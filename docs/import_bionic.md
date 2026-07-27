@@ -147,6 +147,10 @@ The Windows implementation lazily allocates a TLS index and a per-thread `int`
 storage cell with `VirtualAlloc`. Cleanup hooks are deferred until the full
 thread lifecycle and pthread key destructor policy exists.
 
+The TLS index initialization uses compiler `__atomic` builtins instead of
+Windows `Interlocked*` imports so the implementation works consistently on
+Windows ARM64 freestanding links.
+
 ## Bootstrap Allocator Tranche
 
 The next allocator tranche adds:

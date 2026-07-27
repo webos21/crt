@@ -15,7 +15,6 @@ __declspec(dllimport) DWORD CRT_WINAPI TlsAlloc(void);
 __declspec(dllimport) BOOL CRT_WINAPI TlsFree(DWORD dwTlsIndex);
 __declspec(dllimport) void* CRT_WINAPI TlsGetValue(DWORD dwTlsIndex);
 __declspec(dllimport) BOOL CRT_WINAPI TlsSetValue(DWORD dwTlsIndex, void* lpTlsValue);
-__declspec(dllimport) long CRT_WINAPI InterlockedCompareExchange(volatile long* Destination, long Exchange, long Comperand);
 __declspec(dllimport) void* CRT_WINAPI VirtualAlloc(
     void* lpAddress,
     unsigned long long dwSize,
@@ -31,12 +30,14 @@ static int* __crt_windows_errno(void) {
 
   index = (DWORD)__crt_errno_tls_index;
   if (index == CRT_TLS_OUT_OF_INDEXES) {
+    long expected;
     DWORD new_index = TlsAlloc();
     if (new_index == CRT_TLS_OUT_OF_INDEXES) {
       return &__crt_errno_fallback;
     }
-    if (InterlockedCompareExchange(&__crt_errno_tls_index, (long)new_index,
-                                   (long)CRT_TLS_OUT_OF_INDEXES) != (long)CRT_TLS_OUT_OF_INDEXES) {
+    expected = (long)CRT_TLS_OUT_OF_INDEXES;
+    if (!__atomic_compare_exchange_n(&__crt_errno_tls_index, &expected, (long)new_index, 0,
+                                     __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
       TlsFree(new_index);
       index = (DWORD)__crt_errno_tls_index;
     } else {
