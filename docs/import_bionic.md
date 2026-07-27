@@ -107,6 +107,21 @@ The second string/memory tranche expands the same low-dependency area with:
 These are byte/string primitives only. Locale-sensitive collation and tokenizing
 APIs are deferred.
 
+The third string tranche adds common search/span and allocation-backed helpers:
+
+- `strcspn`
+- `strdup`
+- `strndup`
+- `strnlen`
+- `strpbrk`
+- `strspn`
+- `strstr`
+
+`strdup` and `strndup` depend on the bootstrap allocator. `strndup` and
+`strnlen` are project-owned implementations for now; the rest follows Bionic's
+BSD-derived portable C sources. Stateful tokenization such as `strtok` is
+deferred until thread/TLS policy is clearer.
+
 ## Next Runtime Boundary Tranche
 
 After the first string/memory import, the next implemented runtime boundary is:

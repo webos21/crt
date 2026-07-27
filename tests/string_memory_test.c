@@ -1,4 +1,5 @@
 #include <string.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 static int fail(const char* message) {
@@ -27,11 +28,19 @@ int main(void) {
   unsigned char expected_overlap_forward[8] = {'0', '1', '0', '1', '2', '3', '4', '7'};
   unsigned char expected_overlap_backward[8] = {'2', '3', '4', '5', '6', '5', '6', '7'};
   const char* repeated = "ababa";
+  const char* haystack = "hello world";
+  const char* alnum = "abc123";
+  char* duplicate;
+  char* limited_duplicate;
   char text[16];
   char padded[8];
 
   if (strlen("") != 0 || strlen("abc") != 3) {
     return fail("strlen");
+  }
+
+  if (strnlen("abc", 0) != 0 || strnlen("abc", 2) != 2 || strnlen("abc", 8) != 3) {
+    return fail("strnlen");
   }
 
   if (strcmp("abc", "abc") != 0 || strcmp("abc", "abd") >= 0 || strcmp("abd", "abc") <= 0) {
@@ -98,6 +107,42 @@ int main(void) {
       strrchr(repeated, '\0') != &repeated[5]) {
     return fail("strrchr");
   }
+  if (strstr(haystack, "world") != &haystack[6] ||
+      strstr(haystack, "") != haystack ||
+      strstr(haystack, "missing") != 0) {
+    return fail("strstr");
+  }
+  if (strspn(alnum, "abc") != 3 || strspn(alnum, "") != 0) {
+    return fail("strspn");
+  }
+  if (strcspn(alnum, "123") != 3 || strcspn("abc", "") != 3) {
+    return fail("strcspn");
+  }
+  if (strpbrk(alnum, "31") != &alnum[3] || strpbrk("abc", "xyz") != 0) {
+    return fail("strpbrk");
+  }
+
+  duplicate = strdup("copy");
+  if (duplicate == 0 || strcmp(duplicate, "copy") != 0) {
+    return fail("strdup");
+  }
+  duplicate[0] = 'C';
+  if (strcmp(duplicate, "Copy") != 0) {
+    return fail("strdup writable");
+  }
+  free(duplicate);
+
+  limited_duplicate = strndup("abcdef", 3);
+  if (limited_duplicate == 0 || strcmp(limited_duplicate, "abc") != 0) {
+    return fail("strndup truncate");
+  }
+  free(limited_duplicate);
+
+  limited_duplicate = strndup("xy", 8);
+  if (limited_duplicate == 0 || strcmp(limited_duplicate, "xy") != 0) {
+    return fail("strndup short");
+  }
+  free(limited_duplicate);
 
   memset(padded, 0x7e, sizeof(padded));
   if (strncpy(padded, "xy", sizeof(padded)) != padded || padded[0] != 'x' ||

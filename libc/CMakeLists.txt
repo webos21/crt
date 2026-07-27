@@ -17,13 +17,20 @@ add_library(c STATIC
   string/memmove.c
   string/memset.c
   string/strcat.c
+  string/strcspn.c
+  string/strdup.c
   string/strchr.c
   string/strlen.c
   string/strcmp.c
   string/strcpy.c
+  string/strndup.c
+  string/strnlen.c
   string/strncmp.c
   string/strncpy.c
+  string/strpbrk.c
   string/strrchr.c
+  string/strspn.c
+  string/strstr.c
 )
 target_link_libraries(c PRIVATE crt_build_flags)
 set_target_properties(c PROPERTIES
