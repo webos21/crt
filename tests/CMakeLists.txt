@@ -108,3 +108,8 @@ add_crt_test(mman_test mman_test.c)
 set_tests_properties(mman_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "mman_test: ok"
 )
+
+add_crt_test(ctype_test ctype_test.c)
+set_tests_properties(ctype_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "ctype_test: ok"
+)

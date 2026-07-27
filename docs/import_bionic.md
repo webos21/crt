@@ -131,8 +131,32 @@ The VM memory tranche adds:
 
 The first implementation supports anonymous private mappings only. Linux and
 macOS use direct syscall wrappers. Windows maps this subset to
-`VirtualAlloc`/`VirtualFree`. File-backed mappings, protection changes,
-`mprotect`, and VM-backed allocator integration are deferred.
+`VirtualAlloc`/`VirtualFree`. The bootstrap allocator now uses this VM subset.
+File-backed mappings, protection changes, and `mprotect` are deferred.
+
+## Ctype Tranche
+
+The current ctype tranche adds C-locale ASCII classification and conversion:
+
+- `isalnum`
+- `isalpha`
+- `isascii`
+- `isblank`
+- `iscntrl`
+- `isdigit`
+- `isgraph`
+- `islower`
+- `isprint`
+- `ispunct`
+- `isspace`
+- `isupper`
+- `isxdigit`
+- `toascii`
+- `tolower`
+- `toupper`
+
+This is adapted from Bionic's ctype inline logic into out-of-line C99 functions.
+Locale-aware `_l` variants are deferred until locale/xlocale policy is defined.
 
 ## Minimal Stdio Tranche
 

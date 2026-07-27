@@ -1,4 +1,5 @@
 add_library(c STATIC
+  src/ctype.c
   src/errno.c
   src/exit.c
   src/fd.c
