@@ -27,6 +27,12 @@ int main(void) {
   if (sizeof(pthread_rwlock_t) != sizeof(int32_t) * 14) {
     return fail("pthread_rwlock_t size");
   }
+  if (sizeof(pthread_spinlock_t) != sizeof(int)) {
+    return fail("pthread_spinlock_t size");
+  }
+  if (PTHREAD_PROCESS_PRIVATE != 0 || PTHREAD_PROCESS_SHARED != 1) {
+    return fail("pthread process shared constants");
+  }
   if (mutex.__private[0] != ((PTHREAD_MUTEX_NORMAL & 3) << 14)) {
     return fail("pthread mutex initializer");
   }

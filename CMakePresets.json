@@ -77,5 +77,61 @@
         "outputOnFailure": true
       }
     }
+  ],
+  "workflowPresets": [
+    {
+      "name": "macos-host-ninja-debug",
+      "displayName": "Configure, build, and test macOS host debug",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "macos-host-ninja-debug"
+        },
+        {
+          "type": "build",
+          "name": "macos-host-ninja-debug"
+        },
+        {
+          "type": "test",
+          "name": "macos-host-ninja-debug"
+        }
+      ]
+    },
+    {
+      "name": "linux-host-ninja-debug",
+      "displayName": "Configure, build, and test Linux host debug",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "linux-host-ninja-debug"
+        },
+        {
+          "type": "build",
+          "name": "linux-host-ninja-debug"
+        },
+        {
+          "type": "test",
+          "name": "linux-host-ninja-debug"
+        }
+      ]
+    },
+    {
+      "name": "windows-host-ninja-debug",
+      "displayName": "Configure, build, and test Windows host debug",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "windows-host-ninja-debug"
+        },
+        {
+          "type": "build",
+          "name": "windows-host-ninja-debug"
+        },
+        {
+          "type": "test",
+          "name": "windows-host-ninja-debug"
+        }
+      ]
+    }
   ]
 }

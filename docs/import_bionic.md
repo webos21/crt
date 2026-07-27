@@ -414,6 +414,25 @@ writers sleep through the private wait/futex primitive and wake all waiters when
 the lock transitions back to the unlocked state. Policy attributes such as
 process-sharing and writer preference are deferred.
 
+## Pthread Spin Lock Tranche
+
+The pthread spin lock tranche adds:
+
+- `pthread_spinlock_t`
+- `PTHREAD_PROCESS_PRIVATE`
+- `PTHREAD_PROCESS_SHARED`
+- `pthread_spin_init`
+- `pthread_spin_destroy`
+- `pthread_spin_lock`
+- `pthread_spin_trylock`
+- `pthread_spin_unlock`
+
+The public spin lock is represented as a single `int`, matching the compact
+POSIX/Bionic-style surface. It uses compiler atomics and `sched_yield` while
+spinning. `PTHREAD_PROCESS_PRIVATE` is supported; `PTHREAD_PROCESS_SHARED`
+returns `ENOTSUP` until process-shared synchronization and shared-memory ABI
+policy are defined.
+
 ## Pthread Condition Variable Tranche
 
 The pthread condition variable tranche adds:

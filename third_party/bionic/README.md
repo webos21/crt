@@ -133,6 +133,13 @@ out-of-line C99 functions.
 | `include/pthread.h` | `libc/include/pthread.h` and `libc/include/bits/pthread_types.h` | project-owned, Bionic-shaped | extended | Adds read/write lock public type and API subset. |
 | `libc/src/pthread.c` | mixed Bionic/POSIX surface | project-owned | extended | Adds wait-backed reader/writer lock operations over inline private storage. |
 
+### Pthread Spin Lock Tranche
+
+| Local file | Upstream path | Upstream ref | Status | Notes |
+| --- | --- | --- | --- | --- |
+| `include/pthread.h` | `libc/include/pthread.h` and `libc/include/bits/pthread_types.h` | project-owned, Bionic-shaped | extended | Adds public spin lock type, process-sharing constants, and API subset. |
+| `libc/src/pthread.c` | mixed Bionic/POSIX surface | project-owned | extended | Adds compiler-atomic spin lock operations for process-private use. |
+
 ### Private Wait/Futex Tranche
 
 | Local file | Upstream path | Upstream ref | Status | Notes |

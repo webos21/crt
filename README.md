@@ -215,6 +215,13 @@ before comparing test counts. The configure log prints `CRT registered tests`
 for the selected OS preset; the count should match across macOS, Linux, and
 Windows unless a test is intentionally gated by platform.
 
+CTest does not build missing test executables. If CTest reports `Unable to find
+executable`, rerun the matching build preset or use the workflow preset:
+
+```sh
+cmake --workflow --preset <os-host-ninja-debug>
+```
+
 ### macOS
 
 The currently verified preset is macOS host debug:
@@ -223,6 +230,12 @@ The currently verified preset is macOS host debug:
 cmake --preset macos-host-ninja-debug
 cmake --build --preset macos-host-ninja-debug
 ctest --preset macos-host-ninja-debug
+```
+
+Or run configure, build, and test in one step:
+
+```sh
+cmake --workflow --preset macos-host-ninja-debug
 ```
 
 Install the project sysroot into the build directory:
@@ -261,6 +274,12 @@ ctest --preset linux-host-ninja-debug
 cmake --build --preset linux-host-ninja-debug --target sysroot
 ```
 
+Or run configure, build, and test in one step:
+
+```sh
+cmake --workflow --preset linux-host-ninja-debug
+```
+
 The test executable is expected at:
 
 ```text
@@ -277,6 +296,12 @@ cmake --preset windows-host-ninja-debug
 cmake --build --preset windows-host-ninja-debug
 ctest --preset windows-host-ninja-debug
 cmake --build --preset windows-host-ninja-debug --target sysroot
+```
+
+Or run configure, build, and test in one step:
+
+```powershell
+cmake --workflow --preset windows-host-ninja-debug
 ```
 
 The test executable is expected at:

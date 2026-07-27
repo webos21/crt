@@ -39,6 +39,7 @@ typedef struct {
 } pthread_rwlock_t;
 
 typedef long pthread_rwlockattr_t;
+typedef int pthread_spinlock_t;
 
 typedef void (*__pthread_once_func_t)(void);
 typedef void (*__pthread_key_destructor_t)(void*);
@@ -50,6 +51,8 @@ typedef void (*__pthread_key_destructor_t)(void*);
 
 #define PTHREAD_CREATE_JOINABLE 0
 #define PTHREAD_CREATE_DETACHED 1
+#define PTHREAD_PROCESS_PRIVATE 0
+#define PTHREAD_PROCESS_SHARED 1
 #define PTHREAD_STACK_MIN 16384
 
 #define PTHREAD_COND_INITIALIZER { { 0 } }
@@ -83,6 +86,11 @@ int pthread_rwlock_trywrlock(pthread_rwlock_t* rwlock);
 int pthread_rwlock_unlock(pthread_rwlock_t* rwlock);
 int pthread_rwlockattr_init(pthread_rwlockattr_t* attr);
 int pthread_rwlockattr_destroy(pthread_rwlockattr_t* attr);
+int pthread_spin_init(pthread_spinlock_t* lock, int pshared);
+int pthread_spin_destroy(pthread_spinlock_t* lock);
+int pthread_spin_lock(pthread_spinlock_t* lock);
+int pthread_spin_trylock(pthread_spinlock_t* lock);
+int pthread_spin_unlock(pthread_spinlock_t* lock);
 pthread_t pthread_self(void);
 int pthread_equal(pthread_t t1, pthread_t t2);
 int pthread_key_create(pthread_key_t* key, __pthread_key_destructor_t destructor);

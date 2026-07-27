@@ -189,6 +189,11 @@ set_tests_properties(pthread_rwlock_contention_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_rwlock_contention_test: ok"
 )
 
+add_crt_test(pthread_spin_test pthread_spin_test.c)
+set_tests_properties(pthread_spin_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "pthread_spin_test: ok"
+)
+
 add_crt_test(pthread_cond_test pthread_cond_test.c)
 set_tests_properties(pthread_cond_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_cond_test: ok"

@@ -590,6 +590,65 @@ int pthread_rwlockattr_destroy(pthread_rwlockattr_t* attr) {
   return 0;
 }
 
+int pthread_spin_init(pthread_spinlock_t* lock, int pshared) {
+  if (lock == 0) {
+    return EINVAL;
+  }
+  if (pshared == PTHREAD_PROCESS_SHARED) {
+    return ENOTSUP;
+  }
+  if (pshared != PTHREAD_PROCESS_PRIVATE) {
+    return EINVAL;
+  }
+  *lock = 0;
+  return 0;
+}
+
+int pthread_spin_destroy(pthread_spinlock_t* lock) {
+  if (lock == 0) {
+    return EINVAL;
+  }
+  if (__atomic_load_n(lock, __ATOMIC_ACQUIRE) != 0) {
+    return EBUSY;
+  }
+  return 0;
+}
+
+int pthread_spin_lock(pthread_spinlock_t* lock) {
+  if (lock == 0) {
+    return EINVAL;
+  }
+  while (__atomic_exchange_n(lock, 1, __ATOMIC_ACQUIRE) != 0) {
+    while (__atomic_load_n(lock, __ATOMIC_RELAXED) != 0) {
+      sched_yield();
+    }
+  }
+  return 0;
+}
+
+int pthread_spin_trylock(pthread_spinlock_t* lock) {
+  int expected = 0;
+
+  if (lock == 0) {
+    return EINVAL;
+  }
+  return __atomic_compare_exchange_n(
+             lock, &expected, 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)
+             ? 0
+             : EBUSY;
+}
+
+int pthread_spin_unlock(pthread_spinlock_t* lock) {
+  if (lock == 0) {
+    return EINVAL;
+  }
+  if (__atomic_load_n(lock, __ATOMIC_ACQUIRE) == 0) {
+    return EPERM;
+  }
+  __atomic_store_n(lock, 0, __ATOMIC_RELEASE);
+  return 0;
+}
+
 pthread_t pthread_self(void) {
   return (pthread_t)__crt_sys_thread_id();
 }
