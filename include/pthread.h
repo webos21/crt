@@ -37,6 +37,7 @@ typedef void (*__pthread_key_destructor_t)(void*);
 
 #define PTHREAD_CREATE_JOINABLE 0
 #define PTHREAD_CREATE_DETACHED 1
+#define PTHREAD_STACK_MIN 16384
 
 #define PTHREAD_MUTEX_INITIALIZER { { ((PTHREAD_MUTEX_NORMAL & 3) << 14) } }
 #define PTHREAD_ONCE_INIT 0
@@ -52,6 +53,12 @@ int pthread_key_create(pthread_key_t* key, __pthread_key_destructor_t destructor
 int pthread_key_delete(pthread_key_t key);
 void* pthread_getspecific(pthread_key_t key);
 int pthread_setspecific(pthread_key_t key, const void* value);
+int pthread_attr_init(pthread_attr_t* attr);
+int pthread_attr_destroy(pthread_attr_t* attr);
+int pthread_attr_getdetachstate(const pthread_attr_t* attr, int* state);
+int pthread_attr_setdetachstate(pthread_attr_t* attr, int state);
+int pthread_attr_getstacksize(const pthread_attr_t* attr, size_t* stack_size);
+int pthread_attr_setstacksize(pthread_attr_t* attr, size_t stack_size);
 int pthread_create(
     pthread_t* thread,
     const pthread_attr_t* attr,

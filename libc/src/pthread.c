@@ -11,6 +11,7 @@ void __crt_sys_thread_exit(int status) __attribute__((noreturn));
 
 #define CRT_PTHREAD_KEYS_MAX 128
 #define CRT_PTHREAD_STACK_SIZE (1024UL * 1024UL)
+#define CRT_PTHREAD_ATTR_FLAG_DETACHED 0x00000001U
 
 #if defined(CRT_TARGET_OS_WINDOWS)
 typedef unsigned long DWORD;
@@ -83,6 +84,7 @@ typedef struct {
   void* (*start_routine)(void*);
   void* arg;
   void* result;
+  int detached;
 } crt_pthread_control;
 
 static int pthread_key_used[CRT_PTHREAD_KEYS_MAX];
@@ -111,17 +113,34 @@ static int pthread_key_is_valid(pthread_key_t key) {
 }
 
 #if defined(CRT_TARGET_OS_WINDOWS) || defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS)
+static void pthread_control_destroy(crt_pthread_control* control) {
+  if (control == 0) {
+    return;
+  }
+#if defined(CRT_TARGET_OS_LINUX)
+  if (control->stack != 0) {
+    munmap(control->stack, control->stack_size);
+  }
+#endif
+  free(control);
+}
+
 static int pthread_start(void* arg) {
   crt_pthread_control* control = (crt_pthread_control*)arg;
+  int detached;
 
   control->result = control->start_routine(control->arg);
+  detached = control->detached;
+  if (detached) {
+    pthread_control_destroy(control);
+  }
   return 0;
 }
 
 #if defined(CRT_TARGET_OS_MACOS)
 static void* pthread_macos_start(void* arg) {
   pthread_start(arg);
-  return ((crt_pthread_control*)arg)->result;
+  return 0;
 }
 #endif
 
@@ -279,6 +298,67 @@ int pthread_setspecific(pthread_key_t key, const void* value) {
   return 0;
 }
 
+int pthread_attr_init(pthread_attr_t* attr) {
+  if (attr == 0) {
+    return EINVAL;
+  }
+  attr->flags = 0;
+  attr->stack_base = 0;
+  attr->stack_size = CRT_PTHREAD_STACK_SIZE;
+  attr->guard_size = 0;
+  attr->sched_policy = 0;
+  attr->sched_priority = 0;
+  return 0;
+}
+
+int pthread_attr_destroy(pthread_attr_t* attr) {
+  if (attr == 0) {
+    return EINVAL;
+  }
+  return 0;
+}
+
+int pthread_attr_getdetachstate(const pthread_attr_t* attr, int* state) {
+  if (attr == 0 || state == 0) {
+    return EINVAL;
+  }
+  *state = (attr->flags & CRT_PTHREAD_ATTR_FLAG_DETACHED) != 0
+               ? PTHREAD_CREATE_DETACHED
+               : PTHREAD_CREATE_JOINABLE;
+  return 0;
+}
+
+int pthread_attr_setdetachstate(pthread_attr_t* attr, int state) {
+  if (attr == 0) {
+    return EINVAL;
+  }
+  if (state == PTHREAD_CREATE_DETACHED) {
+    attr->flags |= CRT_PTHREAD_ATTR_FLAG_DETACHED;
+    return 0;
+  }
+  if (state == PTHREAD_CREATE_JOINABLE) {
+    attr->flags &= ~CRT_PTHREAD_ATTR_FLAG_DETACHED;
+    return 0;
+  }
+  return EINVAL;
+}
+
+int pthread_attr_getstacksize(const pthread_attr_t* attr, size_t* stack_size) {
+  if (attr == 0 || stack_size == 0) {
+    return EINVAL;
+  }
+  *stack_size = attr->stack_size;
+  return 0;
+}
+
+int pthread_attr_setstacksize(pthread_attr_t* attr, size_t stack_size) {
+  if (attr == 0 || stack_size < PTHREAD_STACK_MIN) {
+    return EINVAL;
+  }
+  attr->stack_size = stack_size;
+  return 0;
+}
+
 int pthread_create(
     pthread_t* thread,
     const pthread_attr_t* attr,
@@ -297,17 +377,24 @@ int pthread_create(
   }
   control->start_routine = start_routine;
   control->arg = arg;
+  control->detached =
+      attr != 0 && (attr->flags & CRT_PTHREAD_ATTR_FLAG_DETACHED) != 0;
 
 #if defined(CRT_TARGET_OS_WINDOWS)
-  control->handle = CreateThread(0, 0, pthread_windows_start, control, 0, &control->thread_id);
+  control->handle = CreateThread(
+      0, attr != 0 ? attr->stack_size : 0, pthread_windows_start, control, 0, &control->thread_id);
   if (control->handle == 0) {
     free(control);
     return EAGAIN;
   }
+  if (control->detached) {
+    CloseHandle(control->handle);
+    control->handle = 0;
+  }
   *thread = (pthread_t)(uintptr_t)control;
   return 0;
 #elif defined(CRT_TARGET_OS_LINUX)
-  control->stack_size = CRT_PTHREAD_STACK_SIZE;
+  control->stack_size = attr != 0 ? attr->stack_size : CRT_PTHREAD_STACK_SIZE;
   control->stack = mmap(0, control->stack_size, PROT_READ | PROT_WRITE,
                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (control->stack == MAP_FAILED) {
@@ -357,6 +444,9 @@ int pthread_join(pthread_t thread, void** retval) {
   if (control == 0) {
     return EINVAL;
   }
+  if (control->detached) {
+    return EINVAL;
+  }
 
 #if defined(CRT_TARGET_OS_WINDOWS)
   if (WaitForSingleObject(control->handle, CRT_INFINITE) != CRT_WAIT_OBJECT_0) {
@@ -366,7 +456,7 @@ int pthread_join(pthread_t thread, void** retval) {
     *retval = control->result;
   }
   CloseHandle(control->handle);
-  free(control);
+  pthread_control_destroy(control);
   return 0;
 #elif defined(CRT_TARGET_OS_LINUX)
   {
@@ -382,8 +472,7 @@ int pthread_join(pthread_t thread, void** retval) {
   if (retval != 0) {
     *retval = control->result;
   }
-  munmap(control->stack, control->stack_size);
-  free(control);
+  pthread_control_destroy(control);
   return 0;
 #elif defined(CRT_TARGET_OS_MACOS)
   {
@@ -404,7 +493,7 @@ int pthread_join(pthread_t thread, void** retval) {
   if (retval != 0) {
     *retval = control->result;
   }
-  free(control);
+  pthread_control_destroy(control);
   return 0;
 #else
   return ENOSYS;

@@ -341,6 +341,23 @@ libSystem's native `pthread_create`, `pthread_join`, and `pthread_exit` with
 project control block, and exposes only the project-owned `pthread_t` value to
 callers.
 
+## Pthread Attribute Tranche
+
+The pthread attribute tranche adds the first `pthread_attr_t` API subset:
+
+- `pthread_attr_init`
+- `pthread_attr_destroy`
+- `pthread_attr_getdetachstate`
+- `pthread_attr_setdetachstate`
+- `pthread_attr_getstacksize`
+- `pthread_attr_setstacksize`
+- `PTHREAD_STACK_MIN`
+
+The runtime now consumes detach state and stack size during `pthread_create`.
+Joinable remains the default. Detached creation is accepted and releases the
+project control block when the worker returns; explicit `pthread_detach` and the
+rest of the pthread attribute surface are deferred.
+
 ## VM Memory Tranche
 
 The VM memory tranche adds:
