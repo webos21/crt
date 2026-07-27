@@ -114,6 +114,11 @@ if(CRT_TARGET_OS STREQUAL "windows")
     PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES}
     NO_DEFAULT_PATH
   )
+  find_file(CRT_WINDOWS_SYNCHRONIZATION_LIB
+    NAMES synchronization.lib
+    PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES}
+    NO_DEFAULT_PATH
+  )
 
   if(CRT_WINDOWS_KERNEL32_LIB)
     message(STATUS "Windows kernel32 import library: ${CRT_WINDOWS_KERNEL32_LIB}")
@@ -121,6 +126,18 @@ if(CRT_TARGET_OS STREQUAL "windows")
     message(WARNING "kernel32.lib was not found. Use a Visual Studio Developer shell or set CRT_WINDOWS_KERNEL32_LIB.")
     set(CRT_WINDOWS_KERNEL32_LIB kernel32.lib CACHE FILEPATH "Windows kernel32 import library")
   endif()
+
+  if(CRT_WINDOWS_SYNCHRONIZATION_LIB)
+    message(STATUS "Windows synchronization import library: ${CRT_WINDOWS_SYNCHRONIZATION_LIB}")
+  else()
+    message(WARNING "synchronization.lib was not found. Use a Visual Studio Developer shell or set CRT_WINDOWS_SYNCHRONIZATION_LIB.")
+    set(CRT_WINDOWS_SYNCHRONIZATION_LIB synchronization.lib CACHE FILEPATH "Windows synchronization import library")
+  endif()
+
+  set(CRT_WINDOWS_SYSTEM_LIBS
+    "${CRT_WINDOWS_KERNEL32_LIB}"
+    "${CRT_WINDOWS_SYNCHRONIZATION_LIB}"
+  )
 endif()
 
 add_subdirectory(libc)

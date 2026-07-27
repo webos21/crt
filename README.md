@@ -96,7 +96,8 @@ On Linux, the current fd path uses direct Linux syscall wrappers.
 
 On Windows, the current fd path uses a small POSIX-like fd table over Win32 APIs
 such as `GetStdHandle`, `CreateFileA`, `ReadFile`, `WriteFile`, `CloseHandle`,
-`SetFilePointerEx`, and `ExitProcess`, so the executable links `kernel32`.
+`SetFilePointerEx`, `ExitProcess`, and address-based wait/wake primitives, so
+Windows executables link the relevant Windows SDK import libraries.
 
 The current allocator is a VM-backed bootstrap heap with a simple free list. It
 uses anonymous `mmap` chunks and is intended to support early libc/PAL tests, not
@@ -156,9 +157,10 @@ Install:
 - LLVM/Clang
 - Visual Studio Build Tools 2022 with the Windows SDK
 
-The Windows SDK provides `kernel32.lib`, which is needed by the current Windows
-hello backend. Use a Developer PowerShell or Developer Command Prompt so the
-Windows SDK library paths are visible to the linker.
+The Windows SDK provides import libraries such as `kernel32.lib` and
+`synchronization.lib`, which are needed by the current Windows backend. Use a
+Developer PowerShell or Developer Command Prompt so the Windows SDK library
+paths are visible to the linker.
 
 The configure preset sets `CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY` because
 CRT controls its own startup and C runtime boundary. This avoids CMake's default
@@ -166,12 +168,14 @@ compiler check trying to link a hosted MSVC runtime executable before CRT has
 configured its own targets.
 
 The build also disables CMake's default Windows C standard libraries for CRT
-targets. Only `kernel32.lib` is linked for the current hello backend. CMake tries
-to locate `kernel32.lib` from the installed Windows SDK. If that fails, either
-run from a Visual Studio Developer shell or pass it explicitly:
+targets. CMake tries to locate the required Windows SDK import libraries from
+the installed SDK. If that fails, either run from a Visual Studio Developer
+shell or pass them explicitly:
 
 ```powershell
-cmake --preset windows-host-ninja-debug -DCRT_WINDOWS_KERNEL32_LIB="C:\Path\To\kernel32.lib"
+cmake --preset windows-host-ninja-debug `
+  -DCRT_WINDOWS_KERNEL32_LIB="C:\Path\To\kernel32.lib" `
+  -DCRT_WINDOWS_SYNCHRONIZATION_LIB="C:\Path\To\synchronization.lib"
 ```
 
 Useful checks:
@@ -183,6 +187,7 @@ ninja --version
 clang --version
 lld-link --version
 where kernel32.lib
+where synchronization.lib
 ```
 
 ### macOS

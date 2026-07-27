@@ -26,7 +26,7 @@ elseif(CRT_TARGET_OS STREQUAL "windows")
     -Wl,/subsystem:console
     -Wl,/OPT:REF
   )
-  target_link_libraries(hello_c PRIVATE "${CRT_WINDOWS_KERNEL32_LIB}")
+  target_link_libraries(hello_c PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
 endif()
 add_dependencies(hello_c c crt1)
 
@@ -67,7 +67,7 @@ function(add_crt_test test_name source_file)
       -Wl,/subsystem:console
       -Wl,/OPT:REF
     )
-    target_link_libraries(${test_name} PRIVATE "${CRT_WINDOWS_KERNEL32_LIB}")
+    target_link_libraries(${test_name} PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
   endif()
   add_dependencies(${test_name} c crt1)
   add_test(NAME ${test_name}_runs COMMAND ${test_name})
