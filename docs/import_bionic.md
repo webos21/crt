@@ -121,3 +121,20 @@ This allocator is not imported from Bionic yet. Bionic's production allocator
 stack has more dependencies and should be evaluated separately. The current
 allocator is a small fixed-size bootstrap heap with a free list, intended only to
 support early libc/PAL tests across Linux, Windows, and macOS.
+
+## Minimal Stdio Tranche
+
+The current stdio tranche adds:
+
+- standard streams: `stdin`, `stdout`, `stderr`
+- `fputc`
+- `fputs`
+- `puts`
+- `putchar`
+- `fread`
+- `fwrite`
+- `fflush`
+
+This is not a final Bionic stdio import. The `FILE` ABI, buffering model,
+`fopen`, and `printf` family are intentionally deferred until the file/path,
+allocator, and formatting policies are more stable.

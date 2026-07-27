@@ -35,6 +35,13 @@ The current libc subset includes:
 - `free`
 - `calloc`
 - `realloc`
+- `fputc`
+- `fputs`
+- `puts`
+- `putchar`
+- `fread`
+- `fwrite`
+- `fflush`
 - `memcpy`
 - `memmove`
 - `memset`
@@ -48,6 +55,10 @@ deferred to the later TLS tranche.
 The allocator is currently a fixed-size bootstrap heap with a simple free list.
 This is enough for early cross-OS libc/PAL tests, but it is not the final
 allocator design.
+
+The stdio layer is currently limited to standard streams and direct read/write
+backing. A final `FILE` ABI, buffering model, `fopen`, and `printf` family are
+deferred.
 
 On macOS, the executable still links `libSystem.dylib` explicitly. This is a
 platform loader requirement for normal Mach-O executables. The hello path itself
@@ -70,6 +81,7 @@ sysroot/
   include/
     errno.h
     fcntl.h
+    stdio.h
     string.h
     stdlib.h
     sys/types.h

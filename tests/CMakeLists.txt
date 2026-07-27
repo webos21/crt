@@ -87,3 +87,8 @@ add_crt_test(malloc_test malloc_test.c)
 set_tests_properties(malloc_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "malloc_test: ok"
 )
+
+add_crt_test(stdio_test stdio_test.c)
+set_tests_properties(stdio_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "stdio_test: ok"
+)

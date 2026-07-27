@@ -79,12 +79,12 @@ The repository currently contains the first executable bring-up:
 - minimal public `errno.h`, `fcntl.h`, `string.h`, and `sys/types.h`
 - a tiny `libc.a` with `_exit`, `errno`, `read`, `write`, `open`, `close`,
   `lseek`, bootstrap `malloc`/`free`/`calloc`/`realloc`, and first-tranche
-  string/memory functions
+  string/memory and stdio functions
 - macOS x86_64/aarch64 startup and syscall assembly
 - Linux x86_64/aarch64 startup and syscall assembly
 - Windows x86_64/ARM64 startup and Win32-backed low-level write/exit
   implementation
-- freestanding `Hello World`, string/memory, fd/errno, and malloc tests
+- freestanding `Hello World`, string/memory, fd/errno, malloc, and stdio tests
 - sysroot installation for headers, `crt1.o`, `libc.a`, and compiler-rt builtins
 
 On macOS, normal Mach-O executables must still link `libSystem.dylib`. The test
@@ -101,6 +101,10 @@ The current allocator is a fixed-size bootstrap heap with a simple free list. It
 is intended to support early libc/PAL tests, not production allocation behavior.
 Future allocator work should move to a host VM-backed heap and then evaluate the
 appropriate Bionic allocator integration.
+
+The current stdio layer is intentionally minimal. It supports standard streams
+and simple byte-oriented I/O, but it does not yet define a final `FILE` ABI,
+buffering model, `fopen`, or `printf` family.
 
 ## Prerequisites
 
@@ -217,6 +221,7 @@ out/macos-host-ninja-debug/sysroot/
   include/
     errno.h
     fcntl.h
+    stdio.h
     string.h
     stdlib.h
     sys/types.h
