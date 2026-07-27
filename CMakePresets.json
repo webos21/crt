@@ -24,6 +24,30 @@
         "CRT_TARGET_OS": "macos",
         "CRT_TARGET_ARCH": "host"
       }
+    },
+    {
+      "name": "linux-host-ninja-debug",
+      "displayName": "Linux host debug (Ninja)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/linux-host-ninja-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "clang",
+        "CRT_TARGET_OS": "linux",
+        "CRT_TARGET_ARCH": "host"
+      }
+    },
+    {
+      "name": "windows-host-ninja-debug",
+      "displayName": "Windows host debug (Ninja)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/windows-host-ninja-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "clang",
+        "CRT_TARGET_OS": "windows",
+        "CRT_TARGET_ARCH": "host"
+      }
     }
   ],
   "buildPresets": [
@@ -34,6 +58,14 @@
     {
       "name": "macos-host-ninja-debug",
       "configurePreset": "macos-host-ninja-debug"
+    },
+    {
+      "name": "linux-host-ninja-debug",
+      "configurePreset": "linux-host-ninja-debug"
+    },
+    {
+      "name": "windows-host-ninja-debug",
+      "configurePreset": "windows-host-ninja-debug"
     }
   ],
   "testPresets": [
@@ -47,6 +79,20 @@
     {
       "name": "macos-host-ninja-debug",
       "configurePreset": "macos-host-ninja-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-host-ninja-debug",
+      "configurePreset": "linux-host-ninja-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-host-ninja-debug",
+      "configurePreset": "windows-host-ninja-debug",
       "output": {
         "outputOnFailure": true
       }

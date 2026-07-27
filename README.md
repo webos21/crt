@@ -78,6 +78,8 @@ The repository currently contains the first executable bring-up:
 - a minimal public `unistd.h`
 - a tiny `libc.a` with `write` and `_exit`
 - macOS x86_64/aarch64 startup and syscall assembly
+- Linux x86_64/aarch64 startup and syscall assembly
+- Windows x86_64 startup and Win32-backed low-level write/exit implementation
 - a freestanding `Hello World` test
 - sysroot installation for headers, `crt1.o`, `libc.a`, and compiler-rt builtins
 
@@ -85,10 +87,92 @@ On macOS, normal Mach-O executables must still link `libSystem.dylib`. The test
 does this explicitly while using this project's `_start`, `write`, `_exit`, and
 direct Darwin syscall wrappers for the hello path.
 
-Linux bring-up should remove that macOS-specific exception and verify a fully
-project-owned ELF startup/libc path.
+On Linux, the hello path uses this project's `_start`, `write`, `_exit`, and
+direct Linux syscall wrappers.
+
+On Windows, the hello path uses this project's `mainCRTStartup`, `write`, and
+`_exit`. The low-level backend calls `GetStdHandle`, `WriteFile`, and
+`ExitProcess`, so the executable links `kernel32`.
+
+## Prerequisites
+
+### Common
+
+All platforms need:
+
+- Git
+- CMake 3.25 or newer
+- LLVM Clang
+- compiler-rt from the active Clang installation
+
+Ninja is the preferred generator. The macOS fallback preset currently uses Unix
+Makefiles because Ninja may not be installed on every default macOS setup.
+
+### Linux
+
+Install:
+
+- CMake
+- Ninja
+- Clang/LLVM
+- LLD
+- compiler-rt
+
+Example package names vary by distribution, but the required commands should be
+available on `PATH`:
+
+```sh
+git --version
+cmake --version
+ninja --version
+clang --version
+ld.lld --version
+```
+
+### Windows 11
+
+Install:
+
+- Git for Windows
+- CMake
+- Ninja
+- LLVM/Clang
+- Visual Studio Build Tools 2022 with the Windows SDK
+
+The Windows SDK provides `kernel32.lib`, which is needed by the current Windows
+hello backend. Use a Developer PowerShell or Developer Command Prompt so the
+Windows SDK library paths are visible to the linker.
+
+Useful checks:
+
+```powershell
+git --version
+cmake --version
+ninja --version
+clang --version
+lld-link --version
+```
+
+### macOS
+
+Install:
+
+- Xcode or Xcode Command Line Tools
+- CMake
+- Ninja, optional for the Ninja preset
+
+Useful checks:
+
+```sh
+xcode-select -p
+clang --version
+cmake --version
+ninja --version
+```
 
 ## Build
+
+### macOS
 
 The currently verified preset is macOS host debug:
 
@@ -96,6 +180,14 @@ The currently verified preset is macOS host debug:
 cmake --preset macos-host-debug
 cmake --build --preset macos-host-debug
 ctest --preset macos-host-debug
+```
+
+If Ninja is installed, this preset is also available:
+
+```sh
+cmake --preset macos-host-ninja-debug
+cmake --build --preset macos-host-ninja-debug
+ctest --preset macos-host-ninja-debug
 ```
 
 Install the project sysroot into the build directory:
@@ -115,6 +207,45 @@ out/macos-host-debug/sysroot/
     libc.a
     libclang_rt.builtins.a
 ```
+
+### Linux
+
+On a Linux host with Clang and Ninja installed:
+
+```sh
+cmake --preset linux-host-ninja-debug
+cmake --build --preset linux-host-ninja-debug
+ctest --preset linux-host-ninja-debug
+cmake --build --preset linux-host-ninja-debug --target sysroot
+```
+
+The test executable is expected at:
+
+```text
+out/linux-host-ninja-debug/tests/hello_c
+```
+
+### Windows 11
+
+Open a Developer PowerShell or Developer Command Prompt with the Windows SDK
+environment configured, then run:
+
+```powershell
+cmake --preset windows-host-ninja-debug
+cmake --build --preset windows-host-ninja-debug
+ctest --preset windows-host-ninja-debug
+cmake --build --preset windows-host-ninja-debug --target sysroot
+```
+
+The test executable is expected at:
+
+```text
+out/windows-host-ninja-debug/tests/hello_c.exe
+```
+
+The Windows bring-up intentionally links `kernel32` for the OS boundary while
+still avoiding the hosted C runtime with `-nostdlib`, `-nostartfiles`, and
+`-nodefaultlibs`.
 
 ## Repository Layout
 

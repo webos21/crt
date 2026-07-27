@@ -9,11 +9,21 @@ target_link_options(hello_c PRIVATE
   -nostartfiles
   -nodefaultlibs
 )
-if(APPLE)
+if(CRT_TARGET_OS STREQUAL "macos")
   target_link_options(hello_c PRIVATE
     -Wl,-e,_start
   )
   target_link_libraries(hello_c PRIVATE System)
+elseif(CRT_TARGET_OS STREQUAL "linux")
+  target_link_options(hello_c PRIVATE
+    -Wl,-e,_start
+  )
+elseif(CRT_TARGET_OS STREQUAL "windows")
+  target_link_options(hello_c PRIVATE
+    -Wl,/entry:mainCRTStartup
+    -Wl,/subsystem:console
+  )
+  target_link_libraries(hello_c PRIVATE kernel32)
 endif()
 add_dependencies(hello_c c crt1)
 
