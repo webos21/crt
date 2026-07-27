@@ -179,6 +179,16 @@ set_tests_properties(pthread_mutex_contention_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_mutex_contention_test: ok"
 )
 
+add_crt_test(pthread_rwlock_test pthread_rwlock_test.c)
+set_tests_properties(pthread_rwlock_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "pthread_rwlock_test: ok"
+)
+
+add_crt_test(pthread_rwlock_contention_test pthread_rwlock_contention_test.c)
+set_tests_properties(pthread_rwlock_contention_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "pthread_rwlock_contention_test: ok"
+)
+
 add_crt_test(pthread_cond_test pthread_cond_test.c)
 set_tests_properties(pthread_cond_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_cond_test: ok"

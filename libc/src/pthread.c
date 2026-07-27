@@ -20,6 +20,8 @@ void __crt_sys_thread_exit(int status) __attribute__((noreturn));
 #define CRT_MUTEX_COUNT_WORD 2
 #define CRT_MUTEX_OWNER_LOW_WORD 3
 #define CRT_MUTEX_OWNER_HIGH_WORD 4
+#define CRT_RWLOCK_STATE_WORD 0
+#define CRT_RWLOCK_WRITER_STATE (-1)
 
 #if defined(CRT_TARGET_OS_WINDOWS)
 typedef unsigned long DWORD;
@@ -113,6 +115,10 @@ static crt_atomic_int* cond_waiters(pthread_cond_t* cond) {
 
 static crt_once* once_state(pthread_once_t* once_control) {
   return (crt_once*)once_control;
+}
+
+static crt_atomic_int* rwlock_state(pthread_rwlock_t* rwlock) {
+  return (crt_atomic_int*)&rwlock->__private[CRT_RWLOCK_STATE_WORD];
 }
 
 static int mutex_type(const pthread_mutex_t* mutex) {
@@ -450,6 +456,136 @@ int pthread_once(pthread_once_t* once_control, __pthread_once_func_t init_routin
   if (crt_once_begin(once_state(once_control))) {
     init_routine();
     crt_once_complete(once_state(once_control));
+  }
+  return 0;
+}
+
+int pthread_rwlock_init(pthread_rwlock_t* rwlock, const pthread_rwlockattr_t* attr) {
+  (void)attr;
+
+  if (rwlock == 0) {
+    return EINVAL;
+  }
+  rwlock->__private[CRT_RWLOCK_STATE_WORD] = 0;
+  return 0;
+}
+
+int pthread_rwlock_destroy(pthread_rwlock_t* rwlock) {
+  if (rwlock == 0) {
+    return EINVAL;
+  }
+  if (crt_atomic_load_acquire(rwlock_state(rwlock)) != 0) {
+    return EBUSY;
+  }
+  return 0;
+}
+
+int pthread_rwlock_rdlock(pthread_rwlock_t* rwlock) {
+  int state;
+  int wait_result;
+
+  if (rwlock == 0) {
+    return EINVAL;
+  }
+
+  for (;;) {
+    state = crt_atomic_load_acquire(rwlock_state(rwlock));
+    if (state >= 0) {
+      int expected = state;
+      if (crt_atomic_compare_exchange_acq_rel(rwlock_state(rwlock), &expected, state + 1)) {
+        return 0;
+      }
+      continue;
+    }
+    wait_result = __crt_wait32(&rwlock->__private[CRT_RWLOCK_STATE_WORD], state);
+    if (wait_result != 0 && wait_result != EINTR && wait_result != EAGAIN) {
+      return wait_result;
+    }
+  }
+}
+
+int pthread_rwlock_tryrdlock(pthread_rwlock_t* rwlock) {
+  int state;
+  int expected;
+
+  if (rwlock == 0) {
+    return EINVAL;
+  }
+  state = crt_atomic_load_acquire(rwlock_state(rwlock));
+  if (state < 0) {
+    return EBUSY;
+  }
+  expected = state;
+  return crt_atomic_compare_exchange_acq_rel(rwlock_state(rwlock), &expected, state + 1)
+             ? 0
+             : EBUSY;
+}
+
+int pthread_rwlock_wrlock(pthread_rwlock_t* rwlock) {
+  int state;
+  int wait_result;
+
+  if (rwlock == 0) {
+    return EINVAL;
+  }
+
+  for (;;) {
+    state = 0;
+    if (crt_atomic_compare_exchange_acq_rel(rwlock_state(rwlock), &state, CRT_RWLOCK_WRITER_STATE)) {
+      return 0;
+    }
+    state = crt_atomic_load_acquire(rwlock_state(rwlock));
+    wait_result = __crt_wait32(&rwlock->__private[CRT_RWLOCK_STATE_WORD], state);
+    if (wait_result != 0 && wait_result != EINTR && wait_result != EAGAIN) {
+      return wait_result;
+    }
+  }
+}
+
+int pthread_rwlock_trywrlock(pthread_rwlock_t* rwlock) {
+  int expected = 0;
+
+  if (rwlock == 0) {
+    return EINVAL;
+  }
+  return crt_atomic_compare_exchange_acq_rel(rwlock_state(rwlock), &expected, CRT_RWLOCK_WRITER_STATE)
+             ? 0
+             : EBUSY;
+}
+
+int pthread_rwlock_unlock(pthread_rwlock_t* rwlock) {
+  int state;
+
+  if (rwlock == 0) {
+    return EINVAL;
+  }
+
+  state = crt_atomic_load_acquire(rwlock_state(rwlock));
+  if (state == CRT_RWLOCK_WRITER_STATE) {
+    crt_atomic_store_release(rwlock_state(rwlock), 0);
+    return __crt_wake32_all(&rwlock->__private[CRT_RWLOCK_STATE_WORD]);
+  }
+  if (state > 0) {
+    int previous = crt_atomic_fetch_add_acq_rel(rwlock_state(rwlock), -1);
+    if (previous == 1) {
+      return __crt_wake32_all(&rwlock->__private[CRT_RWLOCK_STATE_WORD]);
+    }
+    return 0;
+  }
+  return EPERM;
+}
+
+int pthread_rwlockattr_init(pthread_rwlockattr_t* attr) {
+  if (attr == 0) {
+    return EINVAL;
+  }
+  *attr = 0;
+  return 0;
+}
+
+int pthread_rwlockattr_destroy(pthread_rwlockattr_t* attr) {
+  if (attr == 0) {
+    return EINVAL;
   }
   return 0;
 }

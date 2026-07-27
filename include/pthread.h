@@ -34,6 +34,12 @@ typedef long pthread_mutexattr_t;
 typedef int pthread_once_t;
 typedef intptr_t pthread_t;
 
+typedef struct {
+  int32_t __private[14];
+} pthread_rwlock_t;
+
+typedef long pthread_rwlockattr_t;
+
 typedef void (*__pthread_once_func_t)(void);
 typedef void (*__pthread_key_destructor_t)(void*);
 
@@ -49,6 +55,7 @@ typedef void (*__pthread_key_destructor_t)(void*);
 #define PTHREAD_COND_INITIALIZER { { 0 } }
 #define PTHREAD_MUTEX_INITIALIZER { { ((PTHREAD_MUTEX_NORMAL & 3) << 14) } }
 #define PTHREAD_ONCE_INIT 0
+#define PTHREAD_RWLOCK_INITIALIZER { { 0 } }
 
 int pthread_cond_init(pthread_cond_t* cond, const pthread_condattr_t* attr);
 int pthread_cond_destroy(pthread_cond_t* cond);
@@ -67,6 +74,15 @@ int pthread_mutexattr_destroy(pthread_mutexattr_t* attr);
 int pthread_mutexattr_gettype(const pthread_mutexattr_t* attr, int* type);
 int pthread_mutexattr_settype(pthread_mutexattr_t* attr, int type);
 int pthread_once(pthread_once_t* once_control, __pthread_once_func_t init_routine);
+int pthread_rwlock_init(pthread_rwlock_t* rwlock, const pthread_rwlockattr_t* attr);
+int pthread_rwlock_destroy(pthread_rwlock_t* rwlock);
+int pthread_rwlock_rdlock(pthread_rwlock_t* rwlock);
+int pthread_rwlock_tryrdlock(pthread_rwlock_t* rwlock);
+int pthread_rwlock_wrlock(pthread_rwlock_t* rwlock);
+int pthread_rwlock_trywrlock(pthread_rwlock_t* rwlock);
+int pthread_rwlock_unlock(pthread_rwlock_t* rwlock);
+int pthread_rwlockattr_init(pthread_rwlockattr_t* attr);
+int pthread_rwlockattr_destroy(pthread_rwlockattr_t* attr);
 pthread_t pthread_self(void);
 int pthread_equal(pthread_t t1, pthread_t t2);
 int pthread_key_create(pthread_key_t* key, __pthread_key_destructor_t destructor);

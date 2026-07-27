@@ -391,6 +391,29 @@ Contended mutexes now sleep through the private wait/futex primitive instead of
 spinning until release. Error-checking mutexes return `EDEADLK` on self-lock and
 `EPERM` on unlock by a non-owner.
 
+## Pthread Read/Write Lock Tranche
+
+The pthread read/write lock tranche adds:
+
+- `pthread_rwlock_t`
+- `pthread_rwlockattr_t`
+- `PTHREAD_RWLOCK_INITIALIZER`
+- `pthread_rwlock_init`
+- `pthread_rwlock_destroy`
+- `pthread_rwlock_rdlock`
+- `pthread_rwlock_tryrdlock`
+- `pthread_rwlock_wrlock`
+- `pthread_rwlock_trywrlock`
+- `pthread_rwlock_unlock`
+- `pthread_rwlockattr_init`
+- `pthread_rwlockattr_destroy`
+
+The current implementation stores a compact reader-count/writer-state word in
+the Bionic-shaped `pthread_rwlock_t.__private[]` storage. Contended readers and
+writers sleep through the private wait/futex primitive and wake all waiters when
+the lock transitions back to the unlocked state. Policy attributes such as
+process-sharing and writer preference are deferred.
+
 ## Pthread Condition Variable Tranche
 
 The pthread condition variable tranche adds:
@@ -428,6 +451,7 @@ Windows maps it to `WaitOnAddress`, `WakeByAddressSingle`, and
 on the running system.
 
 `pthread_once`, `pthread_mutex_lock`, `pthread_mutex_unlock`,
+`pthread_rwlock_rdlock`, `pthread_rwlock_wrlock`, `pthread_rwlock_unlock`,
 `pthread_cond_signal`, `pthread_cond_broadcast`, and `pthread_cond_wait` now use
 this private primitive instead of pure spin/yield polling.
 
