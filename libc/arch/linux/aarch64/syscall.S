@@ -99,6 +99,15 @@ __crt_sys_nanosleep:
   ret
 .size __crt_sys_nanosleep, . - __crt_sys_nanosleep
 
+.globl __crt_sys_sched_yield
+.type __crt_sys_sched_yield, %function
+.p2align 2
+__crt_sys_sched_yield:
+  mov x8, #124
+  svc #0
+  ret
+.size __crt_sys_sched_yield, . - __crt_sys_sched_yield
+
 .globl __crt_sys_exit
 .type __crt_sys_exit, %function
 .p2align 2

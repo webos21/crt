@@ -89,6 +89,34 @@ ___crt_sys_gettimeofday:
   neg x0, x0
   ret
 
+.globl ___crt_sys_sleep_ms
+.p2align 2
+___crt_sys_sleep_ms:
+  mov x2, x0
+  mov x0, #0
+  mov x1, #0
+  mov x16, #230
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_sched_yield
+.p2align 2
+___crt_sys_sched_yield:
+  mov x0, #0
+  mov x1, #0
+  mov x2, #0
+  mov x16, #230
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
 .globl ___crt_sys_exit
 .p2align 2
 ___crt_sys_exit:

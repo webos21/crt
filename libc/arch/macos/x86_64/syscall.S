@@ -90,6 +90,34 @@ ___crt_sys_gettimeofday:
   negq %rax
   retq
 
+.globl ___crt_sys_sleep_ms
+.p2align 4, 0x90
+___crt_sys_sleep_ms:
+  movq %rdi, %rdx
+  xorq %rdi, %rdi
+  xorq %rsi, %rsi
+  movq $0x20000e6, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_sched_yield
+.p2align 4, 0x90
+___crt_sys_sched_yield:
+  xorq %rdi, %rdi
+  xorq %rsi, %rsi
+  xorq %rdx, %rdx
+  movq $0x20000e6, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
 .globl ___crt_sys_exit
 .p2align 4, 0x90
 ___crt_sys_exit:

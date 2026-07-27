@@ -9,6 +9,8 @@ long __crt_sys_clock_gettime(clockid_t clock_id, struct timespec* tp);
 
 #if !defined(CRT_TARGET_OS_MACOS)
 long __crt_sys_nanosleep(const struct timespec* req, struct timespec* rem);
+#else
+long __crt_sys_sleep_ms(unsigned long milliseconds);
 #endif
 
 #if defined(CRT_TARGET_OS_MACOS)
@@ -105,23 +107,17 @@ int nanosleep(const struct timespec* req, struct timespec* rem) {
 
 #if defined(CRT_TARGET_OS_MACOS)
   {
-    struct timespec start;
-    int64_t requested_ns;
-    int64_t elapsed_ns = 0;
+    uint64_t milliseconds;
 
     (void)rem;
-    if (clock_gettime(CLOCK_MONOTONIC, &start) != 0) {
-      return -1;
+    if (req->tv_sec > (time_t)(UINT64_MAX / 1000U)) {
+      return __set_errno(EINVAL);
     }
-    requested_ns = req->tv_sec * INT64_C(1000000000) + req->tv_nsec;
-    while (elapsed_ns < requested_ns) {
-      struct timespec now;
-      if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
-        return -1;
-      }
-      elapsed_ns = (now.tv_sec - start.tv_sec) * INT64_C(1000000000) + now.tv_nsec - start.tv_nsec;
+    milliseconds = (uint64_t)req->tv_sec * 1000U + ((uint64_t)req->tv_nsec + 999999U) / 1000000U;
+    if (milliseconds > 0x7fffffffU) {
+      return __set_errno(EINVAL);
     }
-    return 0;
+    return normalize_syscall_result(__crt_sys_sleep_ms((unsigned long)milliseconds));
   }
 #else
   return normalize_syscall_result(__crt_sys_nanosleep(req, rem));

@@ -83,6 +83,13 @@ out-of-line C99 functions.
 | `include/sys/time.h` | `libc/include/sys/time.h` | project-owned | new | Minimal `timeval` and `gettimeofday` declaration. |
 | `libc/src/time.c` | mixed Bionic/POSIX surface | project-owned | new | Cross-host bootstrap implementation over project syscall/PAL hooks. |
 
+### Scheduler Primitive Tranche
+
+| Local file | Upstream path | Upstream ref | Status | Notes |
+| --- | --- | --- | --- | --- |
+| `include/sched.h` | `libc/include/sched.h` | project-owned | new | Minimal `sched_yield` declaration. |
+| `libc/src/sched.c` | `libc/bionic/sched_yield.cpp` | project-owned | new | Cross-host wrapper over project syscall/PAL hook. |
+
 ## Rules
 
 - Preserve original copyright and license headers.

@@ -133,3 +133,8 @@ add_crt_test(time_test time_test.c)
 set_tests_properties(time_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "time_test: ok"
 )
+
+add_crt_test(sched_test sched_test.c)
+set_tests_properties(sched_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "sched_test: ok"
+)

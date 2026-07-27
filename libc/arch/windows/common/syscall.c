@@ -355,6 +355,11 @@ long __crt_sys_nanosleep(const struct timespec* req, struct timespec* rem) {
   return 0;
 }
 
+long __crt_sys_sched_yield(void) {
+  Sleep(0);
+  return 0;
+}
+
 void __crt_sys_exit(int status) {
   ExitProcess((unsigned int)status);
 }

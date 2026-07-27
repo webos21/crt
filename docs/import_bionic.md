@@ -200,13 +200,27 @@ The current time tranche adds:
 
 Linux uses direct syscall wrappers for `gettimeofday` and sleep. Windows maps
 wall-clock time to `GetSystemTimeAsFileTime` and sleep to `Sleep`. macOS uses
-the direct `gettimeofday` syscall and a short bootstrap busy-wait implementation
-for `nanosleep`.
+the direct `gettimeofday` syscall and a `poll(NULL, 0, timeout_ms)` based
+bootstrap implementation for `nanosleep`.
 
 `CLOCK_REALTIME` is backed by wall-clock time on all hosts. `CLOCK_MONOTONIC`
 uses a real monotonic backend: Linux `clock_gettime`, macOS Mach absolute time,
-and Windows QPC. macOS `nanosleep` still uses a bootstrap busy-wait loop until a
-proper blocking sleep primitive is introduced.
+and Windows QPC.
+
+## Scheduler Primitive Tranche
+
+The current scheduler primitive tranche adds:
+
+- `sched_yield`
+
+Linux uses the direct `sched_yield` syscall. Windows maps it to `Sleep(0)`.
+macOS uses `poll(NULL, 0, 0)` as a bootstrap yield syscall because there is no
+stable public `sched_yield` syscall entry in the Darwin syscall table.
+
+This tranche also changes macOS `nanosleep` from a busy-wait loop to
+`poll(NULL, 0, timeout_ms)`. The resolution is millisecond-level for now, but it
+is a blocking sleep primitive and is suitable as a stepping stone toward pthread
+condition waits.
 
 ## VM Memory Tranche
 
