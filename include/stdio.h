@@ -1,6 +1,7 @@
 #ifndef CRT_STDIO_H
 #define CRT_STDIO_H
 
+#include <stdarg.h>
 #include <stddef.h>
 
 #ifdef __cplusplus
@@ -26,6 +27,10 @@ FILE* fopen(const char* path, const char* mode);
 int fclose(FILE* stream);
 int fseek(FILE* stream, long offset, int whence);
 long ftell(FILE* stream);
+int printf(const char* format, ...);
+int fprintf(FILE* stream, const char* format, ...);
+int snprintf(char* s, size_t n, const char* format, ...);
+int vsnprintf(char* s, size_t n, const char* format, va_list ap);
 int puts(const char* s);
 int putchar(int c);
 size_t fread(void* ptr, size_t size, size_t nmemb, FILE* stream);

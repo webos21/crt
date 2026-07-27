@@ -41,6 +41,10 @@ The current libc subset includes:
 - `fclose`
 - `fseek`
 - `ftell`
+- `printf`
+- `fprintf`
+- `snprintf`
+- `vsnprintf`
 - `puts`
 - `putchar`
 - `fread`
@@ -61,8 +65,8 @@ This is enough for early cross-OS libc/PAL tests, but it is not the final
 allocator design.
 
 The stdio layer is currently limited to standard streams, fd-backed file streams,
-and direct read/write backing. A final `FILE` ABI, buffering model, and `printf`
-family are deferred.
+direct read/write backing, and a small bootstrap formatter. A final `FILE` ABI,
+buffering model, and complete `printf` formatter are deferred.
 
 On macOS, the executable still links `libSystem.dylib` explicitly. This is a
 platform loader requirement for normal Mach-O executables. The hello path itself

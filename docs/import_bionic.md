@@ -131,6 +131,10 @@ The current stdio tranche adds:
 - `fclose`
 - `fseek`
 - `ftell`
+- bootstrap `printf`
+- bootstrap `fprintf`
+- bootstrap `snprintf`
+- bootstrap `vsnprintf`
 - `fputc`
 - `fputs`
 - `puts`
@@ -140,5 +144,7 @@ The current stdio tranche adds:
 - `fflush`
 
 This is not a final Bionic stdio import. The `FILE` ABI, buffering model, and
-`printf` family are intentionally deferred until the file/path, allocator, and
-formatting policies are more stable.
+complete `printf` family are intentionally deferred until the file/path,
+allocator, and formatting policies are more stable. The current formatter only
+supports a small subset useful for early bring-up: `%s`, `%c`, `%d`, `%i`, `%u`,
+`%x`, `%X`, `%p`, `%%`, and `l`/`ll` integer length modifiers.

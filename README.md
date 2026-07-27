@@ -105,7 +105,8 @@ appropriate Bionic allocator integration.
 
 The current stdio layer is intentionally minimal. It supports standard streams,
 `fopen`/`fclose`, `fseek`/`ftell`, and simple byte-oriented I/O, but it does not
-yet define a final `FILE` ABI, buffering model, or `printf` family.
+yet define a final `FILE` ABI or buffering model. The current `printf` family is
+a small bootstrap formatter for early tests, not a complete C/POSIX formatter.
 
 ## Prerequisites
 

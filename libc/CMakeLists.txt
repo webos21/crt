@@ -3,6 +3,7 @@ add_library(c STATIC
   src/exit.c
   src/fd.c
   src/malloc.c
+  src/printf.c
   src/stdio.c
   string/memcpy.c
   string/memmove.c
