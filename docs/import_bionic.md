@@ -156,12 +156,19 @@ The current C99 base header tranche adds:
 
 - `stdint.h`
 - `stdbool.h`
+- `stddef.h`
+- `stdarg.h`
 
 `stdint.h` is adapted from Bionic's public header shape but uses compiler
 predefined integer type macros so that LP64 Unix targets and LLP64 Windows
 targets both expose correct `intptr_t`, `uintptr_t`, `intmax_t`, and limit
 macros. This keeps the sysroot self-contained for code that includes standard
 C99 integer headers before the fuller Bionic header set is imported.
+
+`stddef.h` and `stdarg.h` are project-owned freestanding wrappers over compiler
+predefined types and builtins. Bionic normally relies on compiler-provided forms
+for this layer, so keeping these wrappers small makes the sysroot more explicit
+without importing host libc headers.
 
 ## VM Memory Tranche
 
