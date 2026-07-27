@@ -143,6 +143,11 @@ The Windows SDK provides `kernel32.lib`, which is needed by the current Windows
 hello backend. Use a Developer PowerShell or Developer Command Prompt so the
 Windows SDK library paths are visible to the linker.
 
+The configure preset sets `CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY` because
+CRT controls its own startup and C runtime boundary. This avoids CMake's default
+compiler check trying to link a hosted MSVC runtime executable before CRT has
+configured its own targets.
+
 Useful checks:
 
 ```powershell
@@ -151,6 +156,7 @@ cmake --version
 ninja --version
 clang --version
 lld-link --version
+where kernel32.lib
 ```
 
 ### macOS

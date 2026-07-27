@@ -46,7 +46,8 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_C_COMPILER": "clang",
         "CRT_TARGET_OS": "windows",
-        "CRT_TARGET_ARCH": "host"
+        "CRT_TARGET_ARCH": "host",
+        "CMAKE_TRY_COMPILE_TARGET_TYPE": "STATIC_LIBRARY"
       }
     }
   ],
