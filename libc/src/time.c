@@ -5,9 +5,20 @@
 #include <time.h>
 
 long __crt_sys_gettimeofday(struct timeval* tv);
+long __crt_sys_clock_gettime(clockid_t clock_id, struct timespec* tp);
 
 #if !defined(CRT_TARGET_OS_MACOS)
 long __crt_sys_nanosleep(const struct timespec* req, struct timespec* rem);
+#endif
+
+#if defined(CRT_TARGET_OS_MACOS)
+struct crt_mach_timebase_info {
+  uint32_t numer;
+  uint32_t denom;
+};
+
+extern uint64_t mach_absolute_time(void);
+extern int mach_timebase_info(struct crt_mach_timebase_info* info);
 #endif
 
 static int normalize_syscall_result(long result) {
@@ -31,22 +42,49 @@ int gettimeofday(struct timeval* tv, void* tz) {
 }
 
 int clock_gettime(clockid_t clock_id, struct timespec* tp) {
-  struct timeval tv;
-
   if (tp == 0) {
     return __set_errno(EINVAL);
   }
-  if (clock_id != CLOCK_REALTIME && clock_id != CLOCK_MONOTONIC) {
-    return __set_errno(EINVAL);
+  return normalize_syscall_result(__crt_sys_clock_gettime(clock_id, tp));
+}
+
+#if defined(CRT_TARGET_OS_MACOS)
+long __crt_sys_clock_gettime(clockid_t clock_id, struct timespec* tp) {
+  if (clock_id == CLOCK_REALTIME) {
+    struct timeval tv;
+    long result = __crt_sys_gettimeofday(&tv);
+    if (result != 0) {
+      return result;
+    }
+    tp->tv_sec = tv.tv_sec;
+    tp->tv_nsec = tv.tv_usec * 1000L;
+    return 0;
   }
 
-  if (gettimeofday(&tv, 0) != 0) {
-    return -1;
+  if (clock_id == CLOCK_MONOTONIC) {
+    static struct crt_mach_timebase_info timebase;
+    uint64_t ticks;
+    uint64_t quotient;
+    uint64_t remainder;
+    uint64_t total_nsec;
+
+    if (timebase.denom == 0 && mach_timebase_info(&timebase) != 0) {
+      return -EIO;
+    }
+
+    ticks = mach_absolute_time();
+    quotient = ticks / timebase.denom;
+    remainder = ticks % timebase.denom;
+    total_nsec = quotient * timebase.numer + (remainder * timebase.numer) / timebase.denom;
+
+    tp->tv_sec = (time_t)(total_nsec / UINT64_C(1000000000));
+    tp->tv_nsec = (long)(total_nsec % UINT64_C(1000000000));
+    return 0;
   }
-  tp->tv_sec = tv.tv_sec;
-  tp->tv_nsec = tv.tv_usec * 1000L;
-  return 0;
+
+  return -EINVAL;
 }
+#endif
 
 time_t time(time_t* tloc) {
   struct timespec ts;
@@ -72,13 +110,13 @@ int nanosleep(const struct timespec* req, struct timespec* rem) {
     int64_t elapsed_ns = 0;
 
     (void)rem;
-    if (clock_gettime(CLOCK_REALTIME, &start) != 0) {
+    if (clock_gettime(CLOCK_MONOTONIC, &start) != 0) {
       return -1;
     }
     requested_ns = req->tv_sec * INT64_C(1000000000) + req->tv_nsec;
     while (elapsed_ns < requested_ns) {
       struct timespec now;
-      if (clock_gettime(CLOCK_REALTIME, &now) != 0) {
+      if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
         return -1;
       }
       elapsed_ns = (now.tv_sec - start.tv_sec) * INT64_C(1000000000) + now.tv_nsec - start.tv_nsec;

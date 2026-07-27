@@ -74,6 +74,15 @@ __crt_sys_gettimeofday:
   retq
 .size __crt_sys_gettimeofday, . - __crt_sys_gettimeofday
 
+.globl __crt_sys_clock_gettime
+.type __crt_sys_clock_gettime, @function
+.p2align 4, 0x90
+__crt_sys_clock_gettime:
+  movq $228, %rax
+  syscall
+  retq
+.size __crt_sys_clock_gettime, . - __crt_sys_clock_gettime
+
 .globl __crt_sys_nanosleep
 .type __crt_sys_nanosleep, @function
 .p2align 4, 0x90

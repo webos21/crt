@@ -88,6 +88,8 @@ struct crt_filetime {
   DWORD high;
 };
 __declspec(dllimport) void CRT_WINAPI GetSystemTimeAsFileTime(struct crt_filetime* lpSystemTimeAsFileTime);
+__declspec(dllimport) BOOL CRT_WINAPI QueryPerformanceCounter(long long* lpPerformanceCount);
+__declspec(dllimport) BOOL CRT_WINAPI QueryPerformanceFrequency(long long* lpFrequency);
 __declspec(dllimport) void CRT_WINAPI Sleep(DWORD dwMilliseconds);
 __declspec(dllimport) void CRT_WINAPI ExitProcess(unsigned int uExitCode);
 
@@ -304,6 +306,38 @@ long __crt_sys_gettimeofday(struct timeval* tv) {
   tv->tv_sec = (time_t)(ticks / WINDOWS_TICK);
   tv->tv_usec = (long)((ticks % WINDOWS_TICK) / 10ULL);
   return 0;
+}
+
+long __crt_sys_clock_gettime(clockid_t clock_id, struct timespec* tp) {
+  if (clock_id == CLOCK_REALTIME) {
+    struct timeval tv;
+    long result = __crt_sys_gettimeofday(&tv);
+    if (result != 0) {
+      return result;
+    }
+    tp->tv_sec = tv.tv_sec;
+    tp->tv_nsec = tv.tv_usec * 1000L;
+    return 0;
+  }
+
+  if (clock_id == CLOCK_MONOTONIC) {
+    long long count;
+    long long frequency;
+    long long seconds;
+    long long remainder;
+
+    if (!QueryPerformanceFrequency(&frequency) || frequency <= 0 ||
+        !QueryPerformanceCounter(&count)) {
+      return fail_last_error();
+    }
+    seconds = count / frequency;
+    remainder = count % frequency;
+    tp->tv_sec = (time_t)seconds;
+    tp->tv_nsec = (long)((remainder * 1000000000LL) / frequency);
+    return 0;
+  }
+
+  return -EINVAL;
 }
 
 long __crt_sys_nanosleep(const struct timespec* req, struct timespec* rem) {

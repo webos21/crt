@@ -12,12 +12,17 @@ static int valid_timespec(const struct timespec* ts) {
   return ts->tv_sec > 0 && ts->tv_nsec >= 0 && ts->tv_nsec < 1000000000L;
 }
 
+static int timespec_less(const struct timespec* lhs, const struct timespec* rhs) {
+  return lhs->tv_sec < rhs->tv_sec || (lhs->tv_sec == rhs->tv_sec && lhs->tv_nsec < rhs->tv_nsec);
+}
+
 int main(void) {
   time_t now;
   time_t stored = 0;
   struct timeval tv;
   struct timespec realtime;
   struct timespec monotonic;
+  struct timespec monotonic_after;
   struct timespec tiny_sleep;
   struct timespec invalid_sleep;
 
@@ -47,6 +52,10 @@ int main(void) {
   tiny_sleep.tv_nsec = 1000000L;
   if (nanosleep(&tiny_sleep, 0) != 0) {
     return fail("nanosleep tiny");
+  }
+  if (clock_gettime(CLOCK_MONOTONIC, &monotonic_after) != 0 ||
+      timespec_less(&monotonic_after, &monotonic)) {
+    return fail("clock_gettime monotonic progression");
   }
 
   invalid_sleep.tv_sec = 0;

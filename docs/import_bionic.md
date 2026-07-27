@@ -203,11 +203,10 @@ wall-clock time to `GetSystemTimeAsFileTime` and sleep to `Sleep`. macOS uses
 the direct `gettimeofday` syscall and a short bootstrap busy-wait implementation
 for `nanosleep`.
 
-`CLOCK_REALTIME` is backed by wall-clock time on all hosts. `CLOCK_MONOTONIC` is
-accepted in this tranche but still uses the same bootstrap wall-clock path, so
-it is not yet a final monotonic implementation. A later pthread preparation
-tranche should add a proper monotonic backend, such as Linux `clock_gettime`,
-macOS Mach absolute time, and Windows QPC.
+`CLOCK_REALTIME` is backed by wall-clock time on all hosts. `CLOCK_MONOTONIC`
+uses a real monotonic backend: Linux `clock_gettime`, macOS Mach absolute time,
+and Windows QPC. macOS `nanosleep` still uses a bootstrap busy-wait loop until a
+proper blocking sleep primitive is introduced.
 
 ## VM Memory Tranche
 
