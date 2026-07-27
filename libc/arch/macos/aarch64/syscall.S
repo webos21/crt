@@ -77,6 +77,18 @@ ___crt_sys_munmap:
   neg x0, x0
   ret
 
+.globl ___crt_sys_gettimeofday
+.p2align 2
+___crt_sys_gettimeofday:
+  mov x1, #0
+  mov x16, #116
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
 .globl ___crt_sys_exit
 .p2align 2
 ___crt_sys_exit:

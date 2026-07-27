@@ -128,3 +128,8 @@ add_crt_test(stddef_stdarg_test stddef_stdarg_test.c)
 set_tests_properties(stddef_stdarg_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "stddef_stdarg_test: ok"
 )
+
+add_crt_test(time_test time_test.c)
+set_tests_properties(time_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "time_test: ok"
+)

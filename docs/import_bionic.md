@@ -185,6 +185,30 @@ predefined types and builtins. Bionic normally relies on compiler-provided forms
 for this layer, so keeping these wrappers small makes the sysroot more explicit
 without importing host libc headers.
 
+## Time Tranche
+
+The current time tranche adds:
+
+- `time_t`
+- `clockid_t`
+- `struct timespec`
+- `struct timeval`
+- `time`
+- `clock_gettime`
+- `gettimeofday`
+- `nanosleep`
+
+Linux uses direct syscall wrappers for `gettimeofday` and sleep. Windows maps
+wall-clock time to `GetSystemTimeAsFileTime` and sleep to `Sleep`. macOS uses
+the direct `gettimeofday` syscall and a short bootstrap busy-wait implementation
+for `nanosleep`.
+
+`CLOCK_REALTIME` is backed by wall-clock time on all hosts. `CLOCK_MONOTONIC` is
+accepted in this tranche but still uses the same bootstrap wall-clock path, so
+it is not yet a final monotonic implementation. A later pthread preparation
+tranche should add a proper monotonic backend, such as Linux `clock_gettime`,
+macOS Mach absolute time, and Windows QPC.
+
 ## VM Memory Tranche
 
 The VM memory tranche adds:

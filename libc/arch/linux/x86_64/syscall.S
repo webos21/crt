@@ -64,6 +64,25 @@ __crt_sys_munmap:
   retq
 .size __crt_sys_munmap, . - __crt_sys_munmap
 
+.globl __crt_sys_gettimeofday
+.type __crt_sys_gettimeofday, @function
+.p2align 4, 0x90
+__crt_sys_gettimeofday:
+  xorq %rsi, %rsi
+  movq $96, %rax
+  syscall
+  retq
+.size __crt_sys_gettimeofday, . - __crt_sys_gettimeofday
+
+.globl __crt_sys_nanosleep
+.type __crt_sys_nanosleep, @function
+.p2align 4, 0x90
+__crt_sys_nanosleep:
+  movq $35, %rax
+  syscall
+  retq
+.size __crt_sys_nanosleep, . - __crt_sys_nanosleep
+
 .globl __crt_sys_exit
 .type __crt_sys_exit, @function
 .p2align 4, 0x90

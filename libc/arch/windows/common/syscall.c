@@ -2,6 +2,8 @@
 #include <fcntl.h>
 #include <stdint.h>
 #include <sys/mman.h>
+#include <sys/time.h>
+#include <time.h>
 #include <unistd.h>
 
 typedef void* HANDLE;
@@ -35,6 +37,8 @@ typedef int BOOL;
 #define PAGE_EXECUTE_READ 0x20
 #define PAGE_EXECUTE_READWRITE 0x40
 #define INVALID_HANDLE_VALUE ((HANDLE)(intptr_t)-1)
+#define WINDOWS_TICK 10000000ULL
+#define SEC_TO_UNIX_EPOCH 11644473600ULL
 
 #if defined(_M_IX86) || defined(__i386__)
 #define CRT_WINAPI __stdcall
@@ -79,6 +83,12 @@ __declspec(dllimport) BOOL CRT_WINAPI VirtualFree(
     void* lpAddress,
     size_t dwSize,
     DWORD dwFreeType);
+struct crt_filetime {
+  DWORD low;
+  DWORD high;
+};
+__declspec(dllimport) void CRT_WINAPI GetSystemTimeAsFileTime(struct crt_filetime* lpSystemTimeAsFileTime);
+__declspec(dllimport) void CRT_WINAPI Sleep(DWORD dwMilliseconds);
 __declspec(dllimport) void CRT_WINAPI ExitProcess(unsigned int uExitCode);
 
 static HANDLE fd_table[CRT_FD_TABLE_SIZE];
@@ -281,6 +291,33 @@ long __crt_sys_munmap(void* addr, unsigned long length) {
   if (!VirtualFree(addr, 0, MEM_RELEASE)) {
     return fail_last_error();
   }
+  return 0;
+}
+
+long __crt_sys_gettimeofday(struct timeval* tv) {
+  struct crt_filetime ft;
+  unsigned long long ticks;
+
+  GetSystemTimeAsFileTime(&ft);
+  ticks = ((unsigned long long)ft.high << 32) | ft.low;
+  ticks -= SEC_TO_UNIX_EPOCH * WINDOWS_TICK;
+  tv->tv_sec = (time_t)(ticks / WINDOWS_TICK);
+  tv->tv_usec = (long)((ticks % WINDOWS_TICK) / 10ULL);
+  return 0;
+}
+
+long __crt_sys_nanosleep(const struct timespec* req, struct timespec* rem) {
+  unsigned long long ms;
+  (void)rem;
+
+  if (req->tv_sec < 0 || req->tv_nsec < 0 || req->tv_nsec >= 1000000000L) {
+    return -EINVAL;
+  }
+  ms = (unsigned long long)req->tv_sec * 1000ULL + ((unsigned long long)req->tv_nsec + 999999ULL) / 1000000ULL;
+  if (ms > 0xffffffffULL) {
+    ms = 0xffffffffULL;
+  }
+  Sleep((DWORD)ms);
   return 0;
 }
 

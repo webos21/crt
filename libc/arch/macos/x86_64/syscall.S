@@ -78,6 +78,18 @@ ___crt_sys_munmap:
   negq %rax
   retq
 
+.globl ___crt_sys_gettimeofday
+.p2align 4, 0x90
+___crt_sys_gettimeofday:
+  xorq %rsi, %rsi
+  movq $0x2000074, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
 .globl ___crt_sys_exit
 .p2align 4, 0x90
 ___crt_sys_exit:
