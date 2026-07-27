@@ -79,7 +79,8 @@ The repository currently contains the first executable bring-up:
 - a tiny `libc.a` with `write` and `_exit`
 - macOS x86_64/aarch64 startup and syscall assembly
 - Linux x86_64/aarch64 startup and syscall assembly
-- Windows x86_64 startup and Win32-backed low-level write/exit implementation
+- Windows x86_64/ARM64 startup and Win32-backed low-level write/exit
+  implementation
 - a freestanding `Hello World` test
 - sysroot installation for headers, `crt1.o`, `libc.a`, and compiler-rt builtins
 
