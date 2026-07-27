@@ -37,6 +37,10 @@ The current libc subset includes:
 - `strlen`
 - `strcmp`
 
+On Windows, `errno` is currently process-global rather than thread-local. PE TLS
+requires startup/runtime support such as `_tls_index`, which is intentionally
+deferred to the later TLS tranche.
+
 On macOS, the executable still links `libSystem.dylib` explicitly. This is a
 platform loader requirement for normal Mach-O executables. The hello path itself
 uses this project's `_start`, `write`, `_exit`, and direct Darwin syscall
