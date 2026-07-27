@@ -34,6 +34,7 @@ add_test(NAME hello_c_runs COMMAND hello_c)
 set_tests_properties(hello_c_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "Hello from freestanding CRT"
 )
+set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS hello_c_runs)
 
 function(add_crt_test test_name source_file)
   add_executable(${test_name}
@@ -74,6 +75,7 @@ function(add_crt_test test_name source_file)
   set_tests_properties(${test_name}_runs PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
   )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS ${test_name}_runs)
 endfunction()
 
 add_crt_test(string_memory_test string_memory_test.c)
@@ -206,3 +208,7 @@ add_crt_test(pthread_type_test pthread_type_test.c)
 set_tests_properties(pthread_type_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_type_test: ok"
 )
+
+get_property(CRT_REGISTERED_TESTS GLOBAL PROPERTY CRT_REGISTERED_TESTS)
+list(LENGTH CRT_REGISTERED_TESTS CRT_REGISTERED_TEST_COUNT)
+message(STATUS "CRT registered tests for ${CRT_TARGET_OS}/${CRT_TARGET_ARCH}: ${CRT_REGISTERED_TEST_COUNT}")

@@ -209,6 +209,12 @@ ninja --version
 
 ## Build
 
+CTest reads generated metadata from each `out/<preset>/` directory. After adding
+or removing tests, run the matching `cmake --preset ...` step on every host
+before comparing test counts. The configure log prints `CRT registered tests`
+for the selected OS preset; the count should match across macOS, Linux, and
+Windows unless a test is intentionally gated by platform.
+
 ### macOS
 
 The currently verified preset is macOS host debug:
