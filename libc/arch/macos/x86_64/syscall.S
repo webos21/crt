@@ -118,6 +118,17 @@ ___crt_sys_sched_yield:
   negq %rax
   retq
 
+.globl ___crt_sys_thread_id
+.p2align 4, 0x90
+___crt_sys_thread_id:
+  movq $0x2000174, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
 .globl ___crt_sys_exit
 .p2align 4, 0x90
 ___crt_sys_exit:

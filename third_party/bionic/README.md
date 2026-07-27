@@ -96,6 +96,20 @@ out-of-line C99 functions.
 | --- | --- | --- | --- | --- |
 | `libc/include/private/crt_atomic.h` | none | project-owned | new | Private compiler-builtin atomic, spinlock, and once helpers for pthread preparation. |
 
+### Pthread Basic Tranche
+
+| Local file | Upstream path | Upstream ref | Status | Notes |
+| --- | --- | --- | --- | --- |
+| `include/pthread.h` | `libc/include/pthread.h` | project-owned | new | Minimal provisional pthread subset for mutex, once, self, and equal. |
+| `libc/src/pthread.c` | mixed Bionic/POSIX surface | project-owned | new | Bootstrap pthread primitives over the private atomic layer and host thread-id hooks. |
+
+### Pthread TLS Key Tranche
+
+| Local file | Upstream path | Upstream ref | Status | Notes |
+| --- | --- | --- | --- | --- |
+| `include/pthread.h` | `libc/include/pthread.h` | project-owned | extended | Adds provisional pthread key APIs. |
+| `libc/src/pthread.c` | mixed Bionic/POSIX surface | project-owned | extended | Adds key allocation and per-thread specific value storage. |
+
 ## Rules
 
 - Preserve original copyright and license headers.

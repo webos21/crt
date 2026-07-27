@@ -257,6 +257,51 @@ On Linux AArch64, the build disables outlined atomics with
 initializer, which depends on glibc's `__getauxval`; that dependency is outside
 this freestanding runtime boundary.
 
+## Pthread Basic Tranche
+
+The current pthread basic tranche adds a first public `pthread.h` subset:
+
+- `pthread_t`
+- `pthread_mutex_t`
+- `pthread_once_t`
+- `PTHREAD_MUTEX_INITIALIZER`
+- `PTHREAD_ONCE_INIT`
+- `pthread_mutex_init`
+- `pthread_mutex_destroy`
+- `pthread_mutex_lock`
+- `pthread_mutex_unlock`
+- `pthread_once`
+- `pthread_self`
+- `pthread_equal`
+
+This is not a complete pthread implementation yet. It provides bootstrap mutex
+and once behavior over the internal atomic/lock layer, plus a host thread-id
+query for `pthread_self`. Thread creation, join/detach, condition variables,
+attributes, cancellation, robust/recursive mutexes, and key destructors are
+deferred.
+
+The exposed pthread type layout is still provisional and may change before ABI
+stabilization.
+
+## Pthread TLS Key Tranche
+
+The pthread TLS key tranche extends the provisional pthread subset with:
+
+- `pthread_key_t`
+- `pthread_key_create`
+- `pthread_key_delete`
+- `pthread_getspecific`
+- `pthread_setspecific`
+
+This tranche intentionally covers only key allocation and per-thread value
+storage. Destructor registration is accepted by the API but deferred until
+thread exit and pthread lifecycle management are implemented.
+
+Linux and macOS currently use compiler TLS storage for the key value array.
+Windows maps each pthread key to a Win32 TLS slot. This keeps Windows free of
+compiler-emitted `_tls_index` dependencies while preserving the pthread API
+shape used by portable libraries.
+
 ## VM Memory Tranche
 
 The VM memory tranche adds:

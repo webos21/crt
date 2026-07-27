@@ -101,6 +101,15 @@ __crt_sys_sched_yield:
   retq
 .size __crt_sys_sched_yield, . - __crt_sys_sched_yield
 
+.globl __crt_sys_thread_id
+.type __crt_sys_thread_id, @function
+.p2align 4, 0x90
+__crt_sys_thread_id:
+  movq $186, %rax
+  syscall
+  retq
+.size __crt_sys_thread_id, . - __crt_sys_thread_id
+
 .globl __crt_sys_exit
 .type __crt_sys_exit, @function
 .p2align 4, 0x90

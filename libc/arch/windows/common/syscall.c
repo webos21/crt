@@ -91,6 +91,7 @@ __declspec(dllimport) void CRT_WINAPI GetSystemTimeAsFileTime(struct crt_filetim
 __declspec(dllimport) BOOL CRT_WINAPI QueryPerformanceCounter(long long* lpPerformanceCount);
 __declspec(dllimport) BOOL CRT_WINAPI QueryPerformanceFrequency(long long* lpFrequency);
 __declspec(dllimport) void CRT_WINAPI Sleep(DWORD dwMilliseconds);
+__declspec(dllimport) DWORD CRT_WINAPI GetCurrentThreadId(void);
 __declspec(dllimport) void CRT_WINAPI ExitProcess(unsigned int uExitCode);
 
 static HANDLE fd_table[CRT_FD_TABLE_SIZE];
@@ -358,6 +359,10 @@ long __crt_sys_nanosleep(const struct timespec* req, struct timespec* rem) {
 long __crt_sys_sched_yield(void) {
   Sleep(0);
   return 0;
+}
+
+long __crt_sys_thread_id(void) {
+  return (long)GetCurrentThreadId();
 }
 
 void __crt_sys_exit(int status) {

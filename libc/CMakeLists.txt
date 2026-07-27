@@ -8,6 +8,7 @@ add_library(c STATIC
   src/malloc.c
   src/mman.c
   src/printf.c
+  src/pthread.c
   src/sched.c
   src/stdio.c
   src/strtol.c

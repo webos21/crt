@@ -117,6 +117,17 @@ ___crt_sys_sched_yield:
   neg x0, x0
   ret
 
+.globl ___crt_sys_thread_id
+.p2align 2
+___crt_sys_thread_id:
+  mov x16, #372
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
 .globl ___crt_sys_exit
 .p2align 2
 ___crt_sys_exit:

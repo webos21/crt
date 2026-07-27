@@ -108,6 +108,15 @@ __crt_sys_sched_yield:
   ret
 .size __crt_sys_sched_yield, . - __crt_sys_sched_yield
 
+.globl __crt_sys_thread_id
+.type __crt_sys_thread_id, %function
+.p2align 2
+__crt_sys_thread_id:
+  mov x8, #178
+  svc #0
+  ret
+.size __crt_sys_thread_id, . - __crt_sys_thread_id
+
 .globl __crt_sys_exit
 .type __crt_sys_exit, %function
 .p2align 2
