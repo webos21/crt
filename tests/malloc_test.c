@@ -17,6 +17,7 @@ int main(void) {
   unsigned char* grown;
   unsigned char* zeros;
   unsigned char* reused;
+  unsigned char* large;
   size_t i;
 
   bytes = (unsigned char*)malloc(16);
@@ -58,6 +59,17 @@ int main(void) {
     return fail("malloc enomem");
   }
 
+  large = (unsigned char*)malloc(1024u * 1024u + 4096u);
+  if (large == 0) {
+    return fail("large malloc");
+  }
+  large[0] = 0x11;
+  large[1024u * 1024u + 4095u] = 0x22;
+  if (large[0] != 0x11 || large[1024u * 1024u + 4095u] != 0x22) {
+    return fail("large malloc contents");
+  }
+
+  free(large);
   free(reused);
   free(zeros);
   free(0);

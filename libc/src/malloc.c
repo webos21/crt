@@ -3,8 +3,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 
-#define CRT_BOOTSTRAP_HEAP_SIZE (1024u * 1024u)
+#define CRT_HEAP_CHUNK_SIZE (64u * 1024u)
 
 typedef union block_header block_header;
 
@@ -17,7 +18,6 @@ union block_header {
   long double align;
 };
 
-static unsigned char heap_storage[CRT_BOOTSTRAP_HEAP_SIZE];
 static block_header* heap_head;
 
 static size_t align_size(size_t size) {
@@ -25,19 +25,45 @@ static size_t align_size(size_t size) {
   return (size + alignment - 1) & ~(alignment - 1);
 }
 
-static void init_heap(void) {
-  uintptr_t start = (uintptr_t)heap_storage;
-  uintptr_t aligned = (start + sizeof(block_header) - 1) & ~(uintptr_t)(sizeof(block_header) - 1);
-  size_t adjustment = (size_t)(aligned - start);
+static size_t align_chunk_size(size_t size) {
+  return (size + CRT_HEAP_CHUNK_SIZE - 1) & ~(CRT_HEAP_CHUNK_SIZE - 1);
+}
 
-  if (heap_head != 0) {
-    return;
+static block_header* append_chunk(size_t size) {
+  size_t needed;
+  size_t chunk_size;
+  void* mapping;
+  block_header* header;
+  block_header* current;
+
+  if (size > ((size_t)-1) - sizeof(block_header) - (CRT_HEAP_CHUNK_SIZE - 1)) {
+    errno = ENOMEM;
+    return 0;
   }
 
-  heap_head = (block_header*)aligned;
-  heap_head->block.size = CRT_BOOTSTRAP_HEAP_SIZE - adjustment - sizeof(block_header);
-  heap_head->block.free = 1;
-  heap_head->block.next = 0;
+  needed = size + sizeof(block_header);
+  chunk_size = align_chunk_size(needed);
+  mapping = mmap(0, chunk_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (mapping == MAP_FAILED) {
+    return 0;
+  }
+
+  header = (block_header*)mapping;
+  header->block.size = chunk_size - sizeof(block_header);
+  header->block.free = 1;
+  header->block.next = 0;
+
+  if (heap_head == 0) {
+    heap_head = header;
+    return header;
+  }
+
+  current = heap_head;
+  while (current->block.next != 0) {
+    current = current->block.next;
+  }
+  current->block.next = header;
+  return header;
 }
 
 static void split_block(block_header* header, size_t size) {
@@ -60,7 +86,9 @@ static void coalesce_free_blocks(void) {
   block_header* current = heap_head;
 
   while (current != 0 && current->block.next != 0) {
-    if (current->block.free && current->block.next->block.free) {
+    unsigned char* current_end = (unsigned char*)(current + 1) + current->block.size;
+    if (current->block.free && current->block.next->block.free &&
+        current_end == (unsigned char*)current->block.next) {
       current->block.size += sizeof(block_header) + current->block.next->block.size;
       current->block.next = current->block.next->block.next;
     } else {
@@ -76,14 +104,12 @@ void* malloc(size_t size) {
   if (size == 0) {
     size = 1;
   }
-  if (size > ((size_t)-1) - (alignment - 1) ||
-      size > CRT_BOOTSTRAP_HEAP_SIZE - sizeof(block_header)) {
+  if (size > ((size_t)-1) - (alignment - 1)) {
     errno = ENOMEM;
     return 0;
   }
   size = align_size(size);
 
-  init_heap();
   current = heap_head;
   while (current != 0) {
     if (current->block.free && current->block.size >= size) {
@@ -94,8 +120,13 @@ void* malloc(size_t size) {
     current = current->block.next;
   }
 
-  errno = ENOMEM;
-  return 0;
+  current = append_chunk(size);
+  if (current == 0) {
+    return 0;
+  }
+  split_block(current, size);
+  current->block.free = 0;
+  return current + 1;
 }
 
 void free(void* ptr) {

@@ -98,9 +98,9 @@ On Windows, the current fd path uses a small POSIX-like fd table over Win32 APIs
 such as `GetStdHandle`, `CreateFileA`, `ReadFile`, `WriteFile`, `CloseHandle`,
 `SetFilePointerEx`, and `ExitProcess`, so the executable links `kernel32`.
 
-The current allocator is a fixed-size bootstrap heap with a simple free list. It
-is intended to support early libc/PAL tests, not production allocation behavior.
-Future allocator work should move to a host VM-backed heap and then evaluate the
+The current allocator is a VM-backed bootstrap heap with a simple free list. It
+uses anonymous `mmap` chunks and is intended to support early libc/PAL tests, not
+production allocation behavior. Future allocator work should evaluate the
 appropriate Bionic allocator integration.
 
 The current VM layer supports anonymous private `mmap` and `munmap`. Linux and

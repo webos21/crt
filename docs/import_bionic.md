@@ -119,7 +119,7 @@ The next allocator tranche adds:
 
 This allocator is not imported from Bionic yet. Bionic's production allocator
 stack has more dependencies and should be evaluated separately. The current
-allocator is a small fixed-size bootstrap heap with a free list, intended only to
+allocator is a small VM-backed bootstrap heap with a free list, intended only to
 support early libc/PAL tests across Linux, Windows, and macOS.
 
 ## VM Memory Tranche
