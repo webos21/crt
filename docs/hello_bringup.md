@@ -1,0 +1,65 @@
+# Hello Bring-Up
+
+This document records the first executable milestone.
+
+The current bring-up builds a minimal C hello program using:
+
+- C99 source.
+- `-ffreestanding`.
+- `-fno-builtin`.
+- `-nostdlib`.
+- `-nostartfiles`.
+- `-nodefaultlibs`.
+- project-provided `crt1.o`.
+- project-provided `libc.a`.
+- project-provided `unistd.h`.
+- compiler-rt builtins when the active Clang exposes them.
+- a generated project sysroot under the build directory.
+
+On macOS, the executable still links `libSystem.dylib` explicitly. This is a
+platform loader requirement for normal Mach-O executables. The hello path itself
+uses this project's `_start`, `write`, `_exit`, and direct Darwin syscall
+wrappers rather than hosted libc startup.
+
+The initial verified flow is:
+
+```sh
+cmake --preset macos-host-debug
+cmake --build --preset macos-host-debug
+ctest --preset macos-host-debug
+cmake --build --preset macos-host-debug --target sysroot
+```
+
+The sysroot currently contains:
+
+```text
+sysroot/
+  include/
+    unistd.h
+  lib/
+    crt1.o
+    libc.a
+    libclang_rt.builtins.a
+```
+
+The manual sysroot-consumer link shape is:
+
+```sh
+clang \
+  -ffreestanding \
+  -fno-builtin \
+  -nostdlib \
+  -nostartfiles \
+  -nodefaultlibs \
+  -I out/macos-host-debug/sysroot/include \
+  out/macos-host-debug/sysroot/lib/crt1.o \
+  tests/hello.c \
+  out/macos-host-debug/sysroot/lib/libc.a \
+  out/macos-host-debug/sysroot/lib/libclang_rt.builtins.a \
+  -Wl,-e,_start \
+  -lSystem \
+  -o out/macos-host-debug/hello_sysroot
+```
+
+Future Linux bring-up should remove the macOS `libSystem` exception and verify a
+fully project-owned startup/libc path for ELF executables.
