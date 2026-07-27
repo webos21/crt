@@ -7,11 +7,19 @@ add_library(c STATIC
   src/mman.c
   src/printf.c
   src/stdio.c
+  string/memchr.c
+  string/memcmp.c
   string/memcpy.c
   string/memmove.c
   string/memset.c
+  string/strcat.c
+  string/strchr.c
   string/strlen.c
   string/strcmp.c
+  string/strcpy.c
+  string/strncmp.c
+  string/strncpy.c
+  string/strrchr.c
 )
 target_link_libraries(c PRIVATE crt_build_flags)
 set_target_properties(c PROPERTIES

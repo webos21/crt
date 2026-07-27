@@ -93,6 +93,20 @@ The first tranche imports only low-dependency string/memory functions:
 The goal is to establish the import and test workflow while keeping the existing
 `write`/`_exit` hello bring-up intact.
 
+The second string/memory tranche expands the same low-dependency area with:
+
+- `memchr`
+- `memcmp`
+- `strcat`
+- `strchr`
+- `strcpy`
+- `strncmp`
+- `strncpy`
+- `strrchr`
+
+These are byte/string primitives only. Locale-sensitive collation and tokenizing
+APIs are deferred.
+
 ## Next Runtime Boundary Tranche
 
 After the first string/memory import, the next implemented runtime boundary is:

@@ -29,6 +29,14 @@ Android Bionic `ics-mr0` tree.
 | `libc/string/memset.c` | `libc/string/memset.c` | `ics-mr0` | adapted | Formatting only; license header preserved. |
 | `libc/string/strlen.c` | `libc/string/strlen.c` | `ics-mr0` | adapted | Removes kernel/standalone include branch for this hosted public header environment. |
 | `libc/string/strcmp.c` | `libc/string/strcmp.c` | `ics-mr0` | adapted | Removes kernel/standalone include branch for this hosted public header environment. |
+| `libc/string/memchr.c` | `libc/string/memchr.c` | `ics-mr0` | adapted | Formatting only; license header preserved. |
+| `libc/string/memcmp.c` | `libc/string/memcmp.c` | `ics-mr0` | adapted | Formatting only; license header preserved. |
+| `libc/string/strcat.c` | `libc/string/strcat.c` | `ics-mr0` | adapted | Removes Android API warning hook. |
+| `libc/string/strchr.c` | `libc/string/index.c` | `ics-mr0` | adapted | Keeps Bionic/OpenBSD implementation under the standard `strchr` name. |
+| `libc/string/strcpy.c` | `libc/string/strcpy.c` | `ics-mr0` | adapted | Formatting only; license header preserved. |
+| `libc/string/strncmp.c` | `libc/string/strncmp.c` | `ics-mr0` | adapted | Removes kernel/standalone include branch for this hosted public header environment. |
+| `libc/string/strncpy.c` | `libc/string/strncpy.c` | `ics-mr0` | adapted | Removes kernel/standalone include branch for this hosted public header environment. |
+| `libc/string/strrchr.c` | `libc/string/rindex.c` | `ics-mr0` | adapted | Keeps Bionic/OpenBSD implementation under the standard `strrchr` name. |
 
 ### Ctype Tranche
 
