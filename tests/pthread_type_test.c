@@ -11,7 +11,7 @@ int main(void) {
   pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
   pthread_once_t once = PTHREAD_ONCE_INIT;
 
-  if (sizeof(pthread_t) != sizeof(long)) {
+  if (sizeof(pthread_t) != sizeof(void*)) {
     return fail("pthread_t size");
   }
   if (sizeof(pthread_key_t) != sizeof(int)) {

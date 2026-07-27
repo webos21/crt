@@ -25,7 +25,7 @@ typedef struct {
 } pthread_mutex_t;
 
 typedef int pthread_once_t;
-typedef long pthread_t;
+typedef intptr_t pthread_t;
 
 typedef void (*__pthread_once_func_t)(void);
 typedef void (*__pthread_key_destructor_t)(void*);

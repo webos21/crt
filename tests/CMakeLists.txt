@@ -127,6 +127,11 @@ set_tests_properties(stdint_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "stdint_test: ok"
 )
 
+add_crt_test(data_model_test data_model_test.c)
+set_tests_properties(data_model_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "data_model_test: ok"
+)
+
 add_crt_test(stddef_stdarg_test stddef_stdarg_test.c)
 set_tests_properties(stddef_stdarg_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "stddef_stdarg_test: ok"

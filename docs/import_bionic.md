@@ -312,11 +312,14 @@ The pthread thread lifecycle tranche adds the first public thread lifecycle API:
 - `pthread_exit`
 
 The public pthread ABI is intentionally project-owned and OS-independent. The
-current type layout follows Bionic's 64-bit Linux-facing shape: `pthread_t` is a
-`long`, `pthread_key_t` and `pthread_once_t` are `int`, `pthread_attr_t` is an
-inline attribute record, and `pthread_mutex_t` is an inline opaque
-`int32_t __private[10]` storage object. macOS does not expose Darwin's native
-opaque pthread types through this runtime.
+current type layout follows Bionic's 64-bit Linux-facing shape:
+`pthread_key_t` and `pthread_once_t` are `int`, `pthread_attr_t` is an inline
+attribute record, and `pthread_mutex_t` is an inline opaque
+`int32_t __private[10]` storage object. `pthread_t` is a pointer-width signed
+integer (`intptr_t`): this matches Bionic's LP64 `long` size on Linux/macOS and
+avoids truncating internal thread handles on Windows LLP64, where C `long` is
+only 32 bits. macOS does not expose Darwin's native opaque pthread types through
+this runtime.
 
 The current project-owned implementation is still intentionally narrow.
 Attributes are accepted only as a placeholder and ignored. Joinable threads are
