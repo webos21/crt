@@ -64,6 +64,7 @@ int pthread_create(
     const pthread_attr_t* attr,
     void* (*start_routine)(void*),
     void* arg);
+int pthread_detach(pthread_t thread);
 int pthread_join(pthread_t thread, void** retval);
 void pthread_exit(void* retval) __attribute__((noreturn));
 

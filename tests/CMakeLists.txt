@@ -172,6 +172,11 @@ set_tests_properties(pthread_attr_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_attr_test: ok"
 )
 
+add_crt_test(pthread_detach_test pthread_detach_test.c)
+set_tests_properties(pthread_detach_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "pthread_detach_test: ok"
+)
+
 add_crt_test(pthread_type_test pthread_type_test.c)
 set_tests_properties(pthread_type_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_type_test: ok"

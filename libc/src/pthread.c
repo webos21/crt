@@ -59,6 +59,7 @@ typedef int (*crt_macos_pthread_create_fn)(
     void* (*)(void*),
     void*);
 typedef int (*crt_macos_pthread_join_fn)(crt_macos_pthread_t, void**);
+typedef int (*crt_macos_pthread_detach_fn)(crt_macos_pthread_t);
 typedef void (*crt_macos_pthread_exit_fn)(void*) __attribute__((noreturn));
 
 #define CRT_RTLD_NEXT ((void*)-1)
@@ -125,14 +126,25 @@ static void pthread_control_destroy(crt_pthread_control* control) {
   free(control);
 }
 
+static void pthread_control_destroy_from_worker(crt_pthread_control* control) {
+  if (control == 0) {
+    return;
+  }
+  /*
+   * Linux threads currently run on the stack stored in the control block.
+   * Reclaiming that mapping requires a later reaper/futex tranche.
+   */
+  free(control);
+}
+
 static int pthread_start(void* arg) {
   crt_pthread_control* control = (crt_pthread_control*)arg;
   int detached;
 
   control->result = control->start_routine(control->arg);
-  detached = control->detached;
+  detached = __atomic_load_n(&control->detached, __ATOMIC_ACQUIRE);
   if (detached) {
-    pthread_control_destroy(control);
+    pthread_control_destroy_from_worker(control);
   }
   return 0;
 }
@@ -425,12 +437,55 @@ int pthread_create(
       free(control);
       return result;
     }
+    if (control->detached) {
+      crt_macos_pthread_detach_fn detach_fn =
+          (crt_macos_pthread_detach_fn)dlsym(CRT_RTLD_NEXT, "pthread_detach");
+      if (detach_fn == 0) {
+        return ENOSYS;
+      }
+      result = detach_fn(control->native_thread);
+      if (result != 0) {
+        return result;
+      }
+    }
   }
   *thread = (pthread_t)(uintptr_t)control;
   return 0;
 #else
   free(control);
   return ENOSYS;
+#endif
+}
+
+int pthread_detach(pthread_t thread) {
+  crt_pthread_control* control = (crt_pthread_control*)(uintptr_t)thread;
+  int expected = 0;
+
+  if (control == 0) {
+    return EINVAL;
+  }
+  if (!__atomic_compare_exchange_n(
+          &control->detached, &expected, 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+    return EINVAL;
+  }
+
+#if defined(CRT_TARGET_OS_WINDOWS)
+  if (control->handle != 0) {
+    CloseHandle(control->handle);
+    control->handle = 0;
+  }
+  return 0;
+#elif defined(CRT_TARGET_OS_MACOS)
+  {
+    crt_macos_pthread_detach_fn detach_fn =
+        (crt_macos_pthread_detach_fn)dlsym(CRT_RTLD_NEXT, "pthread_detach");
+    if (detach_fn == 0) {
+      return ENOSYS;
+    }
+    return detach_fn(control->native_thread);
+  }
+#else
+  return 0;
 #endif
 }
 
@@ -444,7 +499,7 @@ int pthread_join(pthread_t thread, void** retval) {
   if (control == 0) {
     return EINVAL;
   }
-  if (control->detached) {
+  if (__atomic_load_n(&control->detached, __ATOMIC_ACQUIRE)) {
     return EINVAL;
   }
 

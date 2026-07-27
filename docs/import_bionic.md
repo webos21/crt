@@ -358,6 +358,19 @@ Joinable remains the default. Detached creation is accepted and releases the
 project control block when the worker returns; explicit `pthread_detach` and the
 rest of the pthread attribute surface are deferred.
 
+## Pthread Detach Tranche
+
+The pthread detach tranche adds:
+
+- `pthread_detach`
+
+Windows detaches by closing the retained thread handle. macOS detaches the
+hidden native libSystem pthread handle through the adaptation layer. Linux marks
+the project control block as detached; reclaiming detached thread stacks is
+deferred until the runtime has a futex/reaper-backed thread lifecycle.
+
+Calling `pthread_join` on a detached project thread returns `EINVAL`.
+
 ## VM Memory Tranche
 
 The VM memory tranche adds:
