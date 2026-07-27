@@ -371,6 +371,23 @@ deferred until the runtime has a futex/reaper-backed thread lifecycle.
 
 Calling `pthread_join` on a detached project thread returns `EINVAL`.
 
+## Pthread Mutex Attribute Tranche
+
+The pthread mutex attribute tranche adds:
+
+- `pthread_mutex_trylock`
+- `pthread_mutexattr_t`
+- `pthread_mutexattr_init`
+- `pthread_mutexattr_destroy`
+- `pthread_mutexattr_gettype`
+- `pthread_mutexattr_settype`
+
+The runtime accepts `PTHREAD_MUTEX_NORMAL`, `PTHREAD_MUTEX_RECURSIVE`, and
+`PTHREAD_MUTEX_ERRORCHECK`. Normal mutexes retain the earlier spinlock behavior.
+Recursive mutexes track owner and recursion count inside the Bionic-shaped
+`pthread_mutex_t.__private[]` storage. Error-checking mutexes return `EDEADLK`
+on self-lock and `EPERM` on unlock by a non-owner.
+
 ## VM Memory Tranche
 
 The VM memory tranche adds:

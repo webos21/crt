@@ -157,6 +157,11 @@ set_tests_properties(pthread_basic_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_basic_test: ok"
 )
 
+add_crt_test(pthread_mutexattr_test pthread_mutexattr_test.c)
+set_tests_properties(pthread_mutexattr_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "pthread_mutexattr_test: ok"
+)
+
 add_crt_test(pthread_key_test pthread_key_test.c)
 set_tests_properties(pthread_key_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_key_test: ok"

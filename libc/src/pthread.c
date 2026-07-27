@@ -12,6 +12,11 @@ void __crt_sys_thread_exit(int status) __attribute__((noreturn));
 #define CRT_PTHREAD_KEYS_MAX 128
 #define CRT_PTHREAD_STACK_SIZE (1024UL * 1024UL)
 #define CRT_PTHREAD_ATTR_FLAG_DETACHED 0x00000001U
+#define CRT_MUTEX_STATE_WORD 0
+#define CRT_MUTEX_TYPE_WORD 1
+#define CRT_MUTEX_COUNT_WORD 2
+#define CRT_MUTEX_OWNER_LOW_WORD 3
+#define CRT_MUTEX_OWNER_HIGH_WORD 4
 
 #if defined(CRT_TARGET_OS_WINDOWS)
 typedef unsigned long DWORD;
@@ -92,11 +97,39 @@ static int pthread_key_used[CRT_PTHREAD_KEYS_MAX];
 static crt_spinlock pthread_key_lock = CRT_SPINLOCK_INIT;
 
 static crt_atomic_int* mutex_state(pthread_mutex_t* mutex) {
-  return (crt_atomic_int*)&mutex->__private[0];
+  return (crt_atomic_int*)&mutex->__private[CRT_MUTEX_STATE_WORD];
 }
 
 static crt_once* once_state(pthread_once_t* once_control) {
   return (crt_once*)once_control;
+}
+
+static int mutex_type(const pthread_mutex_t* mutex) {
+  int type = mutex->__private[CRT_MUTEX_TYPE_WORD];
+
+  if (type == PTHREAD_MUTEX_RECURSIVE || type == PTHREAD_MUTEX_ERRORCHECK) {
+    return type;
+  }
+  return PTHREAD_MUTEX_NORMAL;
+}
+
+static pthread_t mutex_owner(const pthread_mutex_t* mutex) {
+  uint64_t low = (uint32_t)mutex->__private[CRT_MUTEX_OWNER_LOW_WORD];
+  uint64_t high = (uint32_t)mutex->__private[CRT_MUTEX_OWNER_HIGH_WORD];
+
+  return (pthread_t)(intptr_t)((high << 32) | low);
+}
+
+static void set_mutex_owner(pthread_mutex_t* mutex, pthread_t owner) {
+  uint64_t value = (uint64_t)(uintptr_t)owner;
+
+  mutex->__private[CRT_MUTEX_OWNER_LOW_WORD] = (int32_t)(value & 0xffffffffU);
+  mutex->__private[CRT_MUTEX_OWNER_HIGH_WORD] = (int32_t)(value >> 32);
+}
+
+static void clear_mutex_owner(pthread_mutex_t* mutex) {
+  mutex->__private[CRT_MUTEX_OWNER_LOW_WORD] = 0;
+  mutex->__private[CRT_MUTEX_OWNER_HIGH_WORD] = 0;
 }
 
 #if defined(CRT_TARGET_OS_WINDOWS)
@@ -164,12 +197,23 @@ static DWORD CRT_WINAPI pthread_windows_start(void* arg) {
 #endif
 
 int pthread_mutex_init(pthread_mutex_t* mutex, const void* attr) {
-  (void)attr;
+  const pthread_mutexattr_t* mutex_attr = (const pthread_mutexattr_t*)attr;
+  int type = PTHREAD_MUTEX_NORMAL;
 
   if (mutex == 0) {
     return EINVAL;
   }
-  mutex->__private[0] = 0;
+  if (mutex_attr != 0) {
+    type = (int)*mutex_attr;
+  }
+  if (type != PTHREAD_MUTEX_NORMAL && type != PTHREAD_MUTEX_RECURSIVE &&
+      type != PTHREAD_MUTEX_ERRORCHECK) {
+    return EINVAL;
+  }
+  mutex->__private[CRT_MUTEX_STATE_WORD] = 0;
+  mutex->__private[CRT_MUTEX_TYPE_WORD] = type;
+  mutex->__private[CRT_MUTEX_COUNT_WORD] = 0;
+  clear_mutex_owner(mutex);
   return 0;
 }
 
@@ -184,25 +228,115 @@ int pthread_mutex_destroy(pthread_mutex_t* mutex) {
 }
 
 int pthread_mutex_lock(pthread_mutex_t* mutex) {
+  pthread_t self;
+  int type;
+
   if (mutex == 0) {
     return EINVAL;
   }
+  self = pthread_self();
+  type = mutex_type(mutex);
+
+  if (type != PTHREAD_MUTEX_NORMAL && mutex_owner(mutex) == self) {
+    if (type == PTHREAD_MUTEX_ERRORCHECK) {
+      return EDEADLK;
+    }
+    ++mutex->__private[CRT_MUTEX_COUNT_WORD];
+    return 0;
+  }
+
   while (crt_atomic_exchange_acquire(mutex_state(mutex), 1) != 0) {
     while (crt_atomic_load_relaxed(mutex_state(mutex)) != 0) {
       sched_yield();
     }
   }
+  set_mutex_owner(mutex, self);
+  mutex->__private[CRT_MUTEX_COUNT_WORD] = 1;
+  return 0;
+}
+
+int pthread_mutex_trylock(pthread_mutex_t* mutex) {
+  pthread_t self;
+  int expected = 0;
+  int type;
+
+  if (mutex == 0) {
+    return EINVAL;
+  }
+  self = pthread_self();
+  type = mutex_type(mutex);
+
+  if (type != PTHREAD_MUTEX_NORMAL && mutex_owner(mutex) == self) {
+    if (type == PTHREAD_MUTEX_ERRORCHECK) {
+      return EBUSY;
+    }
+    ++mutex->__private[CRT_MUTEX_COUNT_WORD];
+    return 0;
+  }
+
+  if (!crt_atomic_compare_exchange_acq_rel(mutex_state(mutex), &expected, 1)) {
+    return EBUSY;
+  }
+  set_mutex_owner(mutex, self);
+  mutex->__private[CRT_MUTEX_COUNT_WORD] = 1;
   return 0;
 }
 
 int pthread_mutex_unlock(pthread_mutex_t* mutex) {
+  int type;
+
   if (mutex == 0) {
     return EINVAL;
   }
   if (crt_atomic_load_acquire(mutex_state(mutex)) == 0) {
     return EPERM;
   }
+  type = mutex_type(mutex);
+  if (type != PTHREAD_MUTEX_NORMAL && mutex_owner(mutex) != pthread_self()) {
+    return EPERM;
+  }
+  if (type == PTHREAD_MUTEX_RECURSIVE && mutex->__private[CRT_MUTEX_COUNT_WORD] > 1) {
+    --mutex->__private[CRT_MUTEX_COUNT_WORD];
+    return 0;
+  }
+  mutex->__private[CRT_MUTEX_COUNT_WORD] = 0;
+  clear_mutex_owner(mutex);
   crt_atomic_store_release(mutex_state(mutex), 0);
+  return 0;
+}
+
+int pthread_mutexattr_init(pthread_mutexattr_t* attr) {
+  if (attr == 0) {
+    return EINVAL;
+  }
+  *attr = PTHREAD_MUTEX_NORMAL;
+  return 0;
+}
+
+int pthread_mutexattr_destroy(pthread_mutexattr_t* attr) {
+  if (attr == 0) {
+    return EINVAL;
+  }
+  return 0;
+}
+
+int pthread_mutexattr_gettype(const pthread_mutexattr_t* attr, int* type) {
+  if (attr == 0 || type == 0) {
+    return EINVAL;
+  }
+  *type = (int)*attr;
+  return 0;
+}
+
+int pthread_mutexattr_settype(pthread_mutexattr_t* attr, int type) {
+  if (attr == 0) {
+    return EINVAL;
+  }
+  if (type != PTHREAD_MUTEX_NORMAL && type != PTHREAD_MUTEX_RECURSIVE &&
+      type != PTHREAD_MUTEX_ERRORCHECK) {
+    return EINVAL;
+  }
+  *attr = type;
   return 0;
 }
 

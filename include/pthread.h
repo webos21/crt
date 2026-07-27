@@ -24,6 +24,7 @@ typedef struct {
   int32_t __private[10];
 } pthread_mutex_t;
 
+typedef long pthread_mutexattr_t;
 typedef int pthread_once_t;
 typedef intptr_t pthread_t;
 
@@ -45,7 +46,12 @@ typedef void (*__pthread_key_destructor_t)(void*);
 int pthread_mutex_init(pthread_mutex_t* mutex, const void* attr);
 int pthread_mutex_destroy(pthread_mutex_t* mutex);
 int pthread_mutex_lock(pthread_mutex_t* mutex);
+int pthread_mutex_trylock(pthread_mutex_t* mutex);
 int pthread_mutex_unlock(pthread_mutex_t* mutex);
+int pthread_mutexattr_init(pthread_mutexattr_t* attr);
+int pthread_mutexattr_destroy(pthread_mutexattr_t* attr);
+int pthread_mutexattr_gettype(const pthread_mutexattr_t* attr, int* type);
+int pthread_mutexattr_settype(pthread_mutexattr_t* attr, int type);
 int pthread_once(pthread_once_t* once_control, __pthread_once_func_t init_routine);
 pthread_t pthread_self(void);
 int pthread_equal(pthread_t t1, pthread_t t2);

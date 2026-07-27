@@ -45,6 +45,7 @@ int __set_errno(int value);
 #define EMLINK 31
 #define EPIPE 32
 #define ERANGE 34
+#define EDEADLK 35
 #define ENOSYS 38
 
 #endif
