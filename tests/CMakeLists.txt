@@ -41,6 +41,9 @@ function(add_crt_test test_name source_file)
     $<TARGET_OBJECTS:crt1>
   )
   target_link_libraries(${test_name} PRIVATE crt_build_flags c)
+  target_include_directories(${test_name} PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include"
+  )
   target_link_libraries(${test_name} PRIVATE crt_compiler_rt_builtins)
   target_link_options(${test_name} PRIVATE
     -nostdlib
@@ -137,4 +140,9 @@ set_tests_properties(time_test_runs PROPERTIES
 add_crt_test(sched_test sched_test.c)
 set_tests_properties(sched_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "sched_test: ok"
+)
+
+add_crt_test(atomic_test atomic_test.c)
+set_tests_properties(atomic_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "atomic_test: ok"
 )

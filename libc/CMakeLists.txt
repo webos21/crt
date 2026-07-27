@@ -35,6 +35,9 @@ add_library(c STATIC
   string/strstr.c
 )
 target_link_libraries(c PRIVATE crt_build_flags)
+target_include_directories(c PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
 set_target_properties(c PROPERTIES
   OUTPUT_NAME c
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"

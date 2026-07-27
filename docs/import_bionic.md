@@ -222,6 +222,22 @@ This tranche also changes macOS `nanosleep` from a busy-wait loop to
 is a blocking sleep primitive and is suitable as a stepping stone toward pthread
 condition waits.
 
+## Internal Atomic And Lock Tranche
+
+The current internal atomic and lock tranche adds a private libc header:
+
+- `libc/include/private/crt_atomic.h`
+
+This is not a public C11 `<stdatomic.h>` import. It is a small internal layer
+over compiler `__atomic` builtins, currently limited to `int` atomics, a
+spinlock, and a once-state helper. The goal is to provide a stable foundation
+for future pthread mutex, pthread_once, TLS-key bookkeeping, and allocator lock
+work without committing to public atomic ABI yet.
+
+The spinlock uses `sched_yield` while waiting, so it depends on the scheduler
+primitive tranche. Wider atomics, futex-backed waiting, and public C11 atomics
+are deferred.
+
 ## VM Memory Tranche
 
 The VM memory tranche adds:

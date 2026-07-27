@@ -90,6 +90,12 @@ out-of-line C99 functions.
 | `include/sched.h` | `libc/include/sched.h` | project-owned | new | Minimal `sched_yield` declaration. |
 | `libc/src/sched.c` | `libc/bionic/sched_yield.cpp` | project-owned | new | Cross-host wrapper over project syscall/PAL hook. |
 
+### Internal Atomic And Lock Tranche
+
+| Local file | Upstream path | Upstream ref | Status | Notes |
+| --- | --- | --- | --- | --- |
+| `libc/include/private/crt_atomic.h` | none | project-owned | new | Private compiler-builtin atomic, spinlock, and once helpers for pthread preparation. |
+
 ## Rules
 
 - Preserve original copyright and license headers.
