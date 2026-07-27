@@ -59,6 +59,13 @@ out-of-line C99 functions.
 | `include/limits.h` | `libc/include/limits.h` | project-owned | new | Minimal C99 limit macros needed by numeric conversion tests. |
 | `include/stdlib.h` | `libc/include/stdlib.h` | project-owned | adapted | Adds prototypes for the current allocator and numeric conversion tranche. |
 
+### C99 Base Header Tranche
+
+| Local file | Upstream path | Upstream ref | Status | Notes |
+| --- | --- | --- | --- | --- |
+| `include/stdint.h` | `libc/include/stdint.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Uses compiler predefined type macros instead of Bionic's `__LP64__` branch to support Windows LLP64. |
+| `include/stdbool.h` | `libc/include/stdbool.h` | project-owned | new | Minimal C99 boolean macro header. |
+
 ## Rules
 
 - Preserve original copyright and license headers.

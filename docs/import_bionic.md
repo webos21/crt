@@ -150,6 +150,19 @@ uses the current C-locale `ctype` tranche. It supports bases 2 through 36, base
 0 prefix detection, end-pointer reporting, and `ERANGE` on overflow. Wider
 integer conversions such as `strtoll`, `strtoull`, and `strtoimax` are deferred.
 
+## C99 Base Header Tranche
+
+The current C99 base header tranche adds:
+
+- `stdint.h`
+- `stdbool.h`
+
+`stdint.h` is adapted from Bionic's public header shape but uses compiler
+predefined integer type macros so that LP64 Unix targets and LLP64 Windows
+targets both expose correct `intptr_t`, `uintptr_t`, `intmax_t`, and limit
+macros. This keeps the sysroot self-contained for code that includes standard
+C99 integer headers before the fuller Bionic header set is imported.
+
 ## VM Memory Tranche
 
 The VM memory tranche adds:

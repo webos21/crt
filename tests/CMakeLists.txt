@@ -118,3 +118,8 @@ add_crt_test(stdlib_test stdlib_test.c)
 set_tests_properties(stdlib_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "stdlib_test: ok"
 )
+
+add_crt_test(stdint_test stdint_test.c)
+set_tests_properties(stdint_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "stdint_test: ok"
+)
