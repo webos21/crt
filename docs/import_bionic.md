@@ -302,6 +302,42 @@ Windows maps each pthread key to a Win32 TLS slot. This keeps Windows free of
 compiler-emitted `_tls_index` dependencies while preserving the pthread API
 shape used by portable libraries.
 
+## Pthread Thread Lifecycle Tranche
+
+The pthread thread lifecycle tranche adds the first public thread lifecycle API:
+
+- `pthread_attr_t`
+- `pthread_create`
+- `pthread_join`
+- `pthread_exit`
+
+The public pthread ABI is intentionally project-owned and OS-independent. The
+current type layout follows Bionic's 64-bit Linux-facing shape: `pthread_t` is a
+`long`, `pthread_key_t` and `pthread_once_t` are `int`, `pthread_attr_t` is an
+inline attribute record, and `pthread_mutex_t` is an inline opaque
+`int32_t __private[10]` storage object. macOS does not expose Darwin's native
+opaque pthread types through this runtime.
+
+The current project-owned implementation is still intentionally narrow.
+Attributes are accepted only as a placeholder and ignored. Joinable threads are
+supported as the first policy on Windows and Linux; detach, cancellation,
+priority, scheduling attributes, guard size, stack attributes, and destructor
+execution at thread exit are deferred.
+
+Windows uses `CreateThread`, `WaitForSingleObject`, `CloseHandle`, and
+`ExitThread` from `kernel32`. Linux uses a raw `clone` wrapper with a
+project-owned stack plus `wait4` for the first joinable-thread path. The Linux
+backend deliberately avoids `CLONE_THREAD` for now so that `wait4` can provide a
+simple join primitive while the runtime does not yet have futexes.
+
+macOS keeps the same public pthread ABI as Linux and Windows. Basic mutex,
+once, self, and key APIs are provided by the project implementation. Thread
+creation and join are implemented through an adaptation layer that resolves
+libSystem's native `pthread_create`, `pthread_join`, and `pthread_exit` with
+`dlsym(RTLD_NEXT, ...)`, stores the native Darwin thread handle inside the
+project control block, and exposes only the project-owned `pthread_t` value to
+callers.
+
 ## VM Memory Tranche
 
 The VM memory tranche adds:

@@ -35,6 +35,7 @@ add_library(c STATIC
   string/strspn.c
   string/strstr.c
 )
+
 target_link_libraries(c PRIVATE crt_build_flags)
 target_include_directories(c PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/include"

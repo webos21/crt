@@ -110,6 +110,57 @@ __crt_sys_thread_id:
   retq
 .size __crt_sys_thread_id, . - __crt_sys_thread_id
 
+.globl __crt_sys_clone_thread
+.type __crt_sys_clone_thread, @function
+.p2align 4, 0x90
+__crt_sys_clone_thread:
+  pushq %r12
+  pushq %r13
+  movq %rdi, %r8
+  movq %rsi, %r12
+  movq %rdx, %r13
+  movq %rcx, %rdi
+  movq %r8, %rsi
+  xorq %rdx, %rdx
+  xorq %r10, %r10
+  xorq %r8, %r8
+  movq $56, %rax
+  syscall
+  testq %rax, %rax
+  je 1f
+  popq %r13
+  popq %r12
+  retq
+1:
+  movq %r13, %rdi
+  callq *%r12
+  movq %rax, %rdi
+  movq $60, %rax
+  syscall
+2:
+  jmp 2b
+.size __crt_sys_clone_thread, . - __crt_sys_clone_thread
+
+.globl __crt_sys_wait4
+.type __crt_sys_wait4, @function
+.p2align 4, 0x90
+__crt_sys_wait4:
+  movq %rcx, %r10
+  movq $61, %rax
+  syscall
+  retq
+.size __crt_sys_wait4, . - __crt_sys_wait4
+
+.globl __crt_sys_thread_exit
+.type __crt_sys_thread_exit, @function
+.p2align 4, 0x90
+__crt_sys_thread_exit:
+  movq $60, %rax
+  syscall
+1:
+  jmp 1b
+.size __crt_sys_thread_exit, . - __crt_sys_thread_exit
+
 .globl __crt_sys_exit
 .type __crt_sys_exit, @function
 .p2align 4, 0x90

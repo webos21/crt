@@ -128,6 +128,14 @@ ___crt_sys_thread_id:
   neg x0, x0
   ret
 
+.globl ___crt_sys_thread_exit
+.p2align 2
+___crt_sys_thread_exit:
+  mov x16, #1
+  svc #0x80
+1:
+  b 1b
+
 .globl ___crt_sys_exit
 .p2align 2
 ___crt_sys_exit:

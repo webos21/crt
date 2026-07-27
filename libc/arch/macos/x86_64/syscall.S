@@ -129,6 +129,14 @@ ___crt_sys_thread_id:
   negq %rax
   retq
 
+.globl ___crt_sys_thread_exit
+.p2align 4, 0x90
+___crt_sys_thread_exit:
+  movq $0x2000001, %rax
+  syscall
+1:
+  jmp 1b
+
 .globl ___crt_sys_exit
 .p2align 4, 0x90
 ___crt_sys_exit:

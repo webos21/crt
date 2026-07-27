@@ -110,6 +110,15 @@ out-of-line C99 functions.
 | `include/pthread.h` | `libc/include/pthread.h` | project-owned | extended | Adds provisional pthread key APIs. |
 | `libc/src/pthread.c` | mixed Bionic/POSIX surface | project-owned | extended | Adds key allocation and per-thread specific value storage. |
 
+### Pthread Thread Lifecycle Tranche
+
+| Local file | Upstream path | Upstream ref | Status | Notes |
+| --- | --- | --- | --- | --- |
+| `include/pthread.h` | `libc/include/pthread.h` and `libc/include/bits/pthread_types.h` | project-owned, Bionic-shaped | extended | Uses one Bionic/Linux-style pthread type layout across all target OSes. |
+| `libc/src/pthread.c` | mixed Bionic/POSIX surface | project-owned | extended | Adds first joinable thread backend for Windows, Linux, and macOS; macOS adapts libSystem pthreads beneath the project ABI. |
+| `libc/arch/linux/x86_64/syscall.S` | mixed Bionic/Linux syscall surface | project-owned | extended | Adds raw clone, wait4, and thread exit syscall wrappers. |
+| `libc/arch/linux/aarch64/syscall.S` | mixed Bionic/Linux syscall surface | project-owned | extended | Adds raw clone, wait4, and thread exit syscall wrappers. |
+
 ## Rules
 
 - Preserve original copyright and license headers.

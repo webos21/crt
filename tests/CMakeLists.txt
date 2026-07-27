@@ -156,3 +156,13 @@ add_crt_test(pthread_key_test pthread_key_test.c)
 set_tests_properties(pthread_key_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_key_test: ok"
 )
+
+add_crt_test(pthread_thread_test pthread_thread_test.c)
+set_tests_properties(pthread_thread_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "pthread_thread_test: ok"
+)
+
+add_crt_test(pthread_type_test pthread_type_test.c)
+set_tests_properties(pthread_type_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "pthread_type_test: ok"
+)
