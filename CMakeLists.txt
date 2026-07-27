@@ -47,6 +47,18 @@ elseif(CRT_TARGET_OS STREQUAL "windows")
   target_compile_definitions(crt_build_flags INTERFACE CRT_TARGET_OS_WINDOWS=1)
 endif()
 
+if(CRT_TARGET_ARCH STREQUAL "host")
+  set(CRT_EFFECTIVE_ARCH_FOR_FLAGS "${CMAKE_SYSTEM_PROCESSOR}")
+else()
+  set(CRT_EFFECTIVE_ARCH_FOR_FLAGS "${CRT_TARGET_ARCH}")
+endif()
+
+if(CRT_TARGET_OS STREQUAL "linux" AND CRT_EFFECTIVE_ARCH_FOR_FLAGS MATCHES "^(arm64|ARM64|aarch64)$")
+  target_compile_options(crt_build_flags INTERFACE
+    $<$<COMPILE_LANGUAGE:C>:-mno-outline-atomics>
+  )
+endif()
+
 if(CRT_USE_COMPILER_RT)
   execute_process(
     COMMAND "${CMAKE_C_COMPILER}" --print-libgcc-file-name

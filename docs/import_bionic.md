@@ -238,6 +238,11 @@ The spinlock uses `sched_yield` while waiting, so it depends on the scheduler
 primitive tranche. Wider atomics, futex-backed waiting, and public C11 atomics
 are deferred.
 
+On Linux AArch64, the build disables outlined atomics with
+`-mno-outline-atomics`. Otherwise Clang/GCC can pull in libgcc's LSE atomic
+initializer, which depends on glibc's `__getauxval`; that dependency is outside
+this freestanding runtime boundary.
+
 ## VM Memory Tranche
 
 The VM memory tranche adds:
