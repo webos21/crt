@@ -107,3 +107,17 @@ After the first string/memory import, the next implemented runtime boundary is:
 Linux and macOS use direct syscall wrappers. Windows uses a small POSIX-like fd
 table over Win32 APIs. This keeps the public C surface stable while allowing each
 host OS to provide its own PAL backend.
+
+## Bootstrap Allocator Tranche
+
+The next allocator tranche adds:
+
+- `malloc`
+- `free`
+- `calloc`
+- `realloc`
+
+This allocator is not imported from Bionic yet. Bionic's production allocator
+stack has more dependencies and should be evaluated separately. The current
+allocator is a small fixed-size bootstrap heap with a free list, intended only to
+support early libc/PAL tests across Linux, Windows, and macOS.

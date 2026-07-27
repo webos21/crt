@@ -31,6 +31,10 @@ The current libc subset includes:
 - `open`
 - `close`
 - `lseek`
+- `malloc`
+- `free`
+- `calloc`
+- `realloc`
 - `memcpy`
 - `memmove`
 - `memset`
@@ -40,6 +44,10 @@ The current libc subset includes:
 On Windows, `errno` is currently process-global rather than thread-local. PE TLS
 requires startup/runtime support such as `_tls_index`, which is intentionally
 deferred to the later TLS tranche.
+
+The allocator is currently a fixed-size bootstrap heap with a simple free list.
+This is enough for early cross-OS libc/PAL tests, but it is not the final
+allocator design.
 
 On macOS, the executable still links `libSystem.dylib` explicitly. This is a
 platform loader requirement for normal Mach-O executables. The hello path itself
@@ -63,6 +71,7 @@ sysroot/
     errno.h
     fcntl.h
     string.h
+    stdlib.h
     sys/types.h
     unistd.h
   lib/

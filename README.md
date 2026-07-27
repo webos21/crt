@@ -78,12 +78,13 @@ The repository currently contains the first executable bring-up:
 - a minimal public `unistd.h`
 - minimal public `errno.h`, `fcntl.h`, `string.h`, and `sys/types.h`
 - a tiny `libc.a` with `_exit`, `errno`, `read`, `write`, `open`, `close`,
-  `lseek`, and first-tranche string/memory functions
+  `lseek`, bootstrap `malloc`/`free`/`calloc`/`realloc`, and first-tranche
+  string/memory functions
 - macOS x86_64/aarch64 startup and syscall assembly
 - Linux x86_64/aarch64 startup and syscall assembly
 - Windows x86_64/ARM64 startup and Win32-backed low-level write/exit
   implementation
-- freestanding `Hello World`, string/memory, and fd/errno tests
+- freestanding `Hello World`, string/memory, fd/errno, and malloc tests
 - sysroot installation for headers, `crt1.o`, `libc.a`, and compiler-rt builtins
 
 On macOS, normal Mach-O executables must still link `libSystem.dylib`. The test
@@ -95,6 +96,11 @@ On Linux, the current fd path uses direct Linux syscall wrappers.
 On Windows, the current fd path uses a small POSIX-like fd table over Win32 APIs
 such as `GetStdHandle`, `CreateFileA`, `ReadFile`, `WriteFile`, `CloseHandle`,
 `SetFilePointerEx`, and `ExitProcess`, so the executable links `kernel32`.
+
+The current allocator is a fixed-size bootstrap heap with a simple free list. It
+is intended to support early libc/PAL tests, not production allocation behavior.
+Future allocator work should move to a host VM-backed heap and then evaluate the
+appropriate Bionic allocator integration.
 
 ## Prerequisites
 
@@ -212,6 +218,7 @@ out/macos-host-ninja-debug/sysroot/
     errno.h
     fcntl.h
     string.h
+    stdlib.h
     sys/types.h
     unistd.h
   lib/
