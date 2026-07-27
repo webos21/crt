@@ -30,6 +30,8 @@ add_library(crt_build_flags INTERFACE)
 target_compile_options(crt_build_flags INTERFACE
   -ffreestanding
   -fno-builtin
+  -ffunction-sections
+  -fdata-sections
   -Wall
   -Wextra
   -Werror

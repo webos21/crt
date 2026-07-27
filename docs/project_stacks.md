@@ -322,6 +322,13 @@ appropriate:
 - Use `-fno-builtin` or targeted `-fno-builtin-<name>` when implementing symbols
   such as `memcpy`, `memmove`, `memset`, `strlen`, `malloc`, or other functions
   the compiler might otherwise treat specially.
+- Use `-ffunction-sections` and `-fdata-sections` so unused runtime code and data
+  can be removed by the linker.
+- Use linker section garbage collection for final executable and shared-library
+  links:
+  - ELF/Linux: `-Wl,--gc-sections`.
+  - Mach-O/macOS: `-Wl,-dead_strip`.
+  - PE/COFF Windows: `-Wl,/OPT:REF`.
 - Use `-nostdlib`, `-nostartfiles`, or `-nodefaultlibs` for final runtime and
   low-level test links where accidental host runtime linkage would invalidate
   the result.

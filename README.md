@@ -106,8 +106,7 @@ All platforms need:
 - LLVM Clang
 - compiler-rt from the active Clang installation
 
-Ninja is the preferred generator. The macOS fallback preset currently uses Unix
-Makefiles because Ninja may not be installed on every default macOS setup.
+Ninja is the default generator for all host presets.
 
 ### Linux
 
@@ -175,7 +174,7 @@ Install:
 
 - Xcode or Xcode Command Line Tools
 - CMake
-- Ninja, optional for the Ninja preset
+- Ninja
 
 Useful checks:
 
@@ -193,14 +192,6 @@ ninja --version
 The currently verified preset is macOS host debug:
 
 ```sh
-cmake --preset macos-host-debug
-cmake --build --preset macos-host-debug
-ctest --preset macos-host-debug
-```
-
-If Ninja is installed, this preset is also available:
-
-```sh
 cmake --preset macos-host-ninja-debug
 cmake --build --preset macos-host-ninja-debug
 ctest --preset macos-host-ninja-debug
@@ -209,13 +200,13 @@ ctest --preset macos-host-ninja-debug
 Install the project sysroot into the build directory:
 
 ```sh
-cmake --build --preset macos-host-debug --target sysroot
+cmake --build --preset macos-host-ninja-debug --target sysroot
 ```
 
 The generated sysroot currently contains:
 
 ```text
-out/macos-host-debug/sysroot/
+out/macos-host-ninja-debug/sysroot/
   include/
     unistd.h
   lib/

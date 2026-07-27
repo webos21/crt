@@ -1,6 +1,11 @@
 add_library(c STATIC
   src/exit.c
   src/write.c
+  string/memcpy.c
+  string/memmove.c
+  string/memset.c
+  string/strlen.c
+  string/strcmp.c
 )
 target_link_libraries(c PRIVATE crt_build_flags)
 set_target_properties(c PROPERTIES

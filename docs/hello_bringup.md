@@ -7,9 +7,15 @@ The current bring-up builds a minimal C hello program using:
 - C99 source.
 - `-ffreestanding`.
 - `-fno-builtin`.
+- `-ffunction-sections`.
+- `-fdata-sections`.
 - `-nostdlib`.
 - `-nostartfiles`.
 - `-nodefaultlibs`.
+- linker section garbage collection:
+  - `-Wl,--gc-sections` on ELF/Linux.
+  - `-Wl,-dead_strip` on Mach-O/macOS.
+  - `-Wl,/OPT:REF` on PE/COFF Windows.
 - project-provided `crt1.o`.
 - project-provided `libc.a`.
 - project-provided `unistd.h`.
@@ -24,10 +30,10 @@ wrappers rather than hosted libc startup.
 The initial verified flow is:
 
 ```sh
-cmake --preset macos-host-debug
-cmake --build --preset macos-host-debug
-ctest --preset macos-host-debug
-cmake --build --preset macos-host-debug --target sysroot
+cmake --preset macos-host-ninja-debug
+cmake --build --preset macos-host-ninja-debug
+ctest --preset macos-host-ninja-debug
+cmake --build --preset macos-host-ninja-debug --target sysroot
 ```
 
 The sysroot currently contains:
@@ -51,14 +57,14 @@ clang \
   -nostdlib \
   -nostartfiles \
   -nodefaultlibs \
-  -I out/macos-host-debug/sysroot/include \
-  out/macos-host-debug/sysroot/lib/crt1.o \
+  -I out/macos-host-ninja-debug/sysroot/include \
+  out/macos-host-ninja-debug/sysroot/lib/crt1.o \
   tests/hello.c \
-  out/macos-host-debug/sysroot/lib/libc.a \
-  out/macos-host-debug/sysroot/lib/libclang_rt.builtins.a \
+  out/macos-host-ninja-debug/sysroot/lib/libc.a \
+  out/macos-host-ninja-debug/sysroot/lib/libclang_rt.builtins.a \
   -Wl,-e,_start \
   -lSystem \
-  -o out/macos-host-debug/hello_sysroot
+  -o out/macos-host-ninja-debug/hello_sysroot
 ```
 
 Future Linux bring-up should remove the macOS `libSystem` exception and verify a

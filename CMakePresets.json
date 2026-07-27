@@ -2,18 +2,6 @@
   "version": 6,
   "configurePresets": [
     {
-      "name": "macos-host-debug",
-      "displayName": "macOS host debug",
-      "generator": "Unix Makefiles",
-      "binaryDir": "${sourceDir}/out/macos-host-debug",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_C_COMPILER": "clang",
-        "CRT_TARGET_OS": "macos",
-        "CRT_TARGET_ARCH": "host"
-      }
-    },
-    {
       "name": "macos-host-ninja-debug",
       "displayName": "macOS host debug (Ninja)",
       "generator": "Ninja",
@@ -55,10 +43,6 @@
   ],
   "buildPresets": [
     {
-      "name": "macos-host-debug",
-      "configurePreset": "macos-host-debug"
-    },
-    {
       "name": "macos-host-ninja-debug",
       "configurePreset": "macos-host-ninja-debug"
     },
@@ -72,13 +56,6 @@
     }
   ],
   "testPresets": [
-    {
-      "name": "macos-host-debug",
-      "configurePreset": "macos-host-debug",
-      "output": {
-        "outputOnFailure": true
-      }
-    },
     {
       "name": "macos-host-ninja-debug",
       "configurePreset": "macos-host-ninja-debug",
