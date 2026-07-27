@@ -39,6 +39,13 @@ target_compile_options(crt_build_flags INTERFACE
 target_include_directories(crt_build_flags INTERFACE
   "${CMAKE_SOURCE_DIR}/include"
 )
+if(CRT_TARGET_OS STREQUAL "macos")
+  target_compile_definitions(crt_build_flags INTERFACE CRT_TARGET_OS_MACOS=1)
+elseif(CRT_TARGET_OS STREQUAL "linux")
+  target_compile_definitions(crt_build_flags INTERFACE CRT_TARGET_OS_LINUX=1)
+elseif(CRT_TARGET_OS STREQUAL "windows")
+  target_compile_definitions(crt_build_flags INTERFACE CRT_TARGET_OS_WINDOWS=1)
+endif()
 
 if(CRT_USE_COMPILER_RT)
   execute_process(

@@ -76,24 +76,25 @@ ABI, but the core runtime must remain buildable without requiring Rust.
 The repository currently contains the first executable bring-up:
 
 - a minimal public `unistd.h`
-- a tiny `libc.a` with `write` and `_exit`
+- minimal public `errno.h`, `fcntl.h`, `string.h`, and `sys/types.h`
+- a tiny `libc.a` with `_exit`, `errno`, `read`, `write`, `open`, `close`,
+  `lseek`, and first-tranche string/memory functions
 - macOS x86_64/aarch64 startup and syscall assembly
 - Linux x86_64/aarch64 startup and syscall assembly
 - Windows x86_64/ARM64 startup and Win32-backed low-level write/exit
   implementation
-- a freestanding `Hello World` test
+- freestanding `Hello World`, string/memory, and fd/errno tests
 - sysroot installation for headers, `crt1.o`, `libc.a`, and compiler-rt builtins
 
 On macOS, normal Mach-O executables must still link `libSystem.dylib`. The test
 does this explicitly while using this project's `_start`, `write`, `_exit`, and
 direct Darwin syscall wrappers for the hello path.
 
-On Linux, the hello path uses this project's `_start`, `write`, `_exit`, and
-direct Linux syscall wrappers.
+On Linux, the current fd path uses direct Linux syscall wrappers.
 
-On Windows, the hello path uses this project's `mainCRTStartup`, `write`, and
-`_exit`. The low-level backend calls `GetStdHandle`, `WriteFile`, and
-`ExitProcess`, so the executable links `kernel32`.
+On Windows, the current fd path uses a small POSIX-like fd table over Win32 APIs
+such as `GetStdHandle`, `CreateFileA`, `ReadFile`, `WriteFile`, `CloseHandle`,
+`SetFilePointerEx`, and `ExitProcess`, so the executable links `kernel32`.
 
 ## Prerequisites
 
@@ -208,6 +209,10 @@ The generated sysroot currently contains:
 ```text
 out/macos-host-ninja-debug/sysroot/
   include/
+    errno.h
+    fcntl.h
+    string.h
+    sys/types.h
     unistd.h
   lib/
     crt1.o

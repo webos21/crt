@@ -1,6 +1,7 @@
 add_library(c STATIC
+  src/errno.c
   src/exit.c
-  src/write.c
+  src/fd.c
   string/memcpy.c
   string/memmove.c
   string/memset.c

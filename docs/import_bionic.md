@@ -92,3 +92,18 @@ The first tranche imports only low-dependency string/memory functions:
 
 The goal is to establish the import and test workflow while keeping the existing
 `write`/`_exit` hello bring-up intact.
+
+## Next Runtime Boundary Tranche
+
+After the first string/memory import, the next implemented runtime boundary is:
+
+- `errno`
+- `read`
+- `write`
+- `open`
+- `close`
+- `lseek`
+
+Linux and macOS use direct syscall wrappers. Windows uses a small POSIX-like fd
+table over Win32 APIs. This keeps the public C surface stable while allowing each
+host OS to provide its own PAL backend.

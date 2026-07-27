@@ -68,9 +68,17 @@ function(add_crt_test test_name source_file)
   endif()
   add_dependencies(${test_name} c crt1)
   add_test(NAME ${test_name}_runs COMMAND ${test_name})
+  set_tests_properties(${test_name}_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  )
 endfunction()
 
 add_crt_test(string_memory_test string_memory_test.c)
 set_tests_properties(string_memory_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "string_memory_test: ok"
+)
+
+add_crt_test(fd_errno_test fd_errno_test.c)
+set_tests_properties(fd_errno_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "fd_errno_test: ok"
 )

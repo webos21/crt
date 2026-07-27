@@ -22,6 +22,21 @@ The current bring-up builds a minimal C hello program using:
 - compiler-rt builtins when the active Clang exposes them.
 - a generated project sysroot under the build directory.
 
+The current libc subset includes:
+
+- `_exit`
+- `errno`
+- `read`
+- `write`
+- `open`
+- `close`
+- `lseek`
+- `memcpy`
+- `memmove`
+- `memset`
+- `strlen`
+- `strcmp`
+
 On macOS, the executable still links `libSystem.dylib` explicitly. This is a
 platform loader requirement for normal Mach-O executables. The hello path itself
 uses this project's `_start`, `write`, `_exit`, and direct Darwin syscall
@@ -41,6 +56,10 @@ The sysroot currently contains:
 ```text
 sysroot/
   include/
+    errno.h
+    fcntl.h
+    string.h
+    sys/types.h
     unistd.h
   lib/
     crt1.o
