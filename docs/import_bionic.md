@@ -127,6 +127,10 @@ support early libc/PAL tests across Linux, Windows, and macOS.
 The current stdio tranche adds:
 
 - standard streams: `stdin`, `stdout`, `stderr`
+- `fopen`
+- `fclose`
+- `fseek`
+- `ftell`
 - `fputc`
 - `fputs`
 - `puts`
@@ -135,6 +139,6 @@ The current stdio tranche adds:
 - `fwrite`
 - `fflush`
 
-This is not a final Bionic stdio import. The `FILE` ABI, buffering model,
-`fopen`, and `printf` family are intentionally deferred until the file/path,
-allocator, and formatting policies are more stable.
+This is not a final Bionic stdio import. The `FILE` ABI, buffering model, and
+`printf` family are intentionally deferred until the file/path, allocator, and
+formatting policies are more stable.

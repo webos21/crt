@@ -92,3 +92,9 @@ add_crt_test(stdio_test stdio_test.c)
 set_tests_properties(stdio_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "stdio_test: ok"
 )
+
+add_crt_test(stdio_file_test stdio_file_test.c)
+set_tests_properties(stdio_file_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "stdio_file_test: ok"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)

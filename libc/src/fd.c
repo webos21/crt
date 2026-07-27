@@ -1,6 +1,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stddef.h>
+#include <stdarg.h>
 #include <unistd.h>
 
 long __crt_sys_read(int fd, void* buf, unsigned long count);
@@ -25,7 +26,16 @@ ssize_t write(int fd, const void* buf, size_t count) {
 }
 
 int open(const char* path, int flags, ...) {
-  return (int)normalize_syscall_result(__crt_sys_open(path, flags, 0));
+  unsigned int mode = 0;
+  va_list args;
+
+  if ((flags & O_CREAT) != 0) {
+    va_start(args, flags);
+    mode = (unsigned int)va_arg(args, int);
+    va_end(args);
+  }
+
+  return (int)normalize_syscall_result(__crt_sys_open(path, flags, mode));
 }
 
 int close(int fd) {
