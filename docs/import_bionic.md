@@ -137,6 +137,16 @@ Linux and macOS use direct syscall wrappers. Windows uses a small POSIX-like fd
 table over Win32 APIs. This keeps the public C surface stable while allowing each
 host OS to provide its own PAL backend.
 
+## Errno TLS Tranche
+
+`errno` is thread-local on Linux and macOS through compiler TLS. On Windows it
+uses a Win32 TLS slot rather than compiler PE TLS so the freestanding startup
+path does not require `_tls_index` or the MSVC CRT startup model.
+
+The Windows implementation lazily allocates a TLS index and a per-thread `int`
+storage cell with `VirtualAlloc`. Cleanup hooks are deferred until the full
+thread lifecycle and pthread key destructor policy exists.
+
 ## Bootstrap Allocator Tranche
 
 The next allocator tranche adds:

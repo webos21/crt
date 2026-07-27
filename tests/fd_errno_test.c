@@ -15,7 +15,14 @@ static int fail(const char* message) {
 int main(void) {
   char buffer[4];
   int fd;
+  int* errno_slot;
   ssize_t bytes_read;
+
+  errno = 123;
+  errno_slot = __errno();
+  if (errno_slot == 0 || *errno_slot != 123 || __errno() != errno_slot) {
+    return fail("errno slot");
+  }
 
   errno = 0;
   if (close(-1) != -1 || errno != EBADF) {
