@@ -3,6 +3,8 @@
 
 #include <sched.h>
 
+#include <private/crt_wait.h>
+
 typedef struct {
   int value;
 } crt_atomic_int;
@@ -63,19 +65,25 @@ typedef struct {
 
 static inline int crt_once_begin(crt_once* once) {
   int expected = 0;
+  int state;
 
   if (crt_atomic_compare_exchange_acq_rel(&once->state, &expected, 1)) {
     return 1;
   }
 
-  while (crt_atomic_load_acquire(&once->state) != 2) {
-    sched_yield();
+  while ((state = crt_atomic_load_acquire(&once->state)) != 2) {
+    if (state == 1) {
+      (void)__crt_wait32(&once->state.value, 1);
+    } else {
+      sched_yield();
+    }
   }
   return 0;
 }
 
 static inline void crt_once_complete(crt_once* once) {
   crt_atomic_store_release(&once->state, 2);
+  (void)__crt_wake32_all(&once->state.value);
 }
 
 #endif

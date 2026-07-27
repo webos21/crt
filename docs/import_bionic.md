@@ -248,9 +248,11 @@ spinlock, and a once-state helper. The goal is to provide a stable foundation
 for future pthread mutex, pthread_once, TLS-key bookkeeping, and allocator lock
 work without committing to public atomic ABI yet.
 
-The spinlock uses `sched_yield` while waiting, so it depends on the scheduler
-primitive tranche. Wider atomics, futex-backed waiting, and public C11 atomics
-are deferred.
+The spinlock still uses `sched_yield` while waiting, so it depends on the
+scheduler primitive tranche. The once-state helper now sleeps through the
+private wait/futex primitive while another thread runs the initializer, then
+wakes all waiters when initialization completes. Wider atomics and public C11
+atomics are deferred.
 
 On Linux AArch64, the build disables outlined atomics with
 `-mno-outline-atomics`. Otherwise Clang/GCC can pull in libgcc's LSE atomic
@@ -425,9 +427,9 @@ Windows maps it to `WaitOnAddress`, `WakeByAddressSingle`, and
 `dlsym(RTLD_NEXT, ...)`, with a yield fallback if those symbols are unavailable
 on the running system.
 
-`pthread_mutex_lock`, `pthread_mutex_unlock`, `pthread_cond_signal`,
-`pthread_cond_broadcast`, and `pthread_cond_wait` now use this private primitive
-instead of pure spin/yield polling.
+`pthread_once`, `pthread_mutex_lock`, `pthread_mutex_unlock`,
+`pthread_cond_signal`, `pthread_cond_broadcast`, and `pthread_cond_wait` now use
+this private primitive instead of pure spin/yield polling.
 
 ## VM Memory Tranche
 

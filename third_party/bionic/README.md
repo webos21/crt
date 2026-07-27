@@ -94,7 +94,7 @@ out-of-line C99 functions.
 
 | Local file | Upstream path | Upstream ref | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `libc/include/private/crt_atomic.h` | none | project-owned | new | Private compiler-builtin atomic, spinlock, and once helpers for pthread preparation. |
+| `libc/include/private/crt_atomic.h` | none | project-owned | new | Private compiler-builtin atomic, spinlock, and wait-backed once helpers for pthread preparation. |
 
 ### Pthread Basic Tranche
 
