@@ -149,6 +149,15 @@ CRT controls its own startup and C runtime boundary. This avoids CMake's default
 compiler check trying to link a hosted MSVC runtime executable before CRT has
 configured its own targets.
 
+The build also disables CMake's default Windows C standard libraries for CRT
+targets. Only `kernel32.lib` is linked for the current hello backend. CMake tries
+to locate `kernel32.lib` from the installed Windows SDK. If that fails, either
+run from a Visual Studio Developer shell or pass it explicitly:
+
+```powershell
+cmake --preset windows-host-ninja-debug -DCRT_WINDOWS_KERNEL32_LIB="C:\Path\To\kernel32.lib"
+```
+
 Useful checks:
 
 ```powershell

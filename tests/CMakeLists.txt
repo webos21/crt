@@ -23,7 +23,7 @@ elseif(CRT_TARGET_OS STREQUAL "windows")
     -Wl,/entry:mainCRTStartup
     -Wl,/subsystem:console
   )
-  target_link_libraries(hello_c PRIVATE kernel32)
+  target_link_libraries(hello_c PRIVATE "${CRT_WINDOWS_KERNEL32_LIB}")
 endif()
 add_dependencies(hello_c c crt1)
 

@@ -1,14 +1,24 @@
 cmake_minimum_required(VERSION 3.25)
 
+set(CRT_TARGET_OS "macos" CACHE STRING "Target OS personality")
+set(CRT_TARGET_ARCH "host" CACHE STRING "Target architecture")
+set(CRT_SYSROOT "${CMAKE_BINARY_DIR}/sysroot" CACHE PATH "Project sysroot")
+
+if(CRT_TARGET_OS STREQUAL "windows")
+  set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "" CACHE STRING "MSVC runtime library selection" FORCE)
+  set(CMAKE_C_STANDARD_LIBRARIES "" CACHE STRING "C standard libraries" FORCE)
+endif()
+
 project(crt LANGUAGES C ASM)
+
+if(CRT_TARGET_OS STREQUAL "windows")
+  set(CMAKE_C_STANDARD_LIBRARIES "")
+endif()
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
-
-set(CRT_TARGET_OS "macos" CACHE STRING "Target OS personality")
-set(CRT_TARGET_ARCH "${CMAKE_SYSTEM_PROCESSOR}" CACHE STRING "Target architecture")
-set(CRT_SYSROOT "${CMAKE_BINARY_DIR}/sysroot" CACHE PATH "Project sysroot")
 
 option(CRT_ENABLE_CXX_RUNTIME "Prepare C++ runtime integration points" ON)
 option(CRT_USE_COMPILER_RT "Link compiler-rt builtins when the compiler exposes them" ON)
@@ -46,6 +56,50 @@ if(CRT_USE_COMPILER_RT)
   endif()
 else()
   add_library(crt_compiler_rt_builtins INTERFACE)
+endif()
+
+if(CRT_TARGET_OS STREQUAL "windows")
+  if(CRT_TARGET_ARCH STREQUAL "host")
+    set(CRT_WINDOWS_SDK_ARCH "${CMAKE_SYSTEM_PROCESSOR}")
+  else()
+    set(CRT_WINDOWS_SDK_ARCH "${CRT_TARGET_ARCH}")
+  endif()
+
+  if(CRT_WINDOWS_SDK_ARCH MATCHES "^(x86_64|AMD64|x64)$")
+    set(CRT_WINDOWS_SDK_LIB_ARCH "x64")
+  elseif(CRT_WINDOWS_SDK_ARCH MATCHES "^(arm64|ARM64|aarch64)$")
+    set(CRT_WINDOWS_SDK_LIB_ARCH "arm64")
+  else()
+    set(CRT_WINDOWS_SDK_LIB_ARCH "${CRT_WINDOWS_SDK_ARCH}")
+  endif()
+
+  set(CRT_WINDOWS_SDK_LIB_CANDIDATES)
+  foreach(CRT_WINDOWS_KITS_ROOT
+      "$ENV{WindowsSdkDir}"
+      "$ENV{ProgramFiles\(x86\)}/Windows Kits/10"
+      "$ENV{ProgramFiles}/Windows Kits/10")
+    if(CRT_WINDOWS_KITS_ROOT)
+      file(GLOB CRT_WINDOWS_SDK_UM_DIRS
+        LIST_DIRECTORIES true
+        "${CRT_WINDOWS_KITS_ROOT}/Lib/*/um/${CRT_WINDOWS_SDK_LIB_ARCH}")
+      list(APPEND CRT_WINDOWS_SDK_LIB_CANDIDATES ${CRT_WINDOWS_SDK_UM_DIRS})
+    endif()
+  endforeach()
+  list(REMOVE_DUPLICATES CRT_WINDOWS_SDK_LIB_CANDIDATES)
+  list(SORT CRT_WINDOWS_SDK_LIB_CANDIDATES COMPARE NATURAL ORDER DESCENDING)
+
+  find_file(CRT_WINDOWS_KERNEL32_LIB
+    NAMES kernel32.lib
+    PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES}
+    NO_DEFAULT_PATH
+  )
+
+  if(CRT_WINDOWS_KERNEL32_LIB)
+    message(STATUS "Windows kernel32 import library: ${CRT_WINDOWS_KERNEL32_LIB}")
+  else()
+    message(WARNING "kernel32.lib was not found. Use a Visual Studio Developer shell or set CRT_WINDOWS_KERNEL32_LIB.")
+    set(CRT_WINDOWS_KERNEL32_LIB kernel32.lib CACHE FILEPATH "Windows kernel32 import library")
+  endif()
 endif()
 
 add_subdirectory(libc)
