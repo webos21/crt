@@ -122,6 +122,18 @@ stack has more dependencies and should be evaluated separately. The current
 allocator is a small fixed-size bootstrap heap with a free list, intended only to
 support early libc/PAL tests across Linux, Windows, and macOS.
 
+## VM Memory Tranche
+
+The VM memory tranche adds:
+
+- `mmap`
+- `munmap`
+
+The first implementation supports anonymous private mappings only. Linux and
+macOS use direct syscall wrappers. Windows maps this subset to
+`VirtualAlloc`/`VirtualFree`. File-backed mappings, protection changes,
+`mprotect`, and VM-backed allocator integration are deferred.
+
 ## Minimal Stdio Tranche
 
 The current stdio tranche adds:

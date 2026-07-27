@@ -31,6 +31,8 @@ The current libc subset includes:
 - `open`
 - `close`
 - `lseek`
+- `mmap`
+- `munmap`
 - `malloc`
 - `free`
 - `calloc`
@@ -64,6 +66,10 @@ The allocator is currently a fixed-size bootstrap heap with a simple free list.
 This is enough for early cross-OS libc/PAL tests, but it is not the final
 allocator design.
 
+The VM layer currently supports anonymous private mappings. Linux and macOS use
+direct syscalls. Windows uses `VirtualAlloc` and `VirtualFree` for anonymous
+mappings. File-backed mappings are deferred.
+
 The stdio layer is currently limited to standard streams, fd-backed file streams,
 direct read/write backing, and a small bootstrap formatter. A final `FILE` ABI,
 buffering model, and complete `printf` formatter are deferred.
@@ -92,6 +98,7 @@ sysroot/
     stdio.h
     string.h
     stdlib.h
+    sys/mman.h
     sys/types.h
     unistd.h
   lib/

@@ -55,6 +55,28 @@ ___crt_sys_lseek:
   neg x0, x0
   ret
 
+.globl ___crt_sys_mmap
+.p2align 2
+___crt_sys_mmap:
+  mov x16, #197
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_munmap
+.p2align 2
+___crt_sys_munmap:
+  mov x16, #73
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
 .globl ___crt_sys_exit
 .p2align 2
 ___crt_sys_exit:

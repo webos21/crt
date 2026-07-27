@@ -49,6 +49,24 @@ __crt_sys_lseek:
   ret
 .size __crt_sys_lseek, . - __crt_sys_lseek
 
+.globl __crt_sys_mmap
+.type __crt_sys_mmap, %function
+.p2align 2
+__crt_sys_mmap:
+  mov x8, #222
+  svc #0
+  ret
+.size __crt_sys_mmap, . - __crt_sys_mmap
+
+.globl __crt_sys_munmap
+.type __crt_sys_munmap, %function
+.p2align 2
+__crt_sys_munmap:
+  mov x8, #215
+  svc #0
+  ret
+.size __crt_sys_munmap, . - __crt_sys_munmap
+
 .globl __crt_sys_exit
 .type __crt_sys_exit, %function
 .p2align 2

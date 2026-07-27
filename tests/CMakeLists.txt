@@ -103,3 +103,8 @@ add_crt_test(printf_test printf_test.c)
 set_tests_properties(printf_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "printf_test: ok 7 ff"
 )
+
+add_crt_test(mman_test mman_test.c)
+set_tests_properties(mman_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "mman_test: ok"
+)

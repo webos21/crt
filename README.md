@@ -78,14 +78,14 @@ The repository currently contains the first executable bring-up:
 - a minimal public `unistd.h`
 - minimal public `errno.h`, `fcntl.h`, `string.h`, and `sys/types.h`
 - a tiny `libc.a` with `_exit`, `errno`, `read`, `write`, `open`, `close`,
-  `lseek`, bootstrap `malloc`/`free`/`calloc`/`realloc`, and first-tranche
-  string/memory and fd-backed stdio functions
+  `lseek`, `mmap`/`munmap`, bootstrap `malloc`/`free`/`calloc`/`realloc`, and
+  first-tranche string/memory and fd-backed stdio functions
 - macOS x86_64/aarch64 startup and syscall assembly
 - Linux x86_64/aarch64 startup and syscall assembly
 - Windows x86_64/ARM64 startup and Win32-backed low-level write/exit
   implementation
-- freestanding `Hello World`, string/memory, fd/errno, malloc, stdio, and
-  stdio file tests
+- freestanding `Hello World`, string/memory, fd/errno, malloc, stdio, stdio
+  file, printf, and mmap tests
 - sysroot installation for headers, `crt1.o`, `libc.a`, and compiler-rt builtins
 
 On macOS, normal Mach-O executables must still link `libSystem.dylib`. The test
@@ -102,6 +102,10 @@ The current allocator is a fixed-size bootstrap heap with a simple free list. It
 is intended to support early libc/PAL tests, not production allocation behavior.
 Future allocator work should move to a host VM-backed heap and then evaluate the
 appropriate Bionic allocator integration.
+
+The current VM layer supports anonymous private `mmap` and `munmap`. Linux and
+macOS use direct syscalls. Windows maps anonymous allocations to
+`VirtualAlloc`/`VirtualFree`; file-backed mappings are not implemented yet.
 
 The current stdio layer is intentionally minimal. It supports standard streams,
 `fopen`/`fclose`, `fseek`/`ftell`, and simple byte-oriented I/O, but it does not
@@ -226,6 +230,7 @@ out/macos-host-ninja-debug/sysroot/
     stdio.h
     string.h
     stdlib.h
+    sys/mman.h
     sys/types.h
     unistd.h
   lib/

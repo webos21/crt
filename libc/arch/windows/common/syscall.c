@@ -1,6 +1,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 typedef void* HANDLE;
@@ -24,6 +25,15 @@ typedef int BOOL;
 #define FILE_BEGIN 0
 #define FILE_CURRENT 1
 #define FILE_END 2
+#define MEM_COMMIT 0x00001000
+#define MEM_RESERVE 0x00002000
+#define MEM_RELEASE 0x00008000
+#define PAGE_NOACCESS 0x01
+#define PAGE_READONLY 0x02
+#define PAGE_READWRITE 0x04
+#define PAGE_EXECUTE 0x10
+#define PAGE_EXECUTE_READ 0x20
+#define PAGE_EXECUTE_READWRITE 0x40
 #define INVALID_HANDLE_VALUE ((HANDLE)(intptr_t)-1)
 
 #if defined(_M_IX86) || defined(__i386__)
@@ -60,6 +70,15 @@ __declspec(dllimport) BOOL CRT_WINAPI SetFilePointerEx(
     long long liDistanceToMove,
     long long* lpNewFilePointer,
     DWORD dwMoveMethod);
+__declspec(dllimport) void* CRT_WINAPI VirtualAlloc(
+    void* lpAddress,
+    size_t dwSize,
+    DWORD flAllocationType,
+    DWORD flProtect);
+__declspec(dllimport) BOOL CRT_WINAPI VirtualFree(
+    void* lpAddress,
+    size_t dwSize,
+    DWORD dwFreeType);
 __declspec(dllimport) void CRT_WINAPI ExitProcess(unsigned int uExitCode);
 
 static HANDLE fd_table[CRT_FD_TABLE_SIZE];
@@ -225,6 +244,44 @@ long long __crt_sys_lseek(int fd, long long offset, int whence) {
     return fail_last_error();
   }
   return new_position;
+}
+
+void* __crt_sys_mmap(void* addr, unsigned long length, int prot, int flags, int fd, long long offset) {
+  DWORD protect;
+  void* result;
+  (void)offset;
+
+  if ((flags & MAP_ANONYMOUS) == 0 || fd != -1) {
+    return (void*)(intptr_t)-ENOSYS;
+  }
+
+  if ((prot & PROT_WRITE) != 0 && (prot & PROT_EXEC) != 0) {
+    protect = PAGE_EXECUTE_READWRITE;
+  } else if ((prot & PROT_WRITE) != 0) {
+    protect = PAGE_READWRITE;
+  } else if ((prot & PROT_EXEC) != 0 && (prot & PROT_READ) != 0) {
+    protect = PAGE_EXECUTE_READ;
+  } else if ((prot & PROT_EXEC) != 0) {
+    protect = PAGE_EXECUTE;
+  } else if ((prot & PROT_READ) != 0) {
+    protect = PAGE_READONLY;
+  } else {
+    protect = PAGE_NOACCESS;
+  }
+
+  result = VirtualAlloc(addr, (size_t)length, MEM_RESERVE | MEM_COMMIT, protect);
+  if (result == 0) {
+    return (void*)(intptr_t)-map_windows_error(GetLastError());
+  }
+  return result;
+}
+
+long __crt_sys_munmap(void* addr, unsigned long length) {
+  (void)length;
+  if (!VirtualFree(addr, 0, MEM_RELEASE)) {
+    return fail_last_error();
+  }
+  return 0;
 }
 
 void __crt_sys_exit(int status) {
