@@ -388,6 +388,45 @@ Recursive mutexes track owner and recursion count inside the Bionic-shaped
 `pthread_mutex_t.__private[]` storage. Error-checking mutexes return `EDEADLK`
 on self-lock and `EPERM` on unlock by a non-owner.
 
+## Pthread Condition Variable Tranche
+
+The pthread condition variable tranche adds:
+
+- `pthread_cond_t`
+- `pthread_condattr_t`
+- `PTHREAD_COND_INITIALIZER`
+- `pthread_cond_init`
+- `pthread_cond_destroy`
+- `pthread_cond_signal`
+- `pthread_cond_broadcast`
+- `pthread_cond_wait`
+- `pthread_condattr_init`
+- `pthread_condattr_destroy`
+
+The condition variable uses a sequence counter in the Bionic-shaped
+`pthread_cond_t.__private[]` storage. Waiting threads unlock the supplied mutex,
+wait on the sequence address through the private wait/futex primitive, then lock
+the mutex again. This preserves the public API shape and basic predicate-loop
+usage while keeping the OS wait backend private.
+
+## Private Wait/Futex Tranche
+
+The private wait/futex tranche adds a small internal wait-address primitive:
+
+- `__crt_wait32`
+- `__crt_wake32_one`
+- `__crt_wake32_all`
+
+Linux maps this to the raw `futex` syscall with private wait/wake operations.
+Windows maps it to `WaitOnAddress`, `WakeByAddressSingle`, and
+`WakeByAddressAll`. macOS resolves `os_sync_wait_on_address`,
+`os_sync_wake_by_address_any`, and `os_sync_wake_by_address_all` through
+`dlsym(RTLD_NEXT, ...)`, with a yield fallback if those symbols are unavailable
+on the running system.
+
+`pthread_cond_signal`, `pthread_cond_broadcast`, and `pthread_cond_wait` now use
+this private primitive instead of pure spin/yield polling.
+
 ## VM Memory Tranche
 
 The VM memory tranche adds:

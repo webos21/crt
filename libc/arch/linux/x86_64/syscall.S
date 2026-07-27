@@ -151,6 +151,16 @@ __crt_sys_wait4:
   retq
 .size __crt_sys_wait4, . - __crt_sys_wait4
 
+.globl __crt_sys_futex
+.type __crt_sys_futex, @function
+.p2align 4, 0x90
+__crt_sys_futex:
+  movq %rcx, %r10
+  movq $202, %rax
+  syscall
+  retq
+.size __crt_sys_futex, . - __crt_sys_futex
+
 .globl __crt_sys_thread_exit
 .type __crt_sys_thread_exit, @function
 .p2align 4, 0x90

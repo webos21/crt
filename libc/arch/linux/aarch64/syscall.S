@@ -152,6 +152,15 @@ __crt_sys_wait4:
   ret
 .size __crt_sys_wait4, . - __crt_sys_wait4
 
+.globl __crt_sys_futex
+.type __crt_sys_futex, %function
+.p2align 2
+__crt_sys_futex:
+  mov x8, #98
+  svc #0
+  ret
+.size __crt_sys_futex, . - __crt_sys_futex
+
 .globl __crt_sys_thread_exit
 .type __crt_sys_thread_exit, %function
 .p2align 2

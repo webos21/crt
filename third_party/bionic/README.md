@@ -119,6 +119,22 @@ out-of-line C99 functions.
 | `libc/arch/linux/x86_64/syscall.S` | mixed Bionic/Linux syscall surface | project-owned | extended | Adds raw clone, wait4, and thread exit syscall wrappers. |
 | `libc/arch/linux/aarch64/syscall.S` | mixed Bionic/Linux syscall surface | project-owned | extended | Adds raw clone, wait4, and thread exit syscall wrappers. |
 
+### Pthread Condition Variable Tranche
+
+| Local file | Upstream path | Upstream ref | Status | Notes |
+| --- | --- | --- | --- | --- |
+| `include/pthread.h` | `libc/include/pthread.h` and `libc/include/bits/pthread_types.h` | project-owned, Bionic-shaped | extended | Adds condition variable public type and API subset. |
+| `libc/src/pthread.c` | mixed Bionic/POSIX surface | project-owned | extended | Adds sequence-counter condition variables backed by the private wait/futex layer. |
+
+### Private Wait/Futex Tranche
+
+| Local file | Upstream path | Upstream ref | Status | Notes |
+| --- | --- | --- | --- | --- |
+| `libc/include/private/crt_wait.h` | none | project-owned | new | Private 32-bit wait/wake API used by pthread primitives. |
+| `libc/src/wait.c` | mixed Bionic/Linux futex and host wait surface | project-owned | new | Maps wait/wake to Linux futex, Windows WaitOnAddress, and macOS os_sync wait-by-address symbols. |
+| `libc/arch/linux/x86_64/syscall.S` | mixed Bionic/Linux syscall surface | project-owned | extended | Adds raw futex syscall wrapper. |
+| `libc/arch/linux/aarch64/syscall.S` | mixed Bionic/Linux syscall surface | project-owned | extended | Adds raw futex syscall wrapper. |
+
 ## Rules
 
 - Preserve original copyright and license headers.

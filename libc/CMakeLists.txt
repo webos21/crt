@@ -14,6 +14,7 @@ add_library(c STATIC
   src/strtol.c
   src/strtoul.c
   src/time.c
+  src/wait.c
   string/memchr.c
   string/memcmp.c
   string/memcpy.c

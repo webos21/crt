@@ -152,6 +152,11 @@ set_tests_properties(atomic_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "atomic_test: ok"
 )
 
+add_crt_test(wait_test wait_test.c)
+set_tests_properties(wait_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "wait_test: ok"
+)
+
 add_crt_test(pthread_basic_test pthread_basic_test.c)
 set_tests_properties(pthread_basic_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_basic_test: ok"
@@ -160,6 +165,11 @@ set_tests_properties(pthread_basic_test_runs PROPERTIES
 add_crt_test(pthread_mutexattr_test pthread_mutexattr_test.c)
 set_tests_properties(pthread_mutexattr_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_mutexattr_test: ok"
+)
+
+add_crt_test(pthread_cond_test pthread_cond_test.c)
+set_tests_properties(pthread_cond_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "pthread_cond_test: ok"
 )
 
 add_crt_test(pthread_key_test pthread_key_test.c)

@@ -5,6 +5,7 @@
 #include <sys/mman.h>
 
 #include <private/crt_atomic.h>
+#include <private/crt_wait.h>
 
 long __crt_sys_thread_id(void);
 void __crt_sys_thread_exit(int status) __attribute__((noreturn));
@@ -12,6 +13,8 @@ void __crt_sys_thread_exit(int status) __attribute__((noreturn));
 #define CRT_PTHREAD_KEYS_MAX 128
 #define CRT_PTHREAD_STACK_SIZE (1024UL * 1024UL)
 #define CRT_PTHREAD_ATTR_FLAG_DETACHED 0x00000001U
+#define CRT_COND_SEQUENCE_WORD 0
+#define CRT_COND_WAITERS_WORD 1
 #define CRT_MUTEX_STATE_WORD 0
 #define CRT_MUTEX_TYPE_WORD 1
 #define CRT_MUTEX_COUNT_WORD 2
@@ -98,6 +101,14 @@ static crt_spinlock pthread_key_lock = CRT_SPINLOCK_INIT;
 
 static crt_atomic_int* mutex_state(pthread_mutex_t* mutex) {
   return (crt_atomic_int*)&mutex->__private[CRT_MUTEX_STATE_WORD];
+}
+
+static crt_atomic_int* cond_sequence(pthread_cond_t* cond) {
+  return (crt_atomic_int*)&cond->__private[CRT_COND_SEQUENCE_WORD];
+}
+
+static crt_atomic_int* cond_waiters(pthread_cond_t* cond) {
+  return (crt_atomic_int*)&cond->__private[CRT_COND_WAITERS_WORD];
 }
 
 static crt_once* once_state(pthread_once_t* once_control) {
@@ -195,6 +206,88 @@ static DWORD CRT_WINAPI pthread_windows_start(void* arg) {
 }
 #endif
 #endif
+
+int pthread_cond_init(pthread_cond_t* cond, const pthread_condattr_t* attr) {
+  (void)attr;
+
+  if (cond == 0) {
+    return EINVAL;
+  }
+  cond->__private[CRT_COND_SEQUENCE_WORD] = 0;
+  cond->__private[CRT_COND_WAITERS_WORD] = 0;
+  return 0;
+}
+
+int pthread_cond_destroy(pthread_cond_t* cond) {
+  if (cond == 0) {
+    return EINVAL;
+  }
+  if (crt_atomic_load_acquire(cond_waiters(cond)) != 0) {
+    return EBUSY;
+  }
+  return 0;
+}
+
+int pthread_cond_signal(pthread_cond_t* cond) {
+  if (cond == 0) {
+    return EINVAL;
+  }
+  crt_atomic_fetch_add_acq_rel(cond_sequence(cond), 1);
+  return __crt_wake32_one(&cond->__private[CRT_COND_SEQUENCE_WORD]);
+}
+
+int pthread_cond_broadcast(pthread_cond_t* cond) {
+  if (cond == 0) {
+    return EINVAL;
+  }
+  crt_atomic_fetch_add_acq_rel(cond_sequence(cond), 1);
+  return __crt_wake32_all(&cond->__private[CRT_COND_SEQUENCE_WORD]);
+}
+
+int pthread_cond_wait(pthread_cond_t* cond, pthread_mutex_t* mutex) {
+  int sequence;
+  int result;
+
+  if (cond == 0 || mutex == 0) {
+    return EINVAL;
+  }
+
+  sequence = crt_atomic_load_acquire(cond_sequence(cond));
+  crt_atomic_fetch_add_acq_rel(cond_waiters(cond), 1);
+  result = pthread_mutex_unlock(mutex);
+  if (result != 0) {
+    crt_atomic_fetch_add_acq_rel(cond_waiters(cond), -1);
+    return result;
+  }
+
+  while (crt_atomic_load_acquire(cond_sequence(cond)) == sequence) {
+    result = __crt_wait32(&cond->__private[CRT_COND_SEQUENCE_WORD], sequence);
+    if (result != 0 && result != EINTR && result != EAGAIN) {
+      break;
+    }
+  }
+
+  crt_atomic_fetch_add_acq_rel(cond_waiters(cond), -1);
+  {
+    int lock_result = pthread_mutex_lock(mutex);
+    return result != 0 ? result : lock_result;
+  }
+}
+
+int pthread_condattr_init(pthread_condattr_t* attr) {
+  if (attr == 0) {
+    return EINVAL;
+  }
+  *attr = 0;
+  return 0;
+}
+
+int pthread_condattr_destroy(pthread_condattr_t* attr) {
+  if (attr == 0) {
+    return EINVAL;
+  }
+  return 0;
+}
 
 int pthread_mutex_init(pthread_mutex_t* mutex, const void* attr) {
   const pthread_mutexattr_t* mutex_attr = (const pthread_mutexattr_t*)attr;

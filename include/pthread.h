@@ -21,6 +21,12 @@ typedef struct {
 typedef int pthread_key_t;
 
 typedef struct {
+  int32_t __private[12];
+} pthread_cond_t;
+
+typedef long pthread_condattr_t;
+
+typedef struct {
   int32_t __private[10];
 } pthread_mutex_t;
 
@@ -40,9 +46,17 @@ typedef void (*__pthread_key_destructor_t)(void*);
 #define PTHREAD_CREATE_DETACHED 1
 #define PTHREAD_STACK_MIN 16384
 
+#define PTHREAD_COND_INITIALIZER { { 0 } }
 #define PTHREAD_MUTEX_INITIALIZER { { ((PTHREAD_MUTEX_NORMAL & 3) << 14) } }
 #define PTHREAD_ONCE_INIT 0
 
+int pthread_cond_init(pthread_cond_t* cond, const pthread_condattr_t* attr);
+int pthread_cond_destroy(pthread_cond_t* cond);
+int pthread_cond_signal(pthread_cond_t* cond);
+int pthread_cond_broadcast(pthread_cond_t* cond);
+int pthread_cond_wait(pthread_cond_t* cond, pthread_mutex_t* mutex);
+int pthread_condattr_init(pthread_condattr_t* attr);
+int pthread_condattr_destroy(pthread_condattr_t* attr);
 int pthread_mutex_init(pthread_mutex_t* mutex, const void* attr);
 int pthread_mutex_destroy(pthread_mutex_t* mutex);
 int pthread_mutex_lock(pthread_mutex_t* mutex);
