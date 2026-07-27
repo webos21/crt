@@ -383,10 +383,11 @@ The pthread mutex attribute tranche adds:
 - `pthread_mutexattr_settype`
 
 The runtime accepts `PTHREAD_MUTEX_NORMAL`, `PTHREAD_MUTEX_RECURSIVE`, and
-`PTHREAD_MUTEX_ERRORCHECK`. Normal mutexes retain the earlier spinlock behavior.
-Recursive mutexes track owner and recursion count inside the Bionic-shaped
-`pthread_mutex_t.__private[]` storage. Error-checking mutexes return `EDEADLK`
-on self-lock and `EPERM` on unlock by a non-owner.
+`PTHREAD_MUTEX_ERRORCHECK`. Mutexes keep lock state, type, recursion count, and
+owner identity inside the Bionic-shaped `pthread_mutex_t.__private[]` storage.
+Contended mutexes now sleep through the private wait/futex primitive instead of
+spinning until release. Error-checking mutexes return `EDEADLK` on self-lock and
+`EPERM` on unlock by a non-owner.
 
 ## Pthread Condition Variable Tranche
 
@@ -424,8 +425,9 @@ Windows maps it to `WaitOnAddress`, `WakeByAddressSingle`, and
 `dlsym(RTLD_NEXT, ...)`, with a yield fallback if those symbols are unavailable
 on the running system.
 
-`pthread_cond_signal`, `pthread_cond_broadcast`, and `pthread_cond_wait` now use
-this private primitive instead of pure spin/yield polling.
+`pthread_mutex_lock`, `pthread_mutex_unlock`, `pthread_cond_signal`,
+`pthread_cond_broadcast`, and `pthread_cond_wait` now use this private primitive
+instead of pure spin/yield polling.
 
 ## VM Memory Tranche
 

@@ -323,6 +323,8 @@ int pthread_mutex_destroy(pthread_mutex_t* mutex) {
 int pthread_mutex_lock(pthread_mutex_t* mutex) {
   pthread_t self;
   int type;
+  int expected;
+  int wait_result;
 
   if (mutex == 0) {
     return EINVAL;
@@ -338,9 +340,16 @@ int pthread_mutex_lock(pthread_mutex_t* mutex) {
     return 0;
   }
 
-  while (crt_atomic_exchange_acquire(mutex_state(mutex), 1) != 0) {
+  for (;;) {
+    expected = 0;
+    if (crt_atomic_compare_exchange_acq_rel(mutex_state(mutex), &expected, 1)) {
+      break;
+    }
     while (crt_atomic_load_relaxed(mutex_state(mutex)) != 0) {
-      sched_yield();
+      wait_result = __crt_wait32(&mutex->__private[CRT_MUTEX_STATE_WORD], 1);
+      if (wait_result != 0 && wait_result != EINTR && wait_result != EAGAIN) {
+        return wait_result;
+      }
     }
   }
   set_mutex_owner(mutex, self);
@@ -395,7 +404,7 @@ int pthread_mutex_unlock(pthread_mutex_t* mutex) {
   mutex->__private[CRT_MUTEX_COUNT_WORD] = 0;
   clear_mutex_owner(mutex);
   crt_atomic_store_release(mutex_state(mutex), 0);
-  return 0;
+  return __crt_wake32_one(&mutex->__private[CRT_MUTEX_STATE_WORD]);
 }
 
 int pthread_mutexattr_init(pthread_mutexattr_t* attr) {
