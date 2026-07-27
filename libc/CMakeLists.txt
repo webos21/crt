@@ -1,4 +1,6 @@
 add_library(c STATIC
+  src/atoi.c
+  src/atol.c
   src/ctype.c
   src/errno.c
   src/exit.c
@@ -7,6 +9,8 @@ add_library(c STATIC
   src/mman.c
   src/printf.c
   src/stdio.c
+  src/strtol.c
+  src/strtoul.c
   string/memchr.c
   string/memcmp.c
   string/memcpy.c

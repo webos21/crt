@@ -136,6 +136,20 @@ stack has more dependencies and should be evaluated separately. The current
 allocator is a small VM-backed bootstrap heap with a free list, intended only to
 support early libc/PAL tests across Linux, Windows, and macOS.
 
+## Stdlib Numeric Conversion Tranche
+
+The current stdlib numeric conversion tranche adds:
+
+- `atoi`
+- `atol`
+- `strtol`
+- `strtoul`
+
+The implementation is adapted from Bionic's BSD-derived conversion routines and
+uses the current C-locale `ctype` tranche. It supports bases 2 through 36, base
+0 prefix detection, end-pointer reporting, and `ERANGE` on overflow. Wider
+integer conversions such as `strtoll`, `strtoull`, and `strtoimax` are deferred.
+
 ## VM Memory Tranche
 
 The VM memory tranche adds:

@@ -113,3 +113,8 @@ add_crt_test(ctype_test ctype_test.c)
 set_tests_properties(ctype_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "ctype_test: ok"
 )
+
+add_crt_test(stdlib_test stdlib_test.c)
+set_tests_properties(stdlib_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "stdlib_test: ok"
+)

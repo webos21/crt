@@ -48,6 +48,17 @@ out-of-line C99 functions.
 | `libc/src/ctype.c` | `libc/include/ctype.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Converts Bionic inline predicates to exported C99 functions and defers locale-aware `_l` variants. |
 | `include/ctype.h` | `libc/include/ctype.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Keeps only public prototypes for the current C-locale tranche. |
 
+### Stdlib Numeric Conversion Tranche
+
+| Local file | Upstream path | Upstream ref | Status | Notes |
+| --- | --- | --- | --- | --- |
+| `libc/src/atoi.c` | `libc/stdlib/atoi.c` | `ics-mr0` | adapted | Uses local `strtol` instead of Bionic's `strtoimax` dependency. |
+| `libc/src/atol.c` | `libc/stdlib/atol.c` | `ics-mr0` | adapted | Uses local `strtol` instead of Bionic's `strtoimax` dependency. |
+| `libc/src/strtol.c` | `libc/stdlib/strtol.c` | `ics-mr0` | adapted | Keeps BSD-derived conversion logic; adds invalid-base handling for this project. |
+| `libc/src/strtoul.c` | `libc/stdlib/strtoul.c` | `ics-mr0` | adapted | Keeps BSD-derived conversion logic; adds invalid-base handling for this project. |
+| `include/limits.h` | `libc/include/limits.h` | project-owned | new | Minimal C99 limit macros needed by numeric conversion tests. |
+| `include/stdlib.h` | `libc/include/stdlib.h` | project-owned | adapted | Adds prototypes for the current allocator and numeric conversion tranche. |
+
 ## Rules
 
 - Preserve original copyright and license headers.
