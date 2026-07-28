@@ -15,6 +15,8 @@ int main(void) {
   char readback = 0;
   int fd;
   int copy;
+  int high_copy;
+  int pipefd[2];
   struct stat st;
 
   if (getcwd(cwd, sizeof(cwd)) == 0 || cwd[0] == 0) {
@@ -54,6 +56,16 @@ int main(void) {
     close(fd);
     return fail("fstat sample");
   }
+  if (isatty(fd) != 0) {
+    close(fd);
+    return fail("isatty regular");
+  }
+  if (fcntl(fd, F_GETFD) != 0 ||
+      fcntl(fd, F_SETFD, FD_CLOEXEC) != 0 ||
+      fcntl(fd, F_GETFL) < 0) {
+    close(fd);
+    return fail("fcntl flags");
+  }
   memset(&st, 0, sizeof(st));
   if (lstat("sample.tmp", &st) != 0 || !S_ISREG(st.st_mode) || st.st_size != 1) {
     close(fd);
@@ -79,6 +91,28 @@ int main(void) {
     return fail("dup2");
   }
   close(10);
+  high_copy = fcntl(fd, F_DUPFD, 8);
+  if (high_copy < 8) {
+    close(fd);
+    return fail("fcntl dupfd");
+  }
+  close(high_copy);
+  if (pipe(pipefd) != 0) {
+    close(fd);
+    return fail("pipe");
+  }
+  byte = 'P';
+  readback = 0;
+  if (write(pipefd[1], &byte, 1) != 1 ||
+      read(pipefd[0], &readback, 1) != 1 ||
+      readback != 'P') {
+    close(pipefd[0]);
+    close(pipefd[1]);
+    close(fd);
+    return fail("pipe read/write");
+  }
+  close(pipefd[0]);
+  close(pipefd[1]);
   close(fd);
   if (remove("sample.tmp") != 0) {
     return fail("remove sample");

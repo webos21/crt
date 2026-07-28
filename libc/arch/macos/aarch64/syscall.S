@@ -132,6 +132,21 @@ ___crt_sys_dup2:
   neg x0, x0
   ret
 
+.globl ___crt_sys_pipe
+.p2align 2
+___crt_sys_pipe:
+  mov x9, x0
+  mov x16, #42
+  svc #0x80
+  b.cs 1f
+  str w0, [x9]
+  str w1, [x9, #4]
+  mov x0, #0
+  ret
+1:
+  neg x0, x0
+  ret
+
 .globl ___crt_sys_macos_stat64
 .p2align 2
 ___crt_sys_macos_stat64:

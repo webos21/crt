@@ -99,6 +99,11 @@ __declspec(dllimport) BOOL CRT_WINAPI DuplicateHandle(
     DWORD dwDesiredAccess,
     BOOL bInheritHandle,
     DWORD dwOptions);
+__declspec(dllimport) BOOL CRT_WINAPI CreatePipe(
+    HANDLE* hReadPipe,
+    HANDLE* hWritePipe,
+    void* lpPipeAttributes,
+    DWORD nSize);
 __declspec(dllimport) BOOL CRT_WINAPI SetFilePointerEx(
     HANDLE hFile,
     long long liDistanceToMove,
@@ -405,6 +410,33 @@ long __crt_sys_dup2(int oldfd, int newfd) {
   }
   fd_table[newfd] = duplicate;
   return newfd;
+}
+
+long __crt_sys_pipe(int pipefd[2]) {
+  HANDLE read_handle = 0;
+  HANDLE write_handle = 0;
+  int read_fd;
+  int write_fd;
+
+  if (!CreatePipe(&read_handle, &write_handle, 0, 0)) {
+    return fail_last_error();
+  }
+  read_fd = alloc_fd(read_handle);
+  if (read_fd < 0) {
+    CloseHandle(read_handle);
+    CloseHandle(write_handle);
+    return -EMFILE;
+  }
+  write_fd = alloc_fd(write_handle);
+  if (write_fd < 0) {
+    fd_table[read_fd] = 0;
+    CloseHandle(read_handle);
+    CloseHandle(write_handle);
+    return -EMFILE;
+  }
+  pipefd[0] = read_fd;
+  pipefd[1] = write_fd;
+  return 0;
 }
 
 static long stat_from_handle(HANDLE handle, struct stat* st) {

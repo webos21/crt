@@ -122,6 +122,16 @@ __crt_sys_dup2:
   ret
 .size __crt_sys_dup2, . - __crt_sys_dup2
 
+.globl __crt_sys_pipe
+.type __crt_sys_pipe, %function
+.p2align 2
+__crt_sys_pipe:
+  mov x1, #0
+  mov x8, #59
+  svc #0
+  ret
+.size __crt_sys_pipe, . - __crt_sys_pipe
+
 .globl __crt_sys_statx
 .type __crt_sys_statx, %function
 .p2align 2

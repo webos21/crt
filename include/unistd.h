@@ -25,6 +25,8 @@ pid_t getpid(void);
 pid_t getppid(void);
 int dup(int oldfd);
 int dup2(int oldfd, int newfd);
+int isatty(int fd);
+int pipe(int pipefd[2]);
 void _exit(int status) __attribute__((noreturn));
 
 #define F_OK 0

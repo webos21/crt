@@ -619,6 +619,9 @@ The file/path tranche adds:
 - `chdir`;
 - `dup`;
 - `dup2`;
+- `pipe`;
+- `isatty`;
+- bootstrap `fcntl`;
 - `stat`;
 - `fstat`;
 - `lstat`;
@@ -630,6 +633,10 @@ points as `S_IFLNK` while ordinary files and directories retain their `stat`
 mode. macOS uses direct syscalls where practical. Its `getcwd`
 adapter opens `"."` and calls Darwin `fcntl(F_GETPATH)` through a private
 syscall wrapper, avoiding a libc-level dependency on libSystem's `getcwd`.
+The current `fcntl` subset supports `F_DUPFD`, `F_GETFD`, `F_SETFD`, `F_GETFL`,
+and `F_SETFL` as bootstrap probes; close-on-exec and nonblocking behavior are
+recorded only as accepted surface for now because `exec` and full descriptor
+status flag tracking are not implemented yet.
 
 The metadata tranche moves the supported OS backends beyond the first
 regular-file fallback. Linux uses the raw `statx` syscall and converts the

@@ -132,6 +132,21 @@ ___crt_sys_dup2:
   negq %rax
   retq
 
+.globl ___crt_sys_pipe
+.p2align 4, 0x90
+___crt_sys_pipe:
+  movq %rdi, %r8
+  movq $0x200002a, %rax
+  syscall
+  jc 1f
+  movl %eax, (%r8)
+  movl %edx, 4(%r8)
+  xorl %eax, %eax
+  retq
+1:
+  negq %rax
+  retq
+
 .globl ___crt_sys_macos_stat64
 .p2align 4, 0x90
 ___crt_sys_macos_stat64:

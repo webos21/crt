@@ -22,6 +22,7 @@ long __crt_sys_getcwd(char* buf, unsigned long size);
 #endif
 long __crt_sys_dup(int oldfd);
 long __crt_sys_dup2(int oldfd, int newfd);
+long __crt_sys_pipe(int pipefd[2]);
 #if defined(CRT_TARGET_OS_LINUX)
 long __crt_sys_statx(long dirfd, const char* path, int flags, unsigned int mask, void* statxbuf);
 #elif defined(CRT_TARGET_OS_WINDOWS)
@@ -238,6 +239,101 @@ int dup2(int oldfd, int newfd) {
     return (int)__set_errno(EBADF);
   }
   return (int)normalize_syscall_result(__crt_sys_dup2(oldfd, newfd));
+}
+
+int pipe(int pipefd[2]) {
+  if (pipefd == 0) {
+    return (int)__set_errno(EINVAL);
+  }
+  return (int)normalize_syscall_result(__crt_sys_pipe(pipefd));
+}
+
+int isatty(int fd) {
+  struct stat st;
+
+  if (fstat(fd, &st) != 0) {
+    return 0;
+  }
+  return S_ISCHR(st.st_mode);
+}
+
+int fcntl(int fd, int cmd, ...) {
+  va_list args;
+  int arg;
+  int copy;
+  int saved[64];
+  int saved_count = 0;
+  int result;
+
+  switch (cmd) {
+    case F_DUPFD:
+      va_start(args, cmd);
+      arg = va_arg(args, int);
+      va_end(args);
+      if (arg < 0) {
+        return (int)__set_errno(EINVAL);
+      }
+      do {
+        copy = dup(fd);
+        if (copy < 0) {
+          while (saved_count > 0) {
+            close(saved[--saved_count]);
+          }
+          return -1;
+        }
+        if (copy >= arg) {
+          result = copy;
+          while (saved_count > 0) {
+            close(saved[--saved_count]);
+          }
+          return result;
+        }
+        if (saved_count == (int)(sizeof(saved) / sizeof(saved[0]))) {
+          close(copy);
+          while (saved_count > 0) {
+            close(saved[--saved_count]);
+          }
+          return (int)__set_errno(EMFILE);
+        }
+        saved[saved_count++] = copy;
+      } while (1);
+
+    case F_GETFD:
+      if (fstat(fd, &(struct stat){0}) != 0) {
+        return -1;
+      }
+      return 0;
+
+    case F_SETFD:
+      va_start(args, cmd);
+      arg = va_arg(args, int);
+      va_end(args);
+      if ((arg & ~FD_CLOEXEC) != 0) {
+        return (int)__set_errno(EINVAL);
+      }
+      if (fstat(fd, &(struct stat){0}) != 0) {
+        return -1;
+      }
+      return 0;
+
+    case F_GETFL:
+      if (fstat(fd, &(struct stat){0}) != 0) {
+        return -1;
+      }
+      return O_RDWR;
+
+    case F_SETFL:
+      va_start(args, cmd);
+      (void)va_arg(args, int);
+      va_end(args);
+      if (fstat(fd, &(struct stat){0}) != 0) {
+        return -1;
+      }
+      return 0;
+
+    default:
+      return (int)__set_errno(EINVAL);
+  }
 }
 
 #if !defined(CRT_TARGET_OS_LINUX) && !defined(CRT_TARGET_OS_WINDOWS) && !defined(CRT_TARGET_OS_MACOS)
