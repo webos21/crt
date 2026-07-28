@@ -203,7 +203,7 @@ __crt_sys_thread_exit:
 .type __crt_sys_exit, %function
 .p2align 2
 __crt_sys_exit:
-  mov x8, #93
+  mov x8, #94
   svc #0
 1:
   b 1b

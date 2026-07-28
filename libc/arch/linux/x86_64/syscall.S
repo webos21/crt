@@ -195,7 +195,7 @@ __crt_sys_thread_exit:
 .type __crt_sys_exit, @function
 .p2align 4, 0x90
 __crt_sys_exit:
-  movq $60, %rax
+  movq $231, %rax
   syscall
 1:
   jmp 1b

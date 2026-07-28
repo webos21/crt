@@ -18,9 +18,10 @@ The Linux backend now creates project pthreads with a raw `clone` wrapper using:
 - `CLONE_CHILD_CLEARTID`
 
 The project control block contains a kernel-visible tid word. `pthread_join`
-waits for that word to become zero through the private futex wait primitive,
-which matches the normal child-tid-clearing shape used by Linux pthread
-implementations more closely than the earlier `wait4` bootstrap join.
+waits for that word to become zero through a raw futex wait, which matches the
+kernel wake issued for `CLONE_CHILD_CLEARTID` more closely than the earlier
+`wait4` bootstrap join. The internal wait helpers still use private futexes for
+runtime-owned synchronization words such as mutexes and condition variables.
 
 ## Detached Reaper
 
@@ -33,6 +34,11 @@ is zero, the reaper releases the owned stack mapping and the control block.
 
 Caller-provided stacks are not unmapped by the reaper; ownership remains with the
 caller that supplied the stack through `pthread_attr_setstack`.
+
+The process-level Linux exit path uses `exit_group`, while pthread worker exit
+uses the per-thread `exit` syscall. This distinction matters once permanent
+runtime helper threads such as the detached reaper exist; returning from `main`
+must terminate the whole process, not only the initial thread.
 
 ## Remaining Work
 
