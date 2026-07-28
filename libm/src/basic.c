@@ -35,12 +35,6 @@ long double copysignl(long double x, long double y) {
   return signbit(y) ? -ax : ax;
 }
 
-double fmin(double x, double y) {
-  if (isnan(x)) return y;
-  if (isnan(y)) return x;
-  return x < y ? x : y;
-}
-
 float fminf(float x, float y) {
   if (isnan(x)) return y;
   if (isnan(y)) return x;
@@ -51,12 +45,6 @@ long double fminl(long double x, long double y) {
   if (isnan(x)) return y;
   if (isnan(y)) return x;
   return x < y ? x : y;
-}
-
-double fmax(double x, double y) {
-  if (isnan(x)) return y;
-  if (isnan(y)) return x;
-  return x > y ? x : y;
 }
 
 float fmaxf(float x, float y) {
@@ -71,13 +59,6 @@ long double fmaxl(long double x, long double y) {
   return x > y ? x : y;
 }
 
-double trunc(double x) {
-  if (!isfinite(x) || x == 0.0) {
-    return x;
-  }
-  return (double)(long long)x;
-}
-
 float truncf(float x) {
   return (float)trunc((double)x);
 }
@@ -87,18 +68,6 @@ long double truncl(long double x) {
     return x;
   }
   return (long double)(long long)x;
-}
-
-double floor(double x) {
-  double t;
-  if (!isfinite(x) || x == 0.0) {
-    return x;
-  }
-  t = trunc(x);
-  if (t > x) {
-    t -= 1.0;
-  }
-  return t;
 }
 
 float floorf(float x) {
@@ -117,18 +86,6 @@ long double floorl(long double x) {
   return t;
 }
 
-double ceil(double x) {
-  double t;
-  if (!isfinite(x) || x == 0.0) {
-    return x;
-  }
-  t = trunc(x);
-  if (t < x) {
-    t += 1.0;
-  }
-  return t;
-}
-
 float ceilf(float x) {
   return (float)ceil((double)x);
 }
@@ -143,13 +100,6 @@ long double ceill(long double x) {
     t += 1.0L;
   }
   return t;
-}
-
-double round(double x) {
-  if (!isfinite(x) || x == 0.0) {
-    return x;
-  }
-  return x < 0.0 ? ceil(x - 0.5) : floor(x + 0.5);
 }
 
 float roundf(float x) {

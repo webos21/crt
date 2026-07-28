@@ -121,9 +121,10 @@ and simple byte-oriented I/O, but it does not yet define a final `FILE` ABI or
 buffering model. The current `printf` family is a small bootstrap formatter for
 early tests, not a complete C/POSIX formatter.
 
-The current `libm.a` is a first bootstrap library with basic classification,
-absolute value, sign, min/max, rounding, and square-root functions. It is not
-yet a full fdlibm/msun/Bionic math import.
+The current `libm.a` has a bootstrap `math.h`, classification macros, absolute
+value, sign, float/long double wrappers, square-root functions, and the first
+curated Bionic/FreeBSD msun import for double-precision min/max and rounding
+primitives. It is not yet a full fdlibm/msun/Bionic math import.
 
 ## Prerequisites
 

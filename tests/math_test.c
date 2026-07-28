@@ -30,6 +30,9 @@ int main(void) {
       fmin(NAN, 7.0) != 7.0 || fmax(7.0, NAN) != 7.0) {
     return fail("fmin/fmax");
   }
+  if (!signbit(fmin(0.0, -0.0)) || signbit(fmax(0.0, -0.0))) {
+    return fail("fmin/fmax signed zero");
+  }
   if (floor(2.9) != 2.0 || floor(-2.1) != -3.0 ||
       ceil(2.1) != 3.0 || ceil(-2.9) != -2.0 ||
       trunc(2.9) != 2.0 || trunc(-2.9) != -2.0) {

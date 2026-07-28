@@ -78,6 +78,7 @@ out-of-line C99 functions.
 | Local file | Upstream path | Upstream ref | Status | Notes |
 | --- | --- | --- | --- | --- |
 | `include/stdint.h` | `libc/include/stdint.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Uses compiler predefined type macros instead of Bionic's `__LP64__` branch to support Windows LLP64. |
+| `include/float.h` | compiler-provided header layer | project-owned | new | Defines C floating-point limits from compiler predefined macros so imported fdlibm/msun sources do not depend on host libc headers. |
 | `include/stdbool.h` | `libc/include/stdbool.h` | project-owned | new | Minimal C99 boolean macro header. |
 | `include/stddef.h` | compiler-provided header layer | project-owned | new | Defines `ptrdiff_t`, `size_t`, `wchar_t`, `NULL`, and `offsetof` from compiler builtins. |
 | `include/stdarg.h` | compiler-provided header layer | project-owned | new | Defines `va_list` and `va_*` macros from compiler builtins. |
@@ -96,7 +97,20 @@ out-of-line C99 functions.
 | Local file | Upstream path | Upstream ref | Status | Notes |
 | --- | --- | --- | --- | --- |
 | `include/math.h` | `libc/include/math.h` | project-owned | new | Minimal C99/POSIX math declarations and classification macros for the first `libm.a` boundary. |
-| `libm/src/basic.c` | mixed Bionic/POSIX surface | project-owned | new | Bootstrap absolute value, sign, min/max, rounding, and square-root functions before importing fdlibm/msun sources. |
+| `libm/src/basic.c` | mixed Bionic/POSIX surface | project-owned | new | Bootstrap absolute value, sign, float/long double wrappers, and square-root functions while fdlibm/msun is imported incrementally. |
+
+### Libm FreeBSD/msun Import Tranche 1
+
+| Local file | Upstream path | Upstream ref | Status | Notes |
+| --- | --- | --- | --- | --- |
+| `libm/src/freebsd/math_private.h` | `libm/upstream-freebsd/lib/msun/src/math_private.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Reduced to word extraction/insertion helpers and no-op weak reference macros for the freestanding import. |
+| `libm/src/freebsd/fpmath.h` | `libm/fpmath.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Keeps the double bit layout needed by `fmin`/`fmax` without depending on host endian headers. |
+| `libm/src/freebsd/s_ceil.c` | `libm/upstream-freebsd/lib/msun/src/s_ceil.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Upstream copyright preserved; uses the local adapted private header. |
+| `libm/src/freebsd/s_floor.c` | `libm/upstream-freebsd/lib/msun/src/s_floor.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Upstream copyright preserved; uses the local adapted private header. |
+| `libm/src/freebsd/s_fmax.c` | `libm/upstream-freebsd/lib/msun/src/s_fmax.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Upstream copyright preserved; weak long-double alias disabled for this tranche. |
+| `libm/src/freebsd/s_fmin.c` | `libm/upstream-freebsd/lib/msun/src/s_fmin.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Upstream copyright preserved; weak long-double alias disabled for this tranche. |
+| `libm/src/freebsd/s_round.c` | `libm/upstream-freebsd/lib/msun/src/s_round.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Upstream copyright preserved; uses the local adapted private header. |
+| `libm/src/freebsd/s_trunc.c` | `libm/upstream-freebsd/lib/msun/src/s_trunc.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Upstream copyright preserved; uses the local adapted private header. |
 
 ### Time Tranche
 

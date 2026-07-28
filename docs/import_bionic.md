@@ -224,12 +224,17 @@ The current surface includes:
 - `round`, `roundf`, `roundl`
 - `sqrt`, `sqrtf`, `sqrtl`
 
-This is not yet a Bionic fdlibm/msun import. The implementation is a
-project-owned bootstrap layer that uses compiler classification builtins and
-small portable C routines so configure probes and early libraries can link
-against `-lm`. Transcendental functions such as `sin`, `cos`, `tan`, `exp`,
-`log`, and `pow`, `errno`/floating-point exception policy, and correctly rounded
-edge-case behavior remain deferred until the real libm import policy is chosen.
+The first Bionic/FreeBSD msun import replaces the double-precision
+`floor`/`ceil`/`trunc`/`round` and `fmin`/`fmax` implementations with curated
+sources from Bionic's FreeBSD math tree. Local private headers are adapted to
+avoid host libc and endian dependencies while preserving the upstream copyright
+notices.
+
+The float and long double variants currently remain bootstrap wrappers, and
+`sqrt`/`sqrtf`/`sqrtl` still use the project-owned bootstrap implementation.
+Transcendental functions such as `sin`, `cos`, `tan`, `exp`, `log`, and `pow`,
+`errno`/floating-point exception policy, and full edge-case coverage remain
+deferred to later libm import tranches.
 
 ## Next Runtime Boundary Tranche
 

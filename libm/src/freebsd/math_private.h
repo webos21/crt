@@ -1,0 +1,74 @@
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+
+#ifndef CRT_LIBM_FREEBSD_MATH_PRIVATE_H
+#define CRT_LIBM_FREEBSD_MATH_PRIVATE_H
+
+#include <stdint.h>
+
+typedef uint32_t u_int32_t;
+
+#define __weak_reference(sym, alias)
+
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#define CRT_IEEE_WORD_ORDER_BIG 1
+#else
+#define CRT_IEEE_WORD_ORDER_BIG 0
+#endif
+
+#if CRT_IEEE_WORD_ORDER_BIG
+typedef union {
+  double value;
+  struct {
+    uint32_t msw;
+    uint32_t lsw;
+  } parts;
+  struct {
+    uint64_t w;
+  } xparts;
+} ieee_double_shape_type;
+#else
+typedef union {
+  double value;
+  struct {
+    uint32_t lsw;
+    uint32_t msw;
+  } parts;
+  struct {
+    uint64_t w;
+  } xparts;
+} ieee_double_shape_type;
+#endif
+
+#define EXTRACT_WORDS(ix0, ix1, d) \
+  do { \
+    ieee_double_shape_type ew_u; \
+    ew_u.value = (d); \
+    (ix0) = (int32_t)ew_u.parts.msw; \
+    (ix1) = (int32_t)ew_u.parts.lsw; \
+  } while (0)
+
+#define GET_HIGH_WORD(i, d) \
+  do { \
+    ieee_double_shape_type gh_u; \
+    gh_u.value = (d); \
+    (i) = (int32_t)gh_u.parts.msw; \
+  } while (0)
+
+#define INSERT_WORDS(d, ix0, ix1) \
+  do { \
+    ieee_double_shape_type iw_u; \
+    iw_u.parts.msw = (uint32_t)(ix0); \
+    iw_u.parts.lsw = (uint32_t)(ix1); \
+    (d) = iw_u.value; \
+  } while (0)
+
+#endif
