@@ -90,6 +90,11 @@ __declspec(dllimport) BOOL CRT_WINAPI RemoveDirectoryA(const char* lpPathName);
 __declspec(dllimport) BOOL CRT_WINAPI SetCurrentDirectoryA(const char* lpPathName);
 __declspec(dllimport) DWORD CRT_WINAPI GetCurrentDirectoryA(DWORD nBufferLength, char* lpBuffer);
 __declspec(dllimport) DWORD CRT_WINAPI GetFileAttributesA(const char* lpFileName);
+__declspec(dllimport) DWORD CRT_WINAPI GetFullPathNameA(
+    const char* lpFileName,
+    DWORD nBufferLength,
+    char* lpBuffer,
+    char** lpFilePart);
 __declspec(dllimport) HANDLE CRT_WINAPI GetCurrentProcess(void);
 __declspec(dllimport) BOOL CRT_WINAPI DuplicateHandle(
     HANDLE hSourceProcessHandle,
@@ -437,6 +442,31 @@ long __crt_sys_pipe(int pipefd[2]) {
   pipefd[0] = read_fd;
   pipefd[1] = write_fd;
   return 0;
+}
+
+long __crt_sys_realpath_path(const char* path, char* resolved_path, unsigned long size) {
+  DWORD result = GetFullPathNameA(path, (DWORD)size, resolved_path, 0);
+
+  if (result == 0) {
+    return fail_last_error();
+  }
+  if (result >= (DWORD)size) {
+    return -ERANGE;
+  }
+  return 0;
+}
+
+long __crt_sys_readlink(const char* path, char* buf, unsigned long size) {
+  (void)path;
+  (void)buf;
+  (void)size;
+  return -ENOSYS;
+}
+
+long __crt_sys_symlink(const char* target, const char* linkpath) {
+  (void)target;
+  (void)linkpath;
+  return -ENOSYS;
 }
 
 static long stat_from_handle(HANDLE handle, struct stat* st) {

@@ -622,6 +622,9 @@ The file/path tranche adds:
 - `pipe`;
 - `isatty`;
 - bootstrap `fcntl`;
+- `realpath`;
+- `readlink`;
+- `symlink`;
 - `stat`;
 - `fstat`;
 - `lstat`;
@@ -637,6 +640,12 @@ The current `fcntl` subset supports `F_DUPFD`, `F_GETFD`, `F_SETFD`, `F_GETFL`,
 and `F_SETFL` as bootstrap probes; close-on-exec and nonblocking behavior are
 recorded only as accepted surface for now because `exec` and full descriptor
 status flag tracking are not implemented yet.
+`realpath` currently validates that the path exists, returns an absolute
+normalized path, and supports the common `resolved_path == NULL` allocation
+extension; it does not yet walk and expand every symlink component. Linux and
+macOS implement `readlink` and `symlink` through host syscalls. Windows returns
+`ENOSYS` for `readlink`/`symlink` until the project defines a reparse-point
+policy that is robust without requiring Developer Mode or elevated privileges.
 
 The metadata tranche moves the supported OS backends beyond the first
 regular-file fallback. Linux uses the raw `statx` syscall and converts the

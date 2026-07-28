@@ -1,5 +1,8 @@
 #include <fcntl.h>
+#include <errno.h>
+#include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -13,6 +16,9 @@ int main(void) {
   char cwd[4096];
   char byte = 'Z';
   char readback = 0;
+  char linkbuf[64];
+  char resolved[PATH_MAX];
+  char* allocated_path;
   int fd;
   int copy;
   int high_copy;
@@ -71,6 +77,49 @@ int main(void) {
     close(fd);
     return fail("lstat sample");
   }
+  if (realpath("./sample.tmp", resolved) == 0 || strstr(resolved, "sample.tmp") == 0) {
+    close(fd);
+    return fail("realpath buffer");
+  }
+  allocated_path = realpath("sample.tmp", 0);
+  if (allocated_path == 0 || strstr(allocated_path, "sample.tmp") == 0) {
+    free(allocated_path);
+    close(fd);
+    return fail("realpath alloc");
+  }
+  free(allocated_path);
+#if defined(CRT_TARGET_OS_WINDOWS)
+  errno = 0;
+  if (symlink("sample.tmp", "sample.link") == 0 || errno != ENOSYS) {
+    close(fd);
+    return fail("windows symlink policy");
+  }
+  errno = 0;
+  if (readlink("sample.link", linkbuf, sizeof(linkbuf)) >= 0 || errno != ENOSYS) {
+    close(fd);
+    return fail("windows readlink policy");
+  }
+#else
+  if (symlink("sample.tmp", "sample.link") != 0) {
+    close(fd);
+    return fail("symlink");
+  }
+  memset(linkbuf, 0, sizeof(linkbuf));
+  if (readlink("sample.link", linkbuf, sizeof(linkbuf) - 1) != 10 ||
+      strcmp(linkbuf, "sample.tmp") != 0) {
+    close(fd);
+    return fail("readlink");
+  }
+  memset(&st, 0, sizeof(st));
+  if (lstat("sample.link", &st) != 0 || !S_ISLNK(st.st_mode)) {
+    close(fd);
+    return fail("lstat symlink");
+  }
+  if (remove("sample.link") != 0) {
+    close(fd);
+    return fail("remove symlink");
+  }
+#endif
   if (lseek(fd, 0, SEEK_SET) != 0) {
     close(fd);
     return fail("lseek sample");

@@ -147,6 +147,28 @@ ___crt_sys_pipe:
   neg x0, x0
   ret
 
+.globl ___crt_sys_readlink
+.p2align 2
+___crt_sys_readlink:
+  mov x16, #58
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_symlink
+.p2align 2
+___crt_sys_symlink:
+  mov x16, #57
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
 .globl ___crt_sys_macos_stat64
 .p2align 2
 ___crt_sys_macos_stat64:

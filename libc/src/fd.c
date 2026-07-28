@@ -1,7 +1,9 @@
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stddef.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -23,9 +25,12 @@ long __crt_sys_getcwd(char* buf, unsigned long size);
 long __crt_sys_dup(int oldfd);
 long __crt_sys_dup2(int oldfd, int newfd);
 long __crt_sys_pipe(int pipefd[2]);
+long __crt_sys_readlink(const char* path, char* buf, unsigned long size);
+long __crt_sys_symlink(const char* target, const char* linkpath);
 #if defined(CRT_TARGET_OS_LINUX)
 long __crt_sys_statx(long dirfd, const char* path, int flags, unsigned int mask, void* statxbuf);
 #elif defined(CRT_TARGET_OS_WINDOWS)
+long __crt_sys_realpath_path(const char* path, char* resolved_path, unsigned long size);
 long __crt_sys_stat_path(const char* path, struct stat* st);
 long __crt_sys_lstat_path(const char* path, struct stat* st);
 long __crt_sys_fstat(int fd, struct stat* st);
@@ -122,6 +127,105 @@ static long normalize_syscall_result(long result) {
     return __set_errno((int)-result);
   }
   return result;
+}
+
+static int path_is_absolute(const char* path) {
+  if (path == 0 || path[0] == 0) {
+    return 0;
+  }
+#if defined(CRT_TARGET_OS_WINDOWS)
+  if ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) {
+    return path[1] == ':';
+  }
+  return (path[0] == '/' || path[0] == '\\') && (path[1] == '/' || path[1] == '\\');
+#else
+  return path[0] == '/';
+#endif
+}
+
+static int path_separator(int c) {
+#if defined(CRT_TARGET_OS_WINDOWS)
+  return c == '/' || c == '\\';
+#else
+  return c == '/';
+#endif
+}
+
+static size_t path_root_length(const char* path) {
+#if defined(CRT_TARGET_OS_WINDOWS)
+  if (((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) &&
+      path[1] == ':') {
+    return path_separator(path[2]) ? 3 : 2;
+  }
+  if (path_separator(path[0]) && path_separator(path[1])) {
+    return 2;
+  }
+#endif
+  return path_separator(path[0]) ? 1 : 0;
+}
+
+static int normalize_absolute_path(const char* input, char* output, size_t output_size) {
+  size_t root;
+  size_t in_pos;
+  size_t out_pos;
+
+  if (input == 0 || output == 0 || output_size == 0) {
+    return (int)__set_errno(EINVAL);
+  }
+  root = path_root_length(input);
+  if (root == 0 || root >= output_size) {
+    return (int)__set_errno(EINVAL);
+  }
+  memcpy(output, input, root);
+  out_pos = root;
+  in_pos = root;
+
+  while (path_separator(input[in_pos])) {
+    ++in_pos;
+  }
+  while (input[in_pos] != 0) {
+    size_t part_start = in_pos;
+    size_t part_len;
+
+    while (input[in_pos] != 0 && !path_separator(input[in_pos])) {
+      ++in_pos;
+    }
+    part_len = in_pos - part_start;
+    while (path_separator(input[in_pos])) {
+      ++in_pos;
+    }
+    if (part_len == 0 || (part_len == 1 && input[part_start] == '.')) {
+      continue;
+    }
+    if (part_len == 2 && input[part_start] == '.' && input[part_start + 1] == '.') {
+      if (out_pos > root) {
+        --out_pos;
+        while (out_pos > root && !path_separator(output[out_pos - 1])) {
+          --out_pos;
+        }
+      }
+      continue;
+    }
+    if (out_pos > root && !path_separator(output[out_pos - 1])) {
+      if (out_pos + 1 >= output_size) {
+        return (int)__set_errno(ERANGE);
+      }
+      output[out_pos++] = '/';
+    }
+    if (out_pos + part_len >= output_size) {
+      return (int)__set_errno(ERANGE);
+    }
+    memcpy(output + out_pos, input + part_start, part_len);
+    out_pos += part_len;
+  }
+  if (out_pos == 0) {
+    return (int)__set_errno(EINVAL);
+  }
+  if (out_pos > 1 && path_separator(output[out_pos - 1])) {
+    --out_pos;
+  }
+  output[out_pos] = 0;
+  return 0;
 }
 
 ssize_t read(int fd, void* buf, size_t count) {
@@ -228,6 +332,96 @@ char* getcwd(char* buf, size_t size) {
   }
   return buf;
 #endif
+}
+
+char* realpath(const char* path, char* resolved_path) {
+  char combined[PATH_MAX];
+  char cwd[PATH_MAX];
+  char* output = resolved_path;
+  size_t cwd_len;
+  size_t path_len;
+  struct stat st;
+
+  if (path == 0) {
+    __set_errno(EINVAL);
+    return 0;
+  }
+  if (stat(path, &st) != 0) {
+    return 0;
+  }
+  if (output == 0) {
+    output = (char*)malloc(PATH_MAX);
+    if (output == 0) {
+      __set_errno(ENOMEM);
+      return 0;
+    }
+  }
+
+#if defined(CRT_TARGET_OS_WINDOWS)
+  {
+    char absolute[PATH_MAX];
+
+    if (__crt_sys_realpath_path(path, absolute, sizeof(absolute)) == 0) {
+      if (normalize_absolute_path(absolute, output, PATH_MAX) == 0) {
+        return output;
+      }
+      if (resolved_path == 0) {
+        free(output);
+      }
+      return 0;
+    }
+  }
+#endif
+
+  if (path_is_absolute(path)) {
+    if (normalize_absolute_path(path, output, PATH_MAX) != 0) {
+      if (resolved_path == 0) {
+        free(output);
+      }
+      return 0;
+    }
+    return output;
+  }
+
+  if (getcwd(cwd, sizeof(cwd)) == 0) {
+    if (resolved_path == 0) {
+      free(output);
+    }
+    return 0;
+  }
+  cwd_len = strlen(cwd);
+  path_len = strlen(path);
+  if (cwd_len + 1 + path_len + 1 > sizeof(combined)) {
+    if (resolved_path == 0) {
+      free(output);
+    }
+    __set_errno(ERANGE);
+    return 0;
+  }
+  memcpy(combined, cwd, cwd_len);
+  combined[cwd_len] = '/';
+  memcpy(combined + cwd_len + 1, path, path_len + 1);
+  if (normalize_absolute_path(combined, output, PATH_MAX) != 0) {
+    if (resolved_path == 0) {
+      free(output);
+    }
+    return 0;
+  }
+  return output;
+}
+
+ssize_t readlink(const char* path, char* buf, size_t bufsiz) {
+  if (path == 0 || buf == 0) {
+    return (ssize_t)__set_errno(EINVAL);
+  }
+  return (ssize_t)normalize_syscall_result(__crt_sys_readlink(path, buf, (unsigned long)bufsiz));
+}
+
+int symlink(const char* target, const char* linkpath) {
+  if (target == 0 || linkpath == 0) {
+    return (int)__set_errno(EINVAL);
+  }
+  return (int)normalize_syscall_result(__crt_sys_symlink(target, linkpath));
 }
 
 int dup(int oldfd) {

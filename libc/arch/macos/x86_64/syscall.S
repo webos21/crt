@@ -147,6 +147,28 @@ ___crt_sys_pipe:
   negq %rax
   retq
 
+.globl ___crt_sys_readlink
+.p2align 4, 0x90
+___crt_sys_readlink:
+  movq $0x200003a, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_symlink
+.p2align 4, 0x90
+___crt_sys_symlink:
+  movq $0x2000039, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
 .globl ___crt_sys_macos_stat64
 .p2align 4, 0x90
 ___crt_sys_macos_stat64:

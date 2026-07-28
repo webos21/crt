@@ -27,6 +27,8 @@ int dup(int oldfd);
 int dup2(int oldfd, int newfd);
 int isatty(int fd);
 int pipe(int pipefd[2]);
+ssize_t readlink(const char* path, char* buf, size_t bufsiz);
+int symlink(const char* target, const char* linkpath);
 void _exit(int status) __attribute__((noreturn));
 
 #define F_OK 0

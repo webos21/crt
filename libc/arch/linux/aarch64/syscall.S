@@ -132,6 +132,31 @@ __crt_sys_pipe:
   ret
 .size __crt_sys_pipe, . - __crt_sys_pipe
 
+.globl __crt_sys_readlink
+.type __crt_sys_readlink, %function
+.p2align 2
+__crt_sys_readlink:
+  mov x4, x2
+  mov x2, x1
+  mov x1, x0
+  mov x0, #-100
+  mov x3, x4
+  mov x8, #78
+  svc #0
+  ret
+.size __crt_sys_readlink, . - __crt_sys_readlink
+
+.globl __crt_sys_symlink
+.type __crt_sys_symlink, %function
+.p2align 2
+__crt_sys_symlink:
+  mov x2, x1
+  mov x1, #-100
+  mov x8, #36
+  svc #0
+  ret
+.size __crt_sys_symlink, . - __crt_sys_symlink
+
 .globl __crt_sys_statx
 .type __crt_sys_statx, %function
 .p2align 2

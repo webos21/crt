@@ -118,6 +118,31 @@ __crt_sys_pipe:
   retq
 .size __crt_sys_pipe, . - __crt_sys_pipe
 
+.globl __crt_sys_readlink
+.type __crt_sys_readlink, @function
+.p2align 4, 0x90
+__crt_sys_readlink:
+  movq %rdx, %rcx
+  movq %rsi, %rdx
+  movq %rdi, %rsi
+  movq $-100, %rdi
+  movq %rcx, %r10
+  movq $267, %rax
+  syscall
+  retq
+.size __crt_sys_readlink, . - __crt_sys_readlink
+
+.globl __crt_sys_symlink
+.type __crt_sys_symlink, @function
+.p2align 4, 0x90
+__crt_sys_symlink:
+  movq %rsi, %rdx
+  movq $-100, %rsi
+  movq $266, %rax
+  syscall
+  retq
+.size __crt_sys_symlink, . - __crt_sys_symlink
+
 .globl __crt_sys_statx
 .type __crt_sys_statx, @function
 .p2align 4, 0x90
