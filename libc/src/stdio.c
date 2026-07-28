@@ -13,16 +13,25 @@ struct __crt_FILE {
   int buffering_mode;
   char* buffer;
   size_t buffer_size;
+  int buffer_owned;
+  size_t buffer_pos;
+  size_t buffer_len;
+  int buffer_dirty;
+  int last_op;
   int ungot;
   unsigned char ungot_char;
 };
 
+#define CRT_STDIO_NONE 0
+#define CRT_STDIO_READ 1
+#define CRT_STDIO_WRITE 2
+
 long __crt_sys_unlink(const char* path);
 long __crt_sys_rename(const char* old_path, const char* new_path);
 
-static FILE stdin_storage = {0, 0, 0, 0, _IOLBF, 0, 0, 0, 0};
-static FILE stdout_storage = {1, 0, 0, 0, _IOLBF, 0, 0, 0, 0};
-static FILE stderr_storage = {2, 0, 0, 0, _IONBF, 0, 0, 0, 0};
+static FILE stdin_storage = {0, 0, 0, 0, _IOLBF, 0, 0, 0, 0, 0, 0, CRT_STDIO_NONE, 0, 0};
+static FILE stdout_storage = {1, 0, 0, 0, _IOLBF, 0, 0, 0, 0, 0, 0, CRT_STDIO_NONE, 0, 0};
+static FILE stderr_storage = {2, 0, 0, 0, _IONBF, 0, 0, 0, 0, 0, 0, CRT_STDIO_NONE, 0, 0};
 
 FILE* stdin = &stdin_storage;
 FILE* stdout = &stdout_storage;
@@ -65,6 +74,73 @@ static int parse_mode(const char* mode) {
   return flags;
 }
 
+static void reset_buffer_state(FILE* stream) {
+  stream->buffer_pos = 0;
+  stream->buffer_len = 0;
+  stream->buffer_dirty = 0;
+  stream->ungot = 0;
+}
+
+static int ensure_buffer(FILE* stream) {
+  if (stream->buffering_mode == _IONBF) {
+    return 0;
+  }
+  if (stream->buffer != 0 && stream->buffer_size != 0) {
+    return 0;
+  }
+  stream->buffer = (char*)malloc(BUFSIZ);
+  if (stream->buffer == 0) {
+    stream->error = 1;
+    return -1;
+  }
+  stream->buffer_size = BUFSIZ;
+  stream->buffer_owned = 1;
+  return 0;
+}
+
+static int flush_write_buffer(FILE* stream) {
+  size_t done = 0;
+
+  if (!stream->buffer_dirty || stream->buffer_len == 0) {
+    stream->buffer_pos = 0;
+    stream->buffer_len = 0;
+    stream->buffer_dirty = 0;
+    return 0;
+  }
+  while (done < stream->buffer_len) {
+    ssize_t result = write(stream->fd, stream->buffer + done, stream->buffer_len - done);
+    if (result <= 0) {
+      stream->error = 1;
+      return -1;
+    }
+    done += (size_t)result;
+  }
+  stream->buffer_pos = 0;
+  stream->buffer_len = 0;
+  stream->buffer_dirty = 0;
+  return 0;
+}
+
+static int prepare_read(FILE* stream) {
+  if (stream->last_op == CRT_STDIO_WRITE && flush_write_buffer(stream) != 0) {
+    return -1;
+  }
+  if (stream->last_op != CRT_STDIO_READ) {
+    reset_buffer_state(stream);
+  }
+  stream->last_op = CRT_STDIO_READ;
+  return 0;
+}
+
+static int prepare_write(FILE* stream) {
+  if (stream->last_op == CRT_STDIO_READ) {
+    reset_buffer_state(stream);
+  }
+  stream->last_op = CRT_STDIO_WRITE;
+  stream->eof = 0;
+  return 0;
+}
+
 FILE* fopen(const char* path, const char* mode) {
   int flags = parse_mode(mode);
   int fd;
@@ -91,6 +167,11 @@ FILE* fopen(const char* path, const char* mode) {
   stream->buffering_mode = _IOFBF;
   stream->buffer = 0;
   stream->buffer_size = 0;
+  stream->buffer_owned = 0;
+  stream->buffer_pos = 0;
+  stream->buffer_len = 0;
+  stream->buffer_dirty = 0;
+  stream->last_op = CRT_STDIO_NONE;
   stream->ungot = 0;
   stream->ungot_char = 0;
 
@@ -107,8 +188,16 @@ int fclose(FILE* stream) {
   if (stream_fd(stream) < 0) {
     return EOF;
   }
+  if (fflush(stream) != 0) {
+    result = -1;
+  }
   if (stream->owned) {
-    result = close(stream->fd);
+    if (close(stream->fd) != 0) {
+      result = -1;
+    }
+    if (stream->buffer_owned) {
+      free(stream->buffer);
+    }
     free(stream);
     if (result != 0) {
       return EOF;
@@ -119,16 +208,27 @@ int fclose(FILE* stream) {
 
 int fseek(FILE* stream, long offset, int whence) {
   int fd = stream_fd(stream);
+  long adjusted = offset;
 
   if (fd < 0) {
     return -1;
   }
-  if (lseek(fd, (off_t)offset, whence) < 0) {
+  if (stream->last_op == CRT_STDIO_WRITE && fflush(stream) != 0) {
+    return -1;
+  }
+  if (stream->last_op == CRT_STDIO_READ && whence == SEEK_CUR) {
+    adjusted -= (long)(stream->buffer_len - stream->buffer_pos);
+    if (stream->ungot) {
+      --adjusted;
+    }
+  }
+  if (lseek(fd, (off_t)adjusted, whence) < 0) {
     stream->error = 1;
     return -1;
   }
   stream->eof = 0;
-  stream->ungot = 0;
+  reset_buffer_state(stream);
+  stream->last_op = CRT_STDIO_NONE;
   return 0;
 }
 
@@ -143,6 +243,14 @@ long ftell(FILE* stream) {
   if (result < 0) {
     return -1;
   }
+  if (stream->last_op == CRT_STDIO_WRITE && stream->buffer_dirty) {
+    result += (off_t)stream->buffer_len;
+  } else if (stream->last_op == CRT_STDIO_READ) {
+    result -= (off_t)(stream->buffer_len - stream->buffer_pos);
+    if (stream->ungot) {
+      --result;
+    }
+  }
   return (long)result;
 }
 
@@ -153,9 +261,29 @@ int fputc(int c, FILE* stream) {
   if (fd < 0) {
     return EOF;
   }
-  if (write(fd, &byte, 1) != 1) {
-    stream->error = 1;
+  if (prepare_write(stream) != 0) {
     return EOF;
+  }
+  if (stream->buffering_mode == _IONBF) {
+    if (write(fd, &byte, 1) != 1) {
+      stream->error = 1;
+      return EOF;
+    }
+    return byte;
+  }
+  if (ensure_buffer(stream) != 0) {
+    return EOF;
+  }
+  if (stream->buffer_len == stream->buffer_size && flush_write_buffer(stream) != 0) {
+    return EOF;
+  }
+  stream->buffer[stream->buffer_len++] = (char)byte;
+  stream->buffer_dirty = 1;
+  if (stream->buffer_len == stream->buffer_size ||
+      (stream->buffering_mode == _IOLBF && byte == '\n')) {
+    if (flush_write_buffer(stream) != 0) {
+      return EOF;
+    }
   }
   return byte;
 }
@@ -165,16 +293,17 @@ int putc(int c, FILE* stream) {
 }
 
 int fputs(const char* s, FILE* stream) {
+  size_t i;
   size_t length;
-  int fd = stream_fd(stream);
 
-  if (fd < 0) {
+  if (stream_fd(stream) < 0) {
     return EOF;
   }
   length = strlen(s);
-  if (write(fd, s, length) != (ssize_t)length) {
-    stream->error = 1;
-    return EOF;
+  for (i = 0; i < length; ++i) {
+    if (fputc((unsigned char)s[i], stream) == EOF) {
+      return EOF;
+    }
   }
   return 0;
 }
@@ -201,10 +330,34 @@ int fgetc(FILE* stream) {
   if (fd < 0) {
     return EOF;
   }
+  if (prepare_read(stream) != 0) {
+    return EOF;
+  }
   if (stream->ungot) {
     stream->ungot = 0;
     stream->eof = 0;
     return stream->ungot_char;
+  }
+  if (stream->buffering_mode != _IONBF) {
+    if (ensure_buffer(stream) != 0) {
+      return EOF;
+    }
+    if (stream->buffer_pos >= stream->buffer_len) {
+      result = read(fd, stream->buffer, stream->buffer_size);
+      if (result > 0) {
+        stream->buffer_pos = 0;
+        stream->buffer_len = (size_t)result;
+      } else {
+        if (result == 0) {
+          stream->eof = 1;
+        } else {
+          stream->error = 1;
+        }
+        return EOF;
+      }
+    }
+    stream->eof = 0;
+    return (unsigned char)stream->buffer[stream->buffer_pos++];
   }
   result = read(fd, &byte, 1);
   if (result == 1) {
@@ -240,10 +393,9 @@ int ungetc(int c, FILE* stream) {
 size_t fread(void* ptr, size_t size, size_t nmemb, FILE* stream) {
   size_t total;
   size_t done = 0;
-  int fd = stream_fd(stream);
   unsigned char* out = (unsigned char*)ptr;
 
-  if (fd < 0 || size == 0 || nmemb == 0) {
+  if (stream_fd(stream) < 0 || size == 0 || nmemb == 0) {
     return 0;
   }
   if (nmemb > ((size_t)-1) / size) {
@@ -252,37 +404,22 @@ size_t fread(void* ptr, size_t size, size_t nmemb, FILE* stream) {
   }
 
   total = size * nmemb;
-  if (stream->ungot && total != 0) {
-    out[done++] = stream->ungot_char;
-    stream->ungot = 0;
-  }
   while (done < total) {
-    ssize_t result = read(fd, out + done, total - done);
-    if (result <= 0) {
-      if (result == 0) {
-        stream->eof = 1;
-      } else {
-        stream->error = 1;
-      }
+    int ch = fgetc(stream);
+    if (ch == EOF) {
       break;
     }
-    done += (size_t)result;
-  }
-  if (done == 0) {
-    if (!stream->error) {
-      stream->eof = 1;
-    }
-    return 0;
+    out[done++] = (unsigned char)ch;
   }
   return done / size;
 }
 
 size_t fwrite(const void* ptr, size_t size, size_t nmemb, FILE* stream) {
   size_t total;
-  ssize_t result;
-  int fd = stream_fd(stream);
+  size_t done = 0;
+  const unsigned char* in = (const unsigned char*)ptr;
 
-  if (fd < 0 || size == 0 || nmemb == 0) {
+  if (stream_fd(stream) < 0 || size == 0 || nmemb == 0) {
     return 0;
   }
   if (nmemb > ((size_t)-1) / size) {
@@ -291,20 +428,34 @@ size_t fwrite(const void* ptr, size_t size, size_t nmemb, FILE* stream) {
   }
 
   total = size * nmemb;
-  result = write(fd, ptr, total);
-  if (result <= 0) {
-    stream->error = 1;
-    return 0;
+  while (done < total) {
+    if (fputc(in[done], stream) == EOF) {
+      break;
+    }
+    ++done;
   }
-  return (size_t)result / size;
+  return done / size;
 }
 
 int fflush(FILE* stream) {
   if (stream == 0) {
-    return 0;
+    int result = 0;
+    if (fflush(stdout) != 0) {
+      result = EOF;
+    }
+    if (fflush(stderr) != 0) {
+      result = EOF;
+    }
+    return result;
   }
   if (stream_fd(stream) < 0) {
     return EOF;
+  }
+  if (stream->last_op == CRT_STDIO_WRITE) {
+    return flush_write_buffer(stream) == 0 ? 0 : EOF;
+  }
+  if (stream->last_op == CRT_STDIO_READ) {
+    reset_buffer_state(stream);
   }
   return 0;
 }
@@ -321,9 +472,18 @@ int setvbuf(FILE* stream, char* buf, int mode, size_t size) {
     errno = EINVAL;
     return EOF;
   }
+  if (fflush(stream) != 0) {
+    return EOF;
+  }
+  if (stream->buffer_owned) {
+    free(stream->buffer);
+  }
   stream->buffering_mode = mode;
   stream->buffer = buf;
-  stream->buffer_size = size;
+  stream->buffer_size = mode == _IONBF ? 0 : size;
+  stream->buffer_owned = 0;
+  reset_buffer_state(stream);
+  stream->last_op = CRT_STDIO_NONE;
   return 0;
 }
 

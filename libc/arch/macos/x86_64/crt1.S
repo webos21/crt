@@ -5,4 +5,4 @@ _start:
   xorl %ebp, %ebp
   callq _main
   movl %eax, %edi
-  callq ___crt_sys_exit
+  callq _exit

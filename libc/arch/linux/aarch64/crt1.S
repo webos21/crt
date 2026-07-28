@@ -6,5 +6,5 @@ _start:
   mov x29, #0
   mov x30, #0
   bl main
-  bl __crt_sys_exit
+  bl exit
 .size _start, . - _start

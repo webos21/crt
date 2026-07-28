@@ -14,7 +14,9 @@ static int fail(const char* message) {
 int main(void) {
   FILE* stream;
   FILE* renamed;
+  FILE* observer;
   char buffer[16];
+  char small_buffer[4];
   size_t nread;
   int ch;
 
@@ -50,6 +52,79 @@ int main(void) {
 
   if (fclose(stream) != 0) {
     return fail("fclose");
+  }
+
+  stream = fopen("stdio_buffer_test.tmp", "w+");
+  if (stream == 0) {
+    return fail("fopen buffer");
+  }
+  if (setvbuf(stream, small_buffer, _IOFBF, sizeof(small_buffer)) != 0) {
+    fclose(stream);
+    return fail("setvbuf full");
+  }
+  if (fputc('A', stream) != 'A' || ftell(stream) != 1) {
+    fclose(stream);
+    return fail("buffered fputc ftell");
+  }
+  observer = fopen("stdio_buffer_test.tmp", "r");
+  if (observer == 0) {
+    fclose(stream);
+    return fail("fopen observer");
+  }
+  nread = fread(buffer, 1, 1, observer);
+  if (nread != 0) {
+    fclose(observer);
+    fclose(stream);
+    return fail("full buffering flushed early");
+  }
+  fclose(observer);
+  if (fflush(stream) != 0) {
+    fclose(stream);
+    return fail("fflush buffered");
+  }
+  if (fseek(stream, 0, SEEK_SET) != 0) {
+    fclose(stream);
+    return fail("fseek buffered");
+  }
+  memset(buffer, 0, sizeof(buffer));
+  nread = fread(buffer, 1, 1, stream);
+  if (nread != 1 || buffer[0] != 'A') {
+    fclose(stream);
+    return fail("read buffered write");
+  }
+  fclose(stream);
+  if (remove("stdio_buffer_test.tmp") != 0) {
+    return fail("remove buffer");
+  }
+
+  stream = fopen("stdio_line_buffer_test.tmp", "w+");
+  if (stream == 0) {
+    return fail("fopen line buffer");
+  }
+  if (setvbuf(stream, small_buffer, _IOLBF, sizeof(small_buffer)) != 0) {
+    fclose(stream);
+    return fail("setvbuf line");
+  }
+  if (fputs("L\n", stream) == EOF) {
+    fclose(stream);
+    return fail("line buffered fputs");
+  }
+  observer = fopen("stdio_line_buffer_test.tmp", "r");
+  if (observer == 0) {
+    fclose(stream);
+    return fail("fopen line observer");
+  }
+  memset(buffer, 0, sizeof(buffer));
+  nread = fread(buffer, 1, 2, observer);
+  if (nread != 2 || buffer[0] != 'L' || buffer[1] != '\n') {
+    fclose(observer);
+    fclose(stream);
+    return fail("line buffering did not flush");
+  }
+  fclose(observer);
+  fclose(stream);
+  if (remove("stdio_line_buffer_test.tmp") != 0) {
+    return fail("remove line buffer");
   }
 
   stream = fopen("stdio_file_test.tmp", "r");

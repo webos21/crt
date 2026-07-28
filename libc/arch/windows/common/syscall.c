@@ -29,6 +29,7 @@ typedef int BOOL;
 #define FILE_ATTRIBUTE_NORMAL 0x00000080
 #define MOVEFILE_REPLACE_EXISTING 0x00000001
 #define FILE_ATTRIBUTE_DIRECTORY 0x00000010
+#define FILE_ATTRIBUTE_REPARSE_POINT 0x00000400
 #define INVALID_FILE_ATTRIBUTES ((DWORD)0xffffffffUL)
 #define FILE_FLAG_BACKUP_SEMANTICS 0x02000000
 #define FILE_BEGIN 0
@@ -450,6 +451,23 @@ long __crt_sys_stat_path(const char* path, struct stat* st) {
   result = stat_from_handle(handle, st);
   CloseHandle(handle);
   return result;
+}
+
+long __crt_sys_lstat_path(const char* path, struct stat* st) {
+  DWORD attrs;
+  long result = __crt_sys_stat_path(path, st);
+
+  if (result != 0) {
+    return result;
+  }
+  attrs = GetFileAttributesA(path);
+  if (attrs == INVALID_FILE_ATTRIBUTES) {
+    return fail_last_error();
+  }
+  if ((attrs & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+    st->st_mode = (st->st_mode & ~S_IFMT) | S_IFLNK;
+  }
+  return 0;
 }
 
 long __crt_sys_unlink(const char* path) {

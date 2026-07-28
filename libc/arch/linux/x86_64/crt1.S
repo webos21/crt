@@ -6,5 +6,5 @@ _start:
   xorl %ebp, %ebp
   call main
   movl %eax, %edi
-  call __crt_sys_exit
+  call exit
 .size _start, . - _start

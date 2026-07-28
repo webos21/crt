@@ -26,6 +26,7 @@ long __crt_sys_dup2(int oldfd, int newfd);
 long __crt_sys_statx(long dirfd, const char* path, int flags, unsigned int mask, void* statxbuf);
 #elif defined(CRT_TARGET_OS_WINDOWS)
 long __crt_sys_stat_path(const char* path, struct stat* st);
+long __crt_sys_lstat_path(const char* path, struct stat* st);
 long __crt_sys_fstat(int fd, struct stat* st);
 #elif defined(CRT_TARGET_OS_MACOS)
 long __crt_sys_macos_stat64(const char* path, void* statbuf);
@@ -399,6 +400,11 @@ int lstat(const char* path, struct stat* st) {
     memset(&ds, 0, sizeof(ds));
     return macos_stat64_result(__crt_sys_macos_lstat64(path, &ds), &ds, st);
   }
+#elif defined(CRT_TARGET_OS_WINDOWS)
+  if (path == 0 || st == 0) {
+    return (int)__set_errno(EINVAL);
+  }
+  return (int)normalize_syscall_result(__crt_sys_lstat_path(path, st));
 #else
   return stat(path, st);
 #endif

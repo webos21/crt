@@ -596,10 +596,18 @@ The stdio surface now also exposes:
 - `ungetc`;
 - `setbuf` and `setvbuf`.
 
-This is still a direct file-descriptor based bootstrap stdio implementation.
-`setvbuf` records the requested policy and buffer pointer but does not yet drive
-a full buffered I/O engine. `fflush` remains effectively a validation/no-op for
-this direct-write model.
+The stdio implementation now has a small real buffering engine. `_IONBF` keeps
+direct I/O, `_IOFBF` buffers reads and writes until the buffer fills or
+`fflush`/`fclose`/`fseek` forces a flush, and `_IOLBF` flushes writes on
+newline. `setvbuf` can attach a caller-provided buffer, while streams without a
+provided buffer allocate a bootstrap `BUFSIZ` buffer lazily. The implementation
+still keeps a private bootstrap `FILE` layout and intentionally does not expose
+or freeze a Bionic-compatible `FILE` ABI yet.
+
+The startup objects now route a returned `main` status through `exit`, and
+`exit` flushes the bootstrap standard streams before calling the host exit
+adapter. This keeps newly buffered stdout/stderr behavior usable even before a
+full `atexit` implementation exists.
 
 The file/path tranche adds:
 
@@ -616,7 +624,9 @@ The file/path tranche adds:
 - `sys/stat.h`.
 
 Linux uses raw syscalls. Windows maps the subset to Kernel32 APIs and the
-project fd table. macOS uses direct syscalls where practical. Its `getcwd`
+project fd table; `lstat` follows a bootstrap policy that reports reparse
+points as `S_IFLNK` while ordinary files and directories retain their `stat`
+mode. macOS uses direct syscalls where practical. Its `getcwd`
 adapter opens `"."` and calls Darwin `fcntl(F_GETPATH)` through a private
 syscall wrapper, avoiding a libc-level dependency on libSystem's `getcwd`.
 
