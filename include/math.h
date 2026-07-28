@@ -64,6 +64,10 @@ double exp(double x);
 float expf(float x);
 long double expl(long double x);
 
+double log(double x);
+float logf(float x);
+long double logl(long double x);
+
 #ifdef __cplusplus
 }
 #endif

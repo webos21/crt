@@ -130,3 +130,11 @@ float expf(float x) {
 long double expl(long double x) {
   return (long double)exp((double)x);
 }
+
+float logf(float x) {
+  return (float)log((double)x);
+}
+
+long double logl(long double x) {
+  return (long double)log((double)x);
+}

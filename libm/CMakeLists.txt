@@ -1,6 +1,7 @@
 add_library(m STATIC
   src/basic.c
   src/freebsd/e_exp.c
+  src/freebsd/e_log.c
   src/freebsd/s_ceil.c
   src/freebsd/s_floor.c
   src/freebsd/s_fmax.c

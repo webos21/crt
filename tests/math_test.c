@@ -57,6 +57,12 @@ int main(void) {
       !isnan(exp(NAN)) || expf(0.0f) != 1.0f || expl(0.0L) != 1.0L) {
     return fail("exp");
   }
+  if (!near_double(log(1.0), 0.0) || !near_double(log(2.718281828459045), 1.0) ||
+      !near_double(log(exp(2.0)), 2.0) || log(INFINITY) != INFINITY ||
+      !isinf(log(0.0)) || !signbit(log(0.0)) || !isnan(log(-1.0)) ||
+      !isnan(log(NAN)) || logf(1.0f) != 0.0f || logl(1.0L) != 0.0L) {
+    return fail("log");
+  }
 
   printf("math_test: ok\n");
   return 0;

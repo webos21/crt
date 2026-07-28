@@ -224,6 +224,7 @@ The current surface includes:
 - `round`, `roundf`, `roundl`
 - `sqrt`, `sqrtf`, `sqrtl`
 - `exp`, `expf`, `expl`
+- `log`, `logf`, `logl`
 
 The first Bionic/FreeBSD msun import replaces the double-precision
 `floor`/`ceil`/`trunc`/`round` and `fmin`/`fmax` implementations with curated
@@ -246,6 +247,10 @@ The first exponential tranche imports `exp` from older Bionic fdlibm because
 current Bionic `main` no longer lists a direct double `e_exp.c` source in
 `libm/Android.bp`. `expf` and `expl` are bootstrap wrappers around the imported
 double implementation until their native precision tranches are imported.
+
+The first logarithm tranche follows the same policy for `log`. Current Bionic
+`main` does not list a direct double `e_log.c`; this project imports the older
+Bionic fdlibm source and keeps `logf`/`logl` as bootstrap wrappers for now.
 
 The float and long double variants currently remain bootstrap wrappers, and
 `sqrtl` still uses project-owned bootstrap behavior. Transcendental functions

@@ -73,16 +73,14 @@ candidate is the older Bionic fdlibm source set.
 | `log` | `libm/src/e_log.c` | Bionic `884e4f8` | `EXTRACT_WORDS`, `GET_HIGH_WORD`, `SET_HIGH_WORD`, `u_int32_t` | none beyond `math.h` | Good next candidate after `exp`; no kernel source dependency. |
 | `pow` | `libm/src/e_pow.c` | Bionic `884e4f8` | `EXTRACT_WORDS`, `GET_HIGH_WORD`, `SET_HIGH_WORD`, `SET_LOW_WORD`, `u_int32_t` | `fabs`, `sqrt`, `scalbn` | Needs `scalbn` before full import. It can use the current builtin-backed `sqrt`. |
 
-`exp` has been imported. `expf` and `expl` are currently bootstrap wrappers over
-the double implementation; native float and long-double imports remain separate
-precision tranches.
+`exp` and `log` have been imported. `expf`, `expl`, `logf`, and `logl` are
+currently bootstrap wrappers over the double implementations; native float and
+long-double imports remain separate precision tranches.
 
 Recommended import order:
 
-1. `exp`
-2. `log`
-3. `scalbn`
-4. `pow`
+1. `scalbn`
+2. `pow`
 
 `pow` should not be imported before `scalbn`, because otherwise it either
 requires a temporary local helper or falls back to compiler/libgcc behavior,
