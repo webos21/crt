@@ -12,6 +12,8 @@ void free(void* ptr);
 void* calloc(size_t nmemb, size_t size);
 void* realloc(void* ptr, size_t size);
 void exit(int status) __attribute__((noreturn));
+void abort(void) __attribute__((noreturn));
+int atexit(void (*function)(void));
 int atoi(const char* s);
 long atol(const char* s);
 long strtol(const char* nptr, char** endptr, int base);

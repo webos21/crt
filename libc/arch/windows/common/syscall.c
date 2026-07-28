@@ -137,6 +137,7 @@ __declspec(dllimport) BOOL CRT_WINAPI QueryPerformanceCounter(long long* lpPerfo
 __declspec(dllimport) BOOL CRT_WINAPI QueryPerformanceFrequency(long long* lpFrequency);
 __declspec(dllimport) void CRT_WINAPI Sleep(DWORD dwMilliseconds);
 __declspec(dllimport) DWORD CRT_WINAPI GetCurrentThreadId(void);
+__declspec(dllimport) DWORD CRT_WINAPI GetCurrentProcessId(void);
 __declspec(dllimport) void CRT_WINAPI ExitThread(DWORD dwExitCode);
 __declspec(dllimport) void CRT_WINAPI ExitProcess(unsigned int uExitCode);
 
@@ -588,6 +589,21 @@ long __crt_sys_sched_yield(void) {
 
 long __crt_sys_thread_id(void) {
   return (long)GetCurrentThreadId();
+}
+
+long __crt_sys_getpid(void) {
+  return (long)GetCurrentProcessId();
+}
+
+long __crt_sys_getppid(void) {
+  return 0;
+}
+
+long __crt_sys_kill(long pid, int sig) {
+  if (sig == 0 && pid == (long)GetCurrentProcessId()) {
+    return 0;
+  }
+  return -ENOSYS;
 }
 
 void __crt_sys_thread_exit(int status) {

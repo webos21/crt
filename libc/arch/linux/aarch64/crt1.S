@@ -8,7 +8,7 @@ _start:
   ldr x9, [sp]
   add x0, sp, #16
   add x0, x0, x9, lsl #3
-  bl __crt_env_init
+  bl __crt_env_set_initial
   bl main
   bl exit
 .size _start, . - _start

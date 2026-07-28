@@ -260,6 +260,39 @@ ___crt_sys_thread_id:
   neg x0, x0
   ret
 
+.globl ___crt_sys_getpid
+.p2align 2
+___crt_sys_getpid:
+  mov x16, #20
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_getppid
+.p2align 2
+___crt_sys_getppid:
+  mov x16, #39
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_kill
+.p2align 2
+___crt_sys_kill:
+  mov x16, #37
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
 .globl ___crt_sys_thread_exit
 .p2align 2
 ___crt_sys_thread_exit:

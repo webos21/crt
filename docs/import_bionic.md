@@ -605,9 +605,10 @@ still keeps a private bootstrap `FILE` layout and intentionally does not expose
 or freeze a Bionic-compatible `FILE` ABI yet.
 
 The startup objects now route a returned `main` status through `exit`, and
-`exit` flushes the bootstrap standard streams before calling the host exit
-adapter. This keeps newly buffered stdout/stderr behavior usable even before a
-full `atexit` implementation exists.
+`exit` runs a small LIFO `atexit` handler stack and flushes the bootstrap
+standard streams before calling the host exit adapter. This keeps newly buffered
+stdout/stderr behavior usable while the broader process lifecycle surface is
+still being built out.
 
 The file/path tranche adds:
 
@@ -660,13 +661,31 @@ The string/stdlib tranche adds:
 - `setenv`;
 - `unsetenv`.
 
-The environment store is process-local and runtime-owned, but startup now
-imports the host process environment before `main`: Linux and macOS pass the
-initial stack `envp` into `__crt_env_init`, while Windows imports the process
-environment block with `GetEnvironmentStringsA`. `getenv`, `setenv`, and
-`unsetenv` operate on the copied runtime store and expose it through `environ`;
-they still do not synchronize later changes back to host-specific environment
-APIs.
+The environment store is process-local and runtime-owned. Startup captures the
+initial host environment pointer before `main`, and the first environment API
+call copies it into the runtime store: Linux and macOS retain the startup
+`envp`, while Windows lazily imports the process environment block with
+`GetEnvironmentStringsA`. `getenv`, `setenv`, and `unsetenv` operate on the
+copied runtime store and expose it through `environ`; they still do not
+synchronize later changes back to host-specific environment APIs.
+
+The process/signal tranche adds:
+
+- `getpid`;
+- `getppid`;
+- `kill`;
+- `signal`;
+- `raise`;
+- `abort`;
+- `atexit`;
+- `signal.h`.
+
+This is still a bootstrap signal model. `signal` and `raise` support in-process
+handlers and ignored signals, `kill(pid, 0)` can probe the current process, and
+Linux/macOS forward other `kill` calls to the host syscall. Windows currently
+supports the current-process probe and returns `ENOSYS` for broader host signal
+delivery. Full asynchronous signal delivery, signal masks, `sigaction`, and
+process-group semantics remain deferred.
 
 Windows builds now include a small project-owned `__chkstk` helper in `libc.a`
 for x86_64 and aarch64. Clang may emit this symbol for functions with larger

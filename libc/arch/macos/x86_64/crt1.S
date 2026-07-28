@@ -4,7 +4,7 @@
 _start:
   xorl %ebp, %ebp
   movq %rdx, %rdi
-  callq ___crt_env_init
+  callq ___crt_env_set_initial
   callq _main
   movl %eax, %edi
   callq _exit

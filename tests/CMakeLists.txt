@@ -166,6 +166,11 @@ set_tests_properties(sched_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "sched_test: ok"
 )
 
+add_crt_test(process_signal_test process_signal_test.c)
+set_tests_properties(process_signal_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "process_signal_test: ok"
+)
+
 add_crt_test(atomic_test atomic_test.c)
 set_tests_properties(atomic_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "atomic_test: ok"

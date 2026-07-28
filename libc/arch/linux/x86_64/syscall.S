@@ -254,6 +254,33 @@ __crt_sys_futex:
   retq
 .size __crt_sys_futex, . - __crt_sys_futex
 
+.globl __crt_sys_getpid
+.type __crt_sys_getpid, @function
+.p2align 4, 0x90
+__crt_sys_getpid:
+  movq $39, %rax
+  syscall
+  retq
+.size __crt_sys_getpid, . - __crt_sys_getpid
+
+.globl __crt_sys_getppid
+.type __crt_sys_getppid, @function
+.p2align 4, 0x90
+__crt_sys_getppid:
+  movq $110, %rax
+  syscall
+  retq
+.size __crt_sys_getppid, . - __crt_sys_getppid
+
+.globl __crt_sys_kill
+.type __crt_sys_kill, @function
+.p2align 4, 0x90
+__crt_sys_kill:
+  movq $62, %rax
+  syscall
+  retq
+.size __crt_sys_kill, . - __crt_sys_kill
+
 .globl __crt_sys_thread_exit
 .type __crt_sys_thread_exit, @function
 .p2align 4, 0x90

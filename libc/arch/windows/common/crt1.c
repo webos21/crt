@@ -1,8 +1,8 @@
 int main(void);
-void __crt_env_init(char** envp);
+void __crt_env_set_initial(char** envp);
 void exit(int status);
 
 void mainCRTStartup(void) {
-  __crt_env_init(0);
+  __crt_env_set_initial(0);
   exit(main());
 }

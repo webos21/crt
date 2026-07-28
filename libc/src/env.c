@@ -7,6 +7,7 @@
 static char* env_entries[CRT_ENV_MAX];
 char** environ = env_entries;
 static int env_initialized;
+static char** initial_envp;
 
 #if defined(CRT_TARGET_OS_WINDOWS)
 typedef int BOOL;
@@ -100,6 +101,10 @@ static int env_store_entry(const char* entry, int overwrite) {
   return 0;
 }
 
+void __crt_env_set_initial(char** envp) {
+  initial_envp = envp;
+}
+
 void __crt_env_init(char** envp) {
   char** cursor;
 
@@ -107,6 +112,9 @@ void __crt_env_init(char** envp) {
     return;
   }
   env_initialized = 1;
+  if (envp == 0) {
+    envp = initial_envp;
+  }
   if (envp != 0) {
     for (cursor = envp; *cursor != 0; ++cursor) {
       if (env_store_entry(*cursor, 0) != 0) {

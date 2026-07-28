@@ -11,5 +11,6 @@ typedef uint64_t ino_t;
 typedef uint64_t nlink_t;
 typedef int64_t blksize_t;
 typedef int64_t blkcnt_t;
+typedef int64_t pid_t;
 
 #endif

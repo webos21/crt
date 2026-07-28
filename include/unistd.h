@@ -21,6 +21,8 @@ off_t lseek(int fd, off_t offset, int whence);
 int access(const char* path, int mode);
 int chdir(const char* path);
 char* getcwd(char* buf, size_t size);
+pid_t getpid(void);
+pid_t getppid(void);
 int dup(int oldfd);
 int dup2(int oldfd, int newfd);
 void _exit(int status) __attribute__((noreturn));
