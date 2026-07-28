@@ -999,6 +999,31 @@ static int linux_statx(long dirfd, const char* path, int flags, struct stat* st)
   }
   return statx_to_stat(&sx, st);
 }
+
+static int linux_fstat_procfs_fallback(int fd, struct stat* st) {
+  char path[32] = "/proc/self/fd/";
+  char digits[16];
+  unsigned int value;
+  size_t prefix_len = strlen(path);
+  size_t digit_count = 0;
+
+  if (fd < 0) {
+    return (int)__set_errno(EBADF);
+  }
+  value = (unsigned int)fd;
+  do {
+    digits[digit_count++] = (char)('0' + value % 10U);
+    value /= 10U;
+  } while (value != 0 && digit_count < sizeof(digits));
+  if (prefix_len + digit_count + 1 > sizeof(path)) {
+    return (int)__set_errno(ENAMETOOLONG);
+  }
+  while (digit_count > 0) {
+    path[prefix_len++] = digits[--digit_count];
+  }
+  path[prefix_len] = 0;
+  return linux_statx(CRT_AT_FDCWD, path, 0, st);
+}
 #endif
 
 int stat(const char* path, struct stat* st) {
@@ -1047,7 +1072,12 @@ int lstat(const char* path, struct stat* st) {
 
 int fstat(int fd, struct stat* st) {
 #if defined(CRT_TARGET_OS_LINUX)
-  return linux_statx((long)fd, "", CRT_AT_EMPTY_PATH, st);
+  int result = linux_statx((long)fd, "", CRT_AT_EMPTY_PATH, st);
+
+  if (result == 0) {
+    return 0;
+  }
+  return linux_fstat_procfs_fallback(fd, st);
 #elif defined(CRT_TARGET_OS_WINDOWS)
   if (st == 0) {
     return (int)__set_errno(EINVAL);

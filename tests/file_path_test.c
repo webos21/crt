@@ -201,15 +201,22 @@ int main(void) {
     return fail("opendir");
   }
   dir_open_fd = open(".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-  if (dir_open_fd < 0 ||
-      fstat(dir_open_fd, &st) != 0 ||
-      !S_ISDIR(st.st_mode)) {
-    if (dir_open_fd >= 0) {
-      close(dir_open_fd);
-    }
+  if (dir_open_fd < 0) {
     closedir(dir);
     close(fd);
     return fail("open directory");
+  }
+  if (fstat(dir_open_fd, &st) != 0) {
+    close(dir_open_fd);
+    closedir(dir);
+    close(fd);
+    return fail("fstat directory");
+  }
+  if (!S_ISDIR(st.st_mode)) {
+    closedir(dir);
+    close(dir_open_fd);
+    close(fd);
+    return fail("directory mode");
   }
   close(dir_open_fd);
   if (dirfd(dir) < 0) {
