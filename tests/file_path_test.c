@@ -102,14 +102,16 @@ int main(void) {
     close(fd);
     return fail("chmod readonly");
   }
-  if (access("sample.tmp", W_OK) == 0) {
+  if (stat("sample.tmp", &st) != 0 ||
+      (st.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH)) != 0) {
     close(fd);
-    return fail("chmod write access");
+    return fail("chmod readonly mode");
   }
   if (chmod("sample.tmp", 0600) != 0 ||
-      access("sample.tmp", W_OK) != 0) {
+      stat("sample.tmp", &st) != 0 ||
+      (st.st_mode & S_IWUSR) == 0) {
     close(fd);
-    return fail("chmod writable");
+    return fail("chmod writable mode");
   }
   if (access("missing.tmp", F_OK) == 0) {
     close(fd);
