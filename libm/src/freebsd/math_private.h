@@ -17,6 +17,7 @@
 typedef uint32_t u_int32_t;
 
 #define __weak_reference(sym, alias)
+#define __strong_reference(sym, alias)
 
 #if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
 #define CRT_IEEE_WORD_ORDER_BIG 1
@@ -48,6 +49,11 @@ typedef union {
 } ieee_double_shape_type;
 #endif
 
+typedef union {
+  float value;
+  uint32_t word;
+} ieee_float_shape_type;
+
 #define EXTRACT_WORDS(ix0, ix1, d) \
   do { \
     ieee_double_shape_type ew_u; \
@@ -78,12 +84,34 @@ typedef union {
     (d) = sh_u.value; \
   } while (0)
 
+#define SET_LOW_WORD(d, v) \
+  do { \
+    ieee_double_shape_type sl_u; \
+    sl_u.value = (d); \
+    sl_u.parts.lsw = (uint32_t)(v); \
+    (d) = sl_u.value; \
+  } while (0)
+
 #define INSERT_WORDS(d, ix0, ix1) \
   do { \
     ieee_double_shape_type iw_u; \
     iw_u.parts.msw = (uint32_t)(ix0); \
     iw_u.parts.lsw = (uint32_t)(ix1); \
     (d) = iw_u.value; \
+  } while (0)
+
+#define GET_FLOAT_WORD(i, f) \
+  do { \
+    ieee_float_shape_type gfw_u; \
+    gfw_u.value = (f); \
+    (i) = (int32_t)gfw_u.word; \
+  } while (0)
+
+#define SET_FLOAT_WORD(f, i) \
+  do { \
+    ieee_float_shape_type sfw_u; \
+    sfw_u.word = (uint32_t)(i); \
+    (f) = sfw_u.value; \
   } while (0)
 
 #endif

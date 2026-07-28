@@ -138,3 +138,19 @@ float logf(float x) {
 long double logl(long double x) {
   return (long double)log((double)x);
 }
+
+long double scalbnl(long double x, int n) {
+  return (long double)scalbn((double)x, n);
+}
+
+long double ldexpl(long double x, int n) {
+  return scalbnl(x, n);
+}
+
+float powf(float x, float y) {
+  return (float)pow((double)x, (double)y);
+}
+
+long double powl(long double x, long double y) {
+  return (long double)pow((double)x, (double)y);
+}

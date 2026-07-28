@@ -225,6 +225,9 @@ The current surface includes:
 - `sqrt`, `sqrtf`, `sqrtl`
 - `exp`, `expf`, `expl`
 - `log`, `logf`, `logl`
+- `scalbn`, `scalbnf`, `scalbnl`
+- `ldexp`, `ldexpf`, `ldexpl`
+- `pow`, `powf`, `powl`
 
 The first Bionic/FreeBSD msun import replaces the double-precision
 `floor`/`ceil`/`trunc`/`round` and `fmin`/`fmax` implementations with curated
@@ -252,9 +255,17 @@ The first logarithm tranche follows the same policy for `log`. Current Bionic
 `main` does not list a direct double `e_log.c`; this project imports the older
 Bionic fdlibm source and keeps `logf`/`logl` as bootstrap wrappers for now.
 
+The scaling and power tranche imports `scalbn`, `scalbnf`, and `pow` from the
+same older Bionic fdlibm source set used for `exp` and `log`. Current Bionic
+`main` has `scalbn*` sources derived from musl; this project intentionally uses
+the older fdlibm versions here to keep the early libm tranche aligned with the
+project's Bionic/fdlibm provenance policy. `ldexp` and `ldexpf` are thin aliases
+implemented as wrappers, while `scalbnl`, `ldexpl`, `powf`, and `powl` remain
+bootstrap wrappers over the imported double implementations.
+
 The float and long double variants currently remain bootstrap wrappers, and
 `sqrtl` still uses project-owned bootstrap behavior. Transcendental functions
-such as `sin`, `cos`, `tan`, `exp`, `log`, and `pow`,
+such as `sin`, `cos`, and `tan`,
 `errno`/floating-point exception policy, and full edge-case coverage remain
 deferred to later libm import tranches. Their planned source dependencies are
 recorded in `docs/libm_dependency_map.md`.

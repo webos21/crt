@@ -71,17 +71,17 @@ candidate is the older Bionic fdlibm source set.
 | --- | --- | --- | --- | --- | --- |
 | `exp` | `libm/src/e_exp.c` | Bionic `884e4f8` | `GET_HIGH_WORD`, `GET_LOW_WORD`, `SET_HIGH_WORD`, `u_int32_t` | none beyond `math.h` | Standalone enough for an early import after `math_private.h` expands. |
 | `log` | `libm/src/e_log.c` | Bionic `884e4f8` | `EXTRACT_WORDS`, `GET_HIGH_WORD`, `SET_HIGH_WORD`, `u_int32_t` | none beyond `math.h` | Good next candidate after `exp`; no kernel source dependency. |
+| `scalbn` | `libm/src/s_scalbn.c` | Bionic `884e4f8` | `EXTRACT_WORDS`, `GET_HIGH_WORD`, `SET_HIGH_WORD`, `u_int32_t` | `copysign` | Imported before `pow`; `ldexp` is provided as a wrapper. |
+| `scalbnf` | `libm/src/s_scalbnf.c` | Bionic `884e4f8` | `GET_FLOAT_WORD`, `SET_FLOAT_WORD` | `copysignf` | Imported before `powf`; `ldexpf` is provided as a wrapper. |
 | `pow` | `libm/src/e_pow.c` | Bionic `884e4f8` | `EXTRACT_WORDS`, `GET_HIGH_WORD`, `SET_HIGH_WORD`, `SET_LOW_WORD`, `u_int32_t` | `fabs`, `sqrt`, `scalbn` | Needs `scalbn` before full import. It can use the current builtin-backed `sqrt`. |
 
-`exp` and `log` have been imported. `expf`, `expl`, `logf`, and `logl` are
-currently bootstrap wrappers over the double implementations; native float and
-long-double imports remain separate precision tranches.
+`exp`, `log`, `scalbn`, `scalbnf`, and `pow` have been imported. `expf`,
+`expl`, `logf`, `logl`, `powf`, and `powl` are currently bootstrap wrappers over
+the double implementations; native float and long-double imports remain
+separate precision tranches.
 
 Recommended import order:
 
-1. `scalbn`
-2. `pow`
-
-`pow` should not be imported before `scalbn`, because otherwise it either
-requires a temporary local helper or falls back to compiler/libgcc behavior,
-which would blur the freestanding runtime boundary.
+1. Native float precision for `expf`, `logf`, and `powf`
+2. `sin`, `cos`, and `tan`
+3. Floating-point exception and `errno` policy

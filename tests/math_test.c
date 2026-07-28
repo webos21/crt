@@ -63,6 +63,23 @@ int main(void) {
       !isnan(log(NAN)) || logf(1.0f) != 0.0f || logl(1.0L) != 0.0L) {
     return fail("log");
   }
+  if (scalbn(1.5, 3) != 12.0 || scalbn(-2.0, -1) != -1.0 ||
+      scalbn(0.0, 100) != 0.0 || !signbit(scalbn(-0.0, 100)) ||
+      scalbn(INFINITY, -100) != INFINITY || !isnan(scalbn(NAN, 10)) ||
+      scalbnf(1.25f, 2) != 5.0f || scalbnl(1.0L, 4) != 16.0L ||
+      ldexp(1.5, 2) != 6.0 || ldexpf(0.5f, 3) != 4.0f ||
+      ldexpl(2.0L, -1) != 1.0L) {
+    return fail("scalbn/ldexp");
+  }
+  if (!near_double(pow(2.0, 10.0), 1024.0) ||
+      !near_double(pow(9.0, 0.5), 3.0) ||
+      !near_double(pow(2.0, -3.0), 0.125) ||
+      pow(-2.0, 3.0) != -8.0 || pow(-2.0, 4.0) != 16.0 ||
+      !isnan(pow(-2.0, 0.5)) || pow(0.0, 3.0) != 0.0 ||
+      !isinf(pow(0.0, -1.0)) || pow(INFINITY, 2.0) != INFINITY ||
+      powf(2.0f, 3.0f) != 8.0f || !near_double((double)powl(4.0L, 0.5L), 2.0)) {
+    return fail("pow");
+  }
 
   printf("math_test: ok\n");
   return 0;

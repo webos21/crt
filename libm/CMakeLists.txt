@@ -2,11 +2,14 @@ add_library(m STATIC
   src/basic.c
   src/freebsd/e_exp.c
   src/freebsd/e_log.c
+  src/freebsd/e_pow.c
   src/freebsd/s_ceil.c
   src/freebsd/s_floor.c
   src/freebsd/s_fmax.c
   src/freebsd/s_fmin.c
   src/freebsd/s_round.c
+  src/freebsd/s_scalbn.c
+  src/freebsd/s_scalbnf.c
   src/freebsd/s_trunc.c
 )
 

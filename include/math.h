@@ -68,6 +68,18 @@ double log(double x);
 float logf(float x);
 long double logl(long double x);
 
+double scalbn(double x, int n);
+float scalbnf(float x, int n);
+long double scalbnl(long double x, int n);
+
+double ldexp(double x, int n);
+float ldexpf(float x, int n);
+long double ldexpl(long double x, int n);
+
+double pow(double x, double y);
+float powf(float x, float y);
+long double powl(long double x, long double y);
+
 #ifdef __cplusplus
 }
 #endif
