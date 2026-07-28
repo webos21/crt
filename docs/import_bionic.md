@@ -637,3 +637,11 @@ The string/stdlib tranche adds:
 The environment store is currently process-local and runtime-owned. It does not
 yet import the host process environment at startup, nor does it synchronize with
 host-specific environment APIs.
+
+Windows builds now include a small project-owned `__chkstk` helper in `libc.a`
+for x86_64 and aarch64. Clang may emit this symbol for functions with larger
+stack frames when building with the MSVC ABI, and the freestanding link cannot
+depend on the MSVC runtime to provide it. The x86_64 helper performs page
+probing while preserving the allocation size register. The aarch64 helper is a
+bootstrap symbol shim and should be replaced with a full Windows ARM64 stack
+probe if larger runtime stack frames become common.
