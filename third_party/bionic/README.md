@@ -97,7 +97,7 @@ out-of-line C99 functions.
 | Local file | Upstream path | Upstream ref | Status | Notes |
 | --- | --- | --- | --- | --- |
 | `include/math.h` | `libc/include/math.h` | project-owned | new | Minimal C99/POSIX math declarations and classification macros for the first `libm.a` boundary. |
-| `libm/src/basic.c` | `libm/builtins.cpp` plus mixed Bionic/POSIX surface | adapted/project-owned | new | Bootstrap absolute value, sign, float/long double wrappers, and current-Bionic-style builtin `sqrt`/`sqrtf`; uses Clang elementwise sqrt to avoid recursive Debug/O0 libcalls on Windows. |
+| `libm/src/basic.c` | `libm/builtins.cpp` plus mixed Bionic/POSIX surface | adapted/project-owned | new | Bootstrap float/long double wrappers and current-Bionic-style builtin `fabs*`, `copysign*`, `fminf`, `fmaxf`, `sqrt`, and `sqrtf`; uses Clang elementwise sqrt to avoid recursive Debug/O0 libcalls. |
 
 ### Libm FreeBSD/msun Import Tranche 1
 
@@ -107,8 +107,8 @@ out-of-line C99 functions.
 | `libm/src/freebsd/fpmath.h` | `libm/fpmath.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Keeps the double bit layout needed by `fmin`/`fmax` without depending on host endian headers. |
 | `libm/src/freebsd/s_ceil.c` | `libm/upstream-freebsd/lib/msun/src/s_ceil.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Upstream copyright preserved; uses the local adapted private header. |
 | `libm/src/freebsd/s_floor.c` | `libm/upstream-freebsd/lib/msun/src/s_floor.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Upstream copyright preserved; uses the local adapted private header. |
-| `libm/src/freebsd/s_fmax.c` | `libm/upstream-freebsd/lib/msun/src/s_fmax.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Upstream copyright preserved; weak long-double alias disabled for this tranche. |
-| `libm/src/freebsd/s_fmin.c` | `libm/upstream-freebsd/lib/msun/src/s_fmin.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Upstream copyright preserved; weak long-double alias disabled for this tranche. |
+| `libm/src/freebsd/s_fmax.c` | `libm/upstream-freebsd/lib/msun/src/s_fmax.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Upstream copyright preserved; built with `USE_BUILTIN_FMAX`; weak long-double alias disabled for this tranche. |
+| `libm/src/freebsd/s_fmin.c` | `libm/upstream-freebsd/lib/msun/src/s_fmin.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Upstream copyright preserved; built with `USE_BUILTIN_FMIN`; weak long-double alias disabled for this tranche. |
 | `libm/src/freebsd/s_round.c` | `libm/upstream-freebsd/lib/msun/src/s_round.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Upstream copyright preserved; uses the local adapted private header. |
 | `libm/src/freebsd/s_trunc.c` | `libm/upstream-freebsd/lib/msun/src/s_trunc.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Upstream copyright preserved; uses the local adapted private header. |
 

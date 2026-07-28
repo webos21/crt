@@ -236,6 +236,11 @@ use compiler builtins rather than importing the older portable fdlibm
 Windows builds lower directly to hardware sqrt instructions instead of producing
 a recursive `sqrt`/`sqrtf` libcall back into the same exported function.
 
+The `fabs*`, `copysign*`, `fmin`, `fmax`, `fminf`, and `fmaxf` functions also
+use Clang builtins. These were checked at Debug/O0 for the supported Windows and
+Linux target families to avoid the recursive libcall issue seen with ordinary
+`__builtin_sqrt`.
+
 The float and long double variants currently remain bootstrap wrappers, and
 `sqrtl` still uses project-owned bootstrap behavior. Transcendental functions
 such as `sin`, `cos`, `tan`, `exp`, `log`, and `pow`,

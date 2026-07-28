@@ -10,6 +10,7 @@ add_library(m STATIC
 
 target_link_libraries(m PRIVATE crt_build_flags)
 target_include_directories(m PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/freebsd")
+target_compile_definitions(m PRIVATE USE_BUILTIN_FMAX USE_BUILTIN_FMIN)
 set_target_properties(m PROPERTIES
   OUTPUT_NAME m
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"

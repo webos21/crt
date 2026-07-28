@@ -1,44 +1,31 @@
 #include <math.h>
 
-static double abs_double(double x) {
-  return x < 0.0 ? -x : x;
-}
-
-static long double abs_long_double(long double x) {
-  return x < 0.0L ? -x : x;
-}
-
 double fabs(double x) {
-  return abs_double(x);
+  return __builtin_fabs(x);
 }
 
 float fabsf(float x) {
-  return x < 0.0f ? -x : x;
+  return __builtin_fabsf(x);
 }
 
 long double fabsl(long double x) {
-  return abs_long_double(x);
+  return __builtin_fabsl(x);
 }
 
 double copysign(double x, double y) {
-  double ax = fabs(x);
-  return signbit(y) ? -ax : ax;
+  return __builtin_copysign(x, y);
 }
 
 float copysignf(float x, float y) {
-  float ax = fabsf(x);
-  return signbit(y) ? -ax : ax;
+  return __builtin_copysignf(x, y);
 }
 
 long double copysignl(long double x, long double y) {
-  long double ax = fabsl(x);
-  return signbit(y) ? -ax : ax;
+  return __builtin_copysignl(x, y);
 }
 
 float fminf(float x, float y) {
-  if (isnan(x)) return y;
-  if (isnan(y)) return x;
-  return x < y ? x : y;
+  return __builtin_fminf(x, y);
 }
 
 long double fminl(long double x, long double y) {
@@ -48,9 +35,7 @@ long double fminl(long double x, long double y) {
 }
 
 float fmaxf(float x, float y) {
-  if (isnan(x)) return y;
-  if (isnan(y)) return x;
-  return x > y ? x : y;
+  return __builtin_fmaxf(x, y);
 }
 
 long double fmaxl(long double x, long double y) {
