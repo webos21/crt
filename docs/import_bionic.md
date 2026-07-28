@@ -230,11 +230,18 @@ sources from Bionic's FreeBSD math tree. Local private headers are adapted to
 avoid host libc and endian dependencies while preserving the upstream copyright
 notices.
 
+The `sqrt` and `sqrtf` implementations follow current Bionic `main` policy and
+use compiler builtins rather than importing the older portable fdlibm
+`e_sqrt.c`. This lets Clang lower to the target hardware operation or compiler
+runtime helper while keeping the source portable across the supported
+LLVM/64-bit target set.
+
 The float and long double variants currently remain bootstrap wrappers, and
-`sqrt`/`sqrtf`/`sqrtl` still use the project-owned bootstrap implementation.
-Transcendental functions such as `sin`, `cos`, `tan`, `exp`, `log`, and `pow`,
+`sqrtl` still uses project-owned bootstrap behavior. Transcendental functions
+such as `sin`, `cos`, `tan`, `exp`, `log`, and `pow`,
 `errno`/floating-point exception policy, and full edge-case coverage remain
-deferred to later libm import tranches.
+deferred to later libm import tranches. Their planned source dependencies are
+recorded in `docs/libm_dependency_map.md`.
 
 ## Next Runtime Boundary Tranche
 

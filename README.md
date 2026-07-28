@@ -122,9 +122,10 @@ buffering model. The current `printf` family is a small bootstrap formatter for
 early tests, not a complete C/POSIX formatter.
 
 The current `libm.a` has a bootstrap `math.h`, classification macros, absolute
-value, sign, float/long double wrappers, square-root functions, and the first
-curated Bionic/FreeBSD msun import for double-precision min/max and rounding
-primitives. It is not yet a full fdlibm/msun/Bionic math import.
+value, sign, float/long double wrappers, current-Bionic-style builtin
+`sqrt`/`sqrtf`, and the first curated Bionic/FreeBSD msun import for
+double-precision min/max and rounding primitives. It is not yet a full
+fdlibm/msun/Bionic math import.
 
 ## Prerequisites
 

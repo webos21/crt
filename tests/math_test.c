@@ -48,6 +48,9 @@ int main(void) {
       sqrtf(9.0f) != 3.0f || sqrtl(16.0L) != 4.0L) {
     return fail("sqrt");
   }
+  if (!signbit(sqrt(-0.0)) || sqrt(INFINITY) != INFINITY) {
+    return fail("sqrt signed zero/inf");
+  }
 
   printf("math_test: ok\n");
   return 0;

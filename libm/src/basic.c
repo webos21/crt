@@ -114,24 +114,11 @@ long double roundl(long double x) {
 }
 
 double sqrt(double x) {
-  double guess;
-  int i;
-
-  if (isnan(x) || x == 0.0 || x == INFINITY) {
-    return x;
-  }
-  if (x < 0.0) {
-    return NAN;
-  }
-  guess = x >= 1.0 ? x : 1.0;
-  for (i = 0; i < 32; ++i) {
-    guess = 0.5 * (guess + x / guess);
-  }
-  return guess;
+  return __builtin_sqrt(x);
 }
 
 float sqrtf(float x) {
-  return (float)sqrt((double)x);
+  return __builtin_sqrtf(x);
 }
 
 long double sqrtl(long double x) {
