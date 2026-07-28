@@ -473,7 +473,9 @@ ssize_t write(int fd, const void* buf, size_t count) {
 
 int open(const char* path, int flags, ...) {
   unsigned int mode = 0;
+  int syscall_flags = flags & ~O_CLOEXEC;
   va_list args;
+  int fd;
 
   if ((flags & O_CREAT) != 0) {
     va_start(args, flags);
@@ -481,7 +483,28 @@ int open(const char* path, int flags, ...) {
     va_end(args);
   }
 
-  return (int)normalize_syscall_result(__crt_sys_open(path, flags, mode));
+  if ((flags & O_DIRECTORY) != 0) {
+    syscall_flags &= ~O_DIRECTORY;
+  }
+  fd = (int)normalize_syscall_result(__crt_sys_open(path, syscall_flags, mode));
+  if (fd < 0) {
+    return -1;
+  }
+  if ((flags & O_DIRECTORY) != 0) {
+    struct stat st;
+
+    if (fstat(fd, &st) != 0) {
+      int saved_errno = errno;
+      close(fd);
+      errno = saved_errno;
+      return -1;
+    }
+    if (!S_ISDIR(st.st_mode)) {
+      close(fd);
+      return (int)__set_errno(ENOTDIR);
+    }
+  }
+  return fd;
 }
 
 int creat(const char* path, mode_t mode) {
