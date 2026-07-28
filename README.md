@@ -109,9 +109,10 @@ macOS use direct syscalls. Windows maps anonymous allocations to
 `VirtualAlloc`/`VirtualFree`; file-backed mappings are not implemented yet.
 
 The current stdio layer is intentionally minimal. It supports standard streams,
-`fopen`/`fclose`, `fseek`/`ftell`, and simple byte-oriented I/O, but it does not
-yet define a final `FILE` ABI or buffering model. The current `printf` family is
-a small bootstrap formatter for early tests, not a complete C/POSIX formatter.
+`fopen`/`fclose`, `fseek`/`ftell`, EOF/error state helpers, `remove`/`rename`,
+and simple byte-oriented I/O, but it does not yet define a final `FILE` ABI or
+buffering model. The current `printf` family is a small bootstrap formatter for
+early tests, not a complete C/POSIX formatter.
 
 ## Prerequisites
 

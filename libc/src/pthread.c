@@ -15,6 +15,10 @@ void __crt_sys_thread_exit(int status) __attribute__((noreturn));
 #define CRT_PTHREAD_DESTRUCTOR_ITERATIONS 4
 #define CRT_PTHREAD_STACK_SIZE (1024UL * 1024UL)
 #define CRT_PTHREAD_ATTR_FLAG_DETACHED 0x00000001U
+#define CRT_PTHREAD_ATTR_FLAG_STACK_USER 0x00000002U
+#define CRT_MUTEXATTR_TYPE_MASK 0x000000ffL
+#define CRT_MUTEXATTR_PSHARED_BIT 0x00000100L
+#define CRT_RWLOCKATTR_PSHARED_BIT 0x00000001L
 #define CRT_COND_SEQUENCE_WORD 0
 #define CRT_COND_WAITERS_WORD 1
 #define CRT_MUTEX_STATE_WORD 0
@@ -55,16 +59,31 @@ static pthread_once_t pthread_key_once = PTHREAD_ONCE_INIT;
 static DWORD pthread_control_tls_slot = CRT_TLS_OUT_OF_INDEXES;
 static pthread_once_t pthread_control_once = PTHREAD_ONCE_INIT;
 #elif defined(CRT_TARGET_OS_LINUX)
-long __crt_sys_clone_thread(void* stack_top, int (*entry)(void*), void* arg, unsigned long flags);
+long __crt_sys_clone_thread(
+    void* stack_top,
+    int (*entry)(void*),
+    void* arg,
+    unsigned long flags,
+    int* parent_tid,
+    int* child_tid,
+    void* tls);
 long __crt_sys_wait4(long pid, int* status, int options, void* rusage);
+long __crt_sys_futex(int* addr, int op, int value, const void* timeout, int* addr2, int value3);
 
-#define CRT_SIGCHLD 17UL
+#define CRT_FUTEX_WAIT 0
 #define CRT_CLONE_VM 0x00000100UL
 #define CRT_CLONE_FS 0x00000200UL
 #define CRT_CLONE_FILES 0x00000400UL
 #define CRT_CLONE_SIGHAND 0x00000800UL
+#define CRT_CLONE_THREAD 0x00010000UL
+#define CRT_CLONE_SYSVSEM 0x00040000UL
+#define CRT_CLONE_PARENT_SETTID 0x00100000UL
+#define CRT_CLONE_CHILD_CLEARTID 0x00200000UL
+#define CRT_CLONE_CHILD_SETTID 0x01000000UL
 #define CRT_CLONE_THREAD_FLAGS \
-  (CRT_CLONE_VM | CRT_CLONE_FS | CRT_CLONE_FILES | CRT_CLONE_SIGHAND | CRT_SIGCHLD)
+  (CRT_CLONE_VM | CRT_CLONE_FS | CRT_CLONE_FILES | CRT_CLONE_SIGHAND | CRT_CLONE_THREAD | \
+   CRT_CLONE_SYSVSEM | CRT_CLONE_PARENT_SETTID | CRT_CLONE_CHILD_CLEARTID | \
+   CRT_CLONE_CHILD_SETTID)
 #elif defined(CRT_TARGET_OS_MACOS)
 typedef void* crt_macos_pthread_t;
 typedef int (*crt_macos_pthread_create_fn)(
@@ -91,8 +110,10 @@ typedef struct {
   DWORD thread_id;
 #elif defined(CRT_TARGET_OS_LINUX)
   long tid;
+  int tid_word;
   void* stack;
   unsigned long stack_size;
+  int stack_owned;
 #elif defined(CRT_TARGET_OS_MACOS)
   crt_macos_pthread_t native_thread;
 #endif
@@ -131,7 +152,7 @@ static crt_atomic_int* rwlock_state(pthread_rwlock_t* rwlock) {
 }
 
 static int mutex_type(const pthread_mutex_t* mutex) {
-  int type = mutex->__private[CRT_MUTEX_TYPE_WORD];
+  int type = mutex->__private[CRT_MUTEX_TYPE_WORD] & (int)CRT_MUTEXATTR_TYPE_MASK;
 
   if (type == PTHREAD_MUTEX_RECURSIVE || type == PTHREAD_MUTEX_ERRORCHECK) {
     return type;
@@ -276,7 +297,7 @@ static void pthread_control_destroy(crt_pthread_control* control) {
     return;
   }
 #if defined(CRT_TARGET_OS_LINUX)
-  if (control->stack != 0) {
+  if (control->stack_owned && control->stack != 0) {
     munmap(control->stack, control->stack_size);
   }
 #endif
@@ -287,11 +308,16 @@ static void pthread_control_destroy_from_worker(crt_pthread_control* control) {
   if (control == 0) {
     return;
   }
+#if defined(CRT_TARGET_OS_LINUX)
   /*
-   * Linux threads currently run on the stack stored in the control block.
-   * Reclaiming that mapping requires a later reaper/futex tranche.
+   * The kernel may still clear child_tid after this function returns, and the
+   * worker is still executing on its stack. A Linux reaper/stack-cache tranche
+   * is needed before detached workers can release these mappings themselves.
    */
+  return;
+#else
   free(control);
+#endif
 }
 
 static int pthread_start(void* arg) {
@@ -442,7 +468,26 @@ int pthread_condattr_init(pthread_condattr_t* attr) {
   if (attr == 0) {
     return EINVAL;
   }
-  *attr = 0;
+  *attr = PTHREAD_COND_CLOCK_REALTIME;
+  return 0;
+}
+
+int pthread_condattr_getclock(const pthread_condattr_t* attr, int* clock_id) {
+  if (attr == 0 || clock_id == 0) {
+    return EINVAL;
+  }
+  *clock_id = (int)*attr;
+  return 0;
+}
+
+int pthread_condattr_setclock(pthread_condattr_t* attr, int clock_id) {
+  if (attr == 0) {
+    return EINVAL;
+  }
+  if (clock_id != PTHREAD_COND_CLOCK_REALTIME && clock_id != PTHREAD_COND_CLOCK_MONOTONIC) {
+    return EINVAL;
+  }
+  *attr = clock_id;
   return 0;
 }
 
@@ -461,7 +506,10 @@ int pthread_mutex_init(pthread_mutex_t* mutex, const void* attr) {
     return EINVAL;
   }
   if (mutex_attr != 0) {
-    type = (int)*mutex_attr;
+    if ((*mutex_attr & CRT_MUTEXATTR_PSHARED_BIT) != 0) {
+      return ENOTSUP;
+    }
+    type = (int)(*mutex_attr & CRT_MUTEXATTR_TYPE_MASK);
   }
   if (type != PTHREAD_MUTEX_NORMAL && type != PTHREAD_MUTEX_RECURSIVE &&
       type != PTHREAD_MUTEX_ERRORCHECK) {
@@ -590,7 +638,7 @@ int pthread_mutexattr_gettype(const pthread_mutexattr_t* attr, int* type) {
   if (attr == 0 || type == 0) {
     return EINVAL;
   }
-  *type = (int)*attr;
+  *type = (int)(*attr & CRT_MUTEXATTR_TYPE_MASK);
   return 0;
 }
 
@@ -602,8 +650,32 @@ int pthread_mutexattr_settype(pthread_mutexattr_t* attr, int type) {
       type != PTHREAD_MUTEX_ERRORCHECK) {
     return EINVAL;
   }
-  *attr = type;
+  *attr = (*attr & ~CRT_MUTEXATTR_TYPE_MASK) | type;
   return 0;
+}
+
+int pthread_mutexattr_getpshared(const pthread_mutexattr_t* attr, int* pshared) {
+  if (attr == 0 || pshared == 0) {
+    return EINVAL;
+  }
+  *pshared = (*attr & CRT_MUTEXATTR_PSHARED_BIT) != 0
+                 ? PTHREAD_PROCESS_SHARED
+                 : PTHREAD_PROCESS_PRIVATE;
+  return 0;
+}
+
+int pthread_mutexattr_setpshared(pthread_mutexattr_t* attr, int pshared) {
+  if (attr == 0) {
+    return EINVAL;
+  }
+  if (pshared == PTHREAD_PROCESS_PRIVATE) {
+    *attr &= ~CRT_MUTEXATTR_PSHARED_BIT;
+    return 0;
+  }
+  if (pshared == PTHREAD_PROCESS_SHARED) {
+    return ENOTSUP;
+  }
+  return EINVAL;
 }
 
 int pthread_once(pthread_once_t* once_control, __pthread_once_func_t init_routine) {
@@ -619,10 +691,11 @@ int pthread_once(pthread_once_t* once_control, __pthread_once_func_t init_routin
 }
 
 int pthread_rwlock_init(pthread_rwlock_t* rwlock, const pthread_rwlockattr_t* attr) {
-  (void)attr;
-
   if (rwlock == 0) {
     return EINVAL;
+  }
+  if (attr != 0 && (*attr & CRT_RWLOCKATTR_PSHARED_BIT) != 0) {
+    return ENOTSUP;
   }
   rwlock->__private[CRT_RWLOCK_STATE_WORD] = 0;
   return 0;
@@ -739,6 +812,30 @@ int pthread_rwlockattr_init(pthread_rwlockattr_t* attr) {
   }
   *attr = 0;
   return 0;
+}
+
+int pthread_rwlockattr_getpshared(const pthread_rwlockattr_t* attr, int* pshared) {
+  if (attr == 0 || pshared == 0) {
+    return EINVAL;
+  }
+  *pshared = (*attr & CRT_RWLOCKATTR_PSHARED_BIT) != 0
+                 ? PTHREAD_PROCESS_SHARED
+                 : PTHREAD_PROCESS_PRIVATE;
+  return 0;
+}
+
+int pthread_rwlockattr_setpshared(pthread_rwlockattr_t* attr, int pshared) {
+  if (attr == 0) {
+    return EINVAL;
+  }
+  if (pshared == PTHREAD_PROCESS_PRIVATE) {
+    *attr &= ~CRT_RWLOCKATTR_PSHARED_BIT;
+    return 0;
+  }
+  if (pshared == PTHREAD_PROCESS_SHARED) {
+    return ENOTSUP;
+  }
+  return EINVAL;
 }
 
 int pthread_rwlockattr_destroy(pthread_rwlockattr_t* attr) {
@@ -961,6 +1058,41 @@ int pthread_attr_setstacksize(pthread_attr_t* attr, size_t stack_size) {
   return 0;
 }
 
+int pthread_attr_getguardsize(const pthread_attr_t* attr, size_t* guard_size) {
+  if (attr == 0 || guard_size == 0) {
+    return EINVAL;
+  }
+  *guard_size = attr->guard_size;
+  return 0;
+}
+
+int pthread_attr_setguardsize(pthread_attr_t* attr, size_t guard_size) {
+  if (attr == 0) {
+    return EINVAL;
+  }
+  attr->guard_size = guard_size;
+  return 0;
+}
+
+int pthread_attr_getstack(const pthread_attr_t* attr, void** stack_addr, size_t* stack_size) {
+  if (attr == 0 || stack_addr == 0 || stack_size == 0) {
+    return EINVAL;
+  }
+  *stack_addr = attr->stack_base;
+  *stack_size = attr->stack_size;
+  return 0;
+}
+
+int pthread_attr_setstack(pthread_attr_t* attr, void* stack_addr, size_t stack_size) {
+  if (attr == 0 || stack_addr == 0 || stack_size < PTHREAD_STACK_MIN) {
+    return EINVAL;
+  }
+  attr->stack_base = stack_addr;
+  attr->stack_size = stack_size;
+  attr->flags |= CRT_PTHREAD_ATTR_FLAG_STACK_USER;
+  return 0;
+}
+
 int pthread_create(
     pthread_t* thread,
     const pthread_attr_t* attr,
@@ -996,16 +1128,30 @@ int pthread_create(
   return 0;
 #elif defined(CRT_TARGET_OS_LINUX)
   control->stack_size = attr != 0 ? attr->stack_size : CRT_PTHREAD_STACK_SIZE;
-  control->stack = mmap(0, control->stack_size, PROT_READ | PROT_WRITE,
-                        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  if (control->stack == MAP_FAILED) {
-    free(control);
-    return EAGAIN;
+  if (attr != 0 && (attr->flags & CRT_PTHREAD_ATTR_FLAG_STACK_USER) != 0) {
+    control->stack = attr->stack_base;
+    control->stack_owned = 0;
+  } else {
+    control->stack = mmap(0, control->stack_size, PROT_READ | PROT_WRITE,
+                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (control->stack == MAP_FAILED) {
+      free(control);
+      return EAGAIN;
+    }
+    control->stack_owned = 1;
   }
   control->tid = __crt_sys_clone_thread(
-      (char*)control->stack + control->stack_size, pthread_start, control, CRT_CLONE_THREAD_FLAGS);
+      (char*)control->stack + control->stack_size,
+      pthread_start,
+      control,
+      CRT_CLONE_THREAD_FLAGS,
+      &control->tid_word,
+      &control->tid_word,
+      0);
   if (control->tid < 0) {
-    munmap(control->stack, control->stack_size);
+    if (control->stack_owned) {
+      munmap(control->stack, control->stack_size);
+    }
     free(control);
     return -control->tid;
   }
@@ -1103,14 +1249,11 @@ int pthread_join(pthread_t thread, void** retval) {
   pthread_control_destroy(control);
   return 0;
 #elif defined(CRT_TARGET_OS_LINUX)
-  {
-    long wait_result;
-    int status = 0;
-    do {
-      wait_result = __crt_sys_wait4(control->tid, &status, 0, 0);
-    } while (wait_result == -EINTR);
-    if (wait_result < 0) {
-      return -wait_result;
+  while (__atomic_load_n(&control->tid_word, __ATOMIC_ACQUIRE) != 0) {
+    int tid = __atomic_load_n(&control->tid_word, __ATOMIC_ACQUIRE);
+    long wait_result = __crt_sys_futex(&control->tid_word, CRT_FUTEX_WAIT, tid, 0, 0, 0);
+    if (wait_result < 0 && wait_result != -EINTR && wait_result != -EAGAIN) {
+      return (int)-wait_result;
     }
   }
   if (retval != 0) {

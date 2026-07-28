@@ -1,50 +1,41 @@
-# Linux Pthread Lifecycle Plan
+# Linux Pthread Lifecycle Notes
 
-This note records the next Linux pthread backend direction after the first
-portable pthread tranche.
+This note records the current Linux pthread backend and the remaining lifecycle
+work.
 
 ## Current State
 
-The Linux backend currently creates a thread-like task with a project-owned
-stack and a raw `clone` wrapper, then joins it with `wait4`. This is deliberately
-simple and keeps early bring-up debuggable across Linux, Windows, and macOS.
+The Linux backend now creates project pthreads with a raw `clone` wrapper using:
 
-This model is good enough for current tests, but it is not the final pthread
-lifecycle model:
+- `CLONE_VM`
+- `CLONE_FS`
+- `CLONE_FILES`
+- `CLONE_SIGHAND`
+- `CLONE_THREAD`
+- `CLONE_SYSVSEM`
+- `CLONE_PARENT_SETTID`
+- `CLONE_CHILD_SETTID`
+- `CLONE_CHILD_CLEARTID`
 
-- join is process-child oriented rather than `CLONE_THREAD` oriented;
-- detached thread stack reclamation is deferred;
-- thread group semantics, child-tid clearing, and futex-backed join are not yet
-  represented;
-- signal, cancellation, robust mutex, and destructor ordering relative to
-  kernel-visible thread teardown need a clearer lifecycle boundary before
-  broader library porting.
+The project control block contains a kernel-visible tid word. `pthread_join`
+waits for that word to become zero through the private futex wait primitive,
+which matches the normal child-tid-clearing shape used by Linux pthread
+implementations more closely than the earlier `wait4` bootstrap join.
 
-## Target Direction
+## Remaining Gap
 
-The next Linux pthread lifecycle backend should move toward the normal NPTL /
-Bionic-shaped model:
+Detached Linux workers still cannot safely release their own stack mapping. The
+kernel clears the child tid after the thread is exiting, and the worker is still
+running on the stack that would need to be unmapped. For now, detached Linux
+threads leave the stack/control storage to a future reaper or stack-cache
+tranche.
 
-- create workers with `CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND |
-  CLONE_THREAD | CLONE_SYSVSEM`;
-- use `CLONE_CHILD_CLEARTID` and `CLONE_CHILD_SETTID` once the project has a
-  stable thread-control block location for the kernel-visible tid word;
-- implement join as a wait on that tid word through the private futex primitive;
-- let detached threads release project control storage at thread exit;
-- add a minimal reaper or stack-cache policy so detached Linux stacks are not
-  leaked;
-- run pthread key destructors before the tid word is cleared and before detached
-  storage is released.
+The remaining lifecycle work is:
 
-## Proposed Implementation Order
+- add a minimal reaper or stack-cache policy for detached Linux workers;
+- define the final thread-control block layout before wider TLS integration;
+- decide whether to add architecture TLS setup with `CLONE_SETTLS`;
+- define signal, cancellation, and robust mutex interaction with thread exit.
 
-1. Split `crt_pthread_control` into portable state and Linux-private state.
-2. Add a Linux tid word that can be passed as child tid to `clone`.
-3. Add architecture syscall wrappers for the final `clone` argument set.
-4. Switch join from `wait4` to `__crt_wait32` on the tid word.
-5. Add detached stack reclamation policy.
-6. Extend tests for explicit `pthread_exit`, join result, detached completion,
-   and destructor execution on Linux.
-
-Until this work lands, the current Linux lifecycle should be treated as a
-bootstrap compatibility layer, not a final pthread ABI contract.
+Until that work lands, joinable Linux threads use the intended futex-based
+lifecycle, while detached Linux resource reclamation is still bootstrap-level.

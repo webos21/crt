@@ -56,6 +56,10 @@ struct timespec;
 #define PTHREAD_PROCESS_PRIVATE 0
 #define PTHREAD_PROCESS_SHARED 1
 #define PTHREAD_STACK_MIN 16384
+#define PTHREAD_KEYS_MAX 128
+
+#define PTHREAD_COND_CLOCK_REALTIME 0
+#define PTHREAD_COND_CLOCK_MONOTONIC 1
 
 #define PTHREAD_COND_INITIALIZER { { 0 } }
 #define PTHREAD_MUTEX_INITIALIZER { { ((PTHREAD_MUTEX_NORMAL & 3) << 14) } }
@@ -73,6 +77,8 @@ int pthread_cond_timedwait(
     const struct timespec* abstime);
 int pthread_condattr_init(pthread_condattr_t* attr);
 int pthread_condattr_destroy(pthread_condattr_t* attr);
+int pthread_condattr_getclock(const pthread_condattr_t* attr, int* clock_id);
+int pthread_condattr_setclock(pthread_condattr_t* attr, int clock_id);
 int pthread_mutex_init(pthread_mutex_t* mutex, const void* attr);
 int pthread_mutex_destroy(pthread_mutex_t* mutex);
 int pthread_mutex_lock(pthread_mutex_t* mutex);
@@ -82,6 +88,8 @@ int pthread_mutexattr_init(pthread_mutexattr_t* attr);
 int pthread_mutexattr_destroy(pthread_mutexattr_t* attr);
 int pthread_mutexattr_gettype(const pthread_mutexattr_t* attr, int* type);
 int pthread_mutexattr_settype(pthread_mutexattr_t* attr, int type);
+int pthread_mutexattr_getpshared(const pthread_mutexattr_t* attr, int* pshared);
+int pthread_mutexattr_setpshared(pthread_mutexattr_t* attr, int pshared);
 int pthread_once(pthread_once_t* once_control, __pthread_once_func_t init_routine);
 int pthread_rwlock_init(pthread_rwlock_t* rwlock, const pthread_rwlockattr_t* attr);
 int pthread_rwlock_destroy(pthread_rwlock_t* rwlock);
@@ -92,6 +100,8 @@ int pthread_rwlock_trywrlock(pthread_rwlock_t* rwlock);
 int pthread_rwlock_unlock(pthread_rwlock_t* rwlock);
 int pthread_rwlockattr_init(pthread_rwlockattr_t* attr);
 int pthread_rwlockattr_destroy(pthread_rwlockattr_t* attr);
+int pthread_rwlockattr_getpshared(const pthread_rwlockattr_t* attr, int* pshared);
+int pthread_rwlockattr_setpshared(pthread_rwlockattr_t* attr, int pshared);
 int pthread_spin_init(pthread_spinlock_t* lock, int pshared);
 int pthread_spin_destroy(pthread_spinlock_t* lock);
 int pthread_spin_lock(pthread_spinlock_t* lock);
@@ -109,6 +119,10 @@ int pthread_attr_getdetachstate(const pthread_attr_t* attr, int* state);
 int pthread_attr_setdetachstate(pthread_attr_t* attr, int state);
 int pthread_attr_getstacksize(const pthread_attr_t* attr, size_t* stack_size);
 int pthread_attr_setstacksize(pthread_attr_t* attr, size_t stack_size);
+int pthread_attr_getguardsize(const pthread_attr_t* attr, size_t* guard_size);
+int pthread_attr_setguardsize(pthread_attr_t* attr, size_t guard_size);
+int pthread_attr_getstack(const pthread_attr_t* attr, void** stack_addr, size_t* stack_size);
+int pthread_attr_setstack(pthread_attr_t* attr, void* stack_addr, size_t stack_size);
 int pthread_create(
     pthread_t* thread,
     const pthread_attr_t* attr,

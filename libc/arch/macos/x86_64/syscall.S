@@ -55,6 +55,28 @@ ___crt_sys_lseek:
   negq %rax
   retq
 
+.globl ___crt_sys_unlink
+.p2align 4, 0x90
+___crt_sys_unlink:
+  movq $0x200000a, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_rename
+.p2align 4, 0x90
+___crt_sys_rename:
+  movq $0x2000080, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
 .globl ___crt_sys_mmap
 .p2align 4, 0x90
 ___crt_sys_mmap:

@@ -24,6 +24,7 @@ typedef int BOOL;
 #define OPEN_EXISTING 3
 #define OPEN_ALWAYS 4
 #define FILE_ATTRIBUTE_NORMAL 0x00000080
+#define MOVEFILE_REPLACE_EXISTING 0x00000001
 #define FILE_BEGIN 0
 #define FILE_CURRENT 1
 #define FILE_END 2
@@ -69,6 +70,11 @@ __declspec(dllimport) BOOL CRT_WINAPI WriteFile(
     DWORD* lpNumberOfBytesWritten,
     void* lpOverlapped);
 __declspec(dllimport) BOOL CRT_WINAPI CloseHandle(HANDLE hObject);
+__declspec(dllimport) BOOL CRT_WINAPI DeleteFileA(const char* lpFileName);
+__declspec(dllimport) BOOL CRT_WINAPI MoveFileExA(
+    const char* lpExistingFileName,
+    const char* lpNewFileName,
+    DWORD dwFlags);
 __declspec(dllimport) BOOL CRT_WINAPI SetFilePointerEx(
     HANDLE hFile,
     long long liDistanceToMove,
@@ -258,6 +264,20 @@ long long __crt_sys_lseek(int fd, long long offset, int whence) {
     return fail_last_error();
   }
   return new_position;
+}
+
+long __crt_sys_unlink(const char* path) {
+  if (!DeleteFileA(path)) {
+    return fail_last_error();
+  }
+  return 0;
+}
+
+long __crt_sys_rename(const char* old_path, const char* new_path) {
+  if (!MoveFileExA(old_path, new_path, MOVEFILE_REPLACE_EXISTING)) {
+    return fail_last_error();
+  }
+  return 0;
 }
 
 void* __crt_sys_mmap(void* addr, unsigned long length, int prot, int flags, int fd, long long offset) {

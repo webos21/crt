@@ -45,6 +45,24 @@ __crt_sys_lseek:
   retq
 .size __crt_sys_lseek, . - __crt_sys_lseek
 
+.globl __crt_sys_unlink
+.type __crt_sys_unlink, @function
+.p2align 4, 0x90
+__crt_sys_unlink:
+  movq $87, %rax
+  syscall
+  retq
+.size __crt_sys_unlink, . - __crt_sys_unlink
+
+.globl __crt_sys_rename
+.type __crt_sys_rename, @function
+.p2align 4, 0x90
+__crt_sys_rename:
+  movq $82, %rax
+  syscall
+  retq
+.size __crt_sys_rename, . - __crt_sys_rename
+
 .globl __crt_sys_mmap
 .type __crt_sys_mmap, @function
 .p2align 4, 0x90
@@ -116,18 +134,20 @@ __crt_sys_thread_id:
 __crt_sys_clone_thread:
   pushq %r12
   pushq %r13
-  movq %rdi, %r8
+  pushq %r14
+  movq %rdi, %r11
   movq %rsi, %r12
   movq %rdx, %r13
   movq %rcx, %rdi
-  movq %r8, %rsi
-  xorq %rdx, %rdx
-  xorq %r10, %r10
-  xorq %r8, %r8
+  movq %r11, %rsi
+  movq %r8, %rdx
+  movq %r9, %r10
+  movq 32(%rsp), %r8
   movq $56, %rax
   syscall
   testq %rax, %rax
   je 1f
+  popq %r14
   popq %r13
   popq %r12
   retq

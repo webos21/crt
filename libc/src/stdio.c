@@ -8,11 +8,16 @@
 struct __crt_FILE {
   int fd;
   int owned;
+  int eof;
+  int error;
 };
 
-static FILE stdin_storage = {0, 0};
-static FILE stdout_storage = {1, 0};
-static FILE stderr_storage = {2, 0};
+long __crt_sys_unlink(const char* path);
+long __crt_sys_rename(const char* old_path, const char* new_path);
+
+static FILE stdin_storage = {0, 0, 0, 0};
+static FILE stdout_storage = {1, 0, 0, 0};
+static FILE stderr_storage = {2, 0, 0, 0};
 
 FILE* stdin = &stdin_storage;
 FILE* stdout = &stdout_storage;
@@ -76,6 +81,8 @@ FILE* fopen(const char* path, const char* mode) {
   }
   stream->fd = fd;
   stream->owned = 1;
+  stream->eof = 0;
+  stream->error = 0;
 
   if ((flags & O_APPEND) != 0) {
     lseek(fd, 0, SEEK_END);
@@ -107,8 +114,10 @@ int fseek(FILE* stream, long offset, int whence) {
     return -1;
   }
   if (lseek(fd, (off_t)offset, whence) < 0) {
+    stream->error = 1;
     return -1;
   }
+  stream->eof = 0;
   return 0;
 }
 
@@ -134,6 +143,7 @@ int fputc(int c, FILE* stream) {
     return EOF;
   }
   if (write(fd, &byte, 1) != 1) {
+    stream->error = 1;
     return EOF;
   }
   return byte;
@@ -148,6 +158,7 @@ int fputs(const char* s, FILE* stream) {
   }
   length = strlen(s);
   if (write(fd, s, length) != (ssize_t)length) {
+    stream->error = 1;
     return EOF;
   }
   return 0;
@@ -183,6 +194,11 @@ size_t fread(void* ptr, size_t size, size_t nmemb, FILE* stream) {
   total = size * nmemb;
   result = read(fd, ptr, total);
   if (result <= 0) {
+    if (result == 0) {
+      stream->eof = 1;
+    } else {
+      stream->error = 1;
+    }
     return 0;
   }
   return (size_t)result / size;
@@ -204,6 +220,7 @@ size_t fwrite(const void* ptr, size_t size, size_t nmemb, FILE* stream) {
   total = size * nmemb;
   result = write(fd, ptr, total);
   if (result <= 0) {
+    stream->error = 1;
     return 0;
   }
   return (size_t)result / size;
@@ -217,4 +234,56 @@ int fflush(FILE* stream) {
     return EOF;
   }
   return 0;
+}
+
+int feof(FILE* stream) {
+  if (stream_fd(stream) < 0) {
+    return 0;
+  }
+  return stream->eof;
+}
+
+int ferror(FILE* stream) {
+  if (stream_fd(stream) < 0) {
+    return 1;
+  }
+  return stream->error;
+}
+
+void clearerr(FILE* stream) {
+  if (stream == 0) {
+    return;
+  }
+  stream->eof = 0;
+  stream->error = 0;
+}
+
+int remove(const char* path) {
+  long result;
+
+  if (path == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  result = __crt_sys_unlink(path);
+  if (result < 0 && result >= -4095) {
+    errno = (int)-result;
+    return -1;
+  }
+  return (int)result;
+}
+
+int rename(const char* old_path, const char* new_path) {
+  long result;
+
+  if (old_path == 0 || new_path == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  result = __crt_sys_rename(old_path, new_path);
+  if (result < 0 && result >= -4095) {
+    errno = (int)-result;
+    return -1;
+  }
+  return (int)result;
 }

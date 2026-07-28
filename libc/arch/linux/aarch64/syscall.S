@@ -49,6 +49,30 @@ __crt_sys_lseek:
   ret
 .size __crt_sys_lseek, . - __crt_sys_lseek
 
+.globl __crt_sys_unlink
+.type __crt_sys_unlink, %function
+.p2align 2
+__crt_sys_unlink:
+  mov x1, x0
+  mov x0, #-100
+  mov x8, #35
+  svc #0
+  ret
+.size __crt_sys_unlink, . - __crt_sys_unlink
+
+.globl __crt_sys_rename
+.type __crt_sys_rename, %function
+.p2align 2
+__crt_sys_rename:
+  mov x3, x1
+  mov x2, #-100
+  mov x1, x0
+  mov x0, #-100
+  mov x8, #38
+  svc #0
+  ret
+.size __crt_sys_rename, . - __crt_sys_rename
+
 .globl __crt_sys_mmap
 .type __crt_sys_mmap, %function
 .p2align 2
@@ -122,16 +146,20 @@ __crt_sys_thread_id:
 .p2align 2
 __crt_sys_clone_thread:
   stp x19, x20, [sp, #-16]!
+  stp x21, x22, [sp, #-16]!
   mov x19, x1
   mov x20, x2
+  mov x21, x4
+  mov x22, x5
   mov x1, x0
   mov x0, x3
-  mov x2, #0
-  mov x3, #0
-  mov x4, #0
+  mov x2, x21
+  mov x3, x6
+  mov x4, x22
   mov x8, #220
   svc #0
   cbz x0, 1f
+  ldp x21, x22, [sp], #16
   ldp x19, x20, [sp], #16
   ret
 1:

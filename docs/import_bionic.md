@@ -326,17 +326,17 @@ avoids truncating internal thread handles on Windows LLP64, where C `long` is
 only 32 bits. macOS does not expose Darwin's native opaque pthread types through
 this runtime.
 
-The current project-owned implementation is still intentionally narrow.
-Detach state and stack size are consumed by `pthread_create`; priority,
-scheduling attributes, guard size, caller-supplied stack addresses,
+The current project-owned implementation is still intentionally narrow. Detach
+state, stack size, guard size, and caller-supplied stack addresses are represented
+in `pthread_attr_t`; detach state, stack size, and caller-supplied stack
+addresses are consumed by `pthread_create`. Priority, scheduling attributes,
 cancellation, and robust synchronization are deferred.
 
 Windows uses `CreateThread`, `WaitForSingleObject`, `CloseHandle`, and
-`ExitThread` from `kernel32`. Linux uses a raw `clone` wrapper with a
-project-owned stack plus `wait4` for the first joinable-thread path. The Linux
-backend deliberately avoids `CLONE_THREAD` for now so that `wait4` can provide a
-simple bootstrap join primitive. The planned replacement is a
-`CLONE_THREAD`/child-tid/futex-backed lifecycle described in
+`ExitThread` from `kernel32`. Linux uses a raw `clone` wrapper with
+`CLONE_THREAD`, parent/child tid setup, child tid clearing, a project-owned
+stack, and futex-backed join on the tid word. Detached Linux stack reclamation is
+still deferred until a reaper or stack-cache tranche exists; see
 `docs/linux_pthread_lifecycle.md`.
 
 macOS keeps the same public pthread ABI as Linux and Windows. Basic mutex,
@@ -357,13 +357,18 @@ The pthread attribute tranche adds the first `pthread_attr_t` API subset:
 - `pthread_attr_setdetachstate`
 - `pthread_attr_getstacksize`
 - `pthread_attr_setstacksize`
+- `pthread_attr_getguardsize`
+- `pthread_attr_setguardsize`
+- `pthread_attr_getstack`
+- `pthread_attr_setstack`
 - `PTHREAD_STACK_MIN`
 
-The runtime now consumes detach state and stack size during `pthread_create`.
-Joinable remains the default. Detached creation is accepted and releases the
-project control block when the worker returns or calls `pthread_exit`; explicit
-`pthread_detach` is implemented. The rest of the pthread attribute surface is
-deferred.
+The runtime now consumes detach state, stack size, and caller-supplied stack
+addresses during `pthread_create`. Joinable remains the default. Detached
+creation is accepted and releases the project control block when the worker
+returns or calls `pthread_exit` on Windows/macOS; Linux detached storage release
+waits for a reaper/stack-cache tranche. Explicit `pthread_detach` is implemented.
+Scheduling and priority attributes are deferred.
 
 ## Pthread Detach Tranche
 
@@ -389,6 +394,8 @@ The pthread mutex attribute tranche adds:
 - `pthread_mutexattr_destroy`
 - `pthread_mutexattr_gettype`
 - `pthread_mutexattr_settype`
+- `pthread_mutexattr_getpshared`
+- `pthread_mutexattr_setpshared`
 
 The runtime accepts `PTHREAD_MUTEX_NORMAL`, `PTHREAD_MUTEX_RECURSIVE`, and
 `PTHREAD_MUTEX_ERRORCHECK`. Mutexes keep lock state, type, recursion count, and
@@ -396,6 +403,10 @@ owner identity inside the Bionic-shaped `pthread_mutex_t.__private[]` storage.
 Contended mutexes now sleep through the private wait/futex primitive instead of
 spinning until release. Error-checking mutexes return `EDEADLK` on self-lock and
 `EPERM` on unlock by a non-owner.
+
+The process-sharing attribute surface is exposed. `PTHREAD_PROCESS_PRIVATE` is
+supported; `PTHREAD_PROCESS_SHARED` returns `ENOTSUP` until shared-memory
+synchronization policy is defined.
 
 ## Pthread Read/Write Lock Tranche
 
@@ -413,12 +424,15 @@ The pthread read/write lock tranche adds:
 - `pthread_rwlock_unlock`
 - `pthread_rwlockattr_init`
 - `pthread_rwlockattr_destroy`
+- `pthread_rwlockattr_getpshared`
+- `pthread_rwlockattr_setpshared`
 
 The current implementation stores a compact reader-count/writer-state word in
 the Bionic-shaped `pthread_rwlock_t.__private[]` storage. Contended readers and
 writers sleep through the private wait/futex primitive and wake all waiters when
-the lock transitions back to the unlocked state. Policy attributes such as
-process-sharing and writer preference are deferred.
+the lock transitions back to the unlocked state. The process-sharing attribute
+surface is exposed: `PTHREAD_PROCESS_PRIVATE` is supported and
+`PTHREAD_PROCESS_SHARED` returns `ENOTSUP`. Writer preference is deferred.
 
 ## Pthread Spin Lock Tranche
 
@@ -454,14 +468,17 @@ The pthread condition variable tranche adds:
 - `pthread_cond_timedwait`
 - `pthread_condattr_init`
 - `pthread_condattr_destroy`
+- `pthread_condattr_getclock`
+- `pthread_condattr_setclock`
 
 The condition variable uses a sequence counter in the Bionic-shaped
 `pthread_cond_t.__private[]` storage. Waiting threads unlock the supplied mutex,
 wait on the sequence address through the private wait/futex primitive, then lock
 the mutex again. This preserves the public API shape and basic predicate-loop
 usage while keeping the OS wait backend private. `pthread_cond_timedwait` uses
-absolute `CLOCK_REALTIME` timeouts for now; condition clock attributes are
-deferred until the broader condattr policy is needed.
+absolute `CLOCK_REALTIME` timeouts for now. The condition clock attribute surface
+is exposed in `pthread_condattr_t`, but condition objects do not yet store a
+selected clock internally.
 
 ## Private Wait/Futex Tranche
 
@@ -535,6 +552,11 @@ The current stdio tranche adds:
 - `fclose`
 - `fseek`
 - `ftell`
+- `feof`
+- `ferror`
+- `clearerr`
+- `remove`
+- `rename`
 - bootstrap `printf`
 - bootstrap `fprintf`
 - bootstrap `snprintf`

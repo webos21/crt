@@ -71,8 +71,9 @@ direct syscalls. Windows uses `VirtualAlloc` and `VirtualFree` for anonymous
 mappings. File-backed mappings are deferred.
 
 The stdio layer is currently limited to standard streams, fd-backed file streams,
-direct read/write backing, and a small bootstrap formatter. A final `FILE` ABI,
-buffering model, and complete `printf` formatter are deferred.
+direct read/write backing, EOF/error state helpers, remove/rename, and a small
+bootstrap formatter. A final `FILE` ABI, buffering model, and complete `printf`
+formatter are deferred.
 
 On macOS, the executable still links `libSystem.dylib` explicitly. This is a
 platform loader requirement for normal Mach-O executables. The hello path itself

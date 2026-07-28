@@ -13,6 +13,7 @@ static int fail(const char* message) {
 
 int main(void) {
   FILE* stream;
+  FILE* renamed;
   char buffer[16];
   size_t nread;
 
@@ -55,7 +56,29 @@ int main(void) {
     fclose(stream);
     return fail("reread");
   }
+  nread = fread(buffer, 1, 1, stream);
+  if (nread != 0 || !feof(stream) || ferror(stream)) {
+    fclose(stream);
+    return fail("eof state");
+  }
+  clearerr(stream);
+  if (feof(stream) || ferror(stream)) {
+    fclose(stream);
+    return fail("clearerr");
+  }
   fclose(stream);
+
+  if (rename("stdio_file_test.tmp", "stdio_file_test.renamed.tmp") != 0) {
+    return fail("rename");
+  }
+  renamed = fopen("stdio_file_test.renamed.tmp", "r");
+  if (renamed == 0) {
+    return fail("fopen renamed");
+  }
+  fclose(renamed);
+  if (remove("stdio_file_test.renamed.tmp") != 0) {
+    return fail("remove");
+  }
 
   puts("stdio_file_test: ok");
   return 0;
