@@ -74,6 +74,23 @@ static int parse_mode(const char* mode) {
   return flags;
 }
 
+static void init_stream(FILE* stream, int fd, int owned) {
+  stream->fd = fd;
+  stream->owned = owned;
+  stream->eof = 0;
+  stream->error = 0;
+  stream->buffering_mode = _IOFBF;
+  stream->buffer = 0;
+  stream->buffer_size = 0;
+  stream->buffer_owned = 0;
+  stream->buffer_pos = 0;
+  stream->buffer_len = 0;
+  stream->buffer_dirty = 0;
+  stream->last_op = CRT_STDIO_NONE;
+  stream->ungot = 0;
+  stream->ungot_char = 0;
+}
+
 static void reset_buffer_state(FILE* stream) {
   stream->buffer_pos = 0;
   stream->buffer_len = 0;
@@ -160,26 +177,98 @@ FILE* fopen(const char* path, const char* mode) {
     close(fd);
     return 0;
   }
-  stream->fd = fd;
-  stream->owned = 1;
-  stream->eof = 0;
-  stream->error = 0;
-  stream->buffering_mode = _IOFBF;
-  stream->buffer = 0;
-  stream->buffer_size = 0;
-  stream->buffer_owned = 0;
-  stream->buffer_pos = 0;
-  stream->buffer_len = 0;
-  stream->buffer_dirty = 0;
-  stream->last_op = CRT_STDIO_NONE;
-  stream->ungot = 0;
-  stream->ungot_char = 0;
+  init_stream(stream, fd, 1);
 
   if ((flags & O_APPEND) != 0) {
     lseek(fd, 0, SEEK_END);
   }
 
   return stream;
+}
+
+FILE* fdopen(int fd, const char* mode) {
+  int flags = parse_mode(mode);
+  FILE* stream;
+
+  if (flags < 0) {
+    return 0;
+  }
+  if (fd < 0) {
+    errno = EBADF;
+    return 0;
+  }
+  stream = (FILE*)malloc(sizeof(FILE));
+  if (stream == 0) {
+    errno = ENOMEM;
+    return 0;
+  }
+  init_stream(stream, fd, 1);
+  if ((flags & O_APPEND) != 0) {
+    lseek(fd, 0, SEEK_END);
+  }
+  return stream;
+}
+
+FILE* freopen(const char* path, const char* mode, FILE* stream) {
+  int flags = parse_mode(mode);
+  int fd;
+
+  if (stream_fd(stream) < 0 || flags < 0) {
+    return 0;
+  }
+  if (fflush(stream) != 0) {
+    return 0;
+  }
+  fd = open(path, flags, 0666);
+  if (fd < 0) {
+    stream->error = 1;
+    return 0;
+  }
+  if (stream->owned) {
+    close(stream->fd);
+  }
+  if (stream->buffer_owned) {
+    free(stream->buffer);
+  }
+  init_stream(stream, fd, 1);
+  if ((flags & O_APPEND) != 0) {
+    lseek(fd, 0, SEEK_END);
+  }
+  return stream;
+}
+
+FILE* tmpfile(void) {
+  char name[] = "crt_tmpfile_XXXXXX.tmp";
+  static unsigned long counter;
+  unsigned long attempt;
+
+  for (attempt = 0; attempt < 1000; ++attempt) {
+    unsigned long value = counter++;
+    int fd;
+    FILE* stream;
+
+    name[12] = (char)('0' + (value / 100000UL) % 10UL);
+    name[13] = (char)('0' + (value / 10000UL) % 10UL);
+    name[14] = (char)('0' + (value / 1000UL) % 10UL);
+    name[15] = (char)('0' + (value / 100UL) % 10UL);
+    name[16] = (char)('0' + (value / 10UL) % 10UL);
+    name[17] = (char)('0' + value % 10UL);
+    fd = open(name, O_CREAT | O_EXCL | O_RDWR | O_TRUNC, 0600);
+    if (fd < 0) {
+      continue;
+    }
+    remove(name);
+    stream = (FILE*)malloc(sizeof(FILE));
+    if (stream == 0) {
+      close(fd);
+      errno = ENOMEM;
+      return 0;
+    }
+    init_stream(stream, fd, 1);
+    return stream;
+  }
+  errno = EEXIST;
+  return 0;
 }
 
 int fclose(FILE* stream) {
@@ -204,6 +293,10 @@ int fclose(FILE* stream) {
     }
   }
   return 0;
+}
+
+int fileno(FILE* stream) {
+  return stream_fd(stream);
 }
 
 int fseek(FILE* stream, long offset, int whence) {
@@ -372,6 +465,30 @@ int fgetc(FILE* stream) {
   return EOF;
 }
 
+char* fgets(char* s, int size, FILE* stream) {
+  int i = 0;
+
+  if (s == 0 || size <= 0) {
+    errno = EINVAL;
+    return 0;
+  }
+  while (i < size - 1) {
+    int ch = fgetc(stream);
+    if (ch == EOF) {
+      break;
+    }
+    s[i++] = (char)ch;
+    if (ch == '\n') {
+      break;
+    }
+  }
+  if (i == 0) {
+    return 0;
+  }
+  s[i] = 0;
+  return s;
+}
+
 int getc(FILE* stream) {
   return fgetc(stream);
 }
@@ -537,4 +654,13 @@ int rename(const char* old_path, const char* new_path) {
     return -1;
   }
   return (int)result;
+}
+
+void perror(const char* s) {
+  if (s != 0 && s[0] != 0) {
+    fputs(s, stderr);
+    fputs(": ", stderr);
+  }
+  fputs(strerror(errno), stderr);
+  fputc('\n', stderr);
 }

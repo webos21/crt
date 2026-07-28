@@ -594,7 +594,13 @@ The stdio surface now also exposes:
 - `getc`, `fgetc`, and `getchar`;
 - `putc`;
 - `ungetc`;
-- `setbuf` and `setvbuf`.
+- `setbuf` and `setvbuf`;
+- `fileno`;
+- `fdopen`;
+- `freopen`;
+- `fgets`;
+- `perror`;
+- `tmpfile`.
 
 The stdio implementation now has a small real buffering engine. `_IONBF` keeps
 direct I/O, `_IOFBF` buffers reads and writes until the buffer fills or
@@ -609,6 +615,16 @@ The startup objects now route a returned `main` status through `exit`, and
 standard streams before calling the host exit adapter. This keeps newly buffered
 stdout/stderr behavior usable while the broader process lifecycle surface is
 still being built out.
+
+`fdopen` currently creates an owned `FILE` wrapper around an existing project fd
+and does not yet validate that the requested mode is compatible with the fd's
+original access mode. `freopen` flushes the existing stream, opens the new path,
+then replaces the stream fd while preserving the caller's `FILE*` identity.
+`tmpfile` is a bootstrap implementation: it creates a private counter-based
+temporary name with `O_CREAT | O_EXCL`, unlinks it immediately after a successful
+open where the host permits that behavior, and keeps the resulting stream open.
+It is collision-resistant enough for early tests, but it is not yet a final
+secure temporary-file policy.
 
 The file/path tranche adds:
 

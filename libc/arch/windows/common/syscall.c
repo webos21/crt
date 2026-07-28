@@ -22,6 +22,7 @@ typedef int BOOL;
 #define FILE_SHARE_READ 0x00000001
 #define FILE_SHARE_WRITE 0x00000002
 #define FILE_SHARE_DELETE 0x00000004
+#define CREATE_NEW 1
 #define CREATE_ALWAYS 2
 #define OPEN_EXISTING 3
 #define OPEN_ALWAYS 4
@@ -262,7 +263,9 @@ long __crt_sys_open(const char* path, int flags, unsigned int mode) {
     access = GENERIC_READ;
   }
 
-  if ((flags & O_CREAT) && (flags & O_TRUNC)) {
+  if ((flags & O_CREAT) && (flags & O_EXCL)) {
+    disposition = CREATE_NEW;
+  } else if ((flags & O_CREAT) && (flags & O_TRUNC)) {
     disposition = CREATE_ALWAYS;
   } else if (flags & O_CREAT) {
     disposition = OPEN_ALWAYS;

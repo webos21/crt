@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 static int fail(const char* message) {
@@ -13,12 +14,15 @@ static int fail(const char* message) {
 
 int main(void) {
   FILE* stream;
+  FILE* reopened;
   FILE* renamed;
   FILE* observer;
+  FILE* temp;
   char buffer[16];
   char small_buffer[4];
   size_t nread;
   int ch;
+  int fd;
 
   stream = fopen("stdio_file_test.tmp", "w+");
   if (stream == 0) {
@@ -53,6 +57,84 @@ int main(void) {
   if (fclose(stream) != 0) {
     return fail("fclose");
   }
+
+  stream = fopen("stdio_extra_test.tmp", "w+");
+  if (stream == 0) {
+    return fail("fopen extra");
+  }
+  if (fileno(stream) < 0) {
+    fclose(stream);
+    return fail("fileno");
+  }
+  if (fputs("line1\nline2\n", stream) == EOF ||
+      fseek(stream, 0, SEEK_SET) != 0) {
+    fclose(stream);
+    return fail("write extra");
+  }
+  memset(buffer, 0, sizeof(buffer));
+  if (fgets(buffer, sizeof(buffer), stream) != buffer ||
+      strcmp(buffer, "line1\n") != 0) {
+    fclose(stream);
+    return fail("fgets");
+  }
+  reopened = freopen("stdio_freopen_test.tmp", "w+", stream);
+  if (reopened != stream ||
+      fputs("again", reopened) == EOF ||
+      fseek(reopened, 0, SEEK_SET) != 0) {
+    fclose(stream);
+    return fail("freopen");
+  }
+  memset(buffer, 0, sizeof(buffer));
+  if (fread(buffer, 1, 5, reopened) != 5 || strcmp(buffer, "again") != 0) {
+    fclose(stream);
+    return fail("freopen read");
+  }
+  fclose(stream);
+  if (remove("stdio_extra_test.tmp") != 0 ||
+      remove("stdio_freopen_test.tmp") != 0) {
+    return fail("remove extra");
+  }
+
+  fd = open("stdio_fdopen_test.tmp", O_CREAT | O_RDWR | O_TRUNC, 0666);
+  if (fd < 0) {
+    return fail("open fdopen");
+  }
+  stream = fdopen(fd, "w+");
+  if (stream == 0 ||
+      fputs("fdopen", stream) == EOF ||
+      fseek(stream, 0, SEEK_SET) != 0) {
+    if (stream != 0) {
+      fclose(stream);
+    } else {
+      close(fd);
+    }
+    return fail("fdopen");
+  }
+  memset(buffer, 0, sizeof(buffer));
+  if (fread(buffer, 1, 6, stream) != 6 || strcmp(buffer, "fdopen") != 0) {
+    fclose(stream);
+    return fail("fdopen read");
+  }
+  fclose(stream);
+  if (remove("stdio_fdopen_test.tmp") != 0) {
+    return fail("remove fdopen");
+  }
+
+  temp = tmpfile();
+  if (temp == 0 ||
+      fputs("tmp", temp) == EOF ||
+      fseek(temp, 0, SEEK_SET) != 0) {
+    if (temp != 0) {
+      fclose(temp);
+    }
+    return fail("tmpfile");
+  }
+  memset(buffer, 0, sizeof(buffer));
+  if (fread(buffer, 1, 3, temp) != 3 || strcmp(buffer, "tmp") != 0) {
+    fclose(temp);
+    return fail("tmpfile read");
+  }
+  fclose(temp);
 
   stream = fopen("stdio_buffer_test.tmp", "w+");
   if (stream == 0) {
