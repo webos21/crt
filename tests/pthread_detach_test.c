@@ -5,6 +5,7 @@
 
 static pthread_mutex_t gate = PTHREAD_MUTEX_INITIALIZER;
 static int detached_value;
+static int detached_count;
 
 static int fail(const char* message) {
   fprintf(stderr, "pthread_detach_test: %s\n", message);
@@ -29,6 +30,25 @@ static int wait_for_value(int expected) {
 
   for (i = 0; i < 100000; ++i) {
     if (detached_value == expected) {
+      return 0;
+    }
+    sched_yield();
+  }
+  return 1;
+}
+
+static void* count_worker(void* arg) {
+  (void)arg;
+
+  __atomic_fetch_add(&detached_count, 1, __ATOMIC_ACQ_REL);
+  return 0;
+}
+
+static int wait_for_count(int expected) {
+  int i;
+
+  for (i = 0; i < 100000; ++i) {
+    if (__atomic_load_n(&detached_count, __ATOMIC_ACQUIRE) == expected) {
       return 0;
     }
     sched_yield();
@@ -75,6 +95,16 @@ int main(void) {
   }
   if (wait_for_value(second) != 0) {
     return fail("detached attr worker");
+  }
+
+  detached_count = 0;
+  for (int i = 0; i < 16; ++i) {
+    if (pthread_create(&thread, &attr, count_worker, 0) != 0) {
+      return fail("pthread_create detached stress");
+    }
+  }
+  if (wait_for_count(16) != 0) {
+    return fail("detached stress workers");
   }
   pthread_attr_destroy(&attr);
 

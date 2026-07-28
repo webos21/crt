@@ -335,8 +335,8 @@ cancellation, and robust synchronization are deferred.
 Windows uses `CreateThread`, `WaitForSingleObject`, `CloseHandle`, and
 `ExitThread` from `kernel32`. Linux uses a raw `clone` wrapper with
 `CLONE_THREAD`, parent/child tid setup, child tid clearing, a project-owned
-stack, and futex-backed join on the tid word. Detached Linux stack reclamation is
-still deferred until a reaper or stack-cache tranche exists; see
+stack, futex-backed join on the tid word, and a permanent reaper thread for
+detached project-owned stack/control reclamation. See
 `docs/linux_pthread_lifecycle.md`.
 
 macOS keeps the same public pthread ABI as Linux and Windows. Basic mutex,
@@ -366,9 +366,9 @@ The pthread attribute tranche adds the first `pthread_attr_t` API subset:
 The runtime now consumes detach state, stack size, and caller-supplied stack
 addresses during `pthread_create`. Joinable remains the default. Detached
 creation is accepted and releases the project control block when the worker
-returns or calls `pthread_exit` on Windows/macOS; Linux detached storage release
-waits for a reaper/stack-cache tranche. Explicit `pthread_detach` is implemented.
-Scheduling and priority attributes are deferred.
+returns or calls `pthread_exit`; Linux performs that release from its detached
+reaper once the kernel clears the child tid. Explicit `pthread_detach` is
+implemented. Scheduling and priority attributes are deferred.
 
 ## Pthread Detach Tranche
 
@@ -378,9 +378,8 @@ The pthread detach tranche adds:
 
 Windows detaches by closing the retained thread handle. macOS detaches the
 hidden native libSystem pthread handle through the adaptation layer. Linux marks
-the project control block as detached; reclaiming detached thread stacks is
-deferred until the runtime has the futex/reaper-backed lifecycle described in
-`docs/linux_pthread_lifecycle.md`.
+the project control block as detached and queues it to the detached reaper when
+the worker exits.
 
 Calling `pthread_join` on a detached project thread returns `EINVAL`.
 

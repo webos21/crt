@@ -115,7 +115,7 @@ out-of-line C99 functions.
 | Local file | Upstream path | Upstream ref | Status | Notes |
 | --- | --- | --- | --- | --- |
 | `include/pthread.h` | `libc/include/pthread.h` and `libc/include/bits/pthread_types.h` | project-owned, Bionic-shaped | extended | Uses one Bionic/Linux-style pthread type layout across all target OSes. |
-| `libc/src/pthread.c` | mixed Bionic/POSIX surface | project-owned | extended | Adds thread backends for Windows, Linux, and macOS; Linux uses CLONE_THREAD plus child-tid futex join, and macOS adapts libSystem pthreads beneath the project ABI. |
+| `libc/src/pthread.c` | mixed Bionic/POSIX surface | project-owned | extended | Adds thread backends for Windows, Linux, and macOS; Linux uses CLONE_THREAD plus child-tid futex join and a detached reaper, and macOS adapts libSystem pthreads beneath the project ABI. |
 | `libc/arch/linux/x86_64/syscall.S` | mixed Bionic/Linux syscall surface | project-owned | extended | Adds raw clone, futex, and thread exit syscall wrappers. |
 | `libc/arch/linux/aarch64/syscall.S` | mixed Bionic/Linux syscall surface | project-owned | extended | Adds raw clone, futex, and thread exit syscall wrappers. |
 

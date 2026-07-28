@@ -71,6 +71,7 @@ long __crt_sys_wait4(long pid, int* status, int options, void* rusage);
 long __crt_sys_futex(int* addr, int op, int value, const void* timeout, int* addr2, int value3);
 
 #define CRT_FUTEX_WAIT 0
+#define CRT_LINUX_REAPER_STACK_SIZE (64UL * 1024UL)
 #define CRT_CLONE_VM 0x00000100UL
 #define CRT_CLONE_FS 0x00000200UL
 #define CRT_CLONE_FILES 0x00000400UL
@@ -104,7 +105,7 @@ void* dlsym(void* handle, const char* symbol);
 static __thread void* pthread_key_values[CRT_PTHREAD_KEYS_MAX];
 #endif
 
-typedef struct {
+typedef struct crt_pthread_control {
 #if defined(CRT_TARGET_OS_WINDOWS)
   HANDLE handle;
   DWORD thread_id;
@@ -114,6 +115,8 @@ typedef struct {
   void* stack;
   unsigned long stack_size;
   int stack_owned;
+  int reap_queued;
+  struct crt_pthread_control* reap_next;
 #elif defined(CRT_TARGET_OS_MACOS)
   crt_macos_pthread_t native_thread;
 #endif
@@ -130,6 +133,15 @@ static __thread crt_pthread_control* pthread_current_control;
 static int pthread_key_used[CRT_PTHREAD_KEYS_MAX];
 static __pthread_key_destructor_t pthread_key_destructors[CRT_PTHREAD_KEYS_MAX];
 static crt_spinlock pthread_key_lock = CRT_SPINLOCK_INIT;
+
+#if defined(CRT_TARGET_OS_LINUX)
+static crt_spinlock linux_reap_lock = CRT_SPINLOCK_INIT;
+static crt_atomic_int linux_reap_sequence = CRT_ATOMIC_INT_INIT(0);
+static crt_pthread_control* linux_reap_head;
+static int linux_reaper_started;
+static int linux_reaper_tid;
+static void* linux_reaper_stack;
+#endif
 
 static crt_atomic_int* mutex_state(pthread_mutex_t* mutex) {
   return (crt_atomic_int*)&mutex->__private[CRT_MUTEX_STATE_WORD];
@@ -292,6 +304,12 @@ static void pthread_run_key_destructors(void) {
 }
 
 #if defined(CRT_TARGET_OS_WINDOWS) || defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS)
+#if defined(CRT_TARGET_OS_LINUX)
+static void linux_reap_enqueue(crt_pthread_control* control);
+static int linux_reaper_start(void* arg);
+static int linux_reaper_ensure_started(void);
+#endif
+
 static void pthread_control_destroy(crt_pthread_control* control) {
   if (control == 0) {
     return;
@@ -309,16 +327,124 @@ static void pthread_control_destroy_from_worker(crt_pthread_control* control) {
     return;
   }
 #if defined(CRT_TARGET_OS_LINUX)
-  /*
-   * The kernel may still clear child_tid after this function returns, and the
-   * worker is still executing on its stack. A Linux reaper/stack-cache tranche
-   * is needed before detached workers can release these mappings themselves.
-   */
-  return;
+  linux_reap_enqueue(control);
 #else
   free(control);
 #endif
 }
+
+#if defined(CRT_TARGET_OS_LINUX)
+static void linux_reap_enqueue(crt_pthread_control* control) {
+  int expected = 0;
+
+  if (control == 0) {
+    return;
+  }
+  if (!__atomic_compare_exchange_n(
+          &control->reap_queued, &expected, 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+    return;
+  }
+
+  crt_spin_lock(&linux_reap_lock);
+  control->reap_next = linux_reap_head;
+  linux_reap_head = control;
+  crt_spin_unlock(&linux_reap_lock);
+
+  crt_atomic_fetch_add_acq_rel(&linux_reap_sequence, 1);
+  __crt_wake32_all(&linux_reap_sequence.value);
+}
+
+static int linux_reaper_start(void* arg) {
+  (void)arg;
+
+  for (;;) {
+    int sequence;
+    int* wait_tid = 0;
+    int wait_tid_value = 0;
+    int reaped = 0;
+
+    crt_spin_lock(&linux_reap_lock);
+    {
+      crt_pthread_control** link = &linux_reap_head;
+      while (*link != 0) {
+        crt_pthread_control* control = *link;
+        if (__atomic_load_n(&control->tid_word, __ATOMIC_ACQUIRE) == 0) {
+          *link = control->reap_next;
+          control->reap_next = 0;
+          crt_spin_unlock(&linux_reap_lock);
+          pthread_control_destroy(control);
+          reaped = 1;
+          crt_spin_lock(&linux_reap_lock);
+          link = &linux_reap_head;
+        } else {
+          if (wait_tid == 0) {
+            wait_tid = &control->tid_word;
+            wait_tid_value = __atomic_load_n(&control->tid_word, __ATOMIC_ACQUIRE);
+          }
+          link = &control->reap_next;
+        }
+      }
+      sequence = crt_atomic_load_acquire(&linux_reap_sequence);
+    }
+    crt_spin_unlock(&linux_reap_lock);
+
+    if (!reaped) {
+      if (wait_tid != 0 && wait_tid_value != 0) {
+        __crt_sys_futex(wait_tid, CRT_FUTEX_WAIT, wait_tid_value, 0, 0, 0);
+      } else {
+        __crt_wait32(&linux_reap_sequence.value, sequence);
+      }
+    }
+  }
+}
+
+static int linux_reaper_ensure_started(void) {
+  int expected = 0;
+  int state;
+  void* stack;
+  long tid;
+
+  state = __atomic_load_n(&linux_reaper_started, __ATOMIC_ACQUIRE);
+  if (state == 2) {
+    return 0;
+  }
+  if (state < 0) {
+    return EAGAIN;
+  }
+  if (!__atomic_compare_exchange_n(
+          &linux_reaper_started, &expected, 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+    while (__atomic_load_n(&linux_reaper_started, __ATOMIC_ACQUIRE) == 1) {
+      sched_yield();
+    }
+    return __atomic_load_n(&linux_reaper_started, __ATOMIC_ACQUIRE) == 2 ? 0 : EAGAIN;
+  }
+
+  stack = mmap(0, CRT_LINUX_REAPER_STACK_SIZE, PROT_READ | PROT_WRITE,
+               MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (stack == MAP_FAILED) {
+    __atomic_store_n(&linux_reaper_started, -1, __ATOMIC_RELEASE);
+    return EAGAIN;
+  }
+
+  linux_reaper_stack = stack;
+  tid = __crt_sys_clone_thread(
+      (char*)stack + CRT_LINUX_REAPER_STACK_SIZE,
+      linux_reaper_start,
+      0,
+      CRT_CLONE_THREAD_FLAGS,
+      &linux_reaper_tid,
+      &linux_reaper_tid,
+      0);
+  if (tid < 0) {
+    munmap(stack, CRT_LINUX_REAPER_STACK_SIZE);
+    linux_reaper_stack = 0;
+    __atomic_store_n(&linux_reaper_started, -1, __ATOMIC_RELEASE);
+    return -tid;
+  }
+  __atomic_store_n(&linux_reaper_started, 2, __ATOMIC_RELEASE);
+  return 0;
+}
+#endif
 
 static int pthread_start(void* arg) {
   crt_pthread_control* control = (crt_pthread_control*)arg;
@@ -1127,6 +1253,13 @@ int pthread_create(
   *thread = (pthread_t)(uintptr_t)control;
   return 0;
 #elif defined(CRT_TARGET_OS_LINUX)
+  if (control->detached) {
+    int reaper_result = linux_reaper_ensure_started();
+    if (reaper_result != 0) {
+      free(control);
+      return reaper_result;
+    }
+  }
   control->stack_size = attr != 0 ? attr->stack_size : CRT_PTHREAD_STACK_SIZE;
   if (attr != 0 && (attr->flags & CRT_PTHREAD_ATTR_FLAG_STACK_USER) != 0) {
     control->stack = attr->stack_base;
@@ -1199,6 +1332,14 @@ int pthread_detach(pthread_t thread) {
   if (control == 0) {
     return EINVAL;
   }
+#if defined(CRT_TARGET_OS_LINUX)
+  {
+    int reaper_result = linux_reaper_ensure_started();
+    if (reaper_result != 0) {
+      return reaper_result;
+    }
+  }
+#endif
   if (!__atomic_compare_exchange_n(
           &control->detached, &expected, 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
     return EINVAL;
@@ -1220,6 +1361,11 @@ int pthread_detach(pthread_t thread) {
     return detach_fn(control->native_thread);
   }
 #else
+#if defined(CRT_TARGET_OS_LINUX)
+  if (__atomic_load_n(&control->tid_word, __ATOMIC_ACQUIRE) == 0) {
+    linux_reap_enqueue(control);
+  }
+#endif
   return 0;
 #endif
 }

@@ -22,20 +22,27 @@ waits for that word to become zero through the private futex wait primitive,
 which matches the normal child-tid-clearing shape used by Linux pthread
 implementations more closely than the earlier `wait4` bootstrap join.
 
-## Remaining Gap
+## Detached Reaper
 
-Detached Linux workers still cannot safely release their own stack mapping. The
-kernel clears the child tid after the thread is exiting, and the worker is still
-running on the stack that would need to be unmapped. For now, detached Linux
-threads leave the stack/control storage to a future reaper or stack-cache
-tranche.
+Detached Linux workers cannot safely release their own stack mapping because the
+worker is still executing on that stack while the kernel clears the child tid.
+The runtime therefore starts one permanent Linux reaper thread on demand. A
+detached worker queues its project control block before thread exit, and the
+reaper waits on the queued tid word until the kernel clears it. Once the tid word
+is zero, the reaper releases the owned stack mapping and the control block.
+
+Caller-provided stacks are not unmapped by the reaper; ownership remains with the
+caller that supplied the stack through `pthread_attr_setstack`.
+
+## Remaining Work
 
 The remaining lifecycle work is:
 
-- add a minimal reaper or stack-cache policy for detached Linux workers;
 - define the final thread-control block layout before wider TLS integration;
 - decide whether to add architecture TLS setup with `CLONE_SETTLS`;
-- define signal, cancellation, and robust mutex interaction with thread exit.
+- define signal, cancellation, and robust mutex interaction with thread exit;
+- decide whether the permanent reaper should eventually be replaced by a stack
+  cache for high-volume detached-thread workloads.
 
-Until that work lands, joinable Linux threads use the intended futex-based
-lifecycle, while detached Linux resource reclamation is still bootstrap-level.
+Joinable Linux threads now use the intended futex-based lifecycle, and detached
+Linux threads have project-owned stack/control reclamation through the reaper.
