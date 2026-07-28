@@ -987,11 +987,14 @@ The first socket/network tranche adds:
 Linux uses direct socket syscalls for x86_64 and AArch64. macOS keeps the
 public Linux/Bionic-shaped `sockaddr_in` ABI and translates to Darwin's
 `sin_len` sockaddr layout inside the socket adapter before entering the kernel.
-Windows maps project fds to Winsock sockets, initializes Winsock lazily, links
-`ws2_32.lib`, and routes socket close/read/write/poll operations through the
-socket-aware fd table. The current network resolver is intentionally numeric
-only; DNS lookup, IPv6, nonblocking connect readiness, socketpair, getsockopt,
-and full socket `poll` semantics remain later tranches.
+Windows maps project fds to Winsock sockets, initializes Winsock lazily by
+loading `ws2_32.dll` at runtime, and routes socket close/read/write/poll
+operations through the socket-aware fd table. The build intentionally avoids
+linking `ws2_32.lib`, because this libc exports POSIX socket names such as
+`socket`, `send`, and `recv`; importing the same names from Winsock would create
+duplicate symbols. The current network resolver is intentionally numeric only;
+DNS lookup, IPv6, nonblocking connect readiness, socketpair, getsockopt, and
+full socket `poll` semantics remain later tranches.
 
 The metadata tranche moves the supported OS backends beyond the first
 regular-file fallback. Linux uses the raw `statx` syscall and converts the

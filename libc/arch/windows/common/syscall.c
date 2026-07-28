@@ -80,39 +80,8 @@ struct sockaddr;
 
 __declspec(dllimport) HANDLE CRT_WINAPI GetStdHandle(DWORD nStdHandle);
 __declspec(dllimport) DWORD CRT_WINAPI GetLastError(void);
-__declspec(dllimport) int CRT_WINAPI WSAStartup(WORD wVersionRequested, void* lpWSAData);
-__declspec(dllimport) int CRT_WINAPI WSAGetLastError(void);
-__declspec(dllimport) SOCKET CRT_WINAPI socket(int af, int type, int protocol);
-__declspec(dllimport) int CRT_WINAPI bind(SOCKET s, const struct sockaddr* name, int namelen);
-__declspec(dllimport) int CRT_WINAPI listen(SOCKET s, int backlog);
-__declspec(dllimport) SOCKET CRT_WINAPI accept(SOCKET s, struct sockaddr* addr, int* addrlen);
-__declspec(dllimport) int CRT_WINAPI connect(SOCKET s, const struct sockaddr* name, int namelen);
-__declspec(dllimport) int CRT_WINAPI send(SOCKET s, const char* buf, int len, int flags);
-__declspec(dllimport) int CRT_WINAPI recv(SOCKET s, char* buf, int len, int flags);
-__declspec(dllimport) int CRT_WINAPI sendto(
-    SOCKET s,
-    const char* buf,
-    int len,
-    int flags,
-    const struct sockaddr* to,
-    int tolen);
-__declspec(dllimport) int CRT_WINAPI recvfrom(
-    SOCKET s,
-    char* buf,
-    int len,
-    int flags,
-    struct sockaddr* from,
-    int* fromlen);
-__declspec(dllimport) int CRT_WINAPI getsockname(SOCKET s, struct sockaddr* name, int* namelen);
-__declspec(dllimport) int CRT_WINAPI setsockopt(
-    SOCKET s,
-    int level,
-    int optname,
-    const char* optval,
-    int optlen);
-__declspec(dllimport) int CRT_WINAPI shutdown(SOCKET s, int how);
-__declspec(dllimport) int CRT_WINAPI closesocket(SOCKET s);
-__declspec(dllimport) int CRT_WINAPI ioctlsocket(SOCKET s, long cmd, unsigned long* argp);
+__declspec(dllimport) HANDLE CRT_WINAPI LoadLibraryA(const char* lpLibFileName);
+__declspec(dllimport) void* CRT_WINAPI GetProcAddress(HANDLE hModule, const char* lpProcName);
 __declspec(dllimport) HANDLE CRT_WINAPI CreateFileA(
     const char* lpFileName,
     DWORD dwDesiredAccess,
@@ -219,6 +188,44 @@ static HANDLE fd_table[CRT_FD_TABLE_SIZE];
 static int fd_kind[CRT_FD_TABLE_SIZE];
 static int fd_table_initialized;
 static int winsock_initialized;
+
+struct winsock_api {
+  int (CRT_WINAPI* WSAStartup)(WORD wVersionRequested, void* lpWSAData);
+  int (CRT_WINAPI* WSAGetLastError)(void);
+  SOCKET (CRT_WINAPI* socket)(int af, int type, int protocol);
+  int (CRT_WINAPI* bind)(SOCKET s, const struct sockaddr* name, int namelen);
+  int (CRT_WINAPI* listen)(SOCKET s, int backlog);
+  SOCKET (CRT_WINAPI* accept)(SOCKET s, struct sockaddr* addr, int* addrlen);
+  int (CRT_WINAPI* connect)(SOCKET s, const struct sockaddr* name, int namelen);
+  int (CRT_WINAPI* send)(SOCKET s, const char* buf, int len, int flags);
+  int (CRT_WINAPI* recv)(SOCKET s, char* buf, int len, int flags);
+  int (CRT_WINAPI* sendto)(
+      SOCKET s,
+      const char* buf,
+      int len,
+      int flags,
+      const struct sockaddr* to,
+      int tolen);
+  int (CRT_WINAPI* recvfrom)(
+      SOCKET s,
+      char* buf,
+      int len,
+      int flags,
+      struct sockaddr* from,
+      int* fromlen);
+  int (CRT_WINAPI* getsockname)(SOCKET s, struct sockaddr* name, int* namelen);
+  int (CRT_WINAPI* setsockopt)(
+      SOCKET s,
+      int level,
+      int optname,
+      const char* optval,
+      int optlen);
+  int (CRT_WINAPI* shutdown)(SOCKET s, int how);
+  int (CRT_WINAPI* closesocket)(SOCKET s);
+  int (CRT_WINAPI* ioctlsocket)(SOCKET s, long cmd, unsigned long* argp);
+};
+
+static struct winsock_api winsock;
 
 static int map_windows_error(DWORD error) {
   switch (error) {
@@ -332,13 +339,76 @@ static void init_fd_table(void) {
 }
 
 static long init_winsock(void) {
+  HANDLE module;
   unsigned char data[512];
 
   if (winsock_initialized) {
     return 0;
   }
-  if (WSAStartup((WORD)0x0202, data) != 0) {
-    return -map_wsa_error(WSAGetLastError());
+  module = LoadLibraryA("ws2_32.dll");
+  if (module == 0) {
+    return -ENOSYS;
+  }
+  winsock.WSAStartup = (int (CRT_WINAPI*)(WORD, void*))GetProcAddress(module, "WSAStartup");
+  winsock.WSAGetLastError = (int (CRT_WINAPI*)(void))GetProcAddress(module, "WSAGetLastError");
+  winsock.socket = (SOCKET(CRT_WINAPI*)(int, int, int))GetProcAddress(module, "socket");
+  winsock.bind =
+      (int (CRT_WINAPI*)(SOCKET, const struct sockaddr*, int))GetProcAddress(module, "bind");
+  winsock.listen = (int (CRT_WINAPI*)(SOCKET, int))GetProcAddress(module, "listen");
+  winsock.accept =
+      (SOCKET(CRT_WINAPI*)(SOCKET, struct sockaddr*, int*))GetProcAddress(module, "accept");
+  winsock.connect =
+      (int (CRT_WINAPI*)(SOCKET, const struct sockaddr*, int))GetProcAddress(module, "connect");
+  winsock.send =
+      (int (CRT_WINAPI*)(SOCKET, const char*, int, int))GetProcAddress(module, "send");
+  winsock.recv = (int (CRT_WINAPI*)(SOCKET, char*, int, int))GetProcAddress(module, "recv");
+  winsock.sendto = (int (CRT_WINAPI*)(
+      SOCKET,
+      const char*,
+      int,
+      int,
+      const struct sockaddr*,
+      int))GetProcAddress(module, "sendto");
+  winsock.recvfrom = (int (CRT_WINAPI*)(
+      SOCKET,
+      char*,
+      int,
+      int,
+      struct sockaddr*,
+      int*))GetProcAddress(module, "recvfrom");
+  winsock.getsockname =
+      (int (CRT_WINAPI*)(SOCKET, struct sockaddr*, int*))GetProcAddress(module, "getsockname");
+  winsock.setsockopt = (int (CRT_WINAPI*)(
+      SOCKET,
+      int,
+      int,
+      const char*,
+      int))GetProcAddress(module, "setsockopt");
+  winsock.shutdown = (int (CRT_WINAPI*)(SOCKET, int))GetProcAddress(module, "shutdown");
+  winsock.closesocket = (int (CRT_WINAPI*)(SOCKET))GetProcAddress(module, "closesocket");
+  winsock.ioctlsocket =
+      (int (CRT_WINAPI*)(SOCKET, long, unsigned long*))GetProcAddress(module, "ioctlsocket");
+
+  if (winsock.WSAStartup == 0 ||
+      winsock.WSAGetLastError == 0 ||
+      winsock.socket == 0 ||
+      winsock.bind == 0 ||
+      winsock.listen == 0 ||
+      winsock.accept == 0 ||
+      winsock.connect == 0 ||
+      winsock.send == 0 ||
+      winsock.recv == 0 ||
+      winsock.sendto == 0 ||
+      winsock.recvfrom == 0 ||
+      winsock.getsockname == 0 ||
+      winsock.setsockopt == 0 ||
+      winsock.shutdown == 0 ||
+      winsock.closesocket == 0 ||
+      winsock.ioctlsocket == 0) {
+    return -ENOSYS;
+  }
+  if (winsock.WSAStartup((WORD)0x0202, data) != 0) {
+    return -map_wsa_error(winsock.WSAGetLastError());
   }
   winsock_initialized = 1;
   return 0;
@@ -395,8 +465,8 @@ long __crt_sys_read(int fd, void* buf, unsigned long count) {
   DWORD bytes_read = 0;
 
   if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_SOCKET) {
-    int result = recv((SOCKET)(uintptr_t)fd_table[fd], (char*)buf, (int)count, 0);
-    return result == SOCKET_ERROR ? -map_wsa_error(WSAGetLastError()) : result;
+    int result = winsock.recv((SOCKET)(uintptr_t)fd_table[fd], (char*)buf, (int)count, 0);
+    return result == SOCKET_ERROR ? -map_wsa_error(winsock.WSAGetLastError()) : result;
   }
   if (handle == INVALID_HANDLE_VALUE) {
     return -EBADF;
@@ -412,8 +482,8 @@ long __crt_sys_write(int fd, const void* buf, unsigned long count) {
   DWORD written = 0;
 
   if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_SOCKET) {
-    int result = send((SOCKET)(uintptr_t)fd_table[fd], (const char*)buf, (int)count, 0);
-    return result == SOCKET_ERROR ? -map_wsa_error(WSAGetLastError()) : result;
+    int result = winsock.send((SOCKET)(uintptr_t)fd_table[fd], (const char*)buf, (int)count, 0);
+    return result == SOCKET_ERROR ? -map_wsa_error(winsock.WSAGetLastError()) : result;
   }
   if (handle == INVALID_HANDLE_VALUE) {
     return -EBADF;
@@ -471,7 +541,9 @@ long __crt_sys_close(int fd) {
     SOCKET socket_handle = (SOCKET)(uintptr_t)fd_table[fd];
     fd_table[fd] = 0;
     fd_kind[fd] = CRT_FD_KIND_NONE;
-    return closesocket(socket_handle) == SOCKET_ERROR ? -map_wsa_error(WSAGetLastError()) : 0;
+    return winsock.closesocket(socket_handle) == SOCKET_ERROR
+               ? -map_wsa_error(winsock.WSAGetLastError())
+               : 0;
   }
   if (handle == INVALID_HANDLE_VALUE) {
     return -EBADF;
@@ -600,7 +672,7 @@ long __crt_sys_dup2(int oldfd, int newfd) {
   }
   if (fd_table[newfd] != 0 && fd_table[newfd] != INVALID_HANDLE_VALUE) {
     if (fd_kind[newfd] == CRT_FD_KIND_SOCKET) {
-      closesocket((SOCKET)(uintptr_t)fd_table[newfd]);
+      winsock.closesocket((SOCKET)(uintptr_t)fd_table[newfd]);
     } else {
       CloseHandle(fd_table[newfd]);
     }
@@ -675,7 +747,7 @@ static short poll_socket(SOCKET socket_handle, short events) {
     revents |= POLLOUT;
   }
   if ((events & POLLIN) != 0) {
-    if (ioctlsocket(socket_handle, FIONREAD, &bytes_available) == SOCKET_ERROR) {
+    if (winsock.ioctlsocket(socket_handle, FIONREAD, &bytes_available) == SOCKET_ERROR) {
       return POLLERR;
     }
     if (bytes_available != 0) {
@@ -750,13 +822,13 @@ long __crt_sys_socket(int domain, int type, int protocol) {
   if (init_result != 0) {
     return init_result;
   }
-  socket_handle = socket(domain, type, protocol);
+  socket_handle = winsock.socket(domain, type, protocol);
   if (socket_handle == INVALID_SOCKET) {
-    return -map_wsa_error(WSAGetLastError());
+    return -map_wsa_error(winsock.WSAGetLastError());
   }
   fd = alloc_socket_fd(socket_handle);
   if (fd < 0) {
-    closesocket(socket_handle);
+    winsock.closesocket(socket_handle);
     return -EMFILE;
   }
   return fd;
@@ -768,8 +840,8 @@ long __crt_sys_bind(int sockfd, const void* addr, unsigned int addrlen) {
   if (socket_handle == INVALID_SOCKET) {
     return -EBADF;
   }
-  return bind(socket_handle, (const struct sockaddr*)addr, (int)addrlen) == SOCKET_ERROR
-             ? -map_wsa_error(WSAGetLastError())
+  return winsock.bind(socket_handle, (const struct sockaddr*)addr, (int)addrlen) == SOCKET_ERROR
+             ? -map_wsa_error(winsock.WSAGetLastError())
              : 0;
 }
 
@@ -779,7 +851,9 @@ long __crt_sys_listen(int sockfd, int backlog) {
   if (socket_handle == INVALID_SOCKET) {
     return -EBADF;
   }
-  return listen(socket_handle, backlog) == SOCKET_ERROR ? -map_wsa_error(WSAGetLastError()) : 0;
+  return winsock.listen(socket_handle, backlog) == SOCKET_ERROR
+             ? -map_wsa_error(winsock.WSAGetLastError())
+             : 0;
 }
 
 long __crt_sys_accept(int sockfd, void* addr, unsigned int* addrlen) {
@@ -791,13 +865,13 @@ long __crt_sys_accept(int sockfd, void* addr, unsigned int* addrlen) {
   if (socket_handle == INVALID_SOCKET) {
     return -EBADF;
   }
-  accepted = accept(socket_handle, (struct sockaddr*)addr, addrlen != 0 ? &len : 0);
+  accepted = winsock.accept(socket_handle, (struct sockaddr*)addr, addrlen != 0 ? &len : 0);
   if (accepted == INVALID_SOCKET) {
-    return -map_wsa_error(WSAGetLastError());
+    return -map_wsa_error(winsock.WSAGetLastError());
   }
   fd = alloc_socket_fd(accepted);
   if (fd < 0) {
-    closesocket(accepted);
+    winsock.closesocket(accepted);
     return -EMFILE;
   }
   if (addrlen != 0) {
@@ -812,8 +886,8 @@ long __crt_sys_connect(int sockfd, const void* addr, unsigned int addrlen) {
   if (socket_handle == INVALID_SOCKET) {
     return -EBADF;
   }
-  return connect(socket_handle, (const struct sockaddr*)addr, (int)addrlen) == SOCKET_ERROR
-             ? -map_wsa_error(WSAGetLastError())
+  return winsock.connect(socket_handle, (const struct sockaddr*)addr, (int)addrlen) == SOCKET_ERROR
+             ? -map_wsa_error(winsock.WSAGetLastError())
              : 0;
 }
 
@@ -830,14 +904,14 @@ long __crt_sys_sendto(
   if (socket_handle == INVALID_SOCKET) {
     return -EBADF;
   }
-  result = sendto(
+  result = winsock.sendto(
       socket_handle,
       (const char*)buf,
       (int)len,
       flags,
       (const struct sockaddr*)dest_addr,
       (int)addrlen);
-  return result == SOCKET_ERROR ? -map_wsa_error(WSAGetLastError()) : result;
+  return result == SOCKET_ERROR ? -map_wsa_error(winsock.WSAGetLastError()) : result;
 }
 
 long __crt_sys_recvfrom(
@@ -854,7 +928,7 @@ long __crt_sys_recvfrom(
   if (socket_handle == INVALID_SOCKET) {
     return -EBADF;
   }
-  result = recvfrom(
+  result = winsock.recvfrom(
       socket_handle,
       (char*)buf,
       (int)len,
@@ -862,7 +936,7 @@ long __crt_sys_recvfrom(
       (struct sockaddr*)src_addr,
       addrlen != 0 ? &inout_len : 0);
   if (result == SOCKET_ERROR) {
-    return -map_wsa_error(WSAGetLastError());
+    return -map_wsa_error(winsock.WSAGetLastError());
   }
   if (addrlen != 0) {
     *addrlen = (unsigned int)inout_len;
@@ -877,8 +951,8 @@ long __crt_sys_getsockname(int sockfd, void* addr, unsigned int* addrlen) {
   if (socket_handle == INVALID_SOCKET) {
     return -EBADF;
   }
-  if (getsockname(socket_handle, (struct sockaddr*)addr, &len) == SOCKET_ERROR) {
-    return -map_wsa_error(WSAGetLastError());
+  if (winsock.getsockname(socket_handle, (struct sockaddr*)addr, &len) == SOCKET_ERROR) {
+    return -map_wsa_error(winsock.WSAGetLastError());
   }
   if (addrlen != 0) {
     *addrlen = (unsigned int)len;
@@ -892,13 +966,13 @@ long __crt_sys_setsockopt(int sockfd, int level, int optname, const void* optval
   if (socket_handle == INVALID_SOCKET) {
     return -EBADF;
   }
-  return setsockopt(
+  return winsock.setsockopt(
              socket_handle,
              translate_socket_level(level),
              translate_socket_option(level, optname),
              (const char*)optval,
              (int)optlen) == SOCKET_ERROR
-             ? -map_wsa_error(WSAGetLastError())
+             ? -map_wsa_error(winsock.WSAGetLastError())
              : 0;
 }
 
@@ -910,7 +984,9 @@ long __crt_sys_shutdown(int sockfd, int how) {
   if (socket_handle == INVALID_SOCKET) {
     return -EBADF;
   }
-  return shutdown(socket_handle, mapped_how) == SOCKET_ERROR ? -map_wsa_error(WSAGetLastError()) : 0;
+  return winsock.shutdown(socket_handle, mapped_how) == SOCKET_ERROR
+             ? -map_wsa_error(winsock.WSAGetLastError())
+             : 0;
 }
 
 long __crt_sys_realpath_path(const char* path, char* resolved_path, unsigned long size) {

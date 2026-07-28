@@ -130,12 +130,6 @@ if(CRT_TARGET_OS STREQUAL "windows")
     PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES}
     NO_DEFAULT_PATH
   )
-  find_file(CRT_WINDOWS_WS2_32_LIB
-    NAMES ws2_32.lib
-    PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES}
-    NO_DEFAULT_PATH
-  )
-
   if(CRT_WINDOWS_KERNEL32_LIB)
     message(STATUS "Windows kernel32 import library: ${CRT_WINDOWS_KERNEL32_LIB}")
   else()
@@ -150,17 +144,9 @@ if(CRT_TARGET_OS STREQUAL "windows")
     set(CRT_WINDOWS_SYNCHRONIZATION_LIB synchronization.lib CACHE FILEPATH "Windows synchronization import library")
   endif()
 
-  if(CRT_WINDOWS_WS2_32_LIB)
-    message(STATUS "Windows ws2_32 import library: ${CRT_WINDOWS_WS2_32_LIB}")
-  else()
-    message(WARNING "ws2_32.lib was not found. Use a Visual Studio Developer shell or set CRT_WINDOWS_WS2_32_LIB.")
-    set(CRT_WINDOWS_WS2_32_LIB ws2_32.lib CACHE FILEPATH "Windows ws2_32 import library")
-  endif()
-
   set(CRT_WINDOWS_SYSTEM_LIBS
     "${CRT_WINDOWS_KERNEL32_LIB}"
     "${CRT_WINDOWS_SYNCHRONIZATION_LIB}"
-    "${CRT_WINDOWS_WS2_32_LIB}"
   )
 endif()
 
