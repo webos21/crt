@@ -20,6 +20,7 @@ int main(void) {
   FILE* temp;
   char buffer[16];
   char small_buffer[4];
+  fpos_t pos;
   size_t nread;
   int ch;
   int fd;
@@ -33,13 +34,13 @@ int main(void) {
     fclose(stream);
     return fail("fputs");
   }
-  if (ftell(stream) != 6) {
+  if (ftell(stream) != 6 || ftello(stream) != 6) {
     fclose(stream);
     return fail("ftell after write");
   }
-  if (fseek(stream, 1, SEEK_SET) != 0) {
+  if (fseeko(stream, 1, SEEK_SET) != 0) {
     fclose(stream);
-    return fail("fseek set");
+    return fail("fseeko set");
   }
 
   if (setvbuf(stream, buffer, _IOLBF, sizeof(buffer)) != 0) {
@@ -52,6 +53,19 @@ int main(void) {
   if (nread != 3 || buffer[0] != 'b' || buffer[1] != 'c' || buffer[2] != 'd') {
     fclose(stream);
     return fail("fread");
+  }
+  if (fgetpos(stream, &pos) != 0 || pos != 4) {
+    fclose(stream);
+    return fail("fgetpos");
+  }
+  if (fsetpos(stream, &pos) != 0 || fgetc(stream) != 'e') {
+    fclose(stream);
+    return fail("fsetpos");
+  }
+  rewind(stream);
+  if (fgetc(stream) != 'a' || feof(stream) || ferror(stream)) {
+    fclose(stream);
+    return fail("rewind");
   }
 
   if (fclose(stream) != 0) {

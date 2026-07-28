@@ -352,3 +352,84 @@ float fmodf(float x, float y) {
 long double fmodl(long double x, long double y) {
   return (long double)fmod((double)x, (double)y);
 }
+
+static double nearest_integer_ties_even(double x) {
+  double down;
+  double up;
+  double frac;
+
+  if (x >= 0.0) {
+    down = floor(x);
+    frac = x - down;
+    if (frac < 0.5) {
+      return down;
+    }
+    if (frac > 0.5) {
+      return down + 1.0;
+    }
+    return fmod(down, 2.0) == 0.0 ? down : down + 1.0;
+  }
+
+  up = ceil(x);
+  frac = up - x;
+  if (frac < 0.5) {
+    return up;
+  }
+  if (frac > 0.5) {
+    return up - 1.0;
+  }
+  return fmod(up, 2.0) == 0.0 ? up : up - 1.0;
+}
+
+double remainder(double x, double y) {
+  double q;
+  double r;
+
+  if (isnan(x) || isnan(y) || isinf(x) || y == 0.0) {
+    return NAN;
+  }
+  if (isinf(y)) {
+    return x;
+  }
+  q = nearest_integer_ties_even(x / y);
+  r = x - q * y;
+  return r == 0.0 ? copysign(0.0, x) : r;
+}
+
+float remainderf(float x, float y) {
+  return (float)remainder((double)x, (double)y);
+}
+
+long double remainderl(long double x, long double y) {
+  return (long double)remainder((double)x, (double)y);
+}
+
+double remquo(double x, double y, int* quo) {
+  double q;
+  double r;
+  int sign;
+  int bits;
+
+  if (isnan(x) || isnan(y) || isinf(x) || y == 0.0) {
+    *quo = 0;
+    return NAN;
+  }
+  if (isinf(y)) {
+    *quo = 0;
+    return x;
+  }
+  q = nearest_integer_ties_even(x / y);
+  r = x - q * y;
+  sign = q < 0.0 ? -1 : 1;
+  bits = (int)fmod(fabs(q), 128.0);
+  *quo = sign * bits;
+  return r == 0.0 ? copysign(0.0, x) : r;
+}
+
+float remquof(float x, float y, int* quo) {
+  return (float)remquo((double)x, (double)y, quo);
+}
+
+long double remquol(long double x, long double y, int* quo) {
+  return (long double)remquo((double)x, (double)y, quo);
+}

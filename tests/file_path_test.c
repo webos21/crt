@@ -18,6 +18,7 @@ int main(void) {
   char byte = 'Z';
   char readback = 0;
   char linkbuf[64];
+  char mktemplate[] = "mkstemp_test.XXXXXX";
   char resolved[PATH_MAX];
   char* allocated_path;
   int fd;
@@ -38,6 +39,10 @@ int main(void) {
   if (stat("file_path_test.dir", &st) != 0 || !S_ISDIR(st.st_mode)) {
     return fail("stat dir");
   }
+  if (S_ISREG(st.st_mode) || S_ISCHR(st.st_mode) || S_ISBLK(st.st_mode) ||
+      S_ISFIFO(st.st_mode) || S_ISLNK(st.st_mode) || S_ISSOCK(st.st_mode)) {
+    return fail("stat type macros");
+  }
   if (chdir("file_path_test.dir") != 0) {
     return fail("chdir into");
   }
@@ -56,6 +61,25 @@ int main(void) {
   if (access("missing.tmp", F_OK) == 0) {
     close(fd);
     return fail("access missing");
+  }
+  high_copy = mkstemp(mktemplate);
+  if (high_copy < 0 || strstr(mktemplate, "XXXXXX") != 0) {
+    close(fd);
+    return fail("mkstemp");
+  }
+  if (write(high_copy, &byte, 1) != 1) {
+    close(high_copy);
+    close(fd);
+    return fail("write mkstemp");
+  }
+  close(high_copy);
+  if (stat(mktemplate, &st) != 0 || !S_ISREG(st.st_mode)) {
+    close(fd);
+    return fail("stat mkstemp");
+  }
+  if (remove(mktemplate) != 0) {
+    close(fd);
+    return fail("remove mkstemp");
   }
   if (stat("sample.tmp", &st) != 0 || !S_ISREG(st.st_mode) || st.st_size != 1) {
     close(fd);

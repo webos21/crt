@@ -299,9 +299,9 @@ int fileno(FILE* stream) {
   return stream_fd(stream);
 }
 
-int fseek(FILE* stream, long offset, int whence) {
+static int stream_seek(FILE* stream, off_t offset, int whence) {
   int fd = stream_fd(stream);
-  long adjusted = offset;
+  off_t adjusted = offset;
 
   if (fd < 0) {
     return -1;
@@ -310,12 +310,12 @@ int fseek(FILE* stream, long offset, int whence) {
     return -1;
   }
   if (stream->last_op == CRT_STDIO_READ && whence == SEEK_CUR) {
-    adjusted -= (long)(stream->buffer_len - stream->buffer_pos);
+    adjusted -= (off_t)(stream->buffer_len - stream->buffer_pos);
     if (stream->ungot) {
       --adjusted;
     }
   }
-  if (lseek(fd, (off_t)adjusted, whence) < 0) {
+  if (lseek(fd, adjusted, whence) < 0) {
     stream->error = 1;
     return -1;
   }
@@ -325,16 +325,16 @@ int fseek(FILE* stream, long offset, int whence) {
   return 0;
 }
 
-long ftell(FILE* stream) {
+static off_t stream_tell(FILE* stream) {
   int fd = stream_fd(stream);
   off_t result;
 
   if (fd < 0) {
-    return -1;
+    return (off_t)-1;
   }
   result = lseek(fd, 0, SEEK_CUR);
   if (result < 0) {
-    return -1;
+    return (off_t)-1;
   }
   if (stream->last_op == CRT_STDIO_WRITE && stream->buffer_dirty) {
     result += (off_t)stream->buffer_len;
@@ -344,7 +344,52 @@ long ftell(FILE* stream) {
       --result;
     }
   }
-  return (long)result;
+  return result;
+}
+
+int fseek(FILE* stream, long offset, int whence) {
+  return stream_seek(stream, (off_t)offset, whence);
+}
+
+long ftell(FILE* stream) {
+  return (long)stream_tell(stream);
+}
+
+int fseeko(FILE* stream, off_t offset, int whence) {
+  return stream_seek(stream, offset, whence);
+}
+
+off_t ftello(FILE* stream) {
+  return stream_tell(stream);
+}
+
+void rewind(FILE* stream) {
+  if (stream_seek(stream, 0, SEEK_SET) == 0) {
+    clearerr(stream);
+  }
+}
+
+int fgetpos(FILE* stream, fpos_t* pos) {
+  off_t result;
+
+  if (pos == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  result = stream_tell(stream);
+  if (result < 0) {
+    return -1;
+  }
+  *pos = result;
+  return 0;
+}
+
+int fsetpos(FILE* stream, const fpos_t* pos) {
+  if (pos == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return stream_seek(stream, *pos, SEEK_SET);
 }
 
 int fputc(int c, FILE* stream) {

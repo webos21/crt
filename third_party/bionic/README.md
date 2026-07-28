@@ -14,12 +14,36 @@ Observed main commit: 731631f300090436d7f5df80d50b6275c8c60a93
 License family: BSD-style/permissive for imported libc files
 ```
 
+## Main-First And Legacy Exceptions
+
+The project baseline is Bionic `main`. Legacy refs are used only as curated
+exceptions when current Bionic has no small portable C source for the requested
+function, when current code is tied to Android-private runtime machinery, or
+when current code would force a source-family switch that conflicts with the
+tranche policy.
+
+Current legacy exceptions are:
+
+- `ics-mr0` for early string/memory and numeric-conversion bootstrap sources.
+  These files are small BSD-style C implementations and were easier to adapt to
+  the cross-OS C99/freestanding PAL than current architecture-tuned Bionic
+  variants.
+- Bionic `884e4f8` for selected fdlibm sources such as `exp`, `log`, `pow`, and
+  `scalbn*`. Current Bionic `main` either no longer lists those exact portable
+  double sources or, for `scalbn*`, carries a musl-derived implementation. The
+  project keeps these early libm imports on an fdlibm-oriented path until a
+  native Bionic-main import map is explicit.
+
+Every row below is authoritative for local provenance. If a legacy source is
+replaced by a current-main source later, update the row rather than leaving both
+as implicit alternatives.
+
 ## Imported Files
 
 ### String/Memory Tranche 1
 
 The first runtime import uses portable C string/memory implementations from the
-Android Bionic `ics-mr0` tree.
+Android Bionic `ics-mr0` tree as a legacy bootstrap exception.
 
 | Local file | Upstream path | Upstream ref | Status | Notes |
 | --- | --- | --- | --- | --- |
@@ -97,7 +121,9 @@ out-of-line C99 functions.
 | Local file | Upstream path | Upstream ref | Status | Notes |
 | --- | --- | --- | --- | --- |
 | `include/math.h` | `libc/include/math.h` | project-owned | new | Minimal C99/POSIX math declarations and classification macros for the first `libm.a` boundary. |
+| `include/fenv.h` | `libc/include/fenv.h` | project-owned | new | Minimal C99 floating-point environment declarations with an explicit no-op bootstrap policy. |
 | `libm/src/basic.c` | `libm/builtins.cpp` plus mixed Bionic/POSIX surface | adapted/project-owned | new | Bootstrap float/long double wrappers and current-Bionic-style builtin `fabs*`, `copysign*`, `fminf`, `fmaxf`, `sqrt`, and `sqrtf`; uses Clang elementwise sqrt to avoid recursive Debug/O0 libcalls. |
+| `libm/src/fenv.c` | `libm/fenv-*.c` policy surface | project-owned | new | Bootstrap no-op fenv implementation; accepts only `FE_TONEAREST` and does not expose hardware exception flags yet. |
 
 ### Libm FreeBSD/msun Import Tranche 1
 

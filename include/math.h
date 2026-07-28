@@ -17,6 +17,10 @@ extern "C" {
 #define INFINITY (__builtin_inff())
 #define NAN (__builtin_nanf(""))
 
+#define MATH_ERRNO 1
+#define MATH_ERREXCEPT 2
+#define math_errhandling 0
+
 #define fpclassify(x) __builtin_fpclassify(FP_NAN, FP_INFINITE, FP_NORMAL, FP_SUBNORMAL, FP_ZERO, (x))
 #define isfinite(x) __builtin_isfinite(x)
 #define isinf(x) __builtin_isinf(x)
@@ -130,6 +134,14 @@ long double modfl(long double x, long double* iptr);
 double fmod(double x, double y);
 float fmodf(float x, float y);
 long double fmodl(long double x, long double y);
+
+double remainder(double x, double y);
+float remainderf(float x, float y);
+long double remainderl(long double x, long double y);
+
+double remquo(double x, double y, int* quo);
+float remquof(float x, float y, int* quo);
+long double remquol(long double x, long double y, int* quo);
 
 #ifdef __cplusplus
 }

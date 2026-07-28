@@ -3,6 +3,7 @@
 
 #include <stdarg.h>
 #include <stddef.h>
+#include <sys/types.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,6 +26,7 @@ extern "C" {
 #endif
 
 typedef struct __crt_FILE FILE;
+typedef off_t fpos_t;
 
 extern FILE* stdin;
 extern FILE* stdout;
@@ -41,6 +43,11 @@ int fclose(FILE* stream);
 int fileno(FILE* stream);
 int fseek(FILE* stream, long offset, int whence);
 long ftell(FILE* stream);
+int fseeko(FILE* stream, off_t offset, int whence);
+off_t ftello(FILE* stream);
+void rewind(FILE* stream);
+int fgetpos(FILE* stream, fpos_t* pos);
+int fsetpos(FILE* stream, const fpos_t* pos);
 int fgetc(FILE* stream);
 char* fgets(char* s, int size, FILE* stream);
 int getc(FILE* stream);

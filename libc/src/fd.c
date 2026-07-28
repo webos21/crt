@@ -129,6 +129,12 @@ static long normalize_syscall_result(long result) {
   return result;
 }
 
+static char mkstemp_char(unsigned long value) {
+  static const char alphabet[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  return alphabet[value % (sizeof(alphabet) - 1)];
+}
+
 static int path_is_absolute(const char* path) {
   if (path == 0 || path[0] == 0) {
     return 0;
@@ -247,6 +253,45 @@ int open(const char* path, int flags, ...) {
   }
 
   return (int)normalize_syscall_result(__crt_sys_open(path, flags, mode));
+}
+
+int mkstemp(char* template_path) {
+  static unsigned long counter;
+  size_t length;
+  size_t suffix;
+  unsigned long attempt;
+
+  if (template_path == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  length = strlen(template_path);
+  if (length < 6 || strcmp(template_path + length - 6, "XXXXXX") != 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  suffix = length - 6;
+
+  for (attempt = 0; attempt < 4096; ++attempt) {
+    unsigned long value = counter++ ^ (unsigned long)getpid() ^ (attempt << 16);
+    size_t i;
+    int fd;
+
+    for (i = 0; i < 6; ++i) {
+      template_path[suffix + i] = mkstemp_char(value);
+      value = value / 62UL + 0x9e3779b9UL;
+    }
+    fd = open(template_path, O_CREAT | O_EXCL | O_RDWR, 0600);
+    if (fd >= 0) {
+      return fd;
+    }
+    if (errno != EEXIST) {
+      return -1;
+    }
+  }
+
+  errno = EEXIST;
+  return -1;
 }
 
 int close(int fd) {

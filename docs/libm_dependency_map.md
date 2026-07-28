@@ -7,7 +7,7 @@ present before the function is imported into `libm/src/freebsd/`.
 
 ## Source Policy
 
-Current Bionic `main` uses a mixed strategy:
+Current Bionic `main` is the default reference, but it uses a mixed strategy:
 
 - many trigonometric and helper functions come from Bionic's current
   FreeBSD/msun import under `libm/upstream-freebsd/lib/msun/src/`;
@@ -23,6 +23,13 @@ provides a stable builtin across the supported 64-bit targets and when compiler
 lowering keeps the freestanding boundary explicit. Portable C sources remain
 preferred over architecture-specific optimized routines for functions that do
 not have a suitable compiler builtin policy.
+
+Older Bionic fdlibm files are allowed only as documented bootstrap exceptions.
+They should be used when current Bionic no longer carries a direct portable C
+source for the function or when current Bionic's available source would pull in
+architecture-specific optimized code, Android-private runtime dependencies, or a
+source family that does not match the tranche policy. These exceptions must stay
+visible in `third_party/bionic/README.md`.
 
 ## Imported In This Tranche
 
@@ -82,9 +89,16 @@ separate precision tranches.
 
 Recommended import order:
 
-1. Native float precision for `expf`, `logf`, and `powf`
-2. Native float precision for `sinf`, `cosf`, and `tanf`
-3. Native fdlibm replacements for `log10`, `log2`, `expm1`, and `log1p`
-4. Native fdlibm replacements for `frexp`, `modf`, `fmod`, and `remainder`
-5. Import `remainder` and related quotient variants
-6. Floating-point exception and `errno` policy
+1. Resolve native float source policy for `expf`, `logf`, `powf`, `sinf`, and
+   `cosf`. Current Bionic `main` does not list all of these as simple
+   FreeBSD/msun C files in `libm/Android.bp`; some are supplied through other
+   source groups or optimized routines. Avoid partial imports until the source
+   map is explicit.
+2. Native float precision for `tanf`, `log10f`, `expm1f`, `log1pf`,
+   `remainderf`, `remquof`, and `fmodf`, where current Bionic FreeBSD/msun
+   source files are directly listed.
+3. Native fdlibm replacements for `log10`, `log2`, `expm1`, and `log1p`.
+4. Native fdlibm replacements for `frexp`, `modf`, `fmod`, `remainder`, and
+   `remquo`.
+5. Hardware-backed `fenv` per target architecture, then decide whether
+   `math_errhandling` should become `MATH_ERREXCEPT`, `MATH_ERRNO`, or both.

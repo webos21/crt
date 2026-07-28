@@ -38,10 +38,41 @@ Branch: main
 Observed main commit: 731631f300090436d7f5df80d50b6275c8c60a93
 ```
 
-Some first-tranche portable string/memory files are taken from the older
-`ics-mr0` Bionic tree because modern Bionic uses architecture-specific assembly
-or reorganized upstream source for several of these functions. Those files must
-still be recorded individually in `third_party/bionic/README.md`.
+## Main-First Source Policy
+
+The default source policy is **Bionic main first**. New imports should first look
+at `refs/heads/main` and should use current Bionic public headers, current
+Bionic FreeBSD/msun sources, current Bionic builtins policy, and current Bionic
+kernel-header flow whenever those sources can be used cleanly in this project's
+C99/freestanding PAL environment.
+
+Older Bionic refs such as `ics-mr0` or `884e4f8` are legacy exceptions, not the
+baseline. A legacy exception is allowed only when at least one of these applies:
+
+- current Bionic no longer carries a small portable C implementation for the
+  function;
+- current Bionic routes the function through architecture-specific assembly,
+  optimized routines, Android-private C++ runtime code, fortify hooks, or other
+  dependencies that would pull in a larger Android runtime tranche too early;
+- current Bionic's available implementation is derived from a source family this
+  project has decided not to use as a primary base for that tranche, such as
+  musl-derived code in an otherwise fdlibm-oriented import;
+- the imported source is explicitly temporary bootstrap code and has a documented
+  path back to current Bionic or to a project-owned PAL implementation.
+
+Every legacy exception must be recorded in `third_party/bionic/README.md` with
+the upstream ref, original path, local adaptation status, and a short reason why
+`main` was not used. Legacy imports should be treated as review targets during
+future cleanup, especially once the relevant PAL, pthread, fenv, or architecture
+support exists.
+
+Some first-tranche portable string/memory files are currently taken from the
+older `ics-mr0` Bionic tree because modern Bionic uses architecture-specific
+assembly or reorganized upstream source for several of these functions. Some
+early fdlibm functions are taken from Bionic `884e4f8` because current Bionic
+`main` no longer lists direct portable C sources for those exact double-precision
+entry points. These choices are compatibility/bootstrap choices, not a statement
+that `ics-mr0` or `884e4f8` is the project baseline.
 
 ## License And Provenance Policy
 
@@ -238,6 +269,9 @@ The current surface includes:
 - `frexp`, `frexpf`, `frexpl`
 - `modf`, `modff`, `modfl`
 - `fmod`, `fmodf`, `fmodl`
+- `remainder`, `remainderf`, `remainderl`
+- `remquo`, `remquof`, `remquol`
+- `fenv.h` no-op environment surface
 
 The first Bionic/FreeBSD msun import replaces the double-precision
 `floor`/`ceil`/`trunc`/`round` and `fmin`/`fmax` implementations with curated
@@ -288,6 +322,20 @@ derived from the existing `log`/`exp` core, `frexp` uses local IEEE bit
 decomposition, and `modf`/`fmod` use the current rounding primitives. This is
 intended to satisfy common configure probes and early library ports before
 native fdlibm precision tranches are imported.
+
+The remainder tranche opens `remainder`, `remainderf`, `remainderl`, `remquo`,
+`remquof`, and `remquol` as project-owned bootstrap implementations. They use
+round-to-nearest, ties-to-even quotient selection and preserve signed-zero
+results for the tested cases. Full fdlibm replacements from current Bionic
+FreeBSD/msun remain the intended accuracy tranche.
+
+The first `fenv.h` tranche is a policy surface, not a hardware floating-point
+environment implementation. It exposes the C99 exception and rounding constants,
+`FE_DFL_ENV`, and the core `fe*` functions. The implementation reports
+`FE_TONEAREST`, accepts only `FE_TONEAREST` in `fesetround`, does not track or
+raise floating-point exception flags, and keeps `math_errhandling` set to `0`.
+This explicitly documents that the current libm neither sets `errno` nor raises
+observable floating-point exceptions.
 
 The float and long double variants currently remain bootstrap wrappers, and
 `sqrtl` still uses project-owned bootstrap behavior. Native-precision variants,

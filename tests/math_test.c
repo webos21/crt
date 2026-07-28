@@ -1,5 +1,6 @@
 #include <math.h>
 #include <stdio.h>
+#include <fenv.h>
 
 static int fail(const char* message) {
   fprintf(stderr, "math_test: %s\n", message);
@@ -18,6 +19,9 @@ int main(void) {
   float integralf;
   long double integrall;
   int exponent;
+  int quotient;
+  fexcept_t except_flag;
+  fenv_t env;
 
   if (!isnan(nan_value) || !isinf(inf_value) || !isfinite(1.0) ||
       fpclassify(0.0) != FP_ZERO || fpclassify(inf_value) != FP_INFINITE) {
@@ -143,6 +147,30 @@ int main(void) {
       !near_double(fmodf(7.0f, 2.5f), 2.0) ||
       !near_double((double)fmodl(7.0L, 2.5L), 2.0)) {
     return fail("fmod");
+  }
+  if (!near_double(remainder(7.0, 2.5), -0.5) ||
+      !near_double(remainder(6.0, 4.0), -2.0) ||
+      !near_double(remainder(-7.0, 2.5), 0.5) || !signbit(remainder(-4.0, 2.0)) ||
+      remainder(1.0, INFINITY) != 1.0 || !isnan(remainder(1.0, 0.0)) ||
+      !isnan(remainder(INFINITY, 1.0)) || !near_double(remainderf(7.0f, 2.5f), -0.5) ||
+      !near_double((double)remainderl(7.0L, 2.5L), -0.5)) {
+    return fail("remainder");
+  }
+  if (!near_double(remquo(7.0, 2.5, &quotient), -0.5) || quotient != 3 ||
+      !near_double(remquo(-7.0, 2.5, &quotient), 0.5) || quotient != -3 ||
+      !near_double(remquof(7.0f, 2.5f, &quotient), -0.5) || quotient != 3 ||
+      !near_double((double)remquol(7.0L, 2.5L, &quotient), -0.5) || quotient != 3 ||
+      !isnan(remquo(1.0, 0.0, &quotient)) || quotient != 0) {
+    return fail("remquo");
+  }
+  if (math_errhandling != 0 || fegetround() != FE_TONEAREST ||
+      fesetround(FE_DOWNWARD) == 0 || fesetround(FE_TONEAREST) != 0 ||
+      feclearexcept(FE_ALL_EXCEPT) != 0 || fetestexcept(FE_ALL_EXCEPT) != 0 ||
+      feraiseexcept(FE_INVALID) != 0 || fetestexcept(FE_ALL_EXCEPT) != 0 ||
+      fegetexceptflag(&except_flag, FE_ALL_EXCEPT) != 0 || except_flag != 0 ||
+      fegetenv(&env) != 0 || feholdexcept(&env) != 0 ||
+      fesetenv(FE_DFL_ENV) != 0 || feupdateenv(FE_DFL_ENV) != 0) {
+    return fail("fenv policy");
   }
 
   printf("math_test: ok\n");

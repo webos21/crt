@@ -1,5 +1,6 @@
 add_library(m STATIC
   src/basic.c
+  src/fenv.c
   src/freebsd/e_exp.c
   src/freebsd/e_log.c
   src/freebsd/e_pow.c
