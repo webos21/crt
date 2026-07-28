@@ -660,9 +660,13 @@ The string/stdlib tranche adds:
 - `setenv`;
 - `unsetenv`.
 
-The environment store is currently process-local and runtime-owned. It does not
-yet import the host process environment at startup, nor does it synchronize with
-host-specific environment APIs.
+The environment store is process-local and runtime-owned, but startup now
+imports the host process environment before `main`: Linux and macOS pass the
+initial stack `envp` into `__crt_env_init`, while Windows imports the process
+environment block with `GetEnvironmentStringsA`. `getenv`, `setenv`, and
+`unsetenv` operate on the copied runtime store and expose it through `environ`;
+they still do not synchronize later changes back to host-specific environment
+APIs.
 
 Windows builds now include a small project-owned `__chkstk` helper in `libc.a`
 for x86_64 and aarch64. Clang may emit this symbol for functions with larger

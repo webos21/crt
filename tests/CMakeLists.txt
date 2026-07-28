@@ -138,6 +138,7 @@ set_tests_properties(stdlib_test_runs PROPERTIES
 add_crt_test(stdlib_string_extra_test stdlib_string_extra_test.c)
 set_tests_properties(stdlib_string_extra_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "stdlib_string_extra_test: ok"
+  ENVIRONMENT "CRT_HOST_ENV_TEST=visible"
 )
 
 add_crt_test(stdint_test stdint_test.c)

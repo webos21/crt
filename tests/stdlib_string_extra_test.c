@@ -24,6 +24,11 @@ int main(void) {
   int key = 4;
   int* found;
 
+  if (getenv("CRT_HOST_ENV_TEST") == 0 ||
+      strcmp(getenv("CRT_HOST_ENV_TEST"), "visible") != 0) {
+    return fail("host environment import");
+  }
+
   if (strcmp(strtok_r(text, ",", &save), "alpha") != 0 ||
       strcmp(strtok_r(0, ",", &save), "beta") != 0 ||
       strcmp(strtok_r(0, ",", &save), "gamma") != 0 ||
