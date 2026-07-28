@@ -2,8 +2,13 @@
 #include <sched.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <time.h>
 
 #include <private/crt_wait.h>
+
+static int timeout_is_zero_or_negative(const struct timespec* timeout) {
+  return timeout != 0 && (timeout->tv_sec < 0 || (timeout->tv_sec == 0 && timeout->tv_nsec <= 0));
+}
 
 #if defined(CRT_TARGET_OS_LINUX)
 long __crt_sys_futex(int* addr, int op, int value, const void* timeout, int* addr2, int value3);
@@ -22,6 +27,25 @@ int __crt_wait32(int* addr, int expected) {
     return 0;
   }
   result = __crt_sys_futex(addr, CRT_FUTEX_WAIT_PRIVATE, expected, 0, 0, 0);
+  if (result == 0 || result == -EAGAIN || result == -EINTR) {
+    return 0;
+  }
+  return result < 0 ? (int)-result : 0;
+}
+
+int __crt_wait32_timed(int* addr, int expected, const struct timespec* timeout) {
+  long result;
+
+  if (addr == 0 || timeout == 0) {
+    return EINVAL;
+  }
+  if (__atomic_load_n(addr, __ATOMIC_ACQUIRE) != expected) {
+    return 0;
+  }
+  if (timeout_is_zero_or_negative(timeout)) {
+    return ETIMEDOUT;
+  }
+  result = __crt_sys_futex(addr, CRT_FUTEX_WAIT_PRIVATE, expected, timeout, 0, 0);
   if (result == 0 || result == -EAGAIN || result == -EINTR) {
     return 0;
   }
@@ -54,6 +78,7 @@ typedef int BOOL;
 
 #define CRT_WINAPI
 #define CRT_INFINITE 0xffffffffUL
+#define CRT_ERROR_TIMEOUT 1460UL
 
 __declspec(dllimport) DWORD CRT_WINAPI GetLastError(void);
 __declspec(dllimport) BOOL CRT_WINAPI WaitOnAddress(
@@ -72,9 +97,25 @@ static int map_windows_wait_error(DWORD error) {
       return EACCES;
     case 87:
       return EINVAL;
+    case CRT_ERROR_TIMEOUT:
+      return ETIMEDOUT;
     default:
       return EIO;
   }
+}
+
+static DWORD timeout_to_milliseconds(const struct timespec* timeout) {
+  uint64_t milliseconds;
+
+  if (timeout->tv_sec <= 0 && timeout->tv_nsec <= 0) {
+    return 0;
+  }
+  milliseconds = (uint64_t)timeout->tv_sec * 1000ULL;
+  milliseconds += ((uint64_t)timeout->tv_nsec + 999999ULL) / 1000000ULL;
+  if (milliseconds > 0xfffffffeULL) {
+    return 0xfffffffeUL;
+  }
+  return (DWORD)milliseconds;
 }
 
 int __crt_wait32(int* addr, int expected) {
@@ -85,6 +126,22 @@ int __crt_wait32(int* addr, int expected) {
     return 0;
   }
   if (!WaitOnAddress(addr, &expected, sizeof(expected), CRT_INFINITE)) {
+    return map_windows_wait_error(GetLastError());
+  }
+  return 0;
+}
+
+int __crt_wait32_timed(int* addr, int expected, const struct timespec* timeout) {
+  if (addr == 0 || timeout == 0) {
+    return EINVAL;
+  }
+  if (__atomic_load_n(addr, __ATOMIC_ACQUIRE) != expected) {
+    return 0;
+  }
+  if (timeout_is_zero_or_negative(timeout)) {
+    return ETIMEDOUT;
+  }
+  if (!WaitOnAddress(addr, &expected, sizeof(expected), timeout_to_milliseconds(timeout))) {
     return map_windows_wait_error(GetLastError());
   }
   return 0;
@@ -107,29 +164,54 @@ int __crt_wake32_all(int* addr) {
 }
 
 #elif defined(CRT_TARGET_OS_MACOS)
-typedef int (*crt_os_sync_wait_on_address_fn)(void*, uint64_t, size_t, uint32_t);
-typedef int (*crt_os_sync_wake_by_address_fn)(void*, size_t, uint32_t);
+typedef int os_clockid_t;
+typedef uint32_t os_sync_wait_on_address_flags_t;
+typedef uint32_t os_sync_wake_by_address_flags_t;
 
-#define CRT_RTLD_NEXT ((void*)-1)
-#define CRT_OS_SYNC_WAIT_ON_ADDRESS_NONE 0U
-#define CRT_OS_SYNC_WAKE_BY_ADDRESS_NONE 0U
+#define CRT_OS_CLOCK_MACH_ABSOLUTE_TIME 32
+#define CRT_DARWIN_ETIMEDOUT 60
 
-void* dlsym(void* handle, const char* symbol);
+int* __error(void);
+int os_sync_wait_on_address(
+    void* addr,
+    uint64_t value,
+    size_t size,
+    os_sync_wait_on_address_flags_t flags);
+int os_sync_wait_on_address_with_timeout(
+    void* addr,
+    uint64_t value,
+    size_t size,
+    os_sync_wait_on_address_flags_t flags,
+    os_clockid_t clockid,
+    uint64_t timeout_ns);
+int os_sync_wake_by_address_any(void* addr, size_t size, os_sync_wake_by_address_flags_t flags);
+int os_sync_wake_by_address_all(void* addr, size_t size, os_sync_wake_by_address_flags_t flags);
 
-static crt_os_sync_wait_on_address_fn macos_wait_fn(void) {
-  return (crt_os_sync_wait_on_address_fn)dlsym(CRT_RTLD_NEXT, "os_sync_wait_on_address");
+static int map_macos_wait_result(int result) {
+  int error;
+
+  if (result >= 0) {
+    return 0;
+  }
+  error = *__error();
+  if (error == CRT_DARWIN_ETIMEDOUT) {
+    return ETIMEDOUT;
+  }
+  if (error == ENOENT || error == EFAULT || error == ENOMEM) {
+    return 0;
+  }
+  return error;
 }
 
-static crt_os_sync_wake_by_address_fn macos_wake_one_fn(void) {
-  return (crt_os_sync_wake_by_address_fn)dlsym(CRT_RTLD_NEXT, "os_sync_wake_by_address_any");
-}
+static uint64_t timeout_to_nanoseconds(const struct timespec* timeout) {
+  uint64_t nanoseconds = (uint64_t)timeout->tv_sec * 1000000000ULL;
 
-static crt_os_sync_wake_by_address_fn macos_wake_all_fn(void) {
-  return (crt_os_sync_wake_by_address_fn)dlsym(CRT_RTLD_NEXT, "os_sync_wake_by_address_all");
+  nanoseconds += (uint64_t)timeout->tv_nsec;
+  return nanoseconds == 0 ? 1 : nanoseconds;
 }
 
 int __crt_wait32(int* addr, int expected) {
-  crt_os_sync_wait_on_address_fn wait_fn;
+  int result;
 
   if (addr == 0) {
     return EINVAL;
@@ -137,48 +219,50 @@ int __crt_wait32(int* addr, int expected) {
   if (__atomic_load_n(addr, __ATOMIC_ACQUIRE) != expected) {
     return 0;
   }
+  result = os_sync_wait_on_address(addr, (uint32_t)expected, sizeof(*addr), 0);
+  return map_macos_wait_result(result);
+}
 
-  wait_fn = macos_wait_fn();
-  if (wait_fn == 0) {
-    sched_yield();
+int __crt_wait32_timed(int* addr, int expected, const struct timespec* timeout) {
+  int result;
+
+  if (addr == 0 || timeout == 0) {
+    return EINVAL;
+  }
+  if (__atomic_load_n(addr, __ATOMIC_ACQUIRE) != expected) {
     return 0;
   }
-  if (wait_fn(addr, (uint32_t)expected, sizeof(expected), CRT_OS_SYNC_WAIT_ON_ADDRESS_NONE) < 0) {
-    return errno;
+  if (timeout_is_zero_or_negative(timeout)) {
+    return ETIMEDOUT;
   }
-  return 0;
+  result = os_sync_wait_on_address_with_timeout(
+      addr,
+      (uint32_t)expected,
+      sizeof(*addr),
+      0,
+      CRT_OS_CLOCK_MACH_ABSOLUTE_TIME,
+      timeout_to_nanoseconds(timeout));
+  return map_macos_wait_result(result);
 }
 
 int __crt_wake32_one(int* addr) {
-  crt_os_sync_wake_by_address_fn wake_fn;
+  int result;
 
   if (addr == 0) {
     return EINVAL;
   }
-  wake_fn = macos_wake_one_fn();
-  if (wake_fn == 0) {
-    return 0;
-  }
-  if (wake_fn(addr, sizeof(int), CRT_OS_SYNC_WAKE_BY_ADDRESS_NONE) < 0) {
-    return errno;
-  }
-  return 0;
+  result = os_sync_wake_by_address_any(addr, sizeof(*addr), 0);
+  return map_macos_wait_result(result);
 }
 
 int __crt_wake32_all(int* addr) {
-  crt_os_sync_wake_by_address_fn wake_fn;
+  int result;
 
   if (addr == 0) {
     return EINVAL;
   }
-  wake_fn = macos_wake_all_fn();
-  if (wake_fn == 0) {
-    return 0;
-  }
-  if (wake_fn(addr, sizeof(int), CRT_OS_SYNC_WAKE_BY_ADDRESS_NONE) < 0) {
-    return errno;
-  }
-  return 0;
+  result = os_sync_wake_by_address_all(addr, sizeof(*addr), 0);
+  return map_macos_wait_result(result);
 }
 
 #else
@@ -187,6 +271,19 @@ int __crt_wait32(int* addr, int expected) {
     return EINVAL;
   }
   if (__atomic_load_n(addr, __ATOMIC_ACQUIRE) == expected) {
+    sched_yield();
+  }
+  return 0;
+}
+
+int __crt_wait32_timed(int* addr, int expected, const struct timespec* timeout) {
+  if (addr == 0 || timeout == 0) {
+    return EINVAL;
+  }
+  if (__atomic_load_n(addr, __ATOMIC_ACQUIRE) == expected) {
+    if (timeout_is_zero_or_negative(timeout)) {
+      return ETIMEDOUT;
+    }
     sched_yield();
   }
   return 0;

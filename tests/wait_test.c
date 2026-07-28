@@ -1,5 +1,7 @@
+#include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <time.h>
 
 #include <private/crt_wait.h>
 
@@ -22,13 +24,28 @@ static void* worker(void* arg) {
 }
 
 int main(void) {
+  struct timespec timeout;
   pthread_t thread;
   void* result = 0;
 
   if (__crt_wait32(0, 0) == 0 ||
+      __crt_wait32_timed(0, 0, 0) == 0 ||
       __crt_wake32_one(0) == 0 ||
       __crt_wake32_all(0) == 0) {
     return fail("invalid wait args");
+  }
+  timeout.tv_sec = 0;
+  timeout.tv_nsec = 0;
+  if (__crt_wait32_timed(&value, 1, &timeout) != 0) {
+    return fail("timed wait mismatch");
+  }
+  if (__crt_wait32_timed(&value, 0, &timeout) != ETIMEDOUT) {
+    return fail("timed wait zero timeout");
+  }
+  timeout.tv_sec = 0;
+  timeout.tv_nsec = 1000000L;
+  if (__crt_wait32_timed(&value, 0, &timeout) != ETIMEDOUT) {
+    return fail("timed wait timeout");
   }
   if (pthread_create(&thread, 0, worker, 0) != 0) {
     return fail("pthread_create");

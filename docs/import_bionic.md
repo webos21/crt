@@ -445,6 +445,7 @@ The pthread condition variable tranche adds:
 - `pthread_cond_signal`
 - `pthread_cond_broadcast`
 - `pthread_cond_wait`
+- `pthread_cond_timedwait`
 - `pthread_condattr_init`
 - `pthread_condattr_destroy`
 
@@ -452,27 +453,36 @@ The condition variable uses a sequence counter in the Bionic-shaped
 `pthread_cond_t.__private[]` storage. Waiting threads unlock the supplied mutex,
 wait on the sequence address through the private wait/futex primitive, then lock
 the mutex again. This preserves the public API shape and basic predicate-loop
-usage while keeping the OS wait backend private.
+usage while keeping the OS wait backend private. `pthread_cond_timedwait` uses
+absolute `CLOCK_REALTIME` timeouts for now; condition clock attributes are
+deferred until the broader condattr policy is needed.
 
 ## Private Wait/Futex Tranche
 
 The private wait/futex tranche adds a small internal wait-address primitive:
 
 - `__crt_wait32`
+- `__crt_wait32_timed`
 - `__crt_wake32_one`
 - `__crt_wake32_all`
 
 Linux maps this to the raw `futex` syscall with private wait/wake operations.
 Windows maps it to `WaitOnAddress`, `WakeByAddressSingle`, and
-`WakeByAddressAll`. macOS resolves `os_sync_wait_on_address`,
-`os_sync_wake_by_address_any`, and `os_sync_wake_by_address_all` through
-`dlsym(RTLD_NEXT, ...)`, with a yield fallback if those symbols are unavailable
-on the running system.
+`WakeByAddressAll`. macOS maps it to libSystem's public wait-by-address API:
+`os_sync_wait_on_address`, `os_sync_wait_on_address_with_timeout`,
+`os_sync_wake_by_address_any`, and `os_sync_wake_by_address_all`.
+
+Timed waits use Linux futex relative timeouts, Windows `WaitOnAddress`
+millisecond timeouts, and macOS `os_sync_wait_on_address_with_timeout`
+nanosecond timeouts. Because the public project errno values follow the
+Bionic/Linux numbering, the macOS backend translates Darwin's timeout errno to
+the project `ETIMEDOUT` value before returning to libc code.
 
 `pthread_once`, `pthread_mutex_lock`, `pthread_mutex_unlock`,
 `pthread_rwlock_rdlock`, `pthread_rwlock_wrlock`, `pthread_rwlock_unlock`,
-`pthread_cond_signal`, `pthread_cond_broadcast`, and `pthread_cond_wait` now use
-this private primitive instead of pure spin/yield polling.
+`pthread_cond_signal`, `pthread_cond_broadcast`, `pthread_cond_wait`, and
+`pthread_cond_timedwait` now use this private primitive instead of pure
+spin/yield polling.
 
 ## VM Memory Tranche
 

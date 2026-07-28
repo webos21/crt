@@ -1,6 +1,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <time.h>
 
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
@@ -38,6 +39,7 @@ static void* worker(void* arg) {
 int main(void) {
   pthread_cond_t local_cond;
   pthread_condattr_t cond_attr;
+  struct timespec timeout;
   pthread_t thread;
   void* result = 0;
 
@@ -46,8 +48,15 @@ int main(void) {
       pthread_cond_signal(0) != EINVAL ||
       pthread_cond_broadcast(0) != EINVAL ||
       pthread_cond_wait(0, &mutex) != EINVAL ||
-      pthread_cond_wait(&cond, 0) != EINVAL) {
+      pthread_cond_wait(&cond, 0) != EINVAL ||
+      pthread_cond_timedwait(0, &mutex, 0) != EINVAL ||
+      pthread_cond_timedwait(&cond, 0, 0) != EINVAL) {
     return fail("invalid cond args");
+  }
+  timeout.tv_sec = 0;
+  timeout.tv_nsec = 1000000000L;
+  if (pthread_cond_timedwait(&cond, &mutex, &timeout) != EINVAL) {
+    return fail("invalid cond timeout");
   }
   if (pthread_condattr_init(0) != EINVAL ||
       pthread_condattr_init(&cond_attr) != 0 ||
@@ -58,6 +67,25 @@ int main(void) {
   if (pthread_cond_init(&local_cond, &cond_attr) != 0 ||
       pthread_cond_destroy(&local_cond) != 0) {
     return fail("local cond lifecycle");
+  }
+
+  if (clock_gettime(CLOCK_REALTIME, &timeout) != 0) {
+    return fail("clock_gettime");
+  }
+  if (pthread_mutex_lock(&mutex) != 0) {
+    return fail("timed wait lock");
+  }
+  timeout.tv_nsec += 1000000L;
+  if (timeout.tv_nsec >= 1000000000L) {
+    ++timeout.tv_sec;
+    timeout.tv_nsec -= 1000000000L;
+  }
+  if (pthread_cond_timedwait(&cond, &mutex, &timeout) != ETIMEDOUT) {
+    pthread_mutex_unlock(&mutex);
+    return fail("cond timed wait timeout");
+  }
+  if (pthread_mutex_unlock(&mutex) != 0) {
+    return fail("timed wait unlock");
   }
 
   if (pthread_mutex_lock(&mutex) != 0) {

@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <sys/mman.h>
+#include <time.h>
 
 #include <private/crt_atomic.h>
 #include <private/crt_wait.h>
@@ -149,6 +150,35 @@ static void clear_mutex_owner(pthread_mutex_t* mutex) {
   mutex->__private[CRT_MUTEX_OWNER_HIGH_WORD] = 0;
 }
 
+static int realtime_until(const struct timespec* abstime, struct timespec* remaining) {
+  struct timespec now;
+  time_t sec;
+  long nsec;
+
+  if (abstime == 0 || remaining == 0 || abstime->tv_nsec < 0 || abstime->tv_nsec >= 1000000000L) {
+    return EINVAL;
+  }
+  if (abstime->tv_sec < 0 || (abstime->tv_sec == 0 && abstime->tv_nsec == 0)) {
+    return ETIMEDOUT;
+  }
+  if (clock_gettime(CLOCK_REALTIME, &now) != 0) {
+    return errno;
+  }
+
+  sec = abstime->tv_sec - now.tv_sec;
+  nsec = abstime->tv_nsec - now.tv_nsec;
+  if (nsec < 0) {
+    --sec;
+    nsec += 1000000000L;
+  }
+  if (sec < 0 || (sec == 0 && nsec <= 0)) {
+    return ETIMEDOUT;
+  }
+  remaining->tv_sec = sec;
+  remaining->tv_nsec = nsec;
+  return 0;
+}
+
 #if defined(CRT_TARGET_OS_WINDOWS)
 static void init_windows_key_slots(void) {
   unsigned int i;
@@ -268,6 +298,54 @@ int pthread_cond_wait(pthread_cond_t* cond, pthread_mutex_t* mutex) {
 
   while (crt_atomic_load_acquire(cond_sequence(cond)) == sequence) {
     result = __crt_wait32(&cond->__private[CRT_COND_SEQUENCE_WORD], sequence);
+    if (result != 0 && result != EINTR && result != EAGAIN) {
+      break;
+    }
+  }
+
+  crt_atomic_fetch_add_acq_rel(cond_waiters(cond), -1);
+  {
+    int lock_result = pthread_mutex_lock(mutex);
+    return result != 0 ? result : lock_result;
+  }
+}
+
+int pthread_cond_timedwait(
+    pthread_cond_t* cond,
+    pthread_mutex_t* mutex,
+    const struct timespec* abstime) {
+  int sequence;
+  int result;
+
+  if (cond == 0 || mutex == 0 || abstime == 0) {
+    return EINVAL;
+  }
+  if (abstime->tv_nsec < 0 || abstime->tv_nsec >= 1000000000L) {
+    return EINVAL;
+  }
+
+  sequence = crt_atomic_load_acquire(cond_sequence(cond));
+  crt_atomic_fetch_add_acq_rel(cond_waiters(cond), 1);
+  result = pthread_mutex_unlock(mutex);
+  if (result != 0) {
+    crt_atomic_fetch_add_acq_rel(cond_waiters(cond), -1);
+    return result;
+  }
+
+  while (crt_atomic_load_acquire(cond_sequence(cond)) == sequence) {
+    struct timespec remaining;
+
+    result = realtime_until(abstime, &remaining);
+    if (result != 0) {
+      break;
+    }
+    result = __crt_wait32_timed(&cond->__private[CRT_COND_SEQUENCE_WORD], sequence, &remaining);
+    if (result == ETIMEDOUT) {
+      if (crt_atomic_load_acquire(cond_sequence(cond)) == sequence) {
+        break;
+      }
+      result = 0;
+    }
     if (result != 0 && result != EINTR && result != EAGAIN) {
       break;
     }
