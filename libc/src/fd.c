@@ -15,11 +15,105 @@ long __crt_sys_access(const char* path, int mode);
 long __crt_sys_mkdir(const char* path, unsigned int mode);
 long __crt_sys_rmdir(const char* path);
 long __crt_sys_chdir(const char* path);
-#if !defined(CRT_TARGET_OS_MACOS)
+#if defined(CRT_TARGET_OS_MACOS)
+long __crt_sys_macos_fcntl(int fd, int cmd, void* arg);
+#else
 long __crt_sys_getcwd(char* buf, unsigned long size);
 #endif
 long __crt_sys_dup(int oldfd);
 long __crt_sys_dup2(int oldfd, int newfd);
+#if defined(CRT_TARGET_OS_LINUX)
+long __crt_sys_statx(long dirfd, const char* path, int flags, unsigned int mask, void* statxbuf);
+#elif defined(CRT_TARGET_OS_WINDOWS)
+long __crt_sys_stat_path(const char* path, struct stat* st);
+long __crt_sys_fstat(int fd, struct stat* st);
+#elif defined(CRT_TARGET_OS_MACOS)
+long __crt_sys_macos_stat64(const char* path, void* statbuf);
+long __crt_sys_macos_fstat64(int fd, void* statbuf);
+long __crt_sys_macos_lstat64(const char* path, void* statbuf);
+#endif
+
+#if defined(CRT_TARGET_OS_LINUX)
+#define CRT_AT_FDCWD (-100L)
+#define CRT_AT_EMPTY_PATH 0x1000
+#define CRT_AT_SYMLINK_NOFOLLOW 0x0100
+#define CRT_STATX_BASIC_STATS 0x000007ffU
+#define CRT_STATX_ATTR_MODE 0x00000002U
+#define CRT_STATX_ATTR_NLINK 0x00000004U
+#define CRT_STATX_ATTR_UID 0x00000008U
+#define CRT_STATX_ATTR_GID 0x00000010U
+#define CRT_STATX_ATTR_ATIME 0x00000020U
+#define CRT_STATX_ATTR_MTIME 0x00000040U
+#define CRT_STATX_ATTR_CTIME 0x00000080U
+#define CRT_STATX_ATTR_INO 0x00000100U
+#define CRT_STATX_ATTR_SIZE 0x00000200U
+#define CRT_STATX_ATTR_BLOCKS 0x00000400U
+
+struct crt_statx_timestamp {
+  int64_t tv_sec;
+  uint32_t tv_nsec;
+  int32_t reserved;
+};
+
+struct crt_statx {
+  uint32_t mask;
+  uint32_t blksize;
+  uint64_t attributes;
+  uint32_t nlink;
+  uint32_t uid;
+  uint32_t gid;
+  uint16_t mode;
+  uint16_t reserved0;
+  uint64_t ino;
+  uint64_t size;
+  uint64_t blocks;
+  uint64_t attributes_mask;
+  struct crt_statx_timestamp atime;
+  struct crt_statx_timestamp btime;
+  struct crt_statx_timestamp ctime;
+  struct crt_statx_timestamp mtime;
+  uint32_t rdev_major;
+  uint32_t rdev_minor;
+  uint32_t dev_major;
+  uint32_t dev_minor;
+  uint64_t spare[14];
+};
+#endif
+
+#if defined(CRT_TARGET_OS_MACOS)
+struct crt_darwin_timespec {
+  int64_t tv_sec;
+  int64_t tv_nsec;
+};
+
+struct crt_darwin_stat64 {
+  int32_t dev;
+  uint16_t mode;
+  uint16_t nlink;
+  uint64_t ino;
+  uint32_t uid;
+  uint32_t gid;
+  int32_t rdev;
+  int32_t padding0;
+  struct crt_darwin_timespec atime;
+  struct crt_darwin_timespec mtime;
+  struct crt_darwin_timespec ctime;
+  struct crt_darwin_timespec birthtime;
+  int64_t size;
+  int64_t blocks;
+  int32_t blksize;
+  uint32_t flags;
+  uint32_t gen;
+  int32_t lspare;
+  int64_t qspare[2];
+};
+
+typedef char crt_darwin_stat64_size_check[
+    sizeof(struct crt_darwin_stat64) == 144 ? 1 : -1];
+
+#define CRT_MACOS_F_GETPATH 50
+#define CRT_MACOS_MAXPATHLEN 1024
+#endif
 
 static long normalize_syscall_result(long result) {
   if (result < 0 && result >= -4095) {
@@ -89,8 +183,36 @@ int chdir(const char* path) {
   return (int)normalize_syscall_result(__crt_sys_chdir(path));
 }
 
-#if !defined(CRT_TARGET_OS_MACOS)
 char* getcwd(char* buf, size_t size) {
+#if defined(CRT_TARGET_OS_MACOS)
+  char path[CRT_MACOS_MAXPATHLEN];
+  size_t length;
+  int fd;
+  long result;
+
+  if (buf == 0 || size == 0) {
+    __set_errno(EINVAL);
+    return 0;
+  }
+  fd = open(".", O_RDONLY);
+  if (fd < 0) {
+    return 0;
+  }
+  memset(path, 0, sizeof(path));
+  result = __crt_sys_macos_fcntl(fd, CRT_MACOS_F_GETPATH, path);
+  close(fd);
+  if (result < 0 && result >= -4095) {
+    __set_errno((int)-result);
+    return 0;
+  }
+  length = strlen(path);
+  if (length + 1 > size) {
+    __set_errno(ERANGE);
+    return 0;
+  }
+  memcpy(buf, path, length + 1);
+  return buf;
+#else
   long result;
 
   if (buf == 0 || size == 0) {
@@ -103,8 +225,8 @@ char* getcwd(char* buf, size_t size) {
     return 0;
   }
   return buf;
-}
 #endif
+}
 
 int dup(int oldfd) {
   return (int)normalize_syscall_result(__crt_sys_dup(oldfd));
@@ -117,10 +239,33 @@ int dup2(int oldfd, int newfd) {
   return (int)normalize_syscall_result(__crt_sys_dup2(oldfd, newfd));
 }
 
-int stat(const char* path, struct stat* st) {
-  int fd;
+#if !defined(CRT_TARGET_OS_LINUX) && !defined(CRT_TARGET_OS_WINDOWS) && !defined(CRT_TARGET_OS_MACOS)
+static int fallback_fstat(int fd, struct stat* st) {
   off_t current;
   off_t end;
+
+  if (st == 0) {
+    return (int)__set_errno(EINVAL);
+  }
+  memset(st, 0, sizeof(*st));
+  st->st_mode = S_IFREG | S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
+  st->st_nlink = 1;
+  st->st_blksize = 4096;
+  current = lseek(fd, 0, SEEK_CUR);
+  end = lseek(fd, 0, SEEK_END);
+  if (end < 0) {
+    return -1;
+  }
+  st->st_size = end;
+  st->st_blocks = (end + 511) / 512;
+  if (current >= 0) {
+    (void)lseek(fd, current, SEEK_SET);
+  }
+  return 0;
+}
+
+static int fallback_stat(const char* path, struct stat* st) {
+  int fd;
 
   if (path == 0 || st == 0) {
     return (int)__set_errno(EINVAL);
@@ -129,19 +274,154 @@ int stat(const char* path, struct stat* st) {
   if (fd < 0) {
     return -1;
   }
-  memset(st, 0, sizeof(*st));
-  st->st_mode = S_IFREG | S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
-  st->st_nlink = 1;
-  st->st_blksize = 4096;
-  current = lseek(fd, 0, SEEK_CUR);
-  end = lseek(fd, 0, SEEK_END);
-  if (end >= 0) {
-    st->st_size = end;
-    st->st_blocks = (end + 511) / 512;
-  }
-  if (current >= 0) {
-    (void)lseek(fd, current, SEEK_SET);
+  if (fallback_fstat(fd, st) != 0) {
+    close(fd);
+    return -1;
   }
   close(fd);
   return 0;
+}
+#endif
+
+#if defined(CRT_TARGET_OS_MACOS)
+static int darwin_stat_to_stat(const struct crt_darwin_stat64* ds, struct stat* st) {
+  memset(st, 0, sizeof(*st));
+  st->st_dev = (dev_t)(uint32_t)ds->dev;
+  st->st_ino = (ino_t)ds->ino;
+  st->st_mode = ds->mode;
+  st->st_nlink = ds->nlink;
+  st->st_uid = ds->uid;
+  st->st_gid = ds->gid;
+  st->st_rdev = (dev_t)(uint32_t)ds->rdev;
+  st->st_size = (off_t)ds->size;
+  st->st_blksize = (blksize_t)ds->blksize;
+  st->st_blocks = (blkcnt_t)ds->blocks;
+  st->st_atime = (time_t)ds->atime.tv_sec;
+  st->st_mtime = (time_t)ds->mtime.tv_sec;
+  st->st_ctime = (time_t)ds->ctime.tv_sec;
+  return 0;
+}
+
+static int macos_stat64_result(long result, const struct crt_darwin_stat64* ds, struct stat* st) {
+  if (result < 0 && result >= -4095) {
+    return (int)__set_errno((int)-result);
+  }
+  return darwin_stat_to_stat(ds, st);
+}
+#endif
+
+#if defined(CRT_TARGET_OS_LINUX)
+static int statx_to_stat(const struct crt_statx* sx, struct stat* st) {
+  memset(st, 0, sizeof(*st));
+  if ((sx->mask & CRT_STATX_ATTR_MODE) != 0) {
+    st->st_mode = sx->mode;
+  }
+  if ((sx->mask & CRT_STATX_ATTR_NLINK) != 0) {
+    st->st_nlink = sx->nlink;
+  }
+  if ((sx->mask & CRT_STATX_ATTR_UID) != 0) {
+    st->st_uid = sx->uid;
+  }
+  if ((sx->mask & CRT_STATX_ATTR_GID) != 0) {
+    st->st_gid = sx->gid;
+  }
+  if ((sx->mask & CRT_STATX_ATTR_INO) != 0) {
+    st->st_ino = sx->ino;
+  }
+  if ((sx->mask & CRT_STATX_ATTR_SIZE) != 0) {
+    st->st_size = (off_t)sx->size;
+  }
+  if ((sx->mask & CRT_STATX_ATTR_BLOCKS) != 0) {
+    st->st_blocks = (blkcnt_t)sx->blocks;
+  }
+  if ((sx->mask & CRT_STATX_ATTR_ATIME) != 0) {
+    st->st_atime = (time_t)sx->atime.tv_sec;
+  }
+  if ((sx->mask & CRT_STATX_ATTR_MTIME) != 0) {
+    st->st_mtime = (time_t)sx->mtime.tv_sec;
+  }
+  if ((sx->mask & CRT_STATX_ATTR_CTIME) != 0) {
+    st->st_ctime = (time_t)sx->ctime.tv_sec;
+  }
+  st->st_dev = ((uint64_t)sx->dev_major << 32) | sx->dev_minor;
+  st->st_rdev = ((uint64_t)sx->rdev_major << 32) | sx->rdev_minor;
+  st->st_blksize = sx->blksize != 0 ? (blksize_t)sx->blksize : 4096;
+  return 0;
+}
+
+static int linux_statx(long dirfd, const char* path, int flags, struct stat* st) {
+  struct crt_statx sx;
+  long result;
+
+  if (st == 0 || path == 0) {
+    return (int)__set_errno(EINVAL);
+  }
+  memset(&sx, 0, sizeof(sx));
+  result = __crt_sys_statx(dirfd, path, flags, CRT_STATX_BASIC_STATS, &sx);
+  if (result < 0 && result >= -4095) {
+    return (int)__set_errno((int)-result);
+  }
+  return statx_to_stat(&sx, st);
+}
+#endif
+
+int stat(const char* path, struct stat* st) {
+#if defined(CRT_TARGET_OS_LINUX)
+  return linux_statx(CRT_AT_FDCWD, path, 0, st);
+#elif defined(CRT_TARGET_OS_WINDOWS)
+  if (path == 0 || st == 0) {
+    return (int)__set_errno(EINVAL);
+  }
+  return (int)normalize_syscall_result(__crt_sys_stat_path(path, st));
+#elif defined(CRT_TARGET_OS_MACOS)
+  {
+    struct crt_darwin_stat64 ds;
+    if (path == 0 || st == 0) {
+      return (int)__set_errno(EINVAL);
+    }
+    memset(&ds, 0, sizeof(ds));
+    return macos_stat64_result(__crt_sys_macos_stat64(path, &ds), &ds, st);
+  }
+#else
+  return fallback_stat(path, st);
+#endif
+}
+
+int lstat(const char* path, struct stat* st) {
+#if defined(CRT_TARGET_OS_LINUX)
+  return linux_statx(CRT_AT_FDCWD, path, CRT_AT_SYMLINK_NOFOLLOW, st);
+#elif defined(CRT_TARGET_OS_MACOS)
+  {
+    struct crt_darwin_stat64 ds;
+    if (path == 0 || st == 0) {
+      return (int)__set_errno(EINVAL);
+    }
+    memset(&ds, 0, sizeof(ds));
+    return macos_stat64_result(__crt_sys_macos_lstat64(path, &ds), &ds, st);
+  }
+#else
+  return stat(path, st);
+#endif
+}
+
+int fstat(int fd, struct stat* st) {
+#if defined(CRT_TARGET_OS_LINUX)
+  return linux_statx((long)fd, "", CRT_AT_EMPTY_PATH, st);
+#elif defined(CRT_TARGET_OS_WINDOWS)
+  if (st == 0) {
+    return (int)__set_errno(EINVAL);
+  }
+  return (int)normalize_syscall_result(__crt_sys_fstat(fd, st));
+#elif defined(CRT_TARGET_OS_MACOS)
+  {
+    struct crt_darwin_stat64 ds;
+    if (st == 0) {
+      return (int)__set_errno(EINVAL);
+    }
+    memset(&ds, 0, sizeof(ds));
+    return macos_stat64_result(__crt_sys_macos_fstat64(fd, &ds), &ds, st);
+  }
+#else
+  return fallback_fstat(fd, st);
+#endif
 }

@@ -23,6 +23,9 @@ int main(void) {
   if (mkdir("file_path_test.dir", 0777) != 0) {
     return fail("mkdir");
   }
+  if (stat("file_path_test.dir", &st) != 0 || !S_ISDIR(st.st_mode)) {
+    return fail("stat dir");
+  }
   if (chdir("file_path_test.dir") != 0) {
     return fail("chdir into");
   }
@@ -34,13 +37,27 @@ int main(void) {
     close(fd);
     return fail("write sample");
   }
-  if (access("sample.tmp", F_OK | R_OK) != 0) {
+  if (access("sample.tmp", F_OK | R_OK | W_OK) != 0) {
     close(fd);
     return fail("access sample");
+  }
+  if (access("missing.tmp", F_OK) == 0) {
+    close(fd);
+    return fail("access missing");
   }
   if (stat("sample.tmp", &st) != 0 || !S_ISREG(st.st_mode) || st.st_size != 1) {
     close(fd);
     return fail("stat sample");
+  }
+  memset(&st, 0, sizeof(st));
+  if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size != 1 || st.st_nlink < 1) {
+    close(fd);
+    return fail("fstat sample");
+  }
+  memset(&st, 0, sizeof(st));
+  if (lstat("sample.tmp", &st) != 0 || !S_ISREG(st.st_mode) || st.st_size != 1) {
+    close(fd);
+    return fail("lstat sample");
   }
   if (lseek(fd, 0, SEEK_SET) != 0) {
     close(fd);

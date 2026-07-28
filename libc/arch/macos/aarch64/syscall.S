@@ -99,6 +99,17 @@ ___crt_sys_chdir:
   neg x0, x0
   ret
 
+.globl ___crt_sys_macos_fcntl
+.p2align 2
+___crt_sys_macos_fcntl:
+  mov x16, #92
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
 .globl ___crt_sys_dup
 .p2align 2
 ___crt_sys_dup:
@@ -114,6 +125,39 @@ ___crt_sys_dup:
 .p2align 2
 ___crt_sys_dup2:
   mov x16, #90
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_macos_stat64
+.p2align 2
+___crt_sys_macos_stat64:
+  mov x16, #338
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_macos_fstat64
+.p2align 2
+___crt_sys_macos_fstat64:
+  mov x16, #339
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_macos_lstat64
+.p2align 2
+___crt_sys_macos_lstat64:
+  mov x16, #340
   svc #0x80
   b.cs 1f
   ret

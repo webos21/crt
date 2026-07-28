@@ -611,15 +611,31 @@ The file/path tranche adds:
 - `dup`;
 - `dup2`;
 - `stat`;
+- `fstat`;
+- `lstat`;
 - `sys/stat.h`.
 
 Linux uses raw syscalls. Windows maps the subset to Kernel32 APIs and the
-project fd table. macOS uses direct syscalls where practical and leaves
-`getcwd` to libSystem in the current host-linked bootstrap model. The first
-`stat` implementation is intentionally regular-file oriented: it verifies
-existence through `open`, fills a portable project `struct stat`, and derives
-file size from `lseek`. Directory metadata, timestamps, ownership, device
-identity, symlink handling, and OS-native stat layout import are future work.
+project fd table. macOS uses direct syscalls where practical. Its `getcwd`
+adapter opens `"."` and calls Darwin `fcntl(F_GETPATH)` through a private
+syscall wrapper, avoiding a libc-level dependency on libSystem's `getcwd`.
+
+The metadata tranche moves the supported OS backends beyond the first
+regular-file fallback. Linux uses the raw `statx` syscall and converts the
+kernel `statx` record into the project `struct stat`. Windows uses
+`GetFileInformationByHandle` through either an fd-table handle or a temporary
+metadata handle opened with `FILE_FLAG_BACKUP_SEMANTICS`, then fills file type,
+size, link count, file id, device id, block count, and timestamps. macOS uses
+the Darwin `stat64`, `fstat64`, and `lstat64` syscalls with a private
+Darwin-layout metadata record, then converts that record into the project
+`struct stat` without exposing Darwin's public `struct stat` ABI.
+
+`lstat` currently differs from `stat` on Linux and macOS. Linux passes
+`AT_SYMLINK_NOFOLLOW` to `statx`, and macOS calls `lstat64`.
+
+Windows `access` is still intentionally small, but it now distinguishes writable
+regular files from read-only regular files using `FILE_ATTRIBUTE_READONLY` for
+`W_OK` checks. `R_OK` and `X_OK` remain existence-oriented bootstrap checks.
 
 The string/stdlib tranche adds:
 
@@ -642,6 +658,8 @@ Windows builds now include a small project-owned `__chkstk` helper in `libc.a`
 for x86_64 and aarch64. Clang may emit this symbol for functions with larger
 stack frames when building with the MSVC ABI, and the freestanding link cannot
 depend on the MSVC runtime to provide it. The x86_64 helper performs page
-probing while preserving the allocation size register. The aarch64 helper is a
-bootstrap symbol shim and should be replaced with a full Windows ARM64 stack
-probe if larger runtime stack frames become common.
+probing while preserving the allocation size register. The aarch64 helper
+follows the Windows ARM64 stack-probe convention used by LLVM compiler-rt:
+`x15` carries the allocation size in 16-byte units, the helper probes pages
+below `sp`, clobbers only scratch registers `x16`/`x17`, and leaves `sp`
+unchanged for the caller's prologue to adjust.

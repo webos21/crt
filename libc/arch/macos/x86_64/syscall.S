@@ -99,6 +99,17 @@ ___crt_sys_chdir:
   negq %rax
   retq
 
+.globl ___crt_sys_macos_fcntl
+.p2align 4, 0x90
+___crt_sys_macos_fcntl:
+  movq $0x200005c, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
 .globl ___crt_sys_dup
 .p2align 4, 0x90
 ___crt_sys_dup:
@@ -114,6 +125,39 @@ ___crt_sys_dup:
 .p2align 4, 0x90
 ___crt_sys_dup2:
   movq $0x200005a, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_macos_stat64
+.p2align 4, 0x90
+___crt_sys_macos_stat64:
+  movq $0x2000152, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_macos_fstat64
+.p2align 4, 0x90
+___crt_sys_macos_fstat64:
+  movq $0x2000153, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_macos_lstat64
+.p2align 4, 0x90
+___crt_sys_macos_lstat64:
+  movq $0x2000154, %rax
   syscall
   jc 1f
   retq

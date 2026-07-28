@@ -1,7 +1,9 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
+#include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
@@ -23,10 +25,12 @@ typedef int BOOL;
 #define CREATE_ALWAYS 2
 #define OPEN_EXISTING 3
 #define OPEN_ALWAYS 4
+#define FILE_ATTRIBUTE_READONLY 0x00000001
 #define FILE_ATTRIBUTE_NORMAL 0x00000080
 #define MOVEFILE_REPLACE_EXISTING 0x00000001
 #define FILE_ATTRIBUTE_DIRECTORY 0x00000010
 #define INVALID_FILE_ATTRIBUTES ((DWORD)0xffffffffUL)
+#define FILE_FLAG_BACKUP_SEMANTICS 0x02000000
 #define FILE_BEGIN 0
 #define FILE_CURRENT 1
 #define FILE_END 2
@@ -42,6 +46,7 @@ typedef int BOOL;
 #define INVALID_HANDLE_VALUE ((HANDLE)(intptr_t)-1)
 #define WINDOWS_TICK 10000000ULL
 #define SEC_TO_UNIX_EPOCH 11644473600ULL
+#define DUPLICATE_SAME_ACCESS 0x00000002
 
 #if defined(_M_IX86) || defined(__i386__)
 #define CRT_WINAPI __stdcall
@@ -111,7 +116,22 @@ struct crt_filetime {
   DWORD low;
   DWORD high;
 };
+struct crt_by_handle_file_information {
+  DWORD file_attributes;
+  struct crt_filetime creation_time;
+  struct crt_filetime last_access_time;
+  struct crt_filetime last_write_time;
+  DWORD volume_serial_number;
+  DWORD file_size_high;
+  DWORD file_size_low;
+  DWORD number_of_links;
+  DWORD file_index_high;
+  DWORD file_index_low;
+};
 __declspec(dllimport) void CRT_WINAPI GetSystemTimeAsFileTime(struct crt_filetime* lpSystemTimeAsFileTime);
+__declspec(dllimport) BOOL CRT_WINAPI GetFileInformationByHandle(
+    HANDLE hFile,
+    struct crt_by_handle_file_information* lpFileInformation);
 __declspec(dllimport) BOOL CRT_WINAPI QueryPerformanceCounter(long long* lpPerformanceCount);
 __declspec(dllimport) BOOL CRT_WINAPI QueryPerformanceFrequency(long long* lpFrequency);
 __declspec(dllimport) void CRT_WINAPI Sleep(DWORD dwMilliseconds);
@@ -145,6 +165,16 @@ static int map_windows_error(DWORD error) {
 
 static long fail_last_error(void) {
   return -map_windows_error(GetLastError());
+}
+
+static time_t filetime_to_time(const struct crt_filetime* ft) {
+  unsigned long long ticks = ((unsigned long long)ft->high << 32) | ft->low;
+
+  if (ticks < SEC_TO_UNIX_EPOCH * WINDOWS_TICK) {
+    return 0;
+  }
+  ticks -= SEC_TO_UNIX_EPOCH * WINDOWS_TICK;
+  return (time_t)(ticks / WINDOWS_TICK);
 }
 
 static void init_fd_table(void) {
@@ -286,10 +316,14 @@ long long __crt_sys_lseek(int fd, long long offset, int whence) {
 
 long __crt_sys_access(const char* path, int mode) {
   DWORD attrs = GetFileAttributesA(path);
-  (void)mode;
 
   if (attrs == INVALID_FILE_ATTRIBUTES) {
     return fail_last_error();
+  }
+  if ((mode & W_OK) != 0 &&
+      (attrs & FILE_ATTRIBUTE_READONLY) != 0 &&
+      (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0) {
+    return -EACCES;
   }
   return 0;
 }
@@ -336,7 +370,7 @@ long __crt_sys_dup(int oldfd) {
   if (handle == INVALID_HANDLE_VALUE) {
     return -EBADF;
   }
-  if (!DuplicateHandle(GetCurrentProcess(), handle, GetCurrentProcess(), &duplicate, 0, 0, 2)) {
+  if (!DuplicateHandle(GetCurrentProcess(), handle, GetCurrentProcess(), &duplicate, 0, 0, DUPLICATE_SAME_ACCESS)) {
     return fail_last_error();
   }
   fd = alloc_fd(duplicate);
@@ -361,7 +395,7 @@ long __crt_sys_dup2(int oldfd, int newfd) {
   if (oldfd == newfd) {
     return newfd;
   }
-  if (!DuplicateHandle(GetCurrentProcess(), handle, GetCurrentProcess(), &duplicate, 0, 0, 2)) {
+  if (!DuplicateHandle(GetCurrentProcess(), handle, GetCurrentProcess(), &duplicate, 0, 0, DUPLICATE_SAME_ACCESS)) {
     return fail_last_error();
   }
   if (fd_table[newfd] != 0 && fd_table[newfd] != INVALID_HANDLE_VALUE) {
@@ -369,6 +403,53 @@ long __crt_sys_dup2(int oldfd, int newfd) {
   }
   fd_table[newfd] = duplicate;
   return newfd;
+}
+
+static long stat_from_handle(HANDLE handle, struct stat* st) {
+  struct crt_by_handle_file_information info;
+  uint64_t size;
+
+  if (!GetFileInformationByHandle(handle, &info)) {
+    return fail_last_error();
+  }
+  memset(st, 0, sizeof(*st));
+  st->st_dev = info.volume_serial_number;
+  st->st_ino = ((uint64_t)info.file_index_high << 32) | info.file_index_low;
+  st->st_nlink = info.number_of_links;
+  st->st_mode = (info.file_attributes & FILE_ATTRIBUTE_DIRECTORY) != 0
+                    ? (S_IFDIR | S_IRWXU | S_IRWXG | S_IRWXO)
+                    : (S_IFREG | S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+  size = ((uint64_t)info.file_size_high << 32) | info.file_size_low;
+  st->st_size = (off_t)size;
+  st->st_blksize = 4096;
+  st->st_blocks = (blkcnt_t)((size + 511) / 512);
+  st->st_atime = filetime_to_time(&info.last_access_time);
+  st->st_mtime = filetime_to_time(&info.last_write_time);
+  st->st_ctime = filetime_to_time(&info.creation_time);
+  return 0;
+}
+
+long __crt_sys_fstat(int fd, struct stat* st) {
+  HANDLE handle = get_fd_handle(fd);
+
+  if (handle == INVALID_HANDLE_VALUE) {
+    return -EBADF;
+  }
+  return stat_from_handle(handle, st);
+}
+
+long __crt_sys_stat_path(const char* path, struct stat* st) {
+  HANDLE handle;
+  long result;
+
+  handle = CreateFileA(path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                       0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS, 0);
+  if (handle == INVALID_HANDLE_VALUE) {
+    return fail_last_error();
+  }
+  result = stat_from_handle(handle, st);
+  CloseHandle(handle);
+  return result;
 }
 
 long __crt_sys_unlink(const char* path) {

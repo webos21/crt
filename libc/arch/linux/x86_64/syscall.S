@@ -108,6 +108,16 @@ __crt_sys_dup2:
   retq
 .size __crt_sys_dup2, . - __crt_sys_dup2
 
+.globl __crt_sys_statx
+.type __crt_sys_statx, @function
+.p2align 4, 0x90
+__crt_sys_statx:
+  movq %rcx, %r10
+  movq $332, %rax
+  syscall
+  retq
+.size __crt_sys_statx, . - __crt_sys_statx
+
 .globl __crt_sys_unlink
 .type __crt_sys_unlink, @function
 .p2align 4, 0x90
