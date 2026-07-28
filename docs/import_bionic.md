@@ -122,6 +122,24 @@ The third string tranche adds common search/span and allocation-backed helpers:
 BSD-derived portable C sources. Stateful tokenization such as `strtok` is
 deferred until thread/TLS policy is clearer.
 
+The second broad string/memory tranche adds:
+
+- `memccpy`
+- `stpcpy`
+- `stpncpy`
+- `strcasecmp`
+- `strncasecmp`
+- `strcoll`
+- `strsignal`
+- `strxfrm`
+
+`strcoll` and `strxfrm` currently implement the C/POSIX locale bootstrap policy:
+collation is bytewise and transformation is a bounded copy of the input string.
+This keeps configure probes and basic libraries moving, but full locale-aware
+collation remains deferred until the locale subsystem exists. `strsignal` uses
+the project's current signal number surface and returns generic text for unknown
+signals.
+
 ## Next Runtime Boundary Tranche
 
 After the first string/memory import, the next implemented runtime boundary is:
@@ -205,22 +223,45 @@ without importing host libc headers.
 The current time tranche adds:
 
 - `time_t`
+- `clock_t`
 - `clockid_t`
 - `struct timespec`
 - `struct timeval`
+- `struct tm`
+- `clock`
 - `time`
 - `clock_gettime`
 - `gettimeofday`
 - `nanosleep`
+- `timespec_get`
+- `gmtime`
+- `gmtime_r`
+- `localtime`
+- `localtime_r`
+- `asctime`
+- `asctime_r`
+- `ctime`
+- `ctime_r`
+- `mktime`
+- `strftime`
 
 Linux uses direct syscall wrappers for `gettimeofday` and sleep. Windows maps
-wall-clock time to `GetSystemTimeAsFileTime` and sleep to `Sleep`. macOS uses
-the direct `gettimeofday` syscall and a `poll(NULL, 0, timeout_ms)` based
-bootstrap implementation for `nanosleep`.
+wall-clock time to `GetSystemTimeAsFileTime` and sleep to `Sleep`. macOS maps
+wall-clock time through Mach's calendar clock service and uses a
+`poll(NULL, 0, timeout_ms)` based bootstrap implementation for `nanosleep`.
 
 `CLOCK_REALTIME` is backed by wall-clock time on all hosts. `CLOCK_MONOTONIC`
 uses a real monotonic backend: Linux `clock_gettime`, macOS Mach absolute time,
 and Windows QPC.
+
+The calendar conversion layer is still intentionally small. `gmtime_r`,
+`ctime_r`, `asctime_r`, `mktime`, and the static-buffer variants are implemented
+with a project-owned Gregorian UTC conversion. `localtime` and `localtime_r`
+currently follow the same UTC conversion because timezone database loading,
+`TZ`, daylight-saving rules, and locale-aware formatting are not implemented
+yet. `strftime` supports the common bootstrap specifiers used by configure and
+early library tests: `%Y`, `%m`, `%d`, `%H`, `%M`, `%S`, `%a`, `%A`, `%b`, `%h`,
+`%B`, `%F`, `%T`, and `%%`.
 
 ## Scheduler Primitive Tranche
 

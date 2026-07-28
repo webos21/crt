@@ -23,11 +23,16 @@ add_library(c STATIC
   src/time.c
   src/wait.c
   string/memchr.c
+  string/memccpy.c
   string/memcmp.c
   string/memcpy.c
   string/memmove.c
   string/memset.c
   string/strcat.c
+  string/stpcpy.c
+  string/stpncpy.c
+  string/strcasecmp.c
+  string/strcoll.c
   string/strcspn.c
   string/strdup.c
   string/strchr.c
@@ -44,6 +49,7 @@ add_library(c STATIC
   string/strerror.c
   string/strstr.c
   string/strtok_r.c
+  string/strxfrm.c
 )
 
 target_link_libraries(c PRIVATE crt_build_flags)

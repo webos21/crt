@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -68,4 +69,56 @@ char* strerror(int errnum) {
 
   (void)strerror_r(errnum, buffer, sizeof(buffer));
   return buffer;
+}
+
+char* strsignal(int sig) {
+  static char buffer[64];
+
+  switch (sig) {
+    case SIGHUP:
+      return "Hangup";
+    case SIGINT:
+      return "Interrupt";
+    case SIGQUIT:
+      return "Quit";
+    case SIGILL:
+      return "Illegal instruction";
+    case SIGTRAP:
+      return "Trace trap";
+    case SIGABRT:
+      return "Aborted";
+    case SIGBUS:
+      return "Bus error";
+    case SIGFPE:
+      return "Floating point exception";
+    case SIGKILL:
+      return "Killed";
+    case SIGUSR1:
+      return "User signal 1";
+    case SIGSEGV:
+      return "Segmentation fault";
+    case SIGUSR2:
+      return "User signal 2";
+    case SIGPIPE:
+      return "Broken pipe";
+    case SIGALRM:
+      return "Alarm clock";
+    case SIGTERM:
+      return "Terminated";
+    case SIGCHLD:
+      return "Child exited";
+    case SIGCONT:
+      return "Continued";
+    case SIGSTOP:
+      return "Stopped";
+    case SIGTSTP:
+      return "Stopped";
+    case SIGTTIN:
+      return "Stopped";
+    case SIGTTOU:
+      return "Stopped";
+    default:
+      snprintf(buffer, sizeof(buffer), "Unknown signal %d", sig);
+      return buffer;
+  }
 }

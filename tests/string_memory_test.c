@@ -30,10 +30,13 @@ int main(void) {
   const char* repeated = "ababa";
   const char* haystack = "hello world";
   const char* alnum = "abc123";
+  const char* signal_name;
   char* duplicate;
   char* limited_duplicate;
+  char* end;
   char text[16];
   char padded[8];
+  char transformed[8];
 
   if (strlen("") != 0 || strlen("abc") != 3) {
     return fail("strlen");
@@ -61,6 +64,17 @@ int main(void) {
       memchr(buffer, 0x11, sizeof(buffer)) != 0 ||
       memchr(buffer, 0x5a, 0) != 0) {
     return fail("memchr");
+  }
+
+  memset(buffer, 0, sizeof(buffer));
+  if (memccpy(buffer, source, 'd', sizeof(source)) != buffer + 4 ||
+      !check_bytes(buffer, source, 4)) {
+    return fail("memccpy found");
+  }
+  memset(buffer, 0, sizeof(buffer));
+  if (memccpy(buffer, source, 'x', sizeof(source)) != 0 ||
+      !check_bytes(buffer, source, sizeof(source))) {
+    return fail("memccpy missing");
   }
 
   memset(buffer, 0, sizeof(buffer));
@@ -96,6 +110,37 @@ int main(void) {
   if (strcpy(text, "ab") != text || strcmp(text, "ab") != 0) {
     return fail("strcpy");
   }
+  end = stpcpy(text, "xy");
+  if (end != text + 2 || strcmp(text, "xy") != 0) {
+    return fail("stpcpy");
+  }
+  memset(padded, 0x7e, sizeof(padded));
+  end = stpncpy(padded, "ab", sizeof(padded));
+  if (end != padded + 2 || padded[0] != 'a' || padded[1] != 'b' ||
+      padded[2] != 0 || padded[7] != 0) {
+    return fail("stpncpy pad");
+  }
+  memset(padded, 0x7e, sizeof(padded));
+  end = stpncpy(padded, "abcdef", 3);
+  if (end != padded + 3 || padded[0] != 'a' || padded[1] != 'b' ||
+      padded[2] != 'c' || padded[3] != 0x7e) {
+    return fail("stpncpy truncate");
+  }
+  if (strcasecmp("AbC", "aBc") != 0 || strcasecmp("abc", "abd") >= 0 ||
+      strncasecmp("abcX", "ABCy", 3) != 0 || strncasecmp("abc", "ABD", 3) >= 0) {
+    return fail("strcasecmp");
+  }
+  if (strcoll("abc", "abc") != 0 || strcoll("abc", "abd") >= 0) {
+    return fail("strcoll");
+  }
+  memset(transformed, 0, sizeof(transformed));
+  if (strxfrm(transformed, "abc", sizeof(transformed)) != 3 ||
+      strcmp(transformed, "abc") != 0 ||
+      strxfrm(transformed, "abcdef", 4) != 6 ||
+      strcmp(transformed, "abc") != 0) {
+    return fail("strxfrm");
+  }
+  strcpy(text, "ab");
   if (strcat(text, "cd") != text || strcmp(text, "abcd") != 0) {
     return fail("strcat");
   }
@@ -143,6 +188,12 @@ int main(void) {
     return fail("strndup short");
   }
   free(limited_duplicate);
+
+  signal_name = strsignal(15);
+  if (signal_name == 0 || strstr(signal_name, "Terminated") == 0 ||
+      strstr(strsignal(999), "999") == 0) {
+    return fail("strsignal");
+  }
 
   memset(padded, 0x7e, sizeof(padded));
   if (strncpy(padded, "xy", sizeof(padded)) != padded || padded[0] != 'x' ||
