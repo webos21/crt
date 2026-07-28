@@ -1100,9 +1100,14 @@ static long stat_from_handle(HANDLE handle, struct stat* st) {
   st->st_dev = info.volume_serial_number;
   st->st_ino = ((uint64_t)info.file_index_high << 32) | info.file_index_low;
   st->st_nlink = info.number_of_links;
-  st->st_mode = (info.file_attributes & FILE_ATTRIBUTE_DIRECTORY) != 0
-                    ? (S_IFDIR | S_IRWXU | S_IRWXG | S_IRWXO)
-                    : (S_IFREG | S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+  if ((info.file_attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+    st->st_mode = S_IFDIR | S_IRWXU | S_IRWXG | S_IRWXO;
+  } else {
+    st->st_mode = S_IFREG | S_IRUSR | S_IRGRP | S_IROTH;
+    if ((info.file_attributes & FILE_ATTRIBUTE_READONLY) == 0) {
+      st->st_mode |= S_IWUSR | S_IWGRP | S_IWOTH;
+    }
+  }
   size = ((uint64_t)info.file_size_high << 32) | info.file_size_low;
   st->st_size = (off_t)size;
   st->st_blksize = 4096;
