@@ -202,6 +202,35 @@ The bootstrap multibyte encoding is UTF-8. Full Unicode classification, case
 mapping beyond ASCII, locale-specific multibyte encodings, Windows UTF-16 host
 API adapters, and xlocale-aware `_l` variants remain deferred.
 
+## Libm Bootstrap Tranche
+
+The first `libm` tranche adds a separate `libm.a` and public `math.h` while
+keeping the traditional `-lm` link boundary distinct from `libc.a`.
+
+The current surface includes:
+
+- `math.h`
+- `HUGE_VAL`, `HUGE_VALF`, `HUGE_VALL`
+- `INFINITY`
+- `NAN`
+- `fpclassify`, `isfinite`, `isinf`, `isnan`, `isnormal`, and `signbit`
+- `fabs`, `fabsf`, `fabsl`
+- `copysign`, `copysignf`, `copysignl`
+- `fmin`, `fminf`, `fminl`
+- `fmax`, `fmaxf`, `fmaxl`
+- `floor`, `floorf`, `floorl`
+- `ceil`, `ceilf`, `ceill`
+- `trunc`, `truncf`, `truncl`
+- `round`, `roundf`, `roundl`
+- `sqrt`, `sqrtf`, `sqrtl`
+
+This is not yet a Bionic fdlibm/msun import. The implementation is a
+project-owned bootstrap layer that uses compiler classification builtins and
+small portable C routines so configure probes and early libraries can link
+against `-lm`. Transcendental functions such as `sin`, `cos`, `tan`, `exp`,
+`log`, and `pow`, `errno`/floating-point exception policy, and correctly rounded
+edge-case behavior remain deferred until the real libm import policy is chosen.
+
 ## Next Runtime Boundary Tranche
 
 After the first string/memory import, the next implemented runtime boundary is:

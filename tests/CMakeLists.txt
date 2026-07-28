@@ -125,6 +125,13 @@ set_tests_properties(mman_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "mman_test: ok"
 )
 
+add_crt_test(math_test math_test.c)
+target_link_libraries(math_test PRIVATE m)
+add_dependencies(math_test m)
+set_tests_properties(math_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "math_test: ok"
+)
+
 add_crt_test(ctype_test ctype_test.c)
 set_tests_properties(ctype_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "ctype_test: ok"

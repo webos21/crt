@@ -91,8 +91,9 @@ The repository currently contains the first executable bring-up:
 - Windows x86_64/ARM64 startup and Win32-backed low-level write/exit
   implementation
 - freestanding `Hello World`, string/memory, fd/errno, malloc, stdio, stdio
-  file, printf, and mmap tests
-- sysroot installation for headers, `crt1.o`, `libc.a`, and compiler-rt builtins
+  file, printf, mmap, math, locale, wchar/mbstate, and pthread-oriented tests
+- sysroot installation for headers, `crt1.o`, `libc.a`, `libm.a`, and
+  compiler-rt builtins
 
 On macOS, normal Mach-O executables must still link `libSystem.dylib`. The test
 does this explicitly while using this project's `_start`, `write`, `_exit`, and
@@ -119,6 +120,10 @@ The current stdio layer is intentionally minimal. It supports standard streams,
 and simple byte-oriented I/O, but it does not yet define a final `FILE` ABI or
 buffering model. The current `printf` family is a small bootstrap formatter for
 early tests, not a complete C/POSIX formatter.
+
+The current `libm.a` is a first bootstrap library with basic classification,
+absolute value, sign, min/max, rounding, and square-root functions. It is not
+yet a full fdlibm/msun/Bionic math import.
 
 ## Prerequisites
 

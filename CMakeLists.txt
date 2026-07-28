@@ -143,12 +143,13 @@ if(CRT_TARGET_OS STREQUAL "windows")
 endif()
 
 add_subdirectory(libc)
+add_subdirectory(libm)
 add_subdirectory(tests)
 
 install(DIRECTORY include/ DESTINATION include)
 
 add_custom_target(sysroot
   COMMAND "${CMAKE_COMMAND}" --install "${CMAKE_BINARY_DIR}" --prefix "${CRT_SYSROOT}"
-  DEPENDS c crt1
+  DEPENDS c m crt1
   COMMENT "Installing CRT headers, libraries, and startup objects into ${CRT_SYSROOT}"
 )

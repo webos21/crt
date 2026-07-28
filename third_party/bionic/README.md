@@ -91,6 +91,13 @@ out-of-line C99 functions.
 | `libc/src/wchar.c` | mixed Bionic/POSIX surface | project-owned | new | UTF-8 bootstrap conversion, `mbstate_t`, legacy multibyte wrappers, and basic wide string/memory helpers. |
 | `libc/src/wctype.c` | mixed Bionic/POSIX surface | project-owned | new | ASCII/C-locale wide classification and case mapping over the existing ctype policy. |
 
+### Libm Bootstrap Tranche
+
+| Local file | Upstream path | Upstream ref | Status | Notes |
+| --- | --- | --- | --- | --- |
+| `include/math.h` | `libc/include/math.h` | project-owned | new | Minimal C99/POSIX math declarations and classification macros for the first `libm.a` boundary. |
+| `libm/src/basic.c` | mixed Bionic/POSIX surface | project-owned | new | Bootstrap absolute value, sign, min/max, rounding, and square-root functions before importing fdlibm/msun sources. |
+
 ### Time Tranche
 
 | Local file | Upstream path | Upstream ref | Status | Notes |
