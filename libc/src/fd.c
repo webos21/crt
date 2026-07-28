@@ -245,6 +245,7 @@ static int normalize_absolute_path(const char* input, char* output, size_t outpu
 }
 #endif
 
+#if !defined(CRT_TARGET_OS_WINDOWS)
 static int path_append(char* path, size_t size, const char* component, size_t component_len) {
   size_t len = strlen(path);
 
@@ -288,6 +289,7 @@ static void path_pop_component(char* path) {
     path[1] = 0;
   }
 }
+#endif
 
 static int make_absolute_input(const char* path, char* absolute, size_t size) {
   char cwd[PATH_MAX];
@@ -684,7 +686,6 @@ char* getcwd(char* buf, size_t size) {
 char* realpath(const char* path, char* resolved_path) {
   char* output = resolved_path;
   struct stat st;
-  int output_owned = resolved_path == 0;
 
   if (path == 0) {
     __set_errno(EINVAL);
@@ -739,7 +740,7 @@ char* realpath(const char* path, char* resolved_path) {
   }
   return output;
 #else
-  return realpath_resolve_unix(path, output, output_owned);
+  return realpath_resolve_unix(path, output, resolved_path == 0);
 #endif
 }
 

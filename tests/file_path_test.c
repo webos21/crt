@@ -13,6 +13,34 @@ static int fail(const char* message) {
   return 1;
 }
 
+static void cleanup_file_path_test_dir(void) {
+  DIR* dir;
+  struct dirent* entry;
+
+  if (chdir("file_path_test.dir") != 0) {
+    return;
+  }
+  (void)chmod("sample.tmp", 0600);
+  (void)remove("sample.link");
+  (void)remove("sample.tmp");
+  (void)remove("created.tmp");
+  (void)remove("mkstemp_test.XXXXXX");
+  (void)remove("realpath_dir/nested.link");
+  (void)rmdir("realpath_dir");
+  dir = opendir(".");
+  if (dir != 0) {
+    while ((entry = readdir(dir)) != 0) {
+      if (strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) {
+        (void)chmod(entry->d_name, 0600);
+        (void)remove(entry->d_name);
+      }
+    }
+    (void)closedir(dir);
+  }
+  (void)chdir("..");
+  (void)rmdir("file_path_test.dir");
+}
+
 int main(void) {
   char cwd[4096];
   char byte = 'Z';
@@ -36,6 +64,7 @@ int main(void) {
   if (getcwd(cwd, sizeof(cwd)) == 0 || cwd[0] == 0) {
     return fail("getcwd");
   }
+  cleanup_file_path_test_dir();
   if (mkdir("file_path_test.dir", 0777) != 0) {
     return fail("mkdir");
   }
