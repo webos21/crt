@@ -2,6 +2,7 @@ add_library(c STATIC
   src/atoi.c
   src/atol.c
   src/ctype.c
+  src/dirent.c
   src/errno.c
   src/env.c
   src/exit.c

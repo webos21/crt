@@ -143,6 +143,15 @@ __crt_sys_symlink:
   retq
 .size __crt_sys_symlink, . - __crt_sys_symlink
 
+.globl __crt_sys_getdents
+.type __crt_sys_getdents, @function
+.p2align 4, 0x90
+__crt_sys_getdents:
+  movq $217, %rax
+  syscall
+  retq
+.size __crt_sys_getdents, . - __crt_sys_getdents
+
 .globl __crt_sys_statx
 .type __crt_sys_statx, @function
 .p2align 4, 0x90

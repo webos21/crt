@@ -169,6 +169,20 @@ ___crt_sys_symlink:
   neg x0, x0
   ret
 
+.globl ___crt_sys_getdents
+.p2align 2
+___crt_sys_getdents:
+  sub sp, sp, #16
+  mov x3, sp
+  mov x16, #344
+  svc #0x80
+  add sp, sp, #16
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
 .globl ___crt_sys_macos_stat64
 .p2align 2
 ___crt_sys_macos_stat64:

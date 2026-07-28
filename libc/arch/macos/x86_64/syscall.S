@@ -169,6 +169,20 @@ ___crt_sys_symlink:
   negq %rax
   retq
 
+.globl ___crt_sys_getdents
+.p2align 4, 0x90
+___crt_sys_getdents:
+  subq $8, %rsp
+  leaq (%rsp), %rcx
+  movq $0x2000158, %rax
+  syscall
+  addq $8, %rsp
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
 .globl ___crt_sys_macos_stat64
 .p2align 4, 0x90
 ___crt_sys_macos_stat64:

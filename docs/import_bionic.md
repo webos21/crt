@@ -625,6 +625,10 @@ The file/path tranche adds:
 - `realpath`;
 - `readlink`;
 - `symlink`;
+- `opendir`;
+- `readdir`;
+- `closedir`;
+- `dirent.h`;
 - `stat`;
 - `fstat`;
 - `lstat`;
@@ -646,6 +650,9 @@ extension; it does not yet walk and expand every symlink component. Linux and
 macOS implement `readlink` and `symlink` through host syscalls. Windows returns
 `ENOSYS` for `readlink`/`symlink` until the project defines a reparse-point
 policy that is robust without requiring Developer Mode or elevated privileges.
+Directory iteration is exposed through a bootstrap `dirent.h` and
+`opendir`/`readdir`/`closedir`. Linux uses `getdents64`, macOS uses
+`getdirentries64`, and Windows maps to `FindFirstFileA`/`FindNextFileA`.
 
 The metadata tranche moves the supported OS backends beyond the first
 regular-file fallback. Linux uses the raw `statx` syscall and converts the

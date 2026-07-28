@@ -157,6 +157,15 @@ __crt_sys_symlink:
   ret
 .size __crt_sys_symlink, . - __crt_sys_symlink
 
+.globl __crt_sys_getdents
+.type __crt_sys_getdents, %function
+.p2align 2
+__crt_sys_getdents:
+  mov x8, #61
+  svc #0
+  ret
+.size __crt_sys_getdents, . - __crt_sys_getdents
+
 .globl __crt_sys_statx
 .type __crt_sys_statx, %function
 .p2align 2

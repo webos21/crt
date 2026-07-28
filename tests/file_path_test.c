@@ -1,4 +1,5 @@
 #include <fcntl.h>
+#include <dirent.h>
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
@@ -22,7 +23,10 @@ int main(void) {
   int fd;
   int copy;
   int high_copy;
+  int found_sample = 0;
   int pipefd[2];
+  DIR* dir;
+  struct dirent* entry;
   struct stat st;
 
   if (getcwd(cwd, sizeof(cwd)) == 0 || cwd[0] == 0) {
@@ -80,6 +84,25 @@ int main(void) {
   if (realpath("./sample.tmp", resolved) == 0 || strstr(resolved, "sample.tmp") == 0) {
     close(fd);
     return fail("realpath buffer");
+  }
+  dir = opendir(".");
+  if (dir == 0) {
+    close(fd);
+    return fail("opendir");
+  }
+  while ((entry = readdir(dir)) != 0) {
+    if (strcmp(entry->d_name, "sample.tmp") == 0) {
+      found_sample = 1;
+      if (entry->d_type != DT_UNKNOWN && entry->d_type != DT_REG) {
+        closedir(dir);
+        close(fd);
+        return fail("readdir type");
+      }
+    }
+  }
+  if (closedir(dir) != 0 || !found_sample) {
+    close(fd);
+    return fail("readdir sample");
   }
   allocated_path = realpath("sample.tmp", 0);
   if (allocated_path == 0 || strstr(allocated_path, "sample.tmp") == 0) {
