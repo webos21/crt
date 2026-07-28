@@ -28,8 +28,8 @@ not have a suitable compiler builtin policy.
 
 | Function | Local source | Upstream source | Ref | Direct private dependencies | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `sqrt` | `libm/src/basic.c` | `libm/builtins.cpp` | Bionic `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | Clang `__builtin_sqrt` | Follows current Bionic policy; avoids the slower older fdlibm bit-by-bit implementation. |
-| `sqrtf` | `libm/src/basic.c` | `libm/builtins.cpp` | Bionic `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | Clang `__builtin_sqrtf` | Same policy as `sqrt`. |
+| `sqrt` | `libm/src/basic.c` | `libm/builtins.cpp` | Bionic `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | Clang `__builtin_elementwise_sqrt` | Follows current Bionic builtin policy while avoiding recursive Debug/O0 libcalls on Windows. |
+| `sqrtf` | `libm/src/basic.c` | `libm/builtins.cpp` | Bionic `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | Clang `__builtin_elementwise_sqrt` | Same policy as `sqrt`. |
 
 `sqrtl` remains the previous bootstrap long-double implementation. Importing
 `e_sqrtl.c` should be handled as a separate long-double tranche because it

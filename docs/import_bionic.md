@@ -232,9 +232,9 @@ notices.
 
 The `sqrt` and `sqrtf` implementations follow current Bionic `main` policy and
 use compiler builtins rather than importing the older portable fdlibm
-`e_sqrt.c`. This lets Clang lower to the target hardware operation or compiler
-runtime helper while keeping the source portable across the supported
-LLVM/64-bit target set.
+`e_sqrt.c`. The project uses Clang's elementwise sqrt builtin so Debug/O0
+Windows builds lower directly to hardware sqrt instructions instead of producing
+a recursive `sqrt`/`sqrtf` libcall back into the same exported function.
 
 The float and long double variants currently remain bootstrap wrappers, and
 `sqrtl` still uses project-owned bootstrap behavior. Transcendental functions

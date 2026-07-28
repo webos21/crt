@@ -97,7 +97,7 @@ out-of-line C99 functions.
 | Local file | Upstream path | Upstream ref | Status | Notes |
 | --- | --- | --- | --- | --- |
 | `include/math.h` | `libc/include/math.h` | project-owned | new | Minimal C99/POSIX math declarations and classification macros for the first `libm.a` boundary. |
-| `libm/src/basic.c` | `libm/builtins.cpp` plus mixed Bionic/POSIX surface | adapted/project-owned | new | Bootstrap absolute value, sign, float/long double wrappers, and current-Bionic-style builtin `sqrt`/`sqrtf` while fdlibm/msun is imported incrementally. |
+| `libm/src/basic.c` | `libm/builtins.cpp` plus mixed Bionic/POSIX surface | adapted/project-owned | new | Bootstrap absolute value, sign, float/long double wrappers, and current-Bionic-style builtin `sqrt`/`sqrtf`; uses Clang elementwise sqrt to avoid recursive Debug/O0 libcalls on Windows. |
 
 ### Libm FreeBSD/msun Import Tranche 1
 

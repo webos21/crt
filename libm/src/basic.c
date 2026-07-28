@@ -114,11 +114,11 @@ long double roundl(long double x) {
 }
 
 double sqrt(double x) {
-  return __builtin_sqrt(x);
+  return __builtin_elementwise_sqrt(x);
 }
 
 float sqrtf(float x) {
-  return __builtin_sqrtf(x);
+  return __builtin_elementwise_sqrt(x);
 }
 
 long double sqrtl(long double x) {
