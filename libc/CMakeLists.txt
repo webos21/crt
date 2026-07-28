@@ -23,6 +23,8 @@ add_library(c STATIC
   src/strtoull.c
   src/time.c
   src/wait.c
+  src/wchar.c
+  src/wctype.c
   string/memchr.c
   string/memccpy.c
   string/memcmp.c

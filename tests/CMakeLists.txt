@@ -135,6 +135,11 @@ set_tests_properties(locale_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "locale_test: ok"
 )
 
+add_crt_test(wchar_mbstate_test wchar_mbstate_test.c)
+set_tests_properties(wchar_mbstate_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "wchar_mbstate_test: ok"
+)
+
 add_crt_test(stdlib_test stdlib_test.c)
 set_tests_properties(stdlib_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "stdlib_test: ok"

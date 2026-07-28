@@ -82,6 +82,15 @@ out-of-line C99 functions.
 | `include/stddef.h` | compiler-provided header layer | project-owned | new | Defines `ptrdiff_t`, `size_t`, `wchar_t`, `NULL`, and `offsetof` from compiler builtins. |
 | `include/stdarg.h` | compiler-provided header layer | project-owned | new | Defines `va_list` and `va_*` macros from compiler builtins. |
 
+### Wide Character And Multibyte Tranche
+
+| Local file | Upstream path | Upstream ref | Status | Notes |
+| --- | --- | --- | --- | --- |
+| `include/wchar.h` | `libc/include/wchar.h` | project-owned | new | Minimal wide-character, multibyte, and wide string declarations using the project-forced signed 32-bit `wchar_t` ABI. |
+| `include/wctype.h` | `libc/include/wctype.h` | project-owned | new | Minimal wide classification and transform declarations for the C/POSIX locale bootstrap. |
+| `libc/src/wchar.c` | mixed Bionic/POSIX surface | project-owned | new | UTF-8 bootstrap conversion, `mbstate_t`, legacy multibyte wrappers, and basic wide string/memory helpers. |
+| `libc/src/wctype.c` | mixed Bionic/POSIX surface | project-owned | new | ASCII/C-locale wide classification and case mapping over the existing ctype policy. |
+
 ### Time Tranche
 
 | Local file | Upstream path | Upstream ref | Status | Notes |

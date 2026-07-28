@@ -47,6 +47,7 @@ int __set_errno(int value);
 #define ERANGE 34
 #define EDEADLK 35
 #define ENOSYS 38
+#define EILSEQ 84
 #define ENOTSUP 95
 #define ETIMEDOUT 110
 

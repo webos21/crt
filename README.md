@@ -68,6 +68,12 @@ The current baseline decisions are:
 - Default generator: Ninja
 - Test integration: CTest
 
+The project ABI intentionally follows the Linux/Bionic-style runtime surface
+rather than each host OS ABI where those differ. In particular, all CRT targets
+are built with `-Xclang -fwchar-type=int` so `wchar_t` and wide string literals
+are signed 32-bit on Windows as well as on Linux/macOS. External libraries built
+against the CRT sysroot must use the same flag.
+
 Rust may be used later for tooling or optional internal modules behind a stable C
 ABI, but the core runtime must remain buildable without requiring Rust.
 

@@ -169,6 +169,39 @@ grouping and currency strings are empty, and unavailable numeric fields use
 `CHAR_MAX`. This makes the locale contract explicit while keeping the runtime
 independent from host libc locale state.
 
+## Wide Character And Multibyte Tranche
+
+The first `wchar`/`mbstate` tranche adds:
+
+- `wchar.h`
+- `wctype.h`
+- `wint_t`
+- `mbstate_t`
+- `WEOF`
+- `MB_CUR_MAX`
+- `btowc`
+- `wctob`
+- `mbrtowc`
+- `wcrtomb`
+- `mbsrtowcs`
+- `wcsrtombs`
+- `mbstowcs`
+- `wcstombs`
+- legacy `mblen`, `mbtowc`, and `wctomb`
+- basic wide string and wide memory helpers
+- ASCII/C-locale `isw*`, `tow*`, `wctype`, and `wctrans`
+
+`wchar_t` is part of the project ABI rather than the host OS ABI. The build
+uses `-Xclang -fwchar-type=int` so Windows, Linux, and macOS all expose a signed
+32-bit `wchar_t`, matching the Linux/Bionic-style libc surface instead of
+Windows' native 16-bit `wchar_t`. The public typedef still comes from the
+compiler's `__WCHAR_TYPE__`, but the project build flags force that compiler
+type to the runtime ABI we want.
+
+The bootstrap multibyte encoding is UTF-8. Full Unicode classification, case
+mapping beyond ASCII, locale-specific multibyte encodings, Windows UTF-16 host
+API adapters, and xlocale-aware `_l` variants remain deferred.
+
 ## Next Runtime Boundary Tranche
 
 After the first string/memory import, the next implemented runtime boundary is:
