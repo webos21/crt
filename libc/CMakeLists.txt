@@ -3,16 +3,20 @@ add_library(c STATIC
   src/atol.c
   src/ctype.c
   src/errno.c
+  src/env.c
   src/exit.c
   src/fd.c
   src/malloc.c
   src/mman.c
   src/printf.c
   src/pthread.c
+  src/qsort.c
   src/sched.c
   src/stdio.c
   src/strtol.c
+  src/strtoll.c
   src/strtoul.c
+  src/strtoull.c
   src/time.c
   src/wait.c
   string/memchr.c
@@ -34,7 +38,9 @@ add_library(c STATIC
   string/strpbrk.c
   string/strrchr.c
   string/strspn.c
+  string/strerror.c
   string/strstr.c
+  string/strtok_r.c
 )
 
 target_link_libraries(c PRIVATE crt_build_flags)

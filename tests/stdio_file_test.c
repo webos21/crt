@@ -16,6 +16,7 @@ int main(void) {
   FILE* renamed;
   char buffer[16];
   size_t nread;
+  int ch;
 
   stream = fopen("stdio_file_test.tmp", "w+");
   if (stream == 0) {
@@ -33,6 +34,11 @@ int main(void) {
   if (fseek(stream, 1, SEEK_SET) != 0) {
     fclose(stream);
     return fail("fseek set");
+  }
+
+  if (setvbuf(stream, buffer, _IOLBF, sizeof(buffer)) != 0) {
+    fclose(stream);
+    return fail("setvbuf");
   }
 
   memset(buffer, 0, sizeof(buffer));
@@ -65,6 +71,16 @@ int main(void) {
   if (feof(stream) || ferror(stream)) {
     fclose(stream);
     return fail("clearerr");
+  }
+
+  if (fseek(stream, 0, SEEK_SET) != 0) {
+    fclose(stream);
+    return fail("fseek reread");
+  }
+  ch = fgetc(stream);
+  if (ch != 'a' || ungetc(ch, stream) != 'a' || getc(stream) != 'a') {
+    fclose(stream);
+    return fail("getc ungetc");
   }
   fclose(stream);
 

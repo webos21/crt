@@ -27,6 +27,9 @@ char* strpbrk(const char* s1, const char* s2);
 char* strrchr(const char* s, int c);
 size_t strspn(const char* s1, const char* s2);
 char* strstr(const char* s, const char* find);
+char* strtok_r(char* s, const char* delim, char** last);
+char* strerror(int errnum);
+int strerror_r(int errnum, char* buf, size_t buflen);
 
 #ifdef __cplusplus
 }

@@ -28,6 +28,12 @@ int main(void) {
     return fail("long long");
   }
 
+  result = snprintf(buffer, sizeof(buffer), "|%08d|%-6s|%+d|% d|%#x|%#o|%.3s|%5zu|%zd|",
+                    42, "hi", 7, 7, 0x2a, 10u, "abcdef", (size_t)9, (ssize_t)-3);
+  if (strcmp(buffer, "|00000042|hi    |+7| 7|0x2a|012|abc|    9|-3|") != 0) {
+    return fail("flags width precision");
+  }
+
   printf("printf_test: %s %d %x\n", "ok", 7, 255);
   return 0;
 }

@@ -10,14 +10,19 @@ struct __crt_FILE {
   int owned;
   int eof;
   int error;
+  int buffering_mode;
+  char* buffer;
+  size_t buffer_size;
+  int ungot;
+  unsigned char ungot_char;
 };
 
 long __crt_sys_unlink(const char* path);
 long __crt_sys_rename(const char* old_path, const char* new_path);
 
-static FILE stdin_storage = {0, 0, 0, 0};
-static FILE stdout_storage = {1, 0, 0, 0};
-static FILE stderr_storage = {2, 0, 0, 0};
+static FILE stdin_storage = {0, 0, 0, 0, _IOLBF, 0, 0, 0, 0};
+static FILE stdout_storage = {1, 0, 0, 0, _IOLBF, 0, 0, 0, 0};
+static FILE stderr_storage = {2, 0, 0, 0, _IONBF, 0, 0, 0, 0};
 
 FILE* stdin = &stdin_storage;
 FILE* stdout = &stdout_storage;
@@ -83,6 +88,11 @@ FILE* fopen(const char* path, const char* mode) {
   stream->owned = 1;
   stream->eof = 0;
   stream->error = 0;
+  stream->buffering_mode = _IOFBF;
+  stream->buffer = 0;
+  stream->buffer_size = 0;
+  stream->ungot = 0;
+  stream->ungot_char = 0;
 
   if ((flags & O_APPEND) != 0) {
     lseek(fd, 0, SEEK_END);
@@ -118,6 +128,7 @@ int fseek(FILE* stream, long offset, int whence) {
     return -1;
   }
   stream->eof = 0;
+  stream->ungot = 0;
   return 0;
 }
 
@@ -149,6 +160,10 @@ int fputc(int c, FILE* stream) {
   return byte;
 }
 
+int putc(int c, FILE* stream) {
+  return fputc(c, stream);
+}
+
 int fputs(const char* s, FILE* stream) {
   size_t length;
   int fd = stream_fd(stream);
@@ -178,10 +193,55 @@ int putchar(int c) {
   return fputc(c, stdout);
 }
 
+int fgetc(FILE* stream) {
+  unsigned char byte;
+  int fd = stream_fd(stream);
+  ssize_t result;
+
+  if (fd < 0) {
+    return EOF;
+  }
+  if (stream->ungot) {
+    stream->ungot = 0;
+    stream->eof = 0;
+    return stream->ungot_char;
+  }
+  result = read(fd, &byte, 1);
+  if (result == 1) {
+    stream->eof = 0;
+    return byte;
+  }
+  if (result == 0) {
+    stream->eof = 1;
+  } else {
+    stream->error = 1;
+  }
+  return EOF;
+}
+
+int getc(FILE* stream) {
+  return fgetc(stream);
+}
+
+int getchar(void) {
+  return fgetc(stdin);
+}
+
+int ungetc(int c, FILE* stream) {
+  if (stream_fd(stream) < 0 || c == EOF || stream->ungot) {
+    return EOF;
+  }
+  stream->ungot = 1;
+  stream->ungot_char = (unsigned char)c;
+  stream->eof = 0;
+  return (unsigned char)c;
+}
+
 size_t fread(void* ptr, size_t size, size_t nmemb, FILE* stream) {
   size_t total;
-  ssize_t result;
+  size_t done = 0;
   int fd = stream_fd(stream);
+  unsigned char* out = (unsigned char*)ptr;
 
   if (fd < 0 || size == 0 || nmemb == 0) {
     return 0;
@@ -192,16 +252,29 @@ size_t fread(void* ptr, size_t size, size_t nmemb, FILE* stream) {
   }
 
   total = size * nmemb;
-  result = read(fd, ptr, total);
-  if (result <= 0) {
-    if (result == 0) {
+  if (stream->ungot && total != 0) {
+    out[done++] = stream->ungot_char;
+    stream->ungot = 0;
+  }
+  while (done < total) {
+    ssize_t result = read(fd, out + done, total - done);
+    if (result <= 0) {
+      if (result == 0) {
+        stream->eof = 1;
+      } else {
+        stream->error = 1;
+      }
+      break;
+    }
+    done += (size_t)result;
+  }
+  if (done == 0) {
+    if (!stream->error) {
       stream->eof = 1;
-    } else {
-      stream->error = 1;
     }
     return 0;
   }
-  return (size_t)result / size;
+  return done / size;
 }
 
 size_t fwrite(const void* ptr, size_t size, size_t nmemb, FILE* stream) {
@@ -233,6 +306,24 @@ int fflush(FILE* stream) {
   if (stream_fd(stream) < 0) {
     return EOF;
   }
+  return 0;
+}
+
+void setbuf(FILE* stream, char* buf) {
+  (void)setvbuf(stream, buf, buf != 0 ? _IOFBF : _IONBF, BUFSIZ);
+}
+
+int setvbuf(FILE* stream, char* buf, int mode, size_t size) {
+  if (stream_fd(stream) < 0) {
+    return EOF;
+  }
+  if (mode != _IOFBF && mode != _IOLBF && mode != _IONBF) {
+    errno = EINVAL;
+    return EOF;
+  }
+  stream->buffering_mode = mode;
+  stream->buffer = buf;
+  stream->buffer_size = size;
   return 0;
 }
 

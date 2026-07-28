@@ -573,3 +573,67 @@ complete `printf` family are intentionally deferred until the file/path,
 allocator, and formatting policies are more stable. The current formatter only
 supports a small subset useful for early bring-up: `%s`, `%c`, `%d`, `%i`, `%u`,
 `%x`, `%X`, `%p`, `%%`, and `l`/`ll` integer length modifiers.
+
+## Formatting, Stdio, File/Path, and Libc Surface Tranche
+
+The formatter tranche expands `vsnprintf`, `snprintf`, `printf`, and `fprintf`
+with enough surface for more configure-style probes and basic library tests:
+
+- field width;
+- precision for strings and integer zero padding;
+- `-`, `0`, `+`, space, and `#` flags;
+- `%o`;
+- `%zu` and `%zd`.
+
+The formatter is still integer/string-only. Floating-point formatting, dynamic
+`*` width/precision, positional arguments, locale grouping, and the wider
+`printf` family remain deferred.
+
+The stdio surface now also exposes:
+
+- `getc`, `fgetc`, and `getchar`;
+- `putc`;
+- `ungetc`;
+- `setbuf` and `setvbuf`.
+
+This is still a direct file-descriptor based bootstrap stdio implementation.
+`setvbuf` records the requested policy and buffer pointer but does not yet drive
+a full buffered I/O engine. `fflush` remains effectively a validation/no-op for
+this direct-write model.
+
+The file/path tranche adds:
+
+- `access`;
+- `mkdir`;
+- `rmdir`;
+- `getcwd`;
+- `chdir`;
+- `dup`;
+- `dup2`;
+- `stat`;
+- `sys/stat.h`.
+
+Linux uses raw syscalls. Windows maps the subset to Kernel32 APIs and the
+project fd table. macOS uses direct syscalls where practical and leaves
+`getcwd` to libSystem in the current host-linked bootstrap model. The first
+`stat` implementation is intentionally regular-file oriented: it verifies
+existence through `open`, fills a portable project `struct stat`, and derives
+file size from `lseek`. Directory metadata, timestamps, ownership, device
+identity, symlink handling, and OS-native stat layout import are future work.
+
+The string/stdlib tranche adds:
+
+- `strtok_r`;
+- `strerror`;
+- POSIX-style `strerror_r`;
+- `strtoll`;
+- `strtoull`;
+- `qsort`;
+- `bsearch`;
+- `getenv`;
+- `setenv`;
+- `unsetenv`.
+
+The environment store is currently process-local and runtime-owned. It does not
+yet import the host process environment at startup, nor does it synchronize with
+host-specific environment APIs.

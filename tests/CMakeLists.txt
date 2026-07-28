@@ -109,6 +109,12 @@ set_tests_properties(stdio_file_test_runs PROPERTIES
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 
+add_crt_test(file_path_test file_path_test.c)
+set_tests_properties(file_path_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "file_path_test: ok"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
 add_crt_test(printf_test printf_test.c)
 set_tests_properties(printf_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "printf_test: ok 7 ff"
@@ -127,6 +133,11 @@ set_tests_properties(ctype_test_runs PROPERTIES
 add_crt_test(stdlib_test stdlib_test.c)
 set_tests_properties(stdlib_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "stdlib_test: ok"
+)
+
+add_crt_test(stdlib_string_extra_test stdlib_string_extra_test.c)
+set_tests_properties(stdlib_string_extra_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "stdlib_string_extra_test: ok"
 )
 
 add_crt_test(stdint_test stdint_test.c)

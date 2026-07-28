@@ -55,6 +55,72 @@ ___crt_sys_lseek:
   neg x0, x0
   ret
 
+.globl ___crt_sys_access
+.p2align 2
+___crt_sys_access:
+  mov x16, #33
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_mkdir
+.p2align 2
+___crt_sys_mkdir:
+  mov x16, #136
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_rmdir
+.p2align 2
+___crt_sys_rmdir:
+  mov x16, #137
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_chdir
+.p2align 2
+___crt_sys_chdir:
+  mov x16, #12
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_dup
+.p2align 2
+___crt_sys_dup:
+  mov x16, #41
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_dup2
+.p2align 2
+___crt_sys_dup2:
+  mov x16, #90
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
 .globl ___crt_sys_unlink
 .p2align 2
 ___crt_sys_unlink:

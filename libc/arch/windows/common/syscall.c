@@ -25,6 +25,8 @@ typedef int BOOL;
 #define OPEN_ALWAYS 4
 #define FILE_ATTRIBUTE_NORMAL 0x00000080
 #define MOVEFILE_REPLACE_EXISTING 0x00000001
+#define FILE_ATTRIBUTE_DIRECTORY 0x00000010
+#define INVALID_FILE_ATTRIBUTES ((DWORD)0xffffffffUL)
 #define FILE_BEGIN 0
 #define FILE_CURRENT 1
 #define FILE_END 2
@@ -75,6 +77,22 @@ __declspec(dllimport) BOOL CRT_WINAPI MoveFileExA(
     const char* lpExistingFileName,
     const char* lpNewFileName,
     DWORD dwFlags);
+__declspec(dllimport) BOOL CRT_WINAPI CreateDirectoryA(
+    const char* lpPathName,
+    void* lpSecurityAttributes);
+__declspec(dllimport) BOOL CRT_WINAPI RemoveDirectoryA(const char* lpPathName);
+__declspec(dllimport) BOOL CRT_WINAPI SetCurrentDirectoryA(const char* lpPathName);
+__declspec(dllimport) DWORD CRT_WINAPI GetCurrentDirectoryA(DWORD nBufferLength, char* lpBuffer);
+__declspec(dllimport) DWORD CRT_WINAPI GetFileAttributesA(const char* lpFileName);
+__declspec(dllimport) HANDLE CRT_WINAPI GetCurrentProcess(void);
+__declspec(dllimport) BOOL CRT_WINAPI DuplicateHandle(
+    HANDLE hSourceProcessHandle,
+    HANDLE hSourceHandle,
+    HANDLE hTargetProcessHandle,
+    HANDLE* lpTargetHandle,
+    DWORD dwDesiredAccess,
+    BOOL bInheritHandle,
+    DWORD dwOptions);
 __declspec(dllimport) BOOL CRT_WINAPI SetFilePointerEx(
     HANDLE hFile,
     long long liDistanceToMove,
@@ -264,6 +282,93 @@ long long __crt_sys_lseek(int fd, long long offset, int whence) {
     return fail_last_error();
   }
   return new_position;
+}
+
+long __crt_sys_access(const char* path, int mode) {
+  DWORD attrs = GetFileAttributesA(path);
+  (void)mode;
+
+  if (attrs == INVALID_FILE_ATTRIBUTES) {
+    return fail_last_error();
+  }
+  return 0;
+}
+
+long __crt_sys_mkdir(const char* path, unsigned int mode) {
+  (void)mode;
+  if (!CreateDirectoryA(path, 0)) {
+    return fail_last_error();
+  }
+  return 0;
+}
+
+long __crt_sys_rmdir(const char* path) {
+  if (!RemoveDirectoryA(path)) {
+    return fail_last_error();
+  }
+  return 0;
+}
+
+long __crt_sys_chdir(const char* path) {
+  if (!SetCurrentDirectoryA(path)) {
+    return fail_last_error();
+  }
+  return 0;
+}
+
+long __crt_sys_getcwd(char* buf, unsigned long size) {
+  DWORD result = GetCurrentDirectoryA((DWORD)size, buf);
+
+  if (result == 0) {
+    return fail_last_error();
+  }
+  if (result >= (DWORD)size) {
+    return -ERANGE;
+  }
+  return (long)result;
+}
+
+long __crt_sys_dup(int oldfd) {
+  HANDLE handle = get_fd_handle(oldfd);
+  HANDLE duplicate = 0;
+  int fd;
+
+  if (handle == INVALID_HANDLE_VALUE) {
+    return -EBADF;
+  }
+  if (!DuplicateHandle(GetCurrentProcess(), handle, GetCurrentProcess(), &duplicate, 0, 0, 2)) {
+    return fail_last_error();
+  }
+  fd = alloc_fd(duplicate);
+  if (fd < 0) {
+    CloseHandle(duplicate);
+    return -EMFILE;
+  }
+  return fd;
+}
+
+long __crt_sys_dup2(int oldfd, int newfd) {
+  HANDLE handle = get_fd_handle(oldfd);
+  HANDLE duplicate = 0;
+
+  init_fd_table();
+  if (handle == INVALID_HANDLE_VALUE) {
+    return -EBADF;
+  }
+  if (newfd < 0 || newfd >= CRT_FD_TABLE_SIZE) {
+    return -EBADF;
+  }
+  if (oldfd == newfd) {
+    return newfd;
+  }
+  if (!DuplicateHandle(GetCurrentProcess(), handle, GetCurrentProcess(), &duplicate, 0, 0, 2)) {
+    return fail_last_error();
+  }
+  if (fd_table[newfd] != 0 && fd_table[newfd] != INVALID_HANDLE_VALUE) {
+    CloseHandle(fd_table[newfd]);
+  }
+  fd_table[newfd] = duplicate;
+  return newfd;
 }
 
 long __crt_sys_unlink(const char* path) {

@@ -45,6 +45,69 @@ __crt_sys_lseek:
   retq
 .size __crt_sys_lseek, . - __crt_sys_lseek
 
+.globl __crt_sys_access
+.type __crt_sys_access, @function
+.p2align 4, 0x90
+__crt_sys_access:
+  movq $21, %rax
+  syscall
+  retq
+.size __crt_sys_access, . - __crt_sys_access
+
+.globl __crt_sys_mkdir
+.type __crt_sys_mkdir, @function
+.p2align 4, 0x90
+__crt_sys_mkdir:
+  movq $83, %rax
+  syscall
+  retq
+.size __crt_sys_mkdir, . - __crt_sys_mkdir
+
+.globl __crt_sys_rmdir
+.type __crt_sys_rmdir, @function
+.p2align 4, 0x90
+__crt_sys_rmdir:
+  movq $84, %rax
+  syscall
+  retq
+.size __crt_sys_rmdir, . - __crt_sys_rmdir
+
+.globl __crt_sys_chdir
+.type __crt_sys_chdir, @function
+.p2align 4, 0x90
+__crt_sys_chdir:
+  movq $80, %rax
+  syscall
+  retq
+.size __crt_sys_chdir, . - __crt_sys_chdir
+
+.globl __crt_sys_getcwd
+.type __crt_sys_getcwd, @function
+.p2align 4, 0x90
+__crt_sys_getcwd:
+  movq $79, %rax
+  syscall
+  retq
+.size __crt_sys_getcwd, . - __crt_sys_getcwd
+
+.globl __crt_sys_dup
+.type __crt_sys_dup, @function
+.p2align 4, 0x90
+__crt_sys_dup:
+  movq $32, %rax
+  syscall
+  retq
+.size __crt_sys_dup, . - __crt_sys_dup
+
+.globl __crt_sys_dup2
+.type __crt_sys_dup2, @function
+.p2align 4, 0x90
+__crt_sys_dup2:
+  movq $33, %rax
+  syscall
+  retq
+.size __crt_sys_dup2, . - __crt_sys_dup2
+
 .globl __crt_sys_unlink
 .type __crt_sys_unlink, @function
 .p2align 4, 0x90
