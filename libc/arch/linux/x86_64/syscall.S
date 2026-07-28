@@ -118,6 +118,111 @@ __crt_sys_pipe:
   retq
 .size __crt_sys_pipe, . - __crt_sys_pipe
 
+.globl __crt_sys_ppoll
+.type __crt_sys_ppoll, @function
+.p2align 4, 0x90
+__crt_sys_ppoll:
+  xorq %r10, %r10
+  xorq %r8, %r8
+  movq $271, %rax
+  syscall
+  retq
+.size __crt_sys_ppoll, . - __crt_sys_ppoll
+
+.globl __crt_sys_socket
+.type __crt_sys_socket, @function
+.p2align 4, 0x90
+__crt_sys_socket:
+  movq $41, %rax
+  syscall
+  retq
+.size __crt_sys_socket, . - __crt_sys_socket
+
+.globl __crt_sys_connect
+.type __crt_sys_connect, @function
+.p2align 4, 0x90
+__crt_sys_connect:
+  movq $42, %rax
+  syscall
+  retq
+.size __crt_sys_connect, . - __crt_sys_connect
+
+.globl __crt_sys_accept
+.type __crt_sys_accept, @function
+.p2align 4, 0x90
+__crt_sys_accept:
+  xorq %r10, %r10
+  movq $288, %rax
+  syscall
+  retq
+.size __crt_sys_accept, . - __crt_sys_accept
+
+.globl __crt_sys_sendto
+.type __crt_sys_sendto, @function
+.p2align 4, 0x90
+__crt_sys_sendto:
+  movq %rcx, %r10
+  movq $44, %rax
+  syscall
+  retq
+.size __crt_sys_sendto, . - __crt_sys_sendto
+
+.globl __crt_sys_recvfrom
+.type __crt_sys_recvfrom, @function
+.p2align 4, 0x90
+__crt_sys_recvfrom:
+  movq %rcx, %r10
+  movq $45, %rax
+  syscall
+  retq
+.size __crt_sys_recvfrom, . - __crt_sys_recvfrom
+
+.globl __crt_sys_bind
+.type __crt_sys_bind, @function
+.p2align 4, 0x90
+__crt_sys_bind:
+  movq $49, %rax
+  syscall
+  retq
+.size __crt_sys_bind, . - __crt_sys_bind
+
+.globl __crt_sys_listen
+.type __crt_sys_listen, @function
+.p2align 4, 0x90
+__crt_sys_listen:
+  movq $50, %rax
+  syscall
+  retq
+.size __crt_sys_listen, . - __crt_sys_listen
+
+.globl __crt_sys_getsockname
+.type __crt_sys_getsockname, @function
+.p2align 4, 0x90
+__crt_sys_getsockname:
+  movq $51, %rax
+  syscall
+  retq
+.size __crt_sys_getsockname, . - __crt_sys_getsockname
+
+.globl __crt_sys_setsockopt
+.type __crt_sys_setsockopt, @function
+.p2align 4, 0x90
+__crt_sys_setsockopt:
+  movq %rcx, %r10
+  movq $54, %rax
+  syscall
+  retq
+.size __crt_sys_setsockopt, . - __crt_sys_setsockopt
+
+.globl __crt_sys_shutdown
+.type __crt_sys_shutdown, @function
+.p2align 4, 0x90
+__crt_sys_shutdown:
+  movq $48, %rax
+  syscall
+  retq
+.size __crt_sys_shutdown, . - __crt_sys_shutdown
+
 .globl __crt_sys_readlink
 .type __crt_sys_readlink, @function
 .p2align 4, 0x90

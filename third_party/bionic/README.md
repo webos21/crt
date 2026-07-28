@@ -38,6 +38,20 @@ Every row below is authoritative for local provenance. If a legacy source is
 replaced by a current-main source later, update the row rather than leaving both
 as implicit alternatives.
 
+The machine-readable manifest is `third_party/bionic/import_manifest.json`, with
+schema `third_party/bionic/import_manifest.schema.json`. The manifest adds a
+`review_class` and `next_action` for every tracked source so legacy imports can
+be audited mechanically. The current legacy decision summary is in
+`third_party/bionic/legacy_import_review.md`.
+
+Use:
+
+```sh
+python3 tools/check_import_manifest.py
+```
+
+or the CMake target `check-import-manifest` when Python is available.
+
 ## Imported Files
 
 ### String/Memory Tranche 1

@@ -132,6 +132,108 @@ __crt_sys_pipe:
   ret
 .size __crt_sys_pipe, . - __crt_sys_pipe
 
+.globl __crt_sys_ppoll
+.type __crt_sys_ppoll, %function
+.p2align 2
+__crt_sys_ppoll:
+  mov x3, #0
+  mov x4, #0
+  mov x8, #73
+  svc #0
+  ret
+.size __crt_sys_ppoll, . - __crt_sys_ppoll
+
+.globl __crt_sys_socket
+.type __crt_sys_socket, %function
+.p2align 2
+__crt_sys_socket:
+  mov x8, #198
+  svc #0
+  ret
+.size __crt_sys_socket, . - __crt_sys_socket
+
+.globl __crt_sys_connect
+.type __crt_sys_connect, %function
+.p2align 2
+__crt_sys_connect:
+  mov x8, #203
+  svc #0
+  ret
+.size __crt_sys_connect, . - __crt_sys_connect
+
+.globl __crt_sys_accept
+.type __crt_sys_accept, %function
+.p2align 2
+__crt_sys_accept:
+  mov x3, #0
+  mov x8, #242
+  svc #0
+  ret
+.size __crt_sys_accept, . - __crt_sys_accept
+
+.globl __crt_sys_sendto
+.type __crt_sys_sendto, %function
+.p2align 2
+__crt_sys_sendto:
+  mov x8, #206
+  svc #0
+  ret
+.size __crt_sys_sendto, . - __crt_sys_sendto
+
+.globl __crt_sys_recvfrom
+.type __crt_sys_recvfrom, %function
+.p2align 2
+__crt_sys_recvfrom:
+  mov x8, #207
+  svc #0
+  ret
+.size __crt_sys_recvfrom, . - __crt_sys_recvfrom
+
+.globl __crt_sys_bind
+.type __crt_sys_bind, %function
+.p2align 2
+__crt_sys_bind:
+  mov x8, #200
+  svc #0
+  ret
+.size __crt_sys_bind, . - __crt_sys_bind
+
+.globl __crt_sys_listen
+.type __crt_sys_listen, %function
+.p2align 2
+__crt_sys_listen:
+  mov x8, #201
+  svc #0
+  ret
+.size __crt_sys_listen, . - __crt_sys_listen
+
+.globl __crt_sys_getsockname
+.type __crt_sys_getsockname, %function
+.p2align 2
+__crt_sys_getsockname:
+  mov x8, #204
+  svc #0
+  ret
+.size __crt_sys_getsockname, . - __crt_sys_getsockname
+
+.globl __crt_sys_setsockopt
+.type __crt_sys_setsockopt, %function
+.p2align 2
+__crt_sys_setsockopt:
+  mov x8, #208
+  svc #0
+  ret
+.size __crt_sys_setsockopt, . - __crt_sys_setsockopt
+
+.globl __crt_sys_shutdown
+.type __crt_sys_shutdown, %function
+.p2align 2
+__crt_sys_shutdown:
+  mov x8, #210
+  svc #0
+  ret
+.size __crt_sys_shutdown, . - __crt_sys_shutdown
+
 .globl __crt_sys_readlink
 .type __crt_sys_readlink, %function
 .p2align 2

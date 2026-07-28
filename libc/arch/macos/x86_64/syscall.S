@@ -147,6 +147,129 @@ ___crt_sys_pipe:
   negq %rax
   retq
 
+.globl ___crt_sys_poll
+.p2align 4, 0x90
+___crt_sys_poll:
+  movq $0x20000e6, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_socket
+.p2align 4, 0x90
+___crt_sys_socket:
+  movq $0x2000061, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_connect
+.p2align 4, 0x90
+___crt_sys_connect:
+  movq $0x2000062, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_accept
+.p2align 4, 0x90
+___crt_sys_accept:
+  movq $0x200001e, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_getsockname
+.p2align 4, 0x90
+___crt_sys_getsockname:
+  movq $0x2000020, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_bind
+.p2align 4, 0x90
+___crt_sys_bind:
+  movq $0x2000068, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_setsockopt
+.p2align 4, 0x90
+___crt_sys_setsockopt:
+  movq $0x2000069, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_listen
+.p2align 4, 0x90
+___crt_sys_listen:
+  movq $0x200006a, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_sendto
+.p2align 4, 0x90
+___crt_sys_sendto:
+  movq %rcx, %r10
+  movq $0x2000085, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_shutdown
+.p2align 4, 0x90
+___crt_sys_shutdown:
+  movq $0x2000086, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_recvfrom
+.p2align 4, 0x90
+___crt_sys_recvfrom:
+  movq %rcx, %r10
+  movq $0x200001d, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
 .globl ___crt_sys_readlink
 .p2align 4, 0x90
 ___crt_sys_readlink:

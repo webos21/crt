@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CRT Bionic Import Manifest",
+  "type": "object",
+  "required": ["schema_version", "upstream", "entries"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "upstream": {
+      "type": "object",
+      "required": ["repository", "primary_branch", "observed_main_commit", "observed_main_date"],
+      "additionalProperties": false,
+      "properties": {
+        "repository": {"type": "string"},
+        "primary_branch": {"type": "string"},
+        "observed_main_commit": {"type": "string"},
+        "observed_main_date": {"type": "string"}
+      }
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "local",
+          "component",
+          "source_kind",
+          "upstream_ref",
+          "upstream_path",
+          "status",
+          "review_class",
+          "license_family",
+          "reason",
+          "next_action"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "local": {"type": "string"},
+          "component": {"type": "string"},
+          "source_kind": {
+            "type": "string",
+            "enum": ["bionic-main", "bionic-legacy", "project-owned", "compiler-provided"]
+          },
+          "upstream_ref": {"type": "string"},
+          "upstream_path": {"type": "string"},
+          "status": {
+            "type": "string",
+            "enum": ["imported", "adapted", "new", "extended", "adapted/project-owned"]
+          },
+          "review_class": {
+            "type": "string",
+            "enum": [
+              "main_current",
+              "bootstrap_keep",
+              "main_replace_candidate",
+              "project_owned_transition",
+              "project_owned"
+            ]
+          },
+          "license_family": {"type": "string"},
+          "reason": {"type": "string"},
+          "next_action": {"type": "string"}
+        }
+      }
+    }
+  }
+}

@@ -147,6 +147,127 @@ ___crt_sys_pipe:
   neg x0, x0
   ret
 
+.globl ___crt_sys_poll
+.p2align 2
+___crt_sys_poll:
+  mov x16, #230
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_socket
+.p2align 2
+___crt_sys_socket:
+  mov x16, #97
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_connect
+.p2align 2
+___crt_sys_connect:
+  mov x16, #98
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_accept
+.p2align 2
+___crt_sys_accept:
+  mov x16, #30
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_getsockname
+.p2align 2
+___crt_sys_getsockname:
+  mov x16, #32
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_bind
+.p2align 2
+___crt_sys_bind:
+  mov x16, #104
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_setsockopt
+.p2align 2
+___crt_sys_setsockopt:
+  mov x16, #105
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_listen
+.p2align 2
+___crt_sys_listen:
+  mov x16, #106
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_sendto
+.p2align 2
+___crt_sys_sendto:
+  mov x16, #133
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_shutdown
+.p2align 2
+___crt_sys_shutdown:
+  mov x16, #134
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_recvfrom
+.p2align 2
+___crt_sys_recvfrom:
+  mov x16, #29
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
 .globl ___crt_sys_readlink
 .p2align 2
 ___crt_sys_readlink:

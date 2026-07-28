@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <stdint.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -9,8 +10,11 @@
 #include <unistd.h>
 
 typedef void* HANDLE;
+typedef uintptr_t SOCKET;
 typedef unsigned long DWORD;
+typedef uint16_t WORD;
 typedef int BOOL;
+struct sockaddr;
 
 #define CRT_FD_TABLE_SIZE 64
 
@@ -31,6 +35,9 @@ typedef int BOOL;
 #define MOVEFILE_REPLACE_EXISTING 0x00000001
 #define FILE_ATTRIBUTE_DIRECTORY 0x00000010
 #define FILE_ATTRIBUTE_REPARSE_POINT 0x00000400
+#define FILE_TYPE_DISK 0x0001
+#define FILE_TYPE_CHAR 0x0002
+#define FILE_TYPE_PIPE 0x0003
 #define INVALID_FILE_ATTRIBUTES ((DWORD)0xffffffffUL)
 #define FILE_FLAG_BACKUP_SEMANTICS 0x02000000
 #define FILE_BEGIN 0
@@ -49,6 +56,21 @@ typedef int BOOL;
 #define WINDOWS_TICK 10000000ULL
 #define SEC_TO_UNIX_EPOCH 11644473600ULL
 #define DUPLICATE_SAME_ACCESS 0x00000002
+#define INVALID_SOCKET ((SOCKET)~(uintptr_t)0)
+#define SOCKET_ERROR (-1)
+#define SD_RECEIVE 0
+#define SD_SEND 1
+#define SD_BOTH 2
+#define CRT_PUBLIC_SOL_SOCKET 1
+#define CRT_PUBLIC_SO_REUSEADDR 2
+#define CRT_PUBLIC_SHUT_RD 0
+#define CRT_PUBLIC_SHUT_WR 1
+#define CRT_WS_SOL_SOCKET 0xffff
+#define CRT_WS_SO_REUSEADDR 0x0004
+#define FIONREAD 0x4004667fUL
+#define CRT_FD_KIND_NONE 0
+#define CRT_FD_KIND_FILE 1
+#define CRT_FD_KIND_SOCKET 2
 
 #if defined(_M_IX86) || defined(__i386__)
 #define CRT_WINAPI __stdcall
@@ -58,6 +80,39 @@ typedef int BOOL;
 
 __declspec(dllimport) HANDLE CRT_WINAPI GetStdHandle(DWORD nStdHandle);
 __declspec(dllimport) DWORD CRT_WINAPI GetLastError(void);
+__declspec(dllimport) int CRT_WINAPI WSAStartup(WORD wVersionRequested, void* lpWSAData);
+__declspec(dllimport) int CRT_WINAPI WSAGetLastError(void);
+__declspec(dllimport) SOCKET CRT_WINAPI socket(int af, int type, int protocol);
+__declspec(dllimport) int CRT_WINAPI bind(SOCKET s, const struct sockaddr* name, int namelen);
+__declspec(dllimport) int CRT_WINAPI listen(SOCKET s, int backlog);
+__declspec(dllimport) SOCKET CRT_WINAPI accept(SOCKET s, struct sockaddr* addr, int* addrlen);
+__declspec(dllimport) int CRT_WINAPI connect(SOCKET s, const struct sockaddr* name, int namelen);
+__declspec(dllimport) int CRT_WINAPI send(SOCKET s, const char* buf, int len, int flags);
+__declspec(dllimport) int CRT_WINAPI recv(SOCKET s, char* buf, int len, int flags);
+__declspec(dllimport) int CRT_WINAPI sendto(
+    SOCKET s,
+    const char* buf,
+    int len,
+    int flags,
+    const struct sockaddr* to,
+    int tolen);
+__declspec(dllimport) int CRT_WINAPI recvfrom(
+    SOCKET s,
+    char* buf,
+    int len,
+    int flags,
+    struct sockaddr* from,
+    int* fromlen);
+__declspec(dllimport) int CRT_WINAPI getsockname(SOCKET s, struct sockaddr* name, int* namelen);
+__declspec(dllimport) int CRT_WINAPI setsockopt(
+    SOCKET s,
+    int level,
+    int optname,
+    const char* optval,
+    int optlen);
+__declspec(dllimport) int CRT_WINAPI shutdown(SOCKET s, int how);
+__declspec(dllimport) int CRT_WINAPI closesocket(SOCKET s);
+__declspec(dllimport) int CRT_WINAPI ioctlsocket(SOCKET s, long cmd, unsigned long* argp);
 __declspec(dllimport) HANDLE CRT_WINAPI CreateFileA(
     const char* lpFileName,
     DWORD dwDesiredAccess,
@@ -110,6 +165,14 @@ __declspec(dllimport) BOOL CRT_WINAPI CreatePipe(
     HANDLE* hWritePipe,
     void* lpPipeAttributes,
     DWORD nSize);
+__declspec(dllimport) DWORD CRT_WINAPI GetFileType(HANDLE hFile);
+__declspec(dllimport) BOOL CRT_WINAPI PeekNamedPipe(
+    HANDLE hNamedPipe,
+    void* lpBuffer,
+    DWORD nBufferSize,
+    DWORD* lpBytesRead,
+    DWORD* lpTotalBytesAvail,
+    DWORD* lpBytesLeftThisMessage);
 __declspec(dllimport) BOOL CRT_WINAPI SetFilePointerEx(
     HANDLE hFile,
     long long liDistanceToMove,
@@ -153,7 +216,9 @@ __declspec(dllimport) void CRT_WINAPI ExitThread(DWORD dwExitCode);
 __declspec(dllimport) void CRT_WINAPI ExitProcess(unsigned int uExitCode);
 
 static HANDLE fd_table[CRT_FD_TABLE_SIZE];
+static int fd_kind[CRT_FD_TABLE_SIZE];
 static int fd_table_initialized;
+static int winsock_initialized;
 
 static int map_windows_error(DWORD error) {
   switch (error) {
@@ -171,6 +236,69 @@ static int map_windows_error(DWORD error) {
       return EEXIST;
     case 87:
       return EINVAL;
+    default:
+      return EIO;
+  }
+}
+
+static int map_wsa_error(int error) {
+  switch (error) {
+    case 10004:
+      return EINTR;
+    case 10009:
+      return EBADF;
+    case 10013:
+      return EACCES;
+    case 10014:
+      return EFAULT;
+    case 10022:
+      return EINVAL;
+    case 10035:
+      return EAGAIN;
+    case 10036:
+      return EINPROGRESS;
+    case 10037:
+      return EALREADY;
+    case 10038:
+      return ENOTSOCK;
+    case 10039:
+      return EDESTADDRREQ;
+    case 10040:
+      return EMSGSIZE;
+    case 10041:
+      return EPROTOTYPE;
+    case 10042:
+      return ENOPROTOOPT;
+    case 10043:
+      return EPROTONOSUPPORT;
+    case 10044:
+      return ESOCKTNOSUPPORT;
+    case 10047:
+      return EAFNOSUPPORT;
+    case 10048:
+      return EADDRINUSE;
+    case 10049:
+      return EADDRNOTAVAIL;
+    case 10050:
+      return ENETDOWN;
+    case 10051:
+      return ENETUNREACH;
+    case 10053:
+      return ECONNABORTED;
+    case 10054:
+      return ECONNRESET;
+    case 10055:
+      return ENOBUFS;
+    case 10056:
+      return EISCONN;
+    case 10057:
+      return ENOTCONN;
+    case 10060:
+      return ETIMEDOUT;
+    case 10061:
+      return ECONNREFUSED;
+    case 10065:
+      return EHOSTUNREACH;
     default:
       return EIO;
   }
@@ -197,16 +325,41 @@ static void init_fd_table(void) {
   fd_table[0] = GetStdHandle(STD_INPUT_HANDLE);
   fd_table[1] = GetStdHandle(STD_OUTPUT_HANDLE);
   fd_table[2] = GetStdHandle(STD_ERROR_HANDLE);
+  fd_kind[0] = CRT_FD_KIND_FILE;
+  fd_kind[1] = CRT_FD_KIND_FILE;
+  fd_kind[2] = CRT_FD_KIND_FILE;
   fd_table_initialized = 1;
+}
+
+static long init_winsock(void) {
+  unsigned char data[512];
+
+  if (winsock_initialized) {
+    return 0;
+  }
+  if (WSAStartup((WORD)0x0202, data) != 0) {
+    return -map_wsa_error(WSAGetLastError());
+  }
+  winsock_initialized = 1;
+  return 0;
 }
 
 static HANDLE get_fd_handle(int fd) {
   init_fd_table();
-  if (fd < 0 || fd >= CRT_FD_TABLE_SIZE || fd_table[fd] == 0 ||
+  if (fd < 0 || fd >= CRT_FD_TABLE_SIZE || fd_kind[fd] != CRT_FD_KIND_FILE ||
+      fd_table[fd] == 0 ||
       fd_table[fd] == INVALID_HANDLE_VALUE) {
     return INVALID_HANDLE_VALUE;
   }
   return fd_table[fd];
+}
+
+static SOCKET get_fd_socket(int fd) {
+  init_fd_table();
+  if (fd < 0 || fd >= CRT_FD_TABLE_SIZE || fd_kind[fd] != CRT_FD_KIND_SOCKET) {
+    return INVALID_SOCKET;
+  }
+  return (SOCKET)(uintptr_t)fd_table[fd];
 }
 
 static int alloc_fd(HANDLE handle) {
@@ -216,6 +369,21 @@ static int alloc_fd(HANDLE handle) {
   for (fd = 3; fd < CRT_FD_TABLE_SIZE; ++fd) {
     if (fd_table[fd] == 0) {
       fd_table[fd] = handle;
+      fd_kind[fd] = CRT_FD_KIND_FILE;
+      return fd;
+    }
+  }
+  return -1;
+}
+
+static int alloc_socket_fd(SOCKET socket_handle) {
+  int fd;
+
+  init_fd_table();
+  for (fd = 3; fd < CRT_FD_TABLE_SIZE; ++fd) {
+    if (fd_kind[fd] == CRT_FD_KIND_NONE) {
+      fd_table[fd] = (HANDLE)(uintptr_t)socket_handle;
+      fd_kind[fd] = CRT_FD_KIND_SOCKET;
       return fd;
     }
   }
@@ -226,6 +394,10 @@ long __crt_sys_read(int fd, void* buf, unsigned long count) {
   HANDLE handle = get_fd_handle(fd);
   DWORD bytes_read = 0;
 
+  if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_SOCKET) {
+    int result = recv((SOCKET)(uintptr_t)fd_table[fd], (char*)buf, (int)count, 0);
+    return result == SOCKET_ERROR ? -map_wsa_error(WSAGetLastError()) : result;
+  }
   if (handle == INVALID_HANDLE_VALUE) {
     return -EBADF;
   }
@@ -239,6 +411,10 @@ long __crt_sys_write(int fd, const void* buf, unsigned long count) {
   HANDLE handle = get_fd_handle(fd);
   DWORD written = 0;
 
+  if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_SOCKET) {
+    int result = send((SOCKET)(uintptr_t)fd_table[fd], (const char*)buf, (int)count, 0);
+    return result == SOCKET_ERROR ? -map_wsa_error(WSAGetLastError()) : result;
+  }
   if (handle == INVALID_HANDLE_VALUE) {
     return -EBADF;
   }
@@ -290,14 +466,23 @@ long __crt_sys_open(const char* path, int flags, unsigned int mode) {
 long __crt_sys_close(int fd) {
   HANDLE handle = get_fd_handle(fd);
 
+  init_fd_table();
+  if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_SOCKET) {
+    SOCKET socket_handle = (SOCKET)(uintptr_t)fd_table[fd];
+    fd_table[fd] = 0;
+    fd_kind[fd] = CRT_FD_KIND_NONE;
+    return closesocket(socket_handle) == SOCKET_ERROR ? -map_wsa_error(WSAGetLastError()) : 0;
+  }
   if (handle == INVALID_HANDLE_VALUE) {
     return -EBADF;
   }
   if (fd >= 0 && fd <= 2) {
     fd_table[fd] = 0;
+    fd_kind[fd] = CRT_FD_KIND_NONE;
     return 0;
   }
   fd_table[fd] = 0;
+  fd_kind[fd] = CRT_FD_KIND_NONE;
   if (!CloseHandle(handle)) {
     return fail_last_error();
   }
@@ -414,9 +599,14 @@ long __crt_sys_dup2(int oldfd, int newfd) {
     return fail_last_error();
   }
   if (fd_table[newfd] != 0 && fd_table[newfd] != INVALID_HANDLE_VALUE) {
-    CloseHandle(fd_table[newfd]);
+    if (fd_kind[newfd] == CRT_FD_KIND_SOCKET) {
+      closesocket((SOCKET)(uintptr_t)fd_table[newfd]);
+    } else {
+      CloseHandle(fd_table[newfd]);
+    }
   }
   fd_table[newfd] = duplicate;
+  fd_kind[newfd] = CRT_FD_KIND_FILE;
   return newfd;
 }
 
@@ -438,6 +628,7 @@ long __crt_sys_pipe(int pipefd[2]) {
   write_fd = alloc_fd(write_handle);
   if (write_fd < 0) {
     fd_table[read_fd] = 0;
+    fd_kind[read_fd] = CRT_FD_KIND_NONE;
     CloseHandle(read_handle);
     CloseHandle(write_handle);
     return -EMFILE;
@@ -445,6 +636,281 @@ long __crt_sys_pipe(int pipefd[2]) {
   pipefd[0] = read_fd;
   pipefd[1] = write_fd;
   return 0;
+}
+
+static short poll_handle(HANDLE handle, short events) {
+  DWORD file_type;
+  DWORD bytes_available = 0;
+  short revents = 0;
+
+  if ((events & POLLOUT) != 0) {
+    revents |= POLLOUT;
+  }
+  if ((events & (POLLIN | POLLPRI)) == 0) {
+    return revents;
+  }
+
+  file_type = GetFileType(handle);
+  if (file_type == FILE_TYPE_DISK || file_type == FILE_TYPE_CHAR) {
+    revents |= (short)(events & (POLLIN | POLLPRI));
+    return revents;
+  }
+  if (file_type == FILE_TYPE_PIPE) {
+    if (PeekNamedPipe(handle, 0, 0, 0, &bytes_available, 0)) {
+      if (bytes_available != 0) {
+        revents |= (short)(events & POLLIN);
+      }
+      return revents;
+    }
+    return POLLERR;
+  }
+  return (short)(revents | POLLERR);
+}
+
+static short poll_socket(SOCKET socket_handle, short events) {
+  unsigned long bytes_available = 0;
+  short revents = 0;
+
+  if ((events & POLLOUT) != 0) {
+    revents |= POLLOUT;
+  }
+  if ((events & POLLIN) != 0) {
+    if (ioctlsocket(socket_handle, FIONREAD, &bytes_available) == SOCKET_ERROR) {
+      return POLLERR;
+    }
+    if (bytes_available != 0) {
+      revents |= POLLIN;
+    }
+  }
+  return revents;
+}
+
+long __crt_sys_poll(struct pollfd* fds, unsigned long nfds, int timeout) {
+  unsigned long i;
+  long ready;
+  DWORD slept = 0;
+
+  if (fds == 0 && nfds != 0) {
+    return -EFAULT;
+  }
+  do {
+    ready = 0;
+    for (i = 0; i < nfds; ++i) {
+      HANDLE handle;
+
+      fds[i].revents = 0;
+      if (fds[i].fd < 0) {
+        continue;
+      }
+      if (fds[i].fd < CRT_FD_TABLE_SIZE && fd_kind[fds[i].fd] == CRT_FD_KIND_SOCKET) {
+        fds[i].revents = poll_socket((SOCKET)(uintptr_t)fd_table[fds[i].fd], fds[i].events);
+      } else {
+        handle = get_fd_handle(fds[i].fd);
+        if (handle == INVALID_HANDLE_VALUE) {
+          fds[i].revents = POLLNVAL;
+        } else {
+          fds[i].revents = poll_handle(handle, fds[i].events);
+        }
+      }
+      if (fds[i].revents != 0) {
+        ++ready;
+      }
+    }
+    if (ready != 0 || timeout == 0) {
+      return ready;
+    }
+    if (timeout < 0) {
+      Sleep(1);
+      continue;
+    }
+    if (slept >= (DWORD)timeout) {
+      return 0;
+    }
+    Sleep(1);
+    ++slept;
+  } while (1);
+}
+
+static int translate_socket_level(int level) {
+  return level == CRT_PUBLIC_SOL_SOCKET ? CRT_WS_SOL_SOCKET : level;
+}
+
+static int translate_socket_option(int level, int optname) {
+  if (level == CRT_PUBLIC_SOL_SOCKET && optname == CRT_PUBLIC_SO_REUSEADDR) {
+    return CRT_WS_SO_REUSEADDR;
+  }
+  return optname;
+}
+
+long __crt_sys_socket(int domain, int type, int protocol) {
+  SOCKET socket_handle;
+  int fd;
+  long init_result = init_winsock();
+
+  if (init_result != 0) {
+    return init_result;
+  }
+  socket_handle = socket(domain, type, protocol);
+  if (socket_handle == INVALID_SOCKET) {
+    return -map_wsa_error(WSAGetLastError());
+  }
+  fd = alloc_socket_fd(socket_handle);
+  if (fd < 0) {
+    closesocket(socket_handle);
+    return -EMFILE;
+  }
+  return fd;
+}
+
+long __crt_sys_bind(int sockfd, const void* addr, unsigned int addrlen) {
+  SOCKET socket_handle = get_fd_socket(sockfd);
+
+  if (socket_handle == INVALID_SOCKET) {
+    return -EBADF;
+  }
+  return bind(socket_handle, (const struct sockaddr*)addr, (int)addrlen) == SOCKET_ERROR
+             ? -map_wsa_error(WSAGetLastError())
+             : 0;
+}
+
+long __crt_sys_listen(int sockfd, int backlog) {
+  SOCKET socket_handle = get_fd_socket(sockfd);
+
+  if (socket_handle == INVALID_SOCKET) {
+    return -EBADF;
+  }
+  return listen(socket_handle, backlog) == SOCKET_ERROR ? -map_wsa_error(WSAGetLastError()) : 0;
+}
+
+long __crt_sys_accept(int sockfd, void* addr, unsigned int* addrlen) {
+  SOCKET socket_handle = get_fd_socket(sockfd);
+  SOCKET accepted;
+  int len = addrlen != 0 ? (int)*addrlen : 0;
+  int fd;
+
+  if (socket_handle == INVALID_SOCKET) {
+    return -EBADF;
+  }
+  accepted = accept(socket_handle, (struct sockaddr*)addr, addrlen != 0 ? &len : 0);
+  if (accepted == INVALID_SOCKET) {
+    return -map_wsa_error(WSAGetLastError());
+  }
+  fd = alloc_socket_fd(accepted);
+  if (fd < 0) {
+    closesocket(accepted);
+    return -EMFILE;
+  }
+  if (addrlen != 0) {
+    *addrlen = (unsigned int)len;
+  }
+  return fd;
+}
+
+long __crt_sys_connect(int sockfd, const void* addr, unsigned int addrlen) {
+  SOCKET socket_handle = get_fd_socket(sockfd);
+
+  if (socket_handle == INVALID_SOCKET) {
+    return -EBADF;
+  }
+  return connect(socket_handle, (const struct sockaddr*)addr, (int)addrlen) == SOCKET_ERROR
+             ? -map_wsa_error(WSAGetLastError())
+             : 0;
+}
+
+long __crt_sys_sendto(
+    int sockfd,
+    const void* buf,
+    unsigned long len,
+    int flags,
+    const void* dest_addr,
+    unsigned int addrlen) {
+  SOCKET socket_handle = get_fd_socket(sockfd);
+  int result;
+
+  if (socket_handle == INVALID_SOCKET) {
+    return -EBADF;
+  }
+  result = sendto(
+      socket_handle,
+      (const char*)buf,
+      (int)len,
+      flags,
+      (const struct sockaddr*)dest_addr,
+      (int)addrlen);
+  return result == SOCKET_ERROR ? -map_wsa_error(WSAGetLastError()) : result;
+}
+
+long __crt_sys_recvfrom(
+    int sockfd,
+    void* buf,
+    unsigned long len,
+    int flags,
+    void* src_addr,
+    unsigned int* addrlen) {
+  SOCKET socket_handle = get_fd_socket(sockfd);
+  int inout_len = addrlen != 0 ? (int)*addrlen : 0;
+  int result;
+
+  if (socket_handle == INVALID_SOCKET) {
+    return -EBADF;
+  }
+  result = recvfrom(
+      socket_handle,
+      (char*)buf,
+      (int)len,
+      flags,
+      (struct sockaddr*)src_addr,
+      addrlen != 0 ? &inout_len : 0);
+  if (result == SOCKET_ERROR) {
+    return -map_wsa_error(WSAGetLastError());
+  }
+  if (addrlen != 0) {
+    *addrlen = (unsigned int)inout_len;
+  }
+  return result;
+}
+
+long __crt_sys_getsockname(int sockfd, void* addr, unsigned int* addrlen) {
+  SOCKET socket_handle = get_fd_socket(sockfd);
+  int len = addrlen != 0 ? (int)*addrlen : 0;
+
+  if (socket_handle == INVALID_SOCKET) {
+    return -EBADF;
+  }
+  if (getsockname(socket_handle, (struct sockaddr*)addr, &len) == SOCKET_ERROR) {
+    return -map_wsa_error(WSAGetLastError());
+  }
+  if (addrlen != 0) {
+    *addrlen = (unsigned int)len;
+  }
+  return 0;
+}
+
+long __crt_sys_setsockopt(int sockfd, int level, int optname, const void* optval, unsigned int optlen) {
+  SOCKET socket_handle = get_fd_socket(sockfd);
+
+  if (socket_handle == INVALID_SOCKET) {
+    return -EBADF;
+  }
+  return setsockopt(
+             socket_handle,
+             translate_socket_level(level),
+             translate_socket_option(level, optname),
+             (const char*)optval,
+             (int)optlen) == SOCKET_ERROR
+             ? -map_wsa_error(WSAGetLastError())
+             : 0;
+}
+
+long __crt_sys_shutdown(int sockfd, int how) {
+  SOCKET socket_handle = get_fd_socket(sockfd);
+  int mapped_how =
+      how == CRT_PUBLIC_SHUT_RD ? SD_RECEIVE : (how == CRT_PUBLIC_SHUT_WR ? SD_SEND : SD_BOTH);
+
+  if (socket_handle == INVALID_SOCKET) {
+    return -EBADF;
+  }
+  return shutdown(socket_handle, mapped_how) == SOCKET_ERROR ? -map_wsa_error(WSAGetLastError()) : 0;
 }
 
 long __crt_sys_realpath_path(const char* path, char* resolved_path, unsigned long size) {

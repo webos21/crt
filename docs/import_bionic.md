@@ -30,6 +30,32 @@ Every import tranche must record:
 - whether the local file is pristine or adapted;
 - a short note explaining any local adaptation.
 
+The machine-readable manifest is:
+
+```text
+third_party/bionic/import_manifest.json
+```
+
+The JSON schema is:
+
+```text
+third_party/bionic/import_manifest.schema.json
+```
+
+The human-readable manifest table in `third_party/bionic/README.md` is still
+useful for browsing, but the JSON manifest is the source of truth for automated
+checks. Run this after adding or changing imported sources:
+
+```sh
+cmake --build --preset macos-host-ninja-debug --target check-import-manifest
+```
+
+or directly:
+
+```sh
+python3 tools/check_import_manifest.py
+```
+
 The first import baseline is:
 
 ```text
@@ -65,6 +91,22 @@ the upstream ref, original path, local adaptation status, and a short reason why
 `main` was not used. Legacy imports should be treated as review targets during
 future cleanup, especially once the relevant PAL, pthread, fenv, or architecture
 support exists.
+
+Legacy exceptions must also be classified in
+`third_party/bionic/import_manifest.json` using one of these `review_class`
+values:
+
+- `bootstrap_keep`
+  - keep temporarily because replacement would pull in a larger tranche or a
+    premature ABI policy.
+- `main_replace_candidate`
+  - re-check against Bionic `main` before performance or architecture work.
+- `project_owned_transition`
+  - either replace with a cleaner current-main source or freeze as
+    project-owned behavior while preserving attribution.
+
+The current legacy review is summarized in
+`third_party/bionic/legacy_import_review.md`.
 
 Some first-tranche portable string/memory files are currently taken from the
 older `ics-mr0` Bionic tree because modern Bionic uses architecture-specific
@@ -843,6 +885,11 @@ The stdio surface now also exposes:
 - `fdopen`;
 - `freopen`;
 - `fgets`;
+- `fseeko`;
+- `ftello`;
+- `fgetpos`;
+- `fsetpos`;
+- `rewind`;
 - `perror`;
 - `tmpfile`.
 
@@ -881,6 +928,8 @@ The file/path tranche adds:
 - `dup2`;
 - `pipe`;
 - `isatty`;
+- `poll`;
+- `select`;
 - bootstrap `fcntl`;
 - `realpath`;
 - `readlink`;
@@ -904,6 +953,14 @@ The current `fcntl` subset supports `F_DUPFD`, `F_GETFD`, `F_SETFD`, `F_GETFL`,
 and `F_SETFL` as bootstrap probes; close-on-exec and nonblocking behavior are
 recorded only as accepted surface for now because `exec` and full descriptor
 status flag tracking are not implemented yet.
+The first readiness tranche adds `poll.h` and `sys/select.h`. Linux routes
+`poll` through `ppoll` so x86_64 and AArch64 share the same public C code.
+macOS uses the host `poll` syscall directly. Windows maps readiness over the
+project fd table: regular files and console-like handles are treated as ready,
+pipe reads use `PeekNamedPipe`, and writes are treated as ready for valid
+handles. `select` is implemented over `poll`, so the policy remains centralized.
+This is enough for common configure probes and pipe readiness tests, but it is
+not yet a full socket/network event backend.
 `realpath` currently validates that the path exists, returns an absolute
 normalized path, and supports the common `resolved_path == NULL` allocation
 extension; it does not yet walk and expand every symlink component. Linux and
@@ -913,6 +970,28 @@ policy that is robust without requiring Developer Mode or elevated privileges.
 Directory iteration is exposed through a bootstrap `dirent.h` and
 `opendir`/`readdir`/`closedir`. Linux uses `getdents64`, macOS uses
 `getdirentries64`, and Windows maps to `FindFirstFileA`/`FindNextFileA`.
+
+The first socket/network tranche adds:
+
+- `sys/socket.h`;
+- `netinet/in.h`;
+- `arpa/inet.h`;
+- `netdb.h`;
+- IPv4 `sockaddr_in`, `in_addr`, and byte-order helpers;
+- `inet_pton`, `inet_ntop`, and `inet_addr` for IPv4 numeric addresses;
+- numeric IPv4 `getaddrinfo`, `freeaddrinfo`, and `gai_strerror`;
+- `socket`, `bind`, `listen`, `accept`, `connect`;
+- `send`, `recv`, `sendto`, `recvfrom`;
+- `getsockname`, `setsockopt`, and `shutdown`.
+
+Linux uses direct socket syscalls for x86_64 and AArch64. macOS keeps the
+public Linux/Bionic-shaped `sockaddr_in` ABI and translates to Darwin's
+`sin_len` sockaddr layout inside the socket adapter before entering the kernel.
+Windows maps project fds to Winsock sockets, initializes Winsock lazily, links
+`ws2_32.lib`, and routes socket close/read/write/poll operations through the
+socket-aware fd table. The current network resolver is intentionally numeric
+only; DNS lookup, IPv6, nonblocking connect readiness, socketpair, getsockopt,
+and full socket `poll` semantics remain later tranches.
 
 The metadata tranche moves the supported OS backends beyond the first
 regular-file fallback. Linux uses the raw `statx` syscall and converts the

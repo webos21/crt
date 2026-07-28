@@ -24,7 +24,16 @@ option(CRT_ENABLE_CXX_RUNTIME "Prepare C++ runtime integration points" ON)
 option(CRT_USE_COMPILER_RT "Link compiler-rt builtins when the compiler exposes them" ON)
 
 include(GNUInstallDirs)
+find_package(Python3 COMPONENTS Interpreter QUIET)
 enable_testing()
+
+if(Python3_Interpreter_FOUND)
+  add_custom_target(check-import-manifest
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/check_import_manifest.py"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Checking Bionic import manifest"
+  )
+endif()
 
 add_library(crt_build_flags INTERFACE)
 target_compile_options(crt_build_flags INTERFACE
@@ -121,6 +130,11 @@ if(CRT_TARGET_OS STREQUAL "windows")
     PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES}
     NO_DEFAULT_PATH
   )
+  find_file(CRT_WINDOWS_WS2_32_LIB
+    NAMES ws2_32.lib
+    PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES}
+    NO_DEFAULT_PATH
+  )
 
   if(CRT_WINDOWS_KERNEL32_LIB)
     message(STATUS "Windows kernel32 import library: ${CRT_WINDOWS_KERNEL32_LIB}")
@@ -136,9 +150,17 @@ if(CRT_TARGET_OS STREQUAL "windows")
     set(CRT_WINDOWS_SYNCHRONIZATION_LIB synchronization.lib CACHE FILEPATH "Windows synchronization import library")
   endif()
 
+  if(CRT_WINDOWS_WS2_32_LIB)
+    message(STATUS "Windows ws2_32 import library: ${CRT_WINDOWS_WS2_32_LIB}")
+  else()
+    message(WARNING "ws2_32.lib was not found. Use a Visual Studio Developer shell or set CRT_WINDOWS_WS2_32_LIB.")
+    set(CRT_WINDOWS_WS2_32_LIB ws2_32.lib CACHE FILEPATH "Windows ws2_32 import library")
+  endif()
+
   set(CRT_WINDOWS_SYSTEM_LIBS
     "${CRT_WINDOWS_KERNEL32_LIB}"
     "${CRT_WINDOWS_SYNCHRONIZATION_LIB}"
+    "${CRT_WINDOWS_WS2_32_LIB}"
   )
 endif()
 

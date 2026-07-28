@@ -1,0 +1,120 @@
+# Legacy Import Review
+
+This file classifies legacy Bionic imports against the current project policy:
+Bionic `main` first, legacy only as a documented exception.
+
+The current official `refs/heads/main` observation is:
+
+```text
+Repository: https://android.googlesource.com/platform/bionic
+Commit: 731631f300090436d7f5df80d50b6275c8c60a93
+Date: 2025-03-26
+```
+
+The machine-readable source of truth is
+`third_party/bionic/import_manifest.json`. This review explains the policy
+behind the `review_class` values in that manifest.
+
+## Review Classes
+
+- `bootstrap_keep`: keep the legacy source for now because replacing it would
+  force a larger tranche, source-family change, or premature ABI policy.
+- `main_replace_candidate`: re-check Bionic `main` before doing performance or
+  architecture work; these are likely candidates for builtin, arch-common, or
+  current-main replacement.
+- `project_owned_transition`: the imported code is now small enough or adapted
+  enough that the project should either freeze it as project-owned behavior or
+  replace it with a cleaner current-main source.
+- `main_current`: already based on current Bionic `main`.
+- `project_owned`: intentionally not imported from Bionic.
+
+## Current Legacy Summary
+
+| Source ref | Files | Classification | Decision |
+| --- | ---: | --- | --- |
+| `ics-mr0` string/memory core | 8 | `main_replace_candidate` | Keep temporarily, but review against Bionic main or compiler builtin policy before optimization. |
+| `ics-mr0` simple string helpers | 10 | `project_owned_transition` | Prefer project-owned freeze unless current Bionic upstream-openbsd/freebsd source is cleaner. |
+| `ics-mr0` numeric conversion | 4 | `bootstrap_keep` | Keep until the wider `inttypes.h`, `strtoimax`, locale, and overflow-policy tranche. |
+| `884e4f8` fdlibm double core | 5 | `bootstrap_keep` | Keep while the project follows an fdlibm/msun source family for early libm. |
+
+## File-Level Decisions
+
+### `ics-mr0` string/memory core
+
+These files remain legacy only because they gave a small, portable C bootstrap
+surface before architecture dispatch existed:
+
+- `libc/string/bcopy.c`
+- `libc/string/memcpy.c`
+- `libc/string/memmove.c`
+- `libc/string/memset.c`
+- `libc/string/strlen.c`
+- `libc/string/strcmp.c`
+- `libc/string/memchr.c`
+- `libc/string/memcmp.c`
+
+Decision: `main_replace_candidate`.
+
+Next action: map current Bionic `main` for each symbol. If Bionic `main` routes
+through architecture-specific assembly or compiler builtins, decide explicitly
+whether this project wants builtin-backed C, per-architecture import, or a
+project-owned portable fallback.
+
+### `ics-mr0` simple string helpers
+
+These files are small BSD/OpenBSD-style routines and have already been adapted
+to the project header and symbol surface:
+
+- `libc/string/strcat.c`
+- `libc/string/strchr.c`
+- `libc/string/strcpy.c`
+- `libc/string/strncmp.c`
+- `libc/string/strncpy.c`
+- `libc/string/strrchr.c`
+- `libc/string/strcspn.c`
+- `libc/string/strdup.c`
+- `libc/string/strpbrk.c`
+- `libc/string/strspn.c`
+- `libc/string/strstr.c`
+
+Decision: `project_owned_transition`.
+
+Next action: compare against current Bionic `upstream-openbsd` or equivalent
+sources. If no meaningful current-main advantage exists, freeze them as
+project-owned behavior while preserving attribution.
+
+### `ics-mr0` numeric conversion
+
+These files are stable and already adapted to the project errno/base policy:
+
+- `libc/src/atoi.c`
+- `libc/src/atol.c`
+- `libc/src/strtol.c`
+- `libc/src/strtoul.c`
+
+Decision: `bootstrap_keep`.
+
+Next action: revisit when `inttypes.h`, `strtoimax`, `strtoumax`, locale-aware
+conversion, and full overflow behavior are opened.
+
+### `884e4f8` fdlibm sources
+
+These files preserve the early libm fdlibm/msun source family:
+
+- `libm/src/freebsd/e_exp.c`
+- `libm/src/freebsd/e_log.c`
+- `libm/src/freebsd/e_pow.c`
+- `libm/src/freebsd/s_scalbn.c`
+- `libm/src/freebsd/s_scalbnf.c`
+
+Decision: `bootstrap_keep`.
+
+Next action: keep them until native float tranches, `errno`, and `fenv` policy
+are mature enough to compare against the current Bionic `main` math graph.
+
+## Replacement Order
+
+1. Review `main_replace_candidate` string/memory core first.
+2. Freeze or replace `project_owned_transition` string helpers second.
+3. Defer numeric conversion until locale/inttypes policy.
+4. Defer `884e4f8` fdlibm until libm accuracy and fenv policy are ready.

@@ -28,6 +28,7 @@ int __set_errno(int value);
 #define ENOMEM 12
 #define EACCES 13
 #define EFAULT 14
+#define EINPROGRESS 15
 #define EBUSY 16
 #define EEXIST 17
 #define EXDEV 18
@@ -44,11 +45,33 @@ int __set_errno(int value);
 #define EROFS 30
 #define EMLINK 31
 #define EPIPE 32
+#define EDOM 33
 #define ERANGE 34
 #define EDEADLK 35
+#define EWOULDBLOCK EAGAIN
 #define ENOSYS 38
+#define ENOTSOCK 88
+#define EDESTADDRREQ 89
+#define EMSGSIZE 90
+#define EPROTOTYPE 91
+#define ENOPROTOOPT 92
+#define EPROTONOSUPPORT 93
+#define ESOCKTNOSUPPORT 94
 #define EILSEQ 84
 #define ENOTSUP 95
+#define EAFNOSUPPORT 97
+#define EADDRINUSE 98
+#define EADDRNOTAVAIL 99
+#define ENETDOWN 100
+#define ENETUNREACH 101
+#define ECONNABORTED 103
+#define ECONNRESET 104
+#define ENOBUFS 105
+#define EISCONN 106
+#define ENOTCONN 107
+#define ECONNREFUSED 111
 #define ETIMEDOUT 110
+#define EHOSTUNREACH 113
+#define EALREADY 114
 
 #endif

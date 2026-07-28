@@ -10,12 +10,14 @@ add_library(c STATIC
   src/locale.c
   src/malloc.c
   src/mman.c
+  src/poll.c
   src/printf.c
   src/process.c
   src/pthread.c
   src/qsort.c
   src/sched.c
   src/signal.c
+  src/socket.c
   src/stdio.c
   src/strtol.c
   src/strtoll.c

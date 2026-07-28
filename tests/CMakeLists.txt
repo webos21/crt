@@ -115,6 +115,16 @@ set_tests_properties(file_path_test_runs PROPERTIES
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 
+add_crt_test(poll_select_test poll_select_test.c)
+set_tests_properties(poll_select_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "poll_select_test: ok"
+)
+
+add_crt_test(socket_network_test socket_network_test.c)
+set_tests_properties(socket_network_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "socket_network_test: ok"
+)
+
 add_crt_test(printf_test printf_test.c)
 set_tests_properties(printf_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "printf_test: ok 7 ff"

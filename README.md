@@ -221,6 +221,22 @@ cmake --version
 ninja --version
 ```
 
+## Provenance Checks
+
+Imported Bionic and FreeBSD/msun source provenance is tracked in
+`third_party/bionic/import_manifest.json`. After changing imported files or
+their policy, run:
+
+```sh
+python3 tools/check_import_manifest.py
+```
+
+When CMake finds Python, the same check is available as:
+
+```sh
+cmake --build --preset macos-host-ninja-debug --target check-import-manifest
+```
+
 ## Build
 
 CTest reads generated metadata from each `out/<preset>/` directory. After adding
