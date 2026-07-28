@@ -137,6 +137,7 @@ __crt_sys_statx:
 __crt_sys_unlink:
   mov x1, x0
   mov x0, #-100
+  mov x2, #0
   mov x8, #35
   svc #0
   ret
