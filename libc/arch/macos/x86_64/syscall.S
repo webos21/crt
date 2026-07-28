@@ -55,6 +55,28 @@ ___crt_sys_lseek:
   negq %rax
   retq
 
+.globl ___crt_sys_ftruncate
+.p2align 4, 0x90
+___crt_sys_ftruncate:
+  movq $0x20000c9, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_fsync
+.p2align 4, 0x90
+___crt_sys_fsync:
+  movq $0x200005f, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
 .globl ___crt_sys_access
 .p2align 4, 0x90
 ___crt_sys_access:
@@ -92,6 +114,39 @@ ___crt_sys_rmdir:
 .p2align 4, 0x90
 ___crt_sys_chdir:
   movq $0x200000c, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_chmod
+.p2align 4, 0x90
+___crt_sys_chmod:
+  movq $0x200000f, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_fchmod
+.p2align 4, 0x90
+___crt_sys_fchmod:
+  movq $0x200007c, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_umask
+.p2align 4, 0x90
+___crt_sys_umask:
+  movq $0x200003c, %rax
   syscall
   jc 1f
   retq

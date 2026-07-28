@@ -13,10 +13,17 @@ long __crt_sys_write(int fd, const void* buf, unsigned long count);
 long __crt_sys_open(const char* path, int flags, unsigned int mode);
 long __crt_sys_close(int fd);
 long long __crt_sys_lseek(int fd, long long offset, int whence);
+long __crt_sys_ftruncate(int fd, long long length);
+long __crt_sys_fsync(int fd);
 long __crt_sys_access(const char* path, int mode);
 long __crt_sys_mkdir(const char* path, unsigned int mode);
 long __crt_sys_rmdir(const char* path);
 long __crt_sys_chdir(const char* path);
+long __crt_sys_chmod(const char* path, unsigned int mode);
+long __crt_sys_fchmod(int fd, unsigned int mode);
+#if !defined(CRT_TARGET_OS_WINDOWS)
+long __crt_sys_umask(unsigned int mask);
+#endif
 #if defined(CRT_TARGET_OS_MACOS)
 long __crt_sys_macos_fcntl(int fd, int cmd, void* arg);
 #else
@@ -25,12 +32,14 @@ long __crt_sys_getcwd(char* buf, unsigned long size);
 long __crt_sys_dup(int oldfd);
 long __crt_sys_dup2(int oldfd, int newfd);
 long __crt_sys_pipe(int pipefd[2]);
+long __crt_sys_unlink(const char* path);
 long __crt_sys_readlink(const char* path, char* buf, unsigned long size);
 long __crt_sys_symlink(const char* target, const char* linkpath);
 #if defined(CRT_TARGET_OS_LINUX)
 long __crt_sys_statx(long dirfd, const char* path, int flags, unsigned int mask, void* statxbuf);
 #elif defined(CRT_TARGET_OS_WINDOWS)
 long __crt_sys_realpath_path(const char* path, char* resolved_path, unsigned long size);
+long __crt_sys_isatty(int fd);
 long __crt_sys_stat_path(const char* path, struct stat* st);
 long __crt_sys_lstat_path(const char* path, struct stat* st);
 long __crt_sys_fstat(int fd, struct stat* st);
@@ -170,6 +179,7 @@ static size_t path_root_length(const char* path) {
   return path_separator(path[0]) ? 1 : 0;
 }
 
+#if defined(CRT_TARGET_OS_WINDOWS)
 static int normalize_absolute_path(const char* input, char* output, size_t output_size) {
   size_t root;
   size_t in_pos;
@@ -233,6 +243,223 @@ static int normalize_absolute_path(const char* input, char* output, size_t outpu
   output[out_pos] = 0;
   return 0;
 }
+#endif
+
+static int path_append(char* path, size_t size, const char* component, size_t component_len) {
+  size_t len = strlen(path);
+
+  if (component_len == 0) {
+    return 0;
+  }
+  if (len > 1 && !path_separator(path[len - 1])) {
+    if (len + 1 >= size) {
+      return (int)__set_errno(ENAMETOOLONG);
+    }
+    path[len++] = '/';
+  }
+  if (len == 0) {
+    if (len + 1 >= size) {
+      return (int)__set_errno(ENAMETOOLONG);
+    }
+    path[len++] = '/';
+  }
+  if (len + component_len >= size) {
+    return (int)__set_errno(ENAMETOOLONG);
+  }
+  memcpy(path + len, component, component_len);
+  path[len + component_len] = 0;
+  return 0;
+}
+
+static void path_pop_component(char* path) {
+  size_t len = strlen(path);
+
+  while (len > 1 && path_separator(path[len - 1])) {
+    path[--len] = 0;
+  }
+  while (len > 1 && !path_separator(path[len - 1])) {
+    path[--len] = 0;
+  }
+  while (len > 1 && path_separator(path[len - 1])) {
+    path[--len] = 0;
+  }
+  if (len == 0) {
+    path[0] = '/';
+    path[1] = 0;
+  }
+}
+
+static int make_absolute_input(const char* path, char* absolute, size_t size) {
+  char cwd[PATH_MAX];
+  size_t cwd_len;
+  size_t path_len;
+
+  if (path_is_absolute(path)) {
+    if (strlen(path) + 1 > size) {
+      return (int)__set_errno(ENAMETOOLONG);
+    }
+    memcpy(absolute, path, strlen(path) + 1);
+    return 0;
+  }
+  if (getcwd(cwd, sizeof(cwd)) == 0) {
+    return -1;
+  }
+  cwd_len = strlen(cwd);
+  path_len = strlen(path);
+  if (cwd_len + 1 + path_len + 1 > size) {
+    return (int)__set_errno(ENAMETOOLONG);
+  }
+  memcpy(absolute, cwd, cwd_len);
+  absolute[cwd_len] = '/';
+  memcpy(absolute + cwd_len + 1, path, path_len + 1);
+  return 0;
+}
+
+#if !defined(CRT_TARGET_OS_WINDOWS)
+static int resolve_symlink_path(
+    const char* base,
+    const char* target,
+    const char* remaining,
+    char* output,
+    size_t size) {
+  size_t len = 0;
+  size_t target_len = strlen(target);
+  size_t remaining_len = strlen(remaining);
+
+  if (path_is_absolute(target)) {
+    if (target_len + 1 > size) {
+      return (int)__set_errno(ENAMETOOLONG);
+    }
+    memcpy(output, target, target_len + 1);
+    len = target_len;
+  } else {
+    size_t base_len = strlen(base);
+
+    if (base_len + 1 + target_len + 1 > size) {
+      return (int)__set_errno(ENAMETOOLONG);
+    }
+    memcpy(output, base, base_len);
+    len = base_len;
+    if (len > 1 && !path_separator(output[len - 1])) {
+      output[len++] = '/';
+    }
+    memcpy(output + len, target, target_len + 1);
+    len += target_len;
+  }
+  if (remaining_len != 0) {
+    if (len + 1 + remaining_len + 1 > size) {
+      return (int)__set_errno(ENAMETOOLONG);
+    }
+    if (len == 0 || !path_separator(output[len - 1])) {
+      output[len++] = '/';
+    }
+    memcpy(output + len, remaining, remaining_len + 1);
+  }
+  return 0;
+}
+
+static char* realpath_resolve_unix(const char* path, char* output, int output_owned) {
+  char input[PATH_MAX];
+  char resolved[PATH_MAX];
+  unsigned int symlink_count = 0;
+
+  if (make_absolute_input(path, input, sizeof(input)) != 0) {
+    if (output_owned) {
+      free(output);
+    }
+    return 0;
+  }
+
+restart:
+  if (++symlink_count > 41) {
+    if (output_owned) {
+      free(output);
+    }
+    __set_errno(ELOOP);
+    return 0;
+  }
+  resolved[0] = '/';
+  resolved[1] = 0;
+  {
+    size_t pos = path_root_length(input);
+
+    while (path_separator(input[pos])) {
+      ++pos;
+    }
+    while (input[pos] != 0) {
+      size_t component_start = pos;
+      size_t component_len;
+      char candidate[PATH_MAX];
+      struct stat st;
+
+      while (input[pos] != 0 && !path_separator(input[pos])) {
+        ++pos;
+      }
+      component_len = pos - component_start;
+      while (path_separator(input[pos])) {
+        ++pos;
+      }
+      if (component_len == 0 ||
+          (component_len == 1 && input[component_start] == '.')) {
+        continue;
+      }
+      if (component_len == 2 && input[component_start] == '.' &&
+          input[component_start + 1] == '.') {
+        path_pop_component(resolved);
+        continue;
+      }
+      memcpy(candidate, resolved, strlen(resolved) + 1);
+      if (path_append(candidate, sizeof(candidate), input + component_start, component_len) != 0) {
+        if (output_owned) {
+          free(output);
+        }
+        return 0;
+      }
+      if (lstat(candidate, &st) != 0) {
+        if (output_owned) {
+          free(output);
+        }
+        return 0;
+      }
+      if (S_ISLNK(st.st_mode)) {
+        char target[PATH_MAX];
+        ssize_t link_len = readlink(candidate, target, sizeof(target) - 1);
+
+        if (link_len < 0) {
+          if (output_owned) {
+            free(output);
+          }
+          return 0;
+        }
+        target[link_len] = 0;
+        if (resolve_symlink_path(resolved, target, input + pos, input, sizeof(input)) != 0) {
+          if (output_owned) {
+            free(output);
+          }
+          return 0;
+        }
+        goto restart;
+      }
+      memcpy(resolved, candidate, strlen(candidate) + 1);
+    }
+  }
+  if (stat(resolved, &(struct stat){0}) != 0) {
+    if (output_owned) {
+      free(output);
+    }
+    return 0;
+  }
+  if (strlen(resolved) + 1 > PATH_MAX) {
+    if (output_owned) {
+      free(output);
+    }
+    __set_errno(ENAMETOOLONG);
+    return 0;
+  }
+  memcpy(output, resolved, strlen(resolved) + 1);
+  return output;
+}
+#endif
 
 ssize_t read(int fd, void* buf, size_t count) {
   return (ssize_t)normalize_syscall_result(__crt_sys_read(fd, buf, (unsigned long)count));
@@ -253,6 +480,10 @@ int open(const char* path, int flags, ...) {
   }
 
   return (int)normalize_syscall_result(__crt_sys_open(path, flags, mode));
+}
+
+int creat(const char* path, mode_t mode) {
+  return open(path, O_CREAT | O_WRONLY | O_TRUNC, mode);
 }
 
 int mkstemp(char* template_path) {
@@ -334,6 +565,77 @@ int chdir(const char* path) {
   return (int)normalize_syscall_result(__crt_sys_chdir(path));
 }
 
+int unlink(const char* path) {
+  if (path == 0) {
+    return (int)__set_errno(EINVAL);
+  }
+  return (int)normalize_syscall_result(__crt_sys_unlink(path));
+}
+
+int ftruncate(int fd, off_t length) {
+  if (length < 0) {
+    return (int)__set_errno(EINVAL);
+  }
+  return (int)normalize_syscall_result(__crt_sys_ftruncate(fd, (long long)length));
+}
+
+int fsync(int fd) {
+  return (int)normalize_syscall_result(__crt_sys_fsync(fd));
+}
+
+int fdatasync(int fd) {
+  return fsync(fd);
+}
+
+int truncate(const char* path, off_t length) {
+  int fd;
+  int result;
+
+  if (path == 0) {
+    return (int)__set_errno(EINVAL);
+  }
+  if (length < 0) {
+    return (int)__set_errno(EINVAL);
+  }
+  fd = open(path, O_WRONLY);
+  if (fd < 0) {
+    return -1;
+  }
+  result = ftruncate(fd, length);
+  if (close(fd) != 0 && result == 0) {
+    return -1;
+  }
+  return result;
+}
+
+int chmod(const char* path, mode_t mode) {
+  if (path == 0) {
+    return (int)__set_errno(EINVAL);
+  }
+  return (int)normalize_syscall_result(__crt_sys_chmod(path, (unsigned int)mode));
+}
+
+int fchmod(int fd, mode_t mode) {
+  return (int)normalize_syscall_result(__crt_sys_fchmod(fd, (unsigned int)mode));
+}
+
+mode_t umask(mode_t mask) {
+#if defined(CRT_TARGET_OS_WINDOWS)
+  static mode_t current_umask;
+  mode_t previous = current_umask;
+
+  current_umask = mask & 0777;
+  return previous;
+#else
+  long result = __crt_sys_umask((unsigned int)mask);
+
+  if (result < 0 && result >= -4095) {
+    return (mode_t)__set_errno((int)-result);
+  }
+  return (mode_t)result;
+#endif
+}
+
 char* getcwd(char* buf, size_t size) {
 #if defined(CRT_TARGET_OS_MACOS)
   char path[CRT_MACOS_MAXPATHLEN];
@@ -380,12 +682,9 @@ char* getcwd(char* buf, size_t size) {
 }
 
 char* realpath(const char* path, char* resolved_path) {
-  char combined[PATH_MAX];
-  char cwd[PATH_MAX];
   char* output = resolved_path;
-  size_t cwd_len;
-  size_t path_len;
   struct stat st;
+  int output_owned = resolved_path == 0;
 
   if (path == 0) {
     __set_errno(EINVAL);
@@ -416,7 +715,6 @@ char* realpath(const char* path, char* resolved_path) {
       return 0;
     }
   }
-#endif
 
   if (path_is_absolute(path)) {
     if (normalize_absolute_path(path, output, PATH_MAX) != 0) {
@@ -428,31 +726,21 @@ char* realpath(const char* path, char* resolved_path) {
     return output;
   }
 
-  if (getcwd(cwd, sizeof(cwd)) == 0) {
-    if (resolved_path == 0) {
-      free(output);
+  {
+    char absolute[PATH_MAX];
+
+    if (make_absolute_input(path, absolute, sizeof(absolute)) != 0 ||
+        normalize_absolute_path(absolute, output, PATH_MAX) != 0) {
+      if (resolved_path == 0) {
+        free(output);
+      }
+      return 0;
     }
-    return 0;
-  }
-  cwd_len = strlen(cwd);
-  path_len = strlen(path);
-  if (cwd_len + 1 + path_len + 1 > sizeof(combined)) {
-    if (resolved_path == 0) {
-      free(output);
-    }
-    __set_errno(ERANGE);
-    return 0;
-  }
-  memcpy(combined, cwd, cwd_len);
-  combined[cwd_len] = '/';
-  memcpy(combined + cwd_len + 1, path, path_len + 1);
-  if (normalize_absolute_path(combined, output, PATH_MAX) != 0) {
-    if (resolved_path == 0) {
-      free(output);
-    }
-    return 0;
   }
   return output;
+#else
+  return realpath_resolve_unix(path, output, output_owned);
+#endif
 }
 
 ssize_t readlink(const char* path, char* buf, size_t bufsiz) {
@@ -488,12 +776,22 @@ int pipe(int pipefd[2]) {
 }
 
 int isatty(int fd) {
+#if defined(CRT_TARGET_OS_WINDOWS)
+  long result = __crt_sys_isatty(fd);
+
+  if (result < 0 && result >= -4095) {
+    __set_errno((int)-result);
+    return 0;
+  }
+  return result != 0;
+#else
   struct stat st;
 
   if (fstat(fd, &st) != 0) {
     return 0;
   }
   return S_ISCHR(st.st_mode);
+#endif
 }
 
 int fcntl(int fd, int cmd, ...) {
@@ -506,6 +804,7 @@ int fcntl(int fd, int cmd, ...) {
 
   switch (cmd) {
     case F_DUPFD:
+    case F_DUPFD_CLOEXEC:
       va_start(args, cmd);
       arg = va_arg(args, int);
       va_end(args);

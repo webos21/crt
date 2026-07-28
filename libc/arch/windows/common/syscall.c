@@ -115,6 +115,7 @@ __declspec(dllimport) BOOL CRT_WINAPI RemoveDirectoryA(const char* lpPathName);
 __declspec(dllimport) BOOL CRT_WINAPI SetCurrentDirectoryA(const char* lpPathName);
 __declspec(dllimport) DWORD CRT_WINAPI GetCurrentDirectoryA(DWORD nBufferLength, char* lpBuffer);
 __declspec(dllimport) DWORD CRT_WINAPI GetFileAttributesA(const char* lpFileName);
+__declspec(dllimport) BOOL CRT_WINAPI SetFileAttributesA(const char* lpFileName, DWORD dwFileAttributes);
 __declspec(dllimport) DWORD CRT_WINAPI GetFullPathNameA(
     const char* lpFileName,
     DWORD nBufferLength,
@@ -147,6 +148,8 @@ __declspec(dllimport) BOOL CRT_WINAPI SetFilePointerEx(
     long long liDistanceToMove,
     long long* lpNewFilePointer,
     DWORD dwMoveMethod);
+__declspec(dllimport) BOOL CRT_WINAPI SetEndOfFile(HANDLE hFile);
+__declspec(dllimport) BOOL CRT_WINAPI FlushFileBuffers(HANDLE hFile);
 __declspec(dllimport) void* CRT_WINAPI VirtualAlloc(
     void* lpAddress,
     size_t dwSize,
@@ -497,6 +500,8 @@ long __crt_sys_write(int fd, const void* buf, unsigned long count) {
 long __crt_sys_open(const char* path, int flags, unsigned int mode) {
   DWORD access = 0;
   DWORD disposition = OPEN_EXISTING;
+  DWORD file_flags = FILE_ATTRIBUTE_NORMAL;
+  DWORD attrs;
   HANDLE handle;
   int fd;
   (void)mode;
@@ -519,8 +524,13 @@ long __crt_sys_open(const char* path, int flags, unsigned int mode) {
     disposition = OPEN_EXISTING;
   }
 
+  attrs = GetFileAttributesA(path);
+  if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+    file_flags = FILE_FLAG_BACKUP_SEMANTICS;
+  }
+
   handle = CreateFileA(path, access, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                       0, disposition, FILE_ATTRIBUTE_NORMAL, 0);
+                       0, disposition, file_flags, 0);
   if (handle == INVALID_HANDLE_VALUE) {
     return fail_last_error();
   }
@@ -586,6 +596,44 @@ long long __crt_sys_lseek(int fd, long long offset, int whence) {
   return new_position;
 }
 
+long __crt_sys_ftruncate(int fd, long long length) {
+  HANDLE handle = get_fd_handle(fd);
+  long long saved_position = 0;
+
+  if (handle == INVALID_HANDLE_VALUE) {
+    return -EBADF;
+  }
+  if (length < 0) {
+    return -EINVAL;
+  }
+  if (!SetFilePointerEx(handle, 0, &saved_position, FILE_CURRENT)) {
+    return fail_last_error();
+  }
+  if (!SetFilePointerEx(handle, length, 0, FILE_BEGIN)) {
+    return fail_last_error();
+  }
+  if (!SetEndOfFile(handle)) {
+    (void)SetFilePointerEx(handle, saved_position, 0, FILE_BEGIN);
+    return fail_last_error();
+  }
+  if (!SetFilePointerEx(handle, saved_position, 0, FILE_BEGIN)) {
+    return fail_last_error();
+  }
+  return 0;
+}
+
+long __crt_sys_fsync(int fd) {
+  HANDLE handle = get_fd_handle(fd);
+
+  if (handle == INVALID_HANDLE_VALUE) {
+    return -EBADF;
+  }
+  if (!FlushFileBuffers(handle)) {
+    return fail_last_error();
+  }
+  return 0;
+}
+
 long __crt_sys_access(const char* path, int mode) {
   DWORD attrs = GetFileAttributesA(path);
 
@@ -618,6 +666,33 @@ long __crt_sys_rmdir(const char* path) {
 long __crt_sys_chdir(const char* path) {
   if (!SetCurrentDirectoryA(path)) {
     return fail_last_error();
+  }
+  return 0;
+}
+
+long __crt_sys_chmod(const char* path, unsigned int mode) {
+  DWORD attrs = GetFileAttributesA(path);
+
+  if (attrs == INVALID_FILE_ATTRIBUTES) {
+    return fail_last_error();
+  }
+  if ((mode & (S_IWUSR | S_IWGRP | S_IWOTH)) != 0) {
+    attrs &= ~FILE_ATTRIBUTE_READONLY;
+  } else {
+    attrs |= FILE_ATTRIBUTE_READONLY;
+  }
+  if (!SetFileAttributesA(path, attrs)) {
+    return fail_last_error();
+  }
+  return 0;
+}
+
+long __crt_sys_fchmod(int fd, unsigned int mode) {
+  HANDLE handle = get_fd_handle(fd);
+  (void)mode;
+
+  if (handle == INVALID_HANDLE_VALUE) {
+    return -EBADF;
   }
   return 0;
 }
@@ -1045,6 +1120,17 @@ long __crt_sys_fstat(int fd, struct stat* st) {
     return -EBADF;
   }
   return stat_from_handle(handle, st);
+}
+
+long __crt_sys_isatty(int fd) {
+  HANDLE handle = get_fd_handle(fd);
+  DWORD file_type;
+
+  if (handle == INVALID_HANDLE_VALUE) {
+    return -EBADF;
+  }
+  file_type = GetFileType(handle);
+  return file_type == FILE_TYPE_CHAR ? 1 : 0;
 }
 
 long __crt_sys_stat_path(const char* path, struct stat* st) {

@@ -53,7 +53,9 @@ __declspec(dllimport) BOOL CRT_WINAPI FindClose(HANDLE hFindFile);
 
 struct __crt_DIR {
   HANDLE handle;
+  int fd;
   int first_pending;
+  char pattern[CRT_WIN_MAX_PATH + 3];
   struct crt_win_find_data find_data;
   struct dirent entry;
 };
@@ -115,21 +117,30 @@ static int make_find_pattern(const char* path, char* pattern, size_t size) {
 DIR* opendir(const char* path) {
   char pattern[CRT_WIN_MAX_PATH + 3];
   DIR* dir;
+  int fd;
 
   if (make_find_pattern(path, pattern, sizeof(pattern)) != 0) {
     return 0;
   }
+  fd = open(path, O_RDONLY);
+  if (fd < 0) {
+    return 0;
+  }
   dir = (DIR*)malloc(sizeof(DIR));
   if (dir == 0) {
+    close(fd);
     errno = ENOMEM;
     return 0;
   }
   dir->handle = FindFirstFileA(pattern, &dir->find_data);
   if (dir->handle == INVALID_HANDLE_VALUE) {
+    close(fd);
     free(dir);
     errno = ENOENT;
     return 0;
   }
+  dir->fd = fd;
+  memcpy(dir->pattern, pattern, strlen(pattern) + 1);
   dir->first_pending = 1;
   return dir;
 }
@@ -156,12 +167,39 @@ int closedir(DIR* dirp) {
     return -1;
   }
   if (!FindClose(dirp->handle)) {
+    close(dirp->fd);
     free(dirp);
     errno = EIO;
     return -1;
   }
+  close(dirp->fd);
   free(dirp);
   return 0;
+}
+
+void rewinddir(DIR* dirp) {
+  HANDLE handle;
+
+  if (dirp == 0) {
+    errno = EBADF;
+    return;
+  }
+  handle = FindFirstFileA(dirp->pattern, &dirp->find_data);
+  if (handle == INVALID_HANDLE_VALUE) {
+    errno = EIO;
+    return;
+  }
+  (void)FindClose(dirp->handle);
+  dirp->handle = handle;
+  dirp->first_pending = 1;
+}
+
+int dirfd(DIR* dirp) {
+  if (dirp == 0) {
+    errno = EBADF;
+    return -1;
+  }
+  return dirp->fd;
 }
 #else
 static unsigned char host_dirent_type(unsigned char type) {
@@ -265,5 +303,26 @@ int closedir(DIR* dirp) {
   result = close(dirp->fd);
   free(dirp);
   return result;
+}
+
+void rewinddir(DIR* dirp) {
+  if (dirp == 0) {
+    errno = EBADF;
+    return;
+  }
+  if (lseek(dirp->fd, 0, SEEK_SET) < 0) {
+    return;
+  }
+  dirp->pos = 0;
+  dirp->len = 0;
+  dirp->basep = 0;
+}
+
+int dirfd(DIR* dirp) {
+  if (dirp == 0) {
+    errno = EBADF;
+    return -1;
+  }
+  return dirp->fd;
 }
 #endif

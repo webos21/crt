@@ -193,6 +193,49 @@ int main(void) {
     return fail("remove buffer");
   }
 
+  stream = fopen("stdio_fflush_all_test.tmp", "w+");
+  if (stream == 0) {
+    return fail("fopen fflush all");
+  }
+  if (setvbuf(stream, small_buffer, _IOFBF, sizeof(small_buffer)) != 0 ||
+      fputc('Q', stream) != 'Q') {
+    fclose(stream);
+    return fail("prepare fflush all");
+  }
+  observer = fopen("stdio_fflush_all_test.tmp", "r");
+  if (observer == 0) {
+    fclose(stream);
+    return fail("fopen fflush observer");
+  }
+  nread = fread(buffer, 1, 1, observer);
+  if (nread != 0) {
+    fclose(observer);
+    fclose(stream);
+    return fail("fflush all flushed early");
+  }
+  fclose(observer);
+  if (fflush(0) != 0) {
+    fclose(stream);
+    return fail("fflush all");
+  }
+  observer = fopen("stdio_fflush_all_test.tmp", "r");
+  if (observer == 0) {
+    fclose(stream);
+    return fail("reopen fflush observer");
+  }
+  memset(buffer, 0, sizeof(buffer));
+  nread = fread(buffer, 1, 1, observer);
+  if (nread != 1 || buffer[0] != 'Q') {
+    fclose(observer);
+    fclose(stream);
+    return fail("fflush all visibility");
+  }
+  fclose(observer);
+  fclose(stream);
+  if (remove("stdio_fflush_all_test.tmp") != 0) {
+    return fail("remove fflush all");
+  }
+
   stream = fopen("stdio_line_buffer_test.tmp", "w+");
   if (stream == 0) {
     return fail("fopen line buffer");
@@ -221,6 +264,59 @@ int main(void) {
   fclose(stream);
   if (remove("stdio_line_buffer_test.tmp") != 0) {
     return fail("remove line buffer");
+  }
+
+  stream = fopen("stdio_read_flush_test.tmp", "w+");
+  if (stream == 0) {
+    return fail("fopen read flush");
+  }
+  if (fputs("0123456789", stream) == EOF ||
+      fseek(stream, 0, SEEK_SET) != 0 ||
+      setvbuf(stream, small_buffer, _IOFBF, sizeof(small_buffer)) != 0) {
+    fclose(stream);
+    return fail("prepare read flush");
+  }
+  memset(buffer, 0, sizeof(buffer));
+  if (fread(buffer, 1, 3, stream) != 3 ||
+      strcmp(buffer, "012") != 0 ||
+      fflush(stream) != 0 ||
+      fgetc(stream) != '3') {
+    fclose(stream);
+    return fail("fflush read buffer");
+  }
+  fclose(stream);
+  if (remove("stdio_read_flush_test.tmp") != 0) {
+    return fail("remove read flush");
+  }
+
+  stream = fopen("stdio_read_write_switch_test.tmp", "w+");
+  if (stream == 0) {
+    return fail("fopen read write switch");
+  }
+  if (fputs("ABCDE", stream) == EOF ||
+      fseek(stream, 0, SEEK_SET) != 0 ||
+      setvbuf(stream, small_buffer, _IOFBF, sizeof(small_buffer)) != 0) {
+    fclose(stream);
+    return fail("prepare read write switch");
+  }
+  memset(buffer, 0, sizeof(buffer));
+  if (fread(buffer, 1, 2, stream) != 2 ||
+      strcmp(buffer, "AB") != 0 ||
+      fputc('x', stream) != 'x' ||
+      fflush(stream) != 0 ||
+      fseek(stream, 0, SEEK_SET) != 0) {
+    fclose(stream);
+    return fail("read write switch");
+  }
+  memset(buffer, 0, sizeof(buffer));
+  if (fread(buffer, 1, 5, stream) != 5 ||
+      strcmp(buffer, "ABxDE") != 0) {
+    fclose(stream);
+    return fail("read write switch content");
+  }
+  fclose(stream);
+  if (remove("stdio_read_write_switch_test.tmp") != 0) {
+    return fail("remove read write switch");
   }
 
   stream = fopen("stdio_file_test.tmp", "r");

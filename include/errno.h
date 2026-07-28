@@ -48,8 +48,10 @@ int __set_errno(int value);
 #define EDOM 33
 #define ERANGE 34
 #define EDEADLK 35
+#define ENAMETOOLONG 36
 #define EWOULDBLOCK EAGAIN
 #define ENOSYS 38
+#define ELOOP 40
 #define ENOTSOCK 88
 #define EDESTADDRREQ 89
 #define EMSGSIZE 90

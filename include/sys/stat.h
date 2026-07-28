@@ -60,6 +60,9 @@ int fstat(int fd, struct stat* st);
 int lstat(const char* path, struct stat* st);
 int mkdir(const char* path, mode_t mode);
 int rmdir(const char* path);
+int chmod(const char* path, mode_t mode);
+int fchmod(int fd, mode_t mode);
+mode_t umask(mode_t mask);
 
 #ifdef __cplusplus
 }

@@ -45,6 +45,24 @@ __crt_sys_lseek:
   retq
 .size __crt_sys_lseek, . - __crt_sys_lseek
 
+.globl __crt_sys_ftruncate
+.type __crt_sys_ftruncate, @function
+.p2align 4, 0x90
+__crt_sys_ftruncate:
+  movq $77, %rax
+  syscall
+  retq
+.size __crt_sys_ftruncate, . - __crt_sys_ftruncate
+
+.globl __crt_sys_fsync
+.type __crt_sys_fsync, @function
+.p2align 4, 0x90
+__crt_sys_fsync:
+  movq $74, %rax
+  syscall
+  retq
+.size __crt_sys_fsync, . - __crt_sys_fsync
+
 .globl __crt_sys_access
 .type __crt_sys_access, @function
 .p2align 4, 0x90
@@ -80,6 +98,33 @@ __crt_sys_chdir:
   syscall
   retq
 .size __crt_sys_chdir, . - __crt_sys_chdir
+
+.globl __crt_sys_chmod
+.type __crt_sys_chmod, @function
+.p2align 4, 0x90
+__crt_sys_chmod:
+  movq $90, %rax
+  syscall
+  retq
+.size __crt_sys_chmod, . - __crt_sys_chmod
+
+.globl __crt_sys_fchmod
+.type __crt_sys_fchmod, @function
+.p2align 4, 0x90
+__crt_sys_fchmod:
+  movq $91, %rax
+  syscall
+  retq
+.size __crt_sys_fchmod, . - __crt_sys_fchmod
+
+.globl __crt_sys_umask
+.type __crt_sys_umask, @function
+.p2align 4, 0x90
+__crt_sys_umask:
+  movq $95, %rax
+  syscall
+  retq
+.size __crt_sys_umask, . - __crt_sys_umask
 
 .globl __crt_sys_getcwd
 .type __crt_sys_getcwd, @function

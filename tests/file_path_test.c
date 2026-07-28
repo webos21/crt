@@ -26,6 +26,9 @@ int main(void) {
   int high_copy;
   int found_sample = 0;
   int pipefd[2];
+  int created_fd;
+  int dir_open_fd;
+  mode_t old_mask;
   DIR* dir;
   struct dirent* entry;
   struct stat st;
@@ -54,13 +57,39 @@ int main(void) {
     close(fd);
     return fail("write sample");
   }
+  if (fsync(fd) != 0 || fdatasync(fd) != 0) {
+    close(fd);
+    return fail("fsync sample");
+  }
   if (access("sample.tmp", F_OK | R_OK | W_OK) != 0) {
     close(fd);
     return fail("access sample");
   }
+  if (fchmod(fd, 0600) != 0) {
+    close(fd);
+    return fail("fchmod sample");
+  }
+  if (chmod("sample.tmp", 0400) != 0) {
+    close(fd);
+    return fail("chmod readonly");
+  }
+  if (access("sample.tmp", W_OK) == 0) {
+    close(fd);
+    return fail("chmod write access");
+  }
+  if (chmod("sample.tmp", 0600) != 0 ||
+      access("sample.tmp", W_OK) != 0) {
+    close(fd);
+    return fail("chmod writable");
+  }
   if (access("missing.tmp", F_OK) == 0) {
     close(fd);
     return fail("access missing");
+  }
+  old_mask = umask(0022);
+  if (umask(old_mask) != 0022) {
+    close(fd);
+    return fail("umask");
   }
   high_copy = mkstemp(mktemplate);
   if (high_copy < 0 || strstr(mktemplate, "XXXXXX") != 0) {
@@ -81,6 +110,31 @@ int main(void) {
     close(fd);
     return fail("remove mkstemp");
   }
+  created_fd = creat("created.tmp", 0600);
+  if (created_fd < 0) {
+    close(fd);
+    return fail("creat");
+  }
+  if (write(created_fd, "abcd", 4) != 4 ||
+      ftruncate(created_fd, 2) != 0 ||
+      fstat(created_fd, &st) != 0 ||
+      st.st_size != 2) {
+    close(created_fd);
+    close(fd);
+    return fail("ftruncate");
+  }
+  close(created_fd);
+  if (truncate("created.tmp", 1) != 0 ||
+      stat("created.tmp", &st) != 0 ||
+      st.st_size != 1) {
+    close(fd);
+    return fail("truncate");
+  }
+  if (unlink("created.tmp") != 0 ||
+      access("created.tmp", F_OK) == 0) {
+    close(fd);
+    return fail("unlink");
+  }
   if (stat("sample.tmp", &st) != 0 || !S_ISREG(st.st_mode) || st.st_size != 1) {
     close(fd);
     return fail("stat sample");
@@ -96,6 +150,7 @@ int main(void) {
   }
   if (fcntl(fd, F_GETFD) != 0 ||
       fcntl(fd, F_SETFD, FD_CLOEXEC) != 0 ||
+      fcntl(fd, F_SETFL, O_NONBLOCK) != 0 ||
       fcntl(fd, F_GETFL) < 0) {
     close(fd);
     return fail("fcntl flags");
@@ -114,6 +169,28 @@ int main(void) {
     close(fd);
     return fail("opendir");
   }
+  dir_open_fd = open(".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (dir_open_fd < 0 ||
+      fstat(dir_open_fd, &st) != 0 ||
+      !S_ISDIR(st.st_mode)) {
+    if (dir_open_fd >= 0) {
+      close(dir_open_fd);
+    }
+    closedir(dir);
+    close(fd);
+    return fail("open directory");
+  }
+  close(dir_open_fd);
+  if (dirfd(dir) < 0) {
+    closedir(dir);
+    close(fd);
+    return fail("dirfd");
+  }
+  if (fstat(dirfd(dir), &st) != 0 || !S_ISDIR(st.st_mode)) {
+    closedir(dir);
+    close(fd);
+    return fail("dirfd fstat");
+  }
   while ((entry = readdir(dir)) != 0) {
     if (strcmp(entry->d_name, "sample.tmp") == 0) {
       found_sample = 1;
@@ -124,9 +201,17 @@ int main(void) {
       }
     }
   }
+  rewinddir(dir);
+  found_sample = 0;
+  while ((entry = readdir(dir)) != 0) {
+    if (strcmp(entry->d_name, "sample.tmp") == 0) {
+      found_sample = 1;
+      break;
+    }
+  }
   if (closedir(dir) != 0 || !found_sample) {
     close(fd);
-    return fail("readdir sample");
+    return fail("rewinddir sample");
   }
   allocated_path = realpath("sample.tmp", 0);
   if (allocated_path == 0 || strstr(allocated_path, "sample.tmp") == 0) {
@@ -162,6 +247,30 @@ int main(void) {
     close(fd);
     return fail("lstat symlink");
   }
+  memset(resolved, 0, sizeof(resolved));
+  if (realpath("sample.link", resolved) == 0 ||
+      strstr(resolved, "sample.tmp") == 0 ||
+      strstr(resolved, "sample.link") != 0) {
+    close(fd);
+    return fail("realpath symlink");
+  }
+  if (mkdir("realpath_dir", 0777) != 0 ||
+      symlink("../sample.tmp", "realpath_dir/nested.link") != 0) {
+    close(fd);
+    return fail("realpath nested setup");
+  }
+  memset(resolved, 0, sizeof(resolved));
+  if (realpath("realpath_dir/nested.link", resolved) == 0 ||
+      strstr(resolved, "sample.tmp") == 0 ||
+      strstr(resolved, "nested.link") != 0) {
+    close(fd);
+    return fail("realpath relative symlink");
+  }
+  if (remove("realpath_dir/nested.link") != 0 ||
+      rmdir("realpath_dir") != 0) {
+    close(fd);
+    return fail("remove realpath nested");
+  }
   if (remove("sample.link") != 0) {
     close(fd);
     return fail("remove symlink");
@@ -187,6 +296,12 @@ int main(void) {
     return fail("dup2");
   }
   close(10);
+  high_copy = fcntl(fd, F_DUPFD_CLOEXEC, 8);
+  if (high_copy < 8) {
+    close(fd);
+    return fail("fcntl dupfd cloexec");
+  }
+  close(high_copy);
   high_copy = fcntl(fd, F_DUPFD, 8);
   if (high_copy < 8) {
     close(fd);

@@ -20,6 +20,7 @@ struct __crt_FILE {
   int last_op;
   int ungot;
   unsigned char ungot_char;
+  FILE* next_open;
 };
 
 #define CRT_STDIO_NONE 0
@@ -29,13 +30,15 @@ struct __crt_FILE {
 long __crt_sys_unlink(const char* path);
 long __crt_sys_rename(const char* old_path, const char* new_path);
 
-static FILE stdin_storage = {0, 0, 0, 0, _IOLBF, 0, 0, 0, 0, 0, 0, CRT_STDIO_NONE, 0, 0};
-static FILE stdout_storage = {1, 0, 0, 0, _IOLBF, 0, 0, 0, 0, 0, 0, CRT_STDIO_NONE, 0, 0};
-static FILE stderr_storage = {2, 0, 0, 0, _IONBF, 0, 0, 0, 0, 0, 0, CRT_STDIO_NONE, 0, 0};
+static FILE stdin_storage = {0, 0, 0, 0, _IOLBF, 0, 0, 0, 0, 0, 0, CRT_STDIO_NONE, 0, 0, 0};
+static FILE stdout_storage = {1, 0, 0, 0, _IOLBF, 0, 0, 0, 0, 0, 0, CRT_STDIO_NONE, 0, 0, 0};
+static FILE stderr_storage = {2, 0, 0, 0, _IONBF, 0, 0, 0, 0, 0, 0, CRT_STDIO_NONE, 0, 0, 0};
 
 FILE* stdin = &stdin_storage;
 FILE* stdout = &stdout_storage;
 FILE* stderr = &stderr_storage;
+
+static FILE* open_streams;
 
 static int stream_fd(FILE* stream) {
   if (stream == 0) {
@@ -91,11 +94,50 @@ static void init_stream(FILE* stream, int fd, int owned) {
   stream->ungot_char = 0;
 }
 
+static void register_stream(FILE* stream) {
+  stream->next_open = open_streams;
+  open_streams = stream;
+}
+
+static void unregister_stream(FILE* stream) {
+  FILE** current = &open_streams;
+
+  while (*current != 0) {
+    if (*current == stream) {
+      *current = stream->next_open;
+      stream->next_open = 0;
+      return;
+    }
+    current = &(*current)->next_open;
+  }
+}
+
 static void reset_buffer_state(FILE* stream) {
   stream->buffer_pos = 0;
   stream->buffer_len = 0;
   stream->buffer_dirty = 0;
   stream->ungot = 0;
+}
+
+static int discard_read_buffer(FILE* stream) {
+  off_t unread = 0;
+
+  if (stream->last_op != CRT_STDIO_READ) {
+    reset_buffer_state(stream);
+    return 0;
+  }
+  if (stream->buffer_len > stream->buffer_pos) {
+    unread += (off_t)(stream->buffer_len - stream->buffer_pos);
+  }
+  if (stream->ungot) {
+    ++unread;
+  }
+  if (unread != 0 && lseek(stream->fd, -unread, SEEK_CUR) < 0 && errno != ESPIPE) {
+    stream->error = 1;
+    return -1;
+  }
+  reset_buffer_state(stream);
+  return 0;
 }
 
 static int ensure_buffer(FILE* stream) {
@@ -150,8 +192,8 @@ static int prepare_read(FILE* stream) {
 }
 
 static int prepare_write(FILE* stream) {
-  if (stream->last_op == CRT_STDIO_READ) {
-    reset_buffer_state(stream);
+  if (stream->last_op == CRT_STDIO_READ && discard_read_buffer(stream) != 0) {
+    return -1;
   }
   stream->last_op = CRT_STDIO_WRITE;
   stream->eof = 0;
@@ -178,6 +220,7 @@ FILE* fopen(const char* path, const char* mode) {
     return 0;
   }
   init_stream(stream, fd, 1);
+  register_stream(stream);
 
   if ((flags & O_APPEND) != 0) {
     lseek(fd, 0, SEEK_END);
@@ -203,6 +246,7 @@ FILE* fdopen(int fd, const char* mode) {
     return 0;
   }
   init_stream(stream, fd, 1);
+  register_stream(stream);
   if ((flags & O_APPEND) != 0) {
     lseek(fd, 0, SEEK_END);
   }
@@ -265,6 +309,7 @@ FILE* tmpfile(void) {
       return 0;
     }
     init_stream(stream, fd, 1);
+    register_stream(stream);
     return stream;
   }
   errno = EEXIST;
@@ -284,6 +329,7 @@ int fclose(FILE* stream) {
     if (close(stream->fd) != 0) {
       result = -1;
     }
+    unregister_stream(stream);
     if (stream->buffer_owned) {
       free(stream->buffer);
     }
@@ -602,11 +648,20 @@ size_t fwrite(const void* ptr, size_t size, size_t nmemb, FILE* stream) {
 int fflush(FILE* stream) {
   if (stream == 0) {
     int result = 0;
+    FILE* current;
+
     if (fflush(stdout) != 0) {
       result = EOF;
     }
     if (fflush(stderr) != 0) {
       result = EOF;
+    }
+    current = open_streams;
+    while (current != 0) {
+      if (fflush(current) != 0) {
+        result = EOF;
+      }
+      current = current->next_open;
     }
     return result;
   }
@@ -617,7 +672,7 @@ int fflush(FILE* stream) {
     return flush_write_buffer(stream) == 0 ? 0 : EOF;
   }
   if (stream->last_op == CRT_STDIO_READ) {
-    reset_buffer_state(stream);
+    return discard_read_buffer(stream) == 0 ? 0 : EOF;
   }
   return 0;
 }
@@ -641,7 +696,7 @@ int setvbuf(FILE* stream, char* buf, int mode, size_t size) {
     free(stream->buffer);
   }
   stream->buffering_mode = mode;
-  stream->buffer = buf;
+  stream->buffer = mode == _IONBF || size == 0 ? 0 : buf;
   stream->buffer_size = mode == _IONBF ? 0 : size;
   stream->buffer_owned = 0;
   reset_buffer_state(stream);

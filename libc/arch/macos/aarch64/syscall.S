@@ -55,6 +55,28 @@ ___crt_sys_lseek:
   neg x0, x0
   ret
 
+.globl ___crt_sys_ftruncate
+.p2align 2
+___crt_sys_ftruncate:
+  mov x16, #201
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_fsync
+.p2align 2
+___crt_sys_fsync:
+  mov x16, #95
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
 .globl ___crt_sys_access
 .p2align 2
 ___crt_sys_access:
@@ -92,6 +114,39 @@ ___crt_sys_rmdir:
 .p2align 2
 ___crt_sys_chdir:
   mov x16, #12
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_chmod
+.p2align 2
+___crt_sys_chmod:
+  mov x16, #15
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_fchmod
+.p2align 2
+___crt_sys_fchmod:
+  mov x16, #124
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_umask
+.p2align 2
+___crt_sys_umask:
+  mov x16, #60
   svc #0x80
   b.cs 1f
   ret

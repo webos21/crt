@@ -28,6 +28,8 @@ static const struct errno_name errno_names[] = {
     {ENOSPC, "No space left on device"},
     {EPIPE, "Broken pipe"},
     {ERANGE, "Numerical result out of range"},
+    {ENAMETOOLONG, "File name too long"},
+    {ELOOP, "Too many levels of symbolic links"},
     {EILSEQ, "Invalid or incomplete multibyte or wide character"},
     {ENOSYS, "Function not implemented"},
     {ENOTSUP, "Operation not supported"},
