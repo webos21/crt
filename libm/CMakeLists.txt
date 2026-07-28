@@ -3,13 +3,20 @@ add_library(m STATIC
   src/freebsd/e_exp.c
   src/freebsd/e_log.c
   src/freebsd/e_pow.c
+  src/freebsd/k_cos.c
+  src/freebsd/k_rem_pio2.c
+  src/freebsd/k_sin.c
+  src/freebsd/k_tan.c
   src/freebsd/s_ceil.c
+  src/freebsd/s_cos.c
   src/freebsd/s_floor.c
   src/freebsd/s_fmax.c
   src/freebsd/s_fmin.c
   src/freebsd/s_round.c
   src/freebsd/s_scalbn.c
   src/freebsd/s_scalbnf.c
+  src/freebsd/s_sin.c
+  src/freebsd/s_tan.c
   src/freebsd/s_trunc.c
 )
 

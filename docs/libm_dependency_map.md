@@ -48,11 +48,11 @@ lower them to recursive libcalls back into the same exported `*f` symbol.
 
 | Function | Primary source | Required helper sources | Required private header features | Notes |
 | --- | --- | --- | --- | --- |
-| `sin` | `upstream-freebsd/lib/msun/src/s_sin.c` at Bionic `main` | `e_rem_pio2.c`, `k_rem_pio2.c`, `k_sin.c`, `k_cos.c` | `GET_HIGH_WORD`, `GET_LOW_WORD`, `INSERT_WORDS`, `SET_LOW_WORD`, `STRICT_ASSIGN`, endian-safe double word helpers | `s_sin.c` includes `e_rem_pio2.c` inline when `INLINE_REM_PIO2` is set. Prefer compiling argument reduction once if local symbol collisions appear. |
-| `cos` | `upstream-freebsd/lib/msun/src/s_cos.c` at Bionic `main` | `e_rem_pio2.c`, `k_rem_pio2.c`, `k_sin.c`, `k_cos.c` | same as `sin` | Shares the same argument reduction and kernel files as `sin`. |
-| `tan` | `upstream-freebsd/lib/msun/src/s_tan.c` at Bionic `main` | `e_rem_pio2.c`, `k_rem_pio2.c`, `k_tan.c` | same as `sin` | `tan` uses the same argument reduction path but only the tangent kernel. |
+| `sin` | `upstream-freebsd/lib/msun/src/s_sin.c` at Bionic `main` | `e_rem_pio2.c`, `k_rem_pio2.c`, `k_sin.c`, `k_cos.c` | `GET_HIGH_WORD`, `GET_LOW_WORD`, `INSERT_WORDS`, `SET_LOW_WORD`, `STRICT_ASSIGN`, endian-safe double word helpers | Imported. `s_sin.c` includes `e_rem_pio2.c` inline with `INLINE_REM_PIO2`; `k_rem_pio2.c` is compiled once. |
+| `cos` | `upstream-freebsd/lib/msun/src/s_cos.c` at Bionic `main` | `e_rem_pio2.c`, `k_rem_pio2.c`, `k_sin.c`, `k_cos.c` | same as `sin` | Imported. Shares the same argument reduction and kernel files as `sin`. |
+| `tan` | `upstream-freebsd/lib/msun/src/s_tan.c` at Bionic `main` | `e_rem_pio2.c`, `k_rem_pio2.c`, `k_tan.c` | same as `sin` | Imported. Uses the shared argument reduction path and the tangent kernel. |
 
-Recommended import order:
+Completed import order:
 
 1. Expand local `math_private.h` with the missing word helpers and
    `STRICT_ASSIGN`.
@@ -83,5 +83,8 @@ separate precision tranches.
 Recommended import order:
 
 1. Native float precision for `expf`, `logf`, and `powf`
-2. `sin`, `cos`, and `tan`
-3. Floating-point exception and `errno` policy
+2. Native float precision for `sinf`, `cosf`, and `tanf`
+3. Native fdlibm replacements for `log10`, `log2`, `expm1`, and `log1p`
+4. Native fdlibm replacements for `frexp`, `modf`, `fmod`, and `remainder`
+5. Import `remainder` and related quotient variants
+6. Floating-point exception and `errno` policy

@@ -228,6 +228,16 @@ The current surface includes:
 - `scalbn`, `scalbnf`, `scalbnl`
 - `ldexp`, `ldexpf`, `ldexpl`
 - `pow`, `powf`, `powl`
+- `sin`, `sinf`, `sinl`
+- `cos`, `cosf`, `cosl`
+- `tan`, `tanf`, `tanl`
+- `log10`, `log10f`, `log10l`
+- `log2`, `log2f`, `log2l`
+- `expm1`, `expm1f`, `expm1l`
+- `log1p`, `log1pf`, `log1pl`
+- `frexp`, `frexpf`, `frexpl`
+- `modf`, `modff`, `modfl`
+- `fmod`, `fmodf`, `fmodl`
 
 The first Bionic/FreeBSD msun import replaces the double-precision
 `floor`/`ceil`/`trunc`/`round` and `fmin`/`fmax` implementations with curated
@@ -263,9 +273,24 @@ project's Bionic/fdlibm provenance policy. `ldexp` and `ldexpf` are thin aliases
 implemented as wrappers, while `scalbnl`, `ldexpl`, `powf`, and `powl` remain
 bootstrap wrappers over the imported double implementations.
 
+The trigonometric tranche imports current Bionic FreeBSD/msun `sin`, `cos`,
+`tan`, their shared kernel functions, and the double-precision argument
+reduction path. The public double functions use the original FreeBSD structure:
+`e_rem_pio2.c` is included into each public wrapper with `INLINE_REM_PIO2`,
+while `k_rem_pio2.c`, `k_sin.c`, `k_cos.c`, and `k_tan.c` are compiled once as
+shared internal helpers. `sinf`, `sinl`, `cosf`, `cosl`, `tanf`, and `tanl`
+remain bootstrap wrappers over the imported double implementations.
+
+The configure-friendly tranche opens `log10`, `log2`, `expm1`, `log1p`,
+`frexp`, `modf`, and `fmod`, plus float and long-double wrappers. These are
+project-owned bootstrap implementations for now: logarithmic variants are
+derived from the existing `log`/`exp` core, `frexp` uses local IEEE bit
+decomposition, and `modf`/`fmod` use the current rounding primitives. This is
+intended to satisfy common configure probes and early library ports before
+native fdlibm precision tranches are imported.
+
 The float and long double variants currently remain bootstrap wrappers, and
-`sqrtl` still uses project-owned bootstrap behavior. Transcendental functions
-such as `sin`, `cos`, and `tan`,
+`sqrtl` still uses project-owned bootstrap behavior. Native-precision variants,
 `errno`/floating-point exception policy, and full edge-case coverage remain
 deferred to later libm import tranches. Their planned source dependencies are
 recorded in `docs/libm_dependency_map.md`.

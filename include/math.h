@@ -24,6 +24,17 @@ extern "C" {
 #define isnormal(x) __builtin_isnormal(x)
 #define signbit(x) __builtin_signbit(x)
 
+#if FLT_EVAL_METHOD == 0
+typedef float float_t;
+typedef double double_t;
+#elif FLT_EVAL_METHOD == 1
+typedef double float_t;
+typedef double double_t;
+#else
+typedef long double float_t;
+typedef long double double_t;
+#endif
+
 double fabs(double x);
 float fabsf(float x);
 long double fabsl(long double x);
@@ -68,6 +79,22 @@ double log(double x);
 float logf(float x);
 long double logl(long double x);
 
+double log10(double x);
+float log10f(float x);
+long double log10l(long double x);
+
+double log2(double x);
+float log2f(float x);
+long double log2l(long double x);
+
+double expm1(double x);
+float expm1f(float x);
+long double expm1l(long double x);
+
+double log1p(double x);
+float log1pf(float x);
+long double log1pl(long double x);
+
 double scalbn(double x, int n);
 float scalbnf(float x, int n);
 long double scalbnl(long double x, int n);
@@ -79,6 +106,30 @@ long double ldexpl(long double x, int n);
 double pow(double x, double y);
 float powf(float x, float y);
 long double powl(long double x, long double y);
+
+double sin(double x);
+float sinf(float x);
+long double sinl(long double x);
+
+double cos(double x);
+float cosf(float x);
+long double cosl(long double x);
+
+double tan(double x);
+float tanf(float x);
+long double tanl(long double x);
+
+double frexp(double x, int* exp);
+float frexpf(float x, int* exp);
+long double frexpl(long double x, int* exp);
+
+double modf(double x, double* iptr);
+float modff(float x, float* iptr);
+long double modfl(long double x, long double* iptr);
+
+double fmod(double x, double y);
+float fmodf(float x, float y);
+long double fmodl(long double x, long double y);
 
 #ifdef __cplusplus
 }

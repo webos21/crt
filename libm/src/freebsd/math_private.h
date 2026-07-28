@@ -18,6 +18,17 @@ typedef uint32_t u_int32_t;
 
 #define __weak_reference(sym, alias)
 #define __strong_reference(sym, alias)
+#ifndef __always_inline
+#define __always_inline inline __attribute__((__always_inline__))
+#endif
+
+#ifndef STRICT_ASSIGN
+#define STRICT_ASSIGN(type, lval, rval) \
+  do { \
+    volatile type strict_value = (rval); \
+    (lval) = strict_value; \
+  } while (0)
+#endif
 
 #if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
 #define CRT_IEEE_WORD_ORDER_BIG 1
@@ -113,5 +124,16 @@ typedef union {
     sfw_u.word = (uint32_t)(i); \
     (f) = sfw_u.value; \
   } while (0)
+
+static inline double rnint(double_t x) {
+  return ((double)(x + 0x1.8p52) - 0x1.8p52);
+}
+
+#define irint(x) ((int)(x))
+
+int __kernel_rem_pio2(double* x, double* y, int e0, int nx, int prec);
+double __kernel_sin(double x, double y, int iy);
+double __kernel_cos(double x, double y);
+double __kernel_tan(double x, double y, int iy);
 
 #endif

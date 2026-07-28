@@ -1,4 +1,5 @@
 #include <math.h>
+#include <stdint.h>
 
 double fabs(double x) {
   return __builtin_fabs(x);
@@ -139,6 +140,60 @@ long double logl(long double x) {
   return (long double)log((double)x);
 }
 
+double log10(double x) {
+  return log(x) * 0.43429448190325182765;
+}
+
+float log10f(float x) {
+  return (float)log10((double)x);
+}
+
+long double log10l(long double x) {
+  return (long double)log10((double)x);
+}
+
+double log2(double x) {
+  return log(x) * 1.4426950408889634074;
+}
+
+float log2f(float x) {
+  return (float)log2((double)x);
+}
+
+long double log2l(long double x) {
+  return (long double)log2((double)x);
+}
+
+double expm1(double x) {
+  if (x == 0.0 || fabs(x) < 0.00000001) {
+    return x;
+  }
+  return exp(x) - 1.0;
+}
+
+float expm1f(float x) {
+  return (float)expm1((double)x);
+}
+
+long double expm1l(long double x) {
+  return (long double)expm1((double)x);
+}
+
+double log1p(double x) {
+  if (x == 0.0 || fabs(x) < 0.00000001) {
+    return x;
+  }
+  return log(1.0 + x);
+}
+
+float log1pf(float x) {
+  return (float)log1p((double)x);
+}
+
+long double log1pl(long double x) {
+  return (long double)log1p((double)x);
+}
+
 long double scalbnl(long double x, int n) {
   return (long double)scalbn((double)x, n);
 }
@@ -153,4 +208,147 @@ float powf(float x, float y) {
 
 long double powl(long double x, long double y) {
   return (long double)pow((double)x, (double)y);
+}
+
+float sinf(float x) {
+  return (float)sin((double)x);
+}
+
+long double sinl(long double x) {
+  return (long double)sin((double)x);
+}
+
+float cosf(float x) {
+  return (float)cos((double)x);
+}
+
+long double cosl(long double x) {
+  return (long double)cos((double)x);
+}
+
+float tanf(float x) {
+  return (float)tan((double)x);
+}
+
+long double tanl(long double x) {
+  return (long double)tan((double)x);
+}
+
+double frexp(double x, int* exp) {
+  union {
+    double value;
+    uint64_t bits;
+  } u;
+  int e;
+
+  u.value = x;
+  e = (int)((u.bits >> 52) & 0x7ff);
+  if (e == 0) {
+    if (x == 0.0) {
+      *exp = 0;
+      return x;
+    }
+    x *= 0x1p64;
+    u.value = x;
+    e = (int)((u.bits >> 52) & 0x7ff);
+    *exp = e - 1022 - 64;
+  } else if (e == 0x7ff) {
+    *exp = 0;
+    return x;
+  } else {
+    *exp = e - 1022;
+  }
+  u.bits = (u.bits & UINT64_C(0x800fffffffffffff)) | UINT64_C(0x3fe0000000000000);
+  return u.value;
+}
+
+float frexpf(float x, int* exp) {
+  union {
+    float value;
+    uint32_t bits;
+  } u;
+  int e;
+
+  u.value = x;
+  e = (int)((u.bits >> 23) & 0xff);
+  if (e == 0) {
+    if (x == 0.0f) {
+      *exp = 0;
+      return x;
+    }
+    x *= 0x1p32f;
+    u.value = x;
+    e = (int)((u.bits >> 23) & 0xff);
+    *exp = e - 126 - 32;
+  } else if (e == 0xff) {
+    *exp = 0;
+    return x;
+  } else {
+    *exp = e - 126;
+  }
+  u.bits = (u.bits & UINT32_C(0x807fffff)) | UINT32_C(0x3f000000);
+  return u.value;
+}
+
+long double frexpl(long double x, int* exp) {
+  return (long double)frexp((double)x, exp);
+}
+
+double modf(double x, double* iptr) {
+  double integral;
+  double fractional;
+
+  if (isnan(x)) {
+    *iptr = x;
+    return x;
+  }
+  if (isinf(x)) {
+    *iptr = x;
+    return copysign(0.0, x);
+  }
+  integral = trunc(x);
+  fractional = x - integral;
+  *iptr = integral;
+  return fractional == 0.0 ? copysign(0.0, x) : fractional;
+}
+
+float modff(float x, float* iptr) {
+  double integral;
+  double fractional;
+
+  fractional = modf((double)x, &integral);
+  *iptr = (float)integral;
+  return (float)fractional;
+}
+
+long double modfl(long double x, long double* iptr) {
+  double integral;
+  double fractional;
+
+  fractional = modf((double)x, &integral);
+  *iptr = (long double)integral;
+  return (long double)fractional;
+}
+
+double fmod(double x, double y) {
+  double q;
+  double r;
+
+  if (isnan(x) || isnan(y) || isinf(x) || y == 0.0) {
+    return NAN;
+  }
+  if (isinf(y)) {
+    return x;
+  }
+  q = trunc(x / y);
+  r = x - q * y;
+  return r == 0.0 ? copysign(0.0, x) : r;
+}
+
+float fmodf(float x, float y) {
+  return (float)fmod((double)x, (double)y);
+}
+
+long double fmodl(long double x, long double y) {
+  return (long double)fmod((double)x, (double)y);
 }
