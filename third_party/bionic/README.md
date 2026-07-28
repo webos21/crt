@@ -55,6 +55,13 @@ out-of-line C99 functions.
 | `libc/src/ctype.c` | `libc/include/ctype.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Converts Bionic inline predicates to exported C99 functions and defers locale-aware `_l` variants. |
 | `include/ctype.h` | `libc/include/ctype.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Keeps only public prototypes for the current C-locale tranche. |
 
+### Locale Tranche
+
+| Local file | Upstream path | Upstream ref | Status | Notes |
+| --- | --- | --- | --- | --- |
+| `include/locale.h` | `libc/include/locale.h` | project-owned | new | Minimal C/POSIX locale category declarations and `struct lconv` for the bootstrap C locale. |
+| `libc/src/locale.c` | mixed Bionic/POSIX surface | project-owned | new | Supports the `C`/`POSIX` locale names, empty locale requests, `setlocale`, and `localeconv` without importing host locale state. |
+
 ### Stdlib Numeric Conversion Tranche
 
 | Local file | Upstream path | Upstream ref | Status | Notes |

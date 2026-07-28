@@ -7,6 +7,7 @@ add_library(c STATIC
   src/env.c
   src/exit.c
   src/fd.c
+  src/locale.c
   src/malloc.c
   src/mman.c
   src/printf.c

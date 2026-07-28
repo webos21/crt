@@ -140,6 +140,35 @@ collation remains deferred until the locale subsystem exists. `strsignal` uses
 the project's current signal number surface and returns generic text for unknown
 signals.
 
+## Locale Tranche
+
+The first locale tranche adds the C/POSIX locale surface needed by the existing
+ctype, string collation, numeric conversion, and time-formatting code:
+
+- `locale.h`
+- `LC_ALL`
+- `LC_COLLATE`
+- `LC_CTYPE`
+- `LC_MONETARY`
+- `LC_NUMERIC`
+- `LC_TIME`
+- `LC_MESSAGES`
+- `struct lconv`
+- `setlocale`
+- `localeconv`
+
+Only the built-in `C`/`POSIX` locale is supported. `setlocale(category, NULL)`
+queries the current locale and returns `"C"`. `setlocale(category, "")` is
+accepted as a request for the best available runtime locale, which is also `"C"`
+for now. Host locale import, locale archives, `LANG`/`LC_*` environment parsing,
+thread-local locale objects, `_l` variants, and locale-aware collation remain
+deferred.
+
+`localeconv` returns a static C-locale `struct lconv`: decimal point is `"."`,
+grouping and currency strings are empty, and unavailable numeric fields use
+`CHAR_MAX`. This makes the locale contract explicit while keeping the runtime
+independent from host libc locale state.
+
 ## Next Runtime Boundary Tranche
 
 After the first string/memory import, the next implemented runtime boundary is:
