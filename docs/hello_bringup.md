@@ -62,7 +62,7 @@ On Windows, `errno` uses a Win32 TLS slot instead of compiler PE TLS. This keeps
 the freestanding startup path independent from `_tls_index` while still giving
 each thread a separate `errno` storage location.
 
-The allocator is currently a VM-backed bootstrap heap with a simple free list.
+The allocator is currently a VM-backed bootstrap heap with a locked free list.
 It grows with anonymous `mmap` chunks. This is enough for early cross-OS
 libc/PAL tests, but it is not the final allocator design.
 

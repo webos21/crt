@@ -162,8 +162,9 @@ The next allocator tranche adds:
 
 This allocator is not imported from Bionic yet. Bionic's production allocator
 stack has more dependencies and should be evaluated separately. The current
-allocator is a small VM-backed bootstrap heap with a free list, intended only to
-support early libc/PAL tests across Linux, Windows, and macOS.
+allocator is a small VM-backed bootstrap heap with an internal spinlock-protected
+free list, intended only to support early libc/PAL tests across Linux, Windows,
+and macOS.
 
 ## Stdlib Numeric Conversion Tranche
 
@@ -279,8 +280,8 @@ The current pthread basic tranche adds a first public `pthread.h` subset:
 This is not a complete pthread implementation yet. It provides bootstrap mutex
 and once behavior over the internal atomic/lock layer, plus a host thread-id
 query for `pthread_self`. Thread creation, join/detach, condition variables,
-attributes, cancellation, robust/recursive mutexes, and key destructors are
-deferred.
+attributes, recursive/error-checking mutexes, and key destructors have follow-up
+tranches. Cancellation and robust mutexes are still deferred.
 
 The exposed pthread type layout is still provisional and may change before ABI
 stabilization.
@@ -295,9 +296,11 @@ The pthread TLS key tranche extends the provisional pthread subset with:
 - `pthread_getspecific`
 - `pthread_setspecific`
 
-This tranche intentionally covers only key allocation and per-thread value
-storage. Destructor registration is accepted by the API but deferred until
-thread exit and pthread lifecycle management are implemented.
+This tranche covers key allocation and per-thread value storage. Destructor
+registration is stored in the project key table and destructors are run when a
+project-created thread returns from its start routine or calls `pthread_exit`.
+The runtime follows the usual bounded repeated destructor pass model so a
+destructor may set a non-null value again for a later pass.
 
 Linux and macOS currently use compiler TLS storage for the key value array.
 Windows maps each pthread key to a Win32 TLS slot. This keeps Windows free of
@@ -324,16 +327,17 @@ only 32 bits. macOS does not expose Darwin's native opaque pthread types through
 this runtime.
 
 The current project-owned implementation is still intentionally narrow.
-Attributes are accepted only as a placeholder and ignored. Joinable threads are
-supported as the first policy on Windows and Linux; detach, cancellation,
-priority, scheduling attributes, guard size, stack attributes, and destructor
-execution at thread exit are deferred.
+Detach state and stack size are consumed by `pthread_create`; priority,
+scheduling attributes, guard size, caller-supplied stack addresses,
+cancellation, and robust synchronization are deferred.
 
 Windows uses `CreateThread`, `WaitForSingleObject`, `CloseHandle`, and
 `ExitThread` from `kernel32`. Linux uses a raw `clone` wrapper with a
 project-owned stack plus `wait4` for the first joinable-thread path. The Linux
 backend deliberately avoids `CLONE_THREAD` for now so that `wait4` can provide a
-simple join primitive while the runtime does not yet have futexes.
+simple bootstrap join primitive. The planned replacement is a
+`CLONE_THREAD`/child-tid/futex-backed lifecycle described in
+`docs/linux_pthread_lifecycle.md`.
 
 macOS keeps the same public pthread ABI as Linux and Windows. Basic mutex,
 once, self, and key APIs are provided by the project implementation. Thread
@@ -357,8 +361,9 @@ The pthread attribute tranche adds the first `pthread_attr_t` API subset:
 
 The runtime now consumes detach state and stack size during `pthread_create`.
 Joinable remains the default. Detached creation is accepted and releases the
-project control block when the worker returns; explicit `pthread_detach` and the
-rest of the pthread attribute surface are deferred.
+project control block when the worker returns or calls `pthread_exit`; explicit
+`pthread_detach` is implemented. The rest of the pthread attribute surface is
+deferred.
 
 ## Pthread Detach Tranche
 
@@ -369,7 +374,8 @@ The pthread detach tranche adds:
 Windows detaches by closing the retained thread handle. macOS detaches the
 hidden native libSystem pthread handle through the adaptation layer. Linux marks
 the project control block as detached; reclaiming detached thread stacks is
-deferred until the runtime has a futex/reaper-backed thread lifecycle.
+deferred until the runtime has the futex/reaper-backed lifecycle described in
+`docs/linux_pthread_lifecycle.md`.
 
 Calling `pthread_join` on a detached project thread returns `EINVAL`.
 

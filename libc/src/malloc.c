@@ -5,6 +5,8 @@
 #include <string.h>
 #include <sys/mman.h>
 
+#include <private/crt_atomic.h>
+
 #define CRT_HEAP_CHUNK_SIZE (64u * 1024u)
 
 typedef union block_header block_header;
@@ -19,6 +21,7 @@ union block_header {
 };
 
 static block_header* heap_head;
+static crt_spinlock heap_lock = CRT_SPINLOCK_INIT;
 
 static size_t align_size(size_t size) {
   size_t alignment = sizeof(block_header);
@@ -97,7 +100,7 @@ static void coalesce_free_blocks(void) {
   }
 }
 
-void* malloc(size_t size) {
+static void* malloc_unlocked(size_t size) {
   block_header* current;
   size_t alignment = sizeof(block_header);
 
@@ -129,7 +132,7 @@ void* malloc(size_t size) {
   return current + 1;
 }
 
-void free(void* ptr) {
+static void free_unlocked(void* ptr) {
   block_header* header;
 
   if (ptr == 0) {
@@ -139,6 +142,21 @@ void free(void* ptr) {
   header = ((block_header*)ptr) - 1;
   header->block.free = 1;
   coalesce_free_blocks();
+}
+
+void* malloc(size_t size) {
+  void* ptr;
+
+  crt_spin_lock(&heap_lock);
+  ptr = malloc_unlocked(size);
+  crt_spin_unlock(&heap_lock);
+  return ptr;
+}
+
+void free(void* ptr) {
+  crt_spin_lock(&heap_lock);
+  free_unlocked(ptr);
+  crt_spin_unlock(&heap_lock);
 }
 
 void* calloc(size_t nmemb, size_t size) {
@@ -162,6 +180,7 @@ void* realloc(void* ptr, size_t size) {
   block_header* header;
   void* new_ptr;
   size_t copy_size;
+  size_t alignment = sizeof(block_header);
 
   if (ptr == 0) {
     return malloc(size);
@@ -171,19 +190,28 @@ void* realloc(void* ptr, size_t size) {
     return 0;
   }
 
+  crt_spin_lock(&heap_lock);
+  if (size > ((size_t)-1) - (alignment - 1)) {
+    errno = ENOMEM;
+    crt_spin_unlock(&heap_lock);
+    return 0;
+  }
   header = ((block_header*)ptr) - 1;
   size = align_size(size);
   if (header->block.size >= size) {
     split_block(header, size);
+    crt_spin_unlock(&heap_lock);
     return ptr;
   }
 
-  new_ptr = malloc(size);
+  new_ptr = malloc_unlocked(size);
   if (new_ptr == 0) {
+    crt_spin_unlock(&heap_lock);
     return 0;
   }
   copy_size = header->block.size < size ? header->block.size : size;
   memcpy(new_ptr, ptr, copy_size);
-  free(ptr);
+  free_unlocked(ptr);
+  crt_spin_unlock(&heap_lock);
   return new_ptr;
 }

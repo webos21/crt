@@ -12,6 +12,7 @@ long __crt_sys_thread_id(void);
 void __crt_sys_thread_exit(int status) __attribute__((noreturn));
 
 #define CRT_PTHREAD_KEYS_MAX 128
+#define CRT_PTHREAD_DESTRUCTOR_ITERATIONS 4
 #define CRT_PTHREAD_STACK_SIZE (1024UL * 1024UL)
 #define CRT_PTHREAD_ATTR_FLAG_DETACHED 0x00000001U
 #define CRT_COND_SEQUENCE_WORD 0
@@ -51,6 +52,8 @@ __declspec(dllimport) void CRT_WINAPI ExitThread(DWORD dwExitCode) __attribute__
 
 static DWORD pthread_key_slots[CRT_PTHREAD_KEYS_MAX];
 static pthread_once_t pthread_key_once = PTHREAD_ONCE_INIT;
+static DWORD pthread_control_tls_slot = CRT_TLS_OUT_OF_INDEXES;
+static pthread_once_t pthread_control_once = PTHREAD_ONCE_INIT;
 #elif defined(CRT_TARGET_OS_LINUX)
 long __crt_sys_clone_thread(void* stack_top, int (*entry)(void*), void* arg, unsigned long flags);
 long __crt_sys_wait4(long pid, int* status, int options, void* rusage);
@@ -99,7 +102,12 @@ typedef struct {
   int detached;
 } crt_pthread_control;
 
+#if !defined(CRT_TARGET_OS_WINDOWS)
+static __thread crt_pthread_control* pthread_current_control;
+#endif
+
 static int pthread_key_used[CRT_PTHREAD_KEYS_MAX];
+static __pthread_key_destructor_t pthread_key_destructors[CRT_PTHREAD_KEYS_MAX];
 static crt_spinlock pthread_key_lock = CRT_SPINLOCK_INIT;
 
 static crt_atomic_int* mutex_state(pthread_mutex_t* mutex) {
@@ -193,6 +201,75 @@ static int pthread_key_is_valid(pthread_key_t key) {
   return key >= 0 && key < CRT_PTHREAD_KEYS_MAX && pthread_key_used[key] != 0;
 }
 
+#if defined(CRT_TARGET_OS_WINDOWS)
+static void init_windows_control_slot(void) {
+  pthread_control_tls_slot = TlsAlloc();
+}
+
+static crt_pthread_control* pthread_get_current_control(void) {
+  pthread_once(&pthread_control_once, init_windows_control_slot);
+  if (pthread_control_tls_slot == CRT_TLS_OUT_OF_INDEXES) {
+    return 0;
+  }
+  return (crt_pthread_control*)TlsGetValue(pthread_control_tls_slot);
+}
+
+static void pthread_set_current_control(crt_pthread_control* control) {
+  pthread_once(&pthread_control_once, init_windows_control_slot);
+  if (pthread_control_tls_slot != CRT_TLS_OUT_OF_INDEXES) {
+    TlsSetValue(pthread_control_tls_slot, control);
+  }
+}
+#else
+static crt_pthread_control* pthread_get_current_control(void) {
+  return pthread_current_control;
+}
+
+static void pthread_set_current_control(crt_pthread_control* control) {
+  pthread_current_control = control;
+}
+#endif
+
+static void pthread_run_key_destructors(void) {
+  int iteration;
+
+  for (iteration = 0; iteration < CRT_PTHREAD_DESTRUCTOR_ITERATIONS; ++iteration) {
+    int called = 0;
+    unsigned int i;
+
+    for (i = 0; i < CRT_PTHREAD_KEYS_MAX; ++i) {
+      __pthread_key_destructor_t destructor = 0;
+      void* value = 0;
+
+      crt_spin_lock(&pthread_key_lock);
+      if (pthread_key_used[i]) {
+        destructor = pthread_key_destructors[i];
+#if defined(CRT_TARGET_OS_WINDOWS)
+        value = TlsGetValue(pthread_key_slots[i]);
+        if (value != 0 && destructor != 0) {
+          TlsSetValue(pthread_key_slots[i], 0);
+        }
+#else
+        value = pthread_key_values[i];
+        if (value != 0 && destructor != 0) {
+          pthread_key_values[i] = 0;
+        }
+#endif
+      }
+      crt_spin_unlock(&pthread_key_lock);
+
+      if (value != 0 && destructor != 0) {
+        destructor(value);
+        called = 1;
+      }
+    }
+
+    if (!called) {
+      break;
+    }
+  }
+}
+
 #if defined(CRT_TARGET_OS_WINDOWS) || defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS)
 static void pthread_control_destroy(crt_pthread_control* control) {
   if (control == 0) {
@@ -221,7 +298,10 @@ static int pthread_start(void* arg) {
   crt_pthread_control* control = (crt_pthread_control*)arg;
   int detached;
 
+  pthread_set_current_control(control);
   control->result = control->start_routine(control->arg);
+  pthread_run_key_destructors();
+  pthread_set_current_control(0);
   detached = __atomic_load_n(&control->detached, __ATOMIC_ACQUIRE);
   if (detached) {
     pthread_control_destroy_from_worker(control);
@@ -737,7 +817,6 @@ int pthread_equal(pthread_t t1, pthread_t t2) {
 
 int pthread_key_create(pthread_key_t* key, __pthread_key_destructor_t destructor) {
   unsigned int i;
-  (void)destructor;
 
   if (key == 0) {
     return EINVAL;
@@ -759,6 +838,7 @@ int pthread_key_create(pthread_key_t* key, __pthread_key_destructor_t destructor
       pthread_key_slots[i] = slot;
 #endif
       pthread_key_used[i] = 1;
+      pthread_key_destructors[i] = destructor;
       *key = i;
       crt_spin_unlock(&pthread_key_lock);
       return 0;
@@ -788,6 +868,7 @@ int pthread_key_delete(pthread_key_t key) {
 #else
     pthread_key_values[key] = 0;
 #endif
+    pthread_key_destructors[key] = 0;
     pthread_key_used[key] = 0;
   }
   crt_spin_unlock(&pthread_key_lock);
@@ -886,7 +967,6 @@ int pthread_create(
     void* (*start_routine)(void*),
     void* arg) {
   crt_pthread_control* control;
-  (void)attr;
 
   if (thread == 0 || start_routine == 0) {
     return EINVAL;
@@ -1065,7 +1145,18 @@ int pthread_join(pthread_t thread, void** retval) {
 }
 
 void pthread_exit(void* retval) {
-  (void)retval;
+  crt_pthread_control* control = pthread_get_current_control();
+  int detached = 0;
+
+  if (control != 0) {
+    control->result = retval;
+    detached = __atomic_load_n(&control->detached, __ATOMIC_ACQUIRE);
+  }
+  pthread_run_key_destructors();
+  pthread_set_current_control(0);
+  if (detached) {
+    pthread_control_destroy_from_worker(control);
+  }
 #if defined(CRT_TARGET_OS_WINDOWS)
   ExitThread(0);
 #elif defined(CRT_TARGET_OS_MACOS)

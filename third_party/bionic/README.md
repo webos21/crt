@@ -108,7 +108,7 @@ out-of-line C99 functions.
 | Local file | Upstream path | Upstream ref | Status | Notes |
 | --- | --- | --- | --- | --- |
 | `include/pthread.h` | `libc/include/pthread.h` | project-owned | extended | Adds provisional pthread key APIs. |
-| `libc/src/pthread.c` | mixed Bionic/POSIX surface | project-owned | extended | Adds key allocation and per-thread specific value storage. |
+| `libc/src/pthread.c` | mixed Bionic/POSIX surface | project-owned | extended | Adds key allocation, per-thread specific value storage, and bounded destructor passes at project thread exit. |
 
 ### Pthread Thread Lifecycle Tranche
 

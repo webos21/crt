@@ -99,7 +99,7 @@ such as `GetStdHandle`, `CreateFileA`, `ReadFile`, `WriteFile`, `CloseHandle`,
 `SetFilePointerEx`, `ExitProcess`, and address-based wait/wake primitives, so
 Windows executables link the relevant Windows SDK import libraries.
 
-The current allocator is a VM-backed bootstrap heap with a simple free list. It
+The current allocator is a VM-backed bootstrap heap with a locked free list. It
 uses anonymous `mmap` chunks and is intended to support early libc/PAL tests, not
 production allocation behavior. Future allocator work should evaluate the
 appropriate Bionic allocator integration.
