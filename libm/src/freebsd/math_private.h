@@ -63,6 +63,21 @@ typedef union {
     (i) = (int32_t)gh_u.parts.msw; \
   } while (0)
 
+#define GET_LOW_WORD(i, d) \
+  do { \
+    ieee_double_shape_type gl_u; \
+    gl_u.value = (d); \
+    (i) = (int32_t)gl_u.parts.lsw; \
+  } while (0)
+
+#define SET_HIGH_WORD(d, v) \
+  do { \
+    ieee_double_shape_type sh_u; \
+    sh_u.value = (d); \
+    sh_u.parts.msw = (uint32_t)(v); \
+    (d) = sh_u.value; \
+  } while (0)
+
 #define INSERT_WORDS(d, ix0, ix1) \
   do { \
     ieee_double_shape_type iw_u; \

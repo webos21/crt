@@ -60,6 +60,10 @@ double sqrt(double x);
 float sqrtf(float x);
 long double sqrtl(long double x);
 
+double exp(double x);
+float expf(float x);
+long double expl(long double x);
+
 #ifdef __cplusplus
 }
 #endif

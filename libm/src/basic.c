@@ -122,3 +122,11 @@ long double sqrtl(long double x) {
   }
   return guess;
 }
+
+float expf(float x) {
+  return (float)exp((double)x);
+}
+
+long double expl(long double x) {
+  return (long double)exp((double)x);
+}

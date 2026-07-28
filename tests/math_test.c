@@ -51,6 +51,12 @@ int main(void) {
   if (!signbit(sqrt(-0.0)) || sqrt(INFINITY) != INFINITY) {
     return fail("sqrt signed zero/inf");
   }
+  if (!near_double(exp(0.0), 1.0) || !near_double(exp(1.0), 2.718281828459045) ||
+      !near_double(exp(-1.0), 0.36787944117144233) ||
+      exp(INFINITY) != INFINITY || exp(-INFINITY) != 0.0 ||
+      !isnan(exp(NAN)) || expf(0.0f) != 1.0f || expl(0.0L) != 1.0L) {
+    return fail("exp");
+  }
 
   printf("math_test: ok\n");
   return 0;

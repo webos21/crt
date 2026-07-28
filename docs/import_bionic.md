@@ -223,6 +223,7 @@ The current surface includes:
 - `trunc`, `truncf`, `truncl`
 - `round`, `roundf`, `roundl`
 - `sqrt`, `sqrtf`, `sqrtl`
+- `exp`, `expf`, `expl`
 
 The first Bionic/FreeBSD msun import replaces the double-precision
 `floor`/`ceil`/`trunc`/`round` and `fmin`/`fmax` implementations with curated
@@ -240,6 +241,11 @@ The `fabs*`, `copysign*`, `fmin`, `fmax`, `fminf`, and `fmaxf` functions also
 use Clang builtins. These were checked at Debug/O0 for the supported Windows and
 Linux target families to avoid the recursive libcall issue seen with ordinary
 `__builtin_sqrt`.
+
+The first exponential tranche imports `exp` from older Bionic fdlibm because
+current Bionic `main` no longer lists a direct double `e_exp.c` source in
+`libm/Android.bp`. `expf` and `expl` are bootstrap wrappers around the imported
+double implementation until their native precision tranches are imported.
 
 The float and long double variants currently remain bootstrap wrappers, and
 `sqrtl` still uses project-owned bootstrap behavior. Transcendental functions
