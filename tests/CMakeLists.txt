@@ -268,6 +268,11 @@ set_tests_properties(pthread_key_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_key_test: ok"
 )
 
+add_crt_test(pthread_tls_test pthread_tls_test.c)
+set_tests_properties(pthread_tls_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "pthread_tls_test: ok"
+)
+
 add_crt_test(pthread_key_destructor_test pthread_key_destructor_test.c)
 set_tests_properties(pthread_key_destructor_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_key_destructor_test: ok"

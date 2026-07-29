@@ -23,6 +23,7 @@ add_library(c STATIC
   src/strtoll.c
   src/strtoul.c
   src/strtoull.c
+  src/tls.c
   src/time.c
   src/wait.c
   src/wchar.c

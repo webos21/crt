@@ -21,12 +21,21 @@ to Linux, macOS, and Windows.
 
 ## Backend policy
 
+- `pthread_self`, `__errno`, pthread key storage, and the current-thread name
+  buffer go through the private `crt_tls` adapter. Public pthread ABI stays
+  Bionic-shaped, while each host can use its native current-thread mechanism
+  behind that adapter.
 - Linux uses project-owned `clone` threads and a detached-thread reaper. Joinable
   threads release their control block and owned stack during `pthread_join`.
+  Until the Linux backend grows a Bionic-style TCB/ELF TLS setup, its `crt_tls`
+  backend uses a runtime thread-context registry keyed by kernel tid.
 - macOS keeps the project pthread ABI and calls libSystem pthread entry points
-  behind the adaptation layer for native thread lifecycle.
+  behind the adaptation layer for native thread lifecycle. Its `crt_tls` backend
+  may use compiler TLS because libSystem creates threads with a valid native TLS
+  environment.
 - Windows keeps the project pthread ABI and maps thread lifecycle to Kernel32
-  thread and TLS primitives.
+  thread and TLS primitives. Its `crt_tls` backend uses Win32 TLS slots, keeping
+  the freestanding startup path independent of MSVC CRT PE TLS initialization.
 - Project-created threads return the project control-block handle from
   `pthread_self`, so it matches the `pthread_t` value returned by
   `pthread_create`. Threads not created by this runtime fall back to the backend
@@ -66,7 +75,7 @@ to Linux, macOS, and Windows.
   main thread, it returns default attributes.
 - `pthread_gettid_np` returns the backend thread id when the project has a
   control block. For the current thread it asks the backend directly.
-- Thread names are stored in the project control block or current-thread TLS.
+- Thread names are stored in the project thread context.
   Backend-visible OS thread naming is deferred.
 - `pthread_getcpuclockid` is present but returns `ENOTSUP`; per-thread CPU clock
   mapping is deferred.

@@ -8,6 +8,7 @@
 #include <time.h>
 
 #include <private/crt_atomic.h>
+#include <private/crt_tls.h>
 #include <private/crt_wait.h>
 
 long __crt_sys_thread_id(void);
@@ -49,10 +50,6 @@ typedef void* HANDLE;
 #define CRT_WAIT_OBJECT_0 0
 #define CRT_INFINITE 0xffffffffUL
 
-__declspec(dllimport) DWORD CRT_WINAPI TlsAlloc(void);
-__declspec(dllimport) BOOL CRT_WINAPI TlsFree(DWORD dwTlsIndex);
-__declspec(dllimport) void* CRT_WINAPI TlsGetValue(DWORD dwTlsIndex);
-__declspec(dllimport) BOOL CRT_WINAPI TlsSetValue(DWORD dwTlsIndex, void* lpTlsValue);
 __declspec(dllimport) HANDLE CRT_WINAPI CreateThread(
     void* lpThreadAttributes,
     size_t dwStackSize,
@@ -63,11 +60,6 @@ __declspec(dllimport) HANDLE CRT_WINAPI CreateThread(
 __declspec(dllimport) DWORD CRT_WINAPI WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds);
 __declspec(dllimport) BOOL CRT_WINAPI CloseHandle(HANDLE hObject);
 __declspec(dllimport) void CRT_WINAPI ExitThread(DWORD dwExitCode) __attribute__((noreturn));
-
-static DWORD pthread_key_slots[CRT_PTHREAD_KEYS_MAX];
-static pthread_once_t pthread_key_once = PTHREAD_ONCE_INIT;
-static DWORD pthread_control_tls_slot = CRT_TLS_OUT_OF_INDEXES;
-static pthread_once_t pthread_control_once = PTHREAD_ONCE_INIT;
 #elif defined(CRT_TARGET_OS_LINUX)
 long __crt_sys_clone_thread(
     void* stack_top,
@@ -116,10 +108,6 @@ typedef void (*crt_macos_pthread_exit_fn)(void*) __attribute__((noreturn));
 void* dlsym(void* handle, const char* symbol);
 #endif
 
-#if !defined(CRT_TARGET_OS_WINDOWS)
-static __thread void* pthread_key_values[CRT_PTHREAD_KEYS_MAX];
-#endif
-
 typedef struct crt_pthread_control {
 #if defined(CRT_TARGET_OS_WINDOWS)
   HANDLE handle;
@@ -137,22 +125,13 @@ typedef struct crt_pthread_control {
 #elif defined(CRT_TARGET_OS_MACOS)
   crt_macos_pthread_t native_thread;
 #endif
+  crt_thread_context context;
   pthread_attr_t attr;
   void* (*start_routine)(void*);
   void* arg;
   void* result;
   int detached;
-  char name[CRT_PTHREAD_NAME_MAX];
 } crt_pthread_control;
-
-#if !defined(CRT_TARGET_OS_WINDOWS)
-static __thread crt_pthread_control* pthread_current_control;
-#endif
-#if defined(CRT_TARGET_OS_WINDOWS)
-static char pthread_current_name[CRT_PTHREAD_NAME_MAX];
-#else
-static __thread char pthread_current_name[CRT_PTHREAD_NAME_MAX];
-#endif
 
 static int pthread_key_used[CRT_PTHREAD_KEYS_MAX];
 static __pthread_key_destructor_t pthread_key_destructors[CRT_PTHREAD_KEYS_MAX];
@@ -252,16 +231,6 @@ static int realtime_until(const struct timespec* abstime, struct timespec* remai
   return 0;
 }
 
-#if defined(CRT_TARGET_OS_WINDOWS)
-static void init_windows_key_slots(void) {
-  unsigned int i;
-
-  for (i = 0; i < CRT_PTHREAD_KEYS_MAX; ++i) {
-    pthread_key_slots[i] = CRT_TLS_OUT_OF_INDEXES;
-  }
-}
-#endif
-
 static int pthread_key_is_valid(pthread_key_t key) {
   return key >= 0 && key < CRT_PTHREAD_KEYS_MAX && pthread_key_used[key] != 0;
 }
@@ -270,34 +239,9 @@ static int pthread_is_current_thread(pthread_t thread) {
   return thread != 0 && thread == pthread_self();
 }
 
-#if defined(CRT_TARGET_OS_WINDOWS)
-static void init_windows_control_slot(void) {
-  pthread_control_tls_slot = TlsAlloc();
-}
-
 static crt_pthread_control* pthread_get_current_control(void) {
-  pthread_once(&pthread_control_once, init_windows_control_slot);
-  if (pthread_control_tls_slot == CRT_TLS_OUT_OF_INDEXES) {
-    return 0;
-  }
-  return (crt_pthread_control*)TlsGetValue(pthread_control_tls_slot);
+  return (crt_pthread_control*)__crt_thread_control();
 }
-
-static void pthread_set_current_control(crt_pthread_control* control) {
-  pthread_once(&pthread_control_once, init_windows_control_slot);
-  if (pthread_control_tls_slot != CRT_TLS_OUT_OF_INDEXES) {
-    TlsSetValue(pthread_control_tls_slot, control);
-  }
-}
-#else
-static crt_pthread_control* pthread_get_current_control(void) {
-  return pthread_current_control;
-}
-
-static void pthread_set_current_control(crt_pthread_control* control) {
-  pthread_current_control = control;
-}
-#endif
 
 static crt_pthread_control* pthread_control_from_thread(pthread_t thread) {
   if (thread == 0) {
@@ -323,17 +267,13 @@ static void pthread_run_key_destructors(void) {
       crt_spin_lock(&pthread_key_lock);
       if (pthread_key_used[i]) {
         destructor = pthread_key_destructors[i];
-#if defined(CRT_TARGET_OS_WINDOWS)
-        value = TlsGetValue(pthread_key_slots[i]);
-        if (value != 0 && destructor != 0) {
-          TlsSetValue(pthread_key_slots[i], 0);
+        {
+          void** values = __crt_thread_key_values();
+          value = values[i];
+          if (value != 0 && destructor != 0) {
+            values[i] = 0;
+          }
         }
-#else
-        value = pthread_key_values[i];
-        if (value != 0 && destructor != 0) {
-          pthread_key_values[i] = 0;
-        }
-#endif
       }
       crt_spin_unlock(&pthread_key_lock);
 
@@ -361,6 +301,7 @@ static void pthread_control_destroy(crt_pthread_control* control) {
     return;
   }
 #if defined(CRT_TARGET_OS_LINUX)
+  __crt_thread_clear_current(&control->context);
   if (control->stack_owned && control->mapping != 0) {
     munmap(control->mapping, control->mapping_size);
   }
@@ -496,10 +437,10 @@ static int pthread_start(void* arg) {
   crt_pthread_control* control = (crt_pthread_control*)arg;
   int detached;
 
-  pthread_set_current_control(control);
+  __crt_thread_set_current(&control->context);
   control->result = control->start_routine(control->arg);
   pthread_run_key_destructors();
-  pthread_set_current_control(0);
+  __crt_thread_clear_current(&control->context);
   detached = __atomic_load_n(&control->detached, __ATOMIC_ACQUIRE);
   if (detached) {
     pthread_control_destroy_from_worker(control);
@@ -1219,21 +1160,9 @@ int pthread_key_create(pthread_key_t* key, __pthread_key_destructor_t destructor
     return EINVAL;
   }
 
-#if defined(CRT_TARGET_OS_WINDOWS)
-  pthread_once(&pthread_key_once, init_windows_key_slots);
-#endif
-
   crt_spin_lock(&pthread_key_lock);
   for (i = 0; i < CRT_PTHREAD_KEYS_MAX; ++i) {
     if (pthread_key_used[i] == 0) {
-#if defined(CRT_TARGET_OS_WINDOWS)
-      DWORD slot = TlsAlloc();
-      if (slot == CRT_TLS_OUT_OF_INDEXES) {
-        crt_spin_unlock(&pthread_key_lock);
-        return EAGAIN;
-      }
-      pthread_key_slots[i] = slot;
-#endif
       pthread_key_used[i] = 1;
       pthread_key_destructors[i] = destructor;
       *key = i;
@@ -1248,23 +1177,11 @@ int pthread_key_create(pthread_key_t* key, __pthread_key_destructor_t destructor
 int pthread_key_delete(pthread_key_t key) {
   int result = 0;
 
-#if defined(CRT_TARGET_OS_WINDOWS)
-  pthread_once(&pthread_key_once, init_windows_key_slots);
-#endif
-
   crt_spin_lock(&pthread_key_lock);
   if (!pthread_key_is_valid(key)) {
     result = EINVAL;
   } else {
-#if defined(CRT_TARGET_OS_WINDOWS)
-    DWORD slot = pthread_key_slots[key];
-    pthread_key_slots[key] = CRT_TLS_OUT_OF_INDEXES;
-    if (!TlsFree(slot)) {
-      result = EINVAL;
-    }
-#else
-    pthread_key_values[key] = 0;
-#endif
+    __crt_thread_key_values()[key] = 0;
     pthread_key_destructors[key] = 0;
     pthread_key_used[key] = 0;
   }
@@ -1276,24 +1193,14 @@ void* pthread_getspecific(pthread_key_t key) {
   if (!pthread_key_is_valid(key)) {
     return 0;
   }
-#if defined(CRT_TARGET_OS_WINDOWS)
-  return TlsGetValue(pthread_key_slots[key]);
-#else
-  return pthread_key_values[key];
-#endif
+  return __crt_thread_key_values()[key];
 }
 
 int pthread_setspecific(pthread_key_t key, const void* value) {
   if (!pthread_key_is_valid(key)) {
     return EINVAL;
   }
-#if defined(CRT_TARGET_OS_WINDOWS)
-  if (!TlsSetValue(pthread_key_slots[key], (void*)value)) {
-    return EINVAL;
-  }
-#else
-  pthread_key_values[key] = (void*)value;
-#endif
+  __crt_thread_key_values()[key] = (void*)value;
   return 0;
 }
 
@@ -1498,6 +1405,7 @@ int pthread_create(
     void* (*start_routine)(void*),
     void* arg) {
   crt_pthread_control* control;
+  int* context_tid_word = 0;
 
   if (thread == 0 || start_routine == 0) {
     return EINVAL;
@@ -1509,6 +1417,10 @@ int pthread_create(
   }
   control->start_routine = start_routine;
   control->arg = arg;
+#if defined(CRT_TARGET_OS_LINUX)
+  context_tid_word = &control->tid_word;
+#endif
+  __crt_thread_context_init(&control->context, control, context_tid_word);
   if (attr != 0) {
     control->attr = *attr;
   } else {
@@ -1870,11 +1782,11 @@ int pthread_setname_np(pthread_t thread, const char* name) {
   }
   control = pthread_control_from_thread(thread);
   if (control != 0) {
-    memcpy(control->name, name, length + 1);
+    memcpy(control->context.name, name, length + 1);
     return 0;
   }
   if (pthread_is_current_thread(thread)) {
-    memcpy(pthread_current_name, name, length + 1);
+    memcpy(__crt_thread_name(), name, length + 1);
     return 0;
   }
   return ESRCH;
@@ -1890,9 +1802,9 @@ int pthread_getname_np(pthread_t thread, char* buf, size_t size) {
   }
   control = pthread_control_from_thread(thread);
   if (control != 0) {
-    name = control->name;
+    name = control->context.name;
   } else if (pthread_is_current_thread(thread)) {
-    name = pthread_current_name;
+    name = __crt_thread_name();
   } else {
     return ESRCH;
   }
@@ -1943,7 +1855,9 @@ void pthread_exit(void* retval) {
     detached = __atomic_load_n(&control->detached, __ATOMIC_ACQUIRE);
   }
   pthread_run_key_destructors();
-  pthread_set_current_control(0);
+  if (control != 0) {
+    __crt_thread_clear_current(&control->context);
+  }
   if (detached) {
     pthread_control_destroy_from_worker(control);
   }

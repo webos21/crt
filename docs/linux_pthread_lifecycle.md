@@ -23,6 +23,14 @@ kernel wake issued for `CLONE_CHILD_CLEARTID` more closely than the earlier
 `wait4` bootstrap join. The internal wait helpers still use private futexes for
 runtime-owned synchronization words such as mutexes and condition variables.
 
+Current-thread identity, `errno`, pthread key values, and thread names are now
+routed through the private `crt_tls` adapter. The Linux adapter intentionally
+uses a kernel-tid keyed runtime registry for project-created clone threads until
+the backend grows a Bionic-style TCB/TLS setup with real thread-pointer
+initialization. This keeps `pthread_self()` and `__errno()` on the same
+thread-context abstraction without forcing macOS or Windows to emulate Linux
+TLS internals.
+
 ## Detached Reaper
 
 Detached Linux workers cannot safely release their own stack mapping because the
@@ -44,8 +52,10 @@ must terminate the whole process, not only the initial thread.
 
 The remaining lifecycle work is:
 
-- define the final thread-control block layout before wider TLS integration;
-- decide whether to add architecture TLS setup with `CLONE_SETTLS`;
+- replace the temporary Linux `crt_tls` registry with an architecture-backed
+  Bionic-style TCB/TLS setup;
+- decide how `CLONE_SETTLS`, ELF TLS, and the eventual linker TLS module table
+  connect to the project thread context;
 - define signal, cancellation, and robust mutex interaction with thread exit;
 - decide whether the permanent reaper should eventually be replaced by a stack
   cache for high-volume detached-thread workloads.
