@@ -1056,6 +1056,35 @@ duplicate symbols. The current network resolver is intentionally numeric only;
 DNS lookup, IPv6, nonblocking connect readiness, socketpair, getsockopt, and
 full socket `poll` semantics remain later tranches.
 
+## Libdl Bootstrap Tranche
+
+The first `libdl` tranche adds:
+
+- `dlfcn.h`;
+- `dlopen`;
+- `dlsym`;
+- `dlclose`;
+- `dlerror`;
+- `RTLD_LAZY`, `RTLD_NOW`, `RTLD_LOCAL`, `RTLD_GLOBAL`;
+- `RTLD_DEFAULT` and `RTLD_NEXT`.
+
+This is a project-owned host adapter, not a direct Bionic source import.
+Bionic's real `libdl` is a frontend to Android's dynamic linker and brings
+Android linker namespaces, ELF loader state, soname/search policy, relocation,
+dependency loading, and Android-specific extension APIs. Those belong to the
+future `linker/` tranche rather than this first host-adapter step.
+
+Windows maps `dlopen`/`dlsym`/`dlclose` to
+`LoadLibraryA`/`GetProcAddress`/`FreeLibrary`. macOS maps to dyld image APIs and
+performs Mach-O symbol lookup with the required leading underscore. Linux is
+currently explicit bootstrap behavior only: `dlopen(NULL)` returns a private
+main-program handle, but real object loading and symbol lookup report a
+`dlerror` diagnostic. The Linux limitation is intentional because this project
+links CRT executables with `-nostdlib`, owns its public libc ABI boundary, and
+should not silently mix host glibc/libdl state into the freestanding runtime.
+
+The detailed policy is documented in `docs/dynamic_loading.md`.
+
 The metadata tranche moves the supported OS backends beyond the first
 regular-file fallback. Linux uses the raw `statx` syscall and converts the
 kernel `statx` record into the project `struct stat`. Windows uses

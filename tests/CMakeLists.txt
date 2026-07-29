@@ -125,6 +125,13 @@ set_tests_properties(socket_network_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "socket_network_test: ok"
 )
 
+add_crt_test(dl_test dl_test.c)
+target_link_libraries(dl_test PRIVATE dl)
+add_dependencies(dl_test dl)
+set_tests_properties(dl_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "dl_test: ok"
+)
+
 add_crt_test(printf_test printf_test.c)
 set_tests_properties(printf_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "printf_test: ok 7 ff"

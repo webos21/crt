@@ -244,6 +244,13 @@ out-of-line C99 functions.
 | `libc/arch/linux/x86_64/syscall.S` | mixed Bionic/Linux syscall surface | project-owned | extended | Adds raw clone, futex, and thread exit syscall wrappers. |
 | `libc/arch/linux/aarch64/syscall.S` | mixed Bionic/Linux syscall surface | project-owned | extended | Adds raw clone, futex, and thread exit syscall wrappers. |
 
+### Libdl Bootstrap Tranche
+
+| Local file | Upstream path | Upstream ref | Status | Notes |
+| --- | --- | --- | --- | --- |
+| `include/dlfcn.h` | `libc/include/dlfcn.h` API shape | project-owned, Bionic-shaped | new | Defines the first POSIX/Bionic-style `dlopen`/`dlsym`/`dlclose`/`dlerror` surface and common `RTLD_*` constants. |
+| `libdl/src/dl.c` | mixed Bionic/POSIX libdl surface | project-owned | new | Host adapter over Windows Kernel32 and macOS dyld APIs; Linux real loading is deferred to the project linker or a documented host bridge. |
+
 ### Pthread Condition Variable Tranche
 
 | Local file | Upstream path | Upstream ref | Status | Notes |

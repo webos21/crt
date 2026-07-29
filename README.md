@@ -157,6 +157,14 @@ as `off_t`, `time_t`, `ssize_t`, `socklen_t`, and inode/device counters while
 still allowing host data-model differences such as Windows LLP64 `long`. The
 policy and test coverage are documented in `docs/header_abi.md`.
 
+The current `libdl.a` is a project-owned dynamic-loading adapter with a
+Bionic/POSIX-shaped `dlfcn.h` surface. Windows maps to
+`LoadLibraryA`/`GetProcAddress`/`FreeLibrary`, and macOS maps to dyld image and
+symbol APIs. Linux intentionally does not call host glibc/libdl in the
+freestanding profile yet; real Linux `dlopen` support is deferred to the project
+ELF linker or to a separately documented host bridge. See
+`docs/dynamic_loading.md`.
+
 ## Prerequisites
 
 ### Common
@@ -320,6 +328,8 @@ out/macos-host-ninja-debug/sysroot/
   lib/
     crt1.o
     libc.a
+    libdl.a
+    libm.a
     libclang_rt.builtins.a
 ```
 
@@ -400,3 +410,5 @@ See:
 - `docs/project_meanings.md`
 - `docs/project_stacks.md`
 - `docs/hello_bringup.md`
+- `docs/header_abi.md`
+- `docs/dynamic_loading.md`

@@ -942,6 +942,30 @@
       "license_family": "project",
       "reason": "Minimal public bits layer centralizes Bionic/Linux-style scalar ABI types while absorbing Windows LLP64 host differences.",
       "next_action": "Split into narrower bits headers only when additional public ABI boundaries require it."
+    },
+    {
+      "local": "include/dlfcn.h",
+      "component": "libdl",
+      "source_kind": "project-owned",
+      "upstream_ref": "project-owned",
+      "upstream_path": "libc/include/dlfcn.h API shape",
+      "status": "new",
+      "review_class": "project_owned",
+      "license_family": "project",
+      "reason": "First Bionic/POSIX-shaped dynamic loading header for the project-owned host adapter.",
+      "next_action": "Recheck constants and extension declarations when Android/Bionic linker namespaces or android_dlopen_ext enter scope."
+    },
+    {
+      "local": "libdl/src/dl.c",
+      "component": "libdl",
+      "source_kind": "project-owned",
+      "upstream_ref": "project-owned",
+      "upstream_path": "mixed Bionic/POSIX libdl surface",
+      "status": "new",
+      "review_class": "project_owned",
+      "license_family": "project",
+      "reason": "Host dynamic-loading adapter maps Windows to Kernel32 and macOS to dyld while deferring Linux real loading to the project linker or a separate host bridge.",
+      "next_action": "Implement true Linux loading through the project ELF linker before claiming Bionic-compatible runtime behavior."
     }
   ]
 }
