@@ -9,6 +9,8 @@ typedef unsigned int fexcept_t;
 typedef struct {
   unsigned int flags;
   int round;
+  unsigned int status;
+  unsigned int control;
 } fenv_t;
 
 #define FE_INVALID 0x01

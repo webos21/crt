@@ -20,6 +20,7 @@ REQUIRED_ENTRY_KEYS = {
 SOURCE_KINDS = {
     "bionic-main",
     "bionic-legacy",
+    "freebsd-upstream",
     "project-owned",
     "compiler-provided",
 }

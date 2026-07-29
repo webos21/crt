@@ -42,7 +42,7 @@
           "component": {"type": "string"},
           "source_kind": {
             "type": "string",
-            "enum": ["bionic-main", "bionic-legacy", "project-owned", "compiler-provided"]
+            "enum": ["bionic-main", "bionic-legacy", "freebsd-upstream", "project-owned", "compiler-provided"]
           },
           "upstream_ref": {"type": "string"},
           "upstream_path": {"type": "string"},

@@ -37,8 +37,15 @@ visible in `third_party/bionic/README.md`.
 | --- | --- | --- | --- | --- | --- |
 | `sqrt` | `libm/src/basic.c` | `libm/builtins.cpp` | Bionic `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | Clang `__builtin_elementwise_sqrt` | Follows current Bionic builtin policy while avoiding recursive Debug/O0 libcalls on Windows. |
 | `sqrtf` | `libm/src/basic.c` | `libm/builtins.cpp` | Bionic `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | Clang `__builtin_elementwise_sqrt` | Same policy as `sqrt`. |
+| `expf` | `libm/src/freebsd/e_expf.c` | `libm/src/e_expf.c` | Bionic `884e4f8` | word helpers | Native float fdlibm source replaces the bootstrap double wrapper. |
+| `logf` | `libm/src/freebsd/e_logf.c` | `libm/src/e_logf.c` | Bionic `884e4f8` | word helpers | Native float fdlibm source replaces the bootstrap double wrapper. |
+| `powf` | `libm/src/freebsd/e_powf.c` | `libm/src/e_powf.c` | Bionic `884e4f8` | word helpers, `sqrtf`, `scalbnf` | Native float fdlibm source replaces the bootstrap double wrapper. |
+| `sinf` | `libm/src/freebsd/s_sincosf.c` | project-owned wrapper over Bionic main `e_rem_pio2f.c`, `k_sinf.c`, and `k_cosf.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` plus project wrapper | inline float reduction and kernels | Bionic main exposes helper files but not a standalone public `s_sinf.c` in the observed tree. |
+| `cosf` | `libm/src/freebsd/s_sincosf.c` | project-owned wrapper over Bionic main `e_rem_pio2f.c`, `k_sinf.c`, and `k_cosf.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` plus project wrapper | inline float reduction and kernels | Bionic main exposes helper files but not a standalone public `s_cosf.c` in the observed tree. |
 | `log10` | `libm/src/freebsd/e_log10.c` | `upstream-freebsd/lib/msun/src/e_log10.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | `k_log.h`, word helpers | Replaces the bootstrap `log(x) * log10(e)` wrapper. |
 | `log10f` | `libm/src/freebsd/e_log10f.c` | `upstream-freebsd/lib/msun/src/e_log10f.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | `k_logf.h`, float word helpers | Native float source. |
+| `log2` | `libm/src/freebsd/e_log2.c` | `lib/msun/src/e_log2.c` | FreeBSD upstream main | `k_log.h`, word helpers | Explicit exception because observed Bionic refs did not expose direct `e_log2.c`. |
+| `log2f` | `libm/src/freebsd/e_log2f.c` | `lib/msun/src/e_log2f.c` | FreeBSD upstream main | `k_logf.h`, float word helpers | Explicit exception because observed Bionic refs did not expose direct `e_log2f.c`. |
 | `expm1` | `libm/src/freebsd/s_expm1.c` | `upstream-freebsd/lib/msun/src/s_expm1.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | word helpers, `STRICT_ASSIGN` | Replaces the bootstrap `exp(x) - 1` wrapper. |
 | `expm1f` | `libm/src/freebsd/s_expm1f.c` | `upstream-freebsd/lib/msun/src/s_expm1f.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | float word helpers | Native float source. |
 | `log1p` | `libm/src/freebsd/s_log1p.c` | `upstream-freebsd/lib/msun/src/s_log1p.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | word helpers, `STRICT_ASSIGN` | Replaces the bootstrap `log(1 + x)` wrapper. |
@@ -54,6 +61,7 @@ visible in `third_party/bionic/README.md`.
 | `modf` | `libm/src/freebsd/s_modf.c` | `upstream-freebsd/lib/msun/src/s_modf.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | word helpers | Replaces the trunc/subtract bootstrap implementation. |
 | `modff` | `libm/src/freebsd/s_modff.c` | `upstream-freebsd/lib/msun/src/s_modff.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | float word helpers | Native float source. |
 | `tanf` | `libm/src/freebsd/s_tanf.c` | `upstream-freebsd/lib/msun/src/s_tanf.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | inline `e_rem_pio2f.c`, inline `k_tanf.c`, `M_PI_2` | Native float tangent path. |
+| `fenv` | `libm/src/fenv.c` | project-owned architecture backend | project-owned | x86_64 MXCSR or AArch64 FPCR/FPSR | Provides observable exception flags and rounding mode storage for supported 64-bit CPU families; x87-specific state is still deferred. |
 
 `sqrtl` remains the previous bootstrap long-double implementation. Importing
 `e_sqrtl.c` should be handled as a separate long-double tranche because it
@@ -99,21 +107,21 @@ candidate is the older Bionic fdlibm source set.
 | `scalbnf` | `libm/src/s_scalbnf.c` | Bionic `884e4f8` | `GET_FLOAT_WORD`, `SET_FLOAT_WORD` | `copysignf` | Imported before `powf`; `ldexpf` is provided as a wrapper. |
 | `pow` | `libm/src/e_pow.c` | Bionic `884e4f8` | `EXTRACT_WORDS`, `GET_HIGH_WORD`, `SET_HIGH_WORD`, `SET_LOW_WORD`, `u_int32_t` | `fabs`, `sqrt`, `scalbn` | Needs `scalbn` before full import. It can use the current builtin-backed `sqrt`. |
 
-`exp`, `log`, `scalbn`, `scalbnf`, and `pow` have been imported. `expf`,
-`expl`, `logf`, `logl`, `powf`, and `powl` are currently bootstrap wrappers over
-the double implementations; native float and long-double imports remain
-separate precision tranches.
+`exp`, `log`, `scalbn`, `scalbnf`, `pow`, native `expf`, native `logf`, native
+`powf`, and the common trigonometric float functions have been imported or
+replaced with native-kernel wrappers. `expl`, `logl`, and `powl` are currently
+bootstrap wrappers over the double implementations; long-double imports remain a
+separate precision tranche.
 
 Remaining order:
 
-1. Resolve native float source policy for `expf`, `logf`, `powf`, `sinf`, and
-   `cosf`. Current Bionic `main` does not list all of these as simple
-   FreeBSD/msun C files in the same source family; some are supplied through
-   other source groups or optimized routines. Avoid partial imports until the
-   source map is explicit.
-2. Resolve `log2`/`log2f` source policy. They remain bootstrap wrappers because
-   the current FreeBSD/msun import set used here did not include direct
-   `e_log2.c`/`e_log2f.c` sources.
-3. Add hardware-backed `fenv` per target architecture.
-4. Revisit `math_errhandling` after `fenv` can observe exception flags and the
-   project has decided whether libm functions should set `errno`.
+1. Add long-double source policy for `expl`, `logl`, `powl`, `sinl`, `cosl`,
+   `tanl`, `sqrtl`, and related helpers.
+2. Decide whether x86_64 must also preserve x87 control/status words or whether
+   the project ABI can define SSE/MXCSR-only floating-point environment behavior
+   for now.
+3. Revisit `math_errhandling` after deciding whether imported libm functions
+   should set `errno`, raise observable fenv exceptions consistently, both, or
+   neither.
+4. Evaluate Bionic optimized-routine imports after correctness and provenance
+   are stable.

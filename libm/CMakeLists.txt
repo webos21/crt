@@ -4,10 +4,15 @@ add_library(m STATIC
   src/freebsd/e_fmod.c
   src/freebsd/e_fmodf.c
   src/freebsd/e_exp.c
+  src/freebsd/e_expf.c
   src/freebsd/e_log.c
+  src/freebsd/e_logf.c
+  src/freebsd/e_log2.c
+  src/freebsd/e_log2f.c
   src/freebsd/e_log10.c
   src/freebsd/e_log10f.c
   src/freebsd/e_pow.c
+  src/freebsd/e_powf.c
   src/freebsd/k_cos.c
   src/freebsd/k_rem_pio2.c
   src/freebsd/k_sin.c
@@ -33,6 +38,7 @@ add_library(m STATIC
   src/freebsd/s_scalbn.c
   src/freebsd/s_scalbnf.c
   src/freebsd/s_sin.c
+  src/freebsd/s_sincosf.c
   src/freebsd/s_tan.c
   src/freebsd/s_tanf.c
   src/freebsd/s_trunc.c

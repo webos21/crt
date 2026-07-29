@@ -123,16 +123,8 @@ long double sqrtl(long double x) {
   return guess;
 }
 
-float expf(float x) {
-  return (float)exp((double)x);
-}
-
 long double expl(long double x) {
   return (long double)exp((double)x);
-}
-
-float logf(float x) {
-  return (float)log((double)x);
 }
 
 long double logl(long double x) {
@@ -141,14 +133,6 @@ long double logl(long double x) {
 
 long double log10l(long double x) {
   return (long double)log10((double)x);
-}
-
-double log2(double x) {
-  return log(x) * 1.4426950408889634074;
-}
-
-float log2f(float x) {
-  return (float)log2((double)x);
 }
 
 long double log2l(long double x) {
@@ -171,24 +155,12 @@ long double ldexpl(long double x, int n) {
   return scalbnl(x, n);
 }
 
-float powf(float x, float y) {
-  return (float)pow((double)x, (double)y);
-}
-
 long double powl(long double x, long double y) {
   return (long double)pow((double)x, (double)y);
 }
 
-float sinf(float x) {
-  return (float)sin((double)x);
-}
-
 long double sinl(long double x) {
   return (long double)sin((double)x);
-}
-
-float cosf(float x) {
-  return (float)cos((double)x);
 }
 
 long double cosl(long double x) {

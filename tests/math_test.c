@@ -172,12 +172,24 @@ int main(void) {
     return fail("remquo");
   }
   if (math_errhandling != 0 || fegetround() != FE_TONEAREST ||
-      fesetround(FE_DOWNWARD) == 0 || fesetround(FE_TONEAREST) != 0 ||
+      fesetround(99) == 0 || fesetround(FE_DOWNWARD) != 0 ||
+      fegetround() != FE_DOWNWARD || fesetround(FE_UPWARD) != 0 ||
+      fegetround() != FE_UPWARD || fesetround(FE_TOWARDZERO) != 0 ||
+      fegetround() != FE_TOWARDZERO || fesetround(FE_TONEAREST) != 0 ||
       feclearexcept(FE_ALL_EXCEPT) != 0 || fetestexcept(FE_ALL_EXCEPT) != 0 ||
-      feraiseexcept(FE_INVALID) != 0 || fetestexcept(FE_ALL_EXCEPT) != 0 ||
-      fegetexceptflag(&except_flag, FE_ALL_EXCEPT) != 0 || except_flag != 0 ||
+      feraiseexcept(FE_INVALID | FE_OVERFLOW) != 0 ||
+      (fetestexcept(FE_ALL_EXCEPT) & (FE_INVALID | FE_OVERFLOW)) !=
+          (FE_INVALID | FE_OVERFLOW) ||
+      fegetexceptflag(&except_flag, FE_OVERFLOW) != 0 ||
+      (except_flag & FE_OVERFLOW) == 0 ||
+      feclearexcept(FE_INVALID | FE_OVERFLOW) != 0 ||
+      fetestexcept(FE_INVALID | FE_OVERFLOW) != 0 ||
+      fesetexceptflag(&except_flag, FE_OVERFLOW) != 0 ||
+      (fetestexcept(FE_OVERFLOW) & FE_OVERFLOW) == 0 ||
       fegetenv(&env) != 0 || feholdexcept(&env) != 0 ||
-      fesetenv(FE_DFL_ENV) != 0 || feupdateenv(FE_DFL_ENV) != 0) {
+      fetestexcept(FE_ALL_EXCEPT) != 0 || fesetenv(&env) != 0 ||
+      fesetenv(FE_DFL_ENV) != 0 || fegetround() != FE_TONEAREST ||
+      feupdateenv(FE_DFL_ENV) != 0) {
     return fail("fenv policy");
   }
 

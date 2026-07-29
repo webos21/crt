@@ -313,7 +313,7 @@ The current surface includes:
 - `fmod`, `fmodf`, `fmodl`
 - `remainder`, `remainderf`, `remainderl`
 - `remquo`, `remquof`, `remquol`
-- `fenv.h` no-op environment surface
+- `fenv.h` architecture-backed environment surface for x86_64 and AArch64
 
 The first Bionic/FreeBSD msun import replaces the double-precision
 `floor`/`ceil`/`trunc`/`round` and `fmin`/`fmax` implementations with curated
@@ -332,22 +332,25 @@ use Clang builtins. These were checked at Debug/O0 for the supported Windows and
 Linux target families to avoid the recursive libcall issue seen with ordinary
 `__builtin_sqrt`.
 
-The first exponential tranche imports `exp` from older Bionic fdlibm because
-current Bionic `main` no longer lists a direct double `e_exp.c` source in
-`libm/Android.bp`. `expf` and `expl` are bootstrap wrappers around the imported
-double implementation until their native precision tranches are imported.
+The exponential tranche imports `exp` and native `expf` from older Bionic fdlibm
+because current Bionic `main` no longer lists matching direct portable
+`e_exp.c`/`e_expf.c` sources in the same fdlibm source family. `expl` remains a
+bootstrap wrapper around the imported double implementation until the
+long-double ABI tranche is opened.
 
-The first logarithm tranche follows the same policy for `log`. Current Bionic
-`main` does not list a direct double `e_log.c`; this project imports the older
-Bionic fdlibm source and keeps `logf`/`logl` as bootstrap wrappers for now.
+The logarithm tranche follows the same policy for `log` and native `logf`.
+Current Bionic `main` does not list the same direct fdlibm source files; this
+project imports the older Bionic fdlibm sources and keeps `logl` as a bootstrap
+wrapper for now.
 
 The scaling and power tranche imports `scalbn`, `scalbnf`, and `pow` from the
-same older Bionic fdlibm source set used for `exp` and `log`. Current Bionic
-`main` has `scalbn*` sources derived from musl; this project intentionally uses
-the older fdlibm versions here to keep the early libm tranche aligned with the
-project's Bionic/fdlibm provenance policy. `ldexp` and `ldexpf` are thin aliases
-implemented as wrappers, while `scalbnl`, `ldexpl`, `powf`, and `powl` remain
-bootstrap wrappers over the imported double implementations.
+same older Bionic fdlibm source set used for `exp` and `log`, and then imports
+native `powf` from the same source family. Current Bionic `main` has `scalbn*`
+sources derived from musl; this project intentionally uses the older fdlibm
+versions here to keep the early libm tranche aligned with the project's
+Bionic/fdlibm provenance policy. `ldexp` and `ldexpf` are thin aliases
+implemented as wrappers, while `scalbnl`, `ldexpl`, and `powl` remain bootstrap
+wrappers over the imported double implementations.
 
 The trigonometric tranche imports current Bionic FreeBSD/msun `sin`, `cos`,
 `tan`, their shared kernel functions, and the double-precision argument
@@ -356,16 +359,22 @@ reduction path. The public double functions use the original FreeBSD structure:
 while `k_rem_pio2.c`, `k_sin.c`, `k_cos.c`, and `k_tan.c` are compiled once as
 shared internal helpers. The native float `tanf` path is also imported from
 current Bionic FreeBSD/msun; it includes `e_rem_pio2f.c` and `k_tanf.c` inline.
-`sinf`, `sinl`, `cosf`, `cosl`, and `tanl` remain bootstrap wrappers for now.
+For `sinf` and `cosf`, the observed Bionic main tree provides the float kernels
+`k_sinf.c` and `k_cosf.c` plus `e_rem_pio2f.c`, but not standalone public
+`s_sinf.c` or `s_cosf.c` wrappers. The project therefore owns a small
+`s_sincosf.c` wrapper while preserving Bionic main provenance for the imported
+float reduction and kernel helpers. `sinl`, `cosl`, and `tanl` remain bootstrap
+wrappers for now.
 
 The configure-friendly accuracy tranche replaces the earlier project-owned
 bootstrap implementations for `log10`, `log10f`, `expm1`, `expm1f`, `log1p`,
 `log1pf`, `frexp`, `frexpf`, `modf`, `modff`, `fmod`, and `fmodf` with current
 Bionic FreeBSD/msun sources. The long-double variants remain wrappers over the
 double implementations until a long-double ABI and fenv policy tranche is
-opened. `log2`, `log2f`, and `log2l` still use the bootstrap wrapper policy
-because the current imported Bionic FreeBSD/msun source set did not provide a
-direct `e_log2.c`/`e_log2f.c` source in this tranche.
+opened. `log2` and native `log2f` use explicit FreeBSD upstream msun sources as
+a documented source-family exception because neither the observed Bionic main
+tree nor the older fdlibm ref used here exposed direct `e_log2.c`/`e_log2f.c`
+files. `log2l` remains a bootstrap wrapper.
 
 The remainder tranche replaces `remainder`, `remainderf`, `remquo`, and
 `remquof` with current Bionic FreeBSD/msun sources. `remainderl` and `remquol`
@@ -374,19 +383,21 @@ adds a small `nan_mix_op` compatibility macro for these current FreeBSD/msun
 sources so the imported files can remain close to upstream while the project
 keeps a reduced freestanding private header.
 
-The first `fenv.h` tranche is a policy surface, not a hardware floating-point
-environment implementation. It exposes the C99 exception and rounding constants,
-`FE_DFL_ENV`, and the core `fe*` functions. The implementation reports
-`FE_TONEAREST`, accepts only `FE_TONEAREST` in `fesetround`, does not track or
-raise floating-point exception flags, and keeps `math_errhandling` set to `0`.
-This explicitly documents that the current libm neither sets `errno` nor raises
-observable floating-point exceptions.
+The first hardware `fenv.h` tranche exposes the C99 exception and rounding
+constants, `FE_DFL_ENV`, and the core `fe*` functions. The implementation is
+architecture-backed for the supported 64-bit CPU families: x86_64 stores and
+restores MXCSR, while AArch64 stores and restores FPCR/FPSR. The generic
+fallback remains conservative for unsupported architectures. `math_errhandling`
+is still `0`: imported libm functions are not yet required to set `errno`, and
+the project has not promised complete exception-raising behavior for every math
+operation.
 
-The float and long double variants currently remain bootstrap wrappers, and
-`sqrtl` still uses project-owned bootstrap behavior. Native-precision variants,
-`errno`/floating-point exception policy, and full edge-case coverage remain
-deferred to later libm import tranches. Their planned source dependencies are
-recorded in `docs/libm_dependency_map.md`.
+Most common float variants now use native float sources or project-owned
+wrappers over native float kernels. The long double variants, including
+`sqrtl`, still use project-owned bootstrap behavior. Full long-double ABI
+coverage, x87-specific fenv details on x86_64, per-function `errno` policy, and
+full edge-case accuracy coverage remain deferred to later libm import tranches.
+Their planned source dependencies are recorded in `docs/libm_dependency_map.md`.
 
 ## Next Runtime Boundary Tranche
 
@@ -405,17 +416,16 @@ host OS to provide its own PAL backend.
 
 ## Errno TLS Tranche
 
-`errno` is thread-local on Linux and macOS through compiler TLS. On Windows it
-uses a Win32 TLS slot rather than compiler PE TLS so the freestanding startup
-path does not require `_tls_index` or the MSVC CRT startup model.
+`errno`, `pthread_self()`, pthread key storage, and thread-name state are routed
+through the private `crt_tls` adapter. The public ABI remains Bionic-shaped, but
+each host backend can choose the mechanism that works with its startup model.
 
-The Windows implementation lazily allocates a TLS index and a per-thread `int`
-storage cell with `VirtualAlloc`. Cleanup hooks are deferred until the full
-thread lifecycle and pthread key destructor policy exists.
-
-The TLS index initialization uses compiler `__atomic` builtins instead of
-Windows `Interlocked*` imports so the implementation works consistently on
-Windows ARM64 freestanding links.
+Linux currently uses a project-owned current-thread registry behind the adapter
+until the runtime grows a Bionic-style TCB and `CLONE_SETTLS` setup. macOS may
+use compiler TLS behind the adapter because libSystem-created threads already
+have native TLS state. Windows uses Win32 TLS slots rather than compiler PE TLS
+so the freestanding startup path does not require `_tls_index` or the MSVC CRT
+startup model.
 
 ## Bootstrap Allocator Tranche
 
@@ -591,10 +601,12 @@ project-created thread returns from its start routine or calls `pthread_exit`.
 The runtime follows the usual bounded repeated destructor pass model so a
 destructor may set a non-null value again for a later pass.
 
-Linux and macOS currently use compiler TLS storage for the key value array.
-Windows maps each pthread key to a Win32 TLS slot. This keeps Windows free of
-compiler-emitted `_tls_index` dependencies while preserving the pthread API
-shape used by portable libraries.
+pthread key values are stored through the private `crt_tls` adapter. Linux uses
+the project-owned current-thread registry behind that adapter for now, macOS can
+use compiler TLS behind libSystem-created native thread state, and Windows maps
+through Win32 TLS slots. This keeps Windows free of compiler-emitted
+`_tls_index` dependencies while preserving the pthread API shape used by
+portable libraries.
 
 ## Pthread Thread Lifecycle Tranche
 

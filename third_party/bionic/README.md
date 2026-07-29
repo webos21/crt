@@ -28,11 +28,15 @@ Current legacy exceptions are:
   These files are small BSD-style C implementations and were easier to adapt to
   the cross-OS C99/freestanding PAL than current architecture-tuned Bionic
   variants.
-- Bionic `884e4f8` for selected fdlibm sources such as `exp`, `log`, `pow`, and
-  `scalbn*`. Current Bionic `main` either no longer lists those exact portable
-  double sources or, for `scalbn*`, carries a musl-derived implementation. The
-  project keeps these early libm imports on an fdlibm-oriented path until a
-  native Bionic-main import map is explicit.
+- Bionic `884e4f8` for selected fdlibm sources such as `exp`, `log`, `pow`,
+  native `expf`/`logf`/`powf`, and `scalbn*`. Current Bionic `main` either no
+  longer lists those exact portable sources or, for `scalbn*`, carries a
+  musl-derived implementation. The project keeps these early libm imports on an
+  fdlibm-oriented path until a native Bionic-main import map is explicit.
+- FreeBSD upstream msun for the narrow `log2`/`log2f` exception. The observed
+  Bionic source trees used by this tranche do not expose direct `e_log2.c` and
+  `e_log2f.c` files, so the project records the source-family exception
+  explicitly instead of pretending it came through Bionic.
 
 Every row below is authoritative for local provenance. If a legacy source is
 replaced by a current-main source later, update the row rather than leaving both
@@ -135,9 +139,9 @@ out-of-line C99 functions.
 | Local file | Upstream path | Upstream ref | Status | Notes |
 | --- | --- | --- | --- | --- |
 | `include/math.h` | `libc/include/math.h` | project-owned | new | Minimal C99/POSIX math declarations and classification macros for the first `libm.a` boundary. |
-| `include/fenv.h` | `libc/include/fenv.h` | project-owned | new | Minimal C99 floating-point environment declarations with an explicit no-op bootstrap policy. |
-| `libm/src/basic.c` | `libm/builtins.cpp` plus mixed Bionic/POSIX surface | adapted/project-owned | new | Bootstrap float/long double wrappers and current-Bionic-style builtin `fabs*`, `copysign*`, `fminf`, `fmaxf`, `sqrt`, and `sqrtf`; uses Clang elementwise sqrt to avoid recursive Debug/O0 libcalls. |
-| `libm/src/fenv.c` | `libm/fenv-*.c` policy surface | project-owned | new | Bootstrap no-op fenv implementation; accepts only `FE_TONEAREST` and does not expose hardware exception flags yet. |
+| `include/fenv.h` | `libc/include/fenv.h` | project-owned | new | Minimal C99 floating-point environment declarations with project-owned `fenv_t` storage for architecture-backed state. |
+| `libm/src/basic.c` | `libm/builtins.cpp` plus mixed Bionic/POSIX surface | adapted/project-owned | new | Bootstrap long double wrappers and current-Bionic-style builtin `fabs*`, `copysign*`, `fminf`, `fmaxf`, `sqrt`, and `sqrtf`; uses Clang elementwise sqrt to avoid recursive Debug/O0 libcalls. |
+| `libm/src/fenv.c` | `libm/fenv-*.c` policy surface | project-owned | new | Architecture-backed C99 fenv over x86_64 MXCSR and AArch64 FPCR/FPSR, with a generic fallback for unsupported architectures. |
 
 ### Libm FreeBSD/msun Import Tranche 1
 
@@ -148,6 +152,9 @@ out-of-line C99 functions.
 | `libm/src/freebsd/e_exp.c` | `libm/src/e_exp.c` | Bionic `884e4f8` | adapted | Older portable fdlibm source used because current Bionic `main` no longer lists direct double `e_exp.c`; local adaptation renames `__ieee754_exp` to public `exp` and uses local private word helpers. |
 | `libm/src/freebsd/e_log.c` | `libm/src/e_log.c` | Bionic `884e4f8` | adapted | Older portable fdlibm source used because current Bionic `main` no longer lists direct double `e_log.c`; local adaptation renames `__ieee754_log` to public `log` and uses local private word helpers. |
 | `libm/src/freebsd/e_pow.c` | `libm/src/e_pow.c` | Bionic `884e4f8` | adapted | Older portable fdlibm source used because current Bionic `main` no longer lists direct double `e_pow.c`; local adaptation renames `__ieee754_pow` to public `pow` and uses local private word helpers. |
+| `libm/src/freebsd/e_expf.c` | `libm/src/e_expf.c` | Bionic `884e4f8` | adapted | Native float fdlibm source used because current Bionic `main` does not provide the same simple portable fdlibm source path. |
+| `libm/src/freebsd/e_logf.c` | `libm/src/e_logf.c` | Bionic `884e4f8` | adapted | Native float fdlibm source used because current Bionic `main` does not provide the same simple portable fdlibm source path. |
+| `libm/src/freebsd/e_powf.c` | `libm/src/e_powf.c` | Bionic `884e4f8` | adapted | Native float fdlibm source used because current Bionic `main` does not provide the same simple portable fdlibm source path. |
 | `libm/src/freebsd/e_rem_pio2.c` | `libm/upstream-freebsd/lib/msun/src/e_rem_pio2.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/adapted | Included inline by `s_sin.c`, `s_cos.c`, and `s_tan.c`; uses local private helpers and shared `k_rem_pio2.c`. |
 | `libm/src/freebsd/k_cos.c` | `libm/upstream-freebsd/lib/msun/src/k_cos.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Upstream copyright preserved; shared cosine kernel for trigonometric wrappers. |
 | `libm/src/freebsd/k_rem_pio2.c` | `libm/upstream-freebsd/lib/msun/src/k_rem_pio2.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/adapted | Upstream copyright preserved; uses local `STRICT_ASSIGN`, `scalbn`, and `floor`. |
@@ -168,6 +175,8 @@ out-of-line C99 functions.
 | `libm/src/freebsd/k_logf.h` | `libm/upstream-freebsd/lib/msun/src/k_logf.h` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported | Header helper used by `e_log10f.c`. |
 | `libm/src/freebsd/e_log10.c` | `libm/upstream-freebsd/lib/msun/src/e_log10.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Replaces the project-owned bootstrap `log10` wrapper. |
 | `libm/src/freebsd/e_log10f.c` | `libm/upstream-freebsd/lib/msun/src/e_log10f.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Native float `log10f`; uses `k_logf.h`. |
+| `libm/src/freebsd/e_log2.c` | `lib/msun/src/e_log2.c` | FreeBSD upstream main | adapted | Explicit source-family exception because observed Bionic trees did not expose a direct `e_log2.c`. |
+| `libm/src/freebsd/e_log2f.c` | `lib/msun/src/e_log2f.c` | FreeBSD upstream main | adapted | Explicit source-family exception because observed Bionic trees did not expose a direct `e_log2f.c`. |
 | `libm/src/freebsd/s_expm1.c` | `libm/upstream-freebsd/lib/msun/src/s_expm1.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Replaces the project-owned bootstrap `expm1` wrapper. |
 | `libm/src/freebsd/s_expm1f.c` | `libm/upstream-freebsd/lib/msun/src/s_expm1f.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Native float `expm1f`. |
 | `libm/src/freebsd/s_log1p.c` | `libm/upstream-freebsd/lib/msun/src/s_log1p.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Replaces the project-owned bootstrap `log1p` wrapper. |
@@ -183,6 +192,9 @@ out-of-line C99 functions.
 | `libm/src/freebsd/s_modf.c` | `libm/upstream-freebsd/lib/msun/src/s_modf.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Replaces the project-owned bootstrap `modf` implementation. |
 | `libm/src/freebsd/s_modff.c` | `libm/upstream-freebsd/lib/msun/src/s_modff.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Native float `modff`. |
 | `libm/src/freebsd/e_rem_pio2f.c` | `libm/upstream-freebsd/lib/msun/src/e_rem_pio2f.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Included inline by `s_tanf.c`; not compiled as a separate object. |
+| `libm/src/freebsd/k_sinf.c` | `libm/upstream-freebsd/lib/msun/src/k_sinf.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported | Included inline by project-owned `s_sincosf.c`; not compiled as a separate object. |
+| `libm/src/freebsd/k_cosf.c` | `libm/upstream-freebsd/lib/msun/src/k_cosf.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported | Included inline by project-owned `s_sincosf.c`; not compiled as a separate object. |
+| `libm/src/freebsd/s_sincosf.c` | none | project-owned | new | Public `sinf`/`cosf` wrappers over Bionic main float argument reduction and kernels because observed Bionic main lacks standalone public float wrappers. |
 | `libm/src/freebsd/k_tanf.c` | `libm/upstream-freebsd/lib/msun/src/k_tanf.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported | Included inline by `s_tanf.c`; not compiled as a separate object. |
 | `libm/src/freebsd/s_tanf.c` | `libm/upstream-freebsd/lib/msun/src/s_tanf.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Native float tangent wrapper; includes float argument reduction and kernel helpers inline. |
 

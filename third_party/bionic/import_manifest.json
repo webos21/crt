@@ -822,6 +822,102 @@
       "license_family": "FreeBSD/msun permissive",
       "reason": "Current Bionic FreeBSD/msun native float tangent wrapper replaces the bootstrap tanf wrapper.",
       "next_action": "Keep; import sinf/cosf source policy separately."
+    },
+    {
+      "local": "libm/src/freebsd/e_expf.c",
+      "component": "libm",
+      "source_kind": "bionic-legacy",
+      "upstream_ref": "884e4f8",
+      "upstream_path": "libm/src/e_expf.c",
+      "status": "adapted",
+      "review_class": "bootstrap_keep",
+      "license_family": "fdlibm/Sun permissive",
+      "reason": "Older Bionic fdlibm native float source replaces the expf bootstrap wrapper while keeping the early fdlibm source family.",
+      "next_action": "Keep until the project evaluates current Bionic optimized math source families."
+    },
+    {
+      "local": "libm/src/freebsd/e_logf.c",
+      "component": "libm",
+      "source_kind": "bionic-legacy",
+      "upstream_ref": "884e4f8",
+      "upstream_path": "libm/src/e_logf.c",
+      "status": "adapted",
+      "review_class": "bootstrap_keep",
+      "license_family": "fdlibm/Sun permissive",
+      "reason": "Older Bionic fdlibm native float source replaces the logf bootstrap wrapper while keeping the early fdlibm source family.",
+      "next_action": "Keep until the project evaluates current Bionic optimized math source families."
+    },
+    {
+      "local": "libm/src/freebsd/e_powf.c",
+      "component": "libm",
+      "source_kind": "bionic-legacy",
+      "upstream_ref": "884e4f8",
+      "upstream_path": "libm/src/e_powf.c",
+      "status": "adapted",
+      "review_class": "bootstrap_keep",
+      "license_family": "fdlibm/Sun permissive",
+      "reason": "Older Bionic fdlibm native float source replaces the powf bootstrap wrapper while keeping the early fdlibm source family.",
+      "next_action": "Keep until the project evaluates current Bionic optimized math source families."
+    },
+    {
+      "local": "libm/src/freebsd/e_log2.c",
+      "component": "libm",
+      "source_kind": "freebsd-upstream",
+      "upstream_ref": "FreeBSD src main",
+      "upstream_path": "lib/msun/src/e_log2.c",
+      "status": "adapted",
+      "review_class": "bootstrap_keep",
+      "license_family": "FreeBSD/msun permissive",
+      "reason": "Bionic main and the legacy fdlibm ref used here do not expose a direct log2 source, so the matching upstream msun file is a documented exception.",
+      "next_action": "Recheck Bionic main before optimizing log2 or changing math source-family policy."
+    },
+    {
+      "local": "libm/src/freebsd/e_log2f.c",
+      "component": "libm",
+      "source_kind": "freebsd-upstream",
+      "upstream_ref": "FreeBSD src main",
+      "upstream_path": "lib/msun/src/e_log2f.c",
+      "status": "adapted",
+      "review_class": "bootstrap_keep",
+      "license_family": "FreeBSD/msun permissive",
+      "reason": "Bionic main and the legacy fdlibm ref used here do not expose a direct log2f source, so the matching upstream msun file is a documented exception.",
+      "next_action": "Recheck Bionic main before optimizing log2f or changing math source-family policy."
+    },
+    {
+      "local": "libm/src/freebsd/k_sinf.c",
+      "component": "libm",
+      "source_kind": "bionic-main",
+      "upstream_ref": "7732717429078dd0c583559b2cdc741c7681daf7",
+      "upstream_path": "libm/upstream-freebsd/lib/msun/src/k_sinf.c",
+      "status": "imported",
+      "review_class": "main_current",
+      "license_family": "FreeBSD/msun permissive",
+      "reason": "Current Bionic FreeBSD/msun float sine kernel is included inline by the project-owned sinf/cosf wrapper.",
+      "next_action": "Keep with the native float trigonometric import set."
+    },
+    {
+      "local": "libm/src/freebsd/k_cosf.c",
+      "component": "libm",
+      "source_kind": "bionic-main",
+      "upstream_ref": "7732717429078dd0c583559b2cdc741c7681daf7",
+      "upstream_path": "libm/upstream-freebsd/lib/msun/src/k_cosf.c",
+      "status": "imported",
+      "review_class": "main_current",
+      "license_family": "FreeBSD/msun permissive",
+      "reason": "Current Bionic FreeBSD/msun float cosine kernel is included inline by the project-owned sinf/cosf wrapper.",
+      "next_action": "Keep with the native float trigonometric import set."
+    },
+    {
+      "local": "libm/src/freebsd/s_sincosf.c",
+      "component": "libm",
+      "source_kind": "project-owned",
+      "upstream_ref": "project-owned",
+      "upstream_path": "none",
+      "status": "new",
+      "review_class": "project_owned",
+      "license_family": "project",
+      "reason": "Current Bionic main exposes float sine/cosine kernels and argument reduction but not standalone public s_sinf.c or s_cosf.c wrappers in the observed source tree.",
+      "next_action": "Replace only if a future Bionic main source tree exposes suitable public wrappers."
     }
   ]
 }
