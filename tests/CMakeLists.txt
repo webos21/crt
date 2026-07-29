@@ -243,6 +243,21 @@ set_tests_properties(pthread_spin_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_spin_test: ok"
 )
 
+add_crt_test(pthread_barrier_test pthread_barrier_test.c)
+set_tests_properties(pthread_barrier_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "pthread_barrier_test: ok"
+)
+
+add_crt_test(pthread_policy_test pthread_policy_test.c)
+set_tests_properties(pthread_policy_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "pthread_policy_test: ok"
+)
+
+add_crt_test(pthread_bionic_api_test pthread_bionic_api_test.c)
+set_tests_properties(pthread_bionic_api_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "pthread_bionic_api_test: ok"
+)
+
 add_crt_test(pthread_cond_test pthread_cond_test.c)
 set_tests_properties(pthread_cond_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_cond_test: ok"

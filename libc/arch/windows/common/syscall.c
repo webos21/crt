@@ -159,6 +159,11 @@ __declspec(dllimport) BOOL CRT_WINAPI VirtualFree(
     void* lpAddress,
     size_t dwSize,
     DWORD dwFreeType);
+__declspec(dllimport) BOOL CRT_WINAPI VirtualProtect(
+    void* lpAddress,
+    size_t dwSize,
+    DWORD flNewProtect,
+    DWORD* lpflOldProtect);
 struct crt_filetime {
   DWORD low;
   DWORD high;
@@ -1183,6 +1188,21 @@ long __crt_sys_rename(const char* old_path, const char* new_path) {
   return 0;
 }
 
+static DWORD windows_page_protect(int prot) {
+  if ((prot & PROT_WRITE) != 0 && (prot & PROT_EXEC) != 0) {
+    return PAGE_EXECUTE_READWRITE;
+  } else if ((prot & PROT_WRITE) != 0) {
+    return PAGE_READWRITE;
+  } else if ((prot & PROT_EXEC) != 0 && (prot & PROT_READ) != 0) {
+    return PAGE_EXECUTE_READ;
+  } else if ((prot & PROT_EXEC) != 0) {
+    return PAGE_EXECUTE;
+  } else if ((prot & PROT_READ) != 0) {
+    return PAGE_READONLY;
+  }
+  return PAGE_NOACCESS;
+}
+
 void* __crt_sys_mmap(void* addr, unsigned long length, int prot, int flags, int fd, long long offset) {
   DWORD protect;
   void* result;
@@ -1192,25 +1212,21 @@ void* __crt_sys_mmap(void* addr, unsigned long length, int prot, int flags, int 
     return (void*)(intptr_t)-ENOSYS;
   }
 
-  if ((prot & PROT_WRITE) != 0 && (prot & PROT_EXEC) != 0) {
-    protect = PAGE_EXECUTE_READWRITE;
-  } else if ((prot & PROT_WRITE) != 0) {
-    protect = PAGE_READWRITE;
-  } else if ((prot & PROT_EXEC) != 0 && (prot & PROT_READ) != 0) {
-    protect = PAGE_EXECUTE_READ;
-  } else if ((prot & PROT_EXEC) != 0) {
-    protect = PAGE_EXECUTE;
-  } else if ((prot & PROT_READ) != 0) {
-    protect = PAGE_READONLY;
-  } else {
-    protect = PAGE_NOACCESS;
-  }
-
+  protect = windows_page_protect(prot);
   result = VirtualAlloc(addr, (size_t)length, MEM_RESERVE | MEM_COMMIT, protect);
   if (result == 0) {
     return (void*)(intptr_t)-map_windows_error(GetLastError());
   }
   return result;
+}
+
+long __crt_sys_mprotect(void* addr, unsigned long length, int prot) {
+  DWORD old_protect;
+
+  if (!VirtualProtect(addr, (size_t)length, windows_page_protect(prot), &old_protect)) {
+    return fail_last_error();
+  }
+  return 0;
 }
 
 long __crt_sys_munmap(void* addr, unsigned long length) {

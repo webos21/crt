@@ -11,6 +11,7 @@ int main(void) {
   pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
   pthread_once_t once = PTHREAD_ONCE_INIT;
   pthread_rwlock_t rwlock = PTHREAD_RWLOCK_INITIALIZER;
+  pthread_barrier_t barrier = PTHREAD_BARRIER_INITIALIZER;
 
   if (sizeof(pthread_t) != sizeof(void*)) {
     return fail("pthread_t size");
@@ -30,6 +31,9 @@ int main(void) {
   if (sizeof(pthread_spinlock_t) != sizeof(int)) {
     return fail("pthread_spinlock_t size");
   }
+  if (sizeof(pthread_barrier_t) != sizeof(int32_t) * 4) {
+    return fail("pthread barrier size");
+  }
   if (PTHREAD_PROCESS_PRIVATE != 0 || PTHREAD_PROCESS_SHARED != 1) {
     return fail("pthread process shared constants");
   }
@@ -41,6 +45,9 @@ int main(void) {
   }
   if (rwlock.__private[0] != 0) {
     return fail("pthread rwlock initializer");
+  }
+  if (barrier.__private[0] != 0) {
+    return fail("pthread barrier initializer");
   }
 
   printf("pthread_type_test: ok\n");

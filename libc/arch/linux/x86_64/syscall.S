@@ -340,6 +340,15 @@ __crt_sys_mmap:
   retq
 .size __crt_sys_mmap, . - __crt_sys_mmap
 
+.globl __crt_sys_mprotect
+.type __crt_sys_mprotect, @function
+.p2align 4, 0x90
+__crt_sys_mprotect:
+  movq $10, %rax
+  syscall
+  retq
+.size __crt_sys_mprotect, . - __crt_sys_mprotect
+
 .globl __crt_sys_munmap
 .type __crt_sys_munmap, @function
 .p2align 4, 0x90

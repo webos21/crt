@@ -40,6 +40,22 @@ int main(void) {
     return fail("string contents");
   }
 
+  errno = 0;
+  if (mprotect(memory, 0, PROT_READ) != -1 || errno != EINVAL) {
+    munmap(memory, 4096);
+    return fail("mprotect zero length");
+  }
+  if (mprotect(memory, 4096, PROT_READ) != 0 ||
+      mprotect(memory, 4096, PROT_READ | PROT_WRITE) != 0) {
+    munmap(memory, 4096);
+    return fail("mprotect");
+  }
+  memory[0] = 'M';
+  if (memory[0] != 'M') {
+    munmap(memory, 4096);
+    return fail("mprotect write");
+  }
+
   if (munmap(memory, 4096) != 0) {
     return fail("munmap");
   }

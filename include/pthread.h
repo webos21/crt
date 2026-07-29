@@ -3,6 +3,9 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <sched.h>
+#include <sys/types.h>
+#include <time.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,6 +22,12 @@ typedef struct {
 } pthread_attr_t;
 
 typedef int pthread_key_t;
+
+typedef struct {
+  int32_t __private[4];
+} pthread_barrier_t;
+
+typedef long pthread_barrierattr_t;
 
 typedef struct {
   int32_t __private[12];
@@ -57,15 +66,38 @@ struct timespec;
 #define PTHREAD_PROCESS_SHARED 1
 #define PTHREAD_STACK_MIN 16384
 #define PTHREAD_KEYS_MAX 128
+#define PTHREAD_EXPLICIT_SCHED 0
+#define PTHREAD_INHERIT_SCHED 1
+#define PTHREAD_SCOPE_SYSTEM 0
+#define PTHREAD_SCOPE_PROCESS 1
+#define PTHREAD_MUTEX_STALLED 0
+#define PTHREAD_MUTEX_ROBUST 1
+#define PTHREAD_CANCEL_ENABLE 0
+#define PTHREAD_CANCEL_DISABLE 1
+#define PTHREAD_CANCEL_DEFERRED 0
+#define PTHREAD_CANCEL_ASYNCHRONOUS 1
+#define PTHREAD_CANCELED ((void*)-1)
+#define PTHREAD_BARRIER_SERIAL_THREAD (-1)
 
 #define PTHREAD_COND_CLOCK_REALTIME 0
 #define PTHREAD_COND_CLOCK_MONOTONIC 1
 
+#define PTHREAD_BARRIER_INITIALIZER { { 0 } }
 #define PTHREAD_COND_INITIALIZER { { 0 } }
 #define PTHREAD_MUTEX_INITIALIZER { { ((PTHREAD_MUTEX_NORMAL & 3) << 14) } }
 #define PTHREAD_ONCE_INIT 0
 #define PTHREAD_RWLOCK_INITIALIZER { { 0 } }
 
+int pthread_barrier_init(
+    pthread_barrier_t* barrier,
+    const pthread_barrierattr_t* attr,
+    unsigned int count);
+int pthread_barrier_destroy(pthread_barrier_t* barrier);
+int pthread_barrier_wait(pthread_barrier_t* barrier);
+int pthread_barrierattr_init(pthread_barrierattr_t* attr);
+int pthread_barrierattr_destroy(pthread_barrierattr_t* attr);
+int pthread_barrierattr_getpshared(const pthread_barrierattr_t* attr, int* pshared);
+int pthread_barrierattr_setpshared(pthread_barrierattr_t* attr, int pshared);
 int pthread_cond_init(pthread_cond_t* cond, const pthread_condattr_t* attr);
 int pthread_cond_destroy(pthread_cond_t* cond);
 int pthread_cond_signal(pthread_cond_t* cond);
@@ -90,6 +122,8 @@ int pthread_mutexattr_gettype(const pthread_mutexattr_t* attr, int* type);
 int pthread_mutexattr_settype(pthread_mutexattr_t* attr, int type);
 int pthread_mutexattr_getpshared(const pthread_mutexattr_t* attr, int* pshared);
 int pthread_mutexattr_setpshared(pthread_mutexattr_t* attr, int pshared);
+int pthread_mutexattr_getrobust(const pthread_mutexattr_t* attr, int* robust);
+int pthread_mutexattr_setrobust(pthread_mutexattr_t* attr, int robust);
 int pthread_once(pthread_once_t* once_control, __pthread_once_func_t init_routine);
 int pthread_rwlock_init(pthread_rwlock_t* rwlock, const pthread_rwlockattr_t* attr);
 int pthread_rwlock_destroy(pthread_rwlock_t* rwlock);
@@ -123,6 +157,15 @@ int pthread_attr_getguardsize(const pthread_attr_t* attr, size_t* guard_size);
 int pthread_attr_setguardsize(pthread_attr_t* attr, size_t guard_size);
 int pthread_attr_getstack(const pthread_attr_t* attr, void** stack_addr, size_t* stack_size);
 int pthread_attr_setstack(pthread_attr_t* attr, void* stack_addr, size_t stack_size);
+int pthread_attr_getinheritsched(const pthread_attr_t* attr, int* inheritsched);
+int pthread_attr_setinheritsched(pthread_attr_t* attr, int inheritsched);
+int pthread_attr_getschedpolicy(const pthread_attr_t* attr, int* policy);
+int pthread_attr_setschedpolicy(pthread_attr_t* attr, int policy);
+int pthread_attr_getschedparam(const pthread_attr_t* attr, struct sched_param* param);
+int pthread_attr_setschedparam(pthread_attr_t* attr, const struct sched_param* param);
+int pthread_attr_getscope(const pthread_attr_t* attr, int* scope);
+int pthread_attr_setscope(pthread_attr_t* attr, int scope);
+int pthread_getattr_np(pthread_t thread, pthread_attr_t* attr);
 int pthread_create(
     pthread_t* thread,
     const pthread_attr_t* attr,
@@ -130,6 +173,17 @@ int pthread_create(
     void* arg);
 int pthread_detach(pthread_t thread);
 int pthread_join(pthread_t thread, void** retval);
+int pthread_getschedparam(pthread_t thread, int* policy, struct sched_param* param);
+int pthread_setschedparam(pthread_t thread, int policy, const struct sched_param* param);
+int pthread_setschedprio(pthread_t thread, int priority);
+pid_t pthread_gettid_np(pthread_t thread);
+int pthread_getcpuclockid(pthread_t thread, clockid_t* clock_id);
+int pthread_setname_np(pthread_t thread, const char* name);
+int pthread_getname_np(pthread_t thread, char* buf, size_t size);
+int pthread_cancel(pthread_t thread);
+int pthread_setcancelstate(int state, int* oldstate);
+int pthread_setcanceltype(int type, int* oldtype);
+void pthread_testcancel(void);
 void pthread_exit(void* retval) __attribute__((noreturn));
 
 #ifdef __cplusplus

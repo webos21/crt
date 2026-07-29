@@ -360,6 +360,15 @@ __crt_sys_mmap:
   ret
 .size __crt_sys_mmap, . - __crt_sys_mmap
 
+.globl __crt_sys_mprotect
+.type __crt_sys_mprotect, %function
+.p2align 2
+__crt_sys_mprotect:
+  mov x8, #226
+  svc #0
+  ret
+.size __crt_sys_mprotect, . - __crt_sys_mprotect
+
 .globl __crt_sys_munmap
 .type __crt_sys_munmap, %function
 .p2align 2

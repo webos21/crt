@@ -39,7 +39,7 @@ int main(void) {
       stack_size < PTHREAD_STACK_MIN) {
     return fail("default stack size");
   }
-  if (pthread_attr_getguardsize(&attr, &guard_size) != 0 || guard_size != 0) {
+  if (pthread_attr_getguardsize(&attr, &guard_size) != 0 || guard_size < 4096) {
     return fail("default guard size");
   }
   if (pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED) != 0 ||
@@ -88,12 +88,17 @@ int main(void) {
     pthread_rwlockattr_t rwlock_attr;
     pthread_condattr_t cond_attr;
     int clock_id = -1;
+    int robust = -1;
 
     if (pthread_mutexattr_init(&mutex_attr) != 0 ||
         pthread_mutexattr_getpshared(&mutex_attr, &pshared) != 0 ||
         pshared != PTHREAD_PROCESS_PRIVATE ||
         pthread_mutexattr_setpshared(&mutex_attr, PTHREAD_PROCESS_SHARED) != ENOTSUP ||
-        pthread_mutexattr_setpshared(&mutex_attr, 99) != EINVAL) {
+        pthread_mutexattr_setpshared(&mutex_attr, 99) != EINVAL ||
+        pthread_mutexattr_getrobust(&mutex_attr, &robust) != 0 ||
+        robust != PTHREAD_MUTEX_STALLED ||
+        pthread_mutexattr_setrobust(&mutex_attr, PTHREAD_MUTEX_ROBUST) != ENOTSUP ||
+        pthread_mutexattr_setrobust(&mutex_attr, 99) != EINVAL) {
       return fail("mutex pshared attr");
     }
     pthread_mutexattr_destroy(&mutex_attr);

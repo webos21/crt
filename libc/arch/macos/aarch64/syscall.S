@@ -425,6 +425,17 @@ ___crt_sys_mmap:
   neg x0, x0
   ret
 
+.globl ___crt_sys_mprotect
+.p2align 2
+___crt_sys_mprotect:
+  mov x16, #74
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
 .globl ___crt_sys_munmap
 .p2align 2
 ___crt_sys_munmap:

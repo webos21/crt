@@ -428,6 +428,17 @@ ___crt_sys_mmap:
   negq %rax
   retq
 
+.globl ___crt_sys_mprotect
+.p2align 4, 0x90
+___crt_sys_mprotect:
+  movq $0x200004a, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
 .globl ___crt_sys_munmap
 .p2align 4, 0x90
 ___crt_sys_munmap:

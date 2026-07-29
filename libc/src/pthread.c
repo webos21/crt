@@ -1,7 +1,9 @@
 #include <errno.h>
+#include <limits.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/mman.h>
 #include <time.h>
 
@@ -14,13 +16,21 @@ void __crt_sys_thread_exit(int status) __attribute__((noreturn));
 #define CRT_PTHREAD_KEYS_MAX 128
 #define CRT_PTHREAD_DESTRUCTOR_ITERATIONS 4
 #define CRT_PTHREAD_STACK_SIZE (1024UL * 1024UL)
+#define CRT_PTHREAD_GUARD_SIZE 4096UL
+#define CRT_PTHREAD_NAME_MAX 16
 #define CRT_PTHREAD_ATTR_FLAG_DETACHED 0x00000001U
 #define CRT_PTHREAD_ATTR_FLAG_STACK_USER 0x00000002U
+#define CRT_PTHREAD_ATTR_FLAG_EXPLICIT_SCHED 0x00000004U
 #define CRT_MUTEXATTR_TYPE_MASK 0x000000ffL
 #define CRT_MUTEXATTR_PSHARED_BIT 0x00000100L
+#define CRT_MUTEXATTR_ROBUST_BIT 0x00000200L
 #define CRT_RWLOCKATTR_PSHARED_BIT 0x00000001L
+#define CRT_BARRIERATTR_PSHARED_BIT 0x00000001L
 #define CRT_COND_SEQUENCE_WORD 0
 #define CRT_COND_WAITERS_WORD 1
+#define CRT_BARRIER_COUNT_WORD 0
+#define CRT_BARRIER_WAITERS_WORD 1
+#define CRT_BARRIER_GENERATION_WORD 2
 #define CRT_MUTEX_STATE_WORD 0
 #define CRT_MUTEX_TYPE_WORD 1
 #define CRT_MUTEX_COUNT_WORD 2
@@ -114,21 +124,26 @@ typedef struct crt_pthread_control {
   int tid_word;
   void* stack;
   unsigned long stack_size;
+  void* mapping;
+  unsigned long mapping_size;
   int stack_owned;
   int reap_queued;
   struct crt_pthread_control* reap_next;
 #elif defined(CRT_TARGET_OS_MACOS)
   crt_macos_pthread_t native_thread;
 #endif
+  pthread_attr_t attr;
   void* (*start_routine)(void*);
   void* arg;
   void* result;
   int detached;
+  char name[CRT_PTHREAD_NAME_MAX];
 } crt_pthread_control;
 
 #if !defined(CRT_TARGET_OS_WINDOWS)
 static __thread crt_pthread_control* pthread_current_control;
 #endif
+static __thread char pthread_current_name[CRT_PTHREAD_NAME_MAX];
 
 static int pthread_key_used[CRT_PTHREAD_KEYS_MAX];
 static __pthread_key_destructor_t pthread_key_destructors[CRT_PTHREAD_KEYS_MAX];
@@ -145,6 +160,14 @@ static void* linux_reaper_stack;
 
 static crt_atomic_int* mutex_state(pthread_mutex_t* mutex) {
   return (crt_atomic_int*)&mutex->__private[CRT_MUTEX_STATE_WORD];
+}
+
+static crt_atomic_int* barrier_waiters(pthread_barrier_t* barrier) {
+  return (crt_atomic_int*)&barrier->__private[CRT_BARRIER_WAITERS_WORD];
+}
+
+static crt_atomic_int* barrier_generation(pthread_barrier_t* barrier) {
+  return (crt_atomic_int*)&barrier->__private[CRT_BARRIER_GENERATION_WORD];
 }
 
 static crt_atomic_int* cond_sequence(pthread_cond_t* cond) {
@@ -263,6 +286,16 @@ static void pthread_set_current_control(crt_pthread_control* control) {
 }
 #endif
 
+static crt_pthread_control* pthread_control_from_thread(pthread_t thread) {
+  if (thread == 0) {
+    return 0;
+  }
+  if (thread == pthread_self()) {
+    return pthread_get_current_control();
+  }
+  return (crt_pthread_control*)(uintptr_t)thread;
+}
+
 static void pthread_run_key_destructors(void) {
   int iteration;
 
@@ -315,8 +348,8 @@ static void pthread_control_destroy(crt_pthread_control* control) {
     return;
   }
 #if defined(CRT_TARGET_OS_LINUX)
-  if (control->stack_owned && control->stack != 0) {
-    munmap(control->stack, control->stack_size);
+  if (control->stack_owned && control->mapping != 0) {
+    munmap(control->mapping, control->mapping_size);
   }
 #endif
   free(control);
@@ -474,6 +507,102 @@ static DWORD CRT_WINAPI pthread_windows_start(void* arg) {
 }
 #endif
 #endif
+
+int pthread_barrier_init(
+    pthread_barrier_t* barrier,
+    const pthread_barrierattr_t* attr,
+    unsigned int count) {
+  if (barrier == 0 || count == 0) {
+    return EINVAL;
+  }
+  if (attr != 0 && (*attr & CRT_BARRIERATTR_PSHARED_BIT) != 0) {
+    return ENOTSUP;
+  }
+  barrier->__private[CRT_BARRIER_COUNT_WORD] = (int32_t)count;
+  barrier->__private[CRT_BARRIER_WAITERS_WORD] = 0;
+  barrier->__private[CRT_BARRIER_GENERATION_WORD] = 0;
+  barrier->__private[3] = 0;
+  return 0;
+}
+
+int pthread_barrier_destroy(pthread_barrier_t* barrier) {
+  if (barrier == 0) {
+    return EINVAL;
+  }
+  if (crt_atomic_load_acquire(barrier_waiters(barrier)) != 0) {
+    return EBUSY;
+  }
+  return 0;
+}
+
+int pthread_barrier_wait(pthread_barrier_t* barrier) {
+  int count;
+  int generation;
+  int waiters;
+
+  if (barrier == 0) {
+    return EINVAL;
+  }
+  count = barrier->__private[CRT_BARRIER_COUNT_WORD];
+  if (count <= 0) {
+    return EINVAL;
+  }
+  generation = crt_atomic_load_acquire(barrier_generation(barrier));
+  waiters = crt_atomic_fetch_add_acq_rel(barrier_waiters(barrier), 1) + 1;
+  if (waiters == count) {
+    crt_atomic_store_release(barrier_waiters(barrier), 0);
+    crt_atomic_fetch_add_acq_rel(barrier_generation(barrier), 1);
+    __crt_wake32_all(&barrier->__private[CRT_BARRIER_GENERATION_WORD]);
+    return PTHREAD_BARRIER_SERIAL_THREAD;
+  }
+
+  while (crt_atomic_load_acquire(barrier_generation(barrier)) == generation) {
+    int result = __crt_wait32(&barrier->__private[CRT_BARRIER_GENERATION_WORD], generation);
+    if (result != 0 && result != EINTR && result != EAGAIN) {
+      return result;
+    }
+  }
+  return 0;
+}
+
+int pthread_barrierattr_init(pthread_barrierattr_t* attr) {
+  if (attr == 0) {
+    return EINVAL;
+  }
+  *attr = 0;
+  return 0;
+}
+
+int pthread_barrierattr_destroy(pthread_barrierattr_t* attr) {
+  if (attr == 0) {
+    return EINVAL;
+  }
+  return 0;
+}
+
+int pthread_barrierattr_getpshared(const pthread_barrierattr_t* attr, int* pshared) {
+  if (attr == 0 || pshared == 0) {
+    return EINVAL;
+  }
+  *pshared = (*attr & CRT_BARRIERATTR_PSHARED_BIT) != 0
+                 ? PTHREAD_PROCESS_SHARED
+                 : PTHREAD_PROCESS_PRIVATE;
+  return 0;
+}
+
+int pthread_barrierattr_setpshared(pthread_barrierattr_t* attr, int pshared) {
+  if (attr == 0) {
+    return EINVAL;
+  }
+  if (pshared == PTHREAD_PROCESS_PRIVATE) {
+    *attr &= ~CRT_BARRIERATTR_PSHARED_BIT;
+    return 0;
+  }
+  if (pshared == PTHREAD_PROCESS_SHARED) {
+    return ENOTSUP;
+  }
+  return EINVAL;
+}
 
 int pthread_cond_init(pthread_cond_t* cond, const pthread_condattr_t* attr) {
   (void)attr;
@@ -633,6 +762,9 @@ int pthread_mutex_init(pthread_mutex_t* mutex, const void* attr) {
   }
   if (mutex_attr != 0) {
     if ((*mutex_attr & CRT_MUTEXATTR_PSHARED_BIT) != 0) {
+      return ENOTSUP;
+    }
+    if ((*mutex_attr & CRT_MUTEXATTR_ROBUST_BIT) != 0) {
       return ENOTSUP;
     }
     type = (int)(*mutex_attr & CRT_MUTEXATTR_TYPE_MASK);
@@ -799,6 +931,30 @@ int pthread_mutexattr_setpshared(pthread_mutexattr_t* attr, int pshared) {
     return 0;
   }
   if (pshared == PTHREAD_PROCESS_SHARED) {
+    return ENOTSUP;
+  }
+  return EINVAL;
+}
+
+int pthread_mutexattr_getrobust(const pthread_mutexattr_t* attr, int* robust) {
+  if (attr == 0 || robust == 0) {
+    return EINVAL;
+  }
+  *robust = (*attr & CRT_MUTEXATTR_ROBUST_BIT) != 0
+                ? PTHREAD_MUTEX_ROBUST
+                : PTHREAD_MUTEX_STALLED;
+  return 0;
+}
+
+int pthread_mutexattr_setrobust(pthread_mutexattr_t* attr, int robust) {
+  if (attr == 0) {
+    return EINVAL;
+  }
+  if (robust == PTHREAD_MUTEX_STALLED) {
+    *attr &= ~CRT_MUTEXATTR_ROBUST_BIT;
+    return 0;
+  }
+  if (robust == PTHREAD_MUTEX_ROBUST) {
     return ENOTSUP;
   }
   return EINVAL;
@@ -1130,7 +1286,7 @@ int pthread_attr_init(pthread_attr_t* attr) {
   attr->flags = 0;
   attr->stack_base = 0;
   attr->stack_size = CRT_PTHREAD_STACK_SIZE;
-  attr->guard_size = 0;
+  attr->guard_size = CRT_PTHREAD_GUARD_SIZE;
   attr->sched_policy = 0;
   attr->sched_priority = 0;
   return 0;
@@ -1196,6 +1352,9 @@ int pthread_attr_setguardsize(pthread_attr_t* attr, size_t guard_size) {
   if (attr == 0) {
     return EINVAL;
   }
+  if (guard_size > (size_t)LONG_MAX) {
+    return EINVAL;
+  }
   attr->guard_size = guard_size;
   return 0;
 }
@@ -1215,8 +1374,104 @@ int pthread_attr_setstack(pthread_attr_t* attr, void* stack_addr, size_t stack_s
   }
   attr->stack_base = stack_addr;
   attr->stack_size = stack_size;
+  attr->guard_size = 0;
   attr->flags |= CRT_PTHREAD_ATTR_FLAG_STACK_USER;
   return 0;
+}
+
+int pthread_attr_getinheritsched(const pthread_attr_t* attr, int* inheritsched) {
+  if (attr == 0 || inheritsched == 0) {
+    return EINVAL;
+  }
+  *inheritsched = (attr->flags & CRT_PTHREAD_ATTR_FLAG_EXPLICIT_SCHED) != 0
+                      ? PTHREAD_EXPLICIT_SCHED
+                      : PTHREAD_INHERIT_SCHED;
+  return 0;
+}
+
+int pthread_attr_setinheritsched(pthread_attr_t* attr, int inheritsched) {
+  if (attr == 0) {
+    return EINVAL;
+  }
+  if (inheritsched == PTHREAD_INHERIT_SCHED) {
+    attr->flags &= ~CRT_PTHREAD_ATTR_FLAG_EXPLICIT_SCHED;
+    return 0;
+  }
+  if (inheritsched == PTHREAD_EXPLICIT_SCHED) {
+    attr->flags |= CRT_PTHREAD_ATTR_FLAG_EXPLICIT_SCHED;
+    return 0;
+  }
+  return EINVAL;
+}
+
+int pthread_attr_getschedpolicy(const pthread_attr_t* attr, int* policy) {
+  if (attr == 0 || policy == 0) {
+    return EINVAL;
+  }
+  *policy = attr->sched_policy;
+  return 0;
+}
+
+int pthread_attr_setschedpolicy(pthread_attr_t* attr, int policy) {
+  if (attr == 0) {
+    return EINVAL;
+  }
+  if (policy == SCHED_OTHER || policy == SCHED_FIFO || policy == SCHED_RR) {
+    attr->sched_policy = policy;
+    return 0;
+  }
+  return EINVAL;
+}
+
+int pthread_attr_getschedparam(const pthread_attr_t* attr, struct sched_param* param) {
+  if (attr == 0 || param == 0) {
+    return EINVAL;
+  }
+  param->sched_priority = attr->sched_priority;
+  return 0;
+}
+
+int pthread_attr_setschedparam(pthread_attr_t* attr, const struct sched_param* param) {
+  if (attr == 0 || param == 0) {
+    return EINVAL;
+  }
+  attr->sched_priority = param->sched_priority;
+  return 0;
+}
+
+int pthread_attr_getscope(const pthread_attr_t* attr, int* scope) {
+  if (attr == 0 || scope == 0) {
+    return EINVAL;
+  }
+  *scope = PTHREAD_SCOPE_SYSTEM;
+  return 0;
+}
+
+int pthread_attr_setscope(pthread_attr_t* attr, int scope) {
+  if (attr == 0) {
+    return EINVAL;
+  }
+  if (scope == PTHREAD_SCOPE_SYSTEM) {
+    return 0;
+  }
+  if (scope == PTHREAD_SCOPE_PROCESS) {
+    return ENOTSUP;
+  }
+  return EINVAL;
+}
+
+int pthread_getattr_np(pthread_t thread, pthread_attr_t* attr) {
+  crt_pthread_control* control;
+
+  if (thread == 0 || attr == 0) {
+    return EINVAL;
+  }
+  control = pthread_control_from_thread(thread);
+  if (control != 0) {
+    *attr = control->attr;
+    return 0;
+  }
+  return pthread_attr_init(attr);
 }
 
 int pthread_create(
@@ -1236,12 +1491,17 @@ int pthread_create(
   }
   control->start_routine = start_routine;
   control->arg = arg;
+  if (attr != 0) {
+    control->attr = *attr;
+  } else {
+    pthread_attr_init(&control->attr);
+  }
   control->detached =
-      attr != 0 && (attr->flags & CRT_PTHREAD_ATTR_FLAG_DETACHED) != 0;
+      (control->attr.flags & CRT_PTHREAD_ATTR_FLAG_DETACHED) != 0;
 
 #if defined(CRT_TARGET_OS_WINDOWS)
   control->handle = CreateThread(
-      0, attr != 0 ? attr->stack_size : 0, pthread_windows_start, control, 0, &control->thread_id);
+      0, control->attr.stack_size, pthread_windows_start, control, 0, &control->thread_id);
   if (control->handle == 0) {
     free(control);
     return EAGAIN;
@@ -1260,18 +1520,37 @@ int pthread_create(
       return reaper_result;
     }
   }
-  control->stack_size = attr != 0 ? attr->stack_size : CRT_PTHREAD_STACK_SIZE;
-  if (attr != 0 && (attr->flags & CRT_PTHREAD_ATTR_FLAG_STACK_USER) != 0) {
-    control->stack = attr->stack_base;
+  control->stack_size = control->attr.stack_size;
+  if ((control->attr.flags & CRT_PTHREAD_ATTR_FLAG_STACK_USER) != 0) {
+    control->stack = control->attr.stack_base;
+    control->mapping = 0;
+    control->mapping_size = 0;
     control->stack_owned = 0;
   } else {
-    control->stack = mmap(0, control->stack_size, PROT_READ | PROT_WRITE,
-                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (control->stack == MAP_FAILED) {
+    unsigned long guard_size = (unsigned long)((control->attr.guard_size + 4095UL) & ~4095UL);
+    unsigned long mapping_size;
+
+    if (guard_size > ULONG_MAX - control->stack_size) {
       free(control);
       return EAGAIN;
     }
+    mapping_size = control->stack_size + guard_size;
+    control->mapping = mmap(0, mapping_size, PROT_READ | PROT_WRITE,
+                            MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (control->mapping == MAP_FAILED) {
+      free(control);
+      return EAGAIN;
+    }
+    control->mapping_size = mapping_size;
+    control->stack = (char*)control->mapping + guard_size;
     control->stack_owned = 1;
+    control->attr.stack_base = control->stack;
+    control->attr.guard_size = guard_size;
+    if (guard_size != 0 && mprotect(control->mapping, guard_size, PROT_NONE) != 0) {
+      munmap(control->mapping, control->mapping_size);
+      free(control);
+      return EAGAIN;
+    }
   }
   control->tid = __crt_sys_clone_thread(
       (char*)control->stack + control->stack_size,
@@ -1283,7 +1562,7 @@ int pthread_create(
       0);
   if (control->tid < 0) {
     if (control->stack_owned) {
-      munmap(control->stack, control->stack_size);
+      munmap(control->mapping, control->mapping_size);
     }
     free(control);
     return -control->tid;
@@ -1431,6 +1710,143 @@ int pthread_join(pthread_t thread, void** retval) {
 #else
   return ENOSYS;
 #endif
+}
+
+int pthread_getschedparam(pthread_t thread, int* policy, struct sched_param* param) {
+  if (thread == 0 || policy == 0 || param == 0) {
+    return EINVAL;
+  }
+  *policy = SCHED_OTHER;
+  param->sched_priority = 0;
+  return 0;
+}
+
+int pthread_setschedparam(pthread_t thread, int policy, const struct sched_param* param) {
+  if (thread == 0 || param == 0) {
+    return EINVAL;
+  }
+  if (policy == SCHED_OTHER && param->sched_priority == 0) {
+    return 0;
+  }
+  if (policy == SCHED_FIFO || policy == SCHED_RR || param->sched_priority != 0) {
+    return ENOTSUP;
+  }
+  return EINVAL;
+}
+
+int pthread_setschedprio(pthread_t thread, int priority) {
+  struct sched_param param;
+
+  if (thread == 0) {
+    return EINVAL;
+  }
+  param.sched_priority = priority;
+  return pthread_setschedparam(thread, SCHED_OTHER, &param);
+}
+
+pid_t pthread_gettid_np(pthread_t thread) {
+  crt_pthread_control* control;
+
+  if (thread == 0) {
+    return (pid_t)-1;
+  }
+  if (thread == pthread_self()) {
+    return (pid_t)__crt_sys_thread_id();
+  }
+  control = (crt_pthread_control*)(uintptr_t)thread;
+#if defined(CRT_TARGET_OS_WINDOWS)
+  return (pid_t)control->thread_id;
+#elif defined(CRT_TARGET_OS_LINUX)
+  return (pid_t)control->tid;
+#elif defined(CRT_TARGET_OS_MACOS)
+  return (pid_t)(intptr_t)control->native_thread;
+#else
+  return (pid_t)-1;
+#endif
+}
+
+int pthread_getcpuclockid(pthread_t thread, clockid_t* clock_id) {
+  if (thread == 0 || clock_id == 0) {
+    return EINVAL;
+  }
+  return ENOTSUP;
+}
+
+int pthread_setname_np(pthread_t thread, const char* name) {
+  crt_pthread_control* control;
+  size_t length;
+
+  if (thread == 0 || name == 0) {
+    return EINVAL;
+  }
+  length = strlen(name);
+  if (length >= CRT_PTHREAD_NAME_MAX) {
+    return ERANGE;
+  }
+  control = pthread_control_from_thread(thread);
+  if (control != 0) {
+    memcpy(control->name, name, length + 1);
+    return 0;
+  }
+  if (thread == pthread_self()) {
+    memcpy(pthread_current_name, name, length + 1);
+    return 0;
+  }
+  return ESRCH;
+}
+
+int pthread_getname_np(pthread_t thread, char* buf, size_t size) {
+  crt_pthread_control* control;
+  const char* name = "";
+  size_t length;
+
+  if (thread == 0 || buf == 0 || size == 0) {
+    return EINVAL;
+  }
+  control = pthread_control_from_thread(thread);
+  if (control != 0) {
+    name = control->name;
+  } else if (thread == pthread_self()) {
+    name = pthread_current_name;
+  } else {
+    return ESRCH;
+  }
+  length = strlen(name);
+  if (length + 1 > size) {
+    return ERANGE;
+  }
+  memcpy(buf, name, length + 1);
+  return 0;
+}
+
+int pthread_cancel(pthread_t thread) {
+  if (thread == 0) {
+    return EINVAL;
+  }
+  return ENOTSUP;
+}
+
+int pthread_setcancelstate(int state, int* oldstate) {
+  if (state != PTHREAD_CANCEL_ENABLE && state != PTHREAD_CANCEL_DISABLE) {
+    return EINVAL;
+  }
+  if (oldstate != 0) {
+    *oldstate = PTHREAD_CANCEL_DISABLE;
+  }
+  return state == PTHREAD_CANCEL_DISABLE ? 0 : ENOTSUP;
+}
+
+int pthread_setcanceltype(int type, int* oldtype) {
+  if (type != PTHREAD_CANCEL_DEFERRED && type != PTHREAD_CANCEL_ASYNCHRONOUS) {
+    return EINVAL;
+  }
+  if (oldtype != 0) {
+    *oldtype = PTHREAD_CANCEL_DEFERRED;
+  }
+  return type == PTHREAD_CANCEL_DEFERRED ? 0 : ENOTSUP;
+}
+
+void pthread_testcancel(void) {
 }
 
 void pthread_exit(void* retval) {

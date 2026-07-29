@@ -3,6 +3,7 @@
 #include <sys/mman.h>
 
 void* __crt_sys_mmap(void* addr, unsigned long length, int prot, int flags, int fd, long long offset);
+long __crt_sys_mprotect(void* addr, unsigned long length, int prot);
 long __crt_sys_munmap(void* addr, unsigned long length);
 
 void* mmap(void* addr, size_t length, int prot, int flags, int fd, off_t offset) {
@@ -32,6 +33,22 @@ int munmap(void* addr, size_t length) {
   }
 
   result = __crt_sys_munmap(addr, (unsigned long)length);
+  if (result < 0 && result >= -4095) {
+    errno = (int)-result;
+    return -1;
+  }
+  return (int)result;
+}
+
+int mprotect(void* addr, size_t length, int prot) {
+  long result;
+
+  if (length == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  result = __crt_sys_mprotect(addr, (unsigned long)length, prot);
   if (result < 0 && result >= -4095) {
     errno = (int)-result;
     return -1;

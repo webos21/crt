@@ -26,6 +26,7 @@ extern "C" {
 #define MAP_FAILED ((void*)-1)
 
 void* mmap(void* addr, size_t length, int prot, int flags, int fd, off_t offset);
+int mprotect(void* addr, size_t length, int prot);
 int munmap(void* addr, size_t length);
 
 #ifdef __cplusplus
