@@ -78,6 +78,48 @@ function(add_crt_test test_name source_file)
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS ${test_name}_runs)
 endfunction()
 
+function(add_crt_cxx_test test_name source_file)
+  add_executable(${test_name}
+    ${source_file}
+    $<TARGET_OBJECTS:crt1>
+  )
+  target_link_libraries(${test_name} PRIVATE crt_cxx_build_flags cxx c)
+  target_include_directories(${test_name} PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include"
+  )
+  target_link_libraries(${test_name} PRIVATE crt_compiler_rt_builtins)
+  target_link_options(${test_name} PRIVATE
+    -nostdlib
+    -nostartfiles
+    -nodefaultlibs
+  )
+  if(CRT_TARGET_OS STREQUAL "macos")
+    target_link_options(${test_name} PRIVATE
+      -Wl,-e,_start
+      -Wl,-dead_strip
+    )
+    target_link_libraries(${test_name} PRIVATE System)
+  elseif(CRT_TARGET_OS STREQUAL "linux")
+    target_link_options(${test_name} PRIVATE
+      -Wl,-e,_start
+      -Wl,--gc-sections
+    )
+  elseif(CRT_TARGET_OS STREQUAL "windows")
+    target_link_options(${test_name} PRIVATE
+      -Wl,/entry:mainCRTStartup
+      -Wl,/subsystem:console
+      -Wl,/OPT:REF
+    )
+    target_link_libraries(${test_name} PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  endif()
+  add_dependencies(${test_name} cxx c crt1)
+  add_test(NAME ${test_name}_runs COMMAND ${test_name})
+  set_tests_properties(${test_name}_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS ${test_name}_runs)
+endfunction()
+
 add_crt_test(string_memory_test string_memory_test.c)
 set_tests_properties(string_memory_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "string_memory_test: ok"
@@ -137,6 +179,11 @@ target_link_libraries(cxx_runtime_test PRIVATE cxx)
 add_dependencies(cxx_runtime_test cxx)
 set_tests_properties(cxx_runtime_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "cxx_runtime_test: ok"
+)
+
+add_crt_cxx_test(cxx_frontend_test cxx_frontend_test.cc)
+set_tests_properties(cxx_frontend_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "cxx_frontend_test: ok"
 )
 
 add_crt_test(printf_test printf_test.c)

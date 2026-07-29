@@ -1103,6 +1103,12 @@ The first symbol surface is:
 - `__cxa_deleted_virtual`;
 - `__dso_handle`.
 
+The Windows MSVC ABI bridge bootstrap adds `_Init_thread_header`,
+`_Init_thread_footer`, `_Init_thread_abort`, `_Init_global_epoch`,
+`_Init_thread_epoch`, and `_purecall`. These symbols are compatibility-lane
+support for simple MSVC-ABI frontend probes and future Windows-native C++ DLL
+bridges, not a replacement for the Bionic/Itanium CRT core.
+
 This is not a direct Bionic source import. It is a small Itanium C++ ABI shaped
 bootstrap implementation so the project can test guard variables and destructor
 registration before importing libc++abi. `exit()` weakly calls
@@ -1111,9 +1117,12 @@ programs do not gain a hard dependency on C++ runtime symbols.
 
 Exceptions, RTTI, `__gxx_personality_v0`, full unwind behavior, demangling,
 operator new/delete, libc++abi, libunwind, and libc++ are explicitly deferred.
-Windows needs a separate C++ frontend ABI decision because the current Clang
-MSVC target normally emits MSVC C++ ABI hooks rather than Bionic/Itanium
-`__cxa_*` hooks.
+The project C++ ABI policy is dual-lane: CRT-targeted C++ follows the
+Bionic/Itanium ABI, while Windows-native C++ DLL interoperability is reserved
+for a separate MSVC ABI bridge. The bridge must have its own tests and should
+initially cross through C-callable wrapper boundaries; C++ object, STL, RTTI,
+exception, and allocator ownership interop remain unsupported until explicitly
+designed.
 
 The detailed policy is documented in `docs/cxx_runtime.md`.
 

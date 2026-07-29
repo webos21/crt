@@ -9,6 +9,9 @@ void __cxa_guard_release(uint64_t* guard_object);
 void __cxa_guard_abort(uint64_t* guard_object);
 int __cxa_atexit(destructor_t destructor, void* object, void* dso);
 void __cxa_finalize(void* dso);
+void _Init_thread_header(volatile int* guard);
+void _Init_thread_footer(volatile int* guard);
+void _Init_thread_abort(volatile int* guard);
 
 static int fail(const char* message) {
   fprintf(stderr, "cxx_runtime_test: %s\n", message);
@@ -70,6 +73,26 @@ int main(void) {
   __cxa_finalize(0);
   if (first != 1 || second != 10 || other != 1) {
     return fail("cxa finalize all");
+  }
+
+  {
+    volatile int msvc_guard = 0;
+    _Init_thread_header(&msvc_guard);
+    if (msvc_guard != -1) {
+      return fail("msvc guard acquire");
+    }
+    _Init_thread_footer(&msvc_guard);
+    if (msvc_guard <= 0) {
+      return fail("msvc guard release");
+    }
+    _Init_thread_header(&msvc_guard);
+    if (msvc_guard <= 0) {
+      return fail("msvc guard already initialized");
+    }
+    _Init_thread_abort(&msvc_guard);
+    if (msvc_guard != 0) {
+      return fail("msvc guard abort");
+    }
   }
 
   printf("cxx_runtime_test: ok\n");

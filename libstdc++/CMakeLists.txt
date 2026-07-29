@@ -1,5 +1,6 @@
 add_library(cxx STATIC
   src/cxxabi.c
+  src/msvcabi.c
 )
 
 target_link_libraries(cxx PRIVATE crt_build_flags c)

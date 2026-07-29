@@ -256,6 +256,7 @@ out-of-line C99 functions.
 | Local file | Upstream path | Upstream ref | Status | Notes |
 | --- | --- | --- | --- | --- |
 | `libstdc++/src/cxxabi.c` | mixed Bionic/Itanium C++ ABI surface | project-owned | new | Provides first-tranche `__cxa_guard_*`, `__cxa_atexit`, `__cxa_finalize`, pure/deleted virtual handlers, and `__dso_handle`; full libc++abi/libunwind/libc++ import is deferred. |
+| `libstdc++/src/msvcabi.c` | MSVC/UCRT C++ ABI surface | project-owned | new | Provides first Windows bridge-lane `_Init_thread_*` and `_purecall` hooks for simple MSVC-ABI probes; richer C++ interop is deferred. |
 
 ### Pthread Condition Variable Tranche
 

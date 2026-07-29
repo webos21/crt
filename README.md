@@ -169,7 +169,9 @@ The current `libc++.a` is a small project-owned C++ ABI bootstrap, not the full
 LLVM libc++ standard library. It provides first-tranche `__cxa_*` hooks, guard
 variables, pure/deleted virtual handlers, `__dso_handle`, and destructor
 registration/finalization. Exceptions, RTTI, libunwind, libc++abi, and libc++
-proper remain separate future tranches. See `docs/cxx_runtime.md`.
+proper remain separate future tranches. CRT-targeted C++ uses the
+Bionic/Itanium ABI lane; Windows-native C++ DLL interoperability is reserved for
+a separate MSVC ABI bridge lane. See `docs/cxx_runtime.md`.
 
 ## Prerequisites
 

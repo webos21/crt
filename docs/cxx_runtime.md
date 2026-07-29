@@ -28,6 +28,15 @@ full libc++abi import:
 - `__cxa_deleted_virtual`;
 - `__dso_handle`.
 
+The Windows bridge bootstrap also provides the first MSVC ABI runtime hooks:
+
+- `_Init_thread_header`;
+- `_Init_thread_footer`;
+- `_Init_thread_abort`;
+- `_Init_global_epoch`;
+- `_Init_thread_epoch`;
+- `_purecall`.
+
 ## ABI Policy
 
 Bionic and Unix-like Clang targets use the Itanium C++ ABI for `__cxa_*`
@@ -40,14 +49,55 @@ Bionic's `__cxa_*` model. The current Windows C tests verify that the project
 exports the Bionic/Itanium-shaped symbols, but they do not claim that ordinary
 MSVC-ABI C++ objects are supported.
 
-Before enabling broad C++ source builds on Windows, the project must choose one
-of these paths:
+The project policy is a dual ABI lane:
 
-- build CRT-targeted C++ code with a Clang target/profile that emits Itanium
-  C++ ABI hooks; or
-- add an explicit MSVC C++ ABI adapter layer as a separate compatibility mode.
+- CRT-targeted C++ code should use the Bionic/Itanium C++ ABI lane.
+- Windows-native C++ DLL interoperability should be handled by a separate MSVC
+  ABI bridge lane.
 
-The first path is closer to the Bionic-compatible goal.
+This keeps the project core aligned with Bionic while leaving an explicit path
+for Windows ecosystem integration. The two lanes must not be treated as one ABI:
+name mangling, exception objects, RTTI, class layout edge cases, destructor
+registration, thread-safe statics, and allocation ownership may differ.
+
+The first practical rule is that C ABI boundaries are the default crossing point
+between the lanes. Passing C++ objects, exceptions, RTTI-bearing types, STL
+containers, or ownership of memory allocated by one lane into the other lane is
+unsupported until a narrower bridge contract is defined and tested.
+
+## Windows MSVC ABI Bridge Lane
+
+The Windows bridge lane exists so CRT programs can eventually consume or expose
+Windows-native C++ DLL APIs when a project cannot reduce that dependency to a
+plain C ABI.
+
+This lane is compatibility infrastructure, not the CRT's core ABI. It should be
+implemented as a separate adapter layer with its own tests and documentation.
+Expected work includes:
+
+- identifying Clang/MSVC-emitted runtime hooks for static initialization,
+  destructor registration, pure/deleted virtual calls, RTTI, and exceptions;
+- deciding which hooks can forward into project libc state and which must stay
+  isolated;
+- defining allocation ownership rules across CRT malloc/new and Windows-native
+  allocation APIs;
+- deciding whether exceptions may cross the bridge, with the default answer
+  being no until unwind interoperability is proven;
+- adding DLL load/use tests that exercise C++ exports through an explicit bridge
+  API rather than silently mixing ABIs.
+
+The bridge should begin with conservative C-callable wrappers around
+Windows-native C++ DLLs. Broader C++ object ABI interop can be added only after
+the narrow wrapper model is stable.
+
+The first implementation is deliberately narrow. `_Init_thread_*` implements the
+MSVC local-static guard state machine without UCRT TLS acceleration, and
+`_purecall` terminates through `abort`. Clang's MSVC ABI frontend also emits a
+reference to `_tls_index` for the normal `/Zc:threadSafeInit` fast path, so full
+thread-safe local static support on Windows requires a PE TLS directory and
+loader TLS policy. Until that exists, Windows C++ frontend smoke tests use
+`-fno-threadsafe-statics`, while direct C ABI tests exercise `_Init_thread_*`.
+Exceptions and rich C++ object interop remain explicit future work.
 
 ## Guard Variables
 
@@ -91,17 +141,42 @@ linked libc++abi/libunwind exception machinery, including:
 Early CRT C++ experiments should use `-fno-exceptions` and `-fno-rtti` until
 the libc++abi/libunwind tranche is explicit.
 
+The current C++ frontend test is compiled with `-fno-exceptions` and
+`-fno-rtti`. Linux and macOS keep compiler-emitted thread-safe local-static
+guards enabled, which exercises the Bionic/Itanium `__cxa_guard_*` lane.
+Windows temporarily uses `-fno-threadsafe-statics` for the frontend smoke test
+because the normal MSVC fast path also needs `_tls_index` and PE TLS startup.
+Dedicated C ABI tests exercise both `__cxa_guard_*` and `_Init_thread_*`
+directly.
+
+## External References
+
+The implementation policy is based on these upstream references:
+
+- LLVM libc++abi's guard implementation and specification for
+  `__cxa_guard_*`, `__cxa_atexit`, `__cxa_finalize`, and
+  `__gxx_personality_v0`;
+- the Itanium C++ ABI termination and DSO destructor model;
+- Microsoft's `/Zc:threadSafeInit` documentation, which states that MSVC
+  thread-safe local static initialization depends on UCRT runtime support;
+- Clang's Microsoft C++ ABI code generation, which emits `_Init_thread_header`,
+  `_Init_thread_footer`, `_Init_thread_abort`, and `_CxxThrowException` for the
+  MSVC ABI path;
+- ReactOS' public CRT implementation as a behavioral reference for the small
+  `_Init_thread_*` state machine, used as reference material only rather than
+  imported source.
+
 ## Next Steps
 
 Recommended next work:
 
 1. Add real C++ frontend compile/link probes for Linux and macOS using
    `-fno-exceptions -fno-rtti`.
-2. Decide the Windows C++ ABI target policy before enabling ordinary `.cc`
-   tests on Windows.
+2. Add a Windows policy probe that records which C++ ABI hooks Clang emits for
+   the selected target/profile.
 3. Add `operator new/delete` only after allocator behavior is ready to be a C++
    allocation boundary.
 4. Evaluate importing libc++abi's Itanium ABI source after the project has a
    clear libunwind choice.
-5. Add libunwind linkage experiments separately from the bootstrap `__cxa_*`
-   symbol tranche.
+5. Start a separate Windows MSVC ABI bridge design with C ABI wrapper tests
+   before allowing C++ object or exception interop across the bridge.

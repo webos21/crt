@@ -10,7 +10,7 @@ if(CRT_TARGET_OS STREQUAL "windows")
   set(CMAKE_C_STANDARD_LIBRARIES "" CACHE STRING "C standard libraries" FORCE)
 endif()
 
-project(crt LANGUAGES C ASM)
+project(crt LANGUAGES C CXX ASM)
 
 if(CRT_TARGET_OS STREQUAL "windows")
   set(CMAKE_C_STANDARD_LIBRARIES "")
@@ -19,6 +19,9 @@ endif()
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 message(STATUS "CRT long double ABI follows the compiler target default; no -mlong-double override is applied")
 
@@ -58,6 +61,18 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
   target_compile_definitions(crt_build_flags INTERFACE CRT_TARGET_OS_LINUX=1)
 elseif(CRT_TARGET_OS STREQUAL "windows")
   target_compile_definitions(crt_build_flags INTERFACE CRT_TARGET_OS_WINDOWS=1)
+endif()
+
+add_library(crt_cxx_build_flags INTERFACE)
+target_link_libraries(crt_cxx_build_flags INTERFACE crt_build_flags)
+target_compile_options(crt_cxx_build_flags INTERFACE
+  $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>
+  $<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>
+)
+if(CRT_TARGET_OS STREQUAL "windows")
+  target_compile_options(crt_cxx_build_flags INTERFACE
+    $<$<COMPILE_LANGUAGE:CXX>:-fno-threadsafe-statics>
+  )
 endif()
 
 if(CRT_TARGET_ARCH STREQUAL "host")

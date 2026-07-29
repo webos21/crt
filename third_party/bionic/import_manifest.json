@@ -978,6 +978,18 @@
       "license_family": "project",
       "reason": "First C++ ABI bootstrap exports Bionic/Itanium-shaped __cxa guard, destructor, pure virtual, and DSO handle symbols before importing full libc++abi/libunwind.",
       "next_action": "Replace or extend with libc++abi sources once exception, RTTI, unwind, and Windows C++ ABI policy are decided."
+    },
+    {
+      "local": "libstdc++/src/msvcabi.c",
+      "component": "libstdc++",
+      "source_kind": "project-owned",
+      "upstream_ref": "project-owned",
+      "upstream_path": "MSVC/UCRT C++ ABI surface",
+      "status": "new",
+      "review_class": "project_owned",
+      "license_family": "project",
+      "reason": "First Windows bridge-lane C++ ABI hooks provide _Init_thread_* and _purecall without importing UCRT or treating MSVC ABI as the CRT core ABI.",
+      "next_action": "Extend only through documented Windows-native C++ DLL bridge tests, starting at C-callable wrapper boundaries."
     }
   ]
 }
