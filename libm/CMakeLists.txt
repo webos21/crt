@@ -55,6 +55,9 @@ set_target_properties(m PROPERTIES
 )
 
 add_library(m_shared SHARED ${CRT_LIBM_SOURCES})
+if(CRT_TARGET_OS STREQUAL "windows")
+  target_sources(m_shared PRIVATE $<TARGET_OBJECTS:crt_windows_dllcrt>)
+endif()
 target_link_libraries(m_shared PRIVATE crt_build_flags crt_compiler_rt_builtins)
 target_include_directories(m_shared PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/freebsd")
 target_compile_definitions(m_shared PRIVATE USE_BUILTIN_FMAX USE_BUILTIN_FMIN)

@@ -16,6 +16,9 @@ add_library(cxx_shared SHARED
   src/cxxabi.c
   src/msvcabi.c
 )
+if(CRT_TARGET_OS STREQUAL "windows")
+  target_sources(cxx_shared PRIVATE $<TARGET_OBJECTS:crt_windows_dllcrt>)
+endif()
 
 target_link_libraries(cxx_shared PRIVATE crt_build_flags c_shared)
 target_include_directories(cxx_shared PRIVATE

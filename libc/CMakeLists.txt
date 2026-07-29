@@ -118,6 +118,9 @@ if(CRT_TARGET_OS STREQUAL "windows")
   add_library(crt_windows_chkstk OBJECT ${CRT_WINDOWS_CHKSTK_FILE})
   target_link_libraries(crt_windows_chkstk PRIVATE crt_build_flags)
   target_sources(c PRIVATE $<TARGET_OBJECTS:crt_windows_chkstk>)
+
+  add_library(crt_windows_dllcrt OBJECT arch/windows/common/dllcrt.c)
+  target_link_libraries(crt_windows_dllcrt PRIVATE crt_build_flags)
 endif()
 
 add_library(crt1 OBJECT ${CRT_START_FILE})
@@ -134,6 +137,7 @@ target_include_directories(c_shared PRIVATE
 target_sources(c_shared PRIVATE $<TARGET_OBJECTS:crt_syscall>)
 if(CRT_TARGET_OS STREQUAL "windows")
   target_sources(c_shared PRIVATE $<TARGET_OBJECTS:crt_windows_chkstk>)
+  target_sources(c_shared PRIVATE $<TARGET_OBJECTS:crt_windows_dllcrt>)
 endif()
 crt_configure_shared_runtime(c_shared)
 set_target_properties(c_shared PROPERTIES

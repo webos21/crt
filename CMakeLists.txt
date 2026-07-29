@@ -105,6 +105,7 @@ function(crt_configure_shared_runtime target_name)
   elseif(CRT_TARGET_OS STREQUAL "windows")
     target_link_options(${target_name} PRIVATE
       -fuse-ld=lld
+      -Wl,/entry:crtDllMainCRTStartup
       -Wl,/OPT:REF
     )
     target_link_libraries(${target_name} PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})

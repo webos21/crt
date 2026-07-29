@@ -37,6 +37,12 @@ On Windows the DLL import libraries intentionally use distinct names such as
 colliding with the static archives `c.lib`, `m.lib`, `dl.lib`, and `c++.lib` in
 the same `lib/` output directory.
 
+Windows shared libraries also use a project-owned minimal DLL entry point,
+`crtDllMainCRTStartup`, because the CRT build links with `-nostdlib` and does
+not import MSVC's `_DllMainCRTStartup`. The entry point currently returns
+success for all attach/detach events. It is the future hook for DLL-local
+runtime initialization, TLS, and destructor policy.
+
 These are not yet final ABI-stable shared runtimes. They are build artifacts for
 the next compatibility tranche.
 
