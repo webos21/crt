@@ -24,6 +24,15 @@ static void* worker(void* arg) {
   return &shared_value;
 }
 
+static void* self_worker(void* arg) {
+  (void)arg;
+
+  if (pthread_join(pthread_self(), 0) != EDEADLK) {
+    return (void*)1;
+  }
+  return (void*)pthread_self();
+}
+
 int main(void) {
   pthread_t thread;
   void* result = 0;
@@ -42,6 +51,12 @@ int main(void) {
   }
   if (pthread_join(0, 0) != EINVAL) {
     return fail("pthread_join invalid");
+  }
+  if (pthread_create(&thread, 0, self_worker, 0) != 0) {
+    return fail("pthread_create self");
+  }
+  if (pthread_join(thread, &result) != 0 || result != (void*)thread) {
+    return fail("pthread_self handle");
   }
 
   printf("pthread_thread_test: ok\n");

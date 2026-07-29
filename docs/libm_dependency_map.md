@@ -37,6 +37,23 @@ visible in `third_party/bionic/README.md`.
 | --- | --- | --- | --- | --- | --- |
 | `sqrt` | `libm/src/basic.c` | `libm/builtins.cpp` | Bionic `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | Clang `__builtin_elementwise_sqrt` | Follows current Bionic builtin policy while avoiding recursive Debug/O0 libcalls on Windows. |
 | `sqrtf` | `libm/src/basic.c` | `libm/builtins.cpp` | Bionic `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | Clang `__builtin_elementwise_sqrt` | Same policy as `sqrt`. |
+| `log10` | `libm/src/freebsd/e_log10.c` | `upstream-freebsd/lib/msun/src/e_log10.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | `k_log.h`, word helpers | Replaces the bootstrap `log(x) * log10(e)` wrapper. |
+| `log10f` | `libm/src/freebsd/e_log10f.c` | `upstream-freebsd/lib/msun/src/e_log10f.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | `k_logf.h`, float word helpers | Native float source. |
+| `expm1` | `libm/src/freebsd/s_expm1.c` | `upstream-freebsd/lib/msun/src/s_expm1.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | word helpers, `STRICT_ASSIGN` | Replaces the bootstrap `exp(x) - 1` wrapper. |
+| `expm1f` | `libm/src/freebsd/s_expm1f.c` | `upstream-freebsd/lib/msun/src/s_expm1f.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | float word helpers | Native float source. |
+| `log1p` | `libm/src/freebsd/s_log1p.c` | `upstream-freebsd/lib/msun/src/s_log1p.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | word helpers, `STRICT_ASSIGN` | Replaces the bootstrap `log(1 + x)` wrapper. |
+| `log1pf` | `libm/src/freebsd/s_log1pf.c` | `upstream-freebsd/lib/msun/src/s_log1pf.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | float word helpers | Native float source. |
+| `fmod` | `libm/src/freebsd/e_fmod.c` | `upstream-freebsd/lib/msun/src/e_fmod.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | word helpers, `nan_mix_op` | Replaces the quotient/trunc bootstrap implementation. |
+| `fmodf` | `libm/src/freebsd/e_fmodf.c` | `upstream-freebsd/lib/msun/src/e_fmodf.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | float word helpers, `nan_mix_op` | Native float source. |
+| `remainder` | `libm/src/freebsd/e_remainder.c` | `upstream-freebsd/lib/msun/src/e_remainder.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | `fmod`, `nan_mix_op` | Replaces the bootstrap ties-to-even implementation. |
+| `remainderf` | `libm/src/freebsd/e_remainderf.c` | `upstream-freebsd/lib/msun/src/e_remainderf.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | `fmodf`, `nan_mix_op` | Native float source. |
+| `remquo` | `libm/src/freebsd/s_remquo.c` | `upstream-freebsd/lib/msun/src/s_remquo.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | word helpers, `nan_mix_op` | Replaces the bootstrap quotient-bit implementation. |
+| `remquof` | `libm/src/freebsd/s_remquof.c` | `upstream-freebsd/lib/msun/src/s_remquof.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | float word helpers, `nan_mix_op` | Native float source. |
+| `frexp` | `libm/src/freebsd/s_frexp.c` | `upstream-freebsd/lib/msun/src/s_frexp.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | word helpers | Replaces the local IEEE decomposition bootstrap. |
+| `frexpf` | `libm/src/freebsd/s_frexpf.c` | `upstream-freebsd/lib/msun/src/s_frexpf.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | float word helpers | Native float source. |
+| `modf` | `libm/src/freebsd/s_modf.c` | `upstream-freebsd/lib/msun/src/s_modf.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | word helpers | Replaces the trunc/subtract bootstrap implementation. |
+| `modff` | `libm/src/freebsd/s_modff.c` | `upstream-freebsd/lib/msun/src/s_modff.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | float word helpers | Native float source. |
+| `tanf` | `libm/src/freebsd/s_tanf.c` | `upstream-freebsd/lib/msun/src/s_tanf.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | inline `e_rem_pio2f.c`, inline `k_tanf.c`, `M_PI_2` | Native float tangent path. |
 
 `sqrtl` remains the previous bootstrap long-double implementation. Importing
 `e_sqrtl.c` should be handled as a separate long-double tranche because it
@@ -87,18 +104,16 @@ candidate is the older Bionic fdlibm source set.
 the double implementations; native float and long-double imports remain
 separate precision tranches.
 
-Recommended import order:
+Remaining order:
 
 1. Resolve native float source policy for `expf`, `logf`, `powf`, `sinf`, and
    `cosf`. Current Bionic `main` does not list all of these as simple
-   FreeBSD/msun C files in `libm/Android.bp`; some are supplied through other
-   source groups or optimized routines. Avoid partial imports until the source
-   map is explicit.
-2. Native float precision for `tanf`, `log10f`, `expm1f`, `log1pf`,
-   `remainderf`, `remquof`, and `fmodf`, where current Bionic FreeBSD/msun
-   source files are directly listed.
-3. Native fdlibm replacements for `log10`, `log2`, `expm1`, and `log1p`.
-4. Native fdlibm replacements for `frexp`, `modf`, `fmod`, `remainder`, and
-   `remquo`.
-5. Hardware-backed `fenv` per target architecture, then decide whether
-   `math_errhandling` should become `MATH_ERREXCEPT`, `MATH_ERRNO`, or both.
+   FreeBSD/msun C files in the same source family; some are supplied through
+   other source groups or optimized routines. Avoid partial imports until the
+   source map is explicit.
+2. Resolve `log2`/`log2f` source policy. They remain bootstrap wrappers because
+   the current FreeBSD/msun import set used here did not include direct
+   `e_log2.c`/`e_log2f.c` sources.
+3. Add hardware-backed `fenv` per target architecture.
+4. Revisit `math_errhandling` after `fenv` can observe exception flags and the
+   project has decided whether libm functions should set `errno`.

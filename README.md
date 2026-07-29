@@ -115,6 +115,17 @@ The current VM layer supports anonymous private `mmap` and `munmap`. Linux and
 macOS use direct syscalls. Windows maps anonymous allocations to
 `VirtualAlloc`/`VirtualFree`; file-backed mappings are not implemented yet.
 
+The current pthread layer keeps a project-owned, Bionic-shaped public ABI across
+Linux, macOS, and Windows. It supports create, join, detach, exit, once, keys
+with destructor passes, mutexes, condition variables, rwlocks, spin locks,
+barriers, and the first Bionic extension surface such as `pthread_getattr_np`
+and `pthread_gettid_np`. Cancellation and robust mutexes intentionally return
+`ENOTSUP`, matching the current project policy. Scheduler attributes are stored
+like Bionic attr objects, but host scheduler application is deferred. User
+stacks are accepted by `pthread_attr_setstack`; Linux and macOS can apply them,
+while Windows reports `ENOTSUP` from `pthread_create` because `CreateThread`
+cannot consume arbitrary caller-owned stacks.
+
 The current stdio layer is intentionally minimal. It supports standard streams,
 `fopen`/`fclose`, `fseek`/`ftell`, EOF/error state helpers, `remove`/`rename`,
 and simple byte-oriented I/O, but it does not yet define a final `FILE` ABI or

@@ -22,12 +22,20 @@ typedef uint32_t u_int32_t;
 #define __always_inline inline __attribute__((__always_inline__))
 #endif
 
+#ifndef M_PI_2
+#define M_PI_2 1.57079632679489661923
+#endif
+
 #ifndef STRICT_ASSIGN
 #define STRICT_ASSIGN(type, lval, rval) \
   do { \
     volatile type strict_value = (rval); \
     (lval) = strict_value; \
   } while (0)
+#endif
+
+#ifndef nan_mix_op
+#define nan_mix_op(x, y, op) ((x) op (y))
 #endif
 
 #if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__

@@ -102,6 +102,11 @@ typedef int (*crt_macos_pthread_create_fn)(
     const void*,
     void* (*)(void*),
     void*);
+typedef int (*crt_macos_pthread_attr_init_fn)(void*);
+typedef int (*crt_macos_pthread_attr_destroy_fn)(void*);
+typedef int (*crt_macos_pthread_attr_setstack_fn)(void*, void*, size_t);
+typedef int (*crt_macos_pthread_attr_setstacksize_fn)(void*, size_t);
+typedef int (*crt_macos_pthread_attr_setguardsize_fn)(void*, size_t);
 typedef int (*crt_macos_pthread_join_fn)(crt_macos_pthread_t, void**);
 typedef int (*crt_macos_pthread_detach_fn)(crt_macos_pthread_t);
 typedef void (*crt_macos_pthread_exit_fn)(void*) __attribute__((noreturn));
@@ -261,6 +266,10 @@ static int pthread_key_is_valid(pthread_key_t key) {
   return key >= 0 && key < CRT_PTHREAD_KEYS_MAX && pthread_key_used[key] != 0;
 }
 
+static int pthread_is_current_thread(pthread_t thread) {
+  return thread != 0 && thread == pthread_self();
+}
+
 #if defined(CRT_TARGET_OS_WINDOWS)
 static void init_windows_control_slot(void) {
   pthread_control_tls_slot = TlsAlloc();
@@ -294,7 +303,7 @@ static crt_pthread_control* pthread_control_from_thread(pthread_t thread) {
   if (thread == 0) {
     return 0;
   }
-  if (thread == pthread_self()) {
+  if (pthread_is_current_thread(thread)) {
     return pthread_get_current_control();
   }
   return (crt_pthread_control*)(uintptr_t)thread;
@@ -1191,6 +1200,11 @@ int pthread_spin_unlock(pthread_spinlock_t* lock) {
 }
 
 pthread_t pthread_self(void) {
+  crt_pthread_control* control = pthread_get_current_control();
+
+  if (control != 0) {
+    return (pthread_t)(uintptr_t)control;
+  }
   return (pthread_t)__crt_sys_thread_id();
 }
 
@@ -1504,6 +1518,10 @@ int pthread_create(
       (control->attr.flags & CRT_PTHREAD_ATTR_FLAG_DETACHED) != 0;
 
 #if defined(CRT_TARGET_OS_WINDOWS)
+  if ((control->attr.flags & CRT_PTHREAD_ATTR_FLAG_STACK_USER) != 0) {
+    free(control);
+    return ENOTSUP;
+  }
   control->handle = CreateThread(
       0, control->attr.stack_size, pthread_windows_start, control, 0, &control->thread_id);
   if (control->handle == 0) {
@@ -1577,13 +1595,69 @@ int pthread_create(
   {
     crt_macos_pthread_create_fn create_fn =
         (crt_macos_pthread_create_fn)dlsym(CRT_RTLD_NEXT, "pthread_create");
+    crt_macos_pthread_attr_init_fn attr_init_fn =
+        (crt_macos_pthread_attr_init_fn)dlsym(CRT_RTLD_NEXT, "pthread_attr_init");
+    crt_macos_pthread_attr_destroy_fn attr_destroy_fn =
+        (crt_macos_pthread_attr_destroy_fn)dlsym(CRT_RTLD_NEXT, "pthread_attr_destroy");
+    crt_macos_pthread_attr_setstack_fn attr_setstack_fn =
+        (crt_macos_pthread_attr_setstack_fn)dlsym(CRT_RTLD_NEXT, "pthread_attr_setstack");
+    crt_macos_pthread_attr_setstacksize_fn attr_setstacksize_fn =
+        (crt_macos_pthread_attr_setstacksize_fn)dlsym(CRT_RTLD_NEXT, "pthread_attr_setstacksize");
+    crt_macos_pthread_attr_setguardsize_fn attr_setguardsize_fn =
+        (crt_macos_pthread_attr_setguardsize_fn)dlsym(CRT_RTLD_NEXT, "pthread_attr_setguardsize");
+    union {
+      void* align_ptr;
+      long long align_ll;
+      char storage[128];
+    } native_attr;
+    void* native_attr_ptr = 0;
     int result;
 
     if (create_fn == 0) {
       free(control);
       return ENOSYS;
     }
-    result = create_fn(&control->native_thread, 0, pthread_macos_start, control);
+    if (attr_init_fn != 0 && attr_destroy_fn != 0) {
+      result = attr_init_fn(native_attr.storage);
+      if (result != 0) {
+        free(control);
+        return result;
+      }
+      native_attr_ptr = native_attr.storage;
+      if ((control->attr.flags & CRT_PTHREAD_ATTR_FLAG_STACK_USER) != 0) {
+        if (attr_setstack_fn == 0) {
+          attr_destroy_fn(native_attr_ptr);
+          free(control);
+          return ENOTSUP;
+        }
+        result = attr_setstack_fn(native_attr_ptr, control->attr.stack_base, control->attr.stack_size);
+        if (result != 0) {
+          attr_destroy_fn(native_attr_ptr);
+          free(control);
+          return result;
+        }
+      } else if (attr_setstacksize_fn != 0) {
+        result = attr_setstacksize_fn(native_attr_ptr, control->attr.stack_size);
+        if (result != 0) {
+          attr_destroy_fn(native_attr_ptr);
+          free(control);
+          return result;
+        }
+      }
+      if ((control->attr.flags & CRT_PTHREAD_ATTR_FLAG_STACK_USER) == 0 &&
+          attr_setguardsize_fn != 0) {
+        result = attr_setguardsize_fn(native_attr_ptr, control->attr.guard_size);
+        if (result != 0) {
+          attr_destroy_fn(native_attr_ptr);
+          free(control);
+          return result;
+        }
+      }
+    }
+    result = create_fn(&control->native_thread, native_attr_ptr, pthread_macos_start, control);
+    if (native_attr_ptr != 0) {
+      attr_destroy_fn(native_attr_ptr);
+    }
     if (result != 0) {
       free(control);
       return result;
@@ -1609,7 +1683,7 @@ int pthread_create(
 }
 
 int pthread_detach(pthread_t thread) {
-  crt_pthread_control* control = (crt_pthread_control*)(uintptr_t)thread;
+  crt_pthread_control* control = pthread_control_from_thread(thread);
   int expected = 0;
 
   if (control == 0) {
@@ -1654,7 +1728,7 @@ int pthread_detach(pthread_t thread) {
 }
 
 int pthread_join(pthread_t thread, void** retval) {
-  crt_pthread_control* control = (crt_pthread_control*)(uintptr_t)thread;
+  crt_pthread_control* control = pthread_control_from_thread(thread);
 
 #if !defined(CRT_TARGET_OS_WINDOWS) && !defined(CRT_TARGET_OS_LINUX)
   (void)retval;
@@ -1662,6 +1736,9 @@ int pthread_join(pthread_t thread, void** retval) {
 
   if (control == 0) {
     return EINVAL;
+  }
+  if (pthread_is_current_thread(thread)) {
+    return EDEADLK;
   }
   if (__atomic_load_n(&control->detached, __ATOMIC_ACQUIRE)) {
     return EINVAL;
@@ -1754,7 +1831,7 @@ pid_t pthread_gettid_np(pthread_t thread) {
   if (thread == 0) {
     return (pid_t)-1;
   }
-  if (thread == pthread_self()) {
+  if (pthread_is_current_thread(thread)) {
     return (pid_t)__crt_sys_thread_id();
   }
   control = (crt_pthread_control*)(uintptr_t)thread;
@@ -1792,7 +1869,7 @@ int pthread_setname_np(pthread_t thread, const char* name) {
     memcpy(control->name, name, length + 1);
     return 0;
   }
-  if (thread == pthread_self()) {
+  if (pthread_is_current_thread(thread)) {
     memcpy(pthread_current_name, name, length + 1);
     return 0;
   }
@@ -1810,7 +1887,7 @@ int pthread_getname_np(pthread_t thread, char* buf, size_t size) {
   control = pthread_control_from_thread(thread);
   if (control != 0) {
     name = control->name;
-  } else if (thread == pthread_self()) {
+  } else if (pthread_is_current_thread(thread)) {
     name = pthread_current_name;
   } else {
     return ESRCH;

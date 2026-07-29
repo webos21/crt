@@ -354,22 +354,25 @@ The trigonometric tranche imports current Bionic FreeBSD/msun `sin`, `cos`,
 reduction path. The public double functions use the original FreeBSD structure:
 `e_rem_pio2.c` is included into each public wrapper with `INLINE_REM_PIO2`,
 while `k_rem_pio2.c`, `k_sin.c`, `k_cos.c`, and `k_tan.c` are compiled once as
-shared internal helpers. `sinf`, `sinl`, `cosf`, `cosl`, `tanf`, and `tanl`
-remain bootstrap wrappers over the imported double implementations.
+shared internal helpers. The native float `tanf` path is also imported from
+current Bionic FreeBSD/msun; it includes `e_rem_pio2f.c` and `k_tanf.c` inline.
+`sinf`, `sinl`, `cosf`, `cosl`, and `tanl` remain bootstrap wrappers for now.
 
-The configure-friendly tranche opens `log10`, `log2`, `expm1`, `log1p`,
-`frexp`, `modf`, and `fmod`, plus float and long-double wrappers. These are
-project-owned bootstrap implementations for now: logarithmic variants are
-derived from the existing `log`/`exp` core, `frexp` uses local IEEE bit
-decomposition, and `modf`/`fmod` use the current rounding primitives. This is
-intended to satisfy common configure probes and early library ports before
-native fdlibm precision tranches are imported.
+The configure-friendly accuracy tranche replaces the earlier project-owned
+bootstrap implementations for `log10`, `log10f`, `expm1`, `expm1f`, `log1p`,
+`log1pf`, `frexp`, `frexpf`, `modf`, `modff`, `fmod`, and `fmodf` with current
+Bionic FreeBSD/msun sources. The long-double variants remain wrappers over the
+double implementations until a long-double ABI and fenv policy tranche is
+opened. `log2`, `log2f`, and `log2l` still use the bootstrap wrapper policy
+because the current imported Bionic FreeBSD/msun source set did not provide a
+direct `e_log2.c`/`e_log2f.c` source in this tranche.
 
-The remainder tranche opens `remainder`, `remainderf`, `remainderl`, `remquo`,
-`remquof`, and `remquol` as project-owned bootstrap implementations. They use
-round-to-nearest, ties-to-even quotient selection and preserve signed-zero
-results for the tested cases. Full fdlibm replacements from current Bionic
-FreeBSD/msun remain the intended accuracy tranche.
+The remainder tranche replaces `remainder`, `remainderf`, `remquo`, and
+`remquof` with current Bionic FreeBSD/msun sources. `remainderl` and `remquol`
+remain wrappers over the double implementations. The local `math_private.h`
+adds a small `nan_mix_op` compatibility macro for these current FreeBSD/msun
+sources so the imported files can remain close to upstream while the project
+keeps a reduced freestanding private header.
 
 The first `fenv.h` tranche is a policy surface, not a hardware floating-point
 environment implementation. It exposes the C99 exception and rounding constants,
@@ -614,8 +617,13 @@ this runtime.
 
 The current project-owned implementation is still intentionally narrow. Detach
 state, stack size, guard size, and caller-supplied stack addresses are represented
-in `pthread_attr_t`; detach state, stack size, and caller-supplied stack
-addresses are consumed by `pthread_create`. Priority, scheduling attributes,
+in `pthread_attr_t`. The attribute object accepts caller-supplied stacks on every
+host, matching Bionic's attr-object behavior. Linux applies project-owned stacks
+directly through `clone`, and macOS forwards stack attributes to libSystem when
+native pthread attr entry points are available. Windows preserves the stack
+address in the attr object but returns `ENOTSUP` from `pthread_create` if that
+caller-owned stack must be applied, because `CreateThread` has no API for using
+an arbitrary caller-provided stack. Priority, scheduling backend application,
 cancellation, and robust synchronization are deferred.
 
 Windows uses `CreateThread`, `WaitForSingleObject`, `CloseHandle`, and
@@ -649,12 +657,16 @@ The pthread attribute tranche adds the first `pthread_attr_t` API subset:
 - `pthread_attr_setstack`
 - `PTHREAD_STACK_MIN`
 
-The runtime now consumes detach state, stack size, and caller-supplied stack
-addresses during `pthread_create`. Joinable remains the default. Detached
-creation is accepted and releases the project control block when the worker
-returns or calls `pthread_exit`; Linux performs that release from its detached
-reaper once the kernel clears the child tid. Explicit `pthread_detach` is
-implemented. Scheduling and priority attributes are deferred.
+The runtime now consumes detach state and stack size during `pthread_create`.
+Caller-supplied stacks are stored by `pthread_attr_setstack` on all hosts.
+Linux applies them directly, macOS attempts to pass them through native
+libSystem pthread attributes, and Windows reports `ENOTSUP` from
+`pthread_create` when such a stack must be applied. Joinable remains the default.
+Detached creation is accepted and releases the project control block when the
+worker returns or calls `pthread_exit`; Linux performs that release from its
+detached reaper once the kernel clears the child tid. Explicit `pthread_detach`
+is implemented. Scheduling and priority attributes are stored, while host
+backend scheduler application is deferred.
 
 ## Pthread Detach Tranche
 

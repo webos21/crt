@@ -164,6 +164,27 @@ out-of-line C99 functions.
 | `libm/src/freebsd/s_sin.c` | `libm/upstream-freebsd/lib/msun/src/s_sin.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/adapted | Public `sin`; includes `e_rem_pio2.c` with `INLINE_REM_PIO2`. |
 | `libm/src/freebsd/s_tan.c` | `libm/upstream-freebsd/lib/msun/src/s_tan.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/adapted | Public `tan`; includes `e_rem_pio2.c` with `INLINE_REM_PIO2`. |
 | `libm/src/freebsd/s_trunc.c` | `libm/upstream-freebsd/lib/msun/src/s_trunc.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Upstream copyright preserved; uses the local adapted private header. |
+| `libm/src/freebsd/k_log.h` | `libm/upstream-freebsd/lib/msun/src/k_log.h` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported | Header helper used by `e_log10.c`. |
+| `libm/src/freebsd/k_logf.h` | `libm/upstream-freebsd/lib/msun/src/k_logf.h` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported | Header helper used by `e_log10f.c`. |
+| `libm/src/freebsd/e_log10.c` | `libm/upstream-freebsd/lib/msun/src/e_log10.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Replaces the project-owned bootstrap `log10` wrapper. |
+| `libm/src/freebsd/e_log10f.c` | `libm/upstream-freebsd/lib/msun/src/e_log10f.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Native float `log10f`; uses `k_logf.h`. |
+| `libm/src/freebsd/s_expm1.c` | `libm/upstream-freebsd/lib/msun/src/s_expm1.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Replaces the project-owned bootstrap `expm1` wrapper. |
+| `libm/src/freebsd/s_expm1f.c` | `libm/upstream-freebsd/lib/msun/src/s_expm1f.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Native float `expm1f`. |
+| `libm/src/freebsd/s_log1p.c` | `libm/upstream-freebsd/lib/msun/src/s_log1p.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Replaces the project-owned bootstrap `log1p` wrapper. |
+| `libm/src/freebsd/s_log1pf.c` | `libm/upstream-freebsd/lib/msun/src/s_log1pf.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Native float `log1pf`. |
+| `libm/src/freebsd/e_fmod.c` | `libm/upstream-freebsd/lib/msun/src/e_fmod.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Replaces the project-owned bootstrap `fmod` implementation; uses local `nan_mix_op` compatibility helper. |
+| `libm/src/freebsd/e_fmodf.c` | `libm/upstream-freebsd/lib/msun/src/e_fmodf.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Native float `fmodf`; uses local `nan_mix_op` compatibility helper. |
+| `libm/src/freebsd/e_remainder.c` | `libm/upstream-freebsd/lib/msun/src/e_remainder.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Replaces the project-owned bootstrap `remainder` implementation. |
+| `libm/src/freebsd/e_remainderf.c` | `libm/upstream-freebsd/lib/msun/src/e_remainderf.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Native float `remainderf`. |
+| `libm/src/freebsd/s_remquo.c` | `libm/upstream-freebsd/lib/msun/src/s_remquo.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Replaces the project-owned bootstrap `remquo` implementation. |
+| `libm/src/freebsd/s_remquof.c` | `libm/upstream-freebsd/lib/msun/src/s_remquof.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Native float `remquof`. |
+| `libm/src/freebsd/s_frexp.c` | `libm/upstream-freebsd/lib/msun/src/s_frexp.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Replaces the local IEEE decomposition bootstrap `frexp`. |
+| `libm/src/freebsd/s_frexpf.c` | `libm/upstream-freebsd/lib/msun/src/s_frexpf.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Native float `frexpf`. |
+| `libm/src/freebsd/s_modf.c` | `libm/upstream-freebsd/lib/msun/src/s_modf.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Replaces the project-owned bootstrap `modf` implementation. |
+| `libm/src/freebsd/s_modff.c` | `libm/upstream-freebsd/lib/msun/src/s_modff.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Native float `modff`. |
+| `libm/src/freebsd/e_rem_pio2f.c` | `libm/upstream-freebsd/lib/msun/src/e_rem_pio2f.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Included inline by `s_tanf.c`; not compiled as a separate object. |
+| `libm/src/freebsd/k_tanf.c` | `libm/upstream-freebsd/lib/msun/src/k_tanf.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported | Included inline by `s_tanf.c`; not compiled as a separate object. |
+| `libm/src/freebsd/s_tanf.c` | `libm/upstream-freebsd/lib/msun/src/s_tanf.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Native float tangent wrapper; includes float argument reduction and kernel helpers inline. |
 
 ### Time Tranche
 

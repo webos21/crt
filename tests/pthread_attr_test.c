@@ -1,6 +1,9 @@
 #include <errno.h>
+#include <stdlib.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <string.h>
+#include <sys/mman.h>
 
 static int thread_value;
 
@@ -14,13 +17,20 @@ static void* worker(void* arg) {
   return &thread_value;
 }
 
+static void* stack_worker(void* arg) {
+  (void)arg;
+  return (void*)pthread_self();
+}
+
 int main(void) {
   pthread_attr_t attr;
   pthread_t thread;
   void* result = 0;
+  int create_result;
   size_t stack_size = 0;
   size_t guard_size = 1;
   void* stack_addr = (void*)1;
+  void* user_stack;
   int detach_state = -1;
   int pshared = -1;
   int input = 77;
@@ -82,6 +92,40 @@ int main(void) {
   if (pthread_attr_destroy(&attr) != 0 || pthread_attr_destroy(0) != EINVAL) {
     return fail("pthread_attr_destroy");
   }
+
+  user_stack = mmap(0, PTHREAD_STACK_MIN * 4, PROT_READ | PROT_WRITE,
+                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (user_stack == MAP_FAILED) {
+    return fail("mmap user stack");
+  }
+  if (pthread_attr_init(&attr) != 0 ||
+      pthread_attr_setstack(&attr, user_stack, PTHREAD_STACK_MIN * 4) != 0 ||
+      pthread_attr_getstack(&attr, &stack_addr, &stack_size) != 0 ||
+      stack_addr != user_stack ||
+      stack_size != PTHREAD_STACK_MIN * 4 ||
+      pthread_attr_getguardsize(&attr, &guard_size) != 0 ||
+      guard_size != 0) {
+    munmap(user_stack, PTHREAD_STACK_MIN * 4);
+    return fail("user stack attr");
+  }
+  create_result = pthread_create(&thread, &attr, stack_worker, 0);
+#if defined(CRT_TARGET_OS_WINDOWS)
+  if (create_result != ENOTSUP) {
+    munmap(user_stack, PTHREAD_STACK_MIN * 4);
+    return fail("windows user stack policy");
+  }
+#else
+  if (create_result != 0) {
+    munmap(user_stack, PTHREAD_STACK_MIN * 4);
+    return fail("pthread_create user stack");
+  }
+  if (pthread_join(thread, &result) != 0 || result != (void*)thread) {
+    munmap(user_stack, PTHREAD_STACK_MIN * 4);
+    return fail("pthread_join user stack");
+  }
+#endif
+  pthread_attr_destroy(&attr);
+  munmap(user_stack, PTHREAD_STACK_MIN * 4);
 
   {
     pthread_mutexattr_t mutex_attr;

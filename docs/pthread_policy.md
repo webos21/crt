@@ -27,6 +27,10 @@ to Linux, macOS, and Windows.
   behind the adaptation layer for native thread lifecycle.
 - Windows keeps the project pthread ABI and maps thread lifecycle to Kernel32
   thread and TLS primitives.
+- Project-created threads return the project control-block handle from
+  `pthread_self`, so it matches the `pthread_t` value returned by
+  `pthread_create`. Threads not created by this runtime fall back to the backend
+  thread id for `pthread_self`.
 
 ## Scheduler and stack policy
 
@@ -44,13 +48,17 @@ to Linux, macOS, and Windows.
 - Process scope returns `ENOTSUP`.
 - Linux-owned thread stacks apply the recorded guard size with `mprotect` before
   the usable stack region. The default guard size is one 4096-byte page.
-- Caller-provided stacks disable guard ownership, matching the rule that stack
-  ownership remains with the caller.
-- macOS delegates thread stack layout to libSystem pthreads. Windows delegates
-  stack reservation/commit behavior to `CreateThread`; explicit custom guard
-  sizing is deferred.
-- User-provided stacks are accepted through `pthread_attr_setstack`; ownership
-  remains with the caller.
+- `pthread_attr_setstack` is supported at the attribute-object level on every
+  host. `pthread_attr_getstack` returns the caller-provided address and size even
+  on hosts that cannot apply that stack during thread creation.
+- Caller-provided stacks disable runtime guard ownership, matching the rule that
+  stack ownership remains with the caller.
+- macOS passes stack size, guard size, and caller-provided stacks into native
+  libSystem pthread attributes when the native entry points are available.
+- Windows passes stack size to `CreateThread`. Caller-provided stacks return
+  `ENOTSUP` at `pthread_create` time, not at `pthread_attr_setstack` time,
+  because Kernel32 does not accept an arbitrary caller-owned stack for
+  `CreateThread`.
 
 ## Bionic extension policy
 

@@ -1,23 +1,40 @@
 add_library(m STATIC
   src/basic.c
   src/fenv.c
+  src/freebsd/e_fmod.c
+  src/freebsd/e_fmodf.c
   src/freebsd/e_exp.c
   src/freebsd/e_log.c
+  src/freebsd/e_log10.c
+  src/freebsd/e_log10f.c
   src/freebsd/e_pow.c
   src/freebsd/k_cos.c
   src/freebsd/k_rem_pio2.c
   src/freebsd/k_sin.c
   src/freebsd/k_tan.c
+  src/freebsd/e_remainder.c
+  src/freebsd/e_remainderf.c
   src/freebsd/s_ceil.c
   src/freebsd/s_cos.c
+  src/freebsd/s_expm1.c
+  src/freebsd/s_expm1f.c
   src/freebsd/s_floor.c
   src/freebsd/s_fmax.c
   src/freebsd/s_fmin.c
+  src/freebsd/s_frexp.c
+  src/freebsd/s_frexpf.c
+  src/freebsd/s_log1p.c
+  src/freebsd/s_log1pf.c
+  src/freebsd/s_modf.c
+  src/freebsd/s_modff.c
+  src/freebsd/s_remquo.c
+  src/freebsd/s_remquof.c
   src/freebsd/s_round.c
   src/freebsd/s_scalbn.c
   src/freebsd/s_scalbnf.c
   src/freebsd/s_sin.c
   src/freebsd/s_tan.c
+  src/freebsd/s_tanf.c
   src/freebsd/s_trunc.c
 )
 
