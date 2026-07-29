@@ -31,6 +31,8 @@ THIS SOFTWARE.
 
 #include "gdtoaimp.h"
 
+#if LDBL_MANT_DIG == 113
+
 #undef _0
 #undef _1
 
@@ -118,3 +120,5 @@ strtorQ(CONST char *s, char **sp, int rounding, void *L)
 	ULtoQ((ULong*)L, bits, exp, k);
 	return k;
 	}
+
+#endif

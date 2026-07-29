@@ -1153,11 +1153,11 @@
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
       "upstream_path": "libc/upstream-openbsd/lib/libc/gdtoa/strtorQ.c",
-      "status": "imported",
+      "status": "adapted",
       "review_class": "main_current",
       "license_family": "Lucent permissive via OpenBSD/Bionic",
-      "reason": "Current Bionic/OpenBSD gdtoa decimal-to-binary conversion source replaces the project-owned bootstrap strtod/strtof parser.",
-      "next_action": "Import the remaining dtoa output-conversion files when printf floating formatting needs gdtoa-backed formatting."
+      "reason": "Current Bionic/OpenBSD IEEE quad decimal-to-binary conversion source is compiled only when the active target long double ABI has LDBL_MANT_DIG == 113.",
+      "next_action": "Revisit when native x87 long double parsing or a different Windows long double ABI policy is selected."
     },
     {
       "local": "libc/gdtoa/sum.c",

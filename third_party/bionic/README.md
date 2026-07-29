@@ -156,7 +156,7 @@ Bionic's `__strtorQ`; otherwise it remains a `strtod` wrapper until a native x87
 | `libc/gdtoa/strtodg.c` | `libc/upstream-openbsd/lib/libc/gdtoa/strtodg.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | General decimal-to-binary conversion engine. |
 | `libc/gdtoa/strtof.c` | `libc/upstream-openbsd/lib/libc/gdtoa/strtof.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Public `strtof`. |
 | `libc/gdtoa/strtord.c` | `libc/upstream-openbsd/lib/libc/gdtoa/strtord.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Internal double rounding helper. |
-| `libc/gdtoa/strtorQ.c` | `libc/upstream-openbsd/lib/libc/gdtoa/strtorQ.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | IEEE quad parser used by `strtold` only on `LDBL_MANT_DIG == 113` targets. |
+| `libc/gdtoa/strtorQ.c` | `libc/upstream-openbsd/lib/libc/gdtoa/strtorQ.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | IEEE quad parser compiled and used by `strtold` only on `LDBL_MANT_DIG == 113` targets; double-sized Windows/macOS long double targets skip this body. |
 | `libc/gdtoa/sum.c` | `libc/upstream-openbsd/lib/libc/gdtoa/sum.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Bigint summation helper. |
 | `libc/gdtoa/ulp.c` | `libc/upstream-openbsd/lib/libc/gdtoa/ulp.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | ULP helper used during rounding. |
 | `libc/gdtoa/thread_private.h` | none | project-owned | new | Adapter from OpenBSD gdtoa lock hooks to local pthread mutexes. |
