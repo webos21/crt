@@ -24,8 +24,11 @@ macOS:
 Windows from Git Bash/MSYS:
   . tools/crt-env.sh windows-host-ninja-debug windows
 
-PowerShell:
-  . .\tools\crt-env.ps1 -Preset windows-host-ninja-debug
+Windows Developer Command Prompt:
+  call tools\crt-env.cmd windows-host-ninja-debug
+
+PowerShell without changing execution policy:
+  cmd /k tools\crt-env.cmd windows-host-ninja-debug
 EOF
 }
 

@@ -384,11 +384,21 @@ from Git Bash/MSYS on Windows:
 . tools/crt-env.sh macos-host-ninja-debug
 ```
 
-On Windows PowerShell:
+On Windows, use the command-file environment helper to avoid PowerShell
+execution-policy restrictions:
+
+```bat
+call tools\crt-env.cmd windows-host-ninja-debug
+```
+
+From PowerShell, open a configured `cmd.exe` session instead:
 
 ```powershell
-. .\tools\crt-env.ps1 -Preset windows-host-ninja-debug
+cmd /k tools\crt-env.cmd windows-host-ninja-debug
 ```
+
+`tools\crt-env.ps1` is also available if your PowerShell execution policy allows
+local scripts.
 
 Example zlib build from an extracted upstream source directory:
 
