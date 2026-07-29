@@ -13,6 +13,24 @@ endif()
 
 project(crt LANGUAGES C CXX ASM)
 
+if(CRT_TARGET_ARCH STREQUAL "host")
+  if(CRT_TARGET_OS STREQUAL "macos" AND NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+    message(FATAL_ERROR "CRT_TARGET_OS=macos can only be used on a macOS host in the current host-build profile. Reconfigure with --preset linux-host-ninja-debug on Linux, or clear the stale build cache.")
+  elseif(CRT_TARGET_OS STREQUAL "linux" AND NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "CRT_TARGET_OS=linux can only be used on a Linux host in the current host-build profile. Reconfigure with the matching host preset, or clear the stale build cache.")
+  elseif(CRT_TARGET_OS STREQUAL "windows" AND NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
+    message(FATAL_ERROR "CRT_TARGET_OS=windows can only be used on a Windows host in the current host-build profile. Cross-build support is intentionally deferred.")
+  endif()
+endif()
+
+if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
+  message(FATAL_ERROR "CRT requires Clang as the C compiler because the build uses Clang-specific freestanding ABI flags. Reconfigure with a preset that sets CMAKE_C_COMPILER=clang, or clear the stale build cache.")
+endif()
+
+if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  message(FATAL_ERROR "CRT requires Clang++ as the C++ compiler because the build uses Clang-specific freestanding ABI flags. Reconfigure with a preset that sets CMAKE_CXX_COMPILER=clang++, or clear the stale build cache.")
+endif()
+
 if(CRT_TARGET_OS STREQUAL "windows")
   set(CMAKE_C_STANDARD_LIBRARIES "")
   set(CMAKE_CXX_STANDARD_LIBRARIES "")

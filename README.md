@@ -295,6 +295,18 @@ before comparing test counts. The configure log prints `CRT registered tests`
 for the selected OS preset; the count should match across macOS, Linux, and
 Windows unless a test is intentionally gated by platform.
 
+CMake caches the selected compiler and target OS in each `out/<preset>/`
+directory. If a build command shows the wrong compiler, such as `/usr/bin/cc` or
+`/usr/bin/c++`, or the wrong target define, such as `CRT_TARGET_OS_MACOS=1` in a
+Linux build, clear or refresh that preset's build directory before rebuilding:
+
+```sh
+cmake --fresh --preset <os-host-ninja-debug>
+```
+
+If your CMake does not support `--fresh`, remove the matching `out/<preset>/`
+directory and configure again.
+
 CTest does not build missing test executables. If CTest reports `Unable to find
 executable`, rerun the matching build preset or use the workflow preset:
 
