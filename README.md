@@ -228,9 +228,11 @@ compiler check trying to link a hosted MSVC runtime executable before CRT has
 configured its own targets.
 
 The build also disables CMake's default Windows C standard libraries for CRT
-targets. CMake tries to locate the required Windows SDK import libraries from
-the installed SDK. If that fails, either run from a Visual Studio Developer
-shell or pass them explicitly:
+targets, and does the same for C++ after the C++ runtime bootstrap is enabled.
+This prevents CMake's hosted MSVC defaults such as `oldnames.lib` from being
+added to freestanding `clang++` links. CMake tries to locate the required
+Windows SDK import libraries from the installed SDK. If that fails, either run
+from a Visual Studio Developer shell or pass them explicitly:
 
 ```powershell
 cmake --preset windows-host-ninja-debug `
