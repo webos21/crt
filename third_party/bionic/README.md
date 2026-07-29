@@ -251,6 +251,12 @@ out-of-line C99 functions.
 | `include/dlfcn.h` | `libc/include/dlfcn.h` API shape | project-owned, Bionic-shaped | new | Defines the first POSIX/Bionic-style `dlopen`/`dlsym`/`dlclose`/`dlerror` surface and common `RTLD_*` constants. |
 | `libdl/src/dl.c` | mixed Bionic/POSIX libdl surface | project-owned | new | Host adapter over Windows Kernel32 and macOS dyld APIs; Linux real loading is deferred to the project linker or a documented host bridge. |
 
+### C++ Runtime Bootstrap Tranche
+
+| Local file | Upstream path | Upstream ref | Status | Notes |
+| --- | --- | --- | --- | --- |
+| `libstdc++/src/cxxabi.c` | mixed Bionic/Itanium C++ ABI surface | project-owned | new | Provides first-tranche `__cxa_guard_*`, `__cxa_atexit`, `__cxa_finalize`, pure/deleted virtual handlers, and `__dso_handle`; full libc++abi/libunwind/libc++ import is deferred. |
+
 ### Pthread Condition Variable Tranche
 
 | Local file | Upstream path | Upstream ref | Status | Notes |

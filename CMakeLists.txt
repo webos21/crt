@@ -155,12 +155,13 @@ endif()
 add_subdirectory(libc)
 add_subdirectory(libm)
 add_subdirectory(libdl)
+add_subdirectory(libstdc++)
 add_subdirectory(tests)
 
 install(DIRECTORY include/ DESTINATION include)
 
 add_custom_target(sysroot
   COMMAND "${CMAKE_COMMAND}" --install "${CMAKE_BINARY_DIR}" --prefix "${CRT_SYSROOT}"
-  DEPENDS c m dl crt1
+  DEPENDS c m dl cxx crt1
   COMMENT "Installing CRT headers, libraries, and startup objects into ${CRT_SYSROOT}"
 )

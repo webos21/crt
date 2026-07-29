@@ -165,6 +165,12 @@ freestanding profile yet; real Linux `dlopen` support is deferred to the project
 ELF linker or to a separately documented host bridge. See
 `docs/dynamic_loading.md`.
 
+The current `libc++.a` is a small project-owned C++ ABI bootstrap, not the full
+LLVM libc++ standard library. It provides first-tranche `__cxa_*` hooks, guard
+variables, pure/deleted virtual handlers, `__dso_handle`, and destructor
+registration/finalization. Exceptions, RTTI, libunwind, libc++abi, and libc++
+proper remain separate future tranches. See `docs/cxx_runtime.md`.
+
 ## Prerequisites
 
 ### Common
@@ -330,6 +336,7 @@ out/macos-host-ninja-debug/sysroot/
     libc.a
     libdl.a
     libm.a
+    libc++.a
     libclang_rt.builtins.a
 ```
 
@@ -412,3 +419,4 @@ See:
 - `docs/hello_bringup.md`
 - `docs/header_abi.md`
 - `docs/dynamic_loading.md`
+- `docs/cxx_runtime.md`

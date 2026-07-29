@@ -5,6 +5,7 @@
 #define CRT_ATEXIT_MAX 32
 
 void __crt_sys_exit(int status) __attribute__((noreturn));
+void __cxa_finalize(void* dso) __attribute__((weak));
 
 static void (*atexit_handlers[CRT_ATEXIT_MAX])(void);
 static int atexit_count;
@@ -18,6 +19,9 @@ int atexit(void (*function)(void)) {
 }
 
 void exit(int status) {
+  if (__cxa_finalize != 0) {
+    __cxa_finalize(0);
+  }
   while (atexit_count > 0) {
     void (*handler)(void) = atexit_handlers[--atexit_count];
     handler();

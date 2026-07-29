@@ -966,6 +966,18 @@
       "license_family": "project",
       "reason": "Host dynamic-loading adapter maps Windows to Kernel32 and macOS to dyld while deferring Linux real loading to the project linker or a separate host bridge.",
       "next_action": "Implement true Linux loading through the project ELF linker before claiming Bionic-compatible runtime behavior."
+    },
+    {
+      "local": "libstdc++/src/cxxabi.c",
+      "component": "libstdc++",
+      "source_kind": "project-owned",
+      "upstream_ref": "project-owned",
+      "upstream_path": "mixed Bionic/Itanium C++ ABI surface",
+      "status": "new",
+      "review_class": "project_owned",
+      "license_family": "project",
+      "reason": "First C++ ABI bootstrap exports Bionic/Itanium-shaped __cxa guard, destructor, pure virtual, and DSO handle symbols before importing full libc++abi/libunwind.",
+      "next_action": "Replace or extend with libc++abi sources once exception, RTTI, unwind, and Windows C++ ABI policy are decided."
     }
   ]
 }

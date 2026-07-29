@@ -1085,6 +1085,38 @@ should not silently mix host glibc/libdl state into the freestanding runtime.
 
 The detailed policy is documented in `docs/dynamic_loading.md`.
 
+## C++ Runtime Bootstrap Tranche
+
+The first C++ runtime tranche adds a project-owned ABI support archive installed
+as `libc++.a` from the `libstdc++/` source directory. The directory name follows
+the historical Bionic layout for small C++ support, but the project policy is
+LLVM libc++/libc++abi/libunwind rather than GNU libstdc++.
+
+The first symbol surface is:
+
+- `__cxa_guard_acquire`;
+- `__cxa_guard_release`;
+- `__cxa_guard_abort`;
+- `__cxa_atexit`;
+- `__cxa_finalize`;
+- `__cxa_pure_virtual`;
+- `__cxa_deleted_virtual`;
+- `__dso_handle`.
+
+This is not a direct Bionic source import. It is a small Itanium C++ ABI shaped
+bootstrap implementation so the project can test guard variables and destructor
+registration before importing libc++abi. `exit()` weakly calls
+`__cxa_finalize(NULL)` when the C++ runtime archive is linked, so plain C
+programs do not gain a hard dependency on C++ runtime symbols.
+
+Exceptions, RTTI, `__gxx_personality_v0`, full unwind behavior, demangling,
+operator new/delete, libc++abi, libunwind, and libc++ are explicitly deferred.
+Windows needs a separate C++ frontend ABI decision because the current Clang
+MSVC target normally emits MSVC C++ ABI hooks rather than Bionic/Itanium
+`__cxa_*` hooks.
+
+The detailed policy is documented in `docs/cxx_runtime.md`.
+
 The metadata tranche moves the supported OS backends beyond the first
 regular-file fallback. Linux uses the raw `statx` syscall and converts the
 kernel `statx` record into the project `struct stat`. Windows uses

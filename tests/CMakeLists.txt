@@ -132,6 +132,13 @@ set_tests_properties(dl_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "dl_test: ok"
 )
 
+add_crt_test(cxx_runtime_test cxx_runtime_test.c)
+target_link_libraries(cxx_runtime_test PRIVATE cxx)
+add_dependencies(cxx_runtime_test cxx)
+set_tests_properties(cxx_runtime_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "cxx_runtime_test: ok"
+)
+
 add_crt_test(printf_test printf_test.c)
 set_tests_properties(printf_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "printf_test: ok 7 ff"
