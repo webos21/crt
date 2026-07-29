@@ -68,22 +68,28 @@ mkdir -p out/macos-host-ninja-debug/port-tests/src
 mkdir -p out/macos-host-ninja-debug/port-tests/install
 ```
 
-Then export the wrapper environment from the repository root:
+Then load the wrapper environment from the repository root. On Linux/macOS, or
+from Git Bash/MSYS on Windows:
 
 ```sh
-export CRT_SYSROOT="$PWD/out/macos-host-ninja-debug/sysroot"
-export CRT_TARGET_OS=macos
-export CC="$PWD/tools/crt-cc"
-export CXX="$PWD/tools/crt-c++"
-export AR="${AR:-ar}"
-export RANLIB="${RANLIB:-ranlib}"
-export STRIP="${STRIP:-strip}"
-export PORT_PREFIX="$PWD/out/macos-host-ninja-debug/port-tests/install"
-export CPPFLAGS="-I$PORT_PREFIX/include"
-export LDFLAGS="-L$PORT_PREFIX/lib"
-export PKG_CONFIG_LIBDIR="$PORT_PREFIX/lib/pkgconfig"
-export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
+. tools/crt-env.sh macos-host-ninja-debug
 ```
+
+On Windows PowerShell:
+
+```powershell
+. .\tools\crt-env.ps1 -Preset windows-host-ninja-debug
+```
+
+The env files set:
+
+- `CRT_SYSROOT=out/<preset>/sysroot`;
+- `CRT_TARGET_OS`;
+- `CC=tools/crt-cc`;
+- `CXX=tools/crt-c++`;
+- `PORT_PREFIX=out/<preset>/port-tests/install`;
+- `CPPFLAGS`, `LDFLAGS`, and `PKG_CONFIG_*` for libraries already installed
+  into `PORT_PREFIX`.
 
 Build and install zlib from the extracted upstream source directory:
 

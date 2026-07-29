@@ -377,21 +377,17 @@ mkdir -p out/macos-host-ninja-debug/port-tests/src
 mkdir -p out/macos-host-ninja-debug/port-tests/install
 ```
 
-Use this common environment from the repository root:
+Load the CRT porting environment from the repository root. On Linux/macOS, or
+from Git Bash/MSYS on Windows:
 
 ```sh
-export CRT_SYSROOT="$PWD/out/macos-host-ninja-debug/sysroot"
-export CRT_TARGET_OS=macos
-export CC="$PWD/tools/crt-cc"
-export CXX="$PWD/tools/crt-c++"
-export AR="${AR:-ar}"
-export RANLIB="${RANLIB:-ranlib}"
-export STRIP="${STRIP:-strip}"
-export PORT_PREFIX="$PWD/out/macos-host-ninja-debug/port-tests/install"
-export CPPFLAGS="-I$PORT_PREFIX/include"
-export LDFLAGS="-L$PORT_PREFIX/lib"
-export PKG_CONFIG_LIBDIR="$PORT_PREFIX/lib/pkgconfig"
-export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
+. tools/crt-env.sh macos-host-ninja-debug
+```
+
+On Windows PowerShell:
+
+```powershell
+. .\tools\crt-env.ps1 -Preset windows-host-ninja-debug
 ```
 
 Example zlib build from an extracted upstream source directory:
