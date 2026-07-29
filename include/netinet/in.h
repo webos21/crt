@@ -8,8 +8,8 @@
 extern "C" {
 #endif
 
-typedef uint16_t in_port_t;
-typedef uint32_t in_addr_t;
+typedef __crt_in_port_t in_port_t;
+typedef __crt_in_addr_t in_addr_t;
 
 struct in_addr {
   in_addr_t s_addr;

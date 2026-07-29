@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-typedef unsigned short sa_family_t;
+typedef __crt_sa_family_t sa_family_t;
 
 struct sockaddr {
   sa_family_t sa_family;

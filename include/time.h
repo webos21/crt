@@ -2,15 +2,15 @@
 #define CRT_TIME_H
 
 #include <stddef.h>
-#include <stdint.h>
+#include <bits/crt_types.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef int64_t time_t;
-typedef long clock_t;
-typedef int clockid_t;
+typedef __crt_time_t time_t;
+typedef __crt_clock_t clock_t;
+typedef __crt_clockid_t clockid_t;
 
 struct timespec {
   time_t tv_sec;

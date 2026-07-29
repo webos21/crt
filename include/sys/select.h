@@ -10,7 +10,7 @@ extern "C" {
 
 #define FD_SETSIZE 1024
 
-typedef unsigned long __fd_mask;
+typedef __crt_fd_mask __fd_mask;
 
 typedef struct fd_set {
   __fd_mask fds_bits[FD_SETSIZE / (8 * sizeof(__fd_mask))];

@@ -20,6 +20,8 @@ set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
+message(STATUS "CRT long double ABI follows the compiler target default; no -mlong-double override is applied")
+
 option(CRT_ENABLE_CXX_RUNTIME "Prepare C++ runtime integration points" ON)
 option(CRT_USE_COMPILER_RT "Link compiler-rt builtins when the compiler exposes them" ON)
 

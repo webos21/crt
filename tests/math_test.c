@@ -1,6 +1,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <fenv.h>
+#include <float.h>
 
 static int fail(const char* message) {
   fprintf(stderr, "math_test: %s\n", message);
@@ -171,6 +172,14 @@ int main(void) {
       !isnan(remquo(1.0, 0.0, &quotient))) {
     return fail("remquo");
   }
+#if LDBL_MANT_DIG > DBL_MANT_DIG
+  if (expm1l(4.0L * LDBL_EPSILON) <= 0.0L ||
+      log1pl(4.0L * LDBL_EPSILON) <= 0.0L ||
+      modfl(9007199254740992.5L, &integrall) != 0.5L ||
+      integrall != 9007199254740992.0L) {
+    return fail("long double precision");
+  }
+#endif
   if (math_errhandling != 0 || fegetround() != FE_TONEAREST ||
       fesetround(99) == 0 || fesetround(FE_DOWNWARD) != 0 ||
       fegetround() != FE_DOWNWARD || fesetround(FE_UPWARD) != 0 ||

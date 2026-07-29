@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-typedef unsigned long nfds_t;
+typedef __crt_nfds_t nfds_t;
 
 struct pollfd {
   int fd;

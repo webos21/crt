@@ -1,17 +1,17 @@
 #ifndef CRT_SYS_TYPES_H
 #define CRT_SYS_TYPES_H
 
-#include <stdint.h>
+#include <bits/crt_types.h>
 
-typedef intptr_t ssize_t;
-typedef int64_t off_t;
-typedef unsigned int mode_t;
-typedef uint64_t dev_t;
-typedef uint64_t ino_t;
-typedef uint64_t nlink_t;
-typedef int64_t blksize_t;
-typedef int64_t blkcnt_t;
-typedef int64_t pid_t;
-typedef uint32_t socklen_t;
+typedef __crt_ssize_t ssize_t;
+typedef __crt_off_t off_t;
+typedef __crt_mode_t mode_t;
+typedef __crt_dev_t dev_t;
+typedef __crt_ino_t ino_t;
+typedef __crt_nlink_t nlink_t;
+typedef __crt_blksize_t blksize_t;
+typedef __crt_blkcnt_t blkcnt_t;
+typedef __crt_pid_t pid_t;
+typedef __crt_socklen_t socklen_t;
 
 #endif

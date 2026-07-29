@@ -918,6 +918,30 @@
       "license_family": "project",
       "reason": "Current Bionic main exposes float sine/cosine kernels and argument reduction but not standalone public s_sinf.c or s_cosf.c wrappers in the observed source tree.",
       "next_action": "Replace only if a future Bionic main source tree exposes suitable public wrappers."
+    },
+    {
+      "local": "libm/src/long_double.c",
+      "component": "libm",
+      "source_kind": "project-owned",
+      "upstream_ref": "project-owned",
+      "upstream_path": "none",
+      "status": "new",
+      "review_class": "project_owned",
+      "license_family": "project",
+      "reason": "Portable long double bootstrap implementation keeps the public long double API from collapsing to double wrappers while following the compiler target's native long-double ABI; x86_64 fenv now includes x87 control/status state.",
+      "next_action": "Replace selected functions with representation-appropriate Bionic/FreeBSD sources selected by LDBL_MANT_DIG."
+    },
+    {
+      "local": "include/bits/crt_types.h",
+      "component": "headers",
+      "source_kind": "project-owned",
+      "upstream_ref": "project-owned",
+      "upstream_path": "none",
+      "status": "new",
+      "review_class": "project_owned",
+      "license_family": "project",
+      "reason": "Minimal public bits layer centralizes Bionic/Linux-style scalar ABI types while absorbing Windows LLP64 host differences.",
+      "next_action": "Split into narrower bits headers only when additional public ABI boundaries require it."
     }
   ]
 }

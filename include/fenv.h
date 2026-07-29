@@ -11,6 +11,9 @@ typedef struct {
   int round;
   unsigned int status;
   unsigned int control;
+  unsigned int mxcsr;
+  unsigned int x87_control;
+  unsigned int x87_status;
 } fenv_t;
 
 #define FE_INVALID 0x01

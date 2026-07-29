@@ -61,7 +61,7 @@ visible in `third_party/bionic/README.md`.
 | `modf` | `libm/src/freebsd/s_modf.c` | `upstream-freebsd/lib/msun/src/s_modf.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | word helpers | Replaces the trunc/subtract bootstrap implementation. |
 | `modff` | `libm/src/freebsd/s_modff.c` | `upstream-freebsd/lib/msun/src/s_modff.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | float word helpers | Native float source. |
 | `tanf` | `libm/src/freebsd/s_tanf.c` | `upstream-freebsd/lib/msun/src/s_tanf.c` | Bionic `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | inline `e_rem_pio2f.c`, inline `k_tanf.c`, `M_PI_2` | Native float tangent path. |
-| `fenv` | `libm/src/fenv.c` | project-owned architecture backend | project-owned | x86_64 MXCSR or AArch64 FPCR/FPSR | Provides observable exception flags and rounding mode storage for supported 64-bit CPU families; x87-specific state is still deferred. |
+| `fenv` | `libm/src/fenv.c` | project-owned architecture backend | project-owned | x86_64 MXCSR plus x87 control/status, or AArch64 FPCR/FPSR | Provides observable exception flags and rounding mode storage for supported 64-bit CPU families; full trap/tag-word environment images are still deferred. |
 
 `sqrtl` remains the previous bootstrap long-double implementation. Importing
 `e_sqrtl.c` should be handled as a separate long-double tranche because it
@@ -109,19 +109,20 @@ candidate is the older Bionic fdlibm source set.
 
 `exp`, `log`, `scalbn`, `scalbnf`, `pow`, native `expf`, native `logf`, native
 `powf`, and the common trigonometric float functions have been imported or
-replaced with native-kernel wrappers. `expl`, `logl`, and `powl` are currently
-bootstrap wrappers over the double implementations; long-double imports remain a
-separate precision tranche.
+replaced with native-kernel wrappers. The public long-double APIs now live in a
+project-owned portable bootstrap file, `libm/src/long_double.c`, so they no
+longer collapse through double wrappers on targets where `long double` is wider
+than `double`. The project has decided to follow the compiler target's native
+`long double` ABI instead of forcing Bionic's 64-bit Android 128-bit long double
+model across every host OS.
 
 Remaining order:
 
-1. Add long-double source policy for `expl`, `logl`, `powl`, `sinl`, `cosl`,
-   `tanl`, `sqrtl`, and related helpers.
-2. Decide whether x86_64 must also preserve x87 control/status words or whether
-   the project ABI can define SSE/MXCSR-only floating-point environment behavior
-   for now.
-3. Revisit `math_errhandling` after deciding whether imported libm functions
-   should set `errno`, raise observable fenv exceptions consistently, both, or
-   neither.
-4. Evaluate Bionic optimized-routine imports after correctness and provenance
+1. Replace project-owned long-double bootstrap functions with representation
+   appropriate sources selected by `LDBL_MANT_DIG`: fake/double-sized wrappers
+   for `53`, ld80-style sources for `64`, and ld128-style sources for `113`.
+2. Revisit `math_errhandling` only if a future POSIX compatibility mode requires
+   libm functions to set `errno` or raise strict per-function fenv exceptions.
+   The default policy remains `math_errhandling == 0`.
+3. Evaluate Bionic optimized-routine imports after correctness and provenance
    are stable.

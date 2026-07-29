@@ -386,18 +386,35 @@ keeps a reduced freestanding private header.
 The first hardware `fenv.h` tranche exposes the C99 exception and rounding
 constants, `FE_DFL_ENV`, and the core `fe*` functions. The implementation is
 architecture-backed for the supported 64-bit CPU families: x86_64 stores and
-restores MXCSR, while AArch64 stores and restores FPCR/FPSR. The generic
-fallback remains conservative for unsupported architectures. `math_errhandling`
-is still `0`: imported libm functions are not yet required to set `errno`, and
-the project has not promised complete exception-raising behavior for every math
-operation.
+restores MXCSR plus the x87 control/status words, while AArch64 stores and
+restores FPCR/FPSR. The x86_64 path keeps rounding mode synchronized between
+MXCSR and x87 so host-native 80-bit `long double` code can observe the same
+rounding policy as SSE code. This is not a full `fxsave`/`fldenv` environment
+image: x87 tag word, instruction/data pointers, and trap-enable behavior remain
+deferred.
+
+`math_errhandling` is still `0`: imported libm functions are not required to set
+`errno`, and project-owned wrappers should not add per-function `errno` side
+effects. The fenv API itself exposes observable exception flags, and imported
+math sources may naturally raise hardware flags, but the project does not yet
+require every libm function to raise exactly the POSIX/IEEE exception set for
+every edge case.
 
 Most common float variants now use native float sources or project-owned
-wrappers over native float kernels. The long double variants, including
-`sqrtl`, still use project-owned bootstrap behavior. Full long-double ABI
-coverage, x87-specific fenv details on x86_64, per-function `errno` policy, and
-full edge-case accuracy coverage remain deferred to later libm import tranches.
-Their planned source dependencies are recorded in `docs/libm_dependency_map.md`.
+wrappers over native float kernels. The first long-double tranche moves the
+public `*l` APIs out of double wrappers and into a project-owned portable
+implementation in `libm/src/long_double.c`. This is still a bootstrap accuracy
+layer, not a correctly-rounded fdlibm/msun import.
+
+The project long-double ABI follows the active compiler target default and does
+not use `-mlong-double-64`, `-mlong-double-80`, or `-mlong-double-128` to force a
+single representation. Bionic 64-bit Android uses 128-bit long double, but that
+cannot be forced uniformly across this project's Windows/macOS/Linux target
+matrix. Future source imports should therefore be selected by the observed
+`LDBL_MANT_DIG`: double-sized/fake long double for `53`, ld80-style sources for
+`64`, and ld128-style sources for `113`. Per-function `errno` policy and full
+edge-case accuracy coverage remain deferred to later libm import tranches. Their
+planned source dependencies are recorded in `docs/libm_dependency_map.md`.
 
 ## Next Runtime Boundary Tranche
 
@@ -475,6 +492,25 @@ C99 integer headers before the fuller Bionic header set is imported.
 predefined types and builtins. Bionic normally relies on compiler-provided forms
 for this layer, so keeping these wrappers small makes the sysroot more explicit
 without importing host libc headers.
+
+## Header ABI And Bits Tranche
+
+The first sysroot/header ABI tranche introduces `include/bits/crt_types.h` as a
+small shared public ABI layer. The goal is not to clone Bionic's full `bits/`
+tree yet, but to centralize types that appear in multiple public headers and
+must remain stable across Linux, Windows, and macOS.
+
+The fixed public type policy is Linux/Bionic-shaped where portability pressure
+is highest: `off_t` and `time_t` are signed 64-bit types, device/inode/link
+counts are 64-bit, `ssize_t` is pointer-sized, `pid_t` and `socklen_t` are
+32-bit, and network address family/port/address types keep their POSIX-sized
+forms. Windows LLP64 is absorbed here: Windows `long` can remain 32-bit, but
+public runtime types must not shrink just because the host C data model differs.
+
+`tests/header_abi_test.c` includes the public header set together and verifies
+core type sizes, selected structure fields, and include-order compatibility.
+`tests/data_model_test.c` continues to check wider target data-model choices,
+including the target-native `long double` policy.
 
 ## Time Tranche
 

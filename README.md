@@ -133,10 +133,29 @@ buffering model. The current `printf` family is a small bootstrap formatter for
 early tests, not a complete C/POSIX formatter.
 
 The current `libm.a` has a bootstrap `math.h`, classification macros, absolute
-value, sign, float/long double wrappers, current-Bionic-style builtin
-`sqrt`/`sqrtf`, and the first curated Bionic/FreeBSD msun import for
-double-precision min/max and rounding primitives. It is not yet a full
-fdlibm/msun/Bionic math import.
+value, sign handling, current-Bionic-style builtin `sqrt`/`sqrtf`, a
+project-owned portable long-double bootstrap, and curated Bionic/FreeBSD msun
+imports for the first accuracy tranches. It is not yet a full fdlibm/msun/Bionic
+math import.
+
+The default libm error policy is still `math_errhandling == 0`: math functions
+do not promise per-function `errno` side effects or strict IEEE exception
+raising yet. The `fenv` API itself is backed by hardware state where available:
+x86_64 tracks MXCSR plus x87 control/status words, and AArch64 tracks FPCR/FPSR.
+
+`long double` follows the active compiler target ABI. The build intentionally
+does not pass `-mlong-double-64`, `-mlong-double-80`, or `-mlong-double-128`.
+This means Linux AArch64 can expose 128-bit `long double`, x86_64 targets can
+use their compiler-selected 80-bit or 128-bit mode, and Windows/macOS ARM64 can
+keep their native double-sized `long double`. Bionic's 64-bit Android ABI uses
+128-bit long double, but forcing that ABI uniformly is not portable across the
+project's Windows/macOS/Linux target matrix.
+
+Public scalar types are centralized through a small `bits/` layer. The first
+file, `bits/crt_types.h`, fixes the Bionic/Linux-style ABI for shared types such
+as `off_t`, `time_t`, `ssize_t`, `socklen_t`, and inode/device counters while
+still allowing host data-model differences such as Windows LLP64 `long`. The
+policy and test coverage are documented in `docs/header_abi.md`.
 
 ## Prerequisites
 

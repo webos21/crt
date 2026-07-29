@@ -121,6 +121,7 @@ out-of-line C99 functions.
 | --- | --- | --- | --- | --- |
 | `include/stdint.h` | `libc/include/stdint.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Uses compiler predefined type macros instead of Bionic's `__LP64__` branch to support Windows LLP64. |
 | `include/float.h` | compiler-provided header layer | project-owned | new | Defines C floating-point limits from compiler predefined macros so imported fdlibm/msun sources do not depend on host libc headers. |
+| `include/bits/crt_types.h` | none | project-owned | new | Centralizes shared public ABI scalar types for the first minimal `bits/` layer. |
 | `include/stdbool.h` | `libc/include/stdbool.h` | project-owned | new | Minimal C99 boolean macro header. |
 | `include/stddef.h` | compiler-provided header layer | project-owned | new | Defines `ptrdiff_t`, `size_t`, `wchar_t`, `NULL`, and `offsetof` from compiler builtins. |
 | `include/stdarg.h` | compiler-provided header layer | project-owned | new | Defines `va_list` and `va_*` macros from compiler builtins. |
@@ -140,8 +141,9 @@ out-of-line C99 functions.
 | --- | --- | --- | --- | --- |
 | `include/math.h` | `libc/include/math.h` | project-owned | new | Minimal C99/POSIX math declarations and classification macros for the first `libm.a` boundary. |
 | `include/fenv.h` | `libc/include/fenv.h` | project-owned | new | Minimal C99 floating-point environment declarations with project-owned `fenv_t` storage for architecture-backed state. |
-| `libm/src/basic.c` | `libm/builtins.cpp` plus mixed Bionic/POSIX surface | adapted/project-owned | new | Bootstrap long double wrappers and current-Bionic-style builtin `fabs*`, `copysign*`, `fminf`, `fmaxf`, `sqrt`, and `sqrtf`; uses Clang elementwise sqrt to avoid recursive Debug/O0 libcalls. |
-| `libm/src/fenv.c` | `libm/fenv-*.c` policy surface | project-owned | new | Architecture-backed C99 fenv over x86_64 MXCSR and AArch64 FPCR/FPSR, with a generic fallback for unsupported architectures. |
+| `libm/src/basic.c` | `libm/builtins.cpp` plus mixed Bionic/POSIX surface | adapted/project-owned | new | Current-Bionic-style builtin `fabs*`, `copysign*`, `fminf`, `fmaxf`, `sqrt`, and `sqrtf`, plus simple long-double min/max helpers; uses Clang elementwise sqrt to avoid recursive Debug/O0 libcalls. |
+| `libm/src/fenv.c` | `libm/fenv-*.c` policy surface | project-owned | new | Architecture-backed C99 fenv over x86_64 MXCSR plus x87 control/status and AArch64 FPCR/FPSR, with a generic fallback for unsupported architectures. |
+| `libm/src/long_double.c` | none | project-owned | new | Portable bootstrap long double implementation for rounding, decomposition, elementary, trigonometric, power, and remainder APIs; follows the compiler target's native long-double ABI. |
 
 ### Libm FreeBSD/msun Import Tranche 1
 
