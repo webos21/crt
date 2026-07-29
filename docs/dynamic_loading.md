@@ -92,6 +92,8 @@ directions:
 
 The first option better matches the project goal.
 
+The broader linker/loader policy is documented in `docs/linker_loader.md`.
+
 ## Bionic Compatibility Notes
 
 Android Bionic `libdl` is a frontend to Android's dynamic linker. That stack

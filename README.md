@@ -163,7 +163,7 @@ Bionic/POSIX-shaped `dlfcn.h` surface. Windows maps to
 symbol APIs. Linux intentionally does not call host glibc/libdl in the
 freestanding profile yet; real Linux `dlopen` support is deferred to the project
 ELF linker or to a separately documented host bridge. See
-`docs/dynamic_loading.md`.
+`docs/dynamic_loading.md` and `docs/linker_loader.md`.
 
 The current `libc++.a` is a small project-owned C++ ABI bootstrap, not the full
 LLVM libc++ standard library. It provides first-tranche `__cxa_*` hooks, guard
@@ -172,6 +172,11 @@ registration/finalization. Exceptions, RTTI, libunwind, libc++abi, and libc++
 proper remain separate future tranches. CRT-targeted C++ uses the
 Bionic/Itanium ABI lane; Windows-native C++ DLL interoperability is reserved for
 a separate MSVC ABI bridge lane. See `docs/cxx_runtime.md`.
+
+The build now produces both static and host-native shared artifacts for `libc`,
+`libm`, `libdl`, and `libc++`. Tests still link the static archives by default;
+the shared libraries are first-stage artifacts for loader, export, and ABI
+policy work. See `docs/shared_libraries.md`.
 
 ## Prerequisites
 
@@ -355,6 +360,10 @@ out/macos-host-ninja-debug/sysroot/
     libdl.a
     libm.a
     libc++.a
+    libc.dylib / libc.so / c.dll
+    libdl.dylib / libdl.so / dl.dll
+    libm.dylib / libm.so / m.dll
+    libc++.dylib / libc++.so / c++.dll
     libclang_rt.builtins.a
 ```
 
@@ -438,3 +447,5 @@ See:
 - `docs/header_abi.md`
 - `docs/dynamic_loading.md`
 - `docs/cxx_runtime.md`
+- `docs/linker_loader.md`
+- `docs/shared_libraries.md`

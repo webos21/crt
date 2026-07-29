@@ -1,4 +1,4 @@
-add_library(c STATIC
+set(CRT_LIBC_SOURCES
   src/atoi.c
   src/atol.c
   src/ctype.c
@@ -58,6 +58,7 @@ add_library(c STATIC
   string/strxfrm.c
 )
 
+add_library(c STATIC ${CRT_LIBC_SOURCES})
 target_link_libraries(c PRIVATE crt_build_flags)
 target_include_directories(c PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -125,5 +126,27 @@ set_target_properties(crt1 PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
 )
 
-install(TARGETS c ARCHIVE DESTINATION lib)
+add_library(c_shared SHARED ${CRT_LIBC_SOURCES})
+target_link_libraries(c_shared PRIVATE crt_build_flags crt_compiler_rt_builtins)
+target_include_directories(c_shared PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
+target_sources(c_shared PRIVATE $<TARGET_OBJECTS:crt_syscall>)
+if(CRT_TARGET_OS STREQUAL "windows")
+  target_sources(c_shared PRIVATE $<TARGET_OBJECTS:crt_windows_chkstk>)
+endif()
+crt_configure_shared_runtime(c_shared)
+set_target_properties(c_shared PROPERTIES
+  OUTPUT_NAME c
+  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+  ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
+
+install(TARGETS c c_shared
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
 install(FILES "$<TARGET_OBJECTS:crt1>" DESTINATION lib RENAME crt1.o)

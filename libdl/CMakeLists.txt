@@ -8,4 +8,22 @@ set_target_properties(dl PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
 )
 
-install(TARGETS dl ARCHIVE DESTINATION lib)
+add_library(dl_shared SHARED
+  src/dl.c
+)
+
+target_link_libraries(dl_shared PRIVATE crt_build_flags c_shared)
+crt_configure_shared_runtime(dl_shared)
+set_target_properties(dl_shared PROPERTIES
+  OUTPUT_NAME dl
+  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+  ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
+
+install(TARGETS dl dl_shared
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)

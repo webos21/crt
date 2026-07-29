@@ -1,4 +1,4 @@
-add_library(m STATIC
+set(CRT_LIBM_SOURCES
   src/basic.c
   src/fenv.c
   src/long_double.c
@@ -45,6 +45,7 @@ add_library(m STATIC
   src/freebsd/s_trunc.c
 )
 
+add_library(m STATIC ${CRT_LIBM_SOURCES})
 target_link_libraries(m PRIVATE crt_build_flags)
 target_include_directories(m PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/freebsd")
 target_compile_definitions(m PRIVATE USE_BUILTIN_FMAX USE_BUILTIN_FMIN)
@@ -53,4 +54,21 @@ set_target_properties(m PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
 )
 
-install(TARGETS m ARCHIVE DESTINATION lib)
+add_library(m_shared SHARED ${CRT_LIBM_SOURCES})
+target_link_libraries(m_shared PRIVATE crt_build_flags crt_compiler_rt_builtins)
+target_include_directories(m_shared PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/freebsd")
+target_compile_definitions(m_shared PRIVATE USE_BUILTIN_FMAX USE_BUILTIN_FMIN)
+crt_configure_shared_runtime(m_shared)
+set_target_properties(m_shared PROPERTIES
+  OUTPUT_NAME m
+  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+  ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
+
+install(TARGETS m m_shared
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)

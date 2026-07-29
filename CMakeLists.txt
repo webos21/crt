@@ -95,6 +95,26 @@ if(CRT_TARGET_OS STREQUAL "windows")
   )
 endif()
 
+function(crt_configure_shared_runtime target_name)
+  target_link_options(${target_name} PRIVATE
+    -nostdlib
+    -nodefaultlibs
+  )
+  if(CRT_TARGET_OS STREQUAL "macos")
+    target_link_libraries(${target_name} PRIVATE System)
+  elseif(CRT_TARGET_OS STREQUAL "windows")
+    target_link_options(${target_name} PRIVATE
+      -fuse-ld=lld
+      -Wl,/OPT:REF
+    )
+    target_link_libraries(${target_name} PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  elseif(CRT_TARGET_OS STREQUAL "linux")
+    target_link_options(${target_name} PRIVATE
+      -Wl,--gc-sections
+    )
+  endif()
+endfunction()
+
 if(CRT_TARGET_ARCH STREQUAL "host")
   set(CRT_EFFECTIVE_ARCH_FOR_FLAGS "${CMAKE_SYSTEM_PROCESSOR}")
 else()
@@ -197,6 +217,6 @@ install(DIRECTORY include/ DESTINATION include)
 
 add_custom_target(sysroot
   COMMAND "${CMAKE_COMMAND}" --install "${CMAKE_BINARY_DIR}" --prefix "${CRT_SYSROOT}"
-  DEPENDS c m dl cxx crt1
+  DEPENDS c c_shared m m_shared dl dl_shared cxx cxx_shared crt1
   COMMENT "Installing CRT headers, libraries, and startup objects into ${CRT_SYSROOT}"
 )

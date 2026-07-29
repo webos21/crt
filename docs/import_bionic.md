@@ -1085,6 +1085,46 @@ should not silently mix host glibc/libdl state into the freestanding runtime.
 
 The detailed policy is documented in `docs/dynamic_loading.md`.
 
+## Linker/Loader Policy Tranche
+
+The first linker/loader tranche is a policy tranche rather than an executable
+loader import. The project creates the `linker/` directory as the future home of
+the project-owned dynamic linker, but no linker target is built yet.
+
+The current runtime remains host-loader-first where that is safe:
+
+- Windows `libdl` uses the host PE loader through Kernel32.
+- macOS `libdl` uses dyld image/symbol APIs.
+- Linux freestanding `libdl` does not call host glibc/libdl and keeps real
+  object loading deferred.
+
+Android Bionic's real `libdl` and linker behavior includes ELF loading,
+relocations, `DT_NEEDED`, init/fini arrays, ELF TLS, symbol lookup scopes,
+Android namespaces, and Android-specific extension APIs. Those are future
+runtime behavior compatibility milestones, not claims made by the current
+host-adapter `libdl`.
+
+The detailed policy is documented in `docs/linker_loader.md`.
+
+## Shared Library Artifact Tranche
+
+The first shared-library tranche adds host-native shared artifacts alongside the
+existing static archives:
+
+- `libc`;
+- `libm`;
+- `libdl`;
+- `libc++`.
+
+The existing tests continue to link the static archives by default. The shared
+targets are installed into the project sysroot and use explicit freestanding
+link options so hosted libc/C++ runtime libraries do not silently enter the CRT
+boundary. Windows uses automatic export generation for this first DLL artifact
+tranche; Linux/macOS export lists and symbol versioning are deferred.
+
+This is a build artifact tranche, not a final ABI-stable shared runtime claim.
+The detailed policy is documented in `docs/shared_libraries.md`.
+
 ## C++ Runtime Bootstrap Tranche
 
 The first C++ runtime tranche adds a project-owned ABI support archive installed
