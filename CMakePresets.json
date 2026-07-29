@@ -9,6 +9,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
         "CRT_TARGET_OS": "macos",
         "CRT_TARGET_ARCH": "host"
       }
@@ -21,6 +22,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
         "CRT_TARGET_OS": "linux",
         "CRT_TARGET_ARCH": "host"
       }
@@ -33,6 +35,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
         "CRT_TARGET_OS": "windows",
         "CRT_TARGET_ARCH": "host",
         "CMAKE_TRY_COMPILE_TARGET_TYPE": "STATIC_LIBRARY",

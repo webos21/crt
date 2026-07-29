@@ -182,6 +182,7 @@ All platforms need:
 - Git
 - CMake 3.25 or newer
 - LLVM Clang
+- LLVM Clang++
 - compiler-rt from the active Clang installation
 
 Ninja is the default generator for all host presets.
@@ -204,6 +205,7 @@ git --version
 cmake --version
 ninja --version
 clang --version
+clang++ --version
 ld.lld --version
 ```
 
