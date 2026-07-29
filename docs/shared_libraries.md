@@ -32,6 +32,11 @@ Shared libraries are host-native artifacts:
 - macOS: `.dylib`
 - Windows: `.dll` plus import library
 
+On Windows the DLL import libraries intentionally use distinct names such as
+`c_dll.lib`, `m_dll.lib`, `dl_dll.lib`, and `c++_dll.lib`. This avoids
+colliding with the static archives `c.lib`, `m.lib`, `dl.lib`, and `c++.lib` in
+the same `lib/` output directory.
+
 These are not yet final ABI-stable shared runtimes. They are build artifacts for
 the next compatibility tranche.
 

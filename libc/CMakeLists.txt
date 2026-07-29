@@ -143,6 +143,11 @@ set_target_properties(c_shared PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
   WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
+if(CRT_TARGET_OS STREQUAL "windows")
+  set_target_properties(c_shared PROPERTIES
+    ARCHIVE_OUTPUT_NAME c_dll
+  )
+endif()
 
 install(TARGETS c c_shared
   ARCHIVE DESTINATION lib
