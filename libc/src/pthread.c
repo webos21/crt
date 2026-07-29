@@ -143,7 +143,11 @@ typedef struct crt_pthread_control {
 #if !defined(CRT_TARGET_OS_WINDOWS)
 static __thread crt_pthread_control* pthread_current_control;
 #endif
+#if defined(CRT_TARGET_OS_WINDOWS)
+static char pthread_current_name[CRT_PTHREAD_NAME_MAX];
+#else
 static __thread char pthread_current_name[CRT_PTHREAD_NAME_MAX];
+#endif
 
 static int pthread_key_used[CRT_PTHREAD_KEYS_MAX];
 static __pthread_key_destructor_t pthread_key_destructors[CRT_PTHREAD_KEYS_MAX];
