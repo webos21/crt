@@ -17,7 +17,23 @@ $ToolsDir = Split-Path -Parent $ScriptPath
 $RepoRoot = Split-Path -Parent $ToolsDir
 
 if ([string]::IsNullOrWhiteSpace($Preset)) {
-  $Preset = "windows-host-ninja-debug"
+  Write-Host @"
+Usage:
+  . .\tools\crt-env.ps1 -Preset <preset> [-TargetOS windows]
+
+Windows PowerShell:
+  . .\tools\crt-env.ps1 -Preset windows-host-ninja-debug
+
+Git Bash/MSYS:
+  . tools/crt-env.sh windows-host-ninja-debug windows
+
+Linux:
+  . tools/crt-env.sh linux-host-ninja-debug
+
+macOS:
+  . tools/crt-env.sh macos-host-ninja-debug
+"@
+  return
 }
 
 if ([string]::IsNullOrWhiteSpace($TargetOS)) {
