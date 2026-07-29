@@ -1,0 +1,65 @@
+#!/bin/sh
+set -eu
+
+if [ -z "${CRT_SYSROOT:-}" ]; then
+  echo "crt-cc: CRT_SYSROOT is not set" >&2
+  exit 1
+fi
+
+target_os="${CRT_TARGET_OS:-}"
+if [ -z "$target_os" ]; then
+  case "$(uname -s)" in
+    Darwin) target_os=macos ;;
+    Linux) target_os=linux ;;
+    MINGW*|MSYS*|CYGWIN*) target_os=windows ;;
+    *) target_os=unknown ;;
+  esac
+fi
+
+cc="${CRT_HOST_CC:-clang}"
+resource_dir="$("$cc" -print-resource-dir 2>/dev/null || true)"
+
+compile_only=0
+for arg in "$@"; do
+  case "$arg" in
+    -c|-E|-S) compile_only=1 ;;
+  esac
+done
+
+common_flags="-ffreestanding -fno-builtin -Xclang -fwchar-type=int -ffunction-sections -fdata-sections -nostdinc -isystem${CRT_SYSROOT}/include"
+if [ -n "$resource_dir" ]; then
+  common_flags="$common_flags -isystem${resource_dir}/include"
+fi
+case "$target_os" in
+  macos) common_flags="$common_flags -DCRT_TARGET_OS_MACOS=1" ;;
+  linux) common_flags="$common_flags -DCRT_TARGET_OS_LINUX=1" ;;
+  windows) common_flags="$common_flags -DCRT_TARGET_OS_WINDOWS=1" ;;
+esac
+
+if [ "$compile_only" -eq 1 ]; then
+  # shellcheck disable=SC2086
+  exec "$cc" $common_flags "$@"
+fi
+
+libs="${CRT_SYSROOT}/lib/crt1.o -L${CRT_SYSROOT}/lib"
+case "$target_os" in
+  macos)
+    libs="$libs ${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a ${CRT_SYSROOT}/lib/libc++.a ${CRT_SYSROOT}/lib/libclang_rt.builtins.a -lSystem"
+    entry="-Wl,-e,_start -Wl,-dead_strip"
+    ;;
+  linux)
+    libs="$libs ${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a ${CRT_SYSROOT}/lib/libc++.a ${CRT_SYSROOT}/lib/libclang_rt.builtins.a"
+    entry="-Wl,-e,_start -Wl,--gc-sections"
+    ;;
+  windows)
+    libs="$libs ${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a ${CRT_SYSROOT}/lib/libc++.a ${CRT_SYSROOT}/lib/libclang_rt.builtins.a ${CRT_WINDOWS_SYSTEM_LIBS:-}"
+    entry="-Wl,/entry:mainCRTStartup -Wl,/subsystem:console -Wl,/OPT:REF -fuse-ld=lld"
+    ;;
+  *)
+    echo "crt-cc: unsupported CRT_TARGET_OS=$target_os" >&2
+    exit 1
+    ;;
+esac
+
+# shellcheck disable=SC2086
+exec "$cc" $common_flags -nostdlib -nostartfiles -nodefaultlibs $entry "$@" $libs

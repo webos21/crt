@@ -339,14 +339,25 @@ int snprintf(char* s, size_t n, const char* format, ...) {
   return result;
 }
 
-int fprintf(FILE* stream, const char* format, ...) {
-  char buffer[1024];
+int vsprintf(char* s, const char* format, va_list ap) {
+  return vsnprintf(s, (size_t)-1, format, ap);
+}
+
+int sprintf(char* s, const char* format, ...) {
   int result;
   va_list ap;
 
   va_start(ap, format);
-  result = vsnprintf(buffer, sizeof(buffer), format, ap);
+  result = vsprintf(s, format, ap);
   va_end(ap);
+  return result;
+}
+
+int vfprintf(FILE* stream, const char* format, va_list ap) {
+  char buffer[1024];
+  int result;
+
+  result = vsnprintf(buffer, sizeof(buffer), format, ap);
   if (result < 0) {
     return result;
   }
@@ -354,17 +365,22 @@ int fprintf(FILE* stream, const char* format, ...) {
   return result;
 }
 
-int printf(const char* format, ...) {
-  char buffer[1024];
+int fprintf(FILE* stream, const char* format, ...) {
   int result;
   va_list ap;
 
   va_start(ap, format);
-  result = vsnprintf(buffer, sizeof(buffer), format, ap);
+  result = vfprintf(stream, format, ap);
   va_end(ap);
-  if (result < 0) {
-    return result;
-  }
-  fwrite(buffer, 1, (size_t)result < sizeof(buffer) ? (size_t)result : sizeof(buffer) - 1, stdout);
+  return result;
+}
+
+int printf(const char* format, ...) {
+  int result;
+  va_list ap;
+
+  va_start(ap, format);
+  result = vfprintf(stdout, format, ap);
+  va_end(ap);
   return result;
 }

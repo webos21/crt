@@ -57,3 +57,7 @@ out/
 build/
 .cache/
 compile_commands.json
+
+# Python helper caches
+__pycache__/
+*.py[cod]

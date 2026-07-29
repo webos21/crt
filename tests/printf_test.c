@@ -34,6 +34,11 @@ int main(void) {
     return fail("flags width precision");
   }
 
+  result = sprintf(buffer, "%s:%d", "sprintf", 17);
+  if (result != 10 || strcmp(buffer, "sprintf:17") != 0) {
+    return fail("sprintf");
+  }
+
   printf("printf_test: %s %d %x\n", "ok", 7, 255);
   return 0;
 }

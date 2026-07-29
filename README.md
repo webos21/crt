@@ -367,6 +367,56 @@ out/macos-host-ninja-debug/sysroot/
     libclang_rt.builtins.a
 ```
 
+Configure/make porting should use the NDK-style wrapper tools directly. First
+download and extract the upstream source archives yourself, then install the CRT
+sysroot:
+
+```sh
+cmake --build --preset macos-host-ninja-debug --target sysroot
+mkdir -p out/macos-host-ninja-debug/port-tests/src
+mkdir -p out/macos-host-ninja-debug/port-tests/install
+```
+
+Use this common environment from the repository root:
+
+```sh
+export CRT_SYSROOT="$PWD/out/macos-host-ninja-debug/sysroot"
+export CRT_TARGET_OS=macos
+export CC="$PWD/tools/crt-cc"
+export CXX="$PWD/tools/crt-c++"
+export AR="${AR:-ar}"
+export RANLIB="${RANLIB:-ranlib}"
+export STRIP="${STRIP:-strip}"
+export PORT_PREFIX="$PWD/out/macos-host-ninja-debug/port-tests/install"
+export CPPFLAGS="-I$PORT_PREFIX/include"
+export LDFLAGS="-L$PORT_PREFIX/lib"
+export PKG_CONFIG_LIBDIR="$PORT_PREFIX/lib/pkgconfig"
+export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
+```
+
+Example zlib build from an extracted upstream source directory:
+
+```sh
+cd /path/to/zlib-1.3.1
+./configure --static --prefix="$PORT_PREFIX"
+make -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 2)"
+make install
+```
+
+Example libpng build after zlib has been installed into `PORT_PREFIX`:
+
+```sh
+cd /path/to/libpng-1.6.57
+./configure --disable-shared --enable-static --prefix="$PORT_PREFIX"
+make -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 2)"
+make install
+```
+
+The wrappers use only CRT sysroot libc headers plus Clang resource headers, and
+link configure test executables with CRT startup/static runtime archives. The
+Python port build helper under `tools/` is for project automation and agent-side
+regression checks, not the primary user workflow. See `docs/sysroot_ports.md`.
+
 ### Linux
 
 On a Linux host with Clang and Ninja installed:

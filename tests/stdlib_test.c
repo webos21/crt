@@ -1,5 +1,7 @@
 #include <errno.h>
+#include <float.h>
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -22,12 +24,84 @@ static int expect_ulong(unsigned long actual, unsigned long expected, const char
   return 0;
 }
 
+static int expect_double_near(double actual, double expected, const char* message) {
+  double diff = actual > expected ? actual - expected : expected - actual;
+  if (diff > 0.000001) {
+    return fail(message);
+  }
+  return 0;
+}
+
 int main(void) {
   char* end;
 
   if (expect_long(atoi("  -42xyz"), -42, "atoi") ||
       expect_long(atol("+123"), 123, "atol")) {
     return 1;
+  }
+
+  if (expect_long(abs(-7), 7, "abs") ||
+      expect_long(labs(-70000L), 70000L, "labs") ||
+      expect_double_near(atof("-12.25"), -12.25, "atof")) {
+    return 1;
+  }
+
+  if (expect_double_near(strtod("1.5e2tail", &end), 150.0, "strtod") ||
+      *end != 't') {
+    return fail("strtod end");
+  }
+
+  if (expect_double_near(strtod("0x1.8p2z", &end), 6.0, "strtod hex") ||
+      *end != 'z') {
+    return fail("strtod hex end");
+  }
+
+  if (!isnan(strtod("nan(payload)!", &end)) || *end != '!') {
+    return fail("strtod nan");
+  }
+
+  if (strtod("-inf!", &end) != -INFINITY || *end != '!') {
+    return fail("strtod inf");
+  }
+
+  if (strtod("9007199254740993", &end) != 9007199254740992.0 ||
+      *end != '\0') {
+    return fail("strtod round to even");
+  }
+
+  if (strtod("2.2250738585072014e-308", &end) != DBL_MIN ||
+      *end != '\0') {
+    return fail("strtod dbl_min");
+  }
+
+  if (strtod("0x1p-1074", &end) != 0x1p-1074 || *end != '\0') {
+    return fail("strtod subnormal hex");
+  }
+
+  errno = 0;
+  if (strtod("1e9999", &end) != INFINITY || errno != ERANGE) {
+    return fail("strtod overflow");
+  }
+
+  errno = 0;
+  if (strtod("1e-9999", &end) != 0.0 || errno != ERANGE) {
+    return fail("strtod underflow");
+  }
+
+  if (strtof("3.5", &end) != 3.5f || *end != '\0') {
+    return fail("strtof");
+  }
+
+  if (strtof("16777217", &end) != 16777216.0f || *end != '\0') {
+    return fail("strtof round to even");
+  }
+
+  if (strtof("1.17549435e-38", &end) != FLT_MIN || *end != '\0') {
+    return fail("strtof flt_min");
+  }
+
+  if (strtold("2.25", &end) != 2.25L || *end != '\0') {
+    return fail("strtold");
   }
 
   errno = 0;

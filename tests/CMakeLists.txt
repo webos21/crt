@@ -223,6 +223,11 @@ set_tests_properties(stdlib_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "stdlib_test: ok"
 )
 
+add_crt_test(setjmp_test setjmp_test.c)
+set_tests_properties(setjmp_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "setjmp_test: ok"
+)
+
 add_crt_test(stdlib_string_extra_test stdlib_string_extra_test.c)
 set_tests_properties(stdlib_string_extra_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "stdlib_string_extra_test: ok"

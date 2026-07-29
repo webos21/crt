@@ -1,5 +1,7 @@
 set(CRT_LIBC_SOURCES
   src/atoi.c
+  src/atof.c
+  src/abs.c
   src/atol.c
   src/ctype.c
   src/dirent.c
@@ -7,6 +9,7 @@ set(CRT_LIBC_SOURCES
   src/env.c
   src/exit.c
   src/fd.c
+  src/inttypes.c
   src/locale.c
   src/malloc.c
   src/mman.c
@@ -16,6 +19,7 @@ set(CRT_LIBC_SOURCES
   src/pthread.c
   src/qsort.c
   src/sched.c
+  src/setjmp.c
   src/signal.c
   src/socket.c
   src/stdio.c
@@ -38,6 +42,7 @@ set(CRT_LIBC_SOURCES
   string/stpcpy.c
   string/stpncpy.c
   string/strcasecmp.c
+  string/strings_compat.c
   string/strcoll.c
   string/strcspn.c
   string/strdup.c
@@ -58,10 +63,33 @@ set(CRT_LIBC_SOURCES
   string/strxfrm.c
 )
 
+set(CRT_GDTOA_SOURCES
+  gdtoa/gdtoa_support.c
+  gdtoa/gethex.c
+  gdtoa/gmisc.c
+  gdtoa/hd_init.c
+  gdtoa/hexnan.c
+  gdtoa/misc.c
+  gdtoa/smisc.c
+  gdtoa/strtod.c
+  gdtoa/strtodg.c
+  gdtoa/strtof.c
+  gdtoa/strtord.c
+  gdtoa/strtorQ.c
+  gdtoa/sum.c
+  gdtoa/ulp.c
+)
+
+list(APPEND CRT_LIBC_SOURCES ${CRT_GDTOA_SOURCES})
+set_source_files_properties(${CRT_GDTOA_SOURCES} PROPERTIES
+  COMPILE_OPTIONS "-include;${CMAKE_CURRENT_SOURCE_DIR}/gdtoa/openbsd-compat.h;-Wno-sign-compare;-Wno-uninitialized"
+)
+
 add_library(c STATIC ${CRT_LIBC_SOURCES})
 target_link_libraries(c PRIVATE crt_build_flags)
 target_include_directories(c PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
+  "${CMAKE_CURRENT_SOURCE_DIR}/gdtoa"
 )
 set_target_properties(c PROPERTIES
   OUTPUT_NAME c
@@ -78,9 +106,11 @@ if(CRT_TARGET_OS STREQUAL "macos")
   if(CRT_EFFECTIVE_ARCH MATCHES "^(arm64|aarch64)$")
     set(CRT_START_FILE arch/macos/aarch64/crt1.S)
     set(CRT_SYSCALL_FILE arch/macos/aarch64/syscall.S)
+    set(CRT_SETJMP_FILE arch/macos/aarch64/setjmp.S)
   elseif(CRT_EFFECTIVE_ARCH MATCHES "^(x86_64|AMD64)$")
     set(CRT_START_FILE arch/macos/x86_64/crt1.S)
     set(CRT_SYSCALL_FILE arch/macos/x86_64/syscall.S)
+    set(CRT_SETJMP_FILE arch/macos/x86_64/setjmp.S)
   else()
     message(FATAL_ERROR "Unsupported macOS architecture: ${CRT_EFFECTIVE_ARCH}")
   endif()
@@ -88,9 +118,11 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
   if(CRT_EFFECTIVE_ARCH MATCHES "^(arm64|aarch64)$")
     set(CRT_START_FILE arch/linux/aarch64/crt1.S)
     set(CRT_SYSCALL_FILE arch/linux/aarch64/syscall.S)
+    set(CRT_SETJMP_FILE arch/linux/aarch64/setjmp.S)
   elseif(CRT_EFFECTIVE_ARCH MATCHES "^(x86_64|AMD64)$")
     set(CRT_START_FILE arch/linux/x86_64/crt1.S)
     set(CRT_SYSCALL_FILE arch/linux/x86_64/syscall.S)
+    set(CRT_SETJMP_FILE arch/linux/x86_64/setjmp.S)
   else()
     message(FATAL_ERROR "Unsupported Linux architecture: ${CRT_EFFECTIVE_ARCH}")
   endif()
@@ -98,10 +130,12 @@ elseif(CRT_TARGET_OS STREQUAL "windows")
   if(CRT_EFFECTIVE_ARCH MATCHES "^(x86_64|AMD64)$")
     set(CRT_START_FILE arch/windows/common/crt1.c)
     set(CRT_SYSCALL_FILE arch/windows/common/syscall.c)
+    set(CRT_SETJMP_FILE arch/windows/x86_64/setjmp.S)
     set(CRT_WINDOWS_CHKSTK_FILE arch/windows/x86_64/chkstk.S)
   elseif(CRT_EFFECTIVE_ARCH MATCHES "^(arm64|ARM64|aarch64)$")
     set(CRT_START_FILE arch/windows/common/crt1.c)
     set(CRT_SYSCALL_FILE arch/windows/common/syscall.c)
+    set(CRT_SETJMP_FILE arch/windows/aarch64/setjmp.S)
     set(CRT_WINDOWS_CHKSTK_FILE arch/windows/aarch64/chkstk.S)
   else()
     message(FATAL_ERROR "Unsupported Windows architecture: ${CRT_EFFECTIVE_ARCH}")
@@ -113,6 +147,10 @@ endif()
 add_library(crt_syscall OBJECT ${CRT_SYSCALL_FILE})
 target_link_libraries(crt_syscall PRIVATE crt_build_flags)
 target_sources(c PRIVATE $<TARGET_OBJECTS:crt_syscall>)
+
+add_library(crt_setjmp OBJECT ${CRT_SETJMP_FILE})
+target_link_libraries(crt_setjmp PRIVATE crt_build_flags)
+target_sources(c PRIVATE $<TARGET_OBJECTS:crt_setjmp>)
 
 if(CRT_TARGET_OS STREQUAL "windows")
   add_library(crt_windows_chkstk OBJECT ${CRT_WINDOWS_CHKSTK_FILE})
@@ -133,8 +171,10 @@ add_library(c_shared SHARED ${CRT_LIBC_SOURCES})
 target_link_libraries(c_shared PRIVATE crt_build_flags crt_compiler_rt_builtins)
 target_include_directories(c_shared PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
+  "${CMAKE_CURRENT_SOURCE_DIR}/gdtoa"
 )
 target_sources(c_shared PRIVATE $<TARGET_OBJECTS:crt_syscall>)
+target_sources(c_shared PRIVATE $<TARGET_OBJECTS:crt_setjmp>)
 if(CRT_TARGET_OS STREQUAL "windows")
   target_sources(c_shared PRIVATE $<TARGET_OBJECTS:crt_windows_chkstk>)
   target_sources(c_shared PRIVATE $<TARGET_OBJECTS:crt_windows_dllcrt>)
