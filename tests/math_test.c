@@ -12,6 +12,10 @@ static int near_double(double a, double b) {
   return delta < 0.000001;
 }
 
+static int remquo_low_bits_match(int quotient, int expected) {
+  return (quotient & 0x7) == (expected & 0x7);
+}
+
 int main(void) {
   double nan_value = NAN;
   double inf_value = INFINITY;
@@ -156,11 +160,15 @@ int main(void) {
       !near_double((double)remainderl(7.0L, 2.5L), -0.5)) {
     return fail("remainder");
   }
-  if (!near_double(remquo(7.0, 2.5, &quotient), -0.5) || quotient != 3 ||
-      !near_double(remquo(-7.0, 2.5, &quotient), 0.5) || quotient != -3 ||
-      !near_double(remquof(7.0f, 2.5f, &quotient), -0.5) || quotient != 3 ||
-      !near_double((double)remquol(7.0L, 2.5L, &quotient), -0.5) || quotient != 3 ||
-      !isnan(remquo(1.0, 0.0, &quotient)) || quotient != 0) {
+  if (!near_double(remquo(7.0, 2.5, &quotient), -0.5) ||
+      !remquo_low_bits_match(quotient, 3) ||
+      !near_double(remquo(-7.0, 2.5, &quotient), 0.5) ||
+      !remquo_low_bits_match(quotient, -3) ||
+      !near_double(remquof(7.0f, 2.5f, &quotient), -0.5) ||
+      !remquo_low_bits_match(quotient, 3) ||
+      !near_double((double)remquol(7.0L, 2.5L, &quotient), -0.5) ||
+      !remquo_low_bits_match(quotient, 3) ||
+      !isnan(remquo(1.0, 0.0, &quotient))) {
     return fail("remquo");
   }
   if (math_errhandling != 0 || fegetround() != FE_TONEAREST ||

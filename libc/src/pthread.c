@@ -1758,6 +1758,10 @@ int pthread_join(pthread_t thread, void** retval) {
   while (__atomic_load_n(&control->tid_word, __ATOMIC_ACQUIRE) != 0) {
     int tid = __atomic_load_n(&control->tid_word, __ATOMIC_ACQUIRE);
     long wait_result = __crt_sys_futex(&control->tid_word, CRT_FUTEX_WAIT, tid, 0, 0, 0);
+    if (wait_result == -EINVAL) {
+      sched_yield();
+      continue;
+    }
     if (wait_result < 0 && wait_result != -EINTR && wait_result != -EAGAIN) {
       return (int)-wait_result;
     }
