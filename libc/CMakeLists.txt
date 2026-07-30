@@ -20,6 +20,7 @@ set(CRT_LIBC_SOURCES
   src/pthread.c
   src/qsort.c
   src/sched.c
+  src/scanf.c
   src/setjmp.c
   src/signal.c
   src/socket.c

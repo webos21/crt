@@ -5,6 +5,7 @@
 
 typedef __crt_ssize_t ssize_t;
 typedef __crt_off_t off_t;
+typedef __crt_off_t off64_t;
 typedef __crt_mode_t mode_t;
 typedef __crt_dev_t dev_t;
 typedef __crt_ino_t ino_t;

@@ -902,10 +902,20 @@ The current stdio tranche adds:
 - `clearerr`
 - `remove`
 - `rename`
-- bootstrap `printf`
-- bootstrap `fprintf`
-- bootstrap `snprintf`
-- bootstrap `vsnprintf`
+- `printf`
+- `fprintf`
+- `vfprintf`
+- `vprintf`
+- `sprintf`
+- `vsprintf`
+- `snprintf`
+- `vsnprintf`
+- `scanf`
+- `fscanf`
+- `vfscanf`
+- `vscanf`
+- `sscanf`
+- `vsscanf`
 - `fputc`
 - `fputs`
 - `puts`
@@ -914,26 +924,44 @@ The current stdio tranche adds:
 - `fwrite`
 - `fflush`
 
-This is not a final Bionic stdio import. The `FILE` ABI, buffering model, and
-complete `printf` family are intentionally deferred until the file/path,
-allocator, and formatting policies are more stable. The current formatter only
-supports a small subset useful for early bring-up: `%s`, `%c`, `%d`, `%i`, `%u`,
-`%x`, `%X`, `%p`, `%%`, and `l`/`ll` integer length modifiers.
+This is not a direct final Bionic stdio source import. Bionic's current stdio
+stack keeps the public wrappers small and routes formatting/scanning through
+shared `vfprintf`/`vfscanf` style cores derived from BSD libc. The CRT follows
+that architecture with project-owned C99 implementations adapted to the current
+minimal `FILE` internals.
+
+The formatter core is `vsnprintf`; `sprintf`, `snprintf`, `printf`,
+`fprintf`, `vprintf`, and `vfprintf` are layered above it. It supports the
+integer/string surface used by configure-heavy ports, dynamic `*`
+width/precision, `hh`/`h`/`l`/`ll`/`j`/`z`/`t` length modifiers, `%n`, `%m`,
+and basic floating-point `%f`/`%e`/`%g` compatibility. Floating formatting is
+still a compatibility implementation, not yet a gdtoa-backed full Bionic
+replacement.
+
+The scanner core is shared by `vsscanf` and `vfscanf`; `scanf`, `fscanf`,
+`vscanf`, and `sscanf` are wrappers. It supports common integer conversions,
+strings, characters, scansets, `%n`, and basic floating input via the gdtoa
+`strtod` path already present in the CRT.
 
 ## Formatting, Stdio, File/Path, and Libc Surface Tranche
 
-The formatter tranche expands `vsnprintf`, `snprintf`, `printf`, and `fprintf`
-with enough surface for more configure-style probes and basic library tests:
+The formatter tranche expands `vsnprintf`, `snprintf`, `printf`, `fprintf`,
+`sprintf`, `vfprintf`, and `vprintf` with enough surface for more
+configure-style probes and basic library tests:
 
 - field width;
 - precision for strings and integer zero padding;
 - `-`, `0`, `+`, space, and `#` flags;
 - `%o`;
-- `%zu` and `%zd`.
+- `%zu` and `%zd`;
+- dynamic `*` width and precision;
+- `hh`, `h`, `j`, and `t` length modifiers;
+- `%n` and `%m`;
+- basic `%f`/`%e`/`%g` floating-point output.
 
-The formatter is still integer/string-only. Floating-point formatting, dynamic
-`*` width/precision, positional arguments, locale grouping, and the wider
-`printf` family remain deferred.
+Full gdtoa-backed floating-point formatting, positional arguments, locale
+grouping, wide-character formatting/scanning, and exact Bionic edge-case
+behavior remain deferred.
 
 The stdio surface now also exposes:
 

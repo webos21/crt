@@ -524,6 +524,85 @@ ___crt_sys_munmap:
   neg x0, x0
   ret
 
+.globl ___crt_sys_msync
+.p2align 2
+___crt_sys_msync:
+  mov x16, #65
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_mremap
+.p2align 2
+___crt_sys_mremap:
+  mov x0, #-38
+  ret
+
+.globl ___crt_sys_mlockall
+.p2align 2
+___crt_sys_mlockall:
+  mov x0, #-38
+  ret
+
+.globl ___crt_sys_munlockall
+.p2align 2
+___crt_sys_munlockall:
+  mov x0, #-38
+  ret
+
+.globl ___crt_sys_mlock
+.p2align 2
+___crt_sys_mlock:
+  mov x16, #203
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_mlock2
+.p2align 2
+___crt_sys_mlock2:
+  mov x0, #-38
+  ret
+
+.globl ___crt_sys_munlock
+.p2align 2
+___crt_sys_munlock:
+  mov x16, #204
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_mincore
+.p2align 2
+___crt_sys_mincore:
+  mov x16, #78
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_madvise
+.p2align 2
+___crt_sys_madvise:
+  mov x16, #75
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
 .globl ___crt_sys_sleep_ms
 .p2align 2
 ___crt_sys_sleep_ms:

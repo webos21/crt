@@ -528,6 +528,85 @@ ___crt_sys_munmap:
   negq %rax
   retq
 
+.globl ___crt_sys_msync
+.p2align 4, 0x90
+___crt_sys_msync:
+  movq $0x2000041, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_mremap
+.p2align 4, 0x90
+___crt_sys_mremap:
+  movq $-38, %rax
+  retq
+
+.globl ___crt_sys_mlockall
+.p2align 4, 0x90
+___crt_sys_mlockall:
+  movq $-38, %rax
+  retq
+
+.globl ___crt_sys_munlockall
+.p2align 4, 0x90
+___crt_sys_munlockall:
+  movq $-38, %rax
+  retq
+
+.globl ___crt_sys_mlock
+.p2align 4, 0x90
+___crt_sys_mlock:
+  movq $0x20000cb, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_mlock2
+.p2align 4, 0x90
+___crt_sys_mlock2:
+  movq $-38, %rax
+  retq
+
+.globl ___crt_sys_munlock
+.p2align 4, 0x90
+___crt_sys_munlock:
+  movq $0x20000cc, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_mincore
+.p2align 4, 0x90
+___crt_sys_mincore:
+  movq $0x200004e, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_madvise
+.p2align 4, 0x90
+___crt_sys_madvise:
+  movq $0x200004b, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
 .globl ___crt_sys_sleep_ms
 .p2align 4, 0x90
 ___crt_sys_sleep_ms:

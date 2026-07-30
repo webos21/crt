@@ -1,7 +1,9 @@
+#include <errno.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 
@@ -21,7 +23,10 @@ struct printf_spec {
   int precision;
   int precision_set;
   int long_count;
+  int short_count;
   int size_length;
+  int intmax_length;
+  int ptrdiff_length;
 };
 
 static void buffer_putc(struct printf_buffer* buffer, char c) {
@@ -185,6 +190,62 @@ static void format_integer(
   write_formatted(buffer, spec, prefix, prefix_len, digits, digits_len, value == 0);
 }
 
+static void format_double_fixed(struct printf_buffer* buffer, const struct printf_spec* spec, double value) {
+  struct printf_spec int_spec = *spec;
+  unsigned long long integer_part;
+  unsigned long long scale = 1;
+  unsigned long long fractional;
+  char digits[64];
+  char frac_digits[32];
+  char prefix[1];
+  int precision = spec->precision_set ? spec->precision : 6;
+  int negative = value < 0.0;
+  size_t digits_len;
+  size_t prefix_len = 0;
+  int i;
+
+  if (precision < 0) {
+    precision = 6;
+  }
+  if (precision > 18) {
+    precision = 18;
+  }
+  if (negative) {
+    value = -value;
+    prefix[prefix_len++] = '-';
+  } else if (spec->plus) {
+    prefix[prefix_len++] = '+';
+  } else if (spec->space) {
+    prefix[prefix_len++] = ' ';
+  }
+
+  for (i = 0; i < precision; ++i) {
+    scale *= 10ULL;
+  }
+  integer_part = (unsigned long long)value;
+  fractional = (unsigned long long)((value - (double)integer_part) * (double)scale + 0.5);
+  if (fractional >= scale) {
+    ++integer_part;
+    fractional -= scale;
+  }
+
+  digits_len = convert_unsigned(digits, integer_part, 10, 0);
+  int_spec.precision_set = 0;
+  if (precision > 0 || spec->alt) {
+    size_t base_len = digits_len;
+    digits[base_len++] = '.';
+    for (i = precision - 1; i >= 0; --i) {
+      frac_digits[i] = (char)('0' + (fractional % 10ULL));
+      fractional /= 10ULL;
+    }
+    for (i = 0; i < precision; ++i) {
+      digits[base_len++] = frac_digits[i];
+    }
+    digits_len = base_len;
+  }
+  write_formatted(buffer, &int_spec, prefix, prefix_len, digits, digits_len, 0);
+}
+
 int vsnprintf(char* s, size_t n, const char* format, va_list ap) {
   struct printf_buffer buffer;
 
@@ -193,7 +254,7 @@ int vsnprintf(char* s, size_t n, const char* format, va_list ap) {
   buffer.length = 0;
 
   while (*format != 0) {
-    struct printf_spec spec = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    struct printf_spec spec = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
     if (*format != '%') {
       buffer_putc(&buffer, *format++);
@@ -223,19 +284,47 @@ int vsnprintf(char* s, size_t n, const char* format, va_list ap) {
       format++;
     }
 
-    parse_decimal(&format, &spec.width);
+    if (*format == '*') {
+      spec.width = va_arg(ap, int);
+      if (spec.width < 0) {
+        spec.left = 1;
+        spec.width = -spec.width;
+      }
+      ++format;
+    } else {
+      parse_decimal(&format, &spec.width);
+    }
     if (*format == '.') {
       format++;
       spec.precision_set = 1;
-      parse_decimal(&format, &spec.precision);
+      if (*format == '*') {
+        spec.precision = va_arg(ap, int);
+        if (spec.precision < 0) {
+          spec.precision_set = 0;
+          spec.precision = 0;
+        }
+        ++format;
+      } else {
+        parse_decimal(&format, &spec.precision);
+      }
     }
 
+    while (*format == 'h') {
+      spec.short_count++;
+      format++;
+    }
     while (*format == 'l') {
       spec.long_count++;
       format++;
     }
     if (*format == 'z') {
       spec.size_length = 1;
+      format++;
+    } else if (*format == 'j') {
+      spec.intmax_length = 1;
+      format++;
+    } else if (*format == 't') {
+      spec.ptrdiff_length = 1;
       format++;
     }
 
@@ -255,7 +344,11 @@ int vsnprintf(char* s, size_t n, const char* format, va_list ap) {
         long long value;
         unsigned long long magnitude;
         int negative;
-        if (spec.size_length) {
+        if (spec.intmax_length) {
+          value = va_arg(ap, long long);
+        } else if (spec.ptrdiff_length) {
+          value = (long long)va_arg(ap, ptrdiff_t);
+        } else if (spec.size_length) {
           value = (long long)va_arg(ap, ssize_t);
         } else if (spec.long_count >= 2) {
           value = va_arg(ap, long long);
@@ -279,7 +372,11 @@ int vsnprintf(char* s, size_t n, const char* format, va_list ap) {
       case 'X': {
         unsigned int base = *format == 'o' ? 8u : (*format == 'u' ? 10u : 16u);
         unsigned long long value;
-        if (spec.size_length) {
+        if (spec.intmax_length) {
+          value = va_arg(ap, unsigned long long);
+        } else if (spec.ptrdiff_length) {
+          value = (unsigned long long)va_arg(ap, ptrdiff_t);
+        } else if (spec.size_length) {
           value = (unsigned long long)va_arg(ap, size_t);
         } else if (spec.long_count >= 2) {
           value = va_arg(ap, unsigned long long);
@@ -305,6 +402,35 @@ int vsnprintf(char* s, size_t n, const char* format, va_list ap) {
         format_integer(&buffer, &pointer_spec, value, 0, 0, 16, 0);
         break;
       }
+      case 'n': {
+        if (spec.short_count >= 2) {
+          *va_arg(ap, signed char*) = (signed char)buffer.length;
+        } else if (spec.short_count == 1) {
+          *va_arg(ap, short*) = (short)buffer.length;
+        } else if (spec.long_count >= 2) {
+          *va_arg(ap, long long*) = (long long)buffer.length;
+        } else if (spec.long_count == 1) {
+          *va_arg(ap, long*) = (long)buffer.length;
+        } else if (spec.size_length) {
+          *va_arg(ap, ssize_t*) = (ssize_t)buffer.length;
+        } else if (spec.ptrdiff_length) {
+          *va_arg(ap, ptrdiff_t*) = (ptrdiff_t)buffer.length;
+        } else {
+          *va_arg(ap, int*) = (int)buffer.length;
+        }
+        break;
+      }
+      case 'm':
+        format_string(&buffer, &spec, strerror(errno));
+        break;
+      case 'f':
+      case 'F':
+      case 'e':
+      case 'E':
+      case 'g':
+      case 'G':
+        format_double_fixed(&buffer, &spec, va_arg(ap, double));
+        break;
       default:
         buffer_putc(&buffer, '%');
         if (*format != 0) {
@@ -354,14 +480,37 @@ int sprintf(char* s, const char* format, ...) {
 }
 
 int vfprintf(FILE* stream, const char* format, va_list ap) {
-  char buffer[1024];
+  char stack_buffer[1024];
+  char* buffer = stack_buffer;
+  va_list copy;
   int result;
 
-  result = vsnprintf(buffer, sizeof(buffer), format, ap);
+  va_copy(copy, ap);
+  result = vsnprintf(stack_buffer, sizeof(stack_buffer), format, copy);
+  va_end(copy);
   if (result < 0) {
     return result;
   }
-  fwrite(buffer, 1, (size_t)result < sizeof(buffer) ? (size_t)result : sizeof(buffer) - 1, stream);
+  if ((size_t)result >= sizeof(stack_buffer)) {
+    buffer = (char*)malloc((size_t)result + 1);
+    if (buffer == 0) {
+      return EOF;
+    }
+    result = vsnprintf(buffer, (size_t)result + 1, format, ap);
+    if (result < 0) {
+      free(buffer);
+      return result;
+    }
+  }
+  if (fwrite(buffer, 1, (size_t)result, stream) != (size_t)result) {
+    if (buffer != stack_buffer) {
+      free(buffer);
+    }
+    return EOF;
+  }
+  if (buffer != stack_buffer) {
+    free(buffer);
+  }
   return result;
 }
 
@@ -383,4 +532,8 @@ int printf(const char* format, ...) {
   result = vfprintf(stdout, format, ap);
   va_end(ap);
   return result;
+}
+
+int vprintf(const char* format, va_list ap) {
+  return vfprintf(stdout, format, ap);
 }

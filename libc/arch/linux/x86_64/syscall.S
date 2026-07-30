@@ -412,6 +412,88 @@ __crt_sys_munmap:
   retq
 .size __crt_sys_munmap, . - __crt_sys_munmap
 
+.globl __crt_sys_msync
+.type __crt_sys_msync, @function
+.p2align 4, 0x90
+__crt_sys_msync:
+  movq $26, %rax
+  syscall
+  retq
+.size __crt_sys_msync, . - __crt_sys_msync
+
+.globl __crt_sys_mremap
+.type __crt_sys_mremap, @function
+.p2align 4, 0x90
+__crt_sys_mremap:
+  movq %rcx, %r10
+  movq $25, %rax
+  syscall
+  retq
+.size __crt_sys_mremap, . - __crt_sys_mremap
+
+.globl __crt_sys_mlockall
+.type __crt_sys_mlockall, @function
+.p2align 4, 0x90
+__crt_sys_mlockall:
+  movq $151, %rax
+  syscall
+  retq
+.size __crt_sys_mlockall, . - __crt_sys_mlockall
+
+.globl __crt_sys_munlockall
+.type __crt_sys_munlockall, @function
+.p2align 4, 0x90
+__crt_sys_munlockall:
+  movq $152, %rax
+  syscall
+  retq
+.size __crt_sys_munlockall, . - __crt_sys_munlockall
+
+.globl __crt_sys_mlock
+.type __crt_sys_mlock, @function
+.p2align 4, 0x90
+__crt_sys_mlock:
+  movq $149, %rax
+  syscall
+  retq
+.size __crt_sys_mlock, . - __crt_sys_mlock
+
+.globl __crt_sys_mlock2
+.type __crt_sys_mlock2, @function
+.p2align 4, 0x90
+__crt_sys_mlock2:
+  movq $325, %rax
+  syscall
+  retq
+.size __crt_sys_mlock2, . - __crt_sys_mlock2
+
+.globl __crt_sys_munlock
+.type __crt_sys_munlock, @function
+.p2align 4, 0x90
+__crt_sys_munlock:
+  movq $150, %rax
+  syscall
+  retq
+.size __crt_sys_munlock, . - __crt_sys_munlock
+
+.globl __crt_sys_mincore
+.type __crt_sys_mincore, @function
+.p2align 4, 0x90
+__crt_sys_mincore:
+  movq $27, %rax
+  syscall
+  retq
+.size __crt_sys_mincore, . - __crt_sys_mincore
+
+.globl __crt_sys_madvise
+.type __crt_sys_madvise, @function
+.p2align 4, 0x90
+__crt_sys_madvise:
+  movq $28, %rax
+  syscall
+  retq
+.size __crt_sys_madvise, . - __crt_sys_madvise
+
 .globl __crt_sys_gettimeofday
 .type __crt_sys_gettimeofday, @function
 .p2align 4, 0x90

@@ -120,9 +120,15 @@ struct crt_memory_status_ex {
 #define PAGE_NOACCESS 0x01
 #define PAGE_READONLY 0x02
 #define PAGE_READWRITE 0x04
+#define PAGE_WRITECOPY 0x08
 #define PAGE_EXECUTE 0x10
 #define PAGE_EXECUTE_READ 0x20
 #define PAGE_EXECUTE_READWRITE 0x40
+#define PAGE_EXECUTE_WRITECOPY 0x80
+#define FILE_MAP_COPY 0x00000001
+#define FILE_MAP_WRITE 0x00000002
+#define FILE_MAP_READ 0x00000004
+#define FILE_MAP_EXECUTE 0x00000020
 #define INVALID_HANDLE_VALUE ((HANDLE)(intptr_t)-1)
 #define WINDOWS_TICK 10000000ULL
 #define SEC_TO_UNIX_EPOCH 11644473600ULL
@@ -326,6 +332,26 @@ __declspec(dllimport) BOOL CRT_WINAPI VirtualProtect(
     size_t dwSize,
     DWORD flNewProtect,
     DWORD* lpflOldProtect);
+__declspec(dllimport) HANDLE CRT_WINAPI CreateFileMappingA(
+    HANDLE hFile,
+    void* lpFileMappingAttributes,
+    DWORD flProtect,
+    DWORD dwMaximumSizeHigh,
+    DWORD dwMaximumSizeLow,
+    const char* lpName);
+__declspec(dllimport) void* CRT_WINAPI MapViewOfFileEx(
+    HANDLE hFileMappingObject,
+    DWORD dwDesiredAccess,
+    DWORD dwFileOffsetHigh,
+    DWORD dwFileOffsetLow,
+    size_t dwNumberOfBytesToMap,
+    void* lpBaseAddress);
+__declspec(dllimport) BOOL CRT_WINAPI UnmapViewOfFile(const void* lpBaseAddress);
+__declspec(dllimport) BOOL CRT_WINAPI FlushViewOfFile(
+    const void* lpBaseAddress,
+    size_t dwNumberOfBytesToFlush);
+__declspec(dllimport) BOOL CRT_WINAPI VirtualLock(void* lpAddress, size_t dwSize);
+__declspec(dllimport) BOOL CRT_WINAPI VirtualUnlock(void* lpAddress, size_t dwSize);
 struct crt_filetime {
   DWORD low;
   DWORD high;
@@ -2214,21 +2240,79 @@ static DWORD windows_page_protect(int prot) {
   return PAGE_NOACCESS;
 }
 
+static DWORD windows_mapping_protect(int prot, int flags) {
+  if ((flags & MAP_PRIVATE) != 0 && (prot & PROT_WRITE) != 0) {
+    return (prot & PROT_EXEC) != 0 ? PAGE_EXECUTE_WRITECOPY : PAGE_WRITECOPY;
+  }
+  return windows_page_protect(prot);
+}
+
+static DWORD windows_mapping_access(int prot, int flags) {
+  DWORD access = 0;
+
+  if ((flags & MAP_PRIVATE) != 0 && (prot & PROT_WRITE) != 0) {
+    access |= FILE_MAP_COPY;
+  } else {
+    if ((prot & PROT_READ) != 0) {
+      access |= FILE_MAP_READ;
+    }
+    if ((prot & PROT_WRITE) != 0) {
+      access |= FILE_MAP_WRITE;
+    }
+  }
+  if ((prot & PROT_EXEC) != 0) {
+    access |= FILE_MAP_EXECUTE;
+  }
+  return access == 0 ? FILE_MAP_READ : access;
+}
+
 void* __crt_sys_mmap(void* addr, unsigned long length, int prot, int flags, int fd, long long offset) {
   DWORD protect;
   void* result;
-  (void)offset;
 
-  if ((flags & MAP_ANONYMOUS) == 0 || fd != -1) {
-    return (void*)(intptr_t)-ENOSYS;
+  if ((flags & MAP_TYPE) != MAP_PRIVATE && (flags & MAP_TYPE) != MAP_SHARED) {
+    return (void*)(intptr_t)-EINVAL;
   }
 
-  protect = windows_page_protect(prot);
-  result = VirtualAlloc(addr, (size_t)length, MEM_RESERVE | MEM_COMMIT, protect);
-  if (result == 0) {
-    return (void*)(intptr_t)-map_windows_error(GetLastError());
+  if ((flags & MAP_ANONYMOUS) != 0) {
+    if (fd != -1) {
+      return (void*)(intptr_t)-EINVAL;
+    }
+    protect = windows_page_protect(prot);
+    result = VirtualAlloc(addr, (size_t)length, MEM_RESERVE | MEM_COMMIT, protect);
+    if (result == 0) {
+      return (void*)(intptr_t)-map_windows_error(GetLastError());
+    }
+    return result;
   }
-  return result;
+
+  {
+    HANDLE file = get_fd_handle(fd);
+    HANDLE mapping;
+    DWORD access;
+    unsigned long long end = (unsigned long long)offset + (unsigned long long)length;
+
+    if (file == INVALID_HANDLE_VALUE) {
+      return (void*)(intptr_t)-EBADF;
+    }
+    if (offset < 0) {
+      return (void*)(intptr_t)-EINVAL;
+    }
+    protect = windows_mapping_protect(prot, flags);
+    mapping = CreateFileMappingA(file, 0, protect, (DWORD)(end >> 32), (DWORD)end, 0);
+    if (mapping == 0) {
+      return (void*)(intptr_t)-map_windows_error(GetLastError());
+    }
+    access = windows_mapping_access(prot, flags);
+    result = MapViewOfFileEx(mapping, access, (DWORD)((unsigned long long)offset >> 32),
+                             (DWORD)(unsigned long long)offset, (size_t)length,
+                             (flags & MAP_FIXED) != 0 ? addr : 0);
+    CloseHandle(mapping);
+    if (result == 0) {
+      return (void*)(intptr_t)-map_windows_error(GetLastError());
+    }
+    return result;
+  }
 }
 
 long __crt_sys_mprotect(void* addr, unsigned long length, int prot) {
@@ -2243,9 +2327,77 @@ long __crt_sys_mprotect(void* addr, unsigned long length, int prot) {
 long __crt_sys_munmap(void* addr, unsigned long length) {
   (void)length;
   if (!VirtualFree(addr, 0, MEM_RELEASE)) {
+    if (!UnmapViewOfFile(addr)) {
+      return fail_last_error();
+    }
+  }
+  return 0;
+}
+
+long __crt_sys_msync(void* addr, unsigned long length, int flags) {
+  (void)flags;
+  if (!FlushViewOfFile(addr, (size_t)length)) {
     return fail_last_error();
   }
   return 0;
+}
+
+void* __crt_sys_mremap(void* old_addr, unsigned long old_size, unsigned long new_size, int flags, void* new_addr) {
+  (void)old_addr;
+  (void)old_size;
+  (void)new_size;
+  (void)flags;
+  (void)new_addr;
+  return (void*)(intptr_t)-ENOSYS;
+}
+
+long __crt_sys_mlockall(int flags) {
+  (void)flags;
+  return -ENOSYS;
+}
+
+long __crt_sys_munlockall(void) {
+  return -ENOSYS;
+}
+
+long __crt_sys_mlock(const void* addr, unsigned long length) {
+  if (!VirtualLock((void*)addr, (size_t)length)) {
+    return fail_last_error();
+  }
+  return 0;
+}
+
+long __crt_sys_mlock2(const void* addr, unsigned long length, int flags) {
+  if (flags != 0) {
+    return -EINVAL;
+  }
+  return __crt_sys_mlock(addr, length);
+}
+
+long __crt_sys_munlock(const void* addr, unsigned long length) {
+  if (!VirtualUnlock((void*)addr, (size_t)length)) {
+    return fail_last_error();
+  }
+  return 0;
+}
+
+long __crt_sys_mincore(void* addr, unsigned long length, unsigned char* vector) {
+  (void)addr;
+  (void)length;
+  (void)vector;
+  return -ENOSYS;
+}
+
+long __crt_sys_madvise(void* addr, unsigned long length, int advice) {
+  (void)addr;
+  (void)length;
+  if (advice == MADV_NORMAL || advice == MADV_RANDOM || advice == MADV_SEQUENTIAL ||
+      advice == MADV_WILLNEED || advice == MADV_DONTNEED || advice == POSIX_MADV_NORMAL ||
+      advice == POSIX_MADV_RANDOM || advice == POSIX_MADV_SEQUENTIAL ||
+      advice == POSIX_MADV_WILLNEED || advice == POSIX_MADV_DONTNEED) {
+    return 0;
+  }
+  return -EINVAL;
 }
 
 long __crt_sys_gettimeofday(struct timeval* tv) {

@@ -202,6 +202,12 @@ set_tests_properties(printf_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "printf_test: ok 7 ff"
 )
 
+add_crt_test(scanf_test scanf_test.c)
+set_tests_properties(scanf_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "scanf_test: ok"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
 add_crt_test(mman_test mman_test.c)
 set_tests_properties(mman_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "mman_test: ok"
