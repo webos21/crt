@@ -18,9 +18,14 @@ int main(void) {
   wchar_t wide[16];
   wchar_t buffer[16];
   wchar_t moved[8];
+  wchar_t line[16];
+  char* mem = 0;
   char narrow[16];
+  size_t mem_size = 0;
   wchar_t wc;
+  FILE* stream;
   size_t result;
+  int scanned = 0;
 
   if (sizeof(wchar_t) != 4 || (wchar_t)-1 >= (wchar_t)0) {
     return fail("wchar_t data model");
@@ -109,6 +114,63 @@ int main(void) {
       towctrans(L'G', wctrans("tolower")) != L'g' ||
       wctype("unknown") != 0 || wctrans("unknown") != 0) {
     return fail("wctype");
+  }
+
+  stream = fmemopen((void*)"A\xe2\x82\xac\n", 5, "r");
+  if (stream == 0 || fwide(stream, 1) <= 0 ||
+      fgetwc(stream) != L'A' ||
+      fgetwc(stream) != (wchar_t)0x20ac ||
+      ungetwc(L'Z', stream) != L'Z' ||
+      fgetwc(stream) != L'Z' ||
+      fgetws(line, 16, stream) != line ||
+      wcscmp(line, L"\n") != 0) {
+    if (stream != 0) {
+      fclose(stream);
+    }
+    return fail("wide input stdio");
+  }
+  fclose(stream);
+
+  stream = open_memstream(&mem, &mem_size);
+  if (stream == 0) {
+    return fail("wide output stdio");
+  }
+  if (fwprintf(stream, L"%ls:%d:%lc", L"wide", 7, L'!') < 0) {
+    fclose(stream);
+    free(mem);
+    return fail("fwprintf");
+  }
+  if (fputwc((wchar_t)0x20ac, stream) == WEOF) {
+    fclose(stream);
+    free(mem);
+    return fail("fputwc");
+  }
+  if (fflush(stream) != 0) {
+    fclose(stream);
+    free(mem);
+    return fail("wide fflush");
+  }
+  if (strcmp(mem, "wide:7:!\xe2\x82\xac") != 0) {
+    fclose(stream);
+    free(mem);
+    return fail("wide output content");
+  }
+  fclose(stream);
+  free(mem);
+
+  if (swprintf(buffer, 16, L"%s:%d%c", L"ok", 9, L'?') != 5 ||
+      wcscmp(buffer, L"ok:9?") != 0) {
+    return fail("swprintf");
+  }
+  memset(buffer, 0, sizeof(buffer));
+  if (swscanf(L"name 42", L"%s %d", buffer, &scanned) != 2 ||
+      wcscmp(buffer, L"name") != 0 || scanned != 42) {
+    return fail("swscanf");
+  }
+  memset(buffer, 0, sizeof(buffer));
+  if (swscanf(L"\x20ac done", L"%s", buffer) != 1 ||
+      buffer[0] != (wchar_t)0x20ac || wcscmp(buffer + 1, L"") != 0) {
+    return fail("swscanf utf8");
   }
 
   printf("wchar_mbstate_test: ok\n");

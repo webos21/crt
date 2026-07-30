@@ -323,6 +323,29 @@ static void set_byte_orientation(FILE* stream) {
   }
 }
 
+int __crt_stdio_get_orientation(FILE* stream) {
+  struct __sfileext* ext = stream_ext(stream);
+
+  if (ext == 0) {
+    errno = EBADF;
+    return 0;
+  }
+  return ext->_wcio.wcio_mode;
+}
+
+int __crt_stdio_set_orientation(FILE* stream, int mode) {
+  struct __sfileext* ext = stream_ext(stream);
+
+  if (ext == 0) {
+    errno = EBADF;
+    return 0;
+  }
+  if (ext->_wcio.wcio_mode == ORIENT_UNKNOWN && mode != ORIENT_UNKNOWN) {
+    ext->_wcio.wcio_mode = mode;
+  }
+  return ext->_wcio.wcio_mode;
+}
+
 static int fd_cookie_close(void* opaque) {
   struct crt_stdio_cookie* cookie = (struct crt_stdio_cookie*)opaque;
 

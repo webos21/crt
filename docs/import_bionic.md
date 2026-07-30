@@ -275,6 +275,29 @@ The bootstrap multibyte encoding is UTF-8. Full Unicode classification, case
 mapping beyond ASCII, locale-specific multibyte encodings, Windows UTF-16 host
 API adapters, and xlocale-aware `_l` variants remain deferred.
 
+The first wide-character stdio tranche follows the public surface exposed by
+current Bionic `wchar.h` and adds:
+
+- `fgetwc`, `getwc`, and `getwchar`
+- `fgetws`
+- `fputwc`, `putwc`, and `putwchar`
+- `fputws`
+- `ungetwc`
+- `fwide`
+- `fwprintf`, `vfwprintf`, `wprintf`, and `vwprintf`
+- `swprintf` and `vswprintf`
+- `fwscanf`, `vfwscanf`, `wscanf`, and `vwscanf`
+- `swscanf` and `vswscanf`
+
+The implementation is still a bootstrap compatibility layer rather than a
+direct import of Bionic/BSD wide stdio internals. `FILE` orientation is stored in
+the Bionic-shaped `__sfileext` wide I/O state and wide stream input/output is
+encoded as UTF-8 through the existing byte stdio engine. Wide formatting and
+scanning currently route through the project's narrow `printf`/`scanf` cores
+after converting wide format strings. This keeps the Bionic-shaped API surface
+available for porting tests while deferring a fuller Bionic/BSD formatter,
+scanner, locale, and persistent multibyte stream-state import.
+
 ## Libm Bootstrap Tranche
 
 The first `libm` tranche adds a separate `libm.a` and public `math.h` while

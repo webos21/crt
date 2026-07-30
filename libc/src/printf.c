@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+#include <wchar.h>
 
 struct printf_buffer {
   char* data;
@@ -153,6 +154,59 @@ static void format_string(struct printf_buffer* buffer, const struct printf_spec
   if (spec->left) {
     write_padding(buffer, ' ', pad);
   }
+}
+
+static void format_wide_string(struct printf_buffer* buffer, const struct printf_spec* spec, const wchar_t* value) {
+  size_t wide_len;
+  size_t byte_len;
+  char* narrow;
+  size_t i;
+  struct printf_spec narrow_spec = *spec;
+
+  if (value == 0) {
+    format_string(buffer, spec, "(null)");
+    return;
+  }
+  wide_len = wcslen(value);
+  if (spec->precision_set && spec->precision >= 0 && (size_t)spec->precision < wide_len) {
+    wide_len = (size_t)spec->precision;
+  }
+  narrow = (char*)malloc(wide_len * 4 + 1);
+  if (narrow == 0) {
+    return;
+  }
+  byte_len = 0;
+  for (i = 0; i < wide_len; ++i) {
+    char mb[4];
+    size_t n = wcrtomb(mb, value[i], 0);
+    size_t j;
+
+    if (n == (size_t)-1) {
+      free(narrow);
+      return;
+    }
+    for (j = 0; j < n; ++j) {
+      narrow[byte_len++] = mb[j];
+    }
+  }
+  narrow[byte_len] = 0;
+  if (spec->precision_set) {
+    narrow_spec.precision_set = 0;
+    narrow_spec.precision = 0;
+  }
+  format_string(buffer, &narrow_spec, narrow);
+  free(narrow);
+}
+
+static void format_wide_char(struct printf_buffer* buffer, const struct printf_spec* spec, wchar_t wc) {
+  char narrow[5];
+  size_t length = wcrtomb(narrow, wc, 0);
+
+  if (length == (size_t)-1) {
+    return;
+  }
+  narrow[length] = 0;
+  format_string(buffer, spec, narrow);
 }
 
 static void format_integer(
@@ -330,14 +384,22 @@ int vsnprintf(char* s, size_t n, const char* format, va_list ap) {
 
     switch (*format) {
       case 'c': {
-        char ch = (char)va_arg(ap, int);
-        char text[1];
-        text[0] = ch;
-        write_formatted(&buffer, &spec, 0, 0, text, 1, 0);
+        if (spec.long_count > 0) {
+          format_wide_char(&buffer, &spec, (wchar_t)va_arg(ap, int));
+        } else {
+          char ch = (char)va_arg(ap, int);
+          char text[1];
+          text[0] = ch;
+          write_formatted(&buffer, &spec, 0, 0, text, 1, 0);
+        }
         break;
       }
       case 's':
-        format_string(&buffer, &spec, va_arg(ap, const char*));
+        if (spec.long_count > 0) {
+          format_wide_string(&buffer, &spec, va_arg(ap, const wchar_t*));
+        } else {
+          format_string(&buffer, &spec, va_arg(ap, const char*));
+        }
         break;
       case 'd':
       case 'i': {

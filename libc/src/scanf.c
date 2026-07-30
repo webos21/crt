@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
 
 enum scan_length {
   SCAN_LENGTH_NONE,
@@ -63,6 +64,31 @@ static void source_skip_space(struct scan_source* source) {
     ch = source_getc(source);
   } while (ch != EOF && isspace((unsigned char)ch));
   source_ungetc(source, ch);
+}
+
+static wint_t source_getwc_utf8(struct scan_source* source) {
+  char bytes[4];
+  mbstate_t state = {0, 0, 0};
+  size_t used;
+
+  for (used = 0; used < sizeof(bytes); ++used) {
+    wchar_t wc;
+    size_t result;
+    int ch = source_getc(source);
+
+    if (ch == EOF) {
+      return WEOF;
+    }
+    bytes[used] = (char)ch;
+    result = mbrtowc(&wc, bytes + used, 1, &state);
+    if (result == (size_t)-1) {
+      return WEOF;
+    }
+    if (result != (size_t)-2) {
+      return (wint_t)wc;
+    }
+  }
+  return WEOF;
 }
 
 static int parse_width(const char** format) {
@@ -272,6 +298,36 @@ static int scan_string(struct scan_source* source, int width, int suppress, va_l
   return 0;
 }
 
+static int scan_wide_string(struct scan_source* source, int width, int suppress, va_list* ap) {
+  wchar_t* out = suppress ? 0 : va_arg(*ap, wchar_t*);
+  int count = 0;
+  wint_t wc;
+
+  source_skip_space(source);
+  while (width == 0 || count < width) {
+    wc = source_getwc_utf8(source);
+    if (wc == WEOF) {
+      break;
+    }
+    if (wc >= 0 && wc <= 0x7f && isspace((unsigned char)wc)) {
+      source_ungetc(source, (int)wc);
+      break;
+    }
+    if (!suppress) {
+      out[count] = (wchar_t)wc;
+    }
+    ++count;
+  }
+  if (count == 0) {
+    return -1;
+  }
+  if (!suppress) {
+    out[count] = 0;
+    return 1;
+  }
+  return 0;
+}
+
 static int scan_chars(struct scan_source* source, int width, int suppress, va_list* ap) {
   char* out = suppress ? 0 : va_arg(*ap, char*);
   int count;
@@ -287,6 +343,25 @@ static int scan_chars(struct scan_source* source, int width, int suppress, va_li
     }
     if (!suppress) {
       out[count] = (char)ch;
+    }
+  }
+  return suppress ? 0 : 1;
+}
+
+static int scan_wide_chars(struct scan_source* source, int width, int suppress, va_list* ap) {
+  wchar_t* out = suppress ? 0 : va_arg(*ap, wchar_t*);
+  int count;
+
+  if (width == 0) {
+    width = 1;
+  }
+  for (count = 0; count < width; ++count) {
+    wint_t wc = source_getwc_utf8(source);
+    if (wc == WEOF) {
+      return count == 0 ? -1 : 0;
+    }
+    if (!suppress) {
+      out[count] = (wchar_t)wc;
     }
   }
   return suppress ? 0 : 1;
@@ -399,9 +474,17 @@ static int vscan_core(struct scan_source* source, const char* format, va_list ap
                spec == 'f' || spec == 'F' || spec == 'g' || spec == 'G') {
       result = scan_float(source, width, length, suppress, &ap);
     } else if (spec == 's') {
-      result = scan_string(source, width, suppress, &ap);
+      if (length == SCAN_LENGTH_L) {
+        result = scan_wide_string(source, width, suppress, &ap);
+      } else {
+        result = scan_string(source, width, suppress, &ap);
+      }
     } else if (spec == 'c') {
-      result = scan_chars(source, width, suppress, &ap);
+      if (length == SCAN_LENGTH_L) {
+        result = scan_wide_chars(source, width, suppress, &ap);
+      } else {
+        result = scan_chars(source, width, suppress, &ap);
+      }
     } else if (spec == '[') {
       result = scan_set(source, &format, width, suppress, &ap);
     } else if (spec == 'n') {
