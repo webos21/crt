@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -18,10 +19,13 @@ int main(void) {
   FILE* renamed;
   FILE* observer;
   FILE* temp;
+  char* line = 0;
   char buffer[16];
   char small_buffer[4];
+  size_t line_capacity = 0;
   fpos_t pos;
   size_t nread;
+  ssize_t line_length;
   int ch;
   int fd;
 
@@ -317,6 +321,39 @@ int main(void) {
   fclose(stream);
   if (remove("stdio_read_write_switch_test.tmp") != 0) {
     return fail("remove read write switch");
+  }
+
+  stream = fopen("stdio_getline_test.tmp", "w+");
+  if (stream == 0) {
+    return fail("getline open");
+  }
+  if (fputs("alpha\nbeta:gamma\n", stream) == EOF ||
+      fseek(stream, 0, SEEK_SET) != 0) {
+    fclose(stream);
+    return fail("getline setup");
+  }
+  line_length = getline(&line, &line_capacity, stream);
+  if (line_length != 6 || strcmp(line, "alpha\n") != 0 || line_capacity < 6) {
+    free(line);
+    fclose(stream);
+    return fail("getline");
+  }
+  line_length = getdelim(&line, &line_capacity, ':', stream);
+  if (line_length != 5 || strcmp(line, "beta:") != 0) {
+    free(line);
+    fclose(stream);
+    return fail("getdelim");
+  }
+  line_length = getline(&line, &line_capacity, stream);
+  if (line_length != 6 || strcmp(line, "gamma\n") != 0) {
+    free(line);
+    fclose(stream);
+    return fail("getline tail");
+  }
+  free(line);
+  line = 0;
+  if (fclose(stream) != 0 || remove("stdio_getline_test.tmp") != 0) {
+    return fail("getline cleanup");
   }
 
   stream = fopen("stdio_file_test.tmp", "r");

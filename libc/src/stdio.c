@@ -580,6 +580,55 @@ char* fgets(char* s, int size, FILE* stream) {
   return s;
 }
 
+ssize_t getdelim(char** lineptr, size_t* n, int delimiter, FILE* stream) {
+  size_t pos = 0;
+  int ch;
+
+  if (lineptr == 0 || n == 0 || stream_fd(stream) < 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (*lineptr == 0 || *n == 0) {
+    *n = 128;
+    *lineptr = (char*)malloc(*n);
+    if (*lineptr == 0) {
+      *n = 0;
+      return -1;
+    }
+  }
+
+  while ((ch = fgetc(stream)) != EOF) {
+    if (pos + 1 >= *n) {
+      size_t new_size = *n * 2;
+      char* new_line;
+
+      if (new_size <= *n) {
+        errno = ENOMEM;
+        return -1;
+      }
+      new_line = (char*)realloc(*lineptr, new_size);
+      if (new_line == 0) {
+        return -1;
+      }
+      *lineptr = new_line;
+      *n = new_size;
+    }
+    (*lineptr)[pos++] = (char)ch;
+    if (ch == delimiter) {
+      break;
+    }
+  }
+  if (pos == 0 && ch == EOF) {
+    return -1;
+  }
+  (*lineptr)[pos] = 0;
+  return (ssize_t)pos;
+}
+
+ssize_t getline(char** lineptr, size_t* n, FILE* stream) {
+  return getdelim(lineptr, n, '\n', stream);
+}
+
 int getc(FILE* stream) {
   return fgetc(stream);
 }
