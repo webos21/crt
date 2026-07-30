@@ -25,7 +25,8 @@ extern "C" {
 #define SEEK_END 2
 #endif
 
-typedef struct __crt_FILE FILE;
+struct __sFILE;
+typedef struct __sFILE FILE;
 typedef off_t fpos_t;
 
 extern FILE* stdin;
@@ -58,8 +59,39 @@ int ungetc(int c, FILE* stream);
 int feof(FILE* stream);
 int ferror(FILE* stream);
 void clearerr(FILE* stream);
+int feof_unlocked(FILE* stream);
+int ferror_unlocked(FILE* stream);
+void clearerr_unlocked(FILE* stream);
+int fileno_unlocked(FILE* stream);
+int fflush_unlocked(FILE* stream);
+int fgetc_unlocked(FILE* stream);
+int getc_unlocked(FILE* stream);
+int getchar_unlocked(void);
+int fputc_unlocked(int c, FILE* stream);
+int putc_unlocked(int c, FILE* stream);
+int putchar_unlocked(int c);
+char* fgets_unlocked(char* s, int size, FILE* stream);
+int fputs_unlocked(const char* s, FILE* stream);
+size_t fread_unlocked(void* ptr, size_t size, size_t nmemb, FILE* stream);
+size_t fwrite_unlocked(const void* ptr, size_t size, size_t nmemb, FILE* stream);
+void flockfile(FILE* stream);
+int ftrylockfile(FILE* stream);
+void funlockfile(FILE* stream);
 void setbuf(FILE* stream, char* buf);
 int setvbuf(FILE* stream, char* buf, int mode, size_t size);
+void setbuffer(FILE* stream, char* buf, int size);
+int setlinebuf(FILE* stream);
+FILE* fmemopen(void* buf, size_t size, const char* mode);
+FILE* open_memstream(char** ptr, size_t* sizep);
+FILE* funopen(const void* cookie,
+              int (*read_fn)(void*, char*, int),
+              int (*write_fn)(void*, const char*, int),
+              fpos_t (*seek_fn)(void*, fpos_t, int),
+              int (*close_fn)(void*));
+#define fropen(cookie, fn) funopen(cookie, fn, 0, 0, 0)
+#define fwopen(cookie, fn) funopen(cookie, 0, fn, 0, 0)
+char* fgetln(FILE* stream, size_t* lengthp);
+int fpurge(FILE* stream);
 int remove(const char* path);
 int rename(const char* old_path, const char* new_path);
 int printf(const char* format, ...);
@@ -70,6 +102,8 @@ int sprintf(char* s, const char* format, ...);
 int vsprintf(char* s, const char* format, va_list ap);
 int snprintf(char* s, size_t n, const char* format, ...);
 int vsnprintf(char* s, size_t n, const char* format, va_list ap);
+int asprintf(char** strp, const char* format, ...);
+int vasprintf(char** strp, const char* format, va_list ap);
 int scanf(const char* format, ...);
 int fscanf(FILE* stream, const char* format, ...);
 int vfscanf(FILE* stream, const char* format, va_list ap);

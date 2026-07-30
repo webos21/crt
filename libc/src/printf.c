@@ -479,6 +479,47 @@ int sprintf(char* s, const char* format, ...) {
   return result;
 }
 
+int vasprintf(char** strp, const char* format, va_list ap) {
+  va_list copy;
+  char* buffer;
+  int length;
+  int result;
+
+  if (strp == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  *strp = 0;
+  va_copy(copy, ap);
+  length = vsnprintf(0, 0, format, copy);
+  va_end(copy);
+  if (length < 0) {
+    return -1;
+  }
+  buffer = (char*)malloc((size_t)length + 1);
+  if (buffer == 0) {
+    errno = ENOMEM;
+    return -1;
+  }
+  result = vsnprintf(buffer, (size_t)length + 1, format, ap);
+  if (result < 0) {
+    free(buffer);
+    return -1;
+  }
+  *strp = buffer;
+  return result;
+}
+
+int asprintf(char** strp, const char* format, ...) {
+  int result;
+  va_list ap;
+
+  va_start(ap, format);
+  result = vasprintf(strp, format, ap);
+  va_end(ap);
+  return result;
+}
+
 int vfprintf(FILE* stream, const char* format, va_list ap) {
   char stack_buffer[1024];
   char* buffer = stack_buffer;

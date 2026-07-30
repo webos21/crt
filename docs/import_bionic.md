@@ -979,15 +979,58 @@ The stdio surface now also exposes:
 - `fsetpos`;
 - `rewind`;
 - `perror`;
-- `tmpfile`.
+- `tmpfile`;
+- `asprintf` and `vasprintf`;
+- `flockfile`, `ftrylockfile`, and `funlockfile`;
+- common `*_unlocked` stdio entry points;
+- `setbuffer` and `setlinebuf`;
+- `fmemopen` and `open_memstream`.
 
 The stdio implementation now has a small real buffering engine. `_IONBF` keeps
 direct I/O, `_IOFBF` buffers reads and writes until the buffer fills or
 `fflush`/`fclose`/`fseek` forces a flush, and `_IOLBF` flushes writes on
 newline. `setvbuf` can attach a caller-provided buffer, while streams without a
-provided buffer allocate a bootstrap `BUFSIZ` buffer lazily. The implementation
-still keeps a private bootstrap `FILE` layout and intentionally does not expose
-or freeze a Bionic-compatible `FILE` ABI yet.
+provided buffer allocate a bootstrap `BUFSIZ` buffer lazily.
+
+The `FILE` public type now follows Bionic's modern opaque direction:
+`stdio.h` forward-declares `struct __sFILE` and exposes `FILE*` standard stream
+symbols. Internally, the CRT has moved to a Bionic-shaped `struct __sFILE`
+front matter with `_p`, `_r`, `_w`, `_flags`, `_file`, `_bf`, function-cookie
+slots, and `_ext`, plus a Bionic-shaped `struct __sfileext` containing ungetc
+storage, wide-orientation state, the file lock, caller-locking policy, seek64,
+and popen pid fields. The project-owned tail state that previously lived inside
+`FILE` has been removed. Backend-specific state such as fd ownership,
+memory-stream storage, and the global open-stream list now lives behind the
+Bionic `_cookie` pointer, while buffering uses `_bf`/`_p`/`_r`/`_w`, EOF/error
+state uses `_flags`, ungetc uses `_ubuf`/`_ur`, byte orientation uses
+`_EXT(fp)->_wcio.wcio_mode`, and file locking uses `_EXT(fp)->_lock`.
+
+The locking and memory-stream tranche follows Bionic's public API direction.
+`flockfile`/`ftrylockfile`/`funlockfile` lock through `_EXT(fp)->_lock`, matching
+Bionic's extension-lock placement; the current recursive behavior is maintained
+inside `__sfileext` until pthread recursive mutex initializers are fully aligned.
+The `*_unlocked` functions are exported for source compatibility; internally
+they currently share the same underlying operations as the regular functions and
+will be split further when stdio's final lock boundary is settled. `fmemopen`
+supports fixed-size caller buffers and allocated buffers, and `open_memstream`
+keeps the caller's pointer and size synchronized across writes, `fflush`, and
+`fclose`.
+
+The next stdio tranche starts replacing project-specific control flow with
+Bionic/BSD internal entry points. The CRT now exports and routes byte I/O through
+`__sread`, `__swrite`, `__sseek`, `__sclose`, `__srefill`, `__srget`,
+`__swsetup`, `__swbuf`, and `__sflush`, matching the internal names exposed by
+Bionic's `libc/stdio/local.h`. Public BSD cookie I/O is now available through
+`funopen`, with `fropen` and `fwopen` macros exposed from `stdio.h`. `fgetln`
+uses the BSD `_lb` line buffer field, `fpurge` discards buffered stream state,
+and longer `ungetc` sequences spill into `_EXT(fp)->_ub` instead of relying only
+on a project-owned single-character state.
+
+This is still not a byte-for-byte final Bionic `FILE` ABI. The remaining
+hardening work is to replace the simplified formatter/scanner/buffering engine
+with fuller Bionic/BSD stdio internals, reduce project-only `__sfileext`
+additions where possible, and add ABI layout tests for supported target data
+models.
 
 The startup objects now route a returned `main` status through `exit`, and
 `exit` runs a small LIFO `atexit` handler stack and flushes the bootstrap

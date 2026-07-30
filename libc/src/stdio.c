@@ -1,51 +1,398 @@
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <wchar.h>
 
-struct __crt_FILE {
-  int fd;
-  int owned;
-  int eof;
-  int error;
-  int buffering_mode;
-  char* buffer;
-  size_t buffer_size;
-  int buffer_owned;
-  size_t buffer_pos;
-  size_t buffer_len;
-  int buffer_dirty;
-  int last_op;
-  int ungot;
-  unsigned char ungot_char;
-  FILE* next_open;
+struct __sbuf {
+  unsigned char* _base;
+  size_t _size;
+};
+
+#define WCIO_UNGETWC_BUFSIZE 1
+
+struct wchar_io_data {
+  mbstate_t wcio_mbstate_in;
+  mbstate_t wcio_mbstate_out;
+  wchar_t wcio_ungetwc_buf[WCIO_UNGETWC_BUFSIZE];
+  size_t wcio_ungetwc_inbuf;
+  int wcio_mode;
+};
+
+struct __sfileext {
+  struct __sbuf _ub;
+  struct wchar_io_data _wcio;
+  pthread_mutex_t _lock;
+  int _caller_handles_locking;
+  pthread_t _lock_owner;
+  int _lock_count;
+  off64_t (*_seek64)(void*, off64_t, int);
+  pid_t _popen_pid;
+};
+
+struct __sFILE {
+  unsigned char* _p;
+  int _r;
+  int _w;
+  int _flags;
+  int _file;
+  struct __sbuf _bf;
+  int _lbfsize;
+  void* _cookie;
+  int (*_close)(void*);
+  int (*_read)(void*, char*, int);
+  fpos_t (*_seek)(void*, fpos_t, int);
+  int (*_write)(void*, const char*, int);
+  struct __sbuf _ext;
+  unsigned char* _up;
+  int _ur;
+  unsigned char _ubuf[3];
+  unsigned char _nbuf[1];
+  struct __sbuf _lb;
+  int _blksize;
+  fpos_t _unused_0;
 };
 
 #define CRT_STDIO_NONE 0
 #define CRT_STDIO_READ 1
 #define CRT_STDIO_WRITE 2
+#define CRT_STDIO_KIND_FD 0
+#define CRT_STDIO_KIND_MEMORY 1
+#define CRT_STDIO_KIND_FUNOPEN 2
+
+#define __SLBF 0x0001
+#define __SNBF 0x0002
+#define __SRD 0x0004
+#define __SWR 0x0008
+#define __SRW 0x0010
+#define __SEOF 0x0020
+#define __SERR 0x0040
+#define __SMBF 0x0080
+#define __SSTR 0x0200
+#define __SALC 0x4000
+
+#define _EXT(fp) ((struct __sfileext*)((fp)->_ext._base))
+#define ORIENT_BYTES (-1)
+#define ORIENT_UNKNOWN 0
+#define ORIENT_CHARS 1
+
+struct crt_stdio_cookie {
+  int kind;
+  int fd;
+  int owned;
+  int readable;
+  int writable;
+  int append;
+  int ext_owned;
+  FILE* stream;
+  struct crt_stdio_cookie* next_open;
+  char* mem_base;
+  size_t mem_size;
+  size_t mem_pos;
+  size_t mem_len;
+  int mem_owned;
+  char** mem_open_ptr;
+  size_t* mem_open_size;
+  void* user_cookie;
+  int (*user_close)(void*);
+  int (*user_read)(void*, char*, int);
+  fpos_t (*user_seek)(void*, fpos_t, int);
+  int (*user_write)(void*, const char*, int);
+};
 
 long __crt_sys_unlink(const char* path);
 long __crt_sys_rename(const char* old_path, const char* new_path);
 
-static FILE stdin_storage = {0, 0, 0, 0, _IOLBF, 0, 0, 0, 0, 0, 0, CRT_STDIO_NONE, 0, 0, 0};
-static FILE stdout_storage = {1, 0, 0, 0, _IOLBF, 0, 0, 0, 0, 0, 0, CRT_STDIO_NONE, 0, 0, 0};
-static FILE stderr_storage = {2, 0, 0, 0, _IONBF, 0, 0, 0, 0, 0, 0, CRT_STDIO_NONE, 0, 0, 0};
+static int fd_cookie_close(void* opaque);
+static int fd_cookie_read(void* opaque, char* buf, int count);
+static fpos_t fd_cookie_seek(void* opaque, fpos_t offset, int whence);
+static int fd_cookie_write(void* opaque, const char* buf, int count);
+int __sread(void* opaque, char* buf, int count);
+int __swrite(void* opaque, const char* buf, int count);
+fpos_t __sseek(void* opaque, fpos_t offset, int whence);
+int __sclose(void* opaque);
+int __srefill(FILE* stream);
+int __srget(FILE* stream);
+int __swsetup(FILE* stream);
+int __swbuf(int c, FILE* stream);
+int __sflush(FILE* stream);
 
-FILE* stdin = &stdin_storage;
-FILE* stdout = &stdout_storage;
-FILE* stderr = &stderr_storage;
+static struct __sfileext __sFext[3] = {
+    { {0, 0}, {{0}, {0}, {0}, 0, 0}, PTHREAD_MUTEX_INITIALIZER, 0, 0, 0, 0, 0 },
+    { {0, 0}, {{0}, {0}, {0}, 0, 0}, PTHREAD_MUTEX_INITIALIZER, 0, 0, 0, 0, 0 },
+    { {0, 0}, {{0}, {0}, {0}, 0, 0}, PTHREAD_MUTEX_INITIALIZER, 0, 0, 0, 0, 0 },
+};
 
-static FILE* open_streams;
+static struct crt_stdio_cookie std_cookies[3] = {
+    { CRT_STDIO_KIND_FD, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+    { CRT_STDIO_KIND_FD, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+    { CRT_STDIO_KIND_FD, 2, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+};
+
+FILE __sF[3] = {
+    {
+        ._flags = __SRD,
+        ._file = 0,
+        ._cookie = &std_cookies[0],
+        ._close = __sclose,
+        ._read = __sread,
+        ._seek = __sseek,
+        ._write = __swrite,
+        ._ext = { (unsigned char*)&__sFext[0], sizeof(__sFext[0]) },
+    },
+    {
+        ._flags = __SWR,
+        ._file = 1,
+        ._cookie = &std_cookies[1],
+        ._close = __sclose,
+        ._read = __sread,
+        ._seek = __sseek,
+        ._write = __swrite,
+        ._ext = { (unsigned char*)&__sFext[1], sizeof(__sFext[1]) },
+    },
+    {
+        ._flags = __SWR | __SNBF,
+        ._file = 2,
+        ._cookie = &std_cookies[2],
+        ._close = __sclose,
+        ._read = __sread,
+        ._seek = __sseek,
+        ._write = __swrite,
+        ._ext = { (unsigned char*)&__sFext[2], sizeof(__sFext[2]) },
+    },
+};
+
+FILE* stdin = &__sF[0];
+FILE* stdout = &__sF[1];
+FILE* stderr = &__sF[2];
+
+static struct crt_stdio_cookie* open_streams;
+
+static int stream_valid(FILE* stream) {
+  if (stream == 0) {
+    errno = EBADF;
+    return 0;
+  }
+  return 1;
+}
+
+static struct crt_stdio_cookie* stream_cookie(FILE* stream) {
+  if (stream == 0 || stream->_cookie == 0) {
+    errno = EBADF;
+    return 0;
+  }
+  return (struct crt_stdio_cookie*)stream->_cookie;
+}
 
 static int stream_fd(FILE* stream) {
-  if (stream == 0) {
+  struct crt_stdio_cookie* cookie = stream_cookie(stream);
+
+  if (cookie == 0 || cookie->kind != CRT_STDIO_KIND_FD || cookie->fd < 0) {
     errno = EBADF;
     return -1;
   }
-  return stream->fd;
+  return cookie->fd;
+}
+
+static int is_memory_stream(FILE* stream) {
+  struct crt_stdio_cookie* cookie;
+
+  if (stream == 0 || stream->_cookie == 0) {
+    return 0;
+  }
+  cookie = (struct crt_stdio_cookie*)stream->_cookie;
+  return cookie->kind == CRT_STDIO_KIND_MEMORY;
+}
+
+static struct __sfileext* stream_ext(FILE* stream) {
+  if (stream == 0 || stream->_ext._base == 0) {
+    return 0;
+  }
+  return (struct __sfileext*)stream->_ext._base;
+}
+
+static void set_stream_error(FILE* stream) {
+  stream->_flags |= __SERR;
+}
+
+static void set_stream_eof(FILE* stream) {
+  stream->_flags |= __SEOF;
+}
+
+static void clear_stream_eof(FILE* stream) {
+  stream->_flags &= ~__SEOF;
+}
+
+static int pop_ungetc(FILE* stream) {
+  int ch;
+
+  if (stream == 0 || stream->_ur == 0 || stream->_up == 0) {
+    return EOF;
+  }
+  ch = *stream->_up++;
+  --stream->_ur;
+  if (stream->_ur == 0) {
+    struct __sfileext* ext = stream_ext(stream);
+
+    stream->_up = 0;
+    if (ext != 0 && ext->_ub._base != 0) {
+      stream->_up = 0;
+    }
+  }
+  clear_stream_eof(stream);
+  return ch;
+}
+
+static int stream_buffering_mode(FILE* stream) {
+  if ((stream->_flags & __SNBF) != 0) {
+    return _IONBF;
+  }
+  if ((stream->_flags & __SLBF) != 0) {
+    return _IOLBF;
+  }
+  return _IOFBF;
+}
+
+static int stream_last_op(FILE* stream) {
+  if ((stream->_flags & __SWR) != 0) {
+    return CRT_STDIO_WRITE;
+  }
+  if ((stream->_flags & __SRD) != 0) {
+    return CRT_STDIO_READ;
+  }
+  return CRT_STDIO_NONE;
+}
+
+static void sync_bionic_buffer_fields(FILE* stream) {
+  if (stream == 0) {
+    return;
+  }
+  if (stream->_bf._base == 0) {
+    stream->_p = 0;
+    stream->_r = 0;
+    stream->_w = 0;
+  }
+  stream->_lbfsize = stream_buffering_mode(stream) == _IOLBF ? -(int)stream->_bf._size : 0;
+}
+
+static int bionic_flags_from_mode_flags(int flags) {
+  if ((flags & O_RDWR) == O_RDWR) {
+    return __SRW;
+  }
+  if ((flags & O_WRONLY) == O_WRONLY) {
+    return __SWR;
+  }
+  return __SRD;
+}
+
+static void set_byte_orientation(FILE* stream) {
+  struct __sfileext* ext = stream_ext(stream);
+
+  if (ext != 0 && ext->_wcio.wcio_mode == ORIENT_UNKNOWN) {
+    ext->_wcio.wcio_mode = ORIENT_BYTES;
+  }
+}
+
+static int fd_cookie_close(void* opaque) {
+  struct crt_stdio_cookie* cookie = (struct crt_stdio_cookie*)opaque;
+
+  if (cookie == 0 || cookie->fd < 0) {
+    errno = EBADF;
+    return -1;
+  }
+  return close(cookie->fd);
+}
+
+static int fd_cookie_read(void* opaque, char* buf, int count) {
+  struct crt_stdio_cookie* cookie = (struct crt_stdio_cookie*)opaque;
+  ssize_t result;
+
+  if (cookie == 0 || cookie->fd < 0) {
+    errno = EBADF;
+    return -1;
+  }
+  result = read(cookie->fd, buf, (size_t)count);
+  return result < 0 ? -1 : (int)result;
+}
+
+static fpos_t fd_cookie_seek(void* opaque, fpos_t offset, int whence) {
+  struct crt_stdio_cookie* cookie = (struct crt_stdio_cookie*)opaque;
+
+  if (cookie == 0 || cookie->fd < 0) {
+    errno = EBADF;
+    return (fpos_t)-1;
+  }
+  return lseek(cookie->fd, offset, whence);
+}
+
+static int fd_cookie_write(void* opaque, const char* buf, int count) {
+  struct crt_stdio_cookie* cookie = (struct crt_stdio_cookie*)opaque;
+  ssize_t result;
+
+  if (cookie == 0 || cookie->fd < 0) {
+    errno = EBADF;
+    return -1;
+  }
+  result = write(cookie->fd, buf, (size_t)count);
+  return result < 0 ? -1 : (int)result;
+}
+
+int __sread(void* opaque, char* buf, int count) {
+  return fd_cookie_read(opaque, buf, count);
+}
+
+int __swrite(void* opaque, const char* buf, int count) {
+  return fd_cookie_write(opaque, buf, count);
+}
+
+fpos_t __sseek(void* opaque, fpos_t offset, int whence) {
+  return fd_cookie_seek(opaque, offset, whence);
+}
+
+int __sclose(void* opaque) {
+  return fd_cookie_close(opaque);
+}
+
+static int funopen_cookie_close(void* opaque) {
+  struct crt_stdio_cookie* cookie = (struct crt_stdio_cookie*)opaque;
+
+  if (cookie == 0 || cookie->user_close == 0) {
+    return 0;
+  }
+  return cookie->user_close(cookie->user_cookie);
+}
+
+static int funopen_cookie_read(void* opaque, char* buf, int count) {
+  struct crt_stdio_cookie* cookie = (struct crt_stdio_cookie*)opaque;
+
+  if (cookie == 0 || cookie->user_read == 0) {
+    errno = EBADF;
+    return -1;
+  }
+  return cookie->user_read(cookie->user_cookie, buf, count);
+}
+
+static fpos_t funopen_cookie_seek(void* opaque, fpos_t offset, int whence) {
+  struct crt_stdio_cookie* cookie = (struct crt_stdio_cookie*)opaque;
+
+  if (cookie == 0 || cookie->user_seek == 0) {
+    errno = ESPIPE;
+    return (fpos_t)-1;
+  }
+  return cookie->user_seek(cookie->user_cookie, offset, whence);
+}
+
+static int funopen_cookie_write(void* opaque, const char* buf, int count) {
+  struct crt_stdio_cookie* cookie = (struct crt_stdio_cookie*)opaque;
+
+  if (cookie == 0 || cookie->user_write == 0) {
+    errno = EBADF;
+    return -1;
+  }
+  return cookie->user_write(cookie->user_cookie, buf, count);
 }
 
 static int parse_mode(const char* mode) {
@@ -77,35 +424,63 @@ static int parse_mode(const char* mode) {
   return flags;
 }
 
-static void init_stream(FILE* stream, int fd, int owned) {
-  stream->fd = fd;
-  stream->owned = owned;
-  stream->eof = 0;
-  stream->error = 0;
-  stream->buffering_mode = _IOFBF;
-  stream->buffer = 0;
-  stream->buffer_size = 0;
-  stream->buffer_owned = 0;
-  stream->buffer_pos = 0;
-  stream->buffer_len = 0;
-  stream->buffer_dirty = 0;
-  stream->last_op = CRT_STDIO_NONE;
-  stream->ungot = 0;
-  stream->ungot_char = 0;
+static void init_stream(FILE* stream, int fd, int owned, int readable, int writable, int append) {
+  struct __sfileext* ext;
+  struct crt_stdio_cookie* cookie;
+
+  memset(stream, 0, sizeof(FILE));
+  ext = (struct __sfileext*)malloc(sizeof(struct __sfileext));
+  cookie = (struct crt_stdio_cookie*)malloc(sizeof(struct crt_stdio_cookie));
+  if (cookie == 0) {
+    free(ext);
+    return;
+  }
+  memset(cookie, 0, sizeof(*cookie));
+  cookie->kind = CRT_STDIO_KIND_FD;
+  cookie->fd = fd;
+  cookie->owned = owned;
+  cookie->readable = readable;
+  cookie->writable = writable;
+  cookie->append = append;
+  cookie->stream = stream;
+  if (ext != 0) {
+    memset(ext, 0, sizeof(*ext));
+    pthread_mutex_init(&ext->_lock, 0);
+    stream->_ext._base = (unsigned char*)ext;
+    stream->_ext._size = sizeof(*ext);
+    cookie->ext_owned = 1;
+  }
+  stream->_file = fd;
+  stream->_cookie = cookie;
+  stream->_close = __sclose;
+  stream->_read = __sread;
+  stream->_seek = __sseek;
+  stream->_write = __swrite;
+  sync_bionic_buffer_fields(stream);
 }
 
 static void register_stream(FILE* stream) {
-  stream->next_open = open_streams;
-  open_streams = stream;
+  struct crt_stdio_cookie* cookie = stream_cookie(stream);
+
+  if (cookie == 0) {
+    return;
+  }
+  cookie->next_open = open_streams;
+  open_streams = cookie;
 }
 
 static void unregister_stream(FILE* stream) {
-  FILE** current = &open_streams;
+  struct crt_stdio_cookie* cookie = stream_cookie(stream);
+  struct crt_stdio_cookie** current = &open_streams;
+
+  if (cookie == 0) {
+    return;
+  }
 
   while (*current != 0) {
-    if (*current == stream) {
-      *current = stream->next_open;
-      stream->next_open = 0;
+    if (*current == cookie) {
+      *current = cookie->next_open;
+      cookie->next_open = 0;
       return;
     }
     current = &(*current)->next_open;
@@ -113,27 +488,174 @@ static void unregister_stream(FILE* stream) {
 }
 
 static void reset_buffer_state(FILE* stream) {
-  stream->buffer_pos = 0;
-  stream->buffer_len = 0;
-  stream->buffer_dirty = 0;
-  stream->ungot = 0;
+  stream->_p = stream->_bf._base;
+  stream->_r = 0;
+  stream->_w = stream->_bf._base != 0 && stream_last_op(stream) == CRT_STDIO_WRITE ?
+      (int)stream->_bf._size : 0;
+  stream->_ur = 0;
+  stream->_up = 0;
+  sync_bionic_buffer_fields(stream);
+}
+
+static void free_extension_buffers(FILE* stream) {
+  struct __sfileext* ext = stream_ext(stream);
+
+  if (stream == 0) {
+    return;
+  }
+  if (ext != 0 && ext->_ub._base != 0) {
+    free(ext->_ub._base);
+    ext->_ub._base = 0;
+    ext->_ub._size = 0;
+  }
+  if (stream->_lb._base != 0) {
+    free(stream->_lb._base);
+    stream->_lb._base = 0;
+    stream->_lb._size = 0;
+  }
+}
+
+static int prepare_read(FILE* stream);
+static int prepare_write(FILE* stream);
+
+static size_t bounded_strlen(const char* s, size_t max) {
+  size_t len = 0;
+
+  while (len < max && s[len] != 0) {
+    ++len;
+  }
+  return len;
+}
+
+static void sync_memory_stream(FILE* stream) {
+  struct crt_stdio_cookie* cookie = stream_cookie(stream);
+
+  if (cookie == 0 || cookie->kind != CRT_STDIO_KIND_MEMORY) {
+    return;
+  }
+  if (cookie->mem_open_ptr != 0) {
+    *cookie->mem_open_ptr = cookie->mem_base;
+  }
+  if (cookie->mem_open_size != 0) {
+    *cookie->mem_open_size = cookie->mem_len;
+  }
+}
+
+static int ensure_memory_capacity(FILE* stream, size_t needed) {
+  struct crt_stdio_cookie* cookie = stream_cookie(stream);
+  size_t capacity;
+  char* grown;
+
+  if (cookie == 0) {
+    return -1;
+  }
+  if (needed <= cookie->mem_size) {
+    return 0;
+  }
+  if (cookie->mem_open_ptr == 0) {
+    errno = ENOSPC;
+    set_stream_error(stream);
+    return -1;
+  }
+  capacity = cookie->mem_size == 0 ? 64 : cookie->mem_size;
+  while (capacity < needed) {
+    size_t next = capacity * 2;
+    if (next <= capacity) {
+      errno = ENOMEM;
+      set_stream_error(stream);
+      return -1;
+    }
+    capacity = next;
+  }
+  grown = (char*)realloc(cookie->mem_base, capacity);
+  if (grown == 0) {
+    set_stream_error(stream);
+    return -1;
+  }
+  cookie->mem_base = grown;
+  cookie->mem_size = capacity;
+  sync_memory_stream(stream);
+  return 0;
+}
+
+static int memory_putc(FILE* stream, int c) {
+  struct crt_stdio_cookie* cookie = stream_cookie(stream);
+  unsigned char byte = (unsigned char)c;
+
+  if (cookie == 0 || !cookie->writable) {
+    errno = EBADF;
+    set_stream_error(stream);
+    return EOF;
+  }
+  if (prepare_write(stream) != 0) {
+    return EOF;
+  }
+  set_byte_orientation(stream);
+  if (cookie->append) {
+    cookie->mem_pos = cookie->mem_len;
+  }
+  if (ensure_memory_capacity(stream, cookie->mem_pos + 2) != 0) {
+    return EOF;
+  }
+  cookie->mem_base[cookie->mem_pos++] = (char)byte;
+  if (cookie->mem_pos > cookie->mem_len) {
+    cookie->mem_len = cookie->mem_pos;
+  }
+  if (cookie->mem_len < cookie->mem_size) {
+    cookie->mem_base[cookie->mem_len] = 0;
+  } else if (cookie->mem_size != 0) {
+    cookie->mem_base[cookie->mem_size - 1] = 0;
+  }
+  sync_memory_stream(stream);
+  return byte;
+}
+
+static int memory_getc(FILE* stream) {
+  struct crt_stdio_cookie* cookie = stream_cookie(stream);
+
+  if (cookie == 0 || !cookie->readable) {
+    errno = EBADF;
+    set_stream_error(stream);
+    return EOF;
+  }
+  if (prepare_read(stream) != 0) {
+    return EOF;
+  }
+  set_byte_orientation(stream);
+  if (stream->_ur != 0) {
+    return pop_ungetc(stream);
+  }
+  if (cookie->mem_pos >= cookie->mem_len) {
+    set_stream_eof(stream);
+    return EOF;
+  }
+  clear_stream_eof(stream);
+  return (unsigned char)cookie->mem_base[cookie->mem_pos++];
 }
 
 static int discard_read_buffer(FILE* stream) {
   off_t unread = 0;
 
-  if (stream->last_op != CRT_STDIO_READ) {
+  if (is_memory_stream(stream)) {
+    stream->_ur = 0;
+    stream->_up = 0;
+    stream->_r = 0;
+    return 0;
+  }
+  if (stream_last_op(stream) != CRT_STDIO_READ) {
     reset_buffer_state(stream);
     return 0;
   }
-  if (stream->buffer_len > stream->buffer_pos) {
-    unread += (off_t)(stream->buffer_len - stream->buffer_pos);
-  }
-  if (stream->ungot) {
+  unread += (off_t)stream->_r;
+  if (stream->_ur != 0) {
     ++unread;
   }
-  if (unread != 0 && lseek(stream->fd, -unread, SEEK_CUR) < 0 && errno != ESPIPE) {
-    stream->error = 1;
+  if (stream->_seek == 0) {
+    errno = ESPIPE;
+    return -1;
+  }
+  if (unread != 0 && stream->_seek(stream->_cookie, -unread, SEEK_CUR) < 0 && errno != ESPIPE) {
+    set_stream_error(stream);
     return -1;
   }
   reset_buffer_state(stream);
@@ -141,62 +663,93 @@ static int discard_read_buffer(FILE* stream) {
 }
 
 static int ensure_buffer(FILE* stream) {
-  if (stream->buffering_mode == _IONBF) {
+  if (stream_buffering_mode(stream) == _IONBF) {
     return 0;
   }
-  if (stream->buffer != 0 && stream->buffer_size != 0) {
+  if (stream->_bf._base != 0 && stream->_bf._size != 0) {
+    sync_bionic_buffer_fields(stream);
     return 0;
   }
-  stream->buffer = (char*)malloc(BUFSIZ);
-  if (stream->buffer == 0) {
-    stream->error = 1;
+  stream->_bf._base = (unsigned char*)malloc(BUFSIZ);
+  if (stream->_bf._base == 0) {
+    set_stream_error(stream);
     return -1;
   }
-  stream->buffer_size = BUFSIZ;
-  stream->buffer_owned = 1;
+  stream->_bf._size = BUFSIZ;
+  stream->_p = stream->_bf._base;
+  stream->_flags |= __SMBF;
+  sync_bionic_buffer_fields(stream);
   return 0;
 }
 
 static int flush_write_buffer(FILE* stream) {
+  size_t pending;
   size_t done = 0;
 
-  if (!stream->buffer_dirty || stream->buffer_len == 0) {
-    stream->buffer_pos = 0;
-    stream->buffer_len = 0;
-    stream->buffer_dirty = 0;
+  if (is_memory_stream(stream)) {
+    sync_memory_stream(stream);
+    reset_buffer_state(stream);
     return 0;
   }
-  while (done < stream->buffer_len) {
-    ssize_t result = write(stream->fd, stream->buffer + done, stream->buffer_len - done);
+  pending = stream->_p != 0 && stream->_bf._base != 0 && stream->_p >= stream->_bf._base ?
+      (size_t)(stream->_p - stream->_bf._base) : 0;
+  if (pending == 0) {
+    reset_buffer_state(stream);
+    return 0;
+  }
+  if (stream->_write == 0) {
+    errno = EBADF;
+    set_stream_error(stream);
+    return -1;
+  }
+  while (done < pending) {
+    int chunk = pending - done > (size_t)0x7fffffff ? 0x7fffffff : (int)(pending - done);
+    int result = stream->_write(stream->_cookie, (const char*)stream->_bf._base + done, chunk);
     if (result <= 0) {
-      stream->error = 1;
+      set_stream_error(stream);
       return -1;
     }
     done += (size_t)result;
   }
-  stream->buffer_pos = 0;
-  stream->buffer_len = 0;
-  stream->buffer_dirty = 0;
+  reset_buffer_state(stream);
   return 0;
 }
 
 static int prepare_read(FILE* stream) {
-  if (stream->last_op == CRT_STDIO_WRITE && flush_write_buffer(stream) != 0) {
+  struct crt_stdio_cookie* cookie = stream_cookie(stream);
+
+  if (cookie == 0 || !cookie->readable || stream->_read == 0) {
+    errno = EBADF;
+    set_stream_error(stream);
     return -1;
   }
-  if (stream->last_op != CRT_STDIO_READ) {
+  if (stream_last_op(stream) == CRT_STDIO_WRITE && flush_write_buffer(stream) != 0) {
+    return -1;
+  }
+  if (stream_last_op(stream) != CRT_STDIO_READ) {
     reset_buffer_state(stream);
   }
-  stream->last_op = CRT_STDIO_READ;
+  stream->_flags &= ~__SWR;
+  stream->_flags |= __SRD;
+  sync_bionic_buffer_fields(stream);
   return 0;
 }
 
 static int prepare_write(FILE* stream) {
-  if (stream->last_op == CRT_STDIO_READ && discard_read_buffer(stream) != 0) {
+  struct crt_stdio_cookie* cookie = stream_cookie(stream);
+
+  if (cookie == 0 || !cookie->writable || stream->_write == 0) {
+    errno = EBADF;
+    set_stream_error(stream);
     return -1;
   }
-  stream->last_op = CRT_STDIO_WRITE;
-  stream->eof = 0;
+  if (stream_last_op(stream) == CRT_STDIO_READ && discard_read_buffer(stream) != 0) {
+    return -1;
+  }
+  stream->_flags &= ~__SRD;
+  stream->_flags |= __SWR;
+  clear_stream_eof(stream);
+  sync_bionic_buffer_fields(stream);
   return 0;
 }
 
@@ -219,11 +772,18 @@ FILE* fopen(const char* path, const char* mode) {
     close(fd);
     return 0;
   }
-  init_stream(stream, fd, 1);
+  init_stream(stream, fd, 1, (flags & O_WRONLY) == 0, (flags & (O_WRONLY | O_RDWR)) != 0, (flags & O_APPEND) != 0);
+  if (stream->_cookie == 0) {
+    free(stream);
+    close(fd);
+    errno = ENOMEM;
+    return 0;
+  }
+  stream->_flags = bionic_flags_from_mode_flags(flags);
   register_stream(stream);
 
   if ((flags & O_APPEND) != 0) {
-    lseek(fd, 0, SEEK_END);
+    stream->_seek(stream->_cookie, 0, SEEK_END);
   }
 
   return stream;
@@ -245,10 +805,16 @@ FILE* fdopen(int fd, const char* mode) {
     errno = ENOMEM;
     return 0;
   }
-  init_stream(stream, fd, 1);
+  init_stream(stream, fd, 1, (flags & O_WRONLY) == 0, (flags & (O_WRONLY | O_RDWR)) != 0, (flags & O_APPEND) != 0);
+  if (stream->_cookie == 0) {
+    free(stream);
+    errno = ENOMEM;
+    return 0;
+  }
+  stream->_flags = bionic_flags_from_mode_flags(flags);
   register_stream(stream);
   if ((flags & O_APPEND) != 0) {
-    lseek(fd, 0, SEEK_END);
+    stream->_seek(stream->_cookie, 0, SEEK_END);
   }
   return stream;
 }
@@ -265,18 +831,35 @@ FILE* freopen(const char* path, const char* mode, FILE* stream) {
   }
   fd = open(path, flags, 0666);
   if (fd < 0) {
-    stream->error = 1;
+    set_stream_error(stream);
     return 0;
   }
-  if (stream->owned) {
-    close(stream->fd);
+  {
+    struct crt_stdio_cookie* cookie = stream_cookie(stream);
+    if (cookie != 0 && cookie->owned) {
+      stream->_close(stream->_cookie);
+    }
   }
-  if (stream->buffer_owned) {
-    free(stream->buffer);
+  if ((stream->_flags & __SMBF) != 0) {
+    free(stream->_bf._base);
   }
-  init_stream(stream, fd, 1);
+  {
+    struct crt_stdio_cookie* cookie = stream_cookie(stream);
+    if (cookie != 0 && cookie->ext_owned && stream_ext(stream) != 0) {
+      pthread_mutex_destroy(&stream_ext(stream)->_lock);
+      free(stream->_ext._base);
+    }
+    free(cookie);
+  }
+  init_stream(stream, fd, 1, (flags & O_WRONLY) == 0, (flags & (O_WRONLY | O_RDWR)) != 0, (flags & O_APPEND) != 0);
+  if (stream->_cookie == 0) {
+    close(fd);
+    errno = ENOMEM;
+    return 0;
+  }
+  stream->_flags = bionic_flags_from_mode_flags(flags);
   if ((flags & O_APPEND) != 0) {
-    lseek(fd, 0, SEEK_END);
+    stream->_seek(stream->_cookie, 0, SEEK_END);
   }
   return stream;
 }
@@ -308,7 +891,14 @@ FILE* tmpfile(void) {
       errno = ENOMEM;
       return 0;
     }
-    init_stream(stream, fd, 1);
+    init_stream(stream, fd, 1, 1, 1, 0);
+    if (stream->_cookie == 0) {
+      close(fd);
+      free(stream);
+      errno = ENOMEM;
+      return 0;
+    }
+    stream->_flags = __SRW;
     register_stream(stream);
     return stream;
   }
@@ -316,23 +906,237 @@ FILE* tmpfile(void) {
   return 0;
 }
 
+static int parse_memory_mode(
+    const char* mode,
+    int* readable,
+    int* writable,
+    int* append,
+    int* truncate) {
+  if (mode == 0 || mode[0] == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  *readable = mode[0] == 'r';
+  *writable = mode[0] == 'w' || mode[0] == 'a';
+  *append = mode[0] == 'a';
+  *truncate = mode[0] == 'w';
+  if (mode[0] != 'r' && mode[0] != 'w' && mode[0] != 'a') {
+    errno = EINVAL;
+    return -1;
+  }
+  for (++mode; *mode != 0; ++mode) {
+    if (*mode == '+') {
+      *readable = 1;
+      *writable = 1;
+    }
+  }
+  return 0;
+}
+
+static FILE* create_memory_stream(
+    char* base,
+    size_t size,
+    int base_owned,
+    int readable,
+    int writable,
+    int append,
+    size_t len,
+    char** open_ptr,
+    size_t* open_size) {
+  FILE* stream = (FILE*)malloc(sizeof(FILE));
+  struct crt_stdio_cookie* cookie;
+
+  if (stream == 0) {
+    errno = ENOMEM;
+    return 0;
+  }
+  init_stream(stream, -1, 1, readable, writable, append);
+  if (stream->_cookie == 0) {
+    free(stream);
+    errno = ENOMEM;
+    return 0;
+  }
+  stream->_flags = __SSTR;
+  if (readable && writable) {
+    stream->_flags |= __SRW;
+  } else if (readable) {
+    stream->_flags |= __SRD;
+  } else if (writable) {
+    stream->_flags |= __SWR;
+  }
+  if (open_ptr != 0) {
+    stream->_flags |= __SALC;
+  }
+  cookie = stream_cookie(stream);
+  if (cookie == 0) {
+    free(stream);
+    errno = ENOMEM;
+    return 0;
+  }
+  cookie->kind = CRT_STDIO_KIND_MEMORY;
+  cookie->fd = -1;
+  cookie->readable = readable;
+  cookie->writable = writable;
+  cookie->append = append;
+  cookie->mem_base = base;
+  cookie->mem_size = size;
+  cookie->mem_pos = append ? len : 0;
+  cookie->mem_len = len;
+  cookie->mem_owned = base_owned;
+  cookie->mem_open_ptr = open_ptr;
+  cookie->mem_open_size = open_size;
+  if (cookie->mem_len < cookie->mem_size) {
+    cookie->mem_base[cookie->mem_len] = 0;
+  }
+  sync_memory_stream(stream);
+  register_stream(stream);
+  return stream;
+}
+
+FILE* fmemopen(void* buf, size_t size, const char* mode) {
+  int readable;
+  int writable;
+  int append;
+  int truncate;
+  char* base = (char*)buf;
+  int owned = 0;
+  size_t len;
+
+  if (parse_memory_mode(mode, &readable, &writable, &append, &truncate) != 0) {
+    return 0;
+  }
+  if (buf == 0) {
+    base = size == 0 ? 0 : (char*)malloc(size);
+    if (size != 0 && base == 0) {
+      errno = ENOMEM;
+      return 0;
+    }
+    owned = 1;
+    if (size != 0) {
+      base[0] = 0;
+    }
+  }
+  len = truncate || buf == 0 ? 0 : bounded_strlen(base, size);
+  return create_memory_stream(base, size, owned, readable, writable, append, len, 0, 0);
+}
+
+FILE* open_memstream(char** ptr, size_t* sizep) {
+  char* base;
+
+  if (ptr == 0 || sizep == 0) {
+    errno = EINVAL;
+    return 0;
+  }
+  base = (char*)malloc(1);
+  if (base == 0) {
+    errno = ENOMEM;
+    return 0;
+  }
+  base[0] = 0;
+  *ptr = base;
+  *sizep = 0;
+  return create_memory_stream(base, 1, 1, 0, 1, 0, 0, ptr, sizep);
+}
+
+FILE* funopen(const void* cookie_arg,
+              int (*read_fn)(void*, char*, int),
+              int (*write_fn)(void*, const char*, int),
+              fpos_t (*seek_fn)(void*, fpos_t, int),
+              int (*close_fn)(void*)) {
+  FILE* stream;
+  struct crt_stdio_cookie* cookie;
+
+  if (read_fn == 0 && write_fn == 0) {
+    errno = EINVAL;
+    return 0;
+  }
+  stream = (FILE*)malloc(sizeof(FILE));
+  if (stream == 0) {
+    errno = ENOMEM;
+    return 0;
+  }
+  init_stream(stream, -1, 1, read_fn != 0, write_fn != 0, 0);
+  if (stream->_cookie == 0) {
+    free(stream);
+    errno = ENOMEM;
+    return 0;
+  }
+  cookie = stream_cookie(stream);
+  if (cookie == 0) {
+    free(stream);
+    errno = ENOMEM;
+    return 0;
+  }
+  cookie->kind = CRT_STDIO_KIND_FUNOPEN;
+  cookie->user_cookie = (void*)cookie_arg;
+  cookie->user_read = read_fn;
+  cookie->user_write = write_fn;
+  cookie->user_seek = seek_fn;
+  cookie->user_close = close_fn;
+  stream->_file = -1;
+  stream->_close = funopen_cookie_close;
+  stream->_read = read_fn != 0 ? funopen_cookie_read : 0;
+  stream->_seek = seek_fn != 0 ? funopen_cookie_seek : 0;
+  stream->_write = write_fn != 0 ? funopen_cookie_write : 0;
+  if (read_fn != 0 && write_fn != 0) {
+    stream->_flags = __SRW;
+  } else if (read_fn != 0) {
+    stream->_flags = __SRD;
+  } else {
+    stream->_flags = __SWR;
+  }
+  register_stream(stream);
+  return stream;
+}
+
 int fclose(FILE* stream) {
+  struct crt_stdio_cookie* cookie;
   int result = 0;
 
-  if (stream_fd(stream) < 0) {
+  if (!stream_valid(stream)) {
+    return EOF;
+  }
+  cookie = stream_cookie(stream);
+  if (cookie == 0) {
     return EOF;
   }
   if (fflush(stream) != 0) {
     result = -1;
   }
-  if (stream->owned) {
-    if (close(stream->fd) != 0) {
+  if (cookie->kind == CRT_STDIO_KIND_MEMORY) {
+    unregister_stream(stream);
+    if (cookie->mem_open_ptr != 0) {
+      cookie->mem_owned = 0;
+    }
+    if (cookie->mem_owned) {
+      free(cookie->mem_base);
+    }
+    if ((stream->_flags & __SMBF) != 0) {
+      free(stream->_bf._base);
+    }
+    free_extension_buffers(stream);
+    if (cookie->ext_owned && stream_ext(stream) != 0) {
+      pthread_mutex_destroy(&stream_ext(stream)->_lock);
+      free(stream->_ext._base);
+    }
+    free(cookie);
+    free(stream);
+    return result == 0 ? 0 : EOF;
+  }
+  if (cookie->owned) {
+    if (stream->_close(stream->_cookie) != 0) {
       result = -1;
     }
     unregister_stream(stream);
-    if (stream->buffer_owned) {
-      free(stream->buffer);
+    if ((stream->_flags & __SMBF) != 0) {
+      free(stream->_bf._base);
     }
+    free_extension_buffers(stream);
+    if (cookie->ext_owned && stream_ext(stream) != 0) {
+      pthread_mutex_destroy(&stream_ext(stream)->_lock);
+      free(stream->_ext._base);
+    }
+    free(cookie);
     free(stream);
     if (result != 0) {
       return EOF;
@@ -346,47 +1150,92 @@ int fileno(FILE* stream) {
 }
 
 static int stream_seek(FILE* stream, off_t offset, int whence) {
-  int fd = stream_fd(stream);
+  struct crt_stdio_cookie* cookie = stream_cookie(stream);
   off_t adjusted = offset;
+  off_t base;
+  off_t target;
 
-  if (fd < 0) {
+  if (cookie == 0) {
     return -1;
   }
-  if (stream->last_op == CRT_STDIO_WRITE && fflush(stream) != 0) {
+  if (cookie->kind == CRT_STDIO_KIND_MEMORY) {
+    if (whence == SEEK_SET) {
+      base = 0;
+    } else if (whence == SEEK_CUR) {
+      base = (off_t)cookie->mem_pos;
+      if (stream->_ur != 0) {
+        --base;
+      }
+    } else if (whence == SEEK_END) {
+      base = (off_t)cookie->mem_len;
+    } else {
+      errno = EINVAL;
+      set_stream_error(stream);
+      return -1;
+    }
+    target = base + offset;
+    if (target < 0 || (size_t)target > cookie->mem_size) {
+      errno = EINVAL;
+      set_stream_error(stream);
+      return -1;
+    }
+    cookie->mem_pos = (size_t)target;
+    clear_stream_eof(stream);
+    reset_buffer_state(stream);
+    stream->_flags &= ~(__SRD | __SWR);
+    return 0;
+  }
+  if (stream->_seek == 0) {
+    errno = ESPIPE;
+    set_stream_error(stream);
     return -1;
   }
-  if (stream->last_op == CRT_STDIO_READ && whence == SEEK_CUR) {
-    adjusted -= (off_t)(stream->buffer_len - stream->buffer_pos);
-    if (stream->ungot) {
+  if (stream_last_op(stream) == CRT_STDIO_WRITE && fflush(stream) != 0) {
+    return -1;
+  }
+  if (stream_last_op(stream) == CRT_STDIO_READ && whence == SEEK_CUR) {
+    adjusted -= (off_t)stream->_r;
+    if (stream->_ur != 0) {
       --adjusted;
     }
   }
-  if (lseek(fd, adjusted, whence) < 0) {
-    stream->error = 1;
+  if (stream->_seek(stream->_cookie, adjusted, whence) < 0) {
+    set_stream_error(stream);
     return -1;
   }
-  stream->eof = 0;
+  clear_stream_eof(stream);
   reset_buffer_state(stream);
-  stream->last_op = CRT_STDIO_NONE;
+  stream->_flags &= ~(__SRD | __SWR);
   return 0;
 }
 
 static off_t stream_tell(FILE* stream) {
-  int fd = stream_fd(stream);
+  struct crt_stdio_cookie* cookie = stream_cookie(stream);
   off_t result;
 
-  if (fd < 0) {
+  if (cookie == 0) {
     return (off_t)-1;
   }
-  result = lseek(fd, 0, SEEK_CUR);
+  if (cookie->kind == CRT_STDIO_KIND_MEMORY) {
+    result = (off_t)cookie->mem_pos;
+    if (stream->_ur != 0) {
+      --result;
+    }
+    return result;
+  }
+  if (stream->_seek == 0) {
+    errno = ESPIPE;
+    return (off_t)-1;
+  }
+  result = stream->_seek(stream->_cookie, 0, SEEK_CUR);
   if (result < 0) {
     return (off_t)-1;
   }
-  if (stream->last_op == CRT_STDIO_WRITE && stream->buffer_dirty) {
-    result += (off_t)stream->buffer_len;
-  } else if (stream->last_op == CRT_STDIO_READ) {
-    result -= (off_t)(stream->buffer_len - stream->buffer_pos);
-    if (stream->ungot) {
+  if (stream_last_op(stream) == CRT_STDIO_WRITE && stream->_p != 0 && stream->_bf._base != 0) {
+    result += (off_t)(stream->_p - stream->_bf._base);
+  } else if (stream_last_op(stream) == CRT_STDIO_READ) {
+    result -= (off_t)stream->_r;
+    if (stream->_ur != 0) {
       --result;
     }
   }
@@ -438,38 +1287,177 @@ int fsetpos(FILE* stream, const fpos_t* pos) {
   return stream_seek(stream, *pos, SEEK_SET);
 }
 
-int fputc(int c, FILE* stream) {
-  unsigned char byte = (unsigned char)c;
-  int fd = stream_fd(stream);
+int __srefill(FILE* stream) {
+  ssize_t result;
 
-  if (fd < 0) {
+  if (!stream_valid(stream)) {
     return EOF;
   }
-  if (prepare_write(stream) != 0) {
-    return EOF;
-  }
-  if (stream->buffering_mode == _IONBF) {
-    if (write(fd, &byte, 1) != 1) {
-      stream->error = 1;
+  if (is_memory_stream(stream)) {
+    struct crt_stdio_cookie* cookie = stream_cookie(stream);
+
+    if (cookie == 0 || !cookie->readable) {
+      errno = EBADF;
+      set_stream_error(stream);
       return EOF;
     }
-    return byte;
+    if (cookie->mem_pos >= cookie->mem_len) {
+      set_stream_eof(stream);
+      return EOF;
+    }
+    return 0;
+  }
+  if (prepare_read(stream) != 0) {
+    return EOF;
+  }
+  set_byte_orientation(stream);
+  if (stream_buffering_mode(stream) == _IONBF) {
+    stream->_bf._base = stream->_nbuf;
+    stream->_bf._size = sizeof(stream->_nbuf);
+  } else if (ensure_buffer(stream) != 0) {
+    return EOF;
+  }
+  result = stream->_read(stream->_cookie, (char*)stream->_bf._base, (int)stream->_bf._size);
+  if (result <= 0) {
+    if (result == 0) {
+      set_stream_eof(stream);
+    } else {
+      set_stream_error(stream);
+    }
+    stream->_r = 0;
+    stream->_p = stream->_bf._base;
+    return EOF;
+  }
+  stream->_p = stream->_bf._base;
+  stream->_r = (int)result;
+  clear_stream_eof(stream);
+  sync_bionic_buffer_fields(stream);
+  return 0;
+}
+
+int __srget(FILE* stream) {
+  unsigned char byte;
+
+  if (is_memory_stream(stream)) {
+    return memory_getc(stream);
+  }
+  if (__srefill(stream) != 0) {
+    return EOF;
+  }
+  if (stream->_r <= 0 || stream->_p == 0) {
+    set_stream_eof(stream);
+    return EOF;
+  }
+  byte = *stream->_p++;
+  --stream->_r;
+  sync_bionic_buffer_fields(stream);
+  return byte;
+}
+
+int __swsetup(FILE* stream) {
+  if (!stream_valid(stream) || prepare_write(stream) != 0) {
+    return EOF;
+  }
+  set_byte_orientation(stream);
+  if (stream_buffering_mode(stream) == _IONBF) {
+    stream->_bf._base = stream->_nbuf;
+    stream->_bf._size = sizeof(stream->_nbuf);
+    stream->_p = stream->_bf._base;
+    stream->_w = 0;
+    return 0;
   }
   if (ensure_buffer(stream) != 0) {
     return EOF;
   }
-  if (stream->buffer_len == stream->buffer_size && flush_write_buffer(stream) != 0) {
+  if (stream->_p == 0) {
+    stream->_p = stream->_bf._base;
+  }
+  stream->_w = stream->_bf._size >= (size_t)(stream->_p - stream->_bf._base) ?
+      (int)(stream->_bf._size - (size_t)(stream->_p - stream->_bf._base)) : 0;
+  sync_bionic_buffer_fields(stream);
+  return 0;
+}
+
+int __sflush(FILE* stream) {
+  if (!stream_valid(stream)) {
     return EOF;
   }
-  stream->buffer[stream->buffer_len++] = (char)byte;
-  stream->buffer_dirty = 1;
-  if (stream->buffer_len == stream->buffer_size ||
-      (stream->buffering_mode == _IOLBF && byte == '\n')) {
+  if (is_memory_stream(stream)) {
+    sync_memory_stream(stream);
+    reset_buffer_state(stream);
+    return 0;
+  }
+  if (stream_last_op(stream) == CRT_STDIO_WRITE) {
+    return flush_write_buffer(stream) == 0 ? 0 : EOF;
+  }
+  if (stream_last_op(stream) == CRT_STDIO_READ) {
+    return discard_read_buffer(stream) == 0 ? 0 : EOF;
+  }
+  return 0;
+}
+
+int __swbuf(int c, FILE* stream) {
+  unsigned char byte = (unsigned char)c;
+
+  if (!stream_valid(stream)) {
+    return EOF;
+  }
+  if (is_memory_stream(stream)) {
+    return memory_putc(stream, c);
+  }
+  if (__swsetup(stream) != 0) {
+    return EOF;
+  }
+  if (stream_buffering_mode(stream) == _IONBF) {
+    if (stream->_write(stream->_cookie, (const char*)&byte, 1) != 1) {
+      set_stream_error(stream);
+      return EOF;
+    }
+    return byte;
+  }
+  if (stream->_p == 0 || stream->_bf._base == 0 || stream->_bf._size == 0) {
+    errno = EBADF;
+    set_stream_error(stream);
+    return EOF;
+  }
+  if ((size_t)(stream->_p - stream->_bf._base) == stream->_bf._size && flush_write_buffer(stream) != 0) {
+    return EOF;
+  }
+  *stream->_p++ = byte;
+  stream->_w = stream->_bf._size >= (size_t)(stream->_p - stream->_bf._base) ?
+      (int)(stream->_bf._size - (size_t)(stream->_p - stream->_bf._base)) : 0;
+  sync_bionic_buffer_fields(stream);
+  if ((size_t)(stream->_p - stream->_bf._base) == stream->_bf._size ||
+      (stream_buffering_mode(stream) == _IOLBF && byte == '\n')) {
     if (flush_write_buffer(stream) != 0) {
       return EOF;
     }
   }
   return byte;
+}
+
+int fputc(int c, FILE* stream) {
+  unsigned char byte = (unsigned char)c;
+
+  if (!stream_valid(stream)) {
+    return EOF;
+  }
+  if (is_memory_stream(stream)) {
+    return memory_putc(stream, c);
+  }
+  if (stream_last_op(stream) == CRT_STDIO_WRITE &&
+      stream_buffering_mode(stream) != _IONBF &&
+      stream->_p != 0 &&
+      stream->_bf._base != 0 &&
+      stream->_w > 0) {
+    --stream->_w;
+    *stream->_p++ = byte;
+    if (stream_buffering_mode(stream) == _IOLBF && byte == '\n') {
+      return __sflush(stream) == 0 ? byte : EOF;
+    }
+    return byte;
+  }
+  return __swbuf(c, stream);
 }
 
 int putc(int c, FILE* stream) {
@@ -480,7 +1468,7 @@ int fputs(const char* s, FILE* stream) {
   size_t i;
   size_t length;
 
-  if (stream_fd(stream) < 0) {
+  if (!stream_valid(stream)) {
     return EOF;
   }
   length = strlen(s);
@@ -507,53 +1495,25 @@ int putchar(int c) {
 }
 
 int fgetc(FILE* stream) {
-  unsigned char byte;
-  int fd = stream_fd(stream);
-  ssize_t result;
+  if (!stream_valid(stream)) {
+    return EOF;
+  }
+  if (stream->_ur != 0) {
+    return pop_ungetc(stream);
+  }
+  if (is_memory_stream(stream)) {
+    return memory_getc(stream);
+  }
+  if (stream_last_op(stream) == CRT_STDIO_READ && stream->_r > 0 && stream->_p != 0) {
+    unsigned char byte;
 
-  if (fd < 0) {
-    return EOF;
-  }
-  if (prepare_read(stream) != 0) {
-    return EOF;
-  }
-  if (stream->ungot) {
-    stream->ungot = 0;
-    stream->eof = 0;
-    return stream->ungot_char;
-  }
-  if (stream->buffering_mode != _IONBF) {
-    if (ensure_buffer(stream) != 0) {
-      return EOF;
-    }
-    if (stream->buffer_pos >= stream->buffer_len) {
-      result = read(fd, stream->buffer, stream->buffer_size);
-      if (result > 0) {
-        stream->buffer_pos = 0;
-        stream->buffer_len = (size_t)result;
-      } else {
-        if (result == 0) {
-          stream->eof = 1;
-        } else {
-          stream->error = 1;
-        }
-        return EOF;
-      }
-    }
-    stream->eof = 0;
-    return (unsigned char)stream->buffer[stream->buffer_pos++];
-  }
-  result = read(fd, &byte, 1);
-  if (result == 1) {
-    stream->eof = 0;
+    clear_stream_eof(stream);
+    byte = *stream->_p++;
+    --stream->_r;
+    sync_bionic_buffer_fields(stream);
     return byte;
   }
-  if (result == 0) {
-    stream->eof = 1;
-  } else {
-    stream->error = 1;
-  }
-  return EOF;
+  return __srget(stream);
 }
 
 char* fgets(char* s, int size, FILE* stream) {
@@ -584,7 +1544,7 @@ ssize_t getdelim(char** lineptr, size_t* n, int delimiter, FILE* stream) {
   size_t pos = 0;
   int ch;
 
-  if (lineptr == 0 || n == 0 || stream_fd(stream) < 0) {
+  if (lineptr == 0 || n == 0 || !stream_valid(stream)) {
     errno = EINVAL;
     return -1;
   }
@@ -638,12 +1598,50 @@ int getchar(void) {
 }
 
 int ungetc(int c, FILE* stream) {
-  if (stream_fd(stream) < 0 || c == EOF || stream->ungot) {
+  struct __sfileext* ext;
+  unsigned char* base;
+  size_t capacity;
+
+  if (!stream_valid(stream) || c == EOF) {
     return EOF;
   }
-  stream->ungot = 1;
-  stream->ungot_char = (unsigned char)c;
-  stream->eof = 0;
+  ext = stream_ext(stream);
+  base = stream->_ubuf;
+  capacity = sizeof(stream->_ubuf);
+  if (ext != 0 && ext->_ub._base != 0) {
+    base = ext->_ub._base;
+    capacity = ext->_ub._size;
+  }
+  if (stream->_ur == 0) {
+    stream->_up = base + capacity;
+  }
+  if ((size_t)stream->_ur == capacity) {
+    size_t new_capacity = capacity < 8 ? 8 : capacity * 2;
+    unsigned char* grown = (unsigned char*)malloc(new_capacity);
+    size_t i;
+
+    if (grown == 0) {
+      return EOF;
+    }
+    for (i = 0; i < (size_t)stream->_ur; ++i) {
+      grown[new_capacity - (size_t)stream->_ur + i] = stream->_up[i];
+    }
+    if (ext != 0 && ext->_ub._base != 0) {
+      free(ext->_ub._base);
+    }
+    if (ext == 0) {
+      free(grown);
+      return EOF;
+    }
+    ext->_ub._base = grown;
+    ext->_ub._size = new_capacity;
+    stream->_up = grown + new_capacity - stream->_ur;
+    base = ext->_ub._base;
+  }
+  (void)base;
+  *--stream->_up = (unsigned char)c;
+  ++stream->_ur;
+  clear_stream_eof(stream);
   return (unsigned char)c;
 }
 
@@ -652,7 +1650,7 @@ size_t fread(void* ptr, size_t size, size_t nmemb, FILE* stream) {
   size_t done = 0;
   unsigned char* out = (unsigned char*)ptr;
 
-  if (stream_fd(stream) < 0 || size == 0 || nmemb == 0) {
+  if (!stream_valid(stream) || size == 0 || nmemb == 0) {
     return 0;
   }
   if (nmemb > ((size_t)-1) / size) {
@@ -676,7 +1674,7 @@ size_t fwrite(const void* ptr, size_t size, size_t nmemb, FILE* stream) {
   size_t done = 0;
   const unsigned char* in = (const unsigned char*)ptr;
 
-  if (stream_fd(stream) < 0 || size == 0 || nmemb == 0) {
+  if (!stream_valid(stream) || size == 0 || nmemb == 0) {
     return 0;
   }
   if (nmemb > ((size_t)-1) / size) {
@@ -697,7 +1695,7 @@ size_t fwrite(const void* ptr, size_t size, size_t nmemb, FILE* stream) {
 int fflush(FILE* stream) {
   if (stream == 0) {
     int result = 0;
-    FILE* current;
+    struct crt_stdio_cookie* current;
 
     if (fflush(stdout) != 0) {
       result = EOF;
@@ -707,23 +1705,17 @@ int fflush(FILE* stream) {
     }
     current = open_streams;
     while (current != 0) {
-      if (fflush(current) != 0) {
+      if (fflush(current->stream) != 0) {
         result = EOF;
       }
       current = current->next_open;
     }
     return result;
   }
-  if (stream_fd(stream) < 0) {
+  if (!stream_valid(stream)) {
     return EOF;
   }
-  if (stream->last_op == CRT_STDIO_WRITE) {
-    return flush_write_buffer(stream) == 0 ? 0 : EOF;
-  }
-  if (stream->last_op == CRT_STDIO_READ) {
-    return discard_read_buffer(stream) == 0 ? 0 : EOF;
-  }
-  return 0;
+  return __sflush(stream);
 }
 
 void setbuf(FILE* stream, char* buf) {
@@ -731,7 +1723,7 @@ void setbuf(FILE* stream, char* buf) {
 }
 
 int setvbuf(FILE* stream, char* buf, int mode, size_t size) {
-  if (stream_fd(stream) < 0) {
+  if (!stream_valid(stream)) {
     return EOF;
   }
   if (mode != _IOFBF && mode != _IOLBF && mode != _IONBF) {
@@ -741,38 +1733,238 @@ int setvbuf(FILE* stream, char* buf, int mode, size_t size) {
   if (fflush(stream) != 0) {
     return EOF;
   }
-  if (stream->buffer_owned) {
-    free(stream->buffer);
+  if ((stream->_flags & __SMBF) != 0) {
+    free(stream->_bf._base);
   }
-  stream->buffering_mode = mode;
-  stream->buffer = mode == _IONBF || size == 0 ? 0 : buf;
-  stream->buffer_size = mode == _IONBF ? 0 : size;
-  stream->buffer_owned = 0;
+  stream->_flags &= ~(__SMBF | __SNBF | __SLBF);
+  if (mode == _IONBF) {
+    stream->_flags |= __SNBF;
+    stream->_bf._base = 0;
+    stream->_bf._size = 0;
+  } else {
+    if (mode == _IOLBF) {
+      stream->_flags |= __SLBF;
+    }
+    stream->_bf._base = size == 0 ? 0 : (unsigned char*)buf;
+    stream->_bf._size = size;
+  }
   reset_buffer_state(stream);
-  stream->last_op = CRT_STDIO_NONE;
+  stream->_flags &= ~(__SRD | __SWR);
   return 0;
 }
 
 int feof(FILE* stream) {
-  if (stream_fd(stream) < 0) {
+  if (!stream_valid(stream)) {
     return 0;
   }
-  return stream->eof;
+  return (stream->_flags & __SEOF) != 0;
 }
 
 int ferror(FILE* stream) {
-  if (stream_fd(stream) < 0) {
+  if (!stream_valid(stream)) {
     return 1;
   }
-  return stream->error;
+  return (stream->_flags & __SERR) != 0;
 }
 
 void clearerr(FILE* stream) {
   if (stream == 0) {
     return;
   }
-  stream->eof = 0;
-  stream->error = 0;
+  stream->_flags &= ~(__SEOF | __SERR);
+}
+
+int fpurge(FILE* stream) {
+  if (!stream_valid(stream)) {
+    return EOF;
+  }
+  if (is_memory_stream(stream)) {
+    reset_buffer_state(stream);
+    return 0;
+  }
+  stream->_r = 0;
+  stream->_w = 0;
+  stream->_p = stream->_bf._base;
+  stream->_ur = 0;
+  stream->_up = 0;
+  stream->_flags &= ~(__SRD | __SWR);
+  return 0;
+}
+
+char* fgetln(FILE* stream, size_t* lengthp) {
+  size_t used = 0;
+  int ch;
+
+  if (lengthp == 0 || !stream_valid(stream)) {
+    errno = EINVAL;
+    return 0;
+  }
+  *lengthp = 0;
+  while ((ch = fgetc(stream)) != EOF) {
+    if (used == stream->_lb._size) {
+      size_t new_size = stream->_lb._size == 0 ? 128 : stream->_lb._size * 2;
+      unsigned char* grown;
+
+      if (new_size <= stream->_lb._size) {
+        errno = ENOMEM;
+        set_stream_error(stream);
+        return 0;
+      }
+      grown = (unsigned char*)realloc(stream->_lb._base, new_size);
+      if (grown == 0) {
+        set_stream_error(stream);
+        return 0;
+      }
+      stream->_lb._base = grown;
+      stream->_lb._size = new_size;
+    }
+    stream->_lb._base[used++] = (unsigned char)ch;
+    if (ch == '\n') {
+      break;
+    }
+  }
+  if (used == 0) {
+    return 0;
+  }
+  *lengthp = used;
+  return (char*)stream->_lb._base;
+}
+
+int feof_unlocked(FILE* stream) {
+  return feof(stream);
+}
+
+int ferror_unlocked(FILE* stream) {
+  return ferror(stream);
+}
+
+void clearerr_unlocked(FILE* stream) {
+  clearerr(stream);
+}
+
+int fileno_unlocked(FILE* stream) {
+  return fileno(stream);
+}
+
+int fflush_unlocked(FILE* stream) {
+  return fflush(stream);
+}
+
+int fgetc_unlocked(FILE* stream) {
+  return fgetc(stream);
+}
+
+int getc_unlocked(FILE* stream) {
+  return fgetc_unlocked(stream);
+}
+
+int getchar_unlocked(void) {
+  return fgetc_unlocked(stdin);
+}
+
+int fputc_unlocked(int c, FILE* stream) {
+  return fputc(c, stream);
+}
+
+int putc_unlocked(int c, FILE* stream) {
+  return fputc_unlocked(c, stream);
+}
+
+int putchar_unlocked(int c) {
+  return fputc_unlocked(c, stdout);
+}
+
+char* fgets_unlocked(char* s, int size, FILE* stream) {
+  return fgets(s, size, stream);
+}
+
+int fputs_unlocked(const char* s, FILE* stream) {
+  return fputs(s, stream);
+}
+
+size_t fread_unlocked(void* ptr, size_t size, size_t nmemb, FILE* stream) {
+  return fread(ptr, size, nmemb, stream);
+}
+
+size_t fwrite_unlocked(const void* ptr, size_t size, size_t nmemb, FILE* stream) {
+  return fwrite(ptr, size, nmemb, stream);
+}
+
+void flockfile(FILE* stream) {
+  struct __sfileext* ext;
+  pthread_t self;
+
+  if (stream == 0) {
+    return;
+  }
+  ext = stream_ext(stream);
+  if (ext == 0) {
+    return;
+  }
+  self = pthread_self();
+  if (ext->_lock_count != 0 && pthread_equal(ext->_lock_owner, self)) {
+    ++ext->_lock_count;
+    return;
+  }
+  pthread_mutex_lock(&ext->_lock);
+  ext->_lock_owner = self;
+  ext->_lock_count = 1;
+}
+
+int ftrylockfile(FILE* stream) {
+  struct __sfileext* ext;
+  pthread_t self;
+  int result;
+
+  if (stream == 0) {
+    errno = EBADF;
+    return EBADF;
+  }
+  ext = stream_ext(stream);
+  if (ext == 0) {
+    errno = EBADF;
+    return EBADF;
+  }
+  self = pthread_self();
+  if (ext->_lock_count != 0 && pthread_equal(ext->_lock_owner, self)) {
+    ++ext->_lock_count;
+    return 0;
+  }
+  result = pthread_mutex_trylock(&ext->_lock);
+  if (result != 0) {
+    return result;
+  }
+  ext->_lock_owner = self;
+  ext->_lock_count = 1;
+  return 0;
+}
+
+void funlockfile(FILE* stream) {
+  struct __sfileext* ext;
+
+  if (stream == 0) {
+    return;
+  }
+  ext = stream_ext(stream);
+  if (ext == 0 || ext->_lock_count == 0) {
+    return;
+  }
+  if (!pthread_equal(ext->_lock_owner, pthread_self())) {
+    return;
+  }
+  --ext->_lock_count;
+  if (ext->_lock_count == 0) {
+    ext->_lock_owner = 0;
+    pthread_mutex_unlock(&ext->_lock);
+  }
+}
+
+void setbuffer(FILE* stream, char* buf, int size) {
+  (void)setvbuf(stream, buf, buf != 0 ? _IOFBF : _IONBF, size < 0 ? 0 : (size_t)size);
+}
+
+int setlinebuf(FILE* stream) {
+  return setvbuf(stream, 0, _IOLBF, 0);
 }
 
 int remove(const char* path) {
