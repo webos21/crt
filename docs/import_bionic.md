@@ -1118,6 +1118,13 @@ Bionic's `libc/stdio/local.h`. Public BSD cookie I/O is now available through
 uses the BSD `_lb` line buffer field, `fpurge` discards buffered stream state,
 and longer `ungetc` sequences spill into `_EXT(fp)->_ub` instead of relying only
 on a project-owned single-character state.
+The Bionic `stdio_ext.h` surface is exposed for configure compatibility:
+`__fbufsize`, `__freadable`, `__freading`, `__fwritable`, `__fwriting`, `__flbf`,
+`__fpending`, `__freadahead`, `_flushlbf`, `__fseterr`, and `__fsetlocking`.
+`__fpurge` is kept as the glibc/Bionic-compatible purge entry point and now
+also releases the extension ungetc buffer before resetting stream read/write
+state. The behavior is tracked by `stdio_ext_test`, including pending bytes,
+read-ahead bytes, line-buffered flushing, and explicit error-flag setting.
 
 This is still not a byte-for-byte final Bionic `FILE` ABI. The remaining
 hardening work is to replace the simplified formatter/scanner/buffering engine

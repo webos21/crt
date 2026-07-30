@@ -159,6 +159,18 @@ set_tests_properties(stdio_memory_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "stdio_memory_test: ok"
 )
 
+add_crt_test(stdio_ext_test stdio_ext_test.c)
+set_tests_properties(stdio_ext_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "stdio_ext_test: ok"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
+add_crt_test(stdio_edge_test stdio_edge_test.c)
+set_tests_properties(stdio_edge_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "stdio_edge_test: ok"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
 add_crt_test(temp_name_test temp_name_test.c)
 set_tests_properties(temp_name_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "temp_name_test: ok"

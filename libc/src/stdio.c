@@ -746,7 +746,7 @@ static int discard_read_buffer(FILE* stream) {
   }
   unread += (off_t)stream->_r;
   if (stream->_ur != 0) {
-    ++unread;
+    unread += (off_t)stream->_ur;
   }
   if (stream->_seek == 0) {
     errno = ESPIPE;
@@ -1366,7 +1366,7 @@ static int stream_seek(FILE* stream, off_t offset, int whence) {
   if (stream_last_op(stream) == CRT_STDIO_READ && whence == SEEK_CUR) {
     adjusted -= (off_t)stream->_r;
     if (stream->_ur != 0) {
-      --adjusted;
+      adjusted -= (off_t)stream->_ur;
     }
   }
   if (stream->_seek(stream->_cookie, adjusted, whence) < 0) {
@@ -1389,7 +1389,7 @@ static off_t stream_tell(FILE* stream) {
   if (cookie->kind == CRT_STDIO_KIND_MEMORY) {
     result = (off_t)cookie->mem_pos;
     if (stream->_ur != 0) {
-      --result;
+      result -= (off_t)stream->_ur;
     }
     return result;
   }
@@ -1406,7 +1406,7 @@ static off_t stream_tell(FILE* stream) {
   } else if (stream_last_op(stream) == CRT_STDIO_READ) {
     result -= (off_t)stream->_r;
     if (stream->_ur != 0) {
-      --result;
+      result -= (off_t)stream->_ur;
     }
   }
   return result;
@@ -1813,12 +1813,20 @@ int getchar(void) {
 }
 
 int ungetc(int c, FILE* stream) {
+  struct crt_stdio_cookie* cookie;
   struct __sfileext* ext;
   unsigned char* base;
   size_t capacity;
 
   lock_stream_if_needed(stream);
   if (!stream_valid(stream) || c == EOF) {
+    unlock_stream_if_needed(stream);
+    return EOF;
+  }
+  cookie = stream_cookie(stream);
+  if (cookie == 0 || !cookie->readable) {
+    errno = EBADF;
+    set_stream_error(stream);
     unlock_stream_if_needed(stream);
     return EOF;
   }
@@ -2030,8 +2038,16 @@ void clearerr(FILE* stream) {
 }
 
 int fpurge(FILE* stream) {
+  struct __sfileext* ext;
+
   if (!stream_valid(stream)) {
     return EOF;
+  }
+  ext = stream_ext(stream);
+  if (ext != 0 && ext->_ub._base != 0) {
+    free(ext->_ub._base);
+    ext->_ub._base = 0;
+    ext->_ub._size = 0;
   }
   if (is_memory_stream(stream)) {
     reset_buffer_state(stream);
