@@ -77,8 +77,9 @@ self-contained for specific bootstrap profiles.
 ## Export Policy
 
 Exports are intentionally broad in this tranche. Windows uses CMake's automatic
-export support for the first DLL artifacts. Linux/macOS do not yet use version
-scripts or export lists.
+export support for the first DLL artifacts, with focused hygiene checks for
+known private compiler helpers such as `_fltused`. Linux/macOS do not yet use
+version scripts or export lists.
 
 Before calling these libraries ABI-stable, the project needs:
 
@@ -88,6 +89,10 @@ Before calling these libraries ABI-stable, the project needs:
 - macOS exported symbols list/install name policy;
 - Windows `.def` or explicit `__declspec(dllexport)` policy;
 - tests that compare exported symbols across targets.
+
+The first Windows export hygiene test is `windows_export_hygiene_runs`. It reads
+the generated PE export tables and fails if `_fltused` leaks into a DLL public
+surface.
 
 ## Loader Boundary
 

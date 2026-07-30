@@ -417,6 +417,35 @@ set_tests_properties(pthread_type_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_type_test: ok"
 )
 
+if(CRT_TARGET_OS STREQUAL "windows")
+  add_executable(windows_export_hygiene_test
+    windows_export_hygiene_test.c
+    $<TARGET_OBJECTS:crt1>
+  )
+  target_link_libraries(windows_export_hygiene_test PRIVATE crt_build_flags c)
+  target_link_libraries(windows_export_hygiene_test PRIVATE crt_compiler_rt_builtins)
+  target_link_options(windows_export_hygiene_test PRIVATE
+    -nostdlib
+    -nostartfiles
+    -nodefaultlibs
+    -Wl,/entry:mainCRTStartup
+    -Wl,/subsystem:console
+    -Wl,/OPT:REF
+  )
+  target_link_libraries(windows_export_hygiene_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  add_dependencies(windows_export_hygiene_test c crt1 c_shared m_shared dl_shared cxx_shared)
+  add_test(NAME windows_export_hygiene_runs
+    COMMAND windows_export_hygiene_test
+      "$<TARGET_FILE:c_shared>"
+      "$<TARGET_FILE:m_shared>"
+      "$<TARGET_FILE:dl_shared>"
+      "$<TARGET_FILE:cxx_shared>"
+  )
+  set_tests_properties(windows_export_hygiene_runs PROPERTIES
+    PASS_REGULAR_EXPRESSION "windows_export_hygiene_test: ok"
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS windows_export_hygiene_runs)
+endif()
 get_property(CRT_REGISTERED_TESTS GLOBAL PROPERTY CRT_REGISTERED_TESTS)
 list(LENGTH CRT_REGISTERED_TESTS CRT_REGISTERED_TEST_COUNT)
 message(STATUS "CRT registered tests for ${CRT_TARGET_OS}/${CRT_TARGET_ARCH}: ${CRT_REGISTERED_TEST_COUNT}")
