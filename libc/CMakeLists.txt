@@ -13,6 +13,7 @@ set(CRT_LIBC_SOURCES
   src/locale.c
   src/malloc.c
   src/mman.c
+  src/mntent.c
   src/poll.c
   src/printf.c
   src/process.c
@@ -146,6 +147,9 @@ endif()
 
 add_library(crt_syscall OBJECT ${CRT_SYSCALL_FILE})
 target_link_libraries(crt_syscall PRIVATE crt_build_flags)
+target_include_directories(crt_syscall PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
 target_sources(c PRIVATE $<TARGET_OBJECTS:crt_syscall>)
 
 add_library(crt_setjmp OBJECT ${CRT_SETJMP_FILE})

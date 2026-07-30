@@ -286,6 +286,12 @@ set_tests_properties(rootfs_process_test_runs PROPERTIES
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 
+add_crt_test(mntent_test mntent_test.c)
+set_tests_properties(mntent_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "mntent_test: ok"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
 add_crt_test(atomic_test atomic_test.c)
 set_tests_properties(atomic_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "atomic_test: ok"
