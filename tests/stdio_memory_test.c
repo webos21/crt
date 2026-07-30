@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdio_ext.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -124,6 +125,9 @@ int main(void) {
   if (stream == 0) {
     return fail("stdio_memory_test: open_memstream");
   }
+  if (__fsetlocking(stream, FSETLOCKING_QUERY) != FSETLOCKING_INTERNAL) {
+    return fail("stdio_memory_test: fsetlocking query");
+  }
   flockfile(stream);
   if (ftrylockfile(stream) != 0) {
     return fail("stdio_memory_test: ftrylockfile recursive");
@@ -160,12 +164,24 @@ int main(void) {
   if (stream == 0) {
     return fail("stdio_memory_test: funopen");
   }
+  if (__fsetlocking(stream, FSETLOCKING_BYCALLER) != FSETLOCKING_INTERNAL ||
+      __fsetlocking(stream, FSETLOCKING_QUERY) != FSETLOCKING_BYCALLER) {
+    fclose(stream);
+    return fail("stdio_memory_test: fsetlocking bycaller");
+  }
+  flockfile(stream);
   if (setlinebuf(stream) != 0 ||
       fputs("one\n", stream) == EOF ||
       fwrite("two\nthree", 1, 9, stream) != 9 ||
       fseek(stream, 0, SEEK_SET) != 0) {
+    funlockfile(stream);
     fclose(stream);
     return fail("stdio_memory_test: funopen write");
+  }
+  funlockfile(stream);
+  if (!__freadable(stream) || !__fwritable(stream) || __fbufsize(stream) == 0) {
+    fclose(stream);
+    return fail("stdio_memory_test: stdio_ext state");
   }
   line = fgetln(stream, &line_length);
   if (line == 0 || line_length != 4 || memcmp(line, "one\n", 4) != 0) {

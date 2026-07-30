@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <stdio_ext.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -119,6 +120,14 @@ int __srget(FILE* stream);
 int __swsetup(FILE* stream);
 int __swbuf(int c, FILE* stream);
 int __sflush(FILE* stream);
+static int fputc_unlocked_impl(int c, FILE* stream);
+static int fgetc_unlocked_impl(FILE* stream);
+static int fputs_unlocked_impl(const char* s, FILE* stream);
+static char* fgets_unlocked_impl(char* s, int size, FILE* stream);
+static size_t fread_unlocked_impl(void* ptr, size_t size, size_t nmemb, FILE* stream);
+static size_t fwrite_unlocked_impl(const void* ptr, size_t size, size_t nmemb, FILE* stream);
+static int fflush_unlocked_impl(FILE* stream);
+static char* fgetln_unlocked_impl(FILE* stream, size_t* lengthp);
 
 static struct __sfileext __sFext[3] = {
     { {0, 0}, {{0}, {0}, {0}, 0, 0}, PTHREAD_MUTEX_INITIALIZER, 0, 0, 0, 0, 0 },
@@ -212,6 +221,24 @@ static struct __sfileext* stream_ext(FILE* stream) {
     return 0;
   }
   return (struct __sfileext*)stream->_ext._base;
+}
+
+static int stream_needs_implicit_lock(FILE* stream) {
+  struct __sfileext* ext = stream_ext(stream);
+
+  return ext != 0 && !ext->_caller_handles_locking;
+}
+
+static void lock_stream_if_needed(FILE* stream) {
+  if (stream_needs_implicit_lock(stream)) {
+    flockfile(stream);
+  }
+}
+
+static void unlock_stream_if_needed(FILE* stream) {
+  if (stream_needs_implicit_lock(stream)) {
+    funlockfile(stream);
+  }
 }
 
 static void set_stream_error(FILE* stream) {
@@ -1436,7 +1463,7 @@ int __swbuf(int c, FILE* stream) {
   return byte;
 }
 
-int fputc(int c, FILE* stream) {
+static int fputc_unlocked_impl(int c, FILE* stream) {
   unsigned char byte = (unsigned char)c;
 
   if (!stream_valid(stream)) {
@@ -1460,11 +1487,20 @@ int fputc(int c, FILE* stream) {
   return __swbuf(c, stream);
 }
 
+int fputc(int c, FILE* stream) {
+  int result;
+
+  lock_stream_if_needed(stream);
+  result = fputc_unlocked_impl(c, stream);
+  unlock_stream_if_needed(stream);
+  return result;
+}
+
 int putc(int c, FILE* stream) {
   return fputc(c, stream);
 }
 
-int fputs(const char* s, FILE* stream) {
+static int fputs_unlocked_impl(const char* s, FILE* stream) {
   size_t i;
   size_t length;
 
@@ -1473,28 +1509,40 @@ int fputs(const char* s, FILE* stream) {
   }
   length = strlen(s);
   for (i = 0; i < length; ++i) {
-    if (fputc((unsigned char)s[i], stream) == EOF) {
+    if (fputc_unlocked_impl((unsigned char)s[i], stream) == EOF) {
       return EOF;
     }
   }
   return 0;
 }
 
+int fputs(const char* s, FILE* stream) {
+  int result;
+
+  lock_stream_if_needed(stream);
+  result = fputs_unlocked_impl(s, stream);
+  unlock_stream_if_needed(stream);
+  return result;
+}
+
 int puts(const char* s) {
-  if (fputs(s, stdout) == EOF) {
-    return EOF;
+  int result = 0;
+
+  lock_stream_if_needed(stdout);
+  if (fputs_unlocked_impl(s, stdout) == EOF) {
+    result = EOF;
+  } else if (fputc_unlocked_impl('\n', stdout) == EOF) {
+    result = EOF;
   }
-  if (fputc('\n', stdout) == EOF) {
-    return EOF;
-  }
-  return 0;
+  unlock_stream_if_needed(stdout);
+  return result;
 }
 
 int putchar(int c) {
   return fputc(c, stdout);
 }
 
-int fgetc(FILE* stream) {
+static int fgetc_unlocked_impl(FILE* stream) {
   if (!stream_valid(stream)) {
     return EOF;
   }
@@ -1516,7 +1564,16 @@ int fgetc(FILE* stream) {
   return __srget(stream);
 }
 
-char* fgets(char* s, int size, FILE* stream) {
+int fgetc(FILE* stream) {
+  int result;
+
+  lock_stream_if_needed(stream);
+  result = fgetc_unlocked_impl(stream);
+  unlock_stream_if_needed(stream);
+  return result;
+}
+
+static char* fgets_unlocked_impl(char* s, int size, FILE* stream) {
   int i = 0;
 
   if (s == 0 || size <= 0) {
@@ -1524,7 +1581,7 @@ char* fgets(char* s, int size, FILE* stream) {
     return 0;
   }
   while (i < size - 1) {
-    int ch = fgetc(stream);
+    int ch = fgetc_unlocked_impl(stream);
     if (ch == EOF) {
       break;
     }
@@ -1540,11 +1597,22 @@ char* fgets(char* s, int size, FILE* stream) {
   return s;
 }
 
+char* fgets(char* s, int size, FILE* stream) {
+  char* result;
+
+  lock_stream_if_needed(stream);
+  result = fgets_unlocked_impl(s, size, stream);
+  unlock_stream_if_needed(stream);
+  return result;
+}
+
 ssize_t getdelim(char** lineptr, size_t* n, int delimiter, FILE* stream) {
   size_t pos = 0;
   int ch;
 
+  lock_stream_if_needed(stream);
   if (lineptr == 0 || n == 0 || !stream_valid(stream)) {
+    unlock_stream_if_needed(stream);
     errno = EINVAL;
     return -1;
   }
@@ -1553,21 +1621,24 @@ ssize_t getdelim(char** lineptr, size_t* n, int delimiter, FILE* stream) {
     *lineptr = (char*)malloc(*n);
     if (*lineptr == 0) {
       *n = 0;
+      unlock_stream_if_needed(stream);
       return -1;
     }
   }
 
-  while ((ch = fgetc(stream)) != EOF) {
+  while ((ch = fgetc_unlocked_impl(stream)) != EOF) {
     if (pos + 1 >= *n) {
       size_t new_size = *n * 2;
       char* new_line;
 
       if (new_size <= *n) {
         errno = ENOMEM;
+        unlock_stream_if_needed(stream);
         return -1;
       }
       new_line = (char*)realloc(*lineptr, new_size);
       if (new_line == 0) {
+        unlock_stream_if_needed(stream);
         return -1;
       }
       *lineptr = new_line;
@@ -1578,6 +1649,7 @@ ssize_t getdelim(char** lineptr, size_t* n, int delimiter, FILE* stream) {
       break;
     }
   }
+  unlock_stream_if_needed(stream);
   if (pos == 0 && ch == EOF) {
     return -1;
   }
@@ -1602,7 +1674,9 @@ int ungetc(int c, FILE* stream) {
   unsigned char* base;
   size_t capacity;
 
+  lock_stream_if_needed(stream);
   if (!stream_valid(stream) || c == EOF) {
+    unlock_stream_if_needed(stream);
     return EOF;
   }
   ext = stream_ext(stream);
@@ -1621,6 +1695,7 @@ int ungetc(int c, FILE* stream) {
     size_t i;
 
     if (grown == 0) {
+      unlock_stream_if_needed(stream);
       return EOF;
     }
     for (i = 0; i < (size_t)stream->_ur; ++i) {
@@ -1631,6 +1706,7 @@ int ungetc(int c, FILE* stream) {
     }
     if (ext == 0) {
       free(grown);
+      unlock_stream_if_needed(stream);
       return EOF;
     }
     ext->_ub._base = grown;
@@ -1642,10 +1718,11 @@ int ungetc(int c, FILE* stream) {
   *--stream->_up = (unsigned char)c;
   ++stream->_ur;
   clear_stream_eof(stream);
+  unlock_stream_if_needed(stream);
   return (unsigned char)c;
 }
 
-size_t fread(void* ptr, size_t size, size_t nmemb, FILE* stream) {
+static size_t fread_unlocked_impl(void* ptr, size_t size, size_t nmemb, FILE* stream) {
   size_t total;
   size_t done = 0;
   unsigned char* out = (unsigned char*)ptr;
@@ -1660,7 +1737,7 @@ size_t fread(void* ptr, size_t size, size_t nmemb, FILE* stream) {
 
   total = size * nmemb;
   while (done < total) {
-    int ch = fgetc(stream);
+    int ch = fgetc_unlocked_impl(stream);
     if (ch == EOF) {
       break;
     }
@@ -1669,7 +1746,16 @@ size_t fread(void* ptr, size_t size, size_t nmemb, FILE* stream) {
   return done / size;
 }
 
-size_t fwrite(const void* ptr, size_t size, size_t nmemb, FILE* stream) {
+size_t fread(void* ptr, size_t size, size_t nmemb, FILE* stream) {
+  size_t result;
+
+  lock_stream_if_needed(stream);
+  result = fread_unlocked_impl(ptr, size, nmemb, stream);
+  unlock_stream_if_needed(stream);
+  return result;
+}
+
+static size_t fwrite_unlocked_impl(const void* ptr, size_t size, size_t nmemb, FILE* stream) {
   size_t total;
   size_t done = 0;
   const unsigned char* in = (const unsigned char*)ptr;
@@ -1684,7 +1770,7 @@ size_t fwrite(const void* ptr, size_t size, size_t nmemb, FILE* stream) {
 
   total = size * nmemb;
   while (done < total) {
-    if (fputc(in[done], stream) == EOF) {
+    if (fputc_unlocked_impl(in[done], stream) == EOF) {
       break;
     }
     ++done;
@@ -1692,20 +1778,29 @@ size_t fwrite(const void* ptr, size_t size, size_t nmemb, FILE* stream) {
   return done / size;
 }
 
-int fflush(FILE* stream) {
+size_t fwrite(const void* ptr, size_t size, size_t nmemb, FILE* stream) {
+  size_t result;
+
+  lock_stream_if_needed(stream);
+  result = fwrite_unlocked_impl(ptr, size, nmemb, stream);
+  unlock_stream_if_needed(stream);
+  return result;
+}
+
+static int fflush_unlocked_impl(FILE* stream) {
   if (stream == 0) {
     int result = 0;
     struct crt_stdio_cookie* current;
 
-    if (fflush(stdout) != 0) {
+    if (fflush_unlocked_impl(stdout) != 0) {
       result = EOF;
     }
-    if (fflush(stderr) != 0) {
+    if (fflush_unlocked_impl(stderr) != 0) {
       result = EOF;
     }
     current = open_streams;
     while (current != 0) {
-      if (fflush(current->stream) != 0) {
+      if (fflush_unlocked_impl(current->stream) != 0) {
         result = EOF;
       }
       current = current->next_open;
@@ -1716,6 +1811,23 @@ int fflush(FILE* stream) {
     return EOF;
   }
   return __sflush(stream);
+}
+
+int fflush(FILE* stream) {
+  int result;
+
+  if (stream == 0) {
+    lock_stream_if_needed(stdout);
+    lock_stream_if_needed(stderr);
+    result = fflush_unlocked_impl(0);
+    unlock_stream_if_needed(stderr);
+    unlock_stream_if_needed(stdout);
+    return result;
+  }
+  lock_stream_if_needed(stream);
+  result = fflush_unlocked_impl(stream);
+  unlock_stream_if_needed(stream);
+  return result;
 }
 
 void setbuf(FILE* stream, char* buf) {
@@ -1791,7 +1903,7 @@ int fpurge(FILE* stream) {
   return 0;
 }
 
-char* fgetln(FILE* stream, size_t* lengthp) {
+static char* fgetln_unlocked_impl(FILE* stream, size_t* lengthp) {
   size_t used = 0;
   int ch;
 
@@ -1830,16 +1942,138 @@ char* fgetln(FILE* stream, size_t* lengthp) {
   return (char*)stream->_lb._base;
 }
 
+char* fgetln(FILE* stream, size_t* lengthp) {
+  char* result;
+
+  lock_stream_if_needed(stream);
+  result = fgetln_unlocked_impl(stream, lengthp);
+  unlock_stream_if_needed(stream);
+  return result;
+}
+
+size_t __fbufsize(FILE* stream) {
+  if (!stream_valid(stream)) {
+    return 0;
+  }
+  return stream->_bf._size;
+}
+
+int __freadable(FILE* stream) {
+  struct crt_stdio_cookie* cookie = stream_cookie(stream);
+
+  return cookie != 0 && cookie->readable;
+}
+
+int __freading(FILE* stream) {
+  if (!stream_valid(stream)) {
+    return 0;
+  }
+  return (stream->_flags & __SRD) != 0;
+}
+
+int __fwritable(FILE* stream) {
+  struct crt_stdio_cookie* cookie = stream_cookie(stream);
+
+  return cookie != 0 && cookie->writable;
+}
+
+int __fwriting(FILE* stream) {
+  if (!stream_valid(stream)) {
+    return 0;
+  }
+  return (stream->_flags & __SWR) != 0;
+}
+
+int __flbf(FILE* stream) {
+  if (!stream_valid(stream)) {
+    return 0;
+  }
+  return (stream->_flags & __SLBF) != 0;
+}
+
+void __fpurge(FILE* stream) {
+  (void)fpurge(stream);
+}
+
+size_t __fpending(FILE* stream) {
+  if (!stream_valid(stream) || stream->_p == 0 || stream->_bf._base == 0 || stream->_p < stream->_bf._base) {
+    return 0;
+  }
+  if (stream_last_op(stream) != CRT_STDIO_WRITE) {
+    return 0;
+  }
+  return (size_t)(stream->_p - stream->_bf._base);
+}
+
+size_t __freadahead(FILE* stream) {
+  if (!stream_valid(stream)) {
+    return 0;
+  }
+  return (stream->_r > 0 ? (size_t)stream->_r : 0) + (stream->_ur > 0 ? (size_t)stream->_ur : 0);
+}
+
+void _flushlbf(void) {
+  struct crt_stdio_cookie* current;
+
+  if (__flbf(stdout)) {
+    (void)fflush(stdout);
+  }
+  if (__flbf(stderr)) {
+    (void)fflush(stderr);
+  }
+  current = open_streams;
+  while (current != 0) {
+    if (__flbf(current->stream)) {
+      (void)fflush(current->stream);
+    }
+    current = current->next_open;
+  }
+}
+
+void __fseterr(FILE* stream) {
+  if (stream != 0) {
+    stream->_flags |= __SERR;
+  }
+}
+
+int __fsetlocking(FILE* stream, int type) {
+  struct __sfileext* ext = stream_ext(stream);
+  int old_state;
+
+  if (ext == 0) {
+    errno = EBADF;
+    return FSETLOCKING_INTERNAL;
+  }
+  old_state = ext->_caller_handles_locking ? FSETLOCKING_BYCALLER : FSETLOCKING_INTERNAL;
+  if (type == FSETLOCKING_QUERY) {
+    return old_state;
+  }
+  if (type == FSETLOCKING_INTERNAL) {
+    ext->_caller_handles_locking = 0;
+  } else if (type == FSETLOCKING_BYCALLER) {
+    ext->_caller_handles_locking = 1;
+  }
+  return old_state;
+}
+
 int feof_unlocked(FILE* stream) {
-  return feof(stream);
+  if (!stream_valid(stream)) {
+    return 0;
+  }
+  return (stream->_flags & __SEOF) != 0;
 }
 
 int ferror_unlocked(FILE* stream) {
-  return ferror(stream);
+  if (!stream_valid(stream)) {
+    return 1;
+  }
+  return (stream->_flags & __SERR) != 0;
 }
 
 void clearerr_unlocked(FILE* stream) {
-  clearerr(stream);
+  if (stream != 0) {
+    stream->_flags &= ~(__SEOF | __SERR);
+  }
 }
 
 int fileno_unlocked(FILE* stream) {
@@ -1847,11 +2081,11 @@ int fileno_unlocked(FILE* stream) {
 }
 
 int fflush_unlocked(FILE* stream) {
-  return fflush(stream);
+  return fflush_unlocked_impl(stream);
 }
 
 int fgetc_unlocked(FILE* stream) {
-  return fgetc(stream);
+  return fgetc_unlocked_impl(stream);
 }
 
 int getc_unlocked(FILE* stream) {
@@ -1863,7 +2097,7 @@ int getchar_unlocked(void) {
 }
 
 int fputc_unlocked(int c, FILE* stream) {
-  return fputc(c, stream);
+  return fputc_unlocked_impl(c, stream);
 }
 
 int putc_unlocked(int c, FILE* stream) {
@@ -1875,19 +2109,19 @@ int putchar_unlocked(int c) {
 }
 
 char* fgets_unlocked(char* s, int size, FILE* stream) {
-  return fgets(s, size, stream);
+  return fgets_unlocked_impl(s, size, stream);
 }
 
 int fputs_unlocked(const char* s, FILE* stream) {
-  return fputs(s, stream);
+  return fputs_unlocked_impl(s, stream);
 }
 
 size_t fread_unlocked(void* ptr, size_t size, size_t nmemb, FILE* stream) {
-  return fread(ptr, size, nmemb, stream);
+  return fread_unlocked_impl(ptr, size, nmemb, stream);
 }
 
 size_t fwrite_unlocked(const void* ptr, size_t size, size_t nmemb, FILE* stream) {
-  return fwrite(ptr, size, nmemb, stream);
+  return fwrite_unlocked_impl(ptr, size, nmemb, stream);
 }
 
 void flockfile(FILE* stream) {

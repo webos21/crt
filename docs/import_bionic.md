@@ -1008,13 +1008,15 @@ state uses `_flags`, ungetc uses `_ubuf`/`_ur`, byte orientation uses
 The locking and memory-stream tranche follows Bionic's public API direction.
 `flockfile`/`ftrylockfile`/`funlockfile` lock through `_EXT(fp)->_lock`, matching
 Bionic's extension-lock placement; the current recursive behavior is maintained
-inside `__sfileext` until pthread recursive mutex initializers are fully aligned.
-The `*_unlocked` functions are exported for source compatibility; internally
-they currently share the same underlying operations as the regular functions and
-will be split further when stdio's final lock boundary is settled. `fmemopen`
-supports fixed-size caller buffers and allocated buffers, and `open_memstream`
-keeps the caller's pointer and size synchronized across writes, `fflush`, and
-`fclose`.
+inside `__sfileext` until pthread recursive mutex initializers are fully
+aligned. Regular byte I/O now wraps the underlying implementation with implicit
+locking, while the `*_unlocked` entry points call no-lock core helpers directly.
+`__fsetlocking` and the `FSETLOCKING_*` constants are exposed through
+`stdio_ext.h`; `FSETLOCKING_BYCALLER` sets `_EXT(fp)->_caller_handles_locking`
+so regular stdio calls skip implicit locking when the caller owns the lock
+boundary. `fmemopen` supports fixed-size caller buffers and allocated buffers,
+and `open_memstream` keeps the caller's pointer and size synchronized across
+writes, `fflush`, and `fclose`.
 
 The next stdio tranche starts replacing project-specific control flow with
 Bionic/BSD internal entry points. The CRT now exports and routes byte I/O through
