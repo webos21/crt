@@ -511,6 +511,15 @@ __crt_sys_wait4:
   retq
 .size __crt_sys_wait4, . - __crt_sys_wait4
 
+.globl __crt_sys_fork
+.type __crt_sys_fork, @function
+.p2align 4, 0x90
+__crt_sys_fork:
+  movq $57, %rax
+  syscall
+  retq
+.size __crt_sys_fork, . - __crt_sys_fork
+
 .globl __crt_sys_futex
 .type __crt_sys_futex, @function
 .p2align 4, 0x90
@@ -565,6 +574,15 @@ __crt_sys_kill:
   syscall
   retq
 .size __crt_sys_kill, . - __crt_sys_kill
+
+.globl __crt_sys_execve
+.type __crt_sys_execve, @function
+.p2align 4, 0x90
+__crt_sys_execve:
+  movq $59, %rax
+  syscall
+  retq
+.size __crt_sys_execve, . - __crt_sys_execve
 
 .globl __crt_sys_thread_exit
 .type __crt_sys_thread_exit, @function

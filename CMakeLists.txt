@@ -223,6 +223,16 @@ add_custom_target(sysroot
 )
 
 if(Python3_Interpreter_FOUND)
+  set(CRT_ROOTFS "${CMAKE_BINARY_DIR}/rootfs" CACHE PATH "Android-like runtime root filesystem")
+  add_custom_target(rootfs
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_rootfs.py"
+      --dest "${CRT_ROOTFS}"
+      --target-os "${CRT_TARGET_OS}"
+    DEPENDS sysroot
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Creating Android-like CRT rootfs at ${CRT_ROOTFS}"
+  )
+
   get_filename_component(CRT_BUILD_PRESET_NAME "${CMAKE_BINARY_DIR}" NAME)
   set(CRT_PORT_TEST_ROOT "${CMAKE_BINARY_DIR}/port-tests")
   set(CRT_PORT_SOURCE_ROOT "${CRT_PORT_TEST_ROOT}/src")

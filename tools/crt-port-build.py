@@ -22,6 +22,39 @@ def run(args, cwd, env):
     subprocess.run(args, cwd=cwd, env=env, check=True)
 
 
+def is_native_windows_configure(target_os):
+    return target_os == "windows" and os.name == "nt"
+
+
+def path_for_posix_shell(path):
+    value = str(path).replace("\\", "/")
+    if len(value) >= 2 and value[1] == ":":
+        drive = value[0].lower()
+        rest = value[2:]
+        if rest.startswith("/"):
+            rest = rest[1:]
+        return f"/{drive}/{rest}"
+    return value
+
+
+def find_posix_shell(env):
+    for name in ("CRT_PORT_SHELL", "CONFIG_SHELL"):
+        value = env.get(name)
+        if value:
+            return value
+
+    for name in ("bash", "sh"):
+        value = shutil.which(name)
+        if value:
+            return value
+
+    raise SystemExit(
+        "configure recipes on native Windows require a POSIX shell. "
+        "Install MSYS2 or Git Bash, put bash.exe/sh.exe in PATH, or set "
+        "CRT_PORT_SHELL to the shell executable path."
+    )
+
+
 def join_flags(*parts):
     return " ".join(part for part in parts if part).strip()
 
@@ -47,25 +80,32 @@ def copy_source(src, dst):
 
 def make_env(root, build_dir, sysroot, port_prefix, target_os):
     env = os.environ.copy()
-    env["CRT_SYSROOT"] = str(sysroot)
+    use_posix_paths = is_native_windows_configure(target_os)
+    root_env = path_for_posix_shell(root) if use_posix_paths else str(root)
+    build_dir_env = path_for_posix_shell(build_dir) if use_posix_paths else str(build_dir)
+    sysroot_env = path_for_posix_shell(sysroot) if use_posix_paths else str(sysroot)
+    port_prefix_env = path_for_posix_shell(port_prefix) if use_posix_paths else str(port_prefix)
+    tools_dir_env = path_for_posix_shell(root / "tools") if use_posix_paths else str(root / "tools")
+
+    env["CRT_SYSROOT"] = sysroot_env
     env["CRT_TARGET_OS"] = target_os
-    env["CC"] = str(root / "tools" / "crt-cc")
-    env["CXX"] = str(root / "tools" / "crt-c++")
+    env["CC"] = f"{root_env}/tools/crt-cc" if use_posix_paths else str(root / "tools" / "crt-cc")
+    env["CXX"] = f"{root_env}/tools/crt-c++" if use_posix_paths else str(root / "tools" / "crt-c++")
     env["AR"] = env.get("AR") or shutil.which("llvm-ar") or shutil.which("ar") or "ar"
     env["RANLIB"] = env.get("RANLIB") or shutil.which("llvm-ranlib") or shutil.which("ranlib") or "ranlib"
     env["STRIP"] = env.get("STRIP") or shutil.which("llvm-strip") or shutil.which("strip") or "strip"
-    env["PKG_CONFIG_LIBDIR"] = str(port_prefix / "lib" / "pkgconfig")
+    env["PKG_CONFIG_LIBDIR"] = f"{port_prefix_env}/lib/pkgconfig"
     env["PKG_CONFIG_PATH"] = env["PKG_CONFIG_LIBDIR"]
-    include_flags = f"-I{port_prefix / 'include'}"
-    lib_flags = f"-L{port_prefix / 'lib'}"
+    include_flags = f"-I{port_prefix_env}/include"
+    lib_flags = f"-L{port_prefix_env}/lib"
     env["CPPFLAGS"] = join_flags(include_flags, env.get("CRT_EXTRA_CPPFLAGS", ""))
     env["CFLAGS"] = join_flags(env.get("CRT_PORT_CFLAGS", "-O2"), env.get("CRT_EXTRA_CFLAGS", ""))
     env["CXXFLAGS"] = join_flags(env.get("CRT_PORT_CXXFLAGS", "-O2"), env.get("CRT_EXTRA_CXXFLAGS", ""))
     env["LDFLAGS"] = join_flags(lib_flags, env.get("CRT_EXTRA_LDFLAGS", ""))
     env["LIBS"] = env.get("CRT_EXTRA_LIBS", "")
-    env["PATH"] = f"{root / 'tools'}{os.pathsep}{env.get('PATH', '')}"
+    env["PATH"] = f"{tools_dir_env}{os.pathsep}{env.get('PATH', '')}"
     env["DESTDIR"] = ""
-    env["CRT_PORT_BUILD_DIR"] = str(build_dir)
+    env["CRT_PORT_BUILD_DIR"] = build_dir_env
     return env
 
 
@@ -74,11 +114,16 @@ def apply_recipe_env(env, recipe):
         env[name] = str(value)
 
 
-def build_configure_port(root, work, port_prefix, recipe, env):
+def build_configure_port(root, work, port_prefix, recipe, env, target_os):
     build = recipe["build"]
     configure = ["./configure"]
     configure.extend(build["configure_args"])
-    configure.append(f"--prefix={port_prefix}")
+    prefix = path_for_posix_shell(port_prefix) if is_native_windows_configure(target_os) else str(port_prefix)
+    configure.append(f"--prefix={prefix}")
+    if is_native_windows_configure(target_os):
+        shell = find_posix_shell(env)
+        env["CONFIG_SHELL"] = path_for_posix_shell(shell)
+        configure = [shell] + configure
     run(configure, work, env)
     run(["make", "-j", str(os.cpu_count() or 2)] + build["make_args"], work, env)
     run(["make", "install"], work, env)
@@ -130,7 +175,7 @@ def build_port(root, build_dir, source_root, sysroot, port_prefix, recipes, port
     env = make_env(root, build_dir, sysroot, port_prefix, target_os)
     apply_recipe_env(env, recipe)
     if build["system"] == "configure":
-        build_configure_port(root, work, port_prefix, recipe, env)
+        build_configure_port(root, work, port_prefix, recipe, env, target_os)
     elif build["system"] == "amalgamation":
         build_amalgamation_port(work, port_prefix, recipe, env)
     stamp.parent.mkdir(parents=True, exist_ok=True)

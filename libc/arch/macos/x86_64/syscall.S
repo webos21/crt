@@ -611,6 +611,40 @@ ___crt_sys_getppid:
   negq %rax
   retq
 
+.globl ___crt_sys_fork
+.p2align 4, 0x90
+___crt_sys_fork:
+  movq $0x2000002, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_execve
+.p2align 4, 0x90
+___crt_sys_execve:
+  movq $0x200003b, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_wait4
+.p2align 4, 0x90
+___crt_sys_wait4:
+  movq %rcx, %r10
+  movq $0x2000007, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
 .globl ___crt_sys_geteuid
 .p2align 4, 0x90
 ___crt_sys_geteuid:

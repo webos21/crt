@@ -494,6 +494,15 @@ for one upstream library's porting metadata:
 The human-readable success matrix is maintained in
 `docs/porting_status.md`.
 
+The long-term Windows porting environment is an Android-like shell and command
+rootfs running on this CRT/PAL rather than MSYS/Git Bash as a runtime
+compatibility layer. See `docs/android_shell_environment.md`. The initial
+rootfs scaffold can be created with:
+
+```sh
+cmake --build --preset windows-host-ninja-debug --target rootfs
+```
+
 ### Environment
 
 First install the CRT sysroot:
@@ -560,6 +569,22 @@ link configure test executables with CRT startup/static runtime archives. See
 CMake provides recipe-backed porting targets. They still run the upstream
 `configure && make && make install` flow under `out/<preset>/port-tests`, but
 they make the common test path easier to repeat.
+
+On native Windows, Autoconf `configure` scripts are POSIX shell scripts. The
+CMake port targets may be launched from PowerShell or `cmd.exe`, but configure
+recipes still require Git Bash or MSYS2 build tools (`bash` or `sh`, plus
+`make`) to be installed and visible in `PATH`. If the shell is not discoverable,
+set `CRT_PORT_SHELL` to the full path of `bash.exe` or `sh.exe` before running
+the CMake port target:
+
+```bat
+set CRT_PORT_SHELL=C:\msys64\usr\bin\bash.exe
+cmake --build --preset windows-host-ninja-debug --target port-rebuild-zlib
+```
+
+This shell is only used to run upstream configure/make scripts. The compiled
+objects and libraries still use the CRT sysroot wrappers and the Windows native
+Clang/LLD toolchain selected by the preset.
 
 List the available recipes:
 

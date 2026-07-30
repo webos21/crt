@@ -280,6 +280,12 @@ set_tests_properties(process_signal_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "process_signal_test: ok"
 )
 
+add_crt_test(rootfs_process_test rootfs_process_test.c)
+set_tests_properties(rootfs_process_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "rootfs_process_test: ok"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
 add_crt_test(atomic_test atomic_test.c)
 set_tests_properties(atomic_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "atomic_test: ok"

@@ -3,20 +3,60 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <signal.h>
+#include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+#include <private/crt_spawn.h>
 
 long __crt_sys_getpid(void);
 long __crt_sys_getppid(void);
 long __crt_sys_kill(long pid, int sig);
+long __crt_sys_execve(const char* path, char* const argv[], char* const envp[]);
+long __crt_sys_waitpid(long pid, int* status, int options);
+#if defined(CRT_TARGET_OS_WINDOWS)
+long __crt_sys_posix_spawn(
+    const char* path,
+    char* const argv[],
+    char* const envp[],
+    long* pid,
+    int search_path,
+    const posix_spawn_file_actions_t actions,
+    const posix_spawnattr_t attr);
+#endif
 long __crt_sysconf_page_size(void);
 long __crt_sysconf_nprocessors_conf(void);
 long __crt_sysconf_nprocessors_onln(void);
 long __crt_sysconf_phys_pages(void);
 long __crt_sysconf_avphys_pages(void);
+
+#if defined(CRT_TARGET_OS_LINUX)
+long __crt_sys_fork(void);
+long __crt_sys_wait4(long pid, int* status, int options, void* rusage);
+
+long __crt_sys_waitpid(long pid, int* status, int options) {
+  return __crt_sys_wait4(pid, status, options, 0);
+}
+
+#elif defined(CRT_TARGET_OS_MACOS)
+long __crt_sys_fork(void);
+long __crt_sys_wait4(long pid, int* status, int options, void* rusage);
+
+long __crt_sys_waitpid(long pid, int* status, int options) {
+  return __crt_sys_wait4(pid, status, options, 0);
+}
+#elif defined(CRT_TARGET_OS_WINDOWS)
+long __crt_sys_execve(const char* path, char* const argv[], char* const envp[]) {
+  (void)path;
+  (void)argv;
+  (void)envp;
+  return -ENOTSUP;
+}
+#endif
 
 #define CRT_SYSTEM_CLK_TCK 100
 #define CRT_SYSTEM_IOV_MAX 1024
@@ -224,6 +264,115 @@ static long normalize_syscall_result(long result) {
   return result;
 }
 
+static int posix_spawn_add_file_action(
+    posix_spawn_file_actions_t* actions,
+    enum crt_spawn_action_kind kind,
+    int fd,
+    int new_fd,
+    const char* path,
+    int flags,
+    mode_t mode) {
+  struct __posix_spawn_file_action* action;
+
+  if (actions == 0 || *actions == 0) {
+    return EINVAL;
+  }
+  action = (struct __posix_spawn_file_action*)calloc(1, sizeof(*action));
+  if (action == 0) {
+    return errno;
+  }
+  if (path != 0) {
+    action->path = strdup(path);
+    if (action->path == 0) {
+      free(action);
+      return errno;
+    }
+  }
+  action->kind = kind;
+  action->fd = fd;
+  action->new_fd = new_fd;
+  action->flags = flags;
+  action->mode = mode;
+  if ((*actions)->head == 0) {
+    (*actions)->head = action;
+    (*actions)->last = action;
+  } else {
+    (*actions)->last->next = action;
+    (*actions)->last = action;
+  }
+  return 0;
+}
+
+#if !defined(CRT_TARGET_OS_WINDOWS)
+static int spawn_attr_has_effect(const posix_spawnattr_t attr) {
+  return attr != 0 && attr->flags != 0;
+}
+
+static void apply_spawn_actions_or_exit(const posix_spawn_file_actions_t actions) {
+  struct __posix_spawn_file_action* action;
+
+  if (actions == 0) {
+    return;
+  }
+  for (action = actions->head; action != 0; action = action->next) {
+    if (action->kind == CRT_SPAWN_ACTION_OPEN) {
+      int fd = open(action->path, action->flags, action->mode);
+
+      if (fd < 0) {
+        _exit(127);
+      }
+      if (fd != action->new_fd) {
+        if (dup2(fd, action->new_fd) < 0) {
+          _exit(127);
+        }
+        close(fd);
+      }
+    } else if (action->kind == CRT_SPAWN_ACTION_CLOSE) {
+      close(action->fd);
+    } else if (action->kind == CRT_SPAWN_ACTION_DUP2) {
+      if (dup2(action->fd, action->new_fd) < 0) {
+        _exit(127);
+      }
+    } else if (action->kind == CRT_SPAWN_ACTION_CHDIR) {
+      if (chdir(action->path) < 0) {
+        _exit(127);
+      }
+    } else {
+      _exit(127);
+    }
+  }
+}
+
+long __crt_sys_posix_spawn(
+    const char* path,
+    char* const argv[],
+    char* const envp[],
+    long* pid,
+    int search_path,
+    const posix_spawn_file_actions_t actions,
+    const posix_spawnattr_t attr) {
+  long child;
+  (void)search_path;
+
+  if (spawn_attr_has_effect(attr)) {
+    return -ENOTSUP;
+  }
+  child = __crt_sys_fork();
+  if (child < 0) {
+    return child;
+  }
+  if (child == 0) {
+    apply_spawn_actions_or_exit(actions);
+    __crt_sys_execve(path, argv, envp != 0 ? envp : environ);
+    _exit(127);
+  }
+  if (pid != 0) {
+    *pid = child;
+  }
+  return 0;
+}
+#endif
+
 pid_t getpid(void) {
   return (pid_t)normalize_syscall_result(__crt_sys_getpid());
 }
@@ -244,6 +393,315 @@ int kill(pid_t pid, int sig) {
     return raise(sig);
   }
   return (int)normalize_syscall_result(__crt_sys_kill((long)pid, sig));
+}
+
+int posix_spawnattr_init(posix_spawnattr_t* attr) {
+  if (attr == 0) {
+    return EINVAL;
+  }
+  *attr = (posix_spawnattr_t)calloc(1, sizeof(**attr));
+  return *attr == 0 ? errno : 0;
+}
+
+int posix_spawnattr_destroy(posix_spawnattr_t* attr) {
+  if (attr == 0 || *attr == 0) {
+    return EINVAL;
+  }
+  free(*attr);
+  *attr = 0;
+  return 0;
+}
+
+int posix_spawnattr_setflags(posix_spawnattr_t* attr, short flags) {
+  short supported = POSIX_SPAWN_RESETIDS | POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF |
+                    POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSCHEDPARAM |
+                    POSIX_SPAWN_SETSCHEDULER | POSIX_SPAWN_USEVFORK |
+                    POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT;
+
+  if (attr == 0 || *attr == 0 || (flags & ~supported) != 0) {
+    return EINVAL;
+  }
+  (*attr)->flags = flags;
+  return 0;
+}
+
+int posix_spawnattr_getflags(const posix_spawnattr_t* attr, short* flags) {
+  if (attr == 0 || *attr == 0 || flags == 0) {
+    return EINVAL;
+  }
+  *flags = (*attr)->flags;
+  return 0;
+}
+
+int posix_spawnattr_setpgroup(posix_spawnattr_t* attr, pid_t pgroup) {
+  if (attr == 0 || *attr == 0) {
+    return EINVAL;
+  }
+  (*attr)->pgroup = pgroup;
+  return 0;
+}
+
+int posix_spawnattr_getpgroup(const posix_spawnattr_t* attr, pid_t* pgroup) {
+  if (attr == 0 || *attr == 0 || pgroup == 0) {
+    return EINVAL;
+  }
+  *pgroup = (*attr)->pgroup;
+  return 0;
+}
+
+int posix_spawnattr_setschedparam(posix_spawnattr_t* attr, const struct sched_param* param) {
+  if (attr == 0 || *attr == 0 || param == 0) {
+    return EINVAL;
+  }
+  (*attr)->schedparam = *param;
+  return 0;
+}
+
+int posix_spawnattr_getschedparam(const posix_spawnattr_t* attr, struct sched_param* param) {
+  if (attr == 0 || *attr == 0 || param == 0) {
+    return EINVAL;
+  }
+  *param = (*attr)->schedparam;
+  return 0;
+}
+
+int posix_spawnattr_setschedpolicy(posix_spawnattr_t* attr, int policy) {
+  if (attr == 0 || *attr == 0) {
+    return EINVAL;
+  }
+  (*attr)->schedpolicy = policy;
+  return 0;
+}
+
+int posix_spawnattr_getschedpolicy(const posix_spawnattr_t* attr, int* policy) {
+  if (attr == 0 || *attr == 0 || policy == 0) {
+    return EINVAL;
+  }
+  *policy = (*attr)->schedpolicy;
+  return 0;
+}
+
+int posix_spawnattr_setsigmask(posix_spawnattr_t* attr, const sigset_t* mask) {
+  if (attr == 0 || *attr == 0 || mask == 0) {
+    return EINVAL;
+  }
+  (*attr)->sigmask = *mask;
+  (*attr)->sigmask64 = (sigset64_t)*mask;
+  return 0;
+}
+
+int posix_spawnattr_getsigmask(const posix_spawnattr_t* attr, sigset_t* mask) {
+  if (attr == 0 || *attr == 0 || mask == 0) {
+    return EINVAL;
+  }
+  *mask = (*attr)->sigmask;
+  return 0;
+}
+
+int posix_spawnattr_setsigmask64(posix_spawnattr_t* attr, const sigset64_t* mask) {
+  if (attr == 0 || *attr == 0 || mask == 0) {
+    return EINVAL;
+  }
+  (*attr)->sigmask64 = *mask;
+  (*attr)->sigmask = (sigset_t)*mask;
+  return 0;
+}
+
+int posix_spawnattr_getsigmask64(const posix_spawnattr_t* attr, sigset64_t* mask) {
+  if (attr == 0 || *attr == 0 || mask == 0) {
+    return EINVAL;
+  }
+  *mask = (*attr)->sigmask64;
+  return 0;
+}
+
+int posix_spawnattr_setsigdefault(posix_spawnattr_t* attr, const sigset_t* mask) {
+  if (attr == 0 || *attr == 0 || mask == 0) {
+    return EINVAL;
+  }
+  (*attr)->sigdefault = *mask;
+  (*attr)->sigdefault64 = (sigset64_t)*mask;
+  return 0;
+}
+
+int posix_spawnattr_getsigdefault(const posix_spawnattr_t* attr, sigset_t* mask) {
+  if (attr == 0 || *attr == 0 || mask == 0) {
+    return EINVAL;
+  }
+  *mask = (*attr)->sigdefault;
+  return 0;
+}
+
+int posix_spawnattr_setsigdefault64(posix_spawnattr_t* attr, const sigset64_t* mask) {
+  if (attr == 0 || *attr == 0 || mask == 0) {
+    return EINVAL;
+  }
+  (*attr)->sigdefault64 = *mask;
+  (*attr)->sigdefault = (sigset_t)*mask;
+  return 0;
+}
+
+int posix_spawnattr_getsigdefault64(const posix_spawnattr_t* attr, sigset64_t* mask) {
+  if (attr == 0 || *attr == 0 || mask == 0) {
+    return EINVAL;
+  }
+  *mask = (*attr)->sigdefault64;
+  return 0;
+}
+
+int posix_spawn_file_actions_init(posix_spawn_file_actions_t* actions) {
+  if (actions == 0) {
+    return EINVAL;
+  }
+  *actions = (posix_spawn_file_actions_t)calloc(1, sizeof(**actions));
+  return *actions == 0 ? errno : 0;
+}
+
+int posix_spawn_file_actions_destroy(posix_spawn_file_actions_t* actions) {
+  struct __posix_spawn_file_action* action;
+
+  if (actions == 0 || *actions == 0) {
+    return EINVAL;
+  }
+  action = (*actions)->head;
+  while (action != 0) {
+    struct __posix_spawn_file_action* next = action->next;
+
+    free(action->path);
+    free(action);
+    action = next;
+  }
+  free(*actions);
+  *actions = 0;
+  return 0;
+}
+
+int posix_spawn_file_actions_addopen(
+    posix_spawn_file_actions_t* actions,
+    int fd,
+    const char* path,
+    int flags,
+    mode_t mode) {
+  if (fd < 0) {
+    return EBADF;
+  }
+  if (path == 0) {
+    return EINVAL;
+  }
+  return posix_spawn_add_file_action(actions, CRT_SPAWN_ACTION_OPEN, -1, fd, path, flags, mode);
+}
+
+int posix_spawn_file_actions_addclose(posix_spawn_file_actions_t* actions, int fd) {
+  if (fd < 0) {
+    return EBADF;
+  }
+  return posix_spawn_add_file_action(actions, CRT_SPAWN_ACTION_CLOSE, fd, -1, 0, 0, 0);
+}
+
+int posix_spawn_file_actions_adddup2(posix_spawn_file_actions_t* actions, int fd, int new_fd) {
+  if (fd < 0 || new_fd < 0) {
+    return EBADF;
+  }
+  return posix_spawn_add_file_action(actions, CRT_SPAWN_ACTION_DUP2, fd, new_fd, 0, 0, 0);
+}
+
+int posix_spawn_file_actions_addchdir_np(posix_spawn_file_actions_t* actions, const char* path) {
+  if (path == 0) {
+    return EINVAL;
+  }
+  return posix_spawn_add_file_action(actions, CRT_SPAWN_ACTION_CHDIR, -1, -1, path, 0, 0);
+}
+
+int posix_spawn_file_actions_addfchdir_np(posix_spawn_file_actions_t* actions, int fd) {
+  if (fd < 0) {
+    return EBADF;
+  }
+  return posix_spawn_add_file_action(actions, CRT_SPAWN_ACTION_FCHDIR, fd, -1, 0, 0, 0);
+}
+
+pid_t waitpid(pid_t pid, int* status, int options) {
+  long result = __crt_sys_waitpid((long)pid, status, options);
+
+  return (pid_t)normalize_syscall_result(result);
+}
+
+pid_t wait(int* status) {
+  return waitpid((pid_t)-1, status, 0);
+}
+
+int posix_spawn(
+    pid_t* pid,
+    const char* path,
+    const posix_spawn_file_actions_t* file_actions,
+    const posix_spawnattr_t* attrp,
+    char* const argv[],
+    char* const envp[]) {
+  long child_pid = 0;
+  long result;
+
+  if (path == 0) {
+    return EINVAL;
+  }
+  result = __crt_sys_posix_spawn(
+      path,
+      argv,
+      envp,
+      &child_pid,
+      0,
+      file_actions != 0 ? *file_actions : 0,
+      attrp != 0 ? *attrp : 0);
+  if (result < 0) {
+    return (int)-result;
+  }
+  if (pid != 0) {
+    *pid = (pid_t)child_pid;
+  }
+  return 0;
+}
+
+int posix_spawnp(
+    pid_t* pid,
+    const char* file,
+    const posix_spawn_file_actions_t* file_actions,
+    const posix_spawnattr_t* attrp,
+    char* const argv[],
+    char* const envp[]) {
+  long child_pid = 0;
+  long result;
+
+  if (file == 0) {
+    return EINVAL;
+  }
+  result = __crt_sys_posix_spawn(
+      file,
+      argv,
+      envp,
+      &child_pid,
+      1,
+      file_actions != 0 ? *file_actions : 0,
+      attrp != 0 ? *attrp : 0);
+  if (result < 0) {
+    return (int)-result;
+  }
+  if (pid != 0) {
+    *pid = (pid_t)child_pid;
+  }
+  return 0;
+}
+
+int execve(const char* path, char* const argv[], char* const envp[]) {
+  long result;
+
+  if (path == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  result = __crt_sys_execve(path, argv, envp);
+  if (result < 0 && result >= -4095) {
+    errno = (int)-result;
+    return -1;
+  }
+  return (int)result;
 }
 
 long sysconf(int name) {

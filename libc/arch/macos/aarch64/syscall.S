@@ -607,6 +607,39 @@ ___crt_sys_getppid:
   neg x0, x0
   ret
 
+.globl ___crt_sys_fork
+.p2align 2
+___crt_sys_fork:
+  mov x16, #2
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_execve
+.p2align 2
+___crt_sys_execve:
+  mov x16, #59
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_wait4
+.p2align 2
+___crt_sys_wait4:
+  mov x16, #7
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
 .globl ___crt_sys_geteuid
 .p2align 2
 ___crt_sys_geteuid:

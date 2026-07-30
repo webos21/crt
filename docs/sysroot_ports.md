@@ -203,6 +203,22 @@ cmake --build --preset macos-host-ninja-debug --target port-build-recipes
 cmake --build --preset macos-host-ninja-debug --target port-rebuild-configure
 ```
 
+On native Windows, these CMake targets can be launched from PowerShell or
+`cmd.exe`, but `configure` recipes still need a POSIX build shell because
+upstream Autoconf scripts and the CRT compiler wrappers are shell scripts.
+Install Git Bash or MSYS2 with GNU `make`, keep `bash.exe` or `sh.exe` visible
+in `PATH`, or set `CRT_PORT_SHELL` explicitly:
+
+```bat
+set CRT_PORT_SHELL=C:\msys64\usr\bin\bash.exe
+cmake --build --preset windows-host-ninja-debug --target port-rebuild-zlib
+```
+
+`crt-port-build.py` converts the CRT sysroot, port prefix, and compiler wrapper
+paths to POSIX-style `/c/...` paths before invoking configure. This keeps the
+build shell as a tool for running upstream build scripts only; the produced
+objects still go through the CRT sysroot wrappers and host-native Clang/LLD.
+
 Per-recipe fetch targets resolve recipe dependencies. For example,
 `port-fetch-libpng` also fetches zlib.
 
