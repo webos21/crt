@@ -39,6 +39,7 @@ char* getenv(const char* name);
 int setenv(const char* name, const char* value, int overwrite);
 int unsetenv(const char* name);
 char* realpath(const char* path, char* resolved_path);
+char* mktemp(char* template_path);
 int mkstemp(char* template_path);
 int mblen(const char* s, size_t n);
 int mbtowc(wchar_t* pwc, const char* s, size_t n);

@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <fcntl.h>
+#include <paths.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdio_ext.h>
@@ -673,6 +674,7 @@ static int ensure_memory_capacity(FILE* stream, size_t needed) {
 static int memory_putc(FILE* stream, int c) {
   struct crt_stdio_cookie* cookie = stream_cookie(stream);
   unsigned char byte = (unsigned char)c;
+  size_t needed;
 
   if (cookie == 0 || !cookie->writable) {
     errno = EBADF;
@@ -686,7 +688,11 @@ static int memory_putc(FILE* stream, int c) {
   if (cookie->append) {
     cookie->mem_pos = cookie->mem_len;
   }
-  if (ensure_memory_capacity(stream, cookie->mem_pos + 2) != 0) {
+  needed = cookie->mem_pos + 1;
+  if (cookie->mem_open_ptr != 0 || byte != 0) {
+    ++needed;
+  }
+  if (ensure_memory_capacity(stream, needed) != 0) {
     return EOF;
   }
   cookie->mem_base[cookie->mem_pos++] = (char)byte;
@@ -998,6 +1004,54 @@ FILE* tmpfile(void) {
   return 0;
 }
 
+static const char* get_tmpdir(void) {
+  const char* tmpdir = getenv("TMPDIR");
+
+  return tmpdir != 0 ? tmpdir : "/data/local/tmp";
+}
+
+char* tmpnam(char* s) {
+  static char buffer[L_tmpnam];
+
+  if (s == 0) {
+    s = buffer;
+  }
+  if (snprintf(s, L_tmpnam, "%s/tmpnam.XXXXXXXXXX", get_tmpdir()) < 0) {
+    return 0;
+  }
+  return mktemp(s);
+}
+
+char* tempnam(const char* dir, const char* prefix) {
+  char* path;
+
+  if (getenv("TMPDIR") != 0) {
+    dir = getenv("TMPDIR");
+  }
+  if (dir == 0) {
+    dir = "/data/local/tmp";
+  }
+  if (prefix == 0) {
+    prefix = "tempnam.";
+  }
+  if (asprintf(&path, "%s/%sXXXXXXXXXX", dir, prefix) < 0) {
+    return 0;
+  }
+  if (mktemp(path) == 0) {
+    free(path);
+    return 0;
+  }
+  return path;
+}
+
+char* ctermid(char* s) {
+  if (s == 0) {
+    return (char*)_PATH_TTY;
+  }
+  strcpy(s, _PATH_TTY);
+  return s;
+}
+
 static int parse_memory_mode(
     const char* mode,
     int* readable,
@@ -1108,7 +1162,13 @@ FILE* fmemopen(void* buf, size_t size, const char* mode) {
       base[0] = 0;
     }
   }
-  len = truncate || buf == 0 ? 0 : bounded_strlen(base, size);
+  if (truncate || buf == 0) {
+    len = 0;
+  } else if (mode[0] == 'r') {
+    len = size;
+  } else {
+    len = bounded_strlen(base, size);
+  }
   return create_memory_stream(base, size, owned, readable, writable, append, len, 0, 0);
 }
 
@@ -1266,10 +1326,28 @@ static int stream_seek(FILE* stream, off_t offset, int whence) {
       return -1;
     }
     target = base + offset;
-    if (target < 0 || (size_t)target > cookie->mem_size) {
+    if (target < 0) {
       errno = EINVAL;
       set_stream_error(stream);
       return -1;
+    }
+    if ((size_t)target > cookie->mem_size) {
+      if (cookie->mem_open_ptr == 0) {
+        errno = EINVAL;
+        set_stream_error(stream);
+        return -1;
+      }
+      if (ensure_memory_capacity(stream, (size_t)target + 1) != 0) {
+        return -1;
+      }
+    }
+    if (cookie->mem_open_ptr != 0 && (size_t)target > cookie->mem_len) {
+      memset(cookie->mem_base + cookie->mem_len, 0, (size_t)target - cookie->mem_len);
+      cookie->mem_len = (size_t)target;
+      if (cookie->mem_len < cookie->mem_size) {
+        cookie->mem_base[cookie->mem_len] = 0;
+      }
+      sync_memory_stream(stream);
     }
     cookie->mem_pos = (size_t)target;
     clear_stream_eof(stream);

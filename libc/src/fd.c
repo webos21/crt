@@ -10,6 +10,10 @@
 #include <sys/vfs.h>
 #include <unistd.h>
 
+#ifndef TMP_MAX
+#define TMP_MAX 308915776
+#endif
+
 long __crt_sys_read(int fd, void* buf, unsigned long count);
 long __crt_sys_write(int fd, const void* buf, unsigned long count);
 long __crt_sys_fcntl(int fd, int cmd, void* arg);
@@ -580,43 +584,78 @@ int creat(const char* path, mode_t mode) {
   return open(path, O_CREAT | O_WRONLY | O_TRUNC, mode);
 }
 
-int mkstemp(char* template_path) {
+static char* fill_temp_template(char* template_path, int create_file, int* fd_out) {
   static unsigned long counter;
   size_t length;
   size_t suffix;
+  size_t x_count = 0;
   unsigned long attempt;
 
+  if (fd_out != 0) {
+    *fd_out = -1;
+  }
   if (template_path == 0) {
     errno = EINVAL;
-    return -1;
+    return 0;
   }
   length = strlen(template_path);
-  if (length < 6 || strcmp(template_path + length - 6, "XXXXXX") != 0) {
-    errno = EINVAL;
-    return -1;
+  suffix = length;
+  while (suffix > 0 && template_path[suffix - 1] == 'X') {
+    --suffix;
+    ++x_count;
   }
-  suffix = length - 6;
+  if (x_count < 6) {
+    errno = EINVAL;
+    return 0;
+  }
 
-  for (attempt = 0; attempt < 4096; ++attempt) {
+  for (attempt = 0; attempt < TMP_MAX; ++attempt) {
     unsigned long value = counter++ ^ (unsigned long)getpid() ^ (attempt << 16);
     size_t i;
-    int fd;
 
-    for (i = 0; i < 6; ++i) {
+    for (i = 0; i < x_count; ++i) {
       template_path[suffix + i] = mkstemp_char(value);
       value = value / 62UL + 0x9e3779b9UL;
     }
-    fd = open(template_path, O_CREAT | O_EXCL | O_RDWR, 0600);
-    if (fd >= 0) {
-      return fd;
-    }
-    if (errno != EEXIST) {
-      return -1;
+    if (create_file) {
+      int fd = open(template_path, O_CREAT | O_EXCL | O_RDWR, 0600);
+      if (fd >= 0) {
+        if (fd_out != 0) {
+          *fd_out = fd;
+        }
+        return template_path;
+      }
+      if (errno != EEXIST) {
+        return 0;
+      }
+    } else if (access(template_path, F_OK) != 0) {
+      if (errno == ENOENT) {
+        return template_path;
+      }
+      return 0;
     }
   }
 
   errno = EEXIST;
-  return -1;
+  return 0;
+}
+
+char* mktemp(char* template_path) {
+  char* result = fill_temp_template(template_path, 0, 0);
+
+  if (result == 0 && template_path != 0) {
+    template_path[0] = 0;
+  }
+  return result;
+}
+
+int mkstemp(char* template_path) {
+  int fd = -1;
+
+  if (fill_temp_template(template_path, 1, &fd) == 0) {
+    return -1;
+  }
+  return fd;
 }
 
 int close(int fd) {

@@ -1099,9 +1099,15 @@ locking, while the `*_unlocked` entry points call no-lock core helpers directly.
 `__fsetlocking` and the `FSETLOCKING_*` constants are exposed through
 `stdio_ext.h`; `FSETLOCKING_BYCALLER` sets `_EXT(fp)->_caller_handles_locking`
 so regular stdio calls skip implicit locking when the caller owns the lock
-boundary. `fmemopen` supports fixed-size caller buffers and allocated buffers,
-and `open_memstream` keeps the caller's pointer and size synchronized across
-writes, `fflush`, and `fclose`.
+boundary. `fmemopen` supports fixed-size caller buffers and allocated buffers.
+For read modes it follows Bionic `libc/stdio/fmemopen.cpp` by exposing the
+entire supplied capacity, including embedded NUL bytes, rather than stopping at
+the first string terminator. Fixed-buffer writes reserve room for a trailing NUL
+when writing non-NUL data and report `ENOSPC` when no user byte can fit.
+`open_memstream` keeps the caller's pointer and size synchronized across writes,
+`fseek` growth, `fflush`, and `fclose`; gaps introduced by seeking past the
+current end are filled with NUL bytes. `open_wmemstream` mirrors the same gap
+and flush/close synchronization policy for native `wchar_t` storage.
 
 The next stdio tranche starts replacing project-specific control flow with
 Bionic/BSD internal entry points. The CRT now exports and routes byte I/O through
@@ -1134,6 +1140,15 @@ temporary name with `O_CREAT | O_EXCL`, unlinks it immediately after a successfu
 open where the host permits that behavior, and keeps the resulting stream open.
 It is collision-resistant enough for early tests, but it is not yet a final
 secure temporary-file policy.
+The temporary/name API tranche now follows Bionic's current public direction:
+`L_tmpnam`, `TMP_MAX`, `P_tmpdir`, and `L_ctermid` are exposed from `stdio.h`;
+`tmpnam` and `tempnam` prefer `$TMPDIR` and otherwise use Android's
+`/data/local/tmp` shell fallback; `tempnam` honors the caller-supplied directory
+only when `$TMPDIR` is unset; `ctermid` returns `_PATH_TTY` (`/dev/tty`), matching
+Bionic `stdio.cpp`. `mktemp` is exposed from `stdlib.h` to support the same
+obsolescent name-generation path used by Bionic `tmpfile.cpp`; it does not create
+the file and should remain a compatibility surface behind safer `mkstemp` and
+`tmpfile` usage.
 
 The file/path tranche adds:
 

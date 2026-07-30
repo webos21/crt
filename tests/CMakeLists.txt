@@ -159,6 +159,12 @@ set_tests_properties(stdio_memory_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "stdio_memory_test: ok"
 )
 
+add_crt_test(temp_name_test temp_name_test.c)
+set_tests_properties(temp_name_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "temp_name_test: ok"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
 add_crt_test(file_path_test file_path_test.c)
 set_tests_properties(file_path_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "file_path_test: ok"

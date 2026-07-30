@@ -1,7 +1,10 @@
+#include <errno.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdio_ext.h>
 #include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
 
 struct cookie_buffer {
   char data[64];
@@ -13,6 +16,16 @@ struct cookie_buffer {
 static int fail(const char* message) {
   puts(message);
   return 1;
+}
+
+static int make_vasprintf(char** text, const char* format, ...) {
+  int result;
+  va_list ap;
+
+  va_start(ap, format);
+  result = vasprintf(text, format, ap);
+  va_end(ap);
+  return result;
 }
 
 static int cookie_read(void* opaque, char* buf, int count) {
@@ -79,10 +92,13 @@ int main(void) {
   struct cookie_buffer cookie;
   char* text = 0;
   char fixed[16];
+  char raw[6];
   FILE* stream;
   char* line;
+  wchar_t* wtext = 0;
   size_t line_length;
   size_t size = 0;
+  size_t wsize = 0;
 
   if (asprintf(&text, "value:%d:%s", 42, "ok") != 11) {
     return fail("stdio_memory_test: asprintf length");
@@ -91,6 +107,58 @@ int main(void) {
     return fail("stdio_memory_test: asprintf content");
   }
   free(text);
+  text = 0;
+  if (make_vasprintf(&text, "%s:%04d", "hex", 26) != 8 ||
+      strcmp(text, "hex:0026") != 0) {
+    free(text);
+    return fail("stdio_memory_test: vasprintf");
+  }
+  free(text);
+  text = 0;
+
+  memcpy(raw, "ab\0cd", sizeof(raw));
+  stream = fmemopen(raw, sizeof(raw), "r");
+  if (stream == 0) {
+    return fail("stdio_memory_test: fmemopen raw open");
+  }
+  memset(fixed, 0, sizeof(fixed));
+  if (fread(fixed, 1, sizeof(raw), stream) != sizeof(raw) ||
+      memcmp(fixed, raw, sizeof(raw)) != 0) {
+    fclose(stream);
+    return fail("stdio_memory_test: fmemopen read capacity");
+  }
+  fclose(stream);
+
+  memcpy(raw, "abcde", sizeof(raw));
+  stream = fmemopen(raw, sizeof(raw), "r+");
+  if (stream == 0 ||
+      fseek(stream, (long)sizeof(raw) - 1, SEEK_SET) != 0 ||
+      fputc('\0', stream) == EOF) {
+    if (stream != 0) {
+      fclose(stream);
+    }
+    return fail("stdio_memory_test: fmemopen final nul write");
+  }
+  fclose(stream);
+  if (memcmp(raw, "abcde", 5) != 0 || raw[5] != '\0') {
+    return fail("stdio_memory_test: fmemopen final nul content");
+  }
+
+  memcpy(raw, "abcde", sizeof(raw));
+  stream = fmemopen(raw, sizeof(raw), "r+");
+  if (stream == 0 ||
+      fseek(stream, (long)sizeof(raw) - 1, SEEK_SET) != 0) {
+    if (stream != 0) {
+      fclose(stream);
+    }
+    return fail("stdio_memory_test: fmemopen overflow seek");
+  }
+  errno = 0;
+  if (fputc('Z', stream) != EOF || errno != ENOSPC || !ferror(stream)) {
+    fclose(stream);
+    return fail("stdio_memory_test: fmemopen overflow");
+  }
+  fclose(stream);
 
   memcpy(fixed, "abcdef", 7);
   stream = fmemopen(fixed, sizeof(fixed), "r+");
@@ -156,6 +224,52 @@ int main(void) {
     return fail("stdio_memory_test: memstream close sync");
   }
   free(text);
+  text = 0;
+  size = 99;
+
+  stream = open_memstream(&text, &size);
+  if (stream == 0) {
+    return fail("stdio_memory_test: open_memstream seek open");
+  }
+  if (fputs("ab", stream) == EOF ||
+      fseek(stream, 5, SEEK_SET) != 0 ||
+      fputc('Z', stream) == EOF ||
+      fflush(stream) != 0) {
+    fclose(stream);
+    free(text);
+    return fail("stdio_memory_test: open_memstream seek write");
+  }
+  if (size != 6 ||
+      text[0] != 'a' || text[1] != 'b' ||
+      text[2] != '\0' || text[3] != '\0' || text[4] != '\0' ||
+      text[5] != 'Z' || text[6] != '\0') {
+    fclose(stream);
+    free(text);
+    return fail("stdio_memory_test: open_memstream seek content");
+  }
+  fclose(stream);
+  free(text);
+
+  stream = open_wmemstream(&wtext, &wsize);
+  if (stream == 0) {
+    return fail("stdio_memory_test: open_wmemstream open");
+  }
+  if (fputwc(L'A', stream) == WEOF ||
+      fseek(stream, 3, SEEK_SET) != 0 ||
+      fputwc(L'Z', stream) == WEOF ||
+      fflush(stream) != 0) {
+    fclose(stream);
+    free(wtext);
+    return fail("stdio_memory_test: open_wmemstream seek");
+  }
+  if (wsize != 4 || wtext[0] != L'A' || wtext[1] != 0 ||
+      wtext[2] != 0 || wtext[3] != L'Z' || wtext[4] != 0) {
+    fclose(stream);
+    free(wtext);
+    return fail("stdio_memory_test: open_wmemstream content");
+  }
+  fclose(stream);
+  free(wtext);
 
   cookie.pos = 0;
   cookie.len = 0;

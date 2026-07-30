@@ -12,13 +12,16 @@ extern "C" {
 #define EOF (-1)
 #define BUFSIZ 1024
 #define FILENAME_MAX 4096
-#define FOPEN_MAX 16
+#define FOPEN_MAX 20
+#define L_tmpnam 4096
+#define TMP_MAX 308915776
+#define P_tmpdir "/tmp/"
+#define L_ctermid 1024
 
 #define _IOFBF 0
 #define _IOLBF 1
 #define _IONBF 2
 
-#define L_tmpnam 20
 #ifndef SEEK_SET
 #define SEEK_SET 0
 #define SEEK_CUR 1
@@ -40,6 +43,9 @@ FILE* fopen(const char* path, const char* mode);
 FILE* fdopen(int fd, const char* mode);
 FILE* freopen(const char* path, const char* mode, FILE* stream);
 FILE* tmpfile(void);
+char* tmpnam(char* s);
+char* tempnam(const char* dir, const char* prefix);
+char* ctermid(char* s);
 int fclose(FILE* stream);
 int fileno(FILE* stream);
 int fseek(FILE* stream, long offset, int whence);
