@@ -2617,6 +2617,7 @@ long __crt_sys_waitpid(long pid, int* status, int options) {
   DWORD exit_code = 127;
   int index = -1;
   DWORD timeout = CRT_INFINITE;
+  DWORD child_pid;
 
   if ((options & ~WNOHANG) != 0) {
     return -ENOTSUP;
@@ -2628,6 +2629,7 @@ long __crt_sys_waitpid(long pid, int* status, int options) {
   if (process == 0) {
     return -ECHILD;
   }
+  child_pid = child_pid_table[index];
   wait_result = WaitForSingleObject(process, timeout);
   if (wait_result != CRT_WAIT_OBJECT_0 && (options & WNOHANG) != 0) {
     return 0;
@@ -2647,7 +2649,7 @@ long __crt_sys_waitpid(long pid, int* status, int options) {
   if (status != 0) {
     *status = ((int)exit_code & 0xff) << 8;
   }
-  return pid;
+  return (long)child_pid;
 }
 
 void __crt_sys_thread_exit(int status) {
