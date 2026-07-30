@@ -122,11 +122,11 @@ from Bionic `main` at `731631f300090436d7f5df80d50b6275c8c60a93`. It replaces
 the project-owned bootstrap `strtod`/`strtof` parser with the same gdtoa source
 family Bionic uses for accurate floating-point input conversion.
 
-The current compile set intentionally focuses on input conversion. The dtoa
-output-formatting files (`dtoa.c`, `gdtoa.c`, `dmisc.c`, `hdtoa.c`, `ldtoa.c`)
-are staged for a future gdtoa-backed printf replacement. The active formatter
-now has project-owned `%f`/`%e`/`%g`/`%a` support, but these staged files should
-remain the reference path for stricter Bionic/OpenBSD output conversion.
+The current compile set includes input conversion plus gdtoa output conversion:
+`__dtoa` for double decimal printf output, `__ldtoa` for long-double decimal
+printf output, and `__hdtoa`/`__hldtoa` for hexadecimal `%a`/`%A` output. The
+local `machine/ieee.h` compatibility header supplies the IEEE layout structures
+expected by OpenBSD gdtoa while keeping host SDK headers out of the CRT build.
 
 `strtold` follows the project long-double ABI policy: if the compiler target has
 128-bit IEEE quad long double (`LDBL_MANT_DIG == 113`), it dispatches through
@@ -138,18 +138,18 @@ Bionic's `__strtorQ`; otherwise it remains a `strtod` wrapper until a native x87
 | `libc/gdtoa/arith.h` | `libc/upstream-openbsd/android/include/arith.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Bionic Android gdtoa target configuration for IEEE little-endian 64-bit targets. |
 | `libc/gdtoa/gd_qnan.h` | `libc/upstream-openbsd/android/include/gd_qnan.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Quiet-NaN word definitions used by gdtoa NaN parsing. |
 | `libc/gdtoa/openbsd-compat.h` | `libc/upstream-openbsd/android/include/openbsd-compat.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Trimmed to this project's freestanding header set while preserving gdtoa visibility and alias macros. |
-| `libc/gdtoa/dmisc.c` | `libc/upstream-openbsd/lib/libc/gdtoa/dmisc.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/staged | Output-conversion support file staged for a future gdtoa-backed printf replacement. |
-| `libc/gdtoa/dtoa.c` | `libc/upstream-openbsd/lib/libc/gdtoa/dtoa.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/staged | Output-conversion support file staged for a future gdtoa-backed printf replacement. |
-| `libc/gdtoa/gdtoa.c` | `libc/upstream-openbsd/lib/libc/gdtoa/gdtoa.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/staged | General binary-to-decimal conversion file staged for a future gdtoa-backed printf replacement. |
+| `libc/gdtoa/dmisc.c` | `libc/upstream-openbsd/lib/libc/gdtoa/dmisc.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/compiled | `__freedtoa` support for the active gdtoa-backed printf decimal output path. |
+| `libc/gdtoa/dtoa.c` | `libc/upstream-openbsd/lib/libc/gdtoa/dtoa.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/compiled | Active `__dtoa` decimal output source used by printf `%f`/`%e`/`%g`. |
+| `libc/gdtoa/gdtoa.c` | `libc/upstream-openbsd/lib/libc/gdtoa/gdtoa.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/compiled | General binary-to-decimal conversion engine used by `__ldtoa` for long-double printf output. |
 | `libc/gdtoa/gdtoa.h` | `libc/upstream-openbsd/lib/libc/gdtoa/gdtoa.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Public/internal gdtoa declarations used by the imported conversion files. |
 | `libc/gdtoa/gdtoa_fltrnds.h` | `libc/upstream-openbsd/lib/libc/gdtoa/gdtoa_fltrnds.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Rounding-mode helper included by `strtof.c`. |
 | `libc/gdtoa/gdtoaimp.h` | `libc/upstream-openbsd/lib/libc/gdtoa/gdtoaimp.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Built with local OpenBSD compatibility and thread-private lock adapter. |
 | `libc/gdtoa/gethex.c` | `libc/upstream-openbsd/lib/libc/gdtoa/gethex.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Hexadecimal floating input conversion helper. |
 | `libc/gdtoa/gmisc.c` | `libc/upstream-openbsd/lib/libc/gdtoa/gmisc.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Generic gdtoa bit-copy helpers. |
 | `libc/gdtoa/hd_init.c` | `libc/upstream-openbsd/lib/libc/gdtoa/hd_init.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Hex digit table initialization. |
-| `libc/gdtoa/hdtoa.c` | `libc/upstream-openbsd/lib/libc/gdtoa/hdtoa.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/staged | Hex output-conversion file staged for a future gdtoa-backed printf replacement. |
+| `libc/gdtoa/hdtoa.c` | `libc/upstream-openbsd/lib/libc/gdtoa/hdtoa.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/compiled | Hex output-conversion source used by printf `%a`/`%A`. |
 | `libc/gdtoa/hexnan.c` | `libc/upstream-openbsd/lib/libc/gdtoa/hexnan.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | NaN payload parsing helper. |
-| `libc/gdtoa/ldtoa.c` | `libc/upstream-openbsd/lib/libc/gdtoa/ldtoa.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/staged | Long-double output-conversion file staged for a future gdtoa-backed printf replacement. |
+| `libc/gdtoa/ldtoa.c` | `libc/upstream-openbsd/lib/libc/gdtoa/ldtoa.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/compiled | Long-double output-conversion source used by printf `L` modifier decimal conversions. |
 | `libc/gdtoa/misc.c` | `libc/upstream-openbsd/lib/libc/gdtoa/misc.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Bigint allocator, freelists, and cached power helpers. |
 | `libc/gdtoa/smisc.c` | `libc/upstream-openbsd/lib/libc/gdtoa/smisc.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Shared bigint/string helpers. |
 | `libc/gdtoa/strtod.c` | `libc/upstream-openbsd/lib/libc/gdtoa/strtod.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Public `strtod`. |
@@ -161,6 +161,7 @@ Bionic's `__strtorQ`; otherwise it remains a `strtod` wrapper until a native x87
 | `libc/gdtoa/ulp.c` | `libc/upstream-openbsd/lib/libc/gdtoa/ulp.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | ULP helper used during rounding. |
 | `libc/gdtoa/thread_private.h` | none | project-owned | new | Adapter from OpenBSD gdtoa lock hooks to local pthread mutexes. |
 | `libc/gdtoa/gdtoa_support.c` | `libc/upstream-openbsd/android/gdtoa_support.cpp` shape | project-owned | new | C99 slot-specific lock implementation for gdtoa `MULTIPLE_THREADS`. |
+| `libc/gdtoa/machine/ieee.h` | OpenBSD/BSD `<machine/ieee.h>` layout contract | project-owned | new | Little-endian IEEE layout adapter for double, x87 80-bit long double, and IEEE quad long double. |
 | `libc/src/atof.c` | `libc/bionic/atof.cpp` and `libc/bionic/strtold.cpp` policy shape | project-owned | adapted | Keeps `atof` wrapper and target-policy `strtold` dispatch while `strtod`/`strtof` come from gdtoa. |
 
 ### C99 Base Header Tranche

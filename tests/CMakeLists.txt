@@ -45,6 +45,9 @@ function(add_crt_test test_name source_file)
   target_include_directories(${test_name} PRIVATE
     "${CMAKE_SOURCE_DIR}/libc/include"
   )
+  if(ARGN)
+    target_link_libraries(${test_name} PRIVATE ${ARGN})
+  endif()
   target_link_libraries(${test_name} PRIVATE crt_compiler_rt_builtins)
   target_link_options(${test_name} PRIVATE
     -nostdlib
@@ -202,7 +205,8 @@ set_tests_properties(cxx_frontend_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "cxx_frontend_test: ok"
 )
 
-add_crt_test(printf_test printf_test.c)
+add_crt_test(printf_test printf_test.c m)
+add_dependencies(printf_test m)
 set_tests_properties(printf_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "printf_test: ok 7 ff"
 )
@@ -218,8 +222,7 @@ set_tests_properties(mman_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "mman_test: ok"
 )
 
-add_crt_test(math_test math_test.c)
-target_link_libraries(math_test PRIVATE m)
+add_crt_test(math_test math_test.c m)
 add_dependencies(math_test m)
 set_tests_properties(math_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "math_test: ok"

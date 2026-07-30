@@ -433,7 +433,7 @@
       "source_kind": "bionic-main",
       "upstream_ref": "731631f300090436d7f5df80d50b6275c8c60a93",
       "upstream_path": "libm/upstream-freebsd/lib/msun/src/k_sin.c",
-      "status": "imported",
+      "status": "imported/compiled",
       "review_class": "main_current",
       "license_family": "FreeBSD/msun permissive",
       "reason": "Current Bionic FreeBSD/msun trig kernel.",
@@ -445,7 +445,7 @@
       "source_kind": "bionic-main",
       "upstream_ref": "731631f300090436d7f5df80d50b6275c8c60a93",
       "upstream_path": "libm/upstream-freebsd/lib/msun/src/k_cos.c",
-      "status": "imported",
+      "status": "imported/compiled",
       "review_class": "main_current",
       "license_family": "FreeBSD/msun permissive",
       "reason": "Current Bionic FreeBSD/msun trig kernel.",
@@ -457,7 +457,7 @@
       "source_kind": "bionic-main",
       "upstream_ref": "731631f300090436d7f5df80d50b6275c8c60a93",
       "upstream_path": "libm/upstream-freebsd/lib/msun/src/k_tan.c",
-      "status": "imported",
+      "status": "imported/compiled",
       "review_class": "main_current",
       "license_family": "FreeBSD/msun permissive",
       "reason": "Current Bionic FreeBSD/msun trig kernel.",
@@ -1261,11 +1261,11 @@
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
       "upstream_path": "libc/upstream-openbsd/lib/libc/gdtoa/dmisc.c",
-      "status": "imported",
+      "status": "imported/compiled",
       "review_class": "main_current",
       "license_family": "Lucent permissive via OpenBSD/Bionic",
-      "reason": "Current Bionic/OpenBSD gdtoa output-conversion source is staged with the tranche but not yet compiled because printf floating formatting is deferred.",
-      "next_action": "Compile and adapt with dtoa-backed printf %f/%e/%g support after OpenBSD machine layout dependencies are normalized."
+      "reason": "Current Bionic/OpenBSD gdtoa output-conversion support source is compiled for the active printf %f/%e/%g decimal output path.",
+      "next_action": "Keep aligned with Bionic main when refreshing the gdtoa tranche."
     },
     {
       "local": "libc/gdtoa/dtoa.c",
@@ -1273,11 +1273,11 @@
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
       "upstream_path": "libc/upstream-openbsd/lib/libc/gdtoa/dtoa.c",
-      "status": "imported",
+      "status": "imported/compiled",
       "review_class": "main_current",
       "license_family": "Lucent permissive via OpenBSD/Bionic",
-      "reason": "Current Bionic/OpenBSD gdtoa output-conversion source is staged with the tranche but not yet compiled because printf floating formatting is deferred.",
-      "next_action": "Compile and adapt with dtoa-backed printf %f/%e/%g support after OpenBSD machine layout dependencies are normalized."
+      "reason": "Current Bionic/OpenBSD __dtoa decimal output source is compiled for the active printf %f/%e/%g path.",
+      "next_action": "Keep aligned with Bionic main when refreshing the gdtoa tranche."
     },
     {
       "local": "libc/gdtoa/gdtoa.c",
@@ -1285,11 +1285,11 @@
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
       "upstream_path": "libc/upstream-openbsd/lib/libc/gdtoa/gdtoa.c",
-      "status": "imported",
+      "status": "imported/compiled",
       "review_class": "main_current",
       "license_family": "Lucent permissive via OpenBSD/Bionic",
-      "reason": "Current Bionic/OpenBSD gdtoa output-conversion source is staged with the tranche but not yet compiled because printf floating formatting is deferred.",
-      "next_action": "Compile and adapt with dtoa-backed printf %f/%e/%g support after OpenBSD machine layout dependencies are normalized."
+      "reason": "Current Bionic/OpenBSD general output-conversion engine is compiled for __ldtoa-backed printf long-double decimal output.",
+      "next_action": "Keep aligned with Bionic main when refreshing the gdtoa tranche."
     },
     {
       "local": "libc/gdtoa/hdtoa.c",
@@ -1297,11 +1297,11 @@
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
       "upstream_path": "libc/upstream-openbsd/lib/libc/gdtoa/hdtoa.c",
-      "status": "imported",
+      "status": "imported/compiled",
       "review_class": "main_current",
       "license_family": "Lucent permissive via OpenBSD/Bionic",
-      "reason": "Current Bionic/OpenBSD gdtoa output-conversion source is staged with the tranche but not yet compiled because printf floating formatting is deferred.",
-      "next_action": "Compile and adapt with dtoa-backed printf %f/%e/%g support after OpenBSD machine layout dependencies are normalized."
+      "reason": "Current Bionic/OpenBSD hex output-conversion source is compiled for printf %a/%A output.",
+      "next_action": "Keep aligned with Bionic main when refreshing the gdtoa tranche."
     },
     {
       "local": "libc/gdtoa/ldtoa.c",
@@ -1309,11 +1309,23 @@
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
       "upstream_path": "libc/upstream-openbsd/lib/libc/gdtoa/ldtoa.c",
-      "status": "imported",
+      "status": "imported/compiled",
       "review_class": "main_current",
       "license_family": "Lucent permissive via OpenBSD/Bionic",
-      "reason": "Current Bionic/OpenBSD gdtoa output-conversion source is staged with the tranche but not yet compiled because printf floating formatting is deferred.",
-      "next_action": "Compile and adapt with dtoa-backed printf %f/%e/%g support after OpenBSD machine layout dependencies are normalized."
+      "reason": "Current Bionic/OpenBSD long-double output-conversion source is compiled for printf L modifier decimal output.",
+      "next_action": "Keep aligned with Bionic main when refreshing the gdtoa tranche."
+    },
+    {
+      "local": "libc/gdtoa/machine/ieee.h",
+      "component": "libc",
+      "source_kind": "project-owned",
+      "upstream_ref": "project-owned",
+      "upstream_path": "OpenBSD/BSD <machine/ieee.h> layout contract",
+      "status": "new",
+      "review_class": "project_owned",
+      "license_family": "project",
+      "reason": "Little-endian IEEE layout adapter required by imported OpenBSD hdtoa/ldtoa sources for double, x87 80-bit long double, and IEEE quad long double targets.",
+      "next_action": "Revisit if big-endian or non-IEEE targets are introduced."
     }
   ]
 }

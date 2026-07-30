@@ -49,3 +49,34 @@ void __crt_gdtoa_mutex_lock(void* lock_slot) {
 void __crt_gdtoa_mutex_unlock(void* lock_slot) {
   pthread_mutex_unlock(gdtoa_lock_for_slot(lock_slot));
 }
+
+int __crt_gdtoa_flt_rounds(void) {
+#if defined(__aarch64__) || defined(__arm64__) || defined(_M_ARM64)
+  unsigned long long fpcr;
+  __asm__ volatile("mrs %0, fpcr" : "=r"(fpcr));
+  switch (fpcr & 0x00c00000ULL) {
+    case 0x00400000ULL:
+      return 2;
+    case 0x00800000ULL:
+      return 3;
+    case 0x00c00000ULL:
+      return 0;
+    default:
+      return 1;
+  }
+#elif defined(__x86_64__) || defined(_M_X64)
+  unsigned int mxcsr = __builtin_ia32_stmxcsr();
+  switch (mxcsr & 0x00006000U) {
+    case 0x00002000U:
+      return 3;
+    case 0x00004000U:
+      return 2;
+    case 0x00006000U:
+      return 0;
+    default:
+      return 1;
+  }
+#else
+  return 1;
+#endif
+}

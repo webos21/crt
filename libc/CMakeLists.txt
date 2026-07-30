@@ -66,11 +66,16 @@ set(CRT_LIBC_SOURCES
 )
 
 set(CRT_GDTOA_SOURCES
+  gdtoa/dmisc.c
+  gdtoa/dtoa.c
+  gdtoa/gdtoa.c
   gdtoa/gdtoa_support.c
   gdtoa/gethex.c
   gdtoa/gmisc.c
   gdtoa/hd_init.c
+  gdtoa/hdtoa.c
   gdtoa/hexnan.c
+  gdtoa/ldtoa.c
   gdtoa/misc.c
   gdtoa/smisc.c
   gdtoa/strtod.c

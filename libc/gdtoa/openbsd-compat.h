@@ -48,6 +48,12 @@ extern const char* __progname;
 #define __LIBC_HIDDEN__ __attribute__((visibility("hidden")))
 #endif
 
+int __crt_gdtoa_flt_rounds(void);
+#define CRT_DYNAMIC_FLT_ROUNDS
+#define Honor_FLT_ROUNDS
+#define Trust_FLT_ROUNDS
+#define Flt_Rounds __crt_gdtoa_flt_rounds()
+
 #ifndef memset_explicit
 #define explicit_bzero(p, s) memset((p), 0, (s))
 #endif

@@ -3,7 +3,7 @@
 
 static const fenv_t crt_default_fenv = {0, FE_TONEAREST, 0, 0, 0, 0, 0};
 
-#if defined(__aarch64__) || defined(_M_ARM64)
+#if defined(__aarch64__) || defined(__arm64__) || defined(_M_ARM64)
 #define CRT_FENV_AARCH64 1
 #elif defined(__x86_64__) || defined(_M_X64)
 #define CRT_FENV_X86_64 1

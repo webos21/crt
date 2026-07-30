@@ -1001,14 +1001,22 @@ configure-style probes and basic library tests:
 - signed zero handling for floating-point conversions;
 - hexadecimal floating-point `%a` and `%A`.
 
-Floating-point output is now stronger than the original compatibility formatter:
-`%e`/`%E` use scientific notation with signed, padded exponents, `%g`/`%G`
-select fixed or exponential form and trim trailing zeroes unless `#` is present,
-and `%a`/`%A` emit C99 hexadecimal floating notation. This is still a
-project-owned interim formatter rather than a direct Bionic/OpenBSD
-gdtoa-backed `vfprintf` import. It uses the C/POSIX decimal point, clamps very
-large precision requests, and does not yet honor fenv rounding modes, positional
-arguments, locale grouping, or every exact Bionic edge case.
+Floating-point output now uses imported Bionic/OpenBSD gdtoa output conversion:
+`__dtoa` for double `%f`/`%F`, `%e`/`%E`, and `%g`/`%G`; `__ldtoa` for `L`
+modifier long-double decimal output; and `__hdtoa`/`__hldtoa` for `%a`/`%A`
+hexadecimal output. The gdtoa compile path is built with a local `Flt_Rounds`
+adapter so directed fenv rounding modes are visible without making `libc`
+depend on `libm`.
+
+The formatter also supports simple POSIX positional arguments such as `%2$s`,
+`%1$d`, `*n$` width, and `.*n$` precision. Locale handling is wired through
+`localeconv()->decimal_point`, and the `'` grouping flag now routes base-10
+integer and fixed decimal integer parts through a grouping helper. Because the
+current locale implementation only supports `C`/`POSIX`, grouping currently has
+no visible separator; when non-C locale tables are introduced, the formatter
+will use their `thousands_sep` and `grouping` fields. A full Bionic/BSD
+`vfprintf` import, locale/xlocale tables, and every exact Bionic edge case
+remain deferred.
 
 The stdio surface now also exposes:
 

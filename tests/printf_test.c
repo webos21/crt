@@ -1,7 +1,8 @@
+#include <fenv.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include <math.h>
 
 static int fail(const char* message) {
   fprintf(stderr, "printf_test: %s\n", message);
@@ -54,7 +55,7 @@ int main(void) {
     return fail("float m");
   }
   if (snprintf(buffer, sizeof(buffer), "|%.0f|%.2f|%+.1f|", 2.5, -0.0, 3.0) != 14 ||
-      strcmp(buffer, "|3|-0.00|+3.0|") != 0) {
+      strcmp(buffer, "|2|-0.00|+3.0|") != 0) {
     return fail("float fixed");
   }
   if (snprintf(buffer, sizeof(buffer), "|%.2e|%.1E|%10.2e|", 1234.0, 0.01234, -12.5) != 29 ||
@@ -72,6 +73,39 @@ int main(void) {
   if (snprintf(buffer, sizeof(buffer), "|%f|%F|%e|", INFINITY, -INFINITY, NAN) != 14 ||
       strcmp(buffer, "|inf|-INF|nan|") != 0) {
     return fail("float special");
+  }
+  if (snprintf(buffer, sizeof(buffer), "|%.2Lf|%.2Le|%.1LA|", (long double)3.125,
+               (long double)1234.0, (long double)1.5) != 24 ||
+      strcmp(buffer, "|3.12|1.23e+03|0X1.8P+0|") != 0) {
+    return fail("long double formatting");
+  }
+  if (snprintf(buffer, sizeof(buffer), "%2$s:%1$d:%3$.*4$f", 7, "pos", 3.125, 2) != 10 ||
+      strcmp(buffer, "pos:7:3.12") != 0) {
+    return fail("positional args");
+  }
+  if (snprintf(buffer, sizeof(buffer), "|%3$*2$.*1$f|", 1, 8, 2.25) != 10 ||
+      strcmp(buffer, "|     2.2|") != 0) {
+    return fail("positional width precision");
+  }
+  count = 0;
+  if (snprintf(buffer, sizeof(buffer), "%2$s%1$n", &count, "abc") != 3 ||
+      strcmp(buffer, "abc") != 0 || count != 3) {
+    return fail("positional n");
+  }
+  if (fesetround(FE_DOWNWARD) != 0) {
+    return fail("fesetround downward");
+  }
+  if (snprintf(buffer, sizeof(buffer), "%.0f", 2.9) != 1 || strcmp(buffer, "2") != 0) {
+    return fail("float downward rounding");
+  }
+  if (fesetround(FE_UPWARD) != 0) {
+    return fail("fesetround upward");
+  }
+  if (snprintf(buffer, sizeof(buffer), "%.0f", 2.1) != 1 || strcmp(buffer, "3") != 0) {
+    return fail("float upward rounding");
+  }
+  if (fesetround(FE_TONEAREST) != 0) {
+    return fail("fesetround nearest");
   }
 
   printf("printf_test: %s %d %x\n", "ok", 7, 255);

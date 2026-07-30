@@ -59,7 +59,12 @@
 #define LDBL_HAS_SUBNORM __LDBL_HAS_DENORM__
 #endif
 
+#if defined(CRT_DYNAMIC_FLT_ROUNDS)
+int __crt_gdtoa_flt_rounds(void);
+#define FLT_ROUNDS __crt_gdtoa_flt_rounds()
+#else
 #define FLT_ROUNDS 1
+#endif
 #if defined(__FLT_EVAL_METHOD__)
 #define FLT_EVAL_METHOD __FLT_EVAL_METHOD__
 #else
