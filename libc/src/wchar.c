@@ -1093,6 +1093,15 @@ static char* wide_format_to_narrow_alloc(const wchar_t* format, int wide_io) {
         }
       }
     }
+    if (wide_io && format[i] == L'm' &&
+        (format[i + 1] == L's' || format[i + 1] == L'c' || format[i + 1] == L'[')) {
+      out[pos++] = 'm';
+      ++i;
+    } else if (wide_io && format[i] == L'a' &&
+               (format[i + 1] == L's' || format[i + 1] == L'c' || format[i + 1] == L'[')) {
+      out[pos++] = 'a';
+      ++i;
+    }
     if (format[i] == L'h' || format[i] == L'l' || format[i] == L'j' ||
         format[i] == L'z' || format[i] == L't') {
       out[pos++] = (char)format[i++];

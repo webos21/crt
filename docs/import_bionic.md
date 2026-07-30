@@ -979,8 +979,21 @@ replacement.
 
 The scanner core is shared by `vsscanf` and `vfscanf`; `scanf`, `fscanf`,
 `vscanf`, and `sscanf` are wrappers. It supports common integer conversions,
-strings, characters, scansets, `%n`, and basic floating input via the gdtoa
-`strtod` path already present in the CRT.
+strings, characters, scansets, `%n`, and floating input through the imported
+Bionic/OpenBSD gdtoa `strtod`/`strtof`/`strtold` path. C99 hexadecimal float
+input (`%a`/`%A`) is therefore handled by gdtoa rather than by a project-owned
+parser. `L` length floating conversions now assign `long double`, and string,
+character, and scanset conversions support POSIX `%m` allocation plus the
+GNU/BSD compatibility spelling where `%as`, `%ac`, and `%a[` mean allocation
+instead of C99 hex-float conversion.
+
+Wide scanf entry points still share the byte scanner after converting wide
+format/input text through the CRT UTF-8 conversion layer. `%ls`, `%lc`, and
+`%l[` store `wchar_t` output, and `%m` allocation works for wide destinations
+when the converted format selects the wide length modifier. This remains a
+compatibility implementation rather than a full direct Bionic/BSD `vfscanf`
+import; positional scanf, full locale/xlocale behavior, and many pathological
+matching edge cases are still deferred.
 
 ## Formatting, Stdio, File/Path, and Libc Surface Tranche
 

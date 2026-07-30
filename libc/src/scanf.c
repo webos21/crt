@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <errno.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -12,6 +13,7 @@ enum scan_length {
   SCAN_LENGTH_HH,
   SCAN_LENGTH_H,
   SCAN_LENGTH_L,
+  SCAN_LENGTH_CAPITAL_L,
   SCAN_LENGTH_LL,
   SCAN_LENGTH_Z,
   SCAN_LENGTH_J,
@@ -117,6 +119,10 @@ static enum scan_length parse_length(const char** format) {
   if (**format == 'l') {
     ++*format;
     return SCAN_LENGTH_L;
+  }
+  if (**format == 'L') {
+    ++*format;
+    return SCAN_LENGTH_CAPITAL_L;
   }
   if (**format == 'z') {
     ++*format;
@@ -244,35 +250,61 @@ static int scan_float(struct scan_source* source, int width, enum scan_length le
   char* end = 0;
   int used = read_token(source, token, sizeof(token), width, 1);
   int extra;
-  double value;
 
   if (used == 0) {
     return -1;
   }
-  value = strtod(token, &end);
-  if (end == token) {
-    return -1;
-  }
-  extra = used - (int)(end - token);
-  while (extra-- > 0) {
-    source_ungetc(source, token[--used]);
-  }
-  if (!suppress) {
-    if (length == SCAN_LENGTH_L) {
-      *va_arg(*ap, double*) = value;
-    } else {
-      *va_arg(*ap, float*) = (float)value;
+  if (length == SCAN_LENGTH_CAPITAL_L) {
+    long double value = strtold(token, &end);
+
+    if (end == token) {
+      return -1;
     }
-    return 1;
+    extra = used - (int)(end - token);
+    while (extra-- > 0) {
+      source_ungetc(source, token[--used]);
+    }
+    if (!suppress) {
+      *va_arg(*ap, long double*) = value;
+      return 1;
+    }
+  } else {
+    double value = strtod(token, &end);
+
+    if (end == token) {
+      return -1;
+    }
+    extra = used - (int)(end - token);
+    while (extra-- > 0) {
+      source_ungetc(source, token[--used]);
+    }
+    if (!suppress) {
+      if (length == SCAN_LENGTH_L) {
+      *va_arg(*ap, double*) = value;
+      } else {
+        *va_arg(*ap, float*) = (float)value;
+      }
+      return 1;
+    }
   }
   return 0;
 }
 
-static int scan_string(struct scan_source* source, int width, int suppress, va_list* ap) {
-  char* out = suppress ? 0 : va_arg(*ap, char*);
+static int scan_string(struct scan_source* source, int width, int suppress, int allocate, va_list* ap) {
+  char stack_buffer[256];
+  char* heap_buffer = 0;
+  char* out = 0;
+  size_t capacity = sizeof(stack_buffer);
   int count = 0;
   int ch;
 
+  if (!suppress) {
+    if (allocate) {
+      out = stack_buffer;
+    } else {
+      out = va_arg(*ap, char*);
+    }
+  }
   source_skip_space(source);
   while (width == 0 || count < width) {
     ch = source_getc(source);
@@ -284,25 +316,65 @@ static int scan_string(struct scan_source* source, int width, int suppress, va_l
       break;
     }
     if (!suppress) {
+      if (allocate && (size_t)count + 2 > capacity) {
+        char* grown;
+        capacity *= 2;
+        grown = heap_buffer == 0 ? (char*)malloc(capacity) : (char*)realloc(heap_buffer, capacity);
+        if (grown == 0) {
+          free(heap_buffer);
+          errno = ENOMEM;
+          return -1;
+        }
+        if (heap_buffer == 0) {
+          memcpy(grown, stack_buffer, (size_t)count);
+        }
+        heap_buffer = grown;
+        out = heap_buffer;
+      }
       out[count] = (char)ch;
     }
     ++count;
   }
   if (count == 0) {
+    free(heap_buffer);
     return -1;
   }
   if (!suppress) {
+    char** allocated_out;
+
     out[count] = 0;
+    if (allocate) {
+      allocated_out = va_arg(*ap, char**);
+      if (heap_buffer == 0) {
+        heap_buffer = (char*)malloc((size_t)count + 1);
+        if (heap_buffer == 0) {
+          errno = ENOMEM;
+          return -1;
+        }
+        memcpy(heap_buffer, stack_buffer, (size_t)count + 1);
+      }
+      *allocated_out = heap_buffer;
+    }
     return 1;
   }
   return 0;
 }
 
-static int scan_wide_string(struct scan_source* source, int width, int suppress, va_list* ap) {
-  wchar_t* out = suppress ? 0 : va_arg(*ap, wchar_t*);
+static int scan_wide_string(struct scan_source* source, int width, int suppress, int allocate, va_list* ap) {
+  wchar_t stack_buffer[128];
+  wchar_t* heap_buffer = 0;
+  wchar_t* out = 0;
+  size_t capacity = sizeof(stack_buffer) / sizeof(stack_buffer[0]);
   int count = 0;
   wint_t wc;
 
+  if (!suppress) {
+    if (allocate) {
+      out = stack_buffer;
+    } else {
+      out = va_arg(*ap, wchar_t*);
+    }
+  }
   source_skip_space(source);
   while (width == 0 || count < width) {
     wc = source_getwc_utf8(source);
@@ -314,65 +386,162 @@ static int scan_wide_string(struct scan_source* source, int width, int suppress,
       break;
     }
     if (!suppress) {
+      if (allocate && (size_t)count + 2 > capacity) {
+        wchar_t* grown;
+        capacity *= 2;
+        grown = heap_buffer == 0 ? (wchar_t*)malloc(capacity * sizeof(wchar_t)) :
+            (wchar_t*)realloc(heap_buffer, capacity * sizeof(wchar_t));
+        if (grown == 0) {
+          free(heap_buffer);
+          errno = ENOMEM;
+          return -1;
+        }
+        if (heap_buffer == 0) {
+          memcpy(grown, stack_buffer, (size_t)count * sizeof(wchar_t));
+        }
+        heap_buffer = grown;
+        out = heap_buffer;
+      }
       out[count] = (wchar_t)wc;
     }
     ++count;
   }
   if (count == 0) {
+    free(heap_buffer);
     return -1;
   }
   if (!suppress) {
+    wchar_t** allocated_out;
+
     out[count] = 0;
+    if (allocate) {
+      allocated_out = va_arg(*ap, wchar_t**);
+      if (heap_buffer == 0) {
+        heap_buffer = (wchar_t*)malloc(((size_t)count + 1) * sizeof(wchar_t));
+        if (heap_buffer == 0) {
+          errno = ENOMEM;
+          return -1;
+        }
+        memcpy(heap_buffer, stack_buffer, ((size_t)count + 1) * sizeof(wchar_t));
+      }
+      *allocated_out = heap_buffer;
+    }
     return 1;
   }
   return 0;
 }
 
-static int scan_chars(struct scan_source* source, int width, int suppress, va_list* ap) {
-  char* out = suppress ? 0 : va_arg(*ap, char*);
+static int scan_chars(struct scan_source* source, int width, int suppress, int allocate, va_list* ap) {
+  char stack_buffer[256];
+  char* heap_buffer = 0;
+  char* out = 0;
   int count;
   int ch;
 
   if (width == 0) {
     width = 1;
   }
+  if (!suppress) {
+    if (allocate) {
+      out = width < (int)sizeof(stack_buffer) ? stack_buffer : (char*)malloc((size_t)width + 1);
+      if (out == 0) {
+        errno = ENOMEM;
+        return -1;
+      }
+      if (out != stack_buffer) {
+        heap_buffer = out;
+      }
+    } else {
+      out = va_arg(*ap, char*);
+    }
+  }
   for (count = 0; count < width; ++count) {
     ch = source_getc(source);
     if (ch == EOF) {
+      free(heap_buffer);
       return count == 0 ? -1 : 0;
     }
     if (!suppress) {
       out[count] = (char)ch;
     }
   }
+  if (!suppress && allocate) {
+    char** allocated_out = va_arg(*ap, char**);
+
+    out[count] = 0;
+    if (heap_buffer == 0) {
+      heap_buffer = (char*)malloc((size_t)count + 1);
+      if (heap_buffer == 0) {
+        errno = ENOMEM;
+        return -1;
+      }
+      memcpy(heap_buffer, stack_buffer, (size_t)count + 1);
+    }
+    *allocated_out = heap_buffer;
+  }
   return suppress ? 0 : 1;
 }
 
-static int scan_wide_chars(struct scan_source* source, int width, int suppress, va_list* ap) {
-  wchar_t* out = suppress ? 0 : va_arg(*ap, wchar_t*);
+static int scan_wide_chars(struct scan_source* source, int width, int suppress, int allocate, va_list* ap) {
+  wchar_t stack_buffer[128];
+  wchar_t* heap_buffer = 0;
+  wchar_t* out = 0;
   int count;
 
   if (width == 0) {
     width = 1;
   }
+  if (!suppress) {
+    if (allocate) {
+      out = width < (int)(sizeof(stack_buffer) / sizeof(stack_buffer[0])) ? stack_buffer :
+          (wchar_t*)malloc(((size_t)width + 1) * sizeof(wchar_t));
+      if (out == 0) {
+        errno = ENOMEM;
+        return -1;
+      }
+      if (out != stack_buffer) {
+        heap_buffer = out;
+      }
+    } else {
+      out = va_arg(*ap, wchar_t*);
+    }
+  }
   for (count = 0; count < width; ++count) {
     wint_t wc = source_getwc_utf8(source);
     if (wc == WEOF) {
+      free(heap_buffer);
       return count == 0 ? -1 : 0;
     }
     if (!suppress) {
       out[count] = (wchar_t)wc;
     }
   }
+  if (!suppress && allocate) {
+    wchar_t** allocated_out = va_arg(*ap, wchar_t**);
+
+    out[count] = 0;
+    if (heap_buffer == 0) {
+      heap_buffer = (wchar_t*)malloc(((size_t)count + 1) * sizeof(wchar_t));
+      if (heap_buffer == 0) {
+        errno = ENOMEM;
+        return -1;
+      }
+      memcpy(heap_buffer, stack_buffer, ((size_t)count + 1) * sizeof(wchar_t));
+    }
+    *allocated_out = heap_buffer;
+  }
   return suppress ? 0 : 1;
 }
 
-static int scan_set(struct scan_source* source, const char** format, int width, int suppress, va_list* ap) {
+static int scan_set(struct scan_source* source, const char** format, int width, int suppress, int allocate, va_list* ap) {
   int table[256] = {0};
   int invert = 0;
   int count = 0;
   int ch;
-  char* out = suppress ? 0 : va_arg(*ap, char*);
+  char stack_buffer[256];
+  char* heap_buffer = 0;
+  char* out = 0;
+  size_t capacity = sizeof(stack_buffer);
 
   if (**format == '^') {
     invert = 1;
@@ -390,6 +559,13 @@ static int scan_set(struct scan_source* source, const char** format, int width, 
     ++*format;
   }
 
+  if (!suppress) {
+    if (allocate) {
+      out = stack_buffer;
+    } else {
+      out = va_arg(*ap, char*);
+    }
+  }
   while (width == 0 || count < width) {
     ch = source_getc(source);
     if (ch == EOF) {
@@ -400,25 +576,58 @@ static int scan_set(struct scan_source* source, const char** format, int width, 
       break;
     }
     if (!suppress) {
+      if (allocate && (size_t)count + 2 > capacity) {
+        char* grown;
+        capacity *= 2;
+        grown = heap_buffer == 0 ? (char*)malloc(capacity) : (char*)realloc(heap_buffer, capacity);
+        if (grown == 0) {
+          free(heap_buffer);
+          errno = ENOMEM;
+          return -1;
+        }
+        if (heap_buffer == 0) {
+          memcpy(grown, stack_buffer, (size_t)count);
+        }
+        heap_buffer = grown;
+        out = heap_buffer;
+      }
       out[count] = (char)ch;
     }
     ++count;
   }
   if (count == 0) {
+    free(heap_buffer);
     return -1;
   }
   if (!suppress) {
+    char** allocated_out;
+
     out[count] = 0;
+    if (allocate) {
+      allocated_out = va_arg(*ap, char**);
+      if (heap_buffer == 0) {
+        heap_buffer = (char*)malloc((size_t)count + 1);
+        if (heap_buffer == 0) {
+          errno = ENOMEM;
+          return -1;
+        }
+        memcpy(heap_buffer, stack_buffer, (size_t)count + 1);
+      }
+      *allocated_out = heap_buffer;
+    }
     return 1;
   }
   return 0;
 }
 
-static int scan_wide_set(struct scan_source* source, const char** format, int width, int suppress, va_list* ap) {
+static int scan_wide_set(struct scan_source* source, const char** format, int width, int suppress, int allocate, va_list* ap) {
   int table[256] = {0};
   int invert = 0;
   int count = 0;
-  wchar_t* out = suppress ? 0 : va_arg(*ap, wchar_t*);
+  wchar_t stack_buffer[128];
+  wchar_t* heap_buffer = 0;
+  wchar_t* out = 0;
+  size_t capacity = sizeof(stack_buffer) / sizeof(stack_buffer[0]);
 
   if (**format == '^') {
     invert = 1;
@@ -436,6 +645,13 @@ static int scan_wide_set(struct scan_source* source, const char** format, int wi
     ++*format;
   }
 
+  if (!suppress) {
+    if (allocate) {
+      out = stack_buffer;
+    } else {
+      out = va_arg(*ap, wchar_t*);
+    }
+  }
   while (width == 0 || count < width) {
     wint_t wc = source_getwc_utf8(source);
 
@@ -449,15 +665,46 @@ static int scan_wide_set(struct scan_source* source, const char** format, int wi
       break;
     }
     if (!suppress) {
+      if (allocate && (size_t)count + 2 > capacity) {
+        wchar_t* grown;
+        capacity *= 2;
+        grown = heap_buffer == 0 ? (wchar_t*)malloc(capacity * sizeof(wchar_t)) :
+            (wchar_t*)realloc(heap_buffer, capacity * sizeof(wchar_t));
+        if (grown == 0) {
+          free(heap_buffer);
+          errno = ENOMEM;
+          return -1;
+        }
+        if (heap_buffer == 0) {
+          memcpy(grown, stack_buffer, (size_t)count * sizeof(wchar_t));
+        }
+        heap_buffer = grown;
+        out = heap_buffer;
+      }
       out[count] = (wchar_t)wc;
     }
     ++count;
   }
   if (count == 0) {
+    free(heap_buffer);
     return -1;
   }
   if (!suppress) {
+    wchar_t** allocated_out;
+
     out[count] = 0;
+    if (allocate) {
+      allocated_out = va_arg(*ap, wchar_t**);
+      if (heap_buffer == 0) {
+        heap_buffer = (wchar_t*)malloc(((size_t)count + 1) * sizeof(wchar_t));
+        if (heap_buffer == 0) {
+          errno = ENOMEM;
+          return -1;
+        }
+        memcpy(heap_buffer, stack_buffer, ((size_t)count + 1) * sizeof(wchar_t));
+      }
+      *allocated_out = heap_buffer;
+    }
     return 1;
   }
   return 0;
@@ -468,6 +715,7 @@ static int vscan_core(struct scan_source* source, const char* format, va_list ap
 
   while (*format != 0) {
     int suppress = 0;
+    int allocate = 0;
     int width = 0;
     enum scan_length length;
     int result = 0;
@@ -505,7 +753,23 @@ static int vscan_core(struct scan_source* source, const char* format, va_list ap
       suppress = 1;
       ++format;
     }
+    if (!suppress && *format == 'm') {
+      allocate = 1;
+      ++format;
+    } else if (!suppress && *format == 'a' &&
+               (format[1] == 's' || format[1] == 'c' || format[1] == '[')) {
+      allocate = 1;
+      ++format;
+    }
     width = parse_width(&format);
+    if (!suppress && *format == 'm') {
+      allocate = 1;
+      ++format;
+    } else if (!suppress && *format == 'a' &&
+               (format[1] == 's' || format[1] == 'c' || format[1] == '[')) {
+      allocate = 1;
+      ++format;
+    }
     length = parse_length(&format);
     spec = *format++;
 
@@ -524,21 +788,21 @@ static int vscan_core(struct scan_source* source, const char* format, va_list ap
       result = scan_float(source, width, length, suppress, &ap);
     } else if (spec == 's') {
       if (length == SCAN_LENGTH_L) {
-        result = scan_wide_string(source, width, suppress, &ap);
+        result = scan_wide_string(source, width, suppress, allocate, &ap);
       } else {
-        result = scan_string(source, width, suppress, &ap);
+        result = scan_string(source, width, suppress, allocate, &ap);
       }
     } else if (spec == 'c') {
       if (length == SCAN_LENGTH_L) {
-        result = scan_wide_chars(source, width, suppress, &ap);
+        result = scan_wide_chars(source, width, suppress, allocate, &ap);
       } else {
-        result = scan_chars(source, width, suppress, &ap);
+        result = scan_chars(source, width, suppress, allocate, &ap);
       }
     } else if (spec == '[') {
       if (length == SCAN_LENGTH_L) {
-        result = scan_wide_set(source, &format, width, suppress, &ap);
+        result = scan_wide_set(source, &format, width, suppress, allocate, &ap);
       } else {
-        result = scan_set(source, &format, width, suppress, &ap);
+        result = scan_set(source, &format, width, suppress, allocate, &ap);
       }
     } else if (spec == 'n') {
       if (!suppress) {

@@ -1,5 +1,7 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
 #include <unistd.h>
 
 static int fail(const char* message) {
@@ -22,6 +24,13 @@ int main(void) {
   char word[16];
   char set[16];
   char chars[4] = {0, 0, 0, 0};
+  char* allocated_word = 0;
+  char* allocated_set = 0;
+  char* allocated_chars = 0;
+  wchar_t wide_word[16];
+  wchar_t* allocated_wide = 0;
+  double d = 0.0;
+  long double ld = 0.0L;
 
   if (sscanf("1000-1fff rwxp 40 08:01 123 /tmp/a",
              "%lx-%lx %9s %lx %9s %ld %s%n",
@@ -42,6 +51,42 @@ int main(void) {
       strcmp(set, "abc") != 0 || memcmp(chars, "XYZ", 3) != 0) {
     return fail("sscanf mixed values");
   }
+
+  if (sscanf("0x1.8p2 0x1.2p3", "%la %La", &d, &ld) != 2 ||
+      d < 5.99 || d > 6.01 || ld < 8.99L || ld > 9.01L) {
+    return fail("hex float");
+  }
+
+  if (sscanf("alpha betaXYZ", "%ms %m[be] %3mc",
+             &allocated_word, &allocated_set, &allocated_chars) != 3 ||
+      strcmp(allocated_word, "alpha") != 0 || strcmp(allocated_set, "be") != 0 ||
+      strcmp(allocated_chars, "taX") != 0) {
+    free(allocated_word);
+    free(allocated_set);
+    free(allocated_chars);
+    return fail("allocation modifier");
+  }
+  free(allocated_word);
+  free(allocated_set);
+  free(allocated_chars);
+  allocated_word = 0;
+  if (sscanf("gamma", "%as", &allocated_word) != 1 || strcmp(allocated_word, "gamma") != 0) {
+    free(allocated_word);
+    return fail("gnu allocation modifier");
+  }
+  free(allocated_word);
+
+  memset(wide_word, 0, sizeof(wide_word));
+  if (sscanf("wide 0x1p1", "%ls %La", wide_word, &ld) != 2 ||
+      wcscmp(wide_word, L"wide") != 0 || ld < 1.99L || ld > 2.01L) {
+    return fail("wide and long double");
+  }
+  if (sscanf("delta", "%mls", &allocated_wide) != 1 ||
+      wcscmp(allocated_wide, L"delta") != 0) {
+    free(allocated_wide);
+    return fail("wide allocation modifier");
+  }
+  free(allocated_wide);
 
   stream = fopen("scanf_test.tmp", "w+");
   if (stream == 0) {

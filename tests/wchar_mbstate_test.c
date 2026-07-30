@@ -23,6 +23,7 @@ int main(void) {
   wchar_t line[16];
   wchar_t* end = 0;
   wchar_t* dyn = 0;
+  wchar_t* scan_alloc = 0;
   wchar_t* wmem = 0;
   wchar_t* save = 0;
   wchar_t* tok = 0;
@@ -34,6 +35,7 @@ int main(void) {
   FILE* stream;
   size_t result;
   int scanned = 0;
+  long double ld = 0.0L;
 
   if (sizeof(wchar_t) != 4 || (wchar_t)-1 >= (wchar_t)0) {
     return fail("wchar_t data model");
@@ -259,6 +261,14 @@ int main(void) {
   if (swscanf(L"abc123", L"%[abc]", buffer) != 1 || wcscmp(buffer, L"abc") != 0) {
     return fail("swscanf scanset");
   }
+  if (swscanf(L"0x1.8p1", L"%La", &ld) != 1 || ld < 2.99L || ld > 3.01L) {
+    return fail("swscanf hex float");
+  }
+  if (swscanf(L"alloc", L"%ms", &scan_alloc) != 1 || wcscmp(scan_alloc, L"alloc") != 0) {
+    free(scan_alloc);
+    return fail("swscanf allocation");
+  }
+  free(scan_alloc);
 
   printf("wchar_mbstate_test: ok\n");
   return 0;
