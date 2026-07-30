@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <math.h>
 
 static int fail(const char* message) {
   fprintf(stderr, "printf_test: %s\n", message);
@@ -51,6 +52,26 @@ int main(void) {
   result = snprintf(buffer, sizeof(buffer), "|%.2f|%m|", 3.14159);
   if (result < 0 || strncmp(buffer, "|3.14|", 6) != 0) {
     return fail("float m");
+  }
+  if (snprintf(buffer, sizeof(buffer), "|%.0f|%.2f|%+.1f|", 2.5, -0.0, 3.0) != 14 ||
+      strcmp(buffer, "|3|-0.00|+3.0|") != 0) {
+    return fail("float fixed");
+  }
+  if (snprintf(buffer, sizeof(buffer), "|%.2e|%.1E|%10.2e|", 1234.0, 0.01234, -12.5) != 29 ||
+      strcmp(buffer, "|1.23e+03|1.2E-02| -1.25e+01|") != 0) {
+    return fail("float exponent");
+  }
+  if (snprintf(buffer, sizeof(buffer), "|%.4g|%.3g|%#.3g|", 1234.0, 0.0001234, 12.0) != 20 ||
+      strcmp(buffer, "|1234|0.000123|12.0|") != 0) {
+    return fail("float general");
+  }
+  if (snprintf(buffer, sizeof(buffer), "|%a|%.2a|%A|", 1.5, 1.0, 0.25) != 27 ||
+      strcmp(buffer, "|0x1.8p+0|0x1.00p+0|0X1P-2|") != 0) {
+    return fail("float hex");
+  }
+  if (snprintf(buffer, sizeof(buffer), "|%f|%F|%e|", INFINITY, -INFINITY, NAN) != 14 ||
+      strcmp(buffer, "|inf|-INF|nan|") != 0) {
+    return fail("float special");
   }
 
   printf("printf_test: %s %d %x\n", "ok", 7, 255);

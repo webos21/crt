@@ -346,6 +346,48 @@ int __crt_stdio_set_orientation(FILE* stream, int mode) {
   return ext->_wcio.wcio_mode;
 }
 
+mbstate_t* __crt_stdio_get_mbstate_in(FILE* stream) {
+  struct __sfileext* ext = stream_ext(stream);
+
+  if (ext == 0) {
+    errno = EBADF;
+    return 0;
+  }
+  return &ext->_wcio.wcio_mbstate_in;
+}
+
+mbstate_t* __crt_stdio_get_mbstate_out(FILE* stream) {
+  struct __sfileext* ext = stream_ext(stream);
+
+  if (ext == 0) {
+    errno = EBADF;
+    return 0;
+  }
+  return &ext->_wcio.wcio_mbstate_out;
+}
+
+int __crt_stdio_pop_ungetwc(FILE* stream, wchar_t* wc) {
+  struct __sfileext* ext = stream_ext(stream);
+
+  if (ext == 0 || wc == 0 || ext->_wcio.wcio_ungetwc_inbuf == 0) {
+    return 0;
+  }
+  *wc = ext->_wcio.wcio_ungetwc_buf[--ext->_wcio.wcio_ungetwc_inbuf];
+  clear_stream_eof(stream);
+  return 1;
+}
+
+int __crt_stdio_push_ungetwc(FILE* stream, wchar_t wc) {
+  struct __sfileext* ext = stream_ext(stream);
+
+  if (ext == 0 || ext->_wcio.wcio_ungetwc_inbuf >= WCIO_UNGETWC_BUFSIZE) {
+    return -1;
+  }
+  ext->_wcio.wcio_ungetwc_buf[ext->_wcio.wcio_ungetwc_inbuf++] = wc;
+  clear_stream_eof(stream);
+  return 0;
+}
+
 static int fd_cookie_close(void* opaque) {
   struct crt_stdio_cookie* cookie = (struct crt_stdio_cookie*)opaque;
 

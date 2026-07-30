@@ -289,14 +289,30 @@ current Bionic `wchar.h` and adds:
 - `fwscanf`, `vfwscanf`, `wscanf`, and `vwscanf`
 - `swscanf` and `vswscanf`
 
-The implementation is still a bootstrap compatibility layer rather than a
-direct import of Bionic/BSD wide stdio internals. `FILE` orientation is stored in
-the Bionic-shaped `__sfileext` wide I/O state and wide stream input/output is
-encoded as UTF-8 through the existing byte stdio engine. Wide formatting and
-scanning currently route through the project's narrow `printf`/`scanf` cores
-after converting wide format strings. This keeps the Bionic-shaped API surface
+The second wide-character tranche expands the surface toward current Bionic's
+BSD-derived `wchar.h`:
+
+- bounded conversion: `mbrlen`, `mbsnrtowcs`, and `wcsnrtombs`
+- BSD/GNU string helpers: `wcpcpy`, `wcpncpy`, `wcsncat`, `wcspbrk`,
+  `wcscspn`, `wcsspn`, `wcslcpy`, `wcslcat`, `wcsdup`, and `wmempcpy`
+- tokenizing and C-locale comparison: `wcstok`, `wcscasecmp`,
+  `wcsncasecmp`, `wcscoll`, and `wcsxfrm`
+- numeric conversion wrappers: `wcstod`, `wcstof`, `wcstold`, `wcstol`,
+  `wcstoll`, `wcstoul`, and `wcstoull`
+- display width bootstrap: `wcwidth` and `wcswidth`
+- `open_wmemstream`
+
+The implementation is still a compatibility layer rather than a direct import
+of Bionic/BSD wide stdio internals. `FILE` orientation, per-stream input/output
+`mbstate_t`, and the first wide unget slot are stored in the Bionic-shaped
+`__sfileext` wide I/O state. Wide stream input/output is encoded as UTF-8
+through the existing byte stdio engine, while `open_wmemstream` keeps a native
+`wchar_t` memory buffer synchronized like BSD/Bionic memory streams. Wide
+formatting and scanning currently route through the project's narrow
+`printf`/`scanf` cores after converting wide format strings; `%ls`, `%lc`, and
+ASCII `%l[...]` are supported. This keeps the Bionic-shaped API surface
 available for porting tests while deferring a fuller Bionic/BSD formatter,
-scanner, locale, and persistent multibyte stream-state import.
+scanner, locale/xlocale, Unicode width, and complete scanset import.
 
 ## Libm Bootstrap Tranche
 
@@ -980,11 +996,19 @@ configure-style probes and basic library tests:
 - dynamic `*` width and precision;
 - `hh`, `h`, `j`, and `t` length modifiers;
 - `%n` and `%m`;
-- basic `%f`/`%e`/`%g` floating-point output.
+- finite `%f`, `%F`, `%e`, `%E`, `%g`, and `%G` floating-point output;
+- NaN/Inf spelling for floating-point conversions;
+- signed zero handling for floating-point conversions;
+- hexadecimal floating-point `%a` and `%A`.
 
-Full gdtoa-backed floating-point formatting, positional arguments, locale
-grouping, wide-character formatting/scanning, and exact Bionic edge-case
-behavior remain deferred.
+Floating-point output is now stronger than the original compatibility formatter:
+`%e`/`%E` use scientific notation with signed, padded exponents, `%g`/`%G`
+select fixed or exponential form and trim trailing zeroes unless `#` is present,
+and `%a`/`%A` emit C99 hexadecimal floating notation. This is still a
+project-owned interim formatter rather than a direct Bionic/OpenBSD
+gdtoa-backed `vfprintf` import. It uses the C/POSIX decimal point, clamps very
+large precision requests, and does not yet honor fenv rounding modes, positional
+arguments, locale grouping, or every exact Bionic edge case.
 
 The stdio surface now also exposes:
 

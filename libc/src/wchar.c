@@ -155,8 +155,9 @@ size_t wcrtomb(char* s, wchar_t wc, mbstate_t* ps) {
   return 4;
 }
 
-size_t mbsrtowcs(wchar_t* dst, const char** src, size_t len, mbstate_t* ps) {
+size_t mbsnrtowcs(wchar_t* dst, const char** src, size_t src_len, size_t dst_len, mbstate_t* ps) {
   const char* in;
+  const char* end;
   size_t count = 0;
   mbstate_t local_state = {0, 0, 0};
   mbstate_t* state;
@@ -166,15 +167,17 @@ size_t mbsrtowcs(wchar_t* dst, const char** src, size_t len, mbstate_t* ps) {
     return (size_t)-1;
   }
   in = *src;
+  end = src_len == (size_t)-1 ? 0 : in + src_len;
   state = ps != 0 ? ps : &local_state;
-  while (*in != '\0') {
+  while ((end == 0 || in < end) && *in != '\0') {
     wchar_t wc;
-    size_t consumed = mbrtowc(&wc, in, strlen(in), state);
+    size_t available = end == 0 ? strlen(in) : (size_t)(end - in);
+    size_t consumed = mbrtowc(&wc, in, available, state);
     if (consumed == (size_t)-1 || consumed == (size_t)-2) {
       return (size_t)-1;
     }
     if (dst != 0) {
-      if (count == len) {
+      if (count == dst_len) {
         *src = in;
         return count;
       }
@@ -184,7 +187,7 @@ size_t mbsrtowcs(wchar_t* dst, const char** src, size_t len, mbstate_t* ps) {
     in += consumed;
   }
   if (dst != 0) {
-    if (count < len) {
+    if ((end == 0 || in < end) && *in == 0 && count < dst_len) {
       dst[count] = 0;
       *src = 0;
     } else {
@@ -194,9 +197,18 @@ size_t mbsrtowcs(wchar_t* dst, const char** src, size_t len, mbstate_t* ps) {
   return count;
 }
 
-size_t wcsrtombs(char* dst, const wchar_t** src, size_t len, mbstate_t* ps) {
+size_t mbsrtowcs(wchar_t* dst, const char** src, size_t len, mbstate_t* ps) {
+  return mbsnrtowcs(dst, src, (size_t)-1, len, ps);
+}
+
+size_t mbrlen(const char* s, size_t n, mbstate_t* ps) {
+  return mbrtowc(0, s, n, ps);
+}
+
+size_t wcsnrtombs(char* dst, const wchar_t** src, size_t src_len, size_t dst_len, mbstate_t* ps) {
   const wchar_t* in;
   size_t count = 0;
+  size_t converted = 0;
   char buffer[4];
   (void)ps;
 
@@ -205,14 +217,14 @@ size_t wcsrtombs(char* dst, const wchar_t** src, size_t len, mbstate_t* ps) {
     return (size_t)-1;
   }
   in = *src;
-  while (*in != 0) {
+  while (converted < src_len && *in != 0) {
     size_t produced = wcrtomb(buffer, *in, &internal_wcrtomb_state);
     size_t i;
     if (produced == (size_t)-1) {
       return (size_t)-1;
     }
     if (dst != 0) {
-      if (count + produced > len) {
+      if (count + produced > dst_len) {
         *src = in;
         return count;
       }
@@ -222,9 +234,10 @@ size_t wcsrtombs(char* dst, const wchar_t** src, size_t len, mbstate_t* ps) {
     }
     count += produced;
     ++in;
+    ++converted;
   }
   if (dst != 0) {
-    if (count < len) {
+    if (converted < src_len && *in == 0 && count < dst_len) {
       dst[count] = '\0';
       *src = 0;
     } else {
@@ -232,6 +245,10 @@ size_t wcsrtombs(char* dst, const wchar_t** src, size_t len, mbstate_t* ps) {
     }
   }
   return count;
+}
+
+size_t wcsrtombs(char* dst, const wchar_t** src, size_t len, mbstate_t* ps) {
+  return wcsnrtombs(dst, src, (size_t)-1, len, ps);
 }
 
 size_t mbstowcs(wchar_t* dst, const char* src, size_t len) {
@@ -301,6 +318,10 @@ size_t wcsnlen(const wchar_t* s, size_t maxlen) {
   return i;
 }
 
+static int wide_ascii_tolower(wchar_t wc) {
+  return wc >= L'A' && wc <= L'Z' ? (int)(wc - L'A' + L'a') : (int)wc;
+}
+
 int wcscmp(const wchar_t* s1, const wchar_t* s2) {
   while (*s1 != 0 && *s1 == *s2) {
     ++s1;
@@ -319,11 +340,40 @@ int wcsncmp(const wchar_t* s1, const wchar_t* s2, size_t n) {
   return 0;
 }
 
+int wcscasecmp(const wchar_t* s1, const wchar_t* s2) {
+  while (*s1 != 0 && wide_ascii_tolower(*s1) == wide_ascii_tolower(*s2)) {
+    ++s1;
+    ++s2;
+  }
+  return wide_ascii_tolower(*s1) < wide_ascii_tolower(*s2) ? -1 :
+      (wide_ascii_tolower(*s1) > wide_ascii_tolower(*s2) ? 1 : 0);
+}
+
+int wcsncasecmp(const wchar_t* s1, const wchar_t* s2, size_t n) {
+  size_t i;
+  for (i = 0; i < n; ++i) {
+    int c1 = wide_ascii_tolower(s1[i]);
+    int c2 = wide_ascii_tolower(s2[i]);
+    if (c1 != c2 || s1[i] == 0) {
+      return c1 < c2 ? -1 : (c1 > c2 ? 1 : 0);
+    }
+  }
+  return 0;
+}
+
 wchar_t* wcscpy(wchar_t* dst, const wchar_t* src) {
   wchar_t* result = dst;
   while ((*dst++ = *src++) != 0) {
   }
   return result;
+}
+
+wchar_t* wcpcpy(wchar_t* dst, const wchar_t* src) {
+  while ((*dst = *src) != 0) {
+    ++dst;
+    ++src;
+  }
+  return dst;
 }
 
 wchar_t* wcsncpy(wchar_t* dst, const wchar_t* src, size_t n) {
@@ -337,8 +387,37 @@ wchar_t* wcsncpy(wchar_t* dst, const wchar_t* src, size_t n) {
   return dst;
 }
 
+wchar_t* wcpncpy(wchar_t* dst, const wchar_t* src, size_t n) {
+  size_t i;
+  wchar_t* end;
+
+  for (i = 0; i < n && src[i] != 0; ++i) {
+    dst[i] = src[i];
+  }
+  if (i == n) {
+    return dst + n;
+  }
+  end = dst + i;
+  dst[i++] = 0;
+  while (i < n) {
+    dst[i++] = 0;
+  }
+  return end;
+}
+
 wchar_t* wcscat(wchar_t* dst, const wchar_t* src) {
   wcscpy(dst + wcslen(dst), src);
+  return dst;
+}
+
+wchar_t* wcsncat(wchar_t* dst, const wchar_t* src, size_t n) {
+  wchar_t* d = dst + wcslen(dst);
+  size_t i;
+
+  for (i = 0; i < n && src[i] != 0; ++i) {
+    d[i] = src[i];
+  }
+  d[i] = 0;
   return dst;
 }
 
@@ -352,6 +431,16 @@ wchar_t* wcschr(const wchar_t* s, wchar_t c) {
   return c == 0 ? (wchar_t*)s : 0;
 }
 
+wchar_t* wcspbrk(const wchar_t* s, const wchar_t* accept) {
+  while (*s != 0) {
+    if (wcschr(accept, *s) != 0) {
+      return (wchar_t*)s;
+    }
+    ++s;
+  }
+  return 0;
+}
+
 wchar_t* wcsrchr(const wchar_t* s, wchar_t c) {
   const wchar_t* last = 0;
   do {
@@ -360,6 +449,24 @@ wchar_t* wcsrchr(const wchar_t* s, wchar_t c) {
     }
   } while (*s++ != 0);
   return (wchar_t*)last;
+}
+
+size_t wcscspn(const wchar_t* s, const wchar_t* reject) {
+  size_t n = 0;
+
+  while (s[n] != 0 && wcschr(reject, s[n]) == 0) {
+    ++n;
+  }
+  return n;
+}
+
+size_t wcsspn(const wchar_t* s, const wchar_t* accept) {
+  size_t n = 0;
+
+  while (s[n] != 0 && wcschr(accept, s[n]) != 0) {
+    ++n;
+  }
+  return n;
 }
 
 wchar_t* wcsstr(const wchar_t* s, const wchar_t* find) {
@@ -374,6 +481,92 @@ wchar_t* wcsstr(const wchar_t* s, const wchar_t* find) {
     ++s;
   }
   return 0;
+}
+
+wchar_t* wcstok(wchar_t* s, const wchar_t* delimiter, wchar_t** ptr) {
+  wchar_t* token;
+
+  if (ptr == 0) {
+    errno = EINVAL;
+    return 0;
+  }
+  if (s == 0) {
+    s = *ptr;
+  }
+  if (s == 0) {
+    return 0;
+  }
+  s += wcsspn(s, delimiter);
+  if (*s == 0) {
+    *ptr = 0;
+    return 0;
+  }
+  token = s;
+  s += wcscspn(s, delimiter);
+  if (*s != 0) {
+    *s++ = 0;
+    *ptr = s;
+  } else {
+    *ptr = 0;
+  }
+  return token;
+}
+
+int wcscoll(const wchar_t* s1, const wchar_t* s2) {
+  return wcscmp(s1, s2);
+}
+
+size_t wcsxfrm(wchar_t* dst, const wchar_t* src, size_t n) {
+  size_t len = wcslen(src);
+  size_t copy = len;
+
+  if (dst != 0 && n != 0) {
+    size_t i;
+    if (copy >= n) {
+      copy = n - 1;
+    }
+    for (i = 0; i < copy; ++i) {
+      dst[i] = src[i];
+    }
+    dst[copy] = 0;
+  }
+  return len;
+}
+
+size_t wcslcpy(wchar_t* dst, const wchar_t* src, size_t n) {
+  size_t len = wcslen(src);
+
+  if (n != 0) {
+    size_t copy = len >= n ? n - 1 : len;
+    wmemcpy(dst, src, copy);
+    dst[copy] = 0;
+  }
+  return len;
+}
+
+size_t wcslcat(wchar_t* dst, const wchar_t* src, size_t n) {
+  size_t dst_len = wcsnlen(dst, n);
+  size_t src_len = wcslen(src);
+
+  if (dst_len == n) {
+    return n + src_len;
+  }
+  if (n > dst_len + 1) {
+    size_t copy = src_len >= n - dst_len ? n - dst_len - 1 : src_len;
+    wmemcpy(dst + dst_len, src, copy);
+    dst[dst_len + copy] = 0;
+  }
+  return dst_len + src_len;
+}
+
+wchar_t* wcsdup(const wchar_t* s) {
+  size_t len = wcslen(s) + 1;
+  wchar_t* copy = (wchar_t*)malloc(len * sizeof(wchar_t));
+
+  if (copy == 0) {
+    return 0;
+  }
+  return wmemcpy(copy, s, len);
 }
 
 wchar_t* wmemchr(const wchar_t* s, wchar_t c, size_t n) {
@@ -404,6 +597,10 @@ wchar_t* wmemcpy(wchar_t* dst, const wchar_t* src, size_t n) {
   return dst;
 }
 
+wchar_t* wmempcpy(wchar_t* dst, const wchar_t* src, size_t n) {
+  return wmemcpy(dst, src, n) + n;
+}
+
 wchar_t* wmemmove(wchar_t* dst, const wchar_t* src, size_t n) {
   size_t i;
   if (dst < src) {
@@ -428,6 +625,10 @@ wchar_t* wmemset(wchar_t* dst, wchar_t c, size_t n) {
 
 int __crt_stdio_get_orientation(FILE* stream);
 int __crt_stdio_set_orientation(FILE* stream, int mode);
+mbstate_t* __crt_stdio_get_mbstate_in(FILE* stream);
+mbstate_t* __crt_stdio_get_mbstate_out(FILE* stream);
+int __crt_stdio_pop_ungetwc(FILE* stream, wchar_t* wc);
+int __crt_stdio_push_ungetwc(FILE* stream, wchar_t wc);
 
 #define ORIENT_BYTES (-1)
 #define ORIENT_UNKNOWN 0
@@ -471,6 +672,361 @@ static char* wide_to_multibyte_alloc(const wchar_t* s) {
   }
   out[len] = 0;
   return out;
+}
+
+static wchar_t* wide_end_from_narrow_offset(const wchar_t* s, size_t target_offset) {
+  size_t offset = 0;
+
+  while (*s != 0 && offset < target_offset) {
+    char mb[4];
+    size_t n = wcrtomb(mb, *s, 0);
+
+    if (n == (size_t)-1 || offset + n > target_offset) {
+      break;
+    }
+    offset += n;
+    ++s;
+  }
+  return (wchar_t*)s;
+}
+
+double wcstod(const wchar_t* s, wchar_t** endptr) {
+  char* narrow = wide_to_multibyte_alloc(s);
+  char* narrow_end = 0;
+  double result;
+
+  if (narrow == 0) {
+    if (endptr != 0) {
+      *endptr = (wchar_t*)s;
+    }
+    return 0.0;
+  }
+  result = strtod(narrow, &narrow_end);
+  if (endptr != 0) {
+    *endptr = wide_end_from_narrow_offset(s, (size_t)(narrow_end - narrow));
+  }
+  free(narrow);
+  return result;
+}
+
+float wcstof(const wchar_t* s, wchar_t** endptr) {
+  char* narrow = wide_to_multibyte_alloc(s);
+  char* narrow_end = 0;
+  float result;
+
+  if (narrow == 0) {
+    if (endptr != 0) {
+      *endptr = (wchar_t*)s;
+    }
+    return 0.0f;
+  }
+  result = strtof(narrow, &narrow_end);
+  if (endptr != 0) {
+    *endptr = wide_end_from_narrow_offset(s, (size_t)(narrow_end - narrow));
+  }
+  free(narrow);
+  return result;
+}
+
+long double wcstold(const wchar_t* s, wchar_t** endptr) {
+  char* narrow = wide_to_multibyte_alloc(s);
+  char* narrow_end = 0;
+  long double result;
+
+  if (narrow == 0) {
+    if (endptr != 0) {
+      *endptr = (wchar_t*)s;
+    }
+    return 0.0L;
+  }
+  result = strtold(narrow, &narrow_end);
+  if (endptr != 0) {
+    *endptr = wide_end_from_narrow_offset(s, (size_t)(narrow_end - narrow));
+  }
+  free(narrow);
+  return result;
+}
+
+long wcstol(const wchar_t* s, wchar_t** endptr, int base) {
+  char* narrow = wide_to_multibyte_alloc(s);
+  char* narrow_end = 0;
+  long result;
+
+  if (narrow == 0) {
+    if (endptr != 0) {
+      *endptr = (wchar_t*)s;
+    }
+    return 0;
+  }
+  result = strtol(narrow, &narrow_end, base);
+  if (endptr != 0) {
+    *endptr = wide_end_from_narrow_offset(s, (size_t)(narrow_end - narrow));
+  }
+  free(narrow);
+  return result;
+}
+
+long long wcstoll(const wchar_t* s, wchar_t** endptr, int base) {
+  char* narrow = wide_to_multibyte_alloc(s);
+  char* narrow_end = 0;
+  long long result;
+
+  if (narrow == 0) {
+    if (endptr != 0) {
+      *endptr = (wchar_t*)s;
+    }
+    return 0;
+  }
+  result = strtoll(narrow, &narrow_end, base);
+  if (endptr != 0) {
+    *endptr = wide_end_from_narrow_offset(s, (size_t)(narrow_end - narrow));
+  }
+  free(narrow);
+  return result;
+}
+
+unsigned long wcstoul(const wchar_t* s, wchar_t** endptr, int base) {
+  char* narrow = wide_to_multibyte_alloc(s);
+  char* narrow_end = 0;
+  unsigned long result;
+
+  if (narrow == 0) {
+    if (endptr != 0) {
+      *endptr = (wchar_t*)s;
+    }
+    return 0;
+  }
+  result = strtoul(narrow, &narrow_end, base);
+  if (endptr != 0) {
+    *endptr = wide_end_from_narrow_offset(s, (size_t)(narrow_end - narrow));
+  }
+  free(narrow);
+  return result;
+}
+
+unsigned long long wcstoull(const wchar_t* s, wchar_t** endptr, int base) {
+  char* narrow = wide_to_multibyte_alloc(s);
+  char* narrow_end = 0;
+  unsigned long long result;
+
+  if (narrow == 0) {
+    if (endptr != 0) {
+      *endptr = (wchar_t*)s;
+    }
+    return 0;
+  }
+  result = strtoull(narrow, &narrow_end, base);
+  if (endptr != 0) {
+    *endptr = wide_end_from_narrow_offset(s, (size_t)(narrow_end - narrow));
+  }
+  free(narrow);
+  return result;
+}
+
+int wcwidth(wchar_t wc) {
+  uint32_t value = (uint32_t)wc;
+
+  if (wc == 0) {
+    return 0;
+  }
+  if (value < 0x20U || (value >= 0x7fU && value < 0xa0U) || !valid_codepoint(value)) {
+    return -1;
+  }
+  return 1;
+}
+
+int wcswidth(const wchar_t* s, size_t n) {
+  int total = 0;
+  size_t i;
+
+  for (i = 0; i < n && s[i] != 0; ++i) {
+    int width = wcwidth(s[i]);
+    if (width < 0) {
+      return -1;
+    }
+    total += width;
+  }
+  return total;
+}
+
+struct wmemstream_cookie {
+  wchar_t** ptr;
+  size_t* sizep;
+  wchar_t* buffer;
+  size_t capacity;
+  size_t length;
+  size_t position;
+  mbstate_t state;
+};
+
+static int wmemstream_sync(struct wmemstream_cookie* cookie) {
+  if (cookie == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (cookie->length >= cookie->capacity) {
+    size_t capacity = cookie->capacity == 0 ? 16 : cookie->capacity * 2;
+    wchar_t* grown;
+
+    while (capacity <= cookie->length) {
+      size_t next = capacity * 2;
+      if (next <= capacity) {
+        errno = ENOMEM;
+        return -1;
+      }
+      capacity = next;
+    }
+    grown = (wchar_t*)realloc(cookie->buffer, (capacity + 1) * sizeof(wchar_t));
+    if (grown == 0) {
+      return -1;
+    }
+    cookie->buffer = grown;
+    cookie->capacity = capacity;
+  }
+  cookie->buffer[cookie->length] = 0;
+  *cookie->ptr = cookie->buffer;
+  *cookie->sizep = cookie->length;
+  return 0;
+}
+
+static int wmemstream_ensure_capacity(struct wmemstream_cookie* cookie, size_t needed) {
+  size_t capacity;
+  wchar_t* grown;
+
+  if (needed <= cookie->capacity) {
+    return 0;
+  }
+  capacity = cookie->capacity == 0 ? 16 : cookie->capacity;
+  while (capacity < needed) {
+    size_t next = capacity * 2;
+    if (next <= capacity) {
+      errno = ENOMEM;
+      return -1;
+    }
+    capacity = next;
+  }
+  grown = (wchar_t*)realloc(cookie->buffer, (capacity + 1) * sizeof(wchar_t));
+  if (grown == 0) {
+    return -1;
+  }
+  cookie->buffer = grown;
+  cookie->capacity = capacity;
+  *cookie->ptr = cookie->buffer;
+  return 0;
+}
+
+static int wmemstream_write(void* opaque, const char* buf, int count) {
+  struct wmemstream_cookie* cookie = (struct wmemstream_cookie*)opaque;
+  int i;
+
+  if (cookie == 0 || count < 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  for (i = 0; i < count; ++i) {
+    wchar_t wc;
+    size_t result = mbrtowc(&wc, buf + i, 1, &cookie->state);
+
+    if (result == (size_t)-1) {
+      return -1;
+    }
+    if (result == (size_t)-2) {
+      continue;
+    }
+    if (wmemstream_ensure_capacity(cookie, cookie->position + 1) != 0) {
+      return -1;
+    }
+    cookie->buffer[cookie->position++] = wc;
+    if (cookie->position > cookie->length) {
+      cookie->length = cookie->position;
+    }
+  }
+  if (wmemstream_sync(cookie) != 0) {
+    return -1;
+  }
+  return count;
+}
+
+static fpos_t wmemstream_seek(void* opaque, fpos_t offset, int whence) {
+  struct wmemstream_cookie* cookie = (struct wmemstream_cookie*)opaque;
+  fpos_t base;
+  fpos_t target;
+
+  if (cookie == 0) {
+    errno = EINVAL;
+    return (fpos_t)-1;
+  }
+  if (whence == SEEK_SET) {
+    base = 0;
+  } else if (whence == SEEK_CUR) {
+    base = (fpos_t)cookie->position;
+  } else if (whence == SEEK_END) {
+    base = (fpos_t)cookie->length;
+  } else {
+    errno = EINVAL;
+    return (fpos_t)-1;
+  }
+  target = base + offset;
+  if (target < 0) {
+    errno = EINVAL;
+    return (fpos_t)-1;
+  }
+  if (wmemstream_ensure_capacity(cookie, (size_t)target) != 0) {
+    return (fpos_t)-1;
+  }
+  while (cookie->length < (size_t)target) {
+    cookie->buffer[cookie->length++] = 0;
+  }
+  cookie->position = (size_t)target;
+  (void)wmemstream_sync(cookie);
+  return target;
+}
+
+static int wmemstream_close(void* opaque) {
+  struct wmemstream_cookie* cookie = (struct wmemstream_cookie*)opaque;
+
+  if (cookie == 0) {
+    return 0;
+  }
+  (void)wmemstream_sync(cookie);
+  free(cookie);
+  return 0;
+}
+
+FILE* open_wmemstream(wchar_t** ptr, size_t* sizep) {
+  struct wmemstream_cookie* cookie;
+  FILE* stream;
+
+  if (ptr == 0 || sizep == 0) {
+    errno = EINVAL;
+    return 0;
+  }
+  cookie = (struct wmemstream_cookie*)malloc(sizeof(*cookie));
+  if (cookie == 0) {
+    errno = ENOMEM;
+    return 0;
+  }
+  memset(cookie, 0, sizeof(*cookie));
+  cookie->ptr = ptr;
+  cookie->sizep = sizep;
+  cookie->capacity = 16;
+  cookie->buffer = (wchar_t*)malloc((cookie->capacity + 1) * sizeof(wchar_t));
+  if (cookie->buffer == 0) {
+    free(cookie);
+    errno = ENOMEM;
+    return 0;
+  }
+  cookie->buffer[0] = 0;
+  *ptr = cookie->buffer;
+  *sizep = 0;
+  stream = funopen(cookie, 0, wmemstream_write, wmemstream_seek, wmemstream_close);
+  if (stream == 0) {
+    free(cookie->buffer);
+    free(cookie);
+    return 0;
+  }
+  (void)fwide(stream, 1);
+  return stream;
 }
 
 static int is_format_flag(wchar_t wc) {
@@ -558,11 +1114,16 @@ static char* wide_format_to_narrow_alloc(const wchar_t* format, int wide_io) {
 wint_t fputwc(wchar_t wc, FILE* stream) {
   char mb[4];
   size_t n;
+  mbstate_t* state;
 
   if (ensure_wide_orientation(stream) != 0) {
     return WEOF;
   }
-  n = wcrtomb(mb, wc, 0);
+  state = __crt_stdio_get_mbstate_out(stream);
+  if (state == 0) {
+    return WEOF;
+  }
+  n = wcrtomb(mb, wc, state);
   if (n == (size_t)-1) {
     return WEOF;
   }
@@ -588,11 +1149,19 @@ int fputws(const wchar_t* s, FILE* stream) {
 
 wint_t fgetwc(FILE* stream) {
   char bytes[4];
-  mbstate_t state = {0, 0, 0};
+  mbstate_t* state;
   size_t used;
   int ch;
+  wchar_t ungot;
 
   if (ensure_wide_orientation(stream) != 0) {
+    return WEOF;
+  }
+  if (__crt_stdio_pop_ungetwc(stream, &ungot)) {
+    return (wint_t)ungot;
+  }
+  state = __crt_stdio_get_mbstate_in(stream);
+  if (state == 0) {
     return WEOF;
   }
   for (used = 0; used < sizeof(bytes); ++used) {
@@ -604,7 +1173,7 @@ wint_t fgetwc(FILE* stream) {
       return WEOF;
     }
     bytes[used] = (char)ch;
-    result = mbrtowc(&wc, bytes + used, 1, &state);
+    result = mbrtowc(&wc, bytes + used, 1, state);
     if (result == (size_t)-1) {
       return WEOF;
     }
@@ -625,22 +1194,10 @@ wint_t getwchar(void) {
 }
 
 wint_t ungetwc(wint_t wc, FILE* stream) {
-  char mb[4];
-  size_t n;
-
   if (wc == WEOF || ensure_wide_orientation(stream) != 0) {
     return WEOF;
   }
-  n = wcrtomb(mb, (wchar_t)wc, 0);
-  if (n == (size_t)-1) {
-    return WEOF;
-  }
-  while (n > 0) {
-    if (ungetc((unsigned char)mb[--n], stream) == EOF) {
-      return WEOF;
-    }
-  }
-  return wc;
+  return __crt_stdio_push_ungetwc(stream, (wchar_t)wc) == 0 ? wc : WEOF;
 }
 
 wchar_t* fgetws(wchar_t* s, int size, FILE* stream) {

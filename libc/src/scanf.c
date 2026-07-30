@@ -414,6 +414,55 @@ static int scan_set(struct scan_source* source, const char** format, int width, 
   return 0;
 }
 
+static int scan_wide_set(struct scan_source* source, const char** format, int width, int suppress, va_list* ap) {
+  int table[256] = {0};
+  int invert = 0;
+  int count = 0;
+  wchar_t* out = suppress ? 0 : va_arg(*ap, wchar_t*);
+
+  if (**format == '^') {
+    invert = 1;
+    ++*format;
+  }
+  if (**format == ']') {
+    table[(unsigned char)']'] = 1;
+    ++*format;
+  }
+  while (**format != 0 && **format != ']') {
+    table[(unsigned char)**format] = 1;
+    ++*format;
+  }
+  if (**format == ']') {
+    ++*format;
+  }
+
+  while (width == 0 || count < width) {
+    wint_t wc = source_getwc_utf8(source);
+
+    if (wc == WEOF) {
+      break;
+    }
+    if ((wc < 0 || wc > 255 || table[(unsigned char)wc] == 0) != invert) {
+      if (wc >= 0 && wc <= 255) {
+        source_ungetc(source, (int)wc);
+      }
+      break;
+    }
+    if (!suppress) {
+      out[count] = (wchar_t)wc;
+    }
+    ++count;
+  }
+  if (count == 0) {
+    return -1;
+  }
+  if (!suppress) {
+    out[count] = 0;
+    return 1;
+  }
+  return 0;
+}
+
 static int vscan_core(struct scan_source* source, const char* format, va_list ap) {
   int assigned = 0;
 
@@ -486,7 +535,11 @@ static int vscan_core(struct scan_source* source, const char* format, va_list ap
         result = scan_chars(source, width, suppress, &ap);
       }
     } else if (spec == '[') {
-      result = scan_set(source, &format, width, suppress, &ap);
+      if (length == SCAN_LENGTH_L) {
+        result = scan_wide_set(source, &format, width, suppress, &ap);
+      } else {
+        result = scan_set(source, &format, width, suppress, &ap);
+      }
     } else if (spec == 'n') {
       if (!suppress) {
         assign_signed(&ap, length, (long long)source->consumed);

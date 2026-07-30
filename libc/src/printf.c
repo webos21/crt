@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <float.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -244,19 +245,148 @@ static void format_integer(
   write_formatted(buffer, spec, prefix, prefix_len, digits, digits_len, value == 0);
 }
 
-static void format_double_fixed(struct printf_buffer* buffer, const struct printf_spec* spec, double value) {
-  struct printf_spec int_spec = *spec;
-  unsigned long long integer_part;
+static uint64_t double_bits(double value) {
+  union {
+    double d;
+    uint64_t u;
+  } bits;
+
+  bits.d = value;
+  return bits.u;
+}
+
+static int double_is_negative(double value) {
+  return (double_bits(value) >> 63) != 0;
+}
+
+static int double_is_nan(double value) {
+  uint64_t bits = double_bits(value);
+  return (bits & 0x7ff0000000000000ULL) == 0x7ff0000000000000ULL &&
+      (bits & 0x000fffffffffffffULL) != 0;
+}
+
+static int double_is_inf(double value) {
+  return (double_bits(value) & 0x7fffffffffffffffULL) == 0x7ff0000000000000ULL;
+}
+
+static long double double_abs_value(double value) {
+  return value < 0.0 || double_is_negative(value) ? -(long double)value : (long double)value;
+}
+
+static int append_float_prefix(char* prefix, const struct printf_spec* spec, double value) {
+  if (double_is_negative(value)) {
+    prefix[0] = '-';
+    return 1;
+  }
+  if (spec->plus) {
+    prefix[0] = '+';
+    return 1;
+  }
+  if (spec->space) {
+    prefix[0] = ' ';
+    return 1;
+  }
+  return 0;
+}
+
+static void format_float_special(
+    struct printf_buffer* buffer,
+    const struct printf_spec* spec,
+    double value,
+    int uppercase) {
+  char prefix[1];
+  int prefix_len = double_is_nan(value) ? 0 : append_float_prefix(prefix, spec, value);
+  const char* text;
+
+  if (double_is_nan(value)) {
+    text = uppercase ? "NAN" : "nan";
+  } else {
+    text = uppercase ? "INF" : "inf";
+  }
+  write_formatted(buffer, spec, prefix, (size_t)prefix_len, text, strlen(text), 0);
+}
+
+static unsigned long long pow10_u64(int precision) {
   unsigned long long scale = 1;
+
+  while (precision-- > 0) {
+    scale *= 10ULL;
+  }
+  return scale;
+}
+
+static size_t append_unsigned_fixed_width(char* out, size_t pos, unsigned long long value, int width) {
+  char digits[32];
+  int i;
+
+  for (i = width - 1; i >= 0; --i) {
+    digits[i] = (char)('0' + (value % 10ULL));
+    value /= 10ULL;
+  }
+  for (i = 0; i < width; ++i) {
+    out[pos++] = digits[i];
+  }
+  return pos;
+}
+
+static void trim_fraction(char* digits, size_t* len) {
+  while (*len != 0 && digits[*len - 1] == '0') {
+    --*len;
+  }
+  if (*len != 0 && digits[*len - 1] == '.') {
+    --*len;
+  }
+  digits[*len] = 0;
+}
+
+static int decimal_exponent(long double value) {
+  int exponent = 0;
+
+  if (value == 0.0L) {
+    return 0;
+  }
+  while (value >= 10.0L) {
+    value /= 10.0L;
+    ++exponent;
+  }
+  while (value < 1.0L) {
+    value *= 10.0L;
+    --exponent;
+  }
+  return exponent;
+}
+
+static void append_exponent(char* digits, size_t* len, int exponent, int uppercase) {
+  unsigned int magnitude = exponent < 0 ? (unsigned int)-exponent : (unsigned int)exponent;
+
+  digits[(*len)++] = uppercase ? 'E' : 'e';
+  digits[(*len)++] = exponent < 0 ? '-' : '+';
+  if (magnitude >= 100U) {
+    char temp[16];
+    size_t n = convert_unsigned(temp, magnitude, 10, 0);
+    size_t i;
+    for (i = 0; i < n; ++i) {
+      digits[(*len)++] = temp[i];
+    }
+  } else {
+    digits[(*len)++] = (char)('0' + (magnitude / 10U));
+    digits[(*len)++] = (char)('0' + (magnitude % 10U));
+  }
+}
+
+static void format_double_fixed(struct printf_buffer* buffer, const struct printf_spec* spec, double value) {
+  struct printf_spec out_spec = *spec;
+  unsigned long long integer_part;
+  unsigned long long scale;
   unsigned long long fractional;
-  char digits[64];
-  char frac_digits[32];
+  char digits[160];
+  char integer_digits[64];
   char prefix[1];
   int precision = spec->precision_set ? spec->precision : 6;
   int negative = value < 0.0;
   size_t digits_len;
+  size_t integer_len;
   size_t prefix_len = 0;
-  int i;
 
   if (precision < 0) {
     precision = 6;
@@ -264,40 +394,224 @@ static void format_double_fixed(struct printf_buffer* buffer, const struct print
   if (precision > 18) {
     precision = 18;
   }
-  if (negative) {
-    value = -value;
-    prefix[prefix_len++] = '-';
-  } else if (spec->plus) {
-    prefix[prefix_len++] = '+';
-  } else if (spec->space) {
-    prefix[prefix_len++] = ' ';
+  if (double_is_nan(value) || double_is_inf(value)) {
+    format_float_special(buffer, spec, value, 0);
+    return;
   }
 
-  for (i = 0; i < precision; ++i) {
-    scale *= 10ULL;
-  }
+  prefix_len = (size_t)append_float_prefix(prefix, spec, value);
+  value = (double)double_abs_value(value);
+  scale = pow10_u64(precision);
   integer_part = (unsigned long long)value;
-  fractional = (unsigned long long)((value - (double)integer_part) * (double)scale + 0.5);
+  fractional = (unsigned long long)(((long double)value - (long double)integer_part) * (long double)scale + 0.5L);
   if (fractional >= scale) {
     ++integer_part;
     fractional -= scale;
   }
 
-  digits_len = convert_unsigned(digits, integer_part, 10, 0);
-  int_spec.precision_set = 0;
+  integer_len = convert_unsigned(integer_digits, integer_part, 10, 0);
+  memcpy(digits, integer_digits, integer_len);
+  digits_len = integer_len;
+  out_spec.precision_set = 0;
   if (precision > 0 || spec->alt) {
-    size_t base_len = digits_len;
-    digits[base_len++] = '.';
-    for (i = precision - 1; i >= 0; --i) {
-      frac_digits[i] = (char)('0' + (fractional % 10ULL));
-      fractional /= 10ULL;
-    }
-    for (i = 0; i < precision; ++i) {
-      digits[base_len++] = frac_digits[i];
-    }
-    digits_len = base_len;
+    digits[digits_len++] = '.';
+    digits_len = append_unsigned_fixed_width(digits, digits_len, fractional, precision);
   }
-  write_formatted(buffer, &int_spec, prefix, prefix_len, digits, digits_len, 0);
+  digits[digits_len] = 0;
+  (void)negative;
+  write_formatted(buffer, &out_spec, prefix, prefix_len, digits, digits_len, 0);
+}
+
+static void format_double_exp(
+    struct printf_buffer* buffer,
+    const struct printf_spec* spec,
+    double value,
+    int uppercase,
+    int trim) {
+  struct printf_spec out_spec = *spec;
+  char digits[192];
+  char prefix[1];
+  size_t len = 0;
+  size_t prefix_len;
+  long double magnitude;
+  int precision = spec->precision_set ? spec->precision : 6;
+  int exponent;
+  unsigned long long scale;
+  unsigned long long rounded;
+  unsigned long long first;
+  unsigned long long frac;
+
+  if (precision < 0) {
+    precision = 6;
+  }
+  if (precision > 18) {
+    precision = 18;
+  }
+  if (double_is_nan(value) || double_is_inf(value)) {
+    format_float_special(buffer, spec, value, uppercase);
+    return;
+  }
+  prefix_len = (size_t)append_float_prefix(prefix, spec, value);
+  magnitude = double_abs_value(value);
+  exponent = decimal_exponent(magnitude);
+  if (magnitude != 0.0L) {
+    int i;
+    if (exponent > 0) {
+      for (i = 0; i < exponent; ++i) {
+        magnitude /= 10.0L;
+      }
+    } else if (exponent < 0) {
+      for (i = 0; i < -exponent; ++i) {
+        magnitude *= 10.0L;
+      }
+    }
+  }
+  scale = pow10_u64(precision);
+  rounded = (unsigned long long)(magnitude * (long double)scale + 0.5L);
+  if (rounded >= 10ULL * scale) {
+    rounded /= 10ULL;
+    ++exponent;
+  }
+  first = precision == 0 ? rounded : rounded / scale;
+  frac = precision == 0 ? 0 : rounded % scale;
+  digits[len++] = (char)('0' + first);
+  if (precision > 0 || spec->alt) {
+    digits[len++] = '.';
+    len = append_unsigned_fixed_width(digits, len, frac, precision);
+    if (trim && !spec->alt) {
+      trim_fraction(digits, &len);
+    }
+  }
+  append_exponent(digits, &len, exponent, uppercase);
+  digits[len] = 0;
+  out_spec.precision_set = 0;
+  write_formatted(buffer, &out_spec, prefix, prefix_len, digits, len, 0);
+}
+
+static void format_double_general(
+    struct printf_buffer* buffer,
+    const struct printf_spec* spec,
+    double value,
+    int uppercase) {
+  struct printf_spec adjusted = *spec;
+  int precision = spec->precision_set ? spec->precision : 6;
+  int exponent;
+
+  if (precision == 0) {
+    precision = 1;
+  }
+  if (double_is_nan(value) || double_is_inf(value)) {
+    format_float_special(buffer, spec, value, uppercase);
+    return;
+  }
+  exponent = decimal_exponent(double_abs_value(value));
+  if (exponent < -4 || exponent >= precision) {
+    adjusted.precision_set = 1;
+    adjusted.precision = precision - 1;
+    format_double_exp(buffer, &adjusted, value, uppercase, 1);
+  } else {
+    adjusted.precision_set = 1;
+    adjusted.precision = precision - (exponent + 1);
+    if (adjusted.precision < 0) {
+      adjusted.precision = 0;
+    }
+    adjusted.width = 0;
+    adjusted.left = 0;
+    adjusted.zero = 0;
+    {
+      struct printf_buffer temp;
+      char local[192];
+      size_t len;
+
+      temp.data = local;
+      temp.capacity = sizeof(local);
+      temp.length = 0;
+      format_double_fixed(&temp, &adjusted, value);
+      len = temp.length < sizeof(local) ? temp.length : sizeof(local) - 1;
+      local[len] = 0;
+      if (!spec->alt) {
+        trim_fraction(local, &len);
+      }
+      write_formatted(buffer, spec, 0, 0, local, len, 0);
+    }
+  }
+}
+
+static void format_double_hex(
+    struct printf_buffer* buffer,
+    const struct printf_spec* spec,
+    double value,
+    int uppercase) {
+  struct printf_spec out_spec = *spec;
+  char digits[192];
+  char prefix[3];
+  const char* table = uppercase ? "0123456789ABCDEF" : "0123456789abcdef";
+  size_t prefix_len;
+  size_t len = 0;
+  long double magnitude;
+  int precision = spec->precision_set ? spec->precision : 13;
+  int exponent = 0;
+  int i;
+
+  if (precision < 0) {
+    precision = 13;
+  }
+  if (precision > 32) {
+    precision = 32;
+  }
+  if (double_is_nan(value) || double_is_inf(value)) {
+    format_float_special(buffer, spec, value, uppercase);
+    return;
+  }
+  prefix_len = (size_t)append_float_prefix(prefix, spec, value);
+  prefix[prefix_len++] = '0';
+  prefix[prefix_len++] = uppercase ? 'X' : 'x';
+  magnitude = double_abs_value(value);
+  if (magnitude != 0.0L) {
+    while (magnitude >= 2.0L) {
+      magnitude *= 0.5L;
+      ++exponent;
+    }
+    while (magnitude < 1.0L) {
+      magnitude *= 2.0L;
+      --exponent;
+    }
+  }
+  digits[len++] = magnitude >= 1.0L ? '1' : '0';
+  if (magnitude >= 1.0L) {
+    magnitude -= 1.0L;
+  }
+  if (precision > 0 || spec->alt) {
+    digits[len++] = '.';
+    for (i = 0; i < precision; ++i) {
+      int nibble;
+      magnitude *= 16.0L;
+      nibble = (int)magnitude;
+      if (nibble < 0) {
+        nibble = 0;
+      } else if (nibble > 15) {
+        nibble = 15;
+      }
+      digits[len++] = table[nibble];
+      magnitude -= (long double)nibble;
+    }
+    if (!spec->precision_set && !spec->alt) {
+      trim_fraction(digits, &len);
+    }
+  }
+  digits[len++] = uppercase ? 'P' : 'p';
+  digits[len++] = exponent < 0 ? '-' : '+';
+  {
+    char exp_digits[16];
+    size_t exp_len = convert_unsigned(exp_digits, exponent < 0 ? (unsigned int)-exponent : (unsigned int)exponent, 10, 0);
+    size_t j;
+    for (j = 0; j < exp_len; ++j) {
+      digits[len++] = exp_digits[j];
+    }
+  }
+  digits[len] = 0;
+  out_spec.precision_set = 0;
+  write_formatted(buffer, &out_spec, prefix, prefix_len, digits, len, 0);
 }
 
 int vsnprintf(char* s, size_t n, const char* format, va_list ap) {
@@ -486,12 +800,35 @@ int vsnprintf(char* s, size_t n, const char* format, va_list ap) {
         format_string(&buffer, &spec, strerror(errno));
         break;
       case 'f':
-      case 'F':
-      case 'e':
-      case 'E':
-      case 'g':
-      case 'G':
         format_double_fixed(&buffer, &spec, va_arg(ap, double));
+        break;
+      case 'F':
+        {
+          double value = va_arg(ap, double);
+          if (double_is_nan(value) || double_is_inf(value)) {
+            format_float_special(&buffer, &spec, value, 1);
+          } else {
+            format_double_fixed(&buffer, &spec, value);
+          }
+        }
+        break;
+      case 'e':
+        format_double_exp(&buffer, &spec, va_arg(ap, double), 0, 0);
+        break;
+      case 'E':
+        format_double_exp(&buffer, &spec, va_arg(ap, double), 1, 0);
+        break;
+      case 'g':
+        format_double_general(&buffer, &spec, va_arg(ap, double), 0);
+        break;
+      case 'G':
+        format_double_general(&buffer, &spec, va_arg(ap, double), 1);
+        break;
+      case 'a':
+        format_double_hex(&buffer, &spec, va_arg(ap, double), 0);
+        break;
+      case 'A':
+        format_double_hex(&buffer, &spec, va_arg(ap, double), 1);
         break;
       default:
         buffer_putc(&buffer, '%');

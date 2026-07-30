@@ -124,9 +124,9 @@ family Bionic uses for accurate floating-point input conversion.
 
 The current compile set intentionally focuses on input conversion. The dtoa
 output-formatting files (`dtoa.c`, `gdtoa.c`, `dmisc.c`, `hdtoa.c`, `ldtoa.c`)
-are staged for a later printf floating-format tranche because they pull in
-additional OpenBSD machine layout assumptions that are better handled together
-with `%f`/`%e`/`%g`.
+are staged for a future gdtoa-backed printf replacement. The active formatter
+now has project-owned `%f`/`%e`/`%g`/`%a` support, but these staged files should
+remain the reference path for stricter Bionic/OpenBSD output conversion.
 
 `strtold` follows the project long-double ABI policy: if the compiler target has
 128-bit IEEE quad long double (`LDBL_MANT_DIG == 113`), it dispatches through
@@ -138,18 +138,18 @@ Bionic's `__strtorQ`; otherwise it remains a `strtod` wrapper until a native x87
 | `libc/gdtoa/arith.h` | `libc/upstream-openbsd/android/include/arith.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Bionic Android gdtoa target configuration for IEEE little-endian 64-bit targets. |
 | `libc/gdtoa/gd_qnan.h` | `libc/upstream-openbsd/android/include/gd_qnan.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Quiet-NaN word definitions used by gdtoa NaN parsing. |
 | `libc/gdtoa/openbsd-compat.h` | `libc/upstream-openbsd/android/include/openbsd-compat.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Trimmed to this project's freestanding header set while preserving gdtoa visibility and alias macros. |
-| `libc/gdtoa/dmisc.c` | `libc/upstream-openbsd/lib/libc/gdtoa/dmisc.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/staged | Output-conversion support file staged for the later printf floating-format tranche. |
-| `libc/gdtoa/dtoa.c` | `libc/upstream-openbsd/lib/libc/gdtoa/dtoa.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/staged | Output-conversion support file staged for the later printf floating-format tranche. |
-| `libc/gdtoa/gdtoa.c` | `libc/upstream-openbsd/lib/libc/gdtoa/gdtoa.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/staged | General binary-to-decimal conversion file staged for the later printf floating-format tranche. |
+| `libc/gdtoa/dmisc.c` | `libc/upstream-openbsd/lib/libc/gdtoa/dmisc.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/staged | Output-conversion support file staged for a future gdtoa-backed printf replacement. |
+| `libc/gdtoa/dtoa.c` | `libc/upstream-openbsd/lib/libc/gdtoa/dtoa.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/staged | Output-conversion support file staged for a future gdtoa-backed printf replacement. |
+| `libc/gdtoa/gdtoa.c` | `libc/upstream-openbsd/lib/libc/gdtoa/gdtoa.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/staged | General binary-to-decimal conversion file staged for a future gdtoa-backed printf replacement. |
 | `libc/gdtoa/gdtoa.h` | `libc/upstream-openbsd/lib/libc/gdtoa/gdtoa.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Public/internal gdtoa declarations used by the imported conversion files. |
 | `libc/gdtoa/gdtoa_fltrnds.h` | `libc/upstream-openbsd/lib/libc/gdtoa/gdtoa_fltrnds.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Rounding-mode helper included by `strtof.c`. |
 | `libc/gdtoa/gdtoaimp.h` | `libc/upstream-openbsd/lib/libc/gdtoa/gdtoaimp.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Built with local OpenBSD compatibility and thread-private lock adapter. |
 | `libc/gdtoa/gethex.c` | `libc/upstream-openbsd/lib/libc/gdtoa/gethex.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Hexadecimal floating input conversion helper. |
 | `libc/gdtoa/gmisc.c` | `libc/upstream-openbsd/lib/libc/gdtoa/gmisc.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Generic gdtoa bit-copy helpers. |
 | `libc/gdtoa/hd_init.c` | `libc/upstream-openbsd/lib/libc/gdtoa/hd_init.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Hex digit table initialization. |
-| `libc/gdtoa/hdtoa.c` | `libc/upstream-openbsd/lib/libc/gdtoa/hdtoa.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/staged | Hex output-conversion file staged for the later printf floating-format tranche. |
+| `libc/gdtoa/hdtoa.c` | `libc/upstream-openbsd/lib/libc/gdtoa/hdtoa.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/staged | Hex output-conversion file staged for a future gdtoa-backed printf replacement. |
 | `libc/gdtoa/hexnan.c` | `libc/upstream-openbsd/lib/libc/gdtoa/hexnan.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | NaN payload parsing helper. |
-| `libc/gdtoa/ldtoa.c` | `libc/upstream-openbsd/lib/libc/gdtoa/ldtoa.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/staged | Long-double output-conversion file staged for the later printf floating-format tranche. |
+| `libc/gdtoa/ldtoa.c` | `libc/upstream-openbsd/lib/libc/gdtoa/ldtoa.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/staged | Long-double output-conversion file staged for a future gdtoa-backed printf replacement. |
 | `libc/gdtoa/misc.c` | `libc/upstream-openbsd/lib/libc/gdtoa/misc.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Bigint allocator, freelists, and cached power helpers. |
 | `libc/gdtoa/smisc.c` | `libc/upstream-openbsd/lib/libc/gdtoa/smisc.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Shared bigint/string helpers. |
 | `libc/gdtoa/strtod.c` | `libc/upstream-openbsd/lib/libc/gdtoa/strtod.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Public `strtod`. |
@@ -178,9 +178,9 @@ Bionic's `__strtorQ`; otherwise it remains a `strtod` wrapper until a native x87
 
 | Local file | Upstream path | Upstream ref | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `include/wchar.h` | `libc/include/wchar.h` | project-owned | new | Minimal wide-character, multibyte, and wide string declarations using the project-forced signed 32-bit `wchar_t` ABI. |
+| `include/wchar.h` | `libc/include/wchar.h` | project-owned | new | Bionic main shaped wide-character, multibyte, wide stdio, and BSD wide string declarations using the project-forced signed 32-bit `wchar_t` ABI. |
 | `include/wctype.h` | `libc/include/wctype.h` | project-owned | new | Minimal wide classification and transform declarations for the C/POSIX locale bootstrap. |
-| `libc/src/wchar.c` | mixed Bionic/POSIX surface | project-owned | new | UTF-8 bootstrap conversion, `mbstate_t`, legacy multibyte wrappers, and basic wide string/memory helpers. |
+| `libc/src/wchar.c` | mixed Bionic/BSD/POSIX surface | project-owned | new | UTF-8 bootstrap conversion, per-stream stdio `mbstate_t`, wide stdio/memory stream helpers, BSD wide string helpers, numeric wrappers, and C-locale width/collation policy. |
 | `libc/src/wctype.c` | mixed Bionic/POSIX surface | project-owned | new | ASCII/C-locale wide classification and case mapping over the existing ctype policy. |
 
 ### Libm Bootstrap Tranche
