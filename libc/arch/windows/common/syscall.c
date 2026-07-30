@@ -3,9 +3,11 @@
 #include <poll.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <sys/vfs.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -15,6 +17,70 @@ typedef unsigned long DWORD;
 typedef uint16_t WORD;
 typedef int BOOL;
 struct sockaddr;
+struct crt_filetime;
+typedef struct crt_overlapped {
+  uintptr_t Internal;
+  uintptr_t InternalHigh;
+  union {
+    struct {
+      DWORD Offset;
+      DWORD OffsetHigh;
+    };
+    void* Pointer;
+  };
+  HANDLE hEvent;
+} OVERLAPPED;
+
+struct crt_coord {
+  short X;
+  short Y;
+};
+
+struct crt_small_rect {
+  short Left;
+  short Top;
+  short Right;
+  short Bottom;
+};
+
+struct crt_console_screen_buffer_info {
+  struct crt_coord dwSize;
+  struct crt_coord dwCursorPosition;
+  WORD wAttributes;
+  struct crt_small_rect srWindow;
+  struct crt_coord dwMaximumWindowSize;
+};
+
+struct crt_system_info {
+  union {
+    DWORD dwOemId;
+    struct {
+      WORD wProcessorArchitecture;
+      WORD wReserved;
+    };
+  };
+  DWORD dwPageSize;
+  void* lpMinimumApplicationAddress;
+  void* lpMaximumApplicationAddress;
+  uintptr_t dwActiveProcessorMask;
+  DWORD dwNumberOfProcessors;
+  DWORD dwProcessorType;
+  DWORD dwAllocationGranularity;
+  WORD wProcessorLevel;
+  WORD wProcessorRevision;
+};
+
+struct crt_memory_status_ex {
+  DWORD dwLength;
+  DWORD dwMemoryLoad;
+  unsigned long long ullTotalPhys;
+  unsigned long long ullAvailPhys;
+  unsigned long long ullTotalPageFile;
+  unsigned long long ullAvailPageFile;
+  unsigned long long ullTotalVirtual;
+  unsigned long long ullAvailVirtual;
+  unsigned long long ullAvailExtendedVirtual;
+};
 
 #define CRT_FD_TABLE_SIZE 64
 
@@ -40,6 +106,7 @@ struct sockaddr;
 #define FILE_TYPE_PIPE 0x0003
 #define INVALID_FILE_ATTRIBUTES ((DWORD)0xffffffffUL)
 #define FILE_FLAG_BACKUP_SEMANTICS 0x02000000
+#define FILE_WRITE_ATTRIBUTES 0x00000100
 #define FILE_BEGIN 0
 #define FILE_CURRENT 1
 #define FILE_END 2
@@ -56,6 +123,8 @@ struct sockaddr;
 #define WINDOWS_TICK 10000000ULL
 #define SEC_TO_UNIX_EPOCH 11644473600ULL
 #define DUPLICATE_SAME_ACCESS 0x00000002
+#define LOCKFILE_FAIL_IMMEDIATELY 0x00000001
+#define LOCKFILE_EXCLUSIVE_LOCK 0x00000002
 #define INVALID_SOCKET ((SOCKET)~(uintptr_t)0)
 #define SOCKET_ERROR (-1)
 #define SD_RECEIVE 0
@@ -67,7 +136,7 @@ struct sockaddr;
 #define CRT_PUBLIC_SHUT_WR 1
 #define CRT_WS_SOL_SOCKET 0xffff
 #define CRT_WS_SO_REUSEADDR 0x0004
-#define FIONREAD 0x4004667fUL
+#define CRT_WS_FIONREAD 0x4004667fUL
 #define CRT_FD_KIND_NONE 0
 #define CRT_FD_KIND_FILE 1
 #define CRT_FD_KIND_SOCKET 2
@@ -116,6 +185,9 @@ __declspec(dllimport) BOOL CRT_WINAPI SetCurrentDirectoryA(const char* lpPathNam
 __declspec(dllimport) DWORD CRT_WINAPI GetCurrentDirectoryA(DWORD nBufferLength, char* lpBuffer);
 __declspec(dllimport) DWORD CRT_WINAPI GetFileAttributesA(const char* lpFileName);
 __declspec(dllimport) BOOL CRT_WINAPI SetFileAttributesA(const char* lpFileName, DWORD dwFileAttributes);
+__declspec(dllimport) void CRT_WINAPI GetSystemInfo(struct crt_system_info* lpSystemInfo);
+__declspec(dllimport) BOOL CRT_WINAPI GlobalMemoryStatusEx(
+    struct crt_memory_status_ex* lpBuffer);
 __declspec(dllimport) DWORD CRT_WINAPI GetFullPathNameA(
     const char* lpFileName,
     DWORD nBufferLength,
@@ -143,6 +215,12 @@ __declspec(dllimport) BOOL CRT_WINAPI PeekNamedPipe(
     DWORD* lpBytesRead,
     DWORD* lpTotalBytesAvail,
     DWORD* lpBytesLeftThisMessage);
+__declspec(dllimport) BOOL CRT_WINAPI GetConsoleScreenBufferInfo(
+    HANDLE hConsoleOutput,
+    struct crt_console_screen_buffer_info* lpConsoleScreenBufferInfo);
+__declspec(dllimport) BOOL CRT_WINAPI GetNumberOfConsoleInputEvents(
+    HANDLE hConsoleInput,
+    DWORD* lpcNumberOfEvents);
 __declspec(dllimport) BOOL CRT_WINAPI SetFilePointerEx(
     HANDLE hFile,
     long long liDistanceToMove,
@@ -150,6 +228,29 @@ __declspec(dllimport) BOOL CRT_WINAPI SetFilePointerEx(
     DWORD dwMoveMethod);
 __declspec(dllimport) BOOL CRT_WINAPI SetEndOfFile(HANDLE hFile);
 __declspec(dllimport) BOOL CRT_WINAPI FlushFileBuffers(HANDLE hFile);
+__declspec(dllimport) BOOL CRT_WINAPI LockFileEx(
+    HANDLE hFile,
+    DWORD dwFlags,
+    DWORD dwReserved,
+    DWORD nNumberOfBytesToLockLow,
+    DWORD nNumberOfBytesToLockHigh,
+    OVERLAPPED* lpOverlapped);
+__declspec(dllimport) BOOL CRT_WINAPI UnlockFileEx(
+    HANDLE hFile,
+    DWORD dwReserved,
+    DWORD nNumberOfBytesToUnlockLow,
+    DWORD nNumberOfBytesToUnlockHigh,
+    OVERLAPPED* lpOverlapped);
+__declspec(dllimport) BOOL CRT_WINAPI SetFileTime(
+    HANDLE hFile,
+    const struct crt_filetime* lpCreationTime,
+    const struct crt_filetime* lpLastAccessTime,
+    const struct crt_filetime* lpLastWriteTime);
+__declspec(dllimport) BOOL CRT_WINAPI GetDiskFreeSpaceExA(
+    const char* lpDirectoryName,
+    unsigned long long* lpFreeBytesAvailableToCaller,
+    unsigned long long* lpTotalNumberOfBytes,
+    unsigned long long* lpTotalNumberOfFreeBytes);
 __declspec(dllimport) void* CRT_WINAPI VirtualAlloc(
     void* lpAddress,
     size_t dwSize,
@@ -196,6 +297,8 @@ static HANDLE fd_table[CRT_FD_TABLE_SIZE];
 static int fd_kind[CRT_FD_TABLE_SIZE];
 static int fd_table_initialized;
 static int winsock_initialized;
+
+long __crt_sys_geteuid(void);
 
 struct winsock_api {
   int (CRT_WINAPI* WSAStartup)(WORD wVersionRequested, void* lpWSAData);
@@ -246,6 +349,9 @@ static int map_windows_error(DWORD error) {
       return EBADF;
     case 32:
       return EBUSY;
+    case 33:
+    case 36:
+      return EAGAIN;
     case 80:
     case 183:
       return EEXIST;
@@ -331,6 +437,21 @@ static time_t filetime_to_time(const struct crt_filetime* ft) {
   }
   ticks -= SEC_TO_UNIX_EPOCH * WINDOWS_TICK;
   return (time_t)(ticks / WINDOWS_TICK);
+}
+
+static void time_to_filetime(time_t seconds, long microseconds, struct crt_filetime* ft) {
+  unsigned long long ticks;
+
+  if (seconds < 0) {
+    seconds = 0;
+  }
+  if (microseconds < 0) {
+    microseconds = 0;
+  }
+  ticks = ((unsigned long long)seconds + SEC_TO_UNIX_EPOCH) * WINDOWS_TICK;
+  ticks += (unsigned long long)microseconds * 10ULL;
+  ft->low = (DWORD)(ticks & 0xffffffffU);
+  ft->high = (DWORD)(ticks >> 32);
 }
 
 static void init_fd_table(void) {
@@ -502,6 +623,145 @@ long __crt_sys_write(int fd, const void* buf, unsigned long count) {
   return (long)written;
 }
 
+long __crt_sys_pread(int fd, void* buf, unsigned long count, long long offset) {
+  HANDLE handle = get_fd_handle(fd);
+  OVERLAPPED overlapped;
+  DWORD bytes_read = 0;
+
+  if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_SOCKET) {
+    return -ESPIPE;
+  }
+  if (handle == INVALID_HANDLE_VALUE) {
+    return -EBADF;
+  }
+  if (offset < 0) {
+    return -EINVAL;
+  }
+  memset(&overlapped, 0, sizeof(overlapped));
+  overlapped.Offset = (DWORD)((uint64_t)offset & 0xffffffffU);
+  overlapped.OffsetHigh = (DWORD)(((uint64_t)offset >> 32) & 0xffffffffU);
+  if (!ReadFile(handle, buf, (DWORD)count, &bytes_read, &overlapped)) {
+    return fail_last_error();
+  }
+  return (long)bytes_read;
+}
+
+long __crt_sys_pwrite(int fd, const void* buf, unsigned long count, long long offset) {
+  HANDLE handle = get_fd_handle(fd);
+  OVERLAPPED overlapped;
+  DWORD written = 0;
+
+  if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_SOCKET) {
+    return -ESPIPE;
+  }
+  if (handle == INVALID_HANDLE_VALUE) {
+    return -EBADF;
+  }
+  if (offset < 0) {
+    return -EINVAL;
+  }
+  memset(&overlapped, 0, sizeof(overlapped));
+  overlapped.Offset = (DWORD)((uint64_t)offset & 0xffffffffU);
+  overlapped.OffsetHigh = (DWORD)(((uint64_t)offset >> 32) & 0xffffffffU);
+  if (!WriteFile(handle, buf, (DWORD)count, &written, &overlapped)) {
+    return fail_last_error();
+  }
+  return (long)written;
+}
+
+static long windows_lock_start(HANDLE handle, const struct flock* lock, long long* start) {
+  long long current = 0;
+  long long end = 0;
+
+  if (lock->l_whence == SEEK_SET) {
+    *start = lock->l_start;
+  } else if (lock->l_whence == SEEK_CUR) {
+    if (!SetFilePointerEx(handle, 0, &current, FILE_CURRENT)) {
+      return fail_last_error();
+    }
+    *start = current + lock->l_start;
+  } else if (lock->l_whence == SEEK_END) {
+    if (!SetFilePointerEx(handle, 0, &end, FILE_END)) {
+      return fail_last_error();
+    }
+    *start = end + lock->l_start;
+  } else {
+    return -EINVAL;
+  }
+  if (*start < 0 || lock->l_len < 0) {
+    return -EINVAL;
+  }
+  return 0;
+}
+
+long __crt_sys_fcntl(int fd, int cmd, void* arg) {
+  HANDLE handle = get_fd_handle(fd);
+  struct flock* lock = (struct flock*)arg;
+  OVERLAPPED overlapped;
+  unsigned long long length;
+  long long start;
+  DWORD flags = 0;
+  long result;
+
+  if (handle == INVALID_HANDLE_VALUE) {
+    return -EBADF;
+  }
+  if (lock == 0) {
+    return -EINVAL;
+  }
+  result = windows_lock_start(handle, lock, &start);
+  if (result < 0) {
+    return result;
+  }
+  length = lock->l_len == 0 ? 0xffffffffffffffffULL - (unsigned long long)start
+                            : (unsigned long long)lock->l_len;
+  memset(&overlapped, 0, sizeof(overlapped));
+  overlapped.Offset = (DWORD)((uint64_t)start & 0xffffffffU);
+  overlapped.OffsetHigh = (DWORD)(((uint64_t)start >> 32) & 0xffffffffU);
+
+  if (cmd == F_GETLK) {
+    flags = lock->l_type == F_WRLCK ? LOCKFILE_EXCLUSIVE_LOCK : 0;
+    flags |= LOCKFILE_FAIL_IMMEDIATELY;
+    if (LockFileEx(handle, flags, 0, (DWORD)(length & 0xffffffffU),
+                   (DWORD)(length >> 32), &overlapped)) {
+      (void)UnlockFileEx(handle, 0, (DWORD)(length & 0xffffffffU), (DWORD)(length >> 32),
+                         &overlapped);
+      lock->l_type = F_UNLCK;
+      lock->l_pid = 0;
+      return 0;
+    }
+    result = fail_last_error();
+    if (result == -EAGAIN || result == -EACCES) {
+      lock->l_type = F_WRLCK;
+      lock->l_pid = 0;
+      return 0;
+    }
+    return result;
+  }
+  if (cmd == F_SETLK || cmd == F_SETLKW) {
+    if (lock->l_type == F_UNLCK) {
+      return UnlockFileEx(handle, 0, (DWORD)(length & 0xffffffffU), (DWORD)(length >> 32),
+                          &overlapped)
+                 ? 0
+                 : fail_last_error();
+    }
+    if (lock->l_type != F_RDLCK && lock->l_type != F_WRLCK) {
+      return -EINVAL;
+    }
+    if (lock->l_type == F_WRLCK) {
+      flags |= LOCKFILE_EXCLUSIVE_LOCK;
+    }
+    if (cmd == F_SETLK) {
+      flags |= LOCKFILE_FAIL_IMMEDIATELY;
+    }
+    return LockFileEx(handle, flags, 0, (DWORD)(length & 0xffffffffU),
+                      (DWORD)(length >> 32), &overlapped)
+               ? 0
+               : fail_last_error();
+  }
+  return -EINVAL;
+}
+
 long __crt_sys_open(const char* path, int flags, unsigned int mode) {
   DWORD access = 0;
   DWORD disposition = OPEN_EXISTING;
@@ -637,6 +897,120 @@ long __crt_sys_fsync(int fd) {
     return fail_last_error();
   }
   return 0;
+}
+
+static void windows_statfs_fill_generic(struct statfs* buf) {
+  memset(buf, 0, sizeof(*buf));
+  buf->f_bsize = 4096;
+  buf->f_frsize = 4096;
+  buf->f_namelen = 255;
+}
+
+static const char* windows_root_for_path(const char* path, char root[8]) {
+  if (path != 0 && ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) &&
+      path[1] == ':' && (path[2] == '\\' || path[2] == '/')) {
+    root[0] = path[0];
+    root[1] = ':';
+    root[2] = '\\';
+    root[3] = 0;
+    return root;
+  }
+  return 0;
+}
+
+long __crt_sys_statfs(const char* path, struct statfs* buf) {
+  DWORD attrs;
+  char absolute[4096];
+  char root[8];
+  const char* query_root;
+  unsigned long long available = 0;
+  unsigned long long total = 0;
+  unsigned long long free_bytes = 0;
+
+  if (path == 0 || buf == 0) {
+    return -EINVAL;
+  }
+  attrs = GetFileAttributesA(path);
+  if (attrs == INVALID_FILE_ATTRIBUTES) {
+    return fail_last_error();
+  }
+  windows_statfs_fill_generic(buf);
+  if (GetFullPathNameA(path, (DWORD)sizeof(absolute), absolute, 0) == 0) {
+    return 0;
+  }
+  query_root = windows_root_for_path(absolute, root);
+  if (query_root != 0 && GetDiskFreeSpaceExA(query_root, &available, &total, &free_bytes)) {
+    buf->f_blocks = total / buf->f_frsize;
+    buf->f_bfree = free_bytes / buf->f_frsize;
+    buf->f_bavail = available / buf->f_frsize;
+  }
+  return 0;
+}
+
+long __crt_sys_fstatfs(int fd, struct statfs* buf) {
+  if (buf == 0) {
+    return -EINVAL;
+  }
+  if (get_fd_handle(fd) == INVALID_HANDLE_VALUE) {
+    return -EBADF;
+  }
+  windows_statfs_fill_generic(buf);
+  return 0;
+}
+
+static void timeval_pair_to_filetime_pair(
+    const struct timeval times[2],
+    struct crt_filetime out[2]) {
+  if (times == 0) {
+    GetSystemTimeAsFileTime(&out[0]);
+    out[1] = out[0];
+    return;
+  }
+  time_to_filetime(times[0].tv_sec, times[0].tv_usec, &out[0]);
+  time_to_filetime(times[1].tv_sec, times[1].tv_usec, &out[1]);
+}
+
+long __crt_sys_utimes(const char* path, const struct timeval times[2]) {
+  HANDLE handle;
+  struct crt_filetime ft[2];
+
+  if (path == 0) {
+    return -EINVAL;
+  }
+  if (times != 0 &&
+      (times[0].tv_usec < 0 || times[0].tv_usec >= 1000000L ||
+       times[1].tv_usec < 0 || times[1].tv_usec >= 1000000L)) {
+    return -EINVAL;
+  }
+  handle = CreateFileA(path, FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE |
+                       FILE_SHARE_DELETE, 0, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0);
+  if (handle == INVALID_HANDLE_VALUE) {
+    return fail_last_error();
+  }
+  timeval_pair_to_filetime_pair(times, ft);
+  if (!SetFileTime(handle, 0, &ft[0], &ft[1])) {
+    long result = fail_last_error();
+    CloseHandle(handle);
+    return result;
+  }
+  CloseHandle(handle);
+  return 0;
+}
+
+long __crt_sys_futimes(int fd, const struct timeval times[2]) {
+  HANDLE handle = get_fd_handle(fd);
+  struct crt_filetime ft[2];
+
+  if (handle == INVALID_HANDLE_VALUE) {
+    return -EBADF;
+  }
+  if (times != 0 &&
+      (times[0].tv_usec < 0 || times[0].tv_usec >= 1000000L ||
+       times[1].tv_usec < 0 || times[1].tv_usec >= 1000000L)) {
+    return -EINVAL;
+  }
+  timeval_pair_to_filetime_pair(times, ft);
+  return SetFileTime(handle, 0, &ft[0], &ft[1]) ? 0 : fail_last_error();
 }
 
 long __crt_sys_access(const char* path, int mode) {
@@ -827,7 +1201,7 @@ static short poll_socket(SOCKET socket_handle, short events) {
     revents |= POLLOUT;
   }
   if ((events & POLLIN) != 0) {
-    if (winsock.ioctlsocket(socket_handle, FIONREAD, &bytes_available) == SOCKET_ERROR) {
+    if (winsock.ioctlsocket(socket_handle, CRT_WS_FIONREAD, &bytes_available) == SOCKET_ERROR) {
       return POLLERR;
     }
     if (bytes_available != 0) {
@@ -1105,6 +1479,8 @@ static long stat_from_handle(HANDLE handle, struct stat* st) {
   st->st_dev = info.volume_serial_number;
   st->st_ino = ((uint64_t)info.file_index_high << 32) | info.file_index_low;
   st->st_nlink = info.number_of_links;
+  st->st_uid = (unsigned int)__crt_sys_geteuid();
+  st->st_gid = 0;
   if ((info.file_attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
     st->st_mode = S_IFDIR | S_IRWXU | S_IRWXG | S_IRWXO;
   } else {
@@ -1141,6 +1517,89 @@ long __crt_sys_isatty(int fd) {
   }
   file_type = GetFileType(handle);
   return file_type == FILE_TYPE_CHAR ? 1 : 0;
+}
+
+static long windows_ioctl_fionread_handle(HANDLE handle, int* value) {
+  DWORD file_type;
+  DWORD available = 0;
+
+  if (value == 0) {
+    return -EFAULT;
+  }
+  file_type = GetFileType(handle);
+  if (file_type == FILE_TYPE_PIPE) {
+    if (!PeekNamedPipe(handle, 0, 0, 0, &available, 0)) {
+      return fail_last_error();
+    }
+    *value = (int)available;
+    return 0;
+  }
+  if (file_type == FILE_TYPE_CHAR) {
+    if (GetNumberOfConsoleInputEvents(handle, &available)) {
+      *value = (int)available;
+      return 0;
+    }
+    return -ENOTTY;
+  }
+  return -ENOTTY;
+}
+
+static long windows_ioctl_get_winsize(HANDLE handle, struct winsize* value) {
+  struct crt_console_screen_buffer_info info;
+
+  if (value == 0) {
+    return -EFAULT;
+  }
+  if (GetFileType(handle) != FILE_TYPE_CHAR) {
+    return -ENOTTY;
+  }
+  if (!GetConsoleScreenBufferInfo(handle, &info)) {
+    return -ENOTTY;
+  }
+  value->ws_col = (unsigned short)(info.srWindow.Right - info.srWindow.Left + 1);
+  value->ws_row = (unsigned short)(info.srWindow.Bottom - info.srWindow.Top + 1);
+  value->ws_xpixel = 0;
+  value->ws_ypixel = 0;
+  return 0;
+}
+
+long __crt_sys_ioctl(int fd, unsigned long request, void* arg) {
+  HANDLE handle;
+
+  init_fd_table();
+  if (fd < 0 || fd >= CRT_FD_TABLE_SIZE || fd_kind[fd] == CRT_FD_KIND_NONE ||
+      fd_table[fd] == 0 ||
+      fd_table[fd] == INVALID_HANDLE_VALUE) {
+    return -EBADF;
+  }
+  if (fd_kind[fd] == CRT_FD_KIND_SOCKET) {
+    unsigned long available = 0;
+
+    if (request != FIONREAD) {
+      return -ENOTTY;
+    }
+    if (arg == 0) {
+      return -EFAULT;
+    }
+    if (winsock.ioctlsocket((SOCKET)(uintptr_t)fd_table[fd], CRT_WS_FIONREAD, &available) ==
+        SOCKET_ERROR) {
+      return -map_wsa_error(winsock.WSAGetLastError());
+    }
+    *(int*)arg = (int)available;
+    return 0;
+  }
+
+  handle = fd_table[fd];
+  switch (request) {
+    case FIONREAD:
+      return windows_ioctl_fionread_handle(handle, (int*)arg);
+    case TIOCGWINSZ:
+      return windows_ioctl_get_winsize(handle, (struct winsize*)arg);
+    case TIOCSWINSZ:
+      return GetFileType(handle) == FILE_TYPE_CHAR ? -ENOTSUP : -ENOTTY;
+    default:
+      return -ENOTTY;
+  }
 }
 
 long __crt_sys_stat_path(const char* path, struct stat* st) {
@@ -1310,6 +1769,66 @@ long __crt_sys_getpid(void) {
 }
 
 long __crt_sys_getppid(void) {
+  return 0;
+}
+
+long __crt_sysconf_page_size(void) {
+  struct crt_system_info info;
+
+  memset(&info, 0, sizeof(info));
+  GetSystemInfo(&info);
+  return info.dwPageSize != 0 ? (long)info.dwPageSize : 4096;
+}
+
+long __crt_sysconf_nprocessors_conf(void) {
+  struct crt_system_info info;
+
+  memset(&info, 0, sizeof(info));
+  GetSystemInfo(&info);
+  return info.dwNumberOfProcessors != 0 ? (long)info.dwNumberOfProcessors : 1;
+}
+
+long __crt_sysconf_nprocessors_onln(void) {
+  return __crt_sysconf_nprocessors_conf();
+}
+
+static long windows_phys_pages(int available) {
+  struct crt_memory_status_ex status;
+  unsigned long long bytes;
+  long page_size = __crt_sysconf_page_size();
+
+  if (page_size <= 0) {
+    return -1;
+  }
+  memset(&status, 0, sizeof(status));
+  status.dwLength = sizeof(status);
+  if (!GlobalMemoryStatusEx(&status)) {
+    return -1;
+  }
+  bytes = available ? status.ullAvailPhys : status.ullTotalPhys;
+  return (long)(bytes / (unsigned long long)page_size);
+}
+
+long __crt_sysconf_phys_pages(void) {
+  return windows_phys_pages(0);
+}
+
+long __crt_sysconf_avphys_pages(void) {
+  return windows_phys_pages(1);
+}
+
+long __crt_sys_geteuid(void) {
+  return 1;
+}
+
+long __crt_sys_fchown(int fd, unsigned int owner, unsigned int group) {
+  HANDLE handle = get_fd_handle(fd);
+
+  (void)owner;
+  (void)group;
+  if (handle == INVALID_HANDLE_VALUE) {
+    return -EBADF;
+  }
   return 0;
 }
 

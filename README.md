@@ -319,6 +319,33 @@ executable`, rerun the matching build preset or use the workflow preset:
 cmake --workflow --preset <os-host-ninja-debug>
 ```
 
+### Sysroot
+
+Install the project sysroot into the matching build directory:
+
+```sh
+cmake --build --preset <os-host-ninja-debug> --target sysroot
+```
+
+The generated sysroot is installed under:
+
+```text
+out/<preset>/sysroot/
+  include/
+    public CRT headers
+  lib/
+    crt1.o
+    libc.a
+    libdl.a
+    libm.a
+    libc++.a
+    libc.dylib / libc.so / c.dll
+    libdl.dylib / libdl.so / dl.dll
+    libm.dylib / libm.so / m.dll
+    libc++.dylib / libc++.so / c++.dll
+    libclang_rt.builtins.a
+```
+
 ### macOS
 
 The currently verified preset is macOS host debug:
@@ -340,88 +367,6 @@ Install the project sysroot into the build directory:
 ```sh
 cmake --build --preset macos-host-ninja-debug --target sysroot
 ```
-
-The generated sysroot currently contains:
-
-```text
-out/macos-host-ninja-debug/sysroot/
-  include/
-    errno.h
-    fcntl.h
-    stdio.h
-    string.h
-    stdlib.h
-    sys/mman.h
-    sys/types.h
-    unistd.h
-  lib/
-    crt1.o
-    libc.a
-    libdl.a
-    libm.a
-    libc++.a
-    libc.dylib / libc.so / c.dll
-    libdl.dylib / libdl.so / dl.dll
-    libm.dylib / libm.so / m.dll
-    libc++.dylib / libc++.so / c++.dll
-    libclang_rt.builtins.a
-```
-
-Configure/make porting should use the NDK-style wrapper tools directly. First
-download and extract the upstream source archives yourself, then install the CRT
-sysroot:
-
-```sh
-cmake --build --preset macos-host-ninja-debug --target sysroot
-mkdir -p out/macos-host-ninja-debug/port-tests/src
-mkdir -p out/macos-host-ninja-debug/port-tests/install
-```
-
-Load the CRT porting environment from the repository root. On Linux/macOS, or
-from Git Bash/MSYS on Windows:
-
-```sh
-. tools/crt-env.sh macos-host-ninja-debug
-```
-
-On Windows, use the command-file environment helper to avoid PowerShell
-execution-policy restrictions:
-
-```bat
-call tools\crt-env.cmd windows-host-ninja-debug
-```
-
-From PowerShell, open a configured `cmd.exe` session instead:
-
-```powershell
-cmd /k tools\crt-env.cmd windows-host-ninja-debug
-```
-
-`tools\crt-env.ps1` is also available if your PowerShell execution policy allows
-local scripts.
-
-Example zlib build from an extracted upstream source directory:
-
-```sh
-cd /path/to/zlib-1.3.1
-./configure --static --prefix="$PORT_PREFIX"
-make -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 2)"
-make install
-```
-
-Example libpng build after zlib has been installed into `PORT_PREFIX`:
-
-```sh
-cd /path/to/libpng-1.6.57
-./configure --disable-shared --enable-static --prefix="$PORT_PREFIX"
-make -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 2)"
-make install
-```
-
-The wrappers use only CRT sysroot libc headers plus Clang resource headers, and
-link configure test executables with CRT startup/static runtime archives. The
-Python port build helper under `tools/` is for project automation and agent-side
-regression checks, not the primary user workflow. See `docs/sysroot_ports.md`.
 
 ### Linux
 
@@ -474,11 +419,210 @@ The Windows bring-up intentionally links `kernel32` for the OS boundary while
 still avoiding the hosted C runtime with `-nostdlib`, `-nostartfiles`, and
 `-nodefaultlibs`.
 
+## Porting Tests
+
+Porting tests validate whether unmodified upstream library source can be rebuilt
+against the CRT sysroot. This is separate from the normal CRT unit test flow in
+`## Build`.
+
+The porting loop is also how the CRT grows. When an upstream package fails, the
+preferred fix is to fill the missing Bionic-compatible CRT/sysroot/PAL surface,
+not to patch the upstream package or expose host SDK headers by accident.
+
+The implementation loop for each port is:
+
+1. Run upstream `configure` or a direct `crt-cc` compile/link/run test to expose
+   missing headers, types, symbols, or behavior.
+2. Check how Android Bionic defines or implements the required surface.
+3. Decide the CRT/PAL/sysroot extension policy and implement it in this
+   repository.
+4. Re-run the same porting test. If it fails again, return to step 1 and repeat
+   with the next missing surface.
+
+Bionic is the compatibility reference for this loop. New public headers, types,
+macros, symbols, errno values, return-value behavior, and ABI shapes should be
+checked against Android Bionic before they are added to the CRT sysroot. Host
+OS-specific APIs may still be used behind PAL adapters, but they should not
+define the public CRT surface unless a documented compatibility shim is being
+added deliberately.
+
+The intended user workflow is:
+
+1. Build and install the CRT sysroot for the current host preset.
+2. Download and extract upstream source archives under `out/<preset>/port-tests/src`.
+3. Load the CRT porting environment.
+4. Run the upstream project's native `configure`, `make`, and `make install`.
+5. Record the result in `docs/porting_status.md` and the matching recipe.
+
+The porting work area is always under the build tree:
+
+```text
+out/<preset>/port-tests/
+  downloads/
+  src/
+  build/
+  install/
+  logs/
+```
+
+### Recipes
+
+Porting recipes live under `porting/recipes/`. A recipe is the source of truth
+for one upstream library's porting metadata:
+
+- `source.url`: upstream archive URL.
+- `source.archive`: expected archive filename.
+- `source.source_dir`: extracted source directory name.
+- `source.sha256`: authoritative archive integrity hash.
+- `source.sha1` and `source.md5`: compatibility metadata only.
+- `dependencies`: other recipes that must be installed into `PORT_PREFIX` first.
+- `build.system`: initial build driver, such as `configure`, `amalgamation`, or
+  `manual`.
+- `build.automated`: optional boolean; `false` records an upstream build flow
+  that exists but is not yet included in aggregate CMake port builds.
+- `build.configure_args`: arguments appended before `--prefix=$PORT_PREFIX`.
+- `build.sources`, `build.archive`, and `build.install_headers`: direct
+  single-source/amalgamation build inputs when the upstream archive has no
+  configure script.
+- `build.cflags`: recipe-owned feature switches for the upstream package, kept
+  separate from `CRT_EXTRA_CFLAGS`.
+- `build.env`: recipe-specific configure/cache variables for CRT toolchain
+  capability declarations.
+- `status`: per-host result for Linux, macOS, and Windows.
+- `notes`: known gaps, required CRT surface, or follow-up policy.
+
+The human-readable success matrix is maintained in
+`docs/porting_status.md`.
+
+### Environment
+
+First install the CRT sysroot:
+
+```sh
+cmake --build --preset macos-host-ninja-debug --target sysroot
+```
+
+Load the CRT porting environment from the repository root. On Linux/macOS, or
+from Git Bash/MSYS on Windows:
+
+```sh
+. tools/crt-env.sh macos-host-ninja-debug
+```
+
+On Windows, use the command-file environment helper to avoid PowerShell
+execution-policy restrictions:
+
+```bat
+call tools\crt-env.cmd windows-host-ninja-debug
+```
+
+From PowerShell, open a configured `cmd.exe` session instead:
+
+```powershell
+cmd /k tools\crt-env.cmd windows-host-ninja-debug
+```
+
+`tools\crt-env.ps1` is also available if your PowerShell execution policy allows
+local scripts.
+
+The environment helpers intentionally reset `CPPFLAGS` and `LDFLAGS` to the CRT
+port prefix instead of appending the previous shell values. Use
+`CRT_EXTRA_CPPFLAGS`, `CRT_EXTRA_LDFLAGS`, `CRT_EXTRA_CFLAGS`,
+`CRT_EXTRA_CXXFLAGS`, or `CRT_EXTRA_LIBS` when an upstream package needs extra
+flags.
+
+### Manual Examples
+
+Example zlib build from an extracted upstream source directory:
+
+```sh
+cd /path/to/zlib-1.3.1
+./configure --static --prefix="$PORT_PREFIX"
+make -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 2)"
+make install
+```
+
+Example libpng build after zlib has been installed into `PORT_PREFIX`:
+
+```sh
+cd /path/to/libpng-1.6.57
+./configure --disable-shared --enable-static --prefix="$PORT_PREFIX"
+make -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 2)"
+make install
+```
+
+The wrappers use only CRT sysroot libc headers plus Clang resource headers, and
+link configure test executables with CRT startup/static runtime archives. See
+`docs/sysroot_ports.md`.
+
+### Automation
+
+CMake provides recipe-backed porting targets. They still run the upstream
+`configure && make && make install` flow under `out/<preset>/port-tests`, but
+they make the common test path easier to repeat.
+
+List the available recipes:
+
+```sh
+cmake --build --preset macos-host-ninja-debug --target port-list
+```
+
+Fetch and extract all recipe sources:
+
+```sh
+cmake --build --preset macos-host-ninja-debug --target port-fetch
+```
+
+Fetch and extract one recipe source:
+
+```sh
+cmake --build --preset macos-host-ninja-debug --target port-fetch-zlib
+```
+
+Per-recipe fetch targets also fetch recipe dependencies. For example,
+`port-fetch-libpng` fetches both libpng and zlib because libpng declares zlib in
+`dependencies`.
+
+Build an automated recipe against the CRT sysroot:
+
+```sh
+cmake --build --preset macos-host-ninja-debug --target port-build-zlib
+cmake --build --preset macos-host-ninja-debug --target port-build-libpng
+cmake --build --preset macos-host-ninja-debug --target port-build-sqlite-amalgamation
+```
+
+Force an automated recipe to rebuild:
+
+```sh
+cmake --build --preset macos-host-ninja-debug --target port-rebuild-zlib
+```
+
+Build aggregate recipe groups:
+
+```sh
+cmake --build --preset macos-host-ninja-debug --target port-build-configure
+cmake --build --preset macos-host-ninja-debug --target port-rebuild-configure
+cmake --build --preset macos-host-ninja-debug --target port-build-recipes
+cmake --build --preset macos-host-ninja-debug --target port-rebuild-recipes
+```
+
+`tools/fetch_ports.py` and `tools/crt-port-build.py` are the lower-level helpers
+used by those CMake targets. They read recipes from `porting/recipes/` and are
+kept for project automation and agent-side regression checks. Automated port
+builds also ignore inherited host `CPPFLAGS`, `CFLAGS`, `CXXFLAGS`, `LDFLAGS`,
+and `LIBS`; pass project-specific additions through the matching `CRT_EXTRA_*`
+variables.
+
+CMake target names are generated from the recipes at configure time. If a new
+recipe file is added, rerun the matching `cmake --preset ...` command before
+using its `port-fetch-<name>` or `port-build-<name>` target.
+
 ## Repository Layout
 
 ```text
 docs/
 include/
+porting/
 platform/
 arch/
 cmake/
@@ -488,6 +632,7 @@ libdl/
 libstdc++/
 linker/
 tests/
+tools/
 ```
 
 Only some of these directories exist today. The layout reflects the intended
@@ -505,3 +650,5 @@ See:
 - `docs/cxx_runtime.md`
 - `docs/linker_loader.md`
 - `docs/shared_libraries.md`
+- `docs/sysroot_ports.md`
+- `docs/porting_status.md`

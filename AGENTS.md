@@ -25,6 +25,43 @@ OS에서 더 쉽게 재빌드하고 이전할 수 있게 만드는 것이 핵심
 기존 Linux/glibc 바이너리 무수정 실행을 목표로 하지 않는다. 기본 목표는
 **rebuild-based source portability**이다.
 
+## 포팅 테스트 방향성
+
+외부 library/application porting test는 이 프로젝트의 핵심 개발 루프이다.
+zlib, libpng, SQLite, libffi 같은 원본 upstream source를 CRT sysroot와 wrapper
+toolchain으로 빌드해 보면서 부족한 Bionic-compatible libc/PAL 표면을 찾아
+채운다.
+
+이때 기본 원칙은 다음과 같다.
+
+- porting test는 다음 순서로 반복한다.
+  1. upstream `configure` 또는 `crt-cc` 직접 compile/link/run으로 구현 필요
+     요소를 도출한다.
+  2. 해당 API/type/symbol/behavior의 Android Bionic 구현과 public ABI 정책을
+     확인한다.
+  3. 우리 CRT/PAL/sysroot에서 어떤 방향으로 확장할지 결정하고 구현한다.
+  4. 동일 porting test를 재실행하고, 실패하면 1번으로 돌아가 누락 표면을 다시
+     도출한다.
+- 원본 upstream source를 임의로 patch하지 않는다.
+- 빌드 실패는 먼저 우리 CRT header, libc, libm, libdl, linker, C++ runtime,
+  startup/sysroot, PAL 구현의 부족으로 간주하고 보강한다.
+- porting test에서 새 header/type/macro/symbol/behavior가 필요해지면 반드시
+  Android Bionic의 public header, source, ABI shape, errno/return-value 정책을
+  먼저 참조한다. 우리 CRT/PAL/sysroot는 host OS의 native libc/SDK 모양이 아니라
+  Bionic-compatible surface를 기준으로 확장한다.
+- host OS 또는 특정 upstream package가 Darwin/glibc/MSVC 전용 surface를 요구하더라도
+  그것을 그대로 public ABI로 채택하지 않는다. 필요한 경우 recipe compile option,
+  내부 PAL adapter, 또는 명시적 compatibility shim을 사용하되 Bionic 기준과의 차이를
+  문서화한다.
+- configure/cache 변수는 CRT toolchain capability를 정확히 선언하기 위한 경우에만
+  recipe에 기록한다.
+- host SDK/header/library를 편의상 노출하여 통과시키지 않는다. 필요한 OS boundary는
+  CRT/PAL이 통제하는 최소 compatibility surface로 제공한다.
+- port-specific workaround가 정말 필요하면 먼저 문서에 이유와 장기 제거 조건을
+  기록하고, upstream source 수정은 최후의 수단으로만 검토한다.
+- porting 성공 여부는 단순 compile이 아니라 configure/make/install, 간단한 link/run
+  smoke, 필요한 경우 runtime behavior test까지 확장해서 판단한다.
+
 ## 기반 스택
 
 - Base runtime: Android Bionic libc.

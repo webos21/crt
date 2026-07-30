@@ -12,6 +12,8 @@ typedef uint64_t __crt_nlink_t;
 typedef int64_t __crt_blksize_t;
 typedef int64_t __crt_blkcnt_t;
 typedef int32_t __crt_pid_t;
+typedef uint32_t __crt_uid_t;
+typedef uint32_t __crt_gid_t;
 typedef uint32_t __crt_socklen_t;
 typedef int64_t __crt_time_t;
 typedef long __crt_clock_t;

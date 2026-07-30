@@ -157,6 +157,17 @@ set_tests_properties(file_path_test_runs PROPERTIES
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 
+add_crt_test(sysconf_test sysconf_test.c)
+set_tests_properties(sysconf_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "sysconf_test: ok"
+)
+
+add_crt_test(ioctl_test ioctl_test.c)
+set_tests_properties(ioctl_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "ioctl_test: ok"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
 add_crt_test(poll_select_test poll_select_test.c)
 set_tests_properties(poll_select_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "poll_select_test: ok"

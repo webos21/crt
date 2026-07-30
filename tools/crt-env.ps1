@@ -62,14 +62,15 @@ if (-not $env:AR) { $env:AR = "llvm-ar" }
 if (-not $env:RANLIB) { $env:RANLIB = "llvm-ranlib" }
 if (-not $env:STRIP) { $env:STRIP = "llvm-strip" }
 $env:PORT_PREFIX = Join-Path $RepoRoot "out\$Preset\port-tests\install"
-$env:CPPFLAGS = "-I$($env:PORT_PREFIX)\include" + $(if ($env:CPPFLAGS) { " $($env:CPPFLAGS)" } else { "" })
-$env:LDFLAGS = "-L$($env:PORT_PREFIX)\lib" + $(if ($env:LDFLAGS) { " $($env:LDFLAGS)" } else { "" })
+$env:CPPFLAGS = "-I$($env:PORT_PREFIX)\include" + $(if ($env:CRT_EXTRA_CPPFLAGS) { " $($env:CRT_EXTRA_CPPFLAGS)" } else { "" })
+$env:LDFLAGS = "-L$($env:PORT_PREFIX)\lib" + $(if ($env:CRT_EXTRA_LDFLAGS) { " $($env:CRT_EXTRA_LDFLAGS)" } else { "" })
 $env:PKG_CONFIG_LIBDIR = Join-Path $env:PORT_PREFIX "lib\pkgconfig"
 $env:PKG_CONFIG_PATH = $env:PKG_CONFIG_LIBDIR
 $env:PATH = "$ToolsDir;$($env:PATH)"
 
 New-Item -ItemType Directory -Force -Path (Join-Path $RepoRoot "out\$Preset\port-tests\src") | Out-Null
-New-Item -ItemType Directory -Force -Path $env:PORT_PREFIX | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $env:PORT_PREFIX "include") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $env:PORT_PREFIX "lib\pkgconfig") | Out-Null
 
 Write-Host "CRT_SYSROOT=$($env:CRT_SYSROOT)"
 Write-Host "CRT_TARGET_OS=$($env:CRT_TARGET_OS)"

@@ -1,43 +1,73 @@
 #!/usr/bin/env python3
 import argparse
 import hashlib
+import json
 import os
+from pathlib import Path
 import shutil
 import tarfile
 import urllib.request
 import zipfile
 
 
-PORTS = [
-    {
-        "name": "zlib",
-        "version": "1.3.1",
-        "url": "https://zlib.net/fossils/zlib-1.3.1.tar.gz",
-        "archive": "zlib-1.3.1.tar.gz",
-        "sha256": "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23",
-    },
-    {
-        "name": "libpng",
-        "version": "1.6.57",
-        "url": "https://download.sourceforge.net/libpng/libpng-1.6.57.tar.xz",
-        "archive": "libpng-1.6.57.tar.xz",
-        "sha256": None,
-    },
-    {
-        "name": "sqlite-amalgamation",
-        "version": "3.53.4",
-        "url": "https://www.sqlite.org/2026/sqlite-amalgamation-3530400.zip",
-        "archive": "sqlite-amalgamation-3530400.zip",
-        "sha256": None,
-    },
-    {
-        "name": "libffi",
-        "version": "3.4.5",
-        "url": "https://github.com/libffi/libffi/releases/download/v3.4.5/libffi-3.4.5.tar.gz",
-        "archive": "libffi-3.4.5.tar.gz",
-        "sha256": "96fff4e589e3b239d888d9aa44b3ff30693c2ba1617f953925a70ddebcc102b2",
-    },
-]
+def load_recipes(recipe_dir):
+    recipes = {}
+    for path in sorted(Path(recipe_dir).glob("*.json")):
+        with open(path, "r", encoding="utf-8") as f:
+            recipe = json.load(f)
+        recipes[recipe["name"]] = recipe
+
+    return recipes
+
+
+def resolve_recipe_order(recipes, selected):
+    ordered = []
+    visiting = set()
+    visited = set()
+
+    def visit(name):
+        if name in visited:
+            return
+        if name in visiting:
+            raise SystemExit(f"dependency cycle includes {name}")
+        if name not in recipes:
+            raise SystemExit(f"recipe not found: {name}")
+
+        visiting.add(name)
+        for dep in recipes[name].get("dependencies", []):
+            visit(dep)
+        visiting.remove(name)
+        visited.add(name)
+        ordered.append(recipes[name])
+
+    names = selected or sorted(recipes)
+    for name in names:
+        visit(name)
+    return ordered
+
+
+def list_recipes(recipes):
+    print("name\tversion\tbuild\tautomated\tdependencies\tlinux\tmacos\twindows")
+    for name in sorted(recipes):
+        recipe = recipes[name]
+        build = recipe["build"]
+        status = recipe.get("status", {})
+        deps = ",".join(recipe.get("dependencies", [])) or "-"
+        automated = str(build.get("automated", True)).lower()
+        print(
+            "\t".join(
+                [
+                    recipe["name"],
+                    recipe["version"],
+                    build["system"],
+                    automated,
+                    deps,
+                    status.get("linux", "-"),
+                    status.get("macos", "-"),
+                    status.get("windows", "-"),
+                ]
+            )
+        )
 
 
 def sha256_file(path):
@@ -82,29 +112,42 @@ def extract(archive_path, dest):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dest", required=True, help="destination source root")
+    parser.add_argument("--dest", default=None, help="destination source root")
     parser.add_argument("--cache", default=None, help="archive cache directory")
+    parser.add_argument("--recipe-dir", default="porting/recipes", help="directory containing porting recipes")
+    parser.add_argument("--port", action="append", help="recipe name to fetch; defaults to all recipes")
+    parser.add_argument("--list", action="store_true", help="list recipes and exit")
     args = parser.parse_args()
+
+    recipes = load_recipes(args.recipe_dir)
+    if args.list:
+        list_recipes(recipes)
+        return
+
+    if not args.dest:
+        raise SystemExit("--dest is required unless --list is used")
 
     dest = os.path.abspath(args.dest)
     cache = os.path.abspath(args.cache or os.path.join(dest, "..", "downloads"))
+    selected_recipes = resolve_recipe_order(recipes, args.port)
     os.makedirs(dest, exist_ok=True)
     os.makedirs(cache, exist_ok=True)
 
-    for port in PORTS:
-        archive_path = os.path.join(cache, port["archive"])
-        download(port["url"], archive_path)
+    for recipe in selected_recipes:
+        source = recipe["source"]
+        archive_path = os.path.join(cache, source["archive"])
+        download(source["url"], archive_path)
         actual = sha256_file(archive_path)
-        expected = port["sha256"]
+        expected = source["sha256"]
         if expected is not None and actual != expected:
             raise SystemExit(
-                f"{port['archive']}: sha256 mismatch\n"
+                f"{source['archive']}: sha256 mismatch\n"
                 f"expected {expected}\n"
                 f"actual   {actual}"
             )
-        source_dir = os.path.join(dest, f"{port['name']}-{port['version']}")
+        source_dir = os.path.join(dest, source["source_dir"])
         extract(archive_path, source_dir)
-        print(f"{port['name']} {port['version']}: {source_dir}")
+        print(f"{recipe['name']} {recipe['version']}: {source_dir}")
 
 
 if __name__ == "__main__":

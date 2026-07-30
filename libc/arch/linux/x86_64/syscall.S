@@ -18,6 +18,42 @@ __crt_sys_write:
   retq
 .size __crt_sys_write, . - __crt_sys_write
 
+.globl __crt_sys_fcntl
+.type __crt_sys_fcntl, @function
+.p2align 4, 0x90
+__crt_sys_fcntl:
+  movq $72, %rax
+  syscall
+  retq
+.size __crt_sys_fcntl, . - __crt_sys_fcntl
+
+.globl __crt_sys_ioctl
+.type __crt_sys_ioctl, @function
+.p2align 4, 0x90
+__crt_sys_ioctl:
+  movq $16, %rax
+  syscall
+  retq
+.size __crt_sys_ioctl, . - __crt_sys_ioctl
+
+.globl __crt_sys_pread
+.type __crt_sys_pread, @function
+.p2align 4, 0x90
+__crt_sys_pread:
+  movq $17, %rax
+  syscall
+  retq
+.size __crt_sys_pread, . - __crt_sys_pread
+
+.globl __crt_sys_pwrite
+.type __crt_sys_pwrite, @function
+.p2align 4, 0x90
+__crt_sys_pwrite:
+  movq $18, %rax
+  syscall
+  retq
+.size __crt_sys_pwrite, . - __crt_sys_pwrite
+
 .globl __crt_sys_open
 .type __crt_sys_open, @function
 .p2align 4, 0x90
@@ -62,6 +98,24 @@ __crt_sys_fsync:
   syscall
   retq
 .size __crt_sys_fsync, . - __crt_sys_fsync
+
+.globl __crt_sys_statfs
+.type __crt_sys_statfs, @function
+.p2align 4, 0x90
+__crt_sys_statfs:
+  movq $137, %rax
+  syscall
+  retq
+.size __crt_sys_statfs, . - __crt_sys_statfs
+
+.globl __crt_sys_fstatfs
+.type __crt_sys_fstatfs, @function
+.p2align 4, 0x90
+__crt_sys_fstatfs:
+  movq $138, %rax
+  syscall
+  retq
+.size __crt_sys_fstatfs, . - __crt_sys_fstatfs
 
 .globl __crt_sys_access
 .type __crt_sys_access, @function
@@ -386,6 +440,16 @@ __crt_sys_nanosleep:
   retq
 .size __crt_sys_nanosleep, . - __crt_sys_nanosleep
 
+.globl __crt_sys_utimensat
+.type __crt_sys_utimensat, @function
+.p2align 4, 0x90
+__crt_sys_utimensat:
+  movq %rcx, %r10
+  movq $280, %rax
+  syscall
+  retq
+.size __crt_sys_utimensat, . - __crt_sys_utimensat
+
 .globl __crt_sys_sched_yield
 .type __crt_sys_sched_yield, @function
 .p2align 4, 0x90
@@ -474,6 +538,24 @@ __crt_sys_getppid:
   syscall
   retq
 .size __crt_sys_getppid, . - __crt_sys_getppid
+
+.globl __crt_sys_geteuid
+.type __crt_sys_geteuid, @function
+.p2align 4, 0x90
+__crt_sys_geteuid:
+  movq $107, %rax
+  syscall
+  retq
+.size __crt_sys_geteuid, . - __crt_sys_geteuid
+
+.globl __crt_sys_fchown
+.type __crt_sys_fchown, @function
+.p2align 4, 0x90
+__crt_sys_fchown:
+  movq $93, %rax
+  syscall
+  retq
+.size __crt_sys_fchown, . - __crt_sys_fchown
 
 .globl __crt_sys_kill
 .type __crt_sys_kill, @function

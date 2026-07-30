@@ -2,6 +2,7 @@
 #define CRT_UNISTD_H
 
 #include <stddef.h>
+#include <bits/sysconf.h>
 #include <sys/types.h>
 
 #define SEEK_SET 0
@@ -12,6 +13,67 @@
 #define STDOUT_FILENO 1
 #define STDERR_FILENO 2
 
+#define _POSIX_VERSION 200809L
+#define _POSIX2_VERSION 200809L
+#define _POSIX2_C_VERSION 200809L
+#define _XOPEN_VERSION 700
+#define _XOPEN_XCU_VERSION 4
+
+#define _POSIX_ARG_MAX 4096
+#define _POSIX_BARRIERS _POSIX_VERSION
+#define _POSIX_CHILD_MAX 25
+#define _POSIX_DELAYTIMER_MAX 32
+#define _POSIX_HOST_NAME_MAX 255
+#define _POSIX_LINK_MAX 8
+#define _POSIX_LOGIN_NAME_MAX 9
+#define _POSIX_NGROUPS_MAX 8
+#define _POSIX_OPEN_MAX 20
+#define _POSIX_PATH_MAX 256
+#define _POSIX_PIPE_BUF 512
+#define _POSIX_RE_DUP_MAX 255
+#define _POSIX_SEM_NSEMS_MAX 256
+#define _POSIX_SEM_VALUE_MAX 32767
+#define _POSIX_SIGQUEUE_MAX 32
+#define _POSIX_SSIZE_MAX 32767
+#define _POSIX_STREAM_MAX 8
+#define _POSIX_THREAD_DESTRUCTOR_ITERATIONS 4
+#define _POSIX_THREAD_KEYS_MAX 128
+#define _POSIX_THREAD_THREADS_MAX 64
+#define _POSIX_TIMER_MAX 32
+#define _POSIX_TTY_NAME_MAX 9
+#define _POSIX_TZNAME_MAX 6
+
+#define _POSIX_FSYNC _POSIX_VERSION
+#define _POSIX_JOB_CONTROL _POSIX_VERSION
+#define _POSIX_MAPPED_FILES _POSIX_VERSION
+#define _POSIX_MEMLOCK -1
+#define _POSIX_MEMLOCK_RANGE -1
+#define _POSIX_MEMORY_PROTECTION _POSIX_VERSION
+#define _POSIX_MONOTONIC_CLOCK _POSIX_VERSION
+#define _POSIX_PRIORITY_SCHEDULING -1
+#define _POSIX_READER_WRITER_LOCKS _POSIX_VERSION
+#define _POSIX_REALTIME_SIGNALS -1
+#define _POSIX_SAVED_IDS _POSIX_VERSION
+#define _POSIX_SEMAPHORES _POSIX_VERSION
+#define _POSIX_SHARED_MEMORY_OBJECTS -1
+#define _POSIX_SYNCHRONIZED_IO _POSIX_VERSION
+#define _POSIX_THREADS _POSIX_VERSION
+#define _POSIX_THREAD_ATTR_STACKADDR -1
+#define _POSIX_THREAD_ATTR_STACKSIZE -1
+#define _POSIX_THREAD_PRIO_INHERIT -1
+#define _POSIX_THREAD_PRIO_PROTECT -1
+#define _POSIX_THREAD_PRIORITY_SCHEDULING -1
+#define _POSIX_THREAD_SAFE_FUNCTIONS _POSIX_VERSION
+#define _POSIX_TIMERS _POSIX_VERSION
+
+#define _XOPEN_CRYPT -1
+#define _XOPEN_ENH_I18N -1
+#define _XOPEN_LEGACY -1
+#define _XOPEN_REALTIME -1
+#define _XOPEN_REALTIME_THREADS -1
+#define _XOPEN_SHM -1
+#define _XOPEN_UNIX -1
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -20,6 +82,8 @@ extern char** environ;
 
 ssize_t read(int fd, void* buf, size_t count);
 ssize_t write(int fd, const void* buf, size_t count);
+ssize_t pread(int fd, void* buf, size_t count, off_t offset);
+ssize_t pwrite(int fd, const void* buf, size_t count, off_t offset);
 int close(int fd);
 off_t lseek(int fd, off_t offset, int whence);
 int access(const char* path, int mode);
@@ -32,10 +96,13 @@ int fsync(int fd);
 int fdatasync(int fd);
 pid_t getpid(void);
 pid_t getppid(void);
+uid_t geteuid(void);
+int fchown(int fd, uid_t owner, gid_t group);
 int dup(int oldfd);
 int dup2(int oldfd, int newfd);
 int isatty(int fd);
 int pipe(int pipefd[2]);
+long sysconf(int name);
 ssize_t readlink(const char* path, char* buf, size_t bufsiz);
 int symlink(const char* target, const char* linkpath);
 void _exit(int status) __attribute__((noreturn));

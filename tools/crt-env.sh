@@ -105,13 +105,15 @@ export AR="${AR:-ar}"
 export RANLIB="${RANLIB:-ranlib}"
 export STRIP="${STRIP:-strip}"
 export PORT_PREFIX="$_crt_env_root/out/$_crt_env_preset/port-tests/install"
-export CPPFLAGS="-I$PORT_PREFIX/include${CPPFLAGS:+ $CPPFLAGS}"
-export LDFLAGS="-L$PORT_PREFIX/lib${LDFLAGS:+ $LDFLAGS}"
+export CPPFLAGS="-I$PORT_PREFIX/include${CRT_EXTRA_CPPFLAGS:+ $CRT_EXTRA_CPPFLAGS}"
+export LDFLAGS="-L$PORT_PREFIX/lib${CRT_EXTRA_LDFLAGS:+ $CRT_EXTRA_LDFLAGS}"
 export PKG_CONFIG_LIBDIR="$PORT_PREFIX/lib/pkgconfig"
 export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
 export PATH="$_crt_env_root/tools:$PATH"
 
-mkdir -p "$_crt_env_root/out/$_crt_env_preset/port-tests/src" "$PORT_PREFIX"
+mkdir -p "$_crt_env_root/out/$_crt_env_preset/port-tests/src" \
+  "$PORT_PREFIX/include" \
+  "$PORT_PREFIX/lib/pkgconfig"
 
 echo "CRT_SYSROOT=$CRT_SYSROOT"
 echo "CRT_TARGET_OS=$CRT_TARGET_OS"

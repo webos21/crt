@@ -6,6 +6,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/statfs.h>
+#include <sys/time.h>
+#include <sys/vfs.h>
 #include <unistd.h>
 
 static int fail(const char* message) {
@@ -56,10 +59,14 @@ int main(void) {
   int pipefd[2];
   int created_fd;
   int dir_open_fd;
+  long page_size;
   mode_t old_mask;
   DIR* dir;
   struct dirent* entry;
   struct stat st;
+  struct statfs sfs;
+  struct flock lock;
+  struct timeval tv[2];
 
   if (getcwd(cwd, sizeof(cwd)) == 0 || cwd[0] == 0) {
     return fail("getcwd");
@@ -175,6 +182,67 @@ int main(void) {
     close(fd);
     return fail("fstat sample");
   }
+  byte = 'Y';
+  readback = 0;
+  if (pwrite(fd, &byte, 1, 0) != 1 ||
+      pread(fd, &readback, 1, 0) != 1 ||
+      readback != 'Y') {
+    close(fd);
+    return fail("pread pwrite");
+  }
+  memset(&sfs, 0, sizeof(sfs));
+  if (statfs("sample.tmp", &sfs) != 0 ||
+      sfs.f_bsize < 4096 ||
+      sfs.f_namelen == 0) {
+    close(fd);
+    return fail("statfs sample");
+  }
+  memset(&sfs, 0, sizeof(sfs));
+  if (fstatfs(fd, &sfs) != 0 ||
+      sfs.f_bsize < 4096 ||
+      sfs.f_namelen == 0) {
+    close(fd);
+    return fail("fstatfs sample");
+  }
+  page_size = sysconf(_SC_PAGESIZE);
+  if (page_size < 4096 || (page_size & (page_size - 1)) != 0) {
+    close(fd);
+    return fail("sysconf pagesize");
+  }
+  tv[0].tv_sec = 1000;
+  tv[0].tv_usec = 125000;
+  tv[1].tv_sec = 1000;
+  tv[1].tv_usec = 250000;
+  if (utimes("sample.tmp", tv) != 0 ||
+      stat("sample.tmp", &st) != 0 ||
+      st.st_mtime != 1000) {
+    close(fd);
+    return fail("utimes timestamp");
+  }
+  tv[0].tv_sec = 1001;
+  tv[0].tv_usec = 125000;
+  tv[1].tv_sec = 1001;
+  tv[1].tv_usec = 250000;
+  if (futimes(fd, tv) != 0 ||
+      fstat(fd, &st) != 0 ||
+      st.st_mtime != 1001) {
+    close(fd);
+    return fail("futimes timestamp");
+  }
+  if (geteuid() == (uid_t)-1) {
+    close(fd);
+    return fail("geteuid");
+  }
+  if (fchown(fd, geteuid(), (gid_t)-1) != 0) {
+    close(fd);
+    return fail("fchown");
+  }
+#if defined(CRT_TARGET_OS_WINDOWS)
+  if (fstat(fd, &st) != 0 || st.st_uid != geteuid()) {
+    close(fd);
+    return fail("windows synthetic uid");
+  }
+#endif
   if (isatty(fd) != 0) {
     close(fd);
     return fail("isatty regular");
@@ -185,6 +253,26 @@ int main(void) {
       fcntl(fd, F_GETFL) < 0) {
     close(fd);
     return fail("fcntl flags");
+  }
+  memset(&lock, 0, sizeof(lock));
+  lock.l_type = F_WRLCK;
+  lock.l_whence = SEEK_SET;
+  lock.l_start = 0;
+  lock.l_len = 1;
+  if (fcntl(fd, F_SETLK, &lock) != 0) {
+    close(fd);
+    return fail("fcntl setlk");
+  }
+  lock.l_type = F_UNLCK;
+  if (fcntl(fd, F_SETLK, &lock) != 0) {
+    close(fd);
+    return fail("fcntl unlock");
+  }
+  lock.l_type = F_RDLCK;
+  if (fcntl(fd, F_GETLK, &lock) != 0 ||
+      (lock.l_type != F_UNLCK && lock.l_type != F_RDLCK && lock.l_type != F_WRLCK)) {
+    close(fd);
+    return fail("fcntl getlk");
   }
   memset(&st, 0, sizeof(st));
   if (lstat("sample.tmp", &st) != 0 || !S_ISREG(st.st_mode) || st.st_size != 1) {
@@ -323,7 +411,7 @@ int main(void) {
     close(fd);
     return fail("dup");
   }
-  if (read(copy, &readback, 1) != 1 || readback != 'Z') {
+  if (read(copy, &readback, 1) != 1 || readback != 'Y') {
     close(copy);
     close(fd);
     return fail("read dup");

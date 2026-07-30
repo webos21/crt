@@ -22,15 +22,26 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/ioctl.h>
+#include <sys/mount.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/statfs.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/vfs.h>
 #include <time.h>
 #include <unistd.h>
 #include <wchar.h>
 #include <wctype.h>
+
+#if defined(CRT_TARGET_OS_MACOS)
+#include <TargetConditionals.h>
+#include <mach/mach.h>
+#include <mach/vm_param.h>
+#include <mach/machine/vm_param.h>
+#endif
 
 #define CRT_STATIC_ASSERT(name, expr) typedef char crt_static_assert_##name[(expr) ? 1 : -1]
 
@@ -56,6 +67,28 @@ CRT_STATIC_ASSERT(sockaddr_storage_large, sizeof(struct sockaddr_storage) >= 128
 CRT_STATIC_ASSERT(fd_set_1024, FD_SETSIZE == 1024);
 CRT_STATIC_ASSERT(pollfd_layout, offsetof(struct pollfd, revents) > offsetof(struct pollfd, events));
 CRT_STATIC_ASSERT(addrinfo_addrlen_socklen, sizeof(((struct addrinfo*)0)->ai_addrlen) == sizeof(socklen_t));
+CRT_STATIC_ASSERT(statfs_has_64_blocks, sizeof(((struct statfs*)0)->f_blocks) == 8);
+CRT_STATIC_ASSERT(statfs64_same_size, sizeof(struct statfs64) == sizeof(struct statfs));
+CRT_STATIC_ASSERT(winsize_layout, sizeof(struct winsize) == 8);
+CRT_STATIC_ASSERT(ioctl_fionread_linux_bionic, FIONREAD == 0x541b);
+CRT_STATIC_ASSERT(ioctl_tiocgwinsz_linux_bionic, TIOCGWINSZ == 0x5413);
+CRT_STATIC_ASSERT(ioctl_tiocswinsz_linux_bionic, TIOCSWINSZ == 0x5414);
+CRT_STATIC_ASSERT(sysconf_open_max_bionic, _SC_OPEN_MAX == 0x000b);
+CRT_STATIC_ASSERT(sysconf_mapped_files_bionic, _SC_MAPPED_FILES == 0x003b);
+CRT_STATIC_ASSERT(sysconf_nprocessors_onln_bionic, _SC_NPROCESSORS_ONLN == 0x0061);
+CRT_STATIC_ASSERT(sysconf_monotonic_clock_bionic, _SC_MONOTONIC_CLOCK == 0x0064);
+
+#if defined(CRT_TARGET_OS_MACOS)
+CRT_STATIC_ASSERT(mach_port_32, sizeof(mach_port_t) == 4);
+CRT_STATIC_ASSERT(vm_address_pointer_sized, sizeof(vm_address_t) == sizeof(void*));
+CRT_STATIC_ASSERT(vm_size_pointer_sized, sizeof(vm_size_t) == sizeof(void*));
+CRT_STATIC_ASSERT(mach_page_max_16k, PAGE_MAX_SIZE == 16384);
+CRT_STATIC_ASSERT(mach_page_min_4k, PAGE_MIN_SIZE == 4096);
+CRT_STATIC_ASSERT(target_osx, TARGET_OS_OSX == 1);
+CRT_STATIC_ASSERT(target_not_ios, TARGET_OS_IPHONE == 0);
+CRT_STATIC_ASSERT(target_not_catalyst, TARGET_OS_MACCATALYST == 0);
+CRT_STATIC_ASSERT(target_64_bit, TARGET_RT_64_BIT == 1);
+#endif
 
 static int fail(const char* message) {
   fprintf(stderr, "header_abi_test: %s\n", message);
@@ -67,13 +100,20 @@ int main(void) {
   struct sockaddr_in addr;
   struct pollfd pfd;
   struct stat st;
+  struct statfs sfs;
   struct timespec ts;
   struct timeval tv;
+#if defined(CRT_TARGET_OS_MACOS)
+  kern_return_t (*allocate_fn)(vm_map_t, vm_address_t*, vm_size_t, int);
+  kern_return_t (*remap_fn)(vm_map_t, vm_address_t*, vm_size_t, vm_address_t, int, vm_map_t,
+                            vm_address_t, boolean_t, vm_prot_t*, vm_prot_t*, vm_inherit_t);
+#endif
 
   memset(&fds, 0, sizeof(fds));
   memset(&addr, 0, sizeof(addr));
   memset(&pfd, 0, sizeof(pfd));
   memset(&st, 0, sizeof(st));
+  memset(&sfs, 0, sizeof(sfs));
   memset(&ts, 0, sizeof(ts));
   memset(&tv, 0, sizeof(tv));
 
@@ -98,11 +138,22 @@ int main(void) {
   pfd.fd = -1;
   pfd.events = POLLIN | POLLOUT;
   st.st_size = (off_t)123;
+  sfs.f_namelen = 255;
   ts.tv_sec = (time_t)1;
   tv.tv_sec = (time_t)1;
-  if (pfd.fd != -1 || st.st_size != 123 || ts.tv_sec != 1 || tv.tv_sec != 1) {
+  if (pfd.fd != -1 || st.st_size != 123 || sfs.f_namelen != 255 || ts.tv_sec != 1 ||
+      tv.tv_sec != 1) {
     return fail("basic ABI assignment");
   }
+
+#if defined(CRT_TARGET_OS_MACOS)
+  allocate_fn = vm_allocate;
+  remap_fn = vm_remap;
+  if (allocate_fn == 0 || remap_fn == 0 || VM_FLAGS_ANYWHERE == VM_FLAGS_OVERWRITE ||
+      VM_PROT_EXECUTE == VM_PROT_WRITE || VM_INHERIT_SHARE != 0 || mach_task_self() == 0) {
+    return fail("mach ABI");
+  }
+#endif
 
   printf("header_abi_test: ok\n");
   return 0;

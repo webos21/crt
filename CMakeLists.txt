@@ -221,3 +221,110 @@ add_custom_target(sysroot
   DEPENDS c c_shared m m_shared dl dl_shared cxx cxx_shared crt1
   COMMENT "Installing CRT headers, libraries, and startup objects into ${CRT_SYSROOT}"
 )
+
+if(Python3_Interpreter_FOUND)
+  get_filename_component(CRT_BUILD_PRESET_NAME "${CMAKE_BINARY_DIR}" NAME)
+  set(CRT_PORT_TEST_ROOT "${CMAKE_BINARY_DIR}/port-tests")
+  set(CRT_PORT_SOURCE_ROOT "${CRT_PORT_TEST_ROOT}/src")
+  set(CRT_PORT_DOWNLOAD_ROOT "${CRT_PORT_TEST_ROOT}/downloads")
+  set(CRT_PORT_RECIPE_ROOT "${CMAKE_SOURCE_DIR}/porting/recipes")
+  file(GLOB CRT_PORT_RECIPE_FILES CONFIGURE_DEPENDS "${CRT_PORT_RECIPE_ROOT}/*.json")
+
+  add_custom_target(port-list
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/fetch_ports.py"
+      --recipe-dir "${CRT_PORT_RECIPE_ROOT}"
+      --list
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Listing CRT porting recipes"
+  )
+  add_custom_target(port-fetch
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/fetch_ports.py"
+      --dest "${CRT_PORT_SOURCE_ROOT}"
+      --cache "${CRT_PORT_DOWNLOAD_ROOT}"
+      --recipe-dir "${CRT_PORT_RECIPE_ROOT}"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Fetching and extracting all CRT porting recipe sources into ${CRT_PORT_SOURCE_ROOT}"
+  )
+
+  function(crt_add_port_recipe_target recipe_name)
+    add_custom_target(port-fetch-${recipe_name}
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/fetch_ports.py"
+        --dest "${CRT_PORT_SOURCE_ROOT}"
+        --cache "${CRT_PORT_DOWNLOAD_ROOT}"
+        --recipe-dir "${CRT_PORT_RECIPE_ROOT}"
+        --port "${recipe_name}"
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+      COMMENT "Fetching and extracting ${recipe_name} into ${CRT_PORT_SOURCE_ROOT}"
+    )
+  endfunction()
+
+  function(crt_add_build_port_target recipe_name recipe_build_system)
+    crt_add_port_recipe_target(${recipe_name})
+    add_custom_target(port-build-${recipe_name}
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/crt-port-build.py"
+        --preset "${CRT_BUILD_PRESET_NAME}"
+        --target-os "${CRT_TARGET_OS}"
+        --recipe-dir "${CRT_PORT_RECIPE_ROOT}"
+        --port "${recipe_name}"
+        --skip-sysroot-build
+      DEPENDS sysroot port-fetch-${recipe_name}
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+      COMMENT "Building ${recipe_name} (${recipe_build_system}) against the CRT sysroot"
+    )
+    add_custom_target(port-rebuild-${recipe_name}
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/crt-port-build.py"
+        --preset "${CRT_BUILD_PRESET_NAME}"
+        --target-os "${CRT_TARGET_OS}"
+        --recipe-dir "${CRT_PORT_RECIPE_ROOT}"
+        --port "${recipe_name}"
+        --rebuild
+        --skip-sysroot-build
+      DEPENDS sysroot port-fetch-${recipe_name}
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+      COMMENT "Rebuilding ${recipe_name} (${recipe_build_system}) against the CRT sysroot"
+    )
+  endfunction()
+
+  set(CRT_CONFIGURE_PORT_TARGETS)
+  set(CRT_CONFIGURE_PORT_REBUILD_TARGETS)
+  set(CRT_AUTOMATED_PORT_TARGETS)
+  set(CRT_AUTOMATED_PORT_REBUILD_TARGETS)
+  foreach(CRT_PORT_RECIPE_FILE IN LISTS CRT_PORT_RECIPE_FILES)
+    file(READ "${CRT_PORT_RECIPE_FILE}" CRT_PORT_RECIPE_JSON)
+    string(JSON CRT_PORT_RECIPE_NAME GET "${CRT_PORT_RECIPE_JSON}" name)
+    string(JSON CRT_PORT_RECIPE_BUILD_SYSTEM GET "${CRT_PORT_RECIPE_JSON}" build system)
+    set(CRT_PORT_RECIPE_AUTOMATED "true")
+    string(JSON CRT_PORT_RECIPE_AUTOMATED_VALUE
+      ERROR_VARIABLE CRT_PORT_RECIPE_AUTOMATED_ERROR
+      GET "${CRT_PORT_RECIPE_JSON}" build automated)
+    if(NOT CRT_PORT_RECIPE_AUTOMATED_ERROR STREQUAL "NOTFOUND")
+      set(CRT_PORT_RECIPE_AUTOMATED_VALUE "true")
+    endif()
+    if((CRT_PORT_RECIPE_BUILD_SYSTEM STREQUAL "configure" OR
+        CRT_PORT_RECIPE_BUILD_SYSTEM STREQUAL "amalgamation") AND
+       CRT_PORT_RECIPE_AUTOMATED_VALUE)
+      crt_add_build_port_target(${CRT_PORT_RECIPE_NAME} ${CRT_PORT_RECIPE_BUILD_SYSTEM})
+      list(APPEND CRT_AUTOMATED_PORT_TARGETS port-build-${CRT_PORT_RECIPE_NAME})
+      list(APPEND CRT_AUTOMATED_PORT_REBUILD_TARGETS port-rebuild-${CRT_PORT_RECIPE_NAME})
+      if(CRT_PORT_RECIPE_BUILD_SYSTEM STREQUAL "configure")
+        list(APPEND CRT_CONFIGURE_PORT_TARGETS port-build-${CRT_PORT_RECIPE_NAME})
+        list(APPEND CRT_CONFIGURE_PORT_REBUILD_TARGETS port-rebuild-${CRT_PORT_RECIPE_NAME})
+      endif()
+    else()
+      crt_add_port_recipe_target(${CRT_PORT_RECIPE_NAME})
+    endif()
+  endforeach()
+
+  add_custom_target(port-build-configure
+    DEPENDS ${CRT_CONFIGURE_PORT_TARGETS}
+  )
+  add_custom_target(port-rebuild-configure
+    DEPENDS ${CRT_CONFIGURE_PORT_REBUILD_TARGETS}
+  )
+  add_custom_target(port-build-recipes
+    DEPENDS ${CRT_AUTOMATED_PORT_TARGETS}
+  )
+  add_custom_target(port-rebuild-recipes
+    DEPENDS ${CRT_AUTOMATED_PORT_REBUILD_TARGETS}
+  )
+endif()

@@ -2,8 +2,10 @@
 #include <errno.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -34,6 +36,8 @@ int main(void) {
   char text[INET_ADDRSTRLEN];
   char byte = 'N';
   char readback = 0;
+  int available = 0;
+  struct pollfd pfd;
   struct addrinfo hints;
   struct addrinfo* res = 0;
 
@@ -107,13 +111,28 @@ int main(void) {
     close(server);
     return fail("accept");
   }
-  if (send(client, &byte, 1, 0) != 1 ||
-      recv(accepted, &readback, 1, 0) != 1 ||
-      readback != 'N') {
+  if (send(client, &byte, 1, 0) != 1) {
     close(accepted);
     close(client);
     close(server);
-    return fail("send recv");
+    return fail("send");
+  }
+  pfd.fd = accepted;
+  pfd.events = POLLIN;
+  pfd.revents = 0;
+  if (poll(&pfd, 1, 1000) < 1 ||
+      ioctl(accepted, FIONREAD, &available) != 0 ||
+      available < 1) {
+    close(accepted);
+    close(client);
+    close(server);
+    return fail("socket FIONREAD");
+  }
+  if (recv(accepted, &readback, 1, 0) != 1 || readback != 'N') {
+    close(accepted);
+    close(client);
+    close(server);
+    return fail("recv");
   }
 
   shutdown(client, SHUT_RDWR);

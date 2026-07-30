@@ -22,6 +22,62 @@ ___crt_sys_write:
   negq %rax
   retq
 
+.globl ___crt_sys_pread
+.p2align 4, 0x90
+___crt_sys_pread:
+  movq $0x2000099, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_pwrite
+.p2align 4, 0x90
+___crt_sys_pwrite:
+  movq $0x200009a, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_fcntl
+.p2align 4, 0x90
+___crt_sys_fcntl:
+  movq $0x200005c, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_ioctl
+.p2align 4, 0x90
+___crt_sys_ioctl:
+  movq $0x2000036, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_macos_sysctl
+.p2align 4, 0x90
+___crt_sys_macos_sysctl:
+  movq %rcx, %r10
+  movq $0x20000ca, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
 .globl ___crt_sys_open
 .p2align 4, 0x90
 ___crt_sys_open:
@@ -70,6 +126,28 @@ ___crt_sys_ftruncate:
 .p2align 4, 0x90
 ___crt_sys_fsync:
   movq $0x200005f, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_macos_statfs64
+.p2align 4, 0x90
+___crt_sys_macos_statfs64:
+  movq $0x2000159, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_macos_fstatfs64
+.p2align 4, 0x90
+___crt_sys_macos_fstatfs64:
+  movq $0x200015a, %rax
   syscall
   jc 1f
   retq
@@ -464,6 +542,28 @@ ___crt_sys_sleep_ms:
   negq %rax
   retq
 
+.globl ___crt_sys_utimes
+.p2align 4, 0x90
+___crt_sys_utimes:
+  movq $0x200008a, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_futimes
+.p2align 4, 0x90
+___crt_sys_futimes:
+  movq $0x200008b, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
 .globl ___crt_sys_sched_yield
 .p2align 4, 0x90
 ___crt_sys_sched_yield:
@@ -504,6 +604,28 @@ ___crt_sys_getpid:
 .p2align 4, 0x90
 ___crt_sys_getppid:
   movq $0x2000027, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_geteuid
+.p2align 4, 0x90
+___crt_sys_geteuid:
+  movq $0x2000019, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_fchown
+.p2align 4, 0x90
+___crt_sys_fchown:
+  movq $0x200007b, %rax
   syscall
   jc 1f
   retq

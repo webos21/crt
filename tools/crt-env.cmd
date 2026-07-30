@@ -46,13 +46,13 @@ if not defined AR set "AR=llvm-ar"
 if not defined RANLIB set "RANLIB=llvm-ranlib"
 if not defined STRIP set "STRIP=llvm-strip"
 set "PORT_PREFIX=%CRT_ENV_ROOT%\out\%CRT_ENV_PRESET%\port-tests\install"
-if defined CPPFLAGS (
-  set "CPPFLAGS=-I%PORT_PREFIX%\include %CPPFLAGS%"
+if defined CRT_EXTRA_CPPFLAGS (
+  set "CPPFLAGS=-I%PORT_PREFIX%\include %CRT_EXTRA_CPPFLAGS%"
 ) else (
   set "CPPFLAGS=-I%PORT_PREFIX%\include"
 )
-if defined LDFLAGS (
-  set "LDFLAGS=-L%PORT_PREFIX%\lib %LDFLAGS%"
+if defined CRT_EXTRA_LDFLAGS (
+  set "LDFLAGS=-L%PORT_PREFIX%\lib %CRT_EXTRA_LDFLAGS%"
 ) else (
   set "LDFLAGS=-L%PORT_PREFIX%\lib"
 )
@@ -61,7 +61,8 @@ set "PKG_CONFIG_PATH=%PKG_CONFIG_LIBDIR%"
 set "PATH=%CRT_ENV_ROOT%\tools;%PATH%"
 
 if not exist "%CRT_ENV_ROOT%\out\%CRT_ENV_PRESET%\port-tests\src" mkdir "%CRT_ENV_ROOT%\out\%CRT_ENV_PRESET%\port-tests\src"
-if not exist "%CRT_ENV_ROOT%\out\%CRT_ENV_PRESET%\port-tests\install" mkdir "%CRT_ENV_ROOT%\out\%CRT_ENV_PRESET%\port-tests\install"
+if not exist "%PORT_PREFIX%\include" mkdir "%PORT_PREFIX%\include"
+if not exist "%PORT_PREFIX%\lib\pkgconfig" mkdir "%PORT_PREFIX%\lib\pkgconfig"
 
 echo CRT_SYSROOT=%CRT_SYSROOT%
 echo CRT_TARGET_OS=%CRT_TARGET_OS%

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "name": "libpng",
+  "version": "1.6.57",
+  "source": {
+    "url": "https://download.sourceforge.net/libpng/libpng-1.6.57.tar.xz",
+    "archive": "libpng-1.6.57.tar.xz",
+    "source_dir": "libpng-1.6.57",
+    "sha256": "d10c20d7171569804cae8dfc13ba6dcd0662c41ed39d43d4d429314aafb10a80",
+    "sha1": "866fb81e3355088bb885bb4ded39093ef80eb686",
+    "md5": "07cee8fbb9f4b91db5b36db02f4ccdcd"
+  },
+  "dependencies": [
+    "zlib"
+  ],
+  "build": {
+    "system": "configure",
+    "configure_args": [
+      "--disable-shared",
+      "--enable-static"
+    ],
+    "make_args": []
+  },
+  "status": {
+    "linux": "pending",
+    "macos": "configure-pass",
+    "windows": "pending"
+  },
+  "notes": [
+    "Requires zlib installed into PORT_PREFIX first.",
+    "The first successful CRT configure run required vfprintf, sprintf, vsprintf, inttypes.h, strings.h, strtoimax, strtoumax, bzero, and bcmp."
+  ]
+}

@@ -22,6 +22,61 @@ ___crt_sys_write:
   neg x0, x0
   ret
 
+.globl ___crt_sys_pread
+.p2align 2
+___crt_sys_pread:
+  mov x16, #153
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_pwrite
+.p2align 2
+___crt_sys_pwrite:
+  mov x16, #154
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_fcntl
+.p2align 2
+___crt_sys_fcntl:
+  mov x16, #92
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_ioctl
+.p2align 2
+___crt_sys_ioctl:
+  mov x16, #54
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_macos_sysctl
+.p2align 2
+___crt_sys_macos_sysctl:
+  mov x16, #202
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
 .globl ___crt_sys_open
 .p2align 2
 ___crt_sys_open:
@@ -70,6 +125,28 @@ ___crt_sys_ftruncate:
 .p2align 2
 ___crt_sys_fsync:
   mov x16, #95
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_macos_statfs64
+.p2align 2
+___crt_sys_macos_statfs64:
+  mov x16, #345
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_macos_fstatfs64
+.p2align 2
+___crt_sys_macos_fstatfs64:
+  mov x16, #346
   svc #0x80
   b.cs 1f
   ret
@@ -461,6 +538,28 @@ ___crt_sys_sleep_ms:
   neg x0, x0
   ret
 
+.globl ___crt_sys_utimes
+.p2align 2
+___crt_sys_utimes:
+  mov x16, #138
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_futimes
+.p2align 2
+___crt_sys_futimes:
+  mov x16, #139
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
 .globl ___crt_sys_sched_yield
 .p2align 2
 ___crt_sys_sched_yield:
@@ -501,6 +600,28 @@ ___crt_sys_getpid:
 .p2align 2
 ___crt_sys_getppid:
   mov x16, #39
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_geteuid
+.p2align 2
+___crt_sys_geteuid:
+  mov x16, #25
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_fchown
+.p2align 2
+___crt_sys_fchown:
+  mov x16, #123
   svc #0x80
   b.cs 1f
   ret

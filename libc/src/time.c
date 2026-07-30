@@ -3,14 +3,25 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <time.h>
+#include <unistd.h>
 
 long __crt_sys_clock_gettime(clockid_t clock_id, struct timespec* tp);
 
 #if defined(CRT_TARGET_OS_MACOS)
+long __crt_sys_utimes(const char* path, const struct timeval times[2]);
+long __crt_sys_futimes(int fd, const struct timeval times[2]);
 #else
 long __crt_sys_gettimeofday(struct timeval* tv);
+#endif
+
+#if defined(CRT_TARGET_OS_LINUX)
+long __crt_sys_utimensat(int dirfd, const char* path, const struct timespec times[2], int flags);
+#elif defined(CRT_TARGET_OS_WINDOWS)
+long __crt_sys_utimes(const char* path, const struct timeval times[2]);
+long __crt_sys_futimes(int fd, const struct timeval times[2]);
 #endif
 
 #if !defined(CRT_TARGET_OS_MACOS)
@@ -211,6 +222,55 @@ int gettimeofday(struct timeval* tv, void* tz) {
   }
 #else
   return normalize_syscall_result(__crt_sys_gettimeofday(tv));
+#endif
+}
+
+int utimes(const char* path, const struct timeval times[2]) {
+  if (path == 0) {
+    return __set_errno(EINVAL);
+  }
+#if defined(CRT_TARGET_OS_LINUX)
+  {
+    struct timespec ts[2];
+    const struct timespec* tsp = 0;
+
+    if (times != 0) {
+      if (times[0].tv_usec < 0 || times[0].tv_usec >= 1000000L ||
+          times[1].tv_usec < 0 || times[1].tv_usec >= 1000000L) {
+        return __set_errno(EINVAL);
+      }
+      ts[0].tv_sec = times[0].tv_sec;
+      ts[0].tv_nsec = times[0].tv_usec * 1000L;
+      ts[1].tv_sec = times[1].tv_sec;
+      ts[1].tv_nsec = times[1].tv_usec * 1000L;
+      tsp = ts;
+    }
+    return normalize_syscall_result(__crt_sys_utimensat(-100, path, tsp, 0));
+  }
+#else
+  return normalize_syscall_result(__crt_sys_utimes(path, times));
+#endif
+}
+
+int futimes(int fd, const struct timeval times[2]) {
+#if defined(CRT_TARGET_OS_LINUX)
+  struct timespec ts[2];
+  const struct timespec* tsp = 0;
+
+  if (times != 0) {
+    if (times[0].tv_usec < 0 || times[0].tv_usec >= 1000000L ||
+        times[1].tv_usec < 0 || times[1].tv_usec >= 1000000L) {
+      return __set_errno(EINVAL);
+    }
+    ts[0].tv_sec = times[0].tv_sec;
+    ts[0].tv_nsec = times[0].tv_usec * 1000L;
+    ts[1].tv_sec = times[1].tv_sec;
+    ts[1].tv_nsec = times[1].tv_usec * 1000L;
+    tsp = ts;
+  }
+  return normalize_syscall_result(__crt_sys_utimensat(fd, "", tsp, 0x1000));
+#else
+  return normalize_syscall_result(__crt_sys_futimes(fd, times));
 #endif
 }
 

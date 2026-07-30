@@ -5,11 +5,17 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <sys/vfs.h>
 #include <unistd.h>
 
 long __crt_sys_read(int fd, void* buf, unsigned long count);
 long __crt_sys_write(int fd, const void* buf, unsigned long count);
+long __crt_sys_fcntl(int fd, int cmd, void* arg);
+long __crt_sys_ioctl(int fd, unsigned long request, void* arg);
+long __crt_sys_pread(int fd, void* buf, unsigned long count, long long offset);
+long __crt_sys_pwrite(int fd, const void* buf, unsigned long count, long long offset);
 long __crt_sys_open(const char* path, int flags, unsigned int mode);
 long __crt_sys_close(int fd);
 long long __crt_sys_lseek(int fd, long long offset, int whence);
@@ -35,6 +41,10 @@ long __crt_sys_pipe(int pipefd[2]);
 long __crt_sys_unlink(const char* path);
 long __crt_sys_readlink(const char* path, char* buf, unsigned long size);
 long __crt_sys_symlink(const char* target, const char* linkpath);
+long __crt_sys_geteuid(void);
+long __crt_sys_fchown(int fd, unsigned int owner, unsigned int group);
+long __crt_sys_statfs(const char* path, struct statfs* buf);
+long __crt_sys_fstatfs(int fd, struct statfs* buf);
 #if defined(CRT_TARGET_OS_LINUX)
 long __crt_sys_statx(long dirfd, const char* path, int flags, unsigned int mask, void* statxbuf);
 #elif defined(CRT_TARGET_OS_WINDOWS)
@@ -47,6 +57,8 @@ long __crt_sys_fstat(int fd, struct stat* st);
 long __crt_sys_macos_stat64(const char* path, void* statbuf);
 long __crt_sys_macos_fstat64(int fd, void* statbuf);
 long __crt_sys_macos_lstat64(const char* path, void* statbuf);
+long __crt_sys_macos_statfs64(const char* path, void* statfsbuf);
+long __crt_sys_macos_fstatfs64(int fd, void* statfsbuf);
 #endif
 
 #if defined(CRT_TARGET_OS_LINUX)
@@ -123,6 +135,47 @@ struct crt_darwin_stat64 {
   int32_t lspare;
   int64_t qspare[2];
 };
+
+struct crt_darwin_statfs64 {
+  uint32_t f_bsize;
+  int32_t f_iosize;
+  uint64_t f_blocks;
+  uint64_t f_bfree;
+  uint64_t f_bavail;
+  uint64_t f_files;
+  uint64_t f_ffree;
+  fsid_t f_fsid;
+  uint32_t f_owner;
+  uint32_t f_type;
+  uint32_t f_flags;
+  uint32_t f_fssubtype;
+  char f_fstypename[16];
+  char f_mntonname[1024];
+  char f_mntfromname[1024];
+  uint32_t f_flags_ext;
+  uint32_t f_reserved[7];
+};
+
+struct crt_darwin_flock {
+  int64_t l_start;
+  int64_t l_len;
+  int32_t l_pid;
+  int16_t l_type;
+  int16_t l_whence;
+};
+
+#define CRT_DARWIN_F_GETLK 7
+#define CRT_DARWIN_F_SETLK 8
+#define CRT_DARWIN_F_SETLKW 9
+#define CRT_DARWIN_F_RDLCK 1
+#define CRT_DARWIN_F_UNLCK 2
+#define CRT_DARWIN_F_WRLCK 3
+#define CRT_DARWIN_FIONREAD 0x4004667fUL
+#define CRT_DARWIN_TIOCGWINSZ 0x40087468UL
+#define CRT_DARWIN_TIOCSWINSZ 0x80087467UL
+
+static long macos_fcntl_lock(int fd, int cmd, struct flock* lock);
+static long macos_ioctl(int fd, unsigned long request, void* arg);
 
 typedef char crt_darwin_stat64_size_check[
     sizeof(struct crt_darwin_stat64) == 144 ? 1 : -1];
@@ -471,6 +524,22 @@ ssize_t write(int fd, const void* buf, size_t count) {
   return (ssize_t)normalize_syscall_result(__crt_sys_write(fd, buf, (unsigned long)count));
 }
 
+ssize_t pread(int fd, void* buf, size_t count, off_t offset) {
+  if (offset < 0) {
+    return (ssize_t)__set_errno(EINVAL);
+  }
+  return (ssize_t)normalize_syscall_result(
+      __crt_sys_pread(fd, buf, (unsigned long)count, (long long)offset));
+}
+
+ssize_t pwrite(int fd, const void* buf, size_t count, off_t offset) {
+  if (offset < 0) {
+    return (ssize_t)__set_errno(EINVAL);
+  }
+  return (ssize_t)normalize_syscall_result(
+      __crt_sys_pwrite(fd, buf, (unsigned long)count, (long long)offset));
+}
+
 int open(const char* path, int flags, ...) {
   unsigned int mode = 0;
   int syscall_flags = flags & ~O_CLOEXEC;
@@ -799,6 +868,20 @@ int pipe(int pipefd[2]) {
   return (int)normalize_syscall_result(__crt_sys_pipe(pipefd));
 }
 
+uid_t geteuid(void) {
+  long result = __crt_sys_geteuid();
+
+  if (result < 0 && result >= -4095) {
+    return (uid_t)__set_errno((int)-result);
+  }
+  return (uid_t)result;
+}
+
+int fchown(int fd, uid_t owner, gid_t group) {
+  return (int)normalize_syscall_result(
+      __crt_sys_fchown(fd, (unsigned int)owner, (unsigned int)group));
+}
+
 int isatty(int fd) {
 #if defined(CRT_TARGET_OS_WINDOWS)
   long result = __crt_sys_isatty(fd);
@@ -893,6 +976,24 @@ int fcntl(int fd, int cmd, ...) {
       }
       return 0;
 
+    case F_GETLK:
+    case F_SETLK:
+    case F_SETLKW: {
+      struct flock* lock;
+
+      va_start(args, cmd);
+      lock = va_arg(args, struct flock*);
+      va_end(args);
+      if (lock == 0) {
+        return (int)__set_errno(EINVAL);
+      }
+#if defined(CRT_TARGET_OS_MACOS)
+      return (int)normalize_syscall_result(macos_fcntl_lock(fd, cmd, lock));
+#else
+      return (int)normalize_syscall_result(__crt_sys_fcntl(fd, cmd, lock));
+#endif
+    }
+
     default:
       return (int)__set_errno(EINVAL);
   }
@@ -966,6 +1067,113 @@ static int macos_stat64_result(long result, const struct crt_darwin_stat64* ds, 
     return (int)__set_errno((int)-result);
   }
   return darwin_stat_to_stat(ds, st);
+}
+
+static void darwin_statfs_to_statfs(const struct crt_darwin_statfs64* ds, struct statfs* st) {
+  memset(st, 0, sizeof(*st));
+  st->f_type = ds->f_type;
+  st->f_bsize = ds->f_bsize;
+  st->f_blocks = ds->f_blocks;
+  st->f_bfree = ds->f_bfree;
+  st->f_bavail = ds->f_bavail;
+  st->f_files = ds->f_files;
+  st->f_ffree = ds->f_ffree;
+  st->f_fsid = ds->f_fsid;
+  st->f_namelen = 255;
+  st->f_frsize = ds->f_bsize;
+  st->f_flags = ds->f_flags;
+}
+
+static int macos_statfs64_result(
+    long result,
+    const struct crt_darwin_statfs64* ds,
+    struct statfs* st) {
+  if (result < 0 && result >= -4095) {
+    return (int)__set_errno((int)-result);
+  }
+  darwin_statfs_to_statfs(ds, st);
+  return 0;
+}
+
+static int bionic_lock_type_to_darwin(short type) {
+  switch (type) {
+    case F_RDLCK:
+      return CRT_DARWIN_F_RDLCK;
+    case F_WRLCK:
+      return CRT_DARWIN_F_WRLCK;
+    case F_UNLCK:
+      return CRT_DARWIN_F_UNLCK;
+    default:
+      return -1;
+  }
+}
+
+static int darwin_lock_type_to_bionic(short type) {
+  switch (type) {
+    case CRT_DARWIN_F_RDLCK:
+      return F_RDLCK;
+    case CRT_DARWIN_F_WRLCK:
+      return F_WRLCK;
+    case CRT_DARWIN_F_UNLCK:
+      return F_UNLCK;
+    default:
+      return type;
+  }
+}
+
+static int bionic_fcntl_cmd_to_darwin(int cmd) {
+  switch (cmd) {
+    case F_GETLK:
+      return CRT_DARWIN_F_GETLK;
+    case F_SETLK:
+      return CRT_DARWIN_F_SETLK;
+    case F_SETLKW:
+      return CRT_DARWIN_F_SETLKW;
+    default:
+      return cmd;
+  }
+}
+
+static long macos_fcntl_lock(int fd, int cmd, struct flock* lock) {
+  struct crt_darwin_flock darwin_lock;
+  int darwin_type = bionic_lock_type_to_darwin(lock->l_type);
+  long result;
+
+  if (darwin_type < 0) {
+    return -EINVAL;
+  }
+  memset(&darwin_lock, 0, sizeof(darwin_lock));
+  darwin_lock.l_start = lock->l_start;
+  darwin_lock.l_len = lock->l_len;
+  darwin_lock.l_pid = lock->l_pid;
+  darwin_lock.l_type = (int16_t)darwin_type;
+  darwin_lock.l_whence = lock->l_whence;
+  result = __crt_sys_macos_fcntl(fd, bionic_fcntl_cmd_to_darwin(cmd), &darwin_lock);
+  if (result >= 0 && cmd == F_GETLK) {
+    lock->l_start = darwin_lock.l_start;
+    lock->l_len = darwin_lock.l_len;
+    lock->l_pid = darwin_lock.l_pid;
+    lock->l_type = (short)darwin_lock_type_to_bionic(darwin_lock.l_type);
+    lock->l_whence = darwin_lock.l_whence;
+  }
+  return result;
+}
+
+static unsigned long macos_ioctl_request(unsigned long request) {
+  switch (request) {
+    case FIONREAD:
+      return CRT_DARWIN_FIONREAD;
+    case TIOCGWINSZ:
+      return CRT_DARWIN_TIOCGWINSZ;
+    case TIOCSWINSZ:
+      return CRT_DARWIN_TIOCSWINSZ;
+    default:
+      return request;
+  }
+}
+
+static long macos_ioctl(int fd, unsigned long request, void* arg) {
+  return __crt_sys_ioctl(fd, macos_ioctl_request(request), arg);
 }
 #endif
 
@@ -1118,4 +1326,77 @@ int fstat(int fd, struct stat* st) {
 #else
   return fallback_fstat(fd, st);
 #endif
+}
+
+int statfs(const char* path, struct statfs* buf) {
+  if (path == 0 || buf == 0) {
+    return (int)__set_errno(EINVAL);
+  }
+#if defined(CRT_TARGET_OS_MACOS)
+  {
+    struct crt_darwin_statfs64 ds;
+    memset(&ds, 0, sizeof(ds));
+    return macos_statfs64_result(__crt_sys_macos_statfs64(path, &ds), &ds, buf);
+  }
+#else
+  return (int)normalize_syscall_result(__crt_sys_statfs(path, buf));
+#endif
+}
+
+int fstatfs(int fd, struct statfs* buf) {
+  if (buf == 0) {
+    return (int)__set_errno(EINVAL);
+  }
+#if defined(CRT_TARGET_OS_MACOS)
+  {
+    struct crt_darwin_statfs64 ds;
+    memset(&ds, 0, sizeof(ds));
+    return macos_statfs64_result(__crt_sys_macos_fstatfs64(fd, &ds), &ds, buf);
+  }
+#else
+  return (int)normalize_syscall_result(__crt_sys_fstatfs(fd, buf));
+#endif
+}
+
+int statfs64(const char* path, struct statfs64* buf) {
+  return statfs(path, (struct statfs*)buf);
+}
+
+int fstatfs64(int fd, struct statfs64* buf) {
+  return fstatfs(fd, (struct statfs*)buf);
+}
+
+int ioctl(int fd, int request, ...) {
+  void* arg;
+  va_list ap;
+
+  va_start(ap, request);
+  arg = va_arg(ap, void*);
+  va_end(ap);
+#if defined(CRT_TARGET_OS_MACOS)
+  return (int)normalize_syscall_result(macos_ioctl(fd, (unsigned long)request, arg));
+#else
+  return (int)normalize_syscall_result(__crt_sys_ioctl(fd, (unsigned long)request, arg));
+#endif
+}
+
+int mount(const char* source, const char* target, const char* fs_type, unsigned long flags,
+          const void* data) {
+  (void)source;
+  (void)target;
+  (void)fs_type;
+  (void)flags;
+  (void)data;
+  return (int)__set_errno(ENOTSUP);
+}
+
+int umount(const char* target) {
+  (void)target;
+  return (int)__set_errno(ENOTSUP);
+}
+
+int umount2(const char* target, int flags) {
+  (void)target;
+  (void)flags;
+  return (int)__set_errno(ENOTSUP);
 }

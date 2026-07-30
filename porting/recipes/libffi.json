@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "name": "libffi",
+  "version": "3.4.5",
+  "source": {
+    "url": "https://github.com/libffi/libffi/releases/download/v3.4.5/libffi-3.4.5.tar.gz",
+    "archive": "libffi-3.4.5.tar.gz",
+    "source_dir": "libffi-3.4.5",
+    "sha256": "96fff4e589e3b239d888d9aa44b3ff30693c2ba1617f953925a70ddebcc102b2",
+    "sha1": "1118803ffcedf7a12355d253d8d0f2241cb1f70c",
+    "md5": "cea8d9ea4dc191481a3d56feb5a80937"
+  },
+  "dependencies": [],
+  "build": {
+    "system": "configure",
+    "automated": true,
+    "configure_args": [
+      "--disable-shared",
+      "--enable-static",
+      "--disable-multi-os-directory"
+    ],
+    "env": {
+      "gcc_cv_as_cfi_pseudo_op": "no"
+    },
+    "make_args": []
+  },
+  "status": {
+    "linux": "partial",
+    "macos": "configure-pass",
+    "windows": "partial"
+  },
+  "notes": [
+    "Upstream provides a normal Autoconf configure flow, so build.system records configure rather than manual.",
+    "macOS/aarch64 upstream libffi uses its Darwin trampoline-table path; any required compatibility must be provided by the CRT sysroot/PAL, not by patching libffi sources.",
+    "The CRT toolchain recipe forces gcc_cv_as_cfi_pseudo_op=no because libffi's simple configure probe succeeds while its real Darwin aarch64 CFI assembly does not assemble through the CRT wrapper.",
+    "macOS/aarch64 ffi_call and ffi_closure_alloc/ffi_prep_closure_loc smoke tests passed against the installed static libffi."
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "name": "sqlite-amalgamation",
+  "version": "3.53.4",
+  "source": {
+    "url": "https://www.sqlite.org/2026/sqlite-amalgamation-3530400.zip",
+    "archive": "sqlite-amalgamation-3530400.zip",
+    "source_dir": "sqlite-amalgamation-3.53.4",
+    "sha256": "1e71ddf93849c6a6ecf58b827c0692073d2dd7ee40196158068f7b29f422e87d",
+    "sha1": "30a3a5138e1a5cf068bfe6a8c3fadb9de23d60e4",
+    "md5": "9af095f7326edd65e4b2f3b3382f8cfb"
+  },
+  "dependencies": [],
+  "build": {
+    "system": "amalgamation",
+    "automated": true,
+    "sources": [
+      "sqlite3.c"
+    ],
+    "archive": "libsqlite3.a",
+    "install_headers": [
+      "sqlite3.h",
+      "sqlite3ext.h"
+    ],
+    "cflags": [
+      "-U__APPLE__",
+      "-DSQLITE_THREADSAFE=1",
+      "-DSQLITE_OMIT_LOAD_EXTENSION=1",
+      "-DSQLITE_WITHOUT_ZONEMALLOC=1",
+      "-DSQLITE_ENABLE_LOCKING_STYLE=0"
+    ]
+  },
+  "status": {
+    "linux": "smoke-pass",
+    "macos": "amalgamation-pass",
+    "windows": "smoke-pass"
+  },
+  "notes": [
+    "The amalgamation archive does not ship an Autoconf configure script, so the recipe builds sqlite3.c directly without modifying upstream source.",
+    "macOS builds pass -U__APPLE__ so SQLite uses its generic Unix path against the Bionic-compatible CRT surface rather than Darwin-only VFS/statfs extensions.",
+    "The porting check expanded CRT-owned sys/ioctl.h, sys/vfs.h, sys/statfs.h, pread/pwrite, uid_t/gid_t, geteuid, fchown, utimes/futimes, and sysconf(_SC_PAGESIZE/_SC_PAGE_SIZE).",
+    "SQLITE_WITHOUT_ZONEMALLOC avoids Apple's zone allocator path; SQLITE_ENABLE_LOCKING_STYLE=0 avoids Darwin-specific locking-style code while keeping the upstream amalgamation unchanged."
+  ]
+}

@@ -47,6 +47,7 @@ int __set_errno(int value);
 #define EPIPE 32
 #define EDOM 33
 #define ERANGE 34
+#define ENOLCK 37
 #define EDEADLK 35
 #define ENAMETOOLONG 36
 #define EWOULDBLOCK EAGAIN

@@ -2,10 +2,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define CRT_ENV_MAX 64
+#define CRT_ENV_INITIAL_CAPACITY 64
 
-static char* env_entries[CRT_ENV_MAX];
-char** environ = env_entries;
+static char* env_static_entries[CRT_ENV_INITIAL_CAPACITY];
+static char** env_entries = env_static_entries;
+char** environ = env_static_entries;
+static size_t env_capacity = CRT_ENV_INITIAL_CAPACITY;
 static int env_initialized;
 static char** initial_envp;
 
@@ -36,29 +38,66 @@ static int env_name_valid(const char* name) {
 }
 
 static int env_find(const char* name, size_t name_len) {
-  int i;
+  size_t i;
 
-  for (i = 0; i < CRT_ENV_MAX; ++i) {
+  for (i = 0; i < env_capacity; ++i) {
     if (env_entries[i] != 0 &&
         strncmp(env_entries[i], name, name_len) == 0 &&
         env_entries[i][name_len] == '=') {
-      return i;
+      return (int)i;
     }
   }
   return -1;
 }
 
 static int env_find_entry(const char* entry, size_t name_len) {
-  int i;
+  size_t i;
 
-  for (i = 0; i < CRT_ENV_MAX; ++i) {
+  for (i = 0; i < env_capacity; ++i) {
     if (env_entries[i] != 0 &&
         strncmp(env_entries[i], entry, name_len) == 0 &&
         env_entries[i][name_len] == '=') {
-      return i;
+      return (int)i;
     }
   }
   return -1;
+}
+
+static int env_expand(void) {
+  size_t old_capacity = env_capacity;
+  size_t new_capacity = old_capacity * 2;
+  char** new_entries = (char**)malloc(new_capacity * sizeof(char*));
+  size_t i;
+
+  if (new_entries == 0) {
+    errno = ENOMEM;
+    return -1;
+  }
+  for (i = 0; i < new_capacity; ++i) {
+    new_entries[i] = i < old_capacity ? env_entries[i] : 0;
+  }
+  if (env_entries != env_static_entries) {
+    free(env_entries);
+  }
+  env_entries = new_entries;
+  environ = env_entries;
+  env_capacity = new_capacity;
+  return 0;
+}
+
+static int env_find_free_slot(void) {
+  size_t i;
+
+  for (;;) {
+    for (i = 0; i + 1 < env_capacity; ++i) {
+      if (env_entries[i] == 0) {
+        return (int)i;
+      }
+    }
+    if (env_expand() != 0) {
+      return -1;
+    }
+  }
 }
 
 static int env_store_entry(const char* entry, int overwrite) {
@@ -66,7 +105,6 @@ static int env_store_entry(const char* entry, int overwrite) {
   size_t name_len;
   char* copy;
   int index;
-  int i;
 
   if (entry == 0 || entry[0] == '=' || strchr(entry, '=') == 0) {
     return 0;
@@ -77,12 +115,7 @@ static int env_store_entry(const char* entry, int overwrite) {
     return 0;
   }
   if (index < 0) {
-    for (i = 0; i < CRT_ENV_MAX - 1; ++i) {
-      if (env_entries[i] == 0) {
-        index = i;
-        break;
-      }
-    }
+    index = env_find_free_slot();
   }
   if (index < 0) {
     errno = ENOMEM;
@@ -162,7 +195,6 @@ int setenv(const char* name, const char* value, int overwrite) {
   size_t value_len;
   char* entry;
   int index;
-  int i;
 
   __crt_env_init(0);
   if (!env_name_valid(name) || value == 0) {
@@ -175,12 +207,7 @@ int setenv(const char* name, const char* value, int overwrite) {
     return 0;
   }
   if (index < 0) {
-    for (i = 0; i < CRT_ENV_MAX - 1; ++i) {
-      if (env_entries[i] == 0) {
-        index = i;
-        break;
-      }
-    }
+    index = env_find_free_slot();
   }
   if (index < 0) {
     errno = ENOMEM;
@@ -204,7 +231,7 @@ int setenv(const char* name, const char* value, int overwrite) {
 int unsetenv(const char* name) {
   size_t name_len;
   int index;
-  int i;
+  size_t i;
 
   __crt_env_init(0);
   if (!env_name_valid(name)) {
@@ -215,13 +242,13 @@ int unsetenv(const char* name) {
   index = env_find(name, name_len);
   if (index >= 0) {
     free(env_entries[index]);
-    for (i = index; i < CRT_ENV_MAX - 1; ++i) {
+    for (i = (size_t)index; i + 1 < env_capacity; ++i) {
       env_entries[i] = env_entries[i + 1];
       if (env_entries[i] == 0) {
         break;
       }
     }
-    env_entries[CRT_ENV_MAX - 1] = 0;
+    env_entries[env_capacity - 1] = 0;
   }
   return 0;
 }
