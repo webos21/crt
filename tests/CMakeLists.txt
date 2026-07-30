@@ -217,6 +217,11 @@ set_tests_properties(scanf_test_runs PROPERTIES
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 
+add_crt_test(scanf_edge_matrix_test scanf_edge_matrix_test.c)
+set_tests_properties(scanf_edge_matrix_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "scanf_edge_matrix_test: ok"
+)
+
 add_crt_test(mman_test mman_test.c)
 set_tests_properties(mman_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "mman_test: ok"

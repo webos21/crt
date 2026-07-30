@@ -1,11 +1,14 @@
 #include <ctype.h>
 #include <errno.h>
+#include <inttypes.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/param.h>
 #include <wchar.h>
 
 enum scan_length {
@@ -17,8 +20,16 @@ enum scan_length {
   SCAN_LENGTH_LL,
   SCAN_LENGTH_Z,
   SCAN_LENGTH_J,
-  SCAN_LENGTH_T
+  SCAN_LENGTH_T,
+  SCAN_LENGTH_POINTER
 };
+
+#define SCANF_SIGNOK 0x01
+#define SCANF_HAVESIGN 0x02
+#define SCANF_NDIGITS 0x04
+#define SCANF_PFXOK 0x08
+#define SCANF_PFBOK 0x10
+#define SCANF_NZDIGITS 0x20
 
 struct scan_source {
   const char* string;
@@ -57,6 +68,13 @@ static void source_ungetc(struct scan_source* source, int ch) {
     ungetc(ch, source->stream);
   }
   --source->consumed;
+}
+
+static int source_peekc(struct scan_source* source) {
+  int ch = source_getc(source);
+
+  source_ungetc(source, ch);
+  return ch;
 }
 
 static void source_skip_space(struct scan_source* source) {
@@ -101,6 +119,24 @@ static int parse_width(const char** format) {
     ++*format;
   }
   return width;
+}
+
+static enum scan_length scan_w_to_length(int size, int fast) {
+  enum scan_length fast_length = sizeof(void*) == 8 ? SCAN_LENGTH_LL : SCAN_LENGTH_NONE;
+
+  if (size == 8) {
+    return SCAN_LENGTH_HH;
+  }
+  if (size == 16) {
+    return fast ? fast_length : SCAN_LENGTH_H;
+  }
+  if (size == 32) {
+    return fast ? fast_length : SCAN_LENGTH_NONE;
+  }
+  if (size == 64) {
+    return SCAN_LENGTH_LL;
+  }
+  return SCAN_LENGTH_NONE;
 }
 
 static enum scan_length parse_length(const char** format) {
@@ -158,7 +194,9 @@ static void assign_signed(va_list* ap, enum scan_length length, long long value)
 }
 
 static void assign_unsigned(va_list* ap, enum scan_length length, unsigned long long value) {
-  if (length == SCAN_LENGTH_HH) {
+  if (length == SCAN_LENGTH_POINTER) {
+    *va_arg(*ap, void**) = (void*)(uintptr_t)value;
+  } else if (length == SCAN_LENGTH_HH) {
     *va_arg(*ap, unsigned char*) = (unsigned char)value;
   } else if (length == SCAN_LENGTH_H) {
     *va_arg(*ap, unsigned short*) = (unsigned short)value;
@@ -173,6 +211,144 @@ static void assign_unsigned(va_list* ap, enum scan_length length, unsigned long 
   } else {
     *va_arg(*ap, unsigned int*) = (unsigned int)value;
   }
+}
+
+static int scan_integer_digit_value(int ch) {
+  if (ch >= '0' && ch <= '9') {
+    return ch - '0';
+  }
+  if (ch >= 'A' && ch <= 'Z') {
+    return ch - 'A' + 10;
+  }
+  if (ch >= 'a' && ch <= 'z') {
+    return ch - 'a' + 10;
+  }
+  return -1;
+}
+
+static int scan_integer_token(
+    struct scan_source* source,
+    char* token,
+    size_t token_size,
+    int width,
+    int base,
+    int* final_base) {
+  char* p = token;
+  size_t remaining;
+  int flags = SCANF_SIGNOK | SCANF_NDIGITS | SCANF_NZDIGITS;
+  int ch = 0;
+
+  if (width == 0 || (size_t)width > token_size - 1) {
+    remaining = token_size - 1;
+  } else {
+    remaining = (size_t)width;
+  }
+  if (base == 0) {
+    flags |= SCANF_PFXOK | SCANF_PFBOK;
+  } else if (base == 16) {
+    flags |= SCANF_PFXOK;
+  } else if (base == 2) {
+    flags |= SCANF_PFBOK;
+  }
+
+  while (remaining != 0) {
+    int digit;
+
+    ch = source_getc(source);
+    if (ch == EOF) {
+      break;
+    }
+    switch (ch) {
+      case '0':
+        if (base == 0) {
+          base = 8;
+          flags |= SCANF_PFBOK | SCANF_PFXOK;
+        }
+        if (flags & SCANF_NZDIGITS) {
+          flags &= ~(SCANF_SIGNOK | SCANF_NZDIGITS | SCANF_NDIGITS);
+        } else {
+          flags &= ~(SCANF_SIGNOK | SCANF_PFBOK | SCANF_PFXOK | SCANF_NDIGITS);
+        }
+        break;
+      case 'b':
+      case 'B':
+        if ((flags & SCANF_PFBOK) && p == token + 1 + ((flags & SCANF_HAVESIGN) != 0)) {
+          base = 2;
+          flags &= ~SCANF_PFBOK;
+          break;
+        }
+        digit = scan_integer_digit_value(ch);
+        if (base == 0) {
+          base = 10;
+        }
+        if (digit < 0 || digit >= base) {
+          source_ungetc(source, ch);
+          goto done;
+        }
+        flags &= ~(SCANF_SIGNOK | SCANF_PFBOK | SCANF_PFXOK | SCANF_NDIGITS);
+        break;
+      case 'x':
+      case 'X':
+        if ((flags & SCANF_PFXOK) && p == token + 1 + ((flags & SCANF_HAVESIGN) != 0)) {
+          base = 16;
+          flags &= ~SCANF_PFXOK;
+          break;
+        }
+        digit = scan_integer_digit_value(ch);
+        if (base == 0) {
+          base = 10;
+        }
+        if (digit < 0 || digit >= base) {
+          source_ungetc(source, ch);
+          goto done;
+        }
+        flags &= ~(SCANF_SIGNOK | SCANF_PFBOK | SCANF_PFXOK | SCANF_NDIGITS);
+        break;
+      case '+':
+      case '-':
+        if (flags & SCANF_SIGNOK) {
+          flags &= ~SCANF_SIGNOK;
+          flags |= SCANF_HAVESIGN;
+          break;
+        }
+        source_ungetc(source, ch);
+        goto done;
+      default:
+        digit = scan_integer_digit_value(ch);
+        if (base == 0) {
+          base = 10;
+        }
+        if (digit < 0 || digit >= base) {
+          source_ungetc(source, ch);
+          goto done;
+        }
+        flags &= ~(SCANF_SIGNOK | SCANF_PFBOK | SCANF_PFXOK | SCANF_NDIGITS);
+        break;
+    }
+    *p++ = (char)ch;
+    --remaining;
+  }
+
+done:
+  if (base == 0) {
+    base = 10;
+  }
+  if (flags & SCANF_NDIGITS) {
+    if (p > token) {
+      source_ungetc(source, (unsigned char)*--p);
+    }
+    return -1;
+  }
+  if (p > token) {
+    ch = (unsigned char)p[-1];
+    if ((base == 2 && (ch == 'b' || ch == 'B')) || ch == 'x' || ch == 'X') {
+      --p;
+      source_ungetc(source, ch);
+    }
+  }
+  *p = 0;
+  *final_base = base;
+  return (int)(p - token);
 }
 
 static int read_token(struct scan_source* source, char* token, size_t token_size, int width, int skip_ws) {
@@ -200,45 +376,50 @@ static int read_token(struct scan_source* source, char* token, size_t token_size
 static int scan_integer(struct scan_source* source, int width, int base, int is_signed,
                         enum scan_length length, int suppress, va_list* ap) {
   char token[256];
-  char* end = 0;
-  int used = read_token(source, token, sizeof(token), width, 1);
-  int extra;
+  char converted_token[256];
+  char* parse_token = token;
+  int used;
+  int final_base = base;
 
+  source_skip_space(source);
+  if (source_peekc(source) == EOF) {
+    return -2;
+  }
+  used = scan_integer_token(source, token, sizeof(token), width, base, &final_base);
   if (used == 0) {
+    return -2;
+  }
+  if (used < 0) {
     return -1;
   }
+  if (final_base == 2) {
+    const char* in = token;
+    char* out = converted_token;
+
+    if (*in == '+' || *in == '-') {
+      *out++ = *in++;
+    }
+    if (in[0] == '0' && (in[1] == 'b' || in[1] == 'B')) {
+      in += 2;
+    }
+    while (*in != 0) {
+      *out++ = *in++;
+    }
+    *out = 0;
+    parse_token = converted_token;
+  }
   if (is_signed) {
-    long long value = strtoll(token, &end, base);
-    if (end == token) {
-      extra = used - (int)(end - token);
-      while (extra-- > 0) {
-        source_ungetc(source, token[--used]);
-      }
-      return -1;
-    }
-    extra = used - (int)(end - token);
-    while (extra-- > 0) {
-      source_ungetc(source, token[--used]);
-    }
+    intmax_t value = strtoimax(parse_token, 0, final_base);
+
     if (!suppress) {
-      assign_signed(ap, length, value);
+      assign_signed(ap, length, (long long)value);
       return 1;
     }
   } else {
-    unsigned long long value = strtoull(token, &end, base);
-    if (end == token) {
-      extra = used - (int)(end - token);
-      while (extra-- > 0) {
-        source_ungetc(source, token[--used]);
-      }
-      return -1;
-    }
-    extra = used - (int)(end - token);
-    while (extra-- > 0) {
-      source_ungetc(source, token[--used]);
-    }
+    uintmax_t value = strtoumax(parse_token, 0, final_base);
+
     if (!suppress) {
-      assign_unsigned(ap, length, value);
+      assign_unsigned(ap, length, (unsigned long long)value);
       return 1;
     }
   }
@@ -252,7 +433,7 @@ static int scan_float(struct scan_source* source, int width, enum scan_length le
   int extra;
 
   if (used == 0) {
-    return -1;
+    return -2;
   }
   if (length == SCAN_LENGTH_CAPITAL_L) {
     long double value = strtold(token, &end);
@@ -306,6 +487,9 @@ static int scan_string(struct scan_source* source, int width, int suppress, int 
     }
   }
   source_skip_space(source);
+  if (source_peekc(source) == EOF) {
+    return -2;
+  }
   while (width == 0 || count < width) {
     ch = source_getc(source);
     if (ch == EOF) {
@@ -376,6 +560,9 @@ static int scan_wide_string(struct scan_source* source, int width, int suppress,
     }
   }
   source_skip_space(source);
+  if (source_peekc(source) == EOF) {
+    return -2;
+  }
   while (width == 0 || count < width) {
     wc = source_getwc_utf8(source);
     if (wc == WEOF) {
@@ -459,7 +646,10 @@ static int scan_chars(struct scan_source* source, int width, int suppress, int a
     ch = source_getc(source);
     if (ch == EOF) {
       free(heap_buffer);
-      return count == 0 ? -1 : 0;
+      if (count == 0) {
+        return -2;
+      }
+      break;
     }
     if (!suppress) {
       out[count] = (char)ch;
@@ -510,7 +700,10 @@ static int scan_wide_chars(struct scan_source* source, int width, int suppress, 
     wint_t wc = source_getwc_utf8(source);
     if (wc == WEOF) {
       free(heap_buffer);
-      return count == 0 ? -1 : 0;
+      if (count == 0) {
+        return -2;
+      }
+      break;
     }
     if (!suppress) {
       out[count] = (wchar_t)wc;
@@ -533,9 +726,53 @@ static int scan_wide_chars(struct scan_source* source, int width, int suppress, 
   return suppress ? 0 : 1;
 }
 
+static const char* scan_sccl(char* table, const char* format) {
+  int c;
+  int n;
+  int value;
+
+  c = (unsigned char)*format++;
+  if (c == '^') {
+    value = 1;
+    c = (unsigned char)*format++;
+  } else {
+    value = 0;
+  }
+  memset(table, value, 256);
+  if (c == 0) {
+    return format - 1;
+  }
+
+  value = 1 - value;
+  for (;;) {
+    table[c] = (char)value;
+doswitch:
+    n = (unsigned char)*format++;
+    switch (n) {
+      case 0:
+        return format - 1;
+      case '-':
+        n = (unsigned char)*format;
+        if (n == ']' || n < c) {
+          c = '-';
+          break;
+        }
+        ++format;
+        do {
+          table[++c] = (char)value;
+        } while (c < n);
+        goto doswitch;
+      case ']':
+        return format;
+      default:
+        c = n;
+        break;
+    }
+  }
+}
+
 static int scan_set(struct scan_source* source, const char** format, int width, int suppress, int allocate, va_list* ap) {
-  int table[256] = {0};
-  int invert = 0;
+  char table[256];
   int count = 0;
   int ch;
   char stack_buffer[256];
@@ -543,20 +780,10 @@ static int scan_set(struct scan_source* source, const char** format, int width, 
   char* out = 0;
   size_t capacity = sizeof(stack_buffer);
 
-  if (**format == '^') {
-    invert = 1;
-    ++*format;
-  }
-  if (**format == ']') {
-    table[(unsigned char)']'] = 1;
-    ++*format;
-  }
-  while (**format != 0 && **format != ']') {
-    table[(unsigned char)**format] = 1;
-    ++*format;
-  }
-  if (**format == ']') {
-    ++*format;
+  *format = scan_sccl(table, *format);
+
+  if (source_peekc(source) == EOF) {
+    return -2;
   }
 
   if (!suppress) {
@@ -571,7 +798,7 @@ static int scan_set(struct scan_source* source, const char** format, int width, 
     if (ch == EOF) {
       break;
     }
-    if ((table[(unsigned char)ch] != 0) == invert) {
+    if (table[(unsigned char)ch] == 0) {
       source_ungetc(source, ch);
       break;
     }
@@ -621,28 +848,17 @@ static int scan_set(struct scan_source* source, const char** format, int width, 
 }
 
 static int scan_wide_set(struct scan_source* source, const char** format, int width, int suppress, int allocate, va_list* ap) {
-  int table[256] = {0};
-  int invert = 0;
+  char table[256];
   int count = 0;
   wchar_t stack_buffer[128];
   wchar_t* heap_buffer = 0;
   wchar_t* out = 0;
   size_t capacity = sizeof(stack_buffer) / sizeof(stack_buffer[0]);
 
-  if (**format == '^') {
-    invert = 1;
-    ++*format;
-  }
-  if (**format == ']') {
-    table[(unsigned char)']'] = 1;
-    ++*format;
-  }
-  while (**format != 0 && **format != ']') {
-    table[(unsigned char)**format] = 1;
-    ++*format;
-  }
-  if (**format == ']') {
-    ++*format;
+  *format = scan_sccl(table, *format);
+
+  if (source_peekc(source) == EOF) {
+    return -2;
   }
 
   if (!suppress) {
@@ -658,7 +874,7 @@ static int scan_wide_set(struct scan_source* source, const char** format, int wi
     if (wc == WEOF) {
       break;
     }
-    if ((wc < 0 || wc > 255 || table[(unsigned char)wc] == 0) != invert) {
+    if (wc < 0 || wc > 255 || table[(unsigned char)wc] == 0) {
       if (wc >= 0 && wc <= 255) {
         source_ungetc(source, (int)wc);
       }
@@ -717,7 +933,7 @@ static int vscan_core(struct scan_source* source, const char* format, va_list ap
     int suppress = 0;
     int allocate = 0;
     int width = 0;
-    enum scan_length length;
+    enum scan_length length = SCAN_LENGTH_NONE;
     int result = 0;
     char spec;
     int ch;
@@ -761,26 +977,71 @@ static int vscan_core(struct scan_source* source, const char* format, va_list ap
       allocate = 1;
       ++format;
     }
-    width = parse_width(&format);
-    if (!suppress && *format == 'm') {
-      allocate = 1;
-      ++format;
-    } else if (!suppress && *format == 'a' &&
-               (format[1] == 's' || format[1] == 'c' || format[1] == '[')) {
-      allocate = 1;
-      ++format;
+    for (;;) {
+      if (*format == 0) {
+        return assigned == 0 ? EOF : assigned;
+      }
+      if (isdigit((unsigned char)*format)) {
+        width = parse_width(&format);
+        continue;
+      }
+      if (!suppress && *format == 'm') {
+        allocate = 1;
+        ++format;
+        continue;
+      }
+      if (!suppress && *format == 'a' &&
+          (format[1] == 's' || format[1] == 'c' || format[1] == '[')) {
+        allocate = 1;
+        ++format;
+        continue;
+      }
+      if (*format == 'q') {
+        length = SCAN_LENGTH_LL;
+        ++format;
+        continue;
+      }
+      if (*format == 'w') {
+        int fast = 0;
+        int size = 0;
+
+        ++format;
+        if (*format == 'f') {
+          fast = 1;
+          ++format;
+        }
+        size = parse_width(&format);
+        length = scan_w_to_length(size, fast);
+        continue;
+      }
+      {
+        enum scan_length parsed_length = parse_length(&format);
+        if (parsed_length != SCAN_LENGTH_NONE) {
+          length = parsed_length;
+          continue;
+        }
+      }
+      break;
     }
-    length = parse_length(&format);
     spec = *format++;
 
-    if (spec == 'd') {
+    if (spec == 'D') {
+      result = scan_integer(source, width, 10, 1, SCAN_LENGTH_L, suppress, &ap);
+    } else if (spec == 'd') {
       result = scan_integer(source, width, 10, 1, length, suppress, &ap);
     } else if (spec == 'i') {
       result = scan_integer(source, width, 0, 1, length, suppress, &ap);
+    } else if (spec == 'b') {
+      result = scan_integer(source, width, 2, 0, length, suppress, &ap);
+    } else if (spec == 'U') {
+      result = scan_integer(source, width, 10, 0, SCAN_LENGTH_L, suppress, &ap);
     } else if (spec == 'u') {
       result = scan_integer(source, width, 10, 0, length, suppress, &ap);
     } else if (spec == 'x' || spec == 'X' || spec == 'p') {
-      result = scan_integer(source, width, 16, 0, length, suppress, &ap);
+      result = scan_integer(
+          source, width, 16, 0, spec == 'p' ? SCAN_LENGTH_POINTER : length, suppress, &ap);
+    } else if (spec == 'O') {
+      result = scan_integer(source, width, 8, 0, SCAN_LENGTH_L, suppress, &ap);
     } else if (spec == 'o') {
       result = scan_integer(source, width, 8, 0, length, suppress, &ap);
     } else if (spec == 'a' || spec == 'A' || spec == 'e' || spec == 'E' ||
@@ -813,8 +1074,11 @@ static int vscan_core(struct scan_source* source, const char* format, va_list ap
       break;
     }
 
-    if (result < 0) {
+    if (result == -2) {
       return assigned == 0 ? EOF : assigned;
+    }
+    if (result < 0) {
+      return assigned;
     }
     assigned += result;
   }

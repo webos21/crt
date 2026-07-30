@@ -1326,6 +1326,66 @@
       "license_family": "project",
       "reason": "Little-endian IEEE layout adapter required by imported OpenBSD hdtoa/ldtoa sources for double, x87 80-bit long double, and IEEE quad long double targets.",
       "next_action": "Revisit if big-endian or non-IEEE targets are introduced."
+    },
+    {
+      "local": "third_party/bionic/stdio/scanf_common.h",
+      "component": "libc",
+      "source_kind": "bionic-main",
+      "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
+      "upstream_path": "libc/stdio/scanf_common.h",
+      "status": "reference snapshot",
+      "review_class": "main_current",
+      "license_family": "BSD/OpenBSD via Bionic",
+      "reason": "Reference copy for Bionic/BSD scanf flags, conversion classes, and import provenance.",
+      "next_action": "Use as the behavior contract while converging libc/src/scanf.c toward direct source sharing."
+    },
+    {
+      "local": "third_party/bionic/stdio/vfscanf.cpp",
+      "component": "libc",
+      "source_kind": "bionic-main",
+      "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
+      "upstream_path": "libc/stdio/vfscanf.cpp",
+      "status": "reference snapshot",
+      "review_class": "main_current",
+      "license_family": "BSD/OpenBSD via Bionic",
+      "reason": "Current Bionic byte scanner source used as the behavior model for the active C99 scanf adapter.",
+      "next_action": "Compile directly only after local FILE, refill, orientation, and private stdio helpers are compatible enough."
+    },
+    {
+      "local": "third_party/bionic/stdio/vfwscanf.cpp",
+      "component": "libc",
+      "source_kind": "bionic-main",
+      "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
+      "upstream_path": "libc/stdio/vfwscanf.cpp",
+      "status": "reference snapshot",
+      "review_class": "main_current",
+      "license_family": "BSD/OpenBSD via Bionic",
+      "reason": "Current Bionic wide scanner source used as the behavior model for wide scanf wrapper convergence.",
+      "next_action": "Compile directly only after local wide FILE orientation and wchar input internals converge further."
+    },
+    {
+      "local": "third_party/bionic/stdio/local.h",
+      "component": "libc",
+      "source_kind": "bionic-main",
+      "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
+      "upstream_path": "libc/stdio/local.h",
+      "status": "reference snapshot",
+      "review_class": "main_current",
+      "license_family": "BSD/OpenBSD via Bionic",
+      "reason": "Private stdio dependency snapshot documenting the FILE/refill/orientation interfaces required by Bionic scanner sources.",
+      "next_action": "Use when deciding whether to converge local FILE internals or keep an adapter boundary."
+    },
+    {
+      "local": "libc/src/scanf.c",
+      "component": "libc",
+      "source_kind": "project-owned",
+      "upstream_ref": "Bionic main scanf behavior reference",
+      "upstream_path": "libc/stdio/vfscanf.cpp and libc/stdio/scanf_common.h",
+      "status": "adapted/project-owned",
+      "review_class": "project_owned",
+      "license_family": "project",
+      "reason": "C99 adapter ports Bionic/BSD scanner state behavior onto the CRT scan_source backend without depending on Bionic private FILE internals.",
+      "next_action": "Reduce adapter-only code as local stdio internals converge with Bionic/BSD."
     }
   ]
 }

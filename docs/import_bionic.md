@@ -995,6 +995,23 @@ compatibility implementation rather than a full direct Bionic/BSD `vfscanf`
 import; positional scanf, full locale/xlocale behavior, and many pathological
 matching edge cases are still deferred.
 
+The scanner now keeps Bionic main `vfscanf.cpp`, `vfwscanf.cpp`,
+`scanf_common.h`, and `local.h` snapshots under `third_party/bionic/stdio/`.
+Those files are not compiled directly yet because current Bionic stdio is C++
+and depends on Bionic's private `FILE` refill/buffer internals. Instead,
+`libc/src/scanf.c` is a C99 adapter that ports the Bionic/BSD scanner state
+machine onto this CRT's `scan_source` backend. The current adapter imports the
+Bionic/BSD scanset range algorithm, `%b` and `0b` integer prefix behavior,
+BSD compatibility conversions `%D`/`%O`/`%U`, deprecated `%q`, Bionic `%w`/`%wf`
+integer width modifiers, pointer assignment for `%p`, gdtoa-backed floating
+input, and `%m` allocation semantics. The long-term direction is to keep
+reducing adapter-only behavior until the scanner can share more code directly
+with the Bionic source snapshot.
+
+`tests/scanf_edge_matrix_test.c` is the active edge-case parity matrix. It is
+designed to run both under this CRT and under Android/Bionic so mismatches can
+be reduced case by case. See `docs/scanf_edge_matrix.md`.
+
 ## Formatting, Stdio, File/Path, and Libc Surface Tranche
 
 The formatter tranche expands `vsnprintf`, `snprintf`, `printf`, `fprintf`,

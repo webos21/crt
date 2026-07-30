@@ -164,6 +164,22 @@ Bionic's `__strtorQ`; otherwise it remains a `strtod` wrapper until a native x87
 | `libc/gdtoa/machine/ieee.h` | OpenBSD/BSD `<machine/ieee.h>` layout contract | project-owned | new | Little-endian IEEE layout adapter for double, x87 80-bit long double, and IEEE quad long double. |
 | `libc/src/atof.c` | `libc/bionic/atof.cpp` and `libc/bionic/strtold.cpp` policy shape | project-owned | adapted | Keeps `atof` wrapper and target-policy `strtold` dispatch while `strtod`/`strtof` come from gdtoa. |
 
+### Stdio Scanf Snapshot
+
+Bionic main's scanner sources are preserved under `third_party/bionic/stdio/`
+as reference snapshots. They are not compiled directly yet because Bionic's
+current stdio scanner is C++ and uses private `FILE` buffer/refill internals.
+The active C99 implementation in `libc/src/scanf.c` is an adapter that ports
+the Bionic/BSD state machine onto this project's `scan_source` abstraction.
+
+| Local file | Upstream path | Upstream ref | Status | Notes |
+| --- | --- | --- | --- | --- |
+| `third_party/bionic/stdio/scanf_common.h` | `libc/stdio/scanf_common.h` | Bionic `main` | reference snapshot | Scanner flags, conversion classes, and Bionic/OpenBSD license/provenance reference. |
+| `third_party/bionic/stdio/vfscanf.cpp` | `libc/stdio/vfscanf.cpp` | Bionic `main` | reference snapshot | Current Bionic byte scanner source used as the behavior model for `libc/src/scanf.c`. |
+| `third_party/bionic/stdio/vfwscanf.cpp` | `libc/stdio/vfwscanf.cpp` | Bionic `main` | reference snapshot | Current Bionic wide scanner source used as the behavior model for wide scanf wrappers. |
+| `third_party/bionic/stdio/local.h` | `libc/stdio/local.h` | Bionic `main` | reference snapshot | Private stdio dependency that explains why direct compilation is deferred until the local `FILE` internals converge further. |
+| `libc/src/scanf.c` | `libc/stdio/vfscanf.cpp` behavior plus OpenBSD/BSD scanner algorithm | project-owned C99 adapter | adapted/project-owned | Ports Bionic scanset ranges, `%b`/`0b`, `%D`/`%O`/`%U`, `%q`, `%w`/`%wf`, `%p`, gdtoa-backed floats, wide destinations, and `%m` allocation to the CRT backend. |
+
 ### C99 Base Header Tranche
 
 | Local file | Upstream path | Upstream ref | Status | Notes |

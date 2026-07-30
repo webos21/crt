@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
@@ -31,6 +32,13 @@ int main(void) {
   wchar_t* allocated_wide = 0;
   double d = 0.0;
   long double ld = 0.0L;
+  long compat_long = 0;
+  unsigned long compat_octal = 0;
+  unsigned long compat_unsigned = 0;
+  long long compat_ll = 0;
+  int binary = 0;
+  int fixed32 = 0;
+  void* pointer = 0;
 
   if (sscanf("1000-1fff rwxp 40 08:01 123 /tmp/a",
              "%lx-%lx %9s %lx %9s %ld %s%n",
@@ -87,6 +95,25 @@ int main(void) {
     return fail("wide allocation modifier");
   }
   free(allocated_wide);
+
+  memset(set, 0, sizeof(set));
+  if (sscanf("bdf", "%[a-c-e]", set) != 1 || strcmp(set, "bd") != 0) {
+    return fail("bionic scanset range");
+  }
+  if (sscanf("0b101 0B11", "%i %b", &binary, &fixed32) != 2 ||
+      binary != 5 || fixed32 != 3) {
+    return fail("bionic binary integer");
+  }
+  if (sscanf("-12 17 20 123456789", "%D %O %U %qd", &compat_long,
+             &compat_octal, &compat_unsigned, &compat_ll) != 4 ||
+      compat_long != -12 || compat_octal != 15 || compat_unsigned != 20 ||
+      compat_ll != 123456789LL) {
+    return fail("bsd compat integer");
+  }
+  if (sscanf("42 0x1234", "%w32d %p", &fixed32, &pointer) != 2 ||
+      fixed32 != 42 || pointer != (void*)(uintptr_t)0x1234) {
+    return fail("bionic integer modifiers");
+  }
 
   stream = fopen("scanf_test.tmp", "w+");
   if (stream == 0) {
