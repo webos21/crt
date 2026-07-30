@@ -366,10 +366,10 @@ use compiler builtins rather than importing the older portable fdlibm
 Windows builds lower directly to hardware sqrt instructions instead of producing
 a recursive `sqrt`/`sqrtf` libcall back into the same exported function.
 
-The `fabs*`, `copysign*`, `fmin`, `fmax`, `fminf`, and `fmaxf` functions also
-use Clang builtins. These were checked at Debug/O0 for the supported Windows and
-Linux target families to avoid the recursive libcall issue seen with ordinary
-`__builtin_sqrt`.
+The `fabs*` and `copysign*` functions also use Clang builtins. The `fmin`/`fmax`
+family intentionally uses the FreeBSD/msun or project-owned portable paths so
+NaN and signed-zero behavior stays stable across Windows x86_64 and the other
+supported targets.
 
 The exponential tranche imports `exp` and native `expf` from older Bionic fdlibm
 because current Bionic `main` no longer lists matching direct portable
@@ -1411,3 +1411,13 @@ follows the Windows ARM64 stack-probe convention used by LLVM compiler-rt:
 `x15` carries the allocation size in 16-byte units, the helper probes pages
 below `sp`, clobbers only scratch registers `x16`/`x17`, and leaves `sp`
 unchanged for the caller's prologue to adjust.
+
+Windows x86_64 builds also provide a project-owned weak `_fltused` definition.
+Clang emits this MSVC ABI marker when floating-point code is present, including
+the `libc` formatter/parser and `libm` sources. The symbol normally comes from
+the MSVC runtime, but CRT's freestanding links use `-nostdlib` and
+`-nodefaultlibs`, so the marker lives in the Windows compiler-ABI helper object
+instead of pulling in a hosted runtime library. The weak definition resolves
+static and shared links without being collected by CMake's automatic Windows DLL
+export generation; `windows_export_hygiene_runs` checks that `_fltused` is not
+part of the DLL public export surface.

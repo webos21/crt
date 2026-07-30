@@ -25,22 +25,38 @@ long double copysignl(long double x, long double y) {
 }
 
 float fminf(float x, float y) {
-  return __builtin_fminf(x, y);
+  if (isnan(x)) return y;
+  if (isnan(y)) return x;
+  if (x == 0.0f && y == 0.0f) {
+    return (signbit(x) || signbit(y)) ? -0.0f : 0.0f;
+  }
+  return x < y ? x : y;
 }
 
 long double fminl(long double x, long double y) {
   if (isnan(x)) return y;
   if (isnan(y)) return x;
+  if (x == 0.0L && y == 0.0L) {
+    return (signbit(x) || signbit(y)) ? -0.0L : 0.0L;
+  }
   return x < y ? x : y;
 }
 
 float fmaxf(float x, float y) {
-  return __builtin_fmaxf(x, y);
+  if (isnan(x)) return y;
+  if (isnan(y)) return x;
+  if (x == 0.0f && y == 0.0f) {
+    return (signbit(x) && signbit(y)) ? -0.0f : 0.0f;
+  }
+  return x > y ? x : y;
 }
 
 long double fmaxl(long double x, long double y) {
   if (isnan(x)) return y;
   if (isnan(y)) return x;
+  if (x == 0.0L && y == 0.0L) {
+    return (signbit(x) && signbit(y)) ? -0.0L : 0.0L;
+  }
   return x > y ? x : y;
 }
 

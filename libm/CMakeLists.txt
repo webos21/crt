@@ -46,9 +46,11 @@ set(CRT_LIBM_SOURCES
 )
 
 add_library(m STATIC ${CRT_LIBM_SOURCES})
+if(CRT_TARGET_OS STREQUAL "windows")
+  target_sources(m PRIVATE $<TARGET_OBJECTS:crt_windows_compiler_abi>)
+endif()
 target_link_libraries(m PRIVATE crt_build_flags)
 target_include_directories(m PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/freebsd")
-target_compile_definitions(m PRIVATE USE_BUILTIN_FMAX USE_BUILTIN_FMIN)
 set_target_properties(m PROPERTIES
   OUTPUT_NAME m
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
@@ -57,10 +59,10 @@ set_target_properties(m PROPERTIES
 add_library(m_shared SHARED ${CRT_LIBM_SOURCES})
 if(CRT_TARGET_OS STREQUAL "windows")
   target_sources(m_shared PRIVATE $<TARGET_OBJECTS:crt_windows_dllcrt>)
+  target_sources(m_shared PRIVATE $<TARGET_OBJECTS:crt_windows_compiler_abi>)
 endif()
 target_link_libraries(m_shared PRIVATE crt_build_flags crt_compiler_rt_builtins)
 target_include_directories(m_shared PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/freebsd")
-target_compile_definitions(m_shared PRIVATE USE_BUILTIN_FMAX USE_BUILTIN_FMIN)
 crt_configure_shared_runtime(m_shared)
 set_target_properties(m_shared PROPERTIES
   OUTPUT_NAME m

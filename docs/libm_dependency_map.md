@@ -69,8 +69,10 @@ involves fenv behavior and long-double ABI details. The older Bionic fdlibm
 `libm/src/e_sqrt.c` remains a documented fallback candidate if a future target
 cannot use Clang's builtin lowering safely.
 
-`fabs*`, `copysign*`, `fmin`, `fmax`, `fminf`, and `fmaxf` use Clang builtins.
-By contrast, `__builtin_floorf`, `__builtin_ceilf`, `__builtin_truncf`, and
+`fabs*` and `copysign*` use Clang builtins. The `fmin`/`fmax` family uses the
+FreeBSD/msun or project-owned portable paths so NaN and signed-zero behavior is
+not target-builtin dependent. By contrast, `__builtin_floorf`,
+`__builtin_ceilf`, `__builtin_truncf`, and
 `__builtin_roundf` are not used yet because Debug/O0 Linux and Windows builds
 lower them to recursive libcalls back into the same exported `*f` symbol.
 
