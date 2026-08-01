@@ -820,20 +820,6 @@ static char* build_windows_environment_block(
   return block;
 }
 
-static HANDLE duplicate_inheritable_fd_handle(int fd) {
-  HANDLE source = get_fd_handle(fd);
-  HANDLE duplicate = 0;
-
-  if (source == INVALID_HANDLE_VALUE) {
-    return INVALID_HANDLE_VALUE;
-  }
-  if (!DuplicateHandle(GetCurrentProcess(), source, GetCurrentProcess(), &duplicate, 0, 1,
-                       DUPLICATE_SAME_ACCESS)) {
-    return INVALID_HANDLE_VALUE;
-  }
-  return duplicate;
-}
-
 static int snapshot_kind_from_fd_kind(int kind) {
   if (kind == CRT_FD_KIND_FILE) {
     return CRT_FD_SNAPSHOT_KIND_FILE;
@@ -1019,14 +1005,127 @@ static long open_spawn_action_handle(
   return *out == INVALID_HANDLE_VALUE ? fail_last_error() : 0;
 }
 
-static void close_spawn_std_handles(HANDLE handles[3]) {
-  int i;
+static struct crt_fd_snapshot_entry* fd_snapshot_find_entry(struct crt_fd_snapshot* snapshot, int fd) {
+  unsigned int i;
 
-  for (i = 0; i < 3; ++i) {
-    if (handles[i] != 0 && handles[i] != INVALID_HANDLE_VALUE) {
-      CloseHandle(handles[i]);
+  for (i = 0; i < snapshot->count; ++i) {
+    if (snapshot->entries[i].fd == fd) {
+      return &snapshot->entries[i];
     }
   }
+  return 0;
+}
+
+static const struct crt_fd_snapshot_entry* fd_snapshot_find_const_entry(
+    const struct crt_fd_snapshot* snapshot,
+    int fd) {
+  unsigned int i;
+
+  for (i = 0; i < snapshot->count; ++i) {
+    if (snapshot->entries[i].fd == fd) {
+      return &snapshot->entries[i];
+    }
+  }
+  return 0;
+}
+
+static void fd_snapshot_close_entry(struct crt_fd_snapshot_entry* entry) {
+  if (entry->handle != 0 && entry->handle != (uintptr_t)INVALID_HANDLE_VALUE) {
+    if (entry->kind == CRT_FD_SNAPSHOT_KIND_SOCKET) {
+      init_winsock();
+      if (winsock.closesocket != 0) {
+        winsock.closesocket((SOCKET)entry->handle);
+      }
+    } else {
+      CloseHandle((HANDLE)entry->handle);
+    }
+  }
+  entry->handle = 0;
+  entry->kind = CRT_FD_SNAPSHOT_KIND_NONE;
+  entry->flags = 0;
+}
+
+static long fd_snapshot_remove(struct crt_fd_snapshot* snapshot, int fd) {
+  unsigned int i;
+
+  if (fd < 0 || fd >= CRT_FD_TABLE_SIZE) {
+    return -EBADF;
+  }
+  for (i = 0; i < snapshot->count; ++i) {
+    if (snapshot->entries[i].fd == fd) {
+      fd_snapshot_close_entry(&snapshot->entries[i]);
+      if (i + 1 < snapshot->count) {
+        snapshot->entries[i] = snapshot->entries[snapshot->count - 1];
+      }
+      --snapshot->count;
+      memset(&snapshot->entries[snapshot->count], 0, sizeof(snapshot->entries[snapshot->count]));
+      return 0;
+    }
+  }
+  return 0;
+}
+
+static long fd_snapshot_set_handle(
+    struct crt_fd_snapshot* snapshot,
+    int fd,
+    int kind,
+    HANDLE handle) {
+  struct crt_fd_snapshot_entry* entry;
+
+  if (fd < 0 || fd >= CRT_FD_TABLE_SIZE) {
+    return -EBADF;
+  }
+  if (kind != CRT_FD_SNAPSHOT_KIND_FILE || handle == 0 || handle == INVALID_HANDLE_VALUE) {
+    return -EINVAL;
+  }
+  entry = fd_snapshot_find_entry(snapshot, fd);
+  if (entry == 0) {
+    if (snapshot->count == CRT_FD_SNAPSHOT_MAX) {
+      return -EMFILE;
+    }
+    entry = &snapshot->entries[snapshot->count++];
+    memset(entry, 0, sizeof(*entry));
+    entry->fd = fd;
+  } else {
+    fd_snapshot_close_entry(entry);
+  }
+  entry->fd = fd;
+  entry->kind = kind;
+  entry->flags = CRT_FD_SNAPSHOT_FLAG_INHERITABLE;
+  entry->handle = (uintptr_t)handle;
+  return 0;
+}
+
+static HANDLE fd_snapshot_handle_for_fd(const struct crt_fd_snapshot* snapshot, int fd) {
+  const struct crt_fd_snapshot_entry* entry = fd_snapshot_find_const_entry(snapshot, fd);
+
+  if (entry == 0 ||
+      entry->kind != CRT_FD_SNAPSHOT_KIND_FILE ||
+      entry->handle == 0 ||
+      entry->handle == (uintptr_t)INVALID_HANDLE_VALUE) {
+    return INVALID_HANDLE_VALUE;
+  }
+  return (HANDLE)entry->handle;
+}
+
+static long fd_snapshot_dup2(struct crt_fd_snapshot* snapshot, int fd, int new_fd) {
+  HANDLE source = fd_snapshot_handle_for_fd(snapshot, fd);
+  HANDLE duplicate = 0;
+
+  if (fd < 0 || fd >= CRT_FD_TABLE_SIZE || new_fd < 0 || new_fd >= CRT_FD_TABLE_SIZE) {
+    return -EBADF;
+  }
+  if (source == INVALID_HANDLE_VALUE) {
+    return -EBADF;
+  }
+  if (fd == new_fd) {
+    return 0;
+  }
+  if (!DuplicateHandle(GetCurrentProcess(), source, GetCurrentProcess(), &duplicate, 0, 1,
+                       DUPLICATE_SAME_ACCESS)) {
+    return -map_windows_error(GetLastError());
+  }
+  return fd_snapshot_set_handle(snapshot, new_fd, CRT_FD_SNAPSHOT_KIND_FILE, duplicate);
 }
 
 static long prepare_spawn_startup(
@@ -1035,62 +1134,45 @@ static long prepare_spawn_startup(
     struct crt_startupinfo* startup,
     const char** current_directory,
     char current_directory_buffer[4096],
-    HANDLE inherited_std_handles[3],
+    struct crt_fd_snapshot* fd_snapshot,
     DWORD* creation_flags) {
   struct __posix_spawn_file_action* action;
-  int i;
+  HANDLE std_input;
+  HANDLE std_output;
+  HANDLE std_error;
 
   memset(startup, 0, sizeof(*startup));
   startup->cb = sizeof(*startup);
   *current_directory = 0;
   *creation_flags = 0;
-  for (i = 0; i < 3; ++i) {
-    inherited_std_handles[i] = duplicate_inheritable_fd_handle(i);
-    if (inherited_std_handles[i] == INVALID_HANDLE_VALUE) {
-      inherited_std_handles[i] = 0;
-    }
-  }
   if (actions != 0) {
     for (action = actions->head; action != 0; action = action->next) {
       if (action->kind == CRT_SPAWN_ACTION_OPEN) {
         HANDLE handle = 0;
         long result;
 
-        if (action->new_fd < 0 || action->new_fd > 2) {
-          return -ENOTSUP;
-        }
         result = open_spawn_action_handle(action->path, action->flags, action->mode, &handle);
         if (result != 0) {
           return result;
         }
-        if (inherited_std_handles[action->new_fd] != 0) {
-          CloseHandle(inherited_std_handles[action->new_fd]);
+        result = fd_snapshot_set_handle(
+            fd_snapshot, action->new_fd, CRT_FD_SNAPSHOT_KIND_FILE, handle);
+        if (result != 0) {
+          CloseHandle(handle);
+          return result;
         }
-        inherited_std_handles[action->new_fd] = handle;
       } else if (action->kind == CRT_SPAWN_ACTION_CLOSE) {
-        if (action->fd >= 0 && action->fd <= 2) {
-          if (inherited_std_handles[action->fd] != 0) {
-            CloseHandle(inherited_std_handles[action->fd]);
-          }
-          inherited_std_handles[action->fd] = INVALID_HANDLE_VALUE;
-        } else {
-          return -ENOTSUP;
+        long result = fd_snapshot_remove(fd_snapshot, action->fd);
+
+        if (result != 0) {
+          return result;
         }
       } else if (action->kind == CRT_SPAWN_ACTION_DUP2) {
-        HANDLE handle;
+        long result = fd_snapshot_dup2(fd_snapshot, action->fd, action->new_fd);
 
-        if (action->new_fd < 0 || action->new_fd > 2) {
-          return -ENOTSUP;
+        if (result != 0) {
+          return result;
         }
-        handle = duplicate_inheritable_fd_handle(action->fd);
-        if (handle == INVALID_HANDLE_VALUE) {
-          return -EBADF;
-        }
-        if (inherited_std_handles[action->new_fd] != 0 &&
-            inherited_std_handles[action->new_fd] != INVALID_HANDLE_VALUE) {
-          CloseHandle(inherited_std_handles[action->new_fd]);
-        }
-        inherited_std_handles[action->new_fd] = handle;
       } else if (action->kind == CRT_SPAWN_ACTION_CHDIR) {
         const char* host_path = translate_path_for_host(action->path, current_directory_buffer);
 
@@ -1110,10 +1192,13 @@ static long prepare_spawn_startup(
                       POSIX_SPAWN_SETSIGMASK)) != 0) {
     return -ENOTSUP;
   }
+  std_input = fd_snapshot_handle_for_fd(fd_snapshot, 0);
+  std_output = fd_snapshot_handle_for_fd(fd_snapshot, 1);
+  std_error = fd_snapshot_handle_for_fd(fd_snapshot, 2);
   startup->dwFlags = CRT_STARTF_USESTDHANDLES;
-  startup->hStdInput = inherited_std_handles[0] != 0 ? inherited_std_handles[0] : INVALID_HANDLE_VALUE;
-  startup->hStdOutput = inherited_std_handles[1] != 0 ? inherited_std_handles[1] : INVALID_HANDLE_VALUE;
-  startup->hStdError = inherited_std_handles[2] != 0 ? inherited_std_handles[2] : INVALID_HANDLE_VALUE;
+  startup->hStdInput = std_input != INVALID_HANDLE_VALUE ? std_input : INVALID_HANDLE_VALUE;
+  startup->hStdOutput = std_output != INVALID_HANDLE_VALUE ? std_output : INVALID_HANDLE_VALUE;
+  startup->hStdError = std_error != INVALID_HANDLE_VALUE ? std_error : INVALID_HANDLE_VALUE;
   return 0;
 }
 
@@ -2787,7 +2872,6 @@ long __crt_sys_posix_spawn(
   char command_line[8192];
   struct crt_startupinfo startup;
   struct crt_process_information process;
-  HANDLE std_handles[3];
   char current_directory_buffer[4096];
   const char* current_directory;
   DWORD creation_flags;
@@ -2805,26 +2889,28 @@ long __crt_sys_posix_spawn(
   if (result != 0) {
     return result;
   }
-  result = prepare_spawn_startup(
-      actions, attr, &startup, &current_directory, current_directory_buffer, std_handles,
-      &creation_flags);
+  result = __crt_fd_snapshot_export(&fd_snapshot);
   if (result != 0) {
-    close_spawn_std_handles(std_handles);
     return result;
   }
-  result = __crt_fd_snapshot_export(&fd_snapshot);
-  if (result == 0 &&
-      __crt_fd_snapshot_encode(&fd_snapshot, fd_snapshot_text, sizeof(fd_snapshot_text)) == 0) {
-    fd_snapshot_ready = 1;
-  } else {
+  result = prepare_spawn_startup(
+      actions, attr, &startup, &current_directory, current_directory_buffer, &fd_snapshot,
+      &creation_flags);
+  if (result != 0) {
     __crt_fd_snapshot_dispose(&fd_snapshot);
+    return result;
   }
+  result = __crt_fd_snapshot_encode(&fd_snapshot, fd_snapshot_text, sizeof(fd_snapshot_text));
+  if (result != 0) {
+    __crt_fd_snapshot_dispose(&fd_snapshot);
+    return -result;
+  }
+  fd_snapshot_ready = 1;
   environment_block = build_windows_environment_block(
       envp,
       fd_snapshot_ready ? CRT_FD_SNAPSHOT_ENV : 0,
       fd_snapshot_ready ? fd_snapshot_text : 0);
   if (environment_block == 0) {
-    close_spawn_std_handles(std_handles);
     if (fd_snapshot_ready) {
       __crt_fd_snapshot_dispose(&fd_snapshot);
     }
@@ -2843,14 +2929,12 @@ long __crt_sys_posix_spawn(
           &startup,
           &process)) {
     free(environment_block);
-    close_spawn_std_handles(std_handles);
     if (fd_snapshot_ready) {
       __crt_fd_snapshot_dispose(&fd_snapshot);
     }
     return fail_last_error();
   }
   free(environment_block);
-  close_spawn_std_handles(std_handles);
   if (fd_snapshot_ready) {
     __crt_fd_snapshot_dispose(&fd_snapshot);
   }

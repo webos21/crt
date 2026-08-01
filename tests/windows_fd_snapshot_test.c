@@ -60,6 +60,12 @@ int main(int argc, char** argv) {
     }
     return 9;
   }
+  if (argc == 2 && strcmp(argv[1], "action-child") == 0) {
+    if (write(7, "c", 1) != 1) {
+      return 78;
+    }
+    return 10;
+  }
 
   memset(&snapshot, 0, sizeof(snapshot));
   if (pipe(pipefd) != 0) {
@@ -135,6 +141,41 @@ int main(int argc, char** argv) {
         !WIFEXITED(status) ||
         WEXITSTATUS(status) != 9) {
       return fail("transport wait");
+    }
+  }
+  if (pipe(pipefd) != 0) {
+    return fail("action pipe");
+  }
+  {
+    pid_t pid;
+    int status = 0;
+    posix_spawn_file_actions_t actions;
+    char* child_argv[] = {"/proc/self/exe", "action-child", 0};
+
+    if (posix_spawn_file_actions_init(&actions) != 0 ||
+        posix_spawn_file_actions_adddup2(&actions, pipefd[1], 7) != 0) {
+      close(pipefd[0]);
+      close(pipefd[1]);
+      return fail("action setup");
+    }
+    if (posix_spawn(&pid, "/proc/self/exe", &actions, 0, child_argv, environ) != 0) {
+      posix_spawn_file_actions_destroy(&actions);
+      close(pipefd[0]);
+      close(pipefd[1]);
+      return fail("action spawn");
+    }
+    posix_spawn_file_actions_destroy(&actions);
+    close(pipefd[1]);
+    in = 0;
+    if (read(pipefd[0], &in, 1) != 1 || in != 'c') {
+      close(pipefd[0]);
+      return fail("action read");
+    }
+    close(pipefd[0]);
+    if (waitpid(pid, &status, 0) != pid ||
+        !WIFEXITED(status) ||
+        WEXITSTATUS(status) != 10) {
+      return fail("action wait");
     }
   }
 #else

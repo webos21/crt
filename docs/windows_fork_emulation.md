@@ -99,10 +99,13 @@ than adding a separate `posix_spawn()`-only path:
 6. child imports cwd/rootfs/environment/signal policy;
 7. child enters either fork-resume mode or exec/spawn mode.
 
-`posix_spawn()` still prepares `STARTUPINFOA` std handles for host compatibility,
-but it now also transports the full file-like CRT fd table through the snapshot
-bootstrap. `fork()` emulation can reuse the same descriptor import path and
-focus on memory/runtime-state policy.
+`posix_spawn()` still fills `STARTUPINFOA` std handles for host compatibility,
+but those handles now come from the same fd snapshot that is transported to the
+child. `posix_spawn_file_actions_addopen()`, `addclose()`, and `adddup2()` are
+applied to the snapshot before it is encoded, so non-stdio descriptors can be
+created or remapped for the child without mutating the parent fd table.
+`fork()` emulation can reuse the same descriptor import path and focus on
+memory/runtime-state policy.
 
 ## Open Items
 
