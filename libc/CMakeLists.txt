@@ -25,11 +25,13 @@ set(CRT_LIBC_SOURCES
   src/pthread.c
   src/qsort.c
   src/fnmatch.c
+  src/random.c
   src/regex.c
   src/resource.c
   src/sched.c
   src/scanf.c
   src/setjmp.c
+  src/shadow.c
   src/signal.c
   src/socket.c
   src/stdio.c
