@@ -349,6 +349,60 @@ int clock_gettime(clockid_t clock_id, struct timespec* tp) {
   return normalize_syscall_result(__crt_sys_clock_gettime(clock_id, tp));
 }
 
+int clock_getres(clockid_t clock_id, struct timespec* resolution) {
+  (void)clock_id;
+  if (resolution != 0) {
+    resolution->tv_sec = 0;
+    resolution->tv_nsec = 1000000L;
+  }
+  return 0;
+}
+
+int clock_nanosleep(clockid_t clock_id, int flags, const struct timespec* req, struct timespec* rem) {
+  (void)clock_id;
+  if (flags != 0) {
+    return ENOTSUP;
+  }
+  return nanosleep(req, rem) == 0 ? 0 : errno;
+}
+
+int clock_settime(clockid_t clock_id, const struct timespec* tp) {
+  (void)clock_id;
+  (void)tp;
+  return __set_errno(ENOTSUP);
+}
+
+int timer_create(clockid_t clock_id, struct sigevent* event, timer_t* timer_ptr) {
+  (void)clock_id;
+  (void)event;
+  (void)timer_ptr;
+  return __set_errno(ENOTSUP);
+}
+
+int timer_delete(timer_t timer) {
+  (void)timer;
+  return __set_errno(ENOTSUP);
+}
+
+int timer_settime(timer_t timer, int flags, const struct itimerspec* new_value, struct itimerspec* old_value) {
+  (void)timer;
+  (void)flags;
+  (void)new_value;
+  (void)old_value;
+  return __set_errno(ENOTSUP);
+}
+
+int timer_gettime(timer_t timer, struct itimerspec* value) {
+  (void)timer;
+  (void)value;
+  return __set_errno(ENOTSUP);
+}
+
+int timer_getoverrun(timer_t timer) {
+  (void)timer;
+  return __set_errno(ENOTSUP);
+}
+
 clock_t clock(void) {
   struct timespec ts;
 

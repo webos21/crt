@@ -13,6 +13,21 @@ typedef unsigned long long sigset64_t;
 typedef void (*sighandler_t)(int);
 typedef sighandler_t sig_t;
 
+union sigval {
+  int sival_int;
+  void* sival_ptr;
+};
+
+typedef union sigval sigval_t;
+
+struct sigevent {
+  int sigev_notify;
+  int sigev_signo;
+  union sigval sigev_value;
+  void (*sigev_notify_function)(union sigval);
+  void* sigev_notify_attributes;
+};
+
 typedef struct {
   int si_signo;
   int si_errno;
@@ -75,6 +90,10 @@ struct sigaction {
 #define SIG_BLOCK 0
 #define SIG_UNBLOCK 1
 #define SIG_SETMASK 2
+
+#define SIGEV_SIGNAL 0
+#define SIGEV_NONE 1
+#define SIGEV_THREAD 2
 
 #define SA_NOCLDSTOP 1
 #define SA_NOCLDWAIT 2

@@ -11,10 +11,18 @@ extern "C" {
 typedef __crt_time_t time_t;
 typedef __crt_clock_t clock_t;
 typedef __crt_clockid_t clockid_t;
+typedef __crt_timer_t timer_t;
+
+struct sigevent;
 
 struct timespec {
   time_t tv_sec;
   long tv_nsec;
+};
+
+struct itimerspec {
+  struct timespec it_interval;
+  struct timespec it_value;
 };
 
 struct tm {
@@ -39,7 +47,15 @@ struct tm {
 clock_t clock(void);
 time_t time(time_t* tloc);
 int clock_gettime(clockid_t clock_id, struct timespec* tp);
+int clock_getres(clockid_t clock_id, struct timespec* resolution);
+int clock_nanosleep(clockid_t clock_id, int flags, const struct timespec* req, struct timespec* rem);
+int clock_settime(clockid_t clock_id, const struct timespec* tp);
 int nanosleep(const struct timespec* req, struct timespec* rem);
+int timer_create(clockid_t clock_id, struct sigevent* event, timer_t* timer_ptr);
+int timer_delete(timer_t timer);
+int timer_settime(timer_t timer, int flags, const struct itimerspec* new_value, struct itimerspec* old_value);
+int timer_gettime(timer_t timer, struct itimerspec* value);
+int timer_getoverrun(timer_t timer);
 int timespec_get(struct timespec* ts, int base);
 struct tm* gmtime(const time_t* timep);
 struct tm* gmtime_r(const time_t* timep, struct tm* result);

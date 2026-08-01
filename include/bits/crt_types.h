@@ -18,6 +18,7 @@ typedef uint32_t __crt_socklen_t;
 typedef int64_t __crt_time_t;
 typedef long __crt_clock_t;
 typedef int __crt_clockid_t;
+typedef void* __crt_timer_t;
 typedef unsigned long __crt_nfds_t;
 typedef unsigned short __crt_sa_family_t;
 typedef uint16_t __crt_in_port_t;

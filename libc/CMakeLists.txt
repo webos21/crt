@@ -42,6 +42,7 @@ set(CRT_LIBC_SOURCES
   src/tls.c
   src/termios.c
   src/time.c
+  src/utmp.c
   src/user_group.c
   src/wait.c
   src/wchar.c
