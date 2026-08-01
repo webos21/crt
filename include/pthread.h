@@ -178,6 +178,7 @@ int pthread_setschedparam(pthread_t thread, int policy, const struct sched_param
 int pthread_setschedprio(pthread_t thread, int priority);
 pid_t pthread_gettid_np(pthread_t thread);
 int pthread_getcpuclockid(pthread_t thread, clockid_t* clock_id);
+int pthread_atfork(void (*prepare)(void), void (*parent)(void), void (*child)(void));
 int pthread_setname_np(pthread_t thread, const char* name);
 int pthread_getname_np(pthread_t thread, char* buf, size_t size);
 int pthread_cancel(pthread_t thread);

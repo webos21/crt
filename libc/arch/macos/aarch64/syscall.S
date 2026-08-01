@@ -692,6 +692,9 @@ ___crt_sys_fork:
   mov x16, #2
   svc #0x80
   b.cs 1f
+  cbz x1, 2f
+  mov x0, #0
+2:
   ret
 1:
   neg x0, x0

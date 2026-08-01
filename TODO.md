@@ -59,14 +59,16 @@ Windows cannot faithfully implement POSIX `fork()` over `CreateProcess`.
 Current CRT policy is that `execve()` returns `ENOTSUP` on Windows because it
 cannot replace the current process image.
 
-Options:
+Current direction:
 
-- first validate mksh on Linux/macOS CRT where `fork`/`execve` are closer to the
-  host model;
-- on Windows, investigate whether mksh can be driven through a `posix_spawn`
-  path for the non-interactive configure-script use case;
-- postpone full interactive shell/job-control behavior until the process model
-  is clearer;
+- keep `fork()` as a first-class Bionic PAL goal;
+- validate `_Fork()`, `fork()`, `pthread_atfork()`, fd inheritance, and wait
+  behavior on Linux/macOS first;
+- document Windows `ENOTSUP` as the bootstrap policy only;
+- design Windows fork emulation around `CreateProcess`, child CRT bootstrap,
+  and serialized runtime state import;
+- share fd table inheritance infrastructure between `fork()` emulation and
+  `posix_spawn`;
 - avoid patching upstream first; prefer filling CRT/PAL gaps unless the
   required behavior is fundamentally unavailable on Windows.
 

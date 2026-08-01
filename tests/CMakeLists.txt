@@ -339,6 +339,11 @@ set_tests_properties(wait_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "wait_test: ok"
 )
 
+add_crt_test(fork_test fork_test.c)
+set_tests_properties(fork_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "fork_test: ok"
+)
+
 add_crt_test(pthread_basic_test pthread_basic_test.c)
 set_tests_properties(pthread_basic_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_basic_test: ok"

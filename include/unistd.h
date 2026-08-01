@@ -105,6 +105,9 @@ int pipe(int pipefd[2]);
 long sysconf(int name);
 ssize_t readlink(const char* path, char* buf, size_t bufsiz);
 int symlink(const char* target, const char* linkpath);
+pid_t _Fork(void);
+pid_t fork(void);
+pid_t vfork(void);
 int execve(const char* path, char* const argv[], char* const envp[]);
 void _exit(int status) __attribute__((noreturn));
 

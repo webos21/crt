@@ -696,6 +696,10 @@ ___crt_sys_fork:
   movq $0x2000002, %rax
   syscall
   jc 1f
+  testq %rdx, %rdx
+  jz 2f
+  xorq %rax, %rax
+2:
   retq
 1:
   negq %rax

@@ -157,6 +157,8 @@ Current Windows bootstrap behavior:
 
 Next required process improvements:
 
+- keep `fork()` as a first-class PAL goal because shell child management,
+  pipelines, redirections, and signal behavior depend on it;
 - implement `posix_spawn_file_actions_*` for stdin/stdout/stderr redirection;
 - apply Bionic-style spawn attributes where host semantics exist;
 - extend file actions beyond standard descriptors by teaching child CRT startup
@@ -166,6 +168,8 @@ Next required process improvements:
   mature;
 - decide whether a shell port needs an internal fork emulation layer or can be
   adapted to `posix_spawn`.
+
+See `docs/process_fork.md` for the fork contract and Windows emulation plan.
 
 ## Porting-Test Direction
 

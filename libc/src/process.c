@@ -50,6 +50,10 @@ long __crt_sys_waitpid(long pid, int* status, int options) {
   return __crt_sys_wait4(pid, status, options, 0);
 }
 #elif defined(CRT_TARGET_OS_WINDOWS)
+long __crt_sys_fork(void) {
+  return -ENOTSUP;
+}
+
 long __crt_sys_execve(const char* path, char* const argv[], char* const envp[]) {
   (void)path;
   (void)argv;
@@ -262,6 +266,91 @@ static long normalize_syscall_result(long result) {
     return -1;
   }
   return result;
+}
+
+struct crt_atfork_handler {
+  void (*prepare)(void);
+  void (*parent)(void);
+  void (*child)(void);
+  struct crt_atfork_handler* next;
+};
+
+static struct crt_atfork_handler* atfork_handlers;
+static struct crt_atfork_handler* atfork_handlers_tail;
+
+static void crt_atfork_run_prepare_recursive(struct crt_atfork_handler* handler) {
+  if (handler == 0) {
+    return;
+  }
+  crt_atfork_run_prepare_recursive(handler->next);
+  if (handler->prepare != 0) {
+    handler->prepare();
+  }
+}
+
+static void crt_atfork_run_parent(void) {
+  struct crt_atfork_handler* handler;
+
+  for (handler = atfork_handlers; handler != 0; handler = handler->next) {
+    if (handler->parent != 0) {
+      handler->parent();
+    }
+  }
+}
+
+static void crt_atfork_run_child(void) {
+  struct crt_atfork_handler* handler;
+
+  for (handler = atfork_handlers; handler != 0; handler = handler->next) {
+    if (handler->child != 0) {
+      handler->child();
+    }
+  }
+}
+
+static void crt_after_fork_child(void) {
+  crt_atfork_run_child();
+}
+
+int pthread_atfork(void (*prepare)(void), void (*parent)(void), void (*child)(void)) {
+  struct crt_atfork_handler* handler =
+      (struct crt_atfork_handler*)calloc(1, sizeof(*handler));
+
+  if (handler == 0) {
+    return errno;
+  }
+  handler->prepare = prepare;
+  handler->parent = parent;
+  handler->child = child;
+  if (atfork_handlers == 0) {
+    atfork_handlers = handler;
+    atfork_handlers_tail = handler;
+  } else {
+    atfork_handlers_tail->next = handler;
+    atfork_handlers_tail = handler;
+  }
+  return 0;
+}
+
+pid_t _Fork(void) {
+  return (pid_t)normalize_syscall_result(__crt_sys_fork());
+}
+
+pid_t fork(void) {
+  long child;
+
+  crt_atfork_run_prepare_recursive(atfork_handlers);
+  child = __crt_sys_fork();
+  if (child == 0) {
+    crt_after_fork_child();
+    return 0;
+  }
+  crt_atfork_run_parent();
+  return (pid_t)normalize_syscall_result(child);
+}
+
+pid_t vfork(void) {
+  return fork();
 }
 
 static int posix_spawn_add_file_action(
