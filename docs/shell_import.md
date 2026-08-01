@@ -61,6 +61,13 @@ record:
 - why the gap cannot reasonably be filled in CRT/PAL/sysroot;
 - the condition for removing the patch later.
 
+The first mksh exception is Windows LLP64. mksh assumes pointer-sized values fit
+in `long`, which is true for Android/Linux/macOS LP64 and Android 32-bit, but
+not Windows x86_64. The CRT build defines `MKSH_CRT_ALLOW_LLP64` only for the
+Windows mksh target and carries a small guarded source adjustment to use
+`intmax_t`/`uintmax_t` in mksh's internal formatter. This should be revisited if
+mksh upstream gains a native LLP64 path.
+
 ## Build Policy
 
 The first imported shell/userland binaries should be static CRT executables.

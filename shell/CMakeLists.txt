@@ -200,6 +200,9 @@ if(EXISTS "${CRT_MKSH_ROOT}/Android.bp")
       -Wl,--gc-sections
     )
   elseif(CRT_TARGET_OS STREQUAL "windows")
+    target_compile_definitions(crt_mksh PRIVATE
+      MKSH_CRT_ALLOW_LLP64
+    )
     target_link_options(crt_mksh PRIVATE
       -Wl,/entry:mainCRTStartup
       -Wl,/subsystem:console

@@ -20,5 +20,7 @@
     "Android external/mksh has been imported under shell/mksh/src.",
     "Keep upstream source separate from project-owned CRT/PAL glue.",
     "The CMake integration follows Android.bp source and cflag choices and builds a separate crt_mksh artifact before replacing /system/bin/sh."
+    ,
+    "Windows builds define MKSH_CRT_ALLOW_LLP64 and carry a guarded source adjustment because mksh assumes pointer-sized values fit in long, which is false on Windows x86_64 LLP64."
   ]
 }

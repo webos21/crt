@@ -793,9 +793,10 @@ shf_vfprintf(struct shf *shf, const char *fmt, va_list args)
 	char c, *cp;
 	int tmp = 0, flags;
 	size_t field, precision, len;
-	unsigned long lnum;
+	uintmax_t lnum;
+	intmax_t snum;
 	/* %#o produces the longest output */
-	char numbuf[(8 * sizeof(long) + 2) / 3 + 1 + /* NUL */ 1];
+	char numbuf[(8 * sizeof(uintmax_t) + 2) / 3 + 1 + /* NUL */ 1];
 	/* this stuff for dealing with the buffer */
 	ssize_t nwritten = 0;
 
@@ -911,26 +912,27 @@ shf_vfprintf(struct shf *shf, const char *fmt, va_list args)
 		case 'd':
 		case 'i':
 			if (flags & FL_SIZET)
-				lnum = (long)VA(ssize_t);
+				snum = (intmax_t)VA(ssize_t);
 			else if (flags & FL_LONG)
-				lnum = VA(long);
+				snum = (intmax_t)VA(long);
 			else if (flags & FL_SHORT)
-				lnum = (long)(short)VA(int);
+				snum = (intmax_t)(short)VA(int);
 			else
-				lnum = (long)VA(int);
+				snum = (intmax_t)VA(int);
+			lnum = (uintmax_t)snum;
 			goto integral;
 
 		case 'o':
 		case 'u':
 		case 'x':
 			if (flags & FL_SIZET)
-				lnum = VA(size_t);
+				lnum = (uintmax_t)VA(size_t);
 			else if (flags & FL_LONG)
-				lnum = VA(unsigned long);
+				lnum = (uintmax_t)VA(unsigned long);
 			else if (flags & FL_SHORT)
-				lnum = (unsigned long)(unsigned short)VA(int);
+				lnum = (uintmax_t)(unsigned short)VA(int);
 			else
-				lnum = (unsigned long)VA(unsigned int);
+				lnum = (uintmax_t)VA(unsigned int);
 
  integral:
 			flags |= FL_NUMBER;
@@ -940,8 +942,8 @@ shf_vfprintf(struct shf *shf, const char *fmt, va_list args)
 			switch (c) {
 			case 'd':
 			case 'i':
-				if (0 > (long)lnum) {
-					lnum = -(long)lnum;
+				if (snum < 0) {
+					lnum = (uintmax_t)-(snum + 1) + 1;
 					tmp = 1;
 				} else
 					tmp = 0;

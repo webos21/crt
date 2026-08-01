@@ -52,3 +52,17 @@ shell/mksh/glue/  project-owned build/config glue
 - `strlcpy` and `strlcat`.
 
 These were filled in CRT/PAL/sysroot code rather than by patching mksh.
+
+## Project-Owned Source Adjustments
+
+Imported source should remain unchanged unless the behavior cannot reasonably be
+represented by CRT/PAL. The first required exception is Windows LLP64 support:
+
+- Windows x86_64 has 64-bit pointers and `size_t`, but 32-bit `long`.
+- mksh R59 assumes `sizeof(size_t) <= sizeof(long)` for its internal formatter.
+- `MKSH_CRT_ALLOW_LLP64` is defined only for the Windows CRT mksh target.
+- The guarded source adjustment skips that LP64 assertion and widens the
+  internal formatter integer path from `long`/`unsigned long` to
+  `intmax_t`/`uintmax_t`.
+
+Linux and macOS keep the unguarded LP64 assertion path.

@@ -139,8 +139,10 @@ cta(ari_size_no_matter_of_signedness, sizeof(mksh_ari_t) == sizeof(mksh_uari_t))
 cta(sizet_size_no_matter_of_signedness, sizeof(ssize_t) == sizeof(size_t));
 cta(sizet_voidptr_same_size, sizeof(size_t) == sizeof(void *));
 cta(sizet_funcptr_same_size, sizeof(size_t) == sizeof(void (*)(void)));
+#ifndef MKSH_CRT_ALLOW_LLP64
 /* our formatting routines assume this */
 cta(ptr_fits_in_long, sizeof(size_t) <= sizeof(long));
+#endif
 cta(ari_fits_in_long, sizeof(mksh_ari_t) <= sizeof(long));
 
 static mksh_uari_t
