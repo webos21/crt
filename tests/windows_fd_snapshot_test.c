@@ -49,6 +49,8 @@ int main(int argc, char** argv) {
   int pipefd[2];
   char out = 'x';
   char in = 0;
+  char encoded[8192];
+  struct crt_fd_snapshot decoded;
 
   if (argc == 3 && strcmp(argv[1], "child") == 0) {
     int child_fd = parse_fd_arg(argv[2]);
@@ -76,6 +78,16 @@ int main(int argc, char** argv) {
     close(pipefd[0]);
     close(pipefd[1]);
     return fail("snapshot header");
+  }
+  if (__crt_fd_snapshot_encode(&snapshot, encoded, sizeof(encoded)) != 0 ||
+      __crt_fd_snapshot_decode(encoded, &decoded) != 0 ||
+      decoded.magic != CRT_FD_SNAPSHOT_MAGIC ||
+      decoded.version != CRT_FD_SNAPSHOT_VERSION ||
+      decoded.count != snapshot.count) {
+    __crt_fd_snapshot_dispose(&snapshot);
+    close(pipefd[0]);
+    close(pipefd[1]);
+    return fail("snapshot codec");
   }
   close(pipefd[0]);
   close(pipefd[1]);

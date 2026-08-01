@@ -236,7 +236,7 @@ static int fd_snapshot_parse_hex(const char** cursor, uintptr_t* value) {
   uintptr_t parsed = 0;
   int digits = 0;
 
-  while (**cursor != 0 && **cursor != ':' && **cursor != ';') {
+  while (**cursor != 0 && **cursor != '|' && **cursor != ':' && **cursor != ';') {
     int digit = fd_snapshot_hex_value((unsigned char)**cursor);
 
     if (digit < 0) {
