@@ -1,8 +1,11 @@
 #include <errno.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define CRT_ENV_INITIAL_CAPACITY 64
+#define CRT_ROOTFS_DEFAULT_PATH "/system/bin:/bin:/usr/bin"
 
 static char* env_static_entries[CRT_ENV_INITIAL_CAPACITY];
 static char** env_entries = env_static_entries;
@@ -10,6 +13,8 @@ char** environ = env_static_entries;
 static size_t env_capacity = CRT_ENV_INITIAL_CAPACITY;
 static int env_initialized;
 static char** initial_envp;
+
+void __crt_env_init(char** envp);
 
 #if defined(CRT_TARGET_OS_WINDOWS)
 typedef int BOOL;
@@ -136,6 +141,120 @@ static int env_store_entry(const char* entry, int overwrite) {
 
 void __crt_env_set_initial(char** envp) {
   initial_envp = envp;
+}
+
+#if defined(CRT_TARGET_OS_WINDOWS)
+static int rootfs_path_separator(int c) {
+  return c == '/' || c == '\\';
+}
+#endif
+
+static int rootfs_path_is_absolute(const char* path) {
+  if (path == 0 || path[0] == 0) {
+    return 0;
+  }
+#if defined(CRT_TARGET_OS_WINDOWS)
+  if (((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) &&
+      path[1] == ':') {
+    return 1;
+  }
+  return rootfs_path_separator(path[0]) && rootfs_path_separator(path[1]);
+#else
+  return path[0] == '/';
+#endif
+}
+
+static int rootfs_join_argv0(char* output, size_t output_size, const char* argv0) {
+  char cwd[PATH_MAX];
+  size_t cwd_len;
+  size_t argv_len;
+
+  if (argv0 == 0 || argv0[0] == 0 || output == 0 || output_size == 0) {
+    return -1;
+  }
+  argv_len = strlen(argv0);
+  if (rootfs_path_is_absolute(argv0)) {
+    if (argv_len + 1 > output_size) {
+      return -1;
+    }
+    memcpy(output, argv0, argv_len + 1);
+    return 0;
+  }
+  if (strchr(argv0, '/') == 0 && strchr(argv0, '\\') == 0) {
+    return -1;
+  }
+  if (getcwd(cwd, sizeof(cwd)) == 0) {
+    return -1;
+  }
+  cwd_len = strlen(cwd);
+  if (cwd_len + 1 + argv_len + 1 > output_size) {
+    return -1;
+  }
+  memcpy(output, cwd, cwd_len);
+  output[cwd_len] = '/';
+  memcpy(output + cwd_len + 1, argv0, argv_len + 1);
+  return 0;
+}
+
+static void rootfs_normalize_slashes(char* path) {
+  size_t i;
+
+  for (i = 0; path[i] != 0; ++i) {
+    if (path[i] == '\\') {
+      path[i] = '/';
+    }
+  }
+}
+
+static const char* rootfs_find_marker(const char* path) {
+  const char* marker = 0;
+  const char* cursor = path;
+
+  while ((cursor = strstr(cursor, "/rootfs/")) != 0) {
+    marker = cursor;
+    cursor += 8;
+  }
+  return marker;
+}
+
+static int rootfs_has_runtime_suffix(const char* suffix) {
+  return strncmp(suffix, "system/bin/", 11) == 0 ||
+         strncmp(suffix, "bin/", 4) == 0 ||
+         strncmp(suffix, "usr/bin/", 8) == 0;
+}
+
+void __crt_rootfs_bootstrap(int argc, char** argv) {
+  char absolute_path[PATH_MAX];
+  const char* marker;
+  const char* suffix;
+  size_t root_len;
+
+  __crt_env_init(0);
+  if (getenv("CRT_ROOTFS") != 0) {
+    return;
+  }
+  if (argc <= 0 || argv == 0 || argv[0] == 0) {
+    return;
+  }
+  if (rootfs_join_argv0(absolute_path, sizeof(absolute_path), argv[0]) != 0) {
+    return;
+  }
+  rootfs_normalize_slashes(absolute_path);
+  marker = rootfs_find_marker(absolute_path);
+  if (marker == 0) {
+    return;
+  }
+  suffix = marker + 8;
+  if (!rootfs_has_runtime_suffix(suffix)) {
+    return;
+  }
+  root_len = (size_t)(marker - absolute_path) + 7;
+  absolute_path[root_len] = 0;
+  if (setenv("CRT_ROOTFS", absolute_path, 1) != 0) {
+    return;
+  }
+  (void)setenv("PATH", CRT_ROOTFS_DEFAULT_PATH, 1);
+  (void)chdir("/");
 }
 
 void __crt_env_init(char** envp) {

@@ -10,6 +10,9 @@ _start:
   callq ___crt_env_set_initial
   movq %r12, %rdi
   movq %r13, %rsi
+  callq ___crt_rootfs_bootstrap
+  movq %r12, %rdi
+  movq %r13, %rsi
   movq %r14, %rdx
   callq _main
   movl %eax, %edi

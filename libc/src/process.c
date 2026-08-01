@@ -1229,7 +1229,7 @@ int execvp(const char* file, char* const argv[]) {
   }
   path = getenv("PATH");
   if (path == 0 || path[0] == 0) {
-    path = "/bin:/usr/bin:/system/bin";
+    path = "/system/bin:/bin:/usr/bin";
   }
   start = path;
   while (1) {

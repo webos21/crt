@@ -17,6 +17,7 @@ TOYBOX_APPLETS = [
     "grep",
     "head",
     "ln",
+    "ls",
     "mkdir",
     "mktemp",
     "mv",
@@ -120,7 +121,7 @@ def main():
             shutil.copy2(toybox_source, rootfs / "system" / "bin" / "toybox")
         for applet in TOYBOX_APPLETS:
             applet_name = f"{applet}.exe" if args.target_os == "windows" else applet
-            for applet_dir in ("bin", "usr/bin"):
+            for applet_dir in ("system/bin", "bin", "usr/bin"):
                 install_alias(toybox_dest, rootfs / applet_dir / applet_name, args.target_os)
                 if args.target_os == "windows":
                     shutil.copy2(toybox_source, rootfs / applet_dir / applet)

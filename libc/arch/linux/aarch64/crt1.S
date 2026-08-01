@@ -13,6 +13,9 @@ _start:
   bl __crt_env_set_initial
   mov x0, x19
   mov x1, x20
+  bl __crt_rootfs_bootstrap
+  mov x0, x19
+  mov x1, x20
   mov x2, x21
   bl main
   bl exit

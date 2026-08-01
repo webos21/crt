@@ -11,6 +11,9 @@ _start:
   call __crt_env_set_initial
   movq %r12, %rdi
   movq %r13, %rsi
+  call __crt_rootfs_bootstrap
+  movq %r12, %rdi
+  movq %r13, %rsi
   movq %r14, %rdx
   call main
   movl %eax, %edi

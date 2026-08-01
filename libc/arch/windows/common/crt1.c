@@ -17,6 +17,7 @@ __declspec(dllimport) char* CRT_WINAPI GetCommandLineA(void);
 
 int main(int argc, char** argv, char** envp);
 void __crt_env_set_initial(char** envp);
+void __crt_rootfs_bootstrap(int argc, char** argv);
 void exit(int status);
 
 static char command_line_storage[CRT_COMMAND_LINE_MAX];
@@ -85,5 +86,6 @@ void mainCRTStartup(void) {
     argv_storage[1] = 0;
     argc = 1;
   }
+  __crt_rootfs_bootstrap(argc, argv_storage);
   exit(main(argc, argv_storage, environ));
 }

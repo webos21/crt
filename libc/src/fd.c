@@ -559,6 +559,33 @@ static const char* rootfs_path_for_host(const char* path, char buffer[PATH_MAX])
   memcpy(buffer + root_len, path, path_len + 1);
   return buffer;
 }
+
+static void rootfs_path_for_guest(char* path) {
+  const char* root = getenv("CRT_ROOTFS");
+  size_t root_len;
+  size_t path_len;
+
+  if (root == 0 || root[0] == 0 || path == 0 || path[0] == 0) {
+    return;
+  }
+  root_len = strlen(root);
+  path_len = strlen(path);
+  while (root_len > 1 && root[root_len - 1] == '/') {
+    --root_len;
+  }
+  if (path_len < root_len || strncmp(path, root, root_len) != 0) {
+    return;
+  }
+  if (path[root_len] == 0) {
+    path[0] = '/';
+    path[1] = 0;
+    return;
+  }
+  if (path[root_len] != '/') {
+    return;
+  }
+  memmove(path, path + root_len, path_len - root_len + 1);
+}
 #endif
 
 static int path_separator(int c) {
@@ -1275,6 +1302,7 @@ char* getcwd(char* buf, size_t size) {
     return 0;
   }
   memcpy(buf, path, length + 1);
+  rootfs_path_for_guest(buf);
   return buf;
 #else
   long result;
@@ -1288,6 +1316,7 @@ char* getcwd(char* buf, size_t size) {
     __set_errno((int)-result);
     return 0;
   }
+  rootfs_path_for_guest(buf);
   return buf;
 #endif
 }
