@@ -10,6 +10,7 @@
 #include <sys/time.h>
 #include <sys/wait.h>
 #include <sys/vfs.h>
+#include <termios.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -160,6 +161,11 @@ struct crt_memory_status_ex {
 #define CRT_CREATE_SUSPENDED 0x00000004
 #define CRT_ERROR_BROKEN_PIPE 109
 #define CRT_FROM_PROTOCOL_INFO (-1)
+#define CRT_ENABLE_PROCESSED_INPUT 0x0001
+#define CRT_ENABLE_LINE_INPUT 0x0002
+#define CRT_ENABLE_ECHO_INPUT 0x0004
+#define CRT_ENABLE_PROCESSED_OUTPUT 0x0001
+#define CRT_ENABLE_WRAP_AT_EOL_OUTPUT 0x0002
 
 #if defined(_M_IX86) || defined(__i386__)
 #define CRT_WINAPI __stdcall
@@ -197,6 +203,8 @@ struct crt_process_information {
 
 __declspec(dllimport) HANDLE CRT_WINAPI GetStdHandle(DWORD nStdHandle);
 __declspec(dllimport) DWORD CRT_WINAPI GetLastError(void);
+__declspec(dllimport) BOOL CRT_WINAPI GetConsoleMode(HANDLE hConsoleHandle, DWORD* lpMode);
+__declspec(dllimport) BOOL CRT_WINAPI SetConsoleMode(HANDLE hConsoleHandle, DWORD dwMode);
 __declspec(dllimport) HANDLE CRT_WINAPI LoadLibraryA(const char* lpLibFileName);
 __declspec(dllimport) void* CRT_WINAPI GetProcAddress(HANDLE hModule, const char* lpProcName);
 __declspec(dllimport) DWORD CRT_WINAPI GetModuleFileNameA(
@@ -596,6 +604,9 @@ static const char* translate_path_for_host(const char* path, char buffer[4096]) 
   if (strcmp(path, "/dev/null") == 0) {
     return "NUL";
   }
+  if (strcmp(path, "/dev/tty") == 0 || strcmp(path, "/dev/console") == 0) {
+    return "CON";
+  }
   if (strcmp(path, "/proc/self/exe") == 0) {
     DWORD result = GetModuleFileNameA(0, buffer, 4096);
 
@@ -632,6 +643,10 @@ static const char* translate_path_for_host(const char* path, char buffer[4096]) 
 
 static int path_is_dev_null(const char* path) {
   return path != 0 && strcmp(path, "/dev/null") == 0;
+}
+
+static int path_is_dev_tty(const char* path) {
+  return path != 0 && (strcmp(path, "/dev/tty") == 0 || strcmp(path, "/dev/console") == 0);
 }
 
 static int append_command_arg(char* buffer, size_t size, size_t* pos, const char* arg) {
@@ -1921,6 +1936,20 @@ long __crt_sys_open(const char* path, int flags, unsigned int mode) {
 
   handle = CreateFileA(host_path, access, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                        0, disposition, file_flags, 0);
+  if (handle == INVALID_HANDLE_VALUE && path_is_dev_tty(path)) {
+    if ((access & GENERIC_WRITE) != 0 && (access & GENERIC_READ) == 0) {
+      handle = CreateFileA("CONOUT$", access, FILE_SHARE_READ | FILE_SHARE_WRITE, 0,
+                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+    } else {
+      handle = CreateFileA("CONIN$", GENERIC_READ | GENERIC_WRITE,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE, 0, OPEN_EXISTING,
+                           FILE_ATTRIBUTE_NORMAL, 0);
+      if (handle == INVALID_HANDLE_VALUE) {
+        handle = CreateFileA("CONIN$", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 0,
+                             OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+      }
+    }
+  }
   if (handle == INVALID_HANDLE_VALUE) {
     return fail_last_error();
   }
@@ -2708,11 +2737,26 @@ static long stat_virtual_dev_null(struct stat* st) {
   return 0;
 }
 
+static long stat_virtual_dev_tty(struct stat* st) {
+  if (st == 0) {
+    return -EFAULT;
+  }
+  memset(st, 0, sizeof(*st));
+  st->st_mode = S_IFCHR | S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
+  st->st_nlink = 1;
+  st->st_rdev = 1;
+  st->st_blksize = 4096;
+  return 0;
+}
+
 long __crt_sys_fstat(int fd, struct stat* st) {
   HANDLE handle = get_fd_handle(fd);
 
   if (handle == INVALID_HANDLE_VALUE) {
     return -EBADF;
+  }
+  if (GetFileType(handle) == FILE_TYPE_CHAR) {
+    return stat_virtual_dev_tty(st);
   }
   return stat_from_handle(handle, st);
 }
@@ -2811,6 +2855,68 @@ long __crt_sys_ioctl(int fd, unsigned long request, void* arg) {
   }
 }
 
+long __crt_sys_tcgetattr(int fd, struct termios* termios_p) {
+  HANDLE handle = get_fd_handle(fd);
+  DWORD mode = 0;
+
+  if (termios_p == 0) {
+    return -EFAULT;
+  }
+  if (handle == INVALID_HANDLE_VALUE) {
+    return -EBADF;
+  }
+  if (GetFileType(handle) != FILE_TYPE_CHAR || !GetConsoleMode(handle, &mode)) {
+    return -ENOTTY;
+  }
+  memset(termios_p, 0, sizeof(*termios_p));
+  termios_p->c_iflag = ICRNL | IXON;
+  termios_p->c_oflag = OPOST | ONLCR;
+  termios_p->c_cflag = CREAD | CS8;
+  if ((mode & CRT_ENABLE_PROCESSED_INPUT) != 0) {
+    termios_p->c_lflag |= ISIG | IEXTEN;
+  }
+  if ((mode & CRT_ENABLE_LINE_INPUT) != 0) {
+    termios_p->c_lflag |= ICANON;
+  }
+  if ((mode & CRT_ENABLE_ECHO_INPUT) != 0) {
+    termios_p->c_lflag |= ECHO | ECHOE | ECHOK;
+  }
+  termios_p->c_ispeed = B38400;
+  termios_p->c_ospeed = B38400;
+  return 0;
+}
+
+long __crt_sys_tcsetattr(int fd, const struct termios* termios_p) {
+  HANDLE handle = get_fd_handle(fd);
+  DWORD mode = 0;
+
+  if (termios_p == 0) {
+    return -EFAULT;
+  }
+  if (handle == INVALID_HANDLE_VALUE) {
+    return -EBADF;
+  }
+  if (GetFileType(handle) != FILE_TYPE_CHAR || !GetConsoleMode(handle, &mode)) {
+    return -ENOTTY;
+  }
+  if ((termios_p->c_lflag & ISIG) != 0) {
+    mode |= CRT_ENABLE_PROCESSED_INPUT;
+  } else {
+    mode &= ~CRT_ENABLE_PROCESSED_INPUT;
+  }
+  if ((termios_p->c_lflag & ICANON) != 0) {
+    mode |= CRT_ENABLE_LINE_INPUT;
+  } else {
+    mode &= ~CRT_ENABLE_LINE_INPUT;
+  }
+  if ((termios_p->c_lflag & ECHO) != 0) {
+    mode |= CRT_ENABLE_ECHO_INPUT;
+  } else {
+    mode &= ~CRT_ENABLE_ECHO_INPUT;
+  }
+  return SetConsoleMode(handle, mode) ? 0 : fail_last_error();
+}
+
 long __crt_sys_stat_path(const char* path, struct stat* st) {
   char translated_path[4096];
   const char* host_path = translate_path_for_host(path, translated_path);
@@ -2819,6 +2925,9 @@ long __crt_sys_stat_path(const char* path, struct stat* st) {
 
   if (path_is_dev_null(path)) {
     return stat_virtual_dev_null(st);
+  }
+  if (path_is_dev_tty(path)) {
+    return stat_virtual_dev_tty(st);
   }
   handle = CreateFileA(host_path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                        0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS, 0);
