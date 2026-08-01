@@ -11,6 +11,7 @@ set(CRT_LIBC_SOURCES
   src/exit.c
   src/fd.c
   src/file_lock.c
+  src/getopt.c
   src/inotify.c
   src/inttypes.c
   src/langinfo.c

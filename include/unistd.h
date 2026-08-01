@@ -118,6 +118,10 @@ extern "C" {
 #endif
 
 extern char** environ;
+extern char* optarg;
+extern int optind;
+extern int opterr;
+extern int optopt;
 
 ssize_t read(int fd, void* buf, size_t count);
 ssize_t write(int fd, const void* buf, size_t count);
@@ -158,6 +162,7 @@ int setgid(gid_t gid);
 int nice(int inc);
 int chroot(const char* path);
 int fchown(int fd, uid_t owner, gid_t group);
+int getopt(int argc, char* const argv[], const char* optstring);
 int fchownat(int dirfd, const char* path, uid_t owner, gid_t group, int flags);
 int lchown(const char* path, uid_t owner, gid_t group);
 int dup(int oldfd);
