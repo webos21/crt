@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -19,6 +20,9 @@
 
 long __crt_sys_getpid(void);
 long __crt_sys_getppid(void);
+long __crt_sys_setpgid(long pid, long pgid);
+long __crt_sys_getpgrp(void);
+long __crt_sys_setsid(void);
 long __crt_sys_kill(long pid, int sig);
 long __crt_sys_execve(const char* path, char* const argv[], char* const envp[]);
 long __crt_sys_waitpid(long pid, int* status, int options);
@@ -57,8 +61,42 @@ long __crt_sys_waitpid(long pid, int* status, int options) {
   return __crt_sys_wait4(pid, status, options, 0);
 }
 #elif defined(CRT_TARGET_OS_WINDOWS)
+static long windows_process_group;
+static long windows_session_id;
+
 long __crt_sys_fork(void) {
   return -ENOTSUP;
+}
+
+long __crt_sys_setpgid(long pid, long pgid) {
+  long self = __crt_sys_getpid();
+
+  if (pid < 0 || pgid < 0) {
+    return -EINVAL;
+  }
+  if (pid != 0 && pid != self) {
+    return -ENOTSUP;
+  }
+  if (pgid == 0) {
+    pgid = pid != 0 ? pid : self;
+  }
+  windows_process_group = pgid;
+  return 0;
+}
+
+long __crt_sys_getpgrp(void) {
+  if (windows_process_group == 0) {
+    windows_process_group = __crt_sys_getpid();
+  }
+  return windows_process_group;
+}
+
+long __crt_sys_setsid(void) {
+  long self = __crt_sys_getpid();
+
+  windows_session_id = self;
+  windows_process_group = self;
+  return self;
 }
 
 long __crt_sys_execve(const char* path, char* const argv[], char* const envp[]) {
@@ -512,6 +550,56 @@ pid_t getpid(void) {
 
 pid_t getppid(void) {
   return (pid_t)normalize_syscall_result(__crt_sys_getppid());
+}
+
+int setpgid(pid_t pid, pid_t pgid) {
+  return (int)normalize_syscall_result(__crt_sys_setpgid((long)pid, (long)pgid));
+}
+
+pid_t getpgrp(void) {
+  return (pid_t)normalize_syscall_result(__crt_sys_getpgrp());
+}
+
+pid_t setsid(void) {
+  return (pid_t)normalize_syscall_result(__crt_sys_setsid());
+}
+
+pid_t tcgetpgrp(int fd) {
+#if defined(CRT_TARGET_OS_WINDOWS)
+  if (!isatty(fd)) {
+    errno = ENOTTY;
+    return -1;
+  }
+  return getpgrp();
+#else
+  pid_t pgrp = -1;
+
+  if (ioctl(fd, TIOCGPGRP, &pgrp) != 0) {
+    return -1;
+  }
+  return pgrp;
+#endif
+}
+
+int tcsetpgrp(int fd, pid_t pgrp) {
+#if defined(CRT_TARGET_OS_WINDOWS)
+  if (pgrp <= 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (!isatty(fd)) {
+    errno = ENOTTY;
+    return -1;
+  }
+  (void)pgrp;
+  return 0;
+#else
+  if (pgrp <= 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return ioctl(fd, TIOCSPGRP, &pgrp);
+#endif
 }
 
 int kill(pid_t pid, int sig) {

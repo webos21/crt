@@ -4,6 +4,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 #include <private/crt_fd_table.h>
@@ -76,6 +79,23 @@ int main(int argc, char** argv) {
       return 79;
     }
     return 11;
+  }
+  if (argc == 3 && strcmp(argv[1], "socket-child") == 0) {
+    int child_fd = parse_fd_arg(argv[2]);
+    char byte = 0;
+
+    if (child_fd < 0 ||
+        send(child_fd, "s", 1, 0) != 1 ||
+        recv(child_fd, &byte, 1, 0) != 1 ||
+        byte != 'p') {
+      return 80;
+    }
+    return 12;
+  }
+  if (argc == 3 && strcmp(argv[1], "exit-child") == 0) {
+    int code = parse_fd_arg(argv[2]);
+
+    return code >= 0 ? code : 81;
   }
 
   memset(&snapshot, 0, sizeof(snapshot));
@@ -216,6 +236,125 @@ int main(int argc, char** argv) {
         !WIFEXITED(status) ||
         WEXITSTATUS(status) != 11) {
       return fail("cloexec wait");
+    }
+  }
+  {
+    int server = -1;
+    int client = -1;
+    int accepted = -1;
+    int yes = 1;
+    struct sockaddr_in addr;
+    struct sockaddr_in bound;
+    socklen_t bound_len = sizeof(bound);
+    pid_t pid;
+    int status = 0;
+    char fd_arg[16];
+    char byte = 0;
+    char* child_argv[] = {"/proc/self/exe", "socket-child", fd_arg, 0};
+
+    server = socket(AF_INET, SOCK_STREAM, 0);
+    if (server < 0) {
+      return fail("socket server");
+    }
+    if (setsockopt(server, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) != 0) {
+      close(server);
+      return fail("socket setsockopt");
+    }
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(0);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (bind(server, (struct sockaddr*)&addr, sizeof(addr)) != 0 ||
+        listen(server, 1) != 0) {
+      close(server);
+      return fail("socket listen");
+    }
+    memset(&bound, 0, sizeof(bound));
+    if (getsockname(server, (struct sockaddr*)&bound, &bound_len) != 0 ||
+        bound.sin_port == 0) {
+      close(server);
+      return fail("socket getsockname");
+    }
+    client = socket(AF_INET, SOCK_STREAM, 0);
+    if (client < 0 ||
+        connect(client, (struct sockaddr*)&bound, sizeof(bound)) != 0) {
+      if (client >= 0) {
+        close(client);
+      }
+      close(server);
+      return fail("socket connect");
+    }
+    accepted = accept(server, (struct sockaddr*)&addr, &bound_len);
+    close(server);
+    if (accepted < 0) {
+      close(client);
+      return fail("socket accept");
+    }
+    format_fd_arg(client, fd_arg, sizeof(fd_arg));
+    if (__crt_shell_fork_exec(&pid, "/proc/self/exe", 0, child_argv, environ) != 0) {
+      close(accepted);
+      close(client);
+      return fail("socket shell fork exec");
+    }
+    close(client);
+    if (recv(accepted, &byte, 1, 0) != 1 ||
+        byte != 's' ||
+        send(accepted, "p", 1, 0) != 1) {
+      close(accepted);
+      return fail("socket inherited io");
+    }
+    close(accepted);
+    if (waitpid(pid, &status, 0) != pid ||
+        !WIFEXITED(status) ||
+        WEXITSTATUS(status) != 12) {
+      return fail("socket wait");
+    }
+  }
+  {
+    enum { CHILD_COUNT = 5 };
+    pid_t pids[CHILD_COUNT];
+    int seen[CHILD_COUNT];
+    int i;
+
+    memset(seen, 0, sizeof(seen));
+    for (i = 0; i < CHILD_COUNT; ++i) {
+      char code_arg[16];
+      char* child_argv[] = {"/proc/self/exe", "exit-child", code_arg, 0};
+
+      format_fd_arg(20 + i, code_arg, sizeof(code_arg));
+      if (__crt_shell_fork_exec(&pids[i], "/proc/self/exe", 0, child_argv, environ) != 0) {
+        return fail("multi child spawn");
+      }
+    }
+    for (i = 0; i < CHILD_COUNT; ++i) {
+      int status = 0;
+      pid_t got = waitpid(-1, &status, 0);
+      int slot;
+
+      if (got < 0 || !WIFEXITED(status)) {
+        return fail("multi child waitpid");
+      }
+      for (slot = 0; slot < CHILD_COUNT; ++slot) {
+        if (pids[slot] == got) {
+          if (seen[slot] || WEXITSTATUS(status) != 20 + slot) {
+            return fail("multi child status");
+          }
+          seen[slot] = 1;
+          break;
+        }
+      }
+      if (slot == CHILD_COUNT) {
+        return fail("multi child unknown pid");
+      }
+    }
+    for (i = 0; i < CHILD_COUNT; ++i) {
+      if (!seen[i]) {
+        return fail("multi child missing pid");
+      }
+    }
+    errno = 0;
+    if (waitpid(-1, 0, WNOHANG) != -1 || errno != ECHILD) {
+      return fail("multi child drained");
     }
   }
 #else

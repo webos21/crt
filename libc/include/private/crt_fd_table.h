@@ -6,14 +6,17 @@
 #define CRT_FD_SNAPSHOT_MAGIC 0x43525446U
 #define CRT_FD_SNAPSHOT_VERSION 1U
 #define CRT_FD_SNAPSHOT_MAX 64U
+#define CRT_FD_SOCKET_PROTOCOL_INFO_SIZE 512U
 
 #define CRT_FD_SNAPSHOT_KIND_NONE 0
 #define CRT_FD_SNAPSHOT_KIND_FILE 1
 #define CRT_FD_SNAPSHOT_KIND_SOCKET 2
 
 #define CRT_FD_SNAPSHOT_FLAG_INHERITABLE 0x00000001U
+#define CRT_FD_SNAPSHOT_FLAG_SOCKET_DUPLICATED 0x00000002U
 
 #define CRT_FD_SNAPSHOT_ENV "CRT_FD_SNAPSHOT"
+#define CRT_FD_SNAPSHOT_PIPE_ENV "CRT_FD_SNAPSHOT_PIPE"
 #define CRT_CHILD_BOOTSTRAP_ENV "CRT_CHILD_BOOTSTRAP"
 #define CRT_CHILD_BOOTSTRAP_VERSION "1"
 #define CRT_BOOTSTRAP_CWD_ENV "CRT_BOOTSTRAP_CWD"
@@ -26,6 +29,8 @@ struct crt_fd_snapshot_entry {
   int kind;
   unsigned int flags;
   uintptr_t handle;
+  unsigned int socket_protocol_info_size;
+  unsigned char socket_protocol_info[CRT_FD_SOCKET_PROTOCOL_INFO_SIZE];
 };
 
 struct crt_fd_snapshot {

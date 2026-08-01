@@ -317,6 +317,11 @@ set_tests_properties(process_signal_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "process_signal_test: ok"
 )
 
+add_crt_test(job_control_test job_control_test.c)
+set_tests_properties(job_control_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "job_control_test: ok"
+)
+
 add_crt_test(rootfs_process_test rootfs_process_test.c)
 set_tests_properties(rootfs_process_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "rootfs_process_test: ok"

@@ -686,6 +686,39 @@ ___crt_sys_getppid:
   neg x0, x0
   ret
 
+.globl ___crt_sys_setpgid
+.p2align 2
+___crt_sys_setpgid:
+  mov x16, #82
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_getpgrp
+.p2align 2
+___crt_sys_getpgrp:
+  mov x16, #81
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_setsid
+.p2align 2
+___crt_sys_setsid:
+  mov x16, #147
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
 .globl ___crt_sys_fork
 .p2align 2
 ___crt_sys_fork:

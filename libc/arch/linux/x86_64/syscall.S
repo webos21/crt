@@ -630,6 +630,34 @@ __crt_sys_getppid:
   retq
 .size __crt_sys_getppid, . - __crt_sys_getppid
 
+.globl __crt_sys_setpgid
+.type __crt_sys_setpgid, @function
+.p2align 4, 0x90
+__crt_sys_setpgid:
+  movq $109, %rax
+  syscall
+  retq
+.size __crt_sys_setpgid, . - __crt_sys_setpgid
+
+.globl __crt_sys_getpgrp
+.type __crt_sys_getpgrp, @function
+.p2align 4, 0x90
+__crt_sys_getpgrp:
+  xorq %rdi, %rdi
+  movq $121, %rax
+  syscall
+  retq
+.size __crt_sys_getpgrp, . - __crt_sys_getpgrp
+
+.globl __crt_sys_setsid
+.type __crt_sys_setsid, @function
+.p2align 4, 0x90
+__crt_sys_setsid:
+  movq $112, %rax
+  syscall
+  retq
+.size __crt_sys_setsid, . - __crt_sys_setsid
+
 .globl __crt_sys_geteuid
 .type __crt_sys_geteuid, @function
 .p2align 4, 0x90

@@ -36,12 +36,18 @@ The current CRT already has enough surface to start probing shell/userland
 ports:
 
 - `posix_spawn`, `posix_spawnp`, `waitpid`, `wait`
-- `execve` as a documented unsupported Windows policy
+- `execve` as a documented shell-child contract on Windows: spawn the target
+  through the CRT child bootstrap path, wait, then exit with the child status
 - rootfs path mapping on Windows for paths such as `/tmp`, `/system/bin`,
   `/dev/null`, and `/proc/self/exe`
 - `pipe`, `dup`, `dup2`, `open`, `close`, `read`, `write`, `lseek`
 - `stat`, `lstat`, `opendir`, `readdir`, `closedir`
 - `poll`, `select`, `isatty`, selected `ioctl`
+- Bionic-shaped `posix_spawnattr_*` and `posix_spawn_file_actions_*`
+- Windows fd snapshot transport for child bootstrap, including non-standard fd
+  inheritance and `FD_CLOEXEC` filtering
+- private `__crt_shell_spawn()` and `__crt_shell_fork_exec()` helpers for the
+  first shell-facing child process contract
 - stdio, scanf/printf, malloc, environment variables, locale, wchar, pthread
 - sockets and basic process/signal tests
 
@@ -56,8 +62,10 @@ Shells assume a Unix process model. Pipelines, command substitution, subshells,
 and redirections often assume `fork` plus `exec`.
 
 Windows cannot faithfully implement POSIX `fork()` over `CreateProcess`.
-Current CRT policy is that `execve()` returns `ENOTSUP` on Windows because it
-cannot replace the current process image.
+Current public CRT policy is that `_Fork()` and `fork()` return `ENOTSUP` on
+Windows. Windows `execve()` is only supported for the shell-child contract: it
+spawns the target, waits, and exits with the child status rather than replacing
+the current image in place.
 
 Current direction:
 
@@ -69,6 +77,8 @@ Current direction:
   and serialized runtime state import;
 - share fd table inheritance infrastructure between `fork()` emulation and
   `posix_spawn`;
+- keep public `fork()` returning `ENOTSUP` on Windows until the emulation has a
+  tested Bionic-compatible policy;
 - avoid patching upstream first; prefer filling CRT/PAL gaps unless the
   required behavior is fundamentally unavailable on Windows.
 
@@ -84,9 +94,11 @@ Shells need descriptor inheritance and redirection to work predictably:
 - `F_DUPFD_CLOEXEC`
 - nonblocking flags where scripts or applets probe them
 
-The Windows backend needs a child CRT startup path that can import a serialized
-parent fd table. The current `posix_spawn` file actions are useful, but the
-long-term model must extend beyond only stdin/stdout/stderr.
+The Windows backend now has a child CRT startup path that can import a
+serialized parent fd table. The current `posix_spawn` path applies file actions
+to that snapshot before child launch, including non-standard fd inheritance.
+The remaining work is to harden this for broader shell patterns, socket
+duplication, process-group waits, and future fork emulation.
 
 ### 3. Signal And Job Control
 

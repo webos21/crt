@@ -43,11 +43,15 @@ three Win32 standard handles.
 - `CRT_FD_SNAPSHOT_FLAG_INHERITABLE` marks handles prepared for child
   inheritance.
 
-The current Windows implementation exports file-like handles and socket handle
-slots through the same inheritable handle transport. This is enough to exercise
-the CRT fd-table path uniformly, but robust cross-process socket duplication may
-still need a Winsock-specific policy such as `WSADuplicateSocket` if plain
-handle inheritance proves insufficient for broader socket cases.
+The current Windows implementation exports file-like handles through
+inheritable handle transport. Socket fd entries are converted to
+`WSADuplicateSocketA()` protocol records once the child process id is known.
+
+The current Windows test tranche validates one loopback TCP connection across
+the real child process boundary: the parent creates an accepted socket pair,
+passes the client socket fd through `__crt_shell_fork_exec()`, the child sends
+and receives through the duplicated fd, and the parent verifies the peer I/O and
+exit status. This exercises the `WSADuplicateSocketA()` snapshot-pipe path.
 
 Linux and macOS expose the same private API as an explicit `ENOTSUP` stub. They
 already have native `fork()` fd inheritance and do not need this bootstrap
@@ -65,10 +69,18 @@ process fd table. Import does not consume the snapshot, so callers can dispose
 the snapshot afterwards.
 
 `__crt_fd_snapshot_encode()` and `__crt_fd_snapshot_decode()` provide the fd
-text transport format. Windows `posix_spawn()` injects this encoded snapshot as
-`CRT_FD_SNAPSHOT` in the child environment block, under the broader
-`CRT_CHILD_BOOTSTRAP=1` contract. The Windows CRT startup calls
-`__crt_child_bootstrap()` before `main()`, imports the fd table, restores the
+text transport format. Windows `posix_spawn()` normally injects this encoded
+snapshot as `CRT_FD_SNAPSHOT` in the child environment block, under the broader
+`CRT_CHILD_BOOTSTRAP=1` contract.
+
+When the snapshot contains socket fds, Windows uses a stronger bootstrap path:
+the child is created suspended with an inherited snapshot pipe handle, the
+parent calls `WSADuplicateSocketA()` for the real child process id, encodes the
+updated snapshot, writes it to the bootstrap pipe, and resumes the child. The
+child calls `WSASocketA(FROM_PROTOCOL_INFO, ...)` while importing the snapshot.
+
+The Windows CRT startup calls `__crt_child_bootstrap()` before `main()`, imports
+the fd table from either `CRT_FD_SNAPSHOT` or the snapshot pipe, restores the
 bootstrap cwd/rootfs/signal-mask state, and disposes the inherited snapshot
 handles.
 
@@ -98,12 +110,15 @@ The future Windows child bootstrap should use the same snapshot data rather
 than adding a separate `posix_spawn()`-only path:
 
 1. parent builds an fd snapshot;
-2. parent encodes the snapshot into the current `CRT_FD_SNAPSHOT` transport;
+2. parent encodes ordinary file-handle snapshots into `CRT_FD_SNAPSHOT`, or
+   creates a snapshot pipe for socket-bearing snapshots;
 3. parent starts the child with `CreateProcessA(..., bInheritHandles=TRUE, ...)`;
 4. child CRT startup detects `CRT_CHILD_BOOTSTRAP` before `main()`;
-5. child imports the fd table snapshot;
-6. child imports cwd/rootfs/environment/signal policy;
-7. child enters either fork-resume mode or exec/spawn mode.
+5. for socket-bearing snapshots, parent uses `WSADuplicateSocketA()` with the
+   child pid, writes the updated snapshot to the pipe, and resumes the child;
+6. child imports the fd table snapshot;
+7. child imports cwd/rootfs/environment/signal policy;
+8. child enters either fork-resume mode or exec/spawn mode.
 
 `posix_spawn()` still fills `STARTUPINFOA` std handles for host compatibility,
 but those handles now come from the same fd snapshot that is transported to the
@@ -142,8 +157,9 @@ image replacement semantics.
 
 ## Open Items
 
-- socket duplication torture tests and possible `WSADuplicateSocket` backend;
-- child registry stress tests for multiple concurrent children, process-group
-  waits, and shell pipeline teardown;
+- socket duplication torture tests beyond the current single TCP loopback smoke;
+- broader child registry stress tests for process-group waits and shell
+  pipeline teardown. The current Windows fd snapshot test already covers a
+  small multiple-child `waitpid(-1)` drain;
 - full signal disposition propagation beyond mask/default reset;
 - memory/state policy for real `fork()` emulation.

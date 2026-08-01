@@ -690,6 +690,39 @@ ___crt_sys_getppid:
   negq %rax
   retq
 
+.globl ___crt_sys_setpgid
+.p2align 4, 0x90
+___crt_sys_setpgid:
+  movq $0x2000052, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_getpgrp
+.p2align 4, 0x90
+___crt_sys_getpgrp:
+  movq $0x2000051, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
+.globl ___crt_sys_setsid
+.p2align 4, 0x90
+___crt_sys_setsid:
+  movq $0x2000093, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
 .globl ___crt_sys_fork
 .p2align 4, 0x90
 ___crt_sys_fork:

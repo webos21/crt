@@ -157,7 +157,9 @@ struct crt_memory_status_ex {
 #define CRT_INFINITE 0xffffffffUL
 #define CRT_STARTF_USESTDHANDLES 0x00000100
 #define CRT_CREATE_NEW_PROCESS_GROUP 0x00000200
+#define CRT_CREATE_SUSPENDED 0x00000004
 #define CRT_ERROR_BROKEN_PIPE 109
+#define CRT_FROM_PROTOCOL_INFO (-1)
 
 #if defined(_M_IX86) || defined(__i386__)
 #define CRT_WINAPI __stdcall
@@ -221,6 +223,8 @@ __declspec(dllimport) DWORD CRT_WINAPI SearchPathA(
     char** lpFilePart);
 __declspec(dllimport) DWORD CRT_WINAPI WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds);
 __declspec(dllimport) BOOL CRT_WINAPI GetExitCodeProcess(HANDLE hProcess, DWORD* lpExitCode);
+__declspec(dllimport) DWORD CRT_WINAPI ResumeThread(HANDLE hThread);
+__declspec(dllimport) BOOL CRT_WINAPI TerminateProcess(HANDLE hProcess, unsigned int uExitCode);
 __declspec(dllimport) HANDLE CRT_WINAPI CreateFileA(
     const char* lpFileName,
     DWORD dwDesiredAccess,
@@ -433,6 +437,14 @@ struct winsock_api {
   int (CRT_WINAPI* shutdown)(SOCKET s, int how);
   int (CRT_WINAPI* closesocket)(SOCKET s);
   int (CRT_WINAPI* ioctlsocket)(SOCKET s, long cmd, unsigned long* argp);
+  int (CRT_WINAPI* WSADuplicateSocketA)(SOCKET s, DWORD dwProcessId, void* lpProtocolInfo);
+  SOCKET (CRT_WINAPI* WSASocketA)(
+      int af,
+      int type,
+      int protocol,
+      void* lpProtocolInfo,
+      unsigned int g,
+      DWORD dwFlags);
 };
 
 static struct winsock_api winsock;
@@ -951,14 +963,21 @@ int __crt_fd_snapshot_export(struct crt_fd_snapshot* snapshot) {
       __crt_fd_snapshot_dispose(snapshot);
       return EMFILE;
     }
-    if (!DuplicateHandle(GetCurrentProcess(), fd_table[fd], GetCurrentProcess(), &duplicate, 0, 1,
-                         DUPLICATE_SAME_ACCESS)) {
+    if (!DuplicateHandle(
+            GetCurrentProcess(),
+            fd_table[fd],
+            GetCurrentProcess(),
+            &duplicate,
+            0,
+            fd_kind[fd] == CRT_FD_KIND_FILE ? 1 : 0,
+            DUPLICATE_SAME_ACCESS)) {
       __crt_fd_snapshot_dispose(snapshot);
       return map_windows_error(GetLastError());
     }
     snapshot->entries[count].fd = fd;
     snapshot->entries[count].kind = snapshot_kind_from_fd_kind(fd_kind[fd]);
-    snapshot->entries[count].flags = CRT_FD_SNAPSHOT_FLAG_INHERITABLE;
+    snapshot->entries[count].flags =
+        fd_kind[fd] == CRT_FD_KIND_FILE ? CRT_FD_SNAPSHOT_FLAG_INHERITABLE : 0;
     snapshot->entries[count].handle = (uintptr_t)duplicate;
     ++count;
   }
@@ -985,13 +1004,38 @@ int __crt_fd_snapshot_import(const struct crt_fd_snapshot* snapshot) {
     if (entry->fd < 0 ||
         entry->fd >= CRT_FD_TABLE_SIZE ||
         kind == CRT_FD_KIND_NONE ||
-        entry->handle == 0 ||
-        entry->handle == (uintptr_t)INVALID_HANDLE_VALUE) {
+        (((entry->flags & CRT_FD_SNAPSHOT_FLAG_SOCKET_DUPLICATED) == 0 ||
+          kind != CRT_FD_KIND_SOCKET) &&
+         (entry->handle == 0 || entry->handle == (uintptr_t)INVALID_HANDLE_VALUE))) {
       return EINVAL;
     }
-    if (!DuplicateHandle(GetCurrentProcess(), (HANDLE)entry->handle, GetCurrentProcess(),
-                         &duplicate, 0, 0, DUPLICATE_SAME_ACCESS)) {
-      return map_windows_error(GetLastError());
+    if (kind == CRT_FD_KIND_SOCKET &&
+        (entry->flags & CRT_FD_SNAPSHOT_FLAG_SOCKET_DUPLICATED) != 0) {
+      SOCKET socket_handle;
+
+      if (entry->socket_protocol_info_size == 0 ||
+          entry->socket_protocol_info_size > CRT_FD_SOCKET_PROTOCOL_INFO_SIZE) {
+        return EINVAL;
+      }
+      if (init_winsock() < 0) {
+        return ENOSYS;
+      }
+      socket_handle = winsock.WSASocketA(
+          CRT_FROM_PROTOCOL_INFO,
+          CRT_FROM_PROTOCOL_INFO,
+          CRT_FROM_PROTOCOL_INFO,
+          (void*)entry->socket_protocol_info,
+          0,
+          0);
+      if (socket_handle == INVALID_SOCKET) {
+        return map_wsa_error(winsock.WSAGetLastError());
+      }
+      duplicate = (HANDLE)(uintptr_t)socket_handle;
+    } else {
+      if (!DuplicateHandle(GetCurrentProcess(), (HANDLE)entry->handle, GetCurrentProcess(),
+                           &duplicate, 0, 0, DUPLICATE_SAME_ACCESS)) {
+        return map_windows_error(GetLastError());
+      }
     }
     if (fd_kind[entry->fd] != CRT_FD_KIND_NONE &&
         fd_table[entry->fd] != 0 &&
@@ -1027,6 +1071,56 @@ void __crt_fd_snapshot_dispose(struct crt_fd_snapshot* snapshot) {
   memset(snapshot, 0, sizeof(*snapshot));
 }
 
+static int fd_snapshot_has_socket(const struct crt_fd_snapshot* snapshot) {
+  unsigned int i;
+
+  if (snapshot == 0) {
+    return 0;
+  }
+  for (i = 0; i < snapshot->count && i < CRT_FD_SNAPSHOT_MAX; ++i) {
+    if (snapshot->entries[i].kind == CRT_FD_SNAPSHOT_KIND_SOCKET) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static long fd_snapshot_prepare_socket_duplicates(
+    struct crt_fd_snapshot* snapshot,
+    DWORD child_pid) {
+  unsigned int i;
+  long init_result;
+
+  if (!fd_snapshot_has_socket(snapshot)) {
+    return 0;
+  }
+  init_result = init_winsock();
+  if (init_result < 0) {
+    return init_result;
+  }
+  for (i = 0; i < snapshot->count && i < CRT_FD_SNAPSHOT_MAX; ++i) {
+    struct crt_fd_snapshot_entry* entry = &snapshot->entries[i];
+
+    if (entry->kind != CRT_FD_SNAPSHOT_KIND_SOCKET) {
+      continue;
+    }
+    memset(entry->socket_protocol_info, 0, sizeof(entry->socket_protocol_info));
+    if (winsock.WSADuplicateSocketA(
+            (SOCKET)entry->handle,
+            child_pid,
+            entry->socket_protocol_info) != 0) {
+      return -map_wsa_error(winsock.WSAGetLastError());
+    }
+    if (entry->handle != 0 && entry->handle != (uintptr_t)INVALID_HANDLE_VALUE) {
+      winsock.closesocket((SOCKET)entry->handle);
+    }
+    entry->handle = 0;
+    entry->flags |= CRT_FD_SNAPSHOT_FLAG_SOCKET_DUPLICATED;
+    entry->socket_protocol_info_size = CRT_FD_SOCKET_PROTOCOL_INFO_SIZE;
+  }
+  return 0;
+}
+
 void __crt_fd_after_fork_child(void) {
 }
 
@@ -1053,6 +1147,66 @@ int __crt_fd_set_cloexec(int fd, int cloexec) {
   return 0;
 }
 
+static int bootstrap_read_exact(HANDLE handle, void* buffer, DWORD size) {
+  char* out = (char*)buffer;
+  DWORD offset = 0;
+
+  while (offset < size) {
+    DWORD got = 0;
+
+    if (!ReadFile(handle, out + offset, size - offset, &got, 0) || got == 0) {
+      return -EIO;
+    }
+    offset += got;
+  }
+  return 0;
+}
+
+static int bootstrap_write_exact(HANDLE handle, const void* buffer, DWORD size) {
+  const char* in = (const char*)buffer;
+  DWORD offset = 0;
+
+  while (offset < size) {
+    DWORD wrote = 0;
+
+    if (!WriteFile(handle, in + offset, size - offset, &wrote, 0) || wrote == 0) {
+      return -EIO;
+    }
+    offset += wrote;
+  }
+  return 0;
+}
+
+static int bootstrap_read_fd_snapshot_from_pipe(char* buffer, DWORD size) {
+  const char* pipe_text = getenv(CRT_FD_SNAPSHOT_PIPE_ENV);
+  unsigned long long handle_value = 0;
+  uint32_t length = 0;
+  HANDLE pipe_handle;
+
+  if (pipe_text == 0 || pipe_text[0] == 0 || buffer == 0 || size == 0) {
+    return ENOENT;
+  }
+  if (parse_hex_u64(pipe_text, &handle_value) != 0 ||
+      handle_value == 0 ||
+      handle_value == (uintptr_t)INVALID_HANDLE_VALUE) {
+    return EINVAL;
+  }
+  pipe_handle = (HANDLE)(uintptr_t)handle_value;
+  if (bootstrap_read_exact(pipe_handle, &length, (DWORD)sizeof(length)) != 0 ||
+      length == 0 ||
+      length >= size) {
+    CloseHandle(pipe_handle);
+    return EINVAL;
+  }
+  if (bootstrap_read_exact(pipe_handle, buffer, length) != 0) {
+    CloseHandle(pipe_handle);
+    return EIO;
+  }
+  buffer[length] = 0;
+  CloseHandle(pipe_handle);
+  return 0;
+}
+
 void __crt_child_bootstrap(void) {
   const char* marker = getenv(CRT_CHILD_BOOTSTRAP_ENV);
   const char* encoded = getenv(CRT_FD_SNAPSHOT_ENV);
@@ -1061,6 +1215,7 @@ void __crt_child_bootstrap(void) {
   const char* sigmask = getenv(CRT_BOOTSTRAP_SIGMASK_ENV);
   const char* sigdefault = getenv(CRT_BOOTSTRAP_SIGDEFAULT_ENV);
   struct crt_fd_snapshot snapshot;
+  char pipe_snapshot_text[65536];
   unsigned long long mask_value;
   unsigned long long default_value;
 
@@ -1078,6 +1233,10 @@ void __crt_child_bootstrap(void) {
   }
   if (sigdefault != 0 && parse_hex_u64(sigdefault, &default_value) == 0) {
     __crt_signal_reset_defaults((sigset64_t)default_value);
+  }
+  if ((encoded == 0 || encoded[0] == 0) &&
+      bootstrap_read_fd_snapshot_from_pipe(pipe_snapshot_text, sizeof(pipe_snapshot_text)) == 0) {
+    encoded = pipe_snapshot_text;
   }
   if (encoded == 0 || encoded[0] == 0) {
     return;
@@ -1223,7 +1382,7 @@ static long fd_snapshot_set_handle(
   }
   entry->fd = fd;
   entry->kind = kind;
-  entry->flags = CRT_FD_SNAPSHOT_FLAG_INHERITABLE;
+  entry->flags = kind == CRT_FD_SNAPSHOT_KIND_FILE ? CRT_FD_SNAPSHOT_FLAG_INHERITABLE : 0;
   entry->handle = (uintptr_t)handle;
   return 0;
 }
@@ -1241,23 +1400,35 @@ static HANDLE fd_snapshot_handle_for_fd(const struct crt_fd_snapshot* snapshot, 
 }
 
 static long fd_snapshot_dup2(struct crt_fd_snapshot* snapshot, int fd, int new_fd) {
-  HANDLE source = fd_snapshot_handle_for_fd(snapshot, fd);
+  const struct crt_fd_snapshot_entry* source_entry = fd_snapshot_find_const_entry(snapshot, fd);
+  HANDLE source;
   HANDLE duplicate = 0;
 
   if (fd < 0 || fd >= CRT_FD_TABLE_SIZE || new_fd < 0 || new_fd >= CRT_FD_TABLE_SIZE) {
     return -EBADF;
   }
-  if (source == INVALID_HANDLE_VALUE) {
+  if (source_entry == 0 ||
+      (source_entry->kind != CRT_FD_SNAPSHOT_KIND_FILE &&
+       source_entry->kind != CRT_FD_SNAPSHOT_KIND_SOCKET) ||
+      source_entry->handle == 0 ||
+      source_entry->handle == (uintptr_t)INVALID_HANDLE_VALUE) {
     return -EBADF;
   }
   if (fd == new_fd) {
     return 0;
   }
-  if (!DuplicateHandle(GetCurrentProcess(), source, GetCurrentProcess(), &duplicate, 0, 1,
-                       DUPLICATE_SAME_ACCESS)) {
+  source = (HANDLE)source_entry->handle;
+  if (!DuplicateHandle(
+          GetCurrentProcess(),
+          source,
+          GetCurrentProcess(),
+          &duplicate,
+          0,
+          source_entry->kind == CRT_FD_SNAPSHOT_KIND_FILE ? 1 : 0,
+          DUPLICATE_SAME_ACCESS)) {
     return -map_windows_error(GetLastError());
   }
-  return fd_snapshot_set_handle(snapshot, new_fd, CRT_FD_SNAPSHOT_KIND_FILE, duplicate);
+  return fd_snapshot_set_handle(snapshot, new_fd, source_entry->kind, duplicate);
 }
 
 static long prepare_spawn_startup(
@@ -1457,6 +1628,11 @@ static long init_winsock(void) {
   winsock.closesocket = (int (CRT_WINAPI*)(SOCKET))GetProcAddress(module, "closesocket");
   winsock.ioctlsocket =
       (int (CRT_WINAPI*)(SOCKET, long, unsigned long*))GetProcAddress(module, "ioctlsocket");
+  winsock.WSADuplicateSocketA =
+      (int (CRT_WINAPI*)(SOCKET, DWORD, void*))GetProcAddress(module, "WSADuplicateSocketA");
+  winsock.WSASocketA =
+      (SOCKET(CRT_WINAPI*)(int, int, int, void*, unsigned int, DWORD))GetProcAddress(
+          module, "WSASocketA");
 
   if (winsock.WSAStartup == 0 ||
       winsock.WSAGetLastError == 0 ||
@@ -1473,7 +1649,9 @@ static long init_winsock(void) {
       winsock.setsockopt == 0 ||
       winsock.shutdown == 0 ||
       winsock.closesocket == 0 ||
-      winsock.ioctlsocket == 0) {
+      winsock.ioctlsocket == 0 ||
+      winsock.WSADuplicateSocketA == 0 ||
+      winsock.WSASocketA == 0) {
     return -ENOSYS;
   }
   if (winsock.WSAStartup((WORD)0x0202, data) != 0) {
@@ -3021,15 +3199,19 @@ long __crt_sys_posix_spawn(
   DWORD creation_flags;
   char* environment_block;
   struct crt_fd_snapshot fd_snapshot;
-  char fd_snapshot_text[8192];
+  char fd_snapshot_text[65536];
   char bootstrap_cwd[4096];
+  char bootstrap_pipe_text[17];
   char sigmask_text[17];
   char sigdefault_text[17];
-  struct crt_env_extra extras[6];
+  struct crt_env_extra extras[7];
   size_t extra_count = 0;
   sigset64_t sigmask;
   sigset64_t sigdefault;
   int fd_snapshot_ready = 0;
+  int fd_snapshot_pipe_mode = 0;
+  HANDLE fd_snapshot_pipe_read = 0;
+  HANDLE fd_snapshot_pipe_write = 0;
   long result;
   long remembered;
 
@@ -3051,10 +3233,29 @@ long __crt_sys_posix_spawn(
     __crt_fd_snapshot_dispose(&fd_snapshot);
     return result;
   }
-  result = __crt_fd_snapshot_encode(&fd_snapshot, fd_snapshot_text, sizeof(fd_snapshot_text));
-  if (result != 0) {
-    __crt_fd_snapshot_dispose(&fd_snapshot);
-    return -result;
+  fd_snapshot_pipe_mode = fd_snapshot_has_socket(&fd_snapshot);
+  if (fd_snapshot_pipe_mode) {
+    struct {
+      DWORD nLength;
+      void* lpSecurityDescriptor;
+      BOOL bInheritHandle;
+    } security_attributes;
+
+    security_attributes.nLength = sizeof(security_attributes);
+    security_attributes.lpSecurityDescriptor = 0;
+    security_attributes.bInheritHandle = 1;
+    if (!CreatePipe(&fd_snapshot_pipe_read, &fd_snapshot_pipe_write, &security_attributes, 0)) {
+      __crt_fd_snapshot_dispose(&fd_snapshot);
+      return fail_last_error();
+    }
+    format_hex_u64((unsigned long long)(uintptr_t)fd_snapshot_pipe_read, bootstrap_pipe_text);
+    creation_flags |= CRT_CREATE_SUSPENDED;
+  } else {
+    result = __crt_fd_snapshot_encode(&fd_snapshot, fd_snapshot_text, sizeof(fd_snapshot_text));
+    if (result != 0) {
+      __crt_fd_snapshot_dispose(&fd_snapshot);
+      return -result;
+    }
   }
   fd_snapshot_ready = 1;
   if (current_directory != 0) {
@@ -3062,6 +3263,12 @@ long __crt_sys_posix_spawn(
 
     if (len >= sizeof(bootstrap_cwd)) {
       __crt_fd_snapshot_dispose(&fd_snapshot);
+      if (fd_snapshot_pipe_read != 0) {
+        CloseHandle(fd_snapshot_pipe_read);
+      }
+      if (fd_snapshot_pipe_write != 0) {
+        CloseHandle(fd_snapshot_pipe_write);
+      }
       return -ENAMETOOLONG;
     }
     memcpy(bootstrap_cwd, current_directory, len + 1);
@@ -3070,10 +3277,22 @@ long __crt_sys_posix_spawn(
 
     if (cwd_result == 0) {
       __crt_fd_snapshot_dispose(&fd_snapshot);
+      if (fd_snapshot_pipe_read != 0) {
+        CloseHandle(fd_snapshot_pipe_read);
+      }
+      if (fd_snapshot_pipe_write != 0) {
+        CloseHandle(fd_snapshot_pipe_write);
+      }
       return fail_last_error();
     }
     if (cwd_result >= (DWORD)sizeof(bootstrap_cwd)) {
       __crt_fd_snapshot_dispose(&fd_snapshot);
+      if (fd_snapshot_pipe_read != 0) {
+        CloseHandle(fd_snapshot_pipe_read);
+      }
+      if (fd_snapshot_pipe_write != 0) {
+        CloseHandle(fd_snapshot_pipe_write);
+      }
       return -ERANGE;
     }
   }
@@ -3086,7 +3305,9 @@ long __crt_sys_posix_spawn(
   format_hex_u64((unsigned long long)sigmask, sigmask_text);
   format_hex_u64((unsigned long long)sigdefault, sigdefault_text);
   add_env_extra(extras, &extra_count, CRT_CHILD_BOOTSTRAP_ENV, CRT_CHILD_BOOTSTRAP_VERSION);
-  if (fd_snapshot_ready) {
+  if (fd_snapshot_pipe_mode) {
+    add_env_extra(extras, &extra_count, CRT_FD_SNAPSHOT_PIPE_ENV, bootstrap_pipe_text);
+  } else if (fd_snapshot_ready) {
     add_env_extra(extras, &extra_count, CRT_FD_SNAPSHOT_ENV, fd_snapshot_text);
   }
   add_env_extra(extras, &extra_count, CRT_BOOTSTRAP_CWD_ENV, bootstrap_cwd);
@@ -3097,6 +3318,12 @@ long __crt_sys_posix_spawn(
   if (environment_block == 0) {
     if (fd_snapshot_ready) {
       __crt_fd_snapshot_dispose(&fd_snapshot);
+    }
+    if (fd_snapshot_pipe_read != 0) {
+      CloseHandle(fd_snapshot_pipe_read);
+    }
+    if (fd_snapshot_pipe_write != 0) {
+      CloseHandle(fd_snapshot_pipe_write);
     }
     return -ENOMEM;
   }
@@ -3116,9 +3343,56 @@ long __crt_sys_posix_spawn(
     if (fd_snapshot_ready) {
       __crt_fd_snapshot_dispose(&fd_snapshot);
     }
+    if (fd_snapshot_pipe_read != 0) {
+      CloseHandle(fd_snapshot_pipe_read);
+    }
+    if (fd_snapshot_pipe_write != 0) {
+      CloseHandle(fd_snapshot_pipe_write);
+    }
     return fail_last_error();
   }
   free(environment_block);
+  if (fd_snapshot_pipe_mode) {
+    uint32_t length;
+
+    CloseHandle(fd_snapshot_pipe_read);
+    fd_snapshot_pipe_read = 0;
+    result = fd_snapshot_prepare_socket_duplicates(&fd_snapshot, process.dwProcessId);
+    if (result == 0) {
+      result = __crt_fd_snapshot_encode(&fd_snapshot, fd_snapshot_text, sizeof(fd_snapshot_text));
+      if (result != 0) {
+        result = -result;
+      }
+    }
+    if (result == 0) {
+      length = (uint32_t)strlen(fd_snapshot_text);
+      if (bootstrap_write_exact(fd_snapshot_pipe_write, &length, (DWORD)sizeof(length)) != 0 ||
+          bootstrap_write_exact(fd_snapshot_pipe_write, fd_snapshot_text, length) != 0) {
+        result = -EIO;
+      }
+    }
+    CloseHandle(fd_snapshot_pipe_write);
+    fd_snapshot_pipe_write = 0;
+    if (result != 0) {
+      TerminateProcess(process.hProcess, 127);
+      CloseHandle(process.hThread);
+      CloseHandle(process.hProcess);
+      if (fd_snapshot_ready) {
+        __crt_fd_snapshot_dispose(&fd_snapshot);
+      }
+      return result;
+    }
+    if (ResumeThread(process.hThread) == (DWORD)0xffffffffUL) {
+      result = fail_last_error();
+      TerminateProcess(process.hProcess, 127);
+      CloseHandle(process.hThread);
+      CloseHandle(process.hProcess);
+      if (fd_snapshot_ready) {
+        __crt_fd_snapshot_dispose(&fd_snapshot);
+      }
+      return result;
+    }
+  }
   if (fd_snapshot_ready) {
     __crt_fd_snapshot_dispose(&fd_snapshot);
   }

@@ -177,6 +177,8 @@ struct crt_darwin_flock {
 #define CRT_DARWIN_F_UNLCK 2
 #define CRT_DARWIN_F_WRLCK 3
 #define CRT_DARWIN_FIONREAD 0x4004667fUL
+#define CRT_DARWIN_TIOCGPGRP 0x40047477UL
+#define CRT_DARWIN_TIOCSPGRP 0x80047476UL
 #define CRT_DARWIN_TIOCGWINSZ 0x40087468UL
 #define CRT_DARWIN_TIOCSWINSZ 0x80087467UL
 
@@ -253,6 +255,45 @@ static int fd_snapshot_parse_hex(const char** cursor, uintptr_t* value) {
   return 0;
 }
 
+static int fd_snapshot_append_bytes(
+    char* buffer,
+    unsigned long size,
+    unsigned long* pos,
+    const unsigned char* bytes,
+    unsigned int count) {
+  static const char hex[] = "0123456789abcdef";
+  unsigned int i;
+
+  if (*pos + (unsigned long)count * 2UL >= size) {
+    return ENOSPC;
+  }
+  for (i = 0; i < count; ++i) {
+    buffer[(*pos)++] = hex[(bytes[i] >> 4) & 0xfU];
+    buffer[(*pos)++] = hex[bytes[i] & 0xfU];
+  }
+  buffer[*pos] = 0;
+  return 0;
+}
+
+static int fd_snapshot_parse_bytes(
+    const char** cursor,
+    unsigned char* bytes,
+    unsigned int count) {
+  unsigned int i;
+
+  for (i = 0; i < count; ++i) {
+    int high = fd_snapshot_hex_value((unsigned char)(*cursor)[0]);
+    int low = fd_snapshot_hex_value((unsigned char)(*cursor)[1]);
+
+    if (high < 0 || low < 0) {
+      return EINVAL;
+    }
+    bytes[i] = (unsigned char)((high << 4) | low);
+    *cursor += 2;
+  }
+  return 0;
+}
+
 int __crt_fd_snapshot_encode(const struct crt_fd_snapshot* snapshot, char* buffer, unsigned long size) {
   unsigned long pos = 0;
   unsigned int i;
@@ -296,6 +337,24 @@ int __crt_fd_snapshot_encode(const struct crt_fd_snapshot* snapshot, char* buffe
     result = fd_snapshot_append_hex(buffer, size, &pos, entry->handle);
     if (result != 0 || pos + 1 >= size) {
       return result != 0 ? result : ENOSPC;
+    }
+    if (entry->socket_protocol_info_size != 0) {
+      buffer[pos++] = ':';
+      result = fd_snapshot_append_hex(
+          buffer, size, &pos, (uintptr_t)entry->socket_protocol_info_size);
+      if (result != 0 || pos + 1 >= size) {
+        return result != 0 ? result : ENOSPC;
+      }
+      buffer[pos++] = ':';
+      result = fd_snapshot_append_bytes(
+          buffer,
+          size,
+          &pos,
+          entry->socket_protocol_info,
+          entry->socket_protocol_info_size);
+      if (result != 0 || pos + 1 >= size) {
+        return result != 0 ? result : ENOSPC;
+      }
     }
     buffer[pos++] = ';';
     buffer[pos] = 0;
@@ -351,11 +410,35 @@ int __crt_fd_snapshot_decode(const char* text, struct crt_fd_snapshot* snapshot)
     entry->flags = (unsigned int)value;
     ++cursor;
     result = fd_snapshot_parse_hex(&cursor, &value);
-    if (result != 0 || *cursor != ';') {
+    if (result != 0 || (*cursor != ':' && *cursor != ';')) {
       memset(snapshot, 0, sizeof(*snapshot));
       return EINVAL;
     }
     entry->handle = value;
+    if (*cursor == ':') {
+      ++cursor;
+      result = fd_snapshot_parse_hex(&cursor, &value);
+      if (result != 0 ||
+          *cursor != ':' ||
+          value > CRT_FD_SOCKET_PROTOCOL_INFO_SIZE) {
+        memset(snapshot, 0, sizeof(*snapshot));
+        return EINVAL;
+      }
+      ++cursor;
+      entry->socket_protocol_info_size = (unsigned int)value;
+      result = fd_snapshot_parse_bytes(
+          &cursor,
+          entry->socket_protocol_info,
+          entry->socket_protocol_info_size);
+      if (result != 0) {
+        memset(snapshot, 0, sizeof(*snapshot));
+        return EINVAL;
+      }
+    }
+    if (*cursor != ';') {
+      memset(snapshot, 0, sizeof(*snapshot));
+      return EINVAL;
+    }
     ++cursor;
     ++snapshot->count;
   }
@@ -1449,6 +1532,10 @@ static unsigned long macos_ioctl_request(unsigned long request) {
   switch (request) {
     case FIONREAD:
       return CRT_DARWIN_FIONREAD;
+    case TIOCGPGRP:
+      return CRT_DARWIN_TIOCGPGRP;
+    case TIOCSPGRP:
+      return CRT_DARWIN_TIOCSPGRP;
     case TIOCGWINSZ:
       return CRT_DARWIN_TIOCGWINSZ;
     case TIOCSWINSZ:
