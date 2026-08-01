@@ -24,6 +24,8 @@ set(CRT_LIBC_SOURCES
   src/process.c
   src/pthread.c
   src/qsort.c
+  src/fnmatch.c
+  src/regex.c
   src/resource.c
   src/sched.c
   src/scanf.c
