@@ -202,6 +202,7 @@ if(EXISTS "${CRT_MKSH_ROOT}/Android.bp")
   elseif(CRT_TARGET_OS STREQUAL "windows")
     target_compile_definitions(crt_mksh PRIVATE
       MKSH_CRT_ALLOW_LLP64
+      MKSH_WITH_TEXTMODE
     )
     target_link_options(crt_mksh PRIVATE
       -Wl,/entry:mainCRTStartup

@@ -1310,10 +1310,12 @@ int fcntl(int fd, int cmd, ...) {
       } while (1);
 
     case F_GETFD:
-      if (fstat(fd, &(struct stat){0}) != 0) {
+      errno = 0;
+      result = __crt_fd_get_cloexec(fd);
+      if (result == 0 && errno != 0) {
         return -1;
       }
-      return __crt_fd_get_cloexec(fd) ? FD_CLOEXEC : 0;
+      return result ? FD_CLOEXEC : 0;
 
     case F_SETFD:
       va_start(args, cmd);
@@ -1321,9 +1323,6 @@ int fcntl(int fd, int cmd, ...) {
       va_end(args);
       if ((arg & ~FD_CLOEXEC) != 0) {
         return (int)__set_errno(EINVAL);
-      }
-      if (fstat(fd, &(struct stat){0}) != 0) {
-        return -1;
       }
       if (__crt_fd_set_cloexec(fd, (arg & FD_CLOEXEC) != 0) != 0) {
         return -1;
