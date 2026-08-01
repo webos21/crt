@@ -157,6 +157,7 @@ struct crt_memory_status_ex {
 #define CRT_INFINITE 0xffffffffUL
 #define CRT_STARTF_USESTDHANDLES 0x00000100
 #define CRT_CREATE_NEW_PROCESS_GROUP 0x00000200
+#define CRT_ERROR_BROKEN_PIPE 109
 
 #if defined(_M_IX86) || defined(__i386__)
 #define CRT_WINAPI __stdcall
@@ -1542,6 +1543,9 @@ long __crt_sys_read(int fd, void* buf, unsigned long count) {
     return -EBADF;
   }
   if (!ReadFile(handle, buf, (DWORD)count, &bytes_read, 0)) {
+    if (GetLastError() == CRT_ERROR_BROKEN_PIPE) {
+      return 0;
+    }
     return fail_last_error();
   }
   return (long)bytes_read;
