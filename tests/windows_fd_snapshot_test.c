@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <fcntl.h>
 #include <spawn.h>
 #include <stdio.h>
 #include <string.h>
@@ -6,6 +7,7 @@
 #include <unistd.h>
 
 #include <private/crt_fd_table.h>
+#include <private/crt_shell_process.h>
 
 static int fail(const char* message) {
   fprintf(stderr, "windows_fd_snapshot_test: %s\n", message);
@@ -65,6 +67,15 @@ int main(int argc, char** argv) {
       return 78;
     }
     return 10;
+  }
+  if (argc == 3 && strcmp(argv[1], "cloexec-child") == 0) {
+    int child_fd = parse_fd_arg(argv[2]);
+
+    errno = 0;
+    if (child_fd < 0 || write(child_fd, "d", 1) != -1 || errno != EBADF) {
+      return 79;
+    }
+    return 11;
   }
 
   memset(&snapshot, 0, sizeof(snapshot));
@@ -176,6 +187,35 @@ int main(int argc, char** argv) {
         !WIFEXITED(status) ||
         WEXITSTATUS(status) != 10) {
       return fail("action wait");
+    }
+  }
+  if (pipe(pipefd) != 0) {
+    return fail("cloexec pipe");
+  }
+  {
+    pid_t pid;
+    int status = 0;
+    char fd_arg[16];
+    char* child_argv[] = {"/proc/self/exe", "cloexec-child", fd_arg, 0};
+
+    format_fd_arg(pipefd[1], fd_arg, sizeof(fd_arg));
+    if (fcntl(pipefd[1], F_SETFD, FD_CLOEXEC) != 0 ||
+        fcntl(pipefd[1], F_GETFD) != FD_CLOEXEC) {
+      close(pipefd[0]);
+      close(pipefd[1]);
+      return fail("cloexec fcntl");
+    }
+    if (__crt_shell_fork_exec(&pid, "/proc/self/exe", 0, child_argv, environ) != 0) {
+      close(pipefd[0]);
+      close(pipefd[1]);
+      return fail("cloexec shell fork exec");
+    }
+    close(pipefd[0]);
+    close(pipefd[1]);
+    if (waitpid(pid, &status, 0) != pid ||
+        !WIFEXITED(status) ||
+        WEXITSTATUS(status) != 11) {
+      return fail("cloexec wait");
     }
   }
 #else

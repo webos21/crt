@@ -390,6 +390,41 @@ void __crt_fd_snapshot_dispose(struct crt_fd_snapshot* snapshot) {
     memset(snapshot, 0, sizeof(*snapshot));
   }
 }
+
+int __crt_fd_get_cloexec(int fd) {
+  long result;
+
+  result = __crt_sys_fcntl(fd, F_GETFD, 0);
+  if (result < 0 && result >= -4095) {
+    errno = (int)-result;
+    return 0;
+  }
+  return ((int)result & FD_CLOEXEC) != 0;
+}
+
+int __crt_fd_set_cloexec(int fd, int cloexec) {
+  long result;
+  int flags;
+
+  result = __crt_sys_fcntl(fd, F_GETFD, 0);
+  if (result < 0 && result >= -4095) {
+    errno = (int)-result;
+    return -1;
+  }
+  flags = (int)result;
+  if (cloexec) {
+    flags |= FD_CLOEXEC;
+  } else {
+    flags &= ~FD_CLOEXEC;
+  }
+  result = __crt_sys_fcntl(fd, F_SETFD, (void*)(long)flags);
+  if (result < 0 && result >= -4095) {
+    errno = (int)-result;
+    return -1;
+  }
+  return 0;
+}
+
 void __crt_fd_after_fork_child(void) {
 }
 #endif
@@ -1166,6 +1201,16 @@ int fcntl(int fd, int cmd, ...) {
         }
         if (copy >= arg) {
           result = copy;
+          if (cmd == F_DUPFD_CLOEXEC && __crt_fd_set_cloexec(result, 1) != 0) {
+            int saved_errno = errno;
+
+            close(result);
+            while (saved_count > 0) {
+              close(saved[--saved_count]);
+            }
+            errno = saved_errno;
+            return -1;
+          }
           while (saved_count > 0) {
             close(saved[--saved_count]);
           }
@@ -1185,7 +1230,7 @@ int fcntl(int fd, int cmd, ...) {
       if (fstat(fd, &(struct stat){0}) != 0) {
         return -1;
       }
-      return 0;
+      return __crt_fd_get_cloexec(fd) ? FD_CLOEXEC : 0;
 
     case F_SETFD:
       va_start(args, cmd);
@@ -1195,6 +1240,9 @@ int fcntl(int fd, int cmd, ...) {
         return (int)__set_errno(EINVAL);
       }
       if (fstat(fd, &(struct stat){0}) != 0) {
+        return -1;
+      }
+      if (__crt_fd_set_cloexec(fd, (arg & FD_CLOEXEC) != 0) != 0) {
         return -1;
       }
       return 0;

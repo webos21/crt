@@ -31,6 +31,29 @@ int main(int argc, char** argv) {
   if (argc == 2 && strcmp(argv[1], "child") == 0) {
     return 7;
   }
+#if defined(CRT_TARGET_OS_WINDOWS)
+  if (argc == 2 && strcmp(argv[1], "bootstrap-child") == 0) {
+    sigset_t current_mask = 0;
+
+    if (getenv("CRT_ROOTFS") == 0 ||
+        getcwd(posix_cwd, sizeof(posix_cwd)) == 0 ||
+        strcmp(posix_cwd, "/tmp") != 0 ||
+        sigprocmask(SIG_SETMASK, 0, &current_mask) != 0 ||
+        sigismember(&current_mask, SIGINT) != 1) {
+      return 88;
+    }
+    return 14;
+  }
+  if (argc == 2 && strcmp(argv[1], "exec-target") == 0) {
+    return 13;
+  }
+  if (argc == 2 && strcmp(argv[1], "exec-wrapper") == 0) {
+    char* exec_argv[] = {"/proc/self/exe", "exec-target", 0};
+
+    (void)execve("/proc/self/exe", exec_argv, environ);
+    return 89;
+  }
+#endif
 
   if (posix_spawnattr_init(&attr) != 0 ||
       posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETPGROUP) != 0 ||
@@ -123,8 +146,47 @@ int main(int argc, char** argv) {
   if (wait(0) <= 0) {
     return fail("wait null pid child");
   }
-  if (execve("/proc/self/exe", child_argv, environ) != -1 || errno != ENOTSUP) {
-    return fail("execve unsupported policy");
+  {
+    posix_spawnattr_t child_attr;
+    posix_spawn_file_actions_t child_actions;
+    sigset_t child_mask = 0;
+    char* bootstrap_argv[] = {"/proc/self/exe", "bootstrap-child", 0};
+
+    if (sigemptyset(&child_mask) != 0 ||
+        sigaddset(&child_mask, SIGINT) != 0 ||
+        posix_spawnattr_init(&child_attr) != 0 ||
+        posix_spawnattr_setflags(
+            &child_attr, POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF) != 0 ||
+        posix_spawnattr_setsigmask(&child_attr, &child_mask) != 0 ||
+        posix_spawnattr_setsigdefault(&child_attr, &child_mask) != 0 ||
+        posix_spawn_file_actions_init(&child_actions) != 0 ||
+        posix_spawn_file_actions_addchdir_np(&child_actions, "/tmp") != 0) {
+      return fail("bootstrap setup");
+    }
+    if (posix_spawn(&pid, "/proc/self/exe", &child_actions, &child_attr, bootstrap_argv, environ) != 0) {
+      posix_spawn_file_actions_destroy(&child_actions);
+      posix_spawnattr_destroy(&child_attr);
+      return fail("bootstrap spawn");
+    }
+    posix_spawn_file_actions_destroy(&child_actions);
+    posix_spawnattr_destroy(&child_attr);
+    if (waitpid(pid, &status, 0) != pid ||
+        !WIFEXITED(status) ||
+        WEXITSTATUS(status) != 14) {
+      return fail("bootstrap wait");
+    }
+  }
+  {
+    char* exec_argv[] = {"/proc/self/exe", "exec-wrapper", 0};
+
+    if (posix_spawn(&pid, "/proc/self/exe", 0, 0, exec_argv, environ) != 0) {
+      return fail("exec wrapper spawn");
+    }
+    if (waitpid(pid, &status, 0) != pid ||
+        !WIFEXITED(status) ||
+        WEXITSTATUS(status) != 13) {
+      return fail("exec wrapper wait");
+    }
   }
   if (unlink("/tmp/sample.txt") != 0 || rmdir("/tmp") != 0) {
     return fail("cleanup rootfs");

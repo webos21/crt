@@ -12,6 +12,8 @@
 #include <unistd.h>
 
 #include <private/crt_fd_table.h>
+#include <private/crt_shell_process.h>
+#include <private/crt_signal.h>
 #include <private/crt_spawn.h>
 #include <private/crt_tls.h>
 
@@ -60,9 +62,22 @@ long __crt_sys_fork(void) {
 }
 
 long __crt_sys_execve(const char* path, char* const argv[], char* const envp[]) {
-  (void)path;
-  (void)argv;
-  (void)envp;
+  long pid = 0;
+  int status = 0;
+  long result;
+
+  result = __crt_sys_posix_spawn(path, argv, envp != 0 ? envp : environ, &pid, 0, 0, 0);
+  if (result < 0) {
+    return result;
+  }
+  result = __crt_sys_waitpid(pid, &status, 0);
+  if (result < 0) {
+    return result;
+  }
+  if (WIFEXITED(status)) {
+    _exit(WEXITSTATUS(status));
+  }
+  _exit(127);
   return -ENOTSUP;
 }
 #endif
@@ -749,7 +764,7 @@ int posix_spawn(
   result = __crt_sys_posix_spawn(
       path,
       argv,
-      envp,
+      envp != 0 ? envp : environ,
       &child_pid,
       0,
       file_actions != 0 ? *file_actions : 0,
@@ -779,7 +794,7 @@ int posix_spawnp(
   result = __crt_sys_posix_spawn(
       file,
       argv,
-      envp,
+      envp != 0 ? envp : environ,
       &child_pid,
       1,
       file_actions != 0 ? *file_actions : 0,
@@ -791,6 +806,15 @@ int posix_spawnp(
     *pid = (pid_t)child_pid;
   }
   return 0;
+}
+
+int __crt_shell_fork_exec(
+    pid_t* pid,
+    const char* path,
+    const posix_spawn_file_actions_t* file_actions,
+    char* const argv[],
+    char* const envp[]) {
+  return posix_spawn(pid, path, file_actions, 0, argv, envp);
 }
 
 int execve(const char* path, char* const argv[], char* const envp[]) {

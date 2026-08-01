@@ -143,8 +143,10 @@ Current Windows bootstrap behavior:
 - child process handles are tracked internally until `waitpid()`;
 - `waitpid()` supports blocking waits and `WNOHANG`;
 - exit status is returned in POSIX wait-status form;
-- `execve()` returns `ENOTSUP` because Windows `CreateProcess` cannot faithfully
-  replace the current process image as Bionic/Linux `execve` does;
+- `execve()` is supported only for the shell-child contract: it spawns the
+  target with the CRT child bootstrap path, waits for it, and exits the current
+  process with the child status. This is useful for shell `exec` flow but does
+  not claim Bionic/Linux in-place image replacement semantics;
 - Bionic-shaped `posix_spawnattr_*` and `posix_spawn_file_actions_*` objects are
   available as opaque pointer types;
 - file actions are applied for the standard descriptors that `CreateProcessA`
@@ -159,7 +161,8 @@ Next required process improvements:
 
 - keep `fork()` as a first-class PAL goal because shell child management,
   pipelines, redirections, and signal behavior depend on it;
-- implement `posix_spawn_file_actions_*` for stdin/stdout/stderr redirection;
+- implement `posix_spawn_file_actions_*` for stdin/stdout/stderr and
+  non-standard fd redirection;
 - apply Bionic-style spawn attributes where host semantics exist;
 - extend file actions beyond standard descriptors by teaching child CRT startup
   how to import a serialized fd table;

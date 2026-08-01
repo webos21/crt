@@ -14,6 +14,12 @@
 #define CRT_FD_SNAPSHOT_FLAG_INHERITABLE 0x00000001U
 
 #define CRT_FD_SNAPSHOT_ENV "CRT_FD_SNAPSHOT"
+#define CRT_CHILD_BOOTSTRAP_ENV "CRT_CHILD_BOOTSTRAP"
+#define CRT_CHILD_BOOTSTRAP_VERSION "1"
+#define CRT_BOOTSTRAP_CWD_ENV "CRT_BOOTSTRAP_CWD"
+#define CRT_BOOTSTRAP_ROOTFS_ENV "CRT_BOOTSTRAP_ROOTFS"
+#define CRT_BOOTSTRAP_SIGMASK_ENV "CRT_BOOTSTRAP_SIGMASK"
+#define CRT_BOOTSTRAP_SIGDEFAULT_ENV "CRT_BOOTSTRAP_SIGDEFAULT"
 
 struct crt_fd_snapshot_entry {
   int fd;
@@ -35,6 +41,8 @@ int __crt_fd_snapshot_import(const struct crt_fd_snapshot* snapshot);
 void __crt_fd_snapshot_dispose(struct crt_fd_snapshot* snapshot);
 int __crt_fd_snapshot_encode(const struct crt_fd_snapshot* snapshot, char* buffer, unsigned long size);
 int __crt_fd_snapshot_decode(const char* text, struct crt_fd_snapshot* snapshot);
+int __crt_fd_get_cloexec(int fd);
+int __crt_fd_set_cloexec(int fd, int cloexec);
 void __crt_fd_after_fork_child(void);
 void __crt_child_bootstrap(void);
 

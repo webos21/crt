@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include <private/crt_signal.h>
+
 #define CRT_SIGNAL_MAX 32
 
 static struct sigaction signal_actions[CRT_SIGNAL_MAX];
@@ -103,6 +105,28 @@ int sigprocmask(int how, const sigset_t* set, sigset_t* oldset) {
 
 int pthread_sigmask(int how, const sigset_t* set, sigset_t* oldset) {
   return sigprocmask(how, set, oldset);
+}
+
+void __crt_signal_get_mask(sigset64_t* mask) {
+  if (mask != 0) {
+    *mask = (sigset64_t)signal_mask;
+  }
+}
+
+void __crt_signal_set_mask(sigset64_t mask) {
+  signal_mask = (sigset_t)mask;
+}
+
+void __crt_signal_reset_defaults(sigset64_t mask) {
+  int sig;
+
+  for (sig = 1; sig < CRT_SIGNAL_MAX; ++sig) {
+    if ((mask & ((sigset64_t)1ULL << (unsigned int)(sig - 1))) != 0) {
+      signal_actions[sig].sa_handler = SIG_DFL;
+      signal_actions[sig].sa_mask = 0;
+      signal_actions[sig].sa_flags = 0;
+    }
+  }
 }
 
 sighandler_t signal(int sig, sighandler_t handler) {

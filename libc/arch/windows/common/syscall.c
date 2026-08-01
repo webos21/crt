@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include <private/crt_fd_table.h>
+#include <private/crt_signal.h>
 #include <private/crt_spawn.h>
 
 typedef void* HANDLE;
@@ -385,6 +386,7 @@ __declspec(dllimport) BOOL CRT_WINAPI FreeEnvironmentStringsA(char* lpszEnvironm
 
 static HANDLE fd_table[CRT_FD_TABLE_SIZE];
 static int fd_kind[CRT_FD_TABLE_SIZE];
+static int fd_flags[CRT_FD_TABLE_SIZE];
 static int fd_table_initialized;
 static int winsock_initialized;
 static HANDLE child_process_table[CRT_FD_TABLE_SIZE];
@@ -709,17 +711,40 @@ static long build_process_command_line(
   return 0;
 }
 
-static int env_entry_is_fd_snapshot(const char* entry) {
-  const char name[] = CRT_FD_SNAPSHOT_ENV;
-  size_t name_len = sizeof(name) - 1;
+struct crt_env_extra {
+  const char* name;
+  const char* value;
+};
+
+static int env_entry_matches_name(const char* entry, const char* name) {
+  size_t name_len = strlen(name);
 
   return strncmp(entry, name, name_len) == 0 && entry[name_len] == '=';
 }
 
+static int env_entry_is_bootstrap_extra(
+    const char* entry,
+    const struct crt_env_extra* extras,
+    size_t extra_count) {
+  size_t i;
+
+  for (i = 0; i < extra_count; ++i) {
+    if (extras[i].name != 0 && env_entry_matches_name(entry, extras[i].name)) {
+      return 1;
+    }
+  }
+  return env_entry_matches_name(entry, CRT_FD_SNAPSHOT_ENV) ||
+         env_entry_matches_name(entry, CRT_CHILD_BOOTSTRAP_ENV) ||
+         env_entry_matches_name(entry, CRT_BOOTSTRAP_CWD_ENV) ||
+         env_entry_matches_name(entry, CRT_BOOTSTRAP_ROOTFS_ENV) ||
+         env_entry_matches_name(entry, CRT_BOOTSTRAP_SIGMASK_ENV) ||
+         env_entry_matches_name(entry, CRT_BOOTSTRAP_SIGDEFAULT_ENV);
+}
+
 static size_t environment_block_total(
     char* const envp[],
-    const char* extra_name,
-    const char* extra_value,
+    const struct crt_env_extra* extras,
+    size_t extra_count,
     char** host_block_out) {
   size_t total = 1;
   size_t i;
@@ -728,7 +753,7 @@ static size_t environment_block_total(
   *host_block_out = 0;
   if (envp != 0) {
     for (i = 0; envp[i] != 0; ++i) {
-      if (extra_name != 0 && env_entry_is_fd_snapshot(envp[i])) {
+      if (env_entry_is_bootstrap_extra(envp[i], extras, extra_count)) {
         continue;
       }
       total += strlen(envp[i]) + 1;
@@ -742,24 +767,26 @@ static size_t environment_block_total(
     }
     *host_block_out = host_block;
     for (entry = host_block; *entry != 0; entry += strlen(entry) + 1) {
-      if (extra_name != 0 && env_entry_is_fd_snapshot(entry)) {
+      if (env_entry_is_bootstrap_extra(entry, extras, extra_count)) {
         continue;
       }
       total += strlen(entry) + 1;
     }
   }
-  if (extra_name != 0 && extra_value != 0) {
-    total += strlen(extra_name) + 1 + strlen(extra_value) + 1;
+  for (i = 0; i < extra_count; ++i) {
+    if (extras[i].name != 0 && extras[i].value != 0) {
+      total += strlen(extras[i].name) + 1 + strlen(extras[i].value) + 1;
+    }
   }
   return total;
 }
 
 static char* build_windows_environment_block(
     char* const envp[],
-    const char* extra_name,
-    const char* extra_value) {
+    const struct crt_env_extra* extras,
+    size_t extra_count) {
   char* host_block = 0;
-  size_t total = environment_block_total(envp, extra_name, extra_value, &host_block);
+  size_t total = environment_block_total(envp, extras, extra_count, &host_block);
   char* block;
   size_t offset = 0;
   size_t i;
@@ -778,7 +805,7 @@ static char* build_windows_environment_block(
     for (i = 0; envp[i] != 0; ++i) {
       size_t len;
 
-      if (extra_name != 0 && env_entry_is_fd_snapshot(envp[i])) {
+      if (env_entry_is_bootstrap_extra(envp[i], extras, extra_count)) {
         continue;
       }
       len = strlen(envp[i]);
@@ -792,7 +819,7 @@ static char* build_windows_environment_block(
     for (entry = host_block; *entry != 0; entry += strlen(entry) + 1) {
       size_t len;
 
-      if (extra_name != 0 && env_entry_is_fd_snapshot(entry)) {
+      if (env_entry_is_bootstrap_extra(entry, extras, extra_count)) {
         continue;
       }
       len = strlen(entry);
@@ -801,14 +828,19 @@ static char* build_windows_environment_block(
       block[offset++] = 0;
     }
   }
-  if (extra_name != 0 && extra_value != 0) {
-    size_t name_len = strlen(extra_name);
-    size_t value_len = strlen(extra_value);
+  for (i = 0; i < extra_count; ++i) {
+    size_t name_len;
+    size_t value_len;
 
-    memcpy(block + offset, extra_name, name_len);
+    if (extras[i].name == 0 || extras[i].value == 0) {
+      continue;
+    }
+    name_len = strlen(extras[i].name);
+    value_len = strlen(extras[i].value);
+    memcpy(block + offset, extras[i].name, name_len);
     offset += name_len;
     block[offset++] = '=';
-    memcpy(block + offset, extra_value, value_len);
+    memcpy(block + offset, extras[i].value, value_len);
     offset += value_len;
     block[offset++] = 0;
   }
@@ -818,6 +850,59 @@ static char* build_windows_environment_block(
   block[offset++] = 0;
   block[offset] = 0;
   return block;
+}
+
+static void format_hex_u64(unsigned long long value, char buffer[17]) {
+  static const char hex[] = "0123456789abcdef";
+  int i;
+
+  for (i = 15; i >= 0; --i) {
+    buffer[i] = hex[value & 0xfU];
+    value >>= 4;
+  }
+  buffer[16] = 0;
+}
+
+static int parse_hex_u64(const char* text, unsigned long long* value) {
+  unsigned long long result = 0;
+  int digits = 0;
+
+  if (text == 0 || value == 0) {
+    return -EINVAL;
+  }
+  while (*text != 0) {
+    unsigned int digit;
+
+    if (*text >= '0' && *text <= '9') {
+      digit = (unsigned int)(*text - '0');
+    } else if (*text >= 'a' && *text <= 'f') {
+      digit = (unsigned int)(*text - 'a' + 10);
+    } else if (*text >= 'A' && *text <= 'F') {
+      digit = (unsigned int)(*text - 'A' + 10);
+    } else {
+      return -EINVAL;
+    }
+    result = (result << 4) | digit;
+    ++digits;
+    ++text;
+  }
+  if (digits == 0 || digits > 16) {
+    return -EINVAL;
+  }
+  *value = result;
+  return 0;
+}
+
+static void add_env_extra(
+    struct crt_env_extra* extras,
+    size_t* count,
+    const char* name,
+    const char* value) {
+  if (name != 0 && value != 0 && value[0] != 0) {
+    extras[*count].name = name;
+    extras[*count].value = value;
+    ++*count;
+  }
 }
 
 static int snapshot_kind_from_fd_kind(int kind) {
@@ -855,7 +940,8 @@ int __crt_fd_snapshot_export(struct crt_fd_snapshot* snapshot) {
   for (fd = 0; fd < CRT_FD_TABLE_SIZE; ++fd) {
     HANDLE duplicate = 0;
 
-    if (fd_kind[fd] != CRT_FD_KIND_FILE ||
+    if ((fd_kind[fd] != CRT_FD_KIND_FILE && fd_kind[fd] != CRT_FD_KIND_SOCKET) ||
+        (fd_flags[fd] & FD_CLOEXEC) != 0 ||
         fd_table[fd] == 0 ||
         fd_table[fd] == INVALID_HANDLE_VALUE) {
       continue;
@@ -902,9 +988,6 @@ int __crt_fd_snapshot_import(const struct crt_fd_snapshot* snapshot) {
         entry->handle == (uintptr_t)INVALID_HANDLE_VALUE) {
       return EINVAL;
     }
-    if (kind == CRT_FD_KIND_SOCKET) {
-      return ENOTSUP;
-    }
     if (!DuplicateHandle(GetCurrentProcess(), (HANDLE)entry->handle, GetCurrentProcess(),
                          &duplicate, 0, 0, DUPLICATE_SAME_ACCESS)) {
       return map_windows_error(GetLastError());
@@ -916,6 +999,7 @@ int __crt_fd_snapshot_import(const struct crt_fd_snapshot* snapshot) {
     }
     fd_table[entry->fd] = duplicate;
     fd_kind[entry->fd] = kind;
+    fd_flags[entry->fd] = 0;
   }
   return 0;
 }
@@ -945,10 +1029,55 @@ void __crt_fd_snapshot_dispose(struct crt_fd_snapshot* snapshot) {
 void __crt_fd_after_fork_child(void) {
 }
 
-void __crt_child_bootstrap(void) {
-  const char* encoded = getenv(CRT_FD_SNAPSHOT_ENV);
-  struct crt_fd_snapshot snapshot;
+int __crt_fd_get_cloexec(int fd) {
+  init_fd_table();
+  if (fd < 0 || fd >= CRT_FD_TABLE_SIZE || fd_kind[fd] == CRT_FD_KIND_NONE) {
+    errno = EBADF;
+    return 0;
+  }
+  return (fd_flags[fd] & FD_CLOEXEC) != 0;
+}
 
+int __crt_fd_set_cloexec(int fd, int cloexec) {
+  init_fd_table();
+  if (fd < 0 || fd >= CRT_FD_TABLE_SIZE || fd_kind[fd] == CRT_FD_KIND_NONE) {
+    errno = EBADF;
+    return -1;
+  }
+  if (cloexec) {
+    fd_flags[fd] |= FD_CLOEXEC;
+  } else {
+    fd_flags[fd] &= ~FD_CLOEXEC;
+  }
+  return 0;
+}
+
+void __crt_child_bootstrap(void) {
+  const char* marker = getenv(CRT_CHILD_BOOTSTRAP_ENV);
+  const char* encoded = getenv(CRT_FD_SNAPSHOT_ENV);
+  const char* cwd = getenv(CRT_BOOTSTRAP_CWD_ENV);
+  const char* rootfs = getenv(CRT_BOOTSTRAP_ROOTFS_ENV);
+  const char* sigmask = getenv(CRT_BOOTSTRAP_SIGMASK_ENV);
+  const char* sigdefault = getenv(CRT_BOOTSTRAP_SIGDEFAULT_ENV);
+  struct crt_fd_snapshot snapshot;
+  unsigned long long mask_value;
+  unsigned long long default_value;
+
+  if ((marker == 0 || marker[0] == 0) && (encoded == 0 || encoded[0] == 0)) {
+    return;
+  }
+  if (rootfs != 0 && rootfs[0] != 0) {
+    (void)setenv("CRT_ROOTFS", rootfs, 1);
+  }
+  if (cwd != 0 && cwd[0] != 0) {
+    (void)SetCurrentDirectoryA(cwd);
+  }
+  if (sigmask != 0 && parse_hex_u64(sigmask, &mask_value) == 0) {
+    __crt_signal_set_mask((sigset64_t)mask_value);
+  }
+  if (sigdefault != 0 && parse_hex_u64(sigdefault, &default_value) == 0) {
+    __crt_signal_reset_defaults((sigset64_t)default_value);
+  }
   if (encoded == 0 || encoded[0] == 0) {
     return;
   }
@@ -1075,7 +1204,9 @@ static long fd_snapshot_set_handle(
   if (fd < 0 || fd >= CRT_FD_TABLE_SIZE) {
     return -EBADF;
   }
-  if (kind != CRT_FD_SNAPSHOT_KIND_FILE || handle == 0 || handle == INVALID_HANDLE_VALUE) {
+  if ((kind != CRT_FD_SNAPSHOT_KIND_FILE && kind != CRT_FD_SNAPSHOT_KIND_SOCKET) ||
+      handle == 0 ||
+      handle == INVALID_HANDLE_VALUE) {
     return -EINVAL;
   }
   entry = fd_snapshot_find_entry(snapshot, fd);
@@ -1188,8 +1319,7 @@ static long prepare_spawn_startup(
   }
   if (attr != 0 &&
       (attr->flags & (POSIX_SPAWN_SETSCHEDPARAM | POSIX_SPAWN_SETSCHEDULER |
-                      POSIX_SPAWN_RESETIDS | POSIX_SPAWN_SETSIGDEF |
-                      POSIX_SPAWN_SETSIGMASK)) != 0) {
+                      POSIX_SPAWN_RESETIDS)) != 0) {
     return -ENOTSUP;
   }
   std_input = fd_snapshot_handle_for_fd(fd_snapshot, 0);
@@ -1270,6 +1400,9 @@ static void init_fd_table(void) {
   fd_kind[0] = CRT_FD_KIND_FILE;
   fd_kind[1] = CRT_FD_KIND_FILE;
   fd_kind[2] = CRT_FD_KIND_FILE;
+  fd_flags[0] = 0;
+  fd_flags[1] = 0;
+  fd_flags[2] = 0;
   fd_table_initialized = 1;
 }
 
@@ -1375,6 +1508,7 @@ static int alloc_fd(HANDLE handle) {
     if (fd_table[fd] == 0) {
       fd_table[fd] = handle;
       fd_kind[fd] = CRT_FD_KIND_FILE;
+      fd_flags[fd] = 0;
       return fd;
     }
   }
@@ -1389,6 +1523,7 @@ static int alloc_socket_fd(SOCKET socket_handle) {
     if (fd_kind[fd] == CRT_FD_KIND_NONE) {
       fd_table[fd] = (HANDLE)(uintptr_t)socket_handle;
       fd_kind[fd] = CRT_FD_KIND_SOCKET;
+      fd_flags[fd] = 0;
       return fd;
     }
   }
@@ -1624,6 +1759,7 @@ static long close_fd_slot(int fd) {
     SOCKET socket_handle = (SOCKET)(uintptr_t)fd_table[fd];
     fd_table[fd] = 0;
     fd_kind[fd] = CRT_FD_KIND_NONE;
+    fd_flags[fd] = 0;
     return winsock.closesocket(socket_handle) == SOCKET_ERROR
                ? -map_wsa_error(winsock.WSAGetLastError())
                : 0;
@@ -1635,10 +1771,12 @@ static long close_fd_slot(int fd) {
   if (fd >= 0 && fd <= 2) {
     fd_table[fd] = 0;
     fd_kind[fd] = CRT_FD_KIND_NONE;
+    fd_flags[fd] = 0;
     return 0;
   }
   fd_table[fd] = 0;
   fd_kind[fd] = CRT_FD_KIND_NONE;
+  fd_flags[fd] = 0;
   if (!CloseHandle(handle)) {
     return fail_last_error();
   }
@@ -2001,6 +2139,7 @@ long __crt_sys_dup2(int oldfd, int newfd) {
   }
   fd_table[newfd] = duplicate;
   fd_kind[newfd] = CRT_FD_KIND_FILE;
+  fd_flags[newfd] = 0;
   return newfd;
 }
 
@@ -2023,6 +2162,7 @@ long __crt_sys_pipe(int pipefd[2]) {
   if (write_fd < 0) {
     fd_table[read_fd] = 0;
     fd_kind[read_fd] = CRT_FD_KIND_NONE;
+    fd_flags[read_fd] = 0;
     CloseHandle(read_handle);
     CloseHandle(write_handle);
     return -EMFILE;
@@ -2878,6 +3018,13 @@ long __crt_sys_posix_spawn(
   char* environment_block;
   struct crt_fd_snapshot fd_snapshot;
   char fd_snapshot_text[8192];
+  char bootstrap_cwd[4096];
+  char sigmask_text[17];
+  char sigdefault_text[17];
+  struct crt_env_extra extras[6];
+  size_t extra_count = 0;
+  sigset64_t sigmask;
+  sigset64_t sigdefault;
   int fd_snapshot_ready = 0;
   long result;
   long remembered;
@@ -2906,10 +3053,43 @@ long __crt_sys_posix_spawn(
     return -result;
   }
   fd_snapshot_ready = 1;
-  environment_block = build_windows_environment_block(
-      envp,
-      fd_snapshot_ready ? CRT_FD_SNAPSHOT_ENV : 0,
-      fd_snapshot_ready ? fd_snapshot_text : 0);
+  if (current_directory != 0) {
+    size_t len = strlen(current_directory);
+
+    if (len >= sizeof(bootstrap_cwd)) {
+      __crt_fd_snapshot_dispose(&fd_snapshot);
+      return -ENAMETOOLONG;
+    }
+    memcpy(bootstrap_cwd, current_directory, len + 1);
+  } else {
+    DWORD cwd_result = GetCurrentDirectoryA((DWORD)sizeof(bootstrap_cwd), bootstrap_cwd);
+
+    if (cwd_result == 0) {
+      __crt_fd_snapshot_dispose(&fd_snapshot);
+      return fail_last_error();
+    }
+    if (cwd_result >= (DWORD)sizeof(bootstrap_cwd)) {
+      __crt_fd_snapshot_dispose(&fd_snapshot);
+      return -ERANGE;
+    }
+  }
+  if (attr != 0 && (attr->flags & POSIX_SPAWN_SETSIGMASK) != 0) {
+    sigmask = attr->sigmask64;
+  } else {
+    __crt_signal_get_mask(&sigmask);
+  }
+  sigdefault = attr != 0 && (attr->flags & POSIX_SPAWN_SETSIGDEF) != 0 ? attr->sigdefault64 : 0;
+  format_hex_u64((unsigned long long)sigmask, sigmask_text);
+  format_hex_u64((unsigned long long)sigdefault, sigdefault_text);
+  add_env_extra(extras, &extra_count, CRT_CHILD_BOOTSTRAP_ENV, CRT_CHILD_BOOTSTRAP_VERSION);
+  if (fd_snapshot_ready) {
+    add_env_extra(extras, &extra_count, CRT_FD_SNAPSHOT_ENV, fd_snapshot_text);
+  }
+  add_env_extra(extras, &extra_count, CRT_BOOTSTRAP_CWD_ENV, bootstrap_cwd);
+  add_env_extra(extras, &extra_count, CRT_BOOTSTRAP_ROOTFS_ENV, getenv("CRT_ROOTFS"));
+  add_env_extra(extras, &extra_count, CRT_BOOTSTRAP_SIGMASK_ENV, sigmask_text);
+  add_env_extra(extras, &extra_count, CRT_BOOTSTRAP_SIGDEFAULT_ENV, sigdefault_text);
+  environment_block = build_windows_environment_block(envp, extras, extra_count);
   if (environment_block == 0) {
     if (fd_snapshot_ready) {
       __crt_fd_snapshot_dispose(&fd_snapshot);
