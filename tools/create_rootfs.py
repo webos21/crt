@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import shutil
 from pathlib import Path
 
 
@@ -26,6 +27,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dest", required=True)
     parser.add_argument("--target-os", required=True)
+    parser.add_argument("--shell")
     args = parser.parse_args()
 
     rootfs = Path(args.dest).resolve()
@@ -42,6 +44,10 @@ def main():
         "/proc/self/exe, and /proc/self/fd.\n",
         encoding="utf-8",
     )
+    if args.shell:
+        shell_source = Path(args.shell).resolve()
+        shell_dest = rootfs / "system" / "bin" / ("sh.exe" if args.target_os == "windows" else "sh")
+        shutil.copy2(shell_source, shell_dest)
     print(f"CRT_ROOTFS={rootfs}")
 
 

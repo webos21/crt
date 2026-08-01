@@ -219,7 +219,7 @@ install(DIRECTORY include/ DESTINATION include)
 
 add_custom_target(sysroot
   COMMAND "${CMAKE_COMMAND}" --install "${CMAKE_BINARY_DIR}" --prefix "${CRT_SYSROOT}"
-  DEPENDS c c_shared m m_shared dl dl_shared cxx cxx_shared crt1
+  DEPENDS c c_shared m m_shared dl dl_shared cxx cxx_shared crt1 crt_shell_artifacts
   COMMENT "Installing CRT headers, libraries, and startup objects into ${CRT_SYSROOT}"
 )
 
@@ -229,6 +229,7 @@ if(Python3_Interpreter_FOUND)
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_rootfs.py"
       --dest "${CRT_ROOTFS}"
       --target-os "${CRT_TARGET_OS}"
+      --shell "$<TARGET_FILE:crt_tiny_sh>"
     DEPENDS sysroot crt_shell_artifacts
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     COMMENT "Creating Android-like CRT rootfs at ${CRT_ROOTFS}"

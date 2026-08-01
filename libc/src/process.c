@@ -574,6 +574,10 @@ pid_t tcgetpgrp(int fd) {
 #else
   pid_t pgrp = -1;
 
+  if (!isatty(fd)) {
+    errno = ENOTTY;
+    return -1;
+  }
   if (ioctl(fd, TIOCGPGRP, &pgrp) != 0) {
     return -1;
   }
@@ -596,6 +600,10 @@ int tcsetpgrp(int fd, pid_t pgrp) {
 #else
   if (pgrp <= 0) {
     errno = EINVAL;
+    return -1;
+  }
+  if (!isatty(fd)) {
+    errno = ENOTTY;
     return -1;
   }
   return ioctl(fd, TIOCSPGRP, &pgrp);
