@@ -182,6 +182,31 @@ void __crt_thread_clear_current(crt_thread_context* context) {
 #endif
 }
 
+void __crt_thread_after_fork_child(crt_thread_context* current) {
+#if defined(CRT_TARGET_OS_LINUX)
+  if (current == 0) {
+    current = &main_context;
+  }
+  thread_lock.state.value = 0;
+  thread_head = 0;
+  current->tid = __crt_sys_thread_id();
+  current->tid_word = 0;
+  current->listed = 0;
+  current->next = 0;
+  linux_register_context(current);
+#elif defined(CRT_TARGET_OS_WINDOWS)
+  if (current == 0) {
+    current = &fallback_context;
+  }
+  __crt_thread_set_current(current);
+#else
+  if (current == 0) {
+    current = &main_context;
+  }
+  current_context = current;
+#endif
+}
+
 void* __crt_thread_control(void) {
   return __crt_thread_get_current()->control;
 }

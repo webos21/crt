@@ -13,6 +13,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <private/crt_fd_table.h>
 #include <private/crt_spawn.h>
 
 typedef void* HANDLE;
@@ -389,6 +390,9 @@ static DWORD child_pid_table[CRT_FD_TABLE_SIZE];
 
 long __crt_sys_geteuid(void);
 static HANDLE get_fd_handle(int fd);
+static void init_fd_table(void);
+static long init_winsock(void);
+static long close_fd_slot(int fd);
 
 struct winsock_api {
   int (CRT_WINAPI* WSAStartup)(WORD wVersionRequested, void* lpWSAData);
@@ -743,6 +747,131 @@ static HANDLE duplicate_inheritable_fd_handle(int fd) {
     return INVALID_HANDLE_VALUE;
   }
   return duplicate;
+}
+
+static int snapshot_kind_from_fd_kind(int kind) {
+  if (kind == CRT_FD_KIND_FILE) {
+    return CRT_FD_SNAPSHOT_KIND_FILE;
+  }
+  if (kind == CRT_FD_KIND_SOCKET) {
+    return CRT_FD_SNAPSHOT_KIND_SOCKET;
+  }
+  return CRT_FD_SNAPSHOT_KIND_NONE;
+}
+
+static int fd_kind_from_snapshot_kind(int kind) {
+  if (kind == CRT_FD_SNAPSHOT_KIND_FILE) {
+    return CRT_FD_KIND_FILE;
+  }
+  if (kind == CRT_FD_SNAPSHOT_KIND_SOCKET) {
+    return CRT_FD_KIND_SOCKET;
+  }
+  return CRT_FD_KIND_NONE;
+}
+
+int __crt_fd_snapshot_export(struct crt_fd_snapshot* snapshot) {
+  unsigned int count = 0;
+  int fd;
+
+  if (snapshot == 0) {
+    return EINVAL;
+  }
+  init_fd_table();
+  memset(snapshot, 0, sizeof(*snapshot));
+  snapshot->magic = CRT_FD_SNAPSHOT_MAGIC;
+  snapshot->version = CRT_FD_SNAPSHOT_VERSION;
+  snapshot->capacity = CRT_FD_SNAPSHOT_MAX;
+  for (fd = 0; fd < CRT_FD_TABLE_SIZE; ++fd) {
+    HANDLE duplicate = 0;
+
+    if (fd_kind[fd] != CRT_FD_KIND_FILE ||
+        fd_table[fd] == 0 ||
+        fd_table[fd] == INVALID_HANDLE_VALUE) {
+      continue;
+    }
+    if (count == CRT_FD_SNAPSHOT_MAX) {
+      __crt_fd_snapshot_dispose(snapshot);
+      return EMFILE;
+    }
+    if (!DuplicateHandle(GetCurrentProcess(), fd_table[fd], GetCurrentProcess(), &duplicate, 0, 1,
+                         DUPLICATE_SAME_ACCESS)) {
+      __crt_fd_snapshot_dispose(snapshot);
+      return map_windows_error(GetLastError());
+    }
+    snapshot->entries[count].fd = fd;
+    snapshot->entries[count].kind = snapshot_kind_from_fd_kind(fd_kind[fd]);
+    snapshot->entries[count].flags = CRT_FD_SNAPSHOT_FLAG_INHERITABLE;
+    snapshot->entries[count].handle = (uintptr_t)duplicate;
+    ++count;
+  }
+  snapshot->count = count;
+  return 0;
+}
+
+int __crt_fd_snapshot_import(const struct crt_fd_snapshot* snapshot) {
+  unsigned int i;
+
+  if (snapshot == 0 ||
+      snapshot->magic != CRT_FD_SNAPSHOT_MAGIC ||
+      snapshot->version != CRT_FD_SNAPSHOT_VERSION ||
+      snapshot->count > snapshot->capacity ||
+      snapshot->capacity > CRT_FD_SNAPSHOT_MAX) {
+    return EINVAL;
+  }
+  init_fd_table();
+  for (i = 0; i < snapshot->count; ++i) {
+    const struct crt_fd_snapshot_entry* entry = &snapshot->entries[i];
+    HANDLE duplicate = 0;
+    int kind = fd_kind_from_snapshot_kind(entry->kind);
+
+    if (entry->fd < 0 ||
+        entry->fd >= CRT_FD_TABLE_SIZE ||
+        kind == CRT_FD_KIND_NONE ||
+        entry->handle == 0 ||
+        entry->handle == (uintptr_t)INVALID_HANDLE_VALUE) {
+      return EINVAL;
+    }
+    if (kind == CRT_FD_KIND_SOCKET) {
+      return ENOTSUP;
+    }
+    if (!DuplicateHandle(GetCurrentProcess(), (HANDLE)entry->handle, GetCurrentProcess(),
+                         &duplicate, 0, 0, DUPLICATE_SAME_ACCESS)) {
+      return map_windows_error(GetLastError());
+    }
+    if (fd_kind[entry->fd] != CRT_FD_KIND_NONE &&
+        fd_table[entry->fd] != 0 &&
+        fd_table[entry->fd] != INVALID_HANDLE_VALUE) {
+      close_fd_slot(entry->fd);
+    }
+    fd_table[entry->fd] = duplicate;
+    fd_kind[entry->fd] = kind;
+  }
+  return 0;
+}
+
+void __crt_fd_snapshot_dispose(struct crt_fd_snapshot* snapshot) {
+  unsigned int i;
+
+  if (snapshot == 0) {
+    return;
+  }
+  for (i = 0; i < snapshot->count && i < CRT_FD_SNAPSHOT_MAX; ++i) {
+    if (snapshot->entries[i].handle != 0 &&
+        snapshot->entries[i].handle != (uintptr_t)INVALID_HANDLE_VALUE) {
+      if (snapshot->entries[i].kind == CRT_FD_SNAPSHOT_KIND_SOCKET) {
+        init_winsock();
+        if (winsock.closesocket != 0) {
+          winsock.closesocket((SOCKET)snapshot->entries[i].handle);
+        }
+      } else {
+        CloseHandle((HANDLE)snapshot->entries[i].handle);
+      }
+    }
+  }
+  memset(snapshot, 0, sizeof(*snapshot));
+}
+
+void __crt_fd_after_fork_child(void) {
 }
 
 static long open_spawn_action_handle(
@@ -1303,8 +1432,8 @@ long __crt_sys_open(const char* path, int flags, unsigned int mode) {
   return fd;
 }
 
-long __crt_sys_close(int fd) {
-  HANDLE handle = get_fd_handle(fd);
+static long close_fd_slot(int fd) {
+  HANDLE handle;
 
   init_fd_table();
   if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_SOCKET) {
@@ -1315,6 +1444,7 @@ long __crt_sys_close(int fd) {
                ? -map_wsa_error(winsock.WSAGetLastError())
                : 0;
   }
+  handle = get_fd_handle(fd);
   if (handle == INVALID_HANDLE_VALUE) {
     return -EBADF;
   }
@@ -1329,6 +1459,10 @@ long __crt_sys_close(int fd) {
     return fail_last_error();
   }
   return 0;
+}
+
+long __crt_sys_close(int fd) {
+  return close_fd_slot(fd);
 }
 
 long long __crt_sys_lseek(int fd, long long offset, int whence) {

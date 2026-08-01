@@ -11,7 +11,9 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <private/crt_fd_table.h>
 #include <private/crt_spawn.h>
+#include <private/crt_tls.h>
 
 long __crt_sys_getpid(void);
 long __crt_sys_getppid(void);
@@ -33,6 +35,9 @@ long __crt_sysconf_nprocessors_conf(void);
 long __crt_sysconf_nprocessors_onln(void);
 long __crt_sysconf_phys_pages(void);
 long __crt_sysconf_avphys_pages(void);
+void __crt_malloc_after_fork_child(void);
+void __crt_pthread_after_fork_child(void);
+void __crt_stdio_after_fork_child(void);
 
 #if defined(CRT_TARGET_OS_LINUX)
 long __crt_sys_fork(void);
@@ -288,7 +293,11 @@ static void crt_atfork_run_prepare_recursive(struct crt_atfork_handler* handler)
   }
 }
 
-static void crt_atfork_run_parent(void) {
+void __crt_atfork_prepare(void) {
+  crt_atfork_run_prepare_recursive(atfork_handlers);
+}
+
+void __crt_atfork_parent(void) {
   struct crt_atfork_handler* handler;
 
   for (handler = atfork_handlers; handler != 0; handler = handler->next) {
@@ -298,7 +307,7 @@ static void crt_atfork_run_parent(void) {
   }
 }
 
-static void crt_atfork_run_child(void) {
+static void crt_atfork_run_user_child(void) {
   struct crt_atfork_handler* handler;
 
   for (handler = atfork_handlers; handler != 0; handler = handler->next) {
@@ -308,8 +317,13 @@ static void crt_atfork_run_child(void) {
   }
 }
 
-static void crt_after_fork_child(void) {
-  crt_atfork_run_child();
+void __crt_atfork_child(crt_thread_context* current_context) {
+  __crt_thread_after_fork_child(current_context);
+  __crt_pthread_after_fork_child();
+  __crt_malloc_after_fork_child();
+  __crt_fd_after_fork_child();
+  __crt_stdio_after_fork_child();
+  crt_atfork_run_user_child();
 }
 
 int pthread_atfork(void (*prepare)(void), void (*parent)(void), void (*child)(void)) {
@@ -337,15 +351,16 @@ pid_t _Fork(void) {
 }
 
 pid_t fork(void) {
+  crt_thread_context* current_context = __crt_thread_get_current();
   long child;
 
-  crt_atfork_run_prepare_recursive(atfork_handlers);
+  __crt_atfork_prepare();
   child = __crt_sys_fork();
   if (child == 0) {
-    crt_after_fork_child();
+    __crt_atfork_child(current_context);
     return 0;
   }
-  crt_atfork_run_parent();
+  __crt_atfork_parent();
   return (pid_t)normalize_syscall_result(child);
 }
 

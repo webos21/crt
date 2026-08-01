@@ -23,6 +23,10 @@ union block_header {
 static block_header* heap_head;
 static crt_spinlock heap_lock = CRT_SPINLOCK_INIT;
 
+void __crt_malloc_after_fork_child(void) {
+  heap_lock.state.value = 0;
+}
+
 static size_t align_size(size_t size) {
   size_t alignment = sizeof(block_header);
   return (size + alignment - 1) & ~(alignment - 1);

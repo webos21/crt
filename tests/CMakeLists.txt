@@ -344,6 +344,21 @@ set_tests_properties(fork_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "fork_test: ok"
 )
 
+add_crt_test(fork_signal_test fork_signal_test.c)
+set_tests_properties(fork_signal_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "fork_signal_test: ok"
+)
+
+add_crt_test(fork_runtime_reset_test fork_runtime_reset_test.c)
+set_tests_properties(fork_runtime_reset_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "fork_runtime_reset_test: ok"
+)
+
+add_crt_test(windows_fd_snapshot_test windows_fd_snapshot_test.c)
+set_tests_properties(windows_fd_snapshot_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "windows_fd_snapshot_test: ok"
+)
+
 add_crt_test(pthread_basic_test pthread_basic_test.c)
 set_tests_properties(pthread_basic_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_basic_test: ok"

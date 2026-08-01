@@ -253,6 +253,18 @@ static crt_pthread_control* pthread_control_from_thread(pthread_t thread) {
   return (crt_pthread_control*)(uintptr_t)thread;
 }
 
+void __crt_pthread_after_fork_child(void) {
+  pthread_key_lock.state.value = 0;
+#if defined(CRT_TARGET_OS_LINUX)
+  linux_reap_lock.state.value = 0;
+  linux_reap_sequence.value = 0;
+  linux_reap_head = 0;
+  linux_reaper_started = 0;
+  linux_reaper_tid = 0;
+  linux_reaper_stack = 0;
+#endif
+}
+
 static void pthread_run_key_destructors(void) {
   int iteration;
 

@@ -40,6 +40,26 @@ host kernel syscall backend:
 - `vfork()` currently aliases `fork()` until a separate Bionic-compatible policy
   is needed.
 
+After a successful `fork()`, the child process runs project-owned runtime reset
+hooks before user atfork child handlers:
+
+- TLS/current-thread state is rebound to the surviving calling thread.
+- Linux thread registry and detached-thread reaper bootstrap state are cleared.
+- pthread key/reaper locks, malloc heap lock, and stdio `FILE` locks are reset
+  so the child is not left with locks owned by vanished threads.
+- fd tracking has an explicit `__crt_fd_after_fork_child()` reset hook. It is a
+  no-op for current Linux/macOS native fork inheritance and for Windows while
+  `fork()` remains `ENOTSUP`, but it is the integration point for future Windows
+  child bootstrap.
+
+The internal hook boundary is:
+
+- `__crt_atfork_prepare()` runs user prepare handlers in reverse registration
+  order.
+- `__crt_atfork_parent()` runs user parent handlers in registration order.
+- `__crt_atfork_child()` resets CRT runtime state first, then runs user child
+  handlers in registration order.
+
 Windows currently returns `ENOTSUP` for `_Fork()`/`fork()`. This is an explicit
 bootstrap policy, not the long-term target.
 
@@ -72,10 +92,24 @@ The first test tranche validates:
 - `pthread_atfork()` handler ordering;
 - Windows `ENOTSUP` policy until fork emulation lands.
 
+The second test tranche adds:
+
+- Bionic/POSIX-shaped `sigset_t` manipulation APIs;
+- `sigaction()` and `SA_SIGINFO` bootstrap behavior;
+- `sigprocmask()`/`pthread_sigmask()` process-local mask storage;
+- inherited signal action behavior across `fork()` on Linux/macOS;
+- Windows fork/signal inheritance kept behind the explicit `ENOTSUP` policy.
+
+The third test tranche adds:
+
+- fork while another thread owns a `FILE` lock;
+- child-side stdio lock reset before returning from `fork()`;
+- Windows `ENOTSUP` policy for the same runtime-reset test surface.
+
 Future tests should add:
 
 - signal inheritance and `SIGCHLD`;
 - close-on-exec behavior;
 - multi-fd redirection;
-- fork after stdio/malloc/pthread lock activity;
+- fork after malloc/pthread lock activity;
 - pipeline and command substitution shell smoke tests.

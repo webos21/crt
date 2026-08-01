@@ -10,6 +10,8 @@
 #include <sys/vfs.h>
 #include <unistd.h>
 
+#include <private/crt_fd_table.h>
+
 #ifndef TMP_MAX
 #define TMP_MAX 308915776
 #endif
@@ -194,6 +196,38 @@ static long normalize_syscall_result(long result) {
   }
   return result;
 }
+
+#if !defined(CRT_TARGET_OS_WINDOWS)
+int __crt_fd_snapshot_export(struct crt_fd_snapshot* snapshot) {
+  if (snapshot == 0) {
+    return EINVAL;
+  }
+  memset(snapshot, 0, sizeof(*snapshot));
+  snapshot->magic = CRT_FD_SNAPSHOT_MAGIC;
+  snapshot->version = CRT_FD_SNAPSHOT_VERSION;
+  snapshot->capacity = CRT_FD_SNAPSHOT_MAX;
+  return ENOTSUP;
+}
+
+int __crt_fd_snapshot_import(const struct crt_fd_snapshot* snapshot) {
+  if (snapshot == 0 ||
+      snapshot->magic != CRT_FD_SNAPSHOT_MAGIC ||
+      snapshot->version != CRT_FD_SNAPSHOT_VERSION ||
+      snapshot->count > snapshot->capacity ||
+      snapshot->capacity > CRT_FD_SNAPSHOT_MAX) {
+    return EINVAL;
+  }
+  return ENOTSUP;
+}
+
+void __crt_fd_snapshot_dispose(struct crt_fd_snapshot* snapshot) {
+  if (snapshot != 0) {
+    memset(snapshot, 0, sizeof(*snapshot));
+  }
+}
+void __crt_fd_after_fork_child(void) {
+}
+#endif
 
 static char mkstemp_char(unsigned long value) {
   static const char alphabet[] =

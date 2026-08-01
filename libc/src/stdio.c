@@ -242,6 +242,28 @@ static void unlock_stream_if_needed(FILE* stream) {
   }
 }
 
+static void reset_stream_lock_after_fork(FILE* stream) {
+  struct __sfileext* ext = stream_ext(stream);
+
+  if (ext == 0) {
+    return;
+  }
+  pthread_mutex_init(&ext->_lock, 0);
+  ext->_lock_owner = 0;
+  ext->_lock_count = 0;
+}
+
+void __crt_stdio_after_fork_child(void) {
+  struct crt_stdio_cookie* current;
+
+  reset_stream_lock_after_fork(stdin);
+  reset_stream_lock_after_fork(stdout);
+  reset_stream_lock_after_fork(stderr);
+  for (current = open_streams; current != 0; current = current->next_open) {
+    reset_stream_lock_after_fork(current->stream);
+  }
+}
+
 static void set_stream_error(FILE* stream) {
   stream->_flags |= __SERR;
 }
