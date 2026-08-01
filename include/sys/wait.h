@@ -4,6 +4,8 @@
 #include <sys/types.h>
 
 #define WNOHANG 1
+#define WUNTRACED 2
+#define WCONTINUED 8
 
 #define WEXITSTATUS(status) (((status) >> 8) & 0xff)
 #define WTERMSIG(status) ((status) & 0x7f)

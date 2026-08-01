@@ -1428,6 +1428,12 @@ static int darwin_stat_to_stat(const struct crt_darwin_stat64* ds, struct stat* 
   st->st_atime = (time_t)ds->atime.tv_sec;
   st->st_mtime = (time_t)ds->mtime.tv_sec;
   st->st_ctime = (time_t)ds->ctime.tv_sec;
+  st->st_atim.tv_sec = (time_t)ds->atime.tv_sec;
+  st->st_atim.tv_nsec = ds->atime.tv_nsec;
+  st->st_mtim.tv_sec = (time_t)ds->mtime.tv_sec;
+  st->st_mtim.tv_nsec = ds->mtime.tv_nsec;
+  st->st_ctim.tv_sec = (time_t)ds->ctime.tv_sec;
+  st->st_ctim.tv_nsec = ds->ctime.tv_nsec;
   return 0;
 }
 
@@ -1576,12 +1582,18 @@ static int statx_to_stat(const struct crt_statx* sx, struct stat* st) {
   }
   if ((sx->mask & CRT_STATX_ATTR_ATIME) != 0) {
     st->st_atime = (time_t)sx->atime.tv_sec;
+    st->st_atim.tv_sec = (time_t)sx->atime.tv_sec;
+    st->st_atim.tv_nsec = sx->atime.tv_nsec;
   }
   if ((sx->mask & CRT_STATX_ATTR_MTIME) != 0) {
     st->st_mtime = (time_t)sx->mtime.tv_sec;
+    st->st_mtim.tv_sec = (time_t)sx->mtime.tv_sec;
+    st->st_mtim.tv_nsec = sx->mtime.tv_nsec;
   }
   if ((sx->mask & CRT_STATX_ATTR_CTIME) != 0) {
     st->st_ctime = (time_t)sx->ctime.tv_sec;
+    st->st_ctim.tv_sec = (time_t)sx->ctime.tv_sec;
+    st->st_ctim.tv_nsec = sx->ctime.tv_nsec;
   }
   st->st_dev = ((uint64_t)sx->dev_major << 32) | sx->dev_minor;
   st->st_rdev = ((uint64_t)sx->rdev_major << 32) | sx->rdev_minor;

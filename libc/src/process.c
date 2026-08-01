@@ -556,6 +556,18 @@ int setpgid(pid_t pid, pid_t pgid) {
   return (int)normalize_syscall_result(__crt_sys_setpgid((long)pid, (long)pgid));
 }
 
+pid_t getpgid(pid_t pid) {
+  if (pid < 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (pid == 0 || pid == getpid()) {
+    return getpgrp();
+  }
+  errno = ENOTSUP;
+  return -1;
+}
+
 pid_t getpgrp(void) {
   return (pid_t)normalize_syscall_result(__crt_sys_getpgrp());
 }
@@ -622,6 +634,14 @@ int kill(pid_t pid, int sig) {
     return raise(sig);
   }
   return (int)normalize_syscall_result(__crt_sys_kill((long)pid, sig));
+}
+
+int killpg(pid_t pgrp, int sig) {
+  if (pgrp <= 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return kill(-pgrp, sig);
 }
 
 int posix_spawnattr_init(posix_spawnattr_t* attr) {

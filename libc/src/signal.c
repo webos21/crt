@@ -10,6 +10,76 @@
 static struct sigaction signal_actions[CRT_SIGNAL_MAX];
 static sigset_t signal_mask;
 
+const char* const sys_signame[NSIG] = {
+  "Signal 0",
+  "HUP",
+  "INT",
+  "QUIT",
+  "ILL",
+  "TRAP",
+  "ABRT",
+  "BUS",
+  "FPE",
+  "KILL",
+  "USR1",
+  "SEGV",
+  "USR2",
+  "PIPE",
+  "ALRM",
+  "TERM",
+  "STKFLT",
+  "CHLD",
+  "CONT",
+  "STOP",
+  "TSTP",
+  "TTIN",
+  "TTOU",
+  "URG",
+  "XCPU",
+  "XFSZ",
+  "VTALRM",
+  "PROF",
+  "WINCH",
+  "IO",
+  "PWR",
+  "SYS",
+};
+
+const char* const sys_siglist[NSIG] = {
+  "Signal 0",
+  "Hangup",
+  "Interrupt",
+  "Quit",
+  "Illegal instruction",
+  "Trace/breakpoint trap",
+  "Aborted",
+  "Bus error",
+  "Floating point exception",
+  "Killed",
+  "User signal 1",
+  "Segmentation fault",
+  "User signal 2",
+  "Broken pipe",
+  "Alarm clock",
+  "Terminated",
+  "Stack fault",
+  "Child exited",
+  "Continued",
+  "Stopped",
+  "Stopped",
+  "Stopped",
+  "Stopped",
+  "Urgent I/O condition",
+  "CPU time limit exceeded",
+  "File size limit exceeded",
+  "Virtual timer expired",
+  "Profiling timer expired",
+  "Window changed",
+  "I/O possible",
+  "Power failure",
+  "Bad system call",
+};
+
 static int signal_valid(int sig) {
   return sig > 0 && sig < CRT_SIGNAL_MAX;
 }
@@ -105,6 +175,19 @@ int sigprocmask(int how, const sigset_t* set, sigset_t* oldset) {
 
 int pthread_sigmask(int how, const sigset_t* set, sigset_t* oldset) {
   return sigprocmask(how, set, oldset);
+}
+
+int sigsuspend(const sigset_t* mask) {
+  sigset_t old_mask = signal_mask;
+
+  if (mask == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  signal_mask = *mask;
+  signal_mask = old_mask;
+  errno = EINTR;
+  return -1;
 }
 
 void __crt_signal_get_mask(sigset64_t* mask) {

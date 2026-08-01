@@ -37,6 +37,8 @@ ports:
 
 - project-owned `crt_tiny_sh` bootstrap runner installed into the runtime
   rootfs as `/system/bin/sh`, `/bin/sh`, and `/usr/bin/sh`;
+- imported Android `external/mksh` source under `shell/mksh/src`, built as the
+  separate `crt_mksh` artifact and copied to `rootfs/system/bin/mksh`;
 - tiny shell coverage for `sh -c`, simple tokenization, `;`, `&&`, `||`,
   pipelines, redirection, `$?`, simple `$VAR`, and leading assignments;
 - `posix_spawn`, `posix_spawnp`, `waitpid`, `wait`
@@ -280,6 +282,14 @@ Expected early gaps:
 - signal APIs
 - process/fd inheritance behavior
 
+Current status: Android `external/mksh` now compiles and links on macOS using
+the Android.bp source/define set. The first inventory tranche filled CRT/PAL
+gaps for `sys/sysmacros.h`, `sys/resource.h`, `pwd.h`, `grp.h`, `termios.h`,
+`libgen.h`, `langinfo.h`, `sys/times.h`, `sys/file.h`, `strlcpy`, `strlcat`,
+signal names, `sleep`, `alarm`, `sigsuspend`, uid/gid/resource database stubs,
+and `struct stat` timespec fields. Linux/Windows verification is still
+required before this milestone is closed.
+
 ### Milestone 3: Non-interactive Shell
 
 Goal:
@@ -291,7 +301,8 @@ sh -c 'echo ok'
 The project-owned tiny shell now covers this bootstrap goal and a little more:
 pipeline, redirection, command connectors, simple variable expansion, and
 assignment smoke. The remaining work in this milestone is to repeat the same
-surface with imported Android `external/mksh`.
+surface with imported Android `external/mksh`. The first mksh `-c` smoke now
+passes on macOS; Linux/Windows must confirm the same.
 
 Then validate:
 

@@ -15,9 +15,10 @@ The target Android-shaped layout is:
 /usr/bin/sh         -> shell launcher/copy
 ```
 
-Until `mksh` is imported, `crt_tiny_sh` remains a project-owned bootstrap
-runner installed as `/system/bin/sh`. Its role is to exercise the CRT
-process/fd/signal/rootfs contract and to provide early configure smoke coverage.
+`crt_tiny_sh` remains a project-owned bootstrap runner installed as
+`/system/bin/sh`. Its role is to exercise the CRT process/fd/signal/rootfs
+contract and to provide early configure smoke coverage while imported mksh is
+being hardened.
 
 ## Upstream References
 
@@ -32,10 +33,12 @@ The first source references are Android platform projects:
   - branch: `refs/heads/main`
   - observed tree during planning: `6faafc783dbeda82e582dd4241d3b788a91dc827`
 
-The observed tree values are planning references, not final provenance pins.
-When source is imported, record the exact commit, source date, archive URL, and
-SHA256 in `shell/mksh/import_manifest.json` or
-`shell/toybox/import_manifest.json`.
+mksh is currently pinned to Android external/mksh commit
+`1548076841f243748a3f56da23b38794d437bc12`, tree
+`57ba8b3ab85c6d79171453c42baec1e845d4e30a`. Exact import pins are recorded as
+immutable commit IDs plus archive SHA256 in
+`shell/mksh/import_manifest.json`. Toybox remains at the planning-reference
+stage until its source is imported.
 
 ## Source Layout
 
@@ -100,14 +103,19 @@ parameter expansion, globbing, command substitution, here-docs, arithmetic
 expansion, functions, traps, and interactive job control should be used to drive
 the `mksh` tranche and CRT/PAL gap work.
 
+Imported mksh currently builds as `crt_mksh` and installs as `mksh`. It does
+not replace `crt_tiny_sh` as `/system/bin/sh` until all host smoke tests pass
+and the remaining shell/process gaps are understood.
+
 ## mksh Inventory Tranche
 
-The next source-facing step is inventory, not patching:
+The source-facing inventory is now active:
 
 1. Fetch Android `external/mksh` at the selected commit.
 2. Read `Android.bp`, `Android.patch.txt`, `mkshrc`, `NOTICE`, and the source
    build flags.
-3. Compile with `tools/crt-cc` against the CRT sysroot.
+3. Compile with the CRT freestanding CMake target and later with `tools/crt-cc`
+   against the CRT sysroot.
 4. Record missing public surface under the CRT categories:
    - headers and types;
    - process/fd/signal behavior;
@@ -115,6 +123,11 @@ The next source-facing step is inventory, not patching:
    - user/group/resource database behavior;
    - rootfs/procfs/devfs behavior.
 5. Implement missing pieces in CRT/PAL/sysroot by checking Bionic first.
+
+The first inventory pass reached a linked macOS `crt_mksh` binary without
+patching imported source. The added CRT/PAL/sysroot surface includes resource,
+user/group, termios, langinfo, sysmacros, times, file-lock, signal-name, sleep,
+and stat-timespec support.
 
 ## Toybox Minimal Applet Inventory
 

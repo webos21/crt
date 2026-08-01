@@ -38,6 +38,8 @@ char* strerror(int errnum);
 int strerror_r(int errnum, char* buf, size_t buflen);
 char* strsignal(int sig);
 size_t strxfrm(char* dst, const char* src, size_t n);
+size_t strlcpy(char* dst, const char* src, size_t size);
+size_t strlcat(char* dst, const char* src, size_t size);
 
 #ifdef __cplusplus
 }

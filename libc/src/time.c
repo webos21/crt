@@ -564,3 +564,20 @@ int nanosleep(const struct timespec* req, struct timespec* rem) {
   return normalize_syscall_result(__crt_sys_nanosleep(req, rem));
 #endif
 }
+
+unsigned int sleep(unsigned int seconds) {
+  struct timespec req;
+  struct timespec rem;
+
+  req.tv_sec = (time_t)seconds;
+  req.tv_nsec = 0;
+  if (nanosleep(&req, &rem) != 0) {
+    return (unsigned int)rem.tv_sec;
+  }
+  return 0;
+}
+
+unsigned int alarm(unsigned int seconds) {
+  (void)seconds;
+  return 0;
+}

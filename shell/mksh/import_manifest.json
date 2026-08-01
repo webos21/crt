@@ -6,19 +6,19 @@
     "url": "https://android.googlesource.com/platform/external/mksh",
     "branch": "refs/heads/main",
     "observed_tree": "57ba8b3ab85c6d79171453c42baec1e845d4e30a",
-    "commit": "",
-    "archive": "",
-    "sha256": "",
-    "license": "BSD-like; verify NOTICE and MODULE_LICENSE_BSD_LIKE at import"
+    "commit": "1548076841f243748a3f56da23b38794d437bc12",
+    "archive": "https://android.googlesource.com/platform/external/mksh/+archive/1548076841f243748a3f56da23b38794d437bc12.tar.gz",
+    "sha256": "88149f218a8ae330ca82b2a20147559887f98691ff9014fb9e2aa759fe440fda",
+    "license": "BSD-like/MIT/Unicode-DFS/legacy_notice; see imported NOTICE and Android.bp license block"
   },
   "status": {
-    "linux": "pending",
-    "macos": "pending",
-    "windows": "pending"
+    "linux": "pending host verification",
+    "macos": "builds and basic -c smoke passes",
+    "windows": "pending host verification"
   },
   "notes": [
-    "This manifest is reserved for the first Android external/mksh import.",
+    "Android external/mksh has been imported under shell/mksh/src.",
     "Keep upstream source separate from project-owned CRT/PAL glue.",
-    "observed_tree is a planning reference only; commit/archive/sha256 must be pinned when source is imported."
+    "The CMake integration follows Android.bp source and cflag choices and builds a separate crt_mksh artifact before replacing /system/bin/sh."
   ]
 }

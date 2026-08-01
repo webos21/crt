@@ -28,6 +28,8 @@ def main():
     parser.add_argument("--dest", required=True)
     parser.add_argument("--target-os", required=True)
     parser.add_argument("--shell")
+    parser.add_argument("--mksh")
+    parser.add_argument("--mkshrc")
     args = parser.parse_args()
 
     rootfs = Path(args.dest).resolve()
@@ -53,6 +55,14 @@ def main():
         if args.target_os == "windows":
             for shell_dir in ("system/bin", "bin", "usr/bin"):
                 shutil.copy2(shell_source, rootfs / shell_dir / "sh")
+    if args.mksh:
+        mksh_source = Path(args.mksh).resolve()
+        mksh_name = "mksh.exe" if args.target_os == "windows" else "mksh"
+        shutil.copy2(mksh_source, rootfs / "system" / "bin" / mksh_name)
+        if args.target_os == "windows":
+            shutil.copy2(mksh_source, rootfs / "system" / "bin" / "mksh")
+    if args.mkshrc:
+        shutil.copy2(Path(args.mkshrc).resolve(), rootfs / "system" / "etc" / "mkshrc")
     print(f"CRT_ROOTFS={rootfs}")
 
 

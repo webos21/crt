@@ -2688,6 +2688,12 @@ static long stat_from_handle(HANDLE handle, struct stat* st) {
   st->st_atime = filetime_to_time(&info.last_access_time);
   st->st_mtime = filetime_to_time(&info.last_write_time);
   st->st_ctime = filetime_to_time(&info.creation_time);
+  st->st_atim.tv_sec = st->st_atime;
+  st->st_atim.tv_nsec = 0;
+  st->st_mtim.tv_sec = st->st_mtime;
+  st->st_mtim.tv_nsec = 0;
+  st->st_ctim.tv_sec = st->st_ctime;
+  st->st_ctim.tv_nsec = 0;
   return 0;
 }
 

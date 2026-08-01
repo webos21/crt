@@ -22,6 +22,9 @@
 #define S_IROTH 0004
 #define S_IWOTH 0002
 #define S_IXOTH 0001
+#define S_ISUID 04000
+#define S_ISGID 02000
+#define S_ISVTX 01000
 
 #define S_IRWXU (S_IRUSR | S_IWUSR | S_IXUSR)
 #define S_IRWXG (S_IRGRP | S_IWGRP | S_IXGRP)
@@ -53,6 +56,9 @@ struct stat {
   time_t st_atime;
   time_t st_mtime;
   time_t st_ctime;
+  struct timespec st_atim;
+  struct timespec st_mtim;
+  struct timespec st_ctim;
 };
 
 int stat(const char* path, struct stat* st);

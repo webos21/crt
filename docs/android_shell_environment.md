@@ -34,7 +34,7 @@ The intended project-owned outputs are:
 
 ```text
 shell/src    -> rootfs/system/bin/sh bootstrap runner
-shell/mksh   -> rootfs/system/bin/sh after mksh import
+shell/mksh   -> rootfs/system/bin/mksh, later rootfs/system/bin/sh
 shell/toybox -> rootfs/system/bin/toybox and selected applet entry points
 ```
 
@@ -93,6 +93,16 @@ rootfs/usr/bin/sh
 
 On Windows the rootfs also receives `.exe` copies for host launch convenience,
 while the extensionless names remain available for CRT path translation.
+
+Android mksh is also copied to:
+
+```text
+rootfs/system/bin/mksh
+rootfs/system/etc/mkshrc
+```
+
+The default `/system/bin/sh` remains `crt_tiny_sh` until imported mksh smoke
+coverage is confirmed across Linux, macOS, and Windows.
 
 ## Initial Namespace Policy
 

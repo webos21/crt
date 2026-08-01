@@ -10,6 +10,7 @@ extern "C" {
 #define O_RDONLY 0x0000
 #define O_WRONLY 0x0001
 #define O_RDWR 0x0002
+#define O_ACCMODE 0x0003
 
 #if defined(CRT_TARGET_OS_MACOS)
 #define O_CREAT 0x0200

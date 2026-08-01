@@ -11,6 +11,7 @@ typedef int sig_atomic_t;
 typedef unsigned long sigset_t;
 typedef unsigned long long sigset64_t;
 typedef void (*sighandler_t)(int);
+typedef sighandler_t sig_t;
 
 typedef struct {
   int si_signo;
@@ -58,6 +59,7 @@ struct sigaction {
 #define SIGTSTP 20
 #define SIGTTIN 21
 #define SIGTTOU 22
+#define NSIG 32
 
 #define SIG_BLOCK 0
 #define SIG_UNBLOCK 1
@@ -76,9 +78,14 @@ int sigismember(const sigset_t* set, int sig);
 int sigaction(int sig, const struct sigaction* act, struct sigaction* oldact);
 int sigprocmask(int how, const sigset_t* set, sigset_t* oldset);
 int pthread_sigmask(int how, const sigset_t* set, sigset_t* oldset);
+int sigsuspend(const sigset_t* mask);
 sighandler_t signal(int sig, sighandler_t handler);
 int raise(int sig);
 int kill(pid_t pid, int sig);
+int killpg(pid_t pgrp, int sig);
+
+extern const char* const sys_signame[NSIG];
+extern const char* const sys_siglist[NSIG];
 
 #ifdef __cplusplus
 }

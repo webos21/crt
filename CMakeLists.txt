@@ -230,6 +230,8 @@ if(Python3_Interpreter_FOUND)
       --dest "${CRT_ROOTFS}"
       --target-os "${CRT_TARGET_OS}"
       --shell "$<TARGET_FILE:crt_tiny_sh>"
+      --mksh "$<TARGET_FILE:crt_mksh>"
+      --mkshrc "${CMAKE_SOURCE_DIR}/shell/mksh/src/mkshrc"
     DEPENDS sysroot crt_shell_artifacts
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     COMMENT "Creating Android-like CRT rootfs at ${CRT_ROOTFS}"

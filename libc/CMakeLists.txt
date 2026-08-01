@@ -9,7 +9,10 @@ set(CRT_LIBC_SOURCES
   src/env.c
   src/exit.c
   src/fd.c
+  src/file_lock.c
   src/inttypes.c
+  src/langinfo.c
+  src/libgen.c
   src/locale.c
   src/malloc.c
   src/mman.c
@@ -19,6 +22,7 @@ set(CRT_LIBC_SOURCES
   src/process.c
   src/pthread.c
   src/qsort.c
+  src/resource.c
   src/sched.c
   src/scanf.c
   src/setjmp.c
@@ -30,7 +34,9 @@ set(CRT_LIBC_SOURCES
   src/strtoul.c
   src/strtoull.c
   src/tls.c
+  src/termios.c
   src/time.c
+  src/user_group.c
   src/wait.c
   src/wchar.c
   src/wctype.c
@@ -60,6 +66,8 @@ set(CRT_LIBC_SOURCES
   string/strrchr.c
   string/strspn.c
   string/strerror.c
+  string/strlcat.c
+  string/strlcpy.c
   string/strstr.c
   string/strtok_r.c
   string/strxfrm.c
