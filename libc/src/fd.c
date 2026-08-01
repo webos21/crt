@@ -1349,7 +1349,9 @@ char* getcwd(char* buf, size_t size) {
     __set_errno((int)-result);
     return 0;
   }
+#if !defined(CRT_TARGET_OS_WINDOWS)
   rootfs_path_for_guest(buf);
+#endif
   return buf;
 #endif
 }
