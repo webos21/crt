@@ -115,16 +115,18 @@ memory/runtime-state policy.
 
 ## Shell-Oriented Contract
 
-The first shell-facing contract is `__crt_shell_fork_exec()`, a private helper
-that deliberately means "create a child with fork-like fd state and then exec a
-program". It is implemented through `posix_spawn()` today.
+The first shell-facing contract is `__crt_shell_spawn()`, a private child-spec
+helper for "create a child with fork-like shell state and then exec a program".
+The older `__crt_shell_fork_exec()` wrapper is kept for simple call sites. Both
+are implemented through `posix_spawn()` today.
 
 This is not a general C `fork()` replacement. It does not copy the caller's C
 stack, heap, or program counter. It gives the CRT shell a stable primitive for
 the common shell pattern:
 
 1. build pipes and redirections in the parent;
-2. describe child fd actions with `posix_spawn_file_actions_*`;
+2. describe child fd actions, cwd, rootfs, environment, signal policy, and stdio
+   flush behavior in one child spec;
 3. create the child through the shared Windows bootstrap path;
 4. wait with the CRT child registry and `waitpid()`.
 

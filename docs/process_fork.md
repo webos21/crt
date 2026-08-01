@@ -88,10 +88,12 @@ that snapshot, filters `FD_CLOEXEC` descriptors, and imports fd/cwd/rootfs/signa
 mask state in CRT startup before `main()`.
 
 The private `__crt_shell_fork_exec()` helper is the phase-1 shell contract. It
-supports shell-style "prepare child fd state, create child, exec target" flow,
-but it does not copy the parent's stack, heap, or program counter. Public
-`fork()` remains `ENOTSUP` on Windows until a stricter compatibility tranche is
-implemented and tested.
+wraps the clearer `__crt_shell_spawn()` child-spec API, which carries path,
+argv/envp, file actions, cwd, rootfs, signal mask/default reset, and stdio flush
+policy as one shell child contract. This supports shell-style "prepare child fd
+state, create child, exec target" flow, but it does not copy the parent's stack,
+heap, or program counter. Public `fork()` remains `ENOTSUP` on Windows until a
+stricter compatibility tranche is implemented and tested.
 
 ## Test Policy
 
@@ -120,6 +122,6 @@ Future tests should add:
 
 - signal inheritance and `SIGCHLD`;
 - close-on-exec behavior;
-- multi-fd redirection;
+- broader multi-fd redirection beyond the initial shell smoke coverage;
 - fork after malloc/pthread lock activity;
-- pipeline and command substitution shell smoke tests.
+- command substitution shell smoke tests.

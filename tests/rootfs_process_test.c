@@ -8,6 +8,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <private/crt_shell_process.h>
+
 static int fail(const char* message) {
   printf("rootfs_process_test: %s\n", message);
   return 1;
@@ -147,29 +149,30 @@ int main(int argc, char** argv) {
     return fail("wait null pid child");
   }
   {
-    posix_spawnattr_t child_attr;
-    posix_spawn_file_actions_t child_actions;
     sigset_t child_mask = 0;
+    struct crt_shell_child_spec child_spec;
     char* bootstrap_argv[] = {"/proc/self/exe", "bootstrap-child", 0};
 
     if (sigemptyset(&child_mask) != 0 ||
-        sigaddset(&child_mask, SIGINT) != 0 ||
-        posix_spawnattr_init(&child_attr) != 0 ||
-        posix_spawnattr_setflags(
-            &child_attr, POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF) != 0 ||
-        posix_spawnattr_setsigmask(&child_attr, &child_mask) != 0 ||
-        posix_spawnattr_setsigdefault(&child_attr, &child_mask) != 0 ||
-        posix_spawn_file_actions_init(&child_actions) != 0 ||
-        posix_spawn_file_actions_addchdir_np(&child_actions, "/tmp") != 0) {
+        sigaddset(&child_mask, SIGINT) != 0) {
       return fail("bootstrap setup");
     }
-    if (posix_spawn(&pid, "/proc/self/exe", &child_actions, &child_attr, bootstrap_argv, environ) != 0) {
-      posix_spawn_file_actions_destroy(&child_actions);
-      posix_spawnattr_destroy(&child_attr);
+    memset(&child_spec, 0, sizeof(child_spec));
+    child_spec.path = "/proc/self/exe";
+    child_spec.argv = bootstrap_argv;
+    child_spec.envp = environ;
+    child_spec.cwd = "/tmp";
+    child_spec.rootfs = root;
+    child_spec.sigmask = (sigset64_t)child_mask;
+    child_spec.sigdefault = (sigset64_t)child_mask;
+    child_spec.flags = CRT_SHELL_CHILD_FLUSH_STDIO |
+                       CRT_SHELL_CHILD_SET_CWD |
+                       CRT_SHELL_CHILD_SET_ROOTFS |
+                       CRT_SHELL_CHILD_SET_SIGMASK |
+                       CRT_SHELL_CHILD_SET_SIGDEFAULT;
+    if (__crt_shell_spawn(&pid, &child_spec) != 0) {
       return fail("bootstrap spawn");
     }
-    posix_spawn_file_actions_destroy(&child_actions);
-    posix_spawnattr_destroy(&child_attr);
     if (waitpid(pid, &status, 0) != pid ||
         !WIFEXITED(status) ||
         WEXITSTATUS(status) != 14) {

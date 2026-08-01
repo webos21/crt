@@ -424,7 +424,20 @@ static int posix_spawn_add_file_action(
 
 #if !defined(CRT_TARGET_OS_WINDOWS)
 static int spawn_attr_has_effect(const posix_spawnattr_t attr) {
-  return attr != 0 && attr->flags != 0;
+  return attr != 0 &&
+         (attr->flags & ~(POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK)) != 0;
+}
+
+static void apply_spawn_attr_or_exit(const posix_spawnattr_t attr) {
+  if (attr == 0) {
+    return;
+  }
+  if ((attr->flags & POSIX_SPAWN_SETSIGDEF) != 0) {
+    __crt_signal_reset_defaults(attr->sigdefault64);
+  }
+  if ((attr->flags & POSIX_SPAWN_SETSIGMASK) != 0) {
+    __crt_signal_set_mask(attr->sigmask64);
+  }
 }
 
 static void apply_spawn_actions_or_exit(const posix_spawn_file_actions_t actions) {
@@ -481,6 +494,7 @@ long __crt_sys_posix_spawn(
     return child;
   }
   if (child == 0) {
+    apply_spawn_attr_or_exit(attr);
     apply_spawn_actions_or_exit(actions);
     __crt_sys_execve(path, argv, envp != 0 ? envp : environ);
     _exit(127);
@@ -808,13 +822,224 @@ int posix_spawnp(
   return 0;
 }
 
+static int shell_copy_file_actions(
+    posix_spawn_file_actions_t* out,
+    const posix_spawn_file_actions_t* source,
+    const char* cwd) {
+  struct __posix_spawn_file_action* action;
+  int result;
+
+  result = posix_spawn_file_actions_init(out);
+  if (result != 0) {
+    return result;
+  }
+  if (source != 0 && *source != 0) {
+    for (action = (*source)->head; action != 0; action = action->next) {
+      if (action->kind == CRT_SPAWN_ACTION_OPEN) {
+        result = posix_spawn_file_actions_addopen(
+            out, action->new_fd, action->path, action->flags, action->mode);
+      } else if (action->kind == CRT_SPAWN_ACTION_CLOSE) {
+        result = posix_spawn_file_actions_addclose(out, action->fd);
+      } else if (action->kind == CRT_SPAWN_ACTION_DUP2) {
+        result = posix_spawn_file_actions_adddup2(out, action->fd, action->new_fd);
+      } else if (action->kind == CRT_SPAWN_ACTION_CHDIR) {
+        result = posix_spawn_file_actions_addchdir_np(out, action->path);
+      } else if (action->kind == CRT_SPAWN_ACTION_FCHDIR) {
+        result = posix_spawn_file_actions_addfchdir_np(out, action->fd);
+      } else {
+        result = ENOTSUP;
+      }
+      if (result != 0) {
+        posix_spawn_file_actions_destroy(out);
+        return result;
+      }
+    }
+  }
+  if (cwd != 0) {
+    result = posix_spawn_file_actions_addchdir_np(out, cwd);
+    if (result != 0) {
+      posix_spawn_file_actions_destroy(out);
+      return result;
+    }
+  }
+  return 0;
+}
+
+static int shell_env_name_matches(const char* entry, const char* name) {
+  size_t len = strlen(name);
+
+  return strncmp(entry, name, len) == 0 && entry[len] == '=';
+}
+
+static char** shell_build_env_with_rootfs(char* const envp[], const char* rootfs) {
+  char* const* source = envp != 0 ? envp : environ;
+  size_t count = 0;
+  size_t index = 0;
+  size_t rootfs_len;
+  char** result;
+  char* root_entry;
+
+  if (rootfs == 0) {
+    return 0;
+  }
+  while (source != 0 && source[count] != 0) {
+    ++count;
+  }
+  rootfs_len = strlen(rootfs);
+  root_entry = (char*)malloc(sizeof("CRT_ROOTFS=") - 1 + rootfs_len + 1);
+  if (root_entry == 0) {
+    return 0;
+  }
+  memcpy(root_entry, "CRT_ROOTFS=", sizeof("CRT_ROOTFS=") - 1);
+  memcpy(root_entry + sizeof("CRT_ROOTFS=") - 1, rootfs, rootfs_len + 1);
+  result = (char**)malloc((count + 2) * sizeof(char*));
+  if (result == 0) {
+    free(root_entry);
+    return 0;
+  }
+  for (count = 0; source != 0 && source[count] != 0; ++count) {
+    if (shell_env_name_matches(source[count], "CRT_ROOTFS")) {
+      continue;
+    }
+    result[index++] = source[count];
+  }
+  result[index++] = root_entry;
+  result[index] = 0;
+  return result;
+}
+
+static void shell_free_env_with_rootfs(char** envp) {
+  size_t i;
+
+  if (envp == 0) {
+    return;
+  }
+  for (i = 0; envp[i] != 0; ++i) {
+    if (shell_env_name_matches(envp[i], "CRT_ROOTFS")) {
+      free(envp[i]);
+      break;
+    }
+  }
+  free(envp);
+}
+
+int __crt_shell_spawn(pid_t* pid, const struct crt_shell_child_spec* spec) {
+  posix_spawn_file_actions_t actions;
+  posix_spawn_file_actions_t* actions_ptr = 0;
+  posix_spawnattr_t attr;
+  posix_spawnattr_t* attr_ptr = 0;
+  char** env_override = 0;
+  char* const* child_envp;
+  short attr_flags = 0;
+  int result;
+
+  if (spec == 0 || spec->path == 0) {
+    return EINVAL;
+  }
+  if ((spec->flags & CRT_SHELL_CHILD_SET_CWD) != 0 && spec->cwd == 0) {
+    return EINVAL;
+  }
+  if ((spec->flags & CRT_SHELL_CHILD_SET_ROOTFS) != 0 && spec->rootfs == 0) {
+    return EINVAL;
+  }
+  if ((spec->flags & CRT_SHELL_CHILD_FLUSH_STDIO) != 0 && fflush(0) != 0) {
+    return errno;
+  }
+  if ((spec->flags & CRT_SHELL_CHILD_SET_CWD) != 0 || spec->file_actions != 0) {
+    result = shell_copy_file_actions(
+        &actions,
+        spec->file_actions,
+        (spec->flags & CRT_SHELL_CHILD_SET_CWD) != 0 ? spec->cwd : 0);
+    if (result != 0) {
+      return result;
+    }
+    actions_ptr = &actions;
+  }
+  if ((spec->flags & (CRT_SHELL_CHILD_SET_SIGMASK | CRT_SHELL_CHILD_SET_SIGDEFAULT)) != 0) {
+    result = posix_spawnattr_init(&attr);
+    if (result != 0) {
+      if (actions_ptr != 0) {
+        posix_spawn_file_actions_destroy(actions_ptr);
+      }
+      return result;
+    }
+    if ((spec->flags & CRT_SHELL_CHILD_SET_SIGMASK) != 0) {
+      sigset64_t mask = spec->sigmask;
+
+      attr_flags |= POSIX_SPAWN_SETSIGMASK;
+      result = posix_spawnattr_setsigmask64(&attr, &mask);
+      if (result != 0) {
+        posix_spawnattr_destroy(&attr);
+        if (actions_ptr != 0) {
+          posix_spawn_file_actions_destroy(actions_ptr);
+        }
+        return result;
+      }
+    }
+    if ((spec->flags & CRT_SHELL_CHILD_SET_SIGDEFAULT) != 0) {
+      sigset64_t mask = spec->sigdefault;
+
+      attr_flags |= POSIX_SPAWN_SETSIGDEF;
+      result = posix_spawnattr_setsigdefault64(&attr, &mask);
+      if (result != 0) {
+        posix_spawnattr_destroy(&attr);
+        if (actions_ptr != 0) {
+          posix_spawn_file_actions_destroy(actions_ptr);
+        }
+        return result;
+      }
+    }
+    result = posix_spawnattr_setflags(&attr, attr_flags);
+    if (result != 0) {
+      posix_spawnattr_destroy(&attr);
+      if (actions_ptr != 0) {
+        posix_spawn_file_actions_destroy(actions_ptr);
+      }
+      return result;
+    }
+    attr_ptr = &attr;
+  }
+  child_envp = spec->envp != 0 ? spec->envp : environ;
+  if ((spec->flags & CRT_SHELL_CHILD_SET_ROOTFS) != 0) {
+    env_override = shell_build_env_with_rootfs((char* const*)child_envp, spec->rootfs);
+    if (env_override == 0) {
+      if (attr_ptr != 0) {
+        posix_spawnattr_destroy(attr_ptr);
+      }
+      if (actions_ptr != 0) {
+        posix_spawn_file_actions_destroy(actions_ptr);
+      }
+      return ENOMEM;
+    }
+    child_envp = env_override;
+  }
+  result = posix_spawn(
+      pid, spec->path, actions_ptr, attr_ptr, (char* const*)spec->argv, (char* const*)child_envp);
+  shell_free_env_with_rootfs(env_override);
+  if (attr_ptr != 0) {
+    posix_spawnattr_destroy(attr_ptr);
+  }
+  if (actions_ptr != 0) {
+    posix_spawn_file_actions_destroy(actions_ptr);
+  }
+  return result;
+}
+
 int __crt_shell_fork_exec(
     pid_t* pid,
     const char* path,
     const posix_spawn_file_actions_t* file_actions,
     char* const argv[],
     char* const envp[]) {
-  return posix_spawn(pid, path, file_actions, 0, argv, envp);
+  struct crt_shell_child_spec spec;
+
+  memset(&spec, 0, sizeof(spec));
+  spec.path = path;
+  spec.argv = argv;
+  spec.envp = envp;
+  spec.file_actions = file_actions;
+  spec.flags = CRT_SHELL_CHILD_FLUSH_STDIO;
+  return __crt_shell_spawn(pid, &spec);
 }
 
 int execve(const char* path, char* const argv[], char* const envp[]) {

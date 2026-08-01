@@ -323,6 +323,12 @@ set_tests_properties(rootfs_process_test_runs PROPERTIES
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 
+add_crt_test(shell_smoke_test shell_smoke_test.c)
+set_tests_properties(shell_smoke_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "shell_smoke_test: ok"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
 add_crt_test(mntent_test mntent_test.c)
 set_tests_properties(mntent_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "mntent_test: ok"
