@@ -177,6 +177,9 @@ endif()
 
 add_library(crt1 OBJECT ${CRT_START_FILE})
 target_link_libraries(crt1 PRIVATE crt_build_flags)
+target_include_directories(crt1 PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
 set_target_properties(crt1 PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
 )
