@@ -12,13 +12,22 @@ Toybox is the preferred first source for Android-like command applets under
 - `pwd`
 - `true`
 - `false`
+- `test`
+- `[`
+- `expr`
+- `basename`
+- `dirname`
 - `mkdir`
 - `rm`
 - `cp`
 - `mv`
-- `test`
-- `expr`
+- `ln`
+- `chmod`
+- `uname`
 - `sed`
+- `grep`
 
 Applets requiring deeper terminal, procfs, device, login, networking, or mount
 integration should be deferred until the shell and rootfs model is stronger.
+
+Follow the shared import and patch policy in `docs/shell_import.md`.

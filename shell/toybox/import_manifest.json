@@ -3,11 +3,13 @@
   "role": "/system/bin/toybox and selected applets",
   "source": {
     "upstream": "Android external/toybox",
-    "url": "",
+    "url": "https://android.googlesource.com/platform/external/toybox",
+    "branch": "refs/heads/main",
+    "observed_tree": "6faafc783dbeda82e582dd4241d3b788a91dc827",
     "commit": "",
     "archive": "",
     "sha256": "",
-    "license": ""
+    "license": "BSD; verify LICENSE and MODULE_LICENSE_BSD at import"
   },
   "status": {
     "linux": "pending",
@@ -20,16 +22,24 @@
     "pwd",
     "true",
     "false",
+    "test",
+    "[",
+    "expr",
+    "basename",
+    "dirname",
     "mkdir",
     "rm",
     "cp",
     "mv",
-    "test",
-    "expr",
-    "sed"
+    "ln",
+    "chmod",
+    "uname",
+    "sed",
+    "grep"
   ],
   "notes": [
     "This manifest is reserved for the first Android external/toybox import.",
-    "Start with a minimal configure-friendly applet set."
+    "Start with a minimal configure-friendly applet set.",
+    "observed_tree is a planning reference only; commit/archive/sha256 must be pinned when source is imported."
   ]
 }

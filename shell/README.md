@@ -9,6 +9,8 @@ top of:
 
 ```text
 rootfs/system/bin/sh      -> crt_tiny_sh first, then mksh
+rootfs/bin/sh             -> crt_tiny_sh alias/copy
+rootfs/usr/bin/sh         -> crt_tiny_sh alias/copy
 rootfs/system/bin/toybox  -> toybox
 rootfs/bin/<applets>      -> toybox applet links or launchers
 ```
@@ -42,10 +44,18 @@ runtime rootfs. It intentionally implements only a small non-interactive subset:
 
 - `sh -c "..."`;
 - simple whitespace and quote tokenization;
+- `;`, `&&`, and `||` command connectors;
 - one or more pipeline stages with `|`;
 - `<`, `>`, and single-digit `n>` redirection;
+- `$?` and simple `$VAR` expansion;
+- leading `VAR=value` assignments;
 - builtins: `echo`, `cat`, `upper`, `pwd`, `cd`, `true`, `false`, `exit`;
 - external command spawning through the CRT process path.
 
 This runner exists so shell/PAL smoke tests and early porting probes can execute
 inside the CRT process model before Android `external/mksh` is imported.
+
+It intentionally does not implement full POSIX shell semantics. Globbing,
+command substitution, here-docs, functions, traps, arithmetic expansion, and
+interactive job control are reserved for the mksh tranche and the CRT/PAL gaps
+that mksh exposes.

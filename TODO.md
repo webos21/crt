@@ -35,6 +35,10 @@ configure scripts.
 The current CRT already has enough surface to start probing shell/userland
 ports:
 
+- project-owned `crt_tiny_sh` bootstrap runner installed into the runtime
+  rootfs as `/system/bin/sh`, `/bin/sh`, and `/usr/bin/sh`;
+- tiny shell coverage for `sh -c`, simple tokenization, `;`, `&&`, `||`,
+  pipelines, redirection, `$?`, simple `$VAR`, and leading assignments;
 - `posix_spawn`, `posix_spawnp`, `waitpid`, `wait`
 - `execve` as a documented shell-child contract on Windows: spawn the target
   through the CRT child bootstrap path, wait, then exit with the child status
@@ -244,6 +248,7 @@ Add project-owned shell metadata:
 - `shell/mksh/import_manifest.json`
 - `shell/toybox/README.md`
 - `shell/toybox/import_manifest.json`
+- `docs/shell_import.md`
 
 Record:
 
@@ -282,6 +287,11 @@ Goal:
 ```sh
 sh -c 'echo ok'
 ```
+
+The project-owned tiny shell now covers this bootstrap goal and a little more:
+pipeline, redirection, command connectors, simple variable expansion, and
+assignment smoke. The remaining work in this milestone is to repeat the same
+surface with imported Android `external/mksh`.
 
 Then validate:
 

@@ -16,6 +16,7 @@ The first target is a non-interactive Android-shaped shell:
 - Prefer CRT/PAL fixes over upstream source patches.
 - If a patch is unavoidable, keep it small and record why the behavior cannot be
   represented through the CRT/PAL layer.
+- Follow the shared policy in `docs/shell_import.md`.
 
 ## Expected CRT Gaps
 
@@ -24,3 +25,7 @@ The first target is a non-interactive Android-shaped shell:
 - `pwd.h`, `grp.h`, and synthetic user/group databases.
 - signal set APIs and `sigaction`.
 - process and fd inheritance details, especially on Windows.
+
+The project-owned `crt_tiny_sh` bootstrap runner already validates part of the
+non-interactive process contract. mksh import should use that as a baseline, not
+as a replacement for mksh behavior.

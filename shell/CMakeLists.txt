@@ -45,6 +45,22 @@ set_tests_properties(crt_tiny_shell_pipeline_runs PROPERTIES
 )
 set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_tiny_shell_pipeline_runs)
 
+add_test(NAME crt_tiny_shell_condition_runs
+  COMMAND crt_tiny_sh -c [=[false || echo fallback; true && echo ok; echo status=$?]=]
+)
+set_tests_properties(crt_tiny_shell_condition_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "fallback\nok\nstatus=0"
+)
+set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_tiny_shell_condition_runs)
+
+add_test(NAME crt_tiny_shell_assignment_runs
+  COMMAND crt_tiny_sh -c [=[CRT_TINY_VALUE=works; echo $CRT_TINY_VALUE]=]
+)
+set_tests_properties(crt_tiny_shell_assignment_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "works"
+)
+set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_tiny_shell_assignment_runs)
+
 add_custom_target(crt_shell_artifacts
   DEPENDS crt_tiny_sh
   COMMENT "Building CRT bootstrap shell artifacts"

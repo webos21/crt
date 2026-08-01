@@ -15,6 +15,10 @@
 #define TINY_MAX_ARGS 32
 #define TINY_MAX_COMMANDS 8
 #define TINY_MAX_REDIRS 8
+#define TINY_CONNECT_NONE 0
+#define TINY_CONNECT_ALWAYS 1
+#define TINY_CONNECT_AND 2
+#define TINY_CONNECT_OR 3
 
 struct tiny_redir {
   int fd;
@@ -31,6 +35,7 @@ struct tiny_command {
 };
 
 static const char* tiny_self_path;
+static int tiny_last_status;
 
 static int tiny_fail(const char* message) {
   fprintf(stderr, "sh: %s\n", message);
@@ -177,6 +182,132 @@ static int tiny_is_builtin(const char* name) {
           strcmp(name, "exit") == 0);
 }
 
+static int tiny_is_name_start(int c) {
+  return isalpha((unsigned char)c) || c == '_';
+}
+
+static int tiny_is_name_char(int c) {
+  return isalnum((unsigned char)c) || c == '_';
+}
+
+static int tiny_is_assignment(const char* token) {
+  const char* equal;
+  const char* p;
+
+  if (token == 0 || !tiny_is_name_start((unsigned char)token[0])) {
+    return 0;
+  }
+  equal = strchr(token, '=');
+  if (equal == 0 || equal == token) {
+    return 0;
+  }
+  for (p = token; p < equal; ++p) {
+    if (!tiny_is_name_char((unsigned char)*p)) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int tiny_set_assignment(const char* token) {
+  const char* equal = strchr(token, '=');
+  char* name;
+  int result;
+
+  if (equal == 0) {
+    return -1;
+  }
+  name = (char*)malloc((size_t)(equal - token) + 1);
+  if (name == 0) {
+    return -1;
+  }
+  memcpy(name, token, (size_t)(equal - token));
+  name[equal - token] = 0;
+  result = setenv(name, equal + 1, 1);
+  free(name);
+  return result;
+}
+
+static char* tiny_expand_token(const char* input) {
+  char* output;
+  size_t size;
+  size_t pos = 0;
+  size_t i;
+
+  if (input == 0) {
+    return 0;
+  }
+  size = strlen(input) + 32;
+  output = (char*)malloc(size);
+  if (output == 0) {
+    return 0;
+  }
+  for (i = 0; input[i] != 0; ++i) {
+    const char* value = 0;
+    char status_buffer[16];
+    char name_buffer[128];
+    size_t value_len;
+
+    if (input[i] != '$') {
+      if (pos + 2 >= size) {
+        char* grown = (char*)realloc(output, size * 2);
+
+        if (grown == 0) {
+          free(output);
+          return 0;
+        }
+        output = grown;
+        size *= 2;
+      }
+      output[pos++] = input[i];
+      continue;
+    }
+    if (input[i + 1] == '?') {
+      snprintf(status_buffer, sizeof(status_buffer), "%d", tiny_last_status);
+      value = status_buffer;
+      ++i;
+    } else if (tiny_is_name_start((unsigned char)input[i + 1])) {
+      size_t name_len = 0;
+
+      ++i;
+      while (tiny_is_name_char((unsigned char)input[i]) && name_len + 1 < sizeof(name_buffer)) {
+        name_buffer[name_len++] = input[i++];
+      }
+      --i;
+      name_buffer[name_len] = 0;
+      value = getenv(name_buffer);
+      if (value == 0) {
+        value = "";
+      }
+    } else {
+      value = "$";
+    }
+    value_len = strlen(value);
+    while (pos + value_len + 1 >= size) {
+      char* grown = (char*)realloc(output, size * 2);
+
+      if (grown == 0) {
+        free(output);
+        return 0;
+      }
+      output = grown;
+      size *= 2;
+    }
+    memcpy(output + pos, value, value_len);
+    pos += value_len;
+  }
+  output[pos] = 0;
+  return output;
+}
+
+static void tiny_free_tokens(char** tokens, int token_count) {
+  int i;
+
+  for (i = 0; i < token_count; ++i) {
+    free(tokens[i]);
+  }
+}
+
 static int tiny_tokenize(char* script, char** tokens, int max_tokens) {
   int count = 0;
   char* read = script;
@@ -187,6 +318,30 @@ static int tiny_tokenize(char* script, char** tokens, int max_tokens) {
     }
     if (*read == 0) {
       break;
+    }
+    if (read[0] == '&' && read[1] == '&') {
+      char* token = (char*)malloc(3);
+
+      if (token == 0) {
+        return -1;
+      }
+      token[0] = *read++;
+      token[1] = *read++;
+      token[2] = 0;
+      tokens[count++] = token;
+      continue;
+    }
+    if (read[0] == '|' && read[1] == '|') {
+      char* token = (char*)malloc(3);
+
+      if (token == 0) {
+        return -1;
+      }
+      token[0] = *read++;
+      token[1] = *read++;
+      token[2] = 0;
+      tokens[count++] = token;
+      continue;
     }
     if (read[0] >= '0' && read[0] <= '9' && read[1] == '>') {
       char* token = (char*)malloc(3);
@@ -200,7 +355,7 @@ static int tiny_tokenize(char* script, char** tokens, int max_tokens) {
       tokens[count++] = token;
       continue;
     }
-    if (*read == '|' || *read == '<' || *read == '>') {
+    if (*read == ';' || *read == '|' || *read == '<' || *read == '>') {
       char* token = (char*)malloc(2);
 
       if (token == 0) {
@@ -219,7 +374,7 @@ static int tiny_tokenize(char* script, char** tokens, int max_tokens) {
         return -1;
       }
       while (*read != 0 && !isspace((unsigned char)*read) &&
-             *read != '|' && *read != '<' && *read != '>') {
+             *read != ';' && *read != '|' && *read != '<' && *read != '>') {
         if (*read == '\'' || *read == '"') {
           int quote = *read++;
 
@@ -280,19 +435,25 @@ static int tiny_parse(char** tokens, int token_count, struct tiny_command* comma
       if (i + 1 == token_count) {
         return -1;
       }
-      if (tiny_add_redir(
+      char* path = tiny_expand_token(tokens[++i]);
+
+      if (path == 0 ||
+          tiny_add_redir(
               command,
               output ? 1 : 0,
               output ? O_CREAT | O_WRONLY | O_TRUNC : O_RDONLY,
               0666,
-              tokens[++i]) != 0) {
+              path) != 0) {
         return -1;
       }
       continue;
     }
     if (strlen(token) == 2 && token[0] >= '0' && token[0] <= '9' && token[1] == '>') {
+      char* path;
+
       if (i + 1 == token_count ||
-          tiny_add_redir(command, token[0] - '0', O_CREAT | O_WRONLY | O_TRUNC, 0666, tokens[++i]) != 0) {
+          (path = tiny_expand_token(tokens[++i])) == 0 ||
+          tiny_add_redir(command, token[0] - '0', O_CREAT | O_WRONLY | O_TRUNC, 0666, path) != 0) {
         return -1;
       }
       continue;
@@ -300,10 +461,34 @@ static int tiny_parse(char** tokens, int token_count, struct tiny_command* comma
     if (command->argc + 1 == TINY_MAX_ARGS) {
       return -1;
     }
-    command->argv[command->argc++] = token;
+    command->argv[command->argc] = tiny_expand_token(token);
+    if (command->argv[command->argc] == 0) {
+      return -1;
+    }
+    ++command->argc;
     command->argv[command->argc] = 0;
   }
   return commands[*command_count - 1].argc == 0 ? -1 : 0;
+}
+
+static int tiny_apply_assignments(struct tiny_command* command) {
+  int count = 0;
+  int i;
+
+  while (count < command->argc && tiny_is_assignment(command->argv[count])) {
+    if (tiny_set_assignment(command->argv[count]) != 0) {
+      return -1;
+    }
+    ++count;
+  }
+  if (count == 0) {
+    return 0;
+  }
+  for (i = count; i <= command->argc; ++i) {
+    command->argv[i - count] = command->argv[i];
+  }
+  command->argc -= count;
+  return 0;
 }
 
 static int tiny_apply_redirs_in_parent(const struct tiny_command* command, int saved[TINY_MAX_REDIRS]) {
@@ -431,6 +616,9 @@ static int tiny_run_single(struct tiny_command* command) {
   int result;
   int saved[TINY_MAX_REDIRS];
 
+  if (tiny_apply_assignments(command) != 0) {
+    return 1;
+  }
   if (command->argc == 0) {
     return 0;
   }
@@ -477,6 +665,9 @@ static int tiny_run_commands(struct tiny_command* commands, int command_count) {
     int output_fd = -1;
     int result;
 
+    if (tiny_apply_assignments(&commands[i]) != 0 || commands[i].argc == 0) {
+      return 1;
+    }
     if (i + 1 < command_count) {
       if (pipe(pipefd) != 0) {
         return tiny_fail("pipe");
@@ -524,15 +715,55 @@ static int tiny_run_script(char* script) {
   char* tokens[TINY_MAX_TOKENS];
   struct tiny_command commands[TINY_MAX_COMMANDS];
   int token_count = tiny_tokenize(script, tokens, TINY_MAX_TOKENS);
-  int command_count = 0;
+  int start = 0;
+  int connector = TINY_CONNECT_ALWAYS;
+  int status = 0;
 
+  if (token_count < 0) {
+    return tiny_fail("tokenize");
+  }
   if (token_count == 0) {
     return 0;
   }
-  if (tiny_parse(tokens, token_count, commands, &command_count) != 0) {
-    return tiny_fail("syntax error");
+  while (start < token_count) {
+    int end = start;
+    int next_connector = TINY_CONNECT_NONE;
+    int command_count = 0;
+
+    while (end < token_count) {
+      if (strcmp(tokens[end], ";") == 0) {
+        next_connector = TINY_CONNECT_ALWAYS;
+        break;
+      }
+      if (strcmp(tokens[end], "&&") == 0) {
+        next_connector = TINY_CONNECT_AND;
+        break;
+      }
+      if (strcmp(tokens[end], "||") == 0) {
+        next_connector = TINY_CONNECT_OR;
+        break;
+      }
+      ++end;
+    }
+    if (end == start) {
+      tiny_free_tokens(tokens, token_count);
+      return tiny_fail("syntax error");
+    }
+    if (connector == TINY_CONNECT_ALWAYS ||
+        (connector == TINY_CONNECT_AND && status == 0) ||
+        (connector == TINY_CONNECT_OR && status != 0)) {
+      if (tiny_parse(&tokens[start], end - start, commands, &command_count) != 0) {
+        tiny_free_tokens(tokens, token_count);
+        return tiny_fail("syntax error");
+      }
+      status = tiny_run_commands(commands, command_count);
+      tiny_last_status = status;
+    }
+    connector = next_connector;
+    start = next_connector == TINY_CONNECT_NONE ? end : end + 1;
   }
-  return tiny_run_commands(commands, command_count);
+  tiny_free_tokens(tokens, token_count);
+  return status;
 }
 
 int main(int argc, char** argv) {

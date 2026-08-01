@@ -46,8 +46,13 @@ def main():
     )
     if args.shell:
         shell_source = Path(args.shell).resolve()
-        shell_dest = rootfs / "system" / "bin" / ("sh.exe" if args.target_os == "windows" else "sh")
-        shutil.copy2(shell_source, shell_dest)
+        shell_name = "sh.exe" if args.target_os == "windows" else "sh"
+        for shell_dir in ("system/bin", "bin", "usr/bin"):
+            shell_dest = rootfs / shell_dir / shell_name
+            shutil.copy2(shell_source, shell_dest)
+        if args.target_os == "windows":
+            for shell_dir in ("system/bin", "bin", "usr/bin"):
+                shutil.copy2(shell_source, rootfs / shell_dir / "sh")
     print(f"CRT_ROOTFS={rootfs}")
 
 

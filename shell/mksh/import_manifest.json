@@ -3,11 +3,13 @@
   "role": "/system/bin/sh",
   "source": {
     "upstream": "Android external/mksh",
-    "url": "",
+    "url": "https://android.googlesource.com/platform/external/mksh",
+    "branch": "refs/heads/main",
+    "observed_tree": "57ba8b3ab85c6d79171453c42baec1e845d4e30a",
     "commit": "",
     "archive": "",
     "sha256": "",
-    "license": ""
+    "license": "BSD-like; verify NOTICE and MODULE_LICENSE_BSD_LIKE at import"
   },
   "status": {
     "linux": "pending",
@@ -16,6 +18,7 @@
   },
   "notes": [
     "This manifest is reserved for the first Android external/mksh import.",
-    "Keep upstream source separate from project-owned CRT/PAL glue."
+    "Keep upstream source separate from project-owned CRT/PAL glue.",
+    "observed_tree is a planning reference only; commit/archive/sha256 must be pinned when source is imported."
   ]
 }

@@ -219,6 +219,20 @@ paths to POSIX-style `/c/...` paths before invoking configure. This keeps the
 build shell as a tool for running upstream build scripts only; the produced
 objects still go through the CRT sysroot wrappers and host-native Clang/LLD.
 
+The project now also builds a bootstrap CRT shell as a core artifact:
+
+```text
+out/<preset>/rootfs/system/bin/sh
+out/<preset>/rootfs/bin/sh
+out/<preset>/rootfs/usr/bin/sh
+```
+
+This `crt_tiny_sh` runner is not yet a full Autoconf shell replacement. Use it
+for shell/PAL smoke tests and very small configure probes first. The long-term
+goal is to switch porting recipes from the host bootstrap shell to the CRT
+rootfs shell after the mksh/toybox tranche closes the remaining shell-language
+and applet gaps.
+
 Per-recipe fetch targets resolve recipe dependencies. For example,
 `port-fetch-libpng` also fetches zlib.
 

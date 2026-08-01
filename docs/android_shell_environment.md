@@ -33,7 +33,8 @@ porting recipe. Source lives under `shell/`, at the same architectural level as
 The intended project-owned outputs are:
 
 ```text
-shell/mksh   -> rootfs/system/bin/sh
+shell/src    -> rootfs/system/bin/sh bootstrap runner
+shell/mksh   -> rootfs/system/bin/sh after mksh import
 shell/toybox -> rootfs/system/bin/toybox and selected applet entry points
 ```
 
@@ -82,6 +83,17 @@ out/windows-host-ninja-debug/rootfs/
   home/
 ```
 
+When `crt_shell_artifacts` is built, the bootstrap shell is copied into:
+
+```text
+rootfs/system/bin/sh
+rootfs/bin/sh
+rootfs/usr/bin/sh
+```
+
+On Windows the rootfs also receives `.exe` copies for host launch convenience,
+while the extensionless names remain available for CRT path translation.
+
 ## Initial Namespace Policy
 
 On Windows, `CRT_ROOTFS` enables POSIX absolute path mapping in the PAL:
@@ -120,6 +132,7 @@ simple configure scripts. BusyBox remains a fallback or benchmark.
 
 The source location policy is:
 
+- `shell/src`: project-owned `crt_tiny_sh` bootstrap runner.
 - `shell/mksh`: Android `external/mksh` import and project-owned glue.
 - `shell/toybox`: Android `external/toybox` import, minimal config, and
   project-owned glue.
@@ -173,6 +186,24 @@ Next required process improvements:
   adapted to `posix_spawn`.
 
 See `docs/process_fork.md` for the fork contract and Windows emulation plan.
+
+## Bootstrap Tiny Shell Status
+
+`crt_tiny_sh` is now the first shell artifact. It exists to exercise the CRT
+process model before importing Android `external/mksh`.
+
+Current bootstrap surface:
+
+- `sh -c "..."`;
+- simple tokenization and quotes;
+- `;`, `&&`, `||`;
+- pipeline and redirection smoke coverage;
+- `$?` and simple `$VAR` expansion;
+- leading `VAR=value` assignments;
+- builtins: `echo`, `cat`, `upper`, `pwd`, `cd`, `true`, `false`, `exit`.
+
+This is not the final shell. Missing shell features should normally become
+mksh/toybox import inventory items rather than long-term tiny-shell growth.
 
 ## Porting-Test Direction
 
