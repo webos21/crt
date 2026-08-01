@@ -543,7 +543,11 @@ static const char* rootfs_path_for_host(const char* path, char buffer[PATH_MAX])
   if (!path_is_absolute(path)) {
     return path;
   }
-  if (strcmp(path, "/proc/self/exe") == 0) {
+  if (strcmp(path, "/dev/null") == 0 ||
+      strcmp(path, "/dev/tty") == 0 ||
+      strcmp(path, "/dev/console") == 0 ||
+      strcmp(path, "/proc/self/exe") == 0 ||
+      strncmp(path, "/proc/self/fd/", 14) == 0) {
     return path;
   }
   root = getenv("CRT_ROOTFS");
@@ -551,6 +555,10 @@ static const char* rootfs_path_for_host(const char* path, char buffer[PATH_MAX])
     return path;
   }
   root_len = strlen(root);
+  if (strncmp(path, root, root_len) == 0 &&
+      (path[root_len] == 0 || path[root_len] == '/')) {
+    return path;
+  }
   path_len = strlen(path);
   if (root_len + path_len + 1 > PATH_MAX) {
     return path;
@@ -982,6 +990,31 @@ static int make_at_path(int dirfd, const char* path, char* buffer, size_t size) 
     return (int)__set_errno(ENAMETOOLONG);
   }
   return 0;
+#elif defined(CRT_TARGET_OS_MACOS)
+  {
+    char dir_path[CRT_MACOS_MAXPATHLEN];
+    size_t dir_len;
+    size_t path_len;
+    long result;
+
+    (void)written;
+    memset(dir_path, 0, sizeof(dir_path));
+    result = __crt_sys_macos_fcntl(dirfd, CRT_MACOS_F_GETPATH, dir_path);
+    if (result < 0 && result >= -4095) {
+      return (int)__set_errno((int)-result);
+    }
+    dir_len = strlen(dir_path);
+    path_len = strlen(path);
+    if (dir_len + 1 + path_len + 1 > size) {
+      return (int)__set_errno(ENAMETOOLONG);
+    }
+    memcpy(buffer, dir_path, dir_len);
+    if (dir_len == 0 || buffer[dir_len - 1] != '/') {
+      buffer[dir_len++] = '/';
+    }
+    memcpy(buffer + dir_len, path, path_len + 1);
+    return 0;
+  }
 #else
   (void)written;
   return (int)__set_errno(ENOTSUP);
@@ -1934,7 +1967,12 @@ int fstat(int fd, struct stat* st) {
 }
 
 int fstatat(int dirfd, const char* path, struct stat* st, int flags) {
+#if defined(CRT_TARGET_OS_LINUX)
+  char translated_path[PATH_MAX];
+  int statx_flags = 0;
+#else
   char resolved[PATH_MAX];
+#endif
 
   if ((flags & ~(AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH)) != 0) {
     return (int)__set_errno(EINVAL);
@@ -1942,6 +1980,19 @@ int fstatat(int dirfd, const char* path, struct stat* st, int flags) {
   if ((flags & AT_EMPTY_PATH) != 0 && path != 0 && path[0] == 0) {
     return fstat(dirfd, st);
   }
+#if defined(CRT_TARGET_OS_LINUX)
+  if (path == 0) {
+    return (int)__set_errno(EINVAL);
+  }
+  if ((flags & AT_SYMLINK_NOFOLLOW) != 0) {
+    statx_flags |= CRT_AT_SYMLINK_NOFOLLOW;
+  }
+  if (path_is_absolute(path) || dirfd == AT_FDCWD) {
+    path = rootfs_path_for_host(path, translated_path);
+    return linux_statx(CRT_AT_FDCWD, path, statx_flags, st);
+  }
+  return linux_statx((long)dirfd, path, statx_flags, st);
+#else
   if (make_at_path(dirfd, path, resolved, sizeof(resolved)) != 0) {
     return -1;
   }
@@ -1949,6 +2000,7 @@ int fstatat(int dirfd, const char* path, struct stat* st, int flags) {
     return lstat(resolved, st);
   }
   return stat(resolved, st);
+#endif
 }
 
 int mkdirat(int dirfd, const char* path, mode_t mode) {
