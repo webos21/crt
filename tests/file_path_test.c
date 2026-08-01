@@ -7,7 +7,9 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/statfs.h>
+#include <sys/statvfs.h>
 #include <sys/time.h>
+#include <sys/uio.h>
 #include <sys/vfs.h>
 #include <unistd.h>
 
@@ -65,8 +67,11 @@ int main(void) {
   struct dirent* entry;
   struct stat st;
   struct statfs sfs;
+  struct statvfs svfs;
   struct flock lock;
   struct timeval tv[2];
+  struct iovec iov[2];
+  char pipe_buf[4];
 
   if (getcwd(cwd, sizeof(cwd)) == 0 || cwd[0] == 0) {
     return fail("getcwd");
@@ -203,6 +208,22 @@ int main(void) {
       sfs.f_namelen == 0) {
     close(fd);
     return fail("fstatfs sample");
+  }
+  memset(&svfs, 0, sizeof(svfs));
+  if (statvfs("sample.tmp", &svfs) != 0 ||
+      svfs.f_bsize < 4096 ||
+      svfs.f_frsize == 0 ||
+      svfs.f_namemax == 0) {
+    close(fd);
+    return fail("statvfs sample");
+  }
+  memset(&svfs, 0, sizeof(svfs));
+  if (fstatvfs(fd, &svfs) != 0 ||
+      svfs.f_bsize < 4096 ||
+      svfs.f_frsize == 0 ||
+      svfs.f_namemax == 0) {
+    close(fd);
+    return fail("fstatvfs sample");
   }
   page_size = sysconf(_SC_PAGESIZE);
   if (page_size < 4096 || (page_size & (page_size - 1)) != 0) {
@@ -460,6 +481,28 @@ int main(void) {
     close(pipefd[1]);
     close(fd);
     return fail("pipe read/write");
+  }
+  iov[0].iov_base = (void*)"AB";
+  iov[0].iov_len = 2;
+  iov[1].iov_base = (void*)"CD";
+  iov[1].iov_len = 2;
+  if (writev(pipefd[1], iov, 2) != 4) {
+    close(pipefd[0]);
+    close(pipefd[1]);
+    close(fd);
+    return fail("writev pipe");
+  }
+  memset(pipe_buf, 0, sizeof(pipe_buf));
+  iov[0].iov_base = pipe_buf;
+  iov[0].iov_len = 1;
+  iov[1].iov_base = pipe_buf + 1;
+  iov[1].iov_len = 3;
+  if (readv(pipefd[0], iov, 2) != 4 ||
+      memcmp(pipe_buf, "ABCD", 4) != 0) {
+    close(pipefd[0]);
+    close(pipefd[1]);
+    close(fd);
+    return fail("readv pipe");
   }
   close(pipefd[0]);
   close(pipefd[1]);

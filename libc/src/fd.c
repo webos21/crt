@@ -8,6 +8,8 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
+#include <sys/uio.h>
 #include <sys/vfs.h>
 #include <unistd.h>
 
@@ -907,6 +909,82 @@ ssize_t read(int fd, void* buf, size_t count) {
 
 ssize_t write(int fd, const void* buf, size_t count) {
   return (ssize_t)normalize_syscall_result(__crt_sys_write(fd, buf, (unsigned long)count));
+}
+
+ssize_t readv(int fd, const struct iovec* iov, int iovcnt) {
+  ssize_t total = 0;
+  int i;
+
+  if (iovcnt < 0 || iovcnt > IOV_MAX) {
+    return (ssize_t)__set_errno(EINVAL);
+  }
+  if (iovcnt > 0 && iov == 0) {
+    return (ssize_t)__set_errno(EFAULT);
+  }
+  for (i = 0; i < iovcnt; ++i) {
+    char* base = (char*)iov[i].iov_base;
+    size_t remaining = iov[i].iov_len;
+
+    if (remaining != 0 && base == 0) {
+      return total != 0 ? total : (ssize_t)__set_errno(EFAULT);
+    }
+    while (remaining != 0) {
+      size_t requested = remaining;
+      ssize_t n = read(fd, base, remaining);
+
+      if (n < 0) {
+        return total != 0 ? total : n;
+      }
+      if (n == 0) {
+        return total;
+      }
+      total += n;
+      base += n;
+      remaining -= (size_t)n;
+      if ((size_t)n < requested) {
+        return total;
+      }
+    }
+  }
+  return total;
+}
+
+ssize_t writev(int fd, const struct iovec* iov, int iovcnt) {
+  ssize_t total = 0;
+  int i;
+
+  if (iovcnt < 0 || iovcnt > IOV_MAX) {
+    return (ssize_t)__set_errno(EINVAL);
+  }
+  if (iovcnt > 0 && iov == 0) {
+    return (ssize_t)__set_errno(EFAULT);
+  }
+  for (i = 0; i < iovcnt; ++i) {
+    const char* base = (const char*)iov[i].iov_base;
+    size_t remaining = iov[i].iov_len;
+
+    if (remaining != 0 && base == 0) {
+      return total != 0 ? total : (ssize_t)__set_errno(EFAULT);
+    }
+    while (remaining != 0) {
+      size_t requested = remaining;
+      ssize_t n = write(fd, base, remaining);
+
+      if (n < 0) {
+        return total != 0 ? total : n;
+      }
+      if (n == 0) {
+        return total;
+      }
+      total += n;
+      base += n;
+      remaining -= (size_t)n;
+      if ((size_t)n < requested) {
+        return total;
+      }
+    }
+  }
+  return total;
 }
 
 ssize_t pread(int fd, void* buf, size_t count, off_t offset) {
@@ -2137,6 +2215,47 @@ int statfs64(const char* path, struct statfs64* buf) {
 
 int fstatfs64(int fd, struct statfs64* buf) {
   return fstatfs(fd, (struct statfs*)buf);
+}
+
+static void statfs_to_statvfs(const struct statfs* sfs, struct statvfs* svfs) {
+  memset(svfs, 0, sizeof(*svfs));
+  svfs->f_bsize = (unsigned long)sfs->f_bsize;
+  svfs->f_frsize = (unsigned long)(sfs->f_frsize != 0 ? sfs->f_frsize : sfs->f_bsize);
+  svfs->f_blocks = sfs->f_blocks;
+  svfs->f_bfree = sfs->f_bfree;
+  svfs->f_bavail = sfs->f_bavail;
+  svfs->f_files = sfs->f_files;
+  svfs->f_ffree = sfs->f_ffree;
+  svfs->f_favail = sfs->f_ffree;
+  svfs->f_fsid = (unsigned long)((uint32_t)sfs->f_fsid.__val[0]);
+  svfs->f_flag = (unsigned long)sfs->f_flags;
+  svfs->f_namemax = (unsigned long)sfs->f_namelen;
+}
+
+int statvfs(const char* path, struct statvfs* buf) {
+  struct statfs sfs;
+
+  if (buf == 0) {
+    return (int)__set_errno(EINVAL);
+  }
+  if (statfs(path, &sfs) != 0) {
+    return -1;
+  }
+  statfs_to_statvfs(&sfs, buf);
+  return 0;
+}
+
+int fstatvfs(int fd, struct statvfs* buf) {
+  struct statfs sfs;
+
+  if (buf == 0) {
+    return (int)__set_errno(EINVAL);
+  }
+  if (fstatfs(fd, &sfs) != 0) {
+    return -1;
+  }
+  statfs_to_statvfs(&sfs, buf);
+  return 0;
 }
 
 int ioctl(int fd, int request, ...) {
