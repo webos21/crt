@@ -241,6 +241,171 @@ if(EXISTS "${CRT_MKSH_ROOT}/Android.bp")
   )
 endif()
 
+set(CRT_TOYBOX_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/toybox/src")
+if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
+  set(CRT_TOYBOX_SOURCES
+    toybox/src/lib/args.c
+    toybox/src/lib/commas.c
+    toybox/src/lib/dirtree.c
+    toybox/src/lib/elf.c
+    toybox/src/lib/env.c
+    toybox/src/lib/hash.c
+    toybox/src/lib/lib.c
+    toybox/src/lib/llist.c
+    toybox/src/lib/net.c
+    toybox/src/lib/portability.c
+    toybox/src/lib/tty.c
+    toybox/src/lib/utf8.c
+    toybox/src/lib/xwrap.c
+    toybox/src/main.c
+    toybox/src/toys/lsb/hostname.c
+    toybox/src/toys/lsb/md5sum.c
+    toybox/src/toys/lsb/mktemp.c
+    toybox/src/toys/lsb/seq.c
+    toybox/src/toys/net/microcom.c
+    toybox/src/toys/other/dos2unix.c
+    toybox/src/toys/other/getopt.c
+    toybox/src/toys/other/readlink.c
+    toybox/src/toys/other/setsid.c
+    toybox/src/toys/other/stat.c
+    toybox/src/toys/other/timeout.c
+    toybox/src/toys/other/truncate.c
+    toybox/src/toys/other/which.c
+    toybox/src/toys/other/xxd.c
+    toybox/src/toys/other/yes.c
+    toybox/src/toys/pending/diff.c
+    toybox/src/toys/pending/expr.c
+    toybox/src/toys/pending/tr.c
+    toybox/src/toys/posix/basename.c
+    toybox/src/toys/posix/cat.c
+    toybox/src/toys/posix/chmod.c
+    toybox/src/toys/posix/cmp.c
+    toybox/src/toys/posix/comm.c
+    toybox/src/toys/posix/cp.c
+    toybox/src/toys/posix/cpio.c
+    toybox/src/toys/posix/cut.c
+    toybox/src/toys/posix/date.c
+    toybox/src/toys/posix/dd.c
+    toybox/src/toys/posix/dirname.c
+    toybox/src/toys/posix/du.c
+    toybox/src/toys/posix/echo.c
+    toybox/src/toys/posix/env.c
+    toybox/src/toys/posix/file.c
+    toybox/src/toys/posix/false.c
+    toybox/src/toys/posix/find.c
+    toybox/src/toys/posix/getconf.c
+    toybox/src/toys/posix/grep.c
+    toybox/src/toys/posix/head.c
+    toybox/src/toys/posix/id.c
+    toybox/src/toys/posix/ln.c
+    toybox/src/toys/posix/ls.c
+    toybox/src/toys/posix/mkdir.c
+    toybox/src/toys/posix/nl.c
+    toybox/src/toys/posix/od.c
+    toybox/src/toys/posix/paste.c
+    toybox/src/toys/posix/patch.c
+    toybox/src/toys/posix/printf.c
+    toybox/src/toys/posix/pwd.c
+    toybox/src/toys/posix/rm.c
+    toybox/src/toys/posix/rmdir.c
+    toybox/src/toys/posix/sed.c
+    toybox/src/toys/posix/sleep.c
+    toybox/src/toys/posix/sort.c
+    toybox/src/toys/posix/tail.c
+    toybox/src/toys/posix/tar.c
+    toybox/src/toys/posix/tee.c
+    toybox/src/toys/posix/test.c
+    toybox/src/toys/posix/touch.c
+    toybox/src/toys/posix/true.c
+    toybox/src/toys/posix/uname.c
+    toybox/src/toys/posix/uniq.c
+    toybox/src/toys/posix/wc.c
+    toybox/src/toys/posix/xargs.c
+    $<TARGET_OBJECTS:crt1>
+  )
+  add_executable(crt_toybox ${CRT_TOYBOX_SOURCES})
+  target_link_libraries(crt_toybox PRIVATE c m)
+  target_link_libraries(crt_toybox PRIVATE crt_compiler_rt_builtins)
+  target_include_directories(crt_toybox PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/toybox/crt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/toybox/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/toybox/src/android/linux"
+    "${CMAKE_SOURCE_DIR}/include"
+  )
+  target_compile_options(crt_toybox PRIVATE
+    -ffreestanding
+    -fno-builtin
+    -ffunction-sections
+    -fdata-sections
+    $<$<C_COMPILER_ID:Clang>:SHELL:-Xclang -fwchar-type=int>
+    -U__APPLE__
+    -Wno-char-subscripts
+    -Wno-deprecated-declarations
+    -Wno-invalid-source-encoding
+    -Wno-missing-field-initializers
+    -Wno-pointer-arith
+    -Wno-sign-compare
+    -Wno-string-plus-int
+    -Wno-unused-parameter
+    -Wno-unused-variable
+    -Wno-error=sign-compare
+    -Wno-error=char-subscripts
+    -Wno-error=string-plus-int
+    -Wno-error=unused-function
+    -Wno-error=unused-parameter
+    -funsigned-char
+    -fno-asynchronous-unwind-tables
+    -fno-strict-aliasing
+    -std=gnu99
+  )
+  target_compile_definitions(crt_toybox PRIVATE
+    __BIONIC__
+    __linux__
+    TOYBOX_VENDOR="-crt"
+  )
+  target_link_options(crt_toybox PRIVATE
+    -nostdlib
+    -nostartfiles
+    -nodefaultlibs
+  )
+  if(CRT_TARGET_OS STREQUAL "macos")
+    target_link_options(crt_toybox PRIVATE
+      -Wl,-e,_start
+      -Wl,-dead_strip
+    )
+    target_link_libraries(crt_toybox PRIVATE System)
+  elseif(CRT_TARGET_OS STREQUAL "linux")
+    target_link_options(crt_toybox PRIVATE
+      -Wl,-e,_start
+      -Wl,--gc-sections
+    )
+  elseif(CRT_TARGET_OS STREQUAL "windows")
+    target_link_options(crt_toybox PRIVATE
+      -Wl,/entry:mainCRTStartup
+      -Wl,/subsystem:console
+      -Wl,/OPT:REF
+    )
+    target_link_libraries(crt_toybox PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  endif()
+  add_dependencies(crt_toybox c m crt1)
+  set_target_properties(crt_toybox PROPERTIES
+    OUTPUT_NAME toybox
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/shell"
+  )
+  add_test(NAME crt_toybox_basic_runs
+    COMMAND crt_toybox echo toybox-ok
+  )
+  set_tests_properties(crt_toybox_basic_runs PROPERTIES
+    PASS_REGULAR_EXPRESSION "toybox-ok"
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_toybox_basic_runs)
+  add_dependencies(crt_shell_artifacts crt_toybox)
+  install(TARGETS crt_toybox
+    RUNTIME DESTINATION system/bin
+  )
+endif()
+
 install(TARGETS crt_tiny_sh
   RUNTIME DESTINATION system/bin
 )

@@ -33,6 +33,8 @@ struct tm {
 #define CLOCK_MONOTONIC 1
 #define CLOCKS_PER_SEC 1000000L
 #define TIME_UTC 1
+#define UTIME_NOW 1073741823L
+#define UTIME_OMIT 1073741822L
 
 clock_t clock(void);
 time_t time(time_t* tloc);
@@ -49,6 +51,8 @@ char* ctime(const time_t* timep);
 char* ctime_r(const time_t* timep, char* buf);
 time_t mktime(struct tm* tm);
 size_t strftime(char* s, size_t max, const char* format, const struct tm* tm);
+char* strptime(const char* buf, const char* format, struct tm* tm);
+void tzset(void);
 
 #ifdef __cplusplus
 }

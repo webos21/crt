@@ -18,6 +18,8 @@ extern "C" {
 #define O_TRUNC 0x0400
 #define O_APPEND 0x0008
 #define O_NONBLOCK 0x0004
+#define O_NDELAY O_NONBLOCK
+#define O_NOCTTY 0x20000
 #define O_DIRECTORY 0x100000
 #define O_CLOEXEC 0x1000000
 #else
@@ -26,6 +28,8 @@ extern "C" {
 #define O_TRUNC 0x0200
 #define O_APPEND 0x0400
 #define O_NONBLOCK 0x0800
+#define O_NDELAY O_NONBLOCK
+#define O_NOCTTY 0x0100
 #define O_DIRECTORY 0x10000
 #define O_CLOEXEC 0x80000
 #endif
@@ -42,6 +46,25 @@ extern "C" {
 
 #define FD_CLOEXEC 1
 
+#ifndef AT_FDCWD
+#define AT_FDCWD (-100)
+#endif
+#ifndef AT_SYMLINK_NOFOLLOW
+#define AT_SYMLINK_NOFOLLOW 0x100
+#endif
+#ifndef AT_REMOVEDIR
+#define AT_REMOVEDIR 0x200
+#endif
+#ifndef AT_SYMLINK_FOLLOW
+#define AT_SYMLINK_FOLLOW 0x400
+#endif
+#ifndef AT_EACCESS
+#define AT_EACCESS 0x200
+#endif
+#ifndef AT_EMPTY_PATH
+#define AT_EMPTY_PATH 0x1000
+#endif
+
 #define F_RDLCK 0
 #define F_WRLCK 1
 #define F_UNLCK 2
@@ -55,6 +78,7 @@ struct flock {
 };
 
 int open(const char* path, int flags, ...);
+int openat(int dirfd, const char* path, int flags, ...);
 int creat(const char* path, mode_t mode);
 int fcntl(int fd, int cmd, ...);
 

@@ -6,6 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/utsname.h>
+#include <unistd.h>
 
 #if defined(CRT_TARGET_OS_MACOS)
 struct crt_darwin_sockaddr_in {
@@ -42,6 +44,8 @@ long __crt_sys_recvfrom(
 long __crt_sys_getsockname(int sockfd, void* addr, unsigned int* addrlen);
 long __crt_sys_setsockopt(int sockfd, int level, int optname, const void* optval, unsigned int optlen);
 long __crt_sys_shutdown(int sockfd, int how);
+
+int h_errno;
 
 static long normalize_socket_result(long result) {
   if (result < 0 && result >= -4095) {
@@ -188,6 +192,78 @@ in_addr_t inet_addr(const char* cp) {
     return INADDR_NONE;
   }
   return addr.s_addr;
+}
+
+int gethostname(char* name, size_t len) {
+  struct utsname uts;
+  size_t n;
+
+  if (name == 0 || len == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (uname(&uts) != 0) {
+    return -1;
+  }
+  n = strlen(uts.nodename);
+  if (n >= len) {
+    errno = ENAMETOOLONG;
+    return -1;
+  }
+  memcpy(name, uts.nodename, n + 1);
+  return 0;
+}
+
+int sethostname(const char* name, size_t len) {
+  (void)name;
+  (void)len;
+  errno = ENOTSUP;
+  return -1;
+}
+
+struct hostent* gethostbyname(const char* name) {
+  static struct hostent host;
+  static char canonical[256];
+  static char* aliases[] = {0};
+  static struct in_addr addr;
+  static char* addr_list[] = {(char*)&addr, 0};
+
+  if (name == 0 || name[0] == 0) {
+    h_errno = HOST_NOT_FOUND;
+    return 0;
+  }
+  if (strcmp(name, "localhost") == 0) {
+    addr.s_addr = htonl(0x7f000001U);
+  } else if (inet_pton(AF_INET, name, &addr) != 1) {
+    h_errno = HOST_NOT_FOUND;
+    return 0;
+  }
+  strncpy(canonical, name, sizeof(canonical) - 1);
+  canonical[sizeof(canonical) - 1] = 0;
+  host.h_name = canonical;
+  host.h_aliases = aliases;
+  host.h_addrtype = AF_INET;
+  host.h_length = (int)sizeof(addr);
+  host.h_addr_list = addr_list;
+  h_errno = 0;
+  return &host;
+}
+
+const char* hstrerror(int err) {
+  switch (err) {
+    case 0:
+      return "Resolver Error 0";
+    case HOST_NOT_FOUND:
+      return "Host not found";
+    case TRY_AGAIN:
+      return "Try again";
+    case NO_RECOVERY:
+      return "Non recoverable error";
+    case NO_DATA:
+      return "No data";
+    default:
+      return "Unknown resolver error";
+  }
 }
 
 #if defined(CRT_TARGET_OS_MACOS)

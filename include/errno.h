@@ -52,7 +52,9 @@ int __set_errno(int value);
 #define ENAMETOOLONG 36
 #define EWOULDBLOCK EAGAIN
 #define ENOSYS 38
+#define ENOTEMPTY 39
 #define ELOOP 40
+#define ENODATA 61
 #define ENOTSOCK 88
 #define EDESTADDRREQ 89
 #define EMSGSIZE 90

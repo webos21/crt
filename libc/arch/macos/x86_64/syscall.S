@@ -199,6 +199,17 @@ ___crt_sys_chdir:
   negq %rax
   retq
 
+.globl ___crt_sys_fchdir
+.p2align 4, 0x90
+___crt_sys_fchdir:
+  movq $0x200000d, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  negq %rax
+  retq
+
 .globl ___crt_sys_chmod
 .p2align 4, 0x90
 ___crt_sys_chmod:

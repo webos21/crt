@@ -41,7 +41,9 @@ struct termios {
 #define IGNCR 0000200
 #define ICRNL 0000400
 #define IXON 0002000
+#define IXANY 0004000
 #define IXOFF 0010000
+#define IUTF8 0040000
 
 #define OPOST 0000001
 #define ONLCR 0000004
@@ -56,11 +58,22 @@ struct termios {
 #define ECHOE 0000020
 #define ECHOK 0000040
 #define ECHONL 0000100
+#define ECHOCTL 0001000
+#define ECHOKE 0004000
 #define IEXTEN 0100000
 
 #define TCSANOW 0
 #define TCSADRAIN 1
 #define TCSAFLUSH 2
+
+#define TCIFLUSH 0
+#define TCOFLUSH 1
+#define TCIOFLUSH 2
+
+#define TCOOFF 0
+#define TCOON 1
+#define TCIOFF 2
+#define TCION 3
 
 #define B0 0
 #define B9600 13
@@ -73,10 +86,16 @@ extern "C" {
 
 int tcgetattr(int fd, struct termios* termios_p);
 int tcsetattr(int fd, int optional_actions, const struct termios* termios_p);
+int tcdrain(int fd);
+int tcflow(int fd, int action);
+int tcflush(int fd, int queue_selector);
+int tcsendbreak(int fd, int duration);
 speed_t cfgetispeed(const struct termios* termios_p);
 speed_t cfgetospeed(const struct termios* termios_p);
 int cfsetispeed(struct termios* termios_p, speed_t speed);
 int cfsetospeed(struct termios* termios_p, speed_t speed);
+int cfsetspeed(struct termios* termios_p, speed_t speed);
+void cfmakeraw(struct termios* termios_p);
 
 #ifdef __cplusplus
 }

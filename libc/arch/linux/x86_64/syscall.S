@@ -153,6 +153,15 @@ __crt_sys_chdir:
   retq
 .size __crt_sys_chdir, . - __crt_sys_chdir
 
+.globl __crt_sys_fchdir
+.type __crt_sys_fchdir, @function
+.p2align 4, 0x90
+__crt_sys_fchdir:
+  movq $81, %rax
+  syscall
+  retq
+.size __crt_sys_fchdir, . - __crt_sys_fchdir
+
 .globl __crt_sys_chmod
 .type __crt_sys_chmod, @function
 .p2align 4, 0x90

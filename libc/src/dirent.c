@@ -145,6 +145,12 @@ DIR* opendir(const char* path) {
   return dir;
 }
 
+DIR* fdopendir(int fd) {
+  (void)fd;
+  errno = ENOTSUP;
+  return 0;
+}
+
 struct dirent* readdir(DIR* dirp) {
   if (dirp == 0) {
     errno = EBADF;
@@ -238,6 +244,29 @@ DIR* opendir(const char* path) {
   dir = (DIR*)malloc(sizeof(DIR));
   if (dir == 0) {
     close(fd);
+    errno = ENOMEM;
+    return 0;
+  }
+  dir->fd = fd;
+  dir->pos = 0;
+  dir->len = 0;
+  dir->basep = 0;
+  return dir;
+}
+
+DIR* fdopendir(int fd) {
+  DIR* dir;
+  struct stat st;
+
+  if (fstat(fd, &st) != 0) {
+    return 0;
+  }
+  if (!S_ISDIR(st.st_mode)) {
+    errno = ENOTDIR;
+    return 0;
+  }
+  dir = (DIR*)malloc(sizeof(DIR));
+  if (dir == 0) {
     errno = ENOMEM;
     return 0;
   }

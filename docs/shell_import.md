@@ -154,3 +154,26 @@ ps mount ifconfig stty login top dmesg losetup modprobe
 Toybox applet failures should feed the normal porting loop: identify the missing
 Bionic-compatible surface, implement it in CRT/PAL/sysroot, then rerun without
 modifying upstream source.
+
+The first imported toybox tranche is now present under `shell/toybox/src` with a
+project-owned CRT overlay under `shell/toybox/crt`. The overlay narrows
+Android's generated toybox configuration to the current source/appset boundary
+and disables applets that would pull in zlib, mount/procfs, process table, or
+namespace dependencies before the CRT/PAL owns those surfaces.
+
+Rootfs generation now uses Android-like symlink aliases on POSIX hosts:
+
+```text
+/system/bin/sh      -> mksh
+/bin/<applet>       -> ../system/bin/toybox
+/usr/bin/<applet>   -> ../../system/bin/toybox
+```
+
+Windows keeps copy-based `.exe` aliases because symlink creation has different
+privilege and UX tradeoffs there.
+
+The remaining shell milestone is not "make toybox compile"; that part is
+working for the minimal applet set. The next gap is mksh external-command
+sequencing and pipeline teardown when the child is a CRT toybox applet. Single
+external applet execution works, but command lists and pipelines still expose
+waitpid/SIGCHLD/job-loop fidelity work.

@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+#include <unistd.h>
 #include <wchar.h>
 
 extern char* __dtoa(double d, int mode, int ndigits, int* decpt, int* sign, char** rve);
@@ -1939,6 +1940,37 @@ int asprintf(char** strp, const char* format, ...) {
 
   va_start(ap, format);
   result = vasprintf(strp, format, ap);
+  va_end(ap);
+  return result;
+}
+
+int vdprintf(int fd, const char* format, va_list ap) {
+  char* buffer;
+  int result;
+  ssize_t written;
+
+  result = vasprintf(&buffer, format, ap);
+  if (result < 0) {
+    return -1;
+  }
+  written = write(fd, buffer, (size_t)result);
+  free(buffer);
+  if (written < 0) {
+    return -1;
+  }
+  if (written != result) {
+    errno = EIO;
+    return -1;
+  }
+  return result;
+}
+
+int dprintf(int fd, const char* format, ...) {
+  int result;
+  va_list ap;
+
+  va_start(ap, format);
+  result = vdprintf(fd, format, ap);
   va_end(ap);
   return result;
 }

@@ -36,8 +36,10 @@ extern "C" {
 #define TCSBRK 0x5409
 #define TCXONC 0x540a
 #define TCFLSH 0x540b
+#define TIOCSCTTY 0x540e
 #define TIOCGPGRP 0x540f
 #define TIOCSPGRP 0x5410
+#define TIOCNOTTY 0x5422
 #define TIOCOUTQ 0x5411
 #define TIOCGWINSZ 0x5413
 #define TIOCSWINSZ 0x5414
@@ -47,6 +49,8 @@ extern "C" {
 #define FIONCLEX 0x5450
 #define FIOCLEX 0x5451
 #define FIOASYNC 0x5452
+
+#define BLKGETSIZE64 _IOR(0x12, 114, unsigned long long)
 
 struct winsize {
   unsigned short ws_row;

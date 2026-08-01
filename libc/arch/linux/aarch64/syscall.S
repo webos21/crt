@@ -166,6 +166,15 @@ __crt_sys_chdir:
   ret
 .size __crt_sys_chdir, . - __crt_sys_chdir
 
+.globl __crt_sys_fchdir
+.type __crt_sys_fchdir, %function
+.p2align 2
+__crt_sys_fchdir:
+  mov x8, #50
+  svc #0
+  ret
+.size __crt_sys_fchdir, . - __crt_sys_fchdir
+
 .globl __crt_sys_chmod
 .type __crt_sys_chmod, %function
 .p2align 2

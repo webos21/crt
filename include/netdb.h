@@ -18,6 +18,23 @@ struct addrinfo {
   struct addrinfo* ai_next;
 };
 
+struct hostent {
+  char* h_name;
+  char** h_aliases;
+  int h_addrtype;
+  int h_length;
+  char** h_addr_list;
+};
+
+#define h_addr h_addr_list[0]
+
+extern int h_errno;
+
+#define HOST_NOT_FOUND 1
+#define TRY_AGAIN 2
+#define NO_RECOVERY 3
+#define NO_DATA 4
+
 #define AI_PASSIVE 0x0001
 #define AI_CANONNAME 0x0002
 #define AI_NUMERICHOST 0x0004
@@ -40,6 +57,8 @@ int getaddrinfo(
     struct addrinfo** res);
 void freeaddrinfo(struct addrinfo* res);
 const char* gai_strerror(int errcode);
+struct hostent* gethostbyname(const char* name);
+const char* hstrerror(int err);
 
 #ifdef __cplusplus
 }

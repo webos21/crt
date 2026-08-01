@@ -31,6 +31,8 @@
 #define LLONG_MIN (-LLONG_MAX - 1LL)
 #define ULLONG_MAX (LLONG_MAX * 2ULL + 1ULL)
 
+#define SSIZE_MAX __PTRDIFF_MAX__
+
 #define PATH_MAX 4096
 #define NAME_MAX 255
 #define PIPE_BUF 4096

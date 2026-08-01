@@ -318,6 +318,33 @@ long __crt_sysconf_avphys_pages(void) {
 }
 #endif
 
+#if !defined(CRT_TARGET_OS_WINDOWS)
+static const char* translate_exec_path_for_rootfs(const char* path, char buffer[PATH_MAX]) {
+  const char* root;
+  size_t root_len;
+  size_t path_len;
+
+  if (path == 0 || path[0] != '/') {
+    return path;
+  }
+  if (strcmp(path, "/proc/self/exe") == 0) {
+    return path;
+  }
+  root = getenv("CRT_ROOTFS");
+  if (root == 0 || root[0] == 0) {
+    return path;
+  }
+  root_len = strlen(root);
+  path_len = strlen(path);
+  if (root_len + path_len + 1 > PATH_MAX) {
+    return path;
+  }
+  memcpy(buffer, root, root_len);
+  memcpy(buffer + root_len, path, path_len + 1);
+  return buffer;
+}
+#endif
+
 static long normalize_syscall_result(long result) {
   if (result < 0 && result >= -4095) {
     errno = (int)-result;
@@ -887,10 +914,16 @@ int posix_spawn(
     char* const envp[]) {
   long child_pid = 0;
   long result;
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  char translated_path[PATH_MAX];
+#endif
 
   if (path == 0) {
     return EINVAL;
   }
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  path = translate_exec_path_for_rootfs(path, translated_path);
+#endif
   result = __crt_sys_posix_spawn(
       path,
       argv,
@@ -1160,11 +1193,17 @@ int __crt_shell_fork_exec(
 
 int execve(const char* path, char* const argv[], char* const envp[]) {
   long result;
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  char translated_path[PATH_MAX];
+#endif
 
   if (path == 0) {
     errno = EINVAL;
     return -1;
   }
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  path = translate_exec_path_for_rootfs(path, translated_path);
+#endif
   result = __crt_sys_execve(path, argv, envp);
   if (result < 0 && result >= -4095) {
     errno = (int)-result;
@@ -1173,14 +1212,78 @@ int execve(const char* path, char* const argv[], char* const envp[]) {
   return (int)result;
 }
 
+int execv(const char* path, char* const argv[]) {
+  return execve(path, argv, environ);
+}
+
+int execvp(const char* file, char* const argv[]) {
+  const char* path;
+  const char* start;
+
+  if (file == 0 || file[0] == 0) {
+    errno = ENOENT;
+    return -1;
+  }
+  if (strchr(file, '/') != 0) {
+    return execve(file, argv, environ);
+  }
+  path = getenv("PATH");
+  if (path == 0 || path[0] == 0) {
+    path = "/bin:/usr/bin:/system/bin";
+  }
+  start = path;
+  while (1) {
+    const char* end = strchr(start, ':');
+    size_t dir_len = end != 0 ? (size_t)(end - start) : strlen(start);
+    char candidate[PATH_MAX];
+
+    if (dir_len == 0) {
+      dir_len = 1;
+      start = ".";
+    }
+    if (dir_len + 1 + strlen(file) + 1 <= sizeof(candidate)) {
+      memcpy(candidate, start, dir_len);
+      candidate[dir_len] = '/';
+      strcpy(candidate + dir_len + 1, file);
+      execve(candidate, argv, environ);
+      if (errno != ENOENT && errno != ENOTDIR) {
+        return -1;
+      }
+    }
+    if (end == 0) {
+      break;
+    }
+    start = end + 1;
+  }
+  errno = ENOENT;
+  return -1;
+}
+
+int chroot(const char* path) {
+  if (path == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  errno = ENOTSUP;
+  return -1;
+}
+
 long sysconf(int name) {
   switch (name) {
     case _SC_ARG_MAX:
       return CRT_SYSTEM_ARG_MAX;
+    case _SC_BC_BASE_MAX:
+    case _SC_BC_DIM_MAX:
+    case _SC_BC_SCALE_MAX:
+    case _SC_BC_STRING_MAX:
+      return -1;
     case _SC_CHILD_MAX:
       return _POSIX_CHILD_MAX;
     case _SC_CLK_TCK:
       return CRT_SYSTEM_CLK_TCK;
+    case _SC_COLL_WEIGHTS_MAX:
+    case _SC_EXPR_NEST_MAX:
+      return -1;
     case _SC_LINE_MAX:
       return 2048;
     case _SC_NGROUPS_MAX:
@@ -1242,6 +1345,15 @@ long sysconf(int name) {
       return __crt_sysconf_page_size();
     case _SC_XOPEN_UNIX:
       return _XOPEN_UNIX;
+    case _SC_XBS5_ILP32_OFF32:
+    case _SC_XBS5_ILP32_OFFBIG:
+    case _SC_XBS5_LP64_OFF64:
+    case _SC_XBS5_LPBIG_OFFBIG:
+      return -1;
+    case _SC_AIO_LISTIO_MAX:
+    case _SC_AIO_MAX:
+    case _SC_AIO_PRIO_DELTA_MAX:
+      return -1;
     case _SC_DELAYTIMER_MAX:
       return CRT_SYSTEM_DELAYTIMER_MAX;
     case _SC_MQ_OPEN_MAX:
@@ -1324,6 +1436,13 @@ long sysconf(int name) {
       return __crt_sysconf_avphys_pages();
     case _SC_MONOTONIC_CLOCK:
       return _POSIX_MONOTONIC_CLOCK;
+    case _SC_2_PBS:
+    case _SC_2_PBS_ACCOUNTING:
+    case _SC_2_PBS_CHECKPOINT:
+    case _SC_2_PBS_LOCATE:
+    case _SC_2_PBS_MESSAGE:
+    case _SC_2_PBS_TRACK:
+      return -1;
     case _SC_ADVISORY_INFO:
       return -1;
     case _SC_BARRIERS:
@@ -1342,8 +1461,92 @@ long sysconf(int name) {
       return _POSIX_READER_WRITER_LOCKS;
     case _SC_REGEXP:
       return _POSIX_VERSION;
+    case _SC_SHELL:
+      return _POSIX_VERSION;
+    case _SC_SPAWN:
+      return _POSIX_VERSION;
+    case _SC_SPIN_LOCKS:
+    case _SC_SPORADIC_SERVER:
+    case _SC_SS_REPL_MAX:
+      return -1;
+    case _SC_SYMLOOP_MAX:
+      return 40;
+    case _SC_THREAD_CPUTIME:
+    case _SC_THREAD_PROCESS_SHARED:
+    case _SC_THREAD_ROBUST_PRIO_INHERIT:
+    case _SC_THREAD_ROBUST_PRIO_PROTECT:
+    case _SC_THREAD_SPORADIC_SERVER:
+    case _SC_TIMEOUTS:
+    case _SC_TRACE:
+    case _SC_TRACE_EVENT_FILTER:
+    case _SC_TRACE_EVENT_NAME_MAX:
+    case _SC_TRACE_INHERIT:
+    case _SC_TRACE_LOG:
+    case _SC_TRACE_NAME_MAX:
+    case _SC_TRACE_SYS_MAX:
+    case _SC_TRACE_USER_EVENT_MAX:
+    case _SC_TYPED_MEMORY_OBJECTS:
+    case _SC_V7_ILP32_OFF32:
+    case _SC_V7_ILP32_OFFBIG:
+    case _SC_V7_LP64_OFF64:
+    case _SC_V7_LPBIG_OFFBIG:
+    case _SC_XOPEN_STREAMS:
+    case _SC_XOPEN_UUCP:
+      return -1;
     default:
       errno = ENOSYS;
       return -1;
   }
+}
+
+long pathconf(const char* path, int name) {
+  if (path == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  switch (name) {
+    case _PC_FILESIZEBITS:
+      return 64;
+    case _PC_LINK_MAX:
+      return _POSIX_LINK_MAX;
+    case _PC_MAX_CANON:
+    case _PC_MAX_INPUT:
+      return 255;
+    case _PC_NAME_MAX:
+      return NAME_MAX;
+    case _PC_PATH_MAX:
+      return PATH_MAX;
+    case _PC_PIPE_BUF:
+      return _POSIX_PIPE_BUF;
+    case _PC_2_SYMLINKS:
+      return 1;
+    case _PC_ALLOC_SIZE_MIN:
+    case _PC_REC_INCR_XFER_SIZE:
+    case _PC_REC_MAX_XFER_SIZE:
+    case _PC_REC_MIN_XFER_SIZE:
+    case _PC_REC_XFER_ALIGN:
+      return __crt_sysconf_page_size();
+    case _PC_SYMLINK_MAX:
+      return -1;
+    case _PC_CHOWN_RESTRICTED:
+    case _PC_NO_TRUNC:
+      return 1;
+    case _PC_VDISABLE:
+      return 0;
+    case _PC_ASYNC_IO:
+    case _PC_PRIO_IO:
+    case _PC_SYNC_IO:
+      return -1;
+    default:
+      errno = EINVAL;
+      return -1;
+  }
+}
+
+long fpathconf(int fd, int name) {
+  if (fd < 0) {
+    errno = EBADF;
+    return -1;
+  }
+  return pathconf(".", name);
 }

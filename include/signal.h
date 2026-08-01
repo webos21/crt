@@ -53,12 +53,23 @@ struct sigaction {
 #define SIGPIPE 13
 #define SIGALRM 14
 #define SIGTERM 15
+#define SIGSTKFLT 16
 #define SIGCHLD 17
 #define SIGCONT 18
 #define SIGSTOP 19
 #define SIGTSTP 20
 #define SIGTTIN 21
 #define SIGTTOU 22
+#define SIGURG 23
+#define SIGXCPU 24
+#define SIGXFSZ 25
+#define SIGVTALRM 26
+#define SIGPROF 27
+#define SIGWINCH 28
+#define SIGIO 29
+#define SIGPOLL SIGIO
+#define SIGPWR 30
+#define SIGSYS 31
 #define NSIG 32
 
 #define SIG_BLOCK 0
@@ -69,6 +80,13 @@ struct sigaction {
 #define SA_NOCLDWAIT 2
 #define SA_SIGINFO 4
 #define SA_RESTART 0x10000000
+
+#define CLD_EXITED 1
+#define CLD_KILLED 2
+#define CLD_DUMPED 3
+#define CLD_TRAPPED 4
+#define CLD_STOPPED 5
+#define CLD_CONTINUED 6
 
 int sigemptyset(sigset_t* set);
 int sigfillset(sigset_t* set);

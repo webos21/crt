@@ -103,6 +103,8 @@ int rename(const char* old_path, const char* new_path);
 int printf(const char* format, ...);
 int fprintf(FILE* stream, const char* format, ...);
 int vfprintf(FILE* stream, const char* format, va_list ap);
+int dprintf(int fd, const char* format, ...);
+int vdprintf(int fd, const char* format, va_list ap);
 int vprintf(const char* format, va_list ap);
 int sprintf(char* s, const char* format, ...);
 int vsprintf(char* s, const char* format, va_list ap);

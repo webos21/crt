@@ -31,6 +31,7 @@ long __crt_sys_access(const char* path, int mode);
 long __crt_sys_mkdir(const char* path, unsigned int mode);
 long __crt_sys_rmdir(const char* path);
 long __crt_sys_chdir(const char* path);
+long __crt_sys_fchdir(int fd);
 long __crt_sys_chmod(const char* path, unsigned int mode);
 long __crt_sys_fchmod(int fd, unsigned int mode);
 #if !defined(CRT_TARGET_OS_WINDOWS)
@@ -532,6 +533,33 @@ static int path_is_absolute(const char* path) {
 #endif
 }
 
+#if !defined(CRT_TARGET_OS_WINDOWS)
+static const char* rootfs_path_for_host(const char* path, char buffer[PATH_MAX]) {
+  const char* root;
+  size_t root_len;
+  size_t path_len;
+
+  if (!path_is_absolute(path)) {
+    return path;
+  }
+  if (strcmp(path, "/proc/self/exe") == 0) {
+    return path;
+  }
+  root = getenv("CRT_ROOTFS");
+  if (root == 0 || root[0] == 0) {
+    return path;
+  }
+  root_len = strlen(root);
+  path_len = strlen(path);
+  if (root_len + path_len + 1 > PATH_MAX) {
+    return path;
+  }
+  memcpy(buffer, root, root_len);
+  memcpy(buffer + root_len, path, path_len + 1);
+  return buffer;
+}
+#endif
+
 static int path_separator(int c) {
 #if defined(CRT_TARGET_OS_WINDOWS)
   return c == '/' || c == '\\';
@@ -866,6 +894,9 @@ int open(const char* path, int flags, ...) {
   int syscall_flags = flags & ~O_CLOEXEC;
   va_list args;
   int fd;
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  char translated_path[PATH_MAX];
+#endif
 
   if ((flags & O_CREAT) != 0) {
     va_start(args, flags);
@@ -876,6 +907,9 @@ int open(const char* path, int flags, ...) {
   if ((flags & O_DIRECTORY) != 0) {
     syscall_flags &= ~O_DIRECTORY;
   }
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  path = rootfs_path_for_host(path, translated_path);
+#endif
   fd = (int)normalize_syscall_result(__crt_sys_open(path, syscall_flags, mode));
   if (fd < 0) {
     return -1;
@@ -899,6 +933,47 @@ int open(const char* path, int flags, ...) {
 
 int creat(const char* path, mode_t mode) {
   return open(path, O_CREAT | O_WRONLY | O_TRUNC, mode);
+}
+
+static int make_at_path(int dirfd, const char* path, char* buffer, size_t size) {
+  int written;
+
+  if (path == 0 || buffer == 0 || size == 0) {
+    return (int)__set_errno(EINVAL);
+  }
+  if (dirfd == AT_FDCWD || path_is_absolute(path)) {
+    if (strlen(path) + 1 > size) {
+      return (int)__set_errno(ENAMETOOLONG);
+    }
+    strcpy(buffer, path);
+    return 0;
+  }
+#if defined(CRT_TARGET_OS_LINUX)
+  written = snprintf(buffer, size, "/proc/self/fd/%d/%s", dirfd, path);
+  if (written < 0 || (size_t)written >= size) {
+    return (int)__set_errno(ENAMETOOLONG);
+  }
+  return 0;
+#else
+  (void)written;
+  return (int)__set_errno(ENOTSUP);
+#endif
+}
+
+int openat(int dirfd, const char* path, int flags, ...) {
+  unsigned int mode = 0;
+  va_list args;
+  char resolved[PATH_MAX];
+
+  if ((flags & O_CREAT) != 0) {
+    va_start(args, flags);
+    mode = (unsigned int)va_arg(args, int);
+    va_end(args);
+  }
+  if (make_at_path(dirfd, path, resolved, sizeof(resolved)) != 0) {
+    return -1;
+  }
+  return open(resolved, flags, mode);
 }
 
 static char* fill_temp_template(char* template_path, int create_file, int* fd_out) {
@@ -975,6 +1050,18 @@ int mkstemp(char* template_path) {
   return fd;
 }
 
+char* mkdtemp(char* template_path) {
+  char* result = fill_temp_template(template_path, 0, 0);
+
+  if (result == 0) {
+    return 0;
+  }
+  if (mkdir(result, 0700) != 0) {
+    return 0;
+  }
+  return result;
+}
+
 int close(int fd) {
   return (int)normalize_syscall_result(__crt_sys_close(fd));
 }
@@ -988,38 +1075,104 @@ off_t lseek(int fd, off_t offset, int whence) {
 }
 
 int access(const char* path, int mode) {
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  char translated_path[PATH_MAX];
+#endif
+
   if (path == 0 || (mode & ~(R_OK | W_OK | X_OK)) != 0) {
     return (int)__set_errno(EINVAL);
   }
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  path = rootfs_path_for_host(path, translated_path);
+#endif
   return (int)normalize_syscall_result(__crt_sys_access(path, mode));
 }
 
+int faccessat(int dirfd, const char* path, int mode, int flags) {
+  char resolved[PATH_MAX];
+
+  if ((flags & ~(AT_EACCESS | AT_SYMLINK_NOFOLLOW)) != 0) {
+    return (int)__set_errno(EINVAL);
+  }
+  if (make_at_path(dirfd, path, resolved, sizeof(resolved)) != 0) {
+    return -1;
+  }
+  return access(resolved, mode);
+}
+
 int mkdir(const char* path, mode_t mode) {
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  char translated_path[PATH_MAX];
+#endif
+
   if (path == 0) {
     return (int)__set_errno(EINVAL);
   }
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  path = rootfs_path_for_host(path, translated_path);
+#endif
   return (int)normalize_syscall_result(__crt_sys_mkdir(path, (unsigned int)mode));
 }
 
 int rmdir(const char* path) {
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  char translated_path[PATH_MAX];
+#endif
+
   if (path == 0) {
     return (int)__set_errno(EINVAL);
   }
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  path = rootfs_path_for_host(path, translated_path);
+#endif
   return (int)normalize_syscall_result(__crt_sys_rmdir(path));
 }
 
 int chdir(const char* path) {
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  char translated_path[PATH_MAX];
+#endif
+
   if (path == 0) {
     return (int)__set_errno(EINVAL);
   }
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  path = rootfs_path_for_host(path, translated_path);
+#endif
   return (int)normalize_syscall_result(__crt_sys_chdir(path));
 }
 
+int fchdir(int fd) {
+  return (int)normalize_syscall_result(__crt_sys_fchdir(fd));
+}
+
 int unlink(const char* path) {
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  char translated_path[PATH_MAX];
+#endif
+
   if (path == 0) {
     return (int)__set_errno(EINVAL);
   }
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  path = rootfs_path_for_host(path, translated_path);
+#endif
   return (int)normalize_syscall_result(__crt_sys_unlink(path));
+}
+
+int unlinkat(int dirfd, const char* path, int flags) {
+  char resolved[PATH_MAX];
+
+  if ((flags & ~AT_REMOVEDIR) != 0) {
+    return (int)__set_errno(EINVAL);
+  }
+  if (make_at_path(dirfd, path, resolved, sizeof(resolved)) != 0) {
+    return -1;
+  }
+  if ((flags & AT_REMOVEDIR) != 0) {
+    return rmdir(resolved);
+  }
+  return unlink(resolved);
 }
 
 int ftruncate(int fd, off_t length) {
@@ -1059,9 +1212,16 @@ int truncate(const char* path, off_t length) {
 }
 
 int chmod(const char* path, mode_t mode) {
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  char translated_path[PATH_MAX];
+#endif
+
   if (path == 0) {
     return (int)__set_errno(EINVAL);
   }
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  path = rootfs_path_for_host(path, translated_path);
+#endif
   return (int)normalize_syscall_result(__crt_sys_chmod(path, (unsigned int)mode));
 }
 
@@ -1193,16 +1353,39 @@ char* realpath(const char* path, char* resolved_path) {
 }
 
 ssize_t readlink(const char* path, char* buf, size_t bufsiz) {
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  char translated_path[PATH_MAX];
+#endif
+
   if (path == 0 || buf == 0) {
     return (ssize_t)__set_errno(EINVAL);
   }
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  path = rootfs_path_for_host(path, translated_path);
+#endif
   return (ssize_t)normalize_syscall_result(__crt_sys_readlink(path, buf, (unsigned long)bufsiz));
 }
 
+ssize_t readlinkat(int dirfd, const char* path, char* buf, size_t bufsiz) {
+  char resolved[PATH_MAX];
+
+  if (make_at_path(dirfd, path, resolved, sizeof(resolved)) != 0) {
+    return -1;
+  }
+  return readlink(resolved, buf, bufsiz);
+}
+
 int symlink(const char* target, const char* linkpath) {
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  char translated_linkpath[PATH_MAX];
+#endif
+
   if (target == 0 || linkpath == 0) {
     return (int)__set_errno(EINVAL);
   }
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  linkpath = rootfs_path_for_host(linkpath, translated_linkpath);
+#endif
   return (int)normalize_syscall_result(__crt_sys_symlink(target, linkpath));
 }
 
@@ -1642,6 +1825,10 @@ static int linux_fstat_procfs_fallback(int fd, struct stat* st) {
 #endif
 
 int stat(const char* path, struct stat* st) {
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  char translated_path[PATH_MAX];
+  path = rootfs_path_for_host(path, translated_path);
+#endif
 #if defined(CRT_TARGET_OS_LINUX)
   return linux_statx(CRT_AT_FDCWD, path, 0, st);
 #elif defined(CRT_TARGET_OS_WINDOWS)
@@ -1664,6 +1851,10 @@ int stat(const char* path, struct stat* st) {
 }
 
 int lstat(const char* path, struct stat* st) {
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  char translated_path[PATH_MAX];
+  path = rootfs_path_for_host(path, translated_path);
+#endif
 #if defined(CRT_TARGET_OS_LINUX)
   return linux_statx(CRT_AT_FDCWD, path, CRT_AT_SYMLINK_NOFOLLOW, st);
 #elif defined(CRT_TARGET_OS_MACOS)
@@ -1712,10 +1903,124 @@ int fstat(int fd, struct stat* st) {
 #endif
 }
 
+int fstatat(int dirfd, const char* path, struct stat* st, int flags) {
+  char resolved[PATH_MAX];
+
+  if ((flags & ~(AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH)) != 0) {
+    return (int)__set_errno(EINVAL);
+  }
+  if ((flags & AT_EMPTY_PATH) != 0 && path != 0 && path[0] == 0) {
+    return fstat(dirfd, st);
+  }
+  if (make_at_path(dirfd, path, resolved, sizeof(resolved)) != 0) {
+    return -1;
+  }
+  if ((flags & AT_SYMLINK_NOFOLLOW) != 0) {
+    return lstat(resolved, st);
+  }
+  return stat(resolved, st);
+}
+
+int mkdirat(int dirfd, const char* path, mode_t mode) {
+  char resolved[PATH_MAX];
+
+  if (make_at_path(dirfd, path, resolved, sizeof(resolved)) != 0) {
+    return -1;
+  }
+  return mkdir(resolved, mode);
+}
+
+int fchmodat(int dirfd, const char* path, mode_t mode, int flags) {
+  char resolved[PATH_MAX];
+
+  if ((flags & ~AT_SYMLINK_NOFOLLOW) != 0) {
+    return (int)__set_errno(EINVAL);
+  }
+  if ((flags & AT_SYMLINK_NOFOLLOW) != 0) {
+    return (int)__set_errno(ENOTSUP);
+  }
+  if (make_at_path(dirfd, path, resolved, sizeof(resolved)) != 0) {
+    return -1;
+  }
+  return chmod(resolved, mode);
+}
+
+int fchownat(int dirfd, const char* path, uid_t owner, gid_t group, int flags) {
+  char resolved[PATH_MAX];
+
+  if ((flags & ~AT_SYMLINK_NOFOLLOW) != 0) {
+    return (int)__set_errno(EINVAL);
+  }
+  if (make_at_path(dirfd, path, resolved, sizeof(resolved)) != 0) {
+    return -1;
+  }
+  if (access(resolved, F_OK) != 0) {
+    return -1;
+  }
+  (void)owner;
+  (void)group;
+  return 0;
+}
+
+int lchown(const char* path, uid_t owner, gid_t group) {
+  return fchownat(AT_FDCWD, path, owner, group, AT_SYMLINK_NOFOLLOW);
+}
+
+int mknodat(int dirfd, const char* path, mode_t mode, dev_t dev) {
+  char resolved[PATH_MAX];
+
+  if (make_at_path(dirfd, path, resolved, sizeof(resolved)) != 0) {
+    return -1;
+  }
+  (void)mode;
+  (void)dev;
+  return (int)__set_errno(ENOTSUP);
+}
+
+int mknod(const char* path, mode_t mode, dev_t dev) {
+  return mknodat(AT_FDCWD, path, mode, dev);
+}
+
+int symlinkat(const char* target, int newdirfd, const char* linkpath) {
+  char resolved[PATH_MAX];
+
+  if (make_at_path(newdirfd, linkpath, resolved, sizeof(resolved)) != 0) {
+    return -1;
+  }
+  return symlink(target, resolved);
+}
+
+int linkat(int olddirfd, const char* oldpath, int newdirfd, const char* newpath, int flags) {
+  char resolved_old[PATH_MAX];
+  char resolved_new[PATH_MAX];
+
+  if ((flags & ~AT_SYMLINK_FOLLOW) != 0) {
+    return (int)__set_errno(EINVAL);
+  }
+  if (make_at_path(olddirfd, oldpath, resolved_old, sizeof(resolved_old)) != 0 ||
+      make_at_path(newdirfd, newpath, resolved_new, sizeof(resolved_new)) != 0) {
+    return -1;
+  }
+  (void)resolved_old;
+  (void)resolved_new;
+  return (int)__set_errno(ENOTSUP);
+}
+
+int link(const char* oldpath, const char* newpath) {
+  return linkat(AT_FDCWD, oldpath, AT_FDCWD, newpath, 0);
+}
+
 int statfs(const char* path, struct statfs* buf) {
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  char translated_path[PATH_MAX];
+#endif
+
   if (path == 0 || buf == 0) {
     return (int)__set_errno(EINVAL);
   }
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  path = rootfs_path_for_host(path, translated_path);
+#endif
 #if defined(CRT_TARGET_OS_MACOS)
   {
     struct crt_darwin_statfs64 ds;

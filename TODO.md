@@ -395,3 +395,28 @@ non-interactive /system/bin/sh capable of running simple configure scripts
 ```
 
 Then add toybox applets and rootfs features as configure workloads demand them.
+
+## Current Toybox Tranche Status
+
+Android `external/toybox` is now imported as a core `shell/` artifact, not as a
+porting recipe. The first CRT overlay keeps a minimal configure-oriented applet
+set and builds `/system/bin/toybox`.
+
+Completed in this tranche:
+
+- minimal toybox import and CMake target;
+- CRT overlay `generated/config.h` and `generated/newtoys.h`;
+- rootfs installation of `/system/bin/toybox`;
+- POSIX-host symlink applet aliases and Windows copy-based aliases;
+- initial libc surface exposed by toybox/mksh inventory: `tcflush` family,
+  `xattr` no-attribute stubs, `inotify` ENOSYS stubs, and rootfs path mapping
+  for Linux/macOS `exec` and common file APIs.
+
+Remaining before using the CRT shell for real porting recipes:
+
+- harden mksh external-command sequencing after a toybox child exits;
+- harden mksh pipeline teardown with toybox applets;
+- add focused waitpid/SIGCHLD/job-loop tests that reproduce the compound command
+  hangs observed on macOS;
+- expand toybox applets only when the backing Bionic-compatible CRT/PAL surface
+  is implemented.

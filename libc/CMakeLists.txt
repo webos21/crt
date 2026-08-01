@@ -3,6 +3,7 @@ set(CRT_LIBC_SOURCES
   src/atof.c
   src/abs.c
   src/atol.c
+  src/atoll.c
   src/ctype.c
   src/dirent.c
   src/errno.c
@@ -10,6 +11,7 @@ set(CRT_LIBC_SOURCES
   src/exit.c
   src/fd.c
   src/file_lock.c
+  src/inotify.c
   src/inttypes.c
   src/langinfo.c
   src/libgen.c
@@ -29,6 +31,8 @@ set(CRT_LIBC_SOURCES
   src/signal.c
   src/socket.c
   src/stdio.c
+  src/syslog.c
+  src/syscall_public.c
   src/strtol.c
   src/strtoll.c
   src/strtoul.c
@@ -40,6 +44,7 @@ set(CRT_LIBC_SOURCES
   src/wait.c
   src/wchar.c
   src/wctype.c
+  src/xattr.c
   string/memchr.c
   string/memccpy.c
   string/memcmp.c

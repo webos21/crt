@@ -25,6 +25,7 @@ struct dirent {
 };
 
 DIR* opendir(const char* path);
+DIR* fdopendir(int fd);
 struct dirent* readdir(DIR* dirp);
 void rewinddir(DIR* dirp);
 int dirfd(DIR* dirp);

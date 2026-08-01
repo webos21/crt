@@ -2229,6 +2229,11 @@ long __crt_sys_chdir(const char* path) {
   return 0;
 }
 
+long __crt_sys_fchdir(int fd) {
+  (void)fd;
+  return -ENOTSUP;
+}
+
 long __crt_sys_chmod(const char* path, unsigned int mode) {
   char translated_path[4096];
   const char* host_path = translate_path_for_host(path, translated_path);

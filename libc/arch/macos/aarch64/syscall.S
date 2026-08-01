@@ -198,6 +198,17 @@ ___crt_sys_chdir:
   neg x0, x0
   ret
 
+.globl ___crt_sys_fchdir
+.p2align 2
+___crt_sys_fchdir:
+  mov x16, #13
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  neg x0, x0
+  ret
+
 .globl ___crt_sys_chmod
 .p2align 2
 ___crt_sys_chmod:

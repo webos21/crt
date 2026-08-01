@@ -12,6 +12,9 @@ extern "C" {
 #define LC_NUMERIC 4
 #define LC_TIME 5
 #define LC_MESSAGES 6
+#define LC_CTYPE_MASK (1 << LC_CTYPE)
+
+typedef struct __crt_locale* locale_t;
 
 struct lconv {
   char* decimal_point;
@@ -42,6 +45,9 @@ struct lconv {
 
 char* setlocale(int category, const char* locale);
 struct lconv* localeconv(void);
+locale_t newlocale(int category_mask, const char* locale, locale_t base);
+locale_t uselocale(locale_t locale);
+void freelocale(locale_t locale);
 
 #ifdef __cplusplus
 }

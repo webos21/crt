@@ -59,6 +59,47 @@ int tcsetattr(int fd, int optional_actions, const struct termios* termios_p) {
 #endif
 }
 
+int tcsendbreak(int fd, int duration) {
+  (void)duration;
+  if (!isatty(fd)) {
+    errno = ENOTTY;
+    return -1;
+  }
+  return 0;
+}
+
+int tcdrain(int fd) {
+  if (!isatty(fd)) {
+    errno = ENOTTY;
+    return -1;
+  }
+  return 0;
+}
+
+int tcflow(int fd, int action) {
+  if (action != TCOOFF && action != TCOON && action != TCIOFF && action != TCION) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (!isatty(fd)) {
+    errno = ENOTTY;
+    return -1;
+  }
+  return 0;
+}
+
+int tcflush(int fd, int queue_selector) {
+  if (queue_selector != TCIFLUSH && queue_selector != TCOFLUSH && queue_selector != TCIOFLUSH) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (!isatty(fd)) {
+    errno = ENOTTY;
+    return -1;
+  }
+  return 0;
+}
+
 speed_t cfgetispeed(const struct termios* termios_p) {
   return termios_p == 0 ? 0 : termios_p->c_ispeed;
 }
@@ -83,4 +124,25 @@ int cfsetospeed(struct termios* termios_p, speed_t speed) {
   }
   termios_p->c_ospeed = speed;
   return 0;
+}
+
+int cfsetspeed(struct termios* termios_p, speed_t speed) {
+  if (cfsetispeed(termios_p, speed) != 0) {
+    return -1;
+  }
+  return cfsetospeed(termios_p, speed);
+}
+
+void cfmakeraw(struct termios* termios_p) {
+  if (termios_p == 0) {
+    return;
+  }
+  termios_p->c_iflag &= ~(IGNBRK | BRKINT | IGNPAR | PARMRK | INPCK | ISTRIP |
+                          INLCR | IGNCR | ICRNL | IXON | IXOFF);
+  termios_p->c_oflag &= ~OPOST;
+  termios_p->c_cflag &= ~CSIZE;
+  termios_p->c_cflag |= CS8;
+  termios_p->c_lflag &= ~(ECHO | ECHOE | ECHOK | ECHONL | ICANON | ISIG | IEXTEN);
+  termios_p->c_cc[VMIN] = 1;
+  termios_p->c_cc[VTIME] = 0;
 }

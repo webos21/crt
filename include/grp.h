@@ -17,7 +17,10 @@ extern "C" {
 
 struct group* getgrgid(gid_t gid);
 struct group* getgrnam(const char* name);
+int getgrgid_r(gid_t gid, struct group* grp, char* buf, size_t buflen, struct group** result);
+int getgrnam_r(const char* name, struct group* grp, char* buf, size_t buflen, struct group** result);
 int getgroups(int size, gid_t list[]);
+int getgrouplist(const char* user, gid_t group, gid_t* groups, int* ngroups);
 int setgroups(size_t size, const gid_t* list);
 int initgroups(const char* user, gid_t group);
 

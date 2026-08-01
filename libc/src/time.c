@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <fcntl.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -225,6 +226,12 @@ int gettimeofday(struct timeval* tv, void* tz) {
 #endif
 }
 
+int settimeofday(const struct timeval* tv, const void* tz) {
+  (void)tv;
+  (void)tz;
+  return __set_errno(ENOTSUP);
+}
+
 int utimes(const char* path, const struct timeval times[2]) {
   if (path == 0) {
     return __set_errno(EINVAL);
@@ -271,6 +278,67 @@ int futimes(int fd, const struct timeval times[2]) {
   return normalize_syscall_result(__crt_sys_utimensat(fd, "", tsp, 0x1000));
 #else
   return normalize_syscall_result(__crt_sys_futimes(fd, times));
+#endif
+}
+
+int futimens(int fd, const struct timespec times[2]) {
+#if defined(CRT_TARGET_OS_LINUX)
+  return normalize_syscall_result(__crt_sys_utimensat(fd, "", times, 0x1000));
+#else
+  struct timeval tv[2];
+  const struct timeval* tvp = 0;
+
+  if (times != 0) {
+    if (times[0].tv_nsec < 0 || times[0].tv_nsec >= 1000000000L ||
+        times[1].tv_nsec < 0 || times[1].tv_nsec >= 1000000000L) {
+      return __set_errno(EINVAL);
+    }
+    tv[0].tv_sec = times[0].tv_sec;
+    tv[0].tv_usec = (long)(times[0].tv_nsec / 1000L);
+    tv[1].tv_sec = times[1].tv_sec;
+    tv[1].tv_usec = (long)(times[1].tv_nsec / 1000L);
+    tvp = tv;
+  }
+  return normalize_syscall_result(__crt_sys_futimes(fd, tvp));
+#endif
+}
+
+int utimensat(int dirfd, const char* path, const struct timespec times[2], int flags) {
+  if (path == 0) {
+    return __set_errno(EINVAL);
+  }
+  if (times != 0 &&
+      ((times[0].tv_nsec < 0 || times[0].tv_nsec >= 1000000000L) &&
+       times[0].tv_nsec != UTIME_NOW && times[0].tv_nsec != UTIME_OMIT)) {
+    return __set_errno(EINVAL);
+  }
+  if (times != 0 &&
+      ((times[1].tv_nsec < 0 || times[1].tv_nsec >= 1000000000L) &&
+       times[1].tv_nsec != UTIME_NOW && times[1].tv_nsec != UTIME_OMIT)) {
+    return __set_errno(EINVAL);
+  }
+#if defined(CRT_TARGET_OS_LINUX)
+  return normalize_syscall_result(__crt_sys_utimensat(dirfd, path, times, flags));
+#else
+  if (dirfd != AT_FDCWD || flags != 0) {
+    return __set_errno(ENOTSUP);
+  }
+  if (times == 0) {
+    return utimes(path, 0);
+  }
+  if (times[0].tv_nsec == UTIME_NOW || times[0].tv_nsec == UTIME_OMIT ||
+      times[1].tv_nsec == UTIME_NOW || times[1].tv_nsec == UTIME_OMIT) {
+    return __set_errno(ENOTSUP);
+  }
+  {
+    struct timeval tv[2];
+
+    tv[0].tv_sec = times[0].tv_sec;
+    tv[0].tv_usec = times[0].tv_nsec / 1000L;
+    tv[1].tv_sec = times[1].tv_sec;
+    tv[1].tv_usec = times[1].tv_nsec / 1000L;
+    return utimes(path, tv);
+  }
 #endif
 }
 
@@ -579,5 +647,19 @@ unsigned int sleep(unsigned int seconds) {
 
 unsigned int alarm(unsigned int seconds) {
   (void)seconds;
+  return 0;
+}
+
+void tzset(void) {
+}
+
+char* strptime(const char* buf, const char* format, struct tm* tm) {
+  (void)tm;
+  if (buf == 0 || format == 0) {
+    return 0;
+  }
+  if (format[0] == 0) {
+    return (char*)buf;
+  }
   return 0;
 }

@@ -64,10 +64,17 @@ struct stat {
 int stat(const char* path, struct stat* st);
 int fstat(int fd, struct stat* st);
 int lstat(const char* path, struct stat* st);
+int fstatat(int dirfd, const char* path, struct stat* st, int flags);
 int mkdir(const char* path, mode_t mode);
+int mkdirat(int dirfd, const char* path, mode_t mode);
 int rmdir(const char* path);
 int chmod(const char* path, mode_t mode);
 int fchmod(int fd, mode_t mode);
+int fchmodat(int dirfd, const char* path, mode_t mode, int flags);
+int utimensat(int dirfd, const char* path, const struct timespec times[2], int flags);
+int futimens(int fd, const struct timespec times[2]);
+int mknod(const char* path, mode_t mode, dev_t dev);
+int mknodat(int dirfd, const char* path, mode_t mode, dev_t dev);
 mode_t umask(mode_t mask);
 
 #ifdef __cplusplus

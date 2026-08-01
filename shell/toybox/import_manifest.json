@@ -6,15 +6,15 @@
     "url": "https://android.googlesource.com/platform/external/toybox",
     "branch": "refs/heads/main",
     "observed_tree": "6faafc783dbeda82e582dd4241d3b788a91dc827",
-    "commit": "",
-    "archive": "",
-    "sha256": "",
-    "license": "BSD; verify LICENSE and MODULE_LICENSE_BSD at import"
+    "commit": "59a869a838cfadbf6bc41cb400471ca9d2cae9b5",
+    "archive": "https://android.googlesource.com/platform/external/toybox/+archive/59a869a838cfadbf6bc41cb400471ca9d2cae9b5.tar.gz",
+    "sha256": "d4267b3f44fd8599410d483cac5cb1ae7095e4b8f2b159ecfe27f5e6c4d290a9",
+    "license": "BSD; see imported LICENSE and Android.bp license block"
   },
   "status": {
-    "linux": "pending",
-    "macos": "pending",
-    "windows": "pending"
+    "linux": "pending host verification",
+    "macos": "minimal applet build and single-command smoke passed",
+    "windows": "pending host verification"
   },
   "applets": [
     "cat",
@@ -38,8 +38,10 @@
     "grep"
   ],
   "notes": [
-    "This manifest is reserved for the first Android external/toybox import.",
-    "Start with a minimal configure-friendly applet set.",
-    "observed_tree is a planning reference only; commit/archive/sha256 must be pinned when source is imported."
+    "Android external/toybox has been imported under shell/toybox/src.",
+    "The CRT overlay under shell/toybox/crt keeps the first build to a minimal configure-friendly applet set.",
+    "Applets with deeper dependencies such as gzip/libz, mount, ps, pgrep, pkill, nproc, flock, and unshare are intentionally disabled until the CRT/PAL surface is ready.",
+    "macOS rootfs uses symlink aliases for /system/bin/sh and toybox applets; Windows keeps copy-based .exe aliases.",
+    "The next shell integration gap is mksh external-command sequencing and pipeline teardown with toybox applets, which points at waitpid/SIGCHLD/job-loop fidelity rather than a toybox source patch."
   ]
 }
