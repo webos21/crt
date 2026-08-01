@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOTFS_DIRS = [
     "system/bin",
+    "system/etc",
     "system/lib",
     "bin",
     "usr/bin",
@@ -12,7 +13,11 @@ ROOTFS_DIRS = [
     "tmp",
     "dev",
     "proc",
+    "proc/self",
+    "proc/self/fd",
     "data",
+    "data/local",
+    "data/local/tmp",
     "home",
 ]
 
@@ -33,7 +38,8 @@ def main():
         "\n"
         "This tree is a runtime namespace for CRT-hosted POSIX/Bionic-style\n"
         "programs. It is intentionally separate from the compiler sysroot.\n"
-        "Early virtual paths include /tmp, /dev/null, and /proc/self/exe.\n",
+        "Early virtual paths include /tmp, /dev/null, /dev/tty,\n"
+        "/proc/self/exe, and /proc/self/fd.\n",
         encoding="utf-8",
     )
     print(f"CRT_ROOTFS={rootfs}")

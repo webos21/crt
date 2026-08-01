@@ -212,6 +212,7 @@ add_subdirectory(libc)
 add_subdirectory(libm)
 add_subdirectory(libdl)
 add_subdirectory(libstdc++)
+add_subdirectory(shell)
 add_subdirectory(tests)
 
 install(DIRECTORY include/ DESTINATION include)
@@ -228,7 +229,7 @@ if(Python3_Interpreter_FOUND)
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_rootfs.py"
       --dest "${CRT_ROOTFS}"
       --target-os "${CRT_TARGET_OS}"
-    DEPENDS sysroot
+    DEPENDS sysroot crt_shell_artifacts
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     COMMENT "Creating Android-like CRT rootfs at ${CRT_ROOTFS}"
   )

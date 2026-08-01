@@ -12,7 +12,7 @@ The intended shape is:
 
 ```text
 Windows Terminal / host launcher
-  -> crt-shell
+  -> CRT-built /system/bin/sh
     -> Bionic-compatible libc/PAL
       -> Android-like rootfs
         -> /system/bin/sh and command applets
@@ -23,6 +23,24 @@ This keeps the build shell in the same compatibility world as the libraries
 being ported. The host OS still provides kernel facilities through PAL backends,
 but source packages see Bionic/POSIX-shaped headers, paths, process APIs, and
 runtime behavior.
+
+## Core Artifact Policy
+
+The shell is a first-class project artifact, not an ordinary third-party
+porting recipe. Source lives under `shell/`, at the same architectural level as
+`libc/`, `libm/`, `libdl/`, `libstdc++/`, and `linker/`.
+
+The intended project-owned outputs are:
+
+```text
+shell/mksh   -> rootfs/system/bin/sh
+shell/toybox -> rootfs/system/bin/toybox and selected applet entry points
+```
+
+`porting/recipes/` should continue to describe external libraries and tools that
+are tested against the CRT. It should not own `mksh` or `toybox` as ordinary
+porting targets, because those programs become part of the runtime environment
+used by the porting tests themselves.
 
 ## Sysroot vs Rootfs
 
@@ -48,6 +66,7 @@ It creates:
 ```text
 out/windows-host-ninja-debug/rootfs/
   system/bin/
+  system/etc/
   system/lib/
   bin/
   usr/bin/
@@ -55,7 +74,11 @@ out/windows-host-ninja-debug/rootfs/
   tmp/
   dev/
   proc/
+  proc/self/
+  proc/self/fd/
   data/
+  data/local/
+  data/local/tmp/
   home/
 ```
 
@@ -94,6 +117,13 @@ pretending that every Linux procfs/devfs entry exists.
 
 The recommended first shell tranche is `mksh` plus enough toybox applets to run
 simple configure scripts. BusyBox remains a fallback or benchmark.
+
+The source location policy is:
+
+- `shell/mksh`: Android `external/mksh` import and project-owned glue.
+- `shell/toybox`: Android `external/toybox` import, minimal config, and
+  project-owned glue.
+- `porting/recipes`: external packages that consume the CRT shell.
 
 ## Process API Tranche
 

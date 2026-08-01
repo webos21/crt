@@ -1,0 +1,21 @@
+{
+  "name": "mksh",
+  "role": "/system/bin/sh",
+  "source": {
+    "upstream": "Android external/mksh",
+    "url": "",
+    "commit": "",
+    "archive": "",
+    "sha256": "",
+    "license": ""
+  },
+  "status": {
+    "linux": "pending",
+    "macos": "pending",
+    "windows": "pending"
+  },
+  "notes": [
+    "This manifest is reserved for the first Android external/mksh import.",
+    "Keep upstream source separate from project-owned CRT/PAL glue."
+  ]
+}

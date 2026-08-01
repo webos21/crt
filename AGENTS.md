@@ -155,6 +155,10 @@ runtime은 다음 계층으로 나누어 설계한다.
   - 결과 파일: `libc++.so`
   - The C++ ABI support functions. Stuff like __cxa_guard_acquire and
     __cxa_pure_virtual live here.
+- `shell/`
+  - 결과 파일: `/system/bin/sh`, `/system/bin/toybox`
+  - Android-like shell and command applet environment. This is a core runtime
+    artifact used by porting tests, not an ordinary third-party port recipe.
 - `linker/`
   - 결과 파일: `/system/bin/linker`
   - The dynamic linker. It is responsible for loading the ELF executable into

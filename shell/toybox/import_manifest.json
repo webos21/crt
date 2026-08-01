@@ -1,0 +1,35 @@
+{
+  "name": "toybox",
+  "role": "/system/bin/toybox and selected applets",
+  "source": {
+    "upstream": "Android external/toybox",
+    "url": "",
+    "commit": "",
+    "archive": "",
+    "sha256": "",
+    "license": ""
+  },
+  "status": {
+    "linux": "pending",
+    "macos": "pending",
+    "windows": "pending"
+  },
+  "applets": [
+    "cat",
+    "echo",
+    "pwd",
+    "true",
+    "false",
+    "mkdir",
+    "rm",
+    "cp",
+    "mv",
+    "test",
+    "expr",
+    "sed"
+  ],
+  "notes": [
+    "This manifest is reserved for the first Android external/toybox import.",
+    "Start with a minimal configure-friendly applet set."
+  ]
+}

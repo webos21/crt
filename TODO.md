@@ -1,7 +1,7 @@
 # TODO: Android-like Shell Environment
 
-This note records the current diagnosis and plan for managing shell/userland
-source as part of the CRT port-test loop.
+This note records the current diagnosis and plan for making shell/userland
+programs first-class CRT artifacts used by the port-test loop.
 
 ## Direction
 
@@ -9,6 +9,10 @@ The proposed direction fits the project goal: run an Android-like shell and
 command environment on top of the Bionic-compatible CRT/PAL, rather than relying
 forever on MSYS, Git Bash, WSL, or another foreign Unix runtime for upstream
 `configure` scripts.
+
+The shell is not an ordinary porting recipe. It lives under `shell/`, at the
+same level as `libc/`, `libm/`, `libdl/`, `libstdc++/`, and `linker/`. Porting
+tests consume this shell after it exists.
 
 Android treats `mksh` and `toybox` as separate projects:
 
@@ -218,12 +222,14 @@ direction mature.
 
 ## Proposed Milestones
 
-### Milestone 1: Source And Recipe Pinning
+### Milestone 1: Source And Artifact Pinning
 
-Add recipes:
+Add project-owned shell metadata:
 
-- `porting/recipes/mksh-android.json`
-- `porting/recipes/toybox-minimal.json`
+- `shell/mksh/README.md`
+- `shell/mksh/import_manifest.json`
+- `shell/toybox/README.md`
+- `shell/toybox/import_manifest.json`
 
 Record:
 
