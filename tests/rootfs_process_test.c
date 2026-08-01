@@ -126,8 +126,13 @@ int main(int argc, char** argv) {
   if (stat("/dev/null", &st) != 0 || !S_ISCHR(st.st_mode)) {
     return fail("stat /dev/null");
   }
-  if (access("/proc/self/exe", R_OK) != 0) {
+  if (access("/proc/self/exe", R_OK | X_OK) != 0) {
     return fail("access /proc/self/exe");
+  }
+  if (stat("/proc/self/exe", &st) != 0 ||
+      !S_ISREG(st.st_mode) ||
+      (st.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH)) == 0) {
+    return fail("stat executable mode");
   }
   if (chdir("/tmp") != 0 || getcwd(posix_cwd, sizeof(posix_cwd)) == 0 ||
       strcmp(posix_cwd, "/tmp") != 0) {

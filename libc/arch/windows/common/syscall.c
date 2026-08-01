@@ -552,6 +552,20 @@ static int ascii_tolower(int c) {
   return c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c;
 }
 
+static int ascii_strcasecmp(const char* a, const char* b) {
+  size_t i;
+
+  for (i = 0; a[i] != 0 && b[i] != 0; ++i) {
+    int ac = ascii_tolower((unsigned char)a[i]);
+    int bc = ascii_tolower((unsigned char)b[i]);
+
+    if (ac != bc) {
+      return ac - bc;
+    }
+  }
+  return ascii_tolower((unsigned char)a[i]) - ascii_tolower((unsigned char)b[i]);
+}
+
 static int windows_path_prefix_equal(const char* a, const char* b) {
   size_t i;
 
@@ -647,6 +661,71 @@ static int path_is_dev_null(const char* path) {
 
 static int path_is_dev_tty(const char* path) {
   return path != 0 && (strcmp(path, "/dev/tty") == 0 || strcmp(path, "/dev/console") == 0);
+}
+
+static int windows_has_executable_extension(const char* path) {
+  const char* dot = 0;
+  const char* cursor;
+
+  if (path == 0) {
+    return 0;
+  }
+  for (cursor = path; *cursor != 0; ++cursor) {
+    if (*cursor == '/' || *cursor == '\\') {
+      dot = 0;
+    } else if (*cursor == '.') {
+      dot = cursor;
+    }
+  }
+  if (dot == 0) {
+    return 0;
+  }
+  return ascii_strcasecmp(dot, ".exe") == 0 ||
+         ascii_strcasecmp(dot, ".com") == 0 ||
+         ascii_strcasecmp(dot, ".bat") == 0 ||
+         ascii_strcasecmp(dot, ".cmd") == 0;
+}
+
+static int windows_handle_has_mz_signature(HANDLE handle) {
+  unsigned char magic[2];
+  DWORD bytes_read = 0;
+  long long saved = 0;
+  int executable = 0;
+
+  if (handle == INVALID_HANDLE_VALUE) {
+    return 0;
+  }
+  if (!SetFilePointerEx(handle, 0, &saved, FILE_CURRENT)) {
+    return 0;
+  }
+  if (SetFilePointerEx(handle, 0, 0, FILE_BEGIN) &&
+      ReadFile(handle, magic, (DWORD)sizeof(magic), &bytes_read, 0) &&
+      bytes_read == sizeof(magic) &&
+      magic[0] == 'M' && magic[1] == 'Z') {
+    executable = 1;
+  }
+  (void)SetFilePointerEx(handle, saved, 0, FILE_BEGIN);
+  return executable;
+}
+
+static int windows_path_is_executable_file(const char* host_path, DWORD attrs) {
+  HANDLE handle;
+  int executable;
+
+  if (host_path == 0 || (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+    return 0;
+  }
+  if (windows_has_executable_extension(host_path)) {
+    return 1;
+  }
+  handle = CreateFileA(host_path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE |
+                       FILE_SHARE_DELETE, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+  if (handle == INVALID_HANDLE_VALUE) {
+    return 0;
+  }
+  executable = windows_handle_has_mz_signature(handle);
+  CloseHandle(handle);
+  return executable;
 }
 
 static int append_command_arg(char* buffer, size_t size, size_t* pos, const char* arg) {
@@ -2196,6 +2275,9 @@ long __crt_sys_access(const char* path, int mode) {
       (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0) {
     return -EACCES;
   }
+  if ((mode & X_OK) != 0 && !windows_path_is_executable_file(host_path, attrs)) {
+    return -EACCES;
+  }
   return 0;
 }
 
@@ -2714,6 +2796,9 @@ static long stat_from_handle(HANDLE handle, struct stat* st) {
     if ((info.file_attributes & FILE_ATTRIBUTE_READONLY) == 0) {
       st->st_mode |= S_IWUSR | S_IWGRP | S_IWOTH;
     }
+    if (windows_handle_has_mz_signature(handle)) {
+      st->st_mode |= S_IXUSR | S_IXGRP | S_IXOTH;
+    }
   }
   size = ((uint64_t)info.file_size_high << 32) | info.file_size_low;
   st->st_size = (off_t)size;
@@ -2941,6 +3026,11 @@ long __crt_sys_stat_path(const char* path, struct stat* st) {
   }
   result = stat_from_handle(handle, st);
   CloseHandle(handle);
+  if (result == 0 &&
+      S_ISREG(st->st_mode) &&
+      windows_has_executable_extension(host_path)) {
+    st->st_mode |= S_IXUSR | S_IXGRP | S_IXOTH;
+  }
   return result;
 }
 
