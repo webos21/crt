@@ -72,6 +72,7 @@ __declspec(dllimport) HANDLE CRT_WINAPI LoadLibraryA(const char* lpLibFileName);
 __declspec(dllimport) void* CRT_WINAPI GetProcAddress(HANDLE hModule, const char* lpProcName);
 #endif
 
+#if !defined(CRT_TARGET_OS_LINUX)
 static void uts_copy(char dst[_UTSNAME_LENGTH], const char* src) {
   size_t i;
 
@@ -80,6 +81,7 @@ static void uts_copy(char dst[_UTSNAME_LENGTH], const char* src) {
   }
   dst[i] = 0;
 }
+#endif
 
 #if defined(CRT_TARGET_OS_MACOS)
 static void macos_sysctl_string(int mib0, int mib1, char dst[_UTSNAME_LENGTH], const char* fallback) {
