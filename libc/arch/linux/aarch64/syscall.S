@@ -725,6 +725,15 @@ __crt_sys_execve:
   ret
 .size __crt_sys_execve, . - __crt_sys_execve
 
+.globl __crt_sys_uname
+.type __crt_sys_uname, %function
+.p2align 2
+__crt_sys_uname:
+  mov x8, #160
+  svc #0
+  ret
+.size __crt_sys_uname, . - __crt_sys_uname
+
 .globl __crt_sys_thread_exit
 .type __crt_sys_thread_exit, %function
 .p2align 2
