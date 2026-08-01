@@ -2,6 +2,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <private/crt_fd_table.h>
+
 #if defined(_M_IX86) || defined(__i386__)
 #define CRT_WINAPI __stdcall
 #else
@@ -67,6 +69,7 @@ void mainCRTStartup(void) {
   int argc = 0;
 
   __crt_env_set_initial(0);
+  __crt_child_bootstrap();
   if (command_line != 0) {
     size_t length = strlen(command_line);
 

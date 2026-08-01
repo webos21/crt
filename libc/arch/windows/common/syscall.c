@@ -380,6 +380,8 @@ __declspec(dllimport) DWORD CRT_WINAPI GetCurrentThreadId(void);
 __declspec(dllimport) DWORD CRT_WINAPI GetCurrentProcessId(void);
 __declspec(dllimport) void CRT_WINAPI ExitThread(DWORD dwExitCode);
 __declspec(dllimport) void CRT_WINAPI ExitProcess(unsigned int uExitCode);
+__declspec(dllimport) char* CRT_WINAPI GetEnvironmentStringsA(void);
+__declspec(dllimport) BOOL CRT_WINAPI FreeEnvironmentStringsA(char* lpszEnvironmentBlock);
 
 static HANDLE fd_table[CRT_FD_TABLE_SIZE];
 static int fd_kind[CRT_FD_TABLE_SIZE];
@@ -707,28 +709,111 @@ static long build_process_command_line(
   return 0;
 }
 
-static char* build_windows_environment_block(char* const envp[]) {
+static int env_entry_is_fd_snapshot(const char* entry) {
+  const char name[] = CRT_FD_SNAPSHOT_ENV;
+  size_t name_len = sizeof(name) - 1;
+
+  return strncmp(entry, name, name_len) == 0 && entry[name_len] == '=';
+}
+
+static size_t environment_block_total(
+    char* const envp[],
+    const char* extra_name,
+    const char* extra_value,
+    char** host_block_out) {
   size_t total = 1;
   size_t i;
+  char* host_block = 0;
+
+  *host_block_out = 0;
+  if (envp != 0) {
+    for (i = 0; envp[i] != 0; ++i) {
+      if (extra_name != 0 && env_entry_is_fd_snapshot(envp[i])) {
+        continue;
+      }
+      total += strlen(envp[i]) + 1;
+    }
+  } else {
+    char* entry;
+
+    host_block = GetEnvironmentStringsA();
+    if (host_block == 0) {
+      return 0;
+    }
+    *host_block_out = host_block;
+    for (entry = host_block; *entry != 0; entry += strlen(entry) + 1) {
+      if (extra_name != 0 && env_entry_is_fd_snapshot(entry)) {
+        continue;
+      }
+      total += strlen(entry) + 1;
+    }
+  }
+  if (extra_name != 0 && extra_value != 0) {
+    total += strlen(extra_name) + 1 + strlen(extra_value) + 1;
+  }
+  return total;
+}
+
+static char* build_windows_environment_block(
+    char* const envp[],
+    const char* extra_name,
+    const char* extra_value) {
+  char* host_block = 0;
+  size_t total = environment_block_total(envp, extra_name, extra_value, &host_block);
   char* block;
   size_t offset = 0;
+  size_t i;
 
-  if (envp == 0) {
+  if (total == 0) {
     return 0;
-  }
-  for (i = 0; envp[i] != 0; ++i) {
-    total += strlen(envp[i]) + 1;
   }
   block = (char*)malloc(total + 1);
   if (block == 0) {
+    if (host_block != 0) {
+      FreeEnvironmentStringsA(host_block);
+    }
     return 0;
   }
-  for (i = 0; envp[i] != 0; ++i) {
-    size_t len = strlen(envp[i]);
+  if (envp != 0) {
+    for (i = 0; envp[i] != 0; ++i) {
+      size_t len;
 
-    memcpy(block + offset, envp[i], len);
-    offset += len;
+      if (extra_name != 0 && env_entry_is_fd_snapshot(envp[i])) {
+        continue;
+      }
+      len = strlen(envp[i]);
+      memcpy(block + offset, envp[i], len);
+      offset += len;
+      block[offset++] = 0;
+    }
+  } else {
+    char* entry;
+
+    for (entry = host_block; *entry != 0; entry += strlen(entry) + 1) {
+      size_t len;
+
+      if (extra_name != 0 && env_entry_is_fd_snapshot(entry)) {
+        continue;
+      }
+      len = strlen(entry);
+      memcpy(block + offset, entry, len);
+      offset += len;
+      block[offset++] = 0;
+    }
+  }
+  if (extra_name != 0 && extra_value != 0) {
+    size_t name_len = strlen(extra_name);
+    size_t value_len = strlen(extra_value);
+
+    memcpy(block + offset, extra_name, name_len);
+    offset += name_len;
+    block[offset++] = '=';
+    memcpy(block + offset, extra_value, value_len);
+    offset += value_len;
     block[offset++] = 0;
+  }
+  if (host_block != 0) {
+    FreeEnvironmentStringsA(host_block);
   }
   block[offset++] = 0;
   block[offset] = 0;
@@ -872,6 +957,20 @@ void __crt_fd_snapshot_dispose(struct crt_fd_snapshot* snapshot) {
 }
 
 void __crt_fd_after_fork_child(void) {
+}
+
+void __crt_child_bootstrap(void) {
+  const char* encoded = getenv(CRT_FD_SNAPSHOT_ENV);
+  struct crt_fd_snapshot snapshot;
+
+  if (encoded == 0 || encoded[0] == 0) {
+    return;
+  }
+  if (__crt_fd_snapshot_decode(encoded, &snapshot) == 0) {
+    if (__crt_fd_snapshot_import(&snapshot) == 0) {
+      __crt_fd_snapshot_dispose(&snapshot);
+    }
+  }
 }
 
 static long open_spawn_action_handle(
@@ -2693,6 +2792,9 @@ long __crt_sys_posix_spawn(
   const char* current_directory;
   DWORD creation_flags;
   char* environment_block;
+  struct crt_fd_snapshot fd_snapshot;
+  char fd_snapshot_text[8192];
+  int fd_snapshot_ready = 0;
   long result;
   long remembered;
 
@@ -2710,9 +2812,22 @@ long __crt_sys_posix_spawn(
     close_spawn_std_handles(std_handles);
     return result;
   }
-  environment_block = build_windows_environment_block(envp);
-  if (envp != 0 && environment_block == 0) {
+  result = __crt_fd_snapshot_export(&fd_snapshot);
+  if (result == 0 &&
+      __crt_fd_snapshot_encode(&fd_snapshot, fd_snapshot_text, sizeof(fd_snapshot_text)) == 0) {
+    fd_snapshot_ready = 1;
+  } else {
+    __crt_fd_snapshot_dispose(&fd_snapshot);
+  }
+  environment_block = build_windows_environment_block(
+      envp,
+      fd_snapshot_ready ? CRT_FD_SNAPSHOT_ENV : 0,
+      fd_snapshot_ready ? fd_snapshot_text : 0);
+  if (environment_block == 0) {
     close_spawn_std_handles(std_handles);
+    if (fd_snapshot_ready) {
+      __crt_fd_snapshot_dispose(&fd_snapshot);
+    }
     return -ENOMEM;
   }
   memset(&process, 0, sizeof(process));
@@ -2729,10 +2844,16 @@ long __crt_sys_posix_spawn(
           &process)) {
     free(environment_block);
     close_spawn_std_handles(std_handles);
+    if (fd_snapshot_ready) {
+      __crt_fd_snapshot_dispose(&fd_snapshot);
+    }
     return fail_last_error();
   }
   free(environment_block);
   close_spawn_std_handles(std_handles);
+  if (fd_snapshot_ready) {
+    __crt_fd_snapshot_dispose(&fd_snapshot);
+  }
   CloseHandle(process.hThread);
   remembered = remember_child_process(process.dwProcessId, process.hProcess);
   if (remembered < 0) {

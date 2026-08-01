@@ -197,6 +197,171 @@ static long normalize_syscall_result(long result) {
   return result;
 }
 
+static char fd_snapshot_hex_digit(unsigned int value) {
+  return (char)(value < 10 ? '0' + value : 'a' + (value - 10));
+}
+
+static int fd_snapshot_hex_value(int c) {
+  if (c >= '0' && c <= '9') {
+    return c - '0';
+  }
+  if (c >= 'a' && c <= 'f') {
+    return c - 'a' + 10;
+  }
+  if (c >= 'A' && c <= 'F') {
+    return c - 'A' + 10;
+  }
+  return -1;
+}
+
+static int fd_snapshot_append_hex(char* buffer, unsigned long size, unsigned long* pos, uintptr_t value) {
+  char digits[sizeof(uintptr_t) * 2];
+  unsigned int count = 0;
+
+  do {
+    digits[count++] = fd_snapshot_hex_digit((unsigned int)(value & 0xfU));
+    value >>= 4;
+  } while (value != 0);
+  while (count > 0) {
+    if (*pos + 1 >= size) {
+      return ENOSPC;
+    }
+    buffer[(*pos)++] = digits[--count];
+  }
+  buffer[*pos] = 0;
+  return 0;
+}
+
+static int fd_snapshot_parse_hex(const char** cursor, uintptr_t* value) {
+  uintptr_t parsed = 0;
+  int digits = 0;
+
+  while (**cursor != 0 && **cursor != ':' && **cursor != ';') {
+    int digit = fd_snapshot_hex_value((unsigned char)**cursor);
+
+    if (digit < 0) {
+      return EINVAL;
+    }
+    parsed = (parsed << 4) | (uintptr_t)digit;
+    ++*cursor;
+    ++digits;
+  }
+  if (digits == 0) {
+    return EINVAL;
+  }
+  *value = parsed;
+  return 0;
+}
+
+int __crt_fd_snapshot_encode(const struct crt_fd_snapshot* snapshot, char* buffer, unsigned long size) {
+  unsigned long pos = 0;
+  unsigned int i;
+  int result;
+
+  if (snapshot == 0 || buffer == 0 || size == 0 ||
+      snapshot->magic != CRT_FD_SNAPSHOT_MAGIC ||
+      snapshot->version != CRT_FD_SNAPSHOT_VERSION ||
+      snapshot->count > snapshot->capacity ||
+      snapshot->capacity > CRT_FD_SNAPSHOT_MAX) {
+    return EINVAL;
+  }
+  buffer[0] = 0;
+  result = fd_snapshot_append_hex(buffer, size, &pos, snapshot->version);
+  if (result != 0) {
+    return result;
+  }
+  if (pos + 1 >= size) {
+    return ENOSPC;
+  }
+  buffer[pos++] = '|';
+  buffer[pos] = 0;
+  for (i = 0; i < snapshot->count; ++i) {
+    const struct crt_fd_snapshot_entry* entry = &snapshot->entries[i];
+
+    result = fd_snapshot_append_hex(buffer, size, &pos, (uintptr_t)entry->fd);
+    if (result != 0 || pos + 1 >= size) {
+      return result != 0 ? result : ENOSPC;
+    }
+    buffer[pos++] = ':';
+    result = fd_snapshot_append_hex(buffer, size, &pos, (uintptr_t)entry->kind);
+    if (result != 0 || pos + 1 >= size) {
+      return result != 0 ? result : ENOSPC;
+    }
+    buffer[pos++] = ':';
+    result = fd_snapshot_append_hex(buffer, size, &pos, (uintptr_t)entry->flags);
+    if (result != 0 || pos + 1 >= size) {
+      return result != 0 ? result : ENOSPC;
+    }
+    buffer[pos++] = ':';
+    result = fd_snapshot_append_hex(buffer, size, &pos, entry->handle);
+    if (result != 0 || pos + 1 >= size) {
+      return result != 0 ? result : ENOSPC;
+    }
+    buffer[pos++] = ';';
+    buffer[pos] = 0;
+  }
+  return 0;
+}
+
+int __crt_fd_snapshot_decode(const char* text, struct crt_fd_snapshot* snapshot) {
+  const char* cursor = text;
+  uintptr_t version = 0;
+  int result;
+
+  if (text == 0 || snapshot == 0) {
+    return EINVAL;
+  }
+  memset(snapshot, 0, sizeof(*snapshot));
+  result = fd_snapshot_parse_hex(&cursor, &version);
+  if (result != 0 || *cursor != '|' || version != CRT_FD_SNAPSHOT_VERSION) {
+    return EINVAL;
+  }
+  ++cursor;
+  snapshot->magic = CRT_FD_SNAPSHOT_MAGIC;
+  snapshot->version = CRT_FD_SNAPSHOT_VERSION;
+  snapshot->capacity = CRT_FD_SNAPSHOT_MAX;
+  while (*cursor != 0) {
+    struct crt_fd_snapshot_entry* entry;
+    uintptr_t value = 0;
+
+    if (snapshot->count == CRT_FD_SNAPSHOT_MAX) {
+      memset(snapshot, 0, sizeof(*snapshot));
+      return EMFILE;
+    }
+    entry = &snapshot->entries[snapshot->count];
+    result = fd_snapshot_parse_hex(&cursor, &value);
+    if (result != 0 || *cursor != ':') {
+      memset(snapshot, 0, sizeof(*snapshot));
+      return EINVAL;
+    }
+    entry->fd = (int)value;
+    ++cursor;
+    result = fd_snapshot_parse_hex(&cursor, &value);
+    if (result != 0 || *cursor != ':') {
+      memset(snapshot, 0, sizeof(*snapshot));
+      return EINVAL;
+    }
+    entry->kind = (int)value;
+    ++cursor;
+    result = fd_snapshot_parse_hex(&cursor, &value);
+    if (result != 0 || *cursor != ':') {
+      memset(snapshot, 0, sizeof(*snapshot));
+      return EINVAL;
+    }
+    entry->flags = (unsigned int)value;
+    ++cursor;
+    result = fd_snapshot_parse_hex(&cursor, &value);
+    if (result != 0 || *cursor != ';') {
+      memset(snapshot, 0, sizeof(*snapshot));
+      return EINVAL;
+    }
+    entry->handle = value;
+    ++cursor;
+    ++snapshot->count;
+  }
+  return 0;
+}
+
 #if !defined(CRT_TARGET_OS_WINDOWS)
 int __crt_fd_snapshot_export(struct crt_fd_snapshot* snapshot) {
   if (snapshot == 0) {

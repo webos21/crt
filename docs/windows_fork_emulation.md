@@ -60,6 +60,12 @@ duplicated handles until `__crt_fd_snapshot_dispose()`.
 process fd table. Import does not consume the snapshot, so callers can dispose
 the snapshot afterwards.
 
+`__crt_fd_snapshot_encode()` and `__crt_fd_snapshot_decode()` provide the first
+text transport format. Windows `posix_spawn()` currently injects the encoded
+snapshot as `CRT_FD_SNAPSHOT` in the child environment block. The Windows CRT
+startup calls `__crt_child_bootstrap()` before `main()`, detects that variable,
+imports the fd table, and disposes the inherited snapshot handles.
+
 The first unit test performs an in-process round trip:
 
 1. create a pipe;
@@ -71,30 +77,38 @@ The first unit test performs an in-process round trip:
 This intentionally validates the fd table mechanics while keeping Windows
 `fork()` disabled.
 
+The second unit test crosses a real process boundary:
+
+1. parent creates a pipe;
+2. parent uses `posix_spawn()` to run the same executable;
+3. `posix_spawn()` transports the fd snapshot through `CRT_FD_SNAPSHOT`;
+4. child CRT startup imports the fd table before `main()`;
+5. child writes to the inherited pipe fd passed through `argv`;
+6. parent reads the byte and verifies the child exit status.
+
 ## Child Bootstrap Direction
 
 The future Windows child bootstrap should use the same snapshot data rather
 than adding a separate `posix_spawn()`-only path:
 
 1. parent builds an fd snapshot;
-2. parent encodes the snapshot into a bootstrap blob or environment variable;
+2. parent encodes the snapshot into the current `CRT_FD_SNAPSHOT` transport;
 3. parent starts the child with `CreateProcessA(..., bInheritHandles=TRUE, ...)`;
 4. child CRT startup detects bootstrap mode before `main()`;
 5. child imports the fd table snapshot;
 6. child imports cwd/rootfs/environment/signal policy;
 7. child enters either fork-resume mode or exec/spawn mode.
 
-`posix_spawn()` should eventually move from the current stdio-only
-`STARTUPINFOA` path to this fd snapshot bootstrap. `fork()` emulation can then
-reuse the same descriptor import path and focus on memory/runtime-state policy.
+`posix_spawn()` still prepares `STARTUPINFOA` std handles for host compatibility,
+but it now also transports the full file-like CRT fd table through the snapshot
+bootstrap. `fork()` emulation can reuse the same descriptor import path and
+focus on memory/runtime-state policy.
 
 ## Open Items
 
-- encoded snapshot transport format for `CreateProcessA`;
 - fd close-on-exec and inheritable-handle filtering;
 - sockets through Winsock duplication;
 - cwd/rootfs/environment import record;
 - child process registry integration with `waitpid()`;
 - signal disposition/mask propagation;
 - memory/state policy for real `fork()` emulation.
-

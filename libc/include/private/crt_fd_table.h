@@ -13,6 +13,8 @@
 
 #define CRT_FD_SNAPSHOT_FLAG_INHERITABLE 0x00000001U
 
+#define CRT_FD_SNAPSHOT_ENV "CRT_FD_SNAPSHOT"
+
 struct crt_fd_snapshot_entry {
   int fd;
   int kind;
@@ -31,6 +33,9 @@ struct crt_fd_snapshot {
 int __crt_fd_snapshot_export(struct crt_fd_snapshot* snapshot);
 int __crt_fd_snapshot_import(const struct crt_fd_snapshot* snapshot);
 void __crt_fd_snapshot_dispose(struct crt_fd_snapshot* snapshot);
+int __crt_fd_snapshot_encode(const struct crt_fd_snapshot* snapshot, char* buffer, unsigned long size);
+int __crt_fd_snapshot_decode(const char* text, struct crt_fd_snapshot* snapshot);
 void __crt_fd_after_fork_child(void);
+void __crt_child_bootstrap(void);
 
 #endif
