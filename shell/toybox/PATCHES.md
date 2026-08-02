@@ -113,3 +113,35 @@ Removal/upstream condition:
 This can be revisited if Windows rootfs applets move away from copy-based
 `.exe` aliases or if an upstream/more general toybox applet-dispatch path
 handles host path syntax without local changes.
+
+## Configure Smoke Applet Set
+
+Status: active CRT rootfs selection.
+
+Touched files:
+
+- `crt/generated/newtoys.h`
+- `tools/create_rootfs.py`
+
+Reason:
+
+The Windows CRT rootfs shell is now used for configure-stage porting smoke
+tests. zlib's configure script needs a small POSIX utility set beyond basic
+interactive shell commands, including `date`, `expr`, `printf`, and `tee`.
+
+Change summary:
+
+- Enabled toybox applet registrations for `date`, `expr`, `printf`, and `tee`.
+- Added matching rootfs aliases/copies so mksh can find them through
+  `PATH=/system/bin:/bin:/usr/bin`.
+
+ABI impact:
+
+None on CRT/Bionic public ABI. This only broadens the shell rootfs command set.
+
+Removal/upstream condition:
+
+This is expected to remain as part of the project-owned Android-like shell
+environment. Future configure failures should add applets only after confirming
+the missing command is normal POSIX/Android shell surface rather than a host
+SDK leak.

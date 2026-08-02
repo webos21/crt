@@ -28,6 +28,7 @@ static void cleanup_file_path_test_dir(void) {
   (void)chmod("sample.tmp", 0600);
   (void)remove("sample.link");
   (void)remove("sample.tmp");
+  (void)remove("append.tmp");
   (void)remove("created.tmp");
   (void)remove("mkstemp_test.XXXXXX");
   (void)remove("realpath_dir/nested.link");
@@ -44,6 +45,27 @@ static void cleanup_file_path_test_dir(void) {
   }
   (void)chdir("..");
   (void)rmdir("file_path_test.dir");
+}
+
+static int read_to_buffer(int fd, char* buffer, size_t size) {
+  size_t offset = 0;
+
+  if (size == 0) {
+    return -1;
+  }
+  while (offset + 1 < size) {
+    ssize_t got = read(fd, buffer + offset, size - offset - 1);
+
+    if (got < 0) {
+      return -1;
+    }
+    if (got == 0) {
+      break;
+    }
+    offset += (size_t)got;
+  }
+  buffer[offset] = 0;
+  return 0;
 }
 
 int main(void) {
@@ -177,6 +199,38 @@ int main(void) {
       access("created.tmp", F_OK) == 0) {
     close(fd);
     return fail("unlink");
+  }
+  created_fd = open("append.tmp", O_CREAT | O_WRONLY | O_TRUNC, 0600);
+  if (created_fd < 0 ||
+      write(created_fd, "alpha\n", 6) != 6 ||
+      close(created_fd) != 0) {
+    close(fd);
+    return fail("append setup");
+  }
+  created_fd = open("append.tmp", O_WRONLY | O_APPEND, 0);
+  if (created_fd < 0 ||
+      write(created_fd, "beta\n", 5) != 5 ||
+      dup2(created_fd, 10) != 10 ||
+      write(10, "gamma\n", 6) != 6 ||
+      close(10) != 0 ||
+      close(created_fd) != 0) {
+    close(fd);
+    return fail("append write");
+  }
+  created_fd = open("append.tmp", O_RDONLY, 0);
+  if (created_fd < 0 ||
+      read_to_buffer(created_fd, resolved, sizeof(resolved)) != 0 ||
+      strcmp(resolved, "alpha\nbeta\ngamma\n") != 0 ||
+      close(created_fd) != 0) {
+    if (created_fd >= 0) {
+      close(created_fd);
+    }
+    close(fd);
+    return fail("append readback");
+  }
+  if (unlink("append.tmp") != 0) {
+    close(fd);
+    return fail("append unlink");
   }
   if (stat("sample.tmp", &st) != 0 || !S_ISREG(st.st_mode) || st.st_size != 1) {
     close(fd);

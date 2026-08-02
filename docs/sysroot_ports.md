@@ -209,10 +209,9 @@ cmake --build --preset macos-host-ninja-debug --target port-rebuild-configure
 ```
 
 On native Windows, these CMake targets can be launched from PowerShell or
-`cmd.exe`, but `configure` recipes still need a POSIX build shell because
-upstream Autoconf scripts and the CRT compiler wrappers are shell scripts.
-Install Git Bash or MSYS2 with GNU `make`, keep `bash.exe` or `sh.exe` visible
-in `PATH`, or set `CRT_PORT_SHELL` explicitly:
+`cmd.exe`. The historical bootstrap path still uses Git Bash or MSYS2 for
+`configure` plus GNU `make`; keep `bash.exe` or `sh.exe` visible in `PATH`, or
+set `CRT_PORT_SHELL` explicitly:
 
 ```bat
 set CRT_PORT_SHELL=C:\msys64\usr\bin\bash.exe
@@ -224,6 +223,29 @@ paths to POSIX-style `/c/...` paths before invoking configure. This keeps the
 build shell as a tool for running upstream build scripts only; the produced
 objects still go through the CRT sysroot wrappers and host-native Clang/LLD.
 
+Windows can now also run configure recipes through the CRT rootfs mksh for
+configure-stage smoke tests:
+
+```powershell
+& 'C:/Users/appos/AppData/Local/Programs/Python/Python314/python.exe' `
+  tools/crt-port-build.py `
+  --preset windows-host-ninja-debug `
+  --target-os windows `
+  --port zlib `
+  --use-crt-shell `
+  --configure-only `
+  --rebuild
+```
+
+In this mode `crt-port-build.py` launches
+`out/<preset>/rootfs/system/bin/mksh.exe`, sets
+`PATH=/system/bin:/bin:/usr/bin`, runs the compiler wrappers through
+`/system/bin/mksh`, discovers the host LLVM tools, and passes the Windows SDK
+library directory to the wrappers as an internal backend detail. This is the
+preferred way to expose missing CRT/PAL/rootfs behavior from configure scripts.
+Full `make install` through the CRT shell remains a later tranche; keep using
+the host bootstrap shell when a recipe needs GNU `make` today.
+
 The project now also builds a bootstrap CRT shell as a core artifact:
 
 ```text
@@ -232,11 +254,11 @@ out/<preset>/rootfs/bin/sh
 out/<preset>/rootfs/usr/bin/sh
 ```
 
-This `crt_tiny_sh` runner is not yet a full Autoconf shell replacement. Use it
-for shell/PAL smoke tests and very small configure probes first. The long-term
-goal is to switch porting recipes from the host bootstrap shell to the CRT
-rootfs shell after the mksh/toybox tranche closes the remaining shell-language
-and applet gaps.
+The rootfs shell is now strong enough for zlib's configure-stage probe on
+Windows x86_64, but it is not yet a full Autoconf/make replacement. Use it for
+configure smoke tests first, then promote recipes to full build/install once
+the mksh/toybox tranche closes the remaining shell-language, applet, and make
+gaps.
 
 Per-recipe fetch targets resolve recipe dependencies. For example,
 `port-fetch-libpng` also fetches zlib.

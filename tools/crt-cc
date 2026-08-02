@@ -17,7 +17,48 @@ if [ -z "$target_os" ]; then
 fi
 
 cc="${CRT_HOST_CC:-clang}"
-resource_dir="$("$cc" -print-resource-dir 2>/dev/null || true)"
+if [ "$target_os" = windows ]; then
+  export CRT_SPAWN_NATIVE_WINDOWS=1
+fi
+if [ "$target_os" = windows ]; then
+  resource_dir=""
+else
+  set +e
+  resource_dir="$("$cc" -print-resource-dir 2>/dev/null)"
+  set -e
+fi
+
+windows_host_arg() {
+  case "$1" in
+    /*)
+      if [ -n "${CRT_ROOTFS:-}" ]; then
+        rootfs=$(printf '%s\n' "$CRT_ROOTFS" | sed 's|\\|/|g')
+        printf '%s/%s\n' "$rootfs" "${1#/}"
+      else
+        printf '%s\n' "$1"
+      fi
+      ;;
+    -I/*|-L/*)
+      prefix=${1%%/*}
+      path=/${1#*/}
+      if [ -n "${CRT_ROOTFS:-}" ]; then
+        rootfs=$(printf '%s\n' "$CRT_ROOTFS" | sed 's|\\|/|g')
+        printf '%s%s/%s\n' "$prefix" "$rootfs" "${path#/}"
+      else
+        printf '%s\n' "$1"
+      fi
+      ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+user_args=""
+for arg in "$@"; do
+  if [ "$target_os" = windows ]; then
+    arg=$(windows_host_arg "$arg")
+  fi
+  user_args="$user_args $(printf '%s\n' "$arg")"
+done
 
 compile_only=0
 for arg in "$@"; do
@@ -38,7 +79,7 @@ esac
 
 if [ "$compile_only" -eq 1 ]; then
   # shellcheck disable=SC2086
-  exec "$cc" $common_flags "$@"
+  exec "$cc" $common_flags $user_args
 fi
 
 libs="${CRT_SYSROOT}/lib/crt1.o -L${CRT_SYSROOT}/lib"
@@ -52,7 +93,10 @@ case "$target_os" in
     entry="-Wl,-e,_start -Wl,--gc-sections"
     ;;
   windows)
-    libs="$libs ${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a ${CRT_SYSROOT}/lib/libc++.a ${CRT_SYSROOT}/lib/libclang_rt.builtins.a ${CRT_WINDOWS_SYSTEM_LIBS:-}"
+    if [ -n "${CRT_WINDOWS_SDK_LIBPATH:-}" ]; then
+      libs="$libs -Wl,/libpath:${CRT_WINDOWS_SDK_LIBPATH}"
+    fi
+    libs="$libs ${CRT_SYSROOT}/lib/c.lib ${CRT_SYSROOT}/lib/m.lib ${CRT_SYSROOT}/lib/dl.lib ${CRT_SYSROOT}/lib/c++.lib ${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"
     entry="-Wl,/entry:mainCRTStartup -Wl,/subsystem:console -Wl,/OPT:REF -fuse-ld=lld"
     ;;
   *)
@@ -62,4 +106,4 @@ case "$target_os" in
 esac
 
 # shellcheck disable=SC2086
-exec "$cc" $common_flags -nostdlib -nostartfiles -nodefaultlibs $entry "$@" $libs
+exec "$cc" $common_flags -nostdlib -nostartfiles -nodefaultlibs $entry $user_args $libs

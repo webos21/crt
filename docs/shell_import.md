@@ -210,6 +210,14 @@ CRT shell process contract: Windows `TEXEC` launch goes through
 `__crt_shell_fork_exec()`, while raw arbitrary post-fork child execution remains
 unsupported.
 
+Configure-stage shell coverage has started. Windows rootfs mksh can run zlib
+1.3.1 `./configure --static` through `tools/crt-port-build.py --use-crt-shell
+--configure-only`. The work needed for that path added rootfs applets commonly
+used by configure scripts (`date`, `expr`, `printf`, `tee`) and a Windows mksh
+local fallback for grouped commands in pipelines, such as
+`( command ) 2>&1 | tee -a configure.log`, so the actual external command still
+travels through the CRT child-spec spawn path.
+
 The child-spec path must continue to carry Bionic-shaped process/fd/signal
 behavior: cwd/rootfs/env, file actions including fd 3 and above,
 close-on-exec filtering, stdio flush policy, child registry/waitpid

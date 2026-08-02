@@ -1315,6 +1315,21 @@ static int fd_snapshot_has_socket(const struct crt_fd_snapshot* snapshot) {
   return 0;
 }
 
+static int envp_has_name(char* const envp[], const char* name) {
+  size_t name_len = strlen(name);
+  size_t i;
+
+  if (envp == 0 || name == 0) {
+    return 0;
+  }
+  for (i = 0; envp[i] != 0; ++i) {
+    if (strncmp(envp[i], name, name_len) == 0 && envp[i][name_len] == '=') {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 static long fd_snapshot_remove(struct crt_fd_snapshot* snapshot, int fd);
 
 static long fd_snapshot_prepare_child_duplicates(
@@ -1871,6 +1886,80 @@ static long remember_child_process(DWORD pid, HANDLE process) {
   return -EMFILE;
 }
 
+static long prepare_native_windows_spawn_startup(
+    const posix_spawn_file_actions_t actions,
+    const posix_spawnattr_t attr,
+    struct crt_startupinfo* startup,
+    const char** current_directory,
+    char current_directory_buffer[4096],
+    struct crt_fd_snapshot* fd_snapshot,
+    DWORD* creation_flags) {
+  HANDLE std_input;
+  HANDLE std_output;
+  HANDLE std_error;
+
+  long result = prepare_spawn_startup(
+      actions,
+      attr,
+      startup,
+      current_directory,
+      current_directory_buffer,
+      fd_snapshot,
+      creation_flags);
+  if (result != 0) {
+    return result;
+  }
+  std_input = fd_snapshot_handle_for_fd(fd_snapshot, 0);
+  std_output = fd_snapshot_handle_for_fd(fd_snapshot, 1);
+  std_error = fd_snapshot_handle_for_fd(fd_snapshot, 2);
+  startup->dwFlags = CRT_STARTF_USESTDHANDLES;
+  startup->hStdInput = std_input != INVALID_HANDLE_VALUE ? std_input : INVALID_HANDLE_VALUE;
+  startup->hStdOutput = std_output != INVALID_HANDLE_VALUE ? std_output : INVALID_HANDLE_VALUE;
+  startup->hStdError = std_error != INVALID_HANDLE_VALUE ? std_error : INVALID_HANDLE_VALUE;
+  return 0;
+}
+
+static void set_native_spawn_stdio_inherit(
+    const struct crt_startupinfo* startup,
+    HANDLE handles[3],
+    DWORD old_flags[3],
+    unsigned char touched[3]) {
+  int i;
+
+  handles[0] = startup->hStdInput;
+  handles[1] = startup->hStdOutput;
+  handles[2] = startup->hStdError;
+  memset(touched, 0, 3);
+  for (i = 0; i < 3; ++i) {
+    DWORD flags = 0;
+
+    if (handles[i] == 0 || handles[i] == INVALID_HANDLE_VALUE) {
+      continue;
+    }
+    if (!GetHandleInformation(handles[i], &flags)) {
+      continue;
+    }
+    touched[i] = 1;
+    old_flags[i] = flags;
+    if ((flags & HANDLE_FLAG_INHERIT) == 0) {
+      (void)SetHandleInformation(handles[i], HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+    }
+  }
+}
+
+static void restore_native_spawn_stdio_inherit(
+    const HANDLE handles[3],
+    const DWORD old_flags[3],
+    const unsigned char touched[3]) {
+  int i;
+
+  for (i = 0; i < 3; ++i) {
+    if (touched[i]) {
+      (void)SetHandleInformation(handles[i], HANDLE_FLAG_INHERIT, old_flags[i]);
+    }
+  }
+}
+
 static HANDLE find_child_process(long pid, int* index) {
   int i;
 
@@ -2115,6 +2204,10 @@ long __crt_sys_write(int fd, const void* buf, unsigned long count) {
   if (handle == INVALID_HANDLE_VALUE) {
     return -EBADF;
   }
+  if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && (fd_flags[fd] & O_APPEND) != 0 &&
+      !SetFilePointerEx(handle, 0, 0, FILE_END)) {
+    return fail_last_error();
+  }
   if (!WriteFile(handle, buf, (DWORD)count, &written, 0)) {
     return fail_last_error();
   }
@@ -2321,6 +2414,9 @@ long __crt_sys_open(const char* path, int flags, unsigned int mode) {
   if (fd < 0) {
     CloseHandle(handle);
     return -EMFILE;
+  }
+  if ((flags & O_APPEND) != 0) {
+    fd_flags[fd] |= O_APPEND;
   }
   return fd;
 }
@@ -2692,6 +2788,9 @@ long __crt_sys_dup(int oldfd) {
     CloseHandle(duplicate);
     return -EMFILE;
   }
+  if (oldfd >= 0 && oldfd < CRT_FD_TABLE_SIZE) {
+    fd_flags[fd] = fd_flags[oldfd] & ~FD_CLOEXEC;
+  }
   return fd;
 }
 
@@ -2721,7 +2820,7 @@ long __crt_sys_dup2(int oldfd, int newfd) {
   }
   fd_table[newfd] = duplicate;
   fd_kind[newfd] = CRT_FD_KIND_FILE;
-  fd_flags[newfd] = 0;
+  fd_flags[newfd] = oldfd >= 0 && oldfd < CRT_FD_TABLE_SIZE ? fd_flags[oldfd] & ~FD_CLOEXEC : 0;
   return newfd;
 }
 
@@ -3808,10 +3907,14 @@ long __crt_sys_posix_spawn(
   sigset64_t sigdefault;
   int fd_snapshot_ready = 0;
   int fd_snapshot_pipe_mode = 0;
+  int native_windows_spawn = 0;
   HANDLE fd_snapshot_pipe_read = 0;
   HANDLE fd_snapshot_pipe_write = 0;
   unsigned char spawn_inherit_touched[CRT_FD_TABLE_SIZE];
   DWORD spawn_old_inherit_flags[CRT_FD_TABLE_SIZE];
+  HANDLE native_stdio_handles[3];
+  DWORD native_stdio_old_flags[3];
+  unsigned char native_stdio_touched[3];
   BOOL process_created;
   DWORD process_error;
   long result;
@@ -3840,6 +3943,73 @@ long __crt_sys_posix_spawn(
   result = build_process_command_line(path, argv, command_line, sizeof(command_line));
   if (result != 0) {
     RETURN(result);
+  }
+  native_windows_spawn = getenv("CRT_SPAWN_NATIVE_WINDOWS") != 0 ||
+                         envp_has_name(envp, "CRT_SPAWN_NATIVE_WINDOWS");
+  if (native_windows_spawn) {
+    result = __crt_fd_snapshot_export(&fd_snapshot);
+    if (result != 0) {
+      RETURN(-result);
+    }
+    fd_snapshot_ready = 1;
+    result = prepare_native_windows_spawn_startup(
+        actions,
+        attr,
+        &startup,
+        &current_directory,
+        current_directory_buffer,
+        &fd_snapshot,
+        &creation_flags);
+    if (result != 0) {
+      __crt_fd_snapshot_dispose(&fd_snapshot);
+      RETURN(result);
+    }
+    environment_block = build_windows_environment_block(envp, extras, extra_count);
+    if (environment_block == 0) {
+      __crt_fd_snapshot_dispose(&fd_snapshot);
+      RETURN(-ENOMEM);
+    }
+    memset(&process, 0, sizeof(process));
+    memset(native_stdio_old_flags, 0, sizeof(native_stdio_old_flags));
+    set_native_spawn_stdio_inherit(
+        &startup, native_stdio_handles, native_stdio_old_flags, native_stdio_touched);
+    process_created = CreateProcessA(
+            application_path,
+            command_line,
+            0,
+            0,
+            1,
+            creation_flags,
+            environment_block,
+            current_directory,
+            &startup,
+            &process);
+    process_error = process_created ? 0 : GetLastError();
+    restore_native_spawn_stdio_inherit(
+        native_stdio_handles, native_stdio_old_flags, native_stdio_touched);
+    __crt_fd_snapshot_dispose(&fd_snapshot);
+    fd_snapshot_ready = 0;
+    free(environment_block);
+    if (!process_created) {
+      SetLastError(process_error);
+      RETURN(fail_last_error());
+    }
+    CloseHandle(process.hThread);
+    if (pid != 0 && *pid == CRT_SPAWN_PRIVATE_WAIT_PID) {
+      private_wait_process = process.hProcess;
+      private_wait_pid = process.dwProcessId;
+      *pid = (long)process.dwProcessId;
+      RETURN(0);
+    }
+    remembered = remember_child_process(process.dwProcessId, process.hProcess);
+    if (remembered < 0) {
+      CloseHandle(process.hProcess);
+      RETURN(remembered);
+    }
+    if (pid != 0) {
+      *pid = remembered;
+    }
+    RETURN(0);
   }
   result = __crt_fd_snapshot_export(&fd_snapshot);
   if (result != 0) {

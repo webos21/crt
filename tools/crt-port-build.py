@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import ctypes
 import json
 import os
 import shlex
@@ -26,7 +27,7 @@ def is_native_windows_configure(target_os):
     return target_os == "windows" and os.name == "nt"
 
 
-def path_for_posix_shell(path):
+def path_for_msys_shell(path):
     value = str(path).replace("\\", "/")
     if len(value) >= 2 and value[1] == ":":
         drive = value[0].lower()
@@ -35,6 +36,55 @@ def path_for_posix_shell(path):
             rest = rest[1:]
         return f"/{drive}/{rest}"
     return value
+
+
+def path_for_crt_shell(path):
+    return str(path).replace("\\", "/")
+
+
+def windows_short_path(path):
+    if os.name != "nt":
+        return str(path)
+    value = str(path)
+    GetShortPathNameW = ctypes.windll.kernel32.GetShortPathNameW
+    needed = GetShortPathNameW(value, None, 0)
+    if needed == 0:
+        return value
+    buffer = ctypes.create_unicode_buffer(needed)
+    if GetShortPathNameW(value, buffer, needed) == 0:
+        return value
+    return buffer.value
+
+
+def read_cmake_cache(cache_path):
+    values = {}
+    if not cache_path.exists():
+        return values
+    for line in cache_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith("//") or line.startswith("#") or "=" not in line:
+            continue
+        key_type, value = line.split("=", 1)
+        key = key_type.split(":", 1)[0]
+        values[key] = value
+    return values
+
+
+def find_windows_host_tool(names):
+    for name in names:
+        found = shutil.which(name)
+        if found:
+            return path_for_crt_shell(windows_short_path(found))
+    candidates = []
+    program_files = os.environ.get("ProgramFiles")
+    program_files_x86 = os.environ.get("ProgramFiles(x86)")
+    for root in (program_files, program_files_x86):
+        if root:
+            for name in names:
+                candidates.append(Path(root) / "LLVM" / "bin" / name)
+    for candidate in candidates:
+        if candidate.exists():
+            return path_for_crt_shell(windows_short_path(candidate))
+    return None
 
 
 def find_posix_shell(env):
@@ -78,19 +128,35 @@ def copy_source(src, dst):
     shutil.copytree(src, dst, ignore=ignore)
 
 
-def make_env(root, build_dir, sysroot, port_prefix, target_os):
+def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os, use_crt_shell=False):
     env = os.environ.copy()
-    use_posix_paths = is_native_windows_configure(target_os)
-    root_env = path_for_posix_shell(root) if use_posix_paths else str(root)
-    build_dir_env = path_for_posix_shell(build_dir) if use_posix_paths else str(build_dir)
-    sysroot_env = path_for_posix_shell(sysroot) if use_posix_paths else str(sysroot)
-    port_prefix_env = path_for_posix_shell(port_prefix) if use_posix_paths else str(port_prefix)
-    tools_dir_env = path_for_posix_shell(root / "tools") if use_posix_paths else str(root / "tools")
+    use_msys_paths = is_native_windows_configure(target_os) and not use_crt_shell
+    path_for_shell = path_for_crt_shell if use_crt_shell else path_for_msys_shell
+    root_env = path_for_shell(root) if is_native_windows_configure(target_os) else str(root)
+    build_dir_env = path_for_shell(work_build_dir) if is_native_windows_configure(target_os) else str(work_build_dir)
+    sysroot_env = path_for_shell(sysroot) if is_native_windows_configure(target_os) else str(sysroot)
+    port_prefix_env = path_for_shell(port_prefix) if is_native_windows_configure(target_os) else str(port_prefix)
+    tools_dir_env = path_for_shell(root / "tools") if is_native_windows_configure(target_os) else str(root / "tools")
 
     env["CRT_SYSROOT"] = sysroot_env
     env["CRT_TARGET_OS"] = target_os
-    env["CC"] = f"{root_env}/tools/crt-cc" if use_posix_paths else str(root / "tools" / "crt-cc")
-    env["CXX"] = f"{root_env}/tools/crt-c++" if use_posix_paths else str(root / "tools" / "crt-c++")
+    if use_crt_shell:
+        rootfs = preset_build_dir / "rootfs"
+        env["CRT_ROOTFS"] = str(rootfs)
+        env["CC"] = f"/system/bin/mksh {root_env}/tools/crt-cc"
+        env["CXX"] = f"/system/bin/mksh {root_env}/tools/crt-c++"
+        env["PATH"] = "/system/bin:/bin:/usr/bin"
+        cache = read_cmake_cache(preset_build_dir / "CMakeCache.txt")
+        kernel32 = cache.get("CRT_WINDOWS_KERNEL32_LIB")
+        if kernel32:
+            env["CRT_WINDOWS_SDK_LIBPATH"] = path_for_crt_shell(windows_short_path(Path(kernel32).parent))
+        if target_os == "windows":
+            env["CRT_HOST_CC"] = env.get("CRT_HOST_CC") or find_windows_host_tool(("clang.exe", "clang"))
+            env["CRT_HOST_CXX"] = env.get("CRT_HOST_CXX") or find_windows_host_tool(("clang++.exe", "clang++"))
+    else:
+        env["CC"] = f"{root_env}/tools/crt-cc" if use_msys_paths else str(root / "tools" / "crt-cc")
+        env["CXX"] = f"{root_env}/tools/crt-c++" if use_msys_paths else str(root / "tools" / "crt-c++")
+        env["PATH"] = f"{tools_dir_env}{os.pathsep}{env.get('PATH', '')}"
     env["AR"] = env.get("AR") or shutil.which("llvm-ar") or shutil.which("ar") or "ar"
     env["RANLIB"] = env.get("RANLIB") or shutil.which("llvm-ranlib") or shutil.which("ranlib") or "ranlib"
     env["STRIP"] = env.get("STRIP") or shutil.which("llvm-strip") or shutil.which("strip") or "strip"
@@ -103,7 +169,6 @@ def make_env(root, build_dir, sysroot, port_prefix, target_os):
     env["CXXFLAGS"] = join_flags(env.get("CRT_PORT_CXXFLAGS", "-O2"), env.get("CRT_EXTRA_CXXFLAGS", ""))
     env["LDFLAGS"] = join_flags(lib_flags, env.get("CRT_EXTRA_LDFLAGS", ""))
     env["LIBS"] = env.get("CRT_EXTRA_LIBS", "")
-    env["PATH"] = f"{tools_dir_env}{os.pathsep}{env.get('PATH', '')}"
     env["DESTDIR"] = ""
     env["CRT_PORT_BUILD_DIR"] = build_dir_env
     return env
@@ -114,17 +179,26 @@ def apply_recipe_env(env, recipe):
         env[name] = str(value)
 
 
-def build_configure_port(root, work, port_prefix, recipe, env, target_os):
+def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env, target_os, use_crt_shell=False, configure_only=False):
     build = recipe["build"]
     configure = ["./configure"]
     configure.extend(build["configure_args"])
-    prefix = path_for_posix_shell(port_prefix) if is_native_windows_configure(target_os) else str(port_prefix)
-    configure.append(f"--prefix={prefix}")
     if is_native_windows_configure(target_os):
+        prefix = path_for_crt_shell(port_prefix) if use_crt_shell else path_for_msys_shell(port_prefix)
+    else:
+        prefix = str(port_prefix)
+    configure.append(f"--prefix={prefix}")
+    if is_native_windows_configure(target_os) and use_crt_shell:
+        shell = preset_build_dir / "rootfs" / "system" / "bin" / "mksh.exe"
+        env["CONFIG_SHELL"] = "/system/bin/mksh"
+        configure = [str(shell)] + configure
+    elif is_native_windows_configure(target_os):
         shell = find_posix_shell(env)
-        env["CONFIG_SHELL"] = path_for_posix_shell(shell)
+        env["CONFIG_SHELL"] = path_for_msys_shell(shell)
         configure = [shell] + configure
     run(configure, work, env)
+    if configure_only:
+        return
     run(["make", "-j", str(os.cpu_count() or 2)] + build["make_args"], work, env)
     run(["make", "install"], work, env)
 
@@ -152,7 +226,7 @@ def build_amalgamation_port(work, port_prefix, recipe, env):
         shutil.copy2(work / header, include_dir / Path(header).name)
 
 
-def build_port(root, build_dir, source_root, sysroot, port_prefix, recipes, port, target_os):
+def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, port_prefix, recipes, port, target_os, use_crt_shell=False, configure_only=False):
     if port not in recipes:
         raise SystemExit(f"recipe not found: {port}")
 
@@ -162,20 +236,20 @@ def build_port(root, build_dir, source_root, sysroot, port_prefix, recipes, port
         raise SystemExit(f"{port}: build system '{build['system']}' is not supported by crt-port-build.py yet")
 
     for dep in recipe["dependencies"]:
-        build_port(root, build_dir, source_root, sysroot, port_prefix, recipes, dep, target_os)
+        build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, port_prefix, recipes, dep, target_os, use_crt_shell, configure_only)
 
-    stamp = build_dir / "stamps" / f"{port}.installed"
+    stamp = work_build_dir / "stamps" / f"{port}.installed"
     if stamp.exists():
         return
 
     src = find_source(source_root, recipe["source"]["source_dir"])
-    work = build_dir / "work" / port
+    work = work_build_dir / "work" / port
     copy_source(src, work)
 
-    env = make_env(root, build_dir, sysroot, port_prefix, target_os)
+    env = make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os, use_crt_shell)
     apply_recipe_env(env, recipe)
     if build["system"] == "configure":
-        build_configure_port(root, work, port_prefix, recipe, env, target_os)
+        build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env, target_os, use_crt_shell, configure_only)
     elif build["system"] == "amalgamation":
         build_amalgamation_port(work, port_prefix, recipe, env)
     stamp.parent.mkdir(parents=True, exist_ok=True)
@@ -193,6 +267,8 @@ def main():
     parser.add_argument("--port", action="append", required=True)
     parser.add_argument("--rebuild", action="store_true", help="remove port install stamps before building")
     parser.add_argument("--skip-sysroot-build", action="store_true", help="assume the sysroot target has already been built")
+    parser.add_argument("--use-crt-shell", action="store_true", help="run configure recipes with the CRT rootfs mksh on native Windows")
+    parser.add_argument("--configure-only", action="store_true", help="stop configure recipes after ./configure")
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
@@ -214,7 +290,8 @@ def main():
     target_os = args.target_os or args.preset.split("-host-", 1)[0]
 
     if not args.skip_sysroot_build:
-        run(["cmake", "--build", "--preset", args.preset, "--target", "sysroot"], root, os.environ.copy())
+        target = "rootfs" if args.use_crt_shell else "sysroot"
+        run(["cmake", "--build", "--preset", args.preset, "--target", target], root, os.environ.copy())
     port_prefix.mkdir(parents=True, exist_ok=True)
     (port_prefix / "include").mkdir(parents=True, exist_ok=True)
     (port_prefix / "lib" / "pkgconfig").mkdir(parents=True, exist_ok=True)
@@ -226,7 +303,7 @@ def main():
                 stamp.unlink()
 
     for port in args.port:
-        build_port(root, work_root, source_root, sysroot, port_prefix, recipes, port, target_os)
+        build_port(root, build_dir, work_root, source_root, sysroot, port_prefix, recipes, port, target_os, args.use_crt_shell, args.configure_only)
 
     print(f"ports installed: {port_prefix}")
 

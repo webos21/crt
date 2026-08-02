@@ -512,7 +512,7 @@ exchild(struct op *t, int flags,
 	}
 
 #ifdef MKSH_CRT_SHELL_CHILD_SPEC
-	if (t->type == TCOM && !(flags & XEXEC))
+	if ((t->type == TCOM || t->type == TPAREN) && !(flags & XEXEC))
 		return (crt_mksh_execute_tcom_without_raw_fork(
 		    t, flags, xerrok, close_fd));
 #endif

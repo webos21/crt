@@ -71,6 +71,7 @@ execute(struct op * volatile t,
 	if ((flags&XFORK) && !(flags&XEXEC) && t->type != TPIPE
 #ifdef MKSH_CRT_SHELL_CHILD_SPEC
 	    && t->type != TCOM
+	    && t->type != TPAREN
 #endif
 	    )
 		/* run in sub-process */
