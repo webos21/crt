@@ -159,13 +159,21 @@ int main(int argc, char** argv) {
   {
     int input_pipe[2];
     int output_pipe[2];
+#if !defined(CRT_TARGET_OS_WINDOWS)
     pid_t fork_pid;
     int status = 0;
     char byte = 0;
+#endif
 
     if (pipe(input_pipe) != 0 || pipe(output_pipe) != 0) {
       return fail("fork exec pipe setup");
     }
+#if defined(CRT_TARGET_OS_WINDOWS)
+    close(input_pipe[0]);
+    close(input_pipe[1]);
+    close(output_pipe[0]);
+    close(output_pipe[1]);
+#else
     fork_pid = fork();
     if (fork_pid < 0 && errno == ENOTSUP) {
       close(input_pipe[0]);
@@ -214,6 +222,7 @@ int main(int argc, char** argv) {
         return fail("fork exec pipe io");
       }
     }
+#endif
   }
   {
     pid_t pid;

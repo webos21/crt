@@ -222,6 +222,7 @@ struct crt_rtl_user_process_information {
 
 __declspec(dllimport) HANDLE CRT_WINAPI GetStdHandle(DWORD nStdHandle);
 __declspec(dllimport) DWORD CRT_WINAPI GetLastError(void);
+__declspec(dllimport) void CRT_WINAPI SetLastError(DWORD dwErrCode);
 __declspec(dllimport) BOOL CRT_WINAPI GetConsoleMode(HANDLE hConsoleHandle, DWORD* lpMode);
 __declspec(dllimport) BOOL CRT_WINAPI SetConsoleMode(HANDLE hConsoleHandle, DWORD dwMode);
 __declspec(dllimport) HANDLE CRT_WINAPI LoadLibraryA(const char* lpLibFileName);
@@ -1187,7 +1188,7 @@ int __crt_fd_snapshot_export(struct crt_fd_snapshot* snapshot) {
             GetCurrentProcess(),
             &duplicate,
             0,
-            fd_kind[fd] == CRT_FD_KIND_FILE ? 1 : 0,
+            0,
             DUPLICATE_SAME_ACCESS)) {
       int error = map_windows_error(GetLastError());
 
@@ -1259,6 +1260,9 @@ int __crt_fd_snapshot_import(const struct crt_fd_snapshot* snapshot) {
                            &duplicate, 0, 0, DUPLICATE_SAME_ACCESS)) {
         return map_windows_error(GetLastError());
       }
+      if ((entry->flags & CRT_FD_SNAPSHOT_FLAG_REMOTE_PROCESS_HANDLE) != 0) {
+        CloseHandle((HANDLE)entry->handle);
+      }
     }
     if (fd_kind[entry->fd] != CRT_FD_KIND_NONE &&
         fd_table[entry->fd] != 0 &&
@@ -1281,6 +1285,9 @@ void __crt_fd_snapshot_dispose(struct crt_fd_snapshot* snapshot) {
   for (i = 0; i < snapshot->count && i < CRT_FD_SNAPSHOT_MAX; ++i) {
     if (snapshot->entries[i].handle != 0 &&
         snapshot->entries[i].handle != (uintptr_t)INVALID_HANDLE_VALUE) {
+      if ((snapshot->entries[i].flags & CRT_FD_SNAPSHOT_FLAG_REMOTE_PROCESS_HANDLE) != 0) {
+        continue;
+      }
       if (snapshot->entries[i].kind == CRT_FD_SNAPSHOT_KIND_SOCKET) {
         init_winsock();
         if (winsock.closesocket != 0) {
@@ -1308,22 +1315,53 @@ static int fd_snapshot_has_socket(const struct crt_fd_snapshot* snapshot) {
   return 0;
 }
 
-static long fd_snapshot_prepare_socket_duplicates(
+static long fd_snapshot_remove(struct crt_fd_snapshot* snapshot, int fd);
+
+static long fd_snapshot_prepare_child_duplicates(
     struct crt_fd_snapshot* snapshot,
+    HANDLE child_process,
     DWORD child_pid) {
   unsigned int i;
   long init_result;
 
-  if (!fd_snapshot_has_socket(snapshot)) {
-    return 0;
-  }
-  init_result = init_winsock();
-  if (init_result < 0) {
-    return init_result;
+  if (fd_snapshot_has_socket(snapshot)) {
+    init_result = init_winsock();
+    if (init_result < 0) {
+      return init_result;
+    }
   }
   for (i = 0; i < snapshot->count && i < CRT_FD_SNAPSHOT_MAX; ++i) {
     struct crt_fd_snapshot_entry* entry = &snapshot->entries[i];
 
+    if (entry->kind == CRT_FD_SNAPSHOT_KIND_FILE) {
+      HANDLE child_handle = 0;
+
+      if (entry->handle == 0 || entry->handle == (uintptr_t)INVALID_HANDLE_VALUE) {
+        return -EINVAL;
+      }
+      if (!DuplicateHandle(
+              GetCurrentProcess(),
+              (HANDLE)entry->handle,
+              child_process,
+              &child_handle,
+              0,
+              0,
+              DUPLICATE_SAME_ACCESS)) {
+        int error = map_windows_error(GetLastError());
+
+        if (error == EBADF) {
+          fd_snapshot_remove(snapshot, entry->fd);
+          --i;
+          continue;
+        }
+        return -error;
+      }
+      CloseHandle((HANDLE)entry->handle);
+      entry->handle = (uintptr_t)child_handle;
+      entry->flags &= ~CRT_FD_SNAPSHOT_FLAG_INHERITABLE;
+      entry->flags |= CRT_FD_SNAPSHOT_FLAG_REMOTE_PROCESS_HANDLE;
+      continue;
+    }
     if (entry->kind != CRT_FD_SNAPSHOT_KIND_SOCKET) {
       continue;
     }
@@ -1350,7 +1388,7 @@ static void fd_set_inherit_for_fork(unsigned char touched[CRT_FD_TABLE_SIZE],
 
   init_fd_table();
   memset(touched, 0, CRT_FD_TABLE_SIZE);
-  for (fd = 0; fd < CRT_FD_TABLE_SIZE; ++fd) {
+  for (fd = 3; fd < CRT_FD_TABLE_SIZE; ++fd) {
     DWORD flags = 0;
 
     if (fd_kind[fd] != CRT_FD_KIND_FILE ||
@@ -1380,6 +1418,31 @@ static void fd_restore_inherit_after_fork(const unsigned char touched[CRT_FD_TAB
         fd_table[fd] != INVALID_HANDLE_VALUE) {
       (void)SetHandleInformation(
           fd_table[fd], HANDLE_FLAG_INHERIT, old_flags[fd] & HANDLE_FLAG_INHERIT);
+    }
+  }
+}
+
+static void fd_clear_inherit_for_spawn(unsigned char touched[CRT_FD_TABLE_SIZE],
+                                       DWORD old_flags[CRT_FD_TABLE_SIZE]) {
+  int fd;
+
+  init_fd_table();
+  memset(touched, 0, CRT_FD_TABLE_SIZE);
+  for (fd = 0; fd < CRT_FD_TABLE_SIZE; ++fd) {
+    DWORD flags = 0;
+
+    if (fd_kind[fd] != CRT_FD_KIND_FILE ||
+        fd_table[fd] == 0 ||
+        fd_table[fd] == INVALID_HANDLE_VALUE) {
+      continue;
+    }
+    if (!GetHandleInformation(fd_table[fd], &flags)) {
+      continue;
+    }
+    touched[fd] = 1;
+    old_flags[fd] = flags;
+    if ((flags & HANDLE_FLAG_INHERIT) != 0) {
+      (void)SetHandleInformation(fd_table[fd], HANDLE_FLAG_INHERIT, 0);
     }
   }
 }
@@ -1579,7 +1642,7 @@ static long open_spawn_action_handle(
   }
   security_attributes.nLength = sizeof(security_attributes);
   security_attributes.lpSecurityDescriptor = 0;
-  security_attributes.bInheritHandle = 1;
+  security_attributes.bInheritHandle = 0;
   *out = CreateFileA(host_path, access, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                      &security_attributes, disposition, file_flags, 0);
   return *out == INVALID_HANDLE_VALUE ? fail_last_error() : 0;
@@ -1715,7 +1778,7 @@ static long fd_snapshot_dup2(struct crt_fd_snapshot* snapshot, int fd, int new_f
           GetCurrentProcess(),
           &duplicate,
           0,
-          source_entry->kind == CRT_FD_SNAPSHOT_KIND_FILE ? 1 : 0,
+          0,
           DUPLICATE_SAME_ACCESS)) {
     return -map_windows_error(GetLastError());
   }
@@ -3723,6 +3786,10 @@ long __crt_sys_posix_spawn(
   int fd_snapshot_pipe_mode = 0;
   HANDLE fd_snapshot_pipe_read = 0;
   HANDLE fd_snapshot_pipe_write = 0;
+  unsigned char spawn_inherit_touched[CRT_FD_TABLE_SIZE];
+  DWORD spawn_old_inherit_flags[CRT_FD_TABLE_SIZE];
+  BOOL process_created;
+  DWORD process_error;
   long result;
   long remembered;
 
@@ -3761,12 +3828,11 @@ long __crt_sys_posix_spawn(
     __crt_fd_snapshot_dispose(&fd_snapshot);
     RETURN(result);
   }
-  fd_snapshot_pipe_mode = fd_snapshot_has_socket(&fd_snapshot);
-  if (!fd_snapshot_pipe_mode) {
-    startup.hStdInput = INVALID_HANDLE_VALUE;
-    startup.hStdOutput = INVALID_HANDLE_VALUE;
-    startup.hStdError = INVALID_HANDLE_VALUE;
-  }
+  fd_snapshot_pipe_mode = 1;
+  startup.dwFlags &= ~CRT_STARTF_USESTDHANDLES;
+  startup.hStdInput = INVALID_HANDLE_VALUE;
+  startup.hStdOutput = INVALID_HANDLE_VALUE;
+  startup.hStdError = INVALID_HANDLE_VALUE;
   if (fd_snapshot_pipe_mode) {
     struct {
       DWORD nLength;
@@ -3781,6 +3847,7 @@ long __crt_sys_posix_spawn(
       __crt_fd_snapshot_dispose(&fd_snapshot);
       RETURN(fail_last_error());
     }
+    (void)SetHandleInformation(fd_snapshot_pipe_write, HANDLE_FLAG_INHERIT, 0);
     format_hex_u64((unsigned long long)(uintptr_t)fd_snapshot_pipe_read, bootstrap_pipe_text);
     creation_flags |= CRT_CREATE_SUSPENDED;
   } else {
@@ -3861,7 +3928,9 @@ long __crt_sys_posix_spawn(
     RETURN(-ENOMEM);
   }
   memset(&process, 0, sizeof(process));
-  if (!CreateProcessA(
+  memset(spawn_old_inherit_flags, 0, sizeof(spawn_old_inherit_flags));
+  fd_clear_inherit_for_spawn(spawn_inherit_touched, spawn_old_inherit_flags);
+  process_created = CreateProcessA(
           application_path,
           command_line,
           0,
@@ -3871,7 +3940,10 @@ long __crt_sys_posix_spawn(
           environment_block,
           current_directory,
           &startup,
-          &process)) {
+          &process);
+  process_error = process_created ? 0 : GetLastError();
+  fd_restore_inherit_after_fork(spawn_inherit_touched, spawn_old_inherit_flags);
+  if (!process_created) {
     free(environment_block);
     if (fd_snapshot_ready) {
       __crt_fd_snapshot_dispose(&fd_snapshot);
@@ -3882,6 +3954,7 @@ long __crt_sys_posix_spawn(
     if (fd_snapshot_pipe_write != 0) {
       CloseHandle(fd_snapshot_pipe_write);
     }
+    SetLastError(process_error);
     RETURN(fail_last_error());
   }
   free(environment_block);
@@ -3890,7 +3963,8 @@ long __crt_sys_posix_spawn(
 
     CloseHandle(fd_snapshot_pipe_read);
     fd_snapshot_pipe_read = 0;
-    result = fd_snapshot_prepare_socket_duplicates(&fd_snapshot, process.dwProcessId);
+    result = fd_snapshot_prepare_child_duplicates(
+        &fd_snapshot, process.hProcess, process.dwProcessId);
     if (result == 0) {
       result = __crt_fd_snapshot_encode(&fd_snapshot, fd_snapshot_text, sizeof(fd_snapshot_text));
       if (result != 0) {

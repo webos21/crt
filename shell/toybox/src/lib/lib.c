@@ -805,7 +805,7 @@ int wfchmodat(int fd, char *name, mode_t mode)
 static char *tempfile2zap;
 static void tempfile_handler(void)
 {
-  if (1 < (long)tempfile2zap) unlink(tempfile2zap);
+  if (1 < (uintptr_t)tempfile2zap) unlink(tempfile2zap);
 }
 
 // Open a temporary file to copy an existing file into.
