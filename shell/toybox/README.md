@@ -40,9 +40,9 @@ Current macOS smoke status:
 
 - `crt_toybox echo toybox-ok` passes.
 - `/system/bin/sh` is an mksh symlink in the generated rootfs.
-- Single external toybox applet execution through mksh works.
-- Compound external-command sequencing and pipeline teardown still need
-  waitpid/SIGCHLD/job-loop hardening before porting recipes can switch to this
-  shell by default.
+- mksh should execute toybox applets through the normal libc/PAL fork path.
+- Windows currently needs real libc/PAL fork emulation before mksh external
+  commands, command lists, and pipelines can be considered stable. Do not solve
+  this by adding mksh-specific spawn shortcuts.
 
 Follow the shared import and patch policy in `docs/shell_import.md`.

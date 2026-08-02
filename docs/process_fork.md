@@ -60,8 +60,10 @@ The internal hook boundary is:
 - `__crt_atfork_child()` resets CRT runtime state first, then runs user child
   handlers in registration order.
 
-Windows currently returns `ENOTSUP` for `_Fork()`/`fork()`. This is an explicit
-bootstrap policy, not the long-term target.
+Windows currently returns `ENOTSUP` for `_Fork()`/`fork()`. This is only the
+current incomplete implementation state. The shell goal requires a libc/PAL
+Windows fork implementation that lets unmodified mksh resume in the child
+branch after `fork()`.
 
 ## Windows Direction
 
@@ -80,20 +82,18 @@ The CRT should instead build a project-owned Windows fork tranche around:
 - child process registry integration for `waitpid()`;
 - tight tests for the exact shell patterns required by mksh/toybox.
 
-Before a full Windows `fork()` emulation is attempted, `posix_spawn()` and the
-CRT shell use the same child bootstrap record that a constrained fork would use.
-The current implementation transports fd snapshots through `CRT_FD_SNAPSHOT`,
-wraps them in `CRT_CHILD_BOOTSTRAP`, applies `posix_spawn_file_actions_*` to
-that snapshot, filters `FD_CLOEXEC` descriptors, and imports fd/cwd/rootfs/signal
-mask state in CRT startup before `main()`.
+The current `posix_spawn()` implementation transports fd snapshots through
+`CRT_FD_SNAPSHOT`, wraps them in `CRT_CHILD_BOOTSTRAP`, applies
+`posix_spawn_file_actions_*` to that snapshot, filters `FD_CLOEXEC`
+descriptors, and imports fd/cwd/rootfs/signal mask state in CRT startup before
+`main()`. Windows `fork()` should reuse those pieces, but they are not
+sufficient by themselves: fork must also restore register/stack/runtime state
+so the child returns from the original `fork()` call with value `0`.
 
-The private `__crt_shell_fork_exec()` helper is the phase-1 shell contract. It
-wraps the clearer `__crt_shell_spawn()` child-spec API, which carries path,
-argv/envp, file actions, cwd, rootfs, signal mask/default reset, and stdio flush
-policy as one shell child contract. This supports shell-style "prepare child fd
-state, create child, exec target" flow, but it does not copy the parent's stack,
-heap, or program counter. Public `fork()` remains `ENOTSUP` on Windows until a
-stricter compatibility tranche is implemented and tested.
+The private `__crt_shell_fork_exec()` helper remains a useful direct child-spec
+API for tests and explicit spawn-like shell operations, but it must not become
+the way mksh external commands are made to work. mksh should exercise libc's
+public `fork()` path.
 
 ## Test Policy
 

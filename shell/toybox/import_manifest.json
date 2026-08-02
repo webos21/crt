@@ -41,7 +41,7 @@
     "Android external/toybox has been imported under shell/toybox/src.",
     "The CRT overlay under shell/toybox/crt keeps the first build to a minimal configure-friendly applet set.",
     "Applets with deeper dependencies such as gzip/libz, mount, ps, pgrep, pkill, nproc, flock, and unshare are intentionally disabled until the CRT/PAL surface is ready.",
-    "macOS rootfs uses symlink aliases for /system/bin/sh and toybox applets; Windows keeps copy-based .exe aliases.",
-    "The next shell integration gap is mksh external-command sequencing and pipeline teardown with toybox applets, which points at waitpid/SIGCHLD/job-loop fidelity rather than a toybox source patch."
+    "macOS/Linux rootfs uses symlink aliases for /system/bin/sh and toybox applets; Windows keeps copy-based .exe aliases.",
+    "The next shell integration gap is mksh external-command sequencing and pipeline teardown with toybox applets. On Windows this points at libc/PAL fork emulation plus waitpid/SIGCHLD fidelity rather than mksh-specific spawn shortcuts."
   ]
 }

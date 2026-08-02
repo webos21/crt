@@ -23,9 +23,6 @@
  */
 
 #include "sh.h"
-#ifdef MKSH_CRT_WINDOWS_SPAWN_SIMPLE
-#include <spawn.h>
-#endif
 
 __RCSID("$MirOS: src/bin/mksh/exec.c,v 1.224 2020/08/27 19:52:43 tg Exp $");
 
@@ -45,38 +42,6 @@ static void dbteste_error(Test_env *, int, const char *);
 /* XXX: horrible kludge to fit within the framework */
 static void plain_fmt_entry(char *, size_t, unsigned int, const void *);
 static void select_fmt_entry(char *, size_t, unsigned int, const void *);
-
-#ifdef MKSH_CRT_WINDOWS_SPAWN_SIMPLE
-static int
-crt_windows_spawn_simple(struct op *t, const char *path, const char **ap, int flags)
-{
-	pid_t pid;
-	int status;
-	int result;
-	char **envp;
-	union mksh_ccphack args;
-
-	if ((flags & (XEXEC | XBGND | XPIPEI | XPIPEO | XXCOM | XPCLOSE |
-	    XCCLOSE | XCOPROC | XTIME)) != 0 ||
-	    t->ioact != NULL)
-		return (-1);
-
-	args.ro = ap;
-	envp = makenv();
-	result = posix_spawn(&pid, path, NULL, NULL, args.rw, envp);
-	if (result != 0)
-		return (result == ENOENT ? 127 : 126);
-	while (waitpid(pid, &status, 0) < 0) {
-		if (errno != EINTR)
-			return (125);
-	}
-	if (WIFEXITED(status))
-		return (WEXITSTATUS(status));
-	if (WIFSIGNALED(status))
-		return (128 + WTERMSIG(status));
-	return (125);
-}
-#endif
 
 /*
  * execute command tree
@@ -873,17 +838,6 @@ comexec(struct op *t, struct tbl * volatile tp, const char **ap,
 		texec.left = t;
 		texec.str = tp->val.s;
 		texec.args = ap;
-
-#ifdef MKSH_CRT_WINDOWS_SPAWN_SIMPLE
-		{
-			int spawn_rv = crt_windows_spawn_simple(t, tp->val.s,
-			    ap, flags);
-			if (spawn_rv >= 0) {
-				rv = spawn_rv;
-				break;
-			}
-		}
-#endif
 
 		/* in this case we do not fork, of course */
 		if (flags & XEXEC) {

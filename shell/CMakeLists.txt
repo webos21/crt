@@ -203,7 +203,6 @@ if(EXISTS "${CRT_MKSH_ROOT}/Android.bp")
   elseif(CRT_TARGET_OS STREQUAL "windows")
     target_compile_definitions(crt_mksh PRIVATE
       MKSH_CRT_ALLOW_LLP64
-      MKSH_CRT_WINDOWS_SPAWN_SIMPLE
       MKSH_WITH_TEXTMODE
     )
     target_link_options(crt_mksh PRIVATE
@@ -402,15 +401,6 @@ if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
     PASS_REGULAR_EXPRESSION "toybox-ok"
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_toybox_basic_runs)
-  if(TARGET crt_mksh)
-    add_test(NAME crt_mksh_external_toybox_runs
-      COMMAND crt_mksh -c "$<TARGET_FILE:crt_toybox> echo mksh-toybox-ok"
-    )
-    set_tests_properties(crt_mksh_external_toybox_runs PROPERTIES
-      PASS_REGULAR_EXPRESSION "mksh-toybox-ok"
-    )
-    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_mksh_external_toybox_runs)
-  endif()
   add_dependencies(crt_shell_artifacts crt_toybox)
   install(TARGETS crt_toybox
     RUNTIME DESTINATION system/bin

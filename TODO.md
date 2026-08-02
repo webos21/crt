@@ -1,422 +1,176 @@
-# TODO: Android-like Shell Environment
+# TODO: CRT Shell, Rootfs, And Porting Loop
 
-This note records the current diagnosis and plan for making shell/userland
-programs first-class CRT artifacts used by the port-test loop.
+This file tracks remaining work for the Android-like shell/rootfs environment
+used by CRT porting tests. Completed historical milestones are intentionally
+removed from this file; provenance and policy details belong in `docs/` and
+import manifests.
 
-## Direction
+## Current Baseline
 
-The proposed direction fits the project goal: run an Android-like shell and
-command environment on top of the Bionic-compatible CRT/PAL, rather than relying
-forever on MSYS, Git Bash, WSL, or another foreign Unix runtime for upstream
-`configure` scripts.
+- `shell/` is a core CRT artifact area, not a third-party port recipe.
+- `crt_tiny_sh`, Android `external/mksh`, and Android `external/toybox` are
+  built by CMake.
+- The generated runtime rootfs contains Android-like paths such as
+  `/system/bin`, `/bin`, `/usr/bin`, `/tmp`, `/dev`, and `/proc/self`.
+- `mksh` and a minimal toybox applet set are installed into the rootfs.
+- Windows uses copy-based applet aliases; Linux/macOS use symlink aliases.
+- `posix_spawn`, `waitpid`, fd snapshot transport, rootfs path translation, and
+  the first shell child process contract exist.
+- Windows public `fork()` remains unsupported today; making mksh work correctly
+  on Windows requires implementing fork semantics in libc/PAL, not adding
+  mksh-specific spawn shortcuts.
 
-The shell is not an ordinary porting recipe. It lives under `shell/`, at the
-same level as `libc/`, `libm/`, `libdl/`, `libstdc++/`, and `linker/`. Porting
-tests consume this shell after it exists.
+## Immediate Verification
 
-Android treats `mksh` and `toybox` as separate projects:
+- Re-run Windows x86_64 workflow after the latest mksh/toybox changes.
+- In Windows rootfs mksh, verify:
+  - `ls -al`
+  - `cd /system/bin; ./ls`
+  - `ls.exe`
+  - `toybox ls -al /`
+  - `echo hi | cat`
+  - `echo hi > /tmp/a; cat /tmp/a`
+- If `ls` still reports `Permission denied`, inspect Windows `stat()` and
+  `access(X_OK)` for extensionless PE applet aliases.
+- If `ls.exe` reports `can't fork`, continue with the Windows `fork()` tranche
+  in libc/PAL. Do not add mksh-specific `posix_spawn` bypasses.
 
-- `external/mksh`
-- `external/toybox`
+## Windows Fork Tranche
 
-The natural first target is:
+- Design and implement Windows `fork()` in libc/PAL so unmodified mksh can use
+  its normal `fork()` path.
+- Preserve the Bionic/POSIX contract that child execution resumes at the
+  `fork()` call site with return value `0`.
+- Reuse existing Windows child bootstrap pieces:
+  - `CreateProcess`
+  - fd snapshot export/import
+  - cwd/rootfs/env propagation
+  - signal mask/default propagation
+  - child registry and `waitpid()`
+- Add the missing fork-resume machinery:
+  - saved register/context state;
+  - stack mapping/copy policy;
+  - writable runtime/data segment policy;
+  - TLS/current-thread reset in the child;
+  - malloc/pthread/stdio/fd after-fork reset hooks;
+  - ASLR/base-address constraints or documented failure mode.
+- Keep mksh source changes limited to already-required Windows ABI/build
+  compatibility. Do not special-case mksh external commands around `fork()`.
 
-```text
-/system/bin/sh -> mksh
-/system/bin/<applets> -> toybox
-```
+## Shell Process Model After Fork
 
-Toybox's own shell can remain a later comparison point, but the first Android-
-shaped shell tranche should use `mksh` plus enough toybox applets to run simple
-configure scripts.
+- Validate mksh command execution through libc `fork()`:
+  - simple external commands;
+  - `cmd > file`;
+  - `cmd < file`;
+  - `2>&1`;
+  - fd 3 and higher;
+  - `cmd | cmd`;
+  - multi-stage pipeline teardown;
+  - child exit status propagation.
+- Keep Linux/macOS on the normal native `fork()` path.
 
-## What Already Exists In CRT
+## Signal, Wait, And Job Control
 
-The current CRT already has enough surface to start probing shell/userland
-ports:
+- Harden `waitpid()` for multiple shell children and pipeline children.
+- Add `SIGCHLD`-oriented tests for completed children.
+- Decide whether Windows child notification remains polling/wait-handle based
+  or grows a signal-like event bridge.
+- Improve interactive job-control approximation:
+  - Ctrl-C / Ctrl-Break delivery policy
+  - foreground process group behavior
+  - stopped-child status policy
+- Keep non-interactive configure-script behavior as the first priority.
 
-- project-owned `crt_tiny_sh` bootstrap runner installed into the runtime
-  rootfs as `/system/bin/sh`, `/bin/sh`, and `/usr/bin/sh`;
-- imported Android `external/mksh` source under `shell/mksh/src`, built as the
-  separate `crt_mksh` artifact and copied to `rootfs/system/bin/mksh`;
-- tiny shell coverage for `sh -c`, simple tokenization, `;`, `&&`, `||`,
-  pipelines, redirection, `$?`, simple `$VAR`, and leading assignments;
-- `posix_spawn`, `posix_spawnp`, `waitpid`, `wait`
-- `execve` as a documented shell-child contract on Windows: spawn the target
-  through the CRT child bootstrap path, wait, then exit with the child status
-- rootfs path mapping on Windows for paths such as `/tmp`, `/system/bin`,
-  `/dev/null`, and `/proc/self/exe`
-- `pipe`, `dup`, `dup2`, `open`, `close`, `read`, `write`, `lseek`
-- `stat`, `lstat`, `opendir`, `readdir`, `closedir`
-- `poll`, `select`, `isatty`, selected `ioctl`
-- Bionic-shaped `posix_spawnattr_*` and `posix_spawn_file_actions_*`
-- Windows fd snapshot transport for child bootstrap, including non-standard fd
-  inheritance and `FD_CLOEXEC` filtering
-- private `__crt_shell_spawn()` and `__crt_shell_fork_exec()` helpers for the
-  first shell-facing child process contract
-- stdio, scanf/printf, malloc, environment variables, locale, wchar, pthread
-- sockets and basic process/signal tests
+## Terminal And TTY
 
-This is enough for direct compile/link probes and some non-interactive process
-smoke tests, but not enough for a full shell environment yet.
+- Keep `/dev/tty` and `/dev/console` coherent on all hosts.
+- Improve Windows console handling for:
+  - `isatty`
+  - `tcgetattr` / `tcsetattr`
+  - `TIOCGWINSZ`
+  - close-on-exec behavior on console fds
+- Add mksh interactive smoke tests only after non-interactive command execution
+  is stable.
 
-## Major Missing Areas
+## Toybox Applet Expansion
 
-### 1. fork/exec Model
+Keep the enabled toybox applet set minimal and configure-oriented. Add applets
+only when the backing Bionic-compatible CRT/PAL surface is present.
 
-Shells assume a Unix process model. Pipelines, command substitution, subshells,
-and redirections often assume `fork` plus `exec`.
+Next likely applets:
 
-Windows cannot faithfully implement POSIX `fork()` over `CreateProcess`.
-Current public CRT policy is that `_Fork()` and `fork()` return `ENOTSUP` on
-Windows. Windows `execve()` is only supported for the shell-child contract: it
-spawns the target, waits, and exits with the child status rather than replacing
-the current image in place.
-
-Current direction:
-
-- keep `fork()` as a first-class Bionic PAL goal;
-- validate `_Fork()`, `fork()`, `pthread_atfork()`, fd inheritance, and wait
-  behavior on Linux/macOS first;
-- document Windows `ENOTSUP` as the bootstrap policy only;
-- design Windows fork emulation around `CreateProcess`, child CRT bootstrap,
-  and serialized runtime state import;
-- share fd table inheritance infrastructure between `fork()` emulation and
-  `posix_spawn`;
-- keep public `fork()` returning `ENOTSUP` on Windows until the emulation has a
-  tested Bionic-compatible policy;
-- avoid patching upstream first; prefer filling CRT/PAL gaps unless the
-  required behavior is fundamentally unavailable on Windows.
-
-### 2. FD Inheritance And close-on-exec
-
-Shells need descriptor inheritance and redirection to work predictably:
-
-- `2>&1`
-- pipes
-- here-docs
-- child fd passing
-- `FD_CLOEXEC`
-- `F_DUPFD_CLOEXEC`
-- nonblocking flags where scripts or applets probe them
-
-The Windows backend now has a child CRT startup path that can import a
-serialized parent fd table. The current `posix_spawn` path applies file actions
-to that snapshot before child launch, including non-standard fd inheritance.
-The remaining work is to harden this for broader shell patterns, socket
-duplication, process-group waits, and future fork emulation.
-
-### 3. Signal And Job Control
-
-Minimum non-interactive shell work likely needs:
-
-- `sigaction`
-- `sigprocmask`
-- `sigemptyset`
-- `sigfillset`
-- `sigaddset`
-- `sigdelset`
-- `sigismember`
-- `SIGCHLD`
-- `SIGINT`
-- `SIGTERM`
-- `SIGPIPE`
-
-Interactive shell/job-control work additionally needs:
-
-- `setpgid`
-- `getpgrp`
-- `tcgetpgrp`
-- `tcsetpgrp`
-- `killpg`
-- stopped child status
-- `WUNTRACED`
-- process group semantics
-
-Windows needs a documented console Ctrl-C/Ctrl-Break mapping policy.
-
-### 4. Terminal, tty, And pty
-
-For line editing and interactive behavior, mksh will need terminal APIs:
-
-- `termios.h`
-- `tcgetattr`
-- `tcsetattr`
-- `TIOCGWINSZ`
-- `/dev/tty`
-- possibly pty/ConPTY support later
-
-The first configure-script shell can defer most interactive tty behavior, but
-`isatty`, `ctermid`, `/dev/tty`, and window-size `ioctl` behavior should remain
-coherent.
-
-### 5. User, Group, And Resource Database
-
-mkshrc, toybox applets, and configure probes are likely to expose:
-
-- `pwd.h`
-- `grp.h`
-- `getuid`
-- `geteuid`
-- `getgid`
-- `getegid`
-- `getpwuid`
-- `getpwnam`
-- `getgrgid`
-- `getgrnam`
-- `sys/resource.h`
-- `getrlimit`
-- `setrlimit`
-
-Windows should use synthetic uid/gid/resource-limit policy first, documented as
-PAL behavior. Avoid exposing native Windows account/SID shapes through public
-CRT headers.
-
-### 6. Filesystem And Rootfs Expansion
-
-The runtime rootfs should grow deliberately:
-
-```text
-/system/bin/sh
-/system/bin/toybox
-/system/etc/mkshrc
-/bin
-/usr/bin
-/tmp
-/data/local/tmp
-/dev/null
-/dev/tty
-/proc/self/exe
-/proc/self/fd
-```
-
-Toybox applets may eventually require virtual files such as:
-
-- `/proc/mounts`
-- `/proc/stat`
-- `/proc/self/status`
-
-Add virtual files narrowly as ports require them. Do not pretend to provide a
-complete Linux procfs/devfs.
-
-### 7. libc Header And Function Gaps
-
-Likely upcoming public CRT surface:
-
-- `termios.h`
-- `sys/resource.h`
-- `pwd.h`
-- `grp.h`
-- `fnmatch.h`
-- `glob.h`
-- `regex.h`
-- `getopt`
-- `getopt_long`
-- `mkstemp`
-- `mkdtemp`
-- `umask`
+- `which`
+- `readlink`
+- `stat`
+- `printf`
+- `date`
+- `touch`
 - `chmod`
-- `fchmod`
-- `chown`
-- `lchown`
-- `fchown`
-- `wcwidth`
-- `wcswidth`
-
-Every new public header/type/macro/symbol should be checked against Android
-Bionic first.
-
-## libm, libdl, And linker Implications
-
-`mksh` itself probably does not need much `libm`.
-
-Toybox applets may need more `libm` depending on which applets are enabled. Keep
-the first toybox config minimal and add applets gradually.
-
-`libdl` is probably not central to the first shell tranche.
-
-The dynamic linker should not block the first milestone. Build `mksh` and
-minimal toybox as static CRT executables first. Android-like shared `/system/bin`
-behavior can wait until shared ABI/export policy and the project linker/loader
-direction mature.
-
-## Proposed Milestones
-
-### Milestone 1: Source And Artifact Pinning
-
-Add project-owned shell metadata:
-
-- `shell/mksh/README.md`
-- `shell/mksh/import_manifest.json`
-- `shell/toybox/README.md`
-- `shell/toybox/import_manifest.json`
-- `docs/shell_import.md`
-
-Record:
-
-- upstream URL;
-- tag or commit;
-- archive/source name;
-- hash;
-- Android build flags or selected config;
-- host status.
-
-### Milestone 2: mksh Compile Inventory
-
-Use Android `external/mksh` source and Android build flags as the reference.
-Compile with `crt-cc` and record missing:
-
-- headers;
-- types;
-- macros;
-- symbols;
-- errno behavior;
-- process/runtime assumptions.
-
-Expected early gaps:
-
-- `termios.h`
-- `sys/resource.h`
-- `pwd.h`
-- `grp.h`
-- signal APIs
-- process/fd inheritance behavior
-
-Current status: Android `external/mksh` now compiles and links on macOS using
-the Android.bp source/define set. The first inventory tranche filled CRT/PAL
-gaps for `sys/sysmacros.h`, `sys/resource.h`, `pwd.h`, `grp.h`, `termios.h`,
-`libgen.h`, `langinfo.h`, `sys/times.h`, `sys/file.h`, `strlcpy`, `strlcat`,
-signal names, `sleep`, `alarm`, `sigsuspend`, uid/gid/resource database stubs,
-and `struct stat` timespec fields. Linux/Windows verification is still
-required before this milestone is closed.
-
-### Milestone 3: Non-interactive Shell
-
-Goal:
-
-```sh
-sh -c 'echo ok'
-```
-
-The project-owned tiny shell now covers this bootstrap goal and a little more:
-pipeline, redirection, command connectors, simple variable expansion, and
-assignment smoke. The remaining work in this milestone is to repeat the same
-surface with imported Android `external/mksh`. The first mksh `-c` smoke now
-passes on macOS; Linux/Windows must confirm the same.
-
-Then validate:
-
-- variable assignment;
-- `for`;
-- `case`;
-- shell functions;
-- basic redirection;
-- simple external command invocation.
-
-Explicitly defer:
-
-- job control;
-- pty;
-- full line editing;
-- full signal mask semantics.
-
-### Milestone 4: Pipeline And Subshell
-
-Goal:
-
-```sh
-echo hi | cat
-x=$(echo hi)
-(echo hi)
-cat <<EOF
-hi
-EOF
-```
-
-This milestone requires the Windows process/fd model to become substantially
-stronger:
-
-- pipe inheritance;
-- child fd table serialization;
-- redirection actions beyond standard descriptors;
-- close-on-exec behavior.
-
-### Milestone 5: Toybox Minimal Applets
-
-Start with a minimal applet set:
-
-- `cat`
-- `echo`
-- `pwd`
-- `true`
-- `false`
-- `mkdir`
-- `rm`
-- `cp`
-- `mv`
+- `ln`
+- `grep`
+- `sed`
 - `test`
 - `expr`
-- `sed`
 
-Defer applets that need deeper host integration:
+Defer applets that require deeper Linux-like host integration:
 
 - `ps`
 - `mount`
+- `df`
 - `ifconfig`
 - `stty`
 - `login`
-- full device/procfs-heavy commands
+- device-manager or procfs-heavy commands
 
-### Milestone 6: Configure Smoke
+## Virtual Rootfs Files
 
-Run configure scripts through the CRT shell/rootfs:
+Add virtual files narrowly as shell or porting workloads require them. Do not
+pretend to provide a complete Linux procfs/devfs.
 
-```sh
-/system/bin/sh configure --help
-```
+Likely next virtual paths:
 
-Then:
+- `/proc/mounts`
+- `/proc/self/status`
+- `/proc/self/cmdline`
+- `/proc/self/environ`
+- `/proc/stat`
+- `/dev/zero`
+- `/dev/random`
+- `/dev/urandom`
 
-- zlib `./configure`
-- libpng `./configure`
-- SQLite configure or shell build path
+## Porting Loop Integration
 
-Record all failures as CRT/PAL/sysroot work items before considering upstream
-patches.
+- Switch selected porting smoke tests from host shell usage to CRT rootfs shell
+  once mksh plus toybox can run simple configure scripts.
+- Start with configure-only probes:
+  - `configure --help`
+  - zlib `./configure`
+  - libpng `./configure`
+  - SQLite build probes
+  - libffi configure probes
+- For every failure:
+  1. identify missing header/type/macro/symbol/behavior;
+  2. check Android Bionic public headers and implementation;
+  3. extend CRT/PAL/sysroot rather than patching upstream first;
+  4. record host-specific policy differences in `docs/`.
 
-## Recommended First Target
+## Known CRT/PAL Gaps Exposed By Shell Work
 
-Do not start with "fully interactive Android shell".
+- Windows `fork()` emulation remains the main shell blocker.
+- Shell redirection and pipeline handling on Windows should be validated through
+  mksh's normal `fork()` path after libc/PAL fork support lands.
+- Full interactive job control is not complete.
+- `/proc` and `/dev` are intentionally partial.
+- Some toybox applets remain disabled until supporting APIs are implemented.
 
-Start with:
+## Documentation To Keep Current
 
-```text
-non-interactive /system/bin/sh capable of running simple configure scripts
-```
-
-Then add toybox applets and rootfs features as configure workloads demand them.
-
-## Current Toybox Tranche Status
-
-Android `external/toybox` is now imported as a core `shell/` artifact, not as a
-porting recipe. The first CRT overlay keeps a minimal configure-oriented applet
-set and builds `/system/bin/toybox`.
-
-Completed in this tranche:
-
-- minimal toybox import and CMake target;
-- CRT overlay `generated/config.h` and `generated/newtoys.h`;
-- rootfs installation of `/system/bin/toybox`;
-- POSIX-host symlink applet aliases and Windows copy-based aliases;
-- initial libc surface exposed by toybox/mksh inventory: `tcflush` family,
-  `xattr` no-attribute stubs, `inotify` ENOSYS stubs, and rootfs path mapping
-  for Linux/macOS `exec` and common file APIs.
-
-Remaining before using the CRT shell for real porting recipes:
-
-- harden mksh external-command sequencing after a toybox child exits;
-- harden mksh pipeline teardown with toybox applets;
-- add focused waitpid/SIGCHLD/job-loop tests that reproduce the compound command
-  hangs observed on macOS;
-- expand toybox applets only when the backing Bionic-compatible CRT/PAL surface
-  is implemented.
+- `docs/android_shell_environment.md`
+- `docs/process_fork.md`
+- `docs/windows_fork_emulation.md`
+- `docs/job_control.md`
+- `docs/sysroot_ports.md`
+- `shell/mksh/README.md`
+- `shell/toybox/README.md`
+- `shell/*/import_manifest.json`

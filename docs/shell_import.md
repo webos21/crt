@@ -174,6 +174,6 @@ privilege and UX tradeoffs there.
 
 The remaining shell milestone is not "make toybox compile"; that part is
 working for the minimal applet set. The next gap is mksh external-command
-sequencing and pipeline teardown when the child is a CRT toybox applet. Single
-external applet execution works, but command lists and pipelines still expose
-waitpid/SIGCHLD/job-loop fidelity work.
+sequencing and pipeline teardown when the child is a CRT toybox applet. On
+Windows this must be solved by libc/PAL `fork()` emulation plus waitpid/SIGCHLD
+fidelity, not by adding mksh-specific `posix_spawn()` shortcuts.

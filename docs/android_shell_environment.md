@@ -150,9 +150,13 @@ The source location policy is:
 
 ## Process API Tranche
 
-Windows cannot implement POSIX `fork()` faithfully over `CreateProcess`. The
-project should therefore avoid designing the shell port around `fork` as a hard
-requirement. The first process APIs are:
+The shell must be allowed to exercise the normal Unix `fork()` path. Android
+mksh, toybox applets, configure scripts, pipelines, redirections, and command
+substitution all use that process model as a baseline. Windows cannot obtain
+that contract from `CreateProcessA` alone, but the compatibility boundary must
+still live in libc/PAL rather than in mksh-specific source changes.
+
+The first process APIs are:
 
 - `posix_spawn()` / `posix_spawnp()`;
 - `waitpid()` / `wait()`;
@@ -192,8 +196,10 @@ Next required process improvements:
 - implement `posix_spawn_file_actions_addfchdir_np` once `fchdir()` is available;
 - refine signal mask/default and scheduler attributes as those libc surfaces
   mature;
-- decide whether a shell port needs an internal fork emulation layer or can be
-  adapted to `posix_spawn`.
+- implement Windows `fork()` emulation in libc/PAL so unmodified mksh can enter
+  its normal child branch after `fork()`;
+- keep `posix_spawn()` as a useful primitive, but do not use mksh-specific
+  `posix_spawn()` shortcuts to hide missing `fork()` behavior.
 
 See `docs/process_fork.md` for the fork contract and Windows emulation plan.
 
