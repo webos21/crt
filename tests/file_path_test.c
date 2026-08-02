@@ -338,7 +338,6 @@ int main(void) {
     close(fd);
     return fail("dirfd fstat");
   }
-#if !defined(CRT_TARGET_OS_WINDOWS)
   memset(&st, 0, sizeof(st));
   if (fstatat(dirfd(dir), "sample.tmp", &st, 0) != 0 ||
       !S_ISREG(st.st_mode) ||
@@ -350,7 +349,26 @@ int main(void) {
     close(fd);
     return fail("dirfd fstatat metadata");
   }
-#endif
+  memset(&st, 0, sizeof(st));
+  if (fstatat(dirfd(dir), ".", &st, 0) != 0 ||
+      !S_ISDIR(st.st_mode) ||
+      st.st_blksize == 0 ||
+      st.st_dev == 0 ||
+      st.st_ino == 0) {
+    closedir(dir);
+    close(fd);
+    return fail("dirfd fstatat dot metadata");
+  }
+  memset(&st, 0, sizeof(st));
+  if (fstatat(dirfd(dir), "..", &st, 0) != 0 ||
+      !S_ISDIR(st.st_mode) ||
+      st.st_blksize == 0 ||
+      st.st_dev == 0 ||
+      st.st_ino == 0) {
+    closedir(dir);
+    close(fd);
+    return fail("dirfd fstatat dotdot metadata");
+  }
   while ((entry = readdir(dir)) != 0) {
     if (strcmp(entry->d_name, "sample.tmp") == 0) {
       found_sample = 1;

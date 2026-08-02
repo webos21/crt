@@ -3055,6 +3055,30 @@ long __crt_sys_realpath_path(const char* path, char* resolved_path, unsigned lon
   return 0;
 }
 
+static long normalize_final_handle_path(char* path, unsigned long size) {
+  static const char dos_prefix[] = "\\\\?\\";
+  static const char unc_prefix[] = "\\\\?\\UNC\\";
+  size_t prefix_len;
+  size_t path_len;
+
+  if (strncmp(path, unc_prefix, sizeof(unc_prefix) - 1) == 0) {
+    prefix_len = sizeof(unc_prefix) - 1;
+    path_len = strlen(path + prefix_len);
+    if (path_len + 3 > size) {
+      return -ERANGE;
+    }
+    memmove(path + 2, path + prefix_len, path_len + 1);
+    path[0] = '\\';
+    path[1] = '\\';
+    return 0;
+  }
+  if (strncmp(path, dos_prefix, sizeof(dos_prefix) - 1) == 0) {
+    prefix_len = sizeof(dos_prefix) - 1;
+    memmove(path, path + prefix_len, strlen(path + prefix_len) + 1);
+  }
+  return 0;
+}
+
 long __crt_sys_realpath_fd(int fd, char* resolved_path, unsigned long size) {
   HANDLE handle = get_fd_handle(fd);
   DWORD result;
@@ -3072,7 +3096,7 @@ long __crt_sys_realpath_fd(int fd, char* resolved_path, unsigned long size) {
   if (result >= (DWORD)size) {
     return -ERANGE;
   }
-  return 0;
+  return normalize_final_handle_path(resolved_path, size);
 }
 
 long __crt_sys_readlink(const char* path, char* buf, unsigned long size) {
