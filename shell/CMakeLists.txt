@@ -104,7 +104,6 @@ if(EXISTS "${CRT_MKSH_ROOT}/Android.bp")
   )
   target_compile_definitions(crt_mksh PRIVATE
     __ANDROID__
-    DEBUG_LEAKS
     MKSH_ASSUME_UTF8
     MKSH_DONT_EMIT_IDSTRING
     MKSH_NOPROSPECTOFWORK

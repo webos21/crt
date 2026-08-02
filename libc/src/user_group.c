@@ -25,11 +25,11 @@ static struct group synthetic_group = {
 };
 
 uid_t getuid(void) {
-  return 0;
+  return geteuid();
 }
 
 gid_t getgid(void) {
-  return 0;
+  return getegid();
 }
 
 gid_t getegid(void) {

@@ -184,6 +184,7 @@ struct crt_darwin_flock {
 #define CRT_DARWIN_FIONREAD 0x4004667fUL
 #define CRT_DARWIN_TIOCGPGRP 0x40047477UL
 #define CRT_DARWIN_TIOCSPGRP 0x80047476UL
+#define CRT_DARWIN_TIOCGETA 0x40487413UL
 #define CRT_DARWIN_TIOCGWINSZ 0x40087468UL
 #define CRT_DARWIN_TIOCSWINSZ 0x80087467UL
 
@@ -538,6 +539,18 @@ static int path_is_absolute(const char* path) {
 }
 
 #if !defined(CRT_TARGET_OS_WINDOWS)
+static int rootfs_path_is_dev_tty(const char* path) {
+  return path != 0 && strcmp(path, "/dev/tty") == 0;
+}
+
+#if defined(CRT_TARGET_OS_MACOS)
+static int macos_use_host_dev_tty(void) {
+  const char* value = getenv("CRT_USE_HOST_TTY");
+
+  return value != 0 && value[0] == '1' && value[1] == 0;
+}
+#endif
+
 static const char* rootfs_path_for_host(const char* path, char buffer[PATH_MAX]) {
   const char* root;
   size_t root_len;
@@ -1023,6 +1036,11 @@ int open(const char* path, int flags, ...) {
     syscall_flags &= ~O_DIRECTORY;
   }
 #if !defined(CRT_TARGET_OS_WINDOWS)
+#if defined(CRT_TARGET_OS_MACOS)
+  if (rootfs_path_is_dev_tty(path) && !macos_use_host_dev_tty()) {
+    return (int)__set_errno(ENXIO);
+  }
+#endif
   path = rootfs_path_for_host(path, translated_path);
 #endif
   fd = (int)normalize_syscall_result(__crt_sys_open(path, syscall_flags, mode));
@@ -1227,6 +1245,9 @@ char* mkdtemp(char* template_path) {
 }
 
 int close(int fd) {
+  if (fd < 0) {
+    return (int)__set_errno(EBADF);
+  }
   return (int)normalize_syscall_result(__crt_sys_close(fd));
 }
 
@@ -1599,12 +1620,23 @@ int isatty(int fd) {
   }
   return result != 0;
 #else
-  struct stat st;
+  char termios_probe[128];
+  unsigned long request = TCGETS;
+  long result;
 
-  if (fstat(fd, &st) != 0) {
+#if defined(CRT_TARGET_OS_MACOS)
+  if (!macos_use_host_dev_tty()) {
+    __set_errno(ENOTTY);
     return 0;
   }
-  return S_ISCHR(st.st_mode);
+  request = CRT_DARWIN_TIOCGETA;
+#endif
+  result = __crt_sys_ioctl(fd, request, termios_probe);
+  if (result < 0 && result >= -4095) {
+    __set_errno((int)-result);
+    return 0;
+  }
+  return result >= 0;
 #endif
 }
 
