@@ -53,6 +53,7 @@ set(CRT_LIBC_SOURCES
   src/wctype.c
   src/xattr.c
   string/memchr.c
+  string/memrchr.c
   string/memccpy.c
   string/memcmp.c
   string/memcpy.c

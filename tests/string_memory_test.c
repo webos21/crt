@@ -65,6 +65,11 @@ int main(void) {
       memchr(buffer, 0x5a, 0) != 0) {
     return fail("memchr");
   }
+  if (memrchr(buffer, 0x5a, sizeof(buffer)) != buffer + sizeof(buffer) - 1 ||
+      memrchr(buffer, 0x11, sizeof(buffer)) != 0 ||
+      memrchr(buffer, 0x5a, 0) != 0) {
+    return fail("memrchr");
+  }
 
   memset(buffer, 0, sizeof(buffer));
   if (memccpy(buffer, source, 'd', sizeof(source)) != buffer + 4 ||

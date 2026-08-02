@@ -1,4 +1,5 @@
 #include <poll.h>
+#include <errno.h>
 #include <stdio.h>
 #include <sys/select.h>
 #include <unistd.h>
@@ -13,6 +14,7 @@ int main(void) {
   struct pollfd pfd;
   fd_set readfds;
   struct timeval tv;
+  struct timespec ts;
   char byte = 'Q';
   char readback = 0;
   int result;
@@ -83,6 +85,27 @@ int main(void) {
     close(pipefd[0]);
     close(pipefd[1]);
     return fail("select timeout");
+  }
+
+  FD_ZERO(&readfds);
+  FD_SET(pipefd[0], &readfds);
+  ts.tv_sec = 0;
+  ts.tv_nsec = 0;
+  result = pselect(pipefd[0] + 1, &readfds, 0, 0, &ts, 0);
+  if (result != 0 || FD_ISSET(pipefd[0], &readfds)) {
+    close(pipefd[0]);
+    close(pipefd[1]);
+    return fail("pselect timeout");
+  }
+
+  ts.tv_sec = 0;
+  ts.tv_nsec = 1000000000L;
+  errno = 0;
+  result = pselect(0, 0, 0, 0, &ts, 0);
+  if (result != -1 || errno != EINVAL) {
+    close(pipefd[0]);
+    close(pipefd[1]);
+    return fail("pselect invalid timeout");
   }
 
   close(pipefd[0]);

@@ -1497,6 +1497,32 @@ long sysconf(int name) {
   }
 }
 
+size_t confstr(int name, char* buf, size_t len) {
+  const char* value;
+  size_t value_len;
+  size_t copy_len;
+
+  switch (name) {
+    case _CS_PATH:
+      value = "/system/bin:/bin:/usr/bin";
+      break;
+    case _CS_V7_ENV:
+      value = "POSIXLY_CORRECT=1";
+      break;
+    default:
+      errno = EINVAL;
+      return 0;
+  }
+
+  value_len = strlen(value) + 1;
+  if (buf != 0 && len > 0) {
+    copy_len = value_len < len ? value_len : len - 1;
+    memcpy(buf, value, copy_len);
+    buf[copy_len] = '\0';
+  }
+  return value_len;
+}
+
 long pathconf(const char* path, int name) {
   if (path == 0) {
     errno = EINVAL;

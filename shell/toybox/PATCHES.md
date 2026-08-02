@@ -145,3 +145,34 @@ This is expected to remain as part of the project-owned Android-like shell
 environment. Future configure failures should add applets only after confirming
 the missing command is normal POSIX/Android shell surface rather than a host
 SDK leak.
+
+## CRT confstr Header Compatibility
+
+Status: active CRT-local patch.
+
+Touched file:
+
+- `src/lib/portability.h`
+
+Reason:
+
+Toybox carries a Bionic fallback for `confstr`, but this CRT now exposes
+`confstr(_CS_PATH)` as part of the Bionic-compatible public header surface
+needed by GNU make and other build tools. Leaving the fallback unconditional
+under `__BIONIC__` conflicts with the public `unistd.h` prototype.
+
+Change summary:
+
+- The fallback is now enabled only when `_CS_PATH` was not defined by the
+  active CRT headers.
+
+ABI impact:
+
+None on CRT/Bionic public ABI. The public ABI change is the CRT-owned
+`confstr` addition; this patch only prevents imported toybox source from
+redeclaring it with an incompatible fallback signature.
+
+Removal/upstream condition:
+
+This patch can be dropped if upstream toybox probes `confstr` availability
+instead of assuming all Bionic-like environments lack it.

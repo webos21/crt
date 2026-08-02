@@ -43,6 +43,8 @@ static int expect_known_runtime(int name, const char* message) {
 }
 
 int main(void) {
+  char path[8];
+
   if (_SC_OPEN_MAX != 0x000b ||
       _SC_CLK_TCK != 0x0006 ||
       _SC_MAPPED_FILES != 0x003b ||
@@ -70,6 +72,21 @@ int main(void) {
   errno = 0;
   if (sysconf(0x7fffffff) != -1 || errno != ENOSYS) {
     return fail("unknown errno");
+  }
+  errno = 0;
+  if (confstr(_CS_PATH, 0, 0) != sizeof("/system/bin:/bin:/usr/bin") || errno != 0) {
+    return fail("confstr size");
+  }
+  if (confstr(_CS_PATH, path, sizeof(path)) != sizeof("/system/bin:/bin:/usr/bin") ||
+      path[sizeof(path) - 1] != '\0') {
+    return fail("confstr copy");
+  }
+  if (confstr(_CS_V7_ENV, 0, 0) != sizeof("POSIXLY_CORRECT=1")) {
+    return fail("confstr v7 env");
+  }
+  errno = 0;
+  if (confstr(0x7fffffff, path, sizeof(path)) != 0 || errno != EINVAL) {
+    return fail("confstr unknown");
   }
 
   printf("sysconf_test: ok\n");

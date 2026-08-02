@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <poll.h>
+#include <signal.h>
 #include <stddef.h>
 #include <sys/select.h>
 #include <time.h>
@@ -135,4 +136,48 @@ int select(
     }
   }
   return ready;
+}
+
+int pselect(
+    int nfds,
+    fd_set* readfds,
+    fd_set* writefds,
+    fd_set* exceptfds,
+    const struct timespec* timeout,
+    const sigset_t* sigmask) {
+  struct timeval tv;
+  struct timeval* tvp = 0;
+  sigset_t oldmask;
+  int masked = 0;
+  int result;
+  int saved_errno;
+
+  if (timeout != 0) {
+    if (timeout->tv_sec < 0 || timeout->tv_nsec < 0 ||
+        timeout->tv_nsec >= 1000000000L) {
+      errno = EINVAL;
+      return -1;
+    }
+    tv.tv_sec = timeout->tv_sec;
+    tv.tv_usec = timeout->tv_nsec / 1000;
+    tvp = &tv;
+  }
+
+  if (sigmask != 0) {
+    if (sigprocmask(SIG_SETMASK, sigmask, &oldmask) != 0) {
+      return -1;
+    }
+    masked = 1;
+  }
+
+  result = select(nfds, readfds, writefds, exceptfds, tvp);
+  saved_errno = errno;
+
+  if (masked) {
+    if (sigprocmask(SIG_SETMASK, &oldmask, 0) != 0 && result == 0) {
+      return -1;
+    }
+    errno = saved_errno;
+  }
+  return result;
 }

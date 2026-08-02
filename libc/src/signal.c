@@ -229,6 +229,10 @@ sighandler_t signal(int sig, sighandler_t handler) {
   return previous.sa_handler;
 }
 
+sighandler_t bsd_signal(int sig, sighandler_t handler) {
+  return signal(sig, handler);
+}
+
 int raise(int sig) {
   struct sigaction* action;
   sighandler_t handler;

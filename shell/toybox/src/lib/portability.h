@@ -326,12 +326,16 @@ extern CODE prioritynames[], facilitynames[];
 #endif
 void xgetrandom(void *buf, unsigned len);
 
-// Android's bionic libc doesn't have confstr.
+// Android's bionic libc didn't always have confstr; keep this fallback only
+// when the active CRT headers did not define the confstr name space.
 #ifdef __BIONIC__
+#include <unistd.h>
+#ifndef _CS_PATH
 #define _CS_PATH	0
 #define _CS_V7_ENV	1
 #include <string.h>
 static inline void confstr(int a, char *b, int c) {strcpy(b, a ? "POSIXLY_CORRECT=1" : "/bin:/usr/bin");}
+#endif
 #endif
 
 // Paper over the differences between BSD kqueue and Linux inotify for tail.

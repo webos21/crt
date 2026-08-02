@@ -3,6 +3,8 @@
 
 #include <sys/time.h>
 #include <sys/types.h>
+#include <signal.h>
+#include <time.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -38,6 +40,13 @@ int select(
     fd_set* writefds,
     fd_set* exceptfds,
     struct timeval* timeout);
+int pselect(
+    int nfds,
+    fd_set* readfds,
+    fd_set* writefds,
+    fd_set* exceptfds,
+    const struct timespec* timeout,
+    const sigset_t* sigmask);
 
 #ifdef __cplusplus
 }

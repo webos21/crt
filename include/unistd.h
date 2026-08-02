@@ -113,6 +113,9 @@
 #define _XOPEN_SHM -1
 #define _XOPEN_UNIX -1
 
+#define _CS_PATH 0
+#define _CS_V7_ENV 1
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -130,6 +133,7 @@ ssize_t pwrite(int fd, const void* buf, size_t count, off_t offset);
 int close(int fd);
 off_t lseek(int fd, off_t offset, int whence);
 int access(const char* path, int mode);
+int eaccess(const char* path, int mode);
 int faccessat(int dirfd, const char* path, int mode, int flags);
 int chdir(const char* path);
 int fchdir(int fd);
@@ -152,6 +156,7 @@ uid_t geteuid(void);
 uid_t getuid(void);
 gid_t getgid(void);
 gid_t getegid(void);
+char* getlogin(void);
 pid_t getsid(pid_t pid);
 int gethostname(char* name, size_t len);
 int sethostname(const char* name, size_t len);
@@ -168,10 +173,12 @@ int lchown(const char* path, uid_t owner, gid_t group);
 int dup(int oldfd);
 int dup2(int oldfd, int newfd);
 int isatty(int fd);
+char* ttyname(int fd);
 int pipe(int pipefd[2]);
 unsigned int sleep(unsigned int seconds);
 unsigned int alarm(unsigned int seconds);
 long sysconf(int name);
+size_t confstr(int name, char* buf, size_t len);
 long fpathconf(int fd, int name);
 long pathconf(const char* path, int name);
 ssize_t readlink(const char* path, char* buf, size_t bufsiz);

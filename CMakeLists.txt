@@ -275,14 +275,22 @@ if(Python3_Interpreter_FOUND)
 
   function(crt_add_build_port_target recipe_name recipe_build_system)
     crt_add_port_recipe_target(${recipe_name})
+    set(CRT_PORT_BUILD_DEPENDS sysroot port-fetch-${recipe_name})
+    set(CRT_PORT_BUILD_SHELL_ARGS)
+    if(recipe_build_system STREQUAL "configure" OR
+       recipe_build_system STREQUAL "android_host_tool")
+      set(CRT_PORT_BUILD_DEPENDS rootfs port-fetch-${recipe_name})
+      set(CRT_PORT_BUILD_SHELL_ARGS --use-crt-shell)
+    endif()
     add_custom_target(port-build-${recipe_name}
       COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/crt-port-build.py"
         --preset "${CRT_BUILD_PRESET_NAME}"
         --target-os "${CRT_TARGET_OS}"
         --recipe-dir "${CRT_PORT_RECIPE_ROOT}"
         --port "${recipe_name}"
+        ${CRT_PORT_BUILD_SHELL_ARGS}
         --skip-sysroot-build
-      DEPENDS sysroot port-fetch-${recipe_name}
+      DEPENDS ${CRT_PORT_BUILD_DEPENDS}
       WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
       COMMENT "Building ${recipe_name} (${recipe_build_system}) against the CRT sysroot"
     )
@@ -292,9 +300,10 @@ if(Python3_Interpreter_FOUND)
         --target-os "${CRT_TARGET_OS}"
         --recipe-dir "${CRT_PORT_RECIPE_ROOT}"
         --port "${recipe_name}"
+        ${CRT_PORT_BUILD_SHELL_ARGS}
         --rebuild
         --skip-sysroot-build
-      DEPENDS sysroot port-fetch-${recipe_name}
+      DEPENDS ${CRT_PORT_BUILD_DEPENDS}
       WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
       COMMENT "Rebuilding ${recipe_name} (${recipe_build_system}) against the CRT sysroot"
     )
@@ -316,7 +325,8 @@ if(Python3_Interpreter_FOUND)
       set(CRT_PORT_RECIPE_AUTOMATED_VALUE "true")
     endif()
     if((CRT_PORT_RECIPE_BUILD_SYSTEM STREQUAL "configure" OR
-        CRT_PORT_RECIPE_BUILD_SYSTEM STREQUAL "amalgamation") AND
+        CRT_PORT_RECIPE_BUILD_SYSTEM STREQUAL "amalgamation" OR
+        CRT_PORT_RECIPE_BUILD_SYSTEM STREQUAL "android_host_tool") AND
        CRT_PORT_RECIPE_AUTOMATED_VALUE)
       crt_add_build_port_target(${CRT_PORT_RECIPE_NAME} ${CRT_PORT_RECIPE_BUILD_SYSTEM})
       list(APPEND CRT_AUTOMATED_PORT_TARGETS port-build-${CRT_PORT_RECIPE_NAME})

@@ -10,21 +10,30 @@
     "sha1": "f535367b1a11e2f9ac3bec723fb007fbc0d189e5",
     "md5": "9855b6d802d7fe5b7bd5b196a2271655"
   },
-  "dependencies": [],
+  "dependencies": [
+    "make"
+  ],
   "build": {
     "system": "configure",
     "configure_args": [
       "--static"
     ],
+    "env": {
+      "CFLAGS": "-O2 -U_WIN32 -U_WIN32_WCE -U__WIN32__ -UWIN32 -U_MSC_VER",
+      "RANLIB": "true"
+    },
     "make_args": []
   },
   "status": {
     "linux": "manual-pass",
     "macos": "configure-pass",
-    "windows": "manual-pass"
+    "windows": "configure-pass"
   },
   "notes": [
     "No runtime network dependency.",
-    "Builds static libz.a into PORT_PREFIX."
+    "Builds static libz.a into PORT_PREFIX.",
+    "The recipe undefines _WIN32/_WIN32_WCE/__WIN32__/WIN32/_MSC_VER so zlib stays on its generic POSIX path when the Windows CRT wrapper uses a Windows LLVM target.",
+    "RANLIB is set to true because the optional zlib ranlib step is redundant for the LLVM archive path and currently exposes a Windows mksh subshell status quirk.",
+    "Windows CRT-shell builds currently run make serially and pass SHELL=/system/bin/mksh so recipe commands use the project shell/process path."
   ]
 }

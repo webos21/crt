@@ -238,6 +238,30 @@ int main(int argc, char** argv) {
       return fail("argv0 wait");
     }
   }
+  {
+    pid_t pid;
+    int status = 0;
+    posix_spawnattr_t attr;
+    sigset_t mask;
+    char* child_argv[] = {"toybox-applet", "argv0-child", 0};
+
+    if (posix_spawnattr_init(&attr) != 0 ||
+        sigemptyset(&mask) != 0 ||
+        posix_spawnattr_setsigmask(&attr, &mask) != 0 ||
+        posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_RESETIDS) != 0) {
+      return fail("spawn attr setup");
+    }
+    if (posix_spawn(&pid, "/proc/self/exe", 0, &attr, child_argv, environ) != 0) {
+      posix_spawnattr_destroy(&attr);
+      return fail("spawn attr");
+    }
+    posix_spawnattr_destroy(&attr);
+    if (waitpid(pid, &status, 0) != pid ||
+        !WIFEXITED(status) ||
+        WEXITSTATUS(status) != 13) {
+      return fail("spawn attr wait");
+    }
+  }
   if (pipe(pipefd) != 0) {
     return fail("transport pipe");
   }

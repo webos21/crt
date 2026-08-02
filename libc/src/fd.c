@@ -1608,6 +1608,20 @@ int isatty(int fd) {
 #endif
 }
 
+int eaccess(const char* path, int mode) {
+  return access(path, mode);
+}
+
+char* ttyname(int fd) {
+  static char name[] = "/dev/tty";
+
+  if (!isatty(fd)) {
+    errno = ENOTTY;
+    return 0;
+  }
+  return name;
+}
+
 int fcntl(int fd, int cmd, ...) {
   va_list args;
   int arg;

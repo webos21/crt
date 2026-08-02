@@ -10,7 +10,9 @@
     "sha1": "1118803ffcedf7a12355d253d8d0f2241cb1f70c",
     "md5": "cea8d9ea4dc191481a3d56feb5a80937"
   },
-  "dependencies": [],
+  "dependencies": [
+    "make"
+  ],
   "build": {
     "system": "configure",
     "automated": true,

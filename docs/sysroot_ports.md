@@ -156,7 +156,10 @@ Porting recipes live under `porting/recipes/`. They record source URLs,
 archives, SHA256 hashes, dependencies, build-system type, build arguments, and
 host status. `configure` recipes run upstream configure/make/install.
 `amalgamation` recipes build an upstream single-source distribution directly
-without modifying the upstream source tree. The current human-readable matrix is
+without modifying the upstream source tree. `android_host_tool` recipes build
+Android-owned host tools from their Android.bp source lists so the porting
+environment can bootstrap project-owned build tools before running third-party
+configure recipes. The current human-readable matrix is
 `docs/porting_status.md`.
 
 Build and install zlib from the extracted upstream source directory:
@@ -198,6 +201,7 @@ CMake exposes the same recipe-backed flow as build targets:
 ```sh
 cmake --build --preset macos-host-ninja-debug --target port-list
 cmake --build --preset macos-host-ninja-debug --target port-fetch
+cmake --build --preset macos-host-ninja-debug --target port-build-make
 cmake --build --preset macos-host-ninja-debug --target port-fetch-libpng
 cmake --build --preset macos-host-ninja-debug --target port-build-zlib
 cmake --build --preset macos-host-ninja-debug --target port-build-libpng
@@ -208,23 +212,40 @@ cmake --build --preset macos-host-ninja-debug --target port-build-recipes
 cmake --build --preset macos-host-ninja-debug --target port-rebuild-configure
 ```
 
-On native Windows, these CMake targets can be launched from PowerShell or
-`cmd.exe`. The historical bootstrap path still uses Git Bash or MSYS2 for
-`configure` plus GNU `make`; keep `bash.exe` or `sh.exe` visible in `PATH`, or
-set `CRT_PORT_SHELL` explicitly:
+Configure recipes are launched through the CRT rootfs mksh on every host. The
+CMake `port-build-*` and `port-rebuild-*` targets for configure recipes run:
+
+1. upstream `./configure` under `out/<preset>/rootfs/system/bin/mksh`;
+2. `make -jN` under that same mksh;
+3. `make install` under that same mksh.
+
+The shell is project-owned, and `make` is now the first project-built bootstrap
+tool. AOSP does not carry GNU make under `platform/external`; Android keeps the
+source under `toolchain/make` and prebuilts under
+`platform/prebuilts/build-tools`. The CRT recipe follows the Android.bp
+`cc_binary_host` source list and installs `make` into `PORT_PREFIX/bin`.
+Configure recipes prefer that installed make before falling back to any host
+make. On Windows the recipe intentionally uses the POSIX-like Android config
+path instead of the upstream Win32 make path, so failures expose missing
+Bionic/POSIX CRT/PAL behavior.
+
+On Windows CRT-shell builds, configure recipes currently run make with one job
+and append `SHELL=/system/bin/mksh` to both the build and install invocations.
+This keeps recipe command execution on the project-owned shell/process path and
+avoids the current GNU make jobserver/parallel-child fd inheritance gap. Treat
+parallel make under rootfs mksh as follow-up Windows process work, not as a
+reason to reintroduce host make.
+
+The older Windows bootstrap path can still be used manually by invoking
+`tools/crt-port-build.py` without `--use-crt-shell` and setting
+`CRT_PORT_SHELL`, but it is no longer the default CMake target path:
 
 ```bat
 set CRT_PORT_SHELL=C:\msys64\usr\bin\bash.exe
 cmake --build --preset windows-host-ninja-debug --target port-rebuild-zlib
 ```
 
-`crt-port-build.py` converts the CRT sysroot, port prefix, and compiler wrapper
-paths to POSIX-style `/c/...` paths before invoking configure. This keeps the
-build shell as a tool for running upstream build scripts only; the produced
-objects still go through the CRT sysroot wrappers and host-native Clang/LLD.
-
-Windows can now also run configure recipes through the CRT rootfs mksh for
-configure-stage smoke tests:
+The lower-level configure-only smoke path is still available:
 
 ```powershell
 & 'C:/Users/appos/AppData/Local/Programs/Python/Python314/python.exe' `
@@ -237,31 +258,36 @@ configure-stage smoke tests:
   --rebuild
 ```
 
-In this mode `crt-port-build.py` launches
-`out/<preset>/rootfs/system/bin/mksh.exe`, sets
-`PATH=/system/bin:/bin:/usr/bin`, runs the compiler wrappers through
-`/system/bin/mksh`, discovers the host LLVM tools, and passes the Windows SDK
-library directory to the wrappers as an internal backend detail. This is the
-preferred way to expose missing CRT/PAL/rootfs behavior from configure scripts.
-Full `make install` through the CRT shell remains a later tranche; keep using
-the host bootstrap shell when a recipe needs GNU `make` today.
+In CRT-shell mode `crt-port-build.py` discovers the host LLVM tools and, on
+Windows, passes the Windows SDK library directory to the compiler wrappers as an
+internal backend detail. This is the preferred way to expose missing
+CRT/PAL/rootfs behavior from configure scripts without patching upstream source.
 
-The project now also builds a bootstrap CRT shell as a core artifact:
+The project now also builds bootstrap CRT shell and make artifacts:
 
 ```text
 out/<preset>/rootfs/system/bin/sh
 out/<preset>/rootfs/bin/sh
 out/<preset>/rootfs/usr/bin/sh
+out/<preset>/port-tests/install/bin/make
 ```
 
-The rootfs shell is now strong enough for zlib's configure-stage probe on
-Windows x86_64, but it is not yet a full Autoconf/make replacement. Use it for
-configure smoke tests first, then promote recipes to full build/install once
-the mksh/toybox tranche closes the remaining shell-language, applet, and make
-gaps.
+The rootfs shell is now the standard configure recipe driver, and make is built
+against the CRT sysroot before normal configure recipes run their build and
+install steps.
+
+The zlib recipe also undefines Windows compiler predefines such as `_WIN32` and
+`_MSC_VER` so upstream zlib stays on its generic POSIX path instead of selecting
+the Win32 `<io.h>` branch. This is a recipe-level declaration of the CRT target
+surface, not an upstream source patch. It sets `RANLIB=true` because zlib treats
+ranlib as an optional archive-index refresh and the LLVM `ar` path already
+produces the static archive needed by the porting test. The Windows mksh
+subshell status quirk exposed by zlib's ignored `ranlib || true` line should be
+tracked separately from zlib library portability.
 
 Per-recipe fetch targets resolve recipe dependencies. For example,
-`port-fetch-libpng` also fetches zlib.
+`port-fetch-libpng` also fetches zlib, and zlib fetches the Android make source
+needed to bootstrap the recipe build tool.
 
 `tools/fetch_ports.py` and `tools/crt-port-build.py` read `porting/recipes/` and
 are the lower-level helpers used by those CMake targets. `crt-port-build.py`
@@ -309,7 +335,8 @@ CRT sysroot wrapper:
 
 | Port | Source flow | Result |
 | --- | --- | --- |
-| zlib 1.3.1 | `./configure --static && make && make install` | pass |
+| Android toolchain make | Android.bp host-tool source list | Windows x86_64 pass |
+| zlib 1.3.1 | `./configure --static && make && make install` | macOS pass; Windows x86_64 pass through rootfs mksh and CRT-built make |
 | libpng 1.6.57 | `./configure --disable-shared --enable-static && make && make install` | pass |
 
 The libpng run required adding real CRT surface for:

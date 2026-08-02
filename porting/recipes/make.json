@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "name": "make",
+  "version": "android-toolchain-44fc4fe66a484b91844c302f03eaa8438e065d17",
+  "source": {
+    "url": "https://android.googlesource.com/toolchain/make/+archive/44fc4fe66a484b91844c302f03eaa8438e065d17.tar.gz",
+    "archive": "toolchain-make-44fc4fe66a484b91844c302f03eaa8438e065d17.tar.gz",
+    "source_dir": "toolchain-make-44fc4fe66a484b91844c302f03eaa8438e065d17",
+    "sha256": null,
+    "sha1": null,
+    "md5": null
+  },
+  "dependencies": [],
+  "build": {
+    "system": "android_host_tool",
+    "automated": true,
+    "binary": "make",
+    "include_dirs": [
+      "lib",
+      "src"
+    ],
+    "cflags": [
+      "-DHAVE_CONFIG_H",
+      "-DINCLUDEDIR=0",
+      "-DLIBDIR=0",
+      "-DLOCALEDIR=NULL",
+      "-Wno-dangling-else",
+      "-Wno-deprecated-non-prototype",
+      "-Wno-format",
+      "-Wno-incompatible-pointer-types",
+      "-Wno-string-compare",
+      "-Wno-unused-parameter"
+    ],
+    "sources": [
+      "src/ar.c",
+      "src/arscan.c",
+      "src/commands.c",
+      "src/default.c",
+      "src/dir.c",
+      "src/expand.c",
+      "src/file.c",
+      "src/function.c",
+      "src/getopt.c",
+      "src/getopt1.c",
+      "src/guile.c",
+      "src/hash.c",
+      "src/implicit.c",
+      "src/job.c",
+      "src/load.c",
+      "src/loadapi.c",
+      "src/main.c",
+      "src/misc.c",
+      "src/output.c",
+      "src/read.c",
+      "src/remake.c",
+      "src/rule.c",
+      "src/signame.c",
+      "src/strcache.c",
+      "src/variable.c",
+      "src/version.c",
+      "src/vpath.c",
+      "src/remote-stub.c",
+      "lib/concat-filename.c",
+      "lib/exitfail.c",
+      "lib/findprog-in.c",
+      "lib/fnmatch.c",
+      "lib/glob.c",
+      "lib/xalloc-die.c",
+      "lib/xconcat-filename.c"
+    ],
+    "target_overrides": {
+      "linux": {
+        "include_dirs": [
+          "soong/linux_glibc"
+        ],
+        "sources": [
+          "lib/getloadavg.c",
+          "src/posixos.c"
+        ]
+      },
+      "macos": {
+        "include_dirs": [
+          "soong/darwin"
+        ],
+        "sources": [
+          "src/posixos.c"
+        ],
+        "cflags": [
+          "-UMACOSX_DEPLOYMENT_TARGET",
+          "-DMACOSX_DEPLOYMENT_TARGET=10.13"
+        ]
+      },
+      "windows": {
+        "include_dirs": [
+          "soong/linux_musl"
+        ],
+        "config_undefs": [
+          "HAVE_SYS_TIMEB_H"
+        ],
+        "sources": [
+          "lib/getloadavg.c",
+          "src/posixos.c"
+        ]
+      }
+    }
+  },
+  "status": {
+    "linux": "pending",
+    "macos": "pending",
+    "windows": "manual-pass"
+  },
+  "notes": [
+    "AOSP does not carry make under platform/external; it carries GNU make source under toolchain/make and prebuilts under platform/prebuilts/build-tools.",
+    "The Gitiles +archive gzip hash is not stable across downloads, so the recipe pins the exact commit in the URL instead of using an archive checksum.",
+    "This recipe follows Android.bp's cc_binary_host source list so make can bootstrap without requiring an existing make executable.",
+    "Windows intentionally uses the POSIX-like musl config path rather than the upstream Win32 make path so failures expose CRT/PAL gaps."
+  ]
+}

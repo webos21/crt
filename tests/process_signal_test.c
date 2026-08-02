@@ -78,6 +78,9 @@ int main(void) {
   if (signal(0, handle_usr1) != SIG_ERR || errno != EINVAL) {
     return fail("signal invalid");
   }
+  if (bsd_signal(SIGUSR1, handle_usr1) == SIG_ERR) {
+    return fail("bsd_signal");
+  }
   if (sigemptyset(&set) != 0 ||
       sigaddset(&set, SIGUSR2) != 0 ||
       sigismember(&set, SIGUSR2) != 1 ||

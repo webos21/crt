@@ -4,6 +4,8 @@
 #include <stddef.h>
 
 #define MB_CUR_MAX 4
+#define EXIT_FAILURE 1
+#define EXIT_SUCCESS 0
 
 #ifdef __cplusplus
 extern "C" {
@@ -37,6 +39,7 @@ void* bsearch(
     size_t size,
     int (*compar)(const void*, const void*));
 char* getenv(const char* name);
+int putenv(char* entry);
 int setenv(const char* name, const char* value, int overwrite);
 int unsetenv(const char* name);
 char* realpath(const char* path, char* resolved_path);

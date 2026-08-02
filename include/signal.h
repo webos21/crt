@@ -117,6 +117,7 @@ int sigprocmask(int how, const sigset_t* set, sigset_t* oldset);
 int pthread_sigmask(int how, const sigset_t* set, sigset_t* oldset);
 int sigsuspend(const sigset_t* mask);
 sighandler_t signal(int sig, sighandler_t handler);
+sighandler_t bsd_signal(int sig, sighandler_t handler);
 int raise(int sig);
 int kill(pid_t pid, int sig);
 int killpg(pid_t pgrp, int sig);

@@ -901,10 +901,47 @@ static long resolve_process_application_path(
   if (path == 0 || buffer == 0 || size == 0) {
     return -EINVAL;
   }
-  if (search_path &&
+  if ((search_path || windows_rootfs() != 0) &&
       strchr(host_path, '/') == 0 &&
       strchr(host_path, '\\') == 0 &&
       !(host_path[0] != 0 && host_path[1] == ':')) {
+    const char* env_path = getenv("PATH");
+    if (env_path != 0) {
+      const char* entry = env_path;
+
+      while (*entry != 0) {
+        char candidate[4096];
+        char candidate_host_buffer[4096];
+        const char* next = entry;
+        const char* candidate_host;
+        size_t entry_len;
+
+        while (*next != 0 && *next != ':' && *next != ';') {
+          ++next;
+        }
+        entry_len = (size_t)(next - entry);
+        if (entry_len == 0) {
+          candidate[0] = '.';
+          candidate[1] = '/';
+          entry_len = 1;
+        } else if (entry_len + 1 < sizeof(candidate)) {
+          memcpy(candidate, entry, entry_len);
+          candidate[entry_len] = '/';
+        }
+        if (entry_len + 1 + strlen(path) < sizeof(candidate)) {
+          memcpy(candidate + entry_len + 1, path, strlen(path) + 1);
+          candidate_host = translate_path_for_host(candidate, candidate_host_buffer);
+          if (windows_path_is_executable_file(candidate_host, GetFileAttributesA(candidate_host))) {
+            if (strlen(candidate_host) >= size) {
+              return -ENAMETOOLONG;
+            }
+            strcpy(buffer, candidate_host);
+            return 0;
+          }
+        }
+        entry = *next == 0 ? next : next + 1;
+      }
+    }
     DWORD found = SearchPathA(0, host_path, ".exe", (DWORD)sizeof(searched_path), searched_path, 0);
 
     if (found != 0 && found < sizeof(searched_path)) {
@@ -1859,8 +1896,7 @@ static long prepare_spawn_startup(
     *creation_flags |= CRT_CREATE_NEW_PROCESS_GROUP;
   }
   if (attr != 0 &&
-      (attr->flags & (POSIX_SPAWN_SETSCHEDPARAM | POSIX_SPAWN_SETSCHEDULER |
-                      POSIX_SPAWN_RESETIDS)) != 0) {
+      (attr->flags & (POSIX_SPAWN_SETSCHEDPARAM | POSIX_SPAWN_SETSCHEDULER)) != 0) {
     return -ENOTSUP;
   }
   std_input = fd_snapshot_handle_for_fd(fd_snapshot, 0);
@@ -3947,6 +3983,9 @@ long __crt_sys_posix_spawn(
   native_windows_spawn = getenv("CRT_SPAWN_NATIVE_WINDOWS") != 0 ||
                          envp_has_name(envp, "CRT_SPAWN_NATIVE_WINDOWS");
   if (native_windows_spawn) {
+    extras[extra_count].name = "CRT_SPAWN_NATIVE_WINDOWS";
+    extras[extra_count].value = 0;
+    ++extra_count;
     result = __crt_fd_snapshot_export(&fd_snapshot);
     if (result != 0) {
       RETURN(-result);

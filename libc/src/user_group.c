@@ -36,6 +36,18 @@ gid_t getegid(void) {
   return 0;
 }
 
+char* getlogin(void) {
+  char* name = getenv("LOGNAME");
+
+  if (name == 0 || name[0] == 0) {
+    name = getenv("USER");
+  }
+  if (name != 0 && name[0] != 0) {
+    return name;
+  }
+  return synthetic_passwd.pw_name;
+}
+
 struct passwd* getpwuid(uid_t uid) {
   if (uid != 0) {
     errno = ENOENT;

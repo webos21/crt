@@ -36,7 +36,8 @@ The status values are intentionally conservative:
 
 | Library | Version | Recipe | Linux | macOS | Windows | Build System | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| zlib | 1.3.1 | `porting/recipes/zlib.json` | manual-pass | configure-pass | manual-pass | configure | Static `libz.a`; no runtime network dependency. |
+| make | android-toolchain-44fc4fe66a484b91844c302f03eaa8438e065d17 | `porting/recipes/make.json` | pending | pending | manual-pass | android_host_tool | Android `toolchain/make` built on Windows x86_64 through rootfs mksh and CRT wrappers; `make.exe --version` runs with the CRT DLL path. |
+| zlib | 1.3.1 | `porting/recipes/zlib.json` | manual-pass | configure-pass | configure-pass | configure | Static `libz.a`; Windows x86_64 passes through rootfs mksh plus CRT-built make with serial make execution and `RANLIB=true`. |
 | libpng | 1.6.57 | `porting/recipes/libpng.json` | pending | configure-pass | pending | configure | Depends on zlib in `PORT_PREFIX`. |
 | SQLite amalgamation | 3.53.4 | `porting/recipes/sqlite-amalgamation.json` | smoke-pass | amalgamation-pass | smoke-pass | amalgamation | macOS recipe builds upstream sqlite3.c into libsqlite3.a with `-U__APPLE__`, so SQLite uses the generic Unix path against Bionic-shaped CRT headers instead of Darwin-only statfs/VFS extensions. |
 | libffi | 3.4.5 | `porting/recipes/libffi.json` | partial | configure-pass | partial | configure | macOS/aarch64 configure/make/install passed; ffi_call and closure smoke passed against the CRT sysroot. |

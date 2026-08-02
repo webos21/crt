@@ -309,6 +309,15 @@ char* getenv(const char* name) {
   return env_entries[index] + name_len + 1;
 }
 
+int putenv(char* entry) {
+  __crt_env_init(0);
+  if (entry == 0 || entry[0] == '=' || strchr(entry, '=') == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return env_store_entry(entry, 1);
+}
+
 int setenv(const char* name, const char* value, int overwrite) {
   size_t name_len;
   size_t value_len;
