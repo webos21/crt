@@ -202,8 +202,22 @@ shell-local source compatibility:
   additional LLP64 cleanups should be made in the imported toybox source/glue
   rather than hidden behind Windows CRT ABI changes.
 
-The next gap is mksh external-command sequencing and pipeline teardown when
-the child is a CRT toybox applet. On Windows this must be solved by libc/PAL
-`fork()` emulation plus waitpid/SIGCHLD fidelity, not by adding mksh-specific
-`posix_spawn()` shortcuts. Also keep auditing disabled toybox applets for
-remaining LLP64 pointer-to-`long` assumptions before enabling them.
+The first Windows mksh child-spec adapter is now active. Rootfs mksh can run
+single external commands, external-command pipelines, builtin-to-external
+pipelines such as `echo hello | tr a-z A-Z`, and basic `<`/`>` redirection
+against CRT toybox applets. The adapter keeps the compatibility boundary in the
+CRT shell process contract: Windows `TEXEC` launch goes through
+`__crt_shell_fork_exec()`, while raw arbitrary post-fork child execution remains
+unsupported.
+
+The child-spec path must continue to carry Bionic-shaped process/fd/signal
+behavior: cwd/rootfs/env, file actions including fd 3 and above,
+close-on-exec filtering, stdio flush policy, child registry/waitpid
+integration, and socket fd transport through `WSADuplicateSocketA()` when
+needed.
+
+Real Windows `fork()` remains a long-term research tranche. The mksh/toybox
+milestone should next focus on the remaining shell patterns around fd 3+
+redirections inside mksh, background commands, and broader configure-script
+coverage. Also keep auditing disabled toybox applets for remaining LLP64
+pointer-to-`long` assumptions before enabling them.

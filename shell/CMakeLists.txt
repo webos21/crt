@@ -203,6 +203,7 @@ if(EXISTS "${CRT_MKSH_ROOT}/Android.bp")
   elseif(CRT_TARGET_OS STREQUAL "windows")
     target_compile_definitions(crt_mksh PRIVATE
       MKSH_CRT_ALLOW_LLP64
+      MKSH_CRT_SHELL_CHILD_SPEC
       MKSH_WITH_TEXTMODE
     )
     target_link_options(crt_mksh PRIVATE
@@ -401,6 +402,67 @@ if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
     PASS_REGULAR_EXPRESSION "toybox-ok"
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_toybox_basic_runs)
+  if(CRT_TARGET_OS STREQUAL "windows" AND TARGET crt_mksh)
+    add_test(NAME crt_mksh_rootfs_external_runs
+      COMMAND "${CMAKE_COMMAND}" -E env
+        "CRT_ROOTFS=${CMAKE_BINARY_DIR}/rootfs"
+        "PATH=/system/bin:/bin:/usr/bin"
+        "$<TARGET_FILE:crt_mksh>" -c "ls -al /system/bin | head -n 2"
+    )
+    set_tests_properties(crt_mksh_rootfs_external_runs PROPERTIES
+      PASS_REGULAR_EXPRESSION "total"
+      DEPENDS crt_toybox_basic_runs
+    )
+    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_mksh_rootfs_external_runs)
+
+    add_test(NAME crt_mksh_rootfs_pipeline_runs
+      COMMAND "${CMAKE_COMMAND}" -E env
+        "CRT_ROOTFS=${CMAKE_BINARY_DIR}/rootfs"
+        "PATH=/system/bin:/bin:/usr/bin"
+        "$<TARGET_FILE:crt_mksh>" -c "echo hello | tr a-z A-Z"
+    )
+    set_tests_properties(crt_mksh_rootfs_pipeline_runs PROPERTIES
+      PASS_REGULAR_EXPRESSION "HELLO"
+      DEPENDS crt_mksh_rootfs_external_runs
+    )
+    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_mksh_rootfs_pipeline_runs)
+
+    add_test(NAME crt_mksh_rootfs_redirection_runs
+      COMMAND "${CMAKE_COMMAND}" -E env
+        "CRT_ROOTFS=${CMAKE_BINARY_DIR}/rootfs"
+        "PATH=/system/bin:/bin:/usr/bin"
+        "$<TARGET_FILE:crt_mksh>" -c "echo redir > /tmp/mksh-ctest-redir.txt; cat < /tmp/mksh-ctest-redir.txt"
+    )
+    set_tests_properties(crt_mksh_rootfs_redirection_runs PROPERTIES
+      PASS_REGULAR_EXPRESSION "redir"
+      DEPENDS crt_mksh_rootfs_pipeline_runs
+    )
+    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_mksh_rootfs_redirection_runs)
+
+    add_test(NAME crt_mksh_rootfs_command_substitution_runs
+      COMMAND "${CMAKE_COMMAND}" -E env
+        "CRT_ROOTFS=${CMAKE_BINARY_DIR}/rootfs"
+        "PATH=/system/bin:/bin:/usr/bin"
+        "$<TARGET_FILE:crt_mksh>" -c "echo subfile > /tmp/mksh-ctest-sub.txt; echo $(cat /tmp/mksh-ctest-sub.txt)"
+    )
+    set_tests_properties(crt_mksh_rootfs_command_substitution_runs PROPERTIES
+      PASS_REGULAR_EXPRESSION "subfile"
+      DEPENDS crt_mksh_rootfs_redirection_runs
+    )
+    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_mksh_rootfs_command_substitution_runs)
+
+    add_test(NAME crt_mksh_rootfs_exec_builtin_runs
+      COMMAND "${CMAKE_COMMAND}" -E env
+        "CRT_ROOTFS=${CMAKE_BINARY_DIR}/rootfs"
+        "PATH=/system/bin:/bin:/usr/bin"
+        "$<TARGET_FILE:crt_mksh>" -c "exec echo exec-ok"
+    )
+    set_tests_properties(crt_mksh_rootfs_exec_builtin_runs PROPERTIES
+      PASS_REGULAR_EXPRESSION "exec-ok"
+      DEPENDS crt_mksh_rootfs_command_substitution_runs
+    )
+    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_mksh_rootfs_exec_builtin_runs)
+  endif()
   add_dependencies(crt_shell_artifacts crt_toybox)
   install(TARGETS crt_toybox
     RUNTIME DESTINATION system/bin

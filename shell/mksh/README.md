@@ -66,3 +66,29 @@ represented by CRT/PAL. The first required exception is Windows LLP64 support:
   `intmax_t`/`uintmax_t`.
 
 Linux and macOS keep the unguarded LP64 assertion path.
+
+The second required exception is the Windows shell child-spec adapter:
+
+- Real public Windows `fork()` remains a long-term CRT/PAL research item.
+- `MKSH_CRT_SHELL_CHILD_SPEC` is defined only for the Windows CRT mksh target.
+- When mksh reaches an external `TEXEC` node on Windows, `jobs.c` launches it
+  through `__crt_shell_fork_exec()` instead of raw `fork()` plus child-side
+  `execve()`.
+- Pipeline `TCOM` nodes are allowed to run far enough in the parent shell to
+  become external `TEXEC` nodes, then the child-spec path owns the actual child
+  process. This keeps pipe/redirection fd state in the CRT fd table and avoids
+  the unsupported arbitrary post-fork Windows child path.
+- If a pipeline segment is a builtin that runs in the parent during this early
+  Windows tranche, the following external segment may start a fresh job instead
+  of joining a missing fork-created process list.
+
+ABI impact:
+
+None on the CRT/Bionic public ABI. This is mksh-local Windows glue over the
+private CRT shell process contract.
+
+Removal condition:
+
+This adapter can be reduced or removed if the Windows PAL gains a real,
+Bionic-compatible `fork()` implementation that can safely resume mksh's normal
+post-fork child branch.

@@ -60,10 +60,10 @@ The internal hook boundary is:
 - `__crt_atfork_child()` resets CRT runtime state first, then runs user child
   handlers in registration order.
 
-Windows currently returns `ENOTSUP` for `_Fork()`/`fork()`. This is only the
-current incomplete implementation state. The shell goal requires a libc/PAL
-Windows fork implementation that lets unmodified mksh resume in the child
-branch after `fork()`.
+Windows currently keeps `_Fork()`/`fork()` as a limited, experimental surface.
+It is not the short-term contract for shell execution. The near-term shell goal
+is to make mksh and toybox work through the explicit shell child-spec/spawn path
+while keeping real Windows `fork()` as a long-term research tranche.
 
 ## Windows Direction
 
@@ -71,11 +71,21 @@ Git Bash, MSYS2, and Cygwin show that fork-like behavior can be approximated on
 Windows, but their implementation is a full POSIX runtime strategy and their
 source/license/runtime shape is not adopted here.
 
-The CRT should instead build a project-owned Windows fork tranche around:
+Other public experiments using `RtlCloneUserProcess` demonstrate why this is a
+poor short-term shell foundation: the cloned process may not have coherent
+Win32/CSR runtime state, and inherited handles can fail in the child even when
+raw process cloning succeeds. Research systems that repair this by reconnecting
+to CSRSS depend on version-specific internal offsets and are not acceptable for
+the production CRT/PAL path.
+
+The CRT should instead build a project-owned Windows shell process tranche
+around:
 
 - `CreateProcess` child bootstrap mode;
 - serialized CRT fd table import;
-- inheritable file, pipe, socket, console, and null handles;
+- duplicate file, pipe, console, and null handles transported into the concrete
+  child process;
+- `WSADuplicateSocketA()` for socket fd transport once the child pid is known;
 - cwd, rootfs, and environment propagation;
 - signal disposition/mask propagation where the Windows console/process model
   allows it;
@@ -90,10 +100,38 @@ descriptors, and imports fd/cwd/rootfs/signal mask state in CRT startup before
 sufficient by themselves: fork must also restore register/stack/runtime state
 so the child returns from the original `fork()` call with value `0`.
 
-The private `__crt_shell_fork_exec()` helper remains a useful direct child-spec
-API for tests and explicit spawn-like shell operations, but it must not become
-the way mksh external commands are made to work. mksh should exercise libc's
-public `fork()` path.
+The private `__crt_shell_fork_exec()` helper is now the intended Windows
+shell-child contract for fork-then-exec patterns. It should be extended as a
+clear internal child spec that includes cwd/rootfs/env, signal mask/default
+policy, file actions, close-on-exec filtering, and stdio flush policy. Linux
+and macOS may route through the same helper for shell-owned tests, but their
+public `fork()` behavior remains native.
+
+Real Windows `fork()` remains a long-term goal, not a prerequisite for the next
+mksh/toybox milestone. A future implementation may reuse the child bootstrap
+and fd snapshot machinery, but it must separately solve the harder POSIX
+contract: returning from the original `fork()` call site with coherent
+register, stack, runtime, Win32, and CSR state.
+
+## Research References
+
+The current Windows fork policy is informed by:
+
+- simple `RtlCloneUserProcess` examples, including Cr4sh's native API sample
+  (`https://gist.github.com/Cr4sh/126d844c28a7fbfd25c6`) and the Petr
+  Smid-derived Cygwin mailing-list reproducer
+  (`https://cygwin.com/pipermail/cygwin/2025-September/258811.html`);
+- Hunt & Hackett/diversenok's analysis of Windows process cloning semantics
+  (`https://diversenok.github.io/2023/04/20/Process-Cloning.html`);
+- Pavel Galkin's fork experiment, which shows inherited-handle failure after
+  native cloning (`https://pavelgalkin.com/blog/2025/06/23/`);
+- Winnie's CSRSS-reconnect approach, treated as research only because it relies
+  on reversed, version-specific Windows internals
+  (`https://rlee063.github.io/winnie-afl.html`,
+  `https://hackyboiz.github.io/2021/08/22/fabu1ous/winnie-2/`);
+- WSL1's pico-process architecture, which is kernel/provider based and not
+  reusable from this userland CRT
+  (`https://learn.microsoft.com/it-it/previous-versions/windows/desktop/cmdline/wsl-architectural-overview`).
 
 ## Test Policy
 
@@ -125,3 +163,6 @@ Future tests should add:
 - broader multi-fd redirection beyond the initial shell smoke coverage;
 - fork after malloc/pthread lock activity;
 - command substitution shell smoke tests.
+- Windows direct `fork()+execve()` tests should stay documented as unsupported
+  or experimental until a real fork tranche exists. Shell progress should be
+  validated with `posix_spawn()` and `__crt_shell_fork_exec()` child-spec tests.

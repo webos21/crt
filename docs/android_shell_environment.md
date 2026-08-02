@@ -150,11 +150,17 @@ The source location policy is:
 
 ## Process API Tranche
 
-The shell must be allowed to exercise the normal Unix `fork()` path. Android
-mksh, toybox applets, configure scripts, pipelines, redirections, and command
-substitution all use that process model as a baseline. Windows cannot obtain
-that contract from `CreateProcessA` alone, but the compatibility boundary must
-still live in libc/PAL rather than in mksh-specific source changes.
+Linux and macOS shell work should continue to exercise the normal Unix
+`fork()` path. Android mksh, toybox applets, configure scripts, pipelines,
+redirections, and command substitution all use that process model as their
+baseline.
+
+Windows cannot obtain full POSIX `fork()` semantics from `CreateProcessA`
+alone. For the mksh/toybox milestone, the supported Windows contract is a
+CRT-owned shell child spec for the common fork-then-exec case. The compatibility
+boundary still lives in libc/PAL: mksh/toybox glue may route eligible Windows
+child launches through that helper, but it must not expose host SDK process
+semantics as public Bionic ABI.
 
 The first process APIs are:
 
@@ -186,8 +192,6 @@ Current Windows bootstrap behavior:
 
 Next required process improvements:
 
-- keep `fork()` as a first-class PAL goal because shell child management,
-  pipelines, redirections, and signal behavior depend on it;
 - implement `posix_spawn_file_actions_*` for stdin/stdout/stderr and
   non-standard fd redirection;
 - apply Bionic-style spawn attributes where host semantics exist;
@@ -196,10 +200,11 @@ Next required process improvements:
 - implement `posix_spawn_file_actions_addfchdir_np` once `fchdir()` is available;
 - refine signal mask/default and scheduler attributes as those libc surfaces
   mature;
-- implement Windows `fork()` emulation in libc/PAL so unmodified mksh can enter
-  its normal child branch after `fork()`;
-- keep `posix_spawn()` as a useful primitive, but do not use mksh-specific
-  `posix_spawn()` shortcuts to hide missing `fork()` behavior.
+- grow `__crt_shell_fork_exec()` into the Windows child-spec contract for
+  external commands, pipelines, fd 3+ redirections, command substitution, and
+  exec-builtin-like replacement;
+- keep real Windows `fork()` as a first-class long-term PAL research goal, but
+  do not block mksh/toybox execution on arbitrary post-fork child execution.
 
 See `docs/process_fork.md` for the fork contract and Windows emulation plan.
 

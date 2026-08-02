@@ -68,7 +68,11 @@ execute(struct op * volatile t,
 	if (xerrok == NULL)
 		xerrok = &dummy;
 
-	if ((flags&XFORK) && !(flags&XEXEC) && t->type != TPIPE)
+	if ((flags&XFORK) && !(flags&XEXEC) && t->type != TPIPE
+#ifdef MKSH_CRT_SHELL_CHILD_SPEC
+	    && t->type != TCOM
+#endif
+	    )
 		/* run in sub-process */
 		return (exchild(t, flags & ~XTIME, xerrok, -1));
 

@@ -23,6 +23,11 @@
 
 #include "sh.h"
 
+#ifdef MKSH_CRT_SHELL_CHILD_SPEC
+#include <private/crt_shell_process.h>
+#include <spawn.h>
+#endif
+
 __RCSID("$MirOS: src/bin/mksh/jobs.c,v 1.128 2019/12/11 19:46:20 tg Exp $");
 
 #if HAVE_KILLPG
@@ -61,6 +66,59 @@ struct proc {
 	char command[256 - (ALLOC_OVERHEAD +
 	    offsetof(struct proc_dummy, command[0]))];
 };
+
+#ifdef MKSH_CRT_SHELL_CHILD_SPEC
+static int crt_mksh_pending_child_close_fd = -1;
+
+static int
+crt_mksh_spawn_exec_child(pid_t *pid, struct op *t, int flags, int close_fd)
+{
+	posix_spawn_file_actions_t actions;
+	posix_spawn_file_actions_t *actionsp = NULL;
+	union mksh_ccphack cargs;
+	char **envp;
+	int child_close_fd = close_fd >= 0 ? close_fd :
+	    crt_mksh_pending_child_close_fd;
+	int rv;
+
+	if (t->type != TEXEC || (flags & (XEXEC | XCOPROC)))
+		return (-1);
+
+	if ((flags & XCCLOSE) && child_close_fd >= 0) {
+		rv = posix_spawn_file_actions_init(&actions);
+		if (rv)
+			return (rv);
+		rv = posix_spawn_file_actions_addclose(&actions, child_close_fd);
+		if (rv) {
+			posix_spawn_file_actions_destroy(&actions);
+			return (rv);
+		}
+		actionsp = &actions;
+	}
+
+	envp = makenv();
+	cargs.ro = t->args;
+	rv = __crt_shell_fork_exec(pid, t->str, actionsp, cargs.rw, envp);
+	if (actionsp)
+		posix_spawn_file_actions_destroy(actionsp);
+	return (rv);
+}
+
+static int
+crt_mksh_execute_tcom_without_raw_fork(struct op *t, int flags,
+    volatile int *xerrok, int close_fd)
+{
+	int old_close_fd = crt_mksh_pending_child_close_fd;
+	int rv;
+
+	crt_mksh_pending_child_close_fd = close_fd;
+	rv = execute(t, flags & ~XFORK, xerrok);
+	crt_mksh_pending_child_close_fd = old_close_fd;
+	if (close_fd >= 0 && (flags & XPCLOSE))
+		close(close_fd);
+	return (rv);
+}
+#endif
 
 /* Notify/print flag - j_print() argument */
 #define JP_SHORT	1	/* print signals processes were killed by */
@@ -453,6 +511,12 @@ exchild(struct op *t, int flags,
 		jwflags |= JW_PIPEST;
 	}
 
+#ifdef MKSH_CRT_SHELL_CHILD_SPEC
+	if (t->type == TCOM && !(flags & XEXEC))
+		return (crt_mksh_execute_tcom_without_raw_fork(
+		    t, flags, xerrok, close_fd));
+#endif
+
 	if (flags & XEXEC)
 		/*
 		 * Clear XFORK|XPCLOSE|XCCLOSE|XCOPROC|XPIPEO|XPIPEI|XXCOM|XBGND
@@ -474,15 +538,24 @@ exchild(struct op *t, int flags,
 	/* link process into jobs list */
 	if (flags & XPIPEI) {
 		/* continuing with a pipe */
-		if (!last_job)
+		if (!last_job) {
+#ifdef MKSH_CRT_SHELL_CHILD_SPEC
+			flags &= ~XPIPEI;
+			goto crt_mksh_new_pipeline_job;
+#else
 			internal_errorf("exchild: XPIPEI and no last_job - pid %d",
 			    (int)procpid);
+#endif
+		}
 		j = last_job;
 		if (last_proc)
 			last_proc->next = p;
 		last_proc = p;
 	} else {
 		/* fills in j->job */
+#ifdef MKSH_CRT_SHELL_CHILD_SPEC
+ crt_mksh_new_pipeline_job:
+#endif
 		j = new_job();
 		/*
 		 * we don't consider XXCOMs foreground since they don't get
@@ -507,6 +580,10 @@ exchild(struct op *t, int flags,
 
 	/* create child process */
 	forksleep = 1;
+#ifdef MKSH_CRT_SHELL_CHILD_SPEC
+	rv = crt_mksh_spawn_exec_child(&cldpid, t, flags, close_fd);
+	if (rv == -1) {
+#endif
 	while ((cldpid = fork()) < 0 && errno == EAGAIN && forksleep < 32) {
 		if (intrsig)
 			/* allow user to ^C out... */
@@ -514,6 +591,12 @@ exchild(struct op *t, int flags,
 		sleep(forksleep);
 		forksleep <<= 1;
 	}
+#ifdef MKSH_CRT_SHELL_CHILD_SPEC
+	} else if (rv != 0) {
+		cldpid = -1;
+		errno = rv;
+	}
+#endif
 	/* ensure $RANDOM changes between parent and child */
 	rndset((unsigned long)cldpid);
 	/* fork failed? */
@@ -684,6 +767,14 @@ waitlast(void)
 
 	j = last_job;
 	if (!j || !(j->flags & JF_STARTED)) {
+#ifdef MKSH_CRT_SHELL_CHILD_SPEC
+		if (!j) {
+#ifndef MKSH_NOPROSPECTOFWORK
+			sigprocmask(SIG_SETMASK, &omask, NULL);
+#endif
+			return (exstat & 0xFF);
+		}
+#endif
 		if (!j)
 			warningf(true, Tf_sD_s, "waitlast", "no last job");
 		else

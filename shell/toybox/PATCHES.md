@@ -78,9 +78,10 @@ Verification:
 
 Known remaining shell gap:
 
-Windows mksh external-command lists, pipelines, and redirections still depend
-on the libc/PAL `fork()` tranche. Do not work around this with mksh-specific
-spawn shortcuts.
+Windows mksh external-command lists, pipelines, and redirections should move to
+the CRT-owned shell child-spec path. Real public Windows `fork()` remains a
+long-term research item; do not change CRT/Bionic public ABI or expose host SDK
+process semantics to hide that gap.
 
 ## Windows Applet Name Lookup
 

@@ -2,18 +2,22 @@
 
 ## Goal
 
-Windows public `fork()` is currently unsupported, but this is a temporary
-bootstrap state, not the desired shell architecture. mksh should use its normal
-`fork()` path on Windows too; fixing mksh by adding shell-specific
-`posix_spawn()` shortcuts moves the compatibility boundary to the wrong layer.
+Windows public `fork()` is a long-term research item, not the short-term shell
+architecture. The immediate goal is to make mksh and toybox usable on Windows
+through an explicit CRT-owned shell child-spec path that models the common
+fork-then-exec shell case without pretending that Windows can cheaply provide a
+full POSIX `fork()`.
 
-This document defines the path for a project-owned Windows `fork()` emulation
-inside libc/PAL, without importing the MSYS2/Cygwin runtime model.
+This document defines the current Windows process bootstrap contract and keeps
+the eventual project-owned `fork()` emulation tranche separate from the
+mksh/toybox enablement path. The project does not import the MSYS2/Cygwin
+runtime model.
 
 The first shared primitive is fd table serialization. The same mechanism should
 serve:
 
-- future Windows `fork()` emulation;
+- shell child-spec execution on Windows;
+- future Windows `fork()` emulation research;
 - `posix_spawn()` child bootstrap;
 - shell pipelines, redirection, and command substitution;
 - configure-script execution under the CRT shell.
@@ -38,16 +42,20 @@ three Win32 standard handles.
 
 ## Snapshot Format
 
-`private/crt_fd_table.h` defines the initial in-memory snapshot ABI:
+`private/crt_fd_table.h` defines the private in-memory snapshot ABI:
 
 - magic/version/capacity header;
 - fixed maximum entry count matching the current fd table size;
 - per-entry fd number, descriptor kind, flags, and host handle value;
-- `CRT_FD_SNAPSHOT_FLAG_INHERITABLE` marks handles prepared for child
-  inheritance.
+- `CRT_FD_SNAPSHOT_FLAG_INHERITABLE` marks handles that are directly
+  inheritable by a child.
+- `CRT_FD_SNAPSHOT_FLAG_REMOTE_PROCESS_HANDLE` marks file-like handles that
+  have already been duplicated into the concrete child process. These values
+  are meaningful in the child, not closeable parent handles.
 
-The current Windows implementation exports file-like handles through
-inheritable handle transport. Socket fd entries are converted to
+The current Windows implementation exports file-like handles as parent-owned
+duplicates, then duplicates them into the concrete child process after
+`CreateProcessA` succeeds. Socket fd entries are converted to
 `WSADuplicateSocketA()` protocol records once the child process id is known.
 
 The current Windows test tranche validates one loopback TCP connection across
@@ -62,10 +70,12 @@ this bootstrap format.
 
 ## Export/Import Semantics
 
-`__crt_fd_snapshot_export()` duplicates each eligible Windows fd handle as an
-inheritable handle and records it in the snapshot. Descriptors marked
-`FD_CLOEXEC` are filtered out. The snapshot owns those duplicated handles until
-`__crt_fd_snapshot_dispose()`.
+`__crt_fd_snapshot_export()` duplicates each eligible Windows fd handle and
+records it in the snapshot. Descriptors marked `FD_CLOEXEC` are filtered out.
+For the snapshot-pipe path, the parent duplicates file-like handles into the
+real child process and marks those entries as remote process handles. The
+snapshot owns only the parent-side duplicates that are not remote child handle
+values.
 
 `__crt_fd_snapshot_import()` duplicates each snapshot handle into the current
 process fd table. Import does not consume the snapshot, so callers can dispose
@@ -107,7 +117,28 @@ The second unit test crosses a real process boundary:
 5. child writes to the inherited pipe fd passed through `argv`;
 6. parent reads the byte and verifies the child exit status.
 
-## Fork Bootstrap Direction
+## Shell Child-Spec Direction
+
+The short-term Windows shell path should treat fork-then-exec as a first-class
+internal operation:
+
+1. shell or libc builds a child spec containing executable path, argv/envp,
+   cwd/rootfs, signal policy, fd file actions, close-on-exec policy, and stdio
+   flush policy;
+2. parent starts the child suspended when fd/socket snapshot data must be
+   patched after the child pid is known;
+3. parent transports the fd snapshot through the bootstrap pipe;
+4. child CRT startup imports the fd table, cwd/rootfs, and signal state before
+   entering `main()`;
+5. parent registers the child for `waitpid()` and process-group approximation;
+6. pipelines and command substitutions tear down unused pipe ends in both
+   parent and child according to the child spec.
+
+This path is allowed to power mksh/toybox Windows execution even while public
+`fork()` remains incomplete. It is still a libc/PAL boundary, not host SDK
+leakage and not a broad change to Bionic public ABI.
+
+## Fork Bootstrap Research
 
 Windows `fork()` should use the same child bootstrap data rather than adding a
 separate `posix_spawn()`-only path:
@@ -136,11 +167,11 @@ branch to run.
 ## Shell-Oriented Contract
 
 The existing shell-facing `__crt_shell_spawn()` and `__crt_shell_fork_exec()`
-helpers remain useful for direct shell smoke tests and for `posix_spawn()`, but
-they are not a substitute for public `fork()`. mksh's external command,
-pipeline, command substitution, and subshell paths assume the child branch
-continues immediately after `fork()`. The Windows PAL must eventually satisfy
-that contract below libc.
+helpers are the intended Windows short-term shell contract. They should be
+grown into a precise child-spec API rather than treated as temporary smoke-test
+helpers. mksh and toybox integration work may adapt their Windows build/glue to
+route fork-then-exec patterns through this helper, while leaving arbitrary
+post-fork child execution unsupported on Windows.
 
 Windows `execve()` is implemented only for this shell child contract: it spawns
 the target with the same bootstrap machinery, waits, and exits the current
@@ -154,8 +185,10 @@ image replacement semantics.
   pipeline teardown. The current Windows fd snapshot test already covers a
   small multiple-child `waitpid(-1)` drain;
 - full signal disposition propagation beyond mask/default reset;
-- memory/state policy for real `fork()` emulation.
+- mksh/toybox child-spec adapter for external commands, pipelines, redirection,
+  command substitution, and exec-builtin-like replacement;
+- memory/state policy for real `fork()` emulation;
 - stack/register resume proof-of-concept for static CRT executables;
 - ASLR/base-address constraints and failure diagnostics;
-- mksh `ls`, redirection, pipeline, and command-substitution smoke tests using
-  unmodified mksh fork flow.
+- direct Windows `fork()` policy tests that clearly distinguish unsupported
+  arbitrary fork from supported shell child-spec execution.
