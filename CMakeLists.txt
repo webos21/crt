@@ -226,7 +226,8 @@ add_custom_target(sysroot
 if(Python3_Interpreter_FOUND)
   set(CRT_ROOTFS "${CMAKE_BINARY_DIR}/rootfs" CACHE PATH "Android-like runtime root filesystem")
   add_custom_target(rootfs
-    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_rootfs.py"
+    COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_rootfs.py"
       --dest "${CRT_ROOTFS}"
       --target-os "${CRT_TARGET_OS}"
       --shell "$<TARGET_FILE:crt_tiny_sh>"
@@ -236,6 +237,7 @@ if(Python3_Interpreter_FOUND)
     DEPENDS sysroot crt_shell_artifacts
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     COMMENT "Creating Android-like CRT rootfs at ${CRT_ROOTFS}"
+    USES_TERMINAL
   )
 
   get_filename_component(CRT_BUILD_PRESET_NAME "${CMAKE_BINARY_DIR}" NAME)
@@ -246,30 +248,36 @@ if(Python3_Interpreter_FOUND)
   file(GLOB CRT_PORT_RECIPE_FILES CONFIGURE_DEPENDS "${CRT_PORT_RECIPE_ROOT}/*.json")
 
   add_custom_target(port-list
-    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/fetch_ports.py"
+    COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/fetch_ports.py"
       --recipe-dir "${CRT_PORT_RECIPE_ROOT}"
       --list
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     COMMENT "Listing CRT porting recipes"
+    USES_TERMINAL
   )
   add_custom_target(port-fetch
-    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/fetch_ports.py"
+    COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/fetch_ports.py"
       --dest "${CRT_PORT_SOURCE_ROOT}"
       --cache "${CRT_PORT_DOWNLOAD_ROOT}"
       --recipe-dir "${CRT_PORT_RECIPE_ROOT}"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     COMMENT "Fetching and extracting all CRT porting recipe sources into ${CRT_PORT_SOURCE_ROOT}"
+    USES_TERMINAL
   )
 
   function(crt_add_port_recipe_target recipe_name)
     add_custom_target(port-fetch-${recipe_name}
-      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/fetch_ports.py"
+      COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
+        "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/fetch_ports.py"
         --dest "${CRT_PORT_SOURCE_ROOT}"
         --cache "${CRT_PORT_DOWNLOAD_ROOT}"
         --recipe-dir "${CRT_PORT_RECIPE_ROOT}"
         --port "${recipe_name}"
       WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
       COMMENT "Fetching and extracting ${recipe_name} into ${CRT_PORT_SOURCE_ROOT}"
+      USES_TERMINAL
     )
   endfunction()
 
@@ -283,7 +291,8 @@ if(Python3_Interpreter_FOUND)
       set(CRT_PORT_BUILD_SHELL_ARGS --use-crt-shell)
     endif()
     add_custom_target(port-build-${recipe_name}
-      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/crt-port-build.py"
+      COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
+        "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/crt-port-build.py"
         --preset "${CRT_BUILD_PRESET_NAME}"
         --target-os "${CRT_TARGET_OS}"
         --recipe-dir "${CRT_PORT_RECIPE_ROOT}"
@@ -293,9 +302,11 @@ if(Python3_Interpreter_FOUND)
       DEPENDS ${CRT_PORT_BUILD_DEPENDS}
       WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
       COMMENT "Building ${recipe_name} (${recipe_build_system}) against the CRT sysroot"
+      USES_TERMINAL
     )
     add_custom_target(port-rebuild-${recipe_name}
-      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/crt-port-build.py"
+      COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
+        "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/crt-port-build.py"
         --preset "${CRT_BUILD_PRESET_NAME}"
         --target-os "${CRT_TARGET_OS}"
         --recipe-dir "${CRT_PORT_RECIPE_ROOT}"
@@ -306,6 +317,7 @@ if(Python3_Interpreter_FOUND)
       DEPENDS ${CRT_PORT_BUILD_DEPENDS}
       WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
       COMMENT "Rebuilding ${recipe_name} (${recipe_build_system}) against the CRT sysroot"
+      USES_TERMINAL
     )
   endfunction()
 

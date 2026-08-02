@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import filecmp
 import os
 import shutil
 from pathlib import Path
@@ -60,9 +61,36 @@ ROOTFS_DIRS = [
 ]
 
 
-def install_alias(target: Path, link: Path, target_os: str):
+def progress(message):
+    print(f"[rootfs] {message}", flush=True)
+
+
+def copy_file(src: Path, dst: Path, label: str, quiet=False):
+    if dst.exists() and filecmp.cmp(src, dst, shallow=False):
+        if not quiet:
+            progress(f"skip unchanged {label}: {dst}")
+        return
+    if not quiet:
+        progress(f"install {label}: {dst}")
+    try:
+        shutil.copy2(src, dst)
+    except PermissionError as exc:
+        if os.name == "nt":
+            raise SystemExit(
+                f"[rootfs] failed to install {label}: {dst}\n"
+                f"[rootfs] Windows reports the destination is in use. Close any "
+                f"running rootfs shell/tool process such as mksh.exe, sh.exe, "
+                f"toybox.exe, or applet .exe under this rootfs, then rerun the "
+                f"CMake target.\n"
+                f"[rootfs] source: {src}\n"
+                f"[rootfs] error: {exc}"
+            ) from exc
+        raise
+
+
+def install_alias(target: Path, link: Path, target_os: str, quiet=False):
     if target_os == "windows":
-        shutil.copy2(target, link)
+        copy_file(target, link, "alias", quiet)
         return
     if link.exists() or link.is_symlink():
         link.unlink()
@@ -80,9 +108,11 @@ def main():
     args = parser.parse_args()
 
     rootfs = Path(args.dest).resolve()
+    progress(f"create {rootfs}")
     for entry in ROOTFS_DIRS:
         (rootfs / entry).mkdir(parents=True, exist_ok=True)
 
+    progress("write README.txt")
     (rootfs / "README.txt").write_text(
         "CRT Android-like rootfs\n"
         f"target-os={args.target_os}\n"
@@ -98,38 +128,40 @@ def main():
         shell_name = "sh.exe" if args.target_os == "windows" else "sh"
         tiny_name = "tiny-sh.exe" if args.target_os == "windows" else "tiny-sh"
         for shell_dir in ("system/bin", "bin", "usr/bin"):
-            shutil.copy2(shell_source, rootfs / shell_dir / tiny_name)
+            copy_file(shell_source, rootfs / shell_dir / tiny_name, tiny_name)
         if args.target_os == "windows":
             for shell_dir in ("system/bin", "bin", "usr/bin"):
-                shutil.copy2(shell_source, rootfs / shell_dir / "tiny-sh")
+                copy_file(shell_source, rootfs / shell_dir / "tiny-sh", "tiny-sh")
     if args.mksh:
         mksh_source = Path(args.mksh).resolve()
         mksh_name = "mksh.exe" if args.target_os == "windows" else "mksh"
         mksh_dest = rootfs / "system" / "bin" / mksh_name
-        shutil.copy2(mksh_source, mksh_dest)
+        copy_file(mksh_source, mksh_dest, mksh_name)
         shell_name = "sh.exe" if args.target_os == "windows" else "sh"
         for shell_dir in ("system/bin", "bin", "usr/bin"):
             install_alias(mksh_dest, rootfs / shell_dir / shell_name, args.target_os)
         if args.target_os == "windows":
-            shutil.copy2(mksh_source, rootfs / "system" / "bin" / "mksh")
+            copy_file(mksh_source, rootfs / "system" / "bin" / "mksh", "mksh")
             for shell_dir in ("system/bin", "bin", "usr/bin"):
-                shutil.copy2(mksh_source, rootfs / shell_dir / "sh")
+                copy_file(mksh_source, rootfs / shell_dir / "sh", "sh")
     if args.mkshrc:
-        shutil.copy2(Path(args.mkshrc).resolve(), rootfs / "system" / "etc" / "mkshrc")
+        copy_file(Path(args.mkshrc).resolve(), rootfs / "system" / "etc" / "mkshrc", "mkshrc")
     if args.toybox:
         toybox_source = Path(args.toybox).resolve()
         toybox_name = "toybox.exe" if args.target_os == "windows" else "toybox"
         toybox_dest = rootfs / "system" / "bin" / toybox_name
-        shutil.copy2(toybox_source, toybox_dest)
+        copy_file(toybox_source, toybox_dest, toybox_name)
         if args.target_os == "windows":
-            shutil.copy2(toybox_source, rootfs / "system" / "bin" / "toybox")
+            copy_file(toybox_source, rootfs / "system" / "bin" / "toybox", "toybox")
+        progress(f"install toybox applet aliases: {len(TOYBOX_APPLETS)} applets")
         for applet in TOYBOX_APPLETS:
             applet_name = f"{applet}.exe" if args.target_os == "windows" else applet
             for applet_dir in ("system/bin", "bin", "usr/bin"):
-                install_alias(toybox_dest, rootfs / applet_dir / applet_name, args.target_os)
+                install_alias(toybox_dest, rootfs / applet_dir / applet_name, args.target_os, quiet=True)
                 if args.target_os == "windows":
-                    shutil.copy2(toybox_source, rootfs / applet_dir / applet)
-    print(f"CRT_ROOTFS={rootfs}")
+                    copy_file(toybox_source, rootfs / applet_dir / applet, applet, quiet=True)
+    progress(f"done {rootfs}")
+    print(f"CRT_ROOTFS={rootfs}", flush=True)
 
 
 if __name__ == "__main__":

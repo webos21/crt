@@ -6,6 +6,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 
@@ -18,9 +19,19 @@ def load_recipes(recipe_dir):
     return recipes
 
 
-def run(args, cwd, env):
+def progress(message):
+    print(f"[port] {message}", flush=True)
+
+
+def run(args, cwd, env, label=None):
+    if label:
+        progress(f"start {label}")
     print("+", " ".join(str(a) for a in args), flush=True)
+    start = time.monotonic()
     subprocess.run(args, cwd=cwd, env=env, check=True)
+    if label:
+        elapsed = time.monotonic() - start
+        progress(f"done {label} ({elapsed:.1f}s)")
 
 
 def is_native_windows_configure(target_os):
@@ -231,6 +242,7 @@ def command_value_argv(value, preset_build_dir, target_os):
 
 
 def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env, target_os, use_crt_shell=False, configure_only=False):
+    port_name = recipe["name"]
     build = recipe["build"]
     shell = rootfs_mksh_path(preset_build_dir, target_os)
     configure = ["./configure"]
@@ -245,15 +257,16 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
         env["CONFIG_SHELL"] = "/system/bin/mksh"
         if not is_native_windows_configure(target_os):
             env["CONFIG_SHELL"] = shell
-        run([shell] + configure, work, env)
+        run([shell] + configure, work, env, f"{port_name}: configure")
     elif is_native_windows_configure(target_os):
         shell = find_posix_shell(env)
         env["CONFIG_SHELL"] = path_for_msys_shell(shell)
         configure = [shell] + configure
-        run(configure, work, env)
+        run(configure, work, env, f"{port_name}: configure")
     else:
-        run(configure, work, env)
+        run(configure, work, env, f"{port_name}: configure")
     if configure_only:
+        progress(f"{port_name}: configure-only stop")
         return
     make = env.get("MAKE", "make")
     jobs = 1 if target_os == "windows" and use_crt_shell else (os.cpu_count() or 2)
@@ -263,20 +276,23 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
         make_args.append("SHELL=/system/bin/mksh")
         install_args.append("SHELL=/system/bin/mksh")
     if use_crt_shell:
-        run([str(shell), "-c", make_command_for_shell(make_args, target_os, use_crt_shell)], work, env)
-        run([str(shell), "-c", make_command_for_shell(install_args, target_os, use_crt_shell)], work, env)
+        run([str(shell), "-c", make_command_for_shell(make_args, target_os, use_crt_shell)], work, env, f"{port_name}: make")
+        run([str(shell), "-c", make_command_for_shell(install_args, target_os, use_crt_shell)], work, env, f"{port_name}: make install")
     else:
-        run(make_args, work, env)
-        run(install_args, work, env)
+        run(make_args, work, env, f"{port_name}: make")
+        run(install_args, work, env, f"{port_name}: make install")
 
 
 def build_amalgamation_port(work, port_prefix, recipe, env):
+    port_name = recipe["name"]
     build = recipe["build"]
     objects = []
     cflags = shlex.split(env.get("CPPFLAGS", "")) + shlex.split(env.get("CFLAGS", ""))
     cflags.extend(build.get("cflags", []))
 
-    for source in build["sources"]:
+    sources = list(build["sources"])
+    for index, source in enumerate(sources, 1):
+        progress(f"{port_name}: compile {index}/{len(sources)} {source}")
         src = work / source
         obj = work / (Path(source).name + ".o")
         run([env["CC"]] + cflags + ["-I", str(work), "-c", str(src), "-o", str(obj)], work, env)
@@ -287,13 +303,15 @@ def build_amalgamation_port(work, port_prefix, recipe, env):
     lib_dir.mkdir(parents=True, exist_ok=True)
     include_dir.mkdir(parents=True, exist_ok=True)
     archive = lib_dir / build["archive"]
-    run([env["AR"], "rcs", str(archive)] + [str(obj) for obj in objects], work, env)
-    run([env["RANLIB"], str(archive)], work, env)
+    run([env["AR"], "rcs", str(archive)] + [str(obj) for obj in objects], work, env, f"{port_name}: archive")
+    run([env["RANLIB"], str(archive)], work, env, f"{port_name}: ranlib")
     for header in build.get("install_headers", []):
+        progress(f"{port_name}: install header {header}")
         shutil.copy2(work / header, include_dir / Path(header).name)
 
 
 def build_android_host_tool_port(preset_build_dir, work, port_prefix, recipe, env, target_os):
+    port_name = recipe["name"]
     build = recipe["build"]
     objects = []
     cflags = shlex.split(env.get("CPPFLAGS", "")) + shlex.split(env.get("CFLAGS", ""))
@@ -321,7 +339,8 @@ def build_android_host_tool_port(preset_build_dir, work, port_prefix, recipe, en
             include_path = work / include_path
         cflags.extend(["-I", str(include_path)])
 
-    for source in sources:
+    for index, source in enumerate(sources, 1):
+        progress(f"{port_name}: compile {index}/{len(sources)} {source}")
         src = work / source
         obj = work / (source.replace("/", "_").replace("\\", "_") + ".o")
         run(command_value_argv(env["CC"], preset_build_dir, target_os) + cflags + ["-c", str(src), "-o", str(obj)], work, env)
@@ -333,13 +352,14 @@ def build_android_host_tool_port(preset_build_dir, work, port_prefix, recipe, en
     binary = bin_dir / (build["binary"] + suffix)
     ldflags = shlex.split(env.get("LDFLAGS", ""))
     libs = shlex.split(env.get("LIBS", ""))
-    run(command_value_argv(env["CC"], preset_build_dir, target_os) + [str(obj) for obj in objects] + ldflags + libs + ["-o", str(binary)], work, env)
+    run(command_value_argv(env["CC"], preset_build_dir, target_os) + [str(obj) for obj in objects] + ldflags + libs + ["-o", str(binary)], work, env, f"{port_name}: link {binary.name}")
 
 
 def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, port_prefix, recipes, port, target_os, use_crt_shell=False, configure_only=False, built=None):
     if built is None:
         built = set()
     if port in built:
+        progress(f"{port}: already handled in this run")
         return
     if port not in recipes:
         raise SystemExit(f"recipe not found: {port}")
@@ -357,12 +377,16 @@ def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, por
 
     stamp = work_build_dir / "stamps" / f"{port}.installed"
     if stamp.exists():
+        progress(f"{port}: installed stamp exists, skipping")
+        built.add(port)
         return
 
     src = find_source(source_root, recipe["source"]["source_dir"])
     work = work_build_dir / "work" / port
+    progress(f"{port}: prepare source {src} -> {work}")
     copy_source(src, work)
 
+    progress(f"{port}: build system {build['system']}")
     env = make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os, use_crt_shell)
     apply_recipe_env(env, recipe)
     if build["system"] == "configure":
@@ -373,6 +397,7 @@ def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, por
         build_android_host_tool_port(preset_build_dir, work, port_prefix, recipe, env, target_os)
     stamp.parent.mkdir(parents=True, exist_ok=True)
     stamp.write_text("ok\n")
+    progress(f"{port}: wrote install stamp {stamp}")
     built.add(port)
 
 
@@ -411,7 +436,7 @@ def main():
 
     if not args.skip_sysroot_build:
         target = "rootfs" if args.use_crt_shell else "sysroot"
-        run(["cmake", "--build", "--preset", args.preset, "--target", target], root, os.environ.copy())
+        run(["cmake", "--build", "--preset", args.preset, "--target", target], root, os.environ.copy(), f"cmake target {target}")
     port_prefix.mkdir(parents=True, exist_ok=True)
     (port_prefix / "include").mkdir(parents=True, exist_ok=True)
     (port_prefix / "lib" / "pkgconfig").mkdir(parents=True, exist_ok=True)
@@ -420,12 +445,14 @@ def main():
         for port in args.port:
             stamp = work_root / "stamps" / f"{port}.installed"
             if stamp.exists():
+                progress(f"{port}: remove install stamp for rebuild")
                 stamp.unlink()
 
     for port in args.port:
+        progress(f"{port}: requested")
         build_port(root, build_dir, work_root, source_root, sysroot, port_prefix, recipes, port, target_os, args.use_crt_shell, args.configure_only)
 
-    print(f"ports installed: {port_prefix}")
+    progress(f"ports installed: {port_prefix}")
 
 
 if __name__ == "__main__":
