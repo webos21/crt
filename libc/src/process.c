@@ -25,6 +25,7 @@ long __crt_sys_getpgrp(void);
 long __crt_sys_setsid(void);
 long __crt_sys_kill(long pid, int sig);
 long __crt_sys_execve(const char* path, char* const argv[], char* const envp[]);
+long __crt_sys_fork(void);
 long __crt_sys_waitpid(long pid, int* status, int options);
 #if defined(CRT_TARGET_OS_WINDOWS)
 long __crt_sys_posix_spawn(
@@ -46,7 +47,6 @@ void __crt_pthread_after_fork_child(void);
 void __crt_stdio_after_fork_child(void);
 
 #if defined(CRT_TARGET_OS_LINUX)
-long __crt_sys_fork(void);
 long __crt_sys_wait4(long pid, int* status, int options, void* rusage);
 
 long __crt_sys_waitpid(long pid, int* status, int options) {
@@ -54,7 +54,6 @@ long __crt_sys_waitpid(long pid, int* status, int options) {
 }
 
 #elif defined(CRT_TARGET_OS_MACOS)
-long __crt_sys_fork(void);
 long __crt_sys_wait4(long pid, int* status, int options, void* rusage);
 
 long __crt_sys_waitpid(long pid, int* status, int options) {
@@ -63,10 +62,6 @@ long __crt_sys_waitpid(long pid, int* status, int options) {
 #elif defined(CRT_TARGET_OS_WINDOWS)
 static long windows_process_group;
 static long windows_session_id;
-
-long __crt_sys_fork(void) {
-  return -ENOTSUP;
-}
 
 long __crt_sys_setpgid(long pid, long pgid) {
   long self = __crt_sys_getpid();
@@ -100,11 +95,14 @@ long __crt_sys_setsid(void) {
 }
 
 long __crt_sys_execve(const char* path, char* const argv[], char* const envp[]) {
-  long pid = 0;
+  long pid = CRT_SPAWN_PRIVATE_WAIT_PID;
   int status = 0;
   long result;
 
   result = __crt_sys_posix_spawn(path, argv, envp != 0 ? envp : environ, &pid, 0, 0, 0);
+  if (result > 0) {
+    return -result;
+  }
   if (result < 0) {
     return result;
   }
@@ -932,8 +930,8 @@ int posix_spawn(
       0,
       file_actions != 0 ? *file_actions : 0,
       attrp != 0 ? *attrp : 0);
-  if (result < 0) {
-    return (int)-result;
+  if (result != 0) {
+    return result < 0 ? (int)-result : (int)result;
   }
   if (pid != 0) {
     *pid = (pid_t)child_pid;
@@ -962,8 +960,8 @@ int posix_spawnp(
       1,
       file_actions != 0 ? *file_actions : 0,
       attrp != 0 ? *attrp : 0);
-  if (result < 0) {
-    return (int)-result;
+  if (result != 0) {
+    return result < 0 ? (int)-result : (int)result;
   }
   if (pid != 0) {
     *pid = (pid_t)child_pid;

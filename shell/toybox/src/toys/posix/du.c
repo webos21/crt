@@ -138,10 +138,10 @@ static int do_du(struct dirtree *node)
   // Modern compilers' optimizers are insane and think signed overflow
   // behaves differently than unsigned overflow. Sigh. Big hammer.
   blocks = FLAG(b) ? node->st.st_size : node->st.st_blocks;
-  blocks += (unsigned long)node->extra;
-  node->extra = blocks;
+  blocks += (long long)node->extra;
+  node->extra = (intptr_t)blocks;
   if (node->parent)
-    node->parent->extra = (unsigned long)node->parent->extra+blocks;
+    node->parent->extra = (intptr_t)((long long)node->parent->extra+blocks);
   else TT.total += node->extra;
 
   if (FLAG(a) || !node->parent || (S_ISDIR(node->st.st_mode) && !FLAG(s))) {

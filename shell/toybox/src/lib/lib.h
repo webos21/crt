@@ -72,7 +72,7 @@ void get_optflags(void);
 
 struct dirtree {
   struct dirtree *next, *parent, *child;
-  long extra; // place for user to store their stuff (can be pointer)
+  intptr_t extra; // place for user to store their stuff (can be pointer)
   char *symlink;
   int dirfd;
   struct stat st;

@@ -134,6 +134,23 @@ int main(void) {
       ntohl(addr.sin_addr.s_addr) != INADDR_LOOPBACK) {
     return fail("inet ABI");
   }
+  if (EPERM != 1 ||
+      ECHILD != 10 ||
+      ENOTBLK != 15 ||
+      ETXTBSY != 26 ||
+      EDEADLK != 35 ||
+      EUSERS != 87 ||
+      ENOTSUP != 95 ||
+      EOPNOTSUPP != 95 ||
+      ENETRESET != 102 ||
+      ESHUTDOWN != 108 ||
+      EINPROGRESS != 115 ||
+      ECANCELED != 125 ||
+      EOWNERDEAD != 130 ||
+      ENOTRECOVERABLE != 131 ||
+      EHWPOISON != 133) {
+    return fail("Bionic errno ABI");
+  }
 
   pfd.fd = -1;
   pfd.events = POLLIN | POLLOUT;

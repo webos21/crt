@@ -161,6 +161,13 @@ Android's generated toybox configuration to the current source/appset boundary
 and disables applets that would pull in zlib, mount/procfs, process table, or
 namespace dependencies before the CRT/PAL owns those surfaces.
 
+Android does not put zlib in Bionic libc itself. `zlib.h`/`zconf.h` and `libz`
+come from Android `external/zlib` as a separate public library surface, while
+some platform components such as the dynamic linker may statically link it.
+Follow the same split here: provide zlib as a sysroot/runtime library when the
+porting or shell applet surface needs it, and only embed it privately in a
+component such as the linker if that component has a direct internal dependency.
+
 Rootfs generation now uses Android-like symlink aliases on POSIX hosts:
 
 ```text
@@ -173,7 +180,30 @@ Windows keeps copy-based `.exe` aliases because symlink creation has different
 privilege and UX tradeoffs there.
 
 The remaining shell milestone is not "make toybox compile"; that part is
-working for the minimal applet set. The next gap is mksh external-command
-sequencing and pipeline teardown when the child is a CRT toybox applet. On
-Windows this must be solved by libc/PAL `fork()` emulation plus waitpid/SIGCHLD
-fidelity, not by adding mksh-specific `posix_spawn()` shortcuts.
+working for the minimal applet set. On Windows x86_64, rootfs mksh can now run
+single external toybox applets such as `ls /system/bin`, `ls -s /`, `ls -l /`,
+and `toybox.exe ls -al /` when `CRT_ROOTFS` and a POSIX-style
+`PATH=/system/bin:/bin:/usr/bin` are provided.
+
+The Windows fixes that made this work are intentionally in CRT/PAL or
+shell-local source compatibility:
+
+- Windows `posix_spawn` resolves the host executable path separately from the
+  child command line so applets keep the intended POSIX `argv[0]`.
+- Windows `stat()` marks extensionless PE/MZ rootfs aliases executable, matching
+  `access(X_OK)`.
+- Windows `openat()` and `fdopendir()` can resolve directory fds back to host
+  paths, which toybox directory traversal expects.
+- toybox `dirtree.extra`, `ls`, the common option parser, and active
+  pointer-tagging paths use pointer-width storage where values may hold
+  pointers. Windows direct invocation also accepts `\`-separated `.exe` applet
+  paths. These avoid LLP64 pointer truncation without changing CRT public ABI.
+  Because upstream Android/Linux toybox can assume LP64 for its 64-bit targets,
+  additional LLP64 cleanups should be made in the imported toybox source/glue
+  rather than hidden behind Windows CRT ABI changes.
+
+The next gap is mksh external-command sequencing and pipeline teardown when
+the child is a CRT toybox applet. On Windows this must be solved by libc/PAL
+`fork()` emulation plus waitpid/SIGCHLD fidelity, not by adding mksh-specific
+`posix_spawn()` shortcuts. Also keep auditing disabled toybox applets for
+remaining LLP64 pointer-to-`long` assumptions before enabling them.

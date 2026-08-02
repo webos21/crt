@@ -21,6 +21,7 @@
 typedef void* HANDLE;
 typedef uintptr_t SOCKET;
 typedef unsigned long DWORD;
+typedef unsigned long ULONG;
 typedef uint16_t WORD;
 typedef int BOOL;
 struct sockaddr;
@@ -136,6 +137,7 @@ struct crt_memory_status_ex {
 #define WINDOWS_TICK 10000000ULL
 #define SEC_TO_UNIX_EPOCH 11644473600ULL
 #define DUPLICATE_SAME_ACCESS 0x00000002
+#define HANDLE_FLAG_INHERIT 0x00000001
 #define LOCKFILE_FAIL_IMMEDIATELY 0x00000001
 #define LOCKFILE_EXCLUSIVE_LOCK 0x00000002
 #define INVALID_SOCKET ((SOCKET)~(uintptr_t)0)
@@ -160,6 +162,10 @@ struct crt_memory_status_ex {
 #define CRT_CREATE_NEW_PROCESS_GROUP 0x00000200
 #define CRT_CREATE_SUSPENDED 0x00000004
 #define CRT_ERROR_BROKEN_PIPE 109
+#define CRT_ERROR_HANDLE_EOF 38
+#define CRT_STATUS_SUCCESS 0x00000000UL
+#define CRT_STATUS_PROCESS_CLONED 0x00000129UL
+#define CRT_RTL_CLONE_PROCESS_FLAGS_INHERIT_HANDLES 0x00000002UL
 #define CRT_FROM_PROTOCOL_INFO (-1)
 #define CRT_ENABLE_PROCESSED_INPUT 0x0001
 #define CRT_ENABLE_LINE_INPUT 0x0002
@@ -199,6 +205,19 @@ struct crt_process_information {
   HANDLE hThread;
   DWORD dwProcessId;
   DWORD dwThreadId;
+};
+
+struct crt_client_id {
+  HANDLE UniqueProcess;
+  HANDLE UniqueThread;
+};
+
+struct crt_rtl_user_process_information {
+  ULONG Length;
+  HANDLE Process;
+  HANDLE Thread;
+  struct crt_client_id ClientId;
+  unsigned char ImageInformation[256];
 };
 
 __declspec(dllimport) HANDLE CRT_WINAPI GetStdHandle(DWORD nStdHandle);
@@ -275,6 +294,11 @@ __declspec(dllimport) DWORD CRT_WINAPI GetFullPathNameA(
     DWORD nBufferLength,
     char* lpBuffer,
     char** lpFilePart);
+__declspec(dllimport) DWORD CRT_WINAPI GetFinalPathNameByHandleA(
+    HANDLE hFile,
+    char* lpszFilePath,
+    DWORD cchFilePath,
+    DWORD dwFlags);
 __declspec(dllimport) HANDLE CRT_WINAPI GetCurrentProcess(void);
 __declspec(dllimport) BOOL CRT_WINAPI DuplicateHandle(
     HANDLE hSourceProcessHandle,
@@ -284,6 +308,13 @@ __declspec(dllimport) BOOL CRT_WINAPI DuplicateHandle(
     DWORD dwDesiredAccess,
     BOOL bInheritHandle,
     DWORD dwOptions);
+__declspec(dllimport) BOOL CRT_WINAPI GetHandleInformation(
+    HANDLE hObject,
+    DWORD* lpdwFlags);
+__declspec(dllimport) BOOL CRT_WINAPI SetHandleInformation(
+    HANDLE hObject,
+    DWORD dwMask,
+    DWORD dwFlags);
 __declspec(dllimport) BOOL CRT_WINAPI CreatePipe(
     HANDLE* hReadPipe,
     HANDLE* hWritePipe,
@@ -402,14 +433,29 @@ static int fd_kind[CRT_FD_TABLE_SIZE];
 static int fd_flags[CRT_FD_TABLE_SIZE];
 static int fd_table_initialized;
 static int winsock_initialized;
+static int ntdll_initialized;
 static HANDLE child_process_table[CRT_FD_TABLE_SIZE];
 static DWORD child_pid_table[CRT_FD_TABLE_SIZE];
+static HANDLE private_wait_process;
+static DWORD private_wait_pid;
 
 long __crt_sys_geteuid(void);
 static HANDLE get_fd_handle(int fd);
 static void init_fd_table(void);
 static long init_winsock(void);
+static long init_ntdll(void);
 static long close_fd_slot(int fd);
+
+struct ntdll_api {
+  ULONG (CRT_WINAPI* RtlCloneUserProcess)(
+      ULONG,
+      void*,
+      void*,
+      HANDLE,
+      struct crt_rtl_user_process_information*);
+};
+
+static struct ntdll_api ntdll;
 
 struct winsock_api {
   int (CRT_WINAPI* WSAStartup)(WORD wVersionRequested, void* lpWSAData);
@@ -459,23 +505,80 @@ static struct winsock_api winsock;
 
 static int map_windows_error(DWORD error) {
   switch (error) {
+    case 0:
+      return 0;
     case 2:
     case 3:
+    case 15:
+    case 18:
       return ENOENT;
+    case 4:
+      return EMFILE;
     case 5:
       return EACCES;
     case 6:
       return EBADF;
+    case 7:
+    case 8:
+    case 9:
+    case 14:
+    case 1816:
+      return ENOMEM;
+    case 10:
+      return E2BIG;
+    case 11:
+      return ENOEXEC;
+    case 12:
+      return EACCES;
+    case 13:
+    case 24:
+    case 87:
+      return EINVAL;
+    case 16:
+      return EACCES;
+    case 17:
+      return EXDEV;
+    case 19:
+      return EROFS;
+    case 20:
+      return ENODEV;
+    case 21:
+      return ENXIO;
+    case 22:
+    case 23:
+    case 25:
+    case 26:
+    case 27:
+    case 28:
+    case 29:
+    case 30:
+    case 31:
+      return EIO;
     case 32:
       return EBUSY;
     case 33:
+      return EACCES;
     case 36:
       return EAGAIN;
+    case 38:
+      return ENODATA;
     case 80:
     case 183:
       return EEXIST;
-    case 87:
-      return EINVAL;
+    case 109:
+    case 232:
+    case 233:
+      return EPIPE;
+    case 145:
+      return ENOTEMPTY;
+    case 148:
+    case 170:
+    case 231:
+      return EBUSY;
+    case 206:
+      return ENAMETOOLONG;
+    case 267:
+      return ENOTDIR;
     default:
       return EIO;
   }
@@ -523,6 +626,8 @@ static int map_wsa_error(int error) {
       return ENETDOWN;
     case 10051:
       return ENETUNREACH;
+    case 10052:
+      return ENETRESET;
     case 10053:
       return ECONNABORTED;
     case 10054:
@@ -533,10 +638,16 @@ static int map_wsa_error(int error) {
       return EISCONN;
     case 10057:
       return ENOTCONN;
+    case 10058:
+      return ESHUTDOWN;
+    case 10059:
+      return ETOOMANYREFS;
     case 10060:
       return ETIMEDOUT;
     case 10061:
       return ECONNREFUSED;
+    case 10064:
+      return EHOSTDOWN;
     case 10065:
       return EHOSTUNREACH;
     default:
@@ -777,18 +888,14 @@ static int append_command_arg(char* buffer, size_t size, size_t* pos, const char
   return 0;
 }
 
-static long build_process_command_line(
+static long resolve_process_application_path(
     const char* path,
-    char* const argv[],
     int search_path,
     char* buffer,
     size_t size) {
   char translated_path[4096];
   char searched_path[4096];
   const char* host_path = translate_path_for_host(path, translated_path);
-  size_t pos = 0;
-  int result;
-  size_t i;
 
   if (path == 0 || buffer == 0 || size == 0) {
     return -EINVAL;
@@ -803,14 +910,31 @@ static long build_process_command_line(
       host_path = searched_path;
     }
   }
+  if (strlen(host_path) >= size) {
+    return -ENAMETOOLONG;
+  }
+  strcpy(buffer, host_path);
+  return 0;
+}
+
+static long build_process_command_line(
+    const char* path,
+    char* const argv[],
+    char* buffer,
+    size_t size) {
+  size_t pos = 0;
+  int result;
+  size_t i;
+
+  if (path == 0 || buffer == 0 || size == 0) {
+    return -EINVAL;
+  }
   if (argv == 0 || argv[0] == 0) {
-    result = append_command_arg(buffer, size, &pos, host_path);
+    result = append_command_arg(buffer, size, &pos, path);
     return result == 0 ? 0 : result;
   }
   for (i = 0; argv[i] != 0; ++i) {
-    const char* arg = i == 0 ? host_path : argv[i];
-
-    result = append_command_arg(buffer, size, &pos, arg);
+    result = append_command_arg(buffer, size, &pos, argv[i]);
     if (result != 0) {
       return result;
     }
@@ -1065,8 +1189,13 @@ int __crt_fd_snapshot_export(struct crt_fd_snapshot* snapshot) {
             0,
             fd_kind[fd] == CRT_FD_KIND_FILE ? 1 : 0,
             DUPLICATE_SAME_ACCESS)) {
+      int error = map_windows_error(GetLastError());
+
+      if (error == EBADF) {
+        continue;
+      }
       __crt_fd_snapshot_dispose(snapshot);
-      return map_windows_error(GetLastError());
+      return error;
     }
     snapshot->entries[count].fd = fd;
     snapshot->entries[count].kind = snapshot_kind_from_fd_kind(fd_kind[fd]);
@@ -1215,7 +1344,75 @@ static long fd_snapshot_prepare_socket_duplicates(
   return 0;
 }
 
+static void fd_set_inherit_for_fork(unsigned char touched[CRT_FD_TABLE_SIZE],
+                                    DWORD old_flags[CRT_FD_TABLE_SIZE]) {
+  int fd;
+
+  init_fd_table();
+  memset(touched, 0, CRT_FD_TABLE_SIZE);
+  for (fd = 0; fd < CRT_FD_TABLE_SIZE; ++fd) {
+    DWORD flags = 0;
+
+    if (fd_kind[fd] != CRT_FD_KIND_FILE ||
+        fd_table[fd] == 0 ||
+        fd_table[fd] == INVALID_HANDLE_VALUE) {
+      continue;
+    }
+    if (!GetHandleInformation(fd_table[fd], &flags)) {
+      continue;
+    }
+    touched[fd] = 1;
+    old_flags[fd] = flags;
+    if ((flags & HANDLE_FLAG_INHERIT) == 0) {
+      (void)SetHandleInformation(fd_table[fd], HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+    }
+  }
+}
+
+static void fd_restore_inherit_after_fork(const unsigned char touched[CRT_FD_TABLE_SIZE],
+                                          const DWORD old_flags[CRT_FD_TABLE_SIZE]) {
+  int fd;
+
+  for (fd = 0; fd < CRT_FD_TABLE_SIZE; ++fd) {
+    if (touched[fd] &&
+        fd_kind[fd] == CRT_FD_KIND_FILE &&
+        fd_table[fd] != 0 &&
+        fd_table[fd] != INVALID_HANDLE_VALUE) {
+      (void)SetHandleInformation(
+          fd_table[fd], HANDLE_FLAG_INHERIT, old_flags[fd] & HANDLE_FLAG_INHERIT);
+    }
+  }
+}
+
+static void fd_disable_inherit_in_current_process(void) {
+  int fd;
+
+  init_fd_table();
+  for (fd = 0; fd < CRT_FD_TABLE_SIZE; ++fd) {
+    if (fd_kind[fd] == CRT_FD_KIND_FILE &&
+        fd_table[fd] != 0 &&
+        fd_table[fd] != INVALID_HANDLE_VALUE) {
+      (void)SetHandleInformation(fd_table[fd], HANDLE_FLAG_INHERIT, 0);
+    }
+  }
+}
+
 void __crt_fd_after_fork_child(void) {
+  int i;
+
+  fd_disable_inherit_in_current_process();
+  for (i = 0; i < CRT_FD_TABLE_SIZE; ++i) {
+    if (child_process_table[i] != 0 && child_process_table[i] != INVALID_HANDLE_VALUE) {
+      CloseHandle(child_process_table[i]);
+    }
+    child_process_table[i] = 0;
+    child_pid_table[i] = 0;
+  }
+  if (private_wait_process != 0 && private_wait_process != INVALID_HANDLE_VALUE) {
+    CloseHandle(private_wait_process);
+  }
+  private_wait_process = 0;
+  private_wait_pid = 0;
 }
 
 int __crt_fd_get_cloexec(int fd) {
@@ -1755,6 +1952,26 @@ static long init_winsock(void) {
   return 0;
 }
 
+static long init_ntdll(void) {
+  HANDLE module;
+
+  if (ntdll_initialized) {
+    return 0;
+  }
+  module = LoadLibraryA("ntdll.dll");
+  if (module == 0) {
+    return fail_last_error();
+  }
+  ntdll.RtlCloneUserProcess =
+      (ULONG (CRT_WINAPI*)(ULONG, void*, void*, HANDLE, struct crt_rtl_user_process_information*))
+          GetProcAddress(module, "RtlCloneUserProcess");
+  if (ntdll.RtlCloneUserProcess == 0) {
+    return -ENOTSUP;
+  }
+  ntdll_initialized = 1;
+  return 0;
+}
+
 static HANDLE get_fd_handle(int fd) {
   init_fd_table();
   if (fd < 0 || fd >= CRT_FD_TABLE_SIZE || fd_kind[fd] != CRT_FD_KIND_FILE ||
@@ -1815,7 +2032,8 @@ long __crt_sys_read(int fd, void* buf, unsigned long count) {
     return -EBADF;
   }
   if (!ReadFile(handle, buf, (DWORD)count, &bytes_read, 0)) {
-    if (GetLastError() == CRT_ERROR_BROKEN_PIPE) {
+    DWORD error = GetLastError();
+    if (error == CRT_ERROR_BROKEN_PIPE || error == CRT_ERROR_HANDLE_EOF) {
       return 0;
     }
     return fail_last_error();
@@ -1858,6 +2076,9 @@ long __crt_sys_pread(int fd, void* buf, unsigned long count, long long offset) {
   overlapped.Offset = (DWORD)((uint64_t)offset & 0xffffffffU);
   overlapped.OffsetHigh = (DWORD)(((uint64_t)offset >> 32) & 0xffffffffU);
   if (!ReadFile(handle, buf, (DWORD)count, &bytes_read, &overlapped)) {
+    if (GetLastError() == CRT_ERROR_HANDLE_EOF) {
+      return 0;
+    }
     return fail_last_error();
   }
   return (long)bytes_read;
@@ -2444,10 +2665,18 @@ long __crt_sys_dup2(int oldfd, int newfd) {
 long __crt_sys_pipe(int pipefd[2]) {
   HANDLE read_handle = 0;
   HANDLE write_handle = 0;
+  struct {
+    DWORD nLength;
+    void* lpSecurityDescriptor;
+    BOOL bInheritHandle;
+  } security_attributes;
   int read_fd;
   int write_fd;
 
-  if (!CreatePipe(&read_handle, &write_handle, 0, 0)) {
+  security_attributes.nLength = sizeof(security_attributes);
+  security_attributes.lpSecurityDescriptor = 0;
+  security_attributes.bInheritHandle = 1;
+  if (!CreatePipe(&read_handle, &write_handle, &security_attributes, 0)) {
     return fail_last_error();
   }
   read_fd = alloc_fd(read_handle);
@@ -2763,6 +2992,26 @@ long __crt_sys_realpath_path(const char* path, char* resolved_path, unsigned lon
   return 0;
 }
 
+long __crt_sys_realpath_fd(int fd, char* resolved_path, unsigned long size) {
+  HANDLE handle = get_fd_handle(fd);
+  DWORD result;
+
+  if (resolved_path == 0 || size == 0) {
+    return -EINVAL;
+  }
+  if (handle == INVALID_HANDLE_VALUE) {
+    return -EBADF;
+  }
+  result = GetFinalPathNameByHandleA(handle, resolved_path, (DWORD)size, 0);
+  if (result == 0) {
+    return fail_last_error();
+  }
+  if (result >= (DWORD)size) {
+    return -ERANGE;
+  }
+  return 0;
+}
+
 long __crt_sys_readlink(const char* path, char* buf, unsigned long size) {
   (void)path;
   (void)buf;
@@ -3011,6 +3260,7 @@ long __crt_sys_stat_path(const char* path, struct stat* st) {
   char translated_path[4096];
   const char* host_path = translate_path_for_host(path, translated_path);
   HANDLE handle;
+  DWORD attrs;
   long result;
 
   if (path_is_dev_null(path)) {
@@ -3026,9 +3276,9 @@ long __crt_sys_stat_path(const char* path, struct stat* st) {
   }
   result = stat_from_handle(handle, st);
   CloseHandle(handle);
-  if (result == 0 &&
-      S_ISREG(st->st_mode) &&
-      windows_has_executable_extension(host_path)) {
+  attrs = GetFileAttributesA(host_path);
+  if (result == 0 && S_ISREG(st->st_mode) && attrs != INVALID_FILE_ATTRIBUTES &&
+      windows_path_is_executable_file(host_path, attrs)) {
     st->st_mode |= S_IXUSR | S_IXGRP | S_IXOTH;
   }
   return result;
@@ -3318,6 +3568,52 @@ long __crt_sys_thread_id(void) {
   return (long)GetCurrentThreadId();
 }
 
+long __crt_sys_fork(void) {
+#if defined(__x86_64__) || defined(_M_X64)
+  struct crt_rtl_user_process_information info;
+  unsigned char inherit_touched[CRT_FD_TABLE_SIZE];
+  DWORD old_inherit_flags[CRT_FD_TABLE_SIZE];
+  ULONG status;
+  long result;
+  DWORD child_pid;
+
+  result = init_ntdll();
+  if (result < 0) {
+    return result;
+  }
+  memset(&info, 0, sizeof(info));
+  info.Length = sizeof(info);
+  memset(old_inherit_flags, 0, sizeof(old_inherit_flags));
+  fd_set_inherit_for_fork(inherit_touched, old_inherit_flags);
+  status = ntdll.RtlCloneUserProcess(
+      CRT_RTL_CLONE_PROCESS_FLAGS_INHERIT_HANDLES,
+      0,
+      0,
+      0,
+      &info);
+  fd_restore_inherit_after_fork(inherit_touched, old_inherit_flags);
+  if (status == CRT_STATUS_PROCESS_CLONED) {
+    return 0;
+  }
+  if (status != CRT_STATUS_SUCCESS) {
+    return -ENOTSUP;
+  }
+  child_pid = (DWORD)(uintptr_t)info.ClientId.UniqueProcess;
+  if (child_pid == 0) {
+    child_pid = GetCurrentProcessId();
+  }
+  if (info.Thread != 0 && info.Thread != INVALID_HANDLE_VALUE) {
+    CloseHandle(info.Thread);
+  }
+  if (info.Process == 0 || info.Process == INVALID_HANDLE_VALUE) {
+    return -ECHILD;
+  }
+  return remember_child_process(child_pid, info.Process);
+#else
+  return -ENOTSUP;
+#endif
+}
+
 long __crt_sys_getpid(void) {
   return (long)GetCurrentProcessId();
 }
@@ -3393,6 +3689,16 @@ long __crt_sys_kill(long pid, int sig) {
   return -ENOSYS;
 }
 
+struct crt_windows_spawn_context {
+  char application_path[4096];
+  char command_line[8192];
+  struct crt_startupinfo startup;
+  struct crt_process_information process;
+  char current_directory_buffer[4096];
+  char fd_snapshot_text[65536];
+  char bootstrap_cwd[4096];
+};
+
 long __crt_sys_posix_spawn(
     const char* path,
     char* const argv[],
@@ -3401,16 +3707,11 @@ long __crt_sys_posix_spawn(
     int search_path,
     const posix_spawn_file_actions_t actions,
     const posix_spawnattr_t attr) {
-  char command_line[8192];
-  struct crt_startupinfo startup;
-  struct crt_process_information process;
-  char current_directory_buffer[4096];
+  struct crt_windows_spawn_context* ctx;
   const char* current_directory;
   DWORD creation_flags;
   char* environment_block;
   struct crt_fd_snapshot fd_snapshot;
-  char fd_snapshot_text[65536];
-  char bootstrap_cwd[4096];
   char bootstrap_pipe_text[17];
   char sigmask_text[17];
   char sigdefault_text[17];
@@ -3428,22 +3729,44 @@ long __crt_sys_posix_spawn(
   if (path == 0) {
     return -EINVAL;
   }
-  result = build_process_command_line(path, argv, search_path, command_line, sizeof(command_line));
+#define application_path (ctx->application_path)
+#define command_line (ctx->command_line)
+#define startup (ctx->startup)
+#define process (ctx->process)
+#define current_directory_buffer (ctx->current_directory_buffer)
+#define fd_snapshot_text (ctx->fd_snapshot_text)
+#define bootstrap_cwd (ctx->bootstrap_cwd)
+#define RETURN(value) do { long crt_spawn_return_value__ = (value); free(ctx); return crt_spawn_return_value__; } while (0)
+  ctx = (struct crt_windows_spawn_context*)calloc(1, sizeof(*ctx));
+  if (ctx == 0) {
+    return -ENOMEM;
+  }
+  result = resolve_process_application_path(
+      path, search_path, application_path, sizeof(application_path));
   if (result != 0) {
-    return result;
+    RETURN(result);
+  }
+  result = build_process_command_line(path, argv, command_line, sizeof(command_line));
+  if (result != 0) {
+    RETURN(result);
   }
   result = __crt_fd_snapshot_export(&fd_snapshot);
   if (result != 0) {
-    return result;
+    RETURN(result);
   }
   result = prepare_spawn_startup(
       actions, attr, &startup, &current_directory, current_directory_buffer, &fd_snapshot,
       &creation_flags);
   if (result != 0) {
     __crt_fd_snapshot_dispose(&fd_snapshot);
-    return result;
+    RETURN(result);
   }
   fd_snapshot_pipe_mode = fd_snapshot_has_socket(&fd_snapshot);
+  if (!fd_snapshot_pipe_mode) {
+    startup.hStdInput = INVALID_HANDLE_VALUE;
+    startup.hStdOutput = INVALID_HANDLE_VALUE;
+    startup.hStdError = INVALID_HANDLE_VALUE;
+  }
   if (fd_snapshot_pipe_mode) {
     struct {
       DWORD nLength;
@@ -3456,7 +3779,7 @@ long __crt_sys_posix_spawn(
     security_attributes.bInheritHandle = 1;
     if (!CreatePipe(&fd_snapshot_pipe_read, &fd_snapshot_pipe_write, &security_attributes, 0)) {
       __crt_fd_snapshot_dispose(&fd_snapshot);
-      return fail_last_error();
+      RETURN(fail_last_error());
     }
     format_hex_u64((unsigned long long)(uintptr_t)fd_snapshot_pipe_read, bootstrap_pipe_text);
     creation_flags |= CRT_CREATE_SUSPENDED;
@@ -3464,7 +3787,7 @@ long __crt_sys_posix_spawn(
     result = __crt_fd_snapshot_encode(&fd_snapshot, fd_snapshot_text, sizeof(fd_snapshot_text));
     if (result != 0) {
       __crt_fd_snapshot_dispose(&fd_snapshot);
-      return -result;
+      RETURN(-result);
     }
   }
   fd_snapshot_ready = 1;
@@ -3479,7 +3802,7 @@ long __crt_sys_posix_spawn(
       if (fd_snapshot_pipe_write != 0) {
         CloseHandle(fd_snapshot_pipe_write);
       }
-      return -ENAMETOOLONG;
+      RETURN(-ENAMETOOLONG);
     }
     memcpy(bootstrap_cwd, current_directory, len + 1);
   } else {
@@ -3493,7 +3816,7 @@ long __crt_sys_posix_spawn(
       if (fd_snapshot_pipe_write != 0) {
         CloseHandle(fd_snapshot_pipe_write);
       }
-      return fail_last_error();
+      RETURN(fail_last_error());
     }
     if (cwd_result >= (DWORD)sizeof(bootstrap_cwd)) {
       __crt_fd_snapshot_dispose(&fd_snapshot);
@@ -3503,7 +3826,7 @@ long __crt_sys_posix_spawn(
       if (fd_snapshot_pipe_write != 0) {
         CloseHandle(fd_snapshot_pipe_write);
       }
-      return -ERANGE;
+      RETURN(-ERANGE);
     }
   }
   if (attr != 0 && (attr->flags & POSIX_SPAWN_SETSIGMASK) != 0) {
@@ -3535,11 +3858,11 @@ long __crt_sys_posix_spawn(
     if (fd_snapshot_pipe_write != 0) {
       CloseHandle(fd_snapshot_pipe_write);
     }
-    return -ENOMEM;
+    RETURN(-ENOMEM);
   }
   memset(&process, 0, sizeof(process));
   if (!CreateProcessA(
-          0,
+          application_path,
           command_line,
           0,
           0,
@@ -3559,7 +3882,7 @@ long __crt_sys_posix_spawn(
     if (fd_snapshot_pipe_write != 0) {
       CloseHandle(fd_snapshot_pipe_write);
     }
-    return fail_last_error();
+    RETURN(fail_last_error());
   }
   free(environment_block);
   if (fd_snapshot_pipe_mode) {
@@ -3590,7 +3913,7 @@ long __crt_sys_posix_spawn(
       if (fd_snapshot_ready) {
         __crt_fd_snapshot_dispose(&fd_snapshot);
       }
-      return result;
+      RETURN(result);
     }
     if (ResumeThread(process.hThread) == (DWORD)0xffffffffUL) {
       result = fail_last_error();
@@ -3600,22 +3923,36 @@ long __crt_sys_posix_spawn(
       if (fd_snapshot_ready) {
         __crt_fd_snapshot_dispose(&fd_snapshot);
       }
-      return result;
+      RETURN(result);
     }
   }
   if (fd_snapshot_ready) {
     __crt_fd_snapshot_dispose(&fd_snapshot);
   }
   CloseHandle(process.hThread);
+  if (pid != 0 && *pid == CRT_SPAWN_PRIVATE_WAIT_PID) {
+    private_wait_process = process.hProcess;
+    private_wait_pid = process.dwProcessId;
+    *pid = (long)process.dwProcessId;
+    RETURN(0);
+  }
   remembered = remember_child_process(process.dwProcessId, process.hProcess);
   if (remembered < 0) {
     CloseHandle(process.hProcess);
-    return remembered;
+    RETURN(remembered);
   }
   if (pid != 0) {
     *pid = remembered;
   }
-  return 0;
+  RETURN(0);
+#undef RETURN
+#undef bootstrap_cwd
+#undef fd_snapshot_text
+#undef current_directory_buffer
+#undef process
+#undef startup
+#undef command_line
+#undef application_path
 }
 
 long __crt_sys_waitpid(long pid, int* status, int options) {
@@ -3631,6 +3968,30 @@ long __crt_sys_waitpid(long pid, int* status, int options) {
   }
   if ((options & WNOHANG) != 0) {
     timeout = 0;
+  }
+  if (pid != -1 && private_wait_process != 0 && private_wait_pid == (DWORD)pid) {
+    process = private_wait_process;
+    child_pid = private_wait_pid;
+    wait_result = WaitForSingleObject(process, timeout);
+    if (wait_result != CRT_WAIT_OBJECT_0 && (options & WNOHANG) != 0) {
+      return 0;
+    }
+    if (wait_result == CRT_WAIT_FAILED) {
+      return fail_last_error();
+    }
+    if (wait_result != CRT_WAIT_OBJECT_0) {
+      return -ECHILD;
+    }
+    if (!GetExitCodeProcess(process, &exit_code)) {
+      return fail_last_error();
+    }
+    CloseHandle(process);
+    private_wait_process = 0;
+    private_wait_pid = 0;
+    if (status != 0) {
+      *status = ((int)exit_code & 0xff) << 8;
+    }
+    return (long)child_pid;
   }
   process = find_child_process(pid, &index);
   if (process == 0) {

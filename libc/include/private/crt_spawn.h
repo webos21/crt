@@ -40,4 +40,6 @@ struct __posix_spawnattr {
   sigset64_t sigdefault64;
 };
 
+#define CRT_SPAWN_PRIVATE_WAIT_PID ((long)-2)
+
 #endif

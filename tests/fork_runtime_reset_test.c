@@ -10,7 +10,6 @@ static int fail(const char* message) {
   return 1;
 }
 
-#if !defined(CRT_TARGET_OS_WINDOWS)
 static FILE* locked_stream;
 static volatile int worker_locked;
 static volatile int worker_release;
@@ -72,19 +71,11 @@ static int test_child_stdio_lock_reset(void) {
   }
   return 0;
 }
-#endif
 
 int main(void) {
-#if defined(CRT_TARGET_OS_WINDOWS)
-  errno = 0;
-  if (fork() != -1 || errno != ENOTSUP) {
-    return fail("windows fork policy");
-  }
-#else
   if (test_child_stdio_lock_reset() != 0) {
     return 1;
   }
-#endif
   puts("fork_runtime_reset_test: ok");
   return 0;
 }

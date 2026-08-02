@@ -45,4 +45,6 @@ Current macOS smoke status:
   commands, command lists, and pipelines can be considered stable. Do not solve
   this by adding mksh-specific spawn shortcuts.
 
-Follow the shared import and patch policy in `docs/shell_import.md`.
+Follow the shared import and patch policy in `docs/shell_import.md`. Local
+source changes on top of Android `external/toybox` are recorded in
+`shell/toybox/PATCHES.md`.

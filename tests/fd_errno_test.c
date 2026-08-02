@@ -28,6 +28,10 @@ int main(void) {
   if (close(-1) != -1 || errno != EBADF) {
     return fail("close errno");
   }
+  errno = 0;
+  if (open("missing-file-for-errno-test", O_RDONLY) != -1 || errno != ENOENT) {
+    return fail("open missing errno");
+  }
 
   fd = open("README.md", O_RDONLY);
   if (fd < 0) {
@@ -47,6 +51,11 @@ int main(void) {
   if (lseek(fd, 0, SEEK_SET) != 0) {
     close(fd);
     return fail("lseek");
+  }
+  errno = 0;
+  if (pread(fd, buffer, sizeof(buffer), 1024 * 1024) != 0 || errno != 0) {
+    close(fd);
+    return fail("pread eof errno");
   }
 
   if (close(fd) != 0) {

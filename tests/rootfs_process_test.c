@@ -123,6 +123,31 @@ int main(int argc, char** argv) {
   if (access("/tmp/sample.txt", R_OK | W_OK) != 0) {
     return fail("access rootfs file");
   }
+  fd = open("/tmp/mz-app", O_CREAT | O_RDWR | O_TRUNC, 0700);
+  if (fd < 0) {
+    return fail("open rootfs mz app");
+  }
+  if (write(fd, "MZ", 2) != 2 || close(fd) != 0) {
+    return fail("write rootfs mz app");
+  }
+  if (access("/tmp/mz-app", X_OK) != 0) {
+    return fail("access rootfs mz app");
+  }
+  if (stat("/tmp/mz-app", &st) != 0 ||
+      (st.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH)) == 0) {
+    return fail("stat rootfs mz app");
+  }
+  fd = open("/tmp", O_RDONLY | O_DIRECTORY);
+  if (fd < 0) {
+    return fail("open rootfs dir");
+  }
+  if (fstatat(fd, "mz-app", &st, 0) != 0 ||
+      !S_ISREG(st.st_mode) ||
+      (st.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH)) == 0) {
+    close(fd);
+    return fail("fstatat rootfs mz app");
+  }
+  close(fd);
   if (stat("/dev/null", &st) != 0 || !S_ISCHR(st.st_mode)) {
     return fail("stat /dev/null");
   }
@@ -196,7 +221,7 @@ int main(int argc, char** argv) {
       return fail("exec wrapper wait");
     }
   }
-  if (unlink("/tmp/sample.txt") != 0 || rmdir("/tmp") != 0) {
+  if (unlink("/tmp/mz-app") != 0 || unlink("/tmp/sample.txt") != 0 || rmdir("/tmp") != 0) {
     return fail("cleanup rootfs");
   }
   (void)unsetenv("CRT_ROOTFS");

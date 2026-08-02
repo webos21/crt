@@ -8,6 +8,10 @@ ___crt_sys_read:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -19,6 +23,10 @@ ___crt_sys_write:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -30,6 +38,10 @@ ___crt_sys_pread:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -41,6 +53,10 @@ ___crt_sys_pwrite:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -52,6 +68,10 @@ ___crt_sys_fcntl:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -63,6 +83,10 @@ ___crt_sys_ioctl:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -75,6 +99,10 @@ ___crt_sys_macos_sysctl:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -86,6 +114,10 @@ ___crt_sys_open:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -97,6 +129,10 @@ ___crt_sys_close:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -108,6 +144,10 @@ ___crt_sys_lseek:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -119,6 +159,10 @@ ___crt_sys_ftruncate:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -130,6 +174,10 @@ ___crt_sys_fsync:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -141,6 +189,10 @@ ___crt_sys_macos_statfs64:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -152,6 +204,10 @@ ___crt_sys_macos_fstatfs64:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -163,6 +219,10 @@ ___crt_sys_access:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -174,6 +234,10 @@ ___crt_sys_mkdir:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -185,6 +249,10 @@ ___crt_sys_rmdir:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -196,6 +264,10 @@ ___crt_sys_chdir:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -207,6 +279,10 @@ ___crt_sys_fchdir:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -218,6 +294,10 @@ ___crt_sys_chmod:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -229,6 +309,10 @@ ___crt_sys_fchmod:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -240,6 +324,10 @@ ___crt_sys_umask:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -251,6 +339,10 @@ ___crt_sys_macos_fcntl:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -262,6 +354,10 @@ ___crt_sys_dup:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -273,6 +369,10 @@ ___crt_sys_dup2:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -288,6 +388,10 @@ ___crt_sys_pipe:
   xorl %eax, %eax
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -299,6 +403,10 @@ ___crt_sys_poll:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -310,6 +418,10 @@ ___crt_sys_socket:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -321,6 +433,10 @@ ___crt_sys_connect:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -332,6 +448,10 @@ ___crt_sys_accept:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -343,6 +463,10 @@ ___crt_sys_getsockname:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -354,6 +478,10 @@ ___crt_sys_bind:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -365,6 +493,10 @@ ___crt_sys_setsockopt:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -376,6 +508,10 @@ ___crt_sys_listen:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -388,6 +524,10 @@ ___crt_sys_sendto:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -399,6 +539,10 @@ ___crt_sys_shutdown:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -411,6 +555,10 @@ ___crt_sys_recvfrom:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -422,6 +570,10 @@ ___crt_sys_readlink:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -433,6 +585,10 @@ ___crt_sys_symlink:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -447,6 +603,10 @@ ___crt_sys_getdents:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -458,6 +618,10 @@ ___crt_sys_macos_stat64:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -469,6 +633,10 @@ ___crt_sys_macos_fstat64:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -480,6 +648,10 @@ ___crt_sys_macos_lstat64:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -491,6 +663,10 @@ ___crt_sys_unlink:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -502,6 +678,10 @@ ___crt_sys_rename:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -514,6 +694,10 @@ ___crt_sys_mmap:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -525,6 +709,10 @@ ___crt_sys_mprotect:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -536,6 +724,10 @@ ___crt_sys_munmap:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -547,6 +739,10 @@ ___crt_sys_msync:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -576,6 +772,10 @@ ___crt_sys_mlock:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -593,6 +793,10 @@ ___crt_sys_munlock:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -604,6 +808,10 @@ ___crt_sys_mincore:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -615,6 +823,10 @@ ___crt_sys_madvise:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -629,6 +841,10 @@ ___crt_sys_sleep_ms:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -640,6 +856,10 @@ ___crt_sys_utimes:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -651,6 +871,10 @@ ___crt_sys_futimes:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -665,6 +889,10 @@ ___crt_sys_sched_yield:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -676,6 +904,10 @@ ___crt_sys_thread_id:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -687,6 +919,10 @@ ___crt_sys_getpid:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -698,6 +934,10 @@ ___crt_sys_getppid:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -709,6 +949,10 @@ ___crt_sys_setpgid:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -720,6 +964,10 @@ ___crt_sys_getpgrp:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -731,6 +979,10 @@ ___crt_sys_setsid:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -746,6 +998,10 @@ ___crt_sys_fork:
 2:
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -757,6 +1013,10 @@ ___crt_sys_execve:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -769,6 +1029,10 @@ ___crt_sys_wait4:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -780,6 +1044,10 @@ ___crt_sys_geteuid:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -791,6 +1059,10 @@ ___crt_sys_fchown:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 
@@ -802,6 +1074,10 @@ ___crt_sys_kill:
   jc 1f
   retq
 1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
   negq %rax
   retq
 

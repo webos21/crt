@@ -279,7 +279,7 @@ static int filter(struct dirtree *new)
       (FLAG(L) ? lsm_get_context : lsm_lget_context)(path,(char **)&new->extra);
       free(path);
     }
-    if (CFG_TOYBOX_LSM_NONE || !new->extra) new->extra = (long)xstrdup("?");
+    if (CFG_TOYBOX_LSM_NONE || !new->extra) new->extra = (intptr_t)xstrdup("?");
   }
 
   if (FLAG(u)) new->st.st_mtime = new->st.st_atime;
@@ -329,13 +329,14 @@ static int color_from_mode(mode_t mode)
   return color;
 }
 
-static void zprint(int zap, char *pat, int len, unsigned long arg)
+static void zprint(int zap, char *pat, int len, uintptr_t arg)
 {
   char tmp[32];
 
   sprintf(tmp, "%%*%s", zap ? "s" : pat);
   if (zap && pat[strlen(pat)-1]==' ') strcat(tmp, " ");
-  printf(tmp, len, zap ? (unsigned long)"?" : arg);
+  if (zap || pat[0] == 's') printf(tmp, len, zap ? "?" : (char *)arg);
+  else printf(tmp, len, (unsigned long)arg);
 }
 
 // Display a list of dirtree entries, according to current format
@@ -484,7 +485,7 @@ static void listfiles(int dirfd, struct dirtree *indir)
 
     if (FLAG(s)) {
       print_with_h(tmp, st->st_blocks, 1);
-      zprint(zap, "s ", totals[6], (unsigned long)tmp);
+      zprint(zap, "s ", totals[6], (uintptr_t)tmp);
     }
 
     if (FLAG(l)||FLAG(o)||FLAG(n)||FLAG(g)) {
@@ -522,7 +523,7 @@ static void listfiles(int dirfd, struct dirtree *indir)
           dev_minor(st->st_rdev));
       else {
         print_with_h(tmp, st->st_size, 0);
-        zprint(zap, "s", totals[5]+1, (unsigned long)tmp);
+        zprint(zap, "s", totals[5]+1, (uintptr_t)tmp);
       }
 
       // print time, always in --time-style=long-iso
@@ -534,7 +535,7 @@ static void listfiles(int dirfd, struct dirtree *indir)
         s += sprintf(s, ":%02d.%09d ", tm->tm_sec, (int)st->st_mtim.tv_nsec);
         strftime(s, sizeof(tmp)-(s-tmp), "%z", tm);
       }
-      zprint(zap, "s ", 17+(TT.l>1)*13, (unsigned long)tmp);
+      zprint(zap, "s ", 17+(TT.l>1)*13, (uintptr_t)tmp);
     }
 
     if (FLAG(color)) {
@@ -557,7 +558,7 @@ static void listfiles(int dirfd, struct dirtree *indir)
         if (color) printf("\e[%d;%dm", color>>8, color&255);
       }
 
-      zprint(zap, "s", 0, (unsigned long)dt->symlink);
+      zprint(zap, "s", 0, (uintptr_t)dt->symlink);
       if (!zap && color) printf("\e[0m");
     }
 

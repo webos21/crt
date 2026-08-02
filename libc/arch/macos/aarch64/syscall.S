@@ -8,6 +8,7 @@ ___crt_sys_read:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -19,6 +20,7 @@ ___crt_sys_write:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -30,6 +32,7 @@ ___crt_sys_pread:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -41,6 +44,7 @@ ___crt_sys_pwrite:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -52,6 +56,7 @@ ___crt_sys_fcntl:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -63,6 +68,7 @@ ___crt_sys_ioctl:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -74,6 +80,7 @@ ___crt_sys_macos_sysctl:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -85,6 +92,7 @@ ___crt_sys_open:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -96,6 +104,7 @@ ___crt_sys_close:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -107,6 +116,7 @@ ___crt_sys_lseek:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -118,6 +128,7 @@ ___crt_sys_ftruncate:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -129,6 +140,7 @@ ___crt_sys_fsync:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -140,6 +152,7 @@ ___crt_sys_macos_statfs64:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -151,6 +164,7 @@ ___crt_sys_macos_fstatfs64:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -162,6 +176,7 @@ ___crt_sys_access:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -173,6 +188,7 @@ ___crt_sys_mkdir:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -184,6 +200,7 @@ ___crt_sys_rmdir:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -195,6 +212,7 @@ ___crt_sys_chdir:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -206,6 +224,7 @@ ___crt_sys_fchdir:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -217,6 +236,7 @@ ___crt_sys_chmod:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -228,6 +248,7 @@ ___crt_sys_fchmod:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -239,6 +260,7 @@ ___crt_sys_umask:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -250,6 +272,7 @@ ___crt_sys_macos_fcntl:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -261,6 +284,7 @@ ___crt_sys_dup:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -272,6 +296,7 @@ ___crt_sys_dup2:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -287,6 +312,7 @@ ___crt_sys_pipe:
   mov x0, #0
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -298,6 +324,7 @@ ___crt_sys_poll:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -309,6 +336,7 @@ ___crt_sys_socket:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -320,6 +348,7 @@ ___crt_sys_connect:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -331,6 +360,7 @@ ___crt_sys_accept:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -342,6 +372,7 @@ ___crt_sys_getsockname:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -353,6 +384,7 @@ ___crt_sys_bind:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -364,6 +396,7 @@ ___crt_sys_setsockopt:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -375,6 +408,7 @@ ___crt_sys_listen:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -386,6 +420,7 @@ ___crt_sys_sendto:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -397,6 +432,7 @@ ___crt_sys_shutdown:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -408,6 +444,7 @@ ___crt_sys_recvfrom:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -419,6 +456,7 @@ ___crt_sys_readlink:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -430,6 +468,7 @@ ___crt_sys_symlink:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -444,6 +483,7 @@ ___crt_sys_getdents:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -455,6 +495,7 @@ ___crt_sys_macos_stat64:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -466,6 +507,7 @@ ___crt_sys_macos_fstat64:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -477,6 +519,7 @@ ___crt_sys_macos_lstat64:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -488,6 +531,7 @@ ___crt_sys_unlink:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -499,6 +543,7 @@ ___crt_sys_rename:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -510,6 +555,7 @@ ___crt_sys_mmap:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -521,6 +567,7 @@ ___crt_sys_mprotect:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -532,6 +579,7 @@ ___crt_sys_munmap:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -543,6 +591,7 @@ ___crt_sys_msync:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -572,6 +621,7 @@ ___crt_sys_mlock:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -589,6 +639,7 @@ ___crt_sys_munlock:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -600,6 +651,7 @@ ___crt_sys_mincore:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -611,6 +663,7 @@ ___crt_sys_madvise:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -625,6 +678,7 @@ ___crt_sys_sleep_ms:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -636,6 +690,7 @@ ___crt_sys_utimes:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -647,6 +702,7 @@ ___crt_sys_futimes:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -661,6 +717,7 @@ ___crt_sys_sched_yield:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -672,6 +729,7 @@ ___crt_sys_thread_id:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -683,6 +741,7 @@ ___crt_sys_getpid:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -694,6 +753,7 @@ ___crt_sys_getppid:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -705,6 +765,7 @@ ___crt_sys_setpgid:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -716,6 +777,7 @@ ___crt_sys_getpgrp:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -727,6 +789,7 @@ ___crt_sys_setsid:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -741,6 +804,7 @@ ___crt_sys_fork:
 2:
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -752,6 +816,7 @@ ___crt_sys_execve:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -763,6 +828,7 @@ ___crt_sys_wait4:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -774,6 +840,7 @@ ___crt_sys_geteuid:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -785,6 +852,7 @@ ___crt_sys_fchown:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 
@@ -796,6 +864,7 @@ ___crt_sys_kill:
   b.cs 1f
   ret
 1:
+  bl ___crt_macos_to_bionic_errno
   neg x0, x0
   ret
 

@@ -59,6 +59,7 @@ long __crt_sys_fstatfs(int fd, struct statfs* buf);
 long __crt_sys_statx(long dirfd, const char* path, int flags, unsigned int mask, void* statxbuf);
 #elif defined(CRT_TARGET_OS_WINDOWS)
 long __crt_sys_realpath_path(const char* path, char* resolved_path, unsigned long size);
+long __crt_sys_realpath_fd(int fd, char* resolved_path, unsigned long size);
 long __crt_sys_isatty(int fd);
 long __crt_sys_stat_path(const char* path, struct stat* st);
 long __crt_sys_lstat_path(const char* path, struct stat* st);
@@ -1089,6 +1090,30 @@ static int make_at_path(int dirfd, const char* path, char* buffer, size_t size) 
     memcpy(buffer, dir_path, dir_len);
     if (dir_len == 0 || buffer[dir_len - 1] != '/') {
       buffer[dir_len++] = '/';
+    }
+    memcpy(buffer + dir_len, path, path_len + 1);
+    return 0;
+  }
+#elif defined(CRT_TARGET_OS_WINDOWS)
+  {
+    char dir_path[PATH_MAX];
+    size_t dir_len;
+    size_t path_len;
+    long result;
+
+    (void)written;
+    result = __crt_sys_realpath_fd(dirfd, dir_path, sizeof(dir_path));
+    if (result < 0 && result >= -4095) {
+      return (int)__set_errno((int)-result);
+    }
+    dir_len = strlen(dir_path);
+    path_len = strlen(path);
+    if (dir_len + 1 + path_len + 1 > size) {
+      return (int)__set_errno(ENAMETOOLONG);
+    }
+    memcpy(buffer, dir_path, dir_len);
+    if (dir_len == 0 || (buffer[dir_len - 1] != '/' && buffer[dir_len - 1] != '\\')) {
+      buffer[dir_len++] = '\\';
     }
     memcpy(buffer + dir_len, path, path_len + 1);
     return 0;

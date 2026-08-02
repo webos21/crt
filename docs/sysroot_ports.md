@@ -161,6 +161,11 @@ without modifying the upstream source tree. The current human-readable matrix is
 
 Build and install zlib from the extracted upstream source directory:
 
+Android exposes zlib as a separate `external/zlib` / `libz` public library, not
+as part of Bionic libc. Keep this project aligned with that model: zlib belongs
+in the CRT sysroot/runtime library set and may be linked privately by components
+that need it, but it should not be folded into `libc`.
+
 ```sh
 cd /path/to/zlib-1.3.1
 ./configure --static --prefix="$PORT_PREFIX"

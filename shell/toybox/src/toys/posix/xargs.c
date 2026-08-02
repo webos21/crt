@@ -173,7 +173,7 @@ void xargs_main(void)
       // Count data used
       if (!(data = handle_entries(data, 0))) continue;
       if (data == (char *)2) done++;
-      if ((unsigned long)data <= 2) data = 0;
+      if ((uintptr_t)data <= 2) data = 0;
       else data = xstrdup(data);
 
       break;

@@ -32,6 +32,11 @@ int main(void) {
       strcmp(buffer, "-9223372036854775808 18446744073709551615") != 0) {
     return fail("long long");
   }
+  if (snprintf(0, 0, "%llu", 512ULL) != 3 ||
+      snprintf(0, 0, "%lld", -512LL) != 4 ||
+      snprintf(0, 0, "%*s", 5, "x") != 5) {
+    return fail("snprintf count only");
+  }
 
   result = snprintf(buffer, sizeof(buffer), "|%08d|%-6s|%+d|% d|%#x|%#o|%.3s|%5zu|%zd|",
                     42, "hi", 7, 7, 0x2a, 10u, "abcdef", (size_t)9, (ssize_t)-3);

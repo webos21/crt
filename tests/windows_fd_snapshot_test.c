@@ -97,6 +97,20 @@ int main(int argc, char** argv) {
 
     return code >= 0 ? code : 81;
   }
+  if (argc == 2 && strcmp(argv[1], "argv0-child") == 0) {
+    return strcmp(argv[0], "toybox-applet") == 0 ? 13 : 82;
+  }
+  if (argc == 2 && strcmp(argv[1], "copy-stdio-child") == 0) {
+    char byte = 0;
+
+    if (read(0, &byte, 1) != 1) {
+      return 83;
+    }
+    if (write(1, &byte, 1) != 1) {
+      return 84;
+    }
+    return 14;
+  }
 
   memset(&snapshot, 0, sizeof(snapshot));
   if (pipe(pipefd) != 0) {
@@ -142,9 +156,78 @@ int main(int argc, char** argv) {
   }
   close(pipefd[0]);
   close(pipefd[1]);
-  errno = 0;
-  if (fork() != -1 || errno != ENOTSUP) {
-    return fail("fork policy");
+  {
+    int input_pipe[2];
+    int output_pipe[2];
+    pid_t fork_pid;
+    int status = 0;
+    char byte = 0;
+
+    if (pipe(input_pipe) != 0 || pipe(output_pipe) != 0) {
+      return fail("fork exec pipe setup");
+    }
+    fork_pid = fork();
+    if (fork_pid < 0 && errno == ENOTSUP) {
+      close(input_pipe[0]);
+      close(input_pipe[1]);
+      close(output_pipe[0]);
+      close(output_pipe[1]);
+    } else if (fork_pid < 0) {
+      close(input_pipe[0]);
+      close(input_pipe[1]);
+      close(output_pipe[0]);
+      close(output_pipe[1]);
+      return fail("fork exec fork");
+    } else if (fork_pid == 0) {
+      char* child_argv[] = {"/proc/self/exe", "copy-stdio-child", 0};
+
+      close(input_pipe[1]);
+      close(output_pipe[0]);
+      if (dup2(input_pipe[0], 0) != 0 ||
+          dup2(output_pipe[1], 1) != 1) {
+        _exit(85);
+      }
+      close(input_pipe[0]);
+      close(output_pipe[1]);
+      execve("/proc/self/exe", child_argv, environ);
+      _exit(errno);
+    } else {
+      int io_failed = 0;
+
+      close(input_pipe[0]);
+      close(output_pipe[1]);
+      if (write(input_pipe[1], "z", 1) != 1 ||
+          close(input_pipe[1]) != 0 ||
+          read(output_pipe[0], &byte, 1) != 1 ||
+          byte != 'z') {
+        io_failed = 1;
+      }
+      close(output_pipe[0]);
+      if (waitpid(fork_pid, &status, 0) != fork_pid ||
+          !WIFEXITED(status) ||
+          WEXITSTATUS(status) != 14) {
+        fprintf(stderr, "windows_fd_snapshot_test: fork exec status=%d exited=%d code=%d\n",
+                status, WIFEXITED(status), WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+        return fail("fork exec pipe wait");
+      }
+      if (io_failed) {
+        return fail("fork exec pipe io");
+      }
+    }
+  }
+  {
+    pid_t pid;
+    int status = 0;
+    char* child_argv[] = {"toybox-applet", "argv0-child", 0};
+
+    if (posix_spawn(&pid, "/proc/self/exe", 0, 0, child_argv, environ) != 0) {
+      return fail("argv0 spawn");
+    }
+    if (waitpid(pid, &status, 0) != pid ||
+        !WIFEXITED(status) ||
+        WEXITSTATUS(status) != 13) {
+      return fail("argv0 wait");
+    }
   }
   if (pipe(pipefd) != 0) {
     return fail("transport pipe");

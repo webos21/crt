@@ -22,8 +22,7 @@
  * and so on. If the option isn't seen in argv[], its bit remains 0.
  *
  * Options which have an argument fill in the corresponding slot in the global
- * union "this" (see generated/globals.h), which it treats as an array of longs
- * (note that sizeof(long)==sizeof(pointer) is guaranteed by LP64).
+ * union "this" (see generated/globals.h).
  *
  * You don't have to free the option strings, which point into the environment
  * space. List objects should be freed by main() when command_main() returns.
@@ -50,7 +49,6 @@
 //   So in "abcdefgh" a = 128, h = 1
 //
 //   Suffixes specify that this option takes an argument (stored in GLOBALS):
-//       Note that pointer and long are always the same size, even on 64 bit.
 //     : string argument, keep most recent if more than one
 //     * string argument, appended to a struct arg_list linked list.
 //     # signed long argument
@@ -98,7 +96,7 @@
 // Hangs off getoptflagstate, freed at end of option parsing.
 struct opts {
   struct opts *next;
-  long *arg;         // Pointer into union "this" to store arguments at.
+  void *arg;         // Pointer into union "this" to store arguments at.
   int c;             // Argument character to match
   int flags;         // |=1, ^=2, " "=4, ;=8
   unsigned long long dex[3]; // bits to disable/enable/exclude in toys.optflags
@@ -108,6 +106,42 @@ struct opts {
     FLOAT f;
   } val[3];          // low, high, default - range of allowed values
 };
+
+static char *align_arg_slot(char *arg, size_t align)
+{
+  uintptr_t slot = (uintptr_t)arg;
+
+  return (char *)((slot+align-1)&~(align-1));
+}
+
+static char *advance_arg_slot(char *arg, int type)
+{
+  if (type == ':' || type == '*') {
+    arg = align_arg_slot(arg, __alignof__(void *));
+
+    return arg+sizeof(void *);
+  } else if (CFG_TOYBOX_FLOAT && type == '.') {
+    arg = align_arg_slot(arg, __alignof__(FLOAT));
+
+    return arg+sizeof(FLOAT);
+  }
+
+  arg = align_arg_slot(arg, __alignof__(long));
+
+  return arg+sizeof(long);
+}
+
+static void default_arg(struct opts *opt)
+{
+  if (!opt->arg) return;
+
+  if (opt->type == '*') {
+    llist_traverse(*(void **)opt->arg, free);
+    *(void **)opt->arg = 0;
+  } else if (opt->type == ':') *(char **)opt->arg = (char *)(intptr_t)opt->val[2].l;
+  else if (CFG_TOYBOX_FLOAT && opt->type == '.') *(FLOAT *)opt->arg = opt->val[2].f;
+  else *(long *)opt->arg = opt->val[2].l;
+}
 
 // linked list of long options. (Hangs off getoptflagstate, free at end of
 // option parsing, details about flag to set and global slot to fill out
@@ -133,10 +167,7 @@ struct getoptflagstate
 
 static void forget_arg(struct opts *opt)
 {
-  if (opt->arg) {
-    if (opt->type=='*') llist_traverse((void *)*opt->arg, free);
-    *opt->arg = opt->val[2].l;
-  }
+  default_arg(opt);
 }
 
 // Use getoptflagstate to parse one command line option from argv
@@ -175,7 +206,7 @@ static void gotflag(struct getoptflagstate *gof, struct opts *opt, int longopt)
   // Are we NOT saving an argument? (Type 0, '@', unattached ';', short ' ')
   if (*(arg = gof->arg)) gof->arg++;
   if ((type = opt->type) == '@') {
-    ++*opt->arg;
+    ++*(long *)opt->arg;
     return;
   }
   if (!longopt && *gof->arg && (opt->flags & 4)) return forget_arg(opt);
@@ -198,7 +229,7 @@ static void gotflag(struct getoptflagstate *gof, struct opts *opt, int longopt)
   }
 
   // Parse argument by type
-  if (type == ':') *(opt->arg) = (long)arg;
+  if (type == ':') *(char **)opt->arg = arg;
   else if (type == '*') {
     struct arg_list **list;
 
@@ -214,7 +245,7 @@ static void gotflag(struct getoptflagstate *gof, struct opts *opt, int longopt)
     if (l < opt->val[0].l) help_exit("-%c < %ld%s", opt->c, opt->val[0].l, arg);
     if (l > opt->val[1].l) help_exit("-%c > %ld%s", opt->c, opt->val[1].l, arg);
 
-    *(opt->arg) = l;
+    *(long *)opt->arg = l;
   } else if (CFG_TOYBOX_FLOAT && type == '.') {
     FLOAT *f = (FLOAT *)(opt->arg);
 
@@ -231,7 +262,7 @@ static void gotflag(struct getoptflagstate *gof, struct opts *opt, int longopt)
 static int parse_optflaglist(struct getoptflagstate *gof)
 {
   char *options = toys.which->options;
-  long *nextarg = (long *)&this;
+  char *nextarg = (char *)&this;
   struct opts *new = 0;
   int idx, rc = 0;
 
@@ -336,8 +367,12 @@ static int parse_optflaglist(struct getoptflagstate *gof)
     new->dex[1] = u;
     if (new->flags & 1) gof->requires |= u;
     if (new->type) {
-      new->arg = (void *)nextarg;
-      *(nextarg++) = new->val[2].l;
+      new->arg = align_arg_slot(nextarg,
+        (CFG_TOYBOX_FLOAT && new->type == '.') ? __alignof__(FLOAT) :
+        (new->type == ':' || new->type == '*') ? __alignof__(void *) :
+        __alignof__(long));
+      default_arg(new);
+      nextarg = advance_arg_slot(new->arg, new->type);
     }
   }
 

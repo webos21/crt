@@ -597,7 +597,6 @@ static int do_find(struct dirtree *new)
         goto cont;
       } else if (!strcmp(s, "printf")) {
         char *fmt, *ff, next[32], buf[64], ch;
-        long ll;
         int len;
 
         print++;
@@ -626,39 +625,48 @@ static int do_find(struct dirtree *new)
                 : (long long)new->st.st_size);
             } else {
 
-              // LP64 says these are all a single "long" argument to printf
               strcpy(next+len, "s");
-              if (ch == 'G') next[len] = 'd', ll = new->st.st_gid;
-              else if (ch == 'm') next[len] = 'o', ll = new->st.st_mode&~S_IFMT;
-              else if (ch == 'U') next[len] = 'd', ll = new->st.st_uid;
-              else if (ch == 'f') ll = (long)new->name;
-              else if (ch == 'g') ll = (long)getgroupname(new->st.st_gid);
-              else if (ch == 'u') ll = (long)getusername(new->st.st_uid);
-              else if (ch == 'l') {
-                ll = (long)(ff = xreadlinkat(dirtree_parentfd(new), new->name));
-                if (!ll) ll = (long)"";
-              } else if (ch == 'M') {
-                mode_to_string(new->st.st_mode, buf);
-                ll = (long)buf;
-              } else if (ch == 'P') {
-                ch = *TT.start;
-                *TT.start = 0;
-                ll = (long)(ff = dirtree_path(new, 0));
-                *TT.start = ch;
-              } else if (ch == 'p') ll = (long)(ff = dirtree_path(new, 0));
-              else if (ch == 'T') {
-                if (*++fmt!='@') error_exit("bad -printf %%T: %%T%c", *fmt);
-                sprintf(buf, "%lld.%ld", (long long)new->st.st_mtim.tv_sec,
-                             new->st.st_mtim.tv_nsec);
-                ll = (long)buf;
-              } else if (ch == 'Z') {
-                char *path = dirtree_path(new, 0);
+              if (ch == 'G') {
+                next[len] = 'd';
+                printf(next, (long)new->st.st_gid);
+              } else if (ch == 'm') {
+                next[len] = 'o';
+                printf(next, (long)(new->st.st_mode&~S_IFMT));
+              } else if (ch == 'U') {
+                next[len] = 'd';
+                printf(next, (long)new->st.st_uid);
+              } else {
+                char *out = 0;
 
-                ll = (lsm_get_context(path, &ff) != -1) ? (long)ff : (long)"?";
-                free(path);
-              } else error_exit("bad -printf %%%c", ch);
+                if (ch == 'f') out = new->name;
+                else if (ch == 'g') out = getgroupname(new->st.st_gid);
+                else if (ch == 'u') out = getusername(new->st.st_uid);
+                else if (ch == 'l') {
+                  ff = xreadlinkat(dirtree_parentfd(new), new->name);
+                  out = ff ? ff : "";
+                } else if (ch == 'M') {
+                  mode_to_string(new->st.st_mode, buf);
+                  out = buf;
+                } else if (ch == 'P') {
+                  ch = *TT.start;
+                  *TT.start = 0;
+                  out = ff = dirtree_path(new, 0);
+                  *TT.start = ch;
+                } else if (ch == 'p') out = ff = dirtree_path(new, 0);
+                else if (ch == 'T') {
+                  if (*++fmt!='@') error_exit("bad -printf %%T: %%T%c", *fmt);
+                  sprintf(buf, "%lld.%ld", (long long)new->st.st_mtim.tv_sec,
+                               new->st.st_mtim.tv_nsec);
+                  out = buf;
+                } else if (ch == 'Z') {
+                  char *path = dirtree_path(new, 0);
 
-              printf(next, ll);
+                  out = (lsm_get_context(path, &ff) != -1) ? ff : "?";
+                  free(path);
+                } else error_exit("bad -printf %%%c", ch);
+
+                printf(next, out);
+              }
               free(ff);
             }
           }

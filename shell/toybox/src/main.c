@@ -25,9 +25,15 @@ char *toybox_version = TOYBOX_VERSION, toybuf[4096], libbuf[4096];
 
 struct toy_list *toy_find(char *name)
 {
+  char *slash, *bslash, *dot;
   int top, bottom, middle;
 
-  if (!CFG_TOYBOX || strchr(name, '/')) return 0;
+  if (!CFG_TOYBOX) return 0;
+  slash = strrchr(name, '/');
+  bslash = strrchr(name, '\\');
+  if (bslash > slash) slash = bslash;
+  if (slash) name = slash+1;
+  if ((dot = strrchr(name, '.')) && !strcasecmp(dot, ".exe")) *dot = 0;
 
   // Multiplexer name works as prefix, else skip first entry (it's out of order)
   if (!toys.which && strstart(&name, toy_list->name)) return toy_list;
@@ -237,13 +243,14 @@ void toy_exec_which(struct toy_list *which, char *argv[])
   // Return if stack depth getting noticeable (proxy for leaked heap, etc).
 
   // Compiler writers have decided subtracting char * is undefined behavior,
-  // so convert to integers. (LP64 says sizeof(long)==sizeof(pointer).)
+  // so convert to pointer-width integers.
   // Signed typecast so stack growth direction is irrelevant: we're measuring
-  // the distance between two pointers on the same stack, hence the labs().
+  // the distance between two pointers on the same stack.
   if (!CFG_TOYBOX_NORECURSE && toys.stacktop) {
+    intptr_t stack_depth = (intptr_t)toys.stacktop-(intptr_t)&which;
     int i;
 
-    if (labs((long)toys.stacktop-(long)&which)>24000) return;
+    if (stack_depth>24000 || stack_depth<-24000) return;
     for (i = 0; i<NSIG; i++) signal(i, SIG_DFL);
   }
 

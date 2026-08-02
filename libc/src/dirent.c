@@ -1,6 +1,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -50,6 +51,8 @@ __declspec(dllimport) BOOL CRT_WINAPI FindNextFileA(
     HANDLE hFindFile,
     struct crt_win_find_data* lpFindFileData);
 __declspec(dllimport) BOOL CRT_WINAPI FindClose(HANDLE hFindFile);
+
+long __crt_sys_realpath_fd(int fd, char* resolved_path, unsigned long size);
 
 struct __crt_DIR {
   HANDLE handle;
@@ -114,12 +117,21 @@ static int make_find_pattern(const char* path, char* pattern, size_t size) {
   return 0;
 }
 
+static int make_find_pattern_for_path(const char* path, char* pattern, size_t size) {
+  char resolved[PATH_MAX];
+
+  if (realpath(path, resolved) == 0) {
+    return -1;
+  }
+  return make_find_pattern(resolved, pattern, size);
+}
+
 DIR* opendir(const char* path) {
   char pattern[CRT_WIN_MAX_PATH + 3];
   DIR* dir;
   int fd;
 
-  if (make_find_pattern(path, pattern, sizeof(pattern)) != 0) {
+  if (make_find_pattern_for_path(path, pattern, sizeof(pattern)) != 0) {
     return 0;
   }
   fd = open(path, O_RDONLY);
@@ -146,9 +158,42 @@ DIR* opendir(const char* path) {
 }
 
 DIR* fdopendir(int fd) {
-  (void)fd;
-  errno = ENOTSUP;
-  return 0;
+  char path[PATH_MAX];
+  char pattern[CRT_WIN_MAX_PATH + 3];
+  struct stat st;
+  DIR* dir;
+  long result;
+
+  if (fstat(fd, &st) != 0) {
+    return 0;
+  }
+  if (!S_ISDIR(st.st_mode)) {
+    errno = ENOTDIR;
+    return 0;
+  }
+  result = __crt_sys_realpath_fd(fd, path, sizeof(path));
+  if (result < 0 && result >= -4095) {
+    errno = (int)-result;
+    return 0;
+  }
+  if (make_find_pattern(path, pattern, sizeof(pattern)) != 0) {
+    return 0;
+  }
+  dir = (DIR*)malloc(sizeof(DIR));
+  if (dir == 0) {
+    errno = ENOMEM;
+    return 0;
+  }
+  dir->handle = FindFirstFileA(pattern, &dir->find_data);
+  if (dir->handle == INVALID_HANDLE_VALUE) {
+    free(dir);
+    errno = ENOENT;
+    return 0;
+  }
+  dir->fd = fd;
+  memcpy(dir->pattern, pattern, strlen(pattern) + 1);
+  dir->first_pending = 1;
+  return dir;
 }
 
 struct dirent* readdir(DIR* dirp) {

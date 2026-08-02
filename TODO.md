@@ -22,18 +22,37 @@ import manifests.
 
 ## Immediate Verification
 
-- Re-run Windows x86_64 workflow after the latest mksh/toybox changes.
-- In Windows rootfs mksh, verify:
-  - `ls -al`
+- Windows x86_64 build and CTest currently pass with the shell imports:
+  `ctest --preset windows-host-ninja-debug --output-on-failure` reports 72/72.
+- With `CRT_ROOTFS` set to the generated rootfs and
+  `PATH=/system/bin:/bin:/usr/bin`, Windows rootfs mksh now verifies:
+  - `ls /system/bin`
+  - `ls -s /`
+  - `ls -l /`
+  - `toybox.exe ls -al /`
+  - `cd /system/bin; test -x ./ls; test -x ./ls.exe`
+- Windows direct rootfs applet invocation now also verifies:
+  - `system/bin/ls.exe -l /`
+  - `system/bin/toybox.exe ls -s /`
+  - `system/bin/sed.exe 'N;s/\n/-/'`
+  - `system/bin/toybox.exe getopt -o a:b -- -a hello -b world rest`
+- Remaining Windows mksh failures are the flows that require mksh's normal
+  `fork()` path:
   - `cd /system/bin; ./ls`
-  - `ls.exe`
-  - `toybox ls -al /`
   - `echo hi | cat`
   - `echo hi > /tmp/a; cat /tmp/a`
-- If `ls` still reports `Permission denied`, inspect Windows `stat()` and
-  `access(X_OK)` for extensionless PE applet aliases.
-- If `ls.exe` reports `can't fork`, continue with the Windows `fork()` tranche
-  in libc/PAL. Do not add mksh-specific `posix_spawn` bypasses.
+- Continue with the Windows `fork()` tranche in libc/PAL. Do not add
+  mksh-specific `posix_spawn` bypasses.
+- The active toybox tranche has LLP64 fixes for `dirtree.extra`, `ls`, the
+  common option parser, Windows applet path lookup, and known active
+  pointer-tagging paths. Keep auditing disabled applets for remaining
+  pointer-to-`long` assumptions before enabling more applets. Fix these in
+  toybox source/glue as pointer-width portability issues, not by changing CRT
+  public ABI.
+- Treat zlib as Android `external/zlib`-style sysroot/runtime library surface,
+  not as part of Bionic libc. Link it privately into components such as the
+  dynamic linker only if the component itself needs an internal static
+  dependency.
 
 ## Windows Fork Tranche
 
@@ -97,6 +116,10 @@ import manifests.
 
 Keep the enabled toybox applet set minimal and configure-oriented. Add applets
 only when the backing Bionic-compatible CRT/PAL surface is present.
+
+Before enabling gzip/gunzip/zcat or other compression-heavy applets, decide
+whether to use toybox's built-in deflate implementation or the sysroot `libz`.
+Do not move zlib into libc for this; Android exposes it separately as `libz`.
 
 Next likely applets:
 

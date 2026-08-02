@@ -10,7 +10,6 @@ static int fail(const char* message) {
   return 1;
 }
 
-#if !defined(CRT_TARGET_OS_WINDOWS)
 static int atfork_state;
 
 static void atfork_prepare_one(void) {
@@ -36,7 +35,6 @@ static void atfork_parent_two(void) {
 static void atfork_child_two(void) {
   atfork_state = atfork_state * 10 + 2;
 }
-#endif
 
 static int wait_for_exit(pid_t pid, int expected) {
   int status = 0;
@@ -67,9 +65,6 @@ static int test_fork_basic(void) {
 }
 
 static int test_fork_fd_inheritance(void) {
-#if defined(CRT_TARGET_OS_WINDOWS)
-  return 0;
-#else
   int pipefd[2];
   pid_t pid;
   char byte = 0;
@@ -98,13 +93,9 @@ static int test_fork_fd_inheritance(void) {
   }
   close(pipefd[0]);
   return wait_for_exit(pid, 17);
-#endif
 }
 
 static int test_pthread_atfork_order(void) {
-#if defined(CRT_TARGET_OS_WINDOWS)
-  return 0;
-#else
   int pipefd[2];
   pid_t pid;
   int child_state = 0;
@@ -146,7 +137,6 @@ static int test_pthread_atfork_order(void) {
     return fail("atfork order");
   }
   return 0;
-#endif
 }
 
 int main(void) {
