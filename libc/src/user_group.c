@@ -227,9 +227,15 @@ int initgroups(const char* user, gid_t group) {
 }
 
 int setresuid(uid_t ruid, uid_t euid, uid_t suid) {
-  if ((ruid == (uid_t)-1 || ruid == 0) &&
-      (euid == (uid_t)-1 || euid == 0) &&
-      (suid == (uid_t)-1 || suid == 0)) {
+  uid_t current = geteuid();
+
+  /* Setting an id to its own current value is always a no-op success per
+   * POSIX, regardless of privilege; this CRT model otherwise only accepts
+   * -1 (unchanged) or 0 (root) since it does not implement real privilege
+   * switching. */
+  if ((ruid == (uid_t)-1 || ruid == 0 || ruid == current) &&
+      (euid == (uid_t)-1 || euid == 0 || euid == current) &&
+      (suid == (uid_t)-1 || suid == 0 || suid == current)) {
     return 0;
   }
   errno = ENOTSUP;
@@ -237,9 +243,11 @@ int setresuid(uid_t ruid, uid_t euid, uid_t suid) {
 }
 
 int setresgid(gid_t rgid, gid_t egid, gid_t sgid) {
-  if ((rgid == (gid_t)-1 || rgid == 0) &&
-      (egid == (gid_t)-1 || egid == 0) &&
-      (sgid == (gid_t)-1 || sgid == 0)) {
+  gid_t current = getegid();
+
+  if ((rgid == (gid_t)-1 || rgid == 0 || rgid == current) &&
+      (egid == (gid_t)-1 || egid == 0 || egid == current) &&
+      (sgid == (gid_t)-1 || sgid == 0 || sgid == current)) {
     return 0;
   }
   errno = ENOTSUP;

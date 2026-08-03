@@ -13,7 +13,8 @@ static int has_error(void) {
 }
 
 int main(void) {
-  void* handle;
+  void* main_handle;
+  void* lib_handle;
   void* missing;
   char* error;
 
@@ -21,15 +22,15 @@ int main(void) {
     return fail("initial dlerror");
   }
 
-  handle = dlopen(0, RTLD_NOW | RTLD_LOCAL);
-  if (handle == 0) {
+  main_handle = dlopen(0, RTLD_NOW | RTLD_LOCAL);
+  if (main_handle == 0) {
     return fail("dlopen self");
   }
   if (dlerror() != 0) {
     return fail("dlopen self error");
   }
 
-  missing = dlsym(handle, "crt_symbol_that_should_not_exist");
+  missing = dlsym(main_handle, "crt_symbol_that_should_not_exist");
   if (missing != 0 || !has_error()) {
     return fail("dlsym missing");
   }
@@ -42,32 +43,37 @@ int main(void) {
   }
 
 #if defined(CRT_TARGET_OS_WINDOWS)
-  handle = dlopen("kernel32.dll", RTLD_NOW);
-  if (handle == 0) {
+  lib_handle = dlopen("kernel32.dll", RTLD_NOW);
+  if (lib_handle == 0) {
     return fail("dlopen kernel32");
   }
-  if (dlsym(handle, "GetCurrentProcessId") == 0) {
+  if (dlsym(lib_handle, "GetCurrentProcessId") == 0) {
     return fail("dlsym kernel32");
   }
-  if (dlclose(handle) != 0) {
+  if (dlclose(lib_handle) != 0) {
     return fail("dlclose kernel32");
   }
 #elif defined(CRT_TARGET_OS_MACOS)
-  handle = dlopen("/usr/lib/libSystem.B.dylib", RTLD_NOW);
-  if (handle == 0) {
+  lib_handle = dlopen("/usr/lib/libSystem.B.dylib", RTLD_NOW);
+  if (lib_handle == 0) {
     return fail("dlopen libSystem");
   }
-  if (dlsym(handle, "getpid") == 0) {
+  if (dlsym(lib_handle, "getpid") == 0) {
     return fail("dlsym libSystem");
   }
-  if (dlclose(handle) != 0) {
+  if (dlclose(lib_handle) != 0) {
     return fail("dlclose libSystem");
   }
-#else
-  if (dlclose(handle) != 0) {
+#endif
+
+  /* dlopen(NULL) does not correspond to a loadable/unloadable resource on
+   * any backend, so dlclose() on it must be a harmless no-op success
+   * everywhere -- notably including Windows, where the handle backing it is
+   * never the process's own main-module HMODULE, precisely so this dlclose()
+   * is not misinterpreted as "free the main executable module". */
+  if (dlclose(main_handle) != 0) {
     return fail("dlclose self");
   }
-#endif
 
   error = dlerror();
   if (error != 0 && strstr(error, "dlclose") != 0) {

@@ -37,20 +37,13 @@ struct crt_mach_timebase_info {
   uint32_t denom;
 };
 
-struct crt_mach_timespec {
-  uint32_t tv_sec;
-  uint32_t tv_nsec;
-};
-
-#define CRT_MACH_CALENDAR_CLOCK 1
+/* Darwin's own CLOCK_REALTIME value (matches ours; only used to call
+ * clock_gettime_nsec_np() below). */
+#define CRT_DARWIN_CLOCK_REALTIME 0
 
 extern uint64_t mach_absolute_time(void);
 extern int mach_timebase_info(struct crt_mach_timebase_info* info);
-extern unsigned int mach_host_self(void);
-extern unsigned int mach_task_self_;
-extern int host_get_clock_service(unsigned int host, int clock_id, unsigned int* clock_serv);
-extern int clock_get_time(unsigned int clock_serv, struct crt_mach_timespec* cur_time);
-extern int mach_port_deallocate(unsigned int task, unsigned int name);
+extern uint64_t clock_gettime_nsec_np(int clock_id);
 #endif
 
 static int normalize_syscall_result(long result) {
@@ -204,21 +197,19 @@ int gettimeofday(struct timeval* tv, void* tz) {
   }
 #if defined(CRT_TARGET_OS_MACOS)
   {
-    unsigned int host;
-    unsigned int clock_serv = 0;
-    struct crt_mach_timespec mach_time;
+    /* clock_gettime_nsec_np() reads the commpage directly, like
+     * mach_absolute_time() below for CLOCK_MONOTONIC. Avoid the legacy
+     * mach_host_self()/host_get_clock_service()/clock_get_time() path: it
+     * does a real Mach IPC round trip through a per-thread cached reply
+     * port (mig_get_reply_port()), and that cache does not survive our
+     * raw-syscall fork() cleanly across a nested fork (our fork() does not
+     * run libSystem's internal post-fork port-cache reset), which can send
+     * mig_get_reply_port()/_kernelrpc_mach_port_construct() into unbounded
+     * mutual recursion and crash with a stack overflow. */
+    uint64_t nsec = clock_gettime_nsec_np(CRT_DARWIN_CLOCK_REALTIME);
 
-    host = mach_host_self();
-    if (host_get_clock_service(host, CRT_MACH_CALENDAR_CLOCK, &clock_serv) != 0) {
-      return __set_errno(EIO);
-    }
-    if (clock_get_time(clock_serv, &mach_time) != 0) {
-      mach_port_deallocate(mach_task_self_, clock_serv);
-      return __set_errno(EIO);
-    }
-    mach_port_deallocate(mach_task_self_, clock_serv);
-    tv->tv_sec = (time_t)mach_time.tv_sec;
-    tv->tv_usec = (long)(mach_time.tv_nsec / 1000U);
+    tv->tv_sec = (time_t)(nsec / UINT64_C(1000000000));
+    tv->tv_usec = (long)((nsec % UINT64_C(1000000000)) / 1000U);
     return 0;
   }
 #else

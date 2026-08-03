@@ -1,6 +1,19 @@
-add_library(dl STATIC
+if(CRT_TARGET_OS STREQUAL "macos")
+  set(CRT_DL_BACKEND_SOURCE src/arch/macos/dl_macos.c)
+elseif(CRT_TARGET_OS STREQUAL "linux")
+  set(CRT_DL_BACKEND_SOURCE src/arch/linux/dl_linux.c)
+elseif(CRT_TARGET_OS STREQUAL "windows")
+  set(CRT_DL_BACKEND_SOURCE src/arch/windows/dl_windows.c)
+else()
+  message(FATAL_ERROR "Unsupported CRT_TARGET_OS: ${CRT_TARGET_OS}")
+endif()
+
+set(CRT_DL_SOURCES
   src/dl.c
+  ${CRT_DL_BACKEND_SOURCE}
 )
+
+add_library(dl STATIC ${CRT_DL_SOURCES})
 
 target_link_libraries(dl PRIVATE crt_build_flags c)
 set_target_properties(dl PROPERTIES
@@ -8,9 +21,7 @@ set_target_properties(dl PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
 )
 
-add_library(dl_shared SHARED
-  src/dl.c
-)
+add_library(dl_shared SHARED ${CRT_DL_SOURCES})
 if(CRT_TARGET_OS STREQUAL "windows")
   target_sources(dl_shared PRIVATE $<TARGET_OBJECTS:crt_windows_dllcrt>)
 endif()

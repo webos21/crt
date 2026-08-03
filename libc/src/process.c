@@ -508,9 +508,15 @@ static int posix_spawn_add_file_action(
 }
 
 #if !defined(CRT_TARGET_OS_WINDOWS)
+/* POSIX_SPAWN_USEVFORK is a pure performance hint (permission to use vfork()
+ * instead of fork()); a fork()-based implementation may ignore it with no
+ * behavior change. POSIX_SPAWN_RESETIDS is a real semantic flag, but it is
+ * fully handled below in apply_spawn_attr_or_exit(), so it no longer counts
+ * as an unhandled attribute either. */
 static int spawn_attr_has_effect(const posix_spawnattr_t attr) {
   return attr != 0 &&
-         (attr->flags & ~(POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK)) != 0;
+         (attr->flags & ~(POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK |
+                           POSIX_SPAWN_USEVFORK | POSIX_SPAWN_RESETIDS)) != 0;
 }
 
 static void apply_spawn_attr_or_exit(const posix_spawnattr_t attr) {
@@ -522,6 +528,11 @@ static void apply_spawn_attr_or_exit(const posix_spawnattr_t attr) {
   }
   if ((attr->flags & POSIX_SPAWN_SETSIGMASK) != 0) {
     __crt_signal_set_mask(attr->sigmask64);
+  }
+  if ((attr->flags & POSIX_SPAWN_RESETIDS) != 0) {
+    if (setgid(getgid()) != 0 || setuid(getuid()) != 0) {
+      _exit(127);
+    }
   }
 }
 

@@ -143,8 +143,9 @@ runtime은 다음 계층으로 나누어 설계한다.
     에 architecture/OS별 startup, syscall, setjmp 코드가 있고, `src/gdtoa/`와
     `src/string/`에는 각각 imported OpenBSD gdtoa 계열과 Bionic string/memory
     계열 소스가 있다. architecture-specific code는 공용 루트 `arch/`가 아니라
-    라이브러리별 `src/arch/`에 둔다. libm/libdl/libstdc++도 arch-specific 코드가
-    필요해지면 동일한 패턴을 따른다.
+    라이브러리별 `src/arch/`에 둔다. `libdl/`은 이미 이 패턴을 따르고 있고
+    (아래 참고), libm/libstdc++도 arch-specific 코드가 필요해지면 동일한
+    패턴을 따른다.
 - `libm/`
   - 결과 파일: `libm.so`, `libm.a`
   - The math library. Traditionally Unix systems kept stuff like sin(3) and
@@ -153,6 +154,11 @@ runtime은 다음 계층으로 나누어 설계한다.
   - 결과 파일: `libdl.so`
   - The dynamic linker interface library. This is where stuff like dlopen(3)
     lives.
+  - `src/dl.c`: host-independent dispatcher (`dlerror()` state, shared handle
+    validation), calling into a per-host backend under
+    `src/arch/{linux,macos,windows}/dl_*.c` via `src/dl_internal.h`. Linux's
+    backend is currently a documented stub (no CRT-owned ELF loader yet); see
+    `docs/dynamic_loading.md`.
 - `libstdc++/`
   - 결과 파일: `libc++.so`
   - The C++ ABI support functions. Stuff like __cxa_guard_acquire and

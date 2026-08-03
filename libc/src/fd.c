@@ -561,7 +561,34 @@ static int macos_use_host_dev_tty(void) {
  * genuinely virtual guest paths (e.g. a hardcoded /bin/sh that only exists
  * under the rootfs) fall through to the CRT_ROOTFS-prefixed form. */
 static int host_path_exists(const char* path) {
-  return __crt_sys_access(path, 0) == 0;
+  char parent[PATH_MAX];
+  size_t len;
+  size_t i;
+
+  if (__crt_sys_access(path, 0) == 0) {
+    return 1;
+  }
+  /* A path being newly created (open() with O_CREAT, mkdir(), the new side of
+   * rename()/symlink(), a fresh mkstemp()-style temp file, ...) will never
+   * exist yet even when it names a real host directory. Fall back to
+   * checking whether its parent directory is a real, already-existing host
+   * directory before deciding this is a virtual guest path. */
+  len = strlen(path);
+  if (len == 0 || len >= sizeof(parent)) {
+    return 0;
+  }
+  memcpy(parent, path, len + 1);
+  for (i = len; i > 0; --i) {
+    if (parent[i - 1] == '/') {
+      if (i > 1) {
+        parent[i - 1] = 0;
+      } else {
+        parent[1] = 0;
+      }
+      return __crt_sys_access(parent, 0) == 0;
+    }
+  }
+  return 0;
 }
 
 static const char* rootfs_path_for_host(const char* path, char buffer[PATH_MAX]) {
