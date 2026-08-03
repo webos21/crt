@@ -74,7 +74,8 @@
           "soong/linux_glibc"
         ],
         "config_undefs": [
-          "HAVE_SYS_TIMEB_H"
+          "HAVE_SYS_TIMEB_H",
+          "ENABLE_NLS"
         ],
         "sources": [
           "lib/getloadavg.c",
