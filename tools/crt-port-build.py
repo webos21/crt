@@ -257,7 +257,12 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
         env["CONFIG_SHELL"] = "/system/bin/mksh"
         if not is_native_windows_configure(target_os):
             env["CONFIG_SHELL"] = shell
-        run([shell] + configure, work, env, f"{port_name}: configure")
+        # TEMPORARY diagnostic: set CRT_PORT_SHELL_XTRACE=1 to run configure
+        # under `mksh -x` for tracing a silent (no-output) configure failure.
+        # Remove once the Windows aarch64 zlib configure investigation is
+        # resolved.
+        shell_argv = [shell, "-x"] if os.environ.get("CRT_PORT_SHELL_XTRACE") else [shell]
+        run(shell_argv + configure, work, env, f"{port_name}: configure")
     elif is_native_windows_configure(target_os):
         shell = find_posix_shell(env)
         env["CONFIG_SHELL"] = path_for_msys_shell(shell)
