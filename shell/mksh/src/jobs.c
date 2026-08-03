@@ -512,7 +512,18 @@ exchild(struct op *t, int flags,
 	}
 
 #ifdef MKSH_CRT_SHELL_CHILD_SPEC
-	if ((t->type == TCOM || t->type == TPAREN) && !(flags & XEXEC))
+	/* TPAREN (subshells) must NOT take this fast path: a subshell needs
+	 * real process isolation (fd redirections, cd, variable/exit-state
+	 * changes must not leak back to the parent shell). Running it
+	 * in-process via execute() applies its redirections directly to this
+	 * shell's own fds with nothing to restore them afterward -- for a
+	 * subshell with its own redirection, such as
+	 * `(uname -a || echo unknown) 2>/dev/null`, that permanently
+	 * clobbers this shell's real stderr, silently swallowing every
+	 * later error message instead of just this command's. Only TCOM (a
+	 * single simple external command, which has no such isolation
+	 * requirement) is safe to skip the real fork/spawn path for. */
+	if (t->type == TCOM && !(flags & XEXEC))
 		return (crt_mksh_execute_tcom_without_raw_fork(
 		    t, flags, xerrok, close_fd));
 #endif

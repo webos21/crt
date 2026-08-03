@@ -90,8 +90,41 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   silently swallowed by the non-atomic mask-then-select sequence. Verified
   against the real `port-rebuild-zlib` `configure && make -j 10 && make
   install` end to end on macOS. See `docs/signal_delivery.md`.
+- Fixed Windows aarch64 compile errors (`init_ntdll`/`fd_set_inherit_for_fork`
+  unused-function under `-Werror`): both only backed the x86_64-only
+  `RtlCloneUserProcess` fork path and were genuinely dead code on aarch64;
+  guarded behind the same `#if defined(__x86_64__) || defined(_M_X64)`
+  already used at their call site.
+- Fixed 3 Windows aarch64 fork test failures (`fork_test`,
+  `fork_signal_test`, `fork_runtime_reset_test`): only one of four
+  `fork()`/`_Fork()` call sites treated Windows `ENOTSUP` as an expected,
+  graceful pass; extended the same handling to the other three.
+- Fixed 3 Windows aarch64 mksh rootfs ctest failures
+  (`crt_mksh_rootfs_external_runs`/`_pipeline_runs`/`_command_substitution_runs`):
+  root cause was a stale/missing `rootfs` build artifact, not a code bug --
+  the `rootfs` CMake custom target had no `ALL` and nothing forced it to
+  rebuild before ctest ran. Made `rootfs` part of `ALL` on Windows (the only
+  host where any ctest entry depends on it); macOS/Linux keep it opt-in.
+- Found and fixed a real mksh/CRT-shell-child-spec bug while investigating a
+  separate, silent (`zero output, exit 1`) `port-rebuild-zlib` `./configure`
+  failure on Windows aarch64: `MKSH_CRT_SHELL_CHILD_SPEC`'s `exchild()` fast
+  path incorrectly ran `TPAREN` (subshells) in-process like `TCOM`, so a
+  subshell's own redirection (e.g. `(cmd) 2>/dev/null`) permanently
+  clobbered the interpreter's real stderr with nothing to restore it,
+  silently swallowing every later error in the same script. Fixed by
+  restricting the fast path to `TCOM` only (`shell/mksh/src/jobs.c`); see
+  `docs/windows_fork_emulation.md` for the full diagnosis. This does not make
+  `zlib`'s `configure` pass on Windows aarch64 (still needs real `fork()`
+  there), but turns the silent corruption into an honest `can't fork - try
+  again` failure, and fixes a latent version of the same bug on Windows
+  x86_64 (where real fork already exists).
 
 ## in progressing
+
+- Implement real `fork()` for Windows aarch64 (or otherwise make subshells
+  work there) so `configure`-driven port builds like zlib can fully succeed;
+  currently they fail loudly and correctly instead of silently, but still
+  fail. See `docs/windows_fork_emulation.md`.
 
 - Verify the new Linux signal backend (`docs/signal_delivery.md`) on an
   actual Linux host; it is currently code-review-verified only, since this

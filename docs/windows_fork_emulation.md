@@ -192,3 +192,49 @@ image replacement semantics.
 - ASLR/base-address constraints and failure diagnostics;
 - direct Windows `fork()` policy tests that clearly distinguish unsupported
   arbitrary fork from supported shell child-spec execution.
+
+## Known Bug: Subshells Silently Corrupt The Interpreter's Own fds
+
+Found while investigating a real `port-rebuild-zlib` `./configure` failure on
+Windows aarch64 that produced *zero* output and a bare exit status 1 --
+diagnosed with `mksh -x` tracing (`CRT_PORT_SHELL_XTRACE=1` in
+`tools/crt-port-build.py`, temporary), which pinpointed the exact failing
+construct: `mname=\`(uname -a || echo unknown) 2>/dev/null\`` in zlib's
+`configure`, a parenthesized subshell carrying its own `2>/dev/null`
+redirection, used inside a command substitution.
+
+`MKSH_CRT_SHELL_CHILD_SPEC`'s `exchild()` fast path
+(`shell/mksh/src/jobs.c`) used to skip the raw-fork/spawn machinery for both
+`TCOM` (a single simple command) and `TPAREN` (a `(...)` subshell), running
+either directly in-process via `execute()`. That is safe for `TCOM`, but not
+for `TPAREN`: a subshell's entire point is process-level isolation --
+redirections, `cd`, variable changes, and `exit` must not leak back to the
+parent shell. In the *real*, non-CRT mksh design this isolation comes for
+free because `exchild()` forks one real child to run the whole subshell body;
+running it in-process instead means any redirection the subshell sets up
+(`iosetup()`, before the `TPAREN` switch case even runs) mutates the
+*interpreter's own* fd table with nothing to restore it afterward. For
+`(...) 2>/dev/null` specifically, that permanently clobbers the shell's real
+stderr -- every later `errorf()`/warning in the same script, no matter how
+unrelated, silently vanishes into `/dev/null` instead of being reported,
+which is exactly the "zero output, just exit 1" symptom this presented as.
+
+Fixed by removing `TPAREN` from the fast-path condition, leaving only `TCOM`
+eligible (`shell/mksh/src/jobs.c`). A subshell now always goes through the
+normal job-bookkeeping path; since its node type is not `TEXEC`,
+`crt_mksh_spawn_exec_child()` declines it and it falls through to the raw
+`fork()` call. This does not make subshells work on Windows aarch64 (raw
+`fork()` there still unconditionally returns `ENOTSUP`, since aarch64 has no
+`RtlCloneUserProcess`-based fork path at all), but it turns the silent
+corruption into an honest, immediately visible `mksh: can't fork - try
+again` failure -- matching the actual, documented limitation instead of
+masking it. On Windows x86_64 (where raw `fork()` via `RtlCloneUserProcess`
+does work), this fix means subshells with their own redirections now get
+real process isolation for the first time, instead of a latent, unnoticed
+version of the same fd-corruption bug.
+
+This is a genuine, narrow correctness fix, not a resolution of the underlying
+"no real fork() on Windows aarch64" gap -- any real-world script whose
+`configure`/build process needs a subshell to actually complete (not just
+fail loudly) still requires the real Windows `fork()` emulation described
+above.
