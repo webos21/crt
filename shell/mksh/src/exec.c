@@ -70,8 +70,16 @@ execute(struct op * volatile t,
 
 	if ((flags&XFORK) && !(flags&XEXEC) && t->type != TPIPE
 #ifdef MKSH_CRT_SHELL_CHILD_SPEC
+	    /* TPAREN must still go through exchild()/real fork here: see the
+	     * matching, more detailed comment in jobs.c's exchild(). A
+	     * subshell needs real process isolation for its own redirections
+	     * (e.g. `(cmd) 2>/dev/null`); comsub() reaches this exact check
+	     * directly with a TPAREN node (via execute(t, XXCOM|XPIPEO|XFORK,
+	     * NULL)), bypassing exchild()'s own entry-point guard entirely,
+	     * so excluding TPAREN here too used to run the subshell's
+	     * redirection in-process and permanently clobber this
+	     * interpreter's own fd. */
 	    && t->type != TCOM
-	    && t->type != TPAREN
 #endif
 	    )
 		/* run in sub-process */

@@ -233,6 +233,23 @@ does work), this fix means subshells with their own redirections now get
 real process isolation for the first time, instead of a latent, unnoticed
 version of the same fd-corruption bug.
 
+There is a second, independent copy of the same guard: `execute()` itself
+(`shell/mksh/src/exec.c`) has its own `MKSH_CRT_SHELL_CHILD_SPEC` check --
+`if ((flags&XFORK) && !(flags&XEXEC) && t->type != TPIPE && t->type != TCOM
+&& t->type != TPAREN) return exchild(...)` -- deciding whether to call
+`exchild()` at all. `comsub()` (backtick/`$(...)` command substitution)
+calls `execute(t, XXCOM|XPIPEO|XFORK, NULL)` *directly*, bypassing
+`exchild()`'s own entry-point guard entirely; for a `TPAREN` node this
+second check also used to exclude it, so a subshell reached through command
+substitution specifically -- exactly the `` `(uname -a || echo unknown)
+2>/dev/null` `` construct that exposed this whole bug -- kept corrupting the
+interpreter's fd table even after the `jobs.c` fix, because it never went
+through `jobs.c`'s `exchild()` guard in the first place. Fixed the same way:
+removed `TPAREN` from this second check too, leaving only `TCOM` excluded.
+Confirmed via the same real `port-rebuild-zlib` reproduction that a rebuilt
+`mksh.exe` still hit the identical silent failure after only the `jobs.c`
+fix, which is what surfaced this second guard.
+
 This is a genuine, narrow correctness fix, not a resolution of the underlying
 "no real fork() on Windows aarch64" gap -- any real-world script whose
 `configure`/build process needs a subshell to actually complete (not just

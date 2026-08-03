@@ -112,7 +112,12 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   subshell's own redirection (e.g. `(cmd) 2>/dev/null`) permanently
   clobbered the interpreter's real stderr with nothing to restore it,
   silently swallowing every later error in the same script. Fixed by
-  restricting the fast path to `TCOM` only (`shell/mksh/src/jobs.c`); see
+  restricting the fast path to `TCOM` only (`shell/mksh/src/jobs.c`) --
+  and found a second, independent copy of the same guard inside
+  `execute()` itself (`shell/mksh/src/exec.c`), reached directly by
+  `comsub()` (backtick/`$(...)` substitution) without ever going through
+  `exchild()`, which is why the `jobs.c` fix alone did not change the
+  observed behavior; fixed the same way. See
   `docs/windows_fork_emulation.md` for the full diagnosis. This does not make
   `zlib`'s `configure` pass on Windows aarch64 (still needs real `fork()`
   there), but turns the silent corruption into an honest `can't fork - try
