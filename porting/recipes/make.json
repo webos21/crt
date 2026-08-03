@@ -71,7 +71,8 @@
     "target_overrides": {
       "linux": {
         "include_dirs": [
-          "soong/linux_glibc"
+          "soong/linux_glibc",
+          "soong/linux_musl"
         ],
         "config_undefs": [
           "HAVE_SYS_TIMEB_H",
