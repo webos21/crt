@@ -35,11 +35,16 @@
 
 /* Linux kernel struct sigaction (asm-generic/signal.h), NOT glibc's public
  * struct sigaction, which is a different, ABI-incompatible shape. Field
- * order and layout are the same on x86_64 and aarch64. */
+ * order and layout are the same on x86_64 and aarch64.
+ *
+ * Field names deliberately avoid sa_handler/sa_sigaction: <signal.h>
+ * #defines those (as __sigaction_handler.sa_handler / .sa_sigaction) for
+ * this project's own public struct sigaction, and those macros would
+ * otherwise rewrite this unrelated kernel-ABI struct's member names too. */
 struct crt_kernel_sigaction {
   union {
-    void (*sa_handler)(int);
-    void (*sa_sigaction)(int, siginfo_t*, void*);
+    void (*handler_plain)(int);
+    void (*handler_siginfo)(int, siginfo_t*, void*);
   } handler;
   unsigned long sa_flags;
   void (*sa_restorer)(void);
@@ -87,14 +92,14 @@ int __crt_signal_backend_set_action(int bionic_sig, enum crt_signal_backend_acti
   sa.sa_restorer = 0;
   switch (action) {
     case CRT_SIGNAL_BACKEND_DEFAULT:
-      sa.handler.sa_handler = CRT_KERNEL_SIG_DFL;
+      sa.handler.handler_plain = CRT_KERNEL_SIG_DFL;
       break;
     case CRT_SIGNAL_BACKEND_IGNORE:
-      sa.handler.sa_handler = CRT_KERNEL_SIG_IGN;
+      sa.handler.handler_plain = CRT_KERNEL_SIG_IGN;
       break;
     case CRT_SIGNAL_BACKEND_DISPATCH:
     default:
-      sa.handler.sa_sigaction = crt_linux_signal_entry;
+      sa.handler.handler_siginfo = crt_linux_signal_entry;
       sa.sa_flags = SA_SIGINFO;
 #if defined(__x86_64__)
       sa.sa_flags |= CRT_KERNEL_SA_RESTORER;
