@@ -434,7 +434,9 @@ static int fd_kind[CRT_FD_TABLE_SIZE];
 static int fd_flags[CRT_FD_TABLE_SIZE];
 static int fd_table_initialized;
 static int winsock_initialized;
+#if defined(__x86_64__) || defined(_M_X64)
 static int ntdll_initialized;
+#endif
 static HANDLE child_process_table[CRT_FD_TABLE_SIZE];
 static DWORD child_pid_table[CRT_FD_TABLE_SIZE];
 static HANDLE private_wait_process;
@@ -444,7 +446,9 @@ long __crt_sys_geteuid(void);
 static HANDLE get_fd_handle(int fd);
 static void init_fd_table(void);
 static long init_winsock(void);
+#if defined(__x86_64__) || defined(_M_X64)
 static long init_ntdll(void);
+#endif
 static long close_fd_slot(int fd);
 
 struct ntdll_api {
@@ -456,7 +460,9 @@ struct ntdll_api {
       struct crt_rtl_user_process_information*);
 };
 
+#if defined(__x86_64__) || defined(_M_X64)
 static struct ntdll_api ntdll;
+#endif
 
 struct winsock_api {
   int (CRT_WINAPI* WSAStartup)(WORD wVersionRequested, void* lpWSAData);
@@ -1434,6 +1440,10 @@ static long fd_snapshot_prepare_child_duplicates(
   return 0;
 }
 
+/* Only __crt_sys_fork()'s RtlCloneUserProcess path (x86_64-only; see below)
+ * calls this. Guarded to avoid -Wunused-function on aarch64, where fork()
+ * always returns -ENOTSUP. */
+#if defined(__x86_64__) || defined(_M_X64)
 static void fd_set_inherit_for_fork(unsigned char touched[CRT_FD_TABLE_SIZE],
                                     DWORD old_flags[CRT_FD_TABLE_SIZE]) {
   int fd;
@@ -1458,6 +1468,7 @@ static void fd_set_inherit_for_fork(unsigned char touched[CRT_FD_TABLE_SIZE],
     }
   }
 }
+#endif
 
 static void fd_restore_inherit_after_fork(const unsigned char touched[CRT_FD_TABLE_SIZE],
                                           const DWORD old_flags[CRT_FD_TABLE_SIZE]) {
@@ -2140,6 +2151,10 @@ static long init_winsock(void) {
   return 0;
 }
 
+/* Only __crt_sys_fork()'s RtlCloneUserProcess path (x86_64-only) calls this.
+ * Guarded to avoid -Wunused-function on aarch64, where fork() always
+ * returns -ENOTSUP. */
+#if defined(__x86_64__) || defined(_M_X64)
 static long init_ntdll(void) {
   HANDLE module;
 
@@ -2159,6 +2174,7 @@ static long init_ntdll(void) {
   ntdll_initialized = 1;
   return 0;
 }
+#endif
 
 static HANDLE get_fd_handle(int fd) {
   init_fd_table();
