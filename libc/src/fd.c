@@ -551,6 +551,19 @@ static int macos_use_host_dev_tty(void) {
 }
 #endif
 
+/* Virtual rootfs top-level names (system, bin, usr, tmp, dev, proc, data,
+ * home; see ROOTFS_DIRS in tools/create_rootfs.py) collide lexically with
+ * real host top-level directory names on Linux/macOS, so an absolute path
+ * cannot be classified as "guest" vs "real host path" by name alone. Instead,
+ * prefer the literal path when it already exists on the host: build trees,
+ * sysroot/port-prefix paths, tool scripts, and PATH-resolved host toolchain
+ * binaries (e.g. /usr/bin/clang) all resolve correctly this way, and only
+ * genuinely virtual guest paths (e.g. a hardcoded /bin/sh that only exists
+ * under the rootfs) fall through to the CRT_ROOTFS-prefixed form. */
+static int host_path_exists(const char* path) {
+  return __crt_sys_access(path, 0) == 0;
+}
+
 static const char* rootfs_path_for_host(const char* path, char buffer[PATH_MAX]) {
   const char* root;
   size_t root_len;
@@ -573,6 +586,9 @@ static const char* rootfs_path_for_host(const char* path, char buffer[PATH_MAX])
   root_len = strlen(root);
   if (strncmp(path, root, root_len) == 0 &&
       (path[root_len] == 0 || path[root_len] == '/')) {
+    return path;
+  }
+  if (host_path_exists(path)) {
     return path;
   }
   path_len = strlen(path);

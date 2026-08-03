@@ -25,6 +25,7 @@ long __crt_sys_getpgrp(void);
 long __crt_sys_setsid(void);
 long __crt_sys_kill(long pid, int sig);
 long __crt_sys_execve(const char* path, char* const argv[], char* const envp[]);
+long __crt_sys_access(const char* path, int mode);
 long __crt_sys_fork(void);
 long __crt_sys_waitpid(long pid, int* status, int options);
 #if defined(CRT_TARGET_OS_WINDOWS)
@@ -317,6 +318,20 @@ long __crt_sysconf_avphys_pages(void) {
 #endif
 
 #if !defined(CRT_TARGET_OS_WINDOWS)
+/* Virtual rootfs top-level names (system, bin, usr, tmp, dev, proc, data,
+ * home; see ROOTFS_DIRS in tools/create_rootfs.py) collide lexically with
+ * real host top-level directory names on Linux/macOS, so an absolute path
+ * cannot be classified as "guest" vs "real host path" by name alone. Instead,
+ * prefer the literal path when it already exists on the host: PATH-resolved
+ * host toolchain binaries (e.g. /usr/bin/clang) and already-resolved
+ * rootfs-prefixed candidates from execvp() resolve correctly this way, and
+ * only genuinely virtual guest paths fall through to the CRT_ROOTFS-prefixed
+ * form. Keep this in sync with host_path_exists()/rootfs_path_for_host() in
+ * libc/src/fd.c. */
+static int exec_host_path_exists(const char* path) {
+  return __crt_sys_access(path, 0) == 0;
+}
+
 static const char* translate_exec_path_for_rootfs(const char* path, char buffer[PATH_MAX]) {
   const char* root;
   size_t root_len;
@@ -333,6 +348,13 @@ static const char* translate_exec_path_for_rootfs(const char* path, char buffer[
     return path;
   }
   root_len = strlen(root);
+  if (strncmp(path, root, root_len) == 0 &&
+      (path[root_len] == 0 || path[root_len] == '/')) {
+    return path;
+  }
+  if (exec_host_path_exists(path)) {
+    return path;
+  }
   path_len = strlen(path);
   if (root_len + path_len + 1 > PATH_MAX) {
     return path;

@@ -73,6 +73,9 @@
         "include_dirs": [
           "soong/linux_glibc"
         ],
+        "config_undefs": [
+          "HAVE_SYS_TIMEB_H"
+        ],
         "sources": [
           "lib/getloadavg.c",
           "src/posixos.c"
@@ -82,6 +85,12 @@
         "include_dirs": [
           "soong/darwin"
         ],
+        "config_undefs": [
+          "HAVE_SYS_TIMEB_H"
+        ],
+        "config_redefs": {
+          "ST_MTIM_NSEC": "st_mtim.tv_nsec"
+        },
         "sources": [
           "src/posixos.c"
         ],

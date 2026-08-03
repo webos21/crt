@@ -182,7 +182,7 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
         else:
             rootfs_path = os.pathsep.join(
                 str(rootfs / entry) for entry in ("system/bin", "bin", "usr/bin"))
-            env.pop("CRT_ROOTFS", None)
+            env["CRT_ROOTFS"] = str(rootfs)
             env["CC"] = f"{shell} {root / 'tools' / 'crt-cc'}"
             env["CXX"] = f"{shell} {root / 'tools' / 'crt-c++'}"
             env["PATH"] = f"{rootfs_path}{os.pathsep}{env.get('PATH', '')}"
@@ -324,12 +324,16 @@ def build_android_host_tool_port(preset_build_dir, work, port_prefix, recipe, en
     include_dirs.extend(target.get("include_dirs", []))
     sources.extend(target.get("sources", []))
     config_undefs = target.get("config_undefs", [])
-    if config_undefs:
+    config_redefs = target.get("config_redefs", {})
+    if config_undefs or config_redefs:
         overlay = work / "crt_config_overlay"
         overlay.mkdir(parents=True, exist_ok=True)
         config = overlay / "config.h"
         lines = ["#include_next <config.h>"]
         lines.extend(f"#undef {name}" for name in config_undefs)
+        for name, value in config_redefs.items():
+            lines.append(f"#undef {name}")
+            lines.append(f"#define {name} {value}")
         config.write_text("\n".join(lines) + "\n", encoding="utf-8")
         include_dirs.insert(0, str(overlay))
 
