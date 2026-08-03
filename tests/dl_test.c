@@ -14,7 +14,9 @@ static int has_error(void) {
 
 int main(void) {
   void* main_handle;
+#if defined(CRT_TARGET_OS_WINDOWS) || defined(CRT_TARGET_OS_MACOS)
   void* lib_handle;
+#endif
   void* missing;
   char* error;
 
