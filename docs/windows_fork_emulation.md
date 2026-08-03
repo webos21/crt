@@ -25,7 +25,7 @@ serve:
 ## Current Windows fd Table
 
 The Windows PAL currently owns the descriptor table in
-`libc/arch/windows/common/syscall.c`:
+`libc/src/arch/windows/common/syscall.c`:
 
 - `fd_table[64]` stores host `HANDLE` values or Winsock socket handles.
 - `fd_kind[64]` distinguishes empty slots, file handles, and sockets.

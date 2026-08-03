@@ -53,6 +53,9 @@ $RECYCLE.BIN/
 # VSCode
 .vscode/
 
+# Claude Code
+.claude/
+
 # Python helper caches
 __pycache__/
 *.py[cod]
@@ -73,4 +76,3 @@ out/
 build/
 .cache/
 compile_commands.json
-

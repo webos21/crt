@@ -33,7 +33,7 @@ porting recipe. Source lives under `shell/`, at the same architectural level as
 The intended project-owned outputs are:
 
 ```text
-shell/src    -> rootfs/system/bin/sh bootstrap runner
+shell/tiny_sh -> rootfs/system/bin/sh bootstrap runner
 shell/mksh   -> rootfs/system/bin/mksh, later rootfs/system/bin/sh
 shell/toybox -> rootfs/system/bin/toybox and selected applet entry points
 ```
@@ -142,7 +142,7 @@ simple configure scripts. BusyBox remains a fallback or benchmark.
 
 The source location policy is:
 
-- `shell/src`: project-owned `crt_tiny_sh` bootstrap runner.
+- `shell/tiny_sh`: project-owned `crt_tiny_sh` bootstrap runner.
 - `shell/mksh`: Android `external/mksh` import and project-owned glue.
 - `shell/toybox`: Android `external/toybox` import, minimal config, and
   project-owned glue.

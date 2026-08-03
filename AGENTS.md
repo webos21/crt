@@ -113,16 +113,17 @@ runtime은 다음 계층으로 나누어 설계한다.
 2. Runtime core
    - allocator, stdio, time, locale policy, path handling, process abstractions,
      dynamic loading policy, shared internal helpers.
-3. Platform Adaptation Layer
-   - `platform/linux`, `platform/windows`, `platform/macos`,
-     `platform/android`.
-4. Architecture layer
-   - `arch/x86_64`, `arch/aarch64`, atomics, TLS, startup code,
+3. Platform Adaptation Layer / Architecture layer
+   - OS별·아키텍처별 저수준 구현: atomics, TLS, startup code, syscall wrapper,
      calling-convention-sensitive code.
-5. Optional compatibility modules
+   - 현재는 별도 루트 `platform/`, `arch/` 대신 라이브러리별
+     `<lib>/src/arch/{linux,macos,windows}/{x86_64,aarch64,common}` 아래에 있다
+     (예: `libc/src/arch/macos/aarch64/crt1.S`,
+     `libc/src/arch/windows/common/syscall.c`).
+4. Optional compatibility modules
    - Android log/properties, Binder client primitives, ashmem/memfd-style shared
      memory, Linux/BSD extension shims.
-6. Later graphics/application runtime
+5. Later graphics/application runtime
    - libc/PAL 안정화 이후 별도 정의한다.
 
 ## 프로젝트 구조
@@ -134,15 +135,16 @@ runtime은 다음 계층으로 나누어 설계한다.
   - 프로젝트 관련 문서 저장.
 - `include/`
   - public headers and exported ABI surface.
-- `platform/`
-  - OS별 PAL 구현.
-- `arch/`
-  - x86_64/aarch64 architecture-specific code.
-- `cmake/`
-  - CMake modules and toolchain files.
 - `libc/`
   - 결과 파일: `libc.so`, `libc.a`
   - The C library. Stuff like fopen(3) and kill(2).
+  - `include/`: public headers.
+  - `src/`: implementation. `src/arch/{linux,macos,windows}/{x86_64,aarch64,common}`
+    에 architecture/OS별 startup, syscall, setjmp 코드가 있고, `src/gdtoa/`와
+    `src/string/`에는 각각 imported OpenBSD gdtoa 계열과 Bionic string/memory
+    계열 소스가 있다. architecture-specific code는 공용 루트 `arch/`가 아니라
+    라이브러리별 `src/arch/`에 둔다. libm/libdl/libstdc++도 arch-specific 코드가
+    필요해지면 동일한 패턴을 따른다.
 - `libm/`
   - 결과 파일: `libm.so`, `libm.a`
   - The math library. Traditionally Unix systems kept stuff like sin(3) and
@@ -159,12 +161,28 @@ runtime은 다음 계층으로 나누어 설계한다.
   - 결과 파일: `/system/bin/sh`, `/system/bin/toybox`
   - Android-like shell and command applet environment. This is a core runtime
     artifact used by porting tests, not an ordinary third-party port recipe.
+  - `tiny_sh/`: project-owned bootstrap shell runner (`crt_tiny_sh`).
+  - `mksh/`: imported Android `external/mksh`. Repo metadata (`Android.bp`,
+    `NOTICE`, `mkshrc`, ...) lives directly under `mksh/`; the imported C
+    source lives under `mksh/src/`.
+  - `toybox/`: imported Android `external/toybox` under `toybox/src/`, with
+    project-owned config/build glue under `toybox/crt/`.
 - `linker/`
   - 결과 파일: `/system/bin/linker`
   - The dynamic linker. It is responsible for loading the ELF executable into
     memory and resolving references to symbols.
 - `tests/`
   - Unit, ABI, PAL, and integration tests.
+- `third_party/`
+  - Import provenance: upstream manifests, license notes, and source-family
+    review docs for imported Bionic/OpenBSD code (`third_party/bionic/`).
+- `porting/`
+  - `porting/recipes/`: third-party library porting recipes (zlib, libpng,
+    libffi, SQLite amalgamation, the `make` bootstrap tool, ...).
+- `tools/`
+  - CRT/porting toolchain wrappers and scripts: `crt-cc`, `crt-c++`,
+    `crt-env.sh`/`.cmd`/`.ps1`, `crt-port-build.py`, `create_rootfs.py`,
+    `fetch_ports.py`.
 
 ## 참고 문서
 

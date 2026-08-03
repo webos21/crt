@@ -10,7 +10,7 @@ Bionic source should be handled in two different locations:
 - `third_party/bionic/`
   - provenance records, import manifests, license notes, and optional pristine
     source snapshots.
-- project runtime directories such as `libc/string/`, `libm/`, `libdl/`, and
+- project runtime directories such as `libc/src/string/`, `libm/`, `libdl/`, and
   `linker/`
   - curated files that are actually compiled by this project.
 
@@ -137,7 +137,7 @@ If a pristine Bionic snapshot is imported under `third_party/bionic/`, do not ed
 it directly.
 
 Local changes should live in project-owned runtime directories, such as
-`libc/string/`, and must be recorded as adaptations. This keeps the upstream
+`libc/src/string/`, and must be recorded as adaptations. This keeps the upstream
 source auditable and makes future updates easier.
 
 ## Patch Location Policy

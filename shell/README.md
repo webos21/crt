@@ -39,7 +39,7 @@ rootfs/bin/<applets>      -> toybox applet links or launchers
 
 ## Bootstrap Tiny Shell
 
-`crt_tiny_sh` is built from `shell/src/tiny_sh.c` and installed as `sh` in the
+`crt_tiny_sh` is built from `shell/tiny_sh/tiny_sh.c` and installed as `sh` in the
 runtime rootfs. It intentionally implements only a small non-interactive subset:
 
 - `sh -c "..."`;

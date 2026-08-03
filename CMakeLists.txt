@@ -232,7 +232,7 @@ if(Python3_Interpreter_FOUND)
       --target-os "${CRT_TARGET_OS}"
       --shell "$<TARGET_FILE:crt_tiny_sh>"
       --mksh "$<TARGET_FILE:crt_mksh>"
-      --mkshrc "${CMAKE_SOURCE_DIR}/shell/mksh/src/mkshrc"
+      --mkshrc "${CMAKE_SOURCE_DIR}/shell/mksh/mkshrc"
       --toybox "$<TARGET_FILE:crt_toybox>"
     DEPENDS sysroot crt_shell_artifacts
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"

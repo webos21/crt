@@ -8,7 +8,7 @@
   },
   "entries": [
     {
-      "local": "libc/string/bcopy.c",
+      "local": "libc/src/string/bcopy.c",
       "component": "libc",
       "source_kind": "bionic-legacy",
       "upstream_ref": "ics-mr0",
@@ -20,7 +20,7 @@
       "next_action": "Compare against Bionic main string/memory routing before optimization work."
     },
     {
-      "local": "libc/string/memcpy.c",
+      "local": "libc/src/string/memcpy.c",
       "component": "libc",
       "source_kind": "bionic-legacy",
       "upstream_ref": "ics-mr0",
@@ -32,7 +32,7 @@
       "next_action": "Keep until a main-current string/memory policy chooses builtin, arch-common, or imported source."
     },
     {
-      "local": "libc/string/memmove.c",
+      "local": "libc/src/string/memmove.c",
       "component": "libc",
       "source_kind": "bionic-legacy",
       "upstream_ref": "ics-mr0",
@@ -44,7 +44,7 @@
       "next_action": "Replace together with memcpy/bcopy policy."
     },
     {
-      "local": "libc/string/memset.c",
+      "local": "libc/src/string/memset.c",
       "component": "libc",
       "source_kind": "bionic-legacy",
       "upstream_ref": "ics-mr0",
@@ -56,7 +56,7 @@
       "next_action": "Reevaluate with memcpy/memmove once builtin and arch dispatch policy is defined."
     },
     {
-      "local": "libc/string/strlen.c",
+      "local": "libc/src/string/strlen.c",
       "component": "libc",
       "source_kind": "bionic-legacy",
       "upstream_ref": "ics-mr0",
@@ -68,7 +68,7 @@
       "next_action": "Compare against Bionic main string source and compiler builtin lowering."
     },
     {
-      "local": "libc/string/strcmp.c",
+      "local": "libc/src/string/strcmp.c",
       "component": "libc",
       "source_kind": "bionic-legacy",
       "upstream_ref": "ics-mr0",
@@ -80,7 +80,7 @@
       "next_action": "Compare against Bionic main and decide whether this remains source import or becomes project-owned."
     },
     {
-      "local": "libc/string/memchr.c",
+      "local": "libc/src/string/memchr.c",
       "component": "libc",
       "source_kind": "bionic-legacy",
       "upstream_ref": "ics-mr0",
@@ -92,7 +92,7 @@
       "next_action": "Reevaluate with the rest of string/memory after main source mapping."
     },
     {
-      "local": "libc/string/memcmp.c",
+      "local": "libc/src/string/memcmp.c",
       "component": "libc",
       "source_kind": "bionic-legacy",
       "upstream_ref": "ics-mr0",
@@ -104,7 +104,7 @@
       "next_action": "Reevaluate with the rest of string/memory after main source mapping."
     },
     {
-      "local": "libc/string/strcat.c",
+      "local": "libc/src/string/strcat.c",
       "component": "libc",
       "source_kind": "bionic-legacy",
       "upstream_ref": "ics-mr0",
@@ -116,7 +116,7 @@
       "next_action": "Move to project-owned classification if no main-current import advantage is found."
     },
     {
-      "local": "libc/string/strchr.c",
+      "local": "libc/src/string/strchr.c",
       "component": "libc",
       "source_kind": "bionic-legacy",
       "upstream_ref": "ics-mr0",
@@ -128,7 +128,7 @@
       "next_action": "Review whether a current Bionic upstream-openbsd equivalent is cleaner."
     },
     {
-      "local": "libc/string/strcpy.c",
+      "local": "libc/src/string/strcpy.c",
       "component": "libc",
       "source_kind": "bionic-legacy",
       "upstream_ref": "ics-mr0",
@@ -140,7 +140,7 @@
       "next_action": "Convert to project-owned if main-current source is only optimized dispatch."
     },
     {
-      "local": "libc/string/strncmp.c",
+      "local": "libc/src/string/strncmp.c",
       "component": "libc",
       "source_kind": "bionic-legacy",
       "upstream_ref": "ics-mr0",
@@ -152,7 +152,7 @@
       "next_action": "Review against current Bionic source family before freezing."
     },
     {
-      "local": "libc/string/strncpy.c",
+      "local": "libc/src/string/strncpy.c",
       "component": "libc",
       "source_kind": "bionic-legacy",
       "upstream_ref": "ics-mr0",
@@ -164,7 +164,7 @@
       "next_action": "Review against current Bionic source family before freezing."
     },
     {
-      "local": "libc/string/strrchr.c",
+      "local": "libc/src/string/strrchr.c",
       "component": "libc",
       "source_kind": "bionic-legacy",
       "upstream_ref": "ics-mr0",
@@ -176,7 +176,7 @@
       "next_action": "Review whether a current Bionic upstream-openbsd equivalent is cleaner."
     },
     {
-      "local": "libc/string/strcspn.c",
+      "local": "libc/src/string/strcspn.c",
       "component": "libc",
       "source_kind": "bionic-legacy",
       "upstream_ref": "ics-mr0",
@@ -188,7 +188,7 @@
       "next_action": "Freeze as project-owned or replace with current upstream-openbsd after review."
     },
     {
-      "local": "libc/string/strdup.c",
+      "local": "libc/src/string/strdup.c",
       "component": "libc",
       "source_kind": "bionic-legacy",
       "upstream_ref": "ics-mr0",
@@ -200,7 +200,7 @@
       "next_action": "Freeze as project-owned after allocator policy stabilizes."
     },
     {
-      "local": "libc/string/strpbrk.c",
+      "local": "libc/src/string/strpbrk.c",
       "component": "libc",
       "source_kind": "bionic-legacy",
       "upstream_ref": "ics-mr0",
@@ -212,7 +212,7 @@
       "next_action": "Freeze as project-owned or replace with current upstream-openbsd after review."
     },
     {
-      "local": "libc/string/strspn.c",
+      "local": "libc/src/string/strspn.c",
       "component": "libc",
       "source_kind": "bionic-legacy",
       "upstream_ref": "ics-mr0",
@@ -224,7 +224,7 @@
       "next_action": "Freeze as project-owned or replace with current upstream-openbsd after review."
     },
     {
-      "local": "libc/string/strstr.c",
+      "local": "libc/src/string/strstr.c",
       "component": "libc",
       "source_kind": "bionic-legacy",
       "upstream_ref": "ics-mr0",
@@ -992,7 +992,7 @@
       "next_action": "Extend only through documented Windows-native C++ DLL bridge tests, starting at C-callable wrapper boundaries."
     },
     {
-      "local": "libc/gdtoa/arith.h",
+      "local": "libc/src/gdtoa/arith.h",
       "component": "libc",
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
@@ -1004,7 +1004,7 @@
       "next_action": "Keep aligned with Bionic main when refreshing the gdtoa tranche."
     },
     {
-      "local": "libc/gdtoa/gd_qnan.h",
+      "local": "libc/src/gdtoa/gd_qnan.h",
       "component": "libc",
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
@@ -1016,7 +1016,7 @@
       "next_action": "Keep aligned with Bionic main when refreshing the gdtoa tranche."
     },
     {
-      "local": "libc/gdtoa/openbsd-compat.h",
+      "local": "libc/src/gdtoa/openbsd-compat.h",
       "component": "libc",
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
@@ -1028,7 +1028,7 @@
       "next_action": "Keep aligned with Bionic main when refreshing the gdtoa tranche."
     },
     {
-      "local": "libc/gdtoa/gethex.c",
+      "local": "libc/src/gdtoa/gethex.c",
       "component": "libc",
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
@@ -1040,7 +1040,7 @@
       "next_action": "Import the remaining dtoa output-conversion files when printf floating formatting needs gdtoa-backed formatting."
     },
     {
-      "local": "libc/gdtoa/gmisc.c",
+      "local": "libc/src/gdtoa/gmisc.c",
       "component": "libc",
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
@@ -1052,7 +1052,7 @@
       "next_action": "Import the remaining dtoa output-conversion files when printf floating formatting needs gdtoa-backed formatting."
     },
     {
-      "local": "libc/gdtoa/hd_init.c",
+      "local": "libc/src/gdtoa/hd_init.c",
       "component": "libc",
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
@@ -1064,7 +1064,7 @@
       "next_action": "Import the remaining dtoa output-conversion files when printf floating formatting needs gdtoa-backed formatting."
     },
     {
-      "local": "libc/gdtoa/hexnan.c",
+      "local": "libc/src/gdtoa/hexnan.c",
       "component": "libc",
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
@@ -1076,7 +1076,7 @@
       "next_action": "Import the remaining dtoa output-conversion files when printf floating formatting needs gdtoa-backed formatting."
     },
     {
-      "local": "libc/gdtoa/misc.c",
+      "local": "libc/src/gdtoa/misc.c",
       "component": "libc",
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
@@ -1088,7 +1088,7 @@
       "next_action": "Import the remaining dtoa output-conversion files when printf floating formatting needs gdtoa-backed formatting."
     },
     {
-      "local": "libc/gdtoa/smisc.c",
+      "local": "libc/src/gdtoa/smisc.c",
       "component": "libc",
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
@@ -1100,7 +1100,7 @@
       "next_action": "Import the remaining dtoa output-conversion files when printf floating formatting needs gdtoa-backed formatting."
     },
     {
-      "local": "libc/gdtoa/strtod.c",
+      "local": "libc/src/gdtoa/strtod.c",
       "component": "libc",
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
@@ -1112,7 +1112,7 @@
       "next_action": "Import the remaining dtoa output-conversion files when printf floating formatting needs gdtoa-backed formatting."
     },
     {
-      "local": "libc/gdtoa/strtodg.c",
+      "local": "libc/src/gdtoa/strtodg.c",
       "component": "libc",
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
@@ -1124,7 +1124,7 @@
       "next_action": "Import the remaining dtoa output-conversion files when printf floating formatting needs gdtoa-backed formatting."
     },
     {
-      "local": "libc/gdtoa/strtof.c",
+      "local": "libc/src/gdtoa/strtof.c",
       "component": "libc",
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
@@ -1136,7 +1136,7 @@
       "next_action": "Import the remaining dtoa output-conversion files when printf floating formatting needs gdtoa-backed formatting."
     },
     {
-      "local": "libc/gdtoa/strtord.c",
+      "local": "libc/src/gdtoa/strtord.c",
       "component": "libc",
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
@@ -1148,7 +1148,7 @@
       "next_action": "Import the remaining dtoa output-conversion files when printf floating formatting needs gdtoa-backed formatting."
     },
     {
-      "local": "libc/gdtoa/strtorQ.c",
+      "local": "libc/src/gdtoa/strtorQ.c",
       "component": "libc",
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
@@ -1160,7 +1160,7 @@
       "next_action": "Revisit when native x87 long double parsing or a different Windows long double ABI policy is selected."
     },
     {
-      "local": "libc/gdtoa/sum.c",
+      "local": "libc/src/gdtoa/sum.c",
       "component": "libc",
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
@@ -1172,7 +1172,7 @@
       "next_action": "Import the remaining dtoa output-conversion files when printf floating formatting needs gdtoa-backed formatting."
     },
     {
-      "local": "libc/gdtoa/ulp.c",
+      "local": "libc/src/gdtoa/ulp.c",
       "component": "libc",
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
@@ -1184,7 +1184,7 @@
       "next_action": "Import the remaining dtoa output-conversion files when printf floating formatting needs gdtoa-backed formatting."
     },
     {
-      "local": "libc/gdtoa/gdtoa.h",
+      "local": "libc/src/gdtoa/gdtoa.h",
       "component": "libc",
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
@@ -1196,7 +1196,7 @@
       "next_action": "Import the remaining dtoa output-conversion files when printf floating formatting needs gdtoa-backed formatting."
     },
     {
-      "local": "libc/gdtoa/gdtoa_fltrnds.h",
+      "local": "libc/src/gdtoa/gdtoa_fltrnds.h",
       "component": "libc",
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
@@ -1208,7 +1208,7 @@
       "next_action": "Import the remaining dtoa output-conversion files when printf floating formatting needs gdtoa-backed formatting."
     },
     {
-      "local": "libc/gdtoa/gdtoaimp.h",
+      "local": "libc/src/gdtoa/gdtoaimp.h",
       "component": "libc",
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
@@ -1220,7 +1220,7 @@
       "next_action": "Import the remaining dtoa output-conversion files when printf floating formatting needs gdtoa-backed formatting."
     },
     {
-      "local": "libc/gdtoa/thread_private.h",
+      "local": "libc/src/gdtoa/thread_private.h",
       "component": "libc",
       "source_kind": "project-owned",
       "upstream_ref": "project-owned",
@@ -1232,7 +1232,7 @@
       "next_action": "Revisit when the gdtoa tranche expands to dtoa output conversion or native x87 long double parsing."
     },
     {
-      "local": "libc/gdtoa/gdtoa_support.c",
+      "local": "libc/src/gdtoa/gdtoa_support.c",
       "component": "libc",
       "source_kind": "project-owned",
       "upstream_ref": "project-owned",
@@ -1256,7 +1256,7 @@
       "next_action": "Revisit when the gdtoa tranche expands to dtoa output conversion or native x87 long double parsing."
     },
     {
-      "local": "libc/gdtoa/dmisc.c",
+      "local": "libc/src/gdtoa/dmisc.c",
       "component": "libc",
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
@@ -1268,7 +1268,7 @@
       "next_action": "Keep aligned with Bionic main when refreshing the gdtoa tranche."
     },
     {
-      "local": "libc/gdtoa/dtoa.c",
+      "local": "libc/src/gdtoa/dtoa.c",
       "component": "libc",
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
@@ -1280,7 +1280,7 @@
       "next_action": "Keep aligned with Bionic main when refreshing the gdtoa tranche."
     },
     {
-      "local": "libc/gdtoa/gdtoa.c",
+      "local": "libc/src/gdtoa/gdtoa.c",
       "component": "libc",
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
@@ -1292,7 +1292,7 @@
       "next_action": "Keep aligned with Bionic main when refreshing the gdtoa tranche."
     },
     {
-      "local": "libc/gdtoa/hdtoa.c",
+      "local": "libc/src/gdtoa/hdtoa.c",
       "component": "libc",
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
@@ -1304,7 +1304,7 @@
       "next_action": "Keep aligned with Bionic main when refreshing the gdtoa tranche."
     },
     {
-      "local": "libc/gdtoa/ldtoa.c",
+      "local": "libc/src/gdtoa/ldtoa.c",
       "component": "libc",
       "source_kind": "bionic-main",
       "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
@@ -1316,7 +1316,7 @@
       "next_action": "Keep aligned with Bionic main when refreshing the gdtoa tranche."
     },
     {
-      "local": "libc/gdtoa/machine/ieee.h",
+      "local": "libc/src/gdtoa/machine/ieee.h",
       "component": "libc",
       "source_kind": "project-owned",
       "upstream_ref": "project-owned",

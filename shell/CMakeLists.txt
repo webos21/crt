@@ -1,5 +1,5 @@
 add_executable(crt_tiny_sh
-  src/tiny_sh.c
+  tiny_sh/tiny_sh.c
   $<TARGET_OBJECTS:crt1>
 )
 target_link_libraries(crt_tiny_sh PRIVATE crt_build_flags c)
@@ -66,25 +66,25 @@ add_custom_target(crt_shell_artifacts
   COMMENT "Building CRT bootstrap shell artifacts"
 )
 
-set(CRT_MKSH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/mksh/src")
+set(CRT_MKSH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/mksh")
 if(EXISTS "${CRT_MKSH_ROOT}/Android.bp")
   set(CRT_MKSH_SOURCES
-    mksh/src/src/lalloc.c
-    mksh/src/src/edit.c
-    mksh/src/src/eval.c
-    mksh/src/src/exec.c
-    mksh/src/src/expr.c
-    mksh/src/src/funcs.c
-    mksh/src/src/histrap.c
-    mksh/src/src/jobs.c
-    mksh/src/src/lex.c
-    mksh/src/src/main.c
-    mksh/src/src/misc.c
-    mksh/src/src/shf.c
-    mksh/src/src/syn.c
-    mksh/src/src/tree.c
-    mksh/src/src/ulimit.c
-    mksh/src/src/var.c
+    mksh/src/lalloc.c
+    mksh/src/edit.c
+    mksh/src/eval.c
+    mksh/src/exec.c
+    mksh/src/expr.c
+    mksh/src/funcs.c
+    mksh/src/histrap.c
+    mksh/src/jobs.c
+    mksh/src/lex.c
+    mksh/src/main.c
+    mksh/src/misc.c
+    mksh/src/shf.c
+    mksh/src/syn.c
+    mksh/src/tree.c
+    mksh/src/ulimit.c
+    mksh/src/var.c
     $<TARGET_OBJECTS:crt1>
   )
   add_executable(crt_mksh ${CRT_MKSH_SOURCES})
@@ -92,7 +92,7 @@ if(EXISTS "${CRT_MKSH_ROOT}/Android.bp")
   target_link_libraries(crt_mksh PRIVATE crt_compiler_rt_builtins)
   target_include_directories(crt_mksh PRIVATE
     "${CMAKE_SOURCE_DIR}/libc/include"
-    "${CMAKE_CURRENT_SOURCE_DIR}/mksh/src/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mksh/src"
   )
   target_compile_options(crt_mksh PRIVATE
     -Wno-deprecated-declarations

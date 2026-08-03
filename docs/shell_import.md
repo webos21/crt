@@ -45,11 +45,11 @@ stage until its source is imported.
 Use the following layout:
 
 ```text
-shell/src/          project-owned bootstrap shell runner
-shell/mksh/src/     imported Android external/mksh source
-shell/mksh/glue/    project-owned mksh build/config glue
+shell/tiny_sh/      project-owned bootstrap shell runner
+shell/mksh/         imported mksh repo metadata (Android.bp, NOTICE, mkshrc, ...)
+shell/mksh/src/     imported Android external/mksh C source
 shell/toybox/src/   imported Android external/toybox source
-shell/toybox/glue/  project-owned toybox config/build glue
+shell/toybox/crt/   project-owned toybox config/build glue
 ```
 
 Imported upstream source should stay separate from project-owned glue. If a

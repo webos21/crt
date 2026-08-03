@@ -45,14 +45,14 @@ behind the `review_class` values in that manifest.
 These files remain legacy only because they gave a small, portable C bootstrap
 surface before architecture dispatch existed:
 
-- `libc/string/bcopy.c`
-- `libc/string/memcpy.c`
-- `libc/string/memmove.c`
-- `libc/string/memset.c`
-- `libc/string/strlen.c`
-- `libc/string/strcmp.c`
-- `libc/string/memchr.c`
-- `libc/string/memcmp.c`
+- `libc/src/string/bcopy.c`
+- `libc/src/string/memcpy.c`
+- `libc/src/string/memmove.c`
+- `libc/src/string/memset.c`
+- `libc/src/string/strlen.c`
+- `libc/src/string/strcmp.c`
+- `libc/src/string/memchr.c`
+- `libc/src/string/memcmp.c`
 
 Decision: `main_replace_candidate`.
 
@@ -66,17 +66,17 @@ project-owned portable fallback.
 These files are small BSD/OpenBSD-style routines and have already been adapted
 to the project header and symbol surface:
 
-- `libc/string/strcat.c`
-- `libc/string/strchr.c`
-- `libc/string/strcpy.c`
-- `libc/string/strncmp.c`
-- `libc/string/strncpy.c`
-- `libc/string/strrchr.c`
-- `libc/string/strcspn.c`
-- `libc/string/strdup.c`
-- `libc/string/strpbrk.c`
-- `libc/string/strspn.c`
-- `libc/string/strstr.c`
+- `libc/src/string/strcat.c`
+- `libc/src/string/strchr.c`
+- `libc/src/string/strcpy.c`
+- `libc/src/string/strncmp.c`
+- `libc/src/string/strncpy.c`
+- `libc/src/string/strrchr.c`
+- `libc/src/string/strcspn.c`
+- `libc/src/string/strdup.c`
+- `libc/src/string/strpbrk.c`
+- `libc/src/string/strspn.c`
+- `libc/src/string/strstr.c`
 
 Decision: `project_owned_transition`.
 

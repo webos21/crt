@@ -65,27 +65,27 @@ Android Bionic `ics-mr0` tree as a legacy bootstrap exception.
 
 | Local file | Upstream path | Upstream ref | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `libc/string/bcopy.c` | `libc/string/bcopy.c` | `ics-mr0` | adapted | Uses `uintptr_t` instead of `long` for pointer-width arithmetic across Windows LLP64. |
-| `libc/string/memcpy.c` | `libc/string/memcpy.c` | `ics-mr0` | adapted | Keeps Bionic wrapper shape; includes local `bcopy.c`. |
-| `libc/string/memmove.c` | `libc/string/bcopy.c` | `ics-mr0` | adapted | Generated from the same Bionic `bcopy.c` implementation using `MEMMOVE`. |
-| `libc/string/memset.c` | `libc/string/memset.c` | `ics-mr0` | adapted | Formatting only; license header preserved. |
-| `libc/string/strlen.c` | `libc/string/strlen.c` | `ics-mr0` | adapted | Removes kernel/standalone include branch for this hosted public header environment. |
-| `libc/string/strcmp.c` | `libc/string/strcmp.c` | `ics-mr0` | adapted | Removes kernel/standalone include branch for this hosted public header environment. |
-| `libc/string/memchr.c` | `libc/string/memchr.c` | `ics-mr0` | adapted | Formatting only; license header preserved. |
-| `libc/string/memcmp.c` | `libc/string/memcmp.c` | `ics-mr0` | adapted | Formatting only; license header preserved. |
-| `libc/string/strcat.c` | `libc/string/strcat.c` | `ics-mr0` | adapted | Removes Android API warning hook. |
-| `libc/string/strchr.c` | `libc/string/index.c` | `ics-mr0` | adapted | Keeps Bionic/OpenBSD implementation under the standard `strchr` name. |
-| `libc/string/strcpy.c` | `libc/string/strcpy.c` | `ics-mr0` | adapted | Formatting only; license header preserved. |
-| `libc/string/strncmp.c` | `libc/string/strncmp.c` | `ics-mr0` | adapted | Removes kernel/standalone include branch for this hosted public header environment. |
-| `libc/string/strncpy.c` | `libc/string/strncpy.c` | `ics-mr0` | adapted | Removes kernel/standalone include branch for this hosted public header environment. |
-| `libc/string/strrchr.c` | `libc/string/rindex.c` | `ics-mr0` | adapted | Keeps Bionic/OpenBSD implementation under the standard `strrchr` name. |
-| `libc/string/strcspn.c` | `libc/string/strcspn.c` | `ics-mr0` | adapted | Formatting only; license header preserved. |
-| `libc/string/strdup.c` | `libc/string/strdup.c` | `ics-mr0` | adapted | Removes unused `sys/types.h` dependency for this project. |
-| `libc/string/strndup.c` | none | project-owned | new | Allocator-backed bounded duplicate helper using local `strnlen`. |
-| `libc/string/strnlen.c` | none | project-owned | new | Bounded length helper using local `memchr`. |
-| `libc/string/strpbrk.c` | `libc/string/strpbrk.c` | `ics-mr0` | adapted | Formatting only; license header preserved. |
-| `libc/string/strspn.c` | `libc/string/strspn.c` | `ics-mr0` | adapted | Formatting only; license header preserved. |
-| `libc/string/strstr.c` | `libc/string/strstr.c` | `ics-mr0` | adapted | Formatting only; license header preserved. |
+| `libc/src/string/bcopy.c` | `libc/string/bcopy.c` | `ics-mr0` | adapted | Uses `uintptr_t` instead of `long` for pointer-width arithmetic across Windows LLP64. |
+| `libc/src/string/memcpy.c` | `libc/string/memcpy.c` | `ics-mr0` | adapted | Keeps Bionic wrapper shape; includes local `bcopy.c`. |
+| `libc/src/string/memmove.c` | `libc/string/bcopy.c` | `ics-mr0` | adapted | Generated from the same Bionic `bcopy.c` implementation using `MEMMOVE`. |
+| `libc/src/string/memset.c` | `libc/string/memset.c` | `ics-mr0` | adapted | Formatting only; license header preserved. |
+| `libc/src/string/strlen.c` | `libc/string/strlen.c` | `ics-mr0` | adapted | Removes kernel/standalone include branch for this hosted public header environment. |
+| `libc/src/string/strcmp.c` | `libc/string/strcmp.c` | `ics-mr0` | adapted | Removes kernel/standalone include branch for this hosted public header environment. |
+| `libc/src/string/memchr.c` | `libc/string/memchr.c` | `ics-mr0` | adapted | Formatting only; license header preserved. |
+| `libc/src/string/memcmp.c` | `libc/string/memcmp.c` | `ics-mr0` | adapted | Formatting only; license header preserved. |
+| `libc/src/string/strcat.c` | `libc/string/strcat.c` | `ics-mr0` | adapted | Removes Android API warning hook. |
+| `libc/src/string/strchr.c` | `libc/string/index.c` | `ics-mr0` | adapted | Keeps Bionic/OpenBSD implementation under the standard `strchr` name. |
+| `libc/src/string/strcpy.c` | `libc/string/strcpy.c` | `ics-mr0` | adapted | Formatting only; license header preserved. |
+| `libc/src/string/strncmp.c` | `libc/string/strncmp.c` | `ics-mr0` | adapted | Removes kernel/standalone include branch for this hosted public header environment. |
+| `libc/src/string/strncpy.c` | `libc/string/strncpy.c` | `ics-mr0` | adapted | Removes kernel/standalone include branch for this hosted public header environment. |
+| `libc/src/string/strrchr.c` | `libc/string/rindex.c` | `ics-mr0` | adapted | Keeps Bionic/OpenBSD implementation under the standard `strrchr` name. |
+| `libc/src/string/strcspn.c` | `libc/string/strcspn.c` | `ics-mr0` | adapted | Formatting only; license header preserved. |
+| `libc/src/string/strdup.c` | `libc/string/strdup.c` | `ics-mr0` | adapted | Removes unused `sys/types.h` dependency for this project. |
+| `libc/src/string/strndup.c` | none | project-owned | new | Allocator-backed bounded duplicate helper using local `strnlen`. |
+| `libc/src/string/strnlen.c` | none | project-owned | new | Bounded length helper using local `memchr`. |
+| `libc/src/string/strpbrk.c` | `libc/string/strpbrk.c` | `ics-mr0` | adapted | Formatting only; license header preserved. |
+| `libc/src/string/strspn.c` | `libc/string/strspn.c` | `ics-mr0` | adapted | Formatting only; license header preserved. |
+| `libc/src/string/strstr.c` | `libc/string/strstr.c` | `ics-mr0` | adapted | Formatting only; license header preserved. |
 
 ### Ctype Tranche
 
@@ -135,33 +135,33 @@ Bionic's `__strtorQ`; otherwise it remains a `strtod` wrapper until a native x87
 
 | Local file | Upstream path | Upstream ref | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `libc/gdtoa/arith.h` | `libc/upstream-openbsd/android/include/arith.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Bionic Android gdtoa target configuration for IEEE little-endian 64-bit targets. |
-| `libc/gdtoa/gd_qnan.h` | `libc/upstream-openbsd/android/include/gd_qnan.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Quiet-NaN word definitions used by gdtoa NaN parsing. |
-| `libc/gdtoa/openbsd-compat.h` | `libc/upstream-openbsd/android/include/openbsd-compat.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Trimmed to this project's freestanding header set while preserving gdtoa visibility and alias macros. |
-| `libc/gdtoa/dmisc.c` | `libc/upstream-openbsd/lib/libc/gdtoa/dmisc.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/compiled | `__freedtoa` support for the active gdtoa-backed printf decimal output path. |
-| `libc/gdtoa/dtoa.c` | `libc/upstream-openbsd/lib/libc/gdtoa/dtoa.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/compiled | Active `__dtoa` decimal output source used by printf `%f`/`%e`/`%g`. |
-| `libc/gdtoa/gdtoa.c` | `libc/upstream-openbsd/lib/libc/gdtoa/gdtoa.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/compiled | General binary-to-decimal conversion engine used by `__ldtoa` for long-double printf output. |
-| `libc/gdtoa/gdtoa.h` | `libc/upstream-openbsd/lib/libc/gdtoa/gdtoa.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Public/internal gdtoa declarations used by the imported conversion files. |
-| `libc/gdtoa/gdtoa_fltrnds.h` | `libc/upstream-openbsd/lib/libc/gdtoa/gdtoa_fltrnds.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Rounding-mode helper included by `strtof.c`. |
-| `libc/gdtoa/gdtoaimp.h` | `libc/upstream-openbsd/lib/libc/gdtoa/gdtoaimp.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Built with local OpenBSD compatibility and thread-private lock adapter. |
-| `libc/gdtoa/gethex.c` | `libc/upstream-openbsd/lib/libc/gdtoa/gethex.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Hexadecimal floating input conversion helper. |
-| `libc/gdtoa/gmisc.c` | `libc/upstream-openbsd/lib/libc/gdtoa/gmisc.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Generic gdtoa bit-copy helpers. |
-| `libc/gdtoa/hd_init.c` | `libc/upstream-openbsd/lib/libc/gdtoa/hd_init.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Hex digit table initialization. |
-| `libc/gdtoa/hdtoa.c` | `libc/upstream-openbsd/lib/libc/gdtoa/hdtoa.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/compiled | Hex output-conversion source used by printf `%a`/`%A`. |
-| `libc/gdtoa/hexnan.c` | `libc/upstream-openbsd/lib/libc/gdtoa/hexnan.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | NaN payload parsing helper. |
-| `libc/gdtoa/ldtoa.c` | `libc/upstream-openbsd/lib/libc/gdtoa/ldtoa.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/compiled | Long-double output-conversion source used by printf `L` modifier decimal conversions. |
-| `libc/gdtoa/misc.c` | `libc/upstream-openbsd/lib/libc/gdtoa/misc.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Bigint allocator, freelists, and cached power helpers. |
-| `libc/gdtoa/smisc.c` | `libc/upstream-openbsd/lib/libc/gdtoa/smisc.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Shared bigint/string helpers. |
-| `libc/gdtoa/strtod.c` | `libc/upstream-openbsd/lib/libc/gdtoa/strtod.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Public `strtod`. |
-| `libc/gdtoa/strtodg.c` | `libc/upstream-openbsd/lib/libc/gdtoa/strtodg.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | General decimal-to-binary conversion engine. |
-| `libc/gdtoa/strtof.c` | `libc/upstream-openbsd/lib/libc/gdtoa/strtof.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Public `strtof`. |
-| `libc/gdtoa/strtord.c` | `libc/upstream-openbsd/lib/libc/gdtoa/strtord.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Internal double rounding helper. |
-| `libc/gdtoa/strtorQ.c` | `libc/upstream-openbsd/lib/libc/gdtoa/strtorQ.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | IEEE quad parser compiled and used by `strtold` only on `LDBL_MANT_DIG == 113` targets; double-sized Windows/macOS long double targets skip this body. |
-| `libc/gdtoa/sum.c` | `libc/upstream-openbsd/lib/libc/gdtoa/sum.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Bigint summation helper. |
-| `libc/gdtoa/ulp.c` | `libc/upstream-openbsd/lib/libc/gdtoa/ulp.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | ULP helper used during rounding. |
-| `libc/gdtoa/thread_private.h` | none | project-owned | new | Adapter from OpenBSD gdtoa lock hooks to local pthread mutexes. |
-| `libc/gdtoa/gdtoa_support.c` | `libc/upstream-openbsd/android/gdtoa_support.cpp` shape | project-owned | new | C99 slot-specific lock implementation for gdtoa `MULTIPLE_THREADS`. |
-| `libc/gdtoa/machine/ieee.h` | OpenBSD/BSD `<machine/ieee.h>` layout contract | project-owned | new | Little-endian IEEE layout adapter for double, x87 80-bit long double, and IEEE quad long double. |
+| `libc/src/gdtoa/arith.h` | `libc/upstream-openbsd/android/include/arith.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Bionic Android gdtoa target configuration for IEEE little-endian 64-bit targets. |
+| `libc/src/gdtoa/gd_qnan.h` | `libc/upstream-openbsd/android/include/gd_qnan.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Quiet-NaN word definitions used by gdtoa NaN parsing. |
+| `libc/src/gdtoa/openbsd-compat.h` | `libc/upstream-openbsd/android/include/openbsd-compat.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Trimmed to this project's freestanding header set while preserving gdtoa visibility and alias macros. |
+| `libc/src/gdtoa/dmisc.c` | `libc/upstream-openbsd/lib/libc/gdtoa/dmisc.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/compiled | `__freedtoa` support for the active gdtoa-backed printf decimal output path. |
+| `libc/src/gdtoa/dtoa.c` | `libc/upstream-openbsd/lib/libc/gdtoa/dtoa.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/compiled | Active `__dtoa` decimal output source used by printf `%f`/`%e`/`%g`. |
+| `libc/src/gdtoa/gdtoa.c` | `libc/upstream-openbsd/lib/libc/gdtoa/gdtoa.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/compiled | General binary-to-decimal conversion engine used by `__ldtoa` for long-double printf output. |
+| `libc/src/gdtoa/gdtoa.h` | `libc/upstream-openbsd/lib/libc/gdtoa/gdtoa.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Public/internal gdtoa declarations used by the imported conversion files. |
+| `libc/src/gdtoa/gdtoa_fltrnds.h` | `libc/upstream-openbsd/lib/libc/gdtoa/gdtoa_fltrnds.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Rounding-mode helper included by `strtof.c`. |
+| `libc/src/gdtoa/gdtoaimp.h` | `libc/upstream-openbsd/lib/libc/gdtoa/gdtoaimp.h` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | Built with local OpenBSD compatibility and thread-private lock adapter. |
+| `libc/src/gdtoa/gethex.c` | `libc/upstream-openbsd/lib/libc/gdtoa/gethex.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Hexadecimal floating input conversion helper. |
+| `libc/src/gdtoa/gmisc.c` | `libc/upstream-openbsd/lib/libc/gdtoa/gmisc.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Generic gdtoa bit-copy helpers. |
+| `libc/src/gdtoa/hd_init.c` | `libc/upstream-openbsd/lib/libc/gdtoa/hd_init.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Hex digit table initialization. |
+| `libc/src/gdtoa/hdtoa.c` | `libc/upstream-openbsd/lib/libc/gdtoa/hdtoa.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/compiled | Hex output-conversion source used by printf `%a`/`%A`. |
+| `libc/src/gdtoa/hexnan.c` | `libc/upstream-openbsd/lib/libc/gdtoa/hexnan.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | NaN payload parsing helper. |
+| `libc/src/gdtoa/ldtoa.c` | `libc/upstream-openbsd/lib/libc/gdtoa/ldtoa.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported/compiled | Long-double output-conversion source used by printf `L` modifier decimal conversions. |
+| `libc/src/gdtoa/misc.c` | `libc/upstream-openbsd/lib/libc/gdtoa/misc.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Bigint allocator, freelists, and cached power helpers. |
+| `libc/src/gdtoa/smisc.c` | `libc/upstream-openbsd/lib/libc/gdtoa/smisc.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Shared bigint/string helpers. |
+| `libc/src/gdtoa/strtod.c` | `libc/upstream-openbsd/lib/libc/gdtoa/strtod.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Public `strtod`. |
+| `libc/src/gdtoa/strtodg.c` | `libc/upstream-openbsd/lib/libc/gdtoa/strtodg.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | General decimal-to-binary conversion engine. |
+| `libc/src/gdtoa/strtof.c` | `libc/upstream-openbsd/lib/libc/gdtoa/strtof.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Public `strtof`. |
+| `libc/src/gdtoa/strtord.c` | `libc/upstream-openbsd/lib/libc/gdtoa/strtord.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Internal double rounding helper. |
+| `libc/src/gdtoa/strtorQ.c` | `libc/upstream-openbsd/lib/libc/gdtoa/strtorQ.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | adapted | IEEE quad parser compiled and used by `strtold` only on `LDBL_MANT_DIG == 113` targets; double-sized Windows/macOS long double targets skip this body. |
+| `libc/src/gdtoa/sum.c` | `libc/upstream-openbsd/lib/libc/gdtoa/sum.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Bigint summation helper. |
+| `libc/src/gdtoa/ulp.c` | `libc/upstream-openbsd/lib/libc/gdtoa/ulp.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | ULP helper used during rounding. |
+| `libc/src/gdtoa/thread_private.h` | none | project-owned | new | Adapter from OpenBSD gdtoa lock hooks to local pthread mutexes. |
+| `libc/src/gdtoa/gdtoa_support.c` | `libc/upstream-openbsd/android/gdtoa_support.cpp` shape | project-owned | new | C99 slot-specific lock implementation for gdtoa `MULTIPLE_THREADS`. |
+| `libc/src/gdtoa/machine/ieee.h` | OpenBSD/BSD `<machine/ieee.h>` layout contract | project-owned | new | Little-endian IEEE layout adapter for double, x87 80-bit long double, and IEEE quad long double. |
 | `libc/src/atof.c` | `libc/bionic/atof.cpp` and `libc/bionic/strtold.cpp` policy shape | project-owned | adapted | Keeps `atof` wrapper and target-policy `strtold` dispatch while `strtod`/`strtof` come from gdtoa. |
 
 ### Stdio Scanf Snapshot
@@ -306,8 +306,8 @@ the Bionic/BSD state machine onto this project's `scan_source` abstraction.
 | --- | --- | --- | --- | --- |
 | `include/pthread.h` | `libc/include/pthread.h` and `libc/include/bits/pthread_types.h` | project-owned, Bionic-shaped | extended | Uses one Bionic/Linux-style pthread type layout across all target OSes. |
 | `libc/src/pthread.c` | mixed Bionic/POSIX surface | project-owned | extended | Adds thread backends for Windows, Linux, and macOS; Linux uses CLONE_THREAD plus child-tid futex join and a detached reaper, and macOS adapts libSystem pthreads beneath the project ABI. |
-| `libc/arch/linux/x86_64/syscall.S` | mixed Bionic/Linux syscall surface | project-owned | extended | Adds raw clone, futex, and thread exit syscall wrappers. |
-| `libc/arch/linux/aarch64/syscall.S` | mixed Bionic/Linux syscall surface | project-owned | extended | Adds raw clone, futex, and thread exit syscall wrappers. |
+| `libc/src/arch/linux/x86_64/syscall.S` | mixed Bionic/Linux syscall surface | project-owned | extended | Adds raw clone, futex, and thread exit syscall wrappers. |
+| `libc/src/arch/linux/aarch64/syscall.S` | mixed Bionic/Linux syscall surface | project-owned | extended | Adds raw clone, futex, and thread exit syscall wrappers. |
 
 ### Libdl Bootstrap Tranche
 
@@ -350,8 +350,8 @@ the Bionic/BSD state machine onto this project's `scan_source` abstraction.
 | --- | --- | --- | --- | --- |
 | `libc/include/private/crt_wait.h` | none | project-owned | new | Private 32-bit wait/wake API used by pthread primitives, including relative timed waits. |
 | `libc/src/wait.c` | mixed Bionic/Linux futex and host wait surface | project-owned | new | Maps wait/wake to Linux futex, Windows WaitOnAddress, and macOS libSystem os_sync wait-by-address APIs with timed wait support. |
-| `libc/arch/linux/x86_64/syscall.S` | mixed Bionic/Linux syscall surface | project-owned | extended | Adds raw futex syscall wrapper. |
-| `libc/arch/linux/aarch64/syscall.S` | mixed Bionic/Linux syscall surface | project-owned | extended | Adds raw futex syscall wrapper. |
+| `libc/src/arch/linux/x86_64/syscall.S` | mixed Bionic/Linux syscall surface | project-owned | extended | Adds raw futex syscall wrapper. |
+| `libc/src/arch/linux/aarch64/syscall.S` | mixed Bionic/Linux syscall surface | project-owned | extended | Adds raw futex syscall wrapper. |
 
 ## Rules
 

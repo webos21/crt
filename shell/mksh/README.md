@@ -17,9 +17,14 @@ coverage is deliberately widened.
 ## Layout
 
 ```text
-shell/mksh/src/   imported Android external/mksh source
-shell/mksh/glue/  project-owned build/config glue
+shell/mksh/                 imported repo metadata (Android.bp, NOTICE, mkshrc, ...)
+shell/mksh/src/             imported Android external/mksh C source
 ```
+
+Windows-only source adjustments are kept as small guarded edits directly in the
+imported C source (see "Project-Owned Source Adjustments" below) rather than a
+separate glue directory. Unlike mksh, toybox keeps its project-owned build/config
+glue in a dedicated `shell/toybox/crt/` directory.
 
 ## Current Pin
 
