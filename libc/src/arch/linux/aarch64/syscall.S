@@ -753,3 +753,21 @@ __crt_sys_exit:
 1:
   b 1b
 .size __crt_sys_exit, . - __crt_sys_exit
+
+.globl __crt_sys_rt_sigaction
+.type __crt_sys_rt_sigaction, %function
+.p2align 2
+__crt_sys_rt_sigaction:
+  mov x8, #134
+  svc #0
+  ret
+.size __crt_sys_rt_sigaction, . - __crt_sys_rt_sigaction
+
+.globl __crt_sys_rt_sigprocmask
+.type __crt_sys_rt_sigprocmask, %function
+.p2align 2
+__crt_sys_rt_sigprocmask:
+  mov x8, #135
+  svc #0
+  ret
+.size __crt_sys_rt_sigprocmask, . - __crt_sys_rt_sigprocmask

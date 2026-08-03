@@ -78,8 +78,26 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   - `docs/shell_import.md`;
   - `docs/windows_fork_emulation.md`;
   - `shell/toybox/PATCHES.md`.
+- Fixed the `port-rebuild-zlib` `make -j 10` deadlock: `sigaction()`/
+  `sigprocmask()` previously only updated process-local bookkeeping with no
+  real OS-level signal delivery, so GNU make's jobserver `pselect()` could
+  never be interrupted by a real `SIGCHLD`. Added a per-OS
+  `crt_signal_backend` (macOS: real `sigaction`/`sigprocmask` via a shared
+  Mach-O export-trie helper now also reused by `libdl`; Linux: raw
+  `rt_sigaction`/`rt_sigprocmask` syscalls plus an x86_64 restorer
+  trampoline; Windows: honest no-op stub) and fixed a separate `pselect()`
+  lost-wakeup race (`libc/src/poll.c`) where an already-pending signal was
+  silently swallowed by the non-atomic mask-then-select sequence. Verified
+  against the real `port-rebuild-zlib` `configure && make -j 10 && make
+  install` end to end on macOS. See `docs/signal_delivery.md`.
 
 ## in progressing
+
+- Verify the new Linux signal backend (`docs/signal_delivery.md`) on an
+  actual Linux host; it is currently code-review-verified only, since this
+  project's CMake presets refuse to cross-compile from macOS.
+- Add a permanent regression test for the `fork()` + blocked-`SIGCHLD` +
+  `pselect()` pattern used to verify the signal delivery fix.
 
 - Keep the Windows mksh child-spec path stable for real configure workloads:
   - external command execution;

@@ -5,6 +5,8 @@
 #include <sys/select.h>
 #include <time.h>
 
+#include <private/crt_signal.h>
+
 #if defined(CRT_TARGET_OS_LINUX)
 long __crt_sys_ppoll(struct pollfd* fds, unsigned long nfds, const struct timespec* timeout);
 #else
@@ -164,10 +166,27 @@ int pselect(
   }
 
   if (sigmask != 0) {
+    unsigned long generation_before_unmask = __crt_signal_delivery_generation();
+
     if (sigprocmask(SIG_SETMASK, sigmask, &oldmask) != 0) {
       return -1;
     }
     masked = 1;
+    /* Real kernel signal delivery happens on the way back to userspace from
+     * any syscall, including this sigprocmask() -- so if one of the signals
+     * this call just unblocked was already pending, its handler has already
+     * run by the time sigprocmask() returns here, not merely "at some later
+     * point". Without this check, a plain non-atomic "unblock, then
+     * separately call select()" sequence would silently miss exactly that
+     * case (the classic pselect() lost-wakeup problem: GNU make's
+     * jobserver_acquire(), for one concrete, reproduced example, depends on
+     * pselect() reporting this as an interruption instead of blocking
+     * forever on an event that has already happened). */
+    if (__crt_signal_delivery_generation() != generation_before_unmask) {
+      sigprocmask(SIG_SETMASK, &oldmask, 0);
+      errno = EINTR;
+      return -1;
+    }
   }
 
   result = select(nfds, readfds, writefds, exceptfds, tvp);

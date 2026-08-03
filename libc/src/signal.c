@@ -4,6 +4,7 @@
 #include <unistd.h>
 
 #include <private/crt_signal.h>
+#include <private/crt_signal_backend.h>
 
 #define CRT_SIGNAL_MAX 32
 
@@ -148,7 +149,19 @@ int sigaction(int sig, const struct sigaction* act, struct sigaction* oldact) {
     *oldact = signal_actions[sig];
   }
   if (act != 0) {
+    enum crt_signal_backend_action backend_action;
+
     signal_actions[sig] = *act;
+    if (act->sa_handler == SIG_IGN) {
+      backend_action = CRT_SIGNAL_BACKEND_IGNORE;
+    } else if (act->sa_handler == SIG_DFL) {
+      backend_action = CRT_SIGNAL_BACKEND_DEFAULT;
+    } else {
+      backend_action = CRT_SIGNAL_BACKEND_DISPATCH;
+    }
+    if (__crt_signal_backend_set_action(sig, backend_action) != 0) {
+      return -1;
+    }
   }
   return 0;
 }
@@ -168,6 +181,9 @@ int sigprocmask(int how, const sigset_t* set, sigset_t* oldset) {
     signal_mask = *set;
   } else {
     errno = EINVAL;
+    return -1;
+  }
+  if (__crt_signal_backend_set_mask(how, set) != 0) {
     return -1;
   }
   return 0;
@@ -197,7 +213,13 @@ void __crt_signal_get_mask(sigset64_t* mask) {
 }
 
 void __crt_signal_set_mask(sigset64_t mask) {
-  signal_mask = (sigset_t)mask;
+  sigset_t new_mask = (sigset_t)mask;
+
+  signal_mask = new_mask;
+  /* The real POSIX signal mask survives exec(), unlike per-signal
+   * dispositions set to a handler function, so POSIX_SPAWN_SETSIGMASK must
+   * reach the host's real mask here, not just this bookkeeping copy. */
+  __crt_signal_backend_set_mask(SIG_SETMASK, &new_mask);
 }
 
 void __crt_signal_reset_defaults(sigset64_t mask) {
@@ -208,6 +230,10 @@ void __crt_signal_reset_defaults(sigset64_t mask) {
       signal_actions[sig].sa_handler = SIG_DFL;
       signal_actions[sig].sa_mask = 0;
       signal_actions[sig].sa_flags = 0;
+      /* SIG_IGN (unlike a handler function) survives exec() at the real OS
+       * level too, so POSIX_SPAWN_SETSIGDEF must reset the host's real
+       * disposition here, not just this bookkeeping copy. */
+      __crt_signal_backend_set_action(sig, CRT_SIGNAL_BACKEND_DEFAULT);
     }
   }
 }
@@ -233,21 +259,24 @@ sighandler_t bsd_signal(int sig, sighandler_t handler) {
   return signal(sig, handler);
 }
 
-int raise(int sig) {
-  struct sigaction* action;
-  sighandler_t handler;
+/* See private/crt_signal.h. */
+static volatile unsigned long signal_delivery_generation;
 
-  if (!signal_valid(sig)) {
-    errno = EINVAL;
-    return -1;
-  }
-  if ((signal_mask & signal_bit(sig)) != 0) {
-    return 0;
-  }
-  action = &signal_actions[sig];
-  handler = action->sa_handler;
+unsigned long __crt_signal_delivery_generation(void) {
+  return signal_delivery_generation;
+}
+
+/* Shared handler-invocation logic for a signal that is known to be
+ * deliverable right now (raise() has already checked signal_mask; a real
+ * OS-delivered signal reaching __crt_signal_dispatch() was already allowed
+ * through by the host's own mask, kept in sync by
+ * __crt_signal_backend_set_mask()). */
+static void deliver_signal(int sig) {
+  struct sigaction* action = &signal_actions[sig];
+  sighandler_t handler = action->sa_handler;
+
   if (handler == SIG_IGN) {
-    return 0;
+    return;
   }
   if ((action->sa_flags & SA_SIGINFO) != 0 && action->sa_sigaction != 0) {
     siginfo_t info;
@@ -258,17 +287,40 @@ int raise(int sig) {
     info.si_pid = getpid();
     info.si_uid = geteuid();
     info.si_status = 0;
+    ++signal_delivery_generation;
     action->sa_sigaction(sig, &info, 0);
-    return 0;
+    return;
   }
   if (handler != SIG_DFL && handler != 0) {
+    ++signal_delivery_generation;
     handler(sig);
-    return 0;
+    return;
   }
   if (sig == SIGABRT || sig == SIGTERM || sig == SIGINT) {
     abort();
   }
+}
+
+int raise(int sig) {
+  if (!signal_valid(sig)) {
+    errno = EINVAL;
+    return -1;
+  }
+  if ((signal_mask & signal_bit(sig)) != 0) {
+    return 0;
+  }
+  deliver_signal(sig);
   return 0;
+}
+
+/* Called by each backend's own OS-level signal entry point after
+ * translating the host's native signal number back to Bionic/Linux
+ * numbering. See libc/include/private/crt_signal_backend.h. */
+void __crt_signal_dispatch(int sig) {
+  if (!signal_valid(sig)) {
+    return;
+  }
+  deliver_signal(sig);
 }
 
 void abort(void) {

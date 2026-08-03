@@ -731,3 +731,41 @@ __crt_sys_exit:
 1:
   jmp 1b
 .size __crt_sys_exit, . - __crt_sys_exit
+
+.globl __crt_sys_rt_sigaction
+.type __crt_sys_rt_sigaction, @function
+.p2align 4, 0x90
+__crt_sys_rt_sigaction:
+  movq %rcx, %r10
+  movq $13, %rax
+  syscall
+  retq
+.size __crt_sys_rt_sigaction, . - __crt_sys_rt_sigaction
+
+.globl __crt_sys_rt_sigprocmask
+.type __crt_sys_rt_sigprocmask, @function
+.p2align 4, 0x90
+__crt_sys_rt_sigprocmask:
+  movq %rcx, %r10
+  movq $14, %rax
+  syscall
+  retq
+.size __crt_sys_rt_sigprocmask, . - __crt_sys_rt_sigprocmask
+
+/* Installed as sa_restorer for every real signal this backend hands to the
+ * raw rt_sigaction(2) syscall (see libc/src/arch/linux/common/
+ * signal_backend.c). x86_64's rt_sigaction requires SA_RESTORER plus a real,
+ * executable return address: the kernel jumps here after running the signal
+ * handler, with a signal frame already built on the stack, and
+ * rt_sigreturn(2) never returns normally -- so there is no `retq` here.
+ * aarch64 needs no equivalent; the kernel supplies its own default restorer
+ * from the vDSO (see Android Bionic's arch-arm64 sigaction.cpp comment).
+ * Stripped of Bionic's CFI/unwind directives, which are debugger-quality-only
+ * and not functionally required. */
+.globl __crt_signal_restore_rt
+.type __crt_signal_restore_rt, @function
+.p2align 4, 0x90
+__crt_signal_restore_rt:
+  movq $15, %rax
+  syscall
+.size __crt_signal_restore_rt, . - __crt_signal_restore_rt

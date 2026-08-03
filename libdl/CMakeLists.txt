@@ -16,6 +16,11 @@ set(CRT_DL_SOURCES
 add_library(dl STATIC ${CRT_DL_SOURCES})
 
 target_link_libraries(dl PRIVATE crt_build_flags c)
+# dl_macos.c reuses libc's private Mach-O export-trie engine (see
+# libc/include/private/crt_macho_symbol.h) instead of keeping its own copy;
+# libdl already fully depends on libc, so seeing libc's private headers too
+# is not a new dependency, just a wider one.
+target_include_directories(dl PRIVATE "${CMAKE_SOURCE_DIR}/libc/include")
 set_target_properties(dl PROPERTIES
   OUTPUT_NAME dl
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
@@ -27,6 +32,7 @@ if(CRT_TARGET_OS STREQUAL "windows")
 endif()
 
 target_link_libraries(dl_shared PRIVATE crt_build_flags c_shared)
+target_include_directories(dl_shared PRIVATE "${CMAKE_SOURCE_DIR}/libc/include")
 crt_configure_shared_runtime(dl_shared)
 set_target_properties(dl_shared PROPERTIES
   OUTPUT_NAME dl

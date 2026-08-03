@@ -156,9 +156,16 @@ The third test tranche adds:
 - child-side stdio lock reset before returning from `fork()`;
 - Windows `ENOTSUP` policy for the same runtime-reset test surface.
 
+Real signal delivery (not just process-local bookkeeping) and `SIGCHLD`
+reaching a blocked `pselect()`/`poll()` are now implemented; see
+`docs/signal_delivery.md` for the per-OS backend architecture and the
+`pselect()` atomicity fix that made it actually usable by GNU make's
+jobserver.
+
 Future tests should add:
 
-- signal inheritance and `SIGCHLD`;
+- a permanent regression test for the `fork()` + blocked-`SIGCHLD` +
+  `pselect()` pattern documented in `docs/signal_delivery.md`;
 - close-on-exec behavior;
 - broader multi-fd redirection beyond the initial shell smoke coverage;
 - fork after malloc/pthread lock activity;
