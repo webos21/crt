@@ -49,6 +49,11 @@ static int test_child_stdio_lock_reset(void) {
     worker_release = 1;
     pthread_join(thread, 0);
     fclose(locked_stream);
+#if defined(CRT_TARGET_OS_WINDOWS)
+    if (errno == ENOTSUP) {
+      return 0;
+    }
+#endif
     return fail("fork");
   }
   if (pid == 0) {

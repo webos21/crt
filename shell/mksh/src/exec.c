@@ -820,6 +820,14 @@ comexec(struct op *t, struct tbl * volatile tp, const char **ap,
 	/* tracked alias */
 	case CTALIAS:
 		if (!(tp->flag&ISSET)) {
+#if defined(CRT_TARGET_OS_WINDOWS)
+			/* TEMPORARY diagnostic: remove once the Windows
+			 * aarch64 "inaccessible or not found" investigation
+			 * is resolved (docs/windows_fork_emulation.md). */
+			fprintf(stderr,
+			    "[crt_mksh_debug] comexec: \"%s\" not found/ISSET, errnov=%d, flags=0x%x, tp->type=%d\n",
+			    cp, tp->u2.errnov, (unsigned int)flags, (int)tp->type);
+#endif
 			if (tp->u2.errnov == ENOENT) {
 				rv = 127;
 				warningf(true, Tf_sD_s_s, cp,
@@ -1285,15 +1293,27 @@ search_access(const char *fn, int mode)
 {
 	struct stat sb;
 
-	if (stat(fn, &sb) < 0)
+	if (stat(fn, &sb) < 0) {
+#if defined(CRT_TARGET_OS_WINDOWS)
+		/* TEMPORARY diagnostic: remove once the Windows aarch64
+		 * "inaccessible or not found" investigation is resolved
+		 * (docs/windows_fork_emulation.md). */
+		fprintf(stderr, "[crt_mksh_debug] search_access: stat(\"%s\") failed, errno=%d\n",
+		    fn, errno);
+#endif
 		/* file does not exist */
 		return (ENOENT);
+	}
 	/* LINTED use of access */
 	if (access(fn, mode) < 0) {
 		/* file exists, but we can't access it */
 		int eno;
 
 		eno = errno;
+#if defined(CRT_TARGET_OS_WINDOWS)
+		fprintf(stderr, "[crt_mksh_debug] search_access: access(\"%s\", %d) failed, errno=%d\n",
+		    fn, mode, eno);
+#endif
 		return (eno ? eno : EACCES);
 	}
 #ifdef __OS2__
@@ -1301,9 +1321,17 @@ search_access(const char *fn, int mode)
 	sb.st_mode |= S_IXUSR | S_IXGRP | S_IXOTH;
 #endif
 	if (mode == X_OK && (!S_ISREG(sb.st_mode) ||
-	    !(sb.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH))))
+	    !(sb.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH)))) {
+#if defined(CRT_TARGET_OS_WINDOWS)
+		fprintf(stderr, "[crt_mksh_debug] search_access: \"%s\" found but not a regular executable file (st_mode=0%o)\n",
+		    fn, (unsigned int)sb.st_mode);
+#endif
 		/* access(2) may say root can execute everything */
 		return (S_ISDIR(sb.st_mode) ? EISDIR : EACCES);
+	}
+#if defined(CRT_TARGET_OS_WINDOWS)
+	fprintf(stderr, "[crt_mksh_debug] search_access: \"%s\" ok\n", fn);
+#endif
 	return (0);
 }
 

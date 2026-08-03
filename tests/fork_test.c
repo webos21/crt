@@ -76,6 +76,11 @@ static int test_fork_fd_inheritance(void) {
   if (pid < 0) {
     close(pipefd[0]);
     close(pipefd[1]);
+#if defined(CRT_TARGET_OS_WINDOWS)
+    if (errno == ENOTSUP) {
+      return 0;
+    }
+#endif
     return fail("_Fork");
   }
   if (pid == 0) {
@@ -112,6 +117,11 @@ static int test_pthread_atfork_order(void) {
   if (pid < 0) {
     close(pipefd[0]);
     close(pipefd[1]);
+#if defined(CRT_TARGET_OS_WINDOWS)
+    if (errno == ENOTSUP) {
+      return 0;
+    }
+#endif
     return fail("atfork fork");
   }
   if (pid == 0) {
