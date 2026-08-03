@@ -539,11 +539,13 @@ static int path_is_absolute(const char* path) {
 }
 
 #if !defined(CRT_TARGET_OS_WINDOWS)
+/* Only used on macOS (see the CRT_TARGET_OS_MACOS-guarded open() check
+ * below); guarded the same way to avoid -Wunused-function on Linux. */
+#if defined(CRT_TARGET_OS_MACOS)
 static int rootfs_path_is_dev_tty(const char* path) {
   return path != 0 && strcmp(path, "/dev/tty") == 0;
 }
 
-#if defined(CRT_TARGET_OS_MACOS)
 static int macos_use_host_dev_tty(void) {
   const char* value = getenv("CRT_USE_HOST_TTY");
 
