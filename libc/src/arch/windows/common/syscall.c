@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
@@ -3500,6 +3501,16 @@ long __crt_sys_stat_path(const char* path, struct stat* st) {
   HANDLE handle;
   DWORD attrs;
   long result;
+
+  /* TEMPORARY diagnostic: remove once the Windows aarch64 mksh
+   * "inaccessible or not found" investigation is resolved
+   * (docs/windows_fork_emulation.md). */
+  {
+    const char* rootfs_env = getenv("CRT_ROOTFS");
+
+    fprintf(stderr, "[crt_stat_debug] __crt_sys_stat_path: path=\"%s\" CRT_ROOTFS=%s host_path=\"%s\"\n",
+        path, rootfs_env != 0 ? rootfs_env : "(null)", host_path);
+  }
 
   if (path_is_dev_null(path)) {
     return stat_virtual_dev_null(st);
