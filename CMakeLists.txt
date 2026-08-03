@@ -225,7 +225,20 @@ add_custom_target(sysroot
 
 if(Python3_Interpreter_FOUND)
   set(CRT_ROOTFS "${CMAKE_BINARY_DIR}/rootfs" CACHE PATH "Android-like runtime root filesystem")
-  add_custom_target(rootfs
+  # `crt_mksh_rootfs_*_runs` (shell/CMakeLists.txt) are Windows-only ctest
+  # entries that exec against this real, on-disk rootfs (not the small
+  # self-contained fixtures other tests build). This target has no OUTPUT, so
+  # ninja/CMake cannot tell on its own whether it is stale; without ALL, a
+  # plain `cmake --build` never regenerates it, and those tests silently run
+  # against whatever rootfs happens to already be on disk (or none at all).
+  # Windows is the only host where any ctest entry depends on it, so only
+  # Windows needs it to build automatically as part of the default target.
+  if(CRT_TARGET_OS STREQUAL "windows")
+    set(CRT_ROOTFS_ALL_KEYWORD ALL)
+  else()
+    set(CRT_ROOTFS_ALL_KEYWORD)
+  endif()
+  add_custom_target(rootfs ${CRT_ROOTFS_ALL_KEYWORD}
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
       "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_rootfs.py"
       --dest "${CRT_ROOTFS}"
