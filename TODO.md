@@ -149,6 +149,38 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   succeeds. `configure`-driven port builds like zlib still fail (now further
   in, and with a crash instead of `can't fork - try again`). See
   `docs/windows_fork_emulation.md`.
+- Benchmarked the two candidate fixes' cost floor before committing to
+  either: real `fork()` (`RtlCloneUserProcess`) vs. `posix_spawn()`
+  (`CreateProcessA`), 400 iterations each on real Windows aarch64 hardware.
+  `CreateProcessA` is only ~1.2x the cost of `RtlCloneUserProcess`, not the
+  order-of-magnitude-slower Cygwin reputation everyone expects -- so
+  overhead is not a reason to avoid a `CreateProcessA`-based fix.
+- Researched prior art on Windows process cloning
+  (huntandhackett/diversenok's process-cloning guide, a 2018 Cygwin
+  mailing-list thread on fast fork) before designing further. Conclusion:
+  there is no documented, stable way to re-register a
+  `RtlCloneUserProcess` clone with CSRSS (ruling out an undocumented-API
+  "CSRSS re-registration" fix as too fragile for a long-lived PAL), and no
+  prior art exists for a broker/proxy process that performs `CreateProcessA`
+  on behalf of an unregistered clone -- but that composes two
+  well-established, fully-documented techniques this codebase already uses
+  (privilege-separated broker processes; cross-process handle duplication
+  via `DuplicateHandle`, already used for fd/socket inheritance).
+- **Decided direction (design only, not yet implemented):** a "spawn
+  broker" process. `fork()` itself stays exactly as-is (cheap, already
+  correct for fork-without-spawn). Only `__crt_sys_posix_spawn()`/`execve()`
+  changes: when called from a process that is itself an unregistered
+  `RtlCloneUserProcess` clone, instead of calling `CreateProcessA` directly
+  (which crashes), it asks an always-running, never-cloned broker process
+  (started once by the original registered process) to do the
+  `CreateProcessA` call on its behalf over a pipe, then receives the
+  resulting process handle back via `DuplicateHandle` (confirmed working
+  inside a clone) and treats it exactly like a normal `posix_spawn()`
+  result. No memory copying, `setjmp`/`longjmp` resume, `CONTEXT`/
+  `SetThreadContext` work, or ASLR/stack-address-determinism assumption is
+  needed for this narrower fix. Full design, rejected-alternatives
+  reasoning, and the concrete next implementation steps are recorded in
+  `docs/windows_fork_emulation.md` under "Chosen Direction: Spawn Broker".
 
 - Verify the new Linux signal backend (`docs/signal_delivery.md`) on an
   actual Linux host; it is currently code-review-verified only, since this

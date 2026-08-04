@@ -330,18 +330,181 @@ forking first. The remaining gap is specifically real POSIX subshells
 (`TPAREN`) that both need process isolation (hence a fork) *and* need to run
 an external command inside that isolated child.
 
-Follow-up directions worth trying before assuming this is a hard NT-level
-wall:
-- try `RtlCloneUserProcess` with a plain flag value of `0` instead of
-  `CRT_RTL_CLONE_PROCESS_FLAGS_INHERIT_HANDLES` to see if
-  handle-inheritance-driven cloning is specifically what breaks CSRSS state,
-  versus the clone itself;
-- check whether re-registering with CSRSS in the cloned child (there is no
-  public API for this, but some research/forks projects have reverse
-  engineered partial approaches) makes `CreateProcessA` viable;
-- as a pragmatic workaround scoped to mksh rather than libc, teach the
-  `MKSH_CRT_SHELL_CHILD_SPEC` `TPAREN` path to special-case "subshell body is
-  a single external command" and route it through the existing
-  fork-free `__crt_shell_spawn()` child-spec path instead of raw
-  `fork()`, falling back to raw `fork()` only for subshell bodies that do
-  not need to spawn (pure builtin/variable/redirection isolation).
+## Deciding The Next Step: Overhead Investigation And Prior-Art Research
+
+Two candidate fixes for the `CreateProcessA`-in-clone crash were on the table
+before any more code was written: (a) a Cygwin-style replacement of
+`__crt_sys_fork()` that recreates the process via `CreateProcessA`, copies the
+parent's writable memory (heap, calling thread's stack, `.data`/`.bss`) into
+the fresh child with `WriteProcessMemory`, and resumes the child at the
+`fork()` call site using the existing per-architecture `setjmp`/`longjmp`
+(`libc/src/arch/windows/{x86_64,aarch64}/setjmp.S`, already implemented and
+tested, callee-saved-register-only `jmp_buf`); or (b) something narrower that
+leaves `fork()` alone. Before committing to (a) -- a genuinely large,
+architecture-specific, empirically-risky change (matching `CONTEXT`/
+`SetThreadContext` per arch from scratch, since nothing like that exists
+anywhere in this codebase yet; walking the heap allocator's `heap_head` chunk
+list in `libc/src/malloc.c` to know what to copy; fixing up the Windows
+`TlsAlloc`/`TlsGetValue`-backed pthread TLS slot value in `libc/src/tls.c`,
+which does **not** survive a raw memory copy into a freshly created process
+the way it does under `RtlCloneUserProcess`'s real address-space clone; and
+critically, depending on an *unverified* assumption that disabling image
+ASLR (`/DYNAMICBASE:NO`, not currently used anywhere in this repo's link
+flags) plus a bottom-up-ASLR mitigation policy actually gives the parent and
+a freshly `CreateProcessA`'d child matching stack virtual addresses) -- two
+things were checked first.
+
+### Overhead benchmark
+
+Using only already-implemented, already-verified primitives (no new fork
+mechanism), 400 iterations each of:
+- `fork()` via the existing `RtlCloneUserProcess` path, child immediately
+  `_exit(0)`s;
+- `posix_spawn()` via the existing `__crt_sys_posix_spawn()`/`CreateProcessA`
+  path, spawning a trivial `int main(void) { return 0; }` executable;
+
+both measured with `waitpid()` included, on the real Windows aarch64 machine
+this work was verified on. Result (steady-state, after a cold-start warm-up
+run was discarded):
+
+| | per-call | ratio |
+| --- | --- | --- |
+| `fork()` (`RtlCloneUserProcess`) | ~13.4-14.2 ms | 1.0x |
+| `posix_spawn()` (`CreateProcessA`) | ~16.4-17.0 ms | ~1.20-1.23x |
+
+`CreateProcessA` is only about 20% more expensive than `RtlCloneUserProcess`
+on this hardware -- nowhere near Cygwin's reputation for order-of-magnitude
+slower forks. (This measures the `CreateProcessA` floor only, not the
+additional `WriteProcessMemory` cost a full memory-copy fork would add on
+top -- but it means that floor is not the blocking concern it was assumed to
+be.) This took the "is a `CreateProcessA`-based mechanism even viable
+performance-wise" question off the table; it de-risks approach (a) if it
+were needed, but more importantly it means overhead is not a reason to avoid
+routing *just the spawn step* through a real `CreateProcessA` call either.
+
+### Prior-art research
+
+Before writing a from-scratch `CONTEXT`/register-resume mechanism, existing
+public research on Windows process cloning was checked:
+
+- [The Definitive Guide To Process Cloning on Windows](https://github.com/huntandhackett/process-cloning)
+  (also at [diversenok's blog](https://diversenok.github.io/2023/04/20/Process-Cloning.html))
+  confirms clones cannot reliably load additional DLLs or call CSRSS-backed
+  Win32 APIs, and states there is **no documented way to re-register a clone
+  with CSRSS**; its own recommendation is to avoid Win32 APIs inside the
+  clone entirely and stick to raw NT syscalls -- which is exactly what this
+  project's `MKSH_CRT_SHELL_CHILD_SPEC` workaround already does for ordinary
+  command execution (see "Shell Child-Spec Direction" above). This rules out
+  a CSRSS-re-registration approach (the "Winnie"-style undocumented
+  `CsrClientConnectToServer` route): it would mean depending on an
+  unsupported, security-research-grade internal API with no stability
+  guarantee across Windows updates, which is a bad fit for a PAL meant to
+  keep working for years.
+- The [Cygwin mailing list](https://cygwin.com/pipermail/cygwin/2018-January/235755.html)
+  ("fast/native fork?", Jay K, Jan 2018) independently proposes optimizing
+  specifically for the "`exec()` follows `fork()` immediately" case rather
+  than always paying the full memory-copy cost -- validating the general
+  direction of *not* treating every `fork()` as needing the expensive
+  machinery, even though that thread frames it as deferring `fork()` itself
+  (closer to `vfork()` semantics) rather than what this project ended up
+  choosing.
+- No prior art was found for a **broker/proxy process** that performs
+  `CreateProcessA` on behalf of an unregistered clone and hands the resulting
+  process handle back via `DuplicateHandle`. That specific combination
+  appears to be novel, but it composes two independently well-established,
+  fully documented techniques (privilege-separated broker processes, e.g.
+  Chrome's process model; and cross-process handle duplication, which this
+  codebase already relies on extensively for fd/socket inheritance -- see
+  "Export/Import Semantics" above). No undocumented NT internals are needed.
+
+## Chosen Direction: Spawn Broker (Design, Not Yet Implemented)
+
+The crash is not really a `fork()` problem: `fork()` via `RtlCloneUserProcess`
+already works correctly and cheaply for the "fork, do direct syscalls,
+`_exit()`" shape that most of this project's test suite exercises. The crash
+is specifically that **`__crt_sys_posix_spawn()`/`execve()`, when called from
+inside an unregistered clone, cannot call `CreateProcessA` itself.**
+`execve()` does not need to preserve or resume the calling process's state
+the way `fork()` does -- POSIX `execve()` either replaces the process image or
+fails and returns an error -- so unlike a full `fork()` replacement, fixing
+this does not require memory copying, `setjmp`/`longjmp` resume, `CONTEXT`
+manipulation, or any assumption about matching stack/heap virtual addresses
+between processes.
+
+Instead, the plan is:
+
+1. A single always-running **broker process** is started once by the
+   original (CSRSS-registered, never cloned) process at startup -- e.g. the
+   top-level `mksh` re-execs itself once with a special marker so the second
+   instance runs as a broker instead of an interactive shell. The broker is
+   never itself the target of `RtlCloneUserProcess`, so it is always
+   properly registered and can call `CreateProcessA` indefinitely.
+2. `fork()` is untouched -- still the existing, fast `RtlCloneUserProcess`
+   path (see benchmark above: cheaper than `CreateProcessA`, no reason to
+   change it).
+3. `__crt_sys_posix_spawn()` gains a check for "is the current process an
+   unregistered `RtlCloneUserProcess` clone" (a simple flag set in the
+   `RtlCloneUserProcess` child-branch of `__crt_sys_fork()`, analogous to how
+   `libc/src/tls.c`'s `__crt_thread_after_fork_child()` already distinguishes
+   fork-child state). If set, instead of calling `CreateProcessA` directly
+   (which crashes), it sends the spawn request (application path, command
+   line, environment block, fd-snapshot/startup info -- the same data
+   `prepare_spawn_startup()` already assembles) to the broker over a pipe,
+   reusing the existing bootstrap-pipe transport pattern from
+   `__crt_sys_posix_spawn()`'s `fd_snapshot_pipe_mode` branch (see
+   "Existing CREATE_SUSPENDED + Patch-Then-Resume Pattern" investigation
+   above).
+4. The broker (itself registered, so `CreateProcessA` works normally) creates
+   the real target process, then `DuplicateHandle()`s the resulting
+   `hProcess`/`hThread` into the *requesting* (cloned) process -- this is
+   known to work inside a clone, since `DuplicateHandle` was directly
+   confirmed to succeed there while bisecting the original crash.
+5. The clone receives the duplicated handle and treats it exactly as if it
+   had called `CreateProcessA` itself: records it via the existing
+   `remember_child_process()` bookkeeping, returns from `posix_spawn()`/
+   `execve()` normally, and later `waitpid()`s on it normally --
+   `WaitForSingleObject` on a process handle does not require a genuine
+   Win32 parent-child relationship, so no special-casing is needed there.
+
+This keeps `fork()` exactly as-is (still cheap, still correct for the common
+case), touches only the one call path that actually crashes, and needs no
+new architecture-specific code at all (no per-arch `CONTEXT` handling, no
+memory copying, no ASLR/ stack-address assumptions to validate). It is a
+larger design than a one-line fix -- a broker process lifecycle, an IPC
+protocol for the spawn request, and wiring the detection flag through
+`__crt_sys_posix_spawn()` -- but it is scoped narrowly to the one place that
+is actually broken.
+
+**Status: design only.** Nothing described in this section has been
+implemented yet. The next steps, in order, are:
+1. add the "is an unregistered clone" flag (set in `__crt_sys_fork()`'s
+   `RtlCloneUserProcess`-child branch);
+2. implement the broker process lifecycle (how/when it starts, how a clone
+   locates it);
+3. implement the spawn-request IPC protocol over a pipe (request encoding,
+   response encoding, handle duplication back to the requester);
+4. wire `__crt_sys_posix_spawn()` to route through the broker when the flag
+   is set, falling back to today's direct `CreateProcessA` path otherwise;
+5. re-run the `port-rebuild-zlib` reproduction on Windows aarch64 end to end
+   to confirm the "Checking for obsessive-compulsive compiler options" crash
+   is actually fixed, then continue the normal porting loop for whatever the
+   next missing surface turns out to be.
+
+### Rejected alternatives (recorded so they are not re-litigated later)
+
+- **CSRSS re-registration** (the "Winnie"-style approach: intercept the
+  clone's own initialization and call undocumented internals like
+  `CsrClientConnectToServer` to establish a fresh, legal CSRSS connection
+  matching the clone's new PID): rejected because there is no documented,
+  stable way to do this (confirmed via the process-cloning research above),
+  and depending on unsupported internal APIs is a poor fit for a PAL meant to
+  track multiple Windows versions over a long time.
+- **Full Cygwin-style memory-copy fork** (replace `__crt_sys_fork()` itself
+  with `CreateProcessA` + `WriteProcessMemory` + `setjmp`/`longjmp` resume):
+  not rejected outright -- it remains a valid fallback if the broker design
+  turns out to be insufficient for some case the broker can't handle -- but
+  set aside as the *first* thing to build, because it is strictly more work
+  (new per-architecture `CONTEXT`/`SetThreadContext` code, heap/stack/TLS
+  copying, an unverified stack-address-determinism assumption) to fix a
+  problem that, on inspection, does not actually require touching `fork()`
+  at all.
