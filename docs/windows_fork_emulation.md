@@ -537,7 +537,108 @@ Open follow-ups, none blocking:
   ever needs many concurrent spawns from sibling clones;
 - only the `zlib` recipe has been re-verified end-to-end so far; the next
   step per the normal porting loop is `libpng`, `libffi`, and the SQLite
-  follow-up builds on Windows, per `TODO.md`.
+  follow-up builds on Windows, per `TODO.md`;
+- **every process the broker spawns is reported by Windows as a child of the
+  broker, not of the clone that logically requested it.** This is a real,
+  known gap -- see the "Attempted And Reverted" section immediately below
+  for what was tried and why it was backed out, rather than left half-fixed.
+
+## Attempted And Reverted: Reparenting Spawned Processes To The Client
+
+Raised as a real concern (not just cosmetic): since the broker is the one
+that actually calls `CreateProcessA`, Windows' own `ParentProcessId`
+bookkeeping -- what Task Manager, Process Explorer, and any future toybox
+`ps --forest` would show -- reports every spawned process as a child of the
+broker. A shell's process tree would render flat (everything hanging off one
+broker process) instead of nested the way it does on Linux, where a
+subshell's forked child is the real parent of whatever it execs.
+
+Windows has an official, documented mechanism for exactly this:
+`STARTUPINFOEXA` + `UpdateProcThreadAttribute(..., PROC_THREAD_ATTRIBUTE_PARENT_PROCESS, ...)`,
+the same API `explorer.exe` uses so a UAC-elevated child process appears to
+descend from the requesting shell rather than from `explorer.exe` itself. The
+broker was changed to open the requesting client with the added
+`PROCESS_CREATE_PROCESS` right and pass that handle as the specified parent
+when spawning the real target.
+
+This surfaced a real, and non-obvious, interaction: **generic inheritable
+handles (anything marked via `SetHandleInformation(..., HANDLE_FLAG_INHERIT, ...)`,
+as opposed to the handles explicitly passed via `STARTUPINFO.hStdInput/
+Output/Error`) are sourced from the *specified parent's* handle table when
+`PROC_THREAD_ATTRIBUTE_PARENT_PROCESS` is used, not from the actual process
+that calls `CreateProcessA`.** Confirmed empirically: marking the
+fd-snapshot bootstrap pipe's read end inheritable in the broker's own
+process (as the original, working design did) and closing the broker's copy
+right after `CreateProcessA` -- correct without reparenting, since the real
+target inherits directly from its actual creator -- produced
+`ERROR_NO_DATA` ("the pipe is being closed") when the client later wrote to
+the write end, because the real target never actually received a working
+copy of the read end at all. The fix for *that* symptom was to have the
+broker `DuplicateHandle()` the read end into the *client's* process
+(inheritable there) instead, and patch the bootstrap env var with that
+client-local value -- which did resolve `ERROR_NO_DATA` and got the
+fd-snapshot handshake working again with reparenting enabled.
+
+But a second, worse problem replaced it, and this is where the change was
+backed out rather than pushed further: **spawned target processes then
+failed to start at all**, exiting with a status whose low byte
+(`WEXITSTATUS`) was consistently `66` -- which is exactly
+`STATUS_DLL_INIT_FAILED` (`0xC0000142`) truncated to its low byte
+(`0x42 = 66`), i.e. a Windows *loader-level* failure, before the target's own
+`mainCRTStartup` (and therefore `main()`) ever ran. Isolating this took a
+while and did not fully converge:
+- it was **not** specific to any one target binary's imports -- a trivial
+  `Sleep()`-only executable failed exactly the same way as one using
+  `CreateToolhelp32Snapshot`;
+- it was **not** a `CREATE_SUSPENDED`-specific issue -- launching the same
+  binary suspended-then-resumed via a direct, non-broker, non-reparented
+  `CreateProcessA` (no clone involved at all) worked fine;
+- it was **not** consistently correlated with the reparenting attribute
+  being *set* -- disabling the attribute list construction (forcing the
+  broker back to a plain, non-reparented spawn) while keeping every other
+  change from this session **still** produced `STATUS_DLL_INIT_FAILED` on
+  a later run, which is the most important negative result here: something
+  in this session's combination of changes broke the previously-working
+  plain (non-reparented) spawn path too, and the two problems were never
+  fully teased apart before time was called on the investigation;
+- confirmed **not** a job-object inheritance issue (a documented side
+  effect of `PROC_THREAD_ATTRIBUTE_PARENT_PROCESS`, since the specified
+  parent's job memberships apply to the new process too): `IsProcessInJob`
+  on the relevant processes returned `FALSE`.
+
+Given the actual acceptance test that matters -- `port-rebuild-zlib`'s real
+`configure && make && make install` through real mksh subshells -- **also**
+regressed back to failing while this was in progress, the entire reparenting
+attempt (both files' changes) was reverted via `git checkout --` back to the
+last known-good commit, restoring the confirmed-working state (zlib passes,
+`ctest` 77/77). None of the reparenting code exists in the tree today; this
+section exists purely as a record for whoever picks this up next.
+
+What the next attempt should do differently:
+- treat "does a plain (non-reparented) broker-mediated spawn still work" as
+  a checkpoint to re-verify after *every* incremental change, not just at
+  the end -- the fact that this regressed too, and was never isolated from
+  the reparenting-specific `STATUS_DLL_INIT_FAILED`, is the main reason this
+  investigation didn't converge;
+- consider testing the handle-inheritance-source finding (duplicate into
+  the client, not the broker) as its own, isolated, committed change first,
+  fully re-verified against `port-rebuild-zlib`, *before* layering the
+  `PROC_THREAD_ATTRIBUTE_PARENT_PROCESS` attempt on top of it;
+- if `STATUS_DLL_INIT_FAILED` reappears, capture a crash dump or attach a
+  debugger to the suspended target *before* resuming it, rather than relying
+  on exit-code archaeology after the fact;
+- it remains genuinely unclear whether `PROC_THREAD_ATTRIBUTE_PARENT_PROCESS`
+  is fundamentally incompatible with a specified parent that is itself an
+  unregistered `RtlCloneUserProcess` clone (plausible: the new process's own
+  CSRSS registration may be derived from the specified parent's, and the
+  clone has none) or whether this was a solvable bug in this session's
+  specific implementation. Both remain open.
+- Given `ps` is not currently enabled in this project's toybox build
+  (`CFG_PS 0`) and `getppid()` already unconditionally returns `0` on
+  Windows regardless of broker involvement, the impact of leaving this
+  unfixed is currently limited to external tooling (Task Manager, Process
+  Explorer) showing a flat tree -- annoying for debugging, not something any
+  in-tree functionality depends on today.
 
 ### Rejected alternatives (recorded so they are not re-litigated later)
 

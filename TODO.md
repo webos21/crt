@@ -157,6 +157,34 @@ Detailed policy and provenance stay in `docs/` and import manifests.
 
 ## in progressing
 
+- Attempted to fix a real (if currently low-impact) gap in the spawn broker:
+  every process it spawns shows up in Windows' own process tree as a child
+  of the broker, not of the clone that logically requested it (flat instead
+  of nested in Task Manager/Process Explorer/any future toybox `ps
+  --forest`; `ps` itself is not enabled yet, `CFG_PS 0`). Tried the official
+  `PROC_THREAD_ATTRIBUTE_PARENT_PROCESS` mechanism (same one `explorer.exe`
+  uses for UAC-elevated children). Found and fixed one real bug along the
+  way (inheritable handles are sourced from the *specified parent's* handle
+  table with this attribute, not the actual `CreateProcessA` caller's --
+  the fd-snapshot bootstrap pipe's read end had to move from
+  "inheritable in the broker" to "duplicated into the client, inheritable
+  there"), but hit a second, worse regression that was never fully
+  isolated: spawned targets started failing entirely with
+  `STATUS_DLL_INIT_FAILED` (a Windows loader-level failure, before the
+  target's own `main()` ever runs), and -- the important part -- disabling
+  just the reparenting attribute did **not** reliably fix it, meaning
+  something in this line of changes broke the plain, non-reparented spawn
+  path too, not just the reparented one. Since the actual acceptance test
+  (`port-rebuild-zlib`'s real `configure`/`make`/`make install`) regressed
+  back to failing, reverted both changed files
+  (`libc/src/arch/windows/common/spawn_broker.c` and `.../syscall.c`) via
+  `git checkout --` to the last known-good commit rather than ship a
+  half-fixed state. Confirmed the revert restores the working state (zlib
+  passes, `ctest` 77/77). Full blow-by-blow, what to try differently next
+  time, and why job-object inheritance was ruled out as the cause: see
+  `docs/windows_fork_emulation.md`, "Attempted And Reverted: Reparenting
+  Spawned Processes To The Client".
+
 - Verify the new Linux signal backend (`docs/signal_delivery.md`) on an
   actual Linux host; it is currently code-review-verified only, since this
   project's CMake presets refuse to cross-compile from macOS.
