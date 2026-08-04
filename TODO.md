@@ -123,64 +123,39 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   there), but turns the silent corruption into an honest `can't fork - try
   again` failure, and fixes a latent version of the same bug on Windows
   x86_64 (where real fork already exists).
+- Made real `fork()` work on Windows aarch64 (`RtlCloneUserProcess` is
+  exported there too; the previous x86_64-only guards in
+  `libc/src/arch/windows/common/syscall.c` were simply untested
+  assumptions) and fixed a genuine `fd_set_inherit_for_fork()` bug found
+  along the way (fd 0/1/2 were never marked inheritable, breaking
+  `2>&1` inside a forked subshell). This alone didn't make
+  `configure`-driven builds work, though: `CreateProcessA()` (and, it
+  turned out, `CreatePipe()`) both crash/fail when called from inside an
+  unregistered `RtlCloneUserProcess` clone, because the clone never goes
+  through CreateProcess's CSRSS registration handshake. Benchmarked the
+  cost of routing spawns through `CreateProcessA` instead of raw fork
+  (~1.2x, not the order-of-magnitude Cygwin reputation suggests),
+  researched prior art (no documented CSRSS re-registration method
+  exists; ruled out as too fragile), and built a "spawn broker": `fork()`
+  stays untouched (still cheap `RtlCloneUserProcess`), but
+  `__crt_sys_posix_spawn()` now detects when it is running inside an
+  unregistered clone and, in that case, asks an always-running, never-
+  cloned broker process (`libc/src/arch/windows/common/spawn_broker.c`,
+  protocol in `libc/include/private/crt_spawn_broker.h`) to create the
+  pipe and the real target process on its behalf, handing the resulting
+  handles back via `DuplicateHandle`. Verified end to end on real Windows
+  aarch64 hardware: `cmake --build --preset windows-host-ninja-debug
+  --target port-rebuild-zlib` now completes zlib's full
+  `configure && make && make install` with exit 0 (previously failed at
+  `can't fork - try again`, then at a `CreateProcessA` crash, then at a
+  `CreatePipe()` failure -- each fix exposing the next layer). Full
+  `ctest` stays green (77/77) throughout. See
+  `docs/windows_fork_emulation.md`, "Chosen Direction: Spawn Broker", for
+  the full investigation, the benchmark numbers, the prior-art research,
+  and the rejected alternatives (CSRSS re-registration, full Cygwin-style
+  memory-copy `fork()`).
 
 ## in progressing
-
-- Enabled real `fork()` on Windows aarch64: `RtlCloneUserProcess` is exported
-  by `ntdll.dll` on aarch64 too, so the previously x86_64-only guards around
-  `__crt_sys_fork()`/`init_ntdll()`/`fd_set_inherit_for_fork()` in
-  `libc/src/arch/windows/common/syscall.c` were removed. Also fixed
-  `fd_set_inherit_for_fork()` to mark fd 0/1/2 inheritable (it previously
-  only covered fd>=3), which fixed a real `2>&1`-in-subshell "bad file
-  descriptor" failure. Verified on real Windows/aarch64 hardware: distinct
-  parent/child PIDs, full `ctest` suite green (77/77) with the fork tests now
-  exercising real fork instead of the `ENOTSUP` fallback.
-- Found the next real blocker while reproducing `port-rebuild-zlib` on
-  Windows aarch64: `CreateProcessA()` crashes (access violation) when called
-  from *inside* a process created via `RtlCloneUserProcess`. Plain syscalls
-  (file I/O, `DuplicateHandle`, `GetCurrentProcessId`) work fine in a cloned
-  child, but `CreateProcessA` does not -- likely because
-  `RtlCloneUserProcess` clones the process at the raw NT level without
-  re-establishing the CSRSS (Win32 subsystem) registration a normal
-  `CreateProcess`-spawned process gets, and `CreateProcessA` itself needs a
-  working CSR connection. This means any mksh subshell that both forks
-  (`TPAREN`) and then needs to spawn an external command (`posix_spawn`)
-  still cannot work on Windows aarch64, even though `fork()` itself now
-  succeeds. `configure`-driven port builds like zlib still fail (now further
-  in, and with a crash instead of `can't fork - try again`). See
-  `docs/windows_fork_emulation.md`.
-- Benchmarked the two candidate fixes' cost floor before committing to
-  either: real `fork()` (`RtlCloneUserProcess`) vs. `posix_spawn()`
-  (`CreateProcessA`), 400 iterations each on real Windows aarch64 hardware.
-  `CreateProcessA` is only ~1.2x the cost of `RtlCloneUserProcess`, not the
-  order-of-magnitude-slower Cygwin reputation everyone expects -- so
-  overhead is not a reason to avoid a `CreateProcessA`-based fix.
-- Researched prior art on Windows process cloning
-  (huntandhackett/diversenok's process-cloning guide, a 2018 Cygwin
-  mailing-list thread on fast fork) before designing further. Conclusion:
-  there is no documented, stable way to re-register a
-  `RtlCloneUserProcess` clone with CSRSS (ruling out an undocumented-API
-  "CSRSS re-registration" fix as too fragile for a long-lived PAL), and no
-  prior art exists for a broker/proxy process that performs `CreateProcessA`
-  on behalf of an unregistered clone -- but that composes two
-  well-established, fully-documented techniques this codebase already uses
-  (privilege-separated broker processes; cross-process handle duplication
-  via `DuplicateHandle`, already used for fd/socket inheritance).
-- **Decided direction (design only, not yet implemented):** a "spawn
-  broker" process. `fork()` itself stays exactly as-is (cheap, already
-  correct for fork-without-spawn). Only `__crt_sys_posix_spawn()`/`execve()`
-  changes: when called from a process that is itself an unregistered
-  `RtlCloneUserProcess` clone, instead of calling `CreateProcessA` directly
-  (which crashes), it asks an always-running, never-cloned broker process
-  (started once by the original registered process) to do the
-  `CreateProcessA` call on its behalf over a pipe, then receives the
-  resulting process handle back via `DuplicateHandle` (confirmed working
-  inside a clone) and treats it exactly like a normal `posix_spawn()`
-  result. No memory copying, `setjmp`/`longjmp` resume, `CONTEXT`/
-  `SetThreadContext` work, or ASLR/stack-address-determinism assumption is
-  needed for this narrower fix. Full design, rejected-alternatives
-  reasoning, and the concrete next implementation steps are recorded in
-  `docs/windows_fork_emulation.md` under "Chosen Direction: Spawn Broker".
 
 - Verify the new Linux signal backend (`docs/signal_delivery.md`) on an
   actual Linux host; it is currently code-review-verified only, since this

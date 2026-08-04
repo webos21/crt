@@ -417,7 +417,7 @@ public research on Windows process cloning was checked:
   codebase already relies on extensively for fd/socket inheritance -- see
   "Export/Import Semantics" above). No undocumented NT internals are needed.
 
-## Chosen Direction: Spawn Broker (Design, Not Yet Implemented)
+## Chosen Direction: Spawn Broker (Implemented)
 
 The crash is not really a `fork()` problem: `fork()` via `RtlCloneUserProcess`
 already works correctly and cheaply for the "fork, do direct syscalls,
@@ -475,20 +475,69 @@ protocol for the spawn request, and wiring the detection flag through
 `__crt_sys_posix_spawn()` -- but it is scoped narrowly to the one place that
 is actually broken.
 
-**Status: design only.** Nothing described in this section has been
-implemented yet. The next steps, in order, are:
-1. add the "is an unregistered clone" flag (set in `__crt_sys_fork()`'s
-   `RtlCloneUserProcess`-child branch);
-2. implement the broker process lifecycle (how/when it starts, how a clone
-   locates it);
-3. implement the spawn-request IPC protocol over a pipe (request encoding,
-   response encoding, handle duplication back to the requester);
-4. wire `__crt_sys_posix_spawn()` to route through the broker when the flag
-   is set, falling back to today's direct `CreateProcessA` path otherwise;
-5. re-run the `port-rebuild-zlib` reproduction on Windows aarch64 end to end
-   to confirm the "Checking for obsessive-compulsive compiler options" crash
-   is actually fixed, then continue the normal porting loop for whatever the
-   next missing surface turns out to be.
+**Status: implemented and verified end-to-end on real Windows aarch64
+hardware.** `cmake --build --preset windows-host-ninja-debug --target
+port-rebuild-zlib` now completes `./configure && make && make install` for
+zlib 1.3.1 with exit 0 -- the exact failure this whole investigation started
+from. Full `ctest` stays green (77/77) throughout.
+
+Implementation:
+- `libc/include/private/crt_spawn_broker.h`: the wire protocol (request/
+  response structs), env var names, and the shared function declarations.
+- `libc/src/arch/windows/common/spawn_broker.c`: new file. Client side
+  (`__crt_windows_ensure_spawn_broker()`, `__crt_windows_spawn_broker_request()`)
+  and broker side (`__crt_windows_spawn_broker_main()`,
+  `broker_handle_request()`).
+- `libc/src/arch/windows/common/syscall.c`: `windows_unregistered_clone`
+  flag set in `__crt_sys_fork()`'s clone branch, read via
+  `__crt_windows_is_unregistered_clone()`; `__crt_sys_posix_spawn()` branches
+  on it to call the broker instead of `CreateProcessA` directly.
+- `libc/src/arch/windows/common/crt1.c`: `mainCRTStartup()` checks
+  `CRT_SPAWN_BROKER_MODE` before the normal fd/rootfs bootstrap and, if set,
+  dispatches straight into `__crt_windows_spawn_broker_main()` (never calls
+  the program's own `main()`).
+- `libc/CMakeLists.txt`: `spawn_broker.c` added alongside `syscall.c` for
+  both Windows architectures.
+
+One thing the design write-up above did not anticipate, found while
+verifying: **`CreatePipe()` itself -- not just `CreateProcessA` -- fails with
+`ERROR_INVALID_HANDLE` when called from inside an unregistered clone.**
+Confirmed empirically with file-based checkpoint logging (the same
+per-PID-file technique used earlier in this investigation, since
+inherited-handle-based logging is exactly the kind of thing under test and
+cannot be trusted here): a prewarm attempt (calling `CreatePipe()` once in
+the still-registered parent before ever cloning, on the theory that this was
+a one-time DLL/API-set resolution problem, matching the process-cloning
+guide's "load necessary libraries beforehand" advice) did **not** fix it --
+the clone's own first `CreatePipe()` call still failed with the same error
+regardless. This means the failure is not one-time lazy-resolution state
+that survives the copy-on-write clone; something about `CreatePipe()` itself
+does not work in a clone at all, full stop. The fix follows the same shape as
+the `CreateProcessA` fix: the bootstrap fd-snapshot pipe is now created by
+the broker (a normal process, so `CreatePipe()` works fine there) rather than
+by the clone. The broker keeps the read end (inheritable, in its own
+process, so the `CreateProcessA` call that spawns the real target hands it
+over directly) and returns the write end to the client via `DuplicateHandle`,
+the same handle-handback pattern already used for `hProcess`/`hThread`. See
+`crt_spawn_broker_request_header.want_fd_snapshot_pipe` and
+`crt_spawn_broker_response.fd_snapshot_pipe_write` in `crt_spawn_broker.h`.
+
+Two things called out in the original design as explicitly *not* needed
+remain confirmed not needed: no memory copying, and no ASLR/stack-address
+assumptions -- both were specific to the full Cygwin-style `fork()`
+replacement that was set aside in favor of this narrower fix.
+
+Open follow-ups, none blocking:
+- the broker process currently has no explicit shutdown path beyond the
+  `atexit()` hook registered by whichever process first started it
+  (`shutdown_spawn_broker_atexit()` in `spawn_broker.c`); it is not yet
+  reaped if that process is killed rather than exiting normally;
+- `broker_handle_request()` services one request at a time (no threading);
+  fine for the request rates seen so far, worth revisiting if a workload
+  ever needs many concurrent spawns from sibling clones;
+- only the `zlib` recipe has been re-verified end-to-end so far; the next
+  step per the normal porting loop is `libpng`, `libffi`, and the SQLite
+  follow-up builds on Windows, per `TODO.md`.
 
 ### Rejected alternatives (recorded so they are not re-litigated later)
 
