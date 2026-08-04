@@ -126,10 +126,29 @@ Detailed policy and provenance stay in `docs/` and import manifests.
 
 ## in progressing
 
-- Implement real `fork()` for Windows aarch64 (or otherwise make subshells
-  work there) so `configure`-driven port builds like zlib can fully succeed;
-  currently they fail loudly and correctly instead of silently, but still
-  fail. See `docs/windows_fork_emulation.md`.
+- Enabled real `fork()` on Windows aarch64: `RtlCloneUserProcess` is exported
+  by `ntdll.dll` on aarch64 too, so the previously x86_64-only guards around
+  `__crt_sys_fork()`/`init_ntdll()`/`fd_set_inherit_for_fork()` in
+  `libc/src/arch/windows/common/syscall.c` were removed. Also fixed
+  `fd_set_inherit_for_fork()` to mark fd 0/1/2 inheritable (it previously
+  only covered fd>=3), which fixed a real `2>&1`-in-subshell "bad file
+  descriptor" failure. Verified on real Windows/aarch64 hardware: distinct
+  parent/child PIDs, full `ctest` suite green (77/77) with the fork tests now
+  exercising real fork instead of the `ENOTSUP` fallback.
+- Found the next real blocker while reproducing `port-rebuild-zlib` on
+  Windows aarch64: `CreateProcessA()` crashes (access violation) when called
+  from *inside* a process created via `RtlCloneUserProcess`. Plain syscalls
+  (file I/O, `DuplicateHandle`, `GetCurrentProcessId`) work fine in a cloned
+  child, but `CreateProcessA` does not -- likely because
+  `RtlCloneUserProcess` clones the process at the raw NT level without
+  re-establishing the CSRSS (Win32 subsystem) registration a normal
+  `CreateProcess`-spawned process gets, and `CreateProcessA` itself needs a
+  working CSR connection. This means any mksh subshell that both forks
+  (`TPAREN`) and then needs to spawn an external command (`posix_spawn`)
+  still cannot work on Windows aarch64, even though `fork()` itself now
+  succeeds. `configure`-driven port builds like zlib still fail (now further
+  in, and with a crash instead of `can't fork - try again`). See
+  `docs/windows_fork_emulation.md`.
 
 - Verify the new Linux signal backend (`docs/signal_delivery.md`) on an
   actual Linux host; it is currently code-review-verified only, since this

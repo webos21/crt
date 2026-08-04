@@ -255,3 +255,93 @@ This is a genuine, narrow correctness fix, not a resolution of the underlying
 `configure`/build process needs a subshell to actually complete (not just
 fail loudly) still requires the real Windows `fork()` emulation described
 above.
+
+## Windows aarch64: `RtlCloneUserProcess` Works, But `CreateProcessA` Crashes In The Clone
+
+The "no `RtlCloneUserProcess`-based fork path at all" statement above was an
+untested assumption, not a verified platform limitation. On real Windows
+aarch64 hardware, `ntdll.dll` exports `RtlCloneUserProcess` exactly as it does
+on x86_64, and the `struct crt_rtl_user_process_information` shape (`HANDLE`,
+`ULONG`, LLP64 sizes) is identical across both architectures. Removing the
+`#if defined(__x86_64__) || defined(_M_X64)` guards around
+`__crt_sys_fork()`, `init_ntdll()`, and `fd_set_inherit_for_fork()` in
+`libc/src/arch/windows/common/syscall.c` makes `fork()` succeed on aarch64:
+parent and child get genuinely distinct PIDs, and the full `ctest` suite
+(`fork_test`, `fork_signal_test`, `fork_runtime_reset_test`,
+`job_control_test`, `rootfs_process_test`, `shell_smoke_test`, ...) passes
+while now exercising real fork instead of the `ENOTSUP` fallback path.
+
+This surfaced one real, independent bug: `fd_set_inherit_for_fork()` only
+looped over `fd >= 3`, so descriptors 0/1/2 were never marked
+`HANDLE_FLAG_INHERIT` before the clone. A single-level `fork()` with the
+child only touching its own inherited stdio still worked (Win32 standard
+handles are often already inheritable at process start), but a *nested*
+scenario -- a subshell that itself does `` `( cmd ) 2>&1` `` -- reliably hit
+`mksh: 2>&1 : bad file descriptor`, because the forked child's fd 1/2 Win32
+handles were not actually valid in the child's own handle table. Looping
+`fd_set_inherit_for_fork()` from `fd = 0` (matching
+`fd_restore_inherit_after_fork()`, which already covered the full range)
+fixed this.
+
+With both of those fixed, `port-rebuild-zlib` on Windows aarch64 gets
+significantly further -- past the `./configure[40]: can't fork - try again`
+failure entirely -- but still fails, now at zlib's own
+"Checking for obsessive-compulsive compiler options" compiler sanity check,
+which itself runs as `` `( $CC -c ... ) 2>&1` `` (a subshell inside a command
+substitution). Bisecting with file-based debug logging (writing to a
+per-PID log file via `CreateFileA`, since inherited-handle-based logging like
+`WriteFile(GetStdHandle(STD_ERROR_HANDLE), ...)` is exactly the kind of thing
+under test and cannot be trusted here) narrowed the failure to one exact
+spot: inside `__crt_sys_posix_spawn()`, when a process that *is itself* a
+`RtlCloneUserProcess` clone calls `CreateProcessA()` to spawn a further
+child, `CreateProcessA()` crashes (Windows reports the process's exit code as
+`STATUS_ACCESS_VIOLATION`, whose low byte -- what `waitpid()` surfaces via
+`WEXITSTATUS()` -- is `5`). Everything logged right up to "about to call
+`CreateProcessA`" (fd snapshot export, `prepare_spawn_startup()`,
+`CreatePipe()` for the bootstrap pipe); nothing after `CreateProcessA()` ever
+logs, including the immediate post-call line. Plain syscalls in the cloned
+child -- `CreateFileA`, `WriteFile`, `DuplicateHandle`, `GetCurrentProcessId`
+-- all work fine; only `CreateProcessA` (or something it depends on) does not.
+
+The likely explanation: `RtlCloneUserProcess` clones a process at the raw NT
+level (address space, handle table) without repeating the CSRSS (Win32
+subsystem) registration handshake that a normal `CreateProcess`-spawned
+process goes through. Lower-level `ntdll`/`kernel32` calls that do not need
+CSRSS keep working in the clone; `CreateProcessA` is a more involved Win32
+API that does, and the clone is not a CSRSS-registered client. This matches
+the historical reputation of `RtlCloneUserProcess`-based "fork on Windows"
+research (Interix/Cygwin-adjacent): the clone is real at the NT level but not
+fully alive as a Win32 process.
+
+Practical effect: `fork()` by itself is now genuinely usable on Windows
+aarch64 for the "fork, then only do direct syscalls, then `_exit()`" shape
+(exactly what `fork_test.c` and friends exercise). It is *not* usable for
+"fork, then spawn another process" -- which is exactly what a shell subshell
+that needs to run an external command does. This is a narrower, more precise
+version of the original "no real fork on aarch64" gap: the previous
+assumption was that `RtlCloneUserProcess` was unavailable there; it is
+available, but combining it with `CreateProcessA` in the child is what does
+not work. `MKSH_CRT_SHELL_CHILD_SPEC`'s own child-spec path
+(`__crt_shell_spawn()`/`__crt_shell_fork_exec()`, see "Shell Child-Spec
+Direction" above) deliberately avoids this exact combination for ordinary
+external-command execution and pipelines -- it spawns directly via
+`posix_spawn()` from the *original* (non-cloned) shell process rather than
+forking first. The remaining gap is specifically real POSIX subshells
+(`TPAREN`) that both need process isolation (hence a fork) *and* need to run
+an external command inside that isolated child.
+
+Follow-up directions worth trying before assuming this is a hard NT-level
+wall:
+- try `RtlCloneUserProcess` with a plain flag value of `0` instead of
+  `CRT_RTL_CLONE_PROCESS_FLAGS_INHERIT_HANDLES` to see if
+  handle-inheritance-driven cloning is specifically what breaks CSRSS state,
+  versus the clone itself;
+- check whether re-registering with CSRSS in the cloned child (there is no
+  public API for this, but some research/forks projects have reverse
+  engineered partial approaches) makes `CreateProcessA` viable;
+- as a pragmatic workaround scoped to mksh rather than libc, teach the
+  `MKSH_CRT_SHELL_CHILD_SPEC` `TPAREN` path to special-case "subshell body is
+  a single external command" and route it through the existing
+  fork-free `__crt_shell_spawn()` child-spec path instead of raw
+  `fork()`, falling back to raw `fork()` only for subshell bodies that do
+  not need to spawn (pure builtin/variable/redirection isolation).
