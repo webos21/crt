@@ -128,6 +128,11 @@ set_tests_properties(string_memory_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "string_memory_test: ok"
 )
 
+add_crt_test(regex_test regex_test.c)
+set_tests_properties(regex_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "regex_test: ok"
+)
+
 add_crt_test(fd_errno_test fd_errno_test.c)
 set_tests_properties(fd_errno_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "fd_errno_test: ok"
