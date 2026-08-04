@@ -205,20 +205,45 @@ Detailed policy and provenance stay in `docs/` and import manifests.
     locally and `DuplicateHandle`s *both* ends back into the client,
     instead of attaching one end to a spawned target) and made
     `__crt_sys_pipe()` route through it when inside an unregistered clone.
-  - Current blocker: libpng's `configure` now runs dramatically further
-    (past `checking whether build environment is sane`, make-feature
-    detection, `xargs`/`id` fallback warnings) but still dies with exit
-    127 partway through `checking how to create a ustar tar archive`
-    (`config.log` shows `tar --version` itself exiting 127, as expected
-    since `tar` is not an enabled toybox applet -- but the enclosing
-    `for _am_tool in $_am_tools; do ... done` loop does not survive that
-    the way it does for the earlier `xargs`/`id` fallbacks, and the whole
-    script exits 127 instead of falling through to `plaintar`/`pax`/
-    `cpio`/`none`). Not yet root-caused: could be a missing toybox applet
-    (`tar`) interacting badly with autoconf's fallback loop, or another
-    CRT-shell-child-spec-style subshell/exit-status propagation bug like
-    the one already fixed for `TPAREN` (see "Found and fixed a real
-    mksh/CRT-shell-child-spec bug..." above).
+  - Also found and fixed a fourth real bug along the way, confirmed
+    necessary but **not sufficient on its own** -- see "still open" below:
+    `ERROR_INVALID_NAME` (Windows error 123, returned for any path
+    containing a character Windows never allows in a real filename, e.g.
+    `*`) fell through `map_windows_error()`'s default case to `EIO`
+    instead of `ENOENT`. Autoconf's own exit-trap cleanup runs `rm -f core
+    *.core core.conftest.*`; when the glob doesn't match anything, mksh
+    passes the literal pattern through (normal, expected shell behavior),
+    and a literal `*` can never exist as a real Windows filename, so
+    `ENOENT` is the semantically correct mapping -- and it is exactly what
+    toybox's `rm -f` checks for to stay silent
+    (`shell/toybox/src/toys/posix/rm.c:110`, `errno == ENOENT`). Fixed in
+    `map_windows_error()`. Verified against the full `ctest` suite (78/78).
+  - **Still open / where to pick this up:** even with all four fixes,
+    libpng's `configure` still dies with exit 127 partway through
+    `checking how to create a ustar tar archive` (the
+    `for _am_tool in $_am_tools; do ... done` loop in automake's tar-format
+    probe, around line 3647 of the generated `configure`). `set -x`
+    tracing (inject `set -x` right before that line, in
+    `out/windows-host-ninja-debug/port-tests/src/libpng-1.6.57/configure`
+    so it survives `copy_source()`'s fresh-copy-per-`--rebuild`, then run
+    `port-rebuild-libpng` and capture with `*> full_trace.log` -- piping
+    through `Select-Object`/`ctest`-style truncation loses the interesting
+    part) shows the trace running all the way to autoconf's own universal
+    EXIT trap (`configure: exit`, `rm -f core *.core core.conftest.*`)
+    with no visible anomaly in between, which is what led to (and was
+    fully explained by) the `ERROR_INVALID_NAME` fix above -- but that fix
+    alone did not make the failure go away, so **something else in the
+    same loop still exits 127** and was not yet isolated. Next step: rerun
+    the same `set -x` trace capture (to a file, not truncated) with the
+    `ERROR_INVALID_NAME` fix in place, and diff against the prior trace to
+    find exactly which statement's exit status changed. Prime suspects,
+    not yet checked: the `am__tar_` `eval` inside `(tardir=conftest.dir &&
+    eval $am__tar_ >conftest.tar) >&5 2>&5` when `_am_tar` never got set to
+    a real binary (since `tar`/`gnutar`/`gtar` are all absent); or another
+    instance of the already-documented CRT-shell-child-spec
+    subshell/exit-status-propagation class of bug (see "Found and fixed a
+    real mksh/CRT-shell-child-spec bug..." above, the `TPAREN` one) meaning
+    a *different* subshell in this exact loop, not the exit-trap rm.
 
 - Attempted to fix a real (if currently low-impact) gap in the spawn broker:
   every process it spawns shows up in Windows' own process tree as a child

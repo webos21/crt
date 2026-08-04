@@ -520,6 +520,14 @@ static int map_windows_error(DWORD error) {
     case 3:
     case 15:
     case 18:
+    /* ERROR_INVALID_NAME (a path contains a character Windows never
+     * allows in a real filename, e.g. '*', '?', '"', '<', '>', '|'):
+     * such a path can never correspond to a real file, which is the
+     * same thing ENOENT means to POSIX callers -- most concretely, `rm
+     * -f` on a glob that failed to match anything (so the shell passes
+     * the literal pattern through unchanged, e.g. `rm -f '*.core'`) must
+     * see ENOENT here to silently succeed the way -f promises, not EIO. */
+    case 123:
       return ENOENT;
     case 4:
       return EMFILE;
