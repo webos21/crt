@@ -67,6 +67,21 @@ struct crt_spawn_broker_request_header {
    * one specific env var so the existing fd-snapshot bootstrap machinery
    * keeps working unmodified on the far side of the extra broker hop. */
   uint32_t want_fd_snapshot_pipe;
+  /* Set to request a plain, unattached pipe instead of a spawn: the
+   * broker creates it locally (the same "CreatePipe works fine in a
+   * normal CreateProcessA-spawned process" reasoning as
+   * want_fd_snapshot_pipe above) and duplicates *both* ends back into the
+   * client, then responds immediately without touching any of the
+   * spawn-only fields below or calling CreateProcessA at all. This is
+   * what __crt_sys_pipe() uses when called from inside an unregistered
+   * clone -- ordinary pipe() has exactly the same CreateProcessA-adjacent
+   * failure mode as the fd-snapshot bootstrap pipe did, just reached via
+   * mksh forking a subshell and then needing another pipe for a nested
+   * command substitution or `|` pipeline, rather than via posix_spawn().
+   * Mutually exclusive with want_fd_snapshot_pipe and every other field
+   * except client_pid; a client requesting a plain pipe still fills in
+   * magic/version/client_pid and leaves the rest zeroed. */
+  uint32_t want_plain_pipe;
   uint32_t application_path_length;
   uint32_t command_line_length;
   uint32_t current_directory_length;
@@ -90,6 +105,12 @@ struct crt_spawn_broker_response {
    * the encoded fd snapshot to this handle and closes it, same as it
    * would have with a pipe it created itself. */
   uint64_t fd_snapshot_pipe_write;
+  /* Valid (nonzero) only when the request had want_plain_pipe set and
+   * result is 0: both ends of a fresh pipe, already duplicated into the
+   * client's own process, exactly as if the client had called
+   * CreatePipe() itself. */
+  uint64_t plain_pipe_read;
+  uint64_t plain_pipe_write;
 };
 
 /* Called from __crt_sys_fork(), before RtlCloneUserProcess runs, always
@@ -126,6 +147,14 @@ long __crt_windows_spawn_broker_request(
     void** out_process_handle,
     void** out_thread_handle,
     void** out_fd_snapshot_pipe_write);
+
+/* Client side of the protocol: ask the broker for a plain pipe (see
+ * want_plain_pipe above). Only meaningful (and only called) when
+ * __crt_windows_is_unregistered_clone() is true. On success, out_read and
+ * out_write are filled in with handles already valid in the caller's own
+ * process, exactly as CreatePipe() would have. Returns 0 on success, a
+ * negative errno-shaped value on failure. */
+long __crt_windows_broker_create_pipe(void** out_read, void** out_write);
 
 /* Entry point for a process launched as a broker (CRT_SPAWN_BROKER_MODE_ENV
  * set). Services spawn requests on the CRT_SPAWN_BROKER_PIPE_ENV named

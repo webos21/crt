@@ -527,6 +527,27 @@ remain confirmed not needed: no memory copying, and no ASLR/stack-address
 assumptions -- both were specific to the full Cygwin-style `fork()`
 replacement that was set aside in favor of this narrower fix.
 
+**Generic `pipe()` has the exact same failure mode, and needed the same
+fix.** Found while working through libpng's `configure` (an autoconf script,
+unlike zlib's hand-written one, so it forks far more subshells): mksh forks a
+real `RtlCloneUserProcess` clone for every command substitution and
+pipeline, and any further `pipe()` call made *from inside* that clone (a
+nested command substitution, `cmd1 | cmd2` inside a subshell) hit the same
+`CreatePipe()`-fails-in-an-unregistered-clone behavior described above --
+`__crt_sys_pipe()` called `CreatePipe()` unconditionally, with no
+`__crt_windows_is_unregistered_clone()` check at all, because the original
+fix only ever routed `posix_spawn()`'s own internal bootstrap pipe through
+the broker. Extended the broker protocol with a `want_plain_pipe` request:
+the broker creates a pipe locally (same reasoning -- it is a normal
+`CreateProcessA`-spawned process, so `CreatePipe()` works fine there) and
+`DuplicateHandle`s *both* ends back into the client, rather than keeping one
+end for itself the way `want_fd_snapshot_pipe` does. `__crt_sys_pipe()` now
+checks `__crt_windows_is_unregistered_clone()` and routes through
+`__crt_windows_broker_create_pipe()` when true. See
+`crt_spawn_broker_request_header.want_plain_pipe` and
+`crt_spawn_broker_response.plain_pipe_read`/`plain_pipe_write` in
+`crt_spawn_broker.h`.
+
 Open follow-ups, none blocking:
 - the broker process currently has no explicit shutdown path beyond the
   `atexit()` hook registered by whichever process first started it
@@ -535,9 +556,11 @@ Open follow-ups, none blocking:
 - `broker_handle_request()` services one request at a time (no threading);
   fine for the request rates seen so far, worth revisiting if a workload
   ever needs many concurrent spawns from sibling clones;
-- only the `zlib` recipe has been re-verified end-to-end so far; the next
-  step per the normal porting loop is `libpng`, `libffi`, and the SQLite
-  follow-up builds on Windows, per `TODO.md`;
+- only the `zlib` recipe has been fully verified end-to-end so far; `libpng`
+  is in progress (see `TODO.md`, "in progressing") and gets much further now
+  with the `regex.c`/mksh-path/generic-`pipe()` fixes above, but is not
+  passing yet; `libffi` and the SQLite follow-up build have not been
+  attempted;
 - **every process the broker spawns is reported by Windows as a child of the
   broker, not of the clone that logically requested it.** This is a real,
   known gap -- see the "Attempted And Reverted" section immediately below

@@ -350,6 +350,64 @@ long __crt_windows_spawn_broker_request(
   return 0;
 }
 
+/* ---- client side: ask the broker for a plain, unattached pipe ---- */
+
+long __crt_windows_broker_create_pipe(void** out_read, void** out_write) {
+  struct crt_spawn_broker_request_header header;
+  struct crt_spawn_broker_response response;
+  HANDLE pipe = CRT_INVALID_HANDLE_VALUE;
+  int attempt;
+  int rc;
+
+  if (!g_broker_started || g_broker_pipe_name[0] == 0) {
+    return -ECHILD;
+  }
+
+  for (attempt = 0; attempt < 100; ++attempt) {
+    pipe = CreateFileA(
+        g_broker_pipe_name, CRT_GENERIC_READ | CRT_GENERIC_WRITE, 0, 0, CRT_OPEN_EXISTING, 0, 0);
+    if (pipe != CRT_INVALID_HANDLE_VALUE) {
+      break;
+    }
+    if (GetLastError() != CRT_ERROR_FILE_NOT_FOUND && GetLastError() != CRT_ERROR_PIPE_BUSY) {
+      return -EIO;
+    }
+    WaitNamedPipeA(g_broker_pipe_name, 50);
+    Sleep(10);
+  }
+  if (pipe == CRT_INVALID_HANDLE_VALUE) {
+    return -EIO;
+  }
+
+  memset(&header, 0, sizeof(header));
+  header.magic = CRT_SPAWN_BROKER_MAGIC;
+  header.version = CRT_SPAWN_BROKER_VERSION;
+  header.client_pid = (uint32_t)GetCurrentProcessId();
+  header.want_plain_pipe = 1U;
+
+  rc = write_exact(pipe, &header, (DWORD)sizeof(header));
+  if (rc == 0) {
+    rc = read_exact(pipe, &response, (DWORD)sizeof(response));
+  }
+  CloseHandle(pipe);
+  if (rc != 0) {
+    return rc;
+  }
+  if (response.magic != CRT_SPAWN_BROKER_MAGIC || response.version != CRT_SPAWN_BROKER_VERSION) {
+    return -EIO;
+  }
+  if (response.result != 0) {
+    return response.result;
+  }
+  if (out_read != 0) {
+    *out_read = (void*)(uintptr_t)response.plain_pipe_read;
+  }
+  if (out_write != 0) {
+    *out_write = (void*)(uintptr_t)response.plain_pipe_write;
+  }
+  return 0;
+}
+
 /* ---- broker (server) side ---- */
 
 /* CRT_FD_SNAPSHOT_PIPE_ENV's value is always exactly 16 hex chars, written
@@ -440,6 +498,33 @@ static int broker_handle_request(HANDLE pipe) {
   if (client_process == 0) {
     response.result = -ESRCH;
     response.windows_error = (uint32_t)GetLastError();
+    write_exact(pipe, &response, (DWORD)sizeof(response));
+    return 0;
+  }
+
+  if (header.want_plain_pipe != 0) {
+    HANDLE plain_read = 0;
+    HANDLE plain_write = 0;
+    HANDLE dup_plain_read = 0;
+    HANDLE dup_plain_write = 0;
+
+    if (CreatePipe(&plain_read, &plain_write, 0, 0)) {
+      DuplicateHandle(
+          GetCurrentProcess(), plain_read, client_process, &dup_plain_read, 0, 0,
+          CRT_DUPLICATE_SAME_ACCESS);
+      DuplicateHandle(
+          GetCurrentProcess(), plain_write, client_process, &dup_plain_write, 0, 0,
+          CRT_DUPLICATE_SAME_ACCESS);
+      CloseHandle(plain_read);
+      CloseHandle(plain_write);
+      response.result = 0;
+      response.plain_pipe_read = (uint64_t)(uintptr_t)dup_plain_read;
+      response.plain_pipe_write = (uint64_t)(uintptr_t)dup_plain_write;
+    } else {
+      response.result = -EIO;
+      response.windows_error = (uint32_t)GetLastError();
+    }
+    CloseHandle(client_process);
     write_exact(pipe, &response, (DWORD)sizeof(response));
     return 0;
   }

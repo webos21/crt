@@ -203,6 +203,7 @@ if(EXISTS "${CRT_MKSH_ROOT}/Android.bp")
     target_compile_definitions(crt_mksh PRIVATE
       MKSH_CRT_ALLOW_LLP64
       MKSH_CRT_SHELL_CHILD_SPEC
+      MKSH_CRT_WINPATH
       MKSH_WITH_TEXTMODE
     )
     target_link_options(crt_mksh PRIVATE

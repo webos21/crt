@@ -157,6 +157,69 @@ Detailed policy and provenance stay in `docs/` and import manifests.
 
 ## in progressing
 
+- Started running libpng's real `configure && make && make install` through
+  project-owned mksh/make on Windows aarch64 (`port-rebuild-libpng`, depends
+  on zlib already installed to `PORT_PREFIX`). Not passing yet, but found and
+  fixed three real, independent CRT/mksh bugs along the way, each verified
+  against the full `ctest` suite (78/78) with no regressions:
+  - **`regcomp()`/`regexec()` never implemented capture groups**
+    (`libc/src/regex.c`): `\( \)` (BRE) / `( )` (ERE) were either treated as
+    literal parenthesis characters to match (BRE) or silently miscounted
+    into `re_nsub` (both modes), so `regmatch_t` subexpression bounds were
+    never populated. This broke the extremely common autoconf idiom `expr
+    "x$opt" : 'x--[^-]*-\(.*\)'` used to parse `--enable-X`/`--disable-X`/
+    `--prefix=VALUE` style flags -- `./configure --disable-shared
+    --enable-static --prefix=...` was silently corrupted into `--disable-0
+    --enable-0 --prefix=0` before libpng's (autoconf-generated, unlike
+    zlib's hand-written) `configure` ever got going. Rewrote the matcher to
+    track real capture groups through backtracking (see `regex_test.c`),
+    and fixed `re_nsub` counting to be BRE/ERE-mode-aware instead of always
+    counting unescaped `(`.
+  - **mksh never recognized Windows drive-letter paths as absolute**
+    (`shell/mksh/src/sh.h`, `mksh_abspath()`): mksh already ships a full
+    DOS-path-aware implementation behind `MKSH_DOSPATH`, but that flag also
+    switches `PATH`/`CDPATH` to `;`-separated, which conflicts with this
+    project's deliberate `:`-separated rootfs `PATH` convention
+    (`/system/bin:/bin:/usr/bin`, see `tools/crt-port-build.py`). Added a
+    narrower, CRT-owned `MKSH_CRT_WINPATH` define (alongside the existing
+    `MKSH_CRT_ALLOW_LLP64`/`MKSH_CRT_SHELL_CHILD_SPEC`) that only patches
+    `mksh_abspath`/`mksh_cdirsep`/`mksh_sdirsep` to recognize `X:\`/`X:/`
+    and `\` as well as `/`, without touching `MKSH_PATHSEPC`. Without this,
+    `cd "$(pwd)"` (autoconf's own `ac_pwd`/`ls -di .` working-directory
+    sanity check) silently treated the Windows-native absolute path
+    `getcwd()` returns as *relative*, doubling it into `<dir>/<dir>` and
+    failing with `configure: error: working directory cannot be
+    determined`.
+  - **Generic `pipe()` has the same CreateProcessA-adjacent failure as the
+    spawn broker's own bootstrap pipe, but was never routed through the
+    broker** (`libc/src/arch/windows/common/syscall.c`,
+    `spawn_broker.c`/`crt_spawn_broker.h`): `__crt_sys_pipe()` called
+    `CreatePipe()` unconditionally, with no check for
+    `__crt_windows_is_unregistered_clone()`. mksh forks a real subshell
+    (`RtlCloneUserProcess` clone) for every command substitution/pipeline,
+    and any further pipe needed *inside* that clone (nested command
+    substitution, `cmd1 | cmd2`) hit exactly the already-diagnosed
+    `CreatePipe()`-fails-in-an-unregistered-clone bug -- just reached via
+    plain shell usage instead of `posix_spawn()`. Extended the broker
+    protocol with a `want_plain_pipe` request (broker creates a pipe
+    locally and `DuplicateHandle`s *both* ends back into the client,
+    instead of attaching one end to a spawned target) and made
+    `__crt_sys_pipe()` route through it when inside an unregistered clone.
+  - Current blocker: libpng's `configure` now runs dramatically further
+    (past `checking whether build environment is sane`, make-feature
+    detection, `xargs`/`id` fallback warnings) but still dies with exit
+    127 partway through `checking how to create a ustar tar archive`
+    (`config.log` shows `tar --version` itself exiting 127, as expected
+    since `tar` is not an enabled toybox applet -- but the enclosing
+    `for _am_tool in $_am_tools; do ... done` loop does not survive that
+    the way it does for the earlier `xargs`/`id` fallbacks, and the whole
+    script exits 127 instead of falling through to `plaintar`/`pax`/
+    `cpio`/`none`). Not yet root-caused: could be a missing toybox applet
+    (`tar`) interacting badly with autoconf's fallback loop, or another
+    CRT-shell-child-spec-style subshell/exit-status propagation bug like
+    the one already fixed for `TPAREN` (see "Found and fixed a real
+    mksh/CRT-shell-child-spec bug..." above).
+
 - Attempted to fix a real (if currently low-impact) gap in the spawn broker:
   every process it spawns shows up in Windows' own process tree as a child
   of the broker, not of the clone that logically requested it (flat instead
@@ -226,11 +289,10 @@ Detailed policy and provenance stay in `docs/` and import manifests.
 
 ## planed
 
-- Run the next configure/make/install targets through project-owned mksh and
-  make on Windows:
-  - libpng after zlib;
-  - libffi;
-  - SQLite follow-up builds beyond the current amalgamation smoke.
+- Finish the libpng/libffi/SQLite configure/make/install pass on Windows
+  (see "in progressing" above for the current libpng blocker); libffi and
+  the SQLite follow-up build beyond the current amalgamation smoke have not
+  been attempted yet.
 - Re-run the same make/zlib/libpng/libffi recipe path on macOS and Linux to
   confirm the unified mksh+make flow across hosts.
 - Add focused tests for parallel make prerequisites before enabling `make -jN`

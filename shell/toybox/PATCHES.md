@@ -176,3 +176,50 @@ Removal/upstream condition:
 
 This patch can be dropped if upstream toybox probes `confstr` availability
 instead of assuming all Bionic-like environments lack it.
+
+## mksh Windows Drive-Letter Absolute Path Recognition
+
+Status: active CRT-local patch.
+
+Touched files:
+
+- `mksh/src/sh.h`
+- `shell/CMakeLists.txt`
+
+Reason:
+
+mksh's own `mksh_abspath()` only recognized a leading `/` as an absolute
+path. `getcwd()`/`pwd` have no POSIX root to report on Windows, so they
+always return a Windows-native absolute path (`C:\Users\...`); without this,
+`cd` treated that as *relative* and silently prepended the current directory
+to it, doubling the path into `<dir>/<dir>`. This surfaced while running
+libpng's (autoconf-generated) `configure` on Windows aarch64: its own
+`ac_pwd=\`pwd\` && ... cd "$ac_pwd" && ls -di .` working-directory sanity
+check failed with `configure: error: working directory cannot be
+determined`. mksh already ships a full DOS-path-aware implementation behind
+`MKSH_DOSPATH`, but that flag also switches `PATH`/`CDPATH` from `:` to
+`;`-separated, which conflicts with this project's deliberate
+`:`-separated rootfs `PATH` (`/system/bin:/bin:/usr/bin`, see
+`tools/crt-port-build.py`), so enabling it wholesale was not an option.
+
+Change summary:
+
+- Added a new, narrower `MKSH_CRT_WINPATH` define (`sh.h`) that only patches
+  `mksh_abspath`/`mksh_cdirsep`/`mksh_sdirsep` to recognize `X:\`/`X:/` and
+  `\` as well as `/`, reusing mksh's own existing `MKSH_DOSPATH`-gated
+  macro bodies verbatim rather than writing new path logic. `MKSH_PATHSEPC`
+  is untouched (stays `:`).
+- Enabled `MKSH_CRT_WINPATH` for the Windows build of `crt_mksh`, alongside
+  the existing `MKSH_CRT_ALLOW_LLP64`/`MKSH_CRT_SHELL_CHILD_SPEC` defines.
+
+ABI impact:
+
+None on CRT/Bionic public ABI. This is mksh-internal path-string handling.
+
+Removal/upstream condition:
+
+This is expected to remain as long as this project keeps `:`-separated PATH
+on Windows. If that convention ever changes, switching to plain
+`MKSH_DOSPATH` (and updating every `PATH`/`CDPATH` construction site to use
+`;`) would be the more natural fix instead of maintaining this narrower
+variant.

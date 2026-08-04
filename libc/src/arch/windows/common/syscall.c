@@ -2895,11 +2895,33 @@ long __crt_sys_pipe(int pipefd[2]) {
   int read_fd;
   int write_fd;
 
-  security_attributes.nLength = sizeof(security_attributes);
-  security_attributes.lpSecurityDescriptor = 0;
-  security_attributes.bInheritHandle = 1;
-  if (!CreatePipe(&read_handle, &write_handle, &security_attributes, 0)) {
-    return fail_last_error();
+  if (__crt_windows_is_unregistered_clone()) {
+    /* CreatePipe() fails with ERROR_INVALID_HANDLE when called from
+     * inside an unregistered RtlCloneUserProcess clone (see
+     * docs/windows_fork_emulation.md, "Chosen Direction: Spawn Broker").
+     * That was first found and worked around for posix_spawn()'s own
+     * internal bootstrap pipe, but plain pipe() has the same failure mode
+     * and is reached just as easily: any shell running inside a clone
+     * (e.g. mksh after fork()ing a subshell) that needs another pipe for
+     * a nested command substitution or `|` pipeline hits it too. Route
+     * through the broker exactly like posix_spawn() does. */
+    long broker_result;
+    void* broker_read = 0;
+    void* broker_write = 0;
+
+    broker_result = __crt_windows_broker_create_pipe(&broker_read, &broker_write);
+    if (broker_result != 0) {
+      return broker_result;
+    }
+    read_handle = (HANDLE)broker_read;
+    write_handle = (HANDLE)broker_write;
+  } else {
+    security_attributes.nLength = sizeof(security_attributes);
+    security_attributes.lpSecurityDescriptor = 0;
+    security_attributes.bInheritHandle = 1;
+    if (!CreatePipe(&read_handle, &write_handle, &security_attributes, 0)) {
+      return fail_last_error();
+    }
   }
   read_fd = alloc_fd(read_handle);
   if (read_fd < 0) {

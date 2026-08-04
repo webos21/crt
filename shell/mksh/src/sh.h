@@ -2885,6 +2885,36 @@ extern int tty_init_fd(void);	/* initialise tty_fd, tty_devtty */
 	    (strcmp(mksh_vdirsep_s, T_builtin) != 0));			\
 })
 int getdrvwd(char **, unsigned int);
+#elif defined(MKSH_CRT_WINPATH)
+/*
+ * CRT-owned addition (see shell/toybox/PATCHES.md): recognize Windows
+ * drive-letter absolute paths (`C:\...`, `C:/...`) and accept `\` as a
+ * directory separator, without pulling in the rest of MKSH_DOSPATH --
+ * that also switches MKSH_PATHSEPC to `;`, but this project deliberately
+ * keeps `:`-separated PATH/CDPATH on Windows too (see
+ * tools/crt-port-build.py's crt-shell PATH). getcwd()/pwd have no POSIX
+ * root to report here, so they always return a Windows-native absolute
+ * path; without this, mksh_abspath() never recognizes it, and `cd`
+ * silently treats it as relative, corrupting the path (observed as
+ * `cd: <dir>/<dir>: Input/output error` from autoconf's own
+ * `cd "$ac_pwd" && ls -di .` sanity check).
+ */
+#define mksh_drvltr(s)			__extension__({			\
+	const char *mksh_drvltr_s = (s);				\
+	(ctype(mksh_drvltr_s[0], C_ALPHA) && mksh_drvltr_s[1] == ':');	\
+})
+#define mksh_abspath(s)			__extension__({			\
+	const char *mksh_abspath_s = (s);				\
+	(mksh_cdirsep(mksh_abspath_s[0]) ||				\
+	    (mksh_drvltr(mksh_abspath_s) &&				\
+	    mksh_cdirsep(mksh_abspath_s[2])));				\
+})
+#define mksh_cdirsep(c)			__extension__({			\
+	char mksh_cdirsep_c = (c);					\
+	(mksh_cdirsep_c == '/' || mksh_cdirsep_c == '\\');		\
+})
+#define mksh_sdirsep(s)			strpbrk((s), "/\\")
+#define mksh_vdirsep(s)			vstrchr((s), '/')
 #else
 #define mksh_abspath(s)			(ord((s)[0]) == ORD('/'))
 #define mksh_cdirsep(c)			(ord(c) == ORD('/'))
