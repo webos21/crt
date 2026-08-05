@@ -4,7 +4,6 @@
 #include <unistd.h>
 
 #include <private/crt_fd_table.h>
-#include <private/crt_spawn_broker.h>
 
 #if defined(_M_IX86) || defined(__i386__)
 #define CRT_WINAPI __stdcall
@@ -72,14 +71,6 @@ void mainCRTStartup(void) {
   int argc = 0;
 
   __crt_env_set_initial(0);
-  if (getenv(CRT_SPAWN_BROKER_MODE_ENV) != 0) {
-    /* Never returns: services spawn requests until told to shut down, then
-     * exits directly. Runs before __crt_child_bootstrap() on purpose --
-     * the broker needs none of the fd-snapshot/rootfs/cwd bootstrap state,
-     * and must stay independent of whatever a caller's fd table looks
-     * like. */
-    __crt_windows_spawn_broker_main();
-  }
   __crt_child_bootstrap();
   if (command_line != 0) {
     size_t length = strlen(command_line);

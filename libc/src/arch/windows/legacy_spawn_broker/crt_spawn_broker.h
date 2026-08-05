@@ -82,6 +82,22 @@ struct crt_spawn_broker_request_header {
    * except client_pid; a client requesting a plain pipe still fills in
    * magic/version/client_pid and leaves the rest zeroed. */
   uint32_t want_plain_pipe;
+  /* Set to request a file opened for writing: CreateFileA() itself has
+   * been observed to fail with ERROR_INVALID_HANDLE from inside an
+   * unregistered clone whenever GENERIC_WRITE is requested (read-only
+   * opens work fine) -- the same CSRSS-registration-shaped failure mode
+   * as CreatePipe()/CreateProcessA(), just reached through a plain
+   * write-mode open() this time (concretely: mksh redirecting a
+   * subshell's stderr to a file, `(cmd) 2>conftest.err`, a routine
+   * autoconf idiom). application_path/application_path_length carry the
+   * file path for this request (reused rather than adding a fifth
+   * variable-length field); open_flags/open_mode carry the requested
+   * open() flags and mode. Mutually exclusive with every other want_*
+   * field; a client requesting a file open still fills in
+   * magic/version/client_pid and leaves the spawn-only fields zeroed. */
+  uint32_t want_open_file;
+  uint32_t open_flags;
+  uint32_t open_mode;
   uint32_t application_path_length;
   uint32_t command_line_length;
   uint32_t current_directory_length;
@@ -111,6 +127,11 @@ struct crt_spawn_broker_response {
    * CreatePipe() itself. */
   uint64_t plain_pipe_read;
   uint64_t plain_pipe_write;
+  /* Valid (nonzero) only when the request had want_open_file set and
+   * result is 0: the opened file, already duplicated into the client's
+   * own process, exactly as if the client had called CreateFileA()
+   * itself. */
+  uint64_t open_file_handle;
 };
 
 /* Called from __crt_sys_fork(), before RtlCloneUserProcess runs, always
@@ -155,6 +176,16 @@ long __crt_windows_spawn_broker_request(
  * process, exactly as CreatePipe() would have. Returns 0 on success, a
  * negative errno-shaped value on failure. */
 long __crt_windows_broker_create_pipe(void** out_read, void** out_write);
+
+/* Client side of the protocol: ask the broker to open a file for
+ * writing (see want_open_file above). Only meaningful (and only called)
+ * when __crt_windows_is_unregistered_clone() is true and the requested
+ * open() flags include O_WRONLY or O_RDWR. On success, out_handle is
+ * filled in with a handle already valid in the caller's own process,
+ * exactly as CreateFileA() would have. Returns 0 on success, a negative
+ * errno-shaped value on failure. */
+long __crt_windows_broker_open_file(
+    const char* path, unsigned long open_flags, unsigned long open_mode, void** out_handle);
 
 /* Entry point for a process launched as a broker (CRT_SPAWN_BROKER_MODE_ENV
  * set). Services spawn requests on the CRT_SPAWN_BROKER_PIPE_ENV named

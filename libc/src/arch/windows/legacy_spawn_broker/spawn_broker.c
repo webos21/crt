@@ -1,11 +1,12 @@
 #include <errno.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <private/crt_fd_table.h>
-#include <private/crt_spawn_broker.h>
+#include "crt_spawn_broker.h"
 
 /*
  * See libc/include/private/crt_spawn_broker.h for the protocol and the
@@ -57,6 +58,14 @@ struct crt_broker_process_information {
   DWORD dwThreadId;
 };
 
+struct crt_broker_overlapped {
+  uintptr_t Internal;
+  uintptr_t InternalHigh;
+  DWORD Offset;
+  DWORD OffsetHigh;
+  HANDLE hEvent;
+};
+
 #define CRT_INVALID_HANDLE_VALUE ((HANDLE)(intptr_t)-1)
 #define CRT_INFINITE 0xffffffffUL
 #define CRT_STARTF_USESTDHANDLES 0x00000100UL
@@ -74,6 +83,26 @@ struct crt_broker_process_information {
 #define CRT_PROCESS_DUP_HANDLE 0x00000040UL
 #define CRT_DUPLICATE_SAME_ACCESS 0x00000002UL
 #define CRT_HANDLE_FLAG_INHERIT 0x00000001UL
+#define CRT_FILE_FLAG_OVERLAPPED 0x40000000UL
+#define CRT_ERROR_IO_PENDING 997UL
+#define CRT_WAIT_TIMEOUT 258UL
+#define CRT_WAIT_OBJECT_0 0UL
+#define CRT_CREATE_NEW 1UL
+#define CRT_CREATE_ALWAYS 2UL
+#define CRT_OPEN_ALWAYS 4UL
+#define CRT_FILE_SHARE_READ 0x00000001UL
+#define CRT_FILE_SHARE_WRITE 0x00000002UL
+#define CRT_FILE_SHARE_DELETE 0x00000004UL
+#define CRT_FILE_ATTRIBUTE_NORMAL 0x00000080UL
+#define CRT_FILE_ATTRIBUTE_DIRECTORY 0x00000010UL
+#define CRT_FILE_FLAG_BACKUP_SEMANTICS 0x02000000UL
+#define CRT_INVALID_FILE_ATTRIBUTES 0xffffffffUL
+/* Generous but finite: comfortably covers even a slow CreateProcessA
+ * round trip through the broker, while guaranteeing a stuck request can
+ * never wedge a caller (or the broker itself) forever. See the
+ * __crt_windows_spawn_broker_main() comment for why "forever" was a real,
+ * observed failure mode -- not just a theoretical one. */
+#define CRT_BROKER_IO_TIMEOUT_MS 20000UL
 
 __declspec(dllimport) DWORD CRT_WINAPI GetLastError(void);
 __declspec(dllimport) void CRT_WINAPI SetLastError(DWORD dwErrCode);
@@ -114,35 +143,121 @@ __declspec(dllimport) BOOL CRT_WINAPI CreateProcessA(
     const char* lpCurrentDirectory, struct crt_broker_startupinfo* lpStartupInfo,
     struct crt_broker_process_information* lpProcessInformation);
 __declspec(dllimport) BOOL CRT_WINAPI TerminateProcess(HANDLE hProcess, unsigned int uExitCode);
+__declspec(dllimport) BOOL CRT_WINAPI FlushFileBuffers(HANDLE hFile);
+__declspec(dllimport) HANDLE CRT_WINAPI CreateEventA(
+    void* lpEventAttributes, BOOL bManualReset, BOOL bInitialState, const char* lpName);
+__declspec(dllimport) DWORD CRT_WINAPI WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds);
+__declspec(dllimport) BOOL CRT_WINAPI CancelIoEx(HANDLE hFile, struct crt_broker_overlapped* lpOverlapped);
+__declspec(dllimport) BOOL CRT_WINAPI GetOverlappedResult(
+    HANDLE hFile, struct crt_broker_overlapped* lpOverlapped, DWORD* lpNumberOfBytesTransferred,
+    BOOL bWait);
+__declspec(dllimport) DWORD CRT_WINAPI GetFileAttributesA(const char* lpFileName);
 
-static int write_exact(HANDLE handle, const void* buffer, DWORD size) {
-  const char* in = (const char*)buffer;
-  DWORD offset = 0;
-
-  while (offset < size) {
-    DWORD wrote = 0;
-
-    if (!WriteFile(handle, in + offset, size - offset, &wrote, 0) || wrote == 0) {
-      return -EIO;
-    }
-    offset += wrote;
+/* Waits (bounded by timeout_ms) for an overlapped ReadFile/WriteFile that
+ * returned FALSE/ERROR_IO_PENDING to actually finish, and reports how many
+ * bytes it transferred. On timeout, cancels the operation first -- an
+ * event that never gets signaled after a plain WaitForSingleObject
+ * timeout would otherwise leave the *kernel's* I/O request still pending
+ * against `handle`, which is exactly the kind of thing that would corrupt
+ * the next operation on the same handle. */
+static int overlapped_wait(HANDLE handle, struct crt_broker_overlapped* ov, DWORD timeout_ms,
+                            DWORD* out_bytes) {
+  if (WaitForSingleObject(ov->hEvent, timeout_ms) != CRT_WAIT_OBJECT_0) {
+    CancelIoEx(handle, ov);
+    GetOverlappedResult(handle, ov, out_bytes, 1);
+    return -ETIMEDOUT;
+  }
+  if (!GetOverlappedResult(handle, ov, out_bytes, 1)) {
+    return -EIO;
   }
   return 0;
 }
 
-static int read_exact(HANDLE handle, void* buffer, DWORD size) {
+/* All broker pipe handles (both ends) are opened with
+ * FILE_FLAG_OVERLAPPED specifically so these two helpers can bound how
+ * long they wait: without a timeout, a request that the broker never
+ * responds to (a bug on either side, an unlucky race, the broker process
+ * having died) leaves the caller blocked in ReadFile/WriteFile forever --
+ * observed in practice as an mksh subshell that never exits, invisible in
+ * any log because it isn't crashing, just waiting. See
+ * __crt_windows_spawn_broker_main() for the corresponding server-side
+ * accept-side reasoning. */
+static int write_exact(HANDLE handle, const void* buffer, DWORD size, DWORD timeout_ms) {
+  const char* in = (const char*)buffer;
+  DWORD offset = 0;
+  HANDLE ev;
+  int rc = 0;
+
+  if (size == 0) {
+    return 0;
+  }
+  ev = CreateEventA(0, 1, 0, 0);
+  if (ev == 0) {
+    return -EIO;
+  }
+  while (offset < size) {
+    struct crt_broker_overlapped ov;
+    DWORD wrote = 0;
+
+    memset(&ov, 0, sizeof(ov));
+    ov.hEvent = ev;
+    if (!WriteFile(handle, in + offset, size - offset, &wrote, &ov)) {
+      if (GetLastError() != CRT_ERROR_IO_PENDING) {
+        rc = -EIO;
+        break;
+      }
+      rc = overlapped_wait(handle, &ov, timeout_ms, &wrote);
+      if (rc != 0) {
+        break;
+      }
+    }
+    if (wrote == 0) {
+      rc = -EIO;
+      break;
+    }
+    offset += wrote;
+  }
+  CloseHandle(ev);
+  return rc;
+}
+
+static int read_exact(HANDLE handle, void* buffer, DWORD size, DWORD timeout_ms) {
   char* out = (char*)buffer;
   DWORD offset = 0;
+  HANDLE ev;
+  int rc = 0;
 
+  if (size == 0) {
+    return 0;
+  }
+  ev = CreateEventA(0, 1, 0, 0);
+  if (ev == 0) {
+    return -EIO;
+  }
   while (offset < size) {
+    struct crt_broker_overlapped ov;
     DWORD got = 0;
 
-    if (!ReadFile(handle, out + offset, size - offset, &got, 0) || got == 0) {
-      return -EIO;
+    memset(&ov, 0, sizeof(ov));
+    ov.hEvent = ev;
+    if (!ReadFile(handle, out + offset, size - offset, &got, &ov)) {
+      if (GetLastError() != CRT_ERROR_IO_PENDING) {
+        rc = -EIO;
+        break;
+      }
+      rc = overlapped_wait(handle, &ov, timeout_ms, &got);
+      if (rc != 0) {
+        break;
+      }
+    }
+    if (got == 0) {
+      rc = -EIO;
+      break;
     }
     offset += got;
   }
-  return 0;
+  CloseHandle(ev);
+  return rc;
 }
 
 /* ---- client side: lazily start the broker, once per fork lineage ---- */
@@ -281,7 +396,8 @@ long __crt_windows_spawn_broker_request(
 
   for (attempt = 0; attempt < 100; ++attempt) {
     pipe = CreateFileA(
-        g_broker_pipe_name, CRT_GENERIC_READ | CRT_GENERIC_WRITE, 0, 0, CRT_OPEN_EXISTING, 0, 0);
+        g_broker_pipe_name, CRT_GENERIC_READ | CRT_GENERIC_WRITE, 0, 0, CRT_OPEN_EXISTING,
+        CRT_FILE_FLAG_OVERLAPPED, 0);
     if (pipe != CRT_INVALID_HANDLE_VALUE) {
       break;
     }
@@ -309,21 +425,21 @@ long __crt_windows_spawn_broker_request(
   header.current_directory_length = (uint32_t)current_directory_length;
   header.environment_length = (uint32_t)environment_length;
 
-  rc = write_exact(pipe, &header, (DWORD)sizeof(header));
+  rc = write_exact(pipe, &header, (DWORD)sizeof(header), CRT_BROKER_IO_TIMEOUT_MS);
   if (rc == 0 && application_path_length != 0) {
-    rc = write_exact(pipe, application_path, (DWORD)application_path_length);
+    rc = write_exact(pipe, application_path, (DWORD)application_path_length, CRT_BROKER_IO_TIMEOUT_MS);
   }
   if (rc == 0 && command_line_length != 0) {
-    rc = write_exact(pipe, command_line, (DWORD)command_line_length);
+    rc = write_exact(pipe, command_line, (DWORD)command_line_length, CRT_BROKER_IO_TIMEOUT_MS);
   }
   if (rc == 0 && current_directory_length != 0) {
-    rc = write_exact(pipe, current_directory, (DWORD)current_directory_length);
+    rc = write_exact(pipe, current_directory, (DWORD)current_directory_length, CRT_BROKER_IO_TIMEOUT_MS);
   }
   if (rc == 0 && environment_length != 0) {
-    rc = write_exact(pipe, environment_block, (DWORD)environment_length);
+    rc = write_exact(pipe, environment_block, (DWORD)environment_length, CRT_BROKER_IO_TIMEOUT_MS);
   }
   if (rc == 0) {
-    rc = read_exact(pipe, &response, (DWORD)sizeof(response));
+    rc = read_exact(pipe, &response, (DWORD)sizeof(response), CRT_BROKER_IO_TIMEOUT_MS);
   }
   CloseHandle(pipe);
   if (rc != 0) {
@@ -365,7 +481,8 @@ long __crt_windows_broker_create_pipe(void** out_read, void** out_write) {
 
   for (attempt = 0; attempt < 100; ++attempt) {
     pipe = CreateFileA(
-        g_broker_pipe_name, CRT_GENERIC_READ | CRT_GENERIC_WRITE, 0, 0, CRT_OPEN_EXISTING, 0, 0);
+        g_broker_pipe_name, CRT_GENERIC_READ | CRT_GENERIC_WRITE, 0, 0, CRT_OPEN_EXISTING,
+        CRT_FILE_FLAG_OVERLAPPED, 0);
     if (pipe != CRT_INVALID_HANDLE_VALUE) {
       break;
     }
@@ -385,9 +502,9 @@ long __crt_windows_broker_create_pipe(void** out_read, void** out_write) {
   header.client_pid = (uint32_t)GetCurrentProcessId();
   header.want_plain_pipe = 1U;
 
-  rc = write_exact(pipe, &header, (DWORD)sizeof(header));
+  rc = write_exact(pipe, &header, (DWORD)sizeof(header), CRT_BROKER_IO_TIMEOUT_MS);
   if (rc == 0) {
-    rc = read_exact(pipe, &response, (DWORD)sizeof(response));
+    rc = read_exact(pipe, &response, (DWORD)sizeof(response), CRT_BROKER_IO_TIMEOUT_MS);
   }
   CloseHandle(pipe);
   if (rc != 0) {
@@ -404,6 +521,73 @@ long __crt_windows_broker_create_pipe(void** out_read, void** out_write) {
   }
   if (out_write != 0) {
     *out_write = (void*)(uintptr_t)response.plain_pipe_write;
+  }
+  return 0;
+}
+
+/* ---- client side: ask the broker to open a file for writing ---- */
+
+long __crt_windows_broker_open_file(
+    const char* path, unsigned long open_flags, unsigned long open_mode, void** out_handle) {
+  struct crt_spawn_broker_request_header header;
+  struct crt_spawn_broker_response response;
+  HANDLE pipe = CRT_INVALID_HANDLE_VALUE;
+  int attempt;
+  int rc;
+  size_t path_length = strlen(path);
+
+  if (!g_broker_started || g_broker_pipe_name[0] == 0) {
+    return -ECHILD;
+  }
+  if (path_length >= CRT_SPAWN_BROKER_PATH_MAX) {
+    return -ENAMETOOLONG;
+  }
+
+  for (attempt = 0; attempt < 100; ++attempt) {
+    pipe = CreateFileA(
+        g_broker_pipe_name, CRT_GENERIC_READ | CRT_GENERIC_WRITE, 0, 0, CRT_OPEN_EXISTING,
+        CRT_FILE_FLAG_OVERLAPPED, 0);
+    if (pipe != CRT_INVALID_HANDLE_VALUE) {
+      break;
+    }
+    if (GetLastError() != CRT_ERROR_FILE_NOT_FOUND && GetLastError() != CRT_ERROR_PIPE_BUSY) {
+      return -EIO;
+    }
+    WaitNamedPipeA(g_broker_pipe_name, 50);
+    Sleep(10);
+  }
+  if (pipe == CRT_INVALID_HANDLE_VALUE) {
+    return -EIO;
+  }
+
+  memset(&header, 0, sizeof(header));
+  header.magic = CRT_SPAWN_BROKER_MAGIC;
+  header.version = CRT_SPAWN_BROKER_VERSION;
+  header.client_pid = (uint32_t)GetCurrentProcessId();
+  header.want_open_file = 1U;
+  header.open_flags = (uint32_t)open_flags;
+  header.open_mode = (uint32_t)open_mode;
+  header.application_path_length = (uint32_t)path_length;
+
+  rc = write_exact(pipe, &header, (DWORD)sizeof(header), CRT_BROKER_IO_TIMEOUT_MS);
+  if (rc == 0) {
+    rc = write_exact(pipe, path, (DWORD)path_length, CRT_BROKER_IO_TIMEOUT_MS);
+  }
+  if (rc == 0) {
+    rc = read_exact(pipe, &response, (DWORD)sizeof(response), CRT_BROKER_IO_TIMEOUT_MS);
+  }
+  CloseHandle(pipe);
+  if (rc != 0) {
+    return rc;
+  }
+  if (response.magic != CRT_SPAWN_BROKER_MAGIC || response.version != CRT_SPAWN_BROKER_VERSION) {
+    return -EIO;
+  }
+  if (response.result != 0) {
+    return response.result;
+  }
+  if (out_handle != 0) {
+    *out_handle = (void*)(uintptr_t)response.open_file_handle;
   }
   return 0;
 }
@@ -461,7 +645,7 @@ static int broker_handle_request(HANDLE pipe) {
   response.magic = CRT_SPAWN_BROKER_MAGIC;
   response.version = CRT_SPAWN_BROKER_VERSION;
 
-  rc = read_exact(pipe, &header, (DWORD)sizeof(header));
+  rc = read_exact(pipe, &header, (DWORD)sizeof(header), CRT_BROKER_IO_TIMEOUT_MS);
   if (rc != 0) {
     return rc;
   }
@@ -471,26 +655,27 @@ static int broker_handle_request(HANDLE pipe) {
       header.current_directory_length >= CRT_SPAWN_BROKER_CWD_MAX ||
       header.environment_length >= CRT_SPAWN_BROKER_ENV_MAX) {
     response.result = -EINVAL;
-    write_exact(pipe, &response, (DWORD)sizeof(response));
+    write_exact(pipe, &response, (DWORD)sizeof(response), CRT_BROKER_IO_TIMEOUT_MS);
     return -EINVAL;
   }
   if (header.application_path_length != 0 &&
-      read_exact(pipe, application_path, header.application_path_length) != 0) {
+      read_exact(pipe, application_path, header.application_path_length, CRT_BROKER_IO_TIMEOUT_MS) != 0) {
     return -EIO;
   }
   application_path[header.application_path_length] = 0;
   if (header.command_line_length != 0 &&
-      read_exact(pipe, command_line, header.command_line_length) != 0) {
+      read_exact(pipe, command_line, header.command_line_length, CRT_BROKER_IO_TIMEOUT_MS) != 0) {
     return -EIO;
   }
   command_line[header.command_line_length] = 0;
   if (header.current_directory_length != 0 &&
-      read_exact(pipe, current_directory, header.current_directory_length) != 0) {
+      read_exact(pipe, current_directory, header.current_directory_length, CRT_BROKER_IO_TIMEOUT_MS) !=
+          0) {
     return -EIO;
   }
   current_directory[header.current_directory_length] = 0;
   if (header.environment_length != 0 &&
-      read_exact(pipe, environment_block, header.environment_length) != 0) {
+      read_exact(pipe, environment_block, header.environment_length, CRT_BROKER_IO_TIMEOUT_MS) != 0) {
     return -EIO;
   }
 
@@ -498,7 +683,7 @@ static int broker_handle_request(HANDLE pipe) {
   if (client_process == 0) {
     response.result = -ESRCH;
     response.windows_error = (uint32_t)GetLastError();
-    write_exact(pipe, &response, (DWORD)sizeof(response));
+    write_exact(pipe, &response, (DWORD)sizeof(response), CRT_BROKER_IO_TIMEOUT_MS);
     return 0;
   }
 
@@ -525,7 +710,60 @@ static int broker_handle_request(HANDLE pipe) {
       response.windows_error = (uint32_t)GetLastError();
     }
     CloseHandle(client_process);
-    write_exact(pipe, &response, (DWORD)sizeof(response));
+    write_exact(pipe, &response, (DWORD)sizeof(response), CRT_BROKER_IO_TIMEOUT_MS);
+    return 0;
+  }
+
+  if (header.want_open_file != 0) {
+    /* Mirrors __crt_sys_open()'s CreateFileA() setup in syscall.c (kept
+     * in sync by hand, not shared, matching this file's existing
+     * self-contained style) for exactly the cases that can reach here:
+     * always GENERIC_WRITE (see __crt_sys_open()'s call site below --
+     * read-only opens never route through the broker at all, since only
+     * GENERIC_WRITE was ever observed to fail inside an unregistered
+     * clone). application_path is already the host-translated path
+     * (translate_path_for_host() ran in the client before this request
+     * was ever sent), so no path translation happens here. */
+    DWORD open_access = (header.open_flags & O_RDWR) == O_RDWR
+                             ? (CRT_GENERIC_READ | CRT_GENERIC_WRITE)
+                             : CRT_GENERIC_WRITE;
+    DWORD open_disposition;
+    DWORD open_file_flags = CRT_FILE_ATTRIBUTE_NORMAL;
+    DWORD open_attrs;
+    HANDLE opened = CRT_INVALID_HANDLE_VALUE;
+    HANDLE dup_opened = 0;
+
+    if ((header.open_flags & O_CREAT) && (header.open_flags & O_EXCL)) {
+      open_disposition = CRT_CREATE_NEW;
+    } else if ((header.open_flags & O_CREAT) && (header.open_flags & O_TRUNC)) {
+      open_disposition = CRT_CREATE_ALWAYS;
+    } else if (header.open_flags & O_CREAT) {
+      open_disposition = CRT_OPEN_ALWAYS;
+    } else {
+      open_disposition = CRT_OPEN_EXISTING;
+    }
+    open_attrs = GetFileAttributesA(application_path);
+    if (open_attrs != CRT_INVALID_FILE_ATTRIBUTES &&
+        (open_attrs & CRT_FILE_ATTRIBUTE_DIRECTORY) != 0) {
+      open_file_flags = CRT_FILE_FLAG_BACKUP_SEMANTICS;
+    }
+    opened = CreateFileA(
+        application_path, open_access,
+        CRT_FILE_SHARE_READ | CRT_FILE_SHARE_WRITE | CRT_FILE_SHARE_DELETE, 0, open_disposition,
+        open_file_flags, 0);
+    if (opened != CRT_INVALID_HANDLE_VALUE) {
+      DuplicateHandle(
+          GetCurrentProcess(), opened, client_process, &dup_opened, 0, 0,
+          CRT_DUPLICATE_SAME_ACCESS);
+      CloseHandle(opened);
+      response.result = 0;
+      response.open_file_handle = (uint64_t)(uintptr_t)dup_opened;
+    } else {
+      response.result = -EIO;
+      response.windows_error = (uint32_t)GetLastError();
+    }
+    CloseHandle(client_process);
+    write_exact(pipe, &response, (DWORD)sizeof(response), CRT_BROKER_IO_TIMEOUT_MS);
     return 0;
   }
 
@@ -609,7 +847,7 @@ static int broker_handle_request(HANDLE pipe) {
     }
     response.result = -EIO;
     response.windows_error = (uint32_t)GetLastError();
-    write_exact(pipe, &response, (DWORD)sizeof(response));
+    write_exact(pipe, &response, (DWORD)sizeof(response), CRT_BROKER_IO_TIMEOUT_MS);
     CloseHandle(client_process);
     return 0;
   }
@@ -641,30 +879,102 @@ static int broker_handle_request(HANDLE pipe) {
     response.thread_handle = (uint64_t)(uintptr_t)dup_thread;
     response.fd_snapshot_pipe_write = (uint64_t)(uintptr_t)dup_fd_pipe_write_for_client;
   }
-  write_exact(pipe, &response, (DWORD)sizeof(response));
+  write_exact(pipe, &response, (DWORD)sizeof(response), CRT_BROKER_IO_TIMEOUT_MS);
   return 0;
+}
+
+static HANDLE create_broker_pipe_instance(const char* pipe_name) {
+  return CreateNamedPipeA(
+      pipe_name, CRT_PIPE_ACCESS_DUPLEX | CRT_FILE_FLAG_OVERLAPPED,
+      CRT_PIPE_TYPE_BYTE | CRT_PIPE_READMODE_BYTE | CRT_PIPE_WAIT, CRT_PIPE_UNLIMITED_INSTANCES, 65536,
+      65536, 0, 0);
+}
+
+/* A pipe instance opened with FILE_FLAG_OVERLAPPED (required so
+ * broker_handle_request()'s read_exact()/write_exact() calls on it can
+ * time out) must itself be connected with an OVERLAPPED, or the call
+ * fails outright. Unlike the read/write timeouts, this one waits
+ * indefinitely: an idle broker with no pending request is supposed to
+ * block here -- that is its entire job between requests, not a hang. */
+static BOOL connect_broker_pipe_instance(HANDLE pipe) {
+  struct crt_broker_overlapped ov;
+  HANDLE ev;
+  BOOL result;
+
+  ev = CreateEventA(0, 1, 0, 0);
+  if (ev == 0) {
+    return 0;
+  }
+  memset(&ov, 0, sizeof(ov));
+  ov.hEvent = ev;
+  if (ConnectNamedPipe(pipe, &ov)) {
+    result = 1;
+  } else {
+    DWORD err = GetLastError();
+
+    if (err == CRT_ERROR_PIPE_CONNECTED) {
+      result = 1;
+    } else if (err == CRT_ERROR_IO_PENDING) {
+      DWORD got = 0;
+
+      result = WaitForSingleObject(ev, CRT_INFINITE) == CRT_WAIT_OBJECT_0 &&
+               GetOverlappedResult(pipe, &ov, &got, 1);
+    } else {
+      result = 0;
+    }
+  }
+  CloseHandle(ev);
+  return result;
 }
 
 void __crt_windows_spawn_broker_main(void) {
   const char* pipe_name = getenv(CRT_SPAWN_BROKER_PIPE_ENV);
+  HANDLE pipe;
 
   if (pipe_name == 0 || pipe_name[0] == 0) {
     ExitProcess(1);
   }
+  pipe = create_broker_pipe_instance(pipe_name);
+  if (pipe == CRT_INVALID_HANDLE_VALUE) {
+    ExitProcess(1);
+  }
   for (;;) {
-    HANDLE pipe = CreateNamedPipeA(
-        pipe_name, CRT_PIPE_ACCESS_DUPLEX, CRT_PIPE_TYPE_BYTE | CRT_PIPE_READMODE_BYTE | CRT_PIPE_WAIT,
-        CRT_PIPE_UNLIMITED_INSTANCES, 65536, 65536, 0, 0);
+    HANDLE next_pipe;
     BOOL connected;
 
-    if (pipe == CRT_INVALID_HANDLE_VALUE) {
-      ExitProcess(1);
-    }
-    connected = ConnectNamedPipe(pipe, 0) ? 1 : (GetLastError() == CRT_ERROR_PIPE_CONNECTED);
+    connected = connect_broker_pipe_instance(pipe);
+    /* Create the *next* waiting instance right after accepting this
+     * connection, before servicing it -- not after, at the top of the
+     * next loop iteration. broker_handle_request() below can run a full
+     * CreateProcessA call and take a while; with the instance created
+     * only afterward, there was a real window (this request's full
+     * service time, plus the disconnect/close/recreate cleanup) with
+     * zero pending instances on this pipe name. Any client racing to
+     * connect during that window saw ERROR_FILE_NOT_FOUND -- observed in
+     * practice as mksh's "can't create pipe - try again" from a pipe()
+     * call unlucky enough to land in the gap, in the middle of a long
+     * autoconf run doing many pipe()s back to back. */
+    next_pipe = create_broker_pipe_instance(pipe_name);
     if (connected) {
       broker_handle_request(pipe);
+      /* WriteFile() returning success only means the response bytes made
+       * it into the kernel's pipe buffer, not that the client has
+       * actually read them yet. DisconnectNamedPipe() tears the
+       * connection down immediately regardless, discarding whatever the
+       * client hasn't read yet -- a well-known named-pipe pitfall.
+       * FlushFileBuffers() on a named pipe server handle blocks until the
+       * client has read everything, so the disconnect below can never
+       * race the client's read. Without this, the client's read_exact()
+       * intermittently failed with ERROR_PIPE_NOT_CONNECTED (233) right
+       * after a successful write_exact() on the server side -- confirmed
+       * with per-PID debug logging showing exactly that sequence. */
+      FlushFileBuffers(pipe);
     }
     DisconnectNamedPipe(pipe);
     CloseHandle(pipe);
+    if (next_pipe == CRT_INVALID_HANDLE_VALUE) {
+      ExitProcess(1);
+    }
+    pipe = next_pipe;
   }
 }

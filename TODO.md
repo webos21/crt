@@ -157,6 +157,59 @@ Detailed policy and provenance stay in `docs/` and import manifests.
 
 ## in progressing
 
+- **Retired the spawn broker; moving to a Cygwin/MSYS-style `fork()` instead.**
+  The broker (see "done" above) fixed zlib and got libpng most of the way,
+  but kept surfacing new structural failure modes of its own this session
+  (orphaned `mksh.exe` processes, named-pipe races, I/O timeouts, a
+  process-tree-reparenting attempt that regressed the working state and had
+  to be reverted -- see the entry below). Decided to isolate it out of the
+  active build rather than keep hardening it, and pursue the alternative
+  recorded in `docs/windows_fork_emulation.md`'s "Rejected alternatives"
+  section instead: a real Cygwin/MSYS-style `fork()` (`CreateProcessA` +
+  `WriteProcessMemory` memory copy + `setjmp`/`longjmp` resume), which
+  removes the "unregistered clone" problem at its root instead of working
+  around it process-by-process.
+  - **Phase A (done):** moved `spawn_broker.c`/`crt_spawn_broker.h` into
+    `libc/src/arch/windows/legacy_spawn_broker/` (kept, not deleted, but
+    excluded from `libc/CMakeLists.txt`'s `CRT_SYSCALL_FILE`); reverted the
+    three `__crt_windows_is_unregistered_clone()` branches in
+    `__crt_sys_open()`/`__crt_sys_pipe()`/`__crt_sys_posix_spawn()`
+    (`libc/src/arch/windows/common/syscall.c`) back to their pre-broker
+    direct-`CreateFileA`/`CreatePipe`/`CreateProcessA` form; removed the
+    `CRT_SPAWN_BROKER_MODE` dispatch from `crt1.c`. Full `ctest` stays green
+    (78/78) -- current test coverage does not exercise fork-then-spawn from
+    inside a clone directly, so this is a safe mechanical revert. **Known,
+    accepted regression:** until the new `fork()` lands, any real scenario
+    that needs a forked clone to spawn a further process (e.g. a subshell
+    inside `configure` running the compiler) will fail again the same way it
+    did before the broker existed; `libpng`'s build (see below) is blocked
+    on this.
+  - **Phase B (done):** `/DYNAMICBASE:NO` turned out to be rejected by the
+    linker on aarch64 (`lld-link: error: /dynamicbase:no is not compatible
+    with arm64` -- ARM64 PE images must always be relocatable, so there is
+    no link-time way to disable image ASLR on this architecture at all).
+    Verified instead with `STARTUPINFOEXA` +
+    `UpdateProcThreadAttribute(..., PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY,
+    ...)` setting `PROCESS_CREATION_MITIGATION_POLICY_BOTTOM_UP_ASLR_ALWAYS_OFF
+    | _HIGH_ENTROPY_ASLR_ALWAYS_OFF` at `CreateProcessA` time (a per-process
+    creation attribute, not a PE image characteristic): a probe executable
+    spawned this way landed its first `malloc()` and a stack-local variable
+    at byte-identical addresses across 2 independent top-level launches x 20
+    children each (42/42 matching); the image's own code address was
+    already deterministic on this system even *without* the mitigation
+    policy, so only heap/stack needed it. This is architecture-independent
+    in principle (a process-creation attribute, not a link flag), though
+    only verified on aarch64 so far. **The Phase C address-matching
+    assumption is confirmed feasible on real Windows aarch64 hardware.**
+  - **Phase C (next):** implement the new `__crt_sys_fork()` using this
+    mitigation-policy mechanism in place of the originally-planned
+    `/DYNAMICBASE:NO`. See the plan file referenced in this session for the
+    full step breakdown (self-relaunch via `CreateProcessA(CREATE_SUSPENDED)`
+    with the mitigation policy attribute, heap/stack/`.data`/`.bss` copy via
+    `WriteProcessMemory`, a `SetThreadContext` trampoline that redoes TLS
+    (`TlsAlloc`/`TlsSetValue`) and then `longjmp`s a copied `jmp_buf` to
+    resume at the `fork()` call site).
+
 - Started running libpng's real `configure && make && make install` through
   project-owned mksh/make on Windows aarch64 (`port-rebuild-libpng`, depends
   on zlib already installed to `PORT_PREFIX`). Not passing yet, but found and
@@ -218,32 +271,94 @@ Detailed policy and provenance stay in `docs/` and import manifests.
     toybox's `rm -f` checks for to stay silent
     (`shell/toybox/src/toys/posix/rm.c:110`, `errno == ENOENT`). Fixed in
     `map_windows_error()`. Verified against the full `ctest` suite (78/78).
-  - **Still open / where to pick this up:** even with all four fixes,
-    libpng's `configure` still dies with exit 127 partway through
-    `checking how to create a ustar tar archive` (the
-    `for _am_tool in $_am_tools; do ... done` loop in automake's tar-format
-    probe, around line 3647 of the generated `configure`). `set -x`
-    tracing (inject `set -x` right before that line, in
-    `out/windows-host-ninja-debug/port-tests/src/libpng-1.6.57/configure`
-    so it survives `copy_source()`'s fresh-copy-per-`--rebuild`, then run
-    `port-rebuild-libpng` and capture with `*> full_trace.log` -- piping
-    through `Select-Object`/`ctest`-style truncation loses the interesting
-    part) shows the trace running all the way to autoconf's own universal
-    EXIT trap (`configure: exit`, `rm -f core *.core core.conftest.*`)
-    with no visible anomaly in between, which is what led to (and was
-    fully explained by) the `ERROR_INVALID_NAME` fix above -- but that fix
-    alone did not make the failure go away, so **something else in the
-    same loop still exits 127** and was not yet isolated. Next step: rerun
-    the same `set -x` trace capture (to a file, not truncated) with the
-    `ERROR_INVALID_NAME` fix in place, and diff against the prior trace to
-    find exactly which statement's exit status changed. Prime suspects,
-    not yet checked: the `am__tar_` `eval` inside `(tardir=conftest.dir &&
-    eval $am__tar_ >conftest.tar) >&5 2>&5` when `_am_tar` never got set to
-    a real binary (since `tar`/`gnutar`/`gtar` are all absent); or another
-    instance of the already-documented CRT-shell-child-spec
-    subshell/exit-status-propagation class of bug (see "Found and fixed a
-    real mksh/CRT-shell-child-spec bug..." above, the `TPAREN` one) meaning
-    a *different* subshell in this exact loop, not the exit-trap rm.
+  - **Broker named-pipe server had two independent races**, found via
+    `set -x` tracing and confirmed with per-PID debug logging (removed
+    once fixed): (1) the server created the *next* waiting pipe instance
+    only *after* servicing the current request, leaving a real window
+    (the full service time, e.g. a `CreateProcessA` call, plus
+    disconnect/close/recreate) with zero pending instances -- any client
+    racing to connect during that window saw `ERROR_FILE_NOT_FOUND`,
+    observed as mksh's `can't create pipe - try again` failing
+    `checking whether build environment is sane`. Fixed by creating the
+    next instance immediately after accepting the current connection,
+    before servicing it. (2) `WriteFile()` returning success only means
+    the response bytes reached the kernel's pipe buffer, not that the
+    client read them; the server's `DisconnectNamedPipe()` tore the
+    connection down immediately regardless, intermittently losing the
+    response and failing the client's `read_exact()` with
+    `ERROR_PIPE_NOT_CONNECTED` (233). Fixed by calling
+    `FlushFileBuffers()` (blocks until the client has read everything)
+    before disconnecting. Verified with 50+ repeated runs of the exact
+    failing sanity-check idiom with no further "can't create pipe"
+    failures, and the full `ctest` suite (78/78).
+  - **The broker client's `read_exact()`/`write_exact()` had no
+    timeout**, discovered while investigating orphaned `mksh.exe`
+    processes left running (0% CPU, blocked, no ancestor process left
+    alive) after a build had already finished. If the broker ever fails
+    to respond for any reason, the mksh subshell that asked it for a
+    pipe/spawn blocks in `ReadFile`/`WriteFile` forever -- Windows does
+    not cascade-kill it, so it just sits there indefinitely, invisible
+    in any log because it never crashes. Rewrote the broker's pipe
+    handles (both client and server ends) to use `FILE_FLAG_OVERLAPPED`
+    and added a bounded (20s) wait via `WaitForSingleObject` +
+    `CancelIoEx` on timeout. This did **not** fully eliminate the
+    orphaned-process symptom on its own (see the `TPAREN` bug just
+    below, which was the real remaining cause in the cases actually
+    investigated) but is an independently correct hardening: no broker
+    I/O call can block a caller forever again, regardless of cause.
+  - **The real bug behind the remaining orphaned-subshell/exit-127
+    symptoms: a subshell reached without `XFORK` already set skipped
+    real process isolation entirely** (`shell/mksh/src/exec.c`,
+    `execute()`'s top entry check). A `TPAREN` (`(...)`) is supposed to
+    always get a real fork via `exchild()`, but the entry check only
+    forks when the caller already passed `XFORK` -- and `TLIST`'s
+    handling of the *last* item in a sequence (`case TLIST` in the same
+    file) passes `flags` straight through unchanged, with no `XFORK`.
+    So `{ cmd1; cmd2; (subshell); }` -- a `TLIST` whose last item is a
+    `TPAREN` -- reaches the entry check with no `XFORK`, skips it
+    entirely, and falls through to the `case TPAREN:` handler, which
+    recurses into the subshell's own content with `XFORK` freshly
+    added. If that content is a single `TCOM`, the *same* entry check's
+    existing `&& t->type != TCOM` term (added for a different, already-
+    fixed bug -- see "Found and fixed a real mksh/CRT-shell-child-spec
+    bug..." above) then blocks the fork for it too, since nothing there
+    distinguishes "a TCOM already isolated by a real fork" from "a TCOM
+    that IS the not-yet-forked subshell's own content." Concretely:
+    `(exit $ac_status)` as the last statement of a `{ ...; }` group --
+    exactly the idiom automake's generated `configure` uses to probe for
+    optional tools like `tar` -- ran `exit` in the *interpreter itself*
+    instead of a subshell, killing the whole `./configure` script
+    instead of just that one probe attempt. This is what was actually
+    behind the `checking how to create a ustar tar archive` exit-127
+    failure recorded below (the pipe-broker races above are real,
+    independently-fixed bugs, but were not sufficient to explain this
+    one). Fixed by making the entry check fork on `t->type == TPAREN`
+    unconditionally, regardless of whether `XFORK` was already set --
+    unlike every other node type, "just run me in this interpreter" is
+    never correct for a subshell. Verified with a standalone repro
+    (`(exit 99)` as the last statement of a `{ }` group inside a loop,
+    ran 3 iterations correctly instead of dying on the first) and the
+    full `ctest` suite (78/78); `checking how to create a ustar tar
+    archive` now correctly resolves to `none` and configure proceeds
+    well past it (through `checking for gcc`) instead of aborting.
+  - **Still open / where to pick this up:** with all seven fixes above,
+    libpng's `configure` gets to actual compiler probing (`checking for
+    gcc... /system/bin/mksh .../crt-cc`) but then fails: `./configure:
+    can't create conftest.err: Bad file descriptor` (repeated 5 times)
+    followed by `checking whether the C compiler works... no` /
+    `configure: error: C compiler cannot create executables`. Not yet
+    investigated -- likely another fd-redirection-under-subshell issue
+    in the same family as the ones above, given the pattern so far, but
+    unconfirmed. Separately (and not yet root-caused either): real
+    `exchild()`-forked subshells have been observed left running
+    (blocked, ~0% CPU, no live ancestor) *after* the top-level
+    `./configure` process and its whole python/cmd/cmake launch chain
+    had already exited -- worth checking whether this is the same
+    "broker never responds" class of issue the I/O timeout above
+    covers, or something else blocking in the child (e.g. waiting on
+    its own child that already exited). The timeout fix above bounds
+    broker I/O specifically; it does not (and cannot) bound arbitrary
+    other blocking calls a subshell might make.
 
 - Attempted to fix a real (if currently low-impact) gap in the spawn broker:
   every process it spawns shows up in Windows' own process tree as a child

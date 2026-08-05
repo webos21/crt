@@ -15,6 +15,17 @@
 #define CRT_FD_SNAPSHOT_FLAG_INHERITABLE 0x00000001U
 #define CRT_FD_SNAPSHOT_FLAG_SOCKET_DUPLICATED 0x00000002U
 #define CRT_FD_SNAPSHOT_FLAG_REMOTE_PROCESS_HANDLE 0x00000004U
+/* Mirrors the exporting fd's O_APPEND state (the only fd_flags bit that
+ * matters across a spawn -- FD_CLOEXEC is meaningless on the far side of
+ * an exec, and no other flag is tracked in fd_flags at all). Without
+ * this, a child process that inherits an fd its parent opened with
+ * O_APPEND has no way to know that, and __crt_sys_write() silently
+ * writes from the file's current position (0, freshly opened) instead
+ * of seeking to the end first -- observed as autoconf's own `printf ...
+ * >>confdefs.h` idiom (an external command, unlike mksh's built-in
+ * `echo`, so it always goes through this snapshot) losing every write
+ * but the last. */
+#define CRT_FD_SNAPSHOT_FLAG_APPEND 0x00000008U
 
 #define CRT_FD_SNAPSHOT_ENV "CRT_FD_SNAPSHOT"
 #define CRT_FD_SNAPSHOT_PIPE_ENV "CRT_FD_SNAPSHOT_PIPE"

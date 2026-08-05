@@ -681,3 +681,84 @@ What the next attempt should do differently:
   copying, an unverified stack-address-determinism assumption) to fix a
   problem that, on inspection, does not actually require touching `fork()`
   at all.
+
+## Spawn Broker Retired: Moving To Full Cygwin/MSYS-Style `fork()`
+
+The broker fixed zlib end to end and got libpng most of the way, but kept
+generating new structural failure modes of its own rather than converging:
+recurring orphaned `mksh.exe` processes, named-pipe instance-exhaustion and
+lost-response races (both fixed, see "done" entries in `TODO.md`), missing
+I/O timeouts (also fixed), and finally the process-tree-reparenting attempt
+above, which regressed the previously-working state (`STATUS_DLL_INIT_FAILED`)
+and had to be reverted rather than shipped half-fixed. Each fix bought
+correctness in one dimension while the broker's fundamental shape --
+a second, always-running process privileged to do the one thing a clone
+can't -- kept exposing new edges.
+
+Decision: retire the broker and build the "full Cygwin-style memory-copy
+fork" alternative that was deliberately set aside above ("Rejected
+alternatives", not rejected outright). Once a real `fork()` produces a
+properly `CreateProcessA`-registered child, there is no "unregistered
+clone" state left for anything to work around -- the problem this whole
+document is about disappears at the root instead of being patched call site
+by call site.
+
+**Phase A (done):** `spawn_broker.c`/`crt_spawn_broker.h` moved to
+`libc/src/arch/windows/legacy_spawn_broker/` -- kept for reference, excluded
+from `libc/CMakeLists.txt`. The three call sites in `syscall.c`
+(`__crt_sys_open`/`__crt_sys_pipe`/`__crt_sys_posix_spawn`) that branched on
+`__crt_windows_is_unregistered_clone()` were reverted to their pre-broker
+direct-Win32-call form; `crt1.c`'s `CRT_SPAWN_BROKER_MODE` dispatch was
+removed. `windows_unregistered_clone`/`__crt_windows_is_unregistered_clone()`
+themselves were left in place in `syscall.c` (harmless, still set by
+`__crt_sys_fork()`'s clone branch) since the new `fork()` may still want
+this state in some form. Full `ctest` (78/78) confirmed unaffected --
+current coverage does not exercise fork-then-spawn-from-inside-a-clone
+directly. This is an accepted, temporary regression for any real workload
+that does need that (subshells calling external commands inside
+`configure`, e.g. the in-progress libpng build) until Phase C lands.
+
+**Phase B (done):** the overhead benchmark above already showed
+`CreateProcessA` is not prohibitively slower than `RtlCloneUserProcess`
+(~1.2x). The remaining open risk was entirely about correctness, not
+performance: does an ASLR-disabled executable actually load its
+image/heap/stack at the same virtual addresses across repeated
+`CreateProcessA` launches? A standalone probe tested this directly on real
+Windows aarch64 hardware and found two things:
+
+1. `/DYNAMICBASE:NO` -- the originally planned mechanism -- is rejected by
+   `lld-link` on aarch64 outright: `error: /dynamicbase:no is not
+   compatible with arm64`. ARM64 PE images must always be relocatable;
+   there is no link-time way to disable image ASLR on this architecture.
+2. A different, per-process mechanism works instead:
+   `STARTUPINFOEXA` + `UpdateProcThreadAttribute(...,
+   PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY, ...)` with
+   `PROCESS_CREATION_MITIGATION_POLICY_BOTTOM_UP_ASLR_ALWAYS_OFF |
+   _HIGH_ENTROPY_ASLR_ALWAYS_OFF` set at `CreateProcessA` time. A probe
+   executable spawned this way landed its first `malloc()` allocation and a
+   stack-local variable's address at byte-identical values across 2
+   independent top-level launches x 20 children each (42/42 addresses
+   matching, both heap and stack). The image's own code address
+   (`&some_function`) was already deterministic on this system even
+   *without* the mitigation policy -- only the heap/stack needed it, since
+   those are randomized by a separate "bottom-up ASLR" mechanism, not by
+   the PE `/DYNAMICBASE` characteristic bit. Because this is a
+   process-creation attribute rather than a link-time image flag, it should
+   in principle be architecture-independent (only verified on aarch64 so
+   far).
+
+**The Phase C address-matching assumption is confirmed feasible**, using
+the mitigation-policy mechanism in place of the originally planned
+`/DYNAMICBASE:NO`.
+
+**Phase C:** implement the new `__crt_sys_fork()`: `setjmp` at the call
+site, self-relaunch via `CreateProcessA(..., CREATE_SUSPENDED, ...)` with
+the `PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY` attribute set (as verified in
+Phase B), `WriteProcessMemory` copy of the `malloc.c` `heap_head` chunk
+chain (absolute-pointer-linked, so exact address reproduction matters --
+see "Deciding The Next Step" above) plus the calling thread's stack and
+`.data`/`.bss`, a `GetThreadContext`/`SetThreadContext` trampoline that
+redoes TLS from scratch (fresh `TlsAlloc()` + `TlsSetValue()` -- unlike
+`RtlCloneUserProcess`, a `CreateProcessA`-spawned process does not inherit
+TLS slots at all) and then `longjmp`s the copied `jmp_buf` to resume at the
+original `fork()` call site with return value 0.

@@ -17,7 +17,6 @@
 #include <private/crt_fd_table.h>
 #include <private/crt_signal.h>
 #include <private/crt_spawn.h>
-#include <private/crt_spawn_broker.h>
 
 typedef void* HANDLE;
 typedef uintptr_t SOCKET;
@@ -1137,20 +1136,6 @@ static char* build_windows_environment_block(
   return block;
 }
 
-/* Total byte length of a Windows-style double-null-terminated
- * environment block, including both terminating nulls -- used when
- * handing a block built by build_windows_environment_block() to the
- * spawn broker, which needs an explicit length rather than relying on
- * inherited process state to find the end. */
-static size_t windows_environment_block_length(const char* block) {
-  const char* p = block;
-
-  while (*p != 0) {
-    p += strlen(p) + 1;
-  }
-  return (size_t)(p - block) + 1;
-}
-
 static void format_hex_u64(unsigned long long value, char buffer[17]) {
   static const char hex[] = "0123456789abcdef";
   int i;
@@ -1268,7 +1253,8 @@ int __crt_fd_snapshot_export(struct crt_fd_snapshot* snapshot) {
     snapshot->entries[count].fd = fd;
     snapshot->entries[count].kind = snapshot_kind_from_fd_kind(fd_kind[fd]);
     snapshot->entries[count].flags =
-        fd_kind[fd] == CRT_FD_KIND_FILE ? CRT_FD_SNAPSHOT_FLAG_INHERITABLE : 0;
+        (fd_kind[fd] == CRT_FD_KIND_FILE ? CRT_FD_SNAPSHOT_FLAG_INHERITABLE : 0) |
+        ((fd_flags[fd] & O_APPEND) != 0 ? CRT_FD_SNAPSHOT_FLAG_APPEND : 0);
     snapshot->entries[count].handle = (uintptr_t)duplicate;
     ++count;
   }
@@ -1338,7 +1324,7 @@ int __crt_fd_snapshot_import(const struct crt_fd_snapshot* snapshot) {
     }
     fd_table[entry->fd] = duplicate;
     fd_kind[entry->fd] = kind;
-    fd_flags[entry->fd] = 0;
+    fd_flags[entry->fd] = (entry->flags & CRT_FD_SNAPSHOT_FLAG_APPEND) != 0 ? O_APPEND : 0;
   }
   return 0;
 }
@@ -2433,8 +2419,8 @@ long __crt_sys_open(const char* path, int flags, unsigned int mode) {
   DWORD attrs;
   HANDLE handle;
   int fd;
-  (void)mode;
 
+  (void)mode;
   if ((flags & O_RDWR) == O_RDWR) {
     access = GENERIC_READ | GENERIC_WRITE;
   } else if (flags & O_WRONLY) {
@@ -2903,33 +2889,11 @@ long __crt_sys_pipe(int pipefd[2]) {
   int read_fd;
   int write_fd;
 
-  if (__crt_windows_is_unregistered_clone()) {
-    /* CreatePipe() fails with ERROR_INVALID_HANDLE when called from
-     * inside an unregistered RtlCloneUserProcess clone (see
-     * docs/windows_fork_emulation.md, "Chosen Direction: Spawn Broker").
-     * That was first found and worked around for posix_spawn()'s own
-     * internal bootstrap pipe, but plain pipe() has the same failure mode
-     * and is reached just as easily: any shell running inside a clone
-     * (e.g. mksh after fork()ing a subshell) that needs another pipe for
-     * a nested command substitution or `|` pipeline hits it too. Route
-     * through the broker exactly like posix_spawn() does. */
-    long broker_result;
-    void* broker_read = 0;
-    void* broker_write = 0;
-
-    broker_result = __crt_windows_broker_create_pipe(&broker_read, &broker_write);
-    if (broker_result != 0) {
-      return broker_result;
-    }
-    read_handle = (HANDLE)broker_read;
-    write_handle = (HANDLE)broker_write;
-  } else {
-    security_attributes.nLength = sizeof(security_attributes);
-    security_attributes.lpSecurityDescriptor = 0;
-    security_attributes.bInheritHandle = 1;
-    if (!CreatePipe(&read_handle, &write_handle, &security_attributes, 0)) {
-      return fail_last_error();
-    }
+  security_attributes.nLength = sizeof(security_attributes);
+  security_attributes.lpSecurityDescriptor = 0;
+  security_attributes.bInheritHandle = 1;
+  if (!CreatePipe(&read_handle, &write_handle, &security_attributes, 0)) {
+    return fail_last_error();
   }
   read_fd = alloc_fd(read_handle);
   if (read_fd < 0) {
@@ -3856,12 +3820,6 @@ long __crt_sys_fork(void) {
   if (result < 0) {
     return result;
   }
-  /* Best-effort: if this fails, posix_spawn() from any resulting clone
-   * simply reports an error instead of crashing later. Always called
-   * from a still-registered process (this function is the only place
-   * that creates a clone in the first place), so CreateProcessA here is
-   * safe; idempotent after the first call in a given fork lineage. */
-  (void)__crt_windows_ensure_spawn_broker();
   memset(&info, 0, sizeof(info));
   info.Length = sizeof(info);
   memset(old_inherit_flags, 0, sizeof(old_inherit_flags));
@@ -4016,7 +3974,6 @@ long __crt_sys_posix_spawn(
   DWORD process_error;
   long result;
   long remembered;
-  long broker_spawn_result = 0;
 
   if (path == 0) {
     return -EINVAL;
@@ -4128,21 +4085,7 @@ long __crt_sys_posix_spawn(
   startup.hStdInput = INVALID_HANDLE_VALUE;
   startup.hStdOutput = INVALID_HANDLE_VALUE;
   startup.hStdError = INVALID_HANDLE_VALUE;
-  if (fd_snapshot_pipe_mode && __crt_windows_is_unregistered_clone()) {
-    /* CreatePipe() itself fails with ERROR_INVALID_HANDLE when called
-     * from inside an unregistered clone (confirmed empirically; see
-     * docs/windows_fork_emulation.md, "Chosen Direction: Spawn Broker").
-     * The broker creates the pipe on our behalf instead (see the
-     * __crt_windows_is_unregistered_clone() branch below, which passes
-     * want_fd_snapshot_pipe=1); fd_snapshot_pipe_read/write get filled
-     * in from its response. bootstrap_pipe_text is a placeholder here --
-     * same fixed 16-hex-char width format_hex_u64() would have produced
-     * -- that the broker overwrites with the real value before using the
-     * environment block. */
-    memset(bootstrap_pipe_text, '0', 16);
-    bootstrap_pipe_text[16] = 0;
-    creation_flags |= CRT_CREATE_SUSPENDED;
-  } else if (fd_snapshot_pipe_mode) {
+  if (fd_snapshot_pipe_mode) {
     struct {
       DWORD nLength;
       void* lpSecurityDescriptor;
@@ -4237,61 +4180,21 @@ long __crt_sys_posix_spawn(
     RETURN(-ENOMEM);
   }
   memset(&process, 0, sizeof(process));
-  if (__crt_windows_is_unregistered_clone()) {
-    /* CreateProcessA crashes if called directly from an unregistered
-     * RtlCloneUserProcess clone (see docs/windows_fork_emulation.md,
-     * "Chosen Direction: Spawn Broker"). Ask the broker to do it instead;
-     * it hands back handles already duplicated into *this* process, so
-     * everything below (fd snapshot child-duplicate transport, resume,
-     * bookkeeping) treats them exactly like a normal CreateProcessA
-     * result. */
-    unsigned long broker_pid = 0;
-    void* broker_process_handle = 0;
-    void* broker_thread_handle = 0;
-    void* broker_fd_snapshot_pipe_write = 0;
-
-    broker_spawn_result = __crt_windows_spawn_broker_request(
-        application_path,
-        command_line,
-        current_directory,
-        environment_block,
-        (unsigned int)windows_environment_block_length(environment_block),
-        creation_flags,
-        0,
-        0,
-        0,
-        fd_snapshot_pipe_mode,
-        &broker_pid,
-        &broker_process_handle,
-        &broker_thread_handle,
-        &broker_fd_snapshot_pipe_write);
-    process_created = broker_spawn_result == 0;
-    process_error = 0;
-    if (process_created) {
-      process.hProcess = (HANDLE)broker_process_handle;
-      process.hThread = (HANDLE)broker_thread_handle;
-      process.dwProcessId = (DWORD)broker_pid;
-      if (fd_snapshot_pipe_mode) {
-        fd_snapshot_pipe_write = (HANDLE)broker_fd_snapshot_pipe_write;
-      }
-    }
-  } else {
-    memset(spawn_old_inherit_flags, 0, sizeof(spawn_old_inherit_flags));
-    fd_clear_inherit_for_spawn(spawn_inherit_touched, spawn_old_inherit_flags);
-    process_created = CreateProcessA(
-            application_path,
-            command_line,
-            0,
-            0,
-            1,
-            creation_flags,
-            environment_block,
-            current_directory,
-            &startup,
-            &process);
-    process_error = process_created ? 0 : GetLastError();
-    fd_restore_inherit_after_fork(spawn_inherit_touched, spawn_old_inherit_flags);
-  }
+  memset(spawn_old_inherit_flags, 0, sizeof(spawn_old_inherit_flags));
+  fd_clear_inherit_for_spawn(spawn_inherit_touched, spawn_old_inherit_flags);
+  process_created = CreateProcessA(
+          application_path,
+          command_line,
+          0,
+          0,
+          1,
+          creation_flags,
+          environment_block,
+          current_directory,
+          &startup,
+          &process);
+  process_error = process_created ? 0 : GetLastError();
+  fd_restore_inherit_after_fork(spawn_inherit_touched, spawn_old_inherit_flags);
   if (!process_created) {
     free(environment_block);
     if (fd_snapshot_ready) {
@@ -4302,9 +4205,6 @@ long __crt_sys_posix_spawn(
     }
     if (fd_snapshot_pipe_write != 0) {
       CloseHandle(fd_snapshot_pipe_write);
-    }
-    if (broker_spawn_result != 0) {
-      RETURN(broker_spawn_result);
     }
     SetLastError(process_error);
     RETURN(fail_last_error());
