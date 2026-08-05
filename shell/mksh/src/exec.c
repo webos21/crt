@@ -68,7 +68,31 @@ execute(struct op * volatile t,
 	if (xerrok == NULL)
 		xerrok = &dummy;
 
-	if ((flags&XFORK) && !(flags&XEXEC) && t->type != TPIPE
+	if ((flags&XFORK
+#ifdef MKSH_CRT_SHELL_CHILD_SPEC
+	    /* A TPAREN (subshell) must always get real process isolation,
+	     * whether or not the caller happened to set XFORK -- unlike
+	     * every other node type, "just run me in this interpreter" is
+	     * never correct for a subshell. Without this, a TPAREN reached
+	     * *without* XFORK already set (e.g. as the tail item of a
+	     * TLIST, which threads flags straight through with no XFORK --
+	     * `{ cmd1; cmd2; (subshell); }` is a TLIST whose last item is
+	     * the TPAREN) skips this whole check and falls through to the
+	     * `case TPAREN` below, which recurses into its own content
+	     * with XFORK freshly added. If that content is a single TCOM,
+	     * *this same check* (specifically "&& t->type != TCOM" a few
+	     * lines down) then blocks the fork for it too, because nothing
+	     * here distinguishes "a TCOM already isolated by a real
+	     * fork/the sh -c tail-exec path" from "a TCOM that IS the
+	     * not-yet-forked subshell's own content." Concretely:
+	     * `(exit $ac_status)` as the last statement of a `{ ...; }`
+	     * group -- a common idiom in autoconf's generated configure
+	     * scripts, used to probe for optional tools -- ran `exit` in
+	     * this interpreter instead of a subshell, killing the whole
+	     * `./configure` script instead of just that probe. */
+	    || t->type == TPAREN
+#endif
+	    ) && !(flags&XEXEC) && t->type != TPIPE
 #ifdef MKSH_CRT_SHELL_CHILD_SPEC
 	    /* TPAREN must still go through exchild()/real fork here: see the
 	     * matching, more detailed comment in jobs.c's exchild(). A
@@ -78,7 +102,9 @@ execute(struct op * volatile t,
 	     * NULL)), bypassing exchild()'s own entry-point guard entirely,
 	     * so excluding TPAREN here too used to run the subshell's
 	     * redirection in-process and permanently clobber this
-	     * interpreter's own fd. */
+	     * interpreter's own fd. (t->type == TPAREN always makes this
+	     * "!= TCOM" true anyway, so the new "|| t->type == TPAREN" term
+	     * above can never let a real TCOM slip past this guard.) */
 	    && t->type != TCOM
 #endif
 	    )
