@@ -17,7 +17,8 @@
     "system": "configure",
     "configure_args": [
       "--disable-shared",
-      "--enable-static"
+      "--enable-static",
+      "--build=aarch64-w64-mingw32"
     ],
     "make_args": []
   },
@@ -28,6 +29,7 @@
   },
   "notes": [
     "Requires zlib installed into PORT_PREFIX first.",
-    "The first successful CRT configure run required vfprintf, sprintf, vsprintf, inttypes.h, strings.h, strtoimax, strtoumax, bzero, and bcmp."
+    "The first successful CRT configure run required vfprintf, sprintf, vsprintf, inttypes.h, strings.h, strtoimax, strtoumax, bzero, and bcmp.",
+    "libpng's configure is real GNU Autoconf output (unlike zlib's hand-written script), so it runs config.guess, which does not recognize plain Windows `uname` output (`uname -s = Windows`, no MSYS/Cygwin/MinGW userland) and fails with 'unable to guess system type'. --build=aarch64-w64-mingw32 works around this on Windows aarch64; this is currently hardcoded to that one architecture and will need to become x86_64-w64-mingw32 (or be made dynamic) to also cover Windows x86_64."
   ]
 }
