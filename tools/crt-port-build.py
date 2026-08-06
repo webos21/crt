@@ -193,6 +193,21 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
         if target_os == "windows":
             env["CRT_HOST_CC"] = env.get("CRT_HOST_CC") or find_windows_host_tool(("clang.exe", "clang"))
             env["CRT_HOST_CXX"] = env.get("CRT_HOST_CXX") or find_windows_host_tool(("clang++.exe", "clang++"))
+            # crt-cc links via `-fuse-ld=lld` (see tools/crt-cc), so ld.lld is
+            # already this project's real linker backend -- just not under a
+            # name/location any autoconf-generated configure script would
+            # find on its own. Native-Windows configure runs with PATH
+            # hard-restricted to this project's own rootfs (unlike macOS/
+            # Linux, which append the host PATH -- see the `else` branch
+            # above -- and so already find a real system `ld` there), so
+            # without this, libtool's AC_PROG_LD ("checking for non-GNU
+            # ld") search comes up empty and configure aborts outright
+            # ("no acceptable ld found in $PATH"). Pre-setting $LD skips
+            # that PATH search entirely (autoconf/libtool only search PATH
+            # when $LD isn't already set).
+            found_ld = env.get("LD") or find_windows_host_tool(("ld.lld.exe", "ld.lld"))
+            if found_ld:
+                env["LD"] = found_ld
         make_suffix = ".exe" if target_os == "windows" else ""
         port_make = port_prefix / "bin" / f"make{make_suffix}"
         if port_make.exists():
@@ -207,7 +222,9 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
     env["RANLIB"] = env.get("RANLIB") or shutil.which("llvm-ranlib") or shutil.which("ranlib") or "ranlib"
     env["STRIP"] = env.get("STRIP") or shutil.which("llvm-strip") or shutil.which("strip") or "strip"
     if target_os == "windows" and use_crt_shell:
-        for tool_var in ("AR", "RANLIB", "STRIP"):
+        for tool_var in ("AR", "RANLIB", "STRIP", "LD"):
+            if not env.get(tool_var):
+                continue
             tool_path = Path(env[tool_var])
             if tool_path.is_absolute():
                 env[tool_var] = native_windows_shell_command(tool_path)

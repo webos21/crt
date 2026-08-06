@@ -511,6 +511,47 @@ Detailed policy and provenance stay in `docs/` and import manifests.
     `crt-cc` directly, never a bare `ld`); next step is likely either
     aliasing one or making libpng's `configure` accept the existing
     toolchain wrapper instead. Not yet investigated.
+  - **Update: `ld` not found, fixed.** `crt-cc` already links via
+    `-fuse-ld=lld` (`tools/crt-cc`), so `ld.lld.exe` (shipped by the LLVM
+    install) is this project's real linker backend already -- it just
+    wasn't reachable under any name/location libtool's `AC_PROG_LD`
+    ("checking for non-GNU ld") search would find, because native-Windows
+    `--use-crt-shell` configure runs with `PATH` hard-restricted to this
+    project's own rootfs (`/system/bin:/bin:/usr/bin`), unlike macOS/
+    Linux, which append the *host* PATH and so already have a real system
+    `ld` there (Xcode CLT / binutils) -- this was a Windows-only gap.
+    Fixed in `tools/crt-port-build.py`'s `make_env()`: pre-set `$LD` to
+    `ld.lld.exe`'s real path (found the same way `CRT_HOST_CC`/
+    `CRT_HOST_CXX` already are, via `find_windows_host_tool()`, wrapped
+    with the same `CRT_SPAWN_NATIVE_WINDOWS=1` prefix AR/RANLIB/STRIP
+    already use) -- autoconf/libtool only search `PATH` for `ld` when
+    `$LD` isn't already set, so this skips the broken search entirely.
+    Verified: `checking for non-GNU ld... ...ld.lld.exe`,
+    `checking if the linker (...) is GNU ld... no` (ld.lld's `-v` banner
+    says "compatible with GNU linkers", not literally "GNU", so libtool
+    correctly treats it as non-GNU-but-compatible), and configure sails
+    through the entire libtool linker/shared-library-support detection
+    phase (`checking whether ... linker ... supports shared libraries...
+    yes`, ranlib/strip detection, PIC flags) to a new, much later, and
+    completely different next blocker: `checking if awk () works...
+    inaccessible or not found` / `configure: error: ... no` -- this
+    project's rootfs has no `awk` at all yet (`checking for gawk/mawk/
+    nawk/awk... no` earlier in the same log; toybox's own `awk.c` is a
+    `pending`, not-yet-enabled applet). Not yet investigated -- likely a
+    real, standalone piece of work (an AWK implementation), not a quick
+    fix like the ones above.
+  - Checked whether any of the fixes above are Windows-specific-only or
+    could affect macOS/Linux (couldn't literally build for those hosts
+    from this Windows aarch64 machine -- static review only): the
+    `lseek()` fix lives entirely in `libc/src/arch/windows/common/
+    syscall.c` (macOS/Linux use raw `syscall.S` kernel syscalls, which
+    already return `ESPIPE` for pipes correctly, unaffected); the `LD`
+    env var fix is explicitly `if target_os == "windows"`-scoped; the
+    regex engine port, `reallocarray()`, `MB_LEN_MAX`, and the `egrep`/
+    `fgrep` alias additions all live in shared, non-OS-forked files with
+    no Windows-specific API references, so they apply identically (and
+    identically safely, given `NLS` is deliberately never defined
+    regardless of platform) across all three targets.
 
 - Attempted to fix a real (if currently low-impact) gap in the spawn broker:
   every process it spawns shows up in Windows' own process tree as a child
