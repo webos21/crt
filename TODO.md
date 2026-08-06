@@ -422,17 +422,39 @@ Detailed policy and provenance stay in `docs/` and import manifests.
     does not truncate output`. This is autoconf's own self-test that
     builds a `sed` script by repeatedly doubling a fixed pattern string,
     then pipes the whole thing through `sed` to find the length where
-    truncation starts -- not yet root-caused. The self-relaunch's
-    fd-inheritance gap noted above (now fixed, see "Phase C" update) was
-    one candidate explanation and has been ruled out as the sole cause,
-    since it's specifically fixed now and this hang has not yet been
-    re-tested/re-diagnosed since; remaining candidates are something
-    specific to very long single lines being piped through an external
-    command from inside a subshell, or something else entirely. Next
-    step: retry the libpng configure now that the fd-inheritance fix has
-    landed, and if it still hangs, `-x` trace this specific self-test in
-    isolation (`CRT_PORT_SHELL_XTRACE=1`, matching earlier sessions'
-    approach) to see exactly which command the hang is inside.
+    truncation starts. **Root-caused and fixed.** Re-ran with
+    `CRT_PORT_SHELL_XTRACE=1` and caught the exact stuck command via a
+    live `Monitor` on the trace log: `echo "$ac_script" | sed 99q
+    >conftest.sed`, where `$ac_script` is an ~11 KB doubled string. `echo`
+    is a shell builtin; mksh's `MKSH_CRT_SHELL_CHILD_SPEC` Windows port
+    (`shell/mksh/src/jobs.c`'s `exchild()`) skips a real `fork()` for a
+    `TCOM` pipeline stage to avoid this platform's expensive memory-copy
+    `fork()` when it turns out to be an external command -- but when the
+    stage is a *builtin* instead, it runs synchronously in-process with no
+    concurrent reader forked yet, and its `write()` into the pipe
+    (`CreatePipe()`'s default buffer, ~4096 bytes) blocks forever once it
+    exceeds the buffer. Binary-searched the exact threshold with a minimal
+    `echo "$s" | wc -c` reproduction: 4051 bytes OK, 4101+ hangs
+    indefinitely (confirmed via `timeout`, not just CPU-delta). Fixed by
+    giving every `CreatePipe()` call in `syscall.c` (the generic `pipe()`
+    syscall, the posix_spawn() fd-snapshot bootstrap pipe, and the
+    fork-capable self-relaunch's fd handoff added just above) an explicit
+    4 MiB buffer (`CRT_PIPE_BUFFER_SIZE`) instead of the system default --
+    the latter two share the exact same synchronous-write-before-resume
+    shape and would have hit the identical deadlock for a large enough fd
+    table/snapshot, just not yet observed in practice. Verified: the
+    isolated repro now succeeds well past the old threshold; `ctest` stays
+    at 78/78; a full libpng `configure` re-run sails straight through the
+    sed self-test and `checking for grep that handles long lines and -e`,
+    reaching a *new*, much later, and non-hanging stopping point: `checking
+    for egrep... configure: error: no acceptable egrep could be found` --
+    `egrep`/`fgrep` are simply missing from `tools/create_rootfs.py`'s
+    `TOYBOX_APPLETS` alias list (toybox's `grep.c` natively supports both
+    as `OLDTOY` aliases of `grep`; just need to be added to the list and
+    have their `USE_EGREP`/`USE_FGREP` config macros enabled in this
+    project's hand-picked toybox build). See
+    `docs/windows_fork_emulation.md`, "Windows Pipe Buffer Size", for the
+    full writeup.
 
 - Attempted to fix a real (if currently low-impact) gap in the spawn broker:
   every process it spawns shows up in Windows' own process tree as a child

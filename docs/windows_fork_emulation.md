@@ -174,20 +174,43 @@ status. It does not claim Bionic/Linux in-place image replacement
 semantics -- there is no way to actually replace a running Windows
 process's image, so this is the closest available approximation.
 
+## Windows Pipe Buffer Size
+
+Every `CreatePipe()` call in `syscall.c` (the generic `pipe()` syscall, the
+fd-snapshot bootstrap pipe used by `posix_spawn()`, and the aarch64
+fork-capable self-relaunch's fd handoff above) requests an explicit
+`CRT_PIPE_BUFFER_SIZE` (4 MiB) instead of the system default (`nSize=0`,
+observed ~4096 bytes on this host). Every one of these pipes has a
+synchronous, pre-resume/pre-fork write on one side (the writer runs to
+completion before anything is positioned to drain the pipe), so a
+default-sized buffer deadlocks the instant that write exceeds it.
+
+This was diagnosed for real via mksh specifically: its
+`MKSH_CRT_SHELL_CHILD_SPEC` Windows port (`shell/mksh/src/jobs.c`'s
+`exchild()`) deliberately skips a real `fork()` for a pipeline stage that's
+a plain `TCOM`, to avoid this platform's expensive memory-copy `fork()`
+when the stage turns out to be an external command (which can instead
+`posix_spawn()` directly, concurrently with the rest of the pipeline). But
+when such a stage resolves to a shell **builtin** instead (e.g. `echo
+long-string | sed ...`), nothing ever forks a concurrent process for it --
+the builtin's `write()` into the pipe runs synchronously, in-process,
+*before* the reader is ever spawned. Binary-searched empirically: writes up
+to ~4051 bytes completed, 4101+ hung indefinitely, confirmed via a minimal
+reproduction (`echo "$s" | wc -c` for a growing `$s`) run in isolation with
+`timeout`. This was the exact cause of the libpng `configure` hang
+documented below in earlier revisions of this doc: GNU Autoconf's own
+`checking for a sed that does not truncate output` self-test pipes an
+~11 KB doubled string built by `echo` into `sed`.
+
+Fixed by enlarging the buffer rather than reworking mksh's job-control/fork
+semantics to give every pipeline stage true concurrency -- simpler and
+lower-risk, at the cost of not being a fix for arbitrarily large
+single-write payloads (a write bigger than the buffer would still
+deadlock; 4 MiB comfortably covers realistic shell/configure-script
+usage).
+
 ## Current Open Issues
 
-- **libpng's real `configure` hangs** at autoconf's "checking for a sed
-  that does not truncate output" self-test (confirmed genuinely stuck via
-  the CPU-delta technique, not crashed) -- one step further than it used
-  to get (it now passes `checking whether the C compiler works`, which
-  used to fail under the old spawn-broker mechanism). Not yet
-  root-caused; the self-relaunch's fd-inheritance gap (below) was one
-  candidate explanation and is now fixed, but this hang has not yet been
-  re-tested since. Next step: retry the libpng configure now that the
-  fd-inheritance fix has landed, and if it still hangs, `-x` trace this
-  self-test in isolation (`CRT_PORT_SHELL_XTRACE=1` in
-  `tools/crt-port-build.py`) to see exactly which command the hang is
-  inside.
 - **x86_64 has no fork-then-spawn support at all** (see Summary above) --
   needs the memory-copy `fork()` mechanism ported, which in turn needs its
   own address-determinism verification and its own CONTEXT/TEB-access

@@ -174,6 +174,35 @@ struct crt_memory_status_ex {
 #define CRT_ENABLE_PROCESSED_OUTPUT 0x0001
 #define CRT_ENABLE_WRAP_AT_EOL_OUTPUT 0x0002
 
+/* CreatePipe()'s buffer size: NOT the system default (nSize=0, observed
+ * ~4096 bytes on this host). Every pipe this file creates -- the general
+ * pipe() syscall, the fd-snapshot bootstrap pipes used by posix_spawn()
+ * and the aarch64 fork-capable self-relaunch's fd handoff -- has a
+ * synchronous, pre-resume/pre-fork write into it on one side, so a
+ * default-sized buffer deadlocks the moment that write exceeds it (there
+ * is nothing to drain the pipe until the writer returns). Confirmed for
+ * mksh's Windows port specifically: MKSH_CRT_SHELL_CHILD_SPEC
+ * (shell/mksh/src/jobs.c's exchild()) deliberately skips a real fork()
+ * for a pipeline stage that's a plain TCOM, to avoid the cost of this
+ * platform's memory-copy fork() when the stage turns out to be an
+ * external command (which can instead posix_spawn() directly,
+ * concurrently with the rest of the pipeline). But when such a stage
+ * resolves to a shell BUILTIN (e.g. `echo long-string | sed ...`)
+ * instead, nothing ever forks a concurrent process for it -- the
+ * builtin's write() into this pipe runs synchronously, in-process,
+ * *before* the reader is ever spawned. Empirically confirmed via binary
+ * search: writes up to ~4051 bytes completed, 4101+ hung indefinitely --
+ * observed for real via GNU Autoconf's own `checking for a sed that does
+ * not truncate output` self test, which pipes an ~11KB doubled string
+ * built by `echo` into `sed`. A generous fixed buffer sidesteps this for
+ * any realistic single synchronous write without touching mksh's
+ * job-control/fork semantics or the fd-snapshot protocol's own
+ * suspend/resume ordering; it is not a fix for true producer/consumer
+ * concurrency (a write larger than this would still deadlock), just a
+ * large enough ceiling that it doesn't matter in practice. See
+ * docs/windows_fork_emulation.md for the fork()-cost background. */
+#define CRT_PIPE_BUFFER_SIZE (4 * 1024 * 1024)
+
 #if defined(_M_IX86) || defined(__i386__)
 #define CRT_WINAPI __stdcall
 #else
@@ -1499,7 +1528,7 @@ int __crt_windows_fd_snapshot_relaunch_begin(unsigned long long* out_pipe_read_h
   security_attributes.nLength = sizeof(security_attributes);
   security_attributes.lpSecurityDescriptor = 0;
   security_attributes.bInheritHandle = 1;
-  if (!CreatePipe(&pipe_read, &pipe_write, &security_attributes, 0)) {
+  if (!CreatePipe(&pipe_read, &pipe_write, &security_attributes, CRT_PIPE_BUFFER_SIZE)) {
     result = map_windows_error(GetLastError());
     __crt_fd_snapshot_dispose(&relaunch_fd_snapshot);
     return result;
@@ -3016,7 +3045,7 @@ long __crt_sys_pipe(int pipefd[2]) {
   security_attributes.nLength = sizeof(security_attributes);
   security_attributes.lpSecurityDescriptor = 0;
   security_attributes.bInheritHandle = 1;
-  if (!CreatePipe(&read_handle, &write_handle, &security_attributes, 0)) {
+  if (!CreatePipe(&read_handle, &write_handle, &security_attributes, CRT_PIPE_BUFFER_SIZE)) {
     return fail_last_error();
   }
   read_fd = alloc_fd(read_handle);
@@ -4246,7 +4275,7 @@ long __crt_sys_posix_spawn(
     security_attributes.nLength = sizeof(security_attributes);
     security_attributes.lpSecurityDescriptor = 0;
     security_attributes.bInheritHandle = 1;
-    if (!CreatePipe(&fd_snapshot_pipe_read, &fd_snapshot_pipe_write, &security_attributes, 0)) {
+    if (!CreatePipe(&fd_snapshot_pipe_read, &fd_snapshot_pipe_write, &security_attributes, CRT_PIPE_BUFFER_SIZE)) {
       __crt_fd_snapshot_dispose(&fd_snapshot);
       RETURN(fail_last_error());
     }
