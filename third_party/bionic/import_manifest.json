@@ -1386,6 +1386,138 @@
       "license_family": "project",
       "reason": "C99 adapter ports Bionic/BSD scanner state behavior onto the CRT scan_source backend without depending on Bionic private FILE internals.",
       "next_action": "Reduce adapter-only code as local stdio internals converge with Bionic/BSD."
+    },
+    {
+      "local": "libc/src/regex/regcomp.c",
+      "component": "libc",
+      "source_kind": "bionic-main",
+      "upstream_ref": "main",
+      "upstream_path": "libc/upstream-netbsd/lib/libc/regex/regcomp.c",
+      "status": "adapted",
+      "review_class": "main_current",
+      "license_family": "BSD-3-Clause",
+      "reason": "Full POSIX BRE/ERE compiler (Henry Spencer/NetBSD strip-VM engine), replacing a hand-rolled matcher with no alternation support; needed for GNU Autoconf compatibility (checking for a sed/grep/egrep self-tests) on Windows.",
+      "next_action": "Recheck against Bionic main on future sync; no local behavioral changes beyond the portability shim in netbsd-compat.h."
+    },
+    {
+      "local": "libc/src/regex/regexec.c",
+      "component": "libc",
+      "source_kind": "bionic-main",
+      "upstream_ref": "main",
+      "upstream_path": "libc/upstream-netbsd/lib/libc/regex/regexec.c",
+      "status": "adapted",
+      "review_class": "main_current",
+      "license_family": "BSD-3-Clause",
+      "reason": "regexec() entry point and the three engine.c instantiations (small/large/multibyte state representations). See libc/src/regex/regcomp.c.",
+      "next_action": "Recheck against Bionic main on future sync."
+    },
+    {
+      "local": "libc/src/regex/engine.c",
+      "component": "libc",
+      "source_kind": "bionic-main",
+      "upstream_ref": "main",
+      "upstream_path": "libc/upstream-netbsd/lib/libc/regex/engine.c",
+      "status": "adapted",
+      "review_class": "main_current",
+      "license_family": "BSD-3-Clause",
+      "reason": "Matching engine, textually #include'd three times by regexec.c (never compiled as its own translation unit -- deliberately not listed in libc/CMakeLists.txt CRT_LIBC_SOURCES). See libc/src/regex/regcomp.c.",
+      "next_action": "Recheck against Bionic main on future sync."
+    },
+    {
+      "local": "libc/src/regex/regerror.c",
+      "component": "libc",
+      "source_kind": "bionic-main",
+      "upstream_ref": "main",
+      "upstream_path": "libc/upstream-netbsd/lib/libc/regex/regerror.c",
+      "status": "adapted",
+      "review_class": "main_current",
+      "license_family": "BSD-3-Clause",
+      "reason": "regerror()/REG_ATOI/REG_ITOA support. See libc/src/regex/regcomp.c.",
+      "next_action": "Recheck against Bionic main on future sync."
+    },
+    {
+      "local": "libc/src/regex/regfree.c",
+      "component": "libc",
+      "source_kind": "bionic-main",
+      "upstream_ref": "main",
+      "upstream_path": "libc/upstream-netbsd/lib/libc/regex/regfree.c",
+      "status": "adapted",
+      "review_class": "main_current",
+      "license_family": "BSD-3-Clause",
+      "reason": "regfree(). See libc/src/regex/regcomp.c.",
+      "next_action": "Recheck against Bionic main on future sync."
+    },
+    {
+      "local": "libc/src/regex/regex2.h",
+      "component": "libc",
+      "source_kind": "bionic-main",
+      "upstream_ref": "main",
+      "upstream_path": "libc/upstream-netbsd/lib/libc/regex/regex2.h",
+      "status": "adapted",
+      "review_class": "main_current",
+      "license_family": "BSD-3-Clause",
+      "reason": "Internal struct re_guts / strip-VM opcode definitions (MAGIC1/MAGIC2, cset). Never exposed outside libc/src/regex/ -- the public include/regex.h keeps re_g as an opaque pointer, so this is a pure implementation-detail import with no ABI surface. See libc/src/regex/regcomp.c.",
+      "next_action": "Recheck against Bionic main on future sync."
+    },
+    {
+      "local": "libc/src/regex/utils.h",
+      "component": "libc",
+      "source_kind": "bionic-main",
+      "upstream_ref": "main",
+      "upstream_path": "libc/upstream-netbsd/lib/libc/regex/utils.h",
+      "status": "adapted",
+      "review_class": "main_current",
+      "license_family": "BSD-3-Clause",
+      "reason": "DUPMAX/INFINITY/NC and the non-NLS wint_t/mbstate_t/wctype_t fallback typedefs -- deliberately kept in non-NLS mode (NLS left undefined) since this project's real wint_t is unsigned short (__WINT_TYPE__ on this target), which breaks the engine's negative OUT/BADCHAR sentinel comparisons; see netbsd-compat.h for the full explanation.",
+      "next_action": "Recheck against Bionic main on future sync."
+    },
+    {
+      "local": "libc/src/regex/cname.h",
+      "component": "libc",
+      "source_kind": "bionic-main",
+      "upstream_ref": "main",
+      "upstream_path": "libc/upstream-netbsd/lib/libc/regex/cname.h",
+      "status": "imported",
+      "review_class": "main_current",
+      "license_family": "BSD-3-Clause",
+      "reason": "Symbolic bracket-expression name table (e.g. [.hyphen.]) used by regcomp.c. Pristine, no adaptation needed.",
+      "next_action": "Recheck against Bionic main on future sync."
+    },
+    {
+      "local": "libc/src/regex/netbsd-compat.h",
+      "component": "libc",
+      "source_kind": "project-owned",
+      "upstream_ref": "n/a",
+      "upstream_path": "n/a",
+      "status": "new",
+      "review_class": "project_owned",
+      "license_family": "project",
+      "reason": "Force-included (-include, same pattern as libc/src/gdtoa/openbsd-compat.h) portability shim ahead of every regex/*.c translation unit: defines LIBHACK/REGEX_GNU_EXTENSIONS, no-op _DIAGASSERT/__RCSID/__FBSDID, __UNCONST/__arraycount, and pulls in <unistd.h> for _POSIX2_RE_DUP_MAX.",
+      "next_action": "None; keep alongside the regex import."
+    },
+    {
+      "local": "libc/src/regex/namespace.h",
+      "component": "libc",
+      "source_kind": "project-owned",
+      "upstream_ref": "n/a",
+      "upstream_path": "n/a",
+      "status": "new",
+      "review_class": "project_owned",
+      "license_family": "project",
+      "reason": "Empty stub satisfying regerror.c/regfree.c's unconditional #include \"namespace.h\" (NetBSD's public/private symbol renaming scheme, not applicable here).",
+      "next_action": "None; keep alongside the regex import."
+    },
+    {
+      "local": "libc/src/reallocarray.c",
+      "component": "libc",
+      "source_kind": "project-owned",
+      "upstream_ref": "n/a",
+      "upstream_path": "n/a",
+      "status": "new",
+      "review_class": "project_owned",
+      "license_family": "project",
+      "reason": "Bionic-compatible reallocarray() (overflow-checked realloc(ptr, nmemb*size)), needed by the ported regex engine's dynamic strip/cset array growth. Self-authored to Bionic's documented semantics rather than ported verbatim -- the exact current Bionic source file for it was not located during this import.",
+      "next_action": "Diff against Bionic main libc/bionic/reallocarray.cpp if/when located, to confirm behavior parity (overflow handling, errno)."
     }
   ]
 }

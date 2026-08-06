@@ -455,6 +455,62 @@ Detailed policy and provenance stay in `docs/` and import manifests.
     project's hand-picked toybox build). See
     `docs/windows_fork_emulation.md`, "Windows Pipe Buffer Size", for the
     full writeup.
+  - **Update: egrep/fgrep alias, ERE alternation, and pipe-lseek, all
+    fixed; configure now blocked on a plain missing `ld`.** Three more
+    real, independent bugs found and fixed chasing `checking for
+    egrep`/`fgrep`, in order:
+    1. `egrep`/`fgrep` weren't just missing from `tools/create_rootfs.py`'s
+       `TOYBOX_APPLETS` alias list -- this project also doesn't use
+       toybox's Kconfig `.config`; it hand-lists every enabled applet in
+       `shell/toybox/crt/generated/newtoys.h`, which had no `OLDTOY(egrep,
+       grep, ...)`/`OLDTOY(fgrep, grep, ...)` entries at all (toybox's own
+       `grep.c` already supports both natively). Added both to
+       `newtoys.h` and to `TOYBOX_APPLETS`.
+    2. `grep -E 'bar|baz'` didn't match either alternative -- `|` was
+       matched as a literal character. `libc/src/regex.c` was a 370-line
+       hand-rolled backtracking matcher with **no alternation support at
+       all** (not a regression; it was simply never implemented). Per
+       explicit instruction, replaced it wholesale with the real Bionic/
+       NetBSD Henry-Spencer strip-VM regex engine (`libc/src/regex/`,
+       ported from `libc/upstream-netbsd/lib/libc/regex/` on Bionic
+       `main`) -- full POSIX BRE/ERE, backreferences, bounded repetition,
+       POSIX character classes, opt-in GNU BRE extensions. See
+       `third_party/bionic/README.md`'s "Regex Tranche" for the full file
+       list and adaptation notes (the interesting one: this project's real
+       `wint_t` is `unsigned short`, which breaks the engine's negative
+       sentinel comparisons, so the NLS/real-wide-char path is
+       deliberately left off in favor of utils.h's own signed-`short`
+       fallback -- see `libc/src/regex/netbsd-compat.h`'s top comment).
+       Also added `reallocarray()` (`libc/src/reallocarray.c`) and
+       `MB_LEN_MAX` (`include/limits.h`), both needed by the ported
+       engine and missing from this libc before now.
+    3. Even with alternation working, `grep`/`egrep`/`fgrep` still matched
+       *nothing at all*, on *any* pattern, but only when reading from a
+       **pipe** (a real file argument worked fine) -- root-caused to
+       toybox `grep.c`'s "only run binary-file sniffing on lseekable fds"
+       guard (`!lseek(fd, 0, SEEK_CUR)`): this project's Windows
+       `__crt_sys_lseek()` called `SetFilePointerEx()` on whatever handle
+       it was given with no check for whether it was actually seekable,
+       so the guard's intended skip-on-pipe behavior silently didn't
+       trigger -- grep's binary-sniffing peek-and-rewind ran on piped
+       stdin too, consumed the pipe's data during the peek, and (since a
+       pipe can't be rewound) never got it back, so the real read loop
+       that followed started from an already-drained pipe. Fixed by
+       checking `GetFileType(handle) == FILE_TYPE_PIPE` up front and
+       returning `-ESPIPE`, matching POSIX `lseek(2)` on a pipe/FIFO.
+       Regression-covered in `tests/fd_errno_test.c`.
+
+    All three verified together: `ctest` 78/78 (plus new `regex_test.c`
+    coverage for alternation/bounded-repetition/backreferences/POSIX
+    classes/case-insensitivity, and the `fd_errno_test.c` lseek-on-pipe
+    check); a full libpng `configure` re-run now sails through `checking
+    for egrep`/`checking for fgrep` (`... /system/bin/grep -E` / `-F`) and
+    reaches yet another new, later, ordinary (non-hanging) stopping point:
+    `configure: error: no acceptable ld found in $PATH` -- this project's
+    rootfs has no standalone `ld` binary at all (it drives `lld-link`/
+    `crt-cc` directly, never a bare `ld`); next step is likely either
+    aliasing one or making libpng's `configure` accept the existing
+    toolchain wrapper instead. Not yet investigated.
 
 - Attempted to fix a real (if currently low-impact) gap in the spawn broker:
   every process it spawns shows up in Windows' own process tree as a child

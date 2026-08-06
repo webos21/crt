@@ -62,6 +62,35 @@ int main(void) {
     return fail("close README.md");
   }
 
+  // lseek() on a pipe must fail with ESPIPE, matching POSIX. On Windows,
+  // this project's fd table classifies anonymous pipes as plain
+  // CRT_FD_KIND_FILE (there is no separate "pipe" kind), so this can only
+  // be enforced by asking the OS about the underlying handle directly
+  // (GetFileType() == FILE_TYPE_PIPE in __crt_sys_lseek()) rather than by
+  // fd-table bookkeeping. Without that check, toybox grep's "only sniff
+  // for a binary file on lseekable fds" guard (`!lseek(fd, 0,
+  // SEEK_CUR)`) silently ran its binary-sniffing peek-and-rewind on
+  // piped stdin too -- and since a pipe can't actually be rewound, that
+  // peek permanently consumed the piped input before grep's real read
+  // loop ever started, so every line was gone and grep matched nothing
+  // on any pattern, but only when reading from a pipe (a real file
+  // argument was unaffected).
+  {
+    int pipe_fds[2];
+
+    if (pipe(pipe_fds) != 0) {
+      return fail("pipe");
+    }
+    errno = 0;
+    if (lseek(pipe_fds[0], 0, SEEK_CUR) != -1 || errno != ESPIPE) {
+      close(pipe_fds[0]);
+      close(pipe_fds[1]);
+      return fail("lseek pipe errno");
+    }
+    close(pipe_fds[0]);
+    close(pipe_fds[1]);
+  }
+
   write(1, "fd_errno_test: ok\n", 18);
   return 0;
 }

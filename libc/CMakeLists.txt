@@ -27,7 +27,7 @@ set(CRT_LIBC_SOURCES
   src/qsort.c
   src/fnmatch.c
   src/random.c
-  src/regex.c
+  src/reallocarray.c
   src/resource.c
   src/sched.c
   src/scanf.c
@@ -111,6 +111,22 @@ set(CRT_GDTOA_SOURCES
 list(APPEND CRT_LIBC_SOURCES ${CRT_GDTOA_SOURCES})
 set_source_files_properties(${CRT_GDTOA_SOURCES} PROPERTIES
   COMPILE_OPTIONS "-include;${CMAKE_CURRENT_SOURCE_DIR}/src/gdtoa/openbsd-compat.h;-Wno-sign-compare;-Wno-uninitialized"
+)
+
+# NetBSD/Bionic regex engine import -- see third_party/bionic/README.md for
+# provenance and libc/src/regex/netbsd-compat.h for the portability shim
+# force-included ahead of every file here. engine.c is deliberately NOT
+# listed: it is textually #include'd three times by regexec.c itself (once
+# per state representation), never compiled as its own translation unit.
+set(CRT_REGEX_SOURCES
+  src/regex/regcomp.c
+  src/regex/regerror.c
+  src/regex/regexec.c
+  src/regex/regfree.c
+)
+list(APPEND CRT_LIBC_SOURCES ${CRT_REGEX_SOURCES})
+set_source_files_properties(${CRT_REGEX_SOURCES} PROPERTIES
+  COMPILE_OPTIONS "-include;${CMAKE_CURRENT_SOURCE_DIR}/src/regex/netbsd-compat.h;-Wno-sign-compare;-Wno-unused-parameter;-Wno-unused-function;-Wno-missing-field-initializers"
 )
 
 add_library(c STATIC ${CRT_LIBC_SOURCES})

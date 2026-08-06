@@ -353,6 +353,31 @@ the Bionic/BSD state machine onto this project's `scan_source` abstraction.
 | `libc/src/arch/linux/x86_64/syscall.S` | mixed Bionic/Linux syscall surface | project-owned | extended | Adds raw futex syscall wrapper. |
 | `libc/src/arch/linux/aarch64/syscall.S` | mixed Bionic/Linux syscall surface | project-owned | extended | Adds raw futex syscall wrapper. |
 
+### Regex Tranche
+
+Replaces a hand-rolled backtracking matcher (which had no `|` alternation
+support at all -- it silently matched `|` as a literal character, breaking
+GNU Autoconf's `checking for a sed`/`egrep`/`fgrep` self-tests) with the real
+Henry Spencer/NetBSD strip-VM regex engine Bionic imports under
+`libc/upstream-netbsd/lib/libc/regex/`. Full POSIX BRE/ERE, backreferences,
+bounded repetition, POSIX character classes, and (opt-in via `REG_GNU`) GNU
+BRE extensions (`\+`, `\?`, `\|`).
+
+| Local file | Upstream path | Upstream ref | Status | Notes |
+| --- | --- | --- | --- | --- |
+| `libc/src/regex/regcomp.c` | `libc/upstream-netbsd/lib/libc/regex/regcomp.c` | `main` | adapted | BRE/ERE compiler. Adaptation is limited to the portability shim in `netbsd-compat.h` (force-included, no hand-edits to this file). |
+| `libc/src/regex/regexec.c` | `libc/upstream-netbsd/lib/libc/regex/regexec.c` | `main` | adapted | `regexec()` entry point; textually includes `engine.c` three times (small/large/multibyte state representations). |
+| `libc/src/regex/engine.c` | `libc/upstream-netbsd/lib/libc/regex/engine.c` | `main` | adapted | Matching engine. Deliberately **not** compiled as its own translation unit (not listed in `libc/CMakeLists.txt`) -- only ever reached via `regexec.c`'s `#include`. |
+| `libc/src/regex/regerror.c` | `libc/upstream-netbsd/lib/libc/regex/regerror.c` | `main` | adapted | `regerror()`. |
+| `libc/src/regex/regfree.c` | `libc/upstream-netbsd/lib/libc/regex/regfree.c` | `main` | adapted | `regfree()`. |
+| `libc/src/regex/regex2.h` | `libc/upstream-netbsd/lib/libc/regex/regex2.h` | `main` | adapted | Internal `struct re_guts`/strip-VM opcodes. Opaque outside this directory -- `include/regex.h` (already Bionic-matching byte-for-byte) keeps `re_g` as a forward-declared pointer, so this carries no public ABI surface. |
+| `libc/src/regex/utils.h` | `libc/upstream-netbsd/lib/libc/regex/utils.h` | `main` | adapted | `DUPMAX`/`INFINITY`/`NC`, and the non-NLS fallback `wint_t`/`mbstate_t`/`wctype_t` typedefs -- **NLS is deliberately left undefined**: this project's real `wint_t` (`__WINT_TYPE__` on this target) is `unsigned short`, which breaks the engine's negative `OUT`/`BADCHAR` sentinel comparisons (a 16-bit *unsigned* type can't round-trip a negative literal the way the engine's sentinel design assumes); the signed-`short` fallback utils.h already provides does not have that problem. See `netbsd-compat.h`'s top comment for the full reasoning. |
+| `libc/src/regex/cname.h` | `libc/upstream-netbsd/lib/libc/regex/cname.h` | `main` | imported | Symbolic bracket-expression name table (e.g. `[.hyphen.]`). Pristine. |
+| `libc/src/regex/netbsd-compat.h` | none | project-owned | new | Force-included (`-include`, same pattern as `libc/src/gdtoa/openbsd-compat.h`) ahead of every file above: defines `LIBHACK`/`REGEX_GNU_EXTENSIONS`, no-op `_DIAGASSERT`/`__RCSID`/`__FBSDID`, `__UNCONST`/`__arraycount`, and pulls in `<unistd.h>` for `_POSIX2_RE_DUP_MAX`. |
+| `libc/src/regex/namespace.h` | none | project-owned | new | Empty stub satisfying `regerror.c`/`regfree.c`'s unconditional `#include "namespace.h"` (NetBSD's public/private symbol renaming scheme; not applicable here). |
+| `libc/src/reallocarray.c` | none (Bionic-compatible signature/semantics; exact current Bionic source file not located) | project-owned | new | Overflow-checked `realloc(ptr, nmemb*size)`, needed by the regex engine's dynamic strip/cset array growth. |
+| `include/limits.h` | `libc/include/limits.h` | project-owned, Bionic-shaped | extended | Adds `MB_LEN_MAX` (needed by `regcomp.c`). |
+
 ## Rules
 
 - Preserve original copyright and license headers.

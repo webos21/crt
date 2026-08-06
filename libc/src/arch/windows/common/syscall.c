@@ -2672,6 +2672,23 @@ long long __crt_sys_lseek(int fd, long long offset, int whence) {
   if (handle == INVALID_HANDLE_VALUE) {
     return -EBADF;
   }
+  // Anonymous pipes and sockets aren't seekable, but this project's fd
+  // table classifies pipes as plain CRT_FD_KIND_FILE (see crt_fd_table.h)
+  // -- there is no fd-table-level way to tell a pipe from a real file
+  // apart from asking Windows directly. Without this check,
+  // SetFilePointerEx() below does not reliably fail the way POSIX
+  // lseek(2) is required to for a non-seekable fd (ESPIPE): observed
+  // concretely via toybox grep's "only run binary-file sniffing on
+  // lseekable fds" check (`!lseek(fd, 0, SEEK_CUR)`, grep.c) -- reading
+  // piped stdin, that peek-and-rewind silently succeeded on Windows
+  // instead of being skipped, consuming the pipe's data during the
+  // peek with no way to give it back, so every line of real input was
+  // gone by the time the actual read loop started (grep matched
+  // nothing, on any pattern, only when piped -- reading the same
+  // content from a real file worked correctly).
+  if (GetFileType(handle) == FILE_TYPE_PIPE) {
+    return -ESPIPE;
+  }
 
   if (whence == SEEK_SET) {
     method = FILE_BEGIN;

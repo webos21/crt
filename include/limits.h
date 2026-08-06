@@ -6,6 +6,7 @@
 #define SCHAR_MIN (-128)
 #define SCHAR_MAX 127
 #define UCHAR_MAX 255
+#define MB_LEN_MAX 4
 
 #ifdef __CHAR_UNSIGNED__
 #define CHAR_MIN 0

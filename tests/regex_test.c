@@ -85,6 +85,56 @@ int main(void) {
   if (m[1].rm_so != 2 || m[1].rm_eo != 5) return fail("regexec ere: group bounds");
   regfree(&pat);
 
+  // ERE alternation (`|`). Regression coverage for the bug that motivated
+  // the switch to the ported NetBSD/Bionic regex engine: the previous
+  // hand-rolled matcher had no alternation support at all and silently
+  // treated `|` as a literal character, which broke GNU Autoconf's own
+  // `checking for a sed that does not truncate output` / grep-and-egrep
+  // acceptance self-tests (see docs/windows_fork_emulation.md's "Windows
+  // Pipe Buffer Size" section for the unrelated pipe-deadlock half of
+  // that story, and TODO.md for the full trail).
+  if (regcomp(&pat, "bar|baz", REG_EXTENDED) != 0) return fail("regcomp ere alternation");
+  if (regexec(&pat, "xbazy", 1, m, 0) != 0) return fail("regexec ere alternation: no match (baz)");
+  if (regexec(&pat, "xbary", 1, m, 0) != 0) return fail("regexec ere alternation: no match (bar)");
+  if (regexec(&pat, "xquxy", 1, m, 0) != REG_NOMATCH) return fail("regexec ere alternation: false match");
+  regfree(&pat);
+  if (regcomp(&pat, "(bar|baz)", REG_EXTENDED) != 0) return fail("regcomp ere alternation group");
+  if (regexec(&pat, "xbazy", 2, m, 0) != 0) return fail("regexec ere alternation group: no match");
+  if (m[1].rm_eo - m[1].rm_so != 3) return fail("regexec ere alternation group: capture bounds");
+  regfree(&pat);
+
+  // BRE alternation is a GNU extension (`\|`): REGEX_GNU_EXTENSIONS makes
+  // the feature available in the ported engine, but it stays off unless
+  // the caller opts in with REG_GNU at regcomp() time (this project's
+  // own BRE callers -- mksh, toybox -- do not pass REG_GNU, so plain BRE
+  // callers see standard POSIX behavior; this exercises the opt-in path
+  // specifically).
+  if (regcomp(&pat, "bar\\|baz", REG_GNU) != 0) return fail("regcomp bre gnu alternation");
+  if (regexec(&pat, "xbazy", 1, m, 0) != 0) return fail("regexec bre gnu alternation: no match");
+  regfree(&pat);
+
+  // Bounded repetition `{m,n}`.
+  if (regcomp(&pat, "a{2,3}", REG_EXTENDED) != 0) return fail("regcomp bounded repetition");
+  if (regexec(&pat, "aaaa", 1, m, 0) != 0) return fail("regexec bounded repetition: no match");
+  if (m[0].rm_eo - m[0].rm_so != 3) return fail("regexec bounded repetition: greedy length");
+  if (regexec(&pat, "a", 1, m, 0) != REG_NOMATCH) return fail("regexec bounded repetition: under-min matched");
+  regfree(&pat);
+
+  // BRE backreferences (`\(...\)...\1`).
+  if (regcomp(&pat, "\\(abc\\)\\1", 0) != 0) return fail("regcomp backreference");
+  if (regexec(&pat, "abcabc", 1, m, 0) != 0) return fail("regexec backreference: no match");
+  if (regexec(&pat, "abcxyz", 1, m, 0) != REG_NOMATCH) return fail("regexec backreference: false match");
+  regfree(&pat);
+
+  // POSIX character classes and case-insensitive matching.
+  if (regcomp(&pat, "[[:digit:]]+", REG_EXTENDED) != 0) return fail("regcomp posix class");
+  if (regexec(&pat, "ab12cd", 1, m, 0) != 0) return fail("regexec posix class: no match");
+  if (m[0].rm_eo - m[0].rm_so != 2) return fail("regexec posix class: match length");
+  regfree(&pat);
+  if (regcomp(&pat, "hello", REG_ICASE) != 0) return fail("regcomp icase");
+  if (regexec(&pat, "HELLO world", 1, m, 0) != 0) return fail("regexec icase: no match");
+  regfree(&pat);
+
   write(1, "regex_test: ok\n", 15);
   return 0;
 }
