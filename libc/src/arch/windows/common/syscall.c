@@ -849,7 +849,20 @@ static int windows_has_executable_extension(const char* path) {
          ascii_strcasecmp(dot, ".cmd") == 0;
 }
 
-static int windows_handle_has_mz_signature(HANDLE handle) {
+/* Windows has no on-disk "executable" permission bit at all (NTFS ACLs
+ * don't map onto S_IXUSR/etc. either), so this project's stat()/access()
+ * emulation has always had to infer it from file *content* instead: "MZ"
+ * (a real PE binary) has counted since the very first Windows work this
+ * project did. A "#!" shebang script -- e.g. autoconf's own boilerplate
+ * install-sh -- is just as legitimately executable (this project's own
+ * posix_spawn()/execve() emulation now resolves shebangs itself, and every
+ * real Unix stat() reports S_IXUSR for a script with its execute bit set
+ * regardless of content), so it must count here too: without this, mksh's
+ * own access(path, X_OK) precheck (search_access() in shell/mksh/src/
+ * exec.c) rejects the file as "can't execute: Permission denied" before
+ * ever attempting to run it -- the shebang-resolution logic in
+ * __crt_sys_posix_spawn() never even gets a chance to run. */
+static int windows_handle_looks_executable(HANDLE handle) {
   unsigned char magic[2];
   DWORD bytes_read = 0;
   long long saved = 0;
@@ -864,7 +877,8 @@ static int windows_handle_has_mz_signature(HANDLE handle) {
   if (SetFilePointerEx(handle, 0, 0, FILE_BEGIN) &&
       ReadFile(handle, magic, (DWORD)sizeof(magic), &bytes_read, 0) &&
       bytes_read == sizeof(magic) &&
-      magic[0] == 'M' && magic[1] == 'Z') {
+      ((magic[0] == 'M' && magic[1] == 'Z') ||
+       (magic[0] == '#' && magic[1] == '!'))) {
     executable = 1;
   }
   (void)SetFilePointerEx(handle, saved, 0, FILE_BEGIN);
@@ -886,9 +900,106 @@ static int windows_path_is_executable_file(const char* host_path, DWORD attrs) {
   if (handle == INVALID_HANDLE_VALUE) {
     return 0;
   }
-  executable = windows_handle_has_mz_signature(handle);
+  executable = windows_handle_looks_executable(handle);
   CloseHandle(handle);
   return executable;
+}
+
+/* Reads a resolved host file's first line and, if it starts with "#!",
+ * parses the interpreter path and (Linux-style: at most one, unsplit)
+ * optional argument out of it -- mirroring what the Linux kernel's own
+ * execve() does for scripts. Windows CreateProcessA has no equivalent
+ * mechanism at all (it only ever launches real PE binaries), so nothing
+ * upstream of this project's posix_spawn()/execve() emulation has ever
+ * been able to run a "#!/bin/sh"-style script directly; every script this
+ * project has run so far has always been invoked with its interpreter
+ * spelled out explicitly (e.g. "mksh script.sh"). autoconf's own
+ * boilerplate install-sh breaks that pattern -- libtool's --mode=install
+ * execs it directly -- so __crt_sys_posix_spawn() now checks for this
+ * itself, the same way a real kernel would.
+ * Returns 1 with *has_arg/interpreter/arg filled in if a shebang line was
+ * found, 0 otherwise (including on any read/open failure -- callers should
+ * treat that identically to "not a script" and fall through to their
+ * normal exec path). */
+static int windows_read_shebang(
+    const char* host_path,
+    char* interpreter,
+    size_t interpreter_size,
+    char* arg,
+    size_t arg_size,
+    int* has_arg) {
+  HANDLE handle;
+  char buffer[1024];
+  DWORD bytes_read = 0;
+  size_t line_end;
+  size_t i;
+  size_t j;
+
+  *has_arg = 0;
+  if (interpreter_size > 0) {
+    interpreter[0] = 0;
+  }
+  if (arg_size > 0) {
+    arg[0] = 0;
+  }
+  handle = CreateFileA(host_path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE |
+                       FILE_SHARE_DELETE, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+  if (handle == INVALID_HANDLE_VALUE) {
+    return 0;
+  }
+  if (!ReadFile(handle, buffer, (DWORD)(sizeof(buffer) - 1), &bytes_read, 0)) {
+    CloseHandle(handle);
+    return 0;
+  }
+  CloseHandle(handle);
+  if (bytes_read < 2 || buffer[0] != '#' || buffer[1] != '!') {
+    return 0;
+  }
+  line_end = 2;
+  while (line_end < bytes_read && buffer[line_end] != '\n' && buffer[line_end] != '\r') {
+    ++line_end;
+  }
+  i = 2;
+  while (i < line_end && (buffer[i] == ' ' || buffer[i] == '\t')) {
+    ++i;
+  }
+  j = 0;
+  while (i < line_end && buffer[i] != ' ' && buffer[i] != '\t') {
+    if (j + 1 < interpreter_size) {
+      interpreter[j++] = buffer[i];
+    }
+    ++i;
+  }
+  if (interpreter_size > 0) {
+    interpreter[j < interpreter_size ? j : interpreter_size - 1] = 0;
+  }
+  if (j == 0) {
+    return 0;
+  }
+  while (i < line_end && (buffer[i] == ' ' || buffer[i] == '\t')) {
+    ++i;
+  }
+  if (i < line_end) {
+    size_t end = line_end;
+    size_t k = 0;
+
+    while (end > i && (buffer[end - 1] == ' ' || buffer[end - 1] == '\t')) {
+      --end;
+    }
+    while (i < end) {
+      if (k + 1 < arg_size) {
+        arg[k++] = buffer[i];
+      }
+      ++i;
+    }
+    if (arg_size > 0) {
+      arg[k < arg_size ? k : arg_size - 1] = 0;
+    }
+    if (k > 0) {
+      *has_arg = 1;
+    }
+  }
+  return 1;
 }
 
 static int append_command_arg(char* buffer, size_t size, size_t* pos, const char* arg) {
@@ -3455,7 +3566,7 @@ static long stat_from_handle(HANDLE handle, struct stat* st) {
     if ((info.file_attributes & FILE_ATTRIBUTE_READONLY) == 0) {
       st->st_mode |= S_IWUSR | S_IWGRP | S_IWOTH;
     }
-    if (windows_handle_has_mz_signature(handle)) {
+    if (windows_handle_looks_executable(handle)) {
       st->st_mode |= S_IXUSR | S_IXGRP | S_IXOTH;
     }
   }
@@ -4135,6 +4246,10 @@ struct crt_windows_spawn_context {
   char current_directory_buffer[4096];
   char fd_snapshot_text[65536];
   char bootstrap_cwd[4096];
+  char shebang_interpreter[4096];
+  char shebang_arg[4096];
+  char shebang_script_path[4096];
+  char* shebang_argv[256];
 };
 
 long __crt_sys_posix_spawn(
@@ -4191,6 +4306,45 @@ long __crt_sys_posix_spawn(
       path, search_path, application_path, sizeof(application_path));
   if (result != 0) {
     RETURN(result);
+  }
+  {
+    int shebang_has_arg = 0;
+
+    if (windows_read_shebang(application_path, ctx->shebang_interpreter,
+                              sizeof(ctx->shebang_interpreter), ctx->shebang_arg,
+                              sizeof(ctx->shebang_arg), &shebang_has_arg)) {
+      size_t argv_count = 0;
+      size_t new_index = 0;
+      size_t k;
+
+      memcpy(ctx->shebang_script_path, application_path, sizeof(ctx->shebang_script_path));
+      result = resolve_process_application_path(
+          ctx->shebang_interpreter, 1, application_path, sizeof(application_path));
+      if (result != 0) {
+        RETURN(result);
+      }
+      if (argv != 0) {
+        while (argv[argv_count] != 0) {
+          ++argv_count;
+        }
+      }
+      if (argv_count > 0) {
+        --argv_count; /* original argv[0] is replaced by the resolved script path below */
+      }
+      if (argv_count + 4 > (sizeof(ctx->shebang_argv) / sizeof(ctx->shebang_argv[0]))) {
+        RETURN(-E2BIG);
+      }
+      ctx->shebang_argv[new_index++] = ctx->shebang_interpreter;
+      if (shebang_has_arg) {
+        ctx->shebang_argv[new_index++] = ctx->shebang_arg;
+      }
+      ctx->shebang_argv[new_index++] = ctx->shebang_script_path;
+      for (k = 0; k < argv_count; ++k) {
+        ctx->shebang_argv[new_index++] = argv[k + 1];
+      }
+      ctx->shebang_argv[new_index] = 0;
+      argv = ctx->shebang_argv;
+    }
   }
   result = build_process_command_line(path, argv, command_line, sizeof(command_line));
   if (result != 0) {
