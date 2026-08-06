@@ -589,6 +589,52 @@ Detailed policy and provenance stay in `docs/` and import manifests.
       -- despite zlib's own install stamp already being present in
       `PORT_PREFIX`; not yet investigated (a link/library-path issue,
       not a missing-tool issue like everything above).
+  - Continued past that: `checking for zlibVersion in -lz... no` turned out
+    to be a COFF-vs-Unix static-library-naming mismatch, not a missing
+    build. This project's toolchain links via `clang -fuse-ld=lld`, whose
+    lld-link backend resolves `-lfoo` to a file literally named `foo.lib`
+    (matching this project's own CMake-built libs, e.g. `c.lib`/`m.lib`),
+    but zlib's own autoconf/make install produces the Unix-conventional
+    `libz.a`, which `-lz` could never find. Fixed generally (for all future
+    Windows ports, not just zlib) with a new post-install step,
+    `alias_unix_static_libs_for_windows_link()` in `tools/crt-port-build.py`:
+    after every port build, copies each installed `libfoo.a` to `foo.lib`
+    alongside it (skipped if `foo.lib` already exists). Verified: rebuilding
+    zlib now also produces `z.lib`, and a full libpng `configure` re-run
+    reaches `checking for zlibVersion in -lz... yes`.
+  - Next blocker after that: `fatal error: 'windows.h' file not found`
+    (`pngpriv.h:569`, guarded by
+    `#if defined(_WIN32) || defined(__WIN32__) || defined(__NT__)`). This
+    project's sysroot has no real Windows SDK `<windows.h>` (its own Win32
+    API surface is declared privately inside `libc/src/arch/windows/`, not
+    exposed publicly). Nothing near that include in
+    `pngpriv.h`/`png.c`/`pngerror.c` actually references a real Windows API
+    symbol from it, so -- matching the exact technique zlib's own recipe
+    already uses (`porting/recipes/zlib.json`'s `-U_WIN32` etc. `CFLAGS`) --
+    fixed by adding the same `-U_WIN32 -U_WIN32_WCE -U__WIN32__ -UWIN32
+    -U__NT__ -U_MSC_VER` `CFLAGS` to `porting/recipes/libpng.json` (plus the
+    extra `-U__NT__`, since libpng's own Windows guard also checks that
+    macro), keeping libpng on its generic/POSIX code paths.
+  - Next blocker after that: `fatal error: 'arm_neon.h' file not found`
+    (`pngrtran.c:26`). Root-caused to `tools/crt-cc`/`tools/crt-c++`
+    hardcoding `resource_dir=""` on Windows, entirely skipping clang's own
+    `-print-resource-dir` query -- meaning compiler-provided architecture-
+    intrinsic headers (`arm_neon.h`, `immintrin.h`, ...) were never on the
+    Windows include path at all. Also found a compounding latent bug while
+    fixing this: both scripts build `common_flags`/`user_args`/`libs` as
+    plain strings and pass them via *unquoted* expansion, relying on word-
+    splitting to become separate argv entries -- which silently breaks any
+    single value containing a space, and a stock Windows LLVM install's
+    resource-dir is almost always under `"C:\Program Files\..."`. Fixed
+    both scripts by always querying `resource_dir` (all platforms), and
+    passing `-isystem "$resource_dir/include"` as its own separately-quoted
+    argument pair directly on each `exec` line, instead of folding it into
+    the unquoted `common_flags` string. Verified: `ctest` 79/79 still
+    passing (these scripts compile everything in the Windows build, so this
+    was the highest-stakes check of this whole chain); a standalone
+    `crt-cc` compile of a translation unit including `<arm_neon.h>` now
+    succeeds. Re-running the full libpng port build to find/fix whatever
+    comes next is in progress.
   - Checked whether any of the fixes above are Windows-specific-only or
     could affect macOS/Linux (couldn't literally build for those hosts
     from this Windows aarch64 machine -- static review only): the
