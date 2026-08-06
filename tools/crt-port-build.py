@@ -299,9 +299,30 @@ def make_command_for_shell(make_args, target_os, use_crt_shell):
     return shlex.join([str(arg) for arg in make_args])
 
 
-def apply_recipe_env(env, recipe):
-    for name, value in recipe["build"].get("env", {}).items():
+# Space-separated flag accumulator variables: a shared base value (e.g.
+# CFLAGS=-O2) and a per-OS addition (e.g. Windows-only -U_WIN32 undefs) are
+# both meant to survive in the final value, so target_overrides.<os>.env
+# appends to these rather than replacing them -- matching how
+# target_overrides.<os>.cflags/configure_args (plain lists) already extend
+# rather than replace the base list. Anything else (RANLIB, CC, a probe
+# variable like gcc_cv_as_cfi_pseudo_op, ...) is a single value, not a flag
+# list, so a target override there means "use this value instead", and gets
+# replaced -- notably RANLIB, which already has a real, non-empty default
+# from make_env() before any recipe env is applied, so accumulating it would
+# wrongly append after that default instead of overriding it.
+_ENV_FLAG_ACCUMULATOR_VARS = {"CFLAGS", "CPPFLAGS", "CXXFLAGS", "LDFLAGS", "LIBS"}
+
+
+def apply_recipe_env(env, recipe, target_os):
+    build = recipe["build"]
+    for name, value in build.get("env", {}).items():
         env[name] = str(value)
+    for name, value in build.get("target_overrides", {}).get(target_os, {}).get("env", {}).items():
+        value = str(value)
+        if name in _ENV_FLAG_ACCUMULATOR_VARS and env.get(name):
+            env[name] = f"{env[name]} {value}"
+        else:
+            env[name] = value
 
 
 def command_value_argv(value, preset_build_dir, target_os):
@@ -317,6 +338,7 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
     shell = rootfs_mksh_path(preset_build_dir, target_os)
     configure = ["./configure"]
     configure.extend(build["configure_args"])
+    configure.extend(build.get("target_overrides", {}).get(target_os, {}).get("configure_args", []))
     if is_native_windows_configure(target_os):
         prefix = path_for_crt_shell(port_prefix) if use_crt_shell else path_for_msys_shell(port_prefix)
     else:
@@ -358,19 +380,29 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
         run(install_args, work, env, f"{port_name}: make install")
 
 
-def build_amalgamation_port(work, port_prefix, recipe, env):
+def build_amalgamation_port(preset_build_dir, work, port_prefix, recipe, env, target_os):
     port_name = recipe["name"]
     build = recipe["build"]
     objects = []
     cflags = shlex.split(env.get("CPPFLAGS", "")) + shlex.split(env.get("CFLAGS", ""))
     cflags.extend(build.get("cflags", []))
+    cflags.extend(build.get("target_overrides", {}).get(target_os, {}).get("cflags", []))
+
+    # CC (and, defensively, AR/RANLIB) can be a multi-token string when
+    # --use-crt-shell wraps the real tool in a mksh invocation (e.g.
+    # "<mksh path> <crt-cc path>"), not just a single executable path --
+    # matching how build_android_host_tool_port() already handles env["CC"]
+    # via this same helper instead of passing it as one argv element.
+    cc_argv = command_value_argv(env["CC"], preset_build_dir, target_os)
+    ar_argv = command_value_argv(env["AR"], preset_build_dir, target_os)
+    ranlib_argv = command_value_argv(env["RANLIB"], preset_build_dir, target_os)
 
     sources = list(build["sources"])
     for index, source in enumerate(sources, 1):
         progress(f"{port_name}: compile {index}/{len(sources)} {source}")
         src = work / source
         obj = work / (Path(source).name + ".o")
-        run([env["CC"]] + cflags + ["-I", str(work), "-c", str(src), "-o", str(obj)], work, env)
+        run(cc_argv + cflags + ["-I", str(work), "-c", str(src), "-o", str(obj)], work, env)
         objects.append(obj)
 
     lib_dir = port_prefix / "lib"
@@ -378,8 +410,8 @@ def build_amalgamation_port(work, port_prefix, recipe, env):
     lib_dir.mkdir(parents=True, exist_ok=True)
     include_dir.mkdir(parents=True, exist_ok=True)
     archive = lib_dir / build["archive"]
-    run([env["AR"], "rcs", str(archive)] + [str(obj) for obj in objects], work, env, f"{port_name}: archive")
-    run([env["RANLIB"], str(archive)], work, env, f"{port_name}: ranlib")
+    run(ar_argv + ["rcs", str(archive)] + [str(obj) for obj in objects], work, env, f"{port_name}: archive")
+    run(ranlib_argv + [str(archive)], work, env, f"{port_name}: ranlib")
     for header in build.get("install_headers", []):
         progress(f"{port_name}: install header {header}")
         shutil.copy2(work / header, include_dir / Path(header).name)
@@ -467,11 +499,11 @@ def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, por
 
     progress(f"{port}: build system {build['system']}")
     env = make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os, use_crt_shell)
-    apply_recipe_env(env, recipe)
+    apply_recipe_env(env, recipe, target_os)
     if build["system"] == "configure":
         build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env, target_os, use_crt_shell, configure_only)
     elif build["system"] == "amalgamation":
-        build_amalgamation_port(work, port_prefix, recipe, env)
+        build_amalgamation_port(preset_build_dir, work, port_prefix, recipe, env, target_os)
     elif build["system"] == "android_host_tool":
         build_android_host_tool_port(preset_build_dir, work, port_prefix, recipe, env, target_os)
     if not configure_only:

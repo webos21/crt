@@ -21,10 +21,15 @@
       "--enable-static",
       "--disable-multi-os-directory"
     ],
-    "env": {
-      "gcc_cv_as_cfi_pseudo_op": "no"
-    },
-    "make_args": []
+    "env": {},
+    "make_args": [],
+    "target_overrides": {
+      "macos": {
+        "env": {
+          "gcc_cv_as_cfi_pseudo_op": "no"
+        }
+      }
+    }
   },
   "status": {
     "linux": "partial",
@@ -34,7 +39,7 @@
   "notes": [
     "Upstream provides a normal Autoconf configure flow, so build.system records configure rather than manual.",
     "macOS/aarch64 upstream libffi uses its Darwin trampoline-table path; any required compatibility must be provided by the CRT sysroot/PAL, not by patching libffi sources.",
-    "The CRT toolchain recipe forces gcc_cv_as_cfi_pseudo_op=no because libffi's simple configure probe succeeds while its real Darwin aarch64 CFI assembly does not assemble through the CRT wrapper.",
+    "target_overrides.macos.env forces gcc_cv_as_cfi_pseudo_op=no because libffi's simple configure probe succeeds while its real Darwin aarch64 CFI assembly does not assemble through the CRT wrapper. Scoped to macOS since the note is specifically about Darwin aarch64 assembly; Linux/Windows have not shown the same probe/reality mismatch (status: partial on both, not yet root-caused either way), so this is not assumed to also apply there.",
     "macOS/aarch64 ffi_call and ffi_closure_alloc/ffi_prep_closure_loc smoke tests passed against the installed static libffi."
   ]
 }

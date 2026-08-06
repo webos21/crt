@@ -19,10 +19,17 @@
       "--static"
     ],
     "env": {
-      "CFLAGS": "-O2 -U_WIN32 -U_WIN32_WCE -U__WIN32__ -UWIN32 -U_MSC_VER",
-      "RANLIB": "true"
+      "CFLAGS": "-O2"
     },
-    "make_args": []
+    "make_args": [],
+    "target_overrides": {
+      "windows": {
+        "env": {
+          "CFLAGS": "-U_WIN32 -U_WIN32_WCE -U__WIN32__ -UWIN32 -U_MSC_VER",
+          "RANLIB": "true"
+        }
+      }
+    }
   },
   "status": {
     "linux": "manual-pass",
@@ -32,8 +39,8 @@
   "notes": [
     "No runtime network dependency.",
     "Builds static libz.a into PORT_PREFIX.",
-    "The recipe undefines _WIN32/_WIN32_WCE/__WIN32__/WIN32/_MSC_VER so zlib stays on its generic POSIX path when the Windows CRT wrapper uses a Windows LLVM target.",
-    "RANLIB is set to true because the optional zlib ranlib step is redundant for the LLVM archive path and currently exposes a Windows mksh subshell status quirk.",
+    "target_overrides.windows.env undefines _WIN32/_WIN32_WCE/__WIN32__/WIN32/_MSC_VER so zlib stays on its generic POSIX path when the Windows CRT wrapper uses a Windows LLVM target; scoped to Windows only since these macros are never predefined on macOS/Linux anyway.",
+    "target_overrides.windows.env also sets RANLIB=true because the optional zlib ranlib step is redundant for the LLVM archive path and used to expose a Windows mksh subshell status quirk; macOS/Linux use the real host ranlib (the crt-port-build.py default) since neither has that quirk.",
     "Windows CRT-shell builds currently run make serially and pass SHELL=/system/bin/mksh so recipe commands use the project shell/process path."
   ]
 }

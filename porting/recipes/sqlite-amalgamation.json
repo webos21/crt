@@ -23,12 +23,18 @@
       "sqlite3ext.h"
     ],
     "cflags": [
-      "-U__APPLE__",
       "-DSQLITE_THREADSAFE=1",
-      "-DSQLITE_OMIT_LOAD_EXTENSION=1",
-      "-DSQLITE_WITHOUT_ZONEMALLOC=1",
-      "-DSQLITE_ENABLE_LOCKING_STYLE=0"
-    ]
+      "-DSQLITE_OMIT_LOAD_EXTENSION=1"
+    ],
+    "target_overrides": {
+      "macos": {
+        "cflags": [
+          "-U__APPLE__",
+          "-DSQLITE_WITHOUT_ZONEMALLOC=1",
+          "-DSQLITE_ENABLE_LOCKING_STYLE=0"
+        ]
+      }
+    }
   },
   "status": {
     "linux": "smoke-pass",
@@ -37,8 +43,8 @@
   },
   "notes": [
     "The amalgamation archive does not ship an Autoconf configure script, so the recipe builds sqlite3.c directly without modifying upstream source.",
-    "macOS builds pass -U__APPLE__ so SQLite uses its generic Unix path against the Bionic-compatible CRT surface rather than Darwin-only VFS/statfs extensions.",
+    "target_overrides.macos.cflags passes -U__APPLE__ so SQLite uses its generic Unix path against the Bionic-compatible CRT surface rather than Darwin-only VFS/statfs extensions; scoped to macOS since __APPLE__ is never predefined on Linux/Windows anyway.",
     "The porting check expanded CRT-owned sys/ioctl.h, sys/vfs.h, sys/statfs.h, pread/pwrite, uid_t/gid_t, geteuid, fchown, utimes/futimes, and sysconf(_SC_PAGESIZE/_SC_PAGE_SIZE).",
-    "SQLITE_WITHOUT_ZONEMALLOC avoids Apple's zone allocator path; SQLITE_ENABLE_LOCKING_STYLE=0 avoids Darwin-specific locking-style code while keeping the upstream amalgamation unchanged."
+    "target_overrides.macos.cflags's SQLITE_WITHOUT_ZONEMALLOC avoids Apple's zone allocator path; SQLITE_ENABLE_LOCKING_STYLE=0 avoids Darwin-specific locking-style code while keeping the upstream amalgamation unchanged -- both are Darwin-only concerns, so scoped to macOS. SQLITE_THREADSAFE/SQLITE_OMIT_LOAD_EXTENSION stay shared: neither is platform-specific."
   ]
 }
