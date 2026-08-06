@@ -9,6 +9,34 @@ if(CRT_TARGET_OS STREQUAL "windows")
   set(CMAKE_MSVC_RUNTIME_LIBRARY "" CACHE STRING "MSVC runtime library selection" FORCE)
   set(CMAKE_C_STANDARD_LIBRARIES "" CACHE STRING "C standard libraries" FORCE)
   set(CMAKE_CXX_STANDARD_LIBRARIES "" CACHE STRING "C++ standard libraries" FORCE)
+
+  if(NOT CRT_TARGET_ARCH STREQUAL "host")
+    # Same-OS cross-arch build: e.g. -DCRT_TARGET_ARCH=x86_64 from a
+    # Windows aarch64 host (or vice versa). Clang is a genuine cross-
+    # compiler needing no separate per-arch install, so this just means
+    # telling it (and, transitively, its -fuse-ld=lld backend) a
+    # different target triple -- must be set via CMAKE_<LANG>_COMPILER_
+    # TARGET *before* project()/enable_language() for Clang to honor it.
+    # "-pc-windows-msvc" (not "-w64-mingw32") matches what CMAKE_C_
+    # COMPILER=clang already defaults to with no explicit --target at all
+    # (this project's own code never branches on __GNUC__ vs _MSC_VER the
+    # way third-party autoconf ports do, so nothing here needs the GNU-
+    # compatible macro set tools/crt-cc adds for *port* builds -- see that
+    # script's own comment for why *it* needs -w64-mingw32).
+    if(NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
+      message(FATAL_ERROR "CRT_TARGET_OS=windows with an explicit CRT_TARGET_ARCH override still requires a Windows host (same-OS cross-arch only; cross-OS is intentionally deferred, same as the CRT_TARGET_ARCH=host case above).")
+    endif()
+    if(CRT_TARGET_ARCH MATCHES "^(x86_64|AMD64|x64)$")
+      set(CRT_CROSS_COMPILER_TARGET "x86_64-pc-windows-msvc")
+    elseif(CRT_TARGET_ARCH MATCHES "^(arm64|ARM64|aarch64)$")
+      set(CRT_CROSS_COMPILER_TARGET "aarch64-pc-windows-msvc")
+    else()
+      message(FATAL_ERROR "Unsupported CRT_TARGET_ARCH for a Windows cross-arch build: ${CRT_TARGET_ARCH} (expected x86_64 or arm64/aarch64).")
+    endif()
+    set(CMAKE_C_COMPILER_TARGET "${CRT_CROSS_COMPILER_TARGET}" CACHE STRING "Cross-arch Clang target triple")
+    set(CMAKE_CXX_COMPILER_TARGET "${CRT_CROSS_COMPILER_TARGET}" CACHE STRING "Cross-arch Clang++ target triple")
+    set(CMAKE_ASM_COMPILER_TARGET "${CRT_CROSS_COMPILER_TARGET}" CACHE STRING "Cross-arch Clang assembler target triple")
+  endif()
 endif()
 
 project(crt LANGUAGES C CXX ASM)

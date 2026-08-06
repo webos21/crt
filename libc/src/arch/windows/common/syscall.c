@@ -464,7 +464,7 @@ static int fd_kind[CRT_FD_TABLE_SIZE];
 static int fd_flags[CRT_FD_TABLE_SIZE];
 static int fd_table_initialized;
 static int winsock_initialized;
-#if !defined(__aarch64__) && !defined(_M_ARM64)
+#if !defined(__aarch64__) && !defined(_M_ARM64) && !defined(__x86_64__) && !defined(_M_X64)
 static int ntdll_initialized;
 #endif
 /* Set once, in the RtlCloneUserProcess child branch of __crt_sys_fork().
@@ -483,7 +483,7 @@ long __crt_sys_geteuid(void);
 static HANDLE get_fd_handle(int fd);
 static void init_fd_table(void);
 static long init_winsock(void);
-#if !defined(__aarch64__) && !defined(_M_ARM64)
+#if !defined(__aarch64__) && !defined(_M_ARM64) && !defined(__x86_64__) && !defined(_M_X64)
 static long init_ntdll(void);
 #endif
 static long close_fd_slot(int fd);
@@ -497,7 +497,7 @@ struct ntdll_api {
       struct crt_rtl_user_process_information*);
 };
 
-#if !defined(__aarch64__) && !defined(_M_ARM64)
+#if !defined(__aarch64__) && !defined(_M_ARM64) && !defined(__x86_64__) && !defined(_M_X64)
 static struct ntdll_api ntdll;
 #endif
 
@@ -1599,7 +1599,7 @@ static long fd_snapshot_prepare_child_duplicates(
 
 /* --- fd handoff for the aarch64 fork()-capable startup self-relaunch ---
  *
- * libc/src/arch/windows/aarch64/fork_capable_relaunch.c relaunches this
+ * libc/src/arch/windows/common/fork_capable_relaunch.c relaunches this
  * process's own image under a mitigation policy that makes memory-copy
  * fork() viable (see docs/windows_fork_emulation.md). That relaunch is
  * itself an ordinary CreateProcessA() hop, so without help it only
@@ -2417,10 +2417,10 @@ static long init_winsock(void) {
   return 0;
 }
 
-#if !defined(__aarch64__) && !defined(_M_ARM64)
+#if !defined(__aarch64__) && !defined(_M_ARM64) && !defined(__x86_64__) && !defined(_M_X64)
 /* Only __crt_sys_fork()'s RtlCloneUserProcess path calls this -- aarch64
- * uses the memory-copy fork() instead (see __crt_sys_fork() below), which
- * never calls RtlCloneUserProcess at all. */
+ * and x86_64 use the memory-copy fork() instead (see __crt_sys_fork()
+ * below), which never calls RtlCloneUserProcess at all. */
 static long init_ntdll(void) {
   HANDLE module;
 
@@ -4089,9 +4089,10 @@ long __crt_sys_thread_id(void) {
   return (long)GetCurrentThreadId();
 }
 
-#if defined(__aarch64__) || defined(_M_ARM64)
+#if defined(__aarch64__) || defined(_M_ARM64) || defined(__x86_64__) || defined(_M_X64)
 /* Cygwin/MSYS-style memory-copy fork(), verified on real Windows aarch64
- * hardware -- see libc/src/arch/windows/aarch64/fork_memcopy.c and
+ * hardware and (via this machine's x64 emulation) Windows x86_64 -- see
+ * libc/src/arch/windows/{aarch64,x86_64}/fork_memcopy.c and
  * docs/windows_fork_emulation.md, "Spawn Broker Retired". Replaces the
  * RtlCloneUserProcess path below: the child is a normally
  * CreateProcessA()'d, CSRSS-registered process, so none of the
@@ -4115,6 +4116,14 @@ long __crt_sys_fork(void) {
   return remember_child_process((DWORD)child_pid, (HANDLE)child_process);
 }
 #else
+/* Reached only on a Windows architecture other than aarch64/x86_64 (both
+ * covered by the memory-copy fork() above) -- currently no such target is
+ * actually built by this project, but kept as a fallback rather than a
+ * hard #error, matching how this codebase treats unanticipated
+ * architectures elsewhere. Retains the pre-Phase-C "unregistered clone"
+ * behavior: correct for a pure fork()+_exit() pattern, but fork()-then-
+ * spawn-an-external-command from the child does not work (see
+ * docs/windows_fork_emulation.md's Summary section). */
 long __crt_sys_fork(void) {
   struct crt_rtl_user_process_information info;
   unsigned char inherit_touched[CRT_FD_TABLE_SIZE];
