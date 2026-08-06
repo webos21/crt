@@ -19,6 +19,16 @@ fi
 cxx="${CRT_HOST_CXX:-clang++}"
 if [ "$target_os" = windows ]; then
   export CRT_SPAWN_NATIVE_WINDOWS=1
+  target_arch="${CRT_TARGET_ARCH:-}"
+  if [ -z "$target_arch" ]; then
+    # See the matching comment in tools/crt-cc: check both `uname -m` and
+    # `uname -s` together so this works under either this project's own
+    # toybox `uname` or a host MSYS/Git-Bash `uname`.
+    case "$(uname -m 2>/dev/null)$(uname -s 2>/dev/null)" in
+      *aarch64*|*arm64*|*ARM64*) target_arch=aarch64 ;;
+      *) target_arch=x86_64 ;;
+    esac
+  fi
 fi
 set +e
 resource_dir="$("$cxx" -print-resource-dir 2>/dev/null)"
@@ -67,7 +77,16 @@ common_flags="-ffreestanding -fno-builtin -Xclang -fwchar-type=int -ffunction-se
 case "$target_os" in
   macos) common_flags="$common_flags -DCRT_TARGET_OS_MACOS=1" ;;
   linux) common_flags="$common_flags -DCRT_TARGET_OS_LINUX=1" ;;
-  windows) common_flags="$common_flags -DCRT_TARGET_OS_WINDOWS=1 -fno-threadsafe-statics" ;;
+  windows)
+    # See the matching comment in tools/crt-cc: without an explicit
+    # --target, a stock Windows LLVM install's clang++.exe defaults to
+    # *-pc-windows-msvc, whose predefined macros (_MSC_VER, no __GNUC__)
+    # mislead third-party autoconf/libtool ports into picking the wrong,
+    # MSVC-native build path. *-w64-mingw32 matches what those ports'
+    # `configure` scripts (and this project's own --build=*-w64-mingw32
+    # recipe workarounds) already expect.
+    common_flags="$common_flags -DCRT_TARGET_OS_WINDOWS=1 -fno-threadsafe-statics --target=${target_arch}-w64-mingw32"
+    ;;
 esac
 
 # See the matching comment in tools/crt-cc: resource_dir is passed as its

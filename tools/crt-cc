@@ -19,6 +19,20 @@ fi
 cc="${CRT_HOST_CC:-clang}"
 if [ "$target_os" = windows ]; then
   export CRT_SPAWN_NATIVE_WINDOWS=1
+  target_arch="${CRT_TARGET_ARCH:-}"
+  if [ -z "$target_arch" ]; then
+    # Check both `uname -m` (the semantically correct field, and what this
+    # project's own toybox `uname` reports -- it prints `uname -s` as the
+    # bare "Windows", no ARM64 suffix) and `uname -s` (MSYS/Git-Bash's own
+    # `uname`, which instead puts the arch on the end of -s, e.g.
+    # "MINGW64_NT-10.0-26200-ARM64", and reports "x86_64" from -m even on
+    # an ARM64 host under x86_64 emulation) together, so this works
+    # whichever `uname` ends up on PATH when this script runs.
+    case "$(uname -m 2>/dev/null)$(uname -s 2>/dev/null)" in
+      *aarch64*|*arm64*|*ARM64*) target_arch=aarch64 ;;
+      *) target_arch=x86_64 ;;
+    esac
+  fi
 fi
 set +e
 resource_dir="$("$cc" -print-resource-dir 2>/dev/null)"
@@ -67,7 +81,32 @@ common_flags="-ffreestanding -fno-builtin -Xclang -fwchar-type=int -ffunction-se
 case "$target_os" in
   macos) common_flags="$common_flags -DCRT_TARGET_OS_MACOS=1" ;;
   linux) common_flags="$common_flags -DCRT_TARGET_OS_LINUX=1" ;;
-  windows) common_flags="$common_flags -DCRT_TARGET_OS_WINDOWS=1" ;;
+  windows)
+    common_flags="$common_flags -DCRT_TARGET_OS_WINDOWS=1"
+    # A stock Windows LLVM install's clang.exe defaults to its own host
+    # triple, *-pc-windows-msvc, when no --target is given. That MSVC-
+    # compatible predefined-macro set doesn't define __GNUC__ (only
+    # _MSC_VER, mimicking real MSVC) -- which is harmless to this
+    # project's own freestanding CRT/PAL builds (none of our own headers
+    # branch on __GNUC__), but silently misleads every third-party
+    # autoconf/libtool port: their `configure` scripts' near-universal
+    # "checking whether the compiler supports GNU C" probe (and libtool's
+    # own internal with_gnu_ld override for `case $host_os in
+    # cygwin*|mingw*...)`, which hardcodes `with_gnu_ld=no` unless
+    # `$GCC = yes`) both concluded "no", sending libtool down its
+    # MSVC-native `lib -OUT:...` archiving path -- which this project has
+    # no `lib.exe` for -- well past the actual GNU-ld-detection fix
+    # already applied above. Explicitly targeting *-w64-mingw32 makes
+    # clang emit the GNU-compatible macro set (__GNUC__, __MINGW32__)
+    # that these `configure`-generated probes -- and this project's own
+    # `--build=aarch64-w64-mingw32` autoconf host-triple workaround (see
+    # porting/recipes/*.json) -- already expect. Verified this doesn't
+    # change anything for our own build: we pass -nostdinc/-nostdlib and
+    # our own -isystem/-L paths throughout, so the target triple only
+    # affects predefined macros and calling-convention details, not which
+    # headers/libs get used.
+    common_flags="$common_flags --target=${target_arch}-w64-mingw32"
+    ;;
 esac
 
 # resource_dir (clang's own -print-resource-dir, which houses compiler-
