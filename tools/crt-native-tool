@@ -1,0 +1,47 @@
+#!/bin/sh
+set -eu
+
+# Wraps a real, native (non-CRT-built) Windows host tool -- llvm-ar.exe,
+# llvm-ranlib.exe, llvm-strip.exe, ld.lld.exe -- so that AR/RANLIB/STRIP/LD
+# can be set (by tools/crt-port-build.py) to a single, ordinary command
+# line: "/system/bin/mksh tools/crt-native-tool <real-tool-path>". This
+# script's own `export` is literal, parse-time shell syntax, so it works
+# correctly no matter how the resulting $AR/$RANLIB/$STRIP/$LD value is
+# later referenced -- including from *inside* an autoconf/libtool-generated
+# `configure` script's own shell code, e.g. `` `$LD -v 2>&1` ``.
+#
+# That last case is exactly what an earlier approach got wrong: it set
+# these variables to a literal "CRT_SPAWN_NATIVE_WINDOWS=1 <path>" *string*,
+# relying on the shell to recognize the leading "VAR=val" as an environment-
+# assignment prefix when the whole value is expanded unquoted. POSIX shells
+# only ever recognize that syntax in literal, parsed-at-parse-time source
+# text -- never for a variable's word-split expansion at runtime. Assigning
+# it via a Makefile recipe (`$(AR) ...`) happens to work anyway, because
+# make substitutes recipe variables textually into a *fresh* shell command
+# line before that line is parsed. But libtool's own "is $LD GNU ld" probe
+# (a `` `$LD -v` `` command substitution *inside* the already-parsed
+# `configure` script) instead tried to run a program literally named
+# "CRT_SPAWN_NATIVE_WINDOWS=1", got "not found", and silently concluded
+# `with_gnu_ld=no` -- which sent libtool down the wrong (MSVC-style
+# `lib -OUT:...`) archiving path entirely, well past the original problem
+# this project's `ld.lld.exe` wrapping was meant to solve. Routing through
+# this actual script sidesteps the whole class of bug: the calling shell
+# only ever needs to word-split a command name from its arguments here
+# (always reliable, and exactly how tools/crt-cc's own "$CC" value already
+# works), never recognize an assignment prefix from expanded content.
+#
+# This project's own posix_spawn() (libc/src/arch/windows/common/
+# syscall.c) needs CRT_SPAWN_NATIVE_WINDOWS=1 present in a spawn call's own
+# envp to know the target is a real native Windows binary, so it can skip
+# this project's own CRT bootstrap protocol (fd-snapshot/sigmask env vars a
+# plain LLVM tool would never read).
+
+if [ "$#" -lt 1 ]; then
+  echo "crt-native-tool: missing wrapped tool path" >&2
+  exit 1
+fi
+
+tool="$1"
+shift
+export CRT_SPAWN_NATIVE_WINDOWS=1
+exec "$tool" "$@"

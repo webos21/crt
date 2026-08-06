@@ -147,8 +147,23 @@ def find_host_make(target_os):
     return None
 
 
-def native_windows_shell_command(path):
-    return f"CRT_SPAWN_NATIVE_WINDOWS=1 {path_for_crt_shell(windows_short_path(path))}"
+def native_windows_tool_command(root, root_env, shell, target_os, path):
+    """Wrap a real, native Windows host tool (llvm-ar.exe, ld.lld.exe, ...)
+    as "<mksh> tools/crt-native-tool <tool-path>" rather than the literal
+    string "CRT_SPAWN_NATIVE_WINDOWS=1 <tool-path>" this used to be: the
+    latter relies on the *calling* shell recognizing that leading "VAR=val"
+    as an environment-assignment prefix whenever $AR/$RANLIB/$STRIP/$LD is
+    expanded unquoted, which POSIX shells only do for literal, parsed-at-
+    parse-time source text -- never for a variable's word-split expansion
+    at runtime (e.g. libtool's own `` `$LD -v` `` "is this GNU ld" probe
+    inside `configure`, which silently misdetected `with_gnu_ld=no` this
+    way). See tools/crt-native-tool's own header comment for the full
+    story. Mirrors exactly how CC/CXX are already set two cases above,
+    since that "<mksh> <script>" pattern is already proven reliable."""
+    tool_arg = path_for_crt_shell(windows_short_path(path))
+    if is_native_windows_configure(target_os):
+        return f"/system/bin/mksh {root_env}/tools/crt-native-tool {tool_arg}"
+    return f"{shell} {root / 'tools' / 'crt-native-tool'} {tool_arg}"
 
 
 def rootfs_mksh_path(preset_build_dir, target_os):
@@ -265,7 +280,7 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
                 continue
             tool_path = Path(env[tool_var])
             if tool_path.is_absolute():
-                env[tool_var] = native_windows_shell_command(tool_path)
+                env[tool_var] = native_windows_tool_command(root, root_env, shell, target_os, tool_path)
     env["PKG_CONFIG_LIBDIR"] = f"{port_prefix_env}/lib/pkgconfig"
     env["PKG_CONFIG_PATH"] = env["PKG_CONFIG_LIBDIR"]
     include_flags = f"-I{port_prefix_env}/include"
