@@ -818,18 +818,81 @@ back out of copied memory at all. This is a strictly more robust design,
 not just a workaround -- worth keeping even if the memory-corruption
 mechanism above were fully understood.
 
-**Every Windows aarch64 process now self-relaunches once at startup**
-under the same mitigation policy (`libc/src/arch/windows/common/crt1.c`,
-`windows_aarch64_ensure_mitigated_relaunch()`, gated by the
-`CRT_FORK_MITIGATED` environment marker to relaunch only once). This was
-not originally anticipated: Phase B verified that *children spawned under
-the mitigation policy* get deterministic addresses, but the *parent
-process itself* -- launched normally, with ordinary ASLR -- does not,
-so its own heap/stack addresses would never match what a later `fork()`
-call's mitigated child gets. Every CRT-built program on Windows aarch64
-now pays one extra process launch's worth of startup latency for this,
-whether or not it ever calls `fork()` -- a real, accepted cost of making
-`fork()` possible at all with this mechanism.
+**Fork()-capable processes self-relaunch once at startup** under the same
+mitigation policy (`libc/src/arch/windows/aarch64/fork_capable_relaunch.c`,
+`__crt_windows_ensure_fork_capable_relaunch()`). This was not originally
+anticipated: Phase B verified that *children spawned under the mitigation
+policy* get deterministic addresses, but the *parent process itself* --
+launched normally, with ordinary ASLR -- does not, so its own heap/stack
+addresses would never match what a later `fork()` call's mitigated child
+gets.
+
+This went through two more revisions after first landing:
+
+1. Whether the relaunch already happened was originally tracked with an
+   inheritable `CRT_FORK_MITIGATED` environment variable marker. This was
+   wrong: a process reached via this CRT's `execve()` -- itself an
+   ordinary `CreateProcessA()` call with no mitigation-policy attribute --
+   inherits the calling process's environment block, including that
+   marker, even though the *actual* new process image is not mitigated at
+   all. That combination silently produced processes that believed they
+   were mitigated (so skipped relaunching) while actually running under
+   ordinary ASLR, and `fork()` from inside one of those failed outright
+   (`ERROR_INVALID_ADDRESS` committing the child's stack at an address
+   that only makes sense relative to a mitigated caller). Fixed by
+   querying the process's own real mitigation state directly via
+   `GetProcessMitigationPolicy(GetCurrentProcess(), ProcessASLRPolicy,
+   ...)` instead, which has no such gap.
+2. The relaunch was originally unconditional -- every Windows aarch64
+   process paid it, whether or not it ever called `fork()`. This traded
+   one bug for a worse one: a process reached this way that later spawned
+   a *further* external command (e.g. toybox's own applet-multiplexer
+   dispatch running `echo`) lost that child's stdio entirely and exited
+   silently with no diagnosable output -- confirmed via `CreateProcessA`
+   succeeding, the child reaching `main()` with correctly parsed argv, and
+   then calling `exit(1)` from deep inside its own application logic with
+   zero output, even to a file-based diagnostic that bypassed inherited
+   stdio entirely. Root cause not fully isolated (suspected: something
+   about this project's `posix_spawn()`/`set_native_spawn_stdio_inherit()`
+   handle-inheritance machinery not surviving a *second* process-
+   generation hop the way it was designed for exactly one). Rather than
+   fully root-cause this, the fix was to stop applying it everywhere:
+   the self-relaunch code was pulled out of `crt1.c` into its own file
+   (`fork_capable_relaunch.c`) and made opt-in via a weak symbol
+   (`crt1.c` calls it through `void
+   __crt_windows_ensure_fork_capable_relaunch(...) __attribute__((weak))`,
+   which stays a null function pointer -- and is skipped -- unless a
+   target explicitly links the file). Only `crt_mksh`
+   (`shell/CMakeLists.txt`) and the ctest suite (`tests/CMakeLists.txt`,
+   `add_crt_test()`) opt in; toybox and any other leaf external command
+   do not, and get ordinary (non-relaunched, `fork()`-incapable) startup
+   with no latency cost and no stdio regression.
+
+With this scoping, `ctest` recovered to 76/78 (from completely broken
+external-command execution under the unconditional version): the two
+still-failing tests (`shell_smoke_test`, `windows_fd_snapshot_test`) both
+use `posix_spawn_file_actions_adddup2()` to hand a *non-standard* file
+descriptor (an arbitrary pipe end, not fd 0/1/2) to a child; the
+relaunch's own `CreateProcessA()` call only explicitly re-marks the three
+standard handles (`STARTF_USESTDHANDLES` plus explicit
+`SetHandleInformation(..., HANDLE_FLAG_INHERIT, ...)` on each) as
+inheritable across the extra hop it introduces, not arbitrary caller-held
+handles. The proper fix is almost certainly to have the relaunch reuse
+the existing, already-correct fd-snapshot export/import protocol
+(`__crt_fd_snapshot_export()`/`__crt_child_bootstrap()`, see "Snapshot
+Format" above) instead of its own narrower `STARTF_USESTDHANDLES`-only
+approach -- not yet done. `fork()`/`exec()`/subshells themselves, and
+external-command execution through mksh generally, all work correctly
+with the current fix; this is a narrower gap affecting only C-level
+callers that hand non-standard descriptors to `posix_spawn()` directly.
+
+Separately, and also not yet resolved: `mksh` `exec`-ing another `mksh`
+instance recursively (`mksh -c "exec mksh -c '...'"`) was observed to hang
+indefinitely partway through the resulting relaunch chain, rather than
+failing cleanly. Not yet root-caused; may be a variant of the same
+handle-inheritance gap, or something specific to the three-or-more-deep
+process chain this pattern creates (exec -> unmitigated child -> its own
+relaunch -> mitigated grandchild).
 
 Known limitations, not yet addressed:
 - only the calling thread's stack is copied (matches POSIX `fork()`

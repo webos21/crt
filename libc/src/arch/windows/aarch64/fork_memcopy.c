@@ -331,7 +331,15 @@ static int copy_current_stack(HANDLE process, DWORD64 child_initial_sp, void** o
   size = (size_t)((uintptr_t)stack_base - (uintptr_t)copy_low);
   *out_low = copy_low;
   *out_high = stack_base;
-  return commit_region_into_child(process, copy_low, size);
+  if (commit_region_into_child(process, copy_low, size) != 0) {
+    fprintf(stderr,
+            "fork_memcopy: stack commit failed: stack_limit=%p stack_base=%p child_sp=%p "
+            "AllocationBase=%p mbi.State=%#lx copy_low=%p size=%zu err=%lu\n",
+            stack_limit, stack_base, (void*)(ULONG_PTR)child_initial_sp, mbi.AllocationBase,
+            (unsigned long)mbi.State, copy_low, size, (unsigned long)GetLastError());
+    return -1;
+  }
+  return 0;
 }
 
 long __crt_windows_memcopy_fork(unsigned long* out_child_pid, void** out_child_process) {
@@ -366,17 +374,20 @@ long __crt_windows_memcopy_fork(unsigned long* out_child_pid, void** out_child_p
 
   path_len = GetModuleFileNameA(0, self_path, (DWORD)sizeof(self_path));
   if (path_len == 0 || path_len >= sizeof(self_path)) {
+    fprintf(stderr, "fork_memcopy: GetModuleFileNameA failed err=%lu\n", (unsigned long)GetLastError());
     return -EAGAIN;
   }
 
   InitializeProcThreadAttributeList(0, 1, 0, &attr_list_size);
   attr_list = malloc((size_t)attr_list_size);
   if (attr_list == 0) {
+    fprintf(stderr, "fork_memcopy: malloc(attr_list) failed\n");
     return -ENOMEM;
   }
   if (!InitializeProcThreadAttributeList(attr_list, 1, 0, &attr_list_size) ||
       !UpdateProcThreadAttribute(attr_list, 0, CRT_PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY,
                                   &policy, sizeof(policy), 0, 0)) {
+    fprintf(stderr, "fork_memcopy: attr list setup failed err=%lu\n", (unsigned long)GetLastError());
     free(attr_list);
     return -EAGAIN;
   }
@@ -388,6 +399,8 @@ long __crt_windows_memcopy_fork(unsigned long* out_child_pid, void** out_child_p
 
   if (!CreateProcessA(self_path, cmdline, 0, 0, 1, CRT_EXTENDED_STARTUPINFO_PRESENT | CRT_CREATE_SUSPENDED, 0, 0,
                        &si, &pi)) {
+    fprintf(stderr, "fork_memcopy: CreateProcessA failed err=%lu self_path=%s\n", (unsigned long)GetLastError(),
+            self_path);
     DeleteProcThreadAttributeList(attr_list);
     free(attr_list);
     return -EAGAIN;
@@ -402,6 +415,7 @@ long __crt_windows_memcopy_fork(unsigned long* out_child_pid, void** out_child_p
   memset(&ctx, 0, sizeof(ctx));
   ctx.ContextFlags = CRT_CONTEXT_ARM64_FULL;
   if (!GetThreadContext(pi.hThread, &ctx)) {
+    fprintf(stderr, "fork_memcopy: GetThreadContext failed err=%lu\n", (unsigned long)GetLastError());
     TerminateProcess(pi.hProcess, (unsigned int)-1);
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
@@ -411,12 +425,19 @@ long __crt_windows_memcopy_fork(unsigned long* out_child_pid, void** out_child_p
   /* Order matters: every destination region below must be committed and
    * written *before* SetThreadContext()/ResumeThread(), since the child
    * runs immediately and unsupervised as soon as it is resumed. */
-  if (copy_heap_chunks(pi.hProcess) != 0 || copy_image_data_sections(pi.hProcess) != 0 ||
-      copy_current_stack(pi.hProcess, ctx.Sp, &stack_low, &stack_high) != 0) {
-    TerminateProcess(pi.hProcess, (unsigned int)-1);
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
-    return -EAGAIN;
+  {
+    int heap_rc = copy_heap_chunks(pi.hProcess);
+    int image_rc = heap_rc == 0 ? copy_image_data_sections(pi.hProcess) : heap_rc;
+    int stack_rc = image_rc == 0 ? copy_current_stack(pi.hProcess, ctx.Sp, &stack_low, &stack_high) : image_rc;
+
+    if (stack_rc != 0) {
+      fprintf(stderr, "fork_memcopy: copy failed heap_rc=%d image_rc=%d stack_rc=%d err=%lu\n", heap_rc,
+              image_rc, stack_rc, (unsigned long)GetLastError());
+      TerminateProcess(pi.hProcess, (unsigned int)-1);
+      CloseHandle(pi.hThread);
+      CloseHandle(pi.hProcess);
+      return -EAGAIN;
+    }
   }
 
   /* The current thread's own crt_thread_context block (tls.c) is a
@@ -424,6 +445,7 @@ long __crt_windows_memcopy_fork(unsigned long* out_child_pid, void** out_child_p
    * above -- copy it explicitly. */
   tls_context = __crt_thread_get_current();
   if (copy_region_into_child(pi.hProcess, tls_context, sizeof(*tls_context)) != 0) {
+    fprintf(stderr, "fork_memcopy: tls_context copy failed err=%lu\n", (unsigned long)GetLastError());
     TerminateProcess(pi.hProcess, (unsigned int)-1);
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
@@ -442,6 +464,7 @@ long __crt_windows_memcopy_fork(unsigned long* out_child_pid, void** out_child_p
     SIZE_T written = 0;
     if (!WriteProcessMemory(pi.hProcess, tls_index_ptr, &out_of_indexes, sizeof(out_of_indexes), &written) ||
         written != sizeof(out_of_indexes)) {
+      fprintf(stderr, "fork_memcopy: tls index patch failed err=%lu\n", (unsigned long)GetLastError());
       TerminateProcess(pi.hProcess, (unsigned int)-1);
       CloseHandle(pi.hThread);
       CloseHandle(pi.hProcess);
@@ -484,6 +507,7 @@ long __crt_windows_memcopy_fork(unsigned long* out_child_pid, void** out_child_p
    * longjmp value: X0 = 1. */
   ctx.X[0] = 1;
   if (!SetThreadContext(pi.hThread, &ctx)) {
+    fprintf(stderr, "fork_memcopy: SetThreadContext failed err=%lu\n", (unsigned long)GetLastError());
     TerminateProcess(pi.hProcess, (unsigned int)-1);
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);

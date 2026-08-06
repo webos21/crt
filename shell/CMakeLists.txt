@@ -87,6 +87,14 @@ if(EXISTS "${CRT_MKSH_ROOT}/Android.bp")
     mksh/src/var.c
     $<TARGET_OBJECTS:crt1>
   )
+  if(CRT_TARGET_OS STREQUAL "windows" AND CRT_EFFECTIVE_ARCH_FOR_FLAGS MATCHES "^(arm64|ARM64|aarch64)$")
+    # mksh is the one CRT-built program that actually calls fork() (real
+    # subshells, command substitution) -- opts into the startup self-
+    # relaunch that memory-copy fork() needs. See that file's own top
+    # comment for why this is opt-in rather than linked into every
+    # Windows aarch64 binary.
+    list(APPEND CRT_MKSH_SOURCES "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/aarch64/fork_capable_relaunch.c")
+  endif()
   add_executable(crt_mksh ${CRT_MKSH_SOURCES})
   target_link_libraries(crt_mksh PRIVATE crt_build_flags c)
   target_link_libraries(crt_mksh PRIVATE crt_compiler_rt_builtins)

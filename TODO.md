@@ -204,9 +204,10 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   - **Phase C (done, aarch64):** `__crt_sys_fork()` now dispatches to a new
     `__crt_windows_memcopy_fork()`
     (`libc/src/arch/windows/aarch64/fork_memcopy.c`) on aarch64; x86_64
-    keeps the original `RtlCloneUserProcess` path untouched. Full `ctest`
-    (78/78) passes with the new mechanism active. Two things came up that
-    the design write-up above didn't anticipate:
+    keeps the original `RtlCloneUserProcess` path untouched. `ctest` is at
+    76/78 with the new mechanism active (two known-open gaps in the
+    startup self-relaunch's fd inheritance, see below). Several things
+    came up that the design write-up above didn't anticipate:
     - `malloc.c`'s `block_header` split chain is not the same thing as the
       underlying OS `mmap()`/`VirtualAlloc()` region boundaries -- a single
       64KB chunk gets subdivided into several non-64KB-aligned sub-blocks
@@ -232,25 +233,35 @@ Detailed policy and provenance stay in `docs/` and import manifests.
       itself via `SetThreadContext()` and never asks the child to read
       resume state back out of memory at all -- a more robust design, not
       just a workaround.
-    - Also newly required: every Windows aarch64 process now self-relaunches
-      once at startup under the same mitigation policy
-      (`crt1.c`'s `windows_aarch64_ensure_mitigated_relaunch()`) -- Phase B
-      only verified that *children spawned under the policy* get
-      deterministic addresses, not the *original process itself* (ordinary
-      ASLR), so a later `fork()` call's own addresses would never have
-      matched a mitigated child's without this. Every program pays one
-      extra process launch's worth of startup latency for this now,
-      whether or not it calls `fork()`.
+    - Also newly required: fork()-capable processes self-relaunch once at
+      startup under the same mitigation policy
+      (`libc/src/arch/windows/aarch64/fork_capable_relaunch.c`,
+      `__crt_windows_ensure_fork_capable_relaunch()`) -- Phase B only
+      verified that *children spawned under the policy* get deterministic
+      addresses, not the *original process itself* (ordinary ASLR), so a
+      later `fork()` call's own addresses would never have matched a
+      mitigated child's without this. This went through two more
+      revisions: the "did I already relaunch" check moved from an
+      inheritable env var marker (wrong -- survives `execve()` even when
+      the new process image is not actually mitigated) to querying
+      `GetProcessMitigationPolicy()` directly; and the relaunch itself
+      moved from unconditional (every Windows aarch64 process, which broke
+      external-command stdio entirely -- see docs) to opt-in per target via
+      a weak symbol, linked only into `crt_mksh` and the ctest suite.
     - See `docs/windows_fork_emulation.md`, "Spawn Broker Retired", for the
       full account including known limitations (only the calling thread's
       stack survives into the child, per POSIX; no guard-page preservation
-      past what was committed at fork time; x86_64 not yet ported).
+      past what was committed at fork time; x86_64 not yet ported; the
+      relaunch's fd inheritance covers only the 3 standard handles, not
+      arbitrary `posix_spawn_file_actions_adddup2()` descriptors, which is
+      what the 2 remaining `ctest` failures exercise; `mksh` exec-ing
+      another `mksh` recursively hangs, not yet root-caused).
 
 - Started running libpng's real `configure && make && make install` through
   project-owned mksh/make on Windows aarch64 (`port-rebuild-libpng`, depends
   on zlib already installed to `PORT_PREFIX`). Not passing yet, but found and
   fixed three real, independent CRT/mksh bugs along the way, each verified
-  against the full `ctest` suite (78/78) with no regressions:
+  against the full `ctest` suite (78/78 at the time) with no regressions:
   - **`regcomp()`/`regexec()` never implemented capture groups**
     (`libc/src/regex.c`): `\( \)` (BRE) / `( )` (ERE) were either treated as
     literal parenthesis characters to match (BRE) or silently miscounted
@@ -377,24 +388,27 @@ Detailed policy and provenance stay in `docs/` and import manifests.
     full `ctest` suite (78/78); `checking how to create a ustar tar
     archive` now correctly resolves to `none` and configure proceeds
     well past it (through `checking for gcc`) instead of aborting.
-  - **Still open / where to pick this up:** with all seven fixes above,
-    libpng's `configure` gets to actual compiler probing (`checking for
-    gcc... /system/bin/mksh .../crt-cc`) but then fails: `./configure:
-    can't create conftest.err: Bad file descriptor` (repeated 5 times)
-    followed by `checking whether the C compiler works... no` /
-    `configure: error: C compiler cannot create executables`. Not yet
-    investigated -- likely another fd-redirection-under-subshell issue
-    in the same family as the ones above, given the pattern so far, but
-    unconfirmed. Separately (and not yet root-caused either): real
-    `exchild()`-forked subshells have been observed left running
-    (blocked, ~0% CPU, no live ancestor) *after* the top-level
-    `./configure` process and its whole python/cmd/cmake launch chain
-    had already exited -- worth checking whether this is the same
-    "broker never responds" class of issue the I/O timeout above
-    covers, or something else blocking in the child (e.g. waiting on
-    its own child that already exited). The timeout fix above bounds
-    broker I/O specifically; it does not (and cannot) bound arbitrary
-    other blocking calls a subshell might make.
+  - **Update (post spawn-broker retirement / memory-copy fork()):** the
+    `can't create conftest.err: Bad file descriptor` failure this section
+    used to describe was a symptom of the spawn broker, which no longer
+    exists (see "Phase C" above). With the broker gone and memory-copy
+    `fork()` in its place, `configure` now gets *substantially* further --
+    all the way past `checking whether the C compiler works... yes` (the
+    exact step that used to fail) and through `checking build system
+    type`/`checking host system type` -- before hanging (not crashing:
+    confirmed genuinely stuck via the CPU-delta technique, unchanged CPU
+    across a 10s window) at the very next step, `checking for a sed that
+    does not truncate output`. This is autoconf's own self-test that
+    builds a `sed` script by repeatedly doubling a fixed pattern string,
+    then pipes the whole thing through `sed` to find the length where
+    truncation starts -- not yet root-caused; unclear whether it is the
+    same class of issue as the fd-inheritance gaps noted just above (the
+    self-relaunch's `STARTF_USESTDHANDLES`-only fix covers stdin/stdout/
+    stderr but not arbitrary pipe fds) or something specific to very long
+    single lines being piped through an external command from inside a
+    subshell. Next step: `-x` trace this specific self-test in isolation
+    (`CRT_PORT_SHELL_XTRACE=1`, matching earlier sessions' approach) to see
+    exactly which command the hang is inside.
 
 - Attempted to fix a real (if currently low-impact) gap in the spawn broker:
   every process it spawns shows up in Windows' own process tree as a child
