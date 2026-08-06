@@ -751,14 +751,99 @@ Windows aarch64 hardware and found two things:
 the mitigation-policy mechanism in place of the originally planned
 `/DYNAMICBASE:NO`.
 
-**Phase C:** implement the new `__crt_sys_fork()`: `setjmp` at the call
-site, self-relaunch via `CreateProcessA(..., CREATE_SUSPENDED, ...)` with
-the `PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY` attribute set (as verified in
-Phase B), `WriteProcessMemory` copy of the `malloc.c` `heap_head` chunk
-chain (absolute-pointer-linked, so exact address reproduction matters --
-see "Deciding The Next Step" above) plus the calling thread's stack and
-`.data`/`.bss`, a `GetThreadContext`/`SetThreadContext` trampoline that
-redoes TLS from scratch (fresh `TlsAlloc()` + `TlsSetValue()` -- unlike
-`RtlCloneUserProcess`, a `CreateProcessA`-spawned process does not inherit
-TLS slots at all) and then `longjmp`s the copied `jmp_buf` to resume at the
-original `fork()` call site with return value 0.
+**Phase C (done, aarch64): implemented and verified.** `__crt_sys_fork()`
+now dispatches to `__crt_windows_memcopy_fork()`
+(`libc/src/arch/windows/aarch64/fork_memcopy.c`) on aarch64, keeping the
+original `RtlCloneUserProcess` path unchanged on x86_64. Full `ctest`
+(78/78) passes with the new mechanism active, including
+`fork_test`/`fork_signal_test`/`fork_runtime_reset_test`.
+
+Implementation, in the order it actually happens:
+
+1. `setjmp()` at the top of `__crt_windows_memcopy_fork()` captures the
+   parent's callee-saved registers/Sp/Lr.
+2. Self-relaunch via `CreateProcessA(..., CREATE_SUSPENDED, ...)` with the
+   `PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY` attribute set (as verified in
+   Phase B) -- the child never runs `mainCRTStartup` at all; its very
+   first instruction is whatever the parent points its `CONTEXT.Pc` at
+   below.
+3. `WriteProcessMemory` copies three categories of memory into the child
+   at identical addresses: the `malloc.c` heap (via a dedicated OS-region
+   tracking table, `__crt_malloc_os_region_count()`/`_base()`/`_size()`
+   in `malloc.c` -- **not** a walk of malloc's own `block_header` split
+   chain, which subdivides one 64KB `mmap()` region into several
+   non-64KB-aligned sub-blocks that `VirtualAllocEx()` rejects), the
+   image's own writable PE sections (`.data`/`.bss`, found via manual PE
+   header parsing -- these are already committed by the loader, so this
+   step is a plain `WriteProcessMemory` with no `VirtualAllocEx()` at
+   all), and the calling thread's stack (commit-only, since the loader
+   already reserves the full stack region at thread creation -- adding
+   `MEM_RESERVE` on top of an existing reservation fails).
+4. The current thread's `crt_thread_context` block (tls.c) is copied
+   explicitly (a standalone `VirtualAlloc()`, not covered by the above).
+5. The copied `thread_tls_index` (part of the `.data` copy) is patched
+   back to `CRT_TLS_OUT_OF_INDEXES` in the child, so the existing
+   post-fork hook chain (`__crt_atfork_child()` -> `__crt_thread_after_
+   fork_child()` -> `__crt_thread_set_current()` -> `windows_tls_index()`
+   in tls.c, none of which needed to change) allocates a fresh,
+   legitimate TLS index there instead of reusing the parent's stale one.
+6. The child's initial `CONTEXT` is constructed **directly** from the
+   values `setjmp()` captured in step 1 (`X19`-`X28`, `Fp`, `Sp`, `D8`-
+   `D15`, and `Pc` set to the captured `Lr`, `X0` set to 1 to match
+   `setjmp()`'s own longjmp-return convention) via `SetThreadContext()`,
+   then `ResumeThread()`.
+
+Step 6 is not what the design write-up above originally described.  The
+first working version used a small **trampoline function**: redirect
+`CONTEXT.Pc` to a real function that itself called `longjmp()` on a
+`jmp_buf` copied into the child's memory (matching the design as
+written). This reproducibly crashed with `STATUS_ACCESS_VIOLATION`
+(DEP/execute violation) inside `longjmp()`'s own restore sequence.
+Bisected using `WaitForDebugEvent()`/`ContinueDebugEvent()` (the child
+spawned with `DEBUG_PROCESS`, letting the parent observe the exact
+faulting instruction and register state -- ordinary in-process exception
+handlers were not reliable here) down to: at the moment the trampoline
+tried to read the copied `jmp_buf` back out of child memory, the bytes
+had gone from byte-identical (confirmed via a `ReadProcessMemory()`
+readback taken immediately before `ResumeThread()`) to all zero by the
+time the child's own code executed. The exact mechanism was not fully
+isolated (suspected interaction between the unusually large upfront
+stack commit and the loader/`ntdll` initialization that still runs even
+though the "user" entry point is redirected), but the fix sidesteps the
+question entirely: since the parent already holds every value the
+trampoline would have read from memory in its own local variables/
+registers, it writes them straight into the child's `CONTEXT` itself via
+`SetThreadContext()`, and the child never needs to read `jmp_buf` state
+back out of copied memory at all. This is a strictly more robust design,
+not just a workaround -- worth keeping even if the memory-corruption
+mechanism above were fully understood.
+
+**Every Windows aarch64 process now self-relaunches once at startup**
+under the same mitigation policy (`libc/src/arch/windows/common/crt1.c`,
+`windows_aarch64_ensure_mitigated_relaunch()`, gated by the
+`CRT_FORK_MITIGATED` environment marker to relaunch only once). This was
+not originally anticipated: Phase B verified that *children spawned under
+the mitigation policy* get deterministic addresses, but the *parent
+process itself* -- launched normally, with ordinary ASLR -- does not,
+so its own heap/stack addresses would never match what a later `fork()`
+call's mitigated child gets. Every CRT-built program on Windows aarch64
+now pays one extra process launch's worth of startup latency for this,
+whether or not it ever calls `fork()` -- a real, accepted cost of making
+`fork()` possible at all with this mechanism.
+
+Known limitations, not yet addressed:
+- only the calling thread's stack is copied (matches POSIX `fork()`
+  semantics -- other threads do not survive into the child -- but pthread-
+  created OS threads' own stacks are not otherwise touched or cleaned up
+  in the child beyond the existing `__crt_pthread_after_fork_child()`
+  hook);
+- the stack copy does not preserve a guard page beyond what was already
+  committed at fork() time, so the child cannot auto-grow its stack past
+  that point;
+- x86_64 still uses the original `RtlCloneUserProcess` path and does not
+  get this mechanism (or the startup self-relaunch cost) at all -- would
+  need its own CONTEXT layout, its own Phase B address-determinism
+  verification (untested whether the same mitigation-policy approach even
+  applies there, since `/DYNAMICBASE:NO` links fine on x86_64, unlike
+  aarch64), and its own TEB-access mechanism (X18 is aarch64-specific;
+  x86_64 uses the GS segment register).

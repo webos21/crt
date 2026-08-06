@@ -201,14 +201,50 @@ Detailed policy and provenance stay in `docs/` and import manifests.
     in principle (a process-creation attribute, not a link flag), though
     only verified on aarch64 so far. **The Phase C address-matching
     assumption is confirmed feasible on real Windows aarch64 hardware.**
-  - **Phase C (next):** implement the new `__crt_sys_fork()` using this
-    mitigation-policy mechanism in place of the originally-planned
-    `/DYNAMICBASE:NO`. See the plan file referenced in this session for the
-    full step breakdown (self-relaunch via `CreateProcessA(CREATE_SUSPENDED)`
-    with the mitigation policy attribute, heap/stack/`.data`/`.bss` copy via
-    `WriteProcessMemory`, a `SetThreadContext` trampoline that redoes TLS
-    (`TlsAlloc`/`TlsSetValue`) and then `longjmp`s a copied `jmp_buf` to
-    resume at the `fork()` call site).
+  - **Phase C (done, aarch64):** `__crt_sys_fork()` now dispatches to a new
+    `__crt_windows_memcopy_fork()`
+    (`libc/src/arch/windows/aarch64/fork_memcopy.c`) on aarch64; x86_64
+    keeps the original `RtlCloneUserProcess` path untouched. Full `ctest`
+    (78/78) passes with the new mechanism active. Two things came up that
+    the design write-up above didn't anticipate:
+    - `malloc.c`'s `block_header` split chain is not the same thing as the
+      underlying OS `mmap()`/`VirtualAlloc()` region boundaries -- a single
+      64KB chunk gets subdivided into several non-64KB-aligned sub-blocks
+      once anything allocates from it, and `VirtualAllocEx()` requires an
+      explicit `lpAddress` to be allocation-granularity-aligned. Fixed by
+      adding a separate, dedicated OS-region tracking table in `malloc.c`
+      (`__crt_malloc_os_region_count()`/`_base()`/`_size()`, populated only
+      in `append_chunk()`), independent of the block-split bookkeeping.
+    - The child's `CONTEXT.Pc` was originally redirected to a small
+      trampoline function that itself called `longjmp()` on a `jmp_buf`
+      copied into the child's memory (matching the original design). This
+      reproducibly crashed (`STATUS_ACCESS_VIOLATION`, DEP/execute
+      violation, inside `longjmp()`'s own restore sequence) -- a
+      `ReadProcessMemory()` readback taken immediately before
+      `ResumeThread()` confirmed the copied `jmp_buf` bytes were correct
+      at that point, but had become all-zero by the time the child's own
+      code tried to read them (bisected with `WaitForDebugEvent()`/
+      `ContinueDebugEvent()`, since in-process exception handlers weren't
+      reliable here; exact mechanism not fully isolated). Fixed by
+      skipping the trampoline/`longjmp()` indirection entirely: the parent
+      already holds every register value the trampoline would have read
+      from memory, so it writes them straight into the child's `CONTEXT`
+      itself via `SetThreadContext()` and never asks the child to read
+      resume state back out of memory at all -- a more robust design, not
+      just a workaround.
+    - Also newly required: every Windows aarch64 process now self-relaunches
+      once at startup under the same mitigation policy
+      (`crt1.c`'s `windows_aarch64_ensure_mitigated_relaunch()`) -- Phase B
+      only verified that *children spawned under the policy* get
+      deterministic addresses, not the *original process itself* (ordinary
+      ASLR), so a later `fork()` call's own addresses would never have
+      matched a mitigated child's without this. Every program pays one
+      extra process launch's worth of startup latency for this now,
+      whether or not it calls `fork()`.
+    - See `docs/windows_fork_emulation.md`, "Spawn Broker Retired", for the
+      full account including known limitations (only the calling thread's
+      stack survives into the child, per POSIX; no guard-page preservation
+      past what was committed at fork time; x86_64 not yet ported).
 
 - Started running libpng's real `configure && make && make install` through
   project-owned mksh/make on Windows aarch64 (`port-rebuild-libpng`, depends

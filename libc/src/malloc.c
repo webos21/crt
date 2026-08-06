@@ -27,6 +27,35 @@ void __crt_malloc_after_fork_child(void) {
   heap_lock.state.value = 0;
 }
 
+/* Windows memory-copy fork() support (docs/windows_fork_emulation.md,
+ * "Chosen Direction" superseded by the Cygwin/MSYS-style replacement):
+ * tracks the OS-level mmap()/VirtualAlloc() region boundaries separately
+ * from the block_header split chain above. The two are NOT the same
+ * thing once split_block() has subdivided a chunk: a single 64KB
+ * append_chunk() mmap() region can end up linked as several
+ * block_header nodes, most of them at addresses that are not 64KB-
+ * aligned -- and VirtualAllocEx() on the Windows side requires an
+ * explicit lpAddress to be aligned to the system allocation granularity
+ * (64KB), so the fork implementation must copy whole OS regions, not
+ * individual split blocks. Fixed-size table (not a linked list, to avoid
+ * needing malloc() itself to track allocations of the allocator). */
+#define CRT_MALLOC_MAX_OS_REGIONS 4096
+static void* heap_os_region_base[CRT_MALLOC_MAX_OS_REGIONS];
+static size_t heap_os_region_size[CRT_MALLOC_MAX_OS_REGIONS];
+static int heap_os_region_count;
+
+int __crt_malloc_os_region_count(void) {
+  return heap_os_region_count;
+}
+
+void* __crt_malloc_os_region_base(int index) {
+  return index >= 0 && index < heap_os_region_count ? heap_os_region_base[index] : 0;
+}
+
+size_t __crt_malloc_os_region_size(int index) {
+  return index >= 0 && index < heap_os_region_count ? heap_os_region_size[index] : 0;
+}
+
 static size_t align_size(size_t size) {
   size_t alignment = sizeof(block_header);
   return (size + alignment - 1) & ~(alignment - 1);
@@ -53,6 +82,11 @@ static block_header* append_chunk(size_t size) {
   mapping = mmap(0, chunk_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (mapping == MAP_FAILED) {
     return 0;
+  }
+  if (heap_os_region_count < CRT_MALLOC_MAX_OS_REGIONS) {
+    heap_os_region_base[heap_os_region_count] = mapping;
+    heap_os_region_size[heap_os_region_count] = chunk_size;
+    heap_os_region_count++;
   }
 
   header = (block_header*)mapping;

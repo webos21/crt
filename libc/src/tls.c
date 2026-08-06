@@ -86,6 +86,10 @@ __declspec(dllimport) void* CRT_WINAPI VirtualAlloc(
 static volatile long thread_tls_index = (long)CRT_TLS_OUT_OF_INDEXES;
 static crt_thread_context fallback_context;
 
+long* __crt_windows_tls_index_ptr(void) {
+  return (long*)&thread_tls_index;
+}
+
 static DWORD windows_tls_index(void) {
   DWORD index = (DWORD)thread_tls_index;
 

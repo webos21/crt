@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 #include <private/crt_fd_table.h>
+#include <private/crt_fork_memcopy.h>
 #include <private/crt_signal.h>
 #include <private/crt_spawn.h>
 
@@ -434,7 +435,9 @@ static int fd_kind[CRT_FD_TABLE_SIZE];
 static int fd_flags[CRT_FD_TABLE_SIZE];
 static int fd_table_initialized;
 static int winsock_initialized;
+#if !defined(__aarch64__) && !defined(_M_ARM64)
 static int ntdll_initialized;
+#endif
 /* Set once, in the RtlCloneUserProcess child branch of __crt_sys_fork().
  * A process with this flag set is a raw NT-level clone that never went
  * through CreateProcess's CSRSS registration handshake: CreateProcessA
@@ -451,7 +454,9 @@ long __crt_sys_geteuid(void);
 static HANDLE get_fd_handle(int fd);
 static void init_fd_table(void);
 static long init_winsock(void);
+#if !defined(__aarch64__) && !defined(_M_ARM64)
 static long init_ntdll(void);
+#endif
 static long close_fd_slot(int fd);
 
 struct ntdll_api {
@@ -463,7 +468,9 @@ struct ntdll_api {
       struct crt_rtl_user_process_information*);
 };
 
+#if !defined(__aarch64__) && !defined(_M_ARM64)
 static struct ntdll_api ntdll;
+#endif
 
 struct winsock_api {
   int (CRT_WINAPI* WSAStartup)(WORD wVersionRequested, void* lpWSAData);
@@ -1450,7 +1457,13 @@ static long fd_snapshot_prepare_child_duplicates(
   return 0;
 }
 
-/* Only __crt_sys_fork()'s RtlCloneUserProcess path calls this. */
+/* Used by both __crt_sys_fork() paths: the RtlCloneUserProcess path needs
+ * every fd temporarily inheritable because it clones the whole handle
+ * table regardless of individual inherit flags; the aarch64 memory-copy
+ * path's child is a real CreateProcessA(bInheritHandles=1) child, which
+ * follows ordinary Win32 semantics and only inherits handles already
+ * marked HANDLE_FLAG_INHERIT -- so it needs the exact same temporary
+ * marking around the spawn. */
 static void fd_set_inherit_for_fork(unsigned char touched[CRT_FD_TABLE_SIZE],
                                     DWORD old_flags[CRT_FD_TABLE_SIZE]) {
   int fd;
@@ -2157,7 +2170,10 @@ static long init_winsock(void) {
   return 0;
 }
 
-/* Only __crt_sys_fork()'s RtlCloneUserProcess path calls this. */
+#if !defined(__aarch64__) && !defined(_M_ARM64)
+/* Only __crt_sys_fork()'s RtlCloneUserProcess path calls this -- aarch64
+ * uses the memory-copy fork() instead (see __crt_sys_fork() below), which
+ * never calls RtlCloneUserProcess at all. */
 static long init_ntdll(void) {
   HANDLE module;
 
@@ -2177,6 +2193,7 @@ static long init_ntdll(void) {
   ntdll_initialized = 1;
   return 0;
 }
+#endif
 
 static HANDLE get_fd_handle(int fd) {
   init_fd_table();
@@ -3808,6 +3825,32 @@ long __crt_sys_thread_id(void) {
   return (long)GetCurrentThreadId();
 }
 
+#if defined(__aarch64__) || defined(_M_ARM64)
+/* Cygwin/MSYS-style memory-copy fork(), verified on real Windows aarch64
+ * hardware -- see libc/src/arch/windows/aarch64/fork_memcopy.c and
+ * docs/windows_fork_emulation.md, "Spawn Broker Retired". Replaces the
+ * RtlCloneUserProcess path below: the child is a normally
+ * CreateProcessA()'d, CSRSS-registered process, so none of the
+ * "unregistered clone" workarounds (windows_unregistered_clone,
+ * __crt_windows_is_unregistered_clone()) ever come into play here. */
+long __crt_sys_fork(void) {
+  unsigned char inherit_touched[CRT_FD_TABLE_SIZE];
+  DWORD old_inherit_flags[CRT_FD_TABLE_SIZE];
+  unsigned long child_pid = 0;
+  void* child_process = 0;
+  long result;
+
+  memset(old_inherit_flags, 0, sizeof(old_inherit_flags));
+  fd_set_inherit_for_fork(inherit_touched, old_inherit_flags);
+  result = __crt_windows_memcopy_fork(&child_pid, &child_process);
+  fd_restore_inherit_after_fork(inherit_touched, old_inherit_flags);
+
+  if (result <= 0) {
+    return result;
+  }
+  return remember_child_process((DWORD)child_pid, (HANDLE)child_process);
+}
+#else
 long __crt_sys_fork(void) {
   struct crt_rtl_user_process_information info;
   unsigned char inherit_touched[CRT_FD_TABLE_SIZE];
@@ -3850,6 +3893,7 @@ long __crt_sys_fork(void) {
   }
   return remember_child_process(child_pid, info.Process);
 }
+#endif
 
 int __crt_windows_is_unregistered_clone(void) {
   return windows_unregistered_clone;

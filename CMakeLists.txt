@@ -128,6 +128,19 @@ if(CRT_TARGET_OS STREQUAL "linux" AND CRT_EFFECTIVE_ARCH_FOR_FLAGS MATCHES "^(ar
   )
 endif()
 
+if(CRT_TARGET_OS STREQUAL "windows" AND CRT_EFFECTIVE_ARCH_FOR_FLAGS MATCHES "^(arm64|ARM64|aarch64)$")
+  # Windows ARM64's ABI dedicates X18 as the platform register holding the
+  # current thread's TEB pointer (NtCurrentTeb() == __getReg(18)); real
+  # Windows system code always treats it as reserved. This build must too,
+  # applied to every translation unit (not just the one that reads it),
+  # since any function anywhere in the process that treats X18 as an
+  # ordinary scratch register corrupts it for the rest of the program's
+  # lifetime -- found the hard way while wiring up the memory-copy fork()'s
+  # stack-bounds lookup (libc/src/arch/windows/aarch64/fork_memcopy.c),
+  # which read garbage, differently-valued "TEB" addresses without this.
+  target_compile_options(crt_build_flags INTERFACE -ffixed-x18)
+endif()
+
 if(CRT_USE_COMPILER_RT)
   execute_process(
     COMMAND "${CMAKE_C_COMPILER}" --print-libgcc-file-name
