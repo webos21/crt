@@ -477,6 +477,89 @@ if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
   )
 endif()
 
+# See shell/awk/README.md: a real AWK, built against this project's own CRT
+# like mksh/toybox, rather than either enabling toybox's own disabled-by-
+# default toys/pending/awk.c or depending on whatever awk (if any) a given
+# host machine happens to already have installed.
+set(CRT_AWK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/awk")
+if(EXISTS "${CRT_AWK_ROOT}/src/awk.h")
+  set(CRT_AWK_SOURCES
+    awk/src/awkgram.tab.c
+    awk/src/b.c
+    awk/src/lex.c
+    awk/src/lib.c
+    awk/src/main.c
+    awk/src/parse.c
+    awk/src/proctab.c
+    awk/src/run.c
+    awk/src/tran.c
+  )
+  # Several dispatch-table-shaped functions across this import legitimately
+  # ignore one of their (uniform-signature) parameters. A plain
+  # target_compile_options(-Wno-unused-parameter) is not reliable here: CMake
+  # places crt_build_flags' linked-INTERFACE -Wall/-Wextra/-Werror *after*
+  # this target's own target_compile_options on the actual command line, and
+  # -Wall/-Wextra re-enable -Wunused-parameter there, so -Werror would still
+  # fault -- set_source_files_properties' COMPILE_OPTIONS are appended at the
+  # very end instead, so this reliably wins the "last flag wins" ordering
+  # (same reason libm/CMakeLists.txt and libc/CMakeLists.txt's gdtoa/regex
+  # imports use the same mechanism).
+  set_source_files_properties(${CRT_AWK_SOURCES} PROPERTIES
+    COMPILE_OPTIONS "-Wno-unused-parameter;-Wno-unused-but-set-variable"
+  )
+  add_executable(crt_awk
+    ${CRT_AWK_SOURCES}
+    $<TARGET_OBJECTS:crt1>
+  )
+  target_link_libraries(crt_awk PRIVATE crt_build_flags c m)
+  target_link_libraries(crt_awk PRIVATE crt_compiler_rt_builtins)
+  target_include_directories(crt_awk PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/awk/src"
+  )
+  target_link_options(crt_awk PRIVATE
+    -nostdlib
+    -nostartfiles
+    -nodefaultlibs
+  )
+  if(CRT_TARGET_OS STREQUAL "macos")
+    target_link_options(crt_awk PRIVATE
+      -Wl,-e,_start
+      -Wl,-dead_strip
+    )
+    target_link_libraries(crt_awk PRIVATE System)
+  elseif(CRT_TARGET_OS STREQUAL "linux")
+    target_link_options(crt_awk PRIVATE
+      -Wl,-e,_start
+      -Wl,--gc-sections
+    )
+  elseif(CRT_TARGET_OS STREQUAL "windows")
+    target_link_options(crt_awk PRIVATE
+      -Wl,/entry:mainCRTStartup
+      -Wl,/subsystem:console
+      -Wl,/OPT:REF
+    )
+    target_link_libraries(crt_awk PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  endif()
+  add_dependencies(crt_awk c m crt1)
+  set_target_properties(crt_awk PROPERTIES
+    OUTPUT_NAME awk
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/shell"
+  )
+  add_test(NAME crt_awk_basic_runs
+    COMMAND crt_awk "BEGIN { print \"awk-ok\" }"
+  )
+  set_tests_properties(crt_awk_basic_runs PROPERTIES
+    PASS_REGULAR_EXPRESSION "awk-ok"
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_awk_basic_runs)
+
+  add_dependencies(crt_shell_artifacts crt_awk)
+  install(TARGETS crt_awk
+    RUNTIME DESTINATION system/bin
+  )
+endif()
+
 install(TARGETS crt_tiny_sh
   RUNTIME DESTINATION system/bin
 )

@@ -762,6 +762,8 @@ static void format_double_general(
       char local[192];
       size_t len;
 
+      struct printf_spec out_spec = *spec;
+
       temp.data = local;
       temp.capacity = sizeof(local);
       temp.length = 0;
@@ -771,7 +773,19 @@ static void format_double_general(
       if (!spec->alt) {
         trim_fraction(local, &len);
       }
-      write_formatted(buffer, spec, 0, 0, local, len, 0);
+      // %g's precision controls how many significant digits
+      // format_double_fixed() above already rendered into `local` -- it
+      // must NOT also reach write_formatted() below, which (correctly,
+      // for %d/%x/etc.) treats a set precision as "zero-pad the digit
+      // string to at least this many characters". Passing the original
+      // spec straight through left that still set, so e.g. `%.6g` of
+      // 4.0 printed "000004" instead of "4" (precision=6 read as "pad
+      // to 6 digits" a second time, on top of already having controlled
+      // digit generation via `adjusted` above). format_double_fixed/
+      // format_double_exp already clear this the same way before their
+      // own write_formatted() calls; this branch just missed it.
+      out_spec.precision_set = 0;
+      write_formatted(buffer, &out_spec, 0, 0, local, len, 0);
     }
   }
 }
@@ -905,6 +919,8 @@ static void format_long_double_general(
       char local[256];
       size_t len;
 
+      struct printf_spec out_spec = *spec;
+
       temp.data = local;
       temp.capacity = sizeof(local);
       temp.length = 0;
@@ -914,7 +930,10 @@ static void format_long_double_general(
       if (!spec->alt) {
         trim_fraction(local, &len);
       }
-      write_formatted(buffer, spec, 0, 0, local, len, 0);
+      // See the matching comment in format_double_general(); same bug,
+      // same fix.
+      out_spec.precision_set = 0;
+      write_formatted(buffer, &out_spec, 0, 0, local, len, 0);
     }
   }
 }

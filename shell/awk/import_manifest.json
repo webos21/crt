@@ -1,0 +1,41 @@
+{
+  "name": "awk",
+  "role": "/system/bin/awk (and /bin/awk, /usr/bin/awk aliases)",
+  "source": {
+    "upstream": "onetrueawk/awk (Brian Kernighan's reference AWK; the same lineage NetBSD and many BSDs ship as their system awk)",
+    "url": "https://github.com/onetrueawk/awk",
+    "branch": "master",
+    "commit": "5739fd79bcfc75ba7526773d0cf634521f8aca3c",
+    "observed_date": "2026-04-26",
+    "license": "Lucent Technologies 1997 permissive license; see LICENSE"
+  },
+  "generated_files": [
+    {
+      "file": "src/awkgram.tab.c",
+      "generated_by": "win_flex_bison (WinFlexBison.win_flex_bison 2.5.25) bison -d -b awkgram awkgram.y",
+      "note": "Vendored as a pristine generated file rather than regenerated at build time, matching shell/toybox/crt/generated/*.h's own convention -- this project's CMake build has no bison/yacc dependency otherwise. Regenerate only if awkgram.y itself changes."
+    },
+    {
+      "file": "src/awkgram.tab.h",
+      "generated_by": "same bison invocation as awkgram.tab.c"
+    },
+    {
+      "file": "src/proctab.c",
+      "generated_by": "maketab.c, compiled and run as a native host tool (this project's own crt-cc, targeting the same host the build runs on) against awkgram.tab.h: `./maketab awkgram.tab.h > proctab.c`",
+      "note": "maketab.c itself is kept in src/ for reference/reproducibility but is NOT part of the crt_awk build -- only its one-time output (proctab.c) is compiled."
+    }
+  ],
+  "status": {
+    "linux": "pending host verification",
+    "macos": "pending host verification",
+    "windows": "builds; crt_awk basic -c smoke passes"
+  },
+  "notes": [
+    "Imported to give this project's own rootfs (mksh + toybox + this) a real AWK, matching why mksh/toybox exist at all: bare Windows has none, and most autoconf-generated configure scripts require one.",
+    "Chosen over enabling toybox's own toys/pending/awk.c: that implementation is disabled by default even in Bionic's own upstream toybox config (CFG_AWK 0), signaling real incompleteness; onetrueawk is small, POSIX-focused, and is what NetBSD/many BSDs ship as their actual system awk.",
+    "Deliberately NOT solved by pointing configure at a host-installed awk (e.g. Git for Windows' bundled gawk.exe): that would be an uncontrolled, per-developer-machine dependency linked against a different runtime (MSYS), breaking the same reproducibility/self-containment principle that motivated building mksh/toybox against this project's own CRT in the first place. Linux/macOS need no such workaround since the OS itself always provides a real awk; only Windows needed one built.",
+    "One adaptation to upstream source: src/parse.c's ptoi()/itonp() helpers (smuggling a small int through a bison-stack Node* slot, never a real pointer dereference) cast through `long`, which truncates on Windows LLP64 (32-bit long, 64-bit pointers); changed to `intptr_t`. See the inline comment at the change site.",
+    "Filled real, general (not awk-specific) CRT/libm gaps found compiling this: atan2()/atan() (libm/src/freebsd/e_atan2.c, s_atan.c, both from FreeBSD msun -- NOT libc/src/regex/'s NetBSD-regex import, a separate upstream), system() (libc/src/process.c), rand()/srand()/random()/srandom() (libc/src/random.c), SIGFPE si_code FPE_* constants (include/signal.h), and <stdnoreturn.h> (missing entirely before this).",
+    "Running real awk programs (not just compiling awk) surfaced a real, general printf/snprintf bug unrelated to awk itself: %g with an explicit precision (e.g. the %.30g get_str_val()/tran.c always uses for integral numbers) zero-padded the rendered digit string a second time instead of leaving it alone (format_double_general()/format_long_double_general() in libc/src/printf.c were not clearing spec->precision_set before their final write_formatted() call, unlike their fixed-point/exponential siblings). Fixed, with regression coverage added to tests/printf_test.c."
+  ]
+}

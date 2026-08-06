@@ -16,6 +16,13 @@ void free(void* ptr);
 void* calloc(size_t nmemb, size_t size);
 void* realloc(void* ptr, size_t size);
 void* reallocarray(void* ptr, size_t nmemb, size_t size);
+int system(const char* command);
+
+#define RAND_MAX 0x7fffffff
+int rand(void);
+void srand(unsigned int seed);
+long random(void);
+void srandom(unsigned int seed);
 void exit(int status) __attribute__((noreturn));
 void abort(void) __attribute__((noreturn));
 int atexit(void (*function)(void));

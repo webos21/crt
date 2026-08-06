@@ -37,6 +37,9 @@ typedef uint32_t u_int32_t;
 #ifndef nan_mix_op
 #define nan_mix_op(x, y, op) ((x) op (y))
 #endif
+#ifndef nan_mix
+#define nan_mix(x, y) nan_mix_op((x), (y), +)
+#endif
 
 #if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
 #define CRT_IEEE_WORD_ORDER_BIG 1

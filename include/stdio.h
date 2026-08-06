@@ -42,6 +42,8 @@ int fputs(const char* s, FILE* stream);
 FILE* fopen(const char* path, const char* mode);
 FILE* fdopen(int fd, const char* mode);
 FILE* freopen(const char* path, const char* mode, FILE* stream);
+FILE* popen(const char* command, const char* type);
+int pclose(FILE* stream);
 FILE* tmpfile(void);
 char* tmpnam(char* s);
 char* tempnam(const char* dir, const char* prefix);

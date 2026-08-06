@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <fcntl.h>
+#include <stdlib.h>
 #include <sys/random.h>
 #include <unistd.h>
 
@@ -48,4 +49,35 @@ int getentropy(void* buffer, size_t buffer_size) {
     done += (size_t)n;
   }
   return 0;
+}
+
+// rand()/srand() (ISO C) and random()/srandom() (POSIX): a 48-bit linear
+// congruential generator using the well-known POSIX drand48/rand48
+// family constants (multiplier 0x5DEECE66D, increment 0xB -- the same
+// ones behind drand48()/jrand48() and, not coincidentally, java.util.
+// Random), not a literal port of BSD's own proprietary additive-
+// feedback random() implementation. POSIX does not mandate a specific
+// output sequence for either API -- only that it be a reproducible
+// pseudo-random sequence given the same seed within a run -- which this
+// provides. Needed for onetrueawk's rand()/srand() builtins (see
+// shell/awk/); rand.cpp in Bionic itself defines rand()/srand() as
+// thin wrappers over random()/srandom() for the same reason ("the BSD
+// rand/srand is very weak"), a pattern kept here too.
+static unsigned long long random_state = 1;
+
+void srandom(unsigned int seed) {
+  random_state = (unsigned long long)seed;
+}
+
+long random(void) {
+  random_state = (random_state * 0x5DEECE66DULL + 0xBULL) & 0xFFFFFFFFFFFFULL;
+  return (long)((random_state >> 17) & 0x7fffffffULL);
+}
+
+void srand(unsigned int seed) {
+  srandom(seed);
+}
+
+int rand(void) {
+  return (int)random();
 }

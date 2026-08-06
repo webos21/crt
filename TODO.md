@@ -537,9 +537,58 @@ Detailed policy and provenance stay in `docs/` and import manifests.
     inaccessible or not found` / `configure: error: ... no` -- this
     project's rootfs has no `awk` at all yet (`checking for gawk/mawk/
     nawk/awk... no` earlier in the same log; toybox's own `awk.c` is a
-    `pending`, not-yet-enabled applet). Not yet investigated -- likely a
-    real, standalone piece of work (an AWK implementation), not a quick
-    fix like the ones above.
+    `pending`, not-yet-enabled applet).
+  - **Update: real AWK ported and working.** Per explicit direction,
+    ported Brian Kernighan's reference `onetrueawk` (NetBSD/many BSDs'
+    own system awk) into `shell/awk/`, built with this project's own CRT
+    like `mksh`/`toybox` -- deliberately *not* solved by pointing
+    configure at a host-installed awk (e.g. Git for Windows' bundled
+    `gawk.exe`), which would be an uncontrolled, per-machine, different-
+    runtime dependency breaking the same self-containment principle that
+    justified building `mksh`/`toybox` in the first place. See
+    `shell/awk/README.md` and `import_manifest.json` for the full
+    writeup; summary:
+    - Installed `win_flex_bison` (via `winget`) to generate
+      `awkgram.tab.c`/`.h` from upstream's `awkgram.y`, and built/ran
+      upstream's own `maketab.c` (as a native host tool, via this
+      project's own `crt-cc` against its own sysroot) to generate
+      `proctab.c`. Both generated outputs are vendored as pristine,
+      checked-in files (matching how `shell/toybox/crt/generated/*.h`
+      are already vendored rather than regenerated at build time) -- this
+      project's CMake build gained no new bison/yacc dependency.
+    - One adaptation to upstream source: `parse.c`'s `ptoi()`/`itonp()`
+      pointer-smuggling helpers cast through `long`, truncating on
+      Windows LLP64; changed to `intptr_t`.
+    - Filled several real, general (not awk-specific) CRT/libm gaps found
+      compiling and then actually *running* awk programs: `<stdnoreturn.h>`
+      (missing entirely), `atan2()`/`atan()` (FreeBSD msun, a separate
+      upstream from the regex import), `system()`, `rand()`/`srand()`/
+      `random()`/`srandom()` (a rand48-family LCG, not a literal port of
+      BSD's own proprietary `random()` -- POSIX doesn't mandate a specific
+      sequence), `SIGFPE` `FPE_*` `si_code` constants, and `popen()`/
+      `pclose()`.
+    - Found and fixed a real, general `printf`/`snprintf` bug this way
+      too: `%g` with an *explicit* precision (`%.6g`, `%.30g`, ... --
+      onetrueawk's own number-to-string conversion always uses `%.30g`)
+      zero-padded the already-rendered digit string a second time (e.g.
+      `%.6g` of `4.0` printed `"000004"`, not `"4"`) because
+      `format_double_general()`/`format_long_double_general()`
+      (`libc/src/printf.c`) forgot to clear `spec->precision_set` before
+      their final `write_formatted()` call, unlike their fixed-point/
+      exponential siblings which already did. No prior test had ever
+      exercised `%g` with a non-default precision. Regression-covered in
+      `tests/printf_test.c`.
+    - Verified: `ctest` 79/79 (new `crt_awk_basic_runs` plus the printf
+      regression cases above); manual smoke covering print/field-split/
+      pattern-match/arrays/`printf`/`split`/`sqrt`/`atan2`/`rand`/`srand`/
+      `getline`-from-`popen` all correct. A full libpng `configure`
+      re-run now passes `checking for gawk... (cached) awk` /
+      `checking if awk (awk) works... yes` and reaches yet another new,
+      much later, and completely different next blocker: `checking for
+      zlibVersion in -lz... no` / `configure: error: zlib not installed`
+      -- despite zlib's own install stamp already being present in
+      `PORT_PREFIX`; not yet investigated (a link/library-path issue,
+      not a missing-tool issue like everything above).
   - Checked whether any of the fixes above are Windows-specific-only or
     could affect macOS/Linux (couldn't literally build for those hosts
     from this Windows aarch64 machine -- static review only): the

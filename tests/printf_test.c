@@ -113,6 +113,33 @@ int main(void) {
     return fail("fesetround nearest");
   }
 
+  // %g with an explicit precision (as opposed to the implicit default of
+  // 6) used to leak the caller's original spec->precision_set through to
+  // write_formatted(), which -- correctly, for %d/%x/etc. -- treats a set
+  // precision as "zero-pad the digit string to at least this many
+  // characters". Applied a second time to an *already-rendered* %g
+  // digit string, "%.6g" of 4.0 printed "000004" instead of "4", and
+  // "%.30g" printed a 30-character run of zeros ahead of the "4". Found
+  // via shell/awk/ (onetrueawk's get_str_val() always calls snprintf
+  // with an explicit precision, e.g. "%.30g" for integral values), not
+  // by this test suite -- no prior case exercised %g with any precision
+  // other than the implicit default.
+  if (snprintf(buffer, sizeof(buffer), "%.6g", 4.0) != 1 || strcmp(buffer, "4") != 0) {
+    return fail("%.6g precision (integral)");
+  }
+  if (snprintf(buffer, sizeof(buffer), "%.30g", 4.0) != 1 || strcmp(buffer, "4") != 0) {
+    return fail("%.30g precision (integral)");
+  }
+  if (snprintf(buffer, sizeof(buffer), "%.30g", 2.0) != 1 || strcmp(buffer, "2") != 0) {
+    return fail("%.30g precision (integral, second value)");
+  }
+  if (snprintf(buffer, sizeof(buffer), "%.3g", 3.14159) != 4 || strcmp(buffer, "3.14") != 0) {
+    return fail("%.3g precision (fractional)");
+  }
+  if (snprintf(buffer, sizeof(buffer), "%.30Lg", 4.0L) != 1 || strcmp(buffer, "4") != 0) {
+    return fail("%.30Lg precision (long double, integral)");
+  }
+
   printf("printf_test: %s %d %x\n", "ok", 7, 255);
   return 0;
 }

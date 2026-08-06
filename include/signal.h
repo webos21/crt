@@ -107,6 +107,22 @@ struct sigaction {
 #define CLD_STOPPED 5
 #define CLD_CONTINUED 6
 
+// SIGFPE si_code values (matches Linux/Bionic <bits/siginfo-consts.h>
+// numbering). Added for onetrueawk's SIGFPE handler (main.c), which
+// switches on these to report which kind of floating-point exception
+// occurred; not yet guaranteed to be populated accurately by every
+// platform's SIGFPE delivery path in this project, in which case a
+// handler relying on them just falls through to a generic message
+// rather than misbehaving.
+#define FPE_INTDIV 1
+#define FPE_INTOVF 2
+#define FPE_FLTDIV 3
+#define FPE_FLTOVF 4
+#define FPE_FLTUND 5
+#define FPE_FLTRES 6
+#define FPE_FLTINV 7
+#define FPE_FLTSUB 8
+
 int sigemptyset(sigset_t* set);
 int sigfillset(sigset_t* set);
 int sigaddset(sigset_t* set, int sig);

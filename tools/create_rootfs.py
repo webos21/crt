@@ -107,6 +107,7 @@ def main():
     parser.add_argument("--mksh")
     parser.add_argument("--mkshrc")
     parser.add_argument("--toybox")
+    parser.add_argument("--awk")
     args = parser.parse_args()
 
     rootfs = Path(args.dest).resolve()
@@ -162,6 +163,15 @@ def main():
                 install_alias(toybox_dest, rootfs / applet_dir / applet_name, args.target_os, quiet=True)
                 if args.target_os == "windows":
                     copy_file(toybox_source, rootfs / applet_dir / applet, applet, quiet=True)
+    if args.awk:
+        awk_source = Path(args.awk).resolve()
+        awk_name = "awk.exe" if args.target_os == "windows" else "awk"
+        awk_dest = rootfs / "system" / "bin" / awk_name
+        copy_file(awk_source, awk_dest, awk_name)
+        for awk_dir in ("bin", "usr/bin"):
+            install_alias(awk_dest, rootfs / awk_dir / awk_name, args.target_os, quiet=True)
+            if args.target_os == "windows":
+                copy_file(awk_source, rootfs / awk_dir / "awk", "awk", quiet=True)
     progress(f"done {rootfs}")
     print(f"CRT_ROOTFS={rootfs}", flush=True)
 

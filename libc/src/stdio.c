@@ -2,10 +2,12 @@
 #include <fcntl.h>
 #include <paths.h>
 #include <pthread.h>
+#include <spawn.h>
 #include <stdio.h>
 #include <stdio_ext.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <wchar.h>
 
@@ -937,6 +939,120 @@ FILE* fdopen(int fd, const char* mode) {
     stream->_seek(stream->_cookie, 0, SEEK_END);
   }
   return stream;
+}
+
+// popen()/pclose(): pclose() needs to know which child process belongs to
+// a given popen()-returned FILE* in order to wait for it, so every open
+// popen() stream is tracked here until pclose() (or process exit) retires
+// it. No locking, matching this file's own open_streams list (register_
+// stream()/unregister_stream() above) -- neither is meant to be thread-safe
+// today.
+#define CRT_POPEN_MAX 32
+static FILE* popen_streams[CRT_POPEN_MAX];
+static pid_t popen_pids[CRT_POPEN_MAX];
+
+FILE* popen(const char* command, const char* type) {
+  int pipe_fds[2];
+  int parent_fd;
+  int child_fd;
+  int child_std_fd;
+  posix_spawn_file_actions_t actions;
+  pid_t pid;
+  char* argv[4];
+  FILE* stream;
+  int slot;
+  int saved_errno;
+
+  if (command == 0 || type == 0 || (type[0] != 'r' && type[0] != 'w')) {
+    errno = EINVAL;
+    return 0;
+  }
+  for (slot = 0; slot < CRT_POPEN_MAX; ++slot) {
+    if (popen_streams[slot] == 0) break;
+  }
+  if (slot == CRT_POPEN_MAX) {
+    errno = EMFILE;
+    return 0;
+  }
+
+  if (pipe(pipe_fds) != 0) {
+    return 0;
+  }
+  if (type[0] == 'r') {
+    parent_fd = pipe_fds[0];
+    child_fd = pipe_fds[1];
+    child_std_fd = 1;
+  } else {
+    parent_fd = pipe_fds[1];
+    child_fd = pipe_fds[0];
+    child_std_fd = 0;
+  }
+
+  if (posix_spawn_file_actions_init(&actions) != 0) {
+    close(pipe_fds[0]);
+    close(pipe_fds[1]);
+    return 0;
+  }
+  if (posix_spawn_file_actions_adddup2(&actions, child_fd, child_std_fd) != 0 ||
+      posix_spawn_file_actions_addclose(&actions, parent_fd) != 0 ||
+      posix_spawn_file_actions_addclose(&actions, child_fd) != 0) {
+    posix_spawn_file_actions_destroy(&actions);
+    close(pipe_fds[0]);
+    close(pipe_fds[1]);
+    return 0;
+  }
+
+  argv[0] = (char*)_PATH_BSHELL;
+  argv[1] = "-c";
+  argv[2] = (char*)command;
+  argv[3] = 0;
+  if (posix_spawn(&pid, _PATH_BSHELL, &actions, 0, argv, environ) != 0) {
+    saved_errno = errno;
+    posix_spawn_file_actions_destroy(&actions);
+    close(pipe_fds[0]);
+    close(pipe_fds[1]);
+    errno = saved_errno;
+    return 0;
+  }
+  posix_spawn_file_actions_destroy(&actions);
+  close(child_fd);
+
+  stream = fdopen(parent_fd, type);
+  if (stream == 0) {
+    saved_errno = errno;
+    close(parent_fd);
+    waitpid(pid, 0, 0);
+    errno = saved_errno;
+    return 0;
+  }
+  popen_streams[slot] = stream;
+  popen_pids[slot] = pid;
+  return stream;
+}
+
+int pclose(FILE* stream) {
+  int slot;
+  pid_t pid = -1;
+  int status;
+
+  for (slot = 0; slot < CRT_POPEN_MAX; ++slot) {
+    if (popen_streams[slot] == stream) {
+      pid = popen_pids[slot];
+      popen_streams[slot] = 0;
+      break;
+    }
+  }
+  if (pid < 0) {
+    errno = ECHILD;
+    return -1;
+  }
+  if (fclose(stream) != 0) {
+    return -1;
+  }
+  if (waitpid(pid, &status, 0) < 0) {
+    return -1;
+  }
+  return status;
 }
 
 FILE* freopen(const char* path, const char* mode, FILE* stream) {

@@ -2,6 +2,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <paths.h>
 #include <signal.h>
 #include <spawn.h>
 #include <stdio.h>
@@ -1000,6 +1001,36 @@ int posix_spawnp(
     *pid = (pid_t)child_pid;
   }
   return 0;
+}
+
+// POSIX system(): run `command` via `/bin/sh -c command` and return its
+// wait(2)-encoded termination status (usable with WIFEXITED/WEXITSTATUS/
+// etc.), or -1 if the shell itself could not be spawned or waited for.
+// `command == NULL` asks whether a shell is available at all; this
+// project always installs one into the rootfs (see _PATH_BSHELL,
+// include/paths.h), so that always answers "yes" (nonzero).
+int system(const char* command) {
+  pid_t child_pid;
+  int status;
+  char* argv[4];
+  int spawn_result;
+
+  if (command == 0) {
+    return 1;
+  }
+  argv[0] = (char*)_PATH_BSHELL;
+  argv[1] = "-c";
+  argv[2] = (char*)command;
+  argv[3] = 0;
+  spawn_result = posix_spawn(&child_pid, _PATH_BSHELL, 0, 0, argv, environ);
+  if (spawn_result != 0) {
+    __set_errno(spawn_result);
+    return -1;
+  }
+  if (waitpid(child_pid, &status, 0) < 0) {
+    return -1;
+  }
+  return status;
 }
 
 static int shell_copy_file_actions(

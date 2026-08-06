@@ -14,6 +14,8 @@ set(CRT_LIBM_SOURCES
   src/freebsd/e_log10f.c
   src/freebsd/e_pow.c
   src/freebsd/e_powf.c
+  src/freebsd/e_atan2.c
+  src/freebsd/s_atan.c
   src/freebsd/k_cos.c
   src/freebsd/k_rem_pio2.c
   src/freebsd/k_sin.c
