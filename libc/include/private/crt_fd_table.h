@@ -65,7 +65,7 @@ void __crt_child_bootstrap(void);
 
 /* Windows-only (declared unconditionally since this header carries no OS
  * guards elsewhere; only ever called from Windows aarch64 code). Lets
- * libc/src/arch/windows/aarch64/fork_capable_relaunch.c hand this
+ * libc/src/arch/windows/common/fork_capable_relaunch.c hand this
  * process's current fd table across its own CreateProcessA() self-
  * relaunch hop, reusing the exact duplicate-into-child + pipe transport
  * __crt_sys_posix_spawn() uses for every ordinary spawn. See the

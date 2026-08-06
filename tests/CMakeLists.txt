@@ -38,14 +38,14 @@ set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS hello_c_runs)
 
 function(add_crt_test test_name source_file)
   set(CRT_TEST_EXTRA_SOURCES "")
-  if(CRT_TARGET_OS STREQUAL "windows" AND CRT_EFFECTIVE_ARCH_FOR_FLAGS MATCHES "^(arm64|ARM64|aarch64)$")
+  if(CRT_TARGET_OS STREQUAL "windows" AND CRT_EFFECTIVE_ARCH_FOR_FLAGS MATCHES "^(arm64|ARM64|aarch64|x86_64|AMD64|x64)$")
     # The ctest suite exercises fork() directly (fork_test, fork_signal_test,
     # fork_runtime_reset_test, ...) and needs the startup self-relaunch that
     # memory-copy fork() depends on -- opt in for every test binary rather
     # than auditing which ones call fork() transitively. See that file's own
     # top comment for why this is opt-in rather than linked into every
-    # Windows aarch64 binary.
-    set(CRT_TEST_EXTRA_SOURCES "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/aarch64/fork_capable_relaunch.c")
+    # Windows binary.
+    set(CRT_TEST_EXTRA_SOURCES "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/common/fork_capable_relaunch.c")
   endif()
   add_executable(${test_name}
     ${source_file}

@@ -21,11 +21,11 @@ void __crt_env_set_initial(char** envp);
 void __crt_rootfs_bootstrap(int argc, char** argv);
 void exit(int status);
 
-#if defined(__aarch64__) || defined(_M_ARM64)
+#if defined(__aarch64__) || defined(_M_ARM64) || defined(__x86_64__) || defined(_M_X64)
 /* Weak reference, not a hard dependency: only targets that actually need
  * fork() (currently crt_mksh and the ctest suite -- see
  * shell/CMakeLists.txt and tests/CMakeLists.txt) link
- * libc/src/arch/windows/aarch64/fork_capable_relaunch.c, which provides
+ * libc/src/arch/windows/common/fork_capable_relaunch.c, which provides
  * the strong definition. Everything else (toybox and other leaf external
  * commands that never call fork()) links none of it, so this stays a
  * null function pointer and the check below is skipped entirely -- see
@@ -95,7 +95,7 @@ void mainCRTStartup(void) {
    * child re-derives the same state from the same (still-inherited) env
    * vars via its own __crt_child_bootstrap() call. */
   __crt_child_bootstrap();
-#if defined(__aarch64__) || defined(_M_ARM64)
+#if defined(__aarch64__) || defined(_M_ARM64) || defined(__x86_64__) || defined(_M_X64)
   if (__crt_windows_ensure_fork_capable_relaunch != 0) {
     __crt_windows_ensure_fork_capable_relaunch(command_line);
   }

@@ -1,5 +1,5 @@
-/* Windows aarch64 startup self-relaunch under the fork()-enabling
- * mitigation policy. See libc/src/arch/windows/aarch64/fork_memcopy.c and
+/* Windows startup self-relaunch under the fork()-enabling mitigation
+ * policy. See libc/src/arch/windows/{aarch64,x86_64}/fork_memcopy.c and
  * docs/windows_fork_emulation.md ("Spawn Broker Retired") for why this is
  * needed at all: Phase B only verified that *children spawned under the
  * mitigation policy* get deterministic heap/stack addresses -- the
@@ -7,8 +7,14 @@
  * ASLR addresses without this, so a later fork() call's parent-side
  * addresses would never line up with what a mitigated child gets.
  *
- * Deliberately NOT linked into every Windows aarch64 process (unlike an
- * earlier version of this file, which lived directly in crt1.c and ran
+ * Lives in common/, not either arch directory: nothing in this file is
+ * architecture-specific (plain Win32 API calls throughout, no CONTEXT/
+ * register code -- that part lives in fork_memcopy.c instead), and both
+ * aarch64 and x86_64's memory-copy fork() need the identical relaunch
+ * dance.
+ *
+ * Deliberately NOT linked into every Windows process (unlike an earlier
+ * version of this file, which lived directly in crt1.c and ran
  * unconditionally): every relaunch is a full extra process launch, and
  * doing it for processes that never call fork() at all -- toybox and any
  * other leaf external command -- turned out not to just be wasted
@@ -27,8 +33,7 @@
  * including toybox.
  *
  * TODO: root-cause the stdio-loss bug well enough to re-enable this
- * unconditionally (or scope it more precisely than "opt in per target"),
- * and to port this same mechanism to x86_64. */
+ * unconditionally (or scope it more precisely than "opt in per target"). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
