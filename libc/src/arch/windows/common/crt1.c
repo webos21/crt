@@ -84,12 +84,22 @@ void mainCRTStartup(void) {
   int argc = 0;
 
   __crt_env_set_initial(0);
+  /* Must run BEFORE the fork-capable relaunch check below: this process's
+   * own fd table (and cwd/rootfs/sigmask) only gets populated with
+   * whatever a posix_spawn()-ing parent handed it -- e.g. an
+   * adddup2()'d fd -- once __crt_child_bootstrap() imports the incoming
+   * snapshot. If the relaunch ran first, the relaunch's own fd export
+   * (see fork_capable_relaunch.c) would see only the default 0/1/2 and
+   * silently drop everything else across the relaunch hop. Applying
+   * cwd/rootfs/sigmask here before a relaunch is harmless: the relaunched
+   * child re-derives the same state from the same (still-inherited) env
+   * vars via its own __crt_child_bootstrap() call. */
+  __crt_child_bootstrap();
 #if defined(__aarch64__) || defined(_M_ARM64)
   if (__crt_windows_ensure_fork_capable_relaunch != 0) {
     __crt_windows_ensure_fork_capable_relaunch(command_line);
   }
 #endif
-  __crt_child_bootstrap();
   if (command_line != 0) {
     size_t length = strlen(command_line);
 

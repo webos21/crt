@@ -204,10 +204,11 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   - **Phase C (done, aarch64):** `__crt_sys_fork()` now dispatches to a new
     `__crt_windows_memcopy_fork()`
     (`libc/src/arch/windows/aarch64/fork_memcopy.c`) on aarch64; x86_64
-    keeps the original `RtlCloneUserProcess` path untouched. `ctest` is at
-    76/78 with the new mechanism active (two known-open gaps in the
-    startup self-relaunch's fd inheritance, see below). Several things
-    came up that the design write-up above didn't anticipate:
+    keeps the original `RtlCloneUserProcess` path untouched. `ctest` was at
+    76/78 immediately after this landed (two known-open gaps in the
+    startup self-relaunch's fd inheritance, since fixed -- see the
+    "fd-inheritance gap" update below). Several things came up that the
+    design write-up above didn't anticipate:
     - `malloc.c`'s `block_header` split chain is not the same thing as the
       underlying OS `mmap()`/`VirtualAlloc()` region boundaries -- a single
       64KB chunk gets subdivided into several non-64KB-aligned sub-blocks
@@ -251,11 +252,31 @@ Detailed policy and provenance stay in `docs/` and import manifests.
     - See `docs/windows_fork_emulation.md`, "Spawn Broker Retired", for the
       full account including known limitations (only the calling thread's
       stack survives into the child, per POSIX; no guard-page preservation
-      past what was committed at fork time; x86_64 not yet ported; the
-      relaunch's fd inheritance covers only the 3 standard handles, not
-      arbitrary `posix_spawn_file_actions_adddup2()` descriptors, which is
-      what the 2 remaining `ctest` failures exercise; `mksh` exec-ing
-      another `mksh` recursively hangs, not yet root-caused).
+      past what was committed at fork time; x86_64 not yet ported).
+    - **Update: fd-inheritance gap across the self-relaunch, fixed.** The
+      startup self-relaunch's `CreateProcessA()` hop only forwarded the 3
+      standard handles, so any other fd the process itself had received
+      (e.g. via `posix_spawn_file_actions_adddup2()`) was silently lost --
+      the 2 remaining `ctest` failures (`shell_smoke_test`,
+      `windows_fd_snapshot_test`) both exercised exactly this. Fixed by
+      reusing the exact mechanism `__crt_sys_posix_spawn()` itself already
+      uses for every ordinary spawn (explicit `DuplicateHandle()`-into-
+      child + a suspended-child-and-pipe handoff, not bare Windows handle
+      inheritance) for the relaunch hop too: three new functions in
+      `syscall.c` (`__crt_windows_fd_snapshot_relaunch_begin/_finish/
+      _abort()`, declared in `private/crt_fd_table.h`) let
+      `fork_capable_relaunch.c` export/duplicate/hand off the current fd
+      table without needing its own `fd_table` access. This also required
+      reordering `crt1.c` so `__crt_child_bootstrap()` (which imports an
+      *incoming* fd snapshot into this process's own fd table) runs
+      *before* the relaunch check, not after -- otherwise the relaunch's
+      own export would only ever see the default fd 0/1/2 regardless of
+      what this process itself had just received. `ctest` is back to
+      78/78. As a side effect, this also fixed the previously-unexplained
+      `mksh -c "exec mksh -c '...'"` recursive hang (verified stable across
+      repeated runs and 3-deep nesting) -- it was the same gap: the
+      exec'd-into relaunch was losing the inherited pipe/fd state the
+      outer mksh needed.
 
 - Started running libpng's real `configure && make && make install` through
   project-owned mksh/make on Windows aarch64 (`port-rebuild-libpng`, depends
@@ -401,14 +422,17 @@ Detailed policy and provenance stay in `docs/` and import manifests.
     does not truncate output`. This is autoconf's own self-test that
     builds a `sed` script by repeatedly doubling a fixed pattern string,
     then pipes the whole thing through `sed` to find the length where
-    truncation starts -- not yet root-caused; unclear whether it is the
-    same class of issue as the fd-inheritance gaps noted just above (the
-    self-relaunch's `STARTF_USESTDHANDLES`-only fix covers stdin/stdout/
-    stderr but not arbitrary pipe fds) or something specific to very long
-    single lines being piped through an external command from inside a
-    subshell. Next step: `-x` trace this specific self-test in isolation
-    (`CRT_PORT_SHELL_XTRACE=1`, matching earlier sessions' approach) to see
-    exactly which command the hang is inside.
+    truncation starts -- not yet root-caused. The self-relaunch's
+    fd-inheritance gap noted above (now fixed, see "Phase C" update) was
+    one candidate explanation and has been ruled out as the sole cause,
+    since it's specifically fixed now and this hang has not yet been
+    re-tested/re-diagnosed since; remaining candidates are something
+    specific to very long single lines being piped through an external
+    command from inside a subshell, or something else entirely. Next
+    step: retry the libpng configure now that the fd-inheritance fix has
+    landed, and if it still hangs, `-x` trace this specific self-test in
+    isolation (`CRT_PORT_SHELL_XTRACE=1`, matching earlier sessions'
+    approach) to see exactly which command the hang is inside.
 
 - Attempted to fix a real (if currently low-impact) gap in the spawn broker:
   every process it spawns shows up in Windows' own process tree as a child

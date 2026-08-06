@@ -33,6 +33,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <private/crt_fd_table.h>
+
 typedef void* HANDLE;
 typedef unsigned long DWORD;
 typedef unsigned short WORD;
@@ -54,6 +56,7 @@ typedef unsigned long long SIZE_T;
 #define CRT_HANDLE_FLAG_INHERIT 0x00000001UL
 #define CRT_PROCESS_ASLR_POLICY 1
 #define CRT_COMMAND_LINE_MAX 8192
+#define CRT_CREATE_SUSPENDED 0x00000004UL
 
 struct crt_startupinfoex_relaunch {
   DWORD cb;
@@ -120,6 +123,9 @@ __declspec(dllimport) BOOL CRT_WINAPI UpdateProcThreadAttribute(
 __declspec(dllimport) void CRT_WINAPI DeleteProcThreadAttributeList(void* lpAttributeList);
 __declspec(dllimport) BOOL CRT_WINAPI SetHandleInformation(HANDLE hObject, DWORD dwMask, DWORD dwFlags);
 __declspec(dllimport) DWORD CRT_WINAPI GetLastError(void);
+__declspec(dllimport) BOOL CRT_WINAPI SetEnvironmentVariableA(const char* lpName, const char* lpValue);
+__declspec(dllimport) BOOL CRT_WINAPI TerminateProcess(HANDLE hProcess, unsigned int uExitCode);
+__declspec(dllimport) DWORD CRT_WINAPI ResumeThread(HANDLE hThread);
 void exit(int status);
 
 static char relaunch_command_line[CRT_COMMAND_LINE_MAX];
@@ -215,15 +221,70 @@ void __crt_windows_ensure_fork_capable_relaunch(const char* command_line) {
     SetHandleInformation(si.hStdError, CRT_HANDLE_FLAG_INHERIT, CRT_HANDLE_FLAG_INHERIT);
   }
 
-  if (!CreateProcessA(self_path, relaunch_command_line, 0, 0, 1, CRT_EXTENDED_STARTUPINFO_PRESENT, 0, 0, &si,
-                       &pi)) {
-    fprintf(stderr, "fork_capable_relaunch: CreateProcessA failed err=%lu\n", (unsigned long)GetLastError());
+  /* Hand this process's current fd table (imported by __crt_child_
+   * bootstrap() above, which now deliberately runs before this function
+   * -- see crt1.c) across to the relaunched child the same way
+   * __crt_sys_posix_spawn() hands it to any other spawned child:
+   * duplicate each fd's handle into the child's own process and a
+   * suspended-child + pipe handoff, not bare Windows handle inheritance.
+   * Without this, any fd beyond the 3 standard ones (e.g. one delivered
+   * via posix_spawn_file_actions_adddup2() to spawn *this* process) is
+   * silently lost across this relaunch hop, since its handle value is
+   * only meaningful in this process, not the relaunched one -- see
+   * docs/windows_fork_emulation.md "Current Open Issues". Best-effort:
+   * if this fails, fall back to relaunching without it, same as before
+   * this fd handoff existed. */
+  {
+    unsigned long long pipe_read_handle = 0;
+    int fd_handoff_active = __crt_windows_fd_snapshot_relaunch_begin(&pipe_read_handle) == 0;
+    DWORD creation_flags = CRT_EXTENDED_STARTUPINFO_PRESENT;
+    char pipe_handle_text[20];
+
+    if (fd_handoff_active) {
+      creation_flags |= CRT_CREATE_SUSPENDED;
+      sprintf(pipe_handle_text, "%llx", pipe_read_handle);
+      SetEnvironmentVariableA(CRT_FD_SNAPSHOT_PIPE_ENV, pipe_handle_text);
+      /* Clear any stale direct-encoded snapshot inherited from further
+       * back (e.g. this process's own original spawn, if it used the
+       * non-pipe transport) -- __crt_child_bootstrap() checks
+       * CRT_FD_SNAPSHOT_ENV before CRT_FD_SNAPSHOT_PIPE_ENV, so a
+       * leftover value here would silently shadow the fresh one above. */
+      SetEnvironmentVariableA(CRT_FD_SNAPSHOT_ENV, 0);
+      SetEnvironmentVariableA(CRT_CHILD_BOOTSTRAP_ENV, CRT_CHILD_BOOTSTRAP_VERSION);
+    }
+
+    if (!CreateProcessA(self_path, relaunch_command_line, 0, 0, 1, creation_flags, 0, 0, &si, &pi)) {
+      fprintf(stderr, "fork_capable_relaunch: CreateProcessA failed err=%lu\n", (unsigned long)GetLastError());
+      DeleteProcThreadAttributeList(attr_list);
+      free(attr_list);
+      if (fd_handoff_active) {
+        CloseHandle((HANDLE)(uintptr_t)pipe_read_handle);
+        __crt_windows_fd_snapshot_relaunch_abort();
+      }
+      return;
+    }
     DeleteProcThreadAttributeList(attr_list);
     free(attr_list);
-    return;
+
+    if (fd_handoff_active) {
+      CloseHandle((HANDLE)(uintptr_t)pipe_read_handle);
+      if (__crt_windows_fd_snapshot_relaunch_finish((unsigned long long)(uintptr_t)pi.hProcess, pi.dwProcessId) !=
+          0) {
+        fprintf(stderr, "fork_capable_relaunch: fd snapshot handoff failed\n");
+        TerminateProcess(pi.hProcess, 127);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return;
+      }
+      if (ResumeThread(pi.hThread) == (DWORD)0xffffffffUL) {
+        fprintf(stderr, "fork_capable_relaunch: ResumeThread failed err=%lu\n", (unsigned long)GetLastError());
+        TerminateProcess(pi.hProcess, 127);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return;
+      }
+    }
   }
-  DeleteProcThreadAttributeList(attr_list);
-  free(attr_list);
 
   WaitForSingleObject(pi.hProcess, CRT_INFINITE);
   GetExitCodeProcess(pi.hProcess, &exit_code);

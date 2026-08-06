@@ -63,4 +63,16 @@ int __crt_fd_set_cloexec(int fd, int cloexec);
 void __crt_fd_after_fork_child(void);
 void __crt_child_bootstrap(void);
 
+/* Windows-only (declared unconditionally since this header carries no OS
+ * guards elsewhere; only ever called from Windows aarch64 code). Lets
+ * libc/src/arch/windows/aarch64/fork_capable_relaunch.c hand this
+ * process's current fd table across its own CreateProcessA() self-
+ * relaunch hop, reusing the exact duplicate-into-child + pipe transport
+ * __crt_sys_posix_spawn() uses for every ordinary spawn. See the
+ * implementation in libc/src/arch/windows/common/syscall.c for the full
+ * begin/finish/abort contract. */
+int __crt_windows_fd_snapshot_relaunch_begin(unsigned long long* out_pipe_read_handle);
+int __crt_windows_fd_snapshot_relaunch_finish(unsigned long long child_process_handle, unsigned long child_pid);
+void __crt_windows_fd_snapshot_relaunch_abort(void);
+
 #endif

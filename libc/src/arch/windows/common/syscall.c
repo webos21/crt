@@ -1457,6 +1457,113 @@ static long fd_snapshot_prepare_child_duplicates(
   return 0;
 }
 
+/* --- fd handoff for the aarch64 fork()-capable startup self-relaunch ---
+ *
+ * libc/src/arch/windows/aarch64/fork_capable_relaunch.c relaunches this
+ * process's own image under a mitigation policy that makes memory-copy
+ * fork() viable (see docs/windows_fork_emulation.md). That relaunch is
+ * itself an ordinary CreateProcessA() hop, so without help it only
+ * forwards the 3 standard handles -- any other fd this process itself
+ * received (e.g. via posix_spawn_file_actions_adddup2()) is silently
+ * lost across the hop, since its handle value is only meaningful in
+ * *this* process, not the relaunched one. These three functions let
+ * that aarch64-only file reuse this file's existing snapshot/duplicate/
+ * pipe machinery -- the same one __crt_sys_posix_spawn() itself uses --
+ * instead of reinventing fd_table access and DuplicateHandle()/
+ * WSADuplicateSocketA() plumbing there. Not reentrant: relies on being
+ * used at most once in flight, matching the self-relaunch's own
+ * once-per-process-at-startup contract. */
+static int bootstrap_write_exact(HANDLE handle, const void* buffer, DWORD size);
+
+static struct crt_fd_snapshot relaunch_fd_snapshot;
+static HANDLE relaunch_fd_snapshot_pipe_write;
+static int relaunch_fd_snapshot_in_progress;
+
+int __crt_windows_fd_snapshot_relaunch_begin(unsigned long long* out_pipe_read_handle) {
+  HANDLE pipe_read = 0;
+  HANDLE pipe_write = 0;
+  struct {
+    DWORD nLength;
+    void* lpSecurityDescriptor;
+    BOOL bInheritHandle;
+  } security_attributes;
+  int result;
+
+  if (out_pipe_read_handle == 0 || relaunch_fd_snapshot_in_progress) {
+    return EINVAL;
+  }
+  result = __crt_fd_snapshot_export(&relaunch_fd_snapshot);
+  if (result != 0) {
+    return result;
+  }
+  security_attributes.nLength = sizeof(security_attributes);
+  security_attributes.lpSecurityDescriptor = 0;
+  security_attributes.bInheritHandle = 1;
+  if (!CreatePipe(&pipe_read, &pipe_write, &security_attributes, 0)) {
+    result = map_windows_error(GetLastError());
+    __crt_fd_snapshot_dispose(&relaunch_fd_snapshot);
+    return result;
+  }
+  (void)SetHandleInformation(pipe_write, HANDLE_FLAG_INHERIT, 0);
+  relaunch_fd_snapshot_pipe_write = pipe_write;
+  relaunch_fd_snapshot_in_progress = 1;
+  *out_pipe_read_handle = (unsigned long long)(uintptr_t)pipe_read;
+  return 0;
+}
+
+/* Call after CreateProcessA() of the CREATE_SUSPENDED relaunch child
+ * succeeds. Duplicates each snapshotted fd's handle into the child's own
+ * process (and each socket fd's WSAPROTOCOL_INFO via
+ * WSADuplicateSocketA(), exactly as __crt_sys_posix_spawn() does), writes
+ * the encoded snapshot through the pipe opened by _begin(), and closes
+ * the write end. Returns 0 on success. The caller still owns
+ * ResumeThread()ing the child itself (kept outside this function since
+ * it isn't fd-related) and should TerminateProcess() it if this returns
+ * nonzero, matching __crt_sys_posix_spawn()'s own failure handling. */
+int __crt_windows_fd_snapshot_relaunch_finish(unsigned long long child_process_handle, unsigned long child_pid) {
+  HANDLE child_process = (HANDLE)(uintptr_t)child_process_handle;
+  char snapshot_text[65536];
+  uint32_t length;
+  long result;
+
+  if (!relaunch_fd_snapshot_in_progress) {
+    return EINVAL;
+  }
+  result = fd_snapshot_prepare_child_duplicates(&relaunch_fd_snapshot, child_process, (DWORD)child_pid);
+  if (result == 0) {
+    result = __crt_fd_snapshot_encode(&relaunch_fd_snapshot, snapshot_text, sizeof(snapshot_text));
+    if (result != 0) {
+      result = -result;
+    }
+  }
+  if (result == 0) {
+    length = (uint32_t)strlen(snapshot_text);
+    if (bootstrap_write_exact(relaunch_fd_snapshot_pipe_write, &length, (DWORD)sizeof(length)) != 0 ||
+        bootstrap_write_exact(relaunch_fd_snapshot_pipe_write, snapshot_text, length) != 0) {
+      result = -EIO;
+    }
+  }
+  CloseHandle(relaunch_fd_snapshot_pipe_write);
+  relaunch_fd_snapshot_pipe_write = 0;
+  __crt_fd_snapshot_dispose(&relaunch_fd_snapshot);
+  relaunch_fd_snapshot_in_progress = 0;
+  return result == 0 ? 0 : (int)-result;
+}
+
+/* Call instead of _finish() when CreateProcessA() itself failed after a
+ * successful _begin(). Cleans up the pipe and the exported snapshot. */
+void __crt_windows_fd_snapshot_relaunch_abort(void) {
+  if (!relaunch_fd_snapshot_in_progress) {
+    return;
+  }
+  if (relaunch_fd_snapshot_pipe_write != 0) {
+    CloseHandle(relaunch_fd_snapshot_pipe_write);
+    relaunch_fd_snapshot_pipe_write = 0;
+  }
+  __crt_fd_snapshot_dispose(&relaunch_fd_snapshot);
+  relaunch_fd_snapshot_in_progress = 0;
+}
+
 /* Used by both __crt_sys_fork() paths: the RtlCloneUserProcess path needs
  * every fd temporarily inheritable because it clones the whole handle
  * table regardless of individual inherit flags; the aarch64 memory-copy
