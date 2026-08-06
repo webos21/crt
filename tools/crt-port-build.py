@@ -23,6 +23,44 @@ def progress(message):
     print(f"[port] {message}", flush=True)
 
 
+def alias_unix_static_libs_for_windows_link(port_prefix, target_os):
+    """Windows-only: `-lfoo` on this project's toolchain (clang -fuse-ld=lld,
+    a MinGW-triple driver but a COFF/lld-link backend) resolves to searching
+    for a file literally named `foo.lib`, matching lld-link's own MSVC-
+    compatible argument convention -- it does not also try the Unix
+    `libfoo.a` name the way a native GNU `ld` would. This project's own
+    CMake-built libraries are already named the `foo.lib` way (see e.g.
+    libc/CMakeLists.txt's `OUTPUT_NAME c`), but a third-party port built via
+    its own autoconf/make (zlib, libpng, ...) instead installs the Unix-
+    conventional `libfoo.a`, which a *later* port's `-lfoo` can then never
+    find. Observed concretely: libpng's `configure` failing its own
+    `AC_CHECK_LIB(z, zlibVersion)` probe with `lld-link: error: could not
+    open 'z.lib'`, even though zlib's own install stamp -- and
+    `PORT_PREFIX/lib/libz.a` -- were already present.
+
+    Rather than patching every third-party port's own build system to use
+    an unfamiliar output name, alias every `libfoo.a` this port just
+    installed with a copy named `foo.lib` alongside it, so later ports'
+    plain `-lfoo` references resolve the same way this project's own
+    libraries already do. A copy, not a symlink: Windows symlinks need a
+    privilege an ordinary dev environment may not have, and these archives
+    are small. Skipped if `foo.lib` already exists (e.g. a port that
+    already produces a native COFF archive on its own) to avoid clobbering
+    something intentionally different."""
+    if target_os != "windows":
+        return
+    lib_dir = port_prefix / "lib"
+    if not lib_dir.is_dir():
+        return
+    for unix_lib in sorted(lib_dir.glob("lib*.a")):
+        coff_name = unix_lib.name[len("lib"):-len(".a")] + ".lib"
+        coff_lib = lib_dir / coff_name
+        if coff_lib.exists():
+            continue
+        progress(f"alias {unix_lib.name} -> {coff_name} (for plain -l lookups on this Windows toolchain)")
+        shutil.copy2(unix_lib, coff_lib)
+
+
 def run(args, cwd, env, label=None):
     if label:
         progress(f"start {label}")
@@ -421,6 +459,8 @@ def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, por
         build_amalgamation_port(work, port_prefix, recipe, env)
     elif build["system"] == "android_host_tool":
         build_android_host_tool_port(preset_build_dir, work, port_prefix, recipe, env, target_os)
+    if not configure_only:
+        alias_unix_static_libs_for_windows_link(port_prefix, target_os)
     stamp.parent.mkdir(parents=True, exist_ok=True)
     stamp.write_text("ok\n")
     progress(f"{port}: wrote install stamp {stamp}")
