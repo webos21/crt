@@ -20,13 +20,9 @@ cxx="${CRT_HOST_CXX:-clang++}"
 if [ "$target_os" = windows ]; then
   export CRT_SPAWN_NATIVE_WINDOWS=1
 fi
-if [ "$target_os" = windows ]; then
-  resource_dir=""
-else
-  set +e
-  resource_dir="$("$cxx" -print-resource-dir 2>/dev/null)"
-  set -e
-fi
+set +e
+resource_dir="$("$cxx" -print-resource-dir 2>/dev/null)"
+set -e
 
 windows_host_arg() {
   case "$1" in
@@ -68,16 +64,22 @@ for arg in "$@"; do
 done
 
 common_flags="-ffreestanding -fno-builtin -Xclang -fwchar-type=int -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -nostdinc -nostdinc++ -isystem${CRT_SYSROOT}/include"
-if [ -n "$resource_dir" ]; then
-  common_flags="$common_flags -isystem${resource_dir}/include"
-fi
 case "$target_os" in
   macos) common_flags="$common_flags -DCRT_TARGET_OS_MACOS=1" ;;
   linux) common_flags="$common_flags -DCRT_TARGET_OS_LINUX=1" ;;
   windows) common_flags="$common_flags -DCRT_TARGET_OS_WINDOWS=1 -fno-threadsafe-statics" ;;
 esac
 
+# See the matching comment in tools/crt-cc: resource_dir is passed as its
+# own quoted argument pair directly on each exec line, not folded into
+# $common_flags, because a stock Windows LLVM install's resource-dir is
+# almost always under "C:\Program Files\...", which the unquoted-
+# expansion this script otherwise relies on would silently split apart.
 if [ "$compile_only" -eq 1 ]; then
+  if [ -n "$resource_dir" ]; then
+    # shellcheck disable=SC2086
+    exec "$cxx" $common_flags -isystem "${resource_dir}/include" $user_args
+  fi
   # shellcheck disable=SC2086
   exec "$cxx" $common_flags $user_args
 fi
@@ -105,5 +107,9 @@ case "$target_os" in
     ;;
 esac
 
+if [ -n "$resource_dir" ]; then
+  # shellcheck disable=SC2086
+  exec "$cxx" $common_flags -isystem "${resource_dir}/include" -nostdlib -nostartfiles -nodefaultlibs $entry $user_args $libs
+fi
 # shellcheck disable=SC2086
 exec "$cxx" $common_flags -nostdlib -nostartfiles -nodefaultlibs $entry $user_args $libs

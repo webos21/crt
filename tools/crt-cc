@@ -20,13 +20,9 @@ cc="${CRT_HOST_CC:-clang}"
 if [ "$target_os" = windows ]; then
   export CRT_SPAWN_NATIVE_WINDOWS=1
 fi
-if [ "$target_os" = windows ]; then
-  resource_dir=""
-else
-  set +e
-  resource_dir="$("$cc" -print-resource-dir 2>/dev/null)"
-  set -e
-fi
+set +e
+resource_dir="$("$cc" -print-resource-dir 2>/dev/null)"
+set -e
 
 windows_host_arg() {
   case "$1" in
@@ -68,16 +64,28 @@ for arg in "$@"; do
 done
 
 common_flags="-ffreestanding -fno-builtin -Xclang -fwchar-type=int -ffunction-sections -fdata-sections -nostdinc -isystem${CRT_SYSROOT}/include"
-if [ -n "$resource_dir" ]; then
-  common_flags="$common_flags -isystem${resource_dir}/include"
-fi
 case "$target_os" in
   macos) common_flags="$common_flags -DCRT_TARGET_OS_MACOS=1" ;;
   linux) common_flags="$common_flags -DCRT_TARGET_OS_LINUX=1" ;;
   windows) common_flags="$common_flags -DCRT_TARGET_OS_WINDOWS=1" ;;
 esac
 
+# resource_dir (clang's own -print-resource-dir, which houses compiler-
+# provided architecture-intrinsic headers like arm_neon.h/immintrin.h --
+# separate from anything in CRT_SYSROOT) is passed as its own quoted
+# "-isystem" "$resource_dir/include" argument pair directly on each exec
+# line below, NOT folded into $common_flags: common_flags/user_args/libs
+# are all plain, unquoted-expanded strings throughout this script (relying
+# on word-splitting to turn them back into separate argv entries), which
+# silently breaks apart any single value that itself contains a space --
+# and a stock Windows LLVM install's resource-dir is almost always under
+# "C:\Program Files\...". Quoting just this one pair sidesteps that
+# without a wider rewrite of how this script builds argument lists.
 if [ "$compile_only" -eq 1 ]; then
+  if [ -n "$resource_dir" ]; then
+    # shellcheck disable=SC2086
+    exec "$cc" $common_flags -isystem "${resource_dir}/include" $user_args
+  fi
   # shellcheck disable=SC2086
   exec "$cc" $common_flags $user_args
 fi
@@ -105,5 +113,9 @@ case "$target_os" in
     ;;
 esac
 
+if [ -n "$resource_dir" ]; then
+  # shellcheck disable=SC2086
+  exec "$cc" $common_flags -isystem "${resource_dir}/include" -nostdlib -nostartfiles -nodefaultlibs $entry $user_args $libs
+fi
 # shellcheck disable=SC2086
 exec "$cc" $common_flags -nostdlib -nostartfiles -nodefaultlibs $entry $user_args $libs
