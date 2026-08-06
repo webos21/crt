@@ -7,48 +7,62 @@
 
 ## Summary
 
-Windows has no native `fork()`. This project provides two different
-backends, selected per architecture in `libc/src/arch/windows/common/
-syscall.c`'s `__crt_sys_fork()`:
+Windows has no native `fork()`. Both architectures this project supports
+use the same design -- Cygwin/MSYS-style memory-copy `fork()` -- selected
+in `libc/src/arch/windows/common/syscall.c`'s `__crt_sys_fork()`:
 
-- **x86_64**: `RtlCloneUserProcess`-based clone. Cheap and correct for the
-  "fork, then only do direct syscalls, then `_exit()`" shape, but the
-  clone is not registered with CSRSS, so `CreateProcessA`/`CreatePipe`/
-  write-mode `CreateFileA` all crash or fail if called from inside it.
-  There is currently **no workaround on x86_64** for fork-then-spawn (the
-  spawn broker that used to paper over this was retired -- see history
-  doc -- and not replaced here); only aarch64 has a real fix.
-- **aarch64**: full memory-copy fork() (`libc/src/arch/windows/aarch64/
-  fork_memcopy.c`, `__crt_windows_memcopy_fork()`), described below. The
-  child is a normal, fully `CreateProcessA`-registered process, so it has
-  none of the "unregistered clone" restrictions above -- fork-then-spawn
-  (real POSIX subshells running external commands) works.
+- **aarch64**: `libc/src/arch/windows/aarch64/fork_memcopy.c`,
+  `__crt_windows_memcopy_fork()`. Verified on real Windows aarch64
+  hardware.
+- **x86_64**: `libc/src/arch/windows/x86_64/fork_memcopy.c`, same function
+  name and design, ported from the aarch64 version. Verified on this
+  project's Windows aarch64 development machine's built-in x64 emulation
+  (Prism/xtajit) -- not yet re-verified on real x86_64 hardware, though
+  nothing in the mechanism is emulation-specific (see "Current Open
+  Issues").
+
+In both cases the child is a normal, fully `CreateProcessA`-registered
+process, so it has none of the restrictions a raw NT-level clone (the
+`RtlCloneUserProcess` approach this project used before -- see history
+doc) would have: `CreateProcessA`/`CreatePipe`/write-mode `CreateFileA`
+all work from inside a forked child, so fork-then-spawn (real POSIX
+subshells running external commands) works, not just "fork, then only do
+direct syscalls, then `_exit()`".
 
 Both backends share the same fd-table snapshot/bootstrap mechanism
 (`private/crt_fd_table.h`, described below), used by `posix_spawn()`/
 `execve()` on Windows to hand a spawned child's fd table across the
 process boundary.
 
-## Windows aarch64: Memory-Copy `fork()`
+## Windows Memory-Copy `fork()`
 
-`__crt_windows_memcopy_fork()` (`libc/src/arch/windows/aarch64/
-fork_memcopy.c`) implements `fork()` in the Cygwin/MSYS style: spawn a
-fresh, normal process and manually reproduce the parent's live state in
-it, rather than cloning the address space at the OS level.
+`__crt_windows_memcopy_fork()` (`libc/src/arch/windows/{aarch64,x86_64}/
+fork_memcopy.c` -- two independent files, same design, most of their logic
+identical) implements `fork()` in the Cygwin/MSYS style: spawn a fresh,
+normal process and manually reproduce the parent's live state in it,
+rather than cloning the address space at the OS level.
 
 Steps, in the order they actually happen:
 
 1. `setjmp()` at the top of `__crt_windows_memcopy_fork()` captures the
-   calling thread's callee-saved registers, `Sp`, and `Lr`.
+   calling thread's callee-saved registers, stack pointer, and return
+   address (aarch64: `X19`-`X28`, `Fp`/`X29`, `Sp`, `Lr`, and the low 64
+   bits only of `D8`-`D15` per AAPCS64; x86_64: `Rbx`/`Rbp`/`Rdi`/`Rsi`/
+   `R12`-`R15`, `Rsp`, the return address, and the *full* 128 bits of
+   `Xmm6`-`Xmm15`, which the Windows x64 ABI preserves whole).
 2. Self-relaunch via `CreateProcessA(..., CREATE_SUSPENDED, ...)` with the
    `PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY` attribute set
    (`PROCESS_CREATION_MITIGATION_POLICY_BOTTOM_UP_ASLR_ALWAYS_OFF |
    _HIGH_ENTROPY_ASLR_ALWAYS_OFF`). This is what makes the child's
    heap/stack addresses land at the *same* virtual addresses the calling
-   process itself is using -- verified empirically (42/42 matching
-   addresses across independent launches; see history doc, "Phase B").
-   The child never runs `mainCRTStartup`; its first instruction is
-   whatever the parent points `CONTEXT.Pc` at in step 6.
+   process itself is using -- verified empirically on aarch64 (42/42
+   matching addresses across independent launches; see history doc,
+   "Phase B") and, separately, on x86_64 under this machine's x64
+   emulation (deterministic, identical addresses across repeated runs of
+   a standalone probe; see "Current Open Issues" for what real x86_64
+   hardware has not re-confirmed). The child never runs
+   `mainCRTStartup`; its first instruction is whatever the parent points
+   `CONTEXT.Pc`/`CONTEXT.Rip` at in step 6.
 3. `WriteProcessMemory` copies three categories of memory into the child
    at identical addresses:
    - the `malloc.c` heap, via a dedicated OS-region tracking table
@@ -65,10 +79,10 @@ Steps, in the order they actually happen:
      region at thread creation -- adding `MEM_RESERVE` on top of an
      existing reservation fails with `ERROR_INVALID_ADDRESS`. The commit
      target is clamped to the *child's own* stack reservation
-     (`VirtualQueryEx()` on the child's initial `Sp`), not the parent's
-     `TEB.StackLimit` -- the child's fresh thread has not run any code
-     yet, so its own `TEB.StackLimit` is nowhere near where the parent's
-     has receded to from real call-stack depth.
+     (`VirtualQueryEx()` on the child's initial `Sp`/`Rsp`), not the
+     parent's `TEB.StackLimit` -- the child's fresh thread has not run any
+     code yet, so its own `TEB.StackLimit` is nowhere near where the
+     parent's has receded to from real call-stack depth.
 4. The current thread's `crt_thread_context` block (`tls.c`) is copied
    explicitly -- a standalone `VirtualAlloc()`, not covered by any of the
    three regions above.
@@ -80,36 +94,45 @@ Steps, in the order they actually happen:
    instead of reusing the parent's -- a copied index number is only valid
    in the *parent's* Win32 TLS bitmap.
 6. The child's initial `CONTEXT` is constructed *directly* from the values
-   `setjmp()` captured in step 1 (`X19`-`X28`, `Fp`, `Sp`, `D8`-`D15`, and
-   `Pc` set to the captured `Lr`; `X0` set to `1` to match `setjmp()`'s own
-   longjmp-return convention) via `SetThreadContext()`, then
+   `setjmp()` captured in step 1 via `SetThreadContext()`, then
    `ResumeThread()`. The child resumes exactly as if `setjmp()` had
    returned nonzero at the original call site -- no trampoline function,
    no `longjmp()` call in the child, no reading of resume state back out
    of copied memory (an earlier version did exactly that and it was
    unreliable; see history doc for why).
 
-x86_64 does not have this mechanism at all; it would need its own CONTEXT
-layout (the AMD64 one, distinct from ARM64's), its own address-
-determinism verification (unverified whether the same mitigation-policy
-approach applies there, since `/DYNAMICBASE:NO` links fine on x86_64 --
-unlike aarch64, where the linker rejects it outright), and its own
-TEB-access mechanism (this implementation reads TEB via the ARM64-specific
-X18 platform register; x86_64 would use the GS segment instead).
+TEB access -- needed only for step 3's stack-bounds lookup
+(`copy_current_stack()`) -- is the one piece of this that genuinely has no
+shared implementation between the two architectures: aarch64 reads it via
+the ARM64-specific X18 platform register (requiring `-ffixed-x18`
+globally, applied in the top-level `CMakeLists.txt`); x86_64 reads it via
+the GS segment directly (`%gs:0x30`, no register reservation needed
+anywhere else in the build). `NT_TIB`'s `StackBase`/`StackLimit` fields
+sit at the same `+0x08`/`+0x10` offsets on both, so everything past the
+TEB pointer itself is identical code.
+
+The `CONTEXT_AMD64` struct transcription in the x86_64 file (`P1Home`
+through `LastExceptionFromRip`, `XSAVE_FORMAT`/`M128A` included) was
+cross-checked field-for-field against a real Windows SDK `winnt.h` rather
+than from memory, and independently verified via a standalone
+`offsetof()` probe (matched exactly, `sizeof(CONTEXT) == 1232` as
+expected) before ever being wired into the real build.
 
 ## Startup Self-Relaunch (fork()-Capable Targets Only)
 
 Making memory-copy `fork()` viable requires the *calling* process's own
 heap/stack addresses to already be in the deterministic, mitigated range
--- not just the freshly-spawned child's. `libc/src/arch/windows/aarch64/
+-- not just the freshly-spawned child's. `libc/src/arch/windows/common/
 fork_capable_relaunch.c`'s `__crt_windows_ensure_fork_capable_relaunch()`
-handles this: called once from `mainCRTStartup()`, it checks
+handles this (architecture-independent: plain Win32 API calls throughout,
+shared unchanged by both aarch64 and x86_64 -- lives in `common/`, not
+either arch directory): called once from `mainCRTStartup()`, it checks
 `GetProcessMitigationPolicy(GetCurrentProcess(), ProcessASLRPolicy, ...)`,
 and if bottom-up ASLR is still enabled, relaunches itself under the same
 mitigation-policy attribute used in step 2 above, then waits for the
 relaunched child and exits with its status.
 
-This is **opt-in per build target**, not applied to every Windows aarch64
+This is **opt-in per build target**, not applied to every Windows
 process. `crt1.c` calls it through a weak symbol reference
 (`void __crt_windows_ensure_fork_capable_relaunch(const char*)
 __attribute__((weak))`) that stays a null function pointer -- and is
@@ -121,6 +144,21 @@ startup: no extra process-launch latency, and -- as important -- none of
 the stdio-inheritance regression that applying this unconditionally to
 every process caused (see history doc). If a new target needs to call
 `fork()` itself, it needs to opt in the same way mksh does.
+
+(Porting pitfall worth recording: when this weak-symbol wiring was first
+written, both the declaration and the call site in `crt1.c` were guarded
+by `#if defined(__aarch64__) || defined(_M_ARM64)` -- correct at the time,
+since only aarch64 had a `fork_memcopy.c` to opt into. Porting x86_64
+required updating `tests/CMakeLists.txt`/`shell/CMakeLists.txt`'s own arch
+condition and `libc/CMakeLists.txt`'s source list, but *not* this `#if` in
+`crt1.c`, was tried first -- compiled and linked cleanly, but the
+self-relaunch silently never ran on x86_64 at all: the weak reference
+itself didn't even exist in that translation unit, so the "call it if
+non-null" check was compiled out entirely rather than evaluating to null.
+`fork_test` then failed with a `stack commit failed` error whose addresses
+gave it away -- the parent's own stack address was different on every
+run, exactly what unmitigated ASLR looks like. Fixed by updating this
+`#if` too.)
 
 The relaunch's own `CreateProcessA()` call hands the current process's
 *entire* fd table across to the relaunched child, not just the 3
@@ -177,8 +215,8 @@ process's image, so this is the closest available approximation.
 ## Windows Pipe Buffer Size
 
 Every `CreatePipe()` call in `syscall.c` (the generic `pipe()` syscall, the
-fd-snapshot bootstrap pipe used by `posix_spawn()`, and the aarch64
-fork-capable self-relaunch's fd handoff above) requests an explicit
+fd-snapshot bootstrap pipe used by `posix_spawn()`, and the fork-capable
+self-relaunch's fd handoff above) requests an explicit
 `CRT_PIPE_BUFFER_SIZE` (4 MiB) instead of the system default (`nSize=0`,
 observed ~4096 bytes on this host). Every one of these pipes has a
 synchronous, pre-resume/pre-fork write on one side (the writer runs to
@@ -211,10 +249,16 @@ usage).
 
 ## Current Open Issues
 
-- **x86_64 has no fork-then-spawn support at all** (see Summary above) --
-  needs the memory-copy `fork()` mechanism ported, which in turn needs its
-  own address-determinism verification and its own CONTEXT/TEB-access
-  code, none of which currently exist for that architecture.
+- **x86_64 has only been verified under emulation, not real hardware**:
+  this project's development machine is Windows aarch64, so x86_64
+  verification (including the full `ctest` suite, `fork_test`/
+  `fork_signal_test`/`fork_runtime_reset_test` among them) ran under that
+  machine's built-in x64 emulation (Prism/xtajit), not genuine x86_64
+  silicon. Nothing in the mechanism (mitigation policy, `WriteProcessMemory`,
+  `SetThreadContext`) is emulation-specific, and the emulation layer itself
+  faithfully reproduced both the "ASLR still on" and "ASLR successfully
+  disabled" address behaviors needed for this design to work at all, but
+  real hardware has not re-run this.
 - **Only the calling thread's stack survives into the child** (matches
   POSIX `fork()` semantics -- other threads do not survive into the child
   at all -- but pthread-created OS threads' own stacks are not otherwise

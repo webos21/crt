@@ -155,6 +155,58 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   and the rejected alternatives (CSRSS re-registration, full Cygwin-style
   memory-copy `fork()`).
 
+- Ported Windows aarch64's Cygwin/MSYS-style memory-copy `fork()` (Phase C
+  above) to x86_64. Most of the design carries over unchanged --
+  `fork_capable_relaunch.c` (the startup self-relaunch under the ASLR-
+  disabling mitigation policy) is pure Win32 API with zero
+  architecture-specific code, so it was moved from `aarch64/` to a shared
+  `libc/src/arch/windows/common/` rather than duplicated. What's genuinely
+  new for x86_64 is `libc/src/arch/windows/x86_64/fork_memcopy.c`:
+  - `CONTEXT_AMD64` (winnt.h), transcribed field-for-field and
+    cross-checked directly against a real Windows SDK `winnt.h` rather
+    than from memory (`P1Home` through `LastExceptionFromRip`,
+    `XSAVE_FORMAT`/`M128A` included) -- then independently verified via a
+    standalone `offsetof()` probe (every offset matched exactly, including
+    `sizeof(CONTEXT) == 1232`) before ever being wired into the real
+    build, given how costly a wrong offset would be here.
+  - TEB access: x86_64 has no equivalent of aarch64's reserved X18
+    platform register -- reads it via the GS segment directly
+    (`%gs:0x30`, no register reservation needed anywhere else in the
+    build, unlike aarch64's globally-applied `-ffixed-x18`).
+    `NT_TIB.StackBase`/`StackLimit` sit at the identical `+0x08`/`+0x10`
+    offsets on both architectures, so `copy_current_stack()`'s actual
+    logic needed no changes.
+  - setjmp()/CONTEXT register mapping: Windows x64's callee-saved set
+    (`libc/src/arch/windows/x86_64/setjmp.S`) is `rbx`/`rbp`/`rdi`/`rsi`/
+    `r12`-`r15`/`rsp`/return-address plus `xmm6`-`xmm15` -- and unlike
+    aarch64 (AAPCS64 only guarantees the low 64 bits of `v8`-`v15`), the
+    Windows x64 ABI preserves `xmm6`-`xmm15` in full (128 bits each), so
+    both halves of each register needed copying into `CONTEXT.FltSave.
+    XmmRegisters[6..15]`.
+  - Found and fixed a real bug while wiring this up: `crt1.c`'s weak
+    symbol reference to `__crt_windows_ensure_fork_capable_relaunch()`
+    (and its call site) were still guarded by `#if defined(__aarch64__)
+    ...` only -- so on x86_64 the startup self-relaunch silently never
+    ran at all (the symbol didn't exist in that translation unit, so
+    "call it if non-null" was compiled out, not evaluated false). Caught
+    via `fork_test` failing with a stack-commit error whose parent-side
+    address changed on every run -- exactly what unmitigated ASLR looks
+    like, immediately after `GetProcessMitigationPolicy()` had been
+    independently verified (via a standalone probe) to correctly report
+    "not yet mitigated" vs. "mitigated" in this same x64-under-emulation
+    environment. Fixed by extending that `#if` too.
+  - Verified end-to-end: set up a same-OS cross-arch build
+    (`-DCRT_TARGET_ARCH=x86_64` on this Windows aarch64 machine, requiring
+    a new `CMAKE_C_COMPILER_TARGET`/`CMAKE_CXX_COMPILER_TARGET`/
+    `CMAKE_ASM_COMPILER_TARGET` = `x86_64-pc-windows-msvc` cross-compile
+    path added to the top-level `CMakeLists.txt` -- Clang needs no
+    separate per-arch install, just a different `--target`), then ran the
+    real x86_64 binaries under this machine's built-in x64 emulation
+    (Prism/xtajit). Full `ctest` 79/79, including `fork_test`/
+    `fork_signal_test`/`fork_runtime_reset_test`. Not yet re-verified on
+    real x86_64 hardware -- see `docs/windows_fork_emulation.md`, "Current
+    Open Issues".
+
 ## in progressing
 
 - **Retired the spawn broker; moving to a Cygwin/MSYS-style `fork()` instead.**
@@ -252,7 +304,9 @@ Detailed policy and provenance stay in `docs/` and import manifests.
     - See `docs/windows_fork_emulation.md`, "Spawn Broker Retired", for the
       full account including known limitations (only the calling thread's
       stack survives into the child, per POSIX; no guard-page preservation
-      past what was committed at fork time; x86_64 not yet ported).
+      past what was committed at fork time; x86_64 not yet ported at the
+      time this was written -- see the "done" section above for the later
+      x86_64 port).
     - **Update: fd-inheritance gap across the self-relaunch, fixed.** The
       startup self-relaunch's `CreateProcessA()` hop only forwarded the 3
       standard handles, so any other fd the process itself had received
