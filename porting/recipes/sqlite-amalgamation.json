@@ -33,18 +33,29 @@
           "-DSQLITE_WITHOUT_ZONEMALLOC=1",
           "-DSQLITE_ENABLE_LOCKING_STYLE=0"
         ]
+      },
+      "windows": {
+        "cflags": [
+          "-U_WIN32",
+          "-UWIN32",
+          "-U__CYGWIN__",
+          "-U__MINGW32__",
+          "-U__BORLANDC__"
+        ]
       }
     }
   },
   "status": {
     "linux": "smoke-pass",
     "macos": "amalgamation-pass",
-    "windows": "smoke-pass"
+    "windows": "amalgamation-pass"
   },
   "notes": [
     "The amalgamation archive does not ship an Autoconf configure script, so the recipe builds sqlite3.c directly without modifying upstream source.",
     "target_overrides.macos.cflags passes -U__APPLE__ so SQLite uses its generic Unix path against the Bionic-compatible CRT surface rather than Darwin-only VFS/statfs extensions; scoped to macOS since __APPLE__ is never predefined on Linux/Windows anyway.",
     "The porting check expanded CRT-owned sys/ioctl.h, sys/vfs.h, sys/statfs.h, pread/pwrite, uid_t/gid_t, geteuid, fchown, utimes/futimes, and sysconf(_SC_PAGESIZE/_SC_PAGE_SIZE).",
-    "target_overrides.macos.cflags's SQLITE_WITHOUT_ZONEMALLOC avoids Apple's zone allocator path; SQLITE_ENABLE_LOCKING_STYLE=0 avoids Darwin-specific locking-style code while keeping the upstream amalgamation unchanged -- both are Darwin-only concerns, so scoped to macOS. SQLITE_THREADSAFE/SQLITE_OMIT_LOAD_EXTENSION stay shared: neither is platform-specific."
+    "target_overrides.macos.cflags's SQLITE_WITHOUT_ZONEMALLOC avoids Apple's zone allocator path; SQLITE_ENABLE_LOCKING_STYLE=0 avoids Darwin-specific locking-style code while keeping the upstream amalgamation unchanged -- both are Darwin-only concerns, so scoped to macOS. SQLITE_THREADSAFE/SQLITE_OMIT_LOAD_EXTENSION stay shared: neither is platform-specific.",
+    "target_overrides.windows.cflags undefines _WIN32/WIN32/__CYGWIN__/__MINGW32__/__BORLANDC__ (sqlite3.c's own SQLITE_OS_WIN detection: `#if defined(_WIN32) || defined(WIN32) || defined(__CYGWIN__) || defined(__MINGW32__) || defined(__BORLANDC__)`) so SQLite takes its generic SQLITE_OS_UNIX path instead of #include \"windows.h\" (this project's sysroot has no real Windows SDK header) -- same reasoning and same technique as zlib.json/libpng.json's own Windows CFLAGS. tools/crt-cc targets *-w64-mingw32 on Windows (see that script's own comment), which is what makes __MINGW32__/_WIN32/WIN32 predefined here in the first place; __CYGWIN__/__BORLANDC__ are undefined defensively even though crt-cc never sets them.",
+    "Windows aarch64: full recipe flow (compile/archive/ranlib/install, plus the libfoo.a->foo.lib alias for lld-link -l lookups) verified via crt-port-build.py, then a standalone program linked against the installed libsqlite3.a actually ran sqlite3_open(\":memory:\")/CREATE TABLE/INSERT/SELECT and got the correct value back -- not just a compile/link check."
   ]
 }
