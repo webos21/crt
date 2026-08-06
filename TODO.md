@@ -633,8 +633,95 @@ Detailed policy and provenance stay in `docs/` and import manifests.
     passing (these scripts compile everything in the Windows build, so this
     was the highest-stakes check of this whole chain); a standalone
     `crt-cc` compile of a translation unit including `<arm_neon.h>` now
-    succeeds. Re-running the full libpng port build to find/fix whatever
-    comes next is in progress.
+    succeeds.
+  - Next blocker after that: `png.c` compiled, but `libtool`'s own link
+    step picked `lib -OUT:...` (the MSVC-native static archiver, which
+    this project has no `lib.exe` for) instead of using `$AR`. Root-caused
+    to the *value* previously used for `AR`/`RANLIB`/`STRIP`/`LD`: the
+    literal string `"CRT_SPAWN_NATIVE_WINDOWS=1 <tool-path>"`, relying on
+    the calling shell to recognize that leading `VAR=val` as an
+    environment-assignment prefix whenever the value is expanded
+    unquoted. POSIX shells only ever do that for literal, parsed-at-parse-
+    time source text -- never for a variable's word-split expansion at
+    runtime. Makefile recipes happened to work anyway (make substitutes
+    `$(AR)` textually into a *fresh* shell command line each time), but
+    libtool's own "is `$LD` GNU ld" probe inside `configure` -- `` `$LD
+    -v` ``, a command substitution of an already-parsed variable -- tried
+    to run a program literally named `CRT_SPAWN_NATIVE_WINDOWS=1`, got
+    "not found", and silently concluded `with_gnu_ld=no`, which is what
+    sent libtool down the wrong archiving path. Fixed by adding
+    `tools/crt-native-tool`, a real wrapper script (the same proven
+    pattern as `tools/crt-cc`'s own `$CC` value: `"<mksh> <script>"`) that
+    does `export CRT_SPAWN_NATIVE_WINDOWS=1; exec "$tool" "$@"` --
+    `AR`/`RANLIB`/`STRIP`/`LD` now point at `"<mksh> tools/crt-native-tool
+    <real-tool>"`, which only ever needs the calling shell to word-split a
+    command name from its arguments (always reliable).
+  - Next blocker after that: `with_gnu_ld` was *still* `no` even with `$LD`
+    now correctly probed as GNU-compatible -- a second, independent cause:
+    libtool's own per-tag config has `case $host_os in cygwin*|mingw*...)
+    if test yes != "$GCC"; then with_gnu_ld=no; fi`, and `$GCC` (was our
+    compiler detected as GNU-compatible at all?) was also `no`. Root-caused
+    to a stock Windows LLVM install's `clang.exe` defaulting to its own
+    host triple, `*-pc-windows-msvc`, whenever no `--target` is given --
+    that predefined-macro set doesn't define `__GNUC__` at all (only
+    `_MSC_VER`, mimicking real MSVC), which autoconf's near-universal
+    "checking whether the compiler supports GNU C" probe (and libtool's
+    check above) both read as "not GNU". Fixed by adding an explicit
+    `--target=aarch64-w64-mingw32` (arch auto-detected, `CRT_TARGET_ARCH`
+    overridable) to `tools/crt-cc`/`tools/crt-c++` on Windows, matching
+    what this project's own `--build=aarch64-w64-mingw32` recipe
+    workaround already expects. Verified harmless to this project's own
+    build (we pass `-nostdinc`/`-nostdlib` and our own `-isystem`/`-L`
+    throughout, so the triple only affects predefined macros and calling-
+    convention details, not which headers/libs get used).
+  - With both of those fixed, `png.c` through the last `.c` file compiled,
+    archived via the correct `$AR` path, and linked into `libpng16.a` and
+    every `contrib/tools`/`contrib/libtests` sample binary -- `make`
+    completed in full. Then `make install` hit one more, final blocker:
+    `./libtool: ./install-sh: can't execute: Permission denied`. Root-
+    caused to two compounding gaps, both now fixed in
+    `libc/src/arch/windows/common/syscall.c`:
+    1. `__crt_sys_posix_spawn()` (which `execve()` is itself implemented
+       on top of, via `posix_spawn()` + `waitpid()` + `_exit()`) could
+       previously only ever launch real PE binaries -- nothing in this
+       project's PAL had ever taught it to interpret a `#!` shebang line,
+       since every script run so far had always been invoked with its
+       interpreter spelled out explicitly. `install-sh` (execed directly
+       by libtool's own `--mode=install`, no interpreter prefix) is the
+       first thing this project has hit that assumes shebang execution
+       works at the OS level. Added `windows_read_shebang()` and taught
+       `__crt_sys_posix_spawn()` to re-resolve and re-exec the named
+       interpreter (Linux kernel semantics: at most one unsplit optional
+       argument) when the target file starts with `#!`.
+    2. That alone wasn't enough: mksh's own command dispatch
+       (`search_access()` in `shell/mksh/src/exec.c`) checks
+       `access(path, X_OK)` *before* ever calling `execve()`, and this
+       project's `stat()`/`access()` emulation only ever reported
+       `S_IXUSR`/etc. for files with a real PE `"MZ"` signature (Windows
+       has no on-disk executable-permission bit at all, and NTFS ACLs
+       don't map onto `S_IXUSR` either, so file *content* has always been
+       the only signal available). A `#!` script has no MZ signature, so
+       mksh rejected `install-sh` as "can't execute: Permission denied"
+       before fix 1's shebang logic ever ran. Renamed the helper
+       (`windows_handle_has_mz_signature` ->
+       `windows_handle_looks_executable`) and taught it to also recognize
+       a `#!` prefix, used by both `stat()`'s executable-bit computation
+       and the PATH-search "is this a candidate executable" check.
+    Verified: `ctest` 79/79 still passing at every step above (the
+    `stat()`/`access()` change in particular is broad -- every executable-
+    permission check in the whole Windows build goes through it).
+  - **End-to-end result: libpng 1.6.57's real `configure && make && make
+    install` now completes in full on Windows aarch64** -- `libpng16.a`/
+    `libpng.a` built, archived, and installed into `PORT_PREFIX`, along
+    with all of libpng's own `contrib/tools` and `contrib/libtests` sample
+    binaries, `install-sh`-driven header/pkgconfig/man-page installation,
+    and the `libpng16`->`libpng` alias-copy `install-exec-hook`/
+    `install-data-hook` steps. This was the single longest blocker chain
+    of this whole session -- ld, awk, a real printf bug, static-lib
+    naming, `windows.h`, `arm_neon.h`, `AR`/`LD` shell-quoting, the GNU-
+    ld/GNU-C misdetection, and finally shebang-script execution -- each
+    one a real, general CRT/PAL/tooling gap fixed on its own merits, not
+    a libpng-specific workaround.
   - Checked whether any of the fixes above are Windows-specific-only or
     could affect macOS/Linux (couldn't literally build for those hosts
     from this Windows aarch64 machine -- static review only): the
@@ -717,10 +804,10 @@ Detailed policy and provenance stay in `docs/` and import manifests.
 
 ## planed
 
-- Finish the libpng/libffi/SQLite configure/make/install pass on Windows
-  (see "in progressing" above for the current libpng blocker); libffi and
-  the SQLite follow-up build beyond the current amalgamation smoke have not
-  been attempted yet.
+- libpng's Windows `configure && make && make install` is now fully
+  working end-to-end (see "done" above); still open on this front: the
+  libffi build, and the SQLite follow-up build beyond the current
+  amalgamation smoke -- neither has been attempted yet.
 - Re-run the same make/zlib/libpng/libffi recipe path on macOS and Linux to
   confirm the unified mksh+make flow across hosts.
 - Add focused tests for parallel make prerequisites before enabling `make -jN`
