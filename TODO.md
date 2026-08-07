@@ -527,8 +527,24 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   control, it still resolves to this project's real one. Windows
   regression-checked here (rebuilt zlib's shared library after each
   change, no behavior change -- the windows case block itself was never
-  touched). Not yet re-verified with `ldd`/`otool -L` on the user's real
-  Linux/macOS machines for these two specific fixes.
+  touched).
+  - **Update: confirmed fixed on both hosts, from clean `out/` rebuilds.**
+    Linux: `libpng16.so.16.57.0`'s `libz.so.1` dependency now resolves to
+    this project's own `port-tests/install/lib/libz.so.1`, not the
+    system's; the stray `/lib/ld-linux-aarch64.so.1`/system `libc.so.6`
+    entries seen on an earlier, non-clean `libpng16.so.16.57.0` build
+    were apparently a stale-incremental-build artifact -- gone on a
+    clean rebuild, not a real bug in this fix.
+    macOS: `otool -L` alone can't distinguish "has an unresolvable
+    `@rpath` dependency" from "has one that resolves fine" (it only
+    lists dependencies, not `LC_RPATH` commands), so `otool -l ... |
+    grep -A2 LC_RPATH` on `libz.dylib` was checked instead and shows
+    both expected `LC_RPATH` entries present: `.../sysroot/lib` (finds
+    this project's own `libc.dylib`) and `.../port-tests/install/lib`
+    (finds sibling ports' `.dylib`s, same as the Linux fix above) --
+    `@rpath/libc.dylib` still appears in `otool -L`'s dependency list
+    (expected and correct: the fix makes it *resolvable*, not absent)
+    and should now load correctly at runtime.
 
 ## in progressing
 
