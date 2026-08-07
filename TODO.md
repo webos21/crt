@@ -341,6 +341,45 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   directly rather than by this session -- see
   `docs/porting_status.md`'s `make` row for the full writeup.
 
+- **Fixed the CMake `port-rebuild-sqlite-amalgamation` target failing
+  outright on native Windows, and stopped forcing macOS/Linux port builds
+  through this project's own rootfs mksh.** Reported: `sqlite-amalgamation`
+  on x86_64 Windows failed with `FileNotFoundError: [WinError 2]` trying to
+  spawn `tools/crt-cc` directly (a shebang script, no `.exe`) -- root
+  caused to `CMakeLists.txt`'s `crt_add_build_port_target()` only adding
+  `--use-crt-shell` for `configure`/`android_host_tool` recipe build
+  systems, not `amalgamation`; without it, `crt-port-build.py`'s
+  `make_env()` hands the bare script path to `CreateProcess`, which cannot
+  interpret a shebang line the way a POSIX host can. Fixed by adding
+  `amalgamation` to that condition. While investigating, also confirmed
+  (by reading `tools/crt-cc`, `crt-port-build.py`'s `make_env()`/
+  `build_configure_port()`, and every recipe's macOS/Linux
+  `target_overrides`) that `--use-crt-shell`'s *other* effect -- routing
+  `./configure`/`make`/every compiler invocation through this project's
+  own from-scratch mksh, and putting the rootfs's toybox applets ahead of
+  the host's own coreutils on `$PATH` -- was never actually needed on
+  macOS/Linux: nothing in any recipe depends on it (the CRT sysroot
+  integration is carried entirely by `CC`/`CXX` pointing at `tools/crt-cc`/
+  `tools/crt-c++`, which works identically either way), and those hosts
+  already have a real, complete, natively-shebang-capable shell +
+  coreutils -- exactly what upstream `configure` scripts are actually
+  tested against, unlike this project's deliberately-minimal,
+  Windows-motivated toybox applet set. So `CRT_TARGET_OS STREQUAL
+  "windows"` was added to the same condition, scoping `--use-crt-shell`
+  (and the `rootfs` build dependency it requires) to native Windows only.
+  Expected effect beyond fixing the immediate crash: real correctness risk
+  removed (macOS/Linux configure probes now see the same coreutils/awk/
+  grep upstream projects are tested against, not this project's own
+  applets) and likely a real speedup for macOS/Linux configure runs (no
+  longer routed through this project's own mksh for the thousands of tiny
+  subprocess probes a typical `configure` script runs). Verified in this
+  session only via a fast `cmake --preset` reconfigure + inspecting the
+  generated `build.ninja` (`--use-crt-shell` still present for the Windows
+  preset's port targets, unchanged); an actual macOS/Linux port build with
+  this change, and the real x86_64 Windows `sqlite-amalgamation` rebuild
+  that reported the original crash, are pending verification by the user
+  directly on those hosts.
+
 ## in progressing
 
 - **Retired the spawn broker; moving to a Cygwin/MSYS-style `fork()` instead.**

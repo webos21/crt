@@ -340,8 +340,38 @@ if(Python3_Interpreter_FOUND)
     crt_add_port_recipe_target(${recipe_name})
     set(CRT_PORT_BUILD_DEPENDS sysroot port-fetch-${recipe_name})
     set(CRT_PORT_BUILD_SHELL_ARGS)
-    if(recipe_build_system STREQUAL "configure" OR
-       recipe_build_system STREQUAL "android_host_tool")
+    if((recipe_build_system STREQUAL "configure" OR
+        recipe_build_system STREQUAL "android_host_tool" OR
+        recipe_build_system STREQUAL "amalgamation") AND
+       CRT_TARGET_OS STREQUAL "windows")
+      # --use-crt-shell (route configure/make/crt-cc invocations through
+      # this project's own rootfs mksh instead of the host's shell) is a
+      # native-Windows-only workaround: on native Windows,
+      # tools/crt-cc/tools/crt-c++ are themselves shebang shell scripts
+      # (no .exe), which CreateProcess cannot launch directly (Windows has
+      # no shebang interpretation) -- without --use-crt-shell,
+      # crt-port-build.py's make_env() hands the bare script path straight
+      # to subprocess.run() as argv[0] and it fails to even start. Applies
+      # equally to the amalgamation build system (e.g.
+      # sqlite-amalgamation): it never runs a configure script, but it
+      # still shells out to crt-cc per translation unit the same way.
+      #
+      # Deliberately NOT set for macOS/Linux, even though those hosts can
+      # also pass --use-crt-shell: those hosts already have a real,
+      # complete, natively-shebang-capable shell and coreutils
+      # (bash/dash + real GNU/BSD awk/grep/sed/...), which is exactly the
+      # environment every one of these upstream configure scripts is
+      # actually tested against. --use-crt-shell's PATH (rootfs's
+      # system/bin ahead of the host PATH) would instead route macOS/
+      # Linux configure probes through this project's own toybox
+      # applets -- built deliberately minimal for Windows, where no real
+      # POSIX userland exists at all -- for no compensating benefit
+      # (nothing in any recipe's macos/linux target_overrides needs it;
+      # only tools/crt-cc/tools/crt-c++, unconditionally set as CC/CXX
+      # either way, carry the sysroot integration). This also removes a
+      # real per-process-spawn overhead source from macOS/Linux configure
+      # runs, which invoke the compiler-probe/subshell machinery
+      # thousands of times over.
       set(CRT_PORT_BUILD_DEPENDS rootfs port-fetch-${recipe_name})
       set(CRT_PORT_BUILD_SHELL_ARGS --use-crt-shell)
     endif()
