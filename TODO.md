@@ -546,6 +546,35 @@ Detailed policy and provenance stay in `docs/` and import manifests.
     (expected and correct: the fix makes it *resolvable*, not absent)
     and should now load correctly at runtime.
 
+- **Extended `porting/recipes`' `amalgamation` build system with real
+  shared-library support, and turned it on for sqlite-amalgamation.**
+  `tools/crt-port-build.py`'s `build_amalgamation_port()` gained a
+  `"shared": true` recipe opt-in: when set, it also compiles a second,
+  `-fPIC`-flagged pass over the recipe's own sources and links them via
+  `tools/crt-cc`'s existing `-shared`/`-dynamiclib` support (which already
+  handles everything OS/arch-specific about shared linking -- this new
+  code only supplies the flags specific to *this* library's own name/
+  version). Naming/versioning mirrors zlib's own established convention
+  on macOS/Linux (a real versioned file plus SONAME-style symlink
+  aliases), while Windows gets a plain, unversioned `<name>.dll` (no
+  `lib` prefix, no version suffix) -- matching how upstream SQLite itself
+  actually ships its own precompiled Windows binary as a bare
+  `sqlite3.dll`. No `.lib` import library generated on Windows, same
+  precedent as zlib's own shared build this session (`lld-link` can link
+  a consumer directly against the built `.dll` by its exact filename).
+  Turned on for `sqlite-amalgamation.json` via `"shared": true`. Verified
+  end-to-end on Windows aarch64 *and* a real x86_64 cross-build
+  (`out/windows-x64-cross-debug`): `sqlite3.dll` compiles, links, reports
+  the correct architecture via `llvm-objdump -f`, and a standalone test
+  program dynamically linked against it (built directly via `crt-cc`,
+  mirroring how `examplesh`/`minigzipsh` link against zlib's shared
+  build) ran a real `sqlite3_open`/`CREATE TABLE`/`INSERT`/`SELECT` round
+  trip successfully on both architectures. Full `ctest` 79/79 after the
+  `tools/crt-port-build.py` change. macOS/Linux shared sqlite3 builds not
+  yet verified on those hosts -- pending, following this session's
+  convention of the user running build/regression verification directly
+  on non-Windows machines.
+
 ## in progressing
 
 - **Retired the spawn broker; moving to a Cygwin/MSYS-style `fork()` instead.**

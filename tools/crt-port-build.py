@@ -529,10 +529,91 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
         run(install_args, make_work, env, f"{port_name}: make install")
 
 
+def amalgamation_shared_base_name(port_name, archive_name):
+    """Derive the shared-library base name ("sqlite3") from the recipe's
+    static archive filename ("libsqlite3.a") rather than adding a second,
+    redundant recipe field that could drift out of sync with it."""
+    if not (archive_name.startswith("lib") and archive_name.endswith(".a")):
+        raise SystemExit(
+            f"{port_name}: cannot derive a shared-library name from archive "
+            f"'{archive_name}' (expected 'lib<name>.a')"
+        )
+    return archive_name[len("lib"):-len(".a")]
+
+
+def build_amalgamation_shared_library(port_name, recipe, port_prefix, env, cc_argv, pic_objects, target_os, work):
+    """Links the PIC objects build_amalgamation_port() already compiled
+    into a real shared library, named and versioned per OS the same way
+    zlib's own hand-written Makefile does it (see that recipe/tools/crt-cc
+    for the established convention this mirrors): a real, versioned file
+    plus SONAME-style symlink aliases on macOS/Linux, a plain unversioned
+    .dll on Windows (matching how upstream SQLite itself ships its own
+    precompiled Windows binary as a bare "sqlite3.dll", no "lib" prefix,
+    no version suffix -- Windows has no equivalent SONAME-symlink
+    convention). No .lib import library is generated on Windows, matching
+    zlib's own precedent this session: lld-link can link a consumer
+    directly against the built .dll by its exact filename (verified
+    working for zlib's examplesh/minigzipsh test binaries), so nothing
+    else in this project's port-build flow has needed one either.
+    tools/crt-cc/tools/crt-c++'s own -shared/-dynamiclib handling already
+    covers everything OS/arch-specific this needs (shared vs. static CRT
+    linking, dllcrt.o + /DLL on Windows, -rpath on macOS/Linux) -- this
+    function only adds the handful of flags that are specific to *this*
+    library's own name/version (-soname/-install_name), not to the
+    target platform in general."""
+    build = recipe["build"]
+    base_name = amalgamation_shared_base_name(port_name, build["archive"])
+    version = recipe.get("version", "0.0.0")
+    major = version.split(".")[0]
+    lib_dir = port_prefix / "lib"
+    ldflags = shlex.split(env.get("LDFLAGS", ""))
+    link_cmd = list(cc_argv)
+
+    if target_os == "windows":
+        dll_name = f"{base_name}.dll"
+        dll_path = lib_dir / dll_name
+        link_cmd += ["-shared", "-O2"] + [str(o) for o in pic_objects] + ldflags + ["-o", str(dll_path)]
+        run(link_cmd, work, env, f"{port_name}: link {dll_name}")
+        return
+
+    real_name = None
+    soname = None
+    dev_name = f"lib{base_name}.{'so' if target_os == 'linux' else 'dylib'}"
+    if target_os == "linux":
+        real_name = f"lib{base_name}.so.{version}"
+        soname = f"lib{base_name}.so.{major}"
+        real_path = lib_dir / real_name
+        link_cmd += ["-shared", "-O2", f"-Wl,-soname,{soname}"] + [str(o) for o in pic_objects] + ldflags + [
+            "-o", str(real_path)
+        ]
+    elif target_os == "macos":
+        real_name = f"lib{base_name}.{version}.dylib"
+        soname = f"lib{base_name}.{major}.dylib"
+        real_path = lib_dir / real_name
+        install_name = f"{lib_dir}/{soname}"
+        link_cmd += [
+            "-dynamiclib", "-O2",
+            "-install_name", install_name,
+            "-compatibility_version", f"{major}.0.0",
+            "-current_version", version,
+        ] + [str(o) for o in pic_objects] + ldflags + ["-o", str(real_path)]
+    else:
+        return
+
+    run(link_cmd, work, env, f"{port_name}: link {real_name}")
+    for alias_name in (soname, dev_name):
+        alias_path = lib_dir / alias_name
+        if alias_path.is_symlink() or alias_path.exists():
+            alias_path.unlink()
+        os.symlink(real_name, alias_path)
+        progress(f"{port_name}: alias {alias_name} -> {real_name}")
+
+
 def build_amalgamation_port(preset_build_dir, work, port_prefix, recipe, env, target_os):
     port_name = recipe["name"]
     build = recipe["build"]
     objects = []
+    pic_objects = []
     cflags = shlex.split(env.get("CPPFLAGS", "")) + shlex.split(env.get("CFLAGS", ""))
     cflags.extend(build.get("cflags", []))
     cflags.extend(build.get("target_overrides", {}).get(target_os, {}).get("cflags", []))
@@ -546,6 +627,14 @@ def build_amalgamation_port(preset_build_dir, work, port_prefix, recipe, env, ta
     ar_argv = command_value_argv(env["AR"], preset_build_dir, target_os)
     ranlib_argv = command_value_argv(env["RANLIB"], preset_build_dir, target_os)
 
+    # "shared": true opts a recipe into also building a real shared
+    # library (.so/.dylib/.dll) alongside the static archive this build
+    # system has always produced -- off by default so a future
+    # amalgamation-style recipe that genuinely shouldn't get one (e.g.
+    # something not meant to be dynamically loaded) doesn't silently
+    # acquire one just by using this same build system.
+    build_shared = bool(build.get("shared", False))
+
     sources = list(build["sources"])
     for index, source in enumerate(sources, 1):
         progress(f"{port_name}: compile {index}/{len(sources)} {source}")
@@ -554,6 +643,23 @@ def build_amalgamation_port(preset_build_dir, work, port_prefix, recipe, env, ta
         run(cc_argv + cflags + ["-I", str(work), "-c", str(src), "-o", str(obj)], work, env)
         objects.append(obj)
 
+    if build_shared:
+        # A second, -fPIC compile pass, same reasoning as zlib's own
+        # Makefile (and the non-PIC-static-archive-in-a-shared-object fix
+        # tools/crt-cc/tools/crt-c++ needed this session): Linux's ld
+        # rejects certain relocations from non-PIC code inside a shared
+        # object outright, so the objects that go into the .so/.dylib/
+        # .dll must be compiled -fPIC separately from the ones that go
+        # into the static .a (which has no such requirement and gains
+        # nothing from paying the -fPIC cost).
+        pic_flags = cflags + ["-fPIC", "-DPIC"]
+        for index, source in enumerate(sources, 1):
+            progress(f"{port_name}: compile (PIC) {index}/{len(sources)} {source}")
+            src = work / source
+            obj = work / (Path(source).name + ".pic.o")
+            run(cc_argv + pic_flags + ["-I", str(work), "-c", str(src), "-o", str(obj)], work, env)
+            pic_objects.append(obj)
+
     lib_dir = port_prefix / "lib"
     include_dir = port_prefix / "include"
     lib_dir.mkdir(parents=True, exist_ok=True)
@@ -561,6 +667,10 @@ def build_amalgamation_port(preset_build_dir, work, port_prefix, recipe, env, ta
     archive = lib_dir / build["archive"]
     run(ar_argv + ["rcs", str(archive)] + [str(obj) for obj in objects], work, env, f"{port_name}: archive")
     run(ranlib_argv + [str(archive)], work, env, f"{port_name}: ranlib")
+
+    if build_shared:
+        build_amalgamation_shared_library(port_name, recipe, port_prefix, env, cc_argv, pic_objects, target_os, work)
+
     for header in build.get("install_headers", []):
         progress(f"{port_name}: install header {header}")
         shutil.copy2(work / header, include_dir / Path(header).name)
