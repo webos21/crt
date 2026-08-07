@@ -789,6 +789,65 @@ Detailed policy and provenance stay in `docs/` and import manifests.
     identically safely, given `NLS` is deliberately never defined
     regardless of platform) across all three targets.
 
+- Ran the two remaining Windows porting tests (sqlite-amalgamation and
+  libffi), following up on the libpng work above.
+  - **sqlite-amalgamation: full success.** sqlite3.c's own `SQLITE_OS_WIN`
+    detection (`defined(_WIN32) || defined(WIN32) || defined(__CYGWIN__) ||
+    defined(__MINGW32__) || defined(__BORLANDC__)`) fired because
+    `tools/crt-cc` targets `*-w64-mingw32` (needed for the GNU-C/GNU-ld
+    detection fix from the libpng chain above), which predefines those
+    macros -- fixed the same way as zlib/libpng, via
+    `target_overrides.windows.cflags` undefining them so SQLite takes its
+    generic `SQLITE_OS_UNIX` path instead of `#include "windows.h"`.
+    Verified via the full recipe flow (compile/archive/ranlib/install) plus
+    a standalone program that actually opened an in-memory db, created a
+    table, inserted, and selected the correct value back.
+  - **libffi: builds and installs successfully; core features work in
+    isolation; one real, well-characterized bug remains unresolved.**
+    Blocker chain: `config.guess` doesn't recognize plain Windows `uname`
+    (same `--build=aarch64-w64-mingw32` workaround as libpng/zlib) -> a
+    broken top-level "multilib dispatcher" `Makefile` libffi's own build
+    generates (a bundled `makefile.sed` mishandles a Windows drive-letter
+    colon as a `Makefile` target separator, corrupting `MAKE=C:/...` into
+    `MAKE=C:`) -> routed around via a new, general
+    `target_overrides.<os>.make_subdir` mechanism in
+    `tools/crt-port-build.py` that points `make`/`make install` straight at
+    the real subdirectory `Makefile` -> `dlmalloc.c`/`ffi.c` both
+    `#include <windows.h>`, which this sysroot doesn't have. First tried
+    the usual `-U_WIN32` CFLAGS trick (same as zlib/libpng/sqlite), but
+    that turned out wrong here specifically: `_WIN32` also gates libffi's
+    own Windows-aware avoidance of the X18/TEB-reserved register in its Go-
+    closures code and its `FFI_WIN64` default ABI, so hiding it silently
+    re-broke both. Settled instead on a small, project-owned
+    `porting/shims/win32/windows.h` (new `include_dirs` recipe mechanism)
+    providing just the handful of Win32 APIs those two files actually
+    call, keeping `_WIN32` defined normally so every one of libffi's own
+    Windows-aware decisions resolves exactly as upstream intends. Along the
+    way, discovered `InterlockedCompareExchange`/`InterlockedExchange`/
+    `InterlockedCompareExchangePointer` (needed by `dlmalloc.c`'s spinlock)
+    are real winnt.h compiler intrinsics, not kernel32 exports -- provided
+    via `__sync_val_compare_and_swap`/`__sync_lock_test_and_set` instead --
+    and added `__clear_cache()` (`libc/src/arch/windows/common/
+    compiler_abi.c`) since this project's Windows builds have no
+    compiler-rt builtins archive at all. With all of that, the full build
+    succeeds, and `ffi_call()` alone and `ffi_closure_alloc()`/
+    `ffi_prep_closure_loc()` alone (a real trampoline, exercising the
+    VirtualAlloc/mprotect-equivalent `PROT_EXEC` path) each work correctly
+    in isolation -- but calling `ffi_call()` and then making *any* further
+    libffi call in the same process reliably segfaults, and only when the
+    caller is compiled at `-O1`/`-O2` (never `-O0`). Root-caused (via a
+    minimal ~20-line repro, disassembly, and ruling out X18 corruption,
+    instruction-cache staleness, and shared-`ffi_cif`-state as causes) to a
+    callee-saved GPR (observed: X19) that clang trusts AAPCS64 to preserve
+    across the `ffi_call()` call getting corrupted somewhere in the
+    `ffi_call()`/`ffi_call_SYSV` chain (`src/aarch64/ffi.c` +
+    `src/aarch64/sysv.S`'s unusual caller-provided-stack-frame convention)
+    -- not yet isolated to an exact instruction; would need single-
+    stepping `ffi_call()`'s own compiled code with a real debugger. Status
+    left at `partial` (matching Linux's existing status) rather than a
+    false "pass". Full trail and the repro recipe: see
+    `porting/recipes/libffi.json`'s own notes.
+
 - Attempted to fix a real (if currently low-impact) gap in the spawn broker:
   every process it spawns shows up in Windows' own process tree as a child
   of the broker, not of the clone that logically requested it (flat instead
@@ -858,10 +917,13 @@ Detailed policy and provenance stay in `docs/` and import manifests.
 
 ## planed
 
-- libpng's Windows `configure && make && make install` is now fully
-  working end-to-end (see "done" above); still open on this front: the
-  libffi build, and the SQLite follow-up build beyond the current
-  amalgamation smoke -- neither has been attempted yet.
+- libpng's and sqlite-amalgamation's Windows builds are now fully working
+  end-to-end (see "done" above). libffi's Windows build also succeeds and
+  its core features (ffi_call, closures) work correctly in isolation, but
+  has one remaining, well-characterized bug (a callee-saved-register
+  corruption across ffi_call() at -O1/-O2, see "done" above for the full
+  trail) still open -- would need a real debugger session to fully root-
+  cause.
 - Re-run the same make/zlib/libpng/libffi recipe path on macOS and Linux to
   confirm the unified mksh+make flow across hosts.
 - Add focused tests for parallel make prerequisites before enabling `make -jN`
