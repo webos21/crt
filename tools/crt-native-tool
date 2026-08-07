@@ -44,4 +44,56 @@ fi
 tool="$1"
 shift
 export CRT_SPAWN_NATIVE_WINDOWS=1
+
+# ld.lld.exe is a multi-personality binary: invoked bare (no -m), it
+# defaults to its generic ELF frontend (confirmed for real: `ld.lld.exe
+# --help` lists PowerPC/ELF-only options, no PE/COFF ones at all). This
+# project's own tools/crt-cc *never* hits that default -- clang's own
+# `*-w64-mingw32` driver logic always calls ld.lld with an explicit
+# `-m i386pep`/`-m arm64pe` (confirmed via `crt-cc -shared -v`: the real
+# invocation line reads `ld.lld -m i386pep --shared -Bdynamic -e
+# DllMainCRTStartup --enable-auto-image-base ...`), so it always gets the
+# real PE/COFF MinGW-compatible personality, auto-import support included.
+# But when Autoconf/Libtool call `$LD` *directly* (bare `$LD --help`,
+# `` `$LD -v` `` probes, and libtool's own `archive_cmds` -- some of which
+# invoke `$LD`, not `$CC`), they never know to add that flag themselves,
+# so they see the wrong (ELF) personality and its wrong (empty) feature
+# list -- concretely, libpng's own generated `configure` gates its entire
+# `cygwin*|mingw*` shared-library archive_cmds behind a literal `$LD --help
+# 2>&1 | grep 'auto-import'` check, which always came up empty this way,
+# forcing `ld_shlibs=no` regardless of every other (correctly-passing)
+# GNU-ld/GNU-C detection probe. Fixed at the root by always baking in the
+# right `-m` emulation here, so every direct `$LD` invocation sees exactly
+# the same real, capable PE/COFF personality tools/crt-cc's own compiler-
+# driven links already use -- no generated-script patching needed.
+# Lowercased so this matches regardless of case, *and* regardless of
+# whether $tool is the real long filename ("ld.lld.exe") or an NTFS 8.3
+# short-path alias ("LDLLD~1.EXE") -- tools/crt-port-build.py's
+# windows_short_path() substitutes the latter whenever the real path
+# contains spaces (e.g. under "C:\Program Files\LLVM\..."), which is the
+# common case for a stock LLVM install. An earlier version of this check
+# compared against "ld.lld"/"ld.lld.exe" literally and silently never
+# matched the short-path form, so the -m fix below never actually took
+# effect through the real crt-port-build.py-driven path -- only caught
+# because a direct, full-long-path manual test looked fixed while the
+# real configure run (which always goes through the short-path form) did
+# not.
+tool_base_lc=$(basename "$tool" | tr '[:upper:]' '[:lower:]')
+case "$tool_base_lc" in
+  ld.lld|ld.lld.exe|ldlld~*.exe)
+    target_arch="${CRT_TARGET_ARCH:-}"
+    if [ -z "$target_arch" ]; then
+      case "$(uname -m 2>/dev/null)$(uname -s 2>/dev/null)" in
+        *aarch64*|*arm64*|*ARM64*) target_arch=aarch64 ;;
+        *) target_arch=x86_64 ;;
+      esac
+    fi
+    case "$target_arch" in
+      aarch64|arm64) pe_emulation=arm64pe ;;
+      *) pe_emulation=i386pep ;;
+    esac
+    exec "$tool" -m "$pe_emulation" "$@"
+    ;;
+esac
+
 exec "$tool" "$@"
