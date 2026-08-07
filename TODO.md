@@ -393,7 +393,40 @@ Detailed policy and provenance stay in `docs/` and import manifests.
     itself. See `docs/porting_status.md`'s zlib/libpng/libffi/
     sqlite-amalgamation rows for the per-port notes.
 
-## in progressing
+- **Fixed `tools/crt-cc`/`tools/crt-c++` `-shared` mode statically linking
+  non-PIC archives on Linux.** Reported: `zlib`'s shared build, which
+  worked on macOS, failed its own `configure`-time shared-library probe
+  on a real Linux aarch64 host (`libffi`/`libpng` shared builds succeeded
+  there, `zlib`'s specifically didn't). `configure.log` showed the real
+  cause: `ld` refused `libc.a(stdio.c.o)`'s `R_AARCH64_ADR_PREL_PG_HI21`
+  relocations against `stdin`/`stdout`/`stderr` ("dangerous relocation:
+  unsupported relocation ... recompile with -fPIC") the moment the probe
+  needed a `stdio.c.o` symbol (`getchar()`) -- `libffi`/`libpng`'s shared
+  builds happened not to need any `stdio.c.o`/`env.c.o` symbol from
+  `libc.a` directly, so they never tripped this. Root cause: `crt-cc`/
+  `crt-c++`'s `-shared`/`-dynamiclib` mode statically linked
+  `libc.a`/`libm.a`/`libdl.a`/`libc++.a` (never compiled with `-fPIC`,
+  since nothing about a normal executable requires it) on every OS, not
+  just macOS/Windows where that happens not to be a hard error. Fixed on
+  Linux by linking the already-built *shared* counterparts
+  (`libc.so`/`libm.so`/`libdl.so`/`libc++.so` -- already present in the
+  sysroot via this project's own `c_shared`/`m_shared`/`dl_shared`/
+  `cxx_shared` CMake targets) instead, for `shared_mode` only (normal
+  executables still statically link the `.a` archives, unaffected).
+  Deliberately did **not** make the same change on macOS: it was already
+  confirmed working via static linking (Mach-O/AArch64 is unconditionally
+  position-independent at the ABI level regardless of `-fPIC`, so this
+  isn't a hard error there the way it is on Linux's stricter ELF `ld`),
+  so switching it too would only add an unproven `.dylib`
+  `install_name`/`@rpath` runtime-loadability question with no upside.
+  `libclang_rt.builtins.a` is left static in both modes everywhere
+  (leaf compiler-intrinsic code, no global-data relocations of this
+  kind -- statically linking compiler-rt/libgcc into shared objects is
+  itself completely normal). Not yet verified past the link step itself
+  succeeding: whether the resulting `libz.so` can actually find
+  `libc.so`/etc at runtime when dynamically loaded (`ldd`/`LD_LIBRARY_PATH`
+  question, since they're linked by absolute sysroot path rather than
+  via an installed system location) is a real follow-up to check.
 
 - **Retired the spawn broker; moving to a Cygwin/MSYS-style `fork()` instead.**
   The broker (see "done" above) fixed zlib and got libpng most of the way,

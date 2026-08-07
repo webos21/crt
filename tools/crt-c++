@@ -117,6 +117,13 @@ if [ "$shared_mode" -eq 1 ]; then
 else
   libs="${CRT_SYSROOT}/lib/crt1.o -L${CRT_SYSROOT}/lib"
 fi
+# See the matching comment in tools/crt-cc: on Linux, the static archives
+# are only safe to link into an executable (never compiled with -fPIC),
+# so shared_mode links the already-built shared counterparts instead.
+# macOS is deliberately left on the static archives in both modes -- see
+# tools/crt-cc's own comment on why (already confirmed working there, and
+# Mach-O/AArch64 doesn't have the same hard PIC requirement Linux's ld
+# enforces).
 case "$target_os" in
   macos)
     libs="$libs ${CRT_SYSROOT}/lib/libc++.a ${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a ${CRT_SYSROOT}/lib/libclang_rt.builtins.a -lSystem"
@@ -127,7 +134,12 @@ case "$target_os" in
     fi
     ;;
   linux)
-    libs="$libs ${CRT_SYSROOT}/lib/libc++.a ${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a ${CRT_SYSROOT}/lib/libclang_rt.builtins.a"
+    if [ "$shared_mode" -eq 1 ]; then
+      crt_libs="${CRT_SYSROOT}/lib/libc++.so ${CRT_SYSROOT}/lib/libc.so ${CRT_SYSROOT}/lib/libm.so ${CRT_SYSROOT}/lib/libdl.so"
+    else
+      crt_libs="${CRT_SYSROOT}/lib/libc++.a ${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a"
+    fi
+    libs="$libs $crt_libs ${CRT_SYSROOT}/lib/libclang_rt.builtins.a"
     if [ "$shared_mode" -eq 1 ]; then
       entry="-Wl,--gc-sections"
     else
