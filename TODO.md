@@ -428,6 +428,36 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   question, since they're linked by absolute sysroot path rather than
   via an installed system location) is a real follow-up to check.
 
+- **Implemented `__crt_sys_readlink()` for real (was an honest `-ENOSYS`
+  stub).** Found while separately verifying the Windows build wasn't
+  regressed by the Linux fix above: rebuilding zlib's shared library a
+  *second* time (install dir already has `libz.so`/`libz.so.1` symlinks
+  from the previous run) failed with `rm: .../libz.so: Function not
+  implemented`. Traced to toybox's `dirtree.c` -- shared by every
+  directory-walking applet, including `rm` -- calling `readlinkat()` on
+  every symlink entry it visits to populate `try->symlink`; the stub's
+  `-ENOSYS` propagated straight up into `rm` aborting. This was flagged
+  as a known gap when `__crt_sys_symlink()` was implemented earlier this
+  session ("nothing currently needs it") -- turned out something did,
+  just not until a *rebuild* scenario exercised it. Implemented via
+  `CreateFileA(..., FILE_FLAG_OPEN_REPARSE_POINT)` (opens the link
+  itself rather than transparently following it, the opposite of a plain
+  open) + `DeviceIoControl(FSCTL_GET_REPARSE_POINT)`, parsing the
+  `SymbolicLinkReparseBuffer` arm of `REPARSE_DATA_BUFFER` (field-for-
+  field per real winnt.h) and extracting `PrintName` (the human-facing
+  target string `CreateSymbolicLinkA` was actually given, as opposed to
+  `SubstituteName`, which may carry an NT-namespace `\??\` prefix for
+  absolute targets) via `WideCharToMultiByte` (UTF-16 `PathBuffer` ->
+  narrow `char*`, `CP_ACP`, matching every other narrow-char Win32 API
+  this file already calls). `tests/file_path_test.c`'s Windows symlink
+  block updated to match (was asserting `-ENOSYS` as the expected
+  "policy"; now asserts a real round trip, mirroring the non-Windows
+  branch). Verified: `file_path_test` passes, full `ctest` 79/79, and
+  rebuilding zlib's shared library twice in a row (the exact scenario
+  that surfaced this) no longer errors either time.
+
+## in progressing
+
 - **Retired the spawn broker; moving to a Cygwin/MSYS-style `fork()` instead.**
   The broker (see "done" above) fixed zlib and got libpng most of the way,
   but kept surfacing new structural failure modes of its own this session

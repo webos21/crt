@@ -117,6 +117,12 @@ struct crt_memory_status_ex {
 #define SYMBOLIC_LINK_FLAG_DIRECTORY 0x00000001
 #define SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE 0x00000002
 #define FILE_FLAG_BACKUP_SEMANTICS 0x02000000
+#define FILE_FLAG_OPEN_REPARSE_POINT 0x00200000
+/* FSCTL_GET_REPARSE_POINT = CTL_CODE(FILE_DEVICE_FILE_SYSTEM=9, 42,
+ * METHOD_BUFFERED=0, FILE_ANY_ACCESS=0) = (9<<16)|(0<<14)|(42<<2)|0. */
+#define FSCTL_GET_REPARSE_POINT 0x000900A8
+#define IO_REPARSE_TAG_SYMLINK 0xA000000CUL
+#define MAXIMUM_REPARSE_DATA_BUFFER_SIZE 16384
 #define FILE_WRITE_ATTRIBUTES 0x00000100
 #define FILE_BEGIN 0
 #define FILE_CURRENT 1
@@ -342,6 +348,30 @@ __declspec(dllimport) DWORD CRT_WINAPI GetFinalPathNameByHandleA(
     char* lpszFilePath,
     DWORD cchFilePath,
     DWORD dwFlags);
+__declspec(dllimport) BOOL CRT_WINAPI DeviceIoControl(
+    HANDLE hDevice,
+    DWORD dwIoControlCode,
+    void* lpInBuffer,
+    DWORD nInBufferSize,
+    void* lpOutBuffer,
+    DWORD nOutBufferSize,
+    DWORD* lpBytesReturned,
+    void* lpOverlapped);
+/* CP_ACP=0: convert using the system default (non-Unicode) ANSI code
+ * page -- matching every other narrow-char *A Win32 API this file
+ * already calls (CreateFileA, GetFullPathNameA, ...), so a symlink
+ * target read back via readlink() round-trips through the same encoding
+ * a caller's own path strings (passed to symlink()/open()/etc, all *A
+ * APIs) already use. */
+__declspec(dllimport) int CRT_WINAPI WideCharToMultiByte(
+    unsigned int CodePage,
+    DWORD dwFlags,
+    const uint16_t* lpWideCharStr,
+    int cchWideChar,
+    char* lpMultiByteStr,
+    int cbMultiByte,
+    const char* lpDefaultChar,
+    BOOL* lpUsedDefaultChar);
 __declspec(dllimport) HANDLE CRT_WINAPI GetCurrentProcess(void);
 __declspec(dllimport) BOOL CRT_WINAPI DuplicateHandle(
     HANDLE hSourceProcessHandle,
@@ -3554,18 +3584,108 @@ long __crt_sys_realpath_fd(int fd, char* resolved_path, unsigned long size) {
   return normalize_final_handle_path(resolved_path, size);
 }
 
-/* Still unimplemented: reading a symlink's target back out requires opening
- * it with FILE_FLAG_OPEN_REPARSE_POINT and parsing a REPARSE_DATA_BUFFER
- * (UTF-16 PathBuffer) out via DeviceIoControl(FSCTL_GET_REPARSE_POINT) --
- * meaningfully more machinery than __crt_sys_symlink() above needed, and not
- * yet required by any port build (the SONAME-symlink step that motivated
- * __crt_sys_symlink() only creates links, never reads them back). Left as
- * -ENOSYS honestly rather than faked. */
+/* Symbolic-link-flavored REPARSE_DATA_BUFFER, field-for-field per real
+ * winnt.h (only the SymbolicLinkReparseBuffer arm of the real union --
+ * MountPointReparseBuffer/GenericReparseBuffer are never reached here
+ * since a mismatched ReparseTag is rejected below before this layout is
+ * interpreted). Offsets/lengths are in BYTES from the start of
+ * PathBuffer, since the on-disk buffer stores raw UTF-16 code units. */
+struct crt_reparse_data_buffer_symlink {
+  DWORD ReparseTag;
+  WORD ReparseDataLength;
+  WORD Reserved;
+  WORD SubstituteNameOffset;
+  WORD SubstituteNameLength;
+  WORD PrintNameOffset;
+  WORD PrintNameLength;
+  DWORD Flags;
+  uint16_t PathBuffer[1];
+};
+
+/* readlink(): this project's own __crt_sys_symlink() only ever needed to
+ * *create* a link (unblocking a Makefile's `ln -s libfoo.so.1.2.3
+ * libfoo.so` SONAME step); reading one back out went unimplemented until
+ * a real, reproducible need showed up -- toybox's dirtree.c (shared by
+ * `rm`/`ls`/every applet that walks a directory) calls readlinkat() on
+ * every symlink entry it visits to populate `try->symlink`, so leaving
+ * this as -ENOSYS broke something as basic as `rm -f` on a directory
+ * containing a symlink (observed for real: rebuilding zlib's shared
+ * library, whose install step re-creates the libz.so/libz.so.1 SONAME
+ * symlinks on every rebuild, so `rm -f` has to remove the *existing*
+ * ones first -- toybox reported "Function not implemented", tracing
+ * straight back to this stub via readlinkat() -> readlink() ->
+ * __crt_sys_readlink()).
+ *
+ * Opens the link itself (FILE_FLAG_OPEN_REPARSE_POINT -- without it,
+ * CreateFileA transparently follows the link to its target instead, the
+ * opposite of what readlink() means), reads the reparse point out via
+ * DeviceIoControl(FSCTL_GET_REPARSE_POINT), and extracts PrintName (the
+ * human-facing target string CreateSymbolicLinkA was actually given --
+ * as opposed to SubstituteName, which may carry an NT-namespace \??\
+ * prefix for absolute targets) rather than reconstructing it. */
 long __crt_sys_readlink(const char* path, char* buf, unsigned long size) {
-  (void)path;
-  (void)buf;
-  (void)size;
-  return -ENOSYS;
+  char translated_path[4096];
+  const char* host_path;
+  HANDLE handle;
+  unsigned char* reparse_buffer;
+  struct crt_reparse_data_buffer_symlink* symlink_buffer;
+  DWORD bytes_returned = 0;
+  long result;
+  int converted;
+
+  if (path == 0 || buf == 0) {
+    return -EINVAL;
+  }
+  host_path = translate_path_for_host(path, translated_path);
+  if (host_path == 0) {
+    return -EINVAL;
+  }
+  handle = CreateFileA(host_path, GENERIC_READ,
+                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, 0,
+                       OPEN_EXISTING,
+                       FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS |
+                           FILE_FLAG_OPEN_REPARSE_POINT,
+                       0);
+  if (handle == INVALID_HANDLE_VALUE) {
+    return fail_last_error();
+  }
+
+  reparse_buffer = (unsigned char*)malloc(MAXIMUM_REPARSE_DATA_BUFFER_SIZE);
+  if (reparse_buffer == 0) {
+    CloseHandle(handle);
+    return -ENOMEM;
+  }
+  if (!DeviceIoControl(handle, FSCTL_GET_REPARSE_POINT, 0, 0, reparse_buffer,
+                       MAXIMUM_REPARSE_DATA_BUFFER_SIZE, &bytes_returned, 0)) {
+    result = fail_last_error();
+    free(reparse_buffer);
+    CloseHandle(handle);
+    return result;
+  }
+  CloseHandle(handle);
+
+  symlink_buffer = (struct crt_reparse_data_buffer_symlink*)reparse_buffer;
+  if (symlink_buffer->ReparseTag != IO_REPARSE_TAG_SYMLINK) {
+    /* Not a symlink (e.g. a mount-point/junction reparse point) --
+     * EINVAL matches POSIX readlink() on a non-symlink path. */
+    free(reparse_buffer);
+    return -EINVAL;
+  }
+
+  {
+    const unsigned char* path_buffer_bytes = (const unsigned char*)symlink_buffer->PathBuffer;
+    const uint16_t* print_name =
+        (const uint16_t*)(path_buffer_bytes + symlink_buffer->PrintNameOffset);
+    int print_name_wchars = symlink_buffer->PrintNameLength / 2;
+
+    converted = WideCharToMultiByte(0, 0, print_name, print_name_wchars, buf,
+                                    (int)size, 0, 0);
+  }
+  free(reparse_buffer);
+  if (converted <= 0) {
+    return fail_last_error();
+  }
+  return converted;
 }
 
 long __crt_sys_symlink(const char* target, const char* linkpath) {

@@ -453,20 +453,22 @@ int main(void) {
   }
   free(allocated_path);
 #if defined(CRT_TARGET_OS_WINDOWS)
-  /* symlink() is a real CreateSymbolicLinkA()-backed implementation now
-   * (needed for third-party ports' SONAME-style "ln -s libfoo.so.1.2.3
-   * libfoo.so" build steps). readlink() is still an honest -ENOSYS stub --
-   * nothing in this project's own build or the port builds it enables
-   * needs to read a symlink's target back out yet. */
+  /* Both symlink() and readlink() are real (CreateSymbolicLinkA()- and
+   * DeviceIoControl(FSCTL_GET_REPARSE_POINT)-backed respectively) --
+   * needed for third-party ports' SONAME-style "ln -s libfoo.so.1.2.3
+   * libfoo.so" build steps (symlink()) and for toybox's dirtree.c, which
+   * every directory-walking applet (rm, ls, ...) shares and which calls
+   * readlinkat() on every symlink entry it visits (readlink()). */
   errno = 0;
   if (symlink("sample.tmp", "sample.link") != 0) {
     close(fd);
     return fail("windows symlink create");
   }
-  errno = 0;
-  if (readlink("sample.link", linkbuf, sizeof(linkbuf)) >= 0 || errno != ENOSYS) {
+  memset(linkbuf, 0, sizeof(linkbuf));
+  if (readlink("sample.link", linkbuf, sizeof(linkbuf) - 1) != 10 ||
+      strcmp(linkbuf, "sample.tmp") != 0) {
     close(fd);
-    return fail("windows readlink policy");
+    return fail("windows readlink");
   }
   if (remove("sample.link") != 0) {
     close(fd);
