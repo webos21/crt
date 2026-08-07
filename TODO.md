@@ -584,7 +584,24 @@ Detailed policy and provenance stay in `docs/` and import manifests.
     zlib, and across Windows aarch64+x86_64 plus macOS aarch64 and Linux
     aarch64 for sqlite-amalgamation.
 
-## in progressing
+- **Windows fork() implementation: concluded.** The four entries directly
+  below (spawn-broker retirement -> Cygwin/MSYS-style memory-copy
+  `fork()`, the libpng `configure`/`make`/`make install` blocker chain
+  that exercised it, the sqlite-amalgamation/libffi porting follow-up,
+  and the reverted process-reparenting attempt) were originally written
+  under "in progressing" while the work was ongoing and never moved once
+  finished, growing into one large, hard-to-navigate block covering
+  fork() itself, mksh/toybox fixes, and third-party porting all mixed
+  together. Moved here as a single unit (each of the four keeps its own
+  original, self-contained writeup below -- not rewritten, just
+  relocated and treated as the four separate completed items they always
+  were) now that the underlying work is genuinely done: both Windows
+  architectures have a working memory-copy `fork()`
+  (`docs/windows_fork_emulation.md`), zlib/libpng/libffi/sqlite-
+  amalgamation all build (libffi with one documented, unresolved X19
+  bug), and shared-library support (this file's entries above) is
+  confirmed across all 3 OSes. Any new fork-related problem found from
+  here on gets its own fresh entry, not appended into this one.
 
 - **Retired the spawn broker; moving to a Cygwin/MSYS-style `fork()` instead.**
   The broker (see "done" above) fixed zlib and got libpng most of the way,
@@ -1253,6 +1270,8 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   `docs/windows_fork_emulation.md`, "Attempted And Reverted: Reparenting
   Spawned Processes To The Client".
 
+## in progressing
+
 - Verify the new Linux signal backend (`docs/signal_delivery.md`) on an
   actual Linux host; it is currently code-review-verified only, since this
   project's CMake presets refuse to cross-compile from macOS.
@@ -1346,11 +1365,12 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   - `stty`;
   - `login`;
   - device-manager or procfs-heavy commands.
-- Continue long-term Windows `fork()` research separately from the immediate
-  mksh/toybox milestone:
-  - saved register/context state;
-  - stack mapping/copy policy;
-  - writable runtime/data segment policy;
-  - TLS/current-thread reset in the child;
-  - malloc/pthread/stdio/fd after-fork reset hooks;
-  - ASLR/base-address constraints or documented failure mode.
+- Windows `fork()` itself is no longer an open research item -- this was
+  written before the work below (see "done") settled all of the concerns
+  originally listed here (saved register/context state, stack mapping/
+  copy policy, writable segment policy, TLS reset, malloc/pthread/stdio/fd
+  after-fork hooks, ASLR/base-address handling): both Windows
+  architectures have a working, verified Cygwin/MSYS-style memory-copy
+  `fork()` (`docs/windows_fork_emulation.md`). Kept only as a pointer:
+  any *new* Windows `fork()` problem discovered from here on should
+  become its own fresh entry, not get appended here.

@@ -247,18 +247,36 @@ single-write payloads (a write bigger than the buffer would still
 deadlock; 4 MiB comfortably covers realistic shell/configure-script
 usage).
 
+## Status: Basic Implementation Concluded
+
+As of this writing, basic verification of the Windows `fork()` mechanism
+itself (both architectures) is considered complete. Since it landed, real
+third-party ports have exercised it in practice well beyond the `ctest`
+suite: zlib, libpng, sqlite-amalgamation, and libffi all `configure`/`make`
+through project-owned `mksh` on Windows (fork-then-spawn, subshells,
+pipelines), and this project's own shared-library work (see `TODO.md`) has
+since run successful builds on a real, separate x86_64 Windows machine, not
+just this project's aarch64 development machine's x64 emulation. New
+problems found from here on -- shell/porting-related or otherwise -- get
+their own fresh `TODO.md` entry rather than reopening this document's
+narrative; see "Current Open Issues" below for what remains genuinely
+unresolved about the mechanism itself.
+
 ## Current Open Issues
 
-- **x86_64 has only been verified under emulation, not real hardware**:
-  this project's development machine is Windows aarch64, so x86_64
-  verification (including the full `ctest` suite, `fork_test`/
-  `fork_signal_test`/`fork_runtime_reset_test` among them) ran under that
-  machine's built-in x64 emulation (Prism/xtajit), not genuine x86_64
-  silicon. Nothing in the mechanism (mitigation policy, `WriteProcessMemory`,
-  `SetThreadContext`) is emulation-specific, and the emulation layer itself
-  faithfully reproduced both the "ASLR still on" and "ASLR successfully
-  disabled" address behaviors needed for this design to work at all, but
-  real hardware has not re-run this.
+- **x86_64: `ctest`'s own `fork_test`/`fork_signal_test`/
+  `fork_runtime_reset_test` suite has not been literally re-run on real
+  x86_64 hardware.** All *formal* test-suite verification so far ran under
+  this project's aarch64 development machine's built-in x64 emulation
+  (Prism/xtajit). Nothing in the mechanism (mitigation policy,
+  `WriteProcessMemory`, `SetThreadContext`) is emulation-specific, and the
+  emulation layer itself faithfully reproduced both the "ASLR still on"
+  and "ASLR successfully disabled" address behaviors this design depends
+  on -- and, separately, real x86_64 hardware (a different machine from
+  this project's own) has since run several real third-party port builds
+  successfully (which do exercise `fork()`-adjacent spawn/shell paths in
+  practice, just not through the literal `ctest` entries) -- but the
+  formal suite itself has not been re-run there.
 - **Only the calling thread's stack survives into the child** (matches
   POSIX `fork()` semantics -- other threads do not survive into the child
   at all -- but pthread-created OS threads' own stacks are not otherwise
@@ -267,5 +285,3 @@ usage).
 - **No guard-page preservation**: the stack copy does not preserve a guard
   page beyond what was already committed at `fork()` time, so the child
   cannot auto-grow its stack past that point.
-- `libffi` and the SQLite follow-up build have not been attempted yet on
-  Windows.
