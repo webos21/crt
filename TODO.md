@@ -570,10 +570,19 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   mirroring how `examplesh`/`minigzipsh` link against zlib's shared
   build) ran a real `sqlite3_open`/`CREATE TABLE`/`INSERT`/`SELECT` round
   trip successfully on both architectures. Full `ctest` 79/79 after the
-  `tools/crt-port-build.py` change. macOS/Linux shared sqlite3 builds not
-  yet verified on those hosts -- pending, following this session's
-  convention of the user running build/regression verification directly
-  on non-Windows machines.
+  `tools/crt-port-build.py` change.
+  - **Update: confirmed on macOS and Linux too.** `otool -L` on macOS
+    shows `libsqlite3.dylib` depending only on its own self-identity
+    (`libsqlite3.3.dylib`, matching the `-install_name` set at link time)
+    and `/usr/lib/libSystem.B.dylib` -- no accidental `@rpath/libc.dylib`
+    pickup the way zlib's build hit (sqlite's own build has no equivalent
+    of zlib's stray `LDSHAREDLIBC=-lc` flag to trigger it). `ldd` on
+    Linux shows `libsqlite3.so`'s `libc.so`/`libm.so`/`libdl.so`/
+    `libc++.so` dependencies all correctly resolving to this project's
+    own sysroot. Shared-library support now confirmed working across all
+    3 OSes (Windows aarch64+x86_64, macOS aarch64, Linux aarch64) for
+    zlib, and across Windows aarch64+x86_64 plus macOS aarch64 and Linux
+    aarch64 for sqlite-amalgamation.
 
 ## in progressing
 
