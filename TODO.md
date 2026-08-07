@@ -276,6 +276,71 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   result on Windows is unchanged from before). Full trail in each recipe's
   own `notes`.
 
+- **Fixed GNU make's Windows x86_64 build (`dir.c` compile error, then two
+  more bugs found chasing it).** Reported from a real x86_64 Windows machine
+  (this project's own dev machine is aarch64, whose `make` build had never
+  hit any of these): `src/dir.c:1241: error: array type 'char[256]' is not
+  assignable` at `d->d_name = xmalloc(len)`. Root-caused to
+  `tools/crt-cc`/`tools/crt-c++` targeting `*-w64-mingw32` predefining
+  `__MINGW32__` but not `__MINGW32_MAJOR_VERSION`/`__MINGW32_MINOR_VERSION`
+  (only a real mingw-w64 install's own `_mingw.h` does), so `dir.c`'s `#if
+  __MINGW32_MAJOR_VERSION < 3 ...` guard (an ISO C preprocessor-arithmetic
+  undefined-macro-as-0 trap) wrongly took an ancient-mingw compat branch
+  treating `d_name` as a pointer -- doesn't compile against this project's
+  Bionic-style fixed-array `struct dirent`. Fixed by defining both macros
+  in `tools/crt-cc`/`tools/crt-c++`'s Windows case block to match a real,
+  current mingw-w64 install's actual values (arch-independent: same fix for
+  both `aarch64-w64-mingw32` and `x86_64-w64-mingw32`; Windows-only, since
+  `__MINGW32__` is never defined on macOS/Linux). Verifying this on an
+  x86_64 cross-build (`out/windows-x64-cross-debug`, this project's own
+  aarch64 dev machine's x64-emulation cross-arch setup from earlier this
+  session) surfaced two more, genuinely x86_64-only problems past the fixed
+  compile step:
+  - Link failed on `undefined symbol: ___chkstk_ms` -- the MinGW-mangled
+    name clang emits calls to (instead of the MSVC-triple `__chkstk` name
+    this project already implemented in `libc/src/arch/windows/x86_64/
+    chkstk.S`) when a function's stack frame is large enough to need a
+    guard-page-safe stack probe. Both names are, per LLVM's own
+    compiler-rt, the exact same routine under historical MSVC-vs-MinGW
+    C-symbol-naming-convention names -- fixed by adding `___chkstk_ms` as a
+    second label on the same code, right in `chkstk.S`. Not needed on
+    aarch64: AArch64 COFF never had the leading-underscore name-mangling
+    split x86/x86_64 did, so mingw-w64 uses the same `__chkstk` name there
+    as MSVC (confirmed by checking `libc/src/arch/windows/aarch64/
+    chkstk.S`, which needs no such alias).
+  - Then `undefined symbol: __main` -- clang's `*-w64-mingw32`-only
+    implicit call inserted at the top of every `main()`, a decades-old
+    GCC/MinGW convention for running `.ctors`-section constructors a PE
+    loader wouldn't run itself. This project's own CRT startup
+    (`src/arch/windows/common/crt1.c`) already runs constructors through
+    its own mechanism before `main()` is ever reached, so `__main()` itself
+    has nothing left to do -- matching modern mingw-w64's own runtime,
+    which keeps it only as an empty stub for the same reason. Added exactly
+    that: an empty `void __main(void) {}` in `libc/src/arch/windows/
+    common/compiler_abi.c` (same file/pattern as the pre-existing
+    `__clear_cache()` compiler-support-symbol stub), arch-independent (pure
+    C, no per-arch asm needed) since nothing rules out some other Windows
+    port also needing it on aarch64 eventually.
+  - Also found and fixed, while setting up the x86_64 cross-build repro: a
+    latent `tools/crt-port-build.py` bug where `--target-arch`/
+    `CRT_TARGET_ARCH` was used only for the `@CRT_MINGW_TRIPLE@` recipe-
+    string substitution and never actually exported to the `crt-cc`/
+    `crt-c++` child processes -- which independently auto-detect arch via
+    `uname` when `$CRT_TARGET_ARCH` is unset, silently building the
+    *host's* architecture instead of the requested one on a genuine
+    cross-arch build (caught because a deliberately-requested x86_64 build
+    on this aarch64 dev machine came out as an aarch64 binary with no
+    error). Fixed in `make_env()`: export `$CRT_TARGET_ARCH` derived from
+    the same already-resolved `mingw_triple`.
+  Verified end-to-end on x86_64: `make.exe` compiles, links, reports
+  `architecture: x86_64` via `llvm-objdump -f`, runs `--version`, and
+  correctly evaluates `$(wildcard *.txt)` (exercising the exact `dir.c`
+  code path that started this). Verified on aarch64 too (link succeeds,
+  no regression). Full `ctest` and the real x86_64 build/regression run
+  this depends on (`zlib` -> `make`) were confirmed passing by the user
+  directly rather than by this session -- see
+  `docs/porting_status.md`'s `make` row for the full writeup.
+
 ## in progressing
 
 - **Retired the spawn broker; moving to a Cygwin/MSYS-style `fork()` instead.**

@@ -88,6 +88,11 @@ case "$target_os" in
     # `configure` scripts (and this project's own --build=*-w64-mingw32
     # recipe workarounds) already expect.
     common_flags="$common_flags -DCRT_TARGET_OS_WINDOWS=1 -fno-threadsafe-statics --target=${target_arch}-w64-mingw32"
+    # See the matching comment in tools/crt-cc: also define
+    # __MINGW32_MAJOR_VERSION/__MINGW32_MINOR_VERSION to match a real
+    # mingw-w64 install, since clang's own predefined macro set for this
+    # target stops at __MINGW32__ and leaves those two undefined.
+    common_flags="$common_flags -D__MINGW32_MAJOR_VERSION=3 -D__MINGW32_MINOR_VERSION=11"
     ;;
 esac
 

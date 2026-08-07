@@ -241,8 +241,23 @@ def copy_source(src, dst):
     shutil.copytree(src, dst, ignore=ignore)
 
 
-def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os, use_crt_shell=False):
+def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os, mingw_triple, use_crt_shell=False):
     env = os.environ.copy()
+    if target_os == "windows":
+        # tools/crt-cc/tools/crt-c++ read $CRT_TARGET_ARCH to pick
+        # --target=<arch>-w64-mingw32; if unset, they fall back to
+        # auto-detecting the *host's* arch via `uname`. That fallback is
+        # only correct when the host and requested target arch happen to
+        # match -- it silently builds the wrong architecture during a
+        # same-OS cross-arch build (e.g. this project's own
+        # -DCRT_TARGET_ARCH=x86_64 CMake preset, or --target-arch x86_64
+        # passed straight to this script, from an aarch64 host). mingw_triple
+        # is already resolved once from the same --target-arch/
+        # CRT_TARGET_ARCH/platform.machine() priority chain (see
+        # detect_target_arch()/mingw_triple_for_arch()), so forward that
+        # same answer here instead of letting crt-cc re-derive its own,
+        # potentially different one via `uname`.
+        env["CRT_TARGET_ARCH"] = mingw_triple.removesuffix("-w64-mingw32")
     use_msys_paths = is_native_windows_configure(target_os) and not use_crt_shell
     path_for_shell = path_for_crt_shell if (is_native_windows_configure(target_os) and use_crt_shell) else path_for_msys_shell
     root_env = path_for_shell(root) if is_native_windows_configure(target_os) else str(root)
@@ -613,7 +628,7 @@ def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, por
     apply_source_patches(work, recipe)
 
     progress(f"{port}: build system {build['system']}")
-    env = make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os, use_crt_shell)
+    env = make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os, mingw_triple, use_crt_shell)
     apply_recipe_env(env, recipe, target_os, root)
     if build["system"] == "configure":
         build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env, target_os, mingw_triple, use_crt_shell, configure_only)

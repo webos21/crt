@@ -108,6 +108,26 @@ case "$target_os" in
     # affects predefined macros and calling-convention details, not which
     # headers/libs get used.
     common_flags="$common_flags --target=${target_arch}-w64-mingw32"
+    # clang predefines __MINGW32__ for this target but, unlike a real
+    # mingw-w64 install's own _mingw.h, does NOT predefine
+    # __MINGW32_MAJOR_VERSION/__MINGW32_MINOR_VERSION (the legacy
+    # mingw.org-era compat version pair real mingw-w64 headers still
+    # define for backward compatibility). Third-party sources that probe
+    # those macros to distinguish "ancient mingw.org, pre-3.0" from "any
+    # real mingw-w64" (ISO C preprocessor arithmetic treats an undefined
+    # macro as 0, so `__MINGW32_MAJOR_VERSION < 3` silently evaluates
+    # true) end up on the ancient-compat branch instead -- hit for real in
+    # GNU make's src/dir.c, whose `#if __MINGW32_MAJOR_VERSION < 3 ...`
+    # guards an old-mingw-only `d->d_name = xmalloc(...)` assignment that
+    # doesn't compile against this project's Bionic-style `struct dirent`
+    # (`d_name` is a fixed array, not a pointer). Arch-independent (same
+    # bug on both aarch64-w64-mingw32 and x86_64-w64-mingw32) and Windows-
+    # only (macOS/Linux never define __MINGW32__ at all). Defining these
+    # to match a real, current mingw-w64 install's actual values -- not
+    # picking arbitrary "big enough" numbers -- keeps every third-party
+    # mingw-version probe seeing the same, real answer a genuine mingw-w64
+    # toolchain would give.
+    common_flags="$common_flags -D__MINGW32_MAJOR_VERSION=3 -D__MINGW32_MINOR_VERSION=11"
     ;;
 esac
 

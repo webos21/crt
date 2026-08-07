@@ -39,3 +39,22 @@ void __clear_cache(void* start, void* end) {
 
   FlushInstructionCache(GetCurrentProcess(), start, size);
 }
+
+/* __main(): another compiler-inserted, not user-written, call -- clang (like
+ * real GCC before it) targeting *-w64-mingw32 unconditionally emits a call
+ * to __main() at the very top of every translation unit's own main(), a
+ * decades-old MinGW/Cygwin convention originally meant to run constructors
+ * queued in a .ctors section on a PE loader that (unlike a real ELF dynamic
+ * linker) never ran them itself. This project's own CRT startup
+ * (src/arch/windows/common/crt1.c) already runs constructors correctly
+ * through its own mechanism before main() is ever reached, so __main()
+ * itself has nothing left to do -- matching modern mingw-w64's own runtime,
+ * which keeps __main() around only as an empty, ABI-compatible stub for
+ * exactly this reason. Needed by any third-party port built through
+ * tools/crt-cc (which targets *-w64-mingw32 specifically so configure/
+ * libtool probes see a GNU-like toolchain -- see tools/crt-cc's own
+ * comment) that defines a plain main(), e.g. GNU make's src/main.c. This
+ * project's own sources never call it (crt1.c doesn't target
+ * *-w64-mingw32), so it is otherwise dead weight, not a duplicate
+ * constructor-running path. */
+void __main(void) {}
