@@ -1270,6 +1270,52 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   `docs/windows_fork_emulation.md`, "Attempted And Reverted: Reparenting
   Spawned Processes To The Client".
 
+- **Synced `docs/porting_status.md` and `porting/recipes/*.json` status
+  fields with facts already narrated in this file but never propagated to
+  the status doc/recipes.** Found via user report ("porting status looks
+  wrong"): commit `4628c6c` ("Record macOS/Linux confirmation of
+  sqlite-amalgamation shared build") only ever updated this file's prose,
+  never `docs/porting_status.md`'s table or the recipe JSONs' own
+  `status`/`notes` fields -- same gap for the earlier zlib/libpng Linux
+  `ldd` and macOS `otool` confirmations. Also resolved an open question
+  about `make`: it is **not** Windows-specific -- `tools/crt-port-build.py`'s
+  `build_port()` unconditionally builds and installs the `make` port before
+  any `configure`-system recipe on every host, and `make_env()` prefers the
+  freshly-built `PORT_PREFIX/bin/make` over host `make` via `$MAKE` on all
+  three OSes (verified by reading the code, not just prose). Updated,
+  matching the user's direct confirmation that zlib/libpng/libffi/
+  sqlite-amalgamation all pass on macOS/Linux:
+  - `make`: `linux`/`macos` `pending` -> `manual-pass` (matching Windows;
+    kept at `manual-pass` rather than higher since no standalone
+    `make --version`-style direct check has been separately recorded for
+    these two hosts, only indirect, repeated use as the build driver for
+    every other port).
+  - `zlib`: `linux` `manual-pass` -> `shared-pass`, `macos` `configure-pass`
+    -> `shared-pass` (the `ldd`/`otool` confirmations from the cross-port
+    rpath fix work above were already real verification of "shared library
+    ... load[ing] and run[ning] correctly at runtime", just never reflected
+    in the status value).
+  - `libpng`: `linux` `pending` -> `shared-pass`, `macos` `configure-pass`
+    -> `shared-pass` (unlike Windows, libpng's real GNU Libtool build
+    already produces a working shared library on Linux/macOS through this
+    project's real system `ld`/`ld64` -- confirmed via the same `ldd`
+    session that showed `libpng16.so.16.57.0` resolving its `libz.so.1`
+    dependency correctly).
+  - `sqlite-amalgamation`: `linux` `smoke-pass` -> `amalgamation-pass`
+    (matching macOS/Windows; the `amalgamation` build system's own ceiling
+    status stays `amalgamation-pass` even with a full shared-library
+    round trip verified, matching the existing Windows-row convention of
+    recording shared-library depth in notes rather than a separate status
+    tier).
+  - `libffi`: status values left unchanged (`partial`/`configure-pass`/
+    `partial`) -- the well-documented X19 callee-saved-register `ffi_call()`
+    runtime bug is real and independent of shared-vs-static linking, so a
+    blanket "all pass" was **not** applied here; only added a clarifying
+    note that libffi's own shared library does build successfully on
+    Linux/macOS (already evidenced in this file's zlib-Linux-shared-bug
+    writeup: "`libffi`/`libpng` shared builds succeeded [on Linux]"), which
+    is a separate axis from the open runtime bug.
+
 ## in progressing
 
 - Verify the new Linux signal backend (`docs/signal_delivery.md`) on an

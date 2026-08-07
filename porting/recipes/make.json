@@ -116,14 +116,15 @@
     }
   },
   "status": {
-    "linux": "pending",
-    "macos": "pending",
+    "linux": "manual-pass",
+    "macos": "manual-pass",
     "windows": "manual-pass"
   },
   "notes": [
     "AOSP does not carry make under platform/external; it carries GNU make source under toolchain/make and prebuilts under platform/prebuilts/build-tools.",
     "The Gitiles +archive gzip hash is not stable across downloads, so the recipe pins the exact commit in the URL instead of using an archive checksum.",
     "This recipe follows Android.bp's cc_binary_host source list so make can bootstrap without requiring an existing make executable.",
-    "Windows intentionally uses the POSIX-like musl config path rather than the upstream Win32 make path so failures expose CRT/PAL gaps."
+    "Windows intentionally uses the POSIX-like musl config path rather than the upstream Win32 make path so failures expose CRT/PAL gaps.",
+    "make is not Windows-specific: tools/crt-port-build.py's build_port() unconditionally builds and installs this port before any 'configure'-system recipe on every host (not gated on target_os), and make_env() prefers the freshly-built PORT_PREFIX/bin/make over host make via $MAKE on all three OSes. So this project's own make has already driven every real ./configure && make && make install run for zlib/libpng/libffi on both Linux and macOS, all confirmed passing by the user on real hardware -- see those recipes' own status. Kept at manual-pass (matching Windows) rather than a higher tier since no standalone make --version/$(wildcard ...)-style direct check has been separately recorded for Linux/macOS, only its indirect, repeated use as the build driver for other ports."
   ]
 }

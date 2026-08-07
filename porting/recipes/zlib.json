@@ -30,12 +30,14 @@
     }
   },
   "status": {
-    "linux": "manual-pass",
-    "macos": "configure-pass",
+    "linux": "shared-pass",
+    "macos": "shared-pass",
     "windows": "shared-pass"
   },
   "notes": [
     "No runtime network dependency.",
+    "linux: shared-pass -- tools/crt-cc/tools/crt-c++'s -shared mode originally statically linked non-PIC libc.a on every OS, a hard ld error on Linux's stricter ELF relocations (R_AARCH64_ADR_PREL_PG_HI21 against stdin/stdout/stderr); fixed by linking the already-built shared libc.so/libm.so/libdl.so/libc++.so counterparts instead for shared_mode on Linux. That alone wasn't enough for runtime resolution: none of this project's own shared libraries set an explicit -soname, so libz.so.1.3.1's DT_NEEDED recorded the bare 'libc.so', which ld.so then re-resolved at runtime against the host's own /lib/aarch64-linux-gnu/libc.so (a linker-script stub, not a real ELF image) instead of this project's sysroot -- fixed by adding -Wl,-rpath,${CRT_SYSROOT}/lib to shared_mode's Linux link flags. ldd on a real Linux aarch64 machine confirmed the fix: libz.so.1.3.1's libc.so/libm.so/libdl.so/libc++.so dependencies all resolve to this project's own sysroot, not the host's.",
+    "macos: shared-pass -- otool -l .../libz.dylib | grep -A2 LC_RPATH confirmed both expected LC_RPATH entries are present (.../sysroot/lib and .../port-tests/install/lib, added the same way as the Linux fix), so the stray @rpath/libc.dylib dependency introduced by zlib's own LDSHAREDLIBC=-lc flag (unconditional except on MinGW; ld64 prefers the sibling libc.dylib over the same-named static libc.a when both exist on the search path) now resolves correctly at load time.",
     "Builds both static libz.a and shared libz.so.1.3.1 (plus the libz.so/libz.so.1 SONAME symlinks) into PORT_PREFIX; configure_args was changed from [\"--static\"] to [] so zlib's own default shared=1 behavior applies on every OS, now that Windows can build and load shared objects too (see below).",
     "target_overrides.windows.env undefines _WIN32/_WIN32_WCE/__WIN32__/WIN32/_MSC_VER so zlib stays on its generic POSIX path when the Windows CRT wrapper uses a Windows LLVM target; scoped to Windows only since these macros are never predefined on macOS/Linux anyway.",
     "target_overrides.windows.env also sets RANLIB=true because the optional zlib ranlib step is redundant for the LLVM archive path and used to expose a Windows mksh subshell status quirk; macOS/Linux use the real host ranlib (the crt-port-build.py default) since neither has that quirk.",
