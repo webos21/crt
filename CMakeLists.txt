@@ -350,6 +350,7 @@ if(Python3_Interpreter_FOUND)
         "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/crt-port-build.py"
         --preset "${CRT_BUILD_PRESET_NAME}"
         --target-os "${CRT_TARGET_OS}"
+        --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}"
         --recipe-dir "${CRT_PORT_RECIPE_ROOT}"
         --port "${recipe_name}"
         ${CRT_PORT_BUILD_SHELL_ARGS}
@@ -364,6 +365,7 @@ if(Python3_Interpreter_FOUND)
         "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/crt-port-build.py"
         --preset "${CRT_BUILD_PRESET_NAME}"
         --target-os "${CRT_TARGET_OS}"
+        --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}"
         --recipe-dir "${CRT_PORT_RECIPE_ROOT}"
         --port "${recipe_name}"
         ${CRT_PORT_BUILD_SHELL_ARGS}

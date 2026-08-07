@@ -26,7 +26,7 @@
     "target_overrides": {
       "windows": {
         "configure_args": [
-          "--build=aarch64-w64-mingw32"
+          "--build=@CRT_MINGW_TRIPLE@"
         ],
         "env": {
           "CFLAGS": "-U_WIN32 -U_WIN32_WCE -U__WIN32__ -UWIN32 -U__NT__ -U_MSC_VER"
@@ -42,7 +42,7 @@
   "notes": [
     "Requires zlib installed into PORT_PREFIX first.",
     "The first successful CRT configure run required vfprintf, sprintf, vsprintf, inttypes.h, strings.h, strtoimax, strtoumax, bzero, and bcmp.",
-    "libpng's configure is real GNU Autoconf output (unlike zlib's hand-written script), so it runs config.guess, which does not recognize plain Windows `uname` output (`uname -s = Windows`, no MSYS/Cygwin/MinGW userland) and fails with 'unable to guess system type'. --build=aarch64-w64-mingw32 works around this on Windows aarch64; this is currently hardcoded to that one architecture and will need to become x86_64-w64-mingw32 (or be made dynamic) to also cover Windows x86_64.",
+    "libpng's configure is real GNU Autoconf output (unlike zlib's hand-written script), so it runs config.guess, which does not recognize plain Windows `uname` output (`uname -s = Windows`, no MSYS/Cygwin/MinGW userland) and fails with 'unable to guess system type'. --build=@CRT_MINGW_TRIPLE@ works around this; the placeholder is resolved by tools/crt-port-build.py's own arch detection (--target-arch flag, else CRT_TARGET_ARCH env var, else platform.machine()) to aarch64-w64-mingw32 or x86_64-w64-mingw32, so this recipe works unmodified on both Windows architectures.",
     "target_overrides.windows.env has the same -U_WIN32/-U__WIN32__/etc. CFLAGS trick as zlib.json, plus -U__NT__ (pngpriv.h's own Windows guard also checks __NT__): without it, pngpriv.h's `#if defined(_WIN32) || defined(__WIN32__) || defined(__NT__) / #include <windows.h>` fires -- this project's sysroot has no real Windows SDK <windows.h> (its own Win32 API surface is declared privately inside libc/src/arch/windows/, not exposed publicly) -- and configure fails outright with 'windows.h file not found'. Nothing near that include in pngpriv.h/png.c/pngerror.c actually references a real Windows API symbol from it, so undefining the trigger macros (keeping libpng on its generic/POSIX code paths, matching what this project's CRT actually provides) is correct, not just a workaround -- same reasoning as zlib.json's own note. Scoped to Windows only since these macros are never predefined on macOS/Linux anyway; an earlier version of this recipe applied both this and --build=aarch64-w64-mingw32 unconditionally, which broke the macOS build (libtool concluded the target was MinGW/Windows and tried to invoke an MSVC-style `lib -OUT:...` archiver step that does not exist on macOS)."
   ]
 }

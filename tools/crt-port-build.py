@@ -3,6 +3,7 @@ import argparse
 import ctypes
 import json
 import os
+import platform
 import shlex
 import shutil
 import subprocess
@@ -21,6 +22,34 @@ def load_recipes(recipe_dir):
 
 def progress(message):
     print(f"[port] {message}", flush=True)
+
+
+def detect_target_arch(target_arch_arg):
+    """Resolves the target architecture used for GNU-triple substitution
+    (the @CRT_MINGW_TRIPLE@ token recipes can use in configure_args/
+    make_subdir -- see mingw_triple_for_arch()) to "aarch64" or "x86_64".
+    Priority: explicit --target-arch CLI arg, then CRT_TARGET_ARCH env var
+    (matching the same override tools/crt-cc respects), then
+    platform.machine() -- a real Win32 API query via Python's own stdlib,
+    reliable regardless of which uname/shell this script happens to run
+    under (unlike a shell-based `uname` check: tools/crt-cc's own C-side
+    equivalent has to combine `uname -m` and `uname -s` specifically
+    because this project's toybox uname and MSYS/Git-Bash's uname report
+    the architecture in different fields)."""
+    arch = target_arch_arg or os.environ.get("CRT_TARGET_ARCH") or platform.machine()
+    arch = arch.lower()
+    if arch in ("aarch64", "arm64"):
+        return "aarch64"
+    if arch in ("x86_64", "amd64", "x64"):
+        return "x86_64"
+    raise SystemExit(
+        f"crt-port-build.py: unrecognized target architecture {arch!r} "
+        "(expected aarch64/arm64 or x86_64/amd64/x64; pass --target-arch or set CRT_TARGET_ARCH to override)"
+    )
+
+
+def mingw_triple_for_arch(target_arch):
+    return f"{target_arch}-w64-mingw32"
 
 
 def alias_unix_static_libs_for_windows_link(port_prefix, target_os):
@@ -376,13 +405,20 @@ def command_value_argv(value, preset_build_dir, target_os):
     return argv
 
 
-def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env, target_os, use_crt_shell=False, configure_only=False):
+def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env, target_os, mingw_triple, use_crt_shell=False, configure_only=False):
     port_name = recipe["name"]
     build = recipe["build"]
     shell = rootfs_mksh_path(preset_build_dir, target_os)
     configure = ["./configure"]
     configure.extend(build["configure_args"])
     configure.extend(build.get("target_overrides", {}).get(target_os, {}).get("configure_args", []))
+    # @CRT_MINGW_TRIPLE@: e.g. libpng/libffi's --build=@CRT_MINGW_TRIPLE@
+    # (config.guess can't recognize plain Windows `uname` output, so
+    # configure needs an explicit --build= triple). Substituted here
+    # rather than hardcoded per-recipe so the same recipe JSON works on
+    # both Windows aarch64 and x86_64 -- mingw_triple is resolved once in
+    # main() via detect_target_arch()/mingw_triple_for_arch().
+    configure = [arg.replace("@CRT_MINGW_TRIPLE@", mingw_triple) for arg in configure]
     if is_native_windows_configure(target_os):
         prefix = path_for_crt_shell(port_prefix) if use_crt_shell else path_for_msys_shell(port_prefix)
     else:
@@ -431,6 +467,8 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
     # itself configured with the same --prefix, so make_subdir lets a
     # recipe route straight to it and skip the broken dispatcher entirely.
     make_subdir = build.get("target_overrides", {}).get(target_os, {}).get("make_subdir")
+    if make_subdir:
+        make_subdir = make_subdir.replace("@CRT_MINGW_TRIPLE@", mingw_triple)
     make_work = work / make_subdir if make_subdir else work
     if use_crt_shell:
         run([str(shell), "-c", make_command_for_shell(make_args, target_os, use_crt_shell)], make_work, env, f"{port_name}: make")
@@ -526,7 +564,7 @@ def build_android_host_tool_port(preset_build_dir, work, port_prefix, recipe, en
     run(command_value_argv(env["CC"], preset_build_dir, target_os) + [str(obj) for obj in objects] + ldflags + libs + ["-o", str(binary)], work, env, f"{port_name}: link {binary.name}")
 
 
-def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, port_prefix, recipes, port, target_os, use_crt_shell=False, configure_only=False, built=None):
+def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, port_prefix, recipes, port, target_os, mingw_triple, use_crt_shell=False, configure_only=False, built=None):
     if built is None:
         built = set()
     if port in built:
@@ -541,10 +579,10 @@ def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, por
         raise SystemExit(f"{port}: build system '{build['system']}' is not supported by crt-port-build.py yet")
 
     if build["system"] == "configure" and port != "make" and not configure_only and "make" in recipes:
-        build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, port_prefix, recipes, "make", target_os, use_crt_shell, configure_only, built)
+        build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, port_prefix, recipes, "make", target_os, mingw_triple, use_crt_shell, configure_only, built)
 
     for dep in recipe["dependencies"]:
-        build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, port_prefix, recipes, dep, target_os, use_crt_shell, configure_only, built)
+        build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, port_prefix, recipes, dep, target_os, mingw_triple, use_crt_shell, configure_only, built)
 
     stamp = work_build_dir / "stamps" / f"{port}.installed"
     if stamp.exists():
@@ -562,7 +600,7 @@ def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, por
     env = make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os, use_crt_shell)
     apply_recipe_env(env, recipe, target_os, root)
     if build["system"] == "configure":
-        build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env, target_os, use_crt_shell, configure_only)
+        build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env, target_os, mingw_triple, use_crt_shell, configure_only)
     elif build["system"] == "amalgamation":
         build_amalgamation_port(preset_build_dir, work, port_prefix, recipe, env, target_os)
     elif build["system"] == "android_host_tool":
@@ -579,6 +617,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--preset", required=True)
     parser.add_argument("--target-os", default=None)
+    parser.add_argument("--target-arch", default=None, help="aarch64/arm64 or x86_64/amd64/x64; auto-detected via CRT_TARGET_ARCH env var or platform.machine() if omitted")
     parser.add_argument("--source-root", default=None)
     parser.add_argument("--work-root", default=None)
     parser.add_argument("--install-prefix", default=None)
@@ -607,6 +646,7 @@ def main():
     sysroot = sysroot.resolve()
     port_prefix = port_prefix.resolve()
     target_os = args.target_os or args.preset.split("-host-", 1)[0]
+    mingw_triple = mingw_triple_for_arch(detect_target_arch(args.target_arch))
 
     if not args.skip_sysroot_build:
         target = "rootfs" if args.use_crt_shell else "sysroot"
@@ -624,7 +664,7 @@ def main():
 
     for port in args.port:
         progress(f"{port}: requested")
-        build_port(root, build_dir, work_root, source_root, sysroot, port_prefix, recipes, port, target_os, args.use_crt_shell, args.configure_only)
+        build_port(root, build_dir, work_root, source_root, sysroot, port_prefix, recipes, port, target_os, mingw_triple, args.use_crt_shell, args.configure_only)
 
     progress(f"ports installed: {port_prefix}")
 
