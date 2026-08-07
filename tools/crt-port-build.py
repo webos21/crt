@@ -348,7 +348,27 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
     env["CPPFLAGS"] = join_flags(include_flags, env.get("CRT_EXTRA_CPPFLAGS", ""))
     env["CFLAGS"] = join_flags(env.get("CRT_PORT_CFLAGS", "-O2"), env.get("CRT_EXTRA_CFLAGS", ""))
     env["CXXFLAGS"] = join_flags(env.get("CRT_PORT_CXXFLAGS", "-O2"), env.get("CRT_EXTRA_CXXFLAGS", ""))
-    env["LDFLAGS"] = join_flags(lib_flags, env.get("CRT_EXTRA_LDFLAGS", ""))
+    # -rpath here (macOS/Linux only -- PE/COFF has no rpath concept, and
+    # lld-link in MSVC-compatible mode doesn't understand the flag at
+    # all) is what lets one port's shared library find *another port's*
+    # shared library at runtime -- e.g. libpng.so depending on libz.so.
+    # tools/crt-cc/tools/crt-c++'s own -Wl,-rpath addition (see their
+    # Linux shared_mode comment) only covers this project's own sysroot
+    # (libc.so/libm.so/...), which is a different directory entirely from
+    # PORT_PREFIX/lib where third-party ports install their own shared
+    # libraries -- without this, a port's shared library falls back to
+    # searching the *host's* standard library path for the same bare
+    # SONAME, which can genuinely resolve to a different, real,
+    # legitimately-working library of the same name/version already
+    # installed on the host (e.g. Ubuntu's own libz.so.1 package),
+    # silently linking against the wrong build. Confirmed for real: `ldd`
+    # on a real Linux aarch64 machine showed libpng16.so's libz.so.1
+    # dependency resolving to /lib/aarch64-linux-gnu/libz.so.1 (the
+    # system's own zlib package) instead of this project's own,
+    # freshly-built one sitting right next to libpng16.so in the same
+    # PORT_PREFIX/lib directory.
+    rpath_flag = f"-Wl,-rpath,{port_prefix_env}/lib" if target_os in ("macos", "linux") else ""
+    env["LDFLAGS"] = join_flags(lib_flags, rpath_flag, env.get("CRT_EXTRA_LDFLAGS", ""))
     env["LIBS"] = env.get("CRT_EXTRA_LIBS", "")
     env["DESTDIR"] = ""
     env["CRT_PORT_BUILD_DIR"] = build_dir_env

@@ -482,6 +482,53 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   have. Not yet re-verified with `ldd` on the user's real Linux machine
   (this fix was prepared, not run, per current session convention where
   the user runs build/regression verification directly) -- pending.
+  - **Update: confirmed fixed.** `ldd` on the user's real Linux aarch64
+    machine now shows `libz.so.1.3.1`'s `libc.so`/`libm.so`/`libdl.so`/
+    `libc++.so` dependencies all correctly resolving to this project's
+    own sysroot (`.../out/linux-host-ninja-debug/sysroot/lib/...`), not
+    the host system's.
+
+- **Fixed cross-port shared-library resolution on macOS/Linux (one
+  port's `.so`/`.dylib` finding *another port's*), and macOS's own
+  `libc.dylib` rpath gap uncovered along the way.** Reported via the same
+  `ldd` session above: `libpng16.so`'s `libz.so.1` dependency resolved to
+  `/lib/aarch64-linux-gnu/libz.so.1` (Ubuntu's own system zlib package)
+  instead of this project's own, freshly-built one sitting right next to
+  `libpng16.so` in the same `PORT_PREFIX/lib` directory. Root cause: the
+  `tools/crt-cc`/`tools/crt-c++` `-rpath` added for the earlier `libc.so`
+  fix only covers this project's own sysroot (`${CRT_SYSROOT}/lib`) --
+  a completely different directory from where third-party ports install
+  their own shared libraries (`PORT_PREFIX/lib`, e.g. `port-tests/
+  install/lib`), which was on no rpath at all. Fixed in
+  `tools/crt-port-build.py`'s `make_env()`: `$LDFLAGS` now also carries
+  `-Wl,-rpath,<PORT_PREFIX>/lib` on macOS/Linux (skipped on Windows,
+  which has no rpath concept at the PE/COFF level and where `lld-link`
+  in MSVC-compatible mode doesn't understand the flag at all).
+  While investigating, the user separately shared `otool -L` output on
+  macOS that turned up a second, related bug this same session's earlier
+  "macOS is fine, deliberately left static, no need to touch" conclusion
+  had missed: `libz.dylib` carried a real `@rpath/libc.dylib` dependency
+  despite `tools/crt-cc`'s macOS branch only ever naming static `.a`
+  archives in its own `libs` list. Cause: zlib's own `configure` sets
+  `LDSHAREDLIBC=-lc` unconditionally except on MinGW, appended
+  independently to its shared-library link line -- and since this
+  project's own CMake build always produces both `libc.a` *and*
+  `libc.dylib` side by side in `${CRT_SYSROOT}/lib`, `ld64`'s default
+  `-l<name>` resolution prefers the dylib over the same-named static
+  archive when both exist on the search path, silently reintroducing a
+  dynamic dependency this script was specifically trying to avoid. Since
+  nothing set an `-rpath` there either, that `@rpath`-relative dependency
+  had no way to resolve at actual load time (libtool-built ports like
+  libpng/libffi never pass a stray bare `-lc` the way zlib's own
+  hand-written Makefile does, so they didn't hit this). Fixed the same
+  way as Linux: `tools/crt-cc`/`tools/crt-c++`'s macOS `shared_mode`
+  entry flags now also add `-Wl,-rpath,${CRT_SYSROOT}/lib`, so if a
+  dylib reference sneaks in via some mechanism outside this script's own
+  control, it still resolves to this project's real one. Windows
+  regression-checked here (rebuilt zlib's shared library after each
+  change, no behavior change -- the windows case block itself was never
+  touched). Not yet re-verified with `ldd`/`otool -L` on the user's real
+  Linux/macOS machines for these two specific fixes.
 
 ## in progressing
 

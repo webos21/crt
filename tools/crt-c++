@@ -120,15 +120,16 @@ fi
 # See the matching comment in tools/crt-cc: on Linux, the static archives
 # are only safe to link into an executable (never compiled with -fPIC),
 # so shared_mode links the already-built shared counterparts instead.
-# macOS is deliberately left on the static archives in both modes -- see
-# tools/crt-cc's own comment on why (already confirmed working there, and
-# Mach-O/AArch64 doesn't have the same hard PIC requirement Linux's ld
-# enforces).
+# macOS is passed static archives in both modes -- see tools/crt-cc's own
+# comment for why, and why it still needs -rpath in shared_mode anyway
+# (a stray bare -lc-style flag from some upstream build can still pull in
+# this project's own libc.dylib, which sits right next to libc.a in the
+# sysroot, ahead of the static archive per ld64's default -l resolution).
 case "$target_os" in
   macos)
     libs="$libs ${CRT_SYSROOT}/lib/libc++.a ${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a ${CRT_SYSROOT}/lib/libclang_rt.builtins.a -lSystem"
     if [ "$shared_mode" -eq 1 ]; then
-      entry="-Wl,-dead_strip"
+      entry="-Wl,-dead_strip -Wl,-rpath,${CRT_SYSROOT}/lib"
     else
       entry="-Wl,-e,_start -Wl,-dead_strip"
     fi
