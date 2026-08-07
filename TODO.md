@@ -375,10 +375,23 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   subprocess probes a typical `configure` script runs). Verified in this
   session only via a fast `cmake --preset` reconfigure + inspecting the
   generated `build.ninja` (`--use-crt-shell` still present for the Windows
-  preset's port targets, unchanged); an actual macOS/Linux port build with
-  this change, and the real x86_64 Windows `sqlite-amalgamation` rebuild
-  that reported the original crash, are pending verification by the user
-  directly on those hosts.
+  preset's port targets, unchanged); the real x86_64 Windows
+  `sqlite-amalgamation` rebuild that reported the original crash is still
+  pending verification by the user directly on that host.
+  - **Update: macOS confirmed.** The user rebuilt zlib, libpng, libffi, and
+    sqlite-amalgamation on a real macOS machine after this change and
+    confirmed both predictions: the build is noticeably faster, and the
+    previously-present spurious errors/warnings during `configure`/`make`
+    are gone (`zlib`'s `libz.1.3.1.dylib` in particular confirmed to build
+    correctly). Also confirmed, on request, exactly what still ties these
+    builds to the CRT sysroot despite no longer routing through this
+    project's own mksh: `tools/crt-cc` passes `-nostdinc
+    -isystem${CRT_SYSROOT}/include` (host system headers excluded
+    entirely, only this project's own Bionic-compatible headers visible)
+    and links via `${CRT_SYSROOT}/lib/crt1.o -L${CRT_SYSROOT}/lib` --
+    unrelated to, and unaffected by, which shell drives `configure`/`make`
+    itself. See `docs/porting_status.md`'s zlib/libpng/libffi/
+    sqlite-amalgamation rows for the per-port notes.
 
 ## in progressing
 
