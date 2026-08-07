@@ -456,6 +456,33 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   rebuilding zlib's shared library twice in a row (the exact scenario
   that surfaced this) no longer errors either time.
 
+- **Fixed the Linux `-shared` fix above finding the wrong `libc.so` at
+  runtime.** The Linux non-PIC-`libc.a` fix landed the build/link step,
+  but `ldd` on the resulting `libz.so.1.3.1` on a real Ubuntu/Debian
+  aarch64 machine reported `error while loading shared libraries:
+  /lib/aarch64-linux-gnu/libc.so: invalid ELF header`. Root cause: none
+  of this project's own `libc.so`/`libm.so`/`libdl.so`/`libc++.so` CMake
+  targets set an explicit `-soname`, so each defaults to its own bare
+  output filename ("libc.so", ...) as its `DT_SONAME` -- and that's the
+  literal string `tools/crt-cc`/`tools/crt-c++`'s Linux `shared_mode`
+  linking then records as `libz.so.1.3.1`'s own `DT_NEEDED` entry. At
+  runtime, the dynamic loader has no memory of the absolute sysroot path
+  used at link time -- it re-searches the bare name via the standard
+  system path, and on Debian/Ubuntu aarch64, `/lib/aarch64-linux-gnu/
+  libc.so` genuinely exists as part of `libc6-dev`: a plain-text GNU-ld
+  `INPUT()` linker script meant only for the *host* toolchain's own
+  link-time use, not a real loadable ELF image -- so `ld.so` rejected it
+  outright. Fixed by adding `-Wl,-rpath,${CRT_SYSROOT}/lib` to
+  `shared_mode`'s Linux entry flags in both `tools/crt-cc` and
+  `tools/crt-c++`: bakes this project's own sysroot lib dir into the
+  resulting object's `DT_RUNPATH`, which `ld.so` consults (ahead of the
+  system default path) specifically when resolving *that object's own*
+  `DT_NEEDED` entries, so it finds this project's real `libc.so` there
+  first regardless of what unrelated same-named file the host happens to
+  have. Not yet re-verified with `ldd` on the user's real Linux machine
+  (this fix was prepared, not run, per current session convention where
+  the user runs build/regression verification directly) -- pending.
+
 ## in progressing
 
 - **Retired the spawn broker; moving to a Cygwin/MSYS-style `fork()` instead.**

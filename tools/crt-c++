@@ -141,7 +141,13 @@ case "$target_os" in
     fi
     libs="$libs $crt_libs ${CRT_SYSROOT}/lib/libclang_rt.builtins.a"
     if [ "$shared_mode" -eq 1 ]; then
-      entry="-Wl,--gc-sections"
+      # See the matching comment in tools/crt-cc: bake this project's own
+      # sysroot lib dir into DT_RUNPATH so the loader finds this
+      # project's real libc.so/etc there instead of colliding with an
+      # unrelated same-named file (e.g. Ubuntu/Debian's libc6-dev
+      # link-time-only linker script at /lib/aarch64-linux-gnu/libc.so)
+      # on the host's own default search path.
+      entry="-Wl,--gc-sections -Wl,-rpath,${CRT_SYSROOT}/lib"
     else
       entry="-Wl,-e,_start -Wl,--gc-sections"
     fi

@@ -217,7 +217,28 @@ case "$target_os" in
     fi
     libs="$libs $crt_libs ${CRT_SYSROOT}/lib/libclang_rt.builtins.a"
     if [ "$shared_mode" -eq 1 ]; then
-      entry="-Wl,--gc-sections"
+      # None of libc.so/libm.so/libdl.so/libc++.so set an explicit
+      # -soname (nothing in this build sets one), so each defaults to
+      # its own bare output filename ("libc.so", ...) as its own
+      # DT_SONAME -- and that's exactly the literal string this shared
+      # object then records as its DT_NEEDED entry when it links against
+      # them by path. At runtime the dynamic loader has no memory of the
+      # absolute path used at link time; it re-searches for that bare
+      # name via the standard system search path (ld.so.cache, default
+      # library dirs), which can genuinely find something else entirely
+      # by the same name -- hit for real on Ubuntu/Debian aarch64, where
+      # /lib/aarch64-linux-gnu/libc.so exists as part of libc6-dev: a
+      # plain-text GNU-ld INPUT() linker script meant only for the
+      # *host* toolchain's own link-time use, not a real loadable ELF
+      # image, so ld.so rejected it outright ("invalid ELF header").
+      # -rpath bakes this project's own sysroot lib dir into this
+      # object's DT_RUNPATH, which the loader consults (before the
+      # system default path) specifically when resolving *this object's
+      # own* DT_NEEDED entries -- so it finds this project's real
+      # libc.so there first, regardless of what unrelated file of the
+      # same bare name the host system happens to have on its own
+      # standard search path.
+      entry="-Wl,--gc-sections -Wl,-rpath,${CRT_SYSROOT}/lib"
     else
       entry="-Wl,-e,_start -Wl,--gc-sections"
     fi
