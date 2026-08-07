@@ -207,6 +207,75 @@ Detailed policy and provenance stay in `docs/` and import manifests.
     real x86_64 hardware -- see `docs/windows_fork_emulation.md`, "Current
     Open Issues".
 
+- **Windows shared-library (DLL) build support, end to end for zlib.**
+  Discovered `porting/recipes/*.json` never produced `.so`/`.dll`/`.dylib`
+  outputs at all (only static archives), traced to two gaps and fixed both:
+  - `tools/crt-cc`/`tools/crt-c++` had no `-shared`/`-dynamiclib` support --
+    always hardcoded EXE-building flags (`crt1.o` + entry point). Added
+    `shared_mode` detection (alongside the existing `compile_only`) that
+    swaps in the right start object/entry flags per OS: macOS/Linux drop
+    `-e,_start` (a shared object has no `_start`), Windows swaps `crt1.o`
+    for a new `dllcrt.o` and links with `/entry:crtDllMainCRTStartup
+    /DLL /OPT:REF`. `dllcrt.o` (`crtDllMainCRTStartup`, in
+    `libc/src/arch/windows/common/dllcrt.c`) already existed for this
+    project's own `c.dll`/`c++.dll`/etc CMake DLL targets but was never
+    installed into the sysroot as a standalone, reusable object the way
+    `crt1.o` is for EXEs -- added that install rule to `libc/CMakeLists.txt`.
+    Verified via a minimal hand-built test DLL (`llvm-readobj
+    --file-headers` shows `IMAGE_FILE_DLL` set correctly; loads for real via
+    `LoadLibraryA`/`FreeLibrary`), then via `crt-cc -shared` directly, then
+    via the real zlib port build.
+  - `libc/src/arch/windows/common/syscall.c`'s `__crt_sys_symlink()` was a
+    pure `-ENOSYS` stub, which broke zlib's Makefile SONAME step (`ln -s
+    libz.so.1.3.1 libz.so`) even after the DLL itself linked successfully.
+    Implemented via real `CreateSymbolicLinkA()` (note the Win32 arg order
+    is target/link *reversed* from POSIX `symlink(target, linkpath)`), with
+    `SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE` and a
+    `GetFileAttributesA()`-based best-effort directory-vs-file flag guess
+    (the target need not exist yet, matching upstream Makefiles that
+    symlink before the real file lands). `readlink()` stays `-ENOSYS`
+    (reparse-point parsing via `DeviceIoControl`/`FSCTL_GET_REPARSE_POINT`
+    is real extra work nothing currently needs). Also added `ERROR_PRIVILEGE_
+    NOT_HELD` (1314) -> `EPERM` to `map_windows_error()` (previously fell
+    through to a generic, unhelpful `EIO`) after hitting it for real:
+    `CreateSymbolicLinkA()` with the unprivileged-create flag still requires
+    Windows Developer Mode to be enabled on the machine for a non-elevated
+    process -- confirmed by testing on this dev machine with Developer Mode
+    off (real `EPERM` failure), then again after the user enabled it via
+    `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock\
+    AllowDevelopmentWithoutDevLicense` (real success). Updated
+    `tests/file_path_test.c`'s Windows-only symlink block to match (it
+    previously *asserted* `-ENOSYS`, documenting the old stub as "policy" --
+    now asserts a real create succeeds and only `readlink()` stays
+    `-ENOSYS`).
+  - `porting/recipes/zlib.json`'s `configure_args` changed from
+    `["--static"]` to `[]` (zlib's own default already builds both). Full
+    `ctest` 79/79 after the `syscall.c` change. Verified past "it built"
+    into "it actually works": zlib's own `examplesh`/`minigzipsh` test
+    binaries, dynamically linked against the freshly built
+    `libz.so.1.3.1`, ran a real compress/uncompress/gzip round trip
+    successfully.
+- **libpng and libffi shared-library attempts: root-caused, not achieved.**
+  Both go through real GNU Autoconf + Libtool (unlike zlib's hand-written
+  Makefile), and Libtool's MinGW shared-library detection doesn't recognize
+  this toolchain: `checking for dlltool`/`checking for objdump` both came up
+  false (this project ships LLVM's `llvm-dlltool`/`llvm-objdump`, not
+  binaries under those literal GNU-binutils names) and `checking if the
+  linker is GNU ld` incorrectly resolves `yes` for `lld-link.exe` running in
+  MSVC-compatible mode (its `-v` banner says "compatible with GNU linkers",
+  which apparently still matches whatever pattern this libtool.m4 vintage
+  uses). Extended `tools/crt-port-build.py`'s `make_env()` to pre-set
+  `$DLLTOOL`/`$OBJDUMP` the same way `$LD` already was, which fixed those
+  two probes -- but `checking whether the ... linker ... supports shared
+  libraries` still resolves `no` afterward, via a block of libtool-internal
+  shell logic with no compiler/linker invocation logged in between (a
+  static case-statement decision, not a failed compile probe). Not narrowed
+  further; both ports still build and install cleanly as static-only
+  (`configure_args` no longer force `--disable-shared`, matching zlib's
+  convention of not fighting Libtool's own default, but the practical
+  result on Windows is unchanged from before). Full trail in each recipe's
+  own `notes`.
+
 ## in progressing
 
 - **Retired the spawn broker; moving to a Cygwin/MSYS-style `fork()` instead.**

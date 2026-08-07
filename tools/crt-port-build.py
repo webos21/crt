@@ -290,6 +290,22 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
             found_ld = env.get("LD") or find_windows_host_tool(("ld.lld.exe", "ld.lld"))
             if found_ld:
                 env["LD"] = found_ld
+            # Same reasoning as $LD above, for Libtool's MinGW/Cygwin
+            # shared-library path specifically: it needs dlltool (builds
+            # the .dll.a import library from a DEF file) and objdump
+            # (several of its own internal probes shell out to it, e.g.
+            # deplibs_check_method) under those literal GNU-binutils names.
+            # This project's LLVM install ships equivalents under the
+            # llvm- prefix instead (llvm-dlltool/llvm-objdump); point
+            # DLLTOOL/OBJDUMP at those so libtool's own `checking for
+            # dlltool`/`checking for objdump` probes (which, like ld,
+            # only search PATH when the var isn't already set) succeed.
+            found_dlltool = env.get("DLLTOOL") or find_windows_host_tool(("llvm-dlltool.exe", "llvm-dlltool"))
+            if found_dlltool:
+                env["DLLTOOL"] = found_dlltool
+            found_objdump = env.get("OBJDUMP") or find_windows_host_tool(("llvm-objdump.exe", "llvm-objdump"))
+            if found_objdump:
+                env["OBJDUMP"] = found_objdump
         make_suffix = ".exe" if target_os == "windows" else ""
         port_make = port_prefix / "bin" / f"make{make_suffix}"
         if port_make.exists():
@@ -304,7 +320,7 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
     env["RANLIB"] = env.get("RANLIB") or shutil.which("llvm-ranlib") or shutil.which("ranlib") or "ranlib"
     env["STRIP"] = env.get("STRIP") or shutil.which("llvm-strip") or shutil.which("strip") or "strip"
     if target_os == "windows" and use_crt_shell:
-        for tool_var in ("AR", "RANLIB", "STRIP", "LD"):
+        for tool_var in ("AR", "RANLIB", "STRIP", "LD", "DLLTOOL", "OBJDUMP"):
             if not env.get(tool_var):
                 continue
             tool_path = Path(env[tool_var])

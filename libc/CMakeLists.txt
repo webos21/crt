@@ -269,3 +269,12 @@ install(TARGETS c c_shared
   RUNTIME DESTINATION bin
 )
 install(FILES "$<TARGET_OBJECTS:crt1>" DESTINATION lib RENAME crt1.o)
+if(CRT_TARGET_OS STREQUAL "windows")
+  # crt_windows_dllcrt (crtDllMainCRTStartup, dllcrt.c) has so far only
+  # ever been linked directly into this project's own c_shared/m_shared/
+  # etc DLL targets above -- nothing installed a standalone, reusable
+  # copy into the sysroot the way crt1.o is installed for EXE builds.
+  # tools/crt-cc's own -shared support needs exactly that (see its
+  # comment on dllcrt.o) to build a DLL for a third-party port.
+  install(FILES "$<TARGET_OBJECTS:crt_windows_dllcrt>" DESTINATION lib RENAME dllcrt.o)
+endif()

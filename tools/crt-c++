@@ -67,9 +67,11 @@ for arg in "$@"; do
 done
 
 compile_only=0
+shared_mode=0
 for arg in "$@"; do
   case "$arg" in
     -c|-E|-S) compile_only=1 ;;
+    -shared|-dynamiclib) shared_mode=1 ;;
   esac
 done
 
@@ -103,22 +105,41 @@ if [ "$compile_only" -eq 1 ]; then
   exec "$cxx" $common_flags $user_args
 fi
 
-libs="${CRT_SYSROOT}/lib/crt1.o -L${CRT_SYSROOT}/lib"
+# See the matching comment in tools/crt-cc for why shared_mode changes
+# which start object/entry-point flags apply.
+if [ "$shared_mode" -eq 1 ]; then
+  libs="-L${CRT_SYSROOT}/lib"
+else
+  libs="${CRT_SYSROOT}/lib/crt1.o -L${CRT_SYSROOT}/lib"
+fi
 case "$target_os" in
   macos)
     libs="$libs ${CRT_SYSROOT}/lib/libc++.a ${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a ${CRT_SYSROOT}/lib/libclang_rt.builtins.a -lSystem"
-    entry="-Wl,-e,_start -Wl,-dead_strip"
+    if [ "$shared_mode" -eq 1 ]; then
+      entry="-Wl,-dead_strip"
+    else
+      entry="-Wl,-e,_start -Wl,-dead_strip"
+    fi
     ;;
   linux)
     libs="$libs ${CRT_SYSROOT}/lib/libc++.a ${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a ${CRT_SYSROOT}/lib/libclang_rt.builtins.a"
-    entry="-Wl,-e,_start -Wl,--gc-sections"
+    if [ "$shared_mode" -eq 1 ]; then
+      entry="-Wl,--gc-sections"
+    else
+      entry="-Wl,-e,_start -Wl,--gc-sections"
+    fi
     ;;
   windows)
     if [ -n "${CRT_WINDOWS_SDK_LIBPATH:-}" ]; then
       libs="$libs -Wl,/libpath:${CRT_WINDOWS_SDK_LIBPATH}"
     fi
     libs="$libs ${CRT_SYSROOT}/lib/c++.lib ${CRT_SYSROOT}/lib/c.lib ${CRT_SYSROOT}/lib/m.lib ${CRT_SYSROOT}/lib/dl.lib ${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"
-    entry="-Wl,/entry:mainCRTStartup -Wl,/subsystem:console -Wl,/OPT:REF -fuse-ld=lld"
+    if [ "$shared_mode" -eq 1 ]; then
+      libs="${CRT_SYSROOT}/lib/dllcrt.o $libs"
+      entry="-Wl,/entry:crtDllMainCRTStartup -Wl,/DLL -Wl,/OPT:REF -fuse-ld=lld"
+    else
+      entry="-Wl,/entry:mainCRTStartup -Wl,/subsystem:console -Wl,/OPT:REF -fuse-ld=lld"
+    fi
     ;;
   *)
     echo "crt-c++: unsupported CRT_TARGET_OS=$target_os" >&2

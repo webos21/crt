@@ -114,6 +114,8 @@ struct crt_memory_status_ex {
 #define FILE_TYPE_CHAR 0x0002
 #define FILE_TYPE_PIPE 0x0003
 #define INVALID_FILE_ATTRIBUTES ((DWORD)0xffffffffUL)
+#define SYMBOLIC_LINK_FLAG_DIRECTORY 0x00000001
+#define SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE 0x00000002
 #define FILE_FLAG_BACKUP_SEMANTICS 0x02000000
 #define FILE_WRITE_ATTRIBUTES 0x00000100
 #define FILE_BEGIN 0
@@ -317,6 +319,16 @@ __declspec(dllimport) BOOL CRT_WINAPI SetCurrentDirectoryA(const char* lpPathNam
 __declspec(dllimport) DWORD CRT_WINAPI GetCurrentDirectoryA(DWORD nBufferLength, char* lpBuffer);
 __declspec(dllimport) DWORD CRT_WINAPI GetFileAttributesA(const char* lpFileName);
 __declspec(dllimport) BOOL CRT_WINAPI SetFileAttributesA(const char* lpFileName, DWORD dwFileAttributes);
+/* Real winnt.h/winbase.h declare this returning BOOLEAN (a single byte), not
+ * BOOL (a 4-byte int) -- but kernel32's compiled implementation zero-extends
+ * the byte result into the full return register on both x86_64 and aarch64
+ * (the universal ABI convention for small integer returns), so treating it
+ * as BOOL and checking for zero/nonzero works correctly, matching how
+ * mingw-w64 and other third-party bindings commonly declare it too. */
+__declspec(dllimport) BOOL CRT_WINAPI CreateSymbolicLinkA(
+    const char* lpSymlinkFileName,
+    const char* lpTargetFileName,
+    DWORD dwFlags);
 __declspec(dllimport) void CRT_WINAPI GetSystemInfo(struct crt_system_info* lpSystemInfo);
 __declspec(dllimport) BOOL CRT_WINAPI GlobalMemoryStatusEx(
     struct crt_memory_status_ex* lpBuffer);
@@ -631,6 +643,15 @@ static int map_windows_error(DWORD error) {
       return ENAMETOOLONG;
     case 267:
       return ENOTDIR;
+    case 1314:
+      /* ERROR_PRIVILEGE_NOT_HELD: e.g. CreateSymbolicLinkA() without
+       * SeCreateSymbolicLinkPrivilege -- an unprivileged, non-elevated
+       * process can still hit this even when it passes
+       * SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE, if Windows
+       * Developer Mode is not enabled on the machine. EPERM is the
+       * closest POSIX match (a permission/capability problem, not a
+       * missing-file/EACCES-on-the-path problem). */
+      return EPERM;
     default:
       return EIO;
   }
@@ -3533,6 +3554,13 @@ long __crt_sys_realpath_fd(int fd, char* resolved_path, unsigned long size) {
   return normalize_final_handle_path(resolved_path, size);
 }
 
+/* Still unimplemented: reading a symlink's target back out requires opening
+ * it with FILE_FLAG_OPEN_REPARSE_POINT and parsing a REPARSE_DATA_BUFFER
+ * (UTF-16 PathBuffer) out via DeviceIoControl(FSCTL_GET_REPARSE_POINT) --
+ * meaningfully more machinery than __crt_sys_symlink() above needed, and not
+ * yet required by any port build (the SONAME-symlink step that motivated
+ * __crt_sys_symlink() only creates links, never reads them back). Left as
+ * -ENOSYS honestly rather than faked. */
 long __crt_sys_readlink(const char* path, char* buf, unsigned long size) {
   (void)path;
   (void)buf;
@@ -3541,9 +3569,38 @@ long __crt_sys_readlink(const char* path, char* buf, unsigned long size) {
 }
 
 long __crt_sys_symlink(const char* target, const char* linkpath) {
-  (void)target;
-  (void)linkpath;
-  return -ENOSYS;
+  char translated_link[4096];
+  char translated_target[4096];
+  const char* host_link;
+  const char* host_target;
+  DWORD flags = SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE;
+  DWORD target_attrs;
+
+  if (target == 0 || linkpath == 0) {
+    return -EINVAL;
+  }
+  host_link = translate_path_for_host(linkpath, translated_link);
+  host_target = translate_path_for_host(target, translated_target);
+  if (host_link == 0 || host_target == 0) {
+    return -EINVAL;
+  }
+
+  /* CreateSymbolicLinkA needs to know up front whether the link points at a
+   * directory or a file -- the reparse point it creates is tagged one way
+   * or the other. POSIX symlink() carries no such distinction, and the
+   * target need not even exist yet (e.g. SONAME-style "ln -s libfoo.so.1.2.3
+   * libfoo.so" links some Makefiles create), so this is only a best-effort
+   * probe: if the target currently resolves (relative to the process's
+   * current directory, same as a relative target would resolve for the
+   * link itself) to a directory, tag the link as a directory link;
+   * otherwise -- including "doesn't exist yet" -- default to a file link,
+   * which is also CreateSymbolicLinkA's own default. */
+  target_attrs = GetFileAttributesA(host_target);
+  if (target_attrs != INVALID_FILE_ATTRIBUTES && (target_attrs & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+    flags |= SYMBOLIC_LINK_FLAG_DIRECTORY;
+  }
+
+  return CreateSymbolicLinkA(host_link, host_target, flags) ? 0 : fail_last_error();
 }
 
 static long stat_from_handle(HANDLE handle, struct stat* st) {
