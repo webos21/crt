@@ -188,18 +188,12 @@ handling are a distinct, real Win32 mechanism that could eventually be
 bridged into the same `signal_actions[]`/`raise()` dispatch the same
 general way, but that is separate future work, not part of this fix.
 
-**Verification status:** implemented and code-review-verified only --
-`-fsyntax-only` compiled clean (`-Wall -Wextra`, zero warnings) against the
-real `x86_64-w64-mingw32`/`aarch64-w64-mingw32` target triples and macro set
-`tools/crt-cc` actually uses, for both changed files and the updated test,
-but this project's CMake presets refuse to cross-compile the full build
-(`CRT_TARGET_OS=windows` requires an actual Windows host), so it has not
-been built through the real toolchain, linked, or run. Needs the same
-real-Windows-host verification pass Linux/macOS already got above (build,
-full `ctest`, and specifically `pselect_sigchld_test_runs` -- expected to
-now pass with the *same* fast-`EINTR`, non-Windows-branch assertions
-already used for Linux/macOS, since the test no longer special-cases
-Windows at all).
+**Verification status:** confirmed on a real Windows host -- see "Windows
+Verification" below. (Originally landed code-review-verified only, via
+`-fsyntax-only -Wall -Wextra` against the real `x86_64-w64-mingw32`/
+`aarch64-w64-mingw32` target triples and macro set `tools/crt-cc` actually
+uses, since this project's CMake presets refuse to cross-compile
+`CRT_TARGET_OS=windows` from any other host.)
 
 ## `pselect()` Atomicity
 
@@ -292,6 +286,40 @@ per the caveat above):
   `pselect()` atomicity check (`libc/src/poll.c`) made the new test block for
   its full 5s bounded timeout and fail, confirming the test actually
   exercises the fix rather than passing vacuously; reverted before landing.
+
+## Windows Verification
+
+Verified end to end on a real Windows host (previously code-review-only,
+per the caveat above):
+
+- Full `ctest` suite: 80/80 passing via `cmake --build --preset
+  windows-host-ninja-debug` + `ctest` (79 pre-existing tests plus
+  `pselect_sigchld_test_runs`, added by the Linux verification pass above).
+- `pselect_sigchld_test_runs` itself completed in **0.23s** -- the same
+  fast-`EINTR`-wakeup path already confirmed on Linux (~0.2s) and macOS
+  (0.21s), not the old bounded-5s-timeout behavior the honest no-op stub
+  used to produce. Confirms the real, polled `SIGCHLD` mechanism described
+  in "Windows" above actually fires, not merely that the build compiles.
+- Went further than the synthetic test, matching the Linux/macOS
+  real-world verification style: temporarily lifted `tools/crt-port-
+  build.py`'s hardcoded `jobs = 1 if target_os == "windows" ...`
+  restriction (a local, reverted-immediately test patch) and reran a real
+  port build (`zlib`, `./configure && make -j 8 && make install`) with
+  genuine parallel jobs on Windows -- something no Windows port build had
+  ever actually done before. **This found a second, separate, still-open
+  bug**: `make.exe: /system/bin/mksh: Bad file descriptor` followed by
+  `make.exe: INTERNAL: Exiting with 1 jobserver tokens available; should
+  be 8!` -- GNU Make's own process-spawn failure when creating a
+  *concurrent* recipe shell, not a `pselect()`/`SIGCHLD` symptom (that
+  mechanism is confirmed correct by the regression test above; this is a
+  distinct failure mode, not a hang). Points at a race or gap in this
+  Windows PAL's own concurrent process-spawn/fd-inheritance path, not at
+  anything in this document's own signal-delivery design. Not root-caused
+  this session -- reverted the test patch, rebuilt `zlib` normally (`-j 1`)
+  to restore a known-good state, reran full `ctest` (80/80, clean, no
+  residual corruption). `tools/crt-port-build.py`'s `jobs = 1 if
+  target_os == "windows"` restriction stays in place until this separate
+  bug is fixed; see `TODO.md`, "in progressing", for the tracking entry.
 
 ## Regression Test
 

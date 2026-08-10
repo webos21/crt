@@ -1427,31 +1427,63 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   -- it now asserts the same fast-`EINTR` behavior on every host. See
   `docs/signal_delivery.md`'s rewritten "Windows" section for the full
   design writeup.
-  - **Verification status: code-review-verified only, real Windows build
-    still pending.** This session has no Windows host and this project's
-    CMake presets intentionally refuse to cross-compile
-    `CRT_TARGET_OS=windows` from any other host, so the change could not be
-    built, linked, or run here. De-risked as far as possible without that:
-    `clang -fsyntax-only -Wall -Wextra` against the exact real
-    `x86_64-w64-mingw32`/`aarch64-w64-mingw32` target triples and macro
-    set `tools/crt-cc` itself uses (bypassing CMake's host guard by
-    invoking clang directly) compiled every changed file clean, zero
-    warnings, on both architectures. Still needs a real run on Windows:
-    `cmake --build --preset windows-host-ninja-debug` + full `ctest`, and
-    specifically `pselect_sigchld_test_runs` passing with the same fast
-    `EINTR` timing already confirmed on Linux/macOS (~0.2s, not the full
-    5s timeout).
+  - **Verification status: confirmed on a real Windows host.** Rebuilt the
+    full `windows-host-ninja-debug` preset (`cmake --build --preset
+    windows-host-ninja-debug`) and ran the full suite: `ctest` 80/80 (was
+    79 before this test was added), with `pselect_sigchld_test_runs`
+    itself completing in **0.23s** -- the same fast-`EINTR`-wakeup path
+    already confirmed on Linux (~0.2s) and macOS (0.21s), not the
+    5s-bounded-timeout fallback the old no-op stub would have hit. This
+    independently confirms the real, polled `SIGCHLD` mechanism actually
+    fires on Windows, not just "doesn't crash."
+  - **Went further and tested the actual motivating real-world scenario**
+    (matching the Linux/macOS verification style above): temporarily
+    overrode `tools/crt-port-build.py`'s hardcoded `jobs = 1 if
+    target_os == "windows" ...` restriction (a local, reverted-immediately
+    test patch, not a real change) and reran a real port build
+    (`zlib`, `./configure && make -j 8 && make install`) with genuine
+    parallel jobs on Windows for the first time. **Found a second, separate
+    bug this uncovers**: `make.exe: /system/bin/mksh: Bad file descriptor`
+    followed by `make.exe: INTERNAL: Exiting with 1 jobserver tokens
+    available; should be 8!` -- GNU Make's own process-spawn failure
+    message when creating a *concurrent* recipe shell fails, not a
+    `pselect()`/`SIGCHLD` symptom at all (that mechanism is confirmed
+    working correctly by the regression test above). Points at a race or
+    gap in this Windows PAL's own concurrent process-spawn/fd-inheritance
+    path (plausibly `child_process_table`/`CRT_FD_TABLE_SIZE` bookkeeping,
+    or jobserver-pipe fd duplication, under two-or-more near-simultaneous
+    spawns) that has never been exercised before, since every Windows port
+    build has always run with `-j 1`. **Not root-caused or fixed this
+    session** -- reverted the test patch immediately, rebuilt `zlib`
+    normally (`-j 1`) to restore a known-good state, and reran full `ctest`
+    (80/80, clean) to confirm no residual corruption from the failed
+    parallel attempt. The `jobs = 1 if target_os == "windows"` restriction
+    in `tools/crt-port-build.py` **must stay in place** until this new bug
+    is separately root-caused -- the `SIGCHLD` fix alone was necessary but
+    not sufficient to make real Windows parallel builds safe. See the new
+    "in progressing" entry below.
 
 ## in progressing
 
-- Verify the new Windows `SIGCHLD` backend (`docs/signal_delivery.md`,
-  "Windows") on an actual Windows host: `cmake --build --preset
-  windows-host-ninja-debug`, full `ctest`, and specifically
-  `pselect_sigchld_test_runs` (expected: fast `-1`/`EINTR`, ~0.2s, same as
-  Linux/macOS -- not the old bounded-timeout behavior). Currently
-  `-fsyntax-only`-verified against the real `x86_64-w64-mingw32`/
-  `aarch64-w64-mingw32` target triples only, per this project's CMake
-  presets refusing to cross-compile `CRT_TARGET_OS=windows`.
+- **New**: root-cause the Windows-only `make.exe: /system/bin/mksh: Bad
+  file descriptor` failure (`make.exe: INTERNAL: Exiting with 1 jobserver
+  tokens available; should be N!`) that appears when GNU Make is actually
+  run with real parallel jobs (`-j N`, `N > 1`) on Windows -- found while
+  verifying the `SIGCHLD`/`pselect()` fix above (see that entry for the
+  exact repro: temporarily lift `tools/crt-port-build.py`'s hardcoded
+  `jobs = 1 if target_os == "windows" ...`, `make -j 8` a real port like
+  `zlib`). A distinct bug from the now-fixed `pselect()`/`SIGCHLD`
+  jobserver deadlock -- this is GNU Make's own process-spawn failure
+  message, not a hang, and shows up only once genuinely concurrent recipe
+  shells are attempted, which no Windows port build has ever done before
+  (`jobs` has always been hardcoded to `1` on Windows). Likely candidates:
+  a race in this PAL's own child-process/fd bookkeeping
+  (`child_process_table`/`CRT_FD_TABLE_SIZE` in `libc/src/arch/windows/
+  common/syscall.c`) or in how the jobserver pipe's fds get duplicated
+  across two-or-more near-simultaneous spawns -- not yet narrowed further.
+  Keep `tools/crt-port-build.py`'s `jobs = 1 if target_os == "windows"`
+  restriction in place until this is fixed and verified with a real
+  `-j N` port build plus full `ctest`.
 - Investigate the intermittent `make install` `ln: ... File exists` failure
   on libtool-generated header/lib alias symlinks when rebuilding a port whose
   install directory already has a valid symlink from a prior successful run
