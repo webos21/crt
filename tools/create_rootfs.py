@@ -28,11 +28,13 @@ TOYBOX_APPLETS = [
     "mv",
     "pwd",
     "printf",
+    "readlink",
     "rm",
     "rmdir",
     "sed",
     "sleep",
     "sort",
+    "stat",
     "tail",
     "tee",
     "test",
@@ -42,6 +44,7 @@ TOYBOX_APPLETS = [
     "uname",
     "uniq",
     "wc",
+    "which",
 ]
 
 ROOTFS_DIRS = [

@@ -1476,17 +1476,16 @@ mode_t umask(mode_t mask) {
 #endif
 }
 
-char* getcwd(char* buf, size_t size) {
+// Fills a caller-supplied, already-non-null/non-zero-size buffer. Callable
+// directly by getcwd() below when the caller passed a real buffer, or via
+// a freshly malloc()'d one when it didn't (see getcwd()'s own comment).
+static char* getcwd_into(char* buf, size_t size) {
 #if defined(CRT_TARGET_OS_MACOS)
   char path[CRT_MACOS_MAXPATHLEN];
   size_t length;
   int fd;
   long result;
 
-  if (buf == 0 || size == 0) {
-    __set_errno(EINVAL);
-    return 0;
-  }
   fd = open(".", O_RDONLY);
   if (fd < 0) {
     return 0;
@@ -1509,10 +1508,6 @@ char* getcwd(char* buf, size_t size) {
 #else
   long result;
 
-  if (buf == 0 || size == 0) {
-    __set_errno(EINVAL);
-    return 0;
-  }
   result = __crt_sys_getcwd(buf, (unsigned long)size);
   if (result < 0 && result >= -4095) {
     __set_errno((int)-result);
@@ -1523,6 +1518,43 @@ char* getcwd(char* buf, size_t size) {
 #endif
   return buf;
 #endif
+}
+
+// getcwd(NULL, 0) (and, more loosely, getcwd(NULL, size>0)) is a real
+// POSIX.1-2008/GNU extension -- "allocate a buffer as large as necessary
+// automatically", not an error -- and Android Bionic's own getcwd()
+// (bionic/libc/bionic/getcwd.cpp) implements exactly this: buf==NULL
+// mallocs `size` bytes (defaulting to PATH_MAX when size==0, since the
+// real cwd length is not known ahead of the underlying getcwd call, and
+// unlike glibc's own grow-and-retry loop, Bionic does not resize on
+// ERANGE either -- matched here for the same reason: PATH_MAX already
+// covers every real path this PAL can produce). Only a *non-null* buf
+// with size==0 is the real error case (a caller-owned buffer with no
+// usable capacity at all). Found missing while enabling toybox's `which`
+// applet: its own xgetcwd() (shell/toybox/src/lib/xwrap.c) calls exactly
+// `getcwd(NULL, 0)`, which used to fail outright with EINVAL here.
+char* getcwd(char* buf, size_t size) {
+  char* allocated;
+  char* result;
+
+  if (buf != 0) {
+    if (size == 0) {
+      __set_errno(EINVAL);
+      return 0;
+    }
+    return getcwd_into(buf, size);
+  }
+  allocated = (char*)malloc(size != 0 ? size : PATH_MAX);
+  if (allocated == 0) {
+    __set_errno(ENOMEM);
+    return 0;
+  }
+  result = getcwd_into(allocated, size != 0 ? size : PATH_MAX);
+  if (result == 0) {
+    free(allocated);
+    return 0;
+  }
+  return result;
 }
 
 char* realpath(const char* path, char* resolved_path) {

@@ -1463,66 +1463,77 @@ Detailed policy and provenance stay in `docs/` and import manifests.
     not sufficient to make real Windows parallel builds safe. See the new
     "in progressing" entry below.
 
+- **Actually enabled toybox's `which`/`readlink`/`stat` applets (source had been compiled in for a while, but nothing had registered or exercised them as real, runnable commands) and fixed two genuine bugs found doing it.** `shell/CMakeLists.txt`'s `CRT_TOYBOX_SOURCES` already listed `which.c`/`readlink.c`/`stat.c`, but toybox's own applet-dispatch table (`shell/toybox/crt/generated/newtoys.h`, a hand-curated subset of upstream toybox's full catalog -- see that file) never had `USE_WHICH`/`USE_READLINK`/`USE_STAT` entries, and `tools/create_rootfs.py`'s `TOYBOX_APPLETS` rootfs-alias list didn't have them either, so `toybox which ...` genuinely failed with `Unknown command which` and no rootfs `/system/bin/which` existed at all -- confirmed directly before touching anything. Added the three `USE_*(NEWTOY(...))` lines (matching each applet's own upstream `NEWTOY` signature exactly) and the three rootfs aliases; the base Android config these CRT-local files layer on top of (`shell/toybox/src/android/linux/generated/config.h`) already had `CFG_WHICH`/`CFG_READLINK`/`CFG_STAT` enabled, so no config changes were needed there.
+  - **Found via `which` itself: `getcwd(NULL, 0)` returned `EINVAL`.** `which.c` calls toybox's own `xgetcwd()` (`shell/toybox/src/lib/xwrap.c`), which is exactly `getcwd(NULL, 0)` -- the real POSIX.1-2008/GNU extension ("allocate a buffer as large as necessary automatically"), which Android Bionic's own `getcwd()` implements too. `libc/src/fd.c`'s `getcwd()` had never implemented this at all, rejecting *any* NULL `buf` outright regardless of `size` as `EINVAL`. Fixed per Bionic's own approach (no grow-and-retry loop like glibc; a single `malloc(size ? size : PATH_MAX)` then one real `getcwd()` call into it): split the existing body into a `getcwd_into()` helper reused by both the caller-supplied-buffer path and a new malloc'd-buffer path. `buf != 0 && size == 0` is still the genuine `EINVAL` case (a real buffer with no usable capacity). Added a regression case to `tests/file_path_test.c` (`getcwd(NULL, 0)` matches the known-good `getcwd(buf, size)` result; `getcwd(buf, 0)` still fails `EINVAL`).
+  - **Found via `readlink` itself: silently failed (exit 1, no error text) on every real symlink whose target didn't fit in toybox's own 64-byte starting buffer.** `readlink`'s default mode runs quiet-on-error (upstream toybox behavior, matching real coreutils -- not a bug), which made this look like nothing happened at first. Root cause: `__crt_sys_readlink()` (`libc/src/arch/windows/common/syscall.c`) converted the reparse point's wide-char target directly into the caller's own `size`-byte buffer via `WideCharToMultiByte()` -- which *fails outright* (returns 0, `ERROR_INSUFFICIENT_BUFFER`) when the target doesn't fit, rather than truncating. Real POSIX `readlink(2)` never fails for that reason; it silently truncates to `size` bytes and returns however much it wrote (which can legitimately equal `size`, the caller's own signal to retry bigger) -- exactly the growth-loop toybox's `xreadlinkat()` (`shell/toybox/src/lib/xwrap.c`, starts at 64 bytes and doubles) depends on, and exactly what this project's own raw Linux `readlink(2)` passthrough already provides for free. Since every real absolute path in this rootfs is well over 64 bytes, the very first growth-loop iteration always hit this and gave up immediately. Fixed by converting into an unbounded temporary buffer first (`MAXIMUM_REPARSE_DATA_BUFFER_SIZE` bytes, always enough headroom), then copying/truncating into the caller's real buffer and returning the true (possibly-larger-than-`size`-clamped-to-`size`) length -- matching real `readlink(2)` truncation semantics.
+  - **Verified end-to-end, not just compiled**: rebuilt the full `windows-host-ninja-debug` preset; `which ls` now prints `/system/bin/ls`, `stat README.txt` prints real file metadata, and `readlink` on a real symlink (whose target is a long, rootfs-translated absolute path -- confirmed too long for the old 64-byte first attempt) now succeeds instead of silently failing. Added a permanent regression test, `crt_mksh_rootfs_which_stat_readlink_runs` (`shell/CMakeLists.txt`, same Windows-only `crt_mksh_rootfs_*` chain as the existing external/pipeline/redirection/command-substitution/exec-builtin tests), exercising all three applets together through the real rootfs mksh. Full `ctest` 81/81 (79 pre-existing + `pselect_sigchld_test_runs` + this new test).
+  - General CRT/PAL fixes, not toybox-specific: any other program calling `getcwd(NULL, 0)` or `readlink()` on a long target on Windows was equally affected.
+
 ## in progressing
 
-- **New**: root-cause the Windows-only `make.exe: /system/bin/mksh: Bad
-  file descriptor` failure (`make.exe: INTERNAL: Exiting with 1 jobserver
-  tokens available; should be N!`) that appears when GNU Make is actually
-  run with real parallel jobs (`-j N`, `N > 1`) on Windows -- found while
-  verifying the `SIGCHLD`/`pselect()` fix above (see that entry for the
-  exact repro: temporarily lift `tools/crt-port-build.py`'s hardcoded
-  `jobs = 1 if target_os == "windows" ...`, `make -j 8` a real port like
-  `zlib`). A distinct bug from the now-fixed `pselect()`/`SIGCHLD`
-  jobserver deadlock -- this is GNU Make's own process-spawn failure
-  message, not a hang, and shows up only once genuinely concurrent recipe
-  shells are attempted, which no Windows port build has ever done before
-  (`jobs` has always been hardcoded to `1` on Windows). Likely candidates:
-  a race in this PAL's own child-process/fd bookkeeping
-  (`child_process_table`/`CRT_FD_TABLE_SIZE` in `libc/src/arch/windows/
-  common/syscall.c`) or in how the jobserver pipe's fds get duplicated
-  across two-or-more near-simultaneous spawns -- not yet narrowed further.
-  Keep `tools/crt-port-build.py`'s `jobs = 1 if target_os == "windows"`
-  restriction in place until this is fixed and verified with a real
-  `-j N` port build plus full `ctest`.
-- Investigate the intermittent `make install` `ln: ... File exists` failure
-  on libtool-generated header/lib alias symlinks when rebuilding a port whose
-  install directory already has a valid symlink from a prior successful run
-  (see the libpng shared-pass entry above) -- reproduce from a genuinely cold
-  `out/` directory to rule out same-session Windows delete-pending/handle-
-  timing noise before treating it as a real toybox/CRT `rm`-on-symlink bug.
+Four active threads, not a flat list of one-off items:
 
-- Keep the Windows mksh child-spec path stable for real configure workloads:
-  - external command execution;
-  - `cmd | cmd`;
-  - builtin-to-external pipelines;
-  - `cmd > file`;
-  - `cmd < file`;
-  - fd 3 and higher redirections;
-  - child exit status propagation;
-  - multi-child and pipeline teardown.
-- Harden Windows `waitpid()` and the child registry for multiple live children,
-  configure-script subprocess bursts, and pipeline cleanup.
-- Track the current Windows make limitation:
-  - serial make is the supported path;
-  - parallel make/jobserver fd inheritance is not complete;
-  - this should be fixed in CRT/PAL process/fd handling, not by returning to
-    host make.
-- Audit the Windows mksh subshell status quirk exposed by commands shaped like
-  `(command || true) >/dev/null 2>&1`.
-- Continue validating that `CRT_SPAWN_NATIVE_WINDOWS=1` remains a narrow
-  launcher hint for native host tools such as LLVM `ar`, `ranlib`, and `strip`,
-  not an inherited global mode for configure recipes.
-- Keep make/zlib/libpng/libffi recipe statuses current as each host is rerun.
-- Keep auditing disabled toybox applets for pointer-to-`long` LLP64 assumptions
-  before enabling them.
-- Keep `/dev/tty`, `/dev/console`, `isatty`, `tcgetattr`, `tcsetattr`, and
-  `TIOCGWINSZ` behavior coherent enough for non-interactive shell and configure
-  use.
-- Preserve the porting loop discipline:
-  1. expose the missing header/type/macro/symbol/behavior with upstream source;
+- **Windows shell/process stress hardening.** Real concurrency -- parallel
+  `make -jN`, jobserver pipe fd handling, many live children in the
+  registry at once, subshell/redirection edge cases -- has never actually
+  been exercised on Windows before this session: every Windows port build
+  has always run serial `make -j 1`.
+  - Root-cause `make.exe: /system/bin/mksh: Bad file descriptor`
+    (`make.exe: INTERNAL: Exiting with 1 jobserver tokens available;
+    should be N!`), found this session running a real port build with
+    `-j 8` for the first time (see the "done" entry above for the exact
+    repro and how it was isolated). A distinct bug from the now-fixed
+    `pselect()`/`SIGCHLD` jobserver deadlock -- GNU Make's own process-
+    spawn failure, not a hang. Likely a race in `child_process_table`/
+    `CRT_FD_TABLE_SIZE` (`libc/src/arch/windows/common/syscall.c`) or in
+    jobserver-pipe fd duplication across near-simultaneous spawns -- not
+    yet narrowed further. Keep `tools/crt-port-build.py`'s
+    `jobs = 1 if target_os == "windows"` restriction in place until this
+    is fixed and verified with a real `-j N` port build plus full
+    `ctest`.
+  - Harden `waitpid()` and the child registry for many live children,
+    configure-script subprocess bursts, and pipeline teardown.
+  - Keep the mksh child-spec path (external commands, `cmd | cmd`,
+    builtin-to-external pipelines, `cmd > file`/`cmd < file`, fd 3+
+    redirection, exit-status propagation, multi-child/pipeline teardown)
+    stable under real configure workloads.
+  - Audit the mksh subshell status quirk exposed by commands shaped like
+    `(command || true) >/dev/null 2>&1`.
+
+- **Windows symlink/delete timing verification.** `readlink()`/`lstat()`/
+  `symlink()` are all real and substantially better-verified now (the
+  dangling-symlink `lstat()` fix and the `readlink()` truncation fix,
+  both this session -- see "done" above), but one open item remains: the
+  intermittent `make install` `ln: ... File exists` failure on libtool-
+  generated header/lib alias symlinks, seen when rebuilding a port whose
+  install directory already has a valid symlink from a prior successful
+  run (see the libpng shared-pass entry above). An isolated, minimal
+  repro succeeded cleanly every time, so this looks like same-session
+  Windows delete-pending/handle-timing noise rather than a real toybox/
+  CRT `rm`-on-symlink bug -- needs reproduction from a genuinely cold
+  `out/` directory to confirm either way.
+
+- **Recipe/port status upkeep.** Keep `make`/`zlib`/`libpng`/`libffi`
+  recipe statuses (`porting/recipes/*.json`, `docs/porting_status.md`)
+  current as each host is rerun.
+
+- **Standing porting-loop discipline**, not a task list:
+  1. expose the missing header/type/macro/symbol/behavior with upstream
+     source;
   2. check Android Bionic public headers, source, ABI, and errno policy;
   3. extend CRT/PAL/sysroot rather than patching upstream first;
   4. record host-specific policy differences in `docs/`.
+
+  A few smaller, longer-running audits ride along with this:
+  - Keep auditing disabled toybox applets for pointer-to-`long` LLP64
+    assumptions before enabling them (see the `which`/`readlink`/`stat`
+    "done" entry above for the most recent batch actually enabled).
+  - Keep `/dev/tty`, `/dev/console`, `isatty`, `tcgetattr`, `tcsetattr`,
+    and `TIOCGWINSZ` behavior coherent enough for non-interactive shell
+    and configure use.
+  - Continue validating that `CRT_SPAWN_NATIVE_WINDOWS=1` stays a narrow
+    launcher hint for native host tools (LLVM `ar`/`ranlib`/`strip`), not
+    an inherited global mode for configure recipes.
 
 ## planed
 
@@ -1560,14 +1571,10 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   - `/dev/zero`;
   - `/dev/random`;
   - `/dev/urandom`.
-- Expand toybox applets only when the backing Bionic-compatible CRT/PAL surface
-  exists. Likely next applets:
-  - `which`: add as a lightweight toybox applet for configure and shell
-    usability; mksh has `whence`/`command -v`-style builtins, but `which`
-    should be provided as an external applet.
-  - `readlink`;
-  - `stat`;
-  - `touch`.
+- Expand toybox applets only when the backing Bionic-compatible CRT/PAL
+  surface exists. `which`/`readlink`/`stat`/`touch` are done (see "done"
+  above) -- next candidates would come from auditing the remaining
+  disabled applets for LLP64 pointer-width safety (see "in progressing").
 - Keep deeper Linux-like applets deferred until the PAL owns enough backing
   behavior:
   - `ps`: add through toybox only after the rootfs/PAL provides enough

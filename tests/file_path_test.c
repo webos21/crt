@@ -98,6 +98,25 @@ int main(void) {
   if (getcwd(cwd, sizeof(cwd)) == 0 || cwd[0] == 0) {
     return fail("getcwd");
   }
+  {
+    /* getcwd(NULL, 0): POSIX.1-2008/GNU extension ("allocate a buffer as
+     * large as necessary automatically"), matching Android Bionic's own
+     * getcwd() -- not the EINVAL error this used to return for any
+     * NULL buf regardless of size. Found missing via toybox's `which`
+     * applet, whose own xgetcwd() (shell/toybox/src/lib/xwrap.c) calls
+     * exactly this form. */
+    char* dynamic_cwd = getcwd(0, 0);
+    if (dynamic_cwd == 0 || strcmp(dynamic_cwd, cwd) != 0) {
+      free(dynamic_cwd);
+      return fail("getcwd(NULL, 0)");
+    }
+    free(dynamic_cwd);
+    /* A real caller-owned buffer with size 0 is still the genuine error
+     * case (no usable capacity at all), unaffected by the above. */
+    if (getcwd(cwd, 0) != 0 || errno != EINVAL) {
+      return fail("getcwd(buf, 0) should still fail EINVAL");
+    }
+  }
   cleanup_file_path_test_dir();
   if (mkdir("file_path_test.dir", 0777) != 0) {
     return fail("mkdir");

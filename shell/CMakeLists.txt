@@ -470,6 +470,30 @@ if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
       DEPENDS crt_mksh_rootfs_command_substitution_runs
     )
     set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_mksh_rootfs_exec_builtin_runs)
+
+    # Regression coverage for which/readlink/stat: toybox source for these
+    # was in CRT_TOYBOX_SOURCES above for a while before anything actually
+    # registered them as runnable applets (no shell/toybox/crt/generated/
+    # newtoys.h entry, no rootfs alias) -- `which` additionally exposed a
+    # real getcwd(NULL, 0) bug once it was reachable (libc/src/fd.c never
+    # supported the POSIX.1-2008/GNU "allocate a buffer automatically"
+    # form Bionic's own getcwd() does; see that fix's own comment).
+    add_test(NAME crt_mksh_rootfs_which_stat_readlink_runs
+      COMMAND "${CMAKE_COMMAND}" -E env
+        "CRT_ROOTFS=${CMAKE_BINARY_DIR}/rootfs"
+        "PATH=/system/bin:/bin:/usr/bin"
+        "$<TARGET_FILE:crt_mksh>" -c "which ls; echo wsr-target > /tmp/mksh-ctest-wsr-target.txt; ln -sf /tmp/mksh-ctest-wsr-target.txt /tmp/mksh-ctest-wsr-link.txt; readlink /tmp/mksh-ctest-wsr-link.txt; stat /tmp/mksh-ctest-wsr-target.txt | head -n 1; rm -f /tmp/mksh-ctest-wsr-link.txt /tmp/mksh-ctest-wsr-target.txt"
+    )
+    set_tests_properties(crt_mksh_rootfs_which_stat_readlink_runs PROPERTIES
+      # readlink's own output is whatever real (host-translated, absolute)
+      # target string this PAL's symlink() actually stored -- not
+      # necessarily byte-identical to the guest-relative string `ln -s`
+      # was given -- so this only pins down that it ends in the expected
+      # filename, not the exact translated form.
+      PASS_REGULAR_EXPRESSION "/system/bin/ls\n[^\n]*mksh-ctest-wsr-target\\.txt\n  File: /tmp/mksh-ctest-wsr-target\\.txt"
+      DEPENDS crt_mksh_rootfs_exec_builtin_runs
+    )
+    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_mksh_rootfs_which_stat_readlink_runs)
   endif()
   add_dependencies(crt_shell_artifacts crt_toybox)
   install(TARGETS crt_toybox

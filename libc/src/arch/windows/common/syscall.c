@@ -3746,14 +3746,34 @@ long __crt_sys_readlink(const char* path, char* buf, unsigned long size) {
     const uint16_t* print_name =
         (const uint16_t*)(path_buffer_bytes + symlink_buffer->PrintNameOffset);
     int print_name_wchars = symlink_buffer->PrintNameLength / 2;
+    /* Converting straight into the caller's buf (sized `size`) made
+     * WideCharToMultiByte() fail outright (0, ERROR_INSUFFICIENT_BUFFER)
+     * whenever the real target didn't fit -- but POSIX readlink() never
+     * fails for that reason, it silently truncates to `size` bytes and
+     * returns however much it actually wrote (which can equal `size`,
+     * the caller's own signal to retry with a bigger buffer -- exactly
+     * the growth-loop toybox's own xreadlinkat()/xreadlink() use, and
+     * the same contract this project's raw Linux readlink(2) passthrough
+     * already provides). Convert into an unbounded temporary buffer
+     * first (worst case: MAXIMUM_REPARSE_DATA_BUFFER_SIZE/2 UTF-16 code
+     * units, converted 1:1 or wider into UTF-8 -- MAXIMUM_REPARSE_DATA_
+     * BUFFER_SIZE bytes is always enough headroom), then copy/truncate
+     * into the real caller-sized buf ourselves. */
+    char full_narrow[MAXIMUM_REPARSE_DATA_BUFFER_SIZE];
 
-    converted = WideCharToMultiByte(0, 0, print_name, print_name_wchars, buf,
-                                    (int)size, 0, 0);
+    converted = WideCharToMultiByte(0, 0, print_name, print_name_wchars, full_narrow,
+                                    (int)sizeof(full_narrow), 0, 0);
+    if (converted <= 0) {
+      long result = fail_last_error();
+      free(reparse_buffer);
+      return result;
+    }
+    if ((unsigned long)converted > size) {
+      converted = (int)size;
+    }
+    memcpy(buf, full_narrow, (size_t)converted);
   }
   free(reparse_buffer);
-  if (converted <= 0) {
-    return fail_last_error();
-  }
   return converted;
 }
 
