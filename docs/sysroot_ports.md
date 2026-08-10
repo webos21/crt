@@ -212,22 +212,34 @@ cmake --build --preset macos-host-ninja-debug --target port-build-recipes
 cmake --build --preset macos-host-ninja-debug --target port-rebuild-configure
 ```
 
-Configure recipes are launched through the CRT rootfs mksh on every host. The
-CMake `port-build-*` and `port-rebuild-*` targets for configure recipes run:
+The CMake recipe targets always compile and link through the CRT wrapper
+toolchain (`tools/crt-cc` / `tools/crt-c++`) and the CRT sysroot. The shell that
+drives upstream `configure` and `make` is host-dependent:
+
+- Linux/macOS use the host POSIX shell and host coreutils. Those hosts already
+  provide the complete shell/userland environment upstream configure scripts are
+  normally tested against, and the CRT boundary is still enforced by the wrapper
+  compiler's `-nostdinc`, `CRT_SYSROOT`, startup object, and library flags.
+- Native Windows uses the project-owned rootfs mksh and toybox applets. Windows
+  has no native shebang handling for `tools/crt-cc` / `tools/crt-c++`, so CMake
+  adds `--use-crt-shell` there and runs the recipe commands through
+  `out/<preset>/rootfs/system/bin/mksh`.
+
+On Windows, the CMake `port-build-*` and `port-rebuild-*` targets for configure
+recipes run:
 
 1. upstream `./configure` under `out/<preset>/rootfs/system/bin/mksh`;
 2. `make -jN` under that same mksh;
 3. `make install` under that same mksh.
 
-The shell is project-owned, and `make` is now the first project-built bootstrap
-tool. AOSP does not carry GNU make under `platform/external`; Android keeps the
-source under `toolchain/make` and prebuilts under
-`platform/prebuilts/build-tools`. The CRT recipe follows the Android.bp
-`cc_binary_host` source list and installs `make` into `PORT_PREFIX/bin`.
-Configure recipes prefer that installed make before falling back to any host
-make. On Windows the recipe intentionally uses the POSIX-like Android config
-path instead of the upstream Win32 make path, so failures expose missing
-Bionic/POSIX CRT/PAL behavior.
+`make` is now the first project-built bootstrap tool. AOSP does not carry GNU
+make under `platform/external`; Android keeps the source under `toolchain/make`
+and prebuilts under `platform/prebuilts/build-tools`. The CRT recipe follows
+the Android.bp `cc_binary_host` source list and installs `make` into
+`PORT_PREFIX/bin`. Configure recipes prefer that installed make before falling
+back to any host make. On Windows the recipe intentionally uses the POSIX-like
+Android config path instead of the upstream Win32 make path, so failures expose
+missing Bionic/POSIX CRT/PAL behavior.
 
 On Windows CRT-shell builds, configure recipes currently run make with one job
 and append `SHELL=/system/bin/mksh` to both the build and install invocations.
