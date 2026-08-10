@@ -498,7 +498,20 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
         return
     make = env.get("MAKE", "make")
     jobs = 1 if target_os == "windows" and use_crt_shell else (os.cpu_count() or 2)
-    make_args = [make, "-j", str(jobs)] + build["make_args"]
+    # target_overrides.<os>.make_args extends the base make_args the same
+    # way configure_args/cflags already do (see apply_recipe_env/
+    # build_configure_port's own configure_args handling above) -- e.g.
+    # a host-scoped `make VAR=value` override to replace a value an
+    # upstream Makefile bakes in unconditionally (AM_LTLDFLAGS in
+    # libffi's own Makefile.am, which always adds a real, GNU-Libtool-
+    # generated `-bindir "$(bindir)"`; libtool's own func_normal_abspath
+    # only recognizes a leading '/' as marking an absolute path, so a
+    # real Windows drive-letter path handed to -bindir sends it into a
+    # genuine infinite loop trying to ascend to a root it can never
+    # reach -- see porting/recipes/libffi.json's own notes).
+    make_args = [make, "-j", str(jobs)] + build["make_args"] + build.get("target_overrides", {}).get(
+        target_os, {}
+    ).get("make_args", [])
     install_args = [make, "install"]
     if target_os == "windows" and use_crt_shell:
         make_args.append("SHELL=/system/bin/mksh")

@@ -38,8 +38,39 @@ void __crt_malloc_after_fork_child(void) {
  * explicit lpAddress to be aligned to the system allocation granularity
  * (64KB), so the fork implementation must copy whole OS regions, not
  * individual split blocks. Fixed-size table (not a linked list, to avoid
- * needing malloc() itself to track allocations of the allocator). */
-#define CRT_MALLOC_MAX_OS_REGIONS 4096
+ * needing malloc() itself to track allocations of the allocator).
+ *
+ * CRT_MALLOC_MAX_OS_REGIONS was 4096 (== 4096 * CRT_HEAP_CHUNK_SIZE ==
+ * exactly 256MB) until a real, reproducible bug was found: append_chunk()
+ * silently stopped recording new regions once the table filled up --
+ * `mmap()` still succeeded and the memory was perfectly usable within
+ * this process, but __crt_malloc_os_region_count()/_base()/_size() (what
+ * fork_memcopy.c's copy_heap_chunks() actually walks) never saw anything
+ * past the cap, so a fork() from a process that had allocated more than
+ * 256MB silently produced a child with that memory simply missing --
+ * confirmed directly: a value written past the 256MB mark vanished
+ * across fork() and reading it back in the child faulted (a real mksh
+ * process interpreting a large, deeply self-recursive libtool script --
+ * see the libffi shared-library porting work -- is exactly the kind of
+ * long-lived, memory-growing process that can cross this threshold in
+ * practice, and the resulting corrupted child is indistinguishable from
+ * a hang without knowing to look for this).
+ *
+ * Fixed two ways: (1) raised the cap from 4096 to 65536 (== 4GB of
+ * tracked heap, a still-fixed table -- growing it dynamically would
+ * itself need to route through mmap()/munmap() rather than malloc() to
+ * avoid the same reentrancy append_chunk()'s own header comment already
+ * flags, and would introduce a second, separate "is *this* array's own
+ * backing memory visible to fork()?" bookkeeping problem; 4GB is enough
+ * headroom that hitting it in practice should now be exceptionally
+ * rare). (2) far more importantly, once the table is genuinely full, the
+ * allocation itself now fails (ENOMEM) instead of silently succeeding
+ * untracked -- turning any future "process legitimately needs more than
+ * 4GB of heap and later forks" case into an honest, immediately-visible
+ * allocation failure at the point of the oversized malloc(), instead of
+ * a correctness time bomb that only detonates later, inside some
+ * unrelated fork() call, as memory corruption in the child. */
+#define CRT_MALLOC_MAX_OS_REGIONS 65536
 static void* heap_os_region_base[CRT_MALLOC_MAX_OS_REGIONS];
 static size_t heap_os_region_size[CRT_MALLOC_MAX_OS_REGIONS];
 static int heap_os_region_count;
@@ -79,15 +110,21 @@ static block_header* append_chunk(size_t size) {
 
   needed = size + sizeof(block_header);
   chunk_size = align_chunk_size(needed);
+  if (heap_os_region_count >= CRT_MALLOC_MAX_OS_REGIONS) {
+    /* See CRT_MALLOC_MAX_OS_REGIONS's own comment above: silently
+     * handing out memory we can no longer make visible to fork() is
+     * what caused the original bug. Fail the allocation instead of the
+     * mmap() below ever running. */
+    errno = ENOMEM;
+    return 0;
+  }
   mapping = mmap(0, chunk_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (mapping == MAP_FAILED) {
     return 0;
   }
-  if (heap_os_region_count < CRT_MALLOC_MAX_OS_REGIONS) {
-    heap_os_region_base[heap_os_region_count] = mapping;
-    heap_os_region_size[heap_os_region_count] = chunk_size;
-    heap_os_region_count++;
-  }
+  heap_os_region_base[heap_os_region_count] = mapping;
+  heap_os_region_size[heap_os_region_count] = chunk_size;
+  heap_os_region_count++;
 
   header = (block_header*)mapping;
   header->block.size = chunk_size - sizeof(block_header);
