@@ -53,7 +53,39 @@
  * `_setmode()` has no real POSIX equivalent to pair back to (this
  * project's own I/O is already byte-transparent -- no CRLF translation
  * exists to switch on or off), so those three are real, independent
- * implementations instead of macro pairs. */
+ * implementations instead of macro pairs.
+ *
+ * Separately, _spawnv() also fixes up a broken PATH env var before
+ * actually launching the target program (see _crt_libtool_wrapper_
+ * fix_path_env() below). The wrapper's own generated LIB_PATH_VALUE/
+ * EXE_PATH_VALUE C-string constants (built by libtool's *shell script*
+ * at generation time, from lt_cv_to_host_file_cmd/lt_cv_to_tool_file_cmd
+ * -- preset to func_convert_file_noop in tools/crt-port-build.py's
+ * make_env(), see that preset's own comment for why: this project's
+ * $build is a genuinely native mksh/toybox PAL, not real MSYS, so the
+ * only libtool-provided conversion that actually applies here is "no
+ * conversion, paths are already host format") are ':'-joined, matching
+ * this project's own POSIX-list convention -- but the real Windows OS
+ * (used by the real CreateProcess-equivalent this _spawnv() is about to
+ * call) parses its PATH environment variable on ';', not ':'. The
+ * wrapper's own lt_update_lib_path()/lt_update_exe_path() (ltmain.sh's
+ * generated code, not ours) do nothing more than blind string
+ * concatenation (`new_value = LIB_PATH_VALUE + getenv("PATH")`), so by
+ * the time this process's own `environ` reaches _spawnv(), PATH already
+ * contains ':'-joined entries a real Windows path search cannot split.
+ * No practical failure was ever observed from this (Windows' own
+ * "search the target .exe's own directory first" default DLL
+ * resolution already finds a co-located .dll regardless of PATH), but
+ * it's a real latent bug for any case that isn't co-located. Fixed at
+ * the one point in this whole chain that is genuinely this project's
+ * own code (not generated output, not part of any port's source, and
+ * the last point before the real OS-level spawn happens): rewrite
+ * PATH's *list* separators from ':' to ';' right before spawning,
+ * carefully leaving every drive-letter colon untouched -- Windows
+ * filesystem rules forbid ':' from ever appearing in a path except as
+ * the drive-letter separator, so any ':' that isn't in that exact
+ * position is unambiguously a stray POSIX-style list separator, never
+ * a genuine part of a path component. */
 #ifndef CRT_PORT_SHIM_LIBTOOL_WRAPPER_COMPAT_H
 #define CRT_PORT_SHIM_LIBTOOL_WRAPPER_COMPAT_H
 
@@ -62,6 +94,7 @@
 #include <sys/wait.h>
 #include <spawn.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define _getcwd getcwd
 #define _stat stat
@@ -99,9 +132,92 @@ static __inline int _setmode(int fd, int mode) {
  * ("execv doesn't actually work on mingw as expected on unix") -- not
  * a concern here either way, since this isn't using execv(). */
 #define _P_WAIT 0
+
+/* Rewrite VALUE's list separators (':') to the real Windows separator
+ * (';'), leaving every drive-letter colon untouched. A colon is a
+ * drive-letter colon iff it is the very next character after exactly
+ * one alphabetic character that itself starts a path component (the
+ * very start of the string, or immediately after a previous
+ * separator) -- every other colon is unambiguously a stray list
+ * separator, per Windows' own filesystem naming rules (':' is illegal
+ * anywhere in a real Windows path except that one position). Returns
+ * a freshly malloc()'d copy; caller frees. Returns NULL on allocation
+ * failure (caller treats that as "leave PATH alone"). */
+static __inline char* _crt_libtool_wrapper_fix_path_seps(const char* value) {
+  size_t len = strlen(value);
+  char* fixed = (char*)malloc(len + 1);
+  size_t i;
+  size_t component_start = 0;
+  if (!fixed) {
+    return 0;
+  }
+  memcpy(fixed, value, len + 1);
+  for (i = 0; i < len; i++) {
+    if (fixed[i] == ':') {
+      int is_drive_letter = (i == component_start + 1) &&
+        ((fixed[component_start] >= 'A' && fixed[component_start] <= 'Z') ||
+         (fixed[component_start] >= 'a' && fixed[component_start] <= 'z'));
+      if (is_drive_letter) {
+        continue;
+      }
+      fixed[i] = ';';
+      component_start = i + 1;
+    } else if (fixed[i] == ';') {
+      component_start = i + 1;
+    }
+  }
+  return fixed;
+}
+
+/* Copy ENVP, replacing its "PATH=..." entry (if any) with one whose
+ * value has been through _crt_libtool_wrapper_fix_path_seps(). All
+ * other entries are aliased, not copied -- only the replaced PATH
+ * entry and the new outer array are ever freed by the caller. Returns
+ * ENVP itself, unmodified, if no PATH entry is found or an allocation
+ * fails (a safe, inert fallback -- the same broken-but-usually-benign
+ * behavior this project already shipped before this fix). *OUT_OWNED
+ * is set to the replacement PATH string when one was allocated (for
+ * the caller to free), or NULL otherwise. */
+static __inline char** _crt_libtool_wrapper_fix_path_env(char* const* envp, char** out_owned) {
+  size_t count = 0;
+  size_t i;
+  char** fixed_envp;
+
+  *out_owned = 0;
+  while (envp[count]) {
+    count++;
+  }
+  fixed_envp = (char**)malloc((count + 1) * sizeof(char*));
+  if (!fixed_envp) {
+    return (char**)envp;
+  }
+  for (i = 0; i < count; i++) {
+    fixed_envp[i] = envp[i];
+    if (!*out_owned && strncmp(envp[i], "PATH=", 5) == 0) {
+      char* fixed_value = _crt_libtool_wrapper_fix_path_seps(envp[i] + 5);
+      if (fixed_value) {
+        size_t entry_len = 5 + strlen(fixed_value) + 1;
+        char* entry = (char*)malloc(entry_len);
+        if (entry) {
+          memcpy(entry, "PATH=", 5);
+          memcpy(entry + 5, fixed_value, strlen(fixed_value) + 1);
+          fixed_envp[i] = entry;
+          *out_owned = entry;
+        }
+        free(fixed_value);
+      }
+    }
+  }
+  fixed_envp[count] = 0;
+  return fixed_envp;
+}
+
 static __inline int _spawnv(int mode, const char* path, const char* const* argv) {
   pid_t pid;
   int status;
+  int rc;
+  char* owned_path_entry;
+  char** fixed_envp = _crt_libtool_wrapper_fix_path_env(environ, &owned_path_entry);
 
   (void)mode;
   /* posix_spawn()'s own POSIX signature takes char *const argv[], not
@@ -109,13 +225,18 @@ static __inline int _spawnv(int mode, const char* path, const char* const* argv)
    * by the whole exec/spawn family (none of them actually modify
    * argv), matching real MSVCRT's own _spawnv() also declaring argv
    * const while the underlying OS call it wraps does not. */
-  if (posix_spawn(&pid, path, 0, 0, (char* const*)argv, environ) != 0) {
-    return -1;
+  if (posix_spawn(&pid, path, 0, 0, (char* const*)argv, fixed_envp) != 0) {
+    rc = -1;
+  } else if (waitpid(pid, &status, 0) < 0) {
+    rc = -1;
+  } else {
+    rc = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
   }
-  if (waitpid(pid, &status, 0) < 0) {
-    return -1;
+  if (fixed_envp != (char**)environ) {
+    free(fixed_envp);
   }
-  return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+  free(owned_path_entry);
+  return rc;
 }
 
 #endif /* CRT_PORT_SHIM_LIBTOOL_WRAPPER_COMPAT_H */
