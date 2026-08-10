@@ -125,14 +125,81 @@ Linux/Windows portions of `docs/dynamic_loading.md`.
 
 ### Windows
 
-Left as an honest no-op stub. There is no real Windows kernel mechanism that
-generates a `SIGCHLD`-equivalent async signal; child completion is already
-observed directly through `waitpid()` and the child registry (see
-`docs/windows_fork_emulation.md`), not through a signal. Console control
-events (Ctrl-C/Ctrl-Break) and structured exception handling are a distinct,
-real Win32 mechanism that could eventually be bridged into the same
-`signal_actions[]`/`raise()` dispatch, but that is separate future work, not
-part of this fix.
+No longer a no-op stub for `SIGCHLD`: Windows has no kernel mechanism that
+generates a `SIGCHLD`-equivalent *async* signal the way Linux/macOS do, but
+it does have everything needed to build a real, synchronously-polled
+equivalent, reusing state that already exists for `waitpid()` -- the child
+registry (`child_process_table` in `libc/src/arch/windows/common/
+syscall.c`, see `docs/windows_fork_emulation.md`) already holds a live
+process `HANDLE` per not-yet-reaped child, and a process `HANDLE` becomes
+kernel-signaled the moment that process exits (that is what `WaitForSingle
+Object()` already polls for `waitpid()` itself).
+
+`__crt_windows_check_sigchld_pending()` (`syscall.c`) is the core of it: a
+cheap, non-blocking scan of that registry (`WaitForSingleObject(handle, 0)`
+per live child) that returns 1 the first time it finds a live child whose
+handle has become signaled *and* `SIGCHLD` is currently unblocked (checked
+via the existing `__crt_signal_get_mask()`), marking that child's slot in a
+new parallel `child_notified_table` so the same exit is not reported again --
+matching real `SIGCHLD`'s edge-triggered semantics (delivered once per state
+transition, not repeatedly while a zombie sits unreaped). If `SIGCHLD` is
+currently blocked, the function deliberately does *not* mark anything, so a
+later call -- once unblocked -- still finds the exit: this is what gives
+Windows the same "pending while blocked, delivered on unblock" behavior the
+real kernel provides for free on Linux/macOS.
+
+Two call sites use it, matching the two points a real kernel would actually
+need to deliver:
+
+- `__crt_signal_backend_set_mask()` (`signal_backend.c`): called every time
+  `sigprocmask()` changes the software mask. If a call unblocks `SIGCHLD`
+  and a child had already exited while it was blocked, this calls
+  `__crt_signal_dispatch(SIGCHLD)` synchronously, right there -- mirroring
+  real kernel signal delivery happening on the way back to userspace from
+  the *same* `sigprocmask()` syscall that does the unblocking on Linux/
+  macOS. This is what `pselect()`'s existing atomicity check (see above)
+  actually observes on Windows: `pselect()` itself needed no Windows-
+  specific change at all.
+- `__crt_sys_poll()`'s own blocking loop (`syscall.c`): checked once per
+  iteration (already looping on a 1ms `Sleep()`, since this Windows `poll()`
+  is a hand-rolled busy-wait, not a single blocking syscall), covering a
+  child that exits *while* a `pselect()`/`select()`/`poll()` call is
+  genuinely blocked rather than having already exited beforehand.
+
+Because `__crt_signal_dispatch()` is called synchronously from whichever
+thread is already running `sigprocmask()` or `__crt_sys_poll()` -- never
+from a separate background thread -- the handler still runs on the same
+thread that would have been "interrupted", matching real single-threaded
+POSIX signal delivery; no new locking or threading was introduced anywhere
+in this design.
+
+**Scope.** This covers `pselect()`/`select()`/`poll()` interruption by a
+real `SIGCHLD` -- the concrete case that motivated this whole backend
+interface (GNU make's `jobserver_acquire()`). It deliberately does *not*
+cover interrupting a plain blocking `read()`/`write()`/etc with `EINTR`:
+those are single Win32 syscalls with no polling loop to hook a check into
+here, and making them interruptible would need a much larger overlapped-I/O
+rework -- out of scope for this fix.
+
+Every signal other than `SIGCHLD` stays exactly as before: pure software
+`signal_actions[]` bookkeeping, self-delivery only via `raise()`/`abort()`.
+Console control events (Ctrl-C/Ctrl-Break) and structured exception
+handling are a distinct, real Win32 mechanism that could eventually be
+bridged into the same `signal_actions[]`/`raise()` dispatch the same
+general way, but that is separate future work, not part of this fix.
+
+**Verification status:** implemented and code-review-verified only --
+`-fsyntax-only` compiled clean (`-Wall -Wextra`, zero warnings) against the
+real `x86_64-w64-mingw32`/`aarch64-w64-mingw32` target triples and macro set
+`tools/crt-cc` actually uses, for both changed files and the updated test,
+but this project's CMake presets refuse to cross-compile the full build
+(`CRT_TARGET_OS=windows` requires an actual Windows host), so it has not
+been built through the real toolchain, linked, or run. Needs the same
+real-Windows-host verification pass Linux/macOS already got above (build,
+full `ctest`, and specifically `pselect_sigchld_test_runs` -- expected to
+now pass with the *same* fast-`EINTR`, non-Windows-branch assertions
+already used for Linux/macOS, since the test no longer special-cases
+Windows at all).
 
 ## `pselect()` Atomicity
 
@@ -196,6 +263,14 @@ begins.
   current libc resolved it. Same class of trap as the earlier stale-`ctest`-
   binary issue: a build/install step that does not depend on the changed
   target will happily run old code.
+- **Update: re-confirmed on macOS with the new permanent regression test.**
+  After `tests/pselect_sigchld_test.c` (see "Regression Test" below) was
+  added, the user ran the full suite on a real macOS machine directly:
+  `ctest --preset macos-host-ninja-debug` -- 74/74 passing, with
+  `pselect_sigchld_test_runs` itself completing in 0.21s (matching the fast
+  `EINTR`-wakeup path also confirmed on Linux, not the bounded-timeout
+  Windows path), confirming the `non-Windows` branch of the new test against
+  macOS's real `sigaction`/`sigprocmask` backend, not just Linux's.
 
 ## Linux Verification
 
@@ -224,13 +299,13 @@ per the caveat above):
 `tests/CMakeLists.txt`, `TIMEOUT 30` as an outer safety net) is the permanent
 regression test for the `fork()` + blocked-`SIGCHLD` + `pselect()` pattern:
 it installs a real `SIGCHLD` handler, blocks `SIGCHLD`, forks a child that
-exits immediately, sleeps briefly so the kernel queues the now-pending
-`SIGCHLD`, then calls `pselect()` (unblocking `SIGCHLD` for the duration)
+exits immediately, sleeps briefly so the child has actually exited at the OS
+level, then calls `pselect()` (unblocking `SIGCHLD` for the duration)
 against a pipe read end that is kept deliberately unreadable (the write end
-stays open in the parent) with a 5s timeout. On Linux/macOS it asserts
-`pselect()` returns `-1`/`EINTR` in well under 2s; on Windows (an honest
-no-op signal backend, see above) it asserts the call legitimately runs out
-its bounded timeout instead.
+stays open in the parent) with a 5s timeout. It asserts `pselect()` returns
+`-1`/`EINTR` in well under 2s on every host, including Windows now that it
+has the real (if polled) `SIGCHLD` mechanism described above -- the test no
+longer special-cases Windows at all.
 
 ## Next Steps
 

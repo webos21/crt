@@ -1387,9 +1387,71 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   for its full 5s timeout and failed, before reverting. See
   `docs/signal_delivery.md`'s new "Linux Verification"/"Regression Test"
   sections for the full writeup.
+  - **Update: confirmed on macOS too.** The user ran the full suite on a
+    real macOS machine after pulling this change: `ctest --preset
+    macos-host-ninja-debug` -- 74/74 passing, `pselect_sigchld_test_runs`
+    itself in 0.21s (the fast `EINTR`-wakeup path, same as Linux), so the
+    new test exercises macOS's real `sigaction`/`sigprocmask` backend
+    correctly too, not just Linux's.
+
+- **Implemented real `SIGCHLD` delivery for Windows, replacing the honest
+  no-op stub.** The user asked for the stub to actually be implemented
+  rather than left as documented-but-unfixed. Windows has no kernel
+  mechanism for an async child-exit signal the way Linux/macOS do, but does
+  have everything needed for a real, synchronously-polled equivalent,
+  reusing state that already exists for `waitpid()`: a live child's process
+  `HANDLE` (already tracked in `syscall.c`'s child registry) becomes
+  kernel-signaled the moment it exits. Added
+  `__crt_windows_check_sigchld_pending()` (`libc/src/arch/windows/common/
+  syscall.c`): a cheap, non-blocking scan of that registry
+  (`WaitForSingleObject(handle, 0)` per live child), gated on `SIGCHLD`
+  being currently unblocked, marking each observed exit in a new parallel
+  `child_notified_table` so it is reported exactly once (edge-triggered,
+  matching real `SIGCHLD`). Two call sites, matching the two points a real
+  kernel would actually deliver: `__crt_signal_backend_set_mask()`
+  (`signal_backend.c`) -- delivers an already-pending exit synchronously the
+  moment `sigprocmask()` unblocks `SIGCHLD`, which is *also* exactly what
+  `pselect()`'s existing atomicity check depends on, so `poll.c` itself
+  needed zero Windows-specific changes -- and `__crt_sys_poll()`'s own
+  1ms-`Sleep()` busy-wait loop (`syscall.c`), covering a child that exits
+  while genuinely blocked in `pselect()`/`select()`/`poll()` rather than
+  having already exited beforehand. Both call sites deliver synchronously
+  on whichever thread is already running, never from a new background
+  thread, so no new locking was needed anywhere. Scope: covers `pselect()`/
+  `select()`/`poll()` interruption only (the case that actually motivated
+  this backend interface, GNU make's `jobserver_acquire()`) -- does not
+  cover interrupting a plain blocking `read()`/`write()`/etc, which would
+  need a much larger overlapped-I/O rework; every signal other than
+  `SIGCHLD` stays exactly as before (pure software bookkeeping). Updated
+  `tests/pselect_sigchld_test.c` to drop its Windows special case entirely
+  -- it now asserts the same fast-`EINTR` behavior on every host. See
+  `docs/signal_delivery.md`'s rewritten "Windows" section for the full
+  design writeup.
+  - **Verification status: code-review-verified only, real Windows build
+    still pending.** This session has no Windows host and this project's
+    CMake presets intentionally refuse to cross-compile
+    `CRT_TARGET_OS=windows` from any other host, so the change could not be
+    built, linked, or run here. De-risked as far as possible without that:
+    `clang -fsyntax-only -Wall -Wextra` against the exact real
+    `x86_64-w64-mingw32`/`aarch64-w64-mingw32` target triples and macro
+    set `tools/crt-cc` itself uses (bypassing CMake's host guard by
+    invoking clang directly) compiled every changed file clean, zero
+    warnings, on both architectures. Still needs a real run on Windows:
+    `cmake --build --preset windows-host-ninja-debug` + full `ctest`, and
+    specifically `pselect_sigchld_test_runs` passing with the same fast
+    `EINTR` timing already confirmed on Linux/macOS (~0.2s, not the full
+    5s timeout).
 
 ## in progressing
 
+- Verify the new Windows `SIGCHLD` backend (`docs/signal_delivery.md`,
+  "Windows") on an actual Windows host: `cmake --build --preset
+  windows-host-ninja-debug`, full `ctest`, and specifically
+  `pselect_sigchld_test_runs` (expected: fast `-1`/`EINTR`, ~0.2s, same as
+  Linux/macOS -- not the old bounded-timeout behavior). Currently
+  `-fsyntax-only`-verified against the real `x86_64-w64-mingw32`/
+  `aarch64-w64-mingw32` target triples only, per this project's CMake
+  presets refusing to cross-compile `CRT_TARGET_OS=windows`.
 - Investigate the intermittent `make install` `ln: ... File exists` failure
   on libtool-generated header/lib alias symlinks when rebuilding a port whose
   install directory already has a valid symlink from a prior successful run

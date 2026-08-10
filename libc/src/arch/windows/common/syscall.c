@@ -17,6 +17,7 @@
 #include <private/crt_fd_table.h>
 #include <private/crt_fork_memcopy.h>
 #include <private/crt_signal.h>
+#include <private/crt_signal_backend.h>
 #include <private/crt_spawn.h>
 
 typedef void* HANDLE;
@@ -518,6 +519,14 @@ static int ntdll_initialized;
 static int windows_unregistered_clone;
 static HANDLE child_process_table[CRT_FD_TABLE_SIZE];
 static DWORD child_pid_table[CRT_FD_TABLE_SIZE];
+/* Parallel to child_process_table: 1 once a live, not-yet-reaped child's
+ * process handle has been observed signaled (exited) by
+ * __crt_windows_check_sigchld_pending() below, so the same exit is not
+ * reported as a fresh SIGCHLD-worthy event on every subsequent check --
+ * matches real SIGCHLD's edge-triggered semantics (delivered once per state
+ * transition, not repeatedly while a zombie sits unreaped). See
+ * docs/signal_delivery.md, "Windows". */
+static unsigned char child_notified_table[CRT_FD_TABLE_SIZE];
 static HANDLE private_wait_process;
 static DWORD private_wait_pid;
 
@@ -1850,6 +1859,7 @@ void __crt_fd_after_fork_child(void) {
     }
     child_process_table[i] = 0;
     child_pid_table[i] = 0;
+    child_notified_table[i] = 0;
   }
   if (private_wait_process != 0 && private_wait_process != INVALID_HANDLE_VALUE) {
     CloseHandle(private_wait_process);
@@ -2244,6 +2254,7 @@ static long remember_child_process(DWORD pid, HANDLE process) {
     if (child_process_table[i] == 0) {
       child_process_table[i] = process;
       child_pid_table[i] = pid;
+      child_notified_table[i] = 0;
       return (long)pid;
     }
   }
@@ -2342,6 +2353,51 @@ static HANDLE find_child_process(long pid, int* index) {
 static void forget_child_process_at(int index) {
   child_process_table[index] = 0;
   child_pid_table[index] = 0;
+  child_notified_table[index] = 0;
+}
+
+/* Real SIGCHLD delivery for Windows -- see docs/signal_delivery.md,
+ * "Windows". Windows has no kernel mechanism that generates an async
+ * child-exit signal, so this replaces one: it is a cheap, synchronous,
+ * non-blocking scan of the existing child registry (child_process_table),
+ * called from the two places a real SIGCHLD would actually need to be
+ * observed --  __crt_signal_backend_set_mask() below (the "child already
+ * exited while SIGCHLD was blocked, now being unblocked" case, matching
+ * real kernel signal delivery happening synchronously inside the unblocking
+ * sigprocmask() syscall) and __crt_sys_poll()'s own blocking loop (the
+ * "child exits while genuinely blocked in select()/poll()/pselect()" case).
+ *
+ * Returns 1 (and marks the exited child's slot in child_notified_table so
+ * it is not reported again) if SIGCHLD is currently unblocked *and* at
+ * least one live, not-yet-reaped child has exited since it was last
+ * observed; 0 otherwise (including "SIGCHLD is currently blocked", in
+ * which case the exit -- if any -- is deliberately left unmarked so a
+ * later check, once unblocked, still finds it: this is what gives Windows
+ * the same "pending while blocked, delivered on unblock" behavior the real
+ * kernel provides for free on Linux/macOS). Caller is responsible for
+ * actually calling __crt_signal_dispatch(SIGCHLD) when this returns 1 --
+ * kept separate so callers that also need to return -EINTR (the poll loop)
+ * or just fall through (set_mask) can do so without this function making
+ * that decision for them. */
+int __crt_windows_check_sigchld_pending(void) {
+  sigset64_t mask;
+  int found = 0;
+  int i;
+
+  __crt_signal_get_mask(&mask);
+  if ((mask & ((sigset64_t)1ULL << (SIGCHLD - 1))) != 0) {
+    return 0;
+  }
+  for (i = 0; i < CRT_FD_TABLE_SIZE; ++i) {
+    if (child_process_table[i] == 0 || child_notified_table[i] != 0) {
+      continue;
+    }
+    if (WaitForSingleObject(child_process_table[i], 0) == CRT_WAIT_OBJECT_0) {
+      child_notified_table[i] = 1;
+      found = 1;
+    }
+  }
+  return found;
 }
 
 static time_t filetime_to_time(const struct crt_filetime* ft) {
@@ -3327,6 +3383,19 @@ long __crt_sys_poll(struct pollfd* fds, unsigned long nfds, int timeout) {
     }
     if (ready != 0 || timeout == 0) {
       return ready;
+    }
+    /* About to actually block (Sleep(1) below, possibly repeatedly): this is
+     * the Windows equivalent of the point a real blocking select()/poll()
+     * syscall would be interrupted by an async signal on Linux/macOS. Check
+     * for a real, already-unblocked, previously-unobserved SIGCHLD each
+     * time around this loop -- covers a child exiting while this call is
+     * genuinely blocked, not just one that already exited before it was
+     * ever called (that earlier case is covered by
+     * __crt_signal_backend_set_mask()'s own check, see
+     * libc/src/arch/windows/common/signal_backend.c). */
+    if (__crt_windows_check_sigchld_pending()) {
+      __crt_signal_dispatch(SIGCHLD);
+      return -EINTR;
     }
     if (timeout < 0) {
       Sleep(1);

@@ -130,22 +130,19 @@ int main(void) {
   close(dummy_pipe[0]);
   close(dummy_pipe[1]);
 
-#if defined(CRT_TARGET_OS_WINDOWS)
-  /* Windows' signal backend is an honest no-op stub (docs/signal_delivery.md,
-   * "Windows"): there is no real SIGCHLD-equivalent kernel delivery path, so
-   * pselect() legitimately just runs out its bounded timeout here rather
-   * than observing an EINTR wakeup. Only the bounded-timeout half of the
-   * contract applies on this host. */
-  if (result != 0 || elapsed_ms(&start, &end) < 4000) {
-    return fail("windows pselect timeout behavior");
-  }
-#else
+  /* Windows gets a real (if polled rather than kernel-async) SIGCHLD
+   * delivery path too -- see __crt_windows_check_sigchld_pending() in
+   * libc/src/arch/windows/common/syscall.c and its call from
+   * __crt_signal_backend_set_mask() in libc/src/arch/windows/common/
+   * signal_backend.c -- so the same assertions apply on every host, not
+   * just Linux/macOS's real kernel-level delivery. */
   if (result != -1 || errno != EINTR) {
     return fail("pselect did not report the already-pending SIGCHLD");
   }
-  /* The actual regression check: before the pselect() atomicity fix, this
-   * call silently missed the already-pending signal and blocked for the
-   * full 5-second timeout (in the original GNU make jobserver hang,
+  /* The actual regression check: before the pselect() atomicity fix (Linux/
+   * macOS) / before the child-registry-scan-on-unblock backend (Windows),
+   * this call silently missed the already-pending signal and blocked for
+   * the full 5-second timeout (in the original GNU make jobserver hang,
    * forever). Require it to return in well under that -- catches a real
    * regression instead of merely tolerating a slow pass. */
   if (elapsed_ms(&start, &end) >= 2000) {
@@ -154,7 +151,6 @@ int main(void) {
   if (!sigchld_seen) {
     return fail("SIGCHLD handler never ran");
   }
-#endif
 
   if (waitpid(pid, &status, 0) != pid || !WIFEXITED(status) ||
       WEXITSTATUS(status) != 42) {
