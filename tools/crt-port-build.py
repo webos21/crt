@@ -321,6 +321,29 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
             found_objdump = env.get("OBJDUMP") or find_windows_host_tool(("llvm-objdump.exe", "llvm-objdump"))
             if found_objdump:
                 env["OBJDUMP"] = found_objdump
+            # Same reasoning as $LD/$DLLTOOL/$OBJDUMP above, for nm: this
+            # project never wraps/aliases a bare "nm" into the rootfs
+            # (only AR/RANLIB/STRIP/LD/DLLTOOL/OBJDUMP are), so without
+            # this, libtool's own AC_PATH_TOOL-style NM search comes up
+            # empty and silently falls back to the literal, unresolved
+            # string "nm" -- confirmed for real via config.log
+            # (`NM='nm'`). That alone doesn't fail configure outright
+            # (unlike $LD), but it does silently break libtool's own
+            # "checking command to parse nm output" self-test (its
+            # `$NM conftest.o | $lt_cv_sys_global_symbol_pipe` probe
+            # never runs a real nm, so `lt_cv_sys_global_symbol_pipe`
+            # stays empty) -- which resurfaces much later, at actual
+            # link time, for any library whose cygwin*/mingw*
+            # `export_symbols_cmds` needs a real symbol list (`$NM
+            # $libobjs $convenience | $global_symbol_pipe | $SED ...`):
+            # an empty $global_symbol_pipe leaves two pipe characters
+            # back to back with nothing between them, a bare shell
+            # syntax error ("unexpected '|'"), hit for real building
+            # libpng's own libpng16.la. Pre-setting $NM skips the whole
+            # broken PATH search the same way $LD already does.
+            found_nm = env.get("NM") or find_windows_host_tool(("llvm-nm.exe", "llvm-nm"))
+            if found_nm:
+                env["NM"] = found_nm
             # Generalized from the libpng-era investigation (see
             # porting/recipes/libpng.json's own notes): libtool's
             # deplibs_check_method for cygwin*/mingw* hosts is
@@ -357,7 +380,7 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
     env["RANLIB"] = env.get("RANLIB") or shutil.which("llvm-ranlib") or shutil.which("ranlib") or "ranlib"
     env["STRIP"] = env.get("STRIP") or shutil.which("llvm-strip") or shutil.which("strip") or "strip"
     if target_os == "windows" and use_crt_shell:
-        for tool_var in ("AR", "RANLIB", "STRIP", "LD", "DLLTOOL", "OBJDUMP"):
+        for tool_var in ("AR", "RANLIB", "STRIP", "LD", "DLLTOOL", "OBJDUMP", "NM"):
             if not env.get(tool_var):
                 continue
             tool_path = Path(env[tool_var])
@@ -469,6 +492,38 @@ def apply_recipe_env(env, recipe, target_os, root):
     if include_dirs:
         flags = " ".join(f"-I{path_for_crt_shell(root / d)}" for d in include_dirs)
         env["CPPFLAGS"] = f"{flags} {env['CPPFLAGS']}" if env.get("CPPFLAGS") else flags
+    # force_include: same path-templating as include_dirs, but for a file
+    # unconditionally prepended to every translation unit via -include
+    # (GCC/Clang), rather than merely added to the include search path.
+    # Needed when the thing that must see a compatibility shim first
+    # doesn't itself #include anything this project names or controls --
+    # e.g. GNU Libtool's own generated `.libs/lt-*.c` "uninstalled
+    # execution" wrapper source (ltmain.sh's own template, not the port's
+    # source at all), which #include <unistd.h>/<stdio.h>/... by name, so
+    # there's no upstream #include for a like-named shim (the
+    # include_dirs/porting/shims/win32/windows.h trick) to intercept.
+    #
+    # Deliberately folded into CFLAGS, not CPPFLAGS. Automake's implicit
+    # compile rule reads both ($(CC) ... $(AM_CPPFLAGS) $(CPPFLAGS)
+    # $(AM_CFLAGS) $(CFLAGS)), but its LINK rule -- $(CCLD) $(AM_CFLAGS)
+    # $(CFLAGS) $(AM_LDFLAGS) $(LDFLAGS) -o $@ -- never references
+    # CPPFLAGS at all. That LINK line is exactly where a `.libs/lt-*.c`
+    # wrapper actually gets compiled: libtool generates and compiles it
+    # in one step as part of linking an executable against an
+    # uninstalled shared library, so it only ever sees the LINK line's
+    # flags. Confirmed directly against a real libpng build log: the
+    # pngtest.o *compile* line carried -include correctly (via
+    # CPPFLAGS), but the pngtest.exe *link* line -- where lt-pngtest.c
+    # is actually compiled -- carried no -include at all, leaving
+    # _getcwd/_stat/_chmod/_putenv/_setmode/_spawnv undeclared even
+    # though the shim itself was already verified correct in isolation.
+    # CFLAGS is the one accumulator var common to both rules.
+    force_include = build.get("force_include", []) + build.get("target_overrides", {}).get(target_os, {}).get(
+        "force_include", []
+    )
+    if force_include:
+        flags = " ".join(f"-include {path_for_crt_shell(root / f)}" for f in force_include)
+        env["CFLAGS"] = f"{flags} {env['CFLAGS']}" if env.get("CFLAGS") else flags
 
 
 def command_value_argv(value, preset_build_dir, target_os):
