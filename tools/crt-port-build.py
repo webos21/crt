@@ -366,6 +366,52 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
             # Harmless no-op for any recipe whose configure script
             # doesn't use GNU Libtool at all.
             env.setdefault("lt_cv_deplibs_check_method", "pass_all")
+            # libtool's build-to-host file/path name conversion is a
+            # *separate* axis from the $host mingw* classification above
+            # -- it does not affect whether shared libraries/import libs/
+            # -DDLL_EXPORT get built at all, only how build-side path
+            # strings get rewritten before landing in a `.libs/lt-*.c`
+            # cwrapper's LIB_PATH_VALUE/EXE_PATH_VALUE (and a few other
+            # wrapper-generation spots). configure's own logic:
+            #   case $host in *-*-mingw* )
+            #     case $build in *-*-mingw* | *-*-windows* ) # actually msys
+            #       lt_cv_to_host_file_cmd=func_convert_file_msys_to_w32
+            # i.e. autoconf's authors used "$build *also* looks like
+            # mingw/windows" purely as a historical proxy for "configure
+            # is running inside a real MSYS2 shell" -- true for every
+            # toolchain they anticipated, but not for this project's own
+            # from-scratch mksh/toybox PAL, which genuinely is a native
+            # $build with no MSYS/Cygwin userland underneath it at all.
+            # func_convert_file_msys_to_w32's actual implementation
+            # shells out to a literal `cmd //c echo ...` to exploit real
+            # MSYS's automatic POSIX-argv-to-Windows-path translation --
+            # a real Windows cmd.exe this project's own rootfs $PATH
+            # (deliberately scoped to just its own sysroot bin dirs)
+            # cannot reach, so the conversion always fails ("Could not
+            # determine host file/path name"). libtool then falls back to
+            # its own documented "deliberately simplistic" recovery: a
+            # blind `s/:/;/g` on the *original*, already-host-native
+            # string -- which corrupts every path this project uses
+            # (`C:/Users/...`), since the drive-letter colon isn't a path-
+            # list separator the way a real POSIX build's colons would
+            # be. Confirmed directly: a real generated `.libs/lt-*.c`
+            # wrapper's LIB_PATH_VALUE ended up as `"C;/Users/..."`.
+            # Fixed the same standard way as lt_cv_deplibs_check_method
+            # just above: both lt_cv_to_host_file_cmd and its sibling
+            # lt_cv_to_tool_file_cmd are autoconf cache variables (the
+            # `${VAR+y}` idiom skips detection when pre-set), and
+            # func_convert_file_noop -- libtool's own built-in "paths are
+            # already in host format, nothing to convert" case (the exact
+            # value real non-mingw/cygwin hosts already get in the "else"
+            # branch of that same case statement) -- is precisely correct
+            # here, since this project's paths never were MSYS/POSIX-
+            # style to begin with. (to_host_path_cmd has no cache variable
+            # of its own; it's derived at runtime from to_host_file_cmd by
+            # libtool's func_init_to_host_path_cmd, so fixing the file
+            # variant fixes the path variant too.) Harmless no-op for any
+            # recipe whose configure script doesn't use GNU Libtool.
+            env.setdefault("lt_cv_to_host_file_cmd", "func_convert_file_noop")
+            env.setdefault("lt_cv_to_tool_file_cmd", "func_convert_file_noop")
         make_suffix = ".exe" if target_os == "windows" else ""
         port_make = port_prefix / "bin" / f"make{make_suffix}"
         if port_make.exists():
