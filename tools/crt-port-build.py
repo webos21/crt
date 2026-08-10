@@ -321,6 +321,28 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
             found_objdump = env.get("OBJDUMP") or find_windows_host_tool(("llvm-objdump.exe", "llvm-objdump"))
             if found_objdump:
                 env["OBJDUMP"] = found_objdump
+            # Generalized from the libpng-era investigation (see
+            # porting/recipes/libpng.json's own notes): libtool's
+            # deplibs_check_method for cygwin*/mingw* hosts is
+            # `file_magic file format (pei*-i386(.*architecture: i386)?
+            # |pe-arm-wince|pe-x86-64|pe-aarch64)`, matched against
+            # `$OBJDUMP -f`'s own output -- but LLVM's llvm-objdump
+            # reports `file format coff-x86-64`/`coff-aarch64` for this
+            # project's own real .dll/.so files, never GNU objdump's
+            # `pe-x86-64` spelling the hardcoded regex expects. This is
+            # a fixed, permanent fact about this toolchain (not
+            # something a working `file`/objdump install on this host
+            # could ever satisfy), true for every Windows configure-
+            # based recipe that happens to go through GNU Libtool, not
+            # just the one that first exposed it -- so it belongs here,
+            # not repeated per-recipe. Autoconf's `${VAR+set}` cache-
+            # variable idiom (confirmed by reading a real generated
+            # `configure`'s own logic) honors this pre-set environment
+            # variable and skips the broken detection entirely, the same
+            # mechanism $LD/$DLLTOOL/$OBJDUMP already rely on above.
+            # Harmless no-op for any recipe whose configure script
+            # doesn't use GNU Libtool at all.
+            env.setdefault("lt_cv_deplibs_check_method", "pass_all")
         make_suffix = ".exe" if target_os == "windows" else ""
         port_make = port_prefix / "bin" / f"make{make_suffix}"
         if port_make.exists():
