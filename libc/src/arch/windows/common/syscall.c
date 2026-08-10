@@ -3986,18 +3986,54 @@ long __crt_sys_lstat_path(const char* path, struct stat* st) {
   char translated_path[4096];
   const char* host_path = translate_path_for_host(path, translated_path);
   DWORD attrs;
-  long result = __crt_sys_stat_path(path, st);
+  HANDLE handle;
+  long result;
 
-  if (result != 0) {
-    return result;
-  }
   attrs = GetFileAttributesA(host_path);
   if (attrs == INVALID_FILE_ATTRIBUTES) {
     return fail_last_error();
   }
-  if ((attrs & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
-    st->st_mode = (st->st_mode & ~S_IFMT) | S_IFLNK;
+  /* GetFileAttributesA() itself never follows a reparse point -- it
+   * always reports the link's own attributes (including
+   * FILE_ATTRIBUTE_REPARSE_POINT), never the target's. If this isn't a
+   * symlink at all, the existing stat() path (which legitimately does
+   * want to follow real files/dirs) is unchanged. */
+  if ((attrs & FILE_ATTRIBUTE_REPARSE_POINT) == 0) {
+    return __crt_sys_stat_path(path, st);
   }
+  /* It IS a symlink: this used to unconditionally call
+   * __crt_sys_stat_path() first, which opens via a plain CreateFileA()
+   * (no FILE_FLAG_OPEN_REPARSE_POINT) -- Windows transparently follows
+   * the link to its target for that call, exactly the opposite of what
+   * lstat() means. For a DANGLING symlink (a perfectly normal, valid
+   * case -- e.g. autoconf's own `ln -s conf$$.file conf$$.dir` "does ln
+   * -s work" probe deliberately creates one) that follow-through open
+   * fails outright, so lstat() itself failed even though the symlink
+   * unquestionably exists and lstat() is specifically the call that's
+   * supposed to work on it regardless of whether the target does --
+   * confirmed for real: `ls -la`/`rm -f` on such a link both failed
+   * with a bare "Input/output error", the generic fallback
+   * map_windows_error() gives an unrecognized Windows error code,
+   * because the underlying open-and-follow attempt was failing on
+   * every single caller that ever needed to lstat() a dangling link at
+   * all, not just this one autoconf probe. Fixed by opening the link
+   * itself via FILE_FLAG_OPEN_REPARSE_POINT (the same flag
+   * __crt_sys_readlink() already uses for the same reason) instead of
+   * following it, so a dangling target no longer matters. */
+  handle = CreateFileA(host_path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                       0, OPEN_EXISTING,
+                       FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS |
+                           FILE_FLAG_OPEN_REPARSE_POINT,
+                       0);
+  if (handle == INVALID_HANDLE_VALUE) {
+    return fail_last_error();
+  }
+  result = stat_from_handle(handle, st);
+  CloseHandle(handle);
+  if (result != 0) {
+    return result;
+  }
+  st->st_mode = (st->st_mode & ~S_IFMT) | S_IFLNK;
   return 0;
 }
 

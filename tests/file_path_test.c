@@ -470,6 +470,37 @@ int main(void) {
     close(fd);
     return fail("windows readlink");
   }
+  memset(&st, 0, sizeof(st));
+  if (lstat("sample.link", &st) != 0 || !S_ISLNK(st.st_mode)) {
+    close(fd);
+    return fail("windows lstat symlink");
+  }
+  /* __crt_sys_lstat_path() used to delegate to __crt_sys_stat_path(),
+   * which opens via a plain CreateFileA() (no
+   * FILE_FLAG_OPEN_REPARSE_POINT) and so transparently follows the
+   * link to its target -- the opposite of what lstat() means, and
+   * fatal for a *dangling* symlink specifically: the follow-through
+   * open fails outright since there's nothing at the far end, so
+   * lstat() itself failed even though the symlink unquestionably
+   * exists and lstat() is exactly the call meant to work on it
+   * regardless of whether the target does. Hit for real: autoconf's
+   * own `ln -s conf$$.file conf$$.dir` "does ln -s work" sanity probe
+   * (part of every generated `configure` script) deliberately creates
+   * one, and both `ls -la`/`rm -f` on it failed with a bare "Input/
+   * output error" during libpng's real `./configure` run. */
+  if (symlink("no-such-target.tmp", "dangling.link") != 0) {
+    close(fd);
+    return fail("windows dangling symlink create");
+  }
+  memset(&st, 0, sizeof(st));
+  if (lstat("dangling.link", &st) != 0 || !S_ISLNK(st.st_mode)) {
+    close(fd);
+    return fail("windows lstat dangling symlink");
+  }
+  if (remove("dangling.link") != 0) {
+    close(fd);
+    return fail("windows remove dangling symlink");
+  }
   if (remove("sample.link") != 0) {
     close(fd);
     return fail("windows remove symlink");
