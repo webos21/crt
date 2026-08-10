@@ -376,6 +376,16 @@ set_tests_properties(fork_signal_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "fork_signal_test: ok"
 )
 
+add_crt_test(pselect_sigchld_test pselect_sigchld_test.c)
+set_tests_properties(pselect_sigchld_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "pselect_sigchld_test: ok"
+  # The scenario under test is a real fork() + blocked-SIGCHLD +
+  # pselect() lost-wakeup pattern (docs/signal_delivery.md); the test
+  # itself uses a bounded 5s pselect() timeout so a regression fails
+  # fast instead of hanging, but this TIMEOUT is the outer safety net.
+  TIMEOUT 30
+)
+
 add_crt_test(fork_runtime_reset_test fork_runtime_reset_test.c)
 set_tests_properties(fork_runtime_reset_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "fork_runtime_reset_test: ok"

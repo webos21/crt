@@ -1362,6 +1362,32 @@ Detailed policy and provenance stay in `docs/` and import manifests.
 
 - **Fixed a real, general Windows `lstat()` bug found in libpng's own `configure` output: `rm: conf14228.dir/conf14228.file: Input/output error` (harmless-looking but a genuine PAL defect, not a real autoconf failure).** Root-caused, not just silenced: `__crt_sys_lstat_path()` (`libc/src/arch/windows/common/syscall.c`) used to unconditionally delegate to `__crt_sys_stat_path()` first, which opens via a plain `CreateFileA()` (no `FILE_FLAG_OPEN_REPARSE_POINT`) -- Windows transparently follows a symlink to its target for that call, the exact opposite of what `lstat()` means. For a *dangling* symlink (a completely normal, valid case -- e.g. autoconf's own `ln -s conf$$.file conf$$.dir` "does `ln -s` work" sanity probe, present in essentially every generated `configure` script, deliberately creates one as part of detecting the MSYS `ln -s file dir` gotcha) that follow-through open fails outright since there's nothing at the far end, so `lstat()` itself failed even though the symlink unquestionably exists and `lstat()` is specifically the call that's supposed to work on it regardless of whether the target does. Confirmed directly via an isolated repro (`ln -s conf$$.file conf$$.dir`, then `ls -la`/`rm -f` on the resulting dangling link): `ls -la` showed the entry's own metadata as all `?` (its `lstat()` call was failing too) and `rm -f` reproduced the exact same "Input/output error". Fixed by making `__crt_sys_lstat_path()` check `GetFileAttributesA()` first (which never follows a reparse point on its own) and, only for symlinks, open the link itself via `FILE_FLAG_OPEN_REPARSE_POINT` (the same flag `__crt_sys_readlink()` already uses for the identical reason) instead of the target -- non-symlink paths are unaffected, still delegating to the existing `__crt_sys_stat_path()`. Verified: the isolated repro now succeeds end to end (`ls -la` shows correct symlink metadata, `rm -f`/`rmdir` both exit 0); a real libpng `./configure` re-run no longer emits the error at all; added a regression case to `tests/file_path_test.c` (create a symlink to a nonexistent target, assert `lstat()` succeeds and reports `S_ISLNK`, assert `remove()` succeeds) since no existing test exercised a dangling symlink specifically. Full `ctest` 79/79. General CRT/PAL fix, not port-specific -- any future recipe (or any other program) that ever creates or encounters a dangling symlink on Windows was equally affected.
 
+- **Verified the Linux signal backend (`docs/signal_delivery.md`) on a real
+  Linux aarch64 host, and added the permanent `fork()` + blocked-`SIGCHLD` +
+  `pselect()` regression test.** Both were open "in progressing" items
+  blocked on actual Linux hardware being available; this session had one.
+  Full `ctest` 74/74 via `cmake --build --preset linux-host-ninja-debug` +
+  `ctest --preset linux-host-ninja-debug`. Also ran the real motivating
+  scenario end to end: `port-rebuild-zlib`'s `./configure && make -j 4 &&
+  make install` (this host has 4 cores, so `crt-port-build.py` picks `-j 4`
+  rather than the macOS repro's `-j 10`, same jobserver/`pselect()` path)
+  completed cleanly, `ldd` on the resulting `libz.so.1.3.1` resolved
+  `libc.so`/`libm.so`/`libdl.so`/`libc++.so` to this project's own sysroot,
+  and `examplesh`'s real compress/uncompress round trip passed. Added
+  `tests/pselect_sigchld_test.c` (registered as `pselect_sigchld_test_runs`
+  in `tests/CMakeLists.txt`, `TIMEOUT 30` outer safety net): installs a real
+  `SIGCHLD` handler, blocks `SIGCHLD`, forks a child that exits immediately,
+  sleeps briefly so the kernel queues the now-pending signal, then calls
+  `pselect()` (unblocking `SIGCHLD`) against a pipe kept deliberately
+  unreadable, with a bounded 5s timeout; asserts `-1`/`EINTR` in well under
+  2s on Linux/macOS, and the honest bounded-timeout behavior on Windows
+  (no-op signal backend, see doc). Verified the test actually exercises the
+  fix, not just passes vacuously: temporarily disabled the `pselect()`
+  atomicity check in `libc/src/poll.c` and confirmed the test then blocked
+  for its full 5s timeout and failed, before reverting. See
+  `docs/signal_delivery.md`'s new "Linux Verification"/"Regression Test"
+  sections for the full writeup.
+
 ## in progressing
 
 - Investigate the intermittent `make install` `ln: ... File exists` failure
@@ -1370,11 +1396,6 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   (see the libpng shared-pass entry above) -- reproduce from a genuinely cold
   `out/` directory to rule out same-session Windows delete-pending/handle-
   timing noise before treating it as a real toybox/CRT `rm`-on-symlink bug.
-- Verify the new Linux signal backend (`docs/signal_delivery.md`) on an
-  actual Linux host; it is currently code-review-verified only, since this
-  project's CMake presets refuse to cross-compile from macOS.
-- Add a permanent regression test for the `fork()` + blocked-`SIGCHLD` +
-  `pselect()` pattern used to verify the signal delivery fix.
 
 - Keep the Windows mksh child-spec path stable for real configure workloads:
   - external command execution;

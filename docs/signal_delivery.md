@@ -115,12 +115,13 @@ restorer (`__crt_signal_restore_rt`, in `syscall.S`) is
 (debugger-quality-only, not functionally required), with no trailing `ret`
 since `rt_sigreturn` never returns normally.
 
-**Verification caveat:** this project's CMake presets refuse to cross-compile
+This project's CMake presets refuse to cross-compile
 (`cmake --preset linux-host-ninja-debug` fails immediately unless run on an
-actual Linux host), so the Linux backend is code-review-verified against
-Android Bionic and the Linux kernel UAPI headers only, not built or executed
-in this session. Same caveat as the Linux/Windows portions of
-`docs/dynamic_loading.md`.
+actual Linux host), so this backend was originally code-review-verified
+against Android Bionic and the Linux kernel UAPI headers only, without being
+built or executed. See "Linux Verification" below for the real-host
+follow-up that closed that gap. Same caveat still applies to the
+Linux/Windows portions of `docs/dynamic_loading.md`.
 
 ### Windows
 
@@ -196,13 +197,43 @@ begins.
   binary issue: a build/install step that does not depend on the changed
   target will happily run old code.
 
+## Linux Verification
+
+Verified end to end on a real Linux aarch64 host (previously code-review-only,
+per the caveat above):
+
+- Full `ctest` suite: 74/74 passing via `cmake --build --preset
+  linux-host-ninja-debug` + `ctest --preset linux-host-ninja-debug`.
+- The real `port-rebuild-zlib` `./configure && make -j 4 && make install`
+  (this host has 4 cores, so `crt-port-build.py` picks `-j 4` rather than the
+  `-j 10` used on the macOS repro; same jobserver/`pselect()` code path)
+  completed cleanly, and the resulting `libz.so.1.3.1` resolves its
+  `libc.so`/`libm.so`/`libdl.so`/`libc++.so` dependencies to this project's
+  own sysroot via `ldd`, with `examplesh`'s real compress/uncompress round
+  trip passing.
+- A new permanent regression test, `tests/pselect_sigchld_test.c` (see
+  "Regression Test" below), passes in ~0.2s.
+- Regression sanity check on the fix itself: temporarily disabling the
+  `pselect()` atomicity check (`libc/src/poll.c`) made the new test block for
+  its full 5s bounded timeout and fail, confirming the test actually
+  exercises the fix rather than passing vacuously; reverted before landing.
+
+## Regression Test
+
+`tests/pselect_sigchld_test.c` (registered as `pselect_sigchld_test_runs` in
+`tests/CMakeLists.txt`, `TIMEOUT 30` as an outer safety net) is the permanent
+regression test for the `fork()` + blocked-`SIGCHLD` + `pselect()` pattern:
+it installs a real `SIGCHLD` handler, blocks `SIGCHLD`, forks a child that
+exits immediately, sleeps briefly so the kernel queues the now-pending
+`SIGCHLD`, then calls `pselect()` (unblocking `SIGCHLD` for the duration)
+against a pipe read end that is kept deliberately unreadable (the write end
+stays open in the parent) with a 5s timeout. On Linux/macOS it asserts
+`pselect()` returns `-1`/`EINTR` in well under 2s; on Windows (an honest
+no-op signal backend, see above) it asserts the call legitimately runs out
+its bounded timeout instead.
+
 ## Next Steps
 
-- Verify the Linux backend on an actual Linux host once available (build and
-  test presets currently refuse to run from macOS).
-- Add a permanent regression test for the `fork()` + blocked-`SIGCHLD` +
-  `pselect()` pattern (the isolated repro above), so this does not silently
-  regress.
 - Decide whether Windows should eventually bridge `SetConsoleCtrlHandler`/
   vectored exception handling into `signal_actions[]`/`raise()`, or whether
   that stays out of scope indefinitely.
