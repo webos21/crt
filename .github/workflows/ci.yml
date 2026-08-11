@@ -89,11 +89,20 @@ jobs:
       # fetched directly from the latest GitHub release rather than
       # through a package manager, since chocolatey/winget LLVM package
       # availability for the arm64 host case is not reliably native.
+      #
+      # Authenticated with the auto-provided GITHUB_TOKEN (needs no repo
+      # secret setup): unauthenticated GitHub API calls are capped at 60
+      # requests/hour per source IP, which Actions runners can share and
+      # exhaust; authenticated calls get 1000/hour and stopped failing
+      # this step outright on the very second CI run.
       - name: Install LLVM (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/llvm/llvm-project/releases/latest"
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; "User-Agent" = "crt-ci" }
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/llvm/llvm-project/releases/latest" -Headers $headers
           $asset = $release.assets | Where-Object { $_.name -like "LLVM-*-${{ matrix.llvm_asset }}.exe" } | Select-Object -First 1
           if (-not $asset) {
             throw "Could not find an LLVM '${{ matrix.llvm_asset }}' installer asset in release $($release.tag_name)"
