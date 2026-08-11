@@ -24,25 +24,31 @@ substantive update.
     `/system/bin/mksh <script>`) that reproduces the exact same failure
     in under a second -- the first job always succeeds, every job after
     it fails.
-  - **First hypothesis, ruled out**: with `--jobs 2` specifically (not
-    higher), the build hung completely instead of crashing. `lldb`
-    attached to the stuck `make.exe` showed its main thread blocked in
-    `NtReadFile`, reached via `jobserver_setup() -> fcntl(F_SETFL) ->
-    fstat() -> windows_handle_looks_executable() -> ReadFile()`: this
-    project's own Windows `fstat()` unconditionally peeks a handle's
-    first 2 bytes (looking for an `MZ`/`#!` executable signature) via
+  - **First bug found, a real and necessary co-fix but not the whole
+    story**: with `--jobs 2` specifically (not higher), the build hung
+    completely instead of crashing. `lldb` attached to the stuck
+    `make.exe` showed its main thread blocked in `NtReadFile`, reached via
+    `jobserver_setup() -> fcntl(F_SETFL) -> fstat() ->
+    windows_handle_looks_executable() -> ReadFile()`: this project's own
+    Windows `fstat()` unconditionally peeks a handle's first 2 bytes
+    (looking for an `MZ`/`#!` executable signature) via
     `SetFilePointerEx`+`ReadFile`, even for a pipe -- GNU Make's own
     jobserver pipe, freshly created with only 1 byte of real data in it
     for `-j 2` specifically, meaning the 2-byte peek blocked forever with
-    nothing left to ever write the second byte. Real, separate bug (fixed
-    below as well: `__crt_sys_fstat()`, `libc/src/arch/windows/common/
-    syscall.c`, now special-cases `GetFileType(handle) == FILE_TYPE_PIPE`
-    the same way it already special-cased `FILE_TYPE_CHAR`, reporting
-    `S_IFIFO` via a new `stat_virtual_pipe()` instead of ever touching
-    `windows_handle_looks_executable()`) -- but fixing it only changed
-    the `-j 2` symptom from a hang into the same `Bad file
-    descriptor`/`Error 127` crash every other `-jN` already showed,
-    confirming it was not the root cause of the crash itself.
+    nothing left to ever write the second byte. Fixed (`__crt_sys_fstat()`,
+    `libc/src/arch/windows/common/syscall.c`, now special-cases
+    `GetFileType(handle) == FILE_TYPE_PIPE` the same way it already
+    special-cased `FILE_TYPE_CHAR`, reporting `S_IFIFO` via a new
+    `stat_virtual_pipe()` instead of ever touching
+    `windows_handle_looks_executable()`) -- this changed the `-j 2`
+    symptom from a hang into the same `Bad file descriptor`/`Error 127`
+    crash every other `-jN` already showed, meaning a *second*, deeper bug
+    was still there underneath it (found next) -- but, importantly, this
+    fix was accidentally lost partway through the session (a `git
+    checkout` used to strip temporary debug instrumentation reverted this
+    real fix along with it, unnoticed until the `-j 2` hang reappeared
+    during the follow-up investigation below) and had to be re-applied a
+    second time; re-verified identically afterward.
   - **Traced the real crash with targeted, reverted `crtdbg_log()`
     instrumentation** (temporary; a per-PID-file WinAPI-level logger,
     since a first attempt sharing one log file across many concurrent
@@ -93,19 +99,36 @@ substantive update.
     and install correctly, and the resulting shared library's own
     `examplesh` smoke test (compress/uncompress/gzread/inflate/
     inflateSync/dictionary round trips) passes end to end.
-  - **Not yet resolved, tracked separately in `TODO.md`**: the same real
-    `-j 8` zlib build still prints
+  - **Also fully resolved, same session, by the same `fstat()`/pipe fix
+    above (re-applied after being accidentally lost, see above)**: the
+    real `-j 8` zlib build kept printing
     `make.exe: INTERNAL: Exiting with 1 jobserver tokens available;
-    should be 8!` once, after all work has already completed
-    successfully -- a distinct, non-fatal GNU Make-side token-accounting
-    question, not the same class of bug as the crash above (confirmed:
-    none of zlib's compile jobs are recursive `$(MAKE)` invocations, so
-    the jobserver pipe fds never go through this PAL's spawn/fd-
-    inheritance path at all for this build). `tools/crt-port-build.py`'s
-    `jobs = 1 if target_os == "windows" and use_crt_shell` default is
-    left in place pending that follow-up and a larger-scale stress run;
-    a new `--jobs N` CLI flag on the script itself now makes opting into
-    parallel builds for testing a one-line change instead of a hand-edit.
+    should be 8!` once at the very end, even after the `EBADF` crash fix
+    above made the rest of the build succeed -- a distinct-looking,
+    non-fatal GNU Make jobserver token-accounting warning
+    (`clean_jobserver()`/`jobserver_acquire_all()` in `src/main.c`/
+    `src/posixos.c`: at exit, GNU Make drains its own jobserver pipe and
+    compares the recovered token count against how many it started with).
+    Initially assumed unrelated (confirmed none of zlib's compile jobs
+    are recursive `$(MAKE)` invocations, so the jobserver pipe fds never
+    go through this PAL's spawn/fd-inheritance path for this build) --
+    but `jobserver_acquire_all()` itself calls `set_blocking(job_fds[0],
+    1)` right before draining the pipe, which routes through the exact
+    same `fcntl(F_SETFL) -> fstat() -> windows_handle_looks_executable()`
+    path as the `-j 2` hang above, silently, destructively consuming real
+    token bytes out of the pipe as a side effect of just checking its
+    blocking mode. Once the `fstat()`/pipe fix above was re-applied, this
+    warning disappeared completely -- confirmed with a fresh `-j 8` build
+    (clean exit, no warning) and a `-j 16` build (also clean, after an
+    unrelated transient Windows delete-pending file-lock error on the
+    first attempt -- see the "Windows symlink/delete timing verification"
+    thread in `TODO.md` -- cleared on immediate retry).
+    `tools/crt-port-build.py`'s `jobs = 1 if target_os == "windows"
+    and use_crt_shell` default is left in place pending a real, much
+    larger `libpng`/`libffi`-scale `-jN` stress run (not yet tried) before
+    flipping it; the script's own new `--jobs N` CLI flag makes opting
+    into parallel builds for testing a one-line change instead of a
+    hand-edit in the meantime.
 
 - **Root-caused and fixed the real mksh bug found chasing the
   `sed: bad pattern` errors earlier.** Three rounds of investigation this

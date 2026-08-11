@@ -20,33 +20,24 @@ Four active threads, not a flat list of one-off items:
   registry at once, subshell/redirection edge cases -- was never actually
   exercised on Windows until this thread opened; every Windows port build
   had always run serial `make -j 1`.
-  - **The fatal crash (`make.exe: /system/bin/mksh: Bad file descriptor`,
-    then `Error 127`) is root-caused and fixed -- see `HISTORY.md`'s
-    2026-08-11 entry for the full investigation and verification.** A
-    real `-jN` port build (zlib, `-j 8`) now completes end to end
+  - **Both the fatal crash (`make.exe: /system/bin/mksh: Bad file
+    descriptor`, then `Error 127`) and the jobserver token-count mismatch
+    it was originally bundled with (`INTERNAL: Exiting with N jobserver
+    tokens available; should be M!`) are root-caused and fixed -- see
+    `HISTORY.md`'s 2026-08-11 entries for the full investigation and
+    verification.** Both traced back to the same underlying bug
+    (`__crt_sys_fstat()` destructively `ReadFile()`-ing pipe content) hit
+    from two different call sites, so the same fix resolved both at once.
+    Real `-jN` port builds (zlib, `-j 8` and `-j 16`, repeated) now
+    complete end to end with zero jobserver warnings of any kind
     (compile, archive, shared-library link, install, and the resulting
     `libz.so`'s own compress/uncompress smoke test all pass). Still left
     serial by default in `tools/crt-port-build.py`
-    (`jobs = 1 if target_os == "windows" and use_crt_shell`) pending the
-    item directly below and a real `libpng`/`libffi`-scale stress run --
-    pass the script's own `--jobs N` flag to opt into parallel builds for
-    testing.
-  - **New, separate, non-fatal residual found while verifying the fix**:
-    the same real `-j 8` zlib build above still ends with
-    `make.exe: INTERNAL: Exiting with 1 jobserver tokens available;
-    should be 8!` printed once, after all compile/link/install work has
-    already completed successfully (exit 0, correct artifacts). Not yet
-    investigated -- GNU Make's own jobserver token bookkeeping
-    (`jobserver_acquire`/`jobserver_release`/`jobserver_acquire_all` in
-    `src/posixos.c`) never touches this PAL's fd-inheritance/spawn path
-    directly for non-recursive jobs (confirmed: `jobserver_pre_child`/
-    `jobserver_post_child` only make the jobserver pipe fds inheritable
-    for *recursive* `$(MAKE)` sub-invocations, which none of zlib's
-    compile jobs are), so this is likely a genuine GNU Make-side
-    accounting/timing issue on this port rather than the same fd/spawn
-    class of bug as the fixed crash -- worth its own focused
-    investigation before deciding whether the `jobs = 1` default should
-    actually flip.
+    (`jobs = 1 if target_os == "windows" and use_crt_shell`) pending a
+    real `libpng`/`libffi`-scale stress run (much heavier concurrency and
+    a real dependency graph, not yet tried) before flipping the default
+    -- pass the script's own `--jobs N` flag to opt into parallel builds
+    for testing in the meantime.
   - Harden `waitpid()` and the child registry for many live children,
     configure-script subprocess bursts, and pipeline teardown.
   - Keep the mksh child-spec path (external commands, `cmd | cmd`,

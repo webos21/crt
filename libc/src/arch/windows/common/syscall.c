@@ -3908,14 +3908,52 @@ static long stat_virtual_dev_tty(struct stat* st) {
   return 0;
 }
 
+/* fstat() on a pipe (anonymous or named) must never fall through to
+ * stat_from_handle(), which calls windows_handle_looks_executable() to
+ * guess S_IXUSR by seeking to offset 0 and ReadFile()-ing the first two
+ * bytes looking for an "MZ"/"#!" signature. For a real seekable file
+ * that's a harmless peek-and-rewind; for a pipe it is actively wrong on
+ * two counts: SetFilePointerEx() on a pipe handle doesn't establish a
+ * real position to "rewind" to (pipes aren't seekable), so the ReadFile()
+ * call PERMANENTLY, DESTRUCTIVELY consumes up to 2 bytes from the pipe's
+ * data stream with no way to put them back -- silently corrupting
+ * whatever protocol is using the pipe (found via GNU Make's own
+ * jobserver: fd_noinherit()'s fcntl(F_GETFD) is harmless, but
+ * set_blocking()'s fcntl(F_GETFL)/fcntl(F_SETFL) both route through
+ * fstat() in this project's generic fcntl() implementation
+ * (libc/src/fd.c), reaching this exact path on the jobserver pipe's read
+ * end right after jobserver_setup() has written its initial tokens into
+ * it -- observed hanging outright under `-jN` with N as low as 2: with
+ * only one token (one byte) in the pipe, ReadFile() blocks waiting for
+ * the second byte the 2-byte read request asked for, since nothing else
+ * will ever write to that pipe until jobserver_setup() itself returns).
+ * Matches windows_ioctl_fionread_handle()'s existing FILE_TYPE_PIPE
+ * handling (PeekNamedPipe(), never ReadFile()) -- this is the same class
+ * of bug, just in fstat() instead of the FIONREAD ioctl. */
+static long stat_virtual_pipe(struct stat* st) {
+  if (st == 0) {
+    return -EFAULT;
+  }
+  memset(st, 0, sizeof(*st));
+  st->st_mode = S_IFIFO | S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
+  st->st_nlink = 1;
+  st->st_blksize = 4096;
+  return 0;
+}
+
 long __crt_sys_fstat(int fd, struct stat* st) {
   HANDLE handle = get_fd_handle(fd);
+  DWORD fstat_file_type;
 
   if (handle == INVALID_HANDLE_VALUE) {
     return -EBADF;
   }
-  if (GetFileType(handle) == FILE_TYPE_CHAR) {
+  fstat_file_type = GetFileType(handle);
+  if (fstat_file_type == FILE_TYPE_CHAR) {
     return stat_virtual_dev_tty(st);
+  }
+  if (fstat_file_type == FILE_TYPE_PIPE) {
+    return stat_virtual_pipe(st);
   }
   return stat_from_handle(handle, st);
 }
