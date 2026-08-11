@@ -693,7 +693,8 @@ What the next attempt should do differently:
 The broker fixed zlib end to end and got libpng most of the way, but kept
 generating new structural failure modes of its own rather than converging:
 recurring orphaned `mksh.exe` processes, named-pipe instance-exhaustion and
-lost-response races (both fixed, see "done" entries in `TODO.md`), missing
+lost-response races (both fixed, see the 2026-08-05..2026-08-06 "Retired the
+spawn broker" entry in `HISTORY.md`), missing
 I/O timeouts (also fixed), and finally the process-tree-reparenting attempt
 above, which regressed the previously-working state (`STATUS_DLL_INIT_FAILED`)
 and had to be reverted rather than shipped half-fixed. Each fix bought

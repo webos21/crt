@@ -692,3 +692,10 @@ See:
 - `docs/shared_libraries.md`
 - `docs/sysroot_ports.md`
 - `docs/porting_status.md`
+
+## License
+
+See [`LICENSE.md`](LICENSE.md). CRT follows the same per-file license policy
+as Android Bionic: project-owned code uses a default BSD-style license, and
+code imported or adapted from Bionic and other upstream projects (mksh,
+toybox, awk, ...) keeps its own original license.

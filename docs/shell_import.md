@@ -68,6 +68,26 @@ Windows mksh target and carries a small guarded source adjustment to use
 `intmax_t`/`uintmax_t` in mksh's internal formatter. This should be revisited if
 mksh upstream gains a native LLP64 path.
 
+The second mksh exception is Windows path separators, gated behind a second,
+independent build define: `MKSH_CRT_WINPATH`. mksh's own `mksh_cdirsep()`/
+`mksh_sdirsep()` macros (`shell/mksh/src/sh.h`) normally recognize only `/` as
+a path separator; under `MKSH_CRT_WINPATH` they also recognize `\`, so real
+Windows-style paths lex and glob correctly. This surfaced a genuine,
+independent bug in `globit()`'s (`shell/mksh/src/eval.c`) path-component
+reconstruction: it hardcoded a canonical `/` when re-inserting the separator
+between reconstructed components, instead of the byte that was actually
+consumed there. On POSIX this is a no-op (the only separator `/` ever equals
+its own hardcoded replacement), but once `\` also counts as a separator, any
+non-pathname string containing a backslash that gets routed through glob() --
+which POSIX unquoted-parameter-expansion legitimately does for values like
+`eval cmd=\"$cmd\"`, the idiom GNU Autoconf/Libtool's own
+`func_execute_cmds()` uses throughout every generated `configure`/`libtool`
+script -- came out corrupted. Fixed at the root by threading the real
+separator byte through `globit()`'s recursion instead of hardcoding `/`; see
+the 2026-08-11 entry in `HISTORY.md` for the full investigation and fix. Since
+the fix lives in the shared, non-`MKSH_CRT_WINPATH`-gated part of `globit()`,
+it is a no-op on POSIX and needs no further exception there.
+
 ## Build Policy
 
 The first imported shell/userland binaries should be static CRT executables.
@@ -231,8 +251,23 @@ close-on-exec filtering, stdio flush policy, child registry/waitpid
 integration, and socket fd transport through `WSADuplicateSocketA()` when
 needed.
 
-Real Windows `fork()` remains a long-term research tranche. The mksh/toybox
-milestone should next focus on the remaining shell patterns around fd 3+
-redirections inside mksh, background commands, and broader configure-script
-coverage. Also keep auditing disabled toybox applets for remaining LLP64
-pointer-to-`long` assumptions before enabling them.
+**Update: real Windows `fork()` is no longer a research tranche -- it is
+implemented and verified on both Windows architectures.** What follows in this
+section was written while it was still open; see `docs/windows_fork_emulation.md`
+for the full, current design (a Cygwin/MSYS-style memory-copy `fork()`, not the
+`TEXEC`-only child-spec adapter described above) and `HISTORY.md` for the
+investigation trail. The `configure`/`make`/`make install` flow now drives
+real third-party ports end to end on Windows (zlib, libpng, libffi, sqlite
+amalgamation -- see `docs/porting_status.md`), not just single external
+commands and pipelines.
+
+The toybox applet set has also grown well past the "minimal, configure-oriented"
+list above -- `which`/`readlink`/`stat`/`touch`/`id`/`xargs`/`awk` (a full
+`onetrueawk` port) and real ERE regex support (via a ported Bionic/NetBSD
+regex engine) were added as later porting work required them, each through the
+same loop this section describes (`newtoys.h` registration +
+`tools/create_rootfs.py`'s `TOYBOX_APPLETS` alias). `shell/toybox/crt/generated/
+newtoys.h` is the current source of truth for exactly which applets are
+enabled, not the list above. Auditing the remaining disabled applets for LLP64
+pointer-to-`long` assumptions before enabling them is still an open,
+ongoing task -- see `TODO.md`.
