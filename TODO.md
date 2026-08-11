@@ -1538,36 +1538,74 @@ Four active threads, not a flat list of one-off items:
     directory with Defender exclusions active, to see if the intermittent
     `ln: ... File exists` failure above also stops reproducing.
 
-- **Root-cause the real mksh double-quote/backslash-reduction bug found
-  chasing the `sed: bad pattern` errors above.** Confirmed via an
-  isolated, controlled comparison against real bash: given the identical
-  raw input, this project's own `mksh` collapses consecutive
-  backslash-pairs inside a double-quoted string more aggressively than
-  POSIX requires (`"\\\\("`, 4 backslashes, should keep 2 per real bash;
-  this mksh keeps only 1 -- confirmed at multiple backslash-pair counts,
-  the ratio holds: this mksh's output length is consistently about half
-  what bash's is). This is a genuine bug in mksh's own double-quote
-  parsing or parameter-substitution code (`shell/mksh/src/lex.c`'s
-  `Subst:` label backslash handling looks POSIX-correct on inspection;
-  the actual over-reduction was empirically isolated to variable
-  *interpolation* via `"$var"`, not the initial assignment -- `${#var}`
-  reports the correct, uncollapsed length immediately after assignment,
-  but printing the same variable via `"$var"` prints too few backslashes
-  -- pointing at `shell/mksh/src/eval.c`'s substitution/expansion path,
-  possibly the `XSUB`/`XSUBPAT`/`DODBMAGIC`-related balanced-parenthesis
-  handling around line 909, though this was not confirmed). **Not yet
-  tied conclusively to the specific `sed: bad pattern` failures** in a
-  real libpng build: two attempts to intercept the actual failing `sed`
-  invocation with a debug argv-logging wrapper installed in the rootfs
-  both failed to capture anything, for two different reasons (the
-  wrapper got silently overwritten by `crt-port-build.py`'s own
-  always-rebuild-`rootfs`-first step; a direct re-run of the exact
-  failing command hit a *different*, unexplained failure where a nested
-  `mksh ./libtool` sub-process couldn't resolve the wrapper's own
-  shebang). Confirmed harmless for libpng specifically (the DLL still
-  builds via `__declspec(dllexport)` markers regardless), so not
-  currently blocking anything -- but a real, general mksh correctness
-  bug that could bite harder on a future port without that fallback.
+- **Root-cause the real mksh bug found chasing the `sed: bad pattern`
+  errors above -- now narrowed to a precise, 100%-reliable, minimal
+  repro, but the exact buggy line is still unfound.** Two rounds of
+  investigation this session (the second explicitly re-opened per user
+  request after the `crt_toybox` `fork_capable_relaunch.c` change, on the
+  hypothesis that it might be related -- ruled out: the `sed: bad
+  pattern` symptom already existed before that change, and re-testing
+  after it changed nothing).
+  - **Found the missing piece**: libtool's own `func_execute_cmds()`
+    (`ltmain.sh`, present verbatim in every generated `libtool` script)
+    evaluates each stored `*_cmds` command *twice* -- once implicitly
+    when the script itself was first parsed, and again explicitly via
+    `eval cmd=\"$cmd\"` inside the function -- not once, as every earlier
+    repro attempt this session (including the first sed-gap investigation
+    above) had assumed. Reproducing *that exact two-eval shape* (not a
+    single eval) was the key: a minimal script mimicking it byte-for-byte
+    reproduces mksh's real corruption exactly, while a single-eval
+    version never did, no matter the input.
+  - **Ruled out the `DODBMAGIC`/`XSUBPAT` hypothesis from the first round
+    with hard evidence**, not just inspection: added a temporary
+    `fprintf` at `eval.c`'s `case XSUB:` (reverted before landing,
+    working tree clean afterward), rebuilt `crt_mksh` alone, and ran the
+    minimal repro against it directly. `f` was `0x4b` at every relevant
+    call -- `DODBMAGIC` (`BIT(15)`, `0x8000`) was never set, and
+    `sh.h`'s own comment confirms it's scoped to `[[ x = $y ]]`-style
+    test expressions only (`exec.c`'s `dbteste_getopnd()`, its only call
+    site) -- nowhere near a plain `eval cmd=\"$cmd\"` assignment. Also
+    confirmed via the same debug output that the corruption is already
+    present in `x.str` *before* `XSUB`'s own output-emission logic runs
+    at all -- meaning the bug is in the **lexer** (tokenizing the
+    `eval`'d assignment text), not in expansion/substitution as first
+    suspected.
+  - **Bisected to a precise, minimal trigger** by systematically reducing
+    the real failing sed script down to single characters (each step
+    re-tested against the real mksh binary): a `[...]` bracket expression
+    appearing *after* a `\(...\)` backslash-group anywhere later in the
+    same double-quoted string -- even outside the parens entirely --
+    retroactively corrupts that earlier `\(`/`\)` (inserts a stray `/`
+    right before it). A bracket expression appearing *before* any
+    backslash-group in the same string never triggers it. Minimal
+    reproducer (2 lines, no libtool/sed/nm involved at all):
+    ```sh
+    raw_cmds="'s/x\\\\([^ ]*\\\\)z/\\\\1/'"
+    for cmd in $raw_cmds; do eval cmd=\"$cmd\"; echo "$cmd"; done
+    # real bash: 's/x\([^ ]*\)z/\1/'      (correct)
+    # this mksh: 's/x/\([^ ]*\)z/\1/'     (corrupted: stray '/' before '\(')
+    ```
+  - **Leading suspect, not confirmed**: `shell/mksh/src/lex.c:283`'s
+    `case SBASE: if ((unsigned int)c == ORD('[') && (cf & CMDASN))` --
+    ksh-style `arr[idx]=value` array-assignment-subscript detection,
+    which speculatively watches for `[` while lexing an
+    assignment-eligible word. Named/positioned right for an
+    assignment-context, `[`-triggered bug, but not verified against this
+    specific repro (a real fix attempt should confirm this is the actual
+    path taken -- e.g. `is_wdvarname()`'s check right before it should
+    normally fail for a value this far from a bare identifier, which
+    would rule this exact branch back out and point further into
+    `Subst:`'s own fallthrough handling of `[` inside `SDQUOTE` instead).
+  - Confirmed harmless for libpng specifically (the DLL still builds via
+    `__declspec(dllexport)` markers regardless of the corrupted export-
+    symbol-list script), so not currently blocking anything -- but a
+    real, general mksh correctness bug affecting any script that
+    double-`eval`s a stored command containing both a backslash-escaped
+    group and a later bracket expression, which could bite harder on a
+    future port without libpng's particular fallback. The minimal
+    repro above is the actual deliverable of this investigation --
+    whoever picks this back up next does not need to re-derive any of
+    the above.
 
 - **Recipe/port status upkeep.** Keep `make`/`zlib`/`libpng`/`libffi`
   recipe statuses (`porting/recipes/*.json`, `docs/porting_status.md`)
