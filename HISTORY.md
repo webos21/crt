@@ -10,6 +10,103 @@ substantive update.
 
 ## 2026-08-11
 
+- **Root-caused and fixed the fatal Windows `make -jN` (N>1) crash
+  (`make.exe: /system/bin/mksh: Bad file descriptor`, then `Error 127`),
+  tested against zlib per explicit direction ("libpng는 좀 크니, zlib를
+  기반으로 시험을 해서 해결하는 방향으로 가자").** Every Windows port
+  build had always run serial `make -j 1`; this was the first real
+  attempt at `-jN` concurrency.
+  - **Reproduced reliably**, first against the real zlib port build
+    (`tools/crt-port-build.py --port zlib --jobs 8`, a new CLI flag added
+    to the script specifically to make this testable without hand-editing
+    the `jobs = 1 if target_os == "windows" ...` default), then reduced to
+    a 2-line, 2-target Makefile (`a.o`/`b.o`, each running
+    `/system/bin/mksh <script>`) that reproduces the exact same failure
+    in under a second -- the first job always succeeds, every job after
+    it fails.
+  - **First hypothesis, ruled out**: with `--jobs 2` specifically (not
+    higher), the build hung completely instead of crashing. `lldb`
+    attached to the stuck `make.exe` showed its main thread blocked in
+    `NtReadFile`, reached via `jobserver_setup() -> fcntl(F_SETFL) ->
+    fstat() -> windows_handle_looks_executable() -> ReadFile()`: this
+    project's own Windows `fstat()` unconditionally peeks a handle's
+    first 2 bytes (looking for an `MZ`/`#!` executable signature) via
+    `SetFilePointerEx`+`ReadFile`, even for a pipe -- GNU Make's own
+    jobserver pipe, freshly created with only 1 byte of real data in it
+    for `-j 2` specifically, meaning the 2-byte peek blocked forever with
+    nothing left to ever write the second byte. Real, separate bug (fixed
+    below as well: `__crt_sys_fstat()`, `libc/src/arch/windows/common/
+    syscall.c`, now special-cases `GetFileType(handle) == FILE_TYPE_PIPE`
+    the same way it already special-cased `FILE_TYPE_CHAR`, reporting
+    `S_IFIFO` via a new `stat_virtual_pipe()` instead of ever touching
+    `windows_handle_looks_executable()`) -- but fixing it only changed
+    the `-j 2` symptom from a hang into the same `Bad file
+    descriptor`/`Error 127` crash every other `-jN` already showed,
+    confirming it was not the root cause of the crash itself.
+  - **Traced the real crash with targeted, reverted `crtdbg_log()`
+    instrumentation** (temporary; a per-PID-file WinAPI-level logger,
+    since a first attempt sharing one log file across many concurrent
+    processes silently lost lines to an unsynchronized concurrent-append
+    race -- switching to `crtdbg_<pid>.log` files fixed that) added at
+    each decision point in `__crt_sys_posix_spawn()`/
+    `prepare_spawn_startup()`/`fd_snapshot_dup2()`. Found the exact
+    failing call: GNU Make's own `-jN` (N>1) design gives only the first
+    job "real" stdin; every job after it gets `posix_spawn_file_actions_
+    adddup2(bad_stdin_fd, FD_STDIN)`, where `bad_stdin_fd` is a
+    deliberately `FD_CLOEXEC`'d, already-EOF pipe fd it sets up once at
+    startup (see GNU Make's own `job.c`, `child_execute_job()`) --
+    completely ordinary POSIX practice, since `dup2()` never copies the
+    source fd's `CLOEXEC` flag to the new fd. This project's
+    `__crt_fd_snapshot_export()` (the function that captures "the current
+    process's live fd table" for a spawn's file-action processing)
+    unconditionally *skipped exporting any `FD_CLOEXEC` fd at all* --
+    not just deciding it shouldn't be visible in the child by default,
+    but making it invisible as a `dup2()` *source* during the very same
+    spawn call that was about to redirect it. `fd_snapshot_dup2()` then
+    correctly, but consequently, failed with `EBADF` looking for a source
+    entry that was never captured -- `posix_spawn()` returned `EBADF`
+    directly, and GNU Make's own `posix_spawn_child()` prints exactly
+    `"%s: %s", argv[0], strerror(r)` on a negative pid, producing the
+    observed `/system/bin/mksh: Bad file descriptor` verbatim.
+  - **Root fix**: stopped skipping `FD_CLOEXEC` fds during export (so
+    they remain valid `dup2()` sources), and instead track "should this
+    survive into the child by default" via each snapshot entry's existing
+    `CRT_FD_SNAPSHOT_FLAG_INHERITABLE` bit (now computed from `FD_CLOEXEC`
+    for both file and socket kinds, where it was previously hardcoded
+    per-kind and never actually consulted anywhere), consulted by a new
+    check in `fd_snapshot_prepare_child_duplicates()` that drops
+    (`fd_snapshot_remove()`) any non-inheritable entry right before the
+    parent-to-child handle-duplication step -- so a `CLOEXEC` fd is still
+    available as a lookup/dup2 source during setup, but never actually
+    gets duplicated into the child unless something explicitly retargeted
+    it first (matching real `CLOEXEC` semantics exactly). Net diff: 2
+    small, targeted changes in `libc/src/arch/windows/common/syscall.c`
+    (`__crt_fd_snapshot_export()`, `fd_snapshot_prepare_child_duplicates()`)
+    -- all `crtdbg_log()` instrumentation and the standalone hang repro
+    were reverted/discarded before landing, confirmed via a clean
+    `git diff`.
+  - **Verified three ways**: (1) the minimal 2-target repro now runs both
+    jobs successfully (`running a` / `running b`, exit 0); (2) full
+    `ctest` after rebuilding: 81/81, including the existing
+    `windows_fd_snapshot_test`; (3) the real zlib port build with
+    `--jobs 8`: every compile job runs, `libz.a`/`libz.so.1.3.1` build
+    and install correctly, and the resulting shared library's own
+    `examplesh` smoke test (compress/uncompress/gzread/inflate/
+    inflateSync/dictionary round trips) passes end to end.
+  - **Not yet resolved, tracked separately in `TODO.md`**: the same real
+    `-j 8` zlib build still prints
+    `make.exe: INTERNAL: Exiting with 1 jobserver tokens available;
+    should be 8!` once, after all work has already completed
+    successfully -- a distinct, non-fatal GNU Make-side token-accounting
+    question, not the same class of bug as the crash above (confirmed:
+    none of zlib's compile jobs are recursive `$(MAKE)` invocations, so
+    the jobserver pipe fds never go through this PAL's spawn/fd-
+    inheritance path at all for this build). `tools/crt-port-build.py`'s
+    `jobs = 1 if target_os == "windows" and use_crt_shell` default is
+    left in place pending that follow-up and a larger-scale stress run;
+    a new `--jobs N` CLI flag on the script itself now makes opting into
+    parallel builds for testing a one-line change instead of a hand-edit.
+
 - **Root-caused and fixed the real mksh bug found chasing the
   `sed: bad pattern` errors earlier.** Three rounds of investigation this
   session (the second explicitly re-opened per user request after the

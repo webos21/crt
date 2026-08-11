@@ -579,7 +579,7 @@ def command_value_argv(value, preset_build_dir, target_os):
     return argv
 
 
-def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env, target_os, mingw_triple, use_crt_shell=False, configure_only=False):
+def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env, target_os, mingw_triple, use_crt_shell=False, configure_only=False, jobs=None):
     port_name = recipe["name"]
     build = recipe["build"]
     shell = rootfs_mksh_path(preset_build_dir, target_os)
@@ -620,7 +620,14 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
         progress(f"{port_name}: configure-only stop")
         return
     make = env.get("MAKE", "make")
-    jobs = 1 if target_os == "windows" and use_crt_shell else (os.cpu_count() or 2)
+    if jobs is None:
+        # Default: serial on Windows via the CRT rootfs shell, since GNU
+        # Make's jobserver has an unresolved crash there under real
+        # concurrency (make.exe: /system/bin/mksh: Bad file descriptor) --
+        # see TODO.md's "Windows shell/process stress hardening" entry.
+        # Pass --jobs explicitly (crt-port-build.py's own CLI flag) to
+        # override this for testing/reproducing that bug.
+        jobs = 1 if target_os == "windows" and use_crt_shell else (os.cpu_count() or 2)
     # target_overrides.<os>.make_args extends the base make_args the same
     # way configure_args/cflags already do (see apply_recipe_env/
     # build_configure_port's own configure_args handling above) -- e.g.
@@ -861,7 +868,7 @@ def build_android_host_tool_port(preset_build_dir, work, port_prefix, recipe, en
     run(command_value_argv(env["CC"], preset_build_dir, target_os) + [str(obj) for obj in objects] + ldflags + libs + ["-o", str(binary)], work, env, f"{port_name}: link {binary.name}")
 
 
-def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, port_prefix, recipes, port, target_os, mingw_triple, use_crt_shell=False, configure_only=False, built=None):
+def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, port_prefix, recipes, port, target_os, mingw_triple, use_crt_shell=False, configure_only=False, built=None, jobs=None):
     if built is None:
         built = set()
     if port in built:
@@ -876,10 +883,10 @@ def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, por
         raise SystemExit(f"{port}: build system '{build['system']}' is not supported by crt-port-build.py yet")
 
     if build["system"] == "configure" and port != "make" and not configure_only and "make" in recipes:
-        build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, port_prefix, recipes, "make", target_os, mingw_triple, use_crt_shell, configure_only, built)
+        build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, port_prefix, recipes, "make", target_os, mingw_triple, use_crt_shell, configure_only, built, jobs)
 
     for dep in recipe["dependencies"]:
-        build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, port_prefix, recipes, dep, target_os, mingw_triple, use_crt_shell, configure_only, built)
+        build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, port_prefix, recipes, dep, target_os, mingw_triple, use_crt_shell, configure_only, built, jobs)
 
     stamp = work_build_dir / "stamps" / f"{port}.installed"
     if stamp.exists():
@@ -897,7 +904,7 @@ def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, por
     env = make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os, mingw_triple, use_crt_shell)
     apply_recipe_env(env, recipe, target_os, root)
     if build["system"] == "configure":
-        build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env, target_os, mingw_triple, use_crt_shell, configure_only)
+        build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env, target_os, mingw_triple, use_crt_shell, configure_only, jobs)
     elif build["system"] == "amalgamation":
         build_amalgamation_port(preset_build_dir, work, port_prefix, recipe, env, target_os)
     elif build["system"] == "android_host_tool":
@@ -924,6 +931,7 @@ def main():
     parser.add_argument("--skip-sysroot-build", action="store_true", help="assume the sysroot target has already been built")
     parser.add_argument("--use-crt-shell", action="store_true", help="run configure recipes with the CRT rootfs mksh")
     parser.add_argument("--configure-only", action="store_true", help="stop configure recipes after ./configure")
+    parser.add_argument("--jobs", type=int, default=None, help="override make -jN (default: 1 on Windows via --use-crt-shell, else CPU count); for reproducing/testing the Windows jobserver bug")
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
@@ -961,7 +969,7 @@ def main():
 
     for port in args.port:
         progress(f"{port}: requested")
-        build_port(root, build_dir, work_root, source_root, sysroot, port_prefix, recipes, port, target_os, mingw_triple, args.use_crt_shell, args.configure_only)
+        build_port(root, build_dir, work_root, source_root, sysroot, port_prefix, recipes, port, target_os, mingw_triple, args.use_crt_shell, args.configure_only, jobs=args.jobs)
 
     progress(f"ports installed: {port_prefix}")
 

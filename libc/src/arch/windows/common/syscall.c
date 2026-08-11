@@ -1431,8 +1431,28 @@ int __crt_fd_snapshot_export(struct crt_fd_snapshot* snapshot) {
   for (fd = 0; fd < CRT_FD_TABLE_SIZE; ++fd) {
     HANDLE duplicate = 0;
 
+    /* Deliberately NOT skipping FD_CLOEXEC fds here (an earlier version of
+     * this loop did): CLOEXEC only means "don't survive an exec while
+     * still sitting in this fd slot" -- it says nothing about being
+     * dup2()'d to a *different* fd slot first, which is exactly what
+     * posix_spawn_file_actions_adddup2() legitimately does before the
+     * exec ever happens (the resulting fd never inherits the source's
+     * CLOEXEC flag either way). Skipping export entirely made a CLOEXEC
+     * fd invisible as a dup2() *source* too, not just as something that
+     * would leak into the child by default -- broke every
+     * dup2(cloexec_fd, target) file action outright with EBADF. Found via
+     * GNU Make's own `-jN` (N>1) design: every job after the first gets
+     * stdin redirected to a deliberately CLOEXEC'd, already-EOF "bad
+     * stdin" pipe fd via exactly this pattern (see GNU Make's job.c,
+     * child_execute_job()) -- every job past the first failed to spawn
+     * at all as a result (posix_spawn() returning EBADF outright, printed
+     * by GNU Make as "<program>: Bad file descriptor", then "Error 127").
+     * Whether a fd actually ends up visible in the child by default is
+     * now decided by the CRT_FD_SNAPSHOT_FLAG_INHERITABLE bit below
+     * (still CLOEXEC-based), consulted in
+     * fd_snapshot_prepare_child_duplicates() -- not by whether the fd
+     * made it into the snapshot in the first place. */
     if ((fd_kind[fd] != CRT_FD_KIND_FILE && fd_kind[fd] != CRT_FD_KIND_SOCKET) ||
-        (fd_flags[fd] & FD_CLOEXEC) != 0 ||
         fd_table[fd] == 0 ||
         fd_table[fd] == INVALID_HANDLE_VALUE) {
       continue;
@@ -1460,7 +1480,7 @@ int __crt_fd_snapshot_export(struct crt_fd_snapshot* snapshot) {
     snapshot->entries[count].fd = fd;
     snapshot->entries[count].kind = snapshot_kind_from_fd_kind(fd_kind[fd]);
     snapshot->entries[count].flags =
-        (fd_kind[fd] == CRT_FD_KIND_FILE ? CRT_FD_SNAPSHOT_FLAG_INHERITABLE : 0) |
+        ((fd_flags[fd] & FD_CLOEXEC) == 0 ? CRT_FD_SNAPSHOT_FLAG_INHERITABLE : 0) |
         ((fd_flags[fd] & O_APPEND) != 0 ? CRT_FD_SNAPSHOT_FLAG_APPEND : 0);
     snapshot->entries[count].handle = (uintptr_t)duplicate;
     ++count;
@@ -1608,6 +1628,19 @@ static long fd_snapshot_prepare_child_duplicates(
   for (i = 0; i < snapshot->count && i < CRT_FD_SNAPSHOT_MAX; ++i) {
     struct crt_fd_snapshot_entry* entry = &snapshot->entries[i];
 
+    /* A fd that was FD_CLOEXEC in the parent (and never targeted by an
+     * explicit dup2()/open() spawn action, which unconditionally sets
+     * this flag -- see fd_snapshot_set_handle()) should not actually
+     * appear in the child at all, matching real CLOEXEC semantics. It
+     * only needed to survive export/prepare_spawn_startup as a *lookup*
+     * entry so dup2() could find it as a source; now that lookup phase
+     * is over, drop it rather than needlessly duplicating a handle the
+     * child was never supposed to see. */
+    if ((entry->flags & CRT_FD_SNAPSHOT_FLAG_INHERITABLE) == 0) {
+      fd_snapshot_remove(snapshot, entry->fd);
+      --i;
+      continue;
+    }
     if (entry->kind == CRT_FD_SNAPSHOT_KIND_FILE) {
       HANDLE child_handle = 0;
 
