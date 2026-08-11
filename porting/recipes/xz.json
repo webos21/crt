@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "name": "xz",
+  "version": "5.8.3",
+  "source": {
+    "url": "https://github.com/tukaani-project/xz/releases/download/v5.8.3/xz-5.8.3.tar.gz",
+    "archive": "xz-5.8.3.tar.gz",
+    "source_dir": "xz-5.8.3",
+    "sha256": "3d3a1b973af218114f4f889bbaa2f4c037deaae0c8e815eec381c3d546b974a0",
+    "sha1": "f0d118c5d8953df8735ea6c3e24009e513b1da19",
+    "md5": "6dcfcd102e25b31ae30467498b3eeeab"
+  },
+  "dependencies": [],
+  "build": {
+    "system": "configure",
+    "configure_args": [
+      "--disable-nls",
+      "--disable-doc",
+      "--disable-xz",
+      "--disable-xzdec",
+      "--disable-lzmadec",
+      "--disable-lzmainfo",
+      "--disable-lzma-links",
+      "--disable-scripts",
+      "--enable-sandbox=no",
+      "--enable-threads=posix"
+    ],
+    "env": {
+      "CFLAGS": "-O2"
+    },
+    "make_args": [],
+    "target_overrides": {
+      "windows": {
+        "configure_args": [
+          "--build=@CRT_MINGW_TRIPLE@"
+        ],
+        "env": {
+          "CFLAGS": "-U_WIN32 -U_WIN32_WCE -U__WIN32__ -UWIN32 -U__CYGWIN__"
+        }
+      }
+    }
+  },
+  "status": {
+    "linux": "partial",
+    "macos": "pending",
+    "windows": "pending"
+  },
+  "notes": [
+    "Scoped to liblzma only for this first pass: --disable-xz/--disable-xzdec/--disable-lzmadec/--disable-lzmainfo/--disable-lzma-links/--disable-scripts skip the xz command-line tool family (which pulls in getopt_long, sandboxing (seccomp/Capsicum/pledge/landlock), and console/locale handling well beyond what a library-only consumer like a future curl/pcre2 port would need). Revisit if a later port genuinely needs the xz CLI itself, not just liblzma.",
+    "--disable-nls avoids a gettext/libintl dependency this sysroot doesn't provide. --disable-doc skips Doxygen-generated API docs (no doxygen in this toolchain). --enable-sandbox=no is defensive (the xz CLI's own knob; harmless with --disable-xz). --enable-threads=posix is explicit rather than the default 'yes' auto-detection, since liblzma's multithreaded encoder/decoder should use this project's own real <pthread.h> on every OS, not a native Win32 threading path ('win95'/'vista') this PAL doesn't implement.",
+    "Uses GNU Libtool for the shared build, same as zlib.json/libpng.json -- the Windows-specific libtool/MinGW-detection fixes already live in tools/crt-port-build.py's make_env(), not per-recipe.",
+    "target_overrides.windows.cflags undefines _WIN32 (and defensively _WIN32_WCE/__WIN32__/WIN32/__CYGWIN__) so liblzma's Windows-specific code stays off, keeping it on its generic/POSIX path -- same technique as every other Windows recipe in this directory. Not yet actually built/tested on Windows this session (see status below); carried over from the same established pattern as bzip2/zlib/libpng in case it's needed once the Linux blocker below is resolved.",
+    "FOUND AND FIXED ALONG THE WAY, NOT liblzma-specific: this port's own configure+make+install succeeded on the very first real attempt on Linux (x86_64, WSL Ubuntu 20.04 + clang-18), producing a working liblzma.a/liblzma.so.5.8.3. But the FIRST real attempt to actually *use* the built library (a standalone lzma_easy_buffer_encode()/lzma_stream_buffer_decode() round-trip test, matching the verification pattern already established for zlib/libpng/bzip2) segfaulted at a null function pointer inside lzma_crc32(): liblzma's CRC dispatcher (src/liblzma/check/crc32_fast.c) picks its implementation once via `static void crc32_set_func(void) __attribute__((__constructor__))`, which the linker places into the ELF .init_array section -- and this project's crt1 startup (libc/src/arch/linux/{x86_64,aarch64}/crt1.S, and equally libc/src/arch/windows/common/crt1.c's mainCRTStartup and libc/src/arch/macos/{aarch64,x86_64}/crt1.S) never ran .init_array at all, on any of the three OSes, for the executable entry point. (A *shared* library's own .init_array is a completely different, unaffected mechanism -- the OS's own dynamic linker runs that automatically when the .so/.dylib/.dll loads -- which is exactly why this had never surfaced before: every prior port that got this far linked shared, not static.) Root-caused and fixed for Linux: libc/src/arch/linux/common/init_fini_array.c adds __crt_run_init_array()/__crt_run_fini_array() (using the __init_array_start/__init_array_end boundary symbols the default linker script already provides), called from crt1.S right before `call main` and from libc/src/exit.c (via a weak reference) right before process termination. Linked directly into every Linux executable via a new crt1_init_array.o startup object (parallel to crt1.o, not folded into it -- crt1.o's own install() rule assumes exactly one object file) referenced by both tools/crt-cc and the CMake test/shell build paths (tests/CMakeLists.txt, shell/CMakeLists.txt) via a shared CRT_STARTUP_OBJECTS variable set with PARENT_SCOPE by libc/CMakeLists.txt. Verified with gdb: the exact null-pointer call is gone, and a small buffer_encode/buffer_decode round trip (a short, non-redundant string) now succeeds and produces correct output. Windows and macOS still lack the equivalent fix -- see TODO.md.",
+    "STILL BLOCKING, NOT YET ROOT-CAUSED: with the .init_array fix in place, encoding a *larger* buffer (a few KB, big enough that liblzma's real LZ match-finder initialization runs rather than whatever shortcut a handful of bytes takes) hangs indefinitely -- confirmed via gdb (SIGINT-interrupted mid-hang): stuck spinning inside this project's own malloc() -> crt_spin_lock() -> sched_yield() loop, called from lzma_lz_encoder_init()'s dictionary/hash-table allocation. Confirmed genuinely single-threaded at the time (`/proc/<pid>/status` shows Threads: 1), so this cannot be ordinary lock contention between threads. Peeking the lock's raw value while hung shows outright garbage (e.g. 1815050872), not a sane 0/1 state, meaning something is corrupting malloc's internal spinlock global, not merely contending for it. Ruled out, with a standalone reproduction (no liblzma involved) that allocates the exact same sequence of sizes recorded from a real run (small sizes through a 16MB allocation) and completes cleanly every time: this is not a plain malloc.c sizing/pattern bug on its own. The bug is therefore somewhere in the specific interaction between liblzma's real encoder-init code path and this PAL once buffers are large enough to exercise it -- not yet isolated further. Needs a real debugger session focused specifically on this path (matching how porting/recipes/libffi.json's own ffi_call callee-saved-register bug is documented: found, characterized, reproduced, but root cause not yet pinned to an exact instruction). Status kept at partial rather than shared-pass/configure-pass for this reason (matching how porting/recipes/libffi.json's own ffi_call bug is tracked) -- the library builds, and small-input API calls work, but realistic-sized compression does not yet work correctly.",
+    "macos/windows: not yet attempted for this recipe specifically (the Linux blocker above was found before reaching either host); left pending."
+  ]
+}

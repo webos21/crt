@@ -12,6 +12,7 @@ _start:
   movq %r12, %rdi
   movq %r13, %rsi
   call __crt_rootfs_bootstrap
+  call __crt_run_init_array
   movq %r12, %rdi
   movq %r13, %rsi
   movq %r14, %rdx

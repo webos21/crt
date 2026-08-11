@@ -29,7 +29,44 @@ Five active threads, not a flat list of one-off items:
     shared build, plus an `ldd` rpath check on Linux). No new CRT/PAL gap
     surfaced -- it built cleanly against the existing sysroot the same
     way sqlite-amalgamation already does. macOS still `pending` (no
-    macOS hardware available this session). Next: `xz`.
+    macOS hardware available this session).
+  - `xz` (liblzma): in progress, blocked on Linux at `partial` -- see
+    `porting/recipes/xz.json`'s own notes and the new ".init_array" item
+    below. Configure/build succeeded immediately; a real usage test
+    surfaced and got a fix for a genuine, general CRT startup gap
+    (`.init_array` never ran), but a second, still-open bug (a `malloc()`
+    lock-state corruption once liblzma's real LZ match-finder allocates
+    its dictionary/hash tables) blocks calling it with realistic buffer
+    sizes. Not moving to `pcre2` until this is resolved or explicitly
+    deprioritized.
+
+- **`.init_array`/`.fini_array` (ELF constructor/destructor) support**,
+  found and fixed for Linux while porting xz/liblzma (see that recipe's
+  own notes and `HISTORY.md`): this project's `crt1` startup never ran
+  `__attribute__((constructor))`-registered functions (also what runs
+  C++ global object constructors) for the executable entry point, on any
+  of the three OSes -- invisible until now because every port that got
+  this far linked shared, where the OS's own dynamic loader handles a
+  `.so`'s own `.init_array` automatically. Fixed for Linux
+  (`libc/src/arch/linux/common/init_fini_array.c`, wired into `crt1.S`/
+  `exit.c`/`tools/crt-cc`/the CMake test and shell build paths); verified
+  with gdb against the real liblzma bug that exposed it.
+  - Windows and macOS still lack the equivalent fix. Windows needs a
+    `.CRT$XCU`-section-walking equivalent (PE's own constructor-array
+    convention, different from ELF's `.init_array`); macOS needs to walk
+    `__DATA,__mod_init_func` (Mach-O's equivalent). Neither implemented
+    yet -- only matters for statically-linked constructor-reliant code,
+    which is why nothing in this project's own test suite or any prior
+    port ever exercised it.
+  - Also documented, not yet fixed: for an executable linked against
+    *shared* libc (`c_shared`/`libc.so`) rather than static, `exit()`
+    (which lives inside `libc.so` in that configuration) reaches
+    `__crt_run_fini_array()` only via a weak symbol reference back into
+    the executable's own `crt1` object -- and this toolchain doesn't pass
+    `-rdynamic`/`--export-dynamic`, so that cross-DSO reference likely
+    doesn't resolve. `.init_array` (construction) is unaffected by this
+    gap, since `crt1.o` is always statically embedded into the
+    executable regardless of how libc itself is linked.
 
 - **Windows shell/process stress hardening.** Real concurrency -- parallel
   `make -jN`, jobserver pipe fd handling, many live children in the

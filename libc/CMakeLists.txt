@@ -176,6 +176,22 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
     message(FATAL_ERROR "Unsupported Linux architecture: ${CRT_EFFECTIVE_ARCH}")
   endif()
   set(CRT_SIGNAL_BACKEND_FILE src/arch/linux/common/signal_backend.c)
+  # __crt_run_init_array()/__crt_run_fini_array() (.init_array/.fini_array
+  # support for the executable's own static link -- see that file's own
+  # comment for why this must be linked directly into every executable,
+  # not the general libc.a/libc.so sources: crt1.o is always statically
+  # embedded regardless of whether libc itself is linked static or
+  # shared, so only code that lives alongside it is guaranteed to see
+  # the calling executable's own __init_array_start/__init_array_end
+  # boundary symbols rather than some other DSO's). Kept as its own
+  # object library/install name (crt1_init_array.o) rather than folded
+  # into CRT_START_FILE/crt1.o directly: install(FILES
+  # "$<TARGET_OBJECTS:crt1>" ... RENAME crt1.o) below assumes exactly one
+  # object, and tools/crt-cc already has an established pattern for
+  # referencing more than one fixed-named startup object explicitly
+  # (dllcrt.o on Windows) rather than merging objects to preserve a
+  # single filename.
+  set(CRT_INIT_FINI_ARRAY_FILE src/arch/linux/common/init_fini_array.c)
 elseif(CRT_TARGET_OS STREQUAL "windows")
   if(CRT_EFFECTIVE_ARCH MATCHES "^(x86_64|AMD64)$")
     set(CRT_START_FILE src/arch/windows/common/crt1.c)
@@ -232,6 +248,26 @@ set_target_properties(crt1 PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
 )
 
+set(CRT_STARTUP_OBJECTS $<TARGET_OBJECTS:crt1>)
+if(CRT_TARGET_OS STREQUAL "linux")
+  add_library(crt1_init_array OBJECT ${CRT_INIT_FINI_ARRAY_FILE})
+  target_link_libraries(crt1_init_array PRIVATE crt_build_flags)
+  target_include_directories(crt1_init_array PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+  )
+  set_target_properties(crt1_init_array PROPERTIES
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  )
+  # __crt_run_init_array() (see that file's own comment) must be linked
+  # directly into every executable alongside crt1.o itself on Linux.
+  # Exposed via PARENT_SCOPE so every subdirectory that builds an
+  # executable (shell/, tests/) can list ${CRT_STARTUP_OBJECTS} instead
+  # of the bare $<TARGET_OBJECTS:crt1> they'd otherwise need to remember
+  # to extend themselves on every executable target.
+  list(APPEND CRT_STARTUP_OBJECTS $<TARGET_OBJECTS:crt1_init_array>)
+endif()
+set(CRT_STARTUP_OBJECTS "${CRT_STARTUP_OBJECTS}" PARENT_SCOPE)
+
 add_library(c_shared SHARED ${CRT_LIBC_SOURCES})
 target_link_libraries(c_shared PRIVATE crt_build_flags crt_compiler_rt_builtins)
 target_include_directories(c_shared PRIVATE
@@ -269,6 +305,9 @@ install(TARGETS c c_shared
   RUNTIME DESTINATION bin
 )
 install(FILES "$<TARGET_OBJECTS:crt1>" DESTINATION lib RENAME crt1.o)
+if(CRT_TARGET_OS STREQUAL "linux")
+  install(FILES "$<TARGET_OBJECTS:crt1_init_array>" DESTINATION lib RENAME crt1_init_array.o)
+endif()
 if(CRT_TARGET_OS STREQUAL "windows")
   # crt_windows_dllcrt (crtDllMainCRTStartup, dllcrt.c) has so far only
   # ever been linked directly into this project's own c_shared/m_shared/

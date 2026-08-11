@@ -10,6 +10,86 @@ substantive update.
 
 ## 2026-08-11
 
+- **Fixed a real, general CRT startup gap for Linux: `crt1` never ran ELF
+  `.init_array` (`__attribute__((constructor))` functions, also what runs
+  C++ global object constructors) for the executable entry point.**
+  Found while porting xz/liblzma (`porting/recipes/xz.json`), not while
+  testing this project's own code directly: liblzma's CRC32 dispatcher
+  (`src/liblzma/check/crc32_fast.c`) picks its implementation once via a
+  `static void crc32_set_func(void) __attribute__((__constructor__))`,
+  which the linker places into `.init_array` -- and a real
+  `lzma_easy_buffer_encode()`/`lzma_stream_buffer_decode()` round-trip
+  test (the same kind of "verified past 'it built'" check already
+  established for zlib/libpng/bzip2) segfaulted at a null function
+  pointer the very first time `lzma_crc32()` was called, since that
+  constructor had never run and the dispatch pointer stayed
+  zero-initialized. Confirmed via gdb: `rip=0x0`, called from
+  `lzma_stream_header_encode` -> `lzma_crc32` -> `crc32_func` (NULL).
+  A *shared* library's own `.init_array` is a completely different,
+  unaffected mechanism -- the OS's own dynamic linker runs that
+  automatically when the `.so`/`.dylib`/`.dll` loads -- which is exactly
+  why this had never surfaced before: every prior port that got this far
+  (zlib, libpng, sqlite-amalgamation, bzip2) linked shared, not static.
+  - **Fix** (Linux only for now; see the follow-up items below):
+    `libc/src/arch/linux/common/init_fini_array.c` adds
+    `__crt_run_init_array()`/`__crt_run_fini_array()`, using the
+    `__init_array_start`/`__init_array_end`/`__fini_array_start`/
+    `__fini_array_end` boundary symbols the default GNU ld/lld linker
+    script already provides automatically (`PROVIDE_HIDDEN`) whenever
+    the corresponding output section exists. `__crt_run_init_array()` is
+    called directly from `crt1.S` (both `libc/src/arch/linux/x86_64/
+    crt1.S` and `.../aarch64/crt1.S`) right before `call main`/`bl main`.
+    `__crt_run_fini_array()` is reached from `libc/src/exit.c` via a weak
+    reference (`void __crt_run_fini_array(void) __attribute__((weak));`,
+    matching the existing `__crt_windows_ensure_fork_capable_relaunch`
+    weak-symbol pattern already used in this codebase), called right
+    before `__crt_sys_exit()`.
+  - **Why a new, separate startup object instead of folding into
+    `crt1.o` directly**: `libc/CMakeLists.txt` already has
+    `install(FILES "$<TARGET_OBJECTS:crt1>" DESTINATION lib RENAME
+    crt1.o)`, which assumes the `crt1` object library has exactly one
+    object file -- adding a second source directly broke that rename
+    (`file INSTALL` with multiple source files and one `RENAME` target
+    fails). Fixed instead by giving `init_fini_array.c` its own object
+    library/install name (`crt1_init_array.o`, parallel to `crt1.o`),
+    matching the established pattern for `dllcrt.o` on Windows (another
+    fixed-named startup object referenced explicitly by
+    `tools/crt-cc`/CMake rather than merged into one file). `tools/
+    crt-cc`'s Linux non-shared-mode link line now includes
+    `${CRT_SYSROOT}/lib/crt1_init_array.o` alongside `crt1.o`; the CMake
+    test/shell executable-build paths (`tests/CMakeLists.txt`,
+    `shell/CMakeLists.txt`) reference it the same way through a new
+    `CRT_STARTUP_OBJECTS` variable, set once in `libc/CMakeLists.txt`
+    with `PARENT_SCOPE` (`add_subdirectory(libc)` always runs before
+    `add_subdirectory(shell)`/`add_subdirectory(tests)`) instead of
+    repeating `$<TARGET_OBJECTS:crt1>` (now 3 objects, not 1) at every
+    one of the 8 executable-creation call sites across those two files.
+  - **Verified past "it built"**: re-ran the exact liblzma round-trip
+    test that originally crashed -- the null-pointer call is gone, and a
+    small (well under liblzma's real match-finder threshold) buffer
+    round trip now succeeds with correct compressed/decompressed output.
+    Full `ctest` stayed at 100% (74/74 Linux, 81/81 Windows -- Windows
+    re-verified only for regression-safety, since this fix's actual
+    Linux-specific code doesn't touch Windows at all beyond the
+    now-shared `CRT_STARTUP_OBJECTS` CMake refactor).
+  - **Known follow-up gaps, not fixed here**: (1) Windows needs a
+    `.CRT$XCU`-section-walking equivalent (PE's own constructor-array
+    convention) and macOS needs to walk Mach-O's
+    `__DATA,__mod_init_func` -- neither implemented; only matters for
+    statically-linked constructor-reliant code, which nothing in this
+    project's own test suite or any prior port had ever exercised until
+    now. (2) An executable linked against *shared* libc (`c_shared`)
+    rather than static: `exit()` then lives inside `libc.so`, and its
+    weak reference to `__crt_run_fini_array()` (which only ever lives in
+    the executable's own statically-embedded `crt1` object, so it always
+    sees the *calling executable's* own `.init_array`/`.fini_array`
+    boundaries rather than some unrelated DSO's) likely doesn't resolve
+    across that DSO boundary, since this toolchain never passes
+    `-rdynamic`/`--export-dynamic`. Construction (`.init_array`) is
+    unaffected by this second gap either way, since `crt1.o` is always
+    statically embedded into the executable regardless of how libc
+    itself ends up linked.
+
 - **Ported bzip2 1.0.8 to Linux and Windows (`shared-pass` both), the
   first entry in the new porting-matrix-expansion queue** (`bzip2` ->
   `xz` -> `pcre2` -> `mbedtls` -> `curl`, `TODO.md`). Upstream ships no

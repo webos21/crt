@@ -1,6 +1,6 @@
 add_executable(crt_tiny_sh
   tiny_sh/tiny_sh.c
-  $<TARGET_OBJECTS:crt1>
+  ${CRT_STARTUP_OBJECTS}
 )
 target_link_libraries(crt_tiny_sh PRIVATE crt_build_flags c)
 target_include_directories(crt_tiny_sh PRIVATE
@@ -85,7 +85,7 @@ if(EXISTS "${CRT_MKSH_ROOT}/Android.bp")
     mksh/src/tree.c
     mksh/src/ulimit.c
     mksh/src/var.c
-    $<TARGET_OBJECTS:crt1>
+    ${CRT_STARTUP_OBJECTS}
   )
   if(CRT_TARGET_OS STREQUAL "windows" AND CRT_EFFECTIVE_ARCH_FOR_FLAGS MATCHES "^(arm64|ARM64|aarch64|x86_64|AMD64|x64)$")
     # mksh is the one CRT-built program that actually calls fork() (real
@@ -331,7 +331,7 @@ if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
     toybox/src/toys/posix/uniq.c
     toybox/src/toys/posix/wc.c
     toybox/src/toys/posix/xargs.c
-    $<TARGET_OBJECTS:crt1>
+    ${CRT_STARTUP_OBJECTS}
   )
   if(CRT_TARGET_OS STREQUAL "windows" AND CRT_EFFECTIVE_ARCH_FOR_FLAGS MATCHES "^(arm64|ARM64|aarch64|x86_64|AMD64|x64)$")
     # xargs (and potentially other applets later) calls fork()/vfork() to run
@@ -545,7 +545,7 @@ if(EXISTS "${CRT_AWK_ROOT}/src/awk.h")
   )
   add_executable(crt_awk
     ${CRT_AWK_SOURCES}
-    $<TARGET_OBJECTS:crt1>
+    ${CRT_STARTUP_OBJECTS}
   )
   target_link_libraries(crt_awk PRIVATE crt_build_flags c m)
   target_link_libraries(crt_awk PRIVATE crt_compiler_rt_builtins)

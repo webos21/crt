@@ -14,6 +14,7 @@ _start:
   mov x0, x19
   mov x1, x20
   bl __crt_rootfs_bootstrap
+  bl __crt_run_init_array
   mov x0, x19
   mov x1, x20
   mov x2, x21

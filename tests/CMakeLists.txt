@@ -1,6 +1,10 @@
+# CRT_STARTUP_OBJECTS (crt1.o, plus crt1_init_array.o's object on Linux --
+# see libc/CMakeLists.txt's own comment) is set with PARENT_SCOPE by
+# libc/CMakeLists.txt, which add_subdirectory(libc) always processes
+# before this file.
 add_executable(hello_c
   hello.c
-  $<TARGET_OBJECTS:crt1>
+  ${CRT_STARTUP_OBJECTS}
 )
 target_link_libraries(hello_c PRIVATE crt_build_flags c)
 target_link_libraries(hello_c PRIVATE crt_compiler_rt_builtins)
@@ -50,7 +54,7 @@ function(add_crt_test test_name source_file)
   add_executable(${test_name}
     ${source_file}
     ${CRT_TEST_EXTRA_SOURCES}
-    $<TARGET_OBJECTS:crt1>
+    ${CRT_STARTUP_OBJECTS}
   )
   target_link_libraries(${test_name} PRIVATE crt_build_flags c)
   target_include_directories(${test_name} PRIVATE
@@ -95,7 +99,7 @@ endfunction()
 function(add_crt_cxx_test test_name source_file)
   add_executable(${test_name}
     ${source_file}
-    $<TARGET_OBJECTS:crt1>
+    ${CRT_STARTUP_OBJECTS}
   )
   target_link_libraries(${test_name} PRIVATE crt_cxx_build_flags cxx c)
   target_include_directories(${test_name} PRIVATE
@@ -489,7 +493,7 @@ set_tests_properties(pthread_type_test_runs PROPERTIES
 if(CRT_TARGET_OS STREQUAL "windows")
   add_executable(windows_export_hygiene_test
     windows_export_hygiene_test.c
-    $<TARGET_OBJECTS:crt1>
+    ${CRT_STARTUP_OBJECTS}
   )
   target_link_libraries(windows_export_hygiene_test PRIVATE crt_build_flags c)
   target_link_libraries(windows_export_hygiene_test PRIVATE crt_compiler_rt_builtins)

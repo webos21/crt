@@ -225,6 +225,17 @@ case "$target_os" in
       crt_libs="${CRT_SYSROOT}/lib/libc.so ${CRT_SYSROOT}/lib/libm.so ${CRT_SYSROOT}/lib/libdl.so ${CRT_SYSROOT}/lib/libc++.so"
     else
       crt_libs="${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a ${CRT_SYSROOT}/lib/libc++.a"
+      # __crt_run_init_array()/__crt_run_fini_array() (see
+      # libc/src/arch/linux/common/init_fini_array.c): must be linked
+      # directly into every executable, alongside crt1.o itself, so its
+      # __init_array_start/__init_array_end boundary symbols always
+      # reflect the calling executable's own link -- not some other
+      # DSO's -- regardless of whether libc itself ends up static or
+      # shared here. A -shared/.so build has no equivalent need (a
+      # shared object's own .init_array is handled by the OS's dynamic
+      # loader when it's loaded, not by this project's own startup
+      # code), matching why crt1.o itself is skipped in that case too.
+      libs="$libs ${CRT_SYSROOT}/lib/crt1_init_array.o"
     fi
     libs="$libs $crt_libs ${CRT_SYSROOT}/lib/libclang_rt.builtins.a"
     if [ "$shared_mode" -eq 1 ]; then

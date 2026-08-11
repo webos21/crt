@@ -24,13 +24,31 @@ in those two win.
   via `cmake --workflow --preset <os>-host-ninja-debug` or
   `ctest --test-dir out/<preset>`.
 - **Ports**: see `docs/porting_status.md` for the full per-library,
-  per-host table. Everything currently in `porting/recipes/` is at
-  `shared-pass` on all three OSes except `libffi` (`configure-pass` +
-  working shared build, but a known `-O1`/`-O2` `ffi_call()`-repeat-call
-  correctness bug -- see below).
+  per-host table. `zlib`/`libpng`/`sqlite-amalgamation`/`bzip2` are at
+  `shared-pass` on Linux and Windows (macOS pending on all four, no
+  macOS hardware this session). `libffi` and `xz` (liblzma) are each
+  `partial`: `libffi` builds and works except for a known `-O1`/`-O2`
+  `ffi_call()`-repeat-call bug (see below); `xz` builds and works for
+  small inputs but hangs on realistic-sized ones (see below).
 
 ## Known gaps
 
+- **`.init_array`/`.fini_array` (ELF constructor/destructor) support**:
+  fixed for Linux, still missing on Windows/macOS. See `TODO.md`'s
+  dedicated entry -- this project's `crt1` startup never ran
+  `__attribute__((constructor))` functions (also what runs C++ global
+  object constructors) for the executable entry point on any OS, until
+  found and fixed for Linux while porting xz/liblzma.
+- **xz (liblzma)**: builds and installs cleanly on Linux, and small
+  buffer_encode/buffer_decode calls work correctly, but encoding a
+  larger buffer (big enough to reach liblzma's real LZ match-finder
+  initialization) hangs -- confirmed spinning inside this project's own
+  `malloc()` lock-wait loop with the lock's raw value read back as
+  garbage while hung, despite the process being confirmed genuinely
+  single-threaded at that moment. A standalone malloc-only reproduction
+  of the same allocation sizes does not reproduce it, so the corruption
+  is specific to liblzma's real code path, not a general `malloc.c` bug
+  on its own. Not yet root-caused; see `porting/recipes/xz.json`.
 - **libffi**: `ffi_call()` alone and closures alone each work correctly in
   isolation, but calling `ffi_call()` and then any further libffi call in
   the same process reliably segfaults when the caller is compiled at
