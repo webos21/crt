@@ -1585,26 +1585,56 @@ Four active threads, not a flat list of one-off items:
     # real bash: 's/x\([^ ]*\)z/\1/'      (correct)
     # this mksh: 's/x/\([^ ]*\)z/\1/'     (corrupted: stray '/' before '\(')
     ```
-  - **Leading suspect, not confirmed**: `shell/mksh/src/lex.c:283`'s
-    `case SBASE: if ((unsigned int)c == ORD('[') && (cf & CMDASN))` --
-    ksh-style `arr[idx]=value` array-assignment-subscript detection,
-    which speculatively watches for `[` while lexing an
-    assignment-eligible word. Named/positioned right for an
-    assignment-context, `[`-triggered bug, but not verified against this
-    specific repro (a real fix attempt should confirm this is the actual
-    path taken -- e.g. `is_wdvarname()`'s check right before it should
-    normally fail for a value this far from a bare identifier, which
-    would rule this exact branch back out and point further into
-    `Subst:`'s own fallthrough handling of `[` inside `SDQUOTE` instead).
+  - **`lex.c:283`'s `CMDASN`/array-subscript theory ruled back out** on
+    closer reading: `case SDQUOTE:` (`shell/mksh/src/lex.c`) only special-
+    cases the closing `"`, `goto Subst` for everything else, and
+    `Subst:`'s own switch has an explicit `default: store_char:` tail
+    (line 581) that just emits any unhandled character -- including `[`
+    -- as a plain `CHAR` token, with zero special array-subscript
+    handling. That code path (`case SBASE:`, `cf & CMDASN`) is simply
+    never reached from inside a double-quoted string at all.
+  - **Found the real mechanism by instrumenting `debunk()` directly**
+    (temporary `fprintf` dumps of its input/output, MAGIC bytes rendered
+    as `<M>`; reverted before landing, working tree clean afterward) and
+    running it against the real minimal repro. The root cause traces back
+    to `func_execute_cmds`'s own `eval cmd=\"$cmd\"` idiom itself: the
+    `\"..\"` around `$cmd` are **backslash-escaped literal quote
+    characters, not real quoting**, from the *outer* (pre-`eval`) shell's
+    perspective -- so `$cmd` is substituted as a genuinely **unquoted**
+    reference, subject to the same glob-pattern "magic" marking and
+    field handling any bare `$var` would get. Confirmed directly: `[`,
+    `]`, and `*` in `$cmd`'s value each get a `MAGIC` sentinel byte
+    prefixed (`shell/mksh/src/eval.c`'s `case ORD('['):`/`case
+    ORD('*'):` block around line 1109, gated on `f & (DOPAT|DOGLOB)`) --
+    exactly the glob-metacharacter-protection mechanism real *quoted*
+    text should never go through. The debug dump showed the word being
+    `debunk()`-processed in **multiple separate calls** rather than once
+    for the whole string -- each individual call correctly strips its own
+    `MAGIC` bytes (e.g. `(<M>[^` -> `([^`, `<M>]<M>*\)z/\1/'"` ->
+    `]*\)z/\1/'"`), but something in how these separately-processed
+    fragments get **reassembled** into the final value is where the
+    stray `/` actually enters -- that reassembly code itself is not yet
+    located.
+  - **Not yet found**: the exact reassembly/concatenation site. Next step
+    for whoever picks this up: instrument the word-splitting/field-
+    emission path (`XPput` calls and whatever joins multiple emitted
+    fields back into one assignment value) the same way `debunk()` was
+    instrumented here, or use a real interactive debugger (not available
+    in this session's sandboxed CLI) to step through the exact point two
+    debunked fragments get concatenated.
   - Confirmed harmless for libpng specifically (the DLL still builds via
     `__declspec(dllexport)` markers regardless of the corrupted export-
     symbol-list script), so not currently blocking anything -- but a
-    real, general mksh correctness bug affecting any script that
-    double-`eval`s a stored command containing both a backslash-escaped
-    group and a later bracket expression, which could bite harder on a
-    future port without libpng's particular fallback. The minimal
-    repro above is the actual deliverable of this investigation --
-    whoever picks this back up next does not need to re-derive any of
+    real, general mksh correctness bug: `\"$var\"` (escaped-quotes, not
+    real quoting) around any glob-metacharacter-containing variable,
+    evaluated via `eval`, is exactly the shape GNU Autoconf/Libtool's own
+    `func_execute_cmds`/`func_quote_for_eval`-family helpers use
+    throughout every generated `configure`/`libtool` script -- so this is
+    not a one-off libpng quirk, just the first place this session's real
+    build activity happened to exercise it with the right ingredients
+    (both a backslash-group and a later bracket in the same value). The
+    minimal repro above is the actual deliverable of this investigation
+    -- whoever picks this back up next does not need to re-derive any of
     the above.
 
 - **Recipe/port status upkeep.** Keep `make`/`zlib`/`libpng`/`libffi`
