@@ -10,6 +10,56 @@ substantive update.
 
 ## 2026-08-11
 
+- **Ported bzip2 1.0.8 to Linux and Windows (`shared-pass` both), the
+  first entry in the new porting-matrix-expansion queue** (`bzip2` ->
+  `xz` -> `pcre2` -> `mbedtls` -> `curl`, `TODO.md`). Upstream ships no
+  Autoconf `configure`, just a hand-written `Makefile` (`make CC=...`)
+  plus a second, Linux/GNU-ld-hardcoded `Makefile-libbz2_so` for the
+  shared build -- rather than teach `crt-port-build.py` to drive either
+  directly, `porting/recipes/bzip2.json` builds bzip2's 7 library source
+  files (excluding the CLI tool/DLL sample) through the existing
+  `amalgamation` build system already proven for
+  `sqlite-amalgamation.json`, so the established cross-platform
+  static+shared naming/versioning convention applies unmodified with no
+  new `crt-port-build.py` code. Windows needed one `-U_WIN32` CFLAGS
+  override (same technique as zlib.json/libpng.json/sqlite-
+  amalgamation.json): `bzlib.h`/`bzlib.c` both gate a `_WIN32` branch
+  (a `WINAPI`-calling-convention `#include <windows.h>` in the header,
+  an `<io.h>`+`setmode()` binary-mode dance in the source) that this
+  sysroot doesn't need -- this PAL's I/O is already byte-transparent.
+  No other CRT/PAL gap surfaced; it built clean on the first real attempt
+  on both hosts.
+  - Verified past "it built": a standalone
+    `BZ2_bzBuffToBuffCompress`/`BZ2_bzBuffToBuffDecompress` round-trip
+    test program linked and ran correctly against both the static
+    (`libbz2.a`) and shared (`bz2.dll`/`libbz2.so.1.0.8`) build on both
+    hosts. Windows verified on real x64 hardware via
+    `crt-port-build.py --use-crt-shell`. Linux verified on real x86_64
+    hardware through WSL Ubuntu 20.04 + a freshly-installed clang-18
+    toolchain (Ubuntu 20.04's default clang-10 predates
+    `__builtin_elementwise_sqrt`, needed by `libm/src/basic.c` --
+    unrelated to this port, just a prerequisite for building this
+    project at all in that environment); `ldd` on the dynamically-linked
+    Linux test binary confirmed every CRT dependency (`libc.so`/
+    `libm.so`/`libdl.so`/`libc++.so`) and `libbz2.so.1` itself resolve to
+    this project's own sysroot/port install dirs, not any host package --
+    the same rpath verification zlib/libpng/sqlite-amalgamation already
+    established.
+  - Found and routed around (not a CRT bug): reproducing the Linux leg
+    from this Windows dev machine via WSL against a plain `/mnt/c`-mounted
+    checkout hit `FileNotFoundError` executing `tools/crt-cc`, because
+    Windows `git` checks shell scripts out with CRLF line endings and the
+    Linux kernel's shebang parser then looks for a literal `/bin/sh\r`
+    interpreter that doesn't exist. Real CI's Linux legs check out fresh
+    via native Linux `git` (LF), so this never surfaces there -- a plain
+    `git clone` of the working tree into WSL's native filesystem (LF on
+    checkout) was enough to work around it for local verification.
+  - macOS: not run (no macOS hardware available this session); expected
+    to build the same generic-Unix way as Linux, since none of bzip2's
+    source has an `__APPLE__`-gated branch, but left `pending` in
+    `porting/recipes/bzip2.json`/`docs/porting_status.md` until actually
+    verified, per this project's own conservative status-value policy.
+
 - **Concluded the Windows `make -jN` work: stress-tested at libpng scale
   and enabled parallel builds by default, matching macOS/Linux, per
   explicit direction ("libpng로 시험을 해 보자. 그리고, 문제가 없으면

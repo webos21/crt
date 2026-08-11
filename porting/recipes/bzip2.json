@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "name": "bzip2",
+  "version": "1.0.8",
+  "source": {
+    "url": "https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz",
+    "archive": "bzip2-1.0.8.tar.gz",
+    "source_dir": "bzip2-1.0.8",
+    "sha256": "ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269",
+    "sha1": "bf7badf7e248e0ecf465d33c2f5aeec774209227",
+    "md5": "67e051268d0c475ea773822f7500d0e5"
+  },
+  "dependencies": [],
+  "build": {
+    "system": "amalgamation",
+    "automated": true,
+    "sources": [
+      "blocksort.c",
+      "huffman.c",
+      "crctable.c",
+      "randtable.c",
+      "compress.c",
+      "decompress.c",
+      "bzlib.c"
+    ],
+    "archive": "libbz2.a",
+    "shared": true,
+    "install_headers": [
+      "bzlib.h"
+    ],
+    "cflags": [
+      "-D_FILE_OFFSET_BITS=64"
+    ],
+    "target_overrides": {
+      "windows": {
+        "cflags": [
+          "-U_WIN32"
+        ]
+      }
+    }
+  },
+  "status": {
+    "linux": "shared-pass",
+    "macos": "pending",
+    "windows": "shared-pass"
+  },
+  "notes": [
+    "bzip2 upstream ships no Autoconf configure script -- just a hand-written Makefile expecting `make CC=... AR=... RANLIB=... PREFIX=...` overrides, and a second, Linux/GNU-ld-hardcoded Makefile-libbz2_so for the shared build. Rather than teach crt-port-build.py to drive either Makefile directly (which would mean re-deriving their small, fixed 7-file compile list and Linux-only shared-link recipe anyway), this recipe uses the existing \"amalgamation\" build system already proven for sqlite-amalgamation.json: list the library's 7 .c files as sources (excluding bzip2.c/bzip2recover.c/dlltest.c, which are the CLI tool and a Windows DLL-usage sample, not part of libbz2 itself), and let build_amalgamation_port()/build_amalgamation_shared_library() supply the actual per-OS static+shared build and naming/versioning convention (already established by zlib/sqlite-amalgamation), rather than depend on Makefile-libbz2_so's own Linux-only assumptions. Does not touch upstream source.",
+    "target_overrides.windows.cflags undefines _WIN32 (tools/crt-cc targets *-w64-mingw32, which predefines it) so bzlib.c's own `#if defined(_WIN32) || defined(OS2) || defined(MSDOS)` SET_BINARY_MODE branch takes its #else (no-op) path instead of `#include <io.h>` + `setmode(fileno(file), O_BINARY)` -- this sysroot has no MSVC/MinGW-specific <io.h>/setmode(), and this PAL's I/O is already byte-transparent (no CRLF translation mode to switch), matching the same no-op _setmode() reasoning already established in porting/shims/win32/libtool_wrapper_compat.h. Same technique as zlib.json/libpng.json/sqlite-amalgamation.json's own Windows CFLAGS undefs. OS2/MSDOS are never predefined by this toolchain and are not undefined defensively (nothing else in this codebase does so for macros that can never be set).",
+    "windows: shared-pass, first try, no new CRT/PAL gaps -- x64 host, both libbz2.a and bz2.dll built via crt-port-build.py --use-crt-shell (bzlib.h itself also gates a `#include <windows.h>` WINAPI-calling-convention block behind `_WIN32`, same as zlib.h/pngconf.h; any future consumer that #includes bzlib.h needs the same -U_WIN32 a recipe already applies to its own build, matching the established zlib/libpng precedent). Verified past 'it built': a standalone BZ2_bzBuffToBuffCompress/BZ2_bzBuffToBuffDecompress round-trip program linked and ran correctly against both libbz2.a (static) and bz2.dll (dynamic, loaded via its exact filename the same way zlib's shared build already does, no import lib).",
+    "linux: shared-pass -- x86_64 (WSL Ubuntu 20.04 + clang-18, real hardware, not emulated), no new CRT/PAL gaps. Note for future WSL-based verification against a Windows working tree: a straight /mnt/c-mounted checkout hits ENOENT executing tools/crt-cc, because Windows git checks scripts out with CRLF line endings and the Linux kernel's shebang parser then looks for a literal '/bin/sh\\r' interpreter -- not a CRT bug (real CI's Linux legs check out fresh via native Linux git with LF), just something to route around (a plain local `git clone` into the Linux-native filesystem was enough) when reproducing a Linux leg from a Windows dev machine. Verified the same static+shared round trip as Windows, plus `ldd` on the dynamically-linked test binary confirming libc.so/libm.so/libdl.so/libc++.so all resolve to this project's own sysroot (not any host package) and libbz2.so.1 resolves to this port's own install dir -- same rpath verification zlib/libpng/sqlite-amalgamation already established.",
+    "macos: not yet verified (no macOS hardware available in this session) -- recipe carries no macOS-specific overrides since none of bzip2's own source has an __APPLE__-gated branch (unlike sqlite3.c), so it is expected to build the same generic-Unix way as linux, but that expectation is unconfirmed. Status stays pending until run for real on macOS, per this project's own conservative status-value policy."
+  ]
+}

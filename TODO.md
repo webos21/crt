@@ -24,6 +24,12 @@ Five active threads, not a flat list of one-off items:
   and per-host status live in `porting/recipes/*.json` and
   `docs/porting_status.md` as they land; this bullet just tracks the
   overall queue position.
+  - `bzip2`: done on Linux and Windows (`shared-pass` both, verified with
+    a real compress/decompress round trip against both the static and
+    shared build, plus an `ldd` rpath check on Linux). No new CRT/PAL gap
+    surfaced -- it built cleanly against the existing sysroot the same
+    way sqlite-amalgamation already does. macOS still `pending` (no
+    macOS hardware available this session). Next: `xz`.
 
 - **Windows shell/process stress hardening.** Real concurrency -- parallel
   `make -jN`, jobserver pipe fd handling, many live children in the

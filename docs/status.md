@@ -52,9 +52,9 @@ in those two win.
 
 ## Not yet started
 
-- Porting matrix expansion beyond the current 5 recipes (bzip2, xz, pcre2,
-  mbedtls, curl -- see `TODO.md`'s "in progressing" section for the current
-  queue and order).
+- Porting matrix expansion: `bzip2` is done on Linux/Windows (macOS
+  pending), `xz` -> `pcre2` -> `mbedtls` -> `curl` not started -- see
+  `TODO.md`'s "in progressing" section for the current queue and order.
 - Broader POSIX/rootfs surface hardening beyond what each port's own build
   happens to exercise.
 - C++ runtime phase 2 and an ELF loader/dynamic-linker prototype: not
