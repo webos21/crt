@@ -1,4 +1,5 @@
 #include <fenv.h>
+#include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -79,10 +80,29 @@ int main(void) {
       strcmp(buffer, "|inf|-INF|nan|") != 0) {
     return fail("float special");
   }
-  if (snprintf(buffer, sizeof(buffer), "|%.2Lf|%.2Le|%.1LA|", (long double)3.125,
-               (long double)1234.0, (long double)1.5) != 24 ||
-      strcmp(buffer, "|3.12|1.23e+03|0X1.8P+0|") != 0) {
-    return fail("long double formatting");
+  {
+    /* %A's leading hex digit is only canonically "1" when long double's
+     * stored mantissa has no explicit integer bit (the common case:
+     * IEEE binary64-as-long-double and IEEE binary128/quad). x86_64's
+     * 80-bit x87 extended format stores that integer bit explicitly
+     * instead of leaving it implicit, so there is no spare bit for
+     * gdtoa's hdtoa()-style single-leading-bit reconstruction to land
+     * on a clean "1" -- the real, most-significant nibble of the raw
+     * mantissa comes out first instead. This isn't a bug: glibc
+     * reproduces the exact same "|3.12|1.23e+03|0XC.0P-3|" on x86_64
+     * Linux (verified directly against glibc's own snprintf), so a
+     * single hardcoded expectation isn't portable across long double
+     * representations. */
+#if LDBL_MANT_DIG == 64
+    const char* expected = "|3.12|1.23e+03|0XC.0P-3|";
+#else
+    const char* expected = "|3.12|1.23e+03|0X1.8P+0|";
+#endif
+    if (snprintf(buffer, sizeof(buffer), "|%.2Lf|%.2Le|%.1LA|", (long double)3.125,
+                 (long double)1234.0, (long double)1.5) != (int)strlen(expected) ||
+        strcmp(buffer, expected) != 0) {
+      return fail("long double formatting");
+    }
   }
   if (snprintf(buffer, sizeof(buffer), "%2$s:%1$d:%3$.*4$f", 7, "pos", 3.125, 2) != 10 ||
       strcmp(buffer, "pos:7:3.12") != 0) {

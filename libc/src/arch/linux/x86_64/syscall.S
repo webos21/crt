@@ -40,6 +40,15 @@ __crt_sys_ioctl:
 .type __crt_sys_pread, @function
 .p2align 4, 0x90
 __crt_sys_pread:
+  /* pread64(fd, buf, count, offset) has 4 syscall args. The x86_64 SysV C
+   * ABI passes the 4th integer argument (offset) in %rcx, but the
+   * `syscall` instruction clobbers %rcx (it holds the return address for
+   * SYSRET) and the kernel instead expects the 4th arg in %r10 -- so it
+   * must be moved explicitly, exactly as every other 4+-arg syscall in
+   * this file already does (mmap, sendto, statx, wait4, ...). Without
+   * this, %r10 keeps whatever it held from the caller and the kernel
+   * reads a garbage offset. */
+  movq %rcx, %r10
   movq $17, %rax
   syscall
   retq
@@ -49,6 +58,8 @@ __crt_sys_pread:
 .type __crt_sys_pwrite, @function
 .p2align 4, 0x90
 __crt_sys_pwrite:
+  /* Same 4th-arg (offset) %rcx -> %r10 fixup as __crt_sys_pread above. */
+  movq %rcx, %r10
   movq $18, %rax
   syscall
   retq
