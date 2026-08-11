@@ -10,6 +10,40 @@ substantive update.
 
 ## 2026-08-11
 
+- **Concluded the Windows `make -jN` work: stress-tested at libpng scale
+  and enabled parallel builds by default, matching macOS/Linux, per
+  explicit direction ("libpng로 시험을 해 보자. 그리고, 문제가 없으면
+  linux/macOS와 동일하게 처리하도록 하자").** The two entries below this
+  one root-caused and fixed the actual bugs against zlib (small, fast to
+  iterate on); this entry is the follow-up scale test and the resulting
+  policy change.
+  - **Real libpng build, `-j 12`** (this machine's `os.cpu_count()`):
+    zlib is a hand-written Makefile with ~15 compile jobs; libpng is real
+    GNU Autoconf + Libtool, ~40 compile/link steps including multiple
+    `contrib/libtests`/`contrib/tools` executables, a shared DLL with a
+    real Libtool `nm`/`sed` export-symbol pipeline, and an actual
+    dependency on zlib being installed first -- a substantially different
+    and heavier concurrency shape, and historically "the single longest
+    blocker chain of the whole Windows porting effort" (see the
+    2026-08-07 libpng `shared-pass` entry). Completed in full with zero
+    errors, zero warnings, and zero jobserver messages of any kind:
+    `make` phase 295.3s, `make install` 24.0s. Verified past "it built"
+    into "it actually works": `pngtest.exe` (libpng's own real
+    functional self-test, not a synthetic smoke check) reports
+    `libpng passes test` against a real PNG with eXIf metadata, all 7
+    interlace passes.
+  - **Flipped the default**: `tools/crt-port-build.py`'s
+    `jobs = 1 if target_os == "windows" and use_crt_shell else
+    (os.cpu_count() or 2)` special case is gone -- every OS, Windows
+    included, now defaults to `os.cpu_count() or 2`, matching how
+    macOS/Linux already worked; `--jobs N` still overrides it per
+    invocation for testing. Re-verified both zlib and libpng build
+    correctly with *no* `--jobs` flag at all (relying purely on the new
+    default resolving to this machine's real core count) before landing
+    the change -- not just with the flag explicitly passed during the
+    original investigation.
+  - Full `ctest` 81/81 throughout (before and after the default flip).
+
 - **Root-caused and fixed the fatal Windows `make -jN` (N>1) crash
   (`make.exe: /system/bin/mksh: Bad file descriptor`, then `Error 127`),
   tested against zlib per explicit direction ("libpng는 좀 크니, zlib를

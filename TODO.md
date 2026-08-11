@@ -20,24 +20,23 @@ Four active threads, not a flat list of one-off items:
   registry at once, subshell/redirection edge cases -- was never actually
   exercised on Windows until this thread opened; every Windows port build
   had always run serial `make -j 1`.
-  - **Both the fatal crash (`make.exe: /system/bin/mksh: Bad file
-    descriptor`, then `Error 127`) and the jobserver token-count mismatch
-    it was originally bundled with (`INTERNAL: Exiting with N jobserver
-    tokens available; should be M!`) are root-caused and fixed -- see
-    `HISTORY.md`'s 2026-08-11 entries for the full investigation and
-    verification.** Both traced back to the same underlying bug
-    (`__crt_sys_fstat()` destructively `ReadFile()`-ing pipe content) hit
-    from two different call sites, so the same fix resolved both at once.
-    Real `-jN` port builds (zlib, `-j 8` and `-j 16`, repeated) now
-    complete end to end with zero jobserver warnings of any kind
-    (compile, archive, shared-library link, install, and the resulting
-    `libz.so`'s own compress/uncompress smoke test all pass). Still left
-    serial by default in `tools/crt-port-build.py`
-    (`jobs = 1 if target_os == "windows" and use_crt_shell`) pending a
-    real `libpng`/`libffi`-scale stress run (much heavier concurrency and
-    a real dependency graph, not yet tried) before flipping the default
-    -- pass the script's own `--jobs N` flag to opt into parallel builds
-    for testing in the meantime.
+  - **Parallel `make -jN` on Windows is concluded: root-caused, fixed,
+    stress-tested at libpng scale, and enabled by default -- see
+    `HISTORY.md`'s 2026-08-11 entries for the full investigation.** Both
+    the fatal `make.exe: /system/bin/mksh: Bad file descriptor`/
+    `Error 127` crash and the jobserver token-count mismatch it was
+    originally bundled with traced back to the same bug
+    (`__crt_sys_fstat()` destructively `ReadFile()`-ing pipe content).
+    Verified with zlib (`-j 8`, `-j 16`) and then libpng (real GNU
+    Libtool, a real dependency graph, ~40 compile/link steps, `-j 12`) --
+    both build with zero jobserver warnings and pass their own real
+    functional self-tests (`examplesh`'s compress/uncompress round trip;
+    `pngtest`'s `libpng passes test`). `tools/crt-port-build.py`'s
+    Windows-only `jobs = 1` special case is removed -- Windows now uses
+    the same `os.cpu_count() or 2` default every other OS already used;
+    `--jobs N` still overrides it for any single invocation. Any new
+    Windows parallel-build problem found from here on gets its own fresh
+    entry, not appended into this one.
   - Harden `waitpid()` and the child registry for many live children,
     configure-script subprocess bursts, and pipeline teardown.
   - Keep the mksh child-spec path (external commands, `cmd | cmd`,
@@ -107,12 +106,13 @@ Four active threads, not a flat list of one-off items:
   `ffi_call()` at `-O1`/`-O2`, see `HISTORY.md` and
   `porting/recipes/libffi.json`'s own notes for the full trail) still
   open -- would need a real debugger session to fully root-cause.
-- Add focused tests for parallel make prerequisites before enabling `make -jN`
-  on Windows:
-  - inherited pipe fds;
-  - jobserver-style pipe transport;
-  - concurrent child wait;
-  - close-on-exec filtering under load.
+- Parallel `make -jN` on Windows is no longer an open research item -- it's
+  enabled by default now (see "in progressing" above and `HISTORY.md`).
+  Add a permanent regression test for the fixed bug (fd_snapshot dropping
+  `FD_CLOEXEC` dup2 sources; `fstat()` destructively reading pipe content)
+  so it can't silently regress, covering: inherited pipe fds across
+  `posix_spawn()`, jobserver-style pipe transport, concurrent child wait,
+  and close-on-exec filtering under load.
 - Expand Windows shell smoke tests:
   - fd 3+ redirection inside mksh;
   - grouped commands;

@@ -621,13 +621,18 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
         return
     make = env.get("MAKE", "make")
     if jobs is None:
-        # Default: serial on Windows via the CRT rootfs shell, since GNU
-        # Make's jobserver has an unresolved crash there under real
-        # concurrency (make.exe: /system/bin/mksh: Bad file descriptor) --
-        # see TODO.md's "Windows shell/process stress hardening" entry.
-        # Pass --jobs explicitly (crt-port-build.py's own CLI flag) to
-        # override this for testing/reproducing that bug.
-        jobs = 1 if target_os == "windows" and use_crt_shell else (os.cpu_count() or 2)
+        # Same default on every OS, Windows included: os.cpu_count() (or a
+        # conservative fallback of 2 if that's unavailable). Windows used to
+        # default to serial (`jobs = 1`) here because GNU Make's jobserver
+        # crashed outright under real `-jN` (N>1) concurrency on this PAL
+        # (`make.exe: /system/bin/mksh: Bad file descriptor`) -- root-caused
+        # and fixed, then stress-tested against a real libpng build (much
+        # larger and more concurrent than zlib, real GNU Libtool, real
+        # dependency graph) with real parallelism before removing the
+        # special case; see HISTORY.md's 2026-08-11 entries. Pass --jobs
+        # explicitly (this script's own CLI flag) to override this default
+        # for any single invocation.
+        jobs = os.cpu_count() or 2
     # target_overrides.<os>.make_args extends the base make_args the same
     # way configure_args/cflags already do (see apply_recipe_env/
     # build_configure_port's own configure_args handling above) -- e.g.

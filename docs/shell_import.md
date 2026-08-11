@@ -258,13 +258,14 @@ grouped commands in pipelines, such as
 travels through the CRT child-spec spawn path. `make` is now bootstrapped from
 Android `toolchain/make` as a CRT-built host tool and installed under
 `PORT_PREFIX/bin` on all three OSes, so configure recipes can avoid depending
-on MSYS2, Git-for-Windows, or the host system make even on Windows. Windows
-configure recipes still default to serial make execution and pass
-`SHELL=/system/bin/mksh` -- not because of an unresolved jobserver/fd-
-inheritance limitation anymore (a real `make -jN` crash and a related
-jobserver token-accounting bug were both root-caused and fixed, see
-`HISTORY.md`'s 2026-08-11 entries), but pending a stress run at
-libpng/libffi scale before flipping the default; see `TODO.md`.
+on MSYS2, Git-for-Windows, or the host system make even on Windows. **Update:
+Windows configure recipes now run parallel `make -jN` by default**, matching
+macOS/Linux -- a real `make -jN` crash and a related jobserver token-
+accounting bug were both root-caused and fixed, then stress-tested against a
+real libpng build before flipping `tools/crt-port-build.py`'s Windows-only
+serial-default special case off entirely; see `HISTORY.md`'s 2026-08-11
+entries. Windows configure recipes still pass `SHELL=/system/bin/mksh` to
+keep recipe commands on the CRT child-spec path.
 
 The child-spec path must continue to carry Bionic-shaped process/fd/signal
 behavior: cwd/rootfs/env, file actions including fd 3 and above,
