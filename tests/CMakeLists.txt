@@ -1,10 +1,19 @@
-# CRT_STARTUP_OBJECTS (crt1.o, plus crt1_init_array.o's object on Linux --
-# see libc/CMakeLists.txt's own comment) is set with PARENT_SCOPE by
-# libc/CMakeLists.txt, which add_subdirectory(libc) always processes
-# before this file.
+# CRT_STARTUP_OBJECTS (crt1.o, plus crt1_init_array.o's object on Linux,
+# or crt1_ctors_begin.o+crt1_ctors_walker.o on Windows -- see
+# libc/CMakeLists.txt's own comment) and CRT_STARTUP_END_OBJECTS (empty
+# except on Windows, where crt1_ctors_end.o must be the last .ctors/
+# .dtors contributor on the whole link line) are both set with
+# PARENT_SCOPE by libc/CMakeLists.txt, which add_subdirectory(libc)
+# always processes before this file. CRT_STARTUP_OBJECTS must come
+# before the real source(s) here (not after, despite that being where it
+# used to sit before CRT_STARTUP_END_OBJECTS existed) and
+# CRT_STARTUP_END_OBJECTS after -- Linux/macOS don't care either way,
+# but Windows' ctors_begin/end sentinels are strictly link-order-
+# sensitive (see libc/src/arch/windows/common/ctors_begin.c).
 add_executable(hello_c
-  hello.c
   ${CRT_STARTUP_OBJECTS}
+  hello.c
+  ${CRT_STARTUP_END_OBJECTS}
 )
 target_link_libraries(hello_c PRIVATE crt_build_flags c)
 target_link_libraries(hello_c PRIVATE crt_compiler_rt_builtins)
@@ -52,9 +61,10 @@ function(add_crt_test test_name source_file)
     set(CRT_TEST_EXTRA_SOURCES "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/common/fork_capable_relaunch.c")
   endif()
   add_executable(${test_name}
+    ${CRT_STARTUP_OBJECTS}
     ${source_file}
     ${CRT_TEST_EXTRA_SOURCES}
-    ${CRT_STARTUP_OBJECTS}
+    ${CRT_STARTUP_END_OBJECTS}
   )
   target_link_libraries(${test_name} PRIVATE crt_build_flags c)
   target_include_directories(${test_name} PRIVATE
@@ -98,8 +108,9 @@ endfunction()
 
 function(add_crt_cxx_test test_name source_file)
   add_executable(${test_name}
-    ${source_file}
     ${CRT_STARTUP_OBJECTS}
+    ${source_file}
+    ${CRT_STARTUP_END_OBJECTS}
   )
   target_link_libraries(${test_name} PRIVATE crt_cxx_build_flags cxx c)
   target_include_directories(${test_name} PRIVATE
@@ -490,10 +501,16 @@ set_tests_properties(pthread_type_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_type_test: ok"
 )
 
+add_crt_test(init_array_test init_array_test.c)
+set_tests_properties(init_array_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "init_array_test: ok"
+)
+
 if(CRT_TARGET_OS STREQUAL "windows")
   add_executable(windows_export_hygiene_test
-    windows_export_hygiene_test.c
     ${CRT_STARTUP_OBJECTS}
+    windows_export_hygiene_test.c
+    ${CRT_STARTUP_END_OBJECTS}
   )
   target_link_libraries(windows_export_hygiene_test PRIVATE crt_build_flags c)
   target_link_libraries(windows_export_hygiene_test PRIVATE crt_compiler_rt_builtins)

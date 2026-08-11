@@ -20,6 +20,14 @@ int main(int argc, char** argv, char** envp);
 void __crt_env_set_initial(char** envp);
 void __crt_rootfs_bootstrap(int argc, char** argv);
 void exit(int status);
+/* Defined by libc/src/arch/windows/common/init_fini_array.c
+ * (crt1_ctors_walker OBJECT library), always linked into every
+ * executable right alongside this file itself -- see
+ * CRT_STARTUP_OBJECTS in libc/CMakeLists.txt -- so this is a plain,
+ * strong reference (unlike exit.c's weak reference to the sibling
+ * __crt_run_fini_array(), which is ALSO compiled into c_shared and
+ * therefore can't assume the walker is present there). */
+void __crt_run_init_array(void);
 
 #if defined(__aarch64__) || defined(_M_ARM64) || defined(__x86_64__) || defined(_M_X64)
 /* Weak reference, not a hard dependency: only targets that actually need
@@ -116,5 +124,6 @@ void mainCRTStartup(void) {
     argc = 1;
   }
   __crt_rootfs_bootstrap(argc, argv_storage);
+  __crt_run_init_array();
   exit(main(argc, argv_storage, environ));
 }

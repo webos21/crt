@@ -173,6 +173,92 @@ substantive update.
     statically embedded into the executable regardless of how libc
     itself ends up linked.
 
+- **Built a permanent, cross-OS regression test for constructor/
+  destructor support and used it to root-cause and fix the Windows half
+  of the `.init_array`/`.fini_array` gap (see the entry above); analyzed
+  macOS and found it likely needs no fix at all.** Prompted directly by
+  the observation that if the gap hit both Linux and Windows, it
+  probably hit macOS too, and that a dedicated test (rather than
+  re-purposing xz/liblzma each time) would make it debuggable going
+  forward. `tests/init_array_test.c`: one `__attribute__((constructor))`
+  setting a flag, one `__attribute__((destructor))` printing a
+  pass/fail line depending on whether the flag got set first --
+  deliberately minimal, single source file, no external dependencies,
+  wired into `tests/CMakeLists.txt` via the normal `add_crt_test()` path
+  so it runs on every OS's `ctest` alongside everything else with zero
+  special-casing.
+  - **Windows: fixed and verified (local `ctest`, 82/82, all three OSes'
+    Windows-specific work confirmed via CI on prior commits in this
+    series).** The obvious first attempt -- reusing the exact GNU-style
+    `.ctors`/`.dtors` bracketing technique already designed for this gap
+    (see the entry above) -- built clean but the test still failed
+    silently (no output at all, not even the destructor's "never ran"
+    branch). Root cause, found by disassembling the actual compiled test
+    object with `llvm-objdump`: this project's own CMake-native Windows
+    builds (libc, `tests/`, `shell/`) compile with plain clang and no
+    explicit `--target`, which defaults to `*-pc-windows-msvc` --
+    entirely different from `tools/crt-cc`'s explicit
+    `--target=*-w64-mingw32` used for third-party ports -- and under that
+    default target, clang lowers `__attribute__((constructor))`/
+    `((destructor))` to the fixed section names `.CRT$XCU`/`.CRT$XTX`,
+    not `.ctors`/`.dtors` at all. The project has TWO real, simultaneously
+    -live constructor/destructor conventions on Windows depending on
+    compile path, not one. Confirmed `lld-link` honors MSVC's
+    alphabetical `$`-suffix section-group sorting regardless of
+    link-command-line order (a direct empirical test: three objects
+    contributing `.CRT$XCA`/`.CRT$XCU`/`.CRT$XCZ`, linked in deliberately
+    reversed order, still produced a correctly A-then-U-then-Z-ordered
+    merged section) -- so `.CRT$XCA`/`.CRT$XCZ` (ctors) and `.CRT$XTA`/
+    `.CRT$XTZ` (dtors) sentinels bracket that convention without needing
+    the GNU convention's careful link-line positioning at all. Both
+    conventions are now walked unconditionally by the same three shared
+    objects (`libc/src/arch/windows/common/ctors_begin.c`/`ctors_end.c`/
+    `init_fini_array.c`), `__crt_run_init_array()` called from
+    `crt1.c`'s `mainCRTStartup()` right before `main()`, and
+    `__crt_run_fini_array()` reached from `exit.c` via the same weak-
+    reference pattern Linux already used (necessary here too:
+    `exit.c` is compiled into both the static `c` library and the
+    `c_shared` DLL, and the walker object is only ever linked into a
+    final executable's own `crt1`, never into `c_shared` itself).
+  - **A second, independent bug surfaced by the very act of testing this
+    fix**: once real destructor calls started happening on Windows, the
+    regression test failed a *different* way -- printing both the pass
+    and fail lines, from two different OS processes (confirmed with a
+    `getpid()` probe). Root cause: `libc/src/arch/windows/common/
+    fork_capable_relaunch.c` (already linked into every `ctest` target,
+    not something newly added) has its startup self-relaunch parent
+    process `WaitForSingleObject()` its freshly-spawned child, then
+    forward the child's exit code by calling `exit(code)` -- a call that
+    was harmless before this fix landed, since Windows had no
+    `__crt_run_fini_array()` for it to reach, but which now incorrectly
+    re-ran the test's destructor a second time in the *parent* process,
+    which never ran the matching constructor (it never reaches its own
+    `main()` at all -- only the relaunched child does). Fixed: that call
+    is now `_exit(code)`, a raw process-terminating syscall with no
+    atexit/`__cxa_finalize`/fini_array side effects, which is what a pure
+    wait-and-forward wrapper should have used from the start. A real,
+    pre-existing (not newly introduced) latent bug, invisible until now
+    for the same reason the original gap was: nothing with an observable
+    destructor side effect had ever run through this relaunch path
+    before.
+  - **macOS: analysis-based, not yet empirically confirmed** (no macOS
+    hardware this session). Unlike Linux/Windows, Mach-O constructors
+    (`__DATA,__mod_init_func`) are run automatically by dyld itself for
+    every dynamically-linked image -- including the main executable --
+    before dyld ever transfers control to any entry point, regardless of
+    what that entry symbol is named; macOS has no fully-static executable
+    format, so dyld's own image-init sequence unconditionally runs first.
+    Mach-O destructors (`__DATA,__mod_term_func`) are, in turn, believed
+    to be registered by dyld through the same Itanium C++ ABI atexit
+    mechanism this project's `exit.c` already drains unconditionally via
+    `__cxa_finalize(0)`. If that holds, macOS needs no new walker code at
+    all -- `tests/init_array_test.c` should just pass there as-is via the
+    CI `macos-aarch64` leg. Documented as inference from well-established
+    dyld/Mach-O behavior, not as a confirmed fix, pending that CI run.
+  - Re-verifying xz/liblzma's own Windows round trip specifically (rather
+    than the general-purpose regression test above) was not completed
+    this session -- see `TODO.md`'s xz entry.
+
 - **Ported bzip2 1.0.8 to Linux and Windows (`shared-pass` both), the
   first entry in the new porting-matrix-expansion queue** (`bzip2` ->
   `xz` -> `pcre2` -> `mbedtls` -> `curl`, `TODO.md`). Upstream ships no

@@ -207,6 +207,14 @@ elseif(CRT_TARGET_OS STREQUAL "windows")
     message(FATAL_ERROR "Unsupported Windows architecture: ${CRT_EFFECTIVE_ARCH}")
   endif()
   set(CRT_SIGNAL_BACKEND_FILE src/arch/windows/common/signal_backend.c)
+  # __crt_run_init_array()/__crt_run_fini_array() Windows/PE equivalent --
+  # see libc/src/arch/windows/common/init_fini_array.c's own comment for
+  # why this needs two extra, position-sensitive sentinel objects
+  # (ctors_begin.c/ctors_end.c) rather than the single boundary-symbol
+  # trick Linux's ELF linker script provides automatically.
+  set(CRT_CTORS_BEGIN_FILE src/arch/windows/common/ctors_begin.c)
+  set(CRT_CTORS_END_FILE src/arch/windows/common/ctors_end.c)
+  set(CRT_CTORS_WALKER_FILE src/arch/windows/common/init_fini_array.c)
 else()
   message(FATAL_ERROR "Unsupported CRT_TARGET_OS: ${CRT_TARGET_OS}")
 endif()
@@ -265,6 +273,44 @@ if(CRT_TARGET_OS STREQUAL "linux")
   # of the bare $<TARGET_OBJECTS:crt1> they'd otherwise need to remember
   # to extend themselves on every executable target.
   list(APPEND CRT_STARTUP_OBJECTS $<TARGET_OBJECTS:crt1_init_array>)
+elseif(CRT_TARGET_OS STREQUAL "windows")
+  # See libc/src/arch/windows/common/init_fini_array.c's own comment:
+  # unlike Linux's single boundary-symbol-driven object, Windows/PE needs
+  # THREE separate objects, two of which (begin/end) are POSITION-
+  # SENSITIVE on the final link line, not just "linked somewhere" --
+  # ctors_begin.o must be the first .ctors/.dtors contributor (right
+  # after crt1.o, before any user code), ctors_end.o must be the last
+  # (after everything else, including any third-party static libraries a
+  # port build links). CRT_STARTUP_OBJECTS below only covers the "must
+  # come first" half; CRT_STARTUP_END_OBJECTS (a second, separate
+  # PARENT_SCOPE variable) carries the "must come last" half -- every
+  # add_executable() call site needs to place sources between the two,
+  # not just append CRT_STARTUP_OBJECTS the way Linux/macOS's single
+  # variable already could.
+  add_library(crt1_ctors_begin OBJECT ${CRT_CTORS_BEGIN_FILE})
+  target_link_libraries(crt1_ctors_begin PRIVATE crt_build_flags)
+  set_target_properties(crt1_ctors_begin PROPERTIES
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  )
+  add_library(crt1_ctors_end OBJECT ${CRT_CTORS_END_FILE})
+  target_link_libraries(crt1_ctors_end PRIVATE crt_build_flags)
+  set_target_properties(crt1_ctors_end PROPERTIES
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  )
+  add_library(crt1_ctors_walker OBJECT ${CRT_CTORS_WALKER_FILE})
+  target_link_libraries(crt1_ctors_walker PRIVATE crt_build_flags)
+  set_target_properties(crt1_ctors_walker PROPERTIES
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  )
+  # The walker (plain code, not a section-merge-order-sensitive data
+  # object) can go anywhere; bundled into the "begin" group purely for
+  # convenience, matching how crt1_init_array's own walker rides along
+  # with the "always first" group on Linux.
+  list(APPEND CRT_STARTUP_OBJECTS $<TARGET_OBJECTS:crt1_ctors_begin> $<TARGET_OBJECTS:crt1_ctors_walker>)
+  set(CRT_STARTUP_END_OBJECTS $<TARGET_OBJECTS:crt1_ctors_end> PARENT_SCOPE)
+endif()
+if(NOT CRT_TARGET_OS STREQUAL "windows")
+  set(CRT_STARTUP_END_OBJECTS "" PARENT_SCOPE)
 endif()
 set(CRT_STARTUP_OBJECTS "${CRT_STARTUP_OBJECTS}" PARENT_SCOPE)
 
@@ -316,4 +362,7 @@ if(CRT_TARGET_OS STREQUAL "windows")
   # tools/crt-cc's own -shared support needs exactly that (see its
   # comment on dllcrt.o) to build a DLL for a third-party port.
   install(FILES "$<TARGET_OBJECTS:crt_windows_dllcrt>" DESTINATION lib RENAME dllcrt.o)
+  install(FILES "$<TARGET_OBJECTS:crt1_ctors_begin>" DESTINATION lib RENAME crt1_ctors_begin.o)
+  install(FILES "$<TARGET_OBJECTS:crt1_ctors_end>" DESTINATION lib RENAME crt1_ctors_end.o)
+  install(FILES "$<TARGET_OBJECTS:crt1_ctors_walker>" DESTINATION lib RENAME crt1_ctors_walker.o)
 endif()

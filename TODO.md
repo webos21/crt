@@ -58,27 +58,24 @@ Five active threads, not a flat list of one-off items:
     cosmetic -- see `porting/recipes/xz.json`'s notes for the full
     trail, including a `crt-port-build.py` fix so a recipe's
     `make_args` override reaches `make install` too, not just `make`).
-    Windows *builds* clean (`configure-pass`), but actually calling the
-    library crashes -- confirmed directly (not just presumed): a trivial
-    `lzma_version_string()` call works, but the first real
-    `lzma_easy_buffer_encode()` call segfaults, on both the static and
-    shared build, in the exact same "first real call into the CRC
-    dispatcher" shape as the original Linux bug this port already found
-    and fixed. Strong evidence it's the same `.init_array`-never-ran gap
-    (see the entry below) reaching Windows too, but not confirmed with a
-    debugger the way the Linux case was, and not fixed this session: PE
-    constructors compile into a GNU/MinGW-style bare `.ctors` section
-    (confirmed via `llvm-objdump -h` on a real constructor test, not
-    MSVC's `.CRT$XCU` convention), which has no equivalent to ELF's
-    automatic `__init_array_start`/`_end` boundary symbols -- MinGW-w64's
-    own real crt0 relies on `-1`-sentinel objects (`crtbegin.o`/
-    `crtend.o`) linked first/last to bound the merged section, a
-    mechanism this project doesn't have and would need to add carefully
-    (get the link-order sandwich wrong and it silently walks garbage)
-    rather than as a quick follow-on to an already-long investigation.
+    Windows *builds* clean (`configure-pass`); actually calling the
+    library previously crashed (confirmed directly: a trivial
+    `lzma_version_string()` call worked, but the first real
+    `lzma_easy_buffer_encode()` call segfaulted, on both the static and
+    shared build) in the same "first real call into the CRC dispatcher"
+    shape as the original Linux bug -- strong evidence of the same
+    `.init_array`-never-ran gap (see the entry below) reaching Windows
+    too. That general gap is now fixed and verified on Windows (see the
+    entry below for the full writeup), but re-running xz's own
+    round-trip test specifically to confirm the crash is actually gone
+    was not completed this session -- an unrelated `inttypes.h`
+    header-search quirk in this session's own ad-hoc manual `crt-cc`
+    invocation blocked it (liblzma's own real `./configure`+`make` build
+    resolves `inttypes.h` fine, so this looks like a throwaway-test
+    methodology issue, not a project defect, but it wasn't run down).
     macOS still `pending` (no macOS hardware available this session).
-    Next: `pcre2` (xz's Windows/macOS gaps trail along in the two
-    entries below, not blocking further queue progress).
+    Next: `pcre2` (xz's Windows re-verification and macOS gap trail along
+    in the two entries below, not blocking further queue progress).
 
 - **`.init_array`/`.fini_array` (ELF constructor/destructor) support**,
   found and fixed for Linux while porting xz/liblzma (see that recipe's
@@ -90,38 +87,70 @@ Five active threads, not a flat list of one-off items:
   `.so`'s own `.init_array` automatically. Fixed for Linux
   (`libc/src/arch/linux/common/init_fini_array.c`, wired into `crt1.S`/
   `exit.c`/`tools/crt-cc`/the CMake test and shell build paths); verified
-  with gdb against the real liblzma bug that exposed it.
-  - Windows and macOS still lack the equivalent fix -- and Windows is now
-    *confirmed* (not just presumed) to need it too: the same xz/liblzma
-    round-trip test that exposed and verified the Linux fix crashes on
-    Windows in the identical shape (trivial API calls work, the first
-    real call into liblzma's CRC dispatcher segfaults), on both the
-    static and shared build. PE constructors compile into a bare
-    `.ctors` section (GNU/MinGW convention, confirmed via `llvm-objdump
-    -h` on a real `__attribute__((constructor))` test against this
-    toolchain) rather than MSVC's `.CRT$XCU` family this TODO previously
-    assumed -- so the fix shape is different from what's written below:
-    `.ctors` has no ELF-style automatic linker-provided boundary
-    symbols, so this needs the same `-1`-sentinel-object technique real
-    mingw-w64 crt0 uses (a "begin" object linked immediately after
-    crt1.o and an "end" object linked last, each contributing a `-1`
-    value to the merged `.ctors` section, with the startup walker
-    reading from the begin symbol until it hits `-1`) -- not attempted
-    yet, since getting the link-order sandwich wrong would silently walk
-    garbage instead of failing loudly. macOS needs to walk
-    `__DATA,__mod_init_func` (Mach-O's own, separate convention). Neither
-    implemented yet -- only matters for statically-linked
-    constructor-reliant code, which is why nothing in this project's own
-    test suite or any prior port ever exercised it before xz.
-  - Also documented, not yet fixed: for an executable linked against
-    *shared* libc (`c_shared`/`libc.so`) rather than static, `exit()`
-    (which lives inside `libc.so` in that configuration) reaches
-    `__crt_run_fini_array()` only via a weak symbol reference back into
-    the executable's own `crt1` object -- and this toolchain doesn't pass
-    `-rdynamic`/`--export-dynamic`, so that cross-DSO reference likely
-    doesn't resolve. `.init_array` (construction) is unaffected by this
-    gap, since `crt1.o` is always statically embedded into the
-    executable regardless of how libc itself is linked.
+  with gdb against the real liblzma bug that exposed it. A permanent
+  regression test, `tests/init_array_test.c` (a single constructor +
+  destructor pair, the destructor printing a pass/fail line depending on
+  whether the constructor actually ran first), now guards this on every
+  OS going forward -- see `HISTORY.md`'s dated entry for the full story.
+  - **Windows: fixed and verified** (full local `ctest`, 82/82 including
+    the new regression test). Turned out to need TWO separate section
+    conventions bracketed simultaneously, not one: `tools/crt-cc`'s own
+    `--target=*-w64-mingw32` builds (third-party ports like xz) produce a
+    bare, unnamed-group `.ctors`/`.dtors` section per function (confirmed
+    via `llvm-objdump -h`), while this project's own CMake-native builds
+    (libc itself, `tests/`, `shell/` -- plain clang, no `--target`
+    override, defaults to `*-pc-windows-msvc`) instead produce the fixed
+    section names `.CRT$XCU`/`.CRT$XTX` -- confirmed empirically, and the
+    TODO's earlier assumption that only the GNU convention applied here
+    was wrong. `.ctors`/`.dtors` has no ELF-style automatic boundary
+    symbols and is link-order-sensitive, so it's bracketed the mingw-w64
+    crt0 way (`ctors_begin.o` linked right after `crt1.o` via a new
+    `tools/crt-cc` `$prelibs` slot, `ctors_end.o` appended last).
+    `.CRT$XC*`/`.CRT$XT*`, by contrast, is `$`-suffix-alphabetically
+    sorted by `lld-link` regardless of link-command-line order (confirmed
+    empirically: three objects contributing to `.CRT$XCA`/`.CRT$XCU`/
+    `.CRT$XCZ`, deliberately linked in reverse order, still produced a
+    correctly-ordered merged section) -- bracketed with `.CRT$XCA`/
+    `.CRT$XCZ` (ctors) and `.CRT$XTA`/`.CRT$XTZ` (dtors) sentinels that
+    need no special placement at all. Both conventions live in the same
+    three objects (`libc/src/arch/windows/common/ctors_begin.c`/
+    `ctors_end.c`/`init_fini_array.c`) and are walked unconditionally, so
+    a constructor/destructor compiled under either ABI actually runs.
+    `__crt_run_fini_array()` stays a *weak* reference from `exit.c` (like
+    Linux), since that translation unit is also compiled into the
+    `c_shared` DLL, which never links the walker.
+    Along the way, fixing this exposed a real, pre-existing, unrelated
+    bug: `libc/src/arch/windows/common/fork_capable_relaunch.c`'s parent
+    process (every test target already links this file) calls `exit()`
+    after waiting for its relaunched child, forwarding the child's exit
+    code -- harmless before, since Windows had no `__crt_run_fini_array()`
+    to call, but once it existed the parent's own pass-through `exit()`
+    started incorrectly re-running destructors the parent itself never
+    initialized (it never runs the program's own `main()`/constructors,
+    only the child does). Fixed: that call is now `_exit()`, a raw
+    process-terminating syscall with no atexit/cxa_finalize/fini_array
+    side effects, which is what a pure wait-and-forward wrapper should
+    have used from the start.
+  - **macOS: analysis suggests this may already work with no code
+    changes needed, pending CI confirmation** (no local macOS hardware
+    this session). Unlike Linux/Windows, Mach-O constructors
+    (`__DATA,__mod_init_func`) are run automatically by dyld itself, for
+    every dynamically-linked image including the main executable, before
+    dyld ever transfers control to this project's own entry point
+    (`libc/src/arch/macos/{x86_64,aarch64}/crt1.S`'s `_start`) --
+    unconditionally true for any Mach-O executable regardless of what its
+    entry symbol is named, since macOS has no fully-static executable
+    format and dyld's own image-init sequence always runs first. Mach-O
+    destructors (`__DATA,__mod_term_func`) are, in turn, registered by
+    dyld through the same Itanium C++ ABI atexit mechanism this project's
+    `exit.c` already drains unconditionally via `__cxa_finalize(0)` (see
+    that file's own comment) -- so both already run correctly through
+    pre-existing machinery, with no new walker required. This is
+    inference from well-established, documented dyld/Mach-O behavior, not
+    an empirical confirmation the way the Linux/Windows fixes are --
+    genuinely verifying it requires the CI `macos-aarch64` leg (or real
+    hardware) actually running the new `tests/init_array_test.c`
+    regression test.
 
 - **Windows shell/process stress hardening.** Real concurrency -- parallel
   `make -jN`, jobserver pipe fd handling, many live children in the

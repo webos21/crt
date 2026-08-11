@@ -1,6 +1,7 @@
 add_executable(crt_tiny_sh
-  tiny_sh/tiny_sh.c
   ${CRT_STARTUP_OBJECTS}
+  tiny_sh/tiny_sh.c
+  ${CRT_STARTUP_END_OBJECTS}
 )
 target_link_libraries(crt_tiny_sh PRIVATE crt_build_flags c)
 target_include_directories(crt_tiny_sh PRIVATE
@@ -69,6 +70,7 @@ add_custom_target(crt_shell_artifacts
 set(CRT_MKSH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/mksh")
 if(EXISTS "${CRT_MKSH_ROOT}/Android.bp")
   set(CRT_MKSH_SOURCES
+    ${CRT_STARTUP_OBJECTS}
     mksh/src/lalloc.c
     mksh/src/edit.c
     mksh/src/eval.c
@@ -85,7 +87,6 @@ if(EXISTS "${CRT_MKSH_ROOT}/Android.bp")
     mksh/src/tree.c
     mksh/src/ulimit.c
     mksh/src/var.c
-    ${CRT_STARTUP_OBJECTS}
   )
   if(CRT_TARGET_OS STREQUAL "windows" AND CRT_EFFECTIVE_ARCH_FOR_FLAGS MATCHES "^(arm64|ARM64|aarch64|x86_64|AMD64|x64)$")
     # mksh is the one CRT-built program that actually calls fork() (real
@@ -95,6 +96,11 @@ if(EXISTS "${CRT_MKSH_ROOT}/Android.bp")
     # Windows binary.
     list(APPEND CRT_MKSH_SOURCES "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/common/fork_capable_relaunch.c")
   endif()
+  # CRT_STARTUP_END_OBJECTS must stay the last entry on the link line
+  # (see tests/CMakeLists.txt's own comment) -- appended after the
+  # fork_capable_relaunch.c conditional above rather than baked into the
+  # initial set() call, since that conditional itself appends sources.
+  list(APPEND CRT_MKSH_SOURCES ${CRT_STARTUP_END_OBJECTS})
   add_executable(crt_mksh ${CRT_MKSH_SOURCES})
   target_link_libraries(crt_mksh PRIVATE crt_build_flags c)
   target_link_libraries(crt_mksh PRIVATE crt_compiler_rt_builtins)
@@ -254,6 +260,7 @@ endif()
 set(CRT_TOYBOX_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/toybox/src")
 if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
   set(CRT_TOYBOX_SOURCES
+    ${CRT_STARTUP_OBJECTS}
     toybox/src/lib/args.c
     toybox/src/lib/commas.c
     toybox/src/lib/dirtree.c
@@ -331,7 +338,6 @@ if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
     toybox/src/toys/posix/uniq.c
     toybox/src/toys/posix/wc.c
     toybox/src/toys/posix/xargs.c
-    ${CRT_STARTUP_OBJECTS}
   )
   if(CRT_TARGET_OS STREQUAL "windows" AND CRT_EFFECTIVE_ARCH_FOR_FLAGS MATCHES "^(arm64|ARM64|aarch64|x86_64|AMD64|x64)$")
     # xargs (and potentially other applets later) calls fork()/vfork() to run
@@ -345,6 +351,11 @@ if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
     # linked into every Windows binary.
     list(APPEND CRT_TOYBOX_SOURCES "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/common/fork_capable_relaunch.c")
   endif()
+  # CRT_STARTUP_END_OBJECTS must stay the last entry on the link line
+  # (see tests/CMakeLists.txt's own comment) -- appended after the
+  # fork_capable_relaunch.c conditional above rather than baked into the
+  # initial set() call, since that conditional itself appends sources.
+  list(APPEND CRT_TOYBOX_SOURCES ${CRT_STARTUP_END_OBJECTS})
   add_executable(crt_toybox ${CRT_TOYBOX_SOURCES})
   target_link_libraries(crt_toybox PRIVATE c m)
   target_link_libraries(crt_toybox PRIVATE crt_compiler_rt_builtins)
@@ -544,8 +555,9 @@ if(EXISTS "${CRT_AWK_ROOT}/src/awk.h")
     COMPILE_OPTIONS "-Wno-unused-parameter;-Wno-unused-but-set-variable"
   )
   add_executable(crt_awk
-    ${CRT_AWK_SOURCES}
     ${CRT_STARTUP_OBJECTS}
+    ${CRT_AWK_SOURCES}
+    ${CRT_STARTUP_END_OBJECTS}
   )
   target_link_libraries(crt_awk PRIVATE crt_build_flags c m)
   target_link_libraries(crt_awk PRIVATE crt_compiler_rt_builtins)

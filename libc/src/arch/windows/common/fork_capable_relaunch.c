@@ -131,7 +131,7 @@ __declspec(dllimport) DWORD CRT_WINAPI GetLastError(void);
 __declspec(dllimport) BOOL CRT_WINAPI SetEnvironmentVariableA(const char* lpName, const char* lpValue);
 __declspec(dllimport) BOOL CRT_WINAPI TerminateProcess(HANDLE hProcess, unsigned int uExitCode);
 __declspec(dllimport) DWORD CRT_WINAPI ResumeThread(HANDLE hThread);
-void exit(int status);
+void _exit(int status) __attribute__((noreturn));
 
 static char relaunch_command_line[CRT_COMMAND_LINE_MAX];
 
@@ -295,5 +295,18 @@ void __crt_windows_ensure_fork_capable_relaunch(const char* command_line) {
   GetExitCodeProcess(pi.hProcess, &exit_code);
   CloseHandle(pi.hThread);
   CloseHandle(pi.hProcess);
-  exit((int)exit_code);
+  /* _exit(), not exit(): this parent process is a pure wait-and-forward
+   * shell around the relaunched child -- it never ran the program's own
+   * main() (or, since __crt_run_init_array()/__crt_run_fini_array()
+   * exist on Windows now -- see that file's own comment -- its own
+   * constructors), so running exit()'s full shutdown sequence
+   * (atexit handlers, __cxa_finalize, __crt_run_fini_array) here would
+   * incorrectly run destructors this process's own copy of that state
+   * never initialized. Confirmed hitting this directly: tests/
+   * init_array_test.c's destructor ran a second time in this parent
+   * process, reading its own never-touched (still zero-initialized)
+   * static state and printing the "constructor never ran" failure
+   * branch, even though the real child process it relaunched had
+   * already run the matching constructor and exited correctly. */
+  _exit((int)exit_code);
 }

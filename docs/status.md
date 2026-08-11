@@ -20,36 +20,42 @@ in those two win.
   manual, on real aarch64 hardware -- x86_64 Linux had never actually been
   built until this matrix existed, and immediately surfaced two real,
   previously-invisible bugs (see `HISTORY.md`'s 2026-08-11 entries).
-- **`ctest`**: 74 registered tests, all passing on every CI leg. Run locally
-  via `cmake --workflow --preset <os>-host-ninja-debug` or
-  `ctest --test-dir out/<preset>`.
+- **`ctest`**: 82 registered tests on Windows (count is slightly
+  OS-dependent -- a few targets, like `windows_export_hygiene_test`, only
+  exist on their own OS), all passing locally on Windows as of this
+  session's `.init_array` work; CI is the source of truth for Linux/macOS
+  counts. Run locally via `cmake --workflow --preset <os>-host-ninja-debug`
+  or `ctest --test-dir out/<preset>`.
 - **Ports**: see `docs/porting_status.md` for the full per-library,
   per-host table. `zlib`/`libpng`/`sqlite-amalgamation`/`bzip2` are at
   `shared-pass` on Linux and Windows (macOS pending on all four, no
   macOS hardware this session). `xz` (liblzma) is `shared-pass` on Linux,
-  `configure-pass` on Windows (builds clean, but a confirmed `.init_array`
-  gap crashes it at runtime -- see below). `libffi` is `partial`: builds
+  `configure-pass` on Windows (builds clean; the `.init_array` gap that
+  previously crashed it at runtime is now fixed and verified in general --
+  see below -- but xz's own round trip wasn't re-run this session to
+  confirm the crash specifically is gone). `libffi` is `partial`: builds
   and works except for a known `-O1`/`-O2` `ffi_call()`-repeat-call bug
   (see below).
 
 ## Known gaps
 
 - **`.init_array`/`.fini_array` (ELF constructor/destructor) support**:
-  fixed for Linux, still missing on Windows/macOS. See `TODO.md`'s
-  dedicated entry -- this project's `crt1` startup never ran
-  `__attribute__((constructor))` functions (also what runs C++ global
-  object constructors) for the executable entry point on any OS, until
-  found and fixed for Linux while porting xz/liblzma. Windows is now
-  *confirmed* (not just presumed) to need the same fix: the xz round-trip
-  test that verified the Linux fix crashes on Windows in the identical
-  shape (trivial API calls work, the first real call into liblzma's CRC
-  dispatcher segfaults, on both the static and shared build). PE
-  constructors compile into a GNU/MinGW-style bare `.ctors` section for
-  this toolchain (confirmed via `llvm-objdump -h`), not MSVC's
-  `.CRT$XCU` -- `.ctors` has no ELF-style automatic boundary symbols, so
-  a correct fix needs the same `-1`-sentinel-object technique real
-  mingw-w64 crt0 uses. Not attempted yet; a wrong link-order sandwich
-  would silently walk garbage instead of failing loudly.
+  fixed and verified on Linux and Windows; macOS is analysis-based only
+  (believed to already work with no code changes, via dyld's automatic
+  `__mod_init_func` handling plus this project's existing
+  `__cxa_finalize(0)` call, but not yet empirically confirmed -- no macOS
+  hardware this session, pending the CI `macos-aarch64` leg). See
+  `TODO.md`'s dedicated entry and `HISTORY.md` for the full writeup,
+  including two real bugs the Windows fix surfaced along the way: this
+  project's own CMake-native Windows builds turned out to use a second,
+  entirely separate constructor/destructor convention
+  (`.CRT$XCU`/`.CRT$XTX`, MSVC ABI) alongside the GNU one
+  (`.ctors`/`.dtors`) `tools/crt-cc`'s port builds use, and fixing this
+  exposed a latent, pre-existing bug in the Windows startup
+  self-relaunch's parent-process exit path
+  (`fork_capable_relaunch.c`, now `_exit()` instead of `exit()`). A
+  permanent regression test, `tests/init_array_test.c`, now guards this
+  on every OS's `ctest` run going forward.
 - **libffi**: `ffi_call()` alone and closures alone each work correctly in
   isolation, but calling `ffi_call()` and then any further libffi call in
   the same process reliably segfaults when the caller is compiled at
@@ -72,9 +78,10 @@ in those two win.
 ## Not yet started
 
 - Porting matrix expansion: `bzip2` done on Linux/Windows, `xz` done on
-  Linux (Windows blocked on the `.init_array` gap above, macOS pending);
-  `pcre2` -> `mbedtls` -> `curl` not started -- see `TODO.md`'s "in
-  progressing" section for the current queue and order.
+  Linux (Windows builds clean and the `.init_array` gap that crashed it
+  is now fixed in general, but xz's own round trip isn't re-verified
+  yet; macOS pending); `pcre2` -> `mbedtls` -> `curl` not started -- see
+  `TODO.md`'s "in progressing" section for the current queue and order.
 - Broader POSIX/rootfs surface hardening beyond what each port's own build
   happens to exercise.
 - C++ runtime phase 2 and an ELF loader/dynamic-linker prototype: not
