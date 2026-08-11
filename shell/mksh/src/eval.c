@@ -81,7 +81,7 @@ static int comsub(Expand *, const char *, int);
 static char *valsub(struct op *, Area *);
 static char *trimsub(char *, char *, int);
 static void glob(char *, XPtrV *, bool);
-static void globit(XString *, char **, char *, XPtrV *, int);
+static void globit(XString *, char **, char *, XPtrV *, int, char);
 static const char *maybe_expand_tilde(const char *, XString *, char **, bool);
 #ifndef MKSH_NOPWNAM
 static char *homedir(char *);
@@ -1736,7 +1736,12 @@ glob_str(char *cp, XPtrV *wp, bool markdirs)
 	char *xp;
 
 	Xinit(xs, xp, 256, ATEMP);
-	globit(&xs, &xp, cp, wp, markdirs ? GF_MARKDIR : GF_NONE);
+	/*
+	 * top-level call: xp is still empty here, so the dirsep value
+	 * passed in is never actually written (see the "xp > Xstring"
+	 * check in globit()) -- '/' is just a harmless, canonical default.
+	 */
+	globit(&xs, &xp, cp, wp, markdirs ? GF_MARKDIR : GF_NONE, '/');
 	Xfree(xs, xp);
 
 	return (XPsize(*wp) - oldsize);
@@ -1747,7 +1752,8 @@ globit(XString *xs,	/* dest string */
     char **xpp,		/* ptr to dest end */
     char *sp,		/* source path */
     XPtrV *wp,		/* output list */
-    int check)		/* GF_* flags */
+    int check,		/* GF_* flags */
+    char dirsep)	/* separator char that led into this component */
 {
 	char *np;		/* next source component */
 	char *xp = *xpp;
@@ -1806,7 +1812,23 @@ globit(XString *xs,	/* dest string */
 	}
 
 	if (xp > Xstring(*xs, xp))
-		*xp++ = '/';
+		/*
+		 * Reconstruct the separator that led into this component
+		 * with the ORIGINAL byte (dirsep, passed down by our
+		 * caller via odirsep below), not a hardcoded canonical
+		 * '/'. On POSIX, '/' is the only separator mksh_sdirsep()
+		 * ever finds, so this is a no-op there. Under
+		 * MKSH_CRT_WINPATH, mksh_sdirsep() also matches '\\', so
+		 * hardcoding '/' here used to silently rewrite a literal
+		 * backslash (e.g. from a sed escape like "\(") into a
+		 * *second*, spurious separator alongside the original one
+		 * once it was re-copied further down -- corrupting any
+		 * non-pathname string that happened to contain a
+		 * backslash and got routed through glob() (which POSIX
+		 * unquoted-parameter-expansion rules can do to values
+		 * that were never meant to be a pathname at all).
+		 */
+		*xp++ = dirsep;
 	while (mksh_cdirsep(*sp)) {
 		Xcheck(*xs, xp);
 		*xp++ = *sp++;
@@ -1835,7 +1857,7 @@ globit(XString *xs,	/* dest string */
 		debunk(xp, sp, Xnleft(*xs, xp));
 		xp = strnul(xp);
 		*xpp = xp;
-		globit(xs, xpp, np, wp, check);
+		globit(xs, xpp, np, wp, check, odirsep);
 	} else {
 		DIR *dirp;
 		struct dirent *d;
@@ -1863,7 +1885,7 @@ globit(XString *xs,	/* dest string */
 			memcpy(xp, name, len);
 			*xpp = xp + len - 1;
 			globit(xs, xpp, np, wp, (check & GF_MARKDIR) |
-			    GF_GLOBBED | (np ? GF_EXCHECK : GF_NONE));
+			    GF_GLOBBED | (np ? GF_EXCHECK : GF_NONE), odirsep);
 			xp = Xstring(*xs, xp) + prefix_len;
 		}
 		closedir(dirp);

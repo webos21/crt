@@ -1478,74 +1478,14 @@ Detailed policy and provenance stay in `docs/` and import manifests.
 
 - **Documented Windows Defender build-performance exclusions in `README.md`.** The user ran a real build with process exclusions (`cmake.exe`/`ninja.exe`/`clang.exe`/`clang++.exe`/`clang-cl.exe`/`lld.exe`/`llvm-nm.exe`) and folder exclusions (the LLVM install dir and the whole project tree) applied via `Add-MpPreference` from an elevated PowerShell session. Added the exact commands to the `### Windows 11` prerequisites section, with a one-line rationale (real-time scanning inspects every file a build writes, which is significant given how many small object files, port-build artifacts, and rootfs entries a full build and porting-loop run produce). Separately noted for the record (not applied, the user's own security posture call): the user's machine already had Cloud-delivered protection, Automatic sample submission, and Tamper Protection all off, which combined with these exclusions means (a) process exclusions are broader than folder exclusions -- they skip scanning anything the named binaries touch, anywhere, not just inside the project tree -- and (b) with Tamper Protection off, the exclusion list itself isn't protected from being extended by anything else that gains code execution on the machine.
 
-## in progressing
-
-Four active threads, not a flat list of one-off items:
-
-- **Windows shell/process stress hardening.** Real concurrency -- parallel
-  `make -jN`, jobserver pipe fd handling, many live children in the
-  registry at once, subshell/redirection edge cases -- has never actually
-  been exercised on Windows before this session: every Windows port build
-  has always run serial `make -j 1`.
-  - Root-cause `make.exe: /system/bin/mksh: Bad file descriptor`
-    (`make.exe: INTERNAL: Exiting with 1 jobserver tokens available;
-    should be N!`), found this session running a real port build with
-    `-j 8` for the first time (see the "done" entry above for the exact
-    repro and how it was isolated). A distinct bug from the now-fixed
-    `pselect()`/`SIGCHLD` jobserver deadlock -- GNU Make's own process-
-    spawn failure, not a hang. Likely a race in `child_process_table`/
-    `CRT_FD_TABLE_SIZE` (`libc/src/arch/windows/common/syscall.c`) or in
-    jobserver-pipe fd duplication across near-simultaneous spawns -- not
-    yet narrowed further. Keep `tools/crt-port-build.py`'s
-    `jobs = 1 if target_os == "windows"` restriction in place until this
-    is fixed and verified with a real `-j N` port build plus full
-    `ctest`.
-  - Harden `waitpid()` and the child registry for many live children,
-    configure-script subprocess bursts, and pipeline teardown.
-  - Keep the mksh child-spec path (external commands, `cmd | cmd`,
-    builtin-to-external pipelines, `cmd > file`/`cmd < file`, fd 3+
-    redirection, exit-status propagation, multi-child/pipeline teardown)
-    stable under real configure workloads.
-  - Audit the mksh subshell status quirk exposed by commands shaped like
-    `(command || true) >/dev/null 2>&1`.
-
-- **Windows symlink/delete timing verification.** `readlink()`/`lstat()`/
-  `symlink()` are all real and substantially better-verified now (the
-  dangling-symlink `lstat()` fix and the `readlink()` truncation fix,
-  both this session -- see "done" above), but one open item remains: the
-  intermittent `make install` `ln: ... File exists` failure on libtool-
-  generated header/lib alias symlinks, seen when rebuilding a port whose
-  install directory already has a valid symlink from a prior successful
-  run (see the libpng shared-pass entry above). An isolated, minimal
-  repro succeeded cleanly every time, so this looks like same-session
-  Windows delete-pending/handle-timing noise rather than a real toybox/
-  CRT `rm`-on-symlink bug -- needs reproduction from a genuinely cold
-  `out/` directory to confirm either way.
-  - **New data point, not yet conclusive**: a related, unexplained
-    `Error 5` (`ERROR_ACCESS_DENIED`, no message) hit `make install` twice
-    this session on two different targets (`install-man5` on aarch64
-    earlier, `install-binSCRIPTS` on x86_64 this session -- see the `id`/
-    `xargs` "done" entry above), neither reproducing on an immediate
-    retry. The retry that stayed clean happened to run right after the
-    user applied the Windows Defender process/folder exclusions this
-    session's `README.md` update documents. Consistent with the working
-    "Windows delete-pending/handle-timing noise" theory (Defender
-    real-time scanning holding a file handle open just long enough to
-    collide with `make install`'s own rapid create/delete sequence), but
-    not proven -- multiple other rebuilds were running concurrently in
-    the background at the time, confounding a clean before/after
-    comparison. Worth specifically re-testing from a cold `out/`
-    directory with Defender exclusions active, to see if the intermittent
-    `ln: ... File exists` failure above also stops reproducing.
-
-- **Root-cause the real mksh bug found chasing the `sed: bad pattern`
-  errors above -- now narrowed to a precise, 100%-reliable, minimal
-  repro, but the exact buggy line is still unfound.** Two rounds of
-  investigation this session (the second explicitly re-opened per user
-  request after the `crt_toybox` `fork_capable_relaunch.c` change, on the
-  hypothesis that it might be related -- ruled out: the `sed: bad
-  pattern` symptom already existed before that change, and re-testing
-  after it changed nothing).
+- **Root-caused and fixed the real mksh bug found chasing the
+  `sed: bad pattern` errors above.** Three rounds of investigation this
+  session (the second explicitly re-opened per user request after the
+  `crt_toybox` `fork_capable_relaunch.c` change, on the hypothesis that
+  it might be related -- ruled out: the `sed: bad pattern` symptom
+  already existed before that change, and re-testing after it changed
+  nothing; the third round used real interactive `lldb` debugging to go
+  from "precise minimal repro" to "confirmed exact buggy line").
   - **Found the missing piece**: libtool's own `func_execute_cmds()`
     (`ltmain.sh`, present verbatim in every generated `libtool` script)
     evaluates each stored `*_cmds` command *twice* -- once implicitly
@@ -1686,39 +1626,140 @@ Four active threads, not a flat list of one-off items:
     assignment (`lex.c:1287`) showed `s->str` was a genuine, correct
     single-space C string (`" "`) at runtime. The rejoin mechanism itself
     is completely correct.
-  - **Not yet found**: since the rejoin is correct but the *final* result
-    has no trace of that space (replaced by a stray `/` instead), the
-    corruption happens somewhere in the *re-lexing* of the three-part
-    reassembled stream (first half + real space + second half) -- most
-    likely back inside `globit()`'s own recursive `/`-as-path-separator
-    walk (`eval.c:1745-1876`, notably the unconditional `*xp++ = '/';`
-    re-insertion at line 1808-1809 every time it descends into a new
-    path "component" -- a function fundamentally designed to treat `/`
-    characters as directory separators, which a sed script's own `/`
-    delimiters are not). The next concrete step is stepping through
-    `globit()`'s own recursion with the same lldb setup (now fully
-    working and documented above) rather than more hand-tracing, which
-    kept producing subtly wrong predictions throughout this
-    investigation (every hand-derived hypothesis in this session was
-    eventually contradicted by either a fresh bisection or a live
-    breakpoint -- direct instrumentation was what actually worked each
-    time).
-  - Confirmed harmless for libpng specifically (the DLL still builds via
-    `__declspec(dllexport)` markers regardless of the corrupted export-
-    symbol-list script), so not currently blocking anything -- but a
-    real, general mksh correctness bug: `\"$var\"` (escaped-quotes, not
+  - **Confirmed the exact buggy line with a live breakpoint at
+    `globit()`'s entry** (`shell/mksh/src/eval.c:1745`, using the lldb
+    setup above): the corruption traces to `globit()`'s recursive
+    path-component walk unconditionally re-inserting a **hardcoded
+    canonical `/`** as the separator between reconstructed components
+    (the old `if (xp > Xstring(*xs, xp)) *xp++ = '/';` at line 1808-1809)
+    while a *separate* piece of the same function copies the *original*
+    separator byte verbatim just below it (the `while (mksh_cdirsep(*sp))
+    *xp++ = *sp++;` loop) -- for `x\([^ ]*\)z...`, `mksh_sdirsep()`
+    (`sh.h`, `MKSH_CRT_WINPATH`-gated: `strpbrk(s, "/\\")`, i.e. `\` is
+    *also* a recognized path separator, for legitimate Windows-pathname
+    support) finds the `\` right after `x` and treats it as a component
+    boundary; `globit()` NULs it, recurses, and on the way back down
+    writes a **fresh canonical `/`** for "a boundary was here" -- but the
+    *original* byte at that boundary was `\`, not `/`, so the
+    reconstructed text ends up with the wrong separator character
+    substituted in, corrupting a completely ordinary sed backslash-escape
+    into `/\(`.
+  - **This is a real, portable bug in `globit()` itself, not a
+    Windows-only quirk** -- `mksh_sdirsep()`'s non-`MKSH_CRT_WINPATH`
+    (POSIX) definition is `strchr(s, '/')`, so vanilla upstream mksh runs
+    through the *exact same* hardcoded-`/`-reinsertion code whenever a
+    non-pathname string (like this sed script, which contains real `/`
+    delimiters) gets routed into `glob()` -- POSIX unquoted-parameter-
+    expansion rules do this legitimately for any bare `$var`, which is
+    exactly what `\"$var\"` inside `eval` amounts to (the escaped quotes
+    are literal data, not real quoting, so `$cmd` is genuinely unquoted
+    and glob-eligible -- confirmed in the round above). It is invisible
+    on POSIX purely because the hardcoded replacement (`/`) always
+    happens to equal the original byte (`/`) there -- a silent no-op
+    corruption. `MKSH_CRT_WINPATH` recognizing `\` as *also* a separator
+    is what turns this from a latent, byte-identical no-op into a visible
+    corruption, by making "original separator" and "hardcoded
+    replacement" diverge for the first time.
+  - **Root fix implemented in `shell/mksh/src/eval.c`**: threaded the
+    actual separator byte through `globit()`'s recursion instead of
+    hardcoding `/`. Added a `char dirsep` parameter to `globit()` (and its
+    forward declaration); `glob_str()`'s top-level call passes `'/'` (a
+    harmless default -- `xp` is always empty on that very first call, so
+    the "insert a separator" branch can never fire yet); both of
+    `globit()`'s two recursive call sites (the non-globbing debunk-and-
+    recurse path, and the real `opendir()`/`readdir()` match path) now
+    pass `odirsep` -- the exact separator byte that was just consumed
+    from `sp` a few lines above in the same stack frame, previously
+    computed but never threaded any further than that frame's own local
+    variable. `*xp++ = '/'` became `*xp++ = dirsep`. On POSIX this is a
+    provable no-op (`dirsep` is always `'/'` there, matching the old
+    hardcoded value byte-for-byte); on `MKSH_CRT_WINPATH` it now
+    reconstructs the *original* separator faithfully instead of silently
+    canonicalizing it, so backslash-escape sequences are no longer
+    corrupted.
+  - **Verified three ways**: (1) the minimal repro now matches real bash
+    exactly -- `'s/x\([^ ]*\)z/\1/'` in, byte-identical out, no stray `/`;
+    (2) full `ctest` after rebuilding `crt_mksh`: 81/81 passed, no
+    regressions; (3) a real `libpng` port build (`tools/crt-port-build.py
+    libpng`) produced **zero** `sed: bad pattern` errors anywhere in its
+    output, confirming the fix holds under the actual libtool
+    `func_execute_cmds` workload that originally surfaced this, not just
+    the isolated repro.
+  - Was already confirmed harmless for libpng specifically even before
+    the fix (the DLL still builds via `__declspec(dllexport)` markers
+    regardless of the corrupted export-symbol-list script), but this was
+    a real, general mksh correctness bug: `\"$var\"` (escaped-quotes, not
     real quoting) around any glob-metacharacter-containing variable,
     evaluated via `eval`, is exactly the shape GNU Autoconf/Libtool's own
     `func_execute_cmds`/`func_quote_for_eval`-family helpers use
-    throughout every generated `configure`/`libtool` script -- so this is
-    not a one-off libpng quirk, just the first place this session's real
-    build activity happened to exercise it with the right ingredients
-    (both a backslash-group and a later bracket in the same value). The
-    minimal repro above, and the now-working lldb setup (PATH fix +
-    batch-mode command-file invocation + the fork-relaunch debugging
-    workaround), are the actual deliverables of this investigation --
-    whoever picks this back up next does not need to re-derive any of
-    the above, and can go straight to stepping through `globit()`.
+    throughout every generated `configure`/`libtool` script -- so libpng
+    was just the first place this session's real build activity happened
+    to exercise it with the right ingredients (both a backslash-group and
+    a later bracket in the same value). Fixed at the root rather than
+    worked around specifically so that a future macOS/Linux mksh build
+    (using the same vendored `shell/mksh/src/eval.c`, just without
+    `MKSH_CRT_WINPATH` defined) inherits the fix automatically instead of
+    carrying the same latent, currently-invisible bug forward.
+
+## in progressing
+
+Four active threads, not a flat list of one-off items:
+
+- **Windows shell/process stress hardening.** Real concurrency -- parallel
+  `make -jN`, jobserver pipe fd handling, many live children in the
+  registry at once, subshell/redirection edge cases -- has never actually
+  been exercised on Windows before this session: every Windows port build
+  has always run serial `make -j 1`.
+  - Root-cause `make.exe: /system/bin/mksh: Bad file descriptor`
+    (`make.exe: INTERNAL: Exiting with 1 jobserver tokens available;
+    should be N!`), found this session running a real port build with
+    `-j 8` for the first time (see the "done" entry above for the exact
+    repro and how it was isolated). A distinct bug from the now-fixed
+    `pselect()`/`SIGCHLD` jobserver deadlock -- GNU Make's own process-
+    spawn failure, not a hang. Likely a race in `child_process_table`/
+    `CRT_FD_TABLE_SIZE` (`libc/src/arch/windows/common/syscall.c`) or in
+    jobserver-pipe fd duplication across near-simultaneous spawns -- not
+    yet narrowed further. Keep `tools/crt-port-build.py`'s
+    `jobs = 1 if target_os == "windows"` restriction in place until this
+    is fixed and verified with a real `-j N` port build plus full
+    `ctest`.
+  - Harden `waitpid()` and the child registry for many live children,
+    configure-script subprocess bursts, and pipeline teardown.
+  - Keep the mksh child-spec path (external commands, `cmd | cmd`,
+    builtin-to-external pipelines, `cmd > file`/`cmd < file`, fd 3+
+    redirection, exit-status propagation, multi-child/pipeline teardown)
+    stable under real configure workloads.
+  - Audit the mksh subshell status quirk exposed by commands shaped like
+    `(command || true) >/dev/null 2>&1`.
+
+- **Windows symlink/delete timing verification.** `readlink()`/`lstat()`/
+  `symlink()` are all real and substantially better-verified now (the
+  dangling-symlink `lstat()` fix and the `readlink()` truncation fix,
+  both this session -- see "done" above), but one open item remains: the
+  intermittent `make install` `ln: ... File exists` failure on libtool-
+  generated header/lib alias symlinks, seen when rebuilding a port whose
+  install directory already has a valid symlink from a prior successful
+  run (see the libpng shared-pass entry above). An isolated, minimal
+  repro succeeded cleanly every time, so this looks like same-session
+  Windows delete-pending/handle-timing noise rather than a real toybox/
+  CRT `rm`-on-symlink bug -- needs reproduction from a genuinely cold
+  `out/` directory to confirm either way.
+  - **New data point, not yet conclusive**: a related, unexplained
+    `Error 5` (`ERROR_ACCESS_DENIED`, no message) hit `make install` twice
+    this session on two different targets (`install-man5` on aarch64
+    earlier, `install-binSCRIPTS` on x86_64 this session -- see the `id`/
+    `xargs` "done" entry above), neither reproducing on an immediate
+    retry. The retry that stayed clean happened to run right after the
+    user applied the Windows Defender process/folder exclusions this
+    session's `README.md` update documents. Consistent with the working
+    "Windows delete-pending/handle-timing noise" theory (Defender
+    real-time scanning holding a file handle open just long enough to
+    collide with `make install`'s own rapid create/delete sequence), but
+    not proven -- multiple other rebuilds were running concurrently in
+    the background at the time, confounding a clean before/after
+    comparison. Worth specifically re-testing from a cold `out/`
+    directory with Defender exclusions active, to see if the intermittent
+    `ln: ... File exists` failure above also stops reproducing.
 
 - **Recipe/port status upkeep.** Keep `make`/`zlib`/`libpng`/`libffi`
   recipe statuses (`porting/recipes/*.json`, `docs/porting_status.md`)
