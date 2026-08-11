@@ -138,9 +138,11 @@ parameter expansion, globbing, command substitution, here-docs, arithmetic
 expansion, functions, traps, and interactive job control should be used to drive
 the `mksh` tranche and CRT/PAL gap work.
 
-Imported mksh currently builds as `crt_mksh` and installs as `mksh`. It does
-not replace `crt_tiny_sh` as `/system/bin/sh` until all host smoke tests pass
-and the remaining shell/process gaps are understood.
+Imported mksh builds as `crt_mksh` and installs as `mksh`. **Update: mksh has
+long since replaced `crt_tiny_sh` as `/system/bin/sh`** (see this file's own
+"Update" note near the top of the "Goal" section) -- host smoke tests passed
+and the shell/process gaps this sentence was gating on were closed well
+before mksh took over that role.
 
 ## mksh Inventory Tranche
 

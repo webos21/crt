@@ -248,12 +248,16 @@ back to any host make. On Windows the recipe intentionally uses the POSIX-like
 Android config path instead of the upstream Win32 make path, so failures expose
 missing Bionic/POSIX CRT/PAL behavior.
 
-On Windows CRT-shell builds, configure recipes currently run make with one job
-and append `SHELL=/system/bin/mksh` to both the build and install invocations.
-This keeps recipe command execution on the project-owned shell/process path and
-avoids the current GNU make jobserver/parallel-child fd inheritance gap. Treat
-parallel make under rootfs mksh as follow-up Windows process work, not as a
-reason to reintroduce host make.
+On Windows CRT-shell builds, configure recipes append `SHELL=/system/bin/mksh`
+to both the build and install invocations, keeping recipe command execution on
+the project-owned shell/process path. **Update: `make` now runs with real
+parallelism (`os.cpu_count()` jobs) by default on Windows too, matching
+macOS/Linux** -- a real jobserver crash and a related token-accounting bug
+were both root-caused and fixed, then verified against a real libpng build
+(`-j 12`, zero errors/warnings/jobserver messages) before removing
+`tools/crt-port-build.py`'s old Windows-only serial-default special case; see
+`HISTORY.md`'s 2026-08-11 entries. `--jobs N` overrides the default for any
+single invocation.
 
 The older Windows bootstrap path can still be used manually by invoking
 `tools/crt-port-build.py` without `--use-crt-shell` and setting
