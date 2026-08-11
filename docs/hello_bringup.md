@@ -1,5 +1,19 @@
 # Hello Bring-Up
 
+**This document is a historical snapshot of the first executable milestone,
+not a description of current libc/PAL capability.** Every "currently"/
+"deferred" statement below is dated to that milestone. In particular:
+`mprotect()` is implemented (not deferred); file-backed `mmap()` is
+implemented (`libc/src/mman.c`); the stdio layer has grown a real `FILE`
+ABI, buffering, memory streams, `stdio_ext`, and a gdtoa-backed
+`printf`/`scanf` formatter family, not just the small bootstrap formatter
+described here; and libc now covers process/fd/signal/pthread/shell surface
+far beyond this initial subset list. For current status, see
+`docs/porting_status.md` (third-party library porting) and
+`docs/sysroot_ports.md` (sysroot/PAL policy and behavior-difference tables).
+This file stays as a record of what the *first* milestone looked like, not
+because it's wrong to read, just because reading it as "current" would be.
+
 This document records the first executable milestone.
 
 The current bring-up builds a minimal C hello program using:

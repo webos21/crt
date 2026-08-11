@@ -101,8 +101,13 @@ rootfs/system/bin/mksh
 rootfs/system/etc/mkshrc
 ```
 
-The default `/system/bin/sh` remains `crt_tiny_sh` until imported mksh smoke
-coverage is confirmed across Linux, macOS, and Windows.
+**Update: `/system/bin/sh` (and `/bin/sh`, `/usr/bin/sh`) is now mksh, not
+`crt_tiny_sh`.** `tools/create_rootfs.py`'s `--mksh` flag (passed by every
+current rootfs build) installs mksh to `system/bin/mksh` and aliases/copies
+it over `sh` in all three shell directories, superseding the `tiny-sh`
+install described above (which still gets installed, under the name
+`tiny-sh`, not `sh`, once mksh is present). See "Bootstrap Tiny Shell
+Status" below for `crt_tiny_sh`'s current, now-historical role.
 
 ## Initial Namespace Policy
 
@@ -150,6 +155,14 @@ The source location policy is:
 
 ## Process API Tranche
 
+**Update: this section describes the process API surface as it stood before
+Windows `fork()` was implemented for real -- see `docs/process_fork.md` and
+`docs/windows_fork_emulation.md` for the current, actual state (a real,
+general-purpose Cygwin/MSYS-style memory-copy `fork()`, verified on both
+Windows architectures, not limited to the shell-child-spec case described
+below).** Kept for context on the process API bootstrap sequence; treat
+anything below that says Windows lacks `fork()` as historical.
+
 Linux and macOS shell work should continue to exercise the normal Unix
 `fork()` path. Android mksh, toybox applets, configure scripts, pipelines,
 redirections, and command substitution all use that process model as their
@@ -190,7 +203,9 @@ Current Windows bootstrap behavior:
   Windows process group;
 - explicit `envp` blocks are converted to ANSI Windows environment blocks.
 
-Next required process improvements:
+Next required process improvements (as of when this section was written --
+most of these were later resolved by the real `fork()` work; check
+`TODO.md`/`HISTORY.md` before treating any of these as still open):
 
 - implement `posix_spawn_file_actions_*` for stdin/stdout/stderr and
   non-standard fd redirection;
@@ -202,18 +217,25 @@ Next required process improvements:
   mature;
 - grow `__crt_shell_fork_exec()` into the Windows child-spec contract for
   external commands, pipelines, fd 3+ redirections, command substitution, and
-  exec-builtin-like replacement;
-- keep real Windows `fork()` as a first-class long-term PAL research goal, but
-  do not block mksh/toybox execution on arbitrary post-fork child execution.
+  exec-builtin-like replacement.
 
-See `docs/process_fork.md` for the fork contract and Windows emulation plan.
+See `docs/process_fork.md` for the fork contract and the current Windows
+`fork()` implementation.
 
-## Bootstrap Tiny Shell Status
+## Bootstrap Tiny Shell Status (historical)
 
-`crt_tiny_sh` is now the first shell artifact. It exists to exercise the CRT
-process model before importing Android `external/mksh`.
+**Update: mksh is now the default `/system/bin/sh` (see "Sysroot vs Rootfs"
+above); this section describes `crt_tiny_sh`'s original bootstrap role
+before mksh was imported, kept for context, not current status.**
 
-Current bootstrap surface:
+`crt_tiny_sh` was the first shell artifact. It existed to exercise the CRT
+process model before importing Android `external/mksh`. It is still built
+and installed (as `tiny-sh`, not `sh`, once mksh is present -- see the
+"Sysroot vs Rootfs" update above), and still fills its original bootstrap
+role for early smoke coverage, but mksh is what actually runs configure
+scripts and rootfs shell workloads now.
+
+Its bootstrap surface, unchanged since:
 
 - `sh -c "..."`;
 - simple tokenization and quotes;
@@ -223,8 +245,9 @@ Current bootstrap surface:
 - leading `VAR=value` assignments;
 - builtins: `echo`, `cat`, `upper`, `pwd`, `cd`, `true`, `false`, `exit`.
 
-This is not the final shell. Missing shell features should normally become
-mksh/toybox import inventory items rather than long-term tiny-shell growth.
+This was never meant to be the final shell. Missing shell features became
+mksh/toybox import inventory items rather than tiny-shell growth, as
+intended.
 
 ## Porting-Test Direction
 

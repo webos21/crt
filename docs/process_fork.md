@@ -47,10 +47,10 @@ hooks before user atfork child handlers:
 - Linux thread registry and detached-thread reaper bootstrap state are cleared.
 - pthread key/reaper locks, malloc heap lock, and stdio `FILE` locks are reset
   so the child is not left with locks owned by vanished threads.
-- fd tracking has an explicit `__crt_fd_after_fork_child()` reset hook. It is a
-  no-op for current Linux/macOS native fork inheritance and for Windows while
-  `fork()` remains `ENOTSUP`, but it is the integration point for future Windows
-  child bootstrap.
+- fd tracking has an explicit `__crt_fd_after_fork_child()` reset hook. On
+  Linux/macOS it is a no-op (native fork inheritance already does the right
+  thing); on Windows it is a real integration point used by the memory-copy
+  `fork()` child bootstrap described below.
 
 The internal hook boundary is:
 
@@ -60,12 +60,59 @@ The internal hook boundary is:
 - `__crt_atfork_child()` resets CRT runtime state first, then runs user child
   handlers in registration order.
 
-Windows currently keeps `_Fork()`/`fork()` as a limited, experimental surface.
-It is not the short-term contract for shell execution. The near-term shell goal
-is to make mksh and toybox work through the explicit shell child-spec/spawn path
-while keeping real Windows `fork()` as a long-term research tranche.
+**Update: Windows `fork()` is no longer experimental or `ENOTSUP` -- it is
+implemented and verified on both Windows architectures**, as a real,
+general-purpose `_Fork()`/`fork()`, not just a shell-child-spec workaround.
+Everything below this point in the file (the "Windows Direction"/"Research
+References" sections that used to live here, plus the `ENOTSUP`-era test
+tranches) described the *investigation and design work that led to* that
+implementation, written while it was still an open research question --
+kept only as historical background. For the actual, current design (a
+Cygwin/MSYS-style memory-copy `fork()`, selected in
+`libc/src/arch/windows/common/syscall.c`'s `__crt_sys_fork()`, with the
+per-architecture register/stack/CONTEXT-restoring implementations in
+`libc/src/arch/windows/{aarch64,x86_64}/fork_memcopy.c`) see
+[`docs/windows_fork_emulation.md`](windows_fork_emulation.md); for the full
+chronological investigation (the `RtlCloneUserProcess` research, the spawn
+broker that was built first and then retired, the exact bugs found building
+each piece, and every reverted attempt) see
+[`docs/windows_fork_emulation_history.md`](windows_fork_emulation_history.md).
+The private `__crt_shell_fork_exec()` helper mentioned in this file's older
+text below is still real (mksh's own child-spec path still uses it for the
+patterns it was built for), but it is no longer *the* Windows process
+story -- real `fork()` now backs it and everything else that needs process
+duplication on Windows.
 
-## Windows Direction
+## Test Policy (current)
+
+Windows `fork()` now has the same real test coverage Linux/macOS always
+had, not an `ENOTSUP` placeholder: `fork_test`, `fork_signal_test`, and
+`fork_runtime_reset_test` all run for real on Windows (aarch64 and x86_64),
+covering child exit status, pipe fd inheritance, `pthread_atfork()` handler
+ordering, signal mask/disposition inheritance across `fork()`, and stdio
+lock reset in the child. `windows_fd_snapshot_test` covers the fd-snapshot
+transport `posix_spawn()`/the memory-copy `fork()`'s own child bootstrap
+both build on. Real signal delivery (not just process-local bookkeeping)
+and `SIGCHLD` reaching a blocked `pselect()`/`poll()` are also implemented
+on all three OSes; see `docs/signal_delivery.md` for the per-OS backend
+architecture and the `pselect()` atomicity fix that made it actually
+usable by GNU make's jobserver -- also now exercised for real by parallel
+`make -jN` port builds on Windows, see `HISTORY.md`'s 2026-08-11 entries.
+
+Still open, tracked in `TODO.md`: broader multi-fd redirection beyond the
+current shell smoke coverage, fork after malloc/pthread lock activity under
+real stress (many concurrent children), and command-substitution shell
+smoke tests.
+
+---
+
+**Historical text below this line** describes the Windows fork design
+question while it was still open (written before the memory-copy `fork()`
+above existed) -- kept for context on how the current design was arrived
+at, not as current status. See the "Update" note above for what's actually
+true today.
+
+## Windows Direction (historical)
 
 Git Bash, MSYS2, and Cygwin show that fork-like behavior can be approximated on
 Windows, but their implementation is a full POSIX runtime strategy and their
@@ -100,22 +147,12 @@ descriptors, and imports fd/cwd/rootfs/signal mask state in CRT startup before
 sufficient by themselves: fork must also restore register/stack/runtime state
 so the child returns from the original `fork()` call with value `0`.
 
-The private `__crt_shell_fork_exec()` helper is now the intended Windows
-shell-child contract for fork-then-exec patterns. It should be extended as a
-clear internal child spec that includes cwd/rootfs/env, signal mask/default
-policy, file actions, close-on-exec filtering, and stdio flush policy. Linux
-and macOS may route through the same helper for shell-owned tests, but their
-public `fork()` behavior remains native.
+(This is exactly what the memory-copy `fork()` implementation that shipped
+later actually does -- see `docs/windows_fork_emulation.md`.)
 
-Real Windows `fork()` remains a long-term goal, not a prerequisite for the next
-mksh/toybox milestone. A future implementation may reuse the child bootstrap
-and fd snapshot machinery, but it must separately solve the harder POSIX
-contract: returning from the original `fork()` call site with coherent
-register, stack, runtime, Win32, and CSR state.
+## Research References (historical)
 
-## Research References
-
-The current Windows fork policy is informed by:
+The Windows fork research that led to the current design drew on:
 
 - simple `RtlCloneUserProcess` examples, including Cr4sh's native API sample
   (`https://gist.github.com/Cr4sh/126d844c28a7fbfd25c6`) and the Petr
@@ -133,16 +170,16 @@ The current Windows fork policy is informed by:
   reusable from this userland CRT
   (`https://learn.microsoft.com/it-it/previous-versions/windows/desktop/cmdline/wsl-architectural-overview`).
 
-## Test Policy
+## Test Policy (historical, `ENOTSUP`-era)
 
-The first test tranche validates:
+The first test tranche validated:
 
 - `_Fork()`/`fork()` child exit status;
 - pipe fd inheritance;
 - `pthread_atfork()` handler ordering;
-- Windows `ENOTSUP` policy until fork emulation lands.
+- Windows `ENOTSUP` policy until fork emulation landed.
 
-The second test tranche adds:
+The second test tranche added:
 
 - Bionic/POSIX-shaped `sigset_t` manipulation APIs;
 - `sigaction()` and `SA_SIGINFO` bootstrap behavior;
@@ -150,26 +187,11 @@ The second test tranche adds:
 - inherited signal action behavior across `fork()` on Linux/macOS;
 - Windows fork/signal inheritance kept behind the explicit `ENOTSUP` policy.
 
-The third test tranche adds:
+The third test tranche added:
 
 - fork while another thread owns a `FILE` lock;
 - child-side stdio lock reset before returning from `fork()`;
 - Windows `ENOTSUP` policy for the same runtime-reset test surface.
 
-Real signal delivery (not just process-local bookkeeping) and `SIGCHLD`
-reaching a blocked `pselect()`/`poll()` are now implemented; see
-`docs/signal_delivery.md` for the per-OS backend architecture and the
-`pselect()` atomicity fix that made it actually usable by GNU make's
-jobserver.
-
-Future tests should add:
-
-- a permanent regression test for the `fork()` + blocked-`SIGCHLD` +
-  `pselect()` pattern documented in `docs/signal_delivery.md`;
-- close-on-exec behavior;
-- broader multi-fd redirection beyond the initial shell smoke coverage;
-- fork after malloc/pthread lock activity;
-- command substitution shell smoke tests.
-- Windows direct `fork()+execve()` tests should stay documented as unsupported
-  or experimental until a real fork tranche exists. Shell progress should be
-  validated with `posix_spawn()` and `__crt_shell_fork_exec()` child-spec tests.
+All three tranches' Windows `ENOTSUP` placeholders have since been replaced
+by the real tests listed under "Test Policy (current)" above.

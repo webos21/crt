@@ -153,6 +153,26 @@ Local adaptations should be small and explicit. Examples:
 For larger changes, prefer a project wrapper around the imported implementation
 rather than rewriting the imported file in place.
 
+---
+
+**Everything from here to the end of this file is a chronological, point-in-time
+import tranche log** (an earlier, per-file precursor to the dated entries now
+kept in `HISTORY.md`) -- each "... Tranche" section describes what a given
+piece of work added *at the time it was written*, and later tranches
+routinely supersede "currently"/"deferred" statements made in earlier ones
+without the earlier section being edited to say so. Notably: `mprotect()` and
+file-backed `mmap()` (`VM Memory Tranche`, below) are both implemented now,
+not deferred (`libc/src/mman.c`); `fcntl()`/`realpath()`/`readlink()`/
+`symlink()` (further below) have all grown well past their bootstrap subsets
+(`libc/src/fd.c`, `tests/file_path_test.c`); and libc/libm/pthread/stdio
+coverage generally is far beyond what the tranche list below enumerates. For
+current status, use `docs/porting_status.md` (third-party porting),
+`docs/sysroot_ports.md` (sysroot/PAL policy and behavior-difference tables),
+and `HISTORY.md` (dated record of everything resolved since tranches stopped
+being the way this project recorded progress) -- not this section, which is
+kept as a record of the original import sequence and reasoning, not current
+capability.
+
 ## First Import Tranche
 
 The first tranche imports only low-dependency string/memory functions:

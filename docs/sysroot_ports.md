@@ -169,9 +169,16 @@ as part of Bionic libc. Keep this project aligned with that model: zlib belongs
 in the CRT sysroot/runtime library set and may be linked privately by components
 that need it, but it should not be folded into `libc`.
 
+**Update**: neither example below passes `--static`/`--disable-shared`
+anymore -- `porting/recipes/zlib.json` and `porting/recipes/libpng.json`
+both use `configure_args: []` (upstream's own default, which builds both
+static and shared) and both reach `shared-pass` on all three OSes; see
+`docs/porting_status.md` for the current per-host status matrix and the
+real bugs that had to be fixed to get there.
+
 ```sh
 cd /path/to/zlib-1.3.1
-./configure --static --prefix="$PORT_PREFIX"
+./configure --prefix="$PORT_PREFIX"
 make -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 2)"
 make install
 ```
@@ -181,7 +188,7 @@ installed into `PORT_PREFIX`:
 
 ```sh
 cd /path/to/libpng-1.6.57
-./configure --disable-shared --enable-static --prefix="$PORT_PREFIX"
+./configure --prefix="$PORT_PREFIX"
 make -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 2)"
 make install
 ```
@@ -342,8 +349,17 @@ validation.
 
 ## Current Result
 
-On macOS host, the following original configure/make flows pass with the strict
-CRT sysroot wrapper:
+**This section is a point-in-time snapshot from early in the porting effort
+and duplicates (with stale data) what `docs/porting_status.md` now tracks
+properly per-host, per-port, and kept current -- see that file for the real
+status matrix (all of make/zlib/libpng/sqlite-amalgamation now reach
+`shared-pass`/`amalgamation-pass` on Linux, macOS, and Windows; libffi is
+`partial`).** Kept below only as a historical record of what the *first*
+successful pass looked like and what it required.
+
+On macOS host, the following original configure/make flows first passed with
+the strict CRT sysroot wrapper (all three now build `shared`, not just
+`static` -- see `docs/porting_status.md`):
 
 | Port | Source flow | Result |
 | --- | --- | --- |

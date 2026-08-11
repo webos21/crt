@@ -15,10 +15,15 @@ The target Android-shaped layout is:
 /usr/bin/sh         -> shell launcher/copy
 ```
 
-`crt_tiny_sh` remains a project-owned bootstrap runner installed as
-`/system/bin/sh`. Its role is to exercise the CRT process/fd/signal/rootfs
-contract and to provide early configure smoke coverage while imported mksh is
-being hardened.
+**Update: `/system/bin/sh` is mksh now, not `crt_tiny_sh`** -- the target
+layout above is what's actually installed today (see
+`docs/android_shell_environment.md`'s "Sysroot vs Rootfs" section for the
+exact `tools/create_rootfs.py` mechanics). `crt_tiny_sh` remains a
+project-owned bootstrap runner, installed as `tiny-sh` alongside it, still
+exercising the CRT process/fd/signal/rootfs contract and early configure
+smoke coverage -- it just isn't `/system/bin/sh` anymore, since mksh has
+long since moved past needing to be "hardened" before taking over that
+role.
 
 ## Upstream References
 
@@ -36,9 +41,12 @@ The first source references are Android platform projects:
 mksh is currently pinned to Android external/mksh commit
 `1548076841f243748a3f56da23b38794d437bc12`, tree
 `57ba8b3ab85c6d79171453c42baec1e845d4e30a`. Exact import pins are recorded as
-immutable commit IDs plus archive SHA256 in
-`shell/mksh/import_manifest.json`. Toybox remains at the planning-reference
-stage until its source is imported.
+immutable commit IDs plus archive SHA256 in `shell/mksh/import_manifest.json`.
+**Update: toybox's source has long since been imported** (`shell/toybox/src`,
+with pins in `shell/toybox/import_manifest.json`) and has grown well past
+the initial minimal applet set -- see "Toybox Minimal Applet Inventory"
+below's own "Update" note for the current, much larger enabled-applet list
+and where to find its actual source of truth.
 
 ## Source Layout
 
@@ -231,19 +239,32 @@ CRT shell process contract: Windows `TEXEC` launch goes through
 unsupported.
 
 Configure recipe shell coverage is now the default CMake porting path.
-`port-build-*` and `port-rebuild-*` targets for configure recipes run
-`./configure`, `make`, and `make install` under rootfs mksh on Windows, macOS,
-and Linux. The work needed for that path added rootfs applets commonly used by
-configure scripts (`date`, `expr`, `printf`, `tee`) and a Windows mksh local
-fallback for grouped commands in pipelines, such as
+**Update: rootfs mksh drives `port-build-*`/`port-rebuild-*` on Windows
+only** -- macOS/Linux configure recipes run under the host's own real
+shell/coreutils instead (see `docs/porting_status.md`'s Policy section and
+`CMakeLists.txt`'s `crt_add_build_port_target()`, which scopes
+`--use-crt-shell` to `CRT_TARGET_OS STREQUAL "windows"` specifically: those
+hosts already have a complete, natively-shebang-capable shell environment
+that upstream `configure` scripts are actually tested against, so routing
+them through this project's own deliberately-minimal, Windows-motivated
+toybox applet set added real correctness risk and per-subprocess overhead
+for no benefit). The CRT sysroot boundary on macOS/Linux is carried
+entirely by `crt-cc`/`crt-c++` regardless of which shell drives
+`configure`/`make`. On Windows, the work to get real rootfs-mksh configure
+coverage working added rootfs applets commonly used by configure scripts
+(`date`, `expr`, `printf`, `tee`) and a Windows mksh local fallback for
+grouped commands in pipelines, such as
 `( command ) 2>&1 | tee -a configure.log`, so the actual external command still
 travels through the CRT child-spec spawn path. `make` is now bootstrapped from
 Android `toolchain/make` as a CRT-built host tool and installed under
-`PORT_PREFIX/bin`, so configure recipes can avoid depending on MSYS2,
-Git-for-Windows, or the host system make. Windows configure recipes currently
-force serial make execution and pass `SHELL=/system/bin/mksh`; this keeps
-recipe commands on the CRT child-spec path while parallel make/jobserver fd
-inheritance remains a separate Windows process follow-up.
+`PORT_PREFIX/bin` on all three OSes, so configure recipes can avoid depending
+on MSYS2, Git-for-Windows, or the host system make even on Windows. Windows
+configure recipes still default to serial make execution and pass
+`SHELL=/system/bin/mksh` -- not because of an unresolved jobserver/fd-
+inheritance limitation anymore (a real `make -jN` crash and a related
+jobserver token-accounting bug were both root-caused and fixed, see
+`HISTORY.md`'s 2026-08-11 entries), but pending a stress run at
+libpng/libffi scale before flipping the default; see `TODO.md`.
 
 The child-spec path must continue to carry Bionic-shaped process/fd/signal
 behavior: cwd/rootfs/env, file actions including fd 3 and above,

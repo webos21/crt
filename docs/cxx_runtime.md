@@ -168,15 +168,18 @@ The implementation policy is based on these upstream references:
 
 ## Next Steps
 
-Recommended next work:
+**Update**: item 1 below is done -- `tests/cxx_frontend_test.cc`
+(`add_crt_cxx_test(cxx_frontend_test ...)` in `tests/CMakeLists.txt`) is a
+real C++ frontend compile/link/run probe, built and run via `ctest` on every
+host the project is configured for (not Linux/macOS-only as originally
+scoped), alongside `cxx_runtime_test` for the ABI hook surface itself.
+Remaining recommended next work:
 
-1. Add real C++ frontend compile/link probes for Linux and macOS using
-   `-fno-exceptions -fno-rtti`.
-2. Add a Windows policy probe that records which C++ ABI hooks Clang emits for
+1. Add a Windows policy probe that records which C++ ABI hooks Clang emits for
    the selected target/profile.
-3. Add `operator new/delete` only after allocator behavior is ready to be a C++
+2. Add `operator new/delete` only after allocator behavior is ready to be a C++
    allocation boundary.
-4. Evaluate importing libc++abi's Itanium ABI source after the project has a
+3. Evaluate importing libc++abi's Itanium ABI source after the project has a
    clear libunwind choice.
-5. Start a separate Windows MSVC ABI bridge design with C ABI wrapper tests
+4. Start a separate Windows MSVC ABI bridge design with C ABI wrapper tests
    before allowing C++ object or exception interop across the bridge.
