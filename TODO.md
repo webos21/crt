@@ -1469,6 +1469,15 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   - **Verified end-to-end, not just compiled**: rebuilt the full `windows-host-ninja-debug` preset; `which ls` now prints `/system/bin/ls`, `stat README.txt` prints real file metadata, and `readlink` on a real symlink (whose target is a long, rootfs-translated absolute path -- confirmed too long for the old 64-byte first attempt) now succeeds instead of silently failing. Added a permanent regression test, `crt_mksh_rootfs_which_stat_readlink_runs` (`shell/CMakeLists.txt`, same Windows-only `crt_mksh_rootfs_*` chain as the existing external/pipeline/redirection/command-substitution/exec-builtin tests), exercising all three applets together through the real rootfs mksh. Full `ctest` 81/81 (79 pre-existing + `pselect_sigchld_test_runs` + this new test).
   - General CRT/PAL fixes, not toybox-specific: any other program calling `getcwd(NULL, 0)` or `readlink()` on a long target on Windows was equally affected.
 
+- **Enabled toybox's `id`/`xargs` applets the same way (same `newtoys.h`/rootfs-alias gap as `which`/`readlink`/`stat` above), found and fixed two more real bugs, and used the second one to close out this session's `libpng` cleanliness pass end to end.** Found while reviewing a real libpng `configure` log the user reported as "very clean now": `checking xargs -n works` and `checking whether UID '...' is supported` both fell back ungracefully (`xargs`/`id: inaccessible or not found`) for the identical reason as the earlier applets -- source compiled into `CRT_TOYBOX_SOURCES` but never registered in `newtoys.h` or aliased in `tools/create_rootfs.py`'s `TOYBOX_APPLETS`. Added `USE_ID`/`USE_XARGS` (matching their real upstream `NEWTOY` signatures) and the two rootfs aliases; both `CFG_ID`/`CFG_XARGS` were already enabled in the base Android config.
+  - **Found via `id`: `getpwuid(geteuid())` always failed with "bad uid 1".** `libc/src/arch/windows/common/syscall.c`'s `__crt_sys_geteuid()` hardcoded `return 1`, but `libc/src/user_group.c`'s synthetic passwd/group database (the "shell" user this whole PAL's rootfs is built around) only ever recognized uid **0** -- a genuine, long-standing mismatch between two pieces of this project's own code that nothing had exercised until `id`'s `getpwuid()` lookup actually needed them to agree. Fixed by changing `__crt_sys_geteuid()` to return 0, matching the synthetic passwd entry instead of the other way around (no code anywhere depended on the value being specifically 1 -- checked all `tests/*.c` usages, which only assert `geteuid() != (uid_t)-1` and internal self-consistency with `st_uid`, both unaffected by the actual value). This also changes every `stat()`-reported file's `st_uid` from 1 to 0, consistent with `id`'s own new `uid=0(shell)` output.
+  - **Found via `xargs`: fork()-crashed every single invocation** (`fork_memcopy: stack commit failed`) -- the exact ASLR-mitigation self-relaunch requirement this session's earlier work (and the original Windows `fork()` effort, `docs/windows_fork_emulation.md`) already established: only binaries that link `fork_capable_relaunch.c` and opt in at startup can call `fork()`/`vfork()` on this PAL. `crt_toybox` (`shell/CMakeLists.txt`) never did -- only `crt_mksh` and the `ctest` suite did -- so *any* toybox applet that forks (today just `xargs`; potentially others later) was silently guaranteed to crash. Fixed by adding the identical conditional `fork_capable_relaunch.c` source to `crt_toybox` that `crt_mksh` already has (same Windows x86_64/aarch64 guard).
+  - **Verified end-to-end**: rebuilt the full preset; `id` now prints `uid=0(shell) gid=0(shell) groups=0(shell)`, `xargs` runs real commands correctly (`echo "hello world" | xargs echo prefix:` -> `prefix: hello world`). Full `ctest` 81/81 after each change. Re-ran the real libpng `configure` afterward: `checking xargs -n works... yes`, `checking whether UID '0' is supported by ustar format... yes` -- both probes that used to degrade ungracefully now pass cleanly.
+  - **Also surfaced, investigated, and left open**: two `sed: bad pattern` errors during libpng's DLL link step (libtool's own `nm`-output-parsing script), confirmed non-fatal (the DLL still builds via libpng's `__declspec(dllexport)` markers, and every consumer links fine regardless). Root-caused as far as time allowed: an isolated, reproducible test proved this project's own `mksh` over-collapses backslash pairs inside double-quoted strings compared to real bash (`"\\\\("` should keep 2 backslashes per POSIX, this mksh keeps only 1), a genuine mksh double-quote/`eval` bug -- but two separate attempts to intercept the *actual* failing `sed` invocation with a debug argv-logging wrapper both failed to reproduce the exact failure context (the wrapper never got invoked, once because `crt-port-build.py` always rebuilds the `rootfs` target first and silently overwrote the wrapper, once because a nested `mksh ./libtool` sub-process couldn't resolve the wrapper's own `#!/system/bin/mksh` shebang for a still-unexplained reason). Genuinely unresolved which exact code path produces the observed corruption; tracked under "in progressing" below rather than claimed as fixed.
+  - **Unrelated, but confirmed while re-running libpng repeatedly this session**: a real, reproducible-once `make install` `Error 5` (Windows raw `ERROR_ACCESS_DENIED`, no error text) on `install-binSCRIPTS`, matching the same unexplained-`Error 5` pattern seen earlier this session on a different target (`install-man5`, aarch64, see the `libpng` shared-pass entry's own notes). Did **not** reproduce on an immediate retry. The user separately applied the Windows Defender process/folder exclusions this session's `README.md` update (below) documents, and the retry after that ran clean -- suggestive, not conclusive (one data point, and several other rebuilds were running concurrently in the background at the time confounding any timing comparison), but consistent with the working theory that these sporadic `Error N`-with-no-message failures are Defender real-time-scan file-handle contention, not a real toybox/CRT bug.
+
+- **Documented Windows Defender build-performance exclusions in `README.md`.** The user ran a real build with process exclusions (`cmake.exe`/`ninja.exe`/`clang.exe`/`clang++.exe`/`clang-cl.exe`/`lld.exe`/`llvm-nm.exe`) and folder exclusions (the LLVM install dir and the whole project tree) applied via `Add-MpPreference` from an elevated PowerShell session. Added the exact commands to the `### Windows 11` prerequisites section, with a one-line rationale (real-time scanning inspects every file a build writes, which is significant given how many small object files, port-build artifacts, and rootfs entries a full build and porting-loop run produce). Separately noted for the record (not applied, the user's own security posture call): the user's machine already had Cloud-delivered protection, Automatic sample submission, and Tamper Protection all off, which combined with these exclusions means (a) process exclusions are broader than folder exclusions -- they skip scanning anything the named binaries touch, anywhere, not just inside the project tree -- and (b) with Tamper Protection off, the exclusion list itself isn't protected from being extended by anything else that gains code execution on the machine.
+
 ## in progressing
 
 Four active threads, not a flat list of one-off items:
@@ -1512,6 +1521,53 @@ Four active threads, not a flat list of one-off items:
   Windows delete-pending/handle-timing noise rather than a real toybox/
   CRT `rm`-on-symlink bug -- needs reproduction from a genuinely cold
   `out/` directory to confirm either way.
+  - **New data point, not yet conclusive**: a related, unexplained
+    `Error 5` (`ERROR_ACCESS_DENIED`, no message) hit `make install` twice
+    this session on two different targets (`install-man5` on aarch64
+    earlier, `install-binSCRIPTS` on x86_64 this session -- see the `id`/
+    `xargs` "done" entry above), neither reproducing on an immediate
+    retry. The retry that stayed clean happened to run right after the
+    user applied the Windows Defender process/folder exclusions this
+    session's `README.md` update documents. Consistent with the working
+    "Windows delete-pending/handle-timing noise" theory (Defender
+    real-time scanning holding a file handle open just long enough to
+    collide with `make install`'s own rapid create/delete sequence), but
+    not proven -- multiple other rebuilds were running concurrently in
+    the background at the time, confounding a clean before/after
+    comparison. Worth specifically re-testing from a cold `out/`
+    directory with Defender exclusions active, to see if the intermittent
+    `ln: ... File exists` failure above also stops reproducing.
+
+- **Root-cause the real mksh double-quote/backslash-reduction bug found
+  chasing the `sed: bad pattern` errors above.** Confirmed via an
+  isolated, controlled comparison against real bash: given the identical
+  raw input, this project's own `mksh` collapses consecutive
+  backslash-pairs inside a double-quoted string more aggressively than
+  POSIX requires (`"\\\\("`, 4 backslashes, should keep 2 per real bash;
+  this mksh keeps only 1 -- confirmed at multiple backslash-pair counts,
+  the ratio holds: this mksh's output length is consistently about half
+  what bash's is). This is a genuine bug in mksh's own double-quote
+  parsing or parameter-substitution code (`shell/mksh/src/lex.c`'s
+  `Subst:` label backslash handling looks POSIX-correct on inspection;
+  the actual over-reduction was empirically isolated to variable
+  *interpolation* via `"$var"`, not the initial assignment -- `${#var}`
+  reports the correct, uncollapsed length immediately after assignment,
+  but printing the same variable via `"$var"` prints too few backslashes
+  -- pointing at `shell/mksh/src/eval.c`'s substitution/expansion path,
+  possibly the `XSUB`/`XSUBPAT`/`DODBMAGIC`-related balanced-parenthesis
+  handling around line 909, though this was not confirmed). **Not yet
+  tied conclusively to the specific `sed: bad pattern` failures** in a
+  real libpng build: two attempts to intercept the actual failing `sed`
+  invocation with a debug argv-logging wrapper installed in the rootfs
+  both failed to capture anything, for two different reasons (the
+  wrapper got silently overwritten by `crt-port-build.py`'s own
+  always-rebuild-`rootfs`-first step; a direct re-run of the exact
+  failing command hit a *different*, unexplained failure where a nested
+  `mksh ./libtool` sub-process couldn't resolve the wrapper's own
+  shebang). Confirmed harmless for libpng specifically (the DLL still
+  builds via `__declspec(dllexport)` markers regardless), so not
+  currently blocking anything -- but a real, general mksh correctness
+  bug that could bite harder on a future port without that fallback.
 
 - **Recipe/port status upkeep.** Keep `make`/`zlib`/`libpng`/`libffi`
   recipe statuses (`porting/recipes/*.json`, `docs/porting_status.md`)

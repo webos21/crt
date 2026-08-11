@@ -4527,8 +4527,17 @@ long __crt_sysconf_avphys_pages(void) {
   return windows_phys_pages(1);
 }
 
+/* Matches libc/src/user_group.c's synthetic_passwd/synthetic_group entries
+ * (both hardcode uid/gid 0, the "shell" user) -- geteuid() returning 1
+ * here instead was a genuine mismatch nothing had exercised until toybox's
+ * `id`/`xargs`-adjacent `getpwuid()` lookup actually needed the two to
+ * agree: `id` (via toybox's xgetpwuid(), shell/toybox/src/lib/xwrap.c)
+ * calls getpwuid(geteuid()), and libc's own getpwuid() only recognizes
+ * uid 0 -- so getpwuid(1) always failed ("bad uid 1"), even though this
+ * PAL's own synthetic passwd database was designed around uid 0 being a
+ * valid, resolvable identity throughout. */
 long __crt_sys_geteuid(void) {
-  return 1;
+  return 0;
 }
 
 long __crt_sys_fchown(int fd, unsigned int owner, unsigned int group) {

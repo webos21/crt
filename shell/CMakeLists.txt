@@ -333,6 +333,18 @@ if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
     toybox/src/toys/posix/xargs.c
     $<TARGET_OBJECTS:crt1>
   )
+  if(CRT_TARGET_OS STREQUAL "windows" AND CRT_EFFECTIVE_ARCH_FOR_FLAGS MATCHES "^(arm64|ARM64|aarch64|x86_64|AMD64|x64)$")
+    # xargs (and potentially other applets later) calls fork()/vfork() to run
+    # each batch of arguments -- opts into the startup self-relaunch that
+    # memory-copy fork() depends on, same as crt_mksh above and the ctest
+    # suite. Without it, every fork() call from any toybox applet fails with
+    # "fork_memcopy: stack commit failed" (confirmed hitting this directly:
+    # `xargs` crashed this way, and libpng's own `configure` silently
+    # swallowed the crash output from its "checking xargs -n works" probe).
+    # See that file's own top comment for why this is opt-in rather than
+    # linked into every Windows binary.
+    list(APPEND CRT_TOYBOX_SOURCES "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/common/fork_capable_relaunch.c")
+  endif()
   add_executable(crt_toybox ${CRT_TOYBOX_SOURCES})
   target_link_libraries(crt_toybox PRIVATE c m)
   target_link_libraries(crt_toybox PRIVATE crt_compiler_rt_builtins)

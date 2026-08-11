@@ -21,6 +21,7 @@ TOYBOX_APPLETS = [
     "fgrep",
     "grep",
     "head",
+    "id",
     "ln",
     "ls",
     "mkdir",
@@ -45,6 +46,7 @@ TOYBOX_APPLETS = [
     "uniq",
     "wc",
     "which",
+    "xargs",
 ]
 
 ROOTFS_DIRS = [

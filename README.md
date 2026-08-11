@@ -259,6 +259,21 @@ where kernel32.lib
 where synchronization.lib
 ```
 
+Windows Defender's real-time scanning inspects every file the build writes,
+which is significant here given how many small object files, port-build
+artifacts, and rootfs entries a full build and porting-loop run produce.
+Adding process and folder exclusions noticeably speeds up local builds. From
+an elevated PowerShell session:
+
+```powershell
+# Add Process Exclusions
+Add-MpPreference -ExclusionProcess "cmake.exe", "ninja.exe", "clang.exe", "clang++.exe", "clang-cl.exe", "lld.exe", "llvm-nm.exe"
+
+# Add Folder Exclusions (Update paths based on your actual machine setup)
+Add-MpPreference -ExclusionPath "C:\Program Files\LLVM"
+Add-MpPreference -ExclusionPath "C:\path\to\your\projects\build"
+```
+
 ### macOS
 
 Install:
