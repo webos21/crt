@@ -928,6 +928,22 @@ static int scan_wide_set(struct scan_source* source, const char** format, int wi
 
 static int vscan_core(struct scan_source* source, const char* format, va_list ap) {
   int assigned = 0;
+  /* Do not take &ap directly: `ap` is a *function parameter* of type
+   * va_list, and on ABIs where va_list is itself an array type (x86_64
+   * SysV: `typedef struct __va_list_tag va_list[1];`), array-typed
+   * parameters implicitly decay to a pointer -- so `ap` here is already
+   * effectively a `struct __va_list_tag *`, and `&ap` would give a
+   * spurious extra level of indirection (`struct __va_list_tag **`),
+   * one level more than every scan_*() helper below actually expects
+   * (`va_list *`). This was invisible on aarch64/most other ABIs, where
+   * va_list is a plain (non-array) struct and no such decay happens --
+   * `&ap` there already produces exactly `va_list *`. va_copy() into a
+   * genuine local variable (never itself a function parameter, so never
+   * subject to array-to-pointer decay regardless of va_list's
+   * representation) sidesteps the whole issue portably. */
+  va_list ap_copy;
+
+  va_copy(ap_copy, ap);
 
   while (*format != 0) {
     int suppress = 0;
@@ -979,6 +995,7 @@ static int vscan_core(struct scan_source* source, const char* format, va_list ap
     }
     for (;;) {
       if (*format == 0) {
+        va_end(ap_copy);
         return assigned == 0 ? EOF : assigned;
       }
       if (isdigit((unsigned char)*format)) {
@@ -1026,48 +1043,48 @@ static int vscan_core(struct scan_source* source, const char* format, va_list ap
     spec = *format++;
 
     if (spec == 'D') {
-      result = scan_integer(source, width, 10, 1, SCAN_LENGTH_L, suppress, &ap);
+      result = scan_integer(source, width, 10, 1, SCAN_LENGTH_L, suppress, &ap_copy);
     } else if (spec == 'd') {
-      result = scan_integer(source, width, 10, 1, length, suppress, &ap);
+      result = scan_integer(source, width, 10, 1, length, suppress, &ap_copy);
     } else if (spec == 'i') {
-      result = scan_integer(source, width, 0, 1, length, suppress, &ap);
+      result = scan_integer(source, width, 0, 1, length, suppress, &ap_copy);
     } else if (spec == 'b') {
-      result = scan_integer(source, width, 2, 0, length, suppress, &ap);
+      result = scan_integer(source, width, 2, 0, length, suppress, &ap_copy);
     } else if (spec == 'U') {
-      result = scan_integer(source, width, 10, 0, SCAN_LENGTH_L, suppress, &ap);
+      result = scan_integer(source, width, 10, 0, SCAN_LENGTH_L, suppress, &ap_copy);
     } else if (spec == 'u') {
-      result = scan_integer(source, width, 10, 0, length, suppress, &ap);
+      result = scan_integer(source, width, 10, 0, length, suppress, &ap_copy);
     } else if (spec == 'x' || spec == 'X' || spec == 'p') {
       result = scan_integer(
-          source, width, 16, 0, spec == 'p' ? SCAN_LENGTH_POINTER : length, suppress, &ap);
+          source, width, 16, 0, spec == 'p' ? SCAN_LENGTH_POINTER : length, suppress, &ap_copy);
     } else if (spec == 'O') {
-      result = scan_integer(source, width, 8, 0, SCAN_LENGTH_L, suppress, &ap);
+      result = scan_integer(source, width, 8, 0, SCAN_LENGTH_L, suppress, &ap_copy);
     } else if (spec == 'o') {
-      result = scan_integer(source, width, 8, 0, length, suppress, &ap);
+      result = scan_integer(source, width, 8, 0, length, suppress, &ap_copy);
     } else if (spec == 'a' || spec == 'A' || spec == 'e' || spec == 'E' ||
                spec == 'f' || spec == 'F' || spec == 'g' || spec == 'G') {
-      result = scan_float(source, width, length, suppress, &ap);
+      result = scan_float(source, width, length, suppress, &ap_copy);
     } else if (spec == 's') {
       if (length == SCAN_LENGTH_L) {
-        result = scan_wide_string(source, width, suppress, allocate, &ap);
+        result = scan_wide_string(source, width, suppress, allocate, &ap_copy);
       } else {
-        result = scan_string(source, width, suppress, allocate, &ap);
+        result = scan_string(source, width, suppress, allocate, &ap_copy);
       }
     } else if (spec == 'c') {
       if (length == SCAN_LENGTH_L) {
-        result = scan_wide_chars(source, width, suppress, allocate, &ap);
+        result = scan_wide_chars(source, width, suppress, allocate, &ap_copy);
       } else {
-        result = scan_chars(source, width, suppress, allocate, &ap);
+        result = scan_chars(source, width, suppress, allocate, &ap_copy);
       }
     } else if (spec == '[') {
       if (length == SCAN_LENGTH_L) {
-        result = scan_wide_set(source, &format, width, suppress, allocate, &ap);
+        result = scan_wide_set(source, &format, width, suppress, allocate, &ap_copy);
       } else {
-        result = scan_set(source, &format, width, suppress, allocate, &ap);
+        result = scan_set(source, &format, width, suppress, allocate, &ap_copy);
       }
     } else if (spec == 'n') {
       if (!suppress) {
-        assign_signed(&ap, length, (long long)source->consumed);
+        assign_signed(&ap_copy, length, (long long)source->consumed);
       }
       result = 0;
     } else {
@@ -1075,13 +1092,16 @@ static int vscan_core(struct scan_source* source, const char* format, va_list ap
     }
 
     if (result == -2) {
+      va_end(ap_copy);
       return assigned == 0 ? EOF : assigned;
     }
     if (result < 0) {
+      va_end(ap_copy);
       return assigned;
     }
     assigned += result;
   }
+  va_end(ap_copy);
   return assigned;
 }
 
