@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-aarch64
+            runner: macos-latest
+            preset: macos-host-ninja-debug
+          - name: linux-amd64
+            runner: ubuntu-latest
+            preset: linux-host-ninja-debug
+          - name: linux-arm64
+            runner: ubuntu-24.04-arm
+            preset: linux-host-ninja-debug
+          - name: windows-x64
+            runner: windows-latest
+            preset: windows-host-ninja-debug
+            msvc_arch: x64
+            llvm_asset: win64
+          - name: windows-arm64
+            runner: windows-11-arm
+            preset: windows-host-ninja-debug
+            msvc_arch: arm64
+            llvm_asset: woa64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # ---- Linux: apt already carries a native clang/lld for both amd64
+      # and arm64 repos, so the same step works for both matrix legs. ----
+      - name: Install build tools (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang lld ninja-build cmake
+          clang --version
+          clang++ --version
+          ld.lld --version
+          cmake --version
+          ninja --version
+
+      # ---- macOS: Xcode CLT already provides clang; only cmake/ninja
+      # need installing (or upgrading past whatever the image ships). ----
+      - name: Install build tools (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install ninja cmake
+          clang --version
+          clang++ --version
+          cmake --version
+          ninja --version
+
+      # ---- Windows: this project builds with clang/lld-link but still
+      # needs the Windows SDK import libraries (kernel32.lib,
+      # synchronization.lib) that only a Visual Studio developer
+      # environment reliably exposes -- see README.md's Windows
+      # prerequisites section. ilammy/msvc-dev-cmd sets that up for the
+      # requested architecture (x64 or arm64). ----
+      - name: Set up MSVC developer environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.msvc_arch }}
+
+      # LLVM's own official installers are architecture-specific
+      # (win64 = x64 host, woa64 = arm64/"Windows on Arm" host) and are
+      # fetched directly from the latest GitHub release rather than
+      # through a package manager, since chocolatey/winget LLVM package
+      # availability for the arm64 host case is not reliably native.
+      - name: Install LLVM (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/llvm/llvm-project/releases/latest"
+          $asset = $release.assets | Where-Object { $_.name -like "LLVM-*-${{ matrix.llvm_asset }}.exe" } | Select-Object -First 1
+          if (-not $asset) {
+            throw "Could not find an LLVM '${{ matrix.llvm_asset }}' installer asset in release $($release.tag_name)"
+          }
+          Write-Host "Installing $($asset.name) from $($release.tag_name)"
+          $installer = Join-Path $env:RUNNER_TEMP "llvm-installer.exe"
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $installer
+          Start-Process -FilePath $installer -ArgumentList "/S" -Wait
+          $llvmBin = "C:\Program Files\LLVM\bin"
+          if (-not (Test-Path $llvmBin)) {
+            throw "Expected LLVM install at '$llvmBin' but it does not exist"
+          }
+          Add-Content -Path $env:GITHUB_PATH -Value $llvmBin
+
+      - name: Verify toolchain (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          clang --version
+          clang++ --version
+          lld-link --version
+          cmake --version
+          ninja --version
+
+      - name: Configure, build, and test
+        run: cmake --workflow --preset ${{ matrix.preset }}
