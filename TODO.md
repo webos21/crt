@@ -30,15 +30,55 @@ Five active threads, not a flat list of one-off items:
     surfaced -- it built cleanly against the existing sysroot the same
     way sqlite-amalgamation already does. macOS still `pending` (no
     macOS hardware available this session).
-  - `xz` (liblzma): in progress, blocked on Linux at `partial` -- see
+  - `xz` (liblzma): done on Linux (`shared-pass`) -- see
     `porting/recipes/xz.json`'s own notes and the new ".init_array" item
     below. Configure/build succeeded immediately; a real usage test
     surfaced and got a fix for a genuine, general CRT startup gap
-    (`.init_array` never ran), but a second, still-open bug (a `malloc()`
+    (`.init_array` never ran). A second apparent bug (a `malloc()`
     lock-state corruption once liblzma's real LZ match-finder allocates
-    its dictionary/hash tables) blocks calling it with realistic buffer
-    sizes. Not moving to `pcre2` until this is resolved or explicitly
-    deprioritized.
+    its dictionary/hash tables) turned out, after further investigation
+    with a gdb watchpoint, to be a buffer overflow in this session's own
+    throwaway verification program (an unchecked `snprintf()`-return-value
+    accumulation, `size_t`-underflowing the remaining-buffer-size
+    argument) -- not a CRT/PAL/liblzma bug at all. Fixed the test; real
+    match-finder allocations up to ~512 MB and a full compress/decompress
+    round trip at preset 9|EXTREME with CRC64 both work correctly on
+    Linux, verified against static and shared (`ldd`-checked) builds.
+    Linux is at `shared-pass`.
+    Windows build needed two more fixes (both generalized into
+    `tools/crt-port-build.py` since they're not liblzma-specific):
+    `-U__MINGW32__` in the recipe's own CFLAGS (xz's `sysdefs.h`/
+    `mythread.h` branch on a real mingw-w64 environment this sysroot
+    doesn't fully replicate -- a missing `_mingw.h` and a `sigset_t`/
+    `_sigset_t` remap that fights this project's own real `sigset_t`),
+    and presetting `$RC` to `llvm-rc` plus overriding away the optional
+    `liblzma_w32res.rc` version-info resource (`llvm-rc`'s GNU-windres
+    `-i`/`-o` compatibility mode mis-invokes its own internal clang
+    preprocessing step; not pursued further since the resource is purely
+    cosmetic -- see `porting/recipes/xz.json`'s notes for the full
+    trail, including a `crt-port-build.py` fix so a recipe's
+    `make_args` override reaches `make install` too, not just `make`).
+    Windows *builds* clean (`configure-pass`), but actually calling the
+    library crashes -- confirmed directly (not just presumed): a trivial
+    `lzma_version_string()` call works, but the first real
+    `lzma_easy_buffer_encode()` call segfaults, on both the static and
+    shared build, in the exact same "first real call into the CRC
+    dispatcher" shape as the original Linux bug this port already found
+    and fixed. Strong evidence it's the same `.init_array`-never-ran gap
+    (see the entry below) reaching Windows too, but not confirmed with a
+    debugger the way the Linux case was, and not fixed this session: PE
+    constructors compile into a GNU/MinGW-style bare `.ctors` section
+    (confirmed via `llvm-objdump -h` on a real constructor test, not
+    MSVC's `.CRT$XCU` convention), which has no equivalent to ELF's
+    automatic `__init_array_start`/`_end` boundary symbols -- MinGW-w64's
+    own real crt0 relies on `-1`-sentinel objects (`crtbegin.o`/
+    `crtend.o`) linked first/last to bound the merged section, a
+    mechanism this project doesn't have and would need to add carefully
+    (get the link-order sandwich wrong and it silently walks garbage)
+    rather than as a quick follow-on to an already-long investigation.
+    macOS still `pending` (no macOS hardware available this session).
+    Next: `pcre2` (xz's Windows/macOS gaps trail along in the two
+    entries below, not blocking further queue progress).
 
 - **`.init_array`/`.fini_array` (ELF constructor/destructor) support**,
   found and fixed for Linux while porting xz/liblzma (see that recipe's
@@ -51,13 +91,28 @@ Five active threads, not a flat list of one-off items:
   (`libc/src/arch/linux/common/init_fini_array.c`, wired into `crt1.S`/
   `exit.c`/`tools/crt-cc`/the CMake test and shell build paths); verified
   with gdb against the real liblzma bug that exposed it.
-  - Windows and macOS still lack the equivalent fix. Windows needs a
-    `.CRT$XCU`-section-walking equivalent (PE's own constructor-array
-    convention, different from ELF's `.init_array`); macOS needs to walk
-    `__DATA,__mod_init_func` (Mach-O's equivalent). Neither implemented
-    yet -- only matters for statically-linked constructor-reliant code,
-    which is why nothing in this project's own test suite or any prior
-    port ever exercised it.
+  - Windows and macOS still lack the equivalent fix -- and Windows is now
+    *confirmed* (not just presumed) to need it too: the same xz/liblzma
+    round-trip test that exposed and verified the Linux fix crashes on
+    Windows in the identical shape (trivial API calls work, the first
+    real call into liblzma's CRC dispatcher segfaults), on both the
+    static and shared build. PE constructors compile into a bare
+    `.ctors` section (GNU/MinGW convention, confirmed via `llvm-objdump
+    -h` on a real `__attribute__((constructor))` test against this
+    toolchain) rather than MSVC's `.CRT$XCU` family this TODO previously
+    assumed -- so the fix shape is different from what's written below:
+    `.ctors` has no ELF-style automatic linker-provided boundary
+    symbols, so this needs the same `-1`-sentinel-object technique real
+    mingw-w64 crt0 uses (a "begin" object linked immediately after
+    crt1.o and an "end" object linked last, each contributing a `-1`
+    value to the merged `.ctors` section, with the startup walker
+    reading from the begin symbol until it hits `-1`) -- not attempted
+    yet, since getting the link-order sandwich wrong would silently walk
+    garbage instead of failing loudly. macOS needs to walk
+    `__DATA,__mod_init_func` (Mach-O's own, separate convention). Neither
+    implemented yet -- only matters for statically-linked
+    constructor-reliant code, which is why nothing in this project's own
+    test suite or any prior port ever exercised it before xz.
   - Also documented, not yet fixed: for an executable linked against
     *shared* libc (`c_shared`/`libc.so`) rather than static, `exit()`
     (which lives inside `libc.so` in that configuration) reaches

@@ -26,10 +26,11 @@ in those two win.
 - **Ports**: see `docs/porting_status.md` for the full per-library,
   per-host table. `zlib`/`libpng`/`sqlite-amalgamation`/`bzip2` are at
   `shared-pass` on Linux and Windows (macOS pending on all four, no
-  macOS hardware this session). `libffi` and `xz` (liblzma) are each
-  `partial`: `libffi` builds and works except for a known `-O1`/`-O2`
-  `ffi_call()`-repeat-call bug (see below); `xz` builds and works for
-  small inputs but hangs on realistic-sized ones (see below).
+  macOS hardware this session). `xz` (liblzma) is `shared-pass` on Linux,
+  `configure-pass` on Windows (builds clean, but a confirmed `.init_array`
+  gap crashes it at runtime -- see below). `libffi` is `partial`: builds
+  and works except for a known `-O1`/`-O2` `ffi_call()`-repeat-call bug
+  (see below).
 
 ## Known gaps
 
@@ -38,17 +39,17 @@ in those two win.
   dedicated entry -- this project's `crt1` startup never ran
   `__attribute__((constructor))` functions (also what runs C++ global
   object constructors) for the executable entry point on any OS, until
-  found and fixed for Linux while porting xz/liblzma.
-- **xz (liblzma)**: builds and installs cleanly on Linux, and small
-  buffer_encode/buffer_decode calls work correctly, but encoding a
-  larger buffer (big enough to reach liblzma's real LZ match-finder
-  initialization) hangs -- confirmed spinning inside this project's own
-  `malloc()` lock-wait loop with the lock's raw value read back as
-  garbage while hung, despite the process being confirmed genuinely
-  single-threaded at that moment. A standalone malloc-only reproduction
-  of the same allocation sizes does not reproduce it, so the corruption
-  is specific to liblzma's real code path, not a general `malloc.c` bug
-  on its own. Not yet root-caused; see `porting/recipes/xz.json`.
+  found and fixed for Linux while porting xz/liblzma. Windows is now
+  *confirmed* (not just presumed) to need the same fix: the xz round-trip
+  test that verified the Linux fix crashes on Windows in the identical
+  shape (trivial API calls work, the first real call into liblzma's CRC
+  dispatcher segfaults, on both the static and shared build). PE
+  constructors compile into a GNU/MinGW-style bare `.ctors` section for
+  this toolchain (confirmed via `llvm-objdump -h`), not MSVC's
+  `.CRT$XCU` -- `.ctors` has no ELF-style automatic boundary symbols, so
+  a correct fix needs the same `-1`-sentinel-object technique real
+  mingw-w64 crt0 uses. Not attempted yet; a wrong link-order sandwich
+  would silently walk garbage instead of failing loudly.
 - **libffi**: `ffi_call()` alone and closures alone each work correctly in
   isolation, but calling `ffi_call()` and then any further libffi call in
   the same process reliably segfaults when the caller is compiled at
@@ -70,9 +71,10 @@ in those two win.
 
 ## Not yet started
 
-- Porting matrix expansion: `bzip2` is done on Linux/Windows (macOS
-  pending), `xz` -> `pcre2` -> `mbedtls` -> `curl` not started -- see
-  `TODO.md`'s "in progressing" section for the current queue and order.
+- Porting matrix expansion: `bzip2` done on Linux/Windows, `xz` done on
+  Linux (Windows blocked on the `.init_array` gap above, macOS pending);
+  `pcre2` -> `mbedtls` -> `curl` not started -- see `TODO.md`'s "in
+  progressing" section for the current queue and order.
 - Broader POSIX/rootfs surface hardening beyond what each port's own build
   happens to exercise.
 - C++ runtime phase 2 and an ELF loader/dynamic-linker prototype: not

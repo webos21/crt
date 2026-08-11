@@ -344,6 +344,25 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
             found_nm = env.get("NM") or find_windows_host_tool(("llvm-nm.exe", "llvm-nm"))
             if found_nm:
                 env["NM"] = found_nm
+            # Same reasoning as $LD/$DLLTOOL/$OBJDUMP/$NM above, for the
+            # Windows resource compiler: a mingw32-hosted `configure` (any
+            # recipe building a Windows DLL with a version-info .rc file,
+            # e.g. xz/liblzma's liblzma_w32res.rc) leaves $RC unset, since
+            # this project never wraps/aliases anything under that name
+            # either. Unlike $LD, an empty/unset $RC doesn't fail configure
+            # itself, but it does leave libtool's generated Makefile rule
+            # trying to run its own --mode=compile machinery with no real
+            # tool behind it, which garbles the invocation into something
+            # libtool's own resource-file argument parser rejects outright
+            # ("unrecognised option: '-DHAVE_CONFIG_H'") -- confirmed for
+            # real building xz/liblzma's shared library. This project's
+            # LLVM install ships a real, RC.EXE-compatible resource
+            # compiler under llvm-rc; point $RC at it the same way
+            # $NM/$DLLTOOL/$OBJDUMP already point at their own llvm-
+            # prefixed equivalents.
+            found_rc = env.get("RC") or find_windows_host_tool(("llvm-rc.exe", "llvm-rc"))
+            if found_rc:
+                env["RC"] = found_rc
             # Generalized from the libpng-era investigation (see
             # porting/recipes/libpng.json's own notes): libtool's
             # deplibs_check_method for cygwin*/mingw* hosts is
@@ -426,7 +445,7 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
     env["RANLIB"] = env.get("RANLIB") or shutil.which("llvm-ranlib") or shutil.which("ranlib") or "ranlib"
     env["STRIP"] = env.get("STRIP") or shutil.which("llvm-strip") or shutil.which("strip") or "strip"
     if target_os == "windows" and use_crt_shell:
-        for tool_var in ("AR", "RANLIB", "STRIP", "LD", "DLLTOOL", "OBJDUMP", "NM"):
+        for tool_var in ("AR", "RANLIB", "STRIP", "LD", "DLLTOOL", "OBJDUMP", "NM", "RC"):
             if not env.get(tool_var):
                 continue
             tool_path = Path(env[tool_var])
@@ -644,10 +663,19 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
     # real Windows drive-letter path handed to -bindir sends it into a
     # genuine infinite loop trying to ascend to a root it can never
     # reach -- see porting/recipes/libffi.json's own notes).
-    make_args = [make, "-j", str(jobs)] + build["make_args"] + build.get("target_overrides", {}).get(
-        target_os, {}
-    ).get("make_args", [])
-    install_args = [make, "install"]
+    override_make_args = build.get("target_overrides", {}).get(target_os, {}).get("make_args", [])
+    make_args = [make, "-j", str(jobs)] + build["make_args"] + override_make_args
+    # install_args gets the same VAR=value overrides as make_args (but not
+    # the base build["make_args"]/-jN, which are build-target-specific
+    # flags like parallelism that don't apply to `make install`): a
+    # recipe-level `make` variable override almost always needs to reach
+    # both steps, not just the first -- e.g. xz/liblzma's Windows build
+    # overriding away liblzma_w32res.rc's automake-generated variables
+    # (see porting/recipes/xz.json's own notes) skipped the file during
+    # `make` but `make install`'s own dependency chain re-triggered
+    # building it anyway, since install_args previously never saw the
+    # override at all.
+    install_args = [make, "install"] + override_make_args
     if target_os == "windows" and use_crt_shell:
         make_args.append("SHELL=/system/bin/mksh")
         install_args.append("SHELL=/system/bin/mksh")

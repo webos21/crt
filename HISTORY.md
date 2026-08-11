@@ -10,6 +10,89 @@ substantive update.
 
 ## 2026-08-11
 
+- **Ported xz/liblzma 5.8.3 to Linux (`shared-pass`); Windows build is
+  clean too (`configure-pass`) but blocked at runtime by the
+  `.init_array` gap the very same investigation found (see the dedicated
+  entry below).** `porting/recipes/xz.json`, scoped to liblzma only
+  (`--disable-xz`/`-xzdec`/`-lzmadec`/`-lzmainfo`/`-lzma-links`/
+  `-scripts` skip the CLI tool family's sandboxing/gettext/console
+  surface -- a library-only consumer like a future curl/pcre2 port
+  doesn't need it). Configure+make+install succeeded on the first real
+  attempt on Linux x86_64 (WSL Ubuntu 20.04 + clang-18); the real
+  verification round trip is what surfaced and confirmed the
+  `.init_array` bug documented in the next entry.
+  - **Fully verified on Linux**: after the `.init_array` fix, a
+    standalone `lzma_easy_buffer_encode()`/`lzma_stream_buffer_decode()`
+    round trip at preset 9|EXTREME with `LZMA_CHECK_CRC64` (real
+    match-finder allocations up to ~512 MB, not a toy input) produces
+    byte-for-byte correct output against both the static (`liblzma.a`)
+    and shared (`liblzma.so.5`, `ldd`-verified against this project's own
+    sysroot/port install dirs) build.
+  - **A second apparent bug, investigated and closed as "not a real
+    bug"**: encoding a larger buffer hung inside this project's own
+    `malloc()` lock-wait loop, with the lock's raw value read back as
+    outright garbage despite the process being confirmed genuinely
+    single-threaded (`/proc/<pid>/status` showed `Threads: 1`). A gdb
+    hardware watchpoint on the lock (`watch *(int*)&heap_lock`) traced
+    every corrupting write to `buffer_putc <- vsnprintf <- snprintf <-
+    main` -- the verification test's *own* `main`, not libc or liblzma --
+    and the corrupted bytes decoded to literal fragments of the test's
+    own format string. Root cause: the test built its input with a
+    `snprintf()`-in-a-loop pattern that accumulated the return value into
+    a running length without checking it against the destination
+    buffer's remaining size; once the accumulated length exceeded the
+    buffer, `remaining = buffer_size - accumulated_length` (both
+    `size_t`) underflowed to a huge unsigned value, handing the next
+    `snprintf()` call an effectively unbounded size limit that wrote
+    straight past a `static` buffer into whatever the linker placed next
+    in BSS -- which happened to be malloc's own lock. Fixed the test
+    (not the CRT); the "bug" never existed outside the test harness. A
+    useful reminder that a watchpoint beats theorizing once "single
+    malloc pattern reproduces fine standalone but not in the real
+    program" stops narrowing things down on its own.
+  - **Windows build fixes, all generalized (not xz-specific) since any
+    future Windows configure recipe could hit the same gaps**: (1)
+    `-U__MINGW32__` added to this recipe's own Windows CFLAGS -- xz's
+    `sysdefs.h`/`mythread.h` both branch on `#ifdef __MINGW32__` for real
+    mingw-w64-specific code this sysroot doesn't have an equivalent for
+    (`#include <_mingw.h>`, a header this project doesn't ship; and
+    `#define sigset_t _sigset_t`, which breaks against this project's own
+    real, working `<signal.h>` `sigset_t`). (2) `tools/crt-port-build.py`
+    now presets `$RC` to `llvm-rc` (this project's LLVM install ships
+    one; nothing pointed libtool's resource-compile step at it before,
+    the same class of gap `$LD`/`$DLLTOOL`/`$OBJDUMP`/`$NM` already had
+    fixes for) and wraps it through `crt-native-tool` like the other
+    native tools. (3) `llvm-rc`'s GNU-windres-compatibility `-i`/`-o`
+    flag combination turned out to mis-invoke its own internal clang
+    preprocessing step (confirmed directly: the identical `.rc` file
+    compiles fine with MS-`rc.exe`-style positional-input + `-FO`
+    arguments, but fails with `-i`/`-o`) -- rather than chase a `llvm-rc`
+    bug, skipped building xz's optional `liblzma_w32res.rc` (a purely
+    cosmetic DLL version-info resource) via a `target_overrides.windows.
+    make_args` override of the two Automake-generated variables
+    controlling it (`am__append_46`/`am__objects_41` for this exact xz
+    version). (4) That override then exposed a real, separate
+    `crt-port-build.py` gap: `target_overrides.<os>.make_args` only ever
+    reached the build (`make`) step, not `make install` -- Automake's
+    `install` target re-derives its own dependency chain and rebuilt the
+    skipped resource anyway. Generalized: `install_args` now gets the
+    same `VAR=value` overrides `make_args` does.
+  - **Windows: confirmed at runtime (not just build-time) after all four
+    fixes above**: `liblzma.a`/`liblzma-5.dll` both build clean, but a
+    standalone test showed a trivial `lzma_version_string()` call working
+    while the first real `lzma_easy_buffer_encode()` call segfaults, on
+    both the static and shared build -- the same "first real call into
+    the CRC dispatcher" shape as the Linux bug above. Checked what a fix
+    would need to look like (not implemented this session): PE
+    constructors compile into a bare `.ctors` section for this toolchain
+    (confirmed via `llvm-objdump -h` on a real
+    `__attribute__((constructor))` test), the GNU/MinGW convention, not
+    MSVC's `.CRT$XCU` family -- `.ctors` has no ELF-style automatic
+    linker-provided boundary symbols, so a correct fix needs the same
+    `-1`-sentinel-object technique real mingw-w64 crt0 uses. Left as a
+    tracked TODO.md item rather than rushed.
+  - macOS: not attempted (no macOS hardware this session).
+
 - **Fixed a real, general CRT startup gap for Linux: `crt1` never ran ELF
   `.init_array` (`__attribute__((constructor))` functions, also what runs
   C++ global object constructors) for the executable entry point.**
