@@ -1615,13 +1615,94 @@ Four active threads, not a flat list of one-off items:
     fragments get **reassembled** into the final value is where the
     stray `/` actually enters -- that reassembly code itself is not yet
     located.
-  - **Not yet found**: the exact reassembly/concatenation site. Next step
-    for whoever picks this up: instrument the word-splitting/field-
-    emission path (`XPput` calls and whatever joins multiple emitted
-    fields back into one assignment value) the same way `debunk()` was
-    instrumented here, or use a real interactive debugger (not available
-    in this session's sandboxed CLI) to step through the exact point two
-    debunked fragments get concatenated.
+  - **Got real interactive debugging working, third round**: `lldb.exe`
+    ships with this project's own LLVM install (`C:\Program Files\LLVM\
+    bin\lldb.exe`) but crashed instantly (`unable to find 'python311.dll'`)
+    -- the LLVM Windows package links `lldb` against Python 3.11
+    specifically, but this machine's own Python install is 3.14. Fixed by
+    adding the machine's already-installed (separate, from some earlier
+    unrelated setup) `...\Programs\Python\Python311\` directory to `PATH`
+    before invoking `lldb.exe` -- no reinstall needed. `lldb -b -s
+    <command-file>` (batch mode, sourcing a plain-text command script)
+    works well for this environment's non-interactive tool-call model;
+    `breakpoint command add -o "cmd1" -o "cmd2" ...` (single-line `-o`
+    flags) is required over the interactive `breakpoint command add`
+    .../`DONE` block form, which silently produces no visible output
+    through a sourced command file here. `crt_mksh` already builds with
+    full debug info (`-g -gcodeview`, part of this preset's default
+    flags) -- breakpoints resolve real source file/line locations
+    directly, no extra CMake changes needed.
+  - **First obstacle**: `crt_mksh` links `fork_capable_relaunch.c` (see
+    that file's own docs) and self-relaunches into a *child* process on
+    every invocation until ASLR mitigation is confirmed applied -- so a
+    breakpoint set on the parent (the process `lldb` actually launches)
+    never fires; all the real work happens in an un-debugged child lldb
+    never attaches to. Worked around by temporarily `#if 0`-ing out
+    `__crt_windows_ensure_fork_capable_relaunch()`'s body (a same-session,
+    fully reverted change -- working tree was clean before and after;
+    not a real fix, just a debugging aid, and specifically safe here
+    since this repro never calls `fork()`).
+  - **Traced the real call chain with a live breakpoint on `debunk()`**:
+    it is *not* called directly from `emit_word:` for this repro -- the
+    backtrace showed `debunk` <- `globit` <- `glob_str` <- `glob` <-
+    `expand` <- `eval`. `f=0x4b` (`DOPAT|DOGLOB`-shaped) confirmed real
+    filesystem **pathname globbing** (`glob()`) is being attempted on
+    `$cmd`'s value -- consistent with the "not really quoted" theory
+    above, since real quoted text is never glob-eligible.
+  - **Found the literal fragmentation, not just inferred it**: breakpoints
+    at `glob()`'s entry (`eval.c:1711`) and its "no real file matched,
+    fall back to the literal text" branch (`eval.c:1716`,
+    `XPput(*wp, debunk(cp, cp, strlen(cp) + 1))`) showed `glob()` being
+    invoked **twice, independently**, for two disjoint halves of what
+    should be one continuous string: `cp="cmd=\"'s/x\([^"` (ending mid-
+    bracket-expression, right after `[^`) and a *separate* call with
+    `cp="]*\)z/\1/'\""` (starting right after, from `]`) -- confirming
+    the earlier fragmentation observation was a real word-level split,
+    not just an internal `debunk()` buffering detail. The literal space
+    character that should be inside `[^ ]` is present in *neither* half
+    -- consumed as an ordinary (unquoted, from the lexer's perspective)
+    IFS field separator, exactly like any bare `$var` with embedded
+    spaces would be split, because the shell has no concept of "this
+    space is inside a regex bracket expression" -- that protection is a
+    sed/regex-level concept the shell's own byte-level field-splitter
+    cannot see.
+  - **Traced how the split fragments get reassembled, and ruled out
+    where they *don't* get corrupted**: `func_execute_cmds`'s
+    `eval cmd=\"$cmd\"` is not really an assignment from mksh's execution
+    model's point of view -- it is the `eval` *builtin* (`funcs.c`'s
+    `c_eval()`) receiving `cmd=\"$cmd\"` as its own (now field-split-into-
+    two) argument list. `c_eval()` feeds its multiple argv words back in
+    via a dedicated `SWORDS`/`SWORDSEP` source type
+    (`shell/mksh/src/lex.c:1276-1289`) that re-lexes them as one
+    continuous stream, inserting `T1space` between consecutive words --
+    exactly POSIX's own "join eval's arguments with a space" behavior.
+    Suspected `T1space` itself next (`shell/mksh/src/sh.h` has *two*
+    conflicting `#define T1space` -- `" "` at line 1140 vs. a
+    string-pool-offset `(Treal_sp2 + 5)` at line 974, gated on whether
+    `HAVE_STRING_POOLING` survives a `#ifdef __GNUC__`/`#if __GNUC__ < 4`
+    chain this project's `-DHAVE_STRING_POOLING=2` build flag interacts
+    with in a not-immediately-obvious way) -- **ruled this out too**,
+    empirically: a breakpoint right after the `s->str = T1space;`
+    assignment (`lex.c:1287`) showed `s->str` was a genuine, correct
+    single-space C string (`" "`) at runtime. The rejoin mechanism itself
+    is completely correct.
+  - **Not yet found**: since the rejoin is correct but the *final* result
+    has no trace of that space (replaced by a stray `/` instead), the
+    corruption happens somewhere in the *re-lexing* of the three-part
+    reassembled stream (first half + real space + second half) -- most
+    likely back inside `globit()`'s own recursive `/`-as-path-separator
+    walk (`eval.c:1745-1876`, notably the unconditional `*xp++ = '/';`
+    re-insertion at line 1808-1809 every time it descends into a new
+    path "component" -- a function fundamentally designed to treat `/`
+    characters as directory separators, which a sed script's own `/`
+    delimiters are not). The next concrete step is stepping through
+    `globit()`'s own recursion with the same lldb setup (now fully
+    working and documented above) rather than more hand-tracing, which
+    kept producing subtly wrong predictions throughout this
+    investigation (every hand-derived hypothesis in this session was
+    eventually contradicted by either a fresh bisection or a live
+    breakpoint -- direct instrumentation was what actually worked each
+    time).
   - Confirmed harmless for libpng specifically (the DLL still builds via
     `__declspec(dllexport)` markers regardless of the corrupted export-
     symbol-list script), so not currently blocking anything -- but a
@@ -1633,9 +1714,11 @@ Four active threads, not a flat list of one-off items:
     not a one-off libpng quirk, just the first place this session's real
     build activity happened to exercise it with the right ingredients
     (both a backslash-group and a later bracket in the same value). The
-    minimal repro above is the actual deliverable of this investigation
-    -- whoever picks this back up next does not need to re-derive any of
-    the above.
+    minimal repro above, and the now-working lldb setup (PATH fix +
+    batch-mode command-file invocation + the fork-relaunch debugging
+    workaround), are the actual deliverables of this investigation --
+    whoever picks this back up next does not need to re-derive any of
+    the above, and can go straight to stepping through `globit()`.
 
 - **Recipe/port status upkeep.** Keep `make`/`zlib`/`libpng`/`libffi`
   recipe statuses (`porting/recipes/*.json`, `docs/porting_status.md`)
