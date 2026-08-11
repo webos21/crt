@@ -13,7 +13,17 @@ newest entry first) rather than leaving it here.
 
 ## in progressing
 
-Four active threads, not a flat list of one-off items:
+Five active threads, not a flat list of one-off items:
+
+- **Porting matrix expansion.** Queue, in order: `bzip2` -> `xz` -> `pcre2`
+  -> `mbedtls` -> `curl` (`openssl` held back until something actually
+  needs it). Any POSIX/rootfs gap a port's build exposes gets fixed in
+  place as part of that port's own work, not deferred to a separate pass
+  -- matching how zlib/libpng/libffi already surfaced and fixed real CRT
+  gaps along the way (see `docs/porting_status.md`). Each port's recipe
+  and per-host status live in `porting/recipes/*.json` and
+  `docs/porting_status.md` as they land; this bullet just tracks the
+  overall queue position.
 
 - **Windows shell/process stress hardening.** Real concurrency -- parallel
   `make -jN`, jobserver pipe fd handling, many live children in the
