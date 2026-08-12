@@ -101,6 +101,25 @@ def run(args, cwd, env, label=None):
         progress(f"done {label} ({elapsed:.1f}s)")
 
 
+def run_checked_output(args, cwd, env, expect_stdout=None, label=None):
+    if label:
+        progress(f"start {label}")
+    print("+", " ".join(str(a) for a in args), flush=True)
+    start = time.monotonic()
+    completed = subprocess.run(args, cwd=cwd, env=env, text=True, capture_output=True, check=False)
+    if completed.stdout:
+        print(completed.stdout, end="" if completed.stdout.endswith("\n") else "\n")
+    if completed.stderr:
+        print(completed.stderr, end="" if completed.stderr.endswith("\n") else "\n")
+    if completed.returncode != 0:
+        raise subprocess.CalledProcessError(completed.returncode, args, completed.stdout, completed.stderr)
+    if expect_stdout and expect_stdout not in completed.stdout:
+        raise SystemExit(f"{label or args[0]}: expected stdout fragment not found: {expect_stdout!r}")
+    if label:
+        elapsed = time.monotonic() - start
+        progress(f"done {label} ({elapsed:.1f}s)")
+
+
 def is_native_windows_configure(target_os):
     return target_os == "windows" and os.name == "nt"
 
@@ -591,6 +610,28 @@ def apply_recipe_env(env, recipe, target_os, root):
         env["CFLAGS"] = f"{flags} {env['CFLAGS']}" if env.get("CFLAGS") else flags
 
 
+def substitute_recipe_value(value, root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os):
+    replacements = {
+        "@ROOT@": root,
+        "@BUILD_DIR@": preset_build_dir,
+        "@WORK_ROOT@": work_build_dir,
+        "@SYSROOT@": sysroot,
+        "@PORT_PREFIX@": port_prefix,
+    }
+    result = str(value)
+    for token, path in replacements.items():
+        text = path_for_crt_shell(path) if target_os == "windows" else str(path)
+        result = result.replace(token, text)
+    return result
+
+
+def substitute_recipe_values(values, root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os):
+    return [
+        substitute_recipe_value(value, root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os)
+        for value in values
+    ]
+
+
 def command_value_argv(value, preset_build_dir, target_os):
     argv = shlex.split(value)
     if target_os == "windows" and argv and argv[0] == "/system/bin/mksh":
@@ -901,6 +942,65 @@ def build_android_host_tool_port(preset_build_dir, work, port_prefix, recipe, en
     run(command_value_argv(env["CC"], preset_build_dir, target_os) + [str(obj) for obj in objects] + ldflags + libs + ["-o", str(binary)], work, env, f"{port_name}: link {binary.name}")
 
 
+def port_test_env(env, port_prefix, target_os):
+    test_env = env.copy()
+    lib_dir = port_prefix / "lib"
+    if target_os == "linux":
+        name = "LD_LIBRARY_PATH"
+        search_dirs = [lib_dir]
+    elif target_os == "macos":
+        name = "DYLD_LIBRARY_PATH"
+        search_dirs = [lib_dir]
+    elif target_os == "windows":
+        name = "PATH"
+        search_dirs = [lib_dir, port_prefix / "bin"]
+    else:
+        return test_env
+    current = test_env.get(name, "")
+    sep = os.pathsep
+    prefix = sep.join(str(path) for path in search_dirs)
+    test_env[name] = f"{prefix}{sep}{current}" if current else prefix
+    return test_env
+
+
+def run_port_tests(root, preset_build_dir, work_build_dir, sysroot, port_prefix, recipe, target_os, mingw_triple, use_crt_shell=False):
+    port_name = recipe["name"]
+    tests = recipe.get("tests", [])
+    if not tests:
+        progress(f"{port_name}: no port tests declared")
+        return
+
+    env = make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os, mingw_triple, use_crt_shell)
+    apply_recipe_env(env, recipe, target_os, root)
+    cc_argv = command_value_argv(env["CC"], preset_build_dir, target_os)
+    test_root = work_build_dir / "tests" / port_name
+    test_root.mkdir(parents=True, exist_ok=True)
+    suffix = ".exe" if target_os == "windows" else ""
+
+    for test in tests:
+        test_name = test["name"]
+        test_type = test.get("type", "compile-run")
+        if test_type != "compile-run":
+            raise SystemExit(f"{port_name}: unsupported test type {test_type!r} in {test_name}")
+
+        target = test.get("target_overrides", {}).get(target_os, {})
+        source_value = target.get("source", test["source"])
+        source = Path(substitute_recipe_value(source_value, root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os))
+        if not source.is_absolute():
+            source = root / source
+
+        cflags = list(test.get("cflags", [])) + list(target.get("cflags", []))
+        link_args = list(test.get("link_args", [])) + list(target.get("link_args", []))
+        cflags = substitute_recipe_values(cflags, root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os)
+        link_args = substitute_recipe_values(link_args, root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os)
+
+        binary = test_root / f"{test_name}{suffix}"
+        compile_cmd = cc_argv + cflags + [str(source)] + link_args + ["-o", str(binary)]
+        run(compile_cmd, test_root, env, f"{port_name}: test build {test_name}")
+        run_checked_output([str(binary)], test_root, port_test_env(env, port_prefix, target_os),
+                           test.get("expect_stdout"), f"{port_name}: test run {test_name}")
+
+
 def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, port_prefix, recipes, port, target_os, mingw_triple, use_crt_shell=False, configure_only=False, built=None, jobs=None):
     if built is None:
         built = set()
@@ -964,6 +1064,7 @@ def main():
     parser.add_argument("--skip-sysroot-build", action="store_true", help="assume the sysroot target has already been built")
     parser.add_argument("--use-crt-shell", action="store_true", help="run configure recipes with the CRT rootfs mksh")
     parser.add_argument("--configure-only", action="store_true", help="stop configure recipes after ./configure")
+    parser.add_argument("--test", action="store_true", help="run recipe-declared port tests after the port is installed")
     parser.add_argument("--jobs", type=int, default=None, help="override make -jN (default: 1 on Windows via --use-crt-shell, else CPU count); for reproducing/testing the Windows jobserver bug")
     args = parser.parse_args()
 
@@ -1003,6 +1104,8 @@ def main():
     for port in args.port:
         progress(f"{port}: requested")
         build_port(root, build_dir, work_root, source_root, sysroot, port_prefix, recipes, port, target_os, mingw_triple, args.use_crt_shell, args.configure_only, jobs=args.jobs)
+        if args.test:
+            run_port_tests(root, build_dir, work_root, sysroot, port_prefix, recipes[port], target_os, mingw_triple, args.use_crt_shell)
 
     progress(f"ports installed: {port_prefix}")
 

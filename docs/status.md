@@ -30,12 +30,13 @@ in those two win.
   or `ctest --test-dir out/<preset>`.
 - **Ports**: see `docs/porting_status.md` for the full per-library,
   per-host table. `zlib`/`libpng`/`sqlite-amalgamation`/`bzip2` are at
-  `shared-pass` on Linux and Windows (macOS pending on all four, no
-  macOS hardware this session). `xz` (liblzma) is `shared-pass` on both
-  Linux and Windows (a real, full compress/decompress round trip at
-  preset 9|EXTREME with CRC64 passes against both static and shared
-  builds on both OSes). `libffi` is `partial`: builds and works except
-  for a known `-O1`/`-O2` `ffi_call()`-repeat-call bug (see below).
+  `shared-pass` on all three OSes. `xz` (liblzma) is now
+  `shared-pass` on Linux, macOS, and Windows: a real, full
+  compress/decompress round trip at preset 9|EXTREME with CRC64 passes
+  against both static and shared builds on every verified OS. `libffi`
+  is `partial`: the official recipe smoke now verifies a single
+  `ffi_call()` through both static and shared builds, but a known
+  `-O1`/`-O2` `ffi_call()`-repeat-call bug remains (see below).
 
 ## Known gaps
 
@@ -81,12 +82,12 @@ in those two win.
   stress-tested (libpng scale, `-j 12`), but has no permanent regression
   test yet. See `TODO.md`.
 
-## Not yet started
+## Next
 
-- Porting matrix expansion: `bzip2` done on Linux/Windows, `xz` done on
-  Linux and Windows (`shared-pass` both, macOS pending); `pcre2` ->
-  `mbedtls` -> `curl` not started -- see `TODO.md`'s "in progressing"
-  section for the current queue and order.
+- Porting matrix expansion: `bzip2` and `xz` are done on
+  Linux/macOS/Windows (`shared-pass`). The current next queue is
+  `pcre2` -> `mbedtls` -> `curl`; see `TODO.md`'s "in progressing" section
+  for the current queue and order.
 - Broader POSIX/rootfs surface hardening beyond what each port's own build
   happens to exercise.
 - C++ runtime phase 2 and an ELF loader/dynamic-linker prototype: not

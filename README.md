@@ -585,6 +585,14 @@ CMake provides recipe-backed porting targets. They still run the upstream
 `configure && make && make install` flow under `out/<preset>/port-tests`, but
 they make the common test path easier to repeat.
 
+On Linux and macOS, the recipe targets normally let the host POSIX shell and
+host userland drive upstream `configure`/`make`. That does not mean the produced
+libraries are host-libc builds: `CC`/`CXX` still point at `tools/crt-cc` and
+`tools/crt-c++`, which use the CRT sysroot headers, startup objects, and
+libraries. On macOS, `otool -L` will still show `/usr/lib/libSystem.B.dylib` on
+the final Mach-O files because libSystem is the PAL/backend boundary for Darwin
+syscalls, dyld, pthreads, and process services.
+
 On native Windows, Autoconf `configure` scripts are POSIX shell scripts. The
 CMake port targets may be launched from PowerShell or `cmd.exe`, but configure
 recipes still require Git Bash or MSYS2 build tools (`bash` or `sh`, plus
@@ -646,6 +654,21 @@ cmake --build --preset macos-host-ninja-debug --target port-build-recipes
 cmake --build --preset macos-host-ninja-debug --target port-rebuild-recipes
 ```
 
+Run recipe-declared runtime checks:
+
+```sh
+cmake --build --preset macos-host-ninja-debug --target port-test-xz
+cmake --build --preset macos-host-ninja-debug --target port-test-recipes
+```
+
+`port-test-<name>` first ensures the corresponding `port-build-<name>` target is
+installed, then compiles and runs the checks declared in that recipe's `tests`
+array. `port-test-recipes` runs every recipe that currently declares automated
+tests. The xz recipe uses this path to verify real liblzma compress/decompress
+round trips against both static and shared builds. The same mechanism is used
+for zlib, bzip2, libpng, and libffi smoke tests as those recipes declare their
+own `tests` entries.
+
 `tools/fetch_ports.py` and `tools/crt-port-build.py` are the lower-level helpers
 used by those CMake targets. They read recipes from `porting/recipes/` and are
 kept for project automation and agent-side regression checks. Automated port
@@ -655,7 +678,7 @@ variables.
 
 CMake target names are generated from the recipes at configure time. If a new
 recipe file is added, rerun the matching `cmake --preset ...` command before
-using its `port-fetch-<name>` or `port-build-<name>` target.
+using its `port-fetch-<name>`, `port-build-<name>`, or `port-test-<name>` target.
 
 ## Repository Layout
 

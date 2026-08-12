@@ -15,7 +15,7 @@ newest entry first) rather than leaving it here.
 
 Five active threads, not a flat list of one-off items:
 
-- **Porting matrix expansion.** Queue, in order: `bzip2` -> `xz` -> `pcre2`
+- **Porting matrix expansion.** Queue, in order: `pcre2`
   -> `mbedtls` -> `curl` (`openssl` held back until something actually
   needs it). Any POSIX/rootfs gap a port's build exposes gets fixed in
   place as part of that port's own work, not deferred to a separate pass
@@ -24,17 +24,17 @@ Five active threads, not a flat list of one-off items:
   and per-host status live in `porting/recipes/*.json` and
   `docs/porting_status.md` as they land; this bullet just tracks the
   overall queue position.
-  - `bzip2`: done on Linux and Windows (`shared-pass` both, verified with
-    a real compress/decompress round trip against both the static and
-    shared build, plus an `ldd` rpath check on Linux). No new CRT/PAL gap
-    surfaced -- it built cleanly against the existing sysroot the same
-    way sqlite-amalgamation already does. macOS still `pending` (no
-    macOS hardware available this session).
-  - `xz` (liblzma): **done on Linux and Windows, both `shared-pass`**
-    (macOS still `pending`, no macOS hardware available this session). A
-    real compress/decompress round trip at preset 9|EXTREME with CRC64
-    (real match-finder allocations, byte-for-byte output compare)
-    verified against both static and shared builds on both OSes. Two
+  - `bzip2`: **done on Linux, macOS, and Windows, all `shared-pass`**.
+    A real `BZ2_bzBuffToBuffCompress`/`BZ2_bzBuffToBuffDecompress`
+    round trip is now covered by the official recipe test path against
+    both static and shared builds. No new CRT/PAL gap surfaced -- it
+    built cleanly against the existing sysroot the same way
+    sqlite-amalgamation already does.
+  - `xz` (liblzma): **done on Linux, macOS, and Windows, all
+    `shared-pass`**. A real compress/decompress round trip at preset
+    9|EXTREME with CRC64 (real match-finder allocations, byte-for-byte
+    output compare) verified against both static and shared builds on
+    every verified OS. Two
     genuine, general CRT/toolchain gaps got found and fixed along the
     way, not deferred -- see `HISTORY.md`'s dated entries and
     `porting/recipes/xz.json`'s own notes for the full trail: (1) this
@@ -46,6 +46,14 @@ Five active threads, not a flat list of one-off items:
     GNU ld's default script guarantees, worked around via a recipe patch
     routing liblzma onto its own portable non-constructor fallback path
     on Windows specifically.
+  - `zlib`/`libpng`/`libffi` runtime recipe tests: **landed.**
+    `port-test-recipes` now runs project-owned consumer tests for zlib,
+    bzip2, libpng, libffi, and xz. zlib/bzip2/xz perform real
+    compress/decompress round trips, libpng writes and reads a tiny RGBA
+    PNG through memory callbacks, and libffi verifies a single
+    `ffi_call()` round trip. This does not close libffi's documented
+    repeat-call bug; it only makes the already-known working subset
+    reproducible.
     Next: `pcre2`.
 
 - **`.init_array`/`.fini_array` (ELF/PE/Mach-O constructor/destructor)

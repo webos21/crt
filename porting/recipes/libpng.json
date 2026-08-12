@@ -35,6 +35,72 @@
       }
     }
   },
+  "tests": [
+    {
+      "name": "roundtrip-static",
+      "type": "compile-run",
+      "source": "porting/tests/libpng_roundtrip.c",
+      "cflags": [
+        "-I@PORT_PREFIX@/include",
+        "-I@PORT_PREFIX@/include/libpng16"
+      ],
+      "link_args": [
+        "@PORT_PREFIX@/lib/libpng16.a",
+        "@PORT_PREFIX@/lib/libz.a"
+      ],
+      "expect_stdout": "libpng_roundtrip_test: ok",
+      "target_overrides": {
+        "windows": {
+          "cflags": [
+            "-U_WIN32",
+            "-U_WIN32_WCE",
+            "-U__WIN32__",
+            "-UWIN32",
+            "-U__NT__",
+            "-U_MSC_VER"
+          ]
+        }
+      }
+    },
+    {
+      "name": "roundtrip-shared",
+      "type": "compile-run",
+      "source": "porting/tests/libpng_roundtrip.c",
+      "cflags": [
+        "-I@PORT_PREFIX@/include",
+        "-I@PORT_PREFIX@/include/libpng16"
+      ],
+      "expect_stdout": "libpng_roundtrip_test: ok",
+      "target_overrides": {
+        "linux": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libpng16.so",
+            "@PORT_PREFIX@/lib/libz.so"
+          ]
+        },
+        "macos": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libpng16.dylib",
+            "@PORT_PREFIX@/lib/libz.dylib"
+          ]
+        },
+        "windows": {
+          "cflags": [
+            "-U_WIN32",
+            "-U_WIN32_WCE",
+            "-U__WIN32__",
+            "-UWIN32",
+            "-U__NT__",
+            "-U_MSC_VER"
+          ],
+          "link_args": [
+            "@PORT_PREFIX@/lib/libpng16.dll.a",
+            "@PORT_PREFIX@/lib/libz.so"
+          ]
+        }
+      }
+    }
+  ],
   "status": {
     "linux": "shared-pass",
     "macos": "shared-pass",

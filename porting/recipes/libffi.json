@@ -46,6 +46,46 @@
       }
     }
   },
+  "tests": [
+    {
+      "name": "call-static",
+      "type": "compile-run",
+      "source": "porting/tests/libffi_call.c",
+      "cflags": [
+        "-I@PORT_PREFIX@/include"
+      ],
+      "link_args": [
+        "@PORT_PREFIX@/lib/libffi.a"
+      ],
+      "expect_stdout": "libffi_call_test: ok"
+    },
+    {
+      "name": "call-shared",
+      "type": "compile-run",
+      "source": "porting/tests/libffi_call.c",
+      "cflags": [
+        "-I@PORT_PREFIX@/include"
+      ],
+      "expect_stdout": "libffi_call_test: ok",
+      "target_overrides": {
+        "linux": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libffi.so"
+          ]
+        },
+        "macos": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libffi.dylib"
+          ]
+        },
+        "windows": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libffi.dll.a"
+          ]
+        }
+      }
+    }
+  ],
   "status": {
     "linux": "partial",
     "macos": "configure-pass",

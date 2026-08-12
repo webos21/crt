@@ -8,6 +8,41 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-08-12
+
+- **xz/liblzma macOS is now verified beyond "it built": real
+  compress/decompress round trips pass against both static and shared
+  liblzma, and `tools/crt-cc` now handles GNU Libtool's Darwin
+  relocatable-link path correctly.** `cmake --build --preset
+  macos-host-ninja-debug --target port-rebuild-xz` initially showed the
+  real blocker was not Mach-O constructor/destructor startup: macOS's
+  `init_array_test` already passed, and dyld handles constructors for
+  Mach-O. The actual failure was in `tools/crt-cc` treating libtool's
+  `-r`/`-Wl,-r` partial links like final executable/shared links,
+  adding startup objects, entry flags, CRT libraries, and `-dead_strip`;
+  ld64 rejects `-r` with `-dead_strip`. After separating relocatable
+  link mode, a second Darwin-specific issue appeared: xz builds with
+  `-fvisibility=hidden`, and ld64's partial link lowered `private
+  external` definitions to local symbols, leaving same-output references
+  unresolved at final dylib link. `tools/crt-cc` now adds
+  `-Wl,-keep_private_externs` only for macOS relocatable links. Verified
+  with a standalone CRT-linked smoke program calling
+  `lzma_easy_buffer_encode()` at preset `9|LZMA_PRESET_EXTREME` with
+  `LZMA_CHECK_CRC64`, then `lzma_stream_buffer_decode()`, and comparing
+  the decoded 256 KiB buffer byte-for-byte against the original. Both
+  installed `liblzma.a` and `liblzma.5.dylib` passed; `otool -L`
+  confirmed the shared smoke binary loads this port's installed dylib.
+  The same round-trip is now formalized as a recipe-declared port test:
+  `porting/tests/xz_roundtrip.c` is built and run by
+  `cmake --build --preset <preset> --target port-test-xz`, and the
+  aggregate `port-test-recipes` target runs every recipe that declares
+  automated tests. That aggregate now also covers bzip2, zlib, libpng,
+  and libffi with project-owned consumer tests under `porting/tests/`:
+  bzip2/zlib/xz do real compress/decompress round trips, libpng writes
+  and reads a tiny RGBA PNG through memory callbacks, and libffi verifies
+  a single `ffi_call()` round trip. Full macOS `ctest` remained green
+  (`75/75`).
+
 ## 2026-08-11
 
 - **`.init_array`/`.fini_array` work concluded on all three OSes: macOS
@@ -2240,4 +2275,3 @@ substantive update.
   - `docs/shell_import.md`;
   - `docs/windows_fork_emulation.md`;
   - `shell/toybox/PATCHES.md`.
-

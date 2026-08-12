@@ -72,10 +72,12 @@ done
 
 compile_only=0
 shared_mode=0
+relocatable_mode=0
 for arg in "$@"; do
   case "$arg" in
     -c|-E|-S) compile_only=1 ;;
     -shared|-dynamiclib) shared_mode=1 ;;
+    -r|-Wl,-r) relocatable_mode=1 ;;
   esac
 done
 
@@ -143,6 +145,24 @@ esac
 # "C:\Program Files\...". Quoting just this one pair sidesteps that
 # without a wider rewrite of how this script builds argument lists.
 if [ "$compile_only" -eq 1 ]; then
+  if [ -n "$resource_dir" ]; then
+    # shellcheck disable=SC2086
+    exec "$cc" $common_flags -isystem "${resource_dir}/include" $user_args
+  fi
+  # shellcheck disable=SC2086
+  exec "$cc" $common_flags $user_args
+fi
+
+# A relocatable link (`ld -r`, usually seen through libtool as
+# `crt-cc -Wl,-r -o partial.o ...`) is neither an executable nor a shared
+# library. Do not add crt1.o, entry-point flags, section-gc/dead-strip flags,
+# or CRT libraries here; the output is an intermediate object that will be
+# linked for real later. This matters on macOS where ld64 rejects `-r` together
+# with `-dead_strip`, and it is the right model for ELF/COFF too.
+if [ "$relocatable_mode" -eq 1 ]; then
+  if [ "$target_os" = macos ]; then
+    user_args="$user_args -Wl,-keep_private_externs"
+  fi
   if [ -n "$resource_dir" ]; then
     # shellcheck disable=SC2086
     exec "$cc" $common_flags -isystem "${resource_dir}/include" $user_args

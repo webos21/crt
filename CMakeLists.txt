@@ -406,12 +406,29 @@ if(Python3_Interpreter_FOUND)
       COMMENT "Rebuilding ${recipe_name} (${recipe_build_system}) against the CRT sysroot"
       USES_TERMINAL
     )
+    add_custom_target(port-test-${recipe_name}
+      COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
+        "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/crt-port-build.py"
+        --preset "${CRT_BUILD_PRESET_NAME}"
+        --target-os "${CRT_TARGET_OS}"
+        --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}"
+        --recipe-dir "${CRT_PORT_RECIPE_ROOT}"
+        --port "${recipe_name}"
+        ${CRT_PORT_BUILD_SHELL_ARGS}
+        --test
+        --skip-sysroot-build
+      DEPENDS port-build-${recipe_name}
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+      COMMENT "Running ${recipe_name} recipe tests against the CRT sysroot"
+      USES_TERMINAL
+    )
   endfunction()
 
   set(CRT_CONFIGURE_PORT_TARGETS)
   set(CRT_CONFIGURE_PORT_REBUILD_TARGETS)
   set(CRT_AUTOMATED_PORT_TARGETS)
   set(CRT_AUTOMATED_PORT_REBUILD_TARGETS)
+  set(CRT_AUTOMATED_PORT_TEST_TARGETS)
   foreach(CRT_PORT_RECIPE_FILE IN LISTS CRT_PORT_RECIPE_FILES)
     file(READ "${CRT_PORT_RECIPE_FILE}" CRT_PORT_RECIPE_JSON)
     string(JSON CRT_PORT_RECIPE_NAME GET "${CRT_PORT_RECIPE_JSON}" name)
@@ -430,6 +447,12 @@ if(Python3_Interpreter_FOUND)
       crt_add_build_port_target(${CRT_PORT_RECIPE_NAME} ${CRT_PORT_RECIPE_BUILD_SYSTEM})
       list(APPEND CRT_AUTOMATED_PORT_TARGETS port-build-${CRT_PORT_RECIPE_NAME})
       list(APPEND CRT_AUTOMATED_PORT_REBUILD_TARGETS port-rebuild-${CRT_PORT_RECIPE_NAME})
+      string(JSON CRT_PORT_RECIPE_TESTS
+        ERROR_VARIABLE CRT_PORT_RECIPE_TESTS_ERROR
+        GET "${CRT_PORT_RECIPE_JSON}" tests)
+      if(CRT_PORT_RECIPE_TESTS_ERROR STREQUAL "NOTFOUND")
+        list(APPEND CRT_AUTOMATED_PORT_TEST_TARGETS port-test-${CRT_PORT_RECIPE_NAME})
+      endif()
       if(CRT_PORT_RECIPE_BUILD_SYSTEM STREQUAL "configure")
         list(APPEND CRT_CONFIGURE_PORT_TARGETS port-build-${CRT_PORT_RECIPE_NAME})
         list(APPEND CRT_CONFIGURE_PORT_REBUILD_TARGETS port-rebuild-${CRT_PORT_RECIPE_NAME})
@@ -450,5 +473,8 @@ if(Python3_Interpreter_FOUND)
   )
   add_custom_target(port-rebuild-recipes
     DEPENDS ${CRT_AUTOMATED_PORT_REBUILD_TARGETS}
+  )
+  add_custom_target(port-test-recipes
+    DEPENDS ${CRT_AUTOMATED_PORT_TEST_TARGETS}
   )
 endif()

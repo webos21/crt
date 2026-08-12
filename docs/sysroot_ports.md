@@ -227,6 +227,10 @@ drives upstream `configure` and `make` is host-dependent:
   provide the complete shell/userland environment upstream configure scripts are
   normally tested against, and the CRT boundary is still enforced by the wrapper
   compiler's `-nostdinc`, `CRT_SYSROOT`, startup object, and library flags.
+  On macOS, final Mach-O executables and dylibs may still list
+  `/usr/lib/libSystem.B.dylib` in `otool -L`; that is the intended Darwin
+  PAL/backend dependency, not evidence that the upstream library was built
+  against the host C library headers or startup files.
 - Native Windows uses the project-owned rootfs mksh and toybox applets. Windows
   has no native shebang handling for `tools/crt-cc` / `tools/crt-c++`, so CMake
   adds `--use-crt-shell` there and runs the recipe commands through
@@ -357,9 +361,10 @@ validation.
 and duplicates (with stale data) what `docs/porting_status.md` now tracks
 properly per-host, per-port, and kept current -- see that file for the real
 status matrix (all of make/zlib/libpng/sqlite-amalgamation now reach
-`shared-pass`/`amalgamation-pass` on Linux, macOS, and Windows; libffi is
-`partial`).** Kept below only as a historical record of what the *first*
-successful pass looked like and what it required.
+`shared-pass`/`amalgamation-pass` on Linux, macOS, and Windows; bzip2 and xz
+also reach `shared-pass` on all three OSes; libffi is `partial`).** Kept below
+only as a historical record of what the *first* successful pass looked like and
+what it required.
 
 On macOS host, the following original configure/make flows first passed with
 the strict CRT sysroot wrapper (all three now build `shared`, not just

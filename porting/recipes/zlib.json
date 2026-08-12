@@ -29,6 +29,46 @@
       }
     }
   },
+  "tests": [
+    {
+      "name": "roundtrip-static",
+      "type": "compile-run",
+      "source": "porting/tests/zlib_roundtrip.c",
+      "cflags": [
+        "-I@PORT_PREFIX@/include"
+      ],
+      "link_args": [
+        "@PORT_PREFIX@/lib/libz.a"
+      ],
+      "expect_stdout": "zlib_roundtrip_test: ok"
+    },
+    {
+      "name": "roundtrip-shared",
+      "type": "compile-run",
+      "source": "porting/tests/zlib_roundtrip.c",
+      "cflags": [
+        "-I@PORT_PREFIX@/include"
+      ],
+      "expect_stdout": "zlib_roundtrip_test: ok",
+      "target_overrides": {
+        "linux": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libz.so"
+          ]
+        },
+        "macos": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libz.dylib"
+          ]
+        },
+        "windows": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libz.so"
+          ]
+        }
+      }
+    }
+  ],
   "status": {
     "linux": "shared-pass",
     "macos": "shared-pass",
