@@ -15,13 +15,15 @@ in those two win.
   aarch64, Linux arm64/amd64, Windows arm64/x64), each running this
   project's own `cmake --workflow <os>-host-ninja-debug` preset (configure +
   build + `ctest`) on every push. All 5 legs green as of
-  [run 31480881521](https://github.com/webos21/crt/actions/runs/31480881521)
-  (2026-08-11, the Windows `.init_array` fix + `fork_capable_relaunch.c`
-  bug fix commit). Before the matrix existed, Linux validation had been
-  almost entirely
+  [run 31602222349](https://github.com/webos21/crt/actions/runs/31602222349)
+  (2026-08-12, the `port-test-recipes` commit). Before the matrix
+  existed, Linux validation had been almost entirely
   manual, on real aarch64 hardware -- x86_64 Linux had never actually been
   built until this matrix existed, and immediately surfaced two real,
-  previously-invisible bugs (see `HISTORY.md`'s 2026-08-11 entries).
+  previously-invisible bugs (see `HISTORY.md`'s 2026-08-11 entries). CI's
+  own `cmake --workflow` step does not run `port-test-recipes` (a
+  separate, heavier target that fetches and builds third-party sources)
+  -- that's verified locally/per-host instead, see below.
 - **`ctest`**: 82 registered tests on Windows (count is slightly
   OS-dependent -- a few targets, like `windows_export_hygiene_test`, only
   exist on their own OS), all passing locally on Windows as of this
@@ -33,10 +35,15 @@ in those two win.
   `shared-pass` on all three OSes. `xz` (liblzma) is now
   `shared-pass` on Linux, macOS, and Windows: a real, full
   compress/decompress round trip at preset 9|EXTREME with CRC64 passes
-  against both static and shared builds on every verified OS. `libffi`
-  is `partial`: the official recipe smoke now verifies a single
-  `ffi_call()` through both static and shared builds, but a known
-  `-O1`/`-O2` `ffi_call()`-repeat-call bug remains (see below).
+  against both static and shared builds on every verified OS. All four
+  of those also now have an official, recipe-declared `port-test-<name>`
+  CMake target (aggregated as `port-test-recipes`) exercising the same
+  round trip; re-run directly on Windows this session and confirmed
+  green for all four, both static and shared. `libffi` is `partial`: its
+  own `port-test-libffi` passes statically (`ffi_call()` round trip,
+  `result=42`) but its *shared* variant fails to link on Windows with a
+  newly-found, genuine gap (see below) on top of the pre-existing
+  `-O1`/`-O2` `ffi_call()`-repeat-call bug.
 
 ## Known gaps
 
@@ -70,6 +77,19 @@ in those two win.
   corrupted somewhere in the `ffi_call()`/`ffi_call_SYSV` chain on aarch64;
   not yet isolated to an exact instruction, and not re-tested for an
   x86_64 analogue. See `porting/recipes/libffi.json`'s notes.
+- **libffi shared, Windows only: missing `_pei386_runtime_relocator`**.
+  Linking directly against `libffi.dll.a` (a real import library, as an
+  ordinary consumer program would) fails: `ld.lld: error: output image
+  has runtime pseudo relocations, but the function
+  _pei386_runtime_relocator is missing`. Distinct from the bug above and
+  from the earlier `dlopen()`-based shared-build verification (which
+  never exercises MinGW's auto-import/pseudo-relocation machinery).
+  libffi's public headers apparently reference an exported *data* symbol
+  in a way GNU ld's auto-import feature routes through a runtime
+  pseudo-relocation fixup table that real mingw-w64 services via
+  `_pei386_runtime_relocator` (`libmingwex.a`) -- a startup-time PAL
+  feature this project doesn't implement. Not yet investigated. See
+  `HISTORY.md`'s 2026-08-12 entry and `TODO.md`.
 - **Windows `make install` symlink races**: an intermittent
   `ln: ... File exists` on libtool-generated header/lib alias symlinks when
   rebuilding a port whose install directory already has a valid symlink

@@ -10,6 +10,38 @@ substantive update.
 
 ## 2026-08-12
 
+- **Ran the new `port-test-recipes` aggregate on Windows to verify it
+  end-to-end there too (the entry below only ran/confirmed it on
+  macOS): bzip2, xz, zlib, and libpng all pass both their static and
+  shared consumer tests; libffi's shared test surfaced one new, genuine
+  Windows gap.** `cmake --build --preset windows-host-ninja-debug
+  --target port-test-<name>` for each of the five recipes:
+  `bzip2_roundtrip_test: ok`, `xz_roundtrip_test: ok`,
+  `zlib_roundtrip_test: ok`, and `libpng_roundtrip_test: ok` all printed
+  correctly for both the static and shared build of each library
+  (matching what the entry below already confirmed on macOS).
+  `libffi`'s static test (`libffi_call_test: ok result=42`) also passed,
+  but its *shared* test failed to even link: `ld.lld: error: output
+  image has runtime pseudo relocations, but the function
+  _pei386_runtime_relocator is missing; it is needed for fixing the
+  relocations at runtime`. This is a genuinely new finding, distinct
+  from libffi's already-documented `-O1`/`-O2` `ffi_call()`-repeat-call
+  bug and from the earlier session's own libffi-shared verification
+  (`porting/recipes/libffi.json`'s notes) -- that earlier verification
+  used `dlopen()` to load the built DLL at runtime, which never needs
+  MinGW's auto-import/pseudo-relocation machinery; the new port test
+  instead links directly against `libffi.dll.a` (a real import library)
+  the way a normal C program consuming a prebuilt DLL would, and
+  libffi's public headers apparently reference at least one exported
+  *data* symbol in a way GNU ld's auto-import feature resolves via a
+  runtime pseudo-relocation fixup table -- something real mingw-w64
+  provides via `_pei386_runtime_relocator` (in `libmingwex.a`/its own
+  CRT startup) that this project's PAL does not implement. Not
+  investigated further this pass (a new startup-time PAL feature, not a
+  quick fix) -- tracked as its own `TODO.md` item; `docs/porting_status.md`'s
+  libffi row updated to record the gap without changing its existing
+  `partial` status (which already covers other Windows-shared caveats).
+
 - **xz/liblzma macOS is now verified beyond "it built": real
   compress/decompress round trips pass against both static and shared
   liblzma, and `tools/crt-cc` now handles GNU Libtool's Darwin
