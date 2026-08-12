@@ -10,6 +10,79 @@ substantive update.
 
 ## 2026-08-11
 
+- **`.init_array`/`.fini_array` work concluded on all three OSes: macOS
+  confirmed directly on real hardware (no code changes needed), and xz's
+  own Windows round trip finally passes -- a second, distinct `lld-link`
+  limitation had to be found and routed around first.** Continuation of
+  the same-day investigation documented in the two entries below.
+  - **macOS: confirmed on real hardware, zero code changes needed.**
+    The analysis from the entry below (dyld runs Mach-O
+    `__DATA,__mod_init_func` constructors automatically before any entry
+    point runs; destructors are registered by dyld through the same
+    Itanium C++ ABI atexit mechanism this project's `exit.c` already
+    drains unconditionally via `__cxa_finalize(0)`) held up: running
+    `tests/init_array_test.c` directly on real macOS hardware printed
+    `init_array_test: ok`, and the CI `macos-aarch64` leg came back green
+    on the same commit (all 5 legs). No macOS-specific source changes
+    were needed at all.
+  - **xz/liblzma's own Windows round trip: re-ran it after the general
+    Windows `.init_array` fix landed, and it STILL crashed** -- not a
+    leftover from the first bug, but a second, genuinely distinct
+    `lld-link` limitation. Isolated with a minimal, xz-independent
+    reproduction: a trivial `__attribute__((constructor))` function
+    inside a standalone static archive (`.a`), linked the exact same way
+    `tools/crt-cc` links any third-party port's own archive. Root cause:
+    `lld-link` does not reliably merge multiple static-archive-derived
+    plain (non-`$`-grouped) `.ctors`/`.dtors` contributions into one
+    contiguous, correctly-bracketed region -- unlike GNU `ld`'s default
+    linker script, which guarantees this via explicit `KEEP()` ordering
+    rules (`KEEP(*crtbegin.o(.ctors)) KEEP(*(.ctors)) KEEP(*crtend.o
+    (.ctors))`); COFF/PE and `lld-link` have no equivalent mechanism.
+    Confirmed directly with symbol-address inspection: the begin/end
+    sentinel markers landed immediately adjacent to each other (an empty
+    bracketed range, zero bytes of real content between them) regardless
+    of whether the real archived constructor was placed before, after,
+    or even bundled into the very same archive as the sentinels --
+    the archive-sourced entry consistently landed somewhere else in the
+    final image entirely (located by a raw pointer-value search through
+    the linked binary, landing in `.rdata` at a completely different,
+    non-adjacent offset). This affects only the GNU-ABI (`.ctors`/
+    `.dtors`) convention `tools/crt-cc` port builds use; the MSVC-ABI
+    (`.CRT$XC*`/`.CRT$XT*`) convention this project's own CMake-native
+    builds use is unaffected, since `lld-link`'s alphabetical `$`-suffix
+    sorting is insertion-order-independent by design (re-confirmed with
+    the same technique: three objects deliberately linked in reverse
+    order still produced a correctly-ordered merged section).
+    Given this is a genuine `lld-link` limitation (not something fixable
+    by rearranging this project's own sentinel objects) and liblzma
+    already ships a portable fallback purpose-built for exactly this
+    situation -- its CRC32/CRC64 dispatch code (`crc32_fast.c`/
+    `crc32_small.c`/`crc64_fast.c`/`crc64_small.c`/`lz_encoder.c`, all
+    sharing the same `CRC32_SET_FUNC_ATTR`-guarded pattern) uses a "First
+    Call Resolution" lazy dispatcher whenever `HAVE_FUNC_ATTRIBUTE_
+    CONSTRUCTOR` is undefined, needing no constructor support at all --
+    the fix routes around the `lld-link` gap instead of fighting it: a
+    new `porting/recipes/xz.json` `build.patches` entry undefines
+    `HAVE_FUNC_ATTRIBUTE_CONSTRUCTOR` in `src/common/sysdefs.h`, guarded
+    by `#if defined(CRT_TARGET_OS_WINDOWS)` so it is a genuine no-op on
+    Linux/macOS (where the constructor path already works correctly and
+    is left untouched). `./configure`'s own `HAVE_FUNC_ATTRIBUTE_
+    CONSTRUCTOR` probe is a bare `ac_fn_c_try_compile` compile-only test
+    (never even links), so it always reports "yes" for this toolchain
+    regardless of the archive-linking gap the probe has no way to see --
+    hence overriding it after the fact via a header patch rather than
+    trying to make `./configure` itself detect "no".
+    **Verified**: rebuilt the whole port clean through the real
+    `crt-port-build.py` pipeline (not just the isolated repro), then a
+    full compress/decompress round trip (preset 9|EXTREME,
+    `LZMA_CHECK_CRC64`, 256 KB real match-finder-exercising input,
+    byte-for-byte compare after decode) passes on Windows against both
+    the static (`liblzma.a`) and shared (`liblzma-5.dll` via
+    `lzma.dll.lib`) build. `xz` (liblzma) is now **`shared-pass` on both
+    Linux and Windows**; macOS still `pending` (no macOS hardware for the
+    port itself this session, though the general mechanism it would
+    depend on is now confirmed working there).
+
 - **Ported xz/liblzma 5.8.3 to Linux (`shared-pass`); Windows build is
   clean too (`configure-pass`) but blocked at runtime by the
   `.init_array` gap the very same investigation found (see the dedicated

@@ -30,127 +30,50 @@ Five active threads, not a flat list of one-off items:
     surfaced -- it built cleanly against the existing sysroot the same
     way sqlite-amalgamation already does. macOS still `pending` (no
     macOS hardware available this session).
-  - `xz` (liblzma): done on Linux (`shared-pass`) -- see
-    `porting/recipes/xz.json`'s own notes and the new ".init_array" item
-    below. Configure/build succeeded immediately; a real usage test
-    surfaced and got a fix for a genuine, general CRT startup gap
-    (`.init_array` never ran). A second apparent bug (a `malloc()`
-    lock-state corruption once liblzma's real LZ match-finder allocates
-    its dictionary/hash tables) turned out, after further investigation
-    with a gdb watchpoint, to be a buffer overflow in this session's own
-    throwaway verification program (an unchecked `snprintf()`-return-value
-    accumulation, `size_t`-underflowing the remaining-buffer-size
-    argument) -- not a CRT/PAL/liblzma bug at all. Fixed the test; real
-    match-finder allocations up to ~512 MB and a full compress/decompress
-    round trip at preset 9|EXTREME with CRC64 both work correctly on
-    Linux, verified against static and shared (`ldd`-checked) builds.
-    Linux is at `shared-pass`.
-    Windows build needed two more fixes (both generalized into
-    `tools/crt-port-build.py` since they're not liblzma-specific):
-    `-U__MINGW32__` in the recipe's own CFLAGS (xz's `sysdefs.h`/
-    `mythread.h` branch on a real mingw-w64 environment this sysroot
-    doesn't fully replicate -- a missing `_mingw.h` and a `sigset_t`/
-    `_sigset_t` remap that fights this project's own real `sigset_t`),
-    and presetting `$RC` to `llvm-rc` plus overriding away the optional
-    `liblzma_w32res.rc` version-info resource (`llvm-rc`'s GNU-windres
-    `-i`/`-o` compatibility mode mis-invokes its own internal clang
-    preprocessing step; not pursued further since the resource is purely
-    cosmetic -- see `porting/recipes/xz.json`'s notes for the full
-    trail, including a `crt-port-build.py` fix so a recipe's
-    `make_args` override reaches `make install` too, not just `make`).
-    Windows *builds* clean (`configure-pass`); actually calling the
-    library previously crashed (confirmed directly: a trivial
-    `lzma_version_string()` call worked, but the first real
-    `lzma_easy_buffer_encode()` call segfaulted, on both the static and
-    shared build) in the same "first real call into the CRC dispatcher"
-    shape as the original Linux bug -- strong evidence of the same
-    `.init_array`-never-ran gap (see the entry below) reaching Windows
-    too. That general gap is now fixed and verified on Windows (see the
-    entry below for the full writeup), but re-running xz's own
-    round-trip test specifically to confirm the crash is actually gone
-    was not completed this session -- an unrelated `inttypes.h`
-    header-search quirk in this session's own ad-hoc manual `crt-cc`
-    invocation blocked it (liblzma's own real `./configure`+`make` build
-    resolves `inttypes.h` fine, so this looks like a throwaway-test
-    methodology issue, not a project defect, but it wasn't run down).
-    macOS still `pending` (no macOS hardware available this session).
-    Next: `pcre2` (xz's Windows re-verification and macOS gap trail along
-    in the two entries below, not blocking further queue progress).
+  - `xz` (liblzma): **done on Linux and Windows, both `shared-pass`**
+    (macOS still `pending`, no macOS hardware available this session). A
+    real compress/decompress round trip at preset 9|EXTREME with CRC64
+    (real match-finder allocations, byte-for-byte output compare)
+    verified against both static and shared builds on both OSes. Two
+    genuine, general CRT/toolchain gaps got found and fixed along the
+    way, not deferred -- see `HISTORY.md`'s dated entries and
+    `porting/recipes/xz.json`'s own notes for the full trail: (1) this
+    project's `crt1` startup never ran ELF/PE constructor sections at
+    all (`.init_array`/`.ctors`/`.CRT$XCU` depending on OS/ABI) for the
+    executable entry point on any OS -- see the general fix below; (2)
+    `lld-link` doesn't reliably merge constructor sections contributed by
+    a *static archive* (as opposed to a directly-compiled object) the way
+    GNU ld's default script guarantees, worked around via a recipe patch
+    routing liblzma onto its own portable non-constructor fallback path
+    on Windows specifically.
+    Next: `pcre2`.
 
-- **`.init_array`/`.fini_array` (ELF constructor/destructor) support**,
-  found and fixed for Linux while porting xz/liblzma (see that recipe's
-  own notes and `HISTORY.md`): this project's `crt1` startup never ran
+- **`.init_array`/`.fini_array` (ELF/PE/Mach-O constructor/destructor)
+  support -- DONE on all three OSes, see `HISTORY.md`'s dated entries for
+  the full investigation.** This project's `crt1` startup never ran
   `__attribute__((constructor))`-registered functions (also what runs
-  C++ global object constructors) for the executable entry point, on any
-  of the three OSes -- invisible until now because every port that got
-  this far linked shared, where the OS's own dynamic loader handles a
-  `.so`'s own `.init_array` automatically. Fixed for Linux
-  (`libc/src/arch/linux/common/init_fini_array.c`, wired into `crt1.S`/
-  `exit.c`/`tools/crt-cc`/the CMake test and shell build paths); verified
-  with gdb against the real liblzma bug that exposed it. A permanent
-  regression test, `tests/init_array_test.c` (a single constructor +
-  destructor pair, the destructor printing a pass/fail line depending on
-  whether the constructor actually ran first), now guards this on every
-  OS going forward -- see `HISTORY.md`'s dated entry for the full story.
-  - **Windows: fixed and verified** (full local `ctest`, 82/82 including
-    the new regression test). Turned out to need TWO separate section
-    conventions bracketed simultaneously, not one: `tools/crt-cc`'s own
-    `--target=*-w64-mingw32` builds (third-party ports like xz) produce a
-    bare, unnamed-group `.ctors`/`.dtors` section per function (confirmed
-    via `llvm-objdump -h`), while this project's own CMake-native builds
-    (libc itself, `tests/`, `shell/` -- plain clang, no `--target`
-    override, defaults to `*-pc-windows-msvc`) instead produce the fixed
-    section names `.CRT$XCU`/`.CRT$XTX` -- confirmed empirically, and the
-    TODO's earlier assumption that only the GNU convention applied here
-    was wrong. `.ctors`/`.dtors` has no ELF-style automatic boundary
-    symbols and is link-order-sensitive, so it's bracketed the mingw-w64
-    crt0 way (`ctors_begin.o` linked right after `crt1.o` via a new
-    `tools/crt-cc` `$prelibs` slot, `ctors_end.o` appended last).
-    `.CRT$XC*`/`.CRT$XT*`, by contrast, is `$`-suffix-alphabetically
-    sorted by `lld-link` regardless of link-command-line order (confirmed
-    empirically: three objects contributing to `.CRT$XCA`/`.CRT$XCU`/
-    `.CRT$XCZ`, deliberately linked in reverse order, still produced a
-    correctly-ordered merged section) -- bracketed with `.CRT$XCA`/
-    `.CRT$XCZ` (ctors) and `.CRT$XTA`/`.CRT$XTZ` (dtors) sentinels that
-    need no special placement at all. Both conventions live in the same
-    three objects (`libc/src/arch/windows/common/ctors_begin.c`/
-    `ctors_end.c`/`init_fini_array.c`) and are walked unconditionally, so
-    a constructor/destructor compiled under either ABI actually runs.
-    `__crt_run_fini_array()` stays a *weak* reference from `exit.c` (like
-    Linux), since that translation unit is also compiled into the
-    `c_shared` DLL, which never links the walker.
-    Along the way, fixing this exposed a real, pre-existing, unrelated
-    bug: `libc/src/arch/windows/common/fork_capable_relaunch.c`'s parent
-    process (every test target already links this file) calls `exit()`
-    after waiting for its relaunched child, forwarding the child's exit
-    code -- harmless before, since Windows had no `__crt_run_fini_array()`
-    to call, but once it existed the parent's own pass-through `exit()`
-    started incorrectly re-running destructors the parent itself never
-    initialized (it never runs the program's own `main()`/constructors,
-    only the child does). Fixed: that call is now `_exit()`, a raw
-    process-terminating syscall with no atexit/cxa_finalize/fini_array
-    side effects, which is what a pure wait-and-forward wrapper should
-    have used from the start.
-  - **macOS: analysis suggests this may already work with no code
-    changes needed, pending CI confirmation** (no local macOS hardware
-    this session). Unlike Linux/Windows, Mach-O constructors
-    (`__DATA,__mod_init_func`) are run automatically by dyld itself, for
-    every dynamically-linked image including the main executable, before
-    dyld ever transfers control to this project's own entry point
-    (`libc/src/arch/macos/{x86_64,aarch64}/crt1.S`'s `_start`) --
-    unconditionally true for any Mach-O executable regardless of what its
-    entry symbol is named, since macOS has no fully-static executable
-    format and dyld's own image-init sequence always runs first. Mach-O
-    destructors (`__DATA,__mod_term_func`) are, in turn, registered by
-    dyld through the same Itanium C++ ABI atexit mechanism this project's
-    `exit.c` already drains unconditionally via `__cxa_finalize(0)` (see
-    that file's own comment) -- so both already run correctly through
-    pre-existing machinery, with no new walker required. This is
-    inference from well-established, documented dyld/Mach-O behavior, not
-    an empirical confirmation the way the Linux/Windows fixes are --
-    genuinely verifying it requires the CI `macos-aarch64` leg (or real
-    hardware) actually running the new `tests/init_array_test.c`
-    regression test.
+  C++ global object constructors) for the executable entry point on any
+  OS, found while porting xz/liblzma; invisible until then because every
+  prior port linked shared, where the OS's own dynamic loader handles a
+  `.so`'s own constructors automatically. Linux and Windows both fixed
+  and verified via a full local `ctest` run; macOS confirmed directly on
+  real hardware (`tests/init_array_test.c` prints `init_array_test: ok`)
+  requiring no new code at all, since dyld already runs Mach-O
+  constructors automatically and this project's existing
+  `__cxa_finalize(0)` call in `exit.c` already handled destructors.
+  Windows needed bracketing two entirely separate section conventions
+  simultaneously (GNU `.ctors`/`.dtors` for `tools/crt-cc` port builds,
+  MSVC `.CRT$XCU`/`.CRT$XTX` for this project's own CMake-native builds)
+  and surfaced/fixed a real, pre-existing, unrelated latent bug in the
+  startup self-relaunch path (`fork_capable_relaunch.c`, now `_exit()`
+  instead of `exit()`). A permanent regression test,
+  `tests/init_array_test.c`, now guards the general mechanism on every
+  OS's `ctest` run going forward. The one residual, documented
+  limitation: `lld-link` doesn't reliably bracket a constructor
+  contributed by a *static archive* on Windows (worked around for xz via
+  a recipe patch, not a general CRT-level fix) -- any future port whose
+  own static-archive code relies on `__attribute__((constructor))` on
+  Windows will need the same kind of targeted, per-recipe fix.
 
 - **Windows shell/process stress hardening.** Real concurrency -- parallel
   `make -jN`, jobserver pipe fd handling, many live children in the

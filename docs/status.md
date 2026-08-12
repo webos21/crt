@@ -15,8 +15,10 @@ in those two win.
   aarch64, Linux arm64/amd64, Windows arm64/x64), each running this
   project's own `cmake --workflow <os>-host-ninja-debug` preset (configure +
   build + `ctest`) on every push. All 5 legs green as of
-  [run 31464737310](https://github.com/webos21/crt/actions/runs/31464737310)
-  (2026-08-11). Before this, Linux validation had been almost entirely
+  [run 31480881521](https://github.com/webos21/crt/actions/runs/31480881521)
+  (2026-08-11, the Windows `.init_array` fix + `fork_capable_relaunch.c`
+  bug fix commit). Before the matrix existed, Linux validation had been
+  almost entirely
   manual, on real aarch64 hardware -- x86_64 Linux had never actually been
   built until this matrix existed, and immediately surfaced two real,
   previously-invisible bugs (see `HISTORY.md`'s 2026-08-11 entries).
@@ -29,33 +31,37 @@ in those two win.
 - **Ports**: see `docs/porting_status.md` for the full per-library,
   per-host table. `zlib`/`libpng`/`sqlite-amalgamation`/`bzip2` are at
   `shared-pass` on Linux and Windows (macOS pending on all four, no
-  macOS hardware this session). `xz` (liblzma) is `shared-pass` on Linux,
-  `configure-pass` on Windows (builds clean; the `.init_array` gap that
-  previously crashed it at runtime is now fixed and verified in general --
-  see below -- but xz's own round trip wasn't re-run this session to
-  confirm the crash specifically is gone). `libffi` is `partial`: builds
-  and works except for a known `-O1`/`-O2` `ffi_call()`-repeat-call bug
-  (see below).
+  macOS hardware this session). `xz` (liblzma) is `shared-pass` on both
+  Linux and Windows (a real, full compress/decompress round trip at
+  preset 9|EXTREME with CRC64 passes against both static and shared
+  builds on both OSes). `libffi` is `partial`: builds and works except
+  for a known `-O1`/`-O2` `ffi_call()`-repeat-call bug (see below).
 
 ## Known gaps
 
 - **`.init_array`/`.fini_array` (ELF constructor/destructor) support**:
-  fixed and verified on Linux and Windows; macOS is analysis-based only
-  (believed to already work with no code changes, via dyld's automatic
-  `__mod_init_func` handling plus this project's existing
-  `__cxa_finalize(0)` call, but not yet empirically confirmed -- no macOS
-  hardware this session, pending the CI `macos-aarch64` leg). See
-  `TODO.md`'s dedicated entry and `HISTORY.md` for the full writeup,
-  including two real bugs the Windows fix surfaced along the way: this
-  project's own CMake-native Windows builds turned out to use a second,
-  entirely separate constructor/destructor convention
-  (`.CRT$XCU`/`.CRT$XTX`, MSVC ABI) alongside the GNU one
-  (`.ctors`/`.dtors`) `tools/crt-cc`'s port builds use, and fixing this
-  exposed a latent, pre-existing bug in the Windows startup
-  self-relaunch's parent-process exit path
-  (`fork_capable_relaunch.c`, now `_exit()` instead of `exit()`). A
-  permanent regression test, `tests/init_array_test.c`, now guards this
-  on every OS's `ctest` run going forward.
+  fixed and verified on Linux and Windows (`ctest`) and macOS (confirmed
+  directly on real macOS hardware: `tests/init_array_test.c` prints
+  `init_array_test: ok`, user-run). See `TODO.md`'s dedicated entry and
+  `HISTORY.md` for the full writeup, including three real bugs the
+  Windows work surfaced along the way: (1) this project's own CMake-
+  native Windows builds turned out to use a second, entirely separate
+  constructor/destructor convention (`.CRT$XCU`/`.CRT$XTX`, MSVC ABI)
+  alongside the GNU one (`.ctors`/`.dtors`) `tools/crt-cc`'s port builds
+  use; (2) fixing that exposed a latent, pre-existing bug in the Windows
+  startup self-relaunch's parent-process exit path
+  (`fork_capable_relaunch.c`, now `_exit()` instead of `exit()`); (3) a
+  separate, deeper limitation specific to linking third-party static
+  archives (like `liblzma.a`) on Windows -- `lld-link` does not reliably
+  merge multiple archive-derived plain `.ctors`/`.dtors` contributions
+  into one contiguous region the way GNU ld's default script guarantees,
+  with no COFF/PE equivalent mechanism. Routed around for xz via a
+  recipe patch forcing liblzma's own portable non-constructor fallback
+  path instead (see `porting/recipes/xz.json`); any *other* future port
+  whose own static-archive code relies on `__attribute__((constructor))`
+  on Windows would need the same kind of targeted fix. A permanent
+  regression test, `tests/init_array_test.c`, now guards the general
+  mechanism on every OS's `ctest` run going forward.
 - **libffi**: `ffi_call()` alone and closures alone each work correctly in
   isolation, but calling `ffi_call()` and then any further libffi call in
   the same process reliably segfaults when the caller is compiled at
@@ -78,10 +84,9 @@ in those two win.
 ## Not yet started
 
 - Porting matrix expansion: `bzip2` done on Linux/Windows, `xz` done on
-  Linux (Windows builds clean and the `.init_array` gap that crashed it
-  is now fixed in general, but xz's own round trip isn't re-verified
-  yet; macOS pending); `pcre2` -> `mbedtls` -> `curl` not started -- see
-  `TODO.md`'s "in progressing" section for the current queue and order.
+  Linux and Windows (`shared-pass` both, macOS pending); `pcre2` ->
+  `mbedtls` -> `curl` not started -- see `TODO.md`'s "in progressing"
+  section for the current queue and order.
 - Broader POSIX/rootfs surface hardening beyond what each port's own build
   happens to exercise.
 - C++ runtime phase 2 and an ELF loader/dynamic-linker prototype: not
