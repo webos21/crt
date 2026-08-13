@@ -10,6 +10,70 @@ substantive update.
 
 ## 2026-08-12
 
+- **Implemented Windows/PE "runtime pseudo relocation" support
+  (`_pei386_runtime_relocator()`), fixing the `libffi` shared-link gap
+  found in the previous entry, and added a permanent, project-owned
+  ctest regression test for it.** GNU ld/lld's auto-import extension
+  lets code reference a DATA symbol exported from another DLL with no
+  `__declspec(dllimport)` annotation -- exactly what libffi's own
+  `ffi.h` relies on ("GCC has autoimport and autoexport... always mark
+  externally visible symbols as dllimport for MSVC clients"). The
+  linker makes this work by baking a placeholder value into the
+  referencing instruction/data at link time, then emitting a table of
+  "pseudo relocations" for a startup-time fixup once the real DLL
+  addresses are known -- real mingw-w64 crt0 processes this table via a
+  function conventionally named `_pei386_runtime_relocator()`, and
+  `lld-link` refuses to produce a final image with a non-empty
+  pseudo-reloc table unless a symbol with that exact name exists
+  somewhere in the link. Implemented from scratch
+  (`libc/src/arch/windows/common/pseudo_reloc.c`), with the exact binary
+  table format (a 12-byte v2 header, then 12-byte `sym`/`target`/`flags`
+  entries) cross-checked against two independent sources: mingw-w64's
+  own reference decoder (`mingw-w64-crt/crt/pseudo-reloc.c`) and this
+  exact toolchain's own encoder (LLVM lld's `PseudoRelocTableChunk` in
+  `lld/COFF/Chunks.cpp`) -- both agreed. `__RUNTIME_PSEUDO_RELOC_LIST__`/
+  `_END__` (the list's own boundary symbols, auto-provided by the linker
+  only when a non-empty table actually exists -- confirmed the hard way:
+  an earlier, unguarded version broke every CMake-native Windows build,
+  which never needs auto-import at all, with "undefined symbol") are
+  declared weak, the same pattern already used for `__crt_run_fini_array`.
+  Wired into `crt1.c`'s `mainCRTStartup()` as the very first statement,
+  before anything else could touch an unfixed auto-imported reference.
+  A second, independent bug surfaced immediately once the link-time gap
+  was closed: the *runtime* access-violated on the very first relocation
+  entry processed, since the target location a pseudo relocation patches
+  is frequently inside `.text` (a compile-time-foldable `&global`
+  reference gets embedded as a `movabs` instruction's own immediate
+  operand), which is mapped execute+read-only by default -- fixed by
+  temporarily `VirtualProtect()`-ing the containing page(s) around each
+  write and restoring the original protection afterward, matching real
+  mingw-w64's own approach.
+  **New permanent regression test**: `tests/windows_pseudo_reloc_dll.c`/
+  `windows_pseudo_reloc_consumer.c`, registered as ctest
+  `windows_pseudo_reloc_test_runs`. Deliberately built through
+  `tools/crt-cc`'s GNU-ABI path directly (via a `tests/CMakeLists.txt`
+  `add_custom_command` invoking `mksh.exe tools/crt-cc`, reusing the
+  project's already-established `GetShortPathNameW()`-based fix for
+  `tools/crt-cc`'s own unquoted shell-word-splitting on real Windows SDK
+  paths), not CMake's native build path -- confirmed directly that the
+  native path's default MSVC ABI has no auto-import concept at all, so
+  the mechanism can only ever be exercised through the same GNU-ABI path
+  every third-party port build already uses. Also confirmed, the hard
+  way, that the test's *first* draft (a plain `int* p = &value;` runtime
+  assignment) passed vacuously: that codegen shape can legitimately load
+  through the real import stub directly, producing an empty pseudo-reloc
+  list regardless of whether the fix works at all. Rewriting it to match
+  libffi's actual triggering shape -- storing the address in a
+  static-duration aggregate initializer, which must be literal embedded
+  bytes rather than a load instruction -- produces a genuine, non-empty
+  relocation list; a negative-control run (temporarily reverting the
+  `crt1.c` call site) confirmed the rewritten test fails correctly
+  (reading back the raw placeholder value) without the fix, and passes
+  with it restored. Full local Windows `ctest`: 83/83. `libffi`'s own
+  official `port-test-libffi` shared variant also now passes
+  (`libffi_call_test: ok result=42`), confirmed via the real
+  `crt-port-build.py` pipeline, not just the isolated regression test.
+
 - **Ran the new `port-test-recipes` aggregate on Windows to verify it
   end-to-end there too (the entry below only ran/confirmed it on
   macOS): bzip2, xz, zlib, and libpng all pass both their static and

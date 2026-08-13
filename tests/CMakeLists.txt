@@ -535,6 +535,129 @@ if(CRT_TARGET_OS STREQUAL "windows")
     PASS_REGULAR_EXPRESSION "windows_export_hygiene_test: ok"
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS windows_export_hygiene_runs)
+
+  # Permanent regression test for libc/src/arch/windows/common/
+  # pseudo_reloc.c's _pei386_runtime_relocator() -- see that file's own
+  # comment and HISTORY.md's dated entry for the full story (found while
+  # re-verifying the official port-test-libffi recipe test's shared
+  # variant: linking against libffi.dll.a failed with "output image has
+  # runtime pseudo relocations, but the function _pei386_runtime_
+  # relocator is missing", since libffi's own ffi.h relies on GNU ld's
+  # auto-import extension for its exported ffi_type_* globals rather
+  # than an explicit dllimport annotation). This exercises the exact
+  # same mechanism directly, without needing to download/build
+  # libffi -- windows_pseudo_reloc_dll.c/consumer.c are small,
+  # project-owned sources reproducing the same "plain global exported
+  # from a DLL, referenced with no dllimport annotation" pattern.
+  #
+  # Deliberately NOT built through CMake's own native
+  # add_executable()/add_library(SHARED) path: this project's CMake-
+  # native builds default to the MSVC ABI (see the top-level
+  # CMakeLists.txt's own comment), which has no auto-import/pseudo-
+  # relocation concept at all -- an unannotated cross-DLL data
+  # reference there is just a hard link error, not something this
+  # mechanism could ever be exercised through. Only tools/crt-cc's GNU-
+  # ABI (--target=*-w64-mingw32) path -- the same one every third-party
+  # port build (xz, libffi, ...) uses -- can actually trigger this, so
+  # this test builds through it directly via add_custom_command,
+  # mirroring (a deliberately minimal, no-recipe-system-needed subset
+  # of) how tools/crt-port-build.py invokes it for real port tests: the
+  # same mksh.exe interpreter (tools/crt-cc has a #! shebang line,
+  # which the OS itself can't run directly on Windows), the same
+  # CRT_SYSROOT/CRT_TARGET_OS/CRT_TARGET_ARCH/CRT_WINDOWS_SYSTEM_LIBS
+  # environment tools/crt-cc itself reads. CRT_TARGET_ARCH must be the
+  # normalized "x86_64"/"aarch64" tools/crt-cc's own --target=*-w64-
+  # mingw32 triple construction expects, not whatever raw
+  # CRT_EFFECTIVE_ARCH_FOR_FLAGS happens to hold ("AMD64"/"ARM64" from
+  # CMAKE_SYSTEM_PROCESSOR on a host build) -- tools/crt-cc uses
+  # CRT_TARGET_ARCH completely verbatim, with no normalization of its
+  # own, unlike crt-port-build.py (which does this same normalization
+  # in Python before ever invoking crt-cc).
+  if(CRT_EFFECTIVE_ARCH_FOR_FLAGS MATCHES "^(arm64|ARM64|aarch64)$")
+    set(CRT_PSEUDO_RELOC_TEST_ARCH "aarch64")
+  else()
+    set(CRT_PSEUDO_RELOC_TEST_ARCH "x86_64")
+  endif()
+  # tools/crt-cc is a POSIX shell script that expands $libs (and thus
+  # $CRT_WINDOWS_SYSTEM_LIBS, folded into it) UNQUOTED -- an embedded
+  # space in a real Windows SDK path ("...\Windows Kits\..." /
+  # "Program Files (x86)\...") silently word-splits into multiple,
+  # broken arguments. tools/crt-port-build.py already solves this for
+  # every real port build via GetShortPathNameW() (see its own
+  # windows_short_path()); reuse the exact same Win32 API here rather
+  # than re-deriving the same fix a second, subtly different way.
+  execute_process(
+    COMMAND "${Python3_EXECUTABLE}" -c "import ctypes,sys; k=ctypes.windll.kernel32; n=k.GetShortPathNameW(sys.argv[1],None,0); b=ctypes.create_unicode_buffer(n); k.GetShortPathNameW(sys.argv[1],b,n); print(b.value)" "${CRT_WINDOWS_KERNEL32_LIB}"
+    OUTPUT_VARIABLE CRT_WINDOWS_KERNEL32_LIB_SHORT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  execute_process(
+    COMMAND "${Python3_EXECUTABLE}" -c "import ctypes,sys; k=ctypes.windll.kernel32; n=k.GetShortPathNameW(sys.argv[1],None,0); b=ctypes.create_unicode_buffer(n); k.GetShortPathNameW(sys.argv[1],b,n); print(b.value)" "${CRT_WINDOWS_SYNCHRONIZATION_LIB}"
+    OUTPUT_VARIABLE CRT_WINDOWS_SYNCHRONIZATION_LIB_SHORT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  # tools/crt-cc defaults CC to the bare name "clang", relying on PATH --
+  # mksh's own rootfs environment doesn't carry this host's LLVM install
+  # directory, so it must be set explicitly (short-pathed for the same
+  # unquoted-word-splitting reason as the SDK libs above). Matches
+  # tools/crt-port-build.py's own find_windows_host_tool().
+  find_program(CRT_PSEUDO_RELOC_TEST_CLANG NAMES clang.exe clang)
+  execute_process(
+    COMMAND "${Python3_EXECUTABLE}" -c "import ctypes,sys; k=ctypes.windll.kernel32; n=k.GetShortPathNameW(sys.argv[1],None,0); b=ctypes.create_unicode_buffer(n); k.GetShortPathNameW(sys.argv[1],b,n); print(b.value)" "${CRT_PSEUDO_RELOC_TEST_CLANG}"
+    OUTPUT_VARIABLE CRT_HOST_CC_SHORT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  set(CRT_PSEUDO_RELOC_TEST_DIR "${CMAKE_CURRENT_BINARY_DIR}/windows_pseudo_reloc_test")
+  set(CRT_PSEUDO_RELOC_TEST_DLL "${CRT_PSEUDO_RELOC_TEST_DIR}/libpseudoreloc_regress.dll")
+  set(CRT_PSEUDO_RELOC_TEST_IMPLIB "${CRT_PSEUDO_RELOC_TEST_DIR}/libpseudoreloc_regress.dll.a")
+  set(CRT_PSEUDO_RELOC_TEST_EXE "${CRT_PSEUDO_RELOC_TEST_DIR}/windows_pseudo_reloc_test.exe")
+  set(CRT_PSEUDO_RELOC_TEST_ENV
+    "${CMAKE_COMMAND}" -E env
+    "CRT_SYSROOT=${CRT_SYSROOT}"
+    "CRT_TARGET_OS=windows"
+    "CRT_TARGET_ARCH=${CRT_PSEUDO_RELOC_TEST_ARCH}"
+    "CRT_WINDOWS_SYSTEM_LIBS=-Wl,${CRT_WINDOWS_KERNEL32_LIB_SHORT} -Wl,${CRT_WINDOWS_SYNCHRONIZATION_LIB_SHORT}"
+    "CRT_HOST_CC=${CRT_HOST_CC_SHORT}"
+  )
+  add_custom_command(
+    OUTPUT "${CRT_PSEUDO_RELOC_TEST_DLL}" "${CRT_PSEUDO_RELOC_TEST_IMPLIB}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CRT_PSEUDO_RELOC_TEST_DIR}"
+    COMMAND ${CRT_PSEUDO_RELOC_TEST_ENV}
+      "${CRT_ROOTFS}/system/bin/mksh.exe" "${CMAKE_SOURCE_DIR}/tools/crt-cc"
+      -shared "${CMAKE_CURRENT_SOURCE_DIR}/windows_pseudo_reloc_dll.c"
+      -o "${CRT_PSEUDO_RELOC_TEST_DLL}"
+      "-Wl,--out-implib,${CRT_PSEUDO_RELOC_TEST_IMPLIB}"
+    DEPENDS
+      "${CMAKE_CURRENT_SOURCE_DIR}/windows_pseudo_reloc_dll.c"
+      "${CMAKE_SOURCE_DIR}/tools/crt-cc"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    COMMENT "Building windows_pseudo_reloc_test's regression DLL (GNU ABI, via tools/crt-cc)"
+  )
+  add_custom_command(
+    OUTPUT "${CRT_PSEUDO_RELOC_TEST_EXE}"
+    COMMAND ${CRT_PSEUDO_RELOC_TEST_ENV}
+      "${CRT_ROOTFS}/system/bin/mksh.exe" "${CMAKE_SOURCE_DIR}/tools/crt-cc"
+      "${CMAKE_CURRENT_SOURCE_DIR}/windows_pseudo_reloc_consumer.c"
+      "${CRT_PSEUDO_RELOC_TEST_IMPLIB}"
+      -o "${CRT_PSEUDO_RELOC_TEST_EXE}"
+    DEPENDS
+      "${CMAKE_CURRENT_SOURCE_DIR}/windows_pseudo_reloc_consumer.c"
+      "${CRT_PSEUDO_RELOC_TEST_DLL}" "${CRT_PSEUDO_RELOC_TEST_IMPLIB}"
+      "${CMAKE_SOURCE_DIR}/tools/crt-cc"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    COMMENT "Building windows_pseudo_reloc_test's regression consumer (GNU ABI, via tools/crt-cc)"
+  )
+  add_custom_target(windows_pseudo_reloc_test ALL
+    DEPENDS "${CRT_PSEUDO_RELOC_TEST_EXE}"
+  )
+  add_dependencies(windows_pseudo_reloc_test rootfs sysroot)
+  add_test(NAME windows_pseudo_reloc_test_runs
+    COMMAND "${CRT_PSEUDO_RELOC_TEST_EXE}"
+  )
+  set_tests_properties(windows_pseudo_reloc_test_runs PROPERTIES
+    PASS_REGULAR_EXPRESSION "windows_pseudo_reloc_test: ok"
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS windows_pseudo_reloc_test_runs)
 endif()
 get_property(CRT_REGISTERED_TESTS GLOBAL PROPERTY CRT_REGISTERED_TESTS)
 list(LENGTH CRT_REGISTERED_TESTS CRT_REGISTERED_TEST_COUNT)

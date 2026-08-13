@@ -28,6 +28,17 @@ void exit(int status);
  * __crt_run_fini_array(), which is ALSO compiled into c_shared and
  * therefore can't assume the walker is present there). */
 void __crt_run_init_array(void);
+/* Defined by libc/src/arch/windows/common/pseudo_reloc.c
+ * (crt1_pseudo_reloc OBJECT library), always linked into every
+ * executable right alongside this file itself (see CRT_STARTUP_OBJECTS
+ * in libc/CMakeLists.txt) -- same strong-reference reasoning as
+ * __crt_run_init_array() above. Must run before absolutely anything
+ * else in this function (even __crt_env_set_initial()): any code at all
+ * could touch a GNU-ld-auto-imported data reference (e.g. a third-party
+ * library's own global, like libffi's ffi_type_sint) before its runtime
+ * fixup has been applied. See that file's own comment for the full
+ * story. */
+void _pei386_runtime_relocator(void);
 
 #if defined(__aarch64__) || defined(_M_ARM64) || defined(__x86_64__) || defined(_M_X64)
 /* Weak reference, not a hard dependency: only targets that actually need
@@ -88,9 +99,11 @@ static int parse_windows_command_line(char* command_line, char** argv, int max_a
 }
 
 void mainCRTStartup(void) {
-  char* command_line = GetCommandLineA();
+  char* command_line;
   int argc = 0;
 
+  _pei386_runtime_relocator();
+  command_line = GetCommandLineA();
   __crt_env_set_initial(0);
   /* Must run BEFORE the fork-capable relaunch check below: this process's
    * own fd table (and cwd/rootfs/sigmask) only gets populated with

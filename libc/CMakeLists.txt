@@ -215,6 +215,11 @@ elseif(CRT_TARGET_OS STREQUAL "windows")
   set(CRT_CTORS_BEGIN_FILE src/arch/windows/common/ctors_begin.c)
   set(CRT_CTORS_END_FILE src/arch/windows/common/ctors_end.c)
   set(CRT_CTORS_WALKER_FILE src/arch/windows/common/init_fini_array.c)
+  # _pei386_runtime_relocator() -- see that file's own comment. Not
+  # position-sensitive (no custom sentinel objects needed: the linker
+  # provides __RUNTIME_PSEUDO_RELOC_LIST__/_END__ automatically), just
+  # needs to exist somewhere in the link and be called early at startup.
+  set(CRT_PSEUDO_RELOC_FILE src/arch/windows/common/pseudo_reloc.c)
 else()
   message(FATAL_ERROR "Unsupported CRT_TARGET_OS: ${CRT_TARGET_OS}")
 endif()
@@ -302,11 +307,17 @@ elseif(CRT_TARGET_OS STREQUAL "windows")
   set_target_properties(crt1_ctors_walker PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
   )
-  # The walker (plain code, not a section-merge-order-sensitive data
-  # object) can go anywhere; bundled into the "begin" group purely for
-  # convenience, matching how crt1_init_array's own walker rides along
-  # with the "always first" group on Linux.
-  list(APPEND CRT_STARTUP_OBJECTS $<TARGET_OBJECTS:crt1_ctors_begin> $<TARGET_OBJECTS:crt1_ctors_walker>)
+  add_library(crt1_pseudo_reloc OBJECT ${CRT_PSEUDO_RELOC_FILE})
+  target_link_libraries(crt1_pseudo_reloc PRIVATE crt_build_flags)
+  set_target_properties(crt1_pseudo_reloc PROPERTIES
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  )
+  # Neither the walker nor the pseudo-reloc object (both plain code, not
+  # section-merge-order-sensitive data objects) need any particular link
+  # position; bundled into the "begin" group purely for convenience,
+  # matching how crt1_init_array's own walker rides along with the
+  # "always first" group on Linux.
+  list(APPEND CRT_STARTUP_OBJECTS $<TARGET_OBJECTS:crt1_ctors_begin> $<TARGET_OBJECTS:crt1_ctors_walker> $<TARGET_OBJECTS:crt1_pseudo_reloc>)
   set(CRT_STARTUP_END_OBJECTS $<TARGET_OBJECTS:crt1_ctors_end> PARENT_SCOPE)
 endif()
 if(NOT CRT_TARGET_OS STREQUAL "windows")
@@ -365,4 +376,5 @@ if(CRT_TARGET_OS STREQUAL "windows")
   install(FILES "$<TARGET_OBJECTS:crt1_ctors_begin>" DESTINATION lib RENAME crt1_ctors_begin.o)
   install(FILES "$<TARGET_OBJECTS:crt1_ctors_end>" DESTINATION lib RENAME crt1_ctors_end.o)
   install(FILES "$<TARGET_OBJECTS:crt1_ctors_walker>" DESTINATION lib RENAME crt1_ctors_walker.o)
+  install(FILES "$<TARGET_OBJECTS:crt1_pseudo_reloc>" DESTINATION lib RENAME crt1_pseudo_reloc.o)
 endif()

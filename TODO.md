@@ -174,19 +174,6 @@ Five active threads, not a flat list of one-off items:
   `ffi_call()` at `-O1`/`-O2`, see `HISTORY.md` and
   `porting/recipes/libffi.json`'s own notes for the full trail) still
   open -- would need a real debugger session to fully root-cause.
-- **libffi shared, Windows only: missing `_pei386_runtime_relocator`**,
-  found running the new `port-test-libffi` recipe test directly against
-  `libffi.dll.a` (a real import library, unlike the earlier `dlopen()`-
-  based shared-build verification, which never exercises this path):
-  `ld.lld: error: output image has runtime pseudo relocations, but the
-  function _pei386_runtime_relocator is missing`. libffi's public
-  headers apparently reference an exported *data* symbol in a way GNU
-  ld's auto-import feature routes through a runtime pseudo-relocation
-  fixup table, normally serviced at startup by real mingw-w64's own
-  `_pei386_runtime_relocator` (`libmingwex.a`) -- a startup-time PAL
-  feature this project doesn't implement. Distinct from the `-O1`/`-O2`
-  bug above; not yet investigated. See `HISTORY.md`'s 2026-08-12 entry
-  and `docs/status.md`/`docs/porting_status.md`'s libffi rows.
 - Parallel `make -jN` on Windows is no longer an open research item -- it's
   enabled by default now (see "in progressing" above and `HISTORY.md`).
   Add a permanent regression test for the fixed bug (fd_snapshot dropping

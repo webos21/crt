@@ -315,7 +315,12 @@ case "$target_os" in
       # -shared/DLL build has no equivalent need (a DLL's own .ctors is
       # handled by the OS loader when it loads, not by this project's own
       # startup code), matching why crt1.o itself is skipped there too.
-      prelibs="${CRT_SYSROOT}/lib/crt1_ctors_begin.o ${CRT_SYSROOT}/lib/crt1_ctors_walker.o"
+      # crt1_pseudo_reloc.o (_pei386_runtime_relocator(), see that file's
+      # own comment) isn't position-sensitive -- it just needs to exist
+      # somewhere in the link, and is called from crt1.c's own startup
+      # code -- but rides along in $prelibs with the other walker object
+      # purely for convenience.
+      prelibs="${CRT_SYSROOT}/lib/crt1_ctors_begin.o ${CRT_SYSROOT}/lib/crt1_ctors_walker.o ${CRT_SYSROOT}/lib/crt1_pseudo_reloc.o"
       libs="$libs ${CRT_SYSROOT}/lib/crt1_ctors_end.o"
     fi
     ;;

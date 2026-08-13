@@ -24,26 +24,31 @@ in those two win.
   own `cmake --workflow` step does not run `port-test-recipes` (a
   separate, heavier target that fetches and builds third-party sources)
   -- that's verified locally/per-host instead, see below.
-- **`ctest`**: 82 registered tests on Windows (count is slightly
+- **`ctest`**: 83 registered tests on Windows (count is slightly
   OS-dependent -- a few targets, like `windows_export_hygiene_test`, only
   exist on their own OS), all passing locally on Windows as of this
-  session's `.init_array` work; CI is the source of truth for Linux/macOS
-  counts. Run locally via `cmake --workflow --preset <os>-host-ninja-debug`
-  or `ctest --test-dir out/<preset>`.
+  session's `.init_array`/pseudo-relocation work; CI is the source of
+  truth for Linux/macOS counts. Run locally via
+  `cmake --workflow --preset <os>-host-ninja-debug` or
+  `ctest --test-dir out/<preset>`.
 - **Ports**: see `docs/porting_status.md` for the full per-library,
   per-host table. `zlib`/`libpng`/`sqlite-amalgamation`/`bzip2` are at
   `shared-pass` on all three OSes. `xz` (liblzma) is now
   `shared-pass` on Linux, macOS, and Windows: a real, full
   compress/decompress round trip at preset 9|EXTREME with CRC64 passes
-  against both static and shared builds on every verified OS. All four
-  of those also now have an official, recipe-declared `port-test-<name>`
-  CMake target (aggregated as `port-test-recipes`) exercising the same
-  round trip; re-run directly on Windows this session and confirmed
-  green for all four, both static and shared. `libffi` is `partial`: its
-  own `port-test-libffi` passes statically (`ffi_call()` round trip,
-  `result=42`) but its *shared* variant fails to link on Windows with a
-  newly-found, genuine gap (see below) on top of the pre-existing
-  `-O1`/`-O2` `ffi_call()`-repeat-call bug.
+  against both static and shared builds on every verified OS. `libffi`'s
+  own `port-test-libffi` now passes both its static and shared variants
+  on Windows too (`ffi_call()` round trip, `result=42`) -- the shared
+  variant's `_pei386_runtime_relocator` gap (Windows/PE "runtime pseudo
+  relocation" support, a new PAL feature) is fixed; see `HISTORY.md`'s
+  2026-08-12 entry for the full writeup and `tests/windows_pseudo_reloc_
+  dll.c`/`consumer.c` for its own permanent `ctest` regression coverage.
+  All five of those ports now have an official, recipe-declared
+  `port-test-<name>` CMake target (aggregated as `port-test-recipes`);
+  re-run directly on Windows this session and confirmed green across
+  the board, both static and shared. `libffi` overall stays `partial`
+  only because of its unrelated, pre-existing `-O1`/`-O2`
+  `ffi_call()`-repeat-call bug.
 
 ## Known gaps
 
@@ -77,19 +82,6 @@ in those two win.
   corrupted somewhere in the `ffi_call()`/`ffi_call_SYSV` chain on aarch64;
   not yet isolated to an exact instruction, and not re-tested for an
   x86_64 analogue. See `porting/recipes/libffi.json`'s notes.
-- **libffi shared, Windows only: missing `_pei386_runtime_relocator`**.
-  Linking directly against `libffi.dll.a` (a real import library, as an
-  ordinary consumer program would) fails: `ld.lld: error: output image
-  has runtime pseudo relocations, but the function
-  _pei386_runtime_relocator is missing`. Distinct from the bug above and
-  from the earlier `dlopen()`-based shared-build verification (which
-  never exercises MinGW's auto-import/pseudo-relocation machinery).
-  libffi's public headers apparently reference an exported *data* symbol
-  in a way GNU ld's auto-import feature routes through a runtime
-  pseudo-relocation fixup table that real mingw-w64 services via
-  `_pei386_runtime_relocator` (`libmingwex.a`) -- a startup-time PAL
-  feature this project doesn't implement. Not yet investigated. See
-  `HISTORY.md`'s 2026-08-12 entry and `TODO.md`.
 - **Windows `make install` symlink races**: an intermittent
   `ln: ... File exists` on libtool-generated header/lib alias symlinks when
   rebuilding a port whose install directory already has a valid symlink
