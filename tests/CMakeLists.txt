@@ -624,24 +624,38 @@ if(CRT_TARGET_OS STREQUAL "windows")
     "CRT_WINDOWS_SYSTEM_LIBS=-Wl,${CRT_WINDOWS_KERNEL32_LIB_SHORT} -Wl,${CRT_WINDOWS_SYNCHRONIZATION_LIB_SHORT}"
     "CRT_HOST_CC=${CRT_HOST_CC_SHORT}"
   )
+  # DEPENDS below lists the "rootfs"/"sysroot" TARGETS directly (not just
+  # via add_dependencies() on the aggregate target further down) --
+  # deliberately, after a real CI failure this masked locally: this
+  # session's own dev machine already had a fully-built out/ directory
+  # (rootfs/sysroot both already up to date) from earlier work, so
+  # add_dependencies() on the aggregate target alone was never actually
+  # exercised against a genuinely clean tree. On a truly fresh checkout
+  # (every CI run), that only orders "rootfs"/"sysroot" before the
+  # AGGREGATE target's own completion -- NOT before these two sibling
+  # add_custom_command()s specifically, which are independent DAG nodes
+  # Ninja is otherwise free to run in parallel with (or before)
+  # "rootfs"/"sysroot", racing the mksh.exe/CRT_SYSROOT/lib/* files they
+  # actually consume. Listing the targets directly here closes that gap.
   add_custom_command(
     OUTPUT "${CRT_PSEUDO_RELOC_TEST_DLL}" "${CRT_PSEUDO_RELOC_TEST_IMPLIB}"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${CRT_PSEUDO_RELOC_TEST_DIR}"
     COMMAND ${CRT_PSEUDO_RELOC_TEST_ENV}
-      "${CRT_ROOTFS}/system/bin/mksh.exe" "${CMAKE_SOURCE_DIR}/tools/crt-cc"
+      "${CMAKE_BINARY_DIR}/rootfs/system/bin/mksh.exe" "${CMAKE_SOURCE_DIR}/tools/crt-cc"
       -shared "${CMAKE_CURRENT_SOURCE_DIR}/windows_pseudo_reloc_dll.c"
       -o "${CRT_PSEUDO_RELOC_TEST_DLL}"
       "-Wl,--out-implib,${CRT_PSEUDO_RELOC_TEST_IMPLIB}"
     DEPENDS
       "${CMAKE_CURRENT_SOURCE_DIR}/windows_pseudo_reloc_dll.c"
       "${CMAKE_SOURCE_DIR}/tools/crt-cc"
+      rootfs sysroot
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Building windows_pseudo_reloc_test's regression DLL (GNU ABI, via tools/crt-cc)"
   )
   add_custom_command(
     OUTPUT "${CRT_PSEUDO_RELOC_TEST_EXE}"
     COMMAND ${CRT_PSEUDO_RELOC_TEST_ENV}
-      "${CRT_ROOTFS}/system/bin/mksh.exe" "${CMAKE_SOURCE_DIR}/tools/crt-cc"
+      "${CMAKE_BINARY_DIR}/rootfs/system/bin/mksh.exe" "${CMAKE_SOURCE_DIR}/tools/crt-cc"
       "${CMAKE_CURRENT_SOURCE_DIR}/windows_pseudo_reloc_consumer.c"
       "${CRT_PSEUDO_RELOC_TEST_IMPLIB}"
       -o "${CRT_PSEUDO_RELOC_TEST_EXE}"
@@ -649,6 +663,7 @@ if(CRT_TARGET_OS STREQUAL "windows")
       "${CMAKE_CURRENT_SOURCE_DIR}/windows_pseudo_reloc_consumer.c"
       "${CRT_PSEUDO_RELOC_TEST_DLL}" "${CRT_PSEUDO_RELOC_TEST_IMPLIB}"
       "${CMAKE_SOURCE_DIR}/tools/crt-cc"
+      rootfs sysroot
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Building windows_pseudo_reloc_test's regression consumer (GNU ABI, via tools/crt-cc)"
   )
