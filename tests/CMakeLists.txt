@@ -582,31 +582,36 @@ if(CRT_TARGET_OS STREQUAL "windows")
   # $CRT_WINDOWS_SYSTEM_LIBS, folded into it) UNQUOTED -- an embedded
   # space in a real Windows SDK path ("...\Windows Kits\..." /
   # "Program Files (x86)\...") silently word-splits into multiple,
-  # broken arguments. tools/crt-port-build.py already solves this for
-  # every real port build via GetShortPathNameW() (see its own
-  # windows_short_path()); reuse the exact same Win32 API here rather
-  # than re-deriving the same fix a second, subtly different way.
-  execute_process(
-    COMMAND "${Python3_EXECUTABLE}" -c "import ctypes,sys; k=ctypes.windll.kernel32; n=k.GetShortPathNameW(sys.argv[1],None,0); b=ctypes.create_unicode_buffer(n); k.GetShortPathNameW(sys.argv[1],b,n); print(b.value)" "${CRT_WINDOWS_KERNEL32_LIB}"
-    OUTPUT_VARIABLE CRT_WINDOWS_KERNEL32_LIB_SHORT
-    OUTPUT_STRIP_TRAILING_WHITESPACE
+  # broken arguments. tools/crt-port-build.py works around the identical
+  # problem for every real port build via GetShortPathNameW()
+  # (windows_short_path()) -- NOT reused here, deliberately: confirmed
+  # directly that this breaks on at least one real CI runner, where NTFS
+  # 8.3 short-name generation is disabled system-wide (a common Windows
+  # Server/cloud-image hardening default: GetShortPathNameW() then just
+  # returns the original, still-space-containing path unchanged, with no
+  # error). Sidestepped entirely instead: copy just the two needed .lib
+  # files into a build-tree-local directory at configure time (CMake's
+  # own binary dir is never itself under a spaced path on any host this
+  # project targets, unlike the fixed OS-controlled SDK install
+  # location), then reference those copies.
+  set(CRT_PSEUDO_RELOC_TEST_SDK_LIBDIR "${CMAKE_CURRENT_BINARY_DIR}/windows_sdk_libs")
+  file(MAKE_DIRECTORY "${CRT_PSEUDO_RELOC_TEST_SDK_LIBDIR}")
+  file(COPY "${CRT_WINDOWS_KERNEL32_LIB}" "${CRT_WINDOWS_SYNCHRONIZATION_LIB}"
+    DESTINATION "${CRT_PSEUDO_RELOC_TEST_SDK_LIBDIR}"
   )
-  execute_process(
-    COMMAND "${Python3_EXECUTABLE}" -c "import ctypes,sys; k=ctypes.windll.kernel32; n=k.GetShortPathNameW(sys.argv[1],None,0); b=ctypes.create_unicode_buffer(n); k.GetShortPathNameW(sys.argv[1],b,n); print(b.value)" "${CRT_WINDOWS_SYNCHRONIZATION_LIB}"
-    OUTPUT_VARIABLE CRT_WINDOWS_SYNCHRONIZATION_LIB_SHORT
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-  )
+  get_filename_component(CRT_WINDOWS_KERNEL32_LIB_NAME "${CRT_WINDOWS_KERNEL32_LIB}" NAME)
+  get_filename_component(CRT_WINDOWS_SYNCHRONIZATION_LIB_NAME "${CRT_WINDOWS_SYNCHRONIZATION_LIB}" NAME)
+  set(CRT_WINDOWS_KERNEL32_LIB_SHORT "${CRT_PSEUDO_RELOC_TEST_SDK_LIBDIR}/${CRT_WINDOWS_KERNEL32_LIB_NAME}")
+  set(CRT_WINDOWS_SYNCHRONIZATION_LIB_SHORT "${CRT_PSEUDO_RELOC_TEST_SDK_LIBDIR}/${CRT_WINDOWS_SYNCHRONIZATION_LIB_NAME}")
   # tools/crt-cc defaults CC to the bare name "clang", relying on PATH --
   # mksh's own rootfs environment doesn't carry this host's LLVM install
-  # directory, so it must be set explicitly (short-pathed for the same
-  # unquoted-word-splitting reason as the SDK libs above). Matches
-  # tools/crt-port-build.py's own find_windows_host_tool().
+  # directory, so it must be set explicitly. Unlike $libs above, every
+  # use of $cc in tools/crt-cc is individually double-quoted ("$cc"), so
+  # POSIX word-splitting never applies to it regardless of embedded
+  # spaces -- confirmed directly against a real verbose invocation trace
+  # -- and it can safely be passed as-is, no copy/short-path needed.
   find_program(CRT_PSEUDO_RELOC_TEST_CLANG NAMES clang.exe clang)
-  execute_process(
-    COMMAND "${Python3_EXECUTABLE}" -c "import ctypes,sys; k=ctypes.windll.kernel32; n=k.GetShortPathNameW(sys.argv[1],None,0); b=ctypes.create_unicode_buffer(n); k.GetShortPathNameW(sys.argv[1],b,n); print(b.value)" "${CRT_PSEUDO_RELOC_TEST_CLANG}"
-    OUTPUT_VARIABLE CRT_HOST_CC_SHORT
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-  )
+  set(CRT_HOST_CC_SHORT "${CRT_PSEUDO_RELOC_TEST_CLANG}")
   set(CRT_PSEUDO_RELOC_TEST_DIR "${CMAKE_CURRENT_BINARY_DIR}/windows_pseudo_reloc_test")
   set(CRT_PSEUDO_RELOC_TEST_DLL "${CRT_PSEUDO_RELOC_TEST_DIR}/libpseudoreloc_regress.dll")
   set(CRT_PSEUDO_RELOC_TEST_IMPLIB "${CRT_PSEUDO_RELOC_TEST_DIR}/libpseudoreloc_regress.dll.a")
