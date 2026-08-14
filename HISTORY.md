@@ -480,6 +480,37 @@ substantive update.
     anything on Linux: the full `port-test-recipes` aggregate stayed
     clean, and curl's own static+shared tests there still pass. Not yet
     re-verified on macOS itself this session (no local macOS hardware).
+  - The `DYLD_LIBRARY_PATH` fix above turned out insufficient: the user
+    re-ran `port-rebuild-curl` on real macOS hardware and hit the exact
+    same "checking runtime libs availability... failed" error again.
+    Root cause: `./configure` execs through `/bin/sh` (its own shebang
+    interpreter), and macOS strips `DYLD_`-prefixed environment
+    variables across an exec of any SIP-protected system binary like
+    `/bin/sh` (documented dyld/SIP behavior, not specific to this
+    project's own env-passing code) -- so the `DYLD_LIBRARY_PATH` set
+    by the parent Python subprocess call never actually survived into
+    configure's own child test-compile-and-run. Fixed for real,
+    environment-independently, in `porting/recipes/mbedtls.json`
+    instead: three new `library/Makefile` patches add
+    `-install_name @rpath/$@` to the `APPLE_BUILD` `-dynamiclib` link
+    recipes for `libmbedtls.dylib`/`libmbedx509.dylib`/
+    `libmbedcrypto.dylib` (upstream never sets one at all). This bakes
+    the correct load-command path directly into each `.dylib` at build
+    time, which the consumer's own `-Wl,-rpath,PORT_PREFIX/lib`
+    `LDFLAGS` (already set unconditionally by `make_env()`) then
+    resolves correctly regardless of what environment variables survive
+    any particular exec chain -- immune to the SIP-stripping issue
+    above by construction, since it needs no environment variable at
+    runtime at all. `make_env()`'s `DYLD_LIBRARY_PATH` addition is kept
+    as defense in depth (harmless, still useful for any future
+    runtime-loader case not gated behind a SIP-restricted exec).
+    Verified on Linux (WSL Ubuntu 20.04 + clang-18, full rebuild from
+    scratch): mbedtls's own `crypto-static`/`crypto-shared` tests and
+    curl's own `http-roundtrip-static`/`http-roundtrip-shared` tests all
+    still pass -- the new patches are inert on Linux (that Makefile
+    target is only reached under `APPLE_BUILD=1`), so this is a pure
+    regression check, not a positive macOS confirmation. Still needs a
+    real macOS re-run to confirm.
 
 ## 2026-08-13
 

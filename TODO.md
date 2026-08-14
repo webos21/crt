@@ -119,16 +119,25 @@ Five active threads, not a flat list of one-off items:
     against both. Not yet fixed -- needs either real symbol-visibility
     control on mbedtls's Windows DLL build, or curl linking against
     mbedtls's static libs even for its own shared build. Windows:
-    `configure-blocked`. A real macOS build attempt found one more,
-    fixed: curl's own configure-time "runtime libs availability" probe
+    `configure-blocked`. A real macOS build attempt found one more:
+    curl's own configure-time "runtime libs availability" probe
     (compiles and runs a test program against mbedtls's shared libs)
     failed because mbedtls's `.dylib` files have no `-install_name`
-    set, so dyld can't resolve them via `LC_RPATH` -- `make_env()` now
-    also sets `DYLD_LIBRARY_PATH`/`LD_LIBRARY_PATH` for every subprocess
-    it spawns (build steps included, not just test runs), matching
-    what `run_port_tests()` already did for test binaries. See
-    `porting/recipes/curl.json`'s own notes and `HISTORY.md`'s dated
-    entry for the full trail.
+    set, so dyld can't resolve them via `LC_RPATH`. First fix attempt
+    (`make_env()` also setting `DYLD_LIBRARY_PATH`/`LD_LIBRARY_PATH`
+    for every subprocess it spawns) turned out insufficient on real
+    hardware -- the same error recurred, because configure execs
+    through `/bin/sh`, and macOS strips `DYLD_`-prefixed env vars
+    across an exec of any SIP-protected system binary, so the var
+    never reached configure's own child probe. Real fix landed in
+    `mbedtls.json` instead: three `library/Makefile` patches add
+    `-install_name @rpath/$@` to the macOS `-dynamiclib` recipes,
+    baking the correct path into each `.dylib` at build time (immune
+    to env stripping), resolved via the consumer's existing
+    `-Wl,-rpath` LDFLAGS. Verified on Linux (regression-only, inert
+    there); macOS re-verification still pending. See
+    `porting/recipes/curl.json`'s and `porting/recipes/mbedtls.json`'s
+    own notes and `HISTORY.md`'s dated entry for the full trail.
 
 - **`.init_array`/`.fini_array` (ELF/PE/Mach-O constructor/destructor)
   support -- DONE on all three OSes, see `HISTORY.md`'s dated entries for

@@ -90,11 +90,24 @@ in those two win.
   curl's own configure-time "runtime libs availability" probe (compiles
   and *runs* a test program against mbedtls's shared libs) failed
   because mbedtls's `.dylib` files have no `-install_name` set, so dyld
-  can't resolve them via `LC_RPATH` -- `make_env()` now also sets
-  `DYLD_LIBRARY_PATH`/`LD_LIBRARY_PATH` as a runtime-loader fallback for
-  every subprocess it spawns (build steps included, not just test
-  runs), matching what `run_port_tests()` already did for test binaries.
-  See `HISTORY.md`'s 2026-08-14 entry and `porting/recipes/curl.json`'s own
+  can't resolve them via `LC_RPATH`. First attempt (`make_env()` also
+  setting `DYLD_LIBRARY_PATH`/`LD_LIBRARY_PATH` as a runtime-loader
+  fallback for every subprocess it spawns, matching what
+  `run_port_tests()` already did for test binaries) turned out
+  insufficient on real macOS hardware: the same error recurred, because
+  configure execs through `/bin/sh`, and macOS strips `DYLD_`-prefixed
+  environment variables across an exec of any SIP-protected system
+  binary -- so the env var never survives into configure's own child
+  probe. The real, durable fix landed in `porting/recipes/mbedtls.json`
+  instead: three new `library/Makefile` patches add
+  `-install_name @rpath/$@` to the APPLE_BUILD `-dynamiclib` recipes for
+  all three `.dylib`s, baking the correct load-command path into the
+  library itself (immune to any environment-stripping), resolved at
+  runtime by the consumer's own `-Wl,-rpath` LDFLAGS `make_env()`
+  already sets unconditionally. Verified on Linux (regression-only, the
+  patched Makefile targets are inert there); not yet re-verified on
+  macOS itself. See `HISTORY.md`'s 2026-08-14 entry and both
+  `porting/recipes/curl.json`'s and `porting/recipes/mbedtls.json`'s own
   notes for the full trail.
 
 ## Known gaps
