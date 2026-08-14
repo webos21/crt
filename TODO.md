@@ -55,31 +55,8 @@ Five active threads, not a flat list of one-off items:
     `pcre2_match()` round trip with three named capture groups. This does
     not close libffi's documented repeat-call bug; it only makes the
     already-known working subset reproducible.
-  - `pcre2`: **done on Linux and Windows, both `shared-pass`** (macOS
-    `static-pass` only so far -- the user confirmed `match-static` passes
-    there directly with the earlier static-only recipe, which predates
-    this session's shared-build addition, so macOS is `pending` for
-    `match-shared` specifically). No new CRT/PAL gap surfaced. Two
-    build-system quirks handled the same way earlier ports in this queue
-    already established a pattern for, not new problems: (1)
-    `--build=@CRT_MINGW_TRIPLE@` for the same Windows `config.guess`
-    issue libpng/xz/libffi already hit; (2) the recipe's own test file
-    needed `-DPCRE2_STATIC` in the `match-static` variant's `cflags`
-    (pcre2's own documented convention for linking its static library on
-    Windows) since a separate `crt-cc` compile step doesn't inherit the
-    *library's* own `-U_WIN32` override, so it otherwise expected
-    `dllimport`-decorated symbols against a plain static archive.
-    Started static-only (`--disable-shared --enable-static`), matching
-    bzip2/xz's own cautious start; once `match-static` passed for real on
-    Windows and Linux, dropped that restriction and added a
-    `match-shared` test entry. Verified for real on two hosts: both
-    `match-static` and `match-shared` print `pcre2_match_test: ok
-    matches=4 version=10.47 2025-10-21` on Windows and Linux (WSL Ubuntu
-    20.04 + clang-18), three named capture groups (user/host/tld)
-    individually checked against the matched substrings, not just a
-    nonzero match count. See `porting/recipes/pcre2.json`'s own notes for
-    the full trail.
-    Next: `mbedtls`.
+    Next: `mbedtls` (`pcre2` is done on all three OSes, `shared-pass`
+    -- see `HISTORY.md`'s dated entry).
 
 - **`.init_array`/`.fini_array` (ELF/PE/Mach-O constructor/destructor)
   support -- DONE on all three OSes, see `HISTORY.md`'s dated entries for

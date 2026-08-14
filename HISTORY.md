@@ -8,6 +8,76 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-08-14
+
+- **Ported pcre2 10.47 to Linux, macOS, and Windows -- all three
+  `shared-pass`**, the next entry in the porting matrix expansion queue
+  after xz (`bzip2` -> `xz` -> `pcre2` -> `mbedtls` -> `curl`, see
+  `TODO.md`). No dependencies, no new CRT/PAL gap -- every build-system
+  quirk hit was an already-established pattern from earlier ports in
+  this queue, not a new problem: (1) `--build=@CRT_MINGW_TRIPLE@` for the
+  same Windows `config.guess` issue libpng/xz/libffi already hit
+  (`config.guess` doesn't recognize plain Windows `uname` output); (2)
+  `target_overrides.windows.env.CFLAGS` undefines `_WIN32`/`_WIN32_WCE`/
+  `__WIN32__`/`WIN32` (same technique as zlib/xz/bzip2), since
+  `pcre2grep.c` has a real `#include <windows.h>` + `FindFirstFile()`-
+  based directory-walking implementation this sysroot has no equivalent
+  for -- pcre2's own `Makefile.am` has no configure-time toggle to skip
+  building `pcre2grep`/`pcre2test`, so the recipe still builds them, kept
+  on their portable `opendir()`/`readdir()` path instead.
+  - **`porting/tests/pcre2_match_test.c`**: a real `pcre2_compile()`/
+    `pcre2_match()` round trip with three named capture groups
+    (user/host/tld), each individually verified against the matched
+    substrings, not just a version-string smoke check or a nonzero match
+    count.
+  - **A real bug, found and fixed**: the test initially failed to link
+    on Windows with `undefined symbol: __declspec(dllimport)
+    pcre2_compile_8 ... cannot be used because it is not an import
+    library`. The library itself was built with `_WIN32` undefined
+    (correct -- no `dllimport`/`dllexport` decoration, appropriate for
+    static linking), but the test file's own compile step is a *separate*
+    `crt-cc` invocation that does not inherit the library's own
+    `target_overrides.windows.env.CFLAGS`, so it saw clang's
+    default-predefined `_WIN32` and expected DLL-import-style symbols
+    against a plain static archive. Fixed with the standard,
+    upstream-documented convention for exactly this: `-DPCRE2_STATIC` in
+    the `match-static` test's own `cflags` (deliberately *not* applied to
+    `match-shared`, added afterward, which needs the default
+    `dllimport`-decorated declarations to match the DLL import library it
+    links against).
+  - **Started static-only, then added shared, verified on all three
+    hosts for real**: matching bzip2/xz's own cautious start
+    (`--disable-shared --enable-static`), pcre2 first landed
+    `static-pass` on Linux and Windows. Once that round-tripped for real,
+    `--disable-shared`/`--enable-static` were dropped (`configure_args:
+    []`, matching zlib.json's own pattern of just using the library's
+    real default) and a `match-shared` test entry added. libtool
+    produces `libpcre2-8-0.dll` + `libpcre2-8.dll.a` (import library) on
+    Windows, `libpcre2-8.so` on Linux, `libpcre2-8.dylib` on macOS. Both
+    `match-static` and `match-shared` print `pcre2_match_test: ok
+    matches=4 version=10.47 2025-10-21` on Windows
+    (`cmake --build --preset windows-host-ninja-debug --target
+    port-test-pcre2`), Linux (WSL Ubuntu 20.04 + clang-18,
+    `tools/crt-port-build.py --port pcre2 --test`), and macOS (real
+    aarch64 hardware, user-run, including a clean CI pass on all 5
+    GitHub Actions legs before the macOS shared verification).
+  - **One macOS-specific pitfall, not a code bug**: the user's first
+    `match-shared` attempt on macOS failed with `clang: error: no such
+    file or directory: '.../lib/libpcre2-8.dylib'`. Root cause:
+    `port-test-pcre2` reused an already-`installed`-stamped port-tests
+    directory that still held the *earlier* static-only build (from
+    before this session dropped `--disable-shared`), so
+    `libpcre2-8.dylib` genuinely didn't exist there yet.
+    `cmake --build --preset <preset> --target port-rebuild-pcre2`
+    (clears the install stamp, reruns `configure`/`make`/`make install`)
+    before re-running `port-test-pcre2` picked up the shared build
+    correctly. Worth remembering generally: any recipe whose
+    `build.configure_args`/`env` changes after it was already built once
+    needs an explicit `port-rebuild-<name>` for the change to actually
+    take effect against an already-installed port -- the stamp-based
+    skip is deliberate (avoids re-running a slow `./configure && make` on
+    every invocation), not a bug.
+
 ## 2026-08-12
 
 - **Implemented Windows/PE "runtime pseudo relocation" support
