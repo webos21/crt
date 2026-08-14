@@ -23,7 +23,7 @@ struct sockaddr {
 struct sockaddr_storage {
   sa_family_t ss_family;
   char __ss_padding[126];
-};
+} __attribute__((aligned(__alignof__(void*))));
 
 #define AF_UNSPEC 0
 #define AF_UNIX 1

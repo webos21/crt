@@ -51,6 +51,8 @@ static size_t write_callback(char* ptr, size_t size, size_t nmemb, void* userdat
 
 static int fetch(const char* url, int verify_tls, long* out_status, struct response_buffer* buf) {
   CURL* easy = curl_easy_init();
+  CURLcode res;
+
   if (!easy) {
     fprintf(stderr, "curl_http_roundtrip_test: curl_easy_init failed\n");
     return -1;
@@ -69,7 +71,7 @@ static int fetch(const char* url, int verify_tls, long* out_status, struct respo
     curl_easy_setopt(easy, CURLOPT_SSL_VERIFYHOST, 0L);
   }
 
-  CURLcode res = curl_easy_perform(easy);
+  res = curl_easy_perform(easy);
   if (res != CURLE_OK) {
     fprintf(stderr, "curl_http_roundtrip_test: %s failed: %s\n", url, curl_easy_strerror(res));
     curl_easy_cleanup(easy);

@@ -54,6 +54,7 @@ int main(void) {
   memset(&hints, 0, sizeof(hints));
   hints.ai_family = AF_INET;
   hints.ai_socktype = SOCK_STREAM;
+  hints.ai_flags = AI_ADDRCONFIG;
   if (getaddrinfo("127.0.0.1", "12345", &hints, &res) != 0 ||
       res == 0 ||
       res->ai_family != AF_INET ||
@@ -62,6 +63,13 @@ int main(void) {
     return fail("getaddrinfo numeric");
   }
   freeaddrinfo(res);
+  res = 0;
+
+  hints.ai_flags = 0x40000000;
+  if (getaddrinfo("127.0.0.1", "12345", &hints, &res) != EAI_BADFLAGS) {
+    freeaddrinfo(res);
+    return fail("getaddrinfo bad flags");
+  }
 
   server = socket(AF_INET, SOCK_STREAM, 0);
   if (server < 0) {

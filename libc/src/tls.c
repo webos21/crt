@@ -219,6 +219,10 @@ int* __crt_thread_errno(void) {
   return &__crt_thread_get_current()->errno_value;
 }
 
+int* __crt_thread_h_errno(void) {
+  return &__crt_thread_get_current()->h_errno_value;
+}
+
 void** __crt_thread_key_values(void) {
   return __crt_thread_get_current()->key_values;
 }

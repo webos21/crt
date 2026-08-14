@@ -7,6 +7,7 @@
 typedef struct crt_thread_context {
   void* control;
   int errno_value;
+  int h_errno_value;
   void* key_values[CRT_TLS_KEYS_MAX];
   char name[CRT_TLS_NAME_MAX];
 #if defined(CRT_TARGET_OS_LINUX)
@@ -34,6 +35,7 @@ long* __crt_windows_tls_index_ptr(void);
 #endif
 void* __crt_thread_control(void);
 int* __crt_thread_errno(void);
+int* __crt_thread_h_errno(void);
 void** __crt_thread_key_values(void);
 char* __crt_thread_name(void);
 

@@ -10,7 +10,11 @@
 #include <sys/utsname.h>
 #include <unistd.h>
 
+#include <private/crt_tls.h>
+
 #if defined(CRT_TARGET_OS_MACOS)
+#include <private/crt_macho_symbol.h>
+
 struct crt_darwin_sockaddr_in {
   unsigned char sin_len;
   unsigned char sin_family;
@@ -19,9 +23,29 @@ struct crt_darwin_sockaddr_in {
   unsigned char sin_zero[8];
 };
 
+struct crt_darwin_addrinfo {
+  int ai_flags;
+  int ai_family;
+  int ai_socktype;
+  int ai_protocol;
+  socklen_t ai_addrlen;
+  char* ai_canonname;
+  struct sockaddr* ai_addr;
+  struct crt_darwin_addrinfo* ai_next;
+};
+
+typedef int (*crt_darwin_getaddrinfo_fn)(
+    const char*, const char*, const struct crt_darwin_addrinfo*, struct crt_darwin_addrinfo**);
+typedef void (*crt_darwin_freeaddrinfo_fn)(struct crt_darwin_addrinfo*);
+
+#define CRT_RTLD_NEXT ((void*)-1)
+
+void* dlsym(void* handle, const char* symbol);
+
 #define CRT_DARWIN_SOL_SOCKET 0xffff
 #define CRT_DARWIN_SO_REUSEADDR 0x0004
 #define CRT_DARWIN_SO_ERROR 0x1007
+#define CRT_DARWIN_AI_NUMERICSERV 0x00001000
 #endif
 
 long __crt_sys_socket(int domain, int type, int protocol);
@@ -48,7 +72,10 @@ long __crt_sys_setsockopt(int sockfd, int level, int optname, const void* optval
 long __crt_sys_getsockopt(int sockfd, int level, int optname, void* optval, unsigned int* optlen);
 long __crt_sys_shutdown(int sockfd, int how);
 
-int h_errno;
+int* __get_h_errno(void) {
+  return __crt_thread_h_errno();
+}
+
 
 static long normalize_socket_result(long result) {
   if (result < 0 && result >= -4095) {
@@ -832,6 +859,76 @@ static int dns_resolve_hostname(const char* hostname, struct in_addr* out) {
   return result;
 }
 
+#if defined(CRT_TARGET_OS_MACOS)
+static int macos_host_resolve_hostname(
+    const char* node,
+    const char* service,
+    int socktype,
+    int protocol,
+    struct sockaddr_in* out_addr) {
+  static crt_darwin_getaddrinfo_fn real_getaddrinfo;
+  static crt_darwin_freeaddrinfo_fn real_freeaddrinfo;
+  static int real_symbols_resolved;
+  static int real_symbols_available;
+  struct crt_darwin_addrinfo hints;
+  struct crt_darwin_addrinfo* results = 0;
+  struct crt_darwin_addrinfo* it;
+  int rc;
+
+  if (!real_symbols_resolved) {
+    real_symbols_resolved = 1;
+    real_getaddrinfo = (crt_darwin_getaddrinfo_fn)__crt_macho_find_symbol_in_loaded_image(
+        "/usr/lib/system/libsystem_info.dylib", "getaddrinfo");
+    real_freeaddrinfo = (crt_darwin_freeaddrinfo_fn)__crt_macho_find_symbol_in_loaded_image(
+        "/usr/lib/system/libsystem_info.dylib", "freeaddrinfo");
+    if (real_getaddrinfo == 0) {
+      real_getaddrinfo = (crt_darwin_getaddrinfo_fn)dlsym(CRT_RTLD_NEXT, "getaddrinfo");
+    }
+    if (real_freeaddrinfo == 0) {
+      real_freeaddrinfo = (crt_darwin_freeaddrinfo_fn)dlsym(CRT_RTLD_NEXT, "freeaddrinfo");
+    }
+    if (real_getaddrinfo == (crt_darwin_getaddrinfo_fn)getaddrinfo) {
+      real_getaddrinfo = 0;
+    }
+    if (real_freeaddrinfo == (crt_darwin_freeaddrinfo_fn)freeaddrinfo) {
+      real_freeaddrinfo = 0;
+    }
+    real_symbols_available = real_getaddrinfo != 0 && real_freeaddrinfo != 0;
+  }
+  if (!real_symbols_available) {
+    return -1;
+  }
+
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family = AF_INET;
+  hints.ai_socktype = socktype;
+  hints.ai_protocol = protocol;
+  hints.ai_flags = CRT_DARWIN_AI_NUMERICSERV;
+  rc = real_getaddrinfo(node, service, &hints, &results);
+  if (rc != 0) {
+    return -1;
+  }
+
+  for (it = results; it != 0; it = it->ai_next) {
+    const struct crt_darwin_sockaddr_in* darwin_addr;
+    if (it->ai_family != AF_INET || it->ai_addr == 0 ||
+        it->ai_addrlen < (socklen_t)sizeof(struct crt_darwin_sockaddr_in)) {
+      continue;
+    }
+    darwin_addr = (const struct crt_darwin_sockaddr_in*)it->ai_addr;
+    memset(out_addr, 0, sizeof(*out_addr));
+    out_addr->sin_family = AF_INET;
+    out_addr->sin_port = darwin_addr->sin_port;
+    out_addr->sin_addr = darwin_addr->sin_addr;
+    real_freeaddrinfo(results);
+    return 0;
+  }
+
+  real_freeaddrinfo(results);
+  return -1;
+}
+#endif
+
 int getaddrinfo(
     const char* node,
     const char* service,
@@ -849,6 +946,9 @@ int getaddrinfo(
     return EAI_FAIL;
   }
   *res = 0;
+  if (hints != 0 && (hints->ai_flags & ~AI_MASK) != 0) {
+    return EAI_BADFLAGS;
+  }
   if (family != AF_UNSPEC && family != AF_INET) {
     return EAI_FAMILY;
   }
@@ -871,6 +971,16 @@ int getaddrinfo(
     addr->sin_addr.s_addr =
         (hints != 0 && (hints->ai_flags & AI_PASSIVE) != 0) ? htonl(INADDR_ANY) : htonl(INADDR_LOOPBACK);
   } else if (inet_pton(AF_INET, node, &addr->sin_addr) != 1) {
+    if (hints != 0 && (hints->ai_flags & AI_NUMERICHOST) != 0) {
+      free(ai);
+      free(addr);
+      return EAI_NONAME;
+    }
+#if defined(CRT_TARGET_OS_MACOS)
+    if (macos_host_resolve_hostname(node, service, socktype, protocol, addr) == 0) {
+      port = addr->sin_port;
+    } else
+#endif
     /* Not a literal IP -- try a real DNS lookup (see the DNS client
      * section above) before giving up. */
     if (dns_resolve_hostname(node, &addr->sin_addr) != 0) {

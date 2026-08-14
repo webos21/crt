@@ -13,8 +13,8 @@ struct addrinfo {
   int ai_socktype;
   int ai_protocol;
   socklen_t ai_addrlen;
-  struct sockaddr* ai_addr;
   char* ai_canonname;
+  struct sockaddr* ai_addr;
   struct addrinfo* ai_next;
 };
 
@@ -28,27 +28,42 @@ struct hostent {
 
 #define h_addr h_addr_list[0]
 
-extern int h_errno;
+int* __get_h_errno(void);
 
 #define HOST_NOT_FOUND 1
 #define TRY_AGAIN 2
 #define NO_RECOVERY 3
 #define NO_DATA 4
 
-#define AI_PASSIVE 0x0001
-#define AI_CANONNAME 0x0002
-#define AI_NUMERICHOST 0x0004
-#define AI_NUMERICSERV 0x0400
+#define AI_PASSIVE 0x00000001
+#define AI_CANONNAME 0x00000002
+#define AI_NUMERICHOST 0x00000004
+#define AI_NUMERICSERV 0x00000008
+#define AI_ALL 0x00000100
+#define AI_V4MAPPED_CFG 0x00000200
+#define AI_ADDRCONFIG 0x00000400
+#define AI_V4MAPPED 0x00000800
+#define AI_DEFAULT (AI_V4MAPPED_CFG | AI_ADDRCONFIG)
+#define AI_MASK \
+  (AI_PASSIVE | AI_CANONNAME | AI_NUMERICHOST | AI_NUMERICSERV | AI_ADDRCONFIG)
 
-#define EAI_BADFLAGS -1
-#define EAI_NONAME -2
-#define EAI_AGAIN -3
-#define EAI_FAIL -4
-#define EAI_FAMILY -6
-#define EAI_SOCKTYPE -7
-#define EAI_SERVICE -8
-#define EAI_MEMORY -10
-#define EAI_SYSTEM -11
+#define EAI_ADDRFAMILY 1
+#define EAI_AGAIN 2
+#define EAI_BADFLAGS 3
+#define EAI_FAIL 4
+#define EAI_FAMILY 5
+#define EAI_MEMORY 6
+#define EAI_NODATA 7
+#define EAI_NONAME 8
+#define EAI_SERVICE 9
+#define EAI_SOCKTYPE 10
+#define EAI_SYSTEM 11
+#define EAI_BADHINTS 12
+#define EAI_PROTOCOL 13
+#define EAI_OVERFLOW 14
+#define EAI_MAX 15
+
+#define h_errno (*__get_h_errno())
 
 int getaddrinfo(
     const char* node,

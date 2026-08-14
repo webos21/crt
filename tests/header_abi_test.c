@@ -63,7 +63,8 @@ CRT_STATIC_ASSERT(stat_has_64_size, sizeof(((struct stat*)0)->st_size) == 8);
 CRT_STATIC_ASSERT(timespec_has_64_sec, sizeof(((struct timespec*)0)->tv_sec) == 8);
 CRT_STATIC_ASSERT(timeval_has_64_sec, sizeof(((struct timeval*)0)->tv_sec) == 8);
 CRT_STATIC_ASSERT(sockaddr_size, sizeof(struct sockaddr) == 16);
-CRT_STATIC_ASSERT(sockaddr_storage_large, sizeof(struct sockaddr_storage) >= 128);
+CRT_STATIC_ASSERT(sockaddr_storage_size_bionic, sizeof(struct sockaddr_storage) == 128);
+CRT_STATIC_ASSERT(sockaddr_storage_pointer_aligned, _Alignof(struct sockaddr_storage) == sizeof(void*));
 CRT_STATIC_ASSERT(fd_set_1024, FD_SETSIZE == 1024);
 CRT_STATIC_ASSERT(pollfd_layout, offsetof(struct pollfd, revents) > offsetof(struct pollfd, events));
 CRT_STATIC_ASSERT(addrinfo_addrlen_socklen, sizeof(((struct addrinfo*)0)->ai_addrlen) == sizeof(socklen_t));
@@ -77,6 +78,13 @@ CRT_STATIC_ASSERT(sysconf_open_max_bionic, _SC_OPEN_MAX == 0x000b);
 CRT_STATIC_ASSERT(sysconf_mapped_files_bionic, _SC_MAPPED_FILES == 0x003b);
 CRT_STATIC_ASSERT(sysconf_nprocessors_onln_bionic, _SC_NPROCESSORS_ONLN == 0x0061);
 CRT_STATIC_ASSERT(sysconf_monotonic_clock_bionic, _SC_MONOTONIC_CLOCK == 0x0064);
+CRT_STATIC_ASSERT(ai_numericsrv_bionic, AI_NUMERICSERV == 0x00000008);
+CRT_STATIC_ASSERT(ai_addrconfig_bionic, AI_ADDRCONFIG == 0x00000400);
+CRT_STATIC_ASSERT(ai_default_bionic, AI_DEFAULT == (AI_V4MAPPED_CFG | AI_ADDRCONFIG));
+CRT_STATIC_ASSERT(eai_badflags_bionic, EAI_BADFLAGS == 3);
+CRT_STATIC_ASSERT(eai_noname_bionic, EAI_NONAME == 8);
+CRT_STATIC_ASSERT(eai_service_bionic, EAI_SERVICE == 9);
+CRT_STATIC_ASSERT(eai_system_bionic, EAI_SYSTEM == 11);
 
 #if defined(CRT_TARGET_OS_MACOS)
 CRT_STATIC_ASSERT(mach_port_32, sizeof(mach_port_t) == 4);
