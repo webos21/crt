@@ -119,8 +119,16 @@ Five active threads, not a flat list of one-off items:
     against both. Not yet fixed -- needs either real symbol-visibility
     control on mbedtls's Windows DLL build, or curl linking against
     mbedtls's static libs even for its own shared build. Windows:
-    `configure-blocked`. See `porting/recipes/curl.json`'s own notes
-    and `HISTORY.md`'s dated entry for the full trail.
+    `configure-blocked`. A real macOS build attempt found one more,
+    fixed: curl's own configure-time "runtime libs availability" probe
+    (compiles and runs a test program against mbedtls's shared libs)
+    failed because mbedtls's `.dylib` files have no `-install_name`
+    set, so dyld can't resolve them via `LC_RPATH` -- `make_env()` now
+    also sets `DYLD_LIBRARY_PATH`/`LD_LIBRARY_PATH` for every subprocess
+    it spawns (build steps included, not just test runs), matching
+    what `run_port_tests()` already did for test binaries. See
+    `porting/recipes/curl.json`'s own notes and `HISTORY.md`'s dated
+    entry for the full trail.
 
 - **`.init_array`/`.fini_array` (ELF/PE/Mach-O constructor/destructor)
   support -- DONE on all three OSes, see `HISTORY.md`'s dated entries for

@@ -501,6 +501,35 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
     env["LIBS"] = env.get("CRT_EXTRA_LIBS", "")
     env["DESTDIR"] = ""
     env["CRT_PORT_BUILD_DIR"] = build_dir_env
+    # DYLD_LIBRARY_PATH/LD_LIBRARY_PATH: a runtime-loader fallback search
+    # path pointing at this port's shared-library install dir, alongside
+    # the -Wl,-rpath flag above -- needed for real, not just belt-and-
+    # suspenders: found while porting curl on macOS, where its own
+    # configure runs a real "checking runtime libs availability" probe
+    # (compiles AND EXECUTES a tiny test program linked against
+    # -lmbedtls/-lmbedx509/-lmbedcrypto/-lz) as part of detecting the
+    # mbedTLS backend. That probe failed outright ("one or more libs
+    # available at link-time are not available runtime") because
+    # mbedtls's own hand-written library/Makefile builds its .dylib
+    # files with no explicit -install_name at all (unlike every other
+    # shared-library recipe here, which drives real GNU Libtool and
+    # gets a correct one automatically) -- ld64's default records a
+    # bare "libmbedcrypto.dylib" with no @rpath/absolute-path prefix at
+    # all, which dyld can never resolve via LC_RPATH (macOS's rpath
+    # mechanism only helps references already prefixed "@rpath/...";
+    # unlike Linux's DT_RPATH/DT_RUNPATH, it does nothing for a bare
+    # name) regardless of the -Wl,-rpath flag already in LDFLAGS above.
+    # This project's own run_port_tests()/port_test_env() already set
+    # this same env var for *running* a port's own test binary
+    # afterward (which is why mbedtls's own shared-library test already
+    # passed on macOS despite this) -- but configure's own internal
+    # runtime probes, run as part of the *build* step (not the test
+    # step), never inherited it. Setting it here, once, generically,
+    # covers both without needing an mbedtls-specific workaround.
+    if target_os in ("linux", "macos"):
+        runtime_lib_var = "LD_LIBRARY_PATH" if target_os == "linux" else "DYLD_LIBRARY_PATH"
+        existing = env.get(runtime_lib_var, "")
+        env[runtime_lib_var] = f"{port_prefix_env}/lib{os.pathsep}{existing}" if existing else f"{port_prefix_env}/lib"
     return env
 
 

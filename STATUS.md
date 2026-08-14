@@ -85,8 +85,16 @@ in those two win.
   build turned out to statically embed this project's libc with no
   symbol-visibility control and re-export its internal symbols, colliding
   with this project's own `c.lib` once curl links against both (not
-  fixed this session -- not a curl bug, see `TODO.md`). See
-  `HISTORY.md`'s 2026-08-14 entry and `porting/recipes/curl.json`'s own
+  fixed this session -- not a curl bug, see `TODO.md`). A real macOS
+  build attempt found one more, in `tools/crt-port-build.py` itself:
+  curl's own configure-time "runtime libs availability" probe (compiles
+  and *runs* a test program against mbedtls's shared libs) failed
+  because mbedtls's `.dylib` files have no `-install_name` set, so dyld
+  can't resolve them via `LC_RPATH` -- `make_env()` now also sets
+  `DYLD_LIBRARY_PATH`/`LD_LIBRARY_PATH` as a runtime-loader fallback for
+  every subprocess it spawns (build steps included, not just test
+  runs), matching what `run_port_tests()` already did for test binaries.
+  See `HISTORY.md`'s 2026-08-14 entry and `porting/recipes/curl.json`'s own
   notes for the full trail.
 
 ## Known gaps

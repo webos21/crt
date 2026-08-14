@@ -448,6 +448,38 @@ substantive update.
     into the recipe). Windows: `configure-blocked` (configure itself
     now succeeds after the `CPPFLAGS` fix above; the actual link step
     doesn't). macOS not yet verified this session.
+  - **The user's own real macOS build attempt found one more distinct
+    bug, in `tools/crt-port-build.py` itself.** curl's `configure` runs
+    a real "checking runtime libs availability" probe as part of
+    detecting the mbedTLS backend -- it compiles *and executes* a tiny
+    test program linked against `-lmbedtls`/`-lmbedx509`/
+    `-lmbedcrypto`/`-lz`. That probe failed outright ("one or more libs
+    available at link-time are not available runtime"), because
+    mbedtls's own hand-written `library/Makefile` builds its `.dylib`
+    files with no explicit `-install_name` at all (unlike every other
+    shared-library recipe here, which drives real GNU Libtool and gets
+    a correct one automatically) -- ld64's default records a bare
+    `libmbedcrypto.dylib` with no `@rpath`/absolute-path prefix, which
+    dyld can never resolve via `LC_RPATH` (macOS's rpath mechanism only
+    helps references already prefixed `@rpath/...`; unlike Linux's
+    `DT_RPATH`/`DT_RUNPATH`, it does nothing for a bare name) regardless
+    of the `-Wl,-rpath` flag `make_env()` already adds to `LDFLAGS`.
+    mbedtls's own shared-library test had already passed on macOS
+    despite this exact same install-name gap, because
+    `run_port_tests()`/`port_test_env()` already sets
+    `DYLD_LIBRARY_PATH` as a runtime-loader fallback before *running* a
+    port's own test binary -- but configure's own internal runtime
+    probes, run as part of the *build* step, never inherited it, since
+    that env var was only ever set in the narrower test-running path.
+    Fixed generally in `make_env()` itself, not with an mbedtls- or
+    curl-specific workaround: `DYLD_LIBRARY_PATH` (macOS) /
+    `LD_LIBRARY_PATH` (Linux, for symmetry and future-proofing, though
+    Linux's own rpath mechanism didn't actually need this) now point at
+    `PORT_PREFIX/lib` for every subprocess this tool spawns, build
+    steps included, not just test runs. Verified this didn't regress
+    anything on Linux: the full `port-test-recipes` aggregate stayed
+    clean, and curl's own static+shared tests there still pass. Not yet
+    re-verified on macOS itself this session (no local macOS hardware).
 
 ## 2026-08-13
 
