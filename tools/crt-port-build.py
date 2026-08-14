@@ -727,7 +727,27 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
         arg.replace("@PORT_PREFIX@", port_prefix_text)
         for arg in build.get("target_overrides", {}).get(target_os, {}).get("make_args", [])
     ]
-    make_args = [make, "-j", str(jobs)] + build["make_args"] + override_make_args
+    # build_make_args (new: target_overrides.<os>.build_make_args, distinct
+    # from target_overrides.<os>.make_args above): a `make` variable that
+    # must reach the BUILD step only, never `make install` -- unlike every
+    # existing use of the (build+install)-shared make_args override, which
+    # all only ever change *values* consumed identically by both steps.
+    # mbedtls's own top-level Makefile needs this: WINDOWS=1 selects the
+    # correctly-named .dll build (see the recipe's own notes for the
+    # -lbcrypt/-lws2_32/__udivti3/AESNI fixes that made this build shape
+    # possible), but the SAME top-level Makefile also wraps its *entire*
+    # `install:`/`uninstall:` block in `ifndef WINDOWS` -- passing
+    # WINDOWS=1 to `make install` too doesn't just change what install:
+    # does, it makes install: NOT EXIST AT ALL (confirmed directly: GNU
+    # Make's own -p database dump showed install: surviving only as an
+    # empty .PHONY entry with no recipe once WINDOWS=1 reached it, so
+    # `make install WINDOWS=1` silently no-ops -- exit 0, nothing copied,
+    # no error -- rather than failing loudly).
+    build_only_make_args = [
+        arg.replace("@PORT_PREFIX@", port_prefix_text)
+        for arg in build.get("target_overrides", {}).get(target_os, {}).get("build_make_args", [])
+    ]
+    make_args = [make, "-j", str(jobs)] + build["make_args"] + override_make_args + build_only_make_args
     # install_args gets the same VAR=value overrides as make_args (but not
     # the base build["make_args"]/-jN, which are build-target-specific
     # flags like parallelism that don't apply to `make install`): a

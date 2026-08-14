@@ -53,16 +53,18 @@ in those two win.
   confirmed green across the board. `libffi` overall stays `partial` only
   because of its unrelated, pre-existing `-O1`/`-O2`
   `ffi_call()`-repeat-call bug. `mbedtls` (the next port in the queue
-  after `pcre2`, crypto library only) is now `static-pass` on Linux and
+  after `pcre2`, crypto library only) is now `shared-pass` on Linux and
   Windows: a real SHA-256 known-answer check plus an AES-128-CBC
-  encrypt/decrypt round trip passes on both hosts; macOS not yet
-  verified. See `HISTORY.md`'s 2026-08-14 entry and
-  `porting/recipes/mbedtls.json`'s own notes for the full trail
-  (two new, generalizable `tools/crt-port-build.py` extensions --
-  `build.skip_configure` and a base `build.install_args` field -- plus
-  one recipe patch disabling `MBEDTLS_NET_C`, since this PAL's sockets
-  surface doesn't yet cover everything mbedtls's own networking helper
-  needs; deferred to `curl`, next in the queue).
+  encrypt/decrypt round trip passes on both hosts against both the
+  static and shared build; macOS not yet verified. See `HISTORY.md`'s
+  2026-08-14 entry and `porting/recipes/mbedtls.json`'s own notes for
+  the full trail (three new, generalizable `tools/crt-port-build.py`
+  extensions -- `build.skip_configure`, a base `build.install_args`
+  field, and a per-OS `build_make_args` field for a `make` variable
+  that must reach the build step only, never `make install` -- plus
+  several recipe patches, including disabling `MBEDTLS_NET_C` since
+  this PAL's sockets surface doesn't yet cover everything mbedtls's own
+  networking helper needs; deferred to `curl`, next in the queue).
 
 ## Known gaps
 
@@ -111,7 +113,7 @@ in those two win.
 ## Next
 
 - Porting matrix expansion: `bzip2`, `xz`, and `pcre2` are all done on
-  Linux/macOS/Windows (`shared-pass`). `mbedtls` is `static-pass` on
+  Linux/macOS/Windows (`shared-pass`). `mbedtls` is `shared-pass` on
   Linux/Windows (macOS pending). Next up: `curl`; see `TODO.md`'s "in
   progressing" section for the current queue and order.
 - Broader POSIX/rootfs surface hardening beyond what each port's own build

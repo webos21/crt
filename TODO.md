@@ -55,24 +55,33 @@ Five active threads, not a flat list of one-off items:
     `pcre2_match()` round trip with three named capture groups. This does
     not close libffi's documented repeat-call bug; it only makes the
     already-known working subset reproducible.
-  - `mbedtls`: **static-pass on Linux and Windows**; macOS not yet
+  - `mbedtls`: **`shared-pass` on Linux and Windows**; macOS not yet
     verified (no local macOS hardware this session). A real SHA-256
     known-answer check plus an AES-128-CBC encrypt/decrypt round trip
-    passes through this project's own toolchain on both hosts. Needed
-    two new, small, generalizable `tools/crt-port-build.py` extensions
+    passes through this project's own toolchain on both hosts, against
+    both the static and shared build. Needed three new, small,
+    generalizable `tools/crt-port-build.py` extensions
     (`build.skip_configure` for upstream sources with no `./configure`
     step; a base `build.install_args` field for Makefiles using a
-    `DESTDIR=` install convention instead of autotools' `--prefix=`),
-    plus one recipe patch disabling `MBEDTLS_NET_C` (this PAL's
+    `DESTDIR=` install convention instead of autotools' `--prefix=`; a
+    per-OS `target_overrides.<os>.build_make_args` field for a `make`
+    variable that must reach the build step only, never `make install`
+    -- needed because mbedtls's own top-level Makefile wraps its entire
+    `install:` block in `ifndef WINDOWS`, so passing `WINDOWS=1` to
+    `make install` too doesn't change its behavior, it makes `install:`
+    not exist at all, silently no-oping instead of failing loudly),
+    plus several recipe patches: disabling `MBEDTLS_NET_C` (this PAL's
     `<sys/socket.h>` doesn't yet expose the fuller BSD-sockets surface
     `library/net_sockets.c` needs -- `select()`/`fd_set`/`FD_SET`/
     `SO_TYPE`/etc. -- that gap is `curl`'s territory, the next port in
-    this queue, not this crypto-only pass). Static/library-only for now
-    (no `programs`, no shared build -- mbedtls's own Windows shared-lib
-    rules hardcode `-lws2_32 -lwinmm -lgdi32`, real Windows SDK import
-    libs this PAL doesn't provide). See `porting/recipes/mbedtls.json`'s
-    own notes and `HISTORY.md`'s dated entry for the full trail.
-    Next: `curl`.
+    this queue, not this crypto-only pass), and (Windows only) dropping
+    an unavailable `-lbcrypt`/`-lws2_32`/`-lwinmm`/`-lgdi32` from the
+    Windows-only DLL link rules and disabling `MBEDTLS_HAVE_ASM`/
+    `MBEDTLS_AESNI_C` (this PAL's Windows sysroot has no compiler-rt/
+    builtins archive at all, a real, general gap worth a future
+    dedicated fix -- routed around for this port instead). See
+    `porting/recipes/mbedtls.json`'s own notes and `HISTORY.md`'s dated
+    entry for the full trail. Next: `curl`.
 
 - **`.init_array`/`.fini_array` (ELF/PE/Mach-O constructor/destructor)
   support -- DONE on all three OSes, see `HISTORY.md`'s dated entries for
@@ -170,7 +179,18 @@ Five active threads, not a flat list of one-off items:
      source;
   2. check Android Bionic public headers, source, ABI, and errno policy;
   3. extend CRT/PAL/sysroot rather than patching upstream first;
-  4. record host-specific policy differences in `docs/`.
+  4. record host-specific policy differences in `docs/`;
+  5. **verify both the static AND shared build during the same porting
+     pass, on every host, before calling a port done** -- not
+     static-first-then-shared-as-a-follow-up. Several ports in this
+     queue (bzip2, xz, pcre2, mbedtls) landed `static-pass` first and
+     only got `shared-pass` in a later pass or after the user asked why
+     shared hadn't been checked; going forward, a port's recipe/test
+     entries and status write-up should cover both build shapes before
+     the port is reported as finished, and a host-specific reason must
+     be recorded in the recipe's own notes if shared is genuinely
+     deferred for that host (e.g. a real missing SDK import library),
+     not just left unmentioned.
 
   A few smaller, longer-running audits ride along with this:
   - Keep auditing disabled toybox applets for pointer-to-`long` LLP64

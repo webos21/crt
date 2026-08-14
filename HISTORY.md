@@ -89,21 +89,26 @@ substantive update.
   standalone doc-only push triggering CI for nothing).
 
 - **Ported mbedtls 3.6.7 (crypto library only) to Linux and Windows --
-  both `static-pass`**, the next entry in the porting matrix expansion
+  both `shared-pass`**, the next entry in the porting matrix expansion
   queue after pcre2 (`bzip2` -> `xz` -> `pcre2` -> `mbedtls` -> `curl`,
   see `TODO.md`). Picked the 3.6.7 LTS release over the newer 4.2.0,
   which dropped mbedtls's plain top-level Makefile for a CMake-only
-  build this project's tooling doesn't support. Needed two small,
+  build this project's tooling doesn't support. Needed small,
   generalizable `tools/crt-port-build.py` extensions, not one-off
   recipe hacks: a new `build.skip_configure` flag (mbedtls has no
   `./configure` step at all; skips just that one step, reusing every
   other part of the existing configure-recipe machinery -- patches,
   env/CFLAGS overrides, `make_args`/`install_args`, Windows shell
-  wrapping, parallel `-jN` jobs), and a new base `build.install_args`
+  wrapping, parallel `-jN` jobs), a new base `build.install_args`
   field (extra arguments specific to `make install` only, distinct from
   the existing `target_overrides.<os>.make_args`) for mbedtls's
   `DESTDIR=`-based install convention, unlike every other recipe here's
-  autotools `--prefix=`.
+  autotools `--prefix=`, and (added in a follow-up pass, once static
+  landed and the user asked why shared verification kept being
+  deferred rather than done alongside it -- see TODO.md's new standing
+  porting-loop discipline item) a per-OS `target_overrides.<os>.
+  build_make_args` field for a `make` variable that must reach the
+  build step only, never install.
   - **Avoiding the `programs`/`mbedtls_test` dependency chain**:
     mbedtls's own `install: no_test` -> `no_test: programs` ->
     `programs: lib mbedtls_test` chain means a plain `make install`
@@ -168,12 +173,91 @@ substantive update.
     sha256=ba7816bf8f01cfea... aes128cbc=roundtrip-ok` on both. Full
     Windows `ctest` reran afterward (83/83) to confirm the
     `tools/crt-port-build.py` changes didn't regress anything else.
-    Static/library-only for now -- no shared build, since mbedtls's own
-    Windows shared-library link rules hardcode `-lws2_32 -lwinmm
-    -lgdi32`, real Windows SDK import libraries this PAL doesn't
-    provide; matches bzip2/xz/pcre2's own precedent of starting
-    static-only. macOS not yet verified (no local macOS hardware this
-    session).
+    Landed `static-pass` first on this initial pass.
+  - **Shared-build expansion, same day**: `SHARED=1` added to
+    `make_args` makes library/Makefile's own `all: shared static`
+    build both artifacts in one invocation (library/Makefile defaults
+    to `static` only otherwise). Getting a real, correctly-named
+    Windows shared build (`.dll` + `.dll.a` import library) took a
+    chain of further real, individually-confirmed fixes, each found by
+    an actual build attempt, not guessed in advance: (1)
+    `WINDOWS_BUILD`-gated `-lbcrypt` in `LOCAL_LDFLAGS` (mbedtls's
+    Windows entropy source calls `BCryptGenRandom`; unneeded since
+    `-D__unix__` already routes `entropy_poll.c` off that path) --
+    patched out. (2) The three `.dll` link recipes' own
+    `-lws2_32`/`-lwinmm`/`-lgdi32` (unneeded once `MBEDTLS_NET_C` is
+    disabled) and `-Wl,-soname` (an ELF-only GNU ld concept `lld-link`'s
+    PE frontend doesn't accept) and `-static-libgcc` -- patched out,
+    keeping `--out-implib` (the GNU-ld-compatible import-library flag
+    this project's own `crt-cc`/`lld-link` Windows shared-build path
+    already understands). (3) `bignum.c`'s `mbedtls_mpi_div_mpi()`
+    referencing undefined symbol `__udivti3` (a compiler-rt/libgcc
+    128-bit-division intrinsic): this PAL's Windows sysroot has no
+    compiler-rt/builtins archive at all -- unlike Linux/macOS, where
+    `tools/crt-cc` always links `libclang_rt.builtins.a` into every
+    link, shared or not, Windows' own `crt-cc` libs list has no
+    equivalent. A real, general gap worth a future dedicated fix
+    (noted in the recipe, not yet in `TODO.md` since routing around it
+    for mbedtls specifically was straightforward) -- routed around via
+    `-DMBEDTLS_HAVE_INT32` (forces bignum's portable 32-bit-limb path,
+    no `__int128` division), which conflicts with `MBEDTLS_HAVE_ASM`
+    per `bignum.h`'s own `check_config.h`, so `MBEDTLS_HAVE_ASM` also
+    needed disabling (Windows-only, `CRT_TARGET_OS_WINDOWS`-guarded
+    patch -- a plain `-U` on CFLAGS was tried first and confirmed NOT
+    to work, since `mbedtls_config.h`'s own unguarded `#define`
+    redefines it regardless of the command line). (4) Disabling
+    `HAVE_ASM` then left `MBEDTLS_AESNI_C` unsatisfiable (`aesni.h`
+    needs either `HAVE_ASM` or `-maes`/`-mpclmul` compiler intrinsics,
+    neither available) -- disabled too (Windows-only patch); no
+    correctness loss, `aes.c`'s portable table-based C implementation
+    is used instead, confirmed correct by this port's own AES
+    round-trip test. (5) A deeper, genuinely separate bug: mbedtls's
+    top-level Makefile wraps its *entire* `install:`/`uninstall:`
+    block in `ifndef WINDOWS` -- passing `WINDOWS=1` (needed during the
+    build step to select the correctly-named `.dll` link recipes) to
+    `make install` too doesn't just change what `install:` does, it
+    makes `install:` **not exist at all**. Confirmed directly, not
+    guessed: GNU Make's own `-p` database dump showed `install:`
+    surviving only as an empty `.PHONY` entry once `WINDOWS=1` reached
+    it, so `make install WINDOWS=1` silently no-ops -- exit 0, nothing
+    copied, no error -- which is exactly why this went unnoticed for a
+    full rebuild+test cycle (the "static" test kept passing against
+    stale, pre-shared-work install artifacts) before being caught by
+    checking install output file timestamps. Fixed generally, not with
+    an mbedtls-specific hack: `tools/crt-port-build.py` gained the new
+    `build_make_args` field described above, letting `WINDOWS=1` move
+    out of the shared build+install override and reach the build step
+    only -- `xz`'s own existing Windows recipe, which genuinely needs
+    its `target_overrides.windows.make_args` override to reach both
+    steps, is untouched. Verified for real end to end, both static and
+    shared, on Linux (WSL Ubuntu 20.04 + clang-18, clean clone) and
+    Windows (real x86_64 host): `crypto-static` and `crypto-shared`
+    both print `mbedtls_crypto_test: ok` on both hosts; Windows's
+    shared test binary confirmed via `llvm-objdump -p` to genuinely
+    dynamically depend on `libmbedcrypto.dll`. Reran the full
+    `port-test-recipes` aggregate (all recipes with automated tests)
+    and the full Windows `ctest` suite (83/83) afterward -- no
+    regressions from the `build_make_args` tooling change. Linux and
+    Windows: `shared-pass`. macOS not yet verified (no local macOS
+    hardware this session) -- `APPLE_BUILD=1` wired into
+    `target_overrides.macos.make_args` (safe there, since
+    `APPLE_BUILD` isn't gated by any `ifndef` around `install:`) to
+    select the `.dylib` link recipes, but not yet run on real
+    hardware.
+  - **New standing porting-loop discipline item added to `TODO.md`**:
+    verify both the static AND shared build during the same porting
+    pass, on every host, before calling a port done -- not
+    static-first-then-shared-as-a-follow-up. Several ports in this
+    queue (bzip2, xz, pcre2, mbedtls) landed `static-pass` first and
+    only got `shared-pass` later or after being asked why shared
+    hadn't been checked; this mbedtls pass is the first one done
+    under the new discipline (shared verified in the same continuous
+    session as static, once the gap was pointed out).
+  - **`docs/status.md` moved to `STATUS.md` at the repository root**
+    (same request that prompted the standing-discipline item above),
+    matching `TODO.md`/`HISTORY.md`'s own top-level placement. No other
+    file referenced the old path (checked directly), so this was a
+    plain `git mv` with no link fixups needed.
 
 ## 2026-08-13
 

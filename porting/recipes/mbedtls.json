@@ -19,7 +19,8 @@
       "CFLAGS": "-O2"
     },
     "make_args": [
-      "lib"
+      "lib",
+      "SHARED=1"
     ],
     "patches": [
       {
@@ -27,6 +28,42 @@
         "find": "#define MBEDTLS_NET_C",
         "replace": "/* #define MBEDTLS_NET_C -- disabled for this port, see mbedtls.json's notes */",
         "reason": "library/net_sockets.c's portable (non-_WIN32) path needs a fuller BSD-sockets surface than this PAL currently exposes -- confirmed by a real build attempt, not assumed: select()/fd_set/FD_ZERO/FD_SET/FD_ISSET/suseconds_t/SO_TYPE all came back as undeclared on Windows. This is squarely curl's territory (the next port in this queue, which genuinely needs sockets), not this crypto-only first pass -- mbedtls's own SSL/TLS layer only calls into net_sockets.c through the mbedtls_net_context callback shape a *consumer* can already swap out for its own I/O, so disabling MBEDTLS_NET_C does not block AES/SHA/RSA/etc. use at all, only the convenience BSD-socket helper this port's own test doesn't use."
+      },
+      {
+        "file": "include/mbedtls/mbedtls_config.h",
+        "find": "#define MBEDTLS_HAVE_ASM",
+        "replace": "#if !defined(CRT_TARGET_OS_WINDOWS)\n#define MBEDTLS_HAVE_ASM\n#endif",
+        "reason": "Windows-only in effect (guarded by CRT_TARGET_OS_WINDOWS, a macro tools/crt-cc itself predefines for Windows targets -- genuine no-op on Linux/macOS, where MBEDTLS_HAVE_ASM stays on as upstream intends). A plain -UMBEDTLS_HAVE_ASM on the Windows CFLAGS (the same technique that works for _WIN32/MBEDTLS_NET_C-adjacent macros elsewhere in this recipe) was tried first and did NOT work -- confirmed by a real build attempt still hitting the same #error -- because, unlike those, mbedtls_config.h's own `#define MBEDTLS_HAVE_ASM` line has no #ifndef guard, so it unconditionally redefines the macro back to defined regardless of the command line. Needed alongside MBEDTLS_HAVE_INT32 below: bignum.h's own check_config.h refuses HAVE_INT32/HAVE_INT64 and HAVE_ASM defined simultaneously."
+      },
+      {
+        "file": "include/mbedtls/mbedtls_config.h",
+        "find": "#define MBEDTLS_AESNI_C",
+        "replace": "#if !defined(CRT_TARGET_OS_WINDOWS)\n#define MBEDTLS_AESNI_C\n#endif",
+        "reason": "Windows-only (CRT_TARGET_OS_WINDOWS-guarded, same pattern as MBEDTLS_HAVE_ASM above). AESNI_C's own library/aesni.h hard-#errors unless either compiler intrinsics (needs -maes -mpclmul target flags this recipe doesn't pass) or MBEDTLS_HAVE_ASM (disabled above, for the unrelated bignum __udivti3/compiler-rt gap) are available. Not a correctness loss: aes.c's own portable, table-based C implementation is used instead whenever AESNI_C is off, exactly as on any CPU without real AES-NI hardware -- confirmed correct by this port's own test (a real AES-128-CBC encrypt/decrypt round trip). Revisit if a future pass wants Windows AES-NI acceleration specifically (would need -maes/-mpclmul CFLAGS instead of disabling the feature)."
+      },
+      {
+        "file": "library/Makefile",
+        "find": "ifdef WINDOWS_BUILD\nLOCAL_LDFLAGS += -lbcrypt\nendif",
+        "replace": "ifdef WINDOWS_BUILD\n# -lbcrypt disabled for this port, see mbedtls.json's notes\nendif",
+        "reason": "Applies to every WINDOWS=1 build (compile AND link, not just the .dll recipes below): mbedtls's Windows entropy source (library/entropy_poll.c's _WIN32 branch) calls BCryptGenRandom, needing a real bcrypt.lib this PAL doesn't provide. Safe to drop: target_overrides.windows.env.CFLAGS already undefines _WIN32 (see that note below), so entropy_poll.c never compiles the BCryptGenRandom branch at all -- it takes the portable getrandom()/fopen(\"/dev/urandom\") path instead, which needs no bcrypt import. First discovered by a real build attempt (`lld: error: unable to find library -lbcrypt`), not assumed in advance -- WINDOWS_BUILD's own -lbcrypt line applies globally regardless of which entropy code path actually got compiled."
+      },
+      {
+        "file": "library/Makefile",
+        "find": "\t$(CC) -shared -Wl,-soname,$@ -Wl,--out-implib,$@.a -o $@ $(OBJS_TLS) -lws2_32 -lwinmm -lgdi32 -L. -lmbedx509 -lmbedcrypto -static-libgcc $(LOCAL_LDFLAGS) $(LDFLAGS)",
+        "replace": "\t$(CC) -shared -Wl,--out-implib,$@.a -o $@ $(OBJS_TLS) -L. -lmbedx509 -lmbedcrypto $(LOCAL_LDFLAGS) $(LDFLAGS)",
+        "reason": "libmbedtls.dll's own link recipe (only reached when WINDOWS=1 is passed, see the WINDOWS=1 make_args override below) hardcodes -lws2_32/-lwinmm/-lgdi32 (real Windows SDK import libraries this PAL doesn't provide) and -Wl,-soname (an ELF-only GNU ld concept lld-link's PE frontend doesn't understand) and -static-libgcc (irrelevant to clang/compiler-rt). ws2_32/winmm/gdi32 are safe to drop: MBEDTLS_NET_C (the only thing that would call into winsock) is already disabled by the patch above, and nothing else in this crypto-only build touches multimedia timers (winmm) or GDI. --out-implib is kept -- it is the same GNU-ld-compatible import-library flag this project's own crt-cc/lld-link Windows shared-build path already understands."
+      },
+      {
+        "file": "library/Makefile",
+        "find": "\t$(CC) -shared -Wl,-soname,$@ -Wl,--out-implib,$@.a -o $@ $(OBJS_X509) -lws2_32 -lwinmm -lgdi32 -L. -lmbedcrypto -static-libgcc $(LOCAL_LDFLAGS) $(LDFLAGS)",
+        "replace": "\t$(CC) -shared -Wl,--out-implib,$@.a -o $@ $(OBJS_X509) -L. -lmbedcrypto $(LOCAL_LDFLAGS) $(LDFLAGS)",
+        "reason": "Same fix as libmbedtls.dll's recipe above, applied to libmbedx509.dll."
+      },
+      {
+        "file": "library/Makefile",
+        "find": "\t$(CC) -shared -Wl,-soname,$@ -Wl,--out-implib,$@.a -o $@ $(OBJS_CRYPTO) -lws2_32 -lwinmm -lgdi32 -static-libgcc $(LOCAL_LDFLAGS) $(LDFLAGS)",
+        "replace": "\t$(CC) -shared -Wl,--out-implib,$@.a -o $@ $(OBJS_CRYPTO) $(LOCAL_LDFLAGS) $(LDFLAGS)",
+        "reason": "Same fix as libmbedtls.dll's recipe above, applied to libmbedcrypto.dll."
       }
     ],
     "install_args": [
@@ -36,8 +73,16 @@
     "target_overrides": {
       "windows": {
         "env": {
-          "CFLAGS": "-O2 -U_WIN32 -U_WIN32_WCE -U__WIN32__ -UWIN32 -U__MINGW32__ -D__unix__"
-        }
+          "CFLAGS": "-O2 -U_WIN32 -U_WIN32_WCE -U__WIN32__ -UWIN32 -U__MINGW32__ -D__unix__ -DMBEDTLS_HAVE_INT32"
+        },
+        "build_make_args": [
+          "WINDOWS=1"
+        ]
+      },
+      "macos": {
+        "make_args": [
+          "APPLE_BUILD=1"
+        ]
       }
     }
   },
@@ -55,23 +100,55 @@
         "@PORT_PREFIX@/lib/libmbedcrypto.a"
       ],
       "expect_stdout": "mbedtls_crypto_test: ok"
+    },
+    {
+      "name": "crypto-shared",
+      "type": "compile-run",
+      "source": "porting/tests/mbedtls_crypto_test.c",
+      "cflags": [
+        "-I@PORT_PREFIX@/include"
+      ],
+      "expect_stdout": "mbedtls_crypto_test: ok",
+      "target_overrides": {
+        "linux": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libmbedtls.so",
+            "@PORT_PREFIX@/lib/libmbedx509.so",
+            "@PORT_PREFIX@/lib/libmbedcrypto.so"
+          ]
+        },
+        "macos": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libmbedtls.dylib",
+            "@PORT_PREFIX@/lib/libmbedx509.dylib",
+            "@PORT_PREFIX@/lib/libmbedcrypto.dylib"
+          ]
+        },
+        "windows": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libmbedtls.dll.a",
+            "@PORT_PREFIX@/lib/libmbedx509.dll.a",
+            "@PORT_PREFIX@/lib/libmbedcrypto.dll.a"
+          ]
+        }
+      }
     }
   ],
   "status": {
-    "linux": "static-pass",
+    "linux": "shared-pass",
     "macos": "untested",
-    "windows": "static-pass"
+    "windows": "shared-pass"
   },
   "notes": [
     "Next in the porting matrix expansion queue after bzip2/xz/pcre2 (see TODO.md's \"Porting matrix expansion\" bullet). Picked the 3.6.7 LTS release (supported through at least March 2027), not the newer 4.2.0: 4.2.0 dropped the plain top-level Makefile entirely in favor of a CMake-only build, and this project's tooling (tools/crt-port-build.py) has no CMake-driven-port support at all -- 3.6.7 still ships a real, hand-written top-level Makefile.",
     "skip_configure (a new build.system:\"configure\" flag, added this session to tools/crt-port-build.py's build_configure_port()) -- mbedtls has no ./configure step at all; everything else in the configure-based flow (patches, env/CFLAGS overrides, make_args/install_args, Windows shell wrapping, parallel -jN jobs) is reused unchanged, so this only skips the one step that doesn't apply rather than adding a whole separate 'system' type for one recipe.",
     "install_args (new: a base build.install_args field, distinct from target_overrides.<os>.make_args, extra arguments specific to `make install` only) carries mbedtls's own DESTDIR=@PORT_PREFIX@ install convention -- unlike every other recipe here, mbedtls's Makefile uses `make install DESTDIR=...` (installing straight into DESTDIR, not a staging root prepended to a separate --prefix=), not autotools' --prefix= convention.",
-    "make_args: [\"lib\"] targets the top-level Makefile's `lib` goal specifically (`$(MAKE) -C library`, which itself defaults to `static` only unless the `SHARED` make variable is set -- see library/Makefile's `ifndef SHARED / all: static / else / all: shared static / endif`), not the default `all` goal (`programs tests`). This also sidesteps the framework/exported.make submodule requirement entirely: the top-level Makefile's own conditional only requires it for goals other than `lib`/`library/%` (`ifneq (,$(filter-out lib library/%,$(or $(MAKECMDGOALS),all)))`), and this tarball release does vendor a populated framework/ directory, but there is no reason to depend on it for a library-only port.",
-    "install_args' `-o no_test -o programs -o mbedtls_test` (GNU Make's --old-file/--assume-old option, one per phony prerequisite) routes around a real dependency-chain problem: mbedtls's own `install: no_test` -> `no_test: programs` -> `programs: lib mbedtls_test` chain means a plain `make install` would also try to build every example program under programs/ and the whole mbedtls_test framework (needing framework/exported.make for real this time, and pulling in far more than a library-only port needs). `-o` tells make to treat each of those phony targets as already up to date, so make walks straight to install:'s own recipe body (a handful of mkdir -p/cp -rp/cp -RP commands) without touching its prerequisites at all. Verified directly with GNU Make 4.2.1 (WSL Ubuntu 20.04, native, not yet through this project's own toolchain): `make -n install -o no_test -o programs -o mbedtls_test DESTDIR=...` shows only the install: recipe's own copy commands, no rebuild of programs/mbedtls_test; a real `make lib` + `make install ... DESTDIR=...` run produced exactly `include/{mbedtls,psa}`, `lib/lib{mbedtls,mbedx509,mbedcrypto}.a`, and (harmlessly) a handful of `bin/*.sh` helper scripts that upstream's own tarball ships with the executable bit already set (the `for p in programs/*/*` loop in install:'s recipe only copies files that are `[ -x $p ]`, which excludes ordinary un-built .c/.h sources when programs/ was never compiled -- confirmed by extracting a clean tarball natively into a Linux filesystem, since a first attempt copying from an NTFS-mounted WSL path falsely reported every file as executable, an artifact of that filesystem bridge, not the real tarball).",
-    "target_overrides.windows.cflags undefines _WIN32/_WIN32_WCE/__WIN32__/WIN32/__MINGW32__ (the same technique as every other Windows recipe here) and additionally defines __unix__: unlike the other ports so far, two of mbedtls's own library sources (entropy_poll.c, timing.c) have a HARD #error (not just a silently-empty translation unit) if neither _WIN32 nor a recognized Unix-like macro (unix/__unix/__unix__/__APPLE__+__MACH__/__HAIKU__/__midipix__, see library/common.h's MBEDTLS_PLATFORM_IS_UNIXLIKE derivation) is defined -- since this PAL has no real <windows.h>/<bcrypt.h>/QueryPerformanceCounter to satisfy the _WIN32 branch anyway (same reasoning as every prior port's _WIN32 undef), the correct fix is routing them down their portable POSIX branch (getrandom()/fopen(\"/dev/urandom\") for entropy, gettimeofday() for timing) via -D__unix__, not leaving _WIN32 defined and hoping the Windows branch compiles.",
-    "MBEDTLS_NET_C (networking, on by default) is disabled via the patch above -- first attempted leaving it enabled (with _WIN32 undefined, expecting library/net_sockets.c to take the same portable POSIX sockets path <sys/socket.h>/<netinet/in.h>/<arpa/inet.h>/<netdb.h> this project's own libc/src/socket.c and tests/socket_network_test.c already exercise on all three OSes), but a real Windows build attempt showed this PAL's <sys/socket.h>/friends don't yet expose the fuller BSD-sockets surface net_sockets.c also needs (select()/fd_set/FD_ZERO/FD_SET/FD_ISSET/suseconds_t/SO_TYPE all came back undeclared) -- see the patch's own \"reason\" for the full explanation and why disabling it doesn't block AES/SHA/RSA/etc. use (mbedtls's SSL/TLS layer only touches net_sockets.c through the mbedtls_net_context callback shape a consumer can already swap for its own I/O). Revisit once curl (the next port in this queue, which genuinely needs sockets) has driven this PAL's socket surface further.",
-    "Only mbedtls's own library/ static build is in scope for this first pass (no `programs`, no `tests`/mbedtls_test, no shared build): mbedtls's own Windows shared-library link rules (library/Makefile's `libmbedcrypto.dll`/etc. targets) hardcode `-lws2_32 -lwinmm -lgdi32`, real Windows SDK import libraries this PAL does not provide -- deferred, matching bzip2/xz/pcre2's own precedent of starting static-only and adding a shared-build entry only once the static build is verified solid.",
-    "porting/tests/mbedtls_crypto_test.c is a real cryptographic round trip, not a version-string/link-only smoke check: SHA-256(\"abc\") compared against the actual NIST/FIPS 180-4 known-answer digest, plus a full AES-128-CBC encrypt/decrypt round trip verifying the decrypted output exactly reproduces the original plaintext (and that the ciphertext is not simply equal to the plaintext, so a no-op 'encrypt' couldn't accidentally pass). Verified natively first (WSL Ubuntu 20.04, plain gcc, against a native `make lib` + `make install DESTDIR=...` build) before wiring into this recipe/tools/crt-port-build.py at all, to separate 'does the API usage make sense' from 'does the CRT toolchain integration work'.",
-    "Verified for real through this project's own toolchain end to end, both static-only: Windows (`cmake --build --preset windows-host-ninja-debug --target port-test-mbedtls`, real x86_64 host) and Linux (WSL Ubuntu 20.04 + clang-18, `cmake --build --preset linux-host-ninja-debug --target port-test-mbedtls` in a clean clone) both build the full library/ tree, install headers+libs via the DESTDIR/`-o`-skip install path described above, and print `mbedtls_crypto_test: ok sha256=ba7816bf8f01cfea... aes128cbc=roundtrip-ok`. Also reran this project's full Windows ctest suite afterward (83/83 passed) to confirm the tools/crt-port-build.py changes (skip_configure, install_args) didn't regress any existing port or PAL test. macOS not yet verified (no local macOS hardware this session) -- both static-pass on Linux/Windows, macOS: untested."
+    "make_args: [\"lib\", \"SHARED=1\"] targets the top-level Makefile's `lib` goal specifically (`$(MAKE) -C library`), not the default `all` goal (`programs tests`) -- sidesteps the framework/exported.make submodule requirement entirely (the top-level Makefile's own conditional only requires it for goals other than `lib`/`library/%`). SHARED=1 makes library/Makefile's own `all: shared static` build BOTH the static .a and the real shared library in the same invocation (library/Makefile defaults to `static` only when SHARED is unset), so this one recipe covers both static and shared verification together -- see the standing porting-loop discipline item in TODO.md this session added (\"verify both the static AND shared build during the same porting pass\").",
+    "install_args' `-o no_test -o programs -o mbedtls_test` (GNU Make's --old-file/--assume-old option, one per phony prerequisite) routes around a real dependency-chain problem: mbedtls's own `install: no_test` -> `no_test: programs` -> `programs: lib mbedtls_test` chain means a plain `make install` would also try to build every example program under programs/ and the whole mbedtls_test framework (needing framework/exported.make for real this time, and pulling in far more than a library-only port needs). `-o` tells make to treat each of those phony targets as already up to date, so make walks straight to install:'s own recipe body (a handful of mkdir -p/cp -rp/cp -RP commands) without touching its prerequisites at all.",
+    "target_overrides.windows.cflags undefines _WIN32/_WIN32_WCE/__WIN32__/WIN32/__MINGW32__ (the same technique as every other Windows recipe here) and additionally defines __unix__: two of mbedtls's own library sources (entropy_poll.c, timing.c) have a HARD #error (not just a silently-empty translation unit) if neither _WIN32 nor a recognized Unix-like macro (unix/__unix/__unix__/__APPLE__+__MACH__/__HAIKU__/__midipix__, see library/common.h's MBEDTLS_PLATFORM_IS_UNIXLIKE derivation) is defined -- since this PAL has no real <windows.h>/<bcrypt.h>/QueryPerformanceCounter to satisfy the _WIN32 branch anyway, -D__unix__ routes them down their portable POSIX branch (getrandom()/fopen(\"/dev/urandom\") for entropy, gettimeofday() for timing) instead.",
+    "MBEDTLS_NET_C (networking, on by default) is disabled via the mbedtls_config.h patch: a real Windows build attempt showed this PAL's <sys/socket.h> doesn't yet expose the fuller BSD-sockets surface library/net_sockets.c needs (select()/fd_set/FD_ZERO/FD_SET/FD_ISSET/suseconds_t/SO_TYPE all came back undeclared). Disabling it doesn't block AES/SHA/RSA/etc. use -- mbedtls's SSL/TLS layer only touches net_sockets.c through the mbedtls_net_context callback shape a consumer can already swap for its own I/O. Revisit once curl (the next port in this queue, which genuinely needs sockets) has driven this PAL's socket surface further.",
+    "Getting a real, correctly-named Windows shared build (.dll + .dll.a import library, not just a working library) took a chain of real, individually-confirmed fixes, each found by an actual build attempt rather than guessed in advance: (1) library/Makefile's WINDOWS_BUILD-gated -lbcrypt (mbedtls's Windows entropy source calls BCryptGenRandom; unneeded since -D__unix__ above already routes entropy_poll.c off that path) -- patched out. (2) The three .dll link recipes' own -lws2_32/-lwinmm/-lgdi32 (unneeded once MBEDTLS_NET_C is disabled) and their -Wl,-soname (an ELF-only GNU ld concept lld-link's PE frontend doesn't accept) and -static-libgcc -- patched out, keeping --out-implib (the GNU-ld-compatible import-library flag this project's own crt-cc/lld-link Windows shared-build path already understands). (3) bignum.c's mbedtls_mpi_div_mpi() referencing undefined symbol __udivti3 (a compiler-rt/libgcc 128-bit-division intrinsic) -- this PAL's Windows sysroot has no compiler-rt/builtins archive at all (unlike Linux/macOS, where tools/crt-cc always links libclang_rt.builtins.a into every link, shared or not; Windows' own crt-cc libs list has no equivalent, a real, general gap worth a future dedicated fix, tracked informally here rather than in TODO.md since routing around it for mbedtls specifically was straightforward). Routed around for this port via -DMBEDTLS_HAVE_INT32 (forces bignum's portable 32-bit-limb path, no __int128 division), which conflicts with MBEDTLS_HAVE_ASM per bignum.h's own check_config.h -- so HAVE_ASM also needed disabling (Windows-only, CRT_TARGET_OS_WINDOWS-guarded patch; a plain -U on the CFLAGS was tried first and confirmed NOT to work, since mbedtls_config.h's own unguarded #define redefines it regardless of the command line). (4) Disabling HAVE_ASM then left MBEDTLS_AESNI_C unsatisfiable (library/aesni.h needs either HAVE_ASM or compiler intrinsics via -maes/-mpclmul, neither available) -- disabled too (Windows-only patch); no correctness loss, aes.c's portable table-based C implementation is used instead, confirmed correct by this port's own AES round-trip test. (5) A deeper, genuinely separate bug: mbedtls's top-level Makefile wraps its ENTIRE install:/uninstall: block in `ifndef WINDOWS` -- passing WINDOWS=1 (needed during the BUILD step to select the correctly-named .dll link recipes) to `make install` too doesn't just change install:'s behavior, it makes install: not exist at all (confirmed directly via GNU Make's own -p database dump: install: survives only as an empty .PHONY entry once WINDOWS=1 reaches it, so `make install WINDOWS=1` silently no-ops -- exit 0, nothing copied, no error -- which is how this went unnoticed for a full rebuild+test cycle before being caught by checking install output timestamps). Fixed generally, not with an mbedtls-specific hack: tools/crt-port-build.py gained a new target_overrides.<os>.build_make_args field, distinct from the existing (build+install)-shared target_overrides.<os>.make_args (kept as-is, since xz's own Windows recipe genuinely needs its override to reach both steps) -- build_make_args reaches ONLY the make_args build step, letting WINDOWS=1 move there and out of install_args.",
+    "porting/tests/mbedtls_crypto_test.c is a real cryptographic round trip, not a version-string/link-only smoke check: SHA-256(\"abc\") compared against the actual NIST/FIPS 180-4 known-answer digest, plus a full AES-128-CBC encrypt/decrypt round trip verifying the decrypted output exactly reproduces the original plaintext (and that the ciphertext is not simply equal to the plaintext, so a no-op 'encrypt' couldn't accidentally pass). Verified natively first (WSL Ubuntu 20.04, plain gcc, against a native `make lib` + `make install DESTDIR=...` build) before wiring into this recipe/tools/crt-port-build.py at all.",
+    "Verified for real through this project's own toolchain end to end, BOTH static and shared, on Linux and Windows: `cmake --build --preset <preset> --target port-test-mbedtls` prints `mbedtls_crypto_test: ok sha256=ba7816bf8f01cfea... aes128cbc=roundtrip-ok` for both the crypto-static and crypto-shared test on Windows (real x86_64 host) and Linux (WSL Ubuntu 20.04 + clang-18, clean clone). Windows's shared test binary confirmed (via `llvm-objdump -p`) to genuinely dynamically depend on libmbedcrypto.dll, not accidentally statically linked. Also reran the full `port-test-recipes` aggregate on Windows (all recipes with automated tests, not just mbedtls) and the full Windows `ctest` suite (83/83) afterward to confirm the tools/crt-port-build.py changes (skip_configure, install_args, build_make_args) didn't regress any existing port or PAL test. Linux and Windows: shared-pass. macOS: untested (no local macOS hardware this session) -- APPLE_BUILD=1 is wired into target_overrides.macos.make_args (safe to reach both build and install, unlike Windows' WINDOWS=1, since APPLE_BUILD isn't involved in any ifndef gate around install: in the top-level Makefile) to select the correct DLEXT=dylib/.dylib link recipes, matching the same shared-build shape as Linux/Windows, but not yet run on real hardware."
   ]
 }
