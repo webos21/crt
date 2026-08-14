@@ -52,12 +52,48 @@ newest entry first) rather than leaving it here.
 Active threads, not a flat list of one-off items:
 
 - **Windows curl shared-link closure.** The first curl tranche is
-  `shared-pass` on Linux and macOS. Windows configure now passes, but the
-  shared libcurl link is blocked by mbedtls's Windows DLL re-exporting
-  embedded CRT/libc symbols (`__crt_sys_*`, `setenv`, etc.) and colliding
-  with this project's own `c.lib`. Resolve either by adding real export
-  control to the mbedtls Windows DLL build or by linking curl against
-  static mbedtls libraries for libcurl's own shared build.
+  `shared-pass` on Linux and macOS. Windows configure now passes, and a
+  real rebuild attempt shows `libcurl.la`/`libcurlu.la` themselves now
+  link cleanly -- the previously-documented mbedtls-Windows-DLL
+  duplicate-symbol blocker (`__crt_sys_*`/`setenv` re-exported alongside
+  mbedtls's real API, colliding with this project's own `c.lib`) did not
+  reproduce in that run. Not deliberately fixed, so still tracked here
+  as open/unexplained rather than closed -- needs a dedicated
+  investigation (or at least a repeat rebuild) before declaring it gone
+  for good; resolving it for real, if it recurs, still means either
+  adding real export control to the mbedtls Windows DLL build or linking
+  curl against static mbedtls libraries for libcurl's own shared build.
+  That same rebuild attempt surfaced a second, different, real bug
+  instead, now fixed: curl's own CLI tool (`src/curl.c`/`curlinfo.c`)
+  failed to link with `setmode`/`_spawnv`/`_P_WAIT` undeclared in GNU
+  Libtool's own generated `.libs/lt-curl.c` wrapper -- the same bug
+  class already fixed for libpng via
+  `porting/shims/win32/libtool_wrapper_compat.h`, but curl.json was
+  never wired up to use that shim. Fixed by adding the missing
+  `force_include` to curl.json's Windows `target_overrides`, plus
+  extending the shim itself with a fourth alias (`#define setmode
+  _setmode`) for a variant of the bug libpng never hit: curl's own
+  CFLAGS/CPPFLAGS also undefine `__MINGW32__` (libpng's don't), so
+  ltmain.sh's rename block never fires and the wrapper calls the bare,
+  un-prefixed `setmode` name directly. **Update, same session, verified
+  on real Windows hardware**: that fix (plus four more, real bugs found
+  chasing it end to end -- a second, worse shim-header collision that
+  silently mis-detected `pipe()`/`realpath()`/`sched_yield()` as absent
+  via curl's own generic autoconf function probes; missing `-U_WIN32`
+  cflags on the test programs themselves; Windows's `fcntl(F_SETFL,
+  O_NONBLOCK)` finally implemented for real (`SetNamedPipeHandleState`/
+  `ioctlsocket(FIONBIO)`); and a real Winsock `WSAENOTCONN`-right-after-
+  a-successful-non-blocking-`connect()` race, reinterpreted as `EAGAIN`
+  for non-blocking sockets) got curl's **HTTP round trip working end to
+  end on Windows for the first time ever** (`curl_easy_perform()`
+  against `http://example.com/` returns a real `200 OK`). **HTTPS does
+  not work yet** -- it crashes with a hard, deterministic
+  `STATUS_ACCESS_VIOLATION` right after `mbedTLS: Connecting to
+  example.com:443` is printed, a new, distinct, NOT YET ROOT-CAUSED bug
+  (most likely somewhere in curl's mbedTLS send/recv callback plumbing,
+  not confirmed). Windows status: `partial`. See
+  `porting/recipes/curl.json`'s own notes (a long, blow-by-blow trail)
+  and `HISTORY.md`'s dated entry for the full writeup.
 
 - **Windows shell/process stress hardening.** Real concurrency -- parallel
   `make -jN`, jobserver pipe fd handling, many live children in the

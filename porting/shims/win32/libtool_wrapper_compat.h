@@ -55,6 +55,25 @@
  * exists to switch on or off), so those three are real, independent
  * implementations instead of macro pairs.
  *
+ * `setmode()` (no leading underscore) is a fourth, later-discovered
+ * variant of the same problem, found porting curl: curl's own recipe
+ * undefines __MINGW32__ too (needed so curl's *own* configure/source
+ * treats this target as a portable POSIX host, not just to steer the
+ * wrapper's #include choice the way libpng's recipe does) -- so the
+ * `#elif defined __MINGW32__` rename block above never fires at all,
+ * and the wrapper's own generated call site (`setmode(1,_O_BINARY);`,
+ * emitted as a literal, unconditional line of C by ltmain.sh's own
+ * `func_emit_wrapper`, not gated behind any further #ifdef of its own)
+ * stays spelled exactly `setmode` -- undeclared, since neither the
+ * _MSC_VER nor __MINGW32__ branch that would have declared *or* renamed
+ * it ever ran. Aliased unconditionally to _setmode() below (`#define
+ * setmode _setmode`) -- confirmed harmless: curl's own real source has
+ * exactly one reference to the bare name (`lib/curl_setup.h`'s
+ * `CURL_BINMODE` macro), itself inside a permanently-dead `#ifdef
+ * MSDOS` branch on every host this project targets, so this doesn't
+ * touch a second, unrelated `setmode` binding anywhere in either port's
+ * own code.
+ *
  * Separately, _spawnv() also fixes up a broken PATH env var before
  * actually launching the target program (see _crt_libtool_wrapper_
  * fix_path_env() below). The wrapper's own generated LIB_PATH_VALUE/
@@ -89,12 +108,86 @@
 #ifndef CRT_PORT_SHIM_LIBTOOL_WRAPPER_COMPAT_H
 #define CRT_PORT_SHIM_LIBTOOL_WRAPPER_COMPAT_H
 
-#include <unistd.h>
-#include <sys/stat.h>
-#include <sys/wait.h>
+/* Deliberately minimal includes -- see the long comment below for why.
+ * <spawn.h>/<sys/wait.h> are kept because _spawnv()'s own body genuinely
+ * needs their real declarations (posix_spawn()'s opaque attribute/
+ * file-actions types aren't safe to hand-roll); everything else this
+ * file needs is forward-declared by hand instead of pulled in via a
+ * whole header. */
 #include <spawn.h>
-#include <stdlib.h>
-#include <string.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+
+/* Deliberately NOT #include <unistd.h>/<stdlib.h>/<sys/stat.h>/
+ * <string.h> here, and NOT relying on <spawn.h>'s own transitive pull
+ * of <sched.h>/<signal.h> for anything beyond what posix_spawn() itself
+ * needs -- all found, the hard way, breaking curl's own configure,
+ * because this shim is force-included via -include into EVERY compile
+ * in the whole build (needed so the actual libtool wrapper compile,
+ * reached only through Automake's LINK rule, picks it up -- see this
+ * file's own top comment), not just the wrapper's own. That includes
+ * autoconf's own tiny, header-free conftest.c probes, which deliberately
+ * avoid including anything themselves to test raw, undecorated symbol
+ * visibility. Two distinct failure shapes were found this way:
+ *
+ * (1) A hard configure error: `AC_C_UNDECLARED_BUILTIN_OPTIONS` compiles
+ *     `int main(void) { (void) strchr; return 0; }` expecting it to FAIL
+ *     (that's how it detects the compiler truly treats undeclared
+ *     identifiers as errors). Pulling in the real <string.h> here made
+ *     `strchr` already declared, so that conftest compiled cleanly
+ *     instead -- confirmed via config.log ($?=0 where autoconf expected
+ *     nonzero) -- and configure hard-errored ("cannot make ... report
+ *     undeclared builtins").
+ * (2) A silent, much more dangerous misdetection: GNU Autoconf's classic
+ *     `ac_fn_c_check_func` (the shell function backing every plain
+ *     `AC_CHECK_FUNC`/`AC_CHECK_FUNCS` call, used by curl's configure
+ *     for dozens of functions) compiles a K&R-style probe --
+ *     `char FUNCNAME ();` followed by `return FUNCNAME ();` -- to test
+ *     pure link-time symbol existence, deliberately with NO headers of
+ *     its own either. If this shim had already declared that same
+ *     symbol with its REAL, correctly-typed prototype (as <unistd.h>
+ *     does for `pipe(int[2])`, <stdlib.h> does for `realpath(...)`, or
+ *     <spawn.h>'s own transitive <sched.h> does for `sched_yield(void)`),
+ *     the two conflicting declarations in one translation unit are a
+ *     hard type-conflict compile error -- which `ac_fn_c_check_func`
+ *     treats not as a hard failure but as an ordinary, silent "no, this
+ *     function doesn't exist" result. Confirmed for real by diffing this
+ *     port's own Windows configure output against a from-scratch rerun
+ *     after this fix: `checking for pipe... no` (should be `yes` -- this
+ *     PAL genuinely implements it) turned out to be exactly why curl's
+ *     own `Curl_multi_handle()` failed at runtime with "Out of memory"
+ *     on the very first `curl_easy_perform()` -- curl's own internal
+ *     wakeup-pipe mechanism (`lib/socketpair.c`) needs a working `pipe()`
+ *     it believed it didn't have, and picked a different, broken path
+ *     instead. `checking for realpath...`/`checking for sched_yield...`
+ *     also silently flipped from `yes` to `no` the same way, from
+ *     <stdlib.h>'s real `realpath()` prototype and <spawn.h>'s
+ *     transitive <sched.h> pull of `sched_yield()`, respectively --
+ *     confirmed non-fatal to this port's own real, exercised code paths
+ *     (a full HTTP+HTTPS round trip through this project's own real
+ *     toolchain still passes end to end after this fix), but left here
+ *     as a known, deliberately-accepted residual gap: `<spawn.h>` is the
+ *     one header this shim cannot avoid (posix_spawn()'s own opaque
+ *     attribute/file-actions types aren't safe to hand-roll), so any
+ *     *other* function `<sched.h>`/`<signal.h>` happen to also declare
+ *     stays at this same small, bounded risk of a false "no" if curl (or
+ *     a future port reusing this shim) ever comes to depend on one. The
+ *     general lesson, not just curl-specific: force-including anything
+ *     into a whole autoconf-driven build's CFLAGS makes this shim's own
+ *     header footprint part of that build's own probe surface -- keep it
+ *     to the absolute minimum, and treat any header this file adds back
+ *     as a real, audited decision, not a convenience.
+ *
+ * environ (only <unistd.h> declares it in this project) and
+ * malloc()/free()/strlen()/memcpy()/strncmp() (only <stdlib.h>/
+ * <string.h> do) are all needed directly by this file's own code below,
+ * so they're forward-declared by hand here instead. */
+extern char** environ;
+void* malloc(size_t size);
+void free(void* ptr);
+size_t strlen(const char* s);
+void* memcpy(void* dest, const void* src, size_t n);
+int strncmp(const char* a, const char* b, size_t n);
 
 #define _getcwd getcwd
 #define _stat stat
@@ -110,6 +203,14 @@ static __inline int _setmode(int fd, int mode) {
   (void)mode;
   return 0;
 }
+
+/* Bare `setmode` (no leading underscore): the wrapper calls this
+ * literal spelling directly, unconditionally, whenever neither the
+ * _MSC_VER nor __MINGW32__ rename block above fired -- see the top
+ * comment's own `setmode()` paragraph for why that's exactly curl's
+ * case. Same real implementation as _setmode(), just under the other
+ * name. */
+#define setmode _setmode
 
 /* _spawnv()'s _P_WAIT mode: start `path` with `argv`, wait for it
  * synchronously, and return its exit status (or -1 if it couldn't even

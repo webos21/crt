@@ -164,9 +164,31 @@ struct crt_memory_status_ex {
 #define CRT_WS_SO_REUSEADDR 0x0004
 #define CRT_WS_SO_ERROR 0x1007
 #define CRT_WS_FIONREAD 0x4004667fUL
+#define CRT_WS_FIONBIO 0x8004667eUL
+#define CRT_WSAEWOULDBLOCK 10035
 #define CRT_FD_KIND_NONE 0
 #define CRT_FD_KIND_FILE 1
 #define CRT_FD_KIND_SOCKET 2
+/* ERROR_NO_DATA (232): a genuinely overloaded Win32 error code -- also
+ * the exact error ReadFile() returns on an anonymous pipe placed into
+ * PIPE_NOWAIT mode (via SetNamedPipeHandleState()) when no data is
+ * currently available to read, per MSDN's own documented behavior for
+ * nonblocking pipe reads. Historically mapped alongside
+ * CRT_ERROR_BROKEN_PIPE straight to EPIPE below (its OTHER, more common
+ * meaning: WriteFile() to a pipe whose read end has fully closed) --
+ * left as EPIPE there for that case, and special-cased to EAGAIN only
+ * inside __crt_sys_read()'s own pipe path, gated on this fd actually
+ * being in this project's own O_NONBLOCK-tracked state (see
+ * __crt_fd_set_status_flags), so a real broken-pipe WriteFile() failure
+ * elsewhere is never reinterpreted as "try again". */
+#define CRT_ERROR_NO_DATA 232
+/* PIPE_NOWAIT/PIPE_WAIT: SetNamedPipeHandleState()'s wait-mode bit.
+ * Anonymous pipes from CreatePipe() are always byte-mode
+ * (PIPE_READMODE_BYTE, value 0, never message mode), so these two
+ * values are a complete mode word on their own -- no need to read the
+ * current mode back first. */
+#define CRT_PIPE_NOWAIT 0x00000001UL
+#define CRT_PIPE_WAIT 0x00000000UL
 #define CRT_WAIT_OBJECT_0 0
 #define CRT_WAIT_FAILED 0xffffffffUL
 #define CRT_INFINITE 0xffffffffUL
@@ -404,6 +426,11 @@ __declspec(dllimport) BOOL CRT_WINAPI PeekNamedPipe(
     DWORD* lpBytesRead,
     DWORD* lpTotalBytesAvail,
     DWORD* lpBytesLeftThisMessage);
+__declspec(dllimport) BOOL CRT_WINAPI SetNamedPipeHandleState(
+    HANDLE hNamedPipe,
+    DWORD* lpMode,
+    DWORD* lpMaxCollectionCount,
+    DWORD* lpCollectDataTimeout);
 __declspec(dllimport) BOOL CRT_WINAPI GetConsoleScreenBufferInfo(
     HANDLE hConsoleOutput,
     struct crt_console_screen_buffer_info* lpConsoleScreenBufferInfo);
@@ -507,6 +534,13 @@ __declspec(dllimport) BOOL CRT_WINAPI FreeEnvironmentStringsA(char* lpszEnvironm
 static HANDLE fd_table[CRT_FD_TABLE_SIZE];
 static int fd_kind[CRT_FD_TABLE_SIZE];
 static int fd_flags[CRT_FD_TABLE_SIZE];
+/* O_NONBLOCK, tracked separately from fd_flags (an fcntl "fd flag" --
+ * F_GETFD/F_SETFD -- namespace; O_NONBLOCK is a "file status flag" --
+ * F_GETFL/F_SETFL -- namespace, kept apart the same way real fcntl(2)
+ * keeps them apart) -- see __crt_fd_get_status_flags/
+ * __crt_fd_set_status_flags below for the real implementation this
+ * backs. */
+static int fd_nonblock[CRT_FD_TABLE_SIZE];
 static int fd_table_initialized;
 static int winsock_initialized;
 #if !defined(__aarch64__) && !defined(_M_ARM64) && !defined(__x86_64__) && !defined(_M_X64)
@@ -534,6 +568,7 @@ static DWORD private_wait_pid;
 
 long __crt_sys_geteuid(void);
 static HANDLE get_fd_handle(int fd);
+static SOCKET get_fd_socket(int fd);
 static void init_fd_table(void);
 static long init_winsock(void);
 #if !defined(__aarch64__) && !defined(_M_ARM64) && !defined(__x86_64__) && !defined(_M_X64)
@@ -773,6 +808,40 @@ static int map_wsa_error(int error) {
     default:
       return EIO;
   }
+}
+
+/* WSAENOTCONN (10057) right after a non-blocking connect() has already
+ * been reported complete (select() writable, getsockopt(SO_ERROR) == 0)
+ * is a real, reproducible Windows/Winsock quirk, not a genuine "you
+ * never connected this socket" caller bug: found for real porting curl
+ * once __crt_sys_connect()'s own EINPROGRESS fix let a non-blocking
+ * connect complete correctly for the first time on this PAL --
+ * send()/sendto() still failed WSAENOTCONN on the very first attempt,
+ * confirmed transient (not a permanent failure) with a standalone
+ * probe: an immediate retry after a short delay (as little as ~200ms)
+ * succeeds outright, with no further connect()/select() calls in
+ * between. Winsock's own AFD (Ancillary Function Driver) socket layer
+ * appears to update its internal "connected" bookkeeping on a very
+ * slightly different schedule than the TCP/IP stack driver posts the
+ * FD_CONNECT completion select() and getsockopt(SO_ERROR) both already
+ * observe as done -- a narrow, real race, not something this PAL's own
+ * connect()/select()/getsockopt() implementations are getting wrong
+ * individually (each already correctly forwards to and reports real
+ * Winsock state). The general, correct fix: reinterpret WSAENOTCONN as
+ * EAGAIN here, but ONLY for a socket this project itself already knows
+ * is in non-blocking mode (fd_nonblock[]) -- exactly the scenario where
+ * a caller's own non-blocking I/O retry loop (which curl, and any other
+ * correct non-blocking consumer, already has for ordinary EAGAIN) will
+ * naturally retry and succeed once the race resolves, matching what the
+ * standalone probe already confirmed happens. A genuinely blocking
+ * socket hitting a real "never connected" WSAENOTCONN is unaffected --
+ * that's a real caller bug, not this race, and keeps its ordinary
+ * ENOTCONN mapping. */
+static int map_wsa_send_recv_error(int fd, int error) {
+  if (error == 10057 && fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_nonblock[fd]) {
+    return EAGAIN;
+  }
+  return map_wsa_error(error);
 }
 
 static long fail_last_error(void) {
@@ -1932,6 +2001,91 @@ int __crt_fd_set_cloexec(int fd, int cloexec) {
   return 0;
 }
 
+/* F_GETFL/F_SETFL (real O_NONBLOCK support): unlike Linux/macOS (see
+ * fd.c's own __crt_fd_get_status_flags/__crt_fd_set_status_flags),
+ * Windows has no single fcntl(2)-equivalent syscall to forward to --
+ * needs real per-fd-type handling, matching the TODO this function
+ * used to be. Found and fixed porting curl for real (the Linux/macOS
+ * fix, in fd.c, was made earlier in this same porting pass but never
+ * exercised on Windows until a real Windows curl build got far enough
+ * to actually reach it): curl's own internal wakeup pipe/socketpair
+ * fallback (lib/socketpair.c) sets O_NONBLOCK expecting a real
+ * non-blocking fd back, then does a "drain if pending, don't block
+ * otherwise" read on every curl_multi_perform() call -- with this
+ * still a no-op, that read blocked forever on the very first call,
+ * hanging curl_easy_perform() indefinitely, the exact same shape as
+ * the already-fixed Linux/macOS bug, just not yet reachable there
+ * until pipe() itself was correctly detected by curl's own configure
+ * (see porting/shims/win32/libtool_wrapper_compat.h's own notes for
+ * that distinct, prerequisite bug). Root-caused by direct process
+ * inspection (Get-Process showing 0% CPU, the fd's own process still
+ * alive minutes past a 20-second CURLOPT_TIMEOUT that never fired --
+ * a real blocked ReadFile(), not a busy loop), then confirmed reading
+ * this exact function's own prior no-op source, not guessed.
+ *
+ * SOCKET fds: real winsock ioctlsocket(FIONBIO), already loaded via
+ * GetProcAddress elsewhere in this file (see winsock_api). recv()/
+ * send() already correctly map WSAEWOULDBLOCK to EAGAIN via
+ * map_wsa_error() -- nothing else needed there.
+ *
+ * Pipe fds (this project's fd table classifies pipes as plain
+ * CRT_FD_KIND_FILE -- see crt_fd_table.h -- so GetFileType() is the
+ * only way to tell a pipe apart from a real file, the same technique
+ * __crt_sys_lseek()'s own ESPIPE check above already uses):
+ * SetNamedPipeHandleState(PIPE_NOWAIT), the real Win32 mechanism for a
+ * non-blocking anonymous pipe (CreatePipe()'s handles are secretly
+ * backed by named-pipe kernel objects under a unique generated name,
+ * so this real Win32 API works on them despite never having gone
+ * through CreateNamedPipe() directly -- a well-known, if slightly
+ * obscure, Win32 API fact). Real regular (non-pipe, non-console) files
+ * are left alone -- O_NONBLOCK is meaningless for them under POSIX
+ * too, real Linux fcntl(2) silently accepts and ignores it there. The
+ * resulting non-blocking-read/write behavior (ERROR_NO_DATA on an
+ * empty PIPE_NOWAIT read, 0 bytes successfully "written" on a full
+ * one) is translated to EAGAIN in __crt_sys_read()/__crt_sys_write()
+ * below, gated on fd_nonblock[] (set here), not applied unconditionally
+ * -- see CRT_ERROR_NO_DATA's own comment for why that gating matters. */
+int __crt_fd_get_status_flags(int fd) {
+  init_fd_table();
+  if (fd < 0 || fd >= CRT_FD_TABLE_SIZE || fd_kind[fd] == CRT_FD_KIND_NONE) {
+    errno = EBADF;
+    return -1;
+  }
+  return O_RDWR | (fd_nonblock[fd] ? O_NONBLOCK : 0);
+}
+
+int __crt_fd_set_status_flags(int fd, int flags) {
+  int want_nonblock = (flags & O_NONBLOCK) != 0;
+
+  init_fd_table();
+  if (fd < 0 || fd >= CRT_FD_TABLE_SIZE || fd_kind[fd] == CRT_FD_KIND_NONE) {
+    errno = EBADF;
+    return -1;
+  }
+  if (fd_kind[fd] == CRT_FD_KIND_SOCKET) {
+    unsigned long mode = want_nonblock ? 1UL : 0UL;
+    SOCKET s = get_fd_socket(fd);
+    if (s != INVALID_SOCKET && winsock.ioctlsocket != 0 &&
+        winsock.ioctlsocket(s, (long)CRT_WS_FIONBIO, &mode) == SOCKET_ERROR) {
+      errno = map_wsa_error(winsock.WSAGetLastError());
+      return -1;
+    }
+  } else {
+    HANDLE handle = get_fd_handle(fd);
+    if (handle != INVALID_HANDLE_VALUE && GetFileType(handle) == FILE_TYPE_PIPE) {
+      DWORD mode = want_nonblock ? CRT_PIPE_NOWAIT : CRT_PIPE_WAIT;
+      if (!SetNamedPipeHandleState(handle, &mode, 0, 0)) {
+        errno = map_windows_error(GetLastError());
+        return -1;
+      }
+    }
+    /* Real regular files (GetFileType() == FILE_TYPE_DISK): no-op,
+     * intentionally -- see this function's own top comment. */
+  }
+  fd_nonblock[fd] = want_nonblock;
+  return 0;
+}
+
 static int bootstrap_read_exact(HANDLE handle, void* buffer, DWORD size) {
   char* out = (char*)buffer;
   DWORD offset = 0;
@@ -2624,6 +2778,7 @@ static int alloc_fd(HANDLE handle) {
       fd_table[fd] = handle;
       fd_kind[fd] = CRT_FD_KIND_FILE;
       fd_flags[fd] = 0;
+      fd_nonblock[fd] = 0;
       return fd;
     }
   }
@@ -2639,6 +2794,7 @@ static int alloc_socket_fd(SOCKET socket_handle) {
       fd_table[fd] = (HANDLE)(uintptr_t)socket_handle;
       fd_kind[fd] = CRT_FD_KIND_SOCKET;
       fd_flags[fd] = 0;
+      fd_nonblock[fd] = 0;
       return fd;
     }
   }
@@ -2651,7 +2807,7 @@ long __crt_sys_read(int fd, void* buf, unsigned long count) {
 
   if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_SOCKET) {
     int result = winsock.recv((SOCKET)(uintptr_t)fd_table[fd], (char*)buf, (int)count, 0);
-    return result == SOCKET_ERROR ? -map_wsa_error(winsock.WSAGetLastError()) : result;
+    return result == SOCKET_ERROR ? -map_wsa_send_recv_error(fd, winsock.WSAGetLastError()) : result;
   }
   if (handle == INVALID_HANDLE_VALUE) {
     return -EBADF;
@@ -2660,6 +2816,16 @@ long __crt_sys_read(int fd, void* buf, unsigned long count) {
     DWORD error = GetLastError();
     if (error == CRT_ERROR_BROKEN_PIPE || error == CRT_ERROR_HANDLE_EOF) {
       return 0;
+    }
+    /* ERROR_NO_DATA here specifically means "this PIPE_NOWAIT pipe has
+     * nothing to read right now" (see CRT_ERROR_NO_DATA's own comment
+     * for why this is only reinterpreted this way, not in the general
+     * map_windows_error() table) -- but only actually means that for a
+     * pipe this project itself put into non-blocking mode; on any
+     * other fd, error 232 keeps its ordinary EPIPE mapping via
+     * fail_last_error() below. */
+    if (error == CRT_ERROR_NO_DATA && fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_nonblock[fd]) {
+      return -EAGAIN;
     }
     return fail_last_error();
   }
@@ -2672,7 +2838,7 @@ long __crt_sys_write(int fd, const void* buf, unsigned long count) {
 
   if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_SOCKET) {
     int result = winsock.send((SOCKET)(uintptr_t)fd_table[fd], (const char*)buf, (int)count, 0);
-    return result == SOCKET_ERROR ? -map_wsa_error(winsock.WSAGetLastError()) : result;
+    return result == SOCKET_ERROR ? -map_wsa_send_recv_error(fd, winsock.WSAGetLastError()) : result;
   }
   if (handle == INVALID_HANDLE_VALUE) {
     return -EBADF;
@@ -2683,6 +2849,16 @@ long __crt_sys_write(int fd, const void* buf, unsigned long count) {
   }
   if (!WriteFile(handle, buf, (DWORD)count, &written, 0)) {
     return fail_last_error();
+  }
+  /* A PIPE_NOWAIT pipe with a full buffer doesn't fail WriteFile() at
+   * all -- it "succeeds" with 0 bytes written (a documented Win32
+   * quirk), which would otherwise be misread as a real empty write.
+   * Only reinterpreted as EAGAIN when this project itself put the pipe
+   * into non-blocking mode (fd_nonblock[]) and the caller actually
+   * asked to write something (count > 0) -- a genuine zero-length
+   * write request still correctly returns 0. */
+  if (written == 0 && count > 0 && fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_nonblock[fd]) {
+    return -EAGAIN;
   }
   return (long)written;
 }
@@ -3539,13 +3715,37 @@ long __crt_sys_accept(int sockfd, void* addr, unsigned int* addrlen) {
 
 long __crt_sys_connect(int sockfd, const void* addr, unsigned int addrlen) {
   SOCKET socket_handle = get_fd_socket(sockfd);
+  int error;
 
   if (socket_handle == INVALID_SOCKET) {
     return -EBADF;
   }
-  return winsock.connect(socket_handle, (const struct sockaddr*)addr, (int)addrlen) == SOCKET_ERROR
-             ? -map_wsa_error(winsock.WSAGetLastError())
-             : 0;
+  if (winsock.connect(socket_handle, (const struct sockaddr*)addr, (int)addrlen) != SOCKET_ERROR) {
+    return 0;
+  }
+  /* connect() specifically needs its own errno mapping, not the general
+   * map_wsa_error() every other socket call here uses: real Winsock
+   * signals "non-blocking connect started, not finished yet" with
+   * WSAEWOULDBLOCK (10035) -- the exact same code map_wsa_error() maps
+   * to EAGAIN for read()/write()/recv()/send(), which is the WRONG
+   * POSIX errno for connect() specifically. Real POSIX connect(2) on a
+   * non-blocking socket signals that exact situation with EINPROGRESS,
+   * a distinct errno curl's own connection-establishment code (and any
+   * other real POSIX networking code) specifically checks for -- EAGAIN
+   * on a connect() call means something else entirely there (there is
+   * no established POSIX meaning for "connect() returned EAGAIN").
+   * Found for real porting curl: once F_SETFL/O_NONBLOCK actually took
+   * effect (see __crt_fd_set_status_flags's own comment) and curl
+   * started actually exercising a real non-blocking connect for the
+   * first time on this PAL, it misread our EAGAIN as something other
+   * than "still connecting" and moved on to send() before the TCP
+   * handshake had actually finished, which the OS then correctly
+   * refused with ENOTCONN ("Transport endpoint is not connected"). */
+  error = winsock.WSAGetLastError();
+  if (error == CRT_WSAEWOULDBLOCK) {
+    return -EINPROGRESS;
+  }
+  return -map_wsa_error(error);
 }
 
 long __crt_sys_sendto(
@@ -3561,14 +3761,34 @@ long __crt_sys_sendto(
   if (socket_handle == INVALID_SOCKET) {
     return -EBADF;
   }
-  result = winsock.sendto(
-      socket_handle,
-      (const char*)buf,
-      (int)len,
-      flags,
-      (const struct sockaddr*)dest_addr,
-      (int)addrlen);
-  return result == SOCKET_ERROR ? -map_wsa_error(winsock.WSAGetLastError()) : result;
+  if (dest_addr == 0) {
+    /* libc/src/socket.c's send() calls this with dest_addr=0/addrlen=0
+     * (POSIX send(fd, buf, len, flags) == sendto(fd, buf, len, flags,
+     * NULL, 0) on a connected socket). winsock.send() is the real,
+     * canonical, always-supported Winsock API for a connection-oriented
+     * socket, unlike sendto(), which is really shaped for connectionless
+     * (UDP) use and only loosely documented for a NULL target on TCP --
+     * calling it directly here instead of going through sendto() with a
+     * NULL target avoids relying on that looser guarantee at all. Found
+     * while chasing a real WSAENOTCONN curl hit here (see
+     * map_wsa_send_recv_error()'s own comment for the actual root
+     * cause and fix -- this NULL-target hygiene fix on its own was NOT
+     * sufficient to resolve that bug, confirmed directly: the failure
+     * reproduced identically either way). Kept anyway as the more
+     * correct, better-defined call for this case. An explicit
+     * destination (real sendto()/sendmsg() on a datagram socket) still
+     * goes through winsock.sendto() below, unaffected either way. */
+    result = winsock.send(socket_handle, (const char*)buf, (int)len, flags);
+  } else {
+    result = winsock.sendto(
+        socket_handle,
+        (const char*)buf,
+        (int)len,
+        flags,
+        (const struct sockaddr*)dest_addr,
+        (int)addrlen);
+  }
+  return result == SOCKET_ERROR ? -map_wsa_send_recv_error(sockfd, winsock.WSAGetLastError()) : result;
 }
 
 long __crt_sys_recvfrom(
@@ -3585,15 +3805,24 @@ long __crt_sys_recvfrom(
   if (socket_handle == INVALID_SOCKET) {
     return -EBADF;
   }
-  result = winsock.recvfrom(
-      socket_handle,
-      (char*)buf,
-      (int)len,
-      flags,
-      (struct sockaddr*)src_addr,
-      addrlen != 0 ? &inout_len : 0);
+  if (src_addr == 0) {
+    /* Same NULL-target hygiene fix as __crt_sys_sendto() above,
+     * mirrored here for recv(): libc/src/socket.c's recv() calls this
+     * with src_addr=0/addrlen=0 -- call the real, connection-oriented-
+     * native winsock.recv() instead of winsock.recvfrom() with a NULL
+     * source, for the same reasons (see that function's own comment). */
+    result = winsock.recv(socket_handle, (char*)buf, (int)len, flags);
+  } else {
+    result = winsock.recvfrom(
+        socket_handle,
+        (char*)buf,
+        (int)len,
+        flags,
+        (struct sockaddr*)src_addr,
+        addrlen != 0 ? &inout_len : 0);
+  }
   if (result == SOCKET_ERROR) {
-    return -map_wsa_error(winsock.WSAGetLastError());
+    return -map_wsa_send_recv_error(sockfd, winsock.WSAGetLastError());
   }
   if (addrlen != 0) {
     *addrlen = (unsigned int)inout_len;

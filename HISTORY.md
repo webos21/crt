@@ -10,6 +10,129 @@ substantive update.
 
 ## 2026-08-14
 
+- **Windows curl: chased the `setmode`/`_spawnv` shim-wiring fix all the
+  way through to a real network round trip on the user's own Windows
+  hardware, finding and fixing five more distinct, real bugs -- getting
+  curl's HTTP round trip working end to end on Windows for the first
+  time ever, with one new, distinct, unresolved HTTPS crash left as the
+  final remaining gap.**
+  - (1) Wiring `porting/shims/win32/libtool_wrapper_compat.h`'s
+    `force_include` into `curl.json` (see the entry below) surfaced a
+    second, worse shim-header-footprint problem: the shim's own
+    `#include <string.h>` (needed for its own `strlen`/`memcpy`/
+    `strncmp` calls) leaked a real `strchr()` declaration into curl's
+    configure-time `AC_C_UNDECLARED_BUILTIN_OPTIONS` probe (which
+    deliberately compiles `(void) strchr;` with no headers of its own,
+    expecting it to fail, to detect whether the compiler treats
+    undeclared identifiers as real errors). Since `force_include`
+    applies the shim to every compile in the whole build via CFLAGS,
+    not just the wrapper's, this made that probe wrongly succeed and
+    configure hard-errored ("cannot make ... report undeclared
+    builtins"). Fixed by forward-declaring exactly the three functions
+    needed instead of including the whole header.
+  - (2) The same blast radius silently mis-detected several real
+    functions as absent, with no hard error at all: GNU Autoconf's
+    classic K&R-style `char FUNCNAME ();` link-only probe
+    (`ac_fn_c_check_func`, backing dozens of curl's own `AC_CHECK_FUNC`
+    calls) hits a hard type-conflict compile error whenever the shim
+    had already declared that same symbol with its real prototype --
+    silently read as "no, doesn't exist" rather than a real failure.
+    `<unistd.h>` (`pipe()`), `<stdlib.h>` (`realpath()`), and
+    `<spawn.h>`'s own transitive `<sched.h>` (`sched_yield()`) all did
+    this, flipping `checking for pipe/realpath/sched_yield... yes` to
+    `no`. `checking for pipe... no` specifically turned out to be why
+    `curl_easy_perform()` failed outright with "Out of memory" on its
+    very first call: curl's own internal wakeup-pipe mechanism
+    (`lib/socketpair.c`) genuinely needs `pipe()`, believed it didn't
+    have it, and picked a different, broken path instead. Fixed by
+    minimizing the shim's own header footprint to exactly what its own
+    code directly calls -- `environ`/`malloc`/`free` forward-declared by
+    hand instead of `<unistd.h>`/`<stdlib.h>`; `<spawn.h>`/`<sys/wait.h>`
+    kept (unavoidable for `posix_spawn()`'s own opaque types), accepting
+    `sched_yield`'s own residual, confirmed-non-fatal misdetection as a
+    documented, bounded cost.
+  - (3) Once `pipe()` was correctly detected, the recipe's own test
+    *programs'* compile (a separate step from curl's library build)
+    failed with `curl/curl.h:82:10: fatal error: 'winsock2.h' file not
+    found` -- the library build's own `-U_WIN32` family CFLAGS/CPPFLAGS
+    override never reached the `tests` entries' own `cflags`. Fixed by
+    adding the identical undefines to both `http-roundtrip-static`'s
+    and `http-roundtrip-shared`'s own `target_overrides.windows.cflags`.
+  - (4) With the test finally compiling and running, `curl_easy_perform()`
+    hung indefinitely -- confirmed via direct process inspection
+    (0% CPU minutes past the test's own 20-second `CURLOPT_TIMEOUT`,
+    which never fired) to be the *exact same* `fcntl(F_SETFL,
+    O_NONBLOCK)`-is-a-no-op bug already fixed for Linux/macOS earlier
+    this session, just never reachable on Windows until `pipe()` itself
+    was correctly detected (bug 2 above). Fixed for real this time:
+    `libc/src/arch/windows/common/syscall.c` gained real per-fd
+    `O_NONBLOCK` tracking (`fd_nonblock[]`) and
+    `__crt_fd_get_status_flags()`/`__crt_fd_set_status_flags()` -- SOCKET
+    fds via winsock's own `ioctlsocket(FIONBIO)`, pipe fds (this
+    project's fd table classifies pipes as plain `CRT_FD_KIND_FILE`, so
+    `GetFileType()==FILE_TYPE_PIPE` is the only way to tell them apart)
+    via `SetNamedPipeHandleState(PIPE_NOWAIT)` -- a real Win32 mechanism
+    that works on `CreatePipe()`'s own handles despite never going
+    through `CreateNamedPipe()` directly, since they're secretly backed
+    by named-pipe kernel objects under the hood. `__crt_sys_read()`/
+    `__crt_sys_write()` translate the resulting Win32-specific signals
+    (`ERROR_NO_DATA` on an empty non-blocking pipe read; a documented
+    Win32 quirk where a full non-blocking pipe write "succeeds" with 0
+    bytes written instead of erroring) into `EAGAIN`, gated on
+    `fd_nonblock[]`. `libc/src/fd.c`'s F_GETFL/F_SETFL cases now call
+    these uniformly on every OS, same as F_GETFD/F_SETFD already did.
+    Verified: full local Windows libc rebuild + `ctest` 85/85, no
+    regressions.
+  - (5) With the hang gone, `curl_easy_perform()` returned a clean
+    `CURLE_SEND_ERROR` ("Failed sending data to the peer") instead --
+    real progress (DNS resolved, TCP connected) but still failing.
+    `CURLOPT_VERBOSE` tracing showed a real TCP connection established
+    immediately followed by "Send failure: Transport endpoint is not
+    connected" (`ENOTCONN`) on the very first `send()`. Root-caused with
+    a minimal standalone probe (raw `socket()`/`fcntl(O_NONBLOCK)`/
+    `connect()`/`select()`/`getsockopt(SO_ERROR)`/`send()`, no curl
+    involved): `connect()` returned `EINPROGRESS` (a related bug fixed
+    alongside this one -- `__crt_sys_connect()` was mapping non-blocking
+    connect's real Winsock `WSAEWOULDBLOCK` through the same generic
+    error mapper every other socket call uses, landing on `EAGAIN`, the
+    wrong POSIX errno for `connect()` specifically; fixed by
+    special-casing `WSAEWOULDBLOCK` to `EINPROGRESS` only in
+    `__crt_sys_connect()`), `select()` correctly reported the socket
+    writable, and `getsockopt(SO_ERROR)` correctly reported 0 -- yet
+    `send()` still failed `WSAENOTCONN` on the first attempt, and a bare
+    retry after a ~200ms delay (no further connect()/select() calls in
+    between) succeeded outright. A real, reproducible Winsock race, not
+    a caller bug: Winsock's own AFD (Ancillary Function Driver) socket
+    layer appears to update its internal "connected" bookkeeping on a
+    very slightly different schedule than the TCP/IP driver posts the
+    completion `select()`/`getsockopt()` already both correctly observed
+    as done. Fixed generally: a new `map_wsa_send_recv_error()`
+    reinterprets `WSAENOTCONN` as `EAGAIN`, but only for a socket
+    already known to be in non-blocking mode (`fd_nonblock[]`) -- exactly
+    the scenario where a correct non-blocking I/O caller already has its
+    own ordinary EAGAIN-retry loop, which then naturally retries and
+    succeeds once the race resolves. Applied to `__crt_sys_read()`/
+    `__crt_sys_write()`'s socket branches and to `__crt_sys_sendto()`/
+    `__crt_sys_recvfrom()` (the latter two also switched to calling the
+    real, canonical `winsock.send()`/`winsock.recv()` directly instead
+    of `sendto()`/`recvfrom()` with a NULL target -- a smaller,
+    independently-real hygiene fix that was NOT by itself sufficient to
+    resolve this bug, confirmed directly, but kept as the more correct
+    call regardless).
+  - **Result: curl's HTTP round trip now passes completely on Windows
+    for the first time ever** -- a real `curl_easy_perform()` against
+    `http://example.com/` returns a genuine `HTTP/1.1 200 OK` with real
+    Cloudflare response headers, verified directly on the user's own
+    Windows machine. **HTTPS does not work yet**: a new, distinct,
+    NOT YET ROOT-CAUSED crash (`STATUS_ACCESS_VIOLATION`, reproduced
+    deterministically twice in a row) occurs right after `mbedTLS:
+    Connecting to example.com:443` is printed -- somewhere in curl's own
+    mbedTLS vtls backend or mbedTLS itself, not yet isolated further.
+    Windows status: `partial`. All temporary diagnostic artifacts
+    (a standalone non-blocking-connect probe, `CURLOPT_VERBOSE`) were
+    removed before finalizing. See `porting/recipes/curl.json`'s own
+    notes for the full, detailed trail.
+
 - **Implemented `getauxval()`/`<sys/auxv.h>` for Linux, fixing a real
   `port-rebuild-mbedtls` build failure.** Reported: a fresh
   `port-rebuild-mbedtls` on a real Linux aarch64 host failed with
@@ -662,6 +785,52 @@ substantive update.
     target is only reached under `APPLE_BUILD=1`), so this is a pure
     regression check, not a positive macOS confirmation. Still needs a
     real macOS re-run to confirm.
+  - **A real Windows rebuild attempt got past the previously-documented
+    mbedtls-DLL duplicate-symbol blocker.** `libcurl.la`/`libcurlu.la`
+    themselves now link cleanly -- no `ld.lld: error: duplicate symbol`
+    at all this run. Not deliberately fixed (still tracked as
+    open/unexplained in `TODO.md` rather than closed; needs a repeat
+    rebuild or dedicated investigation before declaring it gone for
+    good). That same rebuild surfaced a different, real bug instead,
+    now fixed: curl's own CLI tool (`src/curl.c`/`curlinfo.c`, linked
+    against the freshly built, still-uninstalled `libcurl.la`) failed
+    with `call to undeclared function 'setmode'`/`'_spawnv'` and `use
+    of undeclared identifier '_P_WAIT'` in GNU Libtool's own generated
+    `.libs/lt-curl.c`/`lt-curlinfo.c` "uninstalled execution" wrapper
+    source -- the exact same bug class already root-caused and fixed
+    for libpng's own CLI/test binaries via `porting/shims/win32/
+    libtool_wrapper_compat.h`, but curl.json was never wired up to use
+    that existing shim at all (a real oversight, not a new bug). One
+    genuinely new wrinkle beyond libpng's own case: libpng's recipe
+    leaves `__MINGW32__` defined (only undefines the `_WIN32` family),
+    so ltmain.sh's own `#elif defined __MINGW32__` rename block fires
+    and the wrapper calls `getcwd`/`stat`/`chmod`/`putenv`/`setmode`
+    through their underscore-prefixed spellings, which the shim's
+    existing macro pairs already resolved. curl.json's own CFLAGS/
+    CPPFLAGS additionally undefine `__MINGW32__` too (needed for curl's
+    own configure/source to treat this target as portable POSIX, not
+    just to steer the wrapper's `#include` choice) -- so that rename
+    block never fires at all, and the wrapper's literal, unconditional
+    `setmode(1,_O_BINARY);` call site (embedded directly by ltmain.sh's
+    `func_emit_wrapper`, not itself behind any further `#ifdef`) stays
+    spelled exactly `setmode`, undeclared either way (`_MSC_VER` is
+    also undefined, so the MSVC `<io.h>`-declares-it branch never ran
+    either). Fixed by (1) wiring the missing `force_include:
+    ["porting/shims/win32/libtool_wrapper_compat.h"]` into curl.json's
+    own Windows `target_overrides`, and (2) extending the shim itself
+    with a fourth alias, `#define setmode _setmode` (the shim's
+    existing real `_setmode()` implementation, just under the
+    un-prefixed spelling too) -- confirmed harmless to add
+    unconditionally: curl's own real source has exactly one reference
+    to the bare name (`lib/curl_setup.h`'s `CURL_BINMODE` macro),
+    itself inside a permanently-dead `#ifdef MSDOS` branch on every
+    host this project targets. `_spawnv`/`_P_WAIT` needed no shim
+    changes at all -- the shim's existing implementations were already
+    unconditional, just never reached this recipe before because
+    `force_include` itself was missing. See `porting/recipes/curl.json`'s
+    own notes for the full trail. Found from the user's own real
+    Windows build log; fixed source-level, not yet re-verified with a
+    real Windows rebuild.
 
 ## 2026-08-13
 

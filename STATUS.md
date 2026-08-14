@@ -119,7 +119,43 @@ in those two win.
   `libSystem`, aside from libSystem itself remaining the intended Darwin
   PAL/backend boundary. See `HISTORY.md`'s 2026-08-14 entry and both
   `porting/recipes/curl.json`'s and `porting/recipes/mbedtls.json`'s own
-  notes for the full trail.
+  notes for the full trail. **Windows**: a real rebuild attempt got
+  past the previously-documented mbedtls-DLL duplicate-symbol blocker
+  (`libcurl.la`/`libcurlu.la` now link cleanly; not deliberately fixed,
+  so still tracked as open/unexplained in `TODO.md` rather than closed)
+  and surfaced a different, real, now-fixed bug instead: curl's own CLI
+  tool failed to link with `setmode`/`_spawnv`/`_P_WAIT` undeclared in
+  GNU Libtool's own generated wrapper source -- the same bug class
+  already fixed for libpng via
+  `porting/shims/win32/libtool_wrapper_compat.h`, but curl.json was
+  never wired up to use that shim. Fixed by wiring in the missing
+  `force_include` plus a new shim alias (`#define setmode _setmode`)
+  for a variant libpng never hit (curl also undefines `__MINGW32__`,
+  so the wrapper's own rename block never fires and calls the bare,
+  un-prefixed name directly). **Update, verified on real Windows
+  hardware**: that fix, plus four more real bugs found chasing it
+  through to an actual network round trip -- a second, worse shim
+  header-footprint collision that silently mis-detected
+  `pipe()`/`realpath()`/`sched_yield()` as absent via curl's own
+  generic autoconf function probes (the `pipe()` one is what actually
+  caused an `Out of memory` failure, curl's wakeup-pipe mechanism
+  believing it had no `pipe()`); missing `-U_WIN32` cflags on the test
+  programs themselves (`fatal error: 'winsock2.h' file not found`);
+  Windows's `fcntl(F_SETFL, O_NONBLOCK)` finally implemented for real
+  (`SetNamedPipeHandleState`/`ioctlsocket(FIONBIO)`, fixing the exact
+  same indefinite-hang bug already fixed for Linux/macOS earlier in
+  this pass, just not reachable on Windows until `pipe()` detection was
+  fixed); and a real Winsock `WSAENOTCONN`-right-after-a-successful-
+  non-blocking-`connect()` race (reinterpreted as `EAGAIN` for
+  non-blocking sockets, confirmed transient with a standalone probe --
+  a bare retry after ~200ms succeeds with no further connect()/select()
+  calls). Result: **curl's HTTP round trip now passes end to end on
+  Windows for the first time ever** (`curl_easy_perform()` against
+  `http://example.com/` returns a real `200 OK`). **HTTPS does not
+  work yet**: a new, distinct, NOT YET ROOT-CAUSED crash
+  (`STATUS_ACCESS_VIOLATION`, reproduced twice) right after mbedTLS
+  begins its handshake. Windows status: `partial`. See
+  `porting/recipes/curl.json`'s own notes for the full trail.
 
 ## Known gaps
 

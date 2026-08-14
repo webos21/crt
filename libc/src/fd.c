@@ -1841,44 +1841,21 @@ int fcntl(int fd, int cmd, ...) {
       return 0;
 
     case F_GETFL:
-#if !defined(CRT_TARGET_OS_WINDOWS)
+      /* Windows: __crt_fd_get_status_flags() now has its own real
+       * implementation in libc/src/arch/windows/common/syscall.c
+       * (per-fd O_NONBLOCK tracking, since Windows has no unified
+       * fcntl(2) syscall to forward to the way Linux/macOS do below) --
+       * see that function's own comment for the full trail, including
+       * the real curl hang this fixed once pipe() itself was correctly
+       * detected (a separate, prerequisite bug -- see
+       * porting/shims/win32/libtool_wrapper_compat.h's own notes). */
       return __crt_fd_get_status_flags(fd);
-#else
-      /* TODO(windows): real O_NONBLOCK tracking -- see F_SETFL below. */
-      if (fstat(fd, &(struct stat){0}) != 0) {
-        return -1;
-      }
-      return O_RDWR;
-#endif
 
     case F_SETFL:
       va_start(args, cmd);
       arg = va_arg(args, int);
       va_end(args);
-#if !defined(CRT_TARGET_OS_WINDOWS)
       return __crt_fd_set_status_flags(fd, arg);
-#else
-      /* TODO(windows): this is still a no-op, unlike Linux/macOS above
-       * (see __crt_fd_get_status_flags/__crt_fd_set_status_flags's own
-       * comment for the real bug this fixed there) -- Windows has no
-       * unified fcntl(2) syscall to forward to. A real fix needs
-       * per-fd-type handling: SOCKET fds can use winsock's own
-       * ioctlsocket(FIONBIO) (already loaded via GetProcAddress
-       * elsewhere in this PAL, see libc/src/arch/windows/common/
-       * syscall.c's winsock_api struct), but anonymous pipes from
-       * CreatePipe() have no non-blocking read mode at all without
-       * switching to overlapped I/O, a larger change than fits this
-       * pass. Not yet hit by a real Windows port build (this gap was
-       * found and fixed for Linux while porting curl there; Windows
-       * curl verification is still pending) -- kept as a known,
-       * documented gap rather than guessed at.
-       */
-      (void)arg;
-      if (fstat(fd, &(struct stat){0}) != 0) {
-        return -1;
-      }
-      return 0;
-#endif
 
     case F_GETLK:
     case F_SETLK:

@@ -60,6 +60,16 @@ int __crt_fd_snapshot_encode(const struct crt_fd_snapshot* snapshot, char* buffe
 int __crt_fd_snapshot_decode(const char* text, struct crt_fd_snapshot* snapshot);
 int __crt_fd_get_cloexec(int fd);
 int __crt_fd_set_cloexec(int fd, int cloexec);
+/* __crt_fd_get_status_flags/__crt_fd_set_status_flags (F_GETFL/F_SETFL,
+ * O_NONBLOCK above all): defined in libc/src/fd.c itself for Linux/
+ * macOS (a direct fcntl(2) forward) and in libc/src/arch/windows/
+ * common/syscall.c for Windows (real per-fd-type handling -- no
+ * unified syscall to forward to there) -- declared here, unconditionally,
+ * so fd.c's own fcntl() can call either implementation the same way on
+ * every OS, matching __crt_fd_get_cloexec/__crt_fd_set_cloexec just
+ * above. */
+int __crt_fd_get_status_flags(int fd);
+int __crt_fd_set_status_flags(int fd, int flags);
 void __crt_fd_after_fork_child(void);
 void __crt_child_bootstrap(void);
 
