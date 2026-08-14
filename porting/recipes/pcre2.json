@@ -13,10 +13,7 @@
   "dependencies": [],
   "build": {
     "system": "configure",
-    "configure_args": [
-      "--disable-shared",
-      "--enable-static"
-    ],
+    "configure_args": [],
     "env": {
       "CFLAGS": "-O2"
     },
@@ -45,20 +42,46 @@
         "@PORT_PREFIX@/lib/libpcre2-8.a"
       ],
       "expect_stdout": "pcre2_match_test: ok"
+    },
+    {
+      "name": "match-shared",
+      "type": "compile-run",
+      "source": "porting/tests/pcre2_match_test.c",
+      "cflags": [
+        "-I@PORT_PREFIX@/include"
+      ],
+      "expect_stdout": "pcre2_match_test: ok",
+      "target_overrides": {
+        "linux": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libpcre2-8.so"
+          ]
+        },
+        "macos": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libpcre2-8.dylib"
+          ]
+        },
+        "windows": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libpcre2-8.dll.a"
+          ]
+        }
+      }
     }
   ],
   "status": {
-    "linux": "static-pass",
+    "linux": "shared-pass",
     "macos": "pending",
-    "windows": "static-pass"
+    "windows": "shared-pass"
   },
   "notes": [
     "Next in the porting matrix expansion queue after bzip2/xz (see TODO.md's \"Porting matrix expansion\" bullet). No dependencies -- pcre2's regex engine is self-contained.",
     "Scoped to the 8-bit code unit width only (--enable-pcre2-16/--enable-pcre2-32 both left off, matching the library's own default): every foreseeable future consumer in this queue (curl, and likely mbedtls if it ever needs pattern matching) only needs plain `char*` regex, not UTF-16/UTF-32 code units.",
-    "--disable-shared/--enable-static: started static-only, matching this queue's own established caution (bzip2/xz both landed static-only first, then added shared once the static build round-tripped for real) -- revisit once the static build/test passes on all three hosts.",
-    "target_overrides.windows.cflags undefines _WIN32/_WIN32_WCE/__WIN32__/WIN32, the same technique already used for zlib.json/xz.json/bzip2.json, for the same reason: pcre2grep.c has a real `#include <windows.h>` + `FindFirstFile()`-based directory-walking implementation gated on WIN32 that this sysroot has no equivalent for (it is a Bionic-style POSIX libc, not a Windows SDK header set) -- undefining these keeps pcre2 (both the library and pcre2grep/pcre2test, which this recipe still builds since upstream's Makefile.am has no configure-time toggle to skip them) on its portable opendir()/readdir()-based POSIX path instead, which this project's own libc already supports. The core library's own pcre2.h.generic PCRE2_EXP_DECL macro also branches on _WIN32 for __declspec(dllimport) annotations -- undefining it means pcre2's own exported symbols rely on GNU ld/lld's auto-import extension for any shared build, same as libffi's ffi_type_* globals did; this project's Windows PAL now implements the required runtime pseudo-relocation fixup generally (libc/src/arch/windows/common/pseudo_reloc.c, see HISTORY.md's 2026-08-12 entry), so this should already be covered if/when this recipe adds a shared build.",
+    "target_overrides.windows.cflags undefines _WIN32/_WIN32_WCE/__WIN32__/WIN32, the same technique already used for zlib.json/xz.json/bzip2.json, for the same reason: pcre2grep.c has a real `#include <windows.h>` + `FindFirstFile()`-based directory-walking implementation gated on WIN32 that this sysroot has no equivalent for (it is a Bionic-style POSIX libc, not a Windows SDK header set) -- undefining these keeps pcre2 (both the library and pcre2grep/pcre2test, which this recipe still builds since upstream's Makefile.am has no configure-time toggle to skip them) on its portable opendir()/readdir()-based POSIX path instead, which this project's own libc already supports. The core library's own pcre2.h.generic PCRE2_EXP_DECL macro also branches on _WIN32 for __declspec(dllimport) annotations -- undefining it means pcre2's own exported symbols rely on GNU ld/lld's auto-import extension for the shared build, same as libffi's ffi_type_* globals did; this project's Windows PAL now implements the required runtime pseudo-relocation fixup generally (libc/src/arch/windows/common/pseudo_reloc.c, see HISTORY.md's 2026-08-12 entry).",
     "target_overrides.windows.configure_args adds --build=@CRT_MINGW_TRIPLE@, the same config.guess workaround already needed by libpng.json/xz.json/libffi.json: pcre2's configure is real GNU Autoconf output, and config.guess does not recognize plain Windows `uname` output.",
-    "The recipe test (porting/tests/pcre2_match_test.c, a real pcre2_compile()/pcre2_match() round trip with three capture groups, not just a version-string smoke check) initially failed to link on Windows with 'undefined symbol: __declspec(dllimport) pcre2_compile_8 ... cannot be used because it is not an import library': the LIBRARY itself was built with _WIN32 undefined (so its own exported symbols have no dllimport/dllexport decoration, correct for static linking), but the test file's own compile step is a separate crt-cc invocation that does NOT inherit target_overrides.windows.env.CFLAGS (that only applies to the library's own build), so it saw clang's default-predefined _WIN32 and expected DLL-import-style symbols against a plain static archive. Fixed with the standard, upstream-documented convention for exactly this situation: `-DPCRE2_STATIC` in the test's own `cflags`, which makes PCRE2_EXP_DECL resolve to a plain `extern` regardless of _WIN32.",
-    "Verified for real, not just 'it built': Windows (`cmake --build --preset windows-host-ninja-debug --target port-test-pcre2`) and Linux (WSL Ubuntu 20.04 + clang-18, `tools/crt-port-build.py --port pcre2 --test`) both print `pcre2_match_test: ok matches=4 version=10.47 2025-10-21` -- three named capture groups (user/host/tld) individually verified against the matched substrings, not just a nonzero match count. Both static-pass. macOS still `pending` (no macOS hardware this session)."
+    "The recipe test (porting/tests/pcre2_match_test.c, a real pcre2_compile()/pcre2_match() round trip with three capture groups, not just a version-string smoke check) initially failed to link on Windows with 'undefined symbol: __declspec(dllimport) pcre2_compile_8 ... cannot be used because it is not an import library': the LIBRARY itself was built with _WIN32 undefined (so its own exported symbols have no dllimport/dllexport decoration, correct for static linking), but the test file's own compile step is a separate crt-cc invocation that does NOT inherit target_overrides.windows.env.CFLAGS (that only applies to the library's own build), so it saw clang's default-predefined _WIN32 and expected DLL-import-style symbols against a plain static archive. Fixed with the standard, upstream-documented convention for exactly this situation: `-DPCRE2_STATIC` in the `match-static` test's own `cflags` (deliberately NOT applied to `match-shared`, since linking against the DLL's import library `libpcre2-8.dll.a` needs the default dllimport-decorated declarations, matching the artifact being linked).",
+    "Started static-only (`--disable-shared --enable-static`), matching this queue's own established caution (bzip2/xz both landed static-only first) -- once the static build/test passed for real on both Windows and Linux, removed that restriction (configure_args: [], matching zlib.json's own pattern of just letting the library's real default -- both static and shared -- apply) and added a `match-shared` test entry. libtool produces `libpcre2-8-0.dll` + `libpcre2-8.dll.a` (import library) on Windows, `libpcre2-8.so`(`.0`) on Linux, `libpcre2-8.dylib` on macOS.",
+    "Verified for real, not just 'it built': both `match-static` and `match-shared` print `pcre2_match_test: ok matches=4 version=10.47 2025-10-21` -- three named capture groups (user/host/tld) individually verified against the matched substrings, not just a nonzero match count -- on Windows (`cmake --build --preset windows-host-ninja-debug --target port-test-pcre2`) and Linux (WSL Ubuntu 20.04 + clang-18, `tools/crt-port-build.py --port pcre2 --test`). Both hosts: `shared-pass`. macOS still `pending` for the shared variant -- the user confirmed `match-static` passes there directly (`pcre2_match_test: ok matches=4 version=10.47 2025-10-21`) with the earlier static-only recipe, but that predates this session's shared-build addition."
   ]
 }
