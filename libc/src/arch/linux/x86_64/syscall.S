@@ -333,6 +333,16 @@ __crt_sys_setsockopt:
   retq
 .size __crt_sys_setsockopt, . - __crt_sys_setsockopt
 
+.globl __crt_sys_getsockopt
+.type __crt_sys_getsockopt, @function
+.p2align 4, 0x90
+__crt_sys_getsockopt:
+  movq %rcx, %r10
+  movq $55, %rax
+  syscall
+  retq
+.size __crt_sys_getsockopt, . - __crt_sys_getsockopt
+
 .globl __crt_sys_shutdown
 .type __crt_sys_shutdown, @function
 .p2align 4, 0x90

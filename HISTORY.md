@@ -237,13 +237,12 @@ substantive update.
     dynamically depend on `libmbedcrypto.dll`. Reran the full
     `port-test-recipes` aggregate (all recipes with automated tests)
     and the full Windows `ctest` suite (83/83) afterward -- no
-    regressions from the `build_make_args` tooling change. Linux and
-    Windows: `shared-pass`. macOS not yet verified (no local macOS
-    hardware this session) -- `APPLE_BUILD=1` wired into
-    `target_overrides.macos.make_args` (safe there, since
-    `APPLE_BUILD` isn't gated by any `ifndef` around `install:`) to
-    select the `.dylib` link recipes, but not yet run on real
-    hardware.
+    regressions from the `build_make_args` tooling change. `APPLE_BUILD=1`
+    wired into `target_overrides.macos.make_args` (safe there, since
+    `APPLE_BUILD` isn't gated by any `ifndef` around `install:`)
+    correctly selects the `.dylib` link recipes -- confirmed by the
+    user on real macOS hardware later the same day. All three hosts:
+    `shared-pass`.
   - **New standing porting-loop discipline item added to `TODO.md`**:
     verify both the static AND shared build during the same porting
     pass, on every host, before calling a port done -- not
@@ -258,6 +257,197 @@ substantive update.
     matching `TODO.md`/`HISTORY.md`'s own top-level placement. No other
     file referenced the old path (checked directly), so this was a
     plain `git mv` with no link fixups needed.
+
+- **Ported curl 8.21.0 to Linux -- `shared-pass`**, the last entry in
+  the porting matrix expansion queue (`bzip2` -> `xz` -> `pcre2` ->
+  `mbedtls` -> `curl`, see `TODO.md`; `openssl` stays held back until
+  something actually needs it). Depends on zlib and mbedtls, both
+  already `shared-pass` everywhere. Scoped to HTTP/HTTPS for this
+  first pass, matching this queue's own established caution.
+  - **First port in this queue to reach a real internet hostname over
+    the network**, not a self-contained local round trip -- and it
+    surfaced two real, general, previously-invisible libc bugs, not
+    curl-specific ones, both root-caused by direct process/source
+    inspection (a real, indefinite hang, not a clean failure), not
+    guessed.
+  - **`getaddrinfo()` had no real DNS resolution at all.** It only
+    ever handled literal numeric IP addresses via `inet_pton()`,
+    returning `EAI_NONAME` immediately for any real hostname -- a gap
+    invisible until now because no prior port in this queue ever
+    needed to resolve a real hostname. Implemented a real, deliberately
+    minimal synchronous DNS client directly in `libc/src/socket.c`:
+    parses `/etc/resolv.conf` for a nameserver (falling back to
+    `8.8.8.8` if missing/unreadable -- a documented simplification on
+    Windows specifically, which has no `/etc/resolv.conf` at all; a
+    fuller fix would query the OS's own configured DNS servers via
+    IPHLPAPI's `GetNetworkParams()`), builds and sends a single UDP
+    query for an A record, and parses the response, with a couple of
+    retries and a short timeout so an unresponsive nameserver can't
+    hang forever. Deliberately scoped: no AAAA/IPv6, no TCP fallback
+    for truncated responses, no search-domain suffixes, no caching --
+    sufficient for curl's own basic HTTP/HTTPS needs, growable later if
+    a future port needs more. Verified directly and in isolation before
+    ever touching curl: a standalone `getaddrinfo("example.com", ...)`
+    call returned the real, correct IP addresses.
+    Also found and fixed along the way, the same class of gap: real-world
+    POSIX systems (and Android Bionic itself) commonly expose `size_t`/
+    `time_t` from `<sys/types.h>` too, not just `<stddef.h>`/`<time.h>`
+    -- curl's own `CURL_SIZEOF` autoconf macro (and its own public
+    `curl/multi.h` header, for `fd_set`) assumes exactly this, and this
+    project's headers didn't. Fixed `<sys/types.h>` (now includes
+    `<stddef.h>` for `size_t`, and defines `time_t`/`clock_t` behind a
+    shared guard macro with `<time.h>` to avoid duplicate-typedef
+    errors when both headers are included together) and `<sys/socket.h>`
+    (now includes `<sys/select.h>` transitively for `fd_set`/`FD_SET`/
+    `select()`). Also added `AF_UNIX`/`AF_LOCAL` (curl auto-enables Unix
+    domain socket support once it detects `<sys/un.h>`, which this
+    project already had -- only the `AF_UNIX` constant itself was
+    missing), the `IN6_IS_ADDR_*` classification macros (pure bit tests
+    on `struct in6_addr`, no syscall involved -- curl's own
+    `lib/cf-socket.c` needs `IN6_IS_ADDR_LINKLOCAL` unconditionally, not
+    behind any feature gate), and a real `getsockopt()` (curl's own
+    `lib/cf-socket.c` needs `SO_ERROR` to check a non-blocking connect's
+    completion status -- mirrored the existing `setsockopt()` syscall
+    plumbing across all three OSes: new raw syscall stubs for Linux
+    x86_64/aarch64 (`#55`/`#209`) and macOS x86_64/aarch64 (BSD syscall
+    `#118`, including the same `SOL_SOCKET`/`SO_*` Darwin-numbering
+    translation table `setsockopt()` already needed), and a new
+    `winsock.getsockopt` entry in the dynamically-loaded `ws2_32.dll`
+    function table on Windows).
+  - **`fcntl(fd, F_SETFL, O_NONBLOCK)` was a pure software no-op on
+    Linux/macOS -- and this, not the DNS gap above, is what actually
+    hung `curl_easy_perform()` indefinitely.** `fcntl()`'s own
+    `F_SETFL` case read the requested flags argument, discarded it,
+    and always reported success, never marking any fd non-blocking at
+    all. curl's own internal wakeup pipe (`lib/socketpair.c`'s portable
+    `pipe()`-based fallback, used by *every* `curl_multi_perform()`
+    call, not just DNS-related ones) sets `O_NONBLOCK` via `fcntl()`
+    expecting a real non-blocking fd back, then does a best-effort
+    "drain if pending, don't block otherwise" read on it
+    (`Curl_wakeup_consume()`) on every call -- with `O_NONBLOCK`
+    silently never taking effect, that read blocked forever on the
+    very first call, before curl ever reached DNS resolution or opened
+    a real network socket. Root-caused with real process inspection,
+    not guessed: `/proc/PID/task/` showed only ever one thread (ruling
+    out a hang inside a spawned resolver thread), `/proc/PID/fd/`
+    showed only the wakeup pipe's own two fds the entire time (no
+    socket ever opened), and `ps` showed 0% CPU (a real blocked
+    `read()`, not a busy loop) -- then pinned to the exact call site by
+    adding temporary `fprintf` instrumentation directly into curl's own
+    `lib/easy.c` (bisecting `easy_perform()`'s three main steps) and
+    `lib/multi.c` (bisecting `multi_perform()`'s per-iteration calls),
+    reverted once the real cause (`Curl_wakeup_consume()`, called from
+    `multi_runsingle()`'s admin-handle branch) was confirmed by reading
+    its own source. Fixed generally in `libc/src/fd.c`, not with a
+    curl-specific workaround: `F_GETFL`/`F_SETFL` now forward to the
+    real `fcntl(2)` syscall on Linux/macOS via two new functions,
+    `__crt_fd_get_status_flags()`/`__crt_fd_set_status_flags()`,
+    mirroring exactly how the pre-existing `__crt_fd_get_cloexec()`/
+    `__crt_fd_set_cloexec()` already forward `F_GETFD`/`F_SETFD` -- a
+    real `fcntl(2)` syscall already implements `O_NONBLOCK` correctly
+    at the kernel level for every fd type (files, pipes, sockets), so
+    this needed no changes to `read()`/`write()` themselves, which
+    already go straight to the raw syscall. Windows's own `fcntl()`
+    backend has no unified syscall to forward to (Windows needs
+    per-fd-type handling: winsock's `ioctlsocket(FIONBIO)` for sockets,
+    overlapped I/O for anonymous pipes, neither attempted this pass) and
+    keeps its prior no-op behavior for `F_GETFL`/`F_SETFL` specifically,
+    explicitly to avoid regressing existing behavior -- documented as a
+    `TODO(windows)` comment directly in the code, not yet hit by a real
+    Windows curl build this session.
+  - **A real `tools/crt-port-build.py` bug found and fixed along the
+    way**: `@PORT_PREFIX@` substitution (needed for curl's own
+    `--with-mbedtls=@PORT_PREFIX@`/`--with-zlib=@PORT_PREFIX@`, so
+    configure can find its two already-installed sibling ports) was
+    previously only ever applied to `make_args`/`install_args`, never
+    to `configure_args` -- no prior "configure"-system recipe in this
+    queue had needed to reference another port's install path from a
+    configure flag before. Confirmed by a real build attempt, not
+    guessed: the literal, unsubstituted string `"@PORT_PREFIX@"`
+    appeared in configure's own `--with-mbedtls` argument and resulting
+    `CPPFLAGS` (the build didn't immediately fail because `crt-cc`'s own
+    default include/library search path happened to already cover the
+    shared port-install prefix, masking the bug until a later,
+    unrelated `size_t` compile probe exposed it). Fixed generally:
+    `port_prefix_text` is now computed once at the top of
+    `build_configure_port()` and applied to `configure_args` the same
+    way it already was for `make_args`/`install_args`.
+  - **`porting/tests/curl_http_roundtrip.c`**: a real round trip
+    against real servers, not a version-string/link-only smoke check --
+    a plain HTTP GET (proving the portable POSIX socket path actually
+    drives a real TCP connection and curl correctly parses a real HTTP
+    response) and an HTTPS GET (proving the mbedTLS backend performs a
+    real TLS handshake and decrypts the response correctly -- the body
+    could not come back as readable HTML otherwise) against
+    `http(s)://example.com`, an IANA-reserved domain kept stable and
+    minimal specifically for documentation/testing use (RFC 2606),
+    checking both the HTTP status code and a known-stable string in the
+    response body. `CURLOPT_SSL_VERIFYPEER`/`VERIFYHOST` are disabled
+    for the HTTPS request since this project doesn't vendor or maintain
+    a CA trust bundle (curl's own `--without-ca-bundle`/`--without-ca-path`)
+    -- this doesn't weaken what the test actually proves, since the TLS
+    handshake and record encryption/decryption still have to succeed
+    for the response to decode into readable HTML at all.
+  - **Verified for real on Linux** (WSL Ubuntu 20.04 + clang-18):
+    `curl_http_roundtrip_test: ok http=200 https=200` for both the
+    static and shared test, using curl's own real default configuration
+    (`POSIX threaded` resolver, `--enable-shared`/`--enable-static` both
+    on) -- confirmed the `fcntl()` fix alone was sufficient, no
+    resolver-specific workaround needed (an earlier, more conservative
+    `--disable-threaded-resolver` was tried first while still chasing
+    the real root cause, then removed once the real fix was found and
+    confirmed to work with curl's actual default). Also reran the full
+    `port-test-recipes` aggregate (all other ports with automated
+    tests) and the full Windows `ctest` suite (83/83) afterward to
+    confirm the `libc`/`tools` changes didn't regress anything else.
+    Linux: `shared-pass`.
+  - **A real Windows build attempt found two more, distinct bugs**,
+    neither one a repeat of the Linux/macOS DNS/`fcntl()` gaps above
+    (those are general and already fixed everywhere).
+  - **curl's own `configure` uses `AC_EGREP_CPP` (a pure
+    preprocessor-only check via `$CPP $CPPFLAGS`, never `$CFLAGS`) for
+    its "checking if socket is prototyped" probe.** With the usual
+    `_WIN32`-family undefines only ever placed in `CFLAGS` (matching
+    every other Windows recipe in this project), that one specific
+    probe still saw `_WIN32` defined (clang's own default predefine for
+    `*-w64-mingw32`), tried to `#include <winsock2.h>` (a header this
+    PAL doesn't have), and curl concluded socket() wasn't usable at
+    all -- surfacing later as a hard `#error "We cannot compile without
+    socket() support!"` in `lib/transfer.c`, even though every actual
+    compile/link-based probe (which does see `CFLAGS`) correctly found
+    `socket()` working. Fixed by adding the identical undefines to
+    `CPPFLAGS` too; confirmed directly, not assumed: "checking if
+    socket is prototyped" now answers yes.
+  - **Once that let configure complete, linking curl's own shared
+    `libcurl.dll` failed with `ld.lld: error: duplicate symbol`** for
+    `__crt_sys_shutdown`/`__crt_sys_poll`/`__crt_sys_unlink`/
+    `__crt_sys_rename`/`setenv` -- each one defined both in this
+    project's own `c.lib` (curl's normal Windows libc import library,
+    expected) and in `libmbedcrypto.dll.a` (mbedtls's own import
+    library, not expected at all -- these are this project's internal
+    CRT/libc symbols, nothing to do with mbedtls's real crypto API).
+    **Not a curl bug**: mbedtls's own `.dll` build
+    (`porting/recipes/mbedtls.json`) statically embeds this project's
+    libc into `libmbedcrypto.dll` and, with no symbol-visibility
+    control at all (no `-fvisibility=hidden`, no `.def` file, no
+    explicit `dllexport` annotations on mbedtls's own public API --
+    upstream mbedtls's headers were never written with Windows DLL
+    export control in mind), re-exports that embedded libc's own
+    symbols right alongside mbedtls's real API. mbedtls's own
+    standalone shared-library test still passes fine in isolation
+    (nothing else there links against both mbedtls's DLL and this
+    project's own `c.lib` at once) -- the collision only surfaces once
+    a *third* library (curl) links against both mbedtls's shared import
+    library and this project's own libc import library for the same
+    final image. Not fixed this session: a real fix needs either
+    proper symbol-visibility control added to mbedtls's own Windows
+    `.dll` build, or curl linking against mbedtls's static libraries
+    specifically even for curl's own shared build (a common, legitimate
+    pattern -- a shared library statically embedding a dependency
+    rather than depending on another shared library -- not yet wired
+    into the recipe). Windows: `configure-blocked` (configure itself
+    now succeeds after the `CPPFLAGS` fix above; the actual link step
+    doesn't). macOS not yet verified this session.
 
 ## 2026-08-13
 

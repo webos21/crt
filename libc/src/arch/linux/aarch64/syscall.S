@@ -337,6 +337,15 @@ __crt_sys_setsockopt:
   ret
 .size __crt_sys_setsockopt, . - __crt_sys_setsockopt
 
+.globl __crt_sys_getsockopt
+.type __crt_sys_getsockopt, %function
+.p2align 2
+__crt_sys_getsockopt:
+  mov x8, #209
+  svc #0
+  ret
+.size __crt_sys_getsockopt, . - __crt_sys_getsockopt
+
 .globl __crt_sys_shutdown
 .type __crt_sys_shutdown, %function
 .p2align 2

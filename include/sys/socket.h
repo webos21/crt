@@ -2,6 +2,11 @@
 #define CRT_SYS_SOCKET_H
 
 #include <stddef.h>
+#include <sys/select.h> /* fd_set/FD_ZERO/FD_SET/select() -- real-world POSIX
+                          * systems commonly expose these from <sys/socket.h>
+                          * too, not just <sys/select.h>; plenty of portable
+                          * software assumes this (mbedTLS's net_sockets.c,
+                          * curl's own public curl/multi.h). */
 #include <sys/types.h>
 
 #ifdef __cplusplus
@@ -21,10 +26,14 @@ struct sockaddr_storage {
 };
 
 #define AF_UNSPEC 0
+#define AF_UNIX 1
+#define AF_LOCAL AF_UNIX
 #define AF_INET 2
 #define AF_INET6 10
 
 #define PF_UNSPEC AF_UNSPEC
+#define PF_UNIX AF_UNIX
+#define PF_LOCAL AF_LOCAL
 #define PF_INET AF_INET
 #define PF_INET6 AF_INET6
 
@@ -73,6 +82,7 @@ ssize_t recvfrom(
     socklen_t* addrlen);
 int getsockname(int sockfd, struct sockaddr* addr, socklen_t* addrlen);
 int setsockopt(int sockfd, int level, int optname, const void* optval, socklen_t optlen);
+int getsockopt(int sockfd, int level, int optname, void* optval, socklen_t* optlen);
 int shutdown(int sockfd, int how);
 
 #ifdef __cplusplus

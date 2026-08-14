@@ -53,10 +53,10 @@ in those two win.
   confirmed green across the board. `libffi` overall stays `partial` only
   because of its unrelated, pre-existing `-O1`/`-O2`
   `ffi_call()`-repeat-call bug. `mbedtls` (the next port in the queue
-  after `pcre2`, crypto library only) is now `shared-pass` on Linux and
-  Windows: a real SHA-256 known-answer check plus an AES-128-CBC
-  encrypt/decrypt round trip passes on both hosts against both the
-  static and shared build; macOS not yet verified. See `HISTORY.md`'s
+  after `pcre2`, crypto library only) is now `shared-pass` on all three
+  OSes: a real SHA-256 known-answer check plus an AES-128-CBC
+  encrypt/decrypt round trip passes on every host against both the
+  static and shared build, macOS confirmed by the user. See `HISTORY.md`'s
   2026-08-14 entry and `porting/recipes/mbedtls.json`'s own notes for
   the full trail (three new, generalizable `tools/crt-port-build.py`
   extensions -- `build.skip_configure`, a base `build.install_args`
@@ -64,7 +64,30 @@ in those two win.
   that must reach the build step only, never `make install` -- plus
   several recipe patches, including disabling `MBEDTLS_NET_C` since
   this PAL's sockets surface doesn't yet cover everything mbedtls's own
-  networking helper needs; deferred to `curl`, next in the queue).
+  networking helper needs; deferred to `curl`, the next and last port
+  in this queue). `curl` (8.21.0) is now `shared-pass` on Linux
+  (macOS not yet verified; Windows `configure-blocked`): a real HTTP GET
+  and HTTPS GET (real TLS handshake via the mbedTLS backend) round trip
+  against `example.com` both pass on Linux, for both static and shared
+  libcurl, using curl's own real default configuration. curl was the
+  first port in this queue to reach a real internet hostname over the
+  network, and it surfaced two real, general, previously-invisible libc
+  bugs, not curl-specific ones: `getaddrinfo()` had no real DNS
+  resolution at all (fixed with a real, minimal synchronous DNS client
+  added to `libc/src/socket.c`), and `fcntl(fd, F_SETFL, O_NONBLOCK)`
+  was a pure no-op on Linux/macOS (the actual cause of an indefinite
+  `curl_easy_perform()` hang, root-caused by direct process inspection
+  and temporary instrumentation in curl's own source -- fixed by
+  forwarding `F_GETFL`/`F_SETFL` to the real `fcntl(2)` syscall). A real
+  Windows build attempt found two more distinct bugs: curl's own
+  `AC_EGREP_CPP`-based socket probe only reads `CPPFLAGS`, not `CFLAGS`
+  (fixed); and, once configure passed, mbedtls's own Windows `.dll`
+  build turned out to statically embed this project's libc with no
+  symbol-visibility control and re-export its internal symbols, colliding
+  with this project's own `c.lib` once curl links against both (not
+  fixed this session -- not a curl bug, see `TODO.md`). See
+  `HISTORY.md`'s 2026-08-14 entry and `porting/recipes/curl.json`'s own
+  notes for the full trail.
 
 ## Known gaps
 
@@ -109,13 +132,30 @@ in those two win.
   pipe-content bug that broke parallel `make` on Windows is fixed and
   stress-tested (libpng scale, `-j 12`), but has no permanent regression
   test yet. See `TODO.md`.
+- **Windows `fcntl(fd, F_SETFL, O_NONBLOCK)` is still a no-op**: fixed
+  for real on Linux/macOS (forwards to the real `fcntl(2)` syscall) as
+  part of curl's own port, but Windows's `fcntl()` backend has no
+  unified syscall to forward to and keeps its prior (also broken,
+  non-regressing) no-op behavior for now -- a real fix needs per-fd-type
+  handling (winsock's `ioctlsocket(FIONBIO)` for sockets, overlapped I/O
+  for anonymous pipes). Documented as a TODO comment directly in
+  `libc/src/fd.c`; not yet hit by a real Windows port build.
+- **DNS resolver is deliberately minimal**: `getaddrinfo()` now does a
+  real DNS lookup (added for curl, see `HISTORY.md`'s 2026-08-14
+  entry), but only a single synchronous UDP query for an A (IPv4)
+  record -- no AAAA/IPv6, no TCP fallback for truncated responses, no
+  search-domain suffixes, no caching. Sufficient for curl's own basic
+  HTTP/HTTPS needs; would need to grow if a future port needs more.
 
 ## Next
 
-- Porting matrix expansion: `bzip2`, `xz`, and `pcre2` are all done on
-  Linux/macOS/Windows (`shared-pass`). `mbedtls` is `shared-pass` on
-  Linux/Windows (macOS pending). Next up: `curl`; see `TODO.md`'s "in
-  progressing" section for the current queue and order.
+- Porting matrix expansion: `bzip2`, `xz`, `pcre2`, and `mbedtls` are
+  all done (`shared-pass`) on Linux/macOS/Windows. `curl` is
+  `shared-pass` on Linux; `configure-blocked` on Windows (a real
+  mbedtls Windows-DLL symbol-export bug, not a curl issue -- see
+  `TODO.md`); macOS not yet verified. Fixing the mbedtls DLL export
+  issue closes out this queue (the last one -- `openssl` stays held
+  back). See `TODO.md`'s "in progressing" section for the full trail.
 - Broader POSIX/rootfs surface hardening beyond what each port's own build
   happens to exercise.
 - C++ runtime phase 2 and an ELF loader/dynamic-linker prototype: not

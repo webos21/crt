@@ -514,6 +514,43 @@ int __crt_fd_set_cloexec(int fd, int cloexec) {
   return 0;
 }
 
+/* F_GETFL/F_SETFL (real file status flags -- O_NONBLOCK above all): a
+ * direct raw fcntl(2) syscall already implements these correctly for
+ * every fd type the kernel itself understands (files, pipes, sockets),
+ * so this just forwards to it, the same way __crt_fd_get_cloexec/
+ * __crt_fd_set_cloexec already forward F_GETFD/F_SETFD above. Found
+ * missing (fcntl()'s own F_GETFL/F_SETFL cases used to be a pure
+ * software no-op that discarded the requested flags and always
+ * reported success) while porting curl: its own internal wakeup
+ * pipe/socketpair fallback (lib/socketpair.c) sets O_NONBLOCK via
+ * fcntl() expecting a real non-blocking fd back, then does a
+ * best-effort "drain if anything is pending, otherwise don't block"
+ * read on it (Curl_wakeup_consume()) -- with O_NONBLOCK silently never
+ * actually taking effect, that read blocked forever waiting for data
+ * nothing was ever going to write, hanging curl_multi_perform() on its
+ * very first call, before it ever reached DNS resolution or opened a
+ * real network socket. Root-caused by direct process inspection (only
+ * ever one thread, only ever the wakeup pipe fds open, 0% CPU -- a
+ * real blocking read, not a busy loop) plus reading this exact
+ * function's own source, not guessed. */
+int __crt_fd_get_status_flags(int fd) {
+  long result = __crt_sys_fcntl(fd, F_GETFL, 0);
+  if (result < 0 && result >= -4095) {
+    errno = (int)-result;
+    return -1;
+  }
+  return (int)result;
+}
+
+int __crt_fd_set_status_flags(int fd, int flags) {
+  long result = __crt_sys_fcntl(fd, F_SETFL, (void*)(long)flags);
+  if (result < 0 && result >= -4095) {
+    errno = (int)-result;
+    return -1;
+  }
+  return 0;
+}
+
 void __crt_fd_after_fork_child(void) {
 }
 #endif
@@ -1804,19 +1841,44 @@ int fcntl(int fd, int cmd, ...) {
       return 0;
 
     case F_GETFL:
+#if !defined(CRT_TARGET_OS_WINDOWS)
+      return __crt_fd_get_status_flags(fd);
+#else
+      /* TODO(windows): real O_NONBLOCK tracking -- see F_SETFL below. */
       if (fstat(fd, &(struct stat){0}) != 0) {
         return -1;
       }
       return O_RDWR;
+#endif
 
     case F_SETFL:
       va_start(args, cmd);
-      (void)va_arg(args, int);
+      arg = va_arg(args, int);
       va_end(args);
+#if !defined(CRT_TARGET_OS_WINDOWS)
+      return __crt_fd_set_status_flags(fd, arg);
+#else
+      /* TODO(windows): this is still a no-op, unlike Linux/macOS above
+       * (see __crt_fd_get_status_flags/__crt_fd_set_status_flags's own
+       * comment for the real bug this fixed there) -- Windows has no
+       * unified fcntl(2) syscall to forward to. A real fix needs
+       * per-fd-type handling: SOCKET fds can use winsock's own
+       * ioctlsocket(FIONBIO) (already loaded via GetProcAddress
+       * elsewhere in this PAL, see libc/src/arch/windows/common/
+       * syscall.c's winsock_api struct), but anonymous pipes from
+       * CreatePipe() have no non-blocking read mode at all without
+       * switching to overlapped I/O, a larger change than fits this
+       * pass. Not yet hit by a real Windows port build (this gap was
+       * found and fixed for Linux while porting curl there; Windows
+       * curl verification is still pending) -- kept as a known,
+       * documented gap rather than guessed at.
+       */
+      (void)arg;
       if (fstat(fd, &(struct stat){0}) != 0) {
         return -1;
       }
       return 0;
+#endif
 
     case F_GETLK:
     case F_SETLK:

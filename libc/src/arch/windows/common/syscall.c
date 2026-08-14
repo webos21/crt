@@ -157,10 +157,12 @@ struct crt_memory_status_ex {
 #define SD_BOTH 2
 #define CRT_PUBLIC_SOL_SOCKET 1
 #define CRT_PUBLIC_SO_REUSEADDR 2
+#define CRT_PUBLIC_SO_ERROR 4
 #define CRT_PUBLIC_SHUT_RD 0
 #define CRT_PUBLIC_SHUT_WR 1
 #define CRT_WS_SOL_SOCKET 0xffff
 #define CRT_WS_SO_REUSEADDR 0x0004
+#define CRT_WS_SO_ERROR 0x1007
 #define CRT_WS_FIONREAD 0x4004667fUL
 #define CRT_FD_KIND_NONE 0
 #define CRT_FD_KIND_FILE 1
@@ -583,6 +585,12 @@ struct winsock_api {
       int optname,
       const char* optval,
       int optlen);
+  int (CRT_WINAPI* getsockopt)(
+      SOCKET s,
+      int level,
+      int optname,
+      char* optval,
+      int* optlen);
   int (CRT_WINAPI* shutdown)(SOCKET s, int how);
   int (CRT_WINAPI* closesocket)(SOCKET s);
   int (CRT_WINAPI* ioctlsocket)(SOCKET s, long cmd, unsigned long* argp);
@@ -2520,6 +2528,12 @@ static long init_winsock(void) {
       int,
       const char*,
       int))GetProcAddress(module, "setsockopt");
+  winsock.getsockopt = (int (CRT_WINAPI*)(
+      SOCKET,
+      int,
+      int,
+      char*,
+      int*))GetProcAddress(module, "getsockopt");
   winsock.shutdown = (int (CRT_WINAPI*)(SOCKET, int))GetProcAddress(module, "shutdown");
   winsock.closesocket = (int (CRT_WINAPI*)(SOCKET))GetProcAddress(module, "closesocket");
   winsock.ioctlsocket =
@@ -2543,6 +2557,7 @@ static long init_winsock(void) {
       winsock.recvfrom == 0 ||
       winsock.getsockname == 0 ||
       winsock.setsockopt == 0 ||
+      winsock.getsockopt == 0 ||
       winsock.shutdown == 0 ||
       winsock.closesocket == 0 ||
       winsock.ioctlsocket == 0 ||
@@ -3450,6 +3465,9 @@ static int translate_socket_option(int level, int optname) {
   if (level == CRT_PUBLIC_SOL_SOCKET && optname == CRT_PUBLIC_SO_REUSEADDR) {
     return CRT_WS_SO_REUSEADDR;
   }
+  if (level == CRT_PUBLIC_SOL_SOCKET && optname == CRT_PUBLIC_SO_ERROR) {
+    return CRT_WS_SO_ERROR;
+  }
   return optname;
 }
 
@@ -3613,6 +3631,29 @@ long __crt_sys_setsockopt(int sockfd, int level, int optname, const void* optval
              (int)optlen) == SOCKET_ERROR
              ? -map_wsa_error(winsock.WSAGetLastError())
              : 0;
+}
+
+long __crt_sys_getsockopt(int sockfd, int level, int optname, void* optval, unsigned int* optlen) {
+  SOCKET socket_handle = get_fd_socket(sockfd);
+  int ws_optlen;
+
+  if (socket_handle == INVALID_SOCKET) {
+    return -EBADF;
+  }
+  if (optlen == 0) {
+    return -EFAULT;
+  }
+  ws_optlen = (int)*optlen;
+  if (winsock.getsockopt(
+          socket_handle,
+          translate_socket_level(level),
+          translate_socket_option(level, optname),
+          (char*)optval,
+          &ws_optlen) == SOCKET_ERROR) {
+    return -map_wsa_error(winsock.WSAGetLastError());
+  }
+  *optlen = (unsigned int)ws_optlen;
+  return 0;
 }
 
 long __crt_sys_shutdown(int sockfd, int how) {

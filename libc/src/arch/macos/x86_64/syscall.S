@@ -500,6 +500,21 @@ ___crt_sys_setsockopt:
   negq %rax
   retq
 
+.globl ___crt_sys_getsockopt
+.p2align 4, 0x90
+___crt_sys_getsockopt:
+  movq $0x2000076, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
+  negq %rax
+  retq
+
 .globl ___crt_sys_listen
 .p2align 4, 0x90
 ___crt_sys_listen:

@@ -55,11 +55,11 @@ Five active threads, not a flat list of one-off items:
     `pcre2_match()` round trip with three named capture groups. This does
     not close libffi's documented repeat-call bug; it only makes the
     already-known working subset reproducible.
-  - `mbedtls`: **`shared-pass` on Linux and Windows**; macOS not yet
-    verified (no local macOS hardware this session). A real SHA-256
-    known-answer check plus an AES-128-CBC encrypt/decrypt round trip
-    passes through this project's own toolchain on both hosts, against
-    both the static and shared build. Needed three new, small,
+  - `mbedtls`: **done on Linux, macOS, and Windows, all `shared-pass`**
+    (macOS confirmed by the user). A real SHA-256 known-answer check
+    plus an AES-128-CBC encrypt/decrypt round trip passes through this
+    project's own toolchain on all three hosts, against both the
+    static and shared build. Needed three new, small,
     generalizable `tools/crt-port-build.py` extensions
     (`build.skip_configure` for upstream sources with no `./configure`
     step; a base `build.install_args` field for Makefiles using a
@@ -81,7 +81,46 @@ Five active threads, not a flat list of one-off items:
     builtins archive at all, a real, general gap worth a future
     dedicated fix -- routed around for this port instead). See
     `porting/recipes/mbedtls.json`'s own notes and `HISTORY.md`'s dated
-    entry for the full trail. Next: `curl`.
+    entry for the full trail.
+  - `curl`: **`shared-pass` on Linux**; Windows attempted for real and
+    `configure-blocked` on a distinct mbedtls issue (see below); macOS
+    not yet verified. Last port in this queue before it closes out (`openssl`
+    stays held back). Scoped to HTTP/HTTPS for this first pass. The
+    first port in this queue to reach a real internet hostname over
+    the network (not a self-contained local round trip), and it
+    surfaced two real, general, previously-invisible libc bugs: (1)
+    `getaddrinfo()` had no real DNS resolution at all -- implemented a
+    real, minimal synchronous DNS client (`/etc/resolv.conf` parsing,
+    UDP A-record query/response, retries/timeout) directly in
+    `libc/src/socket.c`; also added `size_t`/`time_t` to
+    `<sys/types.h>`, `<sys/select.h>` transitively via
+    `<sys/socket.h>`, `AF_UNIX`, `IN6_IS_ADDR_*`, and a real
+    `getsockopt()`, all genuinely missing. (2) `fcntl(fd, F_SETFL,
+    O_NONBLOCK)` was a pure no-op on Linux/macOS -- this, not the DNS
+    gap, is what actually hung `curl_easy_perform()` indefinitely
+    (curl's own internal wakeup pipe never actually became
+    non-blocking); fixed by forwarding `F_GETFL`/`F_SETFL` to the real
+    `fcntl(2)` syscall, mirroring how `F_GETFD`/`F_SETFD` already did.
+    Windows's `fcntl()` keeps its prior no-op behavior for now
+    (documented TODO in the code, not yet hit by a real Windows curl
+    build). Also fixed a real `tools/crt-port-build.py` bug:
+    `@PORT_PREFIX@` substitution was never applied to `configure_args`
+    (only `make_args`/`install_args`), needed for curl's own
+    `--with-mbedtls=@PORT_PREFIX@`. A real Windows build attempt found
+    two more, distinct bugs: `configure`'s `AC_EGREP_CPP`-based socket
+    probe only reads `CPPFLAGS`, never `CFLAGS`, so the `_WIN32`
+    undefine (only ever in `CFLAGS`) never reached it -- fixed by
+    adding it to `CPPFLAGS` too. Once configure passed, linking failed
+    with `ld.lld: duplicate symbol` for several `__crt_sys_*`/`setenv`
+    names -- **not a curl bug**: mbedtls's own Windows `.dll` build
+    statically embeds this project's libc with no symbol-visibility
+    control and re-exports its internal symbols alongside its real
+    API, colliding with this project's own `c.lib` once curl links
+    against both. Not yet fixed -- needs either real symbol-visibility
+    control on mbedtls's Windows DLL build, or curl linking against
+    mbedtls's static libs even for its own shared build. Windows:
+    `configure-blocked`. See `porting/recipes/curl.json`'s own notes
+    and `HISTORY.md`'s dated entry for the full trail.
 
 - **`.init_array`/`.fini_array` (ELF/PE/Mach-O constructor/destructor)
   support -- DONE on all three OSes, see `HISTORY.md`'s dated entries for

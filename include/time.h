@@ -8,8 +8,14 @@
 extern "C" {
 #endif
 
+#ifndef __CRT_TIME_T_DEFINED
+#define __CRT_TIME_T_DEFINED
 typedef __crt_time_t time_t;
+#endif
+#ifndef __CRT_CLOCK_T_DEFINED
+#define __CRT_CLOCK_T_DEFINED
 typedef __crt_clock_t clock_t;
+#endif
 typedef __crt_clockid_t clockid_t;
 typedef __crt_timer_t timer_t;
 

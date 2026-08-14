@@ -643,6 +643,18 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
     port_name = recipe["name"]
     build = recipe["build"]
     shell = rootfs_mksh_path(preset_build_dir, target_os)
+    # @PORT_PREFIX@ substitution, computed once up front so both
+    # configure_args (below) and make_args/install_args (further down)
+    # can use it: needed whenever a recipe's own configure step must
+    # reference ANOTHER already-installed port's location directly (e.g.
+    # curl's --with-mbedtls=@PORT_PREFIX@/--with-zlib=@PORT_PREFIX@,
+    # since every port in this project shares one install prefix). A
+    # first attempt at curl's own recipe found this substitution was
+    # simply never applied to configure_args at all (only make_args/
+    # install_args did it) -- confirmed by a real build attempt showing
+    # the literal, unsubstituted string "@PORT_PREFIX@" in configure's
+    # own --with-mbedtls argument and resulting CPPFLAGS.
+    port_prefix_text = path_for_crt_shell(port_prefix) if target_os == "windows" else str(port_prefix)
     # skip_configure: some upstream sources (mbedtls's 3.x LTS series among
     # them) ship a plain, hand-written top-level Makefile with no
     # ./configure step at all -- there's nothing to run, and no --prefix
@@ -663,6 +675,7 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
         # both Windows aarch64 and x86_64 -- mingw_triple is resolved once in
         # main() via detect_target_arch()/mingw_triple_for_arch().
         configure = [arg.replace("@CRT_MINGW_TRIPLE@", mingw_triple) for arg in configure]
+        configure = [arg.replace("@PORT_PREFIX@", port_prefix_text) for arg in configure]
         if is_native_windows_configure(target_os):
             prefix = path_for_crt_shell(port_prefix) if use_crt_shell else path_for_msys_shell(port_prefix)
         else:
@@ -714,15 +727,13 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
     # real Windows drive-letter path handed to -bindir sends it into a
     # genuine infinite loop trying to ascend to a root it can never
     # reach -- see porting/recipes/libffi.json's own notes).
-    # @PORT_PREFIX@ substitution: needed for skip_configure recipes (like
-    # mbedtls) whose Makefile uses a `make`-variable install convention
-    # (DESTDIR=) instead of a ./configure --prefix= one, so the port's
-    # real install path has to reach make_args/install_args as a `make`
-    # variable rather than a configure flag. Reuses the same token/
-    # conversion convention as substitute_recipe_value (tests' cflags/
-    # link_args), but inlined here since port_prefix is the only
-    # placeholder any recipe has needed in this position so far.
-    port_prefix_text = path_for_crt_shell(port_prefix) if target_os == "windows" else str(port_prefix)
+    # @PORT_PREFIX@ substitution for make_args/install_args (port_prefix_text
+    # itself is computed once, up top of this function -- see that comment):
+    # needed for skip_configure recipes (like mbedtls) whose Makefile uses a
+    # `make`-variable install convention (DESTDIR=) instead of a ./configure
+    # --prefix= one, so the port's real install path has to reach
+    # make_args/install_args as a `make` variable rather than a configure
+    # flag.
     override_make_args = [
         arg.replace("@PORT_PREFIX@", port_prefix_text)
         for arg in build.get("target_overrides", {}).get(target_os, {}).get("make_args", [])

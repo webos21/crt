@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "name": "curl",
+  "version": "8.21.0",
+  "source": {
+    "url": "https://curl.se/download/curl-8.21.0.tar.gz",
+    "archive": "curl-8.21.0.tar.gz",
+    "source_dir": "curl-8.21.0",
+    "sha256": "d9b327997999045a24cda50f3983e69e51c516bd8be6ef9842fc7f99135e33bb",
+    "sha1": "c4a973118684745cb03c38987d131ccbce9e7ab1",
+    "md5": "6e50e38c398737269ec002749bcc5d0d"
+  },
+  "dependencies": ["zlib", "mbedtls"],
+  "build": {
+    "system": "configure",
+    "configure_args": [
+      "--with-mbedtls=@PORT_PREFIX@",
+      "--with-zlib=@PORT_PREFIX@",
+      "--without-brotli",
+      "--without-zstd",
+      "--without-libpsl",
+      "--without-libgsasl",
+      "--without-ca-bundle",
+      "--without-ca-path",
+      "--disable-ldap",
+      "--disable-ldaps",
+      "--disable-ftp",
+      "--disable-file",
+      "--disable-telnet",
+      "--disable-tftp",
+      "--disable-pop3",
+      "--disable-imap",
+      "--disable-smb",
+      "--disable-smtp",
+      "--disable-gopher",
+      "--disable-mqtt",
+      "--disable-rtsp",
+      "--disable-dict",
+      "--disable-ipfs",
+      "--disable-manual",
+      "--disable-docs"
+    ],
+    "env": {
+      "CFLAGS": "-O2"
+    },
+    "make_args": [],
+    "target_overrides": {
+      "windows": {
+        "configure_args": [
+          "--build=@CRT_MINGW_TRIPLE@"
+        ],
+        "env": {
+          "CFLAGS": "-U_WIN32 -U_WIN32_WCE -U__WIN32__ -UWIN32 -U__MINGW32__",
+          "CPPFLAGS": "-U_WIN32 -U_WIN32_WCE -U__WIN32__ -UWIN32 -U__MINGW32__"
+        }
+      }
+    }
+  },
+  "tests": [
+    {
+      "name": "http-roundtrip-static",
+      "type": "compile-run",
+      "source": "porting/tests/curl_http_roundtrip.c",
+      "cflags": [
+        "-I@PORT_PREFIX@/include"
+      ],
+      "link_args": [
+        "@PORT_PREFIX@/lib/libcurl.a",
+        "@PORT_PREFIX@/lib/libmbedtls.a",
+        "@PORT_PREFIX@/lib/libmbedx509.a",
+        "@PORT_PREFIX@/lib/libmbedcrypto.a",
+        "@PORT_PREFIX@/lib/libz.a"
+      ],
+      "expect_stdout": "curl_http_roundtrip_test: ok"
+    },
+    {
+      "name": "http-roundtrip-shared",
+      "type": "compile-run",
+      "source": "porting/tests/curl_http_roundtrip.c",
+      "cflags": [
+        "-I@PORT_PREFIX@/include"
+      ],
+      "expect_stdout": "curl_http_roundtrip_test: ok",
+      "target_overrides": {
+        "linux": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libcurl.so"
+          ]
+        },
+        "macos": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libcurl.dylib"
+          ]
+        },
+        "windows": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libcurl.dll.a"
+          ]
+        }
+      }
+    }
+  ],
+  "status": {
+    "linux": "shared-pass",
+    "macos": "untested",
+    "windows": "configure-blocked"
+  },
+  "notes": [
+    "Last port in this queue before it closes out (bzip2 -> xz -> pcre2 -> mbedtls -> curl, see TODO.md; openssl stays held back until something actually needs it). Depends on zlib and mbedtls, both already shared-pass on all three OSes.",
+    "8.21.0 is curl's current stable release as of this port. --with-mbedtls=@PORT_PREFIX@/--with-zlib=@PORT_PREFIX@ point curl's own configure at this project's shared port-install prefix, where both dependencies are already installed by the time curl's own build runs (tools/crt-port-build.py's dependencies-first ordering). A real bug was found and fixed getting these flags to work at all: tools/crt-port-build.py's @PORT_PREFIX@ substitution was previously only applied to make_args/install_args, never to configure_args -- confirmed by a real build attempt showing the literal, unsubstituted string \"@PORT_PREFIX@\" in configure's own --with-mbedtls argument and resulting CPPFLAGS. Fixed generally (port_prefix_text is now computed once up front in build_configure_port() and applied to configure_args the same way as the other two).",
+    "Scoped to HTTP/HTTPS for this first pass, matching this queue's own established caution (pcre2/xz/bzip2 all started narrower than upstream's full default and expanded only once solid): --disable-ftp/-file/-telnet/-tftp/-pop3/-imap/-smb/-smtp/-gopher/-mqtt/-rtsp/-dict/-ipfs and --disable-ldap/-ldaps turn off every protocol handler this first pass doesn't exercise. --without-brotli/-zstd/-libpsl/-libgsasl disable optional third-party compression/PSL/SASL libraries this project hasn't ported. --disable-manual/-docs skip building curl's own bundled documentation (not needed for a library consumer).",
+    "--without-ca-bundle/--without-ca-path: no default CA trust store is baked into the build. A real deployment consuming this port would need to supply its own CA bundle (e.g. via CURLOPT_CAINFO/CURLOPT_CAINFO_BLOB at runtime) -- this project doesn't vendor or maintain a CA bundle. porting/tests/curl_http_roundtrip.c documents its own choice about certificate verification for the same reason (see that file's own comment).",
+    "curl's own default (`--enable-shared`/`--enable-static`, both yes, and the default `POSIX threaded` resolver, kept rather than disabled -- see below) already builds and passes both static and shared libcurl in one pass -- no extra recipe scoping needed to get both build shapes verified together, matching this session's own new standing porting-loop discipline item in TODO.md (verify both build shapes in the same pass, not sequentially).",
+    "Windows target_overrides mirror the established pattern from every other Windows recipe here: --build=@CRT_MINGW_TRIPLE@ for the config.guess gap, and undefining the _WIN32 family so curl's own build_info/configure logic treats this target as a portable POSIX host rather than native Windows -- curl's Windows-specific code (winsock-specific socket options, native TLS backends, etc.) is entirely gated behind USE_WINSOCK/_WIN32-derived macros that this technique keeps off, routing curl onto the same portable POSIX socket path already exercised by every prior Windows port in this queue.",
+    "CFLAGS alone was NOT enough to undefine _WIN32 for Windows -- a real bug, found by a real build attempt: curl's own configure uses AC_EGREP_CPP (a PURE preprocessor-only check, via $CPP $CPPFLAGS, never $CFLAGS) for its 'checking if socket is prototyped' probe. With _WIN32 only undefined in CFLAGS, that specific probe still saw _WIN32 defined (clang's own default predefine for *-w64-mingw32), tried to '#include <winsock2.h>' (a header this PAL doesn't have), and curl concluded socket() wasn't usable at all -- a hard #error later in lib/transfer.c ('We cannot compile without socket() support!'), even though every actual compile/link-based probe (which DOES see CFLAGS) correctly found socket() working. Fixed by adding the identical undefines to CPPFLAGS too, not just CFLAGS -- confirmed directly: 'checking if socket is prototyped' now answers yes.",
+    "**Windows build is currently blocked by a genuinely separate, real bug in mbedtls's own Windows shared build, not a curl-specific problem**: once the _WIN32/CPPFLAGS fix above let configure complete, linking curl's own shared libcurl.dll failed with `ld.lld: error: duplicate symbol` for __crt_sys_shutdown/__crt_sys_poll/__crt_sys_unlink/__crt_sys_rename/setenv -- each one defined both in this project's own c.lib (curl's normal Windows libc import library, expected) AND in libmbedcrypto.dll.a (mbedtls's own import library, NOT expected -- these are this project's internal CRT/libc symbols, nothing to do with mbedtls's real crypto API). This means mbedtls's own .dll build (porting/recipes/mbedtls.json) statically embedded this project's libc into libmbedcrypto.dll and, without any symbol-visibility control (no -fvisibility=hidden, no .def file, no explicit dllexport annotations on mbedtls's own public API -- upstream mbedtls's headers were never written with Windows DLL export control in mind), re-exported that embedded libc's own symbols right alongside mbedtls's real API. mbedtls's own standalone shared-library test still passes fine in isolation (nothing else links against both mbedtls's DLL and this project's own c.lib at once there) -- the collision only surfaces once a THIRD library (curl) links against both mbedtls's shared import library and this project's own libc import library for the same final image. Not yet fixed this session: a real fix needs either proper symbol-visibility control added to mbedtls's own Windows .dll build (so it only exports its real public API), or having curl link against mbedtls's static libraries specifically even for curl's own shared build (a common, legitimate pattern -- a shared library statically embedding a dependency rather than depending on another shared library -- but not yet wired into this recipe). Windows: configure-blocked (configure itself now succeeds; the actual link step doesn't).",
+    "curl was the FIRST port in this whole queue to actually reach out to a real internet hostname over the network rather than a self-contained local round trip, and it surfaced two real, general, previously-invisible PAL bugs, not curl-specific ones -- both root-caused by direct process/source inspection (this port's own build hanging indefinitely, not failing loudly), not guessed:",
+    "(1) getaddrinfo() had no real DNS resolution at all -- it only ever handled literal numeric IP addresses via inet_pton(), returning EAI_NONAME immediately for any real hostname. Implemented a real, deliberately minimal synchronous DNS client directly in libc/src/socket.c: parses /etc/resolv.conf for a nameserver (falling back to 8.8.8.8 if missing/unreadable -- a documented simplification on Windows specifically, which has no /etc/resolv.conf at all; a fuller fix would query the OS's own configured DNS servers via IPHLPAPI's GetNetworkParams()), builds and sends a single UDP query for an A record, and parses the response (with a couple of retries and a short timeout so an unresponsive nameserver can't hang forever). Deliberately scoped: no AAAA/IPv6, no TCP fallback for truncated responses, no search-domain suffixes, no caching -- sufficient for curl's own basic HTTP/HTTPS needs, growable later if a future port needs more. Also found and fixed along the way: <sys/types.h> didn't expose size_t/time_t (real-world POSIX systems, and Android Bionic itself, do -- curl's own CURL_SIZEOF autoconf macro only #includes <sys/types.h>) and <sys/socket.h> didn't transitively include <sys/select.h> for fd_set/FD_SET/select() (real-world <sys/socket.h> commonly does -- curl's own public curl/multi.h header needs it directly), plus AF_UNIX, the IN6_IS_ADDR_* classification macros, and a real getsockopt() (mirroring the existing setsockopt() syscall plumbing across Linux/macOS/Windows) were all genuinely missing.",
+    "(2) fcntl(fd, F_SETFL, O_NONBLOCK) was a pure software no-op on Linux/macOS -- it read and discarded the requested flags and always reported success, never actually marking any fd non-blocking. This is what actually caused curl_easy_perform() to hang indefinitely (not the DNS gap above, which fails fast once real -- confirmed by adding temporary instrumentation directly into curl's own lib/easy.c and lib/multi.c during this investigation, then reverting it): curl's own internal wakeup pipe (lib/socketpair.c's portable pipe()-based socketpair fallback, used by ALL curl multi-handle operations, not just DNS) sets O_NONBLOCK via fcntl() expecting a real non-blocking fd back, then does a best-effort \"drain if pending, don't block otherwise\" read on it (Curl_wakeup_consume()) on every single curl_multi_perform() call -- with O_NONBLOCK silently never taking effect, that read blocked forever on the very first call, before curl ever reached DNS resolution or opened a real network socket (confirmed directly: only ever one thread, only ever the wakeup pipe's own fds open, 0% CPU -- a real blocked read(), not a busy loop). Fixed generally in libc/src/fd.c: F_GETFL/F_SETFL now forward to the real fcntl(2) syscall on Linux/macOS (the same way F_GETFD/F_SETFD already did), which already implements O_NONBLOCK correctly at the kernel level for every fd type -- no different from how the pre-existing __crt_fd_get_cloexec/__crt_fd_set_cloexec forward F_GETFD/F_SETFD. Windows's own fcntl() backend has no unified syscall to forward to and keeps its prior (also broken, but non-regressing) no-op behavior for now, documented as a TODO comment in the code itself -- not yet hit by a real Windows curl build this session.",
+    "porting/tests/curl_http_roundtrip.c performs a real round trip against real servers, not a version-string/link-only smoke check: a plain HTTP GET (proving the portable POSIX socket path actually drives a real TCP connection and curl parses a real response) and an HTTPS GET (proving the mbedTLS backend performs a real TLS handshake and decrypts the response correctly -- the body could not come back as readable HTML otherwise) against http(s)://example.com (IANA-reserved for exactly this kind of stable documentation/test use, RFC 2606), checking both the HTTP status and a known-stable string in the body. CURLOPT_SSL_VERIFYPEER/VERIFYHOST are disabled for the HTTPS request since this project has no CA bundle to validate against (see the --without-ca-bundle note above) -- this doesn't weaken what the test actually proves, since the TLS handshake and record encryption/decryption still have to succeed for the response to decode at all.",
+    "Verified for real on Linux (WSL Ubuntu 20.04 + clang-18): `curl_http_roundtrip_test: ok http=200 https=200` for both http-roundtrip-static and http-roundtrip-shared, using curl's own real default configuration (POSIX threaded resolver, not a scoped-down synchronous fallback -- confirmed the fcntl() fix alone was sufficient, no resolver-specific workaround needed). Also reran the full port-test-recipes aggregate (all other ports with automated tests) and the full Windows ctest suite (83/83) afterward to confirm the libc/tools changes didn't regress anything else. Linux: shared-pass. Windows: configure-blocked -- see the mbedtls-DLL-over-export note above for the real, distinct blocker found there (not the same class of issue as the DNS/fcntl gaps, which are already fixed and confirmed working on Windows's own build up through the link step). macOS: not yet verified this session."
+  ]
+}

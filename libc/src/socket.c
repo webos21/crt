@@ -1,5 +1,6 @@
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <stddef.h>
@@ -20,6 +21,7 @@ struct crt_darwin_sockaddr_in {
 
 #define CRT_DARWIN_SOL_SOCKET 0xffff
 #define CRT_DARWIN_SO_REUSEADDR 0x0004
+#define CRT_DARWIN_SO_ERROR 0x1007
 #endif
 
 long __crt_sys_socket(int domain, int type, int protocol);
@@ -43,6 +45,7 @@ long __crt_sys_recvfrom(
     unsigned int* addrlen);
 long __crt_sys_getsockname(int sockfd, void* addr, unsigned int* addrlen);
 long __crt_sys_setsockopt(int sockfd, int level, int optname, const void* optval, unsigned int optlen);
+long __crt_sys_getsockopt(int sockfd, int level, int optname, void* optval, unsigned int* optlen);
 long __crt_sys_shutdown(int sockfd, int how);
 
 int h_errno;
@@ -497,6 +500,33 @@ int setsockopt(int sockfd, int level, int optname, const void* optval, socklen_t
       __crt_sys_setsockopt(sockfd, level, optname, optval, (unsigned int)optlen));
 }
 
+int getsockopt(int sockfd, int level, int optname, void* optval, socklen_t* optlen) {
+  unsigned int len;
+  long result;
+
+  if (optlen == 0) {
+    errno = EFAULT;
+    return -1;
+  }
+  len = (unsigned int)*optlen;
+#if defined(CRT_TARGET_OS_MACOS)
+  if (level == SOL_SOCKET) {
+    level = CRT_DARWIN_SOL_SOCKET;
+    if (optname == SO_REUSEADDR) {
+      optname = CRT_DARWIN_SO_REUSEADDR;
+    } else if (optname == SO_ERROR) {
+      optname = CRT_DARWIN_SO_ERROR;
+    }
+  }
+#endif
+  result = __crt_sys_getsockopt(sockfd, level, optname, optval, &len);
+  if (result < 0 && result >= -4095) {
+    return (int)__set_errno((int)-result);
+  }
+  *optlen = (socklen_t)len;
+  return (int)result;
+}
+
 int shutdown(int sockfd, int how) {
   return (int)normalize_socket_result(__crt_sys_shutdown(sockfd, how));
 }
@@ -520,6 +550,286 @@ static int parse_service(const char* service, in_port_t* port) {
   }
   *port = htons((uint16_t)value);
   return 0;
+}
+
+/* --- Minimal DNS client -----------------------------------------------
+ * getaddrinfo() previously only handled literal numeric IP addresses
+ * (via inet_pton()) -- there was no real hostname resolution at all, a
+ * gap invisible until curl (the first port in this project's own queue
+ * to actually reach out to a real internet hostname rather than a
+ * self-contained local round trip) needed it for real: a direct
+ * getaddrinfo("example.com", ...) call returned EAI_NONAME immediately,
+ * root-caused by reading this function's own source, not guessed.
+ *
+ * Scoped deliberately: a single synchronous UDP query for an A (IPv4)
+ * record, with a couple of retries and a short timeout -- not the full
+ * DNS client a real system resolver is (no AAAA/IPv6, no TCP fallback
+ * for truncated responses, no search-domain suffix handling, no
+ * caching). Sufficient for curl's own basic HTTP/HTTPS needs, the
+ * immediate reason this was needed; a fuller resolver can grow from
+ * here if a future port needs more.
+ */
+#define CRT_DNS_PORT 53
+#define CRT_DNS_TIMEOUT_SEC 5
+#define CRT_DNS_MAX_RETRIES 2
+#define CRT_DNS_MSG_SIZE 512
+
+/* Finds the first "nameserver X.X.X.X" line in /etc/resolv.conf. Falls
+ * back to a public resolver (Google's 8.8.8.8) if the file is missing,
+ * unreadable, or has no usable nameserver line -- the real, correct
+ * source on Linux/macOS (which both ship a real /etc/resolv.conf this
+ * PAL's own open()/read() can read directly, being real POSIX file
+ * I/O against the real host filesystem), and a documented, deliberate
+ * simplification on Windows (which has no such file at all -- a fuller
+ * fix would query the OS's own configured adapter DNS servers via
+ * IPHLPAPI's GetNetworkParams(), not attempted this pass since a
+ * public resolver already works correctly from any host with a normal
+ * internet connection, which is what this PAL's own port-build/fetch
+ * machinery already depends on anyway). */
+static void dns_get_nameserver(struct in_addr* out) {
+  int fd;
+  char buf[4096];
+  ssize_t n;
+  size_t total = 0;
+  char* line;
+  char* saveptr = 0;
+
+  out->s_addr = 0;
+  fd = open("/etc/resolv.conf", O_RDONLY);
+  if (fd >= 0) {
+    while (total < sizeof(buf) - 1) {
+      n = read(fd, buf + total, sizeof(buf) - 1 - total);
+      if (n <= 0) {
+        break;
+      }
+      total += (size_t)n;
+    }
+    close(fd);
+    buf[total] = 0;
+
+    line = strtok_r(buf, "\n", &saveptr);
+    while (line != 0) {
+      while (*line == ' ' || *line == '\t') {
+        ++line;
+      }
+      if (strncmp(line, "nameserver", 10) == 0 && (line[10] == ' ' || line[10] == '\t')) {
+        char* p = line + 10;
+        char ipbuf[64];
+        size_t i = 0;
+        while (*p == ' ' || *p == '\t') {
+          ++p;
+        }
+        while (*p != 0 && *p != ' ' && *p != '\t' && *p != '\r' && i < sizeof(ipbuf) - 1) {
+          ipbuf[i++] = *p++;
+        }
+        ipbuf[i] = 0;
+        if (inet_pton(AF_INET, ipbuf, out) == 1) {
+          return;
+        }
+      }
+      line = strtok_r(0, "\n", &saveptr);
+    }
+  }
+  inet_pton(AF_INET, "8.8.8.8", out);
+}
+
+/* Encodes `hostname` as DNS QNAME (length-prefixed labels, root-
+ * terminated) plus a QTYPE=A/QCLASS=IN question, appended after a
+ * standard 12-byte header with RD (recursion desired) set. */
+static int dns_build_query(unsigned char* buf, size_t buf_size, const char* hostname, uint16_t query_id, size_t* out_len) {
+  size_t pos;
+  const char* p;
+
+  if (buf_size < 12) {
+    return -1;
+  }
+  buf[0] = (unsigned char)(query_id >> 8);
+  buf[1] = (unsigned char)(query_id & 0xffU);
+  buf[2] = 0x01; /* RD */
+  buf[3] = 0x00;
+  buf[4] = 0x00;
+  buf[5] = 0x01; /* QDCOUNT=1 */
+  buf[6] = 0x00;
+  buf[7] = 0x00; /* ANCOUNT=0 */
+  buf[8] = 0x00;
+  buf[9] = 0x00; /* NSCOUNT=0 */
+  buf[10] = 0x00;
+  buf[11] = 0x00; /* ARCOUNT=0 */
+  pos = 12;
+
+  p = hostname;
+  while (*p != 0) {
+    const char* label_start = p;
+    size_t label_len;
+    while (*p != 0 && *p != '.') {
+      ++p;
+    }
+    label_len = (size_t)(p - label_start);
+    if (label_len == 0 || label_len > 63 || pos + 1 + label_len > buf_size) {
+      return -1;
+    }
+    buf[pos++] = (unsigned char)label_len;
+    memcpy(buf + pos, label_start, label_len);
+    pos += label_len;
+    if (*p == '.') {
+      ++p;
+    }
+  }
+  if (pos + 1 > buf_size) {
+    return -1;
+  }
+  buf[pos++] = 0; /* root label */
+  if (pos + 4 > buf_size) {
+    return -1;
+  }
+  buf[pos++] = 0x00;
+  buf[pos++] = 0x01; /* QTYPE=A */
+  buf[pos++] = 0x00;
+  buf[pos++] = 0x01; /* QCLASS=IN */
+  *out_len = pos;
+  return 0;
+}
+
+/* Advances past one DNS NAME field (either a length-prefixed label
+ * sequence or a 2-byte compression pointer -- 0xC0 high bits), without
+ * following/decoding compression pointers: this resolver only ever
+ * needs to skip past NAMEs (the question echoed back, and each answer
+ * record's own NAME) to reach the fixed-layout fields after them, never
+ * to reconstruct the actual name string. */
+static int dns_skip_name(const unsigned char* buf, size_t buf_len, size_t pos, size_t* out_pos) {
+  while (pos < buf_len) {
+    unsigned char len = buf[pos];
+    if (len == 0) {
+      *out_pos = pos + 1;
+      return 0;
+    }
+    if ((len & 0xc0U) == 0xc0U) {
+      if (pos + 2 > buf_len) {
+        return -1;
+      }
+      *out_pos = pos + 2;
+      return 0;
+    }
+    pos += 1 + (size_t)len;
+  }
+  return -1;
+}
+
+/* Parses a DNS response for the first A-record answer, verifying the
+ * query ID echoes back, the response flag is set, and RCODE is 0
+ * (success). Only IPv4 (TYPE=A/CLASS=IN, 4-byte RDATA) answers are
+ * recognized -- see this DNS client's own top-of-section comment for
+ * the deliberate AAAA/IPv6 scoping decision. */
+static int dns_parse_response(const unsigned char* buf, size_t buf_len, uint16_t expected_id, struct in_addr* out) {
+  uint16_t id, flags, qdcount, ancount;
+  size_t pos;
+  int i;
+
+  if (buf_len < 12) {
+    return -1;
+  }
+  id = (uint16_t)((buf[0] << 8) | buf[1]);
+  if (id != expected_id) {
+    return -1;
+  }
+  flags = (uint16_t)((buf[2] << 8) | buf[3]);
+  if ((flags & 0x8000U) == 0 || (flags & 0x000fU) != 0) {
+    return -1; /* not a response, or a nonzero RCODE (real failure) */
+  }
+  qdcount = (uint16_t)((buf[4] << 8) | buf[5]);
+  ancount = (uint16_t)((buf[6] << 8) | buf[7]);
+
+  pos = 12;
+  for (i = 0; i < qdcount; ++i) {
+    if (dns_skip_name(buf, buf_len, pos, &pos) != 0 || pos + 4 > buf_len) {
+      return -1;
+    }
+    pos += 4; /* QTYPE + QCLASS */
+  }
+
+  for (i = 0; i < ancount; ++i) {
+    uint16_t type, cls, rdlength;
+    if (dns_skip_name(buf, buf_len, pos, &pos) != 0 || pos + 10 > buf_len) {
+      return -1;
+    }
+    type = (uint16_t)((buf[pos] << 8) | buf[pos + 1]);
+    cls = (uint16_t)((buf[pos + 2] << 8) | buf[pos + 3]);
+    rdlength = (uint16_t)((buf[pos + 8] << 8) | buf[pos + 9]);
+    pos += 10;
+    if (pos + rdlength > buf_len) {
+      return -1;
+    }
+    if (type == 1 && cls == 1 && rdlength == 4) {
+      memcpy(&out->s_addr, buf + pos, 4);
+      return 0;
+    }
+    pos += rdlength;
+  }
+  return -1;
+}
+
+/* Top-level synchronous resolve: builds a query, sends it over UDP to
+ * the configured nameserver, and waits (via select(), so a nameserver
+ * that never responds can't hang this function forever the way the
+ * very first version of this fix -- discovered live, not planned --
+ * would have) up to CRT_DNS_TIMEOUT_SEC per attempt, retrying up to
+ * CRT_DNS_MAX_RETRIES times before giving up. */
+static int dns_resolve_hostname(const char* hostname, struct in_addr* out) {
+  struct in_addr nameserver;
+  int sock;
+  struct sockaddr_in server_addr;
+  unsigned char query[CRT_DNS_MSG_SIZE];
+  unsigned char response[CRT_DNS_MSG_SIZE];
+  size_t query_len;
+  uint16_t query_id;
+  int attempt;
+  int result = -1;
+
+  dns_get_nameserver(&nameserver);
+
+  query_id = (uint16_t)(random() & 0xffffL);
+  if (dns_build_query(query, sizeof(query), hostname, query_id, &query_len) != 0) {
+    return -1;
+  }
+
+  sock = socket(AF_INET, SOCK_DGRAM, 0);
+  if (sock < 0) {
+    return -1;
+  }
+
+  memset(&server_addr, 0, sizeof(server_addr));
+  server_addr.sin_family = AF_INET;
+  server_addr.sin_port = htons(CRT_DNS_PORT);
+  server_addr.sin_addr = nameserver;
+
+  for (attempt = 0; attempt < CRT_DNS_MAX_RETRIES && result != 0; ++attempt) {
+    fd_set readfds;
+    struct timeval tv;
+    ssize_t received;
+    int sel;
+
+    if (sendto(sock, query, query_len, 0, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+      continue;
+    }
+
+    FD_ZERO(&readfds);
+    FD_SET(sock, &readfds);
+    tv.tv_sec = CRT_DNS_TIMEOUT_SEC;
+    tv.tv_usec = 0;
+    sel = select(sock + 1, &readfds, 0, 0, &tv);
+    if (sel <= 0) {
+      continue; /* timed out or interrupted -- retry */
+    }
+
+    received = recvfrom(sock, response, sizeof(response), 0, 0, 0);
+    if (received < 12) {
+      continue;
+    }
+    result = dns_parse_response(response, (size_t)received, query_id, out);
+  }
+
+  close(sock);
+  return result;
 }
 
 int getaddrinfo(
@@ -561,9 +871,13 @@ int getaddrinfo(
     addr->sin_addr.s_addr =
         (hints != 0 && (hints->ai_flags & AI_PASSIVE) != 0) ? htonl(INADDR_ANY) : htonl(INADDR_LOOPBACK);
   } else if (inet_pton(AF_INET, node, &addr->sin_addr) != 1) {
-    free(ai);
-    free(addr);
-    return EAI_NONAME;
+    /* Not a literal IP -- try a real DNS lookup (see the DNS client
+     * section above) before giving up. */
+    if (dns_resolve_hostname(node, &addr->sin_addr) != 0) {
+      free(ai);
+      free(addr);
+      return EAI_NONAME;
+    }
   }
 
   ai->ai_family = AF_INET;

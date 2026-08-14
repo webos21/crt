@@ -2,6 +2,25 @@
 #define CRT_SYS_TYPES_H
 
 #include <bits/crt_types.h>
+#include <stddef.h> /* size_t -- real-world POSIX systems (and Android Bionic
+                      * itself) expose it from <sys/types.h> too, not just
+                      * <stddef.h>; plenty of portable software (including
+                      * curl's own CURL_SIZEOF autoconf macro) assumes this. */
+
+/* time_t/clock_t -- same reasoning as size_t above (real-world <sys/types.h>
+ * exposes these too, not just <time.h>; curl's own CURL_SIZEOF probe for
+ * time_t only #includes <sys/types.h>). Guarded so including both this
+ * header and <time.h> in the same translation unit -- extremely common --
+ * doesn't produce a duplicate-typedef error; <time.h> guards its own
+ * definitions the same way. */
+#ifndef __CRT_TIME_T_DEFINED
+#define __CRT_TIME_T_DEFINED
+typedef __crt_time_t time_t;
+#endif
+#ifndef __CRT_CLOCK_T_DEFINED
+#define __CRT_CLOCK_T_DEFINED
+typedef __crt_clock_t clock_t;
+#endif
 
 typedef __crt_ssize_t ssize_t;
 typedef __crt_off_t off_t;

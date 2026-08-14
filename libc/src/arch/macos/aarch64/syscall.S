@@ -499,6 +499,21 @@ ___crt_sys_setsockopt:
   neg x0, x0
   ret
 
+.globl ___crt_sys_getsockopt
+.p2align 2
+___crt_sys_getsockopt:
+  mov x16, #118
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  stp x29, x30, [sp, #-16]!
+  mov x29, sp
+  bl ___crt_macos_to_bionic_errno
+  ldp x29, x30, [sp], #16
+  neg x0, x0
+  ret
+
 .globl ___crt_sys_listen
 .p2align 2
 ___crt_sys_listen:
