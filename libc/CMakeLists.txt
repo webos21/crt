@@ -177,6 +177,9 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
     message(FATAL_ERROR "Unsupported Linux architecture: ${CRT_EFFECTIVE_ARCH}")
   endif()
   set(CRT_SIGNAL_BACKEND_FILE src/arch/linux/common/signal_backend.c)
+  # getauxval() (include/sys/auxv.h) -- Linux-only, no macOS/Windows
+  # equivalent kernel mechanism exists (see that file's own comment).
+  set(CRT_LINUX_AUXV_FILE src/arch/linux/common/auxv.c)
   # __crt_run_init_array()/__crt_run_fini_array() (.init_array/.fini_array
   # support for the executable's own static link -- see that file's own
   # comment for why this must be linked directly into every executable,
@@ -235,6 +238,9 @@ if(CRT_TARGET_OS STREQUAL "macos")
   target_sources(c PRIVATE ${CRT_MACOS_ERRNO_FILE})
 endif()
 target_sources(c PRIVATE ${CRT_SIGNAL_BACKEND_FILE})
+if(CRT_TARGET_OS STREQUAL "linux")
+  target_sources(c PRIVATE ${CRT_LINUX_AUXV_FILE})
+endif()
 
 add_library(crt_setjmp OBJECT ${CRT_SETJMP_FILE})
 target_link_libraries(crt_setjmp PRIVATE crt_build_flags)
@@ -338,6 +344,9 @@ if(CRT_TARGET_OS STREQUAL "macos")
   target_sources(c_shared PRIVATE ${CRT_MACOS_ERRNO_FILE})
 endif()
 target_sources(c_shared PRIVATE ${CRT_SIGNAL_BACKEND_FILE})
+if(CRT_TARGET_OS STREQUAL "linux")
+  target_sources(c_shared PRIVATE ${CRT_LINUX_AUXV_FILE})
+endif()
 if(CRT_TARGET_OS STREQUAL "windows")
   target_sources(c_shared PRIVATE $<TARGET_OBJECTS:crt_windows_chkstk>)
   target_sources(c_shared PRIVATE $<TARGET_OBJECTS:crt_windows_compiler_abi>)

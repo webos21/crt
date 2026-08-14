@@ -4,6 +4,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <private/crt_auxv.h>
+
 #define CRT_ENV_INITIAL_CAPACITY 64
 #define CRT_ROOTFS_DEFAULT_PATH "/system/bin:/bin:/usr/bin"
 
@@ -12,7 +14,10 @@ static char** env_entries = env_static_entries;
 char** environ = env_static_entries;
 static size_t env_capacity = CRT_ENV_INITIAL_CAPACITY;
 static int env_initialized;
-static char** initial_envp;
+/* Not static: Linux's getauxval() (libc/src/arch/linux/common/auxv.c) reads
+ * this same untouched, kernel-provided pointer to locate the ELF auxiliary
+ * vector. See private/crt_auxv.h. */
+char** __crt_initial_envp;
 
 void __crt_env_init(char** envp);
 
@@ -140,7 +145,7 @@ static int env_store_entry(const char* entry, int overwrite) {
 }
 
 void __crt_env_set_initial(char** envp) {
-  initial_envp = envp;
+  __crt_initial_envp = envp;
 }
 
 #if defined(CRT_TARGET_OS_WINDOWS)
@@ -265,7 +270,7 @@ void __crt_env_init(char** envp) {
   }
   env_initialized = 1;
   if (envp == 0) {
-    envp = initial_envp;
+    envp = __crt_initial_envp;
   }
   if (envp != 0) {
     for (cursor = envp; *cursor != 0; ++cursor) {

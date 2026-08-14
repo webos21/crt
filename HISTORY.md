@@ -10,6 +10,109 @@ substantive update.
 
 ## 2026-08-14
 
+- **Implemented `getauxval()`/`<sys/auxv.h>` for Linux, fixing a real
+  `port-rebuild-mbedtls` build failure.** Reported: a fresh
+  `port-rebuild-mbedtls` on a real Linux aarch64 host failed with
+  `library/aesce.c:109:10: fatal error: 'sys/auxv.h' file not found` --
+  upstream mbedtls's ARMv8 crypto-extension runtime detection
+  (`#if defined(__linux__)`) calls `getauxval(AT_HWCAP)`/`getauxval(AT_HWCAP2)`,
+  and this sysroot had never implemented the header or the function at all.
+  Fixed generally, not with an mbedtls-specific patch, per the standing
+  porting-loop discipline (checked Android Bionic's own `sys/auxv.h`/
+  `getauxval.cpp` and the real Linux kernel UAPI `auxvec.h` for the exact
+  semantics and `AT_*` values, extended the CRT/PAL sysroot): `libc/src/
+  env.c`'s `__crt_env_set_initial()` already captures the untouched,
+  kernel-provided initial `envp` pointer (never a copy) at process
+  startup, and the standard Linux/System V process startup stack layout
+  (`argc, argv[], NULL, envp[], NULL, auxv[], AT_NULL`) puts the ELF
+  auxiliary vector immediately after `envp`'s own `NULL` terminator --
+  reachable by walking that same pointer, with no `crt1.S` changes needed
+  on either architecture. Added `getauxval()` (new `libc/src/arch/linux/
+  common/auxv.c`, Linux-only: macOS/Windows have no equivalent kernel
+  mechanism, matching real upstream, which doesn't ship this header on
+  either host), plus `include/sys/auxv.h` and `include/linux/auxvec.h`
+  (`AT_*` values cross-checked against the real kernel header, not from
+  memory). `env.c`'s previously-`static` `initial_envp` was renamed
+  `__crt_initial_envp` and exposed via a new private header
+  (`libc/include/private/crt_auxv.h`) so the new Linux-only file can read
+  it without otherwise touching the portable, all-OS `env.c`. Verified on
+  a real Linux aarch64 host: a standalone test confirmed real, correct
+  values (`AT_PAGESZ=4096`, a nonzero `AT_HWCAP`/`AT_HWCAP2` bitmask, a
+  nonzero `AT_RANDOM` pointer, and `0`/`ENOENT` for an unknown type),
+  `aesce.o` now compiles, and the full `port-rebuild-mbedtls`
+  `(skip_configure) && make -j4 lib SHARED=1 && make install` completes
+  cleanly end to end, with `libmbedcrypto.so.16` and siblings correctly
+  `ldd`-resolving to this project's own sysroot. Full `ctest` 77/77
+  throughout. Not yet re-verified on macOS/Windows this session (should
+  be a no-op there in principle -- `aesce.c`'s `getauxval()` path is
+  Linux-only upstream -- but not confirmed by an actual rebuild on
+  either host). See `docs/porting_status.md`'s mbedtls row for the same
+  writeup in context.
+  - **Follow-up in the same session: found and fixed a real, separate
+    `<inttypes.h>` bug while investigating why only aarch64 hit the
+    `aesce.c` failure.** `aesce.c` is ARMv8-crypto-extension-specific
+    code (`#if defined(__ARM_ARCH) && __ARM_ARCH >= 8`, upstream);
+    x86_64's equivalent AES acceleration lives in a separate file
+    (`aesni.c`) that detects AES-NI via compiler intrinsics/`CPUID`,
+    never calls `getauxval()`, and never includes `<sys/auxv.h>` at all
+    -- so x86_64 was never exposed to the gap, not because anything
+    there worked around it. While confirming the mbedtls rebuild was
+    otherwise clean, 4 `-Wformat` warnings turned up in
+    `ssl_tls13_server.c` (`MBEDTLS_PRINTF_MS_TIME` mismatched against
+    `mbedtls_ms_time_t`, an `int64_t`). Root cause was general, not
+    mbedtls's: clang's own `__INT64_TYPE__`/`__INTMAX_TYPE__` (confirmed
+    via `-dM -E` against the real target triples, not assumed) is plain
+    `long` on Linux/macOS (LP64) but `long long` on this project's
+    Windows target (`*-w64-mingw32`, LLP64) -- yet `include/inttypes.h`'s
+    `PRId64`/`PRIi64`/`PRIu64`/`PRIx64`/`PRIX64`/`*MAX` macros were
+    hardcoded to the `ll`-modifier forms (correct for Windows only),
+    while the `*PTR`-width macros were hardcoded the other way, to the
+    single-`l` forms -- also only correct on Linux/macOS: `intptr_t` is
+    `long long` on this project's Windows target too, so `PRIdPTR` etc
+    were *also* wrong there, just not yet caught by any real Windows
+    build exercising them. Fixed all of them (`PRI{d,i,u,x,X}{64,MAX,
+    PTR}` and the `SCN{d,u,x}{64,MAX,PTR}` scanf equivalents that already
+    existed) with a single `CRT_TARGET_OS_WINDOWS`-conditioned
+    length-modifier prefix (`CRT_PRI64_PREFIX`/`CRT_PRIPTR_PREFIX`,
+    `"l"` on Linux/macOS, `"ll"` on Windows) rather than patching each
+    macro ad hoc. Verified: a standalone `int64_t`/`uint64_t`/
+    `intmax_t`/`uintptr_t` round trip through every fixed macro compiles
+    clean under `-Wall -Wextra -Werror` and prints correct values on
+    this Linux aarch64 host, the 4 mbedtls warnings are gone from a
+    clean `port-rebuild-mbedtls` rerun, and full `ctest` stays 77/77 (no
+    existing code in this project's own tree used any of these macros,
+    so zero regression risk there). Not yet re-verified on macOS
+    (expected to behave like Linux, same LP64 ABI) or Windows (the
+    `*PTR` direction of this fix is Windows-only in effect and has no
+    real Windows build exercising it yet).
+  - **Second follow-up, same session: `port-rebuild-curl` failed with
+    `undefined reference to '__getauxval'`.** Not a curl, mbedtls, or
+    zlib symbol -- traced with `nm` straight to `lse-init.o` inside this
+    project's own `libclang_rt.builtins.a`, LLVM compiler-rt's AArch64
+    outline-atomics support (`__aarch64_have_lse_atomics`'s own
+    constructor), pulled in automatically once curl's `<stdatomic.h>`
+    usage made clang emit an outlined atomic op. Root cause: real glibc
+    implements the public `getauxval()` as a `weak_alias` to a reserved-
+    namespace `__getauxval()`, and compiler-rt's outline-atomics helper
+    -- written against that real glibc ABI, not Android Bionic's (which
+    only ever exports plain `getauxval()`) -- calls `__getauxval()`
+    directly by that exact name. This project's new `getauxval()`
+    (above) had no such alias. Fixed by adding `unsigned long
+    __getauxval(unsigned long)` to `libc/src/arch/linux/common/auxv.c`
+    (delegates to `getauxval()`), deliberately *not* declared in
+    `include/sys/auxv.h` -- matching real glibc, this is a linkable ABI
+    symbol third-party runtime-support code may assume exists, not part
+    of the public API surface. Verified: `nm` on the rebuilt `libc.a`
+    shows both `getauxval`/`__getauxval` as defined; a full, clean
+    `port-rebuild-curl` (`configure && make -j4 && make install`)
+    completes with `curl`/`libcurl.so` linking successfully this time;
+    `port-test-curl` passes a REAL network round trip for both build
+    shapes (`curl_http_roundtrip_test: ok http=200 https=200`, static
+    and shared, against real `http://example.com/`/`https://
+    example.com/`) -- exercising mbedTLS's real TLS handshake (and, in
+    turn, `aesce.c`'s AES hardware-acceleration path) for real, not just
+    a compile check. Full `ctest` 77/77 throughout.
+
 - **Closed the macOS curl/shared-port audit loop and cleaned up the
   CMake install/RPATH noise.** The first curl tranche is now verified as
   `shared-pass` on macOS as well as Linux: `port-test-curl` passes both
