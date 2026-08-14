@@ -24,11 +24,13 @@ in those two win.
   own `cmake --workflow` step does not run `port-test-recipes` (a
   separate, heavier target that fetches and builds third-party sources)
   -- that's verified locally/per-host instead, see below.
-- **`ctest`**: 83 registered tests on Windows (count is slightly
+- **`ctest`**: 83 registered tests on Windows and 77 on macOS in the
+  latest local run (count is slightly
   OS-dependent -- a few targets, like `windows_export_hygiene_test`, only
   exist on their own OS), all passing locally on Windows as of this
-  session's `.init_array`/pseudo-relocation work; CI is the source of
-  truth for Linux/macOS counts. Run locally via
+  session's `.init_array`/pseudo-relocation work and locally on macOS as
+  of the curl/host-libc audit pass; CI is the source of truth for Linux
+  counts. Run locally via
   `cmake --workflow --preset <os>-host-ninja-debug` or
   `ctest --test-dir out/<preset>`.
 - **Ports**: see `docs/porting_status.md` for the full per-library,
@@ -65,11 +67,16 @@ in those two win.
   several recipe patches, including disabling `MBEDTLS_NET_C` since
   this PAL's sockets surface doesn't yet cover everything mbedtls's own
   networking helper needs; deferred to `curl`, the next and last port
-  in this queue). `curl` (8.21.0) is now `shared-pass` on Linux
-  (macOS not yet verified; Windows `configure-blocked`): a real HTTP GET
+  in this queue). `curl` (8.21.0) is now `shared-pass` on Linux and
+  macOS (Windows `configure-blocked`): a real HTTP GET
   and HTTPS GET (real TLS handshake via the mbedTLS backend) round trip
-  against `example.com` both pass on Linux, for both static and shared
-  libcurl, using curl's own real default configuration. curl was the
+  against `example.com` both pass on Linux and macOS, for both static and
+  shared libcurl. Linux uses curl's own real default configuration; macOS
+  declares `--disable-ipv6` and `--disable-threaded-resolver` for this
+  tranche, keeping the build on this CRT's currently-verified IPv4
+  synchronous resolver path rather than leaking Darwin SystemConfiguration
+  headers or depending on curl's async resolver worker-pool behavior.
+  curl was the
   first port in this queue to reach a real internet hostname over the
   network, and it surfaced two real, general, previously-invisible libc
   bugs, not curl-specific ones: `getaddrinfo()` had no real DNS
@@ -104,37 +111,25 @@ in those two win.
   all three `.dylib`s, baking the correct load-command path into the
   library itself (immune to any environment-stripping), resolved at
   runtime by the consumer's own `-Wl,-rpath` LDFLAGS `make_env()`
-  already sets unconditionally. Verified on Linux (regression-only, the
-  patched Makefile targets are inert there); not yet re-verified on
-  macOS itself. See `HISTORY.md`'s 2026-08-14 entry and both
+  already sets unconditionally. Verified on macOS by rebuilding curl and
+  running both static and shared HTTP/HTTPS round trips against
+  `example.com`. A follow-up macOS audit rebuilt the installed port
+  dylibs and confirmed they depend on this project's `@rpath/libc.dylib`;
+  suspicious libc/POSIX references no longer bind directly from
+  `libSystem`, aside from libSystem itself remaining the intended Darwin
+  PAL/backend boundary. See `HISTORY.md`'s 2026-08-14 entry and both
   `porting/recipes/curl.json`'s and `porting/recipes/mbedtls.json`'s own
   notes for the full trail.
 
 ## Known gaps
 
-- **`.init_array`/`.fini_array` (ELF constructor/destructor) support**:
-  fixed and verified on Linux and Windows (`ctest`) and macOS (confirmed
-  directly on real macOS hardware: `tests/init_array_test.c` prints
-  `init_array_test: ok`, user-run). See `TODO.md`'s dedicated entry and
-  `HISTORY.md` for the full writeup, including three real bugs the
-  Windows work surfaced along the way: (1) this project's own CMake-
-  native Windows builds turned out to use a second, entirely separate
-  constructor/destructor convention (`.CRT$XCU`/`.CRT$XTX`, MSVC ABI)
-  alongside the GNU one (`.ctors`/`.dtors`) `tools/crt-cc`'s port builds
-  use; (2) fixing that exposed a latent, pre-existing bug in the Windows
-  startup self-relaunch's parent-process exit path
-  (`fork_capable_relaunch.c`, now `_exit()` instead of `exit()`); (3) a
-  separate, deeper limitation specific to linking third-party static
-  archives (like `liblzma.a`) on Windows -- `lld-link` does not reliably
-  merge multiple archive-derived plain `.ctors`/`.dtors` contributions
-  into one contiguous region the way GNU ld's default script guarantees,
-  with no COFF/PE equivalent mechanism. Routed around for xz via a
-  recipe patch forcing liblzma's own portable non-constructor fallback
-  path instead (see `porting/recipes/xz.json`); any *other* future port
-  whose own static-archive code relies on `__attribute__((constructor))`
-  on Windows would need the same kind of targeted fix. A permanent
-  regression test, `tests/init_array_test.c`, now guards the general
-  mechanism on every OS's `ctest` run going forward.
+- **Windows static-archive constructor limitation**: executable
+  `.init_array`/`.fini_array` and PE/Mach-O equivalents are fixed and
+  covered by `tests/init_array_test.c`, but `lld-link` still does not
+  reliably bracket constructor records contributed by a third-party
+  static archive the way GNU ld's default ELF script does. xz routes
+  around this with a documented recipe patch; a future Windows port that
+  relies on archive-contained constructors may need a similar policy.
 - **libffi**: `ffi_call()` alone and closures alone each work correctly in
   isolation, but calling `ffi_call()` and then any further libffi call in
   the same process reliably segfaults when the caller is compiled at
@@ -170,13 +165,11 @@ in those two win.
 
 ## Next
 
-- Porting matrix expansion: `bzip2`, `xz`, `pcre2`, and `mbedtls` are
-  all done (`shared-pass`) on Linux/macOS/Windows. `curl` is
-  `shared-pass` on Linux; `configure-blocked` on Windows (a real
-  mbedtls Windows-DLL symbol-export bug, not a curl issue -- see
-  `TODO.md`); macOS not yet verified. Fixing the mbedtls DLL export
-  issue closes out this queue (the last one -- `openssl` stays held
-  back). See `TODO.md`'s "in progressing" section for the full trail.
+- Porting matrix expansion: `bzip2`, `xz`, `pcre2`, `mbedtls`, and
+  `curl` are `shared-pass` on Linux/macOS where verified; Windows is
+  still blocked only on curl's shared link against mbedtls's current DLL
+  export surface. Fixing the mbedtls DLL export/static-dependency policy
+  closes out this queue (`openssl` stays held back until needed).
 - Broader POSIX/rootfs surface hardening beyond what each port's own build
   happens to exercise.
 - C++ runtime phase 2 and an ELF loader/dynamic-linker prototype: not

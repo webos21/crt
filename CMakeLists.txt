@@ -129,6 +129,10 @@ function(crt_configure_shared_runtime target_name)
     -nodefaultlibs
   )
   if(CRT_TARGET_OS STREQUAL "macos")
+    set_target_properties(${target_name} PROPERTIES
+      BUILD_WITH_INSTALL_RPATH TRUE
+      INSTALL_RPATH ""
+    )
     target_link_libraries(${target_name} PRIVATE System)
   elseif(CRT_TARGET_OS STREQUAL "windows")
     target_link_options(${target_name} PRIVATE

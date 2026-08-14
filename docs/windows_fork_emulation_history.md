@@ -563,7 +563,7 @@ Open follow-ups, none blocking:
   fine for the request rates seen so far, worth revisiting if a workload
   ever needs many concurrent spawns from sibling clones;
 - only the `zlib` recipe has been fully verified end-to-end so far; `libpng`
-  is in progress (see `TODO.md`, "in progressing") and gets much further now
+  is in progress (see `TODO.md`, "in progress") and gets much further now
   with the `regex.c`/mksh-path/generic-`pipe()` fixes above, but is not
   passing yet; `libffi` and the SQLite follow-up build have not been
   attempted;

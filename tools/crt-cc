@@ -221,30 +221,11 @@ prelibs=""
 # normal, standard practice.
 case "$target_os" in
   macos)
-    # Passed as explicit static archives in both modes here (same
-    # intent as before), but this alone turned out NOT to guarantee a
-    # purely-static result: this project's own CMake build always
-    # produces both libc.a AND libc.dylib (and m/dl/c++ counterparts)
-    # side by side in ${CRT_SYSROOT}/lib, and some upstream build systems
-    # add their own separate, bare `-lc`-style flag independent of what
-    # this script passes (observed for real: zlib's own configure sets
-    # LDSHAREDLIBC=-lc unconditionally except on MinGW, appended to its
-    # shared-library link line) -- ld64's default -l<name> resolution
-    # prefers a dylib over a same-named static archive when both exist
-    # on the search path, so that stray -lc silently pulled in
-    # @rpath/libc.dylib as a real dependency of the resulting
-    # libz.dylib, confirmed via `otool -L` on a real macOS machine,
-    # despite this script's own libs list only ever naming the .a files.
-    # Since nothing here set an -rpath, that @rpath-relative dependency
-    # had no way to resolve at actual load time. Fixed the same way as
-    # Linux below: add -rpath so if a dylib reference like this sneaks
-    # in via some other mechanism, it still finds this project's real
-    # one instead of failing to load (or, worse, resolving to an
-    # unrelated same-named file elsewhere on the default search path).
-    libs="$libs ${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a ${CRT_SYSROOT}/lib/libc++.a ${CRT_SYSROOT}/lib/libclang_rt.builtins.a -lSystem"
     if [ "$shared_mode" -eq 1 ]; then
+      libs="$libs ${CRT_SYSROOT}/lib/libc.dylib ${CRT_SYSROOT}/lib/libm.dylib ${CRT_SYSROOT}/lib/libdl.dylib ${CRT_SYSROOT}/lib/libc++.dylib ${CRT_SYSROOT}/lib/libclang_rt.builtins.a -lSystem"
       entry="-Wl,-dead_strip -Wl,-rpath,${CRT_SYSROOT}/lib"
     else
+      libs="$libs ${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a ${CRT_SYSROOT}/lib/libc++.a ${CRT_SYSROOT}/lib/libclang_rt.builtins.a -lSystem"
       entry="-Wl,-e,_start -Wl,-dead_strip"
     fi
     ;;

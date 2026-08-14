@@ -253,9 +253,27 @@ def find_source(source_root, source_dir):
     return candidates[0]
 
 
+def remove_tree(path):
+    def retry_with_write_permission(func, failing_path, _exc):
+        try:
+            os.chmod(failing_path, 0o700)
+        except OSError:
+            pass
+        func(failing_path)
+
+    for attempt in range(5):
+        try:
+            shutil.rmtree(path, onexc=retry_with_write_permission)
+            return
+        except OSError:
+            if attempt == 4 or not path.exists():
+                raise
+            time.sleep(0.1 * (attempt + 1))
+
+
 def copy_source(src, dst):
     if dst.exists():
-        shutil.rmtree(dst)
+        remove_tree(dst)
     ignore = shutil.ignore_patterns(".git", "autom4te.cache", "*.o", "*.a", "*.so", "*.dylib", "*.dll")
     shutil.copytree(src, dst, ignore=ignore)
 

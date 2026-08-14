@@ -11,183 +11,23 @@ record of completed work. This section stays empty in `TODO.md` itself --
 when an item below is finished, move its writeup into `HISTORY.md` (dated,
 newest entry first) rather than leaving it here.
 
-## in progressing
+## in progress
 
-Five active threads, not a flat list of one-off items:
+Active threads, not a flat list of one-off items:
 
-- **Porting matrix expansion.** Queue, in order: `mbedtls` -> `curl`
-  (`openssl` held back until something actually needs it). Any
-  POSIX/rootfs gap a port's build exposes gets fixed in
-  place as part of that port's own work, not deferred to a separate pass
-  -- matching how zlib/libpng/libffi already surfaced and fixed real CRT
-  gaps along the way (see `docs/porting_status.md`). Each port's recipe
-  and per-host status live in `porting/recipes/*.json` and
-  `docs/porting_status.md` as they land; this bullet just tracks the
-  overall queue position.
-  - `bzip2`: **done on Linux, macOS, and Windows, all `shared-pass`**.
-    A real `BZ2_bzBuffToBuffCompress`/`BZ2_bzBuffToBuffDecompress`
-    round trip is now covered by the official recipe test path against
-    both static and shared builds. No new CRT/PAL gap surfaced -- it
-    built cleanly against the existing sysroot the same way
-    sqlite-amalgamation already does.
-  - `xz` (liblzma): **done on Linux, macOS, and Windows, all
-    `shared-pass`**. A real compress/decompress round trip at preset
-    9|EXTREME with CRC64 (real match-finder allocations, byte-for-byte
-    output compare) verified against both static and shared builds on
-    every verified OS. Two
-    genuine, general CRT/toolchain gaps got found and fixed along the
-    way, not deferred -- see `HISTORY.md`'s dated entries and
-    `porting/recipes/xz.json`'s own notes for the full trail: (1) this
-    project's `crt1` startup never ran ELF/PE constructor sections at
-    all (`.init_array`/`.ctors`/`.CRT$XCU` depending on OS/ABI) for the
-    executable entry point on any OS -- see the general fix below; (2)
-    `lld-link` doesn't reliably merge constructor sections contributed by
-    a *static archive* (as opposed to a directly-compiled object) the way
-    GNU ld's default script guarantees, worked around via a recipe patch
-    routing liblzma onto its own portable non-constructor fallback path
-    on Windows specifically.
-  - `zlib`/`libpng`/`libffi` runtime recipe tests: **landed.**
-    `port-test-recipes` now runs project-owned consumer tests for zlib,
-    bzip2, libpng, libffi, xz, and pcre2. zlib/bzip2/xz perform real
-    compress/decompress round trips, libpng writes and reads a tiny RGBA
-    PNG through memory callbacks, libffi verifies a single `ffi_call()`
-    round trip, and pcre2 verifies a real `pcre2_compile()`/
-    `pcre2_match()` round trip with three named capture groups. This does
-    not close libffi's documented repeat-call bug; it only makes the
-    already-known working subset reproducible.
-  - `mbedtls`: **done on Linux, macOS, and Windows, all `shared-pass`**
-    (macOS confirmed by the user). A real SHA-256 known-answer check
-    plus an AES-128-CBC encrypt/decrypt round trip passes through this
-    project's own toolchain on all three hosts, against both the
-    static and shared build. Needed three new, small,
-    generalizable `tools/crt-port-build.py` extensions
-    (`build.skip_configure` for upstream sources with no `./configure`
-    step; a base `build.install_args` field for Makefiles using a
-    `DESTDIR=` install convention instead of autotools' `--prefix=`; a
-    per-OS `target_overrides.<os>.build_make_args` field for a `make`
-    variable that must reach the build step only, never `make install`
-    -- needed because mbedtls's own top-level Makefile wraps its entire
-    `install:` block in `ifndef WINDOWS`, so passing `WINDOWS=1` to
-    `make install` too doesn't change its behavior, it makes `install:`
-    not exist at all, silently no-oping instead of failing loudly),
-    plus several recipe patches: disabling `MBEDTLS_NET_C` (this PAL's
-    `<sys/socket.h>` doesn't yet expose the fuller BSD-sockets surface
-    `library/net_sockets.c` needs -- `select()`/`fd_set`/`FD_SET`/
-    `SO_TYPE`/etc. -- that gap is `curl`'s territory, the next port in
-    this queue, not this crypto-only pass), and (Windows only) dropping
-    an unavailable `-lbcrypt`/`-lws2_32`/`-lwinmm`/`-lgdi32` from the
-    Windows-only DLL link rules and disabling `MBEDTLS_HAVE_ASM`/
-    `MBEDTLS_AESNI_C` (this PAL's Windows sysroot has no compiler-rt/
-    builtins archive at all, a real, general gap worth a future
-    dedicated fix -- routed around for this port instead). See
-    `porting/recipes/mbedtls.json`'s own notes and `HISTORY.md`'s dated
-    entry for the full trail.
-  - `curl`: **`shared-pass` on Linux**; Windows attempted for real and
-    `configure-blocked` on a distinct mbedtls issue (see below); macOS
-    not yet verified. Last port in this queue before it closes out (`openssl`
-    stays held back). Scoped to HTTP/HTTPS for this first pass. The
-    first port in this queue to reach a real internet hostname over
-    the network (not a self-contained local round trip), and it
-    surfaced two real, general, previously-invisible libc bugs: (1)
-    `getaddrinfo()` had no real DNS resolution at all -- implemented a
-    real, minimal synchronous DNS client (`/etc/resolv.conf` parsing,
-    UDP A-record query/response, retries/timeout) directly in
-    `libc/src/socket.c`; also added `size_t`/`time_t` to
-    `<sys/types.h>`, `<sys/select.h>` transitively via
-    `<sys/socket.h>`, `AF_UNIX`, `IN6_IS_ADDR_*`, and a real
-    `getsockopt()`, all genuinely missing. (2) `fcntl(fd, F_SETFL,
-    O_NONBLOCK)` was a pure no-op on Linux/macOS -- this, not the DNS
-    gap, is what actually hung `curl_easy_perform()` indefinitely
-    (curl's own internal wakeup pipe never actually became
-    non-blocking); fixed by forwarding `F_GETFL`/`F_SETFL` to the real
-    `fcntl(2)` syscall, mirroring how `F_GETFD`/`F_SETFD` already did.
-    Windows's `fcntl()` keeps its prior no-op behavior for now
-    (documented TODO in the code, not yet hit by a real Windows curl
-    build). Also fixed a real `tools/crt-port-build.py` bug:
-    `@PORT_PREFIX@` substitution was never applied to `configure_args`
-    (only `make_args`/`install_args`), needed for curl's own
-    `--with-mbedtls=@PORT_PREFIX@`. A real Windows build attempt found
-    two more, distinct bugs: `configure`'s `AC_EGREP_CPP`-based socket
-    probe only reads `CPPFLAGS`, never `CFLAGS`, so the `_WIN32`
-    undefine (only ever in `CFLAGS`) never reached it -- fixed by
-    adding it to `CPPFLAGS` too. Once configure passed, linking failed
-    with `ld.lld: duplicate symbol` for several `__crt_sys_*`/`setenv`
-    names -- **not a curl bug**: mbedtls's own Windows `.dll` build
-    statically embeds this project's libc with no symbol-visibility
-    control and re-exports its internal symbols alongside its real
-    API, colliding with this project's own `c.lib` once curl links
-    against both. Not yet fixed -- needs either real symbol-visibility
-    control on mbedtls's Windows DLL build, or curl linking against
-    mbedtls's static libs even for its own shared build. Windows:
-    `configure-blocked`. A real macOS build attempt found one more:
-    curl's own configure-time "runtime libs availability" probe
-    (compiles and runs a test program against mbedtls's shared libs)
-    failed because mbedtls's `.dylib` files have no `-install_name`
-    set, so dyld can't resolve them via `LC_RPATH`. First fix attempt
-    (`make_env()` also setting `DYLD_LIBRARY_PATH`/`LD_LIBRARY_PATH`
-    for every subprocess it spawns) turned out insufficient on real
-    hardware -- the same error recurred, because configure execs
-    through `/bin/sh`, and macOS strips `DYLD_`-prefixed env vars
-    across an exec of any SIP-protected system binary, so the var
-    never reached configure's own child probe. Real fix landed in
-    `mbedtls.json` instead: three `library/Makefile` patches add
-    `-install_name @rpath/$@` to the macOS `-dynamiclib` recipes,
-    baking the correct path into each `.dylib` at build time (immune
-    to env stripping), resolved via the consumer's existing
-    `-Wl,-rpath` LDFLAGS. Verified on Linux (regression-only, inert
-    there); macOS re-verification still pending. See
-    `porting/recipes/curl.json`'s and `porting/recipes/mbedtls.json`'s
-    own notes and `HISTORY.md`'s dated entry for the full trail.
-
-- **`.init_array`/`.fini_array` (ELF/PE/Mach-O constructor/destructor)
-  support -- DONE on all three OSes, see `HISTORY.md`'s dated entries for
-  the full investigation.** This project's `crt1` startup never ran
-  `__attribute__((constructor))`-registered functions (also what runs
-  C++ global object constructors) for the executable entry point on any
-  OS, found while porting xz/liblzma; invisible until then because every
-  prior port linked shared, where the OS's own dynamic loader handles a
-  `.so`'s own constructors automatically. Linux and Windows both fixed
-  and verified via a full local `ctest` run; macOS confirmed directly on
-  real hardware (`tests/init_array_test.c` prints `init_array_test: ok`)
-  requiring no new code at all, since dyld already runs Mach-O
-  constructors automatically and this project's existing
-  `__cxa_finalize(0)` call in `exit.c` already handled destructors.
-  Windows needed bracketing two entirely separate section conventions
-  simultaneously (GNU `.ctors`/`.dtors` for `tools/crt-cc` port builds,
-  MSVC `.CRT$XCU`/`.CRT$XTX` for this project's own CMake-native builds)
-  and surfaced/fixed a real, pre-existing, unrelated latent bug in the
-  startup self-relaunch path (`fork_capable_relaunch.c`, now `_exit()`
-  instead of `exit()`). A permanent regression test,
-  `tests/init_array_test.c`, now guards the general mechanism on every
-  OS's `ctest` run going forward. The one residual, documented
-  limitation: `lld-link` doesn't reliably bracket a constructor
-  contributed by a *static archive* on Windows (worked around for xz via
-  a recipe patch, not a general CRT-level fix) -- any future port whose
-  own static-archive code relies on `__attribute__((constructor))` on
-  Windows will need the same kind of targeted, per-recipe fix.
+- **Windows curl shared-link closure.** The first curl tranche is
+  `shared-pass` on Linux and macOS. Windows configure now passes, but the
+  shared libcurl link is blocked by mbedtls's Windows DLL re-exporting
+  embedded CRT/libc symbols (`__crt_sys_*`, `setenv`, etc.) and colliding
+  with this project's own `c.lib`. Resolve either by adding real export
+  control to the mbedtls Windows DLL build or by linking curl against
+  static mbedtls libraries for libcurl's own shared build.
 
 - **Windows shell/process stress hardening.** Real concurrency -- parallel
   `make -jN`, jobserver pipe fd handling, many live children in the
   registry at once, subshell/redirection edge cases -- was never actually
   exercised on Windows until this thread opened; every Windows port build
   had always run serial `make -j 1`.
-  - **Parallel `make -jN` on Windows is concluded: root-caused, fixed,
-    stress-tested at libpng scale, and enabled by default -- see
-    `HISTORY.md`'s 2026-08-11 entries for the full investigation.** Both
-    the fatal `make.exe: /system/bin/mksh: Bad file descriptor`/
-    `Error 127` crash and the jobserver token-count mismatch it was
-    originally bundled with traced back to the same bug
-    (`__crt_sys_fstat()` destructively `ReadFile()`-ing pipe content).
-    Verified with zlib (`-j 8`, `-j 16`) and then libpng (real GNU
-    Libtool, a real dependency graph, ~40 compile/link steps, `-j 12`) --
-    both build with zero jobserver warnings and pass their own real
-    functional self-tests (`examplesh`'s compress/uncompress round trip;
-    `pngtest`'s `libpng passes test`). `tools/crt-port-build.py`'s
-    Windows-only `jobs = 1` special case is removed -- Windows now uses
-    the same `os.cpu_count() or 2` default every other OS already used;
-    `--jobs N` still overrides it for any single invocation. Any new
-    Windows parallel-build problem found from here on gets its own fresh
-    entry, not appended into this one.
   - Harden `waitpid()` and the child registry for many live children,
     configure-script subprocess bursts, and pipeline teardown.
   - Keep the mksh child-spec path (external commands, `cmd | cmd`,
@@ -226,9 +66,9 @@ Five active threads, not a flat list of one-off items:
     intermittent `ln: ... File exists` failure above also stops
     reproducing.
 
-- **Recipe/port status upkeep.** Keep `make`/`zlib`/`libpng`/`libffi`
-  recipe statuses (`porting/recipes/*.json`, `docs/porting_status.md`)
-  current as each host is rerun.
+- **Recipe/port status upkeep.** Keep recipe statuses
+  (`porting/recipes/*.json`, `docs/porting_status.md`) current as each
+  host is rerun.
 
 - **Standing porting-loop discipline**, not a task list:
   1. expose the missing header/type/macro/symbol/behavior with upstream
@@ -260,7 +100,7 @@ Five active threads, not a flat list of one-off items:
     launcher hint for native host tools (LLVM `ar`/`ranlib`/`strip`), not
     an inherited global mode for configure recipes.
 
-## planed
+## planned
 
 - libffi's Windows build succeeds and its core features (`ffi_call`,
   closures) work correctly in isolation, but has one remaining,
@@ -269,7 +109,7 @@ Five active threads, not a flat list of one-off items:
   `porting/recipes/libffi.json`'s own notes for the full trail) still
   open -- would need a real debugger session to fully root-cause.
 - Parallel `make -jN` on Windows is no longer an open research item -- it's
-  enabled by default now (see "in progressing" above and `HISTORY.md`).
+  enabled by default now (see `HISTORY.md`).
   Add a permanent regression test for the fixed bug (fd_snapshot dropping
   `FD_CLOEXEC` dup2 sources; `fstat()` destructively reading pipe content)
   so it can't silently regress, covering: inherited pipe fds across
@@ -297,8 +137,7 @@ Five active threads, not a flat list of one-off items:
 - Expand toybox applets only when the backing Bionic-compatible CRT/PAL
   surface exists. `which`/`readlink`/`stat`/`touch`/`id`/`xargs` are done
   (see `HISTORY.md`) -- next candidates would come from auditing the
-  remaining disabled applets for LLP64 pointer-width safety (see "in
-  progressing").
+  remaining disabled applets for LLP64 pointer-width safety.
 - Keep deeper Linux-like applets deferred until the PAL owns enough backing
   behavior:
   - `ps`: add through toybox only after the rootfs/PAL provides enough

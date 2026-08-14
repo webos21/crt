@@ -591,7 +591,13 @@ libraries are host-libc builds: `CC`/`CXX` still point at `tools/crt-cc` and
 `tools/crt-c++`, which use the CRT sysroot headers, startup objects, and
 libraries. On macOS, `otool -L` will still show `/usr/lib/libSystem.B.dylib` on
 the final Mach-O files because libSystem is the PAL/backend boundary for Darwin
-syscalls, dyld, pthreads, and process services.
+syscalls, dyld, pthreads, and process services. The porting audit checks for
+the more important distinction: port dylibs should record this project's CRT
+dylibs (`@rpath/libc.dylib`, plus libm/libdl/libc++ where used), and ordinary
+libc/POSIX symbols such as malloc, stdio, sockets, pthreads, time, and string
+functions should resolve through the CRT layer rather than directly from
+libSystem. The current macOS port install tree has been rebuilt and audited
+with `otool -L`/`nm -m -u` on that basis.
 
 On native Windows, Autoconf `configure` scripts are POSIX shell scripts. The
 CMake port targets may be launched from PowerShell or `cmd.exe`, but configure
@@ -664,10 +670,10 @@ cmake --build --preset macos-host-ninja-debug --target port-test-recipes
 `port-test-<name>` first ensures the corresponding `port-build-<name>` target is
 installed, then compiles and runs the checks declared in that recipe's `tests`
 array. `port-test-recipes` runs every recipe that currently declares automated
-tests. The xz recipe uses this path to verify real liblzma compress/decompress
-round trips against both static and shared builds. The same mechanism is used
-for zlib, bzip2, libpng, and libffi smoke tests as those recipes declare their
-own `tests` entries.
+tests. These tests now cover real static/shared round trips for zlib, bzip2,
+xz, libpng, pcre2, mbedTLS, and curl where the recipe declares the matching
+test entries; curl intentionally uses real `example.com` HTTP/HTTPS checks
+rather than a local loopback-only substitute.
 
 `tools/fetch_ports.py` and `tools/crt-port-build.py` are the lower-level helpers
 used by those CMake targets. They read recipes from `porting/recipes/` and are

@@ -240,6 +240,11 @@ set_tests_properties(dns_resolve_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "dns_resolve_test: ok"
 )
 
+add_crt_test(dns_thread_test dns_thread_test.c)
+set_tests_properties(dns_thread_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "dns_thread_test: ok"
+)
+
 add_crt_test(dl_test dl_test.c)
 target_link_libraries(dl_test PRIVATE dl)
 add_dependencies(dl_test dl)

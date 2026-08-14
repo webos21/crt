@@ -230,7 +230,12 @@ drives upstream `configure` and `make` is host-dependent:
   On macOS, final Mach-O executables and dylibs may still list
   `/usr/lib/libSystem.B.dylib` in `otool -L`; that is the intended Darwin
   PAL/backend dependency, not evidence that the upstream library was built
-  against the host C library headers or startup files.
+  against the host C library headers or startup files. The useful audit is
+  stricter: rebuilt port dylibs should record this project's CRT dylibs such as
+  `@rpath/libc.dylib`, and ordinary libc/POSIX undefined symbols should resolve
+  through those CRT dylibs rather than directly from libSystem. The macOS
+  port-install tree has been checked with `otool -L` and `nm -m -u` using that
+  distinction.
 - Native Windows uses the project-owned rootfs mksh and toybox applets. Windows
   has no native shebang handling for `tools/crt-cc` / `tools/crt-c++`, so CMake
   adds `--use-crt-shell` there and runs the recipe commands through

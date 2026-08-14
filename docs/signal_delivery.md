@@ -319,7 +319,7 @@ per the caveat above):
   to restore a known-good state, reran full `ctest` (80/80, clean, no
   residual corruption). `tools/crt-port-build.py`'s `jobs = 1 if
   target_os == "windows"` restriction stays in place until this separate
-  bug is fixed; see `TODO.md`, "in progressing", for the tracking entry.
+  bug is fixed; see `TODO.md`, "in progress", for the tracking entry.
 
 ## Regression Test
 

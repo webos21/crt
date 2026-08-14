@@ -10,6 +10,54 @@ substantive update.
 
 ## 2026-08-14
 
+- **Closed the macOS curl/shared-port audit loop and cleaned up the
+  CMake install/RPATH noise.** The first curl tranche is now verified as
+  `shared-pass` on macOS as well as Linux: `port-test-curl` passes both
+  `http-roundtrip-static` and `http-roundtrip-shared` against real
+  `http://example.com/` and `https://example.com/` via the mbedTLS
+  backend (`curl_http_roundtrip_test: ok http=200 https=200`). macOS
+  keeps `--disable-ipv6` and `--disable-threaded-resolver` for this
+  tranche, deliberately staying on this CRT's currently-verified IPv4
+  synchronous resolver path rather than leaking Darwin
+  SystemConfiguration headers or relying on curl's async resolver
+  worker-pool behavior.
+  - **Audited the installed macOS port dylibs for accidental host-libc
+    binding.** Rebuilt the stale shared outputs for bzip2, libffi, xz,
+    pcre2, libpng, sqlite-amalgamation, zlib, mbedTLS, and curl, then
+    checked the install tree with `otool -L` and `nm -m -u`. The rebuilt
+    dylibs now record this project's CRT dylibs (`@rpath/libc.dylib`
+    and siblings where used), and the audit found no suspicious
+    libc/POSIX symbols (`malloc`/`free`, stdio, string/memory, sockets,
+    pthreads, time, mmap, errno, etc.) binding directly from
+    `/usr/lib/libSystem.B.dylib`. `libSystem` remains visible as the
+    intended Darwin PAL/backend boundary for system calls, dyld,
+    pthread/process services, not as the upstream port's C library.
+  - **Added CRT-owned stack protector symbols.** The audit exposed
+    `___stack_chk_fail`/`___stack_chk_guard` as the last host-resolved
+    compiler runtime style symbols in the macOS port dylibs. `libc` now
+    provides `__stack_chk_guard` and `__stack_chk_fail()` directly
+    (`libc/src/stack_protector.c`), so stack-protector checks no longer
+    need to bind those symbols from libSystem.
+  - **Cleaned the non-fatal CMake install log noise.** CMake-generated
+    install scripts for `libdl.dylib` and `libc++.dylib` were invoking
+    `install_name_tool -delete_rpath <build-lib-dir>` even though the
+    rpath was not present, producing noisy but harmless diagnostics
+    during `sysroot` installation. `crt_configure_shared_runtime()` now
+    uses the install rpath at build time on macOS with an explicit empty
+    `INSTALL_RPATH`, so CMake no longer generates the unnecessary
+    delete-rpath step. Verified by regenerating the macOS preset,
+    confirming no generated `delete_rpath` calls remain, and running
+    `cmake --build --preset macos-host-ninja-debug --target sysroot`
+    cleanly.
+  - **Verification in the same pass**: macOS `ctest` passed
+    (`77/77`), `port-test-curl` passed with network access, and the
+    non-network recipe tests for zlib, libpng, bzip2, xz, pcre2, and
+    mbedTLS passed static/shared checks. `TODO.md`, `STATUS.md`,
+    `README.md`, `docs/sysroot_ports.md`, `docs/porting_status.md`, and
+    `porting/recipes/curl.json` were synchronized so completed material
+    moved out of TODO and the current status reflects curl's Linux/macOS
+    `shared-pass` plus the remaining Windows mbedTLS DLL export blocker.
+
 - **Ported pcre2 10.47 to Linux, macOS, and Windows -- all three
   `shared-pass`**, the next entry in the porting matrix expansion queue
   after xz (`bzip2` -> `xz` -> `pcre2` -> `mbedtls` -> `curl`, see
