@@ -78,6 +78,157 @@ substantive update.
     skip is deliberate (avoids re-running a slow `./configure && make` on
     every invocation), not a bug.
 
+- **CI now skips the full 5-leg matrix for doc/porting-notes-only
+  pushes** (`.github/workflows/ci.yml`'s `push`/`pull_request` triggers
+  gained `paths-ignore: ["**/*.md", "docs/**", "porting/**"]`), so a
+  commit that only touches `HISTORY.md`/`TODO.md`/`docs/`/
+  `porting/recipes/*.json` no longer burns a full CI run. Landed
+  together with the first real mbedtls code/tooling change below,
+  matching the project's own batching policy (real code changes and any
+  accompanying doc updates travel in the same push, rather than a
+  standalone doc-only push triggering CI for nothing).
+
+- **Ported mbedtls 3.6.7 (crypto library only) to Linux and Windows --
+  both `static-pass`**, the next entry in the porting matrix expansion
+  queue after pcre2 (`bzip2` -> `xz` -> `pcre2` -> `mbedtls` -> `curl`,
+  see `TODO.md`). Picked the 3.6.7 LTS release over the newer 4.2.0,
+  which dropped mbedtls's plain top-level Makefile for a CMake-only
+  build this project's tooling doesn't support. Needed two small,
+  generalizable `tools/crt-port-build.py` extensions, not one-off
+  recipe hacks: a new `build.skip_configure` flag (mbedtls has no
+  `./configure` step at all; skips just that one step, reusing every
+  other part of the existing configure-recipe machinery -- patches,
+  env/CFLAGS overrides, `make_args`/`install_args`, Windows shell
+  wrapping, parallel `-jN` jobs), and a new base `build.install_args`
+  field (extra arguments specific to `make install` only, distinct from
+  the existing `target_overrides.<os>.make_args`) for mbedtls's
+  `DESTDIR=`-based install convention, unlike every other recipe here's
+  autotools `--prefix=`.
+  - **Avoiding the `programs`/`mbedtls_test` dependency chain**:
+    mbedtls's own `install: no_test` -> `no_test: programs` ->
+    `programs: lib mbedtls_test` chain means a plain `make install`
+    would also build every example program under `programs/` and the
+    whole `mbedtls_test` framework (needing the `framework/`
+    git-submodule content for real, well beyond what a library-only
+    port needs). `make_args: ["lib"]` targets the top-level Makefile's
+    `lib` goal directly (`$(MAKE) -C library`, which itself defaults to
+    a static-only build unless the `SHARED` make variable is set), and
+    `install_args`' `-o no_test -o programs -o mbedtls_test` (GNU
+    Make's `--assume-old` option, one per phony prerequisite) tells
+    `make install` to treat those three targets as already up to date,
+    so it runs straight to the `install:` recipe's own handful of
+    `mkdir -p`/`cp -rp`/`cp -RP` commands without touching their
+    prerequisites at all. Verified directly with native GNU Make 4.2.1
+    (WSL Ubuntu 20.04) before wiring into the recipe: `make -n install
+    -o no_test -o programs -o mbedtls_test DESTDIR=...` showed only the
+    install recipe's own copy commands, and a real run produced exactly
+    `include/{mbedtls,psa}` + `lib/lib{mbedtls,mbedx509,mbedcrypto}.a`
+    plus a handful of harmless `bin/*.sh` helper scripts upstream's own
+    tarball ships with the executable bit already set.
+  - **Two library sources have a hard `#error`, not just an empty
+    translation unit, without a Unix-like macro**: `entropy_poll.c` and
+    `timing.c` both `#error` out unless either `_WIN32` or a recognized
+    Unix-like macro (`unix`/`__unix`/`__unix__`/`__APPLE__`+`__MACH__`/
+    `__HAIKU__`/`__midipix__`) is defined. Since this PAL has no real
+    `<windows.h>`/`<bcrypt.h>`/`QueryPerformanceCounter` to satisfy the
+    `_WIN32` branch (same reasoning as every prior Windows recipe's
+    `_WIN32` undef), `target_overrides.windows.env.CFLAGS` adds
+    `-D__unix__` alongside the usual `_WIN32`-family undefines, routing
+    both files down their portable `getrandom()`/
+    `fopen("/dev/urandom")`/`gettimeofday()` path instead.
+  - **A real Windows build attempt surfaced a genuine PAL gap, not
+    assumed in advance**: with `MBEDTLS_NET_C` (networking, on by
+    default) left enabled, expecting `library/net_sockets.c`'s portable
+    POSIX-sockets path to work the same way this project's own
+    `libc/src/socket.c`/`tests/socket_network_test.c` already do, the
+    real build instead failed with `select()`/`fd_set`/`FD_ZERO`/
+    `FD_SET`/`FD_ISSET`/`suseconds_t`/`SO_TYPE` all undeclared --
+    this PAL's `<sys/socket.h>` doesn't yet expose the fuller
+    BSD-sockets surface mbedtls's own networking helper needs. Rather
+    than extend that surface now (squarely `curl`'s territory, the next
+    port in this queue, which genuinely needs sockets), added a
+    `build.patches` entry disabling `MBEDTLS_NET_C` in
+    `mbedtls_config.h` -- mbedtls's SSL/TLS layer only touches
+    `net_sockets.c` through the swappable `mbedtls_net_context`
+    callback shape, so this doesn't block AES/SHA/RSA/etc. use at all.
+  - **`porting/tests/mbedtls_crypto_test.c`**: a real cryptographic
+    round trip, not a version-string/link-only smoke check --
+    SHA-256("abc") compared against the actual NIST/FIPS 180-4
+    known-answer digest, plus a full AES-128-CBC encrypt/decrypt round
+    trip verifying the decrypted output exactly reproduces the original
+    plaintext (and that the ciphertext isn't simply equal to the
+    plaintext, so a no-op "encrypt" couldn't accidentally pass).
+    Verified natively first (WSL Ubuntu 20.04, plain gcc, against a
+    native `make lib` + `make install DESTDIR=...` build) to separate
+    "does the API usage make sense" from "does the CRT toolchain
+    integration work," then for real through this project's own
+    toolchain end to end on both Linux (WSL Ubuntu 20.04 + clang-18, a
+    clean clone) and Windows (real x86_64 host): `cmake --build --preset
+    <preset> --target port-test-mbedtls` prints `mbedtls_crypto_test: ok
+    sha256=ba7816bf8f01cfea... aes128cbc=roundtrip-ok` on both. Full
+    Windows `ctest` reran afterward (83/83) to confirm the
+    `tools/crt-port-build.py` changes didn't regress anything else.
+    Static/library-only for now -- no shared build, since mbedtls's own
+    Windows shared-library link rules hardcode `-lws2_32 -lwinmm
+    -lgdi32`, real Windows SDK import libraries this PAL doesn't
+    provide; matches bzip2/xz/pcre2's own precedent of starting
+    static-only. macOS not yet verified (no local macOS hardware this
+    session).
+
+## 2026-08-13
+
+- **Fixed two real, distinct CI-only failures for the Windows
+  `_pei386_runtime_relocator` regression test (`tests/
+  windows_pseudo_reloc_dll.c`/`consumer.c`, added in the entry below),
+  both invisible on this local dev machine's warm build cache.** CI
+  failed identically on both Windows legs (`windows-x64`/
+  `windows-arm64`) for the commit introducing the test; the GitHub
+  Actions job-logs API requires admin rights even on a public repo with
+  no token (`403 Must have admin rights to Repository`), and only
+  generic `check-runs` annotations ("Process completed with exit code
+  1") were reachable -- so both rounds had to be root-caused via local
+  reproduction, not by reading the actual CI log text.
+  - **First attempt, plausible but wrong**: hypothesized GitHub-hosted
+    Windows runners might have NTFS 8.3 short-name generation disabled,
+    so `GetShortPathNameW()` would silently return the original,
+    space-containing SDK `.lib` path unmodified, breaking
+    `tools/crt-cc`'s unquoted shell-word-splitting. Fixed as a genuine
+    robustness improvement regardless (`file(COPY)`-ing the two needed
+    SDK `.lib` files into a space-free build-tree subdirectory instead
+    of relying on short-path conversion, and dropping the unnecessary
+    short-path treatment for `CRT_HOST_CC`, whose every use in
+    `tools/crt-cc` is already individually double-quoted) -- but CI
+    still failed identically on the next run, disproving the
+    hypothesis.
+  - **Second attempt, reproduced and root-caused for real**: rather
+    than guessing again, wiped `out/windows-host-ninja-debug` entirely
+    and ran the literal `cmake --workflow --preset
+    windows-host-ninja-debug` command CI itself runs. This reproduced
+    the failure locally: the failing command showed
+    `/system/bin/mksh.exe` (no drive letter) instead of the expected
+    full rootfs path. Root cause: `CRT_ROOTFS` is `set()` in the
+    top-level `CMakeLists.txt` *after* `add_subdirectory(tests)` already
+    runs, so `tests/CMakeLists.txt`'s own reference to `${CRT_ROOTFS}`
+    saw it as empty on a genuinely fresh configure -- invisible on this
+    machine because its build tree had `CRT_ROOTFS` cached from earlier,
+    unrelated configures, masking the bug every previous local run. A
+    second, related bug found in the same pass: `add_dependencies(
+    aggregate_target A B)` only orders `A`/`B` relative to the aggregate
+    target's own completion, not relative to sibling `add_custom_command()`s
+    (independent DAG nodes) unless those commands' own `DEPENDS` lists
+    name `A`/`B` directly -- a real, previously-latent race, invisible
+    locally but real on every clean CI run. Fixed both: reference
+    `${CMAKE_BINARY_DIR}/rootfs` directly (matching `CRT_ROOTFS`'s own
+    definition) instead of the not-yet-set variable, and add `rootfs
+    sysroot` directly to the `add_custom_command()`s' own `DEPENDS`
+    lists. Verified via the same clean-tree `cmake --workflow` run
+    (83/83 passed, including `windows_pseudo_reloc_test_runs`), then
+    confirmed all 5 GitHub Actions legs green on the real CI run.
+    Methodological note for future CMake-configure-time bugs: local
+    warm-cache testing is not equivalent to CI's always-fresh-checkout
+    testing -- a genuinely clean `out/` wipe is the only reliable local
+    repro for this class of bug.
+
 ## 2026-08-12
 
 - **Implemented Windows/PE "runtime pseudo relocation" support

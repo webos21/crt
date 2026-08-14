@@ -2,8 +2,16 @@ name: CI
 
 on:
   push:
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "porting/**"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "porting/**"
   workflow_dispatch: {}
 
 concurrency:

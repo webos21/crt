@@ -55,8 +55,24 @@ Five active threads, not a flat list of one-off items:
     `pcre2_match()` round trip with three named capture groups. This does
     not close libffi's documented repeat-call bug; it only makes the
     already-known working subset reproducible.
-    Next: `mbedtls` (`pcre2` is done on all three OSes, `shared-pass`
-    -- see `HISTORY.md`'s dated entry).
+  - `mbedtls`: **static-pass on Linux and Windows**; macOS not yet
+    verified (no local macOS hardware this session). A real SHA-256
+    known-answer check plus an AES-128-CBC encrypt/decrypt round trip
+    passes through this project's own toolchain on both hosts. Needed
+    two new, small, generalizable `tools/crt-port-build.py` extensions
+    (`build.skip_configure` for upstream sources with no `./configure`
+    step; a base `build.install_args` field for Makefiles using a
+    `DESTDIR=` install convention instead of autotools' `--prefix=`),
+    plus one recipe patch disabling `MBEDTLS_NET_C` (this PAL's
+    `<sys/socket.h>` doesn't yet expose the fuller BSD-sockets surface
+    `library/net_sockets.c` needs -- `select()`/`fd_set`/`FD_SET`/
+    `SO_TYPE`/etc. -- that gap is `curl`'s territory, the next port in
+    this queue, not this crypto-only pass). Static/library-only for now
+    (no `programs`, no shared build -- mbedtls's own Windows shared-lib
+    rules hardcode `-lws2_32 -lwinmm -lgdi32`, real Windows SDK import
+    libs this PAL doesn't provide). See `porting/recipes/mbedtls.json`'s
+    own notes and `HISTORY.md`'s dated entry for the full trail.
+    Next: `curl`.
 
 - **`.init_array`/`.fini_array` (ELF/PE/Mach-O constructor/destructor)
   support -- DONE on all three OSes, see `HISTORY.md`'s dated entries for

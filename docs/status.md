@@ -15,8 +15,8 @@ in those two win.
   aarch64, Linux arm64/amd64, Windows arm64/x64), each running this
   project's own `cmake --workflow <os>-host-ninja-debug` preset (configure +
   build + `ctest`) on every push. All 5 legs green as of
-  [run 31602222349](https://github.com/webos21/crt/actions/runs/31602222349)
-  (2026-08-12, the `port-test-recipes` commit). Before the matrix
+  [run 31759586497](https://github.com/webos21/crt/actions/runs/31759586497)
+  (2026-08-14, the pcre2 macOS-confirmed commit). Before the matrix
   existed, Linux validation had been almost entirely
   manual, on real aarch64 hardware -- x86_64 Linux had never actually been
   built until this matrix existed, and immediately surfaced two real,
@@ -43,7 +43,7 @@ in those two win.
   relocation" support, a new PAL feature) is fixed; see `HISTORY.md`'s
   2026-08-12 entry for the full writeup and `tests/windows_pseudo_reloc_
   dll.c`/`consumer.c` for its own permanent `ctest` regression coverage.
-  `pcre2` (the next port in the queue after `xz`) is now `shared-pass` on
+  `pcre2` is now `shared-pass` on
   all three OSes: a real `pcre2_compile()`/`pcre2_match()` round trip
   with three named capture groups passes on every host for both static
   and shared builds, macOS confirmed by the user. All six of those ports
@@ -52,7 +52,17 @@ in those two win.
   `port-test-recipes`); re-run directly on Windows this session and
   confirmed green across the board. `libffi` overall stays `partial` only
   because of its unrelated, pre-existing `-O1`/`-O2`
-  `ffi_call()`-repeat-call bug.
+  `ffi_call()`-repeat-call bug. `mbedtls` (the next port in the queue
+  after `pcre2`, crypto library only) is now `static-pass` on Linux and
+  Windows: a real SHA-256 known-answer check plus an AES-128-CBC
+  encrypt/decrypt round trip passes on both hosts; macOS not yet
+  verified. See `HISTORY.md`'s 2026-08-14 entry and
+  `porting/recipes/mbedtls.json`'s own notes for the full trail
+  (two new, generalizable `tools/crt-port-build.py` extensions --
+  `build.skip_configure` and a base `build.install_args` field -- plus
+  one recipe patch disabling `MBEDTLS_NET_C`, since this PAL's sockets
+  surface doesn't yet cover everything mbedtls's own networking helper
+  needs; deferred to `curl`, next in the queue).
 
 ## Known gaps
 
@@ -101,9 +111,9 @@ in those two win.
 ## Next
 
 - Porting matrix expansion: `bzip2`, `xz`, and `pcre2` are all done on
-  Linux/macOS/Windows (`shared-pass`). The current next queue is
-  `mbedtls` -> `curl`; see `TODO.md`'s "in progressing" section for the
-  current queue and order.
+  Linux/macOS/Windows (`shared-pass`). `mbedtls` is `static-pass` on
+  Linux/Windows (macOS pending). Next up: `curl`; see `TODO.md`'s "in
+  progressing" section for the current queue and order.
 - Broader POSIX/rootfs surface hardening beyond what each port's own build
   happens to exercise.
 - C++ runtime phase 2 and an ELF loader/dynamic-linker prototype: not

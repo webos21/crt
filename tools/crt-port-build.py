@@ -643,39 +643,49 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
     port_name = recipe["name"]
     build = recipe["build"]
     shell = rootfs_mksh_path(preset_build_dir, target_os)
-    configure = ["./configure"]
-    configure.extend(build["configure_args"])
-    configure.extend(build.get("target_overrides", {}).get(target_os, {}).get("configure_args", []))
-    # @CRT_MINGW_TRIPLE@: e.g. libpng/libffi's --build=@CRT_MINGW_TRIPLE@
-    # (config.guess can't recognize plain Windows `uname` output, so
-    # configure needs an explicit --build= triple). Substituted here
-    # rather than hardcoded per-recipe so the same recipe JSON works on
-    # both Windows aarch64 and x86_64 -- mingw_triple is resolved once in
-    # main() via detect_target_arch()/mingw_triple_for_arch().
-    configure = [arg.replace("@CRT_MINGW_TRIPLE@", mingw_triple) for arg in configure]
-    if is_native_windows_configure(target_os):
-        prefix = path_for_crt_shell(port_prefix) if use_crt_shell else path_for_msys_shell(port_prefix)
-    else:
-        prefix = str(port_prefix)
-    configure.append(f"--prefix={prefix}")
-    if use_crt_shell:
-        shell = str(shell)
-        env["CONFIG_SHELL"] = "/system/bin/mksh"
-        if not is_native_windows_configure(target_os):
-            env["CONFIG_SHELL"] = shell
-        # TEMPORARY diagnostic: set CRT_PORT_SHELL_XTRACE=1 to run configure
-        # under `mksh -x` for tracing a silent (no-output) configure failure.
-        # Remove once the Windows aarch64 zlib configure investigation is
-        # resolved.
-        shell_argv = [shell, "-x"] if os.environ.get("CRT_PORT_SHELL_XTRACE") else [shell]
-        run(shell_argv + configure, work, env, f"{port_name}: configure")
-    elif is_native_windows_configure(target_os):
-        shell = find_posix_shell(env)
-        env["CONFIG_SHELL"] = path_for_msys_shell(shell)
-        configure = [shell] + configure
-        run(configure, work, env, f"{port_name}: configure")
-    else:
-        run(configure, work, env, f"{port_name}: configure")
+    # skip_configure: some upstream sources (mbedtls's 3.x LTS series among
+    # them) ship a plain, hand-written top-level Makefile with no
+    # ./configure step at all -- there's nothing to run, and no --prefix
+    # convention to append to. Everything else in this function (patches,
+    # env/CFLAGS overrides already applied by apply_recipe_env before this
+    # function is even called, make_args/install_args, Windows shell
+    # wrapping, parallel -jN jobs) is identical to the configure-based
+    # flow, so this only skips the one step that doesn't apply, rather
+    # than duplicating the whole function for a second "system" type.
+    if not build.get("skip_configure", False):
+        configure = ["./configure"]
+        configure.extend(build["configure_args"])
+        configure.extend(build.get("target_overrides", {}).get(target_os, {}).get("configure_args", []))
+        # @CRT_MINGW_TRIPLE@: e.g. libpng/libffi's --build=@CRT_MINGW_TRIPLE@
+        # (config.guess can't recognize plain Windows `uname` output, so
+        # configure needs an explicit --build= triple). Substituted here
+        # rather than hardcoded per-recipe so the same recipe JSON works on
+        # both Windows aarch64 and x86_64 -- mingw_triple is resolved once in
+        # main() via detect_target_arch()/mingw_triple_for_arch().
+        configure = [arg.replace("@CRT_MINGW_TRIPLE@", mingw_triple) for arg in configure]
+        if is_native_windows_configure(target_os):
+            prefix = path_for_crt_shell(port_prefix) if use_crt_shell else path_for_msys_shell(port_prefix)
+        else:
+            prefix = str(port_prefix)
+        configure.append(f"--prefix={prefix}")
+        if use_crt_shell:
+            shell = str(shell)
+            env["CONFIG_SHELL"] = "/system/bin/mksh"
+            if not is_native_windows_configure(target_os):
+                env["CONFIG_SHELL"] = shell
+            # TEMPORARY diagnostic: set CRT_PORT_SHELL_XTRACE=1 to run configure
+            # under `mksh -x` for tracing a silent (no-output) configure failure.
+            # Remove once the Windows aarch64 zlib configure investigation is
+            # resolved.
+            shell_argv = [shell, "-x"] if os.environ.get("CRT_PORT_SHELL_XTRACE") else [shell]
+            run(shell_argv + configure, work, env, f"{port_name}: configure")
+        elif is_native_windows_configure(target_os):
+            shell = find_posix_shell(env)
+            env["CONFIG_SHELL"] = path_for_msys_shell(shell)
+            configure = [shell] + configure
+            run(configure, work, env, f"{port_name}: configure")
+        else:
+            run(configure, work, env, f"{port_name}: configure")
     if configure_only:
         progress(f"{port_name}: configure-only stop")
         return
@@ -704,7 +714,19 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
     # real Windows drive-letter path handed to -bindir sends it into a
     # genuine infinite loop trying to ascend to a root it can never
     # reach -- see porting/recipes/libffi.json's own notes).
-    override_make_args = build.get("target_overrides", {}).get(target_os, {}).get("make_args", [])
+    # @PORT_PREFIX@ substitution: needed for skip_configure recipes (like
+    # mbedtls) whose Makefile uses a `make`-variable install convention
+    # (DESTDIR=) instead of a ./configure --prefix= one, so the port's
+    # real install path has to reach make_args/install_args as a `make`
+    # variable rather than a configure flag. Reuses the same token/
+    # conversion convention as substitute_recipe_value (tests' cflags/
+    # link_args), but inlined here since port_prefix is the only
+    # placeholder any recipe has needed in this position so far.
+    port_prefix_text = path_for_crt_shell(port_prefix) if target_os == "windows" else str(port_prefix)
+    override_make_args = [
+        arg.replace("@PORT_PREFIX@", port_prefix_text)
+        for arg in build.get("target_overrides", {}).get(target_os, {}).get("make_args", [])
+    ]
     make_args = [make, "-j", str(jobs)] + build["make_args"] + override_make_args
     # install_args gets the same VAR=value overrides as make_args (but not
     # the base build["make_args"]/-jN, which are build-target-specific
@@ -716,7 +738,15 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
     # `make` but `make install`'s own dependency chain re-triggered
     # building it anyway, since install_args previously never saw the
     # override at all.
-    install_args = [make, "install"] + override_make_args
+    #
+    # install_args (base recipe level, distinct from target_overrides.
+    # <os>.make_args above): extra arguments specific to the install step
+    # only, not the build step -- e.g. mbedtls's DESTDIR=@PORT_PREFIX@,
+    # which would be harmless but meaningless during `make lib`.
+    base_install_args = [
+        arg.replace("@PORT_PREFIX@", port_prefix_text) for arg in build.get("install_args", [])
+    ]
+    install_args = [make, "install"] + base_install_args + override_make_args
     if target_os == "windows" and use_crt_shell:
         make_args.append("SHELL=/system/bin/mksh")
         install_args.append("SHELL=/system/bin/mksh")
