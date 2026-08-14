@@ -43,11 +43,14 @@ in those two win.
   relocation" support, a new PAL feature) is fixed; see `HISTORY.md`'s
   2026-08-12 entry for the full writeup and `tests/windows_pseudo_reloc_
   dll.c`/`consumer.c` for its own permanent `ctest` regression coverage.
-  All five of those ports now have an official, recipe-declared
-  `port-test-<name>` CMake target (aggregated as `port-test-recipes`);
-  re-run directly on Windows this session and confirmed green across
-  the board, both static and shared. `libffi` overall stays `partial`
-  only because of its unrelated, pre-existing `-O1`/`-O2`
+  `pcre2` (the next port in the queue after `xz`) is now `static-pass` on
+  Linux and Windows: a real `pcre2_compile()`/`pcre2_match()` round trip
+  with three named capture groups passes on both hosts (macOS `pending`,
+  no hardware this session). All six of those ports now have an official,
+  recipe-declared `port-test-<name>` CMake target (aggregated as
+  `port-test-recipes`); re-run directly on Windows this session and
+  confirmed green across the board. `libffi` overall stays `partial` only
+  because of its unrelated, pre-existing `-O1`/`-O2`
   `ffi_call()`-repeat-call bug.
 
 ## Known gaps
@@ -97,9 +100,10 @@ in those two win.
 ## Next
 
 - Porting matrix expansion: `bzip2` and `xz` are done on
-  Linux/macOS/Windows (`shared-pass`). The current next queue is
-  `pcre2` -> `mbedtls` -> `curl`; see `TODO.md`'s "in progressing" section
-  for the current queue and order.
+  Linux/macOS/Windows (`shared-pass`); `pcre2` is done on Linux/Windows
+  (`static-pass`, macOS pending). The current next queue is `mbedtls` ->
+  `curl`; see `TODO.md`'s "in progressing" section for the current queue
+  and order.
 - Broader POSIX/rootfs surface hardening beyond what each port's own build
   happens to exercise.
 - C++ runtime phase 2 and an ELF loader/dynamic-linker prototype: not

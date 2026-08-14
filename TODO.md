@@ -15,9 +15,9 @@ newest entry first) rather than leaving it here.
 
 Five active threads, not a flat list of one-off items:
 
-- **Porting matrix expansion.** Queue, in order: `pcre2`
-  -> `mbedtls` -> `curl` (`openssl` held back until something actually
-  needs it). Any POSIX/rootfs gap a port's build exposes gets fixed in
+- **Porting matrix expansion.** Queue, in order: `mbedtls` -> `curl`
+  (`openssl` held back until something actually needs it). Any
+  POSIX/rootfs gap a port's build exposes gets fixed in
   place as part of that port's own work, not deferred to a separate pass
   -- matching how zlib/libpng/libffi already surfaced and fixed real CRT
   gaps along the way (see `docs/porting_status.md`). Each port's recipe
@@ -48,13 +48,32 @@ Five active threads, not a flat list of one-off items:
     on Windows specifically.
   - `zlib`/`libpng`/`libffi` runtime recipe tests: **landed.**
     `port-test-recipes` now runs project-owned consumer tests for zlib,
-    bzip2, libpng, libffi, and xz. zlib/bzip2/xz perform real
+    bzip2, libpng, libffi, xz, and pcre2. zlib/bzip2/xz perform real
     compress/decompress round trips, libpng writes and reads a tiny RGBA
-    PNG through memory callbacks, and libffi verifies a single
-    `ffi_call()` round trip. This does not close libffi's documented
-    repeat-call bug; it only makes the already-known working subset
-    reproducible.
-    Next: `pcre2`.
+    PNG through memory callbacks, libffi verifies a single `ffi_call()`
+    round trip, and pcre2 verifies a real `pcre2_compile()`/
+    `pcre2_match()` round trip with three named capture groups. This does
+    not close libffi's documented repeat-call bug; it only makes the
+    already-known working subset reproducible.
+  - `pcre2`: **done on Linux and Windows, both `static-pass`** (macOS
+    `pending`, no macOS hardware this session). No new CRT/PAL gap
+    surfaced. Two build-system quirks handled the same way earlier ports
+    in this queue already established a pattern for, not new problems:
+    (1) `--build=@CRT_MINGW_TRIPLE@` for the same Windows `config.guess`
+    issue libpng/xz/libffi already hit; (2) the recipe's own test file
+    needed `-DPCRE2_STATIC` in its `cflags` (pcre2's own documented
+    convention for linking its static library on Windows) since a
+    separate `crt-cc` compile step doesn't inherit the *library's* own
+    `-U_WIN32` override, so it otherwise expected `dllimport`-decorated
+    symbols against a plain static archive. Verified for real on two
+    hosts: `pcre2_match_test: ok matches=4 version=10.47 2025-10-21` on
+    both Windows and Linux (WSL Ubuntu 20.04 + clang-18), three named
+    capture groups (user/host/tld) individually checked against the
+    matched substrings, not just a nonzero match count. See
+    `porting/recipes/pcre2.json`'s own notes for the full trail.
+    Started static-only (`--disable-shared --enable-static`), matching
+    bzip2/xz's own cautious start before they added a shared build.
+    Next: `mbedtls`.
 
 - **`.init_array`/`.fini_array` (ELF/PE/Mach-O constructor/destructor)
   support -- DONE on all three OSes, see `HISTORY.md`'s dated entries for
