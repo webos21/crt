@@ -1106,6 +1106,31 @@ static int windows_handle_looks_executable(HANDLE handle) {
   if (handle == INVALID_HANDLE_VALUE) {
     return 0;
   }
+  /* Only a real regular file (GetFileType() == FILE_TYPE_DISK) can
+   * meaningfully carry an MZ/shebang signature -- a pipe or character
+   * device never can. Checking this up front, before ever touching
+   * SetFilePointerEx()/ReadFile(), matters for more than correctness:
+   * hit a real hang building libffi with parallel make (`make -j N`),
+   * root-caused with a live lldb attach (thread stuck in
+   * ntdll!NtReadFile, called from this function via stat_from_handle()
+   * <- __crt_sys_fstat() <- fstat() <- fcntl() <- GNU Make's own
+   * jobserver_parse_auth(), which fstat()s the inherited jobserver pipe
+   * fds as an auth/sanity check before ever reading a real token from
+   * them). ReadFile() on a pipe with no data queued blocks
+   * indefinitely (this is a plain synchronous handle, not opened with
+   * FILE_FLAG_OVERLAPPED) -- unlike a disk file, where reading 2 bytes
+   * either succeeds or hits EOF immediately, a pipe's writer may not
+   * have produced anything yet, and here never will (nothing is meant
+   * to write to a jobserver auth pipe at all). Same fix shape as the
+   * pipe-lseek bug fixed earlier in this project's history
+   * (GetFileType() == FILE_TYPE_PIPE checked before doing a
+   * content-dependent operation) -- this function just didn't have the
+   * equivalent guard yet, since nothing had called fstat()/stat() on a
+   * pipe handle by way of a real regular-file executable-bit query
+   * until GNU Make's jobserver auth path did. */
+  if (GetFileType(handle) != FILE_TYPE_DISK) {
+    return 0;
+  }
   if (!SetFilePointerEx(handle, 0, &saved, FILE_CURRENT)) {
     return 0;
   }
