@@ -8,6 +8,71 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-08-16
+
+- **Fixed a real `make -jN` hang: `windows_handle_looks_executable()`
+  blocking `ReadFile()` on a pipe, reached via a path the 2026-08-11
+  jobserver-pipe fix didn't cover.** Found while attempting to resume the
+  libffi `lldb` investigation below: `libffi`'s own parallel build
+  (`make -j4`, this project's default since 2026-08-11) hung
+  indefinitely on this aarch64 Windows machine -- never observed during
+  the original zlib/libpng `-jN` stress testing. A live `lldb` attach to
+  the stuck `make.exe` (installing Python 3.11 first, needed to unblock
+  `lldb.exe` itself -- see below) showed the main thread blocked in
+  `ntdll!NtReadFile`, reached via `main -> jobserver_parse_auth -> fcntl
+  -> fstat -> __crt_sys_fstat -> stat_from_handle ->
+  windows_handle_looks_executable -> ReadFile`. Same class of bug as
+  2026-08-11 (that fix is still present and correct -- confirmed via
+  `git log`, not reverted): `windows_handle_looks_executable()`
+  unconditionally peeks a handle's first 2 bytes via `ReadFile` looking
+  for an MZ/shebang signature, which blocks forever on a pipe with no
+  data queued -- but reached this time via a path where
+  `GetFileType(handle)` did not report `FILE_TYPE_PIPE` for this
+  particular handle, so `__crt_sys_fstat()`'s existing `FILE_TYPE_PIPE`
+  special-case (which routes to `stat_virtual_pipe()` instead) never
+  triggered, and execution fell through to `stat_from_handle()`'s
+  general path anyway. Fixed at the point of actual risk rather than
+  only at the one call site the 2026-08-11 fix covered:
+  `windows_handle_looks_executable()` itself now returns 0 immediately
+  unless `GetFileType(handle) == FILE_TYPE_DISK` -- only a real regular
+  file can meaningfully carry an MZ/shebang signature in the first
+  place, so this is correct regardless of which caller or code path
+  reaches it. **Verified**: rebuilt the CRT, then the `make` port itself
+  (statically linked against `libc.a`; needed its own explicit
+  `--rebuild` to pick up the fix, since a sysroot rebuild alone doesn't
+  relink already-installed ports -- the first re-attempt still hung
+  because only the CRT, not `make.exe` itself, had been rebuilt), then
+  libffi's real `configure`/`make -j4`/`make install`/test suite
+  completed cleanly with no hang. Full `ctest` 88/88.
+  - **Also unblocked `lldb` itself for future use on this machine**:
+    `lldb.exe` (and `lldb-dap.exe`/`lldb-mcp.exe`, which share the same
+    `liblldb.dll`) failed to start at all with `error: unable to find
+    'python311.dll'` -- this LLVM build's `lldb` needs a real Python 3.11
+    install on `PATH` (checked: no bundled copy anywhere under the LLVM
+    install tree). Installing Python 3.11 and adding its directory to
+    `PATH` (e.g. `export PATH="<Python311 install dir>:$PATH"` before
+    invoking `lldb.exe`) fixes it. `WinDbg`/`cdb` are not installed on
+    this machine as an alternative.
+- **Re-ran the libffi `repeat-call-static`/`repeat-call-shared` regression
+  after the fix above (unrelated code, but the rebuild needed to test it
+  happened to also re-run this) -- it did not reproduce.** 20/20 clean
+  passes at `-O1` (the committed test's own flag), 10/10 at `-O2` (tried
+  separately), full recipe test suite green, full `ctest` 88/88. This
+  contradicts the 2026-08-15 entry below, which found this reproduces
+  reliably on this same machine. No change was made to libffi's own
+  source, build flags, `FFI_DEFAULT_ABI` override, or anything in
+  `sysv.S`/`ffi.c` this session -- the only change landed in between is
+  the unrelated Windows PAL fix above, which shares no code path with
+  libffi's own aarch64 calling-convention assembly. **Not declaring this
+  fixed**: the cause of the non-reproduction is unknown (possibly a host
+  LLVM/toolchain update between 2026-08-15 and now, possibly the bug was
+  always narrower/more timing-sensitive than the earlier
+  100%-reproducing characterization suggested -- neither confirmed).
+  `porting/recipes/libffi.json`'s `windows` status stays `partial`
+  pending either a repeated failure to restore confidence this is still
+  live, or enough clean reruns across enough rebuilds to reconsider it.
+  See that recipe's own notes for the full writeup.
+
 ## 2026-08-15
 
 - **libffi's aarch64-Windows `ffi_call()` repeat-call register-corruption

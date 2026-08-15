@@ -52,18 +52,21 @@ newest entry first) rather than leaving it here.
 Active threads, not a flat list of one-off items. Remaining libc/PAL
 residuals before the upper runtime phase (see `docs/runtime_roadmap.md`):
 
-- libffi's `ffi_call()` repeat-call register-corruption bug is now
-  confirmed **aarch64-Windows-specific**, not general Windows (x86_64
-  Windows tested clean for the first time, both `-O1`/`-O2`, static and
-  shared -- see `HISTORY.md`'s 2026-08-15 entry). A permanent regression,
+- libffi's `ffi_call()` repeat-call register-corruption bug: status
+  **unclear again as of 2026-08-16**. Confirmed aarch64-Windows-specific
+  on 2026-08-15 (x86_64 Windows tested clean, both `-O1`/`-O2`, static
+  and shared), but a from-clean rebuild on 2026-08-16 (on the same
+  aarch64 Windows machine) did **not** reproduce it at all -- 20/20 clean
+  at `-O1`, 10/10 at `-O2`. Cause of the non-reproduction unknown; not
+  declaring this fixed. `lldb` is now actually usable on this machine
+  (was blocked on a missing `python311.dll`; installing Python 3.11 and
+  putting it on `PATH` fixes it -- see `HISTORY.md`'s 2026-08-16 entry)
+  for whenever a reproducible failure shows up again to single-step
+  against. The permanent regression test,
   `porting/tests/libffi_repeat_call_test.c`
   (`repeat-call-static`/`repeat-call-shared` in `libffi.json`'s `tests`),
-  now exists so this can't silently regress or get lost again. Next:
-  a real `lldb` single-step session on aarch64 Windows hardware to
-  isolate the exact corrupted instruction, then a targeted source patch
-  in `src/aarch64/sysv.S`/`ffi.c` (would be libffi's first patch --
-  `patches` is currently empty). See `porting/recipes/libffi.json`'s own
-  notes for the full trail.
+  stays in place either way so this can't silently get lost again. See
+  `porting/recipes/libffi.json`'s own notes for the full trail.
 - Audit the mksh subshell status quirk exposed by commands shaped like
   `(command || true) >/dev/null 2>&1` (worked around at the recipe level
   for zlib's `RANLIB=true`, see `docs/sysroot_ports.md`, but never
