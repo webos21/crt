@@ -10,6 +10,38 @@ substantive update.
 
 ## 2026-08-15
 
+- **libffi's aarch64-Windows `ffi_call()` repeat-call register-corruption
+  bug: recreated the lost repro as a permanent test, and confirmed x86_64
+  Windows is clean -- narrowing the bug's scope for the first time since
+  it was found.** The documented repro (`ffi_prep_cif` -> `ffi_call
+  (add_ints)` -> `ffi_prep_cif` again, no closures, `-O1`) had only ever
+  lived in an uncommitted scratch file since its 2026-08-07 discovery;
+  recreated it as `porting/tests/libffi_repeat_call_test.c`, wired into
+  `porting/recipes/libffi.json`'s own `tests` array
+  (`repeat-call-static`/`repeat-call-shared`, cflags forcing `-O1`
+  explicitly). Run for the first time ever on x86_64 Windows (this
+  machine): passes cleanly, both static and shared, tried at both `-O1`
+  and `-O2` -- the bug does not reproduce here at all, confirming it is
+  aarch64-Windows-specific, not a general Windows libffi issue (every
+  prior session only ever exercised a single, non-repeated `ffi_call()`
+  on x86_64, so this question had genuinely never been answered before).
+  Also ruled out one plausible-looking hypothesis before it could waste
+  debugging time: read `ffi.c`/`Makefile.am` and confirmed
+  `win64_armasm.S` (MSVC ARMASM syntax) and `sysv.S` (GNU/LLVM syntax)
+  implement the identical symbol set for two different assemblers, not
+  two different ABI code paths -- this project's clang+LLVM-assembler
+  toolchain always uses `sysv.S` regardless of `FFI_SYSV`/`FFI_WIN64`
+  selection, and `ffi.c` calls `ffi_call_SYSV` unconditionally either
+  way (`cif->abi` only changes behavior for variadics/HFA floats, neither
+  exercised by `add_ints(int,int)`), so the recipe's existing
+  `FFI_DEFAULT_ABI` override is very unlikely to be the actual cause.
+  Full `port-test-recipes` aggregate and Windows `ctest` (88/88) both
+  stay clean. **Not yet resolved**: the aarch64 bug itself is still open
+  and still needs a real `lldb` single-step session on aarch64 Windows
+  hardware to isolate the exact corrupted instruction -- next step,
+  pending the user's own aarch64 machine. See `porting/recipes/
+  libffi.json`'s own notes for the full trail.
+
 - **Fixed `/proc/self/exe` self-relaunch on macOS**, found via a genuinely
   new, portable regression, `tests/process_stress_test.c` (many
   concurrent `posix_spawn()`-based workers self-relaunching via

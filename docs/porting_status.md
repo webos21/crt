@@ -85,7 +85,8 @@ queue) are fixed -- see the mbedTLS/curl sections below and `HISTORY.md`'s
 Still open:
 
 - libffi still has a correctness issue around repeated `ffi_call()` usage at
-  optimized levels on some paths.
+  optimized levels, now confirmed aarch64-Windows-specific (x86_64 Windows
+  tested clean). See the libffi section below.
 
 ## make
 
@@ -339,6 +340,8 @@ fixed mbedTLS confirms no regression, both statically and shared.
 - Automated recipe tests:
   - `call-static`
   - `call-shared`
+  - `repeat-call-static`
+  - `repeat-call-shared`
 
 libffi configures, builds, and installs useful artifacts, and its basic
 `ffi_call()` and closure paths work in isolation. Windows shared-library output
@@ -347,5 +350,9 @@ pseudo-relocation support needed by ordinary consumers of `libffi.dll.a`.
 
 Status stays conservative because a correctness bug remains: calling
 `ffi_call()` and then a further libffi call in the same process can corrupt a
-callee-saved register at optimized levels on the affected paths. This needs a
-focused debugger pass before libffi can be promoted to `shared-pass`.
+callee-saved register at optimized levels on the affected paths -- **confirmed
+aarch64-Windows-specific**, not general Windows: the same repro (now a
+permanent test, `repeat-call-static`/`repeat-call-shared`) passes cleanly on
+x86_64 Windows at both `-O1` and `-O2`. This needs a focused `lldb` debugger
+pass on real aarch64 Windows hardware before libffi can be promoted to
+`shared-pass` there.

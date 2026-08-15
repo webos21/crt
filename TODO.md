@@ -52,12 +52,18 @@ newest entry first) rather than leaving it here.
 Active threads, not a flat list of one-off items. Remaining libc/PAL
 residuals before the upper runtime phase (see `docs/runtime_roadmap.md`):
 
-- libffi's Windows build succeeds and its core features (`ffi_call`,
-  closures) work correctly in isolation, but has one remaining,
-  well-characterized bug (a callee-saved-register corruption across
-  `ffi_call()` at `-O1`/`-O2`, see `HISTORY.md` and
-  `porting/recipes/libffi.json`'s own notes for the full trail) still
-  open -- would need a real debugger session to fully root-cause.
+- libffi's `ffi_call()` repeat-call register-corruption bug is now
+  confirmed **aarch64-Windows-specific**, not general Windows (x86_64
+  Windows tested clean for the first time, both `-O1`/`-O2`, static and
+  shared -- see `HISTORY.md`'s 2026-08-15 entry). A permanent regression,
+  `porting/tests/libffi_repeat_call_test.c`
+  (`repeat-call-static`/`repeat-call-shared` in `libffi.json`'s `tests`),
+  now exists so this can't silently regress or get lost again. Next:
+  a real `lldb` single-step session on aarch64 Windows hardware to
+  isolate the exact corrupted instruction, then a targeted source patch
+  in `src/aarch64/sysv.S`/`ffi.c` (would be libffi's first patch --
+  `patches` is currently empty). See `porting/recipes/libffi.json`'s own
+  notes for the full trail.
 - Audit the mksh subshell status quirk exposed by commands shaped like
   `(command || true) >/dev/null 2>&1` (worked around at the recipe level
   for zlib's `RANLIB=true`, see `docs/sysroot_ports.md`, but never

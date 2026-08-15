@@ -114,10 +114,15 @@ in those two win.
 - **libffi**: `ffi_call()` alone and closures alone each work correctly in
   isolation, but calling `ffi_call()` and then any further libffi call in
   the same process reliably segfaults when the caller is compiled at
-  `-O1`/`-O2` (never `-O0`). Root-caused to a callee-saved GPR getting
-  corrupted somewhere in the `ffi_call()`/`ffi_call_SYSV` chain on aarch64;
-  not yet isolated to an exact instruction, and not re-tested for an
-  x86_64 analogue. See `porting/recipes/libffi.json`'s notes.
+  `-O1`/`-O2` (never `-O0`) -- **on aarch64 Windows only**, root-caused to
+  a callee-saved GPR getting corrupted somewhere in the
+  `ffi_call()`/`ffi_call_SYSV` chain, not yet isolated to an exact
+  instruction. x86_64 Windows is now confirmed clean (tested for the
+  first time, see `HISTORY.md`'s 2026-08-15 entry), narrowing this to an
+  aarch64-specific issue. A permanent regression now exists
+  (`porting/tests/libffi_repeat_call_test.c`); next step is a real `lldb`
+  session on aarch64 Windows hardware. See `porting/recipes/libffi.json`'s
+  notes.
 - **DNS resolver is deliberately minimal**: `getaddrinfo()` now does a
   real DNS lookup (added for curl, see `HISTORY.md`'s 2026-08-14
   entry), but only a single synchronous UDP query for an A (IPv4)
