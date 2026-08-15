@@ -630,6 +630,26 @@ static int host_path_exists(const char* path) {
   return 0;
 }
 
+#if defined(CRT_TARGET_OS_MACOS)
+/* Real Mach-O API from libSystem, declared locally rather than including the
+ * real <mach-o/dyld.h> SDK header (matching this project's existing
+ * convention for macOS host APIs, e.g. time.c's clock_gettime_nsec_np() --
+ * this is process.c's __crt_sys_execve()-facing twin of the same fix, for
+ * the open()/stat()/readlink()-style paths this file owns instead). Unlike
+ * Linux, macOS has no real /proc filesystem at all (confirmed empirically:
+ * plain `ls /proc` fails with ENOENT on real macOS), so "/proc/self/exe"
+ * passed straight through to a raw stat/open syscall always fails; this is
+ * the one real, dynamic way to get the current process's own executable
+ * path. */
+extern int _NSGetExecutablePath(char* buf, unsigned int* bufsize);
+
+static const char* macos_resolve_proc_self_exe(char buffer[PATH_MAX]) {
+  unsigned int size = PATH_MAX;
+
+  return _NSGetExecutablePath(buffer, &size) == 0 ? buffer : 0;
+}
+#endif
+
 static const char* rootfs_path_for_host(const char* path, char buffer[PATH_MAX]) {
   const char* root;
   size_t root_len;
@@ -638,10 +658,19 @@ static const char* rootfs_path_for_host(const char* path, char buffer[PATH_MAX])
   if (!path_is_absolute(path)) {
     return path;
   }
+  if (strcmp(path, "/proc/self/exe") == 0) {
+#if defined(CRT_TARGET_OS_MACOS)
+    const char* resolved = macos_resolve_proc_self_exe(buffer);
+
+    return resolved != 0 ? resolved : path;
+#else
+    /* Real Linux kernel /proc/self/exe resolves this natively. */
+    return path;
+#endif
+  }
   if (strcmp(path, "/dev/null") == 0 ||
       strcmp(path, "/dev/tty") == 0 ||
       strcmp(path, "/dev/console") == 0 ||
-      strcmp(path, "/proc/self/exe") == 0 ||
       strncmp(path, "/proc/self/fd/", 14) == 0) {
     return path;
   }

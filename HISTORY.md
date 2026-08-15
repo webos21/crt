@@ -10,6 +10,40 @@ substantive update.
 
 ## 2026-08-15
 
+- **Fixed `/proc/self/exe` self-relaunch on macOS**, found via a genuinely
+  new, portable regression, `tests/process_stress_test.c` (many
+  concurrent `posix_spawn()`-based workers self-relaunching via
+  `/proc/self/exe`, deliberately run on every host, not just Windows):
+  every worker exited `127` on macOS. Root cause: macOS has no `/proc`
+  filesystem at all -- confirmed directly (`ls /proc` itself fails with
+  `ENOENT` on real macOS) -- so a literal `"/proc/self/exe"` handed to a
+  raw `execve(2)`/`posix_spawn(2)`/`access(2)`/`stat(2)` syscall there
+  always fails with `ENOENT`; this project's `posix_spawn()` is built on
+  `fork()` + `execve()` (`libc/src/process.c`'s
+  `__crt_sys_posix_spawn()`), and a failed `execve()` there falls through
+  to `_exit(127)`, the conventional "exec failed" code. Windows already
+  had the equivalent fix (`GetModuleFileNameA()` in
+  `libc/src/arch/windows/common/syscall.c`); macOS simply never got its
+  own version. This went unnoticed for a while because the self-relaunch
+  code in `tests/windows_fd_snapshot_test.c`/`tests/rootfs_process_test.c`
+  turned out not to actually exercise this path on macOS the way it
+  looked at a glance (an easy-to-miss `#if` guard several lines above the
+  call site). Fixed by resolving `/proc/self/exe` through
+  `_NSGetExecutablePath()` (the real Mach-O "what is my own running
+  executable's path" API, declared locally rather than including the real
+  `<mach-o/dyld.h>` SDK header, matching this project's usual convention
+  for macOS host APIs) in both places this project resolves paths before
+  syscalls: `libc/src/process.c`'s `translate_exec_path_for_rootfs()`
+  (`execve()`/`posix_spawn()`) and `libc/src/fd.c`'s
+  `rootfs_path_for_host()` (`open()`/`stat()`/`access()`/etc., so a
+  `readlink("/proc/self/exe", ...)`-style "find my own path" idiom --
+  which `shell/toybox/src/lib/portability.c` uses -- resolves correctly
+  too, not just exec targets). Verified with a minimal, isolated
+  `crt-cc`-built reproduction (confirmed failing before the fix, passing
+  after) in addition to the full `ctest` suite (79/79 passing). See
+  `docs/android_shell_environment.md`'s new "`/proc/self/exe` On macOS"
+  section for the full writeup.
+
 - **Closed out curl's Windows port for good: HTTPS now works, and curl
   8.21.0 is `shared-pass` on all three OSes, finishing the whole
   `bzip2` -> `xz` -> `pcre2` -> `mbedtls` -> `curl` porting queue.**

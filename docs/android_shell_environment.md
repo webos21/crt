@@ -123,6 +123,48 @@ This is a bootstrap namespace, not a full virtual filesystem. As shell and
 configure workloads expand, add narrowly documented virtual paths rather than
 pretending that every Linux procfs/devfs entry exists.
 
+### `/proc/self/exe` On macOS
+
+Linux resolves `/proc/self/exe` natively (a real kernel-provided symlink), so
+`libc/src/process.c`/`libc/src/fd.c` pass it straight through unchanged
+there. macOS has no `/proc` filesystem at all -- not a namespace-policy
+choice, a real host fact (`ls /proc` itself fails with `ENOENT` on real
+macOS) -- so a literal `"/proc/self/exe"` handed to a raw `execve(2)`/
+`posix_spawn(2)`/`access(2)`/`stat(2)` syscall there always fails with
+`ENOENT` too.
+
+This went unnoticed for a while because the only *self-relaunch* code that
+exercised it in `ctest` runs (`tests/windows_fd_snapshot_test.c`'s fork+exec
+subtest, `tests/rootfs_process_test.c`'s `/proc/self/exe` checks) turned out
+to not actually run that code path on macOS the way it looked at a glance --
+easy to misread when skimming, since the guard is a `#if` several lines above
+the call site, not right next to it. `tests/process_stress_test.c`
+(many concurrent `posix_spawn()`-based workers self-relaunching via
+`/proc/self/exe`, portable by design so it runs on every host) was the first
+test to genuinely exercise this on macOS, and it failed with every worker
+exiting `127` -- this project's `posix_spawn()` is built on `fork()` +
+`execve()` (`libc/src/process.c`'s `__crt_sys_posix_spawn()`), and a failed
+`execve()` there falls through to `_exit(127)`, the conventional
+"exec failed" code.
+
+Fixed by resolving `/proc/self/exe` through `_NSGetExecutablePath()` (the
+real Mach-O API for "what is my own running executable's path", declared
+locally per this project's usual convention for macOS host APIs -- e.g.
+`time.c`'s `clock_gettime_nsec_np()` -- rather than including the real
+`<mach-o/dyld.h>` SDK header) in both places this project resolves paths
+before syscalls:
+
+- `libc/src/process.c`'s `translate_exec_path_for_rootfs()`, used by
+  `execve()`/`posix_spawn()`;
+- `libc/src/fd.c`'s `rootfs_path_for_host()`, used by `open()`/`stat()`/
+  `access()`/etc., so non-exec uses (e.g. a `readlink("/proc/self/exe", ...)`-
+  style "find my own path" idiom, which `shell/toybox/src/lib/portability.c`
+  uses) resolve correctly too, not just exec targets.
+
+Windows already had the equivalent fix (`GetModuleFileNameA()` in
+`libc/src/arch/windows/common/syscall.c`); macOS simply never got its own
+version until this was tracked down.
+
 ## Shell Candidate Order
 
 1. `mksh`
