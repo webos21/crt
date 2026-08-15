@@ -49,13 +49,8 @@ newest entry first) rather than leaving it here.
 
 ## in progress
 
-Active threads, not a flat list of one-off items. The curl queue is complete:
-`curl` is `shared-pass` on Linux, macOS, and Windows, with real HTTP and HTTPS
-round trips against `example.com` for both static and shared libcurl.
-mbedtls's Windows DLL symbol-export-hygiene gap, Windows shell/process stress
-hardening, and Windows symlink/delete timing verification are all resolved --
-see `HISTORY.md`'s 2026-08-15 entries. Remaining libc/PAL residuals before the
-upper runtime phase (see `docs/runtime_roadmap.md`) are now the active queue:
+Active threads, not a flat list of one-off items. Remaining libc/PAL
+residuals before the upper runtime phase (see `docs/runtime_roadmap.md`):
 
 - libffi's Windows build succeeds and its core features (`ffi_call`,
   closures) work correctly in isolation, but has one remaining,
