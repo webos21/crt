@@ -8,6 +8,105 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-08-15
+
+- **Closed out curl's Windows port for good: HTTPS now works, and curl
+  8.21.0 is `shared-pass` on all three OSes, finishing the whole
+  `bzip2` -> `xz` -> `pcre2` -> `mbedtls` -> `curl` porting queue.**
+  Continuing directly from the prior day's entry (HTTP working end to
+  end on Windows, HTTPS crashing with `STATUS_ACCESS_VIOLATION`), root-
+  caused with a real `lldb` backtrace on the user's own Windows
+  machine (`lldb.exe -b -s cmds.txt -- the.exe`, `run` then `bt`):
+  `frame #0: 0x0` (a literal NULL function-pointer call) inside
+  `mbedtls_ctr_drbg_reseed_internal`, called from
+  `mbedtls_ctr_drbg_random` <- `mbedtls_ssl_write_client_hello`.
+  Reading mbedTLS's own `library/entropy_poll.c` explained exactly why:
+  its portable entropy source only defines a real `getrandom()`
+  wrapper for actual `__linux__`/`__FreeBSD__`/`__NetBSD__`/
+  `__DragonFly__` -- the generic `__unix__` macro this whole port's
+  Windows recipes define (to route mbedTLS/curl onto their portable
+  Unix code path instead of native `_WIN32`) matches none of those, so
+  it falls straight through to `fopen("/dev/urandom", "rb")`, which
+  this project's Windows PAL never implemented at all (no real device,
+  and no native Windows path maps onto it the way `/dev/null` already
+  does via the real `NUL` device). That entropy-source failure
+  silently short-circuited curl's own `vtls/mbedtls.c` `mbedtls_init()`
+  before its `mbedtls_ctr_drbg_seed()` call ever ran, leaving the
+  module-global CTR_DRBG context's entropy callback null -- invisible
+  until now because `mbedtls_crypto_test.c` (this port's own
+  regression test) only exercises SHA-256/AES-128-CBC with fixed test
+  vectors, never anything needing real random bytes. Fixed for real,
+  not routed around: `libc/src/arch/windows/common/syscall.c` gained a
+  real `/dev/urandom` (and `/dev/random`, treated identically) virtual
+  device -- no real Windows HANDLE backs it at all; a new
+  `CRT_FD_KIND_URANDOM` fd kind is serviced directly in
+  `__crt_sys_read()` by calling `RtlGenRandom()` (advapi32.dll's
+  exported `SystemFunction036`, loaded via `GetProcAddress` the same
+  way winsock is, not a static import-library dependency). Verified:
+  full local libc rebuild + `ctest` 85/85, and the HTTPS round trip
+  then passed -- `curl_http_roundtrip_test: ok http=200 https=200`.
+  - Getting there cleanly took two more real fixes, both found chasing
+    an intermittent hang specifically in the `http-roundtrip-shared`
+    (not static) test after the entropy fix landed. The shared test
+    hung indefinitely only when run through the official `cmake
+    --build --target port-test-curl` harness, never when run directly
+    by hand -- a real `lldb -p <pid>` *attach* to the live hung process
+    (not `run`, since this is a genuine block, not a crash) showed the
+    main thread stuck in `ntdll!NtReadFile`, reached from
+    `KernelBase!ReadFile` <- **`libmbedcrypto.dll!__crt_sys_read`** <-
+    `libmbedcrypto.dll!read` <- `libcurl-4.dll!Curl_wakeup_consume` <-
+    `multi_runsingle`/`multi_perform`/`curl_easy_perform`. The critical
+    detail: `__crt_sys_read`/`read` resolved from **`libmbedcrypto.dll`
+    itself**, not the real `c.dll` -- confirming the Windows
+    mbedtls-DLL symbol-export-hygiene issue documented earlier (a
+    link-time "duplicate symbol" error that had stopped reproducing) is
+    very much still real, just no longer a hard link error: mbedtls's
+    own hand-rolled Windows `.dll` build statically embeds this
+    project's entire libc with no symbol-visibility control and
+    re-exports it, and since mbedtls had never actually been rebuilt
+    during this whole Windows debugging pass (its own "installed
+    stamp" stayed valid the whole time -- curl's own dependency chain
+    only requires it be *installed*, not freshly built),
+    `libmbedcrypto.dll` was still shipping a *pre-fix* embedded copy of
+    `__crt_sys_read()`, silently shadowing the real, already-fixed
+    `c.dll` symbol that `libcurl-4.dll` should have resolved to
+    instead. Confirmed directly: a plain `cmake --build --target
+    port-rebuild-mbedtls` (forcing a fresh mbedtls rebuild, picking up
+    every libc fix from this whole session into its own embedded copy)
+    followed by a curl rebuild made both `http-roundtrip-static` and
+    `http-roundtrip-shared` pass cleanly and repeatably, both in well
+    under a second. **Not a curl bug, and the underlying mbedtls
+    Windows DLL export-hygiene issue is still NOT fixed** -- this is a
+    workaround (rebuild mbedtls alongside any future libc change), not
+    a resolution; a real fix still needs either symbol-visibility
+    control added to mbedtls's own Windows `.dll` build, or curl
+    linking against mbedtls's static libraries specifically for its
+    own shared build. Recorded in both `curl.json`'s and
+    `mbedtls.json`'s own notes, and as a standing item in `TODO.md`.
+  - Separately, `tools/crt-port-build.py`'s own `run_checked_output()`
+    (used to execute every port's test binary) never redirected the
+    child's `stdin`, silently inheriting whatever `stdin` the harness's
+    own deep `cmake -E env -> cmd.exe /C -> python.exe` invocation
+    chain happened to have -- a real, if secondary, contributing factor
+    to the confusion while diagnosing the shared-build hang above,
+    though not its primary cause. Fixed generally, independent of any
+    specific bug: `run_checked_output()` now passes
+    `stdin=subprocess.DEVNULL` explicitly, since a port's own test
+    binary is never given any input on purpose and should never be
+    able to block on it regardless of which library code ends up
+    touching fd 0.
+  - **Final result: curl 8.21.0 is `shared-pass` on all three OSes**,
+    closing out this whole porting queue (`bzip2` -> `xz` -> `pcre2` ->
+    `mbedtls` -> `curl`; `openssl` stays held back). Both
+    `http-roundtrip-static` and `http-roundtrip-shared` pass a real
+    HTTP GET and HTTPS GET (real TLS handshake via mbedTLS) against
+    `http(s)://example.com/` on Linux, macOS, and Windows, verified
+    directly on real hardware for all three, not just Linux/CI. Full
+    `port-test-recipes` aggregate (bzip2/libffi/libpng/mbedtls/pcre2/
+    xz/zlib, plus curl itself) and Windows `ctest` (85/85) both stay
+    clean. See `porting/recipes/curl.json`'s and `porting/recipes/
+    mbedtls.json`'s own notes for the full trail.
+
 ## 2026-08-14
 
 - **Windows curl: chased the `setmode`/`_spawnv` shim-wiring fix all the

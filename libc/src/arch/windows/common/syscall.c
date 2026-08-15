@@ -169,6 +169,14 @@ struct crt_memory_status_ex {
 #define CRT_FD_KIND_NONE 0
 #define CRT_FD_KIND_FILE 1
 #define CRT_FD_KIND_SOCKET 2
+/* A synthetic fd kind for /dev/urandom/etc/random (see path_is_dev_
+ * urandom()'s own comment): serviced entirely in-process by
+ * __crt_sys_read() calling RtlGenRandom() directly, with no real
+ * Windows HANDLE/SOCKET backing it at all -- fd_table[] holds an
+ * arbitrary nonzero placeholder for this kind purely so alloc/close
+ * bookkeeping (which already keys off "fd_table[fd] != 0" for a live
+ * slot) keeps working unchanged. */
+#define CRT_FD_KIND_URANDOM 3
 /* ERROR_NO_DATA (232): a genuinely overloaded Win32 error code -- also
  * the exact error ReadFile() returns on an anonymous pipe placed into
  * PIPE_NOWAIT mode (via SetNamedPipeHandleState()) when no data is
@@ -543,6 +551,17 @@ static int fd_flags[CRT_FD_TABLE_SIZE];
 static int fd_nonblock[CRT_FD_TABLE_SIZE];
 static int fd_table_initialized;
 static int winsock_initialized;
+/* RtlGenRandom (exported as SystemFunction036 from advapi32.dll): backs
+ * the real /dev/urandom device below. See that device's own comment
+ * and init_rng_source()/__crt_sys_urandom_fill() for the full trail --
+ * loaded via GetProcAddress the same way winsock is, not a static
+ * import-library dependency (this project's default Windows link set
+ * only pulls in kernel32.lib/synchronization.lib). Real winnt.h
+ * declares this returning BOOLEAN (a single byte), not BOOL (a 4-byte
+ * int) -- same zero-extension ABI reasoning as CreateSymbolicLinkA's
+ * own comment above applies here too, so declaring it BOOL is safe. */
+static BOOL(CRT_WINAPI* rtl_gen_random)(void*, unsigned long);
+static int rng_initialized;
 #if !defined(__aarch64__) && !defined(_M_ARM64) && !defined(__x86_64__) && !defined(_M_X64)
 static int ntdll_initialized;
 #endif
@@ -961,6 +980,39 @@ static int path_is_dev_null(const char* path) {
 
 static int path_is_dev_tty(const char* path) {
   return path != 0 && (strcmp(path, "/dev/tty") == 0 || strcmp(path, "/dev/console") == 0);
+}
+
+/* /dev/urandom (and /dev/random, treated identically -- like modern
+ * Linux post-getrandom(), there's no real distinction to make here:
+ * RtlGenRandom is a real CSPRNG, never blocks waiting on an entropy
+ * pool the way legacy /dev/random once did). This project's Windows
+ * PAL had no virtual device backing either path at all, and no real
+ * Windows CreateFileA() name maps to one either (unlike /dev/null,
+ * which Windows' own real "NUL" device already covers directly) --
+ * found for real porting curl: mbedTLS's own portable entropy source
+ * (library/entropy_poll.c, reached because this whole port's Windows
+ * recipes route mbedTLS/curl onto their generic Unix code path via
+ * -D__unix__, not native _WIN32) only defines a real getrandom()
+ * wrapper for actual __linux__/__FreeBSD__/__NetBSD__/__DragonFly__ --
+ * a generic __unix__ macro (what this project's own recipes define)
+ * matches none of those, so it falls straight through to
+ * fopen("/dev/urandom", "rb"), which failed outright with no such
+ * device present. That entropy-source failure propagated up through
+ * mbedtls_entropy_func()/psa_crypto_init(), silently short-circuiting
+ * curl's own vtls/mbedtls.c mbedtls_init() before it ever reached its
+ * mbedtls_ctr_drbg_seed() call -- leaving the global CTR_DRBG context
+ * zero-initialized (no real entropy callback registered), which
+ * crashed with a real NULL-function-pointer call
+ * (STATUS_ACCESS_VIOLATION at address 0) the first time curl's own
+ * TLS handshake needed a random ClientHello nonce
+ * (mbedtls_ssl_write_client_hello -> mbedtls_ctr_drbg_random ->
+ * mbedtls_ctr_drbg_reseed_internal). Root-caused with a real lldb
+ * backtrace on the user's own Windows machine, not guessed -- the
+ * crash frame chain pointed straight at the DRBG reseed path with no
+ * other clues, and reading entropy_poll.c's own #if ladder explained
+ * exactly why the fallback path was unreachable. */
+static int path_is_dev_urandom(const char* path) {
+  return path != 0 && (strcmp(path, "/dev/urandom") == 0 || strcmp(path, "/dev/random") == 0);
 }
 
 static int windows_has_executable_extension(const char* path) {
@@ -2726,6 +2778,27 @@ static long init_winsock(void) {
   return 0;
 }
 
+/* Loads RtlGenRandom (advapi32.dll's exported SystemFunction036) once,
+ * the same GetProcAddress-based pattern as init_winsock() above -- see
+ * path_is_dev_urandom()'s own comment for what this backs and why it's
+ * needed at all. */
+static long init_rng_source(void) {
+  HANDLE module;
+
+  if (rng_initialized) {
+    return rtl_gen_random != 0 ? 0 : -ENOSYS;
+  }
+  module = LoadLibraryA("advapi32.dll");
+  if (module == 0) {
+    rng_initialized = 1;
+    return -ENOSYS;
+  }
+  rtl_gen_random = (BOOL(CRT_WINAPI*)(void*, unsigned long))GetProcAddress(
+      module, "SystemFunction036");
+  rng_initialized = 1;
+  return rtl_gen_random != 0 ? 0 : -ENOSYS;
+}
+
 #if !defined(__aarch64__) && !defined(_M_ARM64) && !defined(__x86_64__) && !defined(_M_X64)
 /* Only __crt_sys_fork()'s RtlCloneUserProcess path calls this -- aarch64
  * and x86_64 use the memory-copy fork() instead (see __crt_sys_fork()
@@ -2801,6 +2874,26 @@ static int alloc_socket_fd(SOCKET socket_handle) {
   return -1;
 }
 
+/* See CRT_FD_KIND_URANDOM's own comment: no real HANDLE/SOCKET backs
+ * this fd at all, fd_table[] just needs any nonzero placeholder so the
+ * existing "is this slot live" bookkeeping (fd_table[fd] != 0) keeps
+ * working unchanged for it. */
+static int alloc_urandom_fd(void) {
+  int fd;
+
+  init_fd_table();
+  for (fd = 3; fd < CRT_FD_TABLE_SIZE; ++fd) {
+    if (fd_kind[fd] == CRT_FD_KIND_NONE) {
+      fd_table[fd] = (HANDLE)(uintptr_t)1;
+      fd_kind[fd] = CRT_FD_KIND_URANDOM;
+      fd_flags[fd] = 0;
+      fd_nonblock[fd] = 0;
+      return fd;
+    }
+  }
+  return -1;
+}
+
 long __crt_sys_read(int fd, void* buf, unsigned long count) {
   HANDLE handle = get_fd_handle(fd);
   DWORD bytes_read = 0;
@@ -2808,6 +2901,16 @@ long __crt_sys_read(int fd, void* buf, unsigned long count) {
   if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_SOCKET) {
     int result = winsock.recv((SOCKET)(uintptr_t)fd_table[fd], (char*)buf, (int)count, 0);
     return result == SOCKET_ERROR ? -map_wsa_send_recv_error(fd, winsock.WSAGetLastError()) : result;
+  }
+  if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_URANDOM) {
+    /* See path_is_dev_urandom()'s own comment. RtlGenRandom is an
+     * all-or-nothing fill (no short-read concept the way a real device
+     * file might have), so a real byte count in, the same count out on
+     * success. */
+    if (rtl_gen_random == 0 || !rtl_gen_random(buf, count)) {
+      return -EIO;
+    }
+    return (long)count;
   }
   if (handle == INVALID_HANDLE_VALUE) {
     return -EBADF;
@@ -3055,6 +3158,13 @@ long __crt_sys_open(const char* path, int flags, unsigned int mode) {
       }
     }
   }
+  if (handle == INVALID_HANDLE_VALUE && path_is_dev_urandom(path)) {
+    if (init_rng_source() != 0) {
+      return -ENOSYS;
+    }
+    fd = alloc_urandom_fd();
+    return fd < 0 ? -EMFILE : fd;
+  }
   if (handle == INVALID_HANDLE_VALUE) {
     return fail_last_error();
   }
@@ -3082,6 +3192,12 @@ static long close_fd_slot(int fd) {
     return winsock.closesocket(socket_handle) == SOCKET_ERROR
                ? -map_wsa_error(winsock.WSAGetLastError())
                : 0;
+  }
+  if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_URANDOM) {
+    fd_table[fd] = 0;
+    fd_kind[fd] = CRT_FD_KIND_NONE;
+    fd_flags[fd] = 0;
+    return 0;
   }
   handle = get_fd_handle(fd);
   if (handle == INVALID_HANDLE_VALUE) {

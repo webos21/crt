@@ -51,49 +51,28 @@ newest entry first) rather than leaving it here.
 
 Active threads, not a flat list of one-off items:
 
-- **Windows curl shared-link closure.** The first curl tranche is
-  `shared-pass` on Linux and macOS. Windows configure now passes, and a
-  real rebuild attempt shows `libcurl.la`/`libcurlu.la` themselves now
-  link cleanly -- the previously-documented mbedtls-Windows-DLL
-  duplicate-symbol blocker (`__crt_sys_*`/`setenv` re-exported alongside
-  mbedtls's real API, colliding with this project's own `c.lib`) did not
-  reproduce in that run. Not deliberately fixed, so still tracked here
-  as open/unexplained rather than closed -- needs a dedicated
-  investigation (or at least a repeat rebuild) before declaring it gone
-  for good; resolving it for real, if it recurs, still means either
-  adding real export control to the mbedtls Windows DLL build or linking
-  curl against static mbedtls libraries for libcurl's own shared build.
-  That same rebuild attempt surfaced a second, different, real bug
-  instead, now fixed: curl's own CLI tool (`src/curl.c`/`curlinfo.c`)
-  failed to link with `setmode`/`_spawnv`/`_P_WAIT` undeclared in GNU
-  Libtool's own generated `.libs/lt-curl.c` wrapper -- the same bug
-  class already fixed for libpng via
-  `porting/shims/win32/libtool_wrapper_compat.h`, but curl.json was
-  never wired up to use that shim. Fixed by adding the missing
-  `force_include` to curl.json's Windows `target_overrides`, plus
-  extending the shim itself with a fourth alias (`#define setmode
-  _setmode`) for a variant of the bug libpng never hit: curl's own
-  CFLAGS/CPPFLAGS also undefine `__MINGW32__` (libpng's don't), so
-  ltmain.sh's rename block never fires and the wrapper calls the bare,
-  un-prefixed `setmode` name directly. **Update, same session, verified
-  on real Windows hardware**: that fix (plus four more, real bugs found
-  chasing it end to end -- a second, worse shim-header collision that
-  silently mis-detected `pipe()`/`realpath()`/`sched_yield()` as absent
-  via curl's own generic autoconf function probes; missing `-U_WIN32`
-  cflags on the test programs themselves; Windows's `fcntl(F_SETFL,
-  O_NONBLOCK)` finally implemented for real (`SetNamedPipeHandleState`/
-  `ioctlsocket(FIONBIO)`); and a real Winsock `WSAENOTCONN`-right-after-
-  a-successful-non-blocking-`connect()` race, reinterpreted as `EAGAIN`
-  for non-blocking sockets) got curl's **HTTP round trip working end to
-  end on Windows for the first time ever** (`curl_easy_perform()`
-  against `http://example.com/` returns a real `200 OK`). **HTTPS does
-  not work yet** -- it crashes with a hard, deterministic
-  `STATUS_ACCESS_VIOLATION` right after `mbedTLS: Connecting to
-  example.com:443` is printed, a new, distinct, NOT YET ROOT-CAUSED bug
-  (most likely somewhere in curl's mbedTLS send/recv callback plumbing,
-  not confirmed). Windows status: `partial`. See
-  `porting/recipes/curl.json`'s own notes (a long, blow-by-blow trail)
-  and `HISTORY.md`'s dated entry for the full writeup.
+- **mbedtls's Windows DLL re-exports this project's own libc symbols,
+  with no visibility control.** Confirmed real and NOT fixed (see
+  `porting/recipes/mbedtls.json`'s own notes for the full trail):
+  mbedtls's hand-rolled Windows `.dll` build statically embeds this
+  project's entire libc and re-exports every symbol in it alongside its
+  real public API. First seen as a link-time `ld.lld: error: duplicate
+  symbol` (curl linking against both `libmbedcrypto.dll.a` and this
+  project's own `c.lib`); that specific error stopped reproducing on a
+  later attempt (still unexplained), but the underlying re-export was
+  never fixed, and it resurfaced as a genuine runtime bug instead:
+  `libcurl-4.dll`'s calls to `read()`/`__crt_sys_read()` silently
+  resolved to `libmbedcrypto.dll`'s own embedded, stale copy (predating
+  a real libc fix) instead of the current `c.lib`/`c.dll` -- root-caused
+  with a live `lldb -p <pid>` attach. **Any future libc fix on Windows
+  silently stops applying to anything linking mbedtls's DLL until
+  mbedtls itself is also rebuilt** -- a real, general risk for every
+  future Windows consumer of this port, not just curl, with no
+  recipe-level workaround that actually closes it. Needs either real
+  symbol-visibility control added to mbedtls's own Windows `.dll` build,
+  or every consumer linking against mbedtls's static libraries
+  specifically for their own shared builds instead of its DLL import
+  library.
 
 - **Windows shell/process stress hardening.** Real concurrency -- parallel
   `make -jN`, jobserver pipe fd handling, many live children in the

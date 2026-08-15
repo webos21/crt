@@ -24,11 +24,12 @@ in those two win.
   own `cmake --workflow` step does not run `port-test-recipes` (a
   separate, heavier target that fetches and builds third-party sources)
   -- that's verified locally/per-host instead, see below.
-- **`ctest`**: 83 registered tests on Windows and 77 on macOS in the
+- **`ctest`**: 85 registered tests on Windows and 77 on macOS in the
   latest local run (count is slightly
   OS-dependent -- a few targets, like `windows_export_hygiene_test`, only
-  exist on their own OS), all passing locally on Windows as of this
-  session's `.init_array`/pseudo-relocation work and locally on macOS as
+  exist on their own OS), all passing locally on Windows (85/85, most
+  recently confirmed after the curl HTTPS/`/dev/urandom` work) and
+  locally on macOS as
   of the curl/host-libc audit pass; CI is the source of truth for Linux
   counts. Run locally via
   `cmake --workflow --preset <os>-host-ninja-debug` or
@@ -67,95 +68,34 @@ in those two win.
   several recipe patches, including disabling `MBEDTLS_NET_C` since
   this PAL's sockets surface doesn't yet cover everything mbedtls's own
   networking helper needs; deferred to `curl`, the next and last port
-  in this queue). `curl` (8.21.0) is now `shared-pass` on Linux and
-  macOS (Windows `configure-blocked`): a real HTTP GET
-  and HTTPS GET (real TLS handshake via the mbedTLS backend) round trip
-  against `example.com` both pass on Linux and macOS, for both static and
-  shared libcurl. Linux uses curl's own real default configuration; macOS
-  declares `--disable-ipv6` and `--disable-threaded-resolver` for this
-  tranche, keeping the build on this CRT's currently-verified IPv4
-  synchronous resolver path rather than leaking Darwin SystemConfiguration
-  headers or depending on curl's async resolver worker-pool behavior.
-  curl was the
-  first port in this queue to reach a real internet hostname over the
-  network, and it surfaced two real, general, previously-invisible libc
-  bugs, not curl-specific ones: `getaddrinfo()` had no real DNS
-  resolution at all (fixed with a real, minimal synchronous DNS client
-  added to `libc/src/socket.c`), and `fcntl(fd, F_SETFL, O_NONBLOCK)`
-  was a pure no-op on Linux/macOS (the actual cause of an indefinite
-  `curl_easy_perform()` hang, root-caused by direct process inspection
-  and temporary instrumentation in curl's own source -- fixed by
-  forwarding `F_GETFL`/`F_SETFL` to the real `fcntl(2)` syscall). A real
-  Windows build attempt found two more distinct bugs: curl's own
-  `AC_EGREP_CPP`-based socket probe only reads `CPPFLAGS`, not `CFLAGS`
-  (fixed); and, once configure passed, mbedtls's own Windows `.dll`
-  build turned out to statically embed this project's libc with no
-  symbol-visibility control and re-export its internal symbols, colliding
-  with this project's own `c.lib` once curl links against both (not
-  fixed this session -- not a curl bug, see `TODO.md`). A real macOS
-  build attempt found one more, in `tools/crt-port-build.py` itself:
-  curl's own configure-time "runtime libs availability" probe (compiles
-  and *runs* a test program against mbedtls's shared libs) failed
-  because mbedtls's `.dylib` files have no `-install_name` set, so dyld
-  can't resolve them via `LC_RPATH`. First attempt (`make_env()` also
-  setting `DYLD_LIBRARY_PATH`/`LD_LIBRARY_PATH` as a runtime-loader
-  fallback for every subprocess it spawns, matching what
-  `run_port_tests()` already did for test binaries) turned out
-  insufficient on real macOS hardware: the same error recurred, because
-  configure execs through `/bin/sh`, and macOS strips `DYLD_`-prefixed
-  environment variables across an exec of any SIP-protected system
-  binary -- so the env var never survives into configure's own child
-  probe. The real, durable fix landed in `porting/recipes/mbedtls.json`
-  instead: three new `library/Makefile` patches add
-  `-install_name @rpath/$@` to the APPLE_BUILD `-dynamiclib` recipes for
-  all three `.dylib`s, baking the correct load-command path into the
-  library itself (immune to any environment-stripping), resolved at
-  runtime by the consumer's own `-Wl,-rpath` LDFLAGS `make_env()`
-  already sets unconditionally. Verified on macOS by rebuilding curl and
-  running both static and shared HTTP/HTTPS round trips against
-  `example.com`. A follow-up macOS audit rebuilt the installed port
-  dylibs and confirmed they depend on this project's `@rpath/libc.dylib`;
-  suspicious libc/POSIX references no longer bind directly from
-  `libSystem`, aside from libSystem itself remaining the intended Darwin
-  PAL/backend boundary. See `HISTORY.md`'s 2026-08-14 entry and both
-  `porting/recipes/curl.json`'s and `porting/recipes/mbedtls.json`'s own
-  notes for the full trail. **Windows**: a real rebuild attempt got
-  past the previously-documented mbedtls-DLL duplicate-symbol blocker
-  (`libcurl.la`/`libcurlu.la` now link cleanly; not deliberately fixed,
-  so still tracked as open/unexplained in `TODO.md` rather than closed)
-  and surfaced a different, real, now-fixed bug instead: curl's own CLI
-  tool failed to link with `setmode`/`_spawnv`/`_P_WAIT` undeclared in
-  GNU Libtool's own generated wrapper source -- the same bug class
-  already fixed for libpng via
-  `porting/shims/win32/libtool_wrapper_compat.h`, but curl.json was
-  never wired up to use that shim. Fixed by wiring in the missing
-  `force_include` plus a new shim alias (`#define setmode _setmode`)
-  for a variant libpng never hit (curl also undefines `__MINGW32__`,
-  so the wrapper's own rename block never fires and calls the bare,
-  un-prefixed name directly). **Update, verified on real Windows
-  hardware**: that fix, plus four more real bugs found chasing it
-  through to an actual network round trip -- a second, worse shim
-  header-footprint collision that silently mis-detected
-  `pipe()`/`realpath()`/`sched_yield()` as absent via curl's own
-  generic autoconf function probes (the `pipe()` one is what actually
-  caused an `Out of memory` failure, curl's wakeup-pipe mechanism
-  believing it had no `pipe()`); missing `-U_WIN32` cflags on the test
-  programs themselves (`fatal error: 'winsock2.h' file not found`);
-  Windows's `fcntl(F_SETFL, O_NONBLOCK)` finally implemented for real
-  (`SetNamedPipeHandleState`/`ioctlsocket(FIONBIO)`, fixing the exact
-  same indefinite-hang bug already fixed for Linux/macOS earlier in
-  this pass, just not reachable on Windows until `pipe()` detection was
-  fixed); and a real Winsock `WSAENOTCONN`-right-after-a-successful-
-  non-blocking-`connect()` race (reinterpreted as `EAGAIN` for
-  non-blocking sockets, confirmed transient with a standalone probe --
-  a bare retry after ~200ms succeeds with no further connect()/select()
-  calls). Result: **curl's HTTP round trip now passes end to end on
-  Windows for the first time ever** (`curl_easy_perform()` against
-  `http://example.com/` returns a real `200 OK`). **HTTPS does not
-  work yet**: a new, distinct, NOT YET ROOT-CAUSED crash
-  (`STATUS_ACCESS_VIOLATION`, reproduced twice) right after mbedTLS
-  begins its handshake. Windows status: `partial`. See
-  `porting/recipes/curl.json`'s own notes for the full trail.
+  in this queue). `curl` (8.21.0) is now **`shared-pass` on all three
+  OSes**, closing out this whole porting queue (`bzip2` -> `xz` ->
+  `pcre2` -> `mbedtls` -> `curl`; `openssl` stays deliberately held
+  back). A real HTTP GET and HTTPS GET (real TLS handshake via the
+  mbedTLS backend) round trip against `example.com` passes on Linux,
+  macOS, and Windows, for both static and shared libcurl, verified
+  directly on real hardware for all three hosts. Getting there
+  surfaced a long chain of real, general, previously-invisible PAL
+  bugs across the whole session -- among the most notable: `getaddrinfo()`
+  had no real DNS resolution at all (a minimal synchronous DNS client
+  added to `libc/src/socket.c`); `fcntl(fd, F_SETFL, O_NONBLOCK)` was a
+  pure no-op on every OS (curl's own internal wakeup-pipe mechanism
+  needs it for real -- now forwards to the real syscall on Linux/macOS
+  and implemented for real on Windows via `SetNamedPipeHandleState`/
+  `ioctlsocket(FIONBIO)`); mbedtls's own macOS `.dylib` files had no
+  `-install_name` set, breaking dyld resolution; and, on Windows,
+  mbedTLS's portable entropy source had no working `/dev/urandom` to
+  read from at all, crashing the TLS handshake with a null
+  function-pointer call inside its RNG -- root-caused with a real
+  `lldb` backtrace and fixed by implementing a real `/dev/urandom`
+  device backed by `RtlGenRandom()`. One real, general risk was found
+  and left open, not curl-specific: mbedtls's own Windows `.dll` build
+  re-exports this project's entire libc with no symbol-visibility
+  control, which can silently shadow real libc fixes for any consumer
+  that also links mbedtls's DLL until mbedtls itself is rebuilt too
+  (see `TODO.md` and `porting/recipes/mbedtls.json`'s own notes). See
+  `HISTORY.md`'s dated entries and `porting/recipes/curl.json`'s own
+  notes (a long, blow-by-blow trail) for the full writeup.
 
 ## Known gaps
 
@@ -184,14 +124,13 @@ in those two win.
   pipe-content bug that broke parallel `make` on Windows is fixed and
   stress-tested (libpng scale, `-j 12`), but has no permanent regression
   test yet. See `TODO.md`.
-- **Windows `fcntl(fd, F_SETFL, O_NONBLOCK)` is still a no-op**: fixed
-  for real on Linux/macOS (forwards to the real `fcntl(2)` syscall) as
-  part of curl's own port, but Windows's `fcntl()` backend has no
-  unified syscall to forward to and keeps its prior (also broken,
-  non-regressing) no-op behavior for now -- a real fix needs per-fd-type
-  handling (winsock's `ioctlsocket(FIONBIO)` for sockets, overlapped I/O
-  for anonymous pipes). Documented as a TODO comment directly in
-  `libc/src/fd.c`; not yet hit by a real Windows port build.
+- **mbedtls's Windows DLL re-exports this project's own libc symbols**:
+  confirmed real (not just a theoretical link-time collision -- it
+  caused a genuine, hard-to-diagnose runtime bug for curl, root-caused
+  via a live `lldb` attach), and NOT fixed. Any future libc fix on
+  Windows can silently stop applying to anything that links mbedtls's
+  DLL until mbedtls itself is rebuilt too. See `TODO.md` and
+  `porting/recipes/mbedtls.json`'s own notes for the full trail.
 - **DNS resolver is deliberately minimal**: `getaddrinfo()` now does a
   real DNS lookup (added for curl, see `HISTORY.md`'s 2026-08-14
   entry), but only a single synchronous UDP query for an A (IPv4)
@@ -201,11 +140,13 @@ in those two win.
 
 ## Next
 
-- Porting matrix expansion: `bzip2`, `xz`, `pcre2`, `mbedtls`, and
-  `curl` are `shared-pass` on Linux/macOS where verified; Windows is
-  still blocked only on curl's shared link against mbedtls's current DLL
-  export surface. Fixing the mbedtls DLL export/static-dependency policy
-  closes out this queue (`openssl` stays held back until needed).
+- Porting matrix expansion is **done**: `bzip2`, `xz`, `pcre2`,
+  `mbedtls`, and `curl` are all `shared-pass` on Linux, macOS, and
+  Windows (`openssl` stays deliberately held back until something
+  needs it). The one real, general risk still open from this queue is
+  mbedtls's Windows DLL symbol-export hygiene (see "Known gaps" above)
+  -- worth a dedicated fix at some point, but not blocking anything
+  today.
 - Broader POSIX/rootfs surface hardening beyond what each port's own build
   happens to exercise.
 - C++ runtime phase 2 and an ELF loader/dynamic-linker prototype: not

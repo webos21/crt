@@ -106,7 +106,21 @@ def run_checked_output(args, cwd, env, expect_stdout=None, label=None):
         progress(f"start {label}")
     print("+", " ".join(str(a) for a in args), flush=True)
     start = time.monotonic()
-    completed = subprocess.run(args, cwd=cwd, env=env, text=True, capture_output=True, check=False)
+    # stdin=DEVNULL: found for real running a port's own test binary
+    # (curl's http-roundtrip-shared, on Windows) -- without this, the
+    # test binary inherits whatever stdin this script itself has, which
+    # differs by how deep this script's own invocation chain runs
+    # (cmake -E env -> cmd.exe /C -> python.exe, as CMake's own custom
+    # target driver does, vs. a plain direct subprocess call) and can
+    # end up being a real, live, never-EOF-signaling handle instead of
+    # a closed/redirected one. A test binary should never be able to
+    # block on stdin at all -- it isn't given any input on purpose --
+    # so explicitly redirecting it from the null device removes the
+    # ambiguity outright, regardless of which specific library call
+    # ends up reading from fd 0.
+    completed = subprocess.run(
+        args, cwd=cwd, env=env, text=True, capture_output=True, check=False,
+        stdin=subprocess.DEVNULL)
     if completed.stdout:
         print(completed.stdout, end="" if completed.stdout.endswith("\n") else "\n")
     if completed.stderr:
