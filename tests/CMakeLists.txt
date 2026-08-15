@@ -421,6 +421,29 @@ set_tests_properties(windows_fd_snapshot_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "windows_fd_snapshot_test: ok"
 )
 
+# TODO.md's "Windows shell/process stress hardening" item: many
+# concurrently-live children sharing one inherited jobserver-style pipe,
+# close-on-exec filtering under load, and a full waitpid(-1) drain -- see
+# process_stress_test.c's own top comment for the full design and why it
+# runs on every host, not just Windows.
+add_crt_test(process_stress_test process_stress_test.c)
+set_tests_properties(process_stress_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "process_stress_test: ok"
+  TIMEOUT 60
+)
+
+# TODO.md's "Windows symlink/delete timing verification" item: a real,
+# deterministic reproduction of the DeleteFileA()/CreateSymbolicLinkA()
+# delete-pending race, and a regression for the retry loops
+# __crt_sys_unlink()/__crt_sys_symlink() gained to fix it -- see
+# windows_symlink_delete_race_test.c's own top comment for the full
+# design and why it runs on every host.
+add_crt_test(windows_symlink_delete_race_test windows_symlink_delete_race_test.c)
+set_tests_properties(windows_symlink_delete_race_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "windows_symlink_delete_race_test: ok"
+  TIMEOUT 60
+)
+
 add_crt_test(pthread_basic_test pthread_basic_test.c)
 set_tests_properties(pthread_basic_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_basic_test: ok"
@@ -688,6 +711,116 @@ if(CRT_TARGET_OS STREQUAL "windows")
     PASS_REGULAR_EXPRESSION "windows_pseudo_reloc_test: ok"
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS windows_pseudo_reloc_test_runs)
+
+  # Permanent regression test for tools/crt-cc's Windows shared-library
+  # link order -- see that file's own Windows/shared_mode comment and
+  # windows_dll_symbol_priority_dll.c/_middle.c/consumer.c's own
+  # comments for the full story (found chasing an intermittent hang in
+  # curl's own Windows port: libcurl-4.dll's own read() calls were
+  # silently resolving to a stale, re-exported copy embedded in
+  # libmbedcrypto.dll instead of this project's real, current c.lib,
+  # because mbedtls's own import library appeared before c.lib on
+  # curl's own link line). Three artifacts, chained DLL-to-DLL-to-EXE
+  # to match the real bug's shape exactly (an EXE-to-DLL version of
+  # this same fixture was tried first and did NOT reproduce the bug --
+  # lld-link resolves that shape correctly regardless of link order;
+  # only a DLL's *own* link, importing from another DLL that also
+  # happens to export a same-named symbol, is affected):
+  #   dll.c    ("mbedtls" stand-in)   -> libdllpriority_regress.dll
+  #   middle.c ("libcurl" stand-in)   -> libdllpriority_middle.dll
+  #                                      (links the fixture DLL's own
+  #                                      import library)
+  #   consumer.c (the test binary)   -> links only the middle DLL
+  # Reuses the same tools/crt-cc-via-mksh.exe build technique (and the
+  # same CRT_PSEUDO_RELOC_TEST_ENV/_ARCH/_SDK_LIBDIR-style setup
+  # already established just above) rather than CMake's own native
+  # add_library(SHARED)/add_executable() path, for the same reason:
+  # this needs the real GNU-ABI (--target=*-w64-mingw32) shared-library
+  # link tools/crt-cc drives for every actual port build, not this
+  # project's own CMake-native MSVC-ABI default.
+  #
+  # The fixture DLL's own build below passes
+  # "-Wl,--exclude-symbols=read"/"-Wl,--exclude-symbols=__crt_sys_read"
+  # (one flag per symbol -- clang's "-Wl,A,B" splits on commas into
+  # separate linker arguments, so a single comma-joined flag silently
+  # mis-parses the second name as a file path) -- the same
+  # --exclude-symbols mechanism porting/recipes/mbedtls.json's own
+  # Windows LDFLAGS now applies to mbedtls's real DLLs (there via a
+  # checked-in linker response file,
+  # porting/recipes/mbedtls-windows-exclude-symbols.rsp, one flag per
+  # real libc symbol -- the two flags spelled out directly here are
+  # this fixture's own much smaller, hand-picked equivalent, not the
+  # full list). This makes the permanent regression here about the fix
+  # mechanism itself continuing to hold (lld-link's --exclude-symbols
+  # keeps the fixture DLL from re-exporting read() at all, so the
+  # middle DLL's own read() call can only resolve to the real libc
+  # definition), not a standing demonstration of the raw bug -- the raw
+  # bug is exercised once, by hand, when this fixture is changed.
+  set(CRT_DLL_PRIORITY_TEST_DIR "${CMAKE_CURRENT_BINARY_DIR}/windows_dll_symbol_priority_test")
+  set(CRT_DLL_PRIORITY_TEST_DLL "${CRT_DLL_PRIORITY_TEST_DIR}/libdllpriority_regress.dll")
+  set(CRT_DLL_PRIORITY_TEST_IMPLIB "${CRT_DLL_PRIORITY_TEST_DIR}/libdllpriority_regress.dll.a")
+  set(CRT_DLL_PRIORITY_TEST_MIDDLE_DLL "${CRT_DLL_PRIORITY_TEST_DIR}/libdllpriority_middle.dll")
+  set(CRT_DLL_PRIORITY_TEST_MIDDLE_IMPLIB "${CRT_DLL_PRIORITY_TEST_DIR}/libdllpriority_middle.dll.a")
+  set(CRT_DLL_PRIORITY_TEST_EXE "${CRT_DLL_PRIORITY_TEST_DIR}/windows_dll_symbol_priority_test.exe")
+  add_custom_command(
+    OUTPUT "${CRT_DLL_PRIORITY_TEST_DLL}" "${CRT_DLL_PRIORITY_TEST_IMPLIB}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CRT_DLL_PRIORITY_TEST_DIR}"
+    COMMAND ${CRT_PSEUDO_RELOC_TEST_ENV}
+      "${CMAKE_BINARY_DIR}/rootfs/system/bin/mksh.exe" "${CMAKE_SOURCE_DIR}/tools/crt-cc"
+      -shared "${CMAKE_CURRENT_SOURCE_DIR}/windows_dll_symbol_priority_dll.c"
+      -o "${CRT_DLL_PRIORITY_TEST_DLL}"
+      "-Wl,--exclude-symbols=read"
+      "-Wl,--exclude-symbols=__crt_sys_read"
+      "-Wl,--out-implib,${CRT_DLL_PRIORITY_TEST_IMPLIB}"
+    DEPENDS
+      "${CMAKE_CURRENT_SOURCE_DIR}/windows_dll_symbol_priority_dll.c"
+      "${CMAKE_SOURCE_DIR}/tools/crt-cc"
+      rootfs sysroot
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    COMMENT "Building windows_dll_symbol_priority_test's regression DLL (GNU ABI, via tools/crt-cc)"
+  )
+  add_custom_command(
+    OUTPUT "${CRT_DLL_PRIORITY_TEST_MIDDLE_DLL}" "${CRT_DLL_PRIORITY_TEST_MIDDLE_IMPLIB}"
+    COMMAND ${CRT_PSEUDO_RELOC_TEST_ENV}
+      "${CMAKE_BINARY_DIR}/rootfs/system/bin/mksh.exe" "${CMAKE_SOURCE_DIR}/tools/crt-cc"
+      -shared "${CMAKE_CURRENT_SOURCE_DIR}/windows_dll_symbol_priority_middle.c"
+      "${CRT_DLL_PRIORITY_TEST_IMPLIB}"
+      -o "${CRT_DLL_PRIORITY_TEST_MIDDLE_DLL}"
+      "-Wl,--out-implib,${CRT_DLL_PRIORITY_TEST_MIDDLE_IMPLIB}"
+    DEPENDS
+      "${CMAKE_CURRENT_SOURCE_DIR}/windows_dll_symbol_priority_middle.c"
+      "${CRT_DLL_PRIORITY_TEST_DLL}" "${CRT_DLL_PRIORITY_TEST_IMPLIB}"
+      "${CMAKE_SOURCE_DIR}/tools/crt-cc"
+      rootfs sysroot
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    COMMENT "Building windows_dll_symbol_priority_test's regression middle DLL (GNU ABI, via tools/crt-cc)"
+  )
+  add_custom_command(
+    OUTPUT "${CRT_DLL_PRIORITY_TEST_EXE}"
+    COMMAND ${CRT_PSEUDO_RELOC_TEST_ENV}
+      "${CMAKE_BINARY_DIR}/rootfs/system/bin/mksh.exe" "${CMAKE_SOURCE_DIR}/tools/crt-cc"
+      "${CMAKE_CURRENT_SOURCE_DIR}/windows_dll_symbol_priority_consumer.c"
+      "${CRT_DLL_PRIORITY_TEST_MIDDLE_IMPLIB}"
+      -o "${CRT_DLL_PRIORITY_TEST_EXE}"
+    DEPENDS
+      "${CMAKE_CURRENT_SOURCE_DIR}/windows_dll_symbol_priority_consumer.c"
+      "${CRT_DLL_PRIORITY_TEST_MIDDLE_DLL}" "${CRT_DLL_PRIORITY_TEST_MIDDLE_IMPLIB}"
+      "${CMAKE_SOURCE_DIR}/tools/crt-cc"
+      rootfs sysroot
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    COMMENT "Building windows_dll_symbol_priority_test's regression consumer (GNU ABI, via tools/crt-cc)"
+  )
+  add_custom_target(windows_dll_symbol_priority_test ALL
+    DEPENDS "${CRT_DLL_PRIORITY_TEST_EXE}"
+  )
+  add_dependencies(windows_dll_symbol_priority_test rootfs sysroot)
+  add_test(NAME windows_dll_symbol_priority_test_runs
+    COMMAND "${CRT_DLL_PRIORITY_TEST_EXE}"
+  )
+  set_tests_properties(windows_dll_symbol_priority_test_runs PROPERTIES
+    PASS_REGULAR_EXPRESSION "windows_dll_symbol_priority_test: ok"
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS windows_dll_symbol_priority_test_runs)
 endif()
 get_property(CRT_REGISTERED_TESTS GLOBAL PROPERTY CRT_REGISTERED_TESTS)
 list(LENGTH CRT_REGISTERED_TESTS CRT_REGISTERED_TEST_COUNT)

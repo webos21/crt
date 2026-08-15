@@ -24,11 +24,12 @@ in those two win.
   own `cmake --workflow` step does not run `port-test-recipes` (a
   separate, heavier target that fetches and builds third-party sources)
   -- that's verified locally/per-host instead, see below.
-- **`ctest`**: 85 registered tests on Windows and 77 on macOS in the
+- **`ctest`**: 88 registered tests on Windows and 77 on macOS in the
   latest local run (count is slightly
   OS-dependent -- a few targets, like `windows_export_hygiene_test`, only
-  exist on their own OS), all passing locally on Windows (85/85, most
-  recently confirmed after the curl HTTPS/`/dev/urandom` work) and
+  exist on their own OS), all passing locally on Windows (88/88, most
+  recently confirmed after the mbedtls Windows DLL symbol-hygiene fix and
+  the two new Windows process/symlink regression tests) and
   locally on macOS as
   of the curl/host-libc audit pass; CI is the source of truth for Linux
   counts. Run locally via
@@ -89,13 +90,17 @@ in those two win.
   function-pointer call inside its RNG -- root-caused with a real
   `lldb` backtrace and fixed by implementing a real `/dev/urandom`
   device backed by `RtlGenRandom()`. One real, general risk was found
-  and left open, not curl-specific: mbedtls's own Windows `.dll` build
-  re-exports this project's entire libc with no symbol-visibility
-  control, which can silently shadow real libc fixes for any consumer
-  that also links mbedtls's DLL until mbedtls itself is rebuilt too
-  (see `TODO.md` and `porting/recipes/mbedtls.json`'s own notes). See
-  `HISTORY.md`'s dated entries and `porting/recipes/curl.json`'s own
-  notes (a long, blow-by-blow trail) for the full writeup.
+  and, at the time, left open, not curl-specific: mbedtls's own Windows
+  `.dll` build re-exported this project's entire libc with no
+  symbol-visibility control, which could silently shadow real libc
+  fixes for any consumer that also links mbedtls's DLL until mbedtls
+  itself is rebuilt too. **This is now fixed** (see "Known gaps" below
+  and `porting/recipes/mbedtls.json`'s own notes) -- confirmed with a
+  from-scratch `port-rebuild-curl`/`port-test-curl` against the fixed
+  mbedtls, which also surfaced and fixed one more independent Windows
+  delete-pending-race bug in `__crt_sys_open()`. See `HISTORY.md`'s
+  dated entries and `porting/recipes/curl.json`'s own notes (a long,
+  blow-by-blow trail) for the full writeup.
 
 ## Known gaps
 
@@ -113,24 +118,6 @@ in those two win.
   corrupted somewhere in the `ffi_call()`/`ffi_call_SYSV` chain on aarch64;
   not yet isolated to an exact instruction, and not re-tested for an
   x86_64 analogue. See `porting/recipes/libffi.json`'s notes.
-- **Windows `make install` symlink races**: an intermittent
-  `ln: ... File exists` on libtool-generated header/lib alias symlinks when
-  rebuilding a port whose install directory already has a valid symlink
-  from a prior run. Looks like same-session Windows delete-pending/handle-
-  timing noise (an isolated minimal repro never reproduced it), not a real
-  toybox/CRT `rm`-on-symlink bug, but not confirmed from a genuinely cold
-  `out/` directory yet. See `TODO.md`.
-- **Windows `make -jN` regression coverage**: the fd_snapshot/`fstat()`
-  pipe-content bug that broke parallel `make` on Windows is fixed and
-  stress-tested (libpng scale, `-j 12`), but has no permanent regression
-  test yet. See `TODO.md`.
-- **mbedtls's Windows DLL re-exports this project's own libc symbols**:
-  confirmed real (not just a theoretical link-time collision -- it
-  caused a genuine, hard-to-diagnose runtime bug for curl, root-caused
-  via a live `lldb` attach), and NOT fixed. Any future libc fix on
-  Windows can silently stop applying to anything that links mbedtls's
-  DLL until mbedtls itself is rebuilt too. See `TODO.md` and
-  `porting/recipes/mbedtls.json`'s own notes for the full trail.
 - **DNS resolver is deliberately minimal**: `getaddrinfo()` now does a
   real DNS lookup (added for curl, see `HISTORY.md`'s 2026-08-14
   entry), but only a single synchronous UDP query for an A (IPv4)
@@ -142,16 +129,14 @@ in those two win.
 
 - Porting matrix expansion through curl is **done**: `bzip2`, `xz`, `pcre2`,
   `mbedtls`, and `curl` are all `shared-pass` on Linux, macOS, and Windows
-  (`openssl` stays deliberately held back until something needs it). The one
-  real, general risk still open from this queue is mbedtls's Windows DLL
-  symbol-export hygiene (see "Known gaps" above) -- worth a dedicated fix, but
-  not blocking the curl status.
+  (`openssl` stays deliberately held back until something needs it). The
+  real, general risk once open from this queue -- mbedtls's Windows DLL
+  symbol-export hygiene -- is fixed; see `HISTORY.md`'s 2026-08-15 entry.
 - Before starting the next upper-runtime phase, reduce the remaining
-  libc/PAL planned work in `TODO.md`: libffi correctness, Windows process/fd
-  stress regression coverage, Windows symlink/delete timing verification,
-  rootfs virtual files/devices, DNS resolver growth, console/job-control policy,
-  and toybox applet expansion only where the Bionic-compatible backing surface
-  exists.
+  libc/PAL planned work in `TODO.md`: libffi correctness, the mksh subshell
+  status quirk, rootfs virtual files/devices, DNS resolver growth,
+  console/job-control policy, and toybox applet expansion only where the
+  Bionic-compatible backing surface exists.
 - The next product-level target is documented in `docs/runtime_roadmap.md`:
   an Electron-class rebuilt runtime made of `libcrtgfx` (Skia + Wayland-style
   compositor boundary + Chromium Ozone path), `libcrtmedia` (FFmpeg/codecs/

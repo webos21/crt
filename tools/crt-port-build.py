@@ -7,6 +7,7 @@ import platform
 import shlex
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -275,9 +276,22 @@ def remove_tree(path):
             pass
         func(failing_path)
 
+    # shutil.rmtree()'s onexc= callback (func, path, exc_instance) was
+    # only added in Python 3.12; older interpreters (this project's
+    # Windows CI/dev hosts have run both 3.11 and 3.14 at different
+    # times -- see HISTORY.md) only support the older onerror= callback
+    # (func, path, exc_info triple). Both callback shapes are
+    # source-compatible with retry_with_write_permission's own body
+    # (it only uses failing_path), so just pick whichever kwarg this
+    # interpreter's shutil.rmtree() actually accepts.
+    use_onexc = sys.version_info >= (3, 12)
+
     for attempt in range(5):
         try:
-            shutil.rmtree(path, onexc=retry_with_write_permission)
+            if use_onexc:
+                shutil.rmtree(path, onexc=retry_with_write_permission)
+            else:
+                shutil.rmtree(path, onerror=retry_with_write_permission)
             return
         except OSError:
             if attempt == 4 or not path.exists():
@@ -612,12 +626,33 @@ def apply_source_patches(work, recipe):
 _ENV_FLAG_ACCUMULATOR_VARS = {"CFLAGS", "CPPFLAGS", "CXXFLAGS", "LDFLAGS", "LIBS"}
 
 
-def apply_recipe_env(env, recipe, target_os, root):
+def apply_recipe_env(env, recipe, target_os, root, preset_build_dir=None, work_build_dir=None, sysroot=None, port_prefix=None):
     build = recipe["build"]
+    # @ROOT@/@PORT_PREFIX@/etc. substitution (same tokens
+    # configure_args/make_args/install_args already get via
+    # substitute_recipe_value) applied to env values too -- added so a
+    # recipe's env block can reference a repo-checked-in file by an
+    # absolute, host-independent path (e.g. a linker response file:
+    # see mbedtls.json's own Windows LDFLAGS, which points
+    # --exclude-symbols's several-hundred-entry list at
+    # @ROOT@/porting/recipes/mbedtls-windows-exclude-symbols.rsp via
+    # -Wl,@... instead of spelling every --exclude-symbols=NAME flag
+    # out on the command line -- the fully-spelled-out form blew past
+    # this project's own rootfs mksh's argv length limit ("Argument
+    # list too long") well before hitting any real Windows
+    # CreateProcess limit). preset_build_dir/work_build_dir/sysroot/
+    # port_prefix are optional (default None, substituted as empty
+    # tokens) purely so any future caller that doesn't need path
+    # substitution isn't forced to pass them.
+    def subst(value):
+        if preset_build_dir is None:
+            return str(value)
+        return substitute_recipe_value(value, root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os)
+
     for name, value in build.get("env", {}).items():
-        env[name] = str(value)
+        env[name] = subst(value)
     for name, value in build.get("target_overrides", {}).get(target_os, {}).get("env", {}).items():
-        value = str(value)
+        value = subst(value)
         if name in _ENV_FLAG_ACCUMULATOR_VARS and env.get(name):
             env[name] = f"{env[name]} {value}"
         else:
@@ -1093,7 +1128,7 @@ def run_port_tests(root, preset_build_dir, work_build_dir, sysroot, port_prefix,
         return
 
     env = make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os, mingw_triple, use_crt_shell)
-    apply_recipe_env(env, recipe, target_os, root)
+    apply_recipe_env(env, recipe, target_os, root, preset_build_dir, work_build_dir, sysroot, port_prefix)
     cc_argv = command_value_argv(env["CC"], preset_build_dir, target_os)
     test_root = work_build_dir / "tests" / port_name
     test_root.mkdir(parents=True, exist_ok=True)
@@ -1157,7 +1192,7 @@ def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, por
 
     progress(f"{port}: build system {build['system']}")
     env = make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os, mingw_triple, use_crt_shell)
-    apply_recipe_env(env, recipe, target_os, root)
+    apply_recipe_env(env, recipe, target_os, root, preset_build_dir, work_build_dir, sysroot, port_prefix)
     if build["system"] == "configure":
         build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env, target_os, mingw_triple, use_crt_shell, configure_only, jobs)
     elif build["system"] == "amalgamation":

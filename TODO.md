@@ -51,76 +51,11 @@ newest entry first) rather than leaving it here.
 
 Active threads, not a flat list of one-off items. The curl queue is complete:
 `curl` is `shared-pass` on Linux, macOS, and Windows, with real HTTP and HTTPS
-round trips against `example.com` for both static and shared libcurl. Remaining
-items here are follow-up risks uncovered while getting there, not blockers for
-the curl port itself.
-
-- **mbedtls's Windows DLL re-exports this project's own libc symbols,
-  with no visibility control.** Confirmed real and NOT fixed (see
-  `porting/recipes/mbedtls.json`'s own notes for the full trail):
-  mbedtls's hand-rolled Windows `.dll` build statically embeds this
-  project's entire libc and re-exports every symbol in it alongside its
-  real public API. First seen as a link-time `ld.lld: error: duplicate
-  symbol` (curl linking against both `libmbedcrypto.dll.a` and this
-  project's own `c.lib`); that specific error stopped reproducing on a
-  later attempt (still unexplained), but the underlying re-export was
-  never fixed, and it resurfaced as a genuine runtime bug instead:
-  `libcurl-4.dll`'s calls to `read()`/`__crt_sys_read()` silently
-  resolved to `libmbedcrypto.dll`'s own embedded, stale copy (predating
-  a real libc fix) instead of the current `c.lib`/`c.dll` -- root-caused
-  with a live `lldb -p <pid>` attach. **Any future libc fix on Windows
-  silently stops applying to anything linking mbedtls's DLL until
-  mbedtls itself is also rebuilt** -- a real, general risk for every
-  future Windows consumer of this port, not just curl, with no
-  recipe-level workaround that actually closes it. Needs either real
-  symbol-visibility control added to mbedtls's own Windows `.dll` build,
-  or every consumer linking against mbedtls's static libraries
-  specifically for their own shared builds instead of its DLL import
-  library.
-
-- **Windows shell/process stress hardening.** The broad bring-up is done:
-  real `fork()`, mksh external-command execution, pipelines, command
-  substitution, rootfs execution, and parallel `make -jN` have all been
-  exercised through real port builds. Keep this item narrowly scoped to
-  hardening and permanent regression coverage:
-  - add a focused stress regression for many live children, inherited
-    jobserver-style pipe fds, close-on-exec filtering, and `waitpid(-1)` drain;
-  - keep the mksh child-spec path stable under future configure workloads;
-  - Audit the mksh subshell status quirk exposed by commands shaped like
-    `(command || true) >/dev/null 2>&1`.
-
-- **Windows symlink/delete timing verification.** `readlink()`/`lstat()`/
-  `symlink()` are all real and substantially better-verified now (see
-  `HISTORY.md`'s dangling-symlink `lstat()` fix and `readlink()`
-  truncation fix), but one open item remains: the intermittent
-  `make install` `ln: ... File exists` failure on libtool-generated
-  header/lib alias symlinks, seen when rebuilding a port whose install
-  directory already has a valid symlink from a prior successful run (see
-  the libpng `shared-pass` entry in `HISTORY.md`). An isolated, minimal
-  repro succeeded cleanly every time, so this looks like same-session
-  Windows delete-pending/handle-timing noise rather than a real toybox/
-  CRT `rm`-on-symlink bug -- needs reproduction from a genuinely cold
-  `out/` directory to confirm either way.
-  - **New data point, not yet conclusive**: a related, unexplained
-    `Error 5` (`ERROR_ACCESS_DENIED`, no message) hit `make install`
-    twice on two different targets (`install-man5` on aarch64,
-    `install-binSCRIPTS` on x86_64 -- see `HISTORY.md`'s `id`/`xargs`
-    entry), neither reproducing on an immediate retry. The retry that
-    stayed clean happened to run right after the Windows Defender
-    process/folder exclusions documented in `README.md` were applied.
-    Consistent with the working "Windows delete-pending/handle-timing
-    noise" theory (Defender real-time scanning holding a file handle
-    open just long enough to collide with `make install`'s own rapid
-    create/delete sequence), but not proven -- multiple other rebuilds
-    were running concurrently at the time, confounding a clean
-    before/after comparison. Worth specifically re-testing from a cold
-    `out/` directory with Defender exclusions active, to see if the
-    intermittent `ln: ... File exists` failure above also stops
-    reproducing.
-
-## planned
-
-### libc/PAL residuals before upper runtime
+round trips against `example.com` for both static and shared libcurl.
+mbedtls's Windows DLL symbol-export-hygiene gap, Windows shell/process stress
+hardening, and Windows symlink/delete timing verification are all resolved --
+see `HISTORY.md`'s 2026-08-15 entries. Remaining libc/PAL residuals before the
+upper runtime phase (see `docs/runtime_roadmap.md`) are now the active queue:
 
 - libffi's Windows build succeeds and its core features (`ffi_call`,
   closures) work correctly in isolation, but has one remaining,
@@ -128,13 +63,10 @@ the curl port itself.
   `ffi_call()` at `-O1`/`-O2`, see `HISTORY.md` and
   `porting/recipes/libffi.json`'s own notes for the full trail) still
   open -- would need a real debugger session to fully root-cause.
-- Parallel `make -jN` on Windows is no longer an open research item -- it's
-  enabled by default now (see `HISTORY.md`).
-  Add a permanent regression test for the fixed bug (fd_snapshot dropping
-  `FD_CLOEXEC` dup2 sources; `fstat()` destructively reading pipe content)
-  so it can't silently regress, covering: inherited pipe fds across
-  `posix_spawn()`, jobserver-style pipe transport, concurrent child wait,
-  and close-on-exec filtering under load.
+- Audit the mksh subshell status quirk exposed by commands shaped like
+  `(command || true) >/dev/null 2>&1` (worked around at the recipe level
+  for zlib's `RANLIB=true`, see `docs/sysroot_ports.md`, but never
+  root-caused).
 - Expand Windows shell smoke tests:
   - fd 3+ redirection inside mksh;
   - grouped commands;
@@ -151,9 +83,9 @@ the curl port itself.
   - `/proc/self/cmdline`;
   - `/proc/self/environ`;
   - `/proc/stat`;
-  - `/dev/zero`;
-  - `/dev/random`;
-  - `/dev/urandom`.
+  - `/dev/zero`.
+  (`/dev/random`/`/dev/urandom` are done -- see `HISTORY.md`'s curl HTTPS
+  entry.)
 - Expand toybox applets only when the backing Bionic-compatible CRT/PAL
   surface exists. `which`/`readlink`/`stat`/`touch`/`id`/`xargs` are done
   (see `HISTORY.md`) -- next candidates would come from auditing the
@@ -168,15 +100,8 @@ the curl port itself.
   - `stty`;
   - `login`;
   - device-manager or procfs-heavy commands.
-- Windows `fork()` itself is no longer an open research item -- both
-  Windows architectures have a working, verified Cygwin/MSYS-style
-  memory-copy `fork()` (`docs/windows_fork_emulation.md`; see `HISTORY.md`
-  for the full settlement of the concerns originally listed here: saved
-  register/context state, stack mapping/copy policy, writable segment
-  policy, TLS reset, malloc/pthread/stdio/fd after-fork hooks,
-  ASLR/base-address handling). Kept only as a pointer: any *new* Windows
-  `fork()` problem discovered from here on should become its own fresh
-  entry, not get appended here.
+
+## planned
 
 ### Upper runtime roadmap after libc/PAL cleanup
 

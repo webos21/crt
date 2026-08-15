@@ -77,14 +77,15 @@ zlib -> libpng -> SQLite amalgamation -> bzip2 -> xz -> pcre2 -> mbedTLS -> curl
 Windows all pass real HTTP and HTTPS round trips against `example.com` for both
 static and shared libcurl.
 
-Open cross-cutting follow-ups from this queue:
+mbedTLS's Windows DLL symbol-export hygiene and Windows `make install`
+symlink/delete timing (both once open cross-cutting follow-ups from this
+queue) are fixed -- see the mbedTLS/curl sections below and `HISTORY.md`'s
+2026-08-15 entries.
 
-- mbedTLS's Windows DLL still re-exports this project's own libc symbols. This
-  is a real symbol-hygiene risk for future Windows shared-library consumers.
+Still open:
+
 - libffi still has a correctness issue around repeated `ffi_call()` usage at
   optimized levels on some paths.
-- Windows `make install` symlink/delete timing still has an intermittent
-  delete-pending/handle-timing validation item.
 
 ## make
 
@@ -263,11 +264,19 @@ against both static and shared builds.
 
 Important follow-ups:
 
-- Windows shared DLL export hygiene is still open. The hand-written mbedTLS DLL
-  build embeds this project's libc and re-exports CRT/internal symbols. This
-  caused a real curl runtime bug when a stale embedded `read()` shadowed the
-  current CRT implementation. A fresh rebuild fixed that symptom, but the
-  symbol-hygiene problem itself remains.
+- Windows shared DLL export hygiene is fixed. The hand-written mbedTLS DLL
+  build embeds this project's libc and, with no symbol-visibility control,
+  used to re-export virtually all of it (917 real libc symbol names,
+  confirmed via `llvm-nm`) alongside its own real API -- this originally
+  caused a real curl runtime bug when a stale embedded `read()` shadowed
+  the current CRT implementation. Fixed with a `-Wl,--exclude-symbols`
+  entry per real libc symbol (via a checked-in linker response file,
+  `porting/recipes/mbedtls-windows-exclude-symbols.rsp`) applied to all
+  three of mbedTLS's Windows DLL link recipes. Verified via
+  `llvm-readobj --coff-exports`: zero libc symbols remain in any of the
+  three DLLs' export tables. See `porting/recipes/mbedtls.json`'s own
+  notes for the full trail, including two general `tools/crt-port-build.py`
+  fixes found along the way.
 - macOS `.dylib` install-name handling was fixed by recipe patches adding
   `-install_name @rpath/$@`.
 - Linux `getauxval()`/`<sys/auxv.h>` support was added generally after mbedTLS
@@ -306,11 +315,16 @@ General CRT/PAL work exposed by curl included:
 - macOS mbedTLS install-name/rpath issues;
 - Windows `/dev/urandom` backed by `RtlGenRandom()`;
 - Windows non-blocking connect/send transient error mapping;
-- Windows libtool wrapper shims for curl's generated helper executable.
+- Windows libtool wrapper shims for curl's generated helper executable;
+- Windows `__crt_sys_open()`'s `O_CREAT` path gained the same
+  delete-pending/handle-timing retry `__crt_sys_unlink()`/
+  `__crt_sys_symlink()` already had (see the "Windows symlink/delete
+  timing" note elsewhere in this file), found via a real `Error 5` on
+  `install-pkgconfigDATA` during a from-scratch `port-rebuild-curl`.
 
-The remaining open risk is inherited from mbedTLS, not curl: mbedTLS's Windows
-DLL export hygiene needs a dedicated fix before future Windows shared-library
-consumers can rely on libc fixes always resolving to the current CRT.
+The risk once inherited from mbedTLS is now fixed (see the mbedTLS section
+above); a from-scratch `port-rebuild-curl`/`port-test-curl` against the
+fixed mbedTLS confirms no regression, both statically and shared.
 
 ## libffi
 

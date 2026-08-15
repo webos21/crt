@@ -867,6 +867,52 @@ static long fail_last_error(void) {
   return -map_windows_error(GetLastError());
 }
 
+/* Windows delete-pending/handle-timing retry, shared by __crt_sys_open()
+ * (CREATE_ALWAYS/CREATE_NEW/OPEN_ALWAYS dispositions only -- see its own
+ * call site below), __crt_sys_unlink(), and __crt_sys_symlink() further
+ * down. DeleteFileA() only *marks* a file for deletion when another
+ * handle is still open on it (most commonly Windows Defender's real-time
+ * scanner, briefly opening a file this project's own build just
+ * wrote/closed, right before this project deletes or overwrites it
+ * again) -- the directory entry isn't actually removed until every open
+ * handle closes. A `rm -f old && ln -s new old` pair issued back-to-back
+ * (libtool's own SONAME-symlink install pattern) or a plain `cp`/
+ * `install -m ... src dst` overwrite (autoconf's own generated
+ * `install-sh`, e.g. curl's real `make install` copying `libcurl.pc`
+ * into place -- confirmed for real: a genuinely fresh `port-rebuild-curl`
+ * hit `Error 5` on exactly this step, "install-pkgconfigDATA", the same
+ * failure class TODO.md's "New data point" note already suspected) can
+ * then observe the old entry as still present for a short window:
+ * unlink()'s own DeleteFileA reports success (accepted, not yet
+ * completed), and the immediately-following create -- whether
+ * CreateSymbolicLinkA or a plain CreateFileA(..., CREATE_ALWAYS, ...)
+ * from open() -- either still sees the old file "there"
+ * (ERROR_ALREADY_EXISTS, surfacing as `ln`'s "File exists") or gets
+ * refused a new create at that exact path (ERROR_ACCESS_DENIED, a
+ * pending-delete file's own create restriction). See
+ * tests/windows_symlink_delete_race_test.c's own comment for the
+ * regression this guards. Bounded, short retry loop -- the same practical
+ * idiom Git for Windows/Node.js use for the identical Windows quirk, not a
+ * fix for a real, persistent sharing violation, which still correctly
+ * fails once the retry budget runs out. */
+#define WINDOWS_DELETE_RACE_RETRY_ATTEMPTS 40
+#define WINDOWS_DELETE_RACE_RETRY_SLEEP_MS 10
+/* Raw Win32 error codes, named locally -- this file deliberately never
+ * includes <windows.h> (see its own top-of-file convention: every other
+ * error check here, e.g. map_windows_error()'s own switch just above,
+ * compares against bare numbers instead), so these three get their usual
+ * winerror.h names spelled out here rather than left as unexplained
+ * magic numbers at each call site. */
+#define CRT_WIN_ERROR_ACCESS_DENIED 5
+#define CRT_WIN_ERROR_SHARING_VIOLATION 32
+#define CRT_WIN_ERROR_ALREADY_EXISTS 183
+
+static int windows_is_delete_race_error(DWORD error) {
+  return error == CRT_WIN_ERROR_ACCESS_DENIED ||
+         error == CRT_WIN_ERROR_SHARING_VIOLATION ||
+         error == CRT_WIN_ERROR_ALREADY_EXISTS;
+}
+
 static int ascii_tolower(int c) {
   return c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c;
 }
@@ -3142,8 +3188,28 @@ long __crt_sys_open(const char* path, int flags, unsigned int mode) {
     file_flags = FILE_FLAG_BACKUP_SEMANTICS;
   }
 
-  handle = CreateFileA(host_path, access, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                       0, disposition, file_flags, 0);
+  if ((flags & O_CREAT) != 0) {
+    /* Delete-pending/handle-timing retry (see windows_is_delete_race_error()'s
+     * own comment above fail_last_error()): a create/overwrite at this exact
+     * path can race a just-issued DeleteFileA/CreateFileA(CREATE_ALWAYS) on
+     * the same file from another still-open handle. Only worth retrying for
+     * O_CREAT opens (CREATE_ALWAYS/CREATE_NEW/OPEN_ALWAYS above) -- a plain
+     * OPEN_EXISTING read has no create step to race in the first place. */
+    int attempt;
+
+    handle = INVALID_HANDLE_VALUE;
+    for (attempt = 0; attempt < WINDOWS_DELETE_RACE_RETRY_ATTEMPTS; ++attempt) {
+      handle = CreateFileA(host_path, access, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           0, disposition, file_flags, 0);
+      if (handle != INVALID_HANDLE_VALUE || !windows_is_delete_race_error(GetLastError())) {
+        break;
+      }
+      Sleep(WINDOWS_DELETE_RACE_RETRY_SLEEP_MS);
+    }
+  } else {
+    handle = CreateFileA(host_path, access, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                         0, disposition, file_flags, 0);
+  }
   if (handle == INVALID_HANDLE_VALUE && path_is_dev_tty(path)) {
     if ((access & GENERIC_WRITE) != 0 && (access & GENERIC_READ) == 0) {
       handle = CreateFileA("CONOUT$", access, FILE_SHARE_READ | FILE_SHARE_WRITE, 0,
@@ -4228,7 +4294,20 @@ long __crt_sys_symlink(const char* target, const char* linkpath) {
     flags |= SYMBOLIC_LINK_FLAG_DIRECTORY;
   }
 
-  return CreateSymbolicLinkA(host_link, host_target, flags) ? 0 : fail_last_error();
+  {
+    int attempt;
+
+    for (attempt = 0; attempt < WINDOWS_DELETE_RACE_RETRY_ATTEMPTS; ++attempt) {
+      if (CreateSymbolicLinkA(host_link, host_target, flags)) {
+        return 0;
+      }
+      if (!windows_is_delete_race_error(GetLastError())) {
+        break;
+      }
+      Sleep(WINDOWS_DELETE_RACE_RETRY_SLEEP_MS);
+    }
+    return fail_last_error();
+  }
 }
 
 static long stat_from_handle(HANDLE handle, struct stat* st) {
@@ -4586,11 +4665,23 @@ long __crt_sys_lstat_path(const char* path, struct stat* st) {
 long __crt_sys_unlink(const char* path) {
   char translated_path[4096];
   const char* host_path = translate_path_for_host(path, translated_path);
+  int attempt;
 
-  if (!DeleteFileA(host_path)) {
-    return fail_last_error();
+  /* Same delete-pending/handle-timing race as __crt_sys_symlink()'s own
+   * retry above (see that function's comment) -- a lingering scanner/
+   * handle on this exact path can make DeleteFileA() itself report
+   * ERROR_SHARING_VIOLATION/ERROR_ACCESS_DENIED for the same short
+   * window, independent of whatever create call follows it. */
+  for (attempt = 0; attempt < WINDOWS_DELETE_RACE_RETRY_ATTEMPTS; ++attempt) {
+    if (DeleteFileA(host_path)) {
+      return 0;
+    }
+    if (!windows_is_delete_race_error(GetLastError())) {
+      break;
+    }
+    Sleep(WINDOWS_DELETE_RACE_RETRY_SLEEP_MS);
   }
-  return 0;
+  return fail_last_error();
 }
 
 long __crt_sys_rename(const char* old_path, const char* new_path) {

@@ -107,6 +107,146 @@ substantive update.
     clean. See `porting/recipes/curl.json`'s and `porting/recipes/
     mbedtls.json`'s own notes for the full trail.
 
+- **Fixed mbedtls's Windows DLL symbol-export-hygiene gap for real --
+  the last open general risk from the whole curl porting queue -- and
+  confirmed it end to end with a from-scratch curl rebuild.** The
+  problem was worse than the original `read()`/`__crt_sys_read()`
+  finding suggested: `llvm-nm --defined-only -g` against this project's
+  own `c.lib` showed 917 real libc symbol names, and `llvm-readobj
+  --coff-exports` against the installed `libmbedcrypto.dll` confirmed
+  virtually all of them were being re-exported alongside mbedtls's real
+  API (`comm -12` between the two lists came back almost entirely
+  populated). Fixed at the recipe level, not in `tools/crt-cc` itself: a
+  `-Wl,--exclude-symbols=NAME` flag per real libc symbol, applied to all
+  three of mbedtls's own Windows DLL link recipes
+  (`libmbedtls.dll`/`libmbedx509.dll`/`libmbedcrypto.dll`) via a new
+  Windows `LDFLAGS` env override in `porting/recipes/mbedtls.json`.
+  `--exclude-symbols` only ever controls what a DLL exports, never which
+  definition wins during linking, so unlike a link-order-based fix it
+  cannot introduce a new `duplicate symbol` build failure -- confirmed
+  by trying exactly that first (reordering `c.lib`/`m.lib`/`dl.lib`/
+  `c++.lib` ahead of user args in `tools/crt-cc`'s Windows `shared_mode`
+  branch) and reverting it after a purpose-built three-binary fixture
+  (`tests/windows_dll_symbol_priority_dll.c`/`_middle.c`/`_consumer.c`,
+  a DLL linking a "mbedtls" stand-in DLL's import library alongside real
+  `c.lib` -- an EXE-to-DLL version was tried first and did NOT reproduce
+  the bug, since lld-link resolves that shape correctly regardless of
+  link order; only a DLL's own link, importing from another DLL that
+  also happens to export a same-named symbol, is affected) showed it
+  introduces a hard `duplicate symbol` error whenever a DLL genuinely
+  needs a symbol from both `c.lib` and a linked import library at once
+  -- curl's own real shape. Two real, general bugs in
+  `tools/crt-port-build.py` surfaced getting the recipe-level fix
+  working, both fixed generally: (1) `CRT_EXTRA_LDFLAGS`-style variables
+  (documented as a manual-shell-only convention via `tools/crt-env.*`)
+  silently did nothing when set from a recipe's own `env` block --
+  `apply_recipe_env()` runs *after* `make_env()` already computed the
+  real `LDFLAGS` from those variables, so a recipe-set one was always
+  one step too late; used the real `LDFLAGS` key directly instead
+  (a flag accumulator var `apply_recipe_env()` correctly appends onto).
+  (2) The full, spelled-out 917-symbol flag list (~32KB of literal
+  command-line text) blew straight past this project's own rootfs
+  mksh's argv length limit (`Argument list too long`) -- moved into a
+  checked-in linker response file
+  (`porting/recipes/mbedtls-windows-exclude-symbols.rsp`) referenced via
+  a single short `-Wl,@<path>` argument instead, which needed
+  `apply_recipe_env()` to gain the same `@ROOT@`/`@PORT_PREFIX@`/etc.
+  path substitution `configure_args`/`make_args`/`install_args` already
+  had. Verified: `llvm-readobj --coff-exports` against all three rebuilt
+  DLLs shows zero libc symbol names left in any export table (1159/287/
+  136 real mbedtls exports remain); mbedtls's own `crypto-static`/
+  `crypto-shared` tests still pass. **A genuinely fresh, from-scratch
+  `port-rebuild-curl` against the fixed mbedtls then surfaced one more
+  real, independent bug**: `make install` failed with `Error 5`
+  (`ERROR_ACCESS_DENIED`) on `install-pkgconfigDATA` -- the same
+  delete-pending/handle-timing race just fixed for `unlink()`/
+  `symlink()` (see the entry below), but through `__crt_sys_open()`'s
+  own single-shot, no-retry `CreateFileA(..., CREATE_ALWAYS, ...)` this
+  time (`install-sh` copying `libcurl.pc` over an existing file).
+  Extended the same shared retry loop to `__crt_sys_open()` for
+  `O_CREAT` opens (moved the shared `windows_is_delete_race_error()`
+  helper earlier in `syscall.c`, right after `fail_last_error()`, so
+  `__crt_sys_open()` can reach it too, alongside `__crt_sys_unlink()`/
+  `__crt_sys_symlink()` further down). With both fixes in place: a
+  clean `port-rebuild-curl` installs without error, and `port-test-curl`
+  passes `http-roundtrip-static`/`-shared` with a real HTTP 200 and
+  HTTPS 200 against `example.com`, exactly as before the whole
+  investigation started -- confirming no regression. Full
+  `port-test-recipes` aggregate (all recipes with automated tests) and
+  the full Windows `ctest` suite (88/88, up from 85 -- the three new
+  regressions below) both stay clean. See `porting/recipes/
+  mbedtls.json`'s and `curl.json`'s own notes for the full trail.
+
+- **Windows shell/process stress hardening: added a permanent, real
+  concurrent-load regression covering the fd_snapshot/`fstat()` bug
+  class that once broke parallel `make -jN`.** `tests/process_stress_test.c`
+  (new, runs on every host via the plain `add_crt_test` wiring, not just
+  Windows -- the bug class is Windows-PAL-specific, but the jobserver
+  *protocol* under test is worth covering everywhere for free) spawns 40
+  worker children before reaping any of them (genuinely concurrently
+  live, not spawn-one-wait-one), all racing to read a shared, inherited
+  6-token pipe the same way GNU make's own jobserver protocol works:
+  each worker blocks for a token, verifies a separate `FD_CLOEXEC`-marked
+  "secret" pipe pair was correctly NOT inherited (`EBADF` on both ends,
+  checked by every worker, not just one), then hands its token back. The
+  parent then does a full `waitpid(-1)` drain (all 40 pids accounted for,
+  no duplicates, a final call confirming `ECHILD`) and verifies all 6
+  tokens came back through the shared pipe with none lost or duplicated
+  -- proving 40 concurrently-live processes reading/writing one inherited
+  fd under real contention never corrupts the pipe or leaks a
+  close-on-exec fd. Passes cleanly (`ctest -R process_stress_test`).
+
+- **Windows symlink/delete timing verification: root-caused and fixed
+  the intermittent `ln: ... File exists`/`ERROR_ACCESS_DENIED` failures
+  TODO.md had open, plus added a real, deterministic regression (not a
+  flaky timing test).** `DeleteFileA()` only *marks* a file for deletion
+  while another handle is still open on it -- this project's own
+  `open()` already passes `FILE_SHARE_DELETE`, so this isn't even
+  Defender-specific, any second handle on the same file reproduces it --
+  the directory entry isn't actually removed until every handle closes.
+  A `rm -f old && ln -s new old` pair issued back-to-back (libtool's own
+  SONAME-symlink install pattern, re-run on every port rebuild) can
+  observe the old entry as still present for that short window:
+  `unlink()`'s own `DeleteFileA` reports success (accepted, not yet
+  completed), and the immediately-following `symlink()`'s
+  `CreateSymbolicLinkA` either still sees the old file "there"
+  (`ERROR_ALREADY_EXISTS`, surfacing as `ln`'s "File exists") or gets
+  refused a new create at that exact path (`ERROR_ACCESS_DENIED`) --
+  both exactly the symptoms TODO.md had recorded from real port-install
+  runs. Fixed in `libc/src/arch/windows/common/syscall.c`:
+  `__crt_sys_unlink()`'s `DeleteFileA` call and `__crt_sys_symlink()`'s
+  `CreateSymbolicLinkA` call now share a bounded retry loop (40 attempts,
+  10ms apart, so up to ~400ms) that retries specifically on
+  `ERROR_ACCESS_DENIED`/`ERROR_SHARING_VIOLATION`/`ERROR_ALREADY_EXISTS`
+  -- the same practical idiom Git for Windows/Node.js use for the
+  identical Windows quirk, not a fix for a real, persistent sharing
+  violation, which still correctly fails once the budget runs out. New
+  regression, `tests/windows_symlink_delete_race_test.c` (runs on every
+  host; the Linux/macOS build is a plain functional smoke check since
+  POSIX `unlink()` has no equivalent delete-pending window to race):
+  reproduces the exact race **deterministically**, with no dependency on
+  a real antivirus or external timing -- opens a file, starts a second
+  thread that sleeps 30ms then closes that handle, and on the main
+  thread (no sleep) immediately runs the same `unlink()`+`symlink()`
+  sequence libtool does, racing the closer thread with no ordering
+  guaranteed. Before the fix this would fail outright whenever the
+  closer thread hadn't won yet; with the fix it retries through the
+  window and succeeds every time, verified via a full `readlink()`
+  round trip after the race, repeated 8 times, plus 8 more iterations
+  isolating `unlink()`'s own retry loop the same way. Passes cleanly
+  (`ctest -R windows_symlink_delete_race_test`). **Independently
+  confirmed for real, not just by the synthetic regression above**: a
+  genuinely fresh `port-rebuild-curl` (rebuilding curl from scratch
+  against the newly-fixed mbedtls, see this same date's mbedtls/curl
+  entry above) hit `Error 5` on `install-pkgconfigDATA` -- the exact
+  same failure class TODO.md's own "New data point" note had already
+  suspected but never confirmed, this time through `__crt_sys_open()`'s
+  own single-shot `CreateFileA(..., CREATE_ALWAYS, ...)` rather than
+  `unlink()`/`symlink()`. Extended the same shared retry loop there too
+  (see the mbedtls/curl entry above for the full root-cause and
+  verification -- a clean `port-rebuild-curl` and passing
+  `port-test-curl` with the fix in place).
+
 ## 2026-08-14
 
 - **Windows curl: chased the `setmode`/`_spawnv` shim-wiring fix all the
