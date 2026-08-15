@@ -76,7 +76,7 @@ per-architecture register/stack/CONTEXT-restoring implementations in
 chronological investigation (the `RtlCloneUserProcess` research, the spawn
 broker that was built first and then retired, the exact bugs found building
 each piece, and every reverted attempt) see
-[`docs/windows_fork_emulation_history.md`](windows_fork_emulation_history.md).
+[`docs/bringup/windows_fork_emulation_history.md`](bringup/windows_fork_emulation_history.md).
 The private `__crt_shell_fork_exec()` helper mentioned in this file's older
 text below is still real (mksh's own child-spec path still uses it for the
 patterns it was built for), but it is no longer *the* Windows process

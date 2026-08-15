@@ -3,7 +3,7 @@
 > For the full chronological investigation (spawn broker design/
 > implementation/retirement, benchmarks, prior-art research, reverted
 > attempts, and the exact bugs found while building each piece below), see
-> [`windows_fork_emulation_history.md`](windows_fork_emulation_history.md).
+> [`bringup/windows_fork_emulation_history.md`](bringup/windows_fork_emulation_history.md).
 
 ## Summary
 

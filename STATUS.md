@@ -140,14 +140,22 @@ in those two win.
 
 ## Next
 
-- Porting matrix expansion is **done**: `bzip2`, `xz`, `pcre2`,
-  `mbedtls`, and `curl` are all `shared-pass` on Linux, macOS, and
-  Windows (`openssl` stays deliberately held back until something
-  needs it). The one real, general risk still open from this queue is
-  mbedtls's Windows DLL symbol-export hygiene (see "Known gaps" above)
-  -- worth a dedicated fix at some point, but not blocking anything
-  today.
-- Broader POSIX/rootfs surface hardening beyond what each port's own build
-  happens to exercise.
-- C++ runtime phase 2 and an ELF loader/dynamic-linker prototype: not
-  started, no committed design yet.
+- Porting matrix expansion through curl is **done**: `bzip2`, `xz`, `pcre2`,
+  `mbedtls`, and `curl` are all `shared-pass` on Linux, macOS, and Windows
+  (`openssl` stays deliberately held back until something needs it). The one
+  real, general risk still open from this queue is mbedtls's Windows DLL
+  symbol-export hygiene (see "Known gaps" above) -- worth a dedicated fix, but
+  not blocking the curl status.
+- Before starting the next upper-runtime phase, reduce the remaining
+  libc/PAL planned work in `TODO.md`: libffi correctness, Windows process/fd
+  stress regression coverage, Windows symlink/delete timing verification,
+  rootfs virtual files/devices, DNS resolver growth, console/job-control policy,
+  and toybox applet expansion only where the Bionic-compatible backing surface
+  exists.
+- The next product-level target is documented in `docs/runtime_roadmap.md`:
+  an Electron-class rebuilt runtime made of `libcrtgfx` (Skia + Wayland-style
+  compositor boundary + Chromium Ozone path), `libcrtmedia` (FFmpeg/codecs/
+  audio/video), and `libcrtjs` (QuickJS first, V8 later).
+- C++ runtime phase 2 and an ELF loader/dynamic-linker prototype remain
+  separate lower-layer tracks needed before the browser-class target can become
+  realistic.

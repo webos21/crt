@@ -49,7 +49,11 @@ newest entry first) rather than leaving it here.
 
 ## in progress
 
-Active threads, not a flat list of one-off items:
+Active threads, not a flat list of one-off items. The curl queue is complete:
+`curl` is `shared-pass` on Linux, macOS, and Windows, with real HTTP and HTTPS
+round trips against `example.com` for both static and shared libcurl. Remaining
+items here are follow-up risks uncovered while getting there, not blockers for
+the curl port itself.
 
 - **mbedtls's Windows DLL re-exports this project's own libc symbols,
   with no visibility control.** Confirmed real and NOT fixed (see
@@ -74,17 +78,14 @@ Active threads, not a flat list of one-off items:
   specifically for their own shared builds instead of its DLL import
   library.
 
-- **Windows shell/process stress hardening.** Real concurrency -- parallel
-  `make -jN`, jobserver pipe fd handling, many live children in the
-  registry at once, subshell/redirection edge cases -- was never actually
-  exercised on Windows until this thread opened; every Windows port build
-  had always run serial `make -j 1`.
-  - Harden `waitpid()` and the child registry for many live children,
-    configure-script subprocess bursts, and pipeline teardown.
-  - Keep the mksh child-spec path (external commands, `cmd | cmd`,
-    builtin-to-external pipelines, `cmd > file`/`cmd < file`, fd 3+
-    redirection, exit-status propagation, multi-child/pipeline teardown)
-    stable under real configure workloads.
+- **Windows shell/process stress hardening.** The broad bring-up is done:
+  real `fork()`, mksh external-command execution, pipelines, command
+  substitution, rootfs execution, and parallel `make -jN` have all been
+  exercised through real port builds. Keep this item narrowly scoped to
+  hardening and permanent regression coverage:
+  - add a focused stress regression for many live children, inherited
+    jobserver-style pipe fds, close-on-exec filtering, and `waitpid(-1)` drain;
+  - keep the mksh child-spec path stable under future configure workloads;
   - Audit the mksh subshell status quirk exposed by commands shaped like
     `(command || true) >/dev/null 2>&1`.
 
@@ -118,6 +119,8 @@ Active threads, not a flat list of one-off items:
     reproducing.
 
 ## planned
+
+### libc/PAL residuals before upper runtime
 
 - libffi's Windows build succeeds and its core features (`ffi_call`,
   closures) work correctly in isolation, but has one remaining,
@@ -174,3 +177,20 @@ Active threads, not a flat list of one-off items:
   ASLR/base-address handling). Kept only as a pointer: any *new* Windows
   `fork()` problem discovered from here on should become its own fresh
   entry, not get appended here.
+
+### Upper runtime roadmap after libc/PAL cleanup
+
+The long-term target is an Electron-class rebuilt native application runtime,
+not Electron itself as the next port. See `docs/runtime_roadmap.md`.
+
+- **libcrtjs**: start with QuickJS to expose event-loop, module-loading,
+  filesystem, timer, native-binding, and process gaps at manageable scale.
+  Keep V8 as the final browser-class JavaScript engine target after the C++
+  runtime, JIT/code-memory policy, atomics, threading, and dynamic loading are
+  stronger.
+- **libcrtgfx**: build toward Skia plus a Wayland-compatible compositor
+  boundary, with a Chromium Ozone backend as the long-term browser integration
+  path. Host window/GPU APIs stay below the graphics PAL.
+- **libcrtmedia**: build toward FFmpeg and explicit codec/audio/video
+  libraries, with software decode first and later hardware acceleration through
+  host backends that interoperate with `libcrtgfx`.

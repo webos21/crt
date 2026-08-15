@@ -79,104 +79,33 @@ ABI, but the core runtime must remain buildable without requiring Rust.
 
 ## Current Status
 
-The repository currently contains the first executable bring-up:
+The project has moved beyond the initial hello-world bring-up. The current
+repository builds a Bionic-compatible CRT/PAL baseline with:
 
-- a minimal public `unistd.h`
-- minimal public `errno.h`, `fcntl.h`, `string.h`, and `sys/types.h`
-- a tiny `libc.a` with `_exit`, `errno`, `read`, `write`, `open`, `close`,
-  `lseek`, `mmap`/`munmap`, bootstrap `malloc`/`free`/`calloc`/`realloc`, and
-  first-tranche string/memory and fd-backed stdio functions
-- macOS x86_64/aarch64 startup and syscall assembly
-- Linux x86_64/aarch64 startup and syscall assembly
-- Windows x86_64/ARM64 startup and Win32-backed low-level write/exit
-  implementation
-- freestanding `Hello World`, string/memory, fd/errno, malloc, stdio, stdio
-  file, printf, mmap, math, locale, wchar/mbstate, and pthread-oriented tests
-- sysroot installation for headers, `crt1.o`, `libc.a`, `libm.a`, and
-  compiler-rt builtins
+- `libc`, `libm`, `libdl`, and a small C++ ABI bootstrap, each available as
+  static and host-native shared artifacts.
+- Bionic/Linux-style public headers and type policy through the CRT sysroot.
+- Linux, macOS, and Windows startup, syscall/PAL, fd, process, socket, signal,
+  pthread, TLS, mmap, stdio, locale, wchar, math, dynamic-loading, and rootfs
+  support at the level needed by the current tests and ports.
+- Android-like rootfs output with mksh and selected toybox applets as core
+  project artifacts, not ordinary third-party ports.
+- Recipe-backed porting tests under `out/<preset>/port-tests/`, with zlib,
+  libpng, SQLite amalgamation, bzip2, xz, pcre2, mbedTLS, and curl verified
+  through the current documented status. curl is `shared-pass` on Linux,
+  macOS, and Windows, including real HTTP and HTTPS round trips against
+  `example.com` for both static and shared libcurl.
 
-On macOS, normal Mach-O executables must still link `libSystem.dylib`. The test
-does this explicitly while using this project's `_start`, `write`, `_exit`, and
-direct Darwin syscall wrappers for the hello path.
+For the authoritative short-form snapshot, see `STATUS.md`. For the per-port
+matrix, see `docs/porting_status.md`. Historical first-bring-up notes are kept
+under `docs/bringup/`.
 
-On Linux, the current fd path uses direct Linux syscall wrappers.
-
-On Windows, the current fd path uses a small POSIX-like fd table over Win32 APIs
-such as `GetStdHandle`, `CreateFileA`, `ReadFile`, `WriteFile`, `CloseHandle`,
-`SetFilePointerEx`, `ExitProcess`, and address-based wait/wake primitives, so
-Windows executables link the relevant Windows SDK import libraries.
-
-The current allocator is a VM-backed bootstrap heap with a locked free list. It
-uses anonymous `mmap` chunks and is intended to support early libc/PAL tests, not
-production allocation behavior. Future allocator work should evaluate the
-appropriate Bionic allocator integration.
-
-The current VM layer supports anonymous private `mmap` and `munmap`. Linux and
-macOS use direct syscalls. Windows maps anonymous allocations to
-`VirtualAlloc`/`VirtualFree`; file-backed mappings are not implemented yet.
-
-The current pthread layer keeps a project-owned, Bionic-shaped public ABI across
-Linux, macOS, and Windows. It supports create, join, detach, exit, once, keys
-with destructor passes, mutexes, condition variables, rwlocks, spin locks,
-barriers, and the first Bionic extension surface such as `pthread_getattr_np`
-and `pthread_gettid_np`. Cancellation and robust mutexes intentionally return
-`ENOTSUP`, matching the current project policy. Scheduler attributes are stored
-like Bionic attr objects, but host scheduler application is deferred. User
-stacks are accepted by `pthread_attr_setstack`; Linux and macOS can apply them,
-while Windows reports `ENOTSUP` from `pthread_create` because `CreateThread`
-cannot consume arbitrary caller-owned stacks.
-
-The current stdio layer is intentionally minimal. It supports standard streams,
-`fopen`/`fclose`, `fseek`/`ftell`, EOF/error state helpers, `remove`/`rename`,
-and simple byte-oriented I/O, but it does not yet define a final `FILE` ABI or
-buffering model. The current `printf` family is a small bootstrap formatter for
-early tests, not a complete C/POSIX formatter.
-
-The current `libm.a` has a bootstrap `math.h`, classification macros, absolute
-value, sign handling, current-Bionic-style builtin `sqrt`/`sqrtf`, a
-project-owned portable long-double bootstrap, and curated Bionic/FreeBSD msun
-imports for the first accuracy tranches. It is not yet a full fdlibm/msun/Bionic
-math import.
-
-The default libm error policy is still `math_errhandling == 0`: math functions
-do not promise per-function `errno` side effects or strict IEEE exception
-raising yet. The `fenv` API itself is backed by hardware state where available:
-x86_64 tracks MXCSR plus x87 control/status words, and AArch64 tracks FPCR/FPSR.
-
-`long double` follows the active compiler target ABI. The build intentionally
-does not pass `-mlong-double-64`, `-mlong-double-80`, or `-mlong-double-128`.
-This means Linux AArch64 can expose 128-bit `long double`, x86_64 targets can
-use their compiler-selected 80-bit or 128-bit mode, and Windows/macOS ARM64 can
-keep their native double-sized `long double`. Bionic's 64-bit Android ABI uses
-128-bit long double, but forcing that ABI uniformly is not portable across the
-project's Windows/macOS/Linux target matrix.
-
-Public scalar types are centralized through a small `bits/` layer. The first
-file, `bits/crt_types.h`, fixes the Bionic/Linux-style ABI for shared types such
-as `off_t`, `time_t`, `ssize_t`, `socklen_t`, and inode/device counters while
-still allowing host data-model differences such as Windows LLP64 `long`. The
-policy and test coverage are documented in `docs/header_abi.md`.
-
-The current `libdl.a` is a project-owned dynamic-loading adapter with a
-Bionic/POSIX-shaped `dlfcn.h` surface. Windows maps to
-`LoadLibraryA`/`GetProcAddress`/`FreeLibrary`, and macOS maps to dyld image and
-symbol APIs. Linux intentionally does not call host glibc/libdl in the
-freestanding profile yet; real Linux `dlopen` support is deferred to the project
-ELF linker or to a separately documented host bridge. See
-`docs/dynamic_loading.md` and `docs/linker_loader.md`.
-
-The current `libc++.a` is a small project-owned C++ ABI bootstrap, not the full
-LLVM libc++ standard library. It provides first-tranche `__cxa_*` hooks, guard
-variables, pure/deleted virtual handlers, `__dso_handle`, and destructor
-registration/finalization. Exceptions, RTTI, libunwind, libc++abi, and libc++
-proper remain separate future tranches. CRT-targeted C++ uses the
-Bionic/Itanium ABI lane; Windows-native C++ DLL interoperability is reserved for
-a separate MSVC ABI bridge lane. See `docs/cxx_runtime.md`.
-
-The build now produces both static and host-native shared artifacts for `libc`,
-`libm`, `libdl`, and `libc++`. Tests still link the static archives by default;
-the shared libraries are first-stage artifacts for loader, export, and ABI
-policy work. See `docs/shared_libraries.md`.
+The next product-level target is an Electron-class rebuilt application runtime,
+documented in `docs/runtime_roadmap.md`: `libcrtgfx` (Skia + Wayland-style
+compositor boundary + Chromium Ozone path), `libcrtmedia` (FFmpeg/codecs/audio/
+video), and `libcrtjs` (QuickJS first, V8 later). Before that upper-runtime work
+starts in earnest, the remaining libc/PAL planned items in `TODO.md` should be
+reduced.
 
 ## Prerequisites
 
@@ -223,11 +152,18 @@ Install:
 - Ninja
 - LLVM/Clang
 - Visual Studio Build Tools 2022 with the Windows SDK
+- Windows Developer Mode enabled
 
 The Windows SDK provides import libraries such as `kernel32.lib` and
 `synchronization.lib`, which are needed by the current Windows backend. Use a
 Developer PowerShell or Developer Command Prompt so the Windows SDK library
 paths are visible to the linker.
+
+Windows Developer Mode is required for non-elevated symlink creation. Several
+porting recipes install shared-library aliases with `ln -s`/`symlink()` (for
+example SONAME-style `libfoo.so` links), and the Windows PAL maps those calls to
+Windows reparse-point symlinks. Without Developer Mode, those install steps can
+fail with `EPERM` unless the build runs elevated.
 
 The configure preset sets `CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY` because
 CRT controls its own startup and C runtime boundary. This avoids CMake's default
@@ -713,7 +649,8 @@ See:
 
 - `docs/project_meanings.md`
 - `docs/project_stacks.md`
-- `docs/hello_bringup.md`
+- `docs/runtime_roadmap.md`
+- `docs/bringup/hello_bringup.md`
 - `docs/header_abi.md`
 - `docs/dynamic_loading.md`
 - `docs/cxx_runtime.md`

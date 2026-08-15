@@ -2,7 +2,12 @@
 
 This document records third-party source portability against the CRT sysroot.
 Recipes live under `porting/recipes/` and include source URLs, archive names,
-hashes, dependencies, build options, and per-host status.
+hashes, dependencies, build options, tests, and per-host status.
+
+This file is intentionally a current-status index. Long investigation trails
+belong in `HISTORY.md` and in each recipe's own `notes` field.
+
+## Porting Policy
 
 Porting failures should normally become CRT work items. The preferred direction
 is to keep upstream source unchanged and fill missing Bionic-compatible
@@ -10,54 +15,18 @@ headers, libc/libm/libdl/linker/C++ runtime, startup/sysroot, or PAL behavior in
 this repository. Host SDK leakage or ad hoc upstream patches should be treated
 as policy exceptions and documented before use.
 
-Each status update should follow the porting loop: expose missing requirements
-with upstream `configure` or `crt-cc`, check Bionic's header/source/ABI policy,
-implement the CRT/PAL/sysroot extension, then rerun the same porting test and
-repeat until it passes or a documented policy decision blocks it.
+Each status update should follow the porting loop:
 
-Status notes should call out any deliberate deviation from Bionic. Temporary
+1. Expose missing requirements with upstream `configure` or direct `crt-cc`
+   compile/link/run tests.
+2. Check Bionic's public header, source, ABI shape, and errno policy.
+3. Implement the CRT/PAL/sysroot extension.
+4. Re-run the same porting test and repeat until it passes or a documented
+   policy decision blocks it.
+
+Status notes should call out deliberate deviations from Bionic. Temporary
 host-specific compatibility shims are acceptable only when they are documented
 as such and do not silently replace the Bionic-compatible public surface.
-
-The status values are intentionally conservative:
-
-- `configure-pass`: upstream configure/make/install flow passed with CRT
-  wrappers.
-- `shared-pass`: `configure-pass`, and additionally the port's shared
-  library (`.so`/`.dll`/`.dylib`) built, installed, and was verified to
-  actually load and run correctly at runtime (not just produced as a file).
-  When a recipe declares `tests`, the preferred verification is
-  `cmake --build --preset <preset> --target port-test-<name>` or the aggregate
-  `port-test-recipes`, which compile and run project-owned consumer programs
-  against both static and shared port artifacts where available.
-- `static-pass`: `configure-pass`, with shared-library building attempted
-  and root-caused but not achieved -- the port still builds and installs a
-  fully working static library.
-- `manual-pass`: basic manual source build or direct runtime test passed, but the
-  current recipe flow should be rerun and recorded.
-- `amalgamation-pass`: upstream amalgamation source built and installed through
-  the recipe flow without modifying upstream source.
-- `smoke-pass`: earlier curated integration smoke passed; native upstream build
-  flow is still pending.
-- `partial`: useful subset validated; important upstream features remain open.
-- `configure-blocked`: upstream configure is available, but the full recipe
-  build is blocked by a missing CRT/sysroot policy or API surface.
-- `pending`: not yet verified for that host.
-
-| Library | Version | Recipe | Linux | macOS | Windows | Build System | Notes |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| make | android-toolchain-44fc4fe66a484b91844c302f03eaa8438e065d17 | `porting/recipes/make.json` | manual-pass | manual-pass | manual-pass | android_host_tool | Android `toolchain/make` built on both Windows aarch64 and x86_64 through rootfs mksh and CRT wrappers; `make.exe --version` runs, and `$(wildcard ...)` (exercising `src/dir.c`'s directory-reading code) returns correct results. Two Windows-only, arch-independent-cause bugs found and fixed while getting a real x86_64 build working (the aarch64 build had never hit either, apparently by luck of not needing a large-enough stack frame / not tripping the version-macro branch until GNU make's `dir.c`): (1) `tools/crt-cc`/`tools/crt-c++` targeting `*-w64-mingw32` predefine `__MINGW32__` but not `__MINGW32_MAJOR_VERSION`/`__MINGW32_MINOR_VERSION`, so `dir.c`'s `#if __MINGW32_MAJOR_VERSION < 3 ...` (undefined-macro-as-0 in preprocessor arithmetic) wrongly took an ancient-mingw compat branch assigning to `d->d_name` as a pointer, which doesn't compile against this project's Bionic-style fixed-array `struct dirent` -- fixed by defining both macros to match a real mingw-w64 install. (2) x86_64 only: linking then failed on `undefined symbol: ___chkstk_ms` (the MinGW-mangled name for the MSVC-triple `__chkstk` stack-probe helper this project already provided under the other name) and `undefined symbol: __main` (clang's *-w64-mingw32-only implicit call at the top of `main()`, historically for running `.ctors` constructors a PE loader wouldn't run itself -- this project's own CRT startup already runs constructors through its own mechanism, so it's a no-op here) -- fixed by aliasing `___chkstk_ms` to the existing `__chkstk` implementation (`libc/src/arch/windows/x86_64/chkstk.S`; not needed on aarch64, which has no separate MinGW-vs-MSVC symbol-name split) and adding an empty `__main()` stub (`libc/src/arch/windows/common/compiler_abi.c`, same pattern as `__clear_cache()`). Also fixed a latent `tools/crt-port-build.py` bug where `--target-arch`/`CRT_TARGET_ARCH` was only used for the `@CRT_MINGW_TRIPLE@` recipe-string substitution and never actually exported to the `crt-cc`/`crt-c++` child processes, which independently auto-detect arch via `uname` -- silently building the *host's* architecture instead of the requested one on a genuine cross-arch build. Linux/macOS: `make` is not Windows-specific -- `tools/crt-port-build.py`'s `build_port()` unconditionally builds and installs this port before any `configure`-system recipe on every host, and `make_env()` prefers the freshly-built `PORT_PREFIX/bin/make` over host `make` via `$MAKE` on all three OSes, not just Windows. So this project's own `make` has already driven every real `./configure && make && make install` run for zlib/libpng/libffi below on both Linux and macOS, all confirmed passing by the user on real hardware. Kept at `manual-pass` (matching Windows) rather than a higher tier since no standalone `make --version`/`$(wildcard ...)`-style direct check has been separately recorded for these two hosts, only its indirect, repeated use as the driver for other ports' real builds. |
-| zlib | 1.3.1 | `porting/recipes/zlib.json` | shared-pass | shared-pass | shared-pass | configure | Windows now builds *and installs* both static `libz.a` and shared `libz.so.1.3.1` (plus `libz.so`/`libz.so.1` SONAME symlinks), the latter enabled by `tools/crt-cc`/`tools/crt-c++` gaining `-shared` support (`dllcrt.o` + `/entry:crtDllMainCRTStartup` + `/DLL`) and `__crt_sys_symlink()` going from an `-ENOSYS` stub to a real `CreateSymbolicLinkA()`-backed implementation (needed for the Makefile's `ln -s libz.so.1.3.1 libz.so` SONAME step). Verified past "it built" into "it actually works": zlib's own `examplesh`/`minigzipsh` test binaries, dynamically linked against the freshly built DLL, ran a real compress/uncompress/gzip round trip successfully. `CreateSymbolicLinkA()` requires Windows Developer Mode enabled on the build machine for a non-elevated process even with the unprivileged-create flag; without it, symlink creation (and so this shared build) fails with `EPERM`. aarch64 needed the spawn-broker fix, since retired, for `CreateProcessA()`/`CreatePipe()` inside clones -- see `docs/windows_fork_emulation.md`. macOS: after `CMakeLists.txt` stopped forcing `--use-crt-shell` (this project's own rootfs mksh + toybox applets) on macOS/Linux port builds, the user confirmed on a real macOS machine that the previously-present spurious errors/warnings during `configure`/`make` are gone and `libz.1.3.1.dylib` builds correctly -- consistent with those warnings having come from toybox/mksh behavior differences against what zlib's build actually expects from a real POSIX host shell + coreutils, not from anything sysroot- or CRT-related (the compiler/linker still target the CRT sysroot exactly as before -- only the shell/coreutils driving `configure`/`make` changed). Linux: `shared-pass` -- `tools/crt-cc`/`tools/crt-c++`'s `-shared` mode originally statically linked non-PIC `libc.a` on every OS, which is a hard `ld` error on Linux's stricter ELF relocations (`R_AARCH64_ADR_PREL_PG_HI21` against `stdin`/`stdout`/`stderr`); fixed by linking the already-built shared `libc.so`/`libm.so`/`libdl.so`/`libc++.so` counterparts instead for `shared_mode` on Linux. That alone wasn't enough for runtime resolution: none of this project's own shared libraries set an explicit `-soname`, so `libz.so.1.3.1`'s `DT_NEEDED` recorded the bare `libc.so`, which `ld.so` then re-resolved at runtime against Ubuntu/Debian's own `/lib/aarch64-linux-gnu/libc.so` (a linker-script stub, not a real ELF image) instead of this project's sysroot -- fixed by adding `-Wl,-rpath,${CRT_SYSROOT}/lib` to `shared_mode`'s Linux link flags. `ldd` on a real Linux aarch64 machine confirmed the fix: `libz.so.1.3.1`'s `libc.so`/`libm.so`/`libdl.so`/`libc++.so` dependencies all resolve to this project's own sysroot, not the host's. macOS: `shared-pass` -- `otool -l .../libz.dylib \| grep -A2 LC_RPATH` confirmed both expected `LC_RPATH` entries are present (`.../sysroot/lib` and `.../port-tests/install/lib`, added the same way as the Linux fix, `-Wl,-rpath,...` on `shared_mode`'s macOS link flags), so the stray `@rpath/libc.dylib` dependency introduced by zlib's own `LDSHAREDLIBC=-lc` flag (unconditional except on MinGW; `ld64` prefers the sibling `libc.dylib` over the same-named static `libc.a` when both exist on the search path) now resolves correctly at load time. |
-| libpng | 1.6.57 | `porting/recipes/libpng.json` | shared-pass | shared-pass | shared-pass | configure | Depends on zlib in `PORT_PREFIX`. **Windows: shared-pass, root-caused for real** (upgraded from `static-pass`) -- four independent bugs found and fixed, full writeup in `porting/recipes/libpng.json`'s own notes: (1) `tools/crt-cc`'s real Windows linker backend is `ld.lld -m i386pep`/`-m arm64pe` (confirmed via `crt-cc -shared -v`), a genuine GNU/MinGW-compatible personality with real `--enable-auto-import` support -- but libtool's own shared-library gate calls a bare `$LD --help` (no `-m`), which falls back to `ld.lld`'s generic ELF frontend and never sees it; fixed at the root in `tools/crt-native-tool` by always injecting the right `-m` emulation whenever the wrapped tool is `ld.lld` (handling both the real filename and the NTFS 8.3 short-path alias). (2) libtool's `-DPIC -DDLL_EXPORT` pass then needed `PNG_DLL_EXPORT`/`PNG_DLL_IMPORT`, which `pngconf.h` only defines behind `_WIN32`/`__CYGWIN__` -- exactly what this recipe's CFLAGS deliberately undefine; fixed via the exact command-line override `pngpriv.h` itself documents as sanctioned. (3) libtool's own generated wrapper source for uninstalled test/contrib executables unconditionally `#include <malloc.h>`, which this sysroot never had; added `include/malloc.h` following Android Bionic's own convention (a thin `<stdlib.h>` re-export). (4) libtool's dependent-library file-magic check never matches this toolchain's real `llvm-objdump -f` output (`coff-x86-64`, not GNU objdump's `pe-x86-64`) -- fixed via `lt_cv_deplibs_check_method=pass_all`, the standard cross-toolchain workaround, set as a recipe env var (same cache-variable-preseeding mechanism `$LD`/`$DLLTOOL`/`$OBJDUMP` already use). **Verified past "it built" into "it actually works"**: a standalone test program linked against `libpng16.dll.a` dynamically loaded the real `libpng16-16.dll`, correctly read back its version (`1.6.57`), and completed a real `png_create_write_struct`/`png_create_info_struct`/`png_destroy_write_struct` round trip through the DLL. Full `ctest` stayed at 79/79 throughout. Two more issues found and since fixed for real: (5) `NM` was never preset to a real tool (unlike `LD`/`DLLTOOL`/`OBJDUMP`), so `nm`'s cache variable stayed the literal, unusable default `'nm'` and libtool's generated `nm | sed` symbol-parsing pipeline had nothing between two pipes (`libtool: syntax error: unexpected '|'`) -- fixed by presetting `$NM` to `llvm-nm.exe` and adding it to the `crt-native-tool` wrapping loop, the same way as the other three. (6) every libtool-generated `.libs/lt-*.c` uninstalled-execution wrapper (`pngtest`, `pngcp`, `png-fix-itxt`, and the `contrib/libtests` helpers) hit undeclared `_getcwd`/`_stat`/`_chmod`/`_putenv`/`_setmode`/`_spawnv`/`_P_WAIT`, since the wrapper template's `__MINGW32__`-gated macro-rename block fires independent of (and mismatched with) the `_WIN32`-gated header-include choice this recipe's CFLAGS steer onto POSIX -- fixed with a new project-owned, force-included shim (`porting/shims/win32/libtool_wrapper_compat.h`, wired in via a new `force_include` recipe mechanism folded into `CFLAGS` specifically, since Automake's `LINK` rule -- where libtool actually compiles these wrappers -- never reads `CPPFLAGS`), verified by running the real, freshly-built `pngtest.exe` end to end (`libpng passes test`, rc=0). Both fixes verified with full `ctest` 79/79; see `HISTORY.md` and `porting/recipes/libpng.json`'s own notes for the full writeups. (7) Every `make`/`make install` also printed repeated non-fatal `libtool: error: Could not determine host file/path name ... Continuing, but uninstalled executables may not work.` warnings, masking a real path-corruption bug: `configure`'s `case $build in *-*-mingw*|*-*-windows* ) # actually msys` used "`$build` also looks like mingw/windows" as a historical proxy for "running inside real MSYS2," which doesn't hold for this project's own native `mksh`/toybox PAL -- the resulting `func_convert_file_msys_to_w32` shells out to a `cmd.exe` this project's rootfs `$PATH` can never reach, so the conversion always fails and libtool's own fallback (`s/:/;/g` on the original string) corrupts drive letters (`C:/Users/...` -> `C;/Users/...`) in the generated wrapper's `LIB_PATH_VALUE`/`EXE_PATH_VALUE`. Fixed the same way as (4): `lt_cv_to_host_file_cmd`/`lt_cv_to_tool_file_cmd` are autoconf cache variables, preset both to `func_convert_file_noop` -- libtool's own built-in value for hosts that were never MSYS -- which doesn't touch the separate, `$host`-only classification that governs DLL/EXE generation. Verified: warning count 0, wrapper `LIB_PATH_VALUE` strings now correct, and `pnggetset.exe` (a 3-entry `EXE_PATH_VALUE` case) runs its full test suite end to end. (8) That fix left the strings `:`-joined rather than the `;` the real Windows `PATH` env var needs for multi-entry values -- no built-in libtool `to_host_path_cmd` does "leave paths alone, rejoin with `;`", and a new one would mean hand-patching the generated `libtool` script. Fixed at the one point in this chain that's genuinely this project's own code: `_spawnv()` in `porting/shims/win32/libtool_wrapper_compat.h` now rewrites `PATH`'s list separators from `:` to `;` right before spawning, leaving every drive-letter colon untouched (unambiguous: Windows forbids `:` anywhere in a real path except the drive-letter position). Verified directly with a standalone helper process that prints back its own inherited `PATH`: a parent's `:`-joined value arrives at the real spawned child correctly `;`-joined with every drive letter intact. Already generalized: since the fix lives in the same shared, `force_include`-driven shim as the `_getcwd`/`_stat`/etc. fix, any future Windows configure recipe hitting this class of bug gets it automatically via the same one-line `force_include` entry. `ctest` 79/79; see `HISTORY.md` and `porting/recipes/libpng.json`'s own notes. Windows aarch64's real `configure && make && make install` also completes in full -- `libpng16.a`/`libpng.a` built, archived, and installed, along with all `contrib/tools`/`contrib/libtests` sample binaries and header/pkgconfig/man-page installation via `install-sh`. Getting there drove the single longest blocker chain of the whole Windows porting effort, each one a real, general CRT/mksh/regex/tooling gap fixed on its own merits rather than a libpng-specific workaround: the `fork()` self-relaunch fd-inheritance gap, a builtin-to-external pipe deadlock, missing `egrep`/`fgrep` toybox aliases, no ERE alternation (fixed by porting a real Bionic/NetBSD regex engine, see `third_party/bionic/README.md`'s "Regex Tranche"), `lseek()` not failing on pipes, missing `ld`/`awk` (the latter via a full `onetrueawk` port into `shell/awk/`, which also surfaced a real `printf` `%g`-precision bug), a COFF-vs-Unix static-lib naming mismatch, a missing `<windows.h>` (worked around the same way zlib's recipe already does, via `-U_WIN32` etc. `CFLAGS`), `arm_neon.h` not on the include path (`crt-cc`/`crt-c++` weren't querying clang's resource-dir on Windows), `AR`/`RANLIB`/`STRIP`/`LD` wrapped as a shell-parsed string that silently broke inside `configure`'s own `` `$LD -v` `` probe (replaced with a real wrapper script, `tools/crt-native-tool`), a stock Windows LLVM install defaulting to the MSVC target triple (no `__GNUC__`, misleading autoconf/libtool into picking the wrong archiver -- fixed via an explicit `--target=*-w64-mingw32`), and finally `install-sh` itself failing to run at all, because this project's Windows PAL had never needed to execute a `#!`-script directly nor report one as "executable" via `stat()`/`access()` (both now fixed in `libc/src/arch/windows/common/syscall.c`). See `HISTORY.md` for the full trail. (Superseded: an earlier pass attempted the Windows shared build and left it "root-caused but not achieved" -- see the shared-pass writeup above for how it was actually finished.) Linux/macOS: unlike Windows previously, libpng's real GNU Libtool build produces a working shared library on both hosts through this project's real system `ld`/`ld64` (Libtool's MinGW-specific detection code never gets involved). `ldd` on a real Linux aarch64 machine confirmed `libpng16.so.16.57.0`'s `libz.so.1` dependency resolves to this project's own `port-tests/install/lib/libz.so.1`, not the Ubuntu system zlib package -- fixed by adding `-Wl,-rpath,<PORT_PREFIX>/lib` to `shared_mode`'s macOS/Linux link flags (`tools/crt-port-build.py`'s `make_env()`), so one port's shared library can find a sibling port's shared library, not just this project's own sysroot libc/libm/libdl/libc++. macOS: after `CMakeLists.txt` stopped forcing `--use-crt-shell` on macOS/Linux port builds, the user confirmed the previously-present spurious errors/warnings during `configure`/`make` are gone and the shared library builds cleanly there; the same rpath fix applies. |
-| SQLite amalgamation | 3.53.4 | `porting/recipes/sqlite-amalgamation.json` | amalgamation-pass | amalgamation-pass | amalgamation-pass | amalgamation | macOS builds sqlite3.c with `-U__APPLE__` (generic Unix path, not Darwin-only statfs/VFS extensions). Windows aarch64 builds it with `-U_WIN32 -UWIN32 -U__CYGWIN__ -U__MINGW32__ -U__BORLANDC__` (same reasoning: `tools/crt-cc` targets `*-w64-mingw32`, which predefines `__MINGW32__`/`_WIN32`/`WIN32` and would otherwise trip sqlite3.c's own `SQLITE_OS_WIN` detection into `#include "windows.h"`, which this sysroot doesn't have) -- full recipe flow (compile/archive/ranlib/install/`.lib`-alias) verified via `crt-port-build.py`, then a standalone program linked against the installed `libsqlite3.a` actually ran `sqlite3_open(":memory:")`/`CREATE TABLE`/`INSERT`/`SELECT` and got the correct value back. macOS: after `CMakeLists.txt` stopped forcing `--use-crt-shell` on macOS/Linux port builds, the user confirmed the previously-present spurious errors/warnings during the build are gone. `"shared": true` in the recipe now also builds a real shared library (`sqlite3.dll` on Windows -- no `lib` prefix/version suffix, matching upstream SQLite's own precompiled Windows binary naming; `libsqlite3.so.3.53.4`+SONAME symlinks on Linux; `libsqlite3.3.53.4.dylib`+equivalents on macOS, both mirroring zlib's own established versioning convention) via `tools/crt-port-build.py`'s `build_amalgamation_port()`, reusing `tools/crt-cc`'s existing `-shared`/`-dynamiclib` support for everything OS/arch-specific. Verified end-to-end on Windows aarch64 and a real x86_64 cross-build: `sqlite3.dll` built, linked, reports the correct architecture, and a standalone test program dynamically linked against it ran a real `sqlite3_open`/`CREATE TABLE`/`INSERT`/`SELECT` round trip on both architectures; full `ctest` 79/79. **Confirmed on macOS and Linux too**: `otool -L` on macOS shows `libsqlite3.dylib` depending only on its own self-identity (`libsqlite3.3.dylib`) and `/usr/lib/libSystem.B.dylib` -- no accidental `@rpath/libc.dylib` pickup the way zlib's build hit (sqlite's own build has no equivalent stray `LDSHAREDLIBC=-lc` flag). `ldd` on a real Linux aarch64 machine shows `libsqlite3.so`'s `libc.so`/`libm.so`/`libdl.so`/`libc++.so` dependencies all correctly resolving to this project's own sysroot, not the host's. Shared-library support is now confirmed working end to end across all 3 OSes for both zlib and sqlite-amalgamation. |
-| bzip2 | 1.0.8 | `porting/recipes/bzip2.json` | shared-pass | shared-pass | shared-pass | amalgamation | Upstream ships no Autoconf `configure`, just a hand-written `Makefile` (`make CC=...`) plus a second, Linux/GNU-ld-hardcoded `Makefile-libbz2_so` for the shared build -- rather than drive either directly, this recipe builds bzip2's 7 library source files (excluding `bzip2.c`/`bzip2recover.c`/the CLI tool and DLL sample) through the existing `amalgamation` build system already proven for `sqlite-amalgamation.json`, so the established, cross-platform static+shared naming/versioning convention applies unmodified. Windows: `target_overrides.windows.cflags` undefines `_WIN32` (same technique as zlib.json/libpng.json/sqlite-amalgamation.json) so `bzlib.c`'s `SET_BINARY_MODE` macro takes its portable no-op path instead of `#include <io.h>` + `setmode()` (MSVC/MinGW-only, not in this sysroot) -- consistent with this PAL's I/O already being byte-transparent. Verified past "it built": a standalone `BZ2_bzBuffToBuffCompress`/`BZ2_bzBuffToBuffDecompress` round-trip program linked and ran correctly against both static and shared builds on Windows x64 and Linux. macOS is now verified through the official recipe test path too: `port-test-recipes` built and ran both `libbz2.a` and `libbz2.dylib` consumers, each completing a real compress/decompress byte-for-byte round trip. |
-| xz (liblzma) | 5.8.3 | `porting/recipes/xz.json` | shared-pass | shared-pass | shared-pass | configure | Scoped to liblzma only (`--disable-xz`/`-xzdec`/`-lzmadec`/`-lzmainfo`/`-lzma-links`/`-scripts` skip the CLI tool family and its sandboxing/gettext/console-handling surface). Configure+make+install succeeded on the first real attempt on Linux x86_64 (WSL Ubuntu 20.04 + clang-18) -- but the first real use of the built library (a standalone `lzma_easy_buffer_encode`/`lzma_stream_buffer_decode` round trip) surfaced a genuine, general CRT gap unrelated to xz itself: this project's `crt1` startup never ran the ELF `.init_array` section (global/static C `__attribute__((constructor))` functions -- also what runs C++ global object constructors) for the executable entry point, on **any** of the three OSes -- invisible until now because every prior port that got this far linked shared, where the OS's own dynamic loader runs a `.so`'s `.init_array` automatically, a completely different mechanism. liblzma's own CRC32 dispatcher uses exactly this pattern to pick its implementation once at startup; left unrun, the dispatch function pointer stayed NULL and the first `lzma_crc32()` call segfaulted. **Fixed for Linux**: `libc/src/arch/linux/common/init_fini_array.c` adds `__crt_run_init_array()`/`__crt_run_fini_array()`, wired into `crt1.S` (before `main`) and `exit()` (before termination) via a new `crt1_init_array.o` startup object, shared by `tools/crt-cc` and the CMake test/shell build paths through a `CRT_STARTUP_OBJECTS` variable. Verified with gdb, and with real CI runs across all 5 hosts. A second apparent bug (encoding a larger buffer hanging inside this project's own `malloc()`, with the lock's raw value read back as garbage) turned out, after further investigation with a gdb hardware watchpoint on the lock, to be a buffer overflow in the session's own throwaway verification program, not in liblzma or the CRT: a `snprintf()`-in-a-loop pattern that accumulated the return value into a running length without checking it against the destination buffer's remaining size, so `remaining = buffer_size - accumulated_length` (both `size_t`) eventually underflowed to a huge unsigned value, handing the next `snprintf()` call an effectively unbounded size limit that wrote straight past a `static` buffer into whatever the linker had placed next in BSS -- which happened to be malloc's own lock. Confirmed via the watchpoint: every corrupting write's return address was the test's own `main`, and the corrupted bytes decoded to fragments of the test's own format string. Fixed the test and re-ran: real match-finder allocations (up to ~512 MB at preset 9\|EXTREME) all succeed, and a full compress/decompress round trip at preset 9\|EXTREME with `LZMA_CHECK_CRC64` produces byte-for-byte correct output against both the static and shared (`ldd`-verified) build. Linux: **shared-pass**. Windows: `configure-pass`, not shared-pass -- builds clean (needed two more fixes beyond the Linux ones: `-U__MINGW32__` in CFLAGS, since xz's own `sysdefs.h`/`mythread.h` branch on a real mingw-w64 environment this sysroot doesn't fully replicate; and presetting `$RC` to `llvm-rc` plus skipping the optional `liblzma_w32res.rc` version resource, since `llvm-rc`'s GNU-windres `-i`/`-o` compatibility mode mis-invokes its own internal clang preprocessing step -- both generalized into `tools/crt-port-build.py`, including a fix so a recipe's `make_args` override reaches `make install`, not just `make`) -- but calling the built library crashes. Confirmed directly: a trivial `lzma_version_string()` call works, but the first real `lzma_easy_buffer_encode()` call segfaults on both the static and shared build, in the same "first real call into the CRC dispatcher" shape as the Linux bug this port already fixed. Strong evidence of the same `.init_array` gap reaching Windows. **Update, same session**: that gap is now fixed and verified on Windows in general (full local `ctest`, 82/82, via a new permanent regression test, `tests/init_array_test.c`) -- it turned out to need bracketing TWO separate, simultaneously-live constructor/destructor conventions, not one: `tools/crt-cc`'s own port builds do produce the bare GNU/MinGW-style `.ctors`/`.dtors` section assumed above (confirmed via `llvm-objdump -h`), but this project's own CMake-native builds (libc itself, `tests/`, `shell/`) turned out to use the *other*, MSVC-ABI convention (`.CRT$XCU`/`.CRT$XTX`) instead, since they compile with plain clang and no explicit `--target` override. Fixing this also surfaced and fixed a real, pre-existing, unrelated latent bug in the Windows startup self-relaunch path (`fork_capable_relaunch.c`'s parent process now uses `_exit()` instead of `exit()` when forwarding its child's exit code). **Update, later same session**: re-running xz's own Windows round trip after that fix STILL crashed -- a second, genuinely distinct `lld-link` limitation, confirmed with a minimal xz-independent repro: `lld-link` does not reliably merge multiple static-archive-derived plain `.ctors`/`.dtors` contributions into one contiguous region the way GNU ld's default script's explicit `KEEP()` ordering guarantees, and has no equivalent mechanism for COFF/PE. Routed around it rather than fighting the linker: liblzma already ships a portable "First Call Resolution" fallback for exactly this situation (used whenever `HAVE_FUNC_ATTRIBUTE_CONSTRUCTOR` is undefined), so a new, `CRT_TARGET_OS_WINDOWS`-guarded recipe patch (`porting/recipes/xz.json`'s `build.patches`, a no-op on Linux/macOS) undefines that macro in `src/common/sysdefs.h`, forcing the lazy dispatcher instead of relying on a constructor at all. Verified: full round trip (preset 9\|EXTREME, CRC64, 256 KB, byte-for-byte compare) now passes on Windows against both the static and shared build, rebuilt clean through the real `crt-port-build.py` pipeline. Windows: **shared-pass**. See `HISTORY.md`'s dated entries for the full writeup. macOS: **shared-pass** -- configure/make/install now succeeds on real macOS aarch64 through the CRT sysroot after `tools/crt-cc` learned to treat `-r`/`-Wl,-r` as relocatable link mode, and a standalone CRT-linked round trip verified `lzma_easy_buffer_encode()` at preset 9\|EXTREME with CRC64 followed by `lzma_stream_buffer_decode()` and a byte-for-byte compare against both installed `liblzma.a` and `liblzma.5.dylib` (`otool` confirmed the shared test loads this port install). |
-| pcre2 | 10.47 | `porting/recipes/pcre2.json` | shared-pass | shared-pass | shared-pass | configure | Next in the porting matrix expansion queue after xz (`bzip2` -> `xz` -> `pcre2` -> `mbedtls` -> `curl`, see `TODO.md`). No dependencies; scoped to the 8-bit code unit width only (`--enable-pcre2-16`/`-32` both left off, matching pcre2's own default). `target_overrides.windows.configure_args` adds `--build=@CRT_MINGW_TRIPLE@` (the same `config.guess` workaround already needed by libpng/xz/libffi), and `target_overrides.windows.env.CFLAGS` undefines `_WIN32`/`_WIN32_WCE`/`__WIN32__`/`WIN32` (same technique as zlib/xz/bzip2) since `pcre2grep.c` has a real `#include <windows.h>` + `FindFirstFile()`-based directory-walking path this sysroot has no equivalent for -- pcre2's own Makefile.am has no configure-time toggle to skip building `pcre2grep`/`pcre2test`, so this recipe still builds them, kept on their portable `opendir()`/`readdir()` path instead. The recipe test (`porting/tests/pcre2_match_test.c`, a real `pcre2_compile()`/`pcre2_match()` round trip with three named capture groups individually verified, not just a version-string smoke check) initially failed to link on Windows with `undefined symbol: __declspec(dllimport) pcre2_compile_8 ... cannot be used because it is not an import library`: the library itself was built with `_WIN32` undefined (correct, no dllimport decoration, for static linking), but the test file's own separate `crt-cc` compile step doesn't inherit the library's `target_overrides.windows.env.CFLAGS`, so it saw clang's default-predefined `_WIN32` and expected DLL-import-style symbols against a plain static archive. Fixed with the standard, upstream-documented `-DPCRE2_STATIC` define in the `match-static` test's own `cflags` (deliberately not applied to `match-shared`, which needs the default dllimport-decorated declarations to match the DLL import library it links against). **Started static-only, then added shared**: once `match-static` passed for real on both Windows and Linux, `--disable-shared --enable-static` was dropped (`configure_args: []`, matching zlib.json's own pattern of just using the library's real default) and a `match-shared` test added -- libtool produces `libpcre2-8-0.dll` + `libpcre2-8.dll.a` on Windows, `libpcre2-8.so` on Linux, `libpcre2-8.dylib` on macOS. Verified for real on all three hosts: both `match-static` and `match-shared` print `pcre2_match_test: ok matches=4 version=10.47 2025-10-21` on Windows (`cmake --build --preset windows-host-ninja-debug --target port-test-pcre2`), Linux (WSL Ubuntu 20.04 + clang-18, `tools/crt-port-build.py --port pcre2 --test`), and macOS (real aarch64 hardware, user-run). One macOS-specific pitfall along the way, not a code bug: the user's first `match-shared` attempt failed with `libpcre2-8.dylib` not found, because `port-test-pcre2` reused an install directory that still held the earlier static-only build (from before `--disable-shared` was dropped) -- `cmake --build --preset <preset> --target port-rebuild-pcre2` (clears the stamp, reruns configure/make/install) before re-running `port-test-pcre2` picked up the shared build correctly; any recipe whose `build.configure_args`/`env` changes after it was last built needs the same explicit rebuild to take effect. All three hosts: `shared-pass`. |
-| mbedtls | 3.6.7 | `porting/recipes/mbedtls.json` | shared-pass | shared-pass | shared-pass | configure (skip_configure) | Next in the porting matrix expansion queue after pcre2 (`bzip2` -> `xz` -> `pcre2` -> `mbedtls` -> `curl`, see `TODO.md`). Picked the 3.6.7 LTS release over the newer 4.2.0, which dropped the plain top-level Makefile for a CMake-only build this project's tooling doesn't support. mbedtls has no `./configure` step at all, so this port needed three small, generalizable `tools/crt-port-build.py` extensions: `build.skip_configure` (skips just the `./configure` invocation, reusing every other part of the existing configure-recipe flow), a base `build.install_args` field (extra arguments specific to `make install` only, for mbedtls's `DESTDIR=`-based install convention instead of autotools' `--prefix=`), and a per-OS `target_overrides.<os>.build_make_args` field (a `make` variable reaching the BUILD step only, distinct from the existing `target_overrides.<os>.make_args`, which reaches both build and install and stays that way for xz's own recipe). `make_args: ["lib", "SHARED=1"]` targets the top-level Makefile's `lib` goal (`$(MAKE) -C library`), sidestepping the `framework/exported.make` git-submodule requirement; `SHARED=1` makes library/Makefile's own `all: shared static` build BOTH the static and shared library in one invocation, verifying both build shapes together in the same porting pass rather than static-first-then-shared-later (see TODO.md's standing porting-loop discipline item this session added). `install_args`' `-o no_test -o programs -o mbedtls_test` (GNU Make's `--assume-old` option) tells `make install` to treat those phony prerequisites as already up to date, running straight to the install recipe's own header/lib copy commands without building `programs/`. `target_overrides.windows.env.CFLAGS` undefines `_WIN32`/`_WIN32_WCE`/`__WIN32__`/`WIN32`/`__MINGW32__` and adds `__unix__` (`entropy_poll.c`/`timing.c` hard-`#error` without a recognized Unix-like macro) plus `-DMBEDTLS_HAVE_INT32` (see below). A `build.patches` entry disables `MBEDTLS_NET_C`: a real Windows build attempt showed this PAL's `<sys/socket.h>` doesn't yet expose the fuller BSD-sockets surface `library/net_sockets.c` needs (`select()`/`fd_set`/`FD_ZERO`/`FD_SET`/`FD_ISSET`/`suseconds_t`/`SO_TYPE` all came back undeclared) -- deferred to `curl`, the next port in this queue. Getting a real, correctly-named Windows shared build took a chain of further real, individually-confirmed fixes: library/Makefile's `WINDOWS_BUILD`-gated `-lbcrypt` (mbedtls's Windows entropy source, unneeded once `-D__unix__` routes `entropy_poll.c` off that path) patched out; the three `.dll` link recipes' own `-lws2_32`/`-lwinmm`/`-lgdi32` (unneeded once `MBEDTLS_NET_C` is disabled), `-Wl,-soname` (an ELF-only concept `lld-link`'s PE frontend rejects), and `-static-libgcc` patched out, keeping `--out-implib`; `bignum.c` referencing undefined symbol `__udivti3` (a compiler-rt 128-bit-division intrinsic -- this PAL's Windows sysroot has no compiler-rt/builtins archive at all, unlike Linux/macOS, a real general gap noted for a future dedicated fix) routed around via `-DMBEDTLS_HAVE_INT32` (forces bignum's portable 32-bit-limb path), which conflicts with `MBEDTLS_HAVE_ASM` per `bignum.h`'s own `check_config.h`, so `MBEDTLS_HAVE_ASM` was also disabled (Windows-only patch; a plain `-U` on CFLAGS was tried first and confirmed NOT to work, since `mbedtls_config.h`'s own unguarded `#define` redefines it regardless of the command line); disabling `HAVE_ASM` then left `MBEDTLS_AESNI_C` unsatisfiable (needs `HAVE_ASM` or `-maes`/`-mpclmul` intrinsics), so that was disabled too (Windows-only patch, no correctness loss -- `aes.c`'s portable C implementation is used instead, confirmed correct by this port's own test). A final, genuinely separate bug: mbedtls's top-level Makefile wraps its entire `install:`/`uninstall:` block in `ifndef WINDOWS` -- passing `WINDOWS=1` (needed during the build step to select the correctly-named `.dll` recipes) to `make install` too doesn't change its behavior, it makes `install:` not exist at all (confirmed via GNU Make's own `-p` database dump: `install:` survives only as an empty `.PHONY` entry once `WINDOWS=1` reaches it, so `make install WINDOWS=1` silently no-ops -- exit 0, nothing copied, no error). Fixed generally via the new `build_make_args` field described above, moving `WINDOWS=1` out of the shared build+install override. Verified for real through this project's own toolchain end to end on both Linux (WSL Ubuntu 20.04 + clang-18, a clean clone) and Windows (real x86_64 host), BOTH static and shared: `porting/tests/mbedtls_crypto_test.c` (a real SHA-256("abc") NIST/FIPS 180-4 known-answer check plus a full AES-128-CBC encrypt/decrypt round trip) prints `mbedtls_crypto_test: ok` for both the `crypto-static` and `crypto-shared` test on both hosts; Windows's shared test binary confirmed (`llvm-objdump -p`) to genuinely dynamically depend on `libmbedcrypto.dll`. Also reran the full `port-test-recipes` aggregate and the full Windows `ctest` suite (83/83) afterward to confirm the `tools/crt-port-build.py` changes didn't regress anything else. macOS also confirmed `shared-pass` by the user on real hardware (`port-rebuild-mbedtls` + `port-test-mbedtls`, both `crypto-static` and `crypto-shared` passing) -- `APPLE_BUILD=1` wired into `target_overrides.macos.make_args` (safe to reach both build and install, since `APPLE_BUILD` isn't involved in any `ifndef` gate around `install:`) correctly selected the `.dylib` link recipes. All three hosts: `shared-pass`. **Follow-up, found via curl's own build, not mbedtls's own test**: none of the three `.dylib`s ever got a real `-install_name` (upstream's `library/Makefile` never passes one), so ld64 recorded a bare, unresolvable name -- invisible to mbedtls's own shared test only because `run_port_tests()` already sets `DYLD_LIBRARY_PATH` before running a test binary, a fallback curl's own configure-time runtime probe doesn't go through. Fixed with three new `library/Makefile` patches adding `-install_name @rpath/$@` to the `APPLE_BUILD` `-dynamiclib` recipes -- see the curl row below and `mbedtls.json`'s own notes for the full trail. **Update: fixed a real, general Linux CRT gap found via a fresh `port-rebuild-mbedtls` run** -- `library/aesce.c` (ARMv8 crypto-extension runtime detection, `#if defined(__linux__)`) failed outright with `'sys/auxv.h' file not found`; this sysroot had never implemented `getauxval()`/`<sys/auxv.h>` at all. Fixed generally, not with an mbedtls-specific patch: `libc/src/env.c`'s `__crt_env_set_initial()` already captures the untouched, kernel-provided initial `envp` pointer (never a copy) -- per the standard Linux/System V process startup stack layout (`argc, argv[], NULL, envp[], NULL, auxv[], AT_NULL`), the ELF auxiliary vector sits immediately after `envp`'s own `NULL` terminator, reachable by walking that same pointer with no `crt1.S` changes on either architecture. Added `getauxval()` (`libc/src/arch/linux/common/auxv.c`, Linux-only -- macOS/Windows have no equivalent kernel mechanism, matching real upstream, which doesn't ship this header on either), `include/sys/auxv.h`, and `include/linux/auxvec.h` (`AT_*` values cross-checked against the real Linux kernel UAPI header, not from memory). Verified on a real Linux aarch64 host: a standalone test confirmed real, correct values (`AT_PAGESZ=4096`, a nonzero `AT_HWCAP`/`AT_HWCAP2` bitmask, a nonzero `AT_RANDOM` pointer, and `ENOENT`/`0` for an unknown type), `aesce.o` now compiles, and the full `port-rebuild-mbedtls` `configure(skip) && make -j4 lib SHARED=1 && make install` completes cleanly end to end with both `libmbedcrypto.so.16` etc. correctly `ldd`-resolving to this project's own sysroot. Full `ctest` 77/77 throughout. Not yet re-verified on macOS/Windows (unaffected in principle -- `aesce.c`'s `getauxval()` path is Linux-only upstream -- but not confirmed by an actual rebuild on either host this session). **Known, still-open issue, confirmed real via curl's own Windows debugging**: mbedtls's hand-rolled Windows `.dll` build statically embeds this project's entire libc with no symbol-visibility control and re-exports it alongside its real API -- first seen as a link-time `duplicate symbol` error (didn't reproduce on a later attempt, still unexplained), then confirmed as a genuine runtime bug instead: `libcurl-4.dll`'s calls to `read()`/`__crt_sys_read()` silently resolved to `libmbedcrypto.dll`'s own embedded, stale (pre-dating a real libc fix) copy instead of the current `c.dll`, root-caused with a live `lldb -p <pid>` attach. Fixed for that specific symptom by forcing a fresh `port-rebuild-mbedtls`, but the underlying export-hygiene gap itself is NOT fixed -- any future libc change can silently stop applying to anything linking mbedtls's DLL until mbedtls is rebuilt too. See `TODO.md` and `curl.json`'s own notes. |
-| curl | 8.21.0 | `porting/recipes/curl.json` | shared-pass | shared-pass | shared-pass | configure | Last port in this queue before it closes out (`bzip2` -> `xz` -> `pcre2` -> `mbedtls` -> `curl`, see `TODO.md`; `openssl` stays held back until something actually needs it). Depends on zlib and mbedtls, both already `shared-pass` everywhere. Scoped to HTTP/HTTPS for this first pass (`--disable-ftp/-file/-telnet/-tftp/-pop3/-imap/-smb/-smtp/-gopher/-mqtt/-rtsp/-dict/-ipfs`, `--disable-ldap/-ldaps`, `--without-brotli/-zstd/-libpsl/-libgsasl`), matching pcre2/xz/bzip2's own precedent of starting narrower than upstream's default. `--without-ca-bundle/-ca-path`: no CA trust store is baked in (this project doesn't vendor one); a real deployment supplies its own via `CURLOPT_CAINFO`/`CURLOPT_CAINFO_BLOB`. curl's own Linux defaults (`--enable-shared`/`--enable-static`, `POSIX threaded` resolver) built and passed both static and shared once the real bugs below were fixed; macOS keeps a documented `--disable-ipv6`/`--disable-threaded-resolver` override for this tranche. This was the FIRST port in this queue to reach a real internet hostname over the network rather than a self-contained local round trip, and it surfaced two real, general, previously-invisible libc bugs -- both root-caused by direct process/source inspection (a real, indefinite hang, not a failure), not guessed: (1) `getaddrinfo()` had no real DNS resolution at all, only ever handling literal numeric IPs -- implemented a real, deliberately minimal synchronous DNS client in `libc/src/socket.c` (parses `/etc/resolv.conf` for a nameserver, falling back to `8.8.8.8`; builds/sends a UDP A-record query; parses the response; a couple of retries with a short timeout). Also fixed along the way: `<sys/types.h>` didn't expose `size_t`/`time_t` (real-world POSIX systems, and Android Bionic itself, do), `<sys/socket.h>` didn't transitively include `<sys/select.h>` for `fd_set`/`select()` (ditto), plus `AF_UNIX`, the `IN6_IS_ADDR_*` macros, and a real `getsockopt()` were all missing. (2) `fcntl(fd, F_SETFL, O_NONBLOCK)` was a pure software no-op on Linux/macOS (read and discarded the flags, always reported success) -- this, not the DNS gap, is what actually hung `curl_easy_perform()` indefinitely: curl's own internal wakeup pipe (used by every `curl_multi_perform()` call, not just DNS) sets `O_NONBLOCK` expecting a real non-blocking fd back, then does a "drain if pending, don't block otherwise" read on it; with `O_NONBLOCK` silently never taking effect, that read blocked forever on the very first call, before curl ever reached DNS resolution or opened a real socket (confirmed via direct process inspection: one thread, only the wakeup pipe's own fds open, 0% CPU -- a real blocked `read()`, found by adding and then reverting temporary instrumentation directly into curl's own `lib/easy.c`/`lib/multi.c`). Fixed generally in `libc/src/fd.c`: `F_GETFL`/`F_SETFL` now forward to the real `fcntl(2)` syscall on Linux/macOS (mirroring how `F_GETFD`/`F_SETFD` already did), which already implements `O_NONBLOCK` correctly at the kernel level. Windows's own `fcntl()` backend has no unified syscall to forward to and keeps its prior (also broken, non-regressing) no-op behavior for now, documented as a TODO in the code -- not yet hit by a real Windows curl build. Also fixed a real `tools/crt-port-build.py` bug along the way: `@PORT_PREFIX@` substitution (needed for `--with-mbedtls=@PORT_PREFIX@`/`--with-zlib=@PORT_PREFIX@`) was previously only applied to `make_args`/`install_args`, never `configure_args` -- confirmed by a real build attempt showing the literal unsubstituted string in configure's own arguments; fixed generally. `porting/tests/curl_http_roundtrip.c` performs a real round trip against real servers (http(s)://example.com, RFC 2606) verifying both HTTP status and body content, not a version-string/link-only check. Verified for real on Linux (WSL Ubuntu 20.04 + clang-18): `curl_http_roundtrip_test: ok http=200 https=200` for both static and shared, using curl's own real default configuration (not a scoped-down resolver workaround). Reran the full `port-test-recipes` aggregate and the full Windows `ctest` suite (83/83) afterward -- no regressions. Linux: `shared-pass`. **Windows attempted for real this session too**: curl's own `configure` hit a real, distinct bug there first -- its `AC_EGREP_CPP`-based "checking if socket is prototyped" probe uses `$CPP $CPPFLAGS` only, never `$CFLAGS`, so the `_WIN32` undefine (only ever in `CFLAGS` before) never reached that specific check, leaving it to try (and fail) to `#include <winsock2.h>` and wrongly conclude socket() wasn't usable; fixed by adding the same undefines to `CPPFLAGS` too. Once configure passed, a second, genuinely separate bug surfaced at the link step: mbedtls's own Windows shared build (`libmbedcrypto.dll`) statically embeds this project's libc without any symbol-visibility control and re-exports its internal `__crt_sys_*`/`setenv` symbols alongside its real crypto API, colliding (`ld.lld: error: duplicate symbol`) with this project's own `c.lib` once a third library (curl) links against both. Not a curl bug, and not fixed this session -- needs either real symbol-visibility control added to mbedtls's Windows `.dll` build, or having curl link against mbedtls's static libraries even for curl's own shared build. Windows: `configure-blocked` (configure itself now passes; the link step doesn't). **A real macOS build attempt found one more, fixed, real bug -- in `tools/crt-port-build.py` itself**: curl's own configure-time "checking runtime libs availability" probe compiles and *runs* a test program against mbedtls's shared libs, and failed because mbedtls's `.dylib` files have no `-install_name` set (unlike every Libtool-driven shared recipe here), so ld64's default bare install name can never be resolved by dyld via `LC_RPATH` (which macOS, unlike Linux's `DT_RPATH`/`DT_RUNPATH`, only honors for references already prefixed `@rpath/...`). mbedtls's own shared-library test had already passed on macOS despite this same gap, because `run_port_tests()`/`port_test_env()` already set `DYLD_LIBRARY_PATH` before *running* a test binary -- but configure's own internal runtime probes, part of the *build* step, never inherited it. Fixed generally in `make_env()`: `DYLD_LIBRARY_PATH`/`LD_LIBRARY_PATH` now point at `PORT_PREFIX/lib` for every subprocess this tool spawns, not just test runs. **That fix turned out insufficient on real macOS hardware**: the user re-ran the build and hit the identical error again, because `./configure` execs through `/bin/sh`, and macOS strips `DYLD_`-prefixed environment variables across an exec of any SIP-protected system binary -- so the env var set by the parent Python process never survived into configure's own child probe. The real, durable, environment-independent fix landed in `mbedtls.json` instead: three new `library/Makefile` patches add `-install_name @rpath/$@` to the `APPLE_BUILD` `-dynamiclib` recipes for all three `.dylib`s (upstream never sets one), baking the correct load-command path directly into each library at build time, resolved by the consumer's own already-present `-Wl,-rpath` LDFLAGS regardless of what environment survives any given exec chain. Verified on Linux (regression-only -- the patched Makefile targets are inert there, only reached under `APPLE_BUILD=1`): mbedtls's and curl's own static+shared tests all still pass. Verified on real macOS arm64 afterward: `port-test-curl` passes both `http-roundtrip-static` and `http-roundtrip-shared` against real `http://example.com/` and `https://example.com/` via the mbedTLS backend. The macOS recipe also disables IPv6 and the threaded resolver for this tranche, keeping curl on the currently-verified CRT IPv4 synchronous resolver path rather than leaking Darwin SystemConfiguration headers or relying on curl's async resolver worker-pool behavior. **Update: fixed a real Linux link failure surfaced by the mbedtls `getauxval()` work above** -- a fresh `port-rebuild-curl` failed with `undefined reference to '__getauxval'`, traced via `nm` to `libclang_rt.builtins.a`'s AArch64 outline-atomics support (`lse-init.o`), which calls the real-glibc-ABI `__getauxval()` directly (compiler-rt was written against glibc's `weak_alias(__getauxval, getauxval)` convention, not Android Bionic's plain-`getauxval()`-only one), pulled in by curl's `<stdatomic.h>` usage. Fixed by adding `__getauxval()` to `libc/src/arch/linux/common/auxv.c` (delegates to `getauxval()`, not declared in the public `include/sys/auxv.h`, matching real glibc). Verified: full `port-rebuild-curl` now links and installs cleanly, and `port-test-curl` passes a real network round trip (`curl_http_roundtrip_test: ok http=200 https=200`, both static and shared) against real `http://example.com/`/`https://example.com/`, exercising mbedTLS's real TLS handshake end to end. See `HISTORY.md` for the full trail. **A real Windows rebuild attempt afterward got past the previously-documented mbedtls-DLL duplicate-symbol blocker** -- `libcurl.la`/`libcurlu.la` themselves linked cleanly, no `ld.lld: error: duplicate symbol` this run (not deliberately fixed, still tracked as open/unexplained in `TODO.md` rather than closed). That same rebuild surfaced a different, real, now-fixed bug instead: curl's own CLI tool (`src/curl.c`/`curlinfo.c`) failed to link with `setmode`/`_spawnv`/`_P_WAIT` undeclared in GNU Libtool's own generated `.libs/lt-curl.c` wrapper source -- the same bug class already fixed for libpng via `porting/shims/win32/libtool_wrapper_compat.h`, but curl.json was never wired up to use that shim. Fixed by wiring in the missing `force_include`, plus a new fourth shim alias (`#define setmode _setmode`) for a variant libpng never hit: curl's own CFLAGS/CPPFLAGS also undefine `__MINGW32__` (libpng's don't), so ltmain.sh's own rename block never fires and the wrapper calls the bare, un-prefixed `setmode` name directly, with nothing else declaring it either. **Verified on real Windows hardware, and taken all the way through to a real network round trip**: four more real bugs found and fixed in the same debugging pass -- the shim's own `<string.h>` include leaking `strchr` into curl's `AC_C_UNDECLARED_BUILTIN_OPTIONS` configure probe (hard error); the same shim's `<unistd.h>`/`<stdlib.h>`/`<spawn.h>`-transitive-`<sched.h>` includes silently mis-detecting `pipe()`/`realpath()`/`sched_yield()` as absent via curl's generic `AC_CHECK_FUNC` K&R-style probes (fixed by forward-declaring exactly what the shim's own code needs instead of including whole headers -- the `pipe()` misdetection specifically caused an `Out of memory` failure, curl's own wakeup-pipe mechanism believing `pipe()` didn't exist); missing `-U_WIN32` family cflags on the recipe's own test programs (`fatal error: 'winsock2.h' file not found`, since the library-build CFLAGS/CPPFLAGS override doesn't reach the separate test-compile step); and Windows's `fcntl(F_SETFL, O_NONBLOCK)` finally implemented for real (`SetNamedPipeHandleState(PIPE_NOWAIT)` for pipe fds via `GetFileType()==FILE_TYPE_PIPE`, `ioctlsocket(FIONBIO)` for socket fds, with `ERROR_NO_DATA`/zero-byte-write-success translated to `EAGAIN` in `__crt_sys_read()`/`__crt_sys_write()`) -- fixing the exact same indefinite-hang bug already fixed for Linux/macOS earlier in this pass, just unreachable on Windows until `pipe()` detection itself was fixed. A further real Winsock race was found and fixed once the hang was gone: a non-blocking `connect()` reported complete (`select()` writable, `getsockopt(SO_ERROR)==0`) still failed the very first `send()` with `WSAENOTCONN`, confirmed transient (not a real caller bug) with a standalone probe -- a bare retry after ~200ms with no further connect()/select() calls succeeded outright -- fixed by reinterpreting `WSAENOTCONN` as `EAGAIN` specifically for non-blocking sockets (`map_wsa_send_recv_error()`), letting the caller's own ordinary EAGAIN-retry loop absorb it naturally; `__crt_sys_connect()` also got its own real fix alongside this (Winsock's `WSAEWOULDBLOCK` was mapping to `EAGAIN` via the shared generic error mapper, the wrong POSIX errno for connect() specifically -- real POSIX wants `EINPROGRESS`, which curl's own connection code checks for by name). **curl's HTTP round trip passed completely on Windows for the first time ever**, but HTTPS crashed with a hard, deterministic `STATUS_ACCESS_VIOLATION` right after `mbedTLS: Connecting to example.com:443` printed. **Root-caused with a real `lldb` backtrace**: a literal NULL function-pointer call inside `mbedtls_ctr_drbg_reseed_internal`, because mbedTLS's portable entropy source (`__unix__`, not native `_WIN32`) falls through to `fopen("/dev/urandom", "rb")`, which this project's Windows PAL never implemented -- so curl's own `mbedtls_init()` silently failed to seed its global CTR_DRBG before the handshake needed real random bytes. Fixed for real: a genuine `/dev/urandom`/`/dev/random` virtual device, serviced entirely in `__crt_sys_read()` via `RtlGenRandom()` (advapi32.dll's `SystemFunction036`, loaded via `GetProcAddress`), no real HANDLE involved at all. Two more real bugs surfaced chasing an intermittent hang in the *shared* build specifically after that: mbedtls's own Windows `.dll` build re-exports this project's entire libc with no symbol-visibility control (already documented above as a link-time collision), and since mbedtls had never actually been rebuilt during this whole Windows debugging pass, `libmbedcrypto.dll` was still shipping a *stale, pre-fix* embedded copy of `read()`/`__crt_sys_read()` that silently shadowed the real, current `c.dll` symbol `libcurl-4.dll` should have resolved to -- root-caused with a live `lldb -p <pid>` attach showing the exact call stack, confirmed fixed by forcing a fresh mbedtls rebuild (**still an open, general risk for any future libc change**, not resolved at the mbedtls level -- see that port's own notes); and `tools/crt-port-build.py`'s own test runner never redirected the child's `stdin`, fixed generally by passing `stdin=subprocess.DEVNULL`. **Final result: curl 8.21.0 is `shared-pass` on all three OSes**, closing out this whole porting queue. Both `http-roundtrip-static` and `http-roundtrip-shared` pass a real HTTP+HTTPS round trip on Linux, macOS, and Windows, verified directly on real hardware for all three; full `port-test-recipes` aggregate and Windows `ctest` (85/85) both stay clean. See `porting/recipes/curl.json`'s own notes for the full, detailed trail. |
-| libffi | 3.4.5 | `porting/recipes/libffi.json` | partial | configure-pass | partial | configure | macOS/aarch64 configure/make/install passed; ffi_call and closure smoke passed against the CRT sysroot. Windows: configure/make/install passes (config.guess workaround, a broken libffi-generated top-level Makefile routed around, a project-owned `windows.h` shim for `dlmalloc.c`/`ffi.c`'s Win32 calls -- see `porting/shims/win32/windows.h` -- and a Windows X18/TEB-reservation pitfall in libffi's own Go-closures logic avoided by *not* hiding `_WIN32` from it). **Windows: shared-library build now achieved and verified end-to-end (x86_64)** -- three bugs fixed, full writeup in `porting/recipes/libffi.json`'s own notes: (1) the same generic `ld.lld -m i386pep`/`-m arm64pe` auto-import fix already made for libpng (`tools/crt-native-tool`) applies here unmodified; (2) a severe, general Windows `fork()` bug (`libc/src/malloc.c`'s OS-region tracking table silently dropped regions past 256MB, corrupting any later `fork()`'s child -- found chasing an apparent "hang" rebuilding this exact port; see `HISTORY.md`'s dedicated entry); (3) libffi's own `Makefile.am` unconditionally passes `-bindir "$(bindir)"` to libtool, and libtool's `func_normal_abspath` only recognizes a leading `/` as marking an absolute path -- a real Windows drive-letter path (`C:/...`) is misclassified as relative, and the resulting string never starts with `/` either, so the internal sed-based path-ascent loop never terminates: a genuine, confirmed (via isolated single-stepping) infinite loop, forking a fresh `echo`/`sed` pair every iteration. Fixed via `AM_LTLDFLAGS` command-line + environment-variable override (a real Automake convention, not a patch) dropping just `-bindir`; needed both a new `target_overrides.<os>.make_args` recipe mechanism AND `-e`/environment-based propagation, since libffi's own recursive `SUBDIRS = ... .` self-invocation didn't reliably inherit a plain command-line override. Verified: `libffi-8.dll`/`libffi.dll.a` build and install cleanly (no hangs), a standalone program `dlopen()`ed the real DLL and ran a genuine `ffi_call()` round trip through it, full `ctest` 79/79. `ffi_call()` alone and closures alone each work correctly in isolation, but calling `ffi_call()` and then any further libffi call in the same process reliably segfaults when the caller is compiled at `-O1`/`-O2` (never at `-O0`) -- root-caused to a callee-saved GPR (observed: X19) that clang trusts AAPCS64 to preserve across `ffi_call()` getting corrupted somewhere in the `ffi_call()`/`ffi_call_SYSV` call chain; not yet fully isolated to an exact instruction, and specific to aarch64 (not re-tested for an x86_64 analogue this session, since only a single `ffi_call()` was exercised). See `porting/recipes/libffi.json`'s own notes for the full investigation and a minimal repro. Status stays `partial` on Windows for that reason: the shared-library *build* capability is now solid, but this pre-existing, unrelated `ffi_call()`-repeat-call correctness family is untouched. **A second, distinct gap was found running the official `port-test-libffi` recipe test on Windows, then fixed**: linking directly against `libffi.dll.a` (a real import library, the way an ordinary consumer program would -- as opposed to the `dlopen()` path the shared-build verification above used) failed at link time with `ld.lld: error: output image has runtime pseudo relocations, but the function _pei386_runtime_relocator is missing`. libffi's public headers reference an exported *data* symbol in a way GNU ld's auto-import feature routes through a runtime pseudo-relocation fixup table, normally serviced by real mingw-w64's own `_pei386_runtime_relocator` (in `libmingwex.a`) -- a startup-time PAL feature this project didn't implement yet. **Fixed**: `libc/src/arch/windows/common/pseudo_reloc.c` implements `_pei386_runtime_relocator()` from scratch, with the binary pseudo-relocation table format cross-checked against both mingw-w64's own reference decoder and this exact toolchain's own encoder (LLVM lld's `PseudoRelocTableChunk`); wired into `crt1.c`'s `mainCRTStartup()` as the very first statement. A second bug surfaced immediately once linking succeeded -- the target location a relocation patches is frequently inside `.text` (execute+read-only by default), so the write access-violated until wrapped in a temporary `VirtualProtect()`. A new permanent regression test (`tests/windows_pseudo_reloc_dll.c`/`consumer.c`, ctest `windows_pseudo_reloc_test_runs`) guards this going forward, confirmed via a negative-control run to actually fail without the fix. `port-test-libffi`'s shared variant now passes (`libffi_call_test: ok result=42`). See `HISTORY.md`'s 2026-08-12 entry for the full writeup. Linux/macOS: unlike Windows previously, libffi's real GNU Libtool build already produces a working shared library on both hosts (discovered while chasing zlib's Linux-only shared-link bug: `libffi`/`libpng`'s shared builds succeeded on a real Linux aarch64 host even before that fix, since neither happened to pull in the specific `libc.a` `stdio.c.o` symbol that tripped it) -- this is independent of, and unrelated to, the X19 runtime bug above, which is a pure `ffi_call()` correctness issue, not a link/build problem. Status stays `partial` on Linux for that reason regardless. macOS: after `CMakeLists.txt` stopped forcing `--use-crt-shell` on macOS/Linux port builds, the user confirmed the previously-present spurious errors/warnings during `configure`/`make` are gone. |
-
-## Policy
 
 Third-party source archives are not committed. Download caches, extracted source
 trees, build directories, logs, and install prefixes belong under:
@@ -73,3 +42,296 @@ out/<preset>/port-tests/
 
 Recipe hashes use SHA256 as the authoritative integrity check. SHA1 and MD5 may
 be recorded as compatibility metadata only.
+
+## Status Values
+
+- `configure-pass`: upstream configure/make/install flow passed with CRT
+  wrappers.
+- `shared-pass`: `configure-pass`, and the shared library
+  (`.so`/`.dll`/`.dylib`) built, installed, loaded, and ran correctly at
+  runtime. When a recipe declares tests, the preferred verification is
+  `cmake --build --preset <preset> --target port-test-<name>` or
+  `port-test-recipes`.
+- `static-pass`: `configure-pass`, with shared-library building attempted and
+  root-caused but not achieved.
+- `manual-pass`: basic manual source build or direct runtime test passed, but
+  the current recipe flow should be rerun and recorded.
+- `amalgamation-pass`: upstream amalgamation source built and installed through
+  the recipe flow without modifying upstream source.
+- `smoke-pass`: earlier curated integration smoke passed; native upstream build
+  flow is still pending.
+- `partial`: useful subset validated; important upstream features remain open.
+- `configure-blocked`: upstream configure is available, but the full recipe
+  build is blocked by a missing CRT/sysroot policy or API surface.
+- `pending`: not yet verified for that host.
+
+## Current Summary
+
+The current completed queue is:
+
+```text
+zlib -> libpng -> SQLite amalgamation -> bzip2 -> xz -> pcre2 -> mbedTLS -> curl
+```
+
+`curl` closes the current networking/TLS porting queue: Linux, macOS, and
+Windows all pass real HTTP and HTTPS round trips against `example.com` for both
+static and shared libcurl.
+
+Open cross-cutting follow-ups from this queue:
+
+- mbedTLS's Windows DLL still re-exports this project's own libc symbols. This
+  is a real symbol-hygiene risk for future Windows shared-library consumers.
+- libffi still has a correctness issue around repeated `ffi_call()` usage at
+  optimized levels on some paths.
+- Windows `make install` symlink/delete timing still has an intermittent
+  delete-pending/handle-timing validation item.
+
+## make
+
+- Version: `android-toolchain-44fc4fe66a484b91844c302f03eaa8438e065d17`
+- Recipe: `porting/recipes/make.json`
+- Build system: `android_host_tool`
+- Dependencies: none
+- Status:
+  - Linux: `manual-pass`
+  - macOS: `manual-pass`
+  - Windows: `manual-pass`
+- Automated recipe tests: none
+
+Android `toolchain/make` is built as a host tool through the CRT/rootfs
+environment and then used by configure-style porting recipes. Windows has been
+verified directly on aarch64 and x86_64 (`make.exe --version` and a wildcard
+directory-reading check). Linux/macOS have been repeatedly exercised indirectly
+because this `make` drives the real `configure && make && make install` flows
+for the current port queue, but they stay `manual-pass` until standalone checks
+are recorded.
+
+Key issues already resolved include MinGW version macro assumptions,
+`___chkstk_ms`/`__main` compiler ABI helpers, and target-arch propagation in
+`tools/crt-port-build.py`.
+
+## zlib
+
+- Version: `1.3.1`
+- Recipe: `porting/recipes/zlib.json`
+- Build system: `configure`
+- Dependencies: `make`
+- Status:
+  - Linux: `shared-pass`
+  - macOS: `shared-pass`
+  - Windows: `shared-pass`
+- Automated recipe tests:
+  - `roundtrip-static`
+  - `roundtrip-shared`
+
+zlib builds and installs both static and shared artifacts on all three hosts.
+The recipe tests run real compress/decompress round trips against both build
+shapes.
+
+Important CRT/PAL work exposed by zlib included shared-library wrapper support,
+Windows symlink support for SONAME-style aliases, Linux/macOS shared rpath
+handling, and correct resolution of this project's own CRT shared libraries
+rather than host libraries.
+
+## libpng
+
+- Version: `1.6.57`
+- Recipe: `porting/recipes/libpng.json`
+- Build system: `configure`
+- Dependencies: `zlib`
+- Status:
+  - Linux: `shared-pass`
+  - macOS: `shared-pass`
+  - Windows: `shared-pass`
+- Automated recipe tests:
+  - `roundtrip-static`
+  - `roundtrip-shared`
+
+libpng builds and runs against zlib in `PORT_PREFIX` on all three hosts. The
+recipe tests exercise real libpng create/write/destroy paths against both
+static and shared builds.
+
+The Windows port drove a large amount of general CRT/tooling work: GNU
+Libtool/MinGW detection fixes, `malloc.h`, force-included libtool wrapper
+compatibility, rootfs mksh/toybox execution, regex, `lseek()` on pipes,
+`install-sh` script execution, `which`/`readlink`/`stat` applets, and Windows
+symlink/readlink/lstat behavior. See `HISTORY.md` and the recipe notes for the
+full trail.
+
+## SQLite amalgamation
+
+- Version: `3.53.4`
+- Recipe: `porting/recipes/sqlite-amalgamation.json`
+- Build system: `amalgamation`
+- Dependencies: none
+- Status:
+  - Linux: `amalgamation-pass`
+  - macOS: `amalgamation-pass`
+  - Windows: `amalgamation-pass`
+- Automated recipe tests: recipe-built smoke/link checks are handled by the
+  amalgamation flow.
+
+SQLite's amalgamated `sqlite3.c` builds without upstream source patching. The
+recipe steers Windows away from native Windows headers and keeps macOS on the
+portable Unix path rather than Darwin-specific VFS paths. Shared-library output
+has also been exercised as part of the broader amalgamation build support, but
+the conservative recipe status remains `amalgamation-pass`.
+
+## bzip2
+
+- Version: `1.0.8`
+- Recipe: `porting/recipes/bzip2.json`
+- Build system: `amalgamation`
+- Dependencies: none
+- Status:
+  - Linux: `shared-pass`
+  - macOS: `shared-pass`
+  - Windows: `shared-pass`
+- Automated recipe tests:
+  - `roundtrip-static`
+  - `roundtrip-shared`
+
+bzip2 builds static and shared library artifacts on all three hosts. The tests
+run real compression/decompression round trips against both variants.
+
+This port is part of the completed static/shared verification queue and should
+continue to be checked through `port-test-bzip2` or the aggregate
+`port-test-recipes`.
+
+## xz
+
+- Version: `5.8.3`
+- Recipe: `porting/recipes/xz.json`
+- Build system: `configure`
+- Dependencies: none
+- Status:
+  - Linux: `shared-pass`
+  - macOS: `shared-pass`
+  - Windows: `shared-pass`
+- Automated recipe tests:
+  - `roundtrip-static`
+  - `roundtrip-shared`
+
+xz/liblzma builds and runs on all three hosts. The tests perform a real
+compress/decompress round trip at preset `9|EXTREME` with CRC64 against both
+static and shared builds.
+
+The Windows route includes a documented constructor/archive policy workaround.
+Executable `.init_array`/`.fini_array` equivalents are covered by CRT tests, but
+archive-contained constructor bracketing remains a known Windows limitation
+outside this specific recipe.
+
+## pcre2
+
+- Version: `10.47`
+- Recipe: `porting/recipes/pcre2.json`
+- Build system: `configure`
+- Dependencies: none
+- Status:
+  - Linux: `shared-pass`
+  - macOS: `shared-pass`
+  - Windows: `shared-pass`
+- Automated recipe tests:
+  - `match-static`
+  - `match-shared`
+
+pcre2 is scoped to the 8-bit code unit width for this tranche. The tests run a
+real `pcre2_compile()`/`pcre2_match()` round trip with named capture groups
+against both static and shared builds on all hosts.
+
+Windows uses the usual CRT policy of steering upstream away from native
+`windows.h` paths where the Bionic/POSIX path is the intended compatibility
+surface.
+
+## mbedTLS
+
+- Version: `3.6.7`
+- Recipe: `porting/recipes/mbedtls.json`
+- Build system: `configure` recipe with `skip_configure`
+- Dependencies: none
+- Status:
+  - Linux: `shared-pass`
+  - macOS: `shared-pass`
+  - Windows: `shared-pass`
+- Automated recipe tests:
+  - `crypto-static`
+  - `crypto-shared`
+
+mbedTLS builds static and shared crypto libraries on all three hosts. The tests
+run a SHA-256 known-answer check plus an AES-128-CBC encrypt/decrypt round trip
+against both static and shared builds.
+
+Important follow-ups:
+
+- Windows shared DLL export hygiene is still open. The hand-written mbedTLS DLL
+  build embeds this project's libc and re-exports CRT/internal symbols. This
+  caused a real curl runtime bug when a stale embedded `read()` shadowed the
+  current CRT implementation. A fresh rebuild fixed that symptom, but the
+  symbol-hygiene problem itself remains.
+- macOS `.dylib` install-name handling was fixed by recipe patches adding
+  `-install_name @rpath/$@`.
+- Linux `getauxval()`/`<sys/auxv.h>` support was added generally after mbedTLS
+  exposed the missing surface.
+
+## curl
+
+- Version: `8.21.0`
+- Recipe: `porting/recipes/curl.json`
+- Build system: `configure`
+- Dependencies: `zlib`, `mbedtls`
+- Status:
+  - Linux: `shared-pass`
+  - macOS: `shared-pass`
+  - Windows: `shared-pass`
+- Automated recipe tests:
+  - `http-roundtrip-static`
+  - `http-roundtrip-shared`
+
+curl is the final port in the current queue and is `shared-pass` on all three
+hosts. The tests perform real HTTP and HTTPS requests against `example.com`
+through libcurl, zlib, mbedTLS, DNS, sockets, non-blocking fd behavior, and the
+CRT sysroot. This is intentionally not a local loopback-only test.
+
+The first curl tranche is scoped to HTTP/HTTPS and uses a project-owned CA
+policy: no default CA bundle is baked in, so deployment consumers must provide
+trust material explicitly.
+
+General CRT/PAL work exposed by curl included:
+
+- real `getaddrinfo()` DNS lookup for A records;
+- `fcntl(F_SETFL, O_NONBLOCK)` behavior for Linux/macOS and then Windows
+  pipes/sockets;
+- socket macro/type/header gaps such as `AF_UNIX`, `IN6_IS_ADDR_*`, and
+  `getsockopt()`;
+- macOS mbedTLS install-name/rpath issues;
+- Windows `/dev/urandom` backed by `RtlGenRandom()`;
+- Windows non-blocking connect/send transient error mapping;
+- Windows libtool wrapper shims for curl's generated helper executable.
+
+The remaining open risk is inherited from mbedTLS, not curl: mbedTLS's Windows
+DLL export hygiene needs a dedicated fix before future Windows shared-library
+consumers can rely on libc fixes always resolving to the current CRT.
+
+## libffi
+
+- Version: `3.4.5`
+- Recipe: `porting/recipes/libffi.json`
+- Build system: `configure`
+- Dependencies: `make`
+- Status:
+  - Linux: `partial`
+  - macOS: `configure-pass`
+  - Windows: `partial`
+- Automated recipe tests:
+  - `call-static`
+  - `call-shared`
+
+libffi configures, builds, and installs useful artifacts, and its basic
+`ffi_call()` and closure paths work in isolation. Windows shared-library output
+and import-library use are now possible; the CRT implements the PE runtime
+pseudo-relocation support needed by ordinary consumers of `libffi.dll.a`.
+
+Status stays conservative because a correctness bug remains: calling
+`ffi_call()` and then a further libffi call in the same process can corrupt a
+callee-saved register at optimized levels on the affected paths. This needs a
+focused debugger pass before libffi can be promoted to `shared-pass`.

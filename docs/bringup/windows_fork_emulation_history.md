@@ -4,7 +4,7 @@
 > every bug found and fixed along the way, benchmarks, prior-art research,
 > and attempts that were reverted. It is kept as a record, not as current
 > documentation. **For the current implementation and open issues, see
-> [`windows_fork_emulation.md`](windows_fork_emulation.md).**
+> [`../windows_fork_emulation.md`](../windows_fork_emulation.md).**
 
 ## Goal
 
