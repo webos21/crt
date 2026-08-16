@@ -4838,11 +4838,28 @@ long __crt_sys_rename(const char* old_path, const char* new_path) {
   char translated_new_path[4096];
   const char* host_old_path = translate_path_for_host(old_path, translated_old_path);
   const char* host_new_path = translate_path_for_host(new_path, translated_new_path);
+  int attempt;
 
-  if (!MoveFileExA(host_old_path, host_new_path, MOVEFILE_REPLACE_EXISTING)) {
-    return fail_last_error();
+  /* Same delete-pending/handle-timing race __crt_sys_unlink() above already
+   * guards against: MOVEFILE_REPLACE_EXISTING deletes the destination
+   * internally before the move, so a lingering handle on that exact path
+   * (found for real via toybox's dos2unix/unix2dos, whose copy_tempfile()/
+   * replace_tempfile() temp-file-then-rename-over-original pattern hits
+   * this reliably) can make MoveFileExA() itself report
+   * ERROR_SHARING_VIOLATION/ERROR_ACCESS_DENIED for the same short window
+   * __crt_sys_unlink()/__crt_sys_symlink() already retry through. This was
+   * the one rename()/MoveFileExA() call site in this file that never
+   * gained that retry when the others did. */
+  for (attempt = 0; attempt < WINDOWS_DELETE_RACE_RETRY_ATTEMPTS; ++attempt) {
+    if (MoveFileExA(host_old_path, host_new_path, MOVEFILE_REPLACE_EXISTING)) {
+      return 0;
+    }
+    if (!windows_is_delete_race_error(GetLastError())) {
+      break;
+    }
+    Sleep(WINDOWS_DELETE_RACE_RETRY_SLEEP_MS);
   }
-  return 0;
+  return fail_last_error();
 }
 
 static DWORD windows_page_protect(int prot) {

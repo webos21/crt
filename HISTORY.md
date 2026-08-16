@@ -10,6 +10,104 @@ substantive update.
 
 ## 2026-08-16
 
+- **`linkat()`'s Linux/macOS raw syscall trampolines are confirmed
+  working**: the user built and ran this project on real Linux and macOS
+  hardware, through the full `curl` port test (the last, heaviest port in
+  this project's own queue). Closes the "unverified" gap the same-day
+  `linkat()`/`link()` PAL implementation entry left open -- the Windows
+  `CreateHardLinkA` path was already verified in-session; the Linux
+  x86_64/aarch64 and macOS x86_64/aarch64 `__crt_sys_link` trampolines
+  (added by hand-mirroring the existing `__crt_sys_symlink`/
+  `__crt_sys_unlink` pattern, using well-established syscall numbers, with
+  no cross-toolchain available to test them in-session) could not be.
+  `TODO.md`'s own dated verification item for this is now resolved.
+
+- **Diffed this project's own toybox applet set against the real
+  Android/Bionic reference config and closed almost the entire gap,
+  after the user asked specifically for a Bionic/Android-parity check
+  (not just further ad hoc LLP64 auditing).** `shell/toybox/src/android/
+  linux/generated/config.h` turns out to already be a full, real Android
+  AOSP-derived defconfig snapshot (`CFG_x=1` for 99 applets, most of
+  which this project's own `shell/toybox/crt/generated/newtoys.h` had
+  never registered) -- comparing the two directly, rather than continuing
+  to hand-pick "next candidates," surfaced the true remaining gap in one
+  pass. First, `cut` (the user's own trigger for this investigation, hit
+  while testing a real `configure` script): already compiled
+  (`CRT_TOYBOX_SOURCES`), already `CFG_CUT=1`, already had its
+  `GLOBALS()` union member in `flags.h` -- needed only a `newtoys.h`
+  entry and a rootfs alias, LLP64-audited clean. Extending that same
+  check to the *whole* config-enabled set found 23 more names in exactly
+  the same state (already compiled, already `CFG_x=1`, already in
+  `flags.h`) -- LLP64-audited clean and, this time, also functionally
+  smoke-tested for real (not just pointer-width-safe) before enabling:
+  `cmp`, `comm`, `cpio`, `dd`, `diff`, `du`, `env`, `file`, `find`,
+  `getconf`, `hostname`, `md5sum` (+ its `sha1sum`/`sha256sum`/
+  `sha512sum` `OLDTOY` aliases, matching Android's own choice to leave
+  `sha384sum` disabled), `microcom`, `nl`, `od`, `paste`, `patch`, `seq`,
+  `setsid`, `tar`, `truncate`, `xxd`. Both `newtoys.h` insertions were
+  verified against `LC_ALL=C sort -c` (matching `toy_find()`'s own
+  `strcmp()` byte-order requirement) before and after, given the same
+  day's earlier `crc32`/`cp` sort-order regression.
+
+  Functional testing (not just LLP64 auditing) caught two real gaps pure
+  pointer-width review would have missed entirely:
+  - **`timeout` hangs instead of enforcing its deadline** -- confirmed by
+    directly running `timeout 3 true` and having it block well past 3
+    seconds. Its `SIGCHLD`-plus-`siginfo_t` async handler
+    (`sigsetjmp`/`siglongjmp` out of the handler) combined with a
+    `poll()` loop is a real, different shape from anything this PAL's
+    Windows signal backend has been exercised against before (see
+    `docs/signal_delivery.md`'s own scope notes on blocking syscalls with
+    no polling checkpoint) -- left disabled, not investigated further
+    this pass.
+  - **`dos2unix`/`unix2dos` hit a genuine, non-transient Windows
+    limitation**, not a bug that retrying fixes: their shared
+    `copy_tempfile()`/`replace_tempfile()` implementation (write a
+    converted copy to a tempfile, then rename it over the original) keeps
+    the *original* file's own read handle open for the whole conversion,
+    and `rename()`-over-a-file-with-another-open-handle reliably fails on
+    Windows with `ERROR_ACCESS_DENIED` -- reproduced directly with a
+    minimal standalone repro (open a file read-only without closing it,
+    then `rename()` a different file onto that same path from the same
+    process). Root-caused precisely enough to also find and fix a real,
+    general, adjacent bug along the way: `__crt_sys_rename()`
+    (`libc/src/arch/windows/common/syscall.c`) was the one
+    `MoveFileExA()`/`DeleteFileA()`-family call site in that file that
+    never got the delete-pending/handle-timing retry loop
+    `__crt_sys_unlink()`/`__crt_sys_symlink()`/`__crt_sys_link()` already
+    have -- fixed, a real and generally useful hardening, but confirmed
+    (via the same standalone repro) *not* sufficient to fix `dos2unix`
+    itself, since that failure isn't transient at all. Fixing `dos2unix`
+    for real would need `FILE_RENAME_POSIX_SEMANTICS`
+    (`SetFileInformationByHandle`/`FileRenameInfoEx`, Windows 10 1607+,
+    the one Win32 mechanism that actually replicates POSIX
+    rename-over-open-handle semantics) or restructuring the temp-file
+    pattern to close the original before renaming -- left disabled, not
+    attempted this pass.
+  - `dnsdomainname` was drafted into the batch by mistake (its `NEWTOY`
+    lives in the same file as `hostname`'s) and reverted before landing --
+    Android's own config actually leaves `CFG_DNSDOMAINNAME=0`.
+
+  Also confirmed via `shell/toybox/crt/generated/config.h` (a small,
+  already-existing `#undef`/`#define` override layer this project applies
+  on top of the base Android config, `#include`d first in the actual
+  compiled `config.h`) that ten more Android-enabled names are *already*
+  deliberately forced off here regardless of upstream's own choice --
+  `flock`, `gzip`, `zcat`, `mount`, `nproc`, `pgrep`, `pkill`, `ps`,
+  `umount`, `unshare` -- matching (and for `ps`/`mount`/`umount`/`pgrep`/
+  `pkill`, reinforcing) `TODO.md`'s own existing "Keep deeper Linux-like
+  applets deferred" list. Three more Android-enabled names have no source
+  file at all in this project's own toybox import and would need a real
+  upstream pull first: `install`, `realpath`, `whoami` (an `OLDTOY` alias
+  of `logname`, which is absent).
+
+  New rootfs applet-alias entries added to `tools/create_rootfs.py` for
+  every name actually enabled. All existing regression tests
+  (`crt_mksh_rootfs_toybox_applet_sweep_runs` in particular, which
+  dispatches every currently-registered applet name) plus fresh manual
+  functional smoke tests for each newly-enabled name pass. All 95 tests
+  pass via a genuine `cmake --fresh` reconfigure plus full rebuild.
+
 - **Fixed a real `cp` regression from the same day's earlier toybox
   applet batch, caught by the user asking for a real zlib port
   rebuild.** Inserting `CRC32` between `CKSUM` and `CP` in
