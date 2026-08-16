@@ -10,6 +10,20 @@ substantive update.
 
 ## 2026-08-16
 
+- **Moved the toybox applet status detail out of `TODO.md` into
+  `docs/toybox_applet_status.md`**, mirroring `docs/job_control.md`'s
+  existing pattern (a short pointer in `TODO.md`, full detail in `docs/`).
+  `TODO.md`'s "in progress" section had grown a long, applet-by-applet
+  writeup (the `globals.h`/`flags.h` registration mechanism and its two
+  traps, the still-open `expand`/`logger`/`fold`/`uudecode`/`cal`/`split`/
+  `strings` and `timeout` items, and the deferred-applet list with each
+  one's concrete reason) that belongs in `docs/` per this project's own
+  stated policy ("Detailed policy and provenance stay in `docs/`"), not
+  repeated inline in the work-queue file every time it's touched. No
+  content was dropped, only relocated -- see `docs/toybox_applet_status.md`
+  for the current detail and this entry as the historical record that the
+  investigation behind it happened.
+
 - **Enabled `df`/`stty`, fixing two real, general PAL bugs the enablement
   uncovered along the way.** Both were investigated concretely (upstream
   source read directly, not guessed) as part of a review of the remaining

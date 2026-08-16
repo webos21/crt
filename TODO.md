@@ -88,106 +88,18 @@ newest entry first) rather than leaving it here.
 Active threads, not a flat list of one-off items. Remaining libc/PAL
 residuals before the upper runtime phase (see `docs/runtime_roadmap.md`):
 
-- Expand toybox applets only when the backing Bionic-compatible CRT/PAL
-  surface exists. `which`/`readlink`/`stat`/`touch`/`id`/`xargs`;
-  `cksum`/`crc32`/`tsort`/`tty`/`unlink`/`uuencode`; `link`; a
-  Bionic/Android-parity pass (`cut` plus 24 more names, diffed directly
-  against the real Android/Bionic reference config rather than picked ad
-  hoc); `dos2unix`/`unix2dos` (needed a real `FILE_RENAME_POSIX_
-  SEMANTICS` rename() implementation first, not just an LLP64 audit); and
-  `df`/`stty` (needed two real, general PAL fixes uncovered by actually
-  running them, not just an LLP64 audit -- see `HISTORY.md`'s 2026-08-16
-  entries) are all done. Still open:
-  - `expand`, `logger`, `fold`, `uudecode`, `cal`, `split`, `strings` are
-    audited and LLP64-safe, but need `shell/toybox/src/android/linux/
-    generated/globals.h` extended first (their `GLOBALS()` struct is
-    missing from the committed `union global_union` entirely -- **not**
-    `flags.h`, a real correction of this item's own earlier framing: see
-    the `df`/`stty` entry in `HISTORY.md`'s 2026-08-16 entries for how
-    that distinction was actually found and why hand-adding a
-    `struct X_data`/union-member pair to `globals.h` is low-risk enough to
-    do directly, unlike `flags.h`'s bit-position `FLAG_x` machinery).
-    `flags.h` itself may still need per-applet attention too -- the same
-    2026-08-16 entries found its checked-in snapshot leaves every
-    currently-disabled applet's `FLAG_x` on the always-0 `FORCED_FLAG`
-    multiplier rather than the real `1LL` one, which silently breaks any
-    of its flags once the applet is enabled without noticing (`df -h`
-    behaved exactly like plain `df`, no error). Check each of these seven
-    for the same pattern before considering the `flags.h` side done, not
-    just `globals.h`.
-  - **`timeout`'s original hang is fixed, but it still needs two more,
-    separate PAL features before it's actually correct.** Root cause of
-    the hang: `__crt_sys_poll()`'s `poll_handle()` called
-    `PeekNamedPipe()` unconditionally on any pipe handle to answer
-    `POLLIN`, but that call does not reliably report "no data" on a pipe's
-    *write* end the way it does for a real read end -- confirmed with a
-    minimal standalone repro (an unwritten pipe write end polled for
-    `POLLIN` came back "ready" almost instantly instead of blocking).
-    Fixed by tracking pipe write ends (`fd_pipe_write_only[]`) and never
-    calling `PeekNamedPipe()` on one; new regression:
-    `tests/poll_pipe_write_end_test.c`. This is a real, general `poll()`
-    fix (affects any code polling a pipe write end for readability, not
-    just `timeout`) and stays landed regardless of `timeout`'s own status.
-    Testing the real applet after this fix surfaced two more, deeper,
-    separate gaps rather than closing the item outright:
-    - `deliver_signal()`'s `SA_SIGINFO` path (`libc/src/signal.c`) always
-      hands the handler a zeroed `siginfo_t` (`si_code = 0; si_status =
-      0;`) regardless of which signal or why -- for `SIGCHLD` specifically
-      this means a handler can never learn which child exited or how.
-      `timeout.c`'s own handler reads exactly those fields, so it always
-      computes a wrong exit status. This project's own child-tracking
-      tables (`child_process_table`/`child_pid_table`, already used by
-      `waitpid()`) have the real data; `SIGCHLD` dispatch just doesn't
-      thread it through to `siginfo_t` yet.
-    - `kill()` still only supports signaling the calling process itself
-      (a pre-existing, previously-documented gap) -- sending a real signal
-      to a *different* process is a no-op, so `timeout`'s own deadline
-      enforcement (`kill(pid, SIGTERM)` on the child once the clock runs
-      out) never actually terminates anything; the child just runs to its
-      own natural completion. Confirmed directly: `timeout 2 sleep 10`
-      took the full ~10s, not ~2s.
-    `timeout` stays disabled until at least the `kill()` gap closes (the
-    `siginfo_t` gap affects correctness of the reported exit code, not
-    whether the deadline is enforced at all).
-  - Beyond those, the Android/Bionic-parity diff is exhausted for
-    non-`/proc`-dependent applets. `shell/toybox/crt/generated/config.h`
-    (a small `#undef`/`#define` override layer over the base Android
-    config, `#include`d first) already forces `flock`/`gzip`/`zcat`/
-    `mount`/`nproc`/`pgrep`/`pkill`/`ps`/`umount`/`unshare` to `0`
-    regardless of upstream, matching the deferred-applet list below.
-    `install`/`realpath`/`whoami` (alias `logname`) have no source file
-    in this tree at all and would need a real upstream import first.
-
-- Keep deeper Linux-like applets deferred until the PAL owns enough backing
-  behavior. Investigated concretely (2026-08-16, upstream source read for
-  each, not guessed) -- `df` and `stty` turned out to be tractable and are
-  now done (see above); everything below stays deferred for a specific,
-  confirmed reason, not just "not done yet":
-  - `ps`/`top`/`iotop`/`pgrep`/`pkill`: all five are registered from one
-    shared file (`shell/toybox/src/toys/posix/ps.c`, ~2000 lines) whose
-    `get_ps()`/`get_threads()` does a real recursive `/proc` walk over
-    *every process on the system* (`/proc/$PID/stat`, `/status`, `/io`,
-    `/statm`, `/exe` readlink, `/cmdline`, `/fd/*`, `/proc/$PID/task/*`,
-    `/proc/tty/drivers`, cgroup) -- architecturally a much larger surface
-    than the `/proc/self/*` virtual files this project already has. Add
-    through toybox only once the rootfs/PAL provides real multi-process
-    `/proc/$PID` data, not mksh builtins. Already forced off via
-    `shell/toybox/crt/generated/config.h` regardless of upstream
-    Android's own config -- see above.
-  - `mount`/`umount`: call the real Linux `mount(2)`/`umount(2)` kernel
-    syscalls directly -- genuinely inapplicable outside real Linux with
-    root and a real VFS/block-device concept, which this PAL's
-    architecture doesn't have at all.
-  - `ifconfig`: needs deep Linux-specific socket ioctls (`SIOCGIFCONF`,
-    `SIOCGIFFLAGS`, `SIOCGIFADDR`, `SIOCGIFHWADDR`, `SIOCSIFADDR`, ...)
-    with no Windows equivalent -- Windows needs the entirely different IP
-    Helper API (`GetAdaptersAddresses` etc.), a separate networking-PAL
-    feature beyond the existing curl-oriented socket layer.
-  - `login`: needs `crypt()` (unimplemented), `getspnam()`/a shadow
-    password DB (unimplemented), and real multi-user `setuid` session
-    switching -- architecturally mismatched with this project's
-    single-host-process-per-invocation model.
-  - device-manager or other procfs-heavy commands.
+- **Toybox applet expansion**, only when the backing Bionic-compatible
+  CRT/PAL surface exists. Full applet-by-applet status (what's enabled,
+  what's still open and why, the deferred-applet list with each one's
+  concrete reason, and the `globals.h`/`flags.h` registration traps found
+  while enabling `df`/`stty`) now lives in
+  [`docs/toybox_applet_status.md`](docs/toybox_applet_status.md) -- this
+  bullet stays a pointer. Still open there: `expand`/`logger`/`fold`/
+  `uudecode`/`cal`/`split`/`strings` (a `globals.h` fix, plus a per-applet
+  `flags.h` check); `timeout` (hang fixed, two deeper gaps remain: real
+  `SIGCHLD` `siginfo_t` data, cross-process `kill()`); and a confirmed-not-
+  guessed deferred list (`ps`/`top`/`iotop`/`pgrep`/`pkill`, `mount`/
+  `umount`, `ifconfig`, `login`, procfs-heavy commands).
 
 ## planned
 
