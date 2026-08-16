@@ -52,11 +52,6 @@ newest entry first) rather than leaving it here.
 Active threads, not a flat list of one-off items. Remaining libc/PAL
 residuals before the upper runtime phase (see `docs/runtime_roadmap.md`):
 
-- Expand Windows shell smoke tests:
-  - fd 3+ redirection inside mksh;
-  - grouped commands;
-  - background commands where non-interactive semantics are clear;
-  - configure-script patterns involving subshells and redirections.
 - Decide and document the minimal Windows console process-group policy needed
   for interactive mksh:
   - Ctrl-C / Ctrl-Break delivery;

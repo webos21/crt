@@ -130,6 +130,41 @@ substantive update.
   was even added) both stay clean -- confirming no regression across
   every configure-driven port build this interpreter change touches.
 
+- **Expanded Windows shell smoke test coverage for real mksh interpreter
+  behavior** (TODO.md's "Expand Windows shell smoke tests" item): the
+  existing `tests/shell_smoke_test.c` only ever exercised this project's
+  own `__crt_shell_spawn()`/`posix_spawn()` PAL primitives directly from
+  C, never actually routing anything through mksh's own script parser.
+  New `tests/mksh_shell_smoke_test.c` (same `/bin/sh -c script` +
+  `posix_spawn()` + captured-stdout technique as
+  `tests/mksh_subshell_status_test.c`) covers all four requested areas
+  with 15 cases: fd 3+ redirection (`exec 3>file`/`exec 3<file`, the
+  classic three-step `3>&1 1>&2 2>&3 3>&-` stdout/stderr swap idiom, and
+  fd 3 through a subshell's own redirection); `{ }` grouped commands
+  (shares the current shell's variables/`cd` state, unlike a `(...)`
+  subshell -- checked with a direct contrasting pair -- and its own
+  exit status still propagates correctly through a `;`-list, the same
+  class of check the subshell-status fix above needed for `TPAREN`);
+  `&`/`wait` backgrounding (a background job doesn't block the next
+  statement, `wait` with no args blocks until it finishes, `$!` + `wait
+  $!` retrieves its real exit status rather than just unblocking, and
+  multiple concurrent background jobs can each be waited on
+  individually by their own captured pid); and autoconf-shaped
+  subshell/redirection idioms (`(exit $ac_status)` as a brace group's
+  tail statement -- the exact scenario `shell/mksh/src/exec.c`'s own
+  comment documents as historically broken and the reason `TPAREN` gets
+  real process isolation on Windows at all; a subshell directly as an
+  `if` condition, both taken and not-taken; and a redirected-subshell-
+  probe-then-`test $?`-check pattern generalizing the real zlib
+  `ranlib`/`RANLIB=true` shape beyond that one specific case). Needed
+  `PATH=/system/bin:/bin:/usr/bin` added to the test's own `ENVIRONMENT`
+  property alongside `CRT_ROOTFS` (discovered directly: without it,
+  `rm`/`cat` inside the test scripts failed with "inaccessible or not
+  found", since resolving external commands by bare name needs `PATH`
+  set the same way a real port build's own shell environment already
+  has it, per `tools/crt-port-build.py`'s own `make_env()`). Full
+  `ctest` (90/90) stays clean.
+
 ## 2026-08-15
 
 - **libffi's aarch64-Windows `ffi_call()` repeat-call register-corruption

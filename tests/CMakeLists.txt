@@ -388,6 +388,19 @@ set_tests_properties(mksh_subshell_status_test_runs PROPERTIES
   ENVIRONMENT "CRT_ROOTFS=${CRT_ROOTFS}"
 )
 
+# TODO.md's "Expand Windows shell smoke tests" item: real mksh
+# interpreter-level coverage for fd 3+ redirection, `{ }` grouped
+# commands, `&`/`wait` backgrounding, and autoconf-shaped subshell/
+# redirection idioms -- see mksh_shell_smoke_test.c's own top comment.
+add_crt_test(mksh_shell_smoke_test mksh_shell_smoke_test.c)
+add_dependencies(mksh_shell_smoke_test rootfs)
+set_tests_properties(mksh_shell_smoke_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "mksh_shell_smoke_test: ok"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+  ENVIRONMENT "CRT_ROOTFS=${CRT_ROOTFS};PATH=/system/bin:/bin:/usr/bin"
+  TIMEOUT 30
+)
+
 add_crt_test(mntent_test mntent_test.c)
 set_tests_properties(mntent_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "mntent_test: ok"
