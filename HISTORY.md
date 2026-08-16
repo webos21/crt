@@ -10,6 +10,51 @@ substantive update.
 
 ## 2026-08-16
 
+- **Decided and documented the Windows interactive-job-control policy**
+  (TODO.md's "Decide and document the minimal Windows console
+  process-group policy" item) -- design and documentation only, no code,
+  by explicit user choice: this project's own mksh build defines
+  `MKSH_NOPROSPECTOFWORK` unconditionally on every host (not just
+  Windows, `shell/CMakeLists.txt`), which compiles out mksh's entire
+  internal job-control implementation everywhere, so there is no current
+  interactive-job-control gap actively being worked -- this is
+  forward-looking policy for whoever eventually re-enables it. Three
+  pieces, all recorded in `docs/job_control.md`'s new "Interactive Job
+  Control" section: (1) Ctrl-C/Ctrl-Break delivery -- bridge
+  `SetConsoleCtrlHandler` into `signal_actions[]`/`raise()`, both
+  `CTRL_C_EVENT`/`CTRL_BREAK_EVENT` mapped to `SIGINT` (Bionic's own
+  `signal.h` has no `SIGBREAK`), following `docs/signal_delivery.md`'s
+  existing `SIGCHLD` pattern exactly -- an atomic pending-flag set from
+  the handler thread (Win32 runs it on a new thread per event), actual
+  dispatch on the main thread at the same `pselect()`/`select()`/
+  `poll()` checkpoints, not synchronous dispatch from the handler thread
+  itself, to avoid introducing real concurrency hazards into the
+  existing single-threaded dispatch assumption. (2) Foreground
+  process-group approximation -- realized that `CREATE_NEW_PROCESS_GROUP`
+  (already used by this PAL's `posix_spawn()` for
+  `POSIX_SPAWN_SETPGROUP`/`SETSID`) gives most of real POSIX
+  foreground/background Ctrl-C semantics for free: Windows automatically
+  exempts a `CREATE_NEW_PROCESS_GROUP` child from `CTRL_C_EVENT`, so
+  keeping only background jobs in a new process group (foreground jobs
+  stay in the shell's own console group) reproduces "only the foreground
+  job's group gets `SIGINT`" without needing per-job
+  `GenerateConsoleCtrlEvent` targeting for the common case; the one real
+  gap is recording the mapping from this project's own CRT-managed
+  `pgid` integer (currently opaque, tied to nothing real) to the actual
+  Windows process-group id once a job is spawned into one. (3)
+  Stopped-child status -- decided to stay honest rather than fake it:
+  no real Windows equivalent to `SIGTSTP`/`SIGSTOP`-driven process
+  suspension exists without reaching for undocumented NT internals
+  (`NtSuspendProcess`) this project has consistently avoided elsewhere,
+  so `WIFSTOPPED` support for a real Windows child stays explicitly out
+  of scope until real job control is an actual priority, not left
+  ambiguously "later". `docs/signal_delivery.md`'s own "Next Steps" was
+  updated to point at this decision instead of asking the same open
+  question again. Moved out of TODO.md's "in progress" into a new
+  "Interactive job control" section under "planned", scoped to the three
+  concrete follow-up pieces above plus re-enabling `MKSH_UNEMPLOYED`
+  itself, once this is ever prioritized.
+
 - **Fixed a real CI-only failure (`mksh_subshell_status_test_runs`/
   `mksh_shell_smoke_test_runs`) in the two commits just above, caused by
   `add_subdirectory(tests)` running before `CRT_ROOTFS` was ever set.**

@@ -79,11 +79,6 @@ newest entry first) rather than leaving it here.
 Active threads, not a flat list of one-off items. Remaining libc/PAL
 residuals before the upper runtime phase (see `docs/runtime_roadmap.md`):
 
-- Decide and document the minimal Windows console process-group policy needed
-  for interactive mksh:
-  - Ctrl-C / Ctrl-Break delivery;
-  - foreground process group approximation;
-  - stopped-child status policy.
 - Add virtual rootfs files narrowly as porting workloads require them:
   - `/proc/mounts`;
   - `/proc/self/status`;
@@ -109,6 +104,26 @@ residuals before the upper runtime phase (see `docs/runtime_roadmap.md`):
   - device-manager or procfs-heavy commands.
 
 ## planned
+
+### Interactive job control (deferred until it's an actual priority)
+
+`docs/job_control.md`'s "Interactive Job Control" section has the decided
+design for all three pieces below; nothing here is implemented yet, and this
+project's own mksh build has job control compiled out entirely on every host
+(`MKSH_NOPROSPECTOFWORK`), not just Windows -- see that section for why this
+is forward-looking policy, not a current gap being actively worked.
+
+- Bridge `SetConsoleCtrlHandler` (`CTRL_C_EVENT`/`CTRL_BREAK_EVENT`, both to
+  `SIGINT`) into `signal_actions[]`/`raise()`, mirroring `SIGCHLD`'s existing
+  pending-flag-plus-checkpoint pattern (`docs/signal_delivery.md`).
+- Track the real Windows process-group id behind this project's own
+  CRT-managed `pgid` integer once a job is actually spawned into a new
+  process group, so `tcsetpgrp()` and a targeted `CTRL_BREAK_EVENT` have a
+  real id to act on.
+- Re-enable `MKSH_UNEMPLOYED` (mksh's own job control) once the above exists,
+  and only then decide whether stopped-child (`WIFSTOPPED`) support is worth
+  the low-level Windows work it would need -- `docs/job_control.md` currently
+  keeps that explicitly out of scope.
 
 ### Upper runtime roadmap after libc/PAL cleanup
 

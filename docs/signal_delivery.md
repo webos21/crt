@@ -337,9 +337,18 @@ longer special-cases Windows at all.
 
 ## Next Steps
 
-- Decide whether Windows should eventually bridge `SetConsoleCtrlHandler`/
-  vectored exception handling into `signal_actions[]`/`raise()`, or whether
-  that stays out of scope indefinitely.
+- **Decided** (not yet implemented -- see `docs/job_control.md`'s
+  "Interactive Job Control" section for the full design): bridge
+  `SetConsoleCtrlHandler` (`CTRL_C_EVENT`/`CTRL_BREAK_EVENT`, both mapped to
+  `SIGINT`) into `signal_actions[]`/`raise()`, following this file's own
+  `SIGCHLD` pattern -- an atomic pending-flag set from the handler thread,
+  actual dispatch on the main thread at the same `pselect()`/`select()`/
+  `poll()` checkpoints `SIGCHLD` already uses, not synchronous dispatch from
+  the handler thread itself. Vectored exception handling (`SIGSEGV`/
+  `SIGFPE`/`SIGILL`) stays a separate, not-yet-decided question -- unlike
+  console control events, it has no natural fit with this project's
+  `MKSH_NOPROSPECTOFWORK`-disabled interactive-job-control motivation, so it
+  wasn't decided alongside the console-event bridge above.
 - Consider whether other blocking CRT calls beyond `pselect()`/`select()`/
   `poll()` need the same "was it already pending" generation check, or
   whether real `EINTR` propagation from the underlying syscalls already
