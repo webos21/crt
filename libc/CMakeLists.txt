@@ -31,6 +31,7 @@ set(CRT_LIBC_SOURCES
   src/resource.c
   src/sched.c
   src/scanf.c
+  src/semaphore.c
   src/setjmp.c
   src/shadow.c
   src/signal.c

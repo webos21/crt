@@ -10,6 +10,56 @@ substantive update.
 
 ## 2026-08-16
 
+- **Implemented `semaphore.h` and public `<stdatomic.h>`**, the two
+  cheapest "high priority" findings from the Bionic libc gap audit below
+  (both had every needed primitive already sitting in the tree, unlike the
+  `sendmsg`/`recvmsg`+`SCM_RIGHTS`/`memfd_create` pair, which stays
+  deliberately deferred to when the compositor-boundary work actually
+  begins).
+
+  `semaphore.h` (`libc/src/semaphore.c`): `sem_t`/`sem_init`/`sem_destroy`/
+  `sem_wait`/`sem_trywait`/`sem_timedwait`/`sem_post`/`sem_getvalue`, built
+  over the same private futex/wait-address primitive
+  (`__crt_wait32`/`__crt_wake32_*`) that already backs `pthread_mutex`/
+  `pthread_cond`/`pthread_rwlock` -- a plain non-negative count word, CAS
+  fast path for `sem_wait`/`sem_trywait`/`sem_post`, blocking via
+  `__crt_wait32`/`__crt_wait32_timed` when the count is `0`. `pshared`
+  cross-process semaphores return `ENOTSUP`, matching `PTHREAD_PROCESS_
+  SHARED`'s existing status on `pthread_mutex`/`rwlock`/`spinlock`. Named
+  semaphores (`sem_open`/`sem_close`/`sem_unlink`) are declared but always
+  fail with `ENOSYS`, matching real Bionic's own policy -- Android has
+  never supported them either. New regression: `tests/semaphore_test.c`,
+  covering argument validation, a same-thread post/wait/trywait/getvalue
+  round trip, a real `sem_timedwait` timeout, and a real cross-thread
+  `pthread_create` + blocking `sem_wait()` + `sem_post()` wakeup (not just
+  the CAS fast path).
+
+  Public `<stdatomic.h>` (`include/stdatomic.h`): a real C11 atomics
+  header, not just the existing private `libc/include/private/
+  crt_atomic.h` int-only internal layer. Implemented over Clang's
+  `__c11_atomic_*` builtins acting on real `_Atomic(T)`-qualified types --
+  verified directly against this project's exact `-std=gnu99
+  -ffreestanding` build flags with a throwaway probe before writing the
+  real header, not assumed from the C11 spec text: `_Generic` (a real C11-
+  only feature the standard's own reference `<stdatomic.h>` text leans on
+  for type-generic macros) isn't available under `-std=gnu99`, but that
+  turned out not to matter, since `__c11_atomic_*` builtins are themselves
+  already type-generic compiler magic -- they infer the pointee type
+  straight from the `_Atomic`-qualified pointer argument, so plain macros
+  are enough. `_Atomic` itself is a Clang language extension available
+  regardless of `-std=gnu99` vs. `-std=c11`, also confirmed by direct
+  probe rather than assumed. Covers `memory_order`, the core scalar
+  `atomic_*` typedefs plus the `stdint.h`-backed ones (`atomic_size_t`,
+  `atomic_intptr_t`, etc. -- `atomic_char16_t`/`atomic_char32_t`
+  intentionally deferred alongside the still-missing `uchar.h`),
+  `atomic_flag`, every `atomic_*`/`atomic_*_explicit` operation, fences,
+  and the `ATOMIC_*_LOCK_FREE` macros (mapped straight to Clang's own
+  `__CLANG_ATOMIC_*_LOCK_FREE` predefined macros). New regression:
+  `tests/stdatomic_test.c`.
+
+  All 102 tests pass via a genuine `cmake --fresh` reconfigure plus full
+  rebuild.
+
 - **Audited this project's libc surface against real Android Bionic before
   starting `libcrtgfx`**, per `docs/runtime_roadmap.md`'s own "reduce the
   remaining planned libc/PAL items... before starting the upper runtime in

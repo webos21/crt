@@ -109,16 +109,20 @@ Reviewed (2026-08-16) against real Android Bionic's public surface, not
 guessed -- full findings, evidence, and priority tiers in
 [`docs/bionic_libc_gaps.md`](docs/bionic_libc_gaps.md). Summary:
 
-- **High priority, concretely blocks the Wayland-compositor-boundary goal**:
-  `sendmsg`/`recvmsg` + `SCM_RIGHTS`/`CMSG_*` fd passing (entirely absent --
-  Wayland's core wire-protocol mechanism, no compositor boundary is
-  possible without it); `memfd_create` (absent -- the modern anonymous
-  shared-memory-fd mechanism `wl_shm` clients use, pairs with the above);
-  `semaphore.h` (absent, surprising given how complete pthreads otherwise
-  is -- the private futex/wait-address layer already backing
-  `pthread_cond` etc. makes this cheap); public `<stdatomic.h>` (currently
-  only a private internal layer -- QuickJS/V8/Skia all commonly depend on
-  it directly, and QuickJS bring-up is the very next roadmap step).
+- `semaphore.h` and public `<stdatomic.h>` are **done** (2026-08-16) --
+  both cheap given existing infrastructure (the private futex/wait-address
+  layer already backing `pthread_cond` etc., and Clang's `__c11_atomic_*`
+  builtins respectively). See `HISTORY.md`.
+- **High priority, still open, concretely blocks the Wayland-compositor-
+  boundary goal**: `sendmsg`/`recvmsg` + `SCM_RIGHTS`/`CMSG_*` fd passing
+  (entirely absent -- Wayland's core wire-protocol mechanism, no
+  compositor boundary is possible without it); `memfd_create` (absent --
+  the modern anonymous shared-memory-fd mechanism `wl_shm` clients use,
+  pairs with the above). Deliberately deferred to when the actual
+  compositor-boundary work begins, not built speculatively now -- unlike
+  `semaphore.h`/`stdatomic.h`, these need real Windows PAL design work
+  (`AF_UNIX` + `SCM_RIGHTS` has no native Windows equivalent), not a thin
+  syscall wrapper.
 - **Medium priority**: `sys/epoll.h`/`sys/eventfd.h`/`sys/timerfd.h`
   (Linux-only in real Bionic too; relevant to both `wl_display` client
   integration and a future `libcrtjs` event loop); `dl_iterate_phdr`/

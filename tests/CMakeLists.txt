@@ -433,6 +433,16 @@ set_tests_properties(atomic_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "atomic_test: ok"
 )
 
+add_crt_test(stdatomic_test stdatomic_test.c)
+set_tests_properties(stdatomic_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "stdatomic_test: ok"
+)
+
+add_crt_test(semaphore_test semaphore_test.c)
+set_tests_properties(semaphore_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "semaphore_test: ok"
+)
+
 add_crt_test(wait_test wait_test.c)
 set_tests_properties(wait_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "wait_test: ok"

@@ -26,15 +26,17 @@ in those two win.
   own `cmake --workflow` step does not run `port-test-recipes` (a
   separate, heavier target that fetches and builds third-party sources)
   -- that's verified locally/per-host instead, see below.
-- **`ctest`**: 100 registered tests on Windows and 77 on macOS in the
+- **`ctest`**: 102 registered tests on Windows and 77 on macOS in the
   latest local run (count is slightly
   OS-dependent -- a few targets, like `windows_export_hygiene_test`, only
-  exist on their own OS), all passing locally on Windows (100/100, most
-  recently confirmed after enabling `df`/`stty` and fixing two real PAL
+  exist on their own OS), all passing locally on Windows (102/102, most
+  recently confirmed after implementing `semaphore.h` and public
+  `<stdatomic.h>` -- the two cheapest findings from a Bionic libc gap
+  audit done before starting `libcrtgfx` -- via a genuine `cmake --fresh`
+  reconfigure). Enabling `df`/`stty` just before that fixed two real PAL
   bugs that surfaced along the way (a stale `flags.h` snapshot leaving
   their flags dead code, and no `tcgetattr`/`tcsetattr` round-trip
-  fidelity beyond three bits) -- see `HISTORY.md` -- via a genuine
-  `cmake --fresh` reconfigure). The user
+  fidelity beyond three bits) -- see `HISTORY.md`. The user
   also confirmed a real Linux and macOS build+run this same date, through
   the full `curl` port test -- this closed out the one cross-platform
   verification gap this session's `linkat()`/`link()` PAL work had left
@@ -187,6 +189,18 @@ in those two win.
   `/proc`-heavy applet set (`ps`/`top`/`iotop`/`pgrep`/`pkill`,
   `mount`/`umount`, `ifconfig`, `login`, each now with a concrete,
   confirmed reason recorded in `TODO.md` rather than "not done yet").
+- A real, evidence-based Bionic libc gap audit was done before starting
+  `libcrtgfx` (see `docs/bionic_libc_gaps.md`, `TODO.md`'s new "Bionic libc
+  completeness before `libcrtgfx`" section). `semaphore.h` and public
+  `<stdatomic.h>` are now implemented -- see `HISTORY.md`. Still open and
+  deliberately deferred to when the compositor-boundary work actually
+  starts: `sendmsg`/`recvmsg` + `SCM_RIGHTS`/`CMSG_*` fd passing and
+  `memfd_create` (both concretely block a Wayland-compatible compositor
+  boundary, but need real Windows PAL design work, not a thin syscall
+  wrapper); medium/lower priority items (`epoll`/`eventfd`/`timerfd`,
+  `dl_iterate_phdr`/`link.h`/`elf.h`/`dladdr`, `PTHREAD_PROCESS_SHARED`,
+  `glob.h`/`sys/prctl.h`/`ucontext.h`/`ifaddrs.h`/`threads.h`/`uchar.h`)
+  have no identified near-term consumer yet.
 - The next product-level target is documented in `docs/runtime_roadmap.md`:
   an Electron-class rebuilt runtime made of `libcrtgfx` (Skia + Wayland-style
   compositor boundary + Chromium Ozone path), `libcrtmedia` (FFmpeg/codecs/

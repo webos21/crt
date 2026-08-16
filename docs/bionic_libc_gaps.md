@@ -21,6 +21,11 @@ style event loop, etc.) begins.
 
 ## High priority: concretely blocks the Wayland-compositor-boundary goal
 
+`semaphore.h` and public `<stdatomic.h>` (below) are now **done** -- see
+`HISTORY.md`'s 2026-08-16 entry. `sendmsg`/`recvmsg`+`SCM_RIGHTS` and
+`memfd_create` are still open, deliberately deferred to when the actual
+compositor-boundary work begins rather than built speculatively now.
+
 - **`sendmsg`/`recvmsg` + `SCM_RIGHTS`/`CMSG_*` ancillary-data fd passing**
   -- entirely absent (`include/sys/socket.h` has `socket`/`bind`/`connect`/
   `send`/`recv`/`sendto`/`recvfrom` but no `struct msghdr`/`struct
@@ -43,31 +48,37 @@ style event loop, etc.) begins.
   `__crt_sys_mmap`, which uses `CreateFileMappingA`/`MapViewOfFileEx` for
   the file-backed path) -- only the "get an anonymous shareable fd in the
   first place" piece is missing.
-- **`semaphore.h`** (`sem_t`, `sem_init`, `sem_destroy`, `sem_wait`,
-  `sem_trywait`, `sem_timedwait`, `sem_post`, `sem_getvalue`) -- entirely
-  absent, the most surprising gap given how complete the rest of the
-  pthread story is. This is a baseline POSIX threading primitive nearly
-  every threaded C/C++ library expects (Skia's own thread pool, FFmpeg,
-  the Vulkan loader, etc.), and this project already has every primitive
-  needed to implement it cheaply: the private futex/wait-address layer
-  (`__crt_wait32`/`__crt_wake32_*`, see `docs/import_bionic.md`'s "Private
-  Wait/Futex Tranche") already backs `pthread_mutex`/`pthread_cond`/
-  `pthread_rwlock` the same way a semaphore's counter+wait would need.
-  Real Bionic has the full POSIX unnamed-semaphore surface (named
-  semaphores -- `sem_open`/`sem_close`/`sem_unlink` -- are Bionic stubs
-  returning `ENOSYS`, so parity there is trivial too).
-- **Public `<stdatomic.h>`** -- currently only a private internal layer
-  over compiler `__atomic` builtins (`libc/include/private/crt_atomic.h`),
-  limited to `int` atomics, a spinlock, and a once-state helper; see
-  `docs/import_bionic.md`'s "Internal Atomic And Lock Tranche" ("This is
-  not a public C11 `<stdatomic.h>` import... deferred"). Real Bionic
-  exposes a real C11 `<stdatomic.h>` (a thin wrapper over the same kind of
-  compiler builtins this project already uses internally). QuickJS, V8,
-  and Skia's own threading code all commonly include `<stdatomic.h>`
-  directly as a hard dependency -- this was already a known, tracked gap,
-  resurfaced here because it now has a concrete, near-term consumer
-  (`libcrtjs`'s QuickJS bring-up is roadmap step 3, immediately before
-  Skia) rather than being purely hypothetical.
+- **`semaphore.h`** -- **done** (2026-08-16). Was entirely absent, the most
+  surprising gap given how complete the rest of the pthread story is; this
+  project already had every primitive needed to implement it cheaply, and
+  did: `sem_t`/`sem_init`/`sem_destroy`/`sem_wait`/`sem_trywait`/
+  `sem_timedwait`/`sem_post`/`sem_getvalue` are implemented in
+  `libc/src/semaphore.c` over the same private futex/wait-address layer
+  (`__crt_wait32`/`__crt_wake32_*`) that already backs `pthread_mutex`/
+  `pthread_cond`/`pthread_rwlock`. Named semaphores
+  (`sem_open`/`sem_close`/`sem_unlink`) match real Bionic's own policy of
+  declaring but never supporting them (`ENOSYS`). Regression:
+  `tests/semaphore_test.c` (argument validation, a same-thread post/wait/
+  trywait/getvalue round trip, a real `sem_timedwait` timeout, and a real
+  cross-thread `pthread_create` + blocking `sem_wait()` + `sem_post()`
+  wakeup, not just the CAS fast path).
+- **Public `<stdatomic.h>`** -- **done** (2026-08-16). Was only a private
+  internal layer over compiler `__atomic` builtins
+  (`libc/include/private/crt_atomic.h`), limited to `int` atomics, a
+  spinlock, and a once-state helper; see `docs/import_bionic.md`'s
+  "Internal Atomic And Lock Tranche". Now a real public `include/
+  stdatomic.h`, implemented over Clang's `__c11_atomic_*` builtins acting
+  on real `_Atomic(T)`-qualified types (verified directly against this
+  project's exact `-std=gnu99 -ffreestanding` build flags before writing
+  it -- `_Generic` isn't available under `-std=gnu99`, a real C11-only
+  feature, but turned out not to matter since `__c11_atomic_*` builtins
+  are themselves already type-generic compiler magic, no `_Generic`
+  dispatch needed). Covers `atomic_bool`/`atomic_int`/.../the `stdint.h`-
+  backed atomic typedefs (`atomic_size_t`, `atomic_intptr_t`, etc.,
+  `atomic_char16_t`/`atomic_char32_t` intentionally deferred alongside the
+  still-missing `uchar.h`), `atomic_flag`, all the `atomic_*`/
+  `atomic_*_explicit` operations, fences, and the `LOCK_FREE` macros.
+  Regression: `tests/stdatomic_test.c`.
 
 ## Medium priority: commonly needed by graphics-adjacent native code
 
