@@ -15,9 +15,11 @@ in those two win.
   aarch64, Linux arm64/amd64, Windows arm64/x64), each running this
   project's own `cmake --workflow <os>-host-ninja-debug` preset (configure +
   build + `ctest`) on every push. All 5 legs green as of
-  [run 31759586497](https://github.com/webos21/crt/actions/runs/31759586497)
-  (2026-08-14, the pcre2 macOS-confirmed commit). Before the matrix
-  existed, Linux validation had been almost entirely
+  [run 31918589054](https://github.com/webos21/crt/actions/runs/31918589054)
+  (2026-08-16, the CRT_ROOTFS subdirectory-ordering fix -- see
+  `HISTORY.md`'s same-date entry for a real CI-only failure this matrix
+  caught, unreproducible on a dev tree with any prior configure). Before
+  the matrix existed, Linux validation had been almost entirely
   manual, on real aarch64 hardware -- x86_64 Linux had never actually been
   built until this matrix existed, and immediately surfaced two real,
   previously-invisible bugs (see `HISTORY.md`'s 2026-08-11 entries). CI's
