@@ -99,6 +99,7 @@ struct crt_memory_status_ex {
 #define STD_ERROR_HANDLE ((DWORD)-12)
 #define GENERIC_READ ((DWORD)0x80000000)
 #define GENERIC_WRITE ((DWORD)0x40000000)
+#define DELETE 0x00010000
 #define FILE_SHARE_READ 0x00000001
 #define FILE_SHARE_WRITE 0x00000002
 #define FILE_SHARE_DELETE 0x00000004
@@ -109,6 +110,12 @@ struct crt_memory_status_ex {
 #define FILE_ATTRIBUTE_READONLY 0x00000001
 #define FILE_ATTRIBUTE_NORMAL 0x00000080
 #define MOVEFILE_REPLACE_EXISTING 0x00000001
+/* FILE_INFO_BY_HANDLE_CLASS's FileRenameInfoEx entry (Windows 10 1709+)
+ * and its own Flags bits -- see windows_rename_posix_semantics()'s own
+ * comment for why this is worth reaching for. */
+#define CRT_FILE_RENAME_INFO_EX 22
+#define CRT_FILE_RENAME_FLAG_REPLACE_IF_EXISTS 0x00000001UL
+#define CRT_FILE_RENAME_FLAG_POSIX_SEMANTICS 0x00000002UL
 #define FILE_ATTRIBUTE_DIRECTORY 0x00000010
 #define FILE_ATTRIBUTE_REPARSE_POINT 0x00000400
 #define FILE_TYPE_DISK 0x0001
@@ -418,6 +425,23 @@ __declspec(dllimport) int CRT_WINAPI WideCharToMultiByte(
     int cbMultiByte,
     const char* lpDefaultChar,
     BOOL* lpUsedDefaultChar);
+/* The reverse direction of WideCharToMultiByte above, same CP_ACP=0
+ * reasoning -- needed to build the wide FileName field
+ * windows_rename_posix_semantics() hands to SetFileInformationByHandle()
+ * below, since that API (unlike every other Win32 call this file makes)
+ * has no narrow-char *A entry point at all. */
+__declspec(dllimport) int CRT_WINAPI MultiByteToWideChar(
+    unsigned int CodePage,
+    DWORD dwFlags,
+    const char* lpMultiByteStr,
+    int cbMultiByte,
+    uint16_t* lpWideCharStr,
+    int cchWideChar);
+__declspec(dllimport) BOOL CRT_WINAPI SetFileInformationByHandle(
+    HANDLE hFile,
+    DWORD FileInformationClass,
+    const void* lpFileInformation,
+    DWORD dwBufferSize);
 __declspec(dllimport) HANDLE CRT_WINAPI GetCurrentProcess(void);
 __declspec(dllimport) BOOL CRT_WINAPI DuplicateHandle(
     HANDLE hSourceProcessHandle,
@@ -4833,6 +4857,78 @@ long __crt_sys_unlink(const char* path) {
   return fail_last_error();
 }
 
+/* SetFileInformationByHandle()'s own FILE_RENAME_INFO/FILE_RENAME_INFO_EX
+ * struct, declared locally the same way this file's other Win32
+ * structures are (e.g. struct crt_startupinfo mirroring STARTUPINFOA) --
+ * field order/types match the real struct exactly, so the compiler's own
+ * normal alignment rules land on the same offsets the real API expects.
+ * FileName is a flexible array member on the real struct; sized to this
+ * file's own PATH_MAX-shaped buffers (4096) here instead, since this is
+ * always a plain stack local, never cast from/to the real variable-length
+ * struct. */
+struct crt_file_rename_info {
+  DWORD Flags;
+  HANDLE RootDirectory;
+  DWORD FileNameLength;
+  uint16_t FileName[4096];
+};
+
+/* Real POSIX-semantics rename, tried before the MoveFileExA()-based
+ * fallback below: SetFileInformationByHandle(FileRenameInfoEx,
+ * FILE_RENAME_FLAG_POSIX_SEMANTICS) is the one Win32 mechanism that can
+ * replace a destination file that still has another open handle on it --
+ * found for real via toybox's dos2unix/unix2dos, whose own
+ * copy_tempfile()/replace_tempfile() temp-then-rename pattern keeps the
+ * *original* file open (via loopfiles()'s own read handle) across the
+ * whole conversion, then renames the tempfile over that same still-open
+ * path. MoveFileExA() cannot do this no matter how long a retry loop
+ * waits -- confirmed with a minimal standalone repro, the failure is not
+ * transient at all. Needs Windows 10 version 1607+ (FileRenameInfoEx
+ * itself) and a filesystem that implements POSIX unlink semantics (NTFS
+ * does); on anything older, or if the filesystem doesn't support it, this
+ * call fails and the caller falls through to the existing MoveFileExA()
+ * retry loop unchanged -- purely additive, never a regression from the
+ * previous behavior. */
+static int windows_rename_posix_semantics(const char* host_old_path, const char* host_new_path) {
+  HANDLE source_handle;
+  struct crt_file_rename_info info;
+  int wide_len;
+  BOOL result;
+
+  /* FILE_FLAG_OPEN_REPARSE_POINT: real POSIX rename() never follows a
+   * symlink -- renaming a symlink renames the link itself, not whatever
+   * it points to. Without this flag CreateFileA() follows the reparse
+   * point instead, opening (and then, below, renaming) the *target*, not
+   * the link -- found for real via toybox's own `ln -sf` (its force-
+   * overwrite path creates a temp symlink, then renames it over the
+   * final destination, exactly the shape __crt_sys_symlink()'s own
+   * readlink()-facing comment already documents elsewhere in this file). */
+  source_handle = CreateFileA(host_old_path, DELETE,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, 0,
+      OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, 0);
+  if (source_handle == INVALID_HANDLE_VALUE) {
+    return 0;
+  }
+  /* cchWideChar=-1 has MultiByteToWideChar() include the NUL terminator
+   * in both the conversion and its returned count. */
+  wide_len = MultiByteToWideChar(0, 0, host_new_path, -1, info.FileName,
+      (int)(sizeof(info.FileName) / sizeof(info.FileName[0])));
+  if (wide_len <= 0) {
+    CloseHandle(source_handle);
+    return 0;
+  }
+  info.Flags = CRT_FILE_RENAME_FLAG_REPLACE_IF_EXISTS | CRT_FILE_RENAME_FLAG_POSIX_SEMANTICS;
+  info.RootDirectory = 0;
+  /* FileNameLength is a byte count that excludes the NUL terminator, per
+   * MSDN -- wide_len above includes it (cchWideChar=-1), so subtract one
+   * wchar's worth here. */
+  info.FileNameLength = (DWORD)((wide_len - 1) * (int)sizeof(uint16_t));
+  result = SetFileInformationByHandle(source_handle, CRT_FILE_RENAME_INFO_EX, &info,
+      (DWORD)(sizeof(info) - sizeof(info.FileName) + (size_t)wide_len * sizeof(uint16_t)));
+  CloseHandle(source_handle);
+  return result ? 1 : 0;
+}
+
 long __crt_sys_rename(const char* old_path, const char* new_path) {
   char translated_old_path[4096];
   char translated_new_path[4096];
@@ -4840,16 +4936,23 @@ long __crt_sys_rename(const char* old_path, const char* new_path) {
   const char* host_new_path = translate_path_for_host(new_path, translated_new_path);
   int attempt;
 
-  /* Same delete-pending/handle-timing race __crt_sys_unlink() above already
-   * guards against: MOVEFILE_REPLACE_EXISTING deletes the destination
-   * internally before the move, so a lingering handle on that exact path
-   * (found for real via toybox's dos2unix/unix2dos, whose copy_tempfile()/
-   * replace_tempfile() temp-file-then-rename-over-original pattern hits
-   * this reliably) can make MoveFileExA() itself report
+  if (windows_rename_posix_semantics(host_old_path, host_new_path)) {
+    return 0;
+  }
+
+  /* Fallback: same delete-pending/handle-timing race __crt_sys_unlink()
+   * above already guards against -- MOVEFILE_REPLACE_EXISTING deletes the
+   * destination internally before the move, so a lingering handle on
+   * that exact path can make MoveFileExA() itself report
    * ERROR_SHARING_VIOLATION/ERROR_ACCESS_DENIED for the same short window
-   * __crt_sys_unlink()/__crt_sys_symlink() already retry through. This was
-   * the one rename()/MoveFileExA() call site in this file that never
-   * gained that retry when the others did. */
+   * __crt_sys_unlink()/__crt_sys_symlink() already retry through. This
+   * was the one rename()/MoveFileExA() call site in this file that never
+   * gained that retry when the others did. Note this fallback path alone
+   * does NOT fix the dos2unix/unix2dos case above (that failure isn't
+   * transient) -- windows_rename_posix_semantics() is what actually
+   * handles it; this loop still matters for genuinely transient races
+   * (e.g. an AV/indexer scan) on hosts/filesystems where that call isn't
+   * available. */
   for (attempt = 0; attempt < WINDOWS_DELETE_RACE_RETRY_ATTEMPTS; ++attempt) {
     if (MoveFileExA(host_old_path, host_new_path, MOVEFILE_REPLACE_EXISTING)) {
       return 0;

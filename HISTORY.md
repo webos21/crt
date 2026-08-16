@@ -10,6 +10,48 @@ substantive update.
 
 ## 2026-08-16
 
+- **Implemented real Windows POSIX-semantics rename, re-enabled `dos2unix`/
+  `unix2dos`.** The `rename()`-over-a-file-with-an-open-handle limitation
+  flagged the same day (the previous entry below) is fixed for real:
+  `windows_rename_posix_semantics()` in `libc/src/arch/windows/common/
+  syscall.c` now tries `SetFileInformationByHandle(FileRenameInfoEx,
+  FILE_RENAME_FLAG_POSIX_SEMANTICS | FILE_RENAME_FLAG_REPLACE_IF_EXISTS)`
+  first -- the one Win32 mechanism that actually replicates POSIX
+  rename()'s "replace a file even if something else still has it open"
+  behavior (Windows 10 1607+, NTFS) -- before falling through to the
+  pre-existing `MoveFileExA()`-based retry loop unchanged, so hosts/
+  filesystems where the new call isn't available keep the old (partial)
+  behavior rather than losing rename() entirely. Verified directly with
+  the same minimal standalone repro that found the original bug: opening
+  a file read-only without closing it, then renaming a different file
+  onto that same path from the same process, which used to fail with
+  `ERROR_ACCESS_DENIED` regardless of how long a retry loop waited, now
+  succeeds and the target's content is correctly replaced.
+
+  Building this surfaced a second real bug before it ever reached
+  `ctest`: the new code path's `CreateFileA()` call omitted
+  `FILE_FLAG_OPEN_REPARSE_POINT`, so opening a *symlink* as the rename
+  source silently followed the reparse point and renamed the symlink's
+  *target* instead of the link itself -- real POSIX `rename()` never
+  follows a symlink this way. Caught by the existing
+  `crt_mksh_rootfs_which_stat_readlink_runs` regression (its `ln -sf`
+  step creates a temp symlink and renames it over the final destination,
+  toybox's own `ln.c` force-overwrite pattern, exactly the shape that
+  exposed it) failing after this change, not by anything written
+  specifically for `dos2unix`/`unix2dos` -- fixed by adding the flag, all
+  96 tests (including that one) pass again.
+
+  `dos2unix`/`unix2dos` re-enabled (`newtoys.h`, rootfs aliases -- both
+  already had `CFG_x=1` and their `flags.h` union members from the base
+  Android config, same as the rest of the same-day applet batch) and
+  functionally verified for real: `printf 'a\r\nb\r\n' | dos2unix` then
+  `unix2dos` round-trips through 6 -> 4 -> 6 bytes correctly. New
+  permanent regression: `crt_mksh_rootfs_dos2unix_runs` in
+  `shell/CMakeLists.txt`. All 96 tests pass via a genuine
+  `cmake --fresh` reconfigure plus full rebuild, and the actual `zlib`
+  port build (`port-rebuild-zlib`/`port-test-zlib`, both static and
+  shared) was re-run end to end given how foundational `rename()` is.
+
 - **`linkat()`'s Linux/macOS raw syscall trampolines are confirmed
   working**: the user built and ran this project on real Linux and macOS
   hardware, through the full `curl` port test (the last, heaviest port in

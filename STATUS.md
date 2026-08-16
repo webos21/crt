@@ -26,12 +26,13 @@ in those two win.
   own `cmake --workflow` step does not run `port-test-recipes` (a
   separate, heavier target that fetches and builds third-party sources)
   -- that's verified locally/per-host instead, see below.
-- **`ctest`**: 95 registered tests on Windows and 77 on macOS in the
+- **`ctest`**: 96 registered tests on Windows and 77 on macOS in the
   latest local run (count is slightly
   OS-dependent -- a few targets, like `windows_export_hygiene_test`, only
-  exist on their own OS), all passing locally on Windows (95/95, most
-  recently confirmed after the `cut`/24-applet Bionic-parity batch -- see
-  `HISTORY.md` -- via a genuine `cmake --fresh` reconfigure). The user
+  exist on their own OS), all passing locally on Windows (96/96, most
+  recently confirmed after the real Windows POSIX-semantics `rename()`
+  implementation and `dos2unix`/`unix2dos` re-enable -- see `HISTORY.md`
+  -- via a genuine `cmake --fresh` reconfigure). The user
   also confirmed a real Linux and macOS build+run this same date, through
   the full `curl` port test -- this closed out the one cross-platform
   verification gap this session's `linkat()`/`link()` PAL work had left
@@ -143,22 +144,6 @@ in those two win.
   handler (`sigsetjmp`/`siglongjmp` out of the handler) combined with a
   `poll()` loop is a shape this PAL's Windows signal backend hasn't been
   exercised against before. Left disabled; not investigated further yet.
-- **`dos2unix`/`unix2dos` (toybox applets) hit a genuine, non-transient
-  Windows `rename()`-over-open-handle limitation**: found the same pass as
-  `timeout` above. Their shared temp-file-then-rename pattern keeps the
-  original file's read handle open across the whole conversion;
-  `MoveFileExA(MOVEFILE_REPLACE_EXISTING)` reliably fails against a path
-  with another open handle on Windows, confirmed with a minimal standalone
-  repro. Root-causing this also found and fixed a real, general, adjacent
-  bug: `__crt_sys_rename()` was the one `MoveFileExA()` call site in
-  `libc/src/arch/windows/common/syscall.c` that never got the same
-  delete-pending-race retry loop `__crt_sys_unlink()`/`__crt_sys_symlink()`
-  already have -- fixed, but confirmed insufficient for this specific
-  failure (it isn't transient). Real fix would need
-  `FILE_RENAME_POSIX_SEMANTICS` (`SetFileInformationByHandle`/
-  `FileRenameInfoEx`, Windows 10 1607+) or restructuring the temp-file
-  pattern. Both applets left disabled.
-
 ## Next
 
 - Porting matrix expansion through curl is **done**: `bzip2`, `xz`, `pcre2`,
@@ -172,12 +157,13 @@ in those two win.
   where the Bionic-compatible backing surface exists. The mksh subshell
   status quirk, the six queued virtual rootfs files (`/proc/mounts`,
   `/proc/stat`, `/proc/self/status`, `/proc/self/cmdline`,
-  `/proc/self/environ`, `/dev/zero`), and a Bionic/Android-parity toybox
-  applet diff (`cut` plus 24 more names) are fixed -- see `HISTORY.md`'s
-  2026-08-16 entries. Remaining toybox gap is now down to: a real
-  `flags.h` regeneration (`expand`/`logger`/`fold`/`uudecode`/`cal`/
-  `split`/`strings`), the `timeout`/`dos2unix` functional bugs above, and
-  the already-deliberately-deferred `/proc`-heavy applet set.
+  `/proc/self/environ`, `/dev/zero`), a Bionic/Android-parity toybox
+  applet diff (`cut` plus 24 more names), and a real Windows
+  POSIX-semantics `rename()` (re-enabling `dos2unix`/`unix2dos`) are
+  fixed -- see `HISTORY.md`'s 2026-08-16 entries. Remaining toybox gap is
+  now down to: a real `flags.h` regeneration (`expand`/`logger`/`fold`/
+  `uudecode`/`cal`/`split`/`strings`), the `timeout` hang above, and the
+  already-deliberately-deferred `/proc`-heavy applet set.
 - The next product-level target is documented in `docs/runtime_roadmap.md`:
   an Electron-class rebuilt runtime made of `libcrtgfx` (Skia + Wayland-style
   compositor boundary + Chromium Ozone path), `libcrtmedia` (FFmpeg/codecs/

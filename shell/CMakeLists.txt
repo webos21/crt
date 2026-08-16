@@ -593,6 +593,30 @@ if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
       DEPENDS crt_mksh_rootfs_link_runs
     )
     set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_mksh_rootfs_toybox_applet_sweep_runs)
+
+    # Regression for the real, non-transient Windows rename()-over-open-
+    # handle limitation dos2unix/unix2dos hit (2026-08-16, see
+    # HISTORY.md): their shared copy_tempfile()/replace_tempfile()
+    # implementation keeps the *original* file's own read handle open for
+    # the entire conversion, then renames a tempfile over that same path.
+    # __crt_sys_rename() now tries SetFileInformationByHandle(
+    # FileRenameInfoEx, FILE_RENAME_FLAG_POSIX_SEMANTICS) first (the one
+    # Win32 mechanism that can replace a file with another open handle on
+    # it), falling back to the pre-existing MoveFileExA()-based retry loop
+    # if that's unavailable. Round-trips a file through both directions.
+    add_test(NAME crt_mksh_rootfs_dos2unix_runs
+      COMMAND "${CMAKE_COMMAND}" -E env
+        "CRT_ROOTFS=${CMAKE_BINARY_DIR}/rootfs"
+        "PATH=/system/bin:/bin:/usr/bin"
+        "$<TARGET_FILE:crt_mksh>" -c "printf 'a\\r\\nb\\r\\n' > /tmp/mksh-ctest-dos2unix.txt && dos2unix /tmp/mksh-ctest-dos2unix.txt && wc -c < /tmp/mksh-ctest-dos2unix.txt && unix2dos /tmp/mksh-ctest-dos2unix.txt && wc -c < /tmp/mksh-ctest-dos2unix.txt && rm -f /tmp/mksh-ctest-dos2unix.txt && echo dos2unix-ok"
+    )
+    set_tests_properties(crt_mksh_rootfs_dos2unix_runs PROPERTIES
+      # "a\r\nb\r\n" (6 bytes) -> dos2unix strips both \r -> 4 bytes ->
+      # unix2dos adds them back -> 6 bytes again.
+      PASS_REGULAR_EXPRESSION "^4\n6\ndos2unix-ok"
+      DEPENDS crt_mksh_rootfs_toybox_applet_sweep_runs
+    )
+    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_mksh_rootfs_dos2unix_runs)
   endif()
   add_dependencies(crt_shell_artifacts crt_toybox)
   install(TARGETS crt_toybox

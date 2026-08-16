@@ -81,10 +81,12 @@ residuals before the upper runtime phase (see `docs/runtime_roadmap.md`):
 
 - Expand toybox applets only when the backing Bionic-compatible CRT/PAL
   surface exists. `which`/`readlink`/`stat`/`touch`/`id`/`xargs`;
-  `cksum`/`crc32`/`tsort`/`tty`/`unlink`/`uuencode`; `link`; and a
+  `cksum`/`crc32`/`tsort`/`tty`/`unlink`/`uuencode`; `link`; a
   Bionic/Android-parity pass (`cut` plus 24 more names, diffed directly
   against the real Android/Bionic reference config rather than picked ad
-  hoc) are all done -- see `HISTORY.md`'s 2026-08-16 entries. Still open:
+  hoc); and `dos2unix`/`unix2dos` (needed a real `FILE_RENAME_POSIX_
+  SEMANTICS` rename() implementation first, not just an LLP64 audit) are
+  all done -- see `HISTORY.md`'s 2026-08-16 entries. Still open:
   - `expand`, `logger`, `fold`, `uudecode`, `cal`, `split`, `strings` are
     audited and LLP64-safe, but need a real `shell/toybox/src/android/
     linux/generated/flags.h` regeneration first (their `GLOBALS()` struct
@@ -95,18 +97,6 @@ residuals before the upper runtime phase (see `docs/runtime_roadmap.md`):
     `SIGCHLD`/`siginfo_t` handler + `poll()`-loop shape needs its own
     investigation into this PAL's Windows signal/poll interaction, not
     attempted yet. Left disabled.
-  - **`dos2unix`/`unix2dos` hit a genuine, non-transient Windows limit**:
-    `rename()`-over-a-file-with-an-open-handle (their own
-    `copy_tempfile()`/`replace_tempfile()` temp-then-rename pattern keeps
-    the original open across the whole conversion) fails even after
-    `__crt_sys_rename()` gained the same delete-pending-race retry loop
-    `__crt_sys_unlink()`/`__crt_sys_symlink()`/`__crt_sys_link()` already
-    had (a real, general fix landed regardless, but insufficient here
-    since the failure isn't transient) -- would need
-    `FILE_RENAME_POSIX_SEMANTICS` (`SetFileInformationByHandle`/
-    `FileRenameInfoEx`, Windows 10 1607+) or restructuring the temp-file
-    pattern to not hold the destination open across the rename. Left
-    disabled.
   - Beyond those, the Android/Bionic-parity diff is exhausted for
     non-`/proc`-dependent applets. `shell/toybox/crt/generated/config.h`
     (a small `#undef`/`#define` override layer over the base Android
