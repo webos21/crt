@@ -561,6 +561,48 @@ ___crt_sys_shutdown:
   negq %rax
   retq
 
+/* sendmsg(int sockfd, const struct msghdr *msg, int flags) /
+ * recvmsg(int sockfd, struct msghdr *msg, int flags) -- 3 args each, no
+ * r10 shuffle needed (unlike sendto/recvfrom above, which have 6 and hit
+ * the syscall convention's rcx-clobbered-by-the-syscall-instruction case).
+ * Darwin/XNU BSD syscall numbers 28 (0x1c) / 27 (0x1b), from the classic
+ * BSD socket syscall block this project's own already-tested recvfrom=29
+ * (0x1d, confirmed directly above) and accept=30 both sit in -- recvmsg/
+ * sendmsg are the two slots immediately before recvfrom in that same
+ * table. NOT independently verified on real macOS hardware from this
+ * session (Windows-only dev environment) -- see HISTORY.md's 2026-08-16
+ * entry, matching the same caveat linkat()'s own trampolines carried
+ * until real hardware verification closed it. */
+.globl ___crt_sys_sendmsg
+.p2align 4, 0x90
+___crt_sys_sendmsg:
+  movq $0x200001c, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
+  negq %rax
+  retq
+
+.globl ___crt_sys_recvmsg
+.p2align 4, 0x90
+___crt_sys_recvmsg:
+  movq $0x200001b, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
+  negq %rax
+  retq
+
 .globl ___crt_sys_recvfrom
 .p2align 4, 0x90
 ___crt_sys_recvfrom:

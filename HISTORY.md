@@ -10,6 +10,79 @@ substantive update.
 
 ## 2026-08-16
 
+- **Implemented `sendmsg`/`recvmsg` + `SCM_RIGHTS` fd passing and
+  `memfd_create`**, the last two "high priority" findings from the Bionic
+  libc gap audit below -- both concretely block the Wayland-compositor-
+  boundary goal, unlike `semaphore.h`/`<stdatomic.h>` (the previous entry)
+  which were general-purpose.
+
+  `sendmsg`/`recvmsg` (`include/sys/socket.h`: `struct msghdr`/`struct
+  cmsghdr`/`SCM_RIGHTS`/`CMSG_FIRSTHDR`/`CMSG_NXTHDR`/`CMSG_DATA`/
+  `CMSG_SPACE`/`CMSG_LEN`; `libc/src/socket.c`: the public `sendmsg()`/
+  `recvmsg()` dispatching to new `__crt_sys_sendmsg()`/
+  `__crt_sys_recvmsg()`): Linux and macOS get real raw syscall trampolines
+  (`libc/src/arch/{linux,macos}/{x86_64,aarch64}/syscall.S`) with full
+  native `SCM_RIGHTS` support, no PAL invention needed -- both kernels have
+  supported this natively for decades. **The syscall numbers were
+  carefully reasoned, not copy-pasted from a reference, and were NOT
+  independently verified on real hardware from the Windows-only session
+  that wrote them**: Linux x86_64 `sendmsg`=46/`recvmsg`=47 sit immediately
+  after this project's own already-tested `sendto`=44/`recvfrom`=45 in
+  `arch/x86/entry/syscalls/syscall_64.tbl`; Linux aarch64 (generic table)
+  `sendmsg`=211/`recvmsg`=212 sit immediately after `sendto`=206/
+  `recvfrom`=207; Darwin/XNU `sendmsg`=28 (0x1c)/`recvmsg`=27 (0x1b) sit
+  immediately *before* this project's own already-tested, directly-
+  confirmed `recvfrom`=29 (0x1d)/`accept`=30 in the classic BSD socket
+  syscall block. This matches the exact same gap `linkat()`'s own Linux/
+  macOS trampolines had earlier this session until the user's real
+  hardware testing closed it (see that entry below) -- `tests/
+  sendmsg_scm_rights_test.c`'s real AF_UNIX `SCM_RIGHTS` fd-passing round
+  trip (create a `memfd_create()`-backed fd with known content, pass it
+  over a connected `AF_UNIX SOCK_STREAM` pair, read the content back
+  through the *received* fd on the other end) is what verifies these
+  numbers for real the next time it runs on real Linux/macOS CI or
+  hardware, not this session.
+
+  Windows has no `SCM_RIGHTS`-equivalent mechanism for `AF_UNIX` sockets
+  at all -- cross-process handle sharing there is `DuplicateHandle()`-
+  based, a completely different, PID-targeted model, not a socket-
+  ancillary-data one. `__crt_sys_sendmsg()`/`__crt_sys_recvmsg()` on
+  Windows detect an `SCM_RIGHTS` control message up front (walking
+  `msg_control` via the same `CMSG_FIRSTHDR`/`CMSG_NXTHDR` macros real
+  callers use) and fail immediately with `-ENOTSUP`, rather than silently
+  sending/receiving only the data half of the message and dropping the
+  fds the caller actually needed transferred. Plain multi-`iovec` data
+  still works on Windows: Winsock has no native `sendmsg()`/`recvmsg()`,
+  so every iovec segment is gathered into one contiguous buffer (a single
+  `send()`/`sendto()` call, preserving one-call-one-datagram semantics
+  correctly for datagram sockets, not split into multiple separate
+  sends) and scattered back out symmetrically on the receive side.
+
+  `memfd_create` (`include/sys/mman.h`, `libc/src/mman.c`): deliberately
+  **not** implemented as a Linux raw syscall, specifically to avoid a
+  *third* unverified syscall number stacked on top of the `sendmsg`/
+  `recvmsg` ones above. Instead implemented as a fully portable function --
+  create a uniquely-named file, then unlink it immediately -- the exact
+  same proven technique this project's own `tmpfile()` already uses (see
+  `libc/src/stdio.c`), so it needed zero new PAL work and is provably
+  correct on every host right now rather than pending real-hardware
+  verification. This gives the real thing the near-term consumer actually
+  needs (an anonymous fd, nameless on the filesystem, safe to
+  `mmap(MAP_SHARED)` and hand to another process via the `SCM_RIGHTS`
+  mechanism above) without Linux memfd's `F_ADD_SEALS`/`F_GET_SEALS`
+  sealing support, which isn't implemented (`MFD_ALLOW_SEALING` is
+  accepted but has no effect).
+
+  New permanent regressions: `tests/memfd_create_test.c` (flag validation,
+  two independent memfds proven not to collide, a real `write`/`lseek`/
+  `read` round trip, and a real `mmap(MAP_SHARED)` round trip proving a
+  write through the mapping reaches the underlying fd), `tests/
+  sendmsg_scm_rights_test.c` (a real multi-iovec gather/scatter round trip
+  over AF_INET loopback on every host, plus the platform-specific
+  behavior above -- the real `SCM_RIGHTS` round trip on Linux/macOS, the
+  documented `ENOTSUP` on Windows). All 104 tests pass via a genuine
+  `cmake --fresh` reconfigure plus full rebuild.
+
 - **Implemented `semaphore.h` and public `<stdatomic.h>`**, the two
   cheapest "high priority" findings from the Bionic libc gap audit below
   (both had every needed primitive already sitting in the tree, unlike the

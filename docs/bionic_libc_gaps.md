@@ -21,33 +21,49 @@ style event loop, etc.) begins.
 
 ## High priority: concretely blocks the Wayland-compositor-boundary goal
 
-`semaphore.h` and public `<stdatomic.h>` (below) are now **done** -- see
-`HISTORY.md`'s 2026-08-16 entry. `sendmsg`/`recvmsg`+`SCM_RIGHTS` and
-`memfd_create` are still open, deliberately deferred to when the actual
-compositor-boundary work begins rather than built speculatively now.
+All four items originally listed here are now **done** -- see `HISTORY.md`'s
+2026-08-16 entries.
 
 - **`sendmsg`/`recvmsg` + `SCM_RIGHTS`/`CMSG_*` ancillary-data fd passing**
-  -- entirely absent (`include/sys/socket.h` has `socket`/`bind`/`connect`/
-  `send`/`recv`/`sendto`/`recvfrom` but no `struct msghdr`/`struct
-  cmsghdr`/`sendmsg`/`recvmsg` at all). This is Wayland's core wire-protocol
-  mechanism: every `wl_shm` buffer, DMA-BUF, and even the initial socket
-  handshake passes fds between client and compositor over a Unix domain
-  socket using exactly this mechanism. Nothing resembling a Wayland
-  compositor boundary is possible without it. Real Bionic has the full
-  surface. Windows has no native `AF_UNIX` + `SCM_RIGHTS` equivalent --
-  expect this to need real PAL design work (Windows named-pipe/handle-
-  duplication tricks or an explicit "not supported on Windows" boundary),
-  not a thin syscall wrapper the way Linux/macOS get.
-- **`memfd_create`** -- absent. The standard modern mechanism for creating
-  an anonymous, shared-memory-backed fd to `mmap(MAP_SHARED)` and hand to
-  another process via the `SCM_RIGHTS` mechanism above -- what real `wl_shm`
-  clients use today instead of the older, Bionic-unsupported POSIX
-  `shm_open`. Real Bionic has it as a thin Linux syscall wrapper. `mmap`
-  itself already supports real file-backed `MAP_SHARED` mappings on every
-  host (confirmed in `libc/src/arch/windows/common/syscall.c`'s
-  `__crt_sys_mmap`, which uses `CreateFileMappingA`/`MapViewOfFileEx` for
-  the file-backed path) -- only the "get an anonymous shareable fd in the
-  first place" piece is missing.
+  -- **done**. `struct msghdr`/`struct cmsghdr`/`SCM_RIGHTS`/`CMSG_*`
+  macros added to `include/sys/socket.h`; `sendmsg()`/`recvmsg()`
+  implemented in `libc/src/socket.c` dispatching to new
+  `__crt_sys_sendmsg()`/`__crt_sys_recvmsg()`. Linux/macOS get real raw
+  syscall trampolines (`libc/src/arch/{linux,macos}/{x86_64,aarch64}/
+  syscall.S`) with full native SCM_RIGHTS support -- **the syscall numbers
+  were carefully reasoned from this project's own already-tested
+  neighboring trampolines (e.g. Darwin's confirmed `recvfrom`=29/`accept`=
+  30 anchoring `recvmsg`=27/`sendmsg`=28) but were NOT independently
+  verified on real hardware from the Windows-only session that wrote
+  them**, matching the exact same gap `linkat()`'s own trampolines had
+  until real hardware testing closed it (see that entry in `HISTORY.md`).
+  `tests/sendmsg_scm_rights_test.c`'s own real AF_UNIX fd-passing round
+  trip is what verifies this the next time it runs on real Linux/macOS.
+  Windows has no `SCM_RIGHTS`-equivalent mechanism for `AF_UNIX` sockets at
+  all (a fundamentally different, `DuplicateHandle()`-based, PID-targeted
+  model) -- `__crt_sys_sendmsg()`/`__crt_sys_recvmsg()` there support
+  plain multi-`iovec` data (gathered/scattered into one buffer, since
+  Winsock has no native `sendmsg()`) but detect and reject an `SCM_RIGHTS`
+  control message up front with `ENOTSUP`, failing loudly rather than
+  silently dropping the fds a caller needed transferred.
+- **`memfd_create`** -- **done**, but deliberately *not* as a Linux raw
+  syscall (`include/sys/mman.h`, `libc/src/mman.c`). Implemented instead as
+  a fully portable create-a-uniquely-named-file-then-unlink-it-immediately
+  function -- the exact same proven technique this project's own
+  `tmpfile()` already uses (see `libc/src/stdio.c`) -- rather than a
+  per-host raw syscall/PAL feature. This was a deliberate choice over a
+  real Linux `memfd_create` syscall trampoline specifically to avoid
+  another *unverified* syscall number on top of the `sendmsg`/`recvmsg`
+  ones above; the portable version is provably correct on every host right
+  now (round-trip tested directly) and gives real Bionic-parity behavior
+  for the thing that actually matters to the near-term consumer (an
+  anonymous, `mmap(MAP_SHARED)`-able fd for `wl_shm`-style buffers) --
+  just not Linux memfd's `F_ADD_SEALS`/`F_GET_SEALS` sealing support,
+  which isn't implemented (`MFD_ALLOW_SEALING` is accepted but has no
+  effect). `mmap` itself already supports real file-backed `MAP_SHARED`
+  mappings on every host (confirmed in `libc/src/arch/windows/common/
+  syscall.c`'s `__crt_sys_mmap`, using `CreateFileMappingA`/
+  `MapViewOfFileEx`).
 - **`semaphore.h`** -- **done** (2026-08-16). Was entirely absent, the most
   surprising gap given how complete the rest of the pthread story is; this
   project already had every primitive needed to implement it cheaply, and

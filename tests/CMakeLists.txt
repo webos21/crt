@@ -443,6 +443,16 @@ set_tests_properties(semaphore_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "semaphore_test: ok"
 )
 
+add_crt_test(memfd_create_test memfd_create_test.c)
+set_tests_properties(memfd_create_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "memfd_create_test: ok"
+)
+
+add_crt_test(sendmsg_scm_rights_test sendmsg_scm_rights_test.c)
+set_tests_properties(sendmsg_scm_rights_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "sendmsg_scm_rights_test: ok"
+)
+
 add_crt_test(wait_test wait_test.c)
 set_tests_properties(wait_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "wait_test: ok"

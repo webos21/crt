@@ -296,6 +296,32 @@ __crt_sys_recvfrom:
   retq
 .size __crt_sys_recvfrom, . - __crt_sys_recvfrom
 
+/* sendmsg(int sockfd, const struct msghdr *msg, int flags) -- 3 args, no
+ * r10 shuffle needed (unlike sendto/recvfrom above, which have 6 and hit
+ * the syscall convention's rcx-clobbered-by-the-syscall-instruction case).
+ * Syscall numbers 46/47 per arch/x86/entry/syscalls/syscall_64.tbl, right
+ * after sendto=44/recvfrom=45 above. NOT independently verified on real
+ * Linux hardware from this session (Windows-only dev environment) -- see
+ * HISTORY.md's 2026-08-16 entry, matching the same caveat linkat()'s own
+ * trampolines carried until real hardware verification closed it. */
+.globl __crt_sys_sendmsg
+.type __crt_sys_sendmsg, @function
+.p2align 4, 0x90
+__crt_sys_sendmsg:
+  movq $46, %rax
+  syscall
+  retq
+.size __crt_sys_sendmsg, . - __crt_sys_sendmsg
+
+.globl __crt_sys_recvmsg
+.type __crt_sys_recvmsg, @function
+.p2align 4, 0x90
+__crt_sys_recvmsg:
+  movq $47, %rax
+  syscall
+  retq
+.size __crt_sys_recvmsg, . - __crt_sys_recvmsg
+
 .globl __crt_sys_bind
 .type __crt_sys_bind, @function
 .p2align 4, 0x90

@@ -68,6 +68,22 @@ extern "C" {
 #define POSIX_MADV_WILLNEED MADV_WILLNEED
 #define POSIX_MADV_DONTNEED MADV_DONTNEED
 
+#define MFD_CLOEXEC 0x0001U
+#define MFD_ALLOW_SEALING 0x0002U
+
+/* memfd_create() -- Linux has a real syscall for this; macOS and Windows
+ * don't have any comparable kernel primitive. Implemented portably on every
+ * host as create-a-uniquely-named-file-then-unlink-it-immediately (the
+ * exact same proven technique this project's own tmpfile() already uses,
+ * see libc/src/stdio.c), rather than as a per-host raw syscall/PAL
+ * feature. This gives a real fd nameless-on-the-filesystem, suitable for
+ * mmap(MAP_SHARED), matching what memfd_create()'s actual near-term
+ * consumers need (e.g. wl_shm-style shared buffers) -- but not real Linux
+ * memfd's sealing support (F_ADD_SEALS/F_GET_SEALS aren't implemented;
+ * MFD_ALLOW_SEALING is accepted but has no effect). See
+ * docs/bionic_libc_gaps.md and HISTORY.md's 2026-08-16 entry. */
+int memfd_create(const char* name, unsigned int flags);
+
 void* mmap(void* addr, size_t length, int prot, int flags, int fd, off_t offset);
 void* mmap64(void* addr, size_t length, int prot, int flags, int fd, off64_t offset);
 int mprotect(void* addr, size_t length, int prot);

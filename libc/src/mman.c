@@ -1,7 +1,9 @@
 #include <errno.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include <stdarg.h>
 #include <sys/mman.h>
+#include <unistd.h>
 
 void* __crt_sys_mmap(void* addr, unsigned long length, int prot, int flags, int fd, long long offset);
 long __crt_sys_mprotect(void* addr, unsigned long length, int prot);
@@ -199,4 +201,59 @@ int posix_madvise(void* addr, size_t length, int advice) {
     return (int)-result;
   }
   return (int)result;
+}
+
+int memfd_create(const char* name, unsigned int flags) {
+  char path[32] = "crt_memfd_XXXXXX.tmp";
+  static unsigned long counter;
+  unsigned long attempt;
+
+  (void)name; /* Real Linux memfd_create()'s name argument is purely a
+               * debug label visible in /proc/self/fd/N's symlink target --
+               * it has no functional effect on the fd itself, so there's
+               * nothing meaningful to do with it here. */
+
+  if ((flags & ~(MFD_CLOEXEC | MFD_ALLOW_SEALING)) != 0) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  for (attempt = 0; attempt < 1000; ++attempt) {
+    unsigned long value = counter++;
+    int fd;
+
+    path[11] = (char)('0' + (value / 100000UL) % 10UL);
+    path[12] = (char)('0' + (value / 10000UL) % 10UL);
+    path[13] = (char)('0' + (value / 1000UL) % 10UL);
+    path[14] = (char)('0' + (value / 100UL) % 10UL);
+    path[15] = (char)('0' + (value / 10UL) % 10UL);
+    path[16] = (char)('0' + value % 10UL);
+
+    fd = open(path, O_CREAT | O_EXCL | O_RDWR, 0600);
+    if (fd < 0) {
+      if (errno == EEXIST) {
+        continue;
+      }
+      return -1;
+    }
+    if (unlink(path) != 0) {
+      /* Shouldn't happen on a file just created, but don't hand back an fd
+       * still visibly named on the filesystem if it somehow does. */
+      int saved_errno = errno;
+
+      close(fd);
+      errno = saved_errno;
+      return -1;
+    }
+    if ((flags & MFD_CLOEXEC) != 0 && fcntl(fd, F_SETFD, FD_CLOEXEC) != 0) {
+      int saved_errno = errno;
+
+      close(fd);
+      errno = saved_errno;
+      return -1;
+    }
+    return fd;
+  }
+  errno = EEXIST;
+  return -1;
 }

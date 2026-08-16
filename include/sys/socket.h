@@ -8,6 +8,7 @@
                           * software assumes this (mbedTLS's net_sockets.c,
                           * curl's own public curl/multi.h). */
 #include <sys/types.h>
+#include <sys/uio.h> /* struct iovec, used by struct msghdr below. */
 
 #ifdef __cplusplus
 extern "C" {
@@ -84,6 +85,69 @@ int getsockname(int sockfd, struct sockaddr* addr, socklen_t* addrlen);
 int setsockopt(int sockfd, int level, int optname, const void* optval, socklen_t optlen);
 int getsockopt(int sockfd, int level, int optname, void* optval, socklen_t* optlen);
 int shutdown(int sockfd, int how);
+
+/* sendmsg()/recvmsg() and SCM_RIGHTS ancillary-data fd passing --
+ * Wayland's core wire-protocol mechanism (every wl_shm buffer and the
+ * initial socket handshake pass fds this way over an AF_UNIX socket), see
+ * docs/bionic_libc_gaps.md and HISTORY.md's 2026-08-16 entry. Linux and
+ * macOS both have full native kernel/BSD support for this; Windows has no
+ * SCM_RIGHTS-equivalent mechanism for AF_UNIX sockets at all (Windows'
+ * cross-process handle sharing is DuplicateHandle()-based, a completely
+ * different, PID-targeted model) -- sendmsg()/recvmsg() still work for
+ * plain data on Windows (gathered/scattered over the existing send()/
+ * recv()), but a control message containing SCM_RIGHTS specifically fails
+ * with ENOTSUP there. See __crt_sys_sendmsg()/__crt_sys_recvmsg() in
+ * libc/src/arch/windows/common/syscall.c for the exact behavior. */
+struct msghdr {
+  void* msg_name;
+  socklen_t msg_namelen;
+  struct iovec* msg_iov;
+  size_t msg_iovlen;
+  void* msg_control;
+  size_t msg_controllen;
+  int msg_flags;
+};
+
+struct cmsghdr {
+  size_t cmsg_len;
+  int cmsg_level;
+  int cmsg_type;
+};
+
+#define SCM_RIGHTS 0x01
+
+#define CMSG_ALIGN(len) \
+  (((len) + sizeof(size_t) - 1) & ~(sizeof(size_t) - 1))
+#define CMSG_DATA(cmsg) \
+  ((unsigned char*)(cmsg) + CMSG_ALIGN(sizeof(struct cmsghdr)))
+#define CMSG_SPACE(len) \
+  (CMSG_ALIGN(sizeof(struct cmsghdr)) + CMSG_ALIGN(len))
+#define CMSG_LEN(len) (CMSG_ALIGN(sizeof(struct cmsghdr)) + (len))
+#define CMSG_FIRSTHDR(msgp) \
+  ((size_t)(msgp)->msg_controllen >= sizeof(struct cmsghdr) \
+       ? (struct cmsghdr*)(msgp)->msg_control \
+       : (struct cmsghdr*)0)
+
+static inline struct cmsghdr* __crt_cmsg_nxthdr(
+    struct msghdr* msgp, struct cmsghdr* cmsg) {
+  unsigned char* next = (unsigned char*)cmsg + CMSG_ALIGN(cmsg->cmsg_len);
+  unsigned char* end = (unsigned char*)msgp->msg_control + msgp->msg_controllen;
+
+  if (cmsg->cmsg_len < sizeof(struct cmsghdr)) {
+    return (struct cmsghdr*)0;
+  }
+  if (next + sizeof(struct cmsghdr) > end) {
+    return (struct cmsghdr*)0;
+  }
+  if (next + CMSG_ALIGN(((struct cmsghdr*)next)->cmsg_len) > end) {
+    return (struct cmsghdr*)0;
+  }
+  return (struct cmsghdr*)next;
+}
+#define CMSG_NXTHDR(msgp, cmsg) __crt_cmsg_nxthdr(msgp, cmsg)
+
+ssize_t sendmsg(int sockfd, const struct msghdr* msg, int flags);
+ssize_t recvmsg(int sockfd, struct msghdr* msg, int flags);
 
 #ifdef __cplusplus
 }

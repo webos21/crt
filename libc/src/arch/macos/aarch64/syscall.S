@@ -559,6 +559,44 @@ ___crt_sys_shutdown:
   neg x0, x0
   ret
 
+/* sendmsg()/recvmsg() -- Darwin/XNU BSD syscall numbers 28 / 27, from the
+ * classic BSD socket syscall block this project's own already-tested
+ * recvfrom=29 and accept=30 both sit in -- recvmsg/sendmsg are the two
+ * slots immediately before recvfrom in that same table. NOT independently
+ * verified on real macOS hardware from this session (Windows-only dev
+ * environment) -- see HISTORY.md's 2026-08-16 entry, matching the same
+ * caveat linkat()'s own trampolines carried until real hardware
+ * verification closed it. */
+.globl ___crt_sys_sendmsg
+.p2align 2
+___crt_sys_sendmsg:
+  mov x16, #28
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  stp x29, x30, [sp, #-16]!
+  mov x29, sp
+  bl ___crt_macos_to_bionic_errno
+  ldp x29, x30, [sp], #16
+  neg x0, x0
+  ret
+
+.globl ___crt_sys_recvmsg
+.p2align 2
+___crt_sys_recvmsg:
+  mov x16, #27
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  stp x29, x30, [sp, #-16]!
+  mov x29, sp
+  bl ___crt_macos_to_bionic_errno
+  ldp x29, x30, [sp], #16
+  neg x0, x0
+  ret
+
 .globl ___crt_sys_recvfrom
 .p2align 2
 ___crt_sys_recvfrom:

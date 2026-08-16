@@ -6,6 +6,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/wait.h>
@@ -4174,6 +4175,149 @@ long __crt_sys_recvfrom(
   if (addrlen != 0) {
     *addrlen = (unsigned int)inout_len;
   }
+  return result;
+}
+
+/* See sys/socket.h's own comment on sendmsg()/recvmsg(): Windows has no
+ * SCM_RIGHTS-equivalent fd-passing mechanism for AF_UNIX sockets at all
+ * (cross-process handle sharing on Windows is DuplicateHandle()-based, a
+ * completely different, PID-targeted model, not a socket-ancillary-data
+ * one). Detect an SCM_RIGHTS control message up front and fail loudly and
+ * immediately with -ENOTSUP rather than silently sending/receiving only
+ * the data half of the message and dropping the fds the caller actually
+ * needed transferred. */
+static int windows_msg_control_has_scm_rights(const struct msghdr* msg) {
+  struct msghdr scan;
+  struct cmsghdr* cmsg;
+
+  if (msg->msg_control == 0 || msg->msg_controllen < sizeof(struct cmsghdr)) {
+    return 0;
+  }
+  scan = *msg;
+  for (cmsg = CMSG_FIRSTHDR(&scan); cmsg != 0; cmsg = CMSG_NXTHDR(&scan, cmsg)) {
+    if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+long __crt_sys_sendmsg(int sockfd, const struct msghdr* msg, int flags) {
+  SOCKET socket_handle = get_fd_socket(sockfd);
+  size_t total = 0;
+  size_t i;
+  char* buffer;
+  char* cursor;
+  int result;
+
+  if (socket_handle == INVALID_SOCKET) {
+    return -EBADF;
+  }
+  if (msg == 0) {
+    return -EFAULT;
+  }
+  if (windows_msg_control_has_scm_rights(msg)) {
+    return -ENOTSUP;
+  }
+
+  /* Winsock has no plain sendmsg(); gather every iovec segment into one
+   * contiguous buffer and issue a single send()/sendto() call instead of
+   * one call per segment -- a datagram socket's message boundary would
+   * otherwise silently split into multiple separate datagrams, which a
+   * real single sendmsg() call never does. */
+  for (i = 0; i < msg->msg_iovlen; ++i) {
+    total += msg->msg_iov[i].iov_len;
+  }
+  if (total == 0) {
+    result = msg->msg_name != 0
+                 ? winsock.sendto(
+                       socket_handle, "", 0, flags,
+                       (const struct sockaddr*)msg->msg_name, (int)msg->msg_namelen)
+                 : winsock.send(socket_handle, "", 0, flags);
+    return result == SOCKET_ERROR ? -map_wsa_send_recv_error(sockfd, winsock.WSAGetLastError())
+                                   : result;
+  }
+
+  buffer = (char*)malloc(total);
+  if (buffer == 0) {
+    return -ENOMEM;
+  }
+  cursor = buffer;
+  for (i = 0; i < msg->msg_iovlen; ++i) {
+    memcpy(cursor, msg->msg_iov[i].iov_base, msg->msg_iov[i].iov_len);
+    cursor += msg->msg_iov[i].iov_len;
+  }
+
+  result = msg->msg_name != 0
+               ? winsock.sendto(
+                     socket_handle, buffer, (int)total, flags,
+                     (const struct sockaddr*)msg->msg_name, (int)msg->msg_namelen)
+               : winsock.send(socket_handle, buffer, (int)total, flags);
+  free(buffer);
+
+  return result == SOCKET_ERROR ? -map_wsa_send_recv_error(sockfd, winsock.WSAGetLastError()) : result;
+}
+
+long __crt_sys_recvmsg(int sockfd, struct msghdr* msg, int flags) {
+  SOCKET socket_handle = get_fd_socket(sockfd);
+  size_t total = 0;
+  size_t i;
+  char* buffer;
+  char* cursor;
+  int inout_len;
+  int result;
+  size_t remaining;
+
+  if (socket_handle == INVALID_SOCKET) {
+    return -EBADF;
+  }
+  if (msg == 0) {
+    return -EFAULT;
+  }
+  if (windows_msg_control_has_scm_rights(msg)) {
+    return -ENOTSUP;
+  }
+
+  for (i = 0; i < msg->msg_iovlen; ++i) {
+    total += msg->msg_iov[i].iov_len;
+  }
+  msg->msg_controllen = 0;
+  msg->msg_flags = 0;
+  if (total == 0) {
+    return 0;
+  }
+
+  buffer = (char*)malloc(total);
+  if (buffer == 0) {
+    return -ENOMEM;
+  }
+  inout_len = msg->msg_name != 0 ? (int)msg->msg_namelen : 0;
+  result = msg->msg_name != 0
+               ? winsock.recvfrom(
+                     socket_handle, buffer, (int)total, flags,
+                     (struct sockaddr*)msg->msg_name, &inout_len)
+               : winsock.recv(socket_handle, buffer, (int)total, flags);
+  if (result == SOCKET_ERROR) {
+    free(buffer);
+    return -map_wsa_send_recv_error(sockfd, winsock.WSAGetLastError());
+  }
+  if (msg->msg_name != 0) {
+    msg->msg_namelen = (unsigned int)inout_len;
+  }
+
+  /* Scatter the received bytes back out across the caller's iovec
+   * segments, mirroring how the gather side of __crt_sys_sendmsg()
+   * combines them. */
+  cursor = buffer;
+  remaining = (size_t)result;
+  for (i = 0; i < msg->msg_iovlen && remaining > 0; ++i) {
+    size_t chunk = msg->msg_iov[i].iov_len < remaining ? msg->msg_iov[i].iov_len : remaining;
+
+    memcpy(msg->msg_iov[i].iov_base, cursor, chunk);
+    cursor += chunk;
+    remaining -= chunk;
+  }
+  free(buffer);
   return result;
 }
 

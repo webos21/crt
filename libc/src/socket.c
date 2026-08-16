@@ -67,6 +67,8 @@ long __crt_sys_recvfrom(
     int flags,
     void* src_addr,
     unsigned int* addrlen);
+long __crt_sys_sendmsg(int sockfd, const struct msghdr* msg, int flags);
+long __crt_sys_recvmsg(int sockfd, struct msghdr* msg, int flags);
 long __crt_sys_getsockname(int sockfd, void* addr, unsigned int* addrlen);
 long __crt_sys_setsockopt(int sockfd, int level, int optname, const void* optval, unsigned int optlen);
 long __crt_sys_getsockopt(int sockfd, int level, int optname, void* optval, unsigned int* optlen);
@@ -479,6 +481,69 @@ ssize_t recvfrom(
 
 ssize_t recv(int sockfd, void* buf, size_t len, int flags) {
   return recvfrom(sockfd, buf, len, flags, 0, 0);
+}
+
+ssize_t sendmsg(int sockfd, const struct msghdr* msg, int flags) {
+  if (msg == 0) {
+    errno = EFAULT;
+    return -1;
+  }
+#if defined(CRT_TARGET_OS_MACOS)
+  if (msg->msg_name != 0) {
+    /* Only AF_INET is translatable today -- see to_darwin_sockaddr()'s own
+     * comment/behavior above, already the exact same limitation bind()/
+     * connect()/sendto() have on this host. The realistic near-term
+     * sendmsg()+SCM_RIGHTS consumer (Wayland-style fd passing) always
+     * uses an already-connected AF_UNIX socket with msg_name == 0 anyway,
+     * so this isn't a new gap sendmsg() introduces. */
+    struct crt_darwin_sockaddr_in darwin_addr;
+    unsigned int darwin_len = 0;
+    struct msghdr translated;
+
+    if (to_darwin_sockaddr(
+            (const struct sockaddr*)msg->msg_name, msg->msg_namelen, &darwin_addr, &darwin_len) != 0) {
+      return -1;
+    }
+    translated = *msg;
+    translated.msg_name = &darwin_addr;
+    translated.msg_namelen = darwin_len;
+    return (ssize_t)normalize_socket_result(__crt_sys_sendmsg(sockfd, &translated, flags));
+  }
+#endif
+  return (ssize_t)normalize_socket_result(__crt_sys_sendmsg(sockfd, msg, flags));
+}
+
+ssize_t recvmsg(int sockfd, struct msghdr* msg, int flags) {
+  if (msg == 0) {
+    errno = EFAULT;
+    return -1;
+  }
+#if defined(CRT_TARGET_OS_MACOS)
+  if (msg->msg_name != 0) {
+    struct crt_darwin_sockaddr_in darwin_addr;
+    struct msghdr translated = *msg;
+    long result;
+
+    translated.msg_name = &darwin_addr;
+    translated.msg_namelen = sizeof(darwin_addr);
+    result = __crt_sys_recvmsg(sockfd, &translated, flags);
+    if (result < 0 && result >= -4095) {
+      return (ssize_t)__set_errno((int)-result);
+    }
+    from_darwin_sockaddr(&darwin_addr, (struct sockaddr*)msg->msg_name, &msg->msg_namelen);
+    msg->msg_controllen = translated.msg_controllen;
+    msg->msg_flags = translated.msg_flags;
+    return (ssize_t)result;
+  }
+#endif
+  {
+    long result = __crt_sys_recvmsg(sockfd, msg, flags);
+
+    if (result < 0 && result >= -4095) {
+      return (ssize_t)__set_errno((int)-result);
+    }
+    return (ssize_t)result;
+  }
 }
 
 int getsockname(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {

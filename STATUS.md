@@ -26,15 +26,16 @@ in those two win.
   own `cmake --workflow` step does not run `port-test-recipes` (a
   separate, heavier target that fetches and builds third-party sources)
   -- that's verified locally/per-host instead, see below.
-- **`ctest`**: 102 registered tests on Windows and 77 on macOS in the
+- **`ctest`**: 104 registered tests on Windows and 77 on macOS in the
   latest local run (count is slightly
   OS-dependent -- a few targets, like `windows_export_hygiene_test`, only
-  exist on their own OS), all passing locally on Windows (102/102, most
-  recently confirmed after implementing `semaphore.h` and public
-  `<stdatomic.h>` -- the two cheapest findings from a Bionic libc gap
-  audit done before starting `libcrtgfx` -- via a genuine `cmake --fresh`
-  reconfigure). Enabling `df`/`stty` just before that fixed two real PAL
-  bugs that surfaced along the way (a stale `flags.h` snapshot leaving
+  exist on their own OS), all passing locally on Windows (104/104, most
+  recently confirmed after implementing `sendmsg`/`recvmsg` + `SCM_RIGHTS`
+  fd passing and `memfd_create` -- the last two findings from a Bionic
+  libc gap audit done before starting `libcrtgfx` -- via a genuine
+  `cmake --fresh` reconfigure). `semaphore.h`/public `<stdatomic.h>` and
+  `df`/`stty` just before that are also done, the latter fixing two real
+  PAL bugs that surfaced along the way (a stale `flags.h` snapshot leaving
   their flags dead code, and no `tcgetattr`/`tcsetattr` round-trip
   fidelity beyond three bits) -- see `HISTORY.md`. The user
   also confirmed a real Linux and macOS build+run this same date, through
@@ -162,6 +163,17 @@ in those two win.
   on failure), but means `stty -a`/`stty size` can't be exercised
   end-to-end in every environment; `stty -g`/individual option toggles
   (which don't need window size) are unaffected and verified working.
+- **New `sendmsg`/`recvmsg` Linux/macOS raw syscall trampolines are
+  unverified on real hardware**: written carefully (each number reasoned
+  from this project's own already-tested neighboring trampolines, e.g.
+  Darwin's confirmed `recvfrom`=29/`accept`=30 anchoring `recvmsg`=27/
+  `sendmsg`=28) from a Windows-only dev session with no way to actually
+  run them. Matches the exact same gap `linkat()`'s own trampolines had
+  until the user's real hardware testing closed it -- see `HISTORY.md`.
+  `tests/sendmsg_scm_rights_test.c`'s real `AF_UNIX` `SCM_RIGHTS`
+  fd-passing round trip is what verifies these the next time it runs on
+  real Linux/macOS CI or hardware; Windows's own data-only path (no raw
+  syscalls involved, just Winsock) is already verified directly.
 
 ## Next
 
@@ -190,17 +202,17 @@ in those two win.
   `mount`/`umount`, `ifconfig`, `login`, each now with a concrete,
   confirmed reason recorded in `TODO.md` rather than "not done yet").
 - A real, evidence-based Bionic libc gap audit was done before starting
-  `libcrtgfx` (see `docs/bionic_libc_gaps.md`, `TODO.md`'s new "Bionic libc
-  completeness before `libcrtgfx`" section). `semaphore.h` and public
-  `<stdatomic.h>` are now implemented -- see `HISTORY.md`. Still open and
-  deliberately deferred to when the compositor-boundary work actually
-  starts: `sendmsg`/`recvmsg` + `SCM_RIGHTS`/`CMSG_*` fd passing and
-  `memfd_create` (both concretely block a Wayland-compatible compositor
-  boundary, but need real Windows PAL design work, not a thin syscall
-  wrapper); medium/lower priority items (`epoll`/`eventfd`/`timerfd`,
-  `dl_iterate_phdr`/`link.h`/`elf.h`/`dladdr`, `PTHREAD_PROCESS_SHARED`,
-  `glob.h`/`sys/prctl.h`/`ucontext.h`/`ifaddrs.h`/`threads.h`/`uchar.h`)
-  have no identified near-term consumer yet.
+  `libcrtgfx` (see `docs/bionic_libc_gaps.md`, `TODO.md`'s "Bionic libc
+  completeness before `libcrtgfx`" section). All four "high priority"
+  findings are now implemented -- `semaphore.h`, public `<stdatomic.h>`,
+  `sendmsg`/`recvmsg` + `SCM_RIGHTS`/`CMSG_*` fd passing, and
+  `memfd_create` -- see `HISTORY.md`. One real follow-up remains: the new
+  Linux/macOS `sendmsg`/`recvmsg` raw syscall trampolines need real
+  hardware verification (see "Known gaps" above). Medium/lower priority
+  items with no identified near-term consumer yet stay open:
+  `epoll`/`eventfd`/`timerfd`, `dl_iterate_phdr`/`link.h`/`elf.h`/
+  `dladdr`, `PTHREAD_PROCESS_SHARED`, `glob.h`/`sys/prctl.h`/`ucontext.h`/
+  `ifaddrs.h`/`threads.h`/`uchar.h`.
 - The next product-level target is documented in `docs/runtime_roadmap.md`:
   an Electron-class rebuilt runtime made of `libcrtgfx` (Skia + Wayland-style
   compositor boundary + Chromium Ozone path), `libcrtmedia` (FFmpeg/codecs/

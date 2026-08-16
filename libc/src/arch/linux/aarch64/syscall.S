@@ -301,6 +301,31 @@ __crt_sys_recvfrom:
   ret
 .size __crt_sys_recvfrom, . - __crt_sys_recvfrom
 
+/* sendmsg(int sockfd, const struct msghdr *msg, int flags). Syscall
+ * numbers 211/212 per include/uapi/asm-generic/unistd.h (the generic
+ * table aarch64 uses), right after sendto=206/recvfrom=207 above. NOT
+ * independently verified on real Linux hardware from this session
+ * (Windows-only dev environment) -- see HISTORY.md's 2026-08-16 entry,
+ * matching the same caveat linkat()'s own trampolines carried until real
+ * hardware verification closed it. */
+.globl __crt_sys_sendmsg
+.type __crt_sys_sendmsg, %function
+.p2align 2
+__crt_sys_sendmsg:
+  mov x8, #211
+  svc #0
+  ret
+.size __crt_sys_sendmsg, . - __crt_sys_sendmsg
+
+.globl __crt_sys_recvmsg
+.type __crt_sys_recvmsg, %function
+.p2align 2
+__crt_sys_recvmsg:
+  mov x8, #212
+  svc #0
+  ret
+.size __crt_sys_recvmsg, . - __crt_sys_recvmsg
+
 .globl __crt_sys_bind
 .type __crt_sys_bind, %function
 .p2align 2
