@@ -10,6 +10,41 @@ substantive update.
 
 ## 2026-08-16
 
+- **Fixed a real CI-only failure (`mksh_subshell_status_test_runs`/
+  `mksh_shell_smoke_test_runs`) in the two commits just above, caused by
+  `add_subdirectory(tests)` running before `CRT_ROOTFS` was ever set.**
+  Both new mksh-interpreter tests reference `${CRT_ROOTFS}` directly in
+  their own `set_tests_properties(... ENVIRONMENT ...)` calls, to resolve
+  `/bin/sh` through the real rootfs the same way a real shell script run
+  would. `CRT_ROOTFS` is a `CACHE PATH` variable, normally set inside a
+  big `if(Python3_Interpreter_FOUND)` block -- but that block, and the
+  `add_subdirectory(tests)` call that needs the variable, were both in
+  the top-level `CMakeLists.txt`, in the wrong order: `tests` first, the
+  `CRT_ROOTFS` `set()` about 30 lines later. On a tree with any prior
+  configure (this dev machine, all session), `CRT_ROOTFS` was already
+  sitting in `CMakeCache.txt` from way back, so the wrong ordering never
+  showed -- but on a genuinely fresh configure (a truly clean clone, or
+  CI, which always starts from one), `${CRT_ROOTFS}` is empty the first
+  time `tests/CMakeLists.txt` reads it, baking a literal
+  `ENVIRONMENT "CRT_ROOTFS="` into the generated `CTestTestfile.cmake` --
+  every case in both tests then failed outright with `posix_spawn()`
+  `ENOENT`, unable to resolve `/bin/sh` with no rootfs to resolve it
+  against. **Reproduced directly**, not just inferred from CI's
+  generically unhelpful "Process completed with exit code 1": cloned the
+  repo fresh into a scratch directory, ran the exact
+  `cmake --workflow --preset windows-host-ninja-debug` CI uses, and hit
+  the identical failure locally (LLVM version, `clang 22.1.8`, confirmed
+  identical to what CI's own "Install LLVM (Windows)" step fetches as
+  latest -- ruled out before finding the real cause). Fixed by hoisting
+  just the `set(CRT_ROOTFS ... CACHE PATH ...)` line (not the whole
+  block -- the real `rootfs` custom *target* further down genuinely does
+  need `add_subdirectory(shell)`'s targets, which already run first) to
+  right after `add_subdirectory(shell)`, before `add_subdirectory(tests)`.
+  Verified against a second genuinely fresh clone with the fix applied,
+  `cmake --fresh` in this same tree (discards the cache that was masking
+  the bug locally), and a full rebuild: `ctest` 90/90 in every case.
+
+
 - **Fixed a real `make -jN` hang: `windows_handle_looks_executable()`
   blocking `ReadFile()` on a pipe, reached via a path the 2026-08-11
   jobserver-pipe fix didn't cover.** Found while attempting to resume the

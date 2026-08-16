@@ -258,6 +258,29 @@ add_subdirectory(libm)
 add_subdirectory(libdl)
 add_subdirectory(libstdc++)
 add_subdirectory(shell)
+
+# Hoisted ahead of add_subdirectory(tests) below, out of the
+# if(Python3_Interpreter_FOUND) block further down that otherwise defines
+# it (that block also defines the real "rootfs" custom target itself,
+# which genuinely does need targets add_subdirectory(shell) just defined
+# above -- only the plain path *variable* needs to exist this early, not
+# the target). tests/CMakeLists.txt's mksh-interpreter tests
+# (mksh_subshell_status_test.c, mksh_shell_smoke_test.c) reference
+# ${CRT_ROOTFS} directly in their own set_tests_properties(... ENVIRONMENT
+# ...) calls -- on a from-scratch configure (a genuinely fresh clone, not
+# a tree with a CRT_ROOTFS value already sitting in CMakeCache.txt from
+# any earlier configure), add_subdirectory(tests) used to run before this
+# variable was ever set at all, so those tests' own ENVIRONMENT baked in a
+# literal empty "CRT_ROOTFS=" and every case failed outright with
+# posix_spawn() ENOENT trying to resolve /bin/sh with no rootfs to
+# resolve it against. Reproduced directly from a genuine fresh clone
+# (this exact failure is also what broke CI, which always starts from a
+# clean checkout) -- a locally re-used out/ directory never surfaced it,
+# since CRT_ROOTFS was already cached from a much earlier configure.
+if(Python3_Interpreter_FOUND)
+  set(CRT_ROOTFS "${CMAKE_BINARY_DIR}/rootfs" CACHE PATH "Android-like runtime root filesystem")
+endif()
+
 add_subdirectory(tests)
 
 install(DIRECTORY include/ DESTINATION include)
@@ -269,7 +292,9 @@ add_custom_target(sysroot
 )
 
 if(Python3_Interpreter_FOUND)
-  set(CRT_ROOTFS "${CMAKE_BINARY_DIR}/rootfs" CACHE PATH "Android-like runtime root filesystem")
+  # CRT_ROOTFS itself is now set earlier, right after add_subdirectory(shell)
+  # above -- see that block's own comment for why. Everything below here
+  # still needs this same if(Python3_Interpreter_FOUND) guard.
   # `crt_mksh_rootfs_*_runs` (shell/CMakeLists.txt) are Windows-only ctest
   # entries that exec against this real, on-disk rootfs (not the small
   # self-contained fixtures other tests build). This target has no OUTPUT, so
