@@ -109,7 +109,24 @@ struct msghdr {
 };
 
 struct cmsghdr {
+  /* Real Darwin/XNU's own struct cmsghdr uses a 4-byte socklen_t here
+   * (X/Open XSI compliance), not an 8-byte size_t like Linux's real ABI --
+   * a genuine, documented Linux-vs-BSD divergence point, not a project
+   * choice. This struct's bytes get parsed directly by the real host
+   * kernel through the raw sendmsg()/recvmsg() syscalls in the per-arch
+   * syscall.S files under libc/src/arch/linux and libc/src/arch/macos, so
+   * cmsg_len's width has to match each host's real ABI exactly or the
+   * whole message layout shifts (cmsg_level/cmsg_type get misread from
+   * the wrong bytes) -- found via a real macOS CI failure on the first
+   * attempt, which used size_t unconditionally (correct for Linux, wrong
+   * for Darwin); see HISTORY.md's 2026-08-16 entry. All the CMSG_* macros
+   * below are defined in terms of sizeof(struct cmsghdr), so they adapt
+   * automatically -- no other code needs to know about this. */
+#if defined(CRT_TARGET_OS_MACOS)
+  socklen_t cmsg_len;
+#else
   size_t cmsg_len;
+#endif
   int cmsg_level;
   int cmsg_type;
 };

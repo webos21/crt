@@ -14,11 +14,16 @@ in those two win.
 - **CI**: `.github/workflows/ci.yml`, a 5-leg GitHub Actions matrix (macOS
   aarch64, Linux arm64/amd64, Windows arm64/x64), each running this
   project's own `cmake --workflow <os>-host-ninja-debug` preset (configure +
-  build + `ctest`) on every push. All 5 legs green as of
-  [run 31918589054](https://github.com/webos21/crt/actions/runs/31918589054)
-  (2026-08-16, the CRT_ROOTFS subdirectory-ordering fix -- see
-  `HISTORY.md`'s same-date entry for a real CI-only failure this matrix
-  caught, unreproducible on a dev tree with any prior configure). Before
+  build + `ctest`) on every push. All 5 legs were green as of
+  [run 31950303652](https://github.com/webos21/crt/actions/runs/31950303652)
+  (2026-08-16). [Run 31978303539](https://github.com/webos21/crt/actions/runs/31978303539)
+  (`sendmsg`/`recvmsg`/`memfd_create`, same date) then failed `macos-aarch64`
+  only -- both Linux legs passed, confirming those raw syscall trampolines;
+  root-caused (from the job-level annotation plus an ABI review, since
+  GitHub's log viewer needs sign-in) to a real macOS-only `struct cmsghdr`
+  layout bug, fixed 2026-08-17 -- see `HISTORY.md`'s same-date entry. Not
+  yet re-confirmed green on macOS as of this writing; the fix is pushed and
+  CI will re-run automatically. Before
   the matrix existed, Linux validation had been almost entirely
   manual, on real aarch64 hardware -- x86_64 Linux had never actually been
   built until this matrix existed, and immediately surfaced two real,
@@ -163,17 +168,20 @@ in those two win.
   on failure), but means `stty -a`/`stty size` can't be exercised
   end-to-end in every environment; `stty -g`/individual option toggles
   (which don't need window size) are unaffected and verified working.
-- **New `sendmsg`/`recvmsg` Linux/macOS raw syscall trampolines are
-  unverified on real hardware**: written carefully (each number reasoned
-  from this project's own already-tested neighboring trampolines, e.g.
-  Darwin's confirmed `recvfrom`=29/`accept`=30 anchoring `recvmsg`=27/
-  `sendmsg`=28) from a Windows-only dev session with no way to actually
-  run them. Matches the exact same gap `linkat()`'s own trampolines had
-  until the user's real hardware testing closed it -- see `HISTORY.md`.
-  `tests/sendmsg_scm_rights_test.c`'s real `AF_UNIX` `SCM_RIGHTS`
-  fd-passing round trip is what verifies these the next time it runs on
-  real Linux/macOS CI or hardware; Windows's own data-only path (no raw
-  syscalls involved, just Winsock) is already verified directly.
+- **`sendmsg`/`recvmsg` Linux/macOS raw syscall trampolines: Linux numbers
+  now confirmed by real CI, macOS still pending.** Both `linux-amd64` and
+  `linux-arm64` CI legs passed cleanly against `tests/
+  sendmsg_scm_rights_test.c`'s real `AF_UNIX` `SCM_RIGHTS` fd-passing round
+  trip -- Linux `sendmsg`=46/`recvmsg`=47 (x86_64) and `sendmsg`=211/
+  `recvmsg`=212 (aarch64) are correct. `macos-aarch64` failed on the first
+  push; root-caused to a real `struct cmsghdr` layout bug (Darwin's
+  `cmsg_len` is 4 bytes, this project used 8 unconditionally), fixed
+  2026-08-17 -- see `HISTORY.md`. The macOS raw syscall *numbers*
+  themselves (`sendmsg`=28/`recvmsg`=27) are still not independently
+  confirmed by a passing run; that's what the next CI run (or the user's
+  own hardware) needs to close, matching `linkat()`'s own precedent.
+  Windows's data-only path (no raw syscalls involved, just Winsock) is
+  already verified directly.
 
 ## Next
 

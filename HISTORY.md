@@ -8,7 +8,35 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
-## 2026-08-16
+## 2026-08-17
+
+- **Fixed a real macOS-only `struct cmsghdr` ABI bug, caught by CI on the
+  very first push of the `sendmsg`/`recvmsg` work below.** Real Darwin/XNU's
+  own `struct cmsghdr` uses a 4-byte `socklen_t cmsg_len` (X/Open XSI
+  compliance); this project's `include/sys/socket.h` used an 8-byte
+  `size_t cmsg_len` unconditionally, which is correct for Linux's real ABI
+  (explaining why both `linux-amd64` and `linux-arm64` CI legs -- which
+  exercise the exact same `sendmsg`/`recvmsg`/`SCM_RIGHTS` code path via
+  `tests/sendmsg_scm_rights_test.c` -- passed cleanly) but shifts every
+  field after `cmsg_len` by 4 bytes when the real macOS kernel parses a
+  message built with this layout: `cmsg_level` gets read from bytes that
+  were actually the zero-valued upper half of the 8-byte `cmsg_len`,
+  reading as `0` instead of `SOL_SOCKET`. `macos-aarch64` CI failed with
+  "Process completed with exit code 8" (`cmake --workflow`'s propagated
+  exit status) at the "Configure, build, and test" step -- GitHub's own
+  Actions log viewer required sign-in to show the underlying compiler/test
+  output directly, so this was root-caused from the job/step-level
+  annotation plus a from-first-principles ABI review (real Bionic vs. real
+  Darwin `<sys/socket.h>`), not from reading the raw log. Fixed by making
+  `cmsg_len`'s type conditional on `CRT_TARGET_OS_MACOS`
+  (`socklen_t` there, `size_t` everywhere else) -- every `CMSG_*` macro is
+  already defined in terms of `sizeof(struct cmsghdr)`, so this is the
+  only line that needed to change; no other code (not `libc/src/socket.c`,
+  not the Windows `__crt_sys_sendmsg()`/`__crt_sys_recvmsg()` SCM_RIGHTS
+  detection, not the test files) had to know about it. All 104 tests still
+  pass on Windows via a genuine `cmake --fresh` reconfigure; the actual
+  fix still needs the same real-macOS-CI confirmation the syscall-number
+  reasoning below was already waiting on.
 
 - **Implemented `sendmsg`/`recvmsg` + `SCM_RIGHTS` fd passing and
   `memfd_create`**, the last two "high priority" findings from the Bionic
