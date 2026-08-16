@@ -10,6 +10,33 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   (`porting/recipes/*.json`, `docs/porting_status.md`) current as each
   host is rerun.
 
+- **A local dev tree with an existing `out/` directory is not a reliable
+  test of new CMake-level wiring -- this has now caused two separate
+  real CI-only failures, verify with a genuinely fresh tree before
+  calling any such change done.** This project's own dev machines keep
+  a long-lived `out/<preset>` around across sessions, so `CRT_ROOTFS`
+  (and anything else set via `CACHE` variables, or files/targets a
+  prior build already produced) is usually already sitting in
+  `CMakeCache.txt`/on disk from an earlier configure -- masking
+  ordering bugs (a variable referenced before the line that sets it
+  runs, in top-level-`CMakeLists.txt`-vs-`add_subdirectory()` order; a
+  `DEPENDS`/`add_dependencies()` that only orders against an aggregate
+  target's own completion, not the sibling DAG nodes that actually
+  consume the dependency's output) that a truly fresh checkout -- every
+  CI run, unconditionally -- cannot paper over. Happened twice now: the
+  `windows_pseudo_reloc_test` `DEPENDS` gap (2026-08-12, see
+  `HISTORY.md`) and the `CRT_ROOTFS` subdirectory-ordering gap
+  (2026-08-16, see `HISTORY.md`) -- both root-caused only after
+  reproducing locally from a genuinely fresh clone, both invisible on
+  this exact dev tree beforehand. **Before considering any change to
+  `CMakeLists.txt`/`tests/CMakeLists.txt`/`shell/CMakeLists.txt` (new
+  `ENVIRONMENT`/`DEPENDS` test properties, new `CACHE` variables, new
+  cross-`add_subdirectory()` references) actually done, verify it
+  either via a fresh `git clone` into a scratch directory, or at
+  minimum `cmake --fresh --preset <preset>` in place (discards
+  `CMakeCache.txt` without a full `out/` wipe) -- not just an
+  incremental `cmake --build` against whatever's already configured.**
+
 - **Standing porting-loop discipline**, not a task list:
   1. expose the missing header/type/macro/symbol/behavior with upstream
      source;

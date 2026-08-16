@@ -43,7 +43,18 @@ substantive update.
   Verified against a second genuinely fresh clone with the fix applied,
   `cmake --fresh` in this same tree (discards the cache that was masking
   the bug locally), and a full rebuild: `ctest` 90/90 in every case.
-
+  **This is the second real occurrence of the exact same bug class**:
+  2026-08-12's `windows_pseudo_reloc_test` `DEPENDS` gap (see that date's
+  entry further down) was root-caused the identical way -- a reference
+  to `CRT_ROOTFS` before it was set, invisible on this same dev tree,
+  real on every fresh CI checkout -- and left behind an explicit
+  "Methodological note" saying so. That note didn't stop the same class
+  from recurring. Promoted to a standing, checked-every-time discipline
+  item in `TODO.md`'s `## note` section instead of a one-off HISTORY.md
+  paragraph, since a note only read once clearly isn't enough on its
+  own: verify any new `CMakeLists.txt`-level wiring against a genuinely
+  fresh clone or `cmake --fresh`, not just an incremental rebuild of
+  whatever's already configured, before considering it done.
 
 - **Fixed a real `make -jN` hang: `windows_handle_looks_executable()`
   blocking `ReadFile()` on a pipe, reached via a path the 2026-08-11
