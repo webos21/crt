@@ -26,13 +26,13 @@ in those two win.
   own `cmake --workflow` step does not run `port-test-recipes` (a
   separate, heavier target that fetches and builds third-party sources)
   -- that's verified locally/per-host instead, see below.
-- **`ctest`**: 96 registered tests on Windows and 77 on macOS in the
+- **`ctest`**: 97 registered tests on Windows and 77 on macOS in the
   latest local run (count is slightly
   OS-dependent -- a few targets, like `windows_export_hygiene_test`, only
-  exist on their own OS), all passing locally on Windows (96/96, most
-  recently confirmed after the real Windows POSIX-semantics `rename()`
-  implementation and `dos2unix`/`unix2dos` re-enable -- see `HISTORY.md`
-  -- via a genuine `cmake --fresh` reconfigure). The user
+  exist on their own OS), all passing locally on Windows (97/97, most
+  recently confirmed after fixing a real Windows `poll()` bug found while
+  investigating `timeout`'s hang -- see `HISTORY.md` -- via a genuine
+  `cmake --fresh` reconfigure). The user
   also confirmed a real Linux and macOS build+run this same date, through
   the full `curl` port test -- this closed out the one cross-platform
   verification gap this session's `linkat()`/`link()` PAL work had left
@@ -136,14 +136,20 @@ in those two win.
   record -- no AAAA/IPv6, no TCP fallback for truncated responses, no
   search-domain suffixes, no caching. Sufficient for curl's own basic
   HTTP/HTTPS needs; would need to grow if a future port needs more.
-- **`timeout` (toybox applet) hangs instead of enforcing its deadline**:
-  found while diffing this project's own applet set against the real
-  Android/Bionic reference config (2026-08-16, see `HISTORY.md`) and
-  functionally smoke-testing each candidate before enabling it -- LLP64
-  auditing alone didn't catch this. Its `SIGCHLD`/`siginfo_t` async
-  handler (`sigsetjmp`/`siglongjmp` out of the handler) combined with a
-  `poll()` loop is a shape this PAL's Windows signal backend hasn't been
-  exercised against before. Left disabled; not investigated further yet.
+- **`timeout` (toybox applet) stays disabled -- its hang is fixed, but two
+  deeper gaps remain**: the original hang was a real, general Windows
+  `poll()` bug (`PeekNamedPipe()` misreporting a pipe *write* end as
+  readable), now fixed with a permanent regression
+  (`tests/poll_pipe_write_end_test.c`, see `HISTORY.md`'s 2026-08-16
+  entry). Verifying the real applet after that fix surfaced two more,
+  separate issues: `SIGCHLD`'s `SA_SIGINFO` delivery
+  (`deliver_signal()` in `libc/src/signal.c`) always hands the handler a
+  zeroed `siginfo_t`, so `timeout` always reports the wrong exit code;
+  and `kill()` still only supports signaling the calling process itself,
+  so `timeout`'s own deadline enforcement (`kill(pid, SIGTERM)` on the
+  child) is a silent no-op -- confirmed directly, `timeout 2 sleep 10`
+  ran the full ~10 seconds instead of being cut off at ~2.
+
 ## Next
 
 - Porting matrix expansion through curl is **done**: `bzip2`, `xz`, `pcre2`,
@@ -162,8 +168,10 @@ in those two win.
   POSIX-semantics `rename()` (re-enabling `dos2unix`/`unix2dos`) are
   fixed -- see `HISTORY.md`'s 2026-08-16 entries. Remaining toybox gap is
   now down to: a real `flags.h` regeneration (`expand`/`logger`/`fold`/
-  `uudecode`/`cal`/`split`/`strings`), the `timeout` hang above, and the
-  already-deliberately-deferred `/proc`-heavy applet set.
+  `uudecode`/`cal`/`split`/`strings`), the two deeper gaps `timeout`
+  still needs (real cross-process `kill()`, real `SIGCHLD` `siginfo_t`
+  data) above, and the already-deliberately-deferred `/proc`-heavy
+  applet set.
 - The next product-level target is documented in `docs/runtime_roadmap.md`:
   an Electron-class rebuilt runtime made of `libcrtgfx` (Skia + Wayland-style
   compositor boundary + Chromium Ozone path), `libcrtmedia` (FFmpeg/codecs/

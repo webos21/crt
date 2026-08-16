@@ -93,10 +93,40 @@ residuals before the upper runtime phase (see `docs/runtime_roadmap.md`):
     is missing from the committed `union global_union` entirely) --
     toybox's own `mkflags` C-preprocessor pipeline
     (`scripts/make.sh`/`scripts/genconfig.sh`), not a hand-edit.
-  - **`timeout` hangs instead of enforcing its deadline** -- its
-    `SIGCHLD`/`siginfo_t` handler + `poll()`-loop shape needs its own
-    investigation into this PAL's Windows signal/poll interaction, not
-    attempted yet. Left disabled.
+  - **`timeout`'s original hang is fixed, but it still needs two more,
+    separate PAL features before it's actually correct.** Root cause of
+    the hang: `__crt_sys_poll()`'s `poll_handle()` called
+    `PeekNamedPipe()` unconditionally on any pipe handle to answer
+    `POLLIN`, but that call does not reliably report "no data" on a pipe's
+    *write* end the way it does for a real read end -- confirmed with a
+    minimal standalone repro (an unwritten pipe write end polled for
+    `POLLIN` came back "ready" almost instantly instead of blocking).
+    Fixed by tracking pipe write ends (`fd_pipe_write_only[]`) and never
+    calling `PeekNamedPipe()` on one; new regression:
+    `tests/poll_pipe_write_end_test.c`. This is a real, general `poll()`
+    fix (affects any code polling a pipe write end for readability, not
+    just `timeout`) and stays landed regardless of `timeout`'s own status.
+    Testing the real applet after this fix surfaced two more, deeper,
+    separate gaps rather than closing the item outright:
+    - `deliver_signal()`'s `SA_SIGINFO` path (`libc/src/signal.c`) always
+      hands the handler a zeroed `siginfo_t` (`si_code = 0; si_status =
+      0;`) regardless of which signal or why -- for `SIGCHLD` specifically
+      this means a handler can never learn which child exited or how.
+      `timeout.c`'s own handler reads exactly those fields, so it always
+      computes a wrong exit status. This project's own child-tracking
+      tables (`child_process_table`/`child_pid_table`, already used by
+      `waitpid()`) have the real data; `SIGCHLD` dispatch just doesn't
+      thread it through to `siginfo_t` yet.
+    - `kill()` still only supports signaling the calling process itself
+      (a pre-existing, previously-documented gap) -- sending a real signal
+      to a *different* process is a no-op, so `timeout`'s own deadline
+      enforcement (`kill(pid, SIGTERM)` on the child once the clock runs
+      out) never actually terminates anything; the child just runs to its
+      own natural completion. Confirmed directly: `timeout 2 sleep 10`
+      took the full ~10s, not ~2s.
+    `timeout` stays disabled until at least the `kill()` gap closes (the
+    `siginfo_t` gap affects correctness of the reported exit code, not
+    whether the deadline is enforced at all).
   - Beyond those, the Android/Bionic-parity diff is exhausted for
     non-`/proc`-dependent applets. `shell/toybox/crt/generated/config.h`
     (a small `#undef`/`#define` override layer over the base Android

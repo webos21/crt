@@ -586,6 +586,18 @@ static int fd_flags[CRT_FD_TABLE_SIZE];
  * __crt_fd_set_status_flags below for the real implementation this
  * backs. */
 static int fd_nonblock[CRT_FD_TABLE_SIZE];
+/* Set only for the write end of an anonymous pipe (see __crt_sys_pipe()
+ * below). Windows' own PeekNamedPipe() -- what poll_handle() otherwise
+ * calls unconditionally on any FILE_TYPE_PIPE handle to answer POLLIN --
+ * does not behave the documented way when given a write-only pipe
+ * handle: found for real via toybox's `timeout` applet hanging, root-
+ * caused with a minimal standalone repro showing poll() on a fresh,
+ * nothing-ever-written-to pipe's write end reports POLLIN ready almost
+ * instantly instead of correctly blocking. A write end can never
+ * legitimately satisfy POLLIN (there is nothing to read from it), so
+ * poll_handle() below skips the PeekNamedPipe() call entirely for a
+ * fd flagged here rather than trusting its result. */
+static unsigned char fd_pipe_write_only[CRT_FD_TABLE_SIZE];
 static int fd_table_initialized;
 static int winsock_initialized;
 /* RtlGenRandom (exported as SystemFunction036 from advapi32.dll): backs
@@ -2972,6 +2984,7 @@ static int alloc_fd(HANDLE handle) {
       fd_kind[fd] = CRT_FD_KIND_FILE;
       fd_flags[fd] = 0;
       fd_nonblock[fd] = 0;
+      fd_pipe_write_only[fd] = 0;
       return fd;
     }
   }
@@ -2988,6 +3001,7 @@ static int alloc_socket_fd(SOCKET socket_handle) {
       fd_kind[fd] = CRT_FD_KIND_SOCKET;
       fd_flags[fd] = 0;
       fd_nonblock[fd] = 0;
+      fd_pipe_write_only[fd] = 0;
       return fd;
     }
   }
@@ -3008,6 +3022,7 @@ static int alloc_urandom_fd(void) {
       fd_kind[fd] = CRT_FD_KIND_URANDOM;
       fd_flags[fd] = 0;
       fd_nonblock[fd] = 0;
+      fd_pipe_write_only[fd] = 0;
       return fd;
     }
   }
@@ -3025,6 +3040,7 @@ static int alloc_zero_fd(void) {
       fd_kind[fd] = CRT_FD_KIND_ZERO;
       fd_flags[fd] = 0;
       fd_nonblock[fd] = 0;
+      fd_pipe_write_only[fd] = 0;
       return fd;
     }
   }
@@ -3812,12 +3828,13 @@ long __crt_sys_pipe(int pipefd[2]) {
     CloseHandle(write_handle);
     return -EMFILE;
   }
+  fd_pipe_write_only[write_fd] = 1;
   pipefd[0] = read_fd;
   pipefd[1] = write_fd;
   return 0;
 }
 
-static short poll_handle(HANDLE handle, short events) {
+static short poll_handle(int fd, HANDLE handle, short events) {
   DWORD file_type;
   DWORD bytes_available = 0;
   short revents = 0;
@@ -3835,6 +3852,13 @@ static short poll_handle(HANDLE handle, short events) {
     return revents;
   }
   if (file_type == FILE_TYPE_PIPE) {
+    /* See fd_pipe_write_only[]'s own comment: never ask PeekNamedPipe()
+     * about a pipe write end -- a write-only handle can never actually
+     * satisfy POLLIN, and PeekNamedPipe() does not reliably report "no
+     * data" for one the way it does for a real read end. */
+    if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_pipe_write_only[fd]) {
+      return revents;
+    }
     if (PeekNamedPipe(handle, 0, 0, 0, &bytes_available, 0)) {
       if (bytes_available != 0) {
         revents |= (short)(events & POLLIN);
@@ -3888,7 +3912,7 @@ long __crt_sys_poll(struct pollfd* fds, unsigned long nfds, int timeout) {
         if (handle == INVALID_HANDLE_VALUE) {
           fds[i].revents = POLLNVAL;
         } else {
-          fds[i].revents = poll_handle(handle, fds[i].events);
+          fds[i].revents = poll_handle(fds[i].fd, handle, fds[i].events);
         }
       }
       if (fds[i].revents != 0) {

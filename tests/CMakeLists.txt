@@ -241,6 +241,11 @@ set_tests_properties(poll_select_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "poll_select_test: ok"
 )
 
+add_crt_test(poll_pipe_write_end_test poll_pipe_write_end_test.c)
+set_tests_properties(poll_pipe_write_end_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "poll_pipe_write_end_test: ok"
+)
+
 add_crt_test(socket_network_test socket_network_test.c)
 set_tests_properties(socket_network_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "socket_network_test: ok"

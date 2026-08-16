@@ -10,6 +10,59 @@ substantive update.
 
 ## 2026-08-16
 
+- **Root-caused and fixed `timeout`'s hang -- a real, general Windows
+  `poll()` bug, not a signal issue as first suspected.** Investigated with
+  a minimal standalone repro (`fork()` a child that exits almost
+  immediately; `pipe()`; `poll()` the pipe's *write* end for `POLLIN` with
+  a 3000ms timeout, nothing ever written to it) rather than guessing from
+  `timeout.c`'s own source: `poll()` returned "ready" in about 7ms, not
+  after the real 3000ms timeout. `__crt_sys_poll()`'s `poll_handle()`
+  (`libc/src/arch/windows/common/syscall.c`) called `PeekNamedPipe()`
+  unconditionally on any `FILE_TYPE_PIPE` handle to answer `POLLIN` --
+  that call's documented behavior only covers a pipe's read end; called on
+  the write end it does not reliably report "no data available" the way
+  `POLLIN` semantics require. `timeout.c` upstream deliberately polls an
+  otherwise-unused pipe's write end as a pure sleep-until-timeout
+  mechanism for its non-`-i` (non-inactivity) mode -- exactly the shape
+  that exposed this. Fixed by tracking which fd is a pipe write end
+  (`fd_pipe_write_only[]`, set in `__crt_sys_pipe()`, checked in
+  `poll_handle()` before ever calling `PeekNamedPipe()`) so a write end
+  now correctly reports "not ready" until the real timeout elapses. New
+  permanent regression: `tests/poll_pipe_write_end_test.c` -- a real,
+  general fix (any code polling a pipe write end for readability, not
+  just `timeout`), independent of `timeout`'s own applet status below.
+
+  Verifying the real `timeout` applet end to end after this fix (not just
+  the standalone repro) surfaced two more, separate, deeper gaps rather
+  than closing the item outright -- the hang is gone, but the applet still
+  isn't fully correct:
+  - `deliver_signal()`'s `SA_SIGINFO` path (`libc/src/signal.c`) always
+    hands the handler a zeroed `siginfo_t` (`si_code = 0`, `si_status =
+    0`) regardless of which signal or why. `timeout.c`'s own `SIGCHLD`
+    handler reads exactly those fields to learn the exited child's real
+    status, so it always computed a wrong exit code (`128`, since
+    `si_code` can never equal the real `CLD_EXITED`) even for a child that
+    exited successfully. This project's own child-tracking tables
+    (`child_process_table`/`child_pid_table`, already used by
+    `waitpid()`) hold the real data; `SIGCHLD` dispatch just doesn't
+    thread it through to `siginfo_t` yet.
+  - `kill()` still only supports signaling the calling process itself (a
+    gap already known from earlier in this session, not new) -- sending a
+    signal to a genuinely different process is a no-op. `timeout`'s own
+    deadline enforcement is exactly `kill(pid, SIGTERM)` on the child once
+    the clock runs out, so it silently does nothing: confirmed directly
+    with `timeout 2 sleep 10`, which ran the full ~10 seconds instead of
+    being cut off at ~2. The child was never actually terminated; the
+    command just returned once it finished on its own.
+
+  `timeout` stays disabled -- re-registering it now would ship a command
+  that reports wrong exit codes and, worse, silently fails to enforce the
+  one thing it exists to do. Both gaps are real, separate, and scoped for
+  whoever picks this up next; the original infinite-hang symptom that
+  prompted this investigation is genuinely fixed and covered by a
+  permanent regression regardless. All 97 tests pass via a genuine
+  `cmake --fresh` reconfigure plus full rebuild.
+
 - **Implemented real Windows POSIX-semantics rename, re-enabled `dos2unix`/
   `unix2dos`.** The `rename()`-over-a-file-with-an-open-handle limitation
   flagged the same day (the previous entry below) is fixed for real:
