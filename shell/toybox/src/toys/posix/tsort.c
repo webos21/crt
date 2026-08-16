@@ -50,7 +50,13 @@ static void do_tsort(int fd, char *name)
        otop,     // out at start of this loop over pair[]
        otop2,    // out at start of previous loop over pair[]
        ii, jj, kk;
-  unsigned long sigh;
+  /* CRT: uintptr_t, not upstream's "unsigned long" -- see
+   * shell/toybox/PATCHES.md's "Windows LLP64 Pointer-Width Fixes" entry.
+   * Windows x86_64/aarch64 are LLP64 (long stays 32-bit, pointers are
+   * 64-bit); round-tripping a pointer through unsigned long here silently
+   * truncated it before this fix, corrupting the very address bsearch()
+   * below reads pair data through. */
+  uintptr_t sigh;
 
   // bsearch()'s first argument is the element to search for,
   // and sbse() compares the second element of each pair, so to find
@@ -59,7 +65,7 @@ static void do_tsort(int fd, char *name)
   // typecast to (void *), so do the usual LP64 trick to MAKE IT SHUT UP.
   // (The search function adds 1 to each argument so we never access
   // memory outside the pair.)
-  sigh = ((unsigned long)keep)-sizeof(*keep);
+  sigh = ((uintptr_t)keep)-sizeof(*keep);
 
   // Count input entries in data block read from fd
   if (!(ss = readfd(fd, 0, &plen))) return;

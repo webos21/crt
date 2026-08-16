@@ -90,8 +90,8 @@
 #define USE_CHSH(...)
 #define CFG_CHVT 0
 #define USE_CHVT(...)
-#define CFG_CKSUM 0
-#define USE_CKSUM(...)
+#define CFG_CKSUM 1
+#define USE_CKSUM(...) __VA_ARGS__
 #define CFG_CLEAR 0
 #define USE_CLEAR(...)
 #define CFG_CMP 1
@@ -104,8 +104,8 @@
 #define USE_CPIO(...) __VA_ARGS__
 #define CFG_CP 1
 #define USE_CP(...) __VA_ARGS__
-#define CFG_CRC32 0
-#define USE_CRC32(...)
+#define CFG_CRC32 1
+#define USE_CRC32(...) __VA_ARGS__
 #define CFG_CROND 0
 #define USE_CROND(...)
 #define CFG_CRONTAB 0
@@ -600,10 +600,10 @@
 #define USE_TR(...) __VA_ARGS__
 #define CFG_TS 0
 #define USE_TS(...)
-#define CFG_TSORT 0
-#define USE_TSORT(...)
-#define CFG_TTY 0
-#define USE_TTY(...)
+#define CFG_TSORT 1
+#define USE_TSORT(...) __VA_ARGS__
+#define CFG_TTY 1
+#define USE_TTY(...) __VA_ARGS__
 #define CFG_TUNCTL 0
 #define USE_TUNCTL(...)
 #define CFG_UCLAMPSET 0
@@ -620,8 +620,8 @@
 #define USE_UNIQ(...) __VA_ARGS__
 #define CFG_UNIX2DOS 1
 #define USE_UNIX2DOS(...) __VA_ARGS__
-#define CFG_UNLINK 0
-#define USE_UNLINK(...)
+#define CFG_UNLINK 1
+#define USE_UNLINK(...) __VA_ARGS__
 #define CFG_UNSHARE 1
 #define USE_UNSHARE(...) __VA_ARGS__
 #define CFG_UPTIME 0
@@ -634,8 +634,8 @@
 #define USE_USLEEP(...)
 #define CFG_UUDECODE 0
 #define USE_UUDECODE(...)
-#define CFG_UUENCODE 0
-#define USE_UUENCODE(...)
+#define CFG_UUENCODE 1
+#define USE_UUENCODE(...) __VA_ARGS__
 #define CFG_UUIDGEN 0
 #define USE_UUIDGEN(...)
 #define CFG_VCONFIG 0

@@ -10,6 +10,64 @@ substantive update.
 
 ## 2026-08-16
 
+- **Enabled six more toybox applets after auditing the remaining disabled
+  ones for LLP64 pointer-width safety: `cksum`/`crc32`, `tsort`, `tty`,
+  `unlink`, `uuencode`.** Continues the `which`/`readlink`/`stat`/`touch`/
+  `id`/`xargs` batch's own discipline. Read every plausible next candidate
+  in `shell/toybox/src/toys/posix/` (`link`, `unlink`, `cksum`, `tty`,
+  `logger`, `expand`, `fold`, `tsort`, `uudecode`, `uuencode`, `cal`,
+  `split`, `strings`) for two separate hazards, both real:
+  - **A genuine LLP64 pointer-truncation bug, found in `tsort.c`**: its own
+    `bsearch()`-argument-adjustment trick round-tripped a `char **` through
+    `unsigned long` ("do the usual LP64 trick to MAKE IT SHUT UP", the
+    comment's own words) -- silently truncates the pointer on Windows
+    x86_64/aarch64 (LLP64: `long` stays 32-bit, pointers are 64-bit).
+    Changed to `uintptr_t`. Recorded in `shell/toybox/PATCHES.md`'s
+    existing "Windows LLP64 Pointer-Width Fixes" section (`tsort.c` added
+    to its touched-files list) rather than a new section, since it's the
+    same patch category as the `find`/`du`/`ls`/`sed`/`xargs` fixes already
+    there.
+  - **A previously-undocumented *second* registration gap**, found by
+    actually trying to run the newly-compiled applets, not just compiling
+    them: being listed in `shell/CMakeLists.txt`'s `CRT_TOYBOX_SOURCES` and
+    having a `shell/toybox/crt/generated/newtoys.h` entry is *still* not
+    enough -- `shell/toybox/src/android/linux/generated/config.h`'s
+    `USE_x(...)`/`CFG_x` macro pair (checked-in, would normally come from
+    toybox's own `genconfig.sh`/Kconfig-style `.config`) gates whether a
+    `newtoys.h` entry actually compiles into `toy_list[]` at all --
+    `USE_x(...)` literally expands to nothing when `CFG_x` is `0`. All
+    seven candidates above already had a `CFG_x 0`/empty `USE_x` pair
+    sitting in this file (apparently included in whatever broader
+    Android-defconfig-driven pass originally generated it), so flipping
+    both lines to `1`/`__VA_ARGS__` was enough -- no need to run the real,
+    much heavier `genconfig.sh`+`mkflags` pipeline. Confirmed via a direct
+    `toybox: Unknown command` failure before this fix and working `toybox
+    cksum`/`tsort`/`tty`/`unlink`/`uuencode`/`crc32` (both standalone and
+    through the `toybox` multiplexer) after it.
+  - **Seven of the thirteen candidates need more than this** and were left
+    disabled: `expand`, `logger`, `fold`, `uudecode`, `cal`, `split`,
+    `strings` all use toybox's `GLOBALS()` macro, and their per-applet
+    state struct is missing from `shell/toybox/src/android/linux/generated/
+    flags.h`'s `union global_union` entirely (confirmed: `readlink`/`stat`/
+    `touch`/`id`/`xargs`'s own union members are already present in this
+    same file, so no one has needed a *real* `flags.h` regeneration for
+    this project's own batches so far -- this would be the first). Adding
+    them for real needs toybox's own `mkflags` C-preprocessor-based
+    generation pipeline (`scripts/make.sh`/`scripts/genconfig.sh`), not a
+    two-line hand-edit like `config.h` above -- kept out of this batch as a
+    separate, real prerequisite rather than hand-editing a 7600-line
+    generated union by guesswork.
+  - **`link` was audited and dropped, not an LLP64 issue**: `linkat()`
+    (and therefore `link()`, which calls it) is an unconditional `ENOTSUP`
+    stub in `libc/src/fd.c` on every host today, not just Windows -- a
+    real, separate PAL gap.
+  New permanent regression coverage:
+  `crt_mksh_rootfs_llp64_batch_runs` in `shell/CMakeLists.txt`, matching
+  the existing `crt_mksh_rootfs_which_stat_readlink_runs` pattern (spawns
+  `crt_mksh` with `CRT_ROOTFS`/`PATH` set, drives all six new applets
+  through a real mksh pipeline). All 93 tests pass, verified via a genuine
+  `cmake --fresh` reconfigure plus full rebuild.
+
 - **Added the six virtual rootfs files TODO.md had queued: `/proc/mounts`,
   `/proc/self/status`, `/proc/self/cmdline`, `/proc/self/environ`,
   `/proc/stat`, and `/dev/zero`.** Split cleanly by what each host already

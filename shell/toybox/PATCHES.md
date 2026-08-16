@@ -28,6 +28,7 @@ Touched files:
 - `src/toys/posix/find.c`
 - `src/toys/posix/ls.c`
 - `src/toys/posix/sed.c`
+- `src/toys/posix/tsort.c`
 - `src/toys/posix/xargs.c`
 
 Reason:
@@ -51,6 +52,10 @@ Change summary:
 - `find -printf` separates integer and string printf arguments instead of
   relying on LP64 vararg equivalence.
 - `du` accumulates `dirtree.extra` through pointer-width integer casts.
+- `tsort` (2026-08-16, found while auditing the next disabled-applet batch,
+  see `HISTORY.md`): its own `bsearch()`-argument-adjustment trick round-tripped
+  a `char **` through `unsigned long`, truncating it on Windows. Changed to
+  `uintptr_t`.
 
 ABI impact:
 

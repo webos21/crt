@@ -296,6 +296,7 @@ if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
     toybox/src/toys/posix/basename.c
     toybox/src/toys/posix/cat.c
     toybox/src/toys/posix/chmod.c
+    toybox/src/toys/posix/cksum.c
     toybox/src/toys/posix/cmp.c
     toybox/src/toys/posix/comm.c
     toybox/src/toys/posix/cp.c
@@ -334,8 +335,12 @@ if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
     toybox/src/toys/posix/test.c
     toybox/src/toys/posix/touch.c
     toybox/src/toys/posix/true.c
+    toybox/src/toys/posix/tsort.c
+    toybox/src/toys/posix/tty.c
     toybox/src/toys/posix/uname.c
     toybox/src/toys/posix/uniq.c
+    toybox/src/toys/posix/unlink.c
+    toybox/src/toys/posix/uuencode.c
     toybox/src/toys/posix/wc.c
     toybox/src/toys/posix/xargs.c
   )
@@ -517,6 +522,30 @@ if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
       DEPENDS crt_mksh_rootfs_exec_builtin_runs
     )
     set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_mksh_rootfs_which_stat_readlink_runs)
+
+    # Regression coverage for the 2026-08-16 LLP64-audit batch (cksum/crc32,
+    # tsort, tty, unlink, uuencode): each was newly wired into
+    # shell/toybox/crt/generated/newtoys.h and
+    # shell/toybox/src/android/linux/generated/config.h's CFG_x/USE_x pair
+    # (compiling the .c file into CRT_TOYBOX_SOURCES is not enough on its
+    # own -- see the which/readlink/stat comment above, which this
+    # reconfirmed for a second, disjoint reason: config.h's USE_x macros
+    # gate whether an entry in newtoys.h compiles into toy_list[] at all).
+    # tsort.c also had a real Windows LLP64 pointer-truncation bug fixed
+    # here (see shell/toybox/PATCHES.md); `link` was audited but dropped --
+    # linkat() is an unconditional ENOTSUP stub on every host today, a real
+    # PAL gap, not an LLP64 issue.
+    add_test(NAME crt_mksh_rootfs_llp64_batch_runs
+      COMMAND "${CMAKE_COMMAND}" -E env
+        "CRT_ROOTFS=${CMAKE_BINARY_DIR}/rootfs"
+        "PATH=/system/bin:/bin:/usr/bin"
+        "$<TARGET_FILE:crt_mksh>" -c "echo hi | cksum; printf 'a b\\nb c\\n' | tsort; echo x | crc32; printf hello | uuencode - u.txt; echo target > /tmp/mksh-ctest-llp64-target.txt && unlink /tmp/mksh-ctest-llp64-target.txt && echo applet-batch-ok"
+    )
+    set_tests_properties(crt_mksh_rootfs_llp64_batch_runs PROPERTIES
+      PASS_REGULAR_EXPRESSION "[0-9]+ 3\na\nb\nc\n[0-9a-f]+\nbegin 744 u.txt\n.*\nend\napplet-batch-ok"
+      DEPENDS crt_mksh_rootfs_which_stat_readlink_runs
+    )
+    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_mksh_rootfs_llp64_batch_runs)
   endif()
   add_dependencies(crt_shell_artifacts crt_toybox)
   install(TARGETS crt_toybox

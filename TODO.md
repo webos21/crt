@@ -80,9 +80,21 @@ Active threads, not a flat list of one-off items. Remaining libc/PAL
 residuals before the upper runtime phase (see `docs/runtime_roadmap.md`):
 
 - Expand toybox applets only when the backing Bionic-compatible CRT/PAL
-  surface exists. `which`/`readlink`/`stat`/`touch`/`id`/`xargs` are done
-  (see `HISTORY.md`) -- next candidates would come from auditing the
-  remaining disabled applets for LLP64 pointer-width safety.
+  surface exists. `which`/`readlink`/`stat`/`touch`/`id`/`xargs` and
+  `cksum`/`crc32`/`tsort`/`tty`/`unlink`/`uuencode` are done (see
+  `HISTORY.md`) -- next candidates:
+  - `expand`, `logger`, `fold`, `uudecode`, `cal`, `split`, `strings` are
+    audited and LLP64-safe, but need a real `shell/toybox/src/android/
+    linux/generated/flags.h` regeneration first (their `GLOBALS()` struct
+    is missing from the committed `union global_union` entirely -- see
+    `HISTORY.md`'s 2026-08-16 entry) -- toybox's own `mkflags`
+    C-preprocessor pipeline (`scripts/make.sh`/`scripts/genconfig.sh`),
+    not a hand-edit.
+  - `link` is LLP64-safe but needs `linkat()` implemented for real first
+    (currently an unconditional `ENOTSUP` stub in `libc/src/fd.c` on every
+    host, not just Windows).
+  - Beyond those, keep auditing the remaining disabled applets for LLP64
+    pointer-width safety.
 - Keep deeper Linux-like applets deferred until the PAL owns enough backing
   behavior:
   - `ps`: add through toybox only after the rootfs/PAL provides enough
