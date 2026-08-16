@@ -132,8 +132,8 @@
 #define USE_DEMO_UTF8TOWC(...)
 #define CFG_DEVMEM 0
 #define USE_DEVMEM(...)
-#define CFG_DF 0
-#define USE_DF(...)
+#define CFG_DF 1
+#define USE_DF(...) __VA_ARGS__
 #define CFG_DHCP6 0
 #define USE_DHCP6(...)
 #define CFG_DHCPD 0
@@ -540,8 +540,8 @@
 #define USE_STRACE(...)
 #define CFG_STRINGS 0
 #define USE_STRINGS(...)
-#define CFG_STTY 0
-#define USE_STTY(...)
+#define CFG_STTY 1
+#define USE_STTY(...) __VA_ARGS__
 #define CFG_SU 0
 #define USE_SU(...)
 #define CFG_SULOGIN 0

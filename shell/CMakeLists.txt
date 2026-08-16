@@ -292,6 +292,7 @@ if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
     toybox/src/toys/other/yes.c
     toybox/src/toys/pending/diff.c
     toybox/src/toys/pending/expr.c
+    toybox/src/toys/pending/stty.c
     toybox/src/toys/pending/tr.c
     toybox/src/toys/posix/basename.c
     toybox/src/toys/posix/cat.c
@@ -304,6 +305,7 @@ if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
     toybox/src/toys/posix/cut.c
     toybox/src/toys/posix/date.c
     toybox/src/toys/posix/dd.c
+    toybox/src/toys/posix/df.c
     toybox/src/toys/posix/dirname.c
     toybox/src/toys/posix/du.c
     toybox/src/toys/posix/echo.c
@@ -617,6 +619,48 @@ if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
       DEPENDS crt_mksh_rootfs_toybox_applet_sweep_runs
     )
     set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_mksh_rootfs_dos2unix_runs)
+
+    # df/stty (2026-08-16, see HISTORY.md): both were re-enabled once their
+    # backing PAL surface turned out to already exist (xgetmountlist()'s
+    # /proc/mounts + real statvfs()/GetDiskFreeSpaceExA() for df;
+    # tcgetattr/tcsetattr/TIOCGWINSZ/TIOCSWINSZ for stty). This also
+    # exercises a real, general bug the enablement uncovered: their
+    # pre-generated flags.h entries were checked in with df/stty disabled,
+    # so every one of their FLAG_x macros used the always-0 FORCED_FLAG
+    # multiplier instead of the real 1LL one -- df -h's own FLAG(h) check
+    # is exactly the kind of always-false condition that bug caused (`df
+    # -h` silently behaved like plain `df`, no error, wrong output), which
+    # is why this test greps for the human-readable "Size"/"Avail" header
+    # rather than just checking exit code 0.
+    add_test(NAME crt_mksh_rootfs_df_runs
+      COMMAND "${CMAKE_COMMAND}" -E env
+        "CRT_ROOTFS=${CMAKE_BINARY_DIR}/rootfs"
+        "PATH=/system/bin:/bin:/usr/bin"
+        "$<TARGET_FILE:crt_mksh>" -c "df -h"
+    )
+    set_tests_properties(crt_mksh_rootfs_df_runs PROPERTIES
+      PASS_REGULAR_EXPRESSION "Filesystem +Size +Used +Avail +Use% +Mounted on"
+      DEPENDS crt_mksh_rootfs_dos2unix_runs
+    )
+    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_mksh_rootfs_df_runs)
+
+    # stty -g needs the same FLAG(g)-was-always-false fix as df -h above
+    # (see that test's comment). /dev/tty needs a real attached console,
+    # which some CI/sandbox environments genuinely don't have (confirmed
+    # directly on this machine's own dev environment) -- accept a graceful
+    # ENOTTY skip alongside the real success path rather than requiring a
+    # console this test can't guarantee exists everywhere it runs.
+    add_test(NAME crt_mksh_rootfs_stty_runs
+      COMMAND "${CMAKE_COMMAND}" -E env
+        "CRT_ROOTFS=${CMAKE_BINARY_DIR}/rootfs"
+        "PATH=/system/bin:/bin:/usr/bin"
+        "$<TARGET_FILE:crt_mksh>" -c "if out=$(stty -F /dev/tty -g 2>&1); then case \"$out\" in *:*:*:*) echo stty-ok;; *) echo \"stty-bad-output:$out\";; esac; else echo stty-skip-no-console; fi"
+    )
+    set_tests_properties(crt_mksh_rootfs_stty_runs PROPERTIES
+      PASS_REGULAR_EXPRESSION "stty-ok|stty-skip-no-console"
+      DEPENDS crt_mksh_rootfs_df_runs
+    )
+    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_mksh_rootfs_stty_runs)
   endif()
   add_dependencies(crt_shell_artifacts crt_toybox)
   install(TARGETS crt_toybox

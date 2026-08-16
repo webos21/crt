@@ -62,7 +62,16 @@ Detailed policy and provenance stay in `docs/` and import manifests.
     batches actually enabled).
   - Keep `/dev/tty`, `/dev/console`, `isatty`, `tcgetattr`, `tcsetattr`,
     and `TIOCGWINSZ` behavior coherent enough for non-interactive shell
-    and configure use.
+    and configure use. `tcgetattr`/`tcsetattr` round-trip fidelity (a
+    per-fd shadow so a value `tcsetattr()` was asked to set comes back
+    verbatim from `tcgetattr()`, not re-derived from hardcoded defaults
+    every call) was fixed 2026-08-16 -- see `HISTORY.md`. `TIOCGWINSZ`
+    still legitimately returns `ENOTTY` when the console has no real
+    output screen buffer (confirmed directly: this project's own dev
+    environment has an attached console for input but `GetConsole
+    ScreenBufferInfo` fails on it) -- correct behavior for that real
+    condition, not a bug, but it means `stty -a`/`stty size` can't be
+    exercised end-to-end in every environment.
   - Continue validating that `CRT_SPAWN_NATIVE_WINDOWS=1` stays a narrow
     launcher hint for native host tools (LLVM `ar`/`ranlib`/`strip`), not
     an inherited global mode for configure recipes.
@@ -84,15 +93,28 @@ residuals before the upper runtime phase (see `docs/runtime_roadmap.md`):
   `cksum`/`crc32`/`tsort`/`tty`/`unlink`/`uuencode`; `link`; a
   Bionic/Android-parity pass (`cut` plus 24 more names, diffed directly
   against the real Android/Bionic reference config rather than picked ad
-  hoc); and `dos2unix`/`unix2dos` (needed a real `FILE_RENAME_POSIX_
-  SEMANTICS` rename() implementation first, not just an LLP64 audit) are
-  all done -- see `HISTORY.md`'s 2026-08-16 entries. Still open:
+  hoc); `dos2unix`/`unix2dos` (needed a real `FILE_RENAME_POSIX_
+  SEMANTICS` rename() implementation first, not just an LLP64 audit); and
+  `df`/`stty` (needed two real, general PAL fixes uncovered by actually
+  running them, not just an LLP64 audit -- see `HISTORY.md`'s 2026-08-16
+  entries) are all done. Still open:
   - `expand`, `logger`, `fold`, `uudecode`, `cal`, `split`, `strings` are
-    audited and LLP64-safe, but need a real `shell/toybox/src/android/
-    linux/generated/flags.h` regeneration first (their `GLOBALS()` struct
-    is missing from the committed `union global_union` entirely) --
-    toybox's own `mkflags` C-preprocessor pipeline
-    (`scripts/make.sh`/`scripts/genconfig.sh`), not a hand-edit.
+    audited and LLP64-safe, but need `shell/toybox/src/android/linux/
+    generated/globals.h` extended first (their `GLOBALS()` struct is
+    missing from the committed `union global_union` entirely -- **not**
+    `flags.h`, a real correction of this item's own earlier framing: see
+    the `df`/`stty` entry in `HISTORY.md`'s 2026-08-16 entries for how
+    that distinction was actually found and why hand-adding a
+    `struct X_data`/union-member pair to `globals.h` is low-risk enough to
+    do directly, unlike `flags.h`'s bit-position `FLAG_x` machinery).
+    `flags.h` itself may still need per-applet attention too -- the same
+    2026-08-16 entries found its checked-in snapshot leaves every
+    currently-disabled applet's `FLAG_x` on the always-0 `FORCED_FLAG`
+    multiplier rather than the real `1LL` one, which silently breaks any
+    of its flags once the applet is enabled without noticing (`df -h`
+    behaved exactly like plain `df`, no error). Check each of these seven
+    for the same pattern before considering the `flags.h` side done, not
+    just `globals.h`.
   - **`timeout`'s original hang is fixed, but it still needs two more,
     separate PAL features before it's actually correct.** Root cause of
     the hang: `__crt_sys_poll()`'s `poll_handle()` called
@@ -137,16 +159,35 @@ residuals before the upper runtime phase (see `docs/runtime_roadmap.md`):
     in this tree at all and would need a real upstream import first.
 
 - Keep deeper Linux-like applets deferred until the PAL owns enough backing
-  behavior:
-  - `ps`, `mount`, `umount`, `pgrep`, `pkill`: add through toybox only
-    after the rootfs/PAL provides enough `/proc` process data; not mksh
-    builtins. Already forced off via `shell/toybox/crt/generated/
-    config.h` regardless of upstream Android's own config -- see above.
-  - `df`;
-  - `ifconfig`;
-  - `stty`;
-  - `login`;
-  - device-manager or procfs-heavy commands.
+  behavior. Investigated concretely (2026-08-16, upstream source read for
+  each, not guessed) -- `df` and `stty` turned out to be tractable and are
+  now done (see above); everything below stays deferred for a specific,
+  confirmed reason, not just "not done yet":
+  - `ps`/`top`/`iotop`/`pgrep`/`pkill`: all five are registered from one
+    shared file (`shell/toybox/src/toys/posix/ps.c`, ~2000 lines) whose
+    `get_ps()`/`get_threads()` does a real recursive `/proc` walk over
+    *every process on the system* (`/proc/$PID/stat`, `/status`, `/io`,
+    `/statm`, `/exe` readlink, `/cmdline`, `/fd/*`, `/proc/$PID/task/*`,
+    `/proc/tty/drivers`, cgroup) -- architecturally a much larger surface
+    than the `/proc/self/*` virtual files this project already has. Add
+    through toybox only once the rootfs/PAL provides real multi-process
+    `/proc/$PID` data, not mksh builtins. Already forced off via
+    `shell/toybox/crt/generated/config.h` regardless of upstream
+    Android's own config -- see above.
+  - `mount`/`umount`: call the real Linux `mount(2)`/`umount(2)` kernel
+    syscalls directly -- genuinely inapplicable outside real Linux with
+    root and a real VFS/block-device concept, which this PAL's
+    architecture doesn't have at all.
+  - `ifconfig`: needs deep Linux-specific socket ioctls (`SIOCGIFCONF`,
+    `SIOCGIFFLAGS`, `SIOCGIFADDR`, `SIOCGIFHWADDR`, `SIOCSIFADDR`, ...)
+    with no Windows equivalent -- Windows needs the entirely different IP
+    Helper API (`GetAdaptersAddresses` etc.), a separate networking-PAL
+    feature beyond the existing curl-oriented socket layer.
+  - `login`: needs `crypt()` (unimplemented), `getspnam()`/a shadow
+    password DB (unimplemented), and real multi-user `setuid` session
+    switching -- architecturally mismatched with this project's
+    single-host-process-per-invocation model.
+  - device-manager or other procfs-heavy commands.
 
 ## planned
 

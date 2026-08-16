@@ -1,3 +1,22 @@
+/* df_data/stty_data: hand-added, not part of the original generated
+ * snapshot -- df.c/stty.c's own GLOBALS() macro content copied verbatim
+ * (field-for-field, same order) rather than a hand-edit of the more
+ * complex FLAG_x bit-position machinery flags.h owns (that part already
+ * existed correctly for both applets; only this union member was
+ * missing). See TODO.md/HISTORY.md's 2026-08-16 entries. */
+struct df_data {
+  struct arg_list *t;
+
+  int units, width[6];
+};
+
+struct stty_data {
+  char *F;
+
+  int fd, col;
+  unsigned output_cols;
+};
+
 struct gzip_data {
   int level;
 };
@@ -419,6 +438,8 @@ struct xargs_data {
   FILE *tty;
 };
 extern union global_union {
+	struct df_data df;
+	struct stty_data stty;
 	struct gzip_data gzip;
 	struct hostname_data hostname;
 	struct md5sum_data md5sum;

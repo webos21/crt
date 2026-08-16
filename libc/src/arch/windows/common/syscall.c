@@ -598,6 +598,35 @@ static int fd_nonblock[CRT_FD_TABLE_SIZE];
  * poll_handle() below skips the PeekNamedPipe() call entirely for a
  * fd flagged here rather than trusting its result. */
 static unsigned char fd_pipe_write_only[CRT_FD_TABLE_SIZE];
+/* __crt_sys_tcgetattr()/__crt_sys_tcsetattr() round-trip fidelity: Windows
+ * console mode (SetConsoleMode/GetConsoleMode) only exposes three of the
+ * ~30 POSIX termios bits this PAL cares about (ISIG/IEXTEN via
+ * ENABLE_PROCESSED_INPUT, ICANON via ENABLE_LINE_INPUT, and ECHO+ECHOE+
+ * ECHOK collapsed into the single ENABLE_ECHO_INPUT bit -- Windows has no
+ * separate "visually erase on backspace" vs. "visually erase whole line on
+ * kill char" concept, both ride on the one echo bit). Before this shadow
+ * was added, tcgetattr() just re-derived c_iflag/c_oflag/c_cflag/c_cc[]/
+ * speeds from hardcoded constants every call and ignored whatever
+ * tcsetattr() had actually been asked to set for anything outside those
+ * three real bits -- found for real via toybox's `stty` applet: `stty
+ * -echo` legitimately suppresses real console echo (ENABLE_ECHO_INPUT
+ * cleared correctly), but the immediate tcgetattr()-based verify every
+ * well-behaved stty implementation does afterward then read back
+ * ECHO|ECHOE|ECHOK all bundled-clear together, even though the caller
+ * only asked to clear ECHO -- a real, general round-trip mismatch, not an
+ * stty-specific one. Once tcsetattr() has been called on an fd at least
+ * once, fd_termios_shadow[fd] holds the exact struct termios it was last
+ * asked to set (valid iff fd_termios_shadow_valid[fd]), and tcgetattr()
+ * returns that verbatim instead of re-deriving defaults -- full POSIX
+ * round-trip fidelity for every field, even the ones (c_cc[], speeds,
+ * most of c_iflag/c_oflag/c_cflag) Windows' console has no real backing
+ * for at all, matching how a real termios-capable OS lets you "set" values
+ * a particular device doesn't act on but still reports back faithfully.
+ * A never-set fd keeps today's original behavior: derive a sane initial
+ * reading from the real console mode bits. See TODO.md/HISTORY.md's
+ * 2026-08-16 entries. */
+static struct termios fd_termios_shadow[CRT_FD_TABLE_SIZE];
+static unsigned char fd_termios_shadow_valid[CRT_FD_TABLE_SIZE];
 static int fd_table_initialized;
 static int winsock_initialized;
 /* RtlGenRandom (exported as SystemFunction036 from advapi32.dll): backs
@@ -2985,6 +3014,7 @@ static int alloc_fd(HANDLE handle) {
       fd_flags[fd] = 0;
       fd_nonblock[fd] = 0;
       fd_pipe_write_only[fd] = 0;
+      fd_termios_shadow_valid[fd] = 0;
       return fd;
     }
   }
@@ -3002,6 +3032,7 @@ static int alloc_socket_fd(SOCKET socket_handle) {
       fd_flags[fd] = 0;
       fd_nonblock[fd] = 0;
       fd_pipe_write_only[fd] = 0;
+      fd_termios_shadow_valid[fd] = 0;
       return fd;
     }
   }
@@ -3023,6 +3054,7 @@ static int alloc_urandom_fd(void) {
       fd_flags[fd] = 0;
       fd_nonblock[fd] = 0;
       fd_pipe_write_only[fd] = 0;
+      fd_termios_shadow_valid[fd] = 0;
       return fd;
     }
   }
@@ -3041,6 +3073,7 @@ static int alloc_zero_fd(void) {
       fd_flags[fd] = 0;
       fd_nonblock[fd] = 0;
       fd_pipe_write_only[fd] = 0;
+      fd_termios_shadow_valid[fd] = 0;
       return fd;
     }
   }
@@ -4724,6 +4757,13 @@ long __crt_sys_tcgetattr(int fd, struct termios* termios_p) {
   if (GetFileType(handle) != FILE_TYPE_CHAR || !GetConsoleMode(handle, &mode)) {
     return -ENOTTY;
   }
+  /* See fd_termios_shadow's own comment: once tcsetattr() has stored a
+   * value for this fd, echo it back verbatim for full round-trip fidelity
+   * instead of re-deriving a fresh default every call. */
+  if (fd_termios_shadow_valid[fd]) {
+    *termios_p = fd_termios_shadow[fd];
+    return 0;
+  }
   memset(termios_p, 0, sizeof(*termios_p));
   termios_p->c_iflag = ICRNL | IXON;
   termios_p->c_oflag = OPOST | ONLCR;
@@ -4770,7 +4810,14 @@ long __crt_sys_tcsetattr(int fd, const struct termios* termios_p) {
   } else {
     mode &= ~CRT_ENABLE_ECHO_INPUT;
   }
-  return SetConsoleMode(handle, mode) ? 0 : fail_last_error();
+  if (!SetConsoleMode(handle, mode)) {
+    return fail_last_error();
+  }
+  /* Persist the exact request so a later tcgetattr() on this fd can
+   * return it verbatim -- see fd_termios_shadow's own comment. */
+  fd_termios_shadow[fd] = *termios_p;
+  fd_termios_shadow_valid[fd] = 1;
+  return 0;
 }
 
 long __crt_sys_stat_path(const char* path, struct stat* st) {

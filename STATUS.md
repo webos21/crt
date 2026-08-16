@@ -26,12 +26,14 @@ in those two win.
   own `cmake --workflow` step does not run `port-test-recipes` (a
   separate, heavier target that fetches and builds third-party sources)
   -- that's verified locally/per-host instead, see below.
-- **`ctest`**: 97 registered tests on Windows and 77 on macOS in the
+- **`ctest`**: 100 registered tests on Windows and 77 on macOS in the
   latest local run (count is slightly
   OS-dependent -- a few targets, like `windows_export_hygiene_test`, only
-  exist on their own OS), all passing locally on Windows (97/97, most
-  recently confirmed after fixing a real Windows `poll()` bug found while
-  investigating `timeout`'s hang -- see `HISTORY.md` -- via a genuine
+  exist on their own OS), all passing locally on Windows (100/100, most
+  recently confirmed after enabling `df`/`stty` and fixing two real PAL
+  bugs that surfaced along the way (a stale `flags.h` snapshot leaving
+  their flags dead code, and no `tcgetattr`/`tcsetattr` round-trip
+  fidelity beyond three bits) -- see `HISTORY.md` -- via a genuine
   `cmake --fresh` reconfigure). The user
   also confirmed a real Linux and macOS build+run this same date, through
   the full `curl` port test -- this closed out the one cross-platform
@@ -149,6 +151,15 @@ in those two win.
   so `timeout`'s own deadline enforcement (`kill(pid, SIGTERM)` on the
   child) is a silent no-op -- confirmed directly, `timeout 2 sleep 10`
   ran the full ~10 seconds instead of being cut off at ~2.
+- **`TIOCGWINSZ` legitimately fails in a console with no real output
+  screen buffer**: confirmed directly (`GetConsoleScreenBufferInfo` fails
+  on `CON`/`CONOUT$` in this project's own dev environment for this
+  session, even though `GetConsoleMode` on the same/an input handle
+  succeeds -- a real, partial-console condition, not a code bug). Correct
+  per POSIX and upstream toybox's own `stty.c` semantics (`perror_exit`
+  on failure), but means `stty -a`/`stty size` can't be exercised
+  end-to-end in every environment; `stty -g`/individual option toggles
+  (which don't need window size) are unaffected and verified working.
 
 ## Next
 
@@ -164,14 +175,18 @@ in those two win.
   status quirk, the six queued virtual rootfs files (`/proc/mounts`,
   `/proc/stat`, `/proc/self/status`, `/proc/self/cmdline`,
   `/proc/self/environ`, `/dev/zero`), a Bionic/Android-parity toybox
-  applet diff (`cut` plus 24 more names), and a real Windows
-  POSIX-semantics `rename()` (re-enabling `dos2unix`/`unix2dos`) are
+  applet diff (`cut` plus 24 more names), a real Windows
+  POSIX-semantics `rename()` (re-enabling `dos2unix`/`unix2dos`), and
+  `df`/`stty` (plus the two real PAL bugs their enablement uncovered) are
   fixed -- see `HISTORY.md`'s 2026-08-16 entries. Remaining toybox gap is
-  now down to: a real `flags.h` regeneration (`expand`/`logger`/`fold`/
-  `uudecode`/`cal`/`split`/`strings`), the two deeper gaps `timeout`
-  still needs (real cross-process `kill()`, real `SIGCHLD` `siginfo_t`
-  data) above, and the already-deliberately-deferred `/proc`-heavy
-  applet set.
+  now down to: `expand`/`logger`/`fold`/`uudecode`/`cal`/`split`/
+  `strings` (need `globals.h` extended, and possibly a `flags.h`
+  `FORCED_FLAG` fix per-applet -- see `TODO.md`), the two deeper gaps
+  `timeout` still needs (real cross-process `kill()`, real `SIGCHLD`
+  `siginfo_t` data) above, and the already-deliberately-deferred
+  `/proc`-heavy applet set (`ps`/`top`/`iotop`/`pgrep`/`pkill`,
+  `mount`/`umount`, `ifconfig`, `login`, each now with a concrete,
+  confirmed reason recorded in `TODO.md` rather than "not done yet").
 - The next product-level target is documented in `docs/runtime_roadmap.md`:
   an Electron-class rebuilt runtime made of `libcrtgfx` (Skia + Wayland-style
   compositor boundary + Chromium Ozone path), `libcrtmedia` (FFmpeg/codecs/

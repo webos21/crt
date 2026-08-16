@@ -38,7 +38,18 @@ config STTY
 #define FOR_stty
 #include "toys.h"
 
-#include <linux/tty.h>
+/* linux/tty.h isn't available outside a real Linux kernel source/header
+ * tree, and this project's termios.h (Bionic-style) only had a bare-minimum
+ * subset of the real asm-generic/termbits.h flag set -- not enough for
+ * stty's own -a/-g listing of every termios bit. Rather than depending on a
+ * missing kernel header, include/termios.h was extended with the rest of
+ * the standard, ABI-stable flag values (CBAUDEX, CS5..CS7, PARENB, VEOL,
+ * etc; verified against asm-generic/termbits.h, which x86_64/aarch64 Linux
+ * both use) -- see TODO.md/HISTORY.md's 2026-08-16 entries. NR_LDISCS is
+ * the one value that's genuinely a tty-subsystem constant rather than a
+ * termios flag (bounds the "line N" line-discipline number), so it's kept
+ * as a small local define instead of growing termios.h's scope for it. */
+#define NR_LDISCS 30
 
 GLOBALS(
   char *F;

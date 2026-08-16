@@ -10,6 +10,102 @@ substantive update.
 
 ## 2026-08-16
 
+- **Enabled `df`/`stty`, fixing two real, general PAL bugs the enablement
+  uncovered along the way.** Both were investigated concretely (upstream
+  source read directly, not guessed) as part of a review of the remaining
+  "Keep deeper Linux-like applets deferred" list and found unexpectedly
+  tractable given infrastructure this session already built: `df.c` uses
+  `xgetmountlist()` (`/proc/mounts` + `getmntent()`, both already
+  implemented) and `statvfs()` (already backed by real
+  `GetDiskFreeSpaceExA()`); `stty.c` uses `tcgetattr`/`tcsetattr`/
+  `ioctl(TIOCGWINSZ/TIOCSWINSZ)`, all already implemented. Both were
+  LLP64-audited clean. Getting them actually working end to end (not just
+  compiling) surfaced three separate, real issues:
+  - **`globals.h`, not `flags.h`, is the real source of truth for
+    `GLOBALS()` union-member storage** -- a correction of this session's
+    own earlier assumption (used for the `expand`/`logger`/`fold`/
+    `uudecode`/`cal`/`split`/`strings` batch, see `TODO.md`). `flags.h`'s
+    `#define TT this.X` pattern is generated unconditionally for every
+    applet in `newtoys.h` regardless of whether real union backing exists;
+    the actual storage is a separate `struct X_data { ... }; ... struct
+    X_data X;` pair inside `extern union global_union` in `globals.h`,
+    which was missing for both `df`/`stty`. Confirmed by contrasting a
+    working applet (`cut`, has a real `struct cut_data cut;` member)
+    against `df`/`stty` (genuinely absent). Fixed by hand-adding
+    `struct df_data`/`struct stty_data` (copied verbatim, field-for-field,
+    from each applet's own `GLOBALS()` macro) and their union members --
+    judged low-risk unlike `flags.h`'s bit-position `FLAG_x` machinery,
+    since this is a direct, mechanical mirror of already-known fields.
+  - **`flags.h`'s checked-in snapshot silently disables any applet that
+    was off when it was generated, even after `config.h` re-enables it.**
+    Both `df`/`stty` compiled fine after the `globals.h` fix, but every
+    flag silently did nothing at runtime (`df -h` behaved exactly like
+    plain `df` -- no error, just wrong output; `stty -a`/`stty -g` fell
+    through to the bare no-flags path). Root-caused with a debug print of
+    `toys.optflags`/`FLAG_x`: mkflags emits `#define FLAG_x
+    (FORCED_FLAG<<N)` instead of `#define FLAG_x (1LL<<N)` for any flag
+    that was disabled in the config snapshot flags.h was generated
+    against, and `FORCED_FLAG` itself is `0LL` unless the specific
+    `.c` file defines `FORCE_FLAGS` before including `toys.h` (a small
+    number of files do, e.g. `cat.c`/`cp.c`/`id.c`, for unrelated
+    multiplexed-applet reasons) -- so every one of `df`/`stty`'s flags
+    were dead code, always evaluating to 0, without any compiler warning.
+    The bit *positions* mkflags assigns are independent of enabled state
+    (derived from the applet's full `allflags` superset, not just what's
+    currently compiled in) and were already correct. Fixed by hand-editing
+    just the `FOR_df`/`FOR_stty` blocks in `flags.h`, changing
+    `FORCED_FLAG` to `1LL` for each of their (already correctly
+    positioned) flags -- a narrow, mechanical substitution, not a
+    bit-position change, so it doesn't carry the same risk this session
+    already judged too high for hand-editing *new* flag positions.
+  - **`tcgetattr()`/`tcsetattr()` had no real round-trip fidelity beyond
+    three bits, a general PAL gap `stty` was simply the first thing in
+    this tree to actually exercise.** `__crt_sys_tcgetattr()` re-derived
+    `c_iflag`/`c_oflag`/`c_cflag`/`c_cc[]`/speeds from hardcoded constants
+    on every call and only reflected `ISIG`/`IEXTEN`/`ICANON`/`ECHO`+
+    `ECHOE`+`ECHOK` from the real Windows console mode -- and Windows only
+    exposes one bit (`ENABLE_ECHO_INPUT`) for all three of `ECHO`/`ECHOE`/
+    `ECHOK` combined, no separate control for "erase visually on
+    backspace" vs. "erase whole line on kill char". `stty -echo` (clearing
+    only `ECHO`, leaving `ECHOE`/`ECHOK` set -- exactly what real
+    stty does and what its own set-then-verify check requires) came back
+    from a follow-up `tcgetattr()` with all three cleared, a real
+    mismatch that made even the single most common `stty` invocation
+    pattern fail with "unable to perform all requested operations".
+    Root-caused with a debug byte-diff of the mismatching `struct
+    termios`, not guessed. Fixed with a per-fd shadow
+    (`fd_termios_shadow[]`/`fd_termios_shadow_valid[]` in
+    `libc/src/arch/windows/common/syscall.c`, reset on fd-slot reuse
+    alongside the existing `fd_nonblock[]`/`fd_pipe_write_only[]`
+    pattern): once `tcsetattr()` has been called on an fd at least once,
+    `tcgetattr()` returns that exact struct back verbatim (full fidelity
+    for every field, including the ones -- `c_cc[]`, speeds, most of
+    `c_iflag`/`c_oflag`/`c_cflag` -- Windows' console has no real backing
+    for at all) instead of re-deriving a fresh default; a never-set fd
+    keeps deriving its initial reading from the real console mode bits,
+    unchanged from before. This is a real, general fix (any termios
+    consumer doing a set-then-verify pattern, not stty-specific). New
+    permanent regression: `tests/termios_echo_roundtrip_test.c` (skips
+    gracefully if no real console is attached, confirmed necessary: this
+    project's own dev environment for this session has no real console at
+    all in some contexts and only a partial one -- input works, output
+    screen-buffer queries don't -- in others).
+
+  `TIOCGWINSZ` genuinely returns `ENOTTY` in that same partial-console
+  environment (`GetConsoleScreenBufferInfo` fails with no real output
+  screen buffer, confirmed with a throwaway repro against `CON`/`CONOUT$`/
+  `CONIN$` directly) -- correct behavior for that real condition per both
+  POSIX and upstream toybox's own `perror_exit`-on-failure semantics, not
+  a bug, so `stty -a`/`stty size` can't be exercised end-to-end in every
+  environment even though the applet itself is correct. `df -h`/`df -k`/
+  `df`, and `stty -g`/`stty -echo`/`stty echo`/`stty -icanon`/`stty
+  icanon`/`stty sane`/bare `stty` were all verified directly against the
+  real rootfs binaries. New permanent ctests:
+  `crt_mksh_rootfs_df_runs`/`crt_mksh_rootfs_stty_runs` (mksh-driven,
+  matching the `dos2unix` pattern) plus the standalone
+  `termios_echo_roundtrip_test` above. All 100 tests pass via a genuine
+  `cmake --fresh` reconfigure plus full rebuild.
+
 - **Root-caused and fixed `timeout`'s hang -- a real, general Windows
   `poll()` bug, not a signal issue as first suspected.** Investigated with
   a minimal standalone repro (`fork()` a child that exits almost

@@ -4593,13 +4593,21 @@
 #ifndef TT
 #define TT this.df
 #endif
-#define FLAG_a (FORCED_FLAG<<0)
-#define FLAG_t (FORCED_FLAG<<1)
-#define FLAG_i (FORCED_FLAG<<2)
-#define FLAG_h (FORCED_FLAG<<3)
-#define FLAG_k (FORCED_FLAG<<4)
-#define FLAG_P (FORCED_FLAG<<5)
-#define FLAG_H (FORCED_FLAG<<6)
+/* This file was pre-generated with CFG_DF=0 (df was off in the config
+ * snapshot this checked-in flags.h reflects), so mkflags emitted
+ * FORCED_FLAG (=0 unless FORCE_FLAGS is defined) instead of 1LL for every
+ * one of df's flags -- these bit *positions* are still correct (df's
+ * optstring has no USE_x()-gated sub-flags, so allflags==flags and every
+ * character is really enabled now that CFG_DF=1), only the multiplier was
+ * stale. Hand-flipped to 1LL rather than rerunning the real mkflags
+ * pipeline; see TODO.md/HISTORY.md's 2026-08-16 entries. */
+#define FLAG_a (1LL<<0)
+#define FLAG_t (1LL<<1)
+#define FLAG_i (1LL<<2)
+#define FLAG_h (1LL<<3)
+#define FLAG_k (1LL<<4)
+#define FLAG_P (1LL<<5)
+#define FLAG_H (1LL<<6)
 #endif
 
 #ifdef FOR_dhcp
@@ -6846,9 +6854,12 @@
 #ifndef TT
 #define TT this.stty
 #endif
-#define FLAG_g (FORCED_FLAG<<0)
-#define FLAG_F (FORCED_FLAG<<1)
-#define FLAG_a (FORCED_FLAG<<2)
+/* See the matching comment on FOR_df above -- same stale-FORCED_FLAG issue,
+ * same fix: stty's optstring has no USE_x()-gated sub-flags either, so all
+ * three of its real flags just needed FORCED_FLAG -> 1LL. */
+#define FLAG_g (1LL<<0)
+#define FLAG_F (1LL<<1)
+#define FLAG_a (1LL<<2)
 #endif
 
 #ifdef FOR_su

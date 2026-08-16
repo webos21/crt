@@ -246,6 +246,11 @@ set_tests_properties(poll_pipe_write_end_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "poll_pipe_write_end_test: ok"
 )
 
+add_crt_test(termios_echo_roundtrip_test termios_echo_roundtrip_test.c)
+set_tests_properties(termios_echo_roundtrip_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "termios_echo_roundtrip_test: (ok|skip)"
+)
+
 add_crt_test(socket_network_test socket_network_test.c)
 set_tests_properties(socket_network_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "socket_network_test: ok"
