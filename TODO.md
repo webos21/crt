@@ -103,6 +103,33 @@ residuals before the upper runtime phase (see `docs/runtime_roadmap.md`):
 
 ## planned
 
+### Bionic libc completeness before `libcrtgfx`
+
+Reviewed (2026-08-16) against real Android Bionic's public surface, not
+guessed -- full findings, evidence, and priority tiers in
+[`docs/bionic_libc_gaps.md`](docs/bionic_libc_gaps.md). Summary:
+
+- **High priority, concretely blocks the Wayland-compositor-boundary goal**:
+  `sendmsg`/`recvmsg` + `SCM_RIGHTS`/`CMSG_*` fd passing (entirely absent --
+  Wayland's core wire-protocol mechanism, no compositor boundary is
+  possible without it); `memfd_create` (absent -- the modern anonymous
+  shared-memory-fd mechanism `wl_shm` clients use, pairs with the above);
+  `semaphore.h` (absent, surprising given how complete pthreads otherwise
+  is -- the private futex/wait-address layer already backing
+  `pthread_cond` etc. makes this cheap); public `<stdatomic.h>` (currently
+  only a private internal layer -- QuickJS/V8/Skia all commonly depend on
+  it directly, and QuickJS bring-up is the very next roadmap step).
+- **Medium priority**: `sys/epoll.h`/`sys/eventfd.h`/`sys/timerfd.h`
+  (Linux-only in real Bionic too; relevant to both `wl_display` client
+  integration and a future `libcrtjs` event loop); `dl_iterate_phdr`/
+  `link.h`/`elf.h`/`dladdr` (some GPU driver loaders use these);
+  `PTHREAD_PROCESS_SHARED` (currently `ENOTSUP` everywhere).
+- **Lower priority, no identified near-term consumer**: `glob.h`,
+  `sys/prctl.h`, `ucontext.h`, `ifaddrs.h`, `threads.h` (C11), `uchar.h`.
+- Already known/tracked elsewhere (not new findings): C++ exceptions/RTTI
+  across the runtime boundary (`docs/cxx_runtime.md`), `pthread_cancel`
+  (a real `ENOTSUP` stub).
+
 ### Interactive job control (deferred until it's an actual priority)
 
 `docs/job_control.md`'s "Interactive Job Control" section has the decided

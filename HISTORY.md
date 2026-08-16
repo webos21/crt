@@ -10,6 +10,35 @@ substantive update.
 
 ## 2026-08-16
 
+- **Audited this project's libc surface against real Android Bionic before
+  starting `libcrtgfx`**, per `docs/runtime_roadmap.md`'s own "reduce the
+  remaining planned libc/PAL items... before starting the upper runtime in
+  earnest" order-of-work note. Evidence-based (grepped `include/`/
+  `libc/src/` directly, not guessed from memory of what Bionic "probably"
+  has): confirmed real, concrete gaps most relevant to the Wayland-
+  compatible compositor boundary goal -- `sendmsg`/`recvmsg` +
+  `SCM_RIGHTS`/`CMSG_*` ancillary-data fd passing (entirely absent; this is
+  Wayland's core wire-protocol mechanism for handing shared-memory/DMA-BUF
+  fds between client and compositor, so no compositor boundary is possible
+  without it), `memfd_create` (absent; the modern anonymous shared-memory-
+  fd mechanism that pairs with it, matching `docs/project_meanings.md`'s
+  own "ashmem/memfd-style shared memory" architecture layer), `semaphore.h`
+  (entirely absent despite the rest of pthreads being complete enough to
+  implement it cheaply over the existing private futex/wait-address layer),
+  and public `<stdatomic.h>` (still only a private internal layer, already
+  known-deferred per `docs/import_bionic.md` but now with a concrete near-
+  term consumer since QuickJS bring-up is the very next roadmap step).
+  Also found, lower priority: `sys/epoll.h`/`sys/eventfd.h`/
+  `sys/timerfd.h`, `dl_iterate_phdr`/`link.h`/`elf.h`/`dladdr`,
+  `PTHREAD_PROCESS_SHARED` support, and general completeness items
+  (`glob.h`, `sys/prctl.h`, `ucontext.h`, `ifaddrs.h`, `threads.h`,
+  `uchar.h`) with no identified near-term consumer. Full findings and
+  priority tiers recorded in `docs/bionic_libc_gaps.md`, pointed to from
+  `TODO.md`'s new "Bionic libc completeness before `libcrtgfx`" section.
+  Investigation only -- no implementation yet, pending a decision on what
+  to build now versus defer to when the compositor-boundary work actually
+  starts.
+
 - **Moved the toybox applet status detail out of `TODO.md` into
   `docs/toybox_applet_status.md`**, mirroring `docs/job_control.md`'s
   existing pattern (a short pointer in `TODO.md`, full detail in `docs/`).
