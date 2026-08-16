@@ -177,6 +177,14 @@ struct crt_memory_status_ex {
  * bookkeeping (which already keys off "fd_table[fd] != 0" for a live
  * slot) keeps working unchanged. */
 #define CRT_FD_KIND_URANDOM 3
+/* Same synthetic-fd shape as CRT_FD_KIND_URANDOM, for /dev/zero: no real
+ * Windows device name maps to it (unlike /dev/null -> the real "NUL"
+ * device), and Windows has no "ZERO" device of its own. Serviced
+ * in-process by __crt_sys_read() zero-filling the caller's buffer and
+ * __crt_sys_write() discarding input, matching real /dev/zero semantics on
+ * Linux/macOS (where this already works today via a real host device file,
+ * no code needed there -- see path_is_dev_zero()'s own comment). */
+#define CRT_FD_KIND_ZERO 4
 /* ERROR_NO_DATA (232): a genuinely overloaded Win32 error code -- also
  * the exact error ReadFile() returns on an anonymous pipe placed into
  * PIPE_NOWAIT mode (via SetNamedPipeHandleState()) when no data is
@@ -1059,6 +1067,18 @@ static int path_is_dev_tty(const char* path) {
  * exactly why the fallback path was unreachable. */
 static int path_is_dev_urandom(const char* path) {
   return path != 0 && (strcmp(path, "/dev/urandom") == 0 || strcmp(path, "/dev/random") == 0);
+}
+
+/* /dev/zero: real Linux and macOS both already have a genuine host device
+ * at this exact path (rootfs_path_for_host()'s host_path_exists() check in
+ * libc/src/fd.c finds it and passes the path straight through unchanged --
+ * no PAL code needed on those two hosts), but Windows has neither a real
+ * "/dev/zero" nor any built-in device name that behaves like it (compare
+ * "NUL", which real Windows does provide and this file's
+ * translate_path_for_host() already maps /dev/null onto). Same synthetic,
+ * no-real-HANDLE approach as /dev/urandom above. */
+static int path_is_dev_zero(const char* path) {
+  return path != 0 && strcmp(path, "/dev/zero") == 0;
 }
 
 static int windows_has_executable_extension(const char* path) {
@@ -2965,6 +2985,23 @@ static int alloc_urandom_fd(void) {
   return -1;
 }
 
+/* See CRT_FD_KIND_ZERO's own comment. */
+static int alloc_zero_fd(void) {
+  int fd;
+
+  init_fd_table();
+  for (fd = 3; fd < CRT_FD_TABLE_SIZE; ++fd) {
+    if (fd_kind[fd] == CRT_FD_KIND_NONE) {
+      fd_table[fd] = (HANDLE)(uintptr_t)1;
+      fd_kind[fd] = CRT_FD_KIND_ZERO;
+      fd_flags[fd] = 0;
+      fd_nonblock[fd] = 0;
+      return fd;
+    }
+  }
+  return -1;
+}
+
 long __crt_sys_read(int fd, void* buf, unsigned long count) {
   HANDLE handle = get_fd_handle(fd);
   DWORD bytes_read = 0;
@@ -2981,6 +3018,13 @@ long __crt_sys_read(int fd, void* buf, unsigned long count) {
     if (rtl_gen_random == 0 || !rtl_gen_random(buf, count)) {
       return -EIO;
     }
+    return (long)count;
+  }
+  if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_ZERO) {
+    if (count != 0 && buf == 0) {
+      return -EFAULT;
+    }
+    memset(buf, 0, count);
     return (long)count;
   }
   if (handle == INVALID_HANDLE_VALUE) {
@@ -3013,6 +3057,11 @@ long __crt_sys_write(int fd, const void* buf, unsigned long count) {
   if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_SOCKET) {
     int result = winsock.send((SOCKET)(uintptr_t)fd_table[fd], (const char*)buf, (int)count, 0);
     return result == SOCKET_ERROR ? -map_wsa_send_recv_error(fd, winsock.WSAGetLastError()) : result;
+  }
+  /* Real /dev/zero discards writes, same as /dev/null -- there is nothing
+   * to actually write to. */
+  if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_ZERO) {
+    return (long)count;
   }
   if (handle == INVALID_HANDLE_VALUE) {
     return -EBADF;
@@ -3256,6 +3305,10 @@ long __crt_sys_open(const char* path, int flags, unsigned int mode) {
     fd = alloc_urandom_fd();
     return fd < 0 ? -EMFILE : fd;
   }
+  if (handle == INVALID_HANDLE_VALUE && path_is_dev_zero(path)) {
+    fd = alloc_zero_fd();
+    return fd < 0 ? -EMFILE : fd;
+  }
   if (handle == INVALID_HANDLE_VALUE) {
     return fail_last_error();
   }
@@ -3284,7 +3337,8 @@ static long close_fd_slot(int fd) {
                ? -map_wsa_error(winsock.WSAGetLastError())
                : 0;
   }
-  if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_URANDOM) {
+  if (fd >= 0 && fd < CRT_FD_TABLE_SIZE &&
+      (fd_kind[fd] == CRT_FD_KIND_URANDOM || fd_kind[fd] == CRT_FD_KIND_ZERO)) {
     fd_table[fd] = 0;
     fd_kind[fd] = CRT_FD_KIND_NONE;
     fd_flags[fd] = 0;
@@ -3516,7 +3570,7 @@ long __crt_sys_access(const char* path, int mode) {
   const char* host_path = translate_path_for_host(path, translated_path);
   DWORD attrs;
 
-  if (path_is_dev_null(path)) {
+  if (path_is_dev_null(path) || path_is_dev_zero(path)) {
     return 0;
   }
   attrs = GetFileAttributesA(host_path);
@@ -4398,6 +4452,17 @@ static long stat_virtual_dev_tty(struct stat* st) {
   return 0;
 }
 
+static long stat_virtual_dev_zero(struct stat* st) {
+  if (st == 0) {
+    return -EFAULT;
+  }
+  memset(st, 0, sizeof(*st));
+  st->st_mode = S_IFCHR | S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
+  st->st_nlink = 1;
+  st->st_blksize = 4096;
+  return 0;
+}
+
 /* fstat() on a pipe (anonymous or named) must never fall through to
  * stat_from_handle(), which calls windows_handle_looks_executable() to
  * guess S_IXUSR by seeking to offset 0 and ReadFile()-ing the first two
@@ -4432,9 +4497,22 @@ static long stat_virtual_pipe(struct stat* st) {
 }
 
 long __crt_sys_fstat(int fd, struct stat* st) {
-  HANDLE handle = get_fd_handle(fd);
+  HANDLE handle;
   DWORD fstat_file_type;
 
+  /* CRT_FD_KIND_URANDOM/CRT_FD_KIND_ZERO fds have no real HANDLE behind
+   * them at all (fd_table[] just holds an arbitrary nonzero placeholder,
+   * see CRT_FD_KIND_URANDOM's own comment) -- GetFileType() on that
+   * placeholder would be operating on a value that was never a real
+   * handle in the first place. Report each as the char device it is
+   * instead of falling through to the handle-based path below. */
+  if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_URANDOM) {
+    return stat_virtual_dev_null(st);
+  }
+  if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_ZERO) {
+    return stat_virtual_dev_zero(st);
+  }
+  handle = get_fd_handle(fd);
   if (handle == INVALID_HANDLE_VALUE) {
     return -EBADF;
   }
@@ -4616,6 +4694,9 @@ long __crt_sys_stat_path(const char* path, struct stat* st) {
   }
   if (path_is_dev_tty(path)) {
     return stat_virtual_dev_tty(st);
+  }
+  if (path_is_dev_zero(path)) {
+    return stat_virtual_dev_zero(st);
   }
   handle = CreateFileA(host_path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                        0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS, 0);

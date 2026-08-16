@@ -219,6 +219,17 @@ set_tests_properties(sysconf_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "sysconf_test: ok"
 )
 
+add_crt_test(dev_zero_test dev_zero_test.c)
+set_tests_properties(dev_zero_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "dev_zero_test: ok"
+)
+
+add_crt_test(virtual_proc_test virtual_proc_test.c)
+set_tests_properties(virtual_proc_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "virtual_proc_test: ok"
+  ENVIRONMENT "CRT_VIRTUAL_PROC_TEST_VAR=hello123"
+)
+
 add_crt_test(ioctl_test ioctl_test.c)
 set_tests_properties(ioctl_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "ioctl_test: ok"

@@ -10,6 +10,80 @@ substantive update.
 
 ## 2026-08-16
 
+- **Added the six virtual rootfs files TODO.md had queued: `/proc/mounts`,
+  `/proc/self/status`, `/proc/self/cmdline`, `/proc/self/environ`,
+  `/proc/stat`, and `/dev/zero`.** Split cleanly by what each host already
+  provides for real: Linux already has a genuine kernel procfs and a real
+  `/dev/zero` device, so nothing changed there at all (confirmed via
+  `rootfs_path_for_host()`'s existing `host_path_exists()` check, which
+  already passes real host paths straight through). macOS has a real
+  `/dev/zero` device too (also free), but no `/proc` whatsoever -- a real
+  host fact, same as `/proc/self/exe`'s own precedent. Windows has neither.
+  Two different mechanisms, matching what each gap actually needed:
+  - **`/dev/zero`** (Windows only): a new `CRT_FD_KIND_ZERO` synthetic fd in
+    `libc/src/arch/windows/common/syscall.c`, the same no-real-HANDLE shape
+    `CRT_FD_KIND_URANDOM` already established -- `read()` zero-fills the
+    caller's buffer, `write()` discards (matching real `/dev/zero`
+    semantics), wired into `open()`/`close()`/`fstat()`/`stat()`/`access()`.
+    Bonus fix picked up along the way: `fstat()` on a `CRT_FD_KIND_URANDOM`
+    fd was calling `GetFileType()` on a placeholder value that was never a
+    real Windows handle (undefined behavior, just never previously
+    exercised) -- now short-circuited the same way `CRT_FD_KIND_ZERO` is.
+  - **`/proc/mounts`, `/proc/stat`, `/proc/self/status`,
+    `/proc/self/cmdline`, `/proc/self/environ`** (Windows and macOS): a new
+    shared, portable virtual-file layer in `libc/src/fd.c`, compiled only
+    for `!CRT_TARGET_OS_LINUX`. Content is generated fresh into a small
+    stack buffer on every `open()` and handed to the caller through a real
+    anonymous pipe (write the whole thing in, close the write end, return
+    the read end) -- ordinary `open()`+`read()`+`close()` works with no
+    synthetic-fd bookkeeping needed on either host, unlike `/dev/zero`
+    above. Cross-platform argv access needed its own per-host answer:
+    macOS already has a real, documented API for this
+    (`_NSGetArgc()`/`_NSGetArgv()`, matching `/proc/self/exe`'s own
+    `_NSGetExecutablePath()` precedent), but Windows had nothing --
+    `libc/src/arch/windows/common/crt1.c`'s `mainCRTStartup()` parses argv
+    into a file-local static array that nothing outside that file could
+    reach. Storage for the Windows copy had to live inside `fd.c` itself
+    (part of libc), not in `crt1.c`: `crt1.c`'s own object is only ever
+    linked into the final executable (`CRT_STARTUP_OBJECTS`), never into
+    `c_shared.dll`, so a raw global defined in `crt1.c` left `fd.c`'s
+    reference to it permanently unresolved when linking the DLL variant
+    (caught by actually building `c_shared`, not just `c` -- the failure
+    only showed up there). Fixed by following `environ`'s own existing
+    pattern exactly: `libc/src/env.c` owns `environ`'s real storage and
+    `crt1.c` just calls `__crt_env_set_initial()` into it; likewise `fd.c`
+    now owns `windows_argc`/`windows_argv`'s storage and exposes a new
+    `__crt_windows_set_args()` setter that `crt1.c` calls right before
+    `main()` runs. Content choices were kept deliberately honest rather
+    than fabricated: `/proc/stat`'s per-core counters are real zeros with a
+    comment explaining no host-portable jiffies source exists (only the
+    `cpu`/`cpuN` line *count* is real, from the same
+    `sysconf(_SC_NPROCESSORS_ONLN)` hook `docs/sysroot_ports.md` already
+    documents); `/proc/mounts` uses the literal fstype `crtfs` rather than
+    guessing NTFS/APFS/etc, the same spirit as Linux's own kernel using the
+    literal fstype `rootfs` for its initial ramfs; `/proc/self/status`'s
+    `State:` is always `R (running)`, which is simply true by construction
+    (whatever reads its own status is, by definition, currently running).
+    `stat()`/`lstat()`/`access()` also recognize all five paths (reporting
+    `S_IFREG`, size 0 -- matching real kernel procfs's own "generated on
+    read, not stored" stat shape) so a `test -f`/`test -r` guard before
+    reading one of these files behaves the same on every host.
+  New permanent regression coverage: `tests/dev_zero_test.c` (read/re-read
+  all-zero, write-discards, `fstat`/`stat`/`access` report a char device)
+  and `tests/virtual_proc_test.c` (structural checks for `/proc/mounts` and
+  `/proc/stat` that pass against both the real Linux kernel content and
+  this PAL's own synthetic content; `/proc/self/status`'s `Pid:` line
+  checked against a real `getpid()`; `/proc/self/cmdline`'s first
+  NUL-terminated token checked against the test's own real `argv[0]`;
+  `/proc/self/environ` checked for a ctest-injected `ENVIRONMENT` var,
+  deliberately using a var present at exec time rather than a live
+  `setenv()` call afterward, since real Linux's own `/proc/self/environ` is
+  frozen at exec time and does not reflect later `setenv()`/`putenv()`
+  calls -- matching that exactly rather than only working by accident on
+  the synthetic Windows/macOS path). All 92 tests pass, verified via a
+  genuine `cmake --fresh` reconfigure plus full rebuild, per this same
+  date's own standing discipline note in `TODO.md`.
+
 - **Seriously evaluated actually implementing Windows stop/resume + `fg`/
   `bg` (scope A: command-driven, e.g. `kill -STOP`/`fg`/`bg` -- not live
   Ctrl-Z keypress detection, which stays permanently out of scope per CRT's

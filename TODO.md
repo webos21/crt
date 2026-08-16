@@ -79,15 +79,6 @@ newest entry first) rather than leaving it here.
 Active threads, not a flat list of one-off items. Remaining libc/PAL
 residuals before the upper runtime phase (see `docs/runtime_roadmap.md`):
 
-- Add virtual rootfs files narrowly as porting workloads require them:
-  - `/proc/mounts`;
-  - `/proc/self/status`;
-  - `/proc/self/cmdline`;
-  - `/proc/self/environ`;
-  - `/proc/stat`;
-  - `/dev/zero`.
-  (`/dev/random`/`/dev/urandom` are done -- see `HISTORY.md`'s curl HTTPS
-  entry.)
 - Expand toybox applets only when the backing Bionic-compatible CRT/PAL
   surface exists. `which`/`readlink`/`stat`/`touch`/`id`/`xargs` are done
   (see `HISTORY.md`) -- next candidates would come from auditing the

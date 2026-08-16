@@ -26,12 +26,12 @@ in those two win.
   own `cmake --workflow` step does not run `port-test-recipes` (a
   separate, heavier target that fetches and builds third-party sources)
   -- that's verified locally/per-host instead, see below.
-- **`ctest`**: 88 registered tests on Windows and 77 on macOS in the
+- **`ctest`**: 92 registered tests on Windows and 77 on macOS in the
   latest local run (count is slightly
   OS-dependent -- a few targets, like `windows_export_hygiene_test`, only
-  exist on their own OS), all passing locally on Windows (88/88, most
-  recently confirmed after the mbedtls Windows DLL symbol-hygiene fix and
-  the two new Windows process/symlink regression tests) and
+  exist on their own OS), all passing locally on Windows (92/92, most
+  recently confirmed after the `/dev/zero`/virtual `/proc/*` files, via a
+  genuine `cmake --fresh` reconfigure) and
   locally on macOS as
   of the curl/host-libc audit pass; CI is the source of truth for Linux
   counts. Run locally via
@@ -140,11 +140,13 @@ in those two win.
   real, general risk once open from this queue -- mbedtls's Windows DLL
   symbol-export hygiene -- is fixed; see `HISTORY.md`'s 2026-08-15 entry.
 - Before starting the next upper-runtime phase, reduce the remaining
-  libc/PAL planned work in `TODO.md`: libffi correctness, rootfs virtual
-  files/devices, DNS resolver growth, console/job-control policy, and
-  toybox applet expansion only where the Bionic-compatible backing
-  surface exists. The mksh subshell status quirk is fixed -- see
-  `HISTORY.md`'s 2026-08-16 entry.
+  libc/PAL planned work in `TODO.md`: libffi correctness, DNS resolver
+  growth, console/job-control policy, and toybox applet expansion only
+  where the Bionic-compatible backing surface exists. The mksh subshell
+  status quirk and the six queued virtual rootfs files (`/proc/mounts`,
+  `/proc/stat`, `/proc/self/status`, `/proc/self/cmdline`,
+  `/proc/self/environ`, `/dev/zero`) are fixed -- see `HISTORY.md`'s
+  2026-08-16 entries.
 - The next product-level target is documented in `docs/runtime_roadmap.md`:
   an Electron-class rebuilt runtime made of `libcrtgfx` (Skia + Wayland-style
   compositor boundary + Chromium Ozone path), `libcrtmedia` (FFmpeg/codecs/

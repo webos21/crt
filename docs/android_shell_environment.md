@@ -116,12 +116,28 @@ On Windows, `CRT_ROOTFS` enables POSIX absolute path mapping in the PAL:
 - `/tmp/...` maps under `<CRT_ROOTFS>/tmp/...`;
 - `/system/bin/...` maps under `<CRT_ROOTFS>/system/bin/...`;
 - `/dev/null` maps to the Windows null device;
+- `/dev/zero` is a synthetic char device (`CRT_FD_KIND_ZERO` in
+  `libc/src/arch/windows/common/syscall.c`): reads return zero bytes,
+  writes are discarded;
 - `/proc/self/exe` maps to the current executable path;
+- `/proc/mounts`, `/proc/stat`, `/proc/self/status`, `/proc/self/cmdline`,
+  `/proc/self/environ` are generated in-process on every `open()` (see
+  `libc/src/fd.c`'s own "Virtual /proc files" comment) and handed back
+  through a real anonymous pipe -- ordinary `open()`/`read()`/`close()`
+  works, nothing recursive or directory-listable exists under `/proc`;
 - native absolute paths such as `C:\...` remain native escape paths.
 
 This is a bootstrap namespace, not a full virtual filesystem. As shell and
 configure workloads expand, add narrowly documented virtual paths rather than
 pretending that every Linux procfs/devfs entry exists.
+
+macOS shares the `/proc/*` virtual files above (same `libc/src/fd.c` code,
+compiled for any non-Linux host) -- macOS has no real `/proc` at all, same
+"real host fact" reasoning as `/proc/self/exe` just below. `/dev/zero` is
+*not* shared: both Linux and macOS have a genuine host device at that exact
+path already, so `rootfs_path_for_host()`'s existing `host_path_exists()`
+check passes it straight through unchanged on those two hosts, and no PAL
+code was needed there at all.
 
 ### `/proc/self/exe` On macOS
 

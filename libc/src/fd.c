@@ -723,6 +723,318 @@ static void rootfs_path_for_guest(char* path) {
 }
 #endif
 
+#if !defined(CRT_TARGET_OS_LINUX)
+/* Virtual /proc files, backed entirely in-process -- Linux already has a
+ * real kernel procfs that answers every one of these paths correctly on
+ * its own (rootfs_path_for_host()'s host_path_exists() check above passes
+ * them straight through unchanged there), so none of this compiles in on
+ * Linux. Windows has no /proc at all; macOS has no /proc at all either
+ * (a real host fact, not a namespace-policy choice -- see
+ * macos_resolve_proc_self_exe()'s own comment above). Scope is narrow and
+ * literal, matching TODO.md's own framing ("as porting workloads require
+ * them"): only these five exact paths, only for the current process
+ * ("self"), nothing recursive or directory-listable. Each file's content
+ * is generated fresh into a small stack buffer on every open() and handed
+ * to the caller through a real pipe (see open_virtual_proc_pipe() below),
+ * so ordinary open()+read()+close() usage works with no synthetic-fd
+ * bookkeeping needed on either host -- unlike /dev/urandom/zero on
+ * Windows (see syscall.c's CRT_FD_KIND_URANDOM/CRT_FD_KIND_ZERO), nothing
+ * here needs to stay "live" across multiple reads. */
+#define CRT_VIRTUAL_PROC_MAX 4096
+
+#if defined(CRT_TARGET_OS_MACOS)
+/* Real Mach-O API from libSystem (crt_externs.h), declared locally rather
+ * than including the real SDK header -- matching this project's existing
+ * convention (see macos_resolve_proc_self_exe()'s own comment for
+ * _NSGetExecutablePath()). This is the real, dynamic way to reach this
+ * process's own argc/argv on macOS, since there is no /proc/self/cmdline
+ * to read it from. */
+extern int* _NSGetArgc(void);
+extern char*** _NSGetArgv(void);
+#elif defined(CRT_TARGET_OS_WINDOWS)
+/* Storage lives here, inside libc itself, not in crt1.c -- crt1.c's own
+ * object is only ever linked into the final executable
+ * (CRT_STARTUP_OBJECTS), never into c_shared.dll, so a raw global defined
+ * there would leave this file's own copy of it (also compiled into
+ * c_shared.dll) permanently unresolved at link time. Same reason
+ * libc/src/env.c owns `environ`'s storage rather than crt1.c, and calls it
+ * via a setter (__crt_env_set_initial()) instead. Set once by
+ * mainCRTStartup(), right before main() runs; never mutated afterward. */
+static int windows_argc;
+static char** windows_argv;
+
+void __crt_windows_set_args(int argc, char** argv) {
+  windows_argc = argc;
+  windows_argv = argv;
+}
+#endif
+
+static int virtual_proc_get_args(int* out_argc, char*** out_argv) {
+#if defined(CRT_TARGET_OS_MACOS)
+  *out_argc = *_NSGetArgc();
+  *out_argv = *_NSGetArgv();
+  return 1;
+#elif defined(CRT_TARGET_OS_WINDOWS)
+  *out_argc = windows_argc;
+  *out_argv = windows_argv;
+  return 1;
+#else
+  (void)out_argc;
+  (void)out_argv;
+  return 0;
+#endif
+}
+
+static void vproc_appendf(char* buffer, size_t size, size_t* offset, const char* format, ...) {
+  va_list args;
+  int written;
+
+  if (*offset >= size) {
+    return;
+  }
+  va_start(args, format);
+  written = vsnprintf(buffer + *offset, size - *offset, format, args);
+  va_end(args);
+  if (written > 0) {
+    size_t added = (size_t)written;
+
+    if (added > size - *offset) {
+      added = size - *offset;
+    }
+    *offset += added;
+  }
+}
+
+/* NUL-separated, like the real Linux file -- not a text line format. */
+static long build_proc_self_cmdline(char* buffer, size_t size) {
+  int argc = 0;
+  char** argv = 0;
+  size_t offset = 0;
+  int i;
+
+  if (!virtual_proc_get_args(&argc, &argv) || argv == 0) {
+    return -1;
+  }
+  for (i = 0; i < argc && argv[i] != 0; ++i) {
+    size_t len = strlen(argv[i]) + 1;
+
+    if (offset + len > size) {
+      break;
+    }
+    memcpy(buffer + offset, argv[i], len);
+    offset += len;
+  }
+  return (long)offset;
+}
+
+/* NUL-separated "KEY=VALUE" entries, like the real Linux file. Reads this
+ * process's own environment, which is exactly the one case a real Linux
+ * /proc/self/environ always permits regardless of ptrace policy. */
+static long build_proc_self_environ(char* buffer, size_t size) {
+  size_t offset = 0;
+  int i;
+
+  if (environ == 0) {
+    return 0;
+  }
+  for (i = 0; environ[i] != 0; ++i) {
+    size_t len = strlen(environ[i]) + 1;
+
+    if (offset + len > size) {
+      break;
+    }
+    memcpy(buffer + offset, environ[i], len);
+    offset += len;
+  }
+  return (long)offset;
+}
+
+static long build_proc_self_status(char* buffer, size_t size) {
+  int argc = 0;
+  char** argv = 0;
+  char name_buf[16];
+  const char* name = "?";
+  size_t offset = 0;
+
+  if (virtual_proc_get_args(&argc, &argv) && argv != 0 && argc > 0 && argv[0] != 0) {
+    const char* base = argv[0];
+    const char* cursor;
+    size_t name_len;
+
+    for (cursor = base; *cursor != 0; ++cursor) {
+      if (*cursor == '/' || *cursor == '\\') {
+        base = cursor + 1;
+      }
+    }
+    /* Real Linux truncates comm/Name to 15 bytes (TASK_COMM_LEN - 1);
+     * matched here for anything that greps this field expecting that
+     * exact shape. */
+    name_len = strlen(base);
+    if (name_len > 15) {
+      name_len = 15;
+    }
+    memcpy(name_buf, base, name_len);
+    name_buf[name_len] = 0;
+    name = name_buf;
+  }
+
+  vproc_appendf(buffer, size, &offset, "Name:\t%s\n", name);
+  /* Always "R (running)": whatever reads its own /proc/self/status is, by
+   * definition, running right now. No real per-state tracking exists (or
+   * is needed) behind this. */
+  vproc_appendf(buffer, size, &offset, "State:\tR (running)\n");
+  vproc_appendf(buffer, size, &offset, "Pid:\t%d\n", (int)getpid());
+  vproc_appendf(buffer, size, &offset, "PPid:\t%d\n", (int)getppid());
+  vproc_appendf(buffer, size, &offset, "Uid:\t%u\t%u\t%u\t%u\n",
+      (unsigned)getuid(), (unsigned)getuid(), (unsigned)getuid(), (unsigned)getuid());
+  vproc_appendf(buffer, size, &offset, "Gid:\t%u\t%u\t%u\t%u\n",
+      (unsigned)getgid(), (unsigned)getgid(), (unsigned)getgid(), (unsigned)getgid());
+  vproc_appendf(buffer, size, &offset, "Threads:\t1\n");
+  return (long)offset;
+}
+
+/* Deliberately minimal: a real per-core jiffies/tick breakdown (user/nice/
+ * system/idle/...) needs host-specific timing this PAL does not currently
+ * track anywhere, on either host -- reporting fabricated nonzero numbers
+ * would be actively misleading, so every counter here is a real, honest
+ * zero rather than a guess. What genuinely is real: the "cpu"/"cpuN" line
+ * count itself, from the same sysconf(_SC_NPROCESSORS_ONLN) PAL hook
+ * docs/sysroot_ports.md already documents (GetSystemInfo on Windows,
+ * Darwin sysctl on macOS) -- enough for anything that only wants this
+ * file's line shape or core count, not real CPU-time accounting. */
+static long build_proc_stat(char* buffer, size_t size) {
+  long nproc = sysconf(_SC_NPROCESSORS_ONLN);
+  size_t offset = 0;
+  int i;
+
+  if (nproc < 1) {
+    nproc = 1;
+  }
+  vproc_appendf(buffer, size, &offset, "cpu  0 0 0 0 0 0 0 0 0 0\n");
+  for (i = 0; i < nproc && i < 4096; ++i) {
+    vproc_appendf(buffer, size, &offset, "cpu%d 0 0 0 0 0 0 0 0 0 0\n", i);
+  }
+  vproc_appendf(buffer, size, &offset, "intr 0\n");
+  vproc_appendf(buffer, size, &offset, "ctxt 0\n");
+  vproc_appendf(buffer, size, &offset, "btime 0\n");
+  vproc_appendf(buffer, size, &offset, "processes 1\n");
+  return (long)offset;
+}
+
+/* One line, describing this PAL's own CRT_ROOTFS mapping rather than
+ * claiming a real host filesystem type this code never actually queries
+ * (Windows NTFS/ReFS, macOS APFS/HFS+, ...) -- "crtfs" is an honest,
+ * clearly-synthetic marker, the same spirit as Linux's own kernel using
+ * the literal fstype "rootfs" for its initial ramfs mount. */
+static long build_proc_mounts(char* buffer, size_t size) {
+  const char* root = getenv("CRT_ROOTFS");
+  size_t offset = 0;
+
+  if (root == 0 || root[0] == 0) {
+    root = "none";
+  }
+  vproc_appendf(buffer, size, &offset, "%s / crtfs rw 0 0\n", root);
+  return (long)offset;
+}
+
+static long build_virtual_proc_content(const char* path, char* buffer, size_t size) {
+  if (strcmp(path, "/proc/self/cmdline") == 0) {
+    return build_proc_self_cmdline(buffer, size);
+  }
+  if (strcmp(path, "/proc/self/environ") == 0) {
+    return build_proc_self_environ(buffer, size);
+  }
+  if (strcmp(path, "/proc/self/status") == 0) {
+    return build_proc_self_status(buffer, size);
+  }
+  if (strcmp(path, "/proc/stat") == 0) {
+    return build_proc_stat(buffer, size);
+  }
+  if (strcmp(path, "/proc/mounts") == 0) {
+    return build_proc_mounts(buffer, size);
+  }
+  return -1;
+}
+
+static int path_is_virtual_proc(const char* path) {
+  return path != 0 &&
+      (strcmp(path, "/proc/self/cmdline") == 0 ||
+       strcmp(path, "/proc/self/environ") == 0 ||
+       strcmp(path, "/proc/self/status") == 0 ||
+       strcmp(path, "/proc/stat") == 0 ||
+       strcmp(path, "/proc/mounts") == 0);
+}
+
+/* Turns generated content into a real, ordinary fd via an anonymous pipe:
+ * write the whole thing in (this project's own pipe buffer is comfortably
+ * larger than CRT_VIRTUAL_PROC_MAX on every host -- see
+ * CRT_PIPE_BUFFER_SIZE's own comment in syscall.c for Windows; real
+ * Linux/macOS kernel pipe buffers clear this by a wide margin too), close
+ * the write end, hand back the read end. A single-writer-then-close, no
+ * concurrent reader needed, exactly matches every real consumer of these
+ * files (a sequential read to EOF, then close) -- this is not a general
+ * producer/consumer channel. */
+static int open_virtual_proc_pipe(const char* content, long length) {
+  int fds[2];
+  size_t total = 0;
+
+  if (length < 0 || pipe(fds) != 0) {
+    return -1;
+  }
+  while (total < (size_t)length) {
+    ssize_t written = write(fds[1], content + total, (size_t)length - total);
+
+    if (written <= 0) {
+      close(fds[0]);
+      close(fds[1]);
+      return -1;
+    }
+    total += (size_t)written;
+  }
+  close(fds[1]);
+  return fds[0];
+}
+
+static int open_virtual_proc_file(const char* path, int flags) {
+  char content[CRT_VIRTUAL_PROC_MAX];
+  long length;
+
+  if (!path_is_virtual_proc(path)) {
+    return -1;
+  }
+  /* Every file here is read-only, matching real Linux procfs permissions
+   * for each of these exact paths. A write-mode open falls through to the
+   * real open() call in open() below, which will fail with a real, if
+   * slightly different, error (ENOENT rather than Linux's own EACCES) --
+   * not worth a dedicated error path for an open mode no real caller of
+   * these files legitimately uses. */
+  if ((flags & (O_WRONLY | O_RDWR)) != 0) {
+    return -1;
+  }
+  length = build_virtual_proc_content(path, content, sizeof(content));
+  if (length < 0) {
+    return -1;
+  }
+  return open_virtual_proc_pipe(content, length);
+}
+
+/* Real kernel procfs entries report st_size == 0 too (content is
+ * generated on read, not stored ahead of time) -- matched here exactly
+ * rather than computing a real size, so a script that stats a real
+ * /proc file on Linux and this virtual one on Windows/macOS sees the
+ * same shape. */
+static int stat_virtual_proc_path(const char* path, struct stat* st) {
+  if (!path_is_virtual_proc(path) || st == 0) {
+    return 0;
+  }
+  memset(st, 0, sizeof(*st));
+  st->st_mode = S_IFREG | S_IRUSR | S_IRGRP | S_IROTH;
+  st->st_nlink = 1;
+  st->st_blksize = 4096;
+  return 1;
+}
+#endif
+
 static int path_separator(int c) {
 #if defined(CRT_TARGET_OS_WINDOWS)
   return c == '/' || c == '\\';
@@ -1146,6 +1458,15 @@ int open(const char* path, int flags, ...) {
   if ((flags & O_DIRECTORY) != 0) {
     syscall_flags &= ~O_DIRECTORY;
   }
+#if !defined(CRT_TARGET_OS_LINUX)
+  {
+    int vfd = open_virtual_proc_file(path, syscall_flags);
+
+    if (vfd >= 0) {
+      return vfd;
+    }
+  }
+#endif
 #if !defined(CRT_TARGET_OS_WINDOWS)
 #if defined(CRT_TARGET_OS_MACOS)
   if (rootfs_path_is_dev_tty(path) && !macos_use_host_dev_tty()) {
@@ -1378,6 +1699,13 @@ int access(const char* path, int mode) {
   if (path == 0 || (mode & ~(R_OK | W_OK | X_OK)) != 0) {
     return (int)__set_errno(EINVAL);
   }
+#if !defined(CRT_TARGET_OS_LINUX)
+  if (path_is_virtual_proc(path)) {
+    /* Every virtual /proc path here is real-Linux-read-only; W_OK/X_OK
+     * against one of them is a real "no". */
+    return (mode & (W_OK | X_OK)) != 0 ? (int)__set_errno(EACCES) : 0;
+  }
+#endif
 #if !defined(CRT_TARGET_OS_WINDOWS)
   path = rootfs_path_for_host(path, translated_path);
 #endif
@@ -2184,6 +2512,11 @@ static int linux_fstat_procfs_fallback(int fd, struct stat* st) {
 #endif
 
 int stat(const char* path, struct stat* st) {
+#if !defined(CRT_TARGET_OS_LINUX)
+  if (stat_virtual_proc_path(path, st)) {
+    return 0;
+  }
+#endif
 #if !defined(CRT_TARGET_OS_WINDOWS)
   char translated_path[PATH_MAX];
   path = rootfs_path_for_host(path, translated_path);
@@ -2210,6 +2543,13 @@ int stat(const char* path, struct stat* st) {
 }
 
 int lstat(const char* path, struct stat* st) {
+#if !defined(CRT_TARGET_OS_LINUX)
+  /* None of these virtual paths are ever symlinks, so lstat() reports the
+   * exact same thing stat() does for them. */
+  if (stat_virtual_proc_path(path, st)) {
+    return 0;
+  }
+#endif
 #if !defined(CRT_TARGET_OS_WINDOWS)
   char translated_path[PATH_MAX];
   path = rootfs_path_for_host(path, translated_path);

@@ -56,6 +56,18 @@ void __crt_windows_ensure_fork_capable_relaunch(const char* command_line) __attr
 static char command_line_storage[CRT_COMMAND_LINE_MAX];
 static char* argv_storage[CRT_ARG_MAX];
 
+/* Defined in libc/src/fd.c, the same file that reads it back for the
+ * virtual /proc/self/cmdline backing (Windows has no real kernel /proc at
+ * all, so this is the only source of truth for it -- compare macOS's
+ * _NSGetArgc()/_NSGetArgv(), the real host equivalent used for the same
+ * purpose there). Storage has to live inside libc itself, not here:
+ * crt1.c's own object is only ever linked into the final executable
+ * (CRT_STARTUP_OBJECTS), never into c_shared.dll, so a raw global defined
+ * here would leave fd.c's copy inside c_shared.dll permanently unresolved
+ * at link time. This is the same reason __crt_env_set_initial() below
+ * exists rather than crt1.c owning `environ` directly. */
+void __crt_windows_set_args(int argc, char** argv);
+
 static int command_line_space(int c) {
   return c == ' ' || c == '\t' || c == '\r' || c == '\n';
 }
@@ -136,6 +148,7 @@ void mainCRTStartup(void) {
     argv_storage[1] = 0;
     argc = 1;
   }
+  __crt_windows_set_args(argc, argv_storage);
   __crt_rootfs_bootstrap(argc, argv_storage);
   __crt_run_init_array();
   exit(main(argc, argv_storage, environ));
