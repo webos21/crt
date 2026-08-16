@@ -410,6 +410,29 @@ __crt_sys_unlink:
   ret
 .size __crt_sys_unlink, . - __crt_sys_unlink
 
+/* link(oldpath, newpath): aarch64 dropped the legacy 2-arg link syscall
+ * entirely (only the generic-syscall-ABI *at() forms exist, same reason
+ * __crt_sys_symlink/__crt_sys_unlink above route through symlinkat/
+ * unlinkat) -- linkat(AT_FDCWD, oldpath, AT_FDCWD, newpath, 0) is the only
+ * way to do this on this arch. __crt_sys_link(oldpath, newpath) arrives as
+ * (x0, x1); shuffle to (x0=AT_FDCWD, x1=oldpath, x2=AT_FDCWD, x3=newpath,
+ * x4=flags) for linkat's own (olddirfd, oldpath, newdirfd, newpath, flags)
+ * signature, saving x1's original value (newpath) into x3 and x0's
+ * (oldpath) into x1 before either gets overwritten. */
+.globl __crt_sys_link
+.type __crt_sys_link, %function
+.p2align 2
+__crt_sys_link:
+  mov x3, x1
+  mov x1, x0
+  mov x0, #-100
+  mov x2, #-100
+  mov x4, #0
+  mov x8, #37
+  svc #0
+  ret
+.size __crt_sys_link, . - __crt_sys_link
+
 .globl __crt_sys_rename
 .type __crt_sys_rename, %function
 .p2align 2

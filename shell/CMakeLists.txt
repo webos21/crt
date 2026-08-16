@@ -315,6 +315,7 @@ if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
     toybox/src/toys/posix/grep.c
     toybox/src/toys/posix/head.c
     toybox/src/toys/posix/id.c
+    toybox/src/toys/posix/link.c
     toybox/src/toys/posix/ln.c
     toybox/src/toys/posix/ls.c
     toybox/src/toys/posix/mkdir.c
@@ -532,9 +533,7 @@ if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
     # reconfirmed for a second, disjoint reason: config.h's USE_x macros
     # gate whether an entry in newtoys.h compiles into toy_list[] at all).
     # tsort.c also had a real Windows LLP64 pointer-truncation bug fixed
-    # here (see shell/toybox/PATCHES.md); `link` was audited but dropped --
-    # linkat() is an unconditional ENOTSUP stub on every host today, a real
-    # PAL gap, not an LLP64 issue.
+    # here (see shell/toybox/PATCHES.md).
     add_test(NAME crt_mksh_rootfs_llp64_batch_runs
       COMMAND "${CMAKE_COMMAND}" -E env
         "CRT_ROOTFS=${CMAKE_BINARY_DIR}/rootfs"
@@ -546,6 +545,27 @@ if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
       DEPENDS crt_mksh_rootfs_which_stat_readlink_runs
     )
     set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_mksh_rootfs_llp64_batch_runs)
+
+    # `link` needed real linkat()/link() PAL backing, not just an LLP64
+    # audit -- libc/src/fd.c's linkat() was an unconditional ENOTSUP stub on
+    # every host (not just Windows) until now: CreateHardLinkA on Windows,
+    # a new __crt_sys_link raw syscall trampoline in each of
+    # libc/src/arch/linux/{x86_64,aarch64}/syscall.S and
+    # libc/src/arch/macos/{x86_64,aarch64}/syscall.S. Only the Windows path
+    # is actually verified by running this test on real hardware -- the
+    # other three are unverified this session (no cross-toolchain
+    # available), see HISTORY.md's own dated entry.
+    add_test(NAME crt_mksh_rootfs_link_runs
+      COMMAND "${CMAKE_COMMAND}" -E env
+        "CRT_ROOTFS=${CMAKE_BINARY_DIR}/rootfs"
+        "PATH=/system/bin:/bin:/usr/bin"
+        "$<TARGET_FILE:crt_mksh>" -c "echo linktest > /tmp/mksh-ctest-link-src.txt && link /tmp/mksh-ctest-link-src.txt /tmp/mksh-ctest-link-dst.txt && cat /tmp/mksh-ctest-link-dst.txt && unlink /tmp/mksh-ctest-link-dst.txt && unlink /tmp/mksh-ctest-link-src.txt && echo link-ok"
+    )
+    set_tests_properties(crt_mksh_rootfs_link_runs PROPERTIES
+      PASS_REGULAR_EXPRESSION "linktest\nlink-ok"
+      DEPENDS crt_mksh_rootfs_llp64_batch_runs
+    )
+    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_mksh_rootfs_link_runs)
   endif()
   add_dependencies(crt_shell_artifacts crt_toybox)
   install(TARGETS crt_toybox

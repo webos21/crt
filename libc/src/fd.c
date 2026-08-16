@@ -51,6 +51,7 @@ long __crt_sys_pipe(int pipefd[2]);
 long __crt_sys_unlink(const char* path);
 long __crt_sys_readlink(const char* path, char* buf, unsigned long size);
 long __crt_sys_symlink(const char* target, const char* linkpath);
+long __crt_sys_link(const char* oldpath, const char* newpath);
 long __crt_sys_geteuid(void);
 long __crt_sys_fchown(int fd, unsigned int owner, unsigned int group);
 long __crt_sys_statfs(const char* path, struct statfs* buf);
@@ -2711,7 +2712,18 @@ int symlinkat(const char* target, int newdirfd, const char* linkpath) {
 int linkat(int olddirfd, const char* oldpath, int newdirfd, const char* newpath, int flags) {
   char resolved_old[PATH_MAX];
   char resolved_new[PATH_MAX];
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  char translated_old[PATH_MAX];
+  char translated_new[PATH_MAX];
+#endif
 
+  /* AT_SYMLINK_FOLLOW is accepted (real Linux linkat() distinguishes
+   * hardlinking a symlink itself vs. its target based on this flag) but
+   * not actually threaded through to either host backend below: neither
+   * Windows' CreateHardLinkA nor the raw link/linkat syscalls this PAL's
+   * Linux/macOS backends use take that distinction as a separate
+   * parameter the way openat()'s O_NOFOLLOW does -- narrow, same as this
+   * function's pre-existing flag validation, not a new limitation. */
   if ((flags & ~AT_SYMLINK_FOLLOW) != 0) {
     return (int)__set_errno(EINVAL);
   }
@@ -2719,9 +2731,13 @@ int linkat(int olddirfd, const char* oldpath, int newdirfd, const char* newpath,
       make_at_path(newdirfd, newpath, resolved_new, sizeof(resolved_new)) != 0) {
     return -1;
   }
-  (void)resolved_old;
-  (void)resolved_new;
-  return (int)__set_errno(ENOTSUP);
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  return (int)normalize_syscall_result(__crt_sys_link(
+      rootfs_path_for_host(resolved_old, translated_old),
+      rootfs_path_for_host(resolved_new, translated_new)));
+#else
+  return (int)normalize_syscall_result(__crt_sys_link(resolved_old, resolved_new));
+#endif
 }
 
 int link(const char* oldpath, const char* newpath) {

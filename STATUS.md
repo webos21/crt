@@ -26,13 +26,12 @@ in those two win.
   own `cmake --workflow` step does not run `port-test-recipes` (a
   separate, heavier target that fetches and builds third-party sources)
   -- that's verified locally/per-host instead, see below.
-- **`ctest`**: 93 registered tests on Windows and 77 on macOS in the
+- **`ctest`**: 94 registered tests on Windows and 77 on macOS in the
   latest local run (count is slightly
   OS-dependent -- a few targets, like `windows_export_hygiene_test`, only
-  exist on their own OS), all passing locally on Windows (93/93, most
-  recently confirmed after the `cksum`/`crc32`/`tsort`/`tty`/`unlink`/
-  `uuencode` toybox applet batch, via a genuine `cmake --fresh`
-  reconfigure) and
+  exist on their own OS), all passing locally on Windows (94/94, most
+  recently confirmed after the `link` applet / real `linkat()` PAL
+  implementation, via a genuine `cmake --fresh` reconfigure) and
   locally on macOS as
   of the curl/host-libc audit pass; CI is the source of truth for Linux
   counts. Run locally via
@@ -132,6 +131,13 @@ in those two win.
   record -- no AAAA/IPv6, no TCP fallback for truncated responses, no
   search-domain suffixes, no caching. Sufficient for curl's own basic
   HTTP/HTTPS needs; would need to grow if a future port needs more.
+- **`linkat()`'s Linux/macOS raw syscall trampolines are unverified**:
+  added 2026-08-16 alongside the Windows `CreateHardLinkA` implementation
+  (which *is* directly verified on real hardware, see `HISTORY.md`), but
+  this dev environment has no Linux/macOS cross-toolchain to compile or
+  run `libc/src/arch/{linux,macos}/{x86_64,aarch64}/syscall.S`'s new
+  `__crt_sys_link` trampolines. See `TODO.md`'s own entry -- needs a real
+  build+`ctest` run on those hosts before this is fully "done".
 
 ## Next
 

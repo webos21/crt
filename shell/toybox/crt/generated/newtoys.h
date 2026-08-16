@@ -18,6 +18,7 @@ USE_GETOPT(NEWTOY(getopt, "^a(alternative)n:(name)o:(options)l*(long)(longoption
 USE_GREP(NEWTOY(grep, "(line-buffered)(color):;(exclude-dir)*S(exclude)*M(include)*ZzEFHIab(byte-offset)h(no-filename)ino(only-matching)rRsvwc(count)L(files-without-match)l(files-with-matches)q(quiet)(silent)e*f*C#B#A#m#x[!wx][!EF]", TOYFLAG_BIN|TOYFLAG_ARGFAIL(2)|TOYFLAG_LINEBUF|TOYFLAG_AUTOCONF))
 USE_HEAD(NEWTOY(head, "?n(lines)#<0=10c(bytes)#<0qv[-nc]", TOYFLAG_USR|TOYFLAG_BIN|TOYFLAG_LINEBUF))
 USE_ID(NEWTOY(id, ">1"USE_ID_Z("Z")"nGgru[!"USE_ID_Z("Z")"Ggu]", TOYFLAG_USR|TOYFLAG_BIN))
+USE_LINK(NEWTOY(link, "<2>2", TOYFLAG_USR|TOYFLAG_BIN))
 USE_LN(NEWTOY(ln, "<1rt:Tvnfs", TOYFLAG_BIN))
 USE_LS(NEWTOY(ls, "(sort):(color):;(full-time)(show-control-chars)\377(block-size)#=1024<1\241(group-directories-first)\376ZgoACFHLNRSUXabcdfhikl@mnpqrstuw#=80<0x1[-Cxm1][-Cxml][-Cxmo][-Cxmg][-cu][-ftS][-HL][-Nqb][-k\377]", TOYFLAG_BIN))
 USE_MKDIR(NEWTOY(mkdir, "<1"USE_MKDIR_Z("Z:")"vp(parent)(parents)m:", TOYFLAG_BIN|TOYFLAG_UMASK))

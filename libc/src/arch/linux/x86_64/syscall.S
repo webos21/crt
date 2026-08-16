@@ -405,6 +405,19 @@ __crt_sys_unlink:
   retq
 .size __crt_sys_unlink, . - __crt_sys_unlink
 
+/* link(oldpath, newpath): x86_64 still has the legacy 2-arg __NR_link (86),
+ * right next to __NR_unlink (87) above -- no *at() shuffle needed, unlike
+ * aarch64 below (see that file's own comment). __crt_sys_link(oldpath,
+ * newpath) already matches link(2)'s own (rdi, rsi) argument order. */
+.globl __crt_sys_link
+.type __crt_sys_link, @function
+.p2align 4, 0x90
+__crt_sys_link:
+  movq $86, %rax
+  syscall
+  retq
+.size __crt_sys_link, . - __crt_sys_link
+
 .globl __crt_sys_rename
 .type __crt_sys_rename, @function
 .p2align 4, 0x90

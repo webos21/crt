@@ -685,6 +685,25 @@ ___crt_sys_unlink:
   negq %rax
   retq
 
+/* link(oldpath, newpath): Darwin keeps the legacy 2-arg BSD link syscall
+ * (9) available on every arch -- no *at() shuffle needed, same reasoning
+ * as x86_64 Linux's own __crt_sys_link. __crt_sys_link(oldpath, newpath)
+ * already matches link(2)'s own (rdi, rsi) argument order. */
+.globl ___crt_sys_link
+.p2align 4, 0x90
+___crt_sys_link:
+  movq $0x2000009, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
+  negq %rax
+  retq
+
 .globl ___crt_sys_rename
 .p2align 4, 0x90
 ___crt_sys_rename:

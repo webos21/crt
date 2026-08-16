@@ -80,9 +80,10 @@ Active threads, not a flat list of one-off items. Remaining libc/PAL
 residuals before the upper runtime phase (see `docs/runtime_roadmap.md`):
 
 - Expand toybox applets only when the backing Bionic-compatible CRT/PAL
-  surface exists. `which`/`readlink`/`stat`/`touch`/`id`/`xargs` and
-  `cksum`/`crc32`/`tsort`/`tty`/`unlink`/`uuencode` are done (see
-  `HISTORY.md`) -- next candidates:
+  surface exists. `which`/`readlink`/`stat`/`touch`/`id`/`xargs`,
+  `cksum`/`crc32`/`tsort`/`tty`/`unlink`/`uuencode`, and `link` (needed a
+  real `linkat()` PAL implementation first, not just an LLP64 audit -- see
+  `HISTORY.md`) are done -- next candidates:
   - `expand`, `logger`, `fold`, `uudecode`, `cal`, `split`, `strings` are
     audited and LLP64-safe, but need a real `shell/toybox/src/android/
     linux/generated/flags.h` regeneration first (their `GLOBALS()` struct
@@ -90,11 +91,25 @@ residuals before the upper runtime phase (see `docs/runtime_roadmap.md`):
     `HISTORY.md`'s 2026-08-16 entry) -- toybox's own `mkflags`
     C-preprocessor pipeline (`scripts/make.sh`/`scripts/genconfig.sh`),
     not a hand-edit.
-  - `link` is LLP64-safe but needs `linkat()` implemented for real first
-    (currently an unconditional `ENOTSUP` stub in `libc/src/fd.c` on every
-    host, not just Windows).
   - Beyond those, keep auditing the remaining disabled applets for LLP64
     pointer-width safety.
+
+- **Verify `linkat()`'s new Linux x86_64/aarch64 and macOS x86_64/aarch64
+  raw syscall trampolines with a real build and run on those hosts.**
+  Added 2026-08-16 (see `HISTORY.md`) alongside the Windows
+  `CreateHardLinkA` implementation, which *is* directly verified on real
+  Windows hardware this session (`crt_mksh_rootfs_link_runs`). The other
+  three hosts only got a hand-written `libc/src/arch/{linux,macos}/
+  {x86_64,aarch64}/syscall.S` trampoline mirroring the existing
+  `__crt_sys_symlink`/`__crt_sys_unlink` pattern in the same files, using
+  well-established syscall numbers (Linux x86_64 `__NR_link`=86, Linux
+  aarch64 `__NR_linkat`=37 via `AT_FDCWD`, Darwin `SYS_link`=9 on both
+  archs) -- this dev environment has no cross-toolchain to even compile
+  those three files, let alone run `crt_mksh_rootfs_link_runs` against
+  them. Low-risk (mechanical mirror of an already-working pattern, stable
+  decades-old ABI numbers) but genuinely unverified -- do not treat as
+  "done" until a real Linux and macOS `ctest` run confirms it, per this
+  project's own "always verify with a real build" discipline.
 - Keep deeper Linux-like applets deferred until the PAL owns enough backing
   behavior:
   - `ps`: add through toybox only after the rootfs/PAL provides enough

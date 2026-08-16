@@ -376,6 +376,11 @@ __declspec(dllimport) BOOL CRT_WINAPI CreateSymbolicLinkA(
     const char* lpSymlinkFileName,
     const char* lpTargetFileName,
     DWORD dwFlags);
+/* Same BOOL-return zero-extension ABI note as CreateSymbolicLinkA above. */
+__declspec(dllimport) BOOL CRT_WINAPI CreateHardLinkA(
+    const char* lpFileName,
+    const char* lpExistingFileName,
+    void* lpSecurityAttributes);
 __declspec(dllimport) void CRT_WINAPI GetSystemInfo(struct crt_system_info* lpSystemInfo);
 __declspec(dllimport) BOOL CRT_WINAPI GlobalMemoryStatusEx(
     struct crt_memory_status_ex* lpBuffer);
@@ -4387,6 +4392,44 @@ long __crt_sys_symlink(const char* target, const char* linkpath) {
     }
     return fail_last_error();
   }
+}
+
+/* link(): real POSIX hard link, backed by the real Windows equivalent
+ * (CreateHardLinkA -- an NTFS feature, not a reparse point/emulation the
+ * way symlink() above needs). Unlike CreateSymbolicLinkA, argument order
+ * is (newpath, oldpath) -- the new link name comes first. Was a plain
+ * ENOTSUP stub in libc/src/fd.c's linkat() (every host, not just Windows)
+ * until toybox's `link` applet needed it for real; see that fix and the
+ * new __crt_sys_link trampolines in libc/src/arch/linux and
+ * libc/src/arch/macos's own per-arch syscall.S files for the other two
+ * hosts. */
+long __crt_sys_link(const char* oldpath, const char* newpath) {
+  char translated_new[4096];
+  char translated_old[4096];
+  const char* host_new;
+  const char* host_old;
+  int attempt;
+
+  if (oldpath == 0 || newpath == 0) {
+    return -EINVAL;
+  }
+  host_new = translate_path_for_host(newpath, translated_new);
+  host_old = translate_path_for_host(oldpath, translated_old);
+  if (host_new == 0 || host_old == 0) {
+    return -EINVAL;
+  }
+  /* Same delete-pending/handle-timing race window as CreateSymbolicLinkA/
+   * CreateFileA(O_CREAT) above -- reuse the same retry policy. */
+  for (attempt = 0; attempt < WINDOWS_DELETE_RACE_RETRY_ATTEMPTS; ++attempt) {
+    if (CreateHardLinkA(host_new, host_old, 0)) {
+      return 0;
+    }
+    if (!windows_is_delete_race_error(GetLastError())) {
+      break;
+    }
+    Sleep(WINDOWS_DELETE_RACE_RETRY_SLEEP_MS);
+  }
+  return fail_last_error();
 }
 
 static long stat_from_handle(HANDLE handle, struct stat* st) {

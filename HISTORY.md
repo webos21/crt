@@ -10,6 +10,52 @@ substantive update.
 
 ## 2026-08-16
 
+- **Implemented real `linkat()`/`link()` PAL backing and enabled the
+  `link` toybox applet, closing the one real gap the LLP64 audit batch
+  (below) had left open.** `libc/src/fd.c`'s `linkat()` was an
+  unconditional `ENOTSUP` stub on *every* host, not just Windows -- a real
+  PAL gap, not an LLP64 issue, confirmed by grepping every `libc/src/arch/
+  */*/syscall.S` for a `link`/`linkat` trampoline and finding none at all.
+  - **Windows**: new `__crt_sys_link()` in `libc/src/arch/windows/common/
+    syscall.c`, backed by the real `CreateHardLinkA` (an NTFS feature, not
+    a reparse-point emulation the way `symlink()` needs) -- same
+    delete-pending/handle-timing retry policy `CreateSymbolicLinkA`/
+    `CreateFileA(O_CREAT)` already use. **Directly verified on this
+    session's own Windows hardware**: a standalone smoke test, the
+    `crt_mksh_rootfs_link_runs` ctest regression, and `toybox link`/`
+    system/bin/link.exe` all round-trip a real hardlink correctly (content
+    visible through the new name, survives unlinking the original).
+  - **Linux x86_64/aarch64, macOS x86_64/aarch64**: new `__crt_sys_link`
+    raw syscall trampolines added to each arch's own hand-written
+    `syscall.S`, mirroring the exact register-shuffle style the existing
+    `__crt_sys_symlink`/`__crt_sys_unlink` trampolines in the same files
+    already use. x86_64 (both Linux and Darwin) keeps a legacy 2-arg
+    `link` syscall available (Linux `__NR_link`=86, right next to
+    `__NR_unlink`=87 already used; Darwin `SYS_link`=9, next to
+    `SYS_unlink`=10 already used) -- no register shuffling needed, the
+    existing `__crt_sys_link(oldpath, newpath)` C signature already
+    matches. Linux aarch64 dropped the legacy syscall entirely (same
+    reason `__crt_sys_symlink`/`__crt_sys_unlink` already route through
+    `symlinkat`/`unlinkat` there) -- routes through
+    `linkat(AT_FDCWD, oldpath, AT_FDCWD, newpath, 0)` (`__NR_linkat`=37)
+    instead, with the same kind of register-shuffle `__crt_sys_symlink`
+    already does on that arch. **Not verified by an actual build or run
+    this session** -- this dev environment is Windows-only with no
+    cross-toolchain available to even compile these three files, let alone
+    execute them. The syscall numbers and calling convention are
+    well-established, stable ABI facts (unchanged across kernel/Darwin
+    versions for decades), and the code mechanically mirrors an existing,
+    already-working pattern in the exact same files rather than
+    inventing a new one, but this is still a real, open gap in this
+    project's own "always verify with a real build" discipline until
+    confirmed on actual Linux/macOS hardware -- flagged explicitly in
+    `TODO.md` rather than silently assumed correct.
+  `libc/src/fd.c`'s `linkat()` itself now resolves both paths via
+  `make_at_path()` (already existed) and, on non-Windows, additionally
+  routes them through `rootfs_path_for_host()` before calling
+  `__crt_sys_link()` -- matching `unlink()`/`symlink()`'s own existing
+  pattern exactly.
+
 - **Enabled six more toybox applets after auditing the remaining disabled
   ones for LLP64 pointer-width safety: `cksum`/`crc32`, `tsort`, `tty`,
   `unlink`, `uuencode`.** Continues the `which`/`readlink`/`stat`/`touch`/

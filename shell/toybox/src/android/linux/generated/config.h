@@ -318,8 +318,8 @@
 #define USE_KLOGD(...)
 #define CFG_LAST 0
 #define USE_LAST(...)
-#define CFG_LINK 0
-#define USE_LINK(...)
+#define CFG_LINK 1
+#define USE_LINK(...) __VA_ARGS__
 #define CFG_LINUX32 0
 #define USE_LINUX32(...)
 #define CFG_LN 1

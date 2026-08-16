@@ -24,6 +24,7 @@ TOYBOX_APPLETS = [
     "grep",
     "head",
     "id",
+    "link",
     "ln",
     "ls",
     "mkdir",
