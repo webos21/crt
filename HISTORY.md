@@ -10,6 +10,50 @@ substantive update.
 
 ## 2026-08-16
 
+- **Seriously evaluated actually implementing Windows stop/resume + `fg`/
+  `bg` (scope A: command-driven, e.g. `kill -STOP`/`fg`/`bg` -- not live
+  Ctrl-Z keypress detection, which stays permanently out of scope per CRT's
+  own PAL philosophy of using each platform's real native primitives rather
+  than recreating a full POSIX environment the way Cygwin does), and decided
+  to keep it deferred rather than build it now.** Confirmed there is no
+  *documented* Win32 API to suspend an entire other process:
+  `SuspendThread()` per-thread has a real race (a thread created between
+  enumeration and suspension escapes it); `DebugActiveProcess()` +
+  `SuspendThread()` attaches a real debugger with broader side effects; Job
+  Object `Freeze` (`JobObjectFreezeInformation`) was checked directly
+  against this project's own installed Windows SDK headers (`.../Windows
+  Kits/10/Include/10.0.28000.0/um/winnt.h`) and turned out to be **no more
+  official than the alternative** -- Microsoft's own public header leaves
+  the value nameless (`JobObjectReserved1Information = 18`), with no
+  accompanying struct in `jobapi2.h` at all. The least-bad design, if this
+  is ever picked up: Job Objects for grouping/descendant tracking (fully
+  documented `CreateJobObject`/`AssignProcessToJobObject`/
+  `QueryInformationJobObject`) + `NtSuspendProcess`/`NtResumeProcess`
+  (undocumented, but stable since Windows XP and what Process Explorer/
+  Process Hacker/PowerToys/PowerShell's own `Suspend-Process` all actually
+  use) for the actual freeze/thaw action -- recorded in `docs/
+  job_control.md`'s "Stopped-child status" section. Using it would still be
+  an explicit, narrow reversal of this project's consistently-followed
+  "avoid undocumented NT internals" pattern (fork() emulation, `/dev/
+  urandom` via `RtlGenRandom`, etc. always stick to documented Win32 APIs
+  even in unusual combinations), not a general policy change. **Decisive
+  factor**: reviewed `docs/runtime_roadmap.md`'s actual planned components
+  (`libcrtjs`/QuickJS+V8, `libcrtgfx`/Skia+Wayland-compositor+Ozone,
+  `libcrtmedia`/FFmpeg) and found none of them depend on POSIX job-control
+  signals in their own real-world implementations -- a Wayland compositor
+  manages client visibility via protocol messages, not process signals;
+  Android's own background-app-freeze uses the Linux cgroup freezer, not
+  signals (and is Linux-kernel-specific regardless). The roadmap's one
+  signal-related mention (V8's "signal/process behavior" prerequisite) is a
+  separate matter entirely -- `SIGSEGV`-trap-based WASM bounds checking and
+  `SIGPROF`-style profiling, the "vectored exception handling" question
+  `docs/signal_delivery.md`'s own "Next Steps" already tracks independently,
+  answerable with fully documented Windows APIs
+  (`SetUnhandledExceptionFilter`/`AddVectoredExceptionHandler`), no
+  undocumented-internal question at all. With no real roadmap dependency,
+  stays deferred -- `TODO.md`'s "Interactive job control" section updated
+  with this finding so a future session doesn't have to re-derive it.
+
 - **Decided and documented the Windows interactive-job-control policy**
   (TODO.md's "Decide and document the minimal Windows console
   process-group policy" item) -- design and documentation only, no code,

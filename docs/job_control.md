@@ -129,3 +129,30 @@ remain pure software bookkeeping (self-delivery only via `raise()`, matching
 out of scope until real interactive job control (`MKSH_UNEMPLOYED`
 re-enabled) is an actual priority, not a "later" this document leaves
 ambiguous.
+
+**Investigated (2026-08-16), still deferred -- design for whoever picks this
+up.** Confirmed there is no *documented* way to suspend an entire other
+Windows process. Considered and rejected: `SuspendThread()` per-thread alone
+(real race -- a thread created between enumeration and suspension escapes
+it); `DebugActiveProcess()` + `SuspendThread()` (attaches a real debugger,
+broader side effects on the target's own exception handling); Job Object
+`Freeze` (`JobObjectFreezeInformation`) -- checked directly against this
+project's own Windows SDK headers (`.../Windows Kits/10/Include/
+10.0.28000.0/um/winnt.h`): Microsoft's own public header leaves this value
+nameless (`JobObjectReserved1Information = 18`), with no accompanying struct
+in `jobapi2.h` either -- **not** more official than the option below, and
+arguably less battle-tested. If this is ever built: Job Objects for
+grouping/descendant tracking (`CreateJobObject`/`AssignProcessToJobObject`/
+`QueryInformationJobObject` -- fully documented, and solves "which processes
+belong to this job" including grandchildren for free) + `NtSuspendProcess`/
+`NtResumeProcess` (undocumented, but stable since Windows XP and what
+Process Explorer/Process Hacker/PowerToys/PowerShell's own
+`Suspend-Process`/`Resume-Process` all actually use) applied to each tracked
+pid for the actual freeze/thaw action. Using the latter would still be an
+explicit, narrow reversal of this project's "avoid undocumented NT
+internals" pattern, not a general policy change -- would need its own
+documented justification/risk/mitigation at the time, not silently. Also
+confirmed via `docs/runtime_roadmap.md`: none of the planned upper-runtime
+components need this (see `TODO.md`'s "Interactive job control" section) --
+there is no roadmap pressure to build it, only a possible future interactive
+UX want.

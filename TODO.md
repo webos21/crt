@@ -112,6 +112,19 @@ design for all three pieces below; nothing here is implemented yet, and this
 project's own mksh build has job control compiled out entirely on every host
 (`MKSH_NOPROSPECTOFWORK`), not just Windows -- see that section for why this
 is forward-looking policy, not a current gap being actively worked.
+Re-evaluated (2026-08-16) against `docs/runtime_roadmap.md`: none of the
+planned upper-runtime components (`libcrtjs`/QuickJS+V8, `libcrtgfx`, `libcrtmedia`)
+actually depend on POSIX job-control signals (`SIGSTOP`/`SIGTSTP`/`SIGCONT`)
+or real fg/bg switching -- confirmed genuinely optional infrastructure, not
+something blocking the roadmap. (V8's own "signal/process behavior"
+prerequisite in that doc is a separate matter -- `SIGSEGV`-trap-based WASM
+bounds checks and `SIGPROF`-style profiling, the "vectored exception
+handling" question `docs/signal_delivery.md` already tracks independently,
+answerable with fully documented Windows APIs.) A full Windows stop/resume
+implementation would also need reversing this project's "avoid undocumented
+NT internals" pattern (`NtSuspendProcess`/`NtResumeProcess` -- see
+`docs/job_control.md`'s own "Stopped-child status" note for the design that
+was investigated and the alternatives ruled out). Stays deferred.
 
 - Bridge `SetConsoleCtrlHandler` (`CTRL_C_EVENT`/`CTRL_BREAK_EVENT`, both to
   `SIGINT`) into `signal_actions[]`/`raise()`, mirroring `SIGCHLD`'s existing
