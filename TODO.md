@@ -79,59 +79,42 @@ newest entry first) rather than leaving it here.
 Active threads, not a flat list of one-off items. Remaining libc/PAL
 residuals before the upper runtime phase (see `docs/runtime_roadmap.md`):
 
-- **`linkat()`'s Linux/macOS raw syscall trampolines are now confirmed**:
-  the user built and ran this project on real Linux and macOS hardware
-  (2026-08-16), through the full `curl` port test -- the previously-flagged
-  "unverified" gap (Windows-only verification, no cross-toolchain in the
-  dev session that wrote the trampolines) is closed. See `HISTORY.md`.
-
 - Expand toybox applets only when the backing Bionic-compatible CRT/PAL
-  surface exists. Done: `which`/`readlink`/`stat`/`touch`/`id`/`xargs`;
-  `cksum`/`crc32`/`tsort`/`tty`/`unlink`/`uuencode`; `link` (needed a real
-  `linkat()` PAL implementation, not just an LLP64 audit); `cut` and a
-  24-name Bionic/Android-parity batch (`cmp`, `comm`, `cpio`, `dd`, `diff`,
-  `du`, `env`, `file`, `find`, `getconf`, `hostname`, `md5sum`+
-  `sha1sum`/`sha256sum`/`sha512sum`, `microcom`, `nl`, `od`, `paste`,
-  `patch`, `seq`, `setsid`, `tar`, `truncate`, `xxd`) found by diffing this
-  project's own applet set against the real Android/Bionic reference
-  config (`shell/toybox/src/android/linux/generated/config.h`'s full
-  `CFG_x=1` list) rather than picking candidates ad hoc -- see
-  `HISTORY.md`'s 2026-08-16 entries for both. That same diff also surfaced
-  two real functional bugs LLP64 auditing alone doesn't catch (a live
-  build+run of each candidate does): `timeout` hangs instead of enforcing
-  its deadline (its `SIGCHLD`/`siginfo_t` handler + `poll()`-loop shape
-  needs its own investigation into this PAL's Windows signal/poll
-  interaction, not attempted yet); `dos2unix`/`unix2dos` hit a genuine,
-  non-transient Windows limit -- `rename()`-over-a-file-with-an-open-handle
-  (their own `copy_tempfile()`/`replace_tempfile()` temp-then-rename
-  pattern keeps the original open across the whole conversion) fails even
-  after `__crt_sys_rename()` gained the same delete-pending-race retry
-  loop `__crt_sys_unlink()`/`__crt_sys_symlink()` already had (a real,
-  general bug fixed along the way, but insufficient here since the failure
-  isn't actually transient) -- would need `FILE_RENAME_POSIX_SEMANTICS`
-  (`SetFileInformationByHandle`/`FileRenameInfoEx`, Windows 10 1607+) or
-  restructuring the temp-file pattern to not hold the destination open
-  across the rename. Both applets stay disabled until one of those lands.
-  `shell/toybox/crt/generated/config.h` (a small `#undef`/`#define` layer
-  over the base Android config, `#include`d first) already documents this
-  project's own deliberate exclusions -- `flock`, `gzip`, `zcat`, `mount`,
-  `nproc`, `pgrep`, `pkill`, `ps`, `umount`, `unshare` are forced to `0`
-  there regardless of the base config, matching this file's own "Keep
-  deeper Linux-like applets deferred" list below. A few Android-enabled
-  names have no source file at all in this tree and would need a real
-  upstream import first: `install`, `realpath`, `whoami` (aliases
-  `logname`, absent). Remaining candidates:
+  surface exists. `which`/`readlink`/`stat`/`touch`/`id`/`xargs`;
+  `cksum`/`crc32`/`tsort`/`tty`/`unlink`/`uuencode`; `link`; and a
+  Bionic/Android-parity pass (`cut` plus 24 more names, diffed directly
+  against the real Android/Bionic reference config rather than picked ad
+  hoc) are all done -- see `HISTORY.md`'s 2026-08-16 entries. Still open:
   - `expand`, `logger`, `fold`, `uudecode`, `cal`, `split`, `strings` are
     audited and LLP64-safe, but need a real `shell/toybox/src/android/
     linux/generated/flags.h` regeneration first (their `GLOBALS()` struct
-    is missing from the committed `union global_union` entirely -- see
-    `HISTORY.md`'s 2026-08-16 entry) -- toybox's own `mkflags`
-    C-preprocessor pipeline (`scripts/make.sh`/`scripts/genconfig.sh`),
-    not a hand-edit.
-  - Beyond those, the Android/Bionic-parity diff is now exhausted for
-    non-`/proc`-dependent applets; anything left unaddressed falls under
-    either the `flags.h` regeneration above or the deep-Linux-applet
-    deferral immediately below.
+    is missing from the committed `union global_union` entirely) --
+    toybox's own `mkflags` C-preprocessor pipeline
+    (`scripts/make.sh`/`scripts/genconfig.sh`), not a hand-edit.
+  - **`timeout` hangs instead of enforcing its deadline** -- its
+    `SIGCHLD`/`siginfo_t` handler + `poll()`-loop shape needs its own
+    investigation into this PAL's Windows signal/poll interaction, not
+    attempted yet. Left disabled.
+  - **`dos2unix`/`unix2dos` hit a genuine, non-transient Windows limit**:
+    `rename()`-over-a-file-with-an-open-handle (their own
+    `copy_tempfile()`/`replace_tempfile()` temp-then-rename pattern keeps
+    the original open across the whole conversion) fails even after
+    `__crt_sys_rename()` gained the same delete-pending-race retry loop
+    `__crt_sys_unlink()`/`__crt_sys_symlink()`/`__crt_sys_link()` already
+    had (a real, general fix landed regardless, but insufficient here
+    since the failure isn't transient) -- would need
+    `FILE_RENAME_POSIX_SEMANTICS` (`SetFileInformationByHandle`/
+    `FileRenameInfoEx`, Windows 10 1607+) or restructuring the temp-file
+    pattern to not hold the destination open across the rename. Left
+    disabled.
+  - Beyond those, the Android/Bionic-parity diff is exhausted for
+    non-`/proc`-dependent applets. `shell/toybox/crt/generated/config.h`
+    (a small `#undef`/`#define` override layer over the base Android
+    config, `#include`d first) already forces `flock`/`gzip`/`zcat`/
+    `mount`/`nproc`/`pgrep`/`pkill`/`ps`/`umount`/`unshare` to `0`
+    regardless of upstream, matching the deferred-applet list below.
+    `install`/`realpath`/`whoami` (alias `logname`) have no source file
+    in this tree at all and would need a real upstream import first.
 
 - Keep deeper Linux-like applets deferred until the PAL owns enough backing
   behavior:
