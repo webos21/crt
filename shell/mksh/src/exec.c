@@ -107,9 +107,55 @@ execute(struct op * volatile t,
 	     * above can never let a real TCOM slip past this guard.) */
 	    && t->type != TCOM
 #endif
-	    )
+	    ) {
 		/* run in sub-process */
+#ifdef MKSH_CRT_SHELL_CHILD_SPEC
+		/* Mirror the "Break:" tail's own "exstat = rv & 0xFF;" (further
+		 * down in this same function) for this early-return path too --
+		 * without it, a TPAREN (subshell) node here never sets the
+		 * shared exstat global at all, only returns its status via this
+		 * function's own return value. That's invisible whenever the
+		 * caller discards this return value, which TLIST's own loop
+		 * (below, "case TLIST:") does for every list item except the
+		 * last: `(cmd1); cmd2` compiles to a TLIST whose non-final item
+		 * is the TPAREN, so `(false); echo $?` printed 0 instead of 1 --
+		 * $? saw whatever exstat last held from before the subshell ran
+		 * (0 at the very start of a script), never the subshell's own
+		 * real status, while the exact same TCOM command (`false;
+		 * echo $?`, no subshell) worked correctly, because TCOM's own
+		 * dispatch below *does* reach the "Break:" tail and already
+		 * updates exstat regardless of what any caller does with its
+		 * return value. Root-caused via added, since-removed printf
+		 * tracing through exec.c/jobs.c's exchild()/j_waitj()/
+		 * j_sigchld() -- confirmed exchild() itself always computed and
+		 * returned the correct status; only this side effect was
+		 * missing. This is the "Windows mksh subshell status quirk"
+		 * TODO.md/docs/sysroot_ports.md documented from zlib's own
+		 * `-@ ($(RANLIB) $@ || true) >/dev/null 2>&1` line (that
+		 * specific line never surfaced a wrong *build* result only
+		 * because `-@` already tells make to ignore the whole line's
+		 * exit status regardless). Genuinely Windows-only in practice,
+		 * not just in observation: MKSH_CRT_SHELL_CHILD_SPEC (see
+		 * shell/CMakeLists.txt) is only ever defined for the Windows
+		 * build, so the "|| t->type == TPAREN" disjunct just above is
+		 * compiled out entirely on Linux/macOS -- there, a TPAREN
+		 * reached without XFORK already set (e.g. as a TLIST's
+		 * non-final item) skips this whole early-return block and
+		 * falls through to the switch statement's own "case TPAREN:"
+		 * below instead, which *does* reach the shared "Break:" tail
+		 * and sets exstat correctly. This early-return path exists at
+		 * all only because Windows's own TPAREN needs real process
+		 * isolation reached a different way than upstream mksh
+		 * assumes (see the comment just above this block).
+		 * See tests/mksh_subshell_status_test.c's own comment for the
+		 * permanent regression this guards. */
+		rv = exchild(t, flags & ~XTIME, xerrok, -1);
+		exstat = rv & 0xFF;
+		return (rv);
+#else
 		return (exchild(t, flags & ~XTIME, xerrok, -1));
+#endif
+	}
 
 	newenv(E_EXEC);
 	if (trap)

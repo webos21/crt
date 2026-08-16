@@ -52,10 +52,6 @@ newest entry first) rather than leaving it here.
 Active threads, not a flat list of one-off items. Remaining libc/PAL
 residuals before the upper runtime phase (see `docs/runtime_roadmap.md`):
 
-- Audit the mksh subshell status quirk exposed by commands shaped like
-  `(command || true) >/dev/null 2>&1` (worked around at the recipe level
-  for zlib's `RANLIB=true`, see `docs/sysroot_ports.md`, but never
-  root-caused).
 - Expand Windows shell smoke tests:
   - fd 3+ redirection inside mksh;
   - grouped commands;

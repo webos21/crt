@@ -138,10 +138,11 @@ in those two win.
   real, general risk once open from this queue -- mbedtls's Windows DLL
   symbol-export hygiene -- is fixed; see `HISTORY.md`'s 2026-08-15 entry.
 - Before starting the next upper-runtime phase, reduce the remaining
-  libc/PAL planned work in `TODO.md`: libffi correctness, the mksh subshell
-  status quirk, rootfs virtual files/devices, DNS resolver growth,
-  console/job-control policy, and toybox applet expansion only where the
-  Bionic-compatible backing surface exists.
+  libc/PAL planned work in `TODO.md`: libffi correctness, rootfs virtual
+  files/devices, DNS resolver growth, console/job-control policy, and
+  toybox applet expansion only where the Bionic-compatible backing
+  surface exists. The mksh subshell status quirk is fixed -- see
+  `HISTORY.md`'s 2026-08-16 entry.
 - The next product-level target is documented in `docs/runtime_roadmap.md`:
   an Electron-class rebuilt runtime made of `libcrtgfx` (Skia + Wayland-style
   compositor boundary + Chromium Ozone path), `libcrtmedia` (FFmpeg/codecs/

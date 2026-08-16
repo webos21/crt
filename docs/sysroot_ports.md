@@ -314,8 +314,8 @@ the Win32 `<io.h>` branch. This is a recipe-level declaration of the CRT target
 surface, not an upstream source patch. It sets `RANLIB=true` because zlib treats
 ranlib as an optional archive-index refresh and the LLVM `ar` path already
 produces the static archive needed by the porting test. The Windows mksh
-subshell status quirk exposed by zlib's ignored `ranlib || true` line should be
-tracked separately from zlib library portability.
+subshell status quirk zlib's `ranlib || true` line exposed is fixed -- see
+`HISTORY.md`'s 2026-08-16 entry and `tests/mksh_subshell_status_test.c`.
 
 Per-recipe fetch targets resolve recipe dependencies. For example,
 `port-fetch-libpng` also fetches zlib, and zlib fetches the Android make source

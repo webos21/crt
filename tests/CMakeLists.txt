@@ -375,6 +375,19 @@ set_tests_properties(shell_smoke_test_runs PROPERTIES
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 
+# TODO.md's/docs/sysroot_ports.md's "Windows mksh subshell status quirk"
+# item: a `(subshell); next_command` sequence lost the subshell's real
+# exit status on Windows -- see mksh_subshell_status_test.c's own top
+# comment for the full root cause (shell/mksh/src/exec.c's execute())
+# and the fix.
+add_crt_test(mksh_subshell_status_test mksh_subshell_status_test.c)
+add_dependencies(mksh_subshell_status_test rootfs)
+set_tests_properties(mksh_subshell_status_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "mksh_subshell_status_test: ok"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+  ENVIRONMENT "CRT_ROOTFS=${CRT_ROOTFS}"
+)
+
 add_crt_test(mntent_test mntent_test.c)
 set_tests_properties(mntent_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "mntent_test: ok"

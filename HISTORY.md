@@ -73,6 +73,63 @@ substantive update.
   live, or enough clean reruns across enough rebuilds to reconsider it.
   See that recipe's own notes for the full writeup.
 
+- **Root-caused and fixed the "Windows mksh subshell status quirk"**
+  TODO.md and `docs/sysroot_ports.md` had tracked, unexplained, since
+  zlib's own `-@ ($(RANLIB) $@ || true) >/dev/null 2>&1` line first
+  exposed it (worked around at the recipe level with `RANLIB=true`,
+  never root-caused). Isolated with a series of direct `mksh -c`
+  probes: `(false); echo $?` printed `0` instead of `1`, but the exact
+  same command without the subshell (`false; echo $?`) printed the
+  correct `1` -- and, critically, `(false)` **on its own line**
+  (`printf '(false)\necho "status=$?"\n' | mksh`) printed the correct
+  `1` too. Only a `;`-joined `(subshell); next_command` on one line
+  failed. Traced with temporary `fprintf` instrumentation through
+  `exec.c`/`jobs.c`'s `execute()`/`exchild()`/`j_waitj()`/`j_sigchld()`
+  chain (removed before the real fix landed): `exchild()` always
+  computed and returned the *correct* status (confirmed directly in the
+  trace output), so the job-control machinery was never the problem.
+  The actual bug: `shell/mksh/src/exec.c`'s `execute()` has an
+  early-return path -- `if ((flags&XFORK || t->type == TPAREN) && ...)
+  return (exchild(...));` -- that only a TPAREN (subshell) node ever
+  takes without `XFORK` already set, because `|| t->type == TPAREN` is
+  gated behind `MKSH_CRT_SHELL_CHILD_SPEC`, a **Windows-only** macro
+  (`shell/CMakeLists.txt`; added earlier to guarantee a subshell always
+  gets real process isolation). That path returns `exchild()`'s result
+  directly without ever setting the shared `exstat` global the way
+  every other path through `execute()` does at its own `"Break:"` tail
+  further down in the same function. Invisible whenever the immediate
+  caller uses `execute()`'s return value directly (a standalone
+  `(cmd)` on its own line, where `main.c`'s `shell()` loop assigns
+  `exstat = execute(...)` itself) -- but `case TLIST:`'s own loop
+  (`;`-separated commands) discards the return value of every list item
+  except the last one, relying entirely on each item's own dispatch
+  having already updated `exstat` as a side effect. `TCOM` (a plain
+  command) already does this via the shared `"Break:"` tail; `TPAREN`,
+  via this early-return path, never did. Fixed by making that
+  early-return path set `exstat` too, mirroring the `"Break:"` tail
+  exactly (`shell/mksh/src/exec.c`). On real upstream/non-Windows mksh
+  this exact code path is compiled out entirely (a TPAREN without
+  `XFORK` falls through to the normal switch-statement dispatch and
+  already reaches `"Break:"` correctly) -- genuinely Windows-only, not
+  just Windows-first-observed. New permanent regression,
+  `tests/mksh_subshell_status_test.c` (spawns the real `/bin/sh` via
+  `posix_spawn()`, not a C-level unit test -- the bug is entirely about
+  mksh's own interpreter behavior): 8 cases covering the original repro,
+  a specific non-0/1 exit code, a subshell with its own redirection
+  (matching zlib's real shape), the exact TODO.md-documented
+  `(cmd || true) >/dev/null 2>&1` pattern, a successful (`0`-exit)
+  subshell, two regression guards for paths that were never broken
+  (plain command, command substitution), and a subshell as the *final*
+  list item (also never broken). Needs `CRT_ROOTFS` set to resolve
+  `/bin/sh` through the rootfs -- set via a new `ENVIRONMENT` test
+  property rather than a compile-time path, reusing this project's
+  existing `getenv("CRT_ROOTFS")`-based resolution the same way running
+  a real shell script from a host shell already would. Full `ctest`
+  (89/89, up from 88) and the full `port-test-recipes` aggregate (every
+  recipe with automated tests, run after the fix, before the new test
+  was even added) both stay clean -- confirming no regression across
+  every configure-driven port build this interpreter change touches.
+
 ## 2026-08-15
 
 - **libffi's aarch64-Windows `ffi_call()` repeat-call register-corruption
