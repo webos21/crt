@@ -26,12 +26,13 @@ in those two win.
   own `cmake --workflow` step does not run `port-test-recipes` (a
   separate, heavier target that fetches and builds third-party sources)
   -- that's verified locally/per-host instead, see below.
-- **`ctest`**: 94 registered tests on Windows and 77 on macOS in the
+- **`ctest`**: 95 registered tests on Windows and 77 on macOS in the
   latest local run (count is slightly
   OS-dependent -- a few targets, like `windows_export_hygiene_test`, only
-  exist on their own OS), all passing locally on Windows (94/94, most
-  recently confirmed after the `link` applet / real `linkat()` PAL
-  implementation, via a genuine `cmake --fresh` reconfigure) and
+  exist on their own OS), all passing locally on Windows (95/95, most
+  recently confirmed after fixing a real `cp` applet regression caught by
+  a real `zlib` port rebuild -- see `HISTORY.md` -- via a genuine
+  `cmake --fresh` reconfigure) and
   locally on macOS as
   of the curl/host-libc audit pass; CI is the source of truth for Linux
   counts. Run locally via

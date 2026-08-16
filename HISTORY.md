@@ -10,6 +10,34 @@ substantive update.
 
 ## 2026-08-16
 
+- **Fixed a real `cp` regression from the same day's earlier toybox
+  applet batch, caught by the user asking for a real zlib port
+  rebuild.** Inserting `CRC32` between `CKSUM` and `CP` in
+  `shell/toybox/crt/generated/newtoys.h` left `crc32` sorted *before*
+  `cp` (`'r' > 'p'`), breaking `toy_find()`'s required strict-ascending
+  binary-search invariant over `toy_list[]` -- `cp` alone became silently
+  unreachable (`toybox: Unknown command cp`). None of that batch's own
+  regression tests happened to dispatch `cp`, so `ctest` stayed green;
+  this only surfaced when the user asked for an actual `zlib` port
+  rebuild, whose `make install` step calls `cp` directly. Root-caused by
+  extracting every registered applet name from `newtoys.h` in file order
+  and checking it against `LC_ALL=C sort -c` (matching `strcmp()`'s own
+  byte-order comparison, which `toy_find()` actually uses) -- confirmed
+  `crc32`/`cp` was the only inversion. Fixed by swapping the two lines
+  (correct order: `cksum`, `cp`, `crc32`). New permanent regression:
+  `crt_mksh_rootfs_toybox_applet_sweep_runs` in `shell/CMakeLists.txt`
+  asks toybox itself for its own real, current applet list (plain
+  `toybox` with no arguments -- not a hardcoded copy that could drift out
+  of sync) and dispatches every single one, catching any future entry
+  that becomes unreachable this same way regardless of the underlying
+  cause. Verified the test actually catches this exact bug class by
+  temporarily reintroducing the swapped order, confirming the new test
+  fails with `broken:cp`, then reverting and confirming it passes. Also
+  re-ran the actual `zlib` port build end to end (`port-rebuild-zlib`,
+  `port-test-zlib`) after the fix -- both static and shared round-trip
+  tests pass, `make install`'s own `cp`/`chmod` calls succeed. All 95
+  tests pass via a genuine `cmake --fresh` reconfigure plus full rebuild.
+
 - **Implemented real `linkat()`/`link()` PAL backing and enabled the
   `link` toybox applet, closing the one real gap the LLP64 audit batch
   (below) had left open.** `libc/src/fd.c`'s `linkat()` was an

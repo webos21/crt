@@ -566,6 +566,33 @@ if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
       DEPENDS crt_mksh_rootfs_llp64_batch_runs
     )
     set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_mksh_rootfs_link_runs)
+
+    # Regression for a real bug caught only by an actual zlib port build
+    # (2026-08-16, see HISTORY.md), not by anything above: inserting CRC32
+    # between CKSUM and CP in shell/toybox/crt/generated/newtoys.h left
+    # `crc32` sorted before `cp` (`r` > `p`), breaking toy_find()'s
+    # required strict-ascending binary-search invariant over toy_list[] --
+    # `cp` alone became silently unreachable ("toybox: Unknown command
+    # cp"), which zlib's own `make install` hit immediately (its Makefile
+    # calls `cp` to install the built library). No test above happened to
+    # dispatch `cp`, so this went unnoticed until a real port build tried
+    # it. This test asks toybox itself for its own real, current applet
+    # list (plain `toybox` with no arguments, not a hardcoded copy that
+    # could drift out of sync) and dispatches every single one, catching
+    # any future entry that becomes unreachable this same way regardless
+    # of the underlying cause (newtoys.h ordering, a missing config.h
+    # CFG_x/USE_x pair, or anything else `toy_find()` depends on).
+    add_test(NAME crt_mksh_rootfs_toybox_applet_sweep_runs
+      COMMAND "${CMAKE_COMMAND}" -E env
+        "CRT_ROOTFS=${CMAKE_BINARY_DIR}/rootfs"
+        "PATH=/system/bin:/bin:/usr/bin"
+        "$<TARGET_FILE:crt_mksh>" -c "bad=0; for cmd in $(toybox); do case \"$(toybox \"$cmd\" 2>&1)\" in *'Unknown command'*) bad=1; echo \"broken:$cmd\";; esac; done; if [ \"$bad\" = 0 ]; then echo applet-sweep-ok; fi"
+    )
+    set_tests_properties(crt_mksh_rootfs_toybox_applet_sweep_runs PROPERTIES
+      PASS_REGULAR_EXPRESSION "applet-sweep-ok"
+      DEPENDS crt_mksh_rootfs_link_runs
+    )
+    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_mksh_rootfs_toybox_applet_sweep_runs)
   endif()
   add_dependencies(crt_shell_artifacts crt_toybox)
   install(TARGETS crt_toybox
