@@ -181,6 +181,9 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
   # getauxval() (include/sys/auxv.h) -- Linux-only, no macOS/Windows
   # equivalent kernel mechanism exists (see that file's own comment).
   set(CRT_LINUX_AUXV_FILE src/arch/linux/common/auxv.c)
+  # Real ioctl(TCGETS/TCSETS*)-backed tcgetattr()/tcsetattr()/etc -- see
+  # that file's own comment for the round-trip bug this replaces.
+  set(CRT_LINUX_TERMIOS_FILE src/arch/linux/common/termios.c)
   # __crt_run_init_array()/__crt_run_fini_array() (.init_array/.fini_array
   # support for the executable's own static link -- see that file's own
   # comment for why this must be linked directly into every executable,
@@ -241,6 +244,7 @@ endif()
 target_sources(c PRIVATE ${CRT_SIGNAL_BACKEND_FILE})
 if(CRT_TARGET_OS STREQUAL "linux")
   target_sources(c PRIVATE ${CRT_LINUX_AUXV_FILE})
+  target_sources(c PRIVATE ${CRT_LINUX_TERMIOS_FILE})
 endif()
 
 add_library(crt_setjmp OBJECT ${CRT_SETJMP_FILE})
@@ -347,6 +351,7 @@ endif()
 target_sources(c_shared PRIVATE ${CRT_SIGNAL_BACKEND_FILE})
 if(CRT_TARGET_OS STREQUAL "linux")
   target_sources(c_shared PRIVATE ${CRT_LINUX_AUXV_FILE})
+  target_sources(c_shared PRIVATE ${CRT_LINUX_TERMIOS_FILE})
 endif()
 if(CRT_TARGET_OS STREQUAL "windows")
   target_sources(c_shared PRIVATE $<TARGET_OBJECTS:crt_windows_chkstk>)

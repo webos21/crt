@@ -6,7 +6,23 @@
 #if defined(CRT_TARGET_OS_WINDOWS)
 long __crt_sys_tcgetattr(int fd, struct termios* termios_p);
 long __crt_sys_tcsetattr(int fd, const struct termios* termios_p);
+#elif defined(CRT_TARGET_OS_LINUX)
+/* Real ioctl(TCGETS/TCSETS*)-backed implementation, libc/src/arch/linux/
+ * common/termios.c -- see that file's own comment for why the previous
+ * hardcoded-stub behavior here was a real, general round-trip bug (the
+ * same class already found and fixed on Windows,
+ * tests/termios_echo_roundtrip_test.c). macOS keeps the pre-existing
+ * hardcoded-stub fallback below for now: its BSD ioctl numbers/struct
+ * layout differ from Linux's and haven't been ported yet. */
+long __crt_sys_tcgetattr(int fd, struct termios* termios_p);
+long __crt_sys_tcsetattr(int fd, int optional_actions, const struct termios* termios_p);
+long __crt_sys_tcdrain(int fd);
+long __crt_sys_tcflow(int fd, int action);
+long __crt_sys_tcflush(int fd, int queue_selector);
+long __crt_sys_tcsendbreak(int fd, int duration);
+#endif
 
+#if defined(CRT_TARGET_OS_WINDOWS) || defined(CRT_TARGET_OS_LINUX)
 static int normalize_syscall_result(long result) {
   if (result < 0 && result >= -4095) {
     errno = (int)-result;
@@ -21,7 +37,7 @@ int tcgetattr(int fd, struct termios* termios_p) {
     errno = EFAULT;
     return -1;
   }
-#if defined(CRT_TARGET_OS_WINDOWS)
+#if defined(CRT_TARGET_OS_WINDOWS) || defined(CRT_TARGET_OS_LINUX)
   return normalize_syscall_result(__crt_sys_tcgetattr(fd, termios_p));
 #else
   if (!isatty(fd)) {
@@ -50,6 +66,8 @@ int tcsetattr(int fd, int optional_actions, const struct termios* termios_p) {
   }
 #if defined(CRT_TARGET_OS_WINDOWS)
   return normalize_syscall_result(__crt_sys_tcsetattr(fd, termios_p));
+#elif defined(CRT_TARGET_OS_LINUX)
+  return normalize_syscall_result(__crt_sys_tcsetattr(fd, optional_actions, termios_p));
 #else
   if (!isatty(fd)) {
     errno = ENOTTY;
@@ -60,20 +78,28 @@ int tcsetattr(int fd, int optional_actions, const struct termios* termios_p) {
 }
 
 int tcsendbreak(int fd, int duration) {
+#if defined(CRT_TARGET_OS_LINUX)
+  return normalize_syscall_result(__crt_sys_tcsendbreak(fd, duration));
+#else
   (void)duration;
   if (!isatty(fd)) {
     errno = ENOTTY;
     return -1;
   }
   return 0;
+#endif
 }
 
 int tcdrain(int fd) {
+#if defined(CRT_TARGET_OS_LINUX)
+  return normalize_syscall_result(__crt_sys_tcdrain(fd));
+#else
   if (!isatty(fd)) {
     errno = ENOTTY;
     return -1;
   }
   return 0;
+#endif
 }
 
 int tcflow(int fd, int action) {
@@ -81,11 +107,15 @@ int tcflow(int fd, int action) {
     errno = EINVAL;
     return -1;
   }
+#if defined(CRT_TARGET_OS_LINUX)
+  return normalize_syscall_result(__crt_sys_tcflow(fd, action));
+#else
   if (!isatty(fd)) {
     errno = ENOTTY;
     return -1;
   }
   return 0;
+#endif
 }
 
 int tcflush(int fd, int queue_selector) {
@@ -93,11 +123,15 @@ int tcflush(int fd, int queue_selector) {
     errno = EINVAL;
     return -1;
   }
+#if defined(CRT_TARGET_OS_LINUX)
+  return normalize_syscall_result(__crt_sys_tcflush(fd, queue_selector));
+#else
   if (!isatty(fd)) {
     errno = ENOTTY;
     return -1;
   }
   return 0;
+#endif
 }
 
 speed_t cfgetispeed(const struct termios* termios_p) {

@@ -10,6 +10,55 @@ substantive update.
 
 ## 2026-08-17
 
+- **Implemented real Linux termios (`tcgetattr`/`tcsetattr`/`tcdrain`/
+  `tcflow`/`tcflush`/`tcsendbreak`), fixing a real
+  `termios_echo_roundtrip_test` failure.** Found while auditing CRT/PAL
+  behavior ahead of the libcrtgfx tranche, on a real Linux aarch64 host
+  with an actual terminal attached (`ctest` itself has no controlling
+  tty, so this had never failed there): `tcgetattr()`/`tcsetattr()` on
+  every non-Windows host were pure software stubs -- `tcsetattr()`
+  silently discarded everything it was asked to set, and `tcgetattr()`
+  always returned one fixed, hardcoded `struct termios` regardless of any
+  prior `tcsetattr()` call. This is the exact same class of bug already
+  found and fixed on Windows (see `tests/termios_echo_roundtrip_test.c`'s
+  own comment, written as that regression), just never caught on Linux
+  until a real terminal was available to run the test against.
+  Implemented for real via the same `TCGETS`/`TCSETS{,W,F}` ioctls
+  `isatty()` already used as a pure success/failure probe
+  (`libc/src/arch/linux/common/termios.c`, new): converts between the
+  real Linux kernel `struct termios` (`asm-generic/termbits.h`, cross-
+  checked against the real kernel UAPI header -- no separate speed
+  fields at all, `NCCS=19` not this project's public `NCCS(32)`, baud
+  rate packed into `c_cflag`'s `CBAUD`/`CBAUDEX` bits) and this
+  project's own public `struct termios`; extracting/injecting speed
+  needed no lookup table since this project's own `B0`/`B9600`/
+  `B38400`/`B115200` constants already are the literal raw CBAUD-encoded
+  values. Also wired up the previously-always-no-op `tcdrain()`/
+  `tcflow()`/`tcflush()`/`tcsendbreak()` to the matching `TCSBRK`/
+  `TCXONC`/`TCFLSH` ioctls (already-defined constants in
+  `include/sys/ioctl.h`, unused until now) while in there -- same class
+  of latent bug, cheap to fix alongside the main one. macOS keeps its
+  pre-existing hardcoded-stub fallback for now (different BSD ioctl
+  numbers/struct layout, not ported this session); Windows already had
+  its own real fix from the earlier stty-driven investigation this same
+  test regresses.
+  - **Verified the bug and the fix on this real Linux aarch64 host**,
+    without a genuine attached console available in this sandbox: used
+    `script -qc <binary> /dev/null` to allocate a real pty and run the
+    test attached to it as `/dev/tty`. Confirmed the exact failure first
+    (reverting to the pre-fix stub reproduced the user's own report
+    byte-for-byte: `termios_echo_roundtrip_test: tcgetattr() did not
+    return exactly what tcsetattr() was asked to set (round-trip
+    mismatch)`), then confirmed the fix resolves it
+    (`termios_echo_roundtrip_test: ok`). A standalone follow-up check
+    exercised `tcdrain()`/`tcflush()`/`tcflow()`/`tcsendbreak()` against
+    the same real pty, all succeeding. Full `ctest` 89/89 throughout
+    (the termios test itself reports `skip` under plain `ctest`, which
+    has no controlling tty -- expected, matches the test's own designed
+    behavior for a console-less environment). Not yet independently
+    re-confirmed by the user on the machine that originally reported
+    this, or on macOS/Windows.
+
 - **Fixed the real macOS `sendmsg`/`recvmsg`+`SCM_RIGHTS` end-to-end failure
   the fixes below were still waiting on**, found by actually running
   `tests/sendmsg_scm_rights_test` on real macOS hardware for the first time
