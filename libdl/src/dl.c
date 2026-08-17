@@ -58,3 +58,22 @@ char* dlerror(void) {
   crt_dl_error_pending = 0;
   return crt_dl_error;
 }
+
+int dl_iterate_phdr(
+    int (*callback)(struct dl_phdr_info* info, size_t size, void* data), void* data) {
+  if (callback == 0) {
+    return 0;
+  }
+  return crt_dl_backend_iterate_phdr(callback, data);
+}
+
+int dladdr(const void* addr, Dl_info* info) {
+  if (addr == 0 || info == 0) {
+    return 0;
+  }
+  info->dli_fname = 0;
+  info->dli_fbase = 0;
+  info->dli_sname = 0;
+  info->dli_saddr = 0;
+  return crt_dl_backend_addr_info(addr, info);
+}

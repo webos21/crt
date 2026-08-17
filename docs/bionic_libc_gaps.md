@@ -148,11 +148,60 @@ All four items originally listed here are now **done** -- see `HISTORY.md`'s
   architecture-conditional size check on every host, plus a real
   add-a-pipe-fd/observe-it-become-readable/remove-it round trip on
   Linux).
-- **`dl_iterate_phdr`/`link.h`, `elf.h`, `dladdr`** -- absent (`dlfcn.h`
-  only has `dlopen`/`dlsym`/`dlclose`/`dlerror`, confirmed by reading the
-  file directly). Real Bionic has all of these. Used by some GPU driver
-  loaders (Mesa's own ICD/driver enumeration walks loaded ELF images in
-  some paths) and by unwind/crash-handling code.
+- **`dl_iterate_phdr`/`link.h`, `elf.h`, `dladdr`** -- **done** (2026-08-17).
+  `include/elf.h` (ELF64 types/constants -- a fixed, documented System V
+  ABI binary spec, not host-dependent the way syscall numbers are, so no
+  unverified-hardware caveat applies to it); `include/link.h` (`struct
+  dl_phdr_info`, matching real Bionic's own minimal 4-field shape, not
+  glibc's larger extension); `dladdr`/`Dl_info` added to `include/dlfcn.h`.
+  Real per-host implementations, not stubs, wherever each host actually
+  has something real to report:
+  - **Linux** (`libdl/src/arch/linux/dl_linux.c`): `dl_iterate_phdr()`
+    reports exactly one entry -- the main executable -- built from the
+    real `AT_PHDR`/`AT_PHNUM` values the kernel handed this process at
+    `exec()` (via the existing `getauxval()`). Only one entry because this
+    project has no real ELF dynamic linker yet (`docs/dynamic_loading.md`:
+    Linux `dlopen()` doesn't actually load shared objects today), not a
+    limitation of this feature specifically. The load bias is computed
+    from the `PT_PHDR` segment's own link-time `p_vaddr` when present
+    (falls back to `0`, correct for a non-PIE executable). `dladdr()`
+    checks whether the address falls inside one of that same executable's
+    `PT_LOAD` segments and, if so, reports its real path via
+    `/proc/self/exe`.
+  - **macOS** (`libdl/src/arch/macos/dl_macos.c`): `dl_iterate_phdr()`
+    calls the callback zero times and returns `0` -- `dlpi_phdr`/
+    `dlpi_phnum` are fundamentally `Elf64_Phdr`-shaped, and Mach-O has no
+    such structure at all (real load commands/segment commands are a
+    different format); fabricating ELF-shaped data from real Mach-O data
+    would be actively wrong for any caller walking the array expecting
+    real ELF semantics, not just imprecise, so this is an honest "no ELF
+    images to report" rather than a stub. `dladdr()` is real: a new shared
+    helper (`__crt_macho_find_image_for_address()`, added to
+    `libc/src/arch/macos/common/macho_symbol.c` and exposed via
+    `crt_macho_symbol.h` since it needed the same dyld-image-walking
+    infrastructure `dlopen()`/`dlsym()` already use) walks every loaded
+    image's `LC_SEGMENT_64` commands for the one whose real, slide-
+    adjusted address range contains the target address.
+  - **Windows** (`libdl/src/arch/windows/dl_windows.c`): `dl_iterate_phdr()`
+    is the same honest zero-entries result as macOS, for the same reason
+    (PE has no ELF program headers either). `dladdr()` is real:
+    `GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS)` finds
+    which loaded module contains the address directly (no manual PE
+    parsing needed) -- an `HMODULE`'s own value is documented to equal the
+    module's real load base address on Windows, so it doubles directly as
+    `dli_fbase`.
+
+  On every host, `dli_sname`/`dli_saddr` (the nearest-symbol part of the
+  real `dladdr()` contract) are always left `NULL`/`0` -- POSIX/Bionic both
+  document that as a legitimate result when no matching symbol is found,
+  not a failure, and this project does not parse any host's symbol table
+  for reverse address-to-name lookup yet. New regression: `tests/
+  dl_iterate_phdr_dladdr_test.c` (real `elf.h` struct-size checks on every
+  host; `dl_iterate_phdr()` internal-consistency checks tolerant of either
+  the zero-entries or one-entry shape; a real `dladdr()` lookup against
+  the test binary's own `main()`, verified directly on Windows -- Linux/
+  macOS are reasoned carefully but not yet run on real hardware from this
+  session, matching this same pattern's other entries above).
 - **`PTHREAD_PROCESS_SHARED`** -- the attribute constant is exposed, but
   `pthread_mutex`/`pthread_rwlock`/`pthread_spinlock` all explicitly return
   `ENOTSUP` for it today (confirmed in `docs/import_bionic.md`'s own

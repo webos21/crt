@@ -37,16 +37,21 @@ in those two win.
   own `cmake --workflow` step does not run `port-test-recipes` (a
   separate, heavier target that fetches and builds third-party sources)
   -- that's verified locally/per-host instead, see below.
-- **`ctest`**: 108 registered tests on Windows and 77 on macOS in the
+- **`ctest`**: 109 registered tests on Windows and 77 on macOS in the
   latest local run (count is slightly
   OS-dependent -- a few targets, like `windows_export_hygiene_test`, only
-  exist on their own OS), all passing locally on Windows (108/108, most
-  recently confirmed after implementing `sys/epoll.h`/`sys/eventfd.h`/
-  `sys/timerfd.h` (Linux-only, matching real Bionic -- real raw syscall
-  trampolines on Linux, `ENOSYS` on macOS/Windows; not yet independently
-  verified on real Linux hardware, and `struct epoll_event`'s real
-  x86_64-vs-aarch64 kernel-ABI layout difference needed care) -- via a
-  genuine `cmake --fresh` reconfigure). Just before that: Windows real
+  exist on their own OS), all passing locally on Windows (109/109, most
+  recently confirmed after implementing `dl_iterate_phdr`/`link.h`/
+  `elf.h`/`dladdr` (real per-host implementations wherever each host
+  actually has something real to report -- see `HISTORY.md`'s 2026-08-17
+  entry for the full per-host writeup; verified directly on Windows,
+  Linux/macOS reasoned carefully but not yet run on real hardware) -- via
+  a genuine `cmake --fresh` reconfigure). Just before that: `sys/epoll.h`/
+  `sys/eventfd.h`/`sys/timerfd.h` (Linux-only, matching real Bionic --
+  real raw syscall trampolines on Linux, `ENOSYS` on macOS/Windows; not
+  yet independently verified on real Linux hardware, and `struct
+  epoll_event`'s real x86_64-vs-aarch64 kernel-ABI layout difference
+  needed care). Before that: Windows real
   `tcdrain`/`tcflow`/`tcflush`/`tcsendbreak` backing (`FlushFileBuffers`/
   `FlushConsoleInputBuffer`, honest no-ops for the two a console genuinely
   can't back) -- prompted by real Linux/macOS termios ports landing the
@@ -239,15 +244,17 @@ in those two win.
 - A real, evidence-based Bionic libc gap audit was done before starting
   `libcrtgfx` (see `docs/bionic_libc_gaps.md`, `TODO.md`'s "Bionic libc
   completeness before `libcrtgfx`" section). All four "high priority"
-  findings are now implemented -- `semaphore.h`, public `<stdatomic.h>`,
-  `sendmsg`/`recvmsg` + `SCM_RIGHTS`/`CMSG_*` fd passing, and
-  `memfd_create` -- see `HISTORY.md`. One real follow-up remains: the new
-  Linux/macOS `sendmsg`/`recvmsg` raw syscall trampolines need real
-  hardware verification (see "Known gaps" above). Medium/lower priority
-  items with no identified near-term consumer yet stay open:
-  `epoll`/`eventfd`/`timerfd`, `dl_iterate_phdr`/`link.h`/`elf.h`/
-  `dladdr`, `PTHREAD_PROCESS_SHARED`, `glob.h`/`sys/prctl.h`/`ucontext.h`/
-  `ifaddrs.h`/`threads.h`/`uchar.h`.
+  findings are done -- `semaphore.h`, public `<stdatomic.h>`, `sendmsg`/
+  `recvmsg` + `SCM_RIGHTS`/`CMSG_*` fd passing, and `memfd_create` -- and
+  so are the two "medium priority" items with a concrete design path:
+  `epoll`/`eventfd`/`timerfd` and `dl_iterate_phdr`/`link.h`/`elf.h`/
+  `dladdr` -- see `HISTORY.md`. Two real follow-ups remain: the new
+  Linux/macOS `sendmsg`/`recvmsg` and Linux `eventfd`/`timerfd`/`epoll`/
+  `dl_iterate_phdr`/`dladdr` raw syscall trampolines need real hardware
+  verification (see "Known gaps" above). `PTHREAD_PROCESS_SHARED` is the
+  one remaining medium-priority item still open; lower-priority items
+  with no identified near-term consumer stay open too: `glob.h`/
+  `sys/prctl.h`/`ucontext.h`/`ifaddrs.h`/`threads.h`/`uchar.h`.
 - The next product-level target is documented in `docs/runtime_roadmap.md`:
   an Electron-class rebuilt runtime made of `libcrtgfx` (Skia + Wayland-style
   compositor boundary + Chromium Ozone path), `libcrtmedia` (FFmpeg/codecs/

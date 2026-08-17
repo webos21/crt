@@ -10,6 +10,82 @@ substantive update.
 
 ## 2026-08-17
 
+- **Implemented `dl_iterate_phdr`/`link.h`/`elf.h`/`dladdr`**, the last
+  "medium priority" item from the Bionic libc gap audit
+  (`docs/bionic_libc_gaps.md`) that had a concrete design path.
+  `include/elf.h` (ELF64 types/constants) carries none of the reasoned-
+  but-unverified caveat other raw-syscall work this session needed: the
+  System V ABI's ELF64 object format is a fixed, documented binary spec,
+  not something that varies by host kernel/architecture the way syscall
+  numbers do. `include/link.h` adds `struct dl_phdr_info` matching real
+  Bionic's own minimal 4-field shape (not glibc's larger extension with
+  `dlpi_adds`/`dlpi_subs`/etc.). `dladdr`/`Dl_info` were added to
+  `include/dlfcn.h`.
+
+  Real per-host implementations wherever each host actually has something
+  real to report, not stubs:
+  - **Linux** (`libdl/src/arch/linux/dl_linux.c`): `dl_iterate_phdr()`
+    reports exactly one entry -- the main executable -- built from the
+    real `AT_PHDR`/`AT_PHNUM` values the kernel handed this process at
+    `exec()` (the existing `getauxval()`). Only one entry, because this
+    project has no real ELF dynamic linker yet
+    (`docs/dynamic_loading.md`'s own "Linux" section: `dlopen()` doesn't
+    actually load shared objects today, so there is nothing else to
+    report) -- a real, narrow answer, not a fabricated one. The load bias
+    is computed from the `PT_PHDR` segment's own link-time `p_vaddr` when
+    present (`bias = AT_PHDR - PT_PHDR.p_vaddr`, a standard technique;
+    falls back to `0`, correct for a non-PIE executable, when `PT_PHDR` is
+    absent). `dladdr()` checks whether the target address falls inside
+    one of that same executable's own `PT_LOAD` segments and, if so,
+    reports its real path via `/proc/self/exe`.
+  - **macOS** (`libdl/src/arch/macos/dl_macos.c`): `dl_iterate_phdr()`
+    calls the callback zero times and returns `0`. `dlpi_phdr`/
+    `dlpi_phnum` are fundamentally `Elf64_Phdr`-shaped; Mach-O's real load
+    commands/segment commands are a genuinely different format, and
+    fabricating ELF-shaped data from them would be actively wrong for any
+    caller walking the array expecting real ELF semantics, not merely
+    imprecise -- so this is an honest "no ELF images to report" (a
+    legitimate result `dl_iterate_phdr()`'s own contract already allows,
+    not an error return, since it has none), matching link.h's own
+    documented reasoning. `dladdr()` is real: a new shared helper,
+    `__crt_macho_find_image_for_address()`, was added to `libc/src/arch/
+    macos/common/macho_symbol.c` (and exposed via the existing
+    `crt_macho_symbol.h` private header, since it needed the same dyld
+    loaded-image-list infrastructure `dlopen()`/`dlsym()` already use) --
+    it walks every loaded image's `LC_SEGMENT_64` load commands for the
+    one whose real, slide-adjusted address range contains the target
+    address, matching real Darwin `dladdr()`'s own `dli_fbase` convention
+    (the image's mach_header address).
+  - **Windows** (`libdl/src/arch/windows/dl_windows.c`): `dl_iterate_phdr()`
+    is the same honest zero-entries result as macOS, for the same reason
+    (PE has no ELF program headers either). `dladdr()` is real:
+    `GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS)` finds
+    which loaded module contains the address directly, no manual PE
+    header parsing needed -- a documented Win32 fact makes the resulting
+    `HMODULE`'s own value equal to the module's real load base address,
+    so it doubles directly as `dli_fbase`; `GetModuleFileNameA` supplies
+    `dli_fname`.
+
+  On every host, `dli_sname`/`dli_saddr` (the nearest-symbol part of the
+  real `dladdr()` contract) are always left `NULL`/`0` -- POSIX/Bionic
+  both document that as a legitimate result when no matching symbol is
+  found, not a failure, and this project does not parse any host's symbol
+  table for reverse address-to-name lookup yet.
+
+  New permanent regression: `tests/dl_iterate_phdr_dladdr_test.c` -- real
+  `elf.h` struct-size checks (`sizeof(Elf64_Ehdr) == 64`, etc.) that run
+  on every host, not just Linux/ELF ones, since they're purely about this
+  header matching the real ABI spec; `dl_iterate_phdr()` internal-
+  consistency checks tolerant of either the zero-entries (macOS/Windows)
+  or one-entry (Linux) shape, since both are legitimate depending on
+  host; a real `dladdr()` lookup against the test binary's own `main()`,
+  which found the running executable correctly on Windows (verified
+  directly) -- the Linux/macOS backends are reasoned carefully but not
+  yet run on real hardware from this session, matching the same open
+  caveat `sendmsg`/`recvmsg`'s trampolines and `eventfd`/`timerfd`/
+  `epoll`'s trampolines carried until real testing closed theirs. All 109
+  tests pass on Windows via a genuine `cmake --fresh` reconfigure.
+
 - **Fixed a real `termios_line_control_test` false failure on a real Linux
   terminal, root-caused to intentional Linux kernel pty behavior, not a
   CRT/PAL bug.** Reported: the test passed on GitHub CI but failed for

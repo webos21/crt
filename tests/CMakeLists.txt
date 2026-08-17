@@ -278,6 +278,13 @@ set_tests_properties(dl_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "dl_test: ok"
 )
 
+add_crt_test(dl_iterate_phdr_dladdr_test dl_iterate_phdr_dladdr_test.c)
+target_link_libraries(dl_iterate_phdr_dladdr_test PRIVATE dl)
+add_dependencies(dl_iterate_phdr_dladdr_test dl)
+set_tests_properties(dl_iterate_phdr_dladdr_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "dl_iterate_phdr_dladdr_test: ok"
+)
+
 add_crt_test(cxx_runtime_test cxx_runtime_test.c)
 target_link_libraries(cxx_runtime_test PRIVATE cxx)
 add_dependencies(cxx_runtime_test cxx)

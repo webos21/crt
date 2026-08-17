@@ -536,3 +536,53 @@ void* __crt_macho_find_symbol_in_any_loaded_image(const char* symbol) {
   }
   return 0;
 }
+
+/* dladdr()'s macOS backend (libdl/src/arch/macos/dl_macos.c) -- see
+ * dlfcn.h's own comment. Walks every loaded image's LC_SEGMENT_64 commands
+ * (not just __TEXT: a real address can land in __DATA/__DATA_CONST/etc.
+ * too) looking for the one whose real, slide-adjusted vmaddr..vmaddr+vmsize
+ * range contains `addr`. `*out_base` is set to the image's own mach_header
+ * pointer, matching real dladdr()'s dli_fbase convention on Darwin (Apple's
+ * own implementation reports the mach_header address, not some other base). */
+int __crt_macho_find_image_for_address(const void* addr, const char** out_path, const void** out_base) {
+  uint32_t count = _dyld_image_count();
+  uint32_t i;
+  uintptr_t target = (uintptr_t)addr;
+
+  for (i = 0; i < count; ++i) {
+    const struct crt_mach_header_64* header = _dyld_get_image_header(i);
+    intptr_t slide;
+    const uint8_t* cursor;
+    uint32_t j;
+
+    if (header == 0 || header->magic != CRT_MH_MAGIC_64) {
+      continue;
+    }
+    slide = _dyld_get_image_vmaddr_slide(i);
+    cursor = (const uint8_t*)header + sizeof(struct crt_mach_header_64);
+    for (j = 0; j < header->ncmds; ++j) {
+      const struct crt_load_command* lc = (const struct crt_load_command*)cursor;
+
+      if (lc->cmdsize < sizeof(struct crt_load_command)) {
+        break;
+      }
+      if (lc->cmd == CRT_LC_SEGMENT_64) {
+        const struct crt_segment_command_64* seg = (const struct crt_segment_command_64*)cursor;
+        uintptr_t start = (uintptr_t)seg->vmaddr + (uintptr_t)slide;
+        uintptr_t end = start + (uintptr_t)seg->vmsize;
+
+        if (seg->vmsize != 0 && target >= start && target < end) {
+          if (out_path != 0) {
+            *out_path = _dyld_get_image_name(i);
+          }
+          if (out_base != 0) {
+            *out_base = (const void*)header;
+          }
+          return 1;
+        }
+      }
+      cursor += lc->cmdsize;
+    }
+  }
+  return 0;
+}

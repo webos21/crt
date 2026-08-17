@@ -148,9 +148,18 @@ guessed -- full findings, evidence, and priority tiers in
   `recvmsg` had before real macOS testing closed theirs -- see
   `docs/bionic_libc_gaps.md` for the full writeup, including a real
   x86_64-vs-aarch64 `struct epoll_event` layout difference that needed
-  care). Still open: `dl_iterate_phdr`/`link.h`/`elf.h`/`dladdr` (some GPU
-  driver loaders use these); `PTHREAD_PROCESS_SHARED` (currently
-  `ENOTSUP` everywhere).
+  care). `dl_iterate_phdr`/`link.h`/`elf.h`/`dladdr` are also **done**
+  (2026-08-17) -- real per-host implementations, not stubs, wherever each
+  host actually has something real to report (Linux: the main
+  executable's own real `AT_PHDR`/`AT_PHNUM`-derived data, one entry, no
+  real ELF dynamic linker exists yet to report more; macOS/Windows:
+  `dl_iterate_phdr()` honestly reports zero ELF images since Mach-O/PE
+  have no `Elf64_Phdr` equivalent at all, while `dladdr()` is real on both
+  via each host's own real image-introspection API) -- see
+  `docs/bionic_libc_gaps.md` for the full per-host writeup; verified
+  directly on Windows, Linux/macOS reasoned carefully but not yet run on
+  real hardware from this session. Still open: `PTHREAD_PROCESS_SHARED`
+  (currently `ENOTSUP` everywhere).
 - **Lower priority, no identified near-term consumer**: `glob.h`,
   `sys/prctl.h`, `ucontext.h`, `ifaddrs.h`, `threads.h` (C11), `uchar.h`.
 - Already known/tracked elsewhere (not new findings): C++ exceptions/RTTI

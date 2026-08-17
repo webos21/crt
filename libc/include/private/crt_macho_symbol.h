@@ -47,4 +47,11 @@ void* __crt_macho_find_symbol_in_loaded_image(const char* image_name, const char
  * match. Matches dlsym(RTLD_DEFAULT, ...) search semantics. */
 void* __crt_macho_find_symbol_in_any_loaded_image(const char* symbol);
 
+/* dladdr()'s macOS backend (libdl/src/arch/macos/dl_macos.c): finds which
+ * loaded image's real (slide-adjusted) address range contains `addr`.
+ * Returns nonzero and sets `*out_path`/`*out_base` (the image's own file
+ * path and mach_header address) on a match, 0 otherwise. Either output
+ * pointer may be NULL if the caller doesn't need it. */
+int __crt_macho_find_image_for_address(const void* addr, const char** out_path, const void** out_base);
+
 #endif

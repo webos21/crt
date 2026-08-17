@@ -68,3 +68,28 @@ int crt_dl_backend_close(void* handle) {
   (void)handle;
   return 0;
 }
+
+/* dl_iterate_phdr()'s dlpi_phdr/dlpi_phnum are ELF64_Phdr-shaped; Mach-O
+ * has no such structure at all (a real, different format -- load commands/
+ * segment commands, not ELF program headers). Fabricating ELF-shaped data
+ * from real Mach-O data would be actively wrong, not just approximate --
+ * see link.h's own comment. Honestly reports "no ELF images" by never
+ * invoking the callback. */
+int crt_dl_backend_iterate_phdr(
+    int (*callback)(struct dl_phdr_info* info, size_t size, void* data), void* data) {
+  (void)callback;
+  (void)data;
+  return 0;
+}
+
+int crt_dl_backend_addr_info(const void* addr, Dl_info* info) {
+  const char* path = 0;
+  const void* base = 0;
+
+  if (!__crt_macho_find_image_for_address(addr, &path, &base)) {
+    return 0;
+  }
+  info->dli_fname = path;
+  info->dli_fbase = (void*)base;
+  return 1;
+}
