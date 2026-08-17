@@ -104,18 +104,50 @@ All four items originally listed here are now **done** -- see `HISTORY.md`'s
 
 ## Medium priority: commonly needed by graphics-adjacent native code
 
-- **`sys/epoll.h`, `sys/eventfd.h`, `sys/timerfd.h`** -- all three absent;
-  real Bionic has all three (Linux-only, matching Android's own Looper/
-  ALooper implementation, which is built on exactly this). `wl_display`'s
+- **`sys/epoll.h`, `sys/eventfd.h`, `sys/timerfd.h`** -- **done**
+  (2026-08-17), Linux-only, matching real Bionic exactly (Android's own
+  Looper/ALooper implementation is built on exactly this; `wl_display`'s
   own recommended client integration pattern is "get the display's fd,
-  epoll it alongside your other event sources" -- and this is also the
+  epoll it alongside your other event sources," and this is also the
   standard shape for a `libuv`-style event loop, directly relevant to
-  `libcrtjs`'s own "grow event loop... against the CRT/PAL" roadmap item.
-  Linux-only in real Bionic too, so no cross-platform abstraction pressure
-  at the libc layer itself -- macOS/Windows equivalents (`kqueue`/IOCP)
-  aren't a Bionic-parity concern, they'd be a higher-level PAL/event-loop
-  design question for whichever layer actually needs portable multiplexed
-  I/O.
+  `libcrtjs`'s own "grow event loop... against the CRT/PAL" roadmap item).
+  Declared on every host (`include/sys/{epoll,eventfd,timerfd}.h`) so
+  portable code that merely includes and compiles against the surface
+  keeps working everywhere -- matching this project's existing
+  `libc/src/inotify.c` precedent for a Linux-only kernel feature -- but
+  every function returns `ENOSYS` on macOS/Windows; no cross-platform
+  abstraction pressure at the libc layer itself, matching real Bionic
+  (macOS/Windows equivalents like `kqueue`/IOCP would be a higher-level
+  PAL/event-loop design question for whichever layer actually needs
+  portable multiplexed I/O, not a libc-parity concern).
+
+  Linux gets real raw syscall trampolines (`libc/src/arch/linux/
+  {x86_64,aarch64}/syscall.S`: `eventfd2`, `epoll_create1`/`epoll_ctl`/
+  `epoll_pwait` -- `epoll_wait()` is implemented over `epoll_pwait` with a
+  `NULL` sigmask, matching how glibc itself implements it, since aarch64
+  has no separate `epoll_wait` syscall number at all -- and
+  `timerfd_create`/`timerfd_settime`/`timerfd_gettime`), reasoned
+  carefully from the same well-established, stable syscall tables
+  `sendmsg`/`recvmsg`'s own trampolines were, but **not independently
+  verified on real Linux hardware from this Windows-only session**,
+  matching that exact same caveat. `struct epoll_event` needed particular
+  care: the real Linux kernel ABI packs it to 12 bytes on x86_64
+  (`__attribute__((packed))`, a historical ABI-compat quirk) but expects
+  the naturally-aligned 16-byte layout on aarch64 -- an architecture-
+  conditional version of the same class of bug `struct cmsghdr`'s
+  Linux-vs-macOS `cmsg_len` width mismatch was (see the `sendmsg`/
+  `recvmsg` entry above and `HISTORY.md`'s 2026-08-16 cmsghdr-fix entry).
+  A compile-time size check in `include/sys/epoll.h` (`sizeof(struct
+  epoll_event) == 12` on x86_64, `== 16` elsewhere) exists specifically to
+  catch a mistake here before it becomes a silent runtime data corruption,
+  and runs on every host/architecture this project builds for, not just
+  Linux. New regressions: `tests/eventfd_test.c` (real accumulate/drain
+  round trip on Linux, `ENOSYS` check elsewhere), `tests/timerfd_test.c`
+  (real one-shot-timer-fires-and-is-reported-via-poll round trip on
+  Linux, `ENOSYS` check elsewhere), `tests/epoll_test.c` (the
+  architecture-conditional size check on every host, plus a real
+  add-a-pipe-fd/observe-it-become-readable/remove-it round trip on
+  Linux).
 - **`dl_iterate_phdr`/`link.h`, `elf.h`, `dladdr`** -- absent (`dlfcn.h`
   only has `dlopen`/`dlsym`/`dlclose`/`dlerror`, confirmed by reading the
   file directly). Real Bionic has all of these. Used by some GPU driver

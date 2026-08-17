@@ -14,16 +14,22 @@ in those two win.
 - **CI**: `.github/workflows/ci.yml`, a 5-leg GitHub Actions matrix (macOS
   aarch64, Linux arm64/amd64, Windows arm64/x64), each running this
   project's own `cmake --workflow <os>-host-ninja-debug` preset (configure +
-  build + `ctest`) on every push. All 5 legs were green as of
-  [run 31950303652](https://github.com/webos21/crt/actions/runs/31950303652)
-  (2026-08-16). [Run 31978303539](https://github.com/webos21/crt/actions/runs/31978303539)
-  (`sendmsg`/`recvmsg`/`memfd_create`, same date) then failed `macos-aarch64`
-  only -- both Linux legs passed, confirming those raw syscall trampolines;
-  root-caused (from the job-level annotation plus an ABI review, since
-  GitHub's log viewer needs sign-in) to a real macOS-only `struct cmsghdr`
-  layout bug, fixed 2026-08-17 -- see `HISTORY.md`'s same-date entry. Not
-  yet re-confirmed green on macOS as of this writing; the fix is pushed and
-  CI will re-run automatically. Before
+  build + `ctest`) on every push. All 5 legs green as of
+  [run 31986752976](https://github.com/webos21/crt/actions/runs/31986752976)
+  (2026-08-17, the Windows `tcdrain`/`tcflow`/`tcflush`/`tcsendbreak` push).
+  Two failures happened along the way getting there, both since fixed and
+  reconfirmed green: [run 31978303539](https://github.com/webos21/crt/actions/runs/31978303539)
+  (`sendmsg`/`recvmsg`/`memfd_create`) failed `macos-aarch64` only -- both
+  Linux legs passed, confirming those raw syscall trampolines -- root-
+  caused (from the job-level annotation plus an ABI review, since GitHub's
+  log viewer needs sign-in) to a real macOS-only `struct cmsghdr` layout
+  bug; the immediate fix for that specific bug ([run 31980507866](https://github.com/webos21/crt/actions/runs/31980507866))
+  still failed `macos-aarch64`, because real macOS hardware testing then
+  found three *more* ABI-translation bugs in the same code (`struct
+  msghdr` field widths, `CMSG_ALIGN`'s unit, `cmsg_level`/`SOL_SOCKET`
+  translation) that a Windows-only session's ABI review alone hadn't
+  caught -- all fixed together in the next push, green since. See
+  `HISTORY.md`'s 2026-08-16/17 entries for the full trail. Before
   the matrix existed, Linux validation had been almost entirely
   manual, on real aarch64 hardware -- x86_64 Linux had never actually been
   built until this matrix existed, and immediately surfaced two real,
@@ -31,15 +37,20 @@ in those two win.
   own `cmake --workflow` step does not run `port-test-recipes` (a
   separate, heavier target that fetches and builds third-party sources)
   -- that's verified locally/per-host instead, see below.
-- **`ctest`**: 105 registered tests on Windows and 77 on macOS in the
+- **`ctest`**: 108 registered tests on Windows and 77 on macOS in the
   latest local run (count is slightly
   OS-dependent -- a few targets, like `windows_export_hygiene_test`, only
-  exist on their own OS), all passing locally on Windows (105/105, most
-  recently confirmed after giving Windows real `tcdrain`/`tcflow`/
-  `tcflush`/`tcsendbreak` backing (`FlushFileBuffers`/
+  exist on their own OS), all passing locally on Windows (108/108, most
+  recently confirmed after implementing `sys/epoll.h`/`sys/eventfd.h`/
+  `sys/timerfd.h` (Linux-only, matching real Bionic -- real raw syscall
+  trampolines on Linux, `ENOSYS` on macOS/Windows; not yet independently
+  verified on real Linux hardware, and `struct epoll_event`'s real
+  x86_64-vs-aarch64 kernel-ABI layout difference needed care) -- via a
+  genuine `cmake --fresh` reconfigure). Just before that: Windows real
+  `tcdrain`/`tcflow`/`tcflush`/`tcsendbreak` backing (`FlushFileBuffers`/
   `FlushConsoleInputBuffer`, honest no-ops for the two a console genuinely
   can't back) -- prompted by real Linux/macOS termios ports landing the
-  same day -- via a genuine `cmake --fresh` reconfigure). Before that:
+  same day. Before that:
   real Linux/macOS `tcgetattr`/`tcsetattr`/`tcdrain`/`tcflow`/`tcflush`/
   `tcsendbreak` ports (verified on real hardware, found and fixed four
   real ABI bugs in the `sendmsg`/`recvmsg`/`SCM_RIGHTS` work below along
@@ -175,20 +186,29 @@ in those two win.
   on failure), but means `stty -a`/`stty size` can't be exercised
   end-to-end in every environment; `stty -g`/individual option toggles
   (which don't need window size) are unaffected and verified working.
-- **`sendmsg`/`recvmsg` Linux/macOS raw syscall trampolines: Linux numbers
-  now confirmed by real CI, macOS still pending.** Both `linux-amd64` and
-  `linux-arm64` CI legs passed cleanly against `tests/
+- **`sendmsg`/`recvmsg` Linux/macOS raw syscall trampolines: both hosts now
+  confirmed by real testing.** Linux `sendmsg`=46/`recvmsg`=47 (x86_64) and
+  `sendmsg`=211/`recvmsg`=212 (aarch64) were confirmed correct by real CI
+  (`linux-amd64`/`linux-arm64` both passed `tests/
   sendmsg_scm_rights_test.c`'s real `AF_UNIX` `SCM_RIGHTS` fd-passing round
-  trip -- Linux `sendmsg`=46/`recvmsg`=47 (x86_64) and `sendmsg`=211/
-  `recvmsg`=212 (aarch64) are correct. `macos-aarch64` failed on the first
-  push; root-caused to a real `struct cmsghdr` layout bug (Darwin's
-  `cmsg_len` is 4 bytes, this project used 8 unconditionally), fixed
-  2026-08-17 -- see `HISTORY.md`. The macOS raw syscall *numbers*
-  themselves (`sendmsg`=28/`recvmsg`=27) are still not independently
-  confirmed by a passing run; that's what the next CI run (or the user's
-  own hardware) needs to close, matching `linkat()`'s own precedent.
-  Windows's data-only path (no raw syscalls involved, just Winsock) is
-  already verified directly.
+  trip cleanly). macOS `sendmsg`=28/`recvmsg`=27 were also correct; real
+  macOS hardware testing found and fixed four separate real ABI-
+  translation bugs instead (`struct cmsghdr`'s `cmsg_len` width, `struct
+  msghdr`'s field widths, `CMSG_ALIGN`'s alignment unit, `cmsg_level`/
+  `SOL_SOCKET` translation -- see `HISTORY.md`'s 2026-08-16/17 entries).
+  Windows's data-only path (no raw syscalls involved, just Winsock) was
+  already verified directly, no CI dependency.
+- **`eventfd`/`timerfd`/`epoll` Linux raw syscall trampolines are
+  unverified on real hardware**: written 2026-08-17 following the same
+  reasoning-from-already-tested-neighbors discipline `sendmsg`/`recvmsg`
+  used, including a real x86_64-vs-aarch64 `struct epoll_event` kernel-ABI
+  layout difference (packed 12 bytes on x86_64, natural 16 bytes on
+  aarch64) that needed care -- see `HISTORY.md`. `tests/eventfd_test.c`/
+  `tests/timerfd_test.c`/`tests/epoll_test.c`'s real behavior checks (under
+  `CRT_TARGET_OS_LINUX`) are what verify these the next time they run on
+  real Linux CI or hardware; the `ENOSYS` path on macOS/Windows and the
+  `struct epoll_event` size check (architecture-only, not OS-only) are
+  already verified directly from this session.
 
 ## Next
 

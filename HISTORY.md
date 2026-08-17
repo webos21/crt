@@ -10,6 +10,58 @@ substantive update.
 
 ## 2026-08-17
 
+- **Implemented `sys/epoll.h`/`sys/eventfd.h`/`sys/timerfd.h`**, the first
+  "medium priority" batch from the Bionic libc gap audit
+  (`docs/bionic_libc_gaps.md`). All three are Linux-only in real Bionic
+  too (Android only ever runs on the Linux kernel) -- declared on every
+  host so portable code that merely includes and compiles against the
+  surface keeps working everywhere (matching this project's existing
+  `libc/src/inotify.c` precedent for a Linux-only kernel feature), but
+  every function returns `ENOSYS` on macOS/Windows.
+
+  Linux gets real raw syscall trampolines (`libc/src/arch/linux/
+  {x86_64,aarch64}/syscall.S`): `eventfd2` for `eventfd()`;
+  `epoll_create1`/`epoll_ctl`/`epoll_pwait` for `epoll_create1()`/
+  `epoll_ctl()`/`epoll_wait()` (`epoll_wait()` is implemented over
+  `epoll_pwait` with a `NULL` sigmask, matching how glibc itself
+  implements it -- aarch64 has no separate `epoll_wait` syscall number at
+  all, only `epoll_pwait`, so this keeps one codepath for both
+  architectures); `timerfd_create`/`timerfd_settime`/`timerfd_gettime`
+  (reusing this project's existing `struct itimerspec`/`CLOCK_REALTIME`/
+  `CLOCK_MONOTONIC` from `<time.h>` rather than redeclaring them). Every
+  syscall number was reasoned carefully from the same well-established,
+  stable Linux syscall tables `sendmsg`/`recvmsg`'s own trampolines used
+  (`arch/x86/entry/syscalls/syscall_64.tbl` for x86_64,
+  `include/uapi/asm-generic/unistd.h` for aarch64) -- **not independently
+  verified on real Linux hardware from this Windows-only session**,
+  matching that exact same open caveat.
+
+  `struct epoll_event` needed particular care beyond just the syscall
+  numbers: the real Linux kernel ABI (`include/uapi/linux/eventpoll.h`)
+  packs it to 12 bytes on x86_64 (`__attribute__((packed))`, a historical
+  ABI-compat quirk carried from the original i386 design) but expects the
+  naturally-aligned 16-byte layout on aarch64 -- an architecture-
+  conditional version of the exact same class of bug `struct cmsghdr`'s
+  Linux-vs-macOS `cmsg_len` width mismatch was (see this file's
+  2026-08-16 entry on that fix). Handled with an `#if defined(__x86_64__)
+  || defined(_M_X64)` conditional on the struct's own `__attribute__
+  ((packed))`, plus a compile-time `sizeof()` check
+  (`__crt_epoll_event_size_check`) in `include/sys/epoll.h` itself so a
+  mistake here fails the build immediately rather than silently
+  corrupting every `epoll_ctl()`/`epoll_wait()` call's event data at
+  runtime -- this check runs on every host/architecture this project
+  builds for, not just Linux, since it's purely about this project's own
+  header matching the real kernel ABI.
+
+  New permanent regressions: `tests/eventfd_test.c` (a real write-
+  accumulates/read-drains-and-resets round trip on Linux, an `ENOSYS`
+  check elsewhere), `tests/timerfd_test.c` (a real one-shot 50ms timer
+  observed firing via `poll()` on Linux, `ENOSYS` checks elsewhere),
+  `tests/epoll_test.c` (the architecture-conditional `struct epoll_event`
+  size check on every host, plus a real add-a-pipe-read-fd/observe-it-
+  become-readable-after-a-write/remove-it round trip on Linux). All 108
+  tests pass on Windows via a genuine `cmake --fresh` reconfigure.
+
 - **Gave Windows real `tcdrain`/`tcflow`/`tcflush`/`tcsendbreak` backing**,
   prompted directly by reviewing the real Linux/macOS termios ports below
   and asking the same question of Windows: `libc/src/termios.c`'s

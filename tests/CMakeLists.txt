@@ -458,6 +458,21 @@ set_tests_properties(sendmsg_scm_rights_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "sendmsg_scm_rights_test: ok"
 )
 
+add_crt_test(eventfd_test eventfd_test.c)
+set_tests_properties(eventfd_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "eventfd_test: ok"
+)
+
+add_crt_test(timerfd_test timerfd_test.c)
+set_tests_properties(timerfd_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "timerfd_test: ok"
+)
+
+add_crt_test(epoll_test epoll_test.c)
+set_tests_properties(epoll_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "epoll_test: ok"
+)
+
 add_crt_test(wait_test wait_test.c)
 set_tests_properties(wait_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "wait_test: ok"

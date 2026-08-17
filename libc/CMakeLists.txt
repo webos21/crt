@@ -6,8 +6,10 @@ set(CRT_LIBC_SOURCES
   src/atoll.c
   src/ctype.c
   src/dirent.c
+  src/epoll.c
   src/errno.c
   src/env.c
+  src/eventfd.c
   src/exit.c
   src/fd.c
   src/file_lock.c
@@ -47,6 +49,7 @@ set(CRT_LIBC_SOURCES
   src/tls.c
   src/termios.c
   src/time.c
+  src/timerfd.c
   src/utmp.c
   src/utsname.c
   src/user_group.c

@@ -829,3 +829,82 @@ __crt_signal_restore_rt:
   movq $15, %rax
   syscall
 .size __crt_signal_restore_rt, . - __crt_signal_restore_rt
+
+/* eventfd()/timerfd_*()/epoll_*() -- Linux-only in real Bionic too (see
+ * docs/bionic_libc_gaps.md, HISTORY.md's 2026-08-17 entry). Syscall
+ * numbers from arch/x86/entry/syscalls/syscall_64.tbl, all well-
+ * established/stable (this table only ever appends, never renumbers).
+ * NOT independently verified on real Linux hardware from this session
+ * (Windows-only dev environment) -- matches the exact same caveat
+ * sendmsg()/recvmsg()'s own trampolines carried until real Linux CI
+ * confirmed them; see that HISTORY.md entry. epoll_wait() is implemented
+ * via the epoll_pwait syscall with a NULL sigmask, matching how glibc
+ * itself implements epoll_wait() -- there is no separate epoll_wait
+ * syscall on aarch64 (only epoll_pwait exists there), so using
+ * epoll_pwait uniformly on both architectures avoids needing two
+ * different codepaths. */
+.globl __crt_sys_eventfd2
+.type __crt_sys_eventfd2, @function
+.p2align 4, 0x90
+__crt_sys_eventfd2:
+  movq $290, %rax
+  syscall
+  retq
+.size __crt_sys_eventfd2, . - __crt_sys_eventfd2
+
+.globl __crt_sys_timerfd_create
+.type __crt_sys_timerfd_create, @function
+.p2align 4, 0x90
+__crt_sys_timerfd_create:
+  movq $283, %rax
+  syscall
+  retq
+.size __crt_sys_timerfd_create, . - __crt_sys_timerfd_create
+
+.globl __crt_sys_timerfd_settime
+.type __crt_sys_timerfd_settime, @function
+.p2align 4, 0x90
+__crt_sys_timerfd_settime:
+  movq %rcx, %r10
+  movq $286, %rax
+  syscall
+  retq
+.size __crt_sys_timerfd_settime, . - __crt_sys_timerfd_settime
+
+.globl __crt_sys_timerfd_gettime
+.type __crt_sys_timerfd_gettime, @function
+.p2align 4, 0x90
+__crt_sys_timerfd_gettime:
+  movq $287, %rax
+  syscall
+  retq
+.size __crt_sys_timerfd_gettime, . - __crt_sys_timerfd_gettime
+
+.globl __crt_sys_epoll_create1
+.type __crt_sys_epoll_create1, @function
+.p2align 4, 0x90
+__crt_sys_epoll_create1:
+  movq $291, %rax
+  syscall
+  retq
+.size __crt_sys_epoll_create1, . - __crt_sys_epoll_create1
+
+.globl __crt_sys_epoll_ctl
+.type __crt_sys_epoll_ctl, @function
+.p2align 4, 0x90
+__crt_sys_epoll_ctl:
+  movq %rcx, %r10
+  movq $233, %rax
+  syscall
+  retq
+.size __crt_sys_epoll_ctl, . - __crt_sys_epoll_ctl
+
+.globl __crt_sys_epoll_pwait
+.type __crt_sys_epoll_pwait, @function
+.p2align 4, 0x90
+__crt_sys_epoll_pwait:
+  movq %rcx, %r10
+  movq $281, %rax
+  syscall
+  retq
+.size __crt_sys_epoll_pwait, . - __crt_sys_epoll_pwait

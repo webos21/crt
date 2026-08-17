@@ -828,3 +828,80 @@ __crt_sys_rt_sigprocmask:
   svc #0
   ret
 .size __crt_sys_rt_sigprocmask, . - __crt_sys_rt_sigprocmask
+
+/* eventfd()/timerfd_*()/epoll_*() -- Linux-only in real Bionic too (see
+ * docs/bionic_libc_gaps.md, HISTORY.md's 2026-08-17 entry). Syscall
+ * numbers from the generic table (include/uapi/asm-generic/unistd.h,
+ * what aarch64 uses), all well-established/stable. NOT independently
+ * verified on real Linux hardware from this session (Windows-only dev
+ * environment) -- same caveat sendmsg()/recvmsg()'s own trampolines
+ * carried until real Linux CI confirmed them. AArch64 (unlike x86_64) has
+ * no direct register-shuffle need for any of these -- the AAPCS64 syscall
+ * convention already places every argument (x0..x5) exactly where the C
+ * calling convention does, no equivalent of x86_64's rcx-clobbered-by-
+ * the-syscall-instruction case. epoll_wait() is implemented via the
+ * epoll_pwait syscall with a NULL sigmask (matching glibc's own
+ * epoll_wait() implementation) since aarch64 has no separate epoll_wait
+ * syscall number at all, only epoll_pwait. */
+.globl __crt_sys_eventfd2
+.type __crt_sys_eventfd2, %function
+.p2align 2
+__crt_sys_eventfd2:
+  mov x8, #19
+  svc #0
+  ret
+.size __crt_sys_eventfd2, . - __crt_sys_eventfd2
+
+.globl __crt_sys_epoll_create1
+.type __crt_sys_epoll_create1, %function
+.p2align 2
+__crt_sys_epoll_create1:
+  mov x8, #20
+  svc #0
+  ret
+.size __crt_sys_epoll_create1, . - __crt_sys_epoll_create1
+
+.globl __crt_sys_epoll_ctl
+.type __crt_sys_epoll_ctl, %function
+.p2align 2
+__crt_sys_epoll_ctl:
+  mov x8, #21
+  svc #0
+  ret
+.size __crt_sys_epoll_ctl, . - __crt_sys_epoll_ctl
+
+.globl __crt_sys_epoll_pwait
+.type __crt_sys_epoll_pwait, %function
+.p2align 2
+__crt_sys_epoll_pwait:
+  mov x8, #22
+  svc #0
+  ret
+.size __crt_sys_epoll_pwait, . - __crt_sys_epoll_pwait
+
+.globl __crt_sys_timerfd_create
+.type __crt_sys_timerfd_create, %function
+.p2align 2
+__crt_sys_timerfd_create:
+  mov x8, #85
+  svc #0
+  ret
+.size __crt_sys_timerfd_create, . - __crt_sys_timerfd_create
+
+.globl __crt_sys_timerfd_settime
+.type __crt_sys_timerfd_settime, %function
+.p2align 2
+__crt_sys_timerfd_settime:
+  mov x8, #86
+  svc #0
+  ret
+.size __crt_sys_timerfd_settime, . - __crt_sys_timerfd_settime
+
+.globl __crt_sys_timerfd_gettime
+.type __crt_sys_timerfd_gettime, %function
+.p2align 2
+__crt_sys_timerfd_gettime:
+  mov x8, #87
+  svc #0
+  ret
+.size __crt_sys_timerfd_gettime, . - __crt_sys_timerfd_gettime

@@ -119,11 +119,17 @@ guessed -- full findings, evidence, and priority tiers in
   `HISTORY.md`'s 2026-08-17 entry. Linux was not re-verified this pass
   (only macOS was available); its trampolines remain reasoned-not-verified
   until they actually run on real Linux hardware/CI.
-- **Medium priority**: `sys/epoll.h`/`sys/eventfd.h`/`sys/timerfd.h`
-  (Linux-only in real Bionic too; relevant to both `wl_display` client
-  integration and a future `libcrtjs` event loop); `dl_iterate_phdr`/
-  `link.h`/`elf.h`/`dladdr` (some GPU driver loaders use these);
-  `PTHREAD_PROCESS_SHARED` (currently `ENOTSUP` everywhere).
+- **Medium priority**: `sys/epoll.h`/`sys/eventfd.h`/`sys/timerfd.h` are
+  **done** (2026-08-17) -- Linux-only, matching real Bionic exactly;
+  declared on every host (`ENOSYS` on macOS/Windows) with real raw Linux
+  syscall trampolines, reasoned carefully but **not yet independently
+  verified on real Linux hardware** (same open caveat as `sendmsg`/
+  `recvmsg` had before real macOS testing closed theirs -- see
+  `docs/bionic_libc_gaps.md` for the full writeup, including a real
+  x86_64-vs-aarch64 `struct epoll_event` layout difference that needed
+  care). Still open: `dl_iterate_phdr`/`link.h`/`elf.h`/`dladdr` (some GPU
+  driver loaders use these); `PTHREAD_PROCESS_SHARED` (currently
+  `ENOTSUP` everywhere).
 - **Lower priority, no identified near-term consumer**: `glob.h`,
   `sys/prctl.h`, `ucontext.h`, `ifaddrs.h`, `threads.h` (C11), `uchar.h`.
 - Already known/tracked elsewhere (not new findings): C++ exceptions/RTTI
