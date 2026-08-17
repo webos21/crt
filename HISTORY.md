@@ -10,6 +10,39 @@ substantive update.
 
 ## 2026-08-17
 
+- **Fixed a real `termios_line_control_test` false failure on a real Linux
+  terminal, root-caused to intentional Linux kernel pty behavior, not a
+  CRT/PAL bug.** Reported: the test passed on GitHub CI but failed for
+  real on this host (`c_cflag round trip mismatch (CS7/PARENB/CSTOPB/
+  PARODD)`) -- CI never actually exercises this path (no `/dev/tty`
+  there at all, so the test always `skip`s), while a real interactive
+  session does have one. Root-caused with a standalone repro issuing the
+  raw `TCGETS`/`TCSETS` ioctls directly, entirely bypassing this
+  project's own `libc/src/arch/linux/common/termios.c` (confirmed: the
+  raw kernel round trip already loses `CS7`/`PARENB` before this
+  project's translation layer is even involved), then confirmed against
+  a further isolated per-bit repro and the real Linux kernel source
+  (`drivers/tty/pty.c`'s `pty_set_termios()`, found via search):
+  `c_cflag &= ~(CSIZE | PARENB); c_cflag |= (CS8 | CREAD);` -- the kernel
+  deliberately forces every pseudo-terminal to `CS8`/no-parity
+  unconditionally, since there is no real UART behind a pty for a
+  character-size/parity setting to mean anything. `CSTOPB` (also
+  asserted by this test) is *not* subject to this and round-trips
+  correctly, as does everything else this same test checks (`VMIN`/
+  `VTIME`, `B9600` speed via `cfsetspeed()`/`cfgetispeed()`/
+  `cfgetospeed()`) -- confirmed independently, all pass. Fixed by
+  narrowing `tests/termios_line_control_test.c`'s assertion to what a
+  pty actually promises (`CSTOPB` only), with the finding recorded
+  in-line: this is not an environment limitation to skip past (unlike
+  the existing "no `/dev/tty` at all" skip case both termios tests
+  already have) but expected, real, well-documented kernel behavior that
+  would reject the same request against a real glibc/Bionic libc too,
+  since essentially every interactive Linux session (SSH, tmux, a
+  terminal emulator, `script`) runs on a pty. Verified: reproduced the
+  exact failure via `script -qc <binary> /dev/null` (this host's own
+  session has no directly-attached console either), confirmed the fix
+  resolves it (`termios_line_control_test: ok`), full `ctest` 93/93.
+
 - **Fixed a real mbedtls Windows build break the user hit directly**:
   `ld.lld: error: duplicate symbol: __crt_sys_sendmsg` (also
   `__crt_sys_recvmsg`/`__crt_sys_link`) during `port-rebuild-mbedtls`.
