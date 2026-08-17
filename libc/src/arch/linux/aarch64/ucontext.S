@@ -16,6 +16,35 @@
  * just restored from mcontext offset 0 on a makecontext()-created
  * context's first activation):
  *   0: func   8: argc (unused here)   16..40: argv[0..3]   48: link
+ *
+ * swapcontext() used to patch the saved x30 slot (offset 88) with the
+ * address of a local "1:" resume stub (`adr x2, 1f; str x2, [x0, #88]`)
+ * instead of leaving the real caller's return address there, so that
+ * resuming this context could zero w0 (POSIX: a saved context that gets
+ * resumed appears as if the call that saved it had just returned 0)
+ * before returning to the caller. That's the x86_64 sibling's own `1:`
+ * trick (see linux/x86_64/ucontext.S), where it works because `retq`
+ * pops the return address off the *stack* -- but AAPCS64's `ret` just
+ * branches to whatever is in the x30 *register*, which does not get
+ * cleared or advanced by executing it. So the stub's own `ret` at the
+ * end still had x30 == the stub's own address (nothing between the jump
+ * into the stub and its `ret` ever changed x30), branching straight back
+ * to itself: an unconditional infinite loop, 100% CPU, no crash, no
+ * output -- reproduced live on real macOS aarch64 hardware
+ * (tests/ucontext_test.c hanging forever at exactly this instruction
+ * pair, confirmed by attaching a debugger to the spinning process; see
+ * HISTORY.md). Not something the reasoning in the original commit
+ * caught, since it was never run on real aarch64 hardware.
+ *
+ * Fixed by not touching the x30 slot at all -- `stp x29, x30, [x0, #80]`
+ * a few lines up already saves the real caller's return address there,
+ * exactly like getcontext() does, which is all a plain `ret` needs to
+ * resume at the right place. `mov w0, #0` is done immediately before
+ * every place this file jumps *into* a saved context (setcontext()'s own
+ * `ret`, and swapcontext()'s second `ret` after loading the new
+ * context) instead, so the "resumed as if just returned 0" contract
+ * still holds without needing a separate resume stub or any of the
+ * infinite-loop hazard that came with it.
  */
 .text
 
@@ -55,6 +84,7 @@ setcontext:
   ldp d10, d11, [x0, #120]
   ldp d12, d13, [x0, #136]
   ldp d14, d15, [x0, #152]
+  mov w0, #0
   ret
 .size setcontext, . - setcontext
 
@@ -74,8 +104,6 @@ swapcontext:
   stp d10, d11, [x0, #120]
   stp d12, d13, [x0, #136]
   stp d14, d15, [x0, #152]
-  adr x2, 1f
-  str x2, [x0, #88]
   ldp x19, x20, [x1, #0]
   ldp x21, x22, [x1, #16]
   ldp x23, x24, [x1, #32]
@@ -88,8 +116,6 @@ swapcontext:
   ldp d10, d11, [x1, #120]
   ldp d12, d13, [x1, #136]
   ldp d14, d15, [x1, #152]
-  ret
-1:
   mov w0, #0
   ret
 .size swapcontext, . - swapcontext

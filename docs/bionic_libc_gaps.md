@@ -314,9 +314,26 @@ All six items originally listed here are now **done** (2026-08-17) -- see
   `StackLimit`/`DeallocationStack`) kept in sync with whichever stack is
   currently running -- a real requirement Linux/macOS don't have at all,
   found by the same coroutine test crashing until it was added. Verified
-  directly on Windows x86_64; Linux/macOS and aarch64 (all three hosts)
-  reasoned carefully from the same proven register set but not yet run
-  on real hardware from this session.
+  directly on Windows x86_64 the day this was implemented; aarch64 (all
+  three hosts: Linux/macOS/Windows) was reasoned carefully from the same
+  proven register set but not run on real hardware until the next day
+  (2026-08-17), when `tests/ucontext_test.c` hung indefinitely (100% CPU,
+  no crash, no output) on real macOS aarch64 hardware -- a third genuine
+  bug, this time in every aarch64 `ucontext.S` variant: `swapcontext()`
+  patched the saved link-register slot with a resume-stub address the
+  same way the x86_64 files use their own `1:` stub, but AAPCS64's `ret`
+  branches through the x30 *register* rather than popping a return
+  address off the *stack* the way x86_64's `retq` does, so nothing ever
+  advanced x30 past the stub's own address -- the stub's final `ret`
+  jumped straight back into itself, forever. Fixed by removing the
+  resume-stub patch entirely (the naturally-saved return address already
+  does the job a plain `ret` needs) and moving the "resumed context
+  appears to return 0" behavior to an unconditional `mov w0, #0` right
+  before every point this file jumps into a restored context instead;
+  see `HISTORY.md`. Verified for real on macOS aarch64 (this host);
+  Linux aarch64 and Windows aarch64 get the identical fix reasoned to
+  apply the same way (same AAPCS64 mechanism) but not independently
+  re-run on real hardware for those two.
 
 `wordexp.h`/`nl_types.h`/`aio.h` remain lower priority still, not covered
 by this sweep -- real Bionic either doesn't implement them meaningfully

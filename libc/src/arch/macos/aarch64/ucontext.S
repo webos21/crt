@@ -4,7 +4,10 @@
  * aarch64 variant of this same file, only the symbol-naming convention
  * differs, exactly like this directory's own setjmp.S vs the Linux one).
  * See linux/aarch64/ucontext.S's header comment for the full mcontext_t/
- * bootstrap-frame byte-offset layout -- identical here.
+ * bootstrap-frame byte-offset layout -- identical here, including the
+ * swapcontext() resume-stub infinite-loop bug/fix that same comment
+ * documents in full (found live on this exact host: real macOS aarch64
+ * hardware, see HISTORY.md).
  */
 .text
 
@@ -41,6 +44,7 @@ _setcontext:
   ldp d10, d11, [x0, #120]
   ldp d12, d13, [x0, #136]
   ldp d14, d15, [x0, #152]
+  mov w0, #0
   ret
 
 .globl _swapcontext
@@ -58,8 +62,6 @@ _swapcontext:
   stp d10, d11, [x0, #120]
   stp d12, d13, [x0, #136]
   stp d14, d15, [x0, #152]
-  adr x2, 1f
-  str x2, [x0, #88]
   ldp x19, x20, [x1, #0]
   ldp x21, x22, [x1, #16]
   ldp x23, x24, [x1, #32]
@@ -72,8 +74,6 @@ _swapcontext:
   ldp d10, d11, [x1, #120]
   ldp d12, d13, [x1, #136]
   ldp d14, d15, [x1, #152]
-  ret
-1:
   mov w0, #0
   ret
 

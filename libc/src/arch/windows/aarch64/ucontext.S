@@ -5,8 +5,13 @@
  * AAPCS64-derived convention as Linux/macOS aarch64, unlike x86_64 where
  * Windows and SysV differ). See linux/aarch64/ucontext.S's header
  * comment for the full mcontext_t/bootstrap-frame byte-offset layout --
- * identical here. makecontext() caps argc at 4 uniformly across every
- * host (see ucontext.h's own comment), matching the Windows x86_64 ABI's
+ * identical here, including the swapcontext() resume-stub infinite-loop
+ * bug/fix that same comment documents in full (found live on real macOS
+ * aarch64 hardware, reasoned to apply identically here since AAPCS64's
+ * `ret`-via-link-register mechanism is the same on both, not yet
+ * independently re-verified on real Windows aarch64 hardware -- see
+ * HISTORY.md). makecontext() caps argc at 4 uniformly across every host
+ * (see ucontext.h's own comment), matching the Windows x86_64 ABI's
  * 4-register limit even though AAPCS64 itself has 8 argument registers.
  */
 .text
@@ -46,6 +51,7 @@ setcontext:
   ldp d10, d11, [x0, #120]
   ldp d12, d13, [x0, #136]
   ldp d14, d15, [x0, #152]
+  mov w0, #0
   ret
 
 .globl swapcontext
@@ -64,8 +70,6 @@ swapcontext:
   stp d10, d11, [x0, #120]
   stp d12, d13, [x0, #136]
   stp d14, d15, [x0, #152]
-  adr x2, 1f
-  str x2, [x0, #88]
   ldp x19, x20, [x1, #0]
   ldp x21, x22, [x1, #16]
   ldp x23, x24, [x1, #32]
@@ -78,8 +82,6 @@ swapcontext:
   ldp d10, d11, [x1, #120]
   ldp d12, d13, [x1, #136]
   ldp d14, d15, [x1, #152]
-  ret
-1:
   mov w0, #0
   ret
 
