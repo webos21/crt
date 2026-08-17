@@ -27,18 +27,38 @@ void __crt_sys_thread_exit(int status) __attribute__((noreturn));
 #define CRT_MUTEXATTR_ROBUST_BIT 0x00000200L
 #define CRT_RWLOCKATTR_PSHARED_BIT 0x00000001L
 #define CRT_BARRIERATTR_PSHARED_BIT 0x00000001L
+#define CRT_CONDATTR_CLOCK_MASK 0x000000ffL
+#define CRT_CONDATTR_PSHARED_BIT 0x00000100L
 #define CRT_COND_SEQUENCE_WORD 0
 #define CRT_COND_WAITERS_WORD 1
+#define CRT_COND_SHARED_WORD 2
 #define CRT_BARRIER_COUNT_WORD 0
 #define CRT_BARRIER_WAITERS_WORD 1
 #define CRT_BARRIER_GENERATION_WORD 2
+#define CRT_BARRIER_SHARED_WORD 3
 #define CRT_MUTEX_STATE_WORD 0
 #define CRT_MUTEX_TYPE_WORD 1
 #define CRT_MUTEX_COUNT_WORD 2
 #define CRT_MUTEX_OWNER_LOW_WORD 3
 #define CRT_MUTEX_OWNER_HIGH_WORD 4
+#define CRT_MUTEX_SHARED_WORD 5
 #define CRT_RWLOCK_STATE_WORD 0
+#define CRT_RWLOCK_SHARED_WORD 1
 #define CRT_RWLOCK_WRITER_STATE (-1)
+
+/*
+ * Real, cross-process PTHREAD_PROCESS_SHARED support is only tractable on
+ * Linux (non-private futex ops) and macOS (os_sync_wait_on_address's
+ * SHARED flag, reasoned but unverified -- see wait.c). WaitOnAddress and
+ * friends on Windows are documented same-process-only with no way to opt
+ * into cross-process waiting, so pshared objects stay ENOTSUP there --
+ * an honest architectural limitation, not a missing implementation.
+ */
+#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS)
+#define CRT_PSHARED_SUPPORTED 1
+#else
+#define CRT_PSHARED_SUPPORTED 0
+#endif
 
 #if defined(CRT_TARGET_OS_WINDOWS)
 typedef unsigned long DWORD;
@@ -181,6 +201,22 @@ static int mutex_type(const pthread_mutex_t* mutex) {
     return type;
   }
   return PTHREAD_MUTEX_NORMAL;
+}
+
+static int mutex_shared(const pthread_mutex_t* mutex) {
+  return mutex->__private[CRT_MUTEX_SHARED_WORD] != 0;
+}
+
+static int rwlock_shared(const pthread_rwlock_t* rwlock) {
+  return rwlock->__private[CRT_RWLOCK_SHARED_WORD] != 0;
+}
+
+static int cond_shared(const pthread_cond_t* cond) {
+  return cond->__private[CRT_COND_SHARED_WORD] != 0;
+}
+
+static int barrier_shared(const pthread_barrier_t* barrier) {
+  return barrier->__private[CRT_BARRIER_SHARED_WORD] != 0;
 }
 
 static pthread_t mutex_owner(const pthread_mutex_t* mutex) {
@@ -481,13 +517,11 @@ int pthread_barrier_init(
   if (barrier == 0 || count == 0) {
     return EINVAL;
   }
-  if (attr != 0 && (*attr & CRT_BARRIERATTR_PSHARED_BIT) != 0) {
-    return ENOTSUP;
-  }
   barrier->__private[CRT_BARRIER_COUNT_WORD] = (int32_t)count;
   barrier->__private[CRT_BARRIER_WAITERS_WORD] = 0;
   barrier->__private[CRT_BARRIER_GENERATION_WORD] = 0;
-  barrier->__private[3] = 0;
+  barrier->__private[CRT_BARRIER_SHARED_WORD] =
+      (attr != 0 && (*attr & CRT_BARRIERATTR_PSHARED_BIT) != 0) ? 1 : 0;
   return 0;
 }
 
@@ -516,14 +550,22 @@ int pthread_barrier_wait(pthread_barrier_t* barrier) {
   generation = crt_atomic_load_acquire(barrier_generation(barrier));
   waiters = crt_atomic_fetch_add_acq_rel(barrier_waiters(barrier), 1) + 1;
   if (waiters == count) {
+    int shared = barrier_shared(barrier);
+
     crt_atomic_store_release(barrier_waiters(barrier), 0);
     crt_atomic_fetch_add_acq_rel(barrier_generation(barrier), 1);
-    __crt_wake32_all(&barrier->__private[CRT_BARRIER_GENERATION_WORD]);
+    if (shared) {
+      __crt_wake32_all_shared(&barrier->__private[CRT_BARRIER_GENERATION_WORD]);
+    } else {
+      __crt_wake32_all(&barrier->__private[CRT_BARRIER_GENERATION_WORD]);
+    }
     return PTHREAD_BARRIER_SERIAL_THREAD;
   }
 
   while (crt_atomic_load_acquire(barrier_generation(barrier)) == generation) {
-    int result = __crt_wait32(&barrier->__private[CRT_BARRIER_GENERATION_WORD], generation);
+    int result = barrier_shared(barrier)
+                      ? __crt_wait32_shared(&barrier->__private[CRT_BARRIER_GENERATION_WORD], generation)
+                      : __crt_wait32(&barrier->__private[CRT_BARRIER_GENERATION_WORD], generation);
     if (result != 0 && result != EINTR && result != EAGAIN) {
       return result;
     }
@@ -565,19 +607,24 @@ int pthread_barrierattr_setpshared(pthread_barrierattr_t* attr, int pshared) {
     return 0;
   }
   if (pshared == PTHREAD_PROCESS_SHARED) {
+#if CRT_PSHARED_SUPPORTED
+    *attr |= CRT_BARRIERATTR_PSHARED_BIT;
+    return 0;
+#else
     return ENOTSUP;
+#endif
   }
   return EINVAL;
 }
 
 int pthread_cond_init(pthread_cond_t* cond, const pthread_condattr_t* attr) {
-  (void)attr;
-
   if (cond == 0) {
     return EINVAL;
   }
   cond->__private[CRT_COND_SEQUENCE_WORD] = 0;
   cond->__private[CRT_COND_WAITERS_WORD] = 0;
+  cond->__private[CRT_COND_SHARED_WORD] =
+      (attr != 0 && (*attr & CRT_CONDATTR_PSHARED_BIT) != 0) ? 1 : 0;
   return 0;
 }
 
@@ -596,7 +643,8 @@ int pthread_cond_signal(pthread_cond_t* cond) {
     return EINVAL;
   }
   crt_atomic_fetch_add_acq_rel(cond_sequence(cond), 1);
-  return __crt_wake32_one(&cond->__private[CRT_COND_SEQUENCE_WORD]);
+  return cond_shared(cond) ? __crt_wake32_one_shared(&cond->__private[CRT_COND_SEQUENCE_WORD])
+                            : __crt_wake32_one(&cond->__private[CRT_COND_SEQUENCE_WORD]);
 }
 
 int pthread_cond_broadcast(pthread_cond_t* cond) {
@@ -604,7 +652,8 @@ int pthread_cond_broadcast(pthread_cond_t* cond) {
     return EINVAL;
   }
   crt_atomic_fetch_add_acq_rel(cond_sequence(cond), 1);
-  return __crt_wake32_all(&cond->__private[CRT_COND_SEQUENCE_WORD]);
+  return cond_shared(cond) ? __crt_wake32_all_shared(&cond->__private[CRT_COND_SEQUENCE_WORD])
+                            : __crt_wake32_all(&cond->__private[CRT_COND_SEQUENCE_WORD]);
 }
 
 int pthread_cond_wait(pthread_cond_t* cond, pthread_mutex_t* mutex) {
@@ -624,7 +673,9 @@ int pthread_cond_wait(pthread_cond_t* cond, pthread_mutex_t* mutex) {
   }
 
   while (crt_atomic_load_acquire(cond_sequence(cond)) == sequence) {
-    result = __crt_wait32(&cond->__private[CRT_COND_SEQUENCE_WORD], sequence);
+    result = cond_shared(cond)
+                 ? __crt_wait32_shared(&cond->__private[CRT_COND_SEQUENCE_WORD], sequence)
+                 : __crt_wait32(&cond->__private[CRT_COND_SEQUENCE_WORD], sequence);
     if (result != 0 && result != EINTR && result != EAGAIN) {
       break;
     }
@@ -666,7 +717,9 @@ int pthread_cond_timedwait(
     if (result != 0) {
       break;
     }
-    result = __crt_wait32_timed(&cond->__private[CRT_COND_SEQUENCE_WORD], sequence, &remaining);
+    result = cond_shared(cond)
+                 ? __crt_wait32_timed_shared(&cond->__private[CRT_COND_SEQUENCE_WORD], sequence, &remaining)
+                 : __crt_wait32_timed(&cond->__private[CRT_COND_SEQUENCE_WORD], sequence, &remaining);
     if (result == ETIMEDOUT) {
       if (crt_atomic_load_acquire(cond_sequence(cond)) == sequence) {
         break;
@@ -697,7 +750,7 @@ int pthread_condattr_getclock(const pthread_condattr_t* attr, int* clock_id) {
   if (attr == 0 || clock_id == 0) {
     return EINVAL;
   }
-  *clock_id = (int)*attr;
+  *clock_id = (int)(*attr & CRT_CONDATTR_CLOCK_MASK);
   return 0;
 }
 
@@ -708,8 +761,36 @@ int pthread_condattr_setclock(pthread_condattr_t* attr, int clock_id) {
   if (clock_id != PTHREAD_COND_CLOCK_REALTIME && clock_id != PTHREAD_COND_CLOCK_MONOTONIC) {
     return EINVAL;
   }
-  *attr = clock_id;
+  *attr = (*attr & ~CRT_CONDATTR_CLOCK_MASK) | clock_id;
   return 0;
+}
+
+int pthread_condattr_getpshared(const pthread_condattr_t* attr, int* pshared) {
+  if (attr == 0 || pshared == 0) {
+    return EINVAL;
+  }
+  *pshared = (*attr & CRT_CONDATTR_PSHARED_BIT) != 0 ? PTHREAD_PROCESS_SHARED
+                                                      : PTHREAD_PROCESS_PRIVATE;
+  return 0;
+}
+
+int pthread_condattr_setpshared(pthread_condattr_t* attr, int pshared) {
+  if (attr == 0) {
+    return EINVAL;
+  }
+  if (pshared == PTHREAD_PROCESS_PRIVATE) {
+    *attr &= ~CRT_CONDATTR_PSHARED_BIT;
+    return 0;
+  }
+  if (pshared == PTHREAD_PROCESS_SHARED) {
+#if CRT_PSHARED_SUPPORTED
+    *attr |= CRT_CONDATTR_PSHARED_BIT;
+    return 0;
+#else
+    return ENOTSUP;
+#endif
+  }
+  return EINVAL;
 }
 
 int pthread_condattr_destroy(pthread_condattr_t* attr) {
@@ -727,9 +808,6 @@ int pthread_mutex_init(pthread_mutex_t* mutex, const void* attr) {
     return EINVAL;
   }
   if (mutex_attr != 0) {
-    if ((*mutex_attr & CRT_MUTEXATTR_PSHARED_BIT) != 0) {
-      return ENOTSUP;
-    }
     if ((*mutex_attr & CRT_MUTEXATTR_ROBUST_BIT) != 0) {
       return ENOTSUP;
     }
@@ -742,6 +820,8 @@ int pthread_mutex_init(pthread_mutex_t* mutex, const void* attr) {
   mutex->__private[CRT_MUTEX_STATE_WORD] = 0;
   mutex->__private[CRT_MUTEX_TYPE_WORD] = type;
   mutex->__private[CRT_MUTEX_COUNT_WORD] = 0;
+  mutex->__private[CRT_MUTEX_SHARED_WORD] =
+      (mutex_attr != 0 && (*mutex_attr & CRT_MUTEXATTR_PSHARED_BIT) != 0) ? 1 : 0;
   clear_mutex_owner(mutex);
   return 0;
 }
@@ -782,7 +862,9 @@ int pthread_mutex_lock(pthread_mutex_t* mutex) {
       break;
     }
     while (crt_atomic_load_relaxed(mutex_state(mutex)) != 0) {
-      wait_result = __crt_wait32(&mutex->__private[CRT_MUTEX_STATE_WORD], 1);
+      wait_result = mutex_shared(mutex)
+                         ? __crt_wait32_shared(&mutex->__private[CRT_MUTEX_STATE_WORD], 1)
+                         : __crt_wait32(&mutex->__private[CRT_MUTEX_STATE_WORD], 1);
       if (wait_result != 0 && wait_result != EINTR && wait_result != EAGAIN) {
         return wait_result;
       }
@@ -840,7 +922,8 @@ int pthread_mutex_unlock(pthread_mutex_t* mutex) {
   mutex->__private[CRT_MUTEX_COUNT_WORD] = 0;
   clear_mutex_owner(mutex);
   crt_atomic_store_release(mutex_state(mutex), 0);
-  return __crt_wake32_one(&mutex->__private[CRT_MUTEX_STATE_WORD]);
+  return mutex_shared(mutex) ? __crt_wake32_one_shared(&mutex->__private[CRT_MUTEX_STATE_WORD])
+                              : __crt_wake32_one(&mutex->__private[CRT_MUTEX_STATE_WORD]);
 }
 
 int pthread_mutexattr_init(pthread_mutexattr_t* attr) {
@@ -897,7 +980,12 @@ int pthread_mutexattr_setpshared(pthread_mutexattr_t* attr, int pshared) {
     return 0;
   }
   if (pshared == PTHREAD_PROCESS_SHARED) {
+#if CRT_PSHARED_SUPPORTED
+    *attr |= CRT_MUTEXATTR_PSHARED_BIT;
+    return 0;
+#else
     return ENOTSUP;
+#endif
   }
   return EINVAL;
 }
@@ -942,10 +1030,9 @@ int pthread_rwlock_init(pthread_rwlock_t* rwlock, const pthread_rwlockattr_t* at
   if (rwlock == 0) {
     return EINVAL;
   }
-  if (attr != 0 && (*attr & CRT_RWLOCKATTR_PSHARED_BIT) != 0) {
-    return ENOTSUP;
-  }
   rwlock->__private[CRT_RWLOCK_STATE_WORD] = 0;
+  rwlock->__private[CRT_RWLOCK_SHARED_WORD] =
+      (attr != 0 && (*attr & CRT_RWLOCKATTR_PSHARED_BIT) != 0) ? 1 : 0;
   return 0;
 }
 
@@ -976,7 +1063,9 @@ int pthread_rwlock_rdlock(pthread_rwlock_t* rwlock) {
       }
       continue;
     }
-    wait_result = __crt_wait32(&rwlock->__private[CRT_RWLOCK_STATE_WORD], state);
+    wait_result = rwlock_shared(rwlock)
+                      ? __crt_wait32_shared(&rwlock->__private[CRT_RWLOCK_STATE_WORD], state)
+                      : __crt_wait32(&rwlock->__private[CRT_RWLOCK_STATE_WORD], state);
     if (wait_result != 0 && wait_result != EINTR && wait_result != EAGAIN) {
       return wait_result;
     }
@@ -1014,7 +1103,9 @@ int pthread_rwlock_wrlock(pthread_rwlock_t* rwlock) {
       return 0;
     }
     state = crt_atomic_load_acquire(rwlock_state(rwlock));
-    wait_result = __crt_wait32(&rwlock->__private[CRT_RWLOCK_STATE_WORD], state);
+    wait_result = rwlock_shared(rwlock)
+                      ? __crt_wait32_shared(&rwlock->__private[CRT_RWLOCK_STATE_WORD], state)
+                      : __crt_wait32(&rwlock->__private[CRT_RWLOCK_STATE_WORD], state);
     if (wait_result != 0 && wait_result != EINTR && wait_result != EAGAIN) {
       return wait_result;
     }
@@ -1042,12 +1133,14 @@ int pthread_rwlock_unlock(pthread_rwlock_t* rwlock) {
   state = crt_atomic_load_acquire(rwlock_state(rwlock));
   if (state == CRT_RWLOCK_WRITER_STATE) {
     crt_atomic_store_release(rwlock_state(rwlock), 0);
-    return __crt_wake32_all(&rwlock->__private[CRT_RWLOCK_STATE_WORD]);
+    return rwlock_shared(rwlock) ? __crt_wake32_all_shared(&rwlock->__private[CRT_RWLOCK_STATE_WORD])
+                                  : __crt_wake32_all(&rwlock->__private[CRT_RWLOCK_STATE_WORD]);
   }
   if (state > 0) {
     int previous = crt_atomic_fetch_add_acq_rel(rwlock_state(rwlock), -1);
     if (previous == 1) {
-      return __crt_wake32_all(&rwlock->__private[CRT_RWLOCK_STATE_WORD]);
+      return rwlock_shared(rwlock) ? __crt_wake32_all_shared(&rwlock->__private[CRT_RWLOCK_STATE_WORD])
+                                    : __crt_wake32_all(&rwlock->__private[CRT_RWLOCK_STATE_WORD]);
     }
     return 0;
   }
@@ -1081,7 +1174,12 @@ int pthread_rwlockattr_setpshared(pthread_rwlockattr_t* attr, int pshared) {
     return 0;
   }
   if (pshared == PTHREAD_PROCESS_SHARED) {
+#if CRT_PSHARED_SUPPORTED
+    *attr |= CRT_RWLOCKATTR_PSHARED_BIT;
+    return 0;
+#else
     return ENOTSUP;
+#endif
   }
   return EINVAL;
 }
@@ -1097,10 +1195,16 @@ int pthread_spin_init(pthread_spinlock_t* lock, int pshared) {
   if (lock == 0) {
     return EINVAL;
   }
-  if (pshared == PTHREAD_PROCESS_SHARED) {
-    return ENOTSUP;
-  }
-  if (pshared != PTHREAD_PROCESS_PRIVATE) {
+  /*
+   * Unlike mutex/rwlock/cond/barrier, the spinlock below never calls into
+   * an OS wait/wake primitive -- lock/trylock/unlock are pure __atomic_*
+   * builtins on a plain int. Atomic CPU instructions on genuinely shared
+   * memory behave correctly across process boundaries on every host this
+   * project targets, so PTHREAD_PROCESS_SHARED is real and unconditional
+   * here, including on Windows where the futex-backed primitives above
+   * stay ENOTSUP.
+   */
+  if (pshared != PTHREAD_PROCESS_SHARED && pshared != PTHREAD_PROCESS_PRIVATE) {
     return EINVAL;
   }
   *lock = 0;

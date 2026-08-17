@@ -810,7 +810,10 @@ spinning until release. Error-checking mutexes return `EDEADLK` on self-lock and
 
 The process-sharing attribute surface is exposed. `PTHREAD_PROCESS_PRIVATE` is
 supported; `PTHREAD_PROCESS_SHARED` returns `ENOTSUP` until shared-memory
-synchronization policy is defined.
+synchronization policy is defined. (Updated 2026-08-17: that policy is now
+defined and implemented on Linux/macOS -- see `docs/bionic_libc_gaps.md`'s
+`PTHREAD_PROCESS_SHARED` entry for the current, per-host status; Windows
+still returns `ENOTSUP`.)
 
 ## Pthread Read/Write Lock Tranche
 
@@ -837,6 +840,8 @@ writers sleep through the private wait/futex primitive and wake all waiters when
 the lock transitions back to the unlocked state. The process-sharing attribute
 surface is exposed: `PTHREAD_PROCESS_PRIVATE` is supported and
 `PTHREAD_PROCESS_SHARED` returns `ENOTSUP`. Writer preference is deferred.
+(Updated 2026-08-17: `PTHREAD_PROCESS_SHARED` is now real on Linux/macOS; see
+`docs/bionic_libc_gaps.md`. Windows still returns `ENOTSUP`.)
 
 ## Pthread Spin Lock Tranche
 
@@ -855,7 +860,10 @@ The public spin lock is represented as a single `int`, matching the compact
 POSIX/Bionic-style surface. It uses compiler atomics and `sched_yield` while
 spinning. `PTHREAD_PROCESS_PRIVATE` is supported; `PTHREAD_PROCESS_SHARED`
 returns `ENOTSUP` until process-shared synchronization and shared-memory ABI
-policy are defined.
+policy are defined. (Updated 2026-08-17: `PTHREAD_PROCESS_SHARED` is now
+supported here unconditionally, on every host including Windows -- the
+spinlock never calls into an OS wait/wake primitive, so there was no real
+`ENOTSUP` reason to begin with. See `docs/bionic_libc_gaps.md`.)
 
 ## Pthread Condition Variable Tranche
 
@@ -874,6 +882,8 @@ The pthread condition variable tranche adds:
 - `pthread_condattr_destroy`
 - `pthread_condattr_getclock`
 - `pthread_condattr_setclock`
+- `pthread_condattr_getpshared` (2026-08-17)
+- `pthread_condattr_setpshared` (2026-08-17)
 
 The condition variable uses a sequence counter in the Bionic-shaped
 `pthread_cond_t.__private[]` storage. Waiting threads unlock the supplied mutex,
@@ -882,7 +892,11 @@ the mutex again. This preserves the public API shape and basic predicate-loop
 usage while keeping the OS wait backend private. `pthread_cond_timedwait` uses
 absolute `CLOCK_REALTIME` timeouts for now. The condition clock attribute surface
 is exposed in `pthread_condattr_t`, but condition objects do not yet store a
-selected clock internally.
+selected clock internally. `pthread_condattr_t`'s pshared bit is bit-packed
+alongside the clock id (2026-08-17); condition objects do store that bit, and
+`pthread_cond_signal`/`broadcast`/`wait`/`timedwait` dispatch to the shared or
+private wait/futex primitive accordingly -- see `docs/bionic_libc_gaps.md`'s
+`PTHREAD_PROCESS_SHARED` entry.
 
 ## Private Wait/Futex Tranche
 
@@ -910,6 +924,18 @@ the project `ETIMEDOUT` value before returning to libc code.
 `pthread_cond_signal`, `pthread_cond_broadcast`, `pthread_cond_wait`, and
 `pthread_cond_timedwait` now use this private primitive instead of pure
 spin/yield polling.
+
+**Process-shared variants (2026-08-17):** `__crt_wait32_shared`,
+`__crt_wait32_timed_shared`, `__crt_wake32_one_shared`, and
+`__crt_wake32_all_shared` were added alongside the four private functions
+above, backing `PTHREAD_PROCESS_SHARED` for mutex/rwlock/cond/barrier. Linux
+maps these to the same raw `futex` syscall but without the `_PRIVATE` op
+flag; macOS maps them to the same `os_sync_wait_on_address`/
+`os_sync_wake_by_address_*` calls with the `SHARED` flag bit set instead of
+`0`. Windows returns `ENOTSUP` from all four, since `WaitOnAddress`/
+`WakeByAddressSingle`/`WakeByAddressAll` have no cross-process capability to
+opt into at all. See `docs/bionic_libc_gaps.md`'s `PTHREAD_PROCESS_SHARED`
+entry for the full per-host reasoning and verification status.
 
 ## VM Memory Tranche
 

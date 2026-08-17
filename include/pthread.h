@@ -111,6 +111,8 @@ int pthread_condattr_init(pthread_condattr_t* attr);
 int pthread_condattr_destroy(pthread_condattr_t* attr);
 int pthread_condattr_getclock(const pthread_condattr_t* attr, int* clock_id);
 int pthread_condattr_setclock(pthread_condattr_t* attr, int clock_id);
+int pthread_condattr_getpshared(const pthread_condattr_t* attr, int* pshared);
+int pthread_condattr_setpshared(pthread_condattr_t* attr, int pshared);
 int pthread_mutex_init(pthread_mutex_t* mutex, const void* attr);
 int pthread_mutex_destroy(pthread_mutex_t* mutex);
 int pthread_mutex_lock(pthread_mutex_t* mutex);

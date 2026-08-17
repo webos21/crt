@@ -158,8 +158,16 @@ guessed -- full findings, evidence, and priority tiers in
   via each host's own real image-introspection API) -- see
   `docs/bionic_libc_gaps.md` for the full per-host writeup; verified
   directly on Windows, Linux/macOS reasoned carefully but not yet run on
-  real hardware from this session. Still open: `PTHREAD_PROCESS_SHARED`
-  (currently `ENOTSUP` everywhere).
+  real hardware from this session. `PTHREAD_PROCESS_SHARED` is also
+  **done** (2026-08-17) -- real and cross-process on Linux (non-private
+  futex ops) and macOS (`os_sync_wait_on_address`'s `SHARED` flag,
+  reasoned but not yet verified on real hardware), unconditional on every
+  host for `pthread_spinlock` (pure atomics, no OS wait/wake call to begin
+  with), and an honest `ENOTSUP` on Windows for the other four primitives
+  (`WaitOnAddress`/`WakeByAddress*` are documented same-process-only with
+  no cross-process capability to opt into) -- see `docs/bionic_libc_gaps.md`
+  for the full per-host writeup. This closes out every item in this
+  section.
 - **Lower priority, no identified near-term consumer**: `glob.h`,
   `sys/prctl.h`, `ucontext.h`, `ifaddrs.h`, `threads.h` (C11), `uchar.h`.
 - Already known/tracked elsewhere (not new findings): C++ exceptions/RTTI

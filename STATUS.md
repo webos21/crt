@@ -37,16 +37,27 @@ in those two win.
   own `cmake --workflow` step does not run `port-test-recipes` (a
   separate, heavier target that fetches and builds third-party sources)
   -- that's verified locally/per-host instead, see below.
-- **`ctest`**: 109 registered tests on Windows and 77 on macOS in the
+- **`ctest`**: 110 registered tests on Windows and 77 on macOS in the
   latest local run (count is slightly
   OS-dependent -- a few targets, like `windows_export_hygiene_test`, only
-  exist on their own OS), all passing locally on Windows (109/109, most
-  recently confirmed after implementing `dl_iterate_phdr`/`link.h`/
-  `elf.h`/`dladdr` (real per-host implementations wherever each host
-  actually has something real to report -- see `HISTORY.md`'s 2026-08-17
-  entry for the full per-host writeup; verified directly on Windows,
-  Linux/macOS reasoned carefully but not yet run on real hardware) -- via
-  a genuine `cmake --fresh` reconfigure). Just before that: `sys/epoll.h`/
+  exist on their own OS), all passing locally on Windows (110/110, most
+  recently confirmed after implementing `PTHREAD_PROCESS_SHARED` --
+  real and cross-process on Linux (non-private futex ops) and macOS
+  (`os_sync_wait_on_address`'s `SHARED` flag, reasoned but not yet
+  verified on real hardware), unconditional on every host including
+  Windows for `pthread_spinlock` (pure atomics, no OS wait/wake primitive
+  involved), and an honest `ENOTSUP` on Windows for the other four
+  primitives (`WaitOnAddress`/`WakeByAddress*` have no cross-process
+  capability to opt into at all) -- see `HISTORY.md`'s 2026-08-17 entry
+  for the full per-host writeup; new `tests/pthread_process_shared_test.c`
+  plus an updated `tests/pthread_spin_test.c`, verified via a genuine
+  `cmake --fresh` reconfigure). This closes out every item in TODO.md's
+  "Bionic libc completeness before `libcrtgfx`" section. Just before
+  that: `dl_iterate_phdr`/`link.h`/`elf.h`/`dladdr` (real per-host
+  implementations wherever each host actually has something real to
+  report -- see `HISTORY.md`'s 2026-08-17 entry for the full per-host
+  writeup; verified directly on Windows, Linux/macOS reasoned carefully
+  but not yet run on real hardware). Just before that: `sys/epoll.h`/
   `sys/eventfd.h`/`sys/timerfd.h` (Linux-only, matching real Bionic --
   real raw syscall trampolines on Linux, `ENOSYS` on macOS/Windows; not
   yet independently verified on real Linux hardware, and `struct
@@ -214,6 +225,20 @@ in those two win.
   real Linux CI or hardware; the `ENOSYS` path on macOS/Windows and the
   `struct epoll_event` size check (architecture-only, not OS-only) are
   already verified directly from this session.
+- **macOS `PTHREAD_PROCESS_SHARED`'s `os_sync_wait_on_address` `SHARED`
+  flag is unverified on real hardware**: written 2026-08-17, reasoned from
+  the documented libSystem header shape
+  (`<os/os_sync_wait_on_address.h>`, macOS 14.4+/iOS 17.4+) --
+  `OS_SYNC_WAIT_ON_ADDRESS_SHARED`/`OS_SYNC_WAKE_BY_ADDRESS_SHARED` = `0x1`
+  -- same discipline as the other Linux/macOS raw-ABI entries above.
+  `tests/pthread_process_shared_test.c`'s real cross-thread contention
+  checks (under `CRT_PSHARED_SUPPORTED`, which is true on macOS) are what
+  verify this the next time it runs on real macOS hardware; the Windows
+  `ENOTSUP` path and the Linux non-private futex path are already verified
+  from this session (Linux by the same reasoning that already-tested
+  `sendmsg`/`recvmsg`/`eventfd` neighbors on the same syscall ABI rely on;
+  the private-futex half of the same file was already confirmed correct
+  by real Linux CI before this change).
 
 ## Next
 
@@ -246,15 +271,18 @@ in those two win.
   completeness before `libcrtgfx`" section). All four "high priority"
   findings are done -- `semaphore.h`, public `<stdatomic.h>`, `sendmsg`/
   `recvmsg` + `SCM_RIGHTS`/`CMSG_*` fd passing, and `memfd_create` -- and
-  so are the two "medium priority" items with a concrete design path:
-  `epoll`/`eventfd`/`timerfd` and `dl_iterate_phdr`/`link.h`/`elf.h`/
-  `dladdr` -- see `HISTORY.md`. Two real follow-ups remain: the new
-  Linux/macOS `sendmsg`/`recvmsg` and Linux `eventfd`/`timerfd`/`epoll`/
-  `dl_iterate_phdr`/`dladdr` raw syscall trampolines need real hardware
-  verification (see "Known gaps" above). `PTHREAD_PROCESS_SHARED` is the
-  one remaining medium-priority item still open; lower-priority items
-  with no identified near-term consumer stay open too: `glob.h`/
-  `sys/prctl.h`/`ucontext.h`/`ifaddrs.h`/`threads.h`/`uchar.h`.
+  so are all three "medium priority" items: `epoll`/`eventfd`/`timerfd`,
+  `dl_iterate_phdr`/`link.h`/`elf.h`/`dladdr`, and `PTHREAD_PROCESS_SHARED`
+  -- see `HISTORY.md`. This closes out the entire "Bionic libc
+  completeness before `libcrtgfx`" section. Real follow-ups remain: the
+  new Linux/macOS `sendmsg`/`recvmsg`, Linux `eventfd`/`timerfd`/`epoll`/
+  `dl_iterate_phdr`/`dladdr` raw syscall trampolines, and the macOS
+  `PTHREAD_PROCESS_SHARED` `os_sync_wait_on_address` `SHARED` flag all
+  need real hardware verification (see "Known gaps" above). Lower-priority
+  items with no identified near-term consumer stay open: `glob.h`/
+  `sys/prctl.h`/`ucontext.h`/`ifaddrs.h`/`threads.h`/`uchar.h`. Per the
+  user's own framing, this now positions the project to move into the
+  `libcrtgfx` upper-runtime phase (`docs/runtime_roadmap.md`).
 - The next product-level target is documented in `docs/runtime_roadmap.md`:
   an Electron-class rebuilt runtime made of `libcrtgfx` (Skia + Wayland-style
   compositor boundary + Chromium Ozone path), `libcrtmedia` (FFmpeg/codecs/

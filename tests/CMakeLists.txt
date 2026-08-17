@@ -593,6 +593,11 @@ set_tests_properties(pthread_cond_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_cond_test: ok"
 )
 
+add_crt_test(pthread_process_shared_test pthread_process_shared_test.c)
+set_tests_properties(pthread_process_shared_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "pthread_process_shared_test: ok"
+)
+
 add_crt_test(pthread_key_test pthread_key_test.c)
 set_tests_properties(pthread_key_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_key_test: ok"

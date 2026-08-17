@@ -202,14 +202,46 @@ All four items originally listed here are now **done** -- see `HISTORY.md`'s
   the test binary's own `main()`, verified directly on Windows -- Linux/
   macOS are reasoned carefully but not yet run on real hardware from this
   session, matching this same pattern's other entries above).
-- **`PTHREAD_PROCESS_SHARED`** -- the attribute constant is exposed, but
-  `pthread_mutex`/`pthread_rwlock`/`pthread_spinlock` all explicitly return
-  `ENOTSUP` for it today (confirmed in `docs/import_bionic.md`'s own
-  tranche notes). Relevant for real cross-process shared-memory
-  synchronization in a compositor architecture, though many compositor
-  protocols (including Wayland) route around needing this by using
-  message-passing instead of shared locks -- lower urgency than the
-  fd-passing items above.
+- **`PTHREAD_PROCESS_SHARED`** -- done (2026-08-17). Real, differentiated
+  per-primitive support:
+  - **`pthread_mutex`/`pthread_rwlock`/`pthread_cond`/`pthread_barrier`**:
+    real and cross-process on **Linux** (non-private `FUTEX_WAIT`/
+    `FUTEX_WAKE`, added alongside the existing `_PRIVATE` ops in
+    `libc/src/wait.c` as `__crt_wait32_shared`/`__crt_wake32_*_shared` --
+    the non-private operations key off the futex's physical backing
+    (mapped page + offset) instead of `(mm_struct, virtual address)`, which
+    is what makes two independent processes mapping the same
+    `PTHREAD_PROCESS_SHARED` memory correctly rendezvous) and on **macOS**
+    (`os_sync_wait_on_address`'s documented `OS_SYNC_WAIT_ON_ADDRESS_SHARED`
+    / `OS_SYNC_WAKE_BY_ADDRESS_SHARED` flag bit, mirroring the Linux
+    private/shared split -- reasoned carefully but, like other Linux/macOS
+    work this session, not yet verified against real Apple hardware). Stay
+    `ENOTSUP` on **Windows**: `WaitOnAddress`/`WakeByAddressSingle`/
+    `WakeByAddressAll` are documented by Microsoft as operating on the
+    calling process's own virtual address space only, with no flag or
+    variant that extends them cross-process -- an honest architectural
+    limitation, not a missing feature, so a real fix there would need an
+    entirely different mechanism (a named kernel object such as
+    `CreateMutexA`/`CreateEventA`, or handle duplication/inheritance),
+    out of scope for this primitive. `pthread_condattr_getpshared`/
+    `setpshared` were also added (Bionic has these; this project didn't
+    before), bit-packed alongside the existing clock-id storage in
+    `pthread_condattr_t`.
+  - **`pthread_spinlock`**: real and unconditional on **every host,
+    including Windows**. Unlike the other primitives, this project's
+    spinlock never calls into an OS wait/wake primitive at all --
+    lock/trylock/unlock are pure `__atomic_*` builtins on a plain `int`,
+    and atomic CPU instructions on genuinely shared memory behave
+    correctly across process boundaries on every host this project
+    targets. `pthread_spin_init()` no longer rejects
+    `PTHREAD_PROCESS_SHARED` on any host.
+  - Regression: `tests/pthread_process_shared_test.c` (new -- functional
+    round-trip coverage including real cross-thread contention for mutex/
+    rwlock/barrier/cond behind `#if CRT_PSHARED_SUPPORTED`, matching the
+    exact Linux/macOS-only gate in `libc/src/pthread.c`; on Windows verifies
+    the `ENOTSUP` contract instead) plus an updated `tests/
+    pthread_spin_test.c` (now exercises a real pshared spinlock round trip
+    on every host, including Windows).
 
 ## Lower priority: general POSIX/Bionic completeness, no identified near-term consumer yet
 

@@ -40,9 +40,22 @@ int main(void) {
       pthread_spin_unlock(0) != EINVAL) {
     return fail("invalid spin arguments");
   }
-  if (pthread_spin_init(&spin, 99) != EINVAL ||
-      pthread_spin_init(&spin, PTHREAD_PROCESS_SHARED) != ENOTSUP) {
-    return fail("spin pshared");
+  if (pthread_spin_init(&spin, 99) != EINVAL) {
+    return fail("spin invalid pshared value");
+  }
+  /*
+   * Unlike the mutex/rwlock/cond/barrier primitives, the spinlock is pure
+   * __atomic_* builtins with no OS wait/wake call, so PTHREAD_PROCESS_SHARED
+   * is real and unconditional here -- including on Windows, where the
+   * futex-backed primitives stay ENOTSUP. See pthread_spin_init()'s comment
+   * in libc/src/pthread.c.
+   */
+  if (pthread_spin_init(&spin, PTHREAD_PROCESS_SHARED) != 0) {
+    return fail("spin pshared init");
+  }
+  if (pthread_spin_trylock(&spin) != 0 || pthread_spin_unlock(&spin) != 0 ||
+      pthread_spin_destroy(&spin) != 0) {
+    return fail("spin pshared roundtrip");
   }
   if (pthread_spin_init(&spin, PTHREAD_PROCESS_PRIVATE) != 0) {
     return fail("spin init");
