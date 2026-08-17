@@ -10,6 +10,74 @@ substantive update.
 
 ## 2026-08-17
 
+- **Ported real macOS termios (`tcgetattr`/`tcsetattr`/`tcdrain`/`tcflow`/
+  `tcflush`/`tcsendbreak`)**, closing the gap the same-day Linux termios
+  entry below explicitly deferred ("macOS keeps its pre-existing
+  hardcoded-stub fallback for now"). Confirmed the stub was still broken
+  on this real macOS host first, the same way the Linux bug was found:
+  `tests/termios_echo_roundtrip_test.c` run under a real pty (`script -q
+  ... termios_echo_roundtrip_test`, with `CRT_USE_HOST_TTY=1` to get past
+  the `macos_use_host_dev_tty()` gate in `libc/src/fd.c`) reproduced the
+  exact same class of failure -- `tcgetattr()` always returned one fixed,
+  hardcoded `struct termios`, `tcsetattr()` silently discarded everything
+  it was asked to set.
+
+  Implemented via `libc/src/arch/macos/common/termios.c` (new), using the
+  real `TIOCGETA`/`TIOCSETA{,W,F}`/`TIOCDRAIN`/`TIOCFLUSH`/`TIOCSTART`/
+  `TIOCSTOP`/`TIOCIXON`/`TIOCIXOFF`/`TIOCSBRK`/`TIOCCBRK` ioctls (the same
+  family `fd.c`'s `isatty()` already used `TIOCGETA` from, as a pure
+  probe). Real Darwin's own `struct termios` differs from this project's
+  public, Bionic-shaped one in every way that matters -- not just field
+  widths like Linux's kernel struct needed (`tcflag_t`/`speed_t` are
+  8-byte `unsigned long` here, `NCCS` is 20 not 32, no `c_line` field),
+  but also completely different `c_cc[]` control-character indices (e.g.
+  Bionic's `VINTR`=0 vs. Darwin's `VINTR`=8), completely different
+  `c_iflag`/`c_oflag`/`c_cflag`/`c_lflag` bit positions for every
+  same-named flag, and literal baud numbers in `c_ispeed`/`c_ospeed`
+  instead of Bionic/Linux's small-integer B-codes (this project's own
+  `B9600` is the literal integer `13`, not `9600`). Every ioctl request
+  number, struct size, and flag-bit value was cross-checked against this
+  build host's real Xcode SDK headers (`<sys/termios.h>`/`<sys/ttycom.h>`)
+  and a host-native (real system `clang`, real libSystem) reference
+  program compiled and run directly on this machine printing each
+  constant -- not copied from memory, matching this session's own
+  sendmsg/recvmsg SCM_RIGHTS investigation methodology (see that entry
+  above). `tcflow()`'s BSD-style dispatch to four separate ioctls
+  (`TIOCSTOP`/`TIOCSTART`/`TIOCIXOFF`/`TIOCIXON` rather than one generic
+  ioctl taking the action code) and `tcsendbreak()`'s set-break/sleep-
+  400ms/clear-break sequence were carefully reasoned from this SDK's own
+  `<sys/ttycom.h>` request-name comments and this host's `man 3 tcflow`
+  page (matching the well-known, essentially unchanged-for-decades BSD
+  `lib/libc` implementation lineage), not independently confirmed against
+  Apple's closed-source `Libc` -- flagged the same honest way any
+  raw ioctl mapping this project couldn't cross-check against real source
+  gets flagged elsewhere.
+
+  A handful of Bionic-only bits (`IUCLC`, `OLCUC`, `XCASE` -- SysV-only
+  legacy concepts) and Darwin-only bits (`CIGNORE`, `ALTWERASE`,
+  `NOKERNINFO`, the hardware flow-control `*_OFLOW`/`*_IFLOW` bits,
+  `VDSUSP`/`VSTATUS`) have no counterpart on the other side and are
+  dropped in translation, each documented at its own drop site in the new
+  file rather than guessed at; the `NLDLY`/`CRDLY`/`TABDLY`/`BSDLY`/
+  `VTDLY`/`FFDLY` output-delay bit groups are dropped too, since Darwin's
+  own header marks them "unimplemented ... will currently result in
+  unexpected behaviour" and translating them bit-for-bit would add
+  meaningful complexity for zero real behavior.
+
+  Verified on this real macOS host: `tests/termios_echo_roundtrip_test`
+  now passes (`ok`, not `skip`) under `CRT_USE_HOST_TTY=1` with a real
+  pty. Added a new regression, `tests/termios_line_control_test.c`
+  (registered as `termios_line_control_test_runs`), covering what the
+  echo-roundtrip test doesn't: `tcdrain`/`tcflow` (all 4 actions)/
+  `tcflush` (all 3 selectors)/`tcsendbreak`, a `c_cflag` round trip
+  through `CS7`/`PARENB`/`CSTOPB`/`PARODD` (exercises the 2-bit `CSIZE`
+  index translation, not just single-bit flags), a `VMIN`/`VTIME` `c_cc`
+  round trip (exercises the index-translation table at indices other than
+  the echo test's own `VINTR`/`VEOF`), and a `B9600` speed round trip
+  (exercises the B-code<->literal-baud-number translation) -- all pass
+  under the same real-pty harness. Full suite: 90/90 (89 plus the new
+  test), both static and shared `libc` builds, no regressions.
+
 - **Implemented real Linux termios (`tcgetattr`/`tcsetattr`/`tcdrain`/
   `tcflow`/`tcflush`/`tcsendbreak`), fixing a real
   `termios_echo_roundtrip_test` failure.** Found while auditing CRT/PAL

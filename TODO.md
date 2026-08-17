@@ -62,16 +62,21 @@ Detailed policy and provenance stay in `docs/` and import manifests.
     batches actually enabled).
   - Keep `/dev/tty`, `/dev/console`, `isatty`, `tcgetattr`, `tcsetattr`,
     and `TIOCGWINSZ` behavior coherent enough for non-interactive shell
-    and configure use. `tcgetattr`/`tcsetattr` round-trip fidelity (a
-    per-fd shadow so a value `tcsetattr()` was asked to set comes back
-    verbatim from `tcgetattr()`, not re-derived from hardcoded defaults
-    every call) was fixed 2026-08-16 -- see `HISTORY.md`. `TIOCGWINSZ`
-    still legitimately returns `ENOTTY` when the console has no real
-    output screen buffer (confirmed directly: this project's own dev
-    environment has an attached console for input but `GetConsole
-    ScreenBufferInfo` fails on it) -- correct behavior for that real
-    condition, not a bug, but it means `stty -a`/`stty size` can't be
-    exercised end-to-end in every environment.
+    and configure use. Windows' `tcgetattr`/`tcsetattr` round-trip
+    fidelity (a per-fd shadow so a value `tcsetattr()` was asked to set
+    comes back verbatim from `tcgetattr()`, not re-derived from hardcoded
+    defaults every call) was fixed 2026-08-16 -- see `HISTORY.md`. macOS's
+    own `tcgetattr`/`tcsetattr`/`tcdrain`/`tcflow`/`tcflush`/`tcsendbreak`
+    were pure hardcoded-value/no-op stubs (a different, more complete gap
+    than Windows' -- not just round-trip fidelity, no real ioctl at all)
+    until a real `TIOCGETA`/`TIOCSETA{,W,F}`/... ioctl-backed port landed
+    2026-08-17 -- see `HISTORY.md`. `TIOCGWINSZ` still legitimately
+    returns `ENOTTY` when the console has no real output screen buffer
+    (confirmed directly: this project's own dev environment has an
+    attached console for input but `GetConsole ScreenBufferInfo` fails on
+    it) -- correct behavior for that real condition, not a bug, but it
+    means `stty -a`/`stty size` can't be exercised end-to-end in every
+    environment.
   - Continue validating that `CRT_SPAWN_NATIVE_WINDOWS=1` stays a narrow
     launcher hint for native host tools (LLVM `ar`/`ranlib`/`strip`), not
     an inherited global mode for configure recipes.
