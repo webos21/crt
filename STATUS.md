@@ -31,16 +31,23 @@ in those two win.
   own `cmake --workflow` step does not run `port-test-recipes` (a
   separate, heavier target that fetches and builds third-party sources)
   -- that's verified locally/per-host instead, see below.
-- **`ctest`**: 104 registered tests on Windows and 77 on macOS in the
+- **`ctest`**: 105 registered tests on Windows and 77 on macOS in the
   latest local run (count is slightly
   OS-dependent -- a few targets, like `windows_export_hygiene_test`, only
-  exist on their own OS), all passing locally on Windows (104/104, most
-  recently confirmed after implementing `sendmsg`/`recvmsg` + `SCM_RIGHTS`
-  fd passing and `memfd_create` -- the last two findings from a Bionic
-  libc gap audit done before starting `libcrtgfx` -- via a genuine
-  `cmake --fresh` reconfigure). `semaphore.h`/public `<stdatomic.h>` and
-  `df`/`stty` just before that are also done, the latter fixing two real
-  PAL bugs that surfaced along the way (a stale `flags.h` snapshot leaving
+  exist on their own OS), all passing locally on Windows (105/105, most
+  recently confirmed after giving Windows real `tcdrain`/`tcflow`/
+  `tcflush`/`tcsendbreak` backing (`FlushFileBuffers`/
+  `FlushConsoleInputBuffer`, honest no-ops for the two a console genuinely
+  can't back) -- prompted by real Linux/macOS termios ports landing the
+  same day -- via a genuine `cmake --fresh` reconfigure). Before that:
+  real Linux/macOS `tcgetattr`/`tcsetattr`/`tcdrain`/`tcflow`/`tcflush`/
+  `tcsendbreak` ports (verified on real hardware, found and fixed four
+  real ABI bugs in the `sendmsg`/`recvmsg`/`SCM_RIGHTS` work below along
+  the way), `sendmsg`/`recvmsg` + `SCM_RIGHTS` fd passing and
+  `memfd_create` -- the last two findings from a Bionic libc gap audit
+  done before starting `libcrtgfx` -- and `semaphore.h`/public
+  `<stdatomic.h>`/`df`/`stty` are all also done, the last of those fixing
+  two real PAL bugs that surfaced along the way (a stale `flags.h` snapshot leaving
   their flags dead code, and no `tcgetattr`/`tcsetattr` round-trip
   fidelity beyond three bits) -- see `HISTORY.md`. The user
   also confirmed a real Linux and macOS build+run this same date, through

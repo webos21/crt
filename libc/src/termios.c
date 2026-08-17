@@ -6,6 +6,18 @@
 #if defined(CRT_TARGET_OS_WINDOWS)
 long __crt_sys_tcgetattr(int fd, struct termios* termios_p);
 long __crt_sys_tcsetattr(int fd, const struct termios* termios_p);
+/* tcdrain()/tcflow()/tcflush()/tcsendbreak(): a Windows console isn't a
+ * real BSD/Linux tty line discipline (no transmit queue to drain, no
+ * software/hardware flow control, no break condition), so these don't
+ * translate 1:1 the way tcgetattr()/tcsetattr() do -- see
+ * libc/src/arch/windows/common/syscall.c's own comment on the four
+ * __crt_sys_tc*() functions below for exactly what each one really does
+ * (FlushFileBuffers()/FlushConsoleInputBuffer() where a real Win32
+ * equivalent exists, an honest no-op where it genuinely doesn't). */
+long __crt_sys_tcdrain(int fd);
+long __crt_sys_tcflow(int fd, int action);
+long __crt_sys_tcflush(int fd, int queue_selector);
+long __crt_sys_tcsendbreak(int fd, int duration);
 #elif defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS)
 /* Real ioctl-backed implementation: TCGETS/TCSETS* on Linux
  * (libc/src/arch/linux/common/termios.c), TIOCGETA/TIOCSETA{,W,F} on
@@ -80,7 +92,7 @@ int tcsetattr(int fd, int optional_actions, const struct termios* termios_p) {
 }
 
 int tcsendbreak(int fd, int duration) {
-#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS)
+#if defined(CRT_TARGET_OS_WINDOWS) || defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS)
   return normalize_syscall_result(__crt_sys_tcsendbreak(fd, duration));
 #else
   (void)duration;
@@ -93,7 +105,7 @@ int tcsendbreak(int fd, int duration) {
 }
 
 int tcdrain(int fd) {
-#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS)
+#if defined(CRT_TARGET_OS_WINDOWS) || defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS)
   return normalize_syscall_result(__crt_sys_tcdrain(fd));
 #else
   if (!isatty(fd)) {
@@ -109,7 +121,7 @@ int tcflow(int fd, int action) {
     errno = EINVAL;
     return -1;
   }
-#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS)
+#if defined(CRT_TARGET_OS_WINDOWS) || defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS)
   return normalize_syscall_result(__crt_sys_tcflow(fd, action));
 #else
   if (!isatty(fd)) {
@@ -125,7 +137,7 @@ int tcflush(int fd, int queue_selector) {
     errno = EINVAL;
     return -1;
   }
-#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS)
+#if defined(CRT_TARGET_OS_WINDOWS) || defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS)
   return normalize_syscall_result(__crt_sys_tcflush(fd, queue_selector));
 #else
   if (!isatty(fd)) {

@@ -65,18 +65,27 @@ Detailed policy and provenance stay in `docs/` and import manifests.
     and configure use. Windows' `tcgetattr`/`tcsetattr` round-trip
     fidelity (a per-fd shadow so a value `tcsetattr()` was asked to set
     comes back verbatim from `tcgetattr()`, not re-derived from hardcoded
-    defaults every call) was fixed 2026-08-16 -- see `HISTORY.md`. macOS's
-    own `tcgetattr`/`tcsetattr`/`tcdrain`/`tcflow`/`tcflush`/`tcsendbreak`
-    were pure hardcoded-value/no-op stubs (a different, more complete gap
-    than Windows' -- not just round-trip fidelity, no real ioctl at all)
-    until a real `TIOCGETA`/`TIOCSETA{,W,F}`/... ioctl-backed port landed
-    2026-08-17 -- see `HISTORY.md`. `TIOCGWINSZ` still legitimately
-    returns `ENOTTY` when the console has no real output screen buffer
-    (confirmed directly: this project's own dev environment has an
-    attached console for input but `GetConsole ScreenBufferInfo` fails on
-    it) -- correct behavior for that real condition, not a bug, but it
-    means `stty -a`/`stty size` can't be exercised end-to-end in every
-    environment.
+    defaults every call) was fixed 2026-08-16 -- see `HISTORY.md`. Linux's
+    and macOS's own `tcgetattr`/`tcsetattr`/`tcdrain`/`tcflow`/`tcflush`/
+    `tcsendbreak` were pure hardcoded-value/no-op stubs (a different, more
+    complete gap than Windows' -- not just round-trip fidelity, no real
+    ioctl at all) until real `TCGETS`/`TCSETS*`/... (Linux) and
+    `TIOCGETA`/`TIOCSETA{,W,F}`/... (macOS) ioctl-backed ports landed
+    2026-08-17 -- see `HISTORY.md`. Windows' own `tcdrain`/`tcflow`/
+    `tcflush`/`tcsendbreak` had the exact same gap (pure `isatty()`-check-
+    then-no-op stubs, real Win32 backing never wired up) and are now fixed
+    the same day: `tcdrain()`/`tcflush(TCIFLUSH/TCIOFLUSH)` call real
+    `FlushFileBuffers()`/`FlushConsoleInputBuffer()`; `tcflow()`/
+    `tcsendbreak()` stay honest no-ops (once a real tty fd is confirmed)
+    since a Windows console genuinely has no serial-line-shaped flow-
+    control or break-condition concept to back them with, matching this
+    same note's own `TIOCGWINSZ` precedent below. `TIOCGWINSZ` still
+    legitimately returns `ENOTTY` when the console has no real output
+    screen buffer (confirmed directly: this project's own dev environment
+    has an attached console for input but `GetConsole ScreenBufferInfo`
+    fails on it) -- correct behavior for that real condition, not a bug,
+    but it means `stty -a`/`stty size` can't be exercised end-to-end in
+    every environment.
   - Continue validating that `CRT_SPAWN_NATIVE_WINDOWS=1` stays a narrow
     launcher hint for native host tools (LLVM `ar`/`ranlib`/`strip`), not
     an inherited global mode for configure recipes.

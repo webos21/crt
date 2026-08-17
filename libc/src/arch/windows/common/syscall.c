@@ -490,6 +490,7 @@ __declspec(dllimport) BOOL CRT_WINAPI SetFilePointerEx(
     DWORD dwMoveMethod);
 __declspec(dllimport) BOOL CRT_WINAPI SetEndOfFile(HANDLE hFile);
 __declspec(dllimport) BOOL CRT_WINAPI FlushFileBuffers(HANDLE hFile);
+__declspec(dllimport) BOOL CRT_WINAPI FlushConsoleInputBuffer(HANDLE hConsoleInput);
 __declspec(dllimport) BOOL CRT_WINAPI LockFileEx(
     HANDLE hFile,
     DWORD dwFlags,
@@ -4961,6 +4962,105 @@ long __crt_sys_tcsetattr(int fd, const struct termios* termios_p) {
    * return it verbatim -- see fd_termios_shadow's own comment. */
   fd_termios_shadow[fd] = *termios_p;
   fd_termios_shadow_valid[fd] = 1;
+  return 0;
+}
+
+/* tcdrain()/tcflow()/tcflush()/tcsendbreak() on Windows: until this point
+ * these were pure isatty()-check-then-no-op stubs in libc/src/termios.c
+ * (Windows was never one of that dispatcher's real-implementation
+ * branches, only Linux/macOS were) -- the exact same class of round-trip/
+ * no-real-backing bug already found and fixed for tcgetattr()/tcsetattr()
+ * above, and for Linux's/macOS's own tcdrain/tcflow/tcflush/tcsendbreak
+ * (libc/src/arch/{linux,macos}/common/termios.c, real ioctl-backed).
+ *
+ * A Windows console isn't a real BSD/Linux tty line discipline, though --
+ * it has no serial-line-shaped concepts of a transmit queue to drain,
+ * software/hardware flow control to pause/resume, or a break condition to
+ * assert. So this isn't a 1:1 ioctl port the way the Linux/macOS versions
+ * are: tcdrain() and tcflush()'s input side map onto real, meaningful
+ * Win32 calls (FlushFileBuffers()/FlushConsoleInputBuffer()); tcflow()
+ * and tcsendbreak() have no Windows console equivalent at all and stay
+ * honest no-ops (once a real tty fd is confirmed) -- matching this
+ * project's existing TIOCSWINSZ precedent: declare the real POSIX
+ * surface, document what a console genuinely can't back, don't fake it.
+ * See docs/bionic_libc_gaps.md and HISTORY.md's 2026-08-17 entry. */
+long __crt_sys_tcdrain(int fd) {
+  HANDLE handle = get_fd_handle(fd);
+  DWORD mode = 0;
+
+  if (handle == INVALID_HANDLE_VALUE) {
+    return -EBADF;
+  }
+  if (GetFileType(handle) != FILE_TYPE_CHAR || !GetConsoleMode(handle, &mode)) {
+    return -ENOTTY;
+  }
+  /* The real Win32 call for "block until all written data has reached the
+   * device" -- WriteConsole()/WriteFile() to a console are already
+   * synchronous with no internal buffering layer to drain, so this is
+   * expected to return almost immediately, but it's the actually-correct
+   * API to call for the real semantics, not a no-op stand-in for one. */
+  if (!FlushFileBuffers(handle)) {
+    return fail_last_error();
+  }
+  return 0;
+}
+
+long __crt_sys_tcflow(int fd, int action) {
+  HANDLE handle = get_fd_handle(fd);
+  DWORD mode = 0;
+
+  (void)action;
+  if (handle == INVALID_HANDLE_VALUE) {
+    return -EBADF;
+  }
+  if (GetFileType(handle) != FILE_TYPE_CHAR || !GetConsoleMode(handle, &mode)) {
+    return -ENOTTY;
+  }
+  /* No Windows console API pauses/resumes input or output transmission
+   * the way TIOCSTART/TIOCSTOP/TIOCIXON/TIOCIXOFF do for a real tty --
+   * see this function's own file-level comment above. */
+  return 0;
+}
+
+long __crt_sys_tcflush(int fd, int queue_selector) {
+  HANDLE handle = get_fd_handle(fd);
+  DWORD mode = 0;
+
+  if (handle == INVALID_HANDLE_VALUE) {
+    return -EBADF;
+  }
+  if (GetFileType(handle) != FILE_TYPE_CHAR || !GetConsoleMode(handle, &mode)) {
+    return -ENOTTY;
+  }
+  if (queue_selector == TCIFLUSH || queue_selector == TCIOFLUSH) {
+    /* The real Win32 call for "discard data received but not read" --
+     * discards every unread console input record, exactly POSIX
+     * tcflush(TCIFLUSH) semantics, not a no-op stand-in. */
+    if (!FlushConsoleInputBuffer(handle)) {
+      return fail_last_error();
+    }
+  }
+  /* TCOFLUSH ("discard data written but not transmitted") has no
+   * meaningful Windows console counterpart -- console output isn't queued
+   * the way a real serial line's output buffer is, so there's genuinely
+   * nothing to discard; succeeding with no observable effect is the
+   * honest behavior for that case, not a stub. */
+  return 0;
+}
+
+long __crt_sys_tcsendbreak(int fd, int duration) {
+  HANDLE handle = get_fd_handle(fd);
+  DWORD mode = 0;
+
+  (void)duration;
+  if (handle == INVALID_HANDLE_VALUE) {
+    return -EBADF;
+  }
+  if (GetFileType(handle) != FILE_TYPE_CHAR || !GetConsoleMode(handle, &mode)) {
+    return -ENOTTY;
+  }
+  /* No Windows console equivalent of a serial break condition either --
+   * see this function's own file-level comment above. */
   return 0;
 }
 

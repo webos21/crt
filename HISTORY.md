@@ -10,6 +10,35 @@ substantive update.
 
 ## 2026-08-17
 
+- **Gave Windows real `tcdrain`/`tcflow`/`tcflush`/`tcsendbreak` backing**,
+  prompted directly by reviewing the real Linux/macOS termios ports below
+  and asking the same question of Windows: `libc/src/termios.c`'s
+  dispatcher only ever had a real Windows branch for `tcgetattr`/
+  `tcsetattr` (fixed 2026-08-16, the `fd_termios_shadow` round-trip work) --
+  the other four fell straight through to the generic `isatty()`-check-
+  then-no-op stub, exactly the same "no real backing at all" gap class
+  Linux's and macOS's own versions had before their same-day real ioctl
+  ports, just never previously singled out for Windows specifically.
+  Unlike Linux/macOS, a Windows console isn't a real BSD/Linux tty line
+  discipline, so this isn't a 1:1 ioctl port: `__crt_sys_tcdrain()` calls
+  the real `FlushFileBuffers()` (the correct Win32 "block until written
+  data reaches the device" call, even though a console has no internal
+  buffering layer to meaningfully drain); `__crt_sys_tcflush()` calls the
+  real `FlushConsoleInputBuffer()` for `TCIFLUSH`/`TCIOFLUSH` (discards
+  unread input, matching POSIX semantics exactly) and is an honest no-op
+  for `TCOFLUSH` (a console has no output queue to discard from);
+  `__crt_sys_tcflow()`/`__crt_sys_tcsendbreak()` stay honest no-ops
+  entirely -- a console has no software/hardware flow-control or break-
+  condition concept to back them with, matching this project's existing
+  `TIOCSWINSZ` precedent (declare the real POSIX surface, document what a
+  console genuinely can't do, don't fake it) rather than inventing
+  behavior. All four still validate the fd is a real console handle first
+  (`GetFileType`/`GetConsoleMode`, same as `tcgetattr`/`tcsetattr`) and
+  return `EBADF`/`ENOTTY` correctly. `tests/termios_line_control_test.c`
+  (already landed for the macOS port, host-generic, no `#ifdef` gating)
+  covers this without needing a new test file. All 105 tests pass on
+  Windows via a genuine `cmake --fresh` reconfigure.
+
 - **Ported real macOS termios (`tcgetattr`/`tcsetattr`/`tcdrain`/`tcflow`/
   `tcflush`/`tcsendbreak`)**, closing the gap the same-day Linux termios
   entry below explicitly deferred ("macOS keeps its pre-existing
