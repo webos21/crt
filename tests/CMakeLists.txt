@@ -501,6 +501,11 @@ set_tests_properties(prctl_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "prctl_test: ok"
 )
 
+add_crt_test(ifaddrs_test ifaddrs_test.c)
+set_tests_properties(ifaddrs_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "ifaddrs_test: ok"
+)
+
 add_crt_test(wait_test wait_test.c)
 set_tests_properties(wait_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "wait_test: ok"
