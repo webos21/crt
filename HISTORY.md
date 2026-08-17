@@ -10,6 +10,30 @@ substantive update.
 
 ## 2026-08-17
 
+- **Fixed the real macOS `ifaddrs`/`/dev/zero` regressions found by
+  `cmake --workflow --preset macos-host-ninja-debug` on this host.** The
+  build first failed in `libc/src/ifaddrs.c` because this project's public
+  `include/ifaddrs.h` exposes the Bionic/POSIX `ifa_dstaddr` macro
+  (`ifa_ifu.ifu_dstaddr`), and the macOS adapter's private Darwin mirror
+  struct reused `ifa_dstaddr` as an internal field name. That macro expanded
+  inside the private struct declaration and at the call site, breaking the C
+  syntax. Fixed by renaming the private Darwin field to `ifa_ifu` and keeping
+  the public ABI/macro shape unchanged. Also made the Darwin IPv4 sockaddr
+  translator return an explicit `struct sockaddr*` cast so the `-Werror`
+  build stays clean.
+
+  After that build fix, the full macOS CTest run exposed one runtime mismatch:
+  `dev_zero_test` failed at `open("/dev/zero", O_WRONLY)`. Linux/Bionic
+  `/dev/zero` accepts writes and discards them; this macOS host's real
+  `/dev/zero` is readable but rejects write-only opens. Fixed the macOS PAL
+  path by mapping write-only `/dev/zero` opens to the real `/dev/null` (an
+  exact discard sink for that access mode) and by making `access("/dev/zero",
+  F_OK|R_OK|W_OK)` report the Bionic/Linux surface while still rejecting
+  `X_OK`. Read opens continue to use the real macOS `/dev/zero`.
+
+  Verified: `cmake --workflow --preset macos-host-ninja-debug` completes
+  configure, full rebuild, and **101/101** tests on this machine.
+
 - **Verified `PTHREAD_PROCESS_SHARED` on real macOS hardware and fixed two
   stale pre-existing test expectations it broke**, closing the "reasoned
   but not yet verified on real hardware" caveat the same-day

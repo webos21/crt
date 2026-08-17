@@ -133,11 +133,10 @@ pretending that every Linux procfs/devfs entry exists.
 
 macOS shares the `/proc/*` virtual files above (same `libc/src/fd.c` code,
 compiled for any non-Linux host) -- macOS has no real `/proc` at all, same
-"real host fact" reasoning as `/proc/self/exe` just below. `/dev/zero` is
-*not* shared: both Linux and macOS have a genuine host device at that exact
-path already, so `rootfs_path_for_host()`'s existing `host_path_exists()`
-check passes it straight through unchanged on those two hosts, and no PAL
-code was needed there at all.
+"real host fact" reasoning as `/proc/self/exe` just below. Linux's real
+`/dev/zero` already matches the Bionic contract. macOS's real `/dev/zero` is
+used for reads, but write-only opens are mapped to `/dev/null` so the
+Bionic/Linux "writes are discarded" behavior is preserved.
 
 ### `/proc/self/exe` On macOS
 

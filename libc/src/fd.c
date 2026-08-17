@@ -584,6 +584,10 @@ static int rootfs_path_is_dev_tty(const char* path) {
   return path != 0 && strcmp(path, "/dev/tty") == 0;
 }
 
+static int rootfs_path_is_dev_zero(const char* path) {
+  return path != 0 && strcmp(path, "/dev/zero") == 0;
+}
+
 static int macos_use_host_dev_tty(void) {
   const char* value = getenv("CRT_USE_HOST_TTY");
 
@@ -1473,8 +1477,17 @@ int open(const char* path, int flags, ...) {
   if (rootfs_path_is_dev_tty(path) && !macos_use_host_dev_tty()) {
     return (int)__set_errno(ENXIO);
   }
+  /* Darwin's real /dev/zero is readable but rejects write-only opens on this
+   * host. Bionic/Linux accept writes and discard them, so write-only opens can
+   * be represented exactly by the real /dev/null without adding another PAL fd
+   * kind. Read paths still use the real /dev/zero. */
+  if (rootfs_path_is_dev_zero(path) && (syscall_flags & O_ACCMODE) == O_WRONLY) {
+    path = "/dev/null";
+  } else
 #endif
+  {
   path = rootfs_path_for_host(path, translated_path);
+  }
 #endif
   fd = (int)normalize_syscall_result(__crt_sys_open(path, syscall_flags, mode));
   if (fd < 0) {
@@ -1708,6 +1721,11 @@ int access(const char* path, int mode) {
   }
 #endif
 #if !defined(CRT_TARGET_OS_WINDOWS)
+#if defined(CRT_TARGET_OS_MACOS)
+  if (rootfs_path_is_dev_zero(path)) {
+    return (mode & X_OK) != 0 ? (int)__set_errno(EACCES) : 0;
+  }
+#endif
   path = rootfs_path_for_host(path, translated_path);
 #endif
   return (int)normalize_syscall_result(__crt_sys_access(path, mode));

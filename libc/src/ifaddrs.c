@@ -185,7 +185,7 @@ struct crt_darwin_ifaddrs {
   unsigned int ifa_flags;
   void* ifa_addr;
   void* ifa_netmask;
-  void* ifa_dstaddr;
+  void* ifa_ifu;
   void* ifa_data;
 };
 
@@ -216,7 +216,7 @@ static struct sockaddr* crt_translate_darwin_sockaddr_in(const void* darwin_addr
   out->sin_family = (sa_family_t)src->sin_family;
   out->sin_port = src->sin_port;
   out->sin_addr = src->sin_addr;
-  return out;
+  return (struct sockaddr*)out;
 }
 
 int getifaddrs(struct ifaddrs** ifap) {
@@ -273,7 +273,7 @@ int getifaddrs(struct ifaddrs** ifap) {
     node->ifa_flags = it->ifa_flags;
     node->ifa_addr = crt_translate_darwin_sockaddr_in(it->ifa_addr);
     node->ifa_netmask = crt_translate_darwin_sockaddr_in(it->ifa_netmask);
-    node->ifa_broadaddr = crt_translate_darwin_sockaddr_in(it->ifa_dstaddr);
+    node->ifa_broadaddr = crt_translate_darwin_sockaddr_in(it->ifa_ifu);
     crt_ifaddrs_append(&head, &tail, node);
   }
 
