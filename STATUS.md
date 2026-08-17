@@ -37,22 +37,41 @@ in those two win.
   own `cmake --workflow` step does not run `port-test-recipes` (a
   separate, heavier target that fetches and builds third-party sources)
   -- that's verified locally/per-host instead, see below.
-- **`ctest`**: 110 registered tests on Windows and 77 on macOS in the
-  latest local run (count is slightly
+- **`ctest`**: 117 registered tests on Windows and 95 on macOS in the
+  latest local runs (count is slightly
   OS-dependent -- a few targets, like `windows_export_hygiene_test`, only
-  exist on their own OS), all passing locally on Windows (110/110, most
-  recently confirmed after implementing `PTHREAD_PROCESS_SHARED` --
+  exist on their own OS), all passing on both (117/117 on Windows, 95/95
+  on macOS -- separately confirmed on each host, not simultaneously, so
+  the exact registered-test overlap between the two counts hasn't been
+  cross-checked item-by-item). Most recently confirmed on Windows after
+  implementing the last three items of the Bionic libc gap audit's
+  "lower priority" tier -- `ifaddrs.h` (real per-host: Linux `/sys/class/
+  net` + ioctls, macOS the real Darwin `getifaddrs()` resolved at
+  runtime plus sockaddr translation, Windows `GetAdaptersInfo()`) and
+  `ucontext.h` (real `getcontext`/`setcontext`/`makecontext`/
+  `swapcontext` on every host/arch via new assembly mirroring this
+  project's own proven `setjmp`/`longjmp` register sets; a real coroutine
+  round-trip test caught and fixed two genuine bugs on Windows x86_64 --
+  an LLP64 struct-layout mismatch, and a `swapcontext()` resume-point bug
+  using an adjusted stack pointer with a `retq`-based resume path that
+  needs the unadjusted one) -- see `HISTORY.md`'s 2026-08-17 entries for
+  the full per-item writeups; verified via a genuine `cmake --fresh`
+  reconfigure. Just before that: `uchar.h`/`threads.h`/`sys/prctl.h`/
+  `glob.h`, which surfaced and fixed two real, previously-undetected
+  bugs with no prior regression coverage (`fnmatch()`'s inverted
+  end-of-pattern match logic, breaking every consumer including toybox's
+  `find`/`grep`/`tar`; `remove()` never handling directories, contrary to
+  the C standard). This closes out **every** item from the 2026-08-16
+  Bionic libc gap audit -- high, medium, and lower priority alike. Just
+  before that: `PTHREAD_PROCESS_SHARED` --
   real and cross-process on Linux (non-private futex ops) and macOS
-  (`os_sync_wait_on_address`'s `SHARED` flag, reasoned but not yet
-  verified on real hardware), unconditional on every host including
+  (`os_sync_wait_on_address`'s `SHARED` flag, verified for real on macOS
+  hardware the same day), unconditional on every host including
   Windows for `pthread_spinlock` (pure atomics, no OS wait/wake primitive
   involved), and an honest `ENOTSUP` on Windows for the other four
   primitives (`WaitOnAddress`/`WakeByAddress*` have no cross-process
   capability to opt into at all) -- see `HISTORY.md`'s 2026-08-17 entry
-  for the full per-host writeup; new `tests/pthread_process_shared_test.c`
-  plus an updated `tests/pthread_spin_test.c`, verified via a genuine
-  `cmake --fresh` reconfigure). This closes out every item in TODO.md's
-  "Bionic libc completeness before `libcrtgfx`" section. Just before
+  for the full per-host writeup. Just before
   that: `dl_iterate_phdr`/`link.h`/`elf.h`/`dladdr` (real per-host
   implementations wherever each host actually has something real to
   report -- see `HISTORY.md`'s 2026-08-17 entry for the full per-host
@@ -239,6 +258,39 @@ in those two win.
   `sendmsg`/`recvmsg`/`eventfd` neighbors on the same syscall ABI rely on;
   the private-futex half of the same file was already confirmed correct
   by real Linux CI before this change).
+- **`sys/prctl.h`'s Linux raw `prctl` syscall trampoline is unverified on
+  real hardware**: written 2026-08-17, reasoned from well-known stable
+  UAPI syscall numbers (x86_64=157, aarch64=167) -- same discipline as
+  the other Linux raw-syscall entries above. `tests/prctl_test.c`'s real
+  `PR_SET_NAME`/`PR_GET_NAME`/`PR_GET_DUMPABLE` checks (under
+  `CRT_TARGET_OS_LINUX`) are what verify this the next time it runs on
+  real Linux CI/hardware; the `ENOSYS` path on macOS/Windows and the
+  `PR_*` constant values (fixed UAPI, not host-dependent) are already
+  verified directly from this session.
+- **`ifaddrs.h`'s Linux `/sys/class/net` + `SIOCGIFADDR`/`SIOCGIFNETMASK`/
+  `SIOCGIFBRDADDR`/`SIOCGIFFLAGS` ioctl path is unverified on real
+  hardware**: written 2026-08-17, reasoned from well-known stable UAPI
+  ioctl numbers -- same discipline as above. `tests/ifaddrs_test.c`'s
+  real interface-enumeration checks (host-agnostic, so they already ran
+  successfully against the real Windows `GetAdaptersInfo()` backend this
+  session) are what verify the Linux path the next time it runs on real
+  Linux CI/hardware. The macOS backend (real Darwin `getifaddrs()`
+  resolved at runtime) needed one real fix already found by real macOS
+  testing the same day (a private-struct field name colliding with this
+  project's own public `ifa_dstaddr` macro) -- see `HISTORY.md`.
+- **`ucontext.h`'s Linux, macOS, and aarch64 (all three architectures'
+  non-Windows-x86_64 combinations) assembly is unverified on real
+  hardware**: written 2026-08-17, mirroring this project's own already-
+  verified per-host/per-arch `setjmp`/`longjmp` register sets. Windows
+  x86_64 was verified directly via a real coroutine round-trip test that
+  caught and fixed two genuine bugs during development (see `HISTORY.md`'s
+  full writeup) -- the same test (`tests/ucontext_test.c`) is what
+  verifies the other five host/arch combinations the next time they run
+  on real hardware/CI. Since the swapcontext() resume-point bug found on
+  Windows x86_64 was pure x86_64 `call`/`ret` ABI mechanics (not
+  Windows-specific), it was reasoned to apply identically to Linux/macOS
+  x86_64 and fixed there too pre-emptively, but neither has been
+  independently re-confirmed by actually running the test.
 
 ## Next
 
@@ -268,21 +320,31 @@ in those two win.
   confirmed reason recorded in `TODO.md` rather than "not done yet").
 - A real, evidence-based Bionic libc gap audit was done before starting
   `libcrtgfx` (see `docs/bionic_libc_gaps.md`, `TODO.md`'s "Bionic libc
-  completeness before `libcrtgfx`" section). All four "high priority"
-  findings are done -- `semaphore.h`, public `<stdatomic.h>`, `sendmsg`/
-  `recvmsg` + `SCM_RIGHTS`/`CMSG_*` fd passing, and `memfd_create` -- and
-  so are all three "medium priority" items: `epoll`/`eventfd`/`timerfd`,
-  `dl_iterate_phdr`/`link.h`/`elf.h`/`dladdr`, and `PTHREAD_PROCESS_SHARED`
-  -- see `HISTORY.md`. This closes out the entire "Bionic libc
-  completeness before `libcrtgfx`" section. Real follow-ups remain: the
-  new Linux/macOS `sendmsg`/`recvmsg`, Linux `eventfd`/`timerfd`/`epoll`/
-  `dl_iterate_phdr`/`dladdr` raw syscall trampolines, and the macOS
-  `PTHREAD_PROCESS_SHARED` `os_sync_wait_on_address` `SHARED` flag all
-  need real hardware verification (see "Known gaps" above). Lower-priority
-  items with no identified near-term consumer stay open: `glob.h`/
-  `sys/prctl.h`/`ucontext.h`/`ifaddrs.h`/`threads.h`/`uchar.h`. Per the
-  user's own framing, this now positions the project to move into the
-  `libcrtgfx` upper-runtime phase (`docs/runtime_roadmap.md`).
+  completeness before `libcrtgfx`" section). **Every item found by that
+  audit is now done** -- all four "high priority" findings (`semaphore.h`,
+  public `<stdatomic.h>`, `sendmsg`/`recvmsg` + `SCM_RIGHTS`/`CMSG_*` fd
+  passing, `memfd_create`), all three "medium priority" items
+  (`epoll`/`eventfd`/`timerfd`, `dl_iterate_phdr`/`link.h`/`elf.h`/
+  `dladdr`, `PTHREAD_PROCESS_SHARED`), and all six "lower priority, no
+  identified near-term consumer" items (`uchar.h`, `threads.h`,
+  `sys/prctl.h`, `glob.h`, `ifaddrs.h`, `ucontext.h`) -- see `HISTORY.md`.
+  Implementing the lower-priority tier surfaced and fixed four real,
+  previously-undetected/unresolved bugs along the way: `fnmatch()`'s
+  inverted end-of-pattern match logic (broke every consumer with no
+  regression test to have caught it, including toybox's
+  `find`/`grep`/`tar`), `remove()` never handling directories (contrary
+  to the C standard), and two Windows x86_64-specific `ucontext.h` bugs
+  (an LLP64 struct-layout mismatch, and a `swapcontext()` resume-point
+  bug needing an unadjusted stack pointer for its `retq`-based resume
+  path) caught by a real coroutine round-trip test. Real follow-ups
+  remain: the new Linux/macOS `sendmsg`/`recvmsg`, Linux
+  `eventfd`/`timerfd`/`epoll`/`dl_iterate_phdr`/`dladdr`/`ifaddrs`/
+  `prctl` raw syscall/ioctl trampolines, the macOS `PTHREAD_PROCESS_
+  SHARED` `os_sync_wait_on_address` `SHARED` flag, and the Linux/macOS/
+  aarch64 `ucontext.h` assembly all need real hardware verification (see
+  "Known gaps" above). Per the user's own framing, this now positions the
+  project to move into the `libcrtgfx` upper-runtime phase
+  (`docs/runtime_roadmap.md`).
 - The next product-level target is documented in `docs/runtime_roadmap.md`:
   an Electron-class rebuilt runtime made of `libcrtgfx` (Skia + Wayland-style
   compositor boundary + Chromium Ozone path), `libcrtmedia` (FFmpeg/codecs/

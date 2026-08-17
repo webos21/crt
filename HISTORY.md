@@ -83,6 +83,164 @@ substantive update.
   `dl_iterate_phdr`/epoll/`PTHREAD_PROCESS_SHARED`-era tests), no other
   regressions.
 
+- **Implemented `ucontext.h`** (`getcontext`/`setcontext`/`makecontext`/
+  `swapcontext`), the last of the six "lower priority, no identified
+  near-term consumer" Bionic libc gaps from the 2026-08-16 audit --
+  closing out every item that audit found, across all three priority
+  tiers. Unlike the other five items in that tier, there is no honest
+  host-level reason to hold any host back here: the underlying mechanism
+  (save/restore the callee-saved register set + stack pointer + resume
+  address) is pure userspace state manipulation, no syscall or OS
+  primitive involved, so this project's own already-verified per-host/
+  per-arch `setjmp`/`longjmp` assembly (`libc/src/arch/*/*/setjmp.S`) was
+  the direct model for new `ucontext.S` files covering Linux/macOS/
+  Windows x86_64/aarch64 (six files). `mcontext_t`/`ucontext_t` are a
+  private, self-consistent layout (not bit-compatible with any host's
+  native ucontext_t) -- a deliberate, safe choice since this project's
+  own signal delivery doesn't hand a real `ucontext_t` to `SA_SIGINFO`
+  handlers today (the third handler parameter is opaque `void*`).
+  `makecontext()` supports up to 4 pointer-width arguments uniformly
+  across every host/arch, matching Windows x64's real 4-register limit
+  (the tightest of the ABIs covered) rather than the 6 SysV/AAPCS64
+  themselves allow, for one simple, uniform bootstrap-frame layout.
+
+  A real coroutine round-trip test (`tests/ucontext_test.c`: getcontext/
+  setcontext setjmp-style resume, then a full makecontext/swapcontext
+  coroutine with argument passing and a `uc_link`-driven return) caught
+  and fixed two genuine bugs during development, both on Windows x86_64
+  (the only host verifiable from this Windows-only dev session):
+  - A struct-layout bug: the makecontext bootstrap frame used `long`/
+    `unsigned long` fields, which are only 4 bytes on Windows' LLP64 data
+    model (unlike Linux/macOS's LP64, where they're already 8) -- silently
+    breaking the fixed-byte-offset indexing the trampoline assembly
+    depends on. Fixed with explicit `int64_t`/`uint64_t` on every host.
+  - A genuine `swapcontext()` resume-point bug: its saved stack-pointer
+    slot used the same `%rsp+8`-adjusted convention as `getcontext()`/
+    `setcontext()` (which resume via a raw `jmp` to a separately-saved
+    target address), but `swapcontext()`'s own resume point completes via
+    a real `retq` instead -- which needs the *unadjusted* stack pointer
+    to correctly pop the real return address. Saving the adjusted value
+    made `retq` pop an unrelated stack slot and jump to garbage,
+    reproducing as a reliable `STATUS_ACCESS_VIOLATION` jumping to
+    address 0 inside a real coroutine yield. Fixed on all three x86_64
+    variants (Linux/macOS/Windows); aarch64 was never affected, since
+    AAPCS64's `ret` resolves via the X30 link register rather than
+    popping the stack, so it has no analogous adjusted-vs-unadjusted
+    distinction to get wrong.
+
+  Windows also turned out to need one more real, host-specific piece
+  neither Linux nor macOS do at all: keeping the thread's TEB
+  (`NT_TIB.StackBase`/`StackLimit`, plus `DeallocationStack` -- stable,
+  documented offsets `gs:0x08`/`gs:0x10`/`gs:0x1478`) in sync with
+  whichever stack is currently running. Left stale after switching to a
+  `makecontext()`-created stack, various things that consult it can
+  behave incorrectly; found for real when the coroutine test's first
+  `swapcontext()`-into-a-new-stack reliably crashed until this was added.
+  `getcontext()`/`setcontext()`/`swapcontext()` now all save/restore
+  these three fields alongside the register set; `makecontext()` seeds
+  them from `uc_stack` for a context's first activation.
+
+  Verified directly on Windows x86_64 (real coroutine round trip, real
+  bugs found and fixed via a vectored-exception-handler diagnostic
+  session). Linux/macOS and aarch64 (all three hosts) reasoned carefully
+  from the same proven register set but not yet run on real hardware
+  from this Windows-only dev session -- matching this session's
+  established discipline for other Linux/macOS raw-ABI work.
+
+- **Implemented `ifaddrs.h`** (`getifaddrs`/`freeifaddrs`), the fifth of
+  the six "lower priority" Bionic libc gaps. `struct ifaddrs` matches
+  real Bionic's minimal shape; scoped to AF_INET (IPv4) only on every
+  host, consistent with this project's existing AF_INET/AF_UNIX-only
+  sockaddr translation scope on macOS (`socket.c`).
+  - **Linux**: real, via `/sys/class/net` (real, and deliberately
+    independent of the exact kernel `struct ifreq`/`ifconf` byte layout,
+    unlike `SIOCGIFCONF`'s packed-array-of-`ifreq` return) for interface
+    enumeration, then `SIOCGIFADDR`/`SIOCGIFNETMASK`/`SIOCGIFBRDADDR`/
+    `SIOCGIFFLAGS` ioctls per interface through a deliberately over-sized
+    private `ifreq` shape (safe regardless of the exact real kernel
+    `ifr_ifru` union size). Reasoned from well-known stable UAPI ioctl
+    numbers, flagged unverified pending real Linux hardware/CI.
+  - **macOS**: real, resolving the actual Darwin `getifaddrs()`/
+    `freeifaddrs()` at runtime (the same `__crt_macho_find_symbol_in_
+    loaded_image` + `dlsym(RTLD_NEXT)` technique this project's
+    `getaddrinfo()` macOS backend already uses, avoiding a name collision
+    with this project's own public `getifaddrs()` symbol), then
+    translating each Darwin-native (`sa_len`-prefixed) sockaddr into this
+    project's own Bionic/Linux-shaped sockaddr.
+  - **Windows**: real, via the IP Helper API's `GetAdaptersInfo()`
+    (`iphlpapi.dll`, loaded dynamically at runtime like this project's
+    other optional Windows APIs), chosen over the newer, larger,
+    versioned `IP_ADAPTER_ADDRESSES`/`GetAdaptersAddresses()` specifically
+    because `GetAdaptersInfo()`'s small, non-versioned struct is much
+    lower risk to transcribe correctly from documentation. Verified
+    directly: `tests/ifaddrs_test.c` confirmed real adapter names/flags/
+    addresses are returned on this dev machine.
+
+  Real macOS testing the same day (see the entry above, dated after this
+  one) found and fixed a real build break this work introduced: the
+  private Darwin mirror struct's `ifa_dstaddr` field name collided with
+  the public `ifa_dstaddr` macro (`ifa_ifu.ifu_dstaddr`) this same header
+  defines, breaking C syntax the moment the macOS-only code path was
+  actually compiled (invisible from this Windows-only session, since
+  that `#elif defined(CRT_TARGET_OS_MACOS)` branch never compiles here).
+
+- **Implemented `uchar.h`/`threads.h`/`sys/prctl.h`/`glob.h`**, four of
+  the six "lower priority, no identified near-term consumer" Bionic libc
+  gaps, and fixed two real, previously-undetected bugs surfaced while
+  implementing `glob.h`.
+  - **`uchar.h`**: `mbrtoc16`/`c16rtomb`/`mbrtoc32`/`c32rtomb`, layered on
+    the existing `mbrtowc()`/`wcrtomb()` UTF-8<->UTF-32 codepoint
+    conversion (this project's `wchar_t` is a 32-bit codepoint on every
+    host via `-fwchar-type=int`). `mbrtoc16`/`c16rtomb` add real UTF-16
+    surrogate-pair handling for codepoints outside the BMP, using two
+    sentinel values in `mbstate_t`'s spare byte that real UTF-8 decoding
+    never produces.
+  - **`threads.h`**: C11 thin wrapper over pthreads, matching real
+    Bionic's own approach. `thrd_create()` adapts `thrd_start_t`'s
+    `int(*)(void*)` signature to `pthread_create()`'s `void*(*)(void*)`
+    via a small heap-allocated shim. Added `pthread_mutex_timedlock()` to
+    `pthread.c`/`pthread.h` as a real new Bionic-parity primitive
+    `mtx_timedlock()` needed, reusing `realtime_until()`/
+    `__crt_wait32_timed{,_shared}()`.
+  - **`sys/prctl.h`**: real on Linux (raw `prctl` syscall trampoline,
+    x86_64=157, aarch64=167 -- reasoned carefully, flagged unverified
+    pending real Linux hardware/CI), `ENOSYS` on macOS/Windows since
+    `prctl` is a Linux-only kernel concept (real Bionic's own header is
+    Linux-specific too).
+  - **`glob.h`**: real `glob()`/`globfree()` built on `opendir`/
+    `readdir`/`fnmatch`/`stat`, not a stub. Supports `GLOB_APPEND`/
+    `GLOB_DOOFFS`/`GLOB_ERR`/`GLOB_MARK`/`GLOB_NOCHECK`/`GLOB_NOSORT`/
+    `GLOB_NOESCAPE`, multi-component wildcard patterns, the standard
+    hidden-dotfile convention, and `errfunc`/`GLOB_ERR` reporting for
+    both failed `opendir()` (wildcard segments) and failed `stat()`
+    (literal segments).
+
+  Implementing `glob()` surfaced two real, previously-undetected libc
+  bugs -- neither had a dedicated regression test before this:
+  - **`fnmatch()`**: `match_here()`'s end-of-pattern base case returned
+    the *inverted* value -- `return *s == 0 || ...` is 1 (`FNM_NOMATCH`)
+    exactly when there IS a match (both pattern and string exhausted),
+    and 0 (match) exactly when there ISN'T. This broke every `fnmatch()`
+    call whose pattern's trailing wildcard needed that base case to
+    report success, e.g. `fnmatch("*.txt", "alpha.txt", 0)` always
+    failed. Affects every real `fnmatch()` consumer in the tree (toybox
+    `find`/`grep`/`tar`/`ip`/`modprobe` via `portability.h`) that hit
+    this path -- there was no `fnmatch_test.c` to have caught it. Fixed;
+    added one.
+  - **`remove()`**: only ever called `unlink()`, so `remove()` on a
+    directory always failed -- the C standard requires `remove()` to
+    work for files and (empty) directories alike, same as every real
+    libc. Fixed to `stat()` the path first and dispatch to `rmdir()` for
+    directories. Found because `glob_test.c`'s own cleanup (removing a
+    test directory between runs) kept silently failing. Added a
+    regression case to `stdio_file_test.c`.
+
+  New tests: `uchar_test.c`, `threads_test.c`, `prctl_test.c`,
+  `fnmatch_test.c`, `glob_test.c` (real directory-tree wildcard matching,
+  `GLOB_MARK`/`APPEND`/`DOOFFS`/`NOCHECK`/`ERR`, `errfunc` reporting for
+  both failure paths). Full ctest suite passing on Windows; `cmake
+  --fresh` reconfigure verified clean.
+
 - **Implemented `PTHREAD_PROCESS_SHARED`**, closing out every item in
   TODO.md's "Bionic libc completeness before `libcrtgfx`" section. Real,
   per-primitive, per-host support rather than a single blanket flag:

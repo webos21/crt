@@ -251,22 +251,77 @@ All four items originally listed here are now **done** -- see `HISTORY.md`'s
 
 ## Lower priority: general POSIX/Bionic completeness, no identified near-term consumer yet
 
-Real Bionic has all of these; this project doesn't yet, and nothing in the
-current roadmap concretely needs them:
+All six items originally listed here are now **done** (2026-08-17) -- see
+`HISTORY.md`'s entries for the full per-item writeups. Summary:
 
-- `glob.h` (`glob`/`globfree`)
-- `sys/prctl.h` (`prctl` -- Android uses this heavily for thread naming,
-  seccomp, etc., but this project already has its own thread-naming path)
-- `ucontext.h` (`getcontext`/`setcontext`/`makecontext`/`swapcontext`)
-- `ifaddrs.h` (`getifaddrs`/`freeifaddrs`)
-- `threads.h` (C11 `<threads.h>`, a thin wrapper over pthreads in real
-  Bionic)
-- `uchar.h` (`char16_t`/`char32_t`, `c16rtomb`/`c32rtomb` etc.)
+- **`uchar.h`** -- `mbrtoc16`/`c16rtomb`/`mbrtoc32`/`c32rtomb`, layered on
+  the existing `mbrtowc()`/`wcrtomb()` UTF-8<->UTF-32 codepoint conversion
+  (this project's `wchar_t` is a 32-bit codepoint on every host via
+  `-fwchar-type=int`). `mbrtoc16`/`c16rtomb` add real UTF-16 surrogate-pair
+  handling for codepoints outside the BMP.
+- **`threads.h`** -- C11 thin wrapper over pthreads, matching real Bionic's
+  own approach. `thrd_create()` adapts `thrd_start_t`'s `int(*)(void*)`
+  signature to `pthread_create()`'s `void*(*)(void*)` via a small heap
+  shim. Added `pthread_mutex_timedlock()` as a real new Bionic-parity
+  primitive `mtx_timedlock()` needed.
+- **`sys/prctl.h`** -- real on Linux (raw `prctl` syscall trampoline,
+  x86_64=157, aarch64=167 -- reasoned carefully, flagged unverified
+  pending real Linux hardware/CI), `ENOSYS` on macOS/Windows since `prctl`
+  is a Linux-only kernel concept (real Bionic's own header is
+  Linux-specific too).
+- **`glob.h`** -- real `glob()`/`globfree()` built on
+  `opendir`/`readdir`/`fnmatch`/`stat`. Supports `GLOB_APPEND`/
+  `GLOB_DOOFFS`/`GLOB_ERR`/`GLOB_MARK`/`GLOB_NOCHECK`/`GLOB_NOSORT`/
+  `GLOB_NOESCAPE`, multi-component wildcard patterns, and the standard
+  hidden-dotfile convention. Implementing this surfaced two real,
+  previously-undetected bugs with no prior regression coverage: `fnmatch()`
+  had an inverted end-of-pattern match/no-match return (broke every
+  pattern whose trailing wildcard needed that base case -- e.g.
+  `fnmatch("*.txt", "alpha.txt", 0)` always failed -- affecting every real
+  consumer, including toybox's `find`/`grep`/`tar`), and `remove()` never
+  handled directories (only ever called `unlink()`, so `remove()` on a
+  directory always failed, contrary to the C standard). Both fixed with
+  new regression tests (`tests/fnmatch_test.c`, a `stdio_file_test.c`
+  case).
+- **`ifaddrs.h`** -- real `getifaddrs()`/`freeifaddrs()`, IPv4-only on
+  every host (matching this project's existing AF_INET/AF_UNIX-only
+  sockaddr translation scope on macOS). Linux via `/sys/class/net` +
+  `SIOCGIFADDR`/`SIOCGIFNETMASK`/`SIOCGIFBRDADDR`/`SIOCGIFFLAGS` ioctls
+  (reasoned, unverified pending real Linux hardware); macOS via the real
+  Darwin `getifaddrs()` resolved at runtime plus sockaddr translation;
+  Windows via `GetAdaptersInfo()` (IPv4-only itself), verified directly.
+- **`ucontext.h`** -- real `getcontext()`/`setcontext()`/`makecontext()`/
+  `swapcontext()` on every host and both architectures (x86_64/aarch64) --
+  unlike the other items above, there is no honest host-level reason to
+  hold any host back here: the mechanism (save/restore the callee-saved
+  register set + stack pointer + resume address) is pure userspace state,
+  mirroring this project's own already-verified `setjmp`/`longjmp`
+  assembly. `makecontext()` supports up to 4 pointer-width arguments (a
+  real, documented scope limit -- the number of integer argument
+  registers Windows x64 has, used uniformly on every ABI for one simple
+  bootstrap-frame layout). A real coroutine round-trip test
+  (`tests/ucontext_test.c`) caught and fixed two genuine bugs on Windows
+  x86_64 during development: a struct-layout bug (`long`/`unsigned long`
+  are 4 bytes on Windows' LLP64 data model, not 8 like Linux/macOS's
+  LP64, breaking the fixed-byte-offset bootstrap frame the trampoline
+  assembly indexes into -- fixed with explicit `int64_t`/`uint64_t`), and
+  a `swapcontext()` resume-point bug (its SP slot was saved
+  `%rsp`-plus-8-adjusted, matching `getcontext()`'s convention, but its
+  own resume label completes via a real `retq` rather than a raw `jmp` --
+  `retq` needs the *unadjusted* stack pointer to correctly pop the real
+  return address; saving the adjusted value caused it to jump to garbage
+  instead). Windows also needs its thread's TEB (`NT_TIB.StackBase`/
+  `StackLimit`/`DeallocationStack`) kept in sync with whichever stack is
+  currently running -- a real requirement Linux/macOS don't have at all,
+  found by the same coroutine test crashing until it was added. Verified
+  directly on Windows x86_64; Linux/macOS and aarch64 (all three hosts)
+  reasoned carefully from the same proven register set but not yet run
+  on real hardware from this session.
 
-`glob.h`/`wordexp.h`/`nl_types.h`/`aio.h` are lower priority still --
-real Bionic either doesn't implement them meaningfully (`wordexp`/`aio_*`
-are effectively stubs even on Android) or they have no plausible graphics-
-stack consumer.
+`wordexp.h`/`nl_types.h`/`aio.h` remain lower priority still, not covered
+by this sweep -- real Bionic either doesn't implement them meaningfully
+(`wordexp`/`aio_*` are effectively stubs even on Android) or they have no
+plausible graphics-stack consumer.
 
 Already known and tracked elsewhere, not new findings, listed here only for
 completeness against this same sweep:

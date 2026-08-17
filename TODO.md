@@ -171,10 +171,23 @@ guessed -- full findings, evidence, and priority tiers in
   the other four primitives
   (`WaitOnAddress`/`WakeByAddress*` are documented same-process-only with
   no cross-process capability to opt into) -- see `docs/bionic_libc_gaps.md`
-  for the full per-host writeup. This closes out every item in this
-  section.
-- **Lower priority, no identified near-term consumer**: `glob.h`,
-  `sys/prctl.h`, `ucontext.h`, `ifaddrs.h`, `threads.h` (C11), `uchar.h`.
+  for the full per-host writeup. This closed out every medium-priority
+  item; see the next bullet for the lower-priority tier.
+- **Lower priority, no identified near-term consumer**: also **done**
+  (2026-08-17) -- `uchar.h`, `threads.h`, `sys/prctl.h`, `glob.h`,
+  `ifaddrs.h`, `ucontext.h`. Real implementations throughout, not stubs;
+  see `docs/bionic_libc_gaps.md`'s "Lower priority" section for the full
+  per-item writeup and `HISTORY.md` for the implementation trail.
+  Implementing `glob.h` surfaced and fixed two real, previously-
+  undetected bugs with no prior regression coverage (`fnmatch()`'s
+  inverted end-of-pattern match logic, `remove()` never handling
+  directories). Implementing `ucontext.h` surfaced and fixed two real
+  bugs on Windows x86_64 (an LLP64 struct-layout mismatch, and a
+  `swapcontext()` resume-point bug using an adjusted stack pointer with a
+  `retq`-based resume path that needs the unadjusted one) via a real
+  coroutine round-trip test. This closes out **every** item from the
+  2026-08-16 Bionic libc gap audit -- high, medium, and lower priority
+  alike.
 - Already known/tracked elsewhere (not new findings): C++ exceptions/RTTI
   across the runtime boundary (`docs/cxx_runtime.md`), `pthread_cancel`
   (a real `ENOTSUP` stub).
