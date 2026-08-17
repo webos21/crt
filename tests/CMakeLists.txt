@@ -214,6 +214,17 @@ set_tests_properties(file_path_test_runs PROPERTIES
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 
+add_crt_test(fnmatch_test fnmatch_test.c)
+set_tests_properties(fnmatch_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "fnmatch_test: ok"
+)
+
+add_crt_test(glob_test glob_test.c)
+set_tests_properties(glob_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "glob_test: ok"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
 add_crt_test(sysconf_test sysconf_test.c)
 set_tests_properties(sysconf_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "sysconf_test: ok"
@@ -338,6 +349,11 @@ set_tests_properties(locale_test_runs PROPERTIES
 add_crt_test(wchar_mbstate_test wchar_mbstate_test.c)
 set_tests_properties(wchar_mbstate_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "wchar_mbstate_test: ok"
+)
+
+add_crt_test(uchar_test uchar_test.c)
+set_tests_properties(uchar_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "uchar_test: ok"
 )
 
 add_crt_test(stdlib_test stdlib_test.c)
@@ -480,6 +496,11 @@ set_tests_properties(epoll_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "epoll_test: ok"
 )
 
+add_crt_test(prctl_test prctl_test.c)
+set_tests_properties(prctl_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "prctl_test: ok"
+)
+
 add_crt_test(wait_test wait_test.c)
 set_tests_properties(wait_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "wait_test: ok"
@@ -596,6 +617,11 @@ set_tests_properties(pthread_cond_test_runs PROPERTIES
 add_crt_test(pthread_process_shared_test pthread_process_shared_test.c)
 set_tests_properties(pthread_process_shared_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_process_shared_test: ok"
+)
+
+add_crt_test(threads_test threads_test.c)
+set_tests_properties(threads_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "threads_test: ok"
 )
 
 add_crt_test(pthread_key_test pthread_key_test.c)

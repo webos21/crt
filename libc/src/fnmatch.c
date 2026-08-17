@@ -44,7 +44,24 @@ static int match_here(const char* pattern, const char* string, int flags) {
   const char* s = string;
 
   for (;;) {
-    if (*p == 0) return *s == 0 || ((flags & FNM_LEADING_DIR) && *s == '/');
+    /* End of pattern: a match iff the string is also exhausted (or, under
+     * FNM_LEADING_DIR, iff whatever remains of the string starts with a
+     * '/' -- the pattern matched a leading directory component). This
+     * previously returned the inverted value (`*s == 0 || ...` is 1 --
+     * FNM_NOMATCH -- exactly when there IS a match, and 0 -- match --
+     * exactly when there ISN'T), silently breaking every fnmatch() call
+     * whose pattern's last wildcard needed this base case to report
+     * success (e.g. "*.txt" against "alpha.txt": the recursive attempt
+     * that lines up correctly hit this line and was misreported as a
+     * failure, so the star loop kept scanning past it and the whole
+     * match eventually failed for real). No caller had a dedicated
+     * regression test until tests/fnmatch_test.c below caught it. */
+    if (*p == 0) {
+      if (*s == 0 || ((flags & FNM_LEADING_DIR) && *s == '/')) {
+        return 0;
+      }
+      return FNM_NOMATCH;
+    }
 
     if (*p == '*') {
       while (*p == '*') ++p;

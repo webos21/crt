@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 static int fail(const char* message) {
@@ -398,6 +399,18 @@ int main(void) {
   fclose(renamed);
   if (remove("stdio_file_test.renamed.tmp") != 0) {
     return fail("remove");
+  }
+
+  /* remove() must also work on an (empty) directory, per the C standard --
+   * not just unlink() a file. */
+  if (mkdir("stdio_file_test.dir.tmp", 0755) != 0) {
+    return fail("mkdir for remove");
+  }
+  if (remove("stdio_file_test.dir.tmp") != 0) {
+    return fail("remove directory");
+  }
+  if (access("stdio_file_test.dir.tmp", F_OK) == 0) {
+    return fail("remove directory left it behind");
   }
 
   puts("stdio_file_test: ok");

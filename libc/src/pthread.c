@@ -875,6 +875,51 @@ int pthread_mutex_lock(pthread_mutex_t* mutex) {
   return 0;
 }
 
+int pthread_mutex_timedlock(pthread_mutex_t* mutex, const struct timespec* abstime) {
+  pthread_t self;
+  int type;
+  int expected;
+  int wait_result;
+
+  if (mutex == 0 || abstime == 0) {
+    return EINVAL;
+  }
+  self = pthread_self();
+  type = mutex_type(mutex);
+
+  if (type != PTHREAD_MUTEX_NORMAL && mutex_owner(mutex) == self) {
+    if (type == PTHREAD_MUTEX_ERRORCHECK) {
+      return EDEADLK;
+    }
+    ++mutex->__private[CRT_MUTEX_COUNT_WORD];
+    return 0;
+  }
+
+  for (;;) {
+    expected = 0;
+    if (crt_atomic_compare_exchange_acq_rel(mutex_state(mutex), &expected, 1)) {
+      break;
+    }
+    while (crt_atomic_load_relaxed(mutex_state(mutex)) != 0) {
+      struct timespec remaining;
+      int until_result = realtime_until(abstime, &remaining);
+
+      if (until_result != 0) {
+        return until_result;
+      }
+      wait_result = mutex_shared(mutex)
+                         ? __crt_wait32_timed_shared(&mutex->__private[CRT_MUTEX_STATE_WORD], 1, &remaining)
+                         : __crt_wait32_timed(&mutex->__private[CRT_MUTEX_STATE_WORD], 1, &remaining);
+      if (wait_result != 0 && wait_result != EINTR && wait_result != EAGAIN) {
+        return wait_result;
+      }
+    }
+  }
+  set_mutex_owner(mutex, self);
+  mutex->__private[CRT_MUTEX_COUNT_WORD] = 1;
+  return 0;
+}
+
 int pthread_mutex_trylock(pthread_mutex_t* mutex) {
   pthread_t self;
   int expected = 0;

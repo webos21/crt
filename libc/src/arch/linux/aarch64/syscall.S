@@ -905,3 +905,12 @@ __crt_sys_timerfd_gettime:
   svc #0
   ret
 .size __crt_sys_timerfd_gettime, . - __crt_sys_timerfd_gettime
+
+.globl __crt_sys_prctl
+.type __crt_sys_prctl, %function
+.p2align 2
+__crt_sys_prctl:
+  mov x8, #167
+  svc #0
+  ret
+.size __crt_sys_prctl, . - __crt_sys_prctl

@@ -908,3 +908,13 @@ __crt_sys_epoll_pwait:
   syscall
   retq
 .size __crt_sys_epoll_pwait, . - __crt_sys_epoll_pwait
+
+.globl __crt_sys_prctl
+.type __crt_sys_prctl, @function
+.p2align 4, 0x90
+__crt_sys_prctl:
+  movq %rcx, %r10
+  movq $157, %rax
+  syscall
+  retq
+.size __crt_sys_prctl, . - __crt_sys_prctl

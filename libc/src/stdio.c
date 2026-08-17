@@ -7,6 +7,7 @@
 #include <stdio_ext.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <wchar.h>
@@ -2500,10 +2501,17 @@ int setlinebuf(FILE* stream) {
 
 int remove(const char* path) {
   long result;
+  struct stat st;
 
   if (path == 0) {
     errno = EINVAL;
     return -1;
+  }
+  /* C standard remove() must work for both files and (empty) directories;
+   * unlink() alone only handles files -- dispatch to rmdir() for a
+   * directory, matching how every real libc implements remove(). */
+  if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
+    return rmdir(path);
   }
   result = __crt_sys_unlink(path);
   if (result < 0 && result >= -4095) {

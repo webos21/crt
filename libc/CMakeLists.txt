@@ -14,6 +14,7 @@ set(CRT_LIBC_SOURCES
   src/fd.c
   src/file_lock.c
   src/getopt.c
+  src/glob.c
   src/inotify.c
   src/inttypes.c
   src/langinfo.c
@@ -23,6 +24,7 @@ set(CRT_LIBC_SOURCES
   src/mman.c
   src/mntent.c
   src/poll.c
+  src/prctl.c
   src/printf.c
   src/process.c
   src/pthread.c
@@ -48,8 +50,10 @@ set(CRT_LIBC_SOURCES
   src/strtoull.c
   src/tls.c
   src/termios.c
+  src/threads.c
   src/time.c
   src/timerfd.c
+  src/uchar.c
   src/utmp.c
   src/utsname.c
   src/user_group.c
