@@ -185,9 +185,18 @@ guessed -- full findings, evidence, and priority tiers in
   bugs on Windows x86_64 (an LLP64 struct-layout mismatch, and a
   `swapcontext()` resume-point bug using an adjusted stack pointer with a
   `retq`-based resume path that needs the unadjusted one) via a real
-  coroutine round-trip test. This closes out **every** item from the
-  2026-08-16 Bionic libc gap audit -- high, medium, and lower priority
-  alike.
+  coroutine round-trip test, plus a third real bug found the same way on
+  real macOS aarch64 hardware the next day (2026-08-17): all three
+  aarch64 `ucontext.S` variants (Linux/macOS/Windows) had a
+  `swapcontext()` resume-point bug of their own -- an infinite loop, not
+  a crash, since AAPCS64's `ret` branches through the link *register*
+  rather than popping the stack the way x86_64's `retq`-based resume path
+  does, so the x86_64 fix's own resume-stub trick doesn't translate
+  as-is. Reproduced live (the test hung at 100% CPU) and fixed by
+  removing the resume-stub entirely in favor of just not clobbering the
+  naturally-saved return address; see `HISTORY.md`. This closes out
+  **every** item from the 2026-08-16 Bionic libc gap audit -- high,
+  medium, and lower priority alike.
 - Already known/tracked elsewhere (not new findings): C++ exceptions/RTTI
   across the runtime boundary (`docs/cxx_runtime.md`), `pthread_cancel`
   (a real `ENOTSUP` stub).

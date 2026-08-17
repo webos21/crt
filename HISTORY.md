@@ -10,6 +10,62 @@ substantive update.
 
 ## 2026-08-17
 
+- **Fixed a real infinite-loop bug in every aarch64 `ucontext.S`
+  (`swapcontext()`'s resume point), found live on real macOS aarch64
+  hardware.** `tests/ucontext_test.c` hung indefinitely -- `ctest`
+  printed `Start 73: ucontext_test_runs` and never returned, and the
+  live process sat at 100% CPU with no crash and no output. Confirmed by
+  attaching `lldb` to the still-running process: three separate samples,
+  each taken after a fresh `attach`/`detach` cycle, landed at the exact
+  same instruction (`ucontext.S`'s `mov w0, #0` / `ret` pair immediately
+  after `swapcontext()`'s resume label) -- landing on the identical byte
+  address every time, rather than scattered across a loop body, is what
+  pointed at a true self-referencing infinite loop rather than an
+  ordinary tight loop elsewhere in the test.
+
+  Root cause: `swapcontext()` patched the saved link-register slot
+  (mcontext offset 88) with the address of a local `1:` resume stub
+  (`adr x2, 1f; str x2, [x0, #88]`) instead of leaving the real caller's
+  return address there, mirroring the x86_64 sibling files' own `1:`
+  stub trick (`libc/src/arch/{linux,macos,windows}/x86_64/ucontext.S`).
+  That trick is correct on x86_64 because `retq` pops its target address
+  off the *stack*, so as long as the saved stack pointer points at the
+  right slot, `retq` at `1:` naturally continues on to the real original
+  caller. AAPCS64 has no such mechanism: `ret` just branches to whatever
+  is in the x30 *register*, and branching does not clear or advance that
+  register. So by the time execution reached the resume stub, x30 still
+  equaled the stub's own address (nothing between the jump into it and
+  its own `ret` ever changed x30) -- the stub's `ret` branched straight
+  back into itself, forever. This was flagged as a real risk in the
+  implementing commit's own message ("Linux/macOS and aarch64 reasoned
+  carefully from the same proven register set but not yet run on real
+  hardware from this session") and confirmed the first time it actually
+  ran on real aarch64 hardware.
+
+  Fixed in all three aarch64 variants (`libc/src/arch/{linux,macos,
+  windows}/aarch64/ucontext.S`) by removing the resume-stub patch
+  entirely: `stp x29, x30, [x0, #80]` a few lines earlier in
+  `swapcontext()` already saves the real caller's return address at that
+  same offset, exactly like `getcontext()` does, which is all a plain
+  `ret` needs to resume at the right place. The "a resumed context
+  appears to return 0" contract (POSIX: resuming a saved context behaves
+  as if the call that saved it had just returned) moved to an
+  unconditional `mov w0, #0` immediately before every point this file
+  jumps *into* a restored context instead -- `setcontext()`'s own `ret`,
+  and `swapcontext()`'s second `ret` after loading the new context --
+  rather than depending on a separate stub to set it while also handling
+  the return-address plumbing.
+
+  Verified directly on this real macOS aarch64 host: `ucontext_test`
+  (a real coroutine round trip -- `makecontext()`/`swapcontext()` yield-
+  and-resume, plus a `getcontext()`/`setcontext()` "returns twice"
+  round trip) now prints `ok` instead of hanging. Full suite:
+  **102/102** on `macos-host-ninja-debug`, no regressions. Linux aarch64
+  and Windows aarch64 get the identical fix, reasoned to apply the same
+  way since the underlying AAPCS64 `ret`-via-link-register mechanism is
+  architecture-defined, not OS-specific -- not independently re-verified
+  on real hardware for those two hosts this session.
+
 - **Fixed the real macOS `ifaddrs`/`/dev/zero` regressions found by
   `cmake --workflow --preset macos-host-ninja-debug` on this host.** The
   build first failed in `libc/src/ifaddrs.c` because this project's public
