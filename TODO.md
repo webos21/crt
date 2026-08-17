@@ -168,7 +168,7 @@ was investigated and the alternatives ruled out). Stays deferred.
   the low-level Windows work it would need -- `docs/job_control.md` currently
   keeps that explicitly out of scope.
 
-### Toybox applet expansion
+### Toybox applet expansion (deferred until it's an actual priority)
 
 Only when the backing Bionic-compatible CRT/PAL surface exists.
 Full applet-by-applet status (what's enabled,
