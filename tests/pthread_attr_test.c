@@ -5,6 +5,19 @@
 #include <string.h>
 #include <sys/mman.h>
 
+/* PTHREAD_PROCESS_SHARED is now real on Linux/macOS (2026-08-17, see
+ * HISTORY.md) instead of unconditional ENOTSUP -- this mirrors the
+ * CRT_PSHARED_SUPPORTED gate in libc/src/pthread.c (and
+ * tests/pthread_process_shared_test.c's own copy of it). Without this,
+ * the mutex/rwlock pshared checks below still hardcoded the pre-change
+ * ENOTSUP expectation and failed for real on Linux/macOS the first time
+ * this test actually ran there after that change landed. */
+#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS)
+#define CRT_PSHARED_SUPPORTED 1
+#else
+#define CRT_PSHARED_SUPPORTED 0
+#endif
+
 static int thread_value;
 
 static int fail(const char* message) {
@@ -137,7 +150,11 @@ int main(void) {
     if (pthread_mutexattr_init(&mutex_attr) != 0 ||
         pthread_mutexattr_getpshared(&mutex_attr, &pshared) != 0 ||
         pshared != PTHREAD_PROCESS_PRIVATE ||
+#if CRT_PSHARED_SUPPORTED
+        pthread_mutexattr_setpshared(&mutex_attr, PTHREAD_PROCESS_SHARED) != 0 ||
+#else
         pthread_mutexattr_setpshared(&mutex_attr, PTHREAD_PROCESS_SHARED) != ENOTSUP ||
+#endif
         pthread_mutexattr_setpshared(&mutex_attr, 99) != EINVAL ||
         pthread_mutexattr_getrobust(&mutex_attr, &robust) != 0 ||
         robust != PTHREAD_MUTEX_STALLED ||
@@ -150,7 +167,11 @@ int main(void) {
     if (pthread_rwlockattr_init(&rwlock_attr) != 0 ||
         pthread_rwlockattr_getpshared(&rwlock_attr, &pshared) != 0 ||
         pshared != PTHREAD_PROCESS_PRIVATE ||
+#if CRT_PSHARED_SUPPORTED
+        pthread_rwlockattr_setpshared(&rwlock_attr, PTHREAD_PROCESS_SHARED) != 0 ||
+#else
         pthread_rwlockattr_setpshared(&rwlock_attr, PTHREAD_PROCESS_SHARED) != ENOTSUP ||
+#endif
         pthread_rwlockattr_setpshared(&rwlock_attr, 99) != EINVAL) {
       return fail("rwlock pshared attr");
     }

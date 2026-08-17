@@ -214,9 +214,15 @@ All four items originally listed here are now **done** -- see `HISTORY.md`'s
     `PTHREAD_PROCESS_SHARED` memory correctly rendezvous) and on **macOS**
     (`os_sync_wait_on_address`'s documented `OS_SYNC_WAIT_ON_ADDRESS_SHARED`
     / `OS_SYNC_WAKE_BY_ADDRESS_SHARED` flag bit, mirroring the Linux
-    private/shared split -- reasoned carefully but, like other Linux/macOS
-    work this session, not yet verified against real Apple hardware). Stay
-    `ENOTSUP` on **Windows**: `WaitOnAddress`/`WakeByAddressSingle`/
+    private/shared split -- reasoned carefully from the Windows-only session
+    that wrote it, then verified for real on macOS hardware the same day:
+    `tests/pthread_process_shared_test.c`'s real cross-thread contention
+    passed cleanly, and two pre-existing tests (`pthread_attr_test.c`,
+    `pthread_barrier_test.c`) turned out to still hardcode the pre-change
+    "`setpshared(PTHREAD_PROCESS_SHARED)` always returns `ENOTSUP`"
+    expectation -- fixed to gate on the same `CRT_PSHARED_SUPPORTED` split
+    the implementation and the new test already use; see `HISTORY.md`).
+    Stays `ENOTSUP` on **Windows**: `WaitOnAddress`/`WakeByAddressSingle`/
     `WakeByAddressAll` are documented by Microsoft as operating on the
     calling process's own virtual address space only, with no flag or
     variant that extends them cross-process -- an honest architectural

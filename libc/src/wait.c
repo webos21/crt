@@ -371,11 +371,13 @@ int __crt_wake32_all(int* addr) {
  * OS_SYNC_WAIT_ON_ADDRESS_SHARED / OS_SYNC_WAKE_BY_ADDRESS_SHARED flag bit
  * (value 0x1) that opts an address into cross-process waiting, mirroring
  * this file's flags==0 (private/process-local) default used above. This
- * mirrors the Linux private/shared split. UNVERIFIED: this dev session is
- * Windows-only (see docs/bionic_libc_gaps.md and HISTORY.md's linkat()
- * precedent for the same discipline) -- the flag's existence and value are
- * reasoned from the documented header shape, not confirmed on real macOS
- * hardware. Flag as unverified until confirmed by real macOS CI/hardware.
+ * mirrors the Linux private/shared split. Verified on real macOS hardware
+ * 2026-08-17 (see HISTORY.md): tests/pthread_process_shared_test.c's real
+ * cross-thread mutex/rwlock/cond/barrier contention over PTHREAD_PROCESS_
+ * SHARED objects exercises exactly this path and passes, closing the
+ * unverified-on-real-hardware caveat this comment originally carried from
+ * the Windows-only session that wrote it (matching HISTORY.md's linkat()
+ * precedent for the same discipline).
  */
 #define CRT_OS_SYNC_WAIT_ON_ADDRESS_SHARED 0x00000001U
 #define CRT_OS_SYNC_WAKE_BY_ADDRESS_SHARED 0x00000001U

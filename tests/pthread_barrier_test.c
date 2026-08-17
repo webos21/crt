@@ -2,6 +2,19 @@
 #include <pthread.h>
 #include <stdio.h>
 
+/* PTHREAD_PROCESS_SHARED is now real on Linux/macOS (2026-08-17, see
+ * HISTORY.md) instead of unconditional ENOTSUP -- this mirrors the
+ * CRT_PSHARED_SUPPORTED gate in libc/src/pthread.c (and
+ * tests/pthread_process_shared_test.c's own copy of it). Without this,
+ * the barrierattr pshared check below still hardcoded the pre-change
+ * ENOTSUP expectation and failed for real on Linux/macOS the first time
+ * this test actually ran there after that change landed. */
+#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS)
+#define CRT_PSHARED_SUPPORTED 1
+#else
+#define CRT_PSHARED_SUPPORTED 0
+#endif
+
 #define THREAD_COUNT 4
 
 static pthread_barrier_t barrier;
@@ -48,7 +61,11 @@ int main(void) {
   if (pthread_barrierattr_init(&attr) != 0 ||
       pthread_barrierattr_getpshared(&attr, &pshared) != 0 ||
       pshared != PTHREAD_PROCESS_PRIVATE ||
+#if CRT_PSHARED_SUPPORTED
+      pthread_barrierattr_setpshared(&attr, PTHREAD_PROCESS_SHARED) != 0 ||
+#else
       pthread_barrierattr_setpshared(&attr, PTHREAD_PROCESS_SHARED) != ENOTSUP ||
+#endif
       pthread_barrierattr_setpshared(&attr, 99) != EINVAL ||
       pthread_barrierattr_destroy(&attr) != 0) {
     return fail("barrierattr pshared");

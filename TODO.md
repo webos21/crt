@@ -161,9 +161,14 @@ guessed -- full findings, evidence, and priority tiers in
   real hardware from this session. `PTHREAD_PROCESS_SHARED` is also
   **done** (2026-08-17) -- real and cross-process on Linux (non-private
   futex ops) and macOS (`os_sync_wait_on_address`'s `SHARED` flag,
-  reasoned but not yet verified on real hardware), unconditional on every
-  host for `pthread_spinlock` (pure atomics, no OS wait/wake call to begin
-  with), and an honest `ENOTSUP` on Windows for the other four primitives
+  reasoned from a Windows-only session and then verified for real on
+  macOS hardware the same day -- `tests/pthread_process_shared_test.c`'s
+  real cross-thread contention passed, and two pre-existing tests that
+  still hardcoded the pre-change `ENOTSUP` expectation for
+  `setpshared(PTHREAD_PROCESS_SHARED)` were fixed; see `HISTORY.md`),
+  unconditional on every host for `pthread_spinlock` (pure atomics, no OS
+  wait/wake call to begin with), and an honest `ENOTSUP` on Windows for
+  the other four primitives
   (`WaitOnAddress`/`WakeByAddress*` are documented same-process-only with
   no cross-process capability to opt into) -- see `docs/bionic_libc_gaps.md`
   for the full per-host writeup. This closes out every item in this

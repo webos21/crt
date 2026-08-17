@@ -10,6 +10,55 @@ substantive update.
 
 ## 2026-08-17
 
+- **Verified `PTHREAD_PROCESS_SHARED` on real macOS hardware and fixed two
+  stale pre-existing test expectations it broke**, closing the "reasoned
+  but not yet verified on real hardware" caveat the same-day
+  `PTHREAD_PROCESS_SHARED` entry below carried (written from a
+  Windows-only dev session). Running the full suite on this real macOS
+  host surfaced two real `ctest` failures:
+  ```
+  83/95 pthread_barrier_test_runs ... Failed
+  pthread_barrier_test: barrierattr pshared
+  92/95 pthread_attr_test_runs ... Failed
+  pthread_attr_test: mutex pshared attr
+  ```
+  Root cause: `tests/pthread_barrier_test.c` and `tests/
+  pthread_attr_test.c` both predate the `PTHREAD_PROCESS_SHARED` work and
+  still hardcoded the *pre-change* contract --
+  `pthread_barrierattr_setpshared()`/`pthread_mutexattr_setpshared()`/
+  `pthread_rwlockattr_setpshared()` called with `PTHREAD_PROCESS_SHARED`
+  must return `ENOTSUP`. That was true everywhere before this feature
+  landed; on Linux/macOS now (`CRT_PSHARED_SUPPORTED` in
+  `libc/src/pthread.c`) it correctly returns `0` instead, which the old
+  hardcoded `!= ENOTSUP` checks read as a failure. Not an implementation
+  bug -- confirmed by reading `libc/src/pthread.c`'s own
+  `pthread_mutexattr_setpshared()`, which does exactly what Bionic
+  parity requires (`0` when `CRT_PSHARED_SUPPORTED`, `ENOTSUP` otherwise).
+  The commit that introduced the feature added a new, correctly-gated
+  `tests/pthread_process_shared_test.c` and updated `tests/
+  pthread_spin_test.c`, but missed that these two older, unrelated-looking
+  attr tests also asserted the old contract. Fixed by giving both files
+  the same `CRT_PSHARED_SUPPORTED` gate (`defined(CRT_TARGET_OS_LINUX) ||
+  defined(CRT_TARGET_OS_MACOS)`) the new test and the implementation
+  itself already use, and branching the expected `setpshared()` result on
+  it instead of hardcoding `ENOTSUP`.
+
+  This also incidentally provided the real-hardware verification the
+  macOS `os_sync_wait_on_address`/`os_sync_wake_by_address_*` `SHARED`-flag
+  work itself was still waiting on:
+  `tests/pthread_process_shared_test.c`'s real cross-thread mutex/rwlock/
+  cond/barrier contention over `PTHREAD_PROCESS_SHARED` objects passed
+  cleanly on this real macOS host, exercising
+  `__crt_wait32_shared`/`__crt_wake32_*_shared` (`libc/src/wait.c`) for
+  real -- updated that file's own comment from "UNVERIFIED" to record the
+  confirmation, matching `HISTORY.md`'s established `linkat()` precedent
+  for the same discipline.
+
+  Verified: full suite **95/95** on `macos-host-ninja-debug` (89 termios/
+  sendmsg baseline + `termios_line_control_test` + the newer
+  `dl_iterate_phdr`/epoll/`PTHREAD_PROCESS_SHARED`-era tests), no other
+  regressions.
+
 - **Implemented `PTHREAD_PROCESS_SHARED`**, closing out every item in
   TODO.md's "Bionic libc completeness before `libcrtgfx`" section. Real,
   per-primitive, per-host support rather than a single blanket flag:
