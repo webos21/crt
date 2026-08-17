@@ -10,6 +10,85 @@ substantive update.
 
 ## 2026-08-17
 
+- **Fixed the real macOS `sendmsg`/`recvmsg`+`SCM_RIGHTS` end-to-end failure
+  the fixes below were still waiting on**, found by actually running
+  `tests/sendmsg_scm_rights_test` on real macOS hardware for the first time
+  (`sendmsg_scm_rights_test_runs` failing in `ctest`: `AF_UNIX bind
+  errno=97`). Four distinct real ABI bugs stacked on top of each other,
+  found and fixed one layer at a time -- each fix exposed the next failure
+  underneath it rather than resolving the test outright, so all four had to
+  be found before it passed:
+
+  1. **AF_UNIX `bind()`/`connect()` rejected outright.** `to_darwin_sockaddr()`
+     (`libc/src/socket.c`) only ever handled `AF_INET`, hard-rejecting every
+     other family with `errno = EAFNOSUPPORT` (Bionic's own value, `97` --
+     coincidentally the same number as Darwin's real `ENOLINK`, which made
+     the first-glance symptom look like an errno-translation bug in
+     `__crt_macos_to_bionic_errno()`; that function was checked and is
+     correct, this was a red herring). Real Darwin/XNU's own
+     `struct sockaddr_un` -- like `struct sockaddr_in` before it -- carries a
+     1-byte `sun_len` + 1-byte `sun_family` prefix instead of Linux's plain
+     2-byte family field. Fixed by adding a `struct crt_darwin_sockaddr_un`
+     alongside the existing `struct crt_darwin_sockaddr_in`, unioned into a
+     new `union crt_darwin_sockaddr_storage`, and generalizing
+     `to_darwin_sockaddr()`/`from_darwin_sockaddr()` to dispatch on
+     `sa_family` between the two instead of assuming `AF_INET`. All 8 call
+     sites (`bind`/`accept`/`connect`/`sendto`/`recvfrom`/`sendmsg`/
+     `recvmsg`/`getsockname`) updated to the union type.
+
+  2. **`sendmsg` failing `EINVAL` even after AF_UNIX worked.** Real
+     Darwin/XNU's own `struct msghdr` uses a 4-byte `int msg_iovlen` and
+     4-byte `socklen_t msg_controllen`, not 8-byte `size_t` like Linux's
+     real ABI -- the same class of divergence `struct cmsghdr.cmsg_len`
+     already had to handle (previous entry below). Since `sendmsg()`/
+     `recvmsg()` pass this struct's bytes straight through to the raw
+     kernel syscall, the wrong width shifts every field after `msg_iovlen`
+     (`msg_control`/`msg_controllen`/`msg_flags`) to the wrong byte offset.
+     Fixed by narrowing both fields under `CRT_TARGET_OS_MACOS` in
+     `include/sys/socket.h`, matching the `cmsg_len` precedent.
+
+  3. **Still `EINVAL` after the field-width fix.** Real Darwin aligns
+     ancillary-data (`cmsghdr`) records to 4 bytes
+     (`__DARWIN_ALIGNBYTES32`), not to `sizeof(size_t)` (8 bytes) like this
+     project's `CMSG_ALIGN` assumed unconditionally. Since `CMSG_DATA`/
+     `CMSG_SPACE`/`CMSG_NXTHDR` are all defined in terms of `CMSG_ALIGN`,
+     the wrong alignment put the payload at a byte offset the real kernel
+     didn't expect. Fixed by adding `__CRT_CMSG_ALIGN_UNIT` (4 bytes on
+     macOS, `sizeof(size_t)` elsewhere) and rewriting `CMSG_ALIGN` in terms
+     of it.
+
+  4. **Still `EINVAL` after the layout was byte-for-byte identical to a
+     real host-native reference program** (root-caused by writing a tiny
+     C program that builds the exact same `SCM_RIGHTS` control message,
+     compiling it once with the real host `clang`/libSystem and once
+     through this project's own `crt-cc`/sysroot, and diffing the raw
+     bytes -- the technique that also found bugs 2 and 3 above). The one
+     remaining byte difference was `cmsg_level`: real Darwin's `SOL_SOCKET`
+     is `0xffff`, but this project's own Bionic-shaped `SOL_SOCKET` (`1`)
+     was going out untranslated. `setsockopt()`/`getsockopt()` already
+     translate this via `CRT_DARWIN_SOL_SOCKET` for their own `level`
+     parameter, but that translation never extended to a cmsghdr's own
+     `cmsg_level` field inside `msg_control`. Fixed by adding
+     `translate_cmsg_levels()` (`libc/src/socket.c`), which walks a
+     `msg_control` buffer's `cmsghdr` chain via the existing
+     `CMSG_FIRSTHDR`/`CMSG_NXTHDR` macros, translating `cmsg_level`
+     Bionic->Darwin (for `sendmsg`, on a local translated copy so the
+     caller's own buffer is never mutated) or Darwin->Bionic (for
+     `recvmsg`, in place after the syscall returns, since `recvmsg`
+     already fills the caller's buffer directly). Both `sendmsg()` and
+     `recvmsg()` were also restructured so this control-buffer translation
+     runs independently of whether `msg_name` is set -- the prior code
+     only entered its Darwin-translation branch when `msg_name != 0`, but
+     the actual `SCM_RIGHTS` test case (`tests/sendmsg_scm_rights_test.c`)
+     uses an already-connected socket with `msg_name == 0` and only
+     `msg_control` set, so it was skipping ancillary-data translation
+     entirely.
+
+  Verified: `tests/sendmsg_scm_rights_test` now prints
+  `sendmsg_scm_rights_test: ok` when run directly, and the full
+  `ctest --preset macos-host-ninja-debug` suite passes 89/89 with no
+  regressions from any of the four `socket.c`/`socket.h` changes above.
+
 - **Fixed a real macOS-only `struct cmsghdr` ABI bug, caught by CI on the
   very first push of the `sendmsg`/`recvmsg` work below.** Real Darwin/XNU's
   own `struct cmsghdr` uses a 4-byte `socklen_t cmsg_len` (X/Open XSI

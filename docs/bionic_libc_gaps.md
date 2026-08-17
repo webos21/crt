@@ -33,12 +33,18 @@ All four items originally listed here are now **done** -- see `HISTORY.md`'s
   syscall.S`) with full native SCM_RIGHTS support -- **the syscall numbers
   were carefully reasoned from this project's own already-tested
   neighboring trampolines (e.g. Darwin's confirmed `recvfrom`=29/`accept`=
-  30 anchoring `recvmsg`=27/`sendmsg`=28) but were NOT independently
-  verified on real hardware from the Windows-only session that wrote
-  them**, matching the exact same gap `linkat()`'s own trampolines had
-  until real hardware testing closed it (see that entry in `HISTORY.md`).
-  `tests/sendmsg_scm_rights_test.c`'s own real AF_UNIX fd-passing round
-  trip is what verifies this the next time it runs on real Linux/macOS.
+  30 anchoring `recvmsg`=27/`sendmsg`=28), matching the exact same
+  reasoning-first pattern `linkat()`'s own trampolines used before real
+  hardware testing closed that gap.** `tests/sendmsg_scm_rights_test.c`'s
+  own real AF_UNIX fd-passing round trip has since run on real macOS
+  hardware (2026-08-17) and closed this the same way: the syscall numbers
+  themselves were correct, but it found and fixed four real ABI-
+  translation bugs sitting between this project's Bionic-shaped structs
+  and Darwin's real kernel ABI (AF_UNIX `sockaddr` translation, `struct
+  msghdr` field widths, `CMSG_ALIGN`'s alignment unit, and `cmsg_level`/
+  `SOL_SOCKET` translation) -- see `HISTORY.md`'s 2026-08-17 entry for the
+  full writeup. Linux has not yet run this same real-hardware pass; its
+  trampolines remain reasoned-not-independently-verified until it does.
   Windows has no `SCM_RIGHTS`-equivalent mechanism for `AF_UNIX` sockets at
   all (a fundamentally different, `DuplicateHandle()`-based, PID-targeted
   model) -- `__crt_sys_sendmsg()`/`__crt_sys_recvmsg()` there support

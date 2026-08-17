@@ -102,9 +102,28 @@ struct msghdr {
   void* msg_name;
   socklen_t msg_namelen;
   struct iovec* msg_iov;
+  /* Real Darwin/XNU's own struct msghdr uses a 4-byte int/socklen_t for
+   * these two fields, not 8-byte size_t like Linux's real ABI -- the same
+   * class of Linux-vs-BSD divergence struct cmsghdr's cmsg_len already
+   * documents below, and for the same reason: sendmsg()/recvmsg() (see
+   * socket.c) pass this struct's bytes straight through to the raw host
+   * kernel syscall field-by-field, without translating msg_iovlen/
+   * msg_controllen individually the way msg_name/msg_namelen are (via
+   * to_darwin_sockaddr()), so the width has to match each host's real ABI
+   * exactly or the fields after msg_iovlen (msg_control/msg_controllen/
+   * msg_flags) all land at the wrong byte offsets -- found via a real
+   * macOS EINVAL failure on sendmsg() with an SCM_RIGHTS control message,
+   * see HISTORY.md. All existing callers only ever assign/compare small
+   * counts here, never anything sensitive to the field's exact width. */
+#if defined(CRT_TARGET_OS_MACOS)
+  int msg_iovlen;
+  void* msg_control;
+  socklen_t msg_controllen;
+#else
   size_t msg_iovlen;
   void* msg_control;
   size_t msg_controllen;
+#endif
   int msg_flags;
 };
 
@@ -133,8 +152,24 @@ struct cmsghdr {
 
 #define SCM_RIGHTS 0x01
 
+/* Real Darwin/XNU aligns ancillary-data records to 4 bytes
+ * (__DARWIN_ALIGNBYTES32, i.e. sizeof(uint32_t) - 1), not to sizeof(size_t)
+ * (8 bytes) like Linux's real ABI -- yet another instance of the same
+ * Linux-vs-BSD divergence struct cmsghdr's cmsg_len and struct msghdr's
+ * msg_iovlen/msg_controllen already document above (see their comments,
+ * and HISTORY.md). Getting this wrong doesn't just waste 4 bytes: since
+ * CMSG_DATA()/CMSG_SPACE()/CMSG_NXTHDR() are all defined in terms of this
+ * alignment, an 8-byte-aligned CMSG_DATA() offset disagrees with where the
+ * real kernel actually put (or expects to find) the ancillary payload,
+ * which surfaced as a real macOS sendmsg() EINVAL with a SCM_RIGHTS
+ * control message -- not a wasted-space cosmetic issue. */
+#if defined(CRT_TARGET_OS_MACOS)
+#define __CRT_CMSG_ALIGN_UNIT sizeof(unsigned int)
+#else
+#define __CRT_CMSG_ALIGN_UNIT sizeof(size_t)
+#endif
 #define CMSG_ALIGN(len) \
-  (((len) + sizeof(size_t) - 1) & ~(sizeof(size_t) - 1))
+  (((len) + __CRT_CMSG_ALIGN_UNIT - 1) & ~(__CRT_CMSG_ALIGN_UNIT - 1))
 #define CMSG_DATA(cmsg) \
   ((unsigned char*)(cmsg) + CMSG_ALIGN(sizeof(struct cmsghdr)))
 #define CMSG_SPACE(len) \

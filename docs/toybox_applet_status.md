@@ -4,7 +4,7 @@
 
 Track, applet by applet, which toybox commands are wired into
 `shell/CMakeLists.txt`'s `crt_toybox` target and why any applet that isn't is
-still deferred. `TODO.md`'s own "in progress" section just points here now --
+still deferred. `TODO.md`'s own "planned" section just points here now --
 this is the detail. See `HISTORY.md`'s dated entries for the full writeup of
 each batch actually landed; this file only tracks what's still open.
 

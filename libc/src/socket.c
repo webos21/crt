@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <sys/utsname.h>
 #include <unistd.h>
 
@@ -21,6 +22,36 @@ struct crt_darwin_sockaddr_in {
   in_port_t sin_port;
   struct in_addr sin_addr;
   unsigned char sin_zero[8];
+};
+
+/* Darwin's real struct sockaddr_un (<sys/un.h>): unlike this project's own
+ * Bionic/Linux-shaped struct sockaddr_un (sys/un.h, no length prefix,
+ * 108-byte sun_path), every Darwin sockaddr variant starts with a 1-byte
+ * length then a 1-byte family (struct sockaddr's real layout), and
+ * sun_path is only 104 bytes. */
+struct crt_darwin_sockaddr_un {
+  unsigned char sun_len;
+  unsigned char sun_family;
+  char sun_path[104];
+};
+
+/* Generic header shared by every Darwin sockaddr variant (sa_len then
+ * sa_family, both 1 byte -- see struct crt_darwin_sockaddr_un's comment
+ * above), used to read back which concrete type a syscall filled in
+ * without caring which union member it actually is. */
+struct crt_darwin_sockaddr_header {
+  unsigned char sa_len;
+  unsigned char sa_family;
+};
+
+/* Only AF_INET/AF_UNIX are translatable today -- see to_darwin_sockaddr()'s
+ * own behavior below. Sized to fit whichever Darwin variant is larger
+ * (currently sockaddr_un), so it's always safe to hand syscalls that fill
+ * in an address (accept()/recvfrom()/getsockname()/recvmsg()) a pointer to
+ * one of these regardless of which family the peer turns out to be. */
+union crt_darwin_sockaddr_storage {
+  struct crt_darwin_sockaddr_in in;
+  struct crt_darwin_sockaddr_un un;
 };
 
 struct crt_darwin_addrinfo {
@@ -302,45 +333,136 @@ const char* hstrerror(int err) {
 static int to_darwin_sockaddr(
     const struct sockaddr* addr,
     socklen_t addrlen,
-    struct crt_darwin_sockaddr_in* out,
+    union crt_darwin_sockaddr_storage* out,
     unsigned int* outlen) {
-  const struct sockaddr_in* in;
-
-  if (addr == 0 || out == 0 || outlen == 0 || addrlen < sizeof(struct sockaddr_in)) {
+  if (addr == 0 || out == 0 || outlen == 0) {
     errno = EINVAL;
     return -1;
   }
-  if (addr->sa_family != AF_INET) {
-    errno = EAFNOSUPPORT;
-    return -1;
+  if (addr->sa_family == AF_INET) {
+    const struct sockaddr_in* in;
+
+    if (addrlen < sizeof(struct sockaddr_in)) {
+      errno = EINVAL;
+      return -1;
+    }
+    in = (const struct sockaddr_in*)addr;
+    memset(&out->in, 0, sizeof(out->in));
+    out->in.sin_len = (unsigned char)sizeof(out->in);
+    out->in.sin_family = AF_INET;
+    out->in.sin_port = in->sin_port;
+    out->in.sin_addr = in->sin_addr;
+    memcpy(out->in.sin_zero, in->sin_zero, sizeof(out->in.sin_zero));
+    *outlen = (unsigned int)sizeof(out->in);
+    return 0;
   }
-  in = (const struct sockaddr_in*)addr;
-  memset(out, 0, sizeof(*out));
-  out->sin_len = (unsigned char)sizeof(*out);
-  out->sin_family = AF_INET;
-  out->sin_port = in->sin_port;
-  out->sin_addr = in->sin_addr;
-  memcpy(out->sin_zero, in->sin_zero, sizeof(out->sin_zero));
-  *outlen = (unsigned int)sizeof(*out);
-  return 0;
+  if (addr->sa_family == AF_UNIX) {
+    const struct sockaddr_un* in;
+    size_t path_len;
+
+    if (addrlen < offsetof(struct sockaddr_un, sun_path)) {
+      errno = EINVAL;
+      return -1;
+    }
+    in = (const struct sockaddr_un*)addr;
+    /* addrlen may cover less than the full sun_path array (the common
+     * convention: SUN_LEN()-style callers only pass strlen(sun_path)+1
+     * worth of it), so bound the copy by whichever is smaller -- what the
+     * caller actually says is valid, or a NUL terminator found first. */
+    path_len = strnlen(
+        in->sun_path,
+        (size_t)addrlen - offsetof(struct sockaddr_un, sun_path) < sizeof(in->sun_path)
+            ? (size_t)addrlen - offsetof(struct sockaddr_un, sun_path)
+            : sizeof(in->sun_path));
+    if (path_len >= sizeof(out->un.sun_path)) {
+      /* Darwin's sun_path (104 bytes) is 4 bytes shorter than this
+       * project's own Bionic-shaped one (108 bytes); a path that only
+       * fits in the larger one is a real, if unusual, error here. */
+      errno = ENAMETOOLONG;
+      return -1;
+    }
+    memset(&out->un, 0, sizeof(out->un));
+    out->un.sun_len = (unsigned char)(offsetof(struct crt_darwin_sockaddr_un, sun_path) + path_len + 1);
+    out->un.sun_family = AF_UNIX;
+    memcpy(out->un.sun_path, in->sun_path, path_len);
+    *outlen = (unsigned int)out->un.sun_len;
+    return 0;
+  }
+  errno = EAFNOSUPPORT;
+  return -1;
+}
+
+/* sendmsg()/recvmsg() pass msg_control's ancillary-data bytes straight
+ * through to the raw host kernel syscall (unlike msg_name, there is no
+ * dedicated struct to translate into -- a cmsghdr chain is caller-defined,
+ * variable-length data). setsockopt()/getsockopt() already translate
+ * SOL_SOCKET (this project's own Bionic/Linux value, 1) to/from Darwin's
+ * real value (CRT_DARWIN_SOL_SOCKET, 0xffff) for the socket-option path,
+ * but that translation never extended to a cmsghdr's own cmsg_level field
+ * -- the one and only realistic ancillary-data use case here (SCM_RIGHTS
+ * fd passing) always sets cmsg_level to SOL_SOCKET, and passing our
+ * un-translated value straight to the real kernel makes it reject the
+ * whole message with EINVAL (found via a real macOS sendmsg() failure
+ * with an SCM_RIGHTS control message; the earlier struct msghdr field
+ * width and CMSG_ALIGN() unit fixes above got the ancillary-data *layout*
+ * byte-for-byte identical to a real host-native reference program, but
+ * this cmsg_level mismatch remained until diffed against that reference
+ * byte-by-byte). CMSG_FIRSTHDR()/CMSG_NXTHDR() (sys/socket.h) already walk
+ * a cmsghdr chain generically, so this just runs that walk over a
+ * translation copy instead of the caller's own buffer. */
+static void translate_cmsg_levels(void* control, unsigned int controllen, int to_darwin) {
+  struct msghdr tmp;
+  struct cmsghdr* cmsg;
+
+  memset(&tmp, 0, sizeof(tmp));
+  tmp.msg_control = control;
+  tmp.msg_controllen = controllen;
+  for (cmsg = CMSG_FIRSTHDR(&tmp); cmsg != 0; cmsg = CMSG_NXTHDR(&tmp, cmsg)) {
+    if (to_darwin && cmsg->cmsg_level == SOL_SOCKET) {
+      cmsg->cmsg_level = CRT_DARWIN_SOL_SOCKET;
+    } else if (!to_darwin && cmsg->cmsg_level == CRT_DARWIN_SOL_SOCKET) {
+      cmsg->cmsg_level = SOL_SOCKET;
+    }
+  }
 }
 
 static void from_darwin_sockaddr(
-    const struct crt_darwin_sockaddr_in* in,
+    const union crt_darwin_sockaddr_storage* in,
     struct sockaddr* addr,
     socklen_t* addrlen) {
-  struct sockaddr_in* out;
+  const struct crt_darwin_sockaddr_header* header = (const struct crt_darwin_sockaddr_header*)in;
 
-  if (addr == 0 || addrlen == 0 || *addrlen < sizeof(struct sockaddr_in)) {
+  if (addr == 0 || addrlen == 0) {
     return;
   }
-  out = (struct sockaddr_in*)addr;
-  memset(out, 0, sizeof(*out));
-  out->sin_family = in->sin_family;
-  out->sin_port = in->sin_port;
-  out->sin_addr = in->sin_addr;
-  memcpy(out->sin_zero, in->sin_zero, sizeof(out->sin_zero));
-  *addrlen = (socklen_t)sizeof(*out);
+  if (header->sa_family == AF_INET) {
+    struct sockaddr_in* out;
+
+    if (*addrlen < sizeof(struct sockaddr_in)) {
+      return;
+    }
+    out = (struct sockaddr_in*)addr;
+    memset(out, 0, sizeof(*out));
+    out->sin_family = in->in.sin_family;
+    out->sin_port = in->in.sin_port;
+    out->sin_addr = in->in.sin_addr;
+    memcpy(out->sin_zero, in->in.sin_zero, sizeof(out->sin_zero));
+    *addrlen = (socklen_t)sizeof(*out);
+    return;
+  }
+  if (header->sa_family == AF_UNIX) {
+    struct sockaddr_un* out;
+    size_t path_len = (size_t)in->un.sun_len - offsetof(struct crt_darwin_sockaddr_un, sun_path);
+
+    if (*addrlen < offsetof(struct sockaddr_un, sun_path) || path_len > sizeof(in->un.sun_path)) {
+      return;
+    }
+    out = (struct sockaddr_un*)addr;
+    memset(out, 0, sizeof(*out));
+    out->sun_family = AF_UNIX;
+    memcpy(out->sun_path, in->un.sun_path, path_len);
+    *addrlen = (socklen_t)(offsetof(struct sockaddr_un, sun_path) + path_len);
+  }
 }
 #endif
 
@@ -350,7 +472,7 @@ int socket(int domain, int type, int protocol) {
 
 int bind(int sockfd, const struct sockaddr* addr, socklen_t addrlen) {
 #if defined(CRT_TARGET_OS_MACOS)
-  struct crt_darwin_sockaddr_in darwin_addr;
+  union crt_darwin_sockaddr_storage darwin_addr;
   unsigned int darwin_len;
   if (to_darwin_sockaddr(addr, addrlen, &darwin_addr, &darwin_len) != 0) {
     return -1;
@@ -367,7 +489,7 @@ int listen(int sockfd, int backlog) {
 
 int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
 #if defined(CRT_TARGET_OS_MACOS)
-  struct crt_darwin_sockaddr_in darwin_addr;
+  union crt_darwin_sockaddr_storage darwin_addr;
   unsigned int darwin_len = sizeof(darwin_addr);
   long result;
 
@@ -394,7 +516,7 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
 
 int connect(int sockfd, const struct sockaddr* addr, socklen_t addrlen) {
 #if defined(CRT_TARGET_OS_MACOS)
-  struct crt_darwin_sockaddr_in darwin_addr;
+  union crt_darwin_sockaddr_storage darwin_addr;
   unsigned int darwin_len;
   if (to_darwin_sockaddr(addr, addrlen, &darwin_addr, &darwin_len) != 0) {
     return -1;
@@ -413,7 +535,7 @@ ssize_t sendto(
     const struct sockaddr* dest_addr,
     socklen_t addrlen) {
 #if defined(CRT_TARGET_OS_MACOS)
-  struct crt_darwin_sockaddr_in darwin_addr;
+  union crt_darwin_sockaddr_storage darwin_addr;
   unsigned int darwin_len = 0;
   const void* out_addr = 0;
 
@@ -443,7 +565,7 @@ ssize_t recvfrom(
     struct sockaddr* src_addr,
     socklen_t* addrlen) {
 #if defined(CRT_TARGET_OS_MACOS)
-  struct crt_darwin_sockaddr_in darwin_addr;
+  union crt_darwin_sockaddr_storage darwin_addr;
   unsigned int darwin_len = sizeof(darwin_addr);
   long result = __crt_sys_recvfrom(
       sockfd,
@@ -489,24 +611,42 @@ ssize_t sendmsg(int sockfd, const struct msghdr* msg, int flags) {
     return -1;
   }
 #if defined(CRT_TARGET_OS_MACOS)
-  if (msg->msg_name != 0) {
-    /* Only AF_INET is translatable today -- see to_darwin_sockaddr()'s own
-     * comment/behavior above, already the exact same limitation bind()/
-     * connect()/sendto() have on this host. The realistic near-term
-     * sendmsg()+SCM_RIGHTS consumer (Wayland-style fd passing) always
-     * uses an already-connected AF_UNIX socket with msg_name == 0 anyway,
-     * so this isn't a new gap sendmsg() introduces. */
-    struct crt_darwin_sockaddr_in darwin_addr;
-    unsigned int darwin_len = 0;
-    struct msghdr translated;
+  {
+    /* AF_INET/AF_UNIX msg_name (see to_darwin_sockaddr()) and SOL_SOCKET-
+     * level ancillary data (see translate_cmsg_levels() above) both need
+     * Bionic->Darwin translation before this reaches the raw kernel
+     * syscall -- independently of each other. The realistic near-term
+     * sendmsg()+SCM_RIGHTS consumer (Wayland-style fd passing) always uses
+     * an already-connected AF_UNIX socket, so msg_name == 0 there while
+     * msg_control is set; a translation gated on msg_name alone (the
+     * original version of this function) silently skipped cmsg_level
+     * translation for exactly that case, producing a real EINVAL from the
+     * kernel. Any family to_darwin_sockaddr() doesn't recognize fails with
+     * EAFNOSUPPORT, same as bind()/connect()/sendto() on this host. */
+    union crt_darwin_sockaddr_storage darwin_addr;
+    unsigned char control_buf[512];
+    struct msghdr translated = *msg;
 
-    if (to_darwin_sockaddr(
-            (const struct sockaddr*)msg->msg_name, msg->msg_namelen, &darwin_addr, &darwin_len) != 0) {
-      return -1;
+    if (msg->msg_name != 0) {
+      unsigned int darwin_len = 0;
+
+      if (to_darwin_sockaddr(
+              (const struct sockaddr*)msg->msg_name, msg->msg_namelen, &darwin_addr, &darwin_len) != 0) {
+        return -1;
+      }
+      translated.msg_name = &darwin_addr;
+      translated.msg_namelen = darwin_len;
     }
-    translated = *msg;
-    translated.msg_name = &darwin_addr;
-    translated.msg_namelen = darwin_len;
+    if (msg->msg_control != 0 && msg->msg_controllen > 0) {
+      if (msg->msg_controllen > sizeof(control_buf)) {
+        errno = ENOMEM;
+        return -1;
+      }
+      memcpy(control_buf, msg->msg_control, msg->msg_controllen);
+      translate_cmsg_levels(control_buf, msg->msg_controllen, 1);
+      translated.msg_control = control_buf;
+      translated.msg_controllen = msg->msg_controllen;
+    }
     return (ssize_t)normalize_socket_result(__crt_sys_sendmsg(sockfd, &translated, flags));
   }
 #endif
@@ -519,20 +659,31 @@ ssize_t recvmsg(int sockfd, struct msghdr* msg, int flags) {
     return -1;
   }
 #if defined(CRT_TARGET_OS_MACOS)
-  if (msg->msg_name != 0) {
-    struct crt_darwin_sockaddr_in darwin_addr;
+  {
+    union crt_darwin_sockaddr_storage darwin_addr;
     struct msghdr translated = *msg;
     long result;
 
-    translated.msg_name = &darwin_addr;
-    translated.msg_namelen = sizeof(darwin_addr);
+    if (msg->msg_name != 0) {
+      translated.msg_name = &darwin_addr;
+      translated.msg_namelen = sizeof(darwin_addr);
+    }
+    /* translated.msg_control still points at the caller's own buffer (the
+     * shallow *msg copy above didn't redirect it, unlike msg_name), so the
+     * kernel fills it in place -- no separate copy-back needed here, just
+     * an in-place Darwin->Bionic cmsg_level translation below. */
     result = __crt_sys_recvmsg(sockfd, &translated, flags);
     if (result < 0 && result >= -4095) {
       return (ssize_t)__set_errno((int)-result);
     }
-    from_darwin_sockaddr(&darwin_addr, (struct sockaddr*)msg->msg_name, &msg->msg_namelen);
+    if (msg->msg_name != 0) {
+      from_darwin_sockaddr(&darwin_addr, (struct sockaddr*)msg->msg_name, &msg->msg_namelen);
+    }
     msg->msg_controllen = translated.msg_controllen;
     msg->msg_flags = translated.msg_flags;
+    if (msg->msg_control != 0 && msg->msg_controllen > 0) {
+      translate_cmsg_levels(msg->msg_control, msg->msg_controllen, 0);
+    }
     return (ssize_t)result;
   }
 #endif
@@ -548,7 +699,7 @@ ssize_t recvmsg(int sockfd, struct msghdr* msg, int flags) {
 
 int getsockname(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
 #if defined(CRT_TARGET_OS_MACOS)
-  struct crt_darwin_sockaddr_in darwin_addr;
+  union crt_darwin_sockaddr_storage darwin_addr;
   unsigned int darwin_len = sizeof(darwin_addr);
   long result;
 

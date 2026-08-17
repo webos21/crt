@@ -88,21 +88,6 @@ newest entry first) rather than leaving it here.
 Active threads, not a flat list of one-off items. Remaining libc/PAL
 residuals before the upper runtime phase (see `docs/runtime_roadmap.md`):
 
-- **Toybox applet expansion**, only when the backing Bionic-compatible
-  CRT/PAL surface exists. Full applet-by-applet status (what's enabled,
-  what's still open and why, the deferred-applet list with each one's
-  concrete reason, and the `globals.h`/`flags.h` registration traps found
-  while enabling `df`/`stty`) now lives in
-  [`docs/toybox_applet_status.md`](docs/toybox_applet_status.md) -- this
-  bullet stays a pointer. Still open there: `expand`/`logger`/`fold`/
-  `uudecode`/`cal`/`split`/`strings` (a `globals.h` fix, plus a per-applet
-  `flags.h` check); `timeout` (hang fixed, two deeper gaps remain: real
-  `SIGCHLD` `siginfo_t` data, cross-process `kill()`); and a confirmed-not-
-  guessed deferred list (`ps`/`top`/`iotop`/`pgrep`/`pkill`, `mount`/
-  `umount`, `ifconfig`, `login`, procfs-heavy commands).
-
-## planned
-
 ### Bionic libc completeness before `libcrtgfx`
 
 Reviewed (2026-08-16) against real Android Bionic's public surface, not
@@ -111,13 +96,15 @@ guessed -- full findings, evidence, and priority tiers in
 
 - All four "high priority" items are **done** (2026-08-16): `semaphore.h`,
   public `<stdatomic.h>`, `sendmsg`/`recvmsg` + `SCM_RIGHTS`/`CMSG_*` fd
-  passing, and `memfd_create`. See `HISTORY.md`. One real caveat carried
-  forward from the last two: the new Linux/macOS `sendmsg`/`recvmsg` raw
-  syscall trampolines were carefully reasoned but **not independently
-  verified on real hardware** from the Windows-only session that wrote
-  them (matching `linkat()`'s own past gap) -- `tests/
-  sendmsg_scm_rights_test.c`'s real AF_UNIX fd-passing round trip is what
-  closes this the next time it runs on real Linux/macOS CI or hardware.
+  passing, and `memfd_create`. See `HISTORY.md`. The `sendmsg`/`recvmsg`
+  raw syscall trampolines' real-hardware caveat is now closed (2026-08-17):
+  `tests/sendmsg_scm_rights_test.c`'s real AF_UNIX fd-passing round trip
+  ran on real macOS hardware and found four real ABI bugs (AF_UNIX
+  sockaddr translation, `struct msghdr` field widths, `CMSG_ALIGN` unit,
+  `cmsg_level`/`SOL_SOCKET` translation), all fixed and verified -- see
+  `HISTORY.md`'s 2026-08-17 entry. Linux was not re-verified this pass
+  (only macOS was available); its trampolines remain reasoned-not-verified
+  until they actually run on real Linux hardware/CI.
 - **Medium priority**: `sys/epoll.h`/`sys/eventfd.h`/`sys/timerfd.h`
   (Linux-only in real Bionic too; relevant to both `wl_display` client
   integration and a future `libcrtjs` event loop); `dl_iterate_phdr`/
@@ -128,6 +115,25 @@ guessed -- full findings, evidence, and priority tiers in
 - Already known/tracked elsewhere (not new findings): C++ exceptions/RTTI
   across the runtime boundary (`docs/cxx_runtime.md`), `pthread_cancel`
   (a real `ENOTSUP` stub).
+
+## planned
+
+### Upper runtime roadmap after libc/PAL cleanup
+
+The long-term target is an Electron-class rebuilt native application runtime,
+not Electron itself as the next port. See `docs/runtime_roadmap.md`.
+
+- **libcrtjs**: start with QuickJS to expose event-loop, module-loading,
+  filesystem, timer, native-binding, and process gaps at manageable scale.
+  Keep V8 as the final browser-class JavaScript engine target after the C++
+  runtime, JIT/code-memory policy, atomics, threading, and dynamic loading are
+  stronger.
+- **libcrtgfx**: build toward Skia plus a Wayland-compatible compositor
+  boundary, with a Chromium Ozone backend as the long-term browser integration
+  path. Host window/GPU APIs stay below the graphics PAL.
+- **libcrtmedia**: build toward FFmpeg and explicit codec/audio/video
+  libraries, with software decode first and later hardware acceleration through
+  host backends that interoperate with `libcrtgfx`.
 
 ### Interactive job control (deferred until it's an actual priority)
 
@@ -162,19 +168,17 @@ was investigated and the alternatives ruled out). Stays deferred.
   the low-level Windows work it would need -- `docs/job_control.md` currently
   keeps that explicitly out of scope.
 
-### Upper runtime roadmap after libc/PAL cleanup
+### Toybox applet expansion
 
-The long-term target is an Electron-class rebuilt native application runtime,
-not Electron itself as the next port. See `docs/runtime_roadmap.md`.
-
-- **libcrtjs**: start with QuickJS to expose event-loop, module-loading,
-  filesystem, timer, native-binding, and process gaps at manageable scale.
-  Keep V8 as the final browser-class JavaScript engine target after the C++
-  runtime, JIT/code-memory policy, atomics, threading, and dynamic loading are
-  stronger.
-- **libcrtgfx**: build toward Skia plus a Wayland-compatible compositor
-  boundary, with a Chromium Ozone backend as the long-term browser integration
-  path. Host window/GPU APIs stay below the graphics PAL.
-- **libcrtmedia**: build toward FFmpeg and explicit codec/audio/video
-  libraries, with software decode first and later hardware acceleration through
-  host backends that interoperate with `libcrtgfx`.
+Only when the backing Bionic-compatible CRT/PAL surface exists.
+Full applet-by-applet status (what's enabled,
+what's still open and why, the deferred-applet list with each one's
+concrete reason, and the `globals.h`/`flags.h` registration traps found
+while enabling `df`/`stty`) now lives in
+[`docs/toybox_applet_status.md`](docs/toybox_applet_status.md) -- this
+bullet stays a pointer. Still open there: `expand`/`logger`/`fold`/
+`uudecode`/`cal`/`split`/`strings` (a `globals.h` fix, plus a per-applet
+`flags.h` check); `timeout` (hang fixed, two deeper gaps remain: real
+`SIGCHLD` `siginfo_t` data, cross-process `kill()`); and a confirmed-not-
+guessed deferred list (`ps`/`top`/`iotop`/`pgrep`/`pkill`, `mount`/
+`umount`, `ifconfig`, `login`, procfs-heavy commands).
