@@ -258,6 +258,9 @@ add_subdirectory(libm)
 add_subdirectory(libdl)
 add_subdirectory(libstdc++)
 add_subdirectory(shell)
+add_subdirectory(libcrtgfx)
+add_subdirectory(libcrtjs)
+add_subdirectory(libcrtmedia)
 
 # Hoisted ahead of add_subdirectory(tests) below, out of the
 # if(Python3_Interpreter_FOUND) block further down that otherwise defines
@@ -287,7 +290,7 @@ install(DIRECTORY include/ DESTINATION include)
 
 add_custom_target(sysroot
   COMMAND "${CMAKE_COMMAND}" --install "${CMAKE_BINARY_DIR}" --prefix "${CRT_SYSROOT}"
-  DEPENDS c c_shared m m_shared dl dl_shared cxx cxx_shared crt1 crt_shell_artifacts
+  DEPENDS c c_shared m m_shared dl dl_shared cxx cxx_shared crtgfx crtgfx_shared crtjs crtjs_shared crtmedia crtmedia_shared crt1 crt_shell_artifacts
   COMMENT "Installing CRT headers, libraries, and startup objects into ${CRT_SYSROOT}"
 )
 
@@ -318,6 +321,13 @@ if(Python3_Interpreter_FOUND)
       --mkshrc "${CMAKE_SOURCE_DIR}/shell/mksh/mkshrc"
       --toybox "$<TARGET_FILE:crt_toybox>"
       --awk "$<TARGET_FILE:crt_awk>"
+      --runtime-library "$<TARGET_FILE:c_shared>"
+      --runtime-library "$<TARGET_FILE:m_shared>"
+      --runtime-library "$<TARGET_FILE:dl_shared>"
+      --runtime-library "$<TARGET_FILE:cxx_shared>"
+      --runtime-library "$<TARGET_FILE:crtgfx_shared>"
+      --runtime-library "$<TARGET_FILE:crtjs_shared>"
+      --runtime-library "$<TARGET_FILE:crtmedia_shared>"
     DEPENDS sysroot crt_shell_artifacts
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     COMMENT "Creating Android-like CRT rootfs at ${CRT_ROOTFS}"

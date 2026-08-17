@@ -40,8 +40,17 @@ rootfs, resolver, console, and symbol-export hygiene.
 Initial direction:
 
 - Skia as the primary 2D rendering engine.
+- Normal Skia headers as the public 2D drawing API; project-owned `crtgfx`
+  headers should cover runtime, surface/window, frame presentation, event-loop,
+  backend, and compositor integration rather than wrapping Skia's drawing
+  model. See `docs/libcrtgfx_api_policy.md`.
 - A project-owned Wayland-compatible compositor boundary as the application and
-  toolkit-facing display protocol.
+  toolkit-facing display protocol. Use existing projects such as Wayland
+  protocol libraries, Weston/wlroots, WSLg, and Wawona/Wayoa-style host-native
+  compositors as architecture references before importing source. WSLg is a
+  reference for surface/window/buffer handoff structure only, not for WSL,
+  Linux binary execution, RDP rail, or vGPU dependencies; see
+  `docs/libcrtgfx_wayland_plan.md`.
 - Chromium Ozone backend work as the long-term browser integration path.
 - Host backends hidden below the graphics PAL:
   - Linux: Wayland/DRM/EGL/Vulkan/OpenGL paths as they become necessary.
@@ -53,6 +62,24 @@ Initial direction:
 The first goal is not a full desktop environment. It is a stable graphics
 contract that source-rebuilt toolkits or browser components can target without
 reimplementing the OS split themselves.
+
+Current bring-up starts with real host windows before drawing:
+
+- `include/crtgfx/window.h` defines the first host-independent window surface
+  API.
+- `libcrtgfx/src/common/wayland_weston.c` carries the first Weston-style
+  toplevel/surface state. Windows maps that state to a native host window under
+  `libcrtgfx/src/arch/windows/`.
+- `crtgfx_window_begin_frame()`/`crtgfx_window_end_frame()` provide the first
+  software buffer commit/present path, using BGRA8888 premultiplied pixels.
+- `libcrtgfx`, `libcrtjs`, and `libcrtmedia` are default workflow artifacts:
+  they build as static/shared libraries, install into the sysroot, and their
+  shared runtime files are copied into the Android-like rootfs.
+- Common upper-runtime code links against this project's CRT libraries
+  (`libc`, `libm`, `libdl`, `libc++`). Only the narrow host backend layer is
+  allowed to call host window/GPU APIs directly.
+- The next graphics step is Skia drawing onto the same software surface,
+  followed later by GPU-backed present paths.
 
 ### libcrtmedia
 
@@ -93,11 +120,12 @@ story are strong enough to make failures actionable.
 1. Finish the remaining planned libc/PAL cleanup in `TODO.md`.
 2. Stabilize the porting-test discipline: every new port should verify static
    and shared builds in the same pass on each host, or document why not.
-3. Add QuickJS as the first `libcrtjs` bring-up target.
-4. Add Skia as the first `libcrtgfx` rendering target.
-5. Add FFmpeg as the first `libcrtmedia` target.
-6. Define the Wayland-compatible compositor boundary and host window/GPU
-   adapters.
+3. Bring up `libcrtgfx` first: native host window, software frame present,
+   then Skia drawing.
+4. Define the Wayland-compatible compositor boundary and host window/GPU
+   adapters as the `libcrtgfx` surface contract becomes concrete.
+5. Add QuickJS as the first `libcrtjs` bring-up target.
+6. Add FFmpeg as the first `libcrtmedia` target.
 7. Revisit Chromium/Ozone and V8 after the lower layers have produced enough
    passing evidence.
 

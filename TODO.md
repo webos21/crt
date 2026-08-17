@@ -4,221 +4,162 @@ This file tracks the shell/rootfs/porting work queue. The list is ordered by
 state: completed work first, current work second, and planned follow-up last.
 Detailed policy and provenance stay in `docs/` and import manifests.
 
-## note
+## Notice
 
-- **Recipe/port status upkeep.** Keep recipe statuses
-  (`porting/recipes/*.json`, `docs/porting_status.md`) current as each
-  host is rerun.
+- Keep recipe statuses current in
+  [`porting/recipes/*.json`](porting/recipes/) and
+  [`docs/porting_status.md`](docs/porting_status.md) whenever a host is
+  rerun. Porting policy and the normal configure/make loop live in
+  [`docs/sysroot_ports.md`](docs/sysroot_ports.md); completed porting
+  investigations belong in [`HISTORY.md`](HISTORY.md).
+- A port is not done until both static and shared builds are attempted
+  in the same pass on each host, with any host-specific deferral recorded
+  in the recipe notes and status matrix. See
+  [`docs/porting_status.md`](docs/porting_status.md) for status meanings.
+- For CMake wiring changes, do not trust a long-lived local `out/`
+  directory. Verify with a fresh clone or at least
+  `cmake --fresh --preset <preset>` before calling the change done; stale
+  `CMakeCache.txt`/rootfs artifacts have hidden real CI-only ordering
+  bugs before. The resolved cases are recorded in [`HISTORY.md`](HISTORY.md).
+- Keep toybox applet enablement tied to audited CRT/PAL support, especially
+  LLP64 assumptions on Windows. The live applet list and deferrals are in
+  [`docs/toybox_applet_status.md`](docs/toybox_applet_status.md).
+- Keep terminal/tty behavior coherent for shell and configure use. Current
+  syscall/ioctl coverage is tracked in
+  [`docs/sysroot_ports.md`](docs/sysroot_ports.md), with interactive job
+  control policy deferred in [`docs/job_control.md`](docs/job_control.md).
+- Treat `CRT_SPAWN_NATIVE_WINDOWS=1` as a narrow launcher hint for native
+  host tools only. The wrapper details live in [`tools/crt-cc`](tools/crt-cc),
+  [`tools/crt-c++`](tools/crt-c++), [`tools/crt-native-tool`](tools/crt-native-tool),
+  and [`docs/sysroot_ports.md`](docs/sysroot_ports.md).
+- If a new public libc or `__crt_sys_*` symbol is added, regenerate or replace
+  [`porting/recipes/mbedtls-windows-exclude-symbols.rsp`](porting/recipes/mbedtls-windows-exclude-symbols.rsp)
+  in the same pass. The reason is documented in
+  [`porting/recipes/mbedtls.json`](porting/recipes/mbedtls.json) and
+  [`docs/porting_status.md`](docs/porting_status.md).
 
-- **A local dev tree with an existing `out/` directory is not a reliable
-  test of new CMake-level wiring -- this has now caused two separate
-  real CI-only failures, verify with a genuinely fresh tree before
-  calling any such change done.** This project's own dev machines keep
-  a long-lived `out/<preset>` around across sessions, so `CRT_ROOTFS`
-  (and anything else set via `CACHE` variables, or files/targets a
-  prior build already produced) is usually already sitting in
-  `CMakeCache.txt`/on disk from an earlier configure -- masking
-  ordering bugs (a variable referenced before the line that sets it
-  runs, in top-level-`CMakeLists.txt`-vs-`add_subdirectory()` order; a
-  `DEPENDS`/`add_dependencies()` that only orders against an aggregate
-  target's own completion, not the sibling DAG nodes that actually
-  consume the dependency's output) that a truly fresh checkout -- every
-  CI run, unconditionally -- cannot paper over. Happened twice now: the
-  `windows_pseudo_reloc_test` `DEPENDS` gap (2026-08-12, see
-  `HISTORY.md`) and the `CRT_ROOTFS` subdirectory-ordering gap
-  (2026-08-16, see `HISTORY.md`) -- both root-caused only after
-  reproducing locally from a genuinely fresh clone, both invisible on
-  this exact dev tree beforehand. **Before considering any change to
-  `CMakeLists.txt`/`tests/CMakeLists.txt`/`shell/CMakeLists.txt` (new
-  `ENVIRONMENT`/`DEPENDS` test properties, new `CACHE` variables, new
-  cross-`add_subdirectory()` references) actually done, verify it
-  either via a fresh `git clone` into a scratch directory, or at
-  minimum `cmake --fresh --preset <preset>` in place (discards
-  `CMakeCache.txt` without a full `out/` wipe) -- not just an
-  incremental `cmake --build` against whatever's already configured.**
 
-- **`porting/recipes/mbedtls-windows-exclude-symbols.rsp` is a hand-
-  generated snapshot of every public/`__crt_sys_*` libc symbol name, not
-  something regenerated automatically at build time -- it silently drifts
-  stale every time a new libc symbol is added anywhere, and nothing
-  catches that until some port's Windows DLL link happens to pull in the
-  new symbol's translation unit (each `libc/src/arch/windows/common/
-  syscall.c` symbol is `-Wl,--exclude-symbols`-suppressed individually,
-  and that file compiles as a single translation unit, so pulling in
-  *any* one of its symbols pulls in the whole `.obj`, exports and all).
-  Happened for real (2026-08-17, see `HISTORY.md`): building mbedtls
-  failed with `ld.lld: error: duplicate symbol: __crt_sys_sendmsg` (also
-  `__crt_sys_recvmsg`/`__crt_sys_link`) purely because this session's
-  earlier `sendmsg`/`recvmsg`/`link` work never touched this file. Fixed
-  by regenerating the full list from a fresh `llvm-nm --defined-only -g`
-  dump of `lib/c.lib` (917 -> 947 entries), but the underlying gap is
-  still open: **whenever a new public or `__crt_sys_*` libc symbol is
-  added, regenerate this `.rsp` file in the same pass** (or, better,
-  replace the checked-in snapshot with a real build-time generation step
-  so this stops being a manual step to remember at all) -- don't wait for
-  a port to hit it.
-
-- **Standing porting-loop discipline**, not a task list:
-  1. expose the missing header/type/macro/symbol/behavior with upstream
-     source;
-  2. check Android Bionic public headers, source, ABI, and errno policy;
-  3. extend CRT/PAL/sysroot rather than patching upstream first;
-  4. record host-specific policy differences in `docs/`;
-  5. **verify both the static AND shared build during the same porting
-     pass, on every host, before calling a port done** -- not
-     static-first-then-shared-as-a-follow-up. Several ports in this
-     queue (bzip2, xz, pcre2, mbedtls) landed `static-pass` first and
-     only got `shared-pass` in a later pass or after the user asked why
-     shared hadn't been checked; going forward, a port's recipe/test
-     entries and status write-up should cover both build shapes before
-     the port is reported as finished, and a host-specific reason must
-     be recorded in the recipe's own notes if shared is genuinely
-     deferred for that host (e.g. a real missing SDK import library),
-     not just left unmentioned.
-
-  A few smaller, longer-running audits ride along with this:
-  - Keep auditing disabled toybox applets for pointer-to-`long` LLP64
-    assumptions before enabling them (see `HISTORY.md`'s `which`/
-    `readlink`/`stat` and `id`/`xargs` entries for the most recent
-    batches actually enabled).
-  - Keep `/dev/tty`, `/dev/console`, `isatty`, `tcgetattr`, `tcsetattr`,
-    and `TIOCGWINSZ` behavior coherent enough for non-interactive shell
-    and configure use. Windows' `tcgetattr`/`tcsetattr` round-trip
-    fidelity (a per-fd shadow so a value `tcsetattr()` was asked to set
-    comes back verbatim from `tcgetattr()`, not re-derived from hardcoded
-    defaults every call) was fixed 2026-08-16 -- see `HISTORY.md`. Linux's
-    and macOS's own `tcgetattr`/`tcsetattr`/`tcdrain`/`tcflow`/`tcflush`/
-    `tcsendbreak` were pure hardcoded-value/no-op stubs (a different, more
-    complete gap than Windows' -- not just round-trip fidelity, no real
-    ioctl at all) until real `TCGETS`/`TCSETS*`/... (Linux) and
-    `TIOCGETA`/`TIOCSETA{,W,F}`/... (macOS) ioctl-backed ports landed
-    2026-08-17 -- see `HISTORY.md`. Windows' own `tcdrain`/`tcflow`/
-    `tcflush`/`tcsendbreak` had the exact same gap (pure `isatty()`-check-
-    then-no-op stubs, real Win32 backing never wired up) and are now fixed
-    the same day: `tcdrain()`/`tcflush(TCIFLUSH/TCIOFLUSH)` call real
-    `FlushFileBuffers()`/`FlushConsoleInputBuffer()`; `tcflow()`/
-    `tcsendbreak()` stay honest no-ops (once a real tty fd is confirmed)
-    since a Windows console genuinely has no serial-line-shaped flow-
-    control or break-condition concept to back them with, matching this
-    same note's own `TIOCGWINSZ` precedent below. `TIOCGWINSZ` still
-    legitimately returns `ENOTTY` when the console has no real output
-    screen buffer (confirmed directly: this project's own dev environment
-    has an attached console for input but `GetConsole ScreenBufferInfo`
-    fails on it) -- correct behavior for that real condition, not a bug,
-    but it means `stty -a`/`stty size` can't be exercised end-to-end in
-    every environment.
-  - Continue validating that `CRT_SPAWN_NATIVE_WINDOWS=1` stays a narrow
-    launcher hint for native host tools (LLVM `ar`/`ranlib`/`strip`), not
-    an inherited global mode for configure recipes.
-
-## done
+## Done
 
 See [`HISTORY.md`](HISTORY.md) for the full, dated, reverse-chronological
 record of completed work. This section stays empty in `TODO.md` itself --
 when an item below is finished, move its writeup into `HISTORY.md` (dated,
 newest entry first) rather than leaving it here.
 
-## in progress
+## In Progress
 
-Active threads, not a flat list of one-off items. Remaining libc/PAL
-residuals before the upper runtime phase (see `docs/runtime_roadmap.md`):
+Active threads, not a flat list of one-off items.
 
-### Bionic libc completeness before `libcrtgfx`
+### Upper runtime roadmap
 
-Reviewed (2026-08-16) against real Android Bionic's public surface, not
-guessed -- full findings, evidence, and priority tiers in
-[`docs/bionic_libc_gaps.md`](docs/bionic_libc_gaps.md). Summary:
+The upper-runtime work is now starting. The long-term target remains an
+Electron-class rebuilt native application runtime, but the first practical
+goal is narrower: a lightweight, Bionic-compatible UI/runtime stack that can
+prove JavaScript, graphics, media, event-loop, filesystem, dynamic-loading,
+threading, and host-window boundaries without trying to clone Electron's full
+desktop API ecosystem. See [`docs/runtime_roadmap.md`](docs/runtime_roadmap.md)
+and the 2026-08-17 study notes under [`docs/study/`](docs/study/).
 
-- All four "high priority" items are **done** (2026-08-16): `semaphore.h`,
-  public `<stdatomic.h>`, `sendmsg`/`recvmsg` + `SCM_RIGHTS`/`CMSG_*` fd
-  passing, and `memfd_create`. See `HISTORY.md`. The `sendmsg`/`recvmsg`
-  raw syscall trampolines' real-hardware caveat is now closed (2026-08-17):
-  `tests/sendmsg_scm_rights_test.c`'s real AF_UNIX fd-passing round trip
-  ran on real macOS hardware and found four real ABI bugs (AF_UNIX
-  sockaddr translation, `struct msghdr` field widths, `CMSG_ALIGN` unit,
-  `cmsg_level`/`SOL_SOCKET` translation), all fixed and verified -- see
-  `HISTORY.md`'s 2026-08-17 entry. Linux was not re-verified this pass
-  (only macOS was available); its trampolines remain reasoned-not-verified
-  until they actually run on real Linux hardware/CI.
-- **Medium priority**: `sys/epoll.h`/`sys/eventfd.h`/`sys/timerfd.h` are
-  **done** (2026-08-17) -- Linux-only, matching real Bionic exactly;
-  declared on every host (`ENOSYS` on macOS/Windows) with real raw Linux
-  syscall trampolines, reasoned carefully but **not yet independently
-  verified on real Linux hardware** (same open caveat as `sendmsg`/
-  `recvmsg` had before real macOS testing closed theirs -- see
-  `docs/bionic_libc_gaps.md` for the full writeup, including a real
-  x86_64-vs-aarch64 `struct epoll_event` layout difference that needed
-  care). `dl_iterate_phdr`/`link.h`/`elf.h`/`dladdr` are also **done**
-  (2026-08-17) -- real per-host implementations, not stubs, wherever each
-  host actually has something real to report (Linux: the main
-  executable's own real `AT_PHDR`/`AT_PHNUM`-derived data, one entry, no
-  real ELF dynamic linker exists yet to report more; macOS/Windows:
-  `dl_iterate_phdr()` honestly reports zero ELF images since Mach-O/PE
-  have no `Elf64_Phdr` equivalent at all, while `dladdr()` is real on both
-  via each host's own real image-introspection API) -- see
-  `docs/bionic_libc_gaps.md` for the full per-host writeup; verified
-  directly on Windows, Linux/macOS reasoned carefully but not yet run on
-  real hardware from this session. `PTHREAD_PROCESS_SHARED` is also
-  **done** (2026-08-17) -- real and cross-process on Linux (non-private
-  futex ops) and macOS (`os_sync_wait_on_address`'s `SHARED` flag,
-  reasoned from a Windows-only session and then verified for real on
-  macOS hardware the same day -- `tests/pthread_process_shared_test.c`'s
-  real cross-thread contention passed, and two pre-existing tests that
-  still hardcoded the pre-change `ENOTSUP` expectation for
-  `setpshared(PTHREAD_PROCESS_SHARED)` were fixed; see `HISTORY.md`),
-  unconditional on every host for `pthread_spinlock` (pure atomics, no OS
-  wait/wake call to begin with), and an honest `ENOTSUP` on Windows for
-  the other four primitives
-  (`WaitOnAddress`/`WakeByAddress*` are documented same-process-only with
-  no cross-process capability to opt into) -- see `docs/bionic_libc_gaps.md`
-  for the full per-host writeup. This closed out every medium-priority
-  item; see the next bullet for the lower-priority tier.
-- **Lower priority, no identified near-term consumer**: also **done**
-  (2026-08-17) -- `uchar.h`, `threads.h`, `sys/prctl.h`, `glob.h`,
-  `ifaddrs.h`, `ucontext.h`. Real implementations throughout, not stubs;
-  see `docs/bionic_libc_gaps.md`'s "Lower priority" section for the full
-  per-item writeup and `HISTORY.md` for the implementation trail.
-  Implementing `glob.h` surfaced and fixed two real, previously-
-  undetected bugs with no prior regression coverage (`fnmatch()`'s
-  inverted end-of-pattern match logic, `remove()` never handling
-  directories). Implementing `ucontext.h` surfaced and fixed two real
-  bugs on Windows x86_64 (an LLP64 struct-layout mismatch, and a
-  `swapcontext()` resume-point bug using an adjusted stack pointer with a
-  `retq`-based resume path that needs the unadjusted one) via a real
-  coroutine round-trip test, plus a third real bug found the same way on
-  real macOS aarch64 hardware the next day (2026-08-17): all three
-  aarch64 `ucontext.S` variants (Linux/macOS/Windows) had a
-  `swapcontext()` resume-point bug of their own -- an infinite loop, not
-  a crash, since AAPCS64's `ret` branches through the link *register*
-  rather than popping the stack the way x86_64's `retq`-based resume path
-  does, so the x86_64 fix's own resume-stub trick doesn't translate
-  as-is. Reproduced live (the test hung at 100% CPU) and fixed by
-  removing the resume-stub entirely in favor of just not clobbering the
-  naturally-saved return address; see `HISTORY.md`. This closes out
-  **every** item from the 2026-08-16 Bionic libc gap audit -- high,
-  medium, and lower priority alike.
-- Already known/tracked elsewhere (not new findings): C++ exceptions/RTTI
-  across the runtime boundary (`docs/cxx_runtime.md`), `pthread_cancel`
-  (a real `ENOTSUP` stub).
+Initial source tree shape:
 
-## planned
+```text
+libcrtjs/
+  include/
+  src/
+    common/
+    arch/{linux,macos,windows}/
+  third_party/quickjs/
 
-### Upper runtime roadmap after libc/PAL cleanup
+libcrtgfx/
+  include/
+  src/
+    common/
+    arch/{linux,macos,windows}/
+  third_party/
+    skia/
+    wayland/
 
-The long-term target is an Electron-class rebuilt native application runtime,
-not Electron itself as the next port. See `docs/runtime_roadmap.md`.
+libcrtmedia/
+  include/
+  src/
+    common/
+    arch/{linux,macos,windows}/
+  third_party/ffmpeg/
+```
 
-- **libcrtjs**: start with QuickJS to expose event-loop, module-loading,
-  filesystem, timer, native-binding, and process gaps at manageable scale.
-  Keep V8 as the final browser-class JavaScript engine target after the C++
-  runtime, JIT/code-memory policy, atomics, threading, and dynamic loading are
-  stronger.
-- **libcrtgfx**: build toward Skia plus a Wayland-compatible compositor
-  boundary, with a Chromium Ozone backend as the long-term browser integration
-  path. Host window/GPU APIs stay below the graphics PAL.
-- **libcrtmedia**: build toward FFmpeg and explicit codec/audio/video
-  libraries, with software decode first and later hardware acceleration through
-  host backends that interoperate with `libcrtgfx`.
+Boundary decisions from `docs/study`:
+
+- Keep `libc`/PAL focused on Bionic-compatible low-level runtime behavior.
+  Graphics, JavaScript, media, host windows, GPU APIs, and application-level
+  event loops stay in sibling upper-runtime libraries, not in libc.
+- Start with **QuickJS** before V8. QuickJS is the smallest useful pressure
+  test for event-loop, timers, module loading, native bindings, filesystem,
+  dynamic loading, and process behavior. V8 waits until the C++ runtime,
+  JIT/code-memory policy, atomics, threading, dynamic loading, and signal/
+  exception story are stronger.
+- Start `libcrtgfx` with **Skia as renderer** and a **Wayland-compatible
+  boundary** as protocol/compositor vocabulary, but do not build a full
+  desktop environment first. The public 2D drawing surface should expose
+  normal Skia headers rather than a broad project-owned wrapper API; `crtgfx`
+  owns runtime/window/surface/event/backend integration around Skia. Keep Skia
+  independent from Wayland protocol parsing; host backends should map top-level
+  surfaces to native windows (`HWND`, `NSWindow`, Linux
+  Wayland/DRM/EGL/Vulkan/OpenGL as needed) and let Skia render directly to the
+  host-appropriate GPU/software target. See
+  [`docs/libcrtgfx_api_policy.md`](docs/libcrtgfx_api_policy.md).
+- Treat Wayland as a compatibility boundary and future Chromium/Ozone leverage
+  point, not as a reason to force Linux display-server internals into Windows
+  or macOS. SDL2/GLFW/WebGPU/Vulkan-style alternatives remain fallback
+  references if a host-native prototype proves the Wayland path too heavy.
+  Use WSLg, Wawona/Wayoa/Cocoa-Way-style projects, Weston, wlroots, and
+  Wayland protocol libraries as architecture references first; do not vendor a
+  full compositor until the `crtgfx` surface/frame boundary has tests. From
+  WSLg specifically, take the top-level-surface-to-native-window, explicit
+  buffer handoff, and host-compositor presentation shape; exclude WSL/Linux
+  binary execution, distro/VM packaging, RDP rail integration, and vGPU/VA-API
+  dependency. See [`docs/libcrtgfx_wayland_plan.md`](docs/libcrtgfx_wayland_plan.md).
+- Start `libcrtmedia` after the JS/gfx skeleton exists. FFmpeg is the first
+  reference stack, with software decode first; GPU texture/audio-device handoff
+  comes only after `libcrtgfx` has a real surface/frame abstraction.
+
+Current baseline, completed on Windows first and recorded in
+[`HISTORY.md`](HISTORY.md):
+
+- `libcrtgfx`, `libcrtjs`, and `libcrtmedia` exist as default workflow,
+  sysroot, and rootfs runtime artifacts. They build static/shared libraries
+  and the shared runtime files are copied into `/system/lib` and `/usr/lib`.
+- Common upper-runtime code links through this project's CRT libraries
+  (`libc`, `libm`, `libdl`, `libc++`). Only narrow host backend objects are
+  allowed to speak native OS window/GPU APIs directly.
+- `libcrtgfx` now has a first Windows bring-up path:
+  `include/crtgfx/window.h` flows through
+  `src/common/wayland_weston.c`'s Weston-style toplevel/surface state, with
+  Win32 code kept as the host adapter underneath.
+- `crtgfx_window_begin_frame()`/`crtgfx_window_end_frame()` provide the first
+  BGRA8888 software buffer commit/present path. `crtgfx_window_smoke` covers
+  automation and `crtgfx_window_demo` covers manual bring-up.
+
+Next work order:
+
+1. Repeat the same `libcrtgfx` structure on macOS and Linux: keep common
+   Weston-style surface state unchanged, and add host adapters under
+   `src/arch/macos/` and `src/arch/linux/`.
+2. Connect the software frame path to Skia raster drawing, keeping normal Skia
+   headers as the public 2D drawing API and keeping project-owned headers
+   focused on runtime/surface/present/event integration.
+3. Add Wayland protocol/library investigation as a separate `libcrtgfx`
+   sub-track: decide what is protocol parsing, what is compositor policy, and
+   what is host-native window/GPU adapter code. Start with documented study of
+   candidate projects before importing source.
+4. Add `libcrtjs` QuickJS import/provenance and a minimal host-independent
+   smoke: evaluate a script, expose `print`, run timers through a tiny event
+   loop, and compile/link against this CRT sysroot on all three hosts.
+5. Add the first upper-runtime PAL contracts: event-loop tick/wake, monotonic
+   timers, dynamic module path policy, and native binding loading policy.
+6. Add `libcrtmedia` FFmpeg recipe/import after the JS/gfx skeleton can accept
+   decoded frames/audio buffers.
+
+## Planned
 
 ### Interactive job control (deferred until it's an actual priority)
 

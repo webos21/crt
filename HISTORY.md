@@ -10,6 +10,65 @@ substantive update.
 
 ## 2026-08-17
 
+- **Started the upper-runtime stack as first-class CRT artifacts and brought
+  up the initial Windows `libcrtgfx` Wayland/Weston-style software-present
+  path.** `libcrtgfx`, `libcrtjs`, and `libcrtmedia` are no longer optional
+  placeholders gated behind `CRT_ENABLE_UPPER_RUNTIME`: the top-level
+  `CMakeLists.txt` always adds them, `sysroot` depends on their static/shared
+  targets, and `tools/create_rootfs.py` now copies shared runtime libraries
+  into both `/system/lib` and `/usr/lib` alongside `libc`, `libm`, `libdl`,
+  and `libc++`. The upper-runtime libraries build as normal CRT runtime
+  artifacts: common code links through this project's own `c`/`m`/`dl`/`cxx`
+  or `c_shared`/`m_shared`/`dl_shared`/`cxx_shared` libraries, while only the
+  narrow host backend object layer is allowed to call native OS window/GPU APIs
+  directly.
+
+  `libcrtgfx` now has the first real source tree and public API:
+  `include/crtgfx/window.h` exposes a small host-independent C surface for
+  window creation, event pumping, size queries, and software frame submission.
+  The implementation deliberately stopped being a direct Win32-window wrapper:
+  public `crtgfx_window_*` calls flow into `src/common/wayland_weston.c`, which
+  owns the first Weston-style toplevel/surface state. Host-specific code now
+  implements `crtgfx_host_window_*` below that boundary. On Windows,
+  `src/arch/windows/window_win32.c` maps the toplevel to a native host window
+  and reports resize/close events back into the common Weston-style state.
+
+  The first frame path is CPU software present, not Skia yet:
+  `crtgfx_window_begin_frame()` returns a BGRA8888-premultiplied framebuffer
+  owned by the common toplevel state, and `crtgfx_window_end_frame()` commits
+  it to the host backend. The Windows backend presents that committed buffer
+  with a `StretchDIBits()` blit. `crtgfx_window_smoke` creates a hidden window,
+  fills and commits a software frame, and verifies the path under CTest;
+  `crtgfx_window_demo` opens a visible window and animates the same software
+  frame path for manual bring-up. The Win32 adapter uses internal ABI
+  declarations rather than including `<windows.h>`, avoiding the earlier
+  collision between Windows SDK headers and this project's Bionic-style public
+  headers.
+
+  Also recorded the API/policy direction in
+  `docs/libcrtgfx_api_policy.md` and `docs/libcrtgfx_wayland_plan.md`: expose
+  normal Skia headers for 2D drawing later, keep project-owned `crtgfx` headers
+  focused on runtime/surface/presentation/event/backend contracts, use WSLg/
+  Weston/wlroots/Wawona-style projects as architecture references, and
+  explicitly exclude WSL/Linux-binary execution, VM/distro packaging, RDP rail,
+  and vGPU/VA-API dependency from the Windows plan.
+
+  Verified on Windows x86_64:
+  `cmake --preset windows-host-ninja-debug`,
+  `cmake --build --preset windows-host-ninja-debug --target
+  crtgfx_window_smoke crtgfx_window_demo`,
+  `ctest --preset windows-host-ninja-debug -R crtgfx_window_smoke_runs
+  --output-on-failure`, and a default
+  `cmake --build --preset windows-host-ninja-debug` all pass. The build log
+  confirms `crtgfx`, `crtjs`, and `crtmedia` are installed into the sysroot and
+  their shared runtime files are copied into the Android-like rootfs. A full
+  `ctest --preset windows-host-ninja-debug` was started and confirmed the new
+  `crtgfx_window_smoke_runs` entry in the default list, but was manually
+  interrupted after an unrelated DNS test produced no output for over a minute.
+  macOS and Linux backends are intentionally left as the next follow-up: they
+  should reuse the common Weston-style toplevel/software-buffer contract and
+  add only host adapter code under their respective `src/arch/` directories.
+
 - **Fixed a real infinite-loop bug in every aarch64 `ucontext.S`
   (`swapcontext()`'s resume point), found live on real macOS aarch64
   hardware.** `tests/ucontext_test.c` hung indefinitely -- `ctest`

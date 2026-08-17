@@ -150,6 +150,7 @@ def main():
     parser.add_argument("--mkshrc")
     parser.add_argument("--toybox")
     parser.add_argument("--awk")
+    parser.add_argument("--runtime-library", action="append", default=[])
     args = parser.parse_args()
 
     rootfs = Path(args.dest).resolve()
@@ -214,6 +215,12 @@ def main():
             install_alias(awk_dest, rootfs / awk_dir / awk_name, args.target_os, quiet=True)
             if args.target_os == "windows":
                 copy_file(awk_source, rootfs / awk_dir / "awk", "awk", quiet=True)
+    if args.runtime_library:
+        progress(f"install runtime libraries: {len(args.runtime_library)} files")
+        for runtime_library in args.runtime_library:
+            library_source = Path(runtime_library).resolve()
+            for library_dir in ("system/lib", "usr/lib"):
+                copy_file(library_source, rootfs / library_dir / library_source.name, "runtime library")
     progress(f"done {rootfs}")
     print(f"CRT_ROOTFS={rootfs}", flush=True)
 
