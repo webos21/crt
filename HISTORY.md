@@ -10,6 +10,55 @@ substantive update.
 
 ## 2026-08-17
 
+- **Fixed a real mbedtls Windows build break the user hit directly**:
+  `ld.lld: error: duplicate symbol: __crt_sys_sendmsg` (also
+  `__crt_sys_recvmsg`/`__crt_sys_link`) during `port-rebuild-mbedtls`.
+  Root cause: `porting/recipes/mbedtls-windows-exclude-symbols.rsp` is a
+  hand-generated snapshot (per `docs/porting_status.md`'s existing entry,
+  originally produced via `llvm-nm` against `lib/c.lib` to give mbedtls's
+  Windows DLL build recipe one `-Wl,--exclude-symbols=NAME` flag per real
+  libc symbol, preventing this project's entire libc from leaking into
+  mbedtls's own DLL export tables the way it originally did) -- not
+  something regenerated automatically at build time. `libc/src/arch/
+  windows/common/syscall.c` compiles as a single translation unit, so
+  when mbedtls's DLL link needs even one of its symbols (ordinary file
+  I/O, unrelated to sockets or `link()`), the whole `.obj` -- including
+  every `__crt_sys_*` symbol in it -- becomes a candidate DLL export
+  again; anything not already in that snapshot list leaks straight
+  through, then collides with the same symbol already present directly
+  in `c.lib` when a *later* DLL in the same link chain (here,
+  `libmbedx509.dll`, which depends on `libmbedcrypto.dll.a`) needs it
+  too. This session's earlier `sendmsg`/`recvmsg` work (and `link()`,
+  from an earlier point in the same overall session) added exactly the
+  symbols the snapshot predated.
+
+  Fixed by regenerating the full list rather than hand-patching just the
+  three reported names: dumped `lib/c.lib`'s current symbol table with
+  `llvm-nm --defined-only -g`, filtered to valid plain-C identifiers
+  (dropping compiler-generated string-literal/`.weak`/`.refptr` noise),
+  diffed against the checked-in list to confirm it was a strict superset
+  (917 -> 947 entries, nothing in the old list had gone missing from
+  current `c.lib`, so no existing `--exclude-symbols` target was silently
+  dropped), and wrote the union back out sorted. The 30 newly-added names
+  covered more than just the three from the error report: also
+  `__crt_sys_tcdrain`/`tcflow`/`tcflush`/`tcsendbreak`,
+  `__crt_windows_set_args`, and every public symbol from this session's
+  `semaphore.h`/`eventfd`/`timerfd`/`epoll`/`memfd_create` work
+  (`sem_*`, `eventfd*`, `timerfd_*`, `epoll_*`, `memfd_create`,
+  `sendmsg`/`recvmsg` themselves) -- all of which would have hit this
+  exact same failure mode on whatever future port happened to pull them
+  in first, not just mbedtls.
+
+  Verified for real, not just reasoned: a full `port-rebuild-mbedtls`
+  now builds `libmbedcrypto.dll`/`libmbedx509.dll`/`libmbedtls.dll`
+  cleanly; `llvm-readobj --coff-exports` cross-referenced against the
+  full current libc symbol list shows zero libc symbols in
+  `libmbedcrypto.dll`'s export table (matching the original fix's own
+  verification method); both `crypto-static` and `crypto-shared` recipe
+  tests pass. The underlying maintenance gap -- this `.rsp` file has no
+  mechanism to catch future drift automatically -- is recorded as a
+  standing caution in `TODO.md`'s note section, not just fixed this once.
+
 - **Implemented `sys/epoll.h`/`sys/eventfd.h`/`sys/timerfd.h`**, the first
   "medium priority" batch from the Bionic libc gap audit
   (`docs/bionic_libc_gaps.md`). All three are Linux-only in real Bionic

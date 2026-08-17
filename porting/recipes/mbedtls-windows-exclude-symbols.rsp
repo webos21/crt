@@ -86,6 +86,7 @@
 --exclude-symbols=__crt_sys_ioctl
 --exclude-symbols=__crt_sys_isatty
 --exclude-symbols=__crt_sys_kill
+--exclude-symbols=__crt_sys_link
 --exclude-symbols=__crt_sys_listen
 --exclude-symbols=__crt_sys_lseek
 --exclude-symbols=__crt_sys_lstat_path
@@ -114,9 +115,11 @@
 --exclude-symbols=__crt_sys_realpath_fd
 --exclude-symbols=__crt_sys_realpath_path
 --exclude-symbols=__crt_sys_recvfrom
+--exclude-symbols=__crt_sys_recvmsg
 --exclude-symbols=__crt_sys_rename
 --exclude-symbols=__crt_sys_rmdir
 --exclude-symbols=__crt_sys_sched_yield
+--exclude-symbols=__crt_sys_sendmsg
 --exclude-symbols=__crt_sys_sendto
 --exclude-symbols=__crt_sys_setpgid
 --exclude-symbols=__crt_sys_setsid
@@ -126,7 +129,11 @@
 --exclude-symbols=__crt_sys_stat_path
 --exclude-symbols=__crt_sys_statfs
 --exclude-symbols=__crt_sys_symlink
+--exclude-symbols=__crt_sys_tcdrain
+--exclude-symbols=__crt_sys_tcflow
+--exclude-symbols=__crt_sys_tcflush
 --exclude-symbols=__crt_sys_tcgetattr
+--exclude-symbols=__crt_sys_tcsendbreak
 --exclude-symbols=__crt_sys_tcsetattr
 --exclude-symbols=__crt_sys_thread_exit
 --exclude-symbols=__crt_sys_thread_id
@@ -159,6 +166,7 @@
 --exclude-symbols=__crt_windows_fd_snapshot_relaunch_finish
 --exclude-symbols=__crt_windows_is_unregistered_clone
 --exclude-symbols=__crt_windows_memcopy_fork
+--exclude-symbols=__crt_windows_set_args
 --exclude-symbols=__crt_windows_tls_index_ptr
 --exclude-symbols=__cxa_finalize
 --exclude-symbols=__d2b_D2A
@@ -288,6 +296,12 @@
 --exclude-symbols=endutent
 --exclude-symbols=endutxent
 --exclude-symbols=environ
+--exclude-symbols=epoll_create1
+--exclude-symbols=epoll_ctl
+--exclude-symbols=epoll_wait
+--exclude-symbols=eventfd
+--exclude-symbols=eventfd_read
+--exclude-symbols=eventfd_write
 --exclude-symbols=execv
 --exclude-symbols=execve
 --exclude-symbols=execvp
@@ -498,6 +512,7 @@
 --exclude-symbols=memchr
 --exclude-symbols=memcmp
 --exclude-symbols=memcpy
+--exclude-symbols=memfd_create
 --exclude-symbols=memmove
 --exclude-symbols=memrchr
 --exclude-symbols=memset
@@ -690,6 +705,7 @@
 --exclude-symbols=realpath
 --exclude-symbols=recv
 --exclude-symbols=recvfrom
+--exclude-symbols=recvmsg
 --exclude-symbols=regcomp
 --exclude-symbols=regerror
 --exclude-symbols=regexec
@@ -703,7 +719,18 @@
 --exclude-symbols=scanf
 --exclude-symbols=sched_yield
 --exclude-symbols=select
+--exclude-symbols=sem_close
+--exclude-symbols=sem_destroy
+--exclude-symbols=sem_getvalue
+--exclude-symbols=sem_init
+--exclude-symbols=sem_open
+--exclude-symbols=sem_post
+--exclude-symbols=sem_timedwait
+--exclude-symbols=sem_trywait
+--exclude-symbols=sem_unlink
+--exclude-symbols=sem_wait
 --exclude-symbols=send
+--exclude-symbols=sendmsg
 --exclude-symbols=sendto
 --exclude-symbols=setbuf
 --exclude-symbols=setbuffer
@@ -818,6 +845,9 @@
 --exclude-symbols=timer_getoverrun
 --exclude-symbols=timer_gettime
 --exclude-symbols=timer_settime
+--exclude-symbols=timerfd_create
+--exclude-symbols=timerfd_gettime
+--exclude-symbols=timerfd_settime
 --exclude-symbols=times
 --exclude-symbols=timespec_get
 --exclude-symbols=tmpfile

@@ -37,6 +37,27 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   `CMakeCache.txt` without a full `out/` wipe) -- not just an
   incremental `cmake --build` against whatever's already configured.**
 
+- **`porting/recipes/mbedtls-windows-exclude-symbols.rsp` is a hand-
+  generated snapshot of every public/`__crt_sys_*` libc symbol name, not
+  something regenerated automatically at build time -- it silently drifts
+  stale every time a new libc symbol is added anywhere, and nothing
+  catches that until some port's Windows DLL link happens to pull in the
+  new symbol's translation unit (each `libc/src/arch/windows/common/
+  syscall.c` symbol is `-Wl,--exclude-symbols`-suppressed individually,
+  and that file compiles as a single translation unit, so pulling in
+  *any* one of its symbols pulls in the whole `.obj`, exports and all).
+  Happened for real (2026-08-17, see `HISTORY.md`): building mbedtls
+  failed with `ld.lld: error: duplicate symbol: __crt_sys_sendmsg` (also
+  `__crt_sys_recvmsg`/`__crt_sys_link`) purely because this session's
+  earlier `sendmsg`/`recvmsg`/`link` work never touched this file. Fixed
+  by regenerating the full list from a fresh `llvm-nm --defined-only -g`
+  dump of `lib/c.lib` (917 -> 947 entries), but the underlying gap is
+  still open: **whenever a new public or `__crt_sys_*` libc symbol is
+  added, regenerate this `.rsp` file in the same pass** (or, better,
+  replace the checked-in snapshot with a real build-time generation step
+  so this stops being a manual step to remember at all) -- don't wait for
+  a port to hit it.
+
 - **Standing porting-loop discipline**, not a task list:
   1. expose the missing header/type/macro/symbol/behavior with upstream
      source;
