@@ -10,6 +10,129 @@ substantive update.
 
 ## 2026-08-18
 
+- **Fixed `cmake --workflow --preset linux-host-ninja-debug` failing
+  outright on a real Linux aarch64 host, then two more real bugs the fix
+  exposed underneath -- a genuine porting-loop chain, not one bug.**
+  Reported: `libstdc++/src/new_delete.cc` failed with `'bits/c++config.h'
+  file not found`, then (after that) `'features.h' file not found`, then
+  (after installing `libc++-18-dev` per this session's own suggestion,
+  matching README.md's stated C++ runtime direction) `math_test` hung at
+  100% CPU forever, then (after fixing that) crashed with `SIGSEGV`.
+
+  1. **Root cause of the original error**: `CMakeLists.txt`'s
+     `CRT_CXX_STANDARD_INCLUDE_DIRS` detection loop filtered
+     `CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES` with a regex anchored to the
+     literal substring `include/c++` -- which matches a plain
+     `/usr/include/c++/13`, but not real Debian/Ubuntu GCC's *second*,
+     target-triple-specific directory that actually carries the
+     machine-generated `bits/c++config.h`
+     (`/usr/include/aarch64-linux-gnu/c++/13` on aarch64,
+     `x86_64-linux-gnu` on x86_64) -- confirmed directly via `clang++ -E
+     -x c++ -v /dev/null` and `CMakeCXXCompiler.cmake`'s own
+     `CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES`, both of which do list it.
+     Broadened the regex to match a `c++` path *component* anywhere
+     (`/c[+][+](/|$)`), not just after a literal `include/` prefix.
+  2. **That alone wasn't enough**: with the include path fixed, GNU
+     libstdc++'s own header wrappers (`<cstdlib>` et al) still failed --
+     they need real, private glibc-internal headers (`<features.h>` and,
+     transitively, `bits/os_defines.h`'s own further requirements) this
+     project deliberately never exposes, since it owns its own
+     Bionic-compatible libc, not glibc. This project's actual stated C++
+     runtime direction is libc++, not GNU libstdc++ (README.md's "Stack"
+     section; the `CMAKE_CXX_COMPILE_OBJECT` rule override already
+     assumed libc++'s own `include_next` relationship with this
+     project's C headers) -- Apple Clang defaults to libc++
+     unconditionally on macOS, but a stock Ubuntu/Debian Clang install
+     defaults to GNU libstdc++ instead, `-stdlib=libc++` has to be
+     requested explicitly (confirmed directly: even after installing
+     `libc++-18-dev`, `clang++ -E -x c++ -v` still resolved to GNU
+     libstdc++'s paths without that flag). Fixed by setting
+     `CMAKE_CXX_FLAGS=-stdlib=libc++` on Linux only, but *only* right
+     before `project()`/`enable_language(CXX)` (the one point it's
+     actually consulted, for the one-time
+     `CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES` detection) -- reset back to
+     empty immediately after, since every real per-target C++ compile
+     already gets its own explicit `-isystem`/`-nostdinc++` flags with no
+     further use for `-stdlib=` itself, and leaving it in `CMAKE_CXX_FLAGS`
+     made Clang's own `-Werror,-Wunused-command-line-argument` reject it
+     on every compile-only (`-c`) translation unit.
+  3. **Real libc++ has the same `<features.h>` need, for a different,
+     legitimate reason**: LLVM libc++'s own `<__config>` unconditionally
+     does `#if defined(__linux__) #include <features.h> ... #endif`
+     (checked directly, no glibc-vs-not guard of its own) to detect
+     `__GLIBC_PREREQ` for its own internal ABI-compat branching. Checked
+     Android Bionic's own real `include/features.h` for the correct
+     answer rather than improvising one: it is a one-line
+     glibc-source-compatibility shim, `#include <sys/cdefs.h>` and
+     nothing else -- no `__GLIBC_PREREQ`, so libc++ correctly falls back
+     to its conservative "not glibc" branch. Added the exact same thing
+     as `include/features.h` (this project already had `<sys/cdefs.h>`).
+     With that, the *original* C++ build error was fully resolved --
+     `cxx`/`cxx_shared` (`libstdc++/src/new_delete.cc`) and every C++ test
+     (`cxx_allocation_test`, `cxx_frontend_test`, `cxx_runtime_test`)
+     built and linked clean.
+  4. **`math_test` then hung at 100% CPU, forever** -- a *different*,
+     unrelated, genuinely pre-existing `libm` bug the fixed C++ build
+     simply let the workflow reach for the first time (macOS's own ARM64
+     `long double` is exactly the same 64 bits as `double`, so it never
+     exercises this path at all). Root-caused with `clang -S` on the
+     function in isolation, not guessed: `fmal()`'s entire body compiled
+     down to a single instruction, `b fmal` -- an unconditional branch to
+     itself. Real Linux aarch64/x86_64 `long double` (128-bit quad /
+     80-bit extended) has no native hardware FMA instruction the way
+     `double`/`float` do (confirmed `fma()`/`fmaf()` *do* compile to a
+     single real FMADD/VFMADD instruction each), so Clang lowers
+     `__builtin_fmal()` into a call to the runtime support symbol
+     literally named `fmal` -- which this project's own `fmal()` *is*,
+     making its `return __builtin_fmal(x, y, z);` body genuine, confirmed
+     infinite self-recursion. Fixed with a plain `x * y + z` (not a true
+     single-rounding-step FMA -- a known, documented precision
+     simplification, not a claim of bit-exact FMA semantics, matching
+     this file's existing bar for long double elsewhere).
+  5. **Then `SIGSEGV`, immediately after "fmal" fix, in the very next
+     check** -- root-caused the same way: `clang -S` on `lrint()` (plain
+     `double`, not even the `long double` variant) showed the exact same
+     self-referencing lowering, `bl lrint` this time (a real call with a
+     saved return address, not a tail-call branch, so this class crashes
+     from stack overflow instead of spinning forever -- otherwise
+     identical bug). Confirmed this is *every* `__builtin_lrint`/
+     `__builtin_lround`/`__builtin_llround` (and their `f`/`l` suffixed
+     variants, 9 functions total, double included, not just long double)
+     the same way, regardless of precision -- plausibly because `lrint()`
+     specifically must honor the *current dynamic* `fesetround()` mode,
+     which has no single fixed instruction to lower to at compile time.
+     Reimplemented all 9 in terms of this project's own already-real
+     `floor()`/`ceil()`/`trunc()`/`round()` (confirmed working --
+     `round()` and `fegetround()` are each checked earlier in
+     `math_test.c`, both already passed by the time this bug was
+     reached) plus `fegetround()`: `lround()`/`llround()` always round
+     half away from zero regardless of the current mode (matching
+     `round()`'s own real C99 semantics exactly, so a direct call
+     suffices); `lrint()`/`lrintl()` switch on `fegetround()`'s four
+     modes for real. One documented simplification: `lrint()`'s
+     `FE_TONEAREST` case uses `round()`'s away-from-zero tie-breaking
+     rather than IEEE round-to-nearest-ties-to-even -- only observable on
+     an exact `.5` input, matching this file's existing precision bar.
+
+  **Verified end-to-end on the real Linux aarch64 host that reported the
+  original failure**: the user's own exact command,
+  `cmake --workflow --preset linux-host-ninja-debug`, now completes
+  clean start to finish -- configure, full build (all 104 registered
+  tests link, including every C++ test and `math_test`), and
+  `ctest --preset linux-host-ninja-debug` 104/104. Isolated standalone
+  repros (`clang -S` on each function; direct calls to `atanl`/`atan2l`/
+  `fmal`/`lrint`/`lround`/`llround` and their `f`/`l` variants through the
+  real `crt-cc` toolchain) independently confirmed each fix before
+  re-running the full workflow. `termios_line_control_test`/
+  `crtgfx_window_smoke` re-confirmed passing for real (via `script -qc
+  <binary> /dev/null`, this environment's own way of getting a real pty)
+  after the full rebuild, since both depend on the same `libm`/C++
+  toolchain path. Requires `libc++-18-dev`/`libc++abi-18-dev` (or
+  whichever matches the active Clang major version) installed on Linux --
+  a real, one-time system package install, not something this session's
+  code changes can substitute for; the user installed it directly via
+  `sudo apt-get install`.
+
 - **Flattened `src/common/` out of `libcrtgfx`, `libcrtjs`, and
   `libcrtmedia`** -- common/host-independent runtime code now lives
   directly under each library's `src/` (`libcrtgfx/src/window.c`,

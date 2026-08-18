@@ -12,6 +12,8 @@ static const long double crt_ld_pi =
     3.1415926535897932384626433832795028841971693993751L;
 static const long double crt_ld_pio2 =
     1.5707963267948966192313216916397514420985846996876L;
+static const long double crt_ld_pio4 =
+    7.8539816339744830961566084581987572104929234984378e-1L;
 static const long double crt_ld_twopi =
     6.2831853071795864769252867665590057683943387987502L;
 
@@ -363,6 +365,104 @@ long double cosl(long double x) {
 
 long double tanl(long double x) {
   return sinl(x) / cosl(x);
+}
+
+/* atan(x) Taylor series, valid for |x| reasonably small -- range reduction
+ * (crt_ld_atan_nonneg below) is what keeps the argument small enough for
+ * this to converge well, the same division of labor sinl/cosl/logl above
+ * already use (a plain truncated series plus simple range reduction, not a
+ * bit-exact fdlibm-style implementation). */
+static long double crt_ld_atan_series(long double x) {
+  long double xx = x * x;
+  long double term = x;
+  long double sum = x;
+  int i;
+
+  for (i = 3; i <= 61; i += 2) {
+    term *= -xx;
+    sum += term / (long double)i;
+  }
+  return sum;
+}
+
+/* atan(x) for x >= 0. x > 1 reduces via atan(x) = pi/2 - atan(1/x); x in
+ * (tan(pi/8), 1] reduces via the half-angle identity
+ * atan(x) = pi/4 + atan((x-1)/(x+1)) so the series argument never exceeds
+ * tan(pi/8) (~0.4142), where the plain series above already converges
+ * well within this file's existing term-count budget. */
+static long double crt_ld_atan_nonneg(long double x) {
+  if (isinf(x)) {
+    return crt_ld_pio2;
+  }
+  if (x > 1.0L) {
+    return crt_ld_pio2 - crt_ld_atan_nonneg(1.0L / x);
+  }
+  if (x > 0.4142135623730950488016887242096980785696718753769L) {
+    return crt_ld_pio4 + crt_ld_atan_series((x - 1.0L) / (x + 1.0L));
+  }
+  return crt_ld_atan_series(x);
+}
+
+long double atanl(long double x) {
+  long double result;
+
+  if (isnan(x) || x == 0.0L) {
+    return x;
+  }
+  result = crt_ld_atan_nonneg(crt_ld_abs(x));
+  return x < 0.0L ? -result : result;
+}
+
+long double atan2l(long double y, long double x) {
+  long double result;
+
+  /* This project's real Linux/aarch64/x86_64 long double is never the same
+   * precision as double (LDBL_MANT_DIG != DBL_MANT_DIG on either target),
+   * so the FreeBSD-derived double-precision atan2() in
+   * libm/src/freebsd/e_atan2.c can't be reused via its own
+   * __weak_reference(atan2, atan2l) fallback (only wired up for
+   * LDBL_MANT_DIG == 53 hosts) -- confirmed via a real undefined-reference
+   * link failure from basic.c's asinl()/acosl(), both of which already
+   * called atan2l() assuming a real implementation existed. This is that
+   * real implementation, following the same quadrant logic as the
+   * double-precision one but built on atanl() above instead of bit-level
+   * tricks. */
+  if (isnan(x) || isnan(y)) {
+    return x + y;
+  }
+  if (isinf(x) && isinf(y)) {
+    result = x > 0.0L ? crt_ld_pio4 : (crt_ld_pio2 + crt_ld_pio4);
+    return y < 0.0L ? -result : result;
+  }
+  if (isinf(y)) {
+    return y < 0.0L ? -crt_ld_pio2 : crt_ld_pio2;
+  }
+  if (isinf(x)) {
+    if (x > 0.0L) {
+      return copysignl(0.0L, y);
+    }
+    return y < 0.0L ? -crt_ld_pi : crt_ld_pi;
+  }
+  if (x == 0.0L) {
+    if (y == 0.0L) {
+      if (signbit(x)) {
+        return signbit(y) ? -crt_ld_pi : crt_ld_pi;
+      }
+      return y;
+    }
+    return y < 0.0L ? -crt_ld_pio2 : crt_ld_pio2;
+  }
+  if (y == 0.0L) {
+    if (x > 0.0L) {
+      return y;
+    }
+    return signbit(y) ? -crt_ld_pi : crt_ld_pi;
+  }
+  result = crt_ld_atan_nonneg(crt_ld_abs(y / x));
+  if (x > 0.0L) {
+    return y < 0.0L ? -result : result;
+  }
+  return y < 0.0L ? result - crt_ld_pi : crt_ld_pi - result;
 }
 
 static int crt_ld_is_integer(long double x, long double* iptr) {

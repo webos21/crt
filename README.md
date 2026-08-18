@@ -130,6 +130,17 @@ Install:
 - Clang/LLVM
 - LLD
 - compiler-rt
+- libc++ and libc++abi, matching the installed Clang's major version (for
+  example `libc++-18-dev`/`libc++abi-18-dev` alongside Clang 18 on Ubuntu).
+  This project's C++ runtime direction is libc++, not GNU libstdc++ (see
+  "Stack" above) -- Apple Clang defaults to libc++ unconditionally, so
+  macOS needs nothing extra here, but a stock Ubuntu/Debian Clang install
+  defaults to GNU libstdc++ instead, which does not work with this
+  project's own Bionic-compatible C headers (GNU libstdc++'s own header
+  wrappers pull in real glibc-internal headers this project never
+  exposes). Without this installed, the C++ build fails immediately with
+  `'bits/c++config.h' file not found` or `'features.h' file not found`;
+  see `HISTORY.md`'s 2026-08-18 entry for the full diagnosis.
 
 Example package names vary by distribution, but the required commands should be
 available on `PATH`:

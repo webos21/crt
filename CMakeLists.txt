@@ -37,9 +37,61 @@ if(CRT_TARGET_OS STREQUAL "windows")
     set(CMAKE_CXX_COMPILER_TARGET "${CRT_CROSS_COMPILER_TARGET}" CACHE STRING "Cross-arch Clang++ target triple")
     set(CMAKE_ASM_COMPILER_TARGET "${CRT_CROSS_COMPILER_TARGET}" CACHE STRING "Cross-arch Clang assembler target triple")
   endif()
+elseif(CRT_TARGET_OS STREQUAL "linux")
+  # This project's C++ runtime direction is libc++ specifically (README.md's
+  # "Stack" section; the CMAKE_CXX_COMPILE_OBJECT rule override just below
+  # already assumes libc++'s own include_next relationship with this
+  # project's Bionic-shaped C headers), not GNU libstdc++ -- but unlike
+  # Apple Clang on macOS, where libc++ is simply the unconditional default,
+  # a real Linux Clang install picks whichever standard library the host
+  # distro's toolchain defaults to, which is GNU libstdc++ on a stock
+  # Debian/Ubuntu system (confirmed directly: `clang++ -E -x c++ -v
+  # /dev/null` resolves to /usr/include/c++/13 there, not libc++'s
+  # <llvm-prefix>/include/c++/v1, even with libc++-dev installed --
+  # ``-stdlib=libc++`` genuinely has to be requested, installing the
+  # package alone does not change Clang's own default). GNU libstdc++
+  # cannot work here even with a fully correct include path: its own
+  # header wrappers (<cstdlib> et al) pull in real glibc-internal headers
+  # (<features.h> and friends) this project deliberately never exposes,
+  # since it owns its own Bionic-compatible libc, not glibc -- confirmed
+  # directly by a real build on a real Ubuntu/Debian aarch64 host, which
+  # got exactly that "'features.h' file not found" failure once the
+  # (separately real and still-needed) GNU-libstdc++ multiarch-include-dir
+  # gap right below was fixed. Setting this here, before project()/
+  # enable_language(CXX), is what makes CMake's own compiler-ABI detection
+  # (CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES, consumed by crt_cxx_build_
+  # flags below) see libc++'s real headers in the first place -- setting
+  # it any later (e.g. only on crt_cxx_build_flags's own target_compile_
+  # options) would be too late for that one-time detection pass, and this
+  # project's real per-target compiles already separately pass
+  # -stdlib=libc++ implicitly by using the exact same clang++ invocation
+  # style tools/crt-c++ does. Requires libc++-dev (matching the active
+  # Clang major version, e.g. `apt install libc++-18-dev libc++abi-18-dev`
+  # on Ubuntu) to be installed; if it is not, this still resolves to GNU
+  # libstdc++'s own paths (Clang's own fallback behavior for a
+  # -stdlib=libc++ request with nothing installed to satisfy it), so the
+  # underlying "features.h not found" failure surfaces as before with a
+  # clear signal to install it, rather than a new, more confusing failure
+  # mode.
+  set(CMAKE_CXX_FLAGS "-stdlib=libc++" CACHE STRING "C++ flags" FORCE)
 endif()
 
 project(crt LANGUAGES C CXX ASM)
+
+if(CRT_TARGET_OS STREQUAL "linux")
+  # Only needed to steer the one-time CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES
+  # detection just above (already complete by the time project() returns --
+  # see "Detecting CXX compiler ABI info" in the configure log) towards
+  # libc++ instead of Clang's own Linux default of GNU libstdc++. Every real
+  # per-target C++ compile below already gets its own explicit -isystem/
+  # -nostdinc++ flags from crt_cxx_build_flags, with no further use for
+  # -stdlib= itself -- left in CMAKE_CXX_FLAGS (which every CXX compile
+  # picks up via the CMAKE_CXX_COMPILE_OBJECT rule below), Clang's own
+  # -Werror,-Wunused-command-line-argument rejects it on every compile-only
+  # (-c) translation unit, since -nostdinc++ already fully determines header
+  # search there. Reset back to empty now that its one job is done.
+  set(CMAKE_CXX_FLAGS "" CACHE STRING "C++ flags" FORCE)
+endif()
 
 # CMake's default C++ rule writes target include paths before target compile
 # options. That reverses libc++'s required include_next relationship with our
@@ -122,7 +174,26 @@ add_library(crt_cxx_build_flags INTERFACE)
 target_link_libraries(crt_cxx_build_flags INTERFACE crt_build_flags)
 set(CRT_CXX_STANDARD_INCLUDE_DIRS)
 foreach(CRT_CXX_IMPLICIT_INCLUDE_DIR IN LISTS CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES)
-  if(CRT_CXX_IMPLICIT_INCLUDE_DIR MATCHES "(^|/)include/c[+][+](/|$)" OR
+  # The first pattern used to be anchored to "include/c++" (e.g. plain
+  # "/usr/include/c++/13"), which is what a from-source/non-multiarch GCC or
+  # Clang install looks like -- but real Debian/Ubuntu GCC installs split
+  # libstdc++ headers into that generic directory *plus* a second,
+  # target-triple-specific one carrying the machine-generated
+  # bits/c++config.h (e.g. "/usr/include/aarch64-linux-gnu/c++/13" on
+  # aarch64, "/usr/include/x86_64-linux-gnu/c++/13" on x86_64), which does
+  # not contain the literal substring "include/c++" at all and so was
+  # silently dropped -- confirmed directly via `clang++ -E -x c++ -v
+  # /dev/null` and CMakeCXXCompiler.cmake's own CMAKE_CXX_IMPLICIT_INCLUDE_
+  # DIRECTORIES, both of which do list it. Missing it meant any C++
+  # translation unit that reached <cstdlib> (or any other libstdc++ header
+  # that itself #includes <bits/c++config.h>) failed with "'bits/c++config.h'
+  # file not found" on exactly this class of real Linux host. Broadened to
+  # match a "c++" path *component* anywhere (still requiring the trailing
+  # version/backward directory or end-of-string, so it doesn't also grab
+  # unrelated paths that merely contain the two characters "c++"). The
+  # separate libc++ "/c++/v1$" pattern below still matches its own shape
+  # too (already covered by the broader one, kept for clarity/history).
+  if(CRT_CXX_IMPLICIT_INCLUDE_DIR MATCHES "/c[+][+](/|$)" OR
      CRT_CXX_IMPLICIT_INCLUDE_DIR MATCHES "/c[+][+]/v1$" OR
      CRT_CXX_IMPLICIT_INCLUDE_DIR MATCHES "(/|^)VC/Tools/MSVC/.*/include$")
     list(APPEND CRT_CXX_STANDARD_INCLUDE_DIRS "${CRT_CXX_IMPLICIT_INCLUDE_DIR}")
