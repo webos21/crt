@@ -19,6 +19,7 @@ int main(void) {
   unsigned char* zeros;
   unsigned char* reused;
   unsigned char* large;
+  unsigned char* aligned;
   size_t i;
 
   bytes = (unsigned char*)malloc(16);
@@ -74,6 +75,23 @@ int main(void) {
   }
 
   free(large);
+
+  aligned = 0;
+  if (posix_memalign((void**)&aligned, 64, 37) != 0 || aligned == 0 ||
+      ((size_t)aligned & 63u) != 0 || malloc_usable_size(aligned) < 37) {
+    return fail("posix memalign");
+  }
+  memset(aligned, 0x5a, 37);
+  aligned = (unsigned char*)realloc(aligned, 80);
+  if (aligned == 0 || ((size_t)aligned & 63u) != 0 || aligned[0] != 0x5a ||
+      aligned[36] != 0x5a) {
+    return fail("aligned realloc");
+  }
+  free(aligned);
+  if (posix_memalign((void**)&aligned, 3, 8) != EINVAL) {
+    return fail("posix memalign invalid");
+  }
+
   free(reused);
   free(zeros);
   free(0);

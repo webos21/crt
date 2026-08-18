@@ -352,12 +352,15 @@ in those two win.
 - Skia `m148` now compiles into a CRT-toolchain CPU archive on macOS. The
   response-file archiver boundary is project-owned (`tools/crt-ar`), and the
   first allocation ABI slice (`operator new/delete`) is covered by CTest. A
-  runnable Skia-linked executable remains blocked only on the explicitly
-  deferred full libc++ standard-library import; host libc++ is not used as a
-  fallback. Linux and Windows select their own archiver/C++-include driver
+  Android external libc++ and libc++abi now also build as static/shared CRT
+  runtime libraries on macOS, install into the sysroot and rootfs, and pass
+  static plus shared vector/string/RTTI/exception `crt-libcxx-smoke` runs; host libc++ is not used
+  as a fallback. Linux and Windows select their own archiver/C++-include driver
   paths (`crt-ar` and `crt-ar.cmd` with MSVC STL discovery respectively),
   which were statically reviewed from macOS; their actual Skia GN/Ninja host
   runs remain required before cross-host Skia status can be claimed.
-- C++ runtime phase 2 (libc++/libc++abi/libunwind) and an ELF
-  loader/dynamic-linker prototype remain separate lower-layer tracks needed
-  before the browser-class target can become realistic.
+- C++ runtime phase 2 is complete on macOS for libc++/libc++abi. Linux and
+  Windows still require a CRT-built libunwind and real host execution; current
+  AOSP unwind source is in `toolchain/llvm-project`, not the retired
+  `platform/external/libunwind` checkout. The ELF loader/dynamic-linker
+  prototype remains a separate lower-layer track.

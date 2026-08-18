@@ -1,6 +1,8 @@
 #ifndef CRT_MATH_H
 #define CRT_MATH_H
 
+#include <limits.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -17,9 +19,15 @@ extern "C" {
 #define INFINITY (__builtin_inff())
 #define NAN (__builtin_nanf(""))
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 #define MATH_ERRNO 1
 #define MATH_ERREXCEPT 2
 #define math_errhandling 0
+#define FP_ILOGB0 INT_MIN
+#define FP_ILOGBNAN INT_MIN
 
 #define fpclassify(x) __builtin_fpclassify(FP_NAN, FP_INFINITE, FP_NORMAL, FP_SUBNORMAL, FP_ZERO, (x))
 #define isfinite(x) __builtin_isfinite(x)
@@ -27,6 +35,12 @@ extern "C" {
 #define isnan(x) __builtin_isnan(x)
 #define isnormal(x) __builtin_isnormal(x)
 #define signbit(x) __builtin_signbit(x)
+#define isgreater(x, y) __builtin_isgreater((x), (y))
+#define isgreaterequal(x, y) __builtin_isgreaterequal((x), (y))
+#define isless(x, y) __builtin_isless((x), (y))
+#define islessequal(x, y) __builtin_islessequal((x), (y))
+#define islessgreater(x, y) __builtin_islessgreater((x), (y))
+#define isunordered(x, y) __builtin_isunordered((x), (y))
 
 #if FLT_EVAL_METHOD == 0
 typedef float float_t;
@@ -79,9 +93,21 @@ double nextafter(double x, double y);
 float nextafterf(float x, float y);
 long double nextafterl(long double x, long double y);
 
+double nexttoward(double x, long double y);
+float nexttowardf(float x, long double y);
+long double nexttowardl(long double x, long double y);
+
+double nan(const char* tagp);
+float nanf(const char* tagp);
+long double nanl(const char* tagp);
+
 long lrint(double x);
 long lrintf(float x);
 long lrintl(long double x);
+
+long long llrint(double x);
+long long llrintf(float x);
+long long llrintl(long double x);
 
 long lround(double x);
 long lroundf(float x);
@@ -90,6 +116,14 @@ long lroundl(long double x);
 long long llround(double x);
 long long llroundf(float x);
 long long llroundl(long double x);
+
+double rint(double x);
+float rintf(float x);
+long double rintl(long double x);
+
+double nearbyint(double x);
+float nearbyintf(float x);
+long double nearbyintl(long double x);
 
 double sqrt(double x);
 float sqrtf(float x);
@@ -103,6 +137,10 @@ double exp(double x);
 float expf(float x);
 long double expl(long double x);
 
+double exp2(double x);
+float exp2f(float x);
+long double exp2l(long double x);
+
 double log(double x);
 float logf(float x);
 long double logl(long double x);
@@ -115,6 +153,10 @@ double log2(double x);
 float log2f(float x);
 long double log2l(long double x);
 
+double logb(double x);
+float logbf(float x);
+long double logbl(long double x);
+
 double expm1(double x);
 float expm1f(float x);
 long double expm1l(long double x);
@@ -126,6 +168,10 @@ long double log1pl(long double x);
 double scalbn(double x, int n);
 float scalbnf(float x, int n);
 long double scalbnl(long double x, int n);
+
+double scalbln(double x, long n);
+float scalblnf(float x, long n);
+long double scalblnl(long double x, long n);
 
 double ldexp(double x, int n);
 float ldexpf(float x, int n);
@@ -201,6 +247,40 @@ long double remainderl(long double x, long double y);
 double remquo(double x, double y, int* quo);
 float remquof(float x, float y, int* quo);
 long double remquol(long double x, long double y, int* quo);
+
+double erf(double x);
+float erff(float x);
+long double erfl(long double x);
+double erfc(double x);
+float erfcf(float x);
+long double erfcl(long double x);
+
+double fdim(double x, double y);
+float fdimf(float x, float y);
+long double fdiml(long double x, long double y);
+
+double hypot(double x, double y);
+float hypotf(float x, float y);
+long double hypotl(long double x, long double y);
+
+int ilogb(double x);
+int ilogbf(float x);
+int ilogbl(long double x);
+
+extern int signgam;
+double lgamma(double x);
+float lgammaf(float x);
+long double lgammal(long double x);
+double lgamma_r(double x, int* signgamp);
+float lgammaf_r(float x, int* signgamp);
+long double lgammal_r(long double x, int* signgamp);
+
+double tgamma(double x);
+float tgammaf(float x);
+long double tgammal(long double x);
+
+double sinpi(double x);
+double cospi(double x);
 
 #ifdef __cplusplus
 }

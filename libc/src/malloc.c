@@ -8,6 +8,8 @@
 #include <private/crt_atomic.h>
 
 #define CRT_HEAP_CHUNK_SIZE (64u * 1024u)
+#define CRT_BLOCK_MAGIC UINT64_C(0x435254424c4f434b)
+#define CRT_ALIGNED_MAGIC UINT64_C(0x435254414c49474e)
 
 typedef union block_header block_header;
 
@@ -16,9 +18,17 @@ union block_header {
     size_t size;
     int free;
     block_header* next;
+    uint64_t magic;
   } block;
   long double align;
 };
+
+typedef struct {
+  uint64_t magic;
+  void* allocation;
+  size_t alignment;
+  size_t requested_size;
+} aligned_header;
 
 static block_header* heap_head;
 static crt_spinlock heap_lock = CRT_SPINLOCK_INIT;
@@ -130,6 +140,7 @@ static block_header* append_chunk(size_t size) {
   header->block.size = chunk_size - sizeof(block_header);
   header->block.free = 1;
   header->block.next = 0;
+  header->block.magic = CRT_BLOCK_MAGIC;
 
   if (heap_head == 0) {
     heap_head = header;
@@ -155,6 +166,7 @@ static void split_block(block_header* header, size_t size) {
   next->block.size = header->block.size - size - sizeof(block_header);
   next->block.free = 1;
   next->block.next = header->block.next;
+  next->block.magic = CRT_BLOCK_MAGIC;
 
   header->block.size = size;
   header->block.next = next;
@@ -209,12 +221,21 @@ static void* malloc_unlocked(size_t size) {
 
 static void free_unlocked(void* ptr) {
   block_header* header;
+  aligned_header* aligned;
 
   if (ptr == 0) {
     return;
   }
 
   header = ((block_header*)ptr) - 1;
+  if (header->block.magic != CRT_BLOCK_MAGIC) {
+    aligned = ((aligned_header*)ptr) - 1;
+    if (aligned->magic != CRT_ALIGNED_MAGIC) {
+      return;
+    }
+    ptr = aligned->allocation;
+    header = ((block_header*)ptr) - 1;
+  }
   header->block.free = 1;
   coalesce_free_blocks();
 }
@@ -236,6 +257,7 @@ void free(void* ptr) {
 
 size_t malloc_usable_size(const void* ptr) {
   const block_header* header;
+  const aligned_header* aligned;
   size_t size;
 
   if (ptr == 0) {
@@ -244,7 +266,12 @@ size_t malloc_usable_size(const void* ptr) {
 
   crt_spin_lock(&heap_lock);
   header = ((const block_header*)ptr) - 1;
-  size = header->block.free ? 0 : header->block.size;
+  if (header->block.magic == CRT_BLOCK_MAGIC) {
+    size = header->block.free ? 0 : header->block.size;
+  } else {
+    aligned = ((const aligned_header*)ptr) - 1;
+    size = aligned->magic == CRT_ALIGNED_MAGIC ? aligned->requested_size : 0;
+  }
   crt_spin_unlock(&heap_lock);
   return size;
 }
@@ -268,6 +295,7 @@ void* calloc(size_t nmemb, size_t size) {
 
 void* realloc(void* ptr, size_t size) {
   block_header* header;
+  aligned_header* aligned;
   void* new_ptr;
   size_t copy_size;
   size_t alignment = sizeof(block_header);
@@ -287,6 +315,39 @@ void* realloc(void* ptr, size_t size) {
     return 0;
   }
   header = ((block_header*)ptr) - 1;
+  if (header->block.magic != CRT_BLOCK_MAGIC) {
+    size_t old_size;
+    size_t old_alignment;
+
+    aligned = ((aligned_header*)ptr) - 1;
+    if (aligned->magic != CRT_ALIGNED_MAGIC) {
+      errno = EINVAL;
+      crt_spin_unlock(&heap_lock);
+      return 0;
+    }
+    old_size = aligned->requested_size;
+    old_alignment = aligned->alignment;
+    if (size > ((size_t)-1) - old_alignment - sizeof(aligned_header)) {
+      errno = ENOMEM;
+      crt_spin_unlock(&heap_lock);
+      return 0;
+    }
+    new_ptr = malloc_unlocked(size + old_alignment - 1 + sizeof(aligned_header));
+    if (new_ptr != 0) {
+      uintptr_t address = ((uintptr_t)new_ptr + sizeof(aligned_header) + old_alignment - 1) &
+                          ~(uintptr_t)(old_alignment - 1);
+      aligned_header* new_aligned = ((aligned_header*)address) - 1;
+      new_aligned->magic = CRT_ALIGNED_MAGIC;
+      new_aligned->allocation = new_ptr;
+      new_aligned->alignment = old_alignment;
+      new_aligned->requested_size = size;
+      new_ptr = (void*)address;
+      memcpy(new_ptr, ptr, old_size < size ? old_size : size);
+      free_unlocked(ptr);
+    }
+    crt_spin_unlock(&heap_lock);
+    return new_ptr;
+  }
   size = align_size(size);
   if (header->block.size >= size) {
     split_block(header, size);
@@ -304,4 +365,52 @@ void* realloc(void* ptr, size_t size) {
   free_unlocked(ptr);
   crt_spin_unlock(&heap_lock);
   return new_ptr;
+}
+
+int posix_memalign(void** memptr, size_t alignment, size_t size) {
+  void* allocation;
+  uintptr_t address;
+  aligned_header* aligned;
+
+  if (memptr == 0 || alignment < sizeof(void*) ||
+      (alignment & (alignment - 1)) != 0) {
+    return EINVAL;
+  }
+  if (alignment <= sizeof(block_header)) {
+    allocation = malloc(size);
+    if (allocation == 0) return ENOMEM;
+    *memptr = allocation;
+    return 0;
+  }
+  if (size > ((size_t)-1) - alignment - sizeof(aligned_header)) {
+    return ENOMEM;
+  }
+
+  allocation = malloc(size + alignment - 1 + sizeof(aligned_header));
+  if (allocation == 0) return ENOMEM;
+  address = ((uintptr_t)allocation + sizeof(aligned_header) + alignment - 1) &
+            ~(uintptr_t)(alignment - 1);
+  aligned = ((aligned_header*)address) - 1;
+  aligned->magic = CRT_ALIGNED_MAGIC;
+  aligned->allocation = allocation;
+  aligned->alignment = alignment;
+  aligned->requested_size = size;
+  *memptr = (void*)address;
+  return 0;
+}
+
+void* aligned_alloc(size_t alignment, size_t size) {
+  void* result = 0;
+  int error;
+
+  if (alignment == 0 || (size % alignment) != 0) {
+    errno = EINVAL;
+    return 0;
+  }
+  error = posix_memalign(&result, alignment, size);
+  if (error != 0) {
+    errno = error;
+    return 0;
+  }
+  return result;
 }

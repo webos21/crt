@@ -435,14 +435,23 @@ if(Python3_Interpreter_FOUND)
     set(CRT_ROOTFS_ALL_KEYWORD)
   endif()
   set(CRT_ROOTFS_CXX_LIBRARY "$<TARGET_FILE:cxx_shared>")
+  set(CRT_ROOTFS_CXX_ABI_LIBRARY "")
   if(CRT_USE_IMPORTED_LIBCXX)
     if(CRT_TARGET_OS STREQUAL "windows")
-      set(CRT_ROOTFS_CXX_LIBRARY "${CRT_SYSROOT}/lib/c++.dll")
+      set(CRT_ROOTFS_CXX_LIBRARY "${CRT_SYSROOT}/bin/c++.dll")
+      set(CRT_ROOTFS_CXX_ABI_LIBRARY "${CRT_SYSROOT}/bin/c++abi.dll")
     elseif(CRT_TARGET_OS STREQUAL "macos")
       set(CRT_ROOTFS_CXX_LIBRARY "${CRT_SYSROOT}/lib/libc++.dylib")
+      set(CRT_ROOTFS_CXX_ABI_LIBRARY "${CRT_SYSROOT}/lib/libc++abi.1.dylib")
     else()
       set(CRT_ROOTFS_CXX_LIBRARY "${CRT_SYSROOT}/lib/libc++.so")
+      set(CRT_ROOTFS_CXX_ABI_LIBRARY "${CRT_SYSROOT}/lib/libc++abi.so.1")
     endif()
+  endif()
+  set(CRT_ROOTFS_CXX_ABI_ARGUMENTS "")
+  if(CRT_ROOTFS_CXX_ABI_LIBRARY)
+    list(APPEND CRT_ROOTFS_CXX_ABI_ARGUMENTS
+      --runtime-library "${CRT_ROOTFS_CXX_ABI_LIBRARY}")
   endif()
   add_custom_target(rootfs ${CRT_ROOTFS_ALL_KEYWORD}
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
@@ -458,6 +467,7 @@ if(Python3_Interpreter_FOUND)
       --runtime-library "$<TARGET_FILE:m_shared>"
       --runtime-library "$<TARGET_FILE:dl_shared>"
       --runtime-library "${CRT_ROOTFS_CXX_LIBRARY}"
+      ${CRT_ROOTFS_CXX_ABI_ARGUMENTS}
       --runtime-library "$<TARGET_FILE:crtgfx_shared>"
       --runtime-library "$<TARGET_FILE:crtjs_shared>"
       --runtime-library "$<TARGET_FILE:crtmedia_shared>"

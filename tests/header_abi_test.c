@@ -1,4 +1,5 @@
 #include <arpa/inet.h>
+#include <android/api-level.h>
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
@@ -85,6 +86,7 @@ CRT_STATIC_ASSERT(eai_badflags_bionic, EAI_BADFLAGS == 3);
 CRT_STATIC_ASSERT(eai_noname_bionic, EAI_NONAME == 8);
 CRT_STATIC_ASSERT(eai_service_bionic, EAI_SERVICE == 9);
 CRT_STATIC_ASSERT(eai_system_bionic, EAI_SYSTEM == 11);
+CRT_STATIC_ASSERT(android_api_future_bionic, __ANDROID_API_FUTURE__ == 10000);
 
 #if defined(CRT_TARGET_OS_MACOS)
 CRT_STATIC_ASSERT(mach_port_32, sizeof(mach_port_t) == 4);
@@ -169,6 +171,10 @@ int main(void) {
   if (pfd.fd != -1 || st.st_size != 123 || sfs.f_namelen != 255 || ts.tv_sec != 1 ||
       tv.tv_sec != 1) {
     return fail("basic ABI assignment");
+  }
+  if (android_get_device_api_level() != __ANDROID_API_FUTURE__ ||
+      android_get_application_target_sdk_version() != __ANDROID_API_FUTURE__) {
+    return fail("host Android API level policy");
   }
 
 #if defined(CRT_TARGET_OS_MACOS)

@@ -50,20 +50,26 @@ install(TARGETS cxx cxx_shared
 # shim. Keep those sources outside this checkout too: the metadata below is
 # project-owned, while the selected Android revision is fetched under the active
 # build preset. The fetch target is deliberately separate from the bootstrap
-# `cxx` target until libc++/libc++abi/libunwind can replace it as one coherent
+# `cxx` target until libc++/libc++abi and current LLVM libunwind can replace it as one coherent
 # static-and-shared runtime set.
-set(CRT_LIBCXX_ANDROID_REF "refs/heads/main" CACHE STRING "Android ref shared by libc++, libc++abi, and libunwind")
+set(CRT_LIBCXX_ANDROID_REF "refs/heads/main" CACHE STRING "Android ref shared by external/libc++ and external/libc++abi")
 set(CRT_LIBCXX_FETCH_ROOT "${CMAKE_BINARY_DIR}/external/llvm-runtimes" CACHE PATH "Android LLVM runtime source root")
 set(CRT_LIBCXX_BUILD_ROOT "${CRT_LIBCXX_FETCH_ROOT}/build" CACHE PATH "Android libc++ CMake build root")
 set(CRT_LIBCXX_INSTALL_PREFIX "${CRT_LIBCXX_FETCH_ROOT}/install" CACHE PATH "Android libc++ staged install prefix")
 option(CRT_USE_IMPORTED_LIBCXX "Use a successfully staged Android libc++ runtime for dependent external builds" OFF)
+set(CRT_LIBCXX_PLATFORM_ARGUMENTS "")
+if(CRT_TARGET_OS STREQUAL "windows" AND CRT_WINDOWS_KERNEL32_LIB)
+  get_filename_component(CRT_LIBCXX_WINDOWS_SDK_LIBPATH "${CRT_WINDOWS_KERNEL32_LIB}" DIRECTORY)
+  list(APPEND CRT_LIBCXX_PLATFORM_ARGUMENTS
+    --windows-sdk-libpath "${CRT_LIBCXX_WINDOWS_SDK_LIBPATH}")
+endif()
 if(Python3_Interpreter_FOUND)
   add_custom_target(crt-libcxx-fetch
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
       "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/fetch_libcxx_runtimes.py"
       --root "${CRT_LIBCXX_FETCH_ROOT}"
       --ref "${CRT_LIBCXX_ANDROID_REF}"
-    COMMENT "Fetching Android libc++, libc++abi, and libunwind sources"
+    COMMENT "Fetching Android external/libc++ and external/libc++abi sources"
   )
   add_custom_target(crt-libcxx-configure
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
@@ -74,6 +80,7 @@ if(Python3_Interpreter_FOUND)
       --install-prefix "${CRT_LIBCXX_INSTALL_PREFIX}"
       --sysroot "${CRT_SYSROOT}"
       --target-os "${CRT_TARGET_OS}"
+      ${CRT_LIBCXX_PLATFORM_ARGUMENTS}
       --phase configure
     DEPENDS crt-libcxx-fetch
     COMMENT "Configuring Android libc++ and libc++abi through the CRT toolchain"
@@ -88,6 +95,7 @@ if(Python3_Interpreter_FOUND)
       --install-prefix "${CRT_LIBCXX_INSTALL_PREFIX}"
       --sysroot "${CRT_SYSROOT}"
       --target-os "${CRT_TARGET_OS}"
+      ${CRT_LIBCXX_PLATFORM_ARGUMENTS}
       --phase build
     DEPENDS crt-libcxx-configure
     COMMENT "Building Android libc++ and libc++abi through the CRT toolchain"
@@ -99,6 +107,18 @@ if(Python3_Interpreter_FOUND)
       --sysroot "${CRT_SYSROOT}"
     DEPENDS crt-libcxx-build
     COMMENT "Staging Android libc++ runtime into the CRT sysroot"
+    USES_TERMINAL
+  )
+  set(CRT_LIBCXX_SMOKE_BINARY
+    "${CMAKE_BINARY_DIR}/external/llvm-runtimes/smoke/imported_libcxx_test${CMAKE_EXECUTABLE_SUFFIX}")
+  add_custom_target(crt-libcxx-smoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_libcxx_runtime.py"
+      --root "${CMAKE_SOURCE_DIR}"
+      --sysroot "${CRT_SYSROOT}"
+      --target-os "${CRT_TARGET_OS}"
+      --output "${CRT_LIBCXX_SMOKE_BINARY}"
+    DEPENDS crt-libcxx-sysroot
+    COMMENT "Linking and running static/shared Android libc++ through the CRT sysroot"
     USES_TERMINAL
   )
 endif()

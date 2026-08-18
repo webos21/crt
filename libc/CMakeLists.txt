@@ -1,4 +1,5 @@
 set(CRT_LIBC_SOURCES
+  src/android_api.c
   src/atoi.c
   src/atof.c
   src/abs.c

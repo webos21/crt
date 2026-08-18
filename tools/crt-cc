@@ -83,7 +83,7 @@ done
 
 common_flags="-ffreestanding -fno-builtin -Xclang -fwchar-type=int -ffunction-sections -fdata-sections -nostdinc -isystem${CRT_SYSROOT}/include"
 case "$target_os" in
-  macos) common_flags="$common_flags -DCRT_TARGET_OS_MACOS=1" ;;
+  macos) common_flags="$common_flags -DCRT_TARGET_OS_MACOS=1 -U__APPLE__" ;;
   linux) common_flags="$common_flags -DCRT_TARGET_OS_LINUX=1" ;;
   windows)
     common_flags="$common_flags -DCRT_TARGET_OS_WINDOWS=1"

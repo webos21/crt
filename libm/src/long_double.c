@@ -1,4 +1,5 @@
 #include <float.h>
+#include <fenv.h>
 #include <limits.h>
 #include <math.h>
 
@@ -219,6 +220,95 @@ long double expl(long double x) {
     }
   }
   return scalbnl(sum, k);
+}
+
+long double exp2l(long double x) {
+  return expl(x * crt_ld_ln2);
+}
+
+long double rintl(long double x) {
+#if LDBL_MANT_DIG == DBL_MANT_DIG
+  return (long double)rint((double)x);
+#else
+  switch (fegetround()) {
+    case FE_DOWNWARD: return floorl(x);
+    case FE_UPWARD: return ceill(x);
+    case FE_TOWARDZERO: return truncl(x);
+    case FE_TONEAREST:
+    default: return roundl(x);
+  }
+#endif
+}
+
+double nexttoward(double x, long double y) {
+  return nextafter(x, (double)y);
+}
+
+float nexttowardf(float x, long double y) {
+  return nextafterf(x, (float)y);
+}
+
+long double nexttowardl(long double x, long double y) {
+  return nextafterl(x, y);
+}
+
+long double nanl(const char* tagp) {
+#if LDBL_MANT_DIG == DBL_MANT_DIG
+  return (long double)nan(tagp);
+#else
+  (void)tagp;
+  return __builtin_nanl("");
+#endif
+}
+
+long double logbl(long double x) {
+  if (x == 0.0L) return -(long double)INFINITY;
+  if (!isfinite(x)) return x * x;
+  return (long double)ilogbl(x);
+}
+
+long double erfl(long double x) {
+  return (long double)erf((double)x);
+}
+
+long double erfcl(long double x) {
+  return (long double)erfc((double)x);
+}
+
+long double hypotl(long double x, long double y) {
+  long double ax = crt_ld_abs(x);
+  long double ay = crt_ld_abs(y);
+  long double scale;
+
+  if (isinf(ax) || isinf(ay)) return (long double)INFINITY;
+  if (isnan(ax) || isnan(ay)) return ax + ay;
+  scale = ax > ay ? ax : ay;
+  if (scale == 0.0L) return 0.0L;
+  ax /= scale;
+  ay /= scale;
+  return scale * sqrtl(ax * ax + ay * ay);
+}
+
+int ilogbl(long double x) {
+  int exponent;
+
+  if (x == 0.0L) return FP_ILOGB0;
+  if (isnan(x)) return FP_ILOGBNAN;
+  if (isinf(x)) return INT_MAX;
+  (void)frexpl(crt_ld_abs(x), &exponent);
+  return exponent - 1;
+}
+
+long double lgammal(long double x) {
+  return (long double)lgamma((double)x);
+}
+
+long double lgammal_r(long double x, int* signgamp) {
+  return (long double)lgamma_r((double)x, signgamp);
+}
+
+long double tgammal(long double x) {
+  return (long double)tgamma((double)x);
 }
 
 long double expm1l(long double x) {

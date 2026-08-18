@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <bits/crt_types.h>
+#include <locale.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -74,6 +75,8 @@ char* ctime_r(const time_t* timep, char* buf);
 time_t mktime(struct tm* tm);
 double difftime(time_t time1, time_t time0);
 size_t strftime(char* s, size_t max, const char* format, const struct tm* tm);
+size_t strftime_l(
+    char* s, size_t max, const char* format, const struct tm* tm, locale_t locale);
 char* strptime(const char* buf, const char* format, struct tm* tm);
 void tzset(void);
 

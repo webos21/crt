@@ -10,6 +10,23 @@ substantive update.
 
 ## 2026-08-18
 
+- **Completed the first runnable Android libc++/libc++abi environment on
+  macOS.** `crt-libcxx-configure`/`build` now produce both static and shared
+  libraries through the CRT wrappers, `crt-libcxx-sysroot` stages the full
+  header/runtime set, and `CRT_USE_IMPORTED_LIBCXX=ON` installs the imported
+  dylibs into the Android-like rootfs. The new `crt-libcxx-smoke` target runs
+  static and shared `std::vector`, `std::string`, RTTI, and a real
+  `std::runtime_error` throw/catch. The work exposed and fixed Bionic
+  personality, API-level, aligned-allocation, C99 math, and Darwin symbol
+  interposition gaps. Static Darwin links also stage libc++'s upstream
+  not-weak policy so libSystem cannot interpose its C++ allocator symbols;
+  notably, legacy `-lpthread`/`-lrt` are now absorbed into
+  libc so host libSystem pthread symbols cannot consume Bionic-shaped objects.
+  The complete 104-test macOS workflow passes with imported rootfs mode on.
+  Linux/Windows remain open pending a CRT-built current AOSP LLVM libunwind;
+  `platform/external/libunwind` was confirmed retired, so no host unwinder
+  fallback was introduced.
+
 - **Fixed `cmake --workflow --preset linux-host-ninja-debug` failing
   outright on a real Linux aarch64 host, then two more real bugs the fix
   exposed underneath -- a genuine porting-loop chain, not one bug.**

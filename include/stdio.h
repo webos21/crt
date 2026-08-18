@@ -59,6 +59,7 @@ int fgetpos(FILE* stream, fpos_t* pos);
 int fsetpos(FILE* stream, const fpos_t* pos);
 int fgetc(FILE* stream);
 char* fgets(char* s, int size, FILE* stream);
+char* gets(char* s) __attribute__((deprecated("gets is unsafe, use fgets instead")));
 ssize_t getdelim(char** lineptr, size_t* n, int delimiter, FILE* stream);
 ssize_t getline(char** lineptr, size_t* n, FILE* stream);
 int getc(FILE* stream);

@@ -4,6 +4,12 @@ set(CRT_LIBM_SOURCES
   src/long_double.c
   src/freebsd/e_fmod.c
   src/freebsd/e_fmodf.c
+  src/freebsd/e_hypot.c
+  src/freebsd/e_hypotf.c
+  src/freebsd/e_lgamma.c
+  src/freebsd/e_lgammaf.c
+  src/freebsd/e_lgamma_r.c
+  src/freebsd/e_lgammaf_r.c
   src/freebsd/e_exp.c
   src/freebsd/e_expf.c
   src/freebsd/e_log.c
@@ -15,10 +21,13 @@ set(CRT_LIBM_SOURCES
   src/freebsd/e_pow.c
   src/freebsd/e_powf.c
   src/freebsd/e_atan2.c
+  src/freebsd/b_tgamma.c
   src/freebsd/s_atan.c
   src/freebsd/k_cos.c
+  src/freebsd/k_cosf.c
   src/freebsd/k_rem_pio2.c
   src/freebsd/k_sin.c
+  src/freebsd/k_sinf.c
   src/freebsd/k_tan.c
   src/freebsd/e_remainder.c
   src/freebsd/e_remainderf.c
@@ -26,25 +35,54 @@ set(CRT_LIBM_SOURCES
   src/freebsd/s_cos.c
   src/freebsd/s_expm1.c
   src/freebsd/s_expm1f.c
+  src/freebsd/s_erf.c
+  src/freebsd/s_erff.c
+  src/freebsd/s_fdim.c
   src/freebsd/s_floor.c
   src/freebsd/s_fmax.c
   src/freebsd/s_fmin.c
   src/freebsd/s_frexp.c
   src/freebsd/s_frexpf.c
+  src/freebsd/s_ilogb.c
+  src/freebsd/s_ilogbf.c
   src/freebsd/s_log1p.c
   src/freebsd/s_log1pf.c
+  src/freebsd/s_logb.c
+  src/freebsd/s_logbf.c
+  src/freebsd/s_lrint.c
+  src/freebsd/s_llrint.c
+  src/freebsd/s_llrintf.c
   src/freebsd/s_modf.c
   src/freebsd/s_modff.c
+  src/freebsd/s_nan.c
+  src/freebsd/s_nearbyint.c
   src/freebsd/s_remquo.c
   src/freebsd/s_remquof.c
+  src/freebsd/s_rint.c
+  src/freebsd/s_rintf.c
   src/freebsd/s_round.c
+  src/freebsd/s_scalbln.c
   src/freebsd/s_scalbn.c
   src/freebsd/s_scalbnf.c
+  src/freebsd/s_signgam.c
   src/freebsd/s_sin.c
+  src/freebsd/s_sinpi.c
+  src/freebsd/s_cospi.c
   src/freebsd/s_sincosf.c
   src/freebsd/s_tan.c
   src/freebsd/s_tanf.c
+  src/freebsd/s_tgammaf.c
   src/freebsd/s_trunc.c
+)
+
+# Bionic's Soong build does not promote the two legacy unused locals in
+# b_tgamma.c to errors. Keep the imported source pristine and scope the same
+# warning policy to that translation unit only.
+set_source_files_properties(src/freebsd/b_tgamma.c PROPERTIES
+  COMPILE_OPTIONS "-Wno-unused-variable"
+)
+set_source_files_properties(src/freebsd/s_nan.c PROPERTIES
+  COMPILE_OPTIONS "-include;${CMAKE_CURRENT_SOURCE_DIR}/src/freebsd/freebsd-compat.h"
 )
 
 add_library(m STATIC ${CRT_LIBM_SOURCES})

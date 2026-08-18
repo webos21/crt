@@ -17,6 +17,8 @@ void free(void* ptr);
 void* calloc(size_t nmemb, size_t size);
 void* realloc(void* ptr, size_t size);
 void* reallocarray(void* ptr, size_t nmemb, size_t size);
+int posix_memalign(void** memptr, size_t alignment, size_t size);
+void* aligned_alloc(size_t alignment, size_t size);
 int system(const char* command);
 
 #define RAND_MAX 0x7fffffff

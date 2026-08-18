@@ -152,72 +152,12 @@ long double nextafterl(long double x, long double y) {
   return (long double)nextafter((double)x, (double)y);
 }
 
-/* NOT __builtin_lrint()/__builtin_lround()/__builtin_llround() (or their
- * f/l variants) anywhere in this file: unlike fma()/fmaf() above (which do
- * compile straight to a single native FMADD instruction, confirmed via
- * generated assembly), clang lowers *every* one of these -- lrint, lrintf,
- * lrintl, lround, lroundf, lroundl, llround, llroundf, llroundl, on both
- * double and float, not just long double -- into a call to a runtime
- * support symbol with the exact same name as the builtin, regardless of
- * precision or `-fno-builtin`/`-ffreestanding` (plausibly because lrint()
- * specifically must honor the *current dynamic* fesetround() mode, which
- * has no single fixed-rounding-mode instruction to lower to at compile
- * time). Since this project defines that exact symbol name as this exact
- * function, every one of them was real, confirmed infinite self-recursion
- * (`clang -S` on each in isolation shows the entire body compiling down to
- * `bl <same name>` -- a real call, not fma()'s tail-call `b`, so this
- * class crashes with a stack overflow rather than spinning forever, but is
- * exactly as broken). Found for real via tests/math_test.c crashing
- * (SIGSEGV, not hanging) on a real Linux aarch64 host immediately after
- * the fmal() self-recursion fix above -- the first time any of these had
- * ever actually linked and run on Linux (macOS never exercises this
- * lowering path the same way). Reimplemented in terms of this project's
- * own already-real floor()/ceil()/trunc()/round() (their *l suffixed
- * variants are real too, see long_double.c/basic.c) plus fegetround(),
- * both already confirmed working (round() and fegetround() are each
- * checked earlier in math_test.c, both pass): lround()/llround() always
- * round half away from zero regardless of the current rounding mode (that
- * is round()'s own real, existing semantics, C99's), and lrint() honors
- * the current fesetround() mode for real. One known, documented precision
- * simplification: lrint()'s FE_TONEAREST case uses round()'s away-from-
- * zero tie-breaking rather than IEEE round-to-nearest-ties-to-even -- only
- * observable exactly on a .5 tie, matching this file's existing precision
- * bar elsewhere (see nextafterl() above), not a claim of bit-exact
- * rint() semantics. */
-static long crt_lrint_round_current_mode(double x) {
-  switch (fegetround()) {
-    case FE_DOWNWARD:
-      return (long)floor(x);
-    case FE_UPWARD:
-      return (long)ceil(x);
-    case FE_TOWARDZERO:
-      return (long)trunc(x);
-    case FE_TONEAREST:
-    default:
-      return (long)round(x);
-  }
-}
-
-long lrint(double x) {
-  return crt_lrint_round_current_mode(x);
-}
-
-long lrintf(float x) {
-  return crt_lrint_round_current_mode((double)x);
-}
-
 long lrintl(long double x) {
-  switch (fegetround()) {
-    case FE_DOWNWARD:
-      return (long)floorl(x);
-    case FE_UPWARD:
-      return (long)ceill(x);
-    case FE_TOWARDZERO:
-      return (long)truncl(x);
-    case FE_TONEAREST:
-    default:
-      return (long)roundl(x);
-  }
+  return (long)rintl(x);
+}
+
+long long llrintl(long double x) {
+  return (long long)rintl(x);
 }
 
 long lround(double x) {
@@ -336,6 +276,18 @@ double sqrt(double x) {
 
 float sqrtf(float x) {
   return __builtin_elementwise_sqrt(x);
+}
+
+/* Bionic main's Android.bp has no standalone exp2/exp2f msun source: its
+ * Android build supplies those through its compiler/libm integration. Keep
+ * the public Bionic surface in the CRT with the already-imported exp family
+ * until a matching current-main source route is available. */
+double exp2(double x) {
+  return exp(x * 0.693147180559945309417232121458176568);
+}
+
+float exp2f(float x) {
+  return expf(x * 0.693147180559945309417232121458176568f);
 }
 
 double cbrt(double x) {

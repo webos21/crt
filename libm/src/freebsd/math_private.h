@@ -41,6 +41,13 @@ typedef uint32_t u_int32_t;
 #define nan_mix(x, y) nan_mix_op((x), (y), +)
 #endif
 
+#define _2sumF(a, b) do { \
+  __typeof(a) __w; \
+  __w = (a) + (b); \
+  (b) = ((a) - __w) + (b); \
+  (a) = __w; \
+} while (0)
+
 #if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
 #define CRT_IEEE_WORD_ORDER_BIG 1
 #else
@@ -136,6 +143,17 @@ typedef union {
     (f) = sfw_u.value; \
   } while (0)
 
+#define FFLOOR(x, j0, ix, lx) do { \
+  (j0) = (((ix) >> 20) & 0x7ff) - 0x3ff; \
+  if ((j0) < 20) { \
+    (ix) &= ~(0x000fffff >> (j0)); \
+    (lx) = 0; \
+  } else { \
+    (lx) &= ~((uint32_t)0xffffffff >> ((j0) - 20)); \
+  } \
+  INSERT_WORDS((x), (ix), (lx)); \
+} while (0)
+
 static inline double rnint(double_t x) {
   return ((double)(x + 0x1.8p52) - 0x1.8p52);
 }
@@ -146,5 +164,11 @@ int __kernel_rem_pio2(double* x, double* y, int e0, int nx, int prec);
 double __kernel_sin(double x, double y, int iy);
 double __kernel_cos(double x, double y);
 double __kernel_tan(double x, double y, int iy);
+#ifndef INLINE_KERNEL_SINDF
+float __kernel_sindf(double x);
+#endif
+#ifndef INLINE_KERNEL_COSDF
+float __kernel_cosdf(double x);
+#endif
 
 #endif

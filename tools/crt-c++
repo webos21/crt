@@ -63,11 +63,34 @@ for arg in "$@"; do
   if [ "$target_os" = windows ]; then
     arg=$(windows_host_arg "$arg")
   fi
-  user_args="$user_args $(printf '%s\n' "$arg")"
+  case "$arg" in
+    -lpthread|-lrt)
+      # Bionic merged these historical libraries into libc. Let the CRT libc
+      # selected below satisfy their symbols instead of leaking a host
+      # libpthread/librt into standalone Android runtime builds.
+      ;;
+    -lc)
+      # While producing libc++/libc++abi themselves, the wrapper below picks
+      # the correct static/shared CRT libc shape. Keeping the standalone
+      # project's extra -lc would select a second or host-shaped libc.
+      if [ "${CRT_CXX_BUILDING_RUNTIME:-0}" != 1 ]; then
+        user_args="$user_args $(printf '%s\n' "$arg")"
+      fi
+      ;;
+    *) user_args="$user_args $(printf '%s\n' "$arg")" ;;
+  esac
 done
 
 compile_only=0
 shared_mode=0
+runtime_linkage="${CRT_CXX_RUNTIME_LINKAGE:-static}"
+case "$runtime_linkage" in
+  static|shared) ;;
+  *)
+    echo "crt-c++: CRT_CXX_RUNTIME_LINKAGE must be static or shared" >&2
+    exit 1
+    ;;
+esac
 for arg in "$@"; do
   case "$arg" in
     -c|-E|-S) compile_only=1 ;;
@@ -88,7 +111,7 @@ if [ "${CRT_CXX_ENABLE_RTTI:-0}" != "1" ]; then
 fi
 common_flags="-ffreestanding -fno-builtin -Xclang -fwchar-type=int -ffunction-sections -fdata-sections$cxx_language_flags -nostdinc -nostdinc++ $cxx_standard_include_flags -isystem${CRT_SYSROOT}/include"
 case "$target_os" in
-  macos) common_flags="$common_flags -DCRT_TARGET_OS_MACOS=1" ;;
+  macos) common_flags="$common_flags -DCRT_TARGET_OS_MACOS=1 -U__APPLE__" ;;
   linux) common_flags="$common_flags -DCRT_TARGET_OS_LINUX=1" ;;
   windows)
     # See the matching comment in tools/crt-cc: without an explicit
@@ -138,18 +161,67 @@ fi
 # sysroot, ahead of the static archive per ld64's default -l resolution).
 case "$target_os" in
   macos)
-    libs="$libs ${CRT_SYSROOT}/lib/libc++.a ${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a ${CRT_SYSROOT}/lib/libclang_rt.builtins.a -lSystem"
+    if [ "${CRT_CXX_BUILDING_RUNTIME:-0}" = 1 ]; then
+      cxx_runtime_libs=""
+    elif [ "$runtime_linkage" = shared ]; then
+      if [ ! -f "${CRT_SYSROOT}/lib/libc++.dylib" ] ||
+         [ ! -f "${CRT_SYSROOT}/lib/libc++abi.dylib" ]; then
+        echo "crt-c++: imported shared libc++ runtime is not staged" >&2
+        exit 1
+      fi
+      cxx_runtime_libs="${CRT_SYSROOT}/lib/libc++.dylib ${CRT_SYSROOT}/lib/libc++abi.dylib"
+    else
+      cxx_abi_lib=""
+      if [ -f "${CRT_SYSROOT}/lib/libc++abi.a" ]; then
+        cxx_abi_lib="${CRT_SYSROOT}/lib/libc++abi.a"
+      fi
+      notweak_list="${CRT_SYSROOT}/lib/libc++.notweak.exp"
+      if [ ! -f "$notweak_list" ]; then
+        echo "crt-c++: imported static libc++ Darwin link metadata is not staged" >&2
+        exit 1
+      fi
+      # Darwin's libSystem also exports C++ allocation symbols. Pull the
+      # allocation object from libc++.a and apply libc++'s own Darwin
+      # not-weak policy so dyld cannot interpose the host C++ runtime. Avoid
+      # force-loading the whole archive: that would run unused iostream
+      # initializers and change ordinary static archive semantics.
+      cxx_runtime_libs="-Wl,-u,__Znwm -Wl,-u,__ZnwmSt11align_val_t -Wl,-force_symbols_not_weak_list,$notweak_list ${CRT_SYSROOT}/lib/libc++.a $cxx_abi_lib"
+    fi
+    if [ "$shared_mode" -eq 1 ] || [ "$runtime_linkage" = shared ]; then
+      crt_core_libs="${CRT_SYSROOT}/lib/libc.dylib ${CRT_SYSROOT}/lib/libm.dylib ${CRT_SYSROOT}/lib/libdl.dylib"
+    else
+      crt_core_libs="${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a"
+    fi
+    libs="$libs $cxx_runtime_libs $crt_core_libs ${CRT_SYSROOT}/lib/libclang_rt.builtins.a -lSystem"
     if [ "$shared_mode" -eq 1 ]; then
-      entry="-Wl,-dead_strip -Wl,-rpath,${CRT_SYSROOT}/lib"
+      entry="-Wl,-dead_strip"
     else
       entry="-Wl,-e,_start -Wl,-dead_strip"
     fi
+    if [ "$runtime_linkage" = shared ]; then
+      entry="$entry -Wl,-rpath,${CRT_SYSROOT}/lib"
+    fi
     ;;
   linux)
-    if [ "$shared_mode" -eq 1 ]; then
-      crt_libs="${CRT_SYSROOT}/lib/libc++.so ${CRT_SYSROOT}/lib/libc.so ${CRT_SYSROOT}/lib/libm.so ${CRT_SYSROOT}/lib/libdl.so"
+    if [ "${CRT_CXX_BUILDING_RUNTIME:-0}" = 1 ]; then
+      cxx_runtime_libs=""
+    elif [ "$runtime_linkage" = shared ]; then
+      cxx_abi_lib=""
+      if [ -f "${CRT_SYSROOT}/lib/libc++abi.so" ]; then
+        cxx_abi_lib="${CRT_SYSROOT}/lib/libc++abi.so"
+      fi
+      cxx_runtime_libs="${CRT_SYSROOT}/lib/libc++.so $cxx_abi_lib"
     else
-      crt_libs="${CRT_SYSROOT}/lib/libc++.a ${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a"
+      cxx_abi_lib=""
+      if [ -f "${CRT_SYSROOT}/lib/libc++abi.a" ]; then
+        cxx_abi_lib="${CRT_SYSROOT}/lib/libc++abi.a"
+      fi
+      cxx_runtime_libs="${CRT_SYSROOT}/lib/libc++.a $cxx_abi_lib"
+    fi
+    if [ "$shared_mode" -eq 1 ]; then
+      crt_libs="$cxx_runtime_libs ${CRT_SYSROOT}/lib/libc.so ${CRT_SYSROOT}/lib/libm.so ${CRT_SYSROOT}/lib/libdl.so"
+    else
+      crt_libs="$cxx_runtime_libs ${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a"
     fi
     libs="$libs $crt_libs ${CRT_SYSROOT}/lib/libclang_rt.builtins.a"
     if [ "$shared_mode" -eq 1 ]; then
@@ -163,16 +235,42 @@ case "$target_os" in
     else
       entry="-Wl,-e,_start -Wl,--gc-sections"
     fi
+    if [ "$runtime_linkage" = shared ]; then
+      entry="$entry -Wl,-rpath,${CRT_SYSROOT}/lib"
+    fi
     ;;
   windows)
     if [ -n "${CRT_WINDOWS_SDK_LIBPATH:-}" ]; then
       libs="$libs -Wl,/libpath:${CRT_WINDOWS_SDK_LIBPATH}"
     fi
-    libs="$libs ${CRT_SYSROOT}/lib/c++.lib ${CRT_SYSROOT}/lib/c.lib ${CRT_SYSROOT}/lib/m.lib ${CRT_SYSROOT}/lib/dl.lib ${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"
+    if [ "${CRT_CXX_BUILDING_RUNTIME:-0}" = 1 ]; then
+      cxx_runtime_libs=""
+    elif [ "$runtime_linkage" = shared ]; then
+      cxx_runtime_libs=""
+      for candidate in libc++.dll.a libc++_dll.lib c++_dll.lib; do
+        if [ -f "${CRT_SYSROOT}/lib/$candidate" ]; then
+          cxx_runtime_libs="${CRT_SYSROOT}/lib/$candidate"
+          break
+        fi
+      done
+      if [ -z "$cxx_runtime_libs" ]; then
+        echo "crt-c++: imported shared libc++ import library is not staged" >&2
+        exit 1
+      fi
+    elif [ -f "${CRT_SYSROOT}/lib/libc++.a" ]; then
+      cxx_runtime_libs="${CRT_SYSROOT}/lib/libc++.a"
+      if [ -f "${CRT_SYSROOT}/lib/libc++abi.a" ]; then
+        cxx_runtime_libs="$cxx_runtime_libs ${CRT_SYSROOT}/lib/libc++abi.a"
+      fi
+    else
+      cxx_runtime_libs="${CRT_SYSROOT}/lib/c++.lib"
+    fi
     if [ "$shared_mode" -eq 1 ]; then
-      libs="${CRT_SYSROOT}/lib/dllcrt.o $libs"
+      crt_core_libs="${CRT_SYSROOT}/lib/c_dll.lib ${CRT_SYSROOT}/lib/m_dll.lib ${CRT_SYSROOT}/lib/dl_dll.lib"
+      libs="${CRT_SYSROOT}/lib/dllcrt.o $libs $cxx_runtime_libs $crt_core_libs ${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"
       entry="-Wl,/entry:crtDllMainCRTStartup -Wl,/DLL -Wl,/OPT:REF -fuse-ld=lld"
     else
+      libs="$libs $cxx_runtime_libs ${CRT_SYSROOT}/lib/c.lib ${CRT_SYSROOT}/lib/m.lib ${CRT_SYSROOT}/lib/dl.lib ${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"
       entry="-Wl,/entry:mainCRTStartup -Wl,/subsystem:console -Wl,/OPT:REF -fuse-ld=lld"
     fi
     ;;

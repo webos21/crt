@@ -200,25 +200,24 @@ Next work order:
      MSVC STL include root. Those routes were statically checked on macOS, but
      their real host GN/Ninja workflows still require execution before Skia is
      reported as cross-host verified.
-   - **C++ runtime prerequisite (started):** `crt-libcxx-fetch` now obtains
-     Android's paired libc++, libc++abi, and libunwind sources under the active
-     preset. Build them as one CRT static/shared runtime set and replace the
+   - **C++ runtime prerequisite (macOS runtime smoke complete):** `crt-libcxx-fetch` obtains
+     Android's external libc++ and libc++abi sources under the active preset.
+     Current libunwind comes separately from AOSP `toolchain/llvm-project`.
+     Build them as one CRT static/shared runtime set and replace the
      small Bionic-shaped bootstrap only after standard-library and Skia
      link/run tests pass on all three hosts. `crt-libcxx-configure`,
      `crt-libcxx-build`, and `crt-libcxx-sysroot` now provide the staged CRT
-     build/deployment path; `CRT_USE_IMPORTED_LIBCXX=ON` remains intentionally
-     disabled until that complete runtime set is proven.
-   - First real macOS libc++ `cxx` compile was run against Android main
-     (`4f4a65c` libc++, `6571517` libc++abi, `ec57b05` libunwind). It exposed
-     the next CRT work honestly: finish the Bionic/FreeBSD C99 libm family
-     (`erf*`, `erfc*`, `exp2*`, `fdim*`, `hypot*`, `ilogb*`, `lgamma*`, and
-     remaining siblings), configure libc++ for the CRT pthread personality,
-     and disable libc++'s pre-C++14 `gets` import rather than reintroducing
-     that removed unsafe API. The CRT pthread/C++14 configuration and public
-     locale/time/wchar declarations are now in place; the first current build
-     gate is the Bionic/FreeBSD `erf*`/`erfc*`/`exp2*`/`fdim*`/`hypot*`/
-     `ilogb*`/`lgamma*` libm tranche. macOS-only `Availability.h` is likewise
-     an external-build configuration issue, not a CRT public header.
+     build/deployment path. `CRT_USE_IMPORTED_LIBCXX=ON` is now verified on
+     macOS: sysroot/rootfs staging and static/shared `crt-libcxx-smoke` pass
+     with vector, string, RTTI, and a real exception throw/catch. The full 104-test macOS
+     workflow also remains green.
+   - Remaining C++ runtime gate: build current AOSP LLVM libunwind from
+     `toolchain/llvm-project` and pass `crt-libcxx-smoke` on Linux and Windows.
+     The old `platform/external/libunwind` main checkout ended in 2021 and must
+     not be presented as the current paired unwinder. Windows compiler launch,
+     DLL/import-library staging, and Linux merged-librt policy are prepared but
+     still need real-host runs. macOS-only `Availability.h` remains external
+     build configuration, not a CRT public header.
 3. **Run the Wayland/Weston protocol/library investigation as a separate
    `libcrtgfx` sub-track.**
    Decide what is protocol parsing, what is compositor policy, and what is

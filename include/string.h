@@ -2,6 +2,7 @@
 #define CRT_STRING_H
 
 #include <stddef.h>
+#include <locale.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,6 +22,7 @@ char* stpncpy(char* dst, const char* src, size_t n);
 int strcasecmp(const char* s1, const char* s2);
 int strncasecmp(const char* s1, const char* s2, size_t n);
 int strcoll(const char* s1, const char* s2);
+int strcoll_l(const char* s1, const char* s2, locale_t locale);
 size_t strcspn(const char* s1, const char* s2);
 char* strdup(const char* s);
 char* strchr(const char* s, int c);
@@ -41,6 +43,7 @@ char* strerror(int errnum);
 int strerror_r(int errnum, char* buf, size_t buflen);
 char* strsignal(int sig);
 size_t strxfrm(char* dst, const char* src, size_t n);
+size_t strxfrm_l(char* dst, const char* src, size_t n, locale_t locale);
 size_t strlcpy(char* dst, const char* src, size_t size);
 size_t strlcat(char* dst, const char* src, size_t size);
 

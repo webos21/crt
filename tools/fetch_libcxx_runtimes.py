@@ -9,7 +9,6 @@ from pathlib import Path
 RUNTIMES = (
     ("libcxx", "https://android.googlesource.com/platform/external/libcxx"),
     ("libcxxabi", "https://android.googlesource.com/platform/external/libcxxabi"),
-    ("libunwind", "https://android.googlesource.com/platform/external/libunwind"),
 )
 
 

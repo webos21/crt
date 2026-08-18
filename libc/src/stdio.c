@@ -2394,6 +2394,31 @@ int getchar_unlocked(void) {
   return fgetc_unlocked(stdin);
 }
 
+char* gets(char* buf) {
+  char* out;
+  int ch;
+
+  if (buf == 0) {
+    errno = EINVAL;
+    return 0;
+  }
+  flockfile(stdin);
+  out = buf;
+  while ((ch = getchar_unlocked()) != '\n') {
+    if (ch == EOF) {
+      if (out == buf) {
+        funlockfile(stdin);
+        return 0;
+      }
+      break;
+    }
+    *out++ = (char)ch;
+  }
+  *out = '\0';
+  funlockfile(stdin);
+  return buf;
+}
+
 int fputc_unlocked(int c, FILE* stream) {
   return fputc_unlocked_impl(c, stream);
 }

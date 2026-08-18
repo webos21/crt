@@ -33,6 +33,23 @@ unsigned long long strtoull_l(const char* nptr, char** endptr, int base, locale_
   return strtoull(nptr, endptr, base);
 }
 
+#define CRT_CTYPE_L_WRAPPER(name) \
+  int name##_l(int ch, locale_t locale) { \
+    (void)locale; \
+    return name(ch); \
+  }
+
+CRT_CTYPE_L_WRAPPER(isalnum)
+CRT_CTYPE_L_WRAPPER(isalpha)
+CRT_CTYPE_L_WRAPPER(isblank)
+CRT_CTYPE_L_WRAPPER(iscntrl)
+CRT_CTYPE_L_WRAPPER(isgraph)
+CRT_CTYPE_L_WRAPPER(islower)
+CRT_CTYPE_L_WRAPPER(isprint)
+CRT_CTYPE_L_WRAPPER(ispunct)
+CRT_CTYPE_L_WRAPPER(isspace)
+CRT_CTYPE_L_WRAPPER(isupper)
+
 int isdigit_l(int ch, locale_t locale) {
   (void)locale;
   return isdigit(ch);
@@ -66,6 +83,16 @@ size_t strxfrm_l(char* dst, const char* src, size_t n, locale_t locale) {
 int iswctype_l(wint_t wc, wctype_t desc, locale_t locale) {
   (void)locale;
   return iswctype(wc, desc);
+}
+
+int iswalnum_l(wint_t wc, locale_t locale) {
+  (void)locale;
+  return iswalnum(wc);
+}
+
+int iswgraph_l(wint_t wc, locale_t locale) {
+  (void)locale;
+  return iswgraph(wc);
 }
 
 int iswspace_l(wint_t wc, locale_t locale) {

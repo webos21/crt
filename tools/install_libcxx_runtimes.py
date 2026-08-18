@@ -31,6 +31,19 @@ def main():
         if library.is_file() and (library.name.startswith("libc++") or library.name.startswith("libunwind")):
             shutil.copy2(library, sysroot / "lib" / library.name)
             copied.append(library.name)
+    runtime_bin = install / "bin"
+    if runtime_bin.is_dir():
+        (sysroot / "bin").mkdir(parents=True, exist_ok=True)
+        for library in runtime_bin.iterdir():
+            if library.is_file() and (
+                "c++" in library.name or library.name.startswith("libunwind")
+            ):
+                shutil.copy2(library, sysroot / "bin" / library.name)
+                copied.append(f"bin/{library.name}")
+                lower_name = library.name.lower()
+                if lower_name.endswith(".dll"):
+                    alias = "c++abi.dll" if "abi" in lower_name else "c++.dll"
+                    shutil.copy2(library, sysroot / "bin" / alias)
     if not copied:
         raise SystemExit("Android libc++ install has no runtime libraries to stage")
     print("CRT libc++ staged into sysroot:", ", ".join(sorted(copied)))

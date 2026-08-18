@@ -264,6 +264,37 @@ the Bionic/BSD state machine onto this project's `scan_source` abstraction.
 | `libm/src/freebsd/s_sincosf.c` | none | project-owned | new | Public `sinf`/`cosf` wrappers over Bionic main float argument reduction and kernels because observed Bionic main lacks standalone public float wrappers. |
 | `libm/src/freebsd/k_tanf.c` | `libm/upstream-freebsd/lib/msun/src/k_tanf.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported | Included inline by `s_tanf.c`; not compiled as a separate object. |
 | `libm/src/freebsd/s_tanf.c` | `libm/upstream-freebsd/lib/msun/src/s_tanf.c` | `main` FreeBSD/msun tree at `7732717429078dd0c583559b2cdc741c7681daf7` | imported/adapted | Native float tangent wrapper; includes float argument reduction and kernel helpers inline. |
+| `libm/src/freebsd/s_erf.c` | `libm/upstream-freebsd/lib/msun/src/s_erf.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Bionic main double `erf`/`erfc` implementation. |
+| `libm/src/freebsd/s_erff.c` | `libm/upstream-freebsd/lib/msun/src/s_erff.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Bionic main native-float `erf`/`erfc` implementation. |
+| `libm/src/freebsd/s_fdim.c` | `libm/upstream-freebsd/lib/msun/src/s_fdim.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Provides the double, float, and long-double `fdim` family. |
+| `libm/src/freebsd/e_hypot.c` | `libm/upstream-freebsd/lib/msun/src/e_hypot.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Scaled double `hypot` implementation. |
+| `libm/src/freebsd/e_hypotf.c` | `libm/upstream-freebsd/lib/msun/src/e_hypotf.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Native-float `hypot` implementation. |
+| `libm/src/freebsd/s_ilogb.c` | `libm/upstream-freebsd/lib/msun/src/s_ilogb.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Double `ilogb` with Bionic's special-value constants. |
+| `libm/src/freebsd/s_ilogbf.c` | `libm/upstream-freebsd/lib/msun/src/s_ilogbf.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Native-float `ilogb` implementation. |
+| `libm/src/freebsd/e_lgamma.c` | `libm/upstream-freebsd/lib/msun/src/e_lgamma.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Public double `lgamma` wrapper. |
+| `libm/src/freebsd/e_lgammaf.c` | `libm/upstream-freebsd/lib/msun/src/e_lgammaf.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Public native-float `lgamma` wrapper. |
+| `libm/src/freebsd/e_lgamma_r.c` | `libm/upstream-freebsd/lib/msun/src/e_lgamma_r.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Reentrant double implementation shared by `lgamma` and `lgamma_r`. |
+| `libm/src/freebsd/e_lgammaf_r.c` | `libm/upstream-freebsd/lib/msun/src/e_lgammaf_r.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Reentrant native-float implementation using the imported float trig kernels. |
+| `libm/src/freebsd/s_signgam.c` | `libm/upstream-freebsd/lib/msun/src/s_signgam.c` | `main` at `731631f300090436d7f5df80d50b6275c8c60a93` | imported | Storage for the legacy non-reentrant `signgam` interface. |
+| `libm/src/freebsd/s_lrint.c` | `libm/upstream-freebsd/lib/msun/src/s_lrint.c` | same `main` | imported | Rounding-mode-aware `lrint`. |
+| `libm/src/freebsd/s_llrint.c`, `s_llrintf.c` | matching `libm/upstream-freebsd/lib/msun/src/` files | same `main` | imported | Double and native-float `llrint`. |
+| `libm/src/freebsd/s_logb.c`, `s_logbf.c` | matching `libm/upstream-freebsd/lib/msun/src/` files | same `main` | imported | `logb` family used by libc++ cmath. |
+| `libm/src/freebsd/s_nearbyint.c`, `s_rint.c`, `s_rintf.c` | matching `libm/upstream-freebsd/lib/msun/src/` files | same `main` | imported | Rounding-mode and fenv-aware rounding family. |
+| `libm/src/freebsd/s_scalbln.c` | `libm/upstream-freebsd/lib/msun/src/s_scalbln.c` | same `main` | imported | `scalbln` family. |
+| `libm/src/freebsd/b_tgamma.c` | `libm/upstream-freebsd/lib/msun/bsdsrc/b_tgamma.c` | same `main` | imported/build-adapted | Double `tgamma`; warning adaptation is isolated in CMake. |
+| `libm/src/freebsd/b_log.c`, `b_exp.c` | matching `libm/upstream-freebsd/lib/msun/bsdsrc/` files | same `main` | imported | Include-only dependencies of `b_tgamma.c`. |
+| `libm/src/freebsd/s_tgammaf.c` | `libm/upstream-freebsd/lib/msun/src/s_tgammaf.c` | same `main` | imported | Native-float `tgamma`. |
+| `libm/src/freebsd/s_sinpi.c`, `s_cospi.c` | matching `libm/upstream-freebsd/lib/msun/src/` files | same `main` | imported | Gamma argument-reduction helpers. |
+| `libm/src/freebsd/k_sinpi.h`, `k_cospi.h` | matching `libm/upstream-freebsd/lib/msun/src/` files | same `main` | imported | Include-only sinpi/cospi kernels. |
+| `libm/src/freebsd/s_nan.c` | `libm/upstream-freebsd/lib/msun/src/s_nan.c` | same `main` | imported/build-adapted | Bionic `nan`/`nanf`; target-selected `nanl` remains project-owned. |
+
+`exp2` and `exp2f` remain project-owned compatibility adapters over the
+imported exponential family because the observed Bionic main `Android.bp`
+does not list standalone double/float exp2 sources. Long-double `erf`, `hypot`,
+`ilogb`, and `lgamma` currently follow the compiler target ABI through the
+project long-double adapter. Targets where `long double` is wider than
+`double` still require selection of Bionic's matching `ld80` or `ld128` msun
+source family.
 
 ### Time Tranche
 
@@ -322,6 +353,13 @@ the Bionic/BSD state machine onto this project's `scan_source` abstraction.
 | --- | --- | --- | --- | --- |
 | `libstdc++/src/cxxabi.c` | mixed Bionic/Itanium C++ ABI surface | project-owned | new | Provides first-tranche `__cxa_guard_*`, `__cxa_atexit`, `__cxa_finalize`, pure/deleted virtual handlers, and `__dso_handle`; full libc++abi/libunwind/libc++ import is deferred. |
 | `libstdc++/src/msvcabi.c` | MSVC/UCRT C++ ABI surface | project-owned | new | Provides first Windows bridge-lane `_Init_thread_*` and `_purecall` hooks for simple MSVC-ABI probes; richer C++ interop is deferred. |
+
+### Android API-Level Host Policy
+
+| Local file | Upstream path | Upstream ref | Status | Notes |
+| --- | --- | --- | --- | --- |
+| `include/android/api-level.h` | `libc/include/android/api-level.h` | Bionic `main`, project-adapted | new | Preserves Bionic API constants and declarations; non-Android PAL hosts default to `__ANDROID_API_FUTURE__`. |
+| `libc/src/android_api.c` | Bionic API-level and abort-message runtime policy | project-owned, Bionic-shaped | new | Returns FUTURE for host builds. Android tombstone storage has no host equivalent, so `android_set_abort_message` is a documented no-op after libc++abi has emitted stderr diagnostics. |
 
 ### Pthread Condition Variable Tranche
 

@@ -25,6 +25,7 @@ int main(void) {
   long double integrall;
   int exponent;
   int quotient;
+  int gamma_sign;
   fexcept_t except_flag;
   fenv_t env;
 
@@ -92,6 +93,11 @@ int main(void) {
       exp(INFINITY) != INFINITY || exp(-INFINITY) != 0.0 ||
       !isnan(exp(NAN)) || expf(0.0f) != 1.0f || expl(0.0L) != 1.0L) {
     return fail("exp");
+  }
+  if (exp2(10.0) != 1024.0 || exp2f(3.0f) != 8.0f ||
+      exp2l(4.0L) != 16.0L || exp2(-INFINITY) != 0.0 ||
+      exp2(INFINITY) != INFINITY || !isnan(exp2(NAN))) {
+    return fail("exp2");
   }
   if (!near_double(log(1.0), 0.0) || !near_double(log(2.718281828459045), 1.0) ||
       !near_double(log(exp(2.0)), 2.0) || log(INFINITY) != INFINITY ||
@@ -162,6 +168,30 @@ int main(void) {
       !near_double((double)acosl(0.5L), 1.0471975511965979) ||
       !isnan(asin(2.0)) || !isnan(acos(2.0))) {
     return fail("asin/acos");
+  }
+  if (erf(0.0) != 0.0 || erfc(0.0) != 1.0 ||
+      !near_double(erf(1.0), 0.8427007929497149) ||
+      !near_double((double)erff(1.0f), 0.8427008) ||
+      !near_double((double)erfl(1.0L), 0.8427007929497149) ||
+      !near_double((double)erfcl(1.0L), 0.1572992070502851)) {
+    return fail("erf/erfc");
+  }
+  if (fdim(5.0, 2.0) != 3.0 || fdim(2.0, 5.0) != 0.0 ||
+      fdimf(5.0f, 2.0f) != 3.0f || fdiml(2.0L, 5.0L) != 0.0L ||
+      hypot(3.0, 4.0) != 5.0 || hypotf(3.0f, 4.0f) != 5.0f ||
+      hypotl(3.0L, 4.0L) != 5.0L || hypot(INFINITY, NAN) != INFINITY) {
+    return fail("fdim/hypot");
+  }
+  if (ilogb(8.0) != 3 || ilogbf(0.5f) != -1 || ilogbl(16.0L) != 4 ||
+      ilogb(0.0) != FP_ILOGB0 || ilogb(INFINITY) != INT_MAX ||
+      ilogb(NAN) != FP_ILOGBNAN) {
+    return fail("ilogb");
+  }
+  gamma_sign = 0;
+  if (lgamma(1.0) != 0.0 || lgammaf(1.0f) != 0.0f ||
+      lgammal(1.0L) != 0.0L || lgamma_r(1.0, &gamma_sign) != 0.0 ||
+      gamma_sign != 1) {
+    return fail("lgamma");
   }
   if (frexp(12.0, &exponent) != 0.75 || exponent != 4 ||
       frexp(-0.0, &exponent) != 0.0 || !signbit(frexp(-0.0, &exponent)) ||

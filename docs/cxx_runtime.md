@@ -132,18 +132,19 @@ keeping plain C programs independent of the C++ runtime archive.
 
 ## Exceptions, RTTI, And Unwind
 
-Exceptions are not enabled by this tranche. The project has not yet imported or
-linked libc++abi/libunwind exception machinery, including:
+The bootstrap `cxx` library still defaults to `-fno-exceptions` and
+`-fno-rtti`. The imported Android libc++/libc++abi lane is different: its build
+sets `CRT_CXX_ENABLE_EXCEPTIONS=1` and `CRT_CXX_ENABLE_RTTI=1`, and the macOS
+runtime smoke now verifies a real `std::runtime_error` throw/catch together
+with `std::vector` and `std::string`.
 
-- `__cxa_throw`;
-- `__cxa_begin_catch`;
-- `__cxa_end_catch`;
-- personality routines such as `__gxx_personality_v0`;
-- unwind tables and libunwind backend policy;
-- RTTI and demangling helpers.
-
-Early CRT C++ experiments should use `-fno-exceptions` and `-fno-rtti` until
-the libc++abi/libunwind tranche is explicit.
+macOS currently gets `_Unwind_*` from the documented libSystem PAL boundary.
+Linux and Windows must not fall back to a host C++ runtime. Their remaining
+gate is a CRT-built LLVM libunwind. The previously fetched
+`platform/external/libunwind` main checkout is not that source: its tip removed
+the Android build in 2021 because the repository was no longer used. Current
+AOSP LLVM runtime work lives in `toolchain/llvm-project`; its `libunwind`
+source must be wired as the next static/shared runtime component.
 
 The current C++ frontend test is compiled with `-fno-exceptions` and
 `-fno-rtti`. Linux and macOS keep compiler-emitted thread-safe local-static
@@ -184,22 +185,26 @@ Remaining recommended next work:
 2. **Done (2026-08-18):** `operator new/delete`, array forms, sized delete,
    and nothrow forms forward to the CRT allocator. `cxx_allocation_test`
    validates that boundary on every host.
-3. Import libc++ as the standard library before enabling a real Skia link.
+3. **macOS complete:** Android libc++ and libc++abi build as static and shared
+   libraries through the CRT wrappers, install into the sysroot/rootfs, and
+   pass `crt-libcxx-smoke`. Use this runtime before enabling a real Skia link.
    Skia's CPU-raster archive still uses `std::string`, shared ownership,
    streams, and locale machinery even with GPU backends disabled. It must not
    be satisfied by silently linking the host libc++.
-4. Evaluate importing libc++abi's Itanium ABI source after the project has a
-   clear libunwind choice.
+4. Build current AOSP LLVM libunwind from `toolchain/llvm-project`, then run
+   the same imported-runtime smoke on Linux and Windows.
 5. Start a separate Windows MSVC ABI bridge design with C ABI wrapper tests
    before allowing C++ object or exception interop across the bridge.
 
 ## Android LLVM Runtime Import
 
-`crt-libcxx-fetch` fetches Android's paired `platform/external/libcxx`,
-`platform/external/libcxxabi`, and `platform/external/libunwind` repositories
-at one configurable `CRT_LIBCXX_ANDROID_REF` (default `refs/heads/main`) into
+`crt-libcxx-fetch` currently fetches Android's `platform/external/libcxx` and
+`platform/external/libcxxabi` repositories at one configurable
+`CRT_LIBCXX_ANDROID_REF` (default `refs/heads/main`) into
 `out/<preset>/external/llvm-runtimes/`. The project-owned metadata is under
-`libstdc++/third_party/`; no upstream source is committed there.
+`libstdc++/third_party/`; no upstream source is committed there. The retired
+`platform/external/libunwind` repository is not fetched; current unwind work
+uses AOSP `toolchain/llvm-project/libunwind`.
 
 The CMake targets are deliberately staged:
 
@@ -208,16 +213,18 @@ cmake --build --preset <host-preset> --target crt-libcxx-fetch
 cmake --build --preset <host-preset> --target crt-libcxx-configure
 cmake --build --preset <host-preset> --target crt-libcxx-build
 cmake --build --preset <host-preset> --target crt-libcxx-sysroot
+cmake --build --preset <host-preset> --target crt-libcxx-smoke
 ```
 
 `crt-libcxx-configure` and `crt-libcxx-build` always use `tools/crt-cc` and
 `tools/crt-c++`, with exceptions/RTTI enabled only for the imported runtime.
-The final target stages headers and runtime libraries into the active sysroot.
-It is intentionally separate from the normal `sysroot` target until the full
-libc++/libc++abi/libunwind static-and-shared set passes on every host. Set
-`CRT_USE_IMPORTED_LIBCXX=ON` only after that gate: it makes `rootfs` and the
-Skia external build depend on the staged runtime rather than the bootstrap
-`cxx_shared` artifact.
+The sysroot target stages headers and runtime libraries. The smoke target then
+links and runs both static and shared forms of `tests/imported_libcxx_test.cc`
+using only the staged C++ headers and runtime. `CRT_USE_IMPORTED_LIBCXX=ON`
+makes `rootfs` and the Skia external
+build depend on that staged runtime rather than the bootstrap `cxx_shared`
+artifact. This mode is now verified on macOS; keep it host-explicit until the
+Linux and Windows smoke targets pass.
 
 The first import gate is source provenance and compiler mode. `tools/crt-c++`
 now retains the bootstrap default of `-fno-exceptions -fno-rtti`, but an
@@ -226,19 +233,22 @@ external runtime build may explicitly set `CRT_CXX_ENABLE_EXCEPTIONS=1` and
 as one CRT static-and-shared set, then replace the bootstrap archive only after
 standard-library and Skia link/run tests pass on Linux, macOS, and Windows.
 
-The first actual Android-main libc++ compile was performed on macOS against
-the CRT sysroot. It validated the source/compiler boundary and converted the
-next work into an explicit compatibility list. The `crt-libcxx-configure`
-target now passes the CRT pthread personality and C++14 dialect, so the first
-actual compile boundary is the missing Bionic/FreeBSD C99 libm family:
-`erf*`, `erfc*`, `exp2*`, `fdim*`, `hypot*`, `ilogb*`, and `lgamma*` (with
-their required msun dependency sources). Locale-aware conversion/ctype APIs,
-`difftime`, and `wcsftime` are now exposed through the normal public CRT
-headers rather than only through `xlocale.h`.
+The macOS build now completes both libc++abi and libc++ static/shared outputs.
+It required the Bionic-main msun families recorded in the import manifest,
+locale/time/wchar declarations, `nan*`, aligned allocation, and the
+Bionic-shaped `<android/api-level.h>` host policy. `tools/crt-c++` also absorbs
+legacy `-lpthread`/`-lrt` into libc, matching modern Bionic, so Darwin
+libSystem symbols cannot preempt Bionic-shaped pthread objects.
 
-The staged runtime must not replace the bootstrap `libc++` yet: Android
-`libunwind` is Soong/Android.mk-driven rather than a standalone CMake project,
-and libc++abi/libunwind still need a project-owned CMake adapter and successful
-static/shared link-run coverage on all three hosts. Do not revive `gets`, and
-do not add macOS `Availability.h` as a Bionic public header; both are
-external-build adapter policy.
+Darwin's system libc++ re-exports strong C++ symbols, so a static libc++ archive
+inside a normal macOS executable can be interposed by the system dylib. The
+verified macOS execution shape therefore uses `CRT_CXX_RUNTIME_LINKAGE=shared`
+and an rpath to the CRT sysroot. Static archives are still built and installed;
+static link/run coverage remains a Linux/Windows gate.
+
+Windows configure uses the installed CRT `mksh.exe` as CMake's compiler
+launcher with `crt-cc`/`crt-c++` as `CMAKE_*_COMPILER_ARG1`, because native
+Windows cannot execute their shebangs directly. Shared DLL and import-library
+staging is prepared, but real Windows and Linux builds remain required before
+cross-host completion is claimed. macOS `Availability.h` is still not a
+Bionic public header.

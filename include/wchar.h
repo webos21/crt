@@ -2,6 +2,7 @@
 #define CRT_WCHAR_H
 
 #include <stddef.h>
+#include <locale.h>
 #include <stdio.h>
 #include <time.h>
 
@@ -84,7 +85,9 @@ wchar_t* wcstok(wchar_t* s, const wchar_t* delimiter, wchar_t** ptr);
 int wcscasecmp(const wchar_t* s1, const wchar_t* s2);
 int wcsncasecmp(const wchar_t* s1, const wchar_t* s2, size_t n);
 int wcscoll(const wchar_t* s1, const wchar_t* s2);
+int wcscoll_l(const wchar_t* s1, const wchar_t* s2, locale_t locale);
 size_t wcsxfrm(wchar_t* dst, const wchar_t* src, size_t n);
+size_t wcsxfrm_l(wchar_t* dst, const wchar_t* src, size_t n, locale_t locale);
 size_t wcslcpy(wchar_t* dst, const wchar_t* src, size_t n);
 size_t wcslcat(wchar_t* dst, const wchar_t* src, size_t n);
 wchar_t* wcsdup(const wchar_t* s);
