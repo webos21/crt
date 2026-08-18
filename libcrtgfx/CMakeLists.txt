@@ -1,6 +1,6 @@
 set(CRTGFX_COMMON_SOURCES
-  src/common/window.c
-  src/common/wayland_weston.c
+  src/window.c
+  src/wayland_weston.c
 )
 
 if(CRT_TARGET_OS STREQUAL "windows")
@@ -20,7 +20,7 @@ target_include_directories(crtgfx_common_objects PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
 target_include_directories(crtgfx_common_objects PRIVATE
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/common"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 set_target_properties(crtgfx_common_objects PROPERTIES
   POSITION_INDEPENDENT_CODE ON
@@ -49,7 +49,7 @@ target_include_directories(crtgfx_backend_objects PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
 target_include_directories(crtgfx_backend_objects PRIVATE
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/common"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 set_target_properties(crtgfx_backend_objects PROPERTIES
   POSITION_INDEPENDENT_CODE ON

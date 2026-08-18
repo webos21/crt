@@ -66,14 +66,14 @@ Initial source tree shape:
 libcrtjs/
   include/
   src/
-    common/
+    *.c                        # common runtime code, directly under src/
     arch/{linux,macos,windows}/
   third_party/quickjs/
 
 libcrtgfx/
   include/
   src/
-    common/
+    *.c                        # common runtime code, directly under src/
     arch/{linux,macos,windows}/
   third_party/
     skia/
@@ -82,10 +82,16 @@ libcrtgfx/
 libcrtmedia/
   include/
   src/
-    common/
+    *.c                        # common runtime code, directly under src/
     arch/{linux,macos,windows}/
   third_party/ffmpeg/
 ```
+
+No separate `src/common/` layer in any of the three upper-runtime
+libraries (2026-08-18, `libcrtgfx` first, then `libcrtjs`/`libcrtmedia`
+matched the same way) -- common/host-independent runtime code lives
+directly under `src/`, and only genuinely per-host code lives under
+`src/arch/{linux,macos,windows}/`. See `HISTORY.md`.
 
 Boundary decisions from `docs/study`:
 
@@ -133,7 +139,7 @@ Current baseline, completed on Windows first and recorded in
   allowed to speak native OS window/GPU APIs directly.
 - `libcrtgfx` now has real host adapters on all three targets:
   `include/crtgfx/window.h` flows through
-  `src/common/wayland_weston.c`'s Weston-style toplevel/surface state, with
+  `src/wayland_weston.c`'s Weston-style toplevel/surface state, with
   per-host code underneath -- Win32 (`src/arch/windows/window_win32.c`),
   a hand-rolled core-protocol-Wayland+`xdg-shell` client
   (`src/arch/linux/window_wayland.c`), and real Cocoa driven from C via

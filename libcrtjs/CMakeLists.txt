@@ -1,5 +1,5 @@
 add_library(crtjs STATIC
-  src/common/runtime.c
+  src/runtime.c
 )
 target_link_libraries(crtjs PRIVATE crt_build_flags c m dl cxx)
 target_include_directories(crtjs PUBLIC
@@ -11,7 +11,7 @@ set_target_properties(crtjs PROPERTIES
 )
 
 add_library(crtjs_shared SHARED
-  src/common/runtime.c
+  src/runtime.c
 )
 if(CRT_TARGET_OS STREQUAL "windows")
   target_sources(crtjs_shared PRIVATE $<TARGET_OBJECTS:crt_windows_dllcrt>)

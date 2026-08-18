@@ -10,6 +10,34 @@ substantive update.
 
 ## 2026-08-18
 
+- **Flattened `src/common/` out of `libcrtgfx`, `libcrtjs`, and
+  `libcrtmedia`** -- common/host-independent runtime code now lives
+  directly under each library's `src/` (`libcrtgfx/src/window.c`,
+  `wayland_weston.c`, `wayland_weston_internal.h`;
+  `libcrtjs/src/runtime.c`; `libcrtmedia/src/runtime.c`), with only
+  genuinely per-host code staying under `src/arch/{linux,macos,
+  windows}/`. Requested directly ("libcrtgfx/src/common 폴더는 굳이
+  필요없다", then "libcrtmedia, libcrtjs도 동일한 폴더 구조로 바꾸고") --
+  the extra `common/` layer added no real separation once each library
+  had exactly one non-arch-specific translation unit (or two, for
+  `libcrtgfx`) sitting directly inside it. `git mv` for every moved file
+  (history preserved), `CMakeLists.txt` source lists and
+  `target_include_directories` updated in all three libraries, and every
+  current-state doc/comment reference to the old `src/common/...` paths
+  fixed (`libcrtgfx/README.md`, `docs/runtime_roadmap.md`, `TODO.md`'s
+  own initial-source-tree diagram and current-baseline bullet,
+  `window_cocoa.c`'s own top comment) -- `HISTORY.md`'s own older,
+  already-committed entries that mention the old `src/common/...` paths
+  are left as-is, since they describe what was true at the time, not
+  current-state documentation.
+
+  Verified after a genuine `cmake --fresh` reconfigure (not an existing
+  `out/` tree): builds clean on this real macOS host, `crtgfx_window_smoke`
+  still passes, full `ctest` suite 103/103, no regressions. `libcrtjs`/
+  `libcrtmedia` only had placeholder `runtime.c` stubs at this point (no
+  real per-host code yet), so their moves were mechanical and lower-risk
+  than `libcrtgfx`'s.
+
 - **Implemented a real macOS `libcrtgfx` host window backend
   (`libcrtgfx/src/arch/macos/window_cocoa.c`), replacing the
   `CRTGFX_ERROR_UNSUPPORTED` stub** -- the last of the three hosts to

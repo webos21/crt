@@ -1,6 +1,6 @@
 /*
  * macOS host window backend for libcrtgfx: maps a Wayland-style toplevel
- * surface (src/common/wayland_weston.c) onto a real Cocoa NSWindow, the
+ * surface (src/wayland_weston.c) onto a real Cocoa NSWindow, the
  * same "one top-level surface maps to one host-native window" shape
  * docs/libcrtgfx_wayland_plan.md already established for Windows
  * (src/arch/windows/window_win32.c) and Linux (src/arch/linux/

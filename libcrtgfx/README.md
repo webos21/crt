@@ -20,10 +20,11 @@ Initial direction:
 Current bring-up:
 
 - `include/crtgfx/window.h` exposes the first host-independent window API.
-- `src/common/wayland_weston.c` owns the first Weston-style toplevel/surface
-  state.
-- `src/arch/windows/window_win32.c` is now only the host adapter underneath
-  that Weston-style boundary.
+- `src/wayland_weston.c` owns the first Weston-style toplevel/surface state,
+  directly under `src/` -- host adapters underneath live in
+  `src/arch/{linux,macos,windows}`, no separate `src/common/` layer.
+- `src/arch/windows/window_win32.c` is the real Windows host adapter, only
+  the host layer underneath the Weston-style boundary.
 - `src/arch/linux/window_wayland.c` is the real Linux host adapter: a
   hand-rolled Wayland client (no `libwayland-client` dependency, matching
   this project's no-host-SDK ethos) speaking the real core `wl_display`/
@@ -32,17 +33,23 @@ Current bring-up:
   directly over the `$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY` Unix socket.
   Software-only (`wl_shm`) for now, matching the Windows GDI path. Returns
   `CRTGFX_ERROR_UNSUPPORTED` (not a hard error) when no compositor is
-  reachable at all, so headless CI keeps working exactly as before. See
-  `docs/libcrtgfx_wayland_plan.md` for the design and known scope cuts.
+  reachable at all, so headless CI keeps working exactly as before.
+- `src/arch/macos/window_cocoa.c` is the real macOS host adapter: drives
+  real Cocoa (`NSWindow`/`NSView`/`CALayer`) from plain C via the
+  Objective-C runtime's own C ABI (`objc_msgSend`/`objc_getClass`/...), no
+  `.m` file, matching the same no-host-SDK-headers ethos. Presents frames
+  through `CALayer.contents` (hardware-composited), not `-drawRect:`.
+  See `docs/libcrtgfx_wayland_plan.md` for both adapters' design, known
+  scope cuts, and real-hardware verification record.
 - `crtgfx_window_begin_frame()`/`crtgfx_window_end_frame()` expose the first
-  software buffer present path, using BGRA8888 premultiplied pixels. Windows
-  presents this buffer through the host adapter.
+  software buffer present path, using BGRA8888 premultiplied pixels. Every
+  host adapter presents this same buffer shape through its own backend.
 - `crtgfx` and `crtgfx_shared` are default runtime artifacts installed into
   the sysroot; the shared runtime is also copied into the rootfs.
 - `crtgfx_window_smoke` creates a hidden window, fills a software frame, and
   presents it for automated testing.
-- `crtgfx_window_demo` opens a visible Windows window and animates the software
-  frame path for manual bring-up.
+- `crtgfx_window_demo` opens a visible window and animates the software
+  frame path for manual bring-up, on all three hosts.
 
 See `docs/libcrtgfx_api_policy.md` for the API boundary decision.
 See `docs/libcrtgfx_wayland_plan.md` for the Wayland/compositor plan.

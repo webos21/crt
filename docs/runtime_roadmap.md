@@ -67,9 +67,10 @@ Current bring-up starts with real host windows before drawing:
 
 - `include/crtgfx/window.h` defines the first host-independent window surface
   API.
-- `libcrtgfx/src/common/wayland_weston.c` carries the first Weston-style
-  toplevel/surface state. Windows maps that state to a native host window under
-  `libcrtgfx/src/arch/windows/`.
+- `libcrtgfx/src/wayland_weston.c` carries the first Weston-style
+  toplevel/surface state, directly under `src/` (no separate `src/common/`
+  layer). Each host maps that state to a native host window under
+  `libcrtgfx/src/arch/{linux,macos,windows}/`.
 - `crtgfx_window_begin_frame()`/`crtgfx_window_end_frame()` provide the first
   software buffer commit/present path, using BGRA8888 premultiplied pixels.
 - `libcrtgfx`, `libcrtjs`, and `libcrtmedia` are default workflow artifacts:
