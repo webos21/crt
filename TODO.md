@@ -131,19 +131,27 @@ Current baseline, completed on Windows first and recorded in
 - Common upper-runtime code links through this project's CRT libraries
   (`libc`, `libm`, `libdl`, `libc++`). Only narrow host backend objects are
   allowed to speak native OS window/GPU APIs directly.
-- `libcrtgfx` now has a first Windows bring-up path:
+- `libcrtgfx` now has real host adapters on all three targets:
   `include/crtgfx/window.h` flows through
   `src/common/wayland_weston.c`'s Weston-style toplevel/surface state, with
-  Win32 code kept as the host adapter underneath.
+  per-host code underneath -- Win32 (`src/arch/windows/window_win32.c`),
+  a hand-rolled core-protocol-Wayland+`xdg-shell` client
+  (`src/arch/linux/window_wayland.c`), and real Cocoa driven from C via
+  the Objective-C runtime, no `.m` file
+  (`src/arch/macos/window_cocoa.c`, 2026-08-18) -- see
+  `docs/libcrtgfx_wayland_plan.md`'s "Linux Host Adapter"/"macOS Host
+  Adapter" sections for what each covers, its documented scope cuts, and
+  how it was verified on real hardware/a real compositor session.
 - `crtgfx_window_begin_frame()`/`crtgfx_window_end_frame()` provide the first
   BGRA8888 software buffer commit/present path. `crtgfx_window_smoke` covers
   automation and `crtgfx_window_demo` covers manual bring-up.
 
 Next work order:
 
-1. Repeat the same `libcrtgfx` structure on macOS and Linux: keep common
-   Weston-style surface state unchanged, and add host adapters under
-   `src/arch/macos/` and `src/arch/linux/`.
+1. ~~Repeat the same `libcrtgfx` structure on macOS and Linux~~ -- **done**
+   (Linux, then macOS 2026-08-18): both have real host adapters, not
+   stubs, each verified on real hardware/a real compositor session. See
+   `docs/libcrtgfx_wayland_plan.md`.
 2. Connect the software frame path to Skia raster drawing, keeping normal Skia
    headers as the public 2D drawing API and keeping project-owned headers
    focused on runtime/surface/present/event integration.

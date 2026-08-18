@@ -10,6 +10,152 @@ substantive update.
 
 ## 2026-08-18
 
+- **Implemented a real macOS `libcrtgfx` host window backend
+  (`libcrtgfx/src/arch/macos/window_cocoa.c`), replacing the
+  `CRTGFX_ERROR_UNSUPPORTED` stub** -- the last of the three hosts to
+  get one, matching the same-day Linux entry below. Per
+  `docs/libcrtgfx_wayland_plan.md`'s named architecture reference class
+  (Wawona/Wayoa/Cocoa-Way-style projects), this drives real Cocoa
+  (`NSWindow`/`NSView`/`CALayer`) from plain C via the Objective-C
+  runtime's own C ABI (`objc_msgSend`/`objc_getClass`/
+  `sel_registerName`/`objc_allocateClassPair`) rather than the
+  Objective-C language -- no `.m` translation unit, no ARC, matching
+  `window_win32.c`'s own "no host SDK headers" style (that file never
+  includes `<windows.h>`; this one never `#import`s `<Cocoa/Cocoa.h>`).
+
+  Before writing the real backend, validated the technique itself with
+  three standalone probes on this real macOS aarch64 build host (not
+  reasoned from memory): (1) confirmed every AppKit/Foundation/
+  QuartzCore extern symbol used (`NSDefaultRunLoopMode`,
+  `kCAGravityResize`, the ObjC runtime functions) actually links and
+  resolves; (2) built a full window-creation-through-presentation path
+  (`NSApplication` bootstrap, `NSWindow` init with an `NSRect` argument,
+  a layer-backed `NSView`, `CGImageCreate` from a raw pixel buffer,
+  `layer.setContents:`) and confirmed it runs without an Objective-C
+  exception, which also settled the one real architecture-dependent
+  question -- AAPCS64 (arm64) resolves an `NSRect`-returning message
+  send (`-frame`/`-bounds`) through the ordinary `objc_msgSend` entry
+  point, unlike x86_64's SysV ABI, which needs the dedicated
+  `objc_msgSend_stret` entry point for a struct this size; (3) confirmed
+  `objc_allocateClassPair()`-based runtime class creation correctly
+  dispatches method calls and round-trips an ivar, needed for the
+  `NSWindowDelegate` class this backend defines to receive
+  `windowShouldClose:`/`windowWillClose:`/`windowDidResize:`.
+
+  Performance direction (the concrete lesson taken from the Wawona/
+  Cocoa-Way reference class, and the "성능을 끌어올릴 수 있는 구현
+  방향" the request asked for): presents each frame by building a
+  `CGImage` from the caller's BGRA8888 buffer and setting it as the
+  content view's `CALayer.contents`, which the WindowServer composites
+  in hardware the same way it composites every other app's layers --
+  not the naive `-drawRect:`+`CGContextDrawImage` invalidation round
+  trip. Also a genuine improvement over this project's own Win32
+  adapter, not just a port of the same idea:
+  `-nextEventMatchingMask:untilDate:inMode:dequeue:` accepts a real
+  deadline, so `crtgfx_host_window_dispatch()` blocks the thread
+  efficiently in the OS's own run-loop wait instead of Win32's
+  `PeekMessage`+`Sleep(1)` busy-poll loop (Win32 has no real
+  wait-with-timeout primitive to poll with, so it never had this option).
+
+  `crtgfx_host_window_present_software()` copies the caller's pixel
+  buffer into its own allocation each frame (freed via a real
+  `CGDataProviderCreateWithData` release callback) rather than wrapping
+  the `crtgfx_weston_toplevel` software buffer in place -- that buffer
+  can be mutated or reallocated by the very next
+  `crtgfx_window_begin_frame()` call before `CALayer`/WindowServer has
+  actually consumed the previous frame, a real tear/use-after-free
+  hazard a zero-copy wrap would carry. This is more conservative than
+  this project's own Linux Wayland backend, whose "buffer torn down on
+  the next present rather than gated on `wl_buffer::release`" scope cut
+  is already documented there as a real, currently-theoretical tear
+  risk -- the macOS backend simply doesn't take on that same risk, in
+  exchange for one `memcpy` per frame (still far cheaper than the
+  `-drawRect:` path it replaces).
+
+  `libcrtgfx/CMakeLists.txt`: `window_cocoa.c` replaces
+  `window_stub.c` as the macOS backend source; `crtgfx`/`crtgfx_shared`
+  now link `Foundation`/`AppKit`/`QuartzCore`/`CoreGraphics`/`libobjc`
+  on macOS (`PUBLIC`, mirroring how Windows already publicly links
+  `user32.lib`/`gdi32.lib` there), since a static archive member's
+  undefined AppKit/libobjc symbols only resolve once something actually
+  links those frameworks in, and the shared `.dylib` needs them resolved
+  at its own link time regardless.
+
+  Initial automated verification directly on this real macOS aarch64
+  host, after a genuine `cmake --fresh` reconfigure (not an existing
+  `out/` tree), looked complete but wasn't: `crtgfx_window_smoke` passed
+  with no `CRTGFX_ERROR_UNSUPPORTED` fallback, `crtgfx_window_demo` ran
+  continuously for 8+ seconds with stable CPU/memory and a stable
+  open-fd count (no leak) and no crash, and the full `ctest` suite was
+  103/103 -- but this session's `screencapture`/`System Events` calls
+  both failed with a TCC permission denial in this sandboxed context, so
+  none of that evidence actually confirmed the window was rendering
+  correctly. It wasn't: the user watched the real screen and reported
+  the window showed one frame and then never visibly updated again,
+  exactly unlike the same-day Windows/Linux backends ("계속 화면이
+  바뀌는데 여기는 멈춰 있다"), even though the process stayed healthy
+  and kept calling `crtgfx_host_window_present_software()` every frame
+  without any error return -- process-level health metrics alone cannot
+  distinguish "presenting new frames correctly" from "silently frozen".
+
+  First hypothesis (implicit `CATransaction` never flushing without
+  `-[NSApplication run]`'s own run-loop-idle observer) was reasoned
+  carefully but turned out to be **wrong** -- fixing it (explicit
+  `CATransaction begin`/`commit`) did not change the symptom, caught by
+  re-testing rather than trusting the reasoning. The user then granted
+  Screen Recording permission to this session directly
+  ("TCC 권한 주었으니 직접 모니터링 하면 된다"), which let this session
+  finally see the actual bug for itself: `screencapture` a second apart
+  produced byte-identical screenshots, confirming the freeze directly,
+  and a live `lldb attach`+`bt` on the running (0% CPU, healthy-looking)
+  process showed it blocked inside `-nextEventMatchingMask:untilDate:...`
+  with `until_date` printed as a real date roughly **two and a half
+  weeks in the future** -- the actual, real root cause. Temporary
+  `dprintf()` instrumentation of `crtgfx_now_ms()`'s inputs confirmed
+  `clock_gettime()` was returning wildly inconsistent, non-advancing
+  timestamps instead of real elapsed time, which fed a bogus multi-day
+  interval into `-[NSDate dateWithTimeIntervalSinceNow:]` and made the
+  event wait block far past the caller's real `timeout_ms` -- silently
+  hanging `crtgfx_window_demo`'s entire frame loop the first time a real
+  event backlog needed draining, since the broken deadline check never
+  correctly told it to give up and return.
+
+  Real root cause: a **symbol collision**, not an ABI or logic bug.
+  `crtgfx_window_demo`/`crtgfx_window_smoke` link this project's own
+  libc (`c`) as their actual C runtime, and that static archive's own
+  `clock_gettime()` (`libc/src/time.c`) wins symbol resolution over real
+  Darwin libSystem's `clock_gettime` at link time. `window_cocoa.c` had
+  declared and called `clock_gettime()` with Darwin's *real* raw
+  `CLOCK_MONOTONIC` value (`6`, confirmed earlier from this session's own
+  standalone probes against the real system headers) -- correct for
+  libSystem's implementation, but this project's own macOS
+  `__crt_sys_clock_gettime()` only recognizes its *own*, differently-
+  numbered clock ids (`include/time.h`: `CLOCK_REALTIME=0`/
+  `CLOCK_MONOTONIC=1`) and returns `-EINVAL` for anything else --
+  **leaving the output `struct timespec` completely unwritten, i.e.
+  stack garbage**, for every single call, which is exactly the
+  "wildly inconsistent, non-advancing" pattern the debug prints showed.
+  Fixed by using this project's own `CLOCK_MONOTONIC` value (`1`) instead
+  of Darwin's raw one, since the symbol that actually ends up linked is
+  confirmed (not assumed) to be this project's own implementation, not
+  the real Darwin one the original code was reasoning about.
+
+  Re-verified after the real fix with the newly-granted Screen Recording
+  permission, closing the loop this session couldn't close on its own
+  before: `crtgfx_window_smoke` still passes; three `screencapture`
+  screenshots taken one second apart while `crtgfx_window_demo` ran are
+  all pixel-different from each other (`md5` confirms three distinct
+  hashes), showing the same shifting gradient/diagonal-band pattern
+  Windows/Linux produce -- the window genuinely animates now, confirmed
+  by this session directly, not only by the user. Full `ctest` suite:
+  103/103, no regressions. x86_64 macOS gets the identical fix (the
+  symbol-collision mechanism is link-time, not architecture-specific)
+  but has not been independently run on real Intel/Rosetta hardware this
+  session. See `docs/libcrtgfx_wayland_plan.md`'s "macOS Host Adapter"
+  section for the full writeup, and this project's own
+  `libc/src/time.c`/`include/time.h` for the clock-id numbering this bug
+  fell into.
+
 - **Implemented a real Linux `libcrtgfx` host window backend, replacing the
   `CRTGFX_ERROR_UNSUPPORTED` stub.** Reported: `crtgfx_window_smoke_test`
   failed to even compile on Linux (`-Werror -Wunused-variable` on locals

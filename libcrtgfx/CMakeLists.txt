@@ -6,7 +6,7 @@ set(CRTGFX_COMMON_SOURCES
 if(CRT_TARGET_OS STREQUAL "windows")
   set(CRTGFX_BACKEND_SOURCES src/arch/windows/window_win32.c)
 elseif(CRT_TARGET_OS STREQUAL "macos")
-  set(CRTGFX_BACKEND_SOURCES src/arch/macos/window_stub.c)
+  set(CRTGFX_BACKEND_SOURCES src/arch/macos/window_cocoa.c)
 elseif(CRT_TARGET_OS STREQUAL "linux")
   set(CRTGFX_BACKEND_SOURCES src/arch/linux/window_wayland.c)
 endif()
@@ -78,6 +78,24 @@ if(CRT_TARGET_OS STREQUAL "windows")
   endif()
 endif()
 
+# window_cocoa.c drives real AppKit/Foundation/QuartzCore/CoreGraphics
+# from plain C via the Objective-C runtime (objc_msgSend/objc_getClass/
+# ...) rather than #include-ing any Cocoa header -- see that file's own
+# top comment. Those frameworks and libobjc still need to be on the
+# link line, the same way Windows needs real user32.lib/gdi32.lib
+# above: a static archive member with undefined AppKit/libobjc symbols
+# only resolves once something links these in, and crtgfx_shared (an
+# actual .dylib) needs them resolved at its own link time regardless.
+if(CRT_TARGET_OS STREQUAL "macos")
+  set(CRTGFX_MACOS_FRAMEWORKS
+    "-framework Foundation"
+    "-framework AppKit"
+    "-framework QuartzCore"
+    "-framework CoreGraphics"
+    objc
+  )
+endif()
+
 add_library(crtgfx STATIC
   $<TARGET_OBJECTS:crtgfx_common_objects>
   $<TARGET_OBJECTS:crtgfx_backend_objects>
@@ -92,6 +110,8 @@ if(CRT_TARGET_OS STREQUAL "windows")
     "${CRTGFX_WINDOWS_USER32_LIB}"
     "${CRTGFX_WINDOWS_GDI32_LIB}"
   )
+elseif(CRT_TARGET_OS STREQUAL "macos")
+  target_link_libraries(crtgfx PUBLIC ${CRTGFX_MACOS_FRAMEWORKS})
 endif()
 set_target_properties(crtgfx PROPERTIES
   OUTPUT_NAME crtgfx
@@ -113,6 +133,8 @@ if(CRT_TARGET_OS STREQUAL "windows")
     "${CRTGFX_WINDOWS_USER32_LIB}"
     "${CRTGFX_WINDOWS_GDI32_LIB}"
   )
+elseif(CRT_TARGET_OS STREQUAL "macos")
+  target_link_libraries(crtgfx_shared PRIVATE ${CRTGFX_MACOS_FRAMEWORKS})
 endif()
 crt_configure_shared_runtime(crtgfx_shared)
 set_target_properties(crtgfx_shared PROPERTIES

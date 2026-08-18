@@ -212,3 +212,127 @@ socket. Full `ctest` stays green throughout. Not yet exercised on a
 non-GNOME/Mutter compositor (wlroots-based ones like Sway, or KDE's
 KWin) -- the protocol used here is universal core+stable-xdg-shell, so it
 should behave the same, but that is not independently confirmed yet.
+
+## macOS Host Adapter (done, first cut)
+
+`libcrtgfx/src/arch/macos/window_cocoa.c` (2026-08-18) implements the
+"host-window prototype" step for macOS, taking the concrete technique
+from the Wawona/Wayoa/Cocoa-Way reference class named in this document's
+own "Candidate References" above: drive real Cocoa (NSWindow/NSView/
+CALayer) from plain C via the Objective-C runtime's own C ABI
+(`objc_msgSend`/`objc_getClass`/`sel_registerName`/
+`objc_allocateClassPair`), not the Objective-C language -- no `.m` file,
+no ARC, no Xcode project, matching the win32 adapter's own
+no-host-SDK-headers style (this file never `#import`s `<Cocoa/Cocoa.h>`,
+the same way `window_win32.c` never includes `<windows.h>`).
+
+Covers: `NSApplication` bootstrap for a bundle-less command-line process
+(`setActivationPolicy:`/`finishLaunching`, required for the window to
+actually gain focus and receive input without an `Info.plist`),
+`NSWindow` creation with a titled/closable/resizable style mask, a
+layer-backed content `NSView` (`-setWantsLayer:YES`), a runtime-defined
+`NSWindowDelegate` class (`objc_allocateClassPair`) implementing
+`windowShouldClose:`/`windowWillClose:`/`windowDidResize:`, and
+`CGImage`-into-`CALayer.contents` software presentation.
+
+**Performance direction, the concrete lesson taken from the Wawona/
+Cocoa-Way reference class**: present frames via `CALayer.contents`
+(hardware-composited by the WindowServer, the same fast path a real
+GPU-backed layer would use) rather than the naive `-drawRect:` +
+`CGContextDrawImage` invalidation round trip. Also improves on this
+project's own Win32 adapter, not just matches it:
+`-nextEventMatchingMask:untilDate:inMode:dequeue:` takes a real
+deadline, so `crtgfx_host_window_dispatch()` blocks the thread
+efficiently in the OS's own run-loop wait instead of Win32's
+`PeekMessage`+`Sleep(1)` busy-poll loop (Win32 has no
+"wait-up-to-N-milliseconds" primitive to poll with).
+
+Known scope cuts, documented in the file itself, not silent:
+- single window per process, matching Win32/Linux's own thread-global
+  dispatch shape (`crtgfx_host_window_dispatch()` takes no window
+  parameter);
+- no keyboard/mouse/trackpad input delivered to the caller yet (events
+  are drained and dispatched to AppKit for correct window chrome/
+  resize/close behavior, but not yet surfaced through the crtgfx public
+  API) -- matching Linux's own "no keyboard/pointer/`wl_seat` input"
+  cut;
+- `crtgfx_host_window_present_software()` copies the caller's pixel
+  buffer into its own allocation each frame rather than wrapping it in
+  place, avoiding a real tear/use-after-free hazard the very next
+  `crtgfx_window_begin_frame()` call could otherwise cause (mutating or
+  reallocating the buffer before `CALayer`/WindowServer has actually
+  consumed the previous frame) -- more conservative than Linux's own
+  "torn down on the next present" documented cut above, at the cost of
+  one `memcpy` per frame;
+- `-frame`/`-bounds` (both `NSRect`-returning) are the one place this
+  file's calling convention differs by architecture: AAPCS64 (arm64)
+  resolves a struct return of this size through the ordinary
+  `objc_msgSend` entry point, while x86_64's SysV ABI needs the
+  dedicated `objc_msgSend_stret` entry point. Both paths are
+  implemented; only the arm64 path has been run on real hardware this
+  session.
+
+**A real bug process-health checks alone could not catch, and one wrong
+fix before the real one**: the first working build passed every
+automated check (smoke test "ok", demo running stably for 8+ seconds,
+full `ctest` green) while the window actually shown on screen displayed
+one frame and then never visibly updated again -- caught only because
+the user was watching the real screen and reported exactly what
+Windows/Linux do differently. The first hypothesis (a bare
+`[layer setContents:img]` only scheduling an *implicit* `CATransaction`
+that never gets flushed without `-[NSApplication run]`'s own run-loop-
+idle observer) was reasoned carefully and fixed (explicit
+`[CATransaction begin]`/`[CATransaction commit]`), but **did not
+actually fix the freeze** -- caught by re-testing rather than trusting
+the reasoning.
+
+The user then granted this session Screen Recording permission directly
+("TCC 권한 주었으니 직접 모니터링 하면 된다"), which let this session
+see the real bug for itself: two `screencapture` shots a second apart
+were byte-identical, and a live `lldb attach`+`bt` on the (healthy-
+looking, 0% CPU) running process showed it blocked inside
+`-nextEventMatchingMask:untilDate:...` with `until_date` a real date
+**roughly two and a half weeks in the future**. Temporary `dprintf()`
+instrumentation traced this to `clock_gettime()` returning wildly
+inconsistent, non-advancing timestamps into
+`crtgfx_host_window_dispatch()`'s own deadline math.
+
+Real root cause: a **symbol collision**, not an ABI or logic bug.
+`crtgfx_window_demo`/`crtgfx_window_smoke` link this project's own libc
+(`c`) as their C runtime, and that static archive's own
+`clock_gettime()` (`libc/src/time.c`) wins symbol resolution over real
+Darwin libSystem's at link time. `window_cocoa.c` had called
+`clock_gettime()` with Darwin's *real* raw `CLOCK_MONOTONIC` value (`6`)
+-- correct for libSystem's own implementation, but this project's own
+macOS `__crt_sys_clock_gettime()` only recognizes its own, differently-
+numbered clock ids (`include/time.h`: `CLOCK_REALTIME=0`/
+`CLOCK_MONOTONIC=1`) and returns `-EINVAL` for anything else, **leaving
+the output `struct timespec` completely unwritten -- stack garbage --
+on every single call**. Fixed by using this project's own
+`CLOCK_MONOTONIC` value (`1`) instead of Darwin's raw one, since the
+symbol that actually links is this project's own implementation, not
+the real Darwin one the original code assumed.
+
+**Verified on this project's own real macOS aarch64 build host**, twice
+over: before any of this landed in the real backend, a standalone C
+probe using the identical technique (same extern declarations, same
+frameworks) created a real `NSWindow`/`NSView`/`CALayer`, queried
+`-frame`/`-bounds`, built a `CGImage` from a raw pixel buffer and set it
+as `layer.contents`, and showed the window -- all without an
+Objective-C exception -- and a second probe confirmed runtime
+`objc_allocateClassPair`-based delegate classes correctly receive
+method dispatch and round-trip an ivar. `crtgfx_window_smoke` passed the
+full path end to end throughout (create, get real content-view size,
+draw, present, pump, destroy, no `CRTGFX_ERROR_UNSUPPORTED` fallback) at
+every stage of this investigation, including the two stages where the
+window was actually frozen -- a reminder that this particular smoke
+test cannot, by itself, distinguish a correctly-animating window from a
+frozen one. After the real fix and with the newly-granted Screen
+Recording permission, this session confirmed the animation directly for
+itself: three `screencapture` shots one second apart during a
+`crtgfx_window_demo` run are all pixel-different from each other (three
+distinct `md5` hashes), showing the same shifting gradient pattern
+Windows/Linux produce. Full `ctest` suite: 103/103 throughout. x86_64
+macOS gets the identical fix (the symbol-collision mechanism is
+link-time, not architecture-specific) but has not been independently
+run on real Intel/Rosetta hardware this session. See `HISTORY.md`.
