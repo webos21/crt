@@ -8,10 +8,9 @@ typedef __SIZE_TYPE__ size_t;
 typedef __WCHAR_TYPE__ wchar_t;
 #endif
 
-typedef struct {
-  long long __ll;
-  long double __ld;
-} max_align_t;
+/* Bionic uses long double for the public C max_align_t spelling. Keeping the
+ * same spelling also lets libc++'s C wrapper recognize the compiler type. */
+typedef long double max_align_t;
 
 #ifndef NULL
 #ifdef __cplusplus

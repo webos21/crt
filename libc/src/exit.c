@@ -79,3 +79,7 @@ void exit(int status) {
 void _exit(int status) {
   __crt_sys_exit(status);
 }
+
+void _Exit(int status) {
+  _exit(status);
+}

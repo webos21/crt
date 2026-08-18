@@ -147,6 +147,25 @@ double tan(double x);
 float tanf(float x);
 long double tanl(long double x);
 
+double cosh(double x);
+float coshf(float x);
+long double coshl(long double x);
+double sinh(double x);
+float sinhf(float x);
+long double sinhl(long double x);
+double tanh(double x);
+float tanhf(float x);
+long double tanhl(long double x);
+double acosh(double x);
+float acoshf(float x);
+long double acoshl(long double x);
+double asinh(double x);
+float asinhf(float x);
+long double asinhl(long double x);
+double atanh(double x);
+float atanhf(float x);
+long double atanhl(long double x);
+
 double atan(double x);
 float atanf(float x);
 long double atanl(long double x);

@@ -200,6 +200,19 @@ Next work order:
      MSVC STL include root. Those routes were statically checked on macOS, but
      their real host GN/Ninja workflows still require execution before Skia is
      reported as cross-host verified.
+   - **C++ runtime prerequisite (started):** `crt-libcxx-fetch` now obtains
+     Android's paired libc++, libc++abi, and libunwind sources under the active
+     preset. Build them as one CRT static/shared runtime set and replace the
+     small Bionic-shaped bootstrap only after standard-library and Skia
+     link/run tests pass on all three hosts.
+   - First real macOS libc++ `cxx` compile was run against Android main
+     (`4f4a65c` libc++, `6571517` libc++abi, `ec57b05` libunwind). It exposed
+     the next CRT work honestly: finish the Bionic/FreeBSD C99 libm family
+     (`erf*`, `erfc*`, `exp2*`, `fdim*`, `hypot*`, `ilogb*`, `lgamma*`, and
+     remaining siblings), configure libc++ for the CRT pthread personality,
+     and disable libc++'s pre-C++14 `gets` import rather than reintroducing
+     that removed unsafe API. macOS-only `Availability.h` is likewise an
+     external-build configuration issue, not a CRT public header.
 3. **Run the Wayland/Weston protocol/library investigation as a separate
    `libcrtgfx` sub-track.**
    Decide what is protocol parsing, what is compositor policy, and what is

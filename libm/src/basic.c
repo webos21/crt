@@ -280,6 +280,56 @@ long double acosl(long double x) {
   return atan2l(sqrtl(1.0L - x * x), x);
 }
 
+double cosh(double x) {
+  double ex = exp(x);
+  return 0.5 * (ex + 1.0 / ex);
+}
+
+float coshf(float x) { return (float)cosh((double)x); }
+long double coshl(long double x) { return (long double)cosh((double)x); }
+
+double sinh(double x) {
+  double ex = exp(x);
+  return 0.5 * (ex - 1.0 / ex);
+}
+
+float sinhf(float x) { return (float)sinh((double)x); }
+long double sinhl(long double x) { return (long double)sinh((double)x); }
+
+double tanh(double x) {
+  double ax = fabs(x);
+  double ex;
+  if (isinf(x)) return copysign(1.0, x);
+  ex = exp(2.0 * ax);
+  return copysign((ex - 1.0) / (ex + 1.0), x);
+}
+
+float tanhf(float x) { return (float)tanh((double)x); }
+long double tanhl(long double x) { return (long double)tanh((double)x); }
+
+double acosh(double x) {
+  if (x < 1.0) return NAN;
+  return log(x + sqrt(x * x - 1.0));
+}
+
+float acoshf(float x) { return (float)acosh((double)x); }
+long double acoshl(long double x) { return (long double)acosh((double)x); }
+
+double asinh(double x) {
+  return log(x + sqrt(x * x + 1.0));
+}
+
+float asinhf(float x) { return (float)asinh((double)x); }
+long double asinhl(long double x) { return (long double)asinh((double)x); }
+
+double atanh(double x) {
+  if (x <= -1.0 || x >= 1.0) return x == 1.0 ? INFINITY : (x == -1.0 ? -INFINITY : NAN);
+  return 0.5 * log((1.0 + x) / (1.0 - x));
+}
+
+float atanhf(float x) { return (float)atanh((double)x); }
+long double atanhl(long double x) { return (long double)atanh((double)x); }
+
 double sqrt(double x) {
   return __builtin_elementwise_sqrt(x);
 }

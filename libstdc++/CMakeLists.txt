@@ -45,3 +45,21 @@ install(TARGETS cxx cxx_shared
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
 )
+
+# Android keeps the full standard library outside Bionic's small libstdc++ ABI
+# shim. Keep those sources outside this checkout too: the metadata below is
+# project-owned, while the selected Android revision is fetched under the active
+# build preset. The fetch target is deliberately separate from the bootstrap
+# `cxx` target until libc++/libc++abi/libunwind can replace it as one coherent
+# static-and-shared runtime set.
+set(CRT_LIBCXX_ANDROID_REF "refs/heads/main" CACHE STRING "Android ref shared by libc++, libc++abi, and libunwind")
+set(CRT_LIBCXX_FETCH_ROOT "${CMAKE_BINARY_DIR}/external/llvm-runtimes" CACHE PATH "Android LLVM runtime source root")
+if(Python3_Interpreter_FOUND)
+  add_custom_target(crt-libcxx-fetch
+    COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/fetch_libcxx_runtimes.py"
+      --root "${CRT_LIBCXX_FETCH_ROOT}"
+      --ref "${CRT_LIBCXX_ANDROID_REF}"
+    COMMENT "Fetching Android libc++, libc++abi, and libunwind sources"
+  )
+endif()

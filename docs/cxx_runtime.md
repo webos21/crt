@@ -8,6 +8,10 @@ The source directory is named `libstdc++/` because the original Android Bionic
 tree historically used that directory for small C++ ABI support symbols. The
 project policy is not to adopt GNU libstdc++ as the C++ standard library.
 
+The intended stack is the same separation Android uses: Bionic's small
+`libstdc++` ABI surface plus the separately maintained LLVM libc++, libc++abi,
+and libunwind projects. It is not a plan to hand-write STL containers.
+
 The intended stack is:
 
 - project-owned C++ ABI bootstrap library, currently installed as `libc++.a`;
@@ -188,3 +192,26 @@ Remaining recommended next work:
    clear libunwind choice.
 5. Start a separate Windows MSVC ABI bridge design with C ABI wrapper tests
    before allowing C++ object or exception interop across the bridge.
+
+## Android LLVM Runtime Import
+
+`crt-libcxx-fetch` fetches Android's paired `platform/external/libcxx`,
+`platform/external/libcxxabi`, and `platform/external/libunwind` repositories
+at one configurable `CRT_LIBCXX_ANDROID_REF` (default `refs/heads/main`) into
+`out/<preset>/external/llvm-runtimes/`. The project-owned metadata is under
+`libstdc++/third_party/`; no upstream source is committed there.
+
+The first import gate is source provenance and compiler mode. `tools/crt-c++`
+now retains the bootstrap default of `-fno-exceptions -fno-rtti`, but an
+external runtime build may explicitly set `CRT_CXX_ENABLE_EXCEPTIONS=1` and
+`CRT_CXX_ENABLE_RTTI=1`. The next gate is to build libc++/libc++abi/libunwind
+as one CRT static-and-shared set, then replace the bootstrap archive only after
+standard-library and Skia link/run tests pass on Linux, macOS, and Windows.
+
+The first actual Android-main libc++ compile was performed on macOS against
+the CRT sysroot. It validated the source/compiler boundary and converted the
+next work into an explicit compatibility list: complete the Bionic/FreeBSD C99
+libm functions libc++ imports, present the CRT pthread personality to libc++'s
+configuration, and configure out its legacy `gets` import. Do not solve the
+last point by reviving `gets`, and do not add macOS `Availability.h` as a
+Bionic public header; both are external-build adapter policy.

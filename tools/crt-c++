@@ -79,7 +79,14 @@ done
 # wrappers such as <cstddef> intentionally include their own <stddef.h> first
 # and then forward to the C header underneath.
 cxx_standard_include_flags="${CRT_CXX_STANDARD_INCLUDE_FLAGS:-}"
-common_flags="-ffreestanding -fno-builtin -Xclang -fwchar-type=int -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -nostdinc -nostdinc++ $cxx_standard_include_flags -isystem${CRT_SYSROOT}/include"
+cxx_language_flags=""
+if [ "${CRT_CXX_ENABLE_EXCEPTIONS:-0}" != "1" ]; then
+  cxx_language_flags="$cxx_language_flags -fno-exceptions"
+fi
+if [ "${CRT_CXX_ENABLE_RTTI:-0}" != "1" ]; then
+  cxx_language_flags="$cxx_language_flags -fno-rtti"
+fi
+common_flags="-ffreestanding -fno-builtin -Xclang -fwchar-type=int -ffunction-sections -fdata-sections$cxx_language_flags -nostdinc -nostdinc++ $cxx_standard_include_flags -isystem${CRT_SYSROOT}/include"
 case "$target_os" in
   macos) common_flags="$common_flags -DCRT_TARGET_OS_MACOS=1" ;;
   linux) common_flags="$common_flags -DCRT_TARGET_OS_LINUX=1" ;;

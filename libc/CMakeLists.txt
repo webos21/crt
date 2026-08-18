@@ -74,6 +74,7 @@ set(CRT_LIBC_SOURCES
   src/string/memmove.c
   src/string/memset.c
   src/string/strcat.c
+  src/string/strncat.c
   src/string/stpcpy.c
   src/string/stpncpy.c
   src/string/strcasecmp.c
@@ -96,6 +97,7 @@ set(CRT_LIBC_SOURCES
   src/string/strlcat.c
   src/string/strlcpy.c
   src/string/strstr.c
+  src/string/strtok.c
   src/string/strtok_r.c
   src/string/strxfrm.c
 )

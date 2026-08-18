@@ -39,6 +39,7 @@ void srand(unsigned int seed);
 long random(void);
 void srandom(unsigned int seed);
 void exit(int status) __attribute__((noreturn));
+void _Exit(int status) __attribute__((noreturn));
 void abort(void) __attribute__((noreturn));
 int atexit(void (*function)(void));
 int atoi(const char* s);
@@ -74,8 +75,10 @@ char* mktemp(char* template_path);
 int mkstemp(char* template_path);
 char* mkdtemp(char* template_path);
 int mblen(const char* s, size_t n);
+size_t mbstowcs(wchar_t* dst, const char* src, size_t n);
 int mbtowc(wchar_t* pwc, const char* s, size_t n);
 int wctomb(char* s, wchar_t wc);
+size_t wcstombs(char* dst, const wchar_t* src, size_t n);
 
 #ifdef __cplusplus
 }
