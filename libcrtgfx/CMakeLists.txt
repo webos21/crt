@@ -9,11 +9,21 @@ set(CRTGFX_SKIA_REPOSITORY "https://skia.googlesource.com/skia.git" CACHE STRING
 set(CRTGFX_SKIA_EXPECTED_COMMIT "" CACHE STRING "Optional full Skia commit hash expected after fetch")
 option(CRTGFX_SKIA_SYNC_DEPS "Run Skia tools/git-sync-deps after fetching Skia" ON)
 set(CRTGFX_SKIA_FETCH_ROOT "${CMAKE_BINARY_DIR}/external/skia" CACHE PATH "Local Skia fetch/build root")
-set(CRTGFX_SKIA_ROOT "${CRTGFX_SKIA_FETCH_ROOT}/src" CACHE PATH "Skia checkout root for libcrtgfx")
+set(CRTGFX_SKIA_DEFAULT_ROOT "${CRTGFX_SKIA_FETCH_ROOT}/src")
+if(DEFINED CACHE{CRTGFX_SKIA_ROOT})
+  get_property(CRTGFX_SKIA_CACHED_ROOT CACHE CRTGFX_SKIA_ROOT PROPERTY VALUE)
+  if(CRTGFX_SKIA_CACHED_ROOT MATCHES "/libcrtgfx/third_party/skia$" AND
+     NOT EXISTS "${CRTGFX_SKIA_CACHED_ROOT}/include/core/SkSurface.h")
+    set(CRTGFX_SKIA_ROOT "${CRTGFX_SKIA_DEFAULT_ROOT}" CACHE PATH "Skia checkout root for libcrtgfx" FORCE)
+  endif()
+else()
+  set(CRTGFX_SKIA_ROOT "${CRTGFX_SKIA_DEFAULT_ROOT}" CACHE PATH "Skia checkout root for libcrtgfx")
+endif()
 set(CRTGFX_SKIA_DEFAULT_BUILD_DIR "${CRTGFX_SKIA_ROOT}/out/crt-${CRT_TARGET_OS}-${CRT_EFFECTIVE_ARCH_FOR_FLAGS}")
 if(DEFINED CACHE{CRTGFX_SKIA_BUILD_DIR})
   get_property(CRTGFX_SKIA_CACHED_BUILD_DIR CACHE CRTGFX_SKIA_BUILD_DIR PROPERTY VALUE)
-  if(CRTGFX_SKIA_CACHED_BUILD_DIR MATCHES "/external/skia/build/")
+  if(CRTGFX_SKIA_CACHED_BUILD_DIR MATCHES "/external/skia/build/" OR
+     CRTGFX_SKIA_CACHED_BUILD_DIR MATCHES "/libcrtgfx/third_party/skia/")
     set(CRTGFX_SKIA_BUILD_DIR "${CRTGFX_SKIA_DEFAULT_BUILD_DIR}" CACHE PATH "Skia GN build directory" FORCE)
   endif()
 else()
@@ -33,7 +43,15 @@ if(EXISTS "${CRTGFX_SKIA_ROOT}/include/core/SkSurface.h" AND CRTGFX_SKIA_LIBRARI
 else()
   set(CRTGFX_SKIA_AVAILABLE_DEFAULT OFF)
 endif()
-option(CRTGFX_ENABLE_SKIA "Build libcrtgfx Skia CPU raster bridge when Skia is available" ${CRTGFX_SKIA_AVAILABLE_DEFAULT})
+# Building Skia against the CRT is already a useful porting gate. Linking it
+# into libcrtgfx requires the full libc++ standard library, which is a later
+# explicit tranche; never make ordinary CRT workflows depend on a host libc++
+# as a hidden substitute. Enable this only once that runtime gate is met.
+if(DEFINED CACHE{CRTGFX_SKIA_WAS_AVAILABLE})
+  set(CRTGFX_ENABLE_SKIA OFF CACHE BOOL "Build libcrtgfx Skia CPU raster bridge when the full libc++ runtime is available" FORCE)
+  unset(CRTGFX_SKIA_WAS_AVAILABLE CACHE)
+endif()
+option(CRTGFX_ENABLE_SKIA "Build libcrtgfx Skia CPU raster bridge when the full libc++ runtime is available" OFF)
 if(CRTGFX_ENABLE_SKIA AND NOT EXISTS "${CRTGFX_SKIA_ROOT}/include/core/SkSurface.h")
   message(FATAL_ERROR "CRTGFX_ENABLE_SKIA=ON but ${CRTGFX_SKIA_ROOT}/include/core/SkSurface.h was not found")
 endif()
@@ -168,11 +186,11 @@ set(CRTGFX_SKIA_OBJECTS)
 if(CRTGFX_ENABLE_SKIA)
   add_library(crtgfx_skia_objects OBJECT src/skia_bridge.cc)
   target_link_libraries(crtgfx_skia_objects PRIVATE crt_cxx_build_flags)
-  target_include_directories(crtgfx_skia_objects PUBLIC
+  target_include_directories(crtgfx_skia_objects SYSTEM BEFORE PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${CRTGFX_SKIA_ROOT}"
   )
-  target_include_directories(crtgfx_skia_objects PRIVATE
+  target_include_directories(crtgfx_skia_objects SYSTEM BEFORE PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${CMAKE_SOURCE_DIR}/libc/include"
   )
@@ -353,7 +371,7 @@ if(CRTGFX_ENABLE_SKIA)
     ${CRT_STARTUP_END_OBJECTS}
   )
   target_link_libraries(crtgfx_skia_raster_smoke PRIVATE crt_cxx_build_flags crtgfx cxx c)
-  target_include_directories(crtgfx_skia_raster_smoke PRIVATE
+  target_include_directories(crtgfx_skia_raster_smoke SYSTEM BEFORE PRIVATE
     "${CMAKE_SOURCE_DIR}/libc/include"
     "${CRTGFX_SKIA_ROOT}"
   )

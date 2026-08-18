@@ -1,9 +1,10 @@
 add_library(cxx STATIC
   src/cxxabi.c
   src/msvcabi.c
+  src/new_delete.cc
 )
 
-target_link_libraries(cxx PRIVATE crt_build_flags c)
+target_link_libraries(cxx PRIVATE crt_cxx_build_flags c)
 target_include_directories(cxx PRIVATE
   "${CMAKE_SOURCE_DIR}/libc/include"
 )
@@ -15,12 +16,13 @@ set_target_properties(cxx PROPERTIES
 add_library(cxx_shared SHARED
   src/cxxabi.c
   src/msvcabi.c
+  src/new_delete.cc
 )
 if(CRT_TARGET_OS STREQUAL "windows")
   target_sources(cxx_shared PRIVATE $<TARGET_OBJECTS:crt_windows_dllcrt>)
 endif()
 
-target_link_libraries(cxx_shared PRIVATE crt_build_flags c_shared)
+target_link_libraries(cxx_shared PRIVATE crt_cxx_build_flags c_shared)
 target_include_directories(cxx_shared PRIVATE
   "${CMAKE_SOURCE_DIR}/libc/include"
 )

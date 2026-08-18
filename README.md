@@ -646,11 +646,14 @@ cmake --preset macos-host-ninja-debug \
 ```
 
 `crtgfx-skia-build` installs Skia under
-`out/<preset>/external/skia/install`. Re-run configure after that install exists
-so `CRTGFX_ENABLE_SKIA` can see the real headers and library, then rebuild and
-run the normal test workflow. The Skia bridge deliberately does not provide
-fake Skia headers; applications should include normal Skia headers through the
-CRT sysroot.
+`out/<preset>/external/skia/install`. This validates the selected Skia source
+against the CRT sysroot; it does not yet enable the Skia bridge by default.
+The default Skia archive requires the full project-owned libc++ standard
+library (`std::string`, shared ownership, streams, locale), and the current
+CRT supplies only its ABI/allocation bootstrap. Host libc++ is deliberately
+not linked as a substitute. The Skia bridge deliberately does not provide fake
+Skia headers; applications should include normal Skia headers through the CRT
+sysroot once the libc++ import tranche enables `CRTGFX_ENABLE_SKIA`.
 
 ## Repository Layout
 

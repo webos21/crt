@@ -177,9 +177,14 @@ Remaining recommended next work:
 
 1. Add a Windows policy probe that records which C++ ABI hooks Clang emits for
    the selected target/profile.
-2. Add `operator new/delete` only after allocator behavior is ready to be a C++
-   allocation boundary.
-3. Evaluate importing libc++abi's Itanium ABI source after the project has a
+2. **Done (2026-08-18):** `operator new/delete`, array forms, sized delete,
+   and nothrow forms forward to the CRT allocator. `cxx_allocation_test`
+   validates that boundary on every host.
+3. Import libc++ as the standard library before enabling a real Skia link.
+   Skia's CPU-raster archive still uses `std::string`, shared ownership,
+   streams, and locale machinery even with GPU backends disabled. It must not
+   be satisfied by silently linking the host libc++.
+4. Evaluate importing libc++abi's Itanium ABI source after the project has a
    clear libunwind choice.
-4. Start a separate Windows MSVC ABI bridge design with C ABI wrapper tests
+5. Start a separate Windows MSVC ABI bridge design with C ABI wrapper tests
    before allowing C++ object or exception interop across the bridge.

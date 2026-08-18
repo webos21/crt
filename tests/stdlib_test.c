@@ -45,6 +45,15 @@ int main(void) {
       expect_double_near(atof("-12.25"), -12.25, "atof")) {
     return 1;
   }
+  if (llabs(-9000000000LL) != 9000000000LL) {
+    return fail("llabs");
+  }
+
+  if (div(7, 3).quot != 2 || div(7, 3).rem != 1 ||
+      ldiv(-7L, 3L).quot != -2 || ldiv(-7L, 3L).rem != -1 ||
+      lldiv(9LL, -4LL).quot != -2 || lldiv(9LL, -4LL).rem != 1) {
+    return fail("div family");
+  }
 
   if (expect_double_near(strtod("1.5e2tail", &end), 150.0, "strtod") ||
       *end != 't') {

@@ -19,6 +19,21 @@ void* reallocarray(void* ptr, size_t nmemb, size_t size);
 int system(const char* command);
 
 #define RAND_MAX 0x7fffffff
+typedef struct {
+  int quot;
+  int rem;
+} div_t;
+
+typedef struct {
+  long quot;
+  long rem;
+} ldiv_t;
+
+typedef struct {
+  long long quot;
+  long long rem;
+} lldiv_t;
+
 int rand(void);
 void srand(unsigned int seed);
 long random(void);
@@ -31,6 +46,10 @@ long atol(const char* s);
 long long atoll(const char* s);
 int abs(int n);
 long labs(long n);
+long long llabs(long long n);
+div_t div(int numerator, int denominator);
+ldiv_t ldiv(long numerator, long denominator);
+lldiv_t lldiv(long long numerator, long long denominator);
 double atof(const char* s);
 double strtod(const char* nptr, char** endptr);
 float strtof(const char* nptr, char** endptr);

@@ -35,6 +35,17 @@
 extern "C" {
 #endif
 
+#define _CTYPE_U 0x000001
+#define _CTYPE_L 0x000002
+#define _CTYPE_D 0x000004
+#define _CTYPE_S 0x000008
+#define _CTYPE_P 0x000010
+#define _CTYPE_C 0x000020
+#define _CTYPE_X 0x000040
+#define _CTYPE_B 0x000100
+#define _CTYPE_R 0x000200
+#define _CTYPE_A (_CTYPE_U | _CTYPE_L)
+
 int isalnum(int ch);
 int isalpha(int ch);
 int isascii(int ch);

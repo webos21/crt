@@ -308,6 +308,11 @@ set_tests_properties(cxx_frontend_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "cxx_frontend_test: ok"
 )
 
+add_crt_cxx_test(cxx_allocation_test cxx_allocation_test.cc)
+set_tests_properties(cxx_allocation_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "cxx_allocation_test: ok"
+)
+
 add_crt_test(printf_test printf_test.c m)
 add_dependencies(printf_test m)
 set_tests_properties(printf_test_runs PROPERTIES

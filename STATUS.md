@@ -37,10 +37,10 @@ in those two win.
   own `cmake --workflow` step does not run `port-test-recipes` (a
   separate, heavier target that fetches and builds third-party sources)
   -- that's verified locally/per-host instead, see below.
-- **`ctest`**: 117 registered tests on Windows and 95 on macOS in the
+- **`ctest`**: 117 registered tests on Windows and 104 on macOS in the
   latest local runs (count is slightly
   OS-dependent -- a few targets, like `windows_export_hygiene_test`, only
-  exist on their own OS), all passing on both (117/117 on Windows, 95/95
+  exist on their own OS), all passing on both (117/117 on Windows, 104/104
   on macOS -- separately confirmed on each host, not simultaneously, so
   the exact registered-test overlap between the two counts hasn't been
   cross-checked item-by-item). Most recently confirmed on Windows after
@@ -349,6 +349,15 @@ in those two win.
   an Electron-class rebuilt runtime made of `libcrtgfx` (Skia + Wayland-style
   compositor boundary + Chromium Ozone path), `libcrtmedia` (FFmpeg/codecs/
   audio/video), and `libcrtjs` (QuickJS first, V8 later).
-- C++ runtime phase 2 and an ELF loader/dynamic-linker prototype remain
-  separate lower-layer tracks needed before the browser-class target can become
-  realistic.
+- Skia `m148` now compiles into a CRT-toolchain CPU archive on macOS. The
+  response-file archiver boundary is project-owned (`tools/crt-ar`), and the
+  first allocation ABI slice (`operator new/delete`) is covered by CTest. A
+  runnable Skia-linked executable remains blocked only on the explicitly
+  deferred full libc++ standard-library import; host libc++ is not used as a
+  fallback. Linux and Windows select their own archiver/C++-include driver
+  paths (`crt-ar` and `crt-ar.cmd` with MSVC STL discovery respectively),
+  which were statically reviewed from macOS; their actual Skia GN/Ninja host
+  runs remain required before cross-host Skia status can be claimed.
+- C++ runtime phase 2 (libc++/libc++abi/libunwind) and an ELF
+  loader/dynamic-linker prototype remain separate lower-layer tracks needed
+  before the browser-class target can become realistic.

@@ -53,9 +53,11 @@ Current bring-up:
 - Skia integration is staged as a CRT-built dependency, not a host SDK link.
   Use `crtgfx-skia-fetch` to fetch the selected Skia milestone/ref and
   `crtgfx-skia-build` to configure/build/install Skia with `tools/crt-c++`
-  against this project's sysroot. After that install exists, reconfigure with
-  `CRTGFX_ENABLE_SKIA=ON` (or let the default auto-enable when the installed
-  library is found) to register `crtgfx_skia_raster_smoke`.
+  against this project's sysroot. The current C++ runtime is intentionally an
+  ABI/allocation bootstrap, not a full libc++ standard-library implementation,
+  so this build does not auto-enable the Skia bridge or link host libc++ as a
+  substitute. The full `crtgfx_skia_raster_smoke` becomes enabled with
+  `CRTGFX_ENABLE_SKIA=ON` after the libc++ import tranche is complete.
 
 See `docs/libcrtgfx_api_policy.md` for the API boundary decision.
 See `docs/libcrtgfx_wayland_plan.md` for the Wayland/compositor plan.

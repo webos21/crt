@@ -177,18 +177,29 @@ Next work order:
    Start with a deterministic CPU-raster `SkSurface`/`SkCanvas` smoke before
    any GPU backend.
    - Current status: `crtgfx/skia.h`, `src/skia_bridge.cc`, and
-     `crtgfx_skia_raster_smoke` build wiring exist, but are enabled only when
-     a real Skia checkout and library are available through `CRTGFX_SKIA_ROOT`
-     and `CRTGFX_SKIA_LIBRARIES`. No fake Skia headers are provided.
+     `crtgfx_skia_raster_smoke` build wiring exist. Skia `m148` now builds and
+     installs as a CRT-toolchain CPU archive on macOS; `tools/crt-ar` expands
+     GN response files so this does not depend on Apple `ar` supporting them.
+     No fake Skia headers are provided.
    - Current build automation: `crtgfx-skia-fetch`,
      `crtgfx-skia-configure`, and `crtgfx-skia-build` now exist. The default
      source track is Skia `m148` (`refs/heads/chrome/m148`), with
      `CRTGFX_SKIA_VERSION`, `CRTGFX_SKIA_REF`, and
      `CRTGFX_SKIA_EXPECTED_COMMIT` available for user pinning.
-   - Next concrete work is to run the Skia GN/Ninja build against this CRT
-     sysroot on macOS/Linux/Windows, fix the exposed CRT/PAL/C++ runtime gaps,
-     then turn on `CRTGFX_ENABLE_SKIA` and verify the deterministic
-     `crtgfx_skia_raster_smoke` on both static and shared runtime paths.
+   - The first exposed C++ gap, CRT-owned `operator new/delete`, is complete
+     and covered by `cxx_allocation_test`. The remaining gate is a real
+     project-owned libc++ standard-library import: the default Skia archive
+     uses `std::string`, shared ownership, streams, and locale even with GPU
+     disabled. `CRTGFX_ENABLE_SKIA` therefore remains OFF by default; do not
+     link host libc++ as a substitute. After libc++ is imported, verify the
+     deterministic `crtgfx_skia_raster_smoke` on static and shared paths on all
+     three hosts.
+   - Cross-host build-driver status: the Linux route selects the POSIX
+     `tools/crt-ar` wrapper; the Windows route selects `tools/crt-ar.cmd`,
+     passes the invoking Python through `CRT_HOST_PYTHON`, and recognizes the
+     MSVC STL include root. Those routes were statically checked on macOS, but
+     their real host GN/Ninja workflows still require execution before Skia is
+     reported as cross-host verified.
 3. **Run the Wayland/Weston protocol/library investigation as a separate
    `libcrtgfx` sub-track.**
    Decide what is protocol parsing, what is compositor policy, and what is

@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <malloc.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -26,6 +27,9 @@ int main(void) {
   }
   for (i = 0; i < 16; ++i) {
     bytes[i] = (unsigned char)(i + 1);
+  }
+  if (malloc_usable_size(bytes) < 16 || malloc_usable_size(0) != 0) {
+    return fail("malloc usable size");
   }
 
   grown = (unsigned char*)realloc(bytes, 64);

@@ -75,7 +75,11 @@ for arg in "$@"; do
   esac
 done
 
-common_flags="-ffreestanding -fno-builtin -Xclang -fwchar-type=int -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -nostdinc -nostdinc++ -isystem${CRT_SYSROOT}/include"
+# C++ standard library headers must come before the CRT C headers. libc++'s
+# wrappers such as <cstddef> intentionally include their own <stddef.h> first
+# and then forward to the C header underneath.
+cxx_standard_include_flags="${CRT_CXX_STANDARD_INCLUDE_FLAGS:-}"
+common_flags="-ffreestanding -fno-builtin -Xclang -fwchar-type=int -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -nostdinc -nostdinc++ $cxx_standard_include_flags -isystem${CRT_SYSROOT}/include"
 case "$target_os" in
   macos) common_flags="$common_flags -DCRT_TARGET_OS_MACOS=1" ;;
   linux) common_flags="$common_flags -DCRT_TARGET_OS_LINUX=1" ;;

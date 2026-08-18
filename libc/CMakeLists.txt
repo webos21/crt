@@ -6,6 +6,7 @@ set(CRT_LIBC_SOURCES
   src/atoll.c
   src/ctype.c
   src/dirent.c
+  src/div.c
   src/epoll.c
   src/errno.c
   src/env.c
@@ -21,9 +22,11 @@ set(CRT_LIBC_SOURCES
   src/langinfo.c
   src/libgen.c
   src/locale.c
+  src/locale_l.c
   src/malloc.c
   src/mman.c
   src/mntent.c
+  src/nl_types.c
   src/poll.c
   src/prctl.c
   src/printf.c

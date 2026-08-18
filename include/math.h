@@ -47,6 +47,10 @@ double copysign(double x, double y);
 float copysignf(float x, float y);
 long double copysignl(long double x, long double y);
 
+double fma(double x, double y, double z);
+float fmaf(float x, float y, float z);
+long double fmal(long double x, long double y, long double z);
+
 double fmin(double x, double y);
 float fminf(float x, float y);
 long double fminl(long double x, long double y);
@@ -71,9 +75,29 @@ double round(double x);
 float roundf(float x);
 long double roundl(long double x);
 
+double nextafter(double x, double y);
+float nextafterf(float x, float y);
+long double nextafterl(long double x, long double y);
+
+long lrint(double x);
+long lrintf(float x);
+long lrintl(long double x);
+
+long lround(double x);
+long lroundf(float x);
+long lroundl(long double x);
+
+long long llround(double x);
+long long llroundf(float x);
+long long llroundl(long double x);
+
 double sqrt(double x);
 float sqrtf(float x);
 long double sqrtl(long double x);
+
+double cbrt(double x);
+float cbrtf(float x);
+long double cbrtl(long double x);
 
 double exp(double x);
 float expf(float x);
@@ -130,6 +154,14 @@ long double atanl(long double x);
 double atan2(double y, double x);
 float atan2f(float y, float x);
 long double atan2l(long double y, long double x);
+
+double asin(double x);
+float asinf(float x);
+long double asinl(long double x);
+
+double acos(double x);
+float acosf(float x);
+long double acosl(long double x);
 
 double frexp(double x, int* exp);
 float frexpf(float x, int* exp);

@@ -69,7 +69,10 @@ libcrtgfx/include/
     skia.h          # convenience include/bridge for Skia integration
 
 libcrtgfx/third_party/skia/
-  include/...       # upstream Skia public headers
+  README.md         # source/provenance and build-policy metadata
+
+out/<preset>/external/skia/src/
+  include/...       # fetched upstream Skia public headers
 ```
 
 `crtgfx/skia.h` should be a small bridge header, not a replacement drawing API.
@@ -101,6 +104,22 @@ Current bridge status (2026-08-18):
   `m148`. Users can override it with `CRTGFX_SKIA_VERSION`; use
   `CRTGFX_SKIA_REF` plus `CRTGFX_SKIA_EXPECTED_COMMIT` when a fully pinned
   reproducible checkout is required.
+- `libcrtgfx/third_party/skia/` deliberately stores only project-owned source
+  selection, provenance, and build-policy metadata. The fetched Skia checkout,
+  GN output, and installed archive are always under the active preset's
+  `out/<preset>/external/skia/` tree and are never committed as an accidental
+  source import.
+- A successful `crtgfx-skia-build` proves that the selected Skia source builds
+  with CRT headers and libraries. It does not yet prove a runnable Skia-linked
+  executable: the default `//:skia` archive also requires the real libc++
+  standard library. The bridge and `crtgfx_skia_raster_smoke` remain disabled
+  until that project-owned libc++ tranche exists; host libc++ is not a fallback.
+- The build driver is host-specific only at the tool boundary: Linux uses the
+  POSIX `tools/crt-ar` response-file wrapper, while Windows uses
+  `tools/crt-ar.cmd` and the selected Python interpreter plus an MSVC STL
+  include-root probe. This preserves one GN policy while avoiding an accidental
+  dependency on Apple `ar`, the Windows `py` launcher, or host C++ headers in
+  the CRT public surface. Each route still needs a real host GN/Ninja run.
 
 The first implementation milestone should therefore be:
 

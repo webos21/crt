@@ -39,6 +39,11 @@ int main(void) {
       !signbit(copysign(0.0, -1.0))) {
     return fail("copysign");
   }
+  if (!near_double(fma(2.0, 3.0, 0.5), 6.5) ||
+      fmaf(2.0f, 3.0f, 0.5f) != 6.5f ||
+      (double)fmal(2.0L, 3.0L, 0.5L) != 6.5) {
+    return fail("fma");
+  }
   if (fmin(2.0, -1.0) != -1.0 || fmax(2.0, -1.0) != 2.0 ||
       fmin(NAN, 7.0) != 7.0 || fmax(7.0, NAN) != 7.0) {
     return fail("fmin/fmax");
@@ -55,11 +60,29 @@ int main(void) {
       roundf(1.4f) != 1.0f || roundl(1.6L) != 2.0L) {
     return fail("round");
   }
+  if (!(nextafter(1.0, 2.0) > 1.0) || !(nextafterf(1.0f, 2.0f) > 1.0f) ||
+      !signbit(nextafter(0.0, -1.0)) || !signbit(nextafterf(0.0f, -1.0f)) ||
+      nextafterl(1.0L, 1.0L) != 1.0L) {
+    return fail("nextafter");
+  }
+  if (lrint(2.0) != 2 || lrintf(-2.0f) != -2 || lrintl(3.0L) != 3) {
+    return fail("lrint");
+  }
+  if (lround(2.5) != 3 || lroundf(-2.5f) != -3 || lroundl(1.5L) != 2 ||
+      llround(2.5) != 3 || llroundf(-2.5f) != -3 || llroundl(1.5L) != 2) {
+    return fail("lround/llround");
+  }
   if (!near_double(sqrt(4.0), 2.0) ||
       !near_double(sqrt(2.0) * sqrt(2.0), 2.0) ||
       sqrt(0.0) != 0.0 || !isnan(sqrt(-1.0)) ||
       sqrtf(9.0f) != 3.0f || sqrtl(16.0L) != 4.0L) {
     return fail("sqrt");
+  }
+  if (!near_double(cbrt(27.0), 3.0) || !near_double(cbrt(-8.0), -2.0) ||
+      !near_double((double)cbrtf(27.0f), 3.0) ||
+      !near_double((double)cbrtl(64.0L), 4.0) || cbrt(INFINITY) != INFINITY ||
+      !isnan(cbrt(NAN))) {
+    return fail("cbrt");
   }
   if (!signbit(sqrt(-0.0)) || sqrt(INFINITY) != INFINITY) {
     return fail("sqrt signed zero/inf");
@@ -130,6 +153,15 @@ int main(void) {
       !near_double((double)tanl(0.5L), tan(0.5)) || !isnan(tan(INFINITY)) ||
       !isnan(tan(NAN))) {
     return fail("tan");
+  }
+  if (!near_double(asin(0.5), 0.5235987755982989) ||
+      !near_double((double)asinf(0.5f), 0.5235987901687622) ||
+      !near_double((double)asinl(0.5L), 0.5235987755982989) ||
+      !near_double(acos(0.5), 1.0471975511965979) ||
+      !near_double((double)acosf(0.5f), 1.0471975803375244) ||
+      !near_double((double)acosl(0.5L), 1.0471975511965979) ||
+      !isnan(asin(2.0)) || !isnan(acos(2.0))) {
+    return fail("asin/acos");
   }
   if (frexp(12.0, &exponent) != 0.75 || exponent != 4 ||
       frexp(-0.0, &exponent) != 0.0 || !signbit(frexp(-0.0, &exponent)) ||

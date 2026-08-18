@@ -41,6 +41,13 @@ endif()
 
 project(crt LANGUAGES C CXX ASM)
 
+# CMake's default C++ rule writes target include paths before target compile
+# options. That reverses libc++'s required include_next relationship with our
+# Bionic-shaped C headers. Keep the C rule untouched, but place C++ flags
+# first so crt_cxx_build_flags can establish the same ordering as crt-c++.
+set(CMAKE_CXX_COMPILE_OBJECT
+  "<CMAKE_CXX_COMPILER> <DEFINES> <FLAGS> <INCLUDES> -o <OBJECT> -c <SOURCE>")
+
 if(CRT_TARGET_ARCH STREQUAL "host")
   if(CRT_TARGET_OS STREQUAL "macos" AND NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
     message(FATAL_ERROR "CRT_TARGET_OS=macos can only be used on a macOS host in the current host-build profile. Reconfigure with --preset linux-host-ninja-debug on Linux, or clear the stale build cache.")
@@ -101,7 +108,7 @@ target_compile_options(crt_build_flags INTERFACE
   -Werror
 )
 target_include_directories(crt_build_flags INTERFACE
-  "${CMAKE_SOURCE_DIR}/include"
+  "$<$<COMPILE_LANGUAGE:C>:${CMAKE_SOURCE_DIR}/include>"
 )
 if(CRT_TARGET_OS STREQUAL "macos")
   target_compile_definitions(crt_build_flags INTERFACE CRT_TARGET_OS_MACOS=1)
@@ -113,6 +120,39 @@ endif()
 
 add_library(crt_cxx_build_flags INTERFACE)
 target_link_libraries(crt_cxx_build_flags INTERFACE crt_build_flags)
+set(CRT_CXX_STANDARD_INCLUDE_DIRS)
+foreach(CRT_CXX_IMPLICIT_INCLUDE_DIR IN LISTS CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES)
+  if(CRT_CXX_IMPLICIT_INCLUDE_DIR MATCHES "(^|/)include/c[+][+](/|$)" OR
+     CRT_CXX_IMPLICIT_INCLUDE_DIR MATCHES "/c[+][+]/v1$" OR
+     CRT_CXX_IMPLICIT_INCLUDE_DIR MATCHES "(/|^)VC/Tools/MSVC/.*/include$")
+    list(APPEND CRT_CXX_STANDARD_INCLUDE_DIRS "${CRT_CXX_IMPLICIT_INCLUDE_DIR}")
+  endif()
+endforeach()
+if(NOT CRT_CXX_STANDARD_INCLUDE_DIRS)
+  message(FATAL_ERROR "CRT could not locate the Clang C++ standard-library include directory")
+endif()
+set(CRT_CXX_STANDARD_INCLUDE_FLAGS)
+foreach(CRT_CXX_STANDARD_INCLUDE_DIR IN LISTS CRT_CXX_STANDARD_INCLUDE_DIRS)
+  list(APPEND CRT_CXX_STANDARD_INCLUDE_FLAGS "-isystem${CRT_CXX_STANDARD_INCLUDE_DIR}")
+endforeach()
+execute_process(
+  COMMAND "${CMAKE_CXX_COMPILER}" -print-resource-dir
+  OUTPUT_VARIABLE CRT_CXX_RESOURCE_DIR
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_QUIET
+)
+if(CRT_CXX_RESOURCE_DIR AND EXISTS "${CRT_CXX_RESOURCE_DIR}/include")
+  list(APPEND CRT_CXX_STANDARD_INCLUDE_FLAGS "-isystem${CRT_CXX_RESOURCE_DIR}/include")
+endif()
+# libc++ C++ wrappers use include_next for their companion C headers. Keep the
+# standard headers before the Bionic-compatible C surface and make both system
+# paths, so a CMake C++ target follows tools/crt-c++'s include ordering.
+target_compile_options(crt_cxx_build_flags INTERFACE
+  $<$<COMPILE_LANGUAGE:CXX>:-nostdinc>
+  $<$<COMPILE_LANGUAGE:CXX>:-nostdinc++>
+  $<$<COMPILE_LANGUAGE:CXX>:${CRT_CXX_STANDARD_INCLUDE_FLAGS}>
+  $<$<COMPILE_LANGUAGE:CXX>:-isystem${CMAKE_SOURCE_DIR}/include>
+)
 target_compile_options(crt_cxx_build_flags INTERFACE
   $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>
   $<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>

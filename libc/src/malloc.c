@@ -234,6 +234,21 @@ void free(void* ptr) {
   crt_spin_unlock(&heap_lock);
 }
 
+size_t malloc_usable_size(const void* ptr) {
+  const block_header* header;
+  size_t size;
+
+  if (ptr == 0) {
+    return 0;
+  }
+
+  crt_spin_lock(&heap_lock);
+  header = ((const block_header*)ptr) - 1;
+  size = header->block.free ? 0 : header->block.size;
+  crt_spin_unlock(&heap_lock);
+  return size;
+}
+
 void* calloc(size_t nmemb, size_t size) {
   void* ptr;
 

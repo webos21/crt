@@ -50,6 +50,7 @@ int main(void) {
   ptrdiff_t diff = &bytes[7] - &bytes[2];
   size_t size = sizeof(bytes);
   wchar_t wc = (wchar_t)'A';
+  max_align_t aligned;
 
   if (NULL != (void*)0) {
     return fail("NULL");
@@ -62,6 +63,9 @@ int main(void) {
   }
   if (wc != (wchar_t)'A') {
     return fail("wchar_t");
+  }
+  if (sizeof(aligned) < sizeof(long double)) {
+    return fail("max_align_t");
   }
   if (offsetof(struct sample, i) <= offsetof(struct sample, c) ||
       offsetof(struct sample, tail) <= offsetof(struct sample, i)) {

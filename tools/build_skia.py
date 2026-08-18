@@ -3,6 +3,7 @@ import argparse
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -20,19 +21,57 @@ def gn_list(values):
     return "[" + ", ".join(gn_string(value) for value in values) + "]"
 
 
-def default_gn_args(root, sysroot, target_os, target_arch):
+def detect_cxx_standard_include_dirs(cxx):
+    probe = subprocess.run(
+        [cxx, "-x", "c++", "-E", "-v", "-"],
+        input="",
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    search = probe.stderr.splitlines()
+    include_dirs = []
+    in_search_list = False
+    for line in search:
+        if line.strip() == "#include <...> search starts here:":
+            in_search_list = True
+            continue
+        if in_search_list and line.strip() == "End of search list.":
+            break
+        if not in_search_list:
+            continue
+        candidate = line.strip()
+        normalized = candidate.replace("\\", "/").lower()
+        is_libcxx = "include/c++" in normalized or normalized.endswith("/c++/v1")
+        is_msvc_stl = "/vc/tools/msvc/" in normalized and normalized.endswith("/include")
+        if not is_libcxx and not is_msvc_stl:
+            continue
+        if Path(candidate).is_dir():
+            include_dirs.append(candidate)
+    return include_dirs
+
+
+def default_gn_args(root, sysroot, target_os, target_arch, cxx_include_flags):
     crt_cc = root / "tools" / "crt-cc"
     crt_cxx = root / "tools" / "crt-c++"
-    ar = shutil.which("llvm-ar") or shutil.which("ar") or "ar"
+    crt_ar = root / "tools" / ("crt-ar.cmd" if target_os == "windows" else "crt-ar")
 
     args = {
         "is_official_build": "true",
         "is_component_build": "false",
-        "skia_enable_gpu": "false",
+        "skia_enable_fontmgr_custom_empty": "true",
+        "skia_enable_ganesh": "false",
+        "skia_enable_graphite": "false",
+        "skia_enable_pdf": "false",
+        "skia_enable_skottie": "false",
+        "skia_enable_svg": "false",
+        "skia_use_fonthost_mac": "false",
+        "skia_use_perfetto": "false",
         "skia_enable_tools": "false",
         "skia_use_dawn": "false",
         "skia_use_direct3d": "false",
         "skia_use_egl": "false",
+        "skia_use_expat": "false",
         "skia_use_gl": "false",
         "skia_use_metal": "false",
         "skia_use_vulkan": "false",
@@ -40,18 +79,34 @@ def default_gn_args(root, sysroot, target_os, target_arch):
         "skia_use_freetype": "false",
         "skia_use_harfbuzz": "false",
         "skia_use_icu": "false",
-        "skia_use_libheif": "false",
-        "skia_use_libjpeg_turbo": "false",
-        "skia_use_libpng": "false",
-        "skia_use_libwebp": "false",
+        "skia_use_libavif": "false",
+        "skia_use_libjpeg_turbo_decode": "false",
+        "skia_use_libjpeg_turbo_encode": "false",
+        "skia_use_libpng_decode": "false",
+        "skia_use_libpng_encode": "false",
+        "skia_use_libwebp_decode": "false",
+        "skia_use_libwebp_encode": "false",
         "skia_use_zlib": "false",
         "cc": gn_string(str(crt_cc)),
         "cxx": gn_string(str(crt_cxx)),
-        "ar": gn_string(ar),
-        "extra_cflags": gn_list([f"-isystem{sysroot / 'include'}"]),
-        "extra_cflags_cc": gn_list(["-fno-exceptions", "-fno-rtti"]),
+        # Skia's GN archives use @response files. Apple ar does not expand
+        # those files itself, so keep that detail in the project-owned build
+        # wrapper rather than depending on a particular host LLVM install.
+        "ar": gn_string(str(crt_ar)),
+        "extra_cflags": gn_list(
+            [f"-isystem{sysroot / 'include'}"] +
+            (["-DSK_BUILD_FOR_UNIX"] if target_os == "macos" else [])
+        ),
+        "extra_cflags_cc": gn_list(cxx_include_flags + ["-fno-exceptions", "-fno-rtti"]),
         "extra_ldflags": gn_list([f"-L{sysroot / 'lib'}"]),
     }
+
+    if not cxx_include_flags:
+        print(
+            "warning: no C++ standard include directory was detected; "
+            "Skia may fail on <cstddef>/<utility>/...",
+            file=sys.stderr,
+        )
 
     if target_os == "windows":
         args["target_os"] = gn_string("win")
@@ -60,7 +115,10 @@ def default_gn_args(root, sysroot, target_os, target_arch):
         elif target_arch in ("x86_64", "amd64", "x64"):
             args["target_cpu"] = gn_string("x64")
     elif target_os == "macos":
-        args["target_os"] = gn_string("mac")
+        # This is a CRT/PAL build of Skia, not Skia's native Cocoa/CoreGraphics
+        # port. Select Skia's generic POSIX source set while the wrapper
+        # compiler still emits a macOS binary via CRT_TARGET_OS=macos.
+        args["target_os"] = gn_string("linux")
         if target_arch in ("aarch64", "arm64"):
             args["target_cpu"] = gn_string("arm64")
     elif target_os == "linux":
@@ -133,10 +191,20 @@ def main():
     env = os.environ.copy()
     env["CRT_SYSROOT"] = str(sysroot)
     env["CRT_TARGET_OS"] = args.target_os
+    if args.target_os == "windows":
+        # crt-ar.cmd needs the same interpreter CMake used to launch this
+        # driver; relying on the optional py launcher would make a configured
+        # Python installation look like a missing archiver.
+        env["CRT_HOST_PYTHON"] = sys.executable
     if args.target_arch != "host":
         env["CRT_TARGET_ARCH"] = args.target_arch
 
-    gn_args = default_gn_args(root, sysroot, args.target_os, args.target_arch)
+    host_cxx = os.environ.get("CRT_HOST_CXX") or shutil.which("clang++") or "clang++"
+    cxx_include_flags = [f"-isystem{path}" for path in detect_cxx_standard_include_dirs(host_cxx)]
+    if cxx_include_flags:
+        env["CRT_CXX_STANDARD_INCLUDE_FLAGS"] = " ".join(cxx_include_flags)
+
+    gn_args = default_gn_args(root, sysroot, args.target_os, args.target_arch, cxx_include_flags)
     args_gn = build_dir / "args.gn"
     write_args_file(args_gn, gn_args, args.gn_arg)
     run([gn, "gen", str(build_dir)], cwd=source, env=env)

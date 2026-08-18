@@ -70,6 +70,11 @@ struct lconv* localeconv(void) {
   return &c_lconv;
 }
 
+struct lconv* localeconv_l(locale_t locale) {
+  (void)locale;
+  return localeconv();
+}
+
 locale_t newlocale(int category_mask, const char* locale, locale_t base) {
   (void)base;
   if (category_mask == 0 || !supported_locale_name(locale)) {

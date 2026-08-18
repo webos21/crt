@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""Archiver wrapper for external CRT builds.
+
+Skia GN passes object lists through @response files. GNU/LLVM ar understands
+that form, while the Apple system ar does not. Expand response files here and
+then invoke the selected host archiver; this is a build-tool boundary, not a
+runtime dependency.
+"""
+
+import os
+import shlex
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+
+def expand_response_files(args):
+    expanded = []
+    for arg in args:
+        if arg.startswith("@"):
+            response = Path(arg[1:])
+            try:
+                contents = response.read_text(encoding="utf-8")
+            except OSError as error:
+                raise SystemExit(f"crt-ar: cannot read {response}: {error}")
+            if os.name == "nt":
+                response_args = [line.strip().strip('"') for line in contents.splitlines() if line.strip()]
+            else:
+                response_args = shlex.split(contents)
+            expanded.extend(expand_response_files(response_args))
+        else:
+            expanded.append(arg)
+    return expanded
+
+
+def main():
+    archiver = os.environ.get("CRT_HOST_AR")
+    if not archiver:
+        archiver = shutil.which("llvm-ar") or shutil.which("ar")
+    if not archiver:
+        raise SystemExit("crt-ar: neither CRT_HOST_AR, llvm-ar, nor ar was found")
+    subprocess.run([archiver] + expand_response_files(sys.argv[1:]), check=True)
+
+
+if __name__ == "__main__":
+    main()
