@@ -76,6 +76,32 @@ libcrtgfx/third_party/skia/
 It may include selected Skia public headers and declare helpers that connect a
 `crtgfx_surface` to an `SkSurface`/`SkCanvas` once Skia is imported.
 
+Current bridge status (2026-08-18):
+
+- `libcrtgfx/include/crtgfx/skia.h` is a C++ bridge header. When real Skia
+  headers are present, it includes Skia's normal `include/core/SkSurface.h`
+  path and exposes `crtgfx_skia_make_raster_surface()`.
+- `libcrtgfx/src/skia_bridge.cc` wraps the current BGRA8888 premultiplied
+  `crtgfx_framebuffer` as a Skia CPU raster surface via
+  `SkSurfaces::WrapPixels()`.
+- `crtgfx_skia_raster_smoke` is registered only when
+  `CRTGFX_ENABLE_SKIA=ON` and a real Skia checkout is available through
+  `CRTGFX_SKIA_ROOT`; this project deliberately does not provide fake Skia
+  headers just to make the target compile.
+- When enabled, Skia's public `include/` tree is installed into the sysroot so
+  consumers can include normal Skia headers through the same root-style include
+  path Skia source uses.
+- Skia source/build automation is intentionally separate from ordinary
+  third-party porting recipes because Skia is a core `libcrtgfx` dependency:
+  `crtgfx-skia-fetch` fetches a milestone/ref, `crtgfx-skia-configure`
+  generates GN args with `tools/crt-cc`/`tools/crt-c++`, and
+  `crtgfx-skia-build` builds and installs the CPU-raster Skia library into
+  `CRTGFX_SKIA_INSTALL_PREFIX`.
+- Default source selection is the Chrome/Skia stable milestone branch
+  `m148`. Users can override it with `CRTGFX_SKIA_VERSION`; use
+  `CRTGFX_SKIA_REF` plus `CRTGFX_SKIA_EXPECTED_COMMIT` when a fully pinned
+  reproducible checkout is required.
+
 The first implementation milestone should therefore be:
 
 1. create a tiny `crtgfx` runtime/surface API;

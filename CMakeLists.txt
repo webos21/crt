@@ -293,6 +293,12 @@ add_custom_target(sysroot
   DEPENDS c c_shared m m_shared dl dl_shared cxx cxx_shared crtgfx crtgfx_shared crtjs crtjs_shared crtmedia crtmedia_shared crt1 crt_shell_artifacts
   COMMENT "Installing CRT headers, libraries, and startup objects into ${CRT_SYSROOT}"
 )
+if(TARGET crtgfx-skia-configure)
+  add_dependencies(crtgfx-skia-configure sysroot)
+endif()
+if(TARGET crtgfx-skia-build)
+  add_dependencies(crtgfx-skia-build sysroot)
+endif()
 
 if(Python3_Interpreter_FOUND)
   # CRT_ROOTFS itself is now set earlier, right after add_subdirectory(shell)

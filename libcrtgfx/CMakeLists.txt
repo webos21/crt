@@ -3,12 +3,121 @@ set(CRTGFX_COMMON_SOURCES
   src/wayland_weston.c
 )
 
+set(CRTGFX_SKIA_VERSION "m148" CACHE STRING "Skia Chrome milestone shorthand to fetch, for example m148")
+set(CRTGFX_SKIA_REF "" CACHE STRING "Explicit Skia git ref/commit to fetch; overrides CRTGFX_SKIA_VERSION when set")
+set(CRTGFX_SKIA_REPOSITORY "https://skia.googlesource.com/skia.git" CACHE STRING "Skia git repository URL")
+set(CRTGFX_SKIA_EXPECTED_COMMIT "" CACHE STRING "Optional full Skia commit hash expected after fetch")
+option(CRTGFX_SKIA_SYNC_DEPS "Run Skia tools/git-sync-deps after fetching Skia" ON)
+set(CRTGFX_SKIA_FETCH_ROOT "${CMAKE_BINARY_DIR}/external/skia" CACHE PATH "Local Skia fetch/build root")
+set(CRTGFX_SKIA_ROOT "${CRTGFX_SKIA_FETCH_ROOT}/src" CACHE PATH "Skia checkout root for libcrtgfx")
+set(CRTGFX_SKIA_DEFAULT_BUILD_DIR "${CRTGFX_SKIA_ROOT}/out/crt-${CRT_TARGET_OS}-${CRT_EFFECTIVE_ARCH_FOR_FLAGS}")
+if(DEFINED CACHE{CRTGFX_SKIA_BUILD_DIR})
+  get_property(CRTGFX_SKIA_CACHED_BUILD_DIR CACHE CRTGFX_SKIA_BUILD_DIR PROPERTY VALUE)
+  if(CRTGFX_SKIA_CACHED_BUILD_DIR MATCHES "/external/skia/build/")
+    set(CRTGFX_SKIA_BUILD_DIR "${CRTGFX_SKIA_DEFAULT_BUILD_DIR}" CACHE PATH "Skia GN build directory" FORCE)
+  endif()
+else()
+  set(CRTGFX_SKIA_BUILD_DIR "${CRTGFX_SKIA_DEFAULT_BUILD_DIR}" CACHE PATH "Skia GN build directory")
+endif()
+set(CRTGFX_SKIA_INSTALL_PREFIX "${CRTGFX_SKIA_FETCH_ROOT}/install" CACHE PATH "Skia install prefix used by libcrtgfx")
+set(CRTGFX_SKIA_GN "" CACHE FILEPATH "Optional gn executable for Skia build")
+set(CRTGFX_SKIA_NINJA "" CACHE FILEPATH "Optional ninja executable for Skia build")
+set(CRTGFX_SKIA_EXTRA_GN_ARGS "" CACHE STRING "Semicolon-separated extra raw GN arg lines for Skia build")
+if(NOT CRTGFX_SKIA_LIBRARIES AND EXISTS "${CRTGFX_SKIA_INSTALL_PREFIX}/lib/libskia.a")
+  set(CRTGFX_SKIA_LIBRARIES "${CRTGFX_SKIA_INSTALL_PREFIX}/lib/libskia.a" CACHE STRING "Libraries needed to link Skia CPU raster support" FORCE)
+else()
+  set(CRTGFX_SKIA_LIBRARIES "" CACHE STRING "Libraries needed to link Skia CPU raster support")
+endif()
+if(EXISTS "${CRTGFX_SKIA_ROOT}/include/core/SkSurface.h" AND CRTGFX_SKIA_LIBRARIES)
+  set(CRTGFX_SKIA_AVAILABLE_DEFAULT ON)
+else()
+  set(CRTGFX_SKIA_AVAILABLE_DEFAULT OFF)
+endif()
+option(CRTGFX_ENABLE_SKIA "Build libcrtgfx Skia CPU raster bridge when Skia is available" ${CRTGFX_SKIA_AVAILABLE_DEFAULT})
+if(CRTGFX_ENABLE_SKIA AND NOT EXISTS "${CRTGFX_SKIA_ROOT}/include/core/SkSurface.h")
+  message(FATAL_ERROR "CRTGFX_ENABLE_SKIA=ON but ${CRTGFX_SKIA_ROOT}/include/core/SkSurface.h was not found")
+endif()
+if(CRTGFX_ENABLE_SKIA AND NOT CRTGFX_SKIA_LIBRARIES)
+  message(FATAL_ERROR "CRTGFX_ENABLE_SKIA=ON requires CRTGFX_SKIA_LIBRARIES. Run crtgfx-skia-build, then reconfigure, or set the library path explicitly.")
+endif()
+
 if(CRT_TARGET_OS STREQUAL "windows")
   set(CRTGFX_BACKEND_SOURCES src/arch/windows/window_win32.c)
 elseif(CRT_TARGET_OS STREQUAL "macos")
   set(CRTGFX_BACKEND_SOURCES src/arch/macos/window_cocoa.c)
 elseif(CRT_TARGET_OS STREQUAL "linux")
   set(CRTGFX_BACKEND_SOURCES src/arch/linux/window_wayland.c)
+endif()
+
+if(Python3_Interpreter_FOUND)
+  set(CRTGFX_SKIA_FETCH_ARGS)
+  if(CRTGFX_SKIA_REF)
+    list(APPEND CRTGFX_SKIA_FETCH_ARGS --ref "${CRTGFX_SKIA_REF}")
+  endif()
+  if(CRTGFX_SKIA_EXPECTED_COMMIT)
+    list(APPEND CRTGFX_SKIA_FETCH_ARGS --expected-commit "${CRTGFX_SKIA_EXPECTED_COMMIT}")
+  endif()
+  if(CRTGFX_SKIA_SYNC_DEPS)
+    list(APPEND CRTGFX_SKIA_FETCH_ARGS --sync-deps)
+  endif()
+
+  set(CRTGFX_SKIA_BUILD_ARGS)
+  foreach(CRTGFX_SKIA_EXTRA_GN_ARG IN LISTS CRTGFX_SKIA_EXTRA_GN_ARGS)
+    list(APPEND CRTGFX_SKIA_BUILD_ARGS --gn-arg "${CRTGFX_SKIA_EXTRA_GN_ARG}")
+  endforeach()
+  if(CRTGFX_SKIA_GN)
+    list(APPEND CRTGFX_SKIA_BUILD_ARGS --gn "${CRTGFX_SKIA_GN}")
+  endif()
+  if(CRTGFX_SKIA_NINJA)
+    list(APPEND CRTGFX_SKIA_BUILD_ARGS --ninja "${CRTGFX_SKIA_NINJA}")
+  endif()
+
+  add_custom_target(crtgfx-skia-fetch
+    COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/fetch_skia.py"
+      --dest "${CRTGFX_SKIA_ROOT}"
+      --repo "${CRTGFX_SKIA_REPOSITORY}"
+      --version "${CRTGFX_SKIA_VERSION}"
+      ${CRTGFX_SKIA_FETCH_ARGS}
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Fetching Skia ${CRTGFX_SKIA_VERSION} for libcrtgfx into ${CRTGFX_SKIA_ROOT}"
+    USES_TERMINAL
+  )
+
+  add_custom_target(crtgfx-skia-configure
+    COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/build_skia.py"
+      --root "${CMAKE_SOURCE_DIR}"
+      --source "${CRTGFX_SKIA_ROOT}"
+      --build-dir "${CRTGFX_SKIA_BUILD_DIR}"
+      --install-prefix "${CRTGFX_SKIA_INSTALL_PREFIX}"
+      --sysroot "${CRT_SYSROOT}"
+      --target-os "${CRT_TARGET_OS}"
+      --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}"
+      ${CRTGFX_SKIA_BUILD_ARGS}
+      --configure-only
+    DEPENDS crtgfx-skia-fetch
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Configuring Skia with the CRT toolchain"
+    USES_TERMINAL
+  )
+
+  add_custom_target(crtgfx-skia-build
+    COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/build_skia.py"
+      --root "${CMAKE_SOURCE_DIR}"
+      --source "${CRTGFX_SKIA_ROOT}"
+      --build-dir "${CRTGFX_SKIA_BUILD_DIR}"
+      --install-prefix "${CRTGFX_SKIA_INSTALL_PREFIX}"
+      --sysroot "${CRT_SYSROOT}"
+      --target-os "${CRT_TARGET_OS}"
+      --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}"
+      ${CRTGFX_SKIA_BUILD_ARGS}
+    DEPENDS crtgfx-skia-fetch
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Building Skia CPU raster with the CRT toolchain"
+    USES_TERMINAL
+  )
 endif()
 
 set(CRTGFX_CRT_STATIC_LIBS c m dl cxx)
@@ -54,6 +163,24 @@ target_include_directories(crtgfx_backend_objects PRIVATE
 set_target_properties(crtgfx_backend_objects PROPERTIES
   POSITION_INDEPENDENT_CODE ON
 )
+
+set(CRTGFX_SKIA_OBJECTS)
+if(CRTGFX_ENABLE_SKIA)
+  add_library(crtgfx_skia_objects OBJECT src/skia_bridge.cc)
+  target_link_libraries(crtgfx_skia_objects PRIVATE crt_cxx_build_flags)
+  target_include_directories(crtgfx_skia_objects PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CRTGFX_SKIA_ROOT}"
+  )
+  target_include_directories(crtgfx_skia_objects PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_SOURCE_DIR}/libc/include"
+  )
+  set_target_properties(crtgfx_skia_objects PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+  )
+  set(CRTGFX_SKIA_OBJECTS $<TARGET_OBJECTS:crtgfx_skia_objects>)
+endif()
 if(CRT_TARGET_OS STREQUAL "windows")
   target_compile_definitions(crtgfx_backend_objects PRIVATE
     WIN32_LEAN_AND_MEAN
@@ -99,11 +226,18 @@ endif()
 add_library(crtgfx STATIC
   $<TARGET_OBJECTS:crtgfx_common_objects>
   $<TARGET_OBJECTS:crtgfx_backend_objects>
+  ${CRTGFX_SKIA_OBJECTS}
 )
 target_include_directories(crtgfx PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
+if(CRTGFX_ENABLE_SKIA)
+  target_include_directories(crtgfx PUBLIC "${CRTGFX_SKIA_ROOT}")
+endif()
 target_link_libraries(crtgfx PRIVATE ${CRTGFX_CRT_STATIC_LIBS})
+if(CRTGFX_ENABLE_SKIA AND CRTGFX_SKIA_LIBRARIES)
+  target_link_libraries(crtgfx PUBLIC ${CRTGFX_SKIA_LIBRARIES})
+endif()
 if(CRT_TARGET_OS STREQUAL "windows")
   target_link_libraries(crtgfx PUBLIC
     "${CRT_WINDOWS_KERNEL32_LIB}"
@@ -121,11 +255,18 @@ set_target_properties(crtgfx PROPERTIES
 add_library(crtgfx_shared SHARED
   $<TARGET_OBJECTS:crtgfx_common_objects>
   $<TARGET_OBJECTS:crtgfx_backend_objects>
+  ${CRTGFX_SKIA_OBJECTS}
 )
 target_include_directories(crtgfx_shared PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
+if(CRTGFX_ENABLE_SKIA)
+  target_include_directories(crtgfx_shared PUBLIC "${CRTGFX_SKIA_ROOT}")
+endif()
 target_link_libraries(crtgfx_shared PRIVATE crt_build_flags ${CRTGFX_CRT_SHARED_LIBS})
+if(CRTGFX_ENABLE_SKIA AND CRTGFX_SKIA_LIBRARIES)
+  target_link_libraries(crtgfx_shared PUBLIC ${CRTGFX_SKIA_LIBRARIES})
+endif()
 if(CRT_TARGET_OS STREQUAL "windows")
   target_sources(crtgfx_shared PRIVATE $<TARGET_OBJECTS:crt_windows_dllcrt>)
   target_link_libraries(crtgfx_shared PRIVATE
@@ -158,6 +299,9 @@ install(TARGETS crtgfx crtgfx_shared
 install(DIRECTORY include/ DESTINATION include
   PATTERN ".gitkeep" EXCLUDE
 )
+if(CRTGFX_ENABLE_SKIA)
+  install(DIRECTORY "${CRTGFX_SKIA_ROOT}/include" DESTINATION include)
+endif()
 
 add_executable(crtgfx_window_smoke
   ${CRT_STARTUP_OBJECTS}
@@ -201,6 +345,52 @@ set_tests_properties(crtgfx_window_smoke_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "crtgfx_window_smoke: ok"
 )
 set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_window_smoke_runs)
+
+if(CRTGFX_ENABLE_SKIA)
+  add_executable(crtgfx_skia_raster_smoke
+    ${CRT_STARTUP_OBJECTS}
+    tests/skia_raster_smoke.cc
+    ${CRT_STARTUP_END_OBJECTS}
+  )
+  target_link_libraries(crtgfx_skia_raster_smoke PRIVATE crt_cxx_build_flags crtgfx cxx c)
+  target_include_directories(crtgfx_skia_raster_smoke PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include"
+    "${CRTGFX_SKIA_ROOT}"
+  )
+  target_link_libraries(crtgfx_skia_raster_smoke PRIVATE crt_compiler_rt_builtins)
+  target_link_options(crtgfx_skia_raster_smoke PRIVATE
+    -nostdlib
+    -nostartfiles
+    -nodefaultlibs
+  )
+  if(CRT_TARGET_OS STREQUAL "macos")
+    target_link_options(crtgfx_skia_raster_smoke PRIVATE
+      -Wl,-e,_start
+      -Wl,-dead_strip
+    )
+    target_link_libraries(crtgfx_skia_raster_smoke PRIVATE System)
+  elseif(CRT_TARGET_OS STREQUAL "linux")
+    target_link_options(crtgfx_skia_raster_smoke PRIVATE
+      -Wl,-e,_start
+      -Wl,--gc-sections
+    )
+  elseif(CRT_TARGET_OS STREQUAL "windows")
+    target_link_options(crtgfx_skia_raster_smoke PRIVATE
+      -Wl,/entry:mainCRTStartup
+      -Wl,/subsystem:console
+      -Wl,/OPT:REF
+    )
+    target_link_libraries(crtgfx_skia_raster_smoke PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  endif()
+  add_dependencies(crtgfx_skia_raster_smoke cxx c crt1 crtgfx)
+
+  add_test(NAME crtgfx_skia_raster_smoke_runs COMMAND crtgfx_skia_raster_smoke)
+  set_tests_properties(crtgfx_skia_raster_smoke_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    PASS_REGULAR_EXPRESSION "crtgfx_skia_raster_smoke: ok"
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_skia_raster_smoke_runs)
+endif()
 
 add_executable(crtgfx_window_demo
   ${CRT_STARTUP_OBJECTS}

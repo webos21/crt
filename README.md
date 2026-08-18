@@ -622,6 +622,36 @@ CMake target names are generated from the recipes at configure time. If a new
 recipe file is added, rerun the matching `cmake --preset ...` command before
 using its `port-fetch-<name>`, `port-build-<name>`, or `port-test-<name>` target.
 
+### Skia For libcrtgfx
+
+Skia is treated as a core `libcrtgfx` dependency, not as an ordinary host
+library and not as an upstream source patch. The source/build automation lives
+behind dedicated CMake targets so it can use the same CRT sysroot discipline as
+the porting recipes:
+
+```sh
+cmake --build --preset macos-host-ninja-debug --target crtgfx-skia-fetch
+cmake --build --preset macos-host-ninja-debug --target crtgfx-skia-configure
+cmake --build --preset macos-host-ninja-debug --target crtgfx-skia-build
+```
+
+The default Skia source track is the Chrome/Skia milestone `m148`. Override it
+at configure time when needed:
+
+```sh
+cmake --preset macos-host-ninja-debug -DCRTGFX_SKIA_VERSION=m149
+cmake --preset macos-host-ninja-debug \
+  -DCRTGFX_SKIA_REF=refs/heads/chrome/m148 \
+  -DCRTGFX_SKIA_EXPECTED_COMMIT=<full-commit-hash>
+```
+
+`crtgfx-skia-build` installs Skia under
+`out/<preset>/external/skia/install`. Re-run configure after that install exists
+so `CRTGFX_ENABLE_SKIA` can see the real headers and library, then rebuild and
+run the normal test workflow. The Skia bridge deliberately does not provide
+fake Skia headers; applications should include normal Skia headers through the
+CRT sysroot.
+
 ## Repository Layout
 
 ```text

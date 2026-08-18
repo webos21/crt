@@ -177,6 +177,13 @@ until the frame and input contracts are stable.
      and Cocoa policy) or keep submitted storage alive until a compositor
      release event (Linux Wayland `wl_buffer::release` policy).
 2. Connect the locked software frame to Skia CPU raster drawing.
+   - Current build glue is conditional: `crtgfx/skia.h`,
+     `src/skia_bridge.cc`, and `crtgfx_skia_raster_smoke` become active only
+     when a real Skia checkout and CRT-built Skia library are available.
+   - `crtgfx-skia-fetch`/`crtgfx-skia-configure`/`crtgfx-skia-build` provide
+     the first Skia source/build automation. The build path must use this
+     project's sysroot and `tools/crt-c++`; any failure should be treated as a
+     CRT/PAL/C++ runtime gap before patching Skia.
 3. Study Weston/wlroots/Wayland protocol sources to decide whether to import
    protocol XML/generated helpers, a small protocol library, or no code yet.
 4. Add input/event delivery across Linux Wayland, Win32, and Cocoa.
