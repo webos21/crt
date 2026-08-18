@@ -50,6 +50,7 @@ set(CRT_LIBM_SOURCES
   src/freebsd/s_logb.c
   src/freebsd/s_logbf.c
   src/freebsd/s_lrint.c
+  src/freebsd/s_lrintf.c
   src/freebsd/s_llrint.c
   src/freebsd/s_llrintf.c
   src/freebsd/s_modf.c
@@ -101,7 +102,7 @@ if(CRT_TARGET_OS STREQUAL "windows")
   target_sources(m_shared PRIVATE $<TARGET_OBJECTS:crt_windows_dllcrt>)
   target_sources(m_shared PRIVATE $<TARGET_OBJECTS:crt_windows_compiler_abi>)
 endif()
-target_link_libraries(m_shared PRIVATE crt_build_flags crt_compiler_rt_builtins)
+target_link_libraries(m_shared PRIVATE crt_build_flags crt_compiler_rt_builtins c_shared)
 target_include_directories(m_shared PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/freebsd")
 crt_configure_shared_runtime(m_shared)
 set_target_properties(m_shared PROPERTIES

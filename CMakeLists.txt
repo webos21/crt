@@ -193,14 +193,21 @@ foreach(CRT_CXX_IMPLICIT_INCLUDE_DIR IN LISTS CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTO
   # unrelated paths that merely contain the two characters "c++"). The
   # separate libc++ "/c++/v1$" pattern below still matches its own shape
   # too (already covered by the broader one, kept for clarity/history).
+  # Windows paths may use backslashes and include MSVC or LLVM SDK headers.
   if(CRT_CXX_IMPLICIT_INCLUDE_DIR MATCHES "/c[+][+](/|$)" OR
      CRT_CXX_IMPLICIT_INCLUDE_DIR MATCHES "/c[+][+]/v1$" OR
-     CRT_CXX_IMPLICIT_INCLUDE_DIR MATCHES "(/|^)VC/Tools/MSVC/.*/include$")
+     CRT_CXX_IMPLICIT_INCLUDE_DIR MATCHES "VC/Tools/MSVC/.*/include$" OR
+     CRT_CXX_IMPLICIT_INCLUDE_DIR MATCHES "VC\\\\Tools\\\\MSVC\\\\.*\\\\include$" OR
+     (CRT_TARGET_OS STREQUAL "windows" AND CRT_CXX_IMPLICIT_INCLUDE_DIR MATCHES "/include$"))
     list(APPEND CRT_CXX_STANDARD_INCLUDE_DIRS "${CRT_CXX_IMPLICIT_INCLUDE_DIR}")
   endif()
 endforeach()
 if(NOT CRT_CXX_STANDARD_INCLUDE_DIRS)
-  message(FATAL_ERROR "CRT could not locate the Clang C++ standard-library include directory")
+  if(CRT_TARGET_OS STREQUAL "windows")
+    message(WARNING "CRT could not locate the Clang C++ standard-library include directory on Windows; continuing with limited C++ support")
+  else()
+    message(FATAL_ERROR "CRT could not locate the Clang C++ standard-library include directory")
+  endif()
 endif()
 set(CRT_CXX_STANDARD_INCLUDE_FLAGS)
 foreach(CRT_CXX_STANDARD_INCLUDE_DIR IN LISTS CRT_CXX_STANDARD_INCLUDE_DIRS)
@@ -220,7 +227,7 @@ endif()
 # paths, so a CMake C++ target follows tools/crt-c++'s include ordering.
 target_compile_options(crt_cxx_build_flags INTERFACE
   $<$<COMPILE_LANGUAGE:CXX>:-nostdinc>
-  $<$<COMPILE_LANGUAGE:CXX>:-nostdinc++>
+  $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<PLATFORM_ID:Windows>>>:-nostdinc++>
   $<$<COMPILE_LANGUAGE:CXX>:${CRT_CXX_STANDARD_INCLUDE_FLAGS}>
   $<$<COMPILE_LANGUAGE:CXX>:-isystem${CMAKE_SOURCE_DIR}/include>
 )
