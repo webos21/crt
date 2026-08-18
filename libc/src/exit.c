@@ -50,12 +50,22 @@ void __crt_run_fini_array(void) __attribute__((weak));
 
 static void (*atexit_handlers[CRT_ATEXIT_MAX])(void);
 static int atexit_count;
+static void (*quick_exit_handlers[CRT_ATEXIT_MAX])(void);
+static int quick_exit_count;
 
 int atexit(void (*function)(void)) {
   if (function == 0 || atexit_count >= CRT_ATEXIT_MAX) {
     return -1;
   }
   atexit_handlers[atexit_count++] = function;
+  return 0;
+}
+
+int at_quick_exit(void (*function)(void)) {
+  if (function == 0 || quick_exit_count >= CRT_ATEXIT_MAX) {
+    return -1;
+  }
+  quick_exit_handlers[quick_exit_count++] = function;
   return 0;
 }
 
@@ -78,6 +88,14 @@ void exit(int status) {
 
 void _exit(int status) {
   __crt_sys_exit(status);
+}
+
+void quick_exit(int status) {
+  while (quick_exit_count > 0) {
+    void (*handler)(void) = quick_exit_handlers[--quick_exit_count];
+    handler();
+  }
+  _Exit(status);
 }
 
 void _Exit(int status) {

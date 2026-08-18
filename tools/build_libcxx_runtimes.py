@@ -27,6 +27,40 @@ def install_darwin_link_metadata(libcxx, install_prefix, target_os):
     shutil.copy2(source, destination)
 
 
+def install_libcxxabi_dso_handle_shim(libcxxabi):
+    shim_path = libcxxabi / "src" / "__crt_dso_handle.cpp"
+    shim_path.write_text("extern \"C\" void* __dso_handle = &__dso_handle;\n", encoding="utf-8")
+
+    cmake_file = libcxxabi / "src" / "CMakeLists.txt"
+    if not cmake_file.is_file():
+        return
+    contents = cmake_file.read_text(encoding="utf-8")
+    if "__crt_dso_handle.cpp" in contents:
+        return
+    marker = "if (LIBCXXABI_ENABLE_NEW_DELETE_DEFINITIONS)\n"
+    if marker not in contents:
+        return
+    insertion = "list(APPEND LIBCXXABI_SOURCES __crt_dso_handle.cpp)\n\n"
+    contents = contents.replace(marker, insertion + marker, 1)
+    cmake_file.write_text(contents, encoding="utf-8")
+
+
+def compiler_supports_flag(compiler, flag):
+    if compiler is None:
+        return False
+    try:
+        probe = subprocess.run(
+            [str(compiler), "-x", "c++", "-", "-fsyntax-only", flag],
+            input="int main(){return 0;}\n",
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return False
+    return probe.returncode == 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", required=True, type=Path)
@@ -50,6 +84,8 @@ def main():
         if not (source / "CMakeLists.txt").is_file():
             raise SystemExit(f"Android runtime source is missing: {source}; run crt-libcxx-fetch first")
 
+    install_libcxxabi_dso_handle_shim(libcxxabi)
+
     cmake = shutil.which("cmake") or "cmake"
     env = os.environ.copy()
     env["CRT_SYSROOT"] = str(sysroot)
@@ -66,8 +102,13 @@ def main():
     # Android's current libc++abi has a startup guard for Clang's typed
     # new/delete optimization. Disable that optimization for this standalone
     # runtime build so static initialization cannot call the guarded operator
-    # new before libc++ has initialized its dispatch state.
-    cxx_flags = "-D__BIONIC__ -fno-typed-cxx-new-delete"
+    # new before libc++ has initialized its dispatch state. Some host Clang
+    # toolchains reject the flag entirely, so only add it when the active
+    # compiler supports it.
+    cxx_flags = "-D__BIONIC__"
+    toolchain_cxx = os.environ.get("CRT_HOST_CXX") or shutil.which("clang++") or shutil.which("clang++-18") or shutil.which("c++")
+    if compiler_supports_flag(toolchain_cxx, "-fno-typed-cxx-new-delete"):
+        cxx_flags += " -fno-typed-cxx-new-delete"
     if args.target_os == "macos":
         cxx_flags = f"-U__APPLE__ {cxx_flags}"
     c_compiler = root / "tools" / "crt-cc"

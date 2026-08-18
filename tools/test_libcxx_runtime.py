@@ -3,8 +3,25 @@
 
 import argparse
 import os
+import shutil
 import subprocess
 from pathlib import Path
+
+
+def compiler_supports_flag(compiler, flag):
+    if compiler is None:
+        return False
+    try:
+        probe = subprocess.run(
+            [str(compiler), "-x", "c++", "-", "-fsyntax-only", flag],
+            input="int main(){return 0;}\n",
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return False
+    return probe.returncode == 0
 
 
 def main():
@@ -42,14 +59,18 @@ def main():
             raise SystemExit(f"CRT mksh is missing: {mksh}")
         command = [str(mksh), str(wrapper)]
 
+    host_cxx = os.environ.get("CRT_HOST_CXX") or shutil.which("clang++") or shutil.which("clang++-18") or shutil.which("c++")
+    typed_new_delete_flag = []
+    if compiler_supports_flag(host_cxx, "-fno-typed-cxx-new-delete"):
+        typed_new_delete_flag = ["-fno-typed-cxx-new-delete"]
+
     for linkage in ("static", "shared"):
         env = base_env.copy()
         env["CRT_CXX_RUNTIME_LINKAGE"] = linkage
         binary = output if linkage == "shared" else output.with_name(
             f"{output.stem}_static{output.suffix}"
         )
-        link_command = command + [
-            "-fno-typed-cxx-new-delete",
+        link_command = command + typed_new_delete_flag + [
             "-std=c++17",
             str(root / "tests" / "imported_libcxx_test.cc"),
             "-o",
