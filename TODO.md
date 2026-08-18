@@ -154,24 +154,46 @@ Current baseline, completed on Windows first and recorded in
 
 Next work order:
 
-1. ~~Repeat the same `libcrtgfx` structure on macOS and Linux~~ -- **done**
-   (Linux, then macOS 2026-08-18): both have real host adapters, not
-   stubs, each verified on real hardware/a real compositor session. See
-   `docs/libcrtgfx_wayland_plan.md`.
-2. Connect the software frame path to Skia raster drawing, keeping normal Skia
-   headers as the public 2D drawing API and keeping project-owned headers
-   focused on runtime/surface/present/event integration.
-3. Add Wayland protocol/library investigation as a separate `libcrtgfx`
-   sub-track: decide what is protocol parsing, what is compositor policy, and
-   what is host-native window/GPU adapter code. Start with documented study of
-   candidate projects before importing source.
-4. Add `libcrtjs` QuickJS import/provenance and a minimal host-independent
-   smoke: evaluate a script, expose `print`, run timers through a tiny event
-   loop, and compile/link against this CRT sysroot on all three hosts.
-5. Add the first upper-runtime PAL contracts: event-loop tick/wake, monotonic
-   timers, dynamic module path policy, and native binding loading policy.
-6. Add `libcrtmedia` FFmpeg recipe/import after the JS/gfx skeleton can accept
-   decoded frames/audio buffers.
+1. **Lock the `libcrtgfx` software frame lifecycle.**
+   - Define the meaning of `begin_frame()`/`end_frame()` around buffer
+     ownership, resize, repeated frame submission, and when a submitted buffer
+     may be reused or released.
+   - Make Linux Wayland honor real `wl_buffer::release` before freeing a
+     submitted `wl_shm` buffer. Windows/macOS already copy the submitted frame
+     into host-owned presentation storage, so they satisfy the same contract
+     through a different backend policy.
+   - Expand `crtgfx_window_smoke` from a single-frame smoke into a small
+     repeated-frame lifecycle check, including rejecting nested
+     `begin_frame()` calls.
+   - Verification rule: run the full workflow on macOS/Linux/Windows and run
+     the visible demo on each host when a real desktop/compositor is available.
+   - Current status: macOS workflow passed locally on 2026-08-18 after the
+     lifecycle/test changes; Linux Wayland backend passed C99/`-Werror`
+     syntax checking from macOS. Real Linux and Windows workflow/demo
+     verification is still required before this item moves to `HISTORY.md`.
+2. **Connect the software frame path to Skia CPU raster drawing.**
+   Keep normal Skia headers as the public 2D drawing API and keep
+   project-owned headers focused on runtime/surface/present/event integration.
+   Start with a deterministic CPU-raster `SkSurface`/`SkCanvas` smoke before
+   any GPU backend.
+3. **Run the Wayland/Weston protocol/library investigation as a separate
+   `libcrtgfx` sub-track.**
+   Decide what is protocol parsing, what is compositor policy, and what is
+   host-native window/GPU adapter code. Study Weston/wlroots/Wayland protocol
+   sources before importing code; import protocol XML/generated helpers only
+   when a tested boundary requires them.
+4. **Add input/event delivery to the `libcrtgfx` surface contract.**
+   Cover close, resize, focus, pointer, and keyboard shape across Linux
+   Wayland, Win32, and Cocoa. Keep OS-native event details behind
+   `src/arch/{linux,macos,windows}`.
+5. **Extend Skia integration beyond primitive CPU drawing.**
+   Add image/font/text staging after the CPU-raster surface smoke is stable.
+   Treat HarfBuzz/FreeType/ICU/platform-font discovery as explicit follow-up
+   dependencies, not hidden Skia side effects.
+6. **Add GPU and media handoff only after the frame/input contract is stable.**
+   Windows D3D, macOS Metal, Linux EGL/Vulkan/dmabuf, and `libcrtmedia`
+   decoded-frame/audio handoff are later optimization/integration tranches,
+   not prerequisites for the first Skia raster milestone.
 
 ## Planned
 

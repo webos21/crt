@@ -112,6 +112,9 @@ int crtgfx_weston_toplevel_begin_frame(crtgfx_window* window, crtgfx_framebuffer
   if (window == 0 || out_framebuffer == 0) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
+  if (window->toplevel.frame_pending) {
+    return CRTGFX_ERROR_INVALID_ARGUMENT;
+  }
   rc = crtgfx_weston_toplevel_get_size(window, &window->toplevel.width, &window->toplevel.height);
   if (rc != CRTGFX_OK) {
     return rc;

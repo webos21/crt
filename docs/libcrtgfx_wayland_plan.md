@@ -162,12 +162,30 @@ They should not expose:
 
 ## Immediate Plan
 
-- Keep `libcrtgfx/third_party/wayland/` empty until a specific import target is
-  chosen.
-- Add a study note summarizing candidate reference projects before vendoring
-  any code.
-- Implement the first `crtgfx` surface/frame API as a project-owned boundary.
-- Let Skia draw into that surface before adding real Wayland protocol plumbing.
+The 2026-08-18 three-host window bring-up changed the practical next step:
+`libcrtgfx` already has a project-owned Weston-style toplevel/surface boundary,
+a BGRA8888 software frame path, and real host adapters on Windows, Linux, and
+macOS. The next work should therefore keep Weston/Wayland import pressure small
+until the frame and input contracts are stable.
+
+1. Lock the software frame lifecycle first.
+   - `begin_frame()` returns a writable, caller-owned-for-the-frame CPU buffer.
+   - A second `begin_frame()` before `end_frame()` is invalid.
+   - `end_frame()` submits the frame to the host backend; after it returns, the
+     caller must not assume the submitted storage can be mutated by the host.
+   - Backends may either copy the pixels into host-owned storage (current Win32
+     and Cocoa policy) or keep submitted storage alive until a compositor
+     release event (Linux Wayland `wl_buffer::release` policy).
+2. Connect the locked software frame to Skia CPU raster drawing.
+3. Study Weston/wlroots/Wayland protocol sources to decide whether to import
+   protocol XML/generated helpers, a small protocol library, or no code yet.
+4. Add input/event delivery across Linux Wayland, Win32, and Cocoa.
+5. Add text/image/font staging once the Skia raster smoke is stable.
+6. Defer GPU texture/direct-render and media handoff until frame/input
+   semantics are stable on all three hosts.
+
+`libcrtgfx/third_party/wayland/` stays empty until a specific import target is
+chosen with license/provenance/build implications recorded.
 
 ## Linux Host Adapter (done, first cut)
 
@@ -195,11 +213,17 @@ Known scope cuts, documented in the file itself, not silent:
   window parameter at all, matching Win32's thread-global message queue, so
   it operates on a single process-wide "active window");
 - no keyboard/pointer/`wl_seat` input;
-- a presented `wl_buffer` is torn down on the *next* present rather than
-  gated on its own `wl_buffer::release` event -- correct for a single-frame
-  present, a real (currently just theoretical, not observed) tear risk for
-  a tight render loop;
 - object ids are never recycled.
+
+Implementation update (2026-08-18): presented `wl_buffer` lifetime is now gated
+by the real `wl_buffer::release` event in code. Each submitted `wl_shm` buffer
+remains mapped/open until the compositor releases it, then the backend destroys
+the `wl_buffer` object and frees its storage. This is intended to close the
+earlier tight-render-loop tear/use-after-free risk and make Linux match the
+common `begin_frame()`/`end_frame()` lifecycle contract. This specific release-
+tracking change has passed C99/`-Werror` syntax checking from macOS; it still
+needs a real Linux compositor rerun before the scope cut can be moved to
+`HISTORY.md` as fully verified.
 
 **Verified on a real GNOME/Mutter Wayland session** (not just compiled):
 `crtgfx_window_smoke` passes the full real path end to end (create, get real

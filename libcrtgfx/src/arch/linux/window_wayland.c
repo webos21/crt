@@ -30,12 +30,11 @@
  *    pointer; a real multi-window design needs a shared connection);
  *  - software (wl_shm) presentation only, no GPU/EGL path yet;
  *  - no keyboard/pointer/wl_seat input handling yet;
- *  - a presented wl_buffer is kept alive until either the next present
- *    (previous one torn down then, not wl_buffer::release-gated) or
- *    window destroy -- correct for a single-frame smoke test, a real
- *    tear/leak risk for a tight render loop (crtgfx_window_demo); proper
- *    release-tracked double buffering is real follow-up work, not done
- *    here;
+ *  - wl_buffer lifetime is release-tracked: every presented wl_shm buffer
+ *    stays mapped/open until the compositor sends wl_buffer::release, then
+ *    this backend destroys the wl_buffer object and unmaps/closes its backing
+ *    storage. This is the first real frame-lifecycle contract shared with
+ *    the higher crtgfx software-frame API;
  *  - object ids are allocated monotonically, never recycled (fine for a
  *    short-lived process, not for one that opens/closes many windows).
  *
@@ -88,6 +87,14 @@
 #define XDG_TOPLEVEL_EVENT_CONFIGURE 0u
 #define XDG_TOPLEVEL_EVENT_CLOSE 1u
 
+struct crtgfx_wl_buffer {
+  uint32_t id;
+  int fd;
+  void* data;
+  uint32_t size;
+  struct crtgfx_wl_buffer* next;
+};
+
 struct crtgfx_host_window {
   int fd;
   uint32_t next_id;
@@ -104,9 +111,7 @@ struct crtgfx_host_window {
   int have_first_configure;
   uint32_t configure_serial;
 
-  int shm_fd;
-  void* shm_data;
-  uint32_t shm_size;
+  struct crtgfx_wl_buffer* buffers;
 
   crtgfx_weston_toplevel* toplevel;
 };
@@ -208,6 +213,54 @@ static int wl_send(
   total = sizeof(header) + body_len;
   sent = sendmsg(host->fd, &msg, 0);
   return (sent == (ssize_t)total) ? CRTGFX_OK : CRTGFX_ERROR_HOST;
+}
+
+static void wl_buffer_destroy_storage(struct crtgfx_wl_buffer* buffer) {
+  if (buffer == 0) {
+    return;
+  }
+  if (buffer->data != 0) {
+    munmap(buffer->data, buffer->size);
+  }
+  if (buffer->fd >= 0) {
+    close(buffer->fd);
+  }
+  free(buffer);
+}
+
+static void wl_destroy_released_buffer(struct crtgfx_host_window* host, uint32_t id) {
+  struct crtgfx_wl_buffer** link;
+
+  if (host == 0) {
+    return;
+  }
+  link = &host->buffers;
+  while (*link != 0) {
+    struct crtgfx_wl_buffer* buffer = *link;
+
+    if (buffer->id == id) {
+      *link = buffer->next;
+      (void)wl_send(host, id, WL_BUFFER_DESTROY, 0, 0, -1);
+      wl_buffer_destroy_storage(buffer);
+      return;
+    }
+    link = &buffer->next;
+  }
+}
+
+static void wl_destroy_all_buffers(struct crtgfx_host_window* host) {
+  struct crtgfx_wl_buffer* buffer;
+
+  if (host == 0) {
+    return;
+  }
+  buffer = host->buffers;
+  host->buffers = 0;
+  while (buffer != 0) {
+    struct crtgfx_wl_buffer* next = buffer->next;
+    wl_buffer_destroy_storage(buffer);
+    buffer = next;
+  }
 }
 
 static int wl_read_exact(int fd, void* buf, size_t len, uint32_t timeout_ms) {
@@ -329,11 +382,14 @@ static void wl_dispatch_message(
     crtgfx_weston_toplevel_note_close(host->toplevel);
     return;
   }
+  if (opcode == WL_BUFFER_EVENT_RELEASE) {
+    wl_destroy_released_buffer(host, object_id);
+    return;
+  }
   /* Anything else (wl_display::error/delete_id, wl_surface::enter/leave,
-   * wl_buffer::release, ...) is intentionally ignored -- see this file's
-   * top comment on scope. The message body has already been fully
-   * consumed by wl_recv_message() either way, so ignoring it here is
-   * always safe (never leaves the stream mis-aligned). */
+   * ...) is intentionally ignored. The message body has already been fully
+   * consumed by wl_recv_message() either way, so ignoring it here is always
+   * safe (never leaves the stream mis-aligned). */
 }
 
 static int wl_pump(struct crtgfx_host_window* host, uint32_t timeout_ms) {
@@ -426,7 +482,6 @@ int crtgfx_host_window_create(const crtgfx_window_desc* desc, crtgfx_weston_topl
     return CRTGFX_ERROR_HOST;
   }
   host->fd = -1;
-  host->shm_fd = -1;
   host->toplevel = toplevel;
   host->next_id = 2;
 
@@ -581,12 +636,7 @@ void crtgfx_host_window_destroy(crtgfx_host_window* host) {
   if (crtgfx_wl_active == host) {
     crtgfx_wl_active = 0;
   }
-  if (host->shm_data != 0) {
-    munmap(host->shm_data, host->shm_size);
-  }
-  if (host->shm_fd >= 0) {
-    close(host->shm_fd);
-  }
+  wl_destroy_all_buffers(host);
   if (host->fd >= 0) {
     close(host->fd);
   }
@@ -621,6 +671,7 @@ int crtgfx_host_window_present_software(
     crtgfx_host_window* host, const void* pixels, uint32_t width, uint32_t height, uint32_t stride) {
   int memfd;
   void* mapping;
+  struct crtgfx_wl_buffer* submitted;
   uint32_t size;
   uint32_t pool_id;
   uint32_t buffer_id;
@@ -634,6 +685,7 @@ int crtgfx_host_window_present_software(
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
   size = stride * height;
+  (void)wl_pump(host, 0);
 
   memfd = memfd_create("crtgfx-shm", 0);
   if (memfd < 0) {
@@ -671,6 +723,13 @@ int crtgfx_host_window_present_software(
     close(memfd);
     return CRTGFX_ERROR_HOST;
   }
+  submitted = (struct crtgfx_wl_buffer*)calloc(1, sizeof(*submitted));
+  if (submitted == 0) {
+    wl_send(host, buffer_id, WL_BUFFER_DESTROY, 0, 0, -1);
+    munmap(mapping, size);
+    close(memfd);
+    return CRTGFX_ERROR_HOST;
+  }
   /* A buffer created through a pool stays valid after the pool itself is
    * destroyed (real protocol guarantee) -- destroy it right away so the
    * object id table doesn't grow across repeated presents. */
@@ -680,6 +739,7 @@ int crtgfx_host_window_present_software(
   off = wl_put_u32(body, off, 0);
   off = wl_put_u32(body, off, 0);
   if (wl_send(host, host->surface_id, WL_SURFACE_ATTACH, body, off, -1) != CRTGFX_OK) {
+    free(submitted);
     munmap(mapping, size);
     close(memfd);
     return CRTGFX_ERROR_HOST;
@@ -690,29 +750,24 @@ int crtgfx_host_window_present_software(
   off = wl_put_u32(body, off, width);
   off = wl_put_u32(body, off, height);
   if (wl_send(host, host->surface_id, WL_SURFACE_DAMAGE, body, off, -1) != CRTGFX_OK) {
+    free(submitted);
     munmap(mapping, size);
     close(memfd);
     return CRTGFX_ERROR_HOST;
   }
 
   if (wl_send(host, host->surface_id, WL_SURFACE_COMMIT, 0, 0, -1) != CRTGFX_OK) {
+    free(submitted);
     munmap(mapping, size);
     close(memfd);
     return CRTGFX_ERROR_HOST;
   }
 
-  /* Replace the previously-presented buffer now, not release-gated -- see
-   * this file's top comment on why this is a documented, not-fully-safe
-   * scope cut for a tight render loop (harmless for a single-frame
-   * present, which is all any current test does). */
-  if (host->shm_data != 0) {
-    munmap(host->shm_data, host->shm_size);
-  }
-  if (host->shm_fd >= 0) {
-    close(host->shm_fd);
-  }
-  host->shm_fd = memfd;
-  host->shm_data = mapping;
-  host->shm_size = size;
+  submitted->id = buffer_id;
+  submitted->fd = memfd;
+  submitted->data = mapping;
+  submitted->size = size;
+  submitted->next = host->buffers;
+  host->buffers = submitted;
   return CRTGFX_OK;
 }

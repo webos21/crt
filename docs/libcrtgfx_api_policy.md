@@ -85,6 +85,23 @@ The first implementation milestone should therefore be:
 5. add a smoke that obtains an `SkCanvas` from a `crtgfx` surface and draws a
    deterministic 2D frame.
 
+## Software Frame Contract
+
+Before Skia is imported, the project-owned software frame path is the stable
+boundary every host must obey:
+
+- `crtgfx_window_begin_frame()` returns one writable BGRA8888 premultiplied
+  framebuffer for the current frame.
+- Nested `begin_frame()` calls are invalid; callers must either submit with
+  `crtgfx_window_end_frame()` or destroy the window.
+- `crtgfx_window_end_frame()` transfers the rendered frame to the host
+  presentation backend. After it returns, callers should treat the submitted
+  contents as no longer theirs to mutate.
+- A backend may copy pixels immediately into host-owned storage (current Win32
+  and Cocoa policy) or retain submitted storage until the real compositor
+  releases it (current Linux Wayland `wl_buffer::release` policy).
+- This is the buffer/lifetime contract Skia CPU raster will attach to first.
+
 ## Open Questions
 
 - Whether `crtgfx` should offer a C-only facade for non-C++ consumers later.
