@@ -536,6 +536,10 @@ time_t mktime(struct tm* tm) {
   return result;
 }
 
+double difftime(time_t time1, time_t time0) {
+  return (double)time1 - (double)time0;
+}
+
 size_t strftime(char* s, size_t max, const char* format, const struct tm* tm) {
   static const char* const weekdays_full[] = {"Sunday", "Monday", "Tuesday", "Wednesday",
                                               "Thursday", "Friday", "Saturday"};

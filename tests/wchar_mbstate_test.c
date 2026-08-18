@@ -157,6 +157,13 @@ int main(void) {
       wcswidth(L"abc", 16) != 3) {
     return fail("wide collation width");
   }
+  {
+    struct tm epoch_tm = {0, 0, 0, 1, 0, 70, 4, 0, 0};
+    if (wcsftime(buffer, 16, L"%Y-%m-%d", &epoch_tm) != 10 ||
+        wcscmp(buffer, L"1970-01-01") != 0) {
+      return fail("wcsftime");
+    }
+  }
   if (wcstol(L"123x", &end, 10) != 123 || end == 0 || *end != L'x' ||
       wcstoul(L"77z", &end, 8) != 63 || *end != L'z' ||
       wcstoll(L"-5q", &end, 10) != -5 || *end != L'q' ||

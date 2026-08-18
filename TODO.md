@@ -204,15 +204,21 @@ Next work order:
      Android's paired libc++, libc++abi, and libunwind sources under the active
      preset. Build them as one CRT static/shared runtime set and replace the
      small Bionic-shaped bootstrap only after standard-library and Skia
-     link/run tests pass on all three hosts.
+     link/run tests pass on all three hosts. `crt-libcxx-configure`,
+     `crt-libcxx-build`, and `crt-libcxx-sysroot` now provide the staged CRT
+     build/deployment path; `CRT_USE_IMPORTED_LIBCXX=ON` remains intentionally
+     disabled until that complete runtime set is proven.
    - First real macOS libc++ `cxx` compile was run against Android main
      (`4f4a65c` libc++, `6571517` libc++abi, `ec57b05` libunwind). It exposed
      the next CRT work honestly: finish the Bionic/FreeBSD C99 libm family
      (`erf*`, `erfc*`, `exp2*`, `fdim*`, `hypot*`, `ilogb*`, `lgamma*`, and
      remaining siblings), configure libc++ for the CRT pthread personality,
      and disable libc++'s pre-C++14 `gets` import rather than reintroducing
-     that removed unsafe API. macOS-only `Availability.h` is likewise an
-     external-build configuration issue, not a CRT public header.
+     that removed unsafe API. The CRT pthread/C++14 configuration and public
+     locale/time/wchar declarations are now in place; the first current build
+     gate is the Bionic/FreeBSD `erf*`/`erfc*`/`exp2*`/`fdim*`/`hypot*`/
+     `ilogb*`/`lgamma*` libm tranche. macOS-only `Availability.h` is likewise
+     an external-build configuration issue, not a CRT public header.
 3. **Run the Wayland/Weston protocol/library investigation as a separate
    `libcrtgfx` sub-track.**
    Decide what is protocol parsing, what is compositor policy, and what is

@@ -92,6 +92,9 @@ int main(void) {
       tm_epoch.tm_wday != 4 || tm_epoch.tm_yday != 0 || tm_epoch.tm_isdst != 0) {
     return fail("gmtime epoch");
   }
+  if (difftime(leap_day, epoch) != 951782400.0 || difftime(epoch, leap_day) != -951782400.0) {
+    return fail("difftime");
+  }
   if (gmtime(&leap_day) == 0 ||
       gmtime_r(&leap_day, &tm_leap) != &tm_leap ||
       tm_leap.tm_year != 100 || tm_leap.tm_mon != 1 || tm_leap.tm_mday != 29 ||

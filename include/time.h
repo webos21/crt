@@ -72,6 +72,7 @@ char* asctime_r(const struct tm* tm, char* buf);
 char* ctime(const time_t* timep);
 char* ctime_r(const time_t* timep, char* buf);
 time_t mktime(struct tm* tm);
+double difftime(time_t time1, time_t time0);
 size_t strftime(char* s, size_t max, const char* format, const struct tm* tm);
 char* strptime(const char* buf, const char* format, struct tm* tm);
 void tzset(void);

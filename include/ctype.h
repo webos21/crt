@@ -31,6 +31,8 @@
 #ifndef CRT_CTYPE_H
 #define CRT_CTYPE_H
 
+#include <locale.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -62,6 +64,10 @@ int isxdigit(int ch);
 int toascii(int ch);
 int tolower(int ch);
 int toupper(int ch);
+int isdigit_l(int ch, locale_t locale);
+int isxdigit_l(int ch, locale_t locale);
+int toupper_l(int ch, locale_t locale);
+int tolower_l(int ch, locale_t locale);
 
 #ifdef __cplusplus
 }

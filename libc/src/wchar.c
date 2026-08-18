@@ -261,6 +261,44 @@ size_t wcstombs(char* dst, const wchar_t* src, size_t len) {
   return wcsrtombs(dst, &in, len, 0);
 }
 
+size_t wcsftime(wchar_t* s, size_t max, const wchar_t* format, const struct tm* tm) {
+  char* narrow_format;
+  char* narrow_result;
+  const wchar_t* format_source;
+  const char* result_source;
+  size_t format_length;
+  size_t result_capacity;
+  size_t result_length;
+
+  if (s == 0 || format == 0 || tm == 0 || max == 0) return 0;
+  format_source = format;
+  format_length = wcsrtombs(0, &format_source, 0, 0);
+  if (format_length == (size_t)-1) return 0;
+  narrow_format = (char*)malloc(format_length + 1);
+  if (narrow_format == 0) return 0;
+  format_source = format;
+  if (wcsrtombs(narrow_format, &format_source, format_length + 1, 0) == (size_t)-1) {
+    free(narrow_format);
+    return 0;
+  }
+  result_capacity = max * MB_CUR_MAX;
+  narrow_result = (char*)malloc(result_capacity);
+  if (narrow_result == 0) {
+    free(narrow_format);
+    return 0;
+  }
+  result_length = strftime(narrow_result, result_capacity, narrow_format, tm);
+  free(narrow_format);
+  if (result_length == 0) {
+    free(narrow_result);
+    return 0;
+  }
+  result_source = narrow_result;
+  result_length = mbsrtowcs(s, &result_source, max, 0);
+  free(narrow_result);
+  return result_length == (size_t)-1 || result_source != 0 ? 0 : result_length;
+}
+
 int mblen(const char* s, size_t n) {
   size_t result;
 

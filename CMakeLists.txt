@@ -404,11 +404,17 @@ add_custom_target(sysroot
   DEPENDS c c_shared m m_shared dl dl_shared cxx cxx_shared crtgfx crtgfx_shared crtjs crtjs_shared crtmedia crtmedia_shared crt1 crt_shell_artifacts
   COMMENT "Installing CRT headers, libraries, and startup objects into ${CRT_SYSROOT}"
 )
+if(TARGET crt-libcxx-configure)
+  add_dependencies(crt-libcxx-configure sysroot)
+endif()
 if(TARGET crtgfx-skia-configure)
   add_dependencies(crtgfx-skia-configure sysroot)
 endif()
 if(TARGET crtgfx-skia-build)
   add_dependencies(crtgfx-skia-build sysroot)
+  if(CRT_USE_IMPORTED_LIBCXX)
+    add_dependencies(crtgfx-skia-build crt-libcxx-sysroot)
+  endif()
 endif()
 
 if(Python3_Interpreter_FOUND)
@@ -428,6 +434,16 @@ if(Python3_Interpreter_FOUND)
   else()
     set(CRT_ROOTFS_ALL_KEYWORD)
   endif()
+  set(CRT_ROOTFS_CXX_LIBRARY "$<TARGET_FILE:cxx_shared>")
+  if(CRT_USE_IMPORTED_LIBCXX)
+    if(CRT_TARGET_OS STREQUAL "windows")
+      set(CRT_ROOTFS_CXX_LIBRARY "${CRT_SYSROOT}/lib/c++.dll")
+    elseif(CRT_TARGET_OS STREQUAL "macos")
+      set(CRT_ROOTFS_CXX_LIBRARY "${CRT_SYSROOT}/lib/libc++.dylib")
+    else()
+      set(CRT_ROOTFS_CXX_LIBRARY "${CRT_SYSROOT}/lib/libc++.so")
+    endif()
+  endif()
   add_custom_target(rootfs ${CRT_ROOTFS_ALL_KEYWORD}
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
       "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_rootfs.py"
@@ -441,7 +457,7 @@ if(Python3_Interpreter_FOUND)
       --runtime-library "$<TARGET_FILE:c_shared>"
       --runtime-library "$<TARGET_FILE:m_shared>"
       --runtime-library "$<TARGET_FILE:dl_shared>"
-      --runtime-library "$<TARGET_FILE:cxx_shared>"
+      --runtime-library "${CRT_ROOTFS_CXX_LIBRARY}"
       --runtime-library "$<TARGET_FILE:crtgfx_shared>"
       --runtime-library "$<TARGET_FILE:crtjs_shared>"
       --runtime-library "$<TARGET_FILE:crtmedia_shared>"
@@ -450,6 +466,9 @@ if(Python3_Interpreter_FOUND)
     COMMENT "Creating Android-like CRT rootfs at ${CRT_ROOTFS}"
     USES_TERMINAL
   )
+  if(CRT_USE_IMPORTED_LIBCXX)
+    add_dependencies(rootfs crt-libcxx-sysroot)
+  endif()
 
   get_filename_component(CRT_BUILD_PRESET_NAME "${CMAKE_BINARY_DIR}" NAME)
   set(CRT_PORT_TEST_ROOT "${CMAKE_BINARY_DIR}/port-tests")

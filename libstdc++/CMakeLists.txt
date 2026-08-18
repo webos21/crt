@@ -54,6 +54,9 @@ install(TARGETS cxx cxx_shared
 # static-and-shared runtime set.
 set(CRT_LIBCXX_ANDROID_REF "refs/heads/main" CACHE STRING "Android ref shared by libc++, libc++abi, and libunwind")
 set(CRT_LIBCXX_FETCH_ROOT "${CMAKE_BINARY_DIR}/external/llvm-runtimes" CACHE PATH "Android LLVM runtime source root")
+set(CRT_LIBCXX_BUILD_ROOT "${CRT_LIBCXX_FETCH_ROOT}/build" CACHE PATH "Android libc++ CMake build root")
+set(CRT_LIBCXX_INSTALL_PREFIX "${CRT_LIBCXX_FETCH_ROOT}/install" CACHE PATH "Android libc++ staged install prefix")
+option(CRT_USE_IMPORTED_LIBCXX "Use a successfully staged Android libc++ runtime for dependent external builds" OFF)
 if(Python3_Interpreter_FOUND)
   add_custom_target(crt-libcxx-fetch
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
@@ -61,5 +64,41 @@ if(Python3_Interpreter_FOUND)
       --root "${CRT_LIBCXX_FETCH_ROOT}"
       --ref "${CRT_LIBCXX_ANDROID_REF}"
     COMMENT "Fetching Android libc++, libc++abi, and libunwind sources"
+  )
+  add_custom_target(crt-libcxx-configure
+    COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/build_libcxx_runtimes.py"
+      --root "${CMAKE_SOURCE_DIR}"
+      --source-root "${CRT_LIBCXX_FETCH_ROOT}"
+      --build-root "${CRT_LIBCXX_BUILD_ROOT}"
+      --install-prefix "${CRT_LIBCXX_INSTALL_PREFIX}"
+      --sysroot "${CRT_SYSROOT}"
+      --target-os "${CRT_TARGET_OS}"
+      --phase configure
+    DEPENDS crt-libcxx-fetch
+    COMMENT "Configuring Android libc++ and libc++abi through the CRT toolchain"
+    USES_TERMINAL
+  )
+  add_custom_target(crt-libcxx-build
+    COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/build_libcxx_runtimes.py"
+      --root "${CMAKE_SOURCE_DIR}"
+      --source-root "${CRT_LIBCXX_FETCH_ROOT}"
+      --build-root "${CRT_LIBCXX_BUILD_ROOT}"
+      --install-prefix "${CRT_LIBCXX_INSTALL_PREFIX}"
+      --sysroot "${CRT_SYSROOT}"
+      --target-os "${CRT_TARGET_OS}"
+      --phase build
+    DEPENDS crt-libcxx-configure
+    COMMENT "Building Android libc++ and libc++abi through the CRT toolchain"
+    USES_TERMINAL
+  )
+  add_custom_target(crt-libcxx-sysroot
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/install_libcxx_runtimes.py"
+      --install-prefix "${CRT_LIBCXX_INSTALL_PREFIX}"
+      --sysroot "${CRT_SYSROOT}"
+    DEPENDS crt-libcxx-build
+    COMMENT "Staging Android libc++ runtime into the CRT sysroot"
+    USES_TERMINAL
   )
 endif()

@@ -201,6 +201,24 @@ at one configurable `CRT_LIBCXX_ANDROID_REF` (default `refs/heads/main`) into
 `out/<preset>/external/llvm-runtimes/`. The project-owned metadata is under
 `libstdc++/third_party/`; no upstream source is committed there.
 
+The CMake targets are deliberately staged:
+
+```sh
+cmake --build --preset <host-preset> --target crt-libcxx-fetch
+cmake --build --preset <host-preset> --target crt-libcxx-configure
+cmake --build --preset <host-preset> --target crt-libcxx-build
+cmake --build --preset <host-preset> --target crt-libcxx-sysroot
+```
+
+`crt-libcxx-configure` and `crt-libcxx-build` always use `tools/crt-cc` and
+`tools/crt-c++`, with exceptions/RTTI enabled only for the imported runtime.
+The final target stages headers and runtime libraries into the active sysroot.
+It is intentionally separate from the normal `sysroot` target until the full
+libc++/libc++abi/libunwind static-and-shared set passes on every host. Set
+`CRT_USE_IMPORTED_LIBCXX=ON` only after that gate: it makes `rootfs` and the
+Skia external build depend on the staged runtime rather than the bootstrap
+`cxx_shared` artifact.
+
 The first import gate is source provenance and compiler mode. `tools/crt-c++`
 now retains the bootstrap default of `-fno-exceptions -fno-rtti`, but an
 external runtime build may explicitly set `CRT_CXX_ENABLE_EXCEPTIONS=1` and
@@ -210,8 +228,17 @@ standard-library and Skia link/run tests pass on Linux, macOS, and Windows.
 
 The first actual Android-main libc++ compile was performed on macOS against
 the CRT sysroot. It validated the source/compiler boundary and converted the
-next work into an explicit compatibility list: complete the Bionic/FreeBSD C99
-libm functions libc++ imports, present the CRT pthread personality to libc++'s
-configuration, and configure out its legacy `gets` import. Do not solve the
-last point by reviving `gets`, and do not add macOS `Availability.h` as a
-Bionic public header; both are external-build adapter policy.
+next work into an explicit compatibility list. The `crt-libcxx-configure`
+target now passes the CRT pthread personality and C++14 dialect, so the first
+actual compile boundary is the missing Bionic/FreeBSD C99 libm family:
+`erf*`, `erfc*`, `exp2*`, `fdim*`, `hypot*`, `ilogb*`, and `lgamma*` (with
+their required msun dependency sources). Locale-aware conversion/ctype APIs,
+`difftime`, and `wcsftime` are now exposed through the normal public CRT
+headers rather than only through `xlocale.h`.
+
+The staged runtime must not replace the bootstrap `libc++` yet: Android
+`libunwind` is Soong/Android.mk-driven rather than a standalone CMake project,
+and libc++abi/libunwind still need a project-owned CMake adapter and successful
+static/shared link-run coverage on all three hosts. Do not revive `gets`, and
+do not add macOS `Availability.h` as a Bionic public header; both are
+external-build adapter policy.

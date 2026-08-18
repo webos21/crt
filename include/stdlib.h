@@ -2,6 +2,7 @@
 #define CRT_STDLIB_H
 
 #include <stddef.h>
+#include <locale.h>
 
 #define MB_CUR_MAX 4
 #define EXIT_FAILURE 1
@@ -59,6 +60,11 @@ long strtol(const char* nptr, char** endptr, int base);
 unsigned long strtoul(const char* nptr, char** endptr, int base);
 long long strtoll(const char* nptr, char** endptr, int base);
 unsigned long long strtoull(const char* nptr, char** endptr, int base);
+float strtof_l(const char* nptr, char** endptr, locale_t locale);
+double strtod_l(const char* nptr, char** endptr, locale_t locale);
+long double strtold_l(const char* nptr, char** endptr, locale_t locale);
+long long strtoll_l(const char* nptr, char** endptr, int base, locale_t locale);
+unsigned long long strtoull_l(const char* nptr, char** endptr, int base, locale_t locale);
 void qsort(void* base, size_t nmemb, size_t size, int (*compar)(const void*, const void*));
 void* bsearch(
     const void* key,

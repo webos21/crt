@@ -36,6 +36,7 @@ size_t wcsrtombs(char* dst, const wchar_t** src, size_t len, mbstate_t* ps);
 size_t wcsnrtombs(char* dst, const wchar_t** src, size_t src_len, size_t dst_len, mbstate_t* ps);
 size_t mbstowcs(wchar_t* dst, const char* src, size_t len);
 size_t wcstombs(char* dst, const wchar_t* src, size_t len);
+size_t wcsftime(wchar_t* s, size_t max, const wchar_t* format, const struct tm* tm);
 int mblen(const char* s, size_t n);
 int mbtowc(wchar_t* pwc, const char* s, size_t n);
 int wctomb(char* s, wchar_t wc);
