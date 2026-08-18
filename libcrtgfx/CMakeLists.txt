@@ -8,7 +8,7 @@ if(CRT_TARGET_OS STREQUAL "windows")
 elseif(CRT_TARGET_OS STREQUAL "macos")
   set(CRTGFX_BACKEND_SOURCES src/arch/macos/window_stub.c)
 elseif(CRT_TARGET_OS STREQUAL "linux")
-  set(CRTGFX_BACKEND_SOURCES src/arch/linux/window_stub.c)
+  set(CRTGFX_BACKEND_SOURCES src/arch/linux/window_wayland.c)
 endif()
 
 set(CRTGFX_CRT_STATIC_LIBS c m dl cxx)
@@ -28,8 +28,23 @@ set_target_properties(crtgfx_common_objects PROPERTIES
 
 # Host backends are intentionally outside crt_build_flags: this is the narrow
 # layer allowed to speak native window/GPU APIs while the common runtime above
-# stays on this project's CRT surface.
+# stays on this project's CRT surface. Windows' own backend takes this
+# literally (raw dllimport declarations, no <windows.h>, no dependency on
+# this project's own headers at all beyond compiler-builtin <stddef.h>/
+# <stdint.h>). Linux's Wayland backend is different in kind, not degree: it
+# speaks this project's own POSIX/Bionic-shaped surface (memfd_create(),
+# sendmsg()/SCM_RIGHTS, mmap(), poll(), <sys/socket.h>/<sys/un.h>), the same
+# as every other CRT/PAL source file, not a foreign host SDK -- so it needs
+# crt_build_flags applied for the exact same reason libc/src/socket.c does:
+# without it, plain #include <sys/socket.h> silently falls through to the
+# host's own real glibc header/ABI instead of this project's, compiling
+# against the wrong struct layouts and linking against symbols not actually
+# present in the final -nostdlib/-nodefaultlibs executable at all. Scoped to
+# Linux only so Windows/macOS keep the original no-flags freedom.
 add_library(crtgfx_backend_objects OBJECT ${CRTGFX_BACKEND_SOURCES})
+if(CRT_TARGET_OS STREQUAL "linux")
+  target_link_libraries(crtgfx_backend_objects PRIVATE crt_build_flags)
+endif()
 target_include_directories(crtgfx_backend_objects PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )

@@ -24,7 +24,16 @@ int main(void) {
   desc.flags = 0;
 
   rc = crtgfx_window_create(&desc, &window);
-#if defined(CRT_TARGET_OS_WINDOWS)
+  if (rc == CRTGFX_ERROR_UNSUPPORTED) {
+    /* No usable host backend in this environment (e.g. headless Linux
+     * CI with no Wayland compositor reachable) -- an environment
+     * limitation, not a bug, matching how this project's other
+     * environment-dependent tests (tests/termios_echo_roundtrip_test.c,
+     * ...) skip rather than fail. Any other non-CRTGFX_OK result below is
+     * a real failure once a host backend claims to be usable at all. */
+    puts("crtgfx_window_smoke: ok (unsupported)");
+    return 0;
+  }
   if (rc != CRTGFX_OK) {
     return fail("create", rc);
   }
@@ -70,11 +79,4 @@ int main(void) {
   crtgfx_window_destroy(window);
   puts("crtgfx_window_smoke: ok");
   return 0;
-#else
-  if (rc != CRTGFX_ERROR_UNSUPPORTED) {
-    return fail("expected unsupported backend", rc);
-  }
-  puts("crtgfx_window_smoke: ok (unsupported)");
-  return 0;
-#endif
 }

@@ -8,6 +8,92 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-08-18
+
+- **Implemented a real Linux `libcrtgfx` host window backend, replacing the
+  `CRTGFX_ERROR_UNSUPPORTED` stub.** Reported: `crtgfx_window_smoke_test`
+  failed to even compile on Linux (`-Werror -Wunused-variable` on locals
+  the test's Windows-only real-path branch used but the Linux/macOS
+  `#else` stub branch never touched) -- fixed as part of the same change
+  by giving Linux a real backend instead of just papering over the
+  compile error, matching the ask directly ("linux에도 gfx 구현을 하도록
+  하자").
+
+  `libcrtgfx/src/arch/linux/window_wayland.c` (new, replacing
+  `window_stub.c`) is a hand-rolled Wayland client -- no
+  `libwayland-client` dependency, matching `window_win32.c`'s own
+  no-host-SDK-headers style -- speaking the real core `wl_display`/
+  `wl_registry`/`wl_compositor`/`wl_shm`/`wl_surface` protocol plus the
+  stable `xdg_wm_base`/`xdg_surface`/`xdg_toplevel` shell extension
+  directly over the `$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY` Unix socket.
+  Every opcode and argument layout was taken directly from the real
+  upstream `wayland.xml`/`xdg-shell.xml` protocol definitions (fetched
+  and cross-checked, not guessed) -- a wrong one is a hard compositor-side
+  protocol error, not a soft failure. Software presentation only
+  (`wl_shm`), matching the Windows GDI `StretchDIBits` path: a shared
+  memory buffer via `memfd_create()` (this project's own, already built
+  with exactly this consumer in mind -- see its own doc comment) +
+  `mmap()`, handed to the compositor as a `wl_shm_pool`/`wl_buffer` via
+  `sendmsg()`/`SCM_RIGHTS` fd-passing (also this project's own, already
+  implemented). `CRTGFX_PIXEL_FORMAT_BGRA8888_PREMULTIPLIED` maps exactly
+  onto `WL_SHM_FORMAT_ARGB8888`'s real in-memory byte order, no
+  conversion needed.
+
+  Needed one build-system fix along the way: `crtgfx_backend_objects` is
+  deliberately compiled *outside* `crt_build_flags` (`-nostdinc`/this
+  project's own `-isystem` sysroot include), by design, so `window_win32.c`
+  can freely declare raw Win32 API surface without this project's own
+  headers getting in the way -- but the new Linux file needs the *opposite*:
+  it speaks this project's own POSIX/Bionic-shaped surface (`memfd_create()`,
+  `sendmsg()`/`SCM_RIGHTS`, `<sys/socket.h>`/`<sys/un.h>`, `mmap()`,
+  `poll()`), the same as every other CRT/PAL source file, not a foreign
+  host SDK. Without `crt_build_flags`, `#include <sys/socket.h>` silently
+  fell through to the host's own real glibc header instead of this
+  project's -- caught immediately as `memfd_create`/`ftruncate` "implicit
+  function declaration" errors once the host header path was resolved (a
+  real ABI-mismatch risk if it had silently "worked": the final
+  `-nostdlib`/`-nodefaultlibs` executable only ever links this project's
+  own `libc`, not host glibc, so even successfully-compiled host-header
+  declarations would have failed to link, or worse, linked against
+  structurally-incompatible ABI if the symbol happened to exist under the
+  same name). Fixed by attaching `crt_build_flags` to
+  `crtgfx_backend_objects`, scoped to Linux only so Windows/macOS keep
+  their original host-SDK freedom unchanged.
+
+  Also unified `tests/window_smoke_test.c`'s two separate code paths (a
+  Windows-only "exercise everything" branch and an everyone-else
+  "just check for CRTGFX_ERROR_UNSUPPORTED" branch, which is what left
+  the unused Linux/macOS locals from the original report) into one: any
+  OS may now return `CRTGFX_ERROR_UNSUPPORTED` as a legitimate "no usable
+  backend in this environment" skip (matching how this project's other
+  environment-dependent tests, e.g. `termios_echo_roundtrip_test.c`,
+  already skip rather than fail), but once `crtgfx_window_create()`
+  reports success on *any* host, the full real path (get real size, draw,
+  present, pump events, destroy) is required to work, not just tolerated.
+
+  **Verified on a real GNOME/Mutter Wayland session, not just compiled**:
+  `crtgfx_window_smoke` passes the complete real path end to end,
+  including a real compositor-negotiated `xdg_surface::configure`/
+  `ack_configure` handshake and a real `wl_shm` buffer commit;
+  `crtgfx_window_demo` ran continuously for several seconds (hundreds of
+  present cycles) with a stable open-fd count (`/proc/<pid>/fd` checked
+  directly -- no leak from the per-frame `memfd_create()`/`wl_shm_pool`/
+  `wl_buffer` churn) and no crash or compositor-initiated connection
+  kill (which is exactly what a real protocol error would have caused,
+  immediately). Graceful `CRTGFX_ERROR_UNSUPPORTED` fallback confirmed
+  directly both with `$WAYLAND_DISPLAY`/`$XDG_RUNTIME_DIR` unset
+  (the headless-CI shape) and pointed at a nonexistent socket path, so
+  CI keeps passing exactly as before. Full `ctest` green throughout
+  (grew to 103/103 with `crtgfx_window_smoke_runs` now exercising the
+  real path instead of the stub). Not yet exercised on a non-GNOME/Mutter
+  compositor (a wlroots-based one like Sway, or KDE's KWin) -- expected
+  to behave the same (universal core-protocol + stable-xdg-shell only,
+  nothing GNOME-specific used), but not independently confirmed. See
+  `docs/libcrtgfx_wayland_plan.md`'s new "Linux Host Adapter" section for
+  the full design writeup and documented scope cuts (single window/
+  connection, no input, buffer teardown not `wl_buffer::release`-gated,
+  object ids never recycled).
+
 ## 2026-08-17
 
 - **Started the upper-runtime stack as first-class CRT artifacts and brought

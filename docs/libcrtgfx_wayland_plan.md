@@ -168,3 +168,47 @@ They should not expose:
   any code.
 - Implement the first `crtgfx` surface/frame API as a project-owned boundary.
 - Let Skia draw into that surface before adding real Wayland protocol plumbing.
+
+## Linux Host Adapter (done, first cut)
+
+`libcrtgfx/src/arch/linux/window_wayland.c` implements the "start with the
+simplest available Wayland/DRM/EGL/Vulkan/OpenGL path" step from the Import
+Strategy above, choosing plain core-protocol Wayland + `xdg-shell` over a
+compositor library import (step 6 stays deferred) or DRM/EGL/Vulkan (a later,
+GPU-path milestone). Hand-rolled wire protocol rather than linking
+`libwayland-client`, matching the win32 adapter's own no-host-SDK-headers
+style (`window_win32.c` never includes `<windows.h>` either) -- opcodes and
+argument layouts were taken directly from the real upstream `wayland.xml`/
+`xdg-shell.xml`, not guessed.
+
+Covers: connect, `wl_registry` global enumeration + bind (`wl_compositor`/
+`wl_shm`/`xdg_wm_base`), `wl_surface`/`xdg_surface`/`xdg_toplevel` creation,
+the `xdg_surface::configure`/`ack_configure` handshake, `xdg_wm_base::ping`/
+`pong`, `xdg_toplevel::close`, and `wl_shm`-backed software presentation
+(`memfd_create()` + `mmap()` + `wl_shm_pool`/`wl_buffer`, matching the
+BGRA8888-premultiplied `crtgfx_framebuffer` contract against
+`WL_SHM_FORMAT_ARGB8888`, the same in-memory byte order).
+
+Known scope cuts, documented in the file itself, not silent:
+- one Wayland connection per window, no shared/global display object across
+  multiple simultaneous windows yet (`crtgfx_host_window_dispatch()` has no
+  window parameter at all, matching Win32's thread-global message queue, so
+  it operates on a single process-wide "active window");
+- no keyboard/pointer/`wl_seat` input;
+- a presented `wl_buffer` is torn down on the *next* present rather than
+  gated on its own `wl_buffer::release` event -- correct for a single-frame
+  present, a real (currently just theoretical, not observed) tear risk for
+  a tight render loop;
+- object ids are never recycled.
+
+**Verified on a real GNOME/Mutter Wayland session** (not just compiled):
+`crtgfx_window_smoke` passes the full real path end to end (create, get real
+compositor-assigned size, draw, present, pump, destroy); `crtgfx_window_demo`
+ran continuously for multiple seconds/hundreds of frames with a stable open-fd
+count (no leak) and no crash or compositor-side protocol kill; graceful
+`CRTGFX_ERROR_UNSUPPORTED` fallback confirmed both with `$WAYLAND_DISPLAY`/
+`$XDG_RUNTIME_DIR` unset (headless-CI shape) and pointed at a nonexistent
+socket. Full `ctest` stays green throughout. Not yet exercised on a
+non-GNOME/Mutter compositor (wlroots-based ones like Sway, or KDE's
+KWin) -- the protocol used here is universal core+stable-xdg-shell, so it
+should behave the same, but that is not independently confirmed yet.
