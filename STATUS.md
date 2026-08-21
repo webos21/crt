@@ -70,9 +70,11 @@ in those two win.
   session); reasoned to be unaffected (`windows-arm64` already proved it
   by staying green; macOS's own libc++ was separately established working
   in `HISTORY.md`'s 2026-08-18 entries and this pass touched no
-  macOS-specific code path). The CI-side fix (`.github/workflows/ci.yml`)
-  has not yet had a real GitHub Actions run to confirm green, since that
-  requires an actual push -- update this bullet once that run completes.
+  macOS-specific code path). **Confirmed on the real GitHub Actions run
+  for the fix commit itself**: all 5 legs green, including
+  `windows-arm64`/`macos-aarch64` (not independently re-verified locally
+  this pass, per above) -- [run 32434729833](https://github.com/webos21/crt/actions/runs/32434729833)
+  (2026-08-21, commit `9c0b30b`), ending the 7-commit regression.
   Before the 940af4c regression, all 5 legs had been green as of
   [run 31986752976](https://github.com/webos21/crt/actions/runs/31986752976)
   (2026-08-17, the Windows `tcdrain`/`tcflow`/`tcflush`/`tcsendbreak` push).
