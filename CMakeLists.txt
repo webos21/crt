@@ -309,6 +309,17 @@ function(crt_configure_shared_runtime target_name)
       -Wl,/OPT:REF
     )
     target_link_libraries(${target_name} PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+    if(TARGET crt1_pseudo_reloc)
+      # dllcrt.c's crtDllMainCRTStartup() now calls _pei386_runtime_
+      # relocator() on DLL_PROCESS_ATTACH (see that file's own comment);
+      # the symbol itself lives in this OBJECT library, already linked
+      # into every executable via CRT_STARTUP_OBJECTS (libc/CMakeLists.
+      # txt) but never into a CMake-built shared target until now.
+      # Confirmed for real: "lld-link: error: undefined symbol:
+      # _pei386_runtime_relocator" building c_shared the first time
+      # dllcrt.c's own call was added.
+      target_link_libraries(${target_name} PRIVATE $<TARGET_OBJECTS:crt1_pseudo_reloc>)
+    endif()
   elseif(CRT_TARGET_OS STREQUAL "linux")
     target_link_options(${target_name} PRIVATE
       -Wl,--gc-sections

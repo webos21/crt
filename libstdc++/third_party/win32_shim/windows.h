@@ -39,6 +39,19 @@
  *     IMAGE_OPTIONAL_HEADER32/64 layout at all.
  *   - SRWLOCK and its four Acquire/Release functions: see the dedicated
  *     comment at their declaration below.
+ *   - FILETIME/LARGE_INTEGER/GetSystemTimeAsFileTime/
+ *     GetSystemTimePreciseAsFileTime/QueryPerformanceCounter/
+ *     QueryPerformanceFrequency: libcxx's own src/chrono.cpp (not
+ *     libunwind), for system_clock::now()/steady_clock::now() under
+ *     _LIBCPP_WIN32API -- a legitimate, real Windows-native timing need
+ *     (this project's equivalent of Linux's clock_gettime()), unlike the
+ *     MSVC-UCRT locale/random surface this project's own recipe.json
+ *     patches deliberately redirect away from (see libstdc++/third_party/
+ *     libcxx/recipe.json's own notes). All four functions verified as
+ *     real kernel32.dll exports via llvm-objdump -p; LARGE_INTEGER only
+ *     declares the QuadPart member chrono.cpp actually reads, matching
+ *     this file's existing IMAGE_NT_HEADERS precedent of declaring only
+ *     what is used, not a full real SDK struct.
  *
  * All the real kernel32 exports below are plain C symbols (verified via
  * llvm-nm against this machine's real kernel32.lib: plain "GetLastError",
@@ -67,9 +80,63 @@ typedef unsigned long DWORD;
 typedef int BOOL;
 typedef void* HANDLE;
 typedef HANDLE HMODULE;
+#define FALSE 0
+#define TRUE 1
 
 __declspec(dllimport) HANDLE __stdcall GetCurrentProcess(void);
 __declspec(dllimport) DWORD __stdcall GetLastError(void);
+
+typedef struct _FILETIME {
+  DWORD dwLowDateTime;
+  DWORD dwHighDateTime;
+} FILETIME, *PFILETIME;
+
+typedef union _LARGE_INTEGER {
+  int64_t QuadPart;
+} LARGE_INTEGER, *PLARGE_INTEGER;
+
+__declspec(dllimport) void __stdcall GetSystemTimeAsFileTime(FILETIME* lpSystemTimeAsFileTime);
+__declspec(dllimport) void __stdcall GetSystemTimePreciseAsFileTime(FILETIME* lpSystemTimeAsFileTime);
+__declspec(dllimport) BOOL __stdcall QueryPerformanceCounter(LARGE_INTEGER* lpPerformanceCount);
+__declspec(dllimport) BOOL __stdcall QueryPerformanceFrequency(LARGE_INTEGER* lpFrequency);
+
+/* __int64: a real MSVC/mingw builtin type keyword, only recognized by
+ * clang under -fms-extensions -- this project deliberately does not add
+ * that flag project-wide just for one type name libcxx's own chrono.cpp
+ * happens to spell this way. A plain typedef is enough: on this LLP64
+ * target (x86_64-w64-mingw32) __int64 is always exactly `long long`. */
+typedef long long __int64;
+
+/* SYSTEM_INFO/GetSystemInfo: libcxx's own src/thread.cpp, for
+ * thread::hardware_concurrency() under _LIBCPP_WIN32API (this project's
+ * equivalent of Linux's sysconf(_SC_NPROCESSORS_ONLN) -- a legitimate,
+ * real Windows-native need, same category as chrono.cpp's timing APIs
+ * above). Only dwNumberOfProcessors is ever read, but the full real
+ * struct is declared (not trimmed to just that field): GetSystemInfo()
+ * itself writes according to the REAL struct's full size, so a smaller
+ * declaration here would let it write past the end of a caller's actual
+ * (smaller) stack allocation. Verified as a real kernel32.dll export via
+ * llvm-objdump -p. */
+typedef struct _SYSTEM_INFO {
+  union {
+    DWORD dwOemId;
+    struct {
+      WORD wProcessorArchitecture;
+      WORD wReserved;
+    } s;
+  } u;
+  DWORD dwPageSize;
+  void* lpMinimumApplicationAddress;
+  void* lpMaximumApplicationAddress;
+  uintptr_t dwActiveProcessorMask;
+  DWORD dwNumberOfProcessors;
+  DWORD dwProcessorType;
+  DWORD dwAllocationGranularity;
+  WORD wProcessorLevel;
+  WORD wProcessorRevision;
+} SYSTEM_INFO, *LPSYSTEM_INFO;
+
+__declspec(dllimport) void __stdcall GetSystemInfo(SYSTEM_INFO* lpSystemInfo);
 
 /* RWMutex.hpp's own internal locking (used unconditionally under _WIN32,
  * regardless of exception model -- guards libunwind's process-wide unwind

@@ -496,3 +496,35 @@ in those two win.
   `TODO.md`'s C++ runtime prerequisite section, step 4, and `HISTORY.md`'s
   dated entry). Full local `ctest` (119/119 on Windows) confirms no
   regression to the default build/test workflow.
+- **2026-08-21 (fourth pass): static libc++ now works end to end on
+  Windows, real exceptions included -- `imported_libcxx_test: ok`,
+  matching macOS and Linux's own passing marker for the first time.**
+  Redirected libcxx to its own Android/Bionic locale/random backends
+  instead of MSVC's (six independent `_LIBCPP_MSVCRT_LIKE`-family branch
+  points patched, all scoped to `__BIONIC__` so macOS/Linux stay
+  untouched) rather than trying to shim real Universal CRT (`ucrtbase.
+  dll`) locale/`rand_s()` functions this project has consistently avoided
+  depending on elsewhere -- this project's own `xlocale.h`/`/dev/urandom`
+  emulation already covered nearly everything needed. Getting a real
+  client program (not just the runtime's own build) to actually
+  compile+link+run then surfaced a long chain of further real gaps,
+  never exercised on Windows before now: `tools/test_libcxx_runtime.py`
+  needed the same rootfs/PATH/`CRT_HOST_CXX` treatment `tools/crt-libcxx-
+  build.py` already had; `tools/crt-c++` had never linked a real Windows
+  C++ executable before (missing `prelibs` for ctors-walking/pseudo-
+  reloc, missing `-fdwarf-exceptions` on client code, missing
+  `_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS` for static-archive consumers);
+  `libc++.dll` needed the same libunwind-import-library fix already
+  applied to `libc++abi.dll`; and wiring `crt1_pseudo_reloc.o` into every
+  shared-DLL link surfaced a genuine regression (`pseudo_reloc.c`'s own
+  diagnostic path colliding with a regression test's deliberately-
+  shadowed `read()` via `libc/src/fd.c` bundling read/write together),
+  fixed by moving that file's diagnostics to raw kernel32 calls with zero
+  dependency on this project's own libc at all. The *shared* leg of
+  `crt-libcxx-smoke` remains open: `libc++.dll` does not export enough of
+  `basic_string`'s inline members for a client that sees the whole class
+  `dllimport`-decorated -- a separate, deeper libcxx-extern-template-
+  instantiation problem, deliberately left for its own pass. See
+  `TODO.md`'s C++ runtime prerequisite section, step 4, and `HISTORY.md`'s
+  dated entry for the full writeup. Full local `ctest` (119/119 on
+  Windows) confirms no regression to the default build/test workflow.

@@ -23,7 +23,17 @@ long double strtold_l(const char* nptr, char** endptr, locale_t locale);
 long long strtoll_l(const char* nptr, char** endptr, int base, locale_t locale);
 unsigned long long strtoull_l(const char* nptr, char** endptr, int base, locale_t locale);
 
+int isalnum_l(int ch, locale_t locale);
+int isalpha_l(int ch, locale_t locale);
+int isblank_l(int ch, locale_t locale);
+int iscntrl_l(int ch, locale_t locale);
 int isdigit_l(int ch, locale_t locale);
+int isgraph_l(int ch, locale_t locale);
+int islower_l(int ch, locale_t locale);
+int isprint_l(int ch, locale_t locale);
+int ispunct_l(int ch, locale_t locale);
+int isspace_l(int ch, locale_t locale);
+int isupper_l(int ch, locale_t locale);
 int isxdigit_l(int ch, locale_t locale);
 int toupper_l(int ch, locale_t locale);
 int tolower_l(int ch, locale_t locale);
@@ -32,6 +42,8 @@ int strcoll_l(const char* s1, const char* s2, locale_t locale);
 size_t strxfrm_l(char* dst, const char* src, size_t n, locale_t locale);
 
 int iswctype_l(wint_t wc, wctype_t desc, locale_t locale);
+int iswalnum_l(wint_t wc, locale_t locale);
+int iswgraph_l(wint_t wc, locale_t locale);
 int iswspace_l(wint_t wc, locale_t locale);
 int iswprint_l(wint_t wc, locale_t locale);
 int iswcntrl_l(wint_t wc, locale_t locale);

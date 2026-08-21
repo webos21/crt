@@ -10,6 +10,134 @@ substantive update.
 
 ## 2026-08-21
 
+- **Static libc++ now works end to end on Windows, real exceptions
+  included: `imported_libcxx_test: ok`, matching macOS and Linux's own
+  passing marker for the first time.** Full technical detail (every
+  patch, every gap, every fix, in order) lives in `TODO.md`'s C++ runtime
+  prerequisite section, step 4 -- this entry records the narrative and
+  the reasoning behind the two-track investigation that got here.
+  The immediate trigger was deciding, after investigating and discussing
+  the tradeoff, to redirect libcxx's own locale/`random_device` backend
+  selection from the Windows/MSVC one (needing real Universal CRT
+  `ucrtbase.dll` functions this project has consistently avoided linking
+  everywhere else) to the Android/Bionic one already present in the same
+  fork of libcxx this project already fetches. That redirect turned out
+  smaller than the previous entry's own "materially bigger, deeper
+  change" assessment had estimated: `support/android/locale_bionic.h`'s
+  real guard is `__BIONIC__` (already defined project-wide), not
+  `__ANDROID__` as assumed, and this project's own `xlocale.h`/`/dev/
+  urandom` emulation already covered nearly everything the backend
+  needs. Six independent `_LIBCPP_MSVCRT_LIKE`-family branch points
+  across `include/__locale`, `include/__config`, `src/locale.cpp`, and
+  `src/system_error.cpp` needed matching, carefully `__BIONIC__`-scoped
+  patches (deliberately not a blanket "flip the macro off" -- macOS and
+  Linux define `__BIONIC__` too and had to stay on their own,
+  already-verified paths) -- one of the six (`src/locale.cpp`'s own
+  separate backend `#include`, gated on `_LIBCPP_MSVCRT ||
+  __MINGW32__`) was missed by grepping for `_LIBCPP_MSVCRT_LIKE`/
+  `_LIBCPP_MSVCRT` alone, since `__MINGW32__` is unconditionally defined
+  by Clang for this target regardless of either macro. `islower_l`/
+  `isupper_l`/`iswalnum_l`/`iswgraph_l` turned out to already be
+  *implemented* in `libc/src/locale_l.c` but missing from the public
+  `include/xlocale.h` -- a small, pre-existing header/implementation
+  drift, fixed alongside.
+  Getting `crt-libcxx-build` itself green this way (plus a small,
+  unrelated `cxx_filesystem`/`target_overrides.<os>.build_targets`
+  CMake-target-selection fix, and the same libunwind-import-library
+  linker-flag fix already applied to `libc++abi.dll` now applied to
+  `libc++.dll` too) was only half the work. The other half -- actually
+  compiling, linking, and running a real client C++ program against the
+  result via `crt-libcxx-smoke` -- had never been reached on Windows
+  before at all, and surfaced a long chain of further real, previously
+  latent gaps in the general-purpose Windows C++ toolchain itself, not
+  specific to this recipe:
+  - `tools/test_libcxx_runtime.py` (a separate script from `tools/crt-
+    libcxx-build.py`, never exercised on Windows before) needed the same
+    rootfs-for-toybox/restricted-PATH/`CRT_HOST_CXX`-propagation/
+    `--windows-sdk-libpath` treatment the other script's own
+    `common_cmake_args()` had already worked out -- confirmed via a
+    chain of silent failures (mksh's own forward-slash-only script-path
+    recognition; a bare `clang++` mksh could never resolve without
+    `CRT_HOST_CXX` set; `uname -m` returning exit 127 under `set -eu`
+    with the wrong PATH, propagating silently with no error text at all
+    since the failing command was inside a `$(...)` substitution).
+  - `tools/crt-c++` itself had never actually linked a real Windows C++
+    *executable* before (every prior Windows C++ link through it was
+    either the recipe's own `CRT_CXX_BUILDING_RUNTIME=1` build or a
+    shared-DLL path) -- its own `windows)` case's non-shared branch never
+    had a `prelibs` variable at all, unlike `tools/crt-cc`'s otherwise
+    near-identical branch, silently dropping `crt1_pseudo_reloc.o` and
+    the `crt1_ctors_*` global-constructor-walking objects from every C++
+    executable link. Confirmed via `undefined symbol: _pei386_runtime_
+    relocator, referenced by crt1.c:117:(mainCRTStartup)`.
+  - A client linking the pre-built *static* `libc++.a` still saw every
+    class member `__declspec(dllimport)`-decorated -- `include/__config`'s
+    `_LIBCPP_DLL_VIS` only has two states (`dllexport` while building the
+    library, `dllimport` for "everyone else"), no third "plain static
+    archive" state. Confirmed via lld's own diagnostic literally naming
+    the real, non-decorated symbol sitting right there in `libc++.a`
+    that it could see but not use. Fixed with `-D_LIBCPP_DISABLE_
+    VISIBILITY_ANNOTATIONS`, libcxx's own documented escape hatch for
+    exactly this, added to `tools/crt-c++` only for static, non-runtime-
+    build consumers.
+  - Client code through `tools/crt-c++` was never getting `-fdwarf-
+    exceptions` at all (only the recipe build itself had it) --
+    confirmed via `undefined symbol: __gxx_personality_seh0`, Clang's
+    default native-SEH personality for this target, which this project's
+    own DWARF-only libc++abi never exports. This is the project-wide
+    application of the exact decision `docs/cxx_runtime.md`'s "Windows
+    exception-table format" section already documents in the abstract;
+    it had only ever actually been applied inside the recipe build
+    itself until now.
+  - `libc/src/arch/windows/common/dllcrt.c`'s DLL entry point now calls
+    `_pei386_runtime_relocator()` on `DLL_PROCESS_ATTACH` (the DLL
+    analogue of `crt1.c`'s own executable-startup call), needed the
+    moment `libc++.dll`'s own auto-imported reference into `libunwind.
+    dll` appeared -- confirmed via lld-link's own refusal to produce the
+    image at all. Wiring `crt1_pseudo_reloc.o` into every place that
+    could need it (`tools/crt-cc`, `tools/crt-c++`, and the main
+    project's own CMake-built DLL targets via `crt_configure_shared_
+    runtime()`) surfaced one more, genuinely unrelated regression:
+    `pseudo_reloc.c`'s own diagnostic prints, only ever linked into
+    executables before, first failed linking into `m.dll`/`dl.dll`/
+    `c++.dll` at all (`undefined symbol: stderr`, a cross-DLL DATA
+    reference those small DLLs never provide), and after switching to
+    this project's own `write()`, broke a completely different existing
+    test instead: `libc/src/fd.c` bundles `read()` and `write()` into one
+    translation unit, so any reference to `write()` anywhere in a link
+    pulls in that whole object including its real `read()` -- and
+    `tests/windows_dll_symbol_priority_dll.c` deliberately defines its
+    *own* conflicting `read()` (a regression fixture testing DLL symbol-
+    priority resolution), so the two collided: `duplicate symbol: read`,
+    confirmed as a real regression this change caused (the test was
+    passing in the same session's own earlier 119/119 `ctest` run).
+    Root-caused properly rather than chasing one symbol at a time:
+    `abort()` needed enough of `signal.c`/`exit.c`'s own archive-member
+    resolution to reach the identical collision, so both `write()` and
+    `abort()` were replaced with direct kernel32 calls (`WriteFile`/
+    `GetStdHandle`/`ExitProcess`) -- zero dependency on this project's
+    own libc at all, matching this file's own "must run before
+    absolutely anything else" design intent even more literally than the
+    first attempt did. Full `ctest` reconfirmed 119/119 clean afterward.
+  With all of that in place, `imported_libcxx_test_static.exe` compiles,
+  links, and actually runs to completion -- real `vector`/`string`/
+  exception-throw-catch coverage, genuinely confirmed on Windows for the
+  first time. The **shared** leg (`CRT_CXX_RUNTIME_LINKAGE=shared`)
+  remains open, and is a materially different, deeper problem from
+  everything above: `libc++.dll` does not export enough of `basic_
+  string<char>`'s (and similar containers') *inline* member functions to
+  satisfy a client that sees the whole class `dllimport`-decorated --
+  real libc++'s own Windows-shared-library story only reliably works for
+  types it explicitly `extern template`-instantiates and exports, not
+  arbitrary inline STL usage in client code. Confirmed via lld naming
+  dozens of specific missing members across `basic_string`,
+  `__vector_base_common`, and `length_error`. Deliberately left open
+  rather than attempted in the same pass -- see `TODO.md`'s own step 4
+  for the decision to stop here, and step 6 for how the cross-OS
+  regression test this unblocks (Windows static leg) still needs the
+  shared leg fixed before it can cover Windows fully the way it already
+  does macOS and Linux.
+
 - **Closed the `findUnwindSections()` gap: libunwind and libcxxabi now
   build clean on Windows, static and shared** (`crt-libcxx-build` reaches
   libcxx itself for the first time). Three real gaps found and fixed in

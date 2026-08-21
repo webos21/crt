@@ -151,6 +151,7 @@ if(Python3_Interpreter_FOUND)
       --sysroot "${CRT_SYSROOT}"
       --target-os "${CRT_TARGET_OS}"
       --output "${CRT_LIBCXX_SMOKE_BINARY}"
+      ${CRT_LIBCXX_PLATFORM_ARGUMENTS}
     DEPENDS crt-libcxx-sysroot
     COMMENT "Linking and running static/shared Android libc++ through the CRT sysroot"
     USES_TERMINAL

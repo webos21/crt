@@ -230,12 +230,15 @@ Next work order:
      completion -- real vector/string/RTTI/exception-throw-catch
      coverage, this time actually confirmed rather than just documented.
      See `HISTORY.md`'s later same-day entry for the full writeup.
-   - Remaining C++ runtime gate, real and open, updated 2026-08-21 (steps 1-3
-     are now fully done -- libunwind and libcxxabi both build clean on
-     Windows -- and step 4 found two more, materially bigger open gaps in
-     libcxx itself, a real decision point rather than a quick fix; steps
-     5-7 remain -- see `HISTORY.md`'s dated entries for the full session
-     writeup, including the toolchain bugs found and fixed along the way).
+   - Remaining C++ runtime gate, real and open, updated 2026-08-21 (steps
+     1-4 are now done -- libunwind, libcxxabi, and libcxx all build clean
+     on Windows, redirected to their own Android/Bionic locale/random
+     backends instead of MSVC's, and a real client program's *static*
+     leg now compiles+links+runs end to end: `imported_libcxx_test: ok`,
+     matching macOS and Linux. The *shared* leg has one more, separate,
+     deeper gap -- see step 4's own writeup. Steps 5-7 remain -- see
+     `HISTORY.md`'s dated entries for the full session writeup, including
+     the many toolchain bugs found and fixed along the way).
      Track B (debug backtraces via frame-pointer walking /
      sanitizer_common-style stack capture) stays deliberately out of this
      ordering -- it is read-only stack walking, never destructor/landing-pad
@@ -339,69 +342,179 @@ Next work order:
           separate-recipe build does not. Fixed with a one-line
           `add_definitions(-D_LIBCPP_BUILDING_LIBRARY)` patch right after
           libcxxabi's own existing `add_definitions` call.
-     4. **libcxxabi done; libcxx itself has two remaining, DIFFERENT and
-        larger gaps on Windows -- not yet fixed, decision point recorded
-        below.** Getting this far already fixed one more real, small gap:
-        `cxx_filesystem` (libc++'s `<filesystem>` static archive) doesn't
-        exist as a CMake target on Windows at all -- libcxx's own top-
-        level `CMakeLists.txt` sets `ENABLE_FILESYSTEM_DEFAULT OFF`
-        specifically `if (WIN32)` (ON everywhere else, matching
-        `LIBCXX_ENABLE_EXPERIMENTAL_LIBRARY`), with no stated rationale in
-        the fetched source -- `ninja: error: unknown target
-        'cxx_filesystem'`, a hard failure, not a soft skip. Fixed by
-        adding proper `target_overrides.<os>.build_targets` support to
-        `tools/crt-libcxx-build.py` (mirrors the existing `options`
-        override exactly) and using it to drop `cxx_filesystem` from the
-        Windows `build_targets` list only, leaving macOS/Linux's own
-        already-verified list untouched -- deliberately not overriding
-        `LIBCXX_ENABLE_FILESYSTEM` back to `ON` for Windows, since nothing
-        in this project currently needs `<filesystem>` and there is no
-        found reason to second-guess upstream's own considered default.
-        With that fixed, `cxx`/`cxx_experimental`/`cxx-generated-config`
-        compile almost entirely clean -- except 6 of libcxx's own `.cpp`
-        files (`algorithm.cpp`, `chrono.cpp`, `iostream.cpp`, `ios.cpp`,
-        `locale.cpp`, `random.cpp`) hit two real, unconditional missing
-        headers:
-        - `include/support/win32/locale_win32.h` (libcxx's *own* Windows
-          locale backend, selected via `_LIBCPP_MSVCRT_LIKE` in
-          `include/__config`, itself unconditionally set for any `_WIN32`
-          target) needs `<xlocinfo.h>`, a real Universal CRT (`ucrtbase.
-          dll`) header declaring MSVC's `_locale_t`/`_create_locale`/
-          `_free_locale`/`_X_l`-suffixed locale-extension function family.
-        - `src/chrono.cpp` needs `<winapifamily.h>`, a real Windows SDK
-          header gating UWP-vs-desktop API availability.
-        Unlike the libunwind gap above, this is **not** a small, isolated,
-        declare-a-few-prototypes shim: `locale_win32.h` alone references
-        at least 8 distinct MSVC UCRT functions, and actually implementing
-        their real locale-aware behavior (not just declaring prototypes)
-        would mean linking against `ucrtbase.dll` -- a real, hosted MSVC
-        C runtime this project has consistently avoided depending on
-        everywhere else (the same "own the toolchain, never substitute a
-        host-provided runtime" principle behind building libunwind from
-        source and rejecting host `libunwind-dev`). Android's own libcxx
-        fork (the actual source this project fetches -- see
-        `libstdc++/third_party/libcxx/recipe.json`) already carries an
-        alternate, real `support/android/locale_bionic.h` backend selected
-        via `__ANDROID__` in the exact same `include/__locale` `#if` chain
-        -- architecturally the better fit for a project whose entire
-        premise is a Bionic-compatible libc (which already provides
-        `xlocale.h`), rather than reaching for the MSVC-hosted locale
-        family. Making libcxx actually select that path instead of the
-        Windows one is a materially bigger, deeper change than the shims
-        above, though: `include/__config`'s `#if defined(_WIN32)` block
-        that sets `_LIBCPP_MSVCRT_LIKE` unconditionally also sets several
-        other Windows-wide assumptions in the same breath (e.g.
-        `_LIBCPP_SHORT_WCHAR`, which assumes 16-bit `wchar_t` -- this
-        project's own Windows `wchar_t` is deliberately 32-bit via
-        `-Xclang -fwchar-type=int`, so that assumption may already be
-        wrong regardless of the locale question), so this needs a real,
-        careful audit before being attempted, not a quick flip. Decision
-        recorded 2026-08-21: stop here and record the finding rather than
-        picking one of the two real directions (build a real MSVC
-        UCRT-locale-extension shim vs. switch libcxx's own locale/wchar
-        backend selection to the Android/Bionic one already in its
-        source) without discussing the tradeoff first -- see HISTORY.md's
-        dated entry.
+     4. **DONE: libcxx redirected to its own Android/Bionic locale/random
+        backends instead of the MSVC one; static libc++ now works
+        end-to-end on Windows, real exceptions included** (`imported_
+        libcxx_test: ok`, matching macOS's and Linux's own passing
+        marker). Getting here took two real batches of fixes, in order:
+        first getting `crt-libcxx-build` itself fully green (closing the
+        gap the previous entry above left open), then getting a real
+        client program to actually compile+link+run against the result
+        (`crt-libcxx-smoke`, never reached before on Windows).
+        Batch 1 -- `crt-libcxx-build` itself:
+        - `cxx_filesystem` (libc++'s `<filesystem>` static archive)
+          doesn't exist as a CMake target on Windows at all -- libcxx's
+          own top-level `CMakeLists.txt` sets `ENABLE_FILESYSTEM_DEFAULT
+          OFF` specifically `if (WIN32)` (ON everywhere else). Fixed by
+          adding proper `target_overrides.<os>.build_targets` support to
+          `tools/crt-libcxx-build.py` (mirrors the existing `options`
+          override) and dropping `cxx_filesystem` from the Windows list
+          only; deliberately not overriding `LIBCXX_ENABLE_FILESYSTEM`
+          back to `ON` (nothing in this project needs `<filesystem>` yet,
+          no found reason to second-guess upstream's own default).
+        - The MSVC-locale/random gap this section previously called a
+          "materially bigger, deeper change than the shims above" turned
+          out smaller than expected once actually attempted: `locale_
+          bionic.h`'s own guard is `__BIONIC__` (which this project's
+          recipe build already defines unconditionally), not
+          `__ANDROID__` -- its `__ANDROID__`-specific NDK-fallback code
+          never fires for us, leaving only `<stdlib.h>`/`<xlocale.h>`,
+          both already provided by this project's own sysroot
+          (`libc/src/locale.c`, `include/xlocale.h` -- confirmed to
+          already cover nearly every `_l`-suffixed function libcxx calls;
+          `islower_l`/`isupper_l`/`iswalnum_l`/`iswgraph_l` were already
+          *implemented* in `libc/src/locale_l.c` but missing from the
+          public header, a pre-existing oversight fixed along the way).
+          Six independent `_LIBCPP_MSVCRT_LIKE`-family branch points
+          needed a matching `__BIONIC__`-scoped patch (all in `libstdc++/
+          third_party/libcxx/recipe.json`'s `patches`, all deliberately
+          scoped to keep macOS/Linux's own already-verified behavior
+          untouched -- `__BIONIC__` is defined project-wide, not just on
+          Windows): `include/__locale`'s top-level backend `#include`
+          selection, its separate `__libcpp_locale_guard` struct
+          selection (keyed off a *different* macro, `_LIBCPP_LOCALE__
+          L_EXTENSIONS`, deliberately left alone rather than flipped --
+          see the recipe's own notes for why), its separate `ctype_base::
+          mask` bitmask selection; `include/__config`'s `_LIBCPP_USING_
+          WIN32_RANDOM` selection (`random_device`'s `rand_s()` path --
+          this project's own `/dev/urandom` emulation, already
+          implemented for Windows, needs nothing new); `src/locale.cpp`'s
+          own *separate* backend `#include` (keyed off `_LIBCPP_MSVCRT ||
+          __MINGW32__`, not `_LIBCPP_MSVCRT_LIKE` -- missed by grepping
+          for that macro alone, since `__MINGW32__` is unconditionally
+          defined by Clang for this target regardless); `src/system_
+          error.cpp`'s `strerror_s()` vs. portable `strerror_r()`
+          selection. One more, unrelated CMake-level fix: `lib/
+          CMakeLists.txt`'s own `if(WIN32) file(GLOB
+          LIBCXX_WIN32_SOURCES ../src/support/win32/*.cpp) ... endif()`
+          unconditionally compiles the now-entirely-dead MSVC support
+          files (`support.cpp`/`thread_win32.cpp`/`locale_win32.cpp` --
+          real MSVC UCRT symbols like `errno_t`/`_create_locale`/
+          `wcrtomb_s`/`process.h` none of the source patches above touch
+          at all) regardless of what any header selects; no-op'd the same
+          way this recipe already no-ops upstream's `if(MINGW)` blocks.
+        - `libc++.dll`'s own shared build needed the exact same libunwind-
+          import-library fix already applied to `libc++abi.dll`
+          (`CMAKE_SHARED_LINKER_FLAGS=@INSTALL_PREFIX@/lib/libunwind.
+          dll.a` via `target_overrides.windows`, plus an explicit
+          `"dependencies": ["libcxxabi", "libunwind"]` -- previously
+          transitive only) -- confirmed via `_Unwind_Resume` undefined
+          and 376 more references the first time `cxx_shared`'s own link
+          was actually reached.
+        Batch 2 -- getting a real client program (`tests/imported_libcxx_
+        test.cc`, via `crt-libcxx-smoke`) to actually compile+link+run,
+        never attempted on Windows before now:
+        - `tools/test_libcxx_runtime.py` needed the same `rootfs`
+          (toybox/uname resolution)/restricted-PATH/`CRT_HOST_CXX`/
+          `--windows-sdk-libpath` treatment `tools/crt-libcxx-build.py`'s
+          own `common_cmake_args()` already established, none of which
+          this separate script had ever picked up (it had never actually
+          reached a real compile on Windows before). Silent failures all
+          the way down: mksh's own script-loading needs forward-slash
+          paths the same as its exec() path lookup does; `CRT_HOST_CXX`
+          unset meant a bare `clang++` mksh could never resolve; PATH
+          pointed at plain `sysroot/bin` (DLLs only, no toybox), so
+          `uname -m` inside `tools/crt-c++` failed with exit 127 and
+          `set -eu` propagated that silently (no error text at all) to
+          the whole script.
+        - `tools/crt-c++` itself had never linked a real Windows C++
+          *executable* before (only `CRT_CXX_BUILDING_RUNTIME=1`/
+          shared-DLL paths were ever exercised): its `windows)` case's
+          non-shared branch never had a `prelibs` variable at all (unlike
+          `tools/crt-cc`'s matching branch), so `crt1_ctors_begin.o`/
+          `crt1_ctors_walker.o`/`crt1_ctors_end.o` (global constructor
+          walking) and `crt1_pseudo_reloc.o` (`_pei386_runtime_
+          relocator()`) were silently missing from every C++ executable
+          link -- confirmed via `undefined symbol: _pei386_runtime_
+          relocator, referenced by crt1.c:117:(mainCRTStartup)`. Fixed by
+          adding the identical `prelibs` machinery crt-cc already has.
+        - A *client* compiling against the pre-built static `libc++.a`
+          still saw every class member `__declspec(dllimport)`-decorated
+          (`include/__config`'s `_LIBCPP_DLL_VIS` only has two states:
+          `dllexport` when building the library, `dllimport` for
+          "everyone else," no third "consuming a plain static archive"
+          state) -- confirmed via lld naming the exact archive and
+          mangled symbol it could see but not use ("is available... but
+          cannot be used because it is not an import library"). Fixed
+          with `-D_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS`, libcxx's own
+          documented escape hatch, added to `tools/crt-c++`'s Windows
+          compile flags whenever `CRT_CXX_RUNTIME_LINKAGE` is static and
+          `CRT_CXX_BUILDING_RUNTIME` is unset (shared consumers correctly
+          keep real dllimport decoration).
+        - Client code compiled through `tools/crt-c++` was never getting
+          `-fdwarf-exceptions` at all (only the internal recipe build
+          had it) -- confirmed via `undefined symbol: __gxx_personality_
+          seh0`, Clang's default native-SEH personality for `*-w64-
+          mingw32`, which this project's own libc++abi (built DWARF-only)
+          never exports. This is the project-wide application of the
+          same decision `docs/cxx_runtime.md`'s "Windows exception-table
+          format" section already documents -- fixed by adding the same
+          flag to `tools/crt-c++`'s own Windows `common_flags`, not just
+          the recipe build's.
+        - `libc/src/arch/windows/common/dllcrt.c`'s `crtDllMainCRTStartup()`
+          now calls `_pei386_runtime_relocator()` on `DLL_PROCESS_ATTACH`
+          (the DLL analogue of `crt1.c`'s own executable-startup call),
+          needed the moment libc++.dll's own auto-imported data reference
+          to libunwind.dll appeared -- confirmed via lld-link's own
+          refusal to produce the image at all ("output image has runtime
+          pseudo relocations, but the function _pei386_runtime_relocator
+          is missing"). `crt1_pseudo_reloc.o` had to be wired into every
+          shared-DLL link path that could hit this: `tools/crt-cc` and
+          `tools/crt-c++`'s own `shared_mode` branches, and the main
+          project's own CMake-built DLL targets
+          (`crt_configure_shared_runtime()` in the top-level
+          `CMakeLists.txt`, via `$<TARGET_OBJECTS:crt1_pseudo_reloc>`).
+        - Adding `crt1_pseudo_reloc.o` to every shared DLL link surfaced a
+          real, unrelated regression: `pseudo_reloc.c`'s own diagnostic
+          `fprintf(stderr, ...)` calls (only ever exercised from
+          executables before) failed linking into `m.dll`/`dl.dll`/
+          `c++.dll` at all (`undefined symbol: stderr`, a cross-DLL DATA
+          reference these small DLLs never provide themselves). Switching
+          to this project's own `write()` fixed that but broke something
+          more subtle: `libc/src/fd.c` bundles `read()`/`write()`/every
+          other fd primitive into one translation unit, so any reference
+          to `write()` anywhere in a link pulls in that whole object,
+          including its own real `read()` -- and `tests/windows_dll_
+          symbol_priority_dll.c` deliberately defines its *own*
+          conflicting `read()` (a regression fixture testing DLL symbol-
+          priority resolution), so the two collided: `duplicate symbol:
+          read`, a real failure this change caused. Root-caused all the
+          way to zero dependency on this project's own libc instead of
+          chasing the exact symbol each time: both `write()` and
+          `abort()` (which itself needed enough of `signal.c`/`exit.c`'s
+          own archive-member resolution to reach the same collision) were
+          replaced with raw kernel32 calls (`WriteFile`/`GetStdHandle`/
+          `ExitProcess`) -- genuinely nothing beyond a function-call IAT
+          thunk to kernel32, matching this file's own "must run before
+          absolutely anything else" design intent even more literally
+          than before. Full `ctest` (119/119) reconfirmed clean after.
+        **Not yet fixed**: the *shared* leg of `crt-libcxx-smoke`
+        (`CRT_CXX_RUNTIME_LINKAGE=shared`) still fails -- a separate,
+        deeper problem from everything above: `libc++.dll` does not
+        export enough of `basic_string<char>`'s (and similar containers')
+        *inline* member functions (constructors, `size()`, `data()`,
+        `append()`, the destructor, ...) to satisfy a client that sees
+        the whole class `__declspec(dllimport)`-decorated (real libc++'s
+        own Windows-shared-library story only reliably works for types
+        it explicitly `extern template`-instantiates and exports, not
+        arbitrary inline STL usage) -- confirmed via lld naming dozens of
+        specific missing `basic_string`/`__vector_base_common`/
+        `length_error` members. Fixing this well would mean auditing and
+        likely extending libcxx's own extern-template-instantiation
+        export list, a genuinely different and potentially large
+        undertaking from the redirect work above; deliberately left open
+        rather than attempted in the same pass. See HISTORY.md's dated
+        entry for the full writeup of everything in this item.
      5. Then repeat the same recipe.json-driven build on Linux
         (host-provided libunwind
         was considered and explicitly rejected, see `libstdc++/
@@ -457,9 +570,10 @@ Next work order:
         three hosts once the build passes -- `crt-libcxx-smoke` already has
         the right shape (exception throw/catch is already one of its
         checks, now confirmed working on macOS and on Linux for both
-        linkage modes) to extend rather than needing a new test from
-        scratch. Windows remains the one host where this is still blocked
-        on step 4's own open Windows locale/`<filesystem>` gaps above.
+        linkage modes, and on Windows for the *static* leg -- `imported_
+        libcxx_test: ok`, see step 4 above) to extend rather than needing
+        a new test from scratch. Windows's *shared* leg remains blocked on
+        step 4's own still-open `basic_string` DLL-export gap.
      7. **Design a native-callback/boundary shim for Windows, not yet
         started.** Checked directly (2026-08-21, see `docs/cxx_runtime.md`'s
         "Known cost: DWARF-compiled code has zero Windows-native unwind

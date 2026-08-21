@@ -122,11 +122,49 @@ case "$target_os" in
     # `configure` scripts (and this project's own --build=*-w64-mingw32
     # recipe workarounds) already expect.
     common_flags="$common_flags -DCRT_TARGET_OS_WINDOWS=1 -fno-threadsafe-statics --target=${target_arch}-w64-mingw32"
+    # See docs/cxx_runtime.md's "Windows exception-table format: DWARF
+    # CFI, not native SEH" for the full architectural reasoning (this
+    # project's own from-source libunwind/libc++abi are built as portable
+    # DWARF-CFI unwinders, not linked against native SEH). That decision
+    # has to apply to every Windows C++ translation unit compiled through
+    # this wrapper, not only the recipe.json-driven build of libcxx/
+    # libcxxabi/libunwind themselves: Clang's default exception model for
+    # *-w64-mingw32 is native SEH (__gxx_personality_seh0), which this
+    # project's own libc++abi.a was never built to provide (it exports
+    # __gxx_personality_v0, the DWARF/Itanium personality, instead).
+    # Confirmed for real: the first real Windows C++ *client* program
+    # ever linked through this wrapper (as opposed to internal recipe
+    # builds, which already had this flag) failed with "undefined symbol:
+    # __gxx_personality_seh0" -- every .xdata entry in the client object
+    # still expected the SEH personality this project's runtime never
+    # exports.
+    common_flags="$common_flags -fdwarf-exceptions"
     # See the matching comment in tools/crt-cc: also define
     # __MINGW32_MAJOR_VERSION/__MINGW32_MINOR_VERSION to match a real
     # mingw-w64 install, since clang's own predefined macro set for this
     # target stops at __MINGW32__ and leaves those two undefined.
     common_flags="$common_flags -D__MINGW32_MAJOR_VERSION=3 -D__MINGW32_MINOR_VERSION=11"
+    # libcxx/include/__config's _LIBCPP_DLL_VIS only has two states on
+    # Windows: __declspec(dllexport) when _LIBCPP_BUILDING_LIBRARY is
+    # defined (building the library itself -- CRT_CXX_BUILDING_RUNTIME=1,
+    # handled entirely by this recipe's own CMake options, untouched
+    # here), or __declspec(dllimport) otherwise -- for EVERY consumer,
+    # with no third state for "consuming the static archive." A client
+    # linking libc++.a directly (this project's own default, non-shared
+    # CRT_CXX_RUNTIME_LINKAGE) has no import thunks to satisfy those
+    # dllimport-decorated declarations at all, so linking fails with
+    # "undefined symbol: __declspec(dllimport) ..." even though the real,
+    # non-decorated symbol is right there in libc++.a -- confirmed for
+    # real via lld's own diagnostic naming the exact archive and mangled
+    # symbol. _LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS is libcxx's own
+    # documented escape hatch for exactly this: it drops _LIBCPP_DLL_VIS
+    # (and its siblings) to nothing, matching how a plain static archive
+    # is supposed to be consumed -- direct symbol resolution, no DLL
+    # boundary at all. Shared consumers keep the real dllimport
+    # decoration (correct, and required) unchanged.
+    if [ "${CRT_CXX_BUILDING_RUNTIME:-0}" != 1 ] && [ "$runtime_linkage" != shared ]; then
+      common_flags="$common_flags -D_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS"
+    fi
     ;;
 esac
 
@@ -151,6 +189,11 @@ if [ "$shared_mode" -eq 1 ]; then
 else
   libs="${CRT_SYSROOT}/lib/crt1.o -L${CRT_SYSROOT}/lib"
 fi
+# See the matching declaration in tools/crt-cc: prelibs holds objects that
+# must land on the link line *before* $user_args -- currently only
+# Windows' .ctors/.dtors "begin" sentinel needs this (see the windows)
+# case's own comment below). Empty everywhere else.
+prelibs=""
 # See the matching comment in tools/crt-cc: on Linux, the static archives
 # are only safe to link into an executable (never compiled with -fPIC),
 # so shared_mode links the already-built shared counterparts instead.
@@ -319,11 +362,34 @@ case "$target_os" in
     fi
     if [ "$shared_mode" -eq 1 ]; then
       crt_core_libs="${CRT_SYSROOT}/lib/c_dll.lib ${CRT_SYSROOT}/lib/m_dll.lib ${CRT_SYSROOT}/lib/dl_dll.lib"
-      libs="${CRT_SYSROOT}/lib/dllcrt.o $libs $cxx_runtime_libs $crt_core_libs ${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"
+      # crt1_pseudo_reloc.o (_pei386_runtime_relocator(), see that file's
+      # own comment): dllcrt.c's crtDllMainCRTStartup() now calls this on
+      # DLL_PROCESS_ATTACH, the DLL analogue of crt1.c's own executable-
+      # startup call below. Needed the moment any cross-DLL GNU-ld-auto-
+      # imported data reference appears in a shared build (confirmed for
+      # real: libc++.dll importing from libunwind.dll -- "output image
+      # has runtime pseudo relocations, but the function
+      # _pei386_runtime_relocator is missing" the first time that
+      # happened); harmless to always link in otherwise, matching the
+      # executable path's own always-linked precedent.
+      libs="${CRT_SYSROOT}/lib/dllcrt.o ${CRT_SYSROOT}/lib/crt1_pseudo_reloc.o $libs $cxx_runtime_libs $crt_core_libs ${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"
       entry="-Wl,/entry:crtDllMainCRTStartup -Wl,/DLL -Wl,/OPT:REF -fuse-ld=lld"
     else
       libs="$libs $cxx_runtime_libs ${CRT_SYSROOT}/lib/c.lib ${CRT_SYSROOT}/lib/m.lib ${CRT_SYSROOT}/lib/dl.lib ${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"
       entry="-Wl,/entry:mainCRTStartup -Wl,/subsystem:console -Wl,/OPT:REF -fuse-ld=lld"
+      # __crt_run_init_array()/__crt_run_fini_array() Windows/PE support,
+      # and crt1_pseudo_reloc.o (_pei386_runtime_relocator()): see
+      # tools/crt-cc's own matching comment on its identical windows)
+      # executable branch -- this project's own C++ executables need
+      # exactly the same prelibs set crt-cc's C executables already get,
+      # and this script had never actually linked one until now (every
+      # prior Windows C++ link through this wrapper was either
+      # CRT_CXX_BUILDING_RUNTIME=1 or shared_mode). Confirmed for real:
+      # "undefined symbol: _pei386_runtime_relocator, referenced by
+      # crt1.c:117:(mainCRTStartup)" the first time a real Windows C++
+      # executable was linked through this wrapper.
+      prelibs="${CRT_SYSROOT}/lib/crt1_ctors_begin.o ${CRT_SYSROOT}/lib/crt1_ctors_walker.o ${CRT_SYSROOT}/lib/crt1_pseudo_reloc.o"
+      libs="$libs ${CRT_SYSROOT}/lib/crt1_ctors_end.o"
     fi
     ;;
   *)
@@ -344,14 +410,14 @@ esac
 if [ -n "${CRT_WINDOWS_SDK_LIBPATH:-}" ]; then
   if [ -n "$resource_dir" ]; then
     # shellcheck disable=SC2086
-    exec "$cxx" $common_flags -isystem "${resource_dir}/include" -nostdlib -nostartfiles -nodefaultlibs $entry $user_args $libs "-Wl,/libpath:${CRT_WINDOWS_SDK_LIBPATH}"
+    exec "$cxx" $common_flags -isystem "${resource_dir}/include" -nostdlib -nostartfiles -nodefaultlibs $entry $prelibs $user_args $libs "-Wl,/libpath:${CRT_WINDOWS_SDK_LIBPATH}"
   fi
   # shellcheck disable=SC2086
-  exec "$cxx" $common_flags -nostdlib -nostartfiles -nodefaultlibs $entry $user_args $libs "-Wl,/libpath:${CRT_WINDOWS_SDK_LIBPATH}"
+  exec "$cxx" $common_flags -nostdlib -nostartfiles -nodefaultlibs $entry $prelibs $user_args $libs "-Wl,/libpath:${CRT_WINDOWS_SDK_LIBPATH}"
 fi
 if [ -n "$resource_dir" ]; then
   # shellcheck disable=SC2086
-  exec "$cxx" $common_flags -isystem "${resource_dir}/include" -nostdlib -nostartfiles -nodefaultlibs $entry $user_args $libs
+  exec "$cxx" $common_flags -isystem "${resource_dir}/include" -nostdlib -nostartfiles -nodefaultlibs $entry $prelibs $user_args $libs
 fi
 # shellcheck disable=SC2086
-exec "$cxx" $common_flags -nostdlib -nostartfiles -nodefaultlibs $entry $user_args $libs
+exec "$cxx" $common_flags -nostdlib -nostartfiles -nodefaultlibs $entry $prelibs $user_args $libs

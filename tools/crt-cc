@@ -291,7 +291,9 @@ case "$target_os" in
   windows)
     libs="$libs ${CRT_SYSROOT}/lib/c.lib ${CRT_SYSROOT}/lib/m.lib ${CRT_SYSROOT}/lib/dl.lib ${CRT_SYSROOT}/lib/c++.lib ${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"
     if [ "$shared_mode" -eq 1 ]; then
-      libs="${CRT_SYSROOT}/lib/dllcrt.o $libs"
+      # crt1_pseudo_reloc.o: see the matching comment in tools/crt-c++'s
+      # own shared_mode branch.
+      libs="${CRT_SYSROOT}/lib/dllcrt.o ${CRT_SYSROOT}/lib/crt1_pseudo_reloc.o $libs"
       entry="-Wl,/entry:crtDllMainCRTStartup -Wl,/DLL -Wl,/OPT:REF -fuse-ld=lld"
     else
       entry="-Wl,/entry:mainCRTStartup -Wl,/subsystem:console -Wl,/OPT:REF -fuse-ld=lld"

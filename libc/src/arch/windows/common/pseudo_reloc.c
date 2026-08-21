@@ -54,18 +54,77 @@
  * x86_64 and aarch64, are 64-bit), so it lives in common/, not either
  * arch directory.
  *
- * Only the executable's own entry point (mainCRTStartup, crt1.c) calls
- * this today, matching the concrete, demonstrated failure (an EXE
- * consuming a third-party DLL's auto-imported data). A DLL that itself
- * references another DLL's auto-imported data would need the same call
- * from its own entry point (dllcrt.c's crtDllMainCRTStartup) -- not
- * added here since dllcrt.c doesn't run constructors either yet and
- * nothing currently exercises that path; a real gap if it's ever hit.
+ * Both the executable's own entry point (mainCRTStartup, crt1.c) and the
+ * DLL entry point (crtDllMainCRTStartup, dllcrt.c, on DLL_PROCESS_ATTACH)
+ * call this. The DLL side was added once a concrete case actually needed
+ * it: libc++.dll importing an auto-imported data symbol from
+ * libunwind.dll (see libstdc++/third_party/libcxx/recipe.json's own
+ * notes) -- lld-link refuses to produce a DLL with a non-empty
+ * pseudo-reloc table unless this symbol exists in the link, the exact
+ * same check it applies to executables.
+ *
+ * Diagnostic output below goes through a raw Win32 WriteFile() call
+ * rather than fprintf(stderr, ...) or even this project's own write():
+ * this function runs before absolutely anything else (see above),
+ * including -- once linked into a DLL rather than only an executable --
+ * possibly before the DLL that owns the process's `stderr` FILE* has
+ * finished its own DLL_PROCESS_ATTACH. Confirmed for real, twice: first
+ * linking this file into m.dll/dl.dll/c++.dll failed with "lld-link:
+ * error: undefined symbol: stderr" (a cross-DLL DATA reference from a
+ * small, low-level DLL that does not itself implement stdio, unlike
+ * c.dll); switching to this project's own write() fixed that but broke
+ * something more subtle -- libc/src/fd.c bundles read()/write()/every
+ * other fd primitive into one translation unit, so any reference to
+ * write() anywhere in a link pulls in that whole object, including its
+ * own real read(). tests/windows_dll_symbol_priority_dll.c deliberately
+ * defines its own conflicting read() to test DLL symbol-priority
+ * resolution (see that file's own comment) -- crt1_pseudo_reloc.o now
+ * being linked into every shared DLL (see the DLL-analogue paragraph
+ * above) meant fd.c's read() started colliding with it: "duplicate
+ * symbol: read" building that regression fixture's own DLL, a real
+ * failure this file's own change caused, not a pre-existing one. A raw
+ * WriteFile() call needs no part of this project's own libc at all --
+ * genuinely nothing beyond a function-call IAT thunk to kernel32, never
+ * triggering the pseudo-relocation auto-import machinery this whole
+ * file exists to fix up in the first place, and never pulling in
+ * anything from c.lib. abort() (libc/src/signal.c) got the exact same
+ * treatment for the exact same reason, replaced with a direct
+ * ExitProcess() kernel32 call: switching only write() away from c.lib
+ * was not enough on its own to stop pulling in fd.c.obj (this project's
+ * own archive-member resolution evidently still reached it via some
+ * other path from abort()'s own call chain, not worth fully tracing
+ * once the fix is "depend on zero c.lib symbols, not on tracing exactly
+ * which one" -- confirmed for real: the duplicate-read failure persisted
+ * with write() alone changed, and disappeared once abort() was too).
+ * The two messages that used to carry numeric detail (magic/version/bits
+ * values) are static strings -- these are die-immediately-after paths
+ * for a toolchain-emitted pseudo-reloc table this project's own build
+ * always controls, not a runtime data condition worth a hand-rolled
+ * formatter for.
  */
 
+#include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
+
+typedef unsigned long crt_dword;
+typedef int crt_bool;
+__declspec(dllimport) void* __stdcall GetStdHandle(crt_dword nStdHandle);
+__declspec(dllimport) crt_bool __stdcall WriteFile(
+    void* hFile, const void* lpBuffer, crt_dword nNumberOfBytesToWrite,
+    crt_dword* lpNumberOfBytesWritten, void* lpOverlapped);
+__declspec(dllimport) void __stdcall ExitProcess(crt_dword uExitCode);
+
+static void pseudo_reloc_die(const char* msg, size_t len) {
+  crt_dword written = 0;
+  /* STD_ERROR_HANDLE, a real, stable Win32 constant. */
+  WriteFile(GetStdHandle((crt_dword)-12), msg, (crt_dword)len, &written, 0);
+  /* Not this project's own abort(): that lives in libc/src/signal.c and
+   * pulls in enough of c.lib's own archive-member resolution to collide
+   * with a client's own shadow read() (see the file comment above for
+   * the full story). ExitProcess() needs nothing beyond kernel32. */
+  ExitProcess((crt_dword)-1);
+}
+#define PSEUDO_RELOC_DIE(literal) pseudo_reloc_die(literal, sizeof(literal) - 1)
 
 typedef struct {
   uint32_t sym;
@@ -186,13 +245,11 @@ static void unprotect_and_write(unsigned char* target_addr, int bits, intptr_t v
   unsigned long old_protect = 0;
 
   if (!VirtualProtect((void*)page_start, span, CRT_PAGE_EXECUTE_READWRITE, &old_protect)) {
-    fprintf(stderr, "_pei386_runtime_relocator: VirtualProtect (unprotect) failed\n");
-    abort();
+    PSEUDO_RELOC_DIE("_pei386_runtime_relocator: VirtualProtect (unprotect) failed\n");
   }
   write_truncated(target_addr, bits, value);
   if (!VirtualProtect((void*)page_start, span, old_protect, &old_protect)) {
-    fprintf(stderr, "_pei386_runtime_relocator: VirtualProtect (restore) failed\n");
-    abort();
+    PSEUDO_RELOC_DIE("_pei386_runtime_relocator: VirtualProtect (restore) failed\n");
   }
 }
 
@@ -233,17 +290,13 @@ void _pei386_runtime_relocator(void) {
     return;
   }
   if ((size_t)(list_end - list_start) < sizeof(header)) {
-    fprintf(stderr, "_pei386_runtime_relocator: pseudo-reloc list too small\n");
-    abort();
+    PSEUDO_RELOC_DIE("_pei386_runtime_relocator: pseudo-reloc list too small\n");
   }
   __builtin_memcpy(&header, list_start, sizeof(header));
   if (header.magic1 != 0 || header.magic2 != 0 || header.version != 1) {
-    fprintf(stderr,
-            "_pei386_runtime_relocator: unsupported pseudo-reloc list "
-            "format (magic1=%u magic2=%u version=%u) -- this toolchain "
-            "is only known to emit v2\n",
-            (unsigned)header.magic1, (unsigned)header.magic2, (unsigned)header.version);
-    abort();
+    PSEUDO_RELOC_DIE(
+        "_pei386_runtime_relocator: unsupported pseudo-reloc list format "
+        "-- this toolchain is only known to emit v2\n");
   }
 
   for (cursor = list_start + sizeof(header); cursor + sizeof(crt_pseudo_reloc_item_v2) <= list_end;
@@ -275,8 +328,7 @@ void _pei386_runtime_relocator(void) {
     new_value = old_value - (intptr_t)sym_addr + imp_addr;
 
     if (!fits_in_bits(new_value, bits)) {
-      fprintf(stderr, "_pei386_runtime_relocator: relocation result out of range (bits=%d)\n", bits);
-      abort();
+      PSEUDO_RELOC_DIE("_pei386_runtime_relocator: relocation result out of range\n");
     }
     unprotect_and_write(target_addr, bits, new_value);
   }
