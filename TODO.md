@@ -181,11 +181,74 @@ Next work order:
      installs as a CRT-toolchain CPU archive on macOS; `tools/crt-ar` expands
      GN response files so this does not depend on Apple `ar` supporting them.
      No fake Skia headers are provided.
-   - Current build automation: `crtgfx-skia-fetch`,
-     `crtgfx-skia-configure`, and `crtgfx-skia-build` now exist. The default
-     source track is Skia `m148` (`refs/heads/chrome/m148`), with
-     `CRTGFX_SKIA_VERSION`, `CRTGFX_SKIA_REF`, and
-     `CRTGFX_SKIA_EXPECTED_COMMIT` available for user pinning.
+   - **Fetch pinned + sparse-checked-out, and `crtgfx-skia-fetch`/
+     `-configure`/`-build` verified real end-to-end on Windows (2026-08-21).**
+     `CRTGFX_SKIA_REF`/`CRTGFX_SKIA_EXPECTED_COMMIT` now default to a real
+     commit SHA (`13ffba253fc7854fd3b34f67c82dfb2418dc2944`, captured via
+     `git ls-remote` the same day) instead of the previous empty/floating
+     `refs/heads/chrome/m148` -- the same reproducibility fix already applied
+     to `libstdc++/third_party/*/recipe.json`'s own `source.ref`, see those
+     recipes' notes and `HISTORY.md`'s dated entry for the fuller
+     reproducibility-gap reasoning. `CRTGFX_SKIA_SPARSE_PATHS` (new) trims the
+     fetch the same way (cone-mode sparse-checkout, derived empirically via
+     `ninja -t inputs skia` against a real build, not guessed) from 260MB+ to
+     ~100MB. `CRTGFX_SKIA_SYNC_DEPS` now defaults OFF: confirmed for real
+     that `git-sync-deps` unconditionally downloads Skia's entire third-party
+     dependency set regardless of GN feature flags (8.6GB, including a full
+     Emscripten/WASM toolchain, before being killed), and separately
+     confirmed unnecessary for this project's own CPU-raster-only GN
+     config once `skia_use_wuffs` (GIF decode, the one codec flag left at
+     Skia's own default `true` while every sibling codec was already off) is
+     also disabled -- `ninja -t inputs skia` then shows zero
+     `third_party/externals/` references at all. `tools/build_skia.py` also
+     gained two real Windows fixes, both confirmed necessary: auto-
+     bootstrapping a pinned `gn` binary via Skia's own `bin/fetch-gn` when
+     `bin/gn.exe` is not already present (the previous bare-`gn`-no-`.exe`
+     check never matched on Windows), and a throwaway `python3.bat` PATH
+     shim (GN's own `.gn` dotfile hardcodes `script_executable = "python3"`,
+     which a stock Windows Python install does not provide by that name).
+     Verified via a genuinely fresh fetch + `gn gen` + full `ninja` build
+     through the real `crtgfx-skia-fetch`/`crtgfx-skia-build` CMake targets
+     (not a scratch script): a real `libskia.a` (21MB) was produced. A real
+     mistake was made and caught mid-implementation while doing this: the
+     fetch's own `--depth 1` was dropped from the initial partial clone by
+     mistake (an interactive test that validated the command sequence had
+     actually kept it), producing a 189MB `.git` (464,512 packed objects)
+     for one real `crtgfx-skia-fetch` run before being caught and fixed back
+     to ~22MB. See `HISTORY.md`'s dated entry for the full trail.
+   - **New, separate, pre-existing gap found while verifying the full link**
+     (2026-08-21, NOT caused by the pinning/sparse-checkout work above --
+     confirmed by inspection that nothing touched here changed
+     `crt_cxx_build_flags`, `detect_cxx_standard_include_dirs()`, or either
+     target's own `target_link_libraries()`): with `CRTGFX_ENABLE_SKIA=ON`,
+     `crtgfx_skia_raster_smoke.exe` fails to *link* on Windows with a long
+     list of `lld-link: error: duplicate symbol` (`printf`, `fprintf`,
+     `snprintf`, `fabsf`, `fabsl`, `frexpl`, `wmemcpy`, `wmemset`,
+     `wmemcmp`, ...) between this project's own `c.lib`/`m.lib` and objects
+     that carry their own copies of the same symbols (`skia_raster_smoke.
+     cc.obj` itself, several `libskia.a` members, and MSVC's own
+     `libcpmt.lib`). Root cause, diagnosed but not yet fixed: the top-level
+     `CMakeLists.txt`'s own `crt_cxx_build_flags` deliberately omits
+     `-nostdinc++` on Windows only (`$<NOT:$<PLATFORM_ID:Windows>>>` guard,
+     by design -- this project's own Windows C++ bootstrap library, `cxx`/
+     `cxx_shared`, relies on real MSVC STL headers, unlike Linux/macOS)
+     -- so any Windows CMake-native C++ translation unit that reaches a
+     real C stdio/math header (directly or, as here, transitively through
+     Skia's own headers) gets MSVC UCRT's own inline-materialized
+     `printf`/`fprintf`/`snprintf`/`fabsf`/... as real, externally-visible
+     symbols in that same object file, which then collides with this
+     project's own freestanding `c.lib`/`m.lib` definitions of the exact
+     same names once both get linked into one final executable. This
+     appears to be the first target that ever links this project's own
+     `c`/`cxx` bootstrap libraries together with something (Skia's own
+     headers) that also pulls in real MSVC UCRT stdio/math headers on
+     Windows -- a genuinely separate, deeper Windows-C++-runtime-
+     architecture question from "did the Skia fetch/build itself work"
+     (which is now fully verified, see above), deliberately left open
+     rather than rushed in the same pass. `CRTGFX_ENABLE_SKIA` stays OFF by
+     default (matching its pre-existing default; the default `ctest` suite
+     is unaffected either way since this target is only built when that
+     option is explicitly turned on).
    - The first exposed C++ gap, CRT-owned `operator new/delete`, is complete
      and covered by `cxx_allocation_test`. The remaining gate is a real
      project-owned libc++ standard-library import: the default Skia archive
@@ -193,7 +256,8 @@ Next work order:
      disabled. `CRTGFX_ENABLE_SKIA` therefore remains OFF by default; do not
      link host libc++ as a substitute. After libc++ is imported, verify the
      deterministic `crtgfx_skia_raster_smoke` on static and shared paths on all
-     three hosts.
+     three hosts (Windows fetch/build itself is now verified -- see above --
+     but the final link needs the new gap just above resolved first).
    - Cross-host build-driver status: the Linux route selects the POSIX
      `tools/crt-ar` wrapper; the Windows route selects `tools/crt-ar.cmd`,
      passes the invoking Python through `CRT_HOST_PYTHON`, and recognizes the

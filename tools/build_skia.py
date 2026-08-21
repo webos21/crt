@@ -4,12 +4,44 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
 def run(args, cwd=None, env=None):
     print("+", " ".join(str(arg) for arg in args), flush=True)
     subprocess.run(args, cwd=cwd, env=env, check=True)
+
+
+def ensure_python3_shim(env, host_python):
+    """Skia's own .gn dotfile hardcodes `script_executable = "python3"` --
+    a real, unconditional upstream requirement `gn gen` needs to resolve
+    on PATH, independent of anything this project's own build controls.
+    Most Linux/macOS Python installs already provide a "python3"-named
+    executable by distro/package-manager convention; a stock Windows
+    Python install typically does not (only "python.exe"). Confirmed for
+    real: `gn gen` fails outright with `ERROR Could not find "python3"
+    from dotfile in PATH` without this on Windows.
+
+    A tiny, project-owned .bat shim (not a copy of the whole interpreter)
+    resolves it without touching any real system PATH -- prepended only
+    to this subprocess's own env, matching this project's "wrap what's
+    needed, don't require host changes" discipline already used
+    throughout tools/crt-cc and friends. .bat rather than .exe: Windows'
+    own PATHEXT-based bare-name resolution (which is exactly how `gn`
+    itself, and CreateProcess more generally, looks up "python3" with no
+    extension) tries .BAT/.CMD the same way it tries .EXE, so a batch
+    shim works identically here without needing to copy python.exe's own
+    multi-MB binary into a throwaway temp directory on every build.
+    """
+    if os.name != "nt":
+        return
+    if shutil.which("python3", path=env.get("PATH")):
+        return
+    shim_dir = Path(tempfile.mkdtemp(prefix="crt-skia-python3-shim-"))
+    shim_path = shim_dir / "python3.bat"
+    shim_path.write_text(f'@echo off\r\n"{host_python}" %*\r\n', encoding="utf-8")
+    env["PATH"] = str(shim_dir) + os.pathsep + env.get("PATH", "")
 
 
 def gn_string(value):
@@ -87,6 +119,17 @@ def default_gn_args(root, sysroot, target_os, target_arch, cxx_include_flags):
         "skia_use_libwebp_decode": "false",
         "skia_use_libwebp_encode": "false",
         "skia_use_zlib": "false",
+        # skia_use_wuffs (GIF decode support, via a small vendored
+        # third_party/externals/wuffs checkout) defaults to true in
+        # Skia's own gn/skia.gni, unlike every other optional codec
+        # above -- confirmed for real via `ninja -t inputs skia`: with
+        # every other codec already off, third_party/externals/wuffs is
+        # the ONLY third-party external source this minimal CPU-raster
+        # config still pulls in. Disabled for the same reason as every
+        # sibling codec flag above: nothing in this project's current
+        # Skia integration needs GIF decoding yet, and this keeps the
+        # build needing zero third_party/externals content at all.
+        "skia_use_wuffs": "false",
         "cc": gn_string(str(crt_cc)),
         "cxx": gn_string(str(crt_cxx)),
         # Skia's GN archives use @response files. Apple ar does not expand
@@ -183,14 +226,30 @@ def main():
     build_dir = Path(args.build_dir).resolve()
     install_prefix = Path(args.install_prefix).resolve()
     sysroot = Path(args.sysroot).resolve()
-    gn = args.gn or str(source / "bin" / "gn")
+    gn_exe_suffix = ".exe" if args.target_os == "windows" or os.name == "nt" else ""
+    gn = args.gn or str(source / "bin" / ("gn" + gn_exe_suffix))
     if not Path(gn).exists():
+        # Bare "gn" (no .exe) never resolves via Path.exists() on Windows
+        # even when bin/gn.exe genuinely exists -- confirmed for real: this
+        # silently fell through to `shutil.which("gn")` (which also never
+        # finds it, since bin/ is never on PATH) and then to the literal
+        # string "gn" itself, only failing much later with a confusing
+        # FileNotFoundError from CreateProcess. Bootstraps a fresh gn the
+        # same way Skia's own real developers do -- bin/fetch-gn downloads
+        # a prebuilt binary pinned to a specific git_revision hardcoded in
+        # that script itself, so this needs no pinning of its own here.
         gn = shutil.which("gn") or gn
+        if not Path(gn).exists():
+            fetch_gn = source / "bin" / "fetch-gn"
+            if fetch_gn.exists():
+                run([sys.executable, str(fetch_gn)], cwd=source)
+                gn = str(source / "bin" / ("gn" + gn_exe_suffix))
     ninja = args.ninja or shutil.which("ninja") or "ninja"
 
     env = os.environ.copy()
     env["CRT_SYSROOT"] = str(sysroot)
     env["CRT_TARGET_OS"] = args.target_os
+    ensure_python3_shim(env, sys.executable)
     if args.target_os == "windows":
         # crt-ar.cmd needs the same interpreter CMake used to launch this
         # driver; relying on the optional py launcher would make a configured

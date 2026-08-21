@@ -4,10 +4,67 @@ set(CRTGFX_COMMON_SOURCES
 )
 
 set(CRTGFX_SKIA_VERSION "m148" CACHE STRING "Skia Chrome milestone shorthand to fetch, for example m148")
-set(CRTGFX_SKIA_REF "" CACHE STRING "Explicit Skia git ref/commit to fetch; overrides CRTGFX_SKIA_VERSION when set")
+# Pinned 2026-08-21 (was empty, meaning "whatever refs/heads/chrome/m148
+# currently points to" -- a floating branch, not a fixed commit, the same
+# reproducibility gap already fixed for libstdc++/third_party/{libcxx,
+# libcxxabi,libunwind}/recipe.json's own source.ref -- see those recipes'
+# own notes for the fuller reasoning). Captured via `git ls-remote
+# https://skia.googlesource.com/skia.git refs/heads/chrome/m148` that
+# day; that specific commit's own message ("Remove CQ for unsupported
+# branch refs/heads/chrome/m148") confirms the branch was already
+# frozen/unsupported by Skia's own infra at the moment this was pinned --
+# genuinely as stable a target as a branch ref can be, verified for real
+# rather than assumed. Re-pin by re-running the same git ls-remote
+# command and updating this value (and this comment's own date), never
+# by reverting to an empty/floating value.
+set(CRTGFX_SKIA_REF "13ffba253fc7854fd3b34f67c82dfb2418dc2944" CACHE STRING "Explicit Skia git ref/commit to fetch; overrides CRTGFX_SKIA_VERSION when set")
 set(CRTGFX_SKIA_REPOSITORY "https://skia.googlesource.com/skia.git" CACHE STRING "Skia git repository URL")
-set(CRTGFX_SKIA_EXPECTED_COMMIT "" CACHE STRING "Optional full Skia commit hash expected after fetch")
-option(CRTGFX_SKIA_SYNC_DEPS "Run Skia tools/git-sync-deps after fetching Skia" ON)
+set(CRTGFX_SKIA_EXPECTED_COMMIT "13ffba253fc7854fd3b34f67c82dfb2418dc2944" CACHE STRING "Optional full Skia commit hash expected after fetch")
+# Sparse-checkout (cone mode) trimmed to exactly what this project's own
+# CPU-raster-only GN config (tools/build_skia.py's default_gn_args())
+# actually needs, derived empirically via `ninja -t inputs skia` against
+# a real build, not guessed: include/src carry the public API and core
+# implementation; modules/ must be kept whole (not just the one module,
+# modules/skcms, the build actually links -- `gn gen` itself needs to at
+# least *load* every module's own BUILD.gn to evaluate its own `enabled =
+# skia_enable_<x>` condition, confirmed for real: trimming to modules/
+# skcms alone made `gn gen` fail trying to load modules/skottie/BUILD.gn,
+# a module that is very much disabled (skia_enable_skottie=false) -- but
+# still unconditionally *referenced* from the root BUILD.gn's own module
+# list); third_party/ likewise (small BUILD.gn glue only -- the actual
+# upstream sources under third_party/externals/ are never part of this
+# git repository at all, only ever populated by Skia's own separate
+# tools/git-sync-deps, deliberately never run here, see that below);
+# build_overrides/client_utils/specs/toolchain/bin/gn/.gn/BUILD.gn were
+# kept despite no direct reference found in the files actually read,
+# since each is a few KB to a few hundred KB at most -- not worth the
+# risk of a silent future break for a negligible size saving, the same
+# "kept for safety" call already made for libcxx's own utils/ directory.
+# Confirmed for real: a full fetch+configure+build cycle against exactly
+# this sparse set, with third_party/externals/ entirely absent, produces
+# a working libskia.a (21MB) -- fetch dropped from 260MB+ (untrimmed,
+# unshallowed working tree) to ~103MB.
+set(CRTGFX_SKIA_SPARSE_PATHS
+  "bin;build_overrides;client_utils;gn;include;modules;specs;src;third_party;toolchain"
+  CACHE STRING "Semicolon-separated cone-mode sparse-checkout paths for the Skia fetch; empty means a full checkout"
+)
+# git-sync-deps unconditionally downloads Skia's ENTIRE third-party
+# dependency set per its own DEPS file, regardless of which GN features
+# are actually enabled -- confirmed for real (2026-08-21): running it
+# against this project's own minimal CPU-raster-only config downloaded
+# 8.6GB before being killed, including a complete Emscripten/WASM
+# toolchain (node.js, a Python distribution, WASM binaries) totally
+# unrelated to a Windows/Linux/macOS static-library CPU raster build.
+# Confirmed separately, empirically, that it is not merely wasteful but
+# genuinely UNNEEDED for the actual default_gn_args() config in
+# tools/build_skia.py: `ninja -t inputs skia` against a real build shows
+# zero third_party/externals/ references once skia_use_wuffs is also
+# disabled (see that file's own comment on that flag) -- the one
+# third-party dependency (GIF decode support) this config would
+# otherwise still need. Left available as an opt-in for whoever
+# eventually enables a GN feature that genuinely needs a synced
+# third-party dependency again.
+option(CRTGFX_SKIA_SYNC_DEPS "Run Skia tools/git-sync-deps after fetching Skia" OFF)
 set(CRTGFX_SKIA_FETCH_ROOT "${CMAKE_BINARY_DIR}/external/skia" CACHE PATH "Local Skia fetch/build root")
 set(CRTGFX_SKIA_DEFAULT_ROOT "${CRTGFX_SKIA_FETCH_ROOT}/src")
 if(DEFINED CACHE{CRTGFX_SKIA_ROOT})
@@ -78,6 +135,9 @@ if(Python3_Interpreter_FOUND)
   if(CRTGFX_SKIA_SYNC_DEPS)
     list(APPEND CRTGFX_SKIA_FETCH_ARGS --sync-deps)
   endif()
+  foreach(CRTGFX_SKIA_SPARSE_PATH IN LISTS CRTGFX_SKIA_SPARSE_PATHS)
+    list(APPEND CRTGFX_SKIA_FETCH_ARGS --sparse-path "${CRTGFX_SKIA_SPARSE_PATH}")
+  endforeach()
 
   set(CRTGFX_SKIA_BUILD_ARGS)
   foreach(CRTGFX_SKIA_EXTRA_GN_ARG IN LISTS CRTGFX_SKIA_EXTRA_GN_ARGS)

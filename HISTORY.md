@@ -10,6 +10,154 @@ substantive update.
 
 ## 2026-08-21
 
+- **sysroot/rootfs staging verified end to end for the imported-libc++
+  configuration Skia actually needs, and Skia's own fetch pinned +
+  sparse-checked-out + verified building real end to end on Windows for
+  the first time.** Prompted by a request to (1) confirm libc/libdl/
+  libm/libstdc++ genuinely stage correctly into both `sysroot` and
+  `rootfs` in the shape `libcrtgfx`'s Skia bridge needs before relying on
+  it further, and (2) bring Skia's own fetch up to the same pinned/
+  sparse-checked-out/recipe-described discipline `libstdc++/third_party/
+  {libcxx,libcxxabi,libunwind}/recipe.json` already has (see this same
+  file's own entry earlier this same day).
+
+  **Part 1 -- sysroot/rootfs, confirmed working.** Reconfigured with
+  `CRT_USE_IMPORTED_LIBCXX=ON` (the toggle `libcrtgfx/CMakeLists.txt`'s
+  own comment already says Skia genuinely needs -- "[l]inking it into
+  libcrtgfx requires the full libc++ standard library"), built `sysroot`
+  and `rootfs` from scratch, and inspected the real result directly:
+  `sysroot/lib` carries both static and shared import libraries for
+  `c`/`m`/`dl`/libc++/libc++abi, `sysroot/bin` carries the real runtime
+  DLLs, `sysroot/include/crtgfx/skia.h` is present, and `rootfs/system/
+  lib`+`rootfs/usr/lib` receive all 8 expected runtime libraries
+  (`c.dll`/`m.dll`/`dl.dll`/`c++.dll`/`c++abi.dll`/`crtgfx.dll`/`crtjs.
+  dll`/`crtmedia.dll`). Full `cmake --build` + `ctest` (120/120)
+  confirmed no regression from leaving this toggle on.
+
+  **Part 2 -- Wayland has nothing to pin.** Checked directly:
+  `libcrtgfx/third_party/wayland/README.md` states outright "It is
+  intentionally not a checkout" -- the current Linux adapter (`src/
+  wayland_weston.c`, `src/arch/linux/window_wayland.c`) is a hand-
+  written client of the documented core Wayland/xdg-shell wire
+  protocols, not built against any fetched upstream source, matching
+  `TODO.md`'s own already-decided policy ("do not vendor a full
+  compositor until the crtgfx surface/frame boundary has tests"). Left
+  as-is per the user's own explicit choice when asked.
+
+  **Part 3 -- Skia's fetch, pinned and trimmed, verified via a real
+  build.** `CRTGFX_SKIA_REF`/`CRTGFX_SKIA_EXPECTED_COMMIT` now default to
+  a real commit (`13ffba253fc7854fd3b34f67c82dfb2418dc2944`, captured via
+  `git ls-remote https://skia.googlesource.com/skia.git refs/heads/
+  chrome/m148` that day) instead of an empty/floating value -- that
+  specific commit's own message ("Remove CQ for unsupported branch
+  refs/heads/chrome/m148") confirms the branch was already frozen by
+  Skia's own infra at pin time. `tools/fetch_skia.py` gained cone-mode
+  sparse-checkout support (a new `--sparse-path`, repeatable), mirroring
+  `tools/crt-libcxx-build.py`'s own mechanism. The actual sparse set
+  (`bin`, `build_overrides`, `client_utils`, `gn`, `include`, `modules`,
+  `specs`, `src`, `third_party`, `toolchain`) was derived empirically,
+  the same discipline already used for libcxx: `gn gen` first against
+  the full checkout with a real `gn` binary (bootstrapped via Skia's own
+  `bin/fetch-gn`, itself pinned to a `git_revision` hardcoded in that
+  script), then `ninja -t inputs skia` against a real build to see
+  exactly what the `skia` target's own transitive inputs are, not
+  guessed. `modules/` had to stay whole rather than trim to the one
+  module actually linked (`modules/skcms`, 252K of the dir's 19M): `gn
+  gen` needs to at least *load* every module's own `BUILD.gn` to
+  evaluate its own `enabled = skia_enable_<x>` condition even when
+  disabled, confirmed for real via a failed `gn gen` ("Unable to load
+  ... modules/skottie/BUILD.gn") once trimmed too far.
+
+  `CRTGFX_SKIA_SYNC_DEPS` now defaults OFF, a real and important safety
+  fix independent of the pin itself: running `git-sync-deps` for real
+  against this project's own minimal CPU-raster-only GN config (every
+  optional codec/GPU backend already off) downloaded 8.6GB before being
+  killed -- including a complete Emscripten/WASM toolchain (node.js, a
+  Python distribution, WASM binaries), wholly unrelated to a Windows
+  static-library CPU-raster build, and Skia's own `git-sync-deps`
+  unconditionally fetches its entire `DEPS`-declared third-party set
+  regardless of which GN features are actually enabled. Separately
+  confirmed via `ninja -t inputs skia` that this project's own minimal
+  config needs zero `third_party/externals/` content at all -- once one
+  more flag was also disabled: `skia_use_wuffs` (GIF decode), the one
+  codec flag Skia's own `gn/skia.gni` defaults to `true` that this
+  project's `tools/build_skia.py` had not already turned off alongside
+  every sibling codec (`skia_use_libpng_decode`, `_libjpeg_turbo_decode`,
+  etc.) -- fixed alongside the pin.
+
+  `tools/build_skia.py` also gained two real Windows fixes, both found
+  and confirmed necessary while actually trying to drive this through
+  the real `crtgfx-skia-build` CMake target (which, unlike this
+  session's own manual scratch testing, never passes an explicit `--gn`
+  path): (1) `gn = args.gn or str(source / "bin" / "gn")` never resolved
+  on Windows even when `bin/gn.exe` genuinely existed -- `Path("bin/gn")
+  .exists()` is always false without the `.exe` suffix -- fixed to check
+  the right suffix and, if still missing, auto-bootstrap via Skia's own
+  `bin/fetch-gn`, the same way a real Skia developer would; (2) `gn gen`
+  failed outright with `ERROR Could not find "python3" from dotfile in
+  PATH` -- Skia's own `.gn` dotfile hardcodes `script_executable =
+  "python3"`, a real, unconditional upstream requirement a stock Windows
+  Python install does not satisfy by that name (unlike most Linux/macOS
+  distro Python packages) -- fixed with a throwaway, project-owned
+  `python3.bat` PATH shim, prepended only to this one subprocess's own
+  environment, never touching any real system PATH (matching the "wrap
+  what's needed, don't require host changes" discipline `tools/crt-cc`
+  and friends already use).
+
+  A real mistake was made and caught mid-implementation, the *same*
+  mistake as `libstdc++/third_party/*/recipe.json`'s own earlier fix
+  this same day: `tools/fetch_skia.py`'s first version of the sparse
+  clone also dropped `--depth 1` from the initial partial clone (an
+  interactive scratch test that validated the exact command sequence had
+  actually kept `--depth 1`; the flag was lost transcribing that test
+  into the real file). Caught for real, not just in theory: a genuine
+  `crtgfx-skia-fetch` run without it produced a 189MB `.git` (464,512
+  packed objects) before being fixed back down to ~22MB.
+
+  Verified via the real, actual project machinery end to end, not a
+  scratch script: `crtgfx-skia-fetch` (fresh fetch, ~98MB total, ~22MB
+  `.git`) then `crtgfx-skia-build` (real `gn gen` + full `ninja` build
+  through the CMake target, auto-bootstrapping both `gn.exe` and the
+  `python3` shim along the way) produced a genuine `libskia.a` (21MB).
+
+  **A separate, pre-existing, previously-undiscovered gap was found
+  trying to go one step further** (reconfiguring with
+  `CRTGFX_ENABLE_SKIA=ON` and building `crtgfx_skia_raster_smoke`):
+  the final link fails on Windows with a long list of `lld-link: error:
+  duplicate symbol` (`printf`, `fprintf`, `snprintf`, `fabsf`, `fabsl`,
+  `frexpl`, `wmemcpy`, `wmemset`, `wmemcmp`, ...) between this project's
+  own `c.lib`/`m.lib` and objects (the smoke test's own compiled object,
+  several `libskia.a` members, MSVC's own `libcpmt.lib`) that carry
+  their own copies of the same symbol names. Root-caused, not merely
+  observed: the top-level `CMakeLists.txt`'s own `crt_cxx_build_flags`
+  deliberately omits `-nostdinc++` on Windows only (by design -- this
+  project's own Windows C++ bootstrap library, `cxx`/`cxx_shared`, is
+  built against real MSVC STL headers, unlike Linux/macOS), so any
+  Windows CMake-native C++ translation unit that reaches a real C stdio/
+  math header -- directly, or transitively through Skia's own headers,
+  as here -- gets MSVC UCRT's own inline-materialized copies of these
+  functions compiled in as real, externally-visible symbols, colliding
+  with this project's own freestanding libc/libm once both get linked
+  into the same final executable. This appears to be the first target
+  that ever links this project's own `c`/`cxx` bootstrap libraries
+  together with something that also pulls in real MSVC UCRT headers on
+  Windows -- confirmed to be unrelated to anything changed in this same
+  pass (`crt_cxx_build_flags`, `detect_cxx_standard_include_dirs()`, and
+  both targets' own `target_link_libraries()` calls were all untouched).
+  Deliberately left open as a new, separate, tracked item (`TODO.md`'s
+  Skia section) rather than rushed into the same pass -- a genuinely
+  different, deeper Windows-C++-runtime-architecture question from "does
+  the Skia fetch/build itself work," which is now fully verified.
+  `CRTGFX_ENABLE_SKIA` was turned back off (its original, pre-existing
+  default) before finishing this pass, and a stale `exports.def` left
+  over from briefly toggling it on (a real but purely local incremental-
+  build artifact, confirmed by deleting it and rebuilding clean --
+  `bin/crtgfx.dll`'s own `.def`-export-generation step had not correctly
+  regenerated after the objects list it scans changed) was cleared before
+  the final regression check. Full `cmake --build` + `ctest` (120/120)
+  with `CRTGFX_ENABLE_SKIA=OFF` confirms the default workflow is
+  unaffected by any of this pass's changes.
+
 - **libcxx/libcxxabi/libunwind source pinned to exact commit SHAs, and
   sparse-checkout extended to trim libcxx/libcxxabi's own unused `test/`
   suites.** Followed a request to evaluate vendoring the source into this

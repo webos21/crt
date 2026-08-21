@@ -633,3 +633,48 @@ in those two win.
   trimmed source still reports `imported_libcxx_test: ok` (both linkage
   modes) and 120/120 tests passing. See `HISTORY.md`'s dated entry for
   the full writeup.
+- **2026-08-21 (eighth pass, same day): sysroot/rootfs staging verified
+  for the imported-libc++ config Skia needs, and Skia's own fetch pinned
+  + sparse-checked-out + verified building for real on Windows.**
+  `CRT_USE_IMPORTED_LIBCXX=ON` sysroot/rootfs builds confirmed correct
+  (all 8 expected runtime libraries staged, `skia.h` present in
+  `sysroot/include`, 120/120 no regression). Wayland has nothing to
+  pin today (`libcrtgfx/third_party/wayland/README.md`: "intentionally
+  not a checkout," matching TODO.md's own already-decided no-vendor-yet
+  policy) -- left as-is per explicit choice. Skia: `CRTGFX_SKIA_REF`/
+  `CRTGFX_SKIA_EXPECTED_COMMIT` now default to a real pinned commit
+  (was empty/floating `refs/heads/chrome/m148`); `tools/fetch_skia.py`
+  gained cone-mode sparse-checkout (new `CRTGFX_SKIA_SPARSE_PATHS`,
+  derived empirically via `ninja -t inputs skia` against a real build,
+  not guessed); `CRTGFX_SKIA_SYNC_DEPS` now defaults OFF (confirmed for
+  real: unconditionally downloads Skia's entire third-party set
+  regardless of GN flags -- 8.6GB including a full Emscripten/WASM
+  toolchain before being killed -- and confirmed unnecessary for this
+  project's own minimal CPU-raster config once `skia_use_wuffs` is also
+  disabled, the one codec flag left at Skia's own default while every
+  sibling was already off). `tools/build_skia.py` gained two real
+  Windows fixes: `gn.exe` auto-bootstrap (the previous bare-`gn`
+  existence check never matched on Windows) and a throwaway `python3.bat`
+  PATH shim (`gn gen` otherwise fails outright -- Skia's own `.gn`
+  dotfile hardcodes `script_executable = "python3"`, absent by that name
+  on a stock Windows Python install). A real mistake (missing `--depth 1`
+  on the sparse clone, the exact same class of bug already fixed once
+  this same day for `libstdc++/third_party/*/recipe.json`) was made and
+  caught for real (189MB `.git`, 464,512 packed objects, from one actual
+  `crtgfx-skia-fetch` run) before being fixed to ~22MB. Verified through
+  the real `crtgfx-skia-fetch`/`crtgfx-skia-build` CMake targets, not a
+  scratch script: a genuine `libskia.a` (21MB) was produced. Going one
+  step further (`CRTGFX_ENABLE_SKIA=ON` + `crtgfx_skia_raster_smoke`)
+  surfaced a separate, pre-existing, previously-undiscovered Windows
+  link gap (duplicate `printf`/`fprintf`/`snprintf`/`fabsf`/`fabsl`/
+  `frexpl`/`wmemcpy`/`wmemset`/`wmemcmp` between this project's own
+  `c.lib`/`m.lib` and MSVC-UCRT-inline-materialized copies, root-caused
+  to `crt_cxx_build_flags` deliberately omitting `-nostdinc++` on
+  Windows only) -- confirmed unrelated to this pass's own changes and
+  deliberately left open as a new, separate, tracked `TODO.md` item
+  rather than rushed. `CRTGFX_ENABLE_SKIA` restored to its original OFF
+  default; a stale `exports.def` left from briefly toggling it on (pure
+  local incremental-build staleness, confirmed by deleting and
+  rebuilding clean) was cleared. Full `cmake --build` + `ctest`
+  (120/120) with the default config confirms no regression. See
+  `HISTORY.md`'s dated entry for the full writeup.
