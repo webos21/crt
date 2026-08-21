@@ -470,3 +470,29 @@ in those two win.
   never declared -- planned as a small project-owned header shim, same
   pattern as `libc/src/arch/windows/`'s existing raw `__declspec(dllimport)`
   prototypes. Full local `ctest` (119/119 on Windows) confirms no regression.
+- **2026-08-21 (third pass): libunwind and libcxxabi now build clean on
+  Windows, static and shared.** The planned `libstdc++/third_party/
+  win32_shim/{windows,psapi,ntverp}.h` header shim closed the
+  `findUnwindSections()` gap from the pass above, plus two more real gaps
+  found getting it to actually link (`extern "C"` missing on the shim's
+  declarations, causing C++-mangled references that could never match
+  kernel32.lib's plain-C export names; a false-positive
+  `LIBUNWIND_HAS_PTHREAD_LIB` CMake probe pulling in a `-lpthread` this
+  project deliberately never provides). libcxxabi's own shared `.dll` then
+  needed one more fix: `_LIBCPP_BUILDING_LIBRARY` (a libcxx-side macro,
+  distinct from libcxxabi's own `_LIBCXXABI_BUILDING_LIBRARY`) was never
+  defined for two of its own source files, so `std::runtime_error`/
+  `bad_cast`/`bad_typeid`'s vtables got declared `dllimport` instead of
+  `dllexport` and the shared link failed on undefined vtable symbols.
+  libcxx itself compiles almost entirely clean after fixing a `<filesystem>`
+  build-target mismatch (Windows never enables it upstream), except 6 files
+  hitting two real, unconditional missing Windows headers (`xlocinfo.h` via
+  libcxx's own MSVC-UCRT locale backend, `winapifamily.h`) -- this is a
+  materially bigger, architecturally different gap than the shims above
+  (would mean linking the hosted `ucrtbase.dll` this project otherwise
+  avoids everywhere; Android's own libcxx fork already carries an
+  alternate Bionic-shaped locale backend that looks like the better fit,
+  but switching to it needs a real audit, not a quick flip -- see
+  `TODO.md`'s C++ runtime prerequisite section, step 4, and `HISTORY.md`'s
+  dated entry). Full local `ctest` (119/119 on Windows) confirms no
+  regression to the default build/test workflow.

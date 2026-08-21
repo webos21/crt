@@ -25,6 +25,11 @@
       "-DLIBCXX_STANDARD_VER=c++14",
       "-DLIBCXX_HAS_RT_LIB=OFF"
     ],
+    "target_overrides": {
+      "windows": {
+        "build_targets": ["cxx", "cxx_experimental", "cxx-generated-config"]
+      }
+    },
     "build_targets": ["cxx", "cxx_filesystem", "cxx_experimental", "cxx-generated-config"]
   },
   "post_install_copy": {
@@ -47,6 +52,7 @@
     }
   ],
   "notes": [
+    "target_overrides.windows.build_targets omits cxx_filesystem: libcxx's own top-level CMakeLists.txt sets ENABLE_FILESYSTEM_DEFAULT OFF specifically `if (WIN32)` (LIBCXX_ENABLE_FILESYSTEM defaults ON, matching LIBCXX_ENABLE_EXPERIMENTAL_LIBRARY, everywhere else), so the cxx_filesystem CMake target this recipe's common build_targets requests is simply never generated on Windows -- 'ninja: error: unknown target cxx_filesystem', not a soft skip. This project deliberately does not override LIBCXX_ENABLE_FILESYSTEM back to ON for Windows: upstream's own WIN32-specific default is left as-is (no stated rationale found in the fetched source to second-guess), and nothing in this project currently exercises <filesystem>, so build_targets is adjusted to match what Windows's own CMake configuration actually offers instead. macOS and Linux both keep the common list unchanged, matching their own already-verified crt-libcxx-smoke runs.",
     "LIBCXX_STANDARD_VER=c++14: Android's own build uses a newer dialect than this legacy standalone CMake default; keeping this cache value also avoids the removed C11 gets() import while preserving the public CRT headers.",
     "LIBCXX_HAS_RT_LIB=OFF on every host: modern Bionic provides the historical librt surface from libc itself. The standalone libc++ probe is also compiled as a static library and can report a false positive without performing a real link, so this is pinned off everywhere rather than leaking a host librt dependency into Linux.",
     "post_install_copy.macos stages libc++'s own upstream not-weak symbol-export policy list (lib/notweak.exp) into the shared install prefix as libc++.notweak.exp -- tools/crt-c++'s macOS static-link path applies it via -Wl,-force_symbols_not_weak_list so a stray host libSystem symbol can never interpose this project's own C++ allocator.",

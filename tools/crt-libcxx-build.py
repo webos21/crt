@@ -60,8 +60,20 @@ Recipe JSON shape (schema_version 1):
   "cmake": {
     "options": ["-DFOO=ON", ...],  // applied on every enabled OS
     "target_overrides": {
-      "<os>": { "options": ["-DBAR=ON", ...] }  // appended after the
-          // common options above, OS-specific
+      "<os>": {
+        "options": ["-DBAR=ON", ...],  // appended after the common
+            // options above, OS-specific
+        "build_targets": ["cxx", ...]  // optional; entirely REPLACES
+            // (not merges with) the common "build_targets" below for
+            // this one OS -- for when a target genuinely does not exist
+            // on that OS's CMake configuration (e.g. libcxx's own
+            // upstream CMakeLists.txt defaults LIBCXX_ENABLE_FILESYSTEM
+            // to OFF specifically `if (WIN32)`, so the cxx_filesystem
+            // target this recipe otherwise requests on every other OS
+            // is never generated on Windows at all -- requesting it
+            // anyway is a hard "ninja: error: unknown target" failure,
+            // not a soft skip)
+      }
     },
     "build_targets": ["cxx", "cxx_filesystem"]  // cmake --build --target
         // for each, in order; omit for a plain default-target build
@@ -425,6 +437,32 @@ def common_cmake_args(root, install_prefix, sysroot, rootfs, target_os, windows_
         cxx_flags += " -fdwarf-exceptions"
         c_flags += " -fdwarf-exceptions"
 
+        # -fdwarf-exceptions above turns off the __SEH__-gated <windows.h>
+        # includes, but libunwind's AddressSpace.hpp has one more,
+        # unconditional (real, not __SEH__-related) <windows.h>/<psapi.h>
+        # pair under `#elif defined(_LIBUNWIND_SUPPORT_DWARF_UNWIND) &&
+        # defined(_WIN32)` (findUnwindSections(), which enumerates loaded
+        # PE modules to locate each one's .eh_frame section). This project
+        # deliberately does not patch libunwind's own source for this (see
+        # libstdc++/third_party/libunwind/recipe.json's notes) -- instead
+        # libstdc++/third_party/win32_shim/{windows,psapi}.h provides just
+        # the minimal, real PE/COFF-spec declarations that one function
+        # needs, matching the existing libc/src/arch/windows/ pattern of
+        # raw __declspec(dllimport) prototypes rather than a real SDK
+        # header. Harmless to add for libcxx/libcxxabi too: neither
+        # includes <windows.h> under -fdwarf-exceptions any more, so the
+        # extra -I is simply unused there.
+        # Quoted the same way tools/crt-cc/tools/crt-c++'s own final exec
+        # lines already quote space-containing Windows paths (see those
+        # scripts' resource_dir/CRT_WINDOWS_SDK_LIBPATH handling): this
+        # string is later split on whitespace by CMake when building each
+        # compile command from CMAKE_CXX_FLAGS/CMAKE_C_FLAGS, so an
+        # unquoted path containing a space (e.g. a repo cloned under
+        # "OneDrive - ..." on Windows) would otherwise be torn in two.
+        win32_shim_dir = (root / "libstdc++" / "third_party" / "win32_shim").as_posix()
+        cxx_flags += f' -I"{win32_shim_dir}"'
+        c_flags += f' -I"{win32_shim_dir}"'
+
     c_compiler = root / "tools" / "crt-cc"
     cxx_compiler = root / "tools" / "crt-c++"
     compiler_arg_options = []
@@ -556,7 +594,11 @@ def build_recipe(cmake, recipe, source_root, build_root, install_prefix, common,
     build_dir = build_root / recipe["name"]
     if not (build_dir / "build.ninja").is_file():
         configure_recipe(cmake, recipe, source_root, build_root, install_prefix, common, target_os, env, root)
-    targets = recipe.get("cmake", {}).get("build_targets")
+    cmake_cfg = recipe.get("cmake", {})
+    targets = (
+        cmake_cfg.get("target_overrides", {}).get(target_os, {}).get("build_targets")
+        or cmake_cfg.get("build_targets")
+    )
     build_cmd = [cmake, "--build", str(build_dir)]
     if targets:
         build_cmd += ["--target"] + targets
