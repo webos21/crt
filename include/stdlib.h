@@ -21,6 +21,31 @@ int posix_memalign(void** memptr, size_t alignment, size_t size);
 void* aligned_alloc(size_t alignment, size_t size);
 int system(const char* command);
 
+#if defined(CRT_TARGET_OS_WINDOWS)
+/* Real mingw-w64/MSVC CRT compatibility symbols, Windows only, declared
+ * here rather than in <malloc.h> to match where a real Windows C library
+ * puts them: MSVC's own <stdlib.h> declares _aligned_malloc/_aligned_free
+ * directly (no separate <malloc.h> include needed), and LLVM's libc++/
+ * libc++abi source relies on exactly that -- confirmed directly,
+ * stdlib_new_delete.cpp/fallback_malloc.cpp/libcxx's own src/new.cpp all
+ * call _aligned_malloc()/_aligned_free() under `#if defined(
+ * _LIBCPP_WIN32API)`/`_WIN32` with only <cstdlib>/<new> included, never
+ * <malloc.h> itself. This project's own <stdlib.h> only ever declared
+ * the portable C11 aligned_alloc(), so building libc++abi/libc++ against
+ * this project's headers on Windows failed outright with "use of
+ * undeclared identifier '_aligned_malloc'" even after adding the
+ * declarations to <malloc.h> (never reached, since nothing here
+ * includes that header). Implementation deliberately routes through
+ * posix_memalign(), not aligned_alloc(): the real _aligned_malloc()
+ * contract (any size, power-of-two alignment) is looser than C11
+ * aligned_alloc()'s (requires size to be a multiple of alignment), and
+ * libc++/libc++abi's own operator new(size, align_val_t) callers do not
+ * guarantee that relationship -- aligned_alloc() would wrongly EINVAL/
+ * return null on a perfectly valid request. */
+void* _aligned_malloc(size_t size, size_t alignment);
+void _aligned_free(void* ptr);
+#endif
+
 #define RAND_MAX 0x7fffffff
 typedef struct {
   int quot;

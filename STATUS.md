@@ -445,3 +445,28 @@ in those two win.
   C++ runtime prerequisite section. Full local `ctest` (119/119 on Windows)
   confirms this restructuring introduced no regression to the default
   build/test workflow, which never touches the `crt-libcxx-*` targets.
+- **2026-08-21 (second pass): executed items 1-3 of the revised libunwind
+  adoption plan** (Track A / C++ exceptions only; Track B / debug backtraces
+  deliberately excluded per the user's own review-informed direction -- see
+  `TODO.md`'s C++ runtime prerequisite section for the full 5-item plan and
+  `HISTORY.md`'s dated entry for the complete writeup). `-fdwarf-exceptions`
+  now forces portable DWARF-CFI unwinding instead of native SEH on
+  `*-w64-mingw32` (applied to both `CMAKE_CXX_FLAGS` and `CMAKE_C_FLAGS`);
+  `_aligned_malloc`/`_aligned_free` are now real, implemented in
+  `libc/src/malloc.c` via `posix_memalign()` and declared in
+  `include/stdlib.h` (matching real MSVC header placement, not
+  `<malloc.h>`); libcxxabi's shared `.dll` now correctly links against
+  libunwind's import library (`CMAKE_SHARED_LINKER_FLAGS` override, since a
+  Windows DLL must resolve every symbol at its own link time unlike a static
+  `.a` or an ELF `.so`). Six more real toolchain bugs found and fixed along
+  the way (`-Wl,/libpath:` word-splitting on space-containing paths, stray
+  `CMAKE_{C,CXX}_STANDARD_LIBRARIES` MSVC defaults, upstream CMake's
+  `if(MINGW)` blocks assuming a real mingw-w64 distribution this project's
+  ABI-compatibility-only target doesn't have). All libunwind source files now
+  compile clean except one function; the one remaining gap is genuinely
+  isolated: `libunwind.cpp`'s `findUnwindSections()` needs real PE/COFF
+  module enumeration (`EnumProcessModules`/`psapi.h` +
+  `IMAGE_DOS_HEADER`/`IMAGE_NT_HEADERS`/etc. from `winnt.h`) this project has
+  never declared -- planned as a small project-owned header shim, same
+  pattern as `libc/src/arch/windows/`'s existing raw `__declspec(dllimport)`
+  prototypes. Full local `ctest` (119/119 on Windows) confirms no regression.

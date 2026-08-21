@@ -6,7 +6,7 @@
     "repository": "https://android.googlesource.com/platform/external/libcxxabi",
     "ref": "refs/heads/main"
   },
-  "dependencies": [],
+  "dependencies": ["libunwind"],
   "cmake": {
     "options": [
       "-DLIBCXXABI_ENABLE_SHARED=ON",
@@ -18,6 +18,13 @@
       "-DLIBCXXABI_USE_COMPILER_RT=ON",
       "-DLLVM_EXTERNAL_LIBCXX_SOURCE_DIR=@SOURCE:libcxx@"
     ],
+    "target_overrides": {
+      "windows": {
+        "options": [
+          "-DCMAKE_SHARED_LINKER_FLAGS=@INSTALL_PREFIX@/lib/libunwind.dll.a"
+        ]
+      }
+    },
     "build_targets": ["cxxabi"]
   },
   "extra_files": [
@@ -32,10 +39,18 @@
       "find": "if (LIBCXXABI_ENABLE_NEW_DELETE_DEFINITIONS)\n",
       "replace": "list(APPEND LIBCXXABI_SOURCES __crt_dso_handle.cpp)\n\nif (LIBCXXABI_ENABLE_NEW_DELETE_DEFINITIONS)\n",
       "reason": "This project's own crt1.o never defines __dso_handle (Bionic's real crtbegin/crtend split is not imported), and libc++abi's static-init-guard code needs a real symbol of that exact name to reference. A tiny CRT-owned shim source, wired into libcxxabi's own build via this one-line CMakeLists.txt insertion rather than patched into the freestanding CRT startup objects themselves."
+    },
+    {
+      "file": "src/CMakeLists.txt",
+      "find": "if (MINGW)\n  # MINGW_LIBRARIES is defined in config-ix.cmake\n  list(APPEND LIBCXXABI_LIBRARIES ${MINGW_LIBRARIES})\nendif()",
+      "replace": "# CRT: MINGW_LIBRARIES (mingw32/moldname/mingwex/msvcrt/advapi32/...) is\n# a real mingw-w64 distribution's own CRT stub import libraries -- this\n# project's --target=*-w64-mingw32 is used for ABI/calling-convention\n# compatibility only, never a real mingw-w64 install, so none of these\n# exist in the sysroot at all (confirmed for real: \"lld: error: unable\n# to find library -lmingw32\" and 15 siblings). tools/crt-c++ already\n# supplies the complete real link line (this project's own kernel32.lib/\n# synchronization.lib, its own libc, no mingw-w64 runtime at all), so\n# this block is a deliberate no-op here rather than a real port.\nif (FALSE)\nendif()",
+      "reason": "CMake's built-in MINGW variable is true for any *-w64-mingw32 target regardless of whether a real mingw-w64 CRT distribution actually backs it -- this project's own kernel32.lib/synchronization.lib and Bionic-shaped libc already satisfy everything a real Windows program needs, added by tools/crt-c++ itself; MINGW_LIBRARIES names real mingw-w64 runtime stub libraries this sysroot has never had and will never provide."
     }
   ],
   "notes": [
-    "Deliberately no LIBCXXABI_USE_LLVM_UNWINDER/LIBCXXABI_LIBUNWIND_INCLUDES/dependency on ../libunwind here, on any host: that CMake option only changes libcxxabi's own compile-time #ifdef selection (real libunwind.h API vs. the generic, portable Itanium _Unwind_* ABI surface) -- it does not, by itself, make the CMake-standalone-build cxxabi_shared/cxxabi_static targets actually link against a real libunwind (that automatic wiring only fires inside a combined, single-configure LLVM \"runtimes\" build where libunwind was add_subdirectory()'d into the *same* CMake project graph, which AOSP's split-repo layout -- libcxx/libcxxabi/libunwind are three separate git repos -- makes impractical here anyway; confirmed by reading libcxxabi's own src/CMakeLists.txt, which checks `TARGET unwind_shared`/`HAVE_LIBUNWIND`, neither ever satisfiable from a separate `cmake -S -B` invocation). The plain default (this option OFF) Itanium ABI surface libcxxabi already compiles against is exactly what a real libunwind exports too, so the only real cross-reference this needs is a link-time one -- see tools/crt-c++'s own per-OS cxx_runtime_libs, and ../libunwind/recipe.json's own notes for where each host's libunwind actually comes from (built here on Windows only; a host package on Linux; not needed at all on macOS).",
-    "macos needs nothing special here either: LIBCXXABI_USE_LLVM_UNWINDER simply stays at its upstream default (OFF), matching Darwin's own already-verified-working libSystem unwinder."
+    "Deliberately no LIBCXXABI_USE_LLVM_UNWINDER/LIBCXXABI_LIBUNWIND_INCLUDES here, on any host: that CMake option only changes libcxxabi's own compile-time #ifdef selection (real libunwind.h API vs. the generic, portable Itanium _Unwind_* ABI surface) -- it does not, by itself, make the CMake-standalone-build cxxabi_shared/cxxabi_static targets actually link against a real libunwind (that automatic wiring only fires inside a combined, single-configure LLVM \"runtimes\" build where libunwind was add_subdirectory()'d into the *same* CMake project graph, which AOSP's split-repo layout -- libcxx/libcxxabi/libunwind are three separate git repos -- makes impractical here anyway; confirmed by reading libcxxabi's own src/CMakeLists.txt, which checks `TARGET unwind_shared`/`HAVE_LIBUNWIND`, neither ever satisfiable from a separate `cmake -S -B` invocation). The plain default (this option OFF) Itanium ABI surface libcxxabi already compiles against is exactly what a real libunwind exports too.",
+    "The 'dependencies': ['libunwind'] link and the windows CMAKE_SHARED_LINKER_FLAGS override above exist for a real, empirically-found reason, correcting an earlier (wrong) assumption in this file that a link-time reference in tools/crt-c++ alone would be enough: the STATIC cxxabi_static/libc++abi.a build genuinely does not need libunwind's symbols resolved at its own link step (ar does not check for undefined references, confirmed -- it linked clean with zero libunwind anywhere in scope) but the SHARED cxxabi_shared/libc++abi.dll build does, unconditionally -- unlike an ELF .so, a Windows DLL must resolve every referenced symbol (_Unwind_Resume, _Unwind_RaiseException, vtable for std::logic_error/std::runtime_error/std::bad_cast/std::bad_typeid, ...) at its own link time, confirmed for real via 'ld.lld: error: undefined symbol: _Unwind_Resume' and nine siblings the first time LIBCXXABI_ENABLE_SHARED=ON actually got exercised. This links against libunwind's own shared import library (not the static archive) so the actual unwinder code lives in exactly one place (unwind.dll) with libc++abi.dll importing it, avoiding a duplicate-symbol risk against the separate libunwind.a tools/crt-c++'s own *static*-linkage cxx_runtime_libs still adds directly at the final consumer.",
+    "macos needs nothing special here either: LIBCXXABI_USE_LLVM_UNWINDER simply stays at its upstream default (OFF), matching Darwin's own already-verified-working libSystem unwinder -- and macos never enables the libunwind dependency at all (see ../libunwind/recipe.json's own target_os), so this recipe's 'dependencies' entry is silently skipped there, matching every other disabled-dependency case tools/crt-libcxx-build.py's resolve_build_order() already handles.",
+    "Linux is not yet attempted (see ../libunwind/recipe.json's own notes) but will need the equivalent fix once reached: a target_overrides.linux entry adding libunwind's shared object to CMAKE_SHARED_LINKER_FLAGS the same way, most likely a bare -lunwind plus -L@INSTALL_PREFIX@/lib rather than a Windows-style .dll.a import library."
   ]
 }

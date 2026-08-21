@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <malloc.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -414,3 +415,20 @@ void* aligned_alloc(size_t alignment, size_t size) {
   }
   return result;
 }
+
+#if defined(CRT_TARGET_OS_WINDOWS)
+/* See include/malloc.h's own comment for why these exist and why they
+ * are routed through posix_memalign() rather than aligned_alloc(). */
+void* _aligned_malloc(size_t size, size_t alignment) {
+  void* result = 0;
+
+  if (posix_memalign(&result, alignment, size) != 0) {
+    return 0;
+  }
+  return result;
+}
+
+void _aligned_free(void* ptr) {
+  free(ptr);
+}
+#endif

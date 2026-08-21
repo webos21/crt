@@ -257,9 +257,6 @@ case "$target_os" in
     fi
     ;;
   windows)
-    if [ -n "${CRT_WINDOWS_SDK_LIBPATH:-}" ]; then
-      libs="$libs -Wl,/libpath:${CRT_WINDOWS_SDK_LIBPATH}"
-    fi
     if [ "${CRT_CXX_BUILDING_RUNTIME:-0}" = 1 ]; then
       cxx_runtime_libs=""
     elif [ "$runtime_linkage" = shared ]; then
@@ -312,6 +309,23 @@ case "$target_os" in
     ;;
 esac
 
+# See tools/crt-cc's matching comment: -Wl,/libpath:... is passed as its
+# own quoted argument directly on each exec line below, not folded into
+# $libs, for the same "Program Files (x86)" reason resource_dir already
+# gets this treatment -- $libs is expanded unquoted (relying on word
+# splitting, like every other flag accumulator in this script), which
+# would otherwise tear a space-containing Windows SDK path into multiple
+# broken argv entries. Confirmed for real: this exact bug broke linking
+# libc++abi.dll, clang reporting "no such file or directory: 'Files'" for
+# a linker-flag argument that had already lost its own spaces.
+if [ -n "${CRT_WINDOWS_SDK_LIBPATH:-}" ]; then
+  if [ -n "$resource_dir" ]; then
+    # shellcheck disable=SC2086
+    exec "$cxx" $common_flags -isystem "${resource_dir}/include" -nostdlib -nostartfiles -nodefaultlibs $entry $user_args $libs "-Wl,/libpath:${CRT_WINDOWS_SDK_LIBPATH}"
+  fi
+  # shellcheck disable=SC2086
+  exec "$cxx" $common_flags -nostdlib -nostartfiles -nodefaultlibs $entry $user_args $libs "-Wl,/libpath:${CRT_WINDOWS_SDK_LIBPATH}"
+fi
 if [ -n "$resource_dir" ]; then
   # shellcheck disable=SC2086
   exec "$cxx" $common_flags -isystem "${resource_dir}/include" -nostdlib -nostartfiles -nodefaultlibs $entry $user_args $libs

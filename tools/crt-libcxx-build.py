@@ -395,6 +395,35 @@ def common_cmake_args(root, install_prefix, sysroot, rootfs, target_os, windows_
         cxx_flags += " -fno-typed-cxx-new-delete"
     if target_os == "macos":
         cxx_flags = f"-U__APPLE__ {cxx_flags}"
+    c_flags = ""
+    if target_os == "windows":
+        # Clang's default exception-table format for the *-w64-mingw32
+        # target is native SEH, signaled to source via the __SEH__
+        # predefine -- confirmed directly (`clang++ --target=x86_64-w64-
+        # mingw32 -dM -E` defines __SEH__ by default, and stops defining
+        # it entirely under -fdwarf-exceptions). That predefine gates a
+        # real <windows.h>-family dependency in several places this
+        # project's freestanding, -nostdinc build cannot satisfy:
+        # libcxxabi's own cxa_personality.cpp (`#if defined(__SEH__) ...
+        # #include <windows.h>`), and libunwind's own Unwind-seh.cpp/
+        # public include/unwind.h (`#if defined(_LIBUNWIND_SUPPORT_SEH_
+        # UNWIND)`/`#if defined(__SEH__) ...`). Forcing portable DWARF
+        # CFI-based exceptions instead (exactly what this project's own
+        # from-source-built LLVM libunwind is a table-based unwinder for)
+        # turns those branches off with no source patch needed, and
+        # unifies the exception model with Linux/macOS (both already
+        # Itanium DWARF) -- see TODO.md's C++ runtime prerequisite
+        # section, step 1. Needed on BOTH CMAKE_CXX_FLAGS and CMAKE_C_
+        # FLAGS: libunwind (unlike libcxx/libcxxabi, which are C++-only)
+        # has several plain C source files (UnwindLevel1.c, UnwindLevel1-
+        # gcc-ext.c, Unwind-sjlj.c) that also transitively reach
+        # unwind.h's __SEH__-gated windows.h include via libunwind_ext.h
+        # -- confirmed for real: CMAKE_CXX_FLAGS alone left these three
+        # failing with the exact same "'windows.h' file not found" even
+        # after cxa_personality.cpp/Unwind-seh.cpp (both C++) were
+        # already fixed by it.
+        cxx_flags += " -fdwarf-exceptions"
+        c_flags += " -fdwarf-exceptions"
 
     c_compiler = root / "tools" / "crt-cc"
     cxx_compiler = root / "tools" / "crt-c++"
@@ -465,6 +494,23 @@ def common_cmake_args(root, install_prefix, sysroot, rootfs, target_os, windows_
             compiler_arg_options.append(f"-DCMAKE_RANLIB={Path(llvm_ranlib).as_posix()}")
         if ninja:
             compiler_arg_options.append(f"-DCMAKE_MAKE_PROGRAM={Path(ninja).as_posix()}")
+        # CMAKE_C_STANDARD_LIBRARIES/CMAKE_CXX_STANDARD_LIBRARIES: cleared
+        # for the exact same reason the top-level CMakeLists.txt already
+        # clears them for this project's own targets. CMake's own Windows-
+        # Clang toolchain module defaults these to the standard MSVC
+        # library set (kernel32.lib user32.lib gdi32.lib winspool.lib
+        # shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib
+        # advapi32.lib), silently appended to every link -- confirmed for
+        # real: this is exactly the "lld: error: unable to find library
+        # -lkernel32" (and nine siblings) linking libc++abi.dll, none of
+        # which exist as bare -l-searchable names in this project's own
+        # sysroot (kernel32.lib is linked by its own full path elsewhere,
+        # and this project never needs GDI/OLE/shell32 at all). Left
+        # unset, this silently reintroduces the exact standard-MSVC-
+        # library assumption this project has otherwise avoided
+        # everywhere else.
+        compiler_arg_options.append("-DCMAKE_C_STANDARD_LIBRARIES=")
+        compiler_arg_options.append("-DCMAKE_CXX_STANDARD_LIBRARIES=")
 
     return [
         "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
@@ -474,6 +520,7 @@ def common_cmake_args(root, install_prefix, sysroot, rootfs, target_os, windows_
         f"-DCMAKE_INSTALL_PREFIX={install_prefix}",
         "-DCMAKE_BUILD_TYPE=Debug",
         f"-DCMAKE_CXX_FLAGS={cxx_flags}",
+        f"-DCMAKE_C_FLAGS={c_flags}",
     ] + compiler_arg_options
 
 

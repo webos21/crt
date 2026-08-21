@@ -275,9 +275,6 @@ case "$target_os" in
     fi
     ;;
   windows)
-    if [ -n "${CRT_WINDOWS_SDK_LIBPATH:-}" ]; then
-      libs="$libs -Wl,/libpath:${CRT_WINDOWS_SDK_LIBPATH}"
-    fi
     libs="$libs ${CRT_SYSROOT}/lib/c.lib ${CRT_SYSROOT}/lib/m.lib ${CRT_SYSROOT}/lib/dl.lib ${CRT_SYSROOT}/lib/c++.lib ${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"
     if [ "$shared_mode" -eq 1 ]; then
       libs="${CRT_SYSROOT}/lib/dllcrt.o $libs"
@@ -311,6 +308,20 @@ case "$target_os" in
     ;;
 esac
 
+# See the matching comment in tools/crt-c++: -Wl,/libpath:... is passed
+# as its own quoted argument directly on each exec line below, not
+# folded into $libs (which is expanded unquoted like every other flag
+# accumulator here) -- a space-containing Windows SDK path
+# ("C:\Program Files (x86)\...") would otherwise get torn into multiple
+# broken argv entries by word splitting.
+if [ -n "${CRT_WINDOWS_SDK_LIBPATH:-}" ]; then
+  if [ -n "$resource_dir" ]; then
+    # shellcheck disable=SC2086
+    exec "$cc" $common_flags -isystem "${resource_dir}/include" -nostdlib -nostartfiles -nodefaultlibs $entry $prelibs $user_args $libs "-Wl,/libpath:${CRT_WINDOWS_SDK_LIBPATH}"
+  fi
+  # shellcheck disable=SC2086
+  exec "$cc" $common_flags -nostdlib -nostartfiles -nodefaultlibs $entry $prelibs $user_args $libs "-Wl,/libpath:${CRT_WINDOWS_SDK_LIBPATH}"
+fi
 if [ -n "$resource_dir" ]; then
   # shellcheck disable=SC2086
   exec "$cc" $common_flags -isystem "${resource_dir}/include" -nostdlib -nostartfiles -nodefaultlibs $entry $prelibs $user_args $libs

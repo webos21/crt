@@ -32,6 +32,14 @@
       {"from": "lib/notweak.exp", "to": "lib/libc++.notweak.exp"}
     ]
   },
+  "patches": [
+    {
+      "file": "lib/CMakeLists.txt",
+      "find": "add_library_flags_if(MINGW \"${MINGW_LIBRARIES}\")",
+      "replace": "# CRT: see libcxxabi/recipe.json's own matching patch note -- MINGW_LIBRARIES\n# names a real mingw-w64 distribution's own CRT stub import libraries this\n# project's sysroot has never had and will never provide (this project's\n# --target=*-w64-mingw32 is ABI-compatibility-only; tools/crt-c++ already\n# supplies the real link line). Deliberately no-op'd -- do not re-add.",
+      "reason": "Same as libcxxabi/recipe.json's matching patch: confirmed for real (\"lld: error: unable to find library -lmingw32\" and 15 siblings) building libc++abi first; applying the identical fix here preemptively since libcxx's own lib/CMakeLists.txt has the exact same line."
+    }
+  ],
   "notes": [
     "LIBCXX_STANDARD_VER=c++14: Android's own build uses a newer dialect than this legacy standalone CMake default; keeping this cache value also avoids the removed C11 gets() import while preserving the public CRT headers.",
     "LIBCXX_HAS_RT_LIB=OFF on every host: modern Bionic provides the historical librt surface from libc itself. The standalone libc++ probe is also compiled as a static library and can report a false positive without performing a real link, so this is pinned off everywhere rather than leaking a host librt dependency into Linux.",

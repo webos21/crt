@@ -232,6 +232,126 @@ substantive update.
   itself introduced no regression to the default build/test workflow,
   which never touches the `crt-libcxx-*` targets.
 
+- **Resumed the libunwind/libc++/libc++abi Windows build the same day,
+  following a user-provided review of the plan** (correctly separating the
+  "C++ exceptions actually working" track from a different "debug
+  backtrace capture" track the review's own suggestions were really aimed
+  at -- kept out of this work entirely per explicit instruction, recorded
+  in `TODO.md`). Worked through the revised, ordered plan's first three
+  steps for real, executing and fixing forward rather than reasoning in
+  the abstract -- six more genuine bugs found and fixed along the way, on
+  top of the three from the recipe.json restructuring earlier the same
+  day:
+  1. **`-fdwarf-exceptions` confirmed and applied for real** (previously
+     just a hypothesis): empirically verified with a two-line `-dM -E`
+     probe that this flag stops clang from predefining `__SEH__` for the
+     `*-w64-mingw32` target at all, then applied to the actual build. Had
+     to go on *both* `CMAKE_CXX_FLAGS` and `CMAKE_C_FLAGS` -- libunwind,
+     unlike libcxx/libcxxabi, has several plain C source files
+     (`UnwindLevel1.c`, `UnwindLevel1-gcc-ext.c`, `Unwind-sjlj.c`) that
+     reach the same `__SEH__`-gated `<windows.h>` include via `unwind.h`
+     transitively, confirmed still failing on the CXX-only flag alone
+     after `cxa_personality.cpp`/`Unwind-seh.cpp` were already fixed by
+     it. With both flags set, `cxa_personality.cpp`, `Unwind-seh.cpp`,
+     `UnwindLevel1.c`, `UnwindLevel1-gcc-ext.c`, `Unwind-sjlj.c`, and
+     `Unwind-EHABI.cpp` all compile clean with zero `<windows.h>` errors.
+  2. **Real `_aligned_malloc`/`_aligned_free`** added to this project's
+     own libc (`libc/src/malloc.c`), thin wrappers over the existing
+     `posix_memalign()` (not `aligned_alloc()` -- its stricter C11 "size
+     must be a multiple of alignment" contract does not match the looser
+     real `_aligned_malloc()` one, and libc++/libc++abi's own
+     `operator new(size, align_val_t)` callers do not guarantee that
+     relationship). First placed in `include/malloc.h`, which turned out
+     wrong and had to move to `include/stdlib.h`: libc++/libc++abi's own
+     source (`stdlib_new_delete.cpp`, `fallback_malloc.cpp`, libcxx's own
+     `src/new.cpp`) never `#include <malloc.h>` at all, only
+     `<cstdlib>`/`<new>` -- matching how a real MSVC `<stdlib.h>` declares
+     these symbols directly, confirmed by the build still failing with
+     "undeclared identifier" from `<malloc.h>` alone until moved.
+  3. **libunwind wired as a real dependency of libcxxabi, correcting an
+     earlier (wrong) assumption from the same day's recipe.json
+     restructuring.** That earlier work assumed a link-time-only reference
+     in `tools/crt-c++` would be enough, based on how the plain default
+     (non-LLVM-unwinder) Itanium ABI surface libcxxabi compiles against
+     needs no libcxxabi-side CMake change. True for the *static*
+     `cxxabi_static`/`libc++abi.a` build (confirmed: it links completely
+     clean with zero libunwind anywhere in scope -- a static archive step
+     never checks for undefined references) but wrong for the *shared*
+     `cxxabi_shared`/`libc++abi.dll` build, which -- unlike an ELF `.so`
+     -- must resolve every referenced symbol at its own link time on
+     Windows, confirmed directly via `ld.lld: error: undefined symbol:
+     _Unwind_Resume` and nine siblings (plus vtable-for-`std::logic_error`/
+     `std::bad_cast`/etc.) the first time `LIBCXXABI_ENABLE_SHARED=ON`
+     actually got exercised for real. Fixed by adding `"dependencies":
+     ["libunwind"]` to libcxxabi's own recipe.json (build order:
+     libunwind, then libcxxabi, then libcxx) and a windows-only
+     `CMAKE_SHARED_LINKER_FLAGS` override linking libunwind's own shared
+     import library directly into `libc++abi.dll` -- deliberately the
+     *shared* import library, not the static archive, so the actual
+     unwinder code lives in exactly one place (`unwind.dll`) with
+     `libc++abi.dll` importing it, avoiding a duplicate-symbol risk
+     against the separate `libunwind.a` `tools/crt-c++`'s own
+     *static*-linkage path still adds directly at the final consumer
+     (which remains genuinely link-time-only as originally designed).
+  Along the way, three more real, previously-hidden toolchain bugs
+  surfaced and got fixed, all in `tools/crt-cc`/`tools/crt-c++`
+  themselves (so they benefit every future recipe/port, not just this
+  one):
+  - **`-Wl,/libpath:...` was folded unquoted into `$libs`**, which is
+    expanded unquoted later (relying on word splitting, like every other
+    flag accumulator in these scripts) -- silently tearing a
+    space-containing Windows SDK path (`C:\Program Files (x86)\...`) into
+    multiple broken argv entries the moment a real link actually needed
+    it (`clang++: error: no such file or directory: 'Files'`). The
+    existing `resource_dir` special-casing already showed the right
+    pattern (pass it as its own quoted argument directly on the exec
+    line, not through an unquoted-expansion variable) -- applied the same
+    treatment here, in both scripts.
+  - **CMake's own Windows-Clang toolchain module silently injects the
+    standard MSVC library set** (`kernel32.lib user32.lib gdi32.lib
+    winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib
+    advapi32.lib`) via `CMAKE_CXX_STANDARD_LIBRARIES`/`CMAKE_C_STANDARD_
+    LIBRARIES` unless explicitly cleared -- exactly what the top-level
+    `CMakeLists.txt` already does for this project's own targets, but
+    `tools/crt-libcxx-build.py`'s own `common_cmake_args()` never
+    replicated. Confirmed directly: `ld.lld: error: unable to find
+    library -lkernel32` and nine siblings, none of which exist as bare
+    `-l`-searchable names in this sysroot (`kernel32.lib` is linked by
+    its own full path elsewhere; this project never needs GDI/OLE/
+    shell32 at all). Fixed by clearing both, matching the existing
+    top-level precedent exactly.
+  - **libcxxabi/libcxx/libunwind's own upstream CMake unconditionally
+    links a real mingw-w64 distribution's CRT stub import libraries**
+    (`mingw32`/`moldname`/`mingwex`/`msvcrt`/`advapi32`/...) whenever
+    CMake's built-in `MINGW` variable is true -- which it is for any
+    `*-w64-mingw32` target regardless of whether a real mingw-w64
+    distribution actually backs it. This project's own target is ABI-
+    compatibility-only, never a real mingw-w64 install, so none of these
+    exist in the sysroot and never will (`lld: error: unable to find
+    library -lmingw32` and 15 siblings). Fixed with a small, documented
+    `patches` entry (using the mechanism already proven for the
+    `__crt_dso_handle.cpp` shim) in all three recipe.json files, no-op'ing
+    the exact upstream `if (MINGW) ... endif()`/`add_library_flags_if(
+    MINGW ...)` blocks -- `tools/crt-c++` already supplies the complete
+    real Windows link line.
+  With all nine bugs from the day's two passes fixed, every libunwind
+  source file now compiles clean **except one**: `libunwind.cpp`'s
+  `findUnwindSections()`, via `AddressSpace.hpp`'s own genuine (not
+  `__SEH__`-related) `#elif defined(_LIBUNWIND_SUPPORT_DWARF_UNWIND) &&
+  defined(_WIN32)` branch, which needs real PE/COFF module-enumeration
+  APIs this project has never had a reason to declare before
+  (`EnumProcessModules` from `psapi.h`, plus the real `IMAGE_DOS_HEADER`/
+  `IMAGE_NT_HEADERS`/`IMAGE_FILE_HEADER`/`IMAGE_SECTION_HEADER`/
+  `IMAGE_FIRST_SECTION` PE/COFF header layout from `winnt.h`). Deliberately
+  left for a follow-up rather than rushed -- see `TODO.md`'s own C++
+  runtime prerequisite section, step 3, for the scoped next step (a small
+  project-owned header shim declaring the minimal subset needed, matching
+  how `libc/src/arch/windows/` already declares raw Win32 function
+  prototypes without `<windows.h>`, not a patch to libunwind itself).
+  Full local `ctest` (119/119 on Windows, fresh `cmake --fresh`
+  reconfigure) confirms none of this pass's changes introduced a
+  regression to the default build/test workflow either.
+
 ## 2026-08-18
 
 - **Completed the first runnable Android libc++/libc++abi environment on
