@@ -213,10 +213,23 @@ Next work order:
      exec resolution, `CMAKE_CXX_COMPILER_ARG1` not reliably reaching every
      CMake-driven TryCompile, and libunwind's CMakeLists.txt needing sibling
      `cmake/`/`runtimes/cmake/` directories a sparse checkout of just
-     `libunwind/` does not carry by default). `CRT_USE_IMPORTED_LIBCXX=ON` is
-     verified on macOS: sysroot/rootfs staging and static/shared
-     `crt-libcxx-smoke` pass with vector, string, RTTI, and a real exception
-     throw/catch. The full 104-test macOS workflow also remains green.
+     `libunwind/` does not carry by default). `CRT_USE_IMPORTED_LIBCXX=ON`
+     was claimed verified on macOS here, but that claim was wrong (or at
+     best checked against a stale `install/lib/libc++.dylib` left over
+     from before this same restructuring) -- `crt-libcxx-build` actually
+     failed to *link* `libc++.dylib` at all on a genuinely fresh build
+     (`libcxx` never got the same `__dso_handle` shim `libcxxabi`'s own
+     recipe already had). A third real instance of this project's own "a
+     local dev tree with an existing `out/` directory is not a reliable
+     test of new CMake-level wiring" trap noted just above. Fixed and
+     **genuinely re-verified** the same day, from a fully wiped `build`/
+     `install`/staged-source tree (not an existing one): `crt-libcxx-
+     build` exits 0, `nm` confirms `libc++.dylib` now carries its own
+     defined `___dso_handle`, and both the static and shared
+     `crt-libcxx-smoke` (`imported_libcxx_test`) builds link and run to
+     completion -- real vector/string/RTTI/exception-throw-catch
+     coverage, this time actually confirmed rather than just documented.
+     See `HISTORY.md`'s later same-day entry for the full writeup.
    - Remaining C++ runtime gate, real and open, updated 2026-08-21 (steps 1-3
      of the ordered plan below are now done; only step 3's own leftover gap
      and steps 4-5 remain -- see `HISTORY.md`'s dated entry for the full

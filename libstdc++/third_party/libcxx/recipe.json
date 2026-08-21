@@ -32,6 +32,12 @@
       {"from": "lib/notweak.exp", "to": "lib/libc++.notweak.exp"}
     ]
   },
+  "extra_files": [
+    {
+      "path": "src/__crt_dso_handle.cpp",
+      "content": "extern \"C\" void* __dso_handle = &__dso_handle;\n"
+    }
+  ],
   "patches": [
     {
       "file": "lib/CMakeLists.txt",
@@ -43,6 +49,7 @@
   "notes": [
     "LIBCXX_STANDARD_VER=c++14: Android's own build uses a newer dialect than this legacy standalone CMake default; keeping this cache value also avoids the removed C11 gets() import while preserving the public CRT headers.",
     "LIBCXX_HAS_RT_LIB=OFF on every host: modern Bionic provides the historical librt surface from libc itself. The standalone libc++ probe is also compiled as a static library and can report a false positive without performing a real link, so this is pinned off everywhere rather than leaking a host librt dependency into Linux.",
-    "post_install_copy.macos stages libc++'s own upstream not-weak symbol-export policy list (lib/notweak.exp) into the shared install prefix as libc++.notweak.exp -- tools/crt-c++'s macOS static-link path applies it via -Wl,-force_symbols_not_weak_list so a stray host libSystem symbol can never interpose this project's own C++ allocator."
+    "post_install_copy.macos stages libc++'s own upstream not-weak symbol-export policy list (lib/notweak.exp) into the shared install prefix as libc++.notweak.exp -- tools/crt-c++'s macOS static-link path applies it via -Wl,-force_symbols_not_weak_list so a stray host libSystem symbol can never interpose this project's own C++ allocator.",
+    "extra_files' src/__crt_dso_handle.cpp mirrors libcxxabi/recipe.json's own shim of the identical name/content -- and is NOT a duplicate of it. Per the Itanium C++ ABI, __dso_handle identifies one specific DSO/shared-object image; libcxxabi's copy exists so *its own* static-init-guard code has one, and libcxx needs its *own separate* copy for the exact same reason (src/debug.cpp's __get_db() references it directly). This project's own crt1.o never defines __dso_handle at all (Bionic's real crtbegin/crtend split is not imported), so nothing else provides it here. No CMakeLists.txt patch is needed the way libcxxabi's shim required one: libcxx's own lib/CMakeLists.txt already does `file(GLOB LIBCXX_SOURCES ../src/*.cpp)`, which picks up this new file automatically. Found for real (2026-08-21) as a linker fixup error building libc++.dylib on macOS aarch64 -- 'ld: fixup error (kind=arm64_adrp_lo12) ... target ___dso_handle does not have address' -- confirmed via nm that debug.cpp.o carried an undefined ___dso_handle with no definition anywhere in libcxx's own build, unlike libcxxabi which already had its shim; see HISTORY.md."
   ]
 }

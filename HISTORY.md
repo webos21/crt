@@ -10,6 +10,75 @@ substantive update.
 
 ## 2026-08-21
 
+- **Fixed a real macOS `crt-libcxx-build` regression: `libcxx` needed its
+  own `__dso_handle` shim, not just `libcxxabi`'s.** Reported directly
+  ("`cmake --build ... --target crt-libcxx-build` 명령에 의해 빌드가 잘
+  되었었는데, 뭔가 compile options이 바뀌어서 잘 안 되는 것 같다"), with
+  the user pointing at commit `a4c48b6` ("libcxx is working on macos") as
+  the last-known-good point to diff against. Reproduced directly: linking
+  `libc++.1.0.dylib` failed with `ld: fixup error (kind=arm64_adrp_lo12)
+  at '__ZNSt3__18__get_dbEv'+0x54 from debug.cpp.o, target ___dso_handle
+  does not have address`, on a genuinely fresh build (wiped `external/
+  llvm-runtimes/{build,install,libcxx}` and rebuilt from nothing --
+  ruling out a stale-`out/` artifact before looking for a source-level
+  cause, per this file's own repeated lesson about exactly that trap).
+
+  Root cause, confirmed via `nm` rather than guessed: `debug.cpp.o`
+  (part of `libcxx` itself -- `src/debug.cpp`'s `__get_db()`) carried an
+  undefined `___dso_handle` with no definition anywhere in `libcxx`'s own
+  build. This project's own `crt1.o` never defines `__dso_handle` at all
+  (Bionic's real `crtbegin`/`crtend` split was never imported), so
+  nothing else was going to provide it either. The 2026-08-21 libcxx/
+  libcxxabi/libunwind restructuring (`6b57e48`) had already found and
+  fixed this exact gap for `libcxxabi` (a `src/__crt_dso_handle.cpp`
+  shim, `extern "C" void* __dso_handle = &__dso_handle;`, wired into
+  `LIBCXXABI_SOURCES` via a `libcxxabi/recipe.json` patch) -- but never
+  gave `libcxx` its own copy. That's not a redundant near-miss: per the
+  Itanium C++ ABI, `__dso_handle` identifies one specific DSO/shared-
+  object image, so `libcxxabi`'s copy was never going to satisfy a
+  reference from a *different* shared library (`libc++.dylib`) at
+  `arm64_adrp_lo12` (a direct, same-image relocation, not an indirect
+  cross-image one) -- `libcxx` genuinely needed its own.
+
+  This also means the "`CRT_USE_IMPORTED_LIBCXX=ON` is verified on
+  macOS" claim TODO.md recorded the same day (`6b57e48`'s own entry) was
+  wrong, or at best verified against a stale `install/lib/libc++.dylib`
+  left over from before the libcxxabi/libcxx recipe.json split -- a
+  third instance of this project's own documented "a local dev tree
+  with an existing `out/` directory is not a reliable test of new
+  CMake-level wiring" trap (`TODO.md`'s own note), this time hiding a
+  build failure behind stale *install* artifacts rather than stale
+  *configure* state. TODO.md's claim corrected in the same pass.
+
+  Fixed by giving `libcxx/recipe.json` the identical shim
+  (`extra_files`: `src/__crt_dso_handle.cpp`, same content as
+  `libcxxabi`'s). No `patches` entry was needed the way `libcxxabi`
+  required one: `libcxx`'s own `lib/CMakeLists.txt` already does
+  `file(GLOB LIBCXX_SOURCES ../src/*.cpp)`, which picks up the new file
+  automatically. Each shared library ends up with its own, image-local
+  `___dso_handle` definition -- exactly the Itanium ABI's intent, and
+  confirmed via `nm` on both `libc++abi.dylib` and (now) `libc++.dylib`.
+  For static linking, no duplicate-symbol risk exists either: whichever
+  archive's own copy is needed first to satisfy an outstanding
+  `__dso_handle` reference is the only one ever pulled in (`libc++.a`
+  appears before `libc++abi.a` on `tools/crt-c++`'s own macOS static
+  link line, so `libcxx`'s copy resolves `debug.cpp.o`'s own reference
+  before `libcxxabi`'s copy is ever needed for anything).
+
+  Verified on this real macOS aarch64 host, genuinely fresh (wiped
+  `build`/`install`/staged `libcxx` source, no incremental artifacts
+  involved): `crt-libcxx-build` now exits 0, `nm` confirms
+  `libc++.dylib` carries its own defined `___dso_handle`, and the
+  default `cmake --build`/`ctest` workflow (which doesn't touch
+  `crt-libcxx-*` targets at all) stays green at 104/104 throughout, no
+  regressions. Also re-ran `crt-libcxx-sysroot` (fresh stage of the
+  fixed `libc++.{dylib,a}`/`libc++abi.{dylib,a}` into the CRT sysroot)
+  and `crt-libcxx-smoke` for real this time, not trusting the earlier
+  claim: both the static and shared `imported_libcxx_test` builds link
+  and run to completion, printing `imported_libcxx_test: ok` -- the real
+  vector/string/RTTI/exception-throw-catch coverage TODO.md's checklist
+  originally claimed is now genuinely confirmed, not just documented.
+
 - **Fixed a live, 7-commit-long GitHub Actions CI regression (`linux-amd64`,
   `linux-arm64`, `windows-x64` all red since `940af4c`) plus the
   `math_test` `SegFault` the user hit locally on Windows, prompted by
