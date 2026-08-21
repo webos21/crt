@@ -337,6 +337,24 @@ case "$target_os" in
         echo "crt-c++: imported shared libc++ import library is not staged" >&2
         exit 1
       fi
+      # libc++abi's own import library: unlike libc++.dll.a above, this
+      # was missing entirely until now -- the static branch just below
+      # already links libc++abi.a alongside libc++.a, but nothing mirrored
+      # that for the shared case. Confirmed for real: a real client linked
+      # shared failed with "undefined symbol: __cxa_throw"/__cxa_begin_
+      # catch/__gxx_personality_v0/vtable for std::length_error and
+      # __cxxabiv1::__*_type_info -- all genuinely exported from libc++abi.
+      # dll.a (verified directly with llvm-nm), just never linked in here.
+      # libc++.dll does not itself re-export libc++abi's own symbols
+      # through to a client that only links libc++.dll.a; a client using
+      # exceptions/RTTI needs both DLLs' import libraries directly, same
+      # as the static case already needs both archives.
+      for candidate in libc++abi.dll.a libc++abi_dll.lib c++abi_dll.lib; do
+        if [ -f "${CRT_SYSROOT}/lib/$candidate" ]; then
+          cxx_runtime_libs="$cxx_runtime_libs ${CRT_SYSROOT}/lib/$candidate"
+          break
+        fi
+      done
       # libunwind (Linux/Windows only -- see libstdc++/third_party/
       # libunwind/recipe.json's own notes for why macOS never builds one).
       # Optional, unlike libc++'s own import library just above: absent

@@ -528,3 +528,32 @@ in those two win.
   `TODO.md`'s C++ runtime prerequisite section, step 4, and `HISTORY.md`'s
   dated entry for the full writeup. Full local `ctest` (119/119 on
   Windows) confirms no regression to the default build/test workflow.
+- **2026-08-21 (fifth pass, same day): shared libc++ now also works end
+  to end on Windows -- `imported_libcxx_test: ok` for both linkage modes,
+  matching macOS and Linux.** Four separate root causes, each hiding the
+  next: (1) libcxx's export-table gap for `basic_string`-family members,
+  fixed with two layered `recipe.json` patches (`-fvisibility-inlines-
+  hidden` disabled for Windows only; `_LIBCPP_EXTERN_TEMPLATE_TYPE_VIS`
+  matched to `_LIBCPP_CLASS_TEMPLATE_INSTANTIATION_VIS`'s own
+  `dllexport`, a real upstream declaration/definition macro mismatch
+  confirmed via Clang's own "'dllexport' attribute ignored ... missing on
+  previous declaration" warning); (2) `tools/crt-c++`'s shared branch
+  never linked `libc++abi.dll.a` at all (only the static branch did),
+  leaving every `__cxa_*`/vtable/`__gxx_personality_v0` symbol undefined
+  even though `libc++abi.dll.a` itself genuinely, correctly exports all
+  of them (`llvm-nm`-verified); (3) `tools/test_libcxx_runtime.py` reused
+  the mksh-only POSIX `PATH` (needed for the *compiler* step) to also run
+  the resulting *native* `.exe`, so the real Windows DLL loader could
+  never find `libc++.dll`/`libc++abi.dll`/`libunwind.dll` in
+  `sysroot/bin` -- `STATUS_DLL_NOT_FOUND` at run time despite a clean
+  link; (4) even with a correct run-time `PATH`, those two DLLs were
+  never staged into the sysroot at all, because both `libcxx/lib/
+  CMakeLists.txt`'s and `libcxxabi/src/CMakeLists.txt`'s own upstream
+  `install(TARGETS ...)` calls never specified a `RUNTIME DESTINATION`
+  (only `LIBRARY`/`ARCHIVE`) -- CMake silently skips installing an
+  artifact kind with no destination given, confirmed by contrast with
+  libunwind's own working sibling rule. Fixed with one `RUNTIME
+  DESTINATION` patch per recipe. See `TODO.md`'s C++ runtime prerequisite
+  section, step 4, and `HISTORY.md`'s dated entry for the full four-part
+  writeup. Full local `ctest` (119/119 on Windows) confirms no
+  regression.

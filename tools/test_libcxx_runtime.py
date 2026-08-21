@@ -133,7 +133,28 @@ def main():
         print("+", " ".join(link_command), flush=True)
         subprocess.run(link_command, env=env, check=True)
         print("+", binary, flush=True)
-        subprocess.run([str(binary)], env=env, check=True)
+        run_env = env
+        if args.target_os == "windows":
+            # env["PATH"] is the mksh-only POSIX string set above
+            # ("/system/bin:/bin:/usr/bin") -- correct for the *compiler*
+            # invocation just above (which execs through mksh.exe), but
+            # wrong for running the resulting native .exe directly here:
+            # subprocess.run() below launches it through the real Windows
+            # loader, which parses PATH as semicolon-separated backslash
+            # directories and finds none in that POSIX string. For the
+            # static leg this never mattered (no runtime DLL dependency
+            # beyond kernel32, always found via the system directories),
+            # but the shared leg's exe needs libc++.dll/libc++abi.dll/
+            # libunwind.dll, staged into sysroot/bin, not copied next to
+            # the exe -- confirmed for real: the shared binary linked
+            # clean (no more undefined symbols) but exited 3221225781
+            # (0xC0000135 / STATUS_DLL_NOT_FOUND) before this fix. Build a
+            # real Windows PATH from the original inherited environment
+            # (i.e. before the POSIX override above) with sysroot/bin
+            # prepended, so the loader can actually find those DLLs.
+            run_env = os.environ.copy()
+            run_env["PATH"] = str(sysroot / "bin") + os.pathsep + run_env.get("PATH", "")
+        subprocess.run([str(binary)], env=run_env, check=True)
 
 
 if __name__ == "__main__":

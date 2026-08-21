@@ -200,7 +200,7 @@ Next work order:
      MSVC STL include root. Those routes were statically checked on macOS, but
      their real host GN/Ninja workflows still require execution before Skia is
      reported as cross-host verified.
-   - **C++ runtime prerequisite (macOS runtime smoke complete):** each of
+   - **C++ runtime prerequisite (runtime smoke complete on all three hosts, both linkage modes):** each of
      `libstdc++/third_party/{libunwind,libcxxabi,libcxx}/recipe.json` declares
      its own source (git repo/ref, plus a sparse-checkout subpath for
      libunwind) and CMake build options -- see `tools/crt-libcxx-build.py`'s
@@ -231,12 +231,12 @@ Next work order:
      coverage, this time actually confirmed rather than just documented.
      See `HISTORY.md`'s later same-day entry for the full writeup.
    - Remaining C++ runtime gate, real and open, updated 2026-08-21 (steps
-     1-4 are now done -- libunwind, libcxxabi, and libcxx all build clean
+     1-6 are now done -- libunwind, libcxxabi, and libcxx all build clean
      on Windows, redirected to their own Android/Bionic locale/random
-     backends instead of MSVC's, and a real client program's *static*
-     leg now compiles+links+runs end to end: `imported_libcxx_test: ok`,
-     matching macOS and Linux. The *shared* leg has one more, separate,
-     deeper gap -- see step 4's own writeup. Steps 5-7 remain -- see
+     backends instead of MSVC's, and a real client program compiles+
+     links+runs end to end on both linkage modes: `imported_libcxx_test:
+     ok` for both `imported_libcxx_test_static.exe` and `imported_libcxx_
+     test.exe`, matching macOS and Linux. Step 7 remains -- see
      `HISTORY.md`'s dated entries for the full session writeup, including
      the many toolchain bugs found and fixed along the way).
      Track B (debug backtraces via frame-pointer walking /
@@ -498,23 +498,105 @@ Next work order:
           thunk to kernel32, matching this file's own "must run before
           absolutely anything else" design intent even more literally
           than before. Full `ctest` (119/119) reconfirmed clean after.
-        **Not yet fixed**: the *shared* leg of `crt-libcxx-smoke`
-        (`CRT_CXX_RUNTIME_LINKAGE=shared`) still fails -- a separate,
-        deeper problem from everything above: `libc++.dll` does not
-        export enough of `basic_string<char>`'s (and similar containers')
-        *inline* member functions (constructors, `size()`, `data()`,
-        `append()`, the destructor, ...) to satisfy a client that sees
-        the whole class `__declspec(dllimport)`-decorated (real libc++'s
-        own Windows-shared-library story only reliably works for types
-        it explicitly `extern template`-instantiates and exports, not
-        arbitrary inline STL usage) -- confirmed via lld naming dozens of
-        specific missing `basic_string`/`__vector_base_common`/
-        `length_error` members. Fixing this well would mean auditing and
-        likely extending libcxx's own extern-template-instantiation
-        export list, a genuinely different and potentially large
-        undertaking from the redirect work above; deliberately left open
-        rather than attempted in the same pass. See HISTORY.md's dated
-        entry for the full writeup of everything in this item.
+        **DONE: the *shared* leg of `crt-libcxx-smoke`
+        (`CRT_CXX_RUNTIME_LINKAGE=shared`) now also passes** (`imported_
+        libcxx_test: ok`, matching the static leg and matching macOS/
+        Linux). Four genuinely separate gaps, found and fixed in turn:
+        - `libc++.dll` was not exporting enough of `basic_string<char>`'s
+          (and similar containers') *inline* member functions
+          (constructors, `size()`, `data()`, `append()`, the destructor,
+          ...) to satisfy a client that sees the whole class
+          `__declspec(dllimport)`-decorated -- confirmed via lld naming
+          dozens of specific missing `basic_string`/`__vector_base_
+          common`/`length_error` members even though `src/string.cpp`'s
+          own explicit template instantiation genuinely compiles every
+          one of those members as a real, external (`T`) symbol (`llvm-
+          nm` confirmed). Two independent, layered causes, both in
+          `libstdc++/third_party/libcxx/recipe.json`'s `patches`:
+          `-fvisibility-inlines-hidden` (libcxx's own top-level
+          `CMakeLists.txt`, unconditional upstream) makes Clang emit real
+          `.drectve` `-exclude-symbols:` directives for `_LIBCPP_INLINE_
+          VISIBILITY`-marked members on Windows/PE -- safe on ELF/Mach-O
+          (visibility there only controls cross-DSO export, never
+          whether a client TU may define the symbol itself locally), but
+          fatal once a client sees the whole class `dllimport`-decorated
+          and is therefore forbidden from defining *any* of its members
+          locally, hidden-visibility ones included; disabled for
+          `if (NOT WIN32)` only. Necessary but not sufficient by itself
+          -- undefined-symbol errors persisted identically even with a
+          freshly rebuilt, exclude-symbols-free object, which led to the
+          real, deeper cause: `include/__config`'s `_LIBCPP_EXTERN_
+          TEMPLATE_TYPE_VIS` (the `extern template class` *declaration*-
+          site macro every TU sees via `<string>`) was left completely
+          empty by upstream when `_LIBCPP_BUILDING_LIBRARY` is defined,
+          while its sibling `_LIBCPP_CLASS_TEMPLATE_INSTANTIATION_VIS`
+          (the explicit-instantiation *definition*-site macro) correctly
+          became `dllexport` -- a genuine declaration/definition
+          mismatch, and Clang enforces a real C++/MSVC-ABI rule that a
+          later definition cannot add a DLL attribute a preceding
+          declaration of the same entity lacked. Confirmed via the exact
+          compiler warning once the `.drectve` fix stopped masking it:
+          `"'dllexport' attribute ignored on explicit instantiation
+          definition ... 'dllexport' attribute is missing on previous
+          declaration"`, naming `basic_string<char>`/`basic_iostream<char>`
+          by name. Fixed by matching the declaration-site macro to the
+          same `_LIBCPP_DLL_VIS`; `llvm-nm` confirmed real `__imp_`
+          exports for `basic_string<char>`'s members afterward.
+        - `tools/crt-c++`'s own Windows *shared* branch never linked
+          `libc++abi.dll.a` at all -- only `libc++.dll.a` and (optionally)
+          `libunwind.dll.a`, unlike the *static* branch's already-correct
+          `libc++.a` + `libc++abi.a` + `libunwind.a`. Confirmed as a
+          genuinely separate, previously-latent gap once the export-table
+          fix above resolved every `basic_string` error and left a
+          completely different set behind: `__cxa_allocate_exception`/
+          `__cxa_throw`/`__cxa_begin_catch`/`__cxa_end_catch`/
+          `std::terminate`/`__gxx_personality_v0`/vtable-for-
+          `std::length_error`/vtable-for-`__cxxabiv1::__*_type_info`, all
+          genuinely, correctly exported from `libc++abi.dll.a` itself
+          (`llvm-nm`-verified) but never linked into the client at all.
+          Fixed by adding the same three-candidate-name lookup loop
+          (`libc++abi.dll.a`/`libc++abi_dll.lib`/`c++abi_dll.lib`) already
+          used for `libc++.dll.a`/`libunwind.dll.a` in the same branch.
+        - Once linking succeeded outright, the resulting `.exe` still
+          failed to *run*, exiting `3221225781` (`0xC0000135` /
+          `STATUS_DLL_NOT_FOUND`): `tools/test_libcxx_runtime.py` reused
+          the same `env` for both the *compiler* invocation (needs
+          `PATH="/system/bin:/bin:/usr/bin"`, the mksh/toybox-only POSIX
+          string `tools/crt-libcxx-build.py`'s own `common_cmake_args()`
+          already establishes) and for directly running the resulting
+          *native* Windows executable -- but the real Windows DLL loader
+          parses `PATH` as semicolon-separated backslash directories and
+          found none in that POSIX string, so it could never find
+          `libc++.dll`/`libc++abi.dll`/`libunwind.dll` (staged in
+          `sysroot/bin`, not copied next to the smoke-test binary).
+          Fixed by building a separate real-Windows-`PATH` environment
+          (from the original inherited environment, with `sysroot/bin`
+          prepended) just for the run step.
+        - Even after that, `STATUS_DLL_NOT_FOUND` persisted -- traced all
+          the way to `install/bin` never receiving `libc++.dll`/
+          `libc++abi.dll` at all (only `libunwind.dll` made it, and only
+          the two `.dll.a` *import libraries* + `.a` static archives made
+          it to `install/lib`), even though the real `.dll` runtime
+          binaries genuinely existed in the raw, un-installed build tree
+          (`build/libcxx/lib/libc++.dll`, `build/libcxxabi/lib/
+          libc++abi.dll`). Root-caused to both `libcxx/lib/CMakeLists.txt`
+          and `libcxxabi/src/CMakeLists.txt`'s own upstream
+          `install(TARGETS ...)` calls never specifying a `RUNTIME
+          DESTINATION` -- CMake silently skips installing an artifact
+          kind with no destination given rather than defaulting it, and a
+          Windows/PE shared-library target's actual `.dll` is a `RUNTIME`
+          artifact, distinct from its `ARCHIVE` (`.dll.a`) import library
+          (already correctly installed via the existing `ARCHIVE
+          DESTINATION`). Confirmed via direct comparison against
+          libunwind's own sibling `install(TARGETS ...)` rule, which
+          already has a working `RUNTIME DESTINATION` clause and does
+          stage `libunwind.dll` correctly every time. Fixed with one new
+          patch per recipe (`libstdc++/third_party/{libcxx,libcxxabi}/
+          recipe.json`), each adding `RUNTIME DESTINATION
+          ${..._INSTALL_PREFIX}bin COMPONENT ...` alongside the existing
+          `LIBRARY`/`ARCHIVE` clauses.
+        See HISTORY.md's dated entry for the full writeup of everything
+        in this item, including the static-leg work from the same day.
      5. Then repeat the same recipe.json-driven build on Linux
         (host-provided libunwind
         was considered and explicitly rejected, see `libstdc++/
@@ -569,11 +651,11 @@ Next work order:
         actually reaching a C++ `catch` block, verified identically on all
         three hosts once the build passes -- `crt-libcxx-smoke` already has
         the right shape (exception throw/catch is already one of its
-        checks, now confirmed working on macOS and on Linux for both
-        linkage modes, and on Windows for the *static* leg -- `imported_
+        checks, now confirmed working on macOS, on Linux for both linkage
+        modes, and on Windows for both linkage modes too -- `imported_
         libcxx_test: ok`, see step 4 above) to extend rather than needing
-        a new test from scratch. Windows's *shared* leg remains blocked on
-        step 4's own still-open `basic_string` DLL-export gap.
+        a new test from scratch. All three hosts, both linkage modes,
+        genuinely green as of this item's completion.
      7. **Design a native-callback/boundary shim for Windows, not yet
         started.** Checked directly (2026-08-21, see `docs/cxx_runtime.md`'s
         "Known cost: DWARF-compiled code has zero Windows-native unwind

@@ -10,6 +10,129 @@ substantive update.
 
 ## 2026-08-21
 
+- **Shared libc++ now also works end to end on Windows: `imported_libcxx_
+  test: ok` for both the static and shared legs of `crt-libcxx-smoke`,
+  matching macOS and Linux for both linkage modes.** Direct continuation
+  of the static-leg entry immediately below, same day. Full technical
+  detail lives in `TODO.md`'s C++ runtime prerequisite section, step 4 --
+  this entry records the narrative. Four genuinely separate root causes,
+  found and fixed one at a time, each hiding the next behind it:
+  1. **The export-table gap.** The shared client linked with dozens of
+     `undefined symbol: __declspec(dllimport) std::__1::basic_string<...>`
+     errors (and siblings for other containers), even though `src/
+     string.cpp`'s own explicit template instantiation genuinely compiles
+     every one of those members as a real, external (`T`) symbol
+     (confirmed via `llvm-nm` on the compiled object). Two independent,
+     layered causes: `-fvisibility-inlines-hidden` (libcxx's own
+     top-level `CMakeLists.txt`, unconditional upstream) is harmless on
+     ELF/Mach-O (visibility there only controls cross-DSO export, never
+     whether a client TU may define the symbol locally itself) but fatal
+     on Windows/PE once a client sees the whole class `dllimport`-
+     decorated (via `extern template class ... basic_string<char>`) and
+     is therefore forbidden from locally defining *any* of its members,
+     hidden-visibility inline ones included -- confirmed by dumping
+     `string.cpp.obj`'s own `.drectve` COFF section and finding real
+     `-exclude-symbols:` directives for exactly the mangled names lld
+     later reported undefined. Disabled for `if (NOT WIN32)` only.
+     Necessary but not sufficient by itself: the same undefined-symbol
+     errors persisted identically even after a fresh rebuild confirmed
+     the `.drectve` exclude-symbols list was empty, which is what led to
+     the real, deeper cause -- `include/__config`'s `_LIBCPP_EXTERN_
+     TEMPLATE_TYPE_VIS` (the `extern template class` *declaration*-site
+     macro every TU sees via `<string>`) was left completely empty by
+     upstream whenever `_LIBCPP_BUILDING_LIBRARY` is defined, while its
+     sibling `_LIBCPP_CLASS_TEMPLATE_INSTANTIATION_VIS` (the explicit-
+     instantiation *definition*-site macro, used in `src/string.cpp`
+     itself) correctly became `dllexport` -- a genuine declaration/
+     definition mismatch, and Clang enforces a real C++/MSVC-ABI rule
+     that a later definition cannot add a DLL attribute a preceding
+     declaration of the same entity lacked. Confirmed via the exact
+     compiler warning once the `.drectve` fix stopped masking it:
+     `"'dllexport' attribute ignored on explicit instantiation
+     definition ... 'dllexport' attribute is missing on previous
+     declaration"`, naming `basic_string<char>` (`string.cpp`) and
+     `basic_iostream<char>` (`ios.cpp`) by name. Fixed by matching the
+     declaration-site macro to the same `_LIBCPP_DLL_VIS`; `llvm-nm`
+     confirmed real `__imp_`-prefixed exports for `basic_string<char>`'s
+     members in the freshly rebuilt `libc++.dll.a` afterward, and every
+     `basic_string`-related undefined-symbol error was gone on the next
+     `crt-libcxx-smoke` run.
+  2. **The missing `libc++abi.dll.a` link.** Fixing (1) traded one error
+     set for a completely different one: `__cxa_allocate_exception`/
+     `__cxa_throw`/`__cxa_begin_catch`/`__cxa_end_catch`/`std::terminate`/
+     `__gxx_personality_v0`/vtable-for-`std::length_error`/vtable-for-
+     `__cxxabiv1::__si_class_type_info`/`__cxxabiv1::__class_type_info`,
+     all from libcxxabi rather than libcxx. Checked `include/
+     __cxxabi_config.h`'s own `_LIBCXXABI_FUNC_VIS` family first (same
+     class of bug as (1)) and found it structurally sound -- same macro
+     consistently used for both declaration and definition sites, no
+     split-macro mismatch -- and confirmed via `llvm-nm` on the freshly
+     built `libc++abi.dll.a` that every one of those symbols genuinely,
+     correctly IS exported already. That proved the DLL's own export
+     table was fine and the bug had to be at the client's link step
+     instead: `tools/crt-c++`'s own Windows *shared* branch (`elif
+     [ "$runtime_linkage" = shared ]`) only ever searched for and added
+     `libc++.dll.a` and (optionally) `libunwind.dll.a` to
+     `cxx_runtime_libs` -- `libc++abi.dll.a` was never in the list at
+     all, unlike the *static* branch immediately below it, which already
+     correctly links `libc++.a` + `libc++abi.a` + `libunwind.a`. A
+     genuine, previously-latent asymmetry (the shared leg had simply
+     never worked before this pass, so it had never been exercised).
+     Fixed by adding the same three-candidate-name lookup loop
+     (`libc++abi.dll.a`/`libc++abi_dll.lib`/`c++abi_dll.lib`) already used
+     for the other two libraries in the same branch.
+  3. **The DLL-search-`PATH` bug.** Fixing (2) made the shared client
+     link completely clean for the first time -- and then fail to *run*,
+     exiting `3221225781` (`0xC0000135` / `STATUS_DLL_NOT_FOUND`).
+     `tools/test_libcxx_runtime.py` reused the exact same `env` for both
+     the *compiler* invocation (needs `PATH="/system/bin:/bin:/usr/bin"`,
+     the mksh/toybox-only POSIX string `tools/crt-libcxx-build.py`'s own
+     `common_cmake_args()` already establishes, since the compile step
+     runs through `mksh.exe`) and for directly running the resulting
+     *native* Windows `.exe` afterward -- but the real Windows DLL loader
+     parses `PATH` as semicolon-separated backslash directories and found
+     none at all in that POSIX string, so it could never locate
+     `libc++.dll`/`libc++abi.dll`/`libunwind.dll` (staged into
+     `sysroot/bin`, not copied next to the smoke-test binary itself).
+     Never mattered for the static leg (no runtime DLL dependency beyond
+     kernel32, always found via the system directories regardless of
+     `PATH`). Fixed by building a separate, real Windows `PATH`
+     environment (derived from the original inherited environment, with
+     `sysroot/bin` prepended) used only for the run step, leaving the
+     mksh-only `PATH` untouched for the compile step.
+  4. **The missing `RUNTIME DESTINATION`.** `STATUS_DLL_NOT_FOUND`
+     persisted even after (3) -- traced this time all the way to
+     `install/bin` never receiving `libc++.dll`/`libc++abi.dll` at all
+     (only `libunwind.dll` made it there; `install/lib` only ever got the
+     two `.dll.a` import libraries and `.a` static archives), even though
+     the real `.dll` runtime binaries genuinely existed in the raw,
+     un-installed build tree the whole time (`build/libcxx/lib/
+     libc++.dll`, `build/libcxxabi/lib/libc++abi.dll`). Root-caused to
+     both `libcxx/lib/CMakeLists.txt`'s and `libcxxabi/src/CMakeLists.txt`'s
+     own upstream `install(TARGETS ...)` calls never specifying a
+     `RUNTIME DESTINATION` clause, only `LIBRARY DESTINATION` and
+     `ARCHIVE DESTINATION` -- CMake silently skips installing an artifact
+     kind with no destination given at all rather than defaulting it
+     somewhere sensible, and a Windows/PE shared-library target's actual
+     `.dll` is a `RUNTIME` artifact, entirely distinct from its `ARCHIVE`
+     (`.dll.a`) import library (which the existing `ARCHIVE DESTINATION`
+     clause already installed correctly). Confirmed by direct comparison
+     against libunwind's own sibling `install(TARGETS ...)` rule, which
+     already carries a working `RUNTIME DESTINATION` clause and has
+     staged `libunwind.dll` correctly on every single build this whole
+     session. Fixed with one new recipe.json patch apiece (`libstdc++/
+     third_party/{libcxx,libcxxabi}/recipe.json`), each adding `RUNTIME
+     DESTINATION ${..._INSTALL_PREFIX}bin COMPONENT ...` alongside the
+     existing clauses -- confirmed via the next build's own progress
+     output actually printing `-- Installing: .../install/bin/libc++.dll`
+     for the first time, and via the sysroot-staging step's own summary
+     line finally listing `bin/libc++.dll, bin/libc++abi.dll,
+     bin/libunwind.dll` together.
+  After all four fixes, `crt-libcxx-smoke` reports `imported_libcxx_test:
+  ok` for both `imported_libcxx_test_static.exe` and `imported_libcxx_
+  test.exe` (shared), and a full default `cmake --build` + `ctest` run
+  reconfirmed 119/119 with no regression.
+
 - **Static libc++ now works end to end on Windows, real exceptions
   included: `imported_libcxx_test: ok`, matching macOS and Linux's own
   passing marker for the first time.** Full technical detail (every
