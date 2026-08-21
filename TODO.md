@@ -232,19 +232,76 @@ Next work order:
      project's own libc doesn't declare, only the portable `aligned_alloc`).
      A separate clang-predefined `__SEH__` macro (independent of
      `_LIBCPP_WIN32API`) also gates a `<windows.h>`-dependent exception-
-     personality path in `cxa_personality.cpp`. Needs careful, file-by-file
-     patches redirecting the subsystems this project's own PAL already
-     supports (pthread, `clock_gettime`, `aligned_alloc`) to their portable
-     code paths, without blanket-disabling the parts of `_LIBCPP_WIN32API`
-     that are still genuinely correct -- deferred as a follow-up rather than
-     rushed; not yet attempted on Linux (host-provided libunwind was
-     considered and explicitly rejected -- see `libstdc++/third_party/
-     libunwind/recipe.json`'s own notes for why -- so Linux needs the same
-     from-source build and will very likely hit related, if not identical,
-     gaps once reached). The old `platform/external/libunwind` main checkout
-     ended in 2021 and must not be presented as the current paired unwinder.
-     macOS-only `Availability.h` remains external build configuration, not a
-     CRT public header.
+     personality path in `cxa_personality.cpp` -- and libunwind's own
+     `Unwind-seh.cpp` (gated by its own `_LIBUNWIND_SUPPORT_SEH_UNWIND`)
+     needs `<windef.h>`/`<excpt.h>`/`<winnt.h>` for the same underlying
+     reason, so this is not just a libcxxabi-side problem. The old
+     `platform/external/libunwind` main checkout ended in 2021 and must not
+     be presented as the current paired unwinder. macOS-only
+     `Availability.h` remains external build configuration, not a CRT
+     public header.
+
+     **Revised plan (2026-08-21), in order -- track B (debug backtraces via
+     frame-pointer walking / sanitizer_common-style stack capture) is a
+     genuinely separate feature from this track and is deliberately not
+     part of this ordering; it does not help C++ exceptions at all (it is
+     read-only stack walking, never destructor/landing-pad dispatch) and
+     can be picked up independently whenever it is useful:**
+     1. **Try `-fdwarf-exceptions` first, before any source patch.**
+        `__SEH__` is a clang predefine tied to which exception-table format
+        it emits for the mingw target (SEH vs. portable DWARF CFI) --
+        forcing DWARF CFI is exactly what the from-source-built LLVM
+        libunwind (a table-based unwinder) already understands, and would
+        very likely make `__SEH__` simply not get defined at all, turning
+        off both `cxa_personality.cpp`'s and `Unwind-seh.cpp`'s
+        `<windows.h>`-dependent branches with zero source patches. Unifies
+        the exception model with Linux/macOS (both already Itanium DWARF),
+        which also makes the Phase 3 cross-OS exception test below more
+        meaningful. Genuinely untested so far -- first thing to try when
+        this is picked back up.
+     2. **Implement real `_aligned_malloc`/`_aligned_free` in this
+        project's own libc** (thin wrappers over the existing
+        `aligned_alloc`/`free`) rather than patching libcxxabi/libcxx
+        source. Unrelated to `__SEH__` (gated by `_LIBCPP_WIN32API`/`_WIN32`
+        instead), so step 1 does not help here regardless of outcome. Real
+        mingw-w64 toolchains provide these symbols too, for the same
+        MSVCRT-compatibility reason -- matches this project's own
+        Bionic-parity-first policy (real surface, real implementation) more
+        than a source patch would, and this step is small and independent
+        of the other four -- safe to do any time, does not need to wait on
+        step 1's result.
+     3. **Absorb libunwind's actual engine as project source instead of a
+        separate external CMake build.** Its real source list turns out to
+        be small and stable: `libunwind.cpp`, `UnwindLevel1.c`,
+        `UnwindLevel1-gcc-ext.c`, `Unwind-EHABI.cpp`, `Unwind-seh.cpp`,
+        `Unwind-sjlj.c`, `Unwind-wasm.c`, two `.S` files, plus headers (no
+        `runtimes/` or top-level `cmake/` dependency once compiled directly,
+        unlike the standalone-CMake path). Compiling these directly through
+        `libstdc++/CMakeLists.txt`'s own `crt_cxx_build_flags` (the same
+        convention every other part of this project already uses) removes
+        the whole class of friction this session hit building it as a
+        separate external CMake project -- the missing-`project()`-call
+        driver hack, the `cmake/`/`runtimes/cmake/` sparse-checkout
+        dependency, and the mksh/CMake compiler-detection bugs documented
+        in `HISTORY.md`'s 2026-08-21 entry and the
+        [[crt-mksh-cmake-windows-gotchas]] memory -- while also giving
+        direct control over which code paths (e.g. the SEH branch) even get
+        compiled. Does NOT apply to libcxx/libcxxabi themselves (hundreds of
+        files, not hand-maintainable) -- those keep the recipe.json +
+        standard external CMake build.
+     4. **Get the rest of libcxxabi/libcxx building clean on Windows**,
+        then repeat the same recipe.json-driven build on Linux (not yet
+        attempted at all there -- host-provided libunwind was considered
+        and explicitly rejected, see `libstdc++/third_party/libunwind/
+        recipe.json`'s own notes for why, so Linux needs the same
+        from-source path and will likely hit related, if not identical,
+        gaps once reached).
+     5. **Add a real cross-OS regression test**: `_Unwind_RaiseException`
+        actually reaching a C++ `catch` block, verified identically on all
+        three hosts once the build passes -- `crt-libcxx-smoke` already has
+        the right shape (exception throw/catch is already one of its
+        checks on macOS) to extend rather than needing a new test from
+        scratch.
 3. **Run the Wayland/Weston protocol/library investigation as a separate
    `libcrtgfx` sub-track.**
    Decide what is protocol parsing, what is compositor policy, and what is
