@@ -28,6 +28,37 @@ long double copysignl(long double x, long double y) {
   return __builtin_copysignl(x, y);
 }
 
+/*
+ * NOT unconditionally __builtin_fma(x, y, z)/__builtin_fmaf(x, y, z): a
+ * previous version of this comment claimed aarch64/x86_64 both have real
+ * hardware FMA and that these always compile to a single native FMADD/
+ * VFMADD instruction -- true for aarch64 (ARMv8's base ISA includes
+ * FMADD/FMSUB unconditionally, no separate CPU feature needed), but WRONG
+ * for x86_64: FMA3 is an *optional* x86_64 CPU feature (Haswell/2013+)
+ * that Clang only assumes when the target explicitly enables it
+ * (-mfma, or an -march= that implies it) via the __FMA__ predefine --
+ * this project's build passes neither, on any of the three hosts, so
+ * __FMA__ is undefined on every x86_64 build here. Without it,
+ * __builtin_fma()/__builtin_fmaf() cannot lower to a real instruction and
+ * fall back to a libcall -- to a symbol literally named "fma"/"fmaf",
+ * exactly the functions defined here: real, stack-growing infinite self-
+ * recursion (confirmed via objdump: the compiled body is `call fma`/
+ * `call fmaf` targeting itself), not a hang like the long double case
+ * below -- a hard STATUS_STACK_OVERFLOW crash instead. Caught for real via
+ * tests/math_test.c crashing on this exact machine (Windows x86_64);
+ * reasoned to apply identically to Linux/macOS x86_64 (the __FMA__ gap is
+ * a compiler/architecture fact, not an OS-specific one -- neither host
+ * passes -mfma either), not yet independently re-verified on either.
+ *
+ * Plain x*y+z is not a true single-rounding-step FMA (loses the extra
+ * guard-bit precision real FMA exists for) -- a known, documented
+ * simplification, matching this project's existing precision bar for
+ * fmal() below and nextafterl() above, not a claim of bit-exact FMA
+ * semantics. Real hardware FMA (via __builtin_fma/__builtin_fmaf) is still
+ * used whenever the target genuinely has it: unconditionally on aarch64,
+ * and on any x86_64 build that does someday enable __FMA__.
+ */
+#if defined(__FMA__) || defined(__aarch64__) || defined(_M_ARM64)
 double fma(double x, double y, double z) {
   return __builtin_fma(x, y, z);
 }
@@ -35,30 +66,39 @@ double fma(double x, double y, double z) {
 float fmaf(float x, float y, float z) {
   return __builtin_fmaf(x, y, z);
 }
+#else
+double fma(double x, double y, double z) {
+  return x * y + z;
+}
+
+float fmaf(float x, float y, float z) {
+  return (float)((double)x * (double)y + (double)z);
+}
+#endif
 
 long double fmal(long double x, long double y, long double z) {
-  /* NOT __builtin_fmal(x, y, z): aarch64/x86_64 have real hardware FMA
-   * instructions for float/double (confirmed via generated assembly --
-   * fma()/fmaf() above both compile to a single native FMADD/VFMADD
-   * instruction), but not for their own long double (128-bit quad
-   * precision on Linux aarch64, 80-bit extended on Linux x86_64) -- so
-   * clang can't inline __builtin_fmal() into instructions here and instead
-   * lowers it into a call to the runtime support symbol named "fmal",
-   * which is exactly the symbol this function itself defines: real,
-   * confirmed infinite self-recursion (`clang -S` on just this function
-   * shows the entire body compiling down to `b fmal`, an unconditional
-   * branch to itself), not merely a stack overflow risk -- it never
-   * returns at all, spinning at 100% CPU forever. Caught for real via
-   * tests/math_test.c hanging on a real Linux aarch64 host (the first time
-   * this function had ever actually linked and run there -- macOS's own
-   * ARM64 `long double` is the same 64 bits as `double`, so it never hits
-   * this gap: __builtin_fmal() there lowers straight to the native
-   * double-precision FMADD instruction like fma()/fmaf() already do).
-   * Plain x*y+z is not a true single-rounding-step FMA (loses the extra
-   * guard-bit precision real FMA exists for), a known, documented
-   * simplification matching this project's existing precision bar for
-   * long double elsewhere (see nextafterl() above), not a claim of
-   * bit-exact FMA semantics. */
+  /* NOT __builtin_fmal(x, y, z): even on hosts where fma()/fmaf() above
+   * get real hardware FMA, long double is a different, wider type
+   * (128-bit quad precision on Linux aarch64, 80-bit extended on Linux/
+   * macOS/Windows x86_64 -- except Windows, where long double is just
+   * double again, LLP64) with no matching hardware instruction, so clang
+   * can't inline __builtin_fmal() here either and instead lowers it into a
+   * call to the runtime support symbol named "fmal", which is exactly the
+   * symbol this function itself defines: real, confirmed infinite self-
+   * recursion (`clang -S` on just this function shows the entire body
+   * compiling down to `b fmal`, an unconditional branch to itself), not
+   * merely a stack overflow risk -- it never returns at all, spinning at
+   * 100% CPU forever. Caught for real via tests/math_test.c hanging on a
+   * real Linux aarch64 host (the first time this function had ever
+   * actually linked and run there -- macOS's own ARM64 `long double` is
+   * the same 64 bits as `double`, so it never hits this gap:
+   * __builtin_fmal() there lowers straight to the native double-precision
+   * FMADD instruction like fma()/fmaf() already do there). Plain x*y+z is
+   * not a true single-rounding-step FMA (loses the extra guard-bit
+   * precision real FMA exists for), a known, documented simplification
+   * matching this project's existing precision bar for long double
+   * elsewhere (see nextafterl() above), not a claim of bit-exact FMA
+   * semantics. */
   return x * y + z;
 }
 

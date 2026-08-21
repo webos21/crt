@@ -14,7 +14,66 @@ in those two win.
 - **CI**: `.github/workflows/ci.yml`, a 5-leg GitHub Actions matrix (macOS
   aarch64, Linux arm64/amd64, Windows arm64/x64), each running this
   project's own `cmake --workflow <os>-host-ninja-debug` preset (configure +
-  build + `ctest`) on every push. All 5 legs green as of
+  build + `ctest`) on every push. **Was red on 3 of 5 legs (`linux-amd64`,
+  `linux-arm64`, `windows-x64`) for the 7 commits from `940af4c` through
+  `d7cb458`** (2026-08-18's Skia/libc++ bring-up push sequence) -- caught
+  and fixed 2026-08-21, not by the pushing session itself but by directly
+  querying the GitHub Actions REST API for real job/step conclusions (the
+  `gh` CLI was not available in this session; unauthenticated log downloads
+  return 403 "Must have admin rights", but job-level pass/fail is public).
+  Two independent, unrelated root causes:
+  1. **Linux (both arm64 and amd64), every failing run, at the
+     "Configure, build, and test" step in under ~20 seconds** (too fast to
+     be a real build failure) -- `CMakeLists.txt` forces
+     `-stdlib=libc++` for `CRT_TARGET_OS=linux` (added in `597280c`, whose
+     own HISTORY.md entry shows `libc++-18-dev` was installed by hand on
+     the real Linux aarch64 host that validated it), but
+     `.github/workflows/ci.yml`'s Linux install step has *never*, in the
+     entire git history of that file, installed `libc++-dev`/
+     `libc++abi-dev` -- only bare `clang lld ninja-build cmake`. Without
+     it, CMake's own one-time CXX-compiler-ABI-detection step fails
+     outright linking a trivial program (`ld: cannot find -lc++`), not
+     the graceful "falls back to GNU libstdc++" behavior an earlier
+     `CMakeLists.txt` comment assumed -- reproduced directly (both
+     Clang 10 and Clang 18, via WSL Ubuntu) and confirmed fixed by
+     extracting `libc++-dev`/`libc++abi-dev` and their real runtime
+     dependents (`libc++1`/`libc++abi1`/`libunwind`, pulled via
+     `apt-get download`, no root needed) into a local prefix and
+     re-linking successfully. Fixed by adding `libc++-dev libc++abi-dev`
+     to the Linux install step.
+  2. **Windows x64 only** (`windows-arm64` stayed green throughout,
+     itself a real clue): `libm/src/basic.c`'s `fma()`/`fmaf()` called
+     `__builtin_fma`/`__builtin_fmaf`, which Clang can only lower to a
+     native FMADD/VFMADD instruction when the target defines `__FMA__`
+     (via `-mfma` or an `-march=` that implies it) -- true unconditionally
+     on aarch64 (explaining why `windows-arm64` never hit this), but
+     x86_64 FMA3 is an *optional* CPU feature this project's build never
+     opts into on any host. Without `__FMA__`, the builtins fall back to
+     libcalls literally named `fma`/`fmaf` -- exactly the functions being
+     defined, so genuine, stack-growing infinite self-recursion
+     (confirmed via `llvm-objdump` disassembly of the compiled `.obj`:
+     `callq` targeting the function's own symbol), crashing `math_test`
+     with `STATUS_STACK_OVERFLOW`. Fixed by gating the `__builtin_fma`/
+     `__builtin_fmaf` path behind `__FMA__`/`__aarch64__`/`_M_ARM64`,
+     falling back to `x*y+z` otherwise (matching this file's existing,
+     already-accepted precision bar for `fmal()` just below it, which hit
+     the same class of bug -- tail-branch self-recursion instead of a
+     real call -- on real Linux aarch64 hardware back in `597280c`).
+  Both fixes verified end to end: Windows x64 119/119 `ctest`
+  (`cmake --fresh` reconfigure first), and a genuine second-OS check via
+  WSL Ubuntu (not the shared `/mnt/c` working tree, whose Windows
+  `core.autocrlf=true` checkout corrupts `tools/crt-c++`'s `#!/bin/sh`
+  shebang for a Linux exec -- a real clone onto WSL's own ext4 filesystem
+  instead) -- 104/104 `ctest` there too, both with the same uncommitted
+  fixes applied. `windows-arm64`/`macos-aarch64` were not independently
+  re-verified this pass (no arm64 Windows or macOS hardware in this
+  session); reasoned to be unaffected (`windows-arm64` already proved it
+  by staying green; macOS's own libc++ was separately established working
+  in `HISTORY.md`'s 2026-08-18 entries and this pass touched no
+  macOS-specific code path). The CI-side fix (`.github/workflows/ci.yml`)
+  has not yet had a real GitHub Actions run to confirm green, since that
+  requires an actual push -- update this bullet once that run completes.
+  Before the 940af4c regression, all 5 legs had been green as of
   [run 31986752976](https://github.com/webos21/crt/actions/runs/31986752976)
   (2026-08-17, the Windows `tcdrain`/`tcflow`/`tcflush`/`tcsendbreak` push).
   Two failures happened along the way getting there, both since fixed and
@@ -37,14 +96,17 @@ in those two win.
   own `cmake --workflow` step does not run `port-test-recipes` (a
   separate, heavier target that fetches and builds third-party sources)
   -- that's verified locally/per-host instead, see below.
-- **`ctest`**: 117 registered tests on Windows and 104 on macOS in the
-  latest local runs (count is slightly
+- **`ctest`**: 119 registered tests on Windows and 104 on Linux amd64 (via
+  WSL) in the latest local runs (count is slightly
   OS-dependent -- a few targets, like `windows_export_hygiene_test`, only
-  exist on their own OS), all passing on both (117/117 on Windows, 104/104
-  on macOS -- separately confirmed on each host, not simultaneously, so
-  the exact registered-test overlap between the two counts hasn't been
-  cross-checked item-by-item). Most recently confirmed on Windows after
-  implementing the last three items of the Bionic libc gap audit's
+  exist on their own OS), all passing on both (119/119 on Windows, 104/104
+  via a genuine second-OS WSL Ubuntu run -- separately confirmed on each
+  host, not simultaneously, so the exact registered-test overlap between
+  the two counts hasn't been cross-checked item-by-item). Most recently:
+  the `fma`/`fmaf` self-recursion fix and the Linux CI `libc++-dev` fix
+  above -- see that CI bullet for the full writeup. Before that, confirmed
+  on Windows after implementing the last three items of the Bionic libc
+  gap audit's
   "lower priority" tier -- `ifaddrs.h` (real per-host: Linux `/sys/class/
   net` + ioctls, macOS the real Darwin `getifaddrs()` resolved at
   runtime plus sockaddr translation, Windows `GetAdaptersInfo()`) and

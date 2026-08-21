@@ -57,12 +57,32 @@ jobs:
           python-version: "3.x"
 
       # ---- Linux: apt already carries a native clang/lld for both amd64
-      # and arm64 repos, so the same step works for both matrix legs. ----
+      # and arm64 repos, so the same step works for both matrix legs.
+      # libc++-dev/libc++abi-dev are required from here on: CMakeLists.txt
+      # forces -stdlib=libc++ for CRT_TARGET_OS=linux (see its own comment)
+      # so CMake's one-time CXX-compiler-ABI-detection step links a trivial
+      # program with -stdlib=libc++ before this project's own freestanding
+      # flags ever apply -- without the dev package, that trivial link
+      # itself fails outright ("cannot find -lc++"), not a graceful
+      # fallback to GNU libstdc++ as an earlier comment in CMakeLists.txt
+      # assumed. Confirmed for real: bare `clang lld ninja-build cmake`
+      # (this step's previous package list) reproduces the exact failure
+      # on both Clang 10 and Clang 18 on Ubuntu; CI's own linux-amd64/
+      # linux-arm64 legs have been red for the last several commits with a
+      # job duration (well under a minute) consistent with failing this
+      # early, not partway through a real build. The unversioned
+      # libc++-dev/libc++abi-dev package names track whatever version the
+      # unversioned clang package defaults to on a given Ubuntu release,
+      # so this needs no explicit version pin here. --no-install-recommends
+      # is kept and still safe: it only skips Recommends-level packages,
+      # not the hard Depends (the actual libc++1/libc++abi1/libunwind
+      # runtime .so files) apt resolves for these -dev packages
+      # regardless. ----
       - name: Install build tools (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang lld ninja-build cmake
+          sudo apt-get install -y --no-install-recommends clang lld ninja-build cmake libc++-dev libc++abi-dev
           clang --version
           clang++ --version
           ld.lld --version

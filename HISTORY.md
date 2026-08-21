@@ -8,6 +8,121 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-08-21
+
+- **Fixed a live, 7-commit-long GitHub Actions CI regression (`linux-amd64`,
+  `linux-arm64`, `windows-x64` all red since `940af4c`) plus the
+  `math_test` `SegFault` the user hit locally on Windows, prompted by
+  "macOS에서 skia와 libcxx 빌드를 구성했는데, 타 OS에 대한 고려가 좀
+  부족했던 것 같다" -- verified for real on a second OS via this session's
+  newly available WSL Ubuntu access, not just reasoned about. Two
+  unrelated root causes, both from the 2026-08-18 Skia/libc++ bring-up
+  push sequence:
+  1. **`fma()`/`fmaf()` self-recursion on Windows x86_64**
+     (`libm/src/basic.c`), `STATUS_STACK_OVERFLOW`. A *different* function
+     pair from the already-fixed 2026-08-18 `fmal()`/`lrint()`-family
+     self-recursion bugs (those were real Linux aarch64 findings; `fma()`/
+     `fmaf()` there use genuine hardware FMADD, so they never hit this),
+     but the same root-cause *class*: `__builtin_fma`/`__builtin_fmaf`
+     only lower to a native FMADD/VFMADD instruction when the compile
+     target defines `__FMA__` (`-mfma`, or an `-march=` implying it) --
+     unconditional on aarch64 (ARMv8 baseline), but x86_64 FMA3 is an
+     *optional* CPU feature this project's build opts into on no host.
+     Without it, the builtins fall back to libcalls literally named
+     `fma`/`fmaf` -- exactly the functions being defined here, so real,
+     stack-growing infinite self-recursion, not a hang (`fmal()`'s bug
+     was a tail-branch to itself instead of a real call, since long
+     double has no matching hardware op on any architecture -- a related
+     but distinct failure signature). Found by bisecting `math_test.c`
+     with `fprintf` checkpoints (no interactive debugger available),
+     isolating to a minimal `mini_fmin_test.c` repro, and confirming via
+     `llvm-objdump -d --x86-asm-syntax=att` that the compiled `.obj`'s
+     `callq` instruction resolves to the function's own symbol. Fixed by
+     gating the `__builtin_fma`/`__builtin_fmaf` path behind
+     `#if defined(__FMA__) || defined(__aarch64__) || defined(_M_ARM64)`,
+     falling back to `x*y+z`/`(float)((double)x*(double)y+(double)z)`
+     otherwise -- matching this file's own already-accepted precision bar
+     for `fmal()` right below it. Verified: isolated repro passes both
+     broken and fixed states; full `math_test` clean; Windows
+     `ctest --preset windows-host-ninja-debug` 119/119 after a genuine
+     `cmake --fresh` reconfigure; reproduced identically on Linux amd64
+     via a clean WSL Ubuntu clone (104/104), confirming the reasoning that
+     this is a compiler/architecture fact, not an OS-specific one.
+  2. **Linux CI has never installed `libc++-dev`/`libc++abi-dev`**
+     (`.github/workflows/ci.yml`), for the entire history of that file --
+     confirmed via `git log -p` on the file. `CMakeLists.txt` has forced
+     `-stdlib=libc++` for `CRT_TARGET_OS=linux` since `597280c`, whose own
+     2026-08-18 HISTORY.md entry shows `libc++-18-dev` was installed *by
+     hand* on the real Linux aarch64 host that validated that fix -- but
+     that manual step was never carried into the CI workflow file itself.
+     Without the dev package, CMake's own one-time CXX-compiler-ABI-
+     detection step (which runs before this project's own freestanding
+     flags ever apply) fails outright linking a trivial program
+     (`ld: cannot find -lc++`), not the graceful "falls back to GNU
+     libstdc++" behavior an earlier `CMakeLists.txt` comment assumed for
+     this exact scenario -- that assumption does not hold on real modern
+     Clang (reproduced directly on both Clang 10 and Clang 18 via WSL
+     Ubuntu). No `gh` CLI or repo admin rights were available in this
+     session, so root-caused entirely from the public GitHub Actions REST
+     API (`/actions/runs`, `/actions/runs/{id}/jobs`) rather than raw
+     logs: `linux-amd64`/`linux-arm64` fail at the "Configure, build, and
+     test" step in well under a build's worth of time (consistent with an
+     early configure failure), while `windows-arm64` staying green the
+     whole time was the clue that separated this from the `fma` bug
+     above (aarch64 never hits the `__FMA__` gap). Verified for real
+     without root: `apt-get download` (no sudo needed) fetched
+     `libc++-18-dev`/`libc++abi-18-dev` plus their actual runtime
+     dependents (`libc++1-18`, `libc++abi1-18`, `libunwind-18`/-dev,
+     pulled by hand since `apt-get download` does not resolve
+     dependencies the way a real `apt-get install` would) into a local
+     prefix; the same `-stdlib=libc++` link that failed before now
+     succeeds and the resulting binary runs. A full from-clean
+     `cmake --preset linux-host-ninja-debug` configure/build/`ctest`
+     against this local prefix (`CPATH`/`LIBRARY_PATH` env vars, since
+     system-wide install needs root this session doesn't have) passed
+     104/104, including `math_test_runs`. Fixed by adding
+     `libc++-dev libc++abi-dev` (unversioned package names, which track
+     whatever version the unversioned `clang` package defaults to on a
+     given Ubuntu release, so no explicit version pin is needed) to
+     `ci.yml`'s Linux install step; `--no-install-recommends` stays safe
+     since it only skips Recommends, not the hard Depends that pull in
+     the actual runtime `.so` files. Not yet confirmed green on a real
+     GitHub Actions run (requires an actual push).
+  3. **Separately, fixed a real (if non-fatal) Windows CMake configure
+     warning**: `CRT could not locate the Clang C++ standard-library
+     include directory on Windows; continuing with limited C++ support`
+     (`CMakeLists.txt:207`). Root cause: `CMAKE_CXX_IMPLICIT_INCLUDE_
+     DIRECTORIES` is genuinely empty for a Windows Clang install
+     targeting the default `*-pc-windows-msvc` triple -- confirmed
+     directly against this machine's own generated
+     `CMakeCXXCompiler.cmake` -- not a regex-matching miss like the
+     already-fixed Linux multiarch gap right above this code (that
+     variable really is `""`; CMake's own implicit-include-directory
+     detection does not run the same way for a Clang that simulates
+     MSVC, which CMake expects to rely on the `INCLUDE` environment
+     variable instead, something this freestanding build intentionally
+     never sets). The existing `VC/Tools/MSVC/.*/include$` regex was
+     already written to handle this exact path shape but never got real
+     data to test against. Fixed by probing the compiler directly when
+     the CMake-detected list comes up empty on Windows (`clang++ -E -x
+     c++ -v` against an empty translation unit, parsing its own
+     `#include <...> search starts here` listing, then filtering the
+     result through `EXISTS()` since the captured block also contains
+     one harmless non-path header line). Verified: the warning is gone
+     on a genuine `cmake --fresh` reconfigure, and the probe correctly
+     lists all 7 real search paths (Clang resource dir, MSVC STL,
+     5 Windows Kits UCRT/shared/um/winrt/cppwinrt dirs); the subsequent
+     full `cmake --build` still succeeds, including `c++.dll`/
+     `crtgfx.dll`/`crtjs.dll`/`crtmedia.dll`.
+  A genuine second-OS Linux verification for this pass ran on a clean WSL
+  Ubuntu clone rather than the shared `/mnt/c` Windows working tree: this
+  machine's Git for Windows has `core.autocrlf=true`, so files checked out
+  there (including `tools/crt-c++`'s `#!/bin/sh` shebang) carry CRLF line
+  endings that break a direct Linux exec of that script -- a real,
+  environment-local interop trap, not a repo bug (there is no
+  `.gitattributes` forcing LF, and a genuine fresh CI clone on a native
+  Linux filesystem is unaffected either way).
+
 ## 2026-08-18
 
 - **Completed the first runnable Android libc++/libc++abi environment on

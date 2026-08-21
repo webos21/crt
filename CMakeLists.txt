@@ -202,6 +202,56 @@ foreach(CRT_CXX_IMPLICIT_INCLUDE_DIR IN LISTS CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTO
     list(APPEND CRT_CXX_STANDARD_INCLUDE_DIRS "${CRT_CXX_IMPLICIT_INCLUDE_DIR}")
   endif()
 endforeach()
+if(NOT CRT_CXX_STANDARD_INCLUDE_DIRS AND CRT_TARGET_OS STREQUAL "windows")
+  # The foreach() above comes back completely empty on Windows, not merely a
+  # regex miss like the Linux multiarch gap documented above it -- confirmed
+  # directly against this exact machine's generated CMakeCXXCompiler.cmake:
+  # CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES is genuinely set to "" for a
+  # stock Windows LLVM clang++ install, because CMake's own implicit-
+  # include-directory detection is written for GCC/Clang-GNU-style
+  # compilers and does not run the same way for a Clang that simulates
+  # MSVC (CMAKE_CXX_SIMULATE_ID=MSVC here, the *-pc-windows-msvc default
+  # target with no explicit --target override) -- CMake expects MSVC-like
+  # compilers to rely on the INCLUDE environment variable instead, which
+  # this freestanding build intentionally never sets. The VC/Tools/MSVC/
+  # .*/include$ pattern above was already written to handle exactly this
+  # path shape but never got real data to test it against. Probe the
+  # compiler directly the same way a human would (`clang++ -E -x c++ -v`
+  # against an empty translation unit) and parse its own "#include <...>
+  # search starts here" listing -- the same information CMake's own
+  # detection reads on other platforms, just read here by hand since
+  # CMake declines to for this compiler/target combination.
+  set(CRT_CXX_STDINC_PROBE_SOURCE "${CMAKE_BINARY_DIR}/CMakeFiles/crt_cxx_stdinc_probe.cpp")
+  if(NOT EXISTS "${CRT_CXX_STDINC_PROBE_SOURCE}")
+    file(WRITE "${CRT_CXX_STDINC_PROBE_SOURCE}" "")
+  endif()
+  execute_process(
+    COMMAND "${CMAKE_CXX_COMPILER}" -E -x c++ -v "${CRT_CXX_STDINC_PROBE_SOURCE}"
+    OUTPUT_QUIET
+    ERROR_VARIABLE CRT_CXX_STDINC_PROBE_OUTPUT
+    RESULT_VARIABLE CRT_CXX_STDINC_PROBE_RESULT
+  )
+  if(CRT_CXX_STDINC_PROBE_RESULT EQUAL 0 AND
+     CRT_CXX_STDINC_PROBE_OUTPUT MATCHES "search starts here:(.*)End of search list")
+    string(REGEX REPLACE "\r?\n" ";" CRT_CXX_STDINC_PROBE_LINES "${CMAKE_MATCH_1}")
+    foreach(CRT_CXX_STDINC_PROBE_LINE IN LISTS CRT_CXX_STDINC_PROBE_LINES)
+      string(STRIP "${CRT_CXX_STDINC_PROBE_LINE}" CRT_CXX_STDINC_PROBE_LINE)
+      # The captured block also contains the unrelated
+      # `#include <...> search starts here:` header line (there are two
+      # "search starts here:" markers in real clang -v output, one for
+      # quoted includes and one for angle-bracket includes, and the regex
+      # above has no non-greedy match in CMake to skip past the first) --
+      # harmless, since it is not a real filesystem path and EXISTS()
+      # filters it out here same as any other non-path noise would be.
+      if(CRT_CXX_STDINC_PROBE_LINE AND EXISTS "${CRT_CXX_STDINC_PROBE_LINE}")
+        list(APPEND CRT_CXX_STANDARD_INCLUDE_DIRS "${CRT_CXX_STDINC_PROBE_LINE}")
+      endif()
+    endforeach()
+    if(CRT_CXX_STANDARD_INCLUDE_DIRS)
+      message(STATUS "CRT located the Clang C++ standard-library include directories on Windows via a direct compiler probe: ${CRT_CXX_STANDARD_INCLUDE_DIRS}")
+    endif()
+  endif()
+endif()
 if(NOT CRT_CXX_STANDARD_INCLUDE_DIRS)
   if(CRT_TARGET_OS STREQUAL "windows")
     message(WARNING "CRT could not locate the Clang C++ standard-library include directory on Windows; continuing with limited C++ support")
