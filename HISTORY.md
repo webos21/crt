@@ -123,6 +123,115 @@ substantive update.
   `.gitattributes` forcing LF, and a genuine fresh CI clone on a native
   Linux filesystem is unaffected either way).
 
+- **Restructured the libcxx/libcxxabi/libunwind build from three hardcoded
+  Python scripts into a declarative, per-component recipe.json** --
+  `libstdc++/third_party/{libunwind,libcxxabi,libcxx}/recipe.json`, each
+  next to the component it describes, following the same schema/spirit as
+  `porting/recipes/*.json` but driven by a dedicated new
+  `tools/crt-libcxx-build.py` engine rather than reusing the generic
+  porting engine (a deliberate choice: the two build shapes are genuinely
+  different -- git source with a sparse subpath vs. tarball+sha256, three
+  CMake projects with a real cross-referencing build order vs. one
+  independent `./configure`+`make` each). Replaces (deleted)
+  `tools/fetch_libcxx_runtimes.py` and `tools/build_libcxx_runtimes.py`,
+  whose every CMake flag/URL/branch was previously buried in Python with
+  no single place to see "what does building libcxx actually take."
+  `tools/install_libcxx_runtimes.py` and `tools/test_libcxx_runtime.py`
+  needed no changes (the former already matched libunwind-named files
+  generically; the latter always drives the final link through
+  `tools/crt-c++`, which now handles libunwind's link dependency itself).
+
+  Real libunwind is now part of this build (previously never fetched or
+  built at all, only documented as a future gap): AOSP
+  `toolchain/llvm-project/libunwind`, fetched via a partial clone + cone
+  sparse-checkout scoped to just the `libunwind` subpath (confirmed ~25MB,
+  not the full LLVM monorepo). Enabled on Linux and Windows; deliberately
+  *not* built on macOS (Darwin's own `libSystem` unwinder already works,
+  confirmed by the existing macOS `crt-libcxx-smoke` pass with no
+  libunwind at all) and deliberately *not* satisfied via a host-installed
+  Linux package either, even though one is easy to reach for (e.g.
+  Ubuntu's `libunwind-dev`) -- that would put a `DT_NEEDED` on a library
+  this project does not own the build of into every C++ binary it ships,
+  the same class of thing already avoided elsewhere (`-lpthread`/`-lrt`
+  absorbed into libc; `CRTGFX_ENABLE_SKIA`'s own "never link host libc++
+  as a substitute" policy) and a genuinely different case from CI's
+  libc++-dev/libc++abi-dev install just above, which is build-time-only
+  and never ends up linked into anything this project ships. `libcxxabi`'s
+  own recipe.json deliberately does *not* wire `LIBCXXABI_USE_LLVM_UNWINDER`/
+  `LIBCXXABI_LIBUNWIND_INCLUDES` at all: that CMake option only changes
+  libcxxabi's own compile-time API selection, and the automatic CMake
+  `TARGET unwind_shared` link-wiring it half-depends on only ever fires
+  inside a combined single-configure LLVM "runtimes" build (impractical
+  here, since AOSP's libcxx/libcxxabi/libunwind are three separate git
+  repos) -- so the real link dependency is added at the final consumer
+  instead, in `tools/crt-c++`'s own per-OS `cxx_runtime_libs`.
+
+  Windows verification surfaced three real, previously-hidden toolchain
+  bugs, each root-caused from first principles (isolated PowerShell/mksh
+  repros, not guessed), all now fixed and documented in the code:
+  1. **mksh's own exec resolution requires a forward slash to recognize a
+     literal path.** A bare Windows backslash path (`C:\Program
+     Files\LLVM\bin\clang++.exe`, exactly what `shutil.which()`/`Path()`
+     produce on Windows) has none, so mksh instead treats the *entire*
+     string as a single command name to search `$PATH` for and reports it
+     "inaccessible or not found" -- even though the file genuinely exists.
+     An 8.3 short-path workaround was tried first and looked plausible
+     (matches an existing `tools/crt-port-build.py` precedent for a
+     different problem) but was empirically wrong: the short path failed
+     identically. Isolating this down to a two-line repro script run
+     directly via `mksh.exe` (bypassing both this project's own scripts
+     and PowerShell's own quoting, which independently mangled an earlier
+     attempt at this same repro) pinned the real cause. Fixed by returning
+     forward-slash paths from every host-tool lookup.
+  2. **`CMAKE_CXX_COMPILER_ARG1` is not reliably honored by every
+     CMake-driven TryCompile**, even though it works for CMake's initial
+     compiler *identification* probe. Confirmed directly: the actual
+     generated build command for "Detecting CXX compiler ABI info" ran
+     bare `mksh.exe -D__BIONIC__ ...` with no `crt-c++` argument at all,
+     while the equivalent C compiler probe in the very same configure run
+     correctly included `crt-cc`. Fixed by abandoning the ARG1 mechanism
+     entirely in favor of two small native launcher wrappers,
+     `tools/crt-cc.cmd`/`tools/crt-c++.cmd` (real, directly-executable
+     `.cmd` files CMake can point `CMAKE_C_COMPILER`/`CMAKE_CXX_COMPILER`
+     straight at, reading which `mksh.exe` to invoke from a `CRT_MKSH_EXE`
+     environment variable instead of a CMake cache entry -- so there is
+     nothing left for CMake's own ARG1 handling to silently drop).
+  3. **libunwind's own `CMakeLists.txt` is not self-contained.** Unlike
+     the sibling libcxx/libcxxabi checkouts (which still carry their own
+     standalone-build `project()` bootstrap), it unconditionally assumes
+     it is being `add_subdirectory()`'d from the upstream LLVM monorepo's
+     `runtimes/CMakeLists.txt` driver and `include()`s several shared LLVM
+     CMake utility modules (`HandleCompilerRT.cmake`,
+     `LLVMCheckCompilerLinkerFlag.cmake` from a sibling `cmake/`;
+     `HandleFlags.cmake` from `runtimes/cmake/`) that a sparse checkout of
+     just `libunwind/` never carries, surfacing as three sequential
+     "include could not find requested file" errors (one per missing
+     module, only discovered one at a time as each earlier `include()`
+     itself got past its own error). Fixed two ways together: a small
+     project-owned driver (`libstdc++/third_party/libunwind/standalone/
+     CMakeLists.txt`) that calls `project()` for real and
+     `add_subdirectory()`s the actual fetched source, referenced via
+     `recipe.json`'s new `cmake.driver` field; and a new
+     `extra_checkout_dirs` recipe field that copies the two missing shared
+     directories as siblings of `libunwind/` under the shared source root,
+     matching the relative path shape libunwind's own `CMakeLists.txt`
+     expects.
+
+  With these three fixed, `crt-libcxx-configure` succeeds for all three
+  recipes on Windows, and `crt-libcxx-build` gets well into compiling
+  libcxxabi before hitting a *different*, genuine class of problem: real
+  C++ ABI source-portability gaps in AOSP's libcxxabi/libcxx for a
+  mingw-style Windows target (never built for one before). Deliberately
+  **not** patched in this same pass -- scoped, reasoned about, and left as
+  an explicit, documented follow-up rather than rushed; see `TODO.md`'s
+  own C++ runtime prerequisite section for the specifics
+  (`_LIBCPP_WIN32API` conflating still-correct Windows facts with
+  subsystems that need redirecting to this project's own PAL) and why
+  Linux was not attempted either once this was found on Windows first.
+  Full local `ctest` (119/119 on Windows) confirms this restructuring
+  itself introduced no regression to the default build/test workflow,
+  which never touches the `crt-libcxx-*` targets.
+
 ## 2026-08-18
 
 - **Completed the first runnable Android libc++/libc++abi environment on

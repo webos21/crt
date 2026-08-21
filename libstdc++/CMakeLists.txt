@@ -47,12 +47,15 @@ install(TARGETS cxx cxx_shared
 )
 
 # Android keeps the full standard library outside Bionic's small libstdc++ ABI
-# shim. Keep those sources outside this checkout too: the metadata below is
-# project-owned, while the selected Android revision is fetched under the active
-# build preset. The fetch target is deliberately separate from the bootstrap
-# `cxx` target until libc++/libc++abi and current LLVM libunwind can replace it as one coherent
-# static-and-shared runtime set.
-set(CRT_LIBCXX_ANDROID_REF "refs/heads/main" CACHE STRING "Android ref shared by external/libc++ and external/libc++abi")
+# shim. Keep those sources outside this checkout too: each component's own
+# provenance/build recipe is the project-owned, checked-in
+# third_party/<name>/recipe.json right next to it (see tools/crt-libcxx-
+# build.py's own docstring for the schema), while the selected source
+# revision is fetched under the active build preset. The fetch target is
+# deliberately separate from the bootstrap `cxx` target until libc++/
+# libc++abi/libunwind can replace it as one coherent static-and-shared
+# runtime set.
+set(CRT_LIBCXX_RECIPE_ROOT "${CMAKE_SOURCE_DIR}/libstdc++/third_party" CACHE PATH "libcxx/libcxxabi/libunwind recipe.json root")
 set(CRT_LIBCXX_FETCH_ROOT "${CMAKE_BINARY_DIR}/external/llvm-runtimes" CACHE PATH "Android LLVM runtime source root")
 set(CRT_LIBCXX_BUILD_ROOT "${CRT_LIBCXX_FETCH_ROOT}/build" CACHE PATH "Android libc++ CMake build root")
 set(CRT_LIBCXX_INSTALL_PREFIX "${CRT_LIBCXX_FETCH_ROOT}/install" CACHE PATH "Android libc++ staged install prefix")
@@ -63,18 +66,48 @@ if(CRT_TARGET_OS STREQUAL "windows" AND CRT_WINDOWS_KERNEL32_LIB)
   list(APPEND CRT_LIBCXX_PLATFORM_ARGUMENTS
     --windows-sdk-libpath "${CRT_LIBCXX_WINDOWS_SDK_LIBPATH}")
 endif()
+if(CRT_TARGET_OS STREQUAL "windows")
+  # A native Windows process cannot execute tools/crt-cc/tools/crt-c++'s
+  # shebang lines directly, so CMake's compiler launcher is this
+  # project's own mksh.exe with the real wrapper passed as ARG1 (see
+  # tools/crt-libcxx-build.py's common_cmake_args()). That mksh.exe must
+  # come from the *rootfs* (${CMAKE_BINARY_DIR}/rootfs), not the plainer
+  # sysroot copy the C library install stages for other purposes: the
+  # rootfs is the only tree with toybox's applet aliases actually
+  # installed (system/bin/printf and friends), which tools/crt-cc itself
+  # needs for argument handling -- confirmed for real: launching via the
+  # sysroot's own mksh.exe copy fails every single compile with "printf:
+  # inaccessible or not found", since that tree only carries mksh.exe
+  # itself, no toybox alongside it. Computed inline as the same literal
+  # path the "rootfs" custom target further down uses for its own output
+  # (that target -- and the CRT_ROOTFS cache variable mirroring it -- is
+  # not defined yet at this point in the top-level CMakeLists.txt, but
+  # the plain path expression needs no forward reference); the actual
+  # build-order dependency on the real "rootfs" target is wired later,
+  # in the same if(TARGET crt-libcxx-configure) block that already wires
+  # the sysroot dependency.
+  list(APPEND CRT_LIBCXX_PLATFORM_ARGUMENTS
+    --rootfs "${CMAKE_BINARY_DIR}/rootfs")
+endif()
 if(Python3_Interpreter_FOUND)
   add_custom_target(crt-libcxx-fetch
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
-      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/fetch_libcxx_runtimes.py"
-      --root "${CRT_LIBCXX_FETCH_ROOT}"
-      --ref "${CRT_LIBCXX_ANDROID_REF}"
-    COMMENT "Fetching Android external/libc++ and external/libc++abi sources"
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/crt-libcxx-build.py"
+      --root "${CMAKE_SOURCE_DIR}"
+      --recipe-root "${CRT_LIBCXX_RECIPE_ROOT}"
+      --source-root "${CRT_LIBCXX_FETCH_ROOT}"
+      --build-root "${CRT_LIBCXX_BUILD_ROOT}"
+      --install-prefix "${CRT_LIBCXX_INSTALL_PREFIX}"
+      --sysroot "${CRT_SYSROOT}"
+      --target-os "${CRT_TARGET_OS}"
+      --phase fetch
+    COMMENT "Fetching libcxx/libcxxabi/libunwind recipe sources"
   )
   add_custom_target(crt-libcxx-configure
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
-      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/build_libcxx_runtimes.py"
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/crt-libcxx-build.py"
       --root "${CMAKE_SOURCE_DIR}"
+      --recipe-root "${CRT_LIBCXX_RECIPE_ROOT}"
       --source-root "${CRT_LIBCXX_FETCH_ROOT}"
       --build-root "${CRT_LIBCXX_BUILD_ROOT}"
       --install-prefix "${CRT_LIBCXX_INSTALL_PREFIX}"
@@ -83,13 +116,14 @@ if(Python3_Interpreter_FOUND)
       ${CRT_LIBCXX_PLATFORM_ARGUMENTS}
       --phase configure
     DEPENDS crt-libcxx-fetch
-    COMMENT "Configuring Android libc++ and libc++abi through the CRT toolchain"
+    COMMENT "Configuring libcxx/libcxxabi/libunwind recipes through the CRT toolchain"
     USES_TERMINAL
   )
   add_custom_target(crt-libcxx-build
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
-      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/build_libcxx_runtimes.py"
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/crt-libcxx-build.py"
       --root "${CMAKE_SOURCE_DIR}"
+      --recipe-root "${CRT_LIBCXX_RECIPE_ROOT}"
       --source-root "${CRT_LIBCXX_FETCH_ROOT}"
       --build-root "${CRT_LIBCXX_BUILD_ROOT}"
       --install-prefix "${CRT_LIBCXX_INSTALL_PREFIX}"
@@ -98,7 +132,7 @@ if(Python3_Interpreter_FOUND)
       ${CRT_LIBCXX_PLATFORM_ARGUMENTS}
       --phase build
     DEPENDS crt-libcxx-configure
-    COMMENT "Building Android libc++ and libc++abi through the CRT toolchain"
+    COMMENT "Building libcxx/libcxxabi/libunwind recipes through the CRT toolchain"
     USES_TERMINAL
   )
   add_custom_target(crt-libcxx-sysroot

@@ -200,24 +200,51 @@ Next work order:
      MSVC STL include root. Those routes were statically checked on macOS, but
      their real host GN/Ninja workflows still require execution before Skia is
      reported as cross-host verified.
-   - **C++ runtime prerequisite (macOS runtime smoke complete):** `crt-libcxx-fetch` obtains
-     Android's external libc++ and libc++abi sources under the active preset.
-     Current libunwind comes separately from AOSP `toolchain/llvm-project`.
-     Build them as one CRT static/shared runtime set and replace the
-     small Bionic-shaped bootstrap only after standard-library and Skia
-     link/run tests pass on all three hosts. `crt-libcxx-configure`,
-     `crt-libcxx-build`, and `crt-libcxx-sysroot` now provide the staged CRT
-     build/deployment path. `CRT_USE_IMPORTED_LIBCXX=ON` is now verified on
-     macOS: sysroot/rootfs staging and static/shared `crt-libcxx-smoke` pass
-     with vector, string, RTTI, and a real exception throw/catch. The full 104-test macOS
-     workflow also remains green.
-   - Remaining C++ runtime gate: build current AOSP LLVM libunwind from
-     `toolchain/llvm-project` and pass `crt-libcxx-smoke` on Linux and Windows.
-     The old `platform/external/libunwind` main checkout ended in 2021 and must
-     not be presented as the current paired unwinder. Windows compiler launch,
-     DLL/import-library staging, and Linux merged-librt policy are prepared but
-     still need real-host runs. macOS-only `Availability.h` remains external
-     build configuration, not a CRT public header.
+   - **C++ runtime prerequisite (macOS runtime smoke complete):** each of
+     `libstdc++/third_party/{libunwind,libcxxabi,libcxx}/recipe.json` declares
+     its own source (git repo/ref, plus a sparse-checkout subpath for
+     libunwind) and CMake build options -- see `tools/crt-libcxx-build.py`'s
+     own module docstring for the schema. `crt-libcxx-fetch`/`-configure`/
+     `-build`/`-sysroot` drive all three through the CRT toolchain. Restructured
+     2026-08-21 from hardcoded one-off Python scripts into this declarative,
+     per-component recipe form (2026-08-21 HISTORY.md entry has the full
+     writeup, including three real toolchain bugs the restructuring surfaced
+     and fixed on Windows: a backslash-vs-forward-slash path bug in mksh's own
+     exec resolution, `CMAKE_CXX_COMPILER_ARG1` not reliably reaching every
+     CMake-driven TryCompile, and libunwind's CMakeLists.txt needing sibling
+     `cmake/`/`runtimes/cmake/` directories a sparse checkout of just
+     `libunwind/` does not carry by default). `CRT_USE_IMPORTED_LIBCXX=ON` is
+     verified on macOS: sysroot/rootfs staging and static/shared
+     `crt-libcxx-smoke` pass with vector, string, RTTI, and a real exception
+     throw/catch. The full 104-test macOS workflow also remains green.
+   - Remaining C++ runtime gate, real and open (not just "needs a run"):
+     `crt-libcxx-configure` now succeeds on Windows for all three recipes, but
+     `crt-libcxx-build` fails partway through libcxxabi with genuine C++ ABI
+     source-portability gaps -- AOSP's libcxxabi/libcxx checkout has never
+     been built for a mingw-style Windows target before (only Android/Linux/
+     macOS). `_LIBCPP_WIN32API` (libc++'s own `__config`, unconditionally
+     defined for any `_WIN32` target) conflates several unrelated subsystems:
+     some of what it gates is still correct for this project's Windows host
+     (endianness, `wchar_t` width) and some is not (`chrono.cpp`/`thread.cpp`
+     want `<windows.h>` for native clocks/threading, which this project's
+     `-nostdinc` freestanding build never provides; `stdlib_new_delete.cpp`/
+     `new.cpp` want MSVC-only `_aligned_malloc`/`_aligned_free`, which this
+     project's own libc doesn't declare, only the portable `aligned_alloc`).
+     A separate clang-predefined `__SEH__` macro (independent of
+     `_LIBCPP_WIN32API`) also gates a `<windows.h>`-dependent exception-
+     personality path in `cxa_personality.cpp`. Needs careful, file-by-file
+     patches redirecting the subsystems this project's own PAL already
+     supports (pthread, `clock_gettime`, `aligned_alloc`) to their portable
+     code paths, without blanket-disabling the parts of `_LIBCPP_WIN32API`
+     that are still genuinely correct -- deferred as a follow-up rather than
+     rushed; not yet attempted on Linux (host-provided libunwind was
+     considered and explicitly rejected -- see `libstdc++/third_party/
+     libunwind/recipe.json`'s own notes for why -- so Linux needs the same
+     from-source build and will very likely hit related, if not identical,
+     gaps once reached). The old `platform/external/libunwind` main checkout
+     ended in 2021 and must not be presented as the current paired unwinder.
+     macOS-only `Availability.h` remains external build configuration, not a
+     CRT public header.
 3. **Run the Wayland/Weston protocol/library investigation as a separate
    `libcrtgfx` sub-track.**
    Decide what is protocol parsing, what is compositor policy, and what is

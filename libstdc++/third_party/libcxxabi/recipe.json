@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "name": "libcxxabi",
+  "source": {
+    "type": "git",
+    "repository": "https://android.googlesource.com/platform/external/libcxxabi",
+    "ref": "refs/heads/main"
+  },
+  "dependencies": [],
+  "cmake": {
+    "options": [
+      "-DLIBCXXABI_ENABLE_SHARED=ON",
+      "-DLIBCXXABI_ENABLE_STATIC=ON",
+      "-DLIBCXXABI_INCLUDE_TESTS=OFF",
+      "-DLIBCXXABI_ENABLE_EXCEPTIONS=ON",
+      "-DLIBCXXABI_ENABLE_THREADS=ON",
+      "-DLIBCXXABI_HAS_PTHREAD_API=ON",
+      "-DLIBCXXABI_USE_COMPILER_RT=ON",
+      "-DLLVM_EXTERNAL_LIBCXX_SOURCE_DIR=@SOURCE:libcxx@"
+    ],
+    "build_targets": ["cxxabi"]
+  },
+  "extra_files": [
+    {
+      "path": "src/__crt_dso_handle.cpp",
+      "content": "extern \"C\" void* __dso_handle = &__dso_handle;\n"
+    }
+  ],
+  "patches": [
+    {
+      "file": "src/CMakeLists.txt",
+      "find": "if (LIBCXXABI_ENABLE_NEW_DELETE_DEFINITIONS)\n",
+      "replace": "list(APPEND LIBCXXABI_SOURCES __crt_dso_handle.cpp)\n\nif (LIBCXXABI_ENABLE_NEW_DELETE_DEFINITIONS)\n",
+      "reason": "This project's own crt1.o never defines __dso_handle (Bionic's real crtbegin/crtend split is not imported), and libc++abi's static-init-guard code needs a real symbol of that exact name to reference. A tiny CRT-owned shim source, wired into libcxxabi's own build via this one-line CMakeLists.txt insertion rather than patched into the freestanding CRT startup objects themselves."
+    }
+  ],
+  "notes": [
+    "Deliberately no LIBCXXABI_USE_LLVM_UNWINDER/LIBCXXABI_LIBUNWIND_INCLUDES/dependency on ../libunwind here, on any host: that CMake option only changes libcxxabi's own compile-time #ifdef selection (real libunwind.h API vs. the generic, portable Itanium _Unwind_* ABI surface) -- it does not, by itself, make the CMake-standalone-build cxxabi_shared/cxxabi_static targets actually link against a real libunwind (that automatic wiring only fires inside a combined, single-configure LLVM \"runtimes\" build where libunwind was add_subdirectory()'d into the *same* CMake project graph, which AOSP's split-repo layout -- libcxx/libcxxabi/libunwind are three separate git repos -- makes impractical here anyway; confirmed by reading libcxxabi's own src/CMakeLists.txt, which checks `TARGET unwind_shared`/`HAVE_LIBUNWIND`, neither ever satisfiable from a separate `cmake -S -B` invocation). The plain default (this option OFF) Itanium ABI surface libcxxabi already compiles against is exactly what a real libunwind exports too, so the only real cross-reference this needs is a link-time one -- see tools/crt-c++'s own per-OS cxx_runtime_libs, and ../libunwind/recipe.json's own notes for where each host's libunwind actually comes from (built here on Windows only; a host package on Linux; not needed at all on macOS).",
+    "macos needs nothing special here either: LIBCXXABI_USE_LLVM_UNWINDER simply stays at its upstream default (OFF), matching Darwin's own already-verified-working libSystem unwinder."
+  ]
+}

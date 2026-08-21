@@ -27,8 +27,21 @@ def main():
 
     copy_tree(headers, sysroot / "include" / "c++" / "v1")
     copied = []
+    # "unwind"/"libunwind": libunwind's own CMake OUTPUT_NAME is the bare
+    # "unwind" (see libstdc++/third_party/libunwind/recipe.json), so its
+    # real artifact names vary by platform archive convention -- Unix ar
+    # always adds the "lib" prefix regardless of OUTPUT_NAME
+    # ("libunwind.a"/"libunwind.so"), but this toolchain's Windows import
+    # library naming has been observed to go either way for other
+    # runtimes built the same way (see tools/crt-c++'s own multi-candidate
+    # libunwind.dll.a/libunwind_dll.lib/unwind_dll.lib/unwind.lib lookup) --
+    # match both prefixed and bare forms here rather than assume one.
     for library in libraries.iterdir():
-        if library.is_file() and (library.name.startswith("libc++") or library.name.startswith("libunwind")):
+        if library.is_file() and (
+            library.name.startswith("libc++")
+            or library.name.startswith("libunwind")
+            or library.name.startswith("unwind")
+        ):
             shutil.copy2(library, sysroot / "lib" / library.name)
             copied.append(library.name)
     runtime_bin = install / "bin"
@@ -36,7 +49,9 @@ def main():
         (sysroot / "bin").mkdir(parents=True, exist_ok=True)
         for library in runtime_bin.iterdir():
             if library.is_file() and (
-                "c++" in library.name or library.name.startswith("libunwind")
+                "c++" in library.name
+                or library.name.startswith("libunwind")
+                or library.name.startswith("unwind")
             ):
                 shutil.copy2(library, sysroot / "bin" / library.name)
                 copied.append(f"bin/{library.name}")

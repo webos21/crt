@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "name": "libcxx",
+  "source": {
+    "type": "git",
+    "repository": "https://android.googlesource.com/platform/external/libcxx",
+    "ref": "refs/heads/main"
+  },
+  "dependencies": ["libcxxabi"],
+  "cmake": {
+    "options": [
+      "-DLIBCXX_ENABLE_SHARED=ON",
+      "-DLIBCXX_ENABLE_STATIC=ON",
+      "-DLIBCXX_INCLUDE_TESTS=OFF",
+      "-DLIBCXX_INCLUDE_BENCHMARKS=OFF",
+      "-DLIBCXX_INCLUDE_DOCS=OFF",
+      "-DLIBCXX_CXX_ABI=libcxxabi",
+      "-DLIBCXX_CXX_ABI_INCLUDE_PATHS=@SOURCE:libcxxabi@/include",
+      "-DLIBCXX_CXX_ABI_LIBRARY_PATH=@INSTALL_PREFIX@/lib",
+      "-DLIBCXX_ENABLE_EXCEPTIONS=ON",
+      "-DLIBCXX_ENABLE_RTTI=ON",
+      "-DLIBCXX_ENABLE_THREADS=ON",
+      "-DLIBCXX_HAS_PTHREAD_API=ON",
+      "-DLIBCXX_USE_COMPILER_RT=ON",
+      "-DLIBCXX_STANDARD_VER=c++14",
+      "-DLIBCXX_HAS_RT_LIB=OFF"
+    ],
+    "build_targets": ["cxx", "cxx_filesystem", "cxx_experimental", "cxx-generated-config"]
+  },
+  "post_install_copy": {
+    "macos": [
+      {"from": "lib/notweak.exp", "to": "lib/libc++.notweak.exp"}
+    ]
+  },
+  "notes": [
+    "LIBCXX_STANDARD_VER=c++14: Android's own build uses a newer dialect than this legacy standalone CMake default; keeping this cache value also avoids the removed C11 gets() import while preserving the public CRT headers.",
+    "LIBCXX_HAS_RT_LIB=OFF on every host: modern Bionic provides the historical librt surface from libc itself. The standalone libc++ probe is also compiled as a static library and can report a false positive without performing a real link, so this is pinned off everywhere rather than leaking a host librt dependency into Linux.",
+    "post_install_copy.macos stages libc++'s own upstream not-weak symbol-export policy list (lib/notweak.exp) into the shared install prefix as libc++.notweak.exp -- tools/crt-c++'s macOS static-link path applies it via -Wl,-force_symbols_not_weak_list so a stray host libSystem symbol can never interpose this project's own C++ allocator."
+  ]
+}

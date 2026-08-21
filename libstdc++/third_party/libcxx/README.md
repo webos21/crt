@@ -4,11 +4,14 @@ This directory contains CRT-owned provenance and build policy only. It is not
 an upstream source checkout.
 
 The complete C++ standard library is Android's `platform/external/libcxx`.
-Its paired ABI and unwinder sources are `platform/external/libcxxabi` and
-`platform/external/libunwind`. `tools/fetch_libcxx_runtimes.py` fetches all
-three at one selected Android ref into
-`out/<preset>/external/llvm-runtimes/`; build products belong under that same
-active preset tree and are never committed here.
+`recipe.json` in this directory declares its source (git repository + ref)
+and CMake build options, following the same schema as the sibling
+`../libcxxabi/recipe.json` and `../libunwind/recipe.json`. `tools/crt-libcxx-
+build.py` reads all three recipes and drives fetch/configure/build through
+the CRT toolchain (`tools/crt-cc`/`tools/crt-c++`); see that script's own
+module docstring for the recipe schema. Sources and build products land under
+the active preset's `out/<preset>/external/llvm-runtimes/` and are never
+committed here.
 
 The initial project runtime remains Bionic-shaped: `libstdc++/src/` owns the
 small ABI bootstrap Bionic historically provides, while imported libc++,

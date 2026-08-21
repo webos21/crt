@@ -535,6 +535,22 @@ if(Python3_Interpreter_FOUND)
   )
   if(CRT_USE_IMPORTED_LIBCXX)
     add_dependencies(rootfs crt-libcxx-sysroot)
+  elseif(CRT_TARGET_OS STREQUAL "windows" AND TARGET crt-libcxx-configure)
+    # Windows only, and only the other direction from the
+    # CRT_USE_IMPORTED_LIBCXX=ON case just above (mutually exclusive, to
+    # avoid a real dependency cycle: rootfs -> crt-libcxx-sysroot ->
+    # crt-libcxx-build -> crt-libcxx-configure -> rootfs). Before a
+    # successfully staged libc++ is actually in use, crt-libcxx-configure/
+    # -build themselves need the rootfs to already exist first --
+    # tools/crt-libcxx-build.py launches tools/crt-cc/tools/crt-c++
+    # through the *rootfs*'s mksh.exe (see that script's own
+    # common_cmake_args() comment for why: the sysroot's own separate
+    # mksh.exe copy has no toybox alongside it, so it cannot resolve
+    # "printf" and every compile fails outright).
+    add_dependencies(crt-libcxx-configure rootfs)
+    if(TARGET crt-libcxx-build)
+      add_dependencies(crt-libcxx-build rootfs)
+    endif()
   endif()
 
   get_filename_component(CRT_BUILD_PRESET_NAME "${CMAKE_BINARY_DIR}" NAME)

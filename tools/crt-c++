@@ -210,13 +210,30 @@ case "$target_os" in
       if [ -f "${CRT_SYSROOT}/lib/libc++abi.so" ]; then
         cxx_abi_lib="${CRT_SYSROOT}/lib/libc++abi.so"
       fi
-      cxx_runtime_libs="${CRT_SYSROOT}/lib/libc++.so $cxx_abi_lib"
+      # libunwind (Linux only -- see libstdc++/third_party/libunwind/
+      # recipe.json's own notes for why macOS never builds/needs one, and
+      # libstdc++/third_party/libcxxabi/recipe.json's notes for why the
+      # link dependency has to be added here rather than inside
+      # libcxxabi's own standalone CMake build). Only present at all once
+      # CRT_USE_IMPORTED_LIBCXX=ON has actually staged it; conditional the
+      # same way cxx_abi_lib above already is, so the bootstrap
+      # libstdc++/src/ ABI shim (which never stages a libunwind.so) keeps
+      # linking exactly as before.
+      cxx_unwind_lib=""
+      if [ -f "${CRT_SYSROOT}/lib/libunwind.so" ]; then
+        cxx_unwind_lib="${CRT_SYSROOT}/lib/libunwind.so"
+      fi
+      cxx_runtime_libs="${CRT_SYSROOT}/lib/libc++.so $cxx_abi_lib $cxx_unwind_lib"
     else
       cxx_abi_lib=""
       if [ -f "${CRT_SYSROOT}/lib/libc++abi.a" ]; then
         cxx_abi_lib="${CRT_SYSROOT}/lib/libc++abi.a"
       fi
-      cxx_runtime_libs="${CRT_SYSROOT}/lib/libc++.a $cxx_abi_lib"
+      cxx_unwind_lib=""
+      if [ -f "${CRT_SYSROOT}/lib/libunwind.a" ]; then
+        cxx_unwind_lib="${CRT_SYSROOT}/lib/libunwind.a"
+      fi
+      cxx_runtime_libs="${CRT_SYSROOT}/lib/libc++.a $cxx_abi_lib $cxx_unwind_lib"
     fi
     if [ "$shared_mode" -eq 1 ]; then
       crt_libs="$cxx_runtime_libs ${CRT_SYSROOT}/lib/libc.so ${CRT_SYSROOT}/lib/libm.so ${CRT_SYSROOT}/lib/libdl.so"
@@ -257,10 +274,25 @@ case "$target_os" in
         echo "crt-c++: imported shared libc++ import library is not staged" >&2
         exit 1
       fi
+      # libunwind (Linux/Windows only -- see libstdc++/third_party/
+      # libunwind/recipe.json's own notes for why macOS never builds one).
+      # Optional, unlike libc++'s own import library just above: absent
+      # whenever CRT_USE_IMPORTED_LIBCXX=ON hasn't (yet, or ever, on this
+      # host) actually staged it, matching the bootstrap libstdc++/src/ ABI
+      # shim's own no-libunwind link line.
+      for candidate in libunwind.dll.a libunwind_dll.lib unwind_dll.lib unwind.lib; do
+        if [ -f "${CRT_SYSROOT}/lib/$candidate" ]; then
+          cxx_runtime_libs="$cxx_runtime_libs ${CRT_SYSROOT}/lib/$candidate"
+          break
+        fi
+      done
     elif [ -f "${CRT_SYSROOT}/lib/libc++.a" ]; then
       cxx_runtime_libs="${CRT_SYSROOT}/lib/libc++.a"
       if [ -f "${CRT_SYSROOT}/lib/libc++abi.a" ]; then
         cxx_runtime_libs="$cxx_runtime_libs ${CRT_SYSROOT}/lib/libc++abi.a"
+      fi
+      if [ -f "${CRT_SYSROOT}/lib/libunwind.a" ]; then
+        cxx_runtime_libs="$cxx_runtime_libs ${CRT_SYSROOT}/lib/libunwind.a"
       fi
     else
       cxx_runtime_libs="${CRT_SYSROOT}/lib/c++.lib"

@@ -428,3 +428,20 @@ in those two win.
   AOSP unwind source is in `toolchain/llvm-project`, not the retired
   `platform/external/libunwind` checkout. The ELF loader/dynamic-linker
   prototype remains a separate lower-layer track.
+- **2026-08-21: the libcxx/libcxxabi/libunwind build was restructured from
+  hardcoded Python scripts into per-component `recipe.json` files**
+  (`libstdc++/third_party/{libunwind,libcxxabi,libcxx}/recipe.json`, driven by
+  a new `tools/crt-libcxx-build.py`) -- see `HISTORY.md`'s dated entry for the
+  full writeup, including three real Windows toolchain bugs found and fixed
+  (mksh's own exec needing forward-slash paths, `CMAKE_CXX_COMPILER_ARG1` not
+  reaching every TryCompile, libunwind's `CMakeLists.txt` needing sibling LLVM
+  cmake directories a sparse checkout doesn't carry). Real libunwind now
+  builds as part of this pipeline (previously never attempted at all).
+  `crt-libcxx-configure` now succeeds for all three recipes on Windows;
+  `crt-libcxx-build` still fails partway through libcxxabi on genuine C++ ABI
+  source-portability gaps (`_LIBCPP_WIN32API` needing `<windows.h>`/MSVC-only
+  `_aligned_malloc` this project's freestanding build doesn't provide) --
+  real porting work, deliberately deferred rather than rushed; see `TODO.md`'s
+  C++ runtime prerequisite section. Full local `ctest` (119/119 on Windows)
+  confirms this restructuring introduced no regression to the default
+  build/test workflow, which never touches the `crt-libcxx-*` targets.
