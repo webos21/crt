@@ -74,6 +74,18 @@ are built with `-Xclang -fwchar-type=int` so `wchar_t` and wide string literals
 are signed 32-bit on Windows as well as on Linux/macOS. External libraries built
 against the CRT sysroot must use the same flag.
 
+The same reasoning applies to the C++ exception-table format on Windows.
+Clang's default for `*-w64-mingw32` is native SEH (`.pdata`/`.xdata`, unwound
+by the Windows OS itself through `RtlUnwind`/`RtlVirtualUnwind`), but CRT
+builds with `-fdwarf-exceptions` instead, matching the Itanium DWARF CFI
+format already used on Linux and macOS. This keeps C++ exception unwinding
+running entirely on the project's own from-source LLVM libunwind on all three
+OSes rather than handing the actual unwind engine to a host OS facility --
+the same "own the toolchain" policy already applied to rejecting a
+host-installed `libunwind-dev` package on Linux and to never linking a host
+`libc++` as a substitute for Skia. See `docs/cxx_runtime.md`'s "Exceptions,
+RTTI, And Unwind" section for the full technical detail.
+
 Rust may be used later for tooling or optional internal modules behind a stable C
 ABI, but the core runtime must remain buildable without requiring Rust.
 

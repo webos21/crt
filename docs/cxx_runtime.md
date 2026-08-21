@@ -146,6 +146,62 @@ the Android build in 2021 because the repository was no longer used. Current
 AOSP LLVM runtime work lives in `toolchain/llvm-project`; its `libunwind`
 source must be wired as the next static/shared runtime component.
 
+### Windows exception-table format: DWARF CFI, not native SEH
+
+This is a deliberate, project-important decision, not an incidental compiler
+default. Clang's out-of-the-box exception-table format for the
+`*-w64-mingw32` target is native SEH -- the Windows OS's own unwind format
+(`.pdata`/`.xdata` tables walked by `RtlVirtualUnwind`/`RtlUnwindEx` inside
+`ntdll`), signaled to source via the `__SEH__` predefine. CRT instead builds
+Windows C++ with `-fdwarf-exceptions`, which forces the portable Itanium
+DWARF CFI format used on Linux and macOS.
+
+The reasoning is not "libc++/libc++abi are self-built, therefore use DWARF"
+in the abstract -- it is specifically about which component owns the actual
+unwind *engine*:
+
+- CRT already builds its own LLVM libunwind from source on every OS
+  (`libstdc++/third_party/libunwind/recipe.json`), after explicitly
+  evaluating and rejecting a host-provided `libunwind-dev` package on Linux
+  (see that recipe's own `notes`). That from-source libunwind is a
+  table-based DWARF CFI unwinder -- the same implementation, same table
+  format, same unwind algorithm on Linux, macOS, and Windows.
+- Native SEH is a genuinely different mechanism: the actual stack walking
+  and personality-routine dispatch happens inside the Windows OS itself
+  (`RtlUnwind`), not in CRT-owned code. libunwind does ship an
+  `Unwind-seh.cpp` bridge that can adapt Itanium `_Unwind_*` semantics onto
+  it, but choosing that path as the default would mean CRT's Windows C++
+  exception behavior is driven by an OS-native facility outside the
+  project's own runtime, diverging from how Linux/macOS unwind and
+  reintroducing exactly the kind of host-runtime dependency the PAL design
+  exists to eliminate.
+- This is the same "own the toolchain, never substitute a host-provided
+  runtime for the project's own" principle already applied twice elsewhere:
+  rejecting host `libunwind-dev` on Linux, and Skia's policy of never
+  linking a host `libc++` as a substitute for the project's own.
+- This does not mean avoiding Windows APIs altogether. CRT's libunwind still
+  calls ordinary documented Win32 facilities for auxiliary bookkeeping --
+  for example `EnumProcessModules`/`psapi.h` for PE module enumeration in
+  `AddressSpace.hpp`'s `findUnwindSections()` -- matching how the rest of the
+  Windows PAL already declares raw `__declspec(dllimport)` Win32 prototypes
+  (`libc/src/arch/windows/`) rather than pulling in `<windows.h>` wholesale.
+  What is specifically avoided is depending on the OS's native SEH *unwind
+  engine* as the mechanism that walks the stack and dispatches destructors
+  and catch handlers; documented Win32 calls for bookkeeping are the normal,
+  already-established PAL pattern.
+
+`-fdwarf-exceptions` must be set on both `CMAKE_CXX_FLAGS` and
+`CMAKE_C_FLAGS` in `tools/crt-libcxx-build.py`: libunwind has plain-C sources
+(`UnwindLevel1.c`, `UnwindLevel1-gcc-ext.c`, `Unwind-sjlj.c`) that also
+transitively reach the `__SEH__`-gated `<windows.h>` include in `unwind.h` via
+`libunwind_ext.h`, which this project's `-nostdinc` freestanding build cannot
+satisfy. See `tools/crt-libcxx-build.py`'s own comment at the flag's
+definition for the full empirical trail (confirmed via
+`clang++ --target=x86_64-w64-mingw32 -dM -E` showing `__SEH__` defined by
+default and undefined under `-fdwarf-exceptions`), and `TODO.md`'s C++
+runtime prerequisite section for the adoption plan this decision is step 1
+of.
+
 The current C++ frontend test is compiled with `-fno-exceptions` and
 `-fno-rtti`. Linux and macOS keep compiler-emitted thread-safe local-static
 guards enabled, which exercises the Bionic/Itanium `__cxa_guard_*` lane.

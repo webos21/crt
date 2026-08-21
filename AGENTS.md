@@ -103,6 +103,16 @@ host startup files, host default runtime libraries에 우발적으로 의존하�
 - Bionic cleaned kernel headers와 Linux UAPI provenance/license metadata를
   보존.
 - 내부 Linux kernel header를 임의로 복사하지 않는다.
+- C++ 예외 처리도 이 경계 원칙의 대상이다. Windows(`*-w64-mingw32`) 타겟에서
+  Clang 기본값은 OS 자체가 제공하는 native SEH 예외 테이블(`.pdata`/`.xdata`,
+  `RtlUnwind`/`RtlVirtualUnwind` 기반)이지만, CRT는 `-fdwarf-exceptions`로
+  강제 전환하여 Linux/macOS와 동일하게 Itanium DWARF CFI 예외 테이블을
+  사용한다. CRT는 이미 자체 소스로 libunwind를 빌드해 3개 OS에서 동일한
+  unwind 엔진/테이블 포맷을 쓰기로 결정했으므로 (host `libunwind-dev` 패키지
+  사용을 명시적으로 거부한 것과 동일한 "toolchain을 직접 소유한다" 원칙),
+  Windows에서만 native SEH(=OS 소유의 unwind 엔진)에 의존하면 이 일관성이
+  깨진다. 자세한 배경은 `docs/cxx_runtime.md`의 "Exceptions, RTTI, And
+  Unwind" 절과 `tools/crt-libcxx-build.py`의 관련 주석을 참고한다.
 
 ## 아키텍처 원칙
 
