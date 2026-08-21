@@ -28,18 +28,40 @@ Recipe JSON shape (schema_version 1):
   "source": {
     "type": "git",
     "repository": "<git URL>",
-    "ref": "refs/heads/main",
+    "ref": "<pinned 40-char commit SHA (preferred) or refs/heads/<branch>>",
+        // A pinned SHA is fetched directly (`git fetch --depth 1 origin
+        // <sha>`) -- confirmed to work against android.googlesource.com's
+        // Gerrit/JGit backend without needing the commit to be an actual
+        // ref tip. `git clone --branch <sha>` does NOT work (Gerrit/JGit
+        // rejects it: "Remote branch <sha> not found in upstream origin"),
+        // which is exactly why fetch_recipe() never passes --branch to
+        // the *initial* clone step below -- only ever a separate, later
+        // `git fetch origin <ref>` + `git checkout FETCH_HEAD`, which
+        // works identically whether ref is a branch name or a raw SHA.
+        // Every recipe in this project pins a SHA today (see each
+        // recipe.json's own notes for the exact android.googlesource.com
+        // commit and the date it was captured) -- a floating branch ref
+        // means a rebuild next month can silently fetch different
+        // upstream source with zero signal beyond "a patch's `find` text
+        // no longer matches" (and only for the specific text each patch
+        // touches; everything else could drift with no signal at all).
     "sparse_paths": ["<repo-relative dir(s) to check out>"],  // optional;
-        // omit for a repo that IS the component (libcxx, libcxxabi);
-        // required for a monorepo where only a subdirectory is wanted
-        // (libunwind lives inside AOSP's full toolchain/llvm-project
-        // checkout, which also carries clang/llvm/compiler-rt/... --
+        // two distinct uses: (1) a monorepo where only a subdirectory is
+        // wanted (libunwind lives inside AOSP's full toolchain/llvm-project
+        // checkout, which also carries clang/llvm/compiler-rt/...) --
         // sparse-checkout keeps the fetch to tens of MB instead of the
-        // full monorepo).
+        // full monorepo; (2) trimming a same-repo component's own unused
+        // directories (libcxx/libcxxabi are each already the component,
+        // but their own upstream repos also carry a `test/` suite this
+        // project's build never runs -- tens of MB never worth fetching).
+        // Cone-mode sparse-checkout works identically either way; only
+        // checkout_subdir (below) needs to differ.
     "checkout_subdir": "<path inside the clone that IS the component>",
         // required alongside sparse_paths; the source this recipe
         // actually builds is repo_root/checkout_subdir, not the clone
-        // root itself.
+        // root itself. "." for use (2) above (the clone root already IS
+        // the component -- Path(...) / "." resolves to the same path, no
+        // special-casing needed in fetch_recipe() itself).
     "extra_checkout_dirs": ["<sibling dir>", ...]  // optional; extra
         // top-level clone dirs to also copy, as siblings of every
         // recipe's own checkout_dir directly under the shared source
@@ -233,24 +255,48 @@ def fetch_recipe(recipe, source_root, rebuild=False):
 
     if sparse_paths:
         # A repo-with-a-subpath fetch (libunwind inside AOSP's full
-        # toolchain/llvm-project monorepo mirror): a plain --depth 1 clone
-        # would still download the *entire* tree at that one commit
-        # (hundreds of MB -- llvm/clang/compiler-rt/... all live in the
-        # same repo), so use a real partial clone (--filter=blob:none,
-        # which defers file *content* until checkout) plus cone-mode
-        # sparse-checkout scoped to just the wanted subpath. Verified this
-        # keeps the fetch to ~25MB instead of the full monorepo.
+        # toolchain/llvm-project monorepo mirror, or libcxx/libcxxabi's
+        # own unused test/ suite trimmed from their own standalone
+        # repos): a plain --depth 1 clone would still download the
+        # *entire* tree at that one commit, so use a real partial clone
+        # (--filter=blob:none, which defers file *content* until
+        # checkout) plus cone-mode sparse-checkout scoped to just the
+        # wanted subpath(s). Verified this keeps the fetch to ~25MB for
+        # the llvm-project monorepo case instead of hundreds of MB.
+        #
+        # --depth 1, but no --branch, on this initial clone step (unlike
+        # the non-sparse branch below): a pinned ref is normally a raw
+        # commit SHA now (see this file's own recipe-schema comment
+        # above), and `git clone --branch <sha>` does not work against
+        # this project's actual git host (confirmed for real against
+        # android.googlesource.com's Gerrit/JGit backend: "Remote branch
+        # <sha> not found in upstream origin") -- only a plain `git fetch
+        # origin <ref>` does, whether ref is a branch name or a raw SHA,
+        # which is exactly what runs a few lines down instead. --depth 1
+        # here still matters and must stay: this step, lacking --branch,
+        # clones the default branch's tip shallowly (small and fast --
+        # timed directly at ~6s against the giant llvm-project monorepo),
+        # immediately superseded by the real ref fetch below. Confirmed
+        # for real, the hard way, what dropping --depth 1 here actually
+        # costs: without it this becomes a full, unshallowed (though
+        # still blobless) clone of the *entire* commit/tree history --
+        # for llvm-project specifically, over ten real CPU-minutes of
+        # git churning through history it was about to discard anyway
+        # the very next step, before being killed. --filter=blob:none
+        # alone is not a substitute for --depth 1: it only defers file
+        # *content*, never trims the *commit graph* itself.
         if clone_dir.exists() and rebuild:
             shutil.rmtree(clone_dir)
         if not clone_dir.exists():
             run(
                 ["git", "clone", "--filter=blob:none", "--no-checkout", "--depth", "1",
-                 "--branch", ref.removeprefix("refs/heads/"), source["repository"], str(clone_dir)],
+                 source["repository"], str(clone_dir)],
                 label=f"{recipe['name']}: clone (sparse)",
             )
             run(["git", "sparse-checkout", "init", "--cone"], cwd=clone_dir)
             run(["git", "sparse-checkout", "set"] + sparse_paths, cwd=clone_dir)
-            run(["git", "checkout", ref.removeprefix("refs/heads/")], cwd=clone_dir)
+            run(["git", "fetch", "--depth", "1", "origin", ref], cwd=clone_dir)
+            run(["git", "checkout", "--detach", "FETCH_HEAD"], cwd=clone_dir)
         elif rebuild:
             run(["git", "fetch", "--depth", "1", "origin", ref], cwd=clone_dir)
             run(["git", "checkout", "--detach", "FETCH_HEAD"], cwd=clone_dir)
@@ -284,12 +330,19 @@ def fetch_recipe(recipe, source_root, rebuild=False):
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(src, dest, ignore=shutil.ignore_patterns(".git"))
     else:
+        # No recipe in this project uses this branch today (all three
+        # now set sparse_paths -- see the sparse branch above's own
+        # comment on why --branch <sha> doesn't work), but fixed the same
+        # way regardless rather than left as a latent trap for a future
+        # recipe that pins a SHA without also using sparse_paths.
         if not checkout_dir.exists():
             run(
-                ["git", "clone", "--depth", "1", "--branch", ref.removeprefix("refs/heads/"),
+                ["git", "clone", "--filter=blob:none", "--no-checkout",
                  source["repository"], str(checkout_dir)],
                 label=f"{recipe['name']}: clone",
             )
+            run(["git", "fetch", "--depth", "1", "origin", ref], cwd=checkout_dir)
+            run(["git", "checkout", "--detach", "FETCH_HEAD"], cwd=checkout_dir)
         elif rebuild:
             run(["git", "fetch", "--depth", "1", "origin", ref], cwd=checkout_dir)
             run(["git", "checkout", "--detach", "FETCH_HEAD"], cwd=checkout_dir)

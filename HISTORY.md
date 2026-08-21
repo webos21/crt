@@ -10,6 +10,92 @@ substantive update.
 
 ## 2026-08-21
 
+- **libcxx/libcxxabi/libunwind source pinned to exact commit SHAs, and
+  sparse-checkout extended to trim libcxx/libcxxabi's own unused `test/`
+  suites.** Followed a request to evaluate vendoring the source into this
+  project's own tree versus keeping the existing build-time `git clone`
+  -- the evaluation's own two concrete, low-cost recommendations (pin
+  exact SHAs regardless of the vendoring decision; skip full vendoring
+  for now, since a floating `refs/heads/main` was the real risk, not the
+  network dependency) were then implemented directly.
+
+  All three `libstdc++/third_party/{libcxx,libcxxabi,libunwind}/
+  recipe.json` had `"ref": "refs/heads/main"` -- a floating branch
+  reference, not a pinned commit, with no lockfile recording which
+  commit a given build actually fetched. `apply_patches()`'s own
+  fail-fast behavior (a patch's `find` text not matching raises
+  `SystemExit` immediately, confirmed already in place) only catches
+  drift in the *specific* text each of this project's 18 patches
+  touches -- everything else in three multi-megabyte C++ runtime
+  components could silently change between builds with zero signal at
+  all. Pinned via `git ls-remote <repo> refs/heads/main` on each of the
+  three repos the same day: libcxx `4f4a65c06cecf421b56b9fea867d3aa7200f7f1a`,
+  libcxxabi `65715172d940193fee91631e19adb138bce340c6`, libunwind (from
+  `toolchain/llvm-project`) `37f38d1f3276b62fba09462ab4807dce846c732d`.
+
+  Pinning to a raw SHA needed a real `tools/crt-libcxx-build.py` fix, not
+  just a JSON edit: `fetch_recipe()`'s existing `git clone --branch <ref>`
+  (used for the initial shallow clone in both the sparse and non-sparse
+  paths) does not accept an arbitrary commit SHA -- confirmed for real
+  against this project's actual git host, `android.googlesource.com`'s
+  Gerrit/JGit backend rejects it outright ("Remote branch <sha> not
+  found in upstream origin"). Confirmed the fix empirically before
+  writing it: `git fetch --depth 1 origin <sha>` (as opposed to `clone
+  --branch`) DOES work against the same host for an arbitrary reachable
+  commit, for both the small standalone repos and the giant
+  `toolchain/llvm-project` monorepo alike -- so `fetch_recipe()` no
+  longer passes `--branch` on the initial clone at all, relying entirely
+  on a separate `git fetch origin <ref>` + `git checkout --detach
+  FETCH_HEAD` step that works identically whether `ref` is a branch name
+  or a raw SHA (the non-sparse branch, unused by any of today's three
+  recipes but fixed the same way regardless rather than left as a latent
+  trap for a future recipe).
+
+  A real mistake was made and caught while implementing this: the first
+  version of the fix also dropped `--depth 1` from the initial clone
+  step, reasoning from an interactive test that had actually still kept
+  `--depth 1` (a misreading of the interactive test's own command,
+  caught only once the real background build was observed genuinely
+  stuck -- `ps`/`Get-Process` showed a `git` process's CPU time climbing
+  continuously, over ten real CPU-minutes, cloning the *entire* commit
+  history of the giant `toolchain/llvm-project` monorepo before being
+  killed. `--filter=blob:none` alone is not a substitute for `--depth
+  1`: it only defers file *content*, never trims the *commit graph*
+  itself, which for a repo with llvm-project's history is the actually
+  expensive part even with zero blobs downloaded. Fixed by restoring
+  `--depth 1` (clean now: ~6s for the same monorepo clone step, matching
+  the original interactive test once it was actually reproduced
+  faithfully).
+
+  `sparse_paths`/`checkout_subdir: "."` was also added to libcxx and
+  libcxxabi (previously used only by libunwind's monorepo-subpath
+  extraction) -- a second, distinct use of the same mechanism: trimming
+  a same-repo component's own unused directories, not extracting a
+  subdirectory from a larger monorepo. Both repos already ARE their own
+  component; both also carry their own `test/` suite this project's
+  build never runs at all (`LIBCXX_INCLUDE_TESTS=OFF`/
+  `LIBCXXABI_INCLUDE_TESTS=OFF` already set) -- measured directly at
+  37MB of libcxx's ~52MB full fetch and 5.7MB of libcxxabi's ~7.3MB.
+  The kept directory sets (`CMakeLists.txt`/`include`/`lib`/`src`/`cmake`
+  for both, plus `utils` for libcxx only) were derived by actually
+  reading each repo's own top-level `CMakeLists.txt` for every
+  `add_subdirectory()`/`include()` it reaches unconditionally (both
+  self-contained: neither is extracted from a larger monorepo the way
+  libunwind is, so `CMAKE_MODULE_PATH` resolves every shared CMake
+  module to each repo's own `cmake/Modules/`, no `extra_checkout_dirs`
+  needed) and grepping for direct-by-path script references
+  (`utils/cat_files.py`/`utils/merge_archives.py`/`utils/gen_link_
+  script.py`, kept for libcxx since two of the three are invoked from
+  `lib/CMakeLists.txt` directly, not worth the risk of chasing exactly
+  which `LIBCXX_ENABLE_*` option would prove the third is never
+  reached). Confirmed via a genuinely fresh fetch (existing checkouts
+  wiped first) through the real project script: libcxx dropped from
+  ~52MB to 9.0MB, libcxxabi from ~7.3MB to 612KB, `test/` gone from
+  both, and a full `crt-libcxx-build` + `crt-libcxx-smoke` + `ctest`
+  cycle against the freshly pinned-and-trimmed source still reports
+  `imported_libcxx_test: ok` for both linkage modes and 120/120 tests
+  passing -- no regression from either the pin or the trim.
+
 - **TODO.md item 7 (native-callback/boundary safety net for Windows)
   done -- and its own original design disproved along the way, by an
   empirical repro built specifically to test it.** Full technical detail

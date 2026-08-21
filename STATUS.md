@@ -598,3 +598,38 @@ in those two win.
   `TODO.md`'s C++ runtime prerequisite section, step 7, and `HISTORY.md`'s
   dated entry for the full five-repro empirical trail. Full local `ctest`
   (120/120 on Windows, the new test included) confirms no regression.
+- **2026-08-21 (seventh pass, same day): libcxx/libcxxabi/libunwind
+  pinned to exact commit SHAs; libcxx/libcxxabi sparse-checkout trimmed
+  to drop their own unused `test/` suites.** Evaluated (on request)
+  whether to vendor the C++ runtime source into this repo versus keep
+  the existing build-time `git clone`; the two low-cost recommendations
+  from that evaluation (pin exact SHAs regardless; skip full vendoring
+  for now) were implemented directly. All three recipes had `"ref":
+  "refs/heads/main"` -- a floating branch with no lockfile, a real
+  reproducibility gap this project's own patch fail-fast behavior only
+  partially covers (it catches drift in the specific text a patch
+  touches, not anything else in three multi-megabyte components).
+  Pinning to a raw SHA needed a real `tools/crt-libcxx-build.py` fix,
+  not just a JSON edit: `git clone --branch <sha>` does not work against
+  `android.googlesource.com`'s Gerrit/JGit backend (confirmed for real:
+  "Remote branch <sha> not found in upstream origin"), only a separate
+  `git fetch origin <ref>` + `checkout --detach FETCH_HEAD` does, for
+  either a branch name or a raw SHA. A real mistake was made and caught
+  mid-implementation: the first fix attempt also dropped `--depth 1`
+  from the initial clone (misreading an interactive test that had
+  actually kept it), which silently turned into a 10+ CPU-minute full
+  history clone of the giant `toolchain/llvm-project` monorepo before
+  the stuck build was noticed (via `Get-Process` showing climbing git
+  CPU time) and killed -- `--filter=blob:none` alone does not trim the
+  commit graph, only blob content. Fixed by restoring `--depth 1`
+  (~6s for the same step once corrected). Also added `sparse_paths`/
+  `checkout_subdir: "."` to libcxx and libcxxabi (previously libunwind-
+  only, for a different reason -- monorepo subpath extraction versus
+  same-repo unused-directory trimming), derived by actually reading each
+  repo's own CMakeLists.txt for what it unconditionally needs. Confirmed
+  via a genuinely fresh fetch: libcxx 52MB -> 9.0MB, libcxxabi 7.3MB ->
+  612KB, `test/` gone from both, and a full `crt-libcxx-build` +
+  `crt-libcxx-smoke` + `ctest` cycle against the freshly pinned-and-
+  trimmed source still reports `imported_libcxx_test: ok` (both linkage
+  modes) and 120/120 tests passing. See `HISTORY.md`'s dated entry for
+  the full writeup.
