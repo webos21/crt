@@ -202,6 +202,61 @@ default and undefined under `-fdwarf-exceptions`), and `TODO.md`'s C++
 runtime prerequisite section for the adoption plan this decision is step 1
 of.
 
+### Known cost: DWARF-compiled code has zero Windows-native unwind info
+
+This was checked directly (2026-08-21), not assumed: compiling identical code
+for `x86_64-w64-mingw32` with `-fseh-exceptions` versus `-fdwarf-exceptions`
+and diffing the object's sections shows `-fdwarf-exceptions` emits **no
+`.pdata`/`.xdata` at all** -- only a non-standard `.eh_frame` section that
+only CRT's own from-source libunwind understands. This is not limited to
+functions that actually throw: a plain C function that does nothing but call
+another function loses `.pdata`/`.xdata` too under `-fdwarf-exceptions`. The
+personality also differs: SEH builds reference `__gxx_personality_seh0` (a
+real SEH-compatible bridge `ntdll` can invoke); DWARF builds reference
+`__gxx_personality_v0` (pure Itanium, opaque to the OS).
+
+This matters beyond C++ `catch` interop. The Windows x64 calling convention
+requires unwind info for every non-leaf function; when `RtlLookupFunctionEntry`
+finds no entry for an address, the OS assumes that function is a leaf (never
+adjusts the stack) and skips register restoration when unwinding past it. A
+real non-leaf CRT/libc++ function built with `-fdwarf-exceptions` violates
+that assumption, so any OS-driven unwind that has to walk through such a frame
+computes the wrong caller context -- this is undefined behavior by the ABI's
+own contract, not just "no handler found." Concretely, this can be hit by:
+
+- a hardware exception (access violation, divide-by-zero, stack overflow)
+  raised inside a CRT/libc++ (DWARF) frame that needs to propagate past it
+  (the OS's own second-chance SEH search walks `.pdata`-less frames
+  incorrectly, which can corrupt the search or crash the process outright,
+  independent of whether any CRT code is even trying to catch anything);
+- any Windows-native stack walk that has to cross a CRT/libc++ frame for a
+  reason unrelated to C++ exceptions at all -- a debugger's call-stack view,
+  a Windows Error Reporting minidump, an ETW-based profiler, or
+  `RtlCaptureStackBackTrace`;
+- CRT/libc++-compiled code exposed directly as a native OS callback (a window
+  procedure, a `CreateThread` entry point, a vectored exception handler, a COM
+  vtable method) invoked without an intervening real-SEH boundary frame.
+
+Plain DLL loading is **not** affected by any of this: `LoadLibrary` plus
+calling a non-throwing exported function is pure PE-loader/import-resolution
+mechanics and does not consult unwind tables at all. The risk is specifically
+about unwinding actually having to traverse a DWARF-only frame, whether
+that's driven by a C++ `throw` or by the OS itself.
+
+This is a real, accepted cost of `-fseh-exceptions` not being used, common to
+any non-native exception model on x86-64 Windows (the older 32-bit-only
+"DW2" GCC mingw model avoided this because 32-bit SEH is a linked-list
+mechanism rather than table-based, which does not generalize to x64). It
+sharpens, rather than replaces, the existing Windows MSVC ABI Bridge Lane
+caveat above ("exceptions may cross the bridge... default answer being no
+until unwind interoperability is proven"): the gap is not only personality/
+RTTI/name-mangling incompatibility, it is that CRT/libc++ frames are not
+OS-unwindable at all today. Until a boundary design exists (see `TODO.md`),
+CRT/libc++-compiled code should not be assumed safe to sit on a call stack
+that a native OS-driven unwind (hardware exception propagation, WER, a
+debugger) needs to walk through, and should not be registered directly as a
+raw native OS callback.
+
 The current C++ frontend test is compiled with `-fno-exceptions` and
 `-fno-rtti`. Linux and macOS keep compiler-emitted thread-safe local-static
 guards enabled, which exercises the Bionic/Itanium `__cxa_guard_*` lane.

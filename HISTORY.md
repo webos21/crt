@@ -10,6 +10,38 @@ substantive update.
 
 ## 2026-08-21
 
+- **Investigated whether `-fdwarf-exceptions` on Windows breaks native DLL
+  loading or exception interop, and found a real, previously-unscoped cost.**
+  Checked directly by compiling identical throw/catch (and separately, a
+  plain non-throwing) C/C++ source for `x86_64-w64-mingw32` with
+  `-fseh-exceptions` versus `-fdwarf-exceptions` and diffing the resulting
+  object sections: `-fdwarf-exceptions` emits **no `.pdata`/`.xdata` at
+  all** for any non-leaf function -- not limited to functions that actually
+  throw -- only a non-standard `.eh_frame` section only CRT's own
+  from-source libunwind understands, with the personality symbol also
+  differing (`__gxx_personality_seh0`, real/OS-visible, under SEH vs.
+  `__gxx_personality_v0`, opaque to the OS, under DWARF). Since the Windows
+  x64 ABI requires unwind-table entries for every non-leaf function and
+  treats a missing entry as "this is a leaf, skip register restoration,"
+  this is a genuine ABI-conformance gap, not just a C++ `catch`-interop
+  limitation: it can affect a hardware exception propagating through a
+  CRT/libc++ frame, any Windows-native stack walk (debugger, WER minidump,
+  ETW) that crosses one, and CRT/libc++ code registered directly as a raw
+  OS callback (window proc, thread entry point, vectored exception
+  handler, COM vtable) -- all independent of whether any C++ exception is
+  even involved. Confirmed plain `LoadLibrary` plus calling a non-throwing
+  export is unaffected; the risk is specifically about an OS-driven unwind
+  having to traverse a DWARF-only frame. Documented in `docs/cxx_runtime.md`
+  ("Known cost: DWARF-compiled code has zero Windows-native unwind info",
+  sharpening rather than replacing the existing MSVC ABI Bridge Lane
+  caveat) and recorded as a not-yet-started design task (a boundary shim
+  compiled with real SEH at every CRT/native OS control-flow crossing) in
+  `TODO.md`'s C++ runtime prerequisite section, item 6. Decision: document
+  now, defer the actual shim design -- it is not yet a real requirement
+  since the Windows `crt-libcxx-build` itself isn't fully green yet (the
+  `psapi.h`/PE-module-enumeration gap from the prior entry below is still
+  open).
+
 - **Fixed the first-ever Linux `crt-libcxx-build` run: two real gaps in
   this project's own Linux headers, exactly the "will likely hit related,
   if not identical, gaps once reached" TODO.md called out for the

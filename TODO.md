@@ -348,6 +348,28 @@ Next work order:
         linkage modes) to extend rather than needing a new test from
         scratch. Windows remains the one host where this is still blocked
         on step 4's own open Windows gaps above.
+     6. **Design a native-callback/boundary shim for Windows, not yet
+        started.** Checked directly (2026-08-21, see `docs/cxx_runtime.md`'s
+        "Known cost: DWARF-compiled code has zero Windows-native unwind
+        info"): `-fdwarf-exceptions` builds emit no `.pdata`/`.xdata` at all
+        for *any* non-leaf function, throwing or not -- confirmed by diffing
+        `-fseh-exceptions` vs `-fdwarf-exceptions` object output for
+        identical source. This is a real Windows x64 ABI-conformance gap
+        (the OS assumes a function with no unwind-table entry is a leaf),
+        not just a C++ `catch`-interop limitation, so it affects hardware
+        exceptions propagating through a CRT/libc++ frame, WER/debugger/ETW
+        stack walks that cross one, and CRT/libc++ code registered directly
+        as a raw native OS callback (window proc, `CreateThread` entry
+        point, vectored exception handler, COM vtable). Plain `LoadLibrary`
+        plus calling a non-throwing export is unaffected. Design task for
+        whenever this becomes a real requirement: a boundary shim compiled
+        with real SEH (`-fseh-exceptions`, so it has genuine `.pdata`) at
+        every point CRT/libc++ code is entered from or exits into native
+        OS-driven control flow, so the OS always has at least one real
+        unwindable frame between its own dispatch and DWARF-only code.
+        Sharpens, does not replace, the existing "exceptions may cross the
+        bridge... default answer being no" caveat in the Windows MSVC ABI
+        Bridge Lane section of `docs/cxx_runtime.md`.
 3. **Run the Wayland/Weston protocol/library investigation as a separate
    `libcrtgfx` sub-track.**
    Decide what is protocol parsing, what is compositor policy, and what is
