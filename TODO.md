@@ -656,11 +656,11 @@ Next work order:
         libcxx_test: ok`, see step 4 above) to extend rather than needing
         a new test from scratch. All three hosts, both linkage modes,
         genuinely green as of this item's completion.
-     7. **Design a native-callback/boundary shim for Windows, not yet
-        started.** Checked directly (2026-08-21, see `docs/cxx_runtime.md`'s
-        "Known cost: DWARF-compiled code has zero Windows-native unwind
-        info"): `-fdwarf-exceptions` builds emit no `.pdata`/`.xdata` at all
-        for *any* non-leaf function, throwing or not -- confirmed by diffing
+     7. **DONE: native-callback/boundary safety net for Windows.** Checked
+        directly (2026-08-21, see `docs/cxx_runtime.md`'s "Known cost:
+        DWARF-compiled code has zero Windows-native unwind info"):
+        `-fdwarf-exceptions` builds emit no `.pdata`/`.xdata` at all for
+        *any* non-leaf function, throwing or not -- confirmed by diffing
         `-fseh-exceptions` vs `-fdwarf-exceptions` object output for
         identical source. This is a real Windows x64 ABI-conformance gap
         (the OS assumes a function with no unwind-table entry is a leaf),
@@ -669,15 +669,77 @@ Next work order:
         stack walks that cross one, and CRT/libc++ code registered directly
         as a raw native OS callback (window proc, `CreateThread` entry
         point, vectored exception handler, COM vtable). Plain `LoadLibrary`
-        plus calling a non-throwing export is unaffected. Design task for
-        whenever this becomes a real requirement: a boundary shim compiled
-        with real SEH (`-fseh-exceptions`, so it has genuine `.pdata`) at
-        every point CRT/libc++ code is entered from or exits into native
-        OS-driven control flow, so the OS always has at least one real
-        unwindable frame between its own dispatch and DWARF-only code.
-        Sharpens, does not replace, the existing "exceptions may cross the
-        bridge... default answer being no" caveat in the Windows MSVC ABI
-        Bridge Lane section of `docs/cxx_runtime.md`.
+        plus calling a non-throwing export is unaffected.
+
+        This item's own original design ("a boundary shim compiled with
+        real SEH at every point CRT/libc++ code is entered from or exits
+        into native OS-driven control flow") was **built as a standalone
+        repro first, and empirically disproved**: a `-fseh-exceptions`
+        `__try`/`__except` wrapped directly around a call into a chain of
+        `-fdwarf-exceptions`-compiled functions does NOT catch a hardware
+        fault raised several frames deeper -- the OS's own frame-based
+        search still has to walk the untabled frames beneath the boundary
+        to reach it, and fails at the first one, so the process crashes
+        uncontrolled regardless of the boundary. `SetUnhandledException
+        Filter()` was tried next (its contract -- "only called once
+        nothing else handled it" -- can never preempt a legitimate
+        `__except`) and also disproved: reaching "nothing else handled it"
+        itself needs the same broken walk to complete, so it never fires
+        for a deep-DWARF-chain fault either.
+
+        **What actually works, and shipped**: `libc/src/arch/windows/
+        common/dwarf_unwind_safety_net.c` installs a process-wide
+        `AddVectoredExceptionHandler()` (VEH) callback at CRT startup
+        (`crt1.c` for executables, `dllcrt.c` for DLLs) -- confirmed
+        empirically that VEH, unlike frame-based SEH, does not depend on
+        walking the stack at all and reliably fires for the same
+        deep-DWARF-chain fault with no boundary shim anywhere in the link.
+        The one real risk (VEH fires unconditionally, *before* any
+        frame-based `__except`, confirmed empirically to preempt and break
+        even a fully legitimate one) is closed by gating the handler on
+        `RtlLookupFunctionEntry()` -- the same table lookup the OS's own
+        dispatch relies on -- called on the faulting address: non-NULL
+        (real `.pdata` present, regardless of relation to CRT/libc++) means
+        defer completely (confirmed to let a real `__except` elsewhere
+        catch it exactly as if this file did not exist); NULL (the actual
+        gap) means take over, log a brief diagnostic, and `ExitProcess()`
+        with this project's own existing `128 + <POSIX signal>` convention
+        (see `libc/src/signal.c`'s `abort()`) instead of undefined
+        behavior. Wired into every executable and shared DLL this project
+        builds (`libc/CMakeLists.txt`'s `CRT_STARTUP_OBJECTS`, the
+        top-level `CMakeLists.txt`'s `crt_configure_shared_runtime()`,
+        `tools/crt-cc`/`tools/crt-c++`'s own Windows branches) -- needs no
+        per-callsite boundary shim at all, which turned out to be strictly
+        simpler than (and a real fix, unlike) the item's own original
+        per-callback-wrapper design. A permanent regression test
+        (`tests/windows_dwarf_unwind_safety_net_test.c` +
+        `_victim.c`) exercises this through the real production toolchain
+        (`tools/crt-cc` with an explicit `-fdwarf-exceptions` flag, no
+        libcxx dependency needed), asserting the victim's fault produces
+        the controlled `128 + SIGSEGV` exit rather than any other outcome.
+
+        **Scope, stated honestly**: this fixes exactly the third bullet
+        above (a raw OS callback is now safe) and turns the first two
+        (hardware fault mid-DWARF-frame, OS-driven stack walk crossing
+        one) from "undefined behavior" into "a controlled, deterministic
+        process exit" -- but it does NOT let a C++ `catch` recover from a
+        hardware fault (never promised, matches existing non-`/EHa`
+        semantics), does NOT fix third-party tools that do their own
+        separate OS-native frame-based walk (a debugger's live call-stack
+        view, WER's own minidump writer, an ETW profiler still misbehave
+        crossing a DWARF frame exactly as before), and does NOT attempt a
+        real backtrace (only the single faulting address is reported --
+        a DWARF-CFI-based backtrace via this project's own libunwind would
+        be a real, valuable follow-up, deliberately not attempted here
+        since libunwind is only an optional `CRT_USE_IMPORTED_LIBCXX`
+        component today, not a base libc dependency). Sharpens, does not
+        replace, the existing "exceptions may cross the bridge... default
+        answer being no" caveat in the Windows MSVC ABI Bridge Lane section
+        of `docs/cxx_runtime.md`. See HISTORY.md's dated entry for the full
+        three-stage empirical trail (the standalone repro, the VEH-vs-SEH-
+        vs-SetUnhandledExceptionFilter comparison, and the final
+        RtlLookupFunctionEntry-gated design) and the exact repro
+        commands used.
 3. **Run the Wayland/Weston protocol/library investigation as a separate
    `libcrtgfx` sub-track.**
    Decide what is protocol parsing, what is compositor policy, and what is

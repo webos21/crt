@@ -251,11 +251,60 @@ sharpens, rather than replaces, the existing Windows MSVC ABI Bridge Lane
 caveat above ("exceptions may cross the bridge... default answer being no
 until unwind interoperability is proven"): the gap is not only personality/
 RTTI/name-mangling incompatibility, it is that CRT/libc++ frames are not
-OS-unwindable at all today. Until a boundary design exists (see `TODO.md`),
-CRT/libc++-compiled code should not be assumed safe to sit on a call stack
-that a native OS-driven unwind (hardware exception propagation, WER, a
-debugger) needs to walk through, and should not be registered directly as a
-raw native OS callback.
+OS-unwindable at all today.
+
+**Mitigated (2026-08-21) for the third bullet** (a raw native OS callback,
+never for the first two -- see the honest scope breakdown below):
+`libc/src/arch/windows/common/dwarf_unwind_safety_net.c` installs a
+process-wide vectored exception handler (`AddVectoredExceptionHandler`) at
+CRT startup (both `crt1.c` for executables and `dllcrt.c` for DLLs). See
+that file's own top comment for the full empirical design story (TODO.md
+item 7), but the short version: the boundary-shim idea this section
+originally proposed ("wrap every native-callback entry point in a real-SEH
+frame") was tried and empirically DISPROVED first -- a single `-fseh-
+exceptions`-compiled `__try`/`__except` wrapped directly around a call into
+DWARF-compiled code does **not** catch a hardware fault raised several
+frames deeper, because the OS's own frame-based search still has to walk
+through the untabled frames beneath the boundary to reach it, and fails at
+the first one it meets. `AddVectoredExceptionHandler`, by contrast, does not
+depend on walking the stack at all -- it is dispatched directly from the
+fault's own context. The one real risk with VEH (it fires unconditionally,
+*before* any frame-based `__try`/`__except` gets a chance, so a naive
+"always terminate" handler would break a legitimate application-level catch
+elsewhere in the process) is closed by gating this file's own handler on
+`RtlLookupFunctionEntry()` -- the exact same table lookup the OS's own
+frame-based dispatch relies on -- called on the faulting address itself:
+when it returns non-NULL (real `.pdata` present, regardless of whether it
+has anything to do with this project's own CRT/libc++), the handler defers
+completely (`EXCEPTION_CONTINUE_SEARCH`), confirmed empirically to let a
+real `__except` elsewhere in the chain catch the exception exactly as if
+this file were never linked in; only when it returns NULL (the actual gap)
+does the handler take over, reporting a brief diagnostic and calling
+`ExitProcess()` with a `128 + <POSIX signal number>` exit code (this
+project's own existing convention, see `libc/src/signal.c`'s `abort()`)
+instead of leaving the fault to the OS's own corrupted second-chance search.
+
+What this does and does not fix, stated plainly:
+- **Fixed**: a hardware fault whose address has no Windows-native unwind
+  info now produces a controlled, deterministic process exit instead of
+  undefined behavior -- this is exactly what makes CRT/libc++-compiled code
+  safe to register directly as a raw native OS callback (this section's
+  third bullet above), and needs no per-callsite boundary shim at all: one
+  process-wide registration covers every thread and call path.
+- **Not fixed**: a C++ `catch` still cannot recover from a hardware fault
+  (never promised -- matches this project's existing non-`/EHa` semantics,
+  same as Linux/macOS). Third-party tools that do their own separate,
+  OS-native frame-based walk (a debugger's live call-stack view, WER's own
+  minidump writer, an ETW-based profiler) still misbehave crossing a DWARF
+  frame exactly as described above (this section's first two bullets) --
+  this project's own diagnostic runs first and is unaffected by that, but
+  cannot repair what a third-party tool shows afterward. No backtrace is
+  attempted either (only the single faulting address is reported) --
+  `dwarf_unwind_safety_net.c`'s own top comment explains why a real
+  DWARF-CFI-based backtrace via this project's own libunwind was
+  deliberately left as a follow-up rather than pulled into this pass (it is
+  only an optional `CRT_USE_IMPORTED_LIBCXX` component today, not a base
+  libc dependency).
 
 The current C++ frontend test is compiled with `-fno-exceptions` and
 `-fno-rtti`. Linux and macOS keep compiler-emitted thread-safe local-static

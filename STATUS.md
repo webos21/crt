@@ -557,3 +557,44 @@ in those two win.
   section, step 4, and `HISTORY.md`'s dated entry for the full four-part
   writeup. Full local `ctest` (119/119 on Windows) confirms no
   regression.
+- **2026-08-21 (sixth pass, same day): TODO.md item 7 (native-callback/
+  boundary safety net for Windows) done -- and its own originally-
+  sketched design disproved by an empirical repro before being replaced
+  with one that actually works.** The item's own text proposed wrapping
+  every native-callback entry point in a real-SEH boundary frame; a
+  standalone repro (raw `clang --target=x86_64-w64-mingw32`, no CRT
+  needed) showed this does NOT catch a hardware fault raised several
+  DWARF-compiled frames deep -- the OS's own frame-based search still has
+  to walk the untabled frames beneath the boundary and fails at the
+  first one, confirmed via a control run with the same repro using
+  real-SEH callees throughout (that one caught cleanly). `Set
+  UnhandledExceptionFilter()` was tried next (its own "only fires if
+  nothing else handled it" contract can never preempt a legitimate
+  `__except`) and also disproved the same way: it never fires either,
+  since reaching "unhandled" needs the identical broken walk. What
+  actually works: `AddVectoredExceptionHandler()` (VEH), which doesn't
+  walk the stack at all -- confirmed to reliably fire for the same fault
+  with no boundary shim anywhere. Its own real risk (VEH always fires
+  *before* frame-based SEH, confirmed to preempt and break even a fully
+  legitimate `__except` elsewhere) is closed by gating the handler on
+  `RtlLookupFunctionEntry()` -- real `.pdata` present means defer
+  completely (confirmed to let a real `__except` win exactly as if this
+  handler didn't exist); absent means take over, log a diagnostic, and
+  `ExitProcess()` with this project's own `128 + <POSIX signal>`
+  convention. Shipped as `libc/src/arch/windows/common/dwarf_unwind_
+  safety_net.c`, wired into every executable and shared DLL (`crt1.c`/
+  `dllcrt.c`/`libc/CMakeLists.txt`/top-level `CMakeLists.txt`'s
+  `crt_configure_shared_runtime()`/`tools/crt-cc`/`tools/crt-c++`).
+  Surfaced one real regression along the way (the new startup-hook
+  symbol auto-exported and collided across a chained-DLL test, fixed
+  with `-Wl,--exclude-symbols=` alongside the same latent-but-never-
+  triggered risk in `_pei386_runtime_relocator`) and one useful finding
+  while writing the new permanent regression test (`tests/windows_dwarf_
+  unwind_safety_net_test.c`/`_victim.c`): this project's own Windows
+  `waitpid()` always reports `WIFEXITED`, never `WIFSIGNALED`, for any
+  child regardless of how it actually died -- a separate, already-
+  tracked, deliberately-undecided question (`docs/signal_delivery.md`'s
+  own "Next Steps"), not something this pass expanded scope to fix. See
+  `TODO.md`'s C++ runtime prerequisite section, step 7, and `HISTORY.md`'s
+  dated entry for the full five-repro empirical trail. Full local `ctest`
+  (120/120 on Windows, the new test included) confirms no regression.

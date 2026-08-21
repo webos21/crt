@@ -258,6 +258,10 @@ elseif(CRT_TARGET_OS STREQUAL "windows")
   # provides __RUNTIME_PSEUDO_RELOC_LIST__/_END__ automatically), just
   # needs to exist somewhere in the link and be called early at startup.
   set(CRT_PSEUDO_RELOC_FILE src/arch/windows/common/pseudo_reloc.c)
+  # _crt_install_dwarf_unwind_safety_net() -- see that file's own top
+  # comment. Not position-sensitive, just needs to run early (crt1.c
+  # calls it right after _pei386_runtime_relocator()).
+  set(CRT_DWARF_SAFETY_NET_FILE src/arch/windows/common/dwarf_unwind_safety_net.c)
 else()
   message(FATAL_ERROR "Unsupported CRT_TARGET_OS: ${CRT_TARGET_OS}")
 endif()
@@ -360,12 +364,17 @@ elseif(CRT_TARGET_OS STREQUAL "windows")
   set_target_properties(crt1_pseudo_reloc PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
   )
-  # Neither the walker nor the pseudo-reloc object (both plain code, not
-  # section-merge-order-sensitive data objects) need any particular link
-  # position; bundled into the "begin" group purely for convenience,
-  # matching how crt1_init_array's own walker rides along with the
-  # "always first" group on Linux.
-  list(APPEND CRT_STARTUP_OBJECTS $<TARGET_OBJECTS:crt1_ctors_begin> $<TARGET_OBJECTS:crt1_ctors_walker> $<TARGET_OBJECTS:crt1_pseudo_reloc>)
+  add_library(crt1_dwarf_safety_net OBJECT ${CRT_DWARF_SAFETY_NET_FILE})
+  target_link_libraries(crt1_dwarf_safety_net PRIVATE crt_build_flags)
+  set_target_properties(crt1_dwarf_safety_net PROPERTIES
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  )
+  # Neither the walker nor the pseudo-reloc/dwarf-safety-net objects
+  # (all plain code, not section-merge-order-sensitive data objects) need
+  # any particular link position; bundled into the "begin" group purely
+  # for convenience, matching how crt1_init_array's own walker rides
+  # along with the "always first" group on Linux.
+  list(APPEND CRT_STARTUP_OBJECTS $<TARGET_OBJECTS:crt1_ctors_begin> $<TARGET_OBJECTS:crt1_ctors_walker> $<TARGET_OBJECTS:crt1_pseudo_reloc> $<TARGET_OBJECTS:crt1_dwarf_safety_net>)
   set(CRT_STARTUP_END_OBJECTS $<TARGET_OBJECTS:crt1_ctors_end> PARENT_SCOPE)
 endif()
 if(NOT CRT_TARGET_OS STREQUAL "windows")
@@ -432,4 +441,5 @@ if(CRT_TARGET_OS STREQUAL "windows")
   install(FILES "$<TARGET_OBJECTS:crt1_ctors_end>" DESTINATION lib RENAME crt1_ctors_end.o)
   install(FILES "$<TARGET_OBJECTS:crt1_ctors_walker>" DESTINATION lib RENAME crt1_ctors_walker.o)
   install(FILES "$<TARGET_OBJECTS:crt1_pseudo_reloc>" DESTINATION lib RENAME crt1_pseudo_reloc.o)
+  install(FILES "$<TARGET_OBJECTS:crt1_dwarf_safety_net>" DESTINATION lib RENAME crt1_dwarf_safety_net.o)
 endif()

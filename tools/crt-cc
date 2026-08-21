@@ -291,10 +291,34 @@ case "$target_os" in
   windows)
     libs="$libs ${CRT_SYSROOT}/lib/c.lib ${CRT_SYSROOT}/lib/m.lib ${CRT_SYSROOT}/lib/dl.lib ${CRT_SYSROOT}/lib/c++.lib ${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"
     if [ "$shared_mode" -eq 1 ]; then
-      # crt1_pseudo_reloc.o: see the matching comment in tools/crt-c++'s
-      # own shared_mode branch.
-      libs="${CRT_SYSROOT}/lib/dllcrt.o ${CRT_SYSROOT}/lib/crt1_pseudo_reloc.o $libs"
-      entry="-Wl,/entry:crtDllMainCRTStartup -Wl,/DLL -Wl,/OPT:REF -fuse-ld=lld"
+      # crt1_pseudo_reloc.o/crt1_dwarf_safety_net.o: see the matching
+      # comment in tools/crt-c++'s own shared_mode branch.
+      libs="${CRT_SYSROOT}/lib/dllcrt.o ${CRT_SYSROOT}/lib/crt1_pseudo_reloc.o ${CRT_SYSROOT}/lib/crt1_dwarf_safety_net.o $libs"
+      # --exclude-symbols: both objects above define plain global (not
+      # static -- crt1.c/dllcrt.c call them across translation units)
+      # startup-hook functions never meant to be part of any DLL's own
+      # public surface. GNU-ABI -shared links auto-export every global
+      # symbol by default unless something is explicitly dllexport'd
+      # (see this project's own established note on that lld-link/GNU-ld
+      # default elsewhere), and both objects get linked into EVERY
+      # -shared DLL this wrapper builds -- so two such DLLs chained
+      # together in one process (one importing the other, e.g. tests/
+      # windows_dll_symbol_priority_test's own regress->middle chain)
+      # would otherwise see the same symbol both defined locally (via
+      # their own copy of the object) and imported (via the other DLL's
+      # auto-export), a real, confirmed "duplicate symbol" link failure
+      # for crt1_dwarf_safety_net.o's own _crt_install_dwarf_unwind_
+      # safety_net -- fixed here rather than per-consumer, matching
+      # -Wl,--exclude-symbols' own existing use in tests/CMakeLists.txt
+      # for the unrelated but same-shaped read()/__crt_sys_read
+      # collision. _pei386_runtime_relocator has not actually hit this
+      # in practice yet (nothing currently chains two pseudo-reloc-
+      # carrying DLLs the way windows_dll_symbol_priority_test's own
+      # regress->middle chain does for the new symbol), but is the exact
+      # same latent risk by the exact same mechanism -- excluded
+      # preemptively alongside the one that did fail, rather than left
+      # as a known dormant trap right next to a fixed one.
+      entry="-Wl,--exclude-symbols=_pei386_runtime_relocator -Wl,--exclude-symbols=_crt_install_dwarf_unwind_safety_net -Wl,/entry:crtDllMainCRTStartup -Wl,/DLL -Wl,/OPT:REF -fuse-ld=lld"
     else
       entry="-Wl,/entry:mainCRTStartup -Wl,/subsystem:console -Wl,/OPT:REF -fuse-ld=lld"
       # __crt_run_init_array()/__crt_run_fini_array() Windows/PE support
@@ -309,12 +333,13 @@ case "$target_os" in
       # -shared/DLL build has no equivalent need (a DLL's own .ctors is
       # handled by the OS loader when it loads, not by this project's own
       # startup code), matching why crt1.o itself is skipped there too.
-      # crt1_pseudo_reloc.o (_pei386_runtime_relocator(), see that file's
-      # own comment) isn't position-sensitive -- it just needs to exist
-      # somewhere in the link, and is called from crt1.c's own startup
-      # code -- but rides along in $prelibs with the other walker object
-      # purely for convenience.
-      prelibs="${CRT_SYSROOT}/lib/crt1_ctors_begin.o ${CRT_SYSROOT}/lib/crt1_ctors_walker.o ${CRT_SYSROOT}/lib/crt1_pseudo_reloc.o"
+      # crt1_pseudo_reloc.o (_pei386_runtime_relocator()) and
+      # crt1_dwarf_safety_net.o (_crt_install_dwarf_unwind_safety_net(),
+      # see that file's own top comment) aren't position-sensitive --
+      # they just need to exist somewhere in the link, and are called
+      # from crt1.c's own startup code -- but ride along in $prelibs with
+      # the other walker object purely for convenience.
+      prelibs="${CRT_SYSROOT}/lib/crt1_ctors_begin.o ${CRT_SYSROOT}/lib/crt1_ctors_walker.o ${CRT_SYSROOT}/lib/crt1_pseudo_reloc.o ${CRT_SYSROOT}/lib/crt1_dwarf_safety_net.o"
       libs="$libs ${CRT_SYSROOT}/lib/crt1_ctors_end.o"
     fi
     ;;

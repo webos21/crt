@@ -39,6 +39,13 @@ void __crt_run_init_array(void);
  * fixup has been applied. See that file's own comment for the full
  * story. */
 void _pei386_runtime_relocator(void);
+/* Defined by libc/src/arch/windows/common/dwarf_unwind_safety_net.c
+ * (crt1_dwarf_safety_net OBJECT library), always linked into every
+ * executable right alongside this file itself -- see
+ * CRT_STARTUP_OBJECTS in libc/CMakeLists.txt. See that file's own
+ * top comment for the full story; not position-sensitive, just needs to
+ * run early. */
+void _crt_install_dwarf_unwind_safety_net(void);
 
 #if defined(__aarch64__) || defined(_M_ARM64) || defined(__x86_64__) || defined(_M_X64)
 /* Weak reference, not a hard dependency: only targets that actually need
@@ -115,6 +122,7 @@ void mainCRTStartup(void) {
   int argc = 0;
 
   _pei386_runtime_relocator();
+  _crt_install_dwarf_unwind_safety_net();
   command_line = GetCommandLineA();
   __crt_env_set_initial(0);
   /* Must run BEFORE the fork-capable relaunch check below: this process's

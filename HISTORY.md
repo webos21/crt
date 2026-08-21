@@ -10,6 +10,129 @@ substantive update.
 
 ## 2026-08-21
 
+- **TODO.md item 7 (native-callback/boundary safety net for Windows)
+  done -- and its own original design disproved along the way, by an
+  empirical repro built specifically to test it.** Full technical detail
+  lives in `TODO.md`'s C++ runtime prerequisite section, step 7, and
+  `docs/cxx_runtime.md`'s "Known cost: DWARF-compiled code has zero
+  Windows-native unwind info" section; this entry records the
+  investigation's own narrative.
+
+  The item's own original text proposed "a boundary shim compiled with
+  real SEH (`-fseh-exceptions`, so it has genuine `.pdata`) at every point
+  CRT/libc++ code is entered from or exits into native OS-driven control
+  flow." Before implementing that, it was built as a minimal standalone
+  repro (raw `clang --target=x86_64-w64-mingw32`, no CRT sysroot needed --
+  a chain of four `__attribute__((noinline))` functions with
+  volatile-touched stack buffers compiled `-fdwarf-exceptions`, called
+  from an outer function compiled WITHOUT that flag whose own real
+  `.pdata`-backed frame wraps the call in a genuine `__try`/`__except`)
+  and it failed: the `__except` never caught the fault. A control run of
+  the identical repro with the callee chain ALSO compiled without
+  `-fdwarf-exceptions` (real `.pdata` throughout) confirmed the harness
+  itself was sound -- the same `__except` caught the same fault cleanly
+  there. Root cause: the OS's frame-based unwind search has to walk every
+  intervening frame's own table entry to compute the next frame up; it
+  fails at the FIRST untabled frame it meets, long before ever reaching
+  the boundary's own handler further out -- a single SEH frame at the
+  call-in point cannot make the frames beneath it walkable.
+
+  `AddVectoredExceptionHandler()` (VEH) was tried next and does NOT have
+  this problem: confirmed empirically that a VEH callback (registered
+  with either `First=1` or `First=0` -- both behaved identically) reliably
+  fires for the exact same deep-DWARF-chain fault, with no SEH boundary
+  anywhere in the link at all -- VEH dispatch is driven directly from the
+  fault's own context, not a stack walk. But a second repro (the same
+  fault, this time in a fully `.pdata`-backed callee chain with a real,
+  working `__except` around it, plus a VEH handler registered alongside)
+  showed VEH always fires FIRST, unconditionally, regardless of `First=1`
+  vs `First=0` -- preempting and completely breaking the legitimate
+  `__except`'s own chance to run. `SetUnhandledExceptionFilter()` was
+  considered as the non-preempting alternative (its whole contract is
+  "only called once nothing else handled it," so it structurally cannot
+  preempt a working `__except`) but a third repro disproved it too: it
+  never fired at all for the deep-DWARF-chain fault, for the identical
+  reason the plain SEH boundary failed -- reaching "nothing else handled
+  it" itself requires completing the same broken walk.
+
+  The fix that actually works, verified by a fourth and fifth repro:
+  gate the VEH handler on `RtlLookupFunctionEntry()` -- the exact same
+  table lookup the OS's own frame-based dispatch already relies on --
+  called on the faulting address itself. When it returns non-NULL (real
+  `.pdata` present at the fault site, regardless of whether that code has
+  anything to do with this project's own CRT/libc++), the handler defers
+  completely (`EXCEPTION_CONTINUE_SEARCH`) -- confirmed via the fifth
+  repro that this lets a real `__except` elsewhere in the chain catch the
+  exception exactly as if the handler were never installed. When it
+  returns NULL (a genuine DWARF-only frame -- the fourth repro's own
+  scenario), the handler takes over.
+
+  Shipped as `libc/src/arch/windows/common/dwarf_unwind_safety_net.c`: a
+  process-wide `AddVectoredExceptionHandler()` registration installed at
+  CRT startup (`crt1.c`'s `mainCRTStartup()` right after
+  `_pei386_runtime_relocator()`, and `dllcrt.c`'s
+  `crtDllMainCRTStartup()` on `DLL_PROCESS_ATTACH`, matching that same
+  file's own established wiring pattern), gated by the `RtlLookupFunction
+  Entry()` check above; on a genuine gap it writes a brief raw-`WriteFile`
+  diagnostic (exception code, faulting address -- no backtrace attempted,
+  see the file's own top comment for why) and calls `ExitProcess()` with
+  this project's own existing `128 + <POSIX signal number>` convention
+  (`libc/src/signal.c`'s `abort()` already uses `128 + SIGABRT`).
+  Diagnostic output and process termination both use raw kernel32 calls
+  only, matching `pseudo_reloc.c`'s own zero-libc-dependency discipline
+  (a hardware-fault handler cannot assume the rest of this project's own
+  libc state is intact, and must not risk the same fd.c/`read()`-bundling
+  collision that file's own history already found once).
+
+  Wiring this into every shared DLL surfaced one more real, genuine
+  regression along the way: `_crt_install_dwarf_unwind_safety_net` (a
+  plain global, non-`static`, function -- required, since `crt1.c`/
+  `dllcrt.c` call it across translation units) got auto-exported by
+  GNU-ABI `-shared` links' own default "export every global symbol unless
+  something is explicitly `dllexport`'d" behavior, and `tests/
+  windows_dll_symbol_priority_test`'s own chained-DLL fixture (one DLL
+  importing another, both independently linking a fresh copy of the same
+  startup object) hit a real `ld.lld: error: duplicate symbol` the moment
+  that chain's own middle DLL saw the symbol both defined locally and
+  imported from the DLL underneath it. Fixed with `-Wl,--exclude-
+  symbols=_crt_install_dwarf_unwind_safety_net` added to `tools/crt-cc`/
+  `tools/crt-c++`'s own Windows `-shared` branches, alongside the same
+  fix applied preemptively to `_pei386_runtime_relocator` (the identical
+  latent risk by the identical mechanism, confirmed structurally sound
+  but never actually exercised by any existing chained-DLL test) rather
+  than left as a known dormant trap beside the one that did fail. The
+  project's own CMake-native shared targets (`c_shared`/`m_shared`/
+  `dl_shared`/`cxx_shared`) were checked and confirmed NOT affected: they
+  use the MSVC-ABI toolchain path, where nothing auto-exports without an
+  explicit `dllexport`, and none of their own object files ever reference
+  the startup-hook symbol by name from another DLL's import library (the
+  duplicate only manifests when a linker actually resolves a live
+  reference to the colliding name, not merely from linking against an
+  archive that happens to contain it).
+
+  A permanent regression test (`tests/windows_dwarf_unwind_safety_net_
+  test.c` + `_victim.c`) exercises the real, shipped mechanism end to end
+  through the production toolchain -- the victim is a plain C program
+  (no libcxx dependency, so this stays in the default ctest suite rather
+  than gated behind the separate, opt-in `CRT_USE_IMPORTED_LIBCXX`
+  pipeline) compiled via `tools/crt-cc` with an explicit
+  `-fdwarf-exceptions` flag, reproducing the same call-chain shape the
+  standalone repros above used. Writing this test surfaced one more real,
+  useful finding: this project's own Windows `waitpid()`
+  (`libc/src/arch/windows/common/syscall.c`) always encodes a child's
+  `GetExitCodeProcess()` value as a plain `WIFEXITED` status
+  (`(exit_code & 0xff) << 8`) with no `STATUS_*`-pattern detection or
+  signal synthesis at all -- so the test asserts `WIFEXITED(status) &&
+  WEXITSTATUS(status) == 128 + SIGSEGV`, not `WIFSIGNALED()`/`WTERMSIG()`
+  the way an equivalent POSIX-host assertion would read. Mapping a real
+  hardware fault back into `WIFSIGNALED()` on Windows is exactly the
+  separate, larger, still-not-yet-decided "bridge `SIGSEGV`/`SIGFPE`/
+  `SIGILL` through `signal()`/`raise()`" question `docs/signal_
+  delivery.md`'s own "Next Steps" already tracks -- this test deliberately
+  checks what the PAL genuinely produces today, not that separate,
+  undecided feature. Full default `cmake --build` + `ctest` (120/120,
+  the new test included) confirms no regression.
+
 - **Shared libc++ now also works end to end on Windows: `imported_libcxx_
   test: ok` for both the static and shared legs of `crt-libcxx-smoke`,
   matching macOS and Linux for both linkage modes.** Direct continuation

@@ -320,6 +320,14 @@ function(crt_configure_shared_runtime target_name)
       # dllcrt.c's own call was added.
       target_link_libraries(${target_name} PRIVATE $<TARGET_OBJECTS:crt1_pseudo_reloc>)
     endif()
+    if(TARGET crt1_dwarf_safety_net)
+      # dllcrt.c's crtDllMainCRTStartup() also calls
+      # _crt_install_dwarf_unwind_safety_net() on DLL_PROCESS_ATTACH now
+      # (see that file's own comment and dwarf_unwind_safety_net.c's own
+      # top comment) -- same reasoning and same wiring as
+      # crt1_pseudo_reloc above.
+      target_link_libraries(${target_name} PRIVATE $<TARGET_OBJECTS:crt1_dwarf_safety_net>)
+    endif()
   elseif(CRT_TARGET_OS STREQUAL "linux")
     target_link_options(${target_name} PRIVATE
       -Wl,--gc-sections

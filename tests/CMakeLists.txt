@@ -961,6 +961,53 @@ if(CRT_TARGET_OS STREQUAL "windows")
     PASS_REGULAR_EXPRESSION "windows_dll_symbol_priority_test: ok"
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS windows_dll_symbol_priority_test_runs)
+
+  # Permanent regression test for libc/src/arch/windows/common/
+  # dwarf_unwind_safety_net.c -- see that file's own top comment (TODO.md
+  # item 7 / docs/cxx_runtime.md's "Known cost: DWARF-compiled code has
+  # zero Windows-native unwind info") for the full empirical background,
+  # and windows_dwarf_unwind_safety_net_test.c/_victim.c's own comments
+  # for this test's own shape. The victim needs an explicit
+  # -fdwarf-exceptions flag on the compile line (tools/crt-cc's own
+  # common_flags only adds that for tools/crt-c++'s C++ compiles, not
+  # plain C) -- reuses the same CRT_PSEUDO_RELOC_TEST_ENV/_ARCH/
+  # CRT_HOST_CC_SHORT setup already established just above rather than
+  # re-deriving it a third time in this file.
+  set(CRT_DWARF_SAFETY_NET_TEST_DIR "${CMAKE_CURRENT_BINARY_DIR}/windows_dwarf_unwind_safety_net_test")
+  set(CRT_DWARF_SAFETY_NET_VICTIM_EXE "${CRT_DWARF_SAFETY_NET_TEST_DIR}/windows_dwarf_unwind_safety_net_victim.exe")
+  add_custom_command(
+    OUTPUT "${CRT_DWARF_SAFETY_NET_VICTIM_EXE}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CRT_DWARF_SAFETY_NET_TEST_DIR}"
+    COMMAND ${CRT_PSEUDO_RELOC_TEST_ENV}
+      "${CMAKE_BINARY_DIR}/rootfs/system/bin/mksh.exe" "${CMAKE_SOURCE_DIR}/tools/crt-cc"
+      -fdwarf-exceptions
+      "${CMAKE_CURRENT_SOURCE_DIR}/windows_dwarf_unwind_safety_net_victim.c"
+      -o "${CRT_DWARF_SAFETY_NET_VICTIM_EXE}"
+    DEPENDS
+      "${CMAKE_CURRENT_SOURCE_DIR}/windows_dwarf_unwind_safety_net_victim.c"
+      "${CMAKE_SOURCE_DIR}/tools/crt-cc"
+      rootfs sysroot
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    COMMENT "Building windows_dwarf_unwind_safety_net_test's victim (GNU ABI, -fdwarf-exceptions, via tools/crt-cc)"
+  )
+  add_custom_target(windows_dwarf_unwind_safety_net_victim ALL
+    DEPENDS "${CRT_DWARF_SAFETY_NET_VICTIM_EXE}"
+  )
+  add_dependencies(windows_dwarf_unwind_safety_net_victim rootfs sysroot)
+
+  add_crt_test(windows_dwarf_unwind_safety_net_test windows_dwarf_unwind_safety_net_test.c)
+  add_dependencies(windows_dwarf_unwind_safety_net_test windows_dwarf_unwind_safety_net_victim)
+  # add_crt_test()'s own internal add_test() takes no extra COMMAND args
+  # (see its own definition above) and set_tests_properties() has no
+  # "COMMAND" property to override afterward -- the victim's path is
+  # passed as a compile-time string define instead of an argv, sidestepping
+  # both restrictions without touching the shared add_crt_test() helper.
+  target_compile_definitions(windows_dwarf_unwind_safety_net_test PRIVATE
+    "CRT_DWARF_SAFETY_NET_VICTIM_EXE=\"${CRT_DWARF_SAFETY_NET_VICTIM_EXE}\""
+  )
+  set_tests_properties(windows_dwarf_unwind_safety_net_test_runs PROPERTIES
+    PASS_REGULAR_EXPRESSION "windows_dwarf_unwind_safety_net_test: ok"
+  )
 endif()
 get_property(CRT_REGISTERED_TESTS GLOBAL PROPERTY CRT_REGISTERED_TESTS)
 list(LENGTH CRT_REGISTERED_TESTS CRT_REGISTERED_TEST_COUNT)

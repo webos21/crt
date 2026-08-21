@@ -390,8 +390,21 @@ case "$target_os" in
       # _pei386_runtime_relocator is missing" the first time that
       # happened); harmless to always link in otherwise, matching the
       # executable path's own always-linked precedent.
-      libs="${CRT_SYSROOT}/lib/dllcrt.o ${CRT_SYSROOT}/lib/crt1_pseudo_reloc.o $libs $cxx_runtime_libs $crt_core_libs ${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"
-      entry="-Wl,/entry:crtDllMainCRTStartup -Wl,/DLL -Wl,/OPT:REF -fuse-ld=lld"
+      # crt1_dwarf_safety_net.o (_crt_install_dwarf_unwind_safety_net(),
+      # see that file's own top comment): dllcrt.c's crtDllMainCRTStartup()
+      # calls this too now, right after _pei386_runtime_relocator() above --
+      # a shared libc++.dll/libc++abi.dll/libunwind.dll is exactly the
+      # DWARF-compiled code TODO.md item 7's safety net exists for.
+      libs="${CRT_SYSROOT}/lib/dllcrt.o ${CRT_SYSROOT}/lib/crt1_pseudo_reloc.o ${CRT_SYSROOT}/lib/crt1_dwarf_safety_net.o $libs $cxx_runtime_libs $crt_core_libs ${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"
+      # --exclude-symbols: see the matching, fuller comment in
+      # tools/crt-cc's own shared_mode branch -- both objects above
+      # define plain global startup-hook functions that must never
+      # become part of any DLL's own auto-exported public surface;
+      # confirmed for real as a genuine "duplicate symbol" link failure
+      # for _crt_install_dwarf_unwind_safety_net the moment two shared
+      # DLLs built through this project's own GNU-ABI -shared path are
+      # chained together in one process (one importing the other).
+      entry="-Wl,--exclude-symbols=_pei386_runtime_relocator -Wl,--exclude-symbols=_crt_install_dwarf_unwind_safety_net -Wl,/entry:crtDllMainCRTStartup -Wl,/DLL -Wl,/OPT:REF -fuse-ld=lld"
     else
       libs="$libs $cxx_runtime_libs ${CRT_SYSROOT}/lib/c.lib ${CRT_SYSROOT}/lib/m.lib ${CRT_SYSROOT}/lib/dl.lib ${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"
       entry="-Wl,/entry:mainCRTStartup -Wl,/subsystem:console -Wl,/OPT:REF -fuse-ld=lld"
@@ -406,7 +419,11 @@ case "$target_os" in
       # "undefined symbol: _pei386_runtime_relocator, referenced by
       # crt1.c:117:(mainCRTStartup)" the first time a real Windows C++
       # executable was linked through this wrapper.
-      prelibs="${CRT_SYSROOT}/lib/crt1_ctors_begin.o ${CRT_SYSROOT}/lib/crt1_ctors_walker.o ${CRT_SYSROOT}/lib/crt1_pseudo_reloc.o"
+      # crt1_dwarf_safety_net.o (_crt_install_dwarf_unwind_safety_net(),
+      # TODO.md item 7's native-callback/boundary safety net -- see that
+      # file's own top comment for the full empirical design story):
+      # rides along here too, same reasoning as crt1_pseudo_reloc.o.
+      prelibs="${CRT_SYSROOT}/lib/crt1_ctors_begin.o ${CRT_SYSROOT}/lib/crt1_ctors_walker.o ${CRT_SYSROOT}/lib/crt1_pseudo_reloc.o ${CRT_SYSROOT}/lib/crt1_dwarf_safety_net.o"
       libs="$libs ${CRT_SYSROOT}/lib/crt1_ctors_end.o"
     fi
     ;;
