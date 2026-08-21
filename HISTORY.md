@@ -10,6 +10,249 @@ substantive update.
 
 ## 2026-08-21
 
+- **Fixed the first-ever Linux `crt-libcxx-build` run: two real gaps in
+  this project's own Linux headers, exactly the "will likely hit related,
+  if not identical, gaps once reached" TODO.md called out for the
+  Windows-then-Linux libunwind/libcxxabi/libcxx rollout.** Reported
+  directly ("`cmake --build --preset linux-host-ninja-debug --target
+  crt-libcxx-build`가 실패한다"). Reproduced on the real Linux aarch64
+  host; libunwind's `AddressSpace.hpp`/`UnwindCursor.hpp` failed to
+  compile with two independent errors:
+  1. `error: unknown type name 'Elf_Half'` (and `Elf_Phdr`/`Elf_Addr`).
+     Root cause: `AddressSpace.hpp` only self-defines its `ElfW(type)`
+     macro and the `Elf_Half`/`Elf_Phdr`/`Elf_Addr` typedefs as a
+     `#if !defined(ElfW)` fallback for hosts (its own comment says
+     FreeBSD) whose `<link.h>` doesn't already provide `ElfW()`. This
+     project's `include/link.h` never defined `ElfW()` at all, so the
+     fallback triggered -- and the fallback is circular by construction
+     (`typedef ElfW(Half) Elf_Half;` expands to `Elf_Half Elf_Half;`
+     when `ElfW(type)` is defined as `Elf_##type`, since `Elf_Half` isn't
+     defined yet). Fixed by adding a real `ElfW(type)` macro to
+     `include/link.h`, right after its `#include <elf.h>`: real glibc/
+     Bionic define it as `Elf32_##type` or `Elf64_##type` depending on
+     `__LP64__`/`__ELF_NATIVE_CLASS`, but this project only ever targets
+     ELF64 (`include/elf.h`'s own comment: "this project has no 32-bit
+     target"), so the branch collapses to an unconditional
+     `#define ElfW(type) Elf64_##type`.
+  2. `error: use of undeclared identifier 'SYS_rt_sigprocmask'`, from
+     `UnwindCursor.hpp`'s `isReadableAddr()` (gated on the real, not
+     `__SEH__`-related, `_LIBUNWIND_CHECK_LINUX_SIGRETURN` feature --
+     inspired by Abseil's `AddressIsReadable`, it makes a raw
+     `syscall(SYS_rt_sigprocmask, /*how=*/~0, ...)` to probe whether an
+     address is readable without risking a real signal-mask change,
+     since an invalid `how` is guaranteed to fail after the kernel's
+     `copy_from_user` check but before validating `how` itself).
+     `include/sys/syscall.h` only ever carried two hand-curated syscall
+     numbers (`SYS_getpid`, `SYS_renameat2`); `rt_sigprocmask` was never
+     added. Verified the real kernel syscall numbers before adding them
+     (not guessed): `arch/x86/entry/syscalls/syscall_64.tbl` gives `14`
+     for x86_64; `include/uapi/asm-generic/unistd.h` (aarch64's generic
+     syscall ABI) gives `135`. Added `SYS_rt_sigprocmask` to
+     `include/sys/syscall.h` for both architectures.
+
+  Verified for real: `crt-libcxx-build` exits 0 from a clean state and
+  is a no-op ("Up-to-date") on immediate rerun; a full `cmake --build
+  --preset linux-host-ninja-debug` (whole project) also passes clean.
+  Standalone `crt-cc` probes of `<wchar.h>`, `<stdio.h>`, and
+  `<wctype.h>` each compile clean in isolation, confirming no header-
+  ordering regression from unrelated earlier work.
+
+  **Follow-up the same day, chasing `crt-libcxx-smoke` (the actual
+  link+run exception-throw/catch check) to green -- real gaps, each
+  root-caused and fixed in turn:**
+  1. **Static link, first attempt:** the *first* Linux static link of
+     `libc.a`/`libclang_rt.builtins.a`/`crt1.o` together failed with
+     `undefined reference to '__crt_run_init_array'` (from `crt1.S`).
+     Root cause: `tools/crt-cc` already carried the fix for this (a
+     `${CRT_SYSROOT}/lib/crt1_init_array.o` link line, added when
+     `__crt_run_init_array()`/`__crt_run_fini_array()` were split into
+     their own object -- see `libc/CMakeLists.txt`'s own comment) but
+     `tools/crt-c++` never got the equivalent line -- a plain omission,
+     not a design gap. Fixed by adding the identical line to
+     `tools/crt-c++`'s Linux static branch.
+  2. **Static link, second attempt:** `undefined reference to
+     '__getauxval'` (from `libclang_rt.builtins.a`'s aarch64
+     outline-atomics `lse-init.o`) and `undefined reference to
+     'getauxval'` (from `libdl`'s `dl_linux.c.o`). Both symbols are
+     genuinely implemented (`libc/src/arch/linux/common/auxv.c`) and
+     already used successfully by this project's normal *dynamic* Linux
+     builds; the bug is link *order*: both `tools/crt-cc` and
+     `tools/crt-c++` list `libdl.a`/`libclang_rt.builtins.a` *after*
+     `libc.a`, so by the time either is scanned, `libc.a` has already
+     had its one-and-only left-to-right archive scan and won't be
+     revisited for a symbol only discovered as needed later -- ld/lld's
+     default single-pass archive resolution, not a missing
+     implementation. Fixed by wrapping the whole static archive set
+     (`libc.a`/`libm.a`/`libdl.a`/the C++ runtime archives/
+     `libclang_rt.builtins.a`) in `-Wl,--start-group ... -Wl,--end-group`
+     in both `tools/crt-cc` and `tools/crt-c++`, so ld/lld iterates the
+     set until nothing new resolves, independent of listed order.
+  3. **Static link, third attempt: passed.** `crt-libcxx-smoke`'s static
+     leg now builds, links, and runs to completion --
+     `imported_libcxx_test: ok`, real vector/string/exception-throw-
+     catch coverage, genuinely confirmed on Linux for the first time.
+  4. **Shared link:** `libc++.so: undefined reference to '__cxa_atexit'`
+     and `libc++abi.so: undefined reference to
+     '__cxa_thread_atexit_impl'`. Root cause, confirmed by reading real
+     LLVM libcxxabi's own fetched source: libcxxabi never implements
+     `__cxa_atexit`/`__cxa_finalize` itself (Itanium C++ ABI convention:
+     the platform *libc* provides these, not libc++abi -- real glibc and
+     real Bionic both do). This project's only prior implementation of
+     either symbol was `libstdc++/src/cxxabi.c`, part of the *bootstrap*
+     `cxx`/`cxx_shared` targets predating the imported-libc++ work --
+     never linked at all on the imported-libcxx path. Added a real
+     `__cxa_atexit()`/`__cxa_finalize()`/`__dso_handle` (`__dso_handle`
+     marked hidden-visibility, matching the "one private copy per DSO"
+     reasoning already established in the macOS libcxx `__dso_handle`
+     entry above) to libc itself, Linux-only, matching
+     `CRT_LINUX_AUXV_FILE`'s own precedent: `libc/src/arch/linux/common/
+     cxa_atexit.c`. Guarded the same three symbols back out of
+     `libstdc++/src/cxxabi.c` on Linux only (`#if
+     !defined(CRT_TARGET_OS_LINUX)`) to avoid a genuine
+     multiple-definition conflict on the still-supported bootstrap
+     Linux C++ path (any program using function-local statics needs
+     that file's own `__cxa_guard_acquire()`, which would otherwise drag
+     its now-duplicate `__cxa_atexit` copy in alongside).
+
+     `__cxa_thread_atexit_impl` (the Bionic API 23+ thread_local-
+     destructor extension) was a separate, subtler false positive:
+     libcxxabi's own `config-ix.cmake` probes for it via
+     `check_library_exists(c __cxa_thread_atexit_impl "" ...)`, which
+     reported "found" even though this project's libc genuinely never
+     implements it (confirmed by hand: reproducing the identical probe
+     through `tools/crt-cc` fails to link). Root cause: `crt-libcxx-
+     build.py` configures every out-of-tree LLVM runtime with
+     `CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY`, so
+     `check_library_exists`/`check_function_exists`-style probes only
+     ever compile-and-archive a `.o`, never actually link an executable
+     -- an undefined symbol can never surface, so every such probe in
+     `config-ix.cmake` across all three imported components silently
+     reports a false "found". Confirmed via
+     `build/libcxxabi/CMakeFiles/CMakeConfigureLog.yaml`, which showed
+     the probe's own `ninja`/`crt-ar` command line never invokes the
+     linker at all. Fixed by adding a `target_overrides.linux` entry to
+     `libstdc++/third_party/libcxxabi/recipe.json` forcing
+     `-DLIBCXXABI_HAS_CXA_THREAD_ATEXIT_IMPL=OFF` -- supplying the
+     correct, hand-verified answer the probe cannot reach itself, and
+     letting libcxxabi fall back to its own portable, already-
+     implemented `__cxa_atexit()`+TLS-key-based `cxa_thread_atexit.cpp`
+     path instead (documented, accepted limitations only -- e.g.
+     `dlclose()`'d DSOs -- not something this project introduced).
+  5. **Shared link, next layer: passed the link, crashed at runtime.**
+     `abort()` inside `libunwind::UnwindCursor<...>::isReadableAddr()`'s
+     own `assert(errno == EFAULT || errno == EINVAL)` -- the exact
+     function `SYS_rt_sigprocmask` (fixed earlier this same entry) backs
+     -- firing on *every* real run, not just a rare edge case. Root
+     cause, found via `gdb -batch -ex "break abort" -ex run -ex bt`:
+     this project's public, glibc/Bionic-compatible variadic `syscall(2)`
+     (`libc/src/syscall_public.c`) had never been implemented at all --
+     `long syscall(long number, ...)` was a pure stub, unconditionally
+     `return __set_errno(ENOSYS)`, `number` never even inspected.
+     Harmless for this project's own code (every internal caller already
+     has its own fixed-syscall-number trampoline, e.g. `__crt_sys_read`
+     in `libc/src/arch/linux/{aarch64,x86_64}/syscall.S`) but a real gap
+     for any external caller making a raw numbered `syscall()` directly,
+     which is exactly what libunwind's `isReadableAddr()` does. Fixed
+     with a real implementation: `__crt_generic_syscall(number, a1..a6)`,
+     a new per-architecture raw-syscall assembly trampoline appended to
+     each existing `libc/src/arch/linux/{aarch64,x86_64}/syscall.S`
+     (shifting the 7 incoming C-ABI argument registers into the raw
+     SVC/`syscall`-instruction argument registers -- aarch64: AAPCS64's
+     x0..x6 down to SVC's x8+x0..x5; x86_64: SysV's
+     rdi/rsi/rdx/rcx/r8/r9+stack down to `syscall`'s
+     rax/rdi/rsi/rdx/r10/r8/r9, r10 replacing rcx because the `syscall`
+     instruction itself clobbers rcx/r11, matching the existing
+     `__crt_sys_prctl`/`__crt_sys_epoll_pwait` trampolines' own
+     established 4th-argument workaround), with `libc/src/
+     syscall_public.c` rewritten to unpack the C variadic argument list
+     into that primitive's fixed 6-`long` signature and translate a
+     negative-in-[-4095,-1] raw kernel return into the normal
+     errno-plus-(-1) libc convention (matching `libc/src/fd.c`'s own
+     `normalize_syscall_result()` precedent). Scoped to Linux only
+     (`#if defined(CRT_TARGET_OS_LINUX)`); macOS/Windows keep the
+     original unconditional ENOSYS stub, matching how a raw numbered
+     `syscall(2)` is a Linux-specific POSIX extension to begin with.
+     Verified for real by hand first (a standalone probe reproducing
+     `UnwindCursor.hpp`'s exact call now returns `errno=EINVAL` as
+     expected, not `ENOSYS`), then via the actual crash: gone.
+  6. **Shared link, static leg regression check:** re-ran the full
+     project build (`cmake --build --preset linux-host-ninja-debug`) and
+     `ctest` after each of the above -- 104/104 passing throughout, no
+     regressions from the `__cxa_atexit`/`syscall()` changes touching
+     every Linux link.
+
+  7. **Found immediately after, root-caused, and fixed the same day, at
+     the user's explicit request to keep going:** with everything above
+     fixed, the shared-linkage binary ran to `main()` and executed the
+     `throw std::runtime_error(...)`, but `_Unwind_RaiseException`'s
+     phase-1 search never found the `catch` clause -- `std::terminate()`
+     fired (`terminating with uncaught exception of type
+     std::runtime_error: caught`) even though the throw and catch are in
+     the same function. Root-caused via `gdb -batch -ex "break
+     crt_dl_backend_iterate_phdr" -ex run -ex finish`: the
+     `_Unwind_RaiseException`/personality-routine call chain itself lives
+     in `libcxxabi.so`/`libunwind.so` (separate ELF images from the main
+     executable in the shared-linkage build), so libunwind's own
+     `findUnwindSectionsByPhdr()` needs `dl_iterate_phdr()` to report
+     *every* loaded shared object, not just the main executable, to
+     locate `.eh_frame`/`.gcc_except_table` for a PC inside `__cxa_throw`
+     itself (the very first frame phase-1 unwinding examines).
+     `libdl/src/arch/linux/dl_linux.c`'s `crt_dl_backend_iterate_phdr()`
+     -- by original, documented design (see `include/link.h`'s own
+     former comment) -- reported exactly one entry, the main executable,
+     "because this project has no real ELF dynamic linker yet". That was
+     a correct, deliberate simplification when nothing else needed more,
+     but the imported-libc++ shared-linkage path is the first real
+     consumer that does.
+
+     Fixed for real, not with a new ELF loader: this project already
+     delegates actual `.so` loading to the *real* system dynamic linker
+     (`/lib/ld-linux-aarch64.so.1`, confirmed via `tools/crt-cc`/
+     `crt-c++`'s own `-dynamic-linker` link flag), which already
+     maintains the standard, public SVR4 "rendezvous" `struct r_debug`/
+     `link_map` linked list documented in real glibc's own `<link.h>`
+     (confirmed against this host's `/usr/include/link.h`, Ubuntu
+     24.04) -- real glibc's own `dl_iterate_phdr()` walks exactly this
+     same structure internally, and gdb/lldb rely on the identical
+     protocol. `crt_dl_backend_iterate_phdr()` now: (a) reports the main
+     executable exactly as before, via AT_PHDR/AT_PHNUM (kept, not
+     replaced -- more reliable than trusting an ELF header read through
+     a link_map entry, since the kernel hands it directly to every
+     process at exec()); (b) finds `struct r_debug` via the documented
+     `_DYNAMIC`/`DT_DEBUG` technique (walking this executable's own
+     linker-synthesized `_DYNAMIC` array for the `DT_DEBUG` entry the
+     real dynamic linker fills in at startup -- the same technique gdb
+     itself uses, deliberately not the simpler-looking `extern struct
+     r_debug _r_debug` glibc's own header also documents, since that
+     symbol lives inside the separate ld.so image, not something this
+     project's own link resolves against); (c) walks `r_debug->r_map`,
+     skipping the main executable's own entry (matched by `l_ld ==
+     _DYNAMIC`, not list position) since it was already reported
+     precisely in step (a), and for every other entry reads the ELF
+     header at its `l_addr` load bias to locate that object's own
+     `e_phoff`/`e_phnum` (link_map itself carries a load bias and a
+     `.dynamic` pointer, not phdr/phnum directly). `struct link_map`/
+     `struct r_debug` are declared locally in `dl_linux.c` as this
+     project's own minimal copy of the stable SVR4 fields only (not
+     glibc's full `<link.h>`, which mixes this protocol with a large
+     surface of unrelated dlopen()/audit-interface/ld.so.cache plumbing
+     this project has no use for).
+
+     Verified for real: both `crt-libcxx-smoke` legs now build, link,
+     *and run to completion* -- `imported_libcxx_test: ok` on **both**
+     the static leg (already passing since item 3 above) **and now the
+     shared leg** (previously crashing/terminating), real vector/string/
+     exception-throw-catch coverage confirmed for both linkage modes on
+     Linux for the first time. Re-ran the existing `dl_iterate_phdr_
+     dladdr_test` and the full `ctest` suite (104/104) to confirm the
+     `dl_iterate_phdr()` rewrite has no regression for this project's
+     own prior single-entry callers. `include/link.h`'s own comment
+     updated to match the new, real multi-image behavior.
+
+  **`crt-libcxx-build`/`crt-libcxx-smoke` are now fully green on Linux,
+  both static and shared linkage, matching the already-verified macOS
+  state and Windows' own separate, still-open work (TODO.md).**
+
 - **Fixed a real macOS `crt-libcxx-build` regression: `libcxx` needed its
   own `__dso_handle` shim, not just `libcxxabi`'s.** Reported directly
   ("`cmake --build ... --target crt-libcxx-build` 명령에 의해 빌드가 잘

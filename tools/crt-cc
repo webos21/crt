@@ -232,6 +232,7 @@ case "$target_os" in
   linux)
     if [ "$shared_mode" -eq 1 ]; then
       crt_libs="${CRT_SYSROOT}/lib/libc.so ${CRT_SYSROOT}/lib/libm.so ${CRT_SYSROOT}/lib/libdl.so ${CRT_SYSROOT}/lib/libc++.so"
+      libs="$libs $crt_libs ${CRT_SYSROOT}/lib/libclang_rt.builtins.a"
     else
       crt_libs="${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a ${CRT_SYSROOT}/lib/libc++.a"
       # __crt_run_init_array()/__crt_run_fini_array() (see
@@ -245,8 +246,21 @@ case "$target_os" in
       # loader when it's loaded, not by this project's own startup
       # code), matching why crt1.o itself is skipped in that case too.
       libs="$libs ${CRT_SYSROOT}/lib/crt1_init_array.o"
+      # These static archives have real circular symbol needs GNU ld/lld's
+      # default single left-to-right archive scan cannot satisfy: libdl.a's
+      # dl_linux.c.o calls getauxval() (defined in libc.a's auxv.c.o), and
+      # libclang_rt.builtins.a's aarch64 outline-atomics lse-init.o calls
+      # __getauxval() (also libc.a) -- but both are listed *after* libc.a
+      # here, so by the time ld reaches them, libc.a has already been
+      # scanned once and won't be revisited for a newly-discovered
+      # undefined reference. Confirmed for real: this exact ordering broke
+      # crt-libcxx-smoke's static C++ link (see HISTORY.md's 2026-08-21
+      # entry) the first time anything statically linked libc.a, libdl.a,
+      # and libclang_rt.builtins.a together through this wrapper.
+      # --start-group/--end-group makes ld iterate the whole set until no
+      # archive yields a new definition, independent of listed order.
+      libs="$libs -Wl,--start-group $crt_libs ${CRT_SYSROOT}/lib/libclang_rt.builtins.a -Wl,--end-group"
     fi
-    libs="$libs $crt_libs ${CRT_SYSROOT}/lib/libclang_rt.builtins.a"
     if [ "$shared_mode" -eq 1 ]; then
       # None of libc.so/libm.so/libdl.so/libc++.so set an explicit
       # -soname (nothing in this build sets one), so each defaults to

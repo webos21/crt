@@ -914,3 +914,26 @@ __crt_sys_prctl:
   svc #0
   ret
 .size __crt_sys_prctl, . - __crt_sys_prctl
+
+/* __crt_generic_syscall(number, a1..a6) -- the raw-syscall primitive behind
+ * the public, glibc/Bionic-compatible variadic syscall(2) (see
+ * libc/src/syscall_public.c's own comment for why this exists separately
+ * from the fixed-syscall-number trampolines above). AAPCS64 hands this
+ * 7-argument function x0=number, x1..x6=a1..a6; the raw SVC ABI wants
+ * x8=number, x0..x5=a1..a6, so shift every argument down by one register
+ * before trapping. Each mov reads a higher-numbered register than it
+ * writes, in increasing order, so this sequence is safe without a temp. */
+.globl __crt_generic_syscall
+.type __crt_generic_syscall, %function
+.p2align 2
+__crt_generic_syscall:
+  mov x8, x0
+  mov x0, x1
+  mov x1, x2
+  mov x2, x3
+  mov x3, x4
+  mov x4, x5
+  mov x5, x6
+  svc #0
+  ret
+.size __crt_generic_syscall, . - __crt_generic_syscall

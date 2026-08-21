@@ -207,6 +207,11 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
   # Real ioctl(TCGETS/TCSETS*)-backed tcgetattr()/tcsetattr()/etc -- see
   # that file's own comment for the round-trip bug this replaces.
   set(CRT_LINUX_TERMIOS_FILE src/arch/linux/common/termios.c)
+  # __cxa_atexit()/__cxa_finalize()/__dso_handle -- Itanium C++ ABI static-
+  # duration destructor registration, real glibc/Bionic put this in libc
+  # itself -- see that file's own comment for why libstdc++/src/cxxabi.c's
+  # own copy is guarded out on Linux now that this exists.
+  set(CRT_LINUX_CXA_ATEXIT_FILE src/arch/linux/common/cxa_atexit.c)
   # __crt_run_init_array()/__crt_run_fini_array() (.init_array/.fini_array
   # support for the executable's own static link -- see that file's own
   # comment for why this must be linked directly into every executable,
@@ -271,6 +276,7 @@ target_sources(c PRIVATE ${CRT_SIGNAL_BACKEND_FILE})
 if(CRT_TARGET_OS STREQUAL "linux")
   target_sources(c PRIVATE ${CRT_LINUX_AUXV_FILE})
   target_sources(c PRIVATE ${CRT_LINUX_TERMIOS_FILE})
+  target_sources(c PRIVATE ${CRT_LINUX_CXA_ATEXIT_FILE})
 endif()
 
 add_library(crt_setjmp OBJECT ${CRT_SETJMP_FILE})
@@ -384,6 +390,7 @@ target_sources(c_shared PRIVATE ${CRT_SIGNAL_BACKEND_FILE})
 if(CRT_TARGET_OS STREQUAL "linux")
   target_sources(c_shared PRIVATE ${CRT_LINUX_AUXV_FILE})
   target_sources(c_shared PRIVATE ${CRT_LINUX_TERMIOS_FILE})
+  target_sources(c_shared PRIVATE ${CRT_LINUX_CXA_ATEXIT_FILE})
 endif()
 if(CRT_TARGET_OS STREQUAL "windows")
   target_sources(c_shared PRIVATE $<TARGET_OBJECTS:crt_windows_chkstk>)

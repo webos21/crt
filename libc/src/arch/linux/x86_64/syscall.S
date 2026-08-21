@@ -918,3 +918,30 @@ __crt_sys_prctl:
   syscall
   retq
 .size __crt_sys_prctl, . - __crt_sys_prctl
+
+# __crt_generic_syscall(number, a1..a6) -- the raw-syscall primitive behind
+# the public, glibc/Bionic-compatible variadic syscall(2) (see
+# libc/src/syscall_public.c's own comment for why this exists separately
+# from the fixed-syscall-number trampolines above). SysV ABI hands this
+# 7-argument function number/a1..a5 in rdi/rsi/rdx/rcx/r8/r9, with a6 (the
+# 7th integer argument) overflowed to the stack at 8(%rsp) (return address
+# is at 0(%rsp); no prologue runs before this reads it). The raw `syscall`
+# instruction ABI wants rax=number, rdi/rsi/rdx/r10/r8/r9=a1..a6 -- note r10
+# in place of rcx for the 4th argument, because the syscall instruction
+# itself clobbers rcx (return address) and r11 (flags), exactly like the
+# existing __crt_sys_prctl/__crt_sys_epoll_pwait trampolines above already
+# work around for their own 4th argument.
+.globl __crt_generic_syscall
+.type __crt_generic_syscall, @function
+.p2align 4, 0x90
+__crt_generic_syscall:
+  movq %rdi, %rax
+  movq %rsi, %rdi
+  movq %rdx, %rsi
+  movq %rcx, %rdx
+  movq %r8, %r10
+  movq %r9, %r8
+  movq 8(%rsp), %r9
+  syscall
+  retq
+.size __crt_generic_syscall, . - __crt_generic_syscall

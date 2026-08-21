@@ -291,20 +291,63 @@ Next work order:
      4. **Get the rest of libcxxabi/libcxx building clean on Windows**
         (the psapi.h/PE-header shim above is the one thing standing between
         here and a fully clean Windows `crt-libcxx-build`), then repeat the
-        same recipe.json-driven build on Linux (not yet attempted at all
-        there -- host-provided libunwind was considered and explicitly
-        rejected, see `libstdc++/third_party/libunwind/recipe.json`'s own
-        notes for why, so Linux needs the same from-source path and will
-        likely hit related, if not identical, gaps once reached -- most
-        likely a Linux `target_overrides` entry on libcxxabi's own
-        `CMAKE_SHARED_LINKER_FLAGS`, a bare `-lunwind -L@INSTALL_PREFIX@/
-        lib` rather than a Windows-style `.dll.a` import library).
+        same recipe.json-driven build on Linux (host-provided libunwind
+        was considered and explicitly rejected, see `libstdc++/
+        third_party/libunwind/recipe.json`'s own notes for why, so Linux
+        needs the same from-source path). **Linux `crt-libcxx-build`
+        itself: DONE and verified** (2026-08-21 HISTORY.md entry): two
+        real header/macro gaps this project's Linux `<link.h>`/
+        `<sys/syscall.h>` never needed before (`ElfW()` and
+        `SYS_rt_sigprocmask`). **Linux `crt-libcxx-smoke`'s *static* leg:
+        DONE and verified** (same entry, a chain of five further real
+        gaps found and fixed in turn -- `tools/crt-c++` missing
+        `crt1_init_array.o`, static-archive link-order needing
+        `--start-group`/`--end-group`, real `__cxa_atexit()`/
+        `__cxa_finalize()`/`__dso_handle` added to libc (Linux-only,
+        `libc/src/arch/linux/common/cxa_atexit.c`), libcxxabi's own
+        `config-ix.cmake` probes always false-reporting "found" because
+        `crt-libcxx-build.py` configures with
+        `CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY` (fixed by forcing
+        `LIBCXXABI_HAS_CXA_THREAD_ATEXIT_IMPL=OFF` via
+        `target_overrides.linux`), and a real, previously-unimplemented
+        generic variadic `syscall(2)` (`libc/src/syscall_public.c` was a
+        pure `ENOSYS` stub; now backed by a new
+        `__crt_generic_syscall()` raw-syscall assembly trampoline per
+        architecture). **Linux `crt-libcxx-smoke`'s *shared* leg: DONE
+        and verified too**, same day: the remaining gap was
+        `dl_iterate_phdr()` (`libdl/src/arch/linux/dl_linux.c`) reporting
+        only the main executable's own phdrs, by original documented
+        design (see `include/link.h`'s former comment, "this project has
+        no real ELF dynamic linker yet") -- correct when nothing else
+        needed more, but libunwind's exception search needs it to report
+        *every* loaded shared object (the personality-routine call chain
+        itself lives inside `libcxxabi.so`/`libunwind.so`, separate ELF
+        images from the executable in the shared-linkage build), so a
+        `throw` inside `main()` was never finding its own `catch` clause
+        and calling `std::terminate()` instead. Fixed without a new ELF
+        loader: this project already delegates actual `.so` loading to
+        the real system dynamic linker
+        (`-dynamic-linker /lib/ld-linux-aarch64.so.1`), which already
+        maintains the standard SVR4 `struct r_debug`/`link_map`
+        rendezvous list (via the executable's own `DT_DEBUG` `.dynamic`
+        entry) -- real glibc's own `dl_iterate_phdr()` walks exactly that
+        same structure internally, so `crt_dl_backend_iterate_phdr()` now
+        does too (main executable still via AT_PHDR/AT_PHNUM as before,
+        every other loaded object via the `_DYNAMIC`/`DT_DEBUG`/
+        `r_debug`/`link_map` walk). **`imported_libcxx_test: ok` on both
+        the static and shared legs** -- real vector/string/exception-
+        throw-catch coverage, genuinely confirmed on Linux, both linkage
+        modes, for the first time. See the 2026-08-21 HISTORY.md entry
+        for the full chain (seven real gaps found and fixed in turn) and
+        the `gdb`-verified traces.
      5. **Add a real cross-OS regression test**: `_Unwind_RaiseException`
         actually reaching a C++ `catch` block, verified identically on all
         three hosts once the build passes -- `crt-libcxx-smoke` already has
         the right shape (exception throw/catch is already one of its
-        checks on macOS) to extend rather than needing a new test from
-        scratch.
+        checks, now confirmed working on macOS and on Linux for both
+        linkage modes) to extend rather than needing a new test from
+        scratch. Windows remains the one host where this is still blocked
+        on step 4's own open Windows gaps above.
 3. **Run the Wayland/Weston protocol/library investigation as a separate
    `libcrtgfx` sub-track.**
    Decide what is protocol parsing, what is compositor policy, and what is

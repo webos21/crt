@@ -10,13 +10,27 @@
  * intentionally not carried here). Real behavior only exists where this
  * project actually has ELF images to report:
  *
- * - Linux: reports exactly one entry, the main executable, built from the
- *   real AT_PHDR/AT_PHNUM values the kernel handed this process at exec()
- *   (see sys/auxv.h's getauxval()) -- accurate, not synthesized, but only
- *   one entry because this project has no real ELF dynamic linker yet
- *   (see docs/dynamic_loading.md's "Linux" section: dlopen() on Linux does
- *   not actually load shared objects today, so there is nothing else to
- *   report).
+ * - Linux: reports the main executable, built from the real AT_PHDR/
+ *   AT_PHNUM values the kernel handed this process at exec() (see
+ *   sys/auxv.h's getauxval()), plus every other real shared object
+ *   currently mapped -- found by walking the real system dynamic
+ *   linker's own struct r_debug/link_map rendezvous list (see
+ *   libdl/src/arch/linux/dl_linux.c's own comment), not by this project
+ *   loading anything itself: dlopen() on Linux still does not actually
+ *   load new shared objects today (see docs/dynamic_loading.md's "Linux"
+ *   section), but every Linux executable/DSO this project builds is
+ *   *linked* against the real system dynamic linker
+ *   (`-dynamic-linker /lib/ld-linux-*.so.1`), which does the actual
+ *   `.so` mapping for anything named directly on the link line (libc++.
+ *   so, libc++abi.so, libunwind.so, ...) -- and already maintains that
+ *   same standard rendezvous structure for gdb's own benefit, so walking
+ *   it needs no ELF loader of this project's own. Added 2026-08-21 (see
+ *   that date's HISTORY.md entry) once the imported-libc++ shared-
+ *   linkage build became the first real consumer that needed more than
+ *   the main executable alone: libunwind's own exception unwinding
+ *   resolves .eh_frame/.gcc_except_table for PCs inside libcxxabi.so/
+ *   libunwind.so itself (where __cxa_throw/the personality routine
+ *   live), not just inside the main executable's own code.
  * - macOS/Windows: dl_phdr_info's dlpi_phdr/dlpi_phnum fields are
  *   fundamentally ELF64_Phdr-shaped; Mach-O and PE have no such structure
  *   at all, and fabricating ELF-shaped data from a different real format
@@ -30,6 +44,18 @@
 
 #include <elf.h>
 #include <stddef.h>
+
+/* Real glibc/Bionic <link.h> provide the ElfW(type) macro (pointer-size
+ * independent access to the Elf32_/Elf64_ type family: ElfW(Phdr) ->
+ * Elf64_Phdr on a 64-bit target), branching on __LP64__/__ELF_NATIVE_CLASS
+ * because those libcs support both ELF32 and ELF64 targets. This project
+ * only ever targets ELF64 (see elf.h's own comment), so the branch collapses
+ * to a single, unconditional definition. Needed by LLVM libunwind's
+ * AddressSpace.hpp, which falls back to defining ElfW()/Elf_Half/Elf_Phdr/
+ * Elf_Addr itself only "on systems where <link.h> doesn't provide it" (its
+ * comment says FreeBSD) -- without this, that fallback's own typedefs
+ * (`typedef ElfW(Half) Elf_Half;`) are circular against themselves. */
+#define ElfW(type) Elf64_##type
 
 #ifdef __cplusplus
 extern "C" {
