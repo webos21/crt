@@ -10,6 +10,53 @@ substantive update.
 
 ## 2026-08-22
 
+- **Skia's source pin/sparse-checkout/local-patch record moved into a real
+  `recipe.json` (`libcrtgfx/third_party/skia/recipe.json`), matching
+  `libstdc++/third_party/{libcxx,libcxxabi,libunwind}/recipe.json`'s own
+  shape; a placeholder `recipe.json` was also added for Wayland
+  (`libcrtgfx/third_party/wayland/recipe.json`), which has nothing pinned
+  or fetched yet.** Prompted by a direct request to give Skia the same
+  "recorded SHA-pin + patches" treatment the libcxx recipes already have.
+  Skia's build is GN/Ninja-based, not CMake, so the new recipe reuses
+  only the *shape* (`source.type`/`repository`/`ref`/`expected_commit`/
+  `sparse_paths`/`sync_deps`, plus a `patches` array and a `notes`
+  array) -- there is no `cmake.options`/`target_overrides`/
+  `build_targets` section, and no attempt to route Skia through
+  `tools/crt-libcxx-build.py`'s CMake-specific engine (this project
+  already explicitly rejected that once, in
+  `libcrtgfx/third_party/skia/README.md`'s original text, for the same
+  reason `tools/crt-libcxx-build.py`'s own module docstring rejects
+  reusing `tools/crt-port-build.py`'s generic porting-recipe engine).
+  `libcrtgfx/CMakeLists.txt` now reads `recipe.json`'s own `source.*`
+  fields at configure time via CMake's `string(JSON ...)` (available
+  since this project's own `cmake_minimum_required(VERSION 3.25)`,
+  comfortably past the 3.19 floor that command needs) to populate the
+  `CRTGFX_SKIA_VERSION`/`REF`/`REPOSITORY`/`EXPECTED_COMMIT`/
+  `SPARSE_PATHS`/`SYNC_DEPS` CACHE variable *defaults*, replacing the
+  previous hardcoded literals -- those six values now live in exactly
+  one place instead of two that could silently drift apart. Verified
+  for real, not just written and assumed correct: a genuinely fresh
+  configure (wiped `CMakeCache.txt`/`CMakeFiles`) produced cache values
+  that exactly match `recipe.json`'s own content, and a full default
+  `cmake --build` + `ctest` (`CRTGFX_ENABLE_SKIA` left OFF) still passes
+  120/120.
+
+  The one real build-configuration edit this project makes to the
+  fetched Skia checkout -- `tools/build_skia.py`'s
+  `pin_gn_script_executable()`, rewriting the `.gn` dotfile's
+  `script_executable = "python3"` line to an absolute path (see this
+  same file's earlier entry today for why) -- is now cross-referenced
+  from `recipe.json`'s own `patches` array, marked `"dynamic": true`
+  since the replacement value (the host's own `sys.executable`) is
+  discovered at build time and cannot be recorded as a fixed find/
+  replace string the way libcxx's own recipe patches are. The existing
+  "do not patch Skia's own upstream *source* to make it build" policy
+  (already stated in the README before this change, restated in
+  `recipe.json`'s own notes now) is unchanged and was not reconsidered
+  -- this recipe's `patches` array is scoped to build-configuration
+  files only, a deliberately narrower thing than a real source-code
+  patch.
+
 - **Routed Skia's own GN build through the project-owned imported libc++
   instead of real MSVC STL (`tools/build_skia.py`), fixing eight distinct
   real bugs along the way; the final link is still blocked on two

@@ -678,6 +678,15 @@ in those two win.
   rebuilding clean) was cleared. Full `cmake --build` + `ctest`
   (120/120) with the default config confirms no regression. See
   `HISTORY.md`'s dated entry for the full writeup.
+- **2026-08-22: Skia's source pin/sparse-checkout moved into a real
+  `libcrtgfx/third_party/skia/recipe.json`**, matching `libstdc++/
+  third_party/*/recipe.json`'s own shape (adapted for GN/Ninja, no
+  `cmake.options` section). `libcrtgfx/CMakeLists.txt` now reads it via
+  `string(JSON ...)` instead of hardcoding the same six values inline;
+  verified via a fresh configure producing matching cache values plus
+  120/120 `ctest`. A placeholder `recipe.json` (`source.ref: null`) was
+  also added for Wayland, which still has nothing pinned or fetched.
+  See `HISTORY.md`'s dated entry.
 - **2026-08-22: routed Skia's own GN build through the project-owned
   imported libc++ instead of real MSVC STL, fixing eight distinct real
   bugs; final link still blocked on two separate library-completeness

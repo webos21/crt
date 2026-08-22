@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "name": "wayland",
+  "build_system": "none",
+  "status": "placeholder",
+  "source": {
+    "type": "git",
+    "repository": null,
+    "version": null,
+    "ref": null,
+    "expected_commit": null,
+    "sparse_paths": [],
+    "sync_deps": false
+  },
+  "engine": {
+    "fetch": null,
+    "build": null,
+    "cmake_targets": [],
+    "notes": "No fetch/build engine exists for this component yet -- there is nothing to fetch. libcrtgfx/src/arch/linux/window_wayland.c is a hand-written client of the real core Wayland and stable xdg-shell wire protocols (opcodes/argument layouts taken directly from the real upstream wayland.xml/xdg-shell.xml, not guessed, but never checked into this repo or fetched at build time); it does not link host libwayland-client and has no upstream checkout at all today. See docs/libcrtgfx_wayland_plan.md's own \"Linux Host Adapter\" section."
+  },
+  "patches": [],
+  "notes": [
+    "This file is a deliberate placeholder, not a real recipe: source.repository/ref/expected_commit are null because nothing is pinned or fetched today (contrast libcrtgfx/third_party/skia/recipe.json's own fully-populated source.* fields). It exists so this directory answers the same question Skia's recipe.json does (\"what upstream, at what commit, with what local patches\") the moment that changes, without inventing the schema shape from scratch under time pressure later.",
+    "Likely candidates if/when an upstream import actually happens (see docs/libcrtgfx_wayland_plan.md's own Import Strategy): the wayland/wayland-protocols repos' own wayland.xml/xdg-shell.xml protocol XML (for a generated-bindings approach instead of the current hand-rolled wire protocol code), or a real libwayland-client checkout (for step 6 of that same plan, still deferred). Neither is decided; this is a note for a future session, not a commitment.",
+    "When this stops being a placeholder: populate source.repository/version/ref/expected_commit with a real pinned commit SHA (never a floating branch/tag, matching every other recipe.json in this project -- see libcrtgfx/third_party/skia/recipe.json's own notes for why), fill in engine.fetch/engine.build once a fetch/build script exists (it will very likely need its own tools/fetch_wayland.py the same shape as tools/fetch_skia.py, since this is not a CMake-buildable component either), and update libcrtgfx/third_party/wayland/README.md alongside it. The same no-upstream-source-patch discipline Skia's own recipe.json documents applies here too if that day comes.",
+    "2026-08-22: created alongside libcrtgfx/third_party/skia/recipe.json, at the user's own explicit request to give Wayland the same recording location even though there is nothing to pin yet. See HISTORY.md's dated entry."
+  ]
+}

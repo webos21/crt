@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "name": "skia",
+  "build_system": "gn",
+  "source": {
+    "type": "git",
+    "repository": "https://skia.googlesource.com/skia.git",
+    "version": "m148",
+    "ref": "13ffba253fc7854fd3b34f67c82dfb2418dc2944",
+    "expected_commit": "13ffba253fc7854fd3b34f67c82dfb2418dc2944",
+    "sparse_paths": [
+      "bin", "build_overrides", "client_utils", "gn", "include",
+      "modules", "specs", "src", "third_party", "toolchain"
+    ],
+    "sync_deps": false
+  },
+  "engine": {
+    "fetch": "tools/fetch_skia.py",
+    "build": "tools/build_skia.py",
+    "cmake_targets": ["crtgfx-skia-fetch", "crtgfx-skia-configure", "crtgfx-skia-build"],
+    "notes": "Skia's own build is GN/Ninja-based, not CMake -- unlike libstdc++/third_party/{libcxx,libcxxabi,libunwind}/recipe.json's own recipes, this file has no cmake.options/target_overrides/build_targets section, and libcrtgfx/CMakeLists.txt (not a generic Python recipe engine) is what actually reads this file's own source.* fields at configure time via CMake's string(JSON ...) and feeds them to tools/fetch_skia.py as plain CLI flags. The real GN argument set (skia_enable_*/skia_use_*, cc/cxx/ar wiring, target_os/target_cpu selection) lives in tools/build_skia.py's own default_gn_args() instead -- those are build *configuration*, not source pinning, and change far more often than this recipe's own source.* fields do."
+  },
+  "patches": [
+    {
+      "file": ".gn",
+      "kind": "build-config",
+      "dynamic": true,
+      "applied_by": "tools/build_skia.py:pin_gn_script_executable()",
+      "description": "Rewrites the fetched .gn dotfile's `script_executable = \"python3\"` line to an absolute path (the host's own sys.executable) before every `gn gen`. Not a static find/replace like libcxx's own recipe.json patches: the replacement value is the *host's* Python interpreter path, discovered at build time, so it cannot be recorded as a fixed string here the way a real source-code patch can. Recorded in this array anyway so this recipe stays the single place that answers \"does this project modify anything in the fetched Skia checkout\" -- see pin_gn_script_executable()'s own docstring for the full reasoning (a real PATH-format conflict between gn.exe's own native-Windows PATH search for \"python3\" and mksh.exe's POSIX-only PATH on Windows; no PATH value satisfies both, so this sidesteps PATH entirely for gn.exe instead)."
+    }
+  ],
+  "notes": [
+    "Pinned, not floating (since 2026-08-21): source.ref/source.expected_commit are a real commit SHA, captured via `git ls-remote https://skia.googlesource.com/skia.git refs/heads/chrome/m148` that day -- not \"whatever refs/heads/chrome/m148 currently resolves to,\" the previous default. That commit's own message (\"Remove CQ for unsupported branch refs/heads/chrome/m148\") confirms the branch was already frozen/unsupported by Skia's own infra at pin time, verified for real rather than assumed. source.version (\"m148\") is still the human-readable label; source.ref is what actually gets fetched. Re-pin by re-running the same git ls-remote command and updating both source.ref and source.expected_commit (and this note's own date), never by reverting either to empty/floating.",
+    "source.sparse_paths (cone mode) was derived empirically via `ninja -t inputs skia` against a real build of this project's own CPU-raster-only GN config, not guessed -- confirmed for real to drop the fetch from 260MB+ (an untrimmed, unshallowed working tree) to ~103MB, with a genuinely successful libskia.a (21MB) build against the trimmed checkout. modules/ had to be kept whole rather than trimmed to just the one module actually linked (modules/skcms): `gn gen` needs to at least *load* every module's own BUILD.gn to evaluate its own `enabled = skia_enable_<x>` condition, even for a disabled module, confirmed for real via a failed `gn gen` (\"Unable to load ... modules/skottie/BUILD.gn\") before this was understood. build_overrides/client_utils/specs/toolchain/bin/gn were kept despite no direct reference found in the files actually read, since each is a few KB to a few hundred KB at most -- not worth the risk of a silent future break for a negligible size saving, the same \"kept for safety\" call already made for libcxx's own utils/ directory.",
+    "source.sync_deps is false: git-sync-deps unconditionally downloads Skia's *entire* third-party dependency set per its own DEPS file regardless of which GN features are actually enabled -- confirmed for real (2026-08-21): running it against this project's own minimal CPU-raster-only config downloaded 8.6GB before being killed, including a complete Emscripten/WASM toolchain (node.js, a Python distribution, WASM binaries) totally unrelated to a Windows/Linux/macOS static-library CPU raster build. Confirmed separately, empirically, that it is not merely wasteful but genuinely UNNEEDED for the actual default_gn_args() config in tools/build_skia.py: `ninja -t inputs skia` against a real build shows zero third_party/externals/ references once skia_use_wuffs is also disabled (the one third-party dependency, GIF decode support, this config would otherwise still need). Left available as a CRTGFX_SKIA_SYNC_DEPS CMake opt-in for whoever eventually enables a GN feature that genuinely needs a synced third-party dependency again -- that override is a build-time CMake cache flag, not something this recipe's own source.sync_deps default should flip.",
+    "Do not add a real source-code patch (an actual edit to Skia's own .cc/.cpp/.h files) to this recipe's patches array to make a compile error go away -- that is a deliberate, standing policy (see libcrtgfx/third_party/skia/README.md's own \"Do not patch the fetched upstream source\" line): a build failure should first identify a missing CRT/PAL/C++ runtime surface and follow the project porting loop in AGENTS.md, the same discipline libstdc++/third_party/*/recipe.json's own *source*-level patches were only ever added for after confirming the gap was real and the fix was the right shape (see that file's own patch-by-patch \"reason\" fields). This recipe's patches array exists for build-*configuration*-file edits only (like the .gn dotfile entry above), which is a materially different thing from patching Skia's own C++ implementation.",
+    "2026-08-22: this recipe.json itself is new -- source.*/patches[0] were previously spread across libcrtgfx/CMakeLists.txt's own CRTGFX_SKIA_* CACHE variable defaults (now read from this file instead, via CMake's string(JSON ...)) and tools/build_skia.py's ad hoc pin_gn_script_executable() (still the actual implementation; only now cross-referenced from here). No behavior changed by adding this file -- it is a pure documentation/single-source-of-truth consolidation, matching libstdc++/third_party/*/recipe.json's own shape as closely as a GN-based (non-CMake) build reasonably allows. See HISTORY.md's dated entry."
+  ]
+}

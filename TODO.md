@@ -249,6 +249,24 @@ Next work order:
      default (matching its pre-existing default; the default `ctest` suite
      is unaffected either way since this target is only built when that
      option is explicitly turned on).
+   - **Skia's source pin/sparse-checkout now lives in a real `recipe.json`**
+     **(2026-08-22)**: `libcrtgfx/third_party/skia/recipe.json`, matching
+     `libstdc++/third_party/{libcxx,libcxxabi,libunwind}/recipe.json`'s
+     shape (`source.type`/`repository`/`ref`/`expected_commit`/
+     `sparse_paths`/`sync_deps`, plus a `patches` array for the `.gn`
+     `script_executable` build-config edit and a `notes` array for the
+     pinning history), adapted for Skia's GN/Ninja build (no
+     `cmake.options` section -- that lives in `tools/build_skia.py`'s
+     own `default_gn_args()`, unchanged). `libcrtgfx/CMakeLists.txt`
+     reads it via `string(JSON ...)` at configure time instead of
+     hardcoding the same six values inline; verified via a genuinely
+     fresh configure producing matching cache values, plus full default
+     `ctest` still 120/120. A matching placeholder `recipe.json` was
+     also added for Wayland (`libcrtgfx/third_party/wayland/
+     recipe.json`, `source.ref` left `null` -- there is still nothing to
+     fetch, per the existing "intentionally not a checkout" status) so
+     the same recording location exists the moment that changes. See
+     `HISTORY.md`'s dated entry for the fuller writeup.
    - **Follow-up investigation (2026-08-22): routed Skia's own GN build**
      **through the project-owned imported libc++ instead of real MSVC STL**
      (the architecturally-correct fix for the gap just above), and found +
