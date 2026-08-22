@@ -32,6 +32,25 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--rootfs", type=Path, help="Windows only: the Android-like rootfs (toybox applets, mksh)")
     parser.add_argument("--windows-sdk-libpath", type=Path, help="Windows only: dir containing kernel32.lib")
+    # --host-cc/--host-cxx: accepted for the same reason tools/crt-libcxx-
+    # build.py's own matching arguments exist (see that script's own
+    # docstring near CRT_HOST_CC/CRT_HOST_CXX) -- the top-level CMake
+    # configure's own CMAKE_C_COMPILER/CMAKE_CXX_COMPILER, passed through so
+    # this script's own host-compiler probe below (host_cxx, used for the
+    # -fno-typed-cxx-new-delete feature check and, on Windows, exported as
+    # CRT_HOST_CXX for tools/crt-c++) uses the exact compiler this project
+    # was actually configured with rather than re-deriving its own,
+    # possibly different guess. --host-cc is accepted but unused: this
+    # script only ever compiles the smoke test's C++ client through
+    # tools/crt-c++, never a plain C translation unit. Confirmed for real
+    # (2026-08-22): libstdc++/CMakeLists.txt's own crt-libcxx-smoke target
+    # started passing both flags (via the shared CRT_LIBCXX_PLATFORM_
+    # ARGUMENTS list crt-libcxx-configure/-build already consumed) without
+    # this script's argparse ever being updated to accept them, failing
+    # every invocation with "error: unrecognized arguments: --host-cc ...
+    # --host-cxx ...".
+    parser.add_argument("--host-cc", help="unused; accepted so CRT_LIBCXX_PLATFORM_ARGUMENTS can pass it uniformly")
+    parser.add_argument("--host-cxx", help="host clang++ for this script's own feature probe / Windows CRT_HOST_CXX export")
     args = parser.parse_args()
 
     root = args.root.resolve()
@@ -98,7 +117,7 @@ def main():
         if args.windows_sdk_libpath:
             base_env["CRT_WINDOWS_SDK_LIBPATH"] = str(args.windows_sdk_libpath.resolve())
 
-    host_cxx = os.environ.get("CRT_HOST_CXX") or shutil.which("clang++") or shutil.which("clang++-18") or shutil.which("c++")
+    host_cxx = args.host_cxx or os.environ.get("CRT_HOST_CXX") or shutil.which("clang++") or shutil.which("clang++-18") or shutil.which("c++")
     if host_cxx and args.target_os == "windows":
         # tools/crt-c++ itself falls back to a bare "clang++" (resolved via
         # mksh's own $PATH search) whenever CRT_HOST_CXX is unset -- and

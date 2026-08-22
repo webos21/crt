@@ -404,6 +404,22 @@ Next work order:
      **Linux/WSL: fully verified** -- full default `cmake --build` +
      `ctest` with `CRT_USE_IMPORTED_LIBCXX=ON`, **100% tests passed, 0
      failed, out of 104**, on a fully wiped build tree (WSL/Ubuntu-26.04).
+     **macOS: this migration left it broken (never verified here at the
+     time), fixed same-day once reported.** `crt-libcxx-build` failed
+     with `fatal error: 'mach-o/dyld.h' file not found` (libcxx's own
+     `src/include/refstring.h`, a real-host-libstdc++-interop feature
+     gated by a macro pair Clang's driver predefines from the real
+     target triple, unaffected by this recipe's `-U__APPLE__` flag --
+     disabled the whole feature via a new `libcxx/recipe.json` patch,
+     this project never coexists with a host libstdc++ in the same
+     process anyway); separately, `crt-libcxx-smoke` failed with
+     `unrecognized arguments: --host-cc ... --host-cxx ...`
+     (`tools/test_libcxx_runtime.py`'s own argparse was never updated
+     for the same-day `--host-cc`/`--host-cxx` addition to the shared
+     `CRT_LIBCXX_PLATFORM_ARGUMENTS` list `crt-libcxx-smoke`'s custom
+     target also consumes). Both fixed and re-verified genuinely fresh:
+     `crt-libcxx-smoke` now passes both linkage legs on macOS, matching
+     Linux. See `HISTORY.md`'s later same-day entry.
      **Windows: real progress, intentionally left incomplete.** Six more
      distinct, real bugs were found and fixed the same way (evidence-based,
      one build error at a time, each with its own recipe.json/`win32_shim`

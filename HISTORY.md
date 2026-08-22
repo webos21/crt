@@ -10,6 +10,76 @@ substantive update.
 
 ## 2026-08-22
 
+- **Fixed macOS `crt-libcxx-build`/`crt-libcxx-smoke` after the libcxx/
+  libcxxabi migration off the dead Android fork (two real, separate
+  bugs)**, closing the gap the migration's own commit left open (that
+  work verified Linux fully and Windows partially, but never macOS).
+  Reported directly ("linux에서 libcxx 빌드까지 성공했는데, 이 기기
+  (macos)에서 에러가 난다"). Reproduced on a genuinely fresh build
+  (wiped `external/llvm-runtimes` entirely -- the old fork's checkout
+  and every build/install artifact under it were completely stale
+  against the new `toolchain/llvm-project`-sourced recipe).
+
+  **Bug 1**: `libcxxabi`'s build failed compiling `stdlib_stdexcept.cpp`
+  with `fatal error: 'mach-o/dyld.h' file not found`, via `libcxx`'s own
+  private `src/include/refstring.h` (reached through libcxxabi's
+  `../libcxx/` relative include). Root cause: that header's
+  `_LIBCPP_CHECK_FOR_GCC_EMPTY_STRING_STORAGE` block (real-host-
+  libstdc++-interop code, checking whether an exception's stored string
+  is libstdc++'s own empty-string singleton) is guarded by `#if
+  defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) ||
+  defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)` in this new,
+  actively-maintained source -- unlike the dead fork's own pre-migration
+  copy, which used a plain `#ifdef __APPLE__` this recipe's `-U__APPLE__`
+  flag already neutralized. These two environment macros are predefined
+  by Clang's own driver directly from the real `arm64-apple-macosx`
+  target triple (this recipe passes no explicit `--target=`, so Clang
+  defaults to the real host triple) -- completely unaffected by
+  `-U__APPLE__`, which only undefines that one literal macro. Once that
+  branch is taken, `tools/crt-c++`'s own unconditional `-nostdinc` (even
+  for `CRT_CXX_BUILDING_RUNTIME=1`, building this runtime itself, by
+  design -- correct and necessary for every other translation unit in
+  this build) makes the real macOS SDK's own `<mach-o/dyld.h>`
+  unreachable. Fixed by disabling the whole feature in
+  `libstdc++/third_party/libcxx/recipe.json` (a `patches` entry turning
+  the `#if` into `#if 0`), not just the one `#include` -- this project
+  never links a host libstdc++ into the same process as its own
+  independent libc++abi in the first place, so the ABI-interop this code
+  exists for cannot occur here regardless of headers.
+
+  **Bug 2**, found immediately after Bug 1 while re-verifying
+  `crt-libcxx-smoke`: `tools/test_libcxx_runtime.py` failed every
+  invocation with `error: unrecognized arguments: --host-cc ... --host-cxx
+  ...`. Root cause: the same day's earlier `--host-cc`/`--host-cxx`
+  addition (passing the top-level CMake configure's own
+  `CMAKE_C_COMPILER`/`CMAKE_CXX_COMPILER` through to the recipe bootstrap,
+  fixing a real "silently built with the wrong/too-old host compiler"
+  class of bug) went into a *shared* `CRT_LIBCXX_PLATFORM_ARGUMENTS` CMake
+  list that `crt-libcxx-smoke`'s own custom target also consumes --
+  correct for `crt-libcxx-configure`/`crt-libcxx-build` (which invoke
+  `tools/crt-libcxx-build.py`, whose argparse accepts both flags), but
+  `crt-libcxx-smoke` invokes a *different* script
+  (`tools/test_libcxx_runtime.py`) that was never updated to accept them.
+  Fixed by adding matching `--host-cc`/`--host-cxx` arguments to
+  `test_libcxx_runtime.py`'s own argparse (`--host-cc` accepted but
+  unused -- this script only ever compiles a C++ client through
+  `tools/crt-c++`, never a plain C translation unit; `--host-cxx` now
+  takes precedence over this script's own `CRT_HOST_CXX` env-var/
+  `shutil.which()` fallback chain for its `-fno-typed-cxx-new-delete`
+  feature probe and, on Windows, its `CRT_HOST_CXX` export for
+  `tools/crt-c++`), matching `tools/crt-libcxx-build.py`'s own existing
+  precedence order for the identical flags.
+
+  Verified on this real macOS aarch64 host, genuinely fresh at every
+  step (no stale `external/llvm-runtimes` artifacts from the pre-
+  migration fork involved): `crt-libcxx-build` exits 0, `crt-libcxx-
+  sysroot` stages cleanly, and `crt-libcxx-smoke` now passes both linkage
+  legs -- `imported_libcxx_test: ok` for both the static and shared
+  builds, matching Linux's own already-complete verification. Default
+  `cmake --build`/`ctest` (`CRT_USE_IMPORTED_LIBCXX` stays OFF by default,
+  so this whole area is normally dormant) stays green at 104/104
+  throughout, no regressions.
+
 - **Migrated `libcxx`/`libcxxabi`'s recipe source off the dead Android forks
   onto the live `toolchain/llvm-project` monorepo, fixing the C++20 `<bit>`
   gap that blocked Skia's GN build -- fully verified on Linux/WSL (100%
