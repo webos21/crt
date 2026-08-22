@@ -10,6 +10,66 @@ substantive update.
 
 ## 2026-08-22
 
+- **Fixed Linux aarch64 `crt-libcxx-smoke`'s shared leg: `tools/crt-cc`
+  never gated its own C++ runtime link the way `tools/crt-c++` already
+  did, leaking a spurious `libc++.so` dependency into `libunwind.so`.**
+  Reported directly ("linux amd64에서는 libcxx 빌드가 성공했는데, 여기
+  (linux arm64)에서는 libcxx smoke test에서 다음과 같은 에러가 난다"),
+  with the run failing at `imported_libcxx_test`'s shared leg:
+  `ld: warning: libc++.so, needed by .../libunwind.so, not found` at
+  link time, then `error while loading shared libraries: .../libc++.so:
+  file too short` at run time.
+
+  Root cause, confirmed via `readelf -d libunwind.so` and by capturing
+  libunwind's own real link command (`ninja -t commands`): `libunwind.so`
+  carried a genuine `DT_NEEDED libc++.so` entry it has no real reason to
+  need (libunwind implements the Itanium `_Unwind_*` C ABI, no C++
+  standard library dependency). LLVM libunwind's own `CMakeLists.txt`
+  drives its final link through `CMAKE_C_COMPILER` even though it has
+  `.cpp` sources, so `libunwind.so` itself links via `tools/crt-cc` (the
+  plain-C wrapper), not `tools/crt-c++`. `tools/crt-c++` already gates
+  its own C++ runtime library selection behind
+  `CRT_CXX_BUILDING_RUNTIME` (set globally by `crt-libcxx-build.py` for
+  every recipe, so libcxx/libcxxabi/libunwind never link back against
+  themselves mid-build) -- but `tools/crt-cc` never had the equivalent
+  gate at all: its Linux/macOS/Windows branches unconditionally appended
+  `libc++.a`/`libc++.so`/`libc++.dylib`/`c++.lib` to every link,
+  regardless of `CRT_CXX_BUILDING_RUNTIME`. Harmless as long as
+  `libc++.so` itself was a real ELF file or a plain symlink (the spurious
+  dependency still resolved at both link and load time), which is
+  presumably why this had gone unnoticed through the 2026-08-21 session's
+  own static+shared verification -- but genuinely broken once real
+  upstream LLVM libcxx's own CMake started emitting `libc++.so` as a
+  GNU-ld `INPUT(libc++.so.1 -lc++abi -lunwind)` linker script instead
+  (real, current LLVM behavior -- Debian/Ubuntu's own `libc++-dev`
+  packages ship the identical construct, meant only for the *static
+  linker's* own link-time convenience). A linker script has no ELF
+  `SONAME` for `ld` to read, so `ld` fell back to recording the literal
+  argument text `libc++.so` as `libunwind.so`'s own `DT_NEEDED` -- and
+  the *dynamic loader*, unlike the static linker, has no concept of
+  `INPUT()` scripts at all, so it tried to `mmap()` the 37-byte text file
+  as an ELF image and failed with "file too short".
+
+  Fixed by adding the same `CRT_CXX_BUILDING_RUNTIME` gate `tools/crt-c++`
+  already had to `tools/crt-cc`, factored into one shared `cxx_runtime_lib`
+  variable computed once up front (empty while building the runtime
+  itself; the correct static/shared archive or import library otherwise)
+  and referenced from all three OS branches, matching `tools/crt-c++`'s
+  own existing scope -- not just the Linux branch this specific bug
+  surfaced on: the identical unconditional-libc++-link shape existed on
+  macOS and Windows too, just never triggered there (macOS's own
+  `libunwind` recipe is deliberately excluded via `target_os`, and
+  Windows' `crt-libcxx-build` has its own separate, still-open gate
+  blocking it from reaching this link at all -- see TODO.md).
+
+  Verified for real on a genuinely fresh build (wiped `external/
+  llvm-runtimes/{build,install}` entirely, not an incremental one):
+  `readelf -d libunwind.so` now shows only `libdl.so`/`libc.so`/
+  `libm.so`, no `libc++.so`; both `crt-libcxx-smoke` legs build, link,
+  and run to completion again -- `imported_libcxx_test: ok` on static
+  and shared. Full `cmake --build --preset linux-host-ninja-debug` +
+  `ctest` (104/104) confirm no regression.
+
 - **Fixed macOS `crt-libcxx-build`/`crt-libcxx-smoke` after the libcxx/
   libcxxabi migration off the dead Android fork (two real, separate
   bugs)**, closing the gap the migration's own commit left open (that

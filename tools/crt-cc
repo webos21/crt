@@ -219,22 +219,58 @@ prelibs=""
 # relocations of this kind, and statically linking compiler-rt/libgcc
 # into every shared object (not just executables) is itself completely
 # normal, standard practice.
+# cxx_runtime_lib: empty while this wrapper is building libcxx/libcxxabi/
+# libunwind's own C-language sources (CRT_CXX_BUILDING_RUNTIME=1, set by
+# tools/crt-libcxx-build.py for every recipe -- see the matching comment
+# in tools/crt-c++'s own cxx_runtime_libs, which already had this gate;
+# this wrapper never did). Without this, every crt-cc-driven C link,
+# including libunwind's own -- confirmed for real: LLVM libunwind's
+# CMakeLists.txt drives its final link through CMAKE_C_COMPILER even
+# though it has .cpp sources, so libunwind.so itself is linked via this
+# wrapper -- unconditionally pulled in ${CRT_SYSROOT}/lib/libc++.so/.a, a
+# spurious dependency libunwind has no real reason to need. Harmless at
+# build time (the file exists, ld resolves it), but genuinely broken at
+# *load* time once real upstream LLVM libcxx started emitting libc++.so
+# as a GNU-ld `INPUT(libc++.so.1 -lc++abi -lunwind)` linker script rather
+# than a real ELF file or symlink (real, current LLVM CMake behavior, not
+# something this project's own build introduced): libunwind.so's own
+# DT_NEEDED ends up recording the literal text "libc++.so" (a linker
+# script has no SONAME of its own for ld to read instead), and the
+# dynamic loader -- which, unlike the static linker, has no concept of
+# INPUT() linker scripts at all -- then fails to load it as an ELF image
+# ("file too short"). Confirmed for real: reproduced on Linux aarch64,
+# crt-libcxx-smoke's shared leg (see HISTORY.md's dated entry).
+if [ "${CRT_CXX_BUILDING_RUNTIME:-0}" = 1 ]; then
+  cxx_runtime_lib=""
+elif [ "$shared_mode" -eq 1 ]; then
+  case "$target_os" in
+    macos) cxx_runtime_lib="${CRT_SYSROOT}/lib/libc++.dylib" ;;
+    windows) cxx_runtime_lib="${CRT_SYSROOT}/lib/c++.lib" ;;
+    *) cxx_runtime_lib="${CRT_SYSROOT}/lib/libc++.so" ;;
+  esac
+else
+  case "$target_os" in
+    windows) cxx_runtime_lib="${CRT_SYSROOT}/lib/c++.lib" ;;
+    *) cxx_runtime_lib="${CRT_SYSROOT}/lib/libc++.a" ;;
+  esac
+fi
+
 case "$target_os" in
   macos)
     if [ "$shared_mode" -eq 1 ]; then
-      libs="$libs ${CRT_SYSROOT}/lib/libc.dylib ${CRT_SYSROOT}/lib/libm.dylib ${CRT_SYSROOT}/lib/libdl.dylib ${CRT_SYSROOT}/lib/libc++.dylib ${CRT_SYSROOT}/lib/libclang_rt.builtins.a -lSystem"
+      libs="$libs ${CRT_SYSROOT}/lib/libc.dylib ${CRT_SYSROOT}/lib/libm.dylib ${CRT_SYSROOT}/lib/libdl.dylib $cxx_runtime_lib ${CRT_SYSROOT}/lib/libclang_rt.builtins.a -lSystem"
       entry="-Wl,-dead_strip -Wl,-rpath,${CRT_SYSROOT}/lib"
     else
-      libs="$libs ${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a ${CRT_SYSROOT}/lib/libc++.a ${CRT_SYSROOT}/lib/libclang_rt.builtins.a -lSystem"
+      libs="$libs ${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a $cxx_runtime_lib ${CRT_SYSROOT}/lib/libclang_rt.builtins.a -lSystem"
       entry="-Wl,-e,_start -Wl,-dead_strip"
     fi
     ;;
   linux)
     if [ "$shared_mode" -eq 1 ]; then
-      crt_libs="${CRT_SYSROOT}/lib/libc.so ${CRT_SYSROOT}/lib/libm.so ${CRT_SYSROOT}/lib/libdl.so ${CRT_SYSROOT}/lib/libc++.so"
+      crt_libs="${CRT_SYSROOT}/lib/libc.so ${CRT_SYSROOT}/lib/libm.so ${CRT_SYSROOT}/lib/libdl.so $cxx_runtime_lib"
       libs="$libs $crt_libs ${CRT_SYSROOT}/lib/libclang_rt.builtins.a"
     else
-      crt_libs="${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a ${CRT_SYSROOT}/lib/libc++.a"
+      crt_libs="${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a $cxx_runtime_lib"
       # __crt_run_init_array()/__crt_run_fini_array() (see
       # libc/src/arch/linux/common/init_fini_array.c): must be linked
       # directly into every executable, alongside crt1.o itself, so its
@@ -289,7 +325,7 @@ case "$target_os" in
     fi
     ;;
   windows)
-    libs="$libs ${CRT_SYSROOT}/lib/c.lib ${CRT_SYSROOT}/lib/m.lib ${CRT_SYSROOT}/lib/dl.lib ${CRT_SYSROOT}/lib/c++.lib ${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"
+    libs="$libs ${CRT_SYSROOT}/lib/c.lib ${CRT_SYSROOT}/lib/m.lib ${CRT_SYSROOT}/lib/dl.lib $cxx_runtime_lib ${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"
     if [ "$shared_mode" -eq 1 ]; then
       # crt1_pseudo_reloc.o/crt1_dwarf_safety_net.o: see the matching
       # comment in tools/crt-c++'s own shared_mode branch.
