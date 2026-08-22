@@ -374,6 +374,36 @@ Next work order:
      MSVC STL include root. Those routes were statically checked on macOS, but
      their real host GN/Ninja workflows still require execution before Skia is
      reported as cross-host verified.
+   - **A real Linux (e.g. WSL) attempt at this same Skia-GN-build item is
+     likely to reach the two open library-completeness gaps above (C++20
+     `<bit>`, `<cinttypes>`) with dramatically less toolchain-wiring pain
+     than the Windows pass took (2026-08-22).** Reviewed after the fact,
+     bug by bug: of the eight real bugs fixed to get Windows compiling,
+     every single one is either Windows-only (GN's `msvc_toolchain`
+     hardcoding `cl.exe`; clang's mingw-target `_WIN32` predefine
+     breaking `SK_ALWAYS_INLINE`; `CMAKE_SYSTEM_PROCESSOR`'s Windows-only
+     `AMD64`/`ARM64` spelling; the `gn.exe`-vs-`mksh.exe` PATH-format
+     conflict, which cannot even arise on Linux since both would already
+     agree on a `:`-separated `PATH`) or a *consequence* of Windows being
+     unable to exec a `#!/bin/sh` script directly (needing `crt-cc.cmd`/
+     `crt-c++.cmd` as native launchers at all; `mksh.exe`'s own 8.3-
+     short-path and `__crt_rootfs_bootstrap()` auto-`chdir("/")` bugs,
+     both only reachable because Windows has to route the compiler
+     wrapper through `mksh.exe` in the first place -- on Linux, GN's
+     `gcc_like_toolchain` execs the shebang script directly via the
+     host's own `/bin/sh`, with this project's own PAL/`mksh.exe` never
+     in that call chain at all). The two blocking gaps themselves (the
+     pinned libc++ commit predating C++20 `<bit>`, and this project's own
+     `<cinttypes>` missing declarations) are sysroot-content issues, not
+     host-OS-specific ones -- the same pinned commit and the same
+     `libc/include` tree get used regardless of which host built them, so
+     a Linux attempt would not skip past them, only reach them faster.
+     Caveat: this is a reasoned projection from the bugs actually found,
+     not a verified claim -- the real Linux GN/Ninja workflow has never
+     actually been executed for Skia (see the bullet just above), so an
+     as-yet-undiscovered Linux-specific issue remains possible. Worth
+     attempting before sinking more time into the Windows-only path
+     further, or before touching the libc++ commit pin.
    - **C++ runtime prerequisite (runtime smoke complete on all three hosts, both linkage modes):** each of
      `libstdc++/third_party/{libunwind,libcxxabi,libcxx}/recipe.json` declares
      its own source (git repo/ref, plus a sparse-checkout subpath for
