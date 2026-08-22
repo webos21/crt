@@ -110,6 +110,24 @@ def main():
     dest = Path(args.dest).resolve()
     ref = normalize_ref(args.version, args.ref)
     sparse_paths = sorted(args.sparse_path)
+    if args.sync_deps and sparse_paths and "tools" not in sparse_paths:
+        # tools/git-sync-deps is the script --sync-deps itself needs to
+        # run -- confirmed for real (2026-08-21) that combining a sparse
+        # checkout with --sync-deps otherwise fails with a confusing
+        # "Skia dependency sync script not found" (sync_deps() below
+        # raises SystemExit on a plain missing-file check, giving no hint
+        # that the real cause is the sparse-checkout's own directory
+        # list, not a broken clone). CRTGFX_SKIA_SPARSE_PATHS' own default
+        # (libcrtgfx/CMakeLists.txt) deliberately omits "tools" -- it is
+        # sized for the common case, CRTGFX_SKIA_SYNC_DEPS=OFF -- so this
+        # widens the *actual* sparse-checkout automatically the moment
+        # --sync-deps is requested (whether via a CRTGFX_SKIA_SYNC_DEPS=ON
+        # override or a direct fetch_skia.py --sync-deps invocation)
+        # instead of requiring the caller to separately remember to add
+        # "tools" to CRTGFX_SKIA_SPARSE_PATHS too. Sorted again so the
+        # manifest's own sparse_paths comparison below (an unrelated
+        # ordering-only check) still behaves deterministically.
+        sparse_paths = sorted(sparse_paths + ["tools"])
     manifest_path = dest / ".crt-skia-fetch.json"
 
     if dest.exists():
