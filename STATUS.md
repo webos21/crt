@@ -678,6 +678,24 @@ in those two win.
   rebuilding clean) was cleared. Full `cmake --build` + `ctest`
   (120/120) with the default config confirms no regression. See
   `HISTORY.md`'s dated entry for the full writeup.
+- **2026-08-22: a real WSL/Ubuntu-20.04 attempt confirmed the Skia GN
+  build reaches the same two library-completeness gaps on Linux with
+  zero toolchain-wiring fixes needed, then the `<inttypes.h>` gap was
+  fixed for real.** WSL's own stock git (2.25.1) made a routine
+  partial-clone fetch balloon to 3.6GB+ and fail (HTTP 502) instead of
+  the expected tens of MB -- fixed by upgrading to git 2.50.1 via
+  `ppa:git-core/ppa`, not a recipe bug. With that fixed, the base
+  project built clean (104/104 `ctest`) and Skia's GN build reached
+  real compilation with none of the eight Windows-specific fixes from
+  earlier the same day needed, landing on the exact two gaps predicted:
+  C++20 `<bit>` and `<inttypes.h>`'s missing `imaxdiv_t`/`imaxabs`/
+  `imaxdiv`/`wcstoimax`/`wcstoumax`. The second one was fixed directly
+  in this project's own `include/inttypes.h`/`libc/src/inttypes.c`
+  (confirmed independent of the libc++ pin question) -- verified via
+  120/120 (Windows) and 104/104 (Linux) `ctest`, plus a fresh Skia
+  rebuild whose failure surface shrank to exactly one object file
+  (`SkMathPriv.o`), tracing only to the still-open `<bit>` gap. See
+  `HISTORY.md`'s dated entry for the full writeup.
 - **2026-08-22: Skia's source pin/sparse-checkout moved into a real
   `libcrtgfx/third_party/skia/recipe.json`**, matching `libstdc++/
   third_party/*/recipe.json`'s own shape (adapted for GN/Ninja, no

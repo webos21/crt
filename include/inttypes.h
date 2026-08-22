@@ -1,6 +1,7 @@
 #ifndef CRT_INTTYPES_H
 #define CRT_INTTYPES_H
 
+#include <stddef.h> /* wchar_t, for wcstoimax/wcstoumax below */
 #include <stdint.h>
 
 /* The 64-bit/MAX-width and pointer-width length modifiers below depend on
@@ -82,12 +83,29 @@
 #define SCNxMAX CRT_PRI64_PREFIX "x"
 #define SCNxPTR CRT_PRIPTR_PREFIX "x"
 
+typedef struct {
+  intmax_t quot;
+  intmax_t rem;
+} imaxdiv_t;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 intmax_t strtoimax(const char* nptr, char** endptr, int base);
 uintmax_t strtoumax(const char* nptr, char** endptr, int base);
+
+/* Wide-character counterparts of strtoimax/strtoumax just above -- C99/
+ * POSIX both declare these in <inttypes.h>, not <wchar.h> (confirmed
+ * against real glibc/musl headers), even though the parameter type is
+ * wchar_t. Only <stddef.h> is pulled in above for wchar_t itself, not
+ * the full <wchar.h>, to avoid a heavier/circular include the way real
+ * libc headers do it. */
+intmax_t wcstoimax(const wchar_t* nptr, wchar_t** endptr, int base);
+uintmax_t wcstoumax(const wchar_t* nptr, wchar_t** endptr, int base);
+
+intmax_t imaxabs(intmax_t j);
+imaxdiv_t imaxdiv(intmax_t numer, intmax_t denom);
 
 #ifdef __cplusplus
 }

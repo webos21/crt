@@ -347,18 +347,61 @@ Next work order:
      that header's C++20 support entirely (its own `<bit>` has only the
      pre-existing internal `__popcount` helpers, no `_LIBCPP_STD_VER`
      gating or public entry points at all); separately, this project's
-     own libc `<cinttypes>`/`<inttypes.h>`/`<wchar.h>` do not declare
-     `imaxdiv_t`/`imaxabs`/`imaxdiv`/`wcstoimax`/`wcstoumax`, needed by
-     the imported libc++'s own `<cinttypes>` wrapper. Both are real,
-     separate library-completeness gaps (not GN/toolchain-wiring bugs
-     like the eight above), deliberately left open here rather than
-     patching Skia's own upstream source or reopening the already-
-     verified libc++ commit pin in the same pass -- picking either back
-     up is the direct next step for this item. The eight toolchain-wiring
-     fixes above are real and independently useful regardless (verified:
-     full default `ctest` suite still 120/120 with `CRTGFX_ENABLE_SKIA`
-     left OFF), so they were kept and committed even though the link
-     itself is still blocked.
+     own libc `<inttypes.h>` did not declare `imaxdiv_t`/`imaxabs`/
+     `imaxdiv`/`wcstoimax`/`wcstoumax`, needed by the imported libc++'s
+     own `<cinttypes>` wrapper. The eight toolchain-wiring fixes above
+     are real and independently useful regardless of either gap
+     (verified: full default `ctest` suite still 120/120 with
+     `CRTGFX_ENABLE_SKIA` left OFF), so they were kept and committed
+     even though the link itself was still blocked at the time.
+   - **`<inttypes.h>` gap fixed for real (2026-08-22)**: added
+     `imaxdiv_t`/`imaxabs()`/`imaxdiv()` (implemented directly in terms
+     of `intmax_t`'s own truncating division/modulo, not delegated to
+     `ldiv()`/`lldiv()`, since `intmax_t` is `long` on Linux/macOS but
+     `long long` on this project's Windows target -- confirmed via a
+     real compiler probe on both) and `wcstoimax()`/`wcstoumax()`
+     (thin wrappers over the already-existing `wcstoll()`/`wcstoull()`,
+     matching how `strtoimax()`/`strtoumax()` already wrapped
+     `strtoll()`/`strtoull()`) to `include/inttypes.h`/
+     `libc/src/inttypes.c`. This was a real, deliberate choice between
+     three options the user asked to have spelled out first: bump the
+     libc++ pin, patch a header in, or fix libc directly -- the
+     `<cinttypes>` gap turned out to be entirely independent of the
+     libc++ pin question (it is this project's *own* libc, not
+     anything libcxx ships), so it was fixed directly rather than
+     patched around, matching this project's own porting-loop
+     discipline (`AGENTS.md`). Verified via a second, real Linux build
+     attempt (WSL/Ubuntu 20.04, see the entry right below) that this
+     was the *only* other blocker Windows and Linux both hit: after
+     this fix, the Skia GN build's failure surface shrank to exactly
+     one object file (`SkMathPriv.o`), and every remaining error traces
+     to the still-open `<bit>` gap alone -- confirmed via direct log
+     inspection, not assumed. Zero regression: full default `ctest`
+     120/120 on both Windows and Linux/WSL.
+   - **A real WSL/Ubuntu-20.04 attempt confirmed the "Linux would reach**
+     **the same wall faster" projection above, and surfaced one genuinely**
+     **new, environment-specific finding along the way (2026-08-22).**
+     Skia's GN build reached real compilation with *zero* toolchain-
+     wiring fixes needed on Linux (26-31/544 steps, vs. needing all
+     eight Windows-specific fixes above just to get compilation
+     started) and landed on exactly the same two gaps predicted --
+     confirming the projection was correct, not just plausible. Along
+     the way: the WSL distro's own default git (2.25.1, Ubuntu 20.04's
+     stock `apt` version) made `tools/crt-libcxx-build.py`'s partial-
+     clone fetch of `libunwind` (sparse-checked-out from the full
+     `toolchain/llvm-project` monorepo) balloon to 3.6GB+ and eventually
+     fail with `HTTP 502`, instead of the "tens of MB" that same fetch
+     already reliably produces on Windows (`git 2.55.0`) -- an old
+     git's partial-clone (`--filter=blob:none`) negotiation against a
+     JGit/Gerrit backend is real evidence of being far less efficient
+     than a modern one for this exact kind of fetch, not a bug in this
+     project's own fetch logic. Fixed by upgrading WSL's git via the
+     official `ppa:git-core/ppa` to 2.50.1, after which the identical
+     fetch completed in seconds at the expected size. Worth checking
+     for on any *other* older-Linux-distro host this project's own
+     recipes get run against for the first time -- an unexpectedly slow
+     or oversized partial-clone fetch is a git-version question first,
+     before assuming a recipe-level bug.
    - The first exposed C++ gap, CRT-owned `operator new/delete`, is complete
      and covered by `cxx_allocation_test`. The remaining gate is a real
      project-owned libc++ standard-library import: the default Skia archive
@@ -374,36 +417,11 @@ Next work order:
      MSVC STL include root. Those routes were statically checked on macOS, but
      their real host GN/Ninja workflows still require execution before Skia is
      reported as cross-host verified.
-   - **A real Linux (e.g. WSL) attempt at this same Skia-GN-build item is
-     likely to reach the two open library-completeness gaps above (C++20
-     `<bit>`, `<cinttypes>`) with dramatically less toolchain-wiring pain
-     than the Windows pass took (2026-08-22).** Reviewed after the fact,
-     bug by bug: of the eight real bugs fixed to get Windows compiling,
-     every single one is either Windows-only (GN's `msvc_toolchain`
-     hardcoding `cl.exe`; clang's mingw-target `_WIN32` predefine
-     breaking `SK_ALWAYS_INLINE`; `CMAKE_SYSTEM_PROCESSOR`'s Windows-only
-     `AMD64`/`ARM64` spelling; the `gn.exe`-vs-`mksh.exe` PATH-format
-     conflict, which cannot even arise on Linux since both would already
-     agree on a `:`-separated `PATH`) or a *consequence* of Windows being
-     unable to exec a `#!/bin/sh` script directly (needing `crt-cc.cmd`/
-     `crt-c++.cmd` as native launchers at all; `mksh.exe`'s own 8.3-
-     short-path and `__crt_rootfs_bootstrap()` auto-`chdir("/")` bugs,
-     both only reachable because Windows has to route the compiler
-     wrapper through `mksh.exe` in the first place -- on Linux, GN's
-     `gcc_like_toolchain` execs the shebang script directly via the
-     host's own `/bin/sh`, with this project's own PAL/`mksh.exe` never
-     in that call chain at all). The two blocking gaps themselves (the
-     pinned libc++ commit predating C++20 `<bit>`, and this project's own
-     `<cinttypes>` missing declarations) are sysroot-content issues, not
-     host-OS-specific ones -- the same pinned commit and the same
-     `libc/include` tree get used regardless of which host built them, so
-     a Linux attempt would not skip past them, only reach them faster.
-     Caveat: this is a reasoned projection from the bugs actually found,
-     not a verified claim -- the real Linux GN/Ninja workflow has never
-     actually been executed for Skia (see the bullet just above), so an
-     as-yet-undiscovered Linux-specific issue remains possible. Worth
-     attempting before sinking more time into the Windows-only path
-     further, or before touching the libc++ commit pin.
+   - The Windows-vs-Linux-toolchain-wiring projection that used to be
+     recorded in this bullet was confirmed for real via an actual WSL
+     attempt -- see the dated bullet above ("A real WSL/Ubuntu-20.04
+     attempt confirmed...") for the verified result, and `HISTORY.md`'s
+     matching entry for the full writeup. No longer a projection.
    - **C++ runtime prerequisite (runtime smoke complete on all three hosts, both linkage modes):** each of
      `libstdc++/third_party/{libunwind,libcxxabi,libcxx}/recipe.json` declares
      its own source (git repo/ref, plus a sparse-checkout subpath for

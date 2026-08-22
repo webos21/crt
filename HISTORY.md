@@ -10,6 +10,114 @@ substantive update.
 
 ## 2026-08-22
 
+- **Verified via a real WSL/Ubuntu-20.04 attempt that a Linux build of the
+  Skia GN item reaches the same two library-completeness gaps Windows hit,
+  with zero toolchain-wiring fixes needed to get there -- then fixed one
+  of the two gaps for real (`<inttypes.h>`'s missing `imaxdiv_t`/
+  `imaxabs`/`imaxdiv`/`wcstoimax`/`wcstoumax`), verified clean on both
+  hosts.** Direct follow-up to the user's own question ("WSL로 리눅스
+  빌드 한번 시도해보자") after the Windows-only Skia toolchain-wiring
+  pass earlier this same day.
+
+  **WSL setup, and one real, environment-specific finding along the way.**
+  Cloned this repo fresh into WSL's own native filesystem (`~/crt`, not
+  the `/mnt/c/...` Windows mount) -- confirmed necessary for real: the
+  Windows-mounted copy has CRLF line endings (this machine's
+  `core.autocrlf=true`; the repository's own stored blobs are LF-only,
+  confirmed via `git show HEAD:tools/crt-cc`), which breaks every
+  `#!/bin/sh` shebang script's own interpreter line on Linux. Installed
+  `clang-18`/`libc++-18-dev`/`libc++abi-18-dev` (the user's own doing,
+  after `sudo` needing a password blocked doing it directly) to match
+  this project's own `CMAKE_CXX_FLAGS="-stdlib=libc++"` requirement on
+  Linux (`CMakeLists.txt`'s own comment: a stock Linux Clang defaults to
+  GNU libstdc++, not libc++, unlike Apple Clang). The base project (no
+  Skia) built and passed 104/104 `ctest` on the first real attempt, no
+  fixes needed at all.
+
+  Fetching `libstdc++/third_party/libunwind/recipe.json` (sparse-checked-
+  out from the full `toolchain/llvm-project` monorepo, `--filter=
+  blob:none --depth 1` before the sparse-checkout that's supposed to
+  narrow it) then ballooned to 3.6GB+ over many minutes before failing
+  outright with `error: RPC failed; HTTP 502`, instead of the "tens of
+  MB" that exact same fetch already reliably produces on Windows.
+  Root-caused to WSL/Ubuntu 20.04's own default `apt` git (`2.25.1`, a
+  2020-era release, versus this machine's own `git 2.55.0` on Windows) --
+  confirmed by isolating the variable: after the user upgraded WSL's git
+  to `2.50.1` via the official `ppa:git-core/ppa`, the identical fetch
+  (same recipe, same commit, same sparse paths) completed in seconds at
+  5.7MB. An old git's partial-clone (`--filter=blob:none`) negotiation
+  against a JGit/Gerrit backend (both `android.googlesource.com` and
+  `skia.googlesource.com` run this) is real, verified evidence of being
+  far less efficient than a modern git's for this exact kind of fetch --
+  not a bug in `tools/crt-libcxx-build.py`'s or `tools/fetch_skia.py`'s
+  own fetch logic, which already worked correctly once the git version
+  was current. Worth checking for on any other older-Linux-distro host
+  this project's recipes get run against for the first time.
+
+  **Skia GN build on Linux: zero toolchain-wiring fixes needed, landed on
+  the same two gaps Windows did.** With a working modern git, the full
+  imported-libc++ (`CRT_USE_IMPORTED_LIBCXX=ON`) build succeeded end to
+  end (104/104 `ctest`), and `crtgfx-skia-fetch`/`-build` ran cleanly
+  through `gn gen` and into real compilation at 26/544 ninja steps --
+  none of the eight Windows-specific fixes from earlier the same day
+  (GN toolchain hardcoding, `mksh.exe` launcher/PATH/cwd-bootstrap
+  issues, `--target-arch` spelling, the `SK_BUILD_FOR_WIN`/`__forceinline`
+  macro fix) were needed at all, confirming each one really was
+  Windows-specific or a consequence of Windows being unable to exec a
+  `#!/bin/sh` script directly. The build then hit exactly the two gaps
+  TODO.md's own dated entry already predicted from earlier that day:
+  `SkMathPriv.h`'s `std::countl_zero`/`countr_zero`/`popcount` (C++20
+  `<bit>`) and `<cinttypes>`'s `imaxdiv_t`/`imaxabs`/`imaxdiv`/
+  `wcstoimax`/`wcstoumax` -- verifying the earlier same-day projection
+  ("a Linux attempt would reach the same wall, just faster") for real
+  rather than leaving it as a reasoned guess.
+
+  **The `<inttypes.h>` gap, fixed for real.** Before fixing anything, the
+  user asked which of three possible approaches this actually was:
+  bumping the libc++ pin, patching a header in around the gap, or fixing
+  libc directly. Answered by investigating both gaps concretely first
+  (see the *separate* `<bit>` investigation, still open, in this same
+  day's other dated entry/TODO.md bullet) -- the `<cinttypes>` gap turned
+  out to be entirely independent of the libc++ pin question: it is this
+  project's *own* `include/inttypes.h`/`libc/src/inttypes.c` that were
+  missing real declarations, not anything libcxx itself ships, so it was
+  fixed directly rather than patched around, matching this project's own
+  porting-loop discipline (`AGENTS.md`). Added `imaxdiv_t`/`imaxabs()`/
+  `imaxdiv()` (implemented directly in terms of `intmax_t`'s own
+  truncating division/modulo -- C99-defined semantics, exactly matching
+  `div_t`/`ldiv_t`/`lldiv_t` -- rather than delegated to `ldiv()`/
+  `lldiv()`, since a real compiler probe confirmed `intmax_t` is `long`
+  on Linux/macOS but `long long` on this project's own
+  `--target=x86_64-w64-mingw32` Windows target, so guessing which one to
+  delegate to would have been wrong on one platform or the other) and
+  `wcstoimax()`/`wcstoumax()` (thin wrappers over the already-existing
+  `wcstoll()`/`wcstoull()`, matching how `strtoimax()`/`strtoumax()`
+  already wrapped `strtoll()`/`strtoull()` in the same file).
+  `include/inttypes.h` also gained an `#include <stddef.h>` (for
+  `wchar_t`, needed by the two new wide-character declarations --
+  confirmed real POSIX/glibc headers declare these in `<inttypes.h>`,
+  not `<wchar.h>`, despite the wide parameter type, and `<stddef.h>`
+  alone is enough rather than the full `<wchar.h>`, avoiding a heavier/
+  circular include).
+
+  Verified on both hosts, not just one: full default `ctest` still
+  120/120 on Windows and 104/104 on Linux/WSL after the fix (zero
+  regression), and a fresh Skia GN rebuild on WSL confirmed the fix
+  worked as intended -- the failure surface shrank to exactly one
+  object file (`SkMathPriv.o`), and every remaining compile error traces
+  to the still-open `<bit>` gap alone, confirmed via direct log
+  inspection rather than assumed. The `<bit>` gap itself (migrating
+  libcxx/libcxxabi's own recipe source from the stale, frozen `platform/
+  external/libcxx`/`libcxxabi` Android mirrors -- confirmed dead: its
+  `refs/heads/main` tip is the exact commit already pinned, and that
+  commit's own message is `"Empty merge ab/12770256 into aosp-main-
+  future"` -- to `toolchain/llvm-project`'s own actively-maintained
+  `libcxx`/`libcxxabi` subtrees, matching what `libunwind`'s recipe
+  already correctly does, and re-verifying/porting the existing
+  `_LIBCPP_MSVCRT_LIKE`-family patches against the different source
+  tree) remains open, deliberately deferred as a separate, larger
+  follow-up.
+
 - **Skia's source pin/sparse-checkout/local-patch record moved into a real
   `recipe.json` (`libcrtgfx/third_party/skia/recipe.json`), matching
   `libstdc++/third_party/{libcxx,libcxxabi,libunwind}/recipe.json`'s own
