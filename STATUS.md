@@ -678,3 +678,40 @@ in those two win.
   rebuilding clean) was cleared. Full `cmake --build` + `ctest`
   (120/120) with the default config confirms no regression. See
   `HISTORY.md`'s dated entry for the full writeup.
+- **2026-08-22: routed Skia's own GN build through the project-owned
+  imported libc++ instead of real MSVC STL, fixing eight distinct real
+  bugs; final link still blocked on two separate library-completeness
+  gaps.** Follow-up to the link gap above. Fixed, in order: GN's Windows
+  `msvc_toolchain` ignoring `cc`/`cxx` (bypassed via `target_os =
+  "linux"`, matching the existing macOS trick); `gcc_like_toolchain`
+  needing native-Windows compiler launchers (`crt-cc.cmd`/`crt-c++.cmd`
+  + `shutil.which()`-resolved `CRT_HOST_CC`/`CRT_HOST_CXX`); a
+  previously-undocumented PAL bug where `libc/src/env.c`'s
+  `__crt_rootfs_bootstrap()` auto-`chdir("/")`s any CRT-libc process
+  (`mksh.exe` included) whenever `CRT_ROOTFS` isn't already set,
+  discarding ninja's own working directory (fixed by pre-seeding
+  `CRT_ROOTFS`); mksh's `exec()` failing on any path containing a space
+  regardless of slash direction (fixed via 8.3 short-path conversion);
+  a real PATH-format conflict between `gn.exe` (needs real Windows
+  `PATH` for `python3`) and `mksh.exe` (needs `:`-separated POSIX `PATH`
+  by this project's own deliberate `MKSH_CRT_WINPATH` design, see
+  `shell/toybox/PATCHES.md`) both sharing one subprocess tree (fixed by
+  patching the fetched `.gn` dotfile's `script_executable` to an
+  absolute path instead, replacing the old PATH-shim approach);
+  `--target-arch` arriving as `AMD64`/`ARM64` (CMake spelling) instead
+  of the GNU-triple spelling `tools/crt-cc` needs (new
+  `normalize_target_arch()`); and clang's mingw target predefining
+  `_WIN32` regardless of GN's `target_os`, which broke `SK_ALWAYS_INLINE`
+  -> `__forceinline` (fixed via `-DSK_BUILD_FOR_UNIX`, extending the
+  same override macOS already had). With all eight fixed, real
+  compilation got underway for the first time (34/544 ninja steps, real
+  `.o` files) before hitting two genuine library-completeness gaps: the
+  pinned libc++ commit predates C++20 `<bit>` (`std::popcount`/
+  `countl_zero`/`countr_zero`, needed by `SkMathPriv.h`) entirely, and
+  this project's own libc `<cinttypes>` doesn't declare `imaxdiv_t`/
+  `imaxabs`/`wcstoimax`/`wcstoumax`. Both deliberately left open (user
+  chose to stop and document rather than risk the already-verified
+  libc++ commit pin) -- see `TODO.md`'s dated sub-bullet for the full
+  chain and `HISTORY.md`'s dated entry for the fuller per-bug writeup.
+  Full default `ctest` (120/120) with `CRTGFX_ENABLE_SKIA` left OFF
+  confirms zero regression from all eight fixes.

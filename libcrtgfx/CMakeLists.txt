@@ -149,6 +149,17 @@ if(Python3_Interpreter_FOUND)
   if(CRTGFX_SKIA_NINJA)
     list(APPEND CRTGFX_SKIA_BUILD_ARGS --ninja "${CRTGFX_SKIA_NINJA}")
   endif()
+  if(CRT_TARGET_OS STREQUAL "windows")
+    # tools/build_skia.py needs this to set CRT_MKSH_EXE for crt-cc.cmd/
+    # crt-c++.cmd -- see that file's own comment on why GN's own gcc_like
+    # toolchain (selected via target_os="linux" even for a real Windows
+    # build, also see that file's own comment) needs the .cmd wrappers
+    # rather than the bare #!/bin/sh scripts. Matches libstdc++/
+    # CMakeLists.txt's own CRT_LIBCXX_PLATFORM_ARGUMENTS --rootfs value
+    # exactly (the *rootfs* mksh.exe, not the sysroot's -- only the
+    # rootfs carries toybox's applet aliases these wrapper scripts call).
+    list(APPEND CRTGFX_SKIA_BUILD_ARGS --rootfs "${CMAKE_BINARY_DIR}/rootfs")
+  endif()
 
   add_custom_target(crtgfx-skia-fetch
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1

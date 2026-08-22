@@ -249,6 +249,98 @@ Next work order:
      default (matching its pre-existing default; the default `ctest` suite
      is unaffected either way since this target is only built when that
      option is explicitly turned on).
+   - **Follow-up investigation (2026-08-22): routed Skia's own GN build**
+     **through the project-owned imported libc++ instead of real MSVC STL**
+     (the architecturally-correct fix for the gap just above), and found +
+     fixed eight distinct real bugs getting there, in order: (1) sparse-
+     checkout's `--sync-deps` needing `tools/` too (already fixed, see
+     above); (2) GN's Windows `msvc_toolchain` template hardcodes
+     `cl.exe`/`clang-cl.exe` and ignores the top-level `cc`/`cxx` GN args
+     entirely -- fixed the same way this project's own macOS build already
+     does (`tools/build_skia.py`'s `default_gn_args()`), by setting GN's
+     `target_os = "linux"` even on a real Windows build, which selects the
+     generic `gcc_like_toolchain` (which does respect `cc`/`cxx`) and
+     Skia's own generic POSIX source set; (3) `crt-cc.cmd`/`crt-c++.cmd`
+     (needed because GN's `gcc_like_toolchain` invokes `cc`/`cxx` via
+     `subprocess.check_output(shell=True)` and a bare `{{cc}}` ninja
+     substitution, neither of which can launch `mksh.exe` as a separate
+     leading argument) plus `CRT_HOST_CC`/`CRT_HOST_CXX` resolved via
+     `shutil.which()`; (4) **a genuinely new PAL bug**: `libc/src/env.c`'s
+     `__crt_rootfs_bootstrap()` runs at every CRT-libc process's own
+     startup and, whenever `CRT_ROOTFS` is not already set, auto-detects
+     it from `argv[0]` (`mksh.exe` lives under `.../rootfs/system/bin/`)
+     and then unconditionally `chdir("/")`s -- discarding whatever real
+     cwd ninja launched it with, so every compile failed with "no such
+     file or directory" on its own GN-relative source path (e.g.
+     `../../modules/skcms/src/skcms_TransformHsw.cc`). Fixed by having
+     `tools/build_skia.py` pre-seed `CRT_ROOTFS` itself before `mksh.exe`
+     ever starts (its own `__crt_rootfs_bootstrap()` returns immediately
+     once `CRT_ROOTFS` is already set), matching what
+     `tools/crt-libcxx-build.py` already did for the same reason; (5)
+     mksh's own `exec()`/command-lookup cannot run a program whose path
+     contains a space, forward slashes or not (a stock Windows LLVM
+     install always lands under `"C:\Program Files\LLVM\..."`) -- fixed
+     by converting `CRT_HOST_CC`/`CRT_HOST_CXX` to their 8.3 short-path
+     form (`windows_short_path()`, duplicated from
+     `tools/crt-port-build.py`'s own helper of the same name); (6) a real
+     PATH-format conflict between `gn.exe` (a genuinely native tool that
+     needs a real, semicolon-delimited Windows `PATH` to find `python3`,
+     per Skia's own `.gn` dotfile) and `mksh.exe` (whose `MKSH_PATHSEPC`
+     stays `:` on this project's Windows build by deliberate design, see
+     `shell/toybox/PATCHES.md`'s own `MKSH_CRT_WINPATH` writeup -- a real,
+     backslash-form Windows directory cannot appear in mksh's PATH at all,
+     since mksh reads the drive letter's own `:` as a second separator)
+     -- both tools are invoked from the *same* `gn gen` subprocess tree
+     (GN's own `is_clang.py` compiler probe shells out through
+     `crt-cc.cmd` mid-`gn gen`), so no single PATH value could satisfy
+     both. Fixed by patching the fetched `.gn` dotfile's
+     `script_executable = "python3"` line to an absolute path
+     (`pin_gn_script_executable()`, replacing the previous PATH-shim
+     approach) so `gn.exe` no longer needs PATH for this at all, freeing
+     `PATH` to stay pure POSIX (`/system/bin:/bin:/usr/bin`) for `mksh.exe`.
+     Also fixed two more, unrelated bugs found along the way: (7)
+     `--target-arch` arrives from CMake in `CMAKE_SYSTEM_PROCESSOR`
+     spelling (`AMD64`/`ARM64`), which `tools/crt-cc`'s own
+     `--target=${target_arch}-w64-mingw32` construction needs in GNU-
+     triple spelling (`x86_64`/`aarch64`) -- fixed via a new
+     `normalize_target_arch()` (mirrors `tools/crt-libcxx-build.py`'s own
+     `detect_target_arch()`); (8) clang's own `--target=x86_64-w64-
+     mingw32` predefines `_WIN32`/`_WIN64`, which Skia's `SkFeatures.h`
+     reads as `SK_BUILD_FOR_WIN` regardless of what GN's `target_os` GN
+     arg says -- and `SK_ALWAYS_INLINE` (`SkAttributes.h`) expands to the
+     bare MSVC keyword `__forceinline` under `SK_BUILD_FOR_WIN`, which
+     this project's mingw-target (non-`clang-cl`) invocation does not
+     recognize at all (`error: unknown type name '__forceinline'`).
+     Fixed by explicitly defining `-DSK_BUILD_FOR_UNIX` for the Windows
+     branch too (`SkFeatures.h`'s own auto-detection is a single `#if
+     !defined(SK_BUILD_FOR_*)` guard around the whole block, so defining
+     any one of them up front skips the rest) -- internally consistent
+     either way, since GN's `target_os = "linux"` already selects Skia's
+     generic POSIX *source files* (e.g. `SkOSFile_posix.cpp`, not the
+     real Win32 `SkOSFile_win.cpp`); this exact override already existed
+     for macOS (which hits the identical problem via `__APPLE__`), just
+     hadn't been extended to the Windows branch yet. With all eight
+     fixed, Skia's own GN build got real compilation underway (34/544
+     ninja steps reached, real `.o` files produced) before hitting a
+     *different* class of problem,
+     genuine library-completeness gaps rather than toolchain wiring:
+     Skia's `SkMathPriv.h` needs C++20 `<bit>` (`std::countl_zero`/
+     `countr_zero`/`popcount`), but the pinned libc++ commit predates
+     that header's C++20 support entirely (its own `<bit>` has only the
+     pre-existing internal `__popcount` helpers, no `_LIBCPP_STD_VER`
+     gating or public entry points at all); separately, this project's
+     own libc `<cinttypes>`/`<inttypes.h>`/`<wchar.h>` do not declare
+     `imaxdiv_t`/`imaxabs`/`imaxdiv`/`wcstoimax`/`wcstoumax`, needed by
+     the imported libc++'s own `<cinttypes>` wrapper. Both are real,
+     separate library-completeness gaps (not GN/toolchain-wiring bugs
+     like the eight above), deliberately left open here rather than
+     patching Skia's own upstream source or reopening the already-
+     verified libc++ commit pin in the same pass -- picking either back
+     up is the direct next step for this item. The eight toolchain-wiring
+     fixes above are real and independently useful regardless (verified:
+     full default `ctest` suite still 120/120 with `CRTGFX_ENABLE_SKIA`
+     left OFF), so they were kept and committed even though the link
+     itself is still blocked.
    - The first exposed C++ gap, CRT-owned `operator new/delete`, is complete
      and covered by `cxx_allocation_test`. The remaining gate is a real
      project-owned libc++ standard-library import: the default Skia archive

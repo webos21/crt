@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 
@@ -13,35 +13,119 @@ def run(args, cwd=None, env=None):
     subprocess.run(args, cwd=cwd, env=env, check=True)
 
 
-def ensure_python3_shim(env, host_python):
+def pin_gn_script_executable(source, host_python):
     """Skia's own .gn dotfile hardcodes `script_executable = "python3"` --
-    a real, unconditional upstream requirement `gn gen` needs to resolve
-    on PATH, independent of anything this project's own build controls.
-    Most Linux/macOS Python installs already provide a "python3"-named
-    executable by distro/package-manager convention; a stock Windows
-    Python install typically does not (only "python.exe"). Confirmed for
-    real: `gn gen` fails outright with `ERROR Could not find "python3"
-    from dotfile in PATH` without this on Windows.
+    a real, unconditional upstream requirement `gn gen` needs to resolve,
+    normally via a real, native-Windows-format PATH search (this is GN's
+    own internal exec logic, not this project's PAL -- it never goes
+    through mksh.exe at all). Most Linux/macOS Python installs already
+    provide a "python3"-named executable by distro/package-manager
+    convention; a stock Windows Python install typically does not (only
+    "python.exe"). Confirmed for real: `gn gen` fails outright with
+    `ERROR Could not find "python3" from dotfile in PATH` without some
+    fix on Windows.
 
-    A tiny, project-owned .bat shim (not a copy of the whole interpreter)
-    resolves it without touching any real system PATH -- prepended only
-    to this subprocess's own env, matching this project's "wrap what's
-    needed, don't require host changes" discipline already used
-    throughout tools/crt-cc and friends. .bat rather than .exe: Windows'
-    own PATHEXT-based bare-name resolution (which is exactly how `gn`
-    itself, and CreateProcess more generally, looks up "python3" with no
-    extension) tries .BAT/.CMD the same way it tries .EXE, so a batch
-    shim works identically here without needing to copy python.exe's own
-    multi-MB binary into a throwaway temp directory on every build.
+    This used to be solved with a prepended-to-PATH .bat shim, but that
+    directly conflicts with a *separate*, unrelated requirement on the
+    exact same env["PATH"] value: gn gen's own is_clang.py compiler probe
+    (gn/BUILDCONFIG.gn's exec_script("//gn/is_clang.py", ...)) shells out
+    to crt-cc.cmd, which launches mksh.exe -- and mksh.exe needs PATH to
+    stay this project's own deliberate ":"-separated, rootfs-relative
+    POSIX form ("/system/bin:/bin:/usr/bin", see shell/toybox/PATCHES.md's
+    own MKSH_CRT_WINPATH writeup for why MKSH_PATHSEPC is ':' and stays
+    that way on this project's Windows build). Confirmed for real
+    (2026-08-22): prepending a real, backslash-form Windows directory to
+    that POSIX PATH still broke mksh's *own* internal PATH search (mksh
+    splits PATH on ':' only, so a Windows drive-letter entry like
+    "C:\\...\\rootfs\\system\\bin" gets misread as two garbage entries,
+    "C" and "\\...\\rootfs\\system\\bin" -- there is no format that
+    satisfies both a real Windows PATH search and mksh's POSIX one at the
+    same time).
+
+    Patching the fetched .gn dotfile's own `script_executable` value to
+    an absolute path instead sidesteps the conflict entirely: GN execs
+    that value directly with no PATH search of any kind, so PATH is free
+    to stay purely POSIX-style for mksh's sake. Idempotent (checks the
+    current content first) so a re-run against an already-patched fetch
+    is a no-op.
     """
+    dotfile = source / ".gn"
+    text = dotfile.read_text(encoding="utf-8")
+    pinned = f'script_executable = "{Path(host_python).as_posix()}"'
+    if pinned in text:
+        return
+    patched, count = re.subn(r'^script_executable\s*=.*$', pinned, text, count=1, flags=re.MULTILINE)
+    if count != 1:
+        raise SystemExit(f'{dotfile}: could not find a `script_executable = ...` line to patch')
+    dotfile.write_text(patched, encoding="utf-8")
+
+
+def windows_short_path(path):
+    """Convert an absolute Windows path to its 8.3 short-name form.
+
+    mksh's own exec()/command-lookup genuinely cannot run a program whose
+    path contains a space, forward slashes or not -- confirmed for real
+    (2026-08-22) by isolating to a two-line repro run directly via
+    mksh.exe: `"/c/Program Files/LLVM/bin/clang++" --version` failed
+    "inaccessible or not found" even though the file exists and the path
+    already uses forward slashes (so this is not the separate, already-
+    documented "mksh needs forward slashes, not backslashes" gotcha --
+    see tools/crt-libcxx-build.py's own comments for that one). A stock
+    Windows LLVM install always lands under "C:\\Program Files\\LLVM\\...",
+    so CRT_HOST_CC/CRT_HOST_CXX need the short-path form to be usable at
+    all. Exactly matches tools/crt-port-build.py's own windows_short_path()
+    (same GetShortPathNameW win32 call), duplicated here rather than
+    imported since none of this project's own tools/*.py scripts share a
+    common helper module today."""
     if os.name != "nt":
-        return
-    if shutil.which("python3", path=env.get("PATH")):
-        return
-    shim_dir = Path(tempfile.mkdtemp(prefix="crt-skia-python3-shim-"))
-    shim_path = shim_dir / "python3.bat"
-    shim_path.write_text(f'@echo off\r\n"{host_python}" %*\r\n', encoding="utf-8")
-    env["PATH"] = str(shim_dir) + os.pathsep + env.get("PATH", "")
+        return str(path)
+    import ctypes
+
+    value = str(path)
+    get_short_path_name_w = ctypes.windll.kernel32.GetShortPathNameW
+    needed = get_short_path_name_w(value, None, 0)
+    if needed == 0:
+        return value
+    buffer = ctypes.create_unicode_buffer(needed)
+    if get_short_path_name_w(value, buffer, needed) == 0:
+        return value
+    return buffer.value
+
+
+def normalize_target_arch(target_arch_arg):
+    """Resolves an explicit --target-arch to "aarch64" or "x86_64" --
+    same normalization tools/crt-libcxx-build.py's own
+    detect_target_arch() already applies, needed here for the identical
+    reason: libcrtgfx/CMakeLists.txt passes CRTGFX_SKIA_BUILD_ARGS'
+    --target-arch straight from a CMake variable (CMAKE_SYSTEM_PROCESSOR-
+    shaped, e.g. Windows' own "AMD64"/"ARM64" spelling), not the GNU-
+    triple spelling ("x86_64"/"aarch64") tools/crt-cc's own
+    `--target=${target_arch}-w64-mingw32` construction requires.
+    Confirmed for real (2026-08-22): left unnormalized, CRT_TARGET_ARCH
+    ended up literally "AMD64", producing `--target=AMD64-w64-mingw32`
+    -- not a real clang triple -- which surfaced as `clang++: error:
+    unsupported option '-mavx2' for target 'AMD64-w64-mingw32'` (and,
+    for TUs that don't pass any -m flags at all, the blunter `error:
+    unknown target triple 'AMD64-w64-windows-gnu'`). The case-insensitive
+    match here also covers default_gn_args()'s own target_cpu selection,
+    which previously silently matched neither of its lowercase-only
+    ("aarch64"/"arm64" or "x86_64"/"amd64"/"x64") branches for "AMD64"
+    and fell back on GN's own host-arch autodetection -- happened to
+    still be correct on this x86_64 dev machine, but not guaranteed in
+    general. "host" is passed through unchanged: it is main()'s own
+    sentinel for "no explicit arch, let CRT_TARGET_ARCH stay unset and
+    tools/crt-cc/tools/crt-c++ fall back to platform detection"."""
+    if target_arch_arg == "host":
+        return target_arch_arg
+    arch = target_arch_arg.lower()
+    if arch in ("aarch64", "arm64"):
+        return "aarch64"
+    if arch in ("x86_64", "amd64", "x64"):
+        return "x86_64"
+    raise SystemExit(
+        f"build_skia.py: unrecognized --target-arch {target_arch_arg!r} "
+        "(expected aarch64/arm64 or x86_64/amd64/x64, or \"host\")"
+    )
 
 
 def gn_string(value):
@@ -53,39 +137,72 @@ def gn_list(values):
     return "[" + ", ".join(gn_string(value) for value in values) + "]"
 
 
-def detect_cxx_standard_include_dirs(cxx):
-    probe = subprocess.run(
-        [cxx, "-x", "c++", "-E", "-v", "-"],
-        input="",
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    search = probe.stderr.splitlines()
-    include_dirs = []
-    in_search_list = False
-    for line in search:
-        if line.strip() == "#include <...> search starts here:":
-            in_search_list = True
-            continue
-        if in_search_list and line.strip() == "End of search list.":
-            break
-        if not in_search_list:
-            continue
-        candidate = line.strip()
-        normalized = candidate.replace("\\", "/").lower()
-        is_libcxx = "include/c++" in normalized or normalized.endswith("/c++/v1")
-        is_msvc_stl = "/vc/tools/msvc/" in normalized and normalized.endswith("/include")
-        if not is_libcxx and not is_msvc_stl:
-            continue
-        if Path(candidate).is_dir():
-            include_dirs.append(candidate)
-    return include_dirs
+# REMOVED (2026-08-21): this file used to probe the host compiler
+# (`clang++ -x c++ -E -v -`) for its own default C++ standard-library
+# include directories and inject whichever it found -- real libc++'s own
+# /c++/v1 *or* real MSVC's own VC/Tools/MSVC/.../include -- into every
+# Skia compile via extra_cflags_cc, on the theory that Skia genuinely
+# needs a real <vector>/<string>/etc. implementation from somewhere and
+# this project had not yet imported its own. Confirmed for real
+# (2026-08-21) that this was the root cause of a genuine, previously-
+# undiscovered Windows link failure: `crtgfx_skia_raster_smoke.exe`
+# failed with a long list of `lld-link: error: duplicate symbol`
+# (printf, fprintf, snprintf, fabsf, fabsl, frexpl, wmemcpy, wmemset,
+# wmemcmp, plus a silently auto-linked libcpmt.lib) between this
+# project's own c.lib/m.lib and objects (libskia.a's own members, and a
+# transitively-auto-linked real MSVC C++ runtime library) that carry
+# their own copies of the same symbols -- because probing found real
+# MSVC's own STL/UCRT headers on Windows (no imported libc++ existed at
+# the time this file was first written) and Skia's own compiled code
+# materialized real UCRT inline printf/wmemcpy/etc. as strong symbols,
+# which then collided with this project's own freestanding libc/libm the
+# moment both got linked into one final executable. No per-symbol
+# suppression macro exists for most of these (`_NO_CRT_STDIO_INLINE`
+# covers only the stdio ones; wmemcpy/fabsl/frexpl/the libcpmt.lib
+# auto-link have no equivalent escape hatch at all), so patching around
+# each individual collision was not a real fix.
+#
+# The project-owned imported libc++ (CRT_USE_IMPORTED_LIBCXX, verified
+# working end to end -- static and shared, all three hosts -- earlier
+# this same day) already exists specifically to replace this kind of
+# "borrow the host's C++ standard library" fallback, matching this
+# project's own "own the toolchain, never substitute a host-provided
+# runtime" principle already applied everywhere else (see libcrtgfx/
+# CMakeLists.txt's own comment: "never make ordinary CRT workflows
+# depend on a host libc++ as a hidden substitute"). tools/crt-c++ (which
+# Skia's own GN build already calls as its `cc`/`cxx`) already knows how
+# to wire up the imported libc++ correctly on its own -- unconditional
+# -nostdinc++, CRT_CXX_STANDARD_INCLUDE_FLAGS read directly from the
+# environment, _LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS automatically
+# applied for the default static-linkage case -- confirmed by exactly
+# matching tools/test_libcxx_runtime.py's own already-verified
+# CRT_CXX_STANDARD_INCLUDE_FLAGS=f"-isystem{sysroot/'include'/'c++'/'v1'}"
+# setup below, instead of reinventing include-path detection here.
 
 
-def default_gn_args(root, sysroot, target_os, target_arch, cxx_include_flags):
-    crt_cc = root / "tools" / "crt-cc"
-    crt_cxx = root / "tools" / "crt-c++"
+def default_gn_args(root, sysroot, target_os, target_arch):
+    # .cmd wrappers on Windows: tools/crt-cc/tools/crt-c++ are #!/bin/sh
+    # scripts CreateProcess cannot run directly, and (unlike this
+    # project's own CMake integration, which launches them via mksh.exe
+    # as a compiler-launcher argument) GN's own generic gcc_like_
+    # toolchain() invokes `cc`/`cxx` via a plain `subprocess.check_output
+    # (..., shell=True)` probe (gn/is_clang.py) and later a bare {{cc}}
+    # substitution in each compile rule's own command string -- neither
+    # form can pass mksh.exe as a separate leading argument the way CMake's
+    # own CMAKE_C_COMPILER_ARG1-avoiding trick does. Confirmed for real:
+    # `is_clang.py` failed with `crt-cc --version` exiting 1 (cmd.exe
+    # trying to execute a shebang script directly) the first time Skia's
+    # GN build was actually routed through tools/crt-cc/tools/crt-c++ at
+    # all (see the target_os="linux" comment below for why that took
+    # this long to even reach this point). crt-cc.cmd/crt-c++.cmd already
+    # exist for exactly this reason (built for tools/crt-libcxx-build.py's
+    # own CMake integration) -- reused here rather than inventing a
+    # second wrapper mechanism. CRT_MKSH_EXE (which these .cmd files need
+    # set, see their own comments) is set in main() below, matching
+    # tools/crt-libcxx-build.py's own common_cmake_args()/rootfs handling.
+    cmd_suffix = ".cmd" if target_os == "windows" else ""
+    crt_cc = root / "tools" / f"crt-cc{cmd_suffix}"
+    crt_cxx = root / "tools" / f"crt-c++{cmd_suffix}"
     crt_ar = root / "tools" / ("crt-ar.cmd" if target_os == "windows" else "crt-ar")
 
     args = {
@@ -138,21 +255,82 @@ def default_gn_args(root, sysroot, target_os, target_arch, cxx_include_flags):
         "ar": gn_string(str(crt_ar)),
         "extra_cflags": gn_list(
             [f"-isystem{sysroot / 'include'}"] +
-            (["-DSK_BUILD_FOR_UNIX"] if target_os == "macos" else [])
+            # SK_BUILD_FOR_UNIX here overrides Skia's own include/private/
+            # base/SkFeatures.h auto-detection (an #if !defined(SK_BUILD_
+            # FOR_*) guard around the whole block, so defining any one of
+            # them up front skips the rest entirely) -- needed on both
+            # platforms that use the target_os="linux" GN toolchain-
+            # selection trick (see this function's own target_os comment
+            # below), since each one's *compiler* still predefines its own
+            # real-platform macro regardless of what GN's target_os says.
+            # macOS's own real clang defines __APPLE__, which SkFeatures.h
+            # would otherwise turn into SK_BUILD_FOR_MAC (its catch-all
+            # #else, since TARGET_OS_IPHONE is false) -- already handled
+            # here before this comment existed. Windows needs the exact
+            # same override for a different reason: clang's mingw target
+            # (--target=x86_64-w64-mingw32, see tools/crt-cc's own
+            # comment) predefines _WIN32/_WIN64, which SkFeatures.h reads
+            # as SK_BUILD_FOR_WIN -- and SK_ALWAYS_INLINE (include/
+            # private/base/SkAttributes.h) expands to the bare MSVC
+            # keyword `__forceinline` under SK_BUILD_FOR_WIN, which this
+            # project's own mingw-target clang invocation (real MSVC
+            # compatibility mode, i.e. clang-cl, is never used here)
+            # does not recognize at all. Confirmed for real (2026-08-22):
+            # `error: unknown type name '__forceinline'` in SkAssert.h,
+            # the very first SK_ALWAYS_INLINE use reached. SK_BUILD_FOR_
+            # UNIX is the internally consistent choice either way: GN's
+            # own target_os="linux" selection already picked Skia's
+            # generic POSIX *source files* (e.g. src/ports/SkOSFile_
+            # posix.cpp, not the real Win32 SkOSFile_win.cpp) for both
+            # platforms, so the preprocessor macro should agree.
+            (["-DSK_BUILD_FOR_UNIX"] if target_os in ("macos", "windows") else [])
         ),
-        "extra_cflags_cc": gn_list(cxx_include_flags + ["-fno-exceptions", "-fno-rtti"]),
+        # -fno-exceptions/-fno-rtti here are Skia's own genuine preference
+        # (matches CRTGFX_SKIA's own "no fake Skia headers, no exceptions
+        # in the CPU-raster core" scope) -- redundant with, not a
+        # replacement for, tools/crt-c++'s own default of the same two
+        # flags whenever CRT_CXX_ENABLE_EXCEPTIONS/CRT_CXX_ENABLE_RTTI
+        # are left unset (see that file's own comment). No C++ standard-
+        # library include path is injected here at all any more -- see
+        # this file's own top-of-function comment for why that used to
+        # be here and why it was actively wrong; tools/crt-c++ (Skia's
+        # own `cc`/`cxx`) already wires up the imported libc++ correctly
+        # by itself, reading CRT_CXX_STANDARD_INCLUDE_FLAGS from the
+        # environment (set in main() below).
+        "extra_cflags_cc": gn_list(["-fno-exceptions", "-fno-rtti"]),
         "extra_ldflags": gn_list([f"-L{sysroot / 'lib'}"]),
     }
 
-    if not cxx_include_flags:
-        print(
-            "warning: no C++ standard include directory was detected; "
-            "Skia may fail on <cstddef>/<utility>/...",
-            file=sys.stderr,
-        )
-
     if target_os == "windows":
-        args["target_os"] = gn_string("win")
+        # target_os = "win" (NOT used here, deliberately) makes Skia's own
+        # gn/BUILDCONFIG.gn call set_default_toolchain("//gn/toolchain:
+        # msvc") -- a GN toolchain template (gn/toolchain/BUILD.gn's own
+        # msvc_toolchain()) that is hardcoded to real cl.exe (or
+        # clang-cl.exe if clang_win is set) and completely IGNORES the
+        # top-level cc/cxx args this file sets above, unlike the generic
+        # gcc_like_toolchain() template selected for every other target_os
+        # value (BUILDCONFIG.gn's own if/else: target_os == "win" ->
+        # :msvc, everything else -> :gcc_like, and gcc_like_toolchain()
+        # genuinely does `cc = invoker.cc` / `cxx = invoker.cxx`).
+        # Confirmed for real (2026-08-21): even after fixing this file's
+        # own CRT_CXX_STANDARD_INCLUDE_FLAGS/extra_cflags_cc (see the
+        # removed-detect_cxx_standard_include_dirs() comment above), a
+        # fully clean rebuild still linked real MSVC UCRT symbols into
+        # libskia.a -- traced to `cl : warning D9002: unknown option
+        # '-isystem...' ignored` in the build log, meaning real cl.exe
+        # was compiling Skia the entire time, never tools/crt-c++ at all.
+        # Same fix already established for macOS just below (see that
+        # branch's own comment): select "linux" so Skia's own GN build
+        # takes the generic POSIX/gcc-like source and toolchain path,
+        # while the wrapper compiler (tools/crt-c++, itself already
+        # handling the real --target=x86_64-w64-mingw32 selection
+        # regardless of what GN's own target_os string says) still emits
+        # a genuine Windows binary. This also means src/ports/SkFontHost_
+        # win.cpp (real Win32 GDI/DirectWrite code, confirmed compiling
+        # before this fix) is no longer selected either -- consistent
+        # with skia_enable_fontmgr_custom_empty=true already requesting
+        # the empty/stub font manager, not a real platform one.
+        args["target_os"] = gn_string("linux")
         if target_arch in ("aarch64", "arm64"):
             args["target_cpu"] = gn_string("arm64")
         elif target_arch in ("x86_64", "amd64", "x64"):
@@ -213,6 +391,7 @@ def main():
     parser.add_argument("--build-dir", required=True, help="Skia GN output directory")
     parser.add_argument("--install-prefix", required=True, help="Skia install prefix used by libcrtgfx")
     parser.add_argument("--sysroot", required=True, help="CRT sysroot")
+    parser.add_argument("--rootfs", default="", help="CRT rootfs (Windows only, for mksh.exe)")
     parser.add_argument("--target-os", required=True, choices=["linux", "macos", "windows"])
     parser.add_argument("--target-arch", default="host")
     parser.add_argument("--gn", default="", help="path to gn; defaults to Skia bin/gn or PATH")
@@ -220,6 +399,7 @@ def main():
     parser.add_argument("--gn-arg", action="append", default=[], help="extra raw GN arg line")
     parser.add_argument("--configure-only", action="store_true")
     args = parser.parse_args()
+    args.target_arch = normalize_target_arch(args.target_arch)
 
     root = Path(args.root).resolve()
     source = Path(args.source).resolve()
@@ -249,21 +429,115 @@ def main():
     env = os.environ.copy()
     env["CRT_SYSROOT"] = str(sysroot)
     env["CRT_TARGET_OS"] = args.target_os
-    ensure_python3_shim(env, sys.executable)
+    pin_gn_script_executable(source, sys.executable)
     if args.target_os == "windows":
         # crt-ar.cmd needs the same interpreter CMake used to launch this
         # driver; relying on the optional py launcher would make a configured
         # Python installation look like a missing archiver.
         env["CRT_HOST_PYTHON"] = sys.executable
+        # crt-cc.cmd/crt-c++.cmd (see default_gn_args()'s own comment on
+        # why GN needs these .cmd wrappers rather than the bare scripts)
+        # need CRT_MKSH_EXE set to the *rootfs* copy of mksh.exe, not the
+        # sysroot's -- only the rootfs has toybox's applet aliases
+        # actually installed (system/bin/printf and friends), which
+        # tools/crt-cc/tools/crt-c++ themselves call. Exactly matches
+        # tools/crt-libcxx-build.py's own common_cmake_args() handling.
+        if not args.rootfs:
+            raise SystemExit("--rootfs is required on Windows (its mksh.exe launches crt-cc.cmd/crt-c++.cmd)")
+        mksh = Path(args.rootfs).resolve() / "system" / "bin" / "mksh.exe"
+        if not mksh.is_file():
+            raise SystemExit(f"CRT mksh is missing from the rootfs: {mksh} (build the \"rootfs\" target first)")
+        env["CRT_MKSH_EXE"] = str(mksh)
+        # Pre-seed CRT_ROOTFS (and the matching POSIX-shaped PATH) before
+        # mksh.exe ever starts, exactly matching tools/crt-libcxx-build.py's
+        # own common_cmake_args() handling. This is not just about PATH
+        # resolution: libc/src/env.c's own __crt_rootfs_bootstrap() runs
+        # unconditionally at process startup and, whenever CRT_ROOTFS is
+        # *not already set*, auto-detects it from argv[0] (mksh.exe lives
+        # under .../rootfs/system/bin/) and then unconditionally
+        # `chdir("/")`s -- discarding whatever real cwd ninja launched it
+        # with. Confirmed for real (2026-08-22) by isolating to a two-line
+        # repro run directly via mksh.exe: `pwd` reported "/" even though
+        # mksh.exe was launched with cwd already set to the Skia GN output
+        # directory, and every ninja-driven compile failed with "no such
+        # file or directory" on its own GN-relative source path (e.g.
+        # "../../modules/skcms/src/skcms_TransformHsw.cc") as a direct
+        # result. Setting CRT_ROOTFS here ahead of time makes
+        # __crt_rootfs_bootstrap() return immediately (its own first check
+        # is `if (getenv("CRT_ROOTFS") != 0) return;`), so mksh.exe keeps
+        # the real, correct cwd ninja gave it.
+        env["CRT_ROOTFS"] = str(Path(args.rootfs).resolve())
+        # A flat POSIX-style replacement, matching tools/crt-libcxx-build.
+        # py's own common_cmake_args() exactly. This project's own
+        # Windows mksh build keeps MKSH_PATHSEPC as ':' (a deliberate
+        # choice -- see shell/toybox/PATCHES.md's own MKSH_CRT_WINPATH
+        # writeup), so PATH has to stay pure POSIX/rootfs-relative for
+        # mksh's own internal command search to work *at all*: a mixed
+        # or real-Windows-style entry doesn't just fail to resolve, it
+        # actively breaks mksh's ':'-delimited PATH parsing (a real,
+        # backslash-form Windows directory contains its own ':' after
+        # the drive letter, so mksh reads it as two garbage entries).
+        # Confirmed for real (2026-08-22): even a real-Windows-format
+        # entry pointing *directly* at the rootfs bin dir containing
+        # printf.exe still failed "printf: inaccessible or not found"
+        # from inside mksh.
+        #
+        # gn.exe's own separate, real-Windows-PATH-based "python3" lookup
+        # (needed for the "gn gen" call below) no longer depends on PATH
+        # content at all -- see pin_gn_script_executable()'s own comment,
+        # called earlier in main() before this env is even built.
+        env["PATH"] = "/system/bin:/bin:/usr/bin"
+        # tools/crt-cc/tools/crt-c++ fall back to a bare "clang"/"clang++"
+        # (resolved via mksh's own $PATH search) whenever CRT_HOST_CC/
+        # CRT_HOST_CXX are unset -- but mksh's own PATH inside these
+        # scripts is POSIX-rooted (/system/bin:/bin:/usr/bin, set inside
+        # the scripts themselves for other reasons), which has no real
+        # host compiler on it at all. Confirmed for real: `gn gen` failed
+        # with `crt-cc: clang: inaccessible or not found` (exit 127) the
+        # first time GN's own is_clang.py actually reached crt-cc.cmd at
+        # all -- the exact same gap tools/test_libcxx_runtime.py's own
+        # comment already documents and tools/crt-libcxx-build.py's own
+        # common_cmake_args() already works around, resolved via
+        # shutil.which() (using *this* process's own, unrestricted PATH)
+        # and exported as a forward-slash path (mksh's own script-loading
+        # and exec() path lookup both misread a bare backslash path as a
+        # command name to search PATH for, not a file to open). That
+        # forward-slash form alone is still not enough, though: mksh
+        # cannot exec *any* path containing a space regardless of slash
+        # direction (confirmed for real -- see windows_short_path()'s own
+        # comment), and a stock Windows LLVM install always lands under
+        # "C:\Program Files\LLVM\...". Convert to the 8.3 short-path form
+        # first, exactly matching tools/crt-port-build.py's own
+        # find_windows_host_tool()/native_windows_tool_command() handling
+        # of this identical problem.
+        host_cc = shutil.which("clang")
+        host_cxx = shutil.which("clang++")
+        if host_cc:
+            env["CRT_HOST_CC"] = windows_short_path(host_cc).replace("\\", "/")
+        if host_cxx:
+            env["CRT_HOST_CXX"] = windows_short_path(host_cxx).replace("\\", "/")
     if args.target_arch != "host":
         env["CRT_TARGET_ARCH"] = args.target_arch
 
-    host_cxx = os.environ.get("CRT_HOST_CXX") or shutil.which("clang++") or "clang++"
-    cxx_include_flags = [f"-isystem{path}" for path in detect_cxx_standard_include_dirs(host_cxx)]
-    if cxx_include_flags:
-        env["CRT_CXX_STANDARD_INCLUDE_FLAGS"] = " ".join(cxx_include_flags)
+    # The project-owned imported libc++ (CRT_USE_IMPORTED_LIBCXX) is a
+    # hard requirement, matching libcrtgfx/CMakeLists.txt's own already-
+    # documented policy ("never make ordinary CRT workflows depend on a
+    # host libc++ as a hidden substitute") -- see this file's own
+    # removed-detect_cxx_standard_include_dirs() comment above for the
+    # real failure this replaces. Exactly matches tools/test_libcxx_
+    # runtime.py's own already-verified setup, not reinvented here.
+    libcxx_headers = sysroot / "include" / "c++" / "v1"
+    if not libcxx_headers.is_dir():
+        raise SystemExit(
+            f"CRT_USE_IMPORTED_LIBCXX headers not found: {libcxx_headers}\n"
+            "Build libc++ first (crt-libcxx-build, or reconfigure with "
+            "-DCRT_USE_IMPORTED_LIBCXX=ON and build crt-libcxx-sysroot) -- "
+            "Skia's own C++ code needs a real project-owned <vector>/"
+            "<string>/... implementation, never a host libc++ substitute."
+        )
+    env["CRT_CXX_STANDARD_INCLUDE_FLAGS"] = f"-isystem{libcxx_headers}"
 
-    gn_args = default_gn_args(root, sysroot, args.target_os, args.target_arch, cxx_include_flags)
+    gn_args = default_gn_args(root, sysroot, args.target_os, args.target_arch)
     args_gn = build_dir / "args.gn"
     write_args_file(args_gn, gn_args, args.gn_arg)
     run([gn, "gen", str(build_dir)], cwd=source, env=env)

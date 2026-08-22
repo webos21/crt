@@ -571,6 +571,17 @@ if(Python3_Interpreter_FOUND)
       add_dependencies(crt-libcxx-build rootfs)
     endif()
   endif()
+  if(CRT_TARGET_OS STREQUAL "windows" AND TARGET crtgfx-skia-build)
+    # tools/build_skia.py's own --rootfs argument (libcrtgfx/CMakeLists.
+    # txt's own CRTGFX_SKIA_BUILD_ARGS) needs the rootfs's mksh.exe to
+    # exist -- same reasoning as crt-libcxx-configure/-build just above:
+    # GN's own gcc_like toolchain invokes crt-cc.cmd/crt-c++.cmd, which
+    # need CRT_MKSH_EXE pointed at a real, already-built mksh.exe.
+    add_dependencies(crtgfx-skia-build rootfs)
+    if(TARGET crtgfx-skia-configure)
+      add_dependencies(crtgfx-skia-configure rootfs)
+    endif()
+  endif()
 
   get_filename_component(CRT_BUILD_PRESET_NAME "${CMAKE_BINARY_DIR}" NAME)
   set(CRT_PORT_TEST_ROOT "${CMAKE_BINARY_DIR}/port-tests")
