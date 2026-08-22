@@ -20,6 +20,7 @@ extern "C" {
 #define O_NONBLOCK 0x0004
 #define O_NDELAY O_NONBLOCK
 #define O_NOCTTY 0x20000
+#define O_NOFOLLOW 0x0100
 #define O_DIRECTORY 0x100000
 #define O_CLOEXEC 0x1000000
 #else
@@ -30,6 +31,7 @@ extern "C" {
 #define O_NONBLOCK 0x0800
 #define O_NDELAY O_NONBLOCK
 #define O_NOCTTY 0x0100
+#define O_NOFOLLOW 0x20000
 #define O_DIRECTORY 0x10000
 #define O_CLOEXEC 0x80000
 #endif

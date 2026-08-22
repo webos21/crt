@@ -92,6 +92,20 @@ typedef struct _FILETIME {
 } FILETIME, *PFILETIME;
 
 typedef union _LARGE_INTEGER {
+  /* Real Win32 LARGE_INTEGER also exposes the low/high halves directly
+   * (an anonymous nested struct aliasing the same storage as QuadPart) --
+   * needed by libcxx's own src/filesystem/time_utils.h, which reads/writes
+   * li.LowPart/li.HighPart when converting to/from FILETIME's own two
+   * separate DWORD fields (chrono.cpp above only ever needed QuadPart).
+   * Clang supports this anonymous-struct-in-union layout as a portable
+   * vendor extension even without -fms-extensions (this project
+   * deliberately does not add that flag project-wide, see __int64's own
+   * comment above); verified this project's own build already compiles it
+   * warning-clean under the -Wall/-Wextra set applied here. */
+  struct {
+    DWORD LowPart;
+    long HighPart;
+  };
   int64_t QuadPart;
 } LARGE_INTEGER, *PLARGE_INTEGER;
 
@@ -209,6 +223,35 @@ typedef struct _IMAGE_SECTION_HEADER {
   ((PIMAGE_SECTION_HEADER)((BYTE*)(ntheader) + \
                            offsetof(IMAGE_NT_HEADERS, OptionalHeader) + \
                            (ntheader)->FileHeader.SizeOfOptionalHeader))
+
+/* AreFileApisANSI/WideCharToMultiByte/MultiByteToWideChar/CP_ACP/CP_OEMCP/
+ * MB_ERR_INVALID_CHARS: libcxx's own src/filesystem/path.cpp, for
+ * path::string()/path::wstring() narrow<->wide conversions under
+ * _LIBCPP_WIN32API -- confirmed for real (2026-08-22):
+ * `error: no type named 'UINT' in the global namespace` (and the same for
+ * AreFileApisANSI/CP_ACP/CP_OEMCP/MB_ERR_INVALID_CHARS) building path.cpp,
+ * the first libcxx source file that reaches this code path. This is the
+ * same category of legitimate, real Windows-native need as chrono.cpp's
+ * timing APIs and thread.cpp's SYSTEM_INFO above (a real codepage
+ * conversion, not the MSVC-UCRT locale/random surface this project's own
+ * recipe.json patches deliberately redirect away from) -- confirmed as
+ * real kernel32.dll exports via llvm-objdump -p on this machine's own
+ * kernel32.dll (AreFileApisANSI, WideCharToMultiByte, MultiByteToWideChar
+ * all present, ordinary plain-C exports like GetLastError/GetSystemInfo
+ * above). Signatures match the real, stable, publicly documented Win32
+ * API exactly (learn.microsoft.com/windows/win32/api/...). */
+typedef unsigned int UINT;
+
+#define CP_ACP 0
+#define CP_OEMCP 1
+#define MB_ERR_INVALID_CHARS 0x00000008
+
+__declspec(dllimport) BOOL __stdcall AreFileApisANSI(void);
+__declspec(dllimport) int __stdcall WideCharToMultiByte(UINT CodePage, DWORD dwFlags, const wchar_t* lpWideCharStr,
+                                                         int cchWideChar, char* lpMultiByteStr, int cbMultiByte,
+                                                         const char* lpDefaultChar, BOOL* lpUsedDefaultChar);
+__declspec(dllimport) int __stdcall MultiByteToWideChar(UINT CodePage, DWORD dwFlags, const char* lpMultiByteStr,
+                                                         int cbMultiByte, wchar_t* lpWideCharStr, int cchWideChar);
 
 #ifdef __cplusplus
 } /* extern "C" */

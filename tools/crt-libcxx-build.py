@@ -452,7 +452,28 @@ def common_cmake_args(root, install_prefix, sysroot, rootfs, target_os, windows_
     # operator new before libc++ has initialized its dispatch state. Some
     # host Clang toolchains reject the flag entirely, so only add it when
     # the active compiler supports it.
-    cxx_flags = "-D__BIONIC__"
+    # -gdwarf-4: a real, host-linker-version workaround, not a debug-info
+    # preference. Confirmed for real (2026-08-22), migrating libcxx onto a
+    # current toolchain/llvm-project source built with clang++-18: the
+    # shared cxxabi_shared library link failed with `/usr/bin/ld: DWARF
+    # error: invalid or unhandled FORM value: 0x25` on a stock Ubuntu
+    # 20.04 host -- clang 16+ defaults to emitting DWARF5 debug info,
+    # which that host's own system `ld` (old binutils, from 2020) cannot
+    # parse. A version-matched lld (e.g. /usr/lib/llvm-18/bin/ld.lld, LLD
+    # 18.1.8, confirmed to link clean) fixes it too, but is not a
+    # portable answer here: a bare `-fuse-ld=lld` resolves via PATH to
+    # whatever "ld.lld" happens to already be installed system-wide
+    # (confirmed on this exact host: LLD 10.0.0, the *same* too-old
+    # version, not clang++-18's own), and there is no reliable, portable
+    # way to ask clang for "the lld that matches whichever clang you
+    # picked" across arbitrary host package layouts. Forcing DWARF4
+    # output instead sidesteps the whole problem: it is universally
+    # understood by any linker this project is realistically going to
+    # meet, at the one-time cost of a debug-info format one full version
+    # behind current -- a fully acceptable trade for a from-source
+    # runtime bootstrap, not shipped as this project's own public ABI.
+    cxx_flags = "-D__BIONIC__ -gdwarf-4"
+    c_flags_extra = "-gdwarf-4"
     toolchain_cxx = (
         os.environ.get("CRT_HOST_CXX") or shutil.which("clang++") or shutil.which("clang++-18") or shutil.which("c++")
     )
@@ -460,7 +481,7 @@ def common_cmake_args(root, install_prefix, sysroot, rootfs, target_os, windows_
         cxx_flags += " -fno-typed-cxx-new-delete"
     if target_os == "macos":
         cxx_flags = f"-U__APPLE__ {cxx_flags}"
-    c_flags = ""
+    c_flags = c_flags_extra
     if target_os == "windows":
         # Clang's default exception-table format for the *-w64-mingw32
         # target is native SEH, signaled to source via the __SEH__
@@ -656,7 +677,26 @@ def build_recipe(cmake, recipe, source_root, build_root, install_prefix, common,
     if targets:
         build_cmd += ["--target"] + targets
     run(build_cmd, env=env, label=f"{recipe['name']}: build")
-    run([cmake, "--install", str(build_dir)], env=env, label=f"{recipe['name']}: install")
+    # install_component: needed whenever cmake.driver add_subdirectory()s
+    # more than this recipe's own source (see ../libcxxabi/recipe.json's
+    # own driver, which also add_subdirectory()s libcxx for its
+    # "cxx-headers" target -- see that driver's own comment). A plain
+    # `cmake --install <dir>` with no --component installs *every*
+    # install() rule the whole CMake project graph knows about, not just
+    # the targets this recipe actually built -- confirmed for real: it
+    # tried (and failed) to install libcxx's own generated libcxx.imp,
+    # a file that only exists once libcxx's own "cxx-generated-config"
+    # target has actually been built, which this recipe's own build_cmd
+    # above deliberately never does. Restricting to the recipe's own
+    # install COMPONENT (confirmed present on libcxxabi's own install()
+    # calls, e.g. `COMPONENT cxxabi`) installs only what this recipe
+    # itself is responsible for, leaving libcxx's own separate recipe to
+    # install its own outputs later in the normal build order.
+    install_component = cmake_cfg.get("install_component")
+    install_cmd = [cmake, "--install", str(build_dir)]
+    if install_component:
+        install_cmd += ["--component", install_component]
+    run(install_cmd, env=env, label=f"{recipe['name']}: install")
 
     checkout_dir = source_root / recipe["name"]
     for copy in recipe.get("post_install_copy", {}).get(target_os, []):
@@ -682,6 +722,8 @@ def main():
     parser.add_argument("--phase", required=True, choices=["fetch", "configure", "build"])
     parser.add_argument("--recipe", action="append", help="recipe name to process; defaults to all")
     parser.add_argument("--rebuild", action="store_true")
+    parser.add_argument("--host-cc", help="host clang to compile the recipes with; see common_cmake_args()'s own CRT_HOST_CC handling")
+    parser.add_argument("--host-cxx", help="host clang++ to compile the recipes with; see common_cmake_args()'s own CRT_HOST_CXX handling")
     args = parser.parse_args()
 
     root = args.root.resolve()
@@ -706,6 +748,55 @@ def main():
 
     cmake = shutil.which("cmake") or "cmake"
     env = os.environ.copy()
+    # CRT_HOST_CC/CRT_HOST_CXX: tools/crt-cc/tools/crt-c++ (the compiler
+    # launcher scripts every recipe below is actually built through) fall
+    # back to a bare "clang"/"clang++" whenever these are unset, resolved
+    # via whatever the ambient $PATH happens to symlink that bare name to.
+    # On Windows that PATH is deliberately restricted (see this same
+    # function's own target_os=="windows" branch below) and resolves to
+    # nothing at all; on Linux/macOS PATH is NOT restricted, so a bare
+    # "clang++" *does* resolve to something -- but not necessarily
+    # anything recent enough. Confirmed for real (2026-08-22), migrating
+    # libcxx/libcxxabi onto a current toolchain/llvm-project source: a
+    # host whose own default clang++ symlink point at an older release
+    # (here, a stock Ubuntu 20.04's own apt-default clang++, resolving to
+    # Clang 10) fails outright once this project explicitly requests a
+    # newer, separately-installed clang++-18 for its own top-level CMake
+    # configure (CMAKE_CXX_COMPILER) -- this nested bootstrap previously
+    # had no way to know about that choice at all, silently falling back
+    # to the ambient default instead and hitting a real, hard `#error
+    # "remove_reference not implemented!"` in libcxx's own <type_traits>
+    # (a genuine, version-gated compiler-builtin requirement of this
+    # modern source, not a flag/config problem) -- the version mismatch
+    # was silent because libc++'s own "Clang 18 and later" check is only
+    # a warning, not a hard error, so nothing flagged the *actual*
+    # mismatch until a much later, more confusing failure. Prefer
+    # --host-cc/--host-cxx (the top-level CMake configure's own already-
+    # resolved CMAKE_C_COMPILER/CMAKE_CXX_COMPILER, passed through by
+    # libstdc++/CMakeLists.txt) so this bootstrap always uses the exact
+    # same compiler the rest of the project was told to use, on every
+    # host, rather than re-deriving its own separate guess.
+    if args.host_cc:
+        env["CRT_HOST_CC"] = args.host_cc
+    if args.host_cxx:
+        env["CRT_HOST_CXX"] = args.host_cxx
+    if args.target_os in ("linux", "macos"):
+        # No --host-cc/--host-cxx given (e.g. a direct manual invocation
+        # of this script rather than through the CMake targets) -- fall
+        # back to searching PATH ourselves, preferring a versioned
+        # "clang++-<N>" name over the bare default so a too-old system
+        # default clang++ is less likely to win silently. Still not a
+        # substitute for --host-cc/--host-cxx: this can only see what
+        # PATH already exposes, and has no way to enforce the "18 and
+        # later" requirement libcxx's own compiler.h states.
+        if "CRT_HOST_CC" not in env:
+            found_cc = shutil.which("clang-18") or shutil.which("clang")
+            if found_cc:
+                env["CRT_HOST_CC"] = found_cc
+        if "CRT_HOST_CXX" not in env:
+            found_cxx = shutil.which("clang++-18") or shutil.which("clang++")
+            if found_cxx:
+                env["CRT_HOST_CXX"] = found_cxx
     if args.target_os == "windows":
         if rootfs is None:
             raise SystemExit("--rootfs is required on Windows")

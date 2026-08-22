@@ -89,6 +89,29 @@ if(CRT_TARGET_OS STREQUAL "windows")
   list(APPEND CRT_LIBCXX_PLATFORM_ARGUMENTS
     --rootfs "${CMAKE_BINARY_DIR}/rootfs")
 endif()
+# --host-cc/--host-cxx: tools/crt-libcxx-build.py's own bootstrap (every
+# recipe below is built through tools/crt-cc/tools/crt-c++, which fall
+# back to a bare "clang"/"clang++" resolved via whatever the ambient PATH
+# happens to symlink that name to, whenever CRT_HOST_CC/CRT_HOST_CXX are
+# unset) previously had no way to know which compiler THIS project's own
+# top-level configure was actually told to use -- confirmed for real
+# (2026-08-22) that this is a genuine gap, not just a style preference:
+# a host whose own default clang++ resolves to an older release than the
+# CMAKE_CXX_COMPILER this configure explicitly selected (e.g. a stock
+# Ubuntu 20.04's own apt-default clang++ 10, coexisting with a separately
+# installed, explicitly-requested clang++-18) silently bootstrapped
+# libcxx/libcxxabi with the *wrong*, too-old compiler, only surfacing as
+# a confusing, much-later `#error "remove_reference not implemented!"`
+# deep in libcxx's own <type_traits> once its source was current enough
+# to require compiler builtins that old clang genuinely does not have.
+# Passing this project's own already-resolved CMAKE_C_COMPILER/
+# CMAKE_CXX_COMPILER through directly means the bootstrap always uses
+# the exact same compiler the rest of the project was told to use, on
+# every host, rather than re-deriving its own separate (and possibly
+# different) guess.
+list(APPEND CRT_LIBCXX_PLATFORM_ARGUMENTS
+  --host-cc "${CMAKE_C_COMPILER}"
+  --host-cxx "${CMAKE_CXX_COMPILER}")
 if(Python3_Interpreter_FOUND)
   add_custom_target(crt-libcxx-fetch
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1

@@ -742,3 +742,41 @@ in those two win.
   chain and `HISTORY.md`'s dated entry for the fuller per-bug writeup.
   Full default `ctest` (120/120) with `CRTGFX_ENABLE_SKIA` left OFF
   confirms zero regression from all eight fixes.
+- **2026-08-22 (later same day): migrated libcxx/libcxxabi's recipe source
+  off the dead Android forks onto `toolchain/llvm-project`, fixing the
+  `<bit>` gap above for real. Linux/WSL fully verified (100%, 104/104
+  tests); Windows: six more real bugs fixed, then a deliberate stop at a
+  clearly-scoped remaining gap.** `CRT_USE_IMPORTED_LIBCXX=ON`:
+  **Linux/WSL now builds and passes its full default `ctest` suite
+  end-to-end from a fully wiped build tree** -- **100% tests passed, 0
+  failed, out of 104**. On Windows, fixed real, distinct bugs the same
+  evidence-based way used throughout this whole libcxx/Skia effort: a
+  `_tls_index` link failure (libc++abi's own native-`thread_local`
+  branch needing a real CRT TLS directory this project's `crt1.o` never
+  provides -- redirected to its own already-working pthread-key
+  fallback); `_LIBCPP_MSVCRT_LIKE` wrongly assumed for any `_WIN32`
+  target (patched to exclude `__BIONIC__`, routing locale support back
+  to this project's own already-correct POSIX-shaped `newlocale`/
+  `freelocale`); and four rounds of missing Win32 declarations closed by
+  extending `win32_shim/` (`AreFileApisANSI`/`WideCharToMultiByte`/
+  `MultiByteToWideChar` for `filesystem/path.cpp`, `LARGE_INTEGER`'s
+  `LowPart`/`HighPart` for `filesystem/time_utils.h`, a new
+  `win32_shim/winerror.h` with 49 real `ERROR_*` codes for
+  `system_error.cpp`, and redirecting `<print>`'s terminal detection to
+  the portable `isatty()` path already used everywhere else in this
+  project). Then hit a new, deeper blocker: `libcxx/src/CMakeLists.txt`
+  unconditionally compiles `support/win32/{locale_win32,support}.cpp`
+  for any Windows target, calling real MSVC-CRT-only functions
+  (`_create_locale`, `wcrtomb_s`, `rand_s`, `errno_t`) this project's
+  own libc has no equivalent of -- needs a CMake-level source-list patch,
+  not another header shim, a distinctly bigger scope. **Asked the user
+  how to proceed given the honest scope jump; explicit answer: stop
+  here**, since Linux's complete verification already covers the actual
+  motivating `<bit>` gap. All six Windows fixes are kept (real, correct,
+  and permanent) and confirmed **dormant/inert under the default
+  `CRT_USE_IMPORTED_LIBCXX=OFF`** -- a full default-config Windows
+  regression run (`cmake --build --preset windows-host-ninja-debug` +
+  `ctest`) shows **100% tests passed, 120/120, zero regression**.
+  `CRT_USE_IMPORTED_LIBCXX=ON` on Windows remains open, tracked in
+  `TODO.md` with the specific next step already scoped. See `TODO.md`'s
+  dated sub-bullet and `HISTORY.md`'s dated entry for the full writeup.

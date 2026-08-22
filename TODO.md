@@ -378,6 +378,77 @@ Next work order:
      to the still-open `<bit>` gap alone -- confirmed via direct log
      inspection, not assumed. Zero regression: full default `ctest`
      120/120 on both Windows and Linux/WSL.
+   - **The `<bit>` gap itself fixed for real on Linux, via a source
+     migration (2026-08-22)**: `libstdc++/third_party/{libcxx,libcxxabi}/
+     recipe.json`'s own `source.repository` (the dead Android fork
+     `platform/external/libcxx{,abi}`, frozen since a 2024-12-20 placeholder
+     "Empty merge" commit -- confirmed via that repo's own `refs/heads/main`
+     tip) were migrated to `toolchain/llvm-project`'s own `libcxx`/`libcxxabi`
+     subtrees at the same pinned commit `../libunwind/recipe.json` already
+     used (`37f38d1f3276b62fba09462ab4807dce846c732d`) -- confirmed that
+     commit's own `libcxx/include/bit` has real `_LIBCPP_STD_VER >= 20`
+     gating and a real `countl_zero`/`countr_zero`/`popcount`, unlike the
+     dead fork's 158-line version. This discarded the old fork-specific
+     patches (written against a file layout the new source no longer has)
+     and required rediscovering their equivalents one build error at a
+     time: CMake driver/target-ordering fixes (`cxx-headers` needing a
+     combined `add_subdirectory()`, `LIBCXX_CXX_ABI=system-libcxxabi`,
+     `cmake --install --component` scoping), five bounded `libc/` subtree
+     fetches (`shared`, `src/__support`, `hdr`, `include`, `src/errno`) for
+     llvm-libc utility headers libcxx's own `charconv.cpp` now depends on,
+     two real general libc completeness gaps fixed in this project's own
+     code (`include/linux/futex.h` + `SYS_futex` for `atomic.cpp`'s futex
+     wait/wake, `O_NOFOLLOW` in `include/fcntl.h` for `filesystem/
+     operations.cpp`), and the `__dso_handle`/`generate-cxx-headers`/
+     `find_package(Python3)` wiring both recipes' own drivers needed.
+     **Linux/WSL: fully verified** -- full default `cmake --build` +
+     `ctest` with `CRT_USE_IMPORTED_LIBCXX=ON`, **100% tests passed, 0
+     failed, out of 104**, on a fully wiped build tree (WSL/Ubuntu-26.04).
+     **Windows: real progress, intentionally left incomplete.** Six more
+     distinct, real bugs were found and fixed the same way (evidence-based,
+     one build error at a time, each with its own recipe.json/`win32_shim`
+     note): a `_tls_index` link failure (libc++abi's `cxa_exception_storage.
+     cpp` unconditionally takes Clang's native-`thread_local` branch, which
+     needs a real CRT's TLS directory this project's own `crt1.o` never
+     provides -- patched to fall through to the already-working
+     pthread-key-based branch on this target); `_LIBCPP_MSVCRT_LIKE` being
+     defined for any `_WIN32` target regardless of which CRT actually backs
+     it (wrongly routing locale support at `_locale_t`/`_create_locale`
+     instead of this project's own already-correct POSIX-shaped `newlocale`/
+     `freelocale`); and four rounds of missing declarations resolved by
+     extending `libstdc++/third_party/win32_shim/` (already-established
+     precedent from libunwind's own Windows needs) with real, verified
+     Win32 surface -- `AreFileApisANSI`/`WideCharToMultiByte`/
+     `MultiByteToWideChar`/`CP_ACP`/`CP_OEMCP` for `filesystem/path.cpp`,
+     `LARGE_INTEGER`'s `LowPart`/`HighPart` for `filesystem/time_utils.h`,
+     and a new `win32_shim/winerror.h` with the 49 real `ERROR_*` codes
+     `system_error.cpp` needs (values read directly from this machine's own
+     real SDK `winerror.h`, not assumed), plus redirecting `<print>`'s own
+     terminal-detection to the portable `isatty()` path (this project has
+     no MSVC-CRT `_get_osfhandle()`/fd model to feed `GetConsoleMode`).
+     The build then reached a **new, deeper blocker**: `libcxx/src/
+     CMakeLists.txt` unconditionally compiles `support/win32/{locale_win32,
+     support}.cpp` (and `fstream.cpp`/`random.cpp` reach similar territory)
+     for any Windows target, and these call real MSVC-CRT-only entry points
+     (`_create_locale`/`_free_locale`, `wcrtomb_s`, `errno_t`, `rand_s`,
+     `_wfopen`) this project's own libc has no equivalent of at all --
+     fixing this properly needs a CMake-level patch dropping/replacing
+     those files, not another header shim, a distinctly bigger scope than
+     the fixes above. **Deliberately stopped here** (explicit user decision
+     when asked, given Linux's already-complete verification covers the
+     actual motivating `<bit>` gap): the six Windows fixes above are real,
+     permanent, and kept (each is dormant/inert under the default
+     `CRT_USE_IMPORTED_LIBCXX=OFF`, confirmed via a full default-config
+     Windows regression run, 120/120 `ctest` passing, zero impact), but
+     `CRT_USE_IMPORTED_LIBCXX=ON` does not yet build clean on Windows.
+     Remaining Windows work, next time this is picked up: patch
+     `libcxx/src/CMakeLists.txt` (via `libstdc++/third_party/libcxx/
+     recipe.json`'s own `patches`) to drop `support/win32/locale_win32.cpp`/
+     `support/win32/support.cpp` from `LIBCXX_SOURCES` when targeting this
+     project's own libc, then work through whatever `fstream.cpp`/
+     `random.cpp` still need (`_wfopen`, `rand_s`) the same evidence-based
+     way. See `HISTORY.md`'s matching dated entry for the full session
+     writeup.
    - **A real WSL/Ubuntu-20.04 attempt confirmed the "Linux would reach**
      **the same wall faster" projection above, and surfaced one genuinely**
      **new, environment-specific finding along the way (2026-08-22).**
