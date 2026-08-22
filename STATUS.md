@@ -15,6 +15,14 @@ in those two win.
   `crt-libcxx-smoke` linkage modes. The default Windows regression suite also
   passes 120/120 after this work. `<filesystem>` was compiled as part of
   libc++, but its Windows-specific behavioral coverage remains a follow-up.
+- **Latest Skia CPU-raster build status (2026-08-23, same day): passing.**
+  `cmake --build --preset windows-host-ninja-debug --target
+  crtgfx-skia-build` now exits 0 -- `libskcms.a` and `libskia.a` both link
+  and Skia installs, matching macOS/Linux arm64. Five real bugs fixed along
+  the way (GN's own hardcoded `python3` token, a `cmd.exe` quoting trap,
+  two `win32_shim` gaps, a `tools/crt-ar` response-file parsing bug); see
+  `HISTORY.md`'s matching entry. Not yet done: `-DCRTGFX_ENABLE_SKIA=ON`
+  reconfigure + `crtgfx_skia_raster_smoke` itself on Windows.
 
 ## What "passing" currently means
 

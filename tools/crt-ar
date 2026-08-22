@@ -25,7 +25,25 @@ def expand_response_files(args):
             except OSError as error:
                 raise SystemExit(f"crt-ar: cannot read {response}: {error}")
             if os.name == "nt":
-                response_args = [line.strip().strip('"') for line in contents.splitlines() if line.strip()]
+                # NOT simply one path per line -- confirmed for real
+                # (2026-08-22): Skia's own gcc_like_toolchain alink rule
+                # (rspfile_content = "{{inputs}}") emits every object path
+                # space-separated on a *single* line
+                # ("obj/a.o obj/b.o obj/c.o"), not one per line. The old
+                # line.strip()-only split treated that whole line as one
+                # argument, so llvm-ar received a single nonexistent
+                # "obj/a.o obj/b.o" path (embedded space) instead of two
+                # real ones -- "no such file or directory". shlex.split(...,
+                # posix=False) tokenizes on whitespace (matching this
+                # format, and still correctly handling the older one-path-
+                # per-line form too, since newlines are whitespace as far
+                # as shlex is concerned) while leaving backslashes alone
+                # (posix mode would otherwise treat '\' as an escape
+                # character, corrupting real Windows-style paths) --
+                # unlike posix mode, it does not strip matching quotes
+                # from a token itself, hence the explicit .strip('"')
+                # below, matching what the old per-line code already did.
+                response_args = [arg.strip('"') for arg in shlex.split(contents, posix=False) if arg.strip()]
             else:
                 response_args = shlex.split(contents)
             expanded.extend(expand_response_files(response_args))

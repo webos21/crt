@@ -60,6 +60,73 @@ def pin_gn_script_executable(source, host_python):
     dotfile.write_text(patched, encoding="utf-8")
 
 
+def pin_gcc_toolchain_python(source, host_python):
+    """gn/toolchain/BUILD.gn's own gcc_like_toolchain template (the one this
+    project's Windows build actually uses -- see default_gn_args()'s own
+    `target_os = "linux"` trick, which selects this template instead of
+    msvc_toolchain) hardcodes the bare, unqualified string "python3" into
+    three of its own generated ninja `command = ...` lines (tool("alink")'s
+    pre-archive rm.py cleanup, tool("copy")/tool("copy_bundle_data")'s own
+    cp.py). Unlike script_executable above, GN does not resolve this one
+    through its own exec_script machinery at all -- it is literal ninja
+    rule text, executed later by ninja.exe's own `cmd.exe /c ...` subprocess
+    spawn, once actual compilation starts (not during `gn gen`).
+
+    This project's own env["PATH"] for that ninja invocation is
+    deliberately kept pure POSIX/rootfs-relative (see main()'s own
+    CRT_MKSH_EXE-adjacent comment for why crt-cc.cmd/crt-c++.cmd need
+    that), which a native Windows CreateProcess-based command lookup
+    cannot parse as a real search path at all -- confirmed for real
+    (2026-08-22): `'python3'은(는) 내부 또는 외부 명령... 아닙니다`
+    (Windows' own "not recognized as an internal or external command")
+    failing tool("alink")'s own `python3 rm.py "$out" && ar rcs ...`
+    compound command specifically, right after a real Windows libcxx
+    build finally succeeded and Skia's own build was retried for the
+    first time since. Same root cause and same fix shape as
+    pin_gn_script_executable() above, applied to a different file: replace
+    the bare "python3" token with an absolute, forward-slashed path so no
+    PATH search is ever needed for it, regardless of what PATH's own
+    content or separator convention is at ninja-run time. Windows-only:
+    on real Linux/macOS (this same gcc_like_toolchain template's other
+    real users), a "python3"-named executable is normally already on
+    PATH by distro/package-manager convention, so leaving those hosts
+    unpatched avoids touching an already-working path for no reason.
+    Idempotent (checks the current content first) so a re-run against an
+    already-patched fetch is a no-op.
+    """
+    toolchain_file = source / "gn" / "toolchain" / "BUILD.gn"
+    text = toolchain_file.read_text(encoding="utf-8")
+    # Every occurrence sits bare (unquoted) *inside* an already-open GN
+    # `command = "..."` string literal (e.g. `"$shell python3 \"$cp_py\"
+    # ..."`), never as its own top-level assignment the way
+    # script_executable is above. First attempt (2026-08-22) wrapped the
+    # substituted path in GN-string-escaped `\"...\"` (a real, quoted path
+    # in the ninja command line GN eventually emits) -- syntactically
+    # correct GN, but wrong in practice: confirmed for real, this
+    # produces a *second* `cmd.exe /c "..." "..." "..." && ...` compound
+    # command with three separate quoted segments, which trips a real,
+    # documented cmd.exe quirk (`cmd /?`'s own description of `/C`
+    # argument handling): unless the ENTIRE command line is exactly one
+    # quoted executable name with nothing else quoted, cmd.exe strips
+    # only the very first and very last quote character of the whole
+    # line rather than leaving each quoted segment intact -- corrupting
+    # the command into "지정된 이름, 디렉터리 이름 또는 볼륨 레이블
+    # 구문이 틀렸습니다" (Windows' own "the filename, directory name, or
+    # volume label syntax is incorrect"). Fixed the same way this file's
+    # own windows_short_path() already exists for: an 8.3 short path
+    # never contains spaces by construction, so it can be substituted
+    # bare/unquoted -- matching the original "python3" token's own
+    # unquoted shape exactly -- without ever needing quoting (or hitting
+    # this cmd.exe trap) at all, regardless of where Python is installed.
+    python_path = windows_short_path(host_python).replace("\\", "/")
+    if python_path in text and "python3" not in text:
+        return
+    patched, count = re.subn(r"\bpython3\b", python_path, text)
+    if count == 0:
+        raise SystemExit(f'{toolchain_file}: could not find any bare "python3" token to patch')
+    toolchain_file.write_text(patched, encoding="utf-8")
+
+
 def windows_short_path(path):
     """Convert an absolute Windows path to its 8.3 short-name form.
 
@@ -283,7 +350,27 @@ def default_gn_args(root, sysroot, target_os, target_arch):
             # generic POSIX *source files* (e.g. src/ports/SkOSFile_
             # posix.cpp, not the real Win32 SkOSFile_win.cpp) for both
             # platforms, so the preprocessor macro should agree.
-            (["-DSK_BUILD_FOR_UNIX"] if target_os in ("macos", "windows") else [])
+            (["-DSK_BUILD_FOR_UNIX"] if target_os in ("macos", "windows") else []) +
+            # win32_shim: NOT every Windows-conditional Skia source file
+            # is dodged by the target_os="linux"/SK_BUILD_FOR_UNIX trick
+            # above -- src/ports/SkOSFile_stdio.cpp's own `#ifdef _WIN32`
+            # (a raw preprocessor check, not funneled through Skia's own
+            # SkFeatures.h/SK_BUILD_FOR_* abstraction at all) still
+            # correctly reflects the real compiler target regardless of
+            # what GN's target_os string says, since tools/crt-cc's own
+            # --target=x86_64-w64-mingw32 always predefines _WIN32/_WIN64.
+            # That branch needs <direct.h>/<io.h> (_mkdir/_get_osfhandle),
+            # real MSVC-CRT headers this project's freestanding build has
+            # no access to -- confirmed for real (2026-08-22): `fatal
+            # error: 'direct.h' file not found` compiling this file, the
+            # first time this project's Windows GN/Skia build was retried
+            # after the imported libc++ recipe itself finally finished
+            # building clean. Same win32_shim/{direct,io,windows}.h shim
+            # directory already established for libunwind/libcxx's own
+            # matching Windows needs (see tools/crt-libcxx-build.py's own
+            # common_cmake_args()) -- reused here rather than duplicated,
+            # since it already covers everything this file needs too.
+            ([f"-I{root / 'libstdc++' / 'third_party' / 'win32_shim'}"] if target_os == "windows" else [])
         ),
         # -fno-exceptions/-fno-rtti here are Skia's own genuine preference
         # (matches CRTGFX_SKIA's own "no fake Skia headers, no exceptions
@@ -431,6 +518,12 @@ def main():
     env["CRT_TARGET_OS"] = args.target_os
     pin_gn_script_executable(source, sys.executable)
     if args.target_os == "windows":
+        # See pin_gcc_toolchain_python()'s own comment for the full story --
+        # a real, separate "python3" gap from script_executable's own,
+        # only ever hit once actual compilation starts (not during `gn
+        # gen`), so patch it here too rather than assuming the fix above
+        # already covers it.
+        pin_gcc_toolchain_python(source, sys.executable)
         # crt-ar.cmd needs the same interpreter CMake used to launch this
         # driver; relying on the optional py launcher would make a configured
         # Python installation look like a missing archiver.
@@ -516,6 +609,24 @@ def main():
             env["CRT_HOST_CC"] = windows_short_path(host_cc).replace("\\", "/")
         if host_cxx:
             env["CRT_HOST_CXX"] = windows_short_path(host_cxx).replace("\\", "/")
+        # tools/crt-ar's own fallback (shutil.which("llvm-ar") or
+        # shutil.which("ar")) hits the identical PATH-format problem as
+        # CRT_HOST_CC/CRT_HOST_CXX just above -- confirmed for real
+        # (2026-08-22): `crt-ar: neither CRT_HOST_AR, llvm-ar, nor ar was
+        # found`, the first time tool("alink")'s own `... && crt-ar.cmd
+        # rcs ...` half of its compound command actually ran (the python3
+        # half just before it was fixed separately, see
+        # pin_gcc_toolchain_python()'s own comment). Unlike crt-cc.cmd/
+        # crt-c++.cmd, crt-ar.cmd never routes through mksh.exe at all --
+        # it is a plain native-Windows .cmd wrapper invoking `python
+        # tools/crt-ar` directly (confirmed by reading it) -- so no
+        # windows_short_path()/forward-slash treatment is needed here,
+        # only a real value for CRT_HOST_AR itself, resolved the same way
+        # (via *this* process's own, unrestricted PATH) before PATH gets
+        # overwritten to its POSIX-only form just above.
+        host_ar = shutil.which("llvm-ar")
+        if host_ar:
+            env["CRT_HOST_AR"] = host_ar
     if args.target_arch != "host":
         env["CRT_TARGET_ARCH"] = args.target_arch
 

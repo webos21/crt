@@ -471,6 +471,32 @@ Next work order:
      entry. A dedicated Windows `<filesystem>` behavior test (especially
      UTF-32 `wchar_t` to native UTF-16 path conversion) remains worthwhile
      before claiming that API family's runtime semantics are fully covered.
+   - **Skia's CPU-raster archive now builds clean on Windows too, resolved
+     2026-08-23 (same day, direct follow-up).** With a real Windows
+     `libc++.dll` now in place, `cmake --build --target crtgfx-skia-build`
+     was retried for the first time and surfaced five more real, distinct
+     bugs (all fixed, none touching the default CMake build graph): GN's
+     own generated ninja rules hardcoding a bare `python3` token
+     unresolvable against this project's deliberately POSIX-only build
+     PATH (a *different* gap than `script_executable`'s own, only hit once
+     actual compilation starts); a real `cmd.exe /c` quoting trap the
+     first attempted fix (quoting the substituted path) walked straight
+     into, fixed by reusing the project's own already-established 8.3-
+     short-path trick instead; two more `win32_shim` gaps
+     (`<direct.h>`'s `_mkdir`, `_wfopen`, plus wiring the shim directory
+     onto Skia's own include path at all, which it had never been on);
+     and a real response-file-parsing bug in `tools/crt-ar` itself (its
+     Windows branch assumed one object path per line, but Skia's own
+     `alink` rule packs them space-separated on a single line). See
+     `HISTORY.md`'s matching 2026-08-23 entry for the full per-bug
+     writeup. Verified: both `libskcms.a` and `libskia.a` link and Skia
+     installs cleanly. Not yet done: reconfiguring with
+     `-DCRTGFX_ENABLE_SKIA=ON` and building/running
+     `crtgfx_skia_raster_smoke` itself on Windows (needs a fresh
+     `cmake` reconfigure of the default preset, deliberately not done
+     as part of this fix since `CRTGFX_ENABLE_SKIA` stays OFF by default
+     and flipping it is the user's own call, not a build-fix side
+     effect) -- the natural next step once picked up again.
    - **A real WSL/Ubuntu-20.04 attempt confirmed the "Linux would reach**
      **the same wall faster" projection above, and surfaced one genuinely**
      **new, environment-specific finding along the way (2026-08-22).**

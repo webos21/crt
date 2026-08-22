@@ -10,6 +10,99 @@ substantive update.
 
 ## 2026-08-23
 
+- **Skia's CPU-raster archive (`libskcms.a`/`libskia.a`) now builds clean on
+  Windows via `cmake --build --target crtgfx-skia-build`, matching what
+  already worked on macOS/Linux arm64.** Direct follow-up to the Windows
+  imported-libc++ completion just below: with a real Windows `libc++.dll`
+  finally in place, retrying the Skia build for the first time since
+  surfaced five more real, distinct bugs, fixed the same evidence-based way
+  as everything else this session:
+  1. **`python3` unresolvable inside Skia's own generated ninja rules**
+     (`gn/toolchain/BUILD.gn`'s `gcc_like_toolchain` template hardcodes the
+     bare token `python3` into `tool("alink")`'s pre-archive `rm.py`
+     cleanup and `tool("copy")`/`tool("copy_bundle_data")`'s `cp.py`, none
+     of it routed through GN's own `script_executable` the way `gn gen`'s
+     `exec_script()` calls are). `tools/build_skia.py`'s own
+     `env["PATH"]` is deliberately kept pure POSIX/rootfs-relative for
+     `crt-cc.cmd`/`crt-c++.cmd`'s own internal mksh needs, which a native
+     `cmd.exe` command-name lookup cannot parse as a real search path at
+     all -- confirmed for real: `'python3'은(는) 내부 또는 외부 명령...
+     아닙니다`. New `pin_gcc_toolchain_python()` (mirroring the already-
+     established `pin_gn_script_executable()`) patches the fetched
+     toolchain file's own bare `python3` tokens to an absolute path.
+     First attempt wrapped the substituted path in GN-string-escaped
+     quotes -- syntactically valid GN, but it tripped a real, documented
+     `cmd.exe /c` quirk: with more than one quoted segment on the command
+     line, `cmd.exe` strips only the very first and very last quote
+     character of the *whole* line rather than leaving each quoted
+     segment intact, corrupting the command ("지정된 이름, 디렉터리 이름
+     또는 볼륨 레이블 구문이 틀렸습니다"). Fixed by reusing this file's
+     own already-established `windows_short_path()` (an 8.3 short path
+     never contains spaces, so it needs no quoting at all -- inserted
+     bare, exactly matching the original unquoted `python3` token's own
+     shape) instead of quoting a long-form path.
+  2. **`<direct.h>` file-not-found** compiling Skia's own
+     `src/ports/SkOSFile_stdio.cpp` (`_mkdir`, its only real use from that
+     header -- confirmed by grepping the whole file for every other real
+     `<direct.h>`-family function first). New
+     `libstdc++/third_party/win32_shim/direct.h`, a thin inline wrapper
+     around this project's own real `mkdir(path, 0777)`.
+  3. **win32_shim itself was never on Skia's own include path at all** --
+     confirmed via the `<direct.h>`/`<io.h>` failures happening in the
+     first place, even though both already existed for the imported
+     libc++ recipe's own separate build. `SkOSFile_stdio.cpp`'s own
+     `#ifdef _WIN32` branch is a raw compiler-native check (not routed
+     through Skia's own `SK_BUILD_FOR_*` abstraction the `target_os =
+     "linux"` trick already redirects), so it correctly reflects this
+     project's real `x86_64-w64-mingw32` target regardless of GN's own
+     `target_os` string, and genuinely needs real Windows-shaped headers.
+     `default_gn_args()`'s own `extra_cflags` now adds
+     `-I<repo>/libstdc++/third_party/win32_shim` for `target_os ==
+     "windows"`, reusing the existing shim directory rather than
+     duplicating it.
+  4. **`_wfopen` undeclared** in the same file (`SkOSFile_stdio.cpp`'s own
+     wide-path `fopen`, a real MSVC-CRT function distinct from `_wopen`
+     already in `win32_shim/io.h` -- takes a wide *mode string*, not an
+     `int` flags bitmask, and returns `FILE*`, not an fd). Confirmed for
+     real that `wchar_t` is genuinely 2 bytes (UTF-16) for this project's
+     own real target (`__SIZEOF_WCHAR_T__ == 2`), matching what Skia's own
+     caller already assumes (it builds a UTF-16 code-unit buffer and casts
+     it straight to `wchar_t*`). Implemented as a real `_wfopen()` in
+     `win32_shim/io.h`, converting both the wide path and wide mode string
+     to narrow via `wcstombs()` (the same conversion `_wopen()` already
+     used) before calling this project's own real `fopen()`.
+  5. **`crt-ar: neither CRT_HOST_AR, llvm-ar, nor ar was found`**, then,
+     once that was fixed, a real parsing bug in `tools/crt-ar` itself.
+     `tools/build_skia.py` already pre-resolves `CRT_HOST_CC`/
+     `CRT_HOST_CXX` via `shutil.which()` (using this *script's* own
+     unrestricted PATH) before overwriting `env["PATH"]` to its POSIX-only
+     form, for exactly this class of problem -- `CRT_HOST_AR` needed the
+     same treatment (added, no `windows_short_path()` needed this time:
+     confirmed by reading `crt-ar.cmd`, it never routes through mksh.exe
+     at all, unlike `crt-cc.cmd`/`crt-c++.cmd`). With that fixed, `crt-ar`
+     found `llvm-ar` but then failed archiving with a real, separate bug:
+     `tools/crt-ar`'s own Windows-specific `@response-file` expansion
+     assumed one path per line (`line.strip().strip('"')` per line), but
+     confirmed for real by reading the actual generated `.rsp` file that
+     Skia's own `gcc_like_toolchain` `tool("alink")` rule
+     (`rspfile_content = "{{inputs}}"`) instead emits every object path
+     space-separated on a single line -- the old code treated that whole
+     line as one argument, so `llvm-ar` received one nonexistent path with
+     an embedded space ("no such file or directory") instead of two real
+     ones. Fixed with `shlex.split(contents, posix=False)` (tokenizes on
+     whitespace across both the single-line and one-per-line shapes alike,
+     while leaving backslashes alone -- `posix=True` would otherwise treat
+     `\` as an escape character and corrupt real Windows-style paths).
+  All five fixes are scoped entirely to files/paths only ever reached
+  while actually building Skia (`tools/build_skia.py`, `tools/crt-ar`,
+  `libstdc++/third_party/win32_shim/`) -- none of them touch the default
+  CMake build graph at all (confirmed: `tools/crt-ar` has exactly one
+  consumer project-wide, `tools/build_skia.py`), so no separate regression
+  run was needed. Verified end to end: `cmake --build --preset
+  windows-host-ninja-debug --target crtgfx-skia-build` exits 0, both
+  `libskcms.a` and `libskia.a` link, and Skia installs into
+  `external/skia/install`.
+
 - **Completed the current Windows imported-libc++ build migration.** A fresh
   sparse checkout of the pinned LLVM source now builds `libunwind`,
   `libc++abi`, and `libc++` as both static and shared Windows runtime
