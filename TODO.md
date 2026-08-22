@@ -463,8 +463,14 @@ Next work order:
      `support/win32/support.cpp` from `LIBCXX_SOURCES` when targeting this
      project's own libc, then work through whatever `fstream.cpp`/
      `random.cpp` still need (`_wfopen`, `rand_s`) the same evidence-based
-     way. See `HISTORY.md`'s matching dated entry for the full session
-     writeup.
+     way. **Resolved 2026-08-23:** the recipe now omits those UCRT-only
+     sources, routes random-device through the CRT `/dev/urandom` path, and
+     supplies the bounded filesystem/kernel32 shim and fd adapters required
+     by the remaining libc++ sources. `crt-libcxx-build`, staging, and both
+     smoke linkage modes now pass on Windows; see `HISTORY.md`'s 2026-08-23
+     entry. A dedicated Windows `<filesystem>` behavior test (especially
+     UTF-32 `wchar_t` to native UTF-16 path conversion) remains worthwhile
+     before claiming that API family's runtime semantics are fully covered.
    - **A real WSL/Ubuntu-20.04 attempt confirmed the "Linux would reach**
      **the same wall faster" projection above, and surfaced one genuinely**
      **new, environment-specific finding along the way (2026-08-22).**

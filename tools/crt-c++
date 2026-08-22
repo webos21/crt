@@ -17,6 +17,7 @@ if [ -z "$target_os" ]; then
 fi
 
 cxx="${CRT_HOST_CXX:-clang++}"
+compiler_rt_builtins=""
 if [ "$target_os" = windows ]; then
   export CRT_SPAWN_NATIVE_WINDOWS=1
   target_arch="${CRT_TARGET_ARCH:-}"
@@ -323,6 +324,22 @@ case "$target_os" in
     fi
     ;;
   windows)
+    if [ "${CRT_CXX_BUILDING_RUNTIME:-0}" = 1 ] && [ -n "$resource_dir" ]; then
+      # -nostdlib deliberately suppresses Clang's automatic compiler-rt
+      # addition.  Runtime libraries nevertheless may lower 128-bit
+      # arithmetic to helpers such as __divti3, so link the matching
+      # compiler-owned builtins archive explicitly while bootstrapping
+      # libc++/libc++abi. Prefer the MinGW target archive, then the stock
+      # Windows archive supplied by an MSVC-layout LLVM installation.
+      for candidate in \
+        "${resource_dir}/lib/${target_arch}-w64-windows-gnu/libclang_rt.builtins.a" \
+        "${resource_dir}/lib/windows/clang_rt.builtins-${target_arch}.lib"; do
+        if [ -f "$candidate" ]; then
+          compiler_rt_builtins="$candidate"
+          break
+        fi
+      done
+    fi
     if [ "${CRT_CXX_BUILDING_RUNTIME:-0}" = 1 ]; then
       cxx_runtime_libs=""
     elif [ "$runtime_linkage" = shared ]; then
@@ -442,6 +459,23 @@ esac
 # broken argv entries. Confirmed for real: this exact bug broke linking
 # libc++abi.dll, clang reporting "no such file or directory: 'Files'" for
 # a linker-flag argument that had already lost its own spaces.
+if [ -n "$compiler_rt_builtins" ]; then
+  if [ -n "${CRT_WINDOWS_SDK_LIBPATH:-}" ]; then
+    if [ -n "$resource_dir" ]; then
+      # shellcheck disable=SC2086
+      exec "$cxx" $common_flags -isystem "${resource_dir}/include" -nostdlib -nostartfiles -nodefaultlibs $entry $prelibs $user_args $libs "$compiler_rt_builtins" "-Wl,/libpath:${CRT_WINDOWS_SDK_LIBPATH}"
+    fi
+    # shellcheck disable=SC2086
+    exec "$cxx" $common_flags -nostdlib -nostartfiles -nodefaultlibs $entry $prelibs $user_args $libs "$compiler_rt_builtins" "-Wl,/libpath:${CRT_WINDOWS_SDK_LIBPATH}"
+  fi
+  if [ -n "$resource_dir" ]; then
+    # shellcheck disable=SC2086
+    exec "$cxx" $common_flags -isystem "${resource_dir}/include" -nostdlib -nostartfiles -nodefaultlibs $entry $prelibs $user_args $libs "$compiler_rt_builtins"
+  fi
+  # shellcheck disable=SC2086
+  exec "$cxx" $common_flags -nostdlib -nostartfiles -nodefaultlibs $entry $prelibs $user_args $libs "$compiler_rt_builtins"
+fi
+
 if [ -n "${CRT_WINDOWS_SDK_LIBPATH:-}" ]; then
   if [ -n "$resource_dir" ]; then
     # shellcheck disable=SC2086

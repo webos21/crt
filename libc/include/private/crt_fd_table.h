@@ -85,4 +85,18 @@ int __crt_windows_fd_snapshot_relaunch_begin(unsigned long long* out_pipe_read_h
 int __crt_windows_fd_snapshot_relaunch_finish(unsigned long long child_process_handle, unsigned long child_pid);
 void __crt_windows_fd_snapshot_relaunch_abort(void);
 
+/* Windows-only (same "declared unconditionally" note as the relaunch
+ * trio above). The raw Windows HANDLE backing an already-open fd, cast
+ * to uintptr_t so this cross-platform header needs no <windows.h> of its
+ * own -- 0 if fd is not a real Windows HANDLE-backed entry. Exposes
+ * libc/src/arch/windows/common/syscall.c's own private get_fd_handle()
+ * for use outside libc itself: the imported libc++ recipe's own
+ * filesystem/print/fstream support code needs exactly this (the same
+ * capability a real MSVC CRT's _get_osfhandle() provides), and this
+ * project's own independent fd model has no other public way to recover
+ * a native OS handle from a small-integer fd -- see
+ * libstdc++/third_party/win32_shim/windows.h's own _get_osfhandle()
+ * shim, the actual consumer. */
+uintptr_t __crt_windows_fd_get_handle(int fd);
+
 #endif

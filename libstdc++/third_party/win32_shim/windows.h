@@ -253,6 +253,208 @@ __declspec(dllimport) int __stdcall WideCharToMultiByte(UINT CodePage, DWORD dwF
 __declspec(dllimport) int __stdcall MultiByteToWideChar(UINT CodePage, DWORD dwFlags, const char* lpMultiByteStr,
                                                          int cbMultiByte, wchar_t* lpWideCharStr, int cchWideChar);
 
+/* FormatMessageA/LocalFree/FORMAT_MESSAGE_*: libcxx's own src/
+ * system_error.cpp, for __system_error_category::message() under
+ * _LIBCPP_WIN32API -- confirmed for real (2026-08-22): `no member named
+ * 'FormatMessageA'`/`use of undeclared identifier 'FORMAT_MESSAGE_
+ * ALLOCATE_BUFFER'`/`...'LocalFree'` building system_error.cpp. Same
+ * category as this file's other real Win32-native needs above (turning a
+ * raw Win32 GetLastError() code into a human-readable string is a
+ * legitimate, real Windows-native need with no portable equivalent this
+ * project's own libc could substitute, unlike the MSVC-UCRT locale/random
+ * surface recipe.json's own patches deliberately redirect away from).
+ * Confirmed as real kernel32.dll exports via llvm-objdump -p on this
+ * machine's own kernel32.dll. FORMAT_MESSAGE_* values and the signature
+ * match the real, stable, publicly documented Win32 API exactly
+ * (learn.microsoft.com/windows/win32/api/winbase/nf-winbase-
+ * formatmessagea). */
+#define FORMAT_MESSAGE_ALLOCATE_BUFFER 0x00000100
+#define FORMAT_MESSAGE_FROM_SYSTEM 0x00001000
+#define FORMAT_MESSAGE_IGNORE_INSERTS 0x00000200
+
+/* Arguments is really `va_list*` in the real SDK; declared here as `void*`
+ * to avoid a <stdarg.h> dependency this shim otherwise has no need for --
+ * ABI-identical (both are plain pointers) and system_error.cpp's own call
+ * site only ever passes a literal nullptr for this parameter. */
+__declspec(dllimport) unsigned long __stdcall FormatMessageA(DWORD dwFlags, const void* lpSource, DWORD dwMessageId,
+                                                               DWORD dwLanguageId, char* lpBuffer, DWORD nSize,
+                                                               void* Arguments);
+__declspec(dllimport) HANDLE __stdcall LocalFree(HANDLE hMem);
+__declspec(dllimport) void __stdcall SetLastError(DWORD dwErrCode);
+
+/* DeviceIoControl is the only Kernel32 entry point libc++'s filesystem
+ * reparse-point reader needs from <winioctl.h>.  The control-code constants
+ * intentionally live in the sibling winioctl.h shim, as they do in the SDK. */
+__declspec(dllimport) BOOL __stdcall DeviceIoControl(HANDLE hDevice, DWORD dwIoControlCode,
+                                                     void* lpInBuffer, DWORD nInBufferSize,
+                                                     void* lpOutBuffer, DWORD nOutBufferSize,
+                                                     DWORD* lpBytesReturned, void* lpOverlapped);
+
+/* Narrow file-system portion of WinBase.h used by libc++'s own Windows
+ * <filesystem> backend.  These are Kernel32 APIs and documented data
+ * layouts, not UCRT compatibility declarations. */
+#define INVALID_HANDLE_VALUE ((HANDLE)(intptr_t)-1)
+#define FILE_SHARE_READ 0x00000001UL
+#define FILE_SHARE_WRITE 0x00000002UL
+#define FILE_SHARE_DELETE 0x00000004UL
+#define FILE_READ_ATTRIBUTES 0x00000080UL
+#define FILE_WRITE_ATTRIBUTES 0x00000100UL
+#define GENERIC_WRITE 0x40000000UL
+#define DELETE 0x00010000UL
+#define OPEN_EXISTING 3UL
+#define FILE_FLAG_BACKUP_SEMANTICS 0x02000000UL
+#define FILE_FLAG_OPEN_REPARSE_POINT 0x00200000UL
+#define FILE_ATTRIBUTE_READONLY 0x00000001UL
+#define FILE_ATTRIBUTE_DIRECTORY 0x00000010UL
+#define FILE_ATTRIBUTE_REPARSE_POINT 0x00000400UL
+#define INVALID_FILE_ATTRIBUTES 0xFFFFFFFFUL
+#define FILE_BEGIN 0UL
+#define MOVEFILE_REPLACE_EXISTING 0x00000001UL
+#define MOVEFILE_COPY_ALLOWED 0x00000002UL
+#define MOVEFILE_WRITE_THROUGH 0x00000008UL
+#define SYMBOLIC_LINK_FLAG_DIRECTORY 0x1UL
+#define SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE 0x2UL
+#define ERROR_INVALID_PARAMETER 87UL
+#define ERROR_PATH_NOT_FOUND 3UL
+#define ERROR_NOT_ENOUGH_MEMORY 8UL
+#define MAX_PATH 260
+#define FILE_NAME_NORMALIZED 0x0UL
+#define VOLUME_NAME_DOS 0x0UL
+
+typedef struct _FILE_BASIC_INFO {
+  LARGE_INTEGER CreationTime;
+  LARGE_INTEGER LastAccessTime;
+  LARGE_INTEGER LastWriteTime;
+  LARGE_INTEGER ChangeTime;
+  DWORD FileAttributes;
+} FILE_BASIC_INFO;
+typedef struct _FILE_STANDARD_INFO {
+  LARGE_INTEGER AllocationSize;
+  LARGE_INTEGER EndOfFile;
+  DWORD NumberOfLinks;
+  BYTE DeletePending;
+  BYTE Directory;
+} FILE_STANDARD_INFO;
+typedef struct _FILE_ATTRIBUTE_TAG_INFO {
+  DWORD FileAttributes;
+  DWORD ReparseTag;
+} FILE_ATTRIBUTE_TAG_INFO;
+typedef struct _FILE_DISPOSITION_INFO {
+  BYTE DeleteFile;
+} FILE_DISPOSITION_INFO;
+typedef union _ULARGE_INTEGER {
+  struct {
+    DWORD LowPart;
+    DWORD HighPart;
+  };
+  uint64_t QuadPart;
+} ULARGE_INTEGER;
+typedef struct _BY_HANDLE_FILE_INFORMATION {
+  DWORD dwFileAttributes;
+  FILETIME ftCreationTime;
+  FILETIME ftLastAccessTime;
+  FILETIME ftLastWriteTime;
+  DWORD dwVolumeSerialNumber;
+  DWORD nFileSizeHigh;
+  DWORD nFileSizeLow;
+  DWORD nNumberOfLinks;
+  DWORD nFileIndexHigh;
+  DWORD nFileIndexLow;
+} BY_HANDLE_FILE_INFORMATION;
+typedef struct _WIN32_FIND_DATAW {
+  DWORD dwFileAttributes;
+  FILETIME ftCreationTime;
+  FILETIME ftLastAccessTime;
+  FILETIME ftLastWriteTime;
+  DWORD nFileSizeHigh;
+  DWORD nFileSizeLow;
+  DWORD dwReserved0;
+  DWORD dwReserved1;
+  /* libc++ is built with Bionic's UTF-32 wchar_t.  Its filesystem code
+   * consumes this member as wchar_t[], so retain that source-level type;
+   * the runtime's wide-path conversion boundary remains responsible for
+   * adapting it before a real Win32 call. */
+  wchar_t cFileName[MAX_PATH];
+  wchar_t cAlternateFileName[14];
+} WIN32_FIND_DATAW;
+
+#define FileBasicInfo 0
+#define FileStandardInfo 1
+#define FileDispositionInfo 4
+#define FileAttributeTagInfo 9
+
+__declspec(dllimport) HANDLE __stdcall CreateFileW(const wchar_t* lpFileName, DWORD dwDesiredAccess,
+                                                     DWORD dwShareMode, void* lpSecurityAttributes,
+                                                     DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes,
+                                                     HANDLE hTemplateFile);
+__declspec(dllimport) BOOL __stdcall CloseHandle(HANDLE hObject);
+__declspec(dllimport) BOOL __stdcall GetFileInformationByHandleEx(HANDLE hFile, int FileInformationClass,
+                                                                    void* lpFileInformation, DWORD dwBufferSize);
+__declspec(dllimport) BOOL __stdcall GetFileInformationByHandle(HANDLE hFile,
+                                                                  BY_HANDLE_FILE_INFORMATION* lpFileInformation);
+__declspec(dllimport) BOOL __stdcall SetFileInformationByHandle(HANDLE hFile, int FileInformationClass,
+                                                                  const void* lpFileInformation, DWORD dwBufferSize);
+__declspec(dllimport) BOOL __stdcall CreateDirectoryW(const wchar_t* lpPathName, void* lpSecurityAttributes);
+__declspec(dllimport) BOOL __stdcall CreateSymbolicLinkW(const wchar_t* lpSymlinkFileName,
+                                                          const wchar_t* lpTargetFileName, DWORD dwFlags);
+__declspec(dllimport) BOOL __stdcall CreateHardLinkW(const wchar_t* lpFileName,
+                                                      const wchar_t* lpExistingFileName,
+                                                      void* lpSecurityAttributes);
+__declspec(dllimport) BOOL __stdcall SetFilePointerEx(HANDLE hFile, LARGE_INTEGER liDistanceToMove,
+                                                        LARGE_INTEGER* lpNewFilePointer, DWORD dwMoveMethod);
+__declspec(dllimport) BOOL __stdcall SetEndOfFile(HANDLE hFile);
+__declspec(dllimport) BOOL __stdcall SetFileTime(HANDLE hFile, const FILETIME* lpCreationTime,
+                                                  const FILETIME* lpLastAccessTime,
+                                                  const FILETIME* lpLastWriteTime);
+__declspec(dllimport) BOOL __stdcall MoveFileExW(const wchar_t* lpExistingFileName,
+                                                  const wchar_t* lpNewFileName, DWORD dwFlags);
+__declspec(dllimport) BOOL __stdcall SetCurrentDirectoryW(const wchar_t* lpPathName);
+__declspec(dllimport) DWORD __stdcall GetCurrentDirectoryW(DWORD nBufferLength, wchar_t* lpBuffer);
+__declspec(dllimport) DWORD __stdcall GetFinalPathNameByHandleW(HANDLE hFile, wchar_t* lpszFilePath,
+                                                                  DWORD cchFilePath, DWORD dwFlags);
+__declspec(dllimport) DWORD __stdcall GetFileAttributesW(const wchar_t* lpFileName);
+__declspec(dllimport) BOOL __stdcall SetFileAttributesW(const wchar_t* lpFileName, DWORD dwFileAttributes);
+__declspec(dllimport) BOOL __stdcall GetDiskFreeSpaceExW(const wchar_t* lpDirectoryName,
+                                                          ULARGE_INTEGER* lpFreeBytesAvailableToCaller,
+                                                          ULARGE_INTEGER* lpTotalNumberOfBytes,
+                                                          ULARGE_INTEGER* lpTotalNumberOfFreeBytes);
+__declspec(dllimport) HANDLE __stdcall FindFirstFileW(const wchar_t* lpFileName,
+                                                       WIN32_FIND_DATAW* lpFindFileData);
+__declspec(dllimport) BOOL __stdcall FindNextFileW(HANDLE hFindFile,
+                                                   WIN32_FIND_DATAW* lpFindFileData);
+__declspec(dllimport) BOOL __stdcall FindClose(HANDLE hFindFile);
+__declspec(dllimport) DWORD __stdcall GetTempPathW(DWORD nBufferLength, wchar_t* lpBuffer);
+
+/* _get_osfhandle: libcxx's own src/filesystem/posix_compat.h calls this
+ * real MSVC-CRT function three times (fstat/ftruncate/fchmod's own
+ * fd-taking overloads) to recover the real Windows HANDLE behind an
+ * already-open fd -- confirmed for real (2026-08-22): `fatal error:
+ * 'io.h' file not found` compiling directory_entry.cpp/directory_
+ * iterator.cpp/operations.cpp (posix_compat.h's own #include <io.h>
+ * under _LIBCPP_WIN32API). Unlike the other MSVC-CRT gaps this recipe's
+ * own patches route around by dropping/redirecting the feature
+ * (std::print's WriteConsoleW fast path, fstream's C++26 native_handle()
+ * -- both real but skippable), fstat/ftruncate/fchmod are core,
+ * unavoidable <filesystem> operations (std::filesystem::resize_file,
+ * ::permissions, status queries against an already-open fd) -- worth a
+ * real implementation instead of a third degradation. This project's own
+ * fd model already has exactly the needed fd->HANDLE mapping internally
+ * (libc/src/arch/windows/common/syscall.c's own private get_fd_handle(),
+ * already used by e.g. isatty()) -- __crt_windows_fd_get_handle() (see
+ * its own declaration in libc/include/private/crt_fd_table.h) exposes it
+ * publicly for exactly this. A real MSVC _get_osfhandle() can also
+ * return -1 (INTPTR_MAX-adjacent sentinel, not just any negative value)
+ * on failure; __crt_windows_fd_get_handle() already returns plain 0 for
+ * "no real handle" (a null HANDLE reads the same way to every caller in
+ * this file, all of which only ever check the result via
+ * reinterpret_cast<HANDLE>(...) before an ordinary Win32 call that
+ * itself rejects a null/invalid HANDLE), so no extra sentinel-translation
+ * is needed here. */
+extern uintptr_t __crt_windows_fd_get_handle(int fd);
+static inline intptr_t _get_osfhandle(int fd) {
+  return (intptr_t)__crt_windows_fd_get_handle(fd);
+}
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

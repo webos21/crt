@@ -8,6 +8,25 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-08-23
+
+- **Completed the current Windows imported-libc++ build migration.** A fresh
+  sparse checkout of the pinned LLVM source now builds `libunwind`,
+  `libc++abi`, and `libc++` as both static and shared Windows runtime
+  libraries, stages all eight libraries into the CRT sysroot, and passes
+  both static and shared `crt-libcxx-smoke` executions (`imported_libcxx_test:
+  ok`).  The final porting loop closed several real CRT-boundary gaps without
+  importing UCRT: sparse checkout is reapplied after SHA checkout; the
+  project-owned Win32 shim supplies the narrow Kernel32/filesystem surface
+  libc++ actually uses; `_wopen`/`_close` adapt to the CRT fd/path boundary;
+  the accidental POSIX `sendfile` fast path is disabled on Windows; and the
+  runtime link uses the separately-built libc++abi import library plus the
+  compiler-owned compiler-rt builtins archive.  `__security_cookie` and
+  `__security_check_cookie` now live in the CRT Windows compiler-ABI object,
+  rather than leaking a MSVC startup runtime dependency.  Final verification:
+  `crt-libcxx-build`, `crt-libcxx-sysroot`, and `crt-libcxx-smoke` succeeded,
+  followed by the default Windows `ctest` suite, **120/120 passed**.
+
 ## 2026-08-22
 
 - **Fixed Linux aarch64 `crt-libcxx-smoke`'s shared leg: `tools/crt-cc`

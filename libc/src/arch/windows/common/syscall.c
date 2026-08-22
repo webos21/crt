@@ -2997,6 +2997,21 @@ static HANDLE get_fd_handle(int fd) {
   return fd_table[fd];
 }
 
+/* Public wrapper around get_fd_handle() above -- see its own declaration
+ * in include/private/crt_fd_table.h for why this is exposed outside
+ * libc at all (the imported libc++ recipe's own _get_osfhandle()-shaped
+ * need). INVALID_HANDLE_VALUE maps to 0 here rather than being passed
+ * through as-is: callers outside this file have no reason to know that
+ * particular sentinel's bit pattern, and 0 already reads as "no real
+ * handle" the same way a null HANDLE normally would. */
+uintptr_t __crt_windows_fd_get_handle(int fd) {
+  HANDLE h = get_fd_handle(fd);
+  if (h == INVALID_HANDLE_VALUE) {
+    return 0;
+  }
+  return (uintptr_t)h;
+}
+
 static SOCKET get_fd_socket(int fd) {
   init_fd_table();
   if (fd < 0 || fd >= CRT_FD_TABLE_SIZE || fd_kind[fd] != CRT_FD_KIND_SOCKET) {

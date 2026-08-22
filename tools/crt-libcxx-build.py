@@ -297,9 +297,18 @@ def fetch_recipe(recipe, source_root, rebuild=False):
             run(["git", "sparse-checkout", "set"] + sparse_paths, cwd=clone_dir)
             run(["git", "fetch", "--depth", "1", "origin", ref], cwd=clone_dir)
             run(["git", "checkout", "--detach", "FETCH_HEAD"], cwd=clone_dir)
+            # The initial sparse-checkout rules are installed while the
+            # clone still points at its default-branch tip.  A later
+            # detached checkout of the recipe's pinned SHA can therefore
+            # leave newly requested paths marked skip-worktree rather than
+            # materializing them (observed for libcxxabi on Windows).  Reapply
+            # after that checkout so the rules are evaluated against the
+            # actual pinned tree we are about to copy and build.
+            run(["git", "sparse-checkout", "reapply"], cwd=clone_dir)
         elif rebuild:
             run(["git", "fetch", "--depth", "1", "origin", ref], cwd=clone_dir)
             run(["git", "checkout", "--detach", "FETCH_HEAD"], cwd=clone_dir)
+            run(["git", "sparse-checkout", "reapply"], cwd=clone_dir)
         checkout_subdir = source.get("checkout_subdir")
         if not checkout_subdir:
             raise SystemExit(f"{recipe['name']}: source.sparse_paths requires source.checkout_subdir")

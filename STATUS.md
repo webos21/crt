@@ -9,6 +9,13 @@ current state so the next session doesn't have to re-derive it from
 means; if this page and `HISTORY.md`/`TODO.md` disagree, the dated entries
 in those two win.
 
+- **Latest Windows imported C++ runtime status (2026-08-23): passing.** The
+  pinned LLVM libc++/libc++abi/libunwind recipes build static and shared
+  libraries, stage them into the Windows sysroot, and pass both
+  `crt-libcxx-smoke` linkage modes. The default Windows regression suite also
+  passes 120/120 after this work. `<filesystem>` was compiled as part of
+  libc++, but its Windows-specific behavioral coverage remains a follow-up.
+
 ## What "passing" currently means
 
 - **CI**: `.github/workflows/ci.yml`, a 5-leg GitHub Actions matrix (macOS

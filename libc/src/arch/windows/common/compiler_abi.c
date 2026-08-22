@@ -4,6 +4,10 @@
  * floating-point operations; normally the MSVC runtime provides it.
  */
 
+#include <stdint.h>
+
+void __stack_chk_fail(void);
+
 #if defined(__x86_64__) || defined(_M_X64)
 __attribute__((weak)) int _fltused = 0;
 #endif
@@ -58,3 +62,17 @@ void __clear_cache(void* start, void* end) {
  * *-w64-mingw32), so it is otherwise dead weight, not a duplicate
  * constructor-running path. */
 void __main(void) {}
+
+/* Clang's Windows compiler-rt builtins use the same documented MSVC ABI
+ * stack-cookie pair as /GS-instrumented objects.  The normal MSVC startup
+ * object initializes this state, but CRT-owned crt1/dllcrt deliberately
+ * replaces that startup path.  Keep the cookie in the CRT ABI object so it
+ * is present in both libc.a and libc.dll, alongside the other compiler-
+ * generated symbol shims in this file. */
+uintptr_t __security_cookie = (uintptr_t)0x9e3779b97f4a7c15ULL;
+
+void __security_check_cookie(uintptr_t cookie) {
+  if (cookie != __security_cookie) {
+    __stack_chk_fail();
+  }
+}
