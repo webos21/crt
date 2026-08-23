@@ -21,8 +21,22 @@ in those two win.
   and Skia installs, matching macOS/Linux arm64. Five real bugs fixed along
   the way (GN's own hardcoded `python3` token, a `cmd.exe` quoting trap,
   two `win32_shim` gaps, a `tools/crt-ar` response-file parsing bug); see
-  `HISTORY.md`'s matching entry. Not yet done: `-DCRTGFX_ENABLE_SKIA=ON`
-  reconfigure + `crtgfx_skia_raster_smoke` itself on Windows.
+  `HISTORY.md`'s matching entry.
+- **`crtgfx_skia_raster_smoke` on Windows (2026-08-23, same day): blocked
+  on a real ABI mismatch, not yet fixed.** `CRTGFX_ENABLE_SKIA=ON` was
+  tried; one more real bug fixed (`_NO_CRT_STDIO_INLINE`, a UCRT `printf`
+  inline-definition clash any C++ code reaching real MSVC STL headers
+  could hit), then a genuine architectural gap surfaced: this project's
+  regular CMake C++ code compiles MSVC-mangled (`x86_64-pc-windows-msvc`,
+  clang's own default), while Skia is built GNU/Itanium-mangled
+  (`--target=x86_64-w64-mingw32`, via `tools/crt-cc.cmd`/`crt-c++.cmd`) --
+  not link-compatible. Stopped here by explicit user choice; the two real
+  fixes are kept, `CRTGFX_ENABLE_SKIA` reverted to its documented default
+  `OFF`, confirmed zero regression (100%, 120/120). See `HISTORY.md`'s
+  matching entry and `TODO.md`'s dated sub-bullet for the two real
+  candidate fixes (retarget the smoke test + its dependencies to mingw32,
+  or retarget Skia's own build to MSVC) a future pass should choose
+  between.
 
 ## What "passing" currently means
 

@@ -289,6 +289,33 @@ if(CRT_TARGET_OS STREQUAL "windows")
   target_compile_options(crt_cxx_build_flags INTERFACE
     $<$<COMPILE_LANGUAGE:CXX>:-fno-threadsafe-statics>
   )
+  # _NO_CRT_STDIO_INLINE: the real Windows SDK's own ucrt/stdio.h is
+  # reachable on the -isystem chain just above -- deliberately so, for
+  # libc++'s own internal include_next needs -- but any C++ translation
+  # unit that transitively reaches a *real* MSVC STL header (also on that
+  # same chain, for the identical reason) can pull it in too, even when
+  # nothing in this project's own code names it directly. Confirmed for
+  # real (2026-08-23): libcrtgfx's own tests/skia_raster_smoke.cc's plain
+  # `#include <stdio.h>` was a red herring -- `-E` preprocessing showed
+  # some Skia header reaching <limits> -> the real MSVC <cwchar> -> the
+  # real MSVC <cstdio> -> #include_next's own way into ucrt's real
+  # stdio.h, which by default *defines* (not just declares) `printf` as
+  # an inline wrapper -- confirmed by reading ucrt/stdio.h directly (line
+  # ~948). That collided at link time with this project's own real
+  # printf() in c.lib: `lld-link: error: duplicate symbol: printf`.
+  # _NO_CRT_STDIO_INLINE is ucrt/stdio.h's own real, documented escape
+  # hatch for exactly this situation (confirmed by reading the same
+  # header: every one of its own inline function bodies is wrapped in
+  # `#if defined _NO_CRT_STDIO_INLINE ; #else { ... } #endif`) -- defining
+  # it makes ucrt/stdio.h emit plain declarations instead, so no inline
+  # definition ever gets compiled into a client's own object file
+  # regardless of which downstream C++ header happens to reach it. Applied
+  # project-wide (not scoped to the one test that surfaced it) since any
+  # future C++ code transitively reaching the same real-MSVC-STL chain
+  # would hit the identical clash.
+  target_compile_definitions(crt_cxx_build_flags INTERFACE
+    $<$<COMPILE_LANGUAGE:CXX>:_NO_CRT_STDIO_INLINE>
+  )
 endif()
 
 function(crt_configure_shared_runtime target_name)

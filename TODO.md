@@ -490,13 +490,40 @@ Next work order:
      `alink` rule packs them space-separated on a single line). See
      `HISTORY.md`'s matching 2026-08-23 entry for the full per-bug
      writeup. Verified: both `libskcms.a` and `libskia.a` link and Skia
-     installs cleanly. Not yet done: reconfiguring with
-     `-DCRTGFX_ENABLE_SKIA=ON` and building/running
-     `crtgfx_skia_raster_smoke` itself on Windows (needs a fresh
-     `cmake` reconfigure of the default preset, deliberately not done
-     as part of this fix since `CRTGFX_ENABLE_SKIA` stays OFF by default
-     and flipping it is the user's own call, not a build-fix side
-     effect) -- the natural next step once picked up again.
+     installs cleanly.
+   - **Picked up the very next step (2026-08-23, same day): reconfigured
+     with `-DCRTGFX_ENABLE_SKIA=ON` and built `crtgfx_skia_raster_smoke`.
+     Fixed one more real bug (a project-wide UCRT `printf` inline-
+     definition clash, `_NO_CRT_STDIO_INLINE`), then hit a genuine,
+     deeper architectural gap and deliberately stopped, by explicit user
+     choice.** `crtgfx_skia_raster_smoke.exe` fails to *link* on Windows
+     with a long list of undefined Skia C++ symbols (`SkPaint::SkPaint()`,
+     `SkCanvas::drawRect()`, ...) that demonstrably do exist in
+     `libskia.a` (confirmed via `llvm-nm`). Root cause: this project's
+     own regular CMake C++ code (`crtgfx.lib`/`c++.lib`/this test itself)
+     compiles with clang's *default* Windows target
+     (`x86_64-pc-windows-msvc`, MSVC-style name mangling -- a real,
+     documented, deliberate project choice, see `CMakeLists.txt`'s own
+     comment), while Skia is built via `tools/crt-cc.cmd`/`crt-c++.cmd`,
+     which force `--target=x86_64-w64-mingw32` (Itanium/GNU-style
+     mangling, needed for GNU-macro-compatible third-party autoconf-
+     style code). The two schemes are not link-compatible -- this is the
+     first target project-wide that ever tried linking them together
+     directly. Asked the user how to proceed given the real scope jump;
+     explicit answer: stop here, document the finding, leave the actual
+     fix (retarget this one test-and-transitively-`crtgfx.lib`/`c++.lib`/
+     `c.lib` to `-w64-mingw32`, *or* retarget Skia's own build to
+     `-pc-windows-msvc` -- both real, substantial architectural
+     decisions) for a dedicated pass. `CRTGFX_ENABLE_SKIA` reverted back
+     to its documented default `OFF` (the smoke test is a plain,
+     non-`EXCLUDE_FROM_ALL` executable, so leaving it `ON` would have
+     broken the default `cmake --build`/`ctest` workflow). The two real
+     fixes found along the way are kept (harmless under the default
+     `OFF`, confirmed via a full default-config Windows regression run:
+     **100% tests passed, 120/120, zero regression**). See `HISTORY.md`'s
+     matching 2026-08-23 entry for the full writeup -- the natural next
+     step once this is picked up again is choosing one of the two ABI-
+     unification directions above, not another narrow shim.
    - **A real WSL/Ubuntu-20.04 attempt confirmed the "Linux would reach**
      **the same wall faster" projection above, and surfaced one genuinely**
      **new, environment-specific finding along the way (2026-08-22).**

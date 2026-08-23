@@ -10,6 +10,84 @@ substantive update.
 
 ## 2026-08-23
 
+- **`-DCRTGFX_ENABLE_SKIA=ON` reconfigure + `crtgfx_skia_raster_smoke` build
+  attempted on Windows; fixed one more real bug (a project-wide UCRT
+  `printf` inline-definition clash), then hit a genuine, deeper
+  architectural gap and deliberately stopped, by explicit user choice, once
+  a real fix meant either reworking this project's own Windows C++ target
+  triple or Skia's.** Direct follow-up to the CPU-raster archive build
+  fix just below. Reconfiguring with `CRTGFX_ENABLE_SKIA=ON` picked up the
+  just-built `libskia.a` automatically (`CRTGFX_SKIA_LIBRARIES` auto-
+  detects it if present) and registered `crtgfx_skia_raster_smoke_runs`
+  (120 -> 121 tests). Building it surfaced two real problems:
+  1. **`lld-link: error: duplicate symbol: printf`** (one copy from
+     `.../ucrt/stdio.h:956`, one from this project's own real
+     `c.lib(printf.c.obj)`). `-E` preprocessing the actual test file
+     traced this to a real, if indirect, chain: some Skia header reaches
+     `<limits>` -> the real MSVC `<cwchar>` -> the real MSVC `<cstdio>` ->
+     `#include_next`'s own way into ucrt's real `stdio.h` -- which, by
+     default, *defines* (not just declares) `printf` as an inline
+     wrapper (confirmed by reading `ucrt/stdio.h` directly, its own
+     `#if defined _NO_CRT_STDIO_INLINE ; #else { ... } #endif` pattern
+     around every such wrapper). `_NO_CRT_STDIO_INLINE` is ucrt's own
+     real, documented escape hatch for exactly this -- added to
+     `crt_cxx_build_flags` project-wide (top-level `CMakeLists.txt`,
+     Windows-only) rather than scoped to the one test that surfaced it,
+     since any future C++ code reaching the same real-MSVC-STL chain
+     (itself reachable on purpose, for libc++'s own internal
+     `include_next` needs) would hit the identical clash. A separate,
+     complementary fix landed alongside it (though it turned out not to
+     be the actual root cause of the printf clash): `libcrtgfx/
+     CMakeLists.txt`'s own attempt to put this project's `libc/include`
+     ahead of the real SDK dirs via `target_include_directories(...
+     SYSTEM BEFORE ...)` never actually worked, because this project's
+     own custom `CMAKE_CXX_COMPILE_OBJECT` rule emits `<FLAGS>` (where
+     `crt_cxx_build_flags`'s own inherited real-SDK `-isystem` chain
+     lives) before `<INCLUDES>` (where `target_include_directories`
+     lands) on the real command line -- confirmed via the regenerated
+     `build.ninja`. Fixed by adding the override via
+     `target_compile_options()` instead, which does land in `<FLAGS>`,
+     ahead of the inherited chain.
+  2. **A genuine, deeper architectural ABI mismatch**, once compilation
+     succeeded: `lld-link: error: undefined symbol` for real Skia C++
+     methods (`SkPaint::SkPaint()`, `SkCanvas::drawRect()`, ...) that
+     demonstrably do exist in `libskia.a` (confirmed via `llvm-nm`,
+     real "T"-defined symbols, e.g. `_ZN7SkPaintC1Ev`). Root-caused to
+     this project's own regular CMake C++ code (`crtgfx.lib`, `c++.lib`,
+     and now `crtgfx_skia_raster_smoke.cc` itself) compiling with
+     clang's *default* Windows target (`x86_64-pc-windows-msvc`, MSVC-
+     style C++ name mangling -- confirmed by the linker's own error text
+     using MSVC `__cdecl`-decorated demangled names, and by
+     `CMakeLists.txt`'s own comment: "'-pc-windows-msvc' ... matches
+     what CMAKE_C_COMPILER=clang already defaults to with no explicit
+     --target at all"), while Skia itself is built via `tools/
+     crt-cc.cmd`/`crt-c++.cmd`, which explicitly force
+     `--target=x86_64-w64-mingw32` (Itanium/GNU-style mangling --
+     `_ZN7SkPaintC1Ev` is exactly that form) for GNU-macro-compatible
+     autoconf-style third-party code. These two mangling schemes are not
+     link-compatible. This is the first target in the whole project that
+     ever tried to link the two together directly (every earlier Skia-
+     touching CMake code either only used Skia's C API surface via
+     `crtgfx/skia.h` at a boundary that didn't require this, or never
+     actually linked against `libskia.a`'s own C++ symbols). Given the
+     user's own explicit choice (asked directly, given the real scope
+     jump): **stopped here rather than picking a fix** -- either
+     retargeting this one test (and transitively `crtgfx.lib`/`c++.lib`/
+     `c.lib`, real rework, not scoped) to `-w64-mingw32` to match Skia,
+     or retargeting Skia's own build to `-pc-windows-msvc` to match this
+     project's regular code (risking the GNU-macro compatibility Skia's
+     own GN/autoconf-shaped build genuinely needs), are both real,
+     substantial architectural decisions, not narrow shims. `-D
+     CRTGFX_ENABLE_SKIA=ON` was reverted back to the documented default
+     `OFF` afterward (`crtgfx_skia_raster_smoke` is a plain, non-EXCLUDE_
+     FROM_ALL executable target -- leaving it ON would have broken the
+     default `cmake --build`/`ctest` workflow for anyone touching this
+     tree next). Both real fixes above (`_NO_CRT_STDIO_INLINE`, the
+     `target_compile_options` isystem-ordering fix) are kept regardless
+     (real, permanent, harmless under the default `CRTGFX_ENABLE_SKIA=
+     OFF`) -- confirmed via a full default-config Windows regression run
+     after reverting: **100% tests passed, 120/120, zero regression.**
+
 - **Skia's CPU-raster archive (`libskcms.a`/`libskia.a`) now builds clean on
   Windows via `cmake --build --target crtgfx-skia-build`, matching what
   already worked on macOS/Linux arm64.** Direct follow-up to the Windows

@@ -415,8 +415,36 @@ if(CRTGFX_ENABLE_SKIA)
     ${CRT_STARTUP_END_OBJECTS}
   )
   target_link_libraries(crtgfx_skia_raster_smoke PRIVATE crt_cxx_build_flags crtgfx cxx c)
+  # -isystem<repo>/libc/include, via target_compile_options (NOT target_
+  # include_directories -- see the plain CRTGFX_SKIA_ROOT-only call just
+  # below for that): confirmed for real (2026-08-23) that this project's
+  # own custom CMAKE_CXX_COMPILE_OBJECT rule (top-level CMakeLists.txt,
+  # "place C++ flags first so crt_cxx_build_flags can establish the same
+  # ordering as crt-c++") emits <FLAGS> before <INCLUDES> on the actual
+  # command line, and crt_cxx_build_flags's own real-Windows-SDK isystem
+  # chain (CRT_CXX_STANDARD_INCLUDE_DIRS -- ucrt/shared/um/..., deliberately
+  # kept reachable there for libc++'s own internal include_next chaining)
+  # lives in FLAGS too, inherited via target_link_libraries above -- so a
+  # target_include_directories(... SYSTEM BEFORE ...) call (which lands in
+  # <INCLUDES>, always emitted *after* <FLAGS> by this same custom rule)
+  # can never actually win against it, regardless of the BEFORE keyword.
+  # This is a real, previously-latent bug: no earlier C++ test ever did a
+  # plain #include <stdio.h>, so nothing had reached ucrt's own inline
+  # printf() definition before -- confirmed for real: `lld-link: error:
+  # duplicate symbol: printf`, one copy from
+  # `.../ucrt/stdio.h:956` (this project's own libc/include/stdio.h was
+  # never actually consulted at all) and one from this project's own real
+  # `c.lib(printf.c.obj)`. target_compile_options() calls made directly on
+  # a target land in <FLAGS> ahead of options inherited via
+  # target_link_libraries (confirmed for real by inspecting the
+  # regenerated build.ninja: this -isystem now appears before crt_cxx_
+  # build_flags's own chain), which is what actually fixes the ordering
+  # here -- target_include_directories()'s own BEFORE keyword only orders
+  # within <INCLUDES>, a different slot entirely.
+  target_compile_options(crtgfx_skia_raster_smoke PRIVATE
+    "-isystem${CMAKE_SOURCE_DIR}/libc/include"
+  )
   target_include_directories(crtgfx_skia_raster_smoke SYSTEM BEFORE PRIVATE
-    "${CMAKE_SOURCE_DIR}/libc/include"
     "${CRTGFX_SKIA_ROOT}"
   )
   target_link_libraries(crtgfx_skia_raster_smoke PRIVATE crt_compiler_rt_builtins)
