@@ -45,7 +45,34 @@ if(CRT_TARGET_OS STREQUAL "windows")
     if(NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
       message(FATAL_ERROR "CRT_TARGET_OS=windows with CRT_TARGET_ARCH=host requires a Windows host (cross-OS is intentionally deferred).")
     endif()
-    if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(ARM64|arm64|aarch64)$")
+    # CMAKE_HOST_SYSTEM_PROCESSOR is NOT safe for this check -- confirmed for
+    # real (2026-08-23) on GitHub Actions' own "windows-11-arm" CI runner
+    # (genuine ARM64 hardware): it reported the *emulated* architecture
+    # ("AMD64") whenever the running cmake.exe itself happens to be an x64
+    # binary executing under Windows-on-ARM's x64 emulation layer, not the
+    # true host CPU -- this silently selected x86_64-w64-mingw32 on a real
+    # ARM64 machine (`clang: error: unsupported option '-ffixed-x18' for
+    # target 'x86_64-w64-mingw32'`, that flag being ARM64-only, applied
+    # further below based on this same variable). PROCESSOR_ARCHITEW6432 is
+    # the standard, documented Windows environment-variable escape hatch for
+    # exactly this: set only when the *current process* is running under
+    # some form of architecture emulation, and always holding the *true*
+    # native host architecture in that case; PROCESSOR_ARCHITECTURE alone is
+    # only trustworthy when PROCESSOR_ARCHITEW6432 is unset (meaning the
+    # process is already running natively). This project's own separate,
+    # already-working CRT_WINDOWS_SDK_ARCH detection (this file, further
+    # below) sidesteps the same trap differently -- it reads CMAKE_SYSTEM_
+    # PROCESSOR, only available *after* project() has actually run and
+    # resolved the real compiler/ABI, which is exactly what this block
+    # cannot wait for (CMAKE_C_COMPILER_TARGET/CMAKE_CXX_COMPILER_TARGET
+    # must be set *before* project() for Clang to honor them at all -- see
+    # this whole if(CRT_TARGET_OS STREQUAL "windows")'s own top comment).
+    if(DEFINED ENV{PROCESSOR_ARCHITEW6432} AND NOT "$ENV{PROCESSOR_ARCHITEW6432}" STREQUAL "")
+      set(CRT_WINDOWS_HOST_ARCH_ENV "$ENV{PROCESSOR_ARCHITEW6432}")
+    else()
+      set(CRT_WINDOWS_HOST_ARCH_ENV "$ENV{PROCESSOR_ARCHITECTURE}")
+    endif()
+    if(CRT_WINDOWS_HOST_ARCH_ENV MATCHES "^(ARM64|arm64|aarch64)$")
       set(CRT_WINDOWS_COMPILER_TARGET "aarch64-w64-mingw32")
     else()
       set(CRT_WINDOWS_COMPILER_TARGET "x86_64-w64-mingw32")
@@ -206,92 +233,74 @@ endif()
 add_library(crt_cxx_build_flags INTERFACE)
 target_link_libraries(crt_cxx_build_flags INTERFACE crt_build_flags)
 set(CRT_CXX_STANDARD_INCLUDE_DIRS)
-foreach(CRT_CXX_IMPLICIT_INCLUDE_DIR IN LISTS CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES)
-  # The first pattern used to be anchored to "include/c++" (e.g. plain
-  # "/usr/include/c++/13"), which is what a from-source/non-multiarch GCC or
-  # Clang install looks like -- but real Debian/Ubuntu GCC installs split
-  # libstdc++ headers into that generic directory *plus* a second,
-  # target-triple-specific one carrying the machine-generated
-  # bits/c++config.h (e.g. "/usr/include/aarch64-linux-gnu/c++/13" on
-  # aarch64, "/usr/include/x86_64-linux-gnu/c++/13" on x86_64), which does
-  # not contain the literal substring "include/c++" at all and so was
-  # silently dropped -- confirmed directly via `clang++ -E -x c++ -v
-  # /dev/null` and CMakeCXXCompiler.cmake's own CMAKE_CXX_IMPLICIT_INCLUDE_
-  # DIRECTORIES, both of which do list it. Missing it meant any C++
-  # translation unit that reached <cstdlib> (or any other libstdc++ header
-  # that itself #includes <bits/c++config.h>) failed with "'bits/c++config.h'
-  # file not found" on exactly this class of real Linux host. Broadened to
-  # match a "c++" path *component* anywhere (still requiring the trailing
-  # version/backward directory or end-of-string, so it doesn't also grab
-  # unrelated paths that merely contain the two characters "c++"). The
-  # separate libc++ "/c++/v1$" pattern below still matches its own shape
-  # too (already covered by the broader one, kept for clarity/history).
-  # Windows paths may use backslashes and include MSVC or LLVM SDK headers.
-  if(CRT_CXX_IMPLICIT_INCLUDE_DIR MATCHES "/c[+][+](/|$)" OR
-     CRT_CXX_IMPLICIT_INCLUDE_DIR MATCHES "/c[+][+]/v1$" OR
-     CRT_CXX_IMPLICIT_INCLUDE_DIR MATCHES "VC/Tools/MSVC/.*/include$" OR
-     CRT_CXX_IMPLICIT_INCLUDE_DIR MATCHES "VC\\\\Tools\\\\MSVC\\\\.*\\\\include$" OR
-     (CRT_TARGET_OS STREQUAL "windows" AND CRT_CXX_IMPLICIT_INCLUDE_DIR MATCHES "/include$"))
-    list(APPEND CRT_CXX_STANDARD_INCLUDE_DIRS "${CRT_CXX_IMPLICIT_INCLUDE_DIR}")
-  endif()
-endforeach()
-if(NOT CRT_CXX_STANDARD_INCLUDE_DIRS AND CRT_TARGET_OS STREQUAL "windows")
-  # The foreach() above comes back completely empty on Windows, not merely a
-  # regex miss like the Linux multiarch gap documented above it -- confirmed
-  # directly against this exact machine's generated CMakeCXXCompiler.cmake:
-  # CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES is genuinely set to "" for a
-  # stock Windows LLVM clang++ install, because CMake's own implicit-
-  # include-directory detection is written for GCC/Clang-GNU-style
-  # compilers and does not run the same way for a Clang that simulates
-  # MSVC (CMAKE_CXX_SIMULATE_ID=MSVC here, the *-pc-windows-msvc default
-  # target with no explicit --target override) -- CMake expects MSVC-like
-  # compilers to rely on the INCLUDE environment variable instead, which
-  # this freestanding build intentionally never sets. The VC/Tools/MSVC/
-  # .*/include$ pattern above was already written to handle exactly this
-  # path shape but never got real data to test it against. Probe the
-  # compiler directly the same way a human would (`clang++ -E -x c++ -v`
-  # against an empty translation unit) and parse its own "#include <...>
-  # search starts here" listing -- the same information CMake's own
-  # detection reads on other platforms, just read here by hand since
-  # CMake declines to for this compiler/target combination.
-  set(CRT_CXX_STDINC_PROBE_SOURCE "${CMAKE_BINARY_DIR}/CMakeFiles/crt_cxx_stdinc_probe.cpp")
-  if(NOT EXISTS "${CRT_CXX_STDINC_PROBE_SOURCE}")
-    file(WRITE "${CRT_CXX_STDINC_PROBE_SOURCE}" "")
-  endif()
-  execute_process(
-    COMMAND "${CMAKE_CXX_COMPILER}" -E -x c++ -v "${CRT_CXX_STDINC_PROBE_SOURCE}"
-    OUTPUT_QUIET
-    ERROR_VARIABLE CRT_CXX_STDINC_PROBE_OUTPUT
-    RESULT_VARIABLE CRT_CXX_STDINC_PROBE_RESULT
-  )
-  if(CRT_CXX_STDINC_PROBE_RESULT EQUAL 0 AND
-     CRT_CXX_STDINC_PROBE_OUTPUT MATCHES "search starts here:(.*)End of search list")
-    string(REGEX REPLACE "\r?\n" ";" CRT_CXX_STDINC_PROBE_LINES "${CMAKE_MATCH_1}")
-    foreach(CRT_CXX_STDINC_PROBE_LINE IN LISTS CRT_CXX_STDINC_PROBE_LINES)
-      string(STRIP "${CRT_CXX_STDINC_PROBE_LINE}" CRT_CXX_STDINC_PROBE_LINE)
-      # The captured block also contains the unrelated
-      # `#include <...> search starts here:` header line (there are two
-      # "search starts here:" markers in real clang -v output, one for
-      # quoted includes and one for angle-bracket includes, and the regex
-      # above has no non-greedy match in CMake to skip past the first) --
-      # harmless, since it is not a real filesystem path and EXISTS()
-      # filters it out here same as any other non-path noise would be.
-      if(CRT_CXX_STDINC_PROBE_LINE AND EXISTS "${CRT_CXX_STDINC_PROBE_LINE}")
-        list(APPEND CRT_CXX_STANDARD_INCLUDE_DIRS "${CRT_CXX_STDINC_PROBE_LINE}")
-      endif()
-    endforeach()
-    if(CRT_CXX_STANDARD_INCLUDE_DIRS)
-      message(STATUS "CRT located the Clang C++ standard-library include directories on Windows via a direct compiler probe: ${CRT_CXX_STANDARD_INCLUDE_DIRS}")
+if(NOT CRT_TARGET_OS STREQUAL "windows")
+  foreach(CRT_CXX_IMPLICIT_INCLUDE_DIR IN LISTS CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES)
+    # The first pattern used to be anchored to "include/c++" (e.g. plain
+    # "/usr/include/c++/13"), which is what a from-source/non-multiarch GCC or
+    # Clang install looks like -- but real Debian/Ubuntu GCC installs split
+    # libstdc++ headers into that generic directory *plus* a second,
+    # target-triple-specific one carrying the machine-generated
+    # bits/c++config.h (e.g. "/usr/include/aarch64-linux-gnu/c++/13" on
+    # aarch64, "/usr/include/x86_64-linux-gnu/c++/13" on x86_64), which does
+    # not contain the literal substring "include/c++" at all and so was
+    # silently dropped -- confirmed directly via `clang++ -E -x c++ -v
+    # /dev/null` and CMakeCXXCompiler.cmake's own CMAKE_CXX_IMPLICIT_INCLUDE_
+    # DIRECTORIES, both of which do list it. Missing it meant any C++
+    # translation unit that reached <cstdlib> (or any other libstdc++ header
+    # that itself #includes <bits/c++config.h>) failed with "'bits/c++config.h'
+    # file not found" on exactly this class of real Linux host. Broadened to
+    # match a "c++" path *component* anywhere (still requiring the trailing
+    # version/backward directory or end-of-string, so it doesn't also grab
+    # unrelated paths that merely contain the two characters "c++"). macOS
+    # goes through this same Linux-shaped path too (both reach here only via
+    # the top-of-file -stdlib=libc++ one-time-detection trick, and neither
+    # is ever *-pc-windows-msvc/-*-w64-mingw32, so no Windows-specific
+    # pattern is needed on this branch at all -- see the Windows-specific
+    # skip just below this whole if() for why.
+    if(CRT_CXX_IMPLICIT_INCLUDE_DIR MATCHES "/c[+][+](/|$)" OR
+       CRT_CXX_IMPLICIT_INCLUDE_DIR MATCHES "/c[+][+]/v1$")
+      list(APPEND CRT_CXX_STANDARD_INCLUDE_DIRS "${CRT_CXX_IMPLICIT_INCLUDE_DIR}")
     endif()
-  endif()
-endif()
-if(NOT CRT_CXX_STANDARD_INCLUDE_DIRS)
-  if(CRT_TARGET_OS STREQUAL "windows")
-    message(WARNING "CRT could not locate the Clang C++ standard-library include directory on Windows; continuing with limited C++ support")
-  else()
+  endforeach()
+  if(NOT CRT_CXX_STANDARD_INCLUDE_DIRS)
     message(FATAL_ERROR "CRT could not locate the Clang C++ standard-library include directory")
   endif()
 endif()
+# Windows deliberately never runs the block above at all (not merely "finds
+# nothing" -- confirmed for real, 2026-08-23, this is an active, harmful
+# difference, not just a historical CMake-detection gap): CMAKE_CXX_
+# IMPLICIT_INCLUDE_DIRECTORIES/`clang++ -E -x c++ -v`'s own search-path
+# listing on this project's now-unified --target=*-w64-mingw32 build (see
+# this file's own top-level Windows target-selection block) reflect
+# whatever real MinGW-w64 GCC install clang's own mingw-target driver mode
+# auto-detects on the *build host* -- on a plain dev machine with no such
+# install, that list is empty or harmless (just Clang's own bundled
+# resource-dir), but GitHub Actions' own `windows-latest` runner image
+# ships a real one preinstalled at C:\mingw64 (msys2-based, per GitHub's
+# own documented Windows runner software list) -- and both this loop's own
+# "/c[+][+]" pattern (matching real GCC libstdc++ path shapes just as
+# happily as libc++'s "/c++/v1") and the old Windows-only "/include$"
+# catch-all it used to carry (removed here) picked that real host GCC
+# install's own C++ headers straight up, unconditionally re-adding them as
+# explicit -isystem flags. This project's own bootstrap `cxx`/`cxx_shared`
+# ABI shim (libstdc++/src/new_delete.cc etc) failed to build on CI as a
+# direct result: `error: use of undeclared identifier 'malloc'`, `free` --
+# reaching a real, host GNU libstdc++ (not this project's own libc, and
+# not even the *right* C++ standard library family for an Itanium-ABI,
+# imported-libc++-oriented build) before this project's own libc/include
+# ever got a chance. The VC/Tools/MSVC/*.include$ patterns this loop used
+# to also carry (for the *old*, pre-unification -pc-windows-msvc default)
+# are dead for the identical reason in the other direction: that target is
+# never selected on Windows anymore at all. -nostdinc++ (below, now applied
+# to Windows too, no longer just Linux/macOS) is what actually keeps any
+# of this from mattering going forward -- it suppresses Clang's own
+# implicit/default C++ header search *at the compiler level*, independent
+# of whatever this file's own CMake logic does or doesn't re-derive from
+# CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES -- so Windows C++ code now relies
+# purely on this project's own headers (line ~299 below) and, when real
+# STL support is needed, this project's own imported libc++ (${CRT_SYSROOT}
+# /include/c++/v1, wired explicitly per-consumer in libcrtgfx/CMakeLists.
+# txt), exactly like Linux/macOS already did -- never a host substitute.
 set(CRT_CXX_STANDARD_INCLUDE_FLAGS)
 foreach(CRT_CXX_STANDARD_INCLUDE_DIR IN LISTS CRT_CXX_STANDARD_INCLUDE_DIRS)
   list(APPEND CRT_CXX_STANDARD_INCLUDE_FLAGS "-isystem${CRT_CXX_STANDARD_INCLUDE_DIR}")
@@ -308,9 +317,22 @@ endif()
 # libc++ C++ wrappers use include_next for their companion C headers. Keep the
 # standard headers before the Bionic-compatible C surface and make both system
 # paths, so a CMake C++ target follows tools/crt-c++'s include ordering.
+# -nostdinc++ now applies on Windows too (previously excluded, back when
+# Windows regular CMake C++ code intentionally relied on a real MSVC STL --
+# see this file's own top-level Windows target-selection block and the
+# CRT_CXX_STANDARD_INCLUDE_DIRS comment above for why that's no longer true
+# post-mingw32-unification): this is what actually suppresses Clang's own
+# implicit/default C++ header search at the compiler level, independent of
+# whatever CRT_CXX_STANDARD_INCLUDE_DIRS itself did or didn't re-derive --
+# confirmed for real (2026-08-23) to be the actual load-bearing fix, not
+# just the CRT_CXX_STANDARD_INCLUDE_DIRS restructure above: without it,
+# Clang's own mingw-target driver mode still auto-detects and searches
+# whatever real MinGW-w64 GCC install exists on the build host (this
+# project's own explicit -isystem flags don't suppress the *compiler's*
+# separate implicit search).
 target_compile_options(crt_cxx_build_flags INTERFACE
   $<$<COMPILE_LANGUAGE:CXX>:-nostdinc>
-  $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<PLATFORM_ID:Windows>>>:-nostdinc++>
+  $<$<COMPILE_LANGUAGE:CXX>:-nostdinc++>
   $<$<COMPILE_LANGUAGE:CXX>:${CRT_CXX_STANDARD_INCLUDE_FLAGS}>
   $<$<COMPILE_LANGUAGE:CXX>:-isystem${CMAKE_SOURCE_DIR}/include>
 )

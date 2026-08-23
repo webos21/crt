@@ -10,6 +10,76 @@ substantive update.
 
 ## 2026-08-23
 
+- **Windows CI ("Configure, build, and test") red on both `windows-x64` and
+  `windows-arm64` after the mingw32-unification push, fixed for real -- two
+  distinct, real bugs, neither reproducible on this session's own local
+  Windows dev machine, both diagnosed directly from the user's own pasted
+  CI logs (unauthenticated GitHub Actions log access returns 403; no local
+  way to reproduce GitHub's exact runner images).**
+  1. **`windows-x64`: the mingw32-unified `CRT_CXX_STANDARD_INCLUDE_DIRS`**
+     **detection (`CMakeLists.txt`) reached a real, host-installed MinGW-w64**
+     **GCC toolchain on the CI runner and fed its headers into this**
+     **project's own bootstrap `cxx`/`cxx_shared` build.** GitHub's own
+     `windows-latest` runner image ships a real MinGW-w64/msys2 install
+     preinstalled at `C:\mingw64` (this session's own local dev machine has
+     no such install, so this was never seen locally). Once regular CMake
+     C++ compiled `--target=x86_64-w64-mingw32`, Clang's own mingw-target
+     driver mode auto-detected that real host install and listed its C++
+     headers in `CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES` -- which this
+     project's own detection loop (originally written to find the *old*
+     MSVC-simulate default's real MSVC STL headers) matched via both its
+     generic `/c[+][+]` pattern and its Windows-only `/include$` catch-all,
+     re-adding real GNU libstdc++ headers as explicit `-isystem` flags.
+     `libstdc++/src/new_delete.cc` (`#include <stdlib.h>`, calls `malloc`/
+     `free`) then reached that real host header ahead of this project's own
+     `libc/include/stdlib.h`: `error: use of undeclared identifier
+     'malloc'`/`'free'`. Root-caused directly from the user's own pasted
+     CI log, which showed the real `C:/mingw64/...` `-isystem` paths on the
+     actual failing compile command. Fixed two ways: (a) the whole
+     `CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES`-matching + compiler-probe-
+     fallback block is now Linux/macOS-only (Windows never runs it at all
+     post-unification -- it was only ever needed to find a *host substitute*
+     STL, which this project deliberately no longer wants on any platform);
+     (b) `-nostdinc++` (already applied on Linux/macOS, previously excluded
+     on Windows for the same now-obsolete reason) now applies on Windows
+     too -- confirmed to be the actually load-bearing half of the fix,
+     since it suppresses Clang's own *implicit* C++ header search at the
+     compiler level, independent of anything this project's own CMake code
+     does or doesn't re-derive from `CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES`.
+  2. **`windows-arm64`: `CMAKE_HOST_SYSTEM_PROCESSOR` reported the wrong**
+     **architecture on GitHub's own real ARM64 Windows runner**
+     (`windows-11-arm`), selecting `x86_64-w64-mingw32` on genuine ARM64
+     hardware -- confirmed directly from the user's own pasted log:
+     `clang: error: unsupported option '-ffixed-x18' for target
+     'x86_64-w64-mingw32'` (that flag is ARM64-only, and was correctly
+     applied by this project's own *separate*, already-working
+     `CRT_EFFECTIVE_ARCH_FOR_FLAGS`/`CMAKE_SYSTEM_PROCESSOR`-based detection
+     elsewhere in the same file -- proving the target *arch* was right and
+     only the compiler *target triple* selection was wrong, and that
+     `CMAKE_SYSTEM_PROCESSOR` itself is trustworthy on this exact runner).
+     Root cause: `CMAKE_HOST_SYSTEM_PROCESSOR` (used for this specific
+     decision, which -- unlike the working one -- has to run *before*
+     `project()`, since `CMAKE_C_COMPILER_TARGET`/`CMAKE_CXX_COMPILER_
+     TARGET` only take effect if set before `project()`/`enable_language()`)
+     reflects whatever architecture the *currently running process* sees --
+     and GitHub's `windows-11-arm` runner apparently executes a real x64
+     `cmake.exe` under Windows-on-ARM's own x64 emulation layer, which
+     reports "AMD64" for that reason, not the true ARM64 host. Fixed by
+     reading `PROCESSOR_ARCHITEW6432` directly (the standard, documented
+     Windows environment-variable escape hatch: set only when the current
+     process is running under some form of architecture emulation, and
+     always holding the *true* native host architecture when it is;
+     `PROCESSOR_ARCHITECTURE` alone is only trustworthy when `PROCESSOR_
+     ARCHITEW6432` is unset), falling back to `PROCESSOR_ARCHITECTURE`
+     only when `PROCESSOR_ARCHITEW6432` is empty/unset (meaning the process
+     is already running natively).
+  Verified: full local Windows regression (this session's own dev machine,
+  which never exhibited either bug, so this only confirms zero regression,
+  not the actual fixes -- those can only be confirmed by CI itself, on the
+  real runner images) -- **100% tests passed, 121/121**, `CRTGFX_ENABLE_
+  SKIA=ON`/`CRT_USE_IMPORTED_LIBCXX=ON` both still on from this session's
+  own cached configure.
+
 - **`crtgfx_skia_raster_smoke` also verified for real on Linux (WSL/Ubuntu
   26.04, amd64), direct follow-up to the Windows mingw32-unification entry
   just below -- user asked "did the Skia smoke test actually pass on WSL

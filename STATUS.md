@@ -9,6 +9,14 @@ current state so the next session doesn't have to re-derive it from
 means; if this page and `HISTORY.md`/`TODO.md` disagree, the dated entries
 in those two win.
 
+- **Windows CI (`windows-x64`/`windows-arm64`) fixed after going red from
+  the mingw32-unification push (2026-08-23): two real bugs, diagnosed from
+  the user's own pasted CI logs (a real host MinGW-w64 install on GitHub's
+  runner poisoning `crt_cxx_build_flags`'s implicit-include detection, and
+  `CMAKE_HOST_SYSTEM_PROCESSOR` misreporting under x64 emulation on the
+  real ARM64 runner). See `HISTORY.md`'s matching, topmost entry. Verified
+  regression-free locally (121/121); the fixes themselves can only be
+  confirmed by CI on the real runner images -- watch the next push.
 - **Latest Windows imported C++ runtime status (2026-08-23): passing.** The
   pinned LLVM libc++/libc++abi/libunwind recipes build static and shared
   libraries, stage them into the Windows sysroot, and pass both
