@@ -10,6 +10,78 @@ substantive update.
 
 ## 2026-08-23
 
+- **`crtgfx_skia_raster_smoke`/`libcrtgfx.dylib` fixed and verified for real
+  on macOS (arm64 host), same underlying class of bug as the Linux and
+  Windows entries below but a genuinely different fix -- user reported the
+  exact `cmake --build --preset macos-host-ninja-debug ... --target
+  crtgfx_skia_raster_smoke` command failing with dozens of undefined
+  `std::__1::...` symbols (basic_string, iostream/locale/stringstream,
+  `__shared_ptr` internals, `__libcpp_verbose_abort`, ...) linking both the
+  smoke executable and `libcrtgfx.dylib` against `libskia.a`. Two real,
+  distinct root causes in `libcrtgfx/CMakeLists.txt`, plus one stale-build-
+  artifact issue (not a code bug):
+  1. **The Linux-only `CRTGFX_CRT_STATIC_LIBS`/`CRTGFX_CRT_SHARED_LIBS`
+     bootstrap-`cxx`-to-real-imported-libc++ swap (see the Linux entry
+     below) had never been extended to macOS.** Added a matching `elseif`
+     branch; deliberately no `libunwind` substitution here, unlike Linux --
+     macOS never builds one (`libstdc++/third_party/libunwind/recipe.json`
+     excludes macOS from its own `target_os` list: Darwin's libSystem
+     already provides a real native unwinder).
+  2. **The real fix, and the one that's actually macOS-specific**: Apple
+     ld (`ld64`/`ld-prime`) scans each static archive exactly once,
+     left-to-right, only pulling members needed by symbols already
+     outstanding at that point -- unlike GNU ld/lld on Linux, it has no
+     `--start-group`/`--end-group` equivalent. `crtgfx`'s own build was
+     linking `${CRTGFX_CRT_STATIC_LIBS}` (now including the real
+     `libc++.a`) *before* `${CRTGFX_SKIA_LIBRARIES}` in its own
+     `target_link_libraries()` calls, so `libc++.a` always landed *before*
+     `libskia.a` on any consumer's flattened link line -- by the time ld
+     reached `libskia.a`'s own extensive std::string/iostream/locale use
+     (SkSL's compiler/parser/debug-trace code), those symbols were no
+     longer "outstanding" and got silently skipped. Fixed by simply
+     reversing the call order in `crtgfx`'s own plain `else()` branch
+     (Skia's libraries first, `CRTGFX_CRT_STATIC_LIBS` second) -- the
+     reverse of the intuitive "dependencies after the thing that needs
+     them" ordering, but correct for a single-pass linker. Two more
+     elaborate approaches were tried and rejected before landing on this:
+     a second explicit `target_link_libraries()` mention of `libc++.a` on
+     the smoke executable's own target did nothing (CMake deduplicates a
+     library by resolved path, silently keeping only `crtgfx`'s own
+     earlier-propagated mention); `-Wl,-force_load,libc++.a` did fix the
+     *link*, but unconditionally pulling in every object in `libc++.a`
+     dragged in `iostream.cpp.o`'s always-run global constructor
+     (`std::ios_base::Init`) even though nothing in the program uses
+     `std::cin`/`cout` -- confirmed for real that this crashed at
+     dyld-init time with a null-vtable `EXC_BAD_ACCESS` in
+     `codecvt<char,char,mbstate_t>::encoding()`, before `main()` even
+     runs, and that the identical `<iostream>` code links and runs fine
+     through `tools/crt-c++`'s own normal (non-force_load) static link
+     recipe -- i.e. real imported libc++ global constructors work fine on
+     this project's freestanding macOS runtime; only unconditionally
+     force-loading the whole archive was the problem. Also removed a
+     stray, pre-existing hardcoded `target_link_libraries(
+     crtgfx_skia_raster_smoke PRIVATE cxx c)` specific to that one
+     executable target, which re-added the small bootstrap ABI shim on
+     top of the real one `crtgfx` now correctly propagates.
+  3. **Not a code bug**: `sysroot/lib/libc++.a` had reverted to the small
+     bootstrap stub (18KB, `cxxabi.c.o`/`msvcabi.c.o`/`new_delete.cc.o`)
+     instead of the real, already-built 9.1MB archive at
+     `external/llvm-runtimes/install/lib/libc++.a` -- the top-level
+     `sysroot` custom target's own `cmake --install` step re-installs the
+     bootstrap `cxx`/`cxx_shared` targets' own `libc++.a`/`.dylib` output
+     names on every run, overwriting whatever `crt-libcxx-sysroot` had
+     staged there earlier. Re-ran `tools/install_libcxx_runtimes.py`
+     directly to restage the real archive; a subsequent full default
+     `cmake --build` (which runs the whole `crt-libcxx-build` ->
+     `crt-libcxx-sysroot` chain after `sysroot` itself, in the right
+     order) restaged it correctly on its own, confirming this was a
+     transient ordering artifact from this session's targeted, partial
+     rebuilds rather than a standing bug.
+  Verified for real: `crtgfx_skia_raster_smoke` links, runs, and prints
+  `crtgfx_skia_raster_smoke: ok`; `libcrtgfx.dylib` (`crtgfx_shared`)
+  links; a full default `cmake --build` and the full `ctest` suite
+  (105/105) both pass with no regressions.
+
 - **`crtgfx_skia_raster_smoke` also verified for real on Linux (WSL/Ubuntu
   26.04, amd64), direct follow-up to the Windows mingw32-unification entry
   just below -- user asked "did the Skia smoke test actually pass on WSL

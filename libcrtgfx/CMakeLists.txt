@@ -256,6 +256,32 @@ if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_ENABLE_SKIA AND CRT_USE_IMPORTED_LI
     "${CRT_SYSROOT}/lib/libc++abi.so"
     "${CRT_SYSROOT}/lib/libunwind.so"
   )
+elseif(CRT_TARGET_OS STREQUAL "macos" AND CRTGFX_ENABLE_SKIA AND CRT_USE_IMPORTED_LIBCXX)
+  # Same substitution, same reason, as the Linux branch just above -- this
+  # gap was never extended to macOS when that fix landed (2026-08-23).
+  # Confirmed for real the same way: linking crtgfx_skia_raster_smoke and
+  # libcrtgfx.dylib against the small bootstrap libstdc++/src/ ABI shim
+  # (`cxx`/`cxx_shared`) left dozens of std::__1::... symbols undefined
+  # (basic_string::append/insert/push_back, std::to_string, iostream/
+  # locale/stringstream machinery, __libcpp_verbose_abort, ...) from
+  # Skia's own SkSL compiler/parser/debug-trace code -- that code genuinely
+  # needs the real, project-owned imported libc++, not the tiny operator-
+  # new/delete/__cxa_* stub shim the bootstrap provides. No libunwind
+  # substitution here, unlike Linux: macOS never builds one at all -- see
+  # libstdc++/third_party/libunwind/recipe.json's own target_os list and
+  # notes (Darwin's own libSystem already provides a real native unwinder;
+  # matches upstream LLVM's own LIBCXXABI_USE_LLVM_UNWINDER=OFF default for
+  # Apple targets).
+  list(REMOVE_ITEM CRTGFX_CRT_STATIC_LIBS cxx)
+  list(APPEND CRTGFX_CRT_STATIC_LIBS
+    "${CRT_SYSROOT}/lib/libc++.a"
+    "${CRT_SYSROOT}/lib/libc++abi.a"
+  )
+  list(REMOVE_ITEM CRTGFX_CRT_SHARED_LIBS cxx_shared)
+  list(APPEND CRTGFX_CRT_SHARED_LIBS
+    "${CRT_SYSROOT}/lib/libc++.dylib"
+    "${CRT_SYSROOT}/lib/libc++abi.dylib"
+  )
 endif()
 
 add_library(crtgfx_common_objects OBJECT ${CRTGFX_COMMON_SOURCES})
@@ -429,10 +455,31 @@ if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_ENABLE_SKIA AND CRTGFX_SKIA_LIBRARI
   target_link_libraries(crtgfx PUBLIC ${CRTGFX_SKIA_LIBRARIES})
   target_link_libraries(crtgfx PRIVATE -Wl,--end-group)
 else()
-  target_link_libraries(crtgfx PRIVATE ${CRTGFX_CRT_STATIC_LIBS})
+  # Skia first, CRT_STATIC_LIBS (libc++.a on macOS, once CRTGFX_ENABLE_SKIA
+  # AND CRT_USE_IMPORTED_LIBCXX swap it in below) second -- reversed from
+  # the seemingly more natural "runtime libs, then Skia" order on purpose.
+  # Apple ld (this else() branch's only real user: macOS) scans each
+  # static archive once, left-to-right, only pulling members needed by
+  # symbols already outstanding at that point -- unlike Linux's --start-
+  # group/--end-group branch just above, ld64 has no bracket-and-rescan
+  # equivalent. libskia.a's own SkSL compiler/parser/debug-trace code
+  # makes extensive std::string/iostream/locale/shared_ptr use, so
+  # libc++.a must still be "ahead" in scan order when ld reaches it --
+  # i.e. mentioned *after* libskia.a on the link line, the reverse of the
+  # intuitive "dependencies of a thing come after it" ordering. Confirmed
+  # for real (2026-08-23): with CRT_STATIC_LIBS linked first (the original
+  # order), crtgfx_skia_raster_smoke/libcrtgfx.dylib both failed with
+  # dozens of undefined std::__1::... symbols from libskia.a's own object
+  # files, even after fixing which libc++.a was being linked at all (see
+  # the CRTGFX_CRT_STATIC_LIBS/SHARED_LIBS macOS substitution above this
+  # if/else) and after removing a stray duplicate hardcoded relink on
+  # crtgfx_skia_raster_smoke's own target -- only reordering these two
+  # calls (no --start-group equivalent, no force_load, no per-consumer
+  # override needed) made the link line pass.
   if(CRTGFX_ENABLE_SKIA AND CRTGFX_SKIA_LIBRARIES)
     target_link_libraries(crtgfx PUBLIC ${CRTGFX_SKIA_LIBRARIES})
   endif()
+  target_link_libraries(crtgfx PRIVATE ${CRTGFX_CRT_STATIC_LIBS})
 endif()
 if(CRT_TARGET_OS STREQUAL "windows")
   target_link_libraries(crtgfx PUBLIC
@@ -692,6 +739,25 @@ if(CRTGFX_ENABLE_SKIA)
     # `-Wl,--start-group`, and libskia.a's own `operator new`/`operator
     # delete` needs (defined in cxx's own new_delete.cc) stayed
     # unresolved even with the group fix in place for libm's symbols.
+  elseif(CRT_TARGET_OS STREQUAL "macos" AND CRT_USE_IMPORTED_LIBCXX)
+    # No explicit libc++/libc++abi relink needed here at all (unlike the
+    # Windows branch above) -- crtgfx's own CRTGFX_CRT_STATIC_LIBS swap
+    # (see that swap's own comment, same file) already propagates the
+    # real imported libc++.a/libc++abi.a to every consumer, and crtgfx's
+    # own build now links Skia's libraries *before* CRTGFX_CRT_STATIC_LIBS
+    # (see the plain else() branch of crtgfx's own target_link_libraries
+    # calls, above in this file) specifically so libc++.a lands *after*
+    # libskia.a on the final link line -- Apple ld's single-pass,
+    # left-to-right static-archive scan needs it there, since libskia.a's
+    # own extensive std::string/iostream/locale use (SkSL's compiler/
+    # parser/debug-trace code) must still be outstanding when ld reaches
+    # it. All this branch needs to do is what the `else()` below does for
+    # every other platform *except* stop it from also linking the small
+    # bootstrap libstdc++/src/ ABI shim (`cxx`) on top of the real one
+    # crtgfx already provides -- confirmed for real (2026-08-23): leaving
+    # the `else()` branch's `cxx` mention in place put a second, different
+    # libc++.a on the link line even after the ordering fix above.
+    target_link_libraries(crtgfx_skia_raster_smoke PRIVATE c)
   else()
     target_link_libraries(crtgfx_skia_raster_smoke PRIVATE cxx c)
   endif()
