@@ -10,6 +10,103 @@ substantive update.
 
 ## 2026-08-23
 
+- **`crtgfx_skia_raster_smoke` also verified for real on Linux (WSL/Ubuntu
+  26.04, amd64), direct follow-up to the Windows mingw32-unification entry
+  just below -- user asked "did the Skia smoke test actually pass on WSL
+  too?", which surfaced that it never had (only "Skia's own build" -- the
+  `libskia.a` archive -- had ever been verified there, per the entry
+  below's own record of prior claims).** Building and running it for real
+  (fresh clone at this commit, `crt-libcxx-sysroot` + `crtgfx-skia-build`
+  both already independently verified working on this platform) found and
+  fixed three more real, Linux-specific bugs, then one real environment
+  gap, none overlapping with the Windows fixes below:
+  1. **A genuine GNU-ld (`ld.bfd`) circular-archive-resolution gap**,
+     same class as the one `tools/crt-cc`'s own Linux branch already
+     documents, but never hit by a *regular CMake* target before:
+     `crtgfx`(STATIC)'s own PRIVATE `c`/`m`/`dl`/`cxx` deps and PUBLIC
+     `libskia.a` dep get flattened into any consumer's link line with
+     `libskia.a` always last (confirmed via the generated link command),
+     so `ld.bfd`'s single left-to-right archive scan finishes scanning
+     `libm.a`/`libc++.a`(=`cxx`)/`libc.a` before it ever discovers
+     `libskia.a`'s own needs (`atan2f`, `operator new`/`delete`, even
+     `__dso_handle`) -- `undefined reference to 'atan2f'` etc, then
+     `hidden symbol '__dso_handle' isn't defined`. Fixed with `-Wl,
+     --start-group`/`--end-group`, wrapped around `crtgfx`'s (and
+     `crtgfx_shared`'s) own `CRTGFX_CRT_STATIC_LIBS`/`CRTGFX_SKIA_
+     LIBRARIES` linking directly in `libcrtgfx/CMakeLists.txt`, not on
+     each consumer -- confirmed for real that a consumer-side attempt
+     (wrapping the markers around `crtgfx_skia_raster_smoke`'s own
+     `target_link_libraries()`/`target_link_options()` calls instead)
+     does not reliably bracket `crtgfx`'s own separately-flattened
+     transitive dependencies, splitting the group with `crtgfx`'s own
+     `libm.a`/`libskia.a` landing outside it.
+  2. **`crtgfx_skia_raster_smoke`'s own redundant, explicit `cxx c` link**
+     (pre-existing, for the non-Windows-imported-libcxx case) landed
+     *outside* the new group (this call happens before `crtgfx` itself
+     gets flattened in), and CMake's own link-line de-duplication kept
+     only that first, ungrouped occurrence -- silently dropping the
+     grouped one from `crtgfx`'s own propagated deps. Since `cxx`'s
+     `new_delete.cc` is exactly what provides `operator new`/`delete`,
+     this left them unresolved even with fix 1 in place. Fixed by not
+     re-linking `cxx c` explicitly for this Linux+Skia case at all --
+     `crtgfx`'s own grouped propagation already provides it.
+  3. **Linux needed the same bootstrap-`cxx`-to-real-imported-libc++**
+     **swap already done for Windows** (see the entry below), just never
+     applied here: once fixes 1-2 resolved the `libm`/`operator new`
+     gaps, real `std::__1::basic_string`/`std::__1::locale`/iostream
+     symbols Skia's own SkSL debug-trace code needs (`std::__1::to_
+     string`, `std::__1::locale::classic()`, iostream vtables, ...)
+     stayed undefined -- the bootstrap ABI shim never provided a real
+     STL. Fixed the same way as Windows: swap `cxx`/`cxx_shared` for the
+     real imported `libc++.a`+`libc++abi.a`+`libunwind.a` (`.so` variants
+     for the shared case) chain, gated on `CRT_TARGET_OS STREQUAL
+     "linux" AND CRTGFX_ENABLE_SKIA AND CRT_USE_IMPORTED_LIBCXX`, applied
+     once at `CRTGFX_CRT_STATIC_LIBS`/`CRTGFX_CRT_SHARED_LIBS`'s own
+     definition so every existing consumer inherits it unchanged (no
+     Windows-style DLL-vs-static naming split needed on Linux). Headers
+     needed no equivalent Linux-side fix: `crt_cxx_build_flags`'s own
+     existing Linux fallback (real host `libc++-dev` headers, reached via
+     the project's own `-stdlib=libc++`-during-detection trick) already
+     supplied Itanium-ABI-compatible headers -- confirmed for real, the
+     *compile* step for `skia_bridge.cc`/`skia_raster_smoke.cc` never
+     failed on this platform, only the link.
+  4. **A genuine `ld.bfd`-specific runtime-loader bug**, found only after
+     all three link-time fixes above: the fully-linked, fully-resolved
+     binary failed to even *load*: `error while loading shared libraries:
+     unexpected PLT reloc type 0x00`. `readelf -r` showed `.rela.plt`
+     holding exactly one bogus entry (`R_X86_64_NONE`, sym 0, offset 0)
+     glibc's own `ld.so` refuses to process. Bisected by hand (manually
+     replaying the exact real link command with pieces removed/varied,
+     confirmed each result with a fresh `readelf -r`): ruled out `--gc-
+     sections` and the `--start-group`/`--end-group` markers alone (a
+     trivial `c`/`m`/`dl`-only group, or one also carrying `libc++`/
+     `libc++abi`/`libunwind`, both stayed clean) -- only the full,
+     real combination (through `ld.bfd` specifically) produced it. User
+     suggested switching the linker to `lld` outright rather than chasing
+     `--gc-sections` further; installed `lld` (user's own `apt` install)
+     and relinking the identical inputs/flags with `-fuse-ld=lld` instead
+     produced a clean `.rela.plt` immediately -- a real, if obscure,
+     `ld.bfd` fragility around `--start-group`-wrapped PIE archive
+     linking that `lld` does not share. Added `-fuse-ld=lld` to `crtgfx_
+     skia_raster_smoke`/`crtgfx_shared`'s own Linux+`CRTGFX_ENABLE_SKIA`
+     link options only (regular Linux executables keep the system
+     default `ld.bfd` unchanged, which has always worked fine for them).
+  With all four fixed, the *real* `ctest`-driven run genuinely passes:
+  `crtgfx_skia_raster_smoke: ok`, confirmed twice for consistency. An
+  earlier direct/manual invocation (outside `ctest`, from a fresh nested
+  WSL shell) printed a *different*, legitimate failure first
+  (`end_frame (-3)`, Wayland `present_software` -- unrelated to any of
+  the above, a real Wayland/WSLg environment-connectivity difference
+  between that shell and the one `ctest` itself ran in, not a code bug)
+  -- recorded here since it cost real diagnosis time before `ctest`'s own
+  run showed the true, passing result. Full regression via the real
+  `ctest`-driven suite, run twice: **100% tests passed, 105/105**, with
+  `CRTGFX_ENABLE_SKIA=ON` and `CRT_USE_IMPORTED_LIBCXX=ON` both on
+  (`CRTGFX_ENABLE_SKIA` stays `OFF` by default; unaffected either way).
+  Verified in a disposable clone (`/tmp` turned out to be tmpfs on this
+  WSL distro and was wiped mid-session by a VM idle-restart, losing a
+  full build in progress -- redone under `$HOME`, which persists).
+
 - **Windows regular-CMake C++ target unified to `--target=*-w64-mingw32`
   (matching every `tools/crt-cc`/`tools/crt-c++`-driven "port" build), and
   `crtgfx_skia_raster_smoke` finally links and runs

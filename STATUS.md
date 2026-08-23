@@ -47,6 +47,28 @@ in those two win.
     CMake C++ code compiling `-pc-windows-msvc` (MSVC-mangled) while Skia
     compiled `-w64-mingw32` (Itanium-mangled) is no longer true -- both
     now share the same target/ABI.
+- **`crtgfx_skia_raster_smoke` on Linux/WSL (2026-08-23, same day, direct
+  follow-up): passing.** Asked directly whether the smoke test itself
+  (not just Skia's own `libskia.a` build) had ever passed on Linux amd64 --
+  it hadn't. Building and running it for real found and fixed four more,
+  entirely Linux-specific bugs: a GNU-ld (`ld.bfd`) circular-archive-
+  resolution gap in `crtgfx`'s own linking (fixed with `-Wl,--start-group`/
+  `--end-group`, declared directly in `libcrtgfx/CMakeLists.txt` where
+  `crtgfx`'s own dependencies are set, not per-consumer -- a consumer-side
+  attempt does not reliably bracket `crtgfx`'s own separately-flattened
+  transitive deps); a redundant explicit `cxx` link on `crtgfx_skia_
+  raster_smoke` itself landing outside that new group and getting de-duped
+  away; the same bootstrap-`cxx`-to-real-imported-libc++ swap Windows
+  already needed (Linux's own headers were already fine via `crt_cxx_
+  build_flags`'s existing fallback, only the link needed it); and a real,
+  if obscure, `ld.bfd`-specific runtime-loader bug (`unexpected PLT reloc
+  type 0x00`, `readelf -r` showing a bogus `R_X86_64_NONE` `.rela.plt`
+  entry) fixed by switching just the Skia-enabled targets to `-fuse-ld=
+  lld`. `crtgfx_skia_raster_smoke: ok`, full suite **100% passing,
+  105/105**, both flags on, verified via the real `ctest`-driven run (run
+  twice for consistency). See `HISTORY.md`'s matching, topmost 2026-08-23
+  entry and `TODO.md`'s matching dated sub-bullet. `CRTGFX_ENABLE_SKIA`
+  stays `OFF` by default on Linux too.
 
 ## What "passing" currently means
 

@@ -181,12 +181,20 @@ Next work order:
      installs as a CRT-toolchain CPU archive on macOS; `tools/crt-ar` expands
      GN response files so this does not depend on Apple `ar` supporting them.
      No fake Skia headers are provided. **The deterministic CPU-raster
-     smoke gate itself is now cleared on Windows (2026-08-23, see the
-     mingw32-unification entry below): `crtgfx_skia_raster_smoke` builds,
-     links, and runs (`crtgfx_skia_raster_smoke: ok`) with `CRTGFX_
-     ENABLE_SKIA=ON` and `CRT_USE_IMPORTED_LIBCXX=ON`, full suite 121/121.**
-     Real 2D drawing coverage beyond that one smoke binary, a GPU backend,
-     and Wayland presentation integration are all still open.
+     smoke gate itself is now cleared on both Windows and Linux (2026-08-23,
+     see the mingw32-unification entry and the matching Linux/WSL entry
+     just above it in HISTORY.md): `crtgfx_skia_raster_smoke` builds,
+     links, and runs (`crtgfx_skia_raster_smoke: ok`) on Windows (`CRTGFX_
+     ENABLE_SKIA=ON`/`CRT_USE_IMPORTED_LIBCXX=ON`, full suite 121/121) and
+     on Linux/WSL (same two flags, full suite 105/105) -- macOS not yet
+     re-verified at this exact link-time gate (last confirmed only through
+     "Skia's own build," i.e. `libskia.a` itself, not this smoke binary's
+     own link).** Real 2D drawing coverage beyond that one smoke binary, a
+     GPU backend, and Wayland presentation integration are all still open
+     -- note the Linux entry's own record of a real, separate, still-open
+     Wayland `present_software` connectivity difference between different
+     shell contexts on the same WSL host (unrelated to the smoke test
+     itself, which passes cleanly through the real `ctest`-driven run).
    - **Fetch pinned + sparse-checked-out, and `crtgfx-skia-fetch`/
      `-configure`/`-build` verified real end-to-end on Windows (2026-08-21).**
      `CRTGFX_SKIA_REF`/`CRTGFX_SKIA_EXPECTED_COMMIT` now default to a real
@@ -566,6 +574,21 @@ Next work order:
      crt-c++`) -- that earlier patch is not wrong and was left in place,
      just narrower than what any *new* Windows C++ code compiled through
      either wrapper now gets automatically.
+   - **Resolved 2026-08-23 (same day): `crtgfx_skia_raster_smoke` also
+     verified for real on Linux (WSL/Ubuntu 26.04, amd64), after the user
+     asked directly whether it had ever actually passed there -- it
+     hadn't; only Skia's own archive build had been.** Four more real,
+     Linux-specific fixes (a GNU-ld `--start-group`/`--end-group` circular-
+     archive gap in `crtgfx`'s own linking, a redundant `cxx` link
+     defeating that fix, the same bootstrap-`cxx`-to-real-imported-libc++
+     swap Windows already needed, and a genuine `ld.bfd`-specific runtime-
+     loader bug -- `unexpected PLT reloc type 0x00` -- fixed by switching
+     just the Skia-enabled targets to `-fuse-ld=lld`). Full detail in
+     `HISTORY.md`'s matching, topmost 2026-08-23 entry. Verified via the
+     real `ctest`-driven run (not a manual/direct invocation, which showed
+     a real but unrelated Wayland-environment difference first): **100%
+     tests passed, 105/105**, `crtgfx_skia_raster_smoke: ok`, both flags
+     on. `CRTGFX_ENABLE_SKIA` stays `OFF` by default on Linux too.
    - **A real WSL/Ubuntu-20.04 attempt confirmed the "Linux would reach**
      **the same wall faster" projection above, and surfaced one genuinely**
      **new, environment-specific finding along the way (2026-08-22).**

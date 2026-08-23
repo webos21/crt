@@ -226,6 +226,37 @@ endif()
 
 set(CRTGFX_CRT_STATIC_LIBS c m dl cxx)
 set(CRTGFX_CRT_SHARED_LIBS c_shared m_shared dl_shared cxx_shared)
+if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_ENABLE_SKIA AND CRT_USE_IMPORTED_LIBCXX)
+  # Real imported libc++/libc++abi/libunwind (Itanium ABI, matching Skia
+  # itself -- Skia's own GN build always uses this project's own imported
+  # libc++ regardless of outer-project settings, see tools/build_skia.py),
+  # not the small bootstrap libstdc++/src/ ABI shim (`cxx`/`cxx_shared`) --
+  # see the matching, fuller Windows-side comments on crtgfx_skia_objects/
+  # crtgfx_skia_raster_smoke for why this substitution is needed at all
+  # (the bootstrap shim only provides operator new/delete/__cxa_* stubs,
+  # not a real std::string/std::stringstream/std::locale/... -- confirmed
+  # for real, 2026-08-23: `undefined reference to std::__1::basic_string
+  # <...>::append(...)`, `to_string`, iostream vtables, etc. from Skia's
+  # own SkSL debug-trace code, once the earlier libm/operator-new gaps
+  # were separately fixed). Unlike Windows (where this swap happens per-
+  # consumer, in crtgfx_skia_raster_smoke's/crtgfx_shared's own windows-
+  # specific branches, alongside a DLL-vs-static import-library naming
+  # split that doesn't apply on Linux), this is set once, project-wide for
+  # Linux+Skia+imported-libc++, and flows through every existing consumer
+  # of CRTGFX_CRT_STATIC_LIBS/CRTGFX_CRT_SHARED_LIBS unchanged.
+  list(REMOVE_ITEM CRTGFX_CRT_STATIC_LIBS cxx)
+  list(APPEND CRTGFX_CRT_STATIC_LIBS
+    "${CRT_SYSROOT}/lib/libc++.a"
+    "${CRT_SYSROOT}/lib/libc++abi.a"
+    "${CRT_SYSROOT}/lib/libunwind.a"
+  )
+  list(REMOVE_ITEM CRTGFX_CRT_SHARED_LIBS cxx_shared)
+  list(APPEND CRTGFX_CRT_SHARED_LIBS
+    "${CRT_SYSROOT}/lib/libc++.so"
+    "${CRT_SYSROOT}/lib/libc++abi.so"
+    "${CRT_SYSROOT}/lib/libunwind.so"
+  )
+endif()
 
 add_library(crtgfx_common_objects OBJECT ${CRTGFX_COMMON_SOURCES})
 target_link_libraries(crtgfx_common_objects PRIVATE crt_build_flags)
@@ -370,9 +401,38 @@ target_include_directories(crtgfx PUBLIC
 if(CRTGFX_ENABLE_SKIA)
   target_include_directories(crtgfx PUBLIC "${CRTGFX_SKIA_ROOT}")
 endif()
-target_link_libraries(crtgfx PRIVATE ${CRTGFX_CRT_STATIC_LIBS})
-if(CRTGFX_ENABLE_SKIA AND CRTGFX_SKIA_LIBRARIES)
+if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_ENABLE_SKIA AND CRTGFX_SKIA_LIBRARIES)
+  # --start-group/--end-group: a real GNU-ld circular-archive-resolution
+  # gap, confirmed for real (2026-08-23) via the generated link command for
+  # crtgfx_skia_raster_smoke -- libskia.a's own undefined needs (`atan2f`/
+  # `sinf`/`cosf`/`floor`/`sqrtf` from libm, `operator new`/`delete` from
+  # libc++/libc++abi, even `__dso_handle` from libc's own cxa_atexit.c.o)
+  # get scanned by ld.bfd's default single left-to-right archive pass
+  # *after* libm.a/libc++.a(=cxx)/libc.a already passed, since libskia.a
+  # (PUBLIC) is always the last of `crtgfx`'s own dependencies on the final
+  # link line regardless of call order here. The exact same class of gap
+  # tools/crt-cc's own Linux branch already documents and fixes the
+  # identical way for its own, separate link recipes. Wrapped here, in
+  # `crtgfx`'s own INTERFACE_LINK_LIBRARIES, rather than on each consumer
+  # (crtgfx_skia_raster_smoke, crtgfx_shared, ...): a consumer-side
+  # target_link_libraries()/target_link_options() pairing for the group
+  # markers does NOT reliably bracket `crtgfx`'s own flattened transitive
+  # dependencies -- confirmed for real that CMake re-positions a static
+  # library's own propagated INTERFACE_LINK_LIBRARIES independently of
+  # where a *consumer's own* separately-added flags land, splitting an
+  # attempted --start-group/--end-group pair with `crtgfx`'s own libm.a/
+  # libdl.a/libskia.a landing outside it. Declaring the group directly
+  # where these libraries are declared avoids relying on that ordering at
+  # all.
+  target_link_libraries(crtgfx PRIVATE -Wl,--start-group)
+  target_link_libraries(crtgfx PRIVATE ${CRTGFX_CRT_STATIC_LIBS})
   target_link_libraries(crtgfx PUBLIC ${CRTGFX_SKIA_LIBRARIES})
+  target_link_libraries(crtgfx PRIVATE -Wl,--end-group)
+else()
+  target_link_libraries(crtgfx PRIVATE ${CRTGFX_CRT_STATIC_LIBS})
+  if(CRTGFX_ENABLE_SKIA AND CRTGFX_SKIA_LIBRARIES)
+    target_link_libraries(crtgfx PUBLIC ${CRTGFX_SKIA_LIBRARIES})
+  endif()
 endif()
 if(CRT_TARGET_OS STREQUAL "windows")
   target_link_libraries(crtgfx PUBLIC
@@ -425,10 +485,23 @@ if(CRT_TARGET_OS STREQUAL "windows" AND CRTGFX_ENABLE_SKIA AND CRT_USE_IMPORTED_
     "${CRT_SYSROOT}/lib/libunwind.dll.a"
   )
 else()
+  set(CRTGFX_SHARED_SKIA_LINUX_GROUPED OFF)
+  if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_ENABLE_SKIA AND CRTGFX_SKIA_LIBRARIES)
+    set(CRTGFX_SHARED_SKIA_LINUX_GROUPED ON)
+    # --start-group/--end-group: see `crtgfx`'s own, fuller comment (same
+    # file, its CRTGFX_CRT_STATIC_LIBS/CRTGFX_SKIA_LIBRARIES linking just
+    # above) for the full story -- the identical GNU-ld circular-archive-
+    # resolution gap applies to crtgfx_shared's own link too.
+    target_link_libraries(crtgfx_shared PRIVATE -Wl,--start-group)
+  endif()
   target_link_libraries(crtgfx_shared PRIVATE ${CRTGFX_CRT_SHARED_LIBS})
+  if(CRTGFX_SHARED_SKIA_LINUX_GROUPED)
+    target_link_libraries(crtgfx_shared PUBLIC ${CRTGFX_SKIA_LIBRARIES})
+    target_link_libraries(crtgfx_shared PRIVATE -Wl,--end-group)
+  endif()
 endif()
 target_link_libraries(crtgfx_shared PRIVATE crt_build_flags)
-if(CRTGFX_ENABLE_SKIA AND CRTGFX_SKIA_LIBRARIES)
+if(NOT CRTGFX_SHARED_SKIA_LINUX_GROUPED AND CRTGFX_ENABLE_SKIA AND CRTGFX_SKIA_LIBRARIES)
   target_link_libraries(crtgfx_shared PUBLIC ${CRTGFX_SKIA_LIBRARIES})
 endif()
 if(CRT_TARGET_OS STREQUAL "windows")
@@ -453,6 +526,10 @@ if(CRT_TARGET_OS STREQUAL "windows")
   endif()
 elseif(CRT_TARGET_OS STREQUAL "macos")
   target_link_libraries(crtgfx_shared PRIVATE ${CRTGFX_MACOS_FRAMEWORKS})
+elseif(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_ENABLE_SKIA)
+  # -fuse-ld=lld: see crtgfx_skia_raster_smoke's own, fuller comment (same
+  # file, its Linux branch) for the full ld.bfd-vs-lld story.
+  target_link_options(crtgfx_shared PRIVATE -fuse-ld=lld)
 endif()
 crt_configure_shared_runtime(crtgfx_shared)
 set_target_properties(crtgfx_shared PROPERTIES
@@ -602,6 +679,19 @@ if(CRTGFX_ENABLE_SKIA)
       "${CRT_SYSROOT}/lib/libunwind.a"
       c
     )
+  elseif(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_ENABLE_SKIA AND CRTGFX_SKIA_LIBRARIES)
+    # Deliberately NOT an explicit `cxx c` link here, unlike the other
+    # branches -- `crtgfx`'s own --start-group/--end-group-wrapped link
+    # (see that target's own, fuller comment) already PRIVATE-propagates
+    # cxx/c/m/dl transitively, *inside* the group. An explicit mention
+    # here would land *outside* it (this call happens before `crtgfx`
+    # itself gets flattened into the link line) and CMake's own link-line
+    # de-duplication keeps only that first, ungrouped occurrence, silently
+    # dropping the grouped one -- confirmed for real (2026-08-23): with
+    # this explicit link left in, `lib/libc++.a`(=cxx) landed *before*
+    # `-Wl,--start-group`, and libskia.a's own `operator new`/`operator
+    # delete` needs (defined in cxx's own new_delete.cc) stayed
+    # unresolved even with the group fix in place for libm's symbols.
   else()
     target_link_libraries(crtgfx_skia_raster_smoke PRIVATE cxx c)
   endif()
@@ -622,6 +712,28 @@ if(CRTGFX_ENABLE_SKIA)
       -Wl,-e,_start
       -Wl,--gc-sections
     )
+    if(CRTGFX_ENABLE_SKIA)
+      # -fuse-ld=lld: this project's regular Linux executables link fine
+      # with the system default (ld.bfd) -- this override is scoped to the
+      # Skia-enabled targets specifically, not project-wide. Confirmed for
+      # real (2026-08-23), bisected down from a genuine runtime failure:
+      # `error while loading shared libraries: unexpected PLT reloc type
+      # 0x00`. `readelf -r` showed the built executable's `.rela.plt`
+      # holding exactly one bogus entry (R_X86_64_NONE, sym 0, offset 0)
+      # that glibc's own ld.so refuses to process -- present even in a
+      # from-scratch, fully-symbol-resolved relink of the exact same
+      # inputs (ruled out: --gc-sections, --unresolved-symbols=ignore-all
+      # artifacts, and the -Wl,--start-group/--end-group wrapping alone --
+      # none of those reproduced it in isolation; only the *combination*
+      # actually used here, through ld.bfd specifically, did). Switching
+      # just the linker backend to lld (`-fuse-ld=lld`, otherwise
+      # unchanged) produced a clean `.rela.plt` (no bogus entry) from the
+      # identical link inputs and flags -- a real, known-ish class of
+      # ld.bfd fragility around --start-group/PIE archive linking that lld
+      # doesn't share. Requires `lld` installed on the build host when
+      # CRTGFX_ENABLE_SKIA=ON on Linux (not a default Ubuntu package).
+      target_link_options(crtgfx_skia_raster_smoke PRIVATE -fuse-ld=lld)
+    endif()
   elseif(CRT_TARGET_OS STREQUAL "windows")
     target_link_options(crtgfx_skia_raster_smoke PRIVATE
       -Wl,/entry:mainCRTStartup
