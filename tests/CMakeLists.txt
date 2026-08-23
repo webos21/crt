@@ -1,19 +1,18 @@
 # CRT_STARTUP_OBJECTS (crt1.o, plus crt1_init_array.o's object on Linux,
 # or crt1_ctors_begin.o+crt1_ctors_walker.o on Windows -- see
-# libc/CMakeLists.txt's own comment) and CRT_STARTUP_END_OBJECTS (empty
-# except on Windows, where crt1_ctors_end.o must be the last .ctors/
-# .dtors contributor on the whole link line) are both set with
-# PARENT_SCOPE by libc/CMakeLists.txt, which add_subdirectory(libc)
-# always processes before this file. CRT_STARTUP_OBJECTS must come
-# before the real source(s) here (not after, despite that being where it
-# used to sit before CRT_STARTUP_END_OBJECTS existed) and
-# CRT_STARTUP_END_OBJECTS after -- Linux/macOS don't care either way,
-# but Windows' ctors_begin/end sentinels are strictly link-order-
-# sensitive (see libc/src/arch/windows/common/ctors_begin.c).
+# libc/CMakeLists.txt's own comment) is set with PARENT_SCOPE by
+# libc/CMakeLists.txt, which add_subdirectory(libc) always processes
+# before this file, and must come before the real source(s) here.
+# CRT_STARTUP_END_OBJECTS (empty except on Windows, where crt1_ctors_end.o
+# must be the LAST .ctors/.dtors contributor on the whole link line) is
+# deliberately NOT listed in this add_executable() SOURCES call -- see
+# crt_link_startup_end_objects()'s own comment (top-level CMakeLists.txt)
+# for why that positioning silently doesn't hold on Ninja, and why it's
+# linked in via that helper instead, once, right after this function's
+# last target_link_libraries()/target_link_options() call below.
 add_executable(hello_c
   ${CRT_STARTUP_OBJECTS}
   hello.c
-  ${CRT_STARTUP_END_OBJECTS}
 )
 target_link_libraries(hello_c PRIVATE crt_build_flags c)
 target_link_libraries(hello_c PRIVATE crt_compiler_rt_builtins)
@@ -41,6 +40,7 @@ elseif(CRT_TARGET_OS STREQUAL "windows")
   )
   target_link_libraries(hello_c PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
 endif()
+crt_link_startup_end_objects(hello_c)
 add_dependencies(hello_c c crt1)
 
 add_test(NAME hello_c_runs COMMAND hello_c)
@@ -60,11 +60,13 @@ function(add_crt_test test_name source_file)
     # Windows binary.
     set(CRT_TEST_EXTRA_SOURCES "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/common/fork_capable_relaunch.c")
   endif()
+  # CRT_STARTUP_END_OBJECTS deliberately not listed here -- see
+  # crt_link_startup_end_objects()'s own comment (top-level CMakeLists.txt)
+  # and this function's own final target_link_libraries() call below.
   add_executable(${test_name}
     ${CRT_STARTUP_OBJECTS}
     ${source_file}
     ${CRT_TEST_EXTRA_SOURCES}
-    ${CRT_STARTUP_END_OBJECTS}
   )
   target_link_libraries(${test_name} PRIVATE crt_build_flags c)
   target_include_directories(${test_name} PRIVATE
@@ -98,6 +100,7 @@ function(add_crt_test test_name source_file)
     )
     target_link_libraries(${test_name} PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
   endif()
+  crt_link_startup_end_objects(${test_name})
   add_dependencies(${test_name} c crt1)
   add_test(NAME ${test_name}_runs COMMAND ${test_name})
   set_tests_properties(${test_name}_runs PROPERTIES
@@ -107,10 +110,12 @@ function(add_crt_test test_name source_file)
 endfunction()
 
 function(add_crt_cxx_test test_name source_file)
+  # CRT_STARTUP_END_OBJECTS deliberately not listed here -- see
+  # crt_link_startup_end_objects()'s own comment (top-level CMakeLists.txt)
+  # and this function's own final target_link_libraries() call below.
   add_executable(${test_name}
     ${CRT_STARTUP_OBJECTS}
     ${source_file}
-    ${CRT_STARTUP_END_OBJECTS}
   )
   target_link_libraries(${test_name} PRIVATE crt_cxx_build_flags cxx c)
   target_include_directories(${test_name} PRIVATE
@@ -141,6 +146,7 @@ function(add_crt_cxx_test test_name source_file)
     )
     target_link_libraries(${test_name} PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
   endif()
+  crt_link_startup_end_objects(${test_name})
   add_dependencies(${test_name} cxx c crt1)
   add_test(NAME ${test_name}_runs COMMAND ${test_name})
   set_tests_properties(${test_name}_runs PROPERTIES
@@ -680,10 +686,11 @@ set_tests_properties(init_array_test_runs PROPERTIES
 )
 
 if(CRT_TARGET_OS STREQUAL "windows")
+  # CRT_STARTUP_END_OBJECTS deliberately not listed here -- see
+  # crt_link_startup_end_objects()'s own comment (top-level CMakeLists.txt).
   add_executable(windows_export_hygiene_test
     ${CRT_STARTUP_OBJECTS}
     windows_export_hygiene_test.c
-    ${CRT_STARTUP_END_OBJECTS}
   )
   target_link_libraries(windows_export_hygiene_test PRIVATE crt_build_flags c)
   target_link_libraries(windows_export_hygiene_test PRIVATE crt_compiler_rt_builtins)
@@ -696,6 +703,7 @@ if(CRT_TARGET_OS STREQUAL "windows")
     -Wl,/OPT:REF
   )
   target_link_libraries(windows_export_hygiene_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  crt_link_startup_end_objects(windows_export_hygiene_test)
   add_dependencies(windows_export_hygiene_test c crt1 c_shared m_shared dl_shared cxx_shared)
   add_test(NAME windows_export_hygiene_runs
     COMMAND windows_export_hygiene_test

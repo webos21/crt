@@ -260,6 +260,19 @@ long double acosl(long double x) {
   return atan2l(sqrtl(1.0L - x * x), x);
 }
 
+/* atan2f: this project's own libm otherwise mirrors FreeBSD's own e_*.c/
+ * e_*f.c double/float source pairs one-for-one (e_atan2.c is imported,
+ * e_atan2f.c never was -- a real, pre-existing gap, unrelated to any
+ * specific consumer, first actually hit 2026-08-23 by Skia's own
+ * SkPathBuilder::arcTo()/SkComputeRadialSteps() calling it: `ld.lld: error:
+ * undefined symbol: atan2f`). A cast-wrapper around the already-present,
+ * already-verified double atan2(), matching this same file's own asinf/
+ * acosf/coshf precedent just above, rather than porting a dedicated
+ * single-precision FreeBSD algorithm this session has no way to verify. */
+float atan2f(float y, float x) {
+  return (float)atan2((double)y, (double)x);
+}
+
 double cosh(double x) {
   double ex = exp(x);
   return 0.5 * (ex + 1.0 / ex);

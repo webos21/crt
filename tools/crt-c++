@@ -145,6 +145,23 @@ case "$target_os" in
     # mingw-w64 install, since clang's own predefined macro set for this
     # target stops at __MINGW32__ and leaves those two undefined.
     common_flags="$common_flags -D__MINGW32_MAJOR_VERSION=3 -D__MINGW32_MINOR_VERSION=11"
+    # -femulated-tls: see the matching, fuller comment in tools/crt-cc.
+    # This project's Windows PAL has never implemented real native COFF TLS
+    # (_tls_index/.tls section/IMAGE_TLS_DIRECTORY, normally initialized by
+    # the OS loader -- real mingw-w64/MSVC each supply their own CRT
+    # startup object for this, which this from-scratch freestanding CRT has
+    # no equivalent of). Lowers __declspec(thread)/thread_local to
+    # __emutls_get_address() runtime calls instead -- Bionic/Android's own
+    # historical strategy for the identical reason, matching this whole
+    # project's "Bionic-compatible" identity -- backed by compiler-rt's
+    # emutls.c, already present in the builtins archive this wrapper always
+    # links (confirmed via llvm-nm). Found chasing crtgfx_skia_raster_
+    # smoke's own link failure once mingw32 unification got everything else
+    # working: Skia's SkStrikeCache::GlobalStrikeCache() uses a plain C++11
+    # thread_local, which without this flag lowers to a direct,
+    # unresolvable `_tls_index` reference (`ld.lld: error: undefined
+    # symbol: _tls_index`).
+    common_flags="$common_flags -femulated-tls"
     # libcxx/include/__config's _LIBCPP_DLL_VIS only has two states on
     # Windows: __declspec(dllexport) when _LIBCPP_BUILDING_LIBRARY is
     # defined (building the library itself -- CRT_CXX_BUILDING_RUNTIME=1,
@@ -393,10 +410,19 @@ case "$target_os" in
         cxx_runtime_libs="$cxx_runtime_libs ${CRT_SYSROOT}/lib/libunwind.a"
       fi
     else
+      # This project's own bootstrap cxx/cxx_shared CMake targets
+      # (libstdc++/CMakeLists.txt) are now built --target=*-w64-mingw32
+      # unconditionally too (see CMakeLists.txt's top-level Windows
+      # target-selection block), so this branch's own libc++.a check just
+      # above always resolves in practice -- this bare "c++.lib" name is
+      # what CMake's MSVC-simulation default used to name that same
+      # bootstrap target's output before that unification. Kept as a
+      # last-resort fallback rather than deleted outright, matching how
+      # the rest of this elif chain treats a not-yet-staged artifact.
       cxx_runtime_libs="${CRT_SYSROOT}/lib/c++.lib"
     fi
     if [ "$shared_mode" -eq 1 ]; then
-      crt_core_libs="${CRT_SYSROOT}/lib/c_dll.lib ${CRT_SYSROOT}/lib/m_dll.lib ${CRT_SYSROOT}/lib/dl_dll.lib"
+      crt_core_libs="${CRT_SYSROOT}/lib/libc_dll.dll.a ${CRT_SYSROOT}/lib/libm_dll.dll.a ${CRT_SYSROOT}/lib/libdl_dll.dll.a"
       # crt1_pseudo_reloc.o (_pei386_runtime_relocator(), see that file's
       # own comment): dllcrt.c's crtDllMainCRTStartup() now calls this on
       # DLL_PROCESS_ATTACH, the DLL analogue of crt1.c's own executable-
@@ -423,7 +449,7 @@ case "$target_os" in
       # chained together in one process (one importing the other).
       entry="-Wl,--exclude-symbols=_pei386_runtime_relocator -Wl,--exclude-symbols=_crt_install_dwarf_unwind_safety_net -Wl,/entry:crtDllMainCRTStartup -Wl,/DLL -Wl,/OPT:REF -fuse-ld=lld"
     else
-      libs="$libs $cxx_runtime_libs ${CRT_SYSROOT}/lib/c.lib ${CRT_SYSROOT}/lib/m.lib ${CRT_SYSROOT}/lib/dl.lib ${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"
+      libs="$libs $cxx_runtime_libs ${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a ${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"
       entry="-Wl,/entry:mainCRTStartup -Wl,/subsystem:console -Wl,/OPT:REF -fuse-ld=lld"
       # __crt_run_init_array()/__crt_run_fini_array() Windows/PE support,
       # and crt1_pseudo_reloc.o (_pei386_runtime_relocator()): see

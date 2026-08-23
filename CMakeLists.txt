@@ -10,33 +10,66 @@ if(CRT_TARGET_OS STREQUAL "windows")
   set(CMAKE_C_STANDARD_LIBRARIES "" CACHE STRING "C standard libraries" FORCE)
   set(CMAKE_CXX_STANDARD_LIBRARIES "" CACHE STRING "C++ standard libraries" FORCE)
 
-  if(NOT CRT_TARGET_ARCH STREQUAL "host")
+  # *-w64-mingw32 (Itanium/GNU C++ ABI, matching tools/crt-cc/tools/crt-c++'s
+  # own long-established target for every "port"/GN-driven build in this
+  # project -- libunwind, libc++abi, libc++, and now Skia) for *every*
+  # Windows CMake target, not just the cross-arch case below -- previously
+  # this branch left CMAKE_C_COMPILER_TARGET/CMAKE_CXX_COMPILER_TARGET
+  # entirely unset for a same-arch ("host") build, which meant Clang's own
+  # bare, no-explicit-target default took over: *-pc-windows-msvc, the MSVC
+  # C++ ABI (MSVC-style name mangling, SEH-shaped exception tables) instead
+  # of Itanium. Confirmed for real (2026-08-23) this was a genuine, load-
+  # bearing mismatch, not a cosmetic one: crtgfx_skia_raster_smoke.cc
+  # (built under the old default, -pc-windows-msvc) failed to *link*
+  # against libskia.a (built via tools/crt-cc.cmd/crt-c++.cmd's own
+  # -w64-mingw32) with `undefined symbol: SkPaint::SkPaint()` and friends
+  # -- confirmed via llvm-nm that libskia.a genuinely defines those exact
+  # symbols, just under Itanium mangling (`_ZN7SkPaintC1Ev`), which the
+  # linker's own MSVC-demangled error text (`public: __cdecl
+  # SkPaint::SkPaint(void)`) never matches. This was not a deliberate
+  # architectural choice in the first place -- it was Clang's own bare
+  # default going unquestioned, and it directly contradicted this
+  # project's own already-documented policy (docs/cxx_runtime.md's own
+  # "ABI Policy" section: "CRT-targeted C++ code should use the Bionic/
+  # Itanium C++ ABI lane. Windows-native C++ DLL interoperability should
+  # be handled by a *separate* MSVC ABI bridge lane" -- deliberately kept
+  # as a distinct, narrower, later addition, not this project's own
+  # regular C++ build's default target). This project's own code never
+  # branches on __GNUC__ vs _MSC_VER the way third-party autoconf ports
+  # do (confirmed by grep, zero hits across libc/, libstdc++/, libcrtgfx/,
+  # include/), so nothing here is put at risk by the GNU-compatible macro
+  # set -w64-mingw32 predefines -- this project simply never reads them.
+  # Must be set via CMAKE_<LANG>_COMPILER_TARGET *before* project()/
+  # enable_language() for Clang to honor it.
+  if(CRT_TARGET_ARCH STREQUAL "host")
+    if(NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
+      message(FATAL_ERROR "CRT_TARGET_OS=windows with CRT_TARGET_ARCH=host requires a Windows host (cross-OS is intentionally deferred).")
+    endif()
+    if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(ARM64|arm64|aarch64)$")
+      set(CRT_WINDOWS_COMPILER_TARGET "aarch64-w64-mingw32")
+    else()
+      set(CRT_WINDOWS_COMPILER_TARGET "x86_64-w64-mingw32")
+    endif()
+  else()
     # Same-OS cross-arch build: e.g. -DCRT_TARGET_ARCH=x86_64 from a
     # Windows aarch64 host (or vice versa). Clang is a genuine cross-
     # compiler needing no separate per-arch install, so this just means
     # telling it (and, transitively, its -fuse-ld=lld backend) a
-    # different target triple -- must be set via CMAKE_<LANG>_COMPILER_
-    # TARGET *before* project()/enable_language() for Clang to honor it.
-    # "-pc-windows-msvc" (not "-w64-mingw32") matches what CMAKE_C_
-    # COMPILER=clang already defaults to with no explicit --target at all
-    # (this project's own code never branches on __GNUC__ vs _MSC_VER the
-    # way third-party autoconf ports do, so nothing here needs the GNU-
-    # compatible macro set tools/crt-cc adds for *port* builds -- see that
-    # script's own comment for why *it* needs -w64-mingw32).
+    # different target triple.
     if(NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
       message(FATAL_ERROR "CRT_TARGET_OS=windows with an explicit CRT_TARGET_ARCH override still requires a Windows host (same-OS cross-arch only; cross-OS is intentionally deferred, same as the CRT_TARGET_ARCH=host case above).")
     endif()
     if(CRT_TARGET_ARCH MATCHES "^(x86_64|AMD64|x64)$")
-      set(CRT_CROSS_COMPILER_TARGET "x86_64-pc-windows-msvc")
+      set(CRT_WINDOWS_COMPILER_TARGET "x86_64-w64-mingw32")
     elseif(CRT_TARGET_ARCH MATCHES "^(arm64|ARM64|aarch64)$")
-      set(CRT_CROSS_COMPILER_TARGET "aarch64-pc-windows-msvc")
+      set(CRT_WINDOWS_COMPILER_TARGET "aarch64-w64-mingw32")
     else()
       message(FATAL_ERROR "Unsupported CRT_TARGET_ARCH for a Windows cross-arch build: ${CRT_TARGET_ARCH} (expected x86_64 or arm64/aarch64).")
     endif()
-    set(CMAKE_C_COMPILER_TARGET "${CRT_CROSS_COMPILER_TARGET}" CACHE STRING "Cross-arch Clang target triple")
-    set(CMAKE_CXX_COMPILER_TARGET "${CRT_CROSS_COMPILER_TARGET}" CACHE STRING "Cross-arch Clang++ target triple")
-    set(CMAKE_ASM_COMPILER_TARGET "${CRT_CROSS_COMPILER_TARGET}" CACHE STRING "Cross-arch Clang assembler target triple")
   endif()
+  set(CMAKE_C_COMPILER_TARGET "${CRT_WINDOWS_COMPILER_TARGET}" CACHE STRING "Clang target triple")
+  set(CMAKE_CXX_COMPILER_TARGET "${CRT_WINDOWS_COMPILER_TARGET}" CACHE STRING "Clang++ target triple")
+  set(CMAKE_ASM_COMPILER_TARGET "${CRT_WINDOWS_COMPILER_TARGET}" CACHE STRING "Clang assembler target triple")
 elseif(CRT_TARGET_OS STREQUAL "linux")
   # This project's C++ runtime direction is libc++ specifically (README.md's
   # "Stack" section; the CMAKE_CXX_COMPILE_OBJECT rule override just below
@@ -362,6 +395,43 @@ function(crt_configure_shared_runtime target_name)
   endif()
 endfunction()
 
+# CRT_STARTUP_END_OBJECTS (crt1_ctors_end.o, Windows-only -- see libc/
+# CMakeLists.txt's own comment and libc/src/arch/windows/common/
+# ctors_begin.c's own comment for the full ".ctors"/".dtors" story) must be
+# the LAST .ctors/.dtors contributor on an executable's whole link line.
+# Every call site used to fold it straight into add_executable()'s own
+# SOURCES list, after the real source file(s), expecting Ninja to honor
+# that position. Confirmed for real (2026-08-23, chasing init_array_test's
+# silent post-mingw32-unification failure -- its own constructor stopped
+# running at all): inspecting the generated build.ninja link command for
+# an affected executable shows CMake does NOT actually preserve that
+# interleaving -- every $<TARGET_OBJECTS:...> source (crt1.o, ctors_begin.
+# o, ..., ctors_end.o) gets grouped together and placed as one block
+# *ahead of* the target's own directly-compiled source objects,
+# regardless of where in the SOURCES list each was listed. That left
+# ctors_end.o linked *before* the real source object contributing the
+# actual constructor/destructor, defeating its whole purpose: its own
+# ".ctors"/".dtors" slot (the walk's own end sentinel) landed adjacent to
+# ctors_begin.o's, with the real function pointer sitting just outside
+# the walked range, so it was silently never called (still a clean exit,
+# no crash -- the test only caught this because it deliberately checks
+# for its own required "ok" line rather than just a zero exit code).
+#
+# target_link_libraries() calls, unlike SOURCES-list entries, DO append in
+# real call order onto the link line, after the target's own primary
+# object files -- this project already relied on that same distinction
+# for crt1_pseudo_reloc/crt1_dwarf_safety_net in
+# crt_configure_shared_runtime() above. Call this as the last statement
+# touching a given executable target (after every other target_link_
+# libraries()/target_link_options() call for it) instead of listing
+# CRT_STARTUP_END_OBJECTS in that executable's own add_executable()
+# SOURCES.
+function(crt_link_startup_end_objects target_name)
+  if(CRT_STARTUP_END_OBJECTS)
+    target_link_libraries(${target_name} PRIVATE ${CRT_STARTUP_END_OBJECTS})
+  endif()
+endfunction()
+
 if(CRT_TARGET_ARCH STREQUAL "host")
   set(CRT_EFFECTIVE_ARCH_FOR_FLAGS "${CMAKE_SYSTEM_PROCESSOR}")
 else()
@@ -388,12 +458,70 @@ if(CRT_TARGET_OS STREQUAL "windows" AND CRT_EFFECTIVE_ARCH_FOR_FLAGS MATCHES "^(
 endif()
 
 if(CRT_USE_COMPILER_RT)
-  execute_process(
-    COMMAND "${CMAKE_C_COMPILER}" --print-libgcc-file-name
-    OUTPUT_VARIABLE CRT_COMPILER_RT_BUILTINS
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
-  )
+  set(CRT_COMPILER_RT_BUILTINS "")
+  if(CRT_TARGET_OS STREQUAL "windows")
+    # `clang --print-libgcc-file-name` (the general-purpose probe used
+    # below for macOS/Linux) is not target-aware here -- execute_process()
+    # invokes the raw compiler binary directly, with no knowledge of
+    # CMAKE_C_COMPILER_TARGET (that only affects CMake's own generated
+    # compile *rules*, not an arbitrary execute_process() call) -- so on
+    # Windows it queries clang's own bare default and prints back the
+    # unresolved literal "libgcc.a", which EXISTS() correctly rejects.
+    # Confirmed for real (2026-08-23): this made crt_compiler_rt_builtins
+    # silently resolve to an empty INTERFACE library on every regular
+    # (non tools/crt-cc-driven) Windows CMake build so far, invisible until
+    # the first thing that actually needed a real compiler-rt builtins
+    # symbol linked in -- Skia's own -femulated-tls-lowered thread_local
+    # (SkStrikeCache::GlobalStrikeCache()) needing __emutls_get_address
+    # (`ld.lld: error: undefined symbol: __emutls_get_address`). Mirrors
+    # tools/crt-c++'s own already-proven-working candidate search instead
+    # (its CRT_CXX_BUILDING_RUNTIME comment): prefer the real MinGW-target
+    # archive, fall back to the MSVC-layout LLVM install's own archive --
+    # both verified present under this exact toolchain via direct
+    # `-print-resource-dir` inspection.
+    execute_process(
+      COMMAND "${CMAKE_C_COMPILER}" -print-resource-dir
+      OUTPUT_VARIABLE CRT_COMPILER_RT_RESOURCE_DIR
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET
+    )
+    # clang -print-resource-dir prints a native Windows, backslash-separated
+    # path -- CMake's own string-literal syntax treats a bare backslash as
+    # an escape introducer, so embedding this raw into a generated
+    # install(FILES ...) call (below, via CRT_COMPILER_RT_BUILTINS) breaks
+    # cmake_install.cmake's own parsing at *install* time, not configure
+    # time: "Syntax error in cmake code ... when parsing string
+    # C:\Program Files\LLVM\lib\clang\22/lib/windows/clang_rt.builtins-
+    # x86_64.lib" -- confirmed for real (2026-08-23), the first time this
+    # branch ever actually resolved a real path (every earlier Windows
+    # configure hit the "not found" fallback instead, per this whole
+    # block's own top comment, so this never had real data to break on
+    # before). file(TO_CMAKE_PATH ...) normalizes to forward slashes, CMake's
+    # own accepted form on every platform including Windows.
+    file(TO_CMAKE_PATH "${CRT_COMPILER_RT_RESOURCE_DIR}" CRT_COMPILER_RT_RESOURCE_DIR)
+    if(CRT_COMPILER_RT_RESOURCE_DIR)
+      # CRT_WINDOWS_COMPILER_TARGET (set earlier, top of this file) is
+      # already the correct, normalized "x86_64"/"aarch64" form these
+      # candidate paths need -- CRT_EFFECTIVE_ARCH_FOR_FLAGS (computed
+      # below, from raw CMAKE_SYSTEM_PROCESSOR) is not: it's "AMD64" on
+      # this exact host, which doesn't match either real archive name.
+      string(REGEX REPLACE "-w64-mingw32$" "" CRT_COMPILER_RT_ARCH "${CRT_WINDOWS_COMPILER_TARGET}")
+      foreach(CRT_COMPILER_RT_CANDIDATE
+              "${CRT_COMPILER_RT_RESOURCE_DIR}/lib/${CRT_COMPILER_RT_ARCH}-w64-windows-gnu/libclang_rt.builtins.a"
+              "${CRT_COMPILER_RT_RESOURCE_DIR}/lib/windows/clang_rt.builtins-${CRT_COMPILER_RT_ARCH}.lib")
+        if(NOT CRT_COMPILER_RT_BUILTINS AND EXISTS "${CRT_COMPILER_RT_CANDIDATE}")
+          set(CRT_COMPILER_RT_BUILTINS "${CRT_COMPILER_RT_CANDIDATE}")
+        endif()
+      endforeach()
+    endif()
+  else()
+    execute_process(
+      COMMAND "${CMAKE_C_COMPILER}" --print-libgcc-file-name
+      OUTPUT_VARIABLE CRT_COMPILER_RT_BUILTINS
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET
+    )
+  endif()
   if(CRT_COMPILER_RT_BUILTINS AND EXISTS "${CRT_COMPILER_RT_BUILTINS}")
     message(STATUS "compiler-rt builtins: ${CRT_COMPILER_RT_BUILTINS}")
     add_library(crt_compiler_rt_builtins INTERFACE)
@@ -519,6 +647,27 @@ if(TARGET crtgfx-skia-build)
     add_dependencies(crtgfx-skia-build crt-libcxx-sysroot)
   endif()
 endif()
+# crtgfx_skia_objects/crtgfx_skia_raster_smoke (libcrtgfx/CMakeLists.txt,
+# CRTGFX_ENABLE_SKIA) need ${CRT_SYSROOT}/include/c++/v1 staged (this
+# project's own imported libc++ headers, see that file's own comment on
+# why) before they compile. Deliberately NOT wired as an add_dependencies()
+# edge onto crt-libcxx-sysroot/sysroot the way crtgfx-skia-build's own
+# identical-looking need just above is: crtgfx_skia_objects's compiled
+# output is folded directly into the `crtgfx` STATIC_LIBRARY via
+# $<TARGET_OBJECTS:...> (libcrtgfx/CMakeLists.txt), and `sysroot` (this
+# file, just above) itself DEPENDS on `crtgfx` -- so crtgfx_skia_objects ->
+# crt-libcxx-sysroot -> crt-libcxx-build -> crt-libcxx-configure -> (its
+# own pre-existing add_dependencies(crt-libcxx-configure sysroot) just
+# above) -> sysroot -> crtgfx -> crtgfx_skia_objects is a real dependency
+# cycle -- confirmed for real (2026-08-23): "CMake Generate step failed"
+# with exactly this strongly-connected component reported. crtgfx-skia-
+# build has no such loop back to itself, since nothing in `sysroot`
+# depends on it. libcrtgfx/CMakeLists.txt's own CRTGFX_ENABLE_SKIA guard
+# block instead FATAL_ERRORs at configure time if the imported libc++
+# artifacts are not already staged on disk -- the same "check the file
+# exists, tell the user which target to run first" pattern already used
+# there for Skia's own SkSurface.h/CRTGFX_SKIA_LIBRARIES, sidestepping the
+# ninja dependency graph entirely rather than trying to widen it correctly.
 
 if(Python3_Interpreter_FOUND)
   # CRT_ROOTFS itself is now set earlier, right after add_subdirectory(shell)

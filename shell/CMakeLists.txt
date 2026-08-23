@@ -1,7 +1,8 @@
+# CRT_STARTUP_END_OBJECTS deliberately not listed here -- see
+# crt_link_startup_end_objects()'s own comment (top-level CMakeLists.txt).
 add_executable(crt_tiny_sh
   ${CRT_STARTUP_OBJECTS}
   tiny_sh/tiny_sh.c
-  ${CRT_STARTUP_END_OBJECTS}
 )
 target_link_libraries(crt_tiny_sh PRIVATE crt_build_flags c)
 target_include_directories(crt_tiny_sh PRIVATE
@@ -32,6 +33,7 @@ elseif(CRT_TARGET_OS STREQUAL "windows")
   )
   target_link_libraries(crt_tiny_sh PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
 endif()
+crt_link_startup_end_objects(crt_tiny_sh)
 add_dependencies(crt_tiny_sh c crt1)
 set_target_properties(crt_tiny_sh PROPERTIES
   OUTPUT_NAME sh
@@ -96,11 +98,9 @@ if(EXISTS "${CRT_MKSH_ROOT}/Android.bp")
     # Windows binary.
     list(APPEND CRT_MKSH_SOURCES "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/common/fork_capable_relaunch.c")
   endif()
-  # CRT_STARTUP_END_OBJECTS must stay the last entry on the link line
-  # (see tests/CMakeLists.txt's own comment) -- appended after the
-  # fork_capable_relaunch.c conditional above rather than baked into the
-  # initial set() call, since that conditional itself appends sources.
-  list(APPEND CRT_MKSH_SOURCES ${CRT_STARTUP_END_OBJECTS})
+  # CRT_STARTUP_END_OBJECTS deliberately not appended here -- see
+  # crt_link_startup_end_objects()'s own comment (top-level CMakeLists.txt)
+  # and this target's own crt_link_startup_end_objects() call below.
   add_executable(crt_mksh ${CRT_MKSH_SOURCES})
   target_link_libraries(crt_mksh PRIVATE crt_build_flags c)
   target_link_libraries(crt_mksh PRIVATE crt_compiler_rt_builtins)
@@ -227,6 +227,7 @@ if(EXISTS "${CRT_MKSH_ROOT}/Android.bp")
     )
     target_link_libraries(crt_mksh PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
   endif()
+  crt_link_startup_end_objects(crt_mksh)
   add_dependencies(crt_mksh c crt1)
   set_target_properties(crt_mksh PROPERTIES
     OUTPUT_NAME mksh
@@ -359,11 +360,9 @@ if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
     # linked into every Windows binary.
     list(APPEND CRT_TOYBOX_SOURCES "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/common/fork_capable_relaunch.c")
   endif()
-  # CRT_STARTUP_END_OBJECTS must stay the last entry on the link line
-  # (see tests/CMakeLists.txt's own comment) -- appended after the
-  # fork_capable_relaunch.c conditional above rather than baked into the
-  # initial set() call, since that conditional itself appends sources.
-  list(APPEND CRT_TOYBOX_SOURCES ${CRT_STARTUP_END_OBJECTS})
+  # CRT_STARTUP_END_OBJECTS deliberately not appended here -- see
+  # crt_link_startup_end_objects()'s own comment (top-level CMakeLists.txt)
+  # and this target's own crt_link_startup_end_objects() call below.
   add_executable(crt_toybox ${CRT_TOYBOX_SOURCES})
   target_link_libraries(crt_toybox PRIVATE c m)
   target_link_libraries(crt_toybox PRIVATE crt_compiler_rt_builtins)
@@ -429,6 +428,7 @@ if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
     )
     target_link_libraries(crt_toybox PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
   endif()
+  crt_link_startup_end_objects(crt_toybox)
   add_dependencies(crt_toybox c m crt1)
   set_target_properties(crt_toybox PROPERTIES
     OUTPUT_NAME toybox
@@ -698,10 +698,11 @@ if(EXISTS "${CRT_AWK_ROOT}/src/awk.h")
   set_source_files_properties(${CRT_AWK_SOURCES} PROPERTIES
     COMPILE_OPTIONS "-Wno-unused-parameter;-Wno-unused-but-set-variable"
   )
+  # CRT_STARTUP_END_OBJECTS deliberately not listed here -- see
+  # crt_link_startup_end_objects()'s own comment (top-level CMakeLists.txt).
   add_executable(crt_awk
     ${CRT_STARTUP_OBJECTS}
     ${CRT_AWK_SOURCES}
-    ${CRT_STARTUP_END_OBJECTS}
   )
   target_link_libraries(crt_awk PRIVATE crt_build_flags c m)
   target_link_libraries(crt_awk PRIVATE crt_compiler_rt_builtins)
@@ -733,6 +734,7 @@ if(EXISTS "${CRT_AWK_ROOT}/src/awk.h")
     )
     target_link_libraries(crt_awk PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
   endif()
+  crt_link_startup_end_objects(crt_awk)
   add_dependencies(crt_awk c m crt1)
   set_target_properties(crt_awk PROPERTIES
     OUTPUT_NAME awk

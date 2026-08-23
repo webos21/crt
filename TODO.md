@@ -180,7 +180,13 @@ Next work order:
      `crtgfx_skia_raster_smoke` build wiring exist. Skia `m148` now builds and
      installs as a CRT-toolchain CPU archive on macOS; `tools/crt-ar` expands
      GN response files so this does not depend on Apple `ar` supporting them.
-     No fake Skia headers are provided.
+     No fake Skia headers are provided. **The deterministic CPU-raster
+     smoke gate itself is now cleared on Windows (2026-08-23, see the
+     mingw32-unification entry below): `crtgfx_skia_raster_smoke` builds,
+     links, and runs (`crtgfx_skia_raster_smoke: ok`) with `CRTGFX_
+     ENABLE_SKIA=ON` and `CRT_USE_IMPORTED_LIBCXX=ON`, full suite 121/121.**
+     Real 2D drawing coverage beyond that one smoke binary, a GPU backend,
+     and Wayland presentation integration are all still open.
    - **Fetch pinned + sparse-checked-out, and `crtgfx-skia-fetch`/
      `-configure`/`-build` verified real end-to-end on Windows (2026-08-21).**
      `CRTGFX_SKIA_REF`/`CRTGFX_SKIA_EXPECTED_COMMIT` now default to a real
@@ -524,6 +530,42 @@ Next work order:
      matching 2026-08-23 entry for the full writeup -- the natural next
      step once this is picked up again is choosing one of the two ABI-
      unification directions above, not another narrow shim.
+   - **Resolved 2026-08-23 (same day, direct follow-up): reviewed the
+     mingw32-unification direction read-only first (explicitly asked not
+     to implement yet), then given the explicit go-ahead ("mingw32
+     방식으로 진행하자"), unified Windows regular-CMake C++ to
+     `--target=*-w64-mingw32` project-wide and got `crtgfx_skia_raster_
+     smoke` fully linking and passing (`crtgfx_skia_raster_smoke: ok`).**
+     Ten more distinct real bugs surfaced and fixed along the way
+     (library-naming-convention shift, a genuine CMake/Ninja `.ctors`/
+     `.dtors` ordering gap, `long double` ABI per-arch split, wiring
+     regular CMake C++ onto this project's own imported libc++ instead of
+     real MSVC STL, Skia's `SK_BUILD_FOR_UNIX` trap recurring on this
+     second compile path, a missing `atan2f`, `-femulated-tls` in place of
+     brand-new native COFF TLS support, a silently-empty `crt_compiler_rt_
+     builtins` on every prior Windows CMake build, and two narrow link-
+     time gaps -- `uuid.lib`, a vendor `clang_rt.builtins` archive's own
+     internal `fprintf`/UCRT-only fallback code). Full detail, evidence,
+     and the exact fix for each lives in `HISTORY.md`'s matching
+     2026-08-23 entry (topmost). Verified with a full regression run on
+     both an isolated scratch build dir and the real `windows-host-ninja-
+     debug` preset: **100% tests passed, 121/121** (120 pre-existing +
+     the newly-registered `crtgfx_skia_raster_smoke_runs`), `CRTGFX_
+     ENABLE_SKIA=ON` and `CRT_USE_IMPORTED_LIBCXX=ON` both left on. The
+     dual `__attribute__((constructor))`/`((destructor))` handling in
+     `libc/src/arch/windows/common/{ctors_begin,ctors_end,init_fini_
+     array}.c` (MSVC `.CRT$XCU`/`.CRT$XTX` *and* GNU `.ctors`/`.dtors`,
+     both walked unconditionally) stays -- it still serves the
+     documented, still-future, separate "MSVC ABI bridge lane" for real
+     external MSVC DLL interop (`docs/cxx_runtime.md`'s own "Next Steps"),
+     not made redundant by this unification. Also supersedes libc++abi's
+     own earlier, narrower `_tls_index` workaround (`cxa_exception_
+     storage.cpp` patched to skip Clang's native-`thread_local` branch,
+     documented above under the Windows imported-libc++ entry) with a
+     project-wide one (`-femulated-tls` in both `tools/crt-cc`/`tools/
+     crt-c++`) -- that earlier patch is not wrong and was left in place,
+     just narrower than what any *new* Windows C++ code compiled through
+     either wrapper now gets automatically.
    - **A real WSL/Ubuntu-20.04 attempt confirmed the "Linux would reach**
      **the same wall faster" projection above, and surfaced one genuinely**
      **new, environment-specific finding along the way (2026-08-22).**

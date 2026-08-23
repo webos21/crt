@@ -10,6 +10,205 @@ substantive update.
 
 ## 2026-08-23
 
+- **Windows regular-CMake C++ target unified to `--target=*-w64-mingw32`
+  (matching every `tools/crt-cc`/`tools/crt-c++`-driven "port" build), and
+  `crtgfx_skia_raster_smoke` finally links and runs
+  (`crtgfx_skia_raster_smoke: ok`) -- resolving the ABI-mismatch finding
+  documented in the entry directly below, by the direction the user chose
+  after an explicit, read-only review ("mingw32 방식으로 진행하자").** Full
+  Windows regression after every fix below: **100% tests passed, 121/121**
+  (120 pre-existing + the newly-registered `crtgfx_skia_raster_smoke_runs`),
+  both in an isolated scratch build dir and on the real
+  `windows-host-ninja-debug` preset. This was a long chain of real,
+  independently-discovered bugs, each confirmed against actual build/link
+  output before being fixed (never guessed):
+  1. **`CMakeLists.txt`'s top-level Windows target-selection block** now
+     always sets `CMAKE_C_COMPILER_TARGET`/`CMAKE_CXX_COMPILER_TARGET`/
+     `CMAKE_ASM_COMPILER_TARGET` to `x86_64-w64-mingw32`/
+     `aarch64-w64-mingw32` (both the `CRT_TARGET_ARCH=host` and explicit
+     cross-arch cases), instead of leaving "host" on Clang's own bare
+     `-pc-windows-msvc` default. Aligns with `docs/cxx_runtime.md`'s own
+     already-documented "ABI Policy" (Itanium/GNU C++ ABI lane for
+     CRT-targeted code, a separate future MSVC bridge lane for real DLL
+     interop) and its DWARF-CFI exception-table design, neither of which
+     the pre-existing MSVC-simulate default for regular CMake C++ code
+     actually matched.
+  2. **CMake's own library-naming convention shifted** with the target
+     (`c.lib`/`c_dll.lib` MSVC-style -> `libc.a`/`libc_dll.dll.a` GNU/
+     MinGW-style for every regular `add_library()` target: `c`/`m`/`dl`/
+     `cxx`/their `_shared` variants), breaking every hardcoded
+     `sysroot/lib/<name>.lib`-style path -- `tools/crt-cc`/`tools/crt-c++`
+     themselves (used project-wide, not just by tests), which hardcoded
+     the old MSVC-style names for the regular-build-produced `c.lib`/
+     `m.lib`/`dl.lib`/`c++.lib`/`c_dll.lib`/etc. Fixed by updating those
+     literals to the new GNU-style names (`tools/crt-c++`'s own already-
+     existing `libc++.a`-first / `c++.lib`-fallback `elif` chain for the
+     C++ runtime specifically was left alone -- it already preferred the
+     new name; only the unconditionally-hardcoded `c`/`m`/`dl` paths in
+     both wrappers needed updating).
+  3. **A real, previously-latent CMake/Ninja generator gap**: `windows_
+     dwarf_unwind_safety_net_test`/`init_array_test`'s own
+     `__attribute__((constructor))`/`((destructor))` now lower to plain,
+     link-order-sensitive `.ctors`/`.dtors` sections (GNU convention)
+     instead of the order-insensitive `.CRT$XCU`/`.CRT$XTX` (MSVC
+     convention) -- and CMake's Ninja generator does **not** actually
+     preserve `${CRT_STARTUP_OBJECTS}`/`${CRT_STARTUP_END_OBJECTS}`'s
+     intended interleave position relative to a target's own directly-
+     compiled source files: confirmed for real by inspecting the
+     generated `build.ninja`, every `$<TARGET_OBJECTS:...>`-sourced object
+     (including `crt1_ctors_end.o`, meant to be strictly last) gets
+     grouped together and placed *ahead of* the target's own source
+     objects regardless of where each was listed in `add_executable()`'s
+     SOURCES. `init_array_test`'s own constructor silently never ran as a
+     result (clean exit, no crash -- only caught because the test
+     deliberately checks for its own required output line). Fixed with a
+     new top-level `crt_link_startup_end_objects(target)` helper
+     (`CMakeLists.txt`) that links `CRT_STARTUP_END_OBJECTS` via
+     `target_link_libraries()` instead (which *does* append in real call
+     order, after a target's own primary objects -- already relied on
+     elsewhere in this file for `crt1_pseudo_reloc`/`crt1_dwarf_safety_
+     net`), called as the last statement touching each affected
+     executable target across `tests/CMakeLists.txt`, `shell/
+     CMakeLists.txt`, and `libcrtgfx/CMakeLists.txt` (10 call sites total).
+  4. **`data_model_test.c`'s own Windows `long double` ABI assertion was
+     wrong for the new target**: real, verified via `clang -target
+     x86_64-w64-mingw32/aarch64-w64-mingw32 -dM -E`, x86_64 Windows now
+     gets genuine 80-bit extended-precision `long double`
+     (`sizeof==16`/`LDBL_MANT_DIG==64`, matching generic x86_64 Linux) --
+     only `aarch64-w64-mingw32` keeps `long double == double`
+     (`sizeof==8`/`53`, Microsoft's own ARM64 ABI choice, unrelated to
+     GNU-vs-MSVC). Split the test's Windows branch by architecture to
+     match.
+  5. **No wiring existed anywhere for regular CMake C++ code to reach this
+     project's own imported libc++** (`${CRT_SYSROOT}/include/c++/v1`,
+     `libc++.a`/`libc++abi.a`/`libunwind.a`) on Windows -- the pre-existing
+     `crt_cxx_build_flags` fallback (`CRT_CXX_STANDARD_INCLUDE_DIRS`) had
+     always, on Windows, resolved to the *real host MSVC STL* instead
+     (found via a direct `clang++ -v` compiler probe, since regular CMake
+     C++ code previously compiled `-pc-windows-msvc`) -- exactly the ABI
+     mismatch documented in the entry below. Under the new mingw32 target
+     that probe finds nothing at all (no real mingw-w64 GCC/libstdc++
+     install on this machine to fall back to either), so the very first
+     real Skia header reaching `<cstddef>` failed outright. Fixed by
+     adding an explicit `-isystem${CRT_SYSROOT}/include/c++/v1` (via
+     `target_compile_options()`, landing in `<FLAGS>` ahead of the
+     inherited chain -- the same ordering fix already established below)
+     and swapping the link from the small bootstrap `cxx`/`cxx_shared` ABI
+     shim to the real imported `libc++.a`+`libc++abi.a`+`libunwind.a`
+     static chain (`libc++.dll.a`+`libc++abi.dll.a`+`libunwind.dll.a` for
+     the `crtgfx_shared` DLL case), scoped to `crtgfx_skia_objects`/
+     `crtgfx_skia_raster_smoke`/`crtgfx_shared` only (every other Windows
+     C++ consumer of `crt_cxx_build_flags` only exercises the bootstrap
+     shim and has never needed a real STL) -- gated on a new `CRTGFX_
+     ENABLE_SKIA=ON` + Windows guard requiring `CRT_USE_IMPORTED_LIBCXX=ON`
+     and the sysroot headers already staged (`libcrtgfx/CMakeLists.txt`,
+     mirroring the file's own existing `SkSurface.h`/`CRTGFX_SKIA_
+     LIBRARIES` FATAL_ERROR pattern -- deliberately a configure-time file-
+     existence check, not a `add_dependencies()` ninja edge, since a
+     direct edge onto `crt-libcxx-sysroot` hits a real dependency cycle:
+     `crtgfx_skia_objects`'s output folds into the `crtgfx` STATIC_LIBRARY
+     that the `sysroot` target's own DEPENDS list already needs, and `crt-
+     libcxx-configure` already depends on `sysroot` -- confirmed for real,
+     "CMake Generate step failed" naming exactly this strongly-connected
+     component).
+  6. **Skia's own `SK_BUILD_FOR_WIN`/`__forceinline`/`<crtdbg.h>` trap**
+     (already fixed for Skia's own GN build via `-DSK_BUILD_FOR_UNIX`, see
+     `tools/build_skia.py`'s own comment) hit again here, since `crtgfx_
+     skia_objects`/`crtgfx_skia_raster_smoke` `#include` the same Skia
+     headers directly through a completely separate (regular CMake, not
+     GN) compile path: fixed with the identical `-DSK_BUILD_FOR_UNIX`
+     `target_compile_definitions()` on both targets.
+  7. **`libm` was genuinely missing `atan2f`** (only `atan2`/`atan2l`
+     existed -- confirmed via `llvm-nm`/source search, a real, pre-
+     existing gap unrelated to this migration, just never exercised until
+     `SkPathBuilder::arcTo()`/`SkComputeRadialSteps()` called it). Added as
+     a cast-wrapper around the existing `atan2()` in `libm/src/basic.c`,
+     matching that same file's own established `asinf`/`acosf`/`coshf`
+     precedent (this project's real single-precision FreeBSD source,
+     `e_atan2f.c`, was never imported -- a wrapper was chosen over porting
+     an unverifiable new algorithm).
+  8. **This project's Windows PAL has never implemented native COFF
+     Thread-Local Storage** (`_tls_index`/`.tls` section/
+     `IMAGE_TLS_DIRECTORY`, normally supplied by real mingw-w64's `crt/
+     tlssup.c` or real MSVC's own `tlssup.obj`) -- `libc/src/tls.c`'s own
+     TLS mechanism is a separate, explicit `TlsAlloc`/`TlsGetValue`-based
+     scheme, unrelated to the compiler-emitted native lowering a plain
+     C++11 `thread_local` (`SkStrikeCache::GlobalStrikeCache()`) uses by
+     default (`ld.lld: error: undefined symbol: _tls_index`). Asked the
+     user whether to implement real native TLS support (a genuine, all-new
+     PAL feature) or find another way; re-investigation found `clang
+     -femulated-tls` -- confirmed for real via a standalone compile +
+     `llvm-nm` -- lowers `thread_local` to `__emutls_get_address()` calls
+     instead, backed by compiler-rt's own `emutls.c` (itself just
+     `TlsAlloc`/`TlsGetValue`/`TlsSetValue` under the hood, already present
+     in the vendor `clang_rt.builtins-x86_64.lib` this project always
+     links) -- the same emulated-TLS strategy Bionic/Android itself
+     historically used for the identical reason, matching this whole
+     project's own "Bionic-compatible" identity far better than a brand
+     new native-TLS implementation would have. Added `-femulated-tls` to
+     both `tools/crt-cc` and `tools/crt-c++`'s own Windows `common_flags`
+     (project-wide, so every port this wrapper ever compiles gets
+     consistent `thread_local` lowering), then force-rebuilt Skia from
+     scratch (the flag lives inside the wrapper script, invisible to
+     Skia's own GN/ninja command-line hashing, so a stale `libskia.a`
+     would otherwise never pick it up) -- confirmed via `llvm-nm` that
+     `SkStrikeCache`'s own `thread_local` now references `__emutls_get_
+     address`, not `_tls_index`.
+  9. **`crt_compiler_rt_builtins` had silently resolved to an empty
+     INTERFACE library on every regular Windows CMake build all along**
+     (top-level `CMakeLists.txt`, pre-existing, unrelated to this
+     migration): its `--print-libgcc-file-name` probe calls the raw
+     compiler directly, with no knowledge of `CMAKE_C_COMPILER_TARGET`,
+     so on Windows it always queried Clang's own bare default and got back
+     the unresolved literal `"libgcc.a"`. Invisible until `__emutls_get_
+     address` became the first symbol any regular CMake Windows build
+     actually needed from that archive. Fixed with a Windows-specific
+     probe (`-print-resource-dir` + the same real-archive candidate search
+     already proven in `tools/crt-c++`'s own `CRT_CXX_BUILDING_RUNTIME`
+     comment), normalized through `file(TO_CMAKE_PATH ...)` (a second,
+     separate real bug this surfaced: the raw backslash-separated Windows
+     path broke `cmake_install.cmake`'s own string parsing at *install*
+     time -- "Syntax error in cmake code" -- confirmed for real, since
+     this was the first time that `install(FILES "${CRT_COMPILER_RT_
+     BUILTINS}" ...)` line ever actually received a non-empty, real path
+     to install).
+  10. **Two more real, narrow link-time gaps**, both scoped to `crtgfx_
+      skia_raster_smoke`/`crtgfx_shared` once `crt_compiler_rt_builtins`
+      started actually linking real content: (a) something reachable only
+      once both `crtgfx.a` and `libskia.a` are present together makes
+      lld-link go looking for `libuuid.a` (bisected for real; no `strings`-
+      visible COFF `.drectve` directive found in any linked archive to
+      explain the exact trigger) -- fixed by supplying the real Windows
+      SDK `Uuid.Lib` directly, mirroring this file's own existing `user32.
+      lib`/`gdi32.lib` `find_file()` pattern; (b) `clang_rt.builtins-
+      x86_64.lib` -- confirmed via `llvm-nm` to be a real, vendor-shipped
+      archive bundling more than pure arithmetic builtins -- has at least
+      two object members (`emutls.c.obj`, `enable_execute_stack.c.obj`)
+      that each carry their own internal fallback `fprintf` (itself
+      calling the real UCRT's `__stdio_common_vfprintf`, clearly meant for
+      a real-CRT host, not this freestanding one), which COFF/lld-link's
+      archive semantics (pulling in a member makes *every* symbol it
+      exports part of the final image, unlike ELF's narrower per-symbol
+      resolution) turns into a hard `duplicate symbol: fprintf` against
+      this project's own real one in `libc.a`. Fixed with `-Wl,--allow-
+      multiple-definition` (lld keeps the first-encountered definition,
+      matching link order -- this project's own `libc.a` links well before
+      the vendor archive) plus two tiny, deliberately-non-functional link
+      stubs (new `libc/src/arch/windows/common/emutls_link_stubs.c`,
+      compiled only into the affected targets) for `__acrt_iob_func`/
+      `__stdio_common_vfprintf` themselves, which `emutls.c.obj`'s own
+      `win_error()` diagnostic path (reached only if a genuine Win32
+      `TlsAlloc`/`TlsSetValue` call fails -- an already-fatal, essentially
+      unreachable condition) also references and this freestanding CRT
+      has no real UCRT to provide; the stubs just `abort()` immediately,
+      never attempting a real UCRT-compatible implementation for a path
+      that in practice never runs.
+  - `crtgfx_shared` (the DLL variant, part of the default `ALL` target
+    whenever `CRTGFX_ENABLE_SKIA=ON`, unlike the test-only `crtgfx_skia_
+    raster_smoke`) needed the identical set of fixes (5, 6, 9, 10) applied
+    a second time for its own, separately-linked image, once its own
+    build was reached in a full default-target rebuild.
+
 - **`-DCRTGFX_ENABLE_SKIA=ON` reconfigure + `crtgfx_skia_raster_smoke` build
   attempted on Windows; fixed one more real bug (a project-wide UCRT
   `printf` inline-definition clash), then hit a genuine, deeper

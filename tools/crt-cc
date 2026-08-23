@@ -130,6 +130,33 @@ case "$target_os" in
     # mingw-version probe seeing the same, real answer a genuine mingw-w64
     # toolchain would give.
     common_flags="$common_flags -D__MINGW32_MAJOR_VERSION=3 -D__MINGW32_MINOR_VERSION=11"
+    # -femulated-tls: this project's Windows PAL has never implemented real
+    # native COFF TLS (_tls_index/.tls section/IMAGE_TLS_DIRECTORY, normally
+    # initialized by the OS loader before entry -- real mingw-w64 supplies
+    # this via crt/tlssup.c, real MSVC via its own tlssup.obj, neither of
+    # which this from-scratch freestanding CRT has an equivalent for).
+    # -femulated-tls makes clang instead lower __declspec(thread)/thread_
+    # local to __emutls_get_address() runtime calls -- the same emulated-TLS
+    # strategy Bionic/Android itself has historically used for the identical
+    # reason (no ELF/COFF loader-level TLS directory cooperation needed),
+    # matching this whole project's own "Bionic-compatible" identity.
+    # __emutls_get_address's own implementation (compiler-rt's emutls.c,
+    # itself built on TlsAlloc/TlsGetValue/TlsSetValue under the hood) is
+    # already present in libclang_rt.builtins.a/clang_rt.builtins-*.lib,
+    # already unconditionally linked into every executable this wrapper
+    # builds (see $compiler_rt_builtins below) -- confirmed for real
+    # (2026-08-23): `llvm-nm` on that exact archive lists a defined
+    # __emutls_get_address alongside emutls_init/emutls_exit/etc. Found
+    # chasing crtgfx_skia_raster_smoke's own link failure once mingw32
+    # unification got everything else working: Skia's SkStrikeCache::
+    # GlobalStrikeCache() uses a plain C++11 thread_local, which without
+    # this flag lowers to a direct, unresolvable `_tls_index` reference
+    # (`ld.lld: error: undefined symbol: _tls_index`). Applied here (not
+    # just on Skia's own build) so every port this wrapper ever compiles
+    # gets the same thread_local lowering strategy, rather than a
+    # per-consumer flag that would silently stop matching the moment a
+    # different port needs it too.
+    common_flags="$common_flags -femulated-tls"
     ;;
 esac
 
@@ -245,12 +272,12 @@ if [ "${CRT_CXX_BUILDING_RUNTIME:-0}" = 1 ]; then
 elif [ "$shared_mode" -eq 1 ]; then
   case "$target_os" in
     macos) cxx_runtime_lib="${CRT_SYSROOT}/lib/libc++.dylib" ;;
-    windows) cxx_runtime_lib="${CRT_SYSROOT}/lib/c++.lib" ;;
+    windows) cxx_runtime_lib="${CRT_SYSROOT}/lib/libc++.a" ;;
     *) cxx_runtime_lib="${CRT_SYSROOT}/lib/libc++.so" ;;
   esac
 else
   case "$target_os" in
-    windows) cxx_runtime_lib="${CRT_SYSROOT}/lib/c++.lib" ;;
+    windows) cxx_runtime_lib="${CRT_SYSROOT}/lib/libc++.a" ;;
     *) cxx_runtime_lib="${CRT_SYSROOT}/lib/libc++.a" ;;
   esac
 fi
@@ -325,7 +352,7 @@ case "$target_os" in
     fi
     ;;
   windows)
-    libs="$libs ${CRT_SYSROOT}/lib/c.lib ${CRT_SYSROOT}/lib/m.lib ${CRT_SYSROOT}/lib/dl.lib $cxx_runtime_lib ${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"
+    libs="$libs ${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a $cxx_runtime_lib ${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"
     if [ "$shared_mode" -eq 1 ]; then
       # crt1_pseudo_reloc.o/crt1_dwarf_safety_net.o: see the matching
       # comment in tools/crt-c++'s own shared_mode branch.

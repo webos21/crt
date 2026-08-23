@@ -22,21 +22,31 @@ in those two win.
   the way (GN's own hardcoded `python3` token, a `cmd.exe` quoting trap,
   two `win32_shim` gaps, a `tools/crt-ar` response-file parsing bug); see
   `HISTORY.md`'s matching entry.
-- **`crtgfx_skia_raster_smoke` on Windows (2026-08-23, same day): blocked
-  on a real ABI mismatch, not yet fixed.** `CRTGFX_ENABLE_SKIA=ON` was
-  tried; one more real bug fixed (`_NO_CRT_STDIO_INLINE`, a UCRT `printf`
-  inline-definition clash any C++ code reaching real MSVC STL headers
-  could hit), then a genuine architectural gap surfaced: this project's
-  regular CMake C++ code compiles MSVC-mangled (`x86_64-pc-windows-msvc`,
-  clang's own default), while Skia is built GNU/Itanium-mangled
-  (`--target=x86_64-w64-mingw32`, via `tools/crt-cc.cmd`/`crt-c++.cmd`) --
-  not link-compatible. Stopped here by explicit user choice; the two real
-  fixes are kept, `CRTGFX_ENABLE_SKIA` reverted to its documented default
-  `OFF`, confirmed zero regression (100%, 120/120). See `HISTORY.md`'s
-  matching entry and `TODO.md`'s dated sub-bullet for the two real
-  candidate fixes (retarget the smoke test + its dependencies to mingw32,
-  or retarget Skia's own build to MSVC) a future pass should choose
-  between.
+- **`crtgfx_skia_raster_smoke` on Windows (2026-08-23, same day, resolved):
+  passing.** The ABI-mismatch gap noted below was resolved by unifying
+  Windows regular-CMake C++ to `--target=*-w64-mingw32` project-wide
+  (explicit user go-ahead, after a read-only review pass), matching what
+  every `tools/crt-cc`/`tools/crt-c++`-driven "port" build already used.
+  Ten more real, distinct bugs surfaced and were fixed getting there (CMake
+  library-naming-convention shift, a genuine CMake/Ninja `.ctors`/`.dtors`
+  link-order gap, per-arch `long double` ABI, wiring regular CMake C++ onto
+  this project's own imported libc++, Skia's `SK_BUILD_FOR_UNIX` trap on
+  this second compile path, a missing `atan2f`, `-femulated-tls` instead of
+  new native COFF TLS support, a silently-empty `crt_compiler_rt_builtins`
+  on every prior Windows CMake build, plus `uuid.lib`/a vendor builtins
+  archive's own internal UCRT-only `fprintf` fallback). `crtgfx_skia_
+  raster_smoke: ok`, full suite **100% passing, 121/121**, with
+  `CRTGFX_ENABLE_SKIA=ON` and `CRT_USE_IMPORTED_LIBCXX=ON` both on, verified
+  on both an isolated scratch build dir and the real `windows-host-ninja-
+  debug` preset. `CRTGFX_ENABLE_SKIA` stays `OFF` by default (unchanged;
+  the default regression suite below is unaffected). See `HISTORY.md`'s
+  topmost 2026-08-23 entry for the full per-bug writeup and `TODO.md`'s
+  matching dated sub-bullet.
+  - The mingw32-unification's original trigger, first found and
+    deliberately left open below, is superseded by the above: regular
+    CMake C++ code compiling `-pc-windows-msvc` (MSVC-mangled) while Skia
+    compiled `-w64-mingw32` (Itanium-mangled) is no longer true -- both
+    now share the same target/ABI.
 
 ## What "passing" currently means
 

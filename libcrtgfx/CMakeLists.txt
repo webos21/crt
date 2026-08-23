@@ -88,6 +88,48 @@ endif()
 if(CRTGFX_ENABLE_SKIA AND NOT CRTGFX_SKIA_LIBRARIES)
   message(FATAL_ERROR "CRTGFX_ENABLE_SKIA=ON requires CRTGFX_SKIA_LIBRARIES. Run crtgfx-skia-build, then reconfigure, or set the library path explicitly.")
 endif()
+# Windows-only: crtgfx_skia_objects/crtgfx_skia_raster_smoke's own C++ code
+# (skia_bridge.cc, tests/skia_raster_smoke.cc) needs a real <vector>/<memory>/
+# ... standard library to even compile, and -- since Skia itself is always
+# built --target=*-w64-mingw32 (Itanium/GNU C++ ABI) via tools/crt-cc/tools/
+# crt-c++, regardless of this outer CMake project's own target -- that real
+# standard library must be THIS project's own imported libc++ (staged at
+# ${CRT_SYSROOT}/include/c++/v1 by the crt-libcxx-sysroot target), not a host
+# substitute. Before CMakeLists.txt's mingw32 unification, crt_cxx_build_
+# flags's own Windows fallback (CRT_CXX_STANDARD_INCLUDE_DIRS, see that
+# file's own comment) silently supplied the *real host MSVC STL* instead
+# (found via a direct `clang++ -v` compiler probe, since regular CMake C++
+# code compiled *-pc-windows-msvc by default) -- MSVC-mangled, and the root
+# cause of the ABI-mismatch link failures this whole mingw32 migration was
+# started to fix (see HISTORY.md's dated entry: real Skia methods confirmed
+# present in libskia.a via llvm-nm, yet "undefined symbol" at link time).
+# Confirmed for real (2026-08-23): after the unification, that same fallback
+# probe finds nothing usable under --target=x86_64-w64-mingw32 (no host MSVC
+# STL is reachable from that target, and this project ships no separate real
+# mingw-w64 GCC/libstdc++ install to fall back to either) -- CMAKE_CXX_
+# IMPLICIT_INCLUDE_DIRECTORIES came back as just Clang's own two bundled
+# resource-dir paths, one of which incidentally matches CRT_CXX_STANDARD_
+# INCLUDE_DIRS's generic "ends with /include" Windows catch-all pattern, so
+# the probe never even ran -- and the first real Skia header reaching
+# <cstddef> failed outright: `fatal error: 'cstddef' file not found`. Scoped
+# here (not added to crt_cxx_build_flags globally) because every other
+# Windows C++ consumer of crt_cxx_build_flags (add_crt_cxx_test's own tests)
+# only exercises the small bootstrap libstdc++/src/ ABI shim (cxxabi.c/
+# msvcabi.c/new_delete.cc) and has never needed a real standard library --
+# widening this to all of them would be unverified, unnecessary scope.
+if(CRTGFX_ENABLE_SKIA AND CRT_TARGET_OS STREQUAL "windows" AND NOT CRT_USE_IMPORTED_LIBCXX)
+  message(FATAL_ERROR "CRTGFX_ENABLE_SKIA=ON on Windows requires CRT_USE_IMPORTED_LIBCXX=ON (and a built crt-libcxx-sysroot) -- Skia's own C++ code needs this project's real, project-owned libc++, never a host substitute.")
+endif()
+# Checked here (configure time, file-existence) rather than as a ninja
+# add_dependencies() edge -- see the top-level CMakeLists.txt's own comment
+# (right after its "sysroot"/crtgfx-skia-build wiring) for the real
+# dependency cycle that a direct edge onto crt-libcxx-sysroot/sysroot hits,
+# since crtgfx_skia_objects's own output is folded into the `crtgfx`
+# STATIC_LIBRARY that `sysroot` itself depends on.
+if(CRTGFX_ENABLE_SKIA AND CRT_TARGET_OS STREQUAL "windows" AND
+   NOT EXISTS "${CRT_SYSROOT}/include/c++/v1")
+  message(FATAL_ERROR "CRTGFX_ENABLE_SKIA=ON on Windows but ${CRT_SYSROOT}/include/c++/v1 was not found. Run the crt-libcxx-sysroot target first (with CRT_USE_IMPORTED_LIBCXX=ON), then reconfigure.")
+endif()
 
 if(CRT_TARGET_OS STREQUAL "windows")
   set(CRTGFX_BACKEND_SOURCES src/arch/windows/window_win32.c)
@@ -230,6 +272,38 @@ set(CRTGFX_SKIA_OBJECTS)
 if(CRTGFX_ENABLE_SKIA)
   add_library(crtgfx_skia_objects OBJECT src/skia_bridge.cc)
   target_link_libraries(crtgfx_skia_objects PRIVATE crt_cxx_build_flags)
+  if(CRT_TARGET_OS STREQUAL "windows")
+    # SK_BUILD_FOR_UNIX: matches tools/build_skia.py's own -DSK_BUILD_FOR_
+    # UNIX for Skia's own GN-driven compile (see that file's own fuller
+    # comment) -- needed again here since include/private/base/SkFeatures.h
+    # auto-detects purely from _WIN32 (which clang's mingw target predefines
+    # too) and has no way to tell tools/crt-cc's mingw-target build apart
+    # from real MSVC/clang-cl. Without it, SK_ALWAYS_INLINE (SkAttributes.h)
+    # expands to the bare MSVC keyword __forceinline, and SkTypes.h tries to
+    # #include <crtdbg.h> under SK_DEBUG -- neither exists/parses under
+    # this project's own GNU-ABI clang invocation (confirmed for real,
+    # 2026-08-23: `error: unknown type name '__forceinline'` then `fatal
+    # error: 'crtdbg.h' file not found`, the same failure build_skia.py's
+    # own comment already documents for Skia's own sources). Must match
+    # whatever libskia.a itself was actually compiled with for any
+    # macro-conditional inline code/struct layout in the shared headers to
+    # stay consistent -- Skia's own GN build already picked SK_BUILD_FOR_
+    # UNIX (via target_os="linux"), never SK_BUILD_FOR_WIN.
+    target_compile_definitions(crtgfx_skia_objects PRIVATE SK_BUILD_FOR_UNIX)
+  endif()
+  if(CRT_TARGET_OS STREQUAL "windows" AND CRT_USE_IMPORTED_LIBCXX)
+    # -isystem${CRT_SYSROOT}/include/c++/v1, via target_compile_options (not
+    # target_include_directories) so it lands in <FLAGS>, ahead of
+    # crt_cxx_build_flags's own inherited chain -- see the matching, fuller
+    # comment on crtgfx_skia_raster_smoke's own libc/include isystem just
+    # below for why <INCLUDES> can never win that ordering on this project's
+    # custom CMAKE_CXX_COMPILE_OBJECT rule. See the CRTGFX_ENABLE_SKIA guard
+    # above (top of this file) for why this project's own imported libc++,
+    # not any host substitute, is required here.
+    target_compile_options(crtgfx_skia_objects PRIVATE
+      "-isystem${CRT_SYSROOT}/include/c++/v1"
+    )
+  endif()
   target_include_directories(crtgfx_skia_objects SYSTEM BEFORE PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${CRTGFX_SKIA_ROOT}"
@@ -314,10 +388,24 @@ set_target_properties(crtgfx PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
 )
 
+set(CRTGFX_SHARED_EXTRA_SOURCES "")
+# Windows + Skia only: crtgfx_shared -- unlike the plain `crtgfx` static
+# archive, which only records crtgfx_skia_objects's own unresolved real-
+# libc++/emutls references for whatever later links it in (crtgfx_skia_
+# raster_smoke, already fixed) -- is itself a real DLL, so it must fully
+# resolve those same references at its own link time. See crtgfx_skia_
+# raster_smoke's own matching comments just above (imported libc++,
+# uuid.lib, --allow-multiple-definition, emutls_link_stubs.c) for the full
+# story of each piece; this mirrors all of them for the shared/DLL case.
+if(CRT_TARGET_OS STREQUAL "windows" AND CRTGFX_ENABLE_SKIA)
+  list(APPEND CRTGFX_SHARED_EXTRA_SOURCES
+    "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/common/emutls_link_stubs.c")
+endif()
 add_library(crtgfx_shared SHARED
   $<TARGET_OBJECTS:crtgfx_common_objects>
   $<TARGET_OBJECTS:crtgfx_backend_objects>
   ${CRTGFX_SKIA_OBJECTS}
+  ${CRTGFX_SHARED_EXTRA_SOURCES}
 )
 target_include_directories(crtgfx_shared PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -325,7 +413,21 @@ target_include_directories(crtgfx_shared PUBLIC
 if(CRTGFX_ENABLE_SKIA)
   target_include_directories(crtgfx_shared PUBLIC "${CRTGFX_SKIA_ROOT}")
 endif()
-target_link_libraries(crtgfx_shared PRIVATE crt_build_flags ${CRTGFX_CRT_SHARED_LIBS})
+if(CRT_TARGET_OS STREQUAL "windows" AND CRTGFX_ENABLE_SKIA AND CRT_USE_IMPORTED_LIBCXX)
+  # Real imported libc++/libc++abi/libunwind DLL import libraries (Itanium
+  # ABI, matching Skia itself), not the bootstrap libstdc++/src/ ABI shim
+  # (`cxx_shared`) -- swapped in for just the C++ runtime member of
+  # CRTGFX_CRT_SHARED_LIBS, keeping c_shared/m_shared/dl_shared as-is.
+  target_link_libraries(crtgfx_shared PRIVATE
+    c_shared m_shared dl_shared
+    "${CRT_SYSROOT}/lib/libc++.dll.a"
+    "${CRT_SYSROOT}/lib/libc++abi.dll.a"
+    "${CRT_SYSROOT}/lib/libunwind.dll.a"
+  )
+else()
+  target_link_libraries(crtgfx_shared PRIVATE ${CRTGFX_CRT_SHARED_LIBS})
+endif()
+target_link_libraries(crtgfx_shared PRIVATE crt_build_flags)
 if(CRTGFX_ENABLE_SKIA AND CRTGFX_SKIA_LIBRARIES)
   target_link_libraries(crtgfx_shared PUBLIC ${CRTGFX_SKIA_LIBRARIES})
 endif()
@@ -336,6 +438,19 @@ if(CRT_TARGET_OS STREQUAL "windows")
     "${CRTGFX_WINDOWS_USER32_LIB}"
     "${CRTGFX_WINDOWS_GDI32_LIB}"
   )
+  if(CRTGFX_ENABLE_SKIA)
+    target_link_libraries(crtgfx_shared PRIVATE crt_compiler_rt_builtins)
+    find_file(CRTGFX_WINDOWS_UUID_LIB
+      NAMES Uuid.Lib uuid.lib
+      PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES}
+      NO_DEFAULT_PATH
+    )
+    if(NOT CRTGFX_WINDOWS_UUID_LIB)
+      set(CRTGFX_WINDOWS_UUID_LIB uuid.lib CACHE FILEPATH "Windows uuid import library")
+    endif()
+    target_link_libraries(crtgfx_shared PRIVATE "${CRTGFX_WINDOWS_UUID_LIB}")
+    target_link_options(crtgfx_shared PRIVATE -Wl,--allow-multiple-definition)
+  endif()
 elseif(CRT_TARGET_OS STREQUAL "macos")
   target_link_libraries(crtgfx_shared PRIVATE ${CRTGFX_MACOS_FRAMEWORKS})
 endif()
@@ -365,10 +480,11 @@ if(CRTGFX_ENABLE_SKIA)
   install(DIRECTORY "${CRTGFX_SKIA_ROOT}/include" DESTINATION include)
 endif()
 
+# CRT_STARTUP_END_OBJECTS deliberately not listed here -- see
+# crt_link_startup_end_objects()'s own comment (top-level CMakeLists.txt).
 add_executable(crtgfx_window_smoke
   ${CRT_STARTUP_OBJECTS}
   tests/window_smoke_test.c
-  ${CRT_STARTUP_END_OBJECTS}
 )
 target_link_libraries(crtgfx_window_smoke PRIVATE crt_build_flags c crtgfx)
 target_include_directories(crtgfx_window_smoke PRIVATE
@@ -399,6 +515,7 @@ elseif(CRT_TARGET_OS STREQUAL "windows")
   )
   target_link_libraries(crtgfx_window_smoke PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
 endif()
+crt_link_startup_end_objects(crtgfx_window_smoke)
 add_dependencies(crtgfx_window_smoke c crt1)
 
 add_test(NAME crtgfx_window_smoke_runs COMMAND crtgfx_window_smoke)
@@ -409,12 +526,39 @@ set_tests_properties(crtgfx_window_smoke_runs PROPERTIES
 set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_window_smoke_runs)
 
 if(CRTGFX_ENABLE_SKIA)
+  # CRT_STARTUP_END_OBJECTS deliberately not listed here -- see
+  # crt_link_startup_end_objects()'s own comment (top-level CMakeLists.txt).
+  set(CRTGFX_SKIA_RASTER_SMOKE_EXTRA_SOURCES "")
+  if(CRT_TARGET_OS STREQUAL "windows")
+    # __acrt_iob_func/__stdio_common_vfprintf link stubs -- see that file's
+    # own top comment (needed once -femulated-tls's own compiler-rt
+    # implementation, emutls.c, actually gets linked in).
+    list(APPEND CRTGFX_SKIA_RASTER_SMOKE_EXTRA_SOURCES
+      "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/common/emutls_link_stubs.c")
+  endif()
   add_executable(crtgfx_skia_raster_smoke
     ${CRT_STARTUP_OBJECTS}
     tests/skia_raster_smoke.cc
-    ${CRT_STARTUP_END_OBJECTS}
+    ${CRTGFX_SKIA_RASTER_SMOKE_EXTRA_SOURCES}
   )
-  target_link_libraries(crtgfx_skia_raster_smoke PRIVATE crt_cxx_build_flags crtgfx cxx c)
+  target_link_libraries(crtgfx_skia_raster_smoke PRIVATE crt_cxx_build_flags crtgfx)
+  if(CRT_TARGET_OS STREQUAL "windows")
+    # SK_BUILD_FOR_UNIX: see crtgfx_skia_objects's own, fuller comment just
+    # above (same reasoning; this target also #includes Skia headers
+    # directly via crtgfx/skia.h).
+    target_compile_definitions(crtgfx_skia_raster_smoke PRIVATE SK_BUILD_FOR_UNIX)
+  endif()
+  if(CRT_TARGET_OS STREQUAL "windows" AND CRT_USE_IMPORTED_LIBCXX)
+    # -isystem${CRT_SYSROOT}/include/c++/v1, added *before* the libc/include
+    # one just below (both via target_compile_options, so both land in
+    # <FLAGS> in call order) -- this project's own imported libc++, matching
+    # what compiles skia_bridge.cc/Skia itself, not any host substitute. See
+    # the CRTGFX_ENABLE_SKIA guard at the top of this file for the fuller
+    # story of why this is required on Windows now.
+    target_compile_options(crtgfx_skia_raster_smoke PRIVATE
+      "-isystem${CRT_SYSROOT}/include/c++/v1"
+    )
+  endif()
   # -isystem<repo>/libc/include, via target_compile_options (NOT target_
   # include_directories -- see the plain CRTGFX_SKIA_ROOT-only call just
   # below for that): confirmed for real (2026-08-23) that this project's
@@ -447,6 +591,20 @@ if(CRTGFX_ENABLE_SKIA)
   target_include_directories(crtgfx_skia_raster_smoke SYSTEM BEFORE PRIVATE
     "${CRTGFX_SKIA_ROOT}"
   )
+  if(CRT_TARGET_OS STREQUAL "windows" AND CRT_USE_IMPORTED_LIBCXX)
+    # Real imported libc++/libc++abi/libunwind (Itanium ABI, matching Skia
+    # itself), not the small bootstrap libstdc++/src/ ABI shim (`cxx`) --
+    # see the CRTGFX_ENABLE_SKIA guard at the top of this file. Mirrors
+    # tools/crt-c++'s own cxx_runtime_libs static-link selection.
+    target_link_libraries(crtgfx_skia_raster_smoke PRIVATE
+      "${CRT_SYSROOT}/lib/libc++.a"
+      "${CRT_SYSROOT}/lib/libc++abi.a"
+      "${CRT_SYSROOT}/lib/libunwind.a"
+      c
+    )
+  else()
+    target_link_libraries(crtgfx_skia_raster_smoke PRIVATE cxx c)
+  endif()
   target_link_libraries(crtgfx_skia_raster_smoke PRIVATE crt_compiler_rt_builtins)
   target_link_options(crtgfx_skia_raster_smoke PRIVATE
     -nostdlib
@@ -471,7 +629,48 @@ if(CRTGFX_ENABLE_SKIA)
       -Wl,/OPT:REF
     )
     target_link_libraries(crtgfx_skia_raster_smoke PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+    # uuid.lib: something reachable from this target's own link set (bisected
+    # for real, 2026-08-23, down to needing *both* crtgfx.a and libskia.a
+    # present together -- neither alone triggers it, and no embedded COFF
+    # .drectve string naming "uuid" turned up in any linked archive via
+    # direct `strings` inspection) makes lld-link, in this mingw-target
+    # -Bdynamic mode, go looking for "libuuid.a" -- `ld.lld: error: could
+    # not open 'libuuid.a': no such file or directory` otherwise. Supplying
+    # the real Windows SDK import library directly resolves it regardless
+    # of the exact underlying trigger, matching this file's own existing
+    # user32.lib/gdi32.lib find_file() precedent just above.
+    find_file(CRTGFX_WINDOWS_UUID_LIB
+      NAMES Uuid.Lib uuid.lib
+      PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES}
+      NO_DEFAULT_PATH
+    )
+    if(NOT CRTGFX_WINDOWS_UUID_LIB)
+      set(CRTGFX_WINDOWS_UUID_LIB uuid.lib CACHE FILEPATH "Windows uuid import library")
+    endif()
+    target_link_libraries(crtgfx_skia_raster_smoke PRIVATE "${CRTGFX_WINDOWS_UUID_LIB}")
+    # --allow-multiple-definition: clang_rt.builtins-x86_64.lib (this
+    # target's own crt_compiler_rt_builtins, needed for __emutls_get_
+    # address -- see tools/crt-cc's own -femulated-tls comment) is a real,
+    # vendor-shipped MSVC-layout LLVM archive that bundles more than pure
+    # arithmetic builtins: at least two of its own object members (emutls.
+    # c.obj, enable_execute_stack.c.obj) each carry their own internal
+    # fallback `fprintf` (itself calling the real UCRT's __stdio_common_
+    # vfprintf, so clearly meant for a real-CRT host environment, not this
+    # freestanding one) -- confirmed for real via llvm-nm. Once anything
+    # pulls either member in, COFF/lld-link's own archive semantics treat
+    # every symbol *that member exports* as now part of the final image, so
+    # its own fprintf collides outright with this project's real, correct
+    # `fprintf` in libc.a: `ld.lld: error: duplicate symbol: fprintf`. This
+    # project's own libc.a is linked well before clang_rt.builtins-x86_64.
+    # lib on this target's own link line, and lld's own documented --allow-
+    # multiple-definition behavior (matching GNU ld) is "keep the first
+    # definition encountered" -- so this reliably keeps our real fprintf,
+    # not the vendor archive's unused internal fallback.
+    target_link_options(crtgfx_skia_raster_smoke PRIVATE
+      -Wl,--allow-multiple-definition
+    )
   endif()
+  crt_link_startup_end_objects(crtgfx_skia_raster_smoke)
   add_dependencies(crtgfx_skia_raster_smoke cxx c crt1 crtgfx)
 
   add_test(NAME crtgfx_skia_raster_smoke_runs COMMAND crtgfx_skia_raster_smoke)
@@ -482,10 +681,11 @@ if(CRTGFX_ENABLE_SKIA)
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_skia_raster_smoke_runs)
 endif()
 
+# CRT_STARTUP_END_OBJECTS deliberately not listed here -- see
+# crt_link_startup_end_objects()'s own comment (top-level CMakeLists.txt).
 add_executable(crtgfx_window_demo
   ${CRT_STARTUP_OBJECTS}
   tools/window_demo.c
-  ${CRT_STARTUP_END_OBJECTS}
 )
 target_link_libraries(crtgfx_window_demo PRIVATE crt_build_flags c crtgfx)
 target_include_directories(crtgfx_window_demo PRIVATE
@@ -516,4 +716,5 @@ elseif(CRT_TARGET_OS STREQUAL "windows")
   )
   target_link_libraries(crtgfx_window_demo PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
 endif()
+crt_link_startup_end_objects(crtgfx_window_demo)
 add_dependencies(crtgfx_window_demo c crt1)
