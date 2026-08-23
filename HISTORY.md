@@ -80,6 +80,58 @@ substantive update.
   SKIA=ON`/`CRT_USE_IMPORTED_LIBCXX=ON` both still on from this session's
   own cached configure.
 
+- **New `crtgfx-skia-smoke` CMake target: `cmake --build <dir> --target
+  crtgfx-skia-smoke` now builds and runs `crtgfx_skia_raster_smoke` end to
+  end regardless of *that build directory's own* current `CRTGFX_ENABLE_
+  SKIA`/`CRT_USE_IMPORTED_LIBCXX` cache values -- `cmake --workflow` itself
+  is deliberately left untouched (both flags stay `OFF` by default there);
+  this is an opt-in target for whoever explicitly asks for the Skia smoke
+  test.** Mirrors `crt-libcxx-smoke`'s own already-existing self-sufficient
+  role (confirmed to need zero changes: `tools/test_libcxx_runtime.py`
+  already compiles through `tools/crt-c++` directly, independent of the
+  outer project's own `CRT_USE_IMPORTED_LIBCXX` option). Implemented as a
+  new `add_custom_target(crtgfx-skia-smoke ...)` in `libcrtgfx/CMakeLists.
+  txt` that shells out to a new `tools/test_crtgfx_skia_smoke.py`, which
+  drives a *separate, dedicated* nested build directory (`<build-dir>/
+  crtgfx-skia-smoke`, kept and reused incrementally across invocations,
+  the calling directory's own cache never touched) that reconfigures and
+  builds through the real, already-proven `crtgfx_skia_raster_smoke`
+  CMake target itself, rather than reimplementing its Skia-linking recipe
+  a second time by hand (risking future drift between two copies of the
+  same recipe). Two real bugs found and fixed getting a genuinely
+  from-scratch run (`out/skia-smoke-fresh-test`, first time this exact
+  target/script combination had ever been exercised) working on Windows:
+  1. **Jumping straight to a `CRT_USE_IMPORTED_LIBCXX=ON` configure on a**
+     **brand-new build directory hit the `rootfs`/`crt-libcxx-sysroot`**
+     **circular-dependency guard `CMakeLists.txt` itself already warns**
+     **about**: `crt-libcxx-configure` failed with "CRT mksh is missing
+     from the rootfs ... (build the rootfs target first)". This project's
+     own regular preset directories never hit this in practice only
+     because `rootfs` is already part of their default `ALL` target and
+     normally gets built at least once while the flag is still off, long
+     before anyone reaches for `crt-libcxx-sysroot` directly -- a
+     dedicated, from-scratch directory has no such implicit head start.
+     Fixed by adding an explicit phase 0 (configure with the flag left at
+     its default/off, build `rootfs` on Windows) before ever reconfiguring
+     with the flag on.
+  2. **Even after adding that phase split, the identical failure**
+     **recurred** -- because the phase-0 configure command *omitted*
+     `-DCRT_USE_IMPORTED_LIBCXX=...` entirely rather than forcing it OFF
+     explicitly, relying on `option()`'s own declared default; but a CMake
+     cache variable simply omitted from a *later* reconfigure keeps
+     whatever value an *earlier* configure of that same directory last set
+     it to -- it is not reset to the `option()` default. The shadow
+     directory already had the flag cached `ON` from the first, since-
+     fixed failed attempt, so phase 0 silently reconfigured with it still
+     `ON`, recreating the exact cycle phase 0 exists to avoid. Fixed by
+     making phase 0's configure command pass `-DCRT_USE_IMPORTED_LIBCXX=
+     OFF` explicitly, not by omission.
+  Verified end to end on Windows from a genuinely fresh build directory:
+  `crtgfx_skia_raster_smoke: ok`, exit 0. Confirmed the real `windows-
+  host-ninja-debug` preset directory's own `CMakeCache.txt` was untouched
+  by any of this (its own Skia/libc++ flags predate this work and its
+  cache mtime stayed unchanged throughout).
+
 - **`crtgfx_skia_raster_smoke` also verified for real on Linux (WSL/Ubuntu
   26.04, amd64), direct follow-up to the Windows mingw32-unification entry
   just below -- user asked "did the Skia smoke test actually pass on WSL

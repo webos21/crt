@@ -9,6 +9,15 @@ current state so the next session doesn't have to re-derive it from
 means; if this page and `HISTORY.md`/`TODO.md` disagree, the dated entries
 in those two win.
 
+- **New opt-in `crtgfx-skia-smoke` CMake target (2026-08-23): passing.**
+  `cmake --build <dir> --target crtgfx-skia-smoke` now builds and runs
+  `crtgfx_skia_raster_smoke` end to end via a dedicated shadow build
+  directory, regardless of the calling directory's own current
+  `CRTGFX_ENABLE_SKIA`/`CRT_USE_IMPORTED_LIBCXX` cache state -- mirrors
+  `crt-libcxx-smoke`'s existing self-sufficient role. `cmake --workflow`
+  itself is unchanged; both flags stay `OFF` by default there. See
+  `HISTORY.md`'s matching entry for the two real bugs found getting a
+  from-scratch run working.
 - **Windows CI (`windows-x64`/`windows-arm64`) fixed after going red from
   the mingw32-unification push (2026-08-23): two real bugs, diagnosed from
   the user's own pasted CI logs (a real host MinGW-w64 install on GitHub's

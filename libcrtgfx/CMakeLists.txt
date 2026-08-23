@@ -222,6 +222,39 @@ if(Python3_Interpreter_FOUND)
     COMMENT "Building Skia CPU raster with the CRT toolchain"
     USES_TERMINAL
   )
+
+  # crtgfx-skia-smoke: builds and runs crtgfx_skia_raster_smoke regardless
+  # of *this* build directory's own current CRTGFX_ENABLE_SKIA/CRT_USE_
+  # IMPORTED_LIBCXX cache values -- mirrors crt-libcxx-smoke's own role
+  # (libstdc++/CMakeLists.txt) for the imported-libc++ smoke test:
+  # unconditionally defined (not gated behind CRTGFX_ENABLE_SKIA the way
+  # the real crtgfx_skia_raster_smoke target itself still is), so `cmake
+  # --build <dir> --target crtgfx-skia-smoke` alone drives the whole chain
+  # end to end without first hand-running the multi-step reconfigure dance
+  # this file's own CRTGFX_ENABLE_SKIA guard otherwise requires. Unlike
+  # crt-libcxx-smoke (which compiles its own smoke source directly through
+  # tools/crt-c++, entirely outside the outer CMake project), this drives
+  # a *separate, dedicated* nested build directory that reuses the real,
+  # already-correct crtgfx_skia_raster_smoke CMake target rather than
+  # reimplementing its own build recipe a second time by hand -- see
+  # tools/test_crtgfx_skia_smoke.py's own docstring for the fuller
+  # reasoning. Deliberately does not DEPENDS on crt-libcxx-sysroot/
+  # crtgfx-skia-build the way the real target's own dependents do -- those
+  # run *inside* the dedicated directory the script itself drives, not
+  # this (the calling) one.
+  add_custom_target(crtgfx-skia-smoke
+    COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_crtgfx_skia_smoke.py"
+      --root "${CMAKE_SOURCE_DIR}"
+      --build-dir "${CMAKE_BINARY_DIR}/crtgfx-skia-smoke"
+      --cmake-c-compiler "${CMAKE_C_COMPILER}"
+      --cmake-cxx-compiler "${CMAKE_CXX_COMPILER}"
+      --target-os "${CRT_TARGET_OS}"
+      --target-arch "${CRT_TARGET_ARCH}"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Building and running crtgfx_skia_raster_smoke in a dedicated build directory (CRTGFX_ENABLE_SKIA/CRT_USE_IMPORTED_LIBCXX forced on there, this directory's own cache untouched)"
+    USES_TERMINAL
+  )
 endif()
 
 set(CRTGFX_CRT_STATIC_LIBS c m dl cxx)
