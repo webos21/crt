@@ -589,6 +589,21 @@ Next work order:
      a real but unrelated Wayland-environment difference first): **100%
      tests passed, 105/105**, `crtgfx_skia_raster_smoke: ok`, both flags
      on. `CRTGFX_ENABLE_SKIA` stays `OFF` by default on Linux too.
+     **Also confirmed on Linux aarch64** (2026-08-23, same day, separate
+     host from the amd64 run above): required `lld-18` to be installed
+     first (`-fuse-ld=lld`, from the `ld.bfd` fix above, errored "invalid
+     linker name" without it -- not previously needed on this host), and
+     a `crt-libcxx-sysroot` re-run before the Skia link (a plain default
+     `cmake --build` in between -- from a malformed `-D...` flag placed
+     after `--build` instead of before it, which `cmake --build` silently
+     ignores rather than erroring on -- re-installs the small bootstrap
+     `cxx` static library over `${CRT_SYSROOT}/lib/libc++.a`, since both
+     the bootstrap `cxx` CMake install and the imported-libc++ staging
+     step write that exact same path with no ordering enforced between
+     unrelated build invocations; a real, still-open ordering hazard, not
+     something wrong with the fix itself). No source changes needed once
+     both were sorted out: `ctest` **100% passed, 105/105** here too,
+     `crtgfx_skia_raster_smoke: ok`.
    - **A real WSL/Ubuntu-20.04 attempt confirmed the "Linux would reach**
      **the same wall faster" projection above, and surfaced one genuinely**
      **new, environment-specific finding along the way (2026-08-22).**
