@@ -9,6 +9,29 @@ current state so the next session doesn't have to re-derive it from
 means; if this page and `HISTORY.md`/`TODO.md` disagree, the dated entries
 in those two win.
 
+- **Skia's real FreeType-backed font manager wired in (2026-08-24):**
+  **real end-to-end text rendering verified on Windows (121/121 ctest);**
+  **Linux found and fixed two more real bugs (freetype needs `--with-pic`,**
+  **a `crtgfx_shared` link-order bug) but hit a separate, deeper, still-open**
+  **gap finishing the executable case.** `crtgfx` -> Skia ->
+  `SkFontMgr_New_Custom_Directory()` -> this project's own FreeType port,
+  a real `canvas->drawString()` producing real ink pixels, not a stub font
+  manager. One real Skia API-usage bug fixed along the way:
+  `matchFamilyStyle(nullptr, ...)` does not mean "match any font" the way
+  it reads -- `legacyMakeTypeface(nullptr, ...)` is the real way to ask
+  for a font manager's own default family. **Still open**: `sysroot/lib/
+  libc++.a` (this project's own imported libc++ *static* archive) is
+  missing all locale/iostream object files on Linux (confirmed via
+  `llvm-ar t` -- only 3 members total, none matching), blocking the
+  statically-linked `crtgfx_skia_raster_smoke` executable specifically
+  (Skia's own `SkSLString.cpp` needs `std::locale`/iostream for float-to-
+  string conversion) -- the *shared* `libcrtgfx.so` case links and works
+  fine, confirming the gap is specific to the static archive's own
+  incomplete build, not a Skia/font issue. `CRTGFX_ENABLE_SKIA` restored
+  to its own prior `OFF` state in this session's WSL build directory once
+  confirmed; the rest of the suite (102/102 non-tty tests) stayed clean.
+  See `HISTORY.md`'s matching entry and `TODO.md`'s new follow-up for the
+  full trail.
 - **New `freetype` port (2.14.3, 2026-08-24): `shared-pass` on Linux x64**
   **and Windows x64, macOS not attempted yet.** Phase 1 of the "notepad-
   capability" plan (real font rasterization -- see `TODO.md` for phases

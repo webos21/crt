@@ -1201,21 +1201,39 @@ Next work order:
 5. **Extend Skia integration beyond primitive CPU drawing.**
    Add image/font/text staging after the CPU-raster surface smoke is stable.
    Treat HarfBuzz/FreeType/ICU/platform-font discovery as explicit follow-up
-   dependencies, not hidden Skia side effects. FreeType itself is now a real,
+   dependencies, not hidden Skia side effects. FreeType itself is a real,
    verified port (2.14.3, `shared-pass` on Linux/Windows -- see `HISTORY.md`'s
-   2026-08-24 entry and `porting/recipes/freetype.json`); what remains here is
-   flipping Skia's own GN flags (`skia_use_freetype=true`,
-   `skia_enable_fontmgr_custom_empty=false`, a real `SkFontMgr_custom_*`
-   pointed at the bundled `libcrtgfx/assets/fonts/DejaVuSansMono.ttf`) and a
-   real "draw text" smoke test proving actual glyph rendering end to end
-   through `crtgfx` → Skia → FreeType -- the first of a three-phase "notepad-
+   2026-08-24 entry and `porting/recipes/freetype.json`), and Skia's own real
+   `SkFontMgr_custom_directory` (FreeType-backed, pointed at the bundled
+   `libcrtgfx/assets/fonts/DejaVuSansMono.ttf`) is wired in and **verified
+   end to end on Windows** (a real `canvas->drawString()` producing real ink
+   pixels, `crtgfx_skia_raster_smoke` passing at 121/121 ctest -- see
+   `HISTORY.md`'s 2026-08-24 entry). Linux is NOT done: `CRTGFX_ENABLE_SKIA`
+   is back to its own prior `OFF` state in this session's WSL build
+   directory, blocked on the static-libc++ gap item just below -- this item
+   stays open until that's fixed and the same real text-rendering smoke test
+   passes on Linux too. This is the first of a three-phase "notepad-
    capability" plan (phase 1: this item; phase 2: item 4 above, wiring
    `window_win32.c`/`window_cocoa.c`'s own already-received native keyboard/
    mouse events through to a new `crtgfx/window.h` public API -- a wiring/
    API-design task, not a new-library one; phase 3: item 3 above, porting
    `libxkbcommon` and adding `wl_seat`/`wl_keyboard` to the existing Wayland
    client backend).
-6. **Add GPU and media handoff only after the frame/input contract is stable.**
+6. **Fix this project's own imported libc++ static archive
+   (`sysroot/lib/libc++.a`) on Linux: missing all locale/iostream object
+   files.** Found 2026-08-24 (see `HISTORY.md`'s matching entry) trying to
+   link `crtgfx_skia_raster_smoke` statically on Linux -- `llvm-ar t
+   sysroot/lib/libc++.a` shows only 3 members total, none locale/iostream-
+   related, while the *shared* `libc++.so` (built from the same `tools/
+   crt-libcxx-build.py` source) has full content, confirmed via an isolated
+   test program linking cleanly against it. This blocks any C++ program
+   statically linking `<iostream>`/`<locale>` through this project's own
+   imported libc++ on Linux, not just Skia/fonts -- investigate `tools/
+   crt-libcxx-build.py`'s own static-archive assembly step (likely an
+   incomplete file list or a build-mode flag that silently excludes the
+   locale/iostream translation units from the `.a` specifically). A real
+   prerequisite for item 5 just above reaching Linux parity with Windows.
+7. **Add GPU and media handoff only after the frame/input contract is stable.**
    Windows D3D, macOS Metal, Linux EGL/Vulkan/dmabuf, and `libcrtmedia`
    decoded-frame/audio handoff are later optimization/integration tranches,
    not prerequisites for the first Skia raster milestone.

@@ -2,10 +2,19 @@
 
 #include "include/core/SkCanvas.h"
 #include "include/core/SkColor.h"
+#include "include/core/SkFont.h"
+#include "include/core/SkFontMgr.h"
+#include "include/core/SkFontStyle.h"
 #include "include/core/SkPaint.h"
 #include "include/core/SkRect.h"
+#include "include/core/SkTypeface.h"
+#include "include/ports/SkFontMgr_directory.h"
 
 #include <stdio.h>
+
+#ifndef CRT_SKIA_FONTS_DIR
+#error "CRT_SKIA_FONTS_DIR must be defined (see libcrtgfx/CMakeLists.txt)"
+#endif
 
 static int fail(const char* message, int code = 0) {
   printf("crtgfx_skia_raster_smoke: %s (%d)\n", message, code);
@@ -78,6 +87,58 @@ extern "C" int main() {
   if (!changed) {
     crtgfx_window_destroy(window);
     return fail("draw produced no pixels");
+  }
+
+  // Real end-to-end text rendering: crtgfx -> Skia -> this project's own
+  // FreeType port (porting/recipes/freetype.json, shared-pass on Linux/
+  // Windows as of 2026-08-24), not a stub/empty font manager. Uses the
+  // same real, documented SkFontMgr_New_Custom_Directory() API porting/
+  // tests/freetype_glyph_test.c's own notes already point to, scanning
+  // the bundled libcrtgfx/assets/fonts/ directory (DejaVuSansMono.ttf).
+  {
+    sk_sp<SkFontMgr> font_mgr = SkFontMgr_New_Custom_Directory(CRT_SKIA_FONTS_DIR);
+    if (!font_mgr) {
+      crtgfx_window_destroy(window);
+      return fail("SkFontMgr_New_Custom_Directory");
+    }
+    // legacyMakeTypeface(nullptr, ...), not matchFamilyStyle(nullptr, ...):
+    // confirmed by reading src/ports/SkFontMgr_custom.cpp directly --
+    // SkFontMgr_Custom::onMatchFamilyStyle() does a literal family-name
+    // string match with no null-means-"any"/default-family fallback at
+    // all (a null familyName there just fails to match anything real and
+    // returns nullptr), whereas onLegacyMakeTypeface() explicitly falls
+    // back to the font manager's own already-selected fDefaultFamily
+    // whenever familyName is null. The bundled fonts directory holds
+    // exactly one real font (DejaVuSansMono.ttf), so no specific family
+    // name is needed or assumed -- this is the real, documented way to
+    // ask a custom-directory SkFontMgr for "any available font".
+    sk_sp<SkTypeface> typeface = font_mgr->legacyMakeTypeface(nullptr, SkFontStyle());
+    if (!typeface) {
+      crtgfx_window_destroy(window);
+      return fail("legacyMakeTypeface found no typeface");
+    }
+
+    SkFont font(typeface, 28.0f);
+    paint.setColor(SkColorSetARGB(255, 0xff, 0xff, 0xff));
+    // Drawn well below the rect (y: 12-84) and circle (y: 48-144) above,
+    // so the pixel-changed check below is unambiguous: it can only be
+    // seeing real glyph ink, not the shapes already drawn.
+    canvas->drawString("CRT", 16.0f, 176.0f, font, paint);
+
+    unsigned int text_changed = 0;
+    for (uint32_t y = 150; y < framebuffer.height && !text_changed; ++y) {
+      const unsigned char* row = pixels + y * framebuffer.stride;
+      for (uint32_t x = 0; x < framebuffer.width; ++x) {
+        if (row[x * 4u + 3u] != 0) {
+          text_changed = 1;
+          break;
+        }
+      }
+    }
+    if (!text_changed) {
+      crtgfx_window_destroy(window);
+      return fail("drawString produced no pixels");
+    }
   }
 
   rc = crtgfx_window_end_frame(window);

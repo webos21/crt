@@ -63,8 +63,25 @@ set(CRTGFX_SKIA_INSTALL_PREFIX "${CRTGFX_SKIA_FETCH_ROOT}/install" CACHE PATH "S
 set(CRTGFX_SKIA_GN "" CACHE FILEPATH "Optional gn executable for Skia build")
 set(CRTGFX_SKIA_NINJA "" CACHE FILEPATH "Optional ninja executable for Skia build")
 set(CRTGFX_SKIA_EXTRA_GN_ARGS "" CACHE STRING "Semicolon-separated extra raw GN arg lines for Skia build")
+# The shared porting/recipes install prefix (freetype.json lands here once
+# port-build-freetype has run) -- exactly matching crt-port-build.py's own
+# default port_prefix for THIS preset build directory, same convention as
+# CRTGFX_WAYLAND_PORT_PREFIX further down (out/<preset>/port-tests/install
+# == CMAKE_BINARY_DIR/port-tests/install, since CMAKE_BINARY_DIR already
+# *is* out/<preset>). Defined here (not only where it's consumed by
+# tools/build_skia.py's own --freetype-prefix further down) because
+# CRTGFX_SKIA_LIBRARIES, right below, needs it too: libskia.a's own object
+# files reference real FT_* symbols (skia_use_freetype=true, see
+# tools/build_skia.py's own default_gn_args()) that stay unresolved inside
+# a plain static archive -- every consumer of CRTGFX_SKIA_LIBRARIES
+# (crtgfx/crtgfx_shared/crtgfx_skia_raster_smoke) needs libfreetype.a on
+# its own final link line too, not just libskia.a.
+set(CRTGFX_SKIA_FREETYPE_PREFIX "${CMAKE_BINARY_DIR}/port-tests/install" CACHE PATH "Shared porting/recipes install prefix (freetype) for the Skia build")
 if(NOT CRTGFX_SKIA_LIBRARIES AND EXISTS "${CRTGFX_SKIA_INSTALL_PREFIX}/lib/libskia.a")
   set(CRTGFX_SKIA_LIBRARIES "${CRTGFX_SKIA_INSTALL_PREFIX}/lib/libskia.a" CACHE STRING "Libraries needed to link Skia CPU raster support" FORCE)
+  if(EXISTS "${CRTGFX_SKIA_FREETYPE_PREFIX}/lib/libfreetype.a")
+    set(CRTGFX_SKIA_LIBRARIES "${CRTGFX_SKIA_LIBRARIES};${CRTGFX_SKIA_FREETYPE_PREFIX}/lib/libfreetype.a" CACHE STRING "Libraries needed to link Skia CPU raster support" FORCE)
+  endif()
 else()
   set(CRTGFX_SKIA_LIBRARIES "" CACHE STRING "Libraries needed to link Skia CPU raster support")
 endif()
@@ -154,6 +171,15 @@ if(Python3_Interpreter_FOUND)
     list(APPEND CRTGFX_SKIA_FETCH_ARGS --sparse-path "${CRTGFX_SKIA_SPARSE_PATH}")
   endforeach()
 
+  # CRTGFX_SKIA_FREETYPE_PREFIX itself is defined near the top of this file
+  # (alongside CRTGFX_SKIA_LIBRARIES, which also needs it) -- passed to
+  # tools/build_skia.py's own --freetype-prefix unconditionally here:
+  # porting/recipes/freetype.json is a real, always-present (not opt-in)
+  # recipe as of 2026-08-24, so `gn gen` always wires Skia's real
+  # SkFontMgr_custom_directory against it rather than the empty/stub font
+  # manager -- see tools/build_skia.py's own default_gn_args() for the
+  # mechanics and porting/recipes/freetype.json's own notes for the port
+  # itself.
   set(CRTGFX_SKIA_BUILD_ARGS)
   foreach(CRTGFX_SKIA_EXTRA_GN_ARG IN LISTS CRTGFX_SKIA_EXTRA_GN_ARGS)
     list(APPEND CRTGFX_SKIA_BUILD_ARGS --gn-arg "${CRTGFX_SKIA_EXTRA_GN_ARG}")
@@ -164,6 +190,7 @@ if(Python3_Interpreter_FOUND)
   if(CRTGFX_SKIA_NINJA)
     list(APPEND CRTGFX_SKIA_BUILD_ARGS --ninja "${CRTGFX_SKIA_NINJA}")
   endif()
+  list(APPEND CRTGFX_SKIA_BUILD_ARGS --freetype-prefix "${CRTGFX_SKIA_FREETYPE_PREFIX}")
   if(CRT_TARGET_OS STREQUAL "windows")
     # tools/build_skia.py needs this to set CRT_MKSH_EXE for crt-cc.cmd/
     # crt-c++.cmd -- see that file's own comment on why GN's own gcc_like
@@ -200,7 +227,7 @@ if(Python3_Interpreter_FOUND)
       --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}"
       ${CRTGFX_SKIA_BUILD_ARGS}
       --configure-only
-    DEPENDS crtgfx-skia-fetch
+    DEPENDS crtgfx-skia-fetch port-build-freetype
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     COMMENT "Configuring Skia with the CRT toolchain"
     USES_TERMINAL
@@ -217,7 +244,7 @@ if(Python3_Interpreter_FOUND)
       --target-os "${CRT_TARGET_OS}"
       --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}"
       ${CRTGFX_SKIA_BUILD_ARGS}
-    DEPENDS crtgfx-skia-fetch
+    DEPENDS crtgfx-skia-fetch port-build-freetype
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     COMMENT "Building Skia CPU raster with the CRT toolchain"
     USES_TERMINAL
@@ -720,9 +747,30 @@ else()
     # resolution gap applies to crtgfx_shared's own link too.
     target_link_libraries(crtgfx_shared PRIVATE -Wl,--start-group)
   endif()
+  if(CRTGFX_SHARED_SKIA_LINUX_GROUPED)
+    # CRTGFX_SKIA_LIBRARIES (libskia.a + libfreetype.a, see that variable's
+    # own comment) BEFORE CRTGFX_CRT_SHARED_LIBS here, not after: found for
+    # real (2026-08-24) wiring Skia's own real FreeType font manager in --
+    # ld.lld/GNU ld resolve each SHARED library's own undefined-symbol
+    # contribution in a single left-to-right scan (unlike a static archive
+    # inside --start-group/--end-group, which genuinely does get rescanned
+    # on every pass); cxx_shared's own real libc++.so was already "passed"
+    # by the time libskia.a's later archive-member extraction discovered
+    # NEW undefined libc++ symbols it needed (SkSLString.cpp's own float-
+    # to-string conversion via <sstream>/<locale> -- std::locale::classic()
+    # and friends), so those stayed unresolved
+    # (`ld.lld: error: undefined symbol: std::__1::locale::classic()`)
+    # even though libc++.so genuinely exports them (confirmed directly via
+    # `nm -D`) and an isolated iostream/locale-only test program links
+    # against the exact same libc++.so cleanly. Putting libskia.a/
+    # libfreetype.a first means every libc++ symbol THEY need is already
+    # a known undefined the following cxx_shared/libc++.so scan resolves
+    # in its own single pass -- confirmed fixed by a real manual relink
+    # with this exact reordering before applying it here.
+    target_link_libraries(crtgfx_shared PUBLIC ${CRTGFX_SKIA_LIBRARIES})
+  endif()
   target_link_libraries(crtgfx_shared PRIVATE ${CRTGFX_CRT_SHARED_LIBS})
   if(CRTGFX_SHARED_SKIA_LINUX_GROUPED)
-    target_link_libraries(crtgfx_shared PUBLIC ${CRTGFX_SKIA_LIBRARIES})
     target_link_libraries(crtgfx_shared PRIVATE -Wl,--end-group)
   endif()
 endif()
@@ -851,6 +899,18 @@ if(CRTGFX_ENABLE_SKIA)
     # directly via crtgfx/skia.h).
     target_compile_definitions(crtgfx_skia_raster_smoke PRIVATE SK_BUILD_FOR_UNIX)
   endif()
+  # CRT_SKIA_FONTS_DIR: absolute path to the bundled real font(s) this
+  # test's own real-text-rendering phase scans via SkFontMgr_New_Custom_
+  # Directory() (porting/recipes/freetype.json's own DejaVuSansMono.ttf,
+  # see libcrtgfx/assets/fonts/README.md for provenance/license) -- same
+  # compile-time-path-define convention porting/tests/freetype_glyph_
+  # test.c's own CRT_TEST_FONT_PATH already uses. port-build-freetype
+  # itself is an explicit dependency further down (crt_link_startup_end_
+  # objects()'s own add_dependencies() call already lists crtgfx here;
+  # this target also needs libfreetype.a built and installed before it can
+  # link at all, via CRTGFX_SKIA_LIBRARIES above).
+  target_compile_definitions(crtgfx_skia_raster_smoke PRIVATE
+    CRT_SKIA_FONTS_DIR="${CMAKE_SOURCE_DIR}/libcrtgfx/assets/fonts")
   if(CRT_TARGET_OS STREQUAL "windows" AND CRT_USE_IMPORTED_LIBCXX)
     # -isystem${CRT_SYSROOT}/include/c++/v1, added *before* the libc/include
     # one just below (both via target_compile_options, so both land in
@@ -1028,7 +1088,7 @@ if(CRTGFX_ENABLE_SKIA)
     )
   endif()
   crt_link_startup_end_objects(crtgfx_skia_raster_smoke)
-  add_dependencies(crtgfx_skia_raster_smoke cxx c crt1 crtgfx)
+  add_dependencies(crtgfx_skia_raster_smoke cxx c crt1 crtgfx port-build-freetype)
 
   add_test(NAME crtgfx_skia_raster_smoke_runs COMMAND crtgfx_skia_raster_smoke)
   set_tests_properties(crtgfx_skia_raster_smoke_runs PROPERTIES

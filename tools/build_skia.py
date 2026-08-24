@@ -247,7 +247,7 @@ def gn_list(values):
 # setup below, instead of reinventing include-path detection here.
 
 
-def default_gn_args(root, sysroot, target_os, target_arch):
+def default_gn_args(root, sysroot, target_os, target_arch, freetype_prefix=None):
     # .cmd wrappers on Windows: tools/crt-cc/tools/crt-c++ are #!/bin/sh
     # scripts CreateProcess cannot run directly, and (unlike this
     # project's own CMake integration, which launches them via mksh.exe
@@ -272,10 +272,21 @@ def default_gn_args(root, sysroot, target_os, target_arch):
     crt_cxx = root / "tools" / f"crt-c++{cmd_suffix}"
     crt_ar = root / "tools" / ("crt-ar.cmd" if target_os == "windows" else "crt-ar")
 
+    # freetype_prefix set (porting/recipes/freetype.json's own shared
+    # port_prefix, see main()'s own --freetype-prefix): wire Skia's real
+    # SkFontMgr_custom_directory (backed by this project's own FreeType
+    # port) in instead of the empty/stub font manager -- see this
+    # function's own freetype-specific args below for the mechanics.
+    # freetype_prefix unset: keep the previous, pre-2026-08-24 no-text-
+    # rendering behavior (skia_use_freetype=false, empty font manager)
+    # unchanged, e.g. for a preset/target where freetype hasn't been
+    # built yet.
+    use_freetype = freetype_prefix is not None
     args = {
         "is_official_build": "true",
         "is_component_build": "false",
-        "skia_enable_fontmgr_custom_empty": "true",
+        "skia_enable_fontmgr_custom_empty": "false" if use_freetype else "true",
+        "skia_enable_fontmgr_custom_directory": "true" if use_freetype else "false",
         "skia_enable_ganesh": "false",
         "skia_enable_graphite": "false",
         "skia_enable_pdf": "false",
@@ -292,7 +303,7 @@ def default_gn_args(root, sysroot, target_os, target_arch):
         "skia_use_metal": "false",
         "skia_use_vulkan": "false",
         "skia_use_fontconfig": "false",
-        "skia_use_freetype": "false",
+        "skia_use_freetype": "true" if use_freetype else "false",
         "skia_use_harfbuzz": "false",
         "skia_use_icu": "false",
         "skia_use_libavif": "false",
@@ -385,8 +396,35 @@ def default_gn_args(root, sysroot, target_os, target_arch):
         # by itself, reading CRT_CXX_STANDARD_INCLUDE_FLAGS from the
         # environment (set in main() below).
         "extra_cflags_cc": gn_list(["-fno-exceptions", "-fno-rtti"]),
-        "extra_ldflags": gn_list([f"-L{sysroot / 'lib'}"]),
+        "extra_ldflags": gn_list(
+            [f"-L{sysroot / 'lib'}"] +
+            ([f"-L{freetype_prefix / 'lib'}"] if use_freetype else [])
+        ),
     }
+
+    if use_freetype:
+        # third_party/freetype2/BUILD.gn's own system("freetype2") GN
+        # target (confirmed by reading it directly, not assumed) just
+        # forwards skia_system_freetype2_include_path/_lib verbatim into a
+        # real GN config's include_dirs/libs -- no pkg-config, no vendored
+        # third_party/externals/freetype checkout (this project's own
+        # freetype.json recipe intentionally keeps sync_deps-style
+        # vendoring out of this queue). skia_use_system_freetype2 itself
+        # already defaults to true here (its own declare_args() default,
+        # `(is_official_build || ...) && !is_canvaskit`, is satisfied by
+        # is_official_build=true above), so only the two path/name
+        # overrides are needed -- pointed at this project's own already-
+        # installed, already-verified freetype port
+        # (porting/recipes/freetype.json, shared-pass on Linux/Windows).
+        # "freetype" (no path separator) becomes a plain `-lfreetype`
+        # linker flag, resolved via the `-L<freetype_prefix>/lib` added to
+        # extra_ldflags above -- matching how every other Windows port in
+        # this queue's own crt-port-build.py already installs a
+        # `freetype.lib` alias of `libfreetype.a` specifically "for plain
+        # -l lookups on this Windows toolchain" (see that install step's
+        # own log line), so this resolves identically on all three hosts.
+        args["skia_system_freetype2_include_path"] = gn_string(str(freetype_prefix / "include" / "freetype2"))
+        args["skia_system_freetype2_lib"] = gn_string("freetype")
 
     if target_os == "windows":
         # target_os = "win" (NOT used here, deliberately) makes Skia's own
@@ -485,6 +523,15 @@ def main():
     parser.add_argument("--ninja", default="", help="path to ninja; defaults to PATH")
     parser.add_argument("--gn-arg", action="append", default=[], help="extra raw GN arg line")
     parser.add_argument("--configure-only", action="store_true")
+    parser.add_argument(
+        "--freetype-prefix", default="",
+        help="porting/recipes/freetype.json's own shared port_prefix (out/<preset>/"
+             "port-tests/install) -- when given, Skia is built with a real "
+             "SkFontMgr_custom_directory backed by this project's own FreeType port "
+             "instead of the empty/stub font manager. Omit to keep the previous "
+             "no-text-rendering behavior (e.g. before freetype has been built for a "
+             "given preset/target)."
+    )
     args = parser.parse_args()
     args.target_arch = normalize_target_arch(args.target_arch)
 
@@ -493,6 +540,7 @@ def main():
     build_dir = Path(args.build_dir).resolve()
     install_prefix = Path(args.install_prefix).resolve()
     sysroot = Path(args.sysroot).resolve()
+    freetype_prefix = Path(args.freetype_prefix).resolve() if args.freetype_prefix else None
     gn_exe_suffix = ".exe" if args.target_os == "windows" or os.name == "nt" else ""
     gn = args.gn or str(source / "bin" / ("gn" + gn_exe_suffix))
     if not Path(gn).exists():
@@ -648,7 +696,7 @@ def main():
         )
     env["CRT_CXX_STANDARD_INCLUDE_FLAGS"] = f"-isystem{libcxx_headers}"
 
-    gn_args = default_gn_args(root, sysroot, args.target_os, args.target_arch)
+    gn_args = default_gn_args(root, sysroot, args.target_os, args.target_arch, freetype_prefix)
     args_gn = build_dir / "args.gn"
     write_args_file(args_gn, gn_args, args.gn_arg)
     run([gn, "gen", str(build_dir)], cwd=source, env=env)

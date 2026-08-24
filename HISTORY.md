@@ -10,6 +10,104 @@ substantive update.
 
 ## 2026-08-24
 
+- **Skia's real `SkFontMgr_custom_directory` (FreeType-backed) wired in,
+  replacing the empty/stub font manager -- real end-to-end text rendering
+  (`crtgfx` -> Skia -> this project's own FreeType port) verified on
+  Windows; Linux found two more real, general bugs, one fixed, one flagged
+  open.** Phase 1 of the "notepad-capability" plan, continuing directly
+  from the FreeType port itself (previous entry). `tools/build_skia.py`'s
+  `default_gn_args()` gained a `freetype_prefix` parameter: when given
+  (now unconditional, wired from `libcrtgfx/CMakeLists.txt`'s new
+  `CRTGFX_SKIA_FREETYPE_PREFIX`), it sets `skia_use_freetype=true`,
+  `skia_enable_fontmgr_custom_directory=true`,
+  `skia_enable_fontmgr_custom_empty=false`, and points Skia's own real
+  `skia_system_freetype2_include_path`/`_lib` GN args (confirmed by
+  reading `third_party/freetype2/BUILD.gn` directly -- a real, existing
+  `system("freetype2")` GN target this project's own FreeType port
+  satisfies with no vendored/synced third-party checkout needed) at this
+  project's own already-verified FreeType install. `libcrtgfx/tests/
+  skia_raster_smoke.cc` gained a real text-drawing phase: a genuine
+  `SkFontMgr_New_Custom_Directory()` scan of the bundled `libcrtgfx/
+  assets/fonts/` directory, a real typeface lookup, and a real
+  `canvas->drawString()` call, checked against a dedicated pixel region
+  the earlier rect/circle drawing never touches (so the check is
+  unambiguous proof of text, not incidental overlap). One real API-usage
+  bug found and fixed immediately via a real build+run cycle: `SkFontMgr::
+  matchFamilyStyle(nullptr, style)` does NOT mean "match any font" the way
+  it might read -- confirmed by reading `src/ports/SkFontMgr_custom.cpp`
+  directly, a null familyName there just fails a literal string-equality
+  scan and returns nothing; `legacyMakeTypeface(nullptr, style)` is the
+  real, documented way to ask for "whatever this font manager's own
+  default family is", falling back to `fDefaultFamily` exactly when
+  familyName is null. **Windows verified for real end to end**: `crtgfx-
+  skia-configure`/`crtgfx-skia-build` regenerated and relinked `libskia.a`
+  against the real FreeType port (via the new `CRTGFX_SKIA_LIBRARIES`
+  auto-detection, which now also picks up `libfreetype.a` alongside
+  `libskia.a` whenever both exist), `crtgfx_skia_raster_smoke` rebuilt and
+  ran with a real rasterized "CRT" string producing real ink pixels in its
+  own dedicated check region, and a full default rebuild + `ctest` stayed
+  at 100% (121/121) -- both `port-build-freetype`/`crtgfx-skia-build` now
+  have explicit CMake `DEPENDS` edges onto each other (confirmed safe
+  against the already-documented `sysroot`/Skia dependency-cycle hazard:
+  `crtgfx-skia-build` already depended on `sysroot` directly before this
+  change, so the new path through `port-build-freetype` adds no new cycle
+  risk).
+  **Linux surfaced two more real, general bugs** enabling `CRTGFX_ENABLE_
+  SKIA`/`CRT_USE_IMPORTED_LIBCXX` for the first time in this session's own
+  WSL environment (both were `OFF` before this investigation):
+  1. **FreeType's own static `libfreetype.a` needed `--with-pic`.**
+     Linking `libcrtgfx.so` (a real shared library) against it failed
+     outright (`ld.lld: error: relocation R_X86_64_PC32 cannot be used
+     against symbol 'TT_RunIns'; recompile with -fPIC`) -- GNU Libtool's
+     own default behavior deliberately builds a static archive with
+     non-PIC object code (correct and sufficient for every static-into-
+     executable link, exactly what this port's own two automated tests
+     already exercised) and only the shared object with PIC code; linking
+     that same static archive into a *different* shared object afterward
+     needs PIC code too, on any host. Fixed generally in `porting/
+     recipes/freetype.json` itself (`--with-pic` added to the base,
+     not-Windows-only `configure_args`, confirmed a real, standard,
+     documented libtool flag) -- re-verified both of freetype's own
+     automated tests still pass after the change, and confirmed via a
+     real relink that the `-fPIC` error is gone.
+  2. **A real link-order bug in `libcrtgfx/CMakeLists.txt`'s own
+     `crtgfx_shared` target**, found immediately after the `-fPIC` fix:
+     `ld.lld`/GNU ld resolve each *shared* library's own undefined-symbol
+     contribution in a single left-to-right scan (unlike a static archive
+     inside `-Wl,--start-group`/`--end-group`, which genuinely does get
+     rescanned on every pass) -- `cxx_shared`'s own real `libc++.so` was
+     already "passed" by the time `libskia.a`'s later archive-member
+     extraction discovered new undefined libc++ symbols it needed
+     (`SkSLString.cpp`'s own float-to-string conversion via `<sstream>`/
+     `<locale>` -- `std::locale::classic()` and friends), even though
+     `libc++.so` genuinely exports them (confirmed directly via `nm -D`,
+     and via an isolated iostream/locale-only test program linking
+     cleanly against the exact same `libc++.so`). Fixed by reordering
+     `CRTGFX_SKIA_LIBRARIES` before `CRTGFX_CRT_SHARED_LIBS` inside the
+     same start-group (confirmed by a real manual relink with the
+     corrected order before applying it) -- `crtgfx_shared`/`lib/
+     libcrtgfx.so` now builds and links cleanly standalone.
+  **Left open, a real, separate, deeper gap** (not fixed this session,
+  flagged honestly rather than routed around): the *executable* case
+  (`crtgfx_skia_raster_smoke`, statically linked against `crtgfx`) hits
+  the identical class of undefined-`std::locale`/iostream-symbol error,
+  but this time the root cause is genuinely different and more serious --
+  `sysroot/lib/libc++.a` (this project's own imported libc++ **static**
+  archive) was directly confirmed (via `llvm-ar t`) to contain only 3
+  object-file members total, none of them locale/iostream-related at all,
+  while the *shared* `libc++.so` (built from the same source, confirmed
+  via an isolated test) has full content. This is a real gap in `tools/
+  crt-libcxx-build.py`'s own static-archive assembly on Linux, unrelated
+  to fonts or Skia specifically -- it would block *any* C++ program
+  statically linking `<iostream>`/`<locale>` through this project's own
+  imported libc++ on Linux, not just this one. Deliberately not attempted
+  as a side quest here: `CRTGFX_ENABLE_SKIA` was restored to its own
+  pre-existing `OFF` state in this session's WSL build directory after
+  confirming the rest of the suite (102/102 non-tty-dependent tests) still
+  passes cleanly with it off, leaving that directory in a known-good state
+  for whoever picks up the static-libc++ gap next. See `TODO.md` for the
+  follow-up entry.
+
 - **FreeType 2.14.3 ported and verified end to end on Linux x64/WSL and
   Windows x64 (`porting/recipes/freetype.json`), Phase 1 of the
   "notepad-capability" plan** (font rendering, following the user's own

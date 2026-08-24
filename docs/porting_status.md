@@ -497,5 +497,13 @@ freshly-extracted directory), with a 5-attempt retry-with-backoff wrapper
 matching `tools/crt-port-build.py`'s own established `remove_tree()`
 precedent for the same class of problem.
 
+`--with-pic` added later the same day, found wiring Skia's real
+`SkFontMgr_custom_directory` in (see `HISTORY.md`'s matching entry):
+linking `libcrtgfx.so` against the static `libfreetype.a` failed
+(`recompile with -fPIC`) since libtool's own default only builds the
+*shared* object with PIC code. Applied unconditionally, not Linux-only,
+since this project intends to link FreeType into shared `libcrtgfx`
+builds on every host eventually.
+
 See `porting/recipes/freetype.json`'s own notes for the full trail and
 `HISTORY.md`'s 2026-08-24 entry.
