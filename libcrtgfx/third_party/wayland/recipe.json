@@ -1,28 +1,30 @@
 {
   "schema_version": 1,
   "name": "wayland",
-  "build_system": "none",
-  "status": "placeholder",
+  "build_system": "meson",
   "source": {
     "type": "git",
-    "repository": null,
-    "version": null,
-    "ref": null,
-    "expected_commit": null,
+    "repository": "https://gitlab.freedesktop.org/wayland/wayland.git",
+    "version": "1.26.0",
+    "ref": "87cc8a8728a923fc57938faa81ba0e74f34ecdc7",
+    "expected_commit": "87cc8a8728a923fc57938faa81ba0e74f34ecdc7",
     "sparse_paths": [],
     "sync_deps": false
   },
   "engine": {
-    "fetch": null,
-    "build": null,
-    "cmake_targets": [],
-    "notes": "No fetch/build engine exists for this component yet -- there is nothing to fetch. libcrtgfx/src/arch/linux/window_wayland.c is a hand-written client of the real core Wayland and stable xdg-shell wire protocols (opcodes/argument layouts taken directly from the real upstream wayland.xml/xdg-shell.xml, not guessed, but never checked into this repo or fetched at build time); it does not link host libwayland-client and has no upstream checkout at all today. See docs/libcrtgfx_wayland_plan.md's own \"Linux Host Adapter\" section."
+    "fetch": "tools/fetch_wayland.py",
+    "build": "tools/build_wayland.py",
+    "cmake_targets": ["crtgfx-wayland-configure", "crtgfx-wayland-build", "crtgfx-wayland-smoke"],
+    "notes": "Wayland's own build is Meson/Ninja-based, not CMake and not any of crt-port-build.py's own configure/amalgamation/android_host_tool systems -- same class of 'external build' as libcrtgfx/third_party/skia/recipe.json's own GN/Ninja build, and kept alongside it (outside porting/recipes/, which only the generic configure/amalgamation engine globs) for the same reason. libcrtgfx/CMakeLists.txt reads this file's own source.* fields at configure time via CMake's string(JSON ...) and feeds them to tools/fetch_wayland.py as plain CLI flags, exactly matching the Skia recipe's own wiring. The real Meson option set (scanner/libraries enabled, tests/documentation/dtd_validation disabled, cc/ar wiring) lives in tools/build_wayland.py's own default_meson_options() instead -- build *configuration*, not source pinning, and changes far more often than this recipe's own source.* fields do."
   },
   "patches": [],
   "notes": [
-    "This file is a deliberate placeholder, not a real recipe: source.repository/ref/expected_commit are null because nothing is pinned or fetched today (contrast libcrtgfx/third_party/skia/recipe.json's own fully-populated source.* fields). It exists so this directory answers the same question Skia's recipe.json does (\"what upstream, at what commit, with what local patches\") the moment that changes, without inventing the schema shape from scratch under time pressure later.",
-    "Likely candidates if/when an upstream import actually happens (see docs/libcrtgfx_wayland_plan.md's own Import Strategy): the wayland/wayland-protocols repos' own wayland.xml/xdg-shell.xml protocol XML (for a generated-bindings approach instead of the current hand-rolled wire protocol code), or a real libwayland-client checkout (for step 6 of that same plan, still deferred). Neither is decided; this is a note for a future session, not a commitment.",
-    "When this stops being a placeholder: populate source.repository/version/ref/expected_commit with a real pinned commit SHA (never a floating branch/tag, matching every other recipe.json in this project -- see libcrtgfx/third_party/skia/recipe.json's own notes for why), fill in engine.fetch/engine.build once a fetch/build script exists (it will very likely need its own tools/fetch_wayland.py the same shape as tools/fetch_skia.py, since this is not a CMake-buildable component either), and update libcrtgfx/third_party/wayland/README.md alongside it. The same no-upstream-source-patch discipline Skia's own recipe.json documents applies here too if that day comes.",
-    "2026-08-22: created alongside libcrtgfx/third_party/skia/recipe.json, at the user's own explicit request to give Wayland the same recording location even though there is nothing to pin yet. See HISTORY.md's dated entry."
+    "Scope, decided 2026-08-24 (explicit user go-ahead after being shown the real workload for each option): Wayland *core* only for this first pass -- wayland-scanner (needs expat, see porting/recipes/expat.json, added the same day specifically for this) plus libwayland-client/libwayland-server/libwayland-cursor/libwayland-egl (the 'libraries' Meson option; 'egl' here is Wayland's own thin, dependency-free frontend shim, not real EGL headers -- see tools/build_wayland.py's own notes). wayland-protocols (xdg-shell.xml and friends) is deliberately deferred to a later pass: the agreed crtgfx-wayland-smoke design (see below) only needs core wayland.xml, which wayland-scanner already generates client-side bindings for as part of libwayland-client's own build -- no external protocol package required to prove the external-build pipeline works for real.",
+    "Deliberately does NOT touch libcrtgfx's existing Linux window backend (libcrtgfx/src/arch/linux/window_wayland.c, a hand-rolled core-protocol-Wayland+xdg-shell client that intentionally does not link libwayland-client -- see docs/libcrtgfx_wayland_plan.md's own 'Linux Host Adapter' section). crtgfx-wayland-smoke (below) is a wholly separate, standalone test executable that links the real libwayland-client this recipe builds -- proving the external-build pipeline produces a working library, independent of whether/when a future session decides to swap the hand-rolled backend for it. That swap, if it ever happens, is out of scope here and was explicitly deferred when this scope was decided.",
+    "Pinned, not floating (matching libcrtgfx/third_party/skia/recipe.json's own policy and its own stated reasoning): source.ref/source.expected_commit are the real commit gitlab.freedesktop.org/wayland/wayland.git's own `1.26.0` tag dereferences to, captured via `git ls-remote https://gitlab.freedesktop.org/wayland/wayland.git refs/tags/1.26.0 refs/tags/1.26.0^{}` on 2026-08-24 (the `^{}` form is the annotated tag's own dereferenced commit SHA, not the tag object's own SHA -- `87cc8a8728a923fc57938faa81ba0e74f34ecdc7`, not `5f430e41167dd359b70fb5e9f584ba2dc058e4cc`). 1.26.0 (2026-07-16) was the latest stable release at pin time. Re-pin by re-running the same git ls-remote command and updating both source.ref and source.expected_commit (and this note's own date), never by reverting either to empty/floating.",
+    "source.sparse_paths is empty (a full, non-sparse checkout): confirmed for real (2026-08-24) that the whole upstream repo is small (a handful of MB, no vendored third-party content or generated-doc assets the way Skia's own repo has) -- no need for Skia's own cone-mode trimming machinery here. --depth 1 alone (see tools/fetch_wayland.py) already keeps this fetch small.",
+    "source.sync_deps is false and stays false: Wayland has no DEPS-style third-party dependency-sync step at all (unlike Skia's git-sync-deps) -- this field only exists so this recipe's own schema shape matches libcrtgfx/third_party/skia/recipe.json's exactly, for whoever reads both side by side.",
+    "expat (porting/recipes/expat.json, shared-pass on Linux/Windows as of 2026-08-24) and libffi (porting/recipes/libffi.json, partial on Linux/Windows, configure-pass on macOS -- an existing port, not new) must both already be installed before this recipe's Meson configure step: wayland-scanner's own src/meson.build unconditionally does `dependency('expat')`, and the 'libraries' option needs `dependency('libffi')` (wayland-server's connection.c/event-loop.c and wayland-client both use it). Both recipes already install into the *same* shared port_prefix per preset build directory (crt-port-build.py's own convention -- every porting/recipes/*.json port lands in one out/<preset>/port-tests/install), so tools/build_wayland.py's own single --port-prefix flag (not two separate ones) points Meson's pkg-config resolution at that one shared prefix's lib/pkgconfig, where both expat.pc and libffi.pc already coexist once each port has been built there.",
+    "When this recipe is next touched: verify this note's own workload/scope claims still hold before extending it (e.g. adding wayland-protocols later should get its own dated note here, matching this file's own established discipline, not a silent edit to the notes above)."
   ]
 }

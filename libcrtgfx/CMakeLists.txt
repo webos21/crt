@@ -255,6 +255,124 @@ if(Python3_Interpreter_FOUND)
     COMMENT "Building and running crtgfx_skia_raster_smoke in a dedicated build directory (CRTGFX_ENABLE_SKIA/CRT_USE_IMPORTED_LIBCXX forced on there, this directory's own cache untouched)"
     USES_TERMINAL
   )
+
+  # Wayland core (wayland-scanner + wayland-client/-server/-cursor/-egl),
+  # 2026-08-24: same "external build, recipe.json is the single source of
+  # truth for source pinning" shape as Skia just above, but a genuinely
+  # different build system (Meson/Ninja, not GN/Ninja) and a much smaller
+  # scope -- see libcrtgfx/third_party/wayland/recipe.json's own notes for
+  # the full "why core only, why not wired into libcrtgfx's own backend"
+  # reasoning. Unlike Skia, there is no CRTGFX_ENABLE_WAYLAND flag and no
+  # real libcrtgfx CMake target consumes this build's output at all yet --
+  # crtgfx-wayland-configure/-build exist purely to drive the external
+  # build, and crtgfx-wayland-smoke (below) is a wholly standalone test
+  # executable, not a nested-shadow-directory reuse of some other real
+  # target the way crtgfx-skia-smoke reuses crtgfx_skia_raster_smoke
+  # (there is no equivalent real target here to reuse).
+  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/third_party/wayland/recipe.json" CRTGFX_WAYLAND_RECIPE_JSON)
+  string(JSON CRTGFX_WAYLAND_RECIPE_VERSION GET "${CRTGFX_WAYLAND_RECIPE_JSON}" source version)
+  string(JSON CRTGFX_WAYLAND_RECIPE_REF GET "${CRTGFX_WAYLAND_RECIPE_JSON}" source ref)
+  string(JSON CRTGFX_WAYLAND_RECIPE_REPOSITORY GET "${CRTGFX_WAYLAND_RECIPE_JSON}" source repository)
+  string(JSON CRTGFX_WAYLAND_RECIPE_EXPECTED_COMMIT GET "${CRTGFX_WAYLAND_RECIPE_JSON}" source expected_commit)
+
+  set(CRTGFX_WAYLAND_VERSION "${CRTGFX_WAYLAND_RECIPE_VERSION}" CACHE STRING "Wayland version label to fetch (default: libcrtgfx/third_party/wayland/recipe.json's own source.version)")
+  set(CRTGFX_WAYLAND_REF "${CRTGFX_WAYLAND_RECIPE_REF}" CACHE STRING "Explicit Wayland git ref/commit to fetch (default: libcrtgfx/third_party/wayland/recipe.json's own source.ref)")
+  set(CRTGFX_WAYLAND_REPOSITORY "${CRTGFX_WAYLAND_RECIPE_REPOSITORY}" CACHE STRING "Wayland git repository URL (default: libcrtgfx/third_party/wayland/recipe.json's own source.repository)")
+  set(CRTGFX_WAYLAND_EXPECTED_COMMIT "${CRTGFX_WAYLAND_RECIPE_EXPECTED_COMMIT}" CACHE STRING "Expected Wayland commit hash after fetch (default: libcrtgfx/third_party/wayland/recipe.json's own source.expected_commit)")
+  set(CRTGFX_WAYLAND_FETCH_ROOT "${CMAKE_BINARY_DIR}/external/wayland" CACHE PATH "Local Wayland fetch/build root")
+  set(CRTGFX_WAYLAND_ROOT "${CRTGFX_WAYLAND_FETCH_ROOT}/src" CACHE PATH "Wayland checkout root")
+  set(CRTGFX_WAYLAND_BUILD_DIR "${CRTGFX_WAYLAND_FETCH_ROOT}/build" CACHE PATH "Wayland Meson build directory")
+  set(CRTGFX_WAYLAND_INSTALL_PREFIX "${CRTGFX_WAYLAND_FETCH_ROOT}/install" CACHE PATH "Wayland install prefix")
+  # The shared porting/recipes install prefix (expat.pc/libffi.pc live
+  # here once port-build-expat/port-build-libffi have run) -- exactly
+  # matching crt-port-build.py's own default port_prefix for THIS preset
+  # build directory (out/<preset>/port-tests/install == CMAKE_BINARY_DIR/
+  # port-tests/install, since CMAKE_BINARY_DIR already *is* out/<preset>).
+  set(CRTGFX_WAYLAND_PORT_PREFIX "${CMAKE_BINARY_DIR}/port-tests/install" CACHE PATH "Shared porting/recipes install prefix (expat/libffi) for the Wayland Meson build")
+  set(CRTGFX_WAYLAND_EXTRA_MESON_ARGS "" CACHE STRING "Semicolon-separated extra raw meson setup -D... args for the Wayland build")
+
+  set(CRTGFX_WAYLAND_FETCH_ARGS)
+  if(CRTGFX_WAYLAND_EXPECTED_COMMIT)
+    list(APPEND CRTGFX_WAYLAND_FETCH_ARGS --expected-commit "${CRTGFX_WAYLAND_EXPECTED_COMMIT}")
+  endif()
+
+  set(CRTGFX_WAYLAND_BUILD_ARGS)
+  foreach(CRTGFX_WAYLAND_EXTRA_MESON_ARG IN LISTS CRTGFX_WAYLAND_EXTRA_MESON_ARGS)
+    list(APPEND CRTGFX_WAYLAND_BUILD_ARGS --meson-arg "${CRTGFX_WAYLAND_EXTRA_MESON_ARG}")
+  endforeach()
+  if(CRT_TARGET_OS STREQUAL "windows")
+    # tools/build_wayland.py needs this to set CRT_MKSH_EXE/CRT_ROOTFS for
+    # crt-cc.cmd -- exactly matching CRTGFX_SKIA_BUILD_ARGS's own --rootfs
+    # wiring just above (same rootfs, same reason: only it carries
+    # toybox's applet aliases).
+    list(APPEND CRTGFX_WAYLAND_BUILD_ARGS --rootfs "${CMAKE_BINARY_DIR}/rootfs")
+  endif()
+
+  add_custom_target(crtgfx-wayland-configure
+    COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/fetch_wayland.py"
+      --dest "${CRTGFX_WAYLAND_ROOT}"
+      --repo "${CRTGFX_WAYLAND_REPOSITORY}"
+      --version "${CRTGFX_WAYLAND_VERSION}"
+      --ref "${CRTGFX_WAYLAND_REF}"
+      ${CRTGFX_WAYLAND_FETCH_ARGS}
+    COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/build_wayland.py"
+      --root "${CMAKE_SOURCE_DIR}"
+      --source "${CRTGFX_WAYLAND_ROOT}"
+      --build-dir "${CRTGFX_WAYLAND_BUILD_DIR}"
+      --install-prefix "${CRTGFX_WAYLAND_INSTALL_PREFIX}"
+      --sysroot "${CRT_SYSROOT}"
+      --port-prefix "${CRTGFX_WAYLAND_PORT_PREFIX}"
+      --target-os "${CRT_TARGET_OS}"
+      --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}"
+      ${CRTGFX_WAYLAND_BUILD_ARGS}
+      --configure-only
+    DEPENDS port-build-expat port-build-libffi
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Fetching and configuring Wayland core with the CRT toolchain (Meson setup)"
+    USES_TERMINAL
+  )
+
+  add_custom_target(crtgfx-wayland-build
+    COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/build_wayland.py"
+      --root "${CMAKE_SOURCE_DIR}"
+      --source "${CRTGFX_WAYLAND_ROOT}"
+      --build-dir "${CRTGFX_WAYLAND_BUILD_DIR}"
+      --install-prefix "${CRTGFX_WAYLAND_INSTALL_PREFIX}"
+      --sysroot "${CRT_SYSROOT}"
+      --port-prefix "${CRTGFX_WAYLAND_PORT_PREFIX}"
+      --target-os "${CRT_TARGET_OS}"
+      --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}"
+      ${CRTGFX_WAYLAND_BUILD_ARGS}
+    DEPENDS crtgfx-wayland-configure
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Building and installing Wayland core (wayland-scanner + wayland-client/-server/-cursor/-egl) with the CRT toolchain"
+    USES_TERMINAL
+  )
+
+  # crtgfx-wayland-smoke: self-sufficient like crtgfx-skia-smoke/
+  # crt-libcxx-smoke -- `cmake --build <dir> --target crtgfx-wayland-smoke`
+  # alone drives a dedicated shadow build directory (sysroot/rootfs, then
+  # port-build-expat/port-build-libffi, then crtgfx-wayland-build) and
+  # finally compiles+runs libcrtgfx/tests/wayland_client_smoke.c directly
+  # against the freshly installed libwayland-client, entirely independent
+  # of *this* (the calling) build directory's own cache/state. See
+  # tools/test_crtgfx_wayland_smoke.py's own docstring.
+  add_custom_target(crtgfx-wayland-smoke
+    COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_crtgfx_wayland_smoke.py"
+      --root "${CMAKE_SOURCE_DIR}"
+      --build-dir "${CMAKE_BINARY_DIR}/crtgfx-wayland-smoke"
+      --cmake-c-compiler "${CMAKE_C_COMPILER}"
+      --cmake-cxx-compiler "${CMAKE_CXX_COMPILER}"
+      --target-os "${CRT_TARGET_OS}"
+      --target-arch "${CRT_TARGET_ARCH}"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Building and running wayland_client_smoke in a dedicated build directory (this directory's own cache untouched)"
+    USES_TERMINAL
+  )
 endif()
 
 set(CRTGFX_CRT_STATIC_LIBS c m dl cxx)

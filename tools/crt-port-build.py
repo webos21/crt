@@ -199,6 +199,53 @@ def find_windows_host_tool(names):
     return None
 
 
+def find_llvm_tool(name):
+    """Resolve an llvm-* tool (llvm-ar/llvm-ranlib/llvm-strip) that a plain
+    shutil.which(name) can genuinely miss even when a real LLVM install is
+    right there on this host. Confirmed for real (2026-08-24, building
+    libffi on a real Ubuntu/WSL host while preparing this project's own
+    Wayland port): Debian/Ubuntu's llvm-<N> package installs every LLVM
+    tool, unlinked, under /usr/lib/llvm-<N>/bin/ and exposes only clang/
+    clang++/clang-cl/... on plain PATH (via update-alternatives-managed
+    /usr/bin/clang) -- llvm-ar/llvm-ranlib/llvm-strip themselves are never
+    symlinked onto PATH at all, so shutil.which("llvm-ranlib") returns
+    None and this function's own caller used to fall back to the *host's*
+    real GNU binutils ranlib instead. That matters for a real, non-
+    cosmetic reason: GNU ranlib on a modern glibc host performs its own
+    IFUNC-relink heuristic against archive members, and segfaulted for
+    real relinking this project's own sysroot/lib/libm.so (a real ELF this
+    project's own build produced, not the host's) while ranlib'ing
+    libffi.a -- `ranlib: Relink '.../sysroot/lib/libm.so' with '/usr/lib/
+    x86_64-linux-gnu/libm.so.6' for IFUNC symbol 'ceil'` immediately
+    followed by `Segmentation fault`. LLVM's own llvm-ranlib has no such
+    IFUNC-relink behavior at all (confirmed: switching to it, same host,
+    same libffi.a, ranlib completes with no relink attempt and no crash).
+
+    Resolved by walking backward from wherever the *compiler* this project
+    actually uses is really found: shutil.which("clang") followed by
+    os.path.realpath() (needed since /usr/bin/clang is itself normally an
+    update-alternatives symlink, not the real file) lands in exactly the
+    directory Debian/Ubuntu's own LLVM package installs every other LLVM
+    tool into -- confirmed directly for real on this same host:
+    `realpath $(which clang)` and llvm-ranlib/llvm-ar both resolve under
+    the identical /usr/lib/llvm-21/bin/. A plain shutil.which(name) is
+    still tried first (respects any host where llvm-ranlib genuinely is on
+    PATH, e.g. Homebrew's own layout on macOS, or a from-source LLVM build
+    someone put on PATH themselves), so this is purely an additional
+    fallback, never a behavior change for a host where the simple case
+    already worked."""
+    found = shutil.which(name)
+    if found:
+        return found
+    clang = shutil.which("clang")
+    if not clang:
+        return None
+    candidate = Path(os.path.realpath(clang)).parent / name
+    if candidate.is_file():
+        return str(candidate)
+    return None
+
+
 def find_host_make(target_os):
     names = ("make", "gmake")
     if target_os == "windows":
@@ -506,9 +553,9 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
         env["CC"] = f"{root_env}/tools/crt-cc" if use_msys_paths else str(root / "tools" / "crt-cc")
         env["CXX"] = f"{root_env}/tools/crt-c++" if use_msys_paths else str(root / "tools" / "crt-c++")
         env["PATH"] = f"{tools_dir_env}{os.pathsep}{env.get('PATH', '')}"
-    env["AR"] = env.get("AR") or shutil.which("llvm-ar") or shutil.which("ar") or "ar"
-    env["RANLIB"] = env.get("RANLIB") or shutil.which("llvm-ranlib") or shutil.which("ranlib") or "ranlib"
-    env["STRIP"] = env.get("STRIP") or shutil.which("llvm-strip") or shutil.which("strip") or "strip"
+    env["AR"] = env.get("AR") or find_llvm_tool("llvm-ar") or shutil.which("ar") or "ar"
+    env["RANLIB"] = env.get("RANLIB") or find_llvm_tool("llvm-ranlib") or shutil.which("ranlib") or "ranlib"
+    env["STRIP"] = env.get("STRIP") or find_llvm_tool("llvm-strip") or shutil.which("strip") or "strip"
     if target_os == "windows" and use_crt_shell:
         for tool_var in ("AR", "RANLIB", "STRIP", "LD", "DLLTOOL", "OBJDUMP", "NM", "RC"):
             if not env.get(tool_var):

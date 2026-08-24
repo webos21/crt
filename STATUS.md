@@ -19,6 +19,23 @@ in those two win.
   targets from a POSIX tar archive) -- see `HISTORY.md`'s matching entry and
   `docs/porting_status.md`'s new `expat` section. Full `ctest` stayed at
   121/121 on Windows throughout.
+- **New Wayland core external-build scaffolding (2026-08-24): written and**
+  **locally validated, real end-to-end verification blocked on WSL tooling.**
+  `crtgfx-wayland-configure`/`-build`/`-smoke` CMake targets, a pinned
+  `libcrtgfx/third_party/wayland/recipe.json` (Wayland 1.26.0), and new
+  `tools/fetch_wayland.py`/`build_wayland.py`/`test_crtgfx_wayland_smoke.py`
+  mirror Skia's own external-build shape for a genuinely different build
+  system (Meson/Ninja). Scope: Wayland core only (scanner + client/server/
+  cursor/egl), a standalone smoke executable, no change to the existing
+  hand-rolled `window_wayland.c` backend. A real, general bug found and
+  fixed along the way: `tools/crt-port-build.py`'s AR/RANLIB/STRIP
+  defaults now also search the real `clang` binary's own directory (fixes
+  a genuine GNU-ranlib segfault relinking this project's own sysroot
+  `libm.so` on a real Ubuntu/WSL host that had no `llvm-ranlib` on PATH) --
+  `libffi`'s own port tests now pass cleanly there. `meson`/`pkg-config`
+  still need to be installed on the WSL host before `crtgfx-wayland-build`/
+  `-smoke` can actually be run for the first time. See `HISTORY.md`'s
+  matching entry.
 - **New opt-in `crtgfx-skia-smoke` CMake target (2026-08-23): passing.**
   `cmake --build <dir> --target crtgfx-skia-smoke` now builds and runs
   `crtgfx_skia_raster_smoke` end to end via a dedicated shadow build
