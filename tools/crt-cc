@@ -81,9 +81,45 @@ for arg in "$@"; do
   esac
 done
 
+# Assembly source (a bare *.S/*.s positional argument, or an explicit
+# -x assembler/-x assembler-with-cpp) needs __APPLE__ left alone on macOS,
+# unlike every C/C++ translation unit -- see the -U__APPLE__ case branch
+# just below for why C/C++ gets it undefined. GNU-style .S files select
+# their own assembler directives with #ifdef __APPLE__ (real Mach-O:
+# `.private_extern`) vs the ELF-only fallback (`.hidden`) -- clang's
+# integrated assembler still emits real Mach-O either way (this project's
+# actual toolchain/object format is never in question, only which C-level
+# API surface third-party *code* sees), so hiding __APPLE__ here doesn't
+# make the build "more Bionic-shaped", it just makes the assembler reject
+# a directive Mach-O never supported. Confirmed for real (2026-08-24):
+# libffi's src/aarch64/sysv.S (`FFI_HIDDEN(name)` macro, configure.ac's
+# own AH_BOTTOM block) hit exactly this, failing every `.hidden` use with
+# `error: unknown directive` once __APPLE__ was hidden from it.
+is_asm_source=0
+next_is_x_value=0
+for arg in "$@"; do
+  if [ "$next_is_x_value" -eq 1 ]; then
+    case "$arg" in
+      assembler|assembler-with-cpp) is_asm_source=1 ;;
+    esac
+    next_is_x_value=0
+    continue
+  fi
+  case "$arg" in
+    *.S|*.s) is_asm_source=1 ;;
+    -x) next_is_x_value=1 ;;
+    -xassembler|-xassembler-with-cpp) is_asm_source=1 ;;
+  esac
+done
+
 common_flags="-ffreestanding -fno-builtin -Xclang -fwchar-type=int -ffunction-sections -fdata-sections -nostdinc -isystem${CRT_SYSROOT}/include"
 case "$target_os" in
-  macos) common_flags="$common_flags -DCRT_TARGET_OS_MACOS=1 -U__APPLE__" ;;
+  macos)
+    common_flags="$common_flags -DCRT_TARGET_OS_MACOS=1"
+    if [ "$is_asm_source" -eq 0 ]; then
+      common_flags="$common_flags -U__APPLE__"
+    fi
+    ;;
   linux) common_flags="$common_flags -DCRT_TARGET_OS_LINUX=1" ;;
   windows)
     common_flags="$common_flags -DCRT_TARGET_OS_WINDOWS=1"

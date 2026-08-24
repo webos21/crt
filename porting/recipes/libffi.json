@@ -24,7 +24,8 @@
     "target_overrides": {
       "macos": {
         "env": {
-          "gcc_cv_as_cfi_pseudo_op": "no"
+          "gcc_cv_as_cfi_pseudo_op": "no",
+          "CFLAGS": "-D__APPLE__=1"
         }
       },
       "windows": {

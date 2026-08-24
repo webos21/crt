@@ -10,6 +10,66 @@ substantive update.
 
 ## 2026-08-24
 
+- **`crtgfx-wayland-smoke` fixed on macOS: `libffi`'s aarch64 assembly
+  failed to build under `crt-cc`/`crt-c++`'s project-wide `-U__APPLE__`
+  policy.** User reported the exact failure building `libffi` as a
+  dependency of the macOS Wayland smoke (`cmake --build --preset macos-
+  host-ninja-debug --target crtgfx-wayland-smoke`): `src/aarch64/sysv.S`
+  failed to assemble with `error: unknown directive` on every `.hidden`
+  use. Two real, related bugs, both stemming from the same root policy
+  choice applied too broadly:
+  1. **`tools/crt-cc`/`tools/crt-c++` both unconditionally pass
+     `-U__APPLE__` on macOS for every translation unit**, including `.S`
+     assembly -- a deliberate, documented policy (see `docs/
+     sysroot_ports.md`'s sqlite-amalgamation entry, and the Windows
+     analogue for `_WIN32`) to keep third-party C code on its generic
+     Unix path against this project's Bionic-shaped sysroot rather than
+     assuming a real Darwin/Windows SDK. `libffi`'s own `configure.ac`
+     (`AH_BOTTOM`, generating `fficonfig.h`'s `FFI_HIDDEN` macro) branches
+     on `#ifdef __APPLE__` to pick `.private_extern` (real Mach-O) vs
+     `.hidden` (ELF-only) for its own hand-written assembly -- clang's
+     integrated assembler still emits real Mach-O regardless of this
+     macro (the actual object format was never in question, only which
+     C-level API surface third-party code perceives), so hiding
+     `__APPLE__` here doesn't make anything more "Bionic-shaped", it just
+     makes libffi pick an assembler directive Mach-O has never supported.
+     Fixed generally in both wrapper scripts: detect a `.S`/`.s` source
+     argument (or `-x assembler`/`-x assembler-with-cpp`) and skip the
+     `-U__APPLE__` for that compile only, leaving `__APPLE__` real and
+     defined for actual assembly -- every other C/C++ translation unit on
+     macOS keeps the existing, unchanged `-U__APPLE__` policy.
+  2. **Once (1) fixed the assembler, the link failed instead**, missing
+     `_ffi_go_closure_SYSV`/`_ffi_go_closure_SYSV_V`, referenced from
+     `ffi.c`'s `ffi_prep_go_closure`. Root cause: `src/aarch64/
+     ffitarget.h` uses `__APPLE__` for a *second*, ABI-level purpose
+     beyond assembler-directive choice -- `#if defined(__APPLE__) ...
+     #elif !defined(_WIN32) #define FFI_GO_CLOSURES 1 #endif` (Go-style
+     closures need a free register for a static chain, and real Apple/iOS
+     aarch64 reserves x18, same reason `src/aarch64/ffitarget.h` already
+     disables this for `_WIN32` -- see `porting/recipes/libffi.json`'s
+     own pre-existing Windows notes on the identical X18/`_WIN32`
+     collision, found and fixed the opposite way in an earlier session).
+     With fix 1 applied, `sysv.S` (now seeing real `__APPLE__`) correctly
+     skipped emitting the Go-closure trampolines, but `ffi.c` (still
+     built with `-U__APPLE__`, unaffected by the assembly-only carve-out)
+     still thought `FFI_GO_CLOSURES` was defined and referenced the
+     now-missing symbols -- the two translation units disagreed about
+     the target ABI. Followed the exact precedent already set for
+     Windows/`_WIN32` in this same recipe (keep the platform macro
+     defined normally rather than hide it, since this is a hard ABI
+     constraint, not a portable-API-surface style choice): added
+     `target_overrides.macos.env.CFLAGS: "-D__APPLE__=1"` to `porting/
+     recipes/libffi.json`, so every one of libffi's own C sources sees
+     the same real `__APPLE__` its assembly now does.
+  Verified for real: `crtgfx-wayland-smoke` builds `libffi`, Wayland core
+  (`wayland-scanner` + `libwayland-client.a`), and `wayland_client_smoke`
+  end to end and runs it (prints the same designed "no compositor"
+  headless-fallback line as the Linux/Windows entries elsewhere in this
+  file, since this dev machine has no real Wayland compositor either).
+  Full default `cmake --build` and the full `ctest` suite (104/104) both
+  pass with no regressions from the wrapper-level change, which applies
+  to every macOS `.S` compile project-wide, not just libffi's.
+
 - **Wayland core external build verified end to end on Windows x64 too**
   **(closing the "Windows gap" the same-day Linux-first entry below left**
   **open) -- `crtgfx-wayland-smoke` builds, links, and runs cleanly,**
