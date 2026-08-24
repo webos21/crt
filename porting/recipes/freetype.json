@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "name": "freetype",
+  "version": "2.14.3",
+  "source": {
+    "url": "https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.xz",
+    "archive": "freetype-2.14.3.tar.xz",
+    "source_dir": "freetype-2.14.3",
+    "sha256": "36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f",
+    "sha1": "62e26b89a057ad4f1e28af977945d5c1975a8e67",
+    "md5": "5e78e6fdce5a61d3075e4c25e9852f84"
+  },
+  "dependencies": [],
+  "build": {
+    "system": "configure",
+    "configure_args": [
+      "--with-zlib=no",
+      "--with-bzip2=no",
+      "--with-png=no",
+      "--with-harfbuzz=no",
+      "--with-brotli=no",
+      "--disable-mmap"
+    ],
+    "env": {
+      "CFLAGS": "-O2"
+    },
+    "make_args": [],
+    "target_overrides": {
+      "windows": {
+        "configure_args": [
+          "--build=@CRT_MINGW_TRIPLE@"
+        ],
+        "configure_cwd": "builds/unix",
+        "pre_configure_copy": [
+          {"src": "builds/unix/unix.mk", "dst": "config.mk"}
+        ],
+        "post_configure_patch": [
+          {
+            "file": "builds/unix/unix-def.mk",
+            "find": "TOP_DIR := $(shell cd $(TOP_DIR); pwd)",
+            "replace": "TOP_DIR := $(TOP_DIR)"
+          }
+        ],
+        "env": {
+          "RC": ""
+        }
+      }
+    }
+  },
+  "tests": [
+    {
+      "name": "glyph-rasterize-static",
+      "type": "compile-run",
+      "source": "porting/tests/freetype_glyph_test.c",
+      "cflags": [
+        "-I@PORT_PREFIX@/include/freetype2",
+        "-DCRT_TEST_FONT_PATH=\"@ROOT@/libcrtgfx/assets/fonts/DejaVuSansMono.ttf\""
+      ],
+      "link_args": [
+        "@PORT_PREFIX@/lib/libfreetype.a"
+      ],
+      "expect_stdout": "freetype_glyph_test: ok"
+    },
+    {
+      "name": "glyph-rasterize-shared",
+      "type": "compile-run",
+      "source": "porting/tests/freetype_glyph_test.c",
+      "cflags": [
+        "-I@PORT_PREFIX@/include/freetype2",
+        "-DCRT_TEST_FONT_PATH=\"@ROOT@/libcrtgfx/assets/fonts/DejaVuSansMono.ttf\""
+      ],
+      "expect_stdout": "freetype_glyph_test: ok",
+      "target_overrides": {
+        "linux": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libfreetype.so"
+          ]
+        },
+        "macos": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libfreetype.dylib"
+          ]
+        },
+        "windows": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libfreetype.dll.a"
+          ]
+        }
+      }
+    }
+  ],
+  "status": {
+    "linux": "shared-pass",
+    "macos": "pending",
+    "windows": "shared-pass"
+  },
+  "notes": [
+    "Added 2026-08-24 as Phase 1 of the 'notepad-capability' plan: real text rendering needs a real font rasterizer, and Skia already has first-class, non-host support for FreeType (skia_use_freetype/SkFontMgr_custom_* GN targets exist upstream, just currently off -- see libcrtgfx's own build_skia.py, skia_enable_fontmgr_custom_empty=true/skia_use_freetype=false). Porting FreeType itself is the prerequisite before touching any Skia GN flags.",
+    "Version 2.14.3 (2026-03-22), the current stable release at recipe-creation time. The savannah.gnu.org mirror listed in the official download page redirected to an unreachable third-party mirror (ftp.cc.uoc.gr) when fetched directly; the identical tarball was fetched from the project's own SourceForge release instead (https://sourceforge.net/projects/freetype/files/freetype2/2.14.3/freetype-2.14.3.tar.xz/download) and source.sha256/sha1/md5 were computed directly from that real downloaded copy, matching this project's own SHA256-is-authoritative policy. tools/fetch_ports.py's own download() only ever uses source.url (savannah), not the SourceForge mirror used to obtain this recipe's own hashes -- if savannah's own redirect target is unreachable again when this recipe is actually fetched, that is a real, separate problem to solve then (retry, or point source.url at a working mirror), not something this recipe's own hash values need to change for.",
+    "The release tarball's own top-level ./configure is a thin wrapper (builds/unix/configure.raw's own convention) that forwards its arguments into `$MAKE setup unix`, which itself invokes the real, ~20000-line autotools-generated builds/unix/configure -- confirmed by reading configure directly, not assumed. On Linux/macOS this fits crt-port-build.py's existing 'configure' build system completely unmodified and was verified for real (2026-08-24, Linux x64/WSL): the wrapper reads $MAKE/$GNUMAKE from the environment exactly like every other step of this project's own configure-based recipes already does, and both automated tests (glyph-rasterize-static/-shared) passed against a real rendered 'A' glyph on the first real build attempt. On Windows the same recursive `$MAKE setup unix` call was found genuinely broken on this PAL (2026-08-24): the nested make.exe -- a real, non-mksh-aware native Windows GNU Make -- cannot resolve real toybox applets (cat/cp) through this project's own rootfs-relative $PATH on its own, and forcing it through mksh via SHELL= (the technique that already works for every *non-recursive* make invocation in tools/crt-port-build.py) instead produced a silent, hard crash (exit 139, no output at all) -- a real instability in nested mksh-launched-from-make process spawning on this PAL. Root-caused (by reading builds/toplevel.mk/builds/unix/detect.mk directly) that `$MAKE setup unix`, for an in-tree build, only ever does two real things: `cp builds/unix/unix.mk config.mk` and `cd builds/unix && ./configure $CFG` (the real autoconf script, one directory down) -- builds/toplevel.mk's own `ifeq ($(wildcard $(CONFIG_MK)),) ... else include $(CONFIG_MK)` check confirms pre-existing a real config.mk skips the whole recursive-make detection dance entirely. Windows now replicates those two steps directly via two new, generic tools/crt-port-build.py recipe fields (configure_cwd/pre_configure_copy, read from target_overrides.<os> the same way configure_args already is -- see this recipe's own windows target_overrides above) instead of the crashy recursive make -- no engine change was needed on Linux/macOS, which keep using upstream's own wrapper unmodified.",
+    "--with-zlib=no/--with-bzip2=no/--with-png=no/--with-harfbuzz=no/--with-brotli=no keep this first pass to FreeType's own core TrueType/OpenType outline parsing and rasterization only -- none of the disabled optional codecs (compressed PCF bitmap fonts, embedded PNG color bitmaps, HarfBuzz-assisted auto-hinting for certain complex scripts, WOFF2 decompression) are needed to render a plain TTF/OTF outline font, the actual target use case (DejaVuSansMono.ttf, see this recipe's own tests). zlib and bzip2 are both already-ported dependencies this project could wire in later if a real need for compressed bitmap fonts ever comes up; harfbuzz/brotli would each be real new ports of their own.",
+    "--disable-mmap is the one flag that actually matters for Windows portability, not just a minor optimization toggle: confirmed directly by reading builds/unix/configure.ac that a *-*-mingw* host (needed anyway for config.guess via --build=@CRT_MINGW_TRIPLE@, the same workaround libpng.json/pcre2.json/xz.json/expat.json already use) selects FTSYS_SRC='$(TOP_DIR)/builds/windows/ftsystem.c' -- a real Win32 MapViewOfFile-based implementation this project's own freestanding sysroot has no real <windows.h> to satisfy (the same class of host-SDK-leakage problem zlib/libpng/pcre2/xz all hit and fixed with a CFLAGS -U_WIN32 trick instead, since their own leaks were inside FreeType's -- sorry, THEIR OWN -- unconditionally-compiled source, not a separate host-selected file the way FreeType's is). --disable-mmap skips that whole case statement, leaving FTSYS_SRC unset, which configure.ac's own fallback then resolves to src/base/ftsystem.c -- FreeType's own fully portable, plain stdio-based (fopen/fread/fseek) generic implementation, already well within this project's own proven libc surface. Applied unconditionally (not Windows-only) for one consistent code path across every target this project builds for, since mmap-vs-stdio is a minor I/O optimization for a font-loading library, not a functional requirement.",
+    "porting/tests/freetype_glyph_test.c is a real FT_New_Face()/FT_Set_Pixel_Sizes()/FT_Load_Char(..., FT_LOAD_RENDER) round trip against a real bundled font file (libcrtgfx/assets/fonts/DejaVuSansMono.ttf, see that directory's own README.md for provenance/license) -- FT_LOAD_RENDER rasterizes directly inside FT_Load_Char, no separate FT_Render_Glyph() call needed (confirmed via real freetype.h reading, not assumed) -- checking the resulting FT_Bitmap (face->glyph->bitmap) has plausible non-zero dimensions AND at least one genuinely non-zero (inked) byte in its buffer, not just that FreeType's own API calls returned success codes. -I@PORT_PREFIX@/include/freetype2 (not @PORT_PREFIX@/include directly): FreeType's own install layout nests its real public headers one directory deeper than most other ports in this queue, confirmed by reading builds/unix/freetype2.in's own installed pkg-config Cflags value.",
+    "Windows also hit a real, general stack-overflow bug in this project's own ported make.exe (2026-08-24, found and fixed building this recipe for real, see porting/recipes/make.json's own matching note): make.exe silently segfaults (no output at all) partway through reading freetype's own unusually large Makefile tree -- ld.lld's default 1 MiB PE stack reserve is enough for every other, much flatter configure-based recipe's Makefile in this queue, but not for FreeType's. Fixed generally in make.json itself (target_overrides.windows.env.LDFLAGS=-Wl,--stack,16777216, a 16 MiB reserve), not here -- this recipe needed no field of its own for that fix, just a rebuilt make.exe (`port-rebuild-make`) before rebuilding this recipe.",
+    "windows target_overrides.env.RC=\"\" (empty, overriding the general Windows $RC=llvm-rc.exe convention every other Windows configure-based recipe in this queue relies on -- see e.g. xz.json's own liblzma_w32res.rc use of the same $RC): FreeType's own builds/freetype.mk has a hand-rolled `ifneq ($(RC),) ... $(FTVER_OBJ): $(FTVER_SRC) \\n\\t$(RC) -o $@ $<` rule (not an Automake-generated one) that, once routed through builds/unix/libtool's own --mode=compile wrapper (FreeType's unix.mk always compiles through libtool, even for non-C sources), reorders/mis-wraps the llvm-rc.exe invocation into an argv shape it rejects outright (`Exactly one input file should be provided`) -- confirmed via a real build attempt (2026-08-24). ftver.rc is purely a Windows DLL/EXE VERSIONINFO resource (copyright/version strings shown in Explorer's file Properties dialog), no functional effect on font rasterization at all, so forcing $(RC) empty (which FreeType's own `ifneq ($(RC),)` guard treats as 'no resource compiler available', matching real behavior on any host with no windres/rc.exe) skips the broken rule entirely rather than fixing libtool's own RC-wrapping logic -- a real, scoped workaround, not a functional regression for this port's own actual purpose (glyph rasterization, not embedding Windows version metadata).",
+    "Verified for real end to end (2026-08-24), both hosts: Linux x64/WSL -- both glyph-rasterize-static and glyph-rasterize-shared passed on the first real build attempt, no bugs found (a real rendered 'A' glyph bitmap, non-zero dimensions and at least one inked pixel, confirmed by the test's own assertions, not just a successful compile). Windows x64 -- both tests also passed, after finding and fixing three real, general bugs along the way (all documented above and in their own general-fix locations, not narrowly patched around): the TOP_DIR drive-letter-colon GNU Make static-pattern-rule syntax collision (fixed via this recipe's own configure_cwd/pre_configure_copy/post_configure_patch target_overrides, two of those fields new and generic in tools/crt-port-build.py), this project's own ported make.exe silently stack-overflowing on FreeType's unusually large Makefile tree (fixed generally in porting/recipes/make.json's own Windows LDFLAGS, not here), and libtool mis-wrapping the Windows VERSIONINFO resource compiler for FreeType's own hand-rolled ftver.rc rule (worked around via this recipe's own windows target_overrides.env.RC=\"\", a real but narrowly-scoped fix specific to a purely cosmetic resource this port's actual purpose does not need). Full regression check after all fixes: 100% (121/121) ctest on Windows, and Linux's own full rebuild plus every real (non-tty-dependent) test also passed with no regressions -- see HISTORY.md's 2026-08-24 entries for the complete trail. macOS not attempted this session."
+  ]
+}

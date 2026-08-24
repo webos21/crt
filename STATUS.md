@@ -9,6 +9,28 @@ current state so the next session doesn't have to re-derive it from
 means; if this page and `HISTORY.md`/`TODO.md` disagree, the dated entries
 in those two win.
 
+- **New `freetype` port (2.14.3, 2026-08-24): `shared-pass` on Linux x64**
+  **and Windows x64, macOS not attempted yet.** Phase 1 of the "notepad-
+  capability" plan (real font rasterization -- see `TODO.md` for phases
+  2/3, keyboard input and Wayland `wl_seat`). A real `FT_New_Face()`/
+  `FT_Set_Pixel_Sizes()`/`FT_Load_Char(..., FT_LOAD_RENDER)` round trip
+  against a bundled real font (`libcrtgfx/assets/fonts/DejaVuSansMono.ttf`)
+  confirms an actual rasterized, non-empty glyph bitmap on both hosts, not
+  just a successful compile. Windows needed three real, general bugs found
+  and fixed: a GNU Make static-pattern-rule syntax collision from
+  Windows drive-letter colons in FreeType's own generated Makefile (fixed
+  via three new, generic `tools/crt-port-build.py` recipe fields --
+  `configure_cwd`/`pre_configure_copy`/`post_configure_patch`); a real
+  stack-overflow in this project's own ported `make.exe` parsing
+  FreeType's unusually large Makefile tree (fixed generally in
+  `porting/recipes/make.json`'s own Windows `LDFLAGS`, a 16 MiB stack
+  reserve); and libtool mis-wrapping the Windows resource compiler for a
+  purely cosmetic `ftver.rc` rule (worked around narrowly, this recipe
+  only). Also fixed a general, Windows-only transient file-lock bug in
+  `tools/fetch_ports.py`'s own archive-extraction rename. See
+  `HISTORY.md`'s matching entry and `docs/porting_status.md`'s new
+  `freetype` section for the full trail. Full `ctest` stayed at 121/121 on
+  Windows throughout.
 - **New `expat` port (2.8.3, 2026-08-24): `shared-pass` on Linux x64 and**
   **Windows x64, macOS not attempted yet.** Added as a build dependency for
   the upcoming core Wayland external build (`wayland-scanner` needs it to

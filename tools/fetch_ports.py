@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import stat
 import tarfile
+import time
 import urllib.request
 import zipfile
 
@@ -145,6 +146,28 @@ def fix_windows_symlink_targets(root):
             os.symlink(fixed_target, path, target_is_directory=is_dir_target)
 
 
+def replace_with_retry(src, dst):
+    # Real, reproduced-2026-08-24 Windows-only transient failure: os.replace()
+    # renaming a just-extracted directory tree (thousands of small files, e.g.
+    # freetype's own src/*.c) can raise PermissionError (WinError 5, "Access is
+    # denied") even though nothing in this project holds a handle on it -- a
+    # manual PowerShell Move-Item of the exact same path succeeded seconds
+    # later with no other change, consistent with Windows Defender's
+    # real-time scanner (or a similar AV/indexer) still holding a transient
+    # scan lock on the freshly-written files right after tarfile.extractall()
+    # closes them. Matches tools/crt-port-build.py's own remove_tree()
+    # precedent for the identical class of problem (same retry count, same
+    # 0.1*(attempt+1) backoff) rather than inventing a new convention.
+    for attempt in range(5):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == 4:
+                raise
+            time.sleep(0.1 * (attempt + 1))
+
+
 def extract(archive_path, dest):
     if os.path.exists(dest):
         return
@@ -162,10 +185,10 @@ def extract(archive_path, dest):
     entries = [os.path.join(tmp_dest, entry) for entry in os.listdir(tmp_dest)]
     dirs = [entry for entry in entries if os.path.isdir(entry)]
     if len(dirs) == 1 and len(entries) == 1:
-        os.replace(dirs[0], dest)
+        replace_with_retry(dirs[0], dest)
         os.rmdir(tmp_dest)
     else:
-        os.replace(tmp_dest, dest)
+        replace_with_retry(tmp_dest, dest)
 
 
 def main():

@@ -1201,7 +1201,20 @@ Next work order:
 5. **Extend Skia integration beyond primitive CPU drawing.**
    Add image/font/text staging after the CPU-raster surface smoke is stable.
    Treat HarfBuzz/FreeType/ICU/platform-font discovery as explicit follow-up
-   dependencies, not hidden Skia side effects.
+   dependencies, not hidden Skia side effects. FreeType itself is now a real,
+   verified port (2.14.3, `shared-pass` on Linux/Windows -- see `HISTORY.md`'s
+   2026-08-24 entry and `porting/recipes/freetype.json`); what remains here is
+   flipping Skia's own GN flags (`skia_use_freetype=true`,
+   `skia_enable_fontmgr_custom_empty=false`, a real `SkFontMgr_custom_*`
+   pointed at the bundled `libcrtgfx/assets/fonts/DejaVuSansMono.ttf`) and a
+   real "draw text" smoke test proving actual glyph rendering end to end
+   through `crtgfx` → Skia → FreeType -- the first of a three-phase "notepad-
+   capability" plan (phase 1: this item; phase 2: item 4 above, wiring
+   `window_win32.c`/`window_cocoa.c`'s own already-received native keyboard/
+   mouse events through to a new `crtgfx/window.h` public API -- a wiring/
+   API-design task, not a new-library one; phase 3: item 3 above, porting
+   `libxkbcommon` and adding `wl_seat`/`wl_keyboard` to the existing Wayland
+   client backend).
 6. **Add GPU and media handoff only after the frame/input contract is stable.**
    Windows D3D, macOS Metal, Linux EGL/Vulkan/dmabuf, and `libcrtmedia`
    decoded-frame/audio handoff are later optimization/integration tranches,

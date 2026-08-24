@@ -10,6 +10,133 @@ substantive update.
 
 ## 2026-08-24
 
+- **FreeType 2.14.3 ported and verified end to end on Linux x64/WSL and
+  Windows x64 (`porting/recipes/freetype.json`), Phase 1 of the
+  "notepad-capability" plan** (font rendering, following the user's own
+  explicit "1, 2, 3순서로 진행하자" directive: FreeType port → Skia font
+  manager wiring → real text-rendering verification, in that order --
+  this entry covers step 1). `porting/tests/freetype_glyph_test.c` is a
+  real `FT_Init_FreeType()`/`FT_New_Face()`/`FT_Set_Pixel_Sizes()`/
+  `FT_Load_Char(..., FT_LOAD_RENDER)` round trip against a bundled real
+  font (`libcrtgfx/assets/fonts/DejaVuSansMono.ttf`, DejaVu Fonts 2.37,
+  see that directory's own `README.md` for provenance/license), checking
+  the rasterized `'A'` glyph's `FT_Bitmap` has plausible non-zero
+  dimensions AND at least one genuinely non-zero (inked) byte -- not just
+  that FreeType's own API calls returned success. `--with-zlib=no
+  --with-bzip2=no --with-png=no --with-harfbuzz=no --with-brotli=no
+  --disable-mmap` keep this first pass to core TrueType/OpenType outline
+  rasterization only. Both `glyph-rasterize-static` and
+  `glyph-rasterize-shared` passed on Linux on the first real build
+  attempt, no bugs found. Windows needed three real, general bugs found
+  and fixed along the way:
+  1. **A genuine Windows-only GNU Make syntax collision**: FreeType's own
+     generated `builds/unix/unix-def.mk` has `TOP_DIR := $(shell cd
+     $(TOP_DIR); pwd)` (standard autoconf-generated behavior, harmless on
+     a real POSIX host where an absolute path never contains a colon),
+     which on this project's own Windows PAL resolves to a real
+     drive-letter path (`C:/Users/...`). At least 11 separate
+     rule-declaration lines across FreeType's own hand-rolled (pre-
+     Automake) `builds/*.mk` tree combine two such TOP_DIR/OBJ_DIR-derived
+     absolute expansions on one line -- two colons on one rule-declaration
+     line is real GNU Make static-pattern-rule syntax
+     (`targets : target-pattern : prereq-patterns`), so Make aborted
+     parsing the whole file outright (`target pattern contains no '%'`).
+     Root-caused by reading `builds/toplevel.mk`/`builds/unix/detect.mk`
+     directly: FreeType's own top-level `./configure` is a thin,
+     non-autoconf wrapper that -- for an in-tree build, which every recipe
+     here is -- ultimately just does `cp builds/unix/unix.mk config.mk`
+     and `cd builds/unix && ./configure $CFG` (the real, ~20000-line
+     autotools-generated script one directory down), reached via a
+     *recursive* `$MAKE setup unix` invocation from inside the wrapper
+     script. That recursive invocation was tried for real first and found
+     independently broken on this PAL (see bug 2's own trail below), so
+     rather than debug two separate problems stacked on each other, two
+     new, generic `tools/crt-port-build.py` recipe fields
+     (`configure_cwd`, `pre_configure_copy`, read from
+     `target_overrides.<os>` the same way `configure_args` already is)
+     replicate the wrapper's own two real steps directly, with no
+     recursive make involved -- Linux/macOS keep using upstream's own
+     wrapper unmodified, matching real-world behavior there. Once past
+     that, the root TOP_DIR/OBJ_DIR absolute-path collision itself was
+     fixed with a third new, generic field (`post_configure_patch`, a
+     literal find/replace applied to a real `./configure` output file)
+     patching just the one root-cause line to a no-op self-assignment
+     (`TOP_DIR := $(TOP_DIR)`), keeping TOP_DIR at the top Makefile's own
+     already-relative default for this project's always-in-tree build --
+     confirmed safe (no `$(MAKE) -C`/`cd ...; $(MAKE)` recursive sub-make
+     anywhere in the tree that would need an absolute TOP_DIR to survive a
+     directory change) -- which fixed all 11+ colliding rule lines at
+     once instead of patching each individually.
+  2. **A real, general stack-overflow bug in this project's own ported
+     `make.exe`** (`porting/recipes/make.json`): before the TOP_DIR fix
+     above was found, the recursive `$MAKE setup unix` path was tried and
+     produced a silent, hard crash (exit 139, zero output, not even GNU
+     Make's own `$(info)` banner text) forcing every recipe command
+     through this project's own mksh via `SHELL=/system/bin/mksh`. Root-
+     caused as a genuine stack overflow, not a logic bug: relinking a copy
+     of the already-built `make.exe` objects with a deliberately oversized
+     16 MiB stack reserve (`-Wl,--stack,16777216`, vs. `ld.lld`'s plain PE
+     default of 1 MiB) made the exact same crash disappear, confirmed by
+     running `make -d -n`/`make -p -n` against FreeType's own real
+     Makefile tree with the relinked binary and getting full, correct
+     output instead of a silent death partway through reading
+     `src/psnames/module.mk` (FreeType's own unusually large, deeply
+     cross-including Makefile graph -- dozens of `src/*/module.mk` +
+     `rules.mk` files -- is far larger than every other Windows configure-
+     based recipe's Makefile in this queue, none of which came close to
+     exhausting a 1 MiB stack during GNU Make's own recursive rule/
+     variable evaluation). Fixed generally, not per-recipe: `make.json`'s
+     own `target_overrides.windows.env.LDFLAGS` now includes
+     `-Wl,--stack,16777216` for every future Windows build of this
+     project's own make, at zero cost to every simpler recipe already
+     verified working.
+  3. **libtool mis-wrapping the Windows resource compiler for FreeType's
+     own hand-rolled `ftver.rc` rule**: `builds/freetype.mk`'s
+     `ifneq ($(RC),) ... $(RC) -o $@ $<` rule for `ftver.rc` (a Windows
+     DLL/EXE VERSIONINFO resource -- copyright/version strings shown in
+     Explorer's file Properties dialog, no functional effect on font
+     rasterization) is not an Automake-generated rule; once routed through
+     `builds/unix/libtool`'s own `--mode=compile` (FreeType's `unix.mk`
+     always compiles through libtool, even for non-C sources), the
+     resulting `llvm-rc.exe` invocation gets reordered/mis-wrapped into an
+     argv shape `llvm-rc.exe` rejects outright (`Exactly one input file
+     should be provided`) -- confirmed via a real build attempt. Since
+     `$RC` pointing at `llvm-rc.exe` is otherwise a proven, working,
+     general convention this project already relies on elsewhere (e.g.
+     `xz`'s own `liblzma_w32res.rc`), this was fixed narrowly, in this
+     recipe only: `target_overrides.windows.env.RC=""` (empty), which
+     FreeType's own `ifneq ($(RC),)` guard treats exactly like "no
+     resource compiler available on this host" (a real, supported
+     upstream code path, not a hack) and skips the whole broken rule.
+  Both `glyph-rasterize-static` and `glyph-rasterize-shared` passed on
+  Windows after all three fixes, with a real rendered `'A'` glyph bitmap
+  confirmed non-empty by the test's own assertions. Full regression
+  checks after all fixes, both hosts: Windows -- a full default rebuild
+  (all targets) plus `ctest` both clean, 100% (121/121). Linux -- a full
+  default rebuild plus `ctest` both clean too; 102/104 tests directly
+  confirmed passing (100% of those attempted) with the remaining 2
+  (`termios_echo_roundtrip_test`/`termios_line_control_test`) excluded
+  from this particular verification run only because this session's own
+  non-interactive WSL background-process invocation had no controlling
+  tty for them to use (a real environment limitation of *how this
+  verification pass was run*, not a code regression -- the same suite
+  already passed 104/104 earlier this same day under a different
+  invocation shape, see this file's own Wayland entries below).
+  Also fixed along the way: a real, general Windows-only transient
+  `PermissionError` (`WinError 5`, "Access is denied") renaming a
+  freshly-extracted archive directory in `tools/fetch_ports.py`'s own
+  `extract()`, consistent with a real-time antivirus/indexer scan lock on
+  newly-written files racing the rename -- fixed with a 5-attempt retry-
+  with-backoff wrapper (`replace_with_retry()`), matching
+  `tools/crt-port-build.py`'s own already-established `remove_tree()`
+  precedent for the identical class of problem (same retry count, same
+  `0.1*(attempt+1)` backoff) rather than inventing a new convention. Also
+  caught and fixed a real transcription bug in this recipe's own
+  `source.sha256` (63 hex characters, one short of a valid sha256 --
+  silently wrong length, not just a wrong value) before it could cause a
+  false download-integrity failure; the real value was re-derived from an
+  actual downloaded copy of the tarball, not guessed.
+
 - **`crtgfx-wayland-smoke` fixed on macOS: `libffi`'s aarch64 assembly
   failed to build under `crt-cc`/`crt-c++`'s project-wide `-U__APPLE__`
   policy.** User reported the exact failure building `libffi` as a

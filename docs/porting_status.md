@@ -93,6 +93,10 @@ dependency for the upcoming core Wayland external build (`wayland-scanner`
 needs it to parse protocol XML), not part of the networking/TLS chain above.
 See its own section below.
 
+`freetype` (2026-08-24) is another new port outside this queue -- Phase 1 of
+the "notepad-capability" plan (real font rasterization for `libcrtgfx`), not
+part of the networking/TLS chain above. See its own section below.
+
 ## make
 
 - Version: `android-toolchain-44fc4fe66a484b91844c302f03eaa8438e065d17`
@@ -428,4 +432,70 @@ infrastructure fix, all found and root-caused this session (2026-08-24):
   on Windows right after extraction.
 
 See `porting/recipes/expat.json`'s own notes for the full trail and
+`HISTORY.md`'s 2026-08-24 entry.
+
+## freetype
+
+- Version: `2.14.3`
+- Recipe: `porting/recipes/freetype.json`
+- Build system: `configure`
+- Dependencies: none
+- Status:
+  - Linux: `shared-pass`
+  - macOS: `pending`
+  - Windows: `shared-pass`
+- Automated recipe tests:
+  - `glyph-rasterize-static`
+  - `glyph-rasterize-shared`
+
+Added as Phase 1 of the "notepad-capability" plan: real text rendering
+needs a real font rasterizer, and Skia already has first-class, non-host
+support for FreeType (`skia_use_freetype`/`SkFontMgr_custom_*` GN targets
+exist upstream, just currently off). The tests run a real `FT_New_Face()`/
+`FT_Set_Pixel_Sizes()`/`FT_Load_Char(..., FT_LOAD_RENDER)` round trip
+against a bundled real font (`libcrtgfx/assets/fonts/DejaVuSansMono.ttf`)
+and check the rasterized `'A'` glyph bitmap has plausible non-zero
+dimensions AND at least one genuinely inked pixel, against both static and
+shared `libfreetype`.
+
+Windows needed three real, general fixes, all found and root-caused this
+session (2026-08-24):
+
+- A genuine Windows-only GNU Make syntax collision: FreeType's own
+  generated `builds/unix/unix-def.mk` unconditionally resolves `TOP_DIR`
+  (and everything derived from it) to a real, drive-letter-bearing absolute
+  path (`C:/Users/...`) via `$(shell cd $(TOP_DIR); pwd)` -- harmless on a
+  real POSIX host, but at least 11 separate rule-declaration lines across
+  FreeType's own hand-rolled `builds/*.mk` tree combine two such absolute
+  expansions on one line, which GNU Make misparses as static-pattern-rule
+  syntax and aborts on (`target pattern contains no '%'`). Fixed with three
+  new, generic `tools/crt-port-build.py` recipe fields read from
+  `target_overrides.<os>` (`configure_cwd`, `pre_configure_copy`,
+  `post_configure_patch`) that bypass FreeType's own crash-prone recursive
+  `$MAKE setup unix` wrapper dispatch and patch the one root-cause line to
+  a relative no-op self-assignment -- Linux/macOS keep using upstream's own
+  wrapper unmodified.
+- A real, general stack-overflow bug in this project's own ported
+  `make.exe`: it silently segfaults (zero output) parsing FreeType's own
+  unusually large Makefile tree under `ld.lld`'s plain 1 MiB default PE
+  stack reserve. Fixed generally in `porting/recipes/make.json`'s own
+  Windows `LDFLAGS` (`-Wl,--stack,16777216`, a 16 MiB reserve), not in this
+  recipe.
+- libtool mis-wrapping the Windows resource compiler (`llvm-rc.exe`) for
+  FreeType's own hand-rolled, non-Automake `ftver.rc` VERSIONINFO-resource
+  rule (`Exactly one input file should be provided`). Worked around
+  narrowly, in this recipe only (`target_overrides.windows.env.RC=""`),
+  since `ftver.rc` is purely cosmetic Windows DLL/EXE metadata with no
+  effect on font rasterization -- an empty `$RC` is a real, upstream-
+  supported "no resource compiler" code path FreeType's own
+  `ifneq ($(RC),)` guard already handles.
+
+Also fixed a general, Windows-only transient file-lock bug in
+`tools/fetch_ports.py`'s own archive-extraction rename (`WinError 5`,
+consistent with a real-time antivirus/indexer scan racing the rename of a
+freshly-extracted directory), with a 5-attempt retry-with-backoff wrapper
+matching `tools/crt-port-build.py`'s own established `remove_tree()`
+precedent for the same class of problem.
+
+See `porting/recipes/freetype.json`'s own notes for the full trail and
 `HISTORY.md`'s 2026-08-24 entry.

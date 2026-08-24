@@ -807,6 +807,52 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
     # wrapping, parallel -jN jobs) is identical to the configure-based
     # flow, so this only skips the one step that doesn't apply, rather
     # than duplicating the whole function for a second "system" type.
+    #
+    # pre_configure_copy / configure_cwd: freetype is the first recipe in
+    # this queue whose real top-level ./configure is not a flat autoconf
+    # script but a thin, non-autoconf wrapper (see porting/recipes/
+    # freetype.json's own notes) that -- for an in-tree build, which every
+    # recipe here is -- does nothing but (1) `cp builds/unix/unix.mk
+    # config.mk` and (2) `cd builds/unix && ./configure $CFG` (the real,
+    # autoconf-generated configure FreeType ships one directory down).
+    # Upstream reaches that same pair of steps via `$MAKE setup unix`, a
+    # *recursive* GNU Make invocation launched from inside the wrapper
+    # script itself. That recursive invocation works fine as-is on Linux/
+    # macOS (a real bash + coreutils + GNU make, exactly what upstream's
+    # own wrapper assumes -- verified for real, 2026-08-24), but was tried
+    # for real on Windows the same day and found genuinely broken on this
+    # PAL there: the nested make.exe (a real, non-mksh-aware native
+    # Windows GNU Make) cannot resolve real toybox applets (cat/cp)
+    # through this project's own rootfs-relative $PATH on its own
+    # (`make.exe: cat: No such file or directory`), and forcing every
+    # recipe command through this project's own mksh via a
+    # `SHELL=/system/bin/mksh` override (the same technique make_args/
+    # install_args below already use successfully for every
+    # *non-recursive* make invocation in this file) instead produced a
+    # silent, hard crash (exit 139, no output at all, not even GNU Make's
+    # own $(info) banner text) -- a real, reproduced instability in nested
+    # mksh-launched-from-make process spawning on this PAL, matching the
+    # class of problem already flagged elsewhere in this file (the -jN
+    # jobserver "Bad file descriptor" crash, see the `jobs` comment further
+    # down). Rather than debug that nested-shell crash further, this
+    # recipe-level pair of fields (read from target_overrides.<os> the same
+    # way configure_args/make_args already are, so Linux/macOS can keep
+    # using upstream's own unmodified wrapper while only Windows opts into
+    # the workaround) replicates the wrapper's own two real steps directly
+    # -- pre_configure_copy (a list of {"src","dst"} pairs, both relative
+    # to the port's work directory, copied verbatim before configure runs)
+    # and configure_cwd (a work-relative subdirectory to run ./configure
+    # from, instead of the work root) -- with no recursive make involved
+    # at all. Both default to "no-op"/"." so every existing flat-
+    # ./configure recipe (i.e. every recipe but this one) is unaffected.
+    os_overrides = build.get("target_overrides", {}).get(target_os, {})
+    for copy_entry in os_overrides.get("pre_configure_copy", build.get("pre_configure_copy", [])):
+        copy_src = work / copy_entry["src"]
+        copy_dst = work / copy_entry["dst"]
+        progress(f"{port_name}: pre-configure copy {copy_entry['src']} -> {copy_entry['dst']}")
+        shutil.copy2(copy_src, copy_dst)
+    configure_cwd_rel = os_overrides.get("configure_cwd", build.get("configure_cwd"))
+    configure_cwd = work / configure_cwd_rel if configure_cwd_rel else work
     if not build.get("skip_configure", False):
         configure = ["./configure"]
         configure.extend(build["configure_args"])
@@ -834,14 +880,68 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
             # Remove once the Windows aarch64 zlib configure investigation is
             # resolved.
             shell_argv = [shell, "-x"] if os.environ.get("CRT_PORT_SHELL_XTRACE") else [shell]
-            run(shell_argv + configure, work, env, f"{port_name}: configure")
+            run(shell_argv + configure, configure_cwd, env, f"{port_name}: configure")
         elif is_native_windows_configure(target_os):
             shell = find_posix_shell(env)
             env["CONFIG_SHELL"] = path_for_msys_shell(shell)
             configure = [shell] + configure
-            run(configure, work, env, f"{port_name}: configure")
+            run(configure, configure_cwd, env, f"{port_name}: configure")
         else:
-            run(configure, work, env, f"{port_name}: configure")
+            run(configure, configure_cwd, env, f"{port_name}: configure")
+        # post_configure_patch (read from target_overrides.<os> the same way
+        # pre_configure_copy/configure_cwd above are): a list of {"file",
+        # "find", "replace"} literal (non-regex) string substitutions applied
+        # to a real ./configure *output* file, once, right after configure
+        # finishes. freetype's own generated builds/unix/unix-def.mk hits a
+        # genuine Windows-only GNU Make syntax collision (2026-08-24, found
+        # building this recipe for real): its line `TOP_DIR := $(shell cd
+        # $(TOP_DIR); pwd)` (standard autoconf-generated behavior, true on
+        # every real Unix host too, and harmless there since a real POSIX
+        # absolute path never contains a colon) unconditionally forces
+        # TOP_DIR -- and, transitively, OBJ_DIR/OBJ_BUILD/PLATFORM_DIR,
+        # every one of them derived from it -- absolute via a real `pwd`
+        # call. On this project's own native Windows PAL, `pwd` legitimately
+        # returns a real drive-letter path (`C:/Users/...`), and this
+        # project's own ported GNU Make (porting/recipes/make.json) builds
+        # deliberately for its generic POSIX code path on Windows too, NOT
+        # GNU Make's own mainline HAVE_DOS_PATHS-guarded drive-letter
+        # awareness -- an explicit, already-recorded project decision (see
+        # make.json's own notes: "Windows intentionally uses the POSIX-like
+        # musl config path rather than the upstream Win32 make path so
+        # failures expose CRT/PAL gaps"), not something this recipe should
+        # work around by changing make itself. FreeType's own (unusually,
+        # for this porting queue) hand-rolled, pre-automake build system has
+        # at least 11 separate rule-declaration lines across builds/*.mk
+        # that each combine TWO such TOP_DIR/OBJ_DIR-derived expansions on
+        # one line (confirmed via a real recursive grep across the whole
+        # builds/ tree) -- each one, once absolute, becomes real GNU Make
+        # static-pattern-rule syntax (`targets : target-pattern :
+        # prereq-patterns`, triggered by any two colons on one rule-
+        # declaration line), so Make aborts parsing the *whole file*
+        # (`target pattern contains no '%'`) on whichever one it reaches
+        # first -- not just freetype-config-style convenience rules, real
+        # object-file build rules too (freetype.mk's own $(FTSYS_OBJ)/
+        # $(FTINIT_OBJ)/etc.), so patching each broken rule line
+        # individually would be real whack-a-mole across many files for no
+        # good reason. Patching this ONE root-cause line instead (a no-op
+        # self-assignment, `TOP_DIR := $(TOP_DIR)`) keeps TOP_DIR at the top
+        # Makefile's own original, already-relative default (`TOP_DIR ?=
+        # .`) for this project's always-in-tree build (confirmed safe: no
+        # `$(MAKE) -C`/`cd ...; $(MAKE)` recursive sub-make anywhere in this
+        # tree that would need an absolute TOP_DIR to survive a directory
+        # change), which makes every one of those 11+ rule-declaration
+        # lines relative-vs-relative (a single real colon) automatically,
+        # with no other file needing a matching patch.
+        for patch_entry in os_overrides.get("post_configure_patch", build.get("post_configure_patch", [])):
+            patch_path = work / patch_entry["file"]
+            progress(f"{port_name}: post-configure patch {patch_entry['file']}")
+            patch_text = patch_path.read_text(encoding="utf-8")
+            if patch_entry["find"] not in patch_text:
+                raise SystemExit(
+                    f"{port_name}: post_configure_patch text not found in {patch_path}\n"
+                    f"looking for: {patch_entry['find']!r}"
+                )
+            patch_path.write_text(patch_text.replace(patch_entry["find"], patch_entry["replace"]), encoding="utf-8")
     if configure_only:
         progress(f"{port_name}: configure-only stop")
         return

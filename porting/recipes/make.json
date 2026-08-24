@@ -111,7 +111,10 @@
         "sources": [
           "lib/getloadavg.c",
           "src/posixos.c"
-        ]
+        ],
+        "env": {
+          "LDFLAGS": "-Wl,--stack,16777216"
+        }
       }
     }
   },
@@ -125,6 +128,7 @@
     "The Gitiles +archive gzip hash is not stable across downloads, so the recipe pins the exact commit in the URL instead of using an archive checksum.",
     "This recipe follows Android.bp's cc_binary_host source list so make can bootstrap without requiring an existing make executable.",
     "Windows intentionally uses the POSIX-like musl config path rather than the upstream Win32 make path so failures expose CRT/PAL gaps.",
-    "make is not Windows-specific: tools/crt-port-build.py's build_port() unconditionally builds and installs this port before any 'configure'-system recipe on every host (not gated on target_os), and make_env() prefers the freshly-built PORT_PREFIX/bin/make over host make via $MAKE on all three OSes. So this project's own make has already driven every real ./configure && make && make install run for zlib/libpng/libffi on both Linux and macOS, all confirmed passing by the user on real hardware -- see those recipes' own status. Kept at manual-pass (matching Windows) rather than a higher tier since no standalone make --version/$(wildcard ...)-style direct check has been separately recorded for Linux/macOS, only its indirect, repeated use as the build driver for other ports."
+    "make is not Windows-specific: tools/crt-port-build.py's build_port() unconditionally builds and installs this port before any 'configure'-system recipe on every host (not gated on target_os), and make_env() prefers the freshly-built PORT_PREFIX/bin/make over host make via $MAKE on all three OSes. So this project's own make has already driven every real ./configure && make && make install run for zlib/libpng/libffi on both Linux and macOS, all confirmed passing by the user on real hardware -- see those recipes' own status. Kept at manual-pass (matching Windows) rather than a higher tier since no standalone make --version/$(wildcard ...)-style direct check has been separately recorded for Linux/macOS, only its indirect, repeated use as the build driver for other ports.",
+    "windows target_overrides.env.LDFLAGS=-Wl,--stack,16777216 added 2026-08-24, found porting freetype: this project's own make.exe, linked with ld.lld's plain PE default stack reserve (1 MiB, the same default a real link.exe would also give an unadorned executable), segfaults completely silently (exit 139, zero stdout/stderr, deterministic and reproducible) partway through reading freetype's own unusually large, deeply cross-including hand-rolled Makefile tree (dozens of src/*/module.mk + rules.mk files, each contributing to a large combined variable/rule graph) -- every other Windows configure-based recipe this project has ported so far (curl/mbedTLS/libpng/pcre2/xz/zlib/libffi/expat/wayland) uses a far flatter, smaller Automake-style Makefile and never came close to exhausting a 1 MiB stack during GNU Make's own recursive rule/variable evaluation. Root-caused by relinking a copy of the already-built make.exe objects with a deliberately oversized 16 MiB stack reserve (`-Wl,--stack,16777216`, ld.lld/GNU-ld syntax) and confirming that copy parses and dry-runs (`make -n`) the exact same freetype Makefile tree cleanly -- a real stack-overflow, not a logic bug, and the fix (relink make itself with more stack headroom) is general: it costs nothing for every simpler recipe already verified working, and unblocks any future recipe with an equally large native Makefile graph."
   ]
 }
