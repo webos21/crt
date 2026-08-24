@@ -51,6 +51,30 @@ struct sockaddr_storage {
 #define SO_SNDBUF 7
 #define SO_ERROR 4
 
+#if defined(CRT_TARGET_OS_LINUX)
+/* SO_PEERCRED/struct ucred: real Linux UAPI values (asm-generic/socket.h,
+ * asm-generic/socket.h's own struct ucred), added 2026-08-24 for the
+ * Wayland core external build (src/wayland-os.c's own wl_os_socket_
+ * peercred(), used by a real compositor to identify which process/uid/gid
+ * connected to its listening socket -- upstream's own #elif defined(
+ * SO_PEERCRED)/#else #error "Don't know how to read ucred on this
+ * platform" leaves no portable fallback, so this constant and struct
+ * genuinely have to exist for that file to compile at all, matching this
+ * project's own porting-loop policy of filling a real, confirmed CRT/PAL
+ * gap rather than routing around it). Linux-only: macOS's own equivalent
+ * mechanism is LOCAL_PEERCRED/struct xucred (a different SOL_LOCAL-level
+ * option, not SOL_SOCKET/SO_PEERCRED), and Windows AF_UNIX sockets have no
+ * peer-credential query at all -- neither is needed by anything this
+ * project builds yet, so neither is added speculatively here. */
+#define SO_PEERCRED 17
+
+struct ucred {
+  pid_t pid;
+  uid_t uid;
+  gid_t gid;
+};
+#endif /* defined(CRT_TARGET_OS_LINUX) */
+
 #define SHUT_RD 0
 #define SHUT_WR 1
 #define SHUT_RDWR 2
@@ -59,6 +83,34 @@ struct sockaddr_storage {
 #define MSG_PEEK 0x02
 #define MSG_DONTROUTE 0x04
 #define MSG_WAITALL 0x100
+#if defined(CRT_TARGET_OS_LINUX)
+/* Real Linux values (asm-generic/socket.h -- both are non-portable Linux
+ * extensions, not defined on macOS/Windows's own send()/recv() surface
+ * the way MSG_OOB/MSG_PEEK/... above are). Added 2026-08-24 alongside
+ * MSG_CMSG_CLOEXEC/SO_PEERCRED for the same real caller (src/
+ * connection.c's own wl_connection_flush()/wl_connection_read(), the
+ * Wayland core external build's wire-protocol read/write path): MSG_
+ * NOSIGNAL suppresses SIGPIPE on a write to a peer that already closed
+ * its end (this project's own sockets otherwise behave like any other
+ * Linux socket here -- a write to a broken AF_UNIX pipe still raises
+ * SIGPIPE by default), MSG_DONTWAIT makes one send()/recv() call non-
+ * blocking without needing a separate fcntl(O_NONBLOCK) round trip (and,
+ * unlike O_NONBLOCK, without changing the fd's own blocking mode for any
+ * *other* caller sharing it). */
+#define MSG_DONTWAIT 0x40
+#define MSG_NOSIGNAL 0x4000
+#endif /* defined(CRT_TARGET_OS_LINUX) */
+#if defined(CRT_TARGET_OS_LINUX)
+/* Real Linux value (bits/socket.h): tells recvmsg() to atomically set
+ * FD_CLOEXEC on every file descriptor an SCM_RIGHTS control message
+ * hands back, closing the same fork+exec fd-leak window O_CLOEXEC/
+ * SOCK_CLOEXEC already close for the socket fd itself. Added alongside
+ * SO_PEERCRED above, for the same real caller (src/wayland-os.c's own
+ * wl_os_recvmsg_cloexec(), which already has a portable manual-fcntl
+ * fallback for hosts where this flag doesn't apply -- but still needs the
+ * macro to exist so its own `flags | MSG_CMSG_CLOEXEC` compiles). */
+#define MSG_CMSG_CLOEXEC 0x40000000
+#endif /* defined(CRT_TARGET_OS_LINUX) */
 
 int socket(int domain, int type, int protocol);
 int bind(int sockfd, const struct sockaddr* addr, socklen_t addrlen);

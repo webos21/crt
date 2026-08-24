@@ -73,6 +73,9 @@ typedef char __crt_epoll_event_size_check[sizeof(struct epoll_event) == 16 ? 1 :
 #define EPOLLONESHOT 0x40000000
 #define EPOLLET 0x80000000
 
+/* Legacy entry point, implemented in terms of epoll_create1(0) -- see
+ * libc/src/epoll.c's own comment. Prefer epoll_create1() in new code. */
+int epoll_create(int size);
 int epoll_create1(int flags);
 int epoll_ctl(int epfd, int op, int fd, struct epoll_event* event);
 int epoll_wait(int epfd, struct epoll_event* events, int maxevents, int timeout);

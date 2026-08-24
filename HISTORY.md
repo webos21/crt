@@ -96,84 +96,154 @@ substantive update.
   out-parameters. See `porting/recipes/expat.json`'s own notes and
   `docs/porting_status.md`'s new `expat` section for the full trail.
 
-- **Wayland core external build scaffolding: `crtgfx-wayland-configure`/**
-  **`-build`/`-smoke` CMake targets, mirroring Skia's own external-build**
-  **shape but for a genuinely new build system (Meson/Ninja).** New
+- **Wayland core external build: `crtgfx-wayland-configure`/`-build`/**
+  **`-smoke` CMake targets, verified end to end on Linux x64/WSL --**
+  **including a real live-compositor wire-protocol round trip.** New
   `libcrtgfx/third_party/wayland/recipe.json` (replacing the 2026-08-22
   placeholder), pinned to real Wayland core 1.26.0
   (`87cc8a8728a923fc57938faa81ba0e74f34ecdc7`, captured via `git ls-remote`
-  the same way Skia's own recipe is pinned); new `tools/fetch_wayland.py`
-  (mirrors `tools/fetch_skia.py`, trimmed -- no sparse checkout or
-  dependency sync needed for Wayland's own small repo) and
-  `tools/build_wayland.py` (mirrors `tools/build_skia.py`'s CC/AR wiring
-  through `tools/crt-cc`, but generates a Meson "native file" instead of a
-  GN args file -- host==target throughout, so no cross-file/exe_wrapper is
-  ever needed, and confirmed by reading `tools/crt-cc`'s own script body
-  end to end that, unlike Skia's GN build, this one never needs the
-  POSIX-only-PATH override GN's own `is_clang.py`/bare-`python3`-token gap
-  required on Windows). Scope decided explicitly with the user before any
-  code was written (see the AskUserQuestion exchange this session):
-  Wayland *core* only (wayland-scanner + wayland-client/-server/-cursor/
-  -egl -- 'egl' is Wayland's own dependency-free frontend shim, not real
-  EGL headers), `wayland-protocols`/xdg-shell deferred; the smoke test is
-  a wholly standalone executable (new `libcrtgfx/tests/wayland_client_
-  smoke.c`, a real `wl_display_connect()`+registry-roundtrip program,
-  gracefully treating "no compositor reachable" as a passing outcome since
-  the thing actually being verified -- the external build producing a
-  genuinely linkable library -- already happened by the time `main()`
-  starts), deliberately never touching the existing hand-rolled `libcrtgfx/
-  src/arch/linux/window_wayland.c` backend.
-  New `porting/recipes/expat.json` dependency (see the entry just above)
-  covers `wayland-scanner`'s own `dependency('expat')`; `libffi` (existing
-  port, `porting/recipes/libffi.json`) covers `src/meson.build`'s own
-  `dependency('libffi')` for both `wayland-server`/`wayland-client`.
-  `crtgfx-wayland-smoke`'s own `tools/test_crtgfx_wayland_smoke.py` (new,
-  mirrors `tools/test_crtgfx_skia_smoke.py`'s "dedicated shadow directory,
-  self-sufficient" role, but simpler -- no `CRT_USE_IMPORTED_LIBCXX`
-  reconfigure dance at all, since Wayland is plain C) resolves the smoke
-  test's own compile/link flags via `pkg-config --cflags`/`--libs --static
-  wayland-client` rather than hand-picking archives: confirmed by reading
-  the real upstream `src/meson.build` that `wayland-util`/`wayland-private`
-  (internal `static_library()`s, pulled in via `link_with:`) get bundled
-  directly into `libwayland-client.a`/`.so` at build time, while `libffi`/
-  `threads` (real external `dependency()` lookups) only ever get recorded
-  in the installed `wayland-client.pc`'s own `Libs.private`/`Requires.
-  private` -- `--static` is what correctly expands those for a consumer
-  linking the static archive from outside Meson's own build graph.
-  A real, general bug also found and fixed while preparing `libffi` (a
-  Wayland build dependency) on a real Ubuntu/WSL host for the first time
-  this session: `tools/crt-port-build.py`'s own `AR`/`RANLIB`/`STRIP`
-  defaults (`shutil.which("llvm-ranlib")` etc.) silently missed a real,
-  present LLVM install -- Debian/Ubuntu's `llvm-<N>` package installs every
-  LLVM tool unlinked under `/usr/lib/llvm-<N>/bin/`, exposing only `clang`/
-  `clang++`/... on plain PATH via `update-alternatives`, so `llvm-ranlib`
-  was never found there and this project's own fallback silently used the
-  *host's* real GNU binutils `ranlib` instead -- which then genuinely
+  the same way Skia's own recipe is pinned). Scope decided explicitly with
+  the user before any code was written: wayland-scanner + wayland-client
+  only for this pass (server/cursor/egl and wayland-protocols/xdg-shell
+  deferred -- `crtgfx-wayland-smoke`, the only current consumer, only
+  needs the client library and core `wayland.xml`); the smoke test is a
+  wholly standalone executable (new `libcrtgfx/tests/wayland_client_
+  smoke.c`), deliberately never touching the existing hand-rolled
+  `libcrtgfx/src/arch/linux/window_wayland.c` backend.
+  **The build mechanism itself changed mid-session, at the user's own
+  explicit direction**: a first version used Meson/Ninja (still compiling
+  through `tools/crt-cc`), which worked in principle but needed
+  meson/ninja/pkg-config as real host build tools this project's own
+  sandboxed tooling cannot install. After the user pointed this session at
+  a manual embedded-cross-compile guide and asked to remove that
+  dependency entirely, `tools/build_wayland.py` was rewritten to drive
+  every compile/link step directly via `tools/crt-cc` itself -- no
+  Meson/Ninja/pkg-config at all. Two real inaccuracies in the pasted guide
+  were caught against the real, pinned Wayland source before implementing
+  (wayland-scanner needs expat, not libxml2 -- confirmed via `src/
+  scanner.c`'s own unconditional `#include <expat.h>` vs. libxml2's
+  `#if HAVE_LIBXML`-gated one; `connection.c`, the wire-protocol
+  marshaling file, was missing from the guide's own compile line
+  entirely). Every generated-file step (the DTD-to-header embed, the
+  `wayland-version.h` substitution, `wayland-scanner`'s own `-c client-
+  header`/`public-code` CLI modes) replicates real upstream mechanics,
+  confirmed by fetching and reading `src/embed.py`/`src/scanner.c`/`src/
+  wayland-version.h.in`/`src/meson.build` directly from the pinned commit,
+  not guessed. Static archive only (`libwayland-client.a`, no shared
+  `.so` yet) -- avoids a real two-copies-of-this-project's-own-libc risk a
+  shared build linked into an otherwise-statically-linked smoke executable
+  would create, and has no current consumer to justify the extra SONAME-
+  versioning work yet.
+  `porting/recipes/expat.json` (new, previous entry) covers wayland-
+  scanner's own expat dependency; the existing `libffi` port covers
+  `connection.c`'s own closure-based argument marshaling. Both share one
+  `port_prefix` per preset build directory, so `tools/build_wayland.py`
+  takes a single `--port-prefix` flag and links both by explicit full
+  path -- no `.pc`/pkg-config resolution exists any more since Meson (and
+  its pkgconfig module) is gone.
+  Three real, general CRT/PAL gaps were found and fixed compiling
+  Wayland's own real sources against this project's libc for the first
+  time, none routed around:
+  1. **`SO_PEERCRED`/`struct ucred`/`MSG_CMSG_CLOEXEC`/`MSG_DONTWAIT`/
+     `MSG_NOSIGNAL`** added to `include/sys/socket.h` (Linux-only, real
+     UAPI values) -- `src/wayland-os.c`'s own `wl_os_socket_peercred()`
+     has a hard `#elif defined(SO_PEERCRED)` / `#else #error "Don't know
+     how to read ucred on this platform"` with no portable fallback (every
+     *other* optional feature that file checks -- `HAVE_ACCEPT4`, `HAVE_
+     SYS_UCRED_H`, `HAVE_BROKEN_MSG_CMSG_CLOEXEC`, `HAVE_GETTID` -- has a
+     real, already-present fallback and was simply left undefined via a
+     new, deliberately near-empty generated `config.h`, matching what a
+     genuinely minimal host's own real feature detection would answer for
+     most of them anyway); `connection.c`'s own read/write path needed the
+     three `MSG_*` flags. Verified directly: a standalone `crt-cc` compile
+     referencing all three succeeds on Linux x64/WSL.
+  2. **`ppoll()`** added to `include/poll.h`/`libc/src/poll.c` --
+     `src/wayland-client.c`'s own dispatch loop calls it directly.
+     `__crt_sys_ppoll`'s own raw syscall trampoline (both aarch64/x86_64
+     `.S` files) already existed, used internally by `poll()`'s own real
+     implementation, but was never exposed publicly. Implemented the real
+     public API on top of it, reusing `pselect()`'s own already-
+     established, already-documented `sigprocmask()`+`__crt_signal_
+     delivery_generation()` "atomic enough, no lost wakeup" technique for
+     the (here, unexercised but still real) non-NULL-sigmask case, rather
+     than widening the trampoline to the full 5-argument `ppoll(2)`
+     syscall shape purely for a sigmask this project's own first real
+     caller never actually passes.
+  3. **`epoll_create()`** added to `include/sys/epoll.h`/`libc/src/
+     epoll.c` -- `wl_os_epoll_create_cloexec()`'s own `epoll_create1`-
+     unavailable fallback path (dead code on any real modern kernel, but
+     still unconditionally compiled). Implemented in terms of the
+     already-present `epoll_create1(0)` (kernel-documented as exactly
+     equivalent for any valid `size`) rather than a second raw syscall
+     trampoline.
+  A fourth, general bug (not Wayland-specific, but found preparing
+  `libffi`, a Wayland build dependency, on a real Ubuntu/WSL host for the
+  first time this session): `tools/crt-port-build.py`'s own `AR`/`RANLIB`/
+  `STRIP` defaults silently missed a real, present LLVM install --
+  Debian/Ubuntu's `llvm-<N>` package installs every LLVM tool unlinked
+  under `/usr/lib/llvm-<N>/bin/`, exposing only `clang`/`clang++`/... on
+  PATH via `update-alternatives` -- so this project's own fallback used
+  the *host's* real GNU binutils `ranlib` instead, which then genuinely
   **segfaulted** installing `libffi.a` (`ranlib: Relink '.../sysroot/lib/
   libm.so' with '/usr/lib/x86_64-linux-gnu/libm.so.6' for IFUNC symbol
-  'ceil'` immediately followed by `Segmentation fault`), a real GNU-ranlib
-  IFUNC-relink heuristic choking on this project's own, non-host, sysroot
-  `libm.so`. Fixed generally (new `find_llvm_tool()`, used for all three of
-  AR/RANLIB/STRIP): resolve `shutil.which("clang")`, `os.path.realpath()`
-  it (since `/usr/bin/clang` is itself normally an `update-alternatives`
-  symlink), and look for the requested tool in that *same* directory --
-  confirmed for real this lands exactly where Debian/Ubuntu's LLVM package
-  actually put `llvm-ar`/`llvm-ranlib` alongside the real `clang` binary.
-  Verified: `libffi`'s own `port-test-libffi` (both static and shared,
-  including the `repeat-call-*` correctness regression tests) now passes
-  cleanly on this same Linux x64/WSL host with no crash.
-  Blocked on real end-to-end verification (`crtgfx-wayland-build`/
-  `-smoke`) as of this entry: `meson` and `pkg-config` are not installed on
-  this session's WSL host, and this project's own sandboxed tooling cannot
-  install host packages -- matching the same `sudo apt-get install`
-  hand-off pattern already established for `lld` earlier this session.
-  Everything up to that point (`porting/recipes/expat.json`, `libffi`,
-  `tools/fetch_wayland.py`/`tools/build_wayland.py`/`tools/test_crtgfx_
-  wayland_smoke.py`'s own syntax, the CMake target wiring itself) is
-  written and locally validated (`py_compile`, JSON well-formedness, a
-  real CMake reconfigure confirming all three targets register correctly),
-  but the actual Meson configure/build/install chain has not been run for
-  real yet. See `libcrtgfx/third_party/wayland/recipe.json`'s own notes.
+  'ceil'` immediately followed by `Segmentation fault`) -- a real GNU-
+  ranlib IFUNC-relink heuristic choking on this project's own, non-host,
+  sysroot `libm.so`. Fixed generally with a new `find_llvm_tool()` (used
+  for AR/RANLIB/STRIP alike): resolve `clang`'s own `os.path.realpath()`
+  and look for the requested tool in that same directory.
+  A fifth, general bug in the CMake porting-recipe machinery itself,
+  never hit before because nothing had previously combined a *nested*
+  shadow build directory with a real `port-build-*`/`port-test-*` target:
+  `CRT_BUILD_PRESET_NAME` (top-level `CMakeLists.txt`) fed `tools/
+  crt-port-build.py`'s own `--preset` flag as just `get_filename_component
+  (... NAME)` -- the basename only, correct for every real `CMakePresets.
+  json` entry (`out/<preset-name>`, always one path component deep) but
+  silently wrong for `tools/test_crtgfx_wayland_smoke.py`'s own
+  `${CMAKE_BINARY_DIR}/crtgfx-wayland-smoke` shadow directory, two levels
+  deep under `out/`: `crt-port-build.py`'s own `build_dir = root/"out"/
+  preset` reconstruction silently dropped the `linux-host-ninja-debug/`
+  prefix and looked for already-fetched port sources in the wrong
+  directory entirely. Fixed generally: compute the real relative path
+  from `${CMAKE_SOURCE_DIR}/out` to `CMAKE_BINARY_DIR` instead of just the
+  basename, falling back to the old basename-only behavior if
+  `CMAKE_BINARY_DIR` isn't under `out/` at all.
+  **Verified for real, not just "it built"**: `crtgfx-wayland-smoke`
+  fetched Wayland, built `wayland-scanner`, generated the client protocol
+  bindings, built and installed `libwayland-client.a`, then compiled and
+  ran `wayland_client_smoke` -- which found a real, live Wayland
+  compositor already reachable in this session's own WSL environment
+  (WSLg's own Weston/RDP-based one, confirmed by the real global names it
+  enumerated: `weston_rdprail_shell`, `weston_screenshooter`, plus
+  `wl_compositor`/`wl_shm`/`xdg_wm_base`/`wl_seat`/... 20 real globals
+  total) and completed a genuine `wl_registry` wire-protocol round trip
+  against it -- not merely the documented "no compositor, build/link
+  verified" headless fallback this test was designed to also accept.
+  Full local `ctest`: 104/104 on this same WSL/Linux x64 host after a
+  full rebuild (a from-scratch `cmake --build` was needed to actually
+  exercise the poll.h/socket.h/epoll.h changes -- an earlier `ctest`
+  invocation in this same investigation had silently re-run stale, already
+  -built binaries and does not count as a real regression check).
+  Separately, verifying the equivalent Windows preset directory
+  (`windows-host-ninja-debug`) surfaced -- and this session then re-fixed
+  -- a real instance of the exact "transient bootstrap-cxx-overwrites-
+  real-libc++" ordering artifact this file's own 2026-08-18 macOS entry
+  already documents: this session's own many earlier, unrelated targeted
+  `cmake --build ... --target sysroot`/`rootfs` calls (while iterating on
+  the expat/Wayland CMake wiring) had re-triggered the top-level `sysroot`
+  target's own bootstrap-`cxx`-reinstall, silently overwriting the real
+  imported `libc++.a` `crt-libcxx-sysroot` had staged there earlier --
+  `crtgfx_skia_raster_smoke`'s own link failed with the identical class of
+  `std::__1::...` undefined-symbol errors that entry describes. Fixed the
+  same documented way: re-ran `crt-libcxx-sysroot` to restage the real
+  archive, then a full default `cmake --build`, then confirmed **100%
+  tests passed, 121/121** on Windows too -- this was not a Wayland-caused
+  regression, but a real, pre-existing, self-inflicted artifact from this
+  same session's own earlier build activity in that directory, only
+  caught now because this was the first *full* rebuild attempted there
+  since.
+  See `libcrtgfx/third_party/wayland/recipe.json`'s own notes, `tools/
+  build_wayland.py`'s own docstring, and each libc change's own comment
+  for the full trail.
 
 ## 2026-08-23
 

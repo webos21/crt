@@ -256,12 +256,19 @@ if(Python3_Interpreter_FOUND)
     USES_TERMINAL
   )
 
-  # Wayland core (wayland-scanner + wayland-client/-server/-cursor/-egl),
-  # 2026-08-24: same "external build, recipe.json is the single source of
-  # truth for source pinning" shape as Skia just above, but a genuinely
-  # different build system (Meson/Ninja, not GN/Ninja) and a much smaller
-  # scope -- see libcrtgfx/third_party/wayland/recipe.json's own notes for
-  # the full "why core only, why not wired into libcrtgfx's own backend"
+  # Wayland core (wayland-scanner host tool + wayland-client), 2026-08-24:
+  # same "external build, recipe.json is the single source of truth for
+  # source pinning" shape as Skia just above, but with NO external build-
+  # orchestration tool at all -- tools/build_wayland.py drives every
+  # compile/link step directly via tools/crt-cc itself (no Meson/Ninja/
+  # pkg-config), at the user's own explicit direction, after an initial
+  # Meson-based version of this file was found to need host tooling this
+  # project's own sandboxed tooling cannot install (see HISTORY.md's
+  # 2026-08-24 entries for both the Meson attempt and the direct-compile
+  # rewrite). Scope is also narrower than originally planned: wayland-
+  # scanner + wayland-client only (no server/cursor/egl yet) -- see
+  # libcrtgfx/third_party/wayland/recipe.json's own notes for the full
+  # "why core-client-only, why not wired into libcrtgfx's own backend"
   # reasoning. Unlike Skia, there is no CRTGFX_ENABLE_WAYLAND flag and no
   # real libcrtgfx CMake target consumes this build's output at all yet --
   # crtgfx-wayland-configure/-build exist purely to drive the external
@@ -281,25 +288,24 @@ if(Python3_Interpreter_FOUND)
   set(CRTGFX_WAYLAND_EXPECTED_COMMIT "${CRTGFX_WAYLAND_RECIPE_EXPECTED_COMMIT}" CACHE STRING "Expected Wayland commit hash after fetch (default: libcrtgfx/third_party/wayland/recipe.json's own source.expected_commit)")
   set(CRTGFX_WAYLAND_FETCH_ROOT "${CMAKE_BINARY_DIR}/external/wayland" CACHE PATH "Local Wayland fetch/build root")
   set(CRTGFX_WAYLAND_ROOT "${CRTGFX_WAYLAND_FETCH_ROOT}/src" CACHE PATH "Wayland checkout root")
-  set(CRTGFX_WAYLAND_BUILD_DIR "${CRTGFX_WAYLAND_FETCH_ROOT}/build" CACHE PATH "Wayland Meson build directory")
+  set(CRTGFX_WAYLAND_BUILD_DIR "${CRTGFX_WAYLAND_FETCH_ROOT}/build" CACHE PATH "Wayland build output directory")
   set(CRTGFX_WAYLAND_INSTALL_PREFIX "${CRTGFX_WAYLAND_FETCH_ROOT}/install" CACHE PATH "Wayland install prefix")
   # The shared porting/recipes install prefix (expat.pc/libffi.pc live
   # here once port-build-expat/port-build-libffi have run) -- exactly
   # matching crt-port-build.py's own default port_prefix for THIS preset
   # build directory (out/<preset>/port-tests/install == CMAKE_BINARY_DIR/
   # port-tests/install, since CMAKE_BINARY_DIR already *is* out/<preset>).
-  set(CRTGFX_WAYLAND_PORT_PREFIX "${CMAKE_BINARY_DIR}/port-tests/install" CACHE PATH "Shared porting/recipes install prefix (expat/libffi) for the Wayland Meson build")
-  set(CRTGFX_WAYLAND_EXTRA_MESON_ARGS "" CACHE STRING "Semicolon-separated extra raw meson setup -D... args for the Wayland build")
+  set(CRTGFX_WAYLAND_PORT_PREFIX "${CMAKE_BINARY_DIR}/port-tests/install" CACHE PATH "Shared porting/recipes install prefix (expat/libffi) for the Wayland build")
 
   set(CRTGFX_WAYLAND_FETCH_ARGS)
   if(CRTGFX_WAYLAND_EXPECTED_COMMIT)
     list(APPEND CRTGFX_WAYLAND_FETCH_ARGS --expected-commit "${CRTGFX_WAYLAND_EXPECTED_COMMIT}")
   endif()
 
+  # tools/build_wayland.py (2026-08-24 rewrite) drives every compile/link
+  # step itself via tools/crt-cc directly -- no Meson/Ninja/pkg-config
+  # host-tool dependency at all, see that file's own top-of-file docstring.
   set(CRTGFX_WAYLAND_BUILD_ARGS)
-  foreach(CRTGFX_WAYLAND_EXTRA_MESON_ARG IN LISTS CRTGFX_WAYLAND_EXTRA_MESON_ARGS)
-    list(APPEND CRTGFX_WAYLAND_BUILD_ARGS --meson-arg "${CRTGFX_WAYLAND_EXTRA_MESON_ARG}")
-  endforeach()
   if(CRT_TARGET_OS STREQUAL "windows")
     # tools/build_wayland.py needs this to set CRT_MKSH_EXE/CRT_ROOTFS for
     # crt-cc.cmd -- exactly matching CRTGFX_SKIA_BUILD_ARGS's own --rootfs
@@ -330,7 +336,7 @@ if(Python3_Interpreter_FOUND)
       --configure-only
     DEPENDS port-build-expat port-build-libffi
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    COMMENT "Fetching and configuring Wayland core with the CRT toolchain (Meson setup)"
+    COMMENT "Fetching Wayland and building the wayland-scanner host tool with the CRT toolchain"
     USES_TERMINAL
   )
 
@@ -348,7 +354,7 @@ if(Python3_Interpreter_FOUND)
       ${CRTGFX_WAYLAND_BUILD_ARGS}
     DEPENDS crtgfx-wayland-configure
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    COMMENT "Building and installing Wayland core (wayland-scanner + wayland-client/-server/-cursor/-egl) with the CRT toolchain"
+    COMMENT "Building and installing Wayland core (wayland-scanner + wayland-client) with the CRT toolchain"
     USES_TERMINAL
   )
 

@@ -49,6 +49,72 @@ int poll(struct pollfd* fds, nfds_t nfds, int timeout) {
   return (int)normalize_poll_result(result);
 }
 
+#if defined(CRT_TARGET_OS_LINUX)
+/* Real ppoll(2) semantics (POSIX-ish extension, real on Linux/most BSDs):
+ * like poll(), but with a struct timespec timeout (real sub-millisecond
+ * precision, not poll()'s int-milliseconds) and an optional sigmask
+ * atomically installed for the duration of the wait.
+ *
+ * __crt_sys_ppoll's own raw syscall trampoline (libc/src/arch/linux/{
+ * aarch64,x86_64}/syscall.S) only ever takes 3 arguments (fds, nfds,
+ * timeout) -- it was written for poll()'s own internal use just above,
+ * which never needs a real sigmask. Rather than widening the trampoline
+ * itself to the real 5-argument ppoll(2) syscall shape (fds, nfds,
+ * tmo_p, sigmask, sigsetsize) purely to support a sigmask this project's
+ * own first real caller (Wayland core's src/wayland-client.c) never
+ * actually passes, this reuses the exact same sigprocmask()-based
+ * "atomic enough" technique pselect() above already establishes and
+ * documents (including its own __crt_signal_delivery_generation() lost-
+ * wakeup check) -- correct for the same reason: a signal that arrives
+ * between the real sigprocmask() unmask and the ppoll() syscall proper
+ * still gets caught by the generation check, so the only real behavioral
+ * gap versus a true single-syscall ppoll(2) is a window that can only
+ * ever be observed as "returned EINTR very slightly earlier than a
+ * literal ppoll(2) syscall would have", never a lost wakeup. */
+int ppoll(struct pollfd* fds, nfds_t nfds, const struct timespec* tmo_p, const sigset_t* sigmask) {
+  sigset_t oldmask;
+  int masked = 0;
+  long result;
+  int saved_errno;
+
+  if (fds == 0 && nfds != 0) {
+    errno = EFAULT;
+    return -1;
+  }
+
+  if (sigmask != 0) {
+    unsigned long generation_before_unmask = __crt_signal_delivery_generation();
+
+    if (sigprocmask(SIG_SETMASK, sigmask, &oldmask) != 0) {
+      return -1;
+    }
+    masked = 1;
+    if (__crt_signal_delivery_generation() != generation_before_unmask) {
+      sigprocmask(SIG_SETMASK, &oldmask, 0);
+      errno = EINTR;
+      return -1;
+    }
+  }
+
+  result = __crt_sys_ppoll(fds, (unsigned long)nfds, tmo_p);
+  saved_errno = 0;
+  if (result < 0 && result >= -4095) {
+    saved_errno = (int)-result;
+  }
+
+  if (masked) {
+    if (sigprocmask(SIG_SETMASK, &oldmask, 0) != 0 && result >= 0) {
+      return -1;
+    }
+  }
+  if (saved_errno != 0) {
+    errno = saved_errno;
+    return -1;
+  }
+  return (int)result;
+}
+#endif /* defined(CRT_TARGET_OS_LINUX) */
+
 static int select_has_fd(const fd_set* set, int fd) {
   return set != 0 && FD_ISSET(fd, set);
 }

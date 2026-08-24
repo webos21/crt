@@ -781,7 +781,42 @@ if(Python3_Interpreter_FOUND)
     endif()
   endif()
 
-  get_filename_component(CRT_BUILD_PRESET_NAME "${CMAKE_BINARY_DIR}" NAME)
+  # CRT_BUILD_PRESET_NAME feeds tools/crt-port-build.py's own --preset flag,
+  # which that script uses to independently *reconstruct*
+  # `root / "out" / preset` on its own (see its own main(), build_dir =
+  # (root / "out" / args.preset).resolve()) rather than being told
+  # CMAKE_BINARY_DIR directly. A plain get_filename_component(... NAME)
+  # (the basename only) worked for every real CMakePresets.json entry --
+  # out/<preset-name> is always exactly one path component deep there --
+  # but silently breaks for any build directory nested two or more levels
+  # under out/, which never happened before a shadow/dedicated build
+  # directory (tools/test_crtgfx_wayland_smoke.py's own
+  # ${CMAKE_BINARY_DIR}/crtgfx-wayland-smoke, first introduced 2026-08-24)
+  # combined a nested directory with a real port-build-*/port-test-*
+  # target for the first time: confirmed for real, out/linux-host-ninja-
+  # debug/crtgfx-wayland-smoke's own CRT_BUILD_PRESET_NAME came out as just
+  # "crtgfx-wayland-smoke", so crt-port-build.py's own build_dir
+  # reconstruction silently dropped the "linux-host-ninja-debug/" prefix
+  # and looked for already-fetched port sources in the wrong directory
+  # entirely ("source not found: .../out/crtgfx-wayland-smoke/port-tests/
+  # src/..." instead of the real .../out/linux-host-ninja-debug/crtgfx-
+  # wayland-smoke/port-tests/src/...", where port-fetch-<name>'s own,
+  # separate CRT_PORT_SOURCE_ROOT-based invocation of tools/fetch_ports.py
+  # -- which takes an explicit --dest path, not a --preset name -- had
+  # already put it). Fixed generally: compute the real relative path from
+  # ${CMAKE_SOURCE_DIR}/out to CMAKE_BINARY_DIR instead of just the
+  # basename, so crt-port-build.py's own root/"out"/preset join lands back
+  # on the exact same directory this configure is actually running in, at
+  # any nesting depth. Falls back to the old basename-only behavior if
+  # CMAKE_BINARY_DIR somehow isn't under ${CMAKE_SOURCE_DIR}/out at all
+  # (not a real CMakePresets.json shape, but kept as a defensive fallback
+  # rather than a hard error).
+  string(FIND "${CMAKE_BINARY_DIR}" "${CMAKE_SOURCE_DIR}/out/" CRT_BUILD_PRESET_OUT_PREFIX_POS)
+  if(CRT_BUILD_PRESET_OUT_PREFIX_POS EQUAL 0)
+    file(RELATIVE_PATH CRT_BUILD_PRESET_NAME "${CMAKE_SOURCE_DIR}/out" "${CMAKE_BINARY_DIR}")
+  else()
+    get_filename_component(CRT_BUILD_PRESET_NAME "${CMAKE_BINARY_DIR}" NAME)
+  endif()
   set(CRT_PORT_TEST_ROOT "${CMAKE_BINARY_DIR}/port-tests")
   set(CRT_PORT_SOURCE_ROOT "${CRT_PORT_TEST_ROOT}/src")
   set(CRT_PORT_DOWNLOAD_ROOT "${CRT_PORT_TEST_ROOT}/downloads")

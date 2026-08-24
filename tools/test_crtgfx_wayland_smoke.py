@@ -18,7 +18,13 @@ port-build-expat/port-build-libffi dependencies shell out to that same
 script), then build crtgfx-wayland-build (whose own CMake DEPENDS chain
 handles fetching Wayland and building expat/libffi first), then compile
 and run the standalone smoke test directly via crt-cc against the
-freshly installed libwayland-client.
+freshly installed libwayland-client. No pkg-config: tools/build_wayland.py
+no longer runs Meson at all (2026-08-24 rewrite, see that file's own
+top-of-file docstring), so there is no generated wayland-client.pc to
+query -- the static archive and its one real dependency (libffi) are
+linked by explicit, full path instead, matching the same static-link
+discipline porting/recipes/*.json's own roundtrip-static tests already
+use.
 
 Like crtgfx-skia-smoke, this drives a *separate, dedicated* nested build
 directory (never the calling directory's own -- its own cached flags are
@@ -28,7 +34,6 @@ invocations.
 
 import argparse
 import os
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -119,59 +124,28 @@ def main():
         env["CRT_MKSH_EXE"] = str(mksh)
         env["CRT_ROOTFS"] = str(build_dir / "rootfs")
 
-    # pkg-config, not a hand-picked archive/-l flag: libwayland-client.a
-    # does not embed libffi's own object code (Meson's pkgconfig module
-    # only bundles targets pulled in via link_with -- wayland-util/
-    # wayland-private, both internal static_library()s -- directly into
-    # wayland-client's own .a/.so; libffi/threads, found via
-    # dependency('libffi')/dependency('threads'), are real *external*
-    # deps recorded in the installed wayland-client.pc's own Libs.private/
-    # Requires.private instead). `pkg-config --static` is what correctly
-    # expands those, exactly the way any real external Meson/CMake/
-    # autotools consumer of an installed pkg-config-described library
-    # would resolve them -- hand-guessing the archive list here would
-    # silently drift the moment upstream's own dependency set changes.
-    # PKG_CONFIG_PATH covers both this build's own install (wayland-
-    # client.pc itself) and the shared port_prefix (libffi.pc, resolved
-    # transitively through wayland-client.pc's own Requires.private).
-    pkg_config = shutil.which("pkg-config") or shutil.which("pkgconf")
-    if not pkg_config:
-        raise SystemExit("test_crtgfx_wayland_smoke.py: pkg-config/pkgconf was not found on PATH.")
-    pkgconfig_env = env.copy()
-    port_prefix_pkgconfig = build_dir / "port-tests" / "install" / "lib" / "pkgconfig"
-    pkgconfig_env["PKG_CONFIG_PATH"] = os.pathsep.join(
-        str(p) for p in (lib_dir / "pkgconfig", port_prefix_pkgconfig)
-    )
-    pkgconfig_env.pop("PKG_CONFIG_LIBDIR", None)
-    # --static forces Libs.private/Requires.private into the output (a
-    # plain `pkg-config --libs` only emits the public Libs: line, which
-    # for a Meson-generated .pc omits private/internal deps by design --
-    # correct for a *shared*-library consumer, which resolves those at
-    # dlopen/runtime-link time instead, but this smoke test links the
-    # static archive, so every dependency has to be explicit up front).
-    cflags = subprocess.check_output(
-        [pkg_config, "--cflags", "wayland-client"], env=pkgconfig_env, text=True
-    ).split()
-    libs_static = subprocess.check_output(
-        [pkg_config, "--libs", "--static", "wayland-client"], env=pkgconfig_env, text=True
-    ).split()
+    # Full, explicit archive paths -- libwayland-client.a itself already
+    # embeds wayland-util.c/connection.c/wayland-os.c's own object code
+    # (tools/build_wayland.py compiles and archives all four together, see
+    # that file's own Phase 3), so the only *separate* archive this link
+    # still needs is libffi.a (connection.c's own closure-based argument
+    # marshaling) -- matching porting/recipes/*.json's own roundtrip-static
+    # test convention (a literal @PORT_PREFIX@/lib/lib*.a path, never a
+    # bare -l flag) for the same reason: no pkg-config/.pc file exists to
+    # resolve this from, and a bare -lwayland-client/-lffi search would be
+    # fragile without one.
+    port_prefix_lib = build_dir / "port-tests" / "install" / "lib"
+    static_archive = lib_dir / "libwayland-client.a"
+    libffi_archive = port_prefix_lib / "libffi.a"
+    for required in (static_archive, libffi_archive):
+        if not required.is_file():
+            raise SystemExit(f"expected static library missing: {required}")
 
-    compile_command = [str(crt_cc), f"-I{include_dir}"] + cflags + [str(source)] + libs_static + ["-o", str(binary)]
-
-    # A dynamic loader search path so the freshly-built, freshly-linked
-    # libwayland-client.so (installed under a non-standard, project-owned
-    # prefix -- never the host system's own library search path) would be
-    # found at run time -- kept even though this smoke test links the
-    # static archive above, since a future variant of this script (or a
-    # copy-pasted invocation) may reasonably want the shared build
-    # instead, matching tools/crt-port-build.py's own port_test_env()
-    # helper for the identical reason.
-    if args.target_os == "linux":
-        env["LD_LIBRARY_PATH"] = f"{lib_dir}{os.pathsep}{env.get('LD_LIBRARY_PATH', '')}"
-    elif args.target_os == "macos":
-        env["DYLD_LIBRARY_PATH"] = f"{lib_dir}{os.pathsep}{env.get('DYLD_LIBRARY_PATH', '')}"
-    elif args.target_os == "windows":
-        env["PATH"] = f"{lib_dir}{os.pathsep}{env.get('PATH', '')}"
+    compile_command = [
+        str(crt_cc), f"-I{include_dir}", str(source),
+        str(static_archive), str(libffi_archive),
+        "-o", str(binary),
+    ]
 
     run(compile_command, env=env)
     run([str(binary)], cwd=str(root), env=env)

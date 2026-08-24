@@ -1,33 +1,48 @@
 #!/usr/bin/env python3
-"""Build Wayland core (wayland-scanner + wayland-client/-server/-cursor/-egl)
-with the CRT wrapper toolchain, via Meson/Ninja.
+"""Build Wayland core client-side (wayland-scanner host tool +
+wayland-client) directly via tools/crt-cc, with NO Meson/Ninja/pkg-config
+host-tool dependency at all -- every compile/link step below is a plain,
+explicit subprocess call this script itself drives, mirroring the manual
+embedded-cross-compile recipe the user pointed this session at (scanner
+built and run on the host, the real library cross-compiled against a
+pre-built libffi/libexpat), adapted onto this project's own tools/crt-cc
+wrapper and its own already-ported expat/libffi.
 
-Mirrors tools/build_skia.py's own role -- an external, non-CMake build
-driven by a project-owned Python script, whose CC/CXX/AR wiring points at
-tools/crt-cc et al so the produced binaries genuinely link against this
-project's own libc/libm/libdl, not a host toolchain's -- but for a
-different real build system. Meson generates a "native file" ([binaries]
-c = ..., pkg-config = ...) rather than GN's own --args file. This project's
-build is always host==target (Meson's own "native", non-cross case: the
-machine that runs `meson setup`/`ninja` is the same OS/arch the produced
-binaries target, exactly like every CMake preset in this project), so no
-[host_machine]/[binaries] cross-file section or exe_wrapper is ever needed
--- wayland-scanner, itself built by this exact script, is a real, natively
-executable binary on the same host, and Meson runs it directly mid-build
-(to generate wayland-client-protocol.c/.h) the same way it would any other
-native build tool.
+This REPLACES an earlier Meson-based version of this file (2026-08-24):
+that version worked in principle (the compiler was already tools/crt-cc,
+same as here) but needed meson/ninja/pkg-config as real host build tools,
+which this project's own sandboxed tooling cannot install and which real
+embedded target environments often cannot host either. Removing the
+orchestration layer entirely -- not just working around its absence --
+matches this project's own stated "own the toolchain" philosophy more
+directly: the only things this script depends on that aren't project-
+owned are the C compiler itself (already true everywhere else in this
+project) and this project's own already-built expat/libffi ports.
 
-Unlike Skia's GN build (C++, needs this project's own imported libc++),
-Wayland is plain C (`project('wayland', 'c', ...)` in its own meson.build)
--- there is no CRT_CXX_STANDARD_INCLUDE_FLAGS/imported-libc++ requirement
-here at all.
+Scope, narrowed further from the original core-wide plan (recipe.json's
+own notes): wayland-scanner + wayland-client ONLY for this pass, no
+wayland-server/-cursor/-egl yet -- crtgfx-wayland-smoke (the only current
+consumer) only needs the client library. Static archive only (no shared
+.so this pass): avoids the two-copies-of-this-project's-own-libc risk a
+shared libwayland-client.so linked against this project's own shared libc
+would create for a smoke-test executable that otherwise links statically,
+and a real .so needs its own SONAME-versioning ceremony matching this
+project's own tools/crt-port-build.py::build_amalgamation_shared_library()
+convention -- deferred until something actually needs it.
+
+Every generated-file step below (wayland.dtd.h, wayland-version.h,
+wayland-*-protocol*.h/.c) replicates real upstream Wayland 1.26.0
+mechanics exactly (confirmed by fetching and reading the real src/embed.py,
+src/scanner.c, src/wayland-version.h.in, src/meson.build from
+libcrtgfx/third_party/wayland/recipe.json's own pinned commit) rather than
+inventing an equivalent -- see each generator function's own docstring for
+what it was checked against.
 """
 
 import argparse
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 
@@ -37,14 +52,7 @@ def run(args, cwd=None, env=None):
 
 
 def windows_short_path(path):
-    """Convert an absolute Windows path to its 8.3 short-name form.
-
-    Exactly matches tools/build_skia.py's own windows_short_path() (same
-    GetShortPathNameW win32 call, same reason: mksh's own exec()/command
-    lookup cannot run a program whose path contains a space) -- duplicated
-    here rather than imported, matching that file's own stated convention
-    that none of this project's tools/*.py scripts share a common helper
-    module today."""
+    """Exactly matches tools/build_skia.py's own windows_short_path()."""
     if os.name != "nt":
         return str(path)
     import ctypes
@@ -61,13 +69,7 @@ def windows_short_path(path):
 
 
 def normalize_target_arch(target_arch_arg):
-    """Exactly matches tools/build_skia.py's own normalize_target_arch():
-    resolves an explicit --target-arch (which libcrtgfx/CMakeLists.txt
-    passes straight from a CMAKE_SYSTEM_PROCESSOR-shaped CMake variable,
-    e.g. Windows' own "AMD64"/"ARM64" spelling) to the GNU-triple spelling
-    ("x86_64"/"aarch64") tools/crt-cc's own --target=${arch}-w64-mingw32
-    construction requires. "host" passes through unchanged: the sentinel
-    for "no explicit arch, let CRT_TARGET_ARCH stay unset"."""
+    """Exactly matches tools/build_skia.py's own normalize_target_arch()."""
     if target_arch_arg == "host":
         return target_arch_arg
     arch = target_arch_arg.lower()
@@ -81,88 +83,119 @@ def normalize_target_arch(target_arch_arg):
     )
 
 
-def meson_ini_string(value):
-    escaped = str(value).replace("\\", "\\\\").replace("'", "\\'")
-    return f"'{escaped}'"
+def find_llvm_tool(name):
+    """Exactly matches tools/crt-port-build.py's own find_llvm_tool():
+    a plain shutil.which(name) can miss a real, present LLVM install
+    (confirmed for real on Debian/Ubuntu, where llvm-ar/llvm-ranlib are
+    never symlinked onto PATH even though clang is) -- fall back to
+    looking in the real clang binary's own resolved directory. Duplicated
+    here rather than imported, matching this project's own tools/*.py
+    convention of not sharing a common helper module."""
+    found = shutil.which(name)
+    if found:
+        return found
+    clang = shutil.which("clang")
+    if not clang:
+        return None
+    candidate = Path(os.path.realpath(clang)).parent / name
+    return str(candidate) if candidate.is_file() else None
 
 
-def meson_ini_array(values):
-    return "[" + ", ".join(meson_ini_string(value) for value in values) + "]"
+def generate_dtd_header(dtd_path, dest_path, ident="wayland_dtd"):
+    """Replicates real upstream src/embed.py's own output byte for byte
+    (fetched and read directly from libcrtgfx/third_party/wayland/
+    recipe.json's own pinned commit): a `static const char <ident>[] = {
+    0x.., 0x.., ... };` byte-array literal of the DTD file's raw bytes.
+    src/scanner.c #includes this unconditionally (`#include
+    "wayland.dtd.h"`) even though the array is only ever *read* inside a
+    `#if HAVE_LIBXML` block -- so the header must exist and declare the
+    array regardless of whether DTD validation is actually compiled in."""
+    data = dtd_path.read_bytes()
+    lines = [f"static const char {ident}[] = {{", "\t"]
+    parts = [f"0x{byte:02x}, " for byte in data]
+    lines.append("".join(parts))
+    lines.append("\n};\n")
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    dest_path.write_text("".join(lines), encoding="utf-8")
 
 
-def write_native_file(path, binaries, properties):
-    """Meson "native file" (--native-file): tells `meson setup` which real
-    binaries to use for this native (non-cross) build, overriding its own
-    default PATH-search-based auto-detection. [binaries] values are always
-    written as a one-element array (`c = ['/abs/path']`), matching Meson's
-    own documented convention for a binary entry that might carry fixed
-    leading arguments (e.g. `['ccache', 'gcc']») -- a bare string also
-    works for the plain single-executable case this file always uses, but
-    the array form is what Meson's own docs and every real-world native/
-    cross file example use, so it is used here for the same reason
-    tools/build_skia.py's own default_gn_args() writes real GN list/string
-    literals rather than relying on looser forms GN might also tolerate."""
-    lines = ["[binaries]"]
-    for key, value in binaries.items():
-        lines.append(f"{key} = {meson_ini_array([value])}")
-    if properties:
-        lines.append("")
-        lines.append("[properties]")
-        for key, value in properties.items():
-            lines.append(f"{key} = {meson_ini_string(value)}")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+def generate_version_header(dest_path, major, minor, micro):
+    """Replicates real upstream src/wayland-version.h.in's own @VAR@
+    substitution (the same four tokens Meson's own configuration_data()
+    fills in from meson.project_version()) directly, without needing
+    Meson itself to do it."""
+    text = f"""#ifndef WAYLAND_VERSION_H
+#define WAYLAND_VERSION_H
+
+#define WAYLAND_VERSION_MAJOR {major}
+#define WAYLAND_VERSION_MINOR {minor}
+#define WAYLAND_VERSION_MICRO {micro}
+#define WAYLAND_VERSION "{major}.{minor}.{micro}"
+
+#endif
+"""
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    dest_path.write_text(text, encoding="utf-8")
 
 
-def default_meson_options():
-    """-D option values for `meson setup`, matching this recipe's own
-    documented core-only scope (libcrtgfx/third_party/wayland/recipe.json's
-    own notes): scanner+libraries on (wayland-scanner, wayland-client/
-    -server/-cursor/-egl -- egl here is Wayland's own thin, dependency-free
-    frontend shim, not real EGL headers, see that meson.build's own
-    contents), tests/documentation/dtd_validation off (no test-runner
-    dependencies, no Doxygen/xmlto/xsltproc, no libxml2 -- none of which
-    this project has ported and none of which this build actually needs:
-    dtd_validation only validates the protocol DTD as a build-time nicety,
-    it does not affect what gets built)."""
-    return {
-        "scanner": "true",
-        "libraries": "true",
-        "tests": "false",
-        "documentation": "false",
-        "dtd_validation": "false",
-        # both, not Meson's own default (shared): crtgfx-wayland-smoke
-        # links a plain static crt-cc executable against libwayland-client
-        # directly (see libcrtgfx/tests/wayland_client_smoke.c), and a
-        # future consumer of this build may reasonably want either shape
-        # -- building both up front avoids a second, separate reconfigure
-        # later just to add the one this recipe didn't happen to pick.
-        "default_library": "both",
-    }
+def generate_config_header(dest_path):
+    """src/connection.c and src/wayland-os.c both `#include "../config.h"`
+    and check a handful of HAVE_* feature macros from it (confirmed by
+    grepping the real fetched sources): HAVE_ACCEPT4, HAVE_SYS_UCRED_H,
+    HAVE_XUCRED_CR_PID, HAVE_BROKEN_MSG_CMSG_CLOEXEC, HAVE_GETTID. Every
+    one of them gates an *optional* code path with a real, already-present
+    portable fallback when left undefined (accept()+fcntl() instead of
+    accept4(), the SO_PEERCRED/struct ucred branch instead of FreeBSD's
+    xucred one, the normal MSG_CMSG_CLOEXEC path instead of the FreeBSD-
+    only broken-kernel workaround, an unlabeled thread id in one debug
+    string instead of a real tid) -- confirmed directly by reading each
+    call site, not assumed. Leaving all of them undefined (a header with
+    no #defines at all) is therefore a real, correct, upstream-sanctioned
+    configuration, not a workaround -- the same conservative "don't have
+    it" answer a genuinely minimal/embedded host's own real Meson run
+    would give for most of these anyway. SO_PEERCRED/struct ucred/
+    MSG_CMSG_CLOEXEC themselves (the one branch with no such optional
+    fallback -- src/wayland-os.c's own #else #error "Don't know how to
+    read ucred on this platform" leaves no portable path at all) were
+    instead added directly to this project's own include/sys/socket.h
+    (2026-08-24), the real CRT/PAL surface Bionic-style ports are
+    supposed to gain when a real gap like this is found."""
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    dest_path.write_text(
+        "/* Deliberately empty -- see tools/build_wayland.py's own\n"
+        " * generate_config_header() docstring for why every HAVE_*\n"
+        " * feature macro connection.c/wayland-os.c check is safe to\n"
+        " * leave undefined here. */\n",
+        encoding="utf-8",
+    )
 
 
-def install_artifacts_note(install_prefix):
-    print(f"Wayland installed into {install_prefix}")
+def compile_object(crt_cc, source, obj_path, include_dirs, defines, env, cwd):
+    obj_path.parent.mkdir(parents=True, exist_ok=True)
+    command = [str(crt_cc)]
+    for include_dir in include_dirs:
+        command.append(f"-I{include_dir}")
+    for define in defines:
+        command.append(f"-D{define}")
+    command += ["-c", str(source), "-o", str(obj_path)]
+    run(command, cwd=cwd, env=env)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Build Wayland core with the CRT wrapper toolchain.")
+    parser = argparse.ArgumentParser(description="Build Wayland core (scanner + client) directly via tools/crt-cc.")
     parser.add_argument("--root", required=True, help="CRT repository root")
     parser.add_argument("--source", required=True, help="Wayland source checkout")
-    parser.add_argument("--build-dir", required=True, help="Wayland Meson output directory")
+    parser.add_argument("--build-dir", required=True, help="Wayland build output directory")
     parser.add_argument("--install-prefix", required=True, help="Wayland install prefix used by libcrtgfx")
     parser.add_argument("--sysroot", required=True, help="CRT sysroot")
     parser.add_argument("--rootfs", default="", help="CRT rootfs (Windows only, for mksh.exe)")
     parser.add_argument("--port-prefix", required=True,
                          help="shared porting/recipes install prefix (out/<preset>/port-tests/install) "
-                              "holding expat.pc/libffi.pc under lib/pkgconfig")
+                              "holding expat/libffi headers+libs")
     parser.add_argument("--target-os", required=True, choices=["linux", "macos", "windows"])
     parser.add_argument("--target-arch", default="host")
-    parser.add_argument("--meson", default="", help="path to meson; defaults to PATH")
-    parser.add_argument("--ninja", default="", help="path to ninja; defaults to PATH")
-    parser.add_argument("--pkg-config", default="", help="path to pkg-config/pkgconf; defaults to PATH")
-    parser.add_argument("--meson-arg", action="append", default=[], help="extra raw `meson setup` -D... arg")
-    parser.add_argument("--configure-only", action="store_true")
+    parser.add_argument("--configure-only", action="store_true",
+                         help="stop after generating headers/building wayland-scanner (no wayland-client build)")
     args = parser.parse_args()
     args.target_arch = normalize_target_arch(args.target_arch)
 
@@ -172,35 +205,14 @@ def main():
     install_prefix = Path(args.install_prefix).resolve()
     sysroot = Path(args.sysroot).resolve()
     port_prefix = Path(args.port_prefix).resolve()
+    build_dir.mkdir(parents=True, exist_ok=True)
 
-    meson = args.meson or shutil.which("meson")
-    if not meson:
-        raise SystemExit(
-            "build_wayland.py: meson was not found on PATH. Install it "
-            "(e.g. `sudo apt-get install meson` on Debian/Ubuntu) and retry -- "
-            "this project's own sandboxed tooling cannot install host packages "
-            "for you."
-        )
-    ninja = args.ninja or shutil.which("ninja")
-    if not ninja:
-        raise SystemExit("build_wayland.py: ninja was not found on PATH.")
-    pkg_config = args.pkg_config or shutil.which("pkg-config") or shutil.which("pkgconf")
-    if not pkg_config:
-        raise SystemExit(
-            "build_wayland.py: pkg-config/pkgconf was not found on PATH. Install "
-            "it (e.g. `sudo apt-get install pkg-config` on Debian/Ubuntu) and "
-            "retry -- Meson needs a real pkg-config binary to resolve "
-            "dependency('expat')/dependency('libffi') against --port-prefix."
-        )
-
-    # Absolute paths resolved via *this* process's own, unrestricted PATH,
-    # before any Windows-specific env rewriting below -- matches
-    # tools/build_skia.py's own CRT_HOST_CC/CRT_HOST_AR resolution ordering
-    # exactly, for the identical reason (a later, narrowed PATH would no
-    # longer find these).
     cmd_suffix = ".cmd" if args.target_os == "windows" else ""
     crt_cc = root / "tools" / f"crt-cc{cmd_suffix}"
-    ar = shutil.which("llvm-ar") or shutil.which("ar") or "ar"
+    exe_suffix = ".exe" if args.target_os == "windows" else ""
+
+    ar = find_llvm_tool("llvm-ar") or shutil.which("ar") or "ar"
+    ranlib = find_llvm_tool("llvm-ranlib") or shutil.which("ranlib") or "ranlib"
 
     env = os.environ.copy()
     env["CRT_SYSROOT"] = str(sysroot)
@@ -209,87 +221,137 @@ def main():
         env["CRT_TARGET_ARCH"] = args.target_arch
 
     if args.target_os == "windows":
-        # crt-cc.cmd (a plain, directly-executable native-Windows launcher
-        # for tools/crt-cc, a #!/bin/sh script CreateProcess cannot run
-        # directly) needs CRT_MKSH_EXE set to the *rootfs* copy of
-        # mksh.exe -- exactly matching tools/build_skia.py's own handling,
-        # see that file's own comment for why the rootfs copy specifically
-        # (toybox applet aliases live there, not in the bare sysroot).
+        # Exactly matches tools/build_skia.py's own Windows setup: crt-cc.cmd
+        # needs CRT_MKSH_EXE/CRT_ROOTFS set explicitly (see that file's own
+        # comments for the full "why"). Unlike the Meson-based predecessor
+        # of this file, PATH does not need narrowing to a POSIX-only form --
+        # this script never asks anything else (a build-orchestration tool)
+        # to search PATH at all; every tool this script itself invokes
+        # (crt_cc, ar, ranlib) is resolved to an absolute path up front.
         if not args.rootfs:
             raise SystemExit("--rootfs is required on Windows (its mksh.exe launches crt-cc.cmd)")
         mksh = Path(args.rootfs).resolve() / "system" / "bin" / "mksh.exe"
         if not mksh.is_file():
             raise SystemExit(f"CRT mksh is missing from the rootfs: {mksh} (build the \"rootfs\" target first)")
         env["CRT_MKSH_EXE"] = str(mksh)
-        # CRT_ROOTFS pre-seeded ahead of time for the identical reason
-        # tools/build_skia.py's own main() already documents in detail:
-        # libc/src/env.c's __crt_rootfs_bootstrap() auto-detects it from
-        # argv[0] and unconditionally chdir("/")s whenever it is *not*
-        # already set, which would otherwise silently break every relative
-        # source-file path Ninja's own generated build.ninja passes to
-        # crt-cc.cmd (Ninja invokes build commands with cwd already set to
-        # the build directory, matching `ninja -C <build-dir>` below).
         env["CRT_ROOTFS"] = str(Path(args.rootfs).resolve())
-        # Unlike tools/build_skia.py's own GN-driven build, this script
-        # does NOT need to narrow PATH to a POSIX-only rootfs-relative form
-        # here: confirmed for real by reading tools/crt-cc's own script
-        # body end to end -- once CRT_HOST_CC/CRT_TARGET_OS/CRT_TARGET_ARCH
-        # are all set explicitly (as they are here), it performs zero
-        # bare-name PATH lookups of its own (the one conditional PATH-
-        # dependent path, a bare `uname` call, only runs when
-        # CRT_TARGET_OS/CRT_TARGET_ARCH are left unset). Leaving PATH at
-        # its real, normal Windows value throughout means `meson`/`ninja`/
-        # `pkg-config` -- all genuine host tools, unlike crt-cc's own
-        # target compiler -- keep resolving normally too, without needing
-        # GN/build_skia.py's own separate is_clang.py/"python3"-token
-        # patching dance (which existed specifically to route around a
-        # PATH-format conflict this script's simpler compiler-invocation
-        # shape never creates in the first place).
         host_cc = shutil.which("clang")
         if host_cc:
             env["CRT_HOST_CC"] = windows_short_path(host_cc).replace("\\", "/")
         host_ar = shutil.which("llvm-ar")
         if host_ar:
             ar = host_ar
+        host_ranlib = shutil.which("llvm-ranlib")
+        if host_ranlib:
+            ranlib = host_ranlib
 
-    native_binaries = {
-        "c": str(crt_cc),
-        "ar": ar,
-        "pkg-config": pkg_config,
-    }
-    native_file = build_dir / "crt-native.ini"
-    write_native_file(native_file, native_binaries, properties={})
+    src = source / "src"
+    generated = build_dir / "generated"
+    obj_dir = build_dir / "obj"
+    generated.mkdir(parents=True, exist_ok=True)
+    obj_dir.mkdir(parents=True, exist_ok=True)
 
-    pkgconfig_libdir = str(port_prefix / "lib" / "pkgconfig")
-    env["PKG_CONFIG_PATH"] = pkgconfig_libdir
-    env["PKG_CONFIG_LIBDIR"] = pkgconfig_libdir
+    # --- Generated headers (real upstream mechanics, replicated directly -- see each function's own docstring) ---
+    generate_version_header(generated / "wayland-version.h", 1, 26, 0)
+    generate_dtd_header(source / "protocol" / "wayland.dtd", generated / "wayland.dtd.h")
+    generate_config_header(build_dir / "config.h")
 
-    meson_options = default_meson_options()
-    setup_cmd = [
-        meson, "setup",
-        "--native-file", str(native_file),
-        "--prefix", str(install_prefix),
-    ]
-    for key, value in meson_options.items():
-        setup_cmd += [f"-D{key}={value}"]
-    setup_cmd += args.meson_arg
-    setup_cmd += [str(build_dir), str(source)]
+    common_includes = [src, generated, build_dir]
+    posix_define = "_POSIX_C_SOURCE=200809L"
 
-    if (build_dir / "build.ninja").exists():
-        # Meson refuses to `setup` into an already-configured build
-        # directory a second time without --reconfigure -- reconfigure
-        # in place instead of wiping the directory, matching this
-        # project's own established "kept and reused incrementally across
-        # invocations" pattern for other shadow/dedicated build directories
-        # (see tools/test_crtgfx_skia_smoke.py's own docstring).
-        setup_cmd.insert(2, "--reconfigure")
-    run(setup_cmd, cwd=root, env=env)
+    # --- Phase 1: wayland-scanner, a host tool -- but still built via
+    # tools/crt-cc against this project's own expat, exactly like every
+    # other executable this project's toolchain produces (host==target
+    # throughout this whole project, so the result is directly runnable
+    # on the same machine that built it -- no separate "host compiler"
+    # is needed the way a real embedded cross-build's own guide would use
+    # one). ---
+    expat_include = port_prefix / "include"
+    expat_lib = port_prefix / "lib" / "libexpat.a"
+    if not expat_lib.is_file():
+        raise SystemExit(f"expected expat static library missing: {expat_lib} (build port-build-expat first)")
+
+    scanner_objs = []
+    for source_file in ("scanner.c", "wayland-util.c"):
+        obj = obj_dir / f"{source_file}.o"
+        compile_object(
+            crt_cc, src / source_file, obj,
+            include_dirs=common_includes + [expat_include],
+            defines=[posix_define],
+            env=env, cwd=root,
+        )
+        scanner_objs.append(obj)
+
+    scanner_bin = build_dir / f"wayland-scanner{exe_suffix}"
+    run([str(crt_cc)] + [str(o) for o in scanner_objs] + [str(expat_lib), "-o", str(scanner_bin)], cwd=root, env=env)
+
     if args.configure_only:
+        print(f"wayland-scanner built: {scanner_bin}")
         return
 
-    run([ninja, "-C", str(build_dir)], cwd=root, env=env)
-    run([ninja, "-C", str(build_dir), "install"], cwd=root, env=env)
-    install_artifacts_note(install_prefix)
+    # --- Phase 2: run wayland-scanner to generate the client-side protocol
+    # bindings from the real core protocol/wayland.xml (no wayland-
+    # protocols/xdg-shell needed for this -- core wayland.xml alone is
+    # what libwayland-client.c itself needs to build; see recipe.json's
+    # own notes on why wayland-protocols is deferred). ---
+    protocol_xml = source / "protocol" / "wayland.xml"
+    client_protocol_core_h = generated / "wayland-client-protocol-core.h"
+    client_protocol_h = generated / "wayland-client-protocol.h"
+    protocol_c = generated / "wayland-protocol.c"
+
+    run([str(scanner_bin), "-c", "client-header", str(protocol_xml), str(client_protocol_core_h)], cwd=root, env=env)
+    run([str(scanner_bin), "client-header", str(protocol_xml), str(client_protocol_h)], cwd=root, env=env)
+    run([str(scanner_bin), "public-code", str(protocol_xml), str(protocol_c)], cwd=root, env=env)
+
+    # --- Phase 3: compile wayland-client's own real sources against
+    # this project's own expat is not needed here (only the scanner needs
+    # it) -- libffi is, for connection.c's own closure-based argument
+    # marshaling. wayland-util.c/wayland-os.c are shared with wayland-
+    # server (deferred, see this file's own top-of-file scope note) but
+    # still required here: wayland-client.c calls into both directly. ---
+    libffi_include = port_prefix / "include"
+    libffi_lib = port_prefix / "lib" / "libffi.a"
+    if not libffi_lib.is_file():
+        raise SystemExit(f"expected libffi static library missing: {libffi_lib} (build port-build-libffi first)")
+
+    client_sources = [
+        src / "wayland-client.c",
+        src / "connection.c",
+        src / "wayland-os.c",
+        src / "wayland-util.c",
+        protocol_c,
+    ]
+    client_objs = []
+    for source_file in client_sources:
+        obj = obj_dir / f"{source_file.name}.client.o"
+        compile_object(
+            crt_cc, source_file, obj,
+            include_dirs=common_includes + [libffi_include],
+            defines=[posix_define],
+            env=env, cwd=root,
+        )
+        client_objs.append(obj)
+
+    lib_dir = install_prefix / "lib"
+    include_dir = install_prefix / "include"
+    lib_dir.mkdir(parents=True, exist_ok=True)
+    include_dir.mkdir(parents=True, exist_ok=True)
+
+    static_archive = lib_dir / "libwayland-client.a"
+    run([ar, "rcs", str(static_archive)] + [str(o) for o in client_objs], cwd=root, env=env)
+    run([ranlib, str(static_archive)], cwd=root, env=env)
+
+    for header in ("wayland-util.h", "wayland-client.h", "wayland-client-core.h"):
+        shutil.copy2(src / header, include_dir / header)
+    shutil.copy2(client_protocol_h, include_dir / "wayland-client-protocol.h")
+    shutil.copy2(client_protocol_core_h, include_dir / "wayland-client-protocol-core.h")
+    # wayland-client-core.h itself #includes "wayland-version.h" -- a
+    # consumer compiling against the installed headers alone (not this
+    # build's own -I.../generated) needs it installed alongside the
+    # others, not just left sitting in the build directory.
+    shutil.copy2(generated / "wayland-version.h", include_dir / "wayland-version.h")
+
+    print(f"Wayland client installed into {install_prefix}")
 
 
 if __name__ == "__main__":
