@@ -189,6 +189,12 @@ def main():
     parser.add_argument("--install-prefix", required=True, help="Wayland install prefix used by libcrtgfx")
     parser.add_argument("--sysroot", required=True, help="CRT sysroot")
     parser.add_argument("--rootfs", default="", help="CRT rootfs (Windows only, for mksh.exe)")
+    parser.add_argument("--windows-sdk-libpath", default="",
+                         help="Windows only: directory containing kernel32.lib/synchronization.lib "
+                              "(the calling CMake configure's own ${CRT_WINDOWS_KERNEL32_LIB} directory) "
+                              "-- needed because this script links wayland-scanner.exe directly via "
+                              "tools/crt-cc, bypassing the target_link_libraries(${CRT_WINDOWS_SYSTEM_LIBS}) "
+                              "path every regular CMake-built Windows executable in this project already uses")
     parser.add_argument("--port-prefix", required=True,
                          help="shared porting/recipes install prefix (out/<preset>/port-tests/install) "
                               "holding expat/libffi headers+libs")
@@ -223,11 +229,9 @@ def main():
     if args.target_os == "windows":
         # Exactly matches tools/build_skia.py's own Windows setup: crt-cc.cmd
         # needs CRT_MKSH_EXE/CRT_ROOTFS set explicitly (see that file's own
-        # comments for the full "why"). Unlike the Meson-based predecessor
-        # of this file, PATH does not need narrowing to a POSIX-only form --
-        # this script never asks anything else (a build-orchestration tool)
-        # to search PATH at all; every tool this script itself invokes
-        # (crt_cc, ar, ranlib) is resolved to an absolute path up front.
+        # comments for the full "why"). CRT_HOST_CC/host_ar/host_ranlib are
+        # all resolved via *this* process's own, unrestricted PATH first
+        # (below), before env["PATH"] gets narrowed.
         if not args.rootfs:
             raise SystemExit("--rootfs is required on Windows (its mksh.exe launches crt-cc.cmd)")
         mksh = Path(args.rootfs).resolve() / "system" / "bin" / "mksh.exe"
@@ -244,6 +248,48 @@ def main():
         host_ranlib = shutil.which("llvm-ranlib")
         if host_ranlib:
             ranlib = host_ranlib
+        # CORRECTED (2026-08-24): an earlier version of this file's own
+        # comment here claimed PATH never needs narrowing on Windows,
+        # reasoning that tools/crt-cc's own script never does a bare-name
+        # PATH lookup once CRT_HOST_CC/CRT_TARGET_OS/CRT_TARGET_ARCH are
+        # set. Confirmed wrong for real, running this exact script for the
+        # first time on Windows: crt-cc's own script body calls the plain
+        # shell command `printf` (a toybox applet, e.g. windows_host_arg()'s
+        # `printf '%s\n' "$1"`, and the user_args-building loop's `$(printf
+        # '%s\n' "$arg")` -- unconditional, on every single invocation) and
+        # `sed` (inside windows_host_arg()'s own rootfs-path rewriting) via
+        # mksh's own bare-name PATH search -- `crt-cc[71]: printf:
+        # inaccessible or not found`, the compiler wrapper itself failing
+        # before clang is ever reached. mksh's own PATH search only works
+        # against the deliberate ":"-separated, rootfs-relative POSIX form
+        # (see tools/build_skia.py's own matching comment for the fuller
+        # "why"), so it has to be set here exactly like Skia's own GN build
+        # needs it -- this script is not actually exempt from that
+        # requirement after all. Every OTHER subprocess call this script
+        # makes (ar/ranlib -- absolute host paths, resolved above, invoked
+        # directly by Python's own subprocess without going through mksh at
+        # all; the built wayland-scanner.exe itself -- a plain native
+        # executable with no PATH dependency of its own) is unaffected by
+        # this narrowing, so it is safe to apply for this whole script's
+        # env, not just the crt-cc calls specifically.
+        env["PATH"] = "/system/bin:/bin:/usr/bin"
+        # tools/crt-cc's own Windows link branch falls back to bare
+        # `-Wl,kernel32.lib -Wl,synchronization.lib` (resolved via ld.lld's
+        # own default library search, which does not include the real
+        # Windows SDK lib directory) whenever CRT_WINDOWS_SYSTEM_LIBS is
+        # unset -- confirmed for real: `ld.lld: error: could not open
+        # 'kernel32.lib'` linking wayland-scanner.exe, the first time this
+        # script tried to link a real Windows executable directly via
+        # crt-cc at all (every other Windows executable in this project
+        # links through regular CMake's own target_link_libraries(
+        # ${CRT_WINDOWS_SYSTEM_LIBS}), which passes full absolute paths
+        # and never hits this fallback; tools/build_skia.py never links an
+        # executable at all, only libskia.a, so it never hit this either).
+        # CRT_WINDOWS_SDK_LIBPATH (not CRT_WINDOWS_SYSTEM_LIBS itself) is
+        # what crt-cc's own script actually reads to fix this -- see its
+        # own `-Wl,/libpath:${CRT_WINDOWS_SDK_LIBPATH}` handling.
+        if args.windows_sdk_libpath:
+            env["CRT_WINDOWS_SDK_LIBPATH"] = args.windows_sdk_libpath
 
     src = source / "src"
     generated = build_dir / "generated"

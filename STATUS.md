@@ -20,38 +20,46 @@ in those two win.
   `docs/porting_status.md`'s new `expat` section. Full `ctest` stayed at
   121/121 on Windows throughout.
 - **New Wayland core external build (2026-08-24): verified end to end on**
-  **Linux x64/WSL, including a real live-compositor round trip. Windows**
-  **not attempted yet (next step).** `crtgfx-wayland-configure`/`-build`/
-  `-smoke` CMake targets, a pinned `libcrtgfx/third_party/wayland/
-  recipe.json` (Wayland 1.26.0, wayland-scanner + wayland-client only this
-  pass). No Meson/Ninja/pkg-config host-tool dependency at all: `tools/
-  build_wayland.py` drives every compile/link step directly via
-  `tools/crt-cc` (rewritten mid-session from an initial Meson-based
-  version, at the user's own explicit direction, specifically to drop
-  that host-tool dependency). `crtgfx-wayland-smoke` fetched Wayland,
-  built `wayland-scanner`, built `libwayland-client.a`, then ran a real
-  `wl_registry` round trip against a live Wayland compositor this
-  session's own WSL environment happened to have reachable (WSLg's own
-  Weston), enumerating 20 real compositor globals -- not just the
-  designed "no compositor, build/link verified" headless fallback. Full
-  `ctest`: 104/104 on Linux x64. Three real CRT/PAL gaps found and fixed
-  getting there: `SO_PEERCRED`/`struct ucred`/`MSG_CMSG_CLOEXEC`/`MSG_
-  DONTWAIT`/`MSG_NOSIGNAL` (`include/sys/socket.h`), `ppoll()`
-  (`include/poll.h`/`libc/src/poll.c`), `epoll_create()`
-  (`include/sys/epoll.h`/`libc/src/epoll.c`) -- all Linux-only, all real
-  Bionic-compatible surface, none routed around. Two more general,
-  unrelated bugs found and fixed along the way: `tools/crt-port-build.py`'s
-  AR/RANLIB/STRIP defaults now also search the real `clang` binary's own
-  directory (fixes a genuine GNU-ranlib segfault on a real Ubuntu/WSL host
-  with no `llvm-ranlib` on PATH), and `CRT_BUILD_PRESET_NAME` (top-level
-  `CMakeLists.txt`) now computes a real relative path instead of just a
-  basename, fixing `port-build-*`/`port-test-*` targets inside any nested
-  shadow build directory. Windows also needed re-fixing a real, pre-
-  existing, self-inflicted "stale bootstrap libc++ overwrote the real
-  imported one" artifact (this file's own 2026-08-18 macOS entry's class
-  of bug) from this same session's earlier, unrelated targeted `--target
-  sysroot` calls -- confirmed **100% tests passed, 121/121** there again
-  after restaging. See `HISTORY.md`'s matching entry for the full trail.
+  **both Linux x64/WSL (real live-compositor round trip) and Windows x64**
+  **(build+link verified, designed headless fallback).**
+  `crtgfx-wayland-configure`/`-build`/`-smoke` CMake targets, a pinned
+  `libcrtgfx/third_party/wayland/recipe.json` (Wayland 1.26.0, wayland-
+  scanner + wayland-client only this pass). No Meson/Ninja/pkg-config
+  host-tool dependency at all: `tools/build_wayland.py` drives every
+  compile/link step directly via `tools/crt-cc` (rewritten mid-session
+  from an initial Meson-based version, at the user's own explicit
+  direction, specifically to drop that host-tool dependency). On Linux,
+  `crtgfx-wayland-smoke` ran a real `wl_registry` round trip against a
+  live Wayland compositor this session's own WSL environment happened to
+  have reachable (WSLg's own Weston), enumerating 20 real compositor
+  globals. On Windows (no real compositor available), it correctly hits
+  the designed graceful fallback and still reports `ok`. Full `ctest`:
+  **104/104 on Linux x64, 121/121 on Windows x64.**
+  Nine real bugs found and fixed getting both platforms working, none
+  routed around: three cross-platform CRT/PAL gaps (`SO_PEERCRED`/`struct
+  ucred`/`MSG_CMSG_CLOEXEC`/`MSG_DONTWAIT`/`MSG_NOSIGNAL`/`SOCK_CLOEXEC`
+  in `include/sys/socket.h`, `ppoll()` in `include/poll.h`/`libc/src/
+  poll.c` -- rewritten portable, not Linux-only, after Windows compile
+  surfaced Wayland's own unconditional call site -- and `epoll_create()`
+  in `include/sys/epoll.h`/`libc/src/epoll.c`); three Windows-specific
+  build-orchestration gaps in the new scripts themselves (missing POSIX-
+  form `PATH` for `crt-cc`'s own internal `printf`/`sed` calls, a missing
+  `CRT_WINDOWS_SDK_LIBPATH` for linking a real Windows executable directly
+  via `crt-cc` for the first time in this project, and a `CRT_HOST_CC`
+  omission in the smoke-test script specifically); and two more general,
+  unrelated bugs: `tools/crt-port-build.py`'s AR/RANLIB/STRIP defaults now
+  also search the real `clang` binary's own directory (fixes a genuine
+  GNU-ranlib segfault on a real Ubuntu/WSL host with no `llvm-ranlib` on
+  PATH), and `CRT_BUILD_PRESET_NAME` (top-level `CMakeLists.txt`) now
+  computes a real relative path instead of just a basename, fixing
+  `port-build-*`/`port-test-*` targets inside any nested shadow build
+  directory. A known, standing "transient bootstrap-libc++-overwrites-
+  the-real-imported-one" ordering artifact (this file's own 2026-08-18
+  macOS entry's class of bug) recurred twice on Windows during this same
+  investigation, unrelated to Wayland itself -- re-fixed both times by
+  restaging `crt-libcxx-sysroot`; a real, permanent fix to the underlying
+  ordering hazard is still an open follow-up, not solved here. See
+  `HISTORY.md`'s matching entry for the full trail.
 - **New opt-in `crtgfx-skia-smoke` CMake target (2026-08-23): passing.**
   `cmake --build <dir> --target crtgfx-skia-smoke` now builds and runs
   `crtgfx_skia_raster_smoke` end to end via a dedicated shadow build

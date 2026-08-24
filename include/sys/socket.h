@@ -1,6 +1,8 @@
 #ifndef CRT_SYS_SOCKET_H
 #define CRT_SYS_SOCKET_H
 
+#include <fcntl.h> /* O_CLOEXEC, reused by SOCK_CLOEXEC below -- same
+                     * convention as sys/epoll.h's own EPOLL_CLOEXEC. */
 #include <stddef.h>
 #include <sys/select.h> /* fd_set/FD_ZERO/FD_SET/select() -- real-world POSIX
                           * systems commonly expose these from <sys/socket.h>
@@ -41,6 +43,14 @@ struct sockaddr_storage {
 #define SOCK_STREAM 1
 #define SOCK_DGRAM 2
 #define SOCK_RAW 3
+/* Real Linux kernel ABI fact (not just a glibc choice, matching sys/
+ * epoll.h's own EPOLL_CLOEXEC precedent): the kernel deliberately reuses
+ * O_CLOEXEC's own bit value for this socket()/accept4() type flag, ORed
+ * into the `type` argument to atomically set close-on-exec on the new fd.
+ * Added 2026-08-24 for the Wayland core external build (src/wayland-os.c's
+ * own wl_os_socket_cloexec(): `wl_socket(domain, type | SOCK_CLOEXEC,
+ * protocol)`). */
+#define SOCK_CLOEXEC O_CLOEXEC
 
 #define SOL_SOCKET 1
 #define SO_REUSEADDR 2
@@ -51,21 +61,32 @@ struct sockaddr_storage {
 #define SO_SNDBUF 7
 #define SO_ERROR 4
 
-#if defined(CRT_TARGET_OS_LINUX)
-/* SO_PEERCRED/struct ucred: real Linux UAPI values (asm-generic/socket.h,
- * asm-generic/socket.h's own struct ucred), added 2026-08-24 for the
- * Wayland core external build (src/wayland-os.c's own wl_os_socket_
- * peercred(), used by a real compositor to identify which process/uid/gid
- * connected to its listening socket -- upstream's own #elif defined(
- * SO_PEERCRED)/#else #error "Don't know how to read ucred on this
- * platform" leaves no portable fallback, so this constant and struct
+/* SO_PEERCRED/struct ucred: real Linux UAPI values (asm-generic/socket.h),
+ * added 2026-08-24 for the Wayland core external build (src/wayland-os.c's
+ * own wl_os_socket_peercred(), used by a real compositor to identify which
+ * process/uid/gid connected to its listening socket -- upstream's own
+ * #elif defined(SO_PEERCRED)/#else #error "Don't know how to read ucred on
+ * this platform" leaves no portable fallback, so this constant and struct
  * genuinely have to exist for that file to compile at all, matching this
  * project's own porting-loop policy of filling a real, confirmed CRT/PAL
- * gap rather than routing around it). Linux-only: macOS's own equivalent
- * mechanism is LOCAL_PEERCRED/struct xucred (a different SOL_LOCAL-level
- * option, not SOL_SOCKET/SO_PEERCRED), and Windows AF_UNIX sockets have no
- * peer-credential query at all -- neither is needed by anything this
- * project builds yet, so neither is added speculatively here. */
+ * gap rather than routing around it).
+ *
+ * Declared cross-platform, not Linux-only (an earlier version of this
+ * guarded it to Linux only, reasoning wl_os_socket_peercred() -- a real
+ * compositor's own credential check -- would never actually run on
+ * Windows, since no real Windows AF_UNIX Wayland compositor exists): the
+ * function still has to *compile* on every target this project's own
+ * Wayland client-side source list builds for, confirmed for real
+ * (2026-08-24) that src/wayland-os.c is part of that shared source list on
+ * Windows too, not just Linux. The macro/struct existing does not imply
+ * this project's own Windows AF_UNIX implementation actually supports
+ * SO_PEERCRED at the getsockopt() level -- it does not, and nothing in
+ * this project's current Windows build ever calls wl_os_socket_peercred()
+ * at runtime, since it is unreachable without a real compositor listener
+ * to call it against. macOS is a real, separate future gap if this ever
+ * needs to compile there too: its own equivalent mechanism is
+ * LOCAL_PEERCRED/struct xucred, a different SOL_LOCAL-level option, not
+ * this SOL_SOCKET/SO_PEERCRED one -- not added speculatively here. */
 #define SO_PEERCRED 17
 
 struct ucred {
@@ -73,7 +94,6 @@ struct ucred {
   uid_t uid;
   gid_t gid;
 };
-#endif /* defined(CRT_TARGET_OS_LINUX) */
 
 #define SHUT_RD 0
 #define SHUT_WR 1
@@ -83,34 +103,40 @@ struct ucred {
 #define MSG_PEEK 0x02
 #define MSG_DONTROUTE 0x04
 #define MSG_WAITALL 0x100
-#if defined(CRT_TARGET_OS_LINUX)
-/* Real Linux values (asm-generic/socket.h -- both are non-portable Linux
- * extensions, not defined on macOS/Windows's own send()/recv() surface
- * the way MSG_OOB/MSG_PEEK/... above are). Added 2026-08-24 alongside
- * MSG_CMSG_CLOEXEC/SO_PEERCRED for the same real caller (src/
- * connection.c's own wl_connection_flush()/wl_connection_read(), the
- * Wayland core external build's wire-protocol read/write path): MSG_
- * NOSIGNAL suppresses SIGPIPE on a write to a peer that already closed
- * its end (this project's own sockets otherwise behave like any other
- * Linux socket here -- a write to a broken AF_UNIX pipe still raises
- * SIGPIPE by default), MSG_DONTWAIT makes one send()/recv() call non-
- * blocking without needing a separate fcntl(O_NONBLOCK) round trip (and,
- * unlike O_NONBLOCK, without changing the fd's own blocking mode for any
- * *other* caller sharing it). */
+/* MSG_DONTWAIT/MSG_NOSIGNAL/MSG_CMSG_CLOEXEC: real Linux values (asm-
+ * generic/socket.h, bits/socket.h), added 2026-08-24 for the Wayland core
+ * external build's wire-protocol read/write path (src/connection.c's own
+ * wl_connection_flush()/wl_connection_read(), src/wayland-os.c's own
+ * wl_os_recvmsg_cloexec()). MSG_NOSIGNAL suppresses SIGPIPE on a write to
+ * a peer that already closed its end; MSG_DONTWAIT makes one send()/
+ * recv() call non-blocking without a separate fcntl(O_NONBLOCK) round
+ * trip; MSG_CMSG_CLOEXEC atomically sets FD_CLOEXEC on SCM_RIGHTS-
+ * received file descriptors (wl_os_recvmsg_cloexec() already has a
+ * portable manual-fcntl fallback for hosts where the flag itself doesn't
+ * apply, but still needs the macro to exist for `flags | MSG_CMSG_CLOEXEC`
+ * to compile).
+ *
+ * Declared cross-platform, not Linux-only (an earlier version guarded all
+ * three to Linux only): confirmed for real (2026-08-24) that src/
+ * connection.c/src/wayland-os.c are part of the shared Wayland client
+ * source list on Windows too, so these three need to at least *compile*
+ * there as well. This project's own Windows socket syscalls (libc/src/
+ * arch/windows/common/syscall.c) already pass the `flags` argument
+ * straight through to the real winsock.send()/recv() calls with no
+ * validation or translation of individual bits (the same is already true
+ * of MSG_WAITALL's own value above, which does not match real Winsock's
+ * own MSG_WAITALL=0x8 either -- a pre-existing, unrelated gap, not
+ * something newly introduced here) -- real Winsock has no MSG_DONTWAIT/
+ * MSG_NOSIGNAL/MSG_CMSG_CLOEXEC equivalent at all (Windows sockets have
+ * no SIGPIPE to suppress, no per-call non-blocking mode, and no fork()
+ * to protect an inherited fd from), so these three values are inert
+ * placeholders on Windows -- correct to *compile* against, but not
+ * claimed to change real socket behavior there. Nothing in this
+ * project's current Windows build calls this code path at runtime
+ * (unreachable without a real compositor to connect to). */
 #define MSG_DONTWAIT 0x40
 #define MSG_NOSIGNAL 0x4000
-#endif /* defined(CRT_TARGET_OS_LINUX) */
-#if defined(CRT_TARGET_OS_LINUX)
-/* Real Linux value (bits/socket.h): tells recvmsg() to atomically set
- * FD_CLOEXEC on every file descriptor an SCM_RIGHTS control message
- * hands back, closing the same fork+exec fd-leak window O_CLOEXEC/
- * SOCK_CLOEXEC already close for the socket fd itself. Added alongside
- * SO_PEERCRED above, for the same real caller (src/wayland-os.c's own
- * wl_os_recvmsg_cloexec(), which already has a portable manual-fcntl
- * fallback for hosts where this flag doesn't apply -- but still needs the
- * macro to exist so its own `flags | MSG_CMSG_CLOEXEC` compiles). */
 #define MSG_CMSG_CLOEXEC 0x40000000
-#endif /* defined(CRT_TARGET_OS_LINUX) */
 
 int socket(int domain, int type, int protocol);
 int bind(int sockfd, const struct sockaddr* addr, socklen_t addrlen);

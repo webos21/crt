@@ -312,6 +312,19 @@ if(Python3_Interpreter_FOUND)
     # wiring just above (same rootfs, same reason: only it carries
     # toybox's applet aliases).
     list(APPEND CRTGFX_WAYLAND_BUILD_ARGS --rootfs "${CMAKE_BINARY_DIR}/rootfs")
+    # tools/build_wayland.py links wayland-scanner.exe directly via
+    # tools/crt-cc (not through regular CMake target_link_libraries(
+    # ${CRT_WINDOWS_SYSTEM_LIBS})), so it needs the real Windows SDK lib
+    # directory passed in explicitly -- exactly matching libstdc++/
+    # CMakeLists.txt's own CRT_LIBCXX_WINDOWS_SDK_LIBPATH derivation from
+    # this same ${CRT_WINDOWS_KERNEL32_LIB} cache variable. Confirmed for
+    # real (2026-08-24): without this, crt-cc's own Windows link branch
+    # falls back to bare `-Wl,kernel32.lib -Wl,synchronization.lib`, which
+    # ld.lld cannot resolve on its own ("could not open 'kernel32.lib'").
+    if(CRT_WINDOWS_KERNEL32_LIB)
+      get_filename_component(CRTGFX_WAYLAND_WINDOWS_SDK_LIBPATH "${CRT_WINDOWS_KERNEL32_LIB}" DIRECTORY)
+      list(APPEND CRTGFX_WAYLAND_BUILD_ARGS --windows-sdk-libpath "${CRTGFX_WAYLAND_WINDOWS_SDK_LIBPATH}")
+    endif()
   endif()
 
   add_custom_target(crtgfx-wayland-configure
@@ -366,6 +379,14 @@ if(Python3_Interpreter_FOUND)
   # against the freshly installed libwayland-client, entirely independent
   # of *this* (the calling) build directory's own cache/state. See
   # tools/test_crtgfx_wayland_smoke.py's own docstring.
+  set(CRTGFX_WAYLAND_SMOKE_ARGS)
+  if(CRT_TARGET_OS STREQUAL "windows" AND CRTGFX_WAYLAND_WINDOWS_SDK_LIBPATH)
+    # Same reason as CRTGFX_WAYLAND_BUILD_ARGS's own --windows-sdk-libpath
+    # just above: tools/test_crtgfx_wayland_smoke.py also links an
+    # executable (wayland_client_smoke.exe) directly via tools/crt-cc.
+    list(APPEND CRTGFX_WAYLAND_SMOKE_ARGS --windows-sdk-libpath "${CRTGFX_WAYLAND_WINDOWS_SDK_LIBPATH}")
+  endif()
+
   add_custom_target(crtgfx-wayland-smoke
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
       "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_crtgfx_wayland_smoke.py"
@@ -375,6 +396,7 @@ if(Python3_Interpreter_FOUND)
       --cmake-cxx-compiler "${CMAKE_CXX_COMPILER}"
       --target-os "${CRT_TARGET_OS}"
       --target-arch "${CRT_TARGET_ARCH}"
+      ${CRTGFX_WAYLAND_SMOKE_ARGS}
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     COMMENT "Building and running wayland_client_smoke in a dedicated build directory (this directory's own cache untouched)"
     USES_TERMINAL

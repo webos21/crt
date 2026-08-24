@@ -10,6 +10,116 @@ substantive update.
 
 ## 2026-08-24
 
+- **Wayland core external build verified end to end on Windows x64 too**
+  **(closing the "Windows gap" the same-day Linux-first entry below left**
+  **open) -- `crtgfx-wayland-smoke` builds, links, and runs cleanly,**
+  **printing the designed "no compositor" headless-fallback line since**
+  **this dev machine has no real Wayland compositor.** Six more real bugs
+  found and fixed getting there, none specific to Wayland's own protocol
+  logic -- all genuine CRT/PAL or build-orchestration gaps that had simply
+  never been exercised by this exact combination (a script linking a real
+  Windows executable directly via `tools/crt-cc`, bypassing every existing
+  regular-CMake code path) before:
+  1. **`tools/crt-cc`'s own script body calls the plain shell commands**
+     **`printf`/`sed` internally on every single invocation** (`windows_
+     host_arg()`'s own path rewriting, the `user_args`-building loop) --
+     confirmed for real: `crt-cc[71]: printf: inaccessible or not found`.
+     An earlier version of `tools/build_wayland.py`'s own Windows setup
+     claimed (incorrectly) that this script never needs the POSIX-only-
+     PATH override `tools/build_skia.py`'s own GN build needs, reasoning
+     from an incomplete read of `crt-cc`'s own bare-name lookups (missed
+     `printf`/`sed`, only checked for `$cc`/`uname`). Fixed by setting
+     `PATH=/system/bin:/bin:/usr/bin` after all, exactly matching Skia's
+     own precedent -- corrected the file's own comment alongside the fix.
+  2. **`tools/crt-cc`'s own Windows link branch falls back to bare**
+     **`-Wl,kernel32.lib -Wl,synchronization.lib`** (unresolvable by
+     `ld.lld` on their own: `could not open 'kernel32.lib'`) **whenever**
+     **`CRT_WINDOWS_SDK_LIBPATH` is unset.** Every other Windows
+     executable in this project links through regular CMake's own
+     `target_link_libraries(${CRT_WINDOWS_SYSTEM_LIBS})` (full absolute
+     paths, never hits this fallback); `tools/build_skia.py` never links
+     an executable at all, only `libskia.a`. This is the first script in
+     the project to link a real Windows executable directly via `crt-cc`.
+     Fixed with a new `--windows-sdk-libpath` flag on both `tools/
+     build_wayland.py` and `tools/test_crtgfx_wayland_smoke.py`, wired
+     from `libcrtgfx/CMakeLists.txt`'s own already-resolved `${CRT_
+     WINDOWS_KERNEL32_LIB}` cache variable (`get_filename_component(...
+     DIRECTORY)`), matching `libstdc++/CMakeLists.txt`'s own `CRT_LIBCXX_
+     WINDOWS_SDK_LIBPATH` derivation from the identical variable.
+  3. **`ppoll()` was Linux-only, but Wayland core's own `src/wayland-**
+     **client.c` calls it with no `#ifdef __linux__` guard of its own** --
+     compiling that file for Windows for the first time surfaced this
+     immediately. Rewritten to be fully portable (removed the earlier
+     `CRT_TARGET_OS_LINUX` guard on both the `include/poll.h` declaration
+     and the `libc/src/poll.c` definition): now implemented in terms of
+     the already cross-platform `poll()` (millisecond timeout conversion,
+     mirroring how `sys/select.h`'s own `pselect()` is already a portable
+     wrapper around `select()`) instead of the Linux-only raw `__crt_sys_
+     ppoll` syscall trampoline. The only real cost is millisecond instead
+     of nanosecond timeout precision on Linux specifically -- irrelevant
+     to every current caller, which all just want "wait up to N ms".
+  4. **`SO_PEERCRED`/`struct ucred`/`MSG_CMSG_CLOEXEC`/`MSG_DONTWAIT`/**
+     **`MSG_NOSIGNAL`, added Linux-only earlier this same day, also**
+     **needed to at least compile on Windows** -- `src/wayland-os.c`/
+     `src/connection.c` are part of the shared Wayland client source list
+     on every target this project builds for, not just Linux. Un-guarded
+     all five in `include/sys/socket.h`; documented clearly that this
+     does not claim real Windows Winsock support for any of them (Windows
+     has no SIGPIPE, no per-call non-blocking mode, no fork() to protect
+     an fd from, and no real peer-credential query on `AF_UNIX` sockets)
+     -- only that the code compiles, matching that none of this is
+     actually reachable at runtime on Windows without a real compositor.
+  5. **A new, real gap found the same way: `SOCK_CLOEXEC`** (`src/
+     wayland-os.c`'s own `wl_os_socket_cloexec()`) **was entirely
+     missing.** Added as `#define SOCK_CLOEXEC O_CLOEXEC` (`include/sys/
+     socket.h`, now `#include <fcntl.h>`) -- a real Linux kernel ABI fact,
+     not just a glibc convention (the kernel deliberately reuses `O_
+     CLOEXEC`'s own bit value here), matching `sys/epoll.h`'s own already-
+     established `EPOLL_CLOEXEC = O_CLOEXEC` precedent exactly.
+  6. **`tools/test_crtgfx_wayland_smoke.py`'s own separate Windows env**
+     **setup had the identical `printf`/PATH gap as `tools/build_
+     wayland.py`'s (bug 1), but was missing the fix's other required
+     half: `CRT_HOST_CC`.** Once `PATH` narrows to the POSIX form, `crt-
+     cc`'s own `cc="${CRT_HOST_CC:-clang}"` fallback can no longer find a
+     bare `"clang"` via `mksh`'s own PATH search either (`clang:
+     inaccessible or not found`) -- `tools/build_wayland.py` already
+     resolved and set `CRT_HOST_CC` before narrowing PATH, but this
+     *separate* script's own env setup (compiling `wayland_client_
+     smoke.c`) had not been updated to match. Added the same resolution
+     (`shutil.which("clang")`, `windows_short_path()`) there too.
+  Also hit again, a second time this same day, while doing the final
+  regression check after all of the above (not a Wayland-caused
+  regression, but the same standing, documented "transient bootstrap-
+  libc++-overwrites-the-real-imported-one" ordering artifact this file's
+  own 2026-08-18 macOS entry and this same day's earlier Windows-CI-fix
+  entry both already describe): confirmed via `ninja -t query crtgfx-
+  wayland-smoke` that the Wayland smoke target has no dependency edge on
+  `sysroot`/`crt-libcxx-sysroot` at all, so this was not triggered by any
+  Wayland-specific build step -- most likely an earlier, unrelated full
+  default `cmake --build` run (needed to re-verify the shared poll.h/
+  socket.h header changes) re-triggered the bootstrap `sysroot` target's
+  own reinstall. Re-fixed the same documented way (rebuild `crt-libcxx-
+  sysroot`, then a full default `cmake --build`); this recurring more
+  than once in a single session is worth a real, permanent fix to the
+  underlying ordering hazard at some point, not just repeating the manual
+  workaround indefinitely -- left as a follow-up, not solved here.
+  **Verified for real on both hosts, not just "it built"**: Windows x64
+  -- `crtgfx-wayland-smoke` builds `wayland-scanner.exe`, generates the
+  client protocol bindings, builds and installs `libwayland-client.a`,
+  compiles and runs `wayland_client_smoke.exe`, which correctly reports
+  `error: XDG_RUNTIME_DIR is invalid or not set in the environment` from
+  inside the library itself and then prints the designed graceful
+  fallback (`wayland_client_smoke: no compositor available ... library
+  build+link verified, live connect skipped` / `wayland_client_smoke:
+  ok`) -- exactly the expected outcome on a machine with no real Wayland
+  compositor. Full `ctest`: **100% passed, 121/121** after a full
+  default rebuild (not a stale re-run). Linux x64/WSL re-verified after
+  all six fixes above (the `ppoll()`/`sys/socket.h` changes needed to be
+  confirmed not to have broken anything there): full `ctest` **104/104**,
+  and `crtgfx-wayland-smoke` still completes the same real live-
+  compositor `wl_registry` round trip (20 globals) as the Linux-first
+  entry below originally found.
+
 - **New `expat` port (`porting/recipes/expat.json`, 2.8.3), added as a build**
   **dependency for the upcoming core Wayland external build -- not part of**
   **the existing networking/TLS port queue.** Upstream `wayland-scanner`

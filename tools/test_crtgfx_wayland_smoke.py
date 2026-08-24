@@ -34,6 +34,7 @@ invocations.
 
 import argparse
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -41,6 +42,28 @@ from pathlib import Path
 def run(command, **kwargs):
     print("+", " ".join(str(c) for c in command), flush=True)
     subprocess.run(command, check=True, **kwargs)
+
+
+def windows_short_path(path):
+    """Exactly matches tools/build_wayland.py's/tools/build_skia.py's own
+    windows_short_path() (same GetShortPathNameW win32 call, same reason:
+    mksh's own exec()/command lookup cannot run a program whose path
+    contains a space) -- duplicated here rather than imported, matching
+    this project's own tools/*.py convention of not sharing a common
+    helper module."""
+    if os.name != "nt":
+        return str(path)
+    import ctypes
+
+    value = str(path)
+    get_short_path_name_w = ctypes.windll.kernel32.GetShortPathNameW
+    needed = get_short_path_name_w(value, None, 0)
+    if needed == 0:
+        return value
+    buffer = ctypes.create_unicode_buffer(needed)
+    if get_short_path_name_w(value, buffer, needed) == 0:
+        return value
+    return buffer.value
 
 
 def main():
@@ -52,6 +75,10 @@ def main():
     parser.add_argument("--cmake-cxx-compiler", required=True)
     parser.add_argument("--target-os", required=True, choices=["linux", "macos", "windows"])
     parser.add_argument("--target-arch", default="host")
+    parser.add_argument("--windows-sdk-libpath", default="",
+                         help="Windows only: directory containing kernel32.lib/synchronization.lib, "
+                              "needed because this script links wayland_client_smoke.exe directly via "
+                              "tools/crt-cc -- see tools/build_wayland.py's own matching flag/comment")
     args = parser.parse_args()
 
     root = args.root.resolve()
@@ -123,6 +150,32 @@ def main():
             raise SystemExit(f"CRT mksh is missing from the rootfs: {mksh}")
         env["CRT_MKSH_EXE"] = str(mksh)
         env["CRT_ROOTFS"] = str(build_dir / "rootfs")
+        # Both fixes confirmed for real (2026-08-24), see tools/
+        # build_wayland.py's own matching comments for the full "why":
+        # tools/crt-cc's own script body calls the plain shell commands
+        # printf/sed internally on every invocation, which mksh can only
+        # resolve via this deliberate, rootfs-relative POSIX PATH form; and
+        # crt-cc's own Windows link branch falls back to unresolvable bare
+        # `kernel32.lib`/`synchronization.lib` names unless
+        # CRT_WINDOWS_SDK_LIBPATH points at the real Windows SDK lib dir
+        # (this script links wayland_client_smoke.exe directly via crt-cc,
+        # bypassing the target_link_libraries(${CRT_WINDOWS_SYSTEM_LIBS})
+        # path every regular CMake-built Windows executable uses instead).
+        # CRT_HOST_CC must be resolved (via *this* process's own PATH)
+        # *before* the PATH narrowing just below -- tools/crt-cc's own
+        # `cc="${CRT_HOST_CC:-clang}"` falls back to a bare "clang" name
+        # search through mksh's own PATH otherwise, which the POSIX-only
+        # PATH set here cannot resolve (`crt-cc: clang: inaccessible or
+        # not found`, confirmed for real -- this exact omission was the
+        # one remaining gap tools/build_wayland.py's own matching fix
+        # already covered, but this script's own separate env setup here
+        # had not been updated to match).
+        host_cc = shutil.which("clang")
+        if host_cc:
+            env["CRT_HOST_CC"] = windows_short_path(host_cc).replace("\\", "/")
+        env["PATH"] = "/system/bin:/bin:/usr/bin"
+        if args.windows_sdk_libpath:
+            env["CRT_WINDOWS_SDK_LIBPATH"] = args.windows_sdk_libpath
 
     # Full, explicit archive paths -- libwayland-client.a itself already
     # embeds wayland-util.c/connection.c/wayland-os.c's own object code

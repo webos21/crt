@@ -25,20 +25,17 @@ struct pollfd {
 #define POLLNVAL 0x0020
 
 int poll(struct pollfd* fds, nfds_t nfds, int timeout);
-#if defined(CRT_TARGET_OS_LINUX)
-/* Real Linux-only syscall-backed API (matches Bionic's own real ppoll();
- * glibc gates this behind _GNU_SOURCE, but this project's headers have no
- * such feature-test-macro gating anywhere else). Declaration guarded to
- * match libc/src/poll.c's own implementation, which is genuinely Linux-
- * only there too (built on the real ppoll(2) syscall's own sub-
- * millisecond timeout precision, not emulated on macOS/Windows the way
- * poll() itself is) -- an unguarded declaration with no definition on
- * those platforms would silently create a link-time-only gap instead of
- * a clear compile-time one. Added 2026-08-24 for the Wayland core
- * external build (src/wayland-client.c's own dispatch loop calls it
- * directly). */
+/* A real Linux/BSD extension (matches Bionic's own real ppoll(); glibc
+ * gates this behind _GNU_SOURCE, but this project's headers have no such
+ * feature-test-macro gating anywhere else) -- declared and implemented
+ * cross-platform, not Linux-only, because Wayland core's own src/
+ * wayland-client.c calls it unconditionally with no __linux__ guard of
+ * its own, and this project's own build targets it on both Linux and
+ * Windows. libc/src/poll.c's own implementation is a portable millisecond-
+ * timeout wrapper around poll() (matching how sys/select.h's own
+ * pselect() is already a portable wrapper around select()), not a raw
+ * syscall -- see that file's own comment. */
 int ppoll(struct pollfd* fds, nfds_t nfds, const struct timespec* tmo_p, const sigset_t* sigmask);
-#endif /* defined(CRT_TARGET_OS_LINUX) */
 
 #ifdef __cplusplus
 }
