@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import tarfile
 import urllib.request
 import zipfile
@@ -88,6 +89,62 @@ def download(url, archive_path):
     os.replace(tmp_path, archive_path)
 
 
+def fix_windows_symlink_targets(root):
+    """tarfile.extractall() recreates a POSIX tar's symlink members via
+    os.symlink(member.linkname, targetpath) -- passing the raw, forward-
+    slash-separated linkname straight through, unmodified. Confirmed for
+    real (2026-08-24, building porting/recipes/make.json's own "make"
+    dependency from a genuinely from-scratch Windows build directory for
+    the first time in this project's history): a *relative* symlink whose
+    target crosses a directory via ".." (e.g. Android toolchain/make's own
+    build-aux/config.guess -> ../gnulib/build-aux/config.guess) resolves
+    fine through os.readlink() and MSYS2/Git-Bash's own `ls`/`readlink`
+    (which parse the raw reparse-point print name directly), but fails
+    os.stat()/open() -- i.e. every real Win32 CreateFile-based API,
+    including copy_source()'s own shutil.copytree() a moment later --
+    with `OSError: [WinError 123] The filename, directory name, or volume
+    label syntax is incorrect`. Reproduced directly and in isolation: the
+    identical relative target recreated with backslash separators
+    (`..\\gnulib\\build-aux\\config.guess`) resolves and stats correctly,
+    proving this is purely a slash-direction issue in how Windows resolves
+    a relative symlink target, not a missing-file or permissions problem
+    (Developer Mode was already enabled and os.symlink() itself succeeded
+    for every one of these entries -- os.path.islink() is True, os.readlink()
+    returns the right string, only the *resolution* through a real file API
+    fails). Fixed generally here (not per-recipe) since any future tar-
+    sourced recipe with relative symlinks in its archive would hit the same
+    bug on Windows the first time crt-port-build.py's own copy_source()
+    tries to read through one.
+
+    Windows-only and only relevant to the tarfile path above: zipfile's
+    own extractall() never recreates real symlinks at all (a zip's symlink
+    entries are Unix-specific external-attribute metadata the stdlib zip
+    reader does not act on), so there is nothing to fix for zip archives.
+    """
+    if os.name != "nt":
+        return
+    for dirpath, dirnames, filenames in os.walk(root):
+        for name in dirnames + filenames:
+            path = os.path.join(dirpath, name)
+            if not os.path.islink(path):
+                continue
+            target = os.readlink(path)
+            fixed_target = target.replace("/", "\\")
+            if fixed_target == target:
+                continue
+            # Determine the reparse point's own directory-vs-file symlink
+            # flag via lstat() (operates on the link itself, no target
+            # resolution needed) rather than os.path.isdir(path) (follows
+            # the link -- and the whole reason this function exists is
+            # that following the link is exactly what fails right now).
+            is_dir_target = bool(os.lstat(path).st_file_attributes & stat.FILE_ATTRIBUTE_DIRECTORY)
+            if is_dir_target:
+                os.rmdir(path)
+            else:
+                os.remove(path)
+            os.symlink(fixed_target, path, target_is_directory=is_dir_target)
+
+
 def extract(archive_path, dest):
     if os.path.exists(dest):
         return
@@ -101,6 +158,7 @@ def extract(archive_path, dest):
     else:
         with tarfile.open(archive_path) as tf:
             tf.extractall(tmp_dest)
+        fix_windows_symlink_targets(tmp_dest)
     entries = [os.path.join(tmp_dest, entry) for entry in os.listdir(tmp_dest)]
     dirs = [entry for entry in entries if os.path.isdir(entry)]
     if len(dirs) == 1 and len(entries) == 1:

@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "name": "expat",
+  "version": "2.8.3",
+  "source": {
+    "url": "https://github.com/libexpat/libexpat/releases/download/R_2_8_3/expat-2.8.3.tar.xz",
+    "archive": "expat-2.8.3.tar.xz",
+    "source_dir": "expat-2.8.3",
+    "sha256": "f6256df90c906773d344da084402b7d3e4f22ed41b1a59c989098a83d3ea0c85",
+    "sha1": "76dbade422e70c395494559bf722c56393c58eba",
+    "md5": "1747f5a57b191f0373baeb5adc8078ca"
+  },
+  "dependencies": [],
+  "build": {
+    "system": "configure",
+    "configure_args": [
+      "--without-xmlwf",
+      "--without-examples",
+      "--without-tests",
+      "--without-docbook",
+      "--with-dev-urandom"
+    ],
+    "env": {
+      "CFLAGS": "-O2"
+    },
+    "make_args": [],
+    "target_overrides": {
+      "windows": {
+        "configure_args": [
+          "--build=@CRT_MINGW_TRIPLE@",
+          "--without-dev-urandom"
+        ],
+        "env": {
+          "CFLAGS": "-U_WIN32 -U_WIN32_WCE -U__WIN32__ -UWIN32 -U_MSC_VER"
+        },
+        "force_include": [
+          "porting/shims/win32/expat_rand_s_compat.h"
+        ]
+      }
+    }
+  },
+  "tests": [
+    {
+      "name": "roundtrip-static",
+      "type": "compile-run",
+      "source": "porting/tests/expat_roundtrip.c",
+      "cflags": [
+        "-I@PORT_PREFIX@/include",
+        "-DXML_STATIC"
+      ],
+      "link_args": [
+        "@PORT_PREFIX@/lib/libexpat.a"
+      ],
+      "expect_stdout": "expat_roundtrip_test: ok"
+    },
+    {
+      "name": "roundtrip-shared",
+      "type": "compile-run",
+      "source": "porting/tests/expat_roundtrip.c",
+      "cflags": [
+        "-I@PORT_PREFIX@/include"
+      ],
+      "expect_stdout": "expat_roundtrip_test: ok",
+      "target_overrides": {
+        "linux": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libexpat.so"
+          ]
+        },
+        "macos": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libexpat.dylib"
+          ]
+        },
+        "windows": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libexpat.dll.a"
+          ]
+        }
+      }
+    }
+  ],
+  "status": {
+    "linux": "shared-pass",
+    "macos": "pending",
+    "windows": "shared-pass"
+  },
+  "notes": [
+    "Added 2026-08-24 as a dependency for the upcoming core Wayland external build (tools/fetch_wayland.py/tools/build_wayland.py, libcrtgfx/third_party/wayland/recipe.json): upstream wayland-scanner parses protocol XML via expat, and libcrtgfx's own crtgfx-wayland-configure/-build/-smoke targets need a real, CRT-built libexpat installed into PORT_PREFIX before wayland's own Meson configure can find it via pkg-config. Not otherwise needed by the current recipe queue (zlib -> libpng -> SQLite amalgamation -> bzip2 -> xz -> pcre2 -> mbedTLS -> curl).",
+    "Version 2.8.3 (2026-08-10), the current stable release as of this recipe's creation date -- fixes CVE-2026-72522. source.sha256/sha1/md5 were computed directly from a real downloaded copy of the release asset (not copied from a webpage), matching this project's own SHA256-is-authoritative policy (docs/porting_status.md).",
+    "The release tarball ships a pre-generated ./configure (real GNU Autoconf output, confirmed by extracting and inspecting it directly) and Makefile.in, unlike a plain git checkout of this repo (which needs buildconf.sh/autoreconf first) -- so this fits the existing 'configure' build system with no new engine code, the same as zlib/libpng/pcre2/xz/mbedtls.",
+    "--without-xmlwf/--without-examples/--without-tests/--without-docbook keep the build to just the library itself: xmlwf is a standalone XML-well-formedness-checking CLI tool this project has no use for yet, the bundled test suite has its own separate test-runner dependencies this project's own porting test convention (porting/tests/*.c, run through crt-port-build.py's run_port_tests()) already replaces, and docbook needs xmllint/xsltproc host tooling unrelated to the library build.",
+    "--with-dev-urandom (base recipe level, Linux/macOS): forces `#define XML_DEV_URANDOM 1` (confirmed directly via `grep -n dev-urandom configure` -- no filesystem probe, safe on a from-scratch configure) so the library's runtime entropy source is this project's own already-proven /dev/urandom node rather than whatever configure's own [default=check] auto-detection happens to find first.",
+    "target_overrides.windows.env undefines _WIN32/_WIN32_WCE/__WIN32__/WIN32/_MSC_VER, the same technique zlib.json/libpng.json/pcre2.json/xz.json/bzip2.json already use: confirmed directly (grep across lib/*.c/*.h) that expat's own lib/xmlparse.c only takes a real <windows.h> dependency (via lib/winconfig.h, included only `#ifdef _WIN32`) when building through its legacy win32/ MSVC project files, never through this configure-based path -- undefining _WIN32 here keeps expat's own code on its generic POSIX path (lib/internal.h's own EXPAT_FMT_* macros fall back to real <inttypes.h> PRId/PRIu macros, which this project's libc already provides, matching libpng's own <malloc.h>/inttypes.h precedent). NOTE, corrected after real verification: undefining _WIN32 does NOT skip lib/random_rand_s.c the way an earlier draft of this note assumed -- see the two Windows-specific entries below for what actually controls that file and why dev-urandom had to be reversed on Windows specifically.",
+    "target_overrides.windows.configure_args adds --build=@CRT_MINGW_TRIPLE@, the same config.guess workaround already needed by libpng.json/pcre2.json/xz.json/libffi.json: expat's configure is real GNU Autoconf output, and config.guess does not recognize plain Windows `uname` output. This --build= value is also what makes expat's own configure.ac classify $host_os as `mingw*` (AM_CONDITIONAL([MINGW], ...), see the two entries below) -- a real, load-bearing side effect, not just a config.guess workaround: it is also what steers GNU Libtool onto its Windows DLL/import-library code path, the same mechanism zlib.json/libpng.json/pcre2.json's own Windows shared-pass status already depends on.",
+    "target_overrides.windows.force_include adds porting/shims/win32/expat_rand_s_compat.h (new). Confirmed for real (2026-08-24) that expat's configure.ac's MINGW classification above unconditionally adds lib/random_rand_s.c to lib/Makefile.am's own `if MINGW` source list -- unlike expat's other Windows-only code, this is a *separate file* gated at configure time by host-triple classification, not a `#ifdef _WIN32` branch inside an always-compiled file, so undefining _WIN32 at compile time cannot remove it from the build. random_rand_s.c calls a bare, undeclared `rand_s()` -- a real Microsoft CRT extension this project's Bionic-compatible libc does not implement (`error: call to undeclared function 'rand_s'`). Fixed with a small, documented, project-owned compatibility shim (matching the standing 'temporary host-specific compatibility shims are acceptable only when documented as such' policy, docs/porting_status.md) providing a real rand_s() in terms of this project's own already-linked, already-verified getrandom() -- confirmed via the same build that random_getrandom.c compiles and links successfully -- rather than either implementing a real rand_s() generally in this project's libc just for one dead code path, or patching expat's own configure.ac/Makefile.am (this project's standing no-upstream-source-patch policy). See the shim's own header comment for the full trail, including why the code path is provably unreachable at runtime (expat's own lib/xmlparse.c generate_hash_secret_salt() priority chain picks HAVE_GETRANDOM before it would ever need a Windows-only rand_s() path).",
+    "target_overrides.windows.configure_args also adds --without-dev-urandom (new), reversing the base recipe's --with-dev-urandom on Windows only. Confirmed for real (2026-08-24): expat's own lib/Makefile.am excludes lib/random_dev_urandom.c (which defines writeRandomBytes_dev_urandom()) whenever MINGW is true (`if ! MINGW ... random_dev_urandom.c ... endif`) -- upstream's own assumption that MinGW/Windows has no /dev/urandom, regardless of what a caller forces via --with-dev-urandom. Forcing XML_DEV_URANDOM=1 anyway (the base recipe's setting) left lib/xmlparse.c's own generate_hash_secret_salt() fallback path referencing writeRandomBytes_dev_urandom() with no definition anywhere in the build -- `ld.lld: error: undefined symbol: writeRandomBytes_dev_urandom`. Reversed to --without-dev-urandom on Windows specifically rather than teaching this project's libc to also expose a working /dev/urandom node under expat's own MINGW-excluded file: this project's own getrandom() (confirmed real and working on Windows in this same build -- see the rand_s shim entry above) already wins expat's own runtime priority chain ahead of dev_urandom regardless, so the net entropy source actually used at runtime is unaffected -- only the compile-time XML_DEV_URANDOM define needed to stop claiming a source Windows's own Makefile.am declines to build.",
+    "porting/tests/expat_roundtrip.c is a real XML_Parse() round trip (nested elements, an attribute, character data, all captured via XML_SetElementHandler/XML_SetCharacterDataHandler callbacks and checked against expected values), not just a version-string smoke check, matching pcre2_match_test.c's own bar for what counts as a real port test. -DXML_STATIC on the roundtrip-static test only (not roundtrip-shared), matching pcre2.json's own PCRE2_STATIC precedent: expat.h's own XMLCALL/XMLIMPORT decoration branches on XML_STATIC being defined to avoid expecting __declspec(dllimport)-decorated symbols when linking a plain static archive. Two real bugs in the test source itself, found and fixed against the real build (not upstream's fault): XML_Status needs the `enum` tag (expat.h declares `enum XML_Status { ... }` with no typedef), and XML_ExpatVersionInfo() returns an XML_Expat_Version struct by value rather than taking three out-parameters.",
+    "Verified for real, not just 'it built': Linux x64 (WSL/Ubuntu, a genuinely fresh clone + from-scratch sysroot build) -- both roundtrip-static and roundtrip-shared print `expat_roundtrip_test: ok items=2 version=2.8.3`; confirmed the shared test binary actually resolves libexpat.so.1 (and libexpat.so's own libm/libc/libdl/libc++ dependencies) into this project's own sysroot/port-install via `LD_LIBRARY_PATH` + `ldd`, not the WSL host's own Ubuntu-packaged libexpat -- a real risk on Ubuntu, which ships its own system libexpat.so.1 that would otherwise silently satisfy the same SONAME. Windows x64 (this session's own dev machine, windows-host-ninja-debug preset) -- both roundtrip-static and roundtrip-shared print the identical `ok` line; full ctest stayed at 121/121 throughout. macOS not attempted this session (out of scope for this pass -- see the Wayland-dependency note above, which only needed Linux+Windows verified so far).",
+    "A genuine, general Windows infrastructure bug was found and fixed getting here, unrelated to expat itself: tools/fetch_ports.py's extract() (used by every recipe, not just this one) recreates a POSIX tar's symlink members via tarfile.extractall(), which passes each member's raw, forward-slash-separated linkname straight through to os.symlink() unmodified. Confirmed for real (2026-08-24, the first time any configure-based recipe's own 'make' dependency -- porting/recipes/make.json -- was fetched into a genuinely from-scratch Windows build directory this project's history): a *relative* symlink target that crosses a directory via '..' (e.g. toolchain/make's own build-aux/config.guess -> ../gnulib/build-aux/config.guess) resolves fine through os.readlink() and MSYS2/Git-Bash's own ls/readlink (which parse the raw reparse-point print name directly), but fails os.stat()/open() -- i.e. every real Win32 CreateFile-based API, including copy_source()'s own shutil.copytree() a moment later -- with `OSError: [WinError 123] The filename, directory name, or volume label syntax is incorrect`. Reproduced and fixed in isolation before touching the real code: the identical relative target recreated with backslash separators resolves and stats correctly. Fixed generally in tools/fetch_ports.py (new fix_windows_symlink_targets(), Windows-only, called right after tarfile.extractall()) rather than specific to the make/expat recipes, since any future tar-sourced recipe with relative symlinks would hit the same bug the first time crt-port-build.py's own copy_source() tried to read through one."
+  ]
+}

@@ -8,6 +8,94 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-08-24
+
+- **New `expat` port (`porting/recipes/expat.json`, 2.8.3), added as a build**
+  **dependency for the upcoming core Wayland external build -- not part of**
+  **the existing networking/TLS port queue.** Upstream `wayland-scanner`
+  parses protocol XML via expat; `libcrtgfx`'s planned `crtgfx-wayland-
+  configure`/`-build`/`-smoke` targets need a real, CRT-built `libexpat`
+  installed into `PORT_PREFIX` before Wayland's own Meson configure can find
+  it via pkg-config. Verified `shared-pass` on Linux x64 (WSL/Ubuntu, a
+  genuinely fresh clone + from-scratch sysroot) and Windows x64 (this
+  session's own dev machine) via a real `XML_Parse()` round trip test
+  (`porting/tests/expat_roundtrip.c`) against both static and shared builds;
+  macOS not attempted this session. Confirmed the Linux shared test actually
+  resolves against this project's own `libexpat.so.1` (and its own libm/
+  libc/libdl/libc++ deps) in `port-tests/install`, not WSL/Ubuntu's own
+  system-packaged `libexpat.so.1` -- a real risk, since Ubuntu ships one
+  under the identical SONAME. Full `ctest` stayed at 121/121 on Windows
+  throughout.
+  1. **Windows: expat's own `configure.ac` classifies this recipe's**
+     **`--build=@CRT_MINGW_TRIPLE@` host as `mingw*`, unconditionally**
+     **adding `lib/random_rand_s.c` to the build** (a real Automake
+     `MINGW` conditional gating a *separate file*, not a `#ifdef _WIN32`
+     branch inside an always-compiled one -- this recipe's usual
+     `-U_WIN32` CFLAGS override, already proven on zlib/libpng/pcre2/xz/
+     bzip2, cannot reach it). That file calls a bare, undeclared
+     `rand_s()` -- a real Microsoft CRT extension this project's Bionic-
+     compatible libc does not implement (`error: call to undeclared
+     function 'rand_s'`). Fixed with a new, small, documented
+     compatibility shim, `porting/shims/win32/expat_rand_s_compat.h`,
+     providing a real `rand_s()` in terms of this project's own already-
+     linked, already-verified `getrandom()` -- confirmed the code path is
+     provably unreachable at runtime anyway (expat's own entropy-source
+     priority chain in `lib/xmlparse.c`'s `generate_hash_secret_salt()`
+     picks `HAVE_GETRANDOM` before it would ever need the Windows-only
+     `rand_s()` path), so this is a real, working implementation of dead
+     code, not a fake stand-in for something actually exercised.
+  2. **Windows: the same `mingw*` classification also excludes**
+     **`lib/random_dev_urandom.c` from the build** (upstream's own "MinGW
+     has no /dev/urandom" assumption) -- but this recipe's base
+     `--with-dev-urandom` (forced everywhere, matching this project's own
+     already-proven Windows `/dev/urandom` PAL node, backed by
+     `RtlGenRandom()`, per curl's own port notes) left `lib/xmlparse.c`
+     referencing `writeRandomBytes_dev_urandom()` with no definition
+     anywhere in the Windows build: `ld.lld: error: undefined symbol:
+     writeRandomBytes_dev_urandom`. Fixed by reversing to
+     `--without-dev-urandom` on Windows specifically (`target_overrides.
+     windows.configure_args`), rather than teaching this project's libc
+     to expose a working `/dev/urandom` node under a file expat's own
+     Makefile.am declines to build there -- `getrandom()` (fix 1 above)
+     already wins expat's own runtime priority chain ahead of dev-
+     urandom regardless, so the actual entropy source used at runtime on
+     Windows is unaffected by this reversal, only the compile-time claim
+     was.
+  3. **A general Windows infrastructure bug, not expat-specific, found**
+     **getting the `make` port's own source to fetch cleanly into a**
+     **genuinely from-scratch Windows build directory for the first time**
+     **in this project's history**: `tools/fetch_ports.py`'s `extract()`
+     recreates a POSIX tar's symlink members via `tarfile.extractall()`,
+     which passes each member's raw, forward-slash-separated `linkname`
+     straight through to `os.symlink()` unmodified. Confirmed for real: a
+     *relative* symlink target that crosses a directory via `..` (e.g.
+     `porting/recipes/make.json`'s own Android toolchain/make source,
+     `build-aux/config.guess -> ../gnulib/build-aux/config.guess`)
+     resolves fine through `os.readlink()` and MSYS2/Git-Bash's own `ls`/
+     `readlink` (which parse the raw reparse-point print name directly),
+     but fails every real Win32 `CreateFile`-based API -- including
+     `copy_source()`'s own `shutil.copytree()` a moment later -- with
+     `OSError: [WinError 123] The filename, directory name, or volume
+     label syntax is incorrect`. Reproduced and fixed in isolation before
+     touching the real code: the identical relative target recreated
+     with backslash separators resolves and stats correctly. Fixed
+     generally in `tools/fetch_ports.py` (new Windows-only
+     `fix_windows_symlink_targets()`, called right after
+     `tarfile.extractall()`, using `os.lstat()`'s own `st_file_attributes`
+     to tell a directory-type symlink from a file-type one without
+     needing to resolve the -- at that point still broken -- target)
+     rather than specific to the make/expat recipes, since any future
+     tar-sourced recipe with relative symlinks would hit the same bug the
+     first time `crt-port-build.py`'s own `copy_source()` tried to read
+     through one.
+  Two real bugs were also found and fixed in the new port test itself
+  (`porting/tests/expat_roundtrip.c`), not upstream's fault: `XML_Status`
+  needs the `enum` tag (expat.h declares a bare `enum XML_Status { ... }`
+  with no typedef), and `XML_ExpatVersionInfo()` returns an
+  `XML_Expat_Version` struct by value rather than taking three
+  out-parameters. See `porting/recipes/expat.json`'s own notes and
+  `docs/porting_status.md`'s new `expat` section for the full trail.
+
 ## 2026-08-23
 
 - **Windows CI ("Configure, build, and test") red on both `windows-x64` and

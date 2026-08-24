@@ -9,6 +9,16 @@ current state so the next session doesn't have to re-derive it from
 means; if this page and `HISTORY.md`/`TODO.md` disagree, the dated entries
 in those two win.
 
+- **New `expat` port (2.8.3, 2026-08-24): `shared-pass` on Linux x64 and**
+  **Windows x64, macOS not attempted yet.** Added as a build dependency for
+  the upcoming core Wayland external build (`wayland-scanner` needs it to
+  parse protocol XML), not part of the existing networking/TLS port queue.
+  Windows needed a `rand_s()` compatibility shim, a `--without-dev-urandom`
+  override, and a general `tools/fetch_ports.py` fix for a real Windows
+  symlink-resolution bug (`WinError 123` on forward-slash relative symlink
+  targets from a POSIX tar archive) -- see `HISTORY.md`'s matching entry and
+  `docs/porting_status.md`'s new `expat` section. Full `ctest` stayed at
+  121/121 on Windows throughout.
 - **New opt-in `crtgfx-skia-smoke` CMake target (2026-08-23): passing.**
   `cmake --build <dir> --target crtgfx-skia-smoke` now builds and runs
   `crtgfx_skia_raster_smoke` end to end via a dedicated shadow build

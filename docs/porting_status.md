@@ -88,6 +88,11 @@ Still open:
   optimized levels, now confirmed aarch64-Windows-specific (x86_64 Windows
   tested clean). See the libffi section below.
 
+`expat` (2026-08-24) is a new port outside this queue -- added as a build
+dependency for the upcoming core Wayland external build (`wayland-scanner`
+needs it to parse protocol XML), not part of the networking/TLS chain above.
+See its own section below.
+
 ## make
 
 - Version: `android-toolchain-44fc4fe66a484b91844c302f03eaa8438e065d17`
@@ -376,3 +381,51 @@ permanent test, `repeat-call-static`/`repeat-call-shared`) passes cleanly on
 x86_64 Windows at both `-O1` and `-O2`. This needs a focused `lldb` debugger
 pass on real aarch64 Windows hardware before libffi can be promoted to
 `shared-pass` there.
+
+## expat
+
+- Version: `2.8.3`
+- Recipe: `porting/recipes/expat.json`
+- Build system: `configure`
+- Dependencies: none
+- Status:
+  - Linux: `shared-pass`
+  - macOS: `pending`
+  - Windows: `shared-pass`
+- Automated recipe tests:
+  - `roundtrip-static`
+  - `roundtrip-shared`
+
+Added outside the networking/TLS queue above, as a build dependency for the
+upcoming core Wayland external build: upstream `wayland-scanner` parses
+protocol XML via expat. The tests run a real `XML_Parse()` round trip
+(nested elements, an attribute, character data) against both static and
+shared builds.
+
+Windows needed two real, expat-specific fixes plus one general Windows
+infrastructure fix, all found and root-caused this session (2026-08-24):
+
+- expat's own `configure.ac` classifies this recipe's `--build=@CRT_MINGW_
+  TRIPLE@` host as `mingw*`, which unconditionally adds `lib/random_rand_s.c`
+  to the build (an Automake `MINGW` conditional, not a `#ifdef _WIN32` branch
+  this recipe's usual `-U_WIN32` CFLAGS trick can reach) -- that file calls a
+  bare `rand_s()`, a Microsoft CRT extension this project's libc does not
+  implement. Fixed with a small, documented compatibility shim
+  (`porting/shims/win32/expat_rand_s_compat.h`) providing a real `rand_s()`
+  in terms of this project's own already-working `getrandom()`.
+- The same `mingw*` classification also excludes `lib/random_dev_urandom.c`
+  from the build (upstream's own "MinGW has no /dev/urandom" assumption),
+  so this recipe's base `--with-dev-urandom` (used on Linux/macOS) left an
+  undefined-symbol link error on Windows; reversed to `--without-dev-urandom`
+  there since `getrandom()` already wins expat's own runtime entropy
+  priority chain ahead of dev-urandom regardless.
+- A general Windows infrastructure bug in `tools/fetch_ports.py`: relative
+  symlink targets from a POSIX tar archive (e.g. `porting/recipes/make.json`'s
+  own `build-aux/config.guess -> ../gnulib/build-aux/config.guess`) resolve
+  through `os.readlink()` but fail every real Win32 file API (`WinError 123`)
+  when the target contains forward slashes -- fixed generally (not
+  expat-specific) by normalizing tar-extracted symlink targets to backslashes
+  on Windows right after extraction.
+
+See `porting/recipes/expat.json`'s own notes for the full trail and
+`HISTORY.md`'s 2026-08-24 entry.
