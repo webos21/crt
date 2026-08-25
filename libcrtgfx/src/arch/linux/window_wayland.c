@@ -306,11 +306,19 @@ static void wl_buffer_destroy_storage(struct crtgfx_wl_buffer* buffer) {
   free(buffer);
 }
 
-static void wl_destroy_released_buffer(struct crtgfx_host_window* host, uint32_t id) {
+/* Returns 1 if `id` was actually a tracked wl_buffer (and destroys it),
+ * 0 otherwise -- the caller needs this to know whether it may safely
+ * treat the message as fully handled. See its own call site's comment:
+ * wl_buffer::release and wl_seat::capabilities are BOTH opcode 0 (every
+ * Wayland interface numbers its own events from 0 independently), so
+ * "opcode == WL_BUFFER_EVENT_RELEASE" alone is not enough to identify a
+ * message -- only checking that object_id genuinely names a buffer this
+ * backend created actually disambiguates it. */
+static int wl_destroy_released_buffer(struct crtgfx_host_window* host, uint32_t id) {
   struct crtgfx_wl_buffer** link;
 
   if (host == 0) {
-    return;
+    return 0;
   }
   link = &host->buffers;
   while (*link != 0) {
@@ -320,10 +328,11 @@ static void wl_destroy_released_buffer(struct crtgfx_host_window* host, uint32_t
       *link = buffer->next;
       (void)wl_send(host, id, WL_BUFFER_DESTROY, 0, 0, -1);
       wl_buffer_destroy_storage(buffer);
-      return;
+      return 1;
     }
     link = &buffer->next;
   }
+  return 0;
 }
 
 static void wl_destroy_all_buffers(struct crtgfx_host_window* host) {
@@ -552,8 +561,26 @@ static void wl_dispatch_message(
     crtgfx_weston_toplevel_note_close(host->toplevel);
     return;
   }
-  if (opcode == WL_BUFFER_EVENT_RELEASE) {
-    wl_destroy_released_buffer(host, object_id);
+  /* Real, found bug (2026-08-25, real-hardware test): wl_buffer::release
+   * and wl_seat::capabilities are BOTH opcode 0 -- every Wayland
+   * interface numbers its own events starting from 0 independently, so
+   * opcode alone never disambiguates *which* interface's event this is,
+   * only object_id does. This branch used to check opcode alone and
+   * unconditionally `return`, which meant wl_seat::capabilities (also
+   * opcode 0) got silently swallowed here before it ever reached the
+   * real handler below -- wl_destroy_released_buffer() itself was
+   * harmless on a non-buffer id (its own internal loop just finds
+   * nothing and no-ops), but the unconditional early `return` after it
+   * discarded the message regardless. Confirmed via this file's own
+   * CRTGFX_WAYLAND_DEBUG=1 tracing on real hardware: the "seat:
+   * capabilities=..." trace line never printed at all, only "seat: bind
+   * requested" -- keyboard input never worked because the keyboard was
+   * simply never requested in the first place (WL_SEAT_GET_KEYBOARD
+   * only gets sent from inside the capabilities handler). Fixed by only
+   * treating the message as consumed when object_id genuinely named a
+   * buffer this backend created; otherwise fall through so the real
+   * owner of opcode 0 on this object_id gets a chance to handle it. */
+  if (opcode == WL_BUFFER_EVENT_RELEASE && wl_destroy_released_buffer(host, object_id)) {
     return;
   }
   if (host->seat_id != 0 && object_id == host->seat_id && opcode == WL_SEAT_EVENT_CAPABILITIES) {
