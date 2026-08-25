@@ -18,18 +18,21 @@ extension surface to host large applications.
 
 ## Current Baseline
 
-The current baseline is still the Bionic-compatible CRT/PAL:
+The current baseline includes both the Bionic-compatible CRT/PAL and the first
+completed `libcrtgfx` CPU-raster milestone:
 
 - libc/libm/libdl/libc++ bootstrap libraries;
 - shared-library artifacts for all hosts;
 - Android-like rootfs, mksh, and toybox applet environment;
 - configure/make porting flow through CRT wrappers;
-- verified source-port queue through curl on Linux, macOS, and Windows.
+- verified source-port queue through curl on Linux, macOS, and Windows;
+- native Win32, Cocoa, and Linux Wayland windows behind one crtgfx boundary;
+- repeated software-frame presentation and keyboard/mouse input on all three;
+- CRT-built Skia CPU raster plus FreeType text rendering on all three.
 
-Before starting the upper runtime in earnest, the remaining planned libc/PAL
-items in `TODO.md` should be reduced. The upper runtime should expose new gaps,
-but it should not be used to avoid known low-level work such as process, fd,
-rootfs, resolver, console, and symbol-export hygiene.
+The upper runtime is therefore no longer only a plan. New ports must still
+close CRT/PAL gaps at the Bionic-compatible layer rather than hiding them in
+application-specific patches.
 
 ## Upper Libraries
 
@@ -63,7 +66,7 @@ The first goal is not a full desktop environment. It is a stable graphics
 contract that source-rebuilt toolkits or browser components can target without
 reimplementing the OS split themselves.
 
-Current bring-up starts with real host windows before drawing:
+Current graphics baseline:
 
 - `include/crtgfx/window.h` defines the first host-independent window surface
   API.
@@ -79,8 +82,12 @@ Current bring-up starts with real host windows before drawing:
 - Common upper-runtime code links against this project's CRT libraries
   (`libc`, `libm`, `libdl`, `libc++`). Only the narrow host backend layer is
   allowed to call host window/GPU APIs directly.
-- The next graphics step is Skia drawing onto the same software surface,
-  followed later by GPU-backed present paths.
+- `crtgfx_window_poll_event()` delivers keyboard, text, and pointer events on
+  all three hosts; Linux composes text with the project-built xkbcommon port.
+- CRT-built Skia renders into the software surface, and its FreeType-backed
+  font manager draws the bundled font. The interactive demo draws typed text.
+- The next graphics work is broader CPU-raster coverage, then a GPU-backed
+  surface/present contract.
 
 ### libcrtmedia
 
@@ -118,16 +125,14 @@ story are strong enough to make failures actionable.
 
 ## Order Of Work
 
-1. Finish the remaining planned libc/PAL cleanup in `TODO.md`.
-2. Stabilize the porting-test discipline: every new port should verify static
+1. Continue focused libc/PAL cleanup when an upper-runtime consumer exposes a
+   concrete Bionic-compatible requirement.
+2. Maintain the porting-test discipline: every new port should verify static
    and shared builds in the same pass on each host, or document why not.
-3. Bring up `libcrtgfx` first: native host window, software frame present,
-   then Skia drawing.
-4. Define the Wayland-compatible compositor boundary and host window/GPU
-   adapters as the `libcrtgfx` surface contract becomes concrete.
-5. Add QuickJS as the first `libcrtjs` bring-up target.
-6. Add FFmpeg as the first `libcrtmedia` target.
-7. Revisit Chromium/Ozone and V8 after the lower layers have produced enough
+3. Expand the completed `libcrtgfx` CPU baseline and define its GPU handoff.
+4. Add QuickJS as the first `libcrtjs` bring-up target.
+5. Add FFmpeg as the first `libcrtmedia` target.
+6. Revisit Chromium/Ozone and V8 after the lower layers have produced enough
    passing evidence.
 
 ## Non-Goals For This Phase
@@ -137,4 +142,3 @@ story are strong enough to make failures actionable.
 - Do not expose host SDK headers as public CRT ABI.
 - Do not make libcrtgfx/libcrtmedia/libcrtjs part of libc.
 - Do not claim Android framework or APK compatibility.
-

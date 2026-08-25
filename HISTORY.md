@@ -10,6 +10,17 @@ substantive update.
 
 ## 2026-08-25
 
+- **Synchronized the project status documents after completing the first
+  three-host `libcrtgfx` CPU-raster milestone.** `STATUS.md` is now a concise
+  current snapshot instead of a second implementation diary: it separates the
+  CRT/PAL baseline, completed graphics milestone, verification model, active
+  limitations, and next priorities. Completed frame lifecycle, Skia,
+  FreeType, imported-libc++, and keyboard/mouse work was removed from
+  `TODO.md`; stale pre-input/pre-libc++ wording in the crtgfx API, Wayland,
+  runtime-roadmap, and local README documents was updated to match the code
+  and the real macOS/Linux/Windows verification record. Detailed technical
+  history remains here rather than being duplicated into `STATUS.md`.
+
 - **Real keyboard/mouse input wired through `crtgfx/window.h`'s public
   `crtgfx_window_poll_event()` API on all three targets -- the
   "notepad-capability" plan's phases 2/3, phase 1 (fonts) already

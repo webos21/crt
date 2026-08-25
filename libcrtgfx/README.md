@@ -17,7 +17,7 @@ Initial direction:
 - keep Wayland as a compatibility boundary, not as public libc surface;
 - place host adapters under `src/arch/{linux,macos,windows}`.
 
-Current bring-up:
+Current baseline:
 
 - `include/crtgfx/window.h` exposes the first host-independent window API.
 - `src/wayland_weston.c` owns the first Weston-style toplevel/surface state,
@@ -46,18 +46,21 @@ Current bring-up:
   host adapter presents this same buffer shape through its own backend.
 - `crtgfx` and `crtgfx_shared` are default runtime artifacts installed into
   the sysroot; the shared runtime is also copied into the rootfs.
-- `crtgfx_window_smoke` creates a hidden window, fills a software frame, and
-  presents it for automated testing.
+- `crtgfx_window_smoke` creates a window, rejects a nested frame, and presents
+  repeated software frames for automated lifecycle testing.
 - `crtgfx_window_demo` opens a visible window and animates the software
   frame path for manual bring-up, on all three hosts.
-- Skia integration is staged as a CRT-built dependency, not a host SDK link.
+- `crtgfx_window_poll_event()` delivers keyboard/text/pointer input through a
+  common queue on all three hosts. Linux uses Wayland seat devices plus the
+  project-built xkbcommon port; Win32 and Cocoa translate their native events.
+- Skia integration is a CRT-built dependency, not a host SDK link.
   Use `crtgfx-skia-fetch` to fetch the selected Skia milestone/ref and
   `crtgfx-skia-build` to configure/build/install Skia with `tools/crt-c++`
-  against this project's sysroot. The current C++ runtime is intentionally an
-  ABI/allocation bootstrap, not a full libc++ standard-library implementation,
-  so this build does not auto-enable the Skia bridge or link host libc++ as a
-  substitute. The full `crtgfx_skia_raster_smoke` becomes enabled with
-  `CRTGFX_ENABLE_SKIA=ON` after the libc++ import tranche is complete.
+  against this project's sysroot and imported libc++. With
+  `CRTGFX_ENABLE_SKIA=ON`, `crtgfx_skia_raster_smoke` verifies a real CPU
+  `SkSurface`/`SkCanvas` plus FreeType-backed text, and
+  `crtgfx_keyboard_interactive` draws typed text with the same path. This is
+  verified on Linux, macOS, and Windows; host libc++ is not a substitute.
 
 See `docs/libcrtgfx_api_policy.md` for the API boundary decision.
 See `docs/libcrtgfx_wayland_plan.md` for the Wayland/compositor plan.

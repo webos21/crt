@@ -52,7 +52,7 @@ Active threads, not a flat list of one-off items.
 
 ### Upper runtime roadmap
 
-The upper-runtime work is now starting. The long-term target remains an
+The upper-runtime work is now underway. The long-term target remains an
 Electron-class rebuilt native application runtime, but the first practical
 goal is narrower: a lightweight, Bionic-compatible UI/runtime stack that can
 prove JavaScript, graphics, media, event-loop, filesystem, dynamic-loading,
@@ -118,9 +118,10 @@ Boundary decisions from `docs/study`:
   or macOS. SDL2/GLFW/WebGPU/Vulkan-style alternatives remain fallback
   references if a host-native prototype proves the Wayland path too heavy.
   Use WSLg, Wawona/Wayoa/Cocoa-Way-style projects, Weston, wlroots, and
-  Wayland protocol libraries as architecture references first; do not vendor a
-  full compositor until the `crtgfx` surface/frame boundary has tests. From
-  WSLg specifically, take the top-level-surface-to-native-window, explicit
+  Wayland protocol libraries as architecture references first; now that the
+  `crtgfx` surface/frame boundary has tests, import a full compositor only for
+  a concrete consumer rather than treating test availability as sufficient.
+  From WSLg specifically, take the top-level-surface-to-native-window, explicit
   buffer handoff, and host-compositor presentation shape; exclude WSL/Linux
   binary execution, distro/VM packaging, RDP rail integration, and vGPU/VA-API
   dependency. See [`docs/libcrtgfx_wayland_plan.md`](docs/libcrtgfx_wayland_plan.md).
@@ -128,133 +129,50 @@ Boundary decisions from `docs/study`:
   reference stack, with software decode first; GPU texture/audio-device handoff
   comes only after `libcrtgfx` has a real surface/frame abstraction.
 
-Current baseline, completed on Windows first and recorded in
-[`HISTORY.md`](HISTORY.md):
+The first `libcrtgfx` CPU-raster milestone is complete and no longer belongs
+in this work queue. Native windows, repeated software-frame presentation,
+Linux `wl_buffer::release`, keyboard/mouse input, Skia CPU raster, imported
+libc++, and FreeType-backed typed text have all been verified on macOS, Linux,
+and Windows. The concise current state is in [`STATUS.md`](STATUS.md); the
+implementation trail is in [`HISTORY.md`](HISTORY.md).
 
-- `libcrtgfx`, `libcrtjs`, and `libcrtmedia` exist as default workflow,
-  sysroot, and rootfs runtime artifacts. They build static/shared libraries
-  and the shared runtime files are copied into `/system/lib` and `/usr/lib`.
-- Common upper-runtime code links through this project's CRT libraries
-  (`libc`, `libm`, `libdl`, `libc++`). Only narrow host backend objects are
-  allowed to speak native OS window/GPU APIs directly.
-- `libcrtgfx` now has real host adapters on all three targets:
-  `include/crtgfx/window.h` flows through
-  `src/wayland_weston.c`'s Weston-style toplevel/surface state, with
-  per-host code underneath -- Win32 (`src/arch/windows/window_win32.c`),
-  a hand-rolled core-protocol-Wayland+`xdg-shell` client
-  (`src/arch/linux/window_wayland.c`), and real Cocoa driven from C via
-  the Objective-C runtime, no `.m` file
-  (`src/arch/macos/window_cocoa.c`, 2026-08-18) -- see
-  `docs/libcrtgfx_wayland_plan.md`'s "Linux Host Adapter"/"macOS Host
-  Adapter" sections for what each covers, its documented scope cuts, and
-  how it was verified on real hardware/a real compositor session.
-- `crtgfx_window_begin_frame()`/`crtgfx_window_end_frame()` provide the first
-  BGRA8888 software buffer commit/present path. `crtgfx_window_smoke` covers
-  automation and `crtgfx_window_demo` covers manual bring-up.
-- **Real keyboard/mouse input now flows through `crtgfx/window.h`'s public
-  `crtgfx_window_poll_event()` API on all three targets (2026-08-25,
-  the "notepad-capability" plan's phases 2/3 -- see `HISTORY.md`'s
-  matching dated entries).** Linux: a real `wl_seat`/`wl_keyboard`/
-  `wl_pointer` client (`src/arch/linux/window_wayland.c`) plus a new
-  `libcrtgfx/third_party/xkbcommon` port turning `(keycode, modifier
-  state)` into real composed UTF-8 text -- verified live against a real
-  compositor (actual typing/mouse activity captured as real
-  `KEY_DOWN`/`KEY_UP`/`TEXT`/`POINTER_MOTION`/`POINTER_BUTTON_*` events).
-  Windows: real `WM_KEYDOWN`/`WM_CHAR`/mouse-message handling in
-  `src/arch/windows/window_win32.c` -- verified live on this project's
-  own native Windows host (real typed "asdf" and mouse clicks captured
-  correctly). macOS: real `NSEventTypeKeyDown`/`FlagsChanged`/mouse-
-  event handling in `src/arch/macos/window_cocoa.c`, implemented as
-  "reasoned but flagged unverified" (no macOS host access this session)
-  and now confirmed working live on real macOS hardware by the user
-  (2026-08-25) -- typed text and mouse activity captured correctly,
-  matching Linux/Windows. All three targets are real-hardware verified.
-- **Skia's real FreeType-backed font manager (`SkFontMgr_New_Custom_
-  Directory`, pointed at the bundled `libcrtgfx/assets/fonts/
-  DejaVuSansMono.ttf`) is now verified end to end on all three targets**
-  (`crtgfx_skia_raster_smoke: ok`, a real `canvas->drawString()`
-  producing real ink pixels): Windows and macOS were already verified;
-  **Linux was the last one, unblocked 2026-08-25 by fixing this
-  project's own imported static `libc++.a`** (see the next bullet) --
-  previously blocked entirely (`CRTGFX_ENABLE_SKIA` had to stay `OFF` on
-  Linux). `crtgfx_keyboard_interactive` (a manual, non-ctest demo
-  binary) now also draws real typed text on screen this same way when
-  built with `CRTGFX_ENABLE_SKIA=ON`, falling back to a plain gradient
-  fill otherwise.
-- **This project's own imported static `libc++.a` is now correct on
-  Linux (2026-08-25).** Two real, compounding bugs, both closed: (1)
-  the previously-reported "only 3 archive members, no locale/iostream
-  objects at all" was a stale build artifact, not a structural bug --
-  a genuinely fresh rebuild produces a full, correct archive with no
-  source changes needed; (2) fixing that exposed a real `__dso_handle`
-  multiple-definition conflict between `libc/src/arch/linux/common/
-  cxa_atexit.c`'s own hidden-visibility copy and a shim `libcxx`/
-  `libcxxabi` inject for macOS (whose `crt1.o` has no equivalent at
-  all) -- fixed at the CMake level, excluding the shim only from each
-  library's *static* object list on Linux (the *shared* `.so` targets
-  still need their own copy, since a hidden-visibility symbol can never
-  resolve across a shared-object boundary). Verified via a genuinely
-  clean, from-scratch rebuild and a real static-linked program using
-  `<iostream>`/`<locale>`/`<sstream>`, which ran and printed correct
-  output. Both `CRT_USE_IMPORTED_LIBCXX=ON` and the default `OFF`
-  config pass the full `ctest` suite with no regressions.
+Open upper-runtime work, in recommended order:
 
-Next work order:
-
-1. **Lock the `libcrtgfx` software frame lifecycle.**
-   - Define the meaning of `begin_frame()`/`end_frame()` around buffer
-     ownership, resize, repeated frame submission, and when a submitted buffer
-     may be reused or released.
-   - Make Linux Wayland honor real `wl_buffer::release` before freeing a
-     submitted `wl_shm` buffer. Windows/macOS already copy the submitted frame
-     into host-owned presentation storage, so they satisfy the same contract
-     through a different backend policy.
-   - Expand `crtgfx_window_smoke` from a single-frame smoke into a small
-     repeated-frame lifecycle check, including rejecting nested
-     `begin_frame()` calls.
-   - Verification rule: run the full workflow on macOS/Linux/Windows and run
-     the visible demo on each host when a real desktop/compositor is available.
-   - Current status: the basic single-frame workflow itself has since been
-     exercised live on all three hosts many times over, via the keyboard/
-     mouse input work and the Skia raster smoke gate (both 2026-08-25) --
-     but this item's own actual remaining scope, honoring real
-     `wl_buffer::release` on Linux and expanding `crtgfx_window_smoke` into
-     a repeated-frame lifecycle check, has not been touched yet.
-2. **Connect the software frame path to Skia CPU raster drawing.**
-   Keep normal Skia headers as the public 2D drawing API and keep
-   project-owned headers focused on runtime/surface/present/event integration.
-   - Status: the deterministic CPU-raster smoke gate is done. Skia `m148`
-     builds as a CRT-toolchain CPU archive (via this project's own imported
-     libc++) and links on all three hosts; `crtgfx_skia_raster_smoke`'s real
-     FreeType-backed font manager (`SkFontMgr_New_Custom_Directory`)
-     produces real ink pixels on Windows, macOS, and Linux -- Linux was
-     last, unblocked 2026-08-25 by the imported static `libc++.a` fix (see
-     the "Current baseline" bullets above). `crtgfx_keyboard_interactive`
-     now also renders real typed text the same way. One-command build
-     targets exist for both (`crtgfx-skia-smoke`,
-     `crtgfx-keyboard-interactive-skia`), and `tools/test_crtgfx_skia_
-     smoke.py` builds any real crtgfx executable target the same way via
-     `--target`/`--no-run`. The full build/bug-fix trail (Skia fetch/pin,
-     GN/Ninja toolchain wiring across all three hosts, the imported-libc++
-     port, the `<bit>`/`<inttypes.h>` libc gaps, the Windows DWARF-unwind
-     safety net) lives in `HISTORY.md` and is not repeated here.
-   - Still open: real 2D drawing coverage beyond the one smoke binary
-     (paths, images, shaders, clipping/layers -- anything past
-     `drawString()`/a raster fill), a GPU backend (tracked separately as
-     item 3 below), and a real, still-open Wayland `present_software`
-     connectivity difference between different shell contexts on the same
-     WSL host (unrelated to the smoke test itself, which passes cleanly
-     through the real `ctest`-driven run).
-   - A dedicated Windows `<filesystem>` behavior test (especially UTF-32
-     `wchar_t` to native UTF-16 path conversion) remains worthwhile before
-     claiming that imported-libc++ API family's runtime semantics are
-     fully covered.
-3. **Add GPU and media handoff only after the frame/input contract is stable.**
-   Windows D3D, macOS Metal, Linux EGL/Vulkan/dmabuf, and `libcrtmedia`
-   decoded-frame/audio handoff are later optimization/integration tranches,
-   not prerequisites for the first Skia raster milestone.
+1. **Broaden deterministic graphics coverage.** Add a synthetic common-event
+   queue/input regression where host boundaries permit it, then add Skia paths,
+   images, clipping, layers, and representative shader tests without replacing
+   normal Skia headers with a project-owned drawing facade. Add a focused
+   Windows `<filesystem>` behavior test for UTF-32 `wchar_t` to UTF-16 path
+   handling.
+2. **Define and implement the GPU surface handoff.** Keep the software path as
+   the correctness baseline, then stage Direct3D, Metal, and Linux EGL/Vulkan/
+   dmabuf backends behind the same window/surface contract.
+3. **Start `libcrtjs` with QuickJS.** Use it to pressure-test timers, module
+   loading, filesystem, networking, dynamic loading, native bindings, and the
+   common event-loop boundary before attempting V8.
+4. **Start `libcrtmedia` with FFmpeg software decode.** Add decoded CPU-frame
+   and audio-buffer tests before host audio and GPU texture interop.
+5. **Revisit Chromium/Ozone and V8 only after those lower contracts produce
+   stable three-host evidence.**
 
 ## Planned
+
+### Focused CRT/PAL follow-ups
+
+These are real remaining limitations, but none blocks the completed
+`libcrtgfx` CPU-raster milestone. Promote one into active work when a consumer
+or host investigation supplies the required evidence.
+
+- Isolate and fix the optimized repeated-call libffi register corruption on
+  Windows aarch64 using the existing regression on real hardware.
+- Extend the resolver from its current synchronous UDP IPv4/A-record baseline
+  when IPv6, TCP fallback, search domains, or caching becomes a consumer
+  requirement.
+- Complete cross-process signal delivery and meaningful `SIGCHLD` `siginfo_t`
+  data before enabling toybox `timeout`.
+- Revisit a CRT-owned ELF loader/Android-linker boundary only after a real
+  upper-runtime consumer requires behavior the host loader adapter cannot
+  provide.
 
 ### Interactive job control (deferred until it's an actual priority)
 

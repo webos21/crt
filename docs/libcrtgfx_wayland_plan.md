@@ -5,8 +5,10 @@ part of `libcrtgfx`.
 
 ## Direction
 
-Use existing Wayland/compositor projects as references first, not as immediate
-source imports.
+Use existing Wayland/compositor projects as architecture references before
+expanding the imported surface. A pinned Wayland core build now exists for
+toolchain/protocol validation, while the Linux host adapter remains a small
+project-owned client and no full compositor has been imported.
 
 The goal is to learn and reuse proven architecture:
 
@@ -22,10 +24,10 @@ large compositor stack before the project's own boundary is clear.
 
 ## Candidate References
 
-- **Wayland protocol libraries**: use as the protocol vocabulary and generator
-  reference. The first concrete question is whether this project needs only
-  generated protocol headers/state machines, or a real client/server library
-  import.
+- **Wayland protocol libraries**: protocol vocabulary, scanner, and client
+  library reference. The current external build covers the scanner/client
+  slice; generated protocol state and full server/compositor policy should be
+  added only for a concrete consumer.
 - **wlroots/Weston**: use mainly as Linux reference designs for compositor
   roles, surface lifecycle, input dispatch, and `wl_shm`/buffer handling.
   They are not assumed to be directly portable to Windows/macOS.
@@ -36,9 +38,9 @@ large compositor stack before the project's own boundary is clear.
 - **Wawona/Wayoa/Cocoa-Way style projects**: reference for macOS/iOS-native
   mapping of Wayland surfaces to host windows and Metal-backed presentation.
 
-Before any reference project is vendored, record its license, language/runtime
-requirements, build system, host dependencies, protocol scope, and whether it
-can be used as source, design reference, or test fixture only.
+Before any additional reference project is vendored, record its license,
+language/runtime requirements, build system, host dependencies, protocol
+scope, and whether it is source, design reference, or test fixture only.
 
 ## WSLg Lessons Without WSL
 
@@ -160,39 +162,31 @@ They should not expose:
   eventually need a single scheduling contract.
 - GPU zero-copy is a later optimization, not the first correctness target.
 
-## Immediate Plan
+## Milestone Result And Next Plan
 
-The 2026-08-18 three-host window bring-up changed the practical next step:
-`libcrtgfx` already has a project-owned Weston-style toplevel/surface boundary,
-a BGRA8888 software frame path, and real host adapters on Windows, Linux, and
-macOS. The next work should therefore keep Weston/Wayland import pressure small
-until the frame and input contracts are stable.
+The original CPU/software milestone is complete as of 2026-08-25:
 
-1. Lock the software frame lifecycle first.
-   - `begin_frame()` returns a writable, caller-owned-for-the-frame CPU buffer.
-   - A second `begin_frame()` before `end_frame()` is invalid.
-   - `end_frame()` submits the frame to the host backend; after it returns, the
-     caller must not assume the submitted storage can be mutated by the host.
-   - Backends may either copy the pixels into host-owned storage (current Win32
-     and Cocoa policy) or keep submitted storage alive until a compositor
-     release event (Linux Wayland `wl_buffer::release` policy).
-2. Connect the locked software frame to Skia CPU raster drawing.
-   - Current build glue is conditional: `crtgfx/skia.h`,
-     `src/skia_bridge.cc`, and `crtgfx_skia_raster_smoke` become active only
-     when a real Skia checkout and CRT-built Skia library are available.
-   - `crtgfx-skia-fetch`/`crtgfx-skia-configure`/`crtgfx-skia-build` provide
-     the first Skia source/build automation. The build path must use this
-     project's sysroot and `tools/crt-c++`; any failure should be treated as a
-     CRT/PAL/C++ runtime gap before patching Skia.
-3. Study Weston/wlroots/Wayland protocol sources to decide whether to import
-   protocol XML/generated helpers, a small protocol library, or no code yet.
-4. Add input/event delivery across Linux Wayland, Win32, and Cocoa.
-5. Add text/image/font staging once the Skia raster smoke is stable.
-6. Defer GPU texture/direct-render and media handoff until frame/input
-   semantics are stable on all three hosts.
+1. The software-frame contract is fixed and tested. Nested `begin_frame()` is
+   rejected, repeated submission is exercised, Windows/macOS copy into
+   host-owned storage, and Linux waits for real `wl_buffer::release` before
+   reclaiming submitted `wl_shm` storage.
+2. Skia `m148` builds with the CRT toolchain/imported libc++ and draws through
+   an `SkSurface`/`SkCanvas` attached to the common software frame.
+3. Wayland protocol and build policy are recorded under
+   `libcrtgfx/third_party/wayland/`; fetched source and build output remain
+   under the active preset's `out/` tree. The Linux host adapter still uses
+   its small project-owned wire implementation rather than depending on the
+   host `libwayland-client`.
+4. Keyboard and pointer input are live on Linux Wayland, Win32, and Cocoa
+   through the common `crtgfx_window_poll_event()` API. Linux text composition
+   uses the project-built xkbcommon port.
+5. Skia's FreeType-backed custom-directory font manager renders the bundled
+   font on all three hosts, including typed text in the interactive demo.
 
-`libcrtgfx/third_party/wayland/` stays empty until a specific import target is
-chosen with license/provenance/build implications recorded.
+The next tranche is broader deterministic Skia drawing coverage, followed by
+a GPU buffer/surface handoff contract. Direct3D, Metal, Linux EGL/Vulkan/
+dmabuf, full compositor policy, Chromium Ozone, and media texture handoff stay
+outside the completed CPU-raster milestone.
 
 ## Linux Host Adapter (done, first cut)
 
@@ -219,18 +213,21 @@ Known scope cuts, documented in the file itself, not silent:
   multiple simultaneous windows yet (`crtgfx_host_window_dispatch()` has no
   window parameter at all, matching Win32's thread-global message queue, so
   it operates on a single process-wide "active window");
-- no keyboard/pointer/`wl_seat` input;
 - object ids are never recycled.
+
+Input is no longer a scope cut: `wl_seat`/`wl_keyboard`/`wl_pointer` events
+feed the common queue, and xkbcommon converts keymap/modifier state into UTF-8
+text. This path has been exercised against a real compositor with keyboard
+and pointer activity.
 
 Implementation update (2026-08-18): presented `wl_buffer` lifetime is now gated
 by the real `wl_buffer::release` event in code. Each submitted `wl_shm` buffer
 remains mapped/open until the compositor releases it, then the backend destroys
 the `wl_buffer` object and frees its storage. This is intended to close the
 earlier tight-render-loop tear/use-after-free risk and make Linux match the
-common `begin_frame()`/`end_frame()` lifecycle contract. This specific release-
-tracking change has passed C99/`-Werror` syntax checking from macOS; it still
-needs a real Linux compositor rerun before the scope cut can be moved to
-`HISTORY.md` as fully verified.
+common `begin_frame()`/`end_frame()` lifecycle contract. The release-tracking
+path has since been exercised on real Linux together with repeated software
+presentation and input dispatch.
 
 **Verified on a real GNOME/Mutter Wayland session** (not just compiled):
 `crtgfx_window_smoke` passes the full real path end to end (create, get real
@@ -282,11 +279,6 @@ Known scope cuts, documented in the file itself, not silent:
 - single window per process, matching Win32/Linux's own thread-global
   dispatch shape (`crtgfx_host_window_dispatch()` takes no window
   parameter);
-- no keyboard/mouse/trackpad input delivered to the caller yet (events
-  are drained and dispatched to AppKit for correct window chrome/
-  resize/close behavior, but not yet surfaced through the crtgfx public
-  API) -- matching Linux's own "no keyboard/pointer/`wl_seat` input"
-  cut;
 - `crtgfx_host_window_present_software()` copies the caller's pixel
   buffer into its own allocation each frame rather than wrapping it in
   place, avoiding a real tear/use-after-free hazard the very next
@@ -302,6 +294,11 @@ Known scope cuts, documented in the file itself, not silent:
   dedicated `objc_msgSend_stret` entry point. Both paths are
   implemented; only the arm64 path has been run on real hardware this
   session.
+
+Keyboard, modifier, text, and mouse events are now translated from `NSEvent`
+into the common crtgfx event queue and have been verified live on real macOS
+hardware. Trackpad-specific gestures remain outside the current public event
+surface.
 
 **A real bug process-health checks alone could not catch, and one wrong
 fix before the real one**: the first working build passed every

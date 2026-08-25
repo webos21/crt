@@ -110,30 +110,31 @@ Current bridge status (2026-08-18):
   `out/<preset>/external/skia/` tree and are never committed as an accidental
   source import.
 - A successful `crtgfx-skia-build` proves that the selected Skia source builds
-  with CRT headers and libraries. It does not yet prove a runnable Skia-linked
-  executable: the default `//:skia` archive also requires the real libc++
-  standard library. The bridge and `crtgfx_skia_raster_smoke` remain disabled
-  until that project-owned libc++ tranche exists; host libc++ is not a fallback.
+  with CRT headers and libraries. The separate `crtgfx-skia-smoke` target then
+  stages the project-owned imported libc++, links a real Skia consumer, and
+  runs CPU-raster plus FreeType-backed text checks. This complete path now
+  passes on Linux, macOS, and Windows; host libc++ is not a fallback.
 - The build driver is host-specific only at the tool boundary: Linux uses the
   POSIX `tools/crt-ar` response-file wrapper, while Windows uses
   `tools/crt-ar.cmd` and the selected Python interpreter plus an MSVC STL
   include-root probe. This preserves one GN policy while avoiding an accidental
   dependency on Apple `ar`, the Windows `py` launcher, or host C++ headers in
-  the CRT public surface. Each route still needs a real host GN/Ninja run.
+  the CRT public surface. Each route has now completed a real host GN/Ninja
+  build and runnable raster smoke.
 
-The first implementation milestone should therefore be:
+The completed first implementation milestone consists of:
 
-1. create a tiny `crtgfx` runtime/surface API;
-2. keep the first smoke software-only and independent of Skia where useful;
-3. import/build Skia;
-4. expose Skia headers through the `libcrtgfx` include/install path;
-5. add a smoke that obtains an `SkCanvas` from a `crtgfx` surface and draws a
+1. a small `crtgfx` runtime/surface/event API;
+2. a software-only frame smoke independent of Skia;
+3. a CRT-built Skia and imported libc++ toolchain path;
+4. normal Skia headers exposed through the sysroot;
+5. a smoke that obtains an `SkCanvas` from a `crtgfx` surface and draws a
    deterministic 2D frame.
 
 ## Software Frame Contract
 
-Before Skia is imported, the project-owned software frame path is the stable
-boundary every host must obey:
+The project-owned software frame path is the stable boundary every host and
+the current Skia CPU-raster integration obey:
 
 - `crtgfx_window_begin_frame()` returns one writable BGRA8888 premultiplied
   framebuffer for the current frame.
@@ -145,15 +146,16 @@ boundary every host must obey:
 - A backend may copy pixels immediately into host-owned storage (current Win32
   and Cocoa policy) or retain submitted storage until the real compositor
   releases it (current Linux Wayland `wl_buffer::release` policy).
-- This is the buffer/lifetime contract Skia CPU raster will attach to first.
+- This is the buffer/lifetime contract used by the current Skia CPU-raster
+  path and retained as the correctness baseline for future GPU backends.
 
 ## Open Questions
 
 - Whether `crtgfx` should offer a C-only facade for non-C++ consumers later.
   This should be additive and narrow, not the primary drawing API.
-- Which Skia subset should be exposed first: CPU raster only, Ganesh GPU,
-  Graphite GPU, or a staged CPU-first/GPU-later plan.
-- How Skia text/font dependencies should be staged, especially HarfBuzz,
-  FreeType, ICU, and platform font discovery.
+- Which GPU API should be the first backend after the completed CPU-raster
+  baseline, and whether Ganesh or Graphite is the better first Skia path.
+- How to grow from the completed FreeType custom-directory baseline into
+  HarfBuzz shaping, ICU, fallback fonts, and platform font discovery.
 - How `libcrtmedia` should hand decoded frames to Skia: CPU pixel buffer first,
   then GPU texture interop after the host backend is stable.
