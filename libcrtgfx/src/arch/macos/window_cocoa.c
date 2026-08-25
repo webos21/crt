@@ -134,11 +134,22 @@
  *  - single window per process, matching Win32's own thread-global
  *    message queue shape (crtgfx_host_window_dispatch() takes no window
  *    parameter, same as the Win32/Linux backends);
- *  - no keyboard/mouse/trackpad input delivered to the caller yet
- *    (events are drained and dispatched to AppKit for correct window
- *    chrome/resize/close behavior, but this backend does not yet
- *    surface input events through the crtgfx public API -- matching
- *    Linux's own "no keyboard/pointer/wl_seat input" cut);
+ *  - keyboard/mouse input (added 2026-08-25, after Linux and Windows
+ *    already had it verified on real hardware -- see this file's own
+ *    "Keyboard/mouse input" comment further down for the full account):
+ *    UNLIKE every other real/verified fact documented in this file's own
+ *    comments above (all cross-checked on this real macOS host before
+ *    landing), the NSEventType/NSEventModifierFlags/kVK_* constants and
+ *    the objc_msgSend calling-convention choices the new code uses are
+ *    reasoned from Apple's own long-published, stable AppKit ABI (the
+ *    same well-known values every Cocoa input-handling reference cites),
+ *    NOT independently verified against a real running process this
+ *    session -- this session had no macOS host access at all when this
+ *    landed. Matches this project's own established "reasoned but
+ *    flagged unverified" discipline for exactly this situation (see
+ *    memory/HISTORY.md notes on Linux/macOS raw syscall trampolines
+ *    added from a Windows-only session, closed once real hardware
+ *    confirmed them) -- flagged here, not silently shipped as if tested;
  *  - `-frame`/`-bounds` (both NSRect-returning) are the one place this
  *    file's calling convention differs between architectures: AAPCS64
  *    returns NSRect via the ordinary `objc_msgSend` entry point (Apple
@@ -273,13 +284,57 @@ extern void* memcpy(void* dst, const void* src, unsigned long size);
 #define CRTGFX_CGIMAGE_ALPHA_PREMULTIPLIED_FIRST 2u
 #define CRTGFX_CGBITMAP_BYTE_ORDER_32_LITTLE (2u << 12)
 
+/* Real, standard NSEventType values (AppKit's NSEvent.h -- stable since
+ * NeXTSTEP/early Mac OS X). See this file's own top comment ("Scope
+ * cuts") for this session's verification status. */
+#define CRTGFX_NSEVENT_LEFTMOUSEDOWN 1u
+#define CRTGFX_NSEVENT_LEFTMOUSEUP 2u
+#define CRTGFX_NSEVENT_RIGHTMOUSEDOWN 3u
+#define CRTGFX_NSEVENT_RIGHTMOUSEUP 4u
+#define CRTGFX_NSEVENT_MOUSEMOVED 5u
+#define CRTGFX_NSEVENT_LEFTMOUSEDRAGGED 6u
+#define CRTGFX_NSEVENT_RIGHTMOUSEDRAGGED 7u
+#define CRTGFX_NSEVENT_KEYDOWN 10u
+#define CRTGFX_NSEVENT_KEYUP 11u
+#define CRTGFX_NSEVENT_FLAGSCHANGED 12u
+#define CRTGFX_NSEVENT_OTHERMOUSEDOWN 25u
+#define CRTGFX_NSEVENT_OTHERMOUSEUP 26u
+#define CRTGFX_NSEVENT_OTHERMOUSEDRAGGED 27u
+
+/* Real, standard NSEventModifierFlags bits (NSEvent.h, same stability
+ * note as above). */
+#define CRTGFX_NSEVENT_MODIFIER_SHIFT (1u << 17)
+#define CRTGFX_NSEVENT_MODIFIER_CONTROL (1u << 18)
+#define CRTGFX_NSEVENT_MODIFIER_OPTION (1u << 19)
+#define CRTGFX_NSEVENT_MODIFIER_COMMAND (1u << 20)
+
 struct crtgfx_host_window {
   id window;
   id delegate;
   crtgfx_weston_toplevel* toplevel;
+  /* Cocoa reports a bare modifier-key press/release (Shift/Control/
+   * Option/Command alone, no other key) as NSEventTypeFlagsChanged, not
+   * KeyDown/KeyUp -- unlike KeyDown/KeyUp, FlagsChanged carries no
+   * explicit "pressed or released" flag of its own, only the *complete*
+   * new NSEventModifierFlags bitmask. Diffing against the previous call's
+   * flags (stored here) is the standard way to recover press-vs-release
+   * for that one event. Known, documented limitation: if both Shift keys
+   * are held and only one is released, the Shift *bit* stays set (the
+   * other Shift key is still down), so this diff cannot tell that one
+   * specific physical key transitioned -- a real ambiguity in Cocoa's own
+   * flags model (it is per-category, not per left/right key), not a bug
+   * in this diffing logic. */
+  NSUInteger last_modifier_flags;
 };
 
 static Class crtgfx_delegate_class;
+/* crtgfx_host_window_dispatch() takes no window parameter (this file's
+ * own "single window per process" scope cut, matching Win32's own
+ * thread-global message queue shape) -- but it now needs to reach the
+ * active window's toplevel to queue keyboard/mouse events, so it needs
+ * a global the same way src/arch/linux/window_wayland.c's own
+ * crtgfx_wl_active already does for exactly the same reason. */
+static struct crtgfx_host_window* crtgfx_cocoa_active;
 
 /* -frame/-bounds both return NSRect by value. AAPCS64 (arm64) resolves
  * this through the ordinary objc_msgSend entry point; the x86_64 SysV
@@ -350,6 +405,156 @@ static id crtgfx_msgsend_init_window(
     id window, SEL op, NSRect rect, NSUInteger style, NSUInteger backing, BOOL defer) {
   return ((id(*)(id, SEL, NSRect, NSUInteger, NSUInteger, BOOL))objc_msgSend)(
       window, op, rect, style, backing, defer);
+}
+
+static NSUInteger crtgfx_msgsend_uint(id self, SEL op) {
+  return ((NSUInteger(*)(id, SEL))objc_msgSend)(self, op);
+}
+
+static unsigned short crtgfx_msgsend_ushort(id self, SEL op) {
+  return ((unsigned short (*)(id, SEL))objc_msgSend)(self, op);
+}
+
+/* -locationInWindow returns NSPoint (two CGFloat/double = 16 bytes on
+ * 64-bit) -- unlike NSRect (32 bytes, crtgfx_msgsend_rect() above), this
+ * fits within the SysV x86_64 ABI's two-SSE-register return class, so it
+ * does NOT need objc_msgSend_stret on either architecture (that entry
+ * point only exists for structs the real platform ABI can't return in
+ * registers at all -- reasoned from Apple's own long-documented ABI
+ * rules, same verification-status note as this file's own top comment). */
+static NSPoint crtgfx_msgsend_point(id self, SEL op) {
+  return ((NSPoint(*)(id, SEL))objc_msgSend)(self, op);
+}
+
+static const char* crtgfx_msgsend_utf8string(id ns_string) {
+  if (ns_string == 0) {
+    return 0;
+  }
+  return ((const char* (*)(id, SEL))objc_msgSend)(ns_string, sel_registerName("UTF8String"));
+}
+
+/* Real, standard macOS hardware virtual keycodes (Carbon's own kVK_*
+ * enumeration, HIToolbox/Events.h -- but the *values* are what matters
+ * here, not the header: -[NSEvent keyCode] returns these regardless of
+ * whether Carbon.framework is linked at all, which it isn't in this
+ * file). Physical-key-position codes, stable across macOS keyboard
+ * layouts and OS versions for exactly the same reason Linux evdev
+ * codes are -- both correspond to real hardware scan positions, not the
+ * character a given layout produces. See this file's own top comment
+ * ("Scope cuts") for this session's verification status: reasoned from
+ * this well-known, widely-published table, not independently confirmed
+ * against a real running process. Follows crtgfx_win_vk_to_evdev()'s own
+ * documented simplification (window_win32.c): generic left/right
+ * ambiguity aside, always maps to evdev's *left* variant for Shift/
+ * Control/Option(Alt)/Command(Super) when a dedicated left/right kVK_*
+ * code exists for both, since crtgfx_event's own modifiers bitmask (not
+ * the raw keycode) is what a real app should query for "is shift/ctrl/
+ * alt/super down". */
+static uint32_t crtgfx_cocoa_keycode_to_evdev(unsigned short keycode) {
+  switch (keycode) {
+    case 0x00: return 30u;  /* A */
+    case 0x01: return 31u;  /* S */
+    case 0x02: return 32u;  /* D */
+    case 0x03: return 33u;  /* F */
+    case 0x04: return 35u;  /* H */
+    case 0x05: return 34u;  /* G */
+    case 0x06: return 44u;  /* Z */
+    case 0x07: return 45u;  /* X */
+    case 0x08: return 46u;  /* C */
+    case 0x09: return 47u;  /* V */
+    case 0x0b: return 48u;  /* B */
+    case 0x0c: return 16u;  /* Q */
+    case 0x0d: return 17u;  /* W */
+    case 0x0e: return 18u;  /* E */
+    case 0x0f: return 19u;  /* R */
+    case 0x10: return 21u;  /* Y */
+    case 0x11: return 20u;  /* T */
+    case 0x12: return 2u;   /* 1 */
+    case 0x13: return 3u;   /* 2 */
+    case 0x14: return 4u;   /* 3 */
+    case 0x15: return 5u;   /* 4 */
+    case 0x16: return 7u;   /* 6 */
+    case 0x17: return 6u;   /* 5 */
+    case 0x18: return 13u;  /* = */
+    case 0x19: return 10u;  /* 9 */
+    case 0x1a: return 8u;   /* 7 */
+    case 0x1b: return 12u;  /* - */
+    case 0x1c: return 9u;   /* 8 */
+    case 0x1d: return 11u;  /* 0 */
+    case 0x1e: return 27u;  /* ] */
+    case 0x1f: return 24u;  /* O */
+    case 0x20: return 22u;  /* U */
+    case 0x21: return 26u;  /* [ */
+    case 0x22: return 23u;  /* I */
+    case 0x23: return 25u;  /* P */
+    case 0x24: return 28u;  /* Return */
+    case 0x25: return 38u;  /* L */
+    case 0x26: return 36u;  /* J */
+    case 0x27: return 40u;  /* ' */
+    case 0x28: return 37u;  /* K */
+    case 0x29: return 39u;  /* ; */
+    case 0x2a: return 43u;  /* \ */
+    case 0x2b: return 51u;  /* , */
+    case 0x2c: return 53u;  /* / */
+    case 0x2d: return 49u;  /* N */
+    case 0x2e: return 50u;  /* M */
+    case 0x2f: return 52u;  /* . */
+    case 0x30: return 15u;  /* Tab */
+    case 0x31: return 57u;  /* Space */
+    case 0x32: return 41u;  /* ` */
+    case 0x33: return 14u;  /* Delete (physically labeled "delete", but is Backspace) */
+    case 0x35: return 1u;   /* Escape */
+    case 0x36: return 126u; /* Command (right) -> evdev SUPER right */
+    case 0x37: return 125u; /* Command (left) -> evdev SUPER */
+    case 0x38: return 42u;  /* Shift (left) */
+    case 0x39: return 58u;  /* CapsLock */
+    case 0x3a: return 56u;  /* Option/Alt (left) */
+    case 0x3b: return 29u;  /* Control (left) */
+    case 0x3c: return 54u;  /* Shift (right) */
+    case 0x3d: return 100u; /* Option/Alt (right) */
+    case 0x3e: return 97u;  /* Control (right) */
+    case 0x3f: return 0u;   /* Function (fn) -- no evdev equivalent, left unmapped */
+    case 0x41: return 83u;  /* Keypad . */
+    case 0x43: return 55u;  /* Keypad * */
+    case 0x45: return 78u;  /* Keypad + */
+    case 0x4b: return 98u;  /* Keypad / */
+    case 0x4c: return 96u;  /* Keypad Enter */
+    case 0x4e: return 74u;  /* Keypad - */
+    case 0x51: return 0u;   /* Keypad = -- no evdev equivalent, left unmapped */
+    case 0x52: return 82u;  /* Keypad 0 */
+    case 0x53: return 79u;  /* Keypad 1 */
+    case 0x54: return 80u;  /* Keypad 2 */
+    case 0x55: return 81u;  /* Keypad 3 */
+    case 0x56: return 75u;  /* Keypad 4 */
+    case 0x57: return 76u;  /* Keypad 5 */
+    case 0x58: return 77u;  /* Keypad 6 */
+    case 0x59: return 71u;  /* Keypad 7 */
+    case 0x5b: return 72u;  /* Keypad 8 */
+    case 0x5c: return 73u;  /* Keypad 9 */
+    case 0x60: return 63u;  /* F5 */
+    case 0x61: return 64u;  /* F6 */
+    case 0x62: return 65u;  /* F7 */
+    case 0x63: return 61u;  /* F3 */
+    case 0x64: return 66u;  /* F8 */
+    case 0x65: return 67u;  /* F9 */
+    case 0x67: return 87u;  /* F11 */
+    case 0x6d: return 68u;  /* F10 */
+    case 0x6f: return 88u;  /* F12 */
+    case 0x72: return 0u;   /* Help -- no evdev equivalent, left unmapped */
+    case 0x73: return 102u; /* Home */
+    case 0x74: return 104u; /* Page Up */
+    case 0x75: return 111u; /* Forward Delete */
+    case 0x76: return 62u;  /* F4 */
+    case 0x77: return 107u; /* End */
+    case 0x78: return 60u;  /* F2 */
+    case 0x79: return 109u; /* Page Down */
+    case 0x7a: return 59u;  /* F1 */
+    case 0x7b: return 105u; /* Left Arrow */
+    case 0x7c: return 106u; /* Right Arrow */
+    case 0x7d: return 108u; /* Down Arrow */
+    case 0x7e: return 103u; /* Up Arrow */
+    default: return 0u;     /* unmapped: no KEY_DOWN/UP is queued for it (see caller) */
+  }
 }
 
 /* windowShouldClose:/windowWillClose:/windowDidResize: -- the same three
@@ -515,6 +720,7 @@ int crtgfx_host_window_create(const crtgfx_window_desc* desc, crtgfx_weston_topl
   host->window = window;
   host->delegate = delegate;
   toplevel->host = host;
+  crtgfx_cocoa_active = host;
 
   crtgfx_weston_toplevel_note_size(toplevel, desc->width, desc->height);
 
@@ -525,6 +731,9 @@ int crtgfx_host_window_create(const crtgfx_window_desc* desc, crtgfx_weston_topl
 }
 
 void crtgfx_host_window_destroy(crtgfx_host_window* host) {
+  if (crtgfx_cocoa_active == host) {
+    crtgfx_cocoa_active = 0;
+  }
   if (host->window != 0) {
     crtgfx_msgsend_void_id(host->window, sel_registerName("setDelegate:"), 0);
     crtgfx_msgsend_void(host->window, sel_registerName("close"));
@@ -546,6 +755,194 @@ int crtgfx_host_window_show(crtgfx_host_window* host) {
   app = crtgfx_ensure_application();
   crtgfx_msgsend_void_bool(app, sel_registerName("activateIgnoringOtherApps:"), 1);
   return CRTGFX_OK;
+}
+
+static uint32_t crtgfx_cocoa_query_modifiers(NSUInteger flags) {
+  uint32_t mods = 0u;
+  if ((flags & CRTGFX_NSEVENT_MODIFIER_SHIFT) != 0u) {
+    mods |= CRTGFX_MOD_SHIFT;
+  }
+  if ((flags & CRTGFX_NSEVENT_MODIFIER_CONTROL) != 0u) {
+    mods |= CRTGFX_MOD_CTRL;
+  }
+  if ((flags & CRTGFX_NSEVENT_MODIFIER_OPTION) != 0u) {
+    mods |= CRTGFX_MOD_ALT;
+  }
+  if ((flags & CRTGFX_NSEVENT_MODIFIER_COMMAND) != 0u) {
+    mods |= CRTGFX_MOD_SUPER;
+  }
+  return mods;
+}
+
+static void crtgfx_cocoa_queue_key_event(
+    struct crtgfx_host_window* host, crtgfx_event_type type, uint32_t keycode, uint32_t modifiers) {
+  crtgfx_event event = {0};
+  event.type = type;
+  event.data.key.keycode = keycode;
+  event.data.key.modifiers = modifiers;
+  crtgfx_weston_toplevel_note_event(host->toplevel, &event);
+}
+
+/* Real, standard Keyboard/mouse input (added 2026-08-25, see this file's
+ * own top comment "Scope cuts" for this session's verification status).
+ * Called from crtgfx_host_window_dispatch()'s own event loop *before*
+ * -sendEvent:, on every event regardless of type -- it queues a
+ * crtgfx_event for the types it understands and otherwise does nothing,
+ * always letting -sendEvent: still run afterward so normal AppKit
+ * behavior (window dragging, menu key equivalents, ...) is unaffected,
+ * the same "observe, don't fully intercept" shape window_win32.c's own
+ * WndProc uses (queue our own event, still call DefWindowProcA/
+ * TranslateMessage). */
+static void crtgfx_cocoa_handle_event(struct crtgfx_host_window* host, id event) {
+  NSUInteger type;
+  NSUInteger modifier_flags;
+
+  if (host == 0 || host->toplevel == 0 || event == 0) {
+    return;
+  }
+  type = crtgfx_msgsend_uint(event, sel_registerName("type"));
+  modifier_flags = crtgfx_msgsend_uint(event, sel_registerName("modifierFlags"));
+
+  if (type == CRTGFX_NSEVENT_KEYDOWN || type == CRTGFX_NSEVENT_KEYUP) {
+    unsigned short keycode = crtgfx_msgsend_ushort(event, sel_registerName("keyCode"));
+    uint32_t evdev_keycode = crtgfx_cocoa_keycode_to_evdev(keycode);
+    uint32_t modifiers = crtgfx_cocoa_query_modifiers(modifier_flags);
+
+    if (evdev_keycode != 0u) {
+      crtgfx_cocoa_queue_key_event(
+          host, (type == CRTGFX_NSEVENT_KEYDOWN) ? CRTGFX_EVENT_KEY_DOWN : CRTGFX_EVENT_KEY_UP,
+          evdev_keycode, modifiers);
+    }
+    if (type == CRTGFX_NSEVENT_KEYDOWN) {
+      /* -characters already hands back real, composed UTF-8-encodable
+       * text (correct out of the box for dead keys/non-Latin layouts,
+       * matching crtgfx/window.h's own CRTGFX_EVENT_TEXT design) --
+       * -UTF8String converts it, no hand-rolled UTF-8 encoder needed
+       * here the way window_win32.c's WM_CHAR path needs one (Win32
+       * hands back raw UTF-16 code units instead). Skipped for C0
+       * control codes (0x00-0x1f) and DEL (0x7f): -characters still
+       * returns those for Return/Tab/Backspace/Escape/Ctrl+letter key
+       * presses, but those are already fully reported as real KEY_DOWN/
+       * KEY_UP above -- surfacing e.g. Backspace *again* here as a
+       * one-byte "text" event would be a real duplicate/
+       * misrepresentation, the same reasoning window_win32.c's own
+       * WM_CHAR handler documents. */
+      id characters = crtgfx_msgsend_op(event, sel_registerName("characters"));
+      const char* utf8 = crtgfx_msgsend_utf8string(characters);
+      if (utf8 != 0 && utf8[0] != 0 && (unsigned char)utf8[0] >= 0x20u &&
+          (unsigned char)utf8[0] != 0x7fu) {
+        crtgfx_event text_event = {0};
+        unsigned int i; /* not size_t -- this file deliberately has no
+                          * <stddef.h>/libc include at all, see its own
+                          * top comment; unsigned (not int) to avoid a
+                          * signed/unsigned comparison warning against
+                          * sizeof(...)'s own size_t result below */
+        text_event.type = CRTGFX_EVENT_TEXT;
+        for (i = 0; i < sizeof(text_event.data.text.utf8) - 1u && utf8[i] != 0; ++i) {
+          text_event.data.text.utf8[i] = utf8[i];
+        }
+        crtgfx_weston_toplevel_note_event(host->toplevel, &text_event);
+      }
+    }
+    return;
+  }
+
+  if (type == CRTGFX_NSEVENT_FLAGSCHANGED) {
+    /* A bare modifier press/release (see this file's own struct
+     * crtgfx_host_window comment on host->last_modifier_flags for the
+     * full reasoning and its one known, documented ambiguity). */
+    unsigned short keycode = crtgfx_msgsend_ushort(event, sel_registerName("keyCode"));
+    uint32_t evdev_keycode = crtgfx_cocoa_keycode_to_evdev(keycode);
+    NSUInteger relevant_bit = 0u;
+
+    switch (keycode) {
+      case 0x38:
+      case 0x3c:
+        relevant_bit = CRTGFX_NSEVENT_MODIFIER_SHIFT;
+        break;
+      case 0x3b:
+      case 0x3e:
+        relevant_bit = CRTGFX_NSEVENT_MODIFIER_CONTROL;
+        break;
+      case 0x3a:
+      case 0x3d:
+        relevant_bit = CRTGFX_NSEVENT_MODIFIER_OPTION;
+        break;
+      case 0x36:
+      case 0x37:
+        relevant_bit = CRTGFX_NSEVENT_MODIFIER_COMMAND;
+        break;
+      default:
+        break;
+    }
+    if (evdev_keycode != 0u && relevant_bit != 0u) {
+      int now_down = (modifier_flags & relevant_bit) != 0u;
+      crtgfx_cocoa_queue_key_event(
+          host, now_down ? CRTGFX_EVENT_KEY_DOWN : CRTGFX_EVENT_KEY_UP, evdev_keycode,
+          crtgfx_cocoa_query_modifiers(modifier_flags));
+    }
+    host->last_modifier_flags = modifier_flags;
+    return;
+  }
+
+  if (type == CRTGFX_NSEVENT_MOUSEMOVED || type == CRTGFX_NSEVENT_LEFTMOUSEDRAGGED ||
+      type == CRTGFX_NSEVENT_RIGHTMOUSEDRAGGED) {
+    id content_view;
+    NSRect bounds;
+    NSPoint location;
+    crtgfx_event motion_event = {0};
+
+    if (host->window == 0) {
+      return;
+    }
+    content_view = crtgfx_msgsend_op(host->window, sel_registerName("contentView"));
+    if (content_view == 0) {
+      return;
+    }
+    bounds = crtgfx_msgsend_rect(content_view, sel_registerName("bounds"));
+    location = crtgfx_msgsend_point(event, sel_registerName("locationInWindow"));
+    /* Cocoa's coordinate origin is bottom-left; every other crtgfx
+     * backend (Win32/Wayland) reports pointer coordinates with a
+     * top-left origin -- flipped here so callers never see a host-
+     * specific coordinate convention leak through the public API. */
+    motion_event.type = CRTGFX_EVENT_POINTER_MOTION;
+    motion_event.data.pointer_motion.x = (double)location.x;
+    motion_event.data.pointer_motion.y = (double)bounds.size.height - (double)location.y;
+    crtgfx_weston_toplevel_note_event(host->toplevel, &motion_event);
+    return;
+  }
+
+  if (type == CRTGFX_NSEVENT_LEFTMOUSEDOWN || type == CRTGFX_NSEVENT_RIGHTMOUSEDOWN ||
+      type == CRTGFX_NSEVENT_OTHERMOUSEDOWN || type == CRTGFX_NSEVENT_LEFTMOUSEUP ||
+      type == CRTGFX_NSEVENT_RIGHTMOUSEUP || type == CRTGFX_NSEVENT_OTHERMOUSEUP) {
+    id content_view;
+    NSRect bounds;
+    NSPoint location;
+    crtgfx_event button_event = {0};
+    int is_down = (type == CRTGFX_NSEVENT_LEFTMOUSEDOWN || type == CRTGFX_NSEVENT_RIGHTMOUSEDOWN ||
+                   type == CRTGFX_NSEVENT_OTHERMOUSEDOWN);
+
+    if (host->window == 0) {
+      return;
+    }
+    content_view = crtgfx_msgsend_op(host->window, sel_registerName("contentView"));
+    if (content_view == 0) {
+      return;
+    }
+    bounds = crtgfx_msgsend_rect(content_view, sel_registerName("bounds"));
+    location = crtgfx_msgsend_point(event, sel_registerName("locationInWindow"));
+    button_event.type = is_down ? CRTGFX_EVENT_POINTER_BUTTON_DOWN : CRTGFX_EVENT_POINTER_BUTTON_UP;
+    button_event.data.pointer_button.button =
+        (type == CRTGFX_NSEVENT_LEFTMOUSEDOWN || type == CRTGFX_NSEVENT_LEFTMOUSEUP)
+            ? CRTGFX_POINTER_BUTTON_LEFT
+        : (type == CRTGFX_NSEVENT_RIGHTMOUSEDOWN || type == CRTGFX_NSEVENT_RIGHTMOUSEUP)
+            ? CRTGFX_POINTER_BUTTON_RIGHT
+            : CRTGFX_POINTER_BUTTON_MIDDLE;
+    button_event.data.pointer_button.x = (double)location.x;
+    button_event.data.pointer_button.y = (double)bounds.size.height - (double)location.y;
+    crtgfx_weston_toplevel_note_event(host->toplevel, &button_event);
+    return;
+  }
 }
 
 static long crtgfx_now_ms(void) {
@@ -584,6 +981,7 @@ int crtgfx_host_window_dispatch(uint32_t timeout_ms) {
     if (event == 0) {
       break;
     }
+    crtgfx_cocoa_handle_event(crtgfx_cocoa_active, event);
     crtgfx_msgsend_void_id(app, sel_registerName("sendEvent:"), event);
   }
 
