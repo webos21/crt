@@ -291,7 +291,31 @@ def main():
         print(f"libxkbcommon configured: {build_dir}")
         return
 
-    common_includes = [src, include, build_dir]
+    # root / "include": this project's own raw libc headers (stdio.h,
+    # assert.h, string.h, ...), included directly from the source tree --
+    # NOT via tools/crt-cc's own default -isystem${CRT_SYSROOT}/include.
+    # Found for real via a GitHub Actions CI failure (2026-08-25) on a
+    # from-scratch checkout: "fatal error: 'stdio.h' file not found" at
+    # xkbcommon.h's own #include <stdio.h>, because crtgfx-xkbcommon-build
+    # has no ninja dependency edge forcing the `sysroot` custom target
+    # (the thing that actually populates ${CRT_SYSROOT}/include by
+    # copying this project's own include/ into the build tree) to run
+    # first -- and it deliberately CAN'T have one: `sysroot` itself
+    # DEPENDS on crtgfx/crtgfx_shared (CMakeLists.txt), which in turn
+    # DEPEND on crtgfx-xkbcommon-build (libcrtgfx/CMakeLists.txt) to link
+    # libxkbcommon.a, so crtgfx-xkbcommon-build -> sysroot -> crtgfx ->
+    # crtgfx-xkbcommon-build would be a real ninja dependency cycle (the
+    # same class of cycle libcrtgfx/CMakeLists.txt's own CRTGFX_ENABLE_SKIA
+    # comments already document and deliberately avoid for Skia, by never
+    # creating a real edge onto crtgfx-skia-build in the first place). This
+    # never surfaced locally because a build directory reused across
+    # sessions already had ${CRT_SYSROOT}/include populated from an
+    # earlier, unrelated full build -- only a genuinely fresh checkout
+    # (i.e. CI) exposes it. Since this project's own include/ is plain
+    # source-controlled header files with no build step of their own, an
+    # extra -I straight at the repo's include/ directory is always valid
+    # immediately, with no ordering dependency on anything at all.
+    common_includes = [src, include, build_dir, root / "include"]
     defines = ["HAVE_CONFIG_H"]
 
     obj_dir = build_dir / "obj"
