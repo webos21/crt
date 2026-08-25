@@ -8,6 +8,42 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-08-25
+
+- **`crtgfx-skia-build` fixed on macOS: `freetype` failed to fetch its
+  own implicit `make` build-tool dependency.** User reported the exact
+  failure (`cmake --build --preset macos-host-ninja-debug --target
+  crtgfx-skia-build`): `source not found: .../port-tests/src/toolchain-
+  make-44fc4fe66a484b91844c302f03eaa8438e065d17` while building freetype
+  (a "configure"-system recipe). Root cause: `tools/crt-port-build.py`'s
+  `build_port()` unconditionally builds and installs the `make` port
+  before *any* configure-system recipe on every host (see `porting/
+  recipes/make.json`'s own notes), but that rule lives only in
+  `crt-port-build.py` -- `tools/fetch_ports.py`'s own dependency
+  resolution (which decides what to actually download) instead walks
+  each recipe's own declared `dependencies` array. `freetype.json` (and
+  `expat.json`/`mbedtls.json`/`pcre2.json`/`xz.json`, found to share the
+  identical gap once this class of bug was understood) all had `"depend-
+  encies": []`, so a fully standalone `port-fetch-freetype` (this
+  recipe's own dedicated CMake target, `crtgfx-skia-build`'s only
+  configure-system dependency) never fetched `make`'s source at all --
+  the gap never surfaced for `libffi`/`zlib` (which already declare
+  `dependencies: ["make"]`) or for `expat` in the Wayland smoke session
+  the day before, since `libffi`'s own fetch had already pulled `make`'s
+  source into that session's *shared* `port-tests/src/` tree first,
+  masking the same latent bug there. Fixed by adding `"make"` to all
+  five recipes' `dependencies` arrays, matching `libffi.json`/`zlib.json`'s
+  own existing precedent exactly -- this only changes what `fetch_ports.py`
+  fetches, not anything about the build itself (`crt-port-build.py`
+  already built `make` first regardless). Verified for real: re-running
+  the exact failing `crt-port-build.py --port freetype` invocation now
+  succeeds end to end (configure/make/make install), and freetype's own
+  `glyph-rasterize-static`/`glyph-rasterize-shared` port tests both print
+  `freetype_glyph_test: ok` (a real rendered DejaVuSansMono glyph) --
+  `porting/recipes/freetype.json`'s own `status.macos` updated from
+  `pending` to `shared-pass` to match. Full default `cmake --build` and
+  the full `ctest` suite (104/104) both pass with no regressions.
+
 ## 2026-08-24
 
 - **Skia's real `SkFontMgr_custom_directory` (FreeType-backed) wired in,
