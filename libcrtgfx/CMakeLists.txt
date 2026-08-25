@@ -79,11 +79,41 @@ set(CRTGFX_SKIA_EXTRA_GN_ARGS "" CACHE STRING "Semicolon-separated extra raw GN 
 set(CRTGFX_SKIA_FREETYPE_PREFIX "${CMAKE_BINARY_DIR}/port-tests/install" CACHE PATH "Shared porting/recipes install prefix (freetype) for the Skia build")
 if(NOT CRTGFX_SKIA_LIBRARIES AND EXISTS "${CRTGFX_SKIA_INSTALL_PREFIX}/lib/libskia.a")
   set(CRTGFX_SKIA_LIBRARIES "${CRTGFX_SKIA_INSTALL_PREFIX}/lib/libskia.a" CACHE STRING "Libraries needed to link Skia CPU raster support" FORCE)
-  if(EXISTS "${CRTGFX_SKIA_FREETYPE_PREFIX}/lib/libfreetype.a")
-    set(CRTGFX_SKIA_LIBRARIES "${CRTGFX_SKIA_LIBRARIES};${CRTGFX_SKIA_FREETYPE_PREFIX}/lib/libfreetype.a" CACHE STRING "Libraries needed to link Skia CPU raster support" FORCE)
-  endif()
-else()
+elseif(NOT CRTGFX_SKIA_LIBRARIES)
   set(CRTGFX_SKIA_LIBRARIES "" CACHE STRING "Libraries needed to link Skia CPU raster support")
+endif()
+# Deliberately a *separate*, unconditionally-re-evaluated check, not folded
+# into the one-shot "first time CRTGFX_SKIA_LIBRARIES gets populated" branch
+# above: libskia.a and libfreetype.a don't necessarily finish building in
+# the same configure pass (crtgfx-skia-build itself has no ninja dependency
+# edge onto port-build-freetype's own *build*, only crtgfx-skia-configure/
+# -build depending on it being requested -- see this file's own crtgfx-
+# skia-configure/-build add_custom_target calls further down). Confirmed
+# for real (2026-08-25): a build tree whose CRTGFX_SKIA_LIBRARIES cache
+# entry was already populated from an earlier configure, back when
+# port-build-freetype had not yet succeeded on macOS (see porting/
+# recipes/freetype.json's own 2026-08-25 notes on the make-dependency fix
+# that unblocked it there), kept silently linking crtgfx/crtgfx_shared
+# without libfreetype.a forever after -- the one-shot guard above only
+# ever fires once per build directory's cache lifetime, so freetype.a
+# becoming available *later* than the first configure never re-triggered
+# it. Symptom: dozens of undefined `_FT_*` symbols linking libcrtgfx.dylib
+# (SkScalerContext_FreeType/SkFontScanner_FreeType, from libskia.a's own
+# skia_use_freetype=true object files), not a "clean rebuild will fix it"
+# situation -- a plain `cmake --build` reconfigure alone does not
+# re-evaluate this any more than it did before, since the cache entry
+# already exists either way. This block re-checks on *every* configure,
+# regardless of whether CRTGFX_SKIA_LIBRARIES already had a value coming
+# in (auto-populated above, previously cached, or an explicit user
+# override), and appends libfreetype.a the moment it exists on disk if it
+# isn't already present -- self-healing across a freetype port that
+# builds successfully sometime after libskia.a already did, without
+# needing a full cache wipe/reconfigure from scratch to notice.
+if(CRTGFX_SKIA_LIBRARIES AND EXISTS "${CRTGFX_SKIA_FREETYPE_PREFIX}/lib/libfreetype.a")
+  set(CRTGFX_SKIA_FREETYPE_LIBRARY "${CRTGFX_SKIA_FREETYPE_PREFIX}/lib/libfreetype.a")
+  if(NOT CRTGFX_SKIA_FREETYPE_LIBRARY IN_LIST CRTGFX_SKIA_LIBRARIES)
+    set(CRTGFX_SKIA_LIBRARIES "${CRTGFX_SKIA_LIBRARIES};${CRTGFX_SKIA_FREETYPE_LIBRARY}" CACHE STRING "Libraries needed to link Skia CPU raster support" FORCE)
+  endif()
 endif()
 if(EXISTS "${CRTGFX_SKIA_ROOT}/include/core/SkSurface.h" AND CRTGFX_SKIA_LIBRARIES)
   set(CRTGFX_SKIA_AVAILABLE_DEFAULT ON)

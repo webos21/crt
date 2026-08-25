@@ -40,11 +40,45 @@ if(CRT_TARGET_OS STREQUAL "windows")
   )
 endif()
 
-install(TARGETS cxx cxx_shared
-  ARCHIVE DESTINATION lib
-  LIBRARY DESTINATION lib
-  RUNTIME DESTINATION bin
-)
+# option() hoisted up from its previous spot further down this same file
+# (where CRT_LIBCXX_RECIPE_ROOT/etc. are declared) so it exists before this
+# install() call needs to read it -- see that if(NOT CRT_USE_IMPORTED_LIBCXX)
+# guard's own comment for why.
+option(CRT_USE_IMPORTED_LIBCXX "Use a successfully staged Android libc++ runtime for dependent external builds" OFF)
+# Skipped entirely once a real imported libc++ is in play: the top-level
+# `sysroot` custom target (CMakeLists.txt) has no declared OUTPUT/
+# BYPRODUCTS, so ninja always considers it "out of date" and reruns its
+# `cmake --install` step on *every* build invocation that reaches it
+# (crt-libcxx-configure and every configure-system port's own port-build-*
+# target both depend on it directly) -- not just the first time. Since
+# this install(TARGETS ...) uses cxx/cxx_shared's own OUTPUT_NAME (`c++`),
+# it writes to the exact same ${CRT_SYSROOT}/lib/libc++.a/.dylib path
+# tools/install_libcxx_runtimes.py's own staging step (the crt-libcxx-
+# sysroot target) writes the real, full imported libc++ to -- so leaving
+# this unconditional meant *any* later build activity that happened to
+# reach `sysroot` again (an ordinary `cmake --build --target crtgfx_skia_
+# raster_smoke`/`port-build-freetype`/etc, not just an explicit `--target
+# sysroot`) would silently overwrite an already-correctly-staged real
+# libc++.a back to this small bootstrap ABI shim (operator new/delete/
+# __cxa_* stubs only) -- confirmed for real, twice (2026-08-23 and
+# 2026-08-25, on two different build directories): dozens of undefined
+# std::__1::... symbols linking crtgfx_skia_raster_smoke/libcrtgfx.dylib
+# against libskia.a, in a tree where crt-libcxx-sysroot had *already* run
+# successfully and produced the real 9MB+ archive shortly before. A
+# reconfigure/rebuild alone never fixed it, because the clobbering install
+# step kept re-running on the very next build invocation that needed
+# `sysroot` for any other reason. Guarding it here (skip staging the
+# bootstrap's own libc++.a/.dylib into the sysroot at all, once imported
+# libc++ is the active choice) is the real fix, not another one-off
+# manual re-stage: whichever install runs last, real or bootstrap, no
+# longer matters, because the bootstrap one is never in the running.
+if(NOT CRT_USE_IMPORTED_LIBCXX)
+  install(TARGETS cxx cxx_shared
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin
+  )
+endif()
 
 # Android keeps the full standard library outside Bionic's small libstdc++ ABI
 # shim. Keep those sources outside this checkout too: each component's own
@@ -59,7 +93,9 @@ set(CRT_LIBCXX_RECIPE_ROOT "${CMAKE_SOURCE_DIR}/libstdc++/third_party" CACHE PAT
 set(CRT_LIBCXX_FETCH_ROOT "${CMAKE_BINARY_DIR}/external/llvm-runtimes" CACHE PATH "Android LLVM runtime source root")
 set(CRT_LIBCXX_BUILD_ROOT "${CRT_LIBCXX_FETCH_ROOT}/build" CACHE PATH "Android libc++ CMake build root")
 set(CRT_LIBCXX_INSTALL_PREFIX "${CRT_LIBCXX_FETCH_ROOT}/install" CACHE PATH "Android libc++ staged install prefix")
-option(CRT_USE_IMPORTED_LIBCXX "Use a successfully staged Android libc++ runtime for dependent external builds" OFF)
+# CRT_USE_IMPORTED_LIBCXX itself is declared earlier in this same file now
+# (right before the install(TARGETS cxx cxx_shared ...) call that needs to
+# read it) -- see that option()'s own comment for why.
 set(CRT_LIBCXX_PLATFORM_ARGUMENTS "")
 if(CRT_TARGET_OS STREQUAL "windows" AND CRT_WINDOWS_KERNEL32_LIB)
   get_filename_component(CRT_LIBCXX_WINDOWS_SDK_LIBPATH "${CRT_WINDOWS_KERNEL32_LIB}" DIRECTORY)
