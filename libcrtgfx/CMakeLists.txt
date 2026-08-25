@@ -132,10 +132,36 @@ set(CRTGFX_XKBCOMMON_FETCH_ROOT "${CMAKE_BINARY_DIR}/external/xkbcommon" CACHE P
 set(CRTGFX_XKBCOMMON_ROOT "${CRTGFX_XKBCOMMON_FETCH_ROOT}/src" CACHE PATH "libxkbcommon checkout root")
 set(CRTGFX_XKBCOMMON_BUILD_DIR "${CRTGFX_XKBCOMMON_FETCH_ROOT}/build" CACHE PATH "libxkbcommon build output directory")
 set(CRTGFX_XKBCOMMON_INSTALL_PREFIX "${CRTGFX_XKBCOMMON_FETCH_ROOT}/install" CACHE PATH "libxkbcommon install prefix")
-if(CRT_TARGET_OS STREQUAL "linux" AND EXISTS "${CRTGFX_XKBCOMMON_INSTALL_PREFIX}/lib/libxkbcommon.a")
+# Deliberately NOT gated on `EXISTS "${CRTGFX_XKBCOMMON_INSTALL_PREFIX}/lib/
+# libxkbcommon.a"` the way CRTGFX_SKIA_LIBRARIES (above) is -- Skia is an
+# opt-in port (CRTGFX_ENABLE_SKIA) that may genuinely never have been built,
+# so an EXISTS check is the right way to detect "not built yet" and degrade
+# gracefully. libxkbcommon is NOT opt-in: crtgfx/crtgfx_shared always
+# add_dependencies() on crtgfx-xkbcommon-build on Linux (further down this
+# file), so libxkbcommon.a always gets built before anything actually links
+# it -- but that's a *ninja build-time* guarantee, not a *CMake configure-
+# time* one. A real GitHub Actions CI failure (2026-08-25) on a from-scratch
+# checkout showed the actual bug an EXISTS check causes here: `cmake
+# --workflow` configures once, *before* any ninja target has run, so
+# libxkbcommon.a genuinely does not exist on disk yet at configure time --
+# an EXISTS-gated CRTGFX_XKBCOMMON_LIBRARIES permanently cached itself as
+# empty right then, and (unlike CRTGFX_SKIA_LIBRARIES's own re-checked-
+# every-configure freetype block above) nothing ever re-evaluates it later
+# in the same single-pass workflow, even after the real build finishes --
+# ninja bakes the empty value into every already-generated link command.
+# Symptom: crtgfx_window_smoke/crtgfx_window_demo (real executables, which
+# unlike a .so hard-fail on unresolved symbols) linked with `undefined
+# reference to xkb_context_new` and friends, on a target (aarch64) that had
+# never had a stale populated cache entry from an earlier local session to
+# accidentally mask the bug, unlike every prior local Linux verification
+# this port had actually received. Setting this unconditionally for Linux
+# is correct specifically *because* the ninja dependency edges already make
+# the file's existence a real invariant by build time -- there is no
+# "maybe never built" state to detect here the way there is for Skia.
+if(CRT_TARGET_OS STREQUAL "linux")
   set(CRTGFX_XKBCOMMON_LIBRARIES "${CRTGFX_XKBCOMMON_INSTALL_PREFIX}/lib/libxkbcommon.a" CACHE STRING "Libraries needed to link libxkbcommon into the Linux/Wayland backend" FORCE)
 else()
-  set(CRTGFX_XKBCOMMON_LIBRARIES "" CACHE STRING "Libraries needed to link libxkbcommon into the Linux/Wayland backend")
+  set(CRTGFX_XKBCOMMON_LIBRARIES "" CACHE STRING "Libraries needed to link libxkbcommon into the Linux/Wayland backend" FORCE)
 endif()
 # Building Skia against the CRT is already a useful porting gate. Linking it
 # into libcrtgfx requires the full libc++ standard library, which is a later
@@ -545,7 +571,30 @@ if(Python3_Interpreter_FOUND)
     USES_TERMINAL
   )
 
-  add_custom_target(crtgfx-xkbcommon-build
+  # OUTPUT-based (not a plain add_custom_target COMMAND) specifically so
+  # ninja has a real rule that produces this *exact* file path -- required
+  # because CRTGFX_XKBCOMMON_LIBRARIES (just above) now unconditionally
+  # feeds this literal path into target_link_libraries(crtgfx/crtgfx_shared
+  # PRIVATE ...). A raw file path passed to target_link_libraries becomes a
+  # real ninja build-graph *input*, not just an order-only target
+  # dependency -- if nothing in the graph claims to produce that path (a
+  # plain add_custom_target's COMMAND has no OUTPUT, so it doesn't count),
+  # ninja refuses to even start the build: real GitHub Actions CI failure
+  # (2026-08-25, aarch64), from a from-scratch checkout: "ninja: error:
+  # 'external/xkbcommon/install/lib/libxkbcommon.a', needed by
+  # 'lib/libcrtgfx.so', missing and no known rule to make it". This is
+  # exactly the ninja limitation CRTGFX_SKIA_LIBRARIES's own EXISTS-gating
+  # (above) was *also* silently working around by simply never listing a
+  # not-yet-existing file as a link input in the first place -- xkbcommon
+  # can't use that same trick (see CRTGFX_XKBCOMMON_LIBRARIES's own
+  # comment: it's a non-optional, always-built dependency, and an
+  # EXISTS-gated value evaluated once at configure time can never become
+  # true later within one single-pass `cmake --workflow` invocation). An
+  # OUTPUT-based add_custom_command is the correct, general fix instead:
+  # ninja then knows precisely how to produce this path on demand,
+  # regardless of configure-vs-build-time ordering.
+  add_custom_command(
+    OUTPUT "${CRTGFX_XKBCOMMON_INSTALL_PREFIX}/lib/libxkbcommon.a"
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
       "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/build_xkbcommon.py"
       --root "${CMAKE_SOURCE_DIR}"
@@ -560,6 +609,9 @@ if(Python3_Interpreter_FOUND)
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     COMMENT "Building and installing libxkbcommon's core keymap/state API with the CRT toolchain"
     USES_TERMINAL
+  )
+  add_custom_target(crtgfx-xkbcommon-build
+    DEPENDS "${CRTGFX_XKBCOMMON_INSTALL_PREFIX}/lib/libxkbcommon.a"
   )
 endif()
 
