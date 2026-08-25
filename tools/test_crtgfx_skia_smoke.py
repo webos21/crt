@@ -82,6 +82,18 @@ def main():
         # that stale cached value here, recreating the exact rootfs/
         # crt-libcxx-sysroot cycle this phase exists to avoid.
         "-DCRT_USE_IMPORTED_LIBCXX=OFF",
+        # Same exact reasoning, applied to the *other* flag this script's
+        # own Phase 2 (below) turns on -- found missing for real
+        # (2026-08-25, Windows): a build directory that had already
+        # completed a full previous run (Phase 2 left CRTGFX_ENABLE_SKIA=ON
+        # cached) hit libcrtgfx/CMakeLists.txt's own new "CRTGFX_ENABLE_
+        # SKIA=ON requires CRT_USE_IMPORTED_LIBCXX=ON on Windows" guard
+        # right here in Phase 0, because this phase forces
+        # CRT_USE_IMPORTED_LIBCXX=OFF while the stale CRTGFX_ENABLE_SKIA=ON
+        # from the *previous* invocation was left untouched -- the same
+        # class of stale-cache bug the comment above already learned to
+        # avoid for CRT_USE_IMPORTED_LIBCXX, just not yet applied here too.
+        "-DCRTGFX_ENABLE_SKIA=OFF",
     ]
     if args.target_os == "windows":
         # Matches CMakePresets.json's own windows-host-ninja-debug entry.

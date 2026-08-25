@@ -120,9 +120,33 @@ static int crtgfx_wl_debug_enabled(void) {
 #define XDG_TOPLEVEL_EVENT_CONFIGURE 0u
 #define XDG_TOPLEVEL_EVENT_CLOSE 1u
 /* wl_seat */
+#define WL_SEAT_GET_POINTER 0u
 #define WL_SEAT_GET_KEYBOARD 1u
 #define WL_SEAT_EVENT_CAPABILITIES 0u
+/* Real wayland.xml wl_seat::capability bitfield enum: pointer=1,
+ * keyboard=2, touch=4. */
+#define WL_SEAT_CAPABILITY_POINTER (1u << 0)
 #define WL_SEAT_CAPABILITY_KEYBOARD (1u << 1)
+/* wl_pointer -- event opcodes are declaration order in wayland.xml
+ * (enter, leave, motion, button, axis, frame since v5, ...); this
+ * backend only ever binds wl_seat/wl_pointer at version 1, so nothing
+ * past axis is ever sent. surface_x/surface_y/value are wl_fixed_t, a
+ * 24.8 signed fixed-point number packed into an int32 -- confirmed
+ * directly against real upstream wayland-util.h's own wl_fixed_to_
+ * double() (`return f / 256.0;`), not assumed. */
+#define WL_POINTER_EVENT_ENTER 0u
+#define WL_POINTER_EVENT_LEAVE 1u
+#define WL_POINTER_EVENT_MOTION 2u
+#define WL_POINTER_EVENT_BUTTON 3u
+#define WL_POINTER_BUTTON_STATE_RELEASED 0u
+#define WL_POINTER_BUTTON_STATE_PRESSED 1u
+/* Real Linux evdev button codes (linux/input-event-codes.h -- confirmed
+ * against a real copy of that header, matching this file's own already-
+ * established discipline for KEY_* codes). wl_pointer::button's own doc
+ * says the button field *is* one of these, not a separate enum. */
+#define CRTGFX_BTN_LEFT 0x110u
+#define CRTGFX_BTN_RIGHT 0x111u
+#define CRTGFX_BTN_MIDDLE 0x112u
 /* wl_keyboard -- event opcodes are declaration order in wayland.xml
  * (keymap, enter, leave, key, modifiers, repeat_info since v4); request
  * opcode (release, since v3) is never sent by this backend, which only
@@ -175,6 +199,13 @@ struct crtgfx_host_window {
    * keyboard events are ever queued -- not a connection failure. */
   uint32_t seat_id;
   uint32_t keyboard_id;
+  uint32_t pointer_id;
+  /* wl_pointer::button carries no x/y of its own -- wayland.xml's own
+   * doc says "The location of the click is given by the last motion,
+   * warp or enter event", so the most recent one has to be tracked here
+   * to fill in crtgfx_event.data.pointer_button.x/y on a button event. */
+  double pointer_x;
+  double pointer_y;
 
   int have_first_configure;
   uint32_t configure_serial;
@@ -587,14 +618,85 @@ static void wl_dispatch_message(
     uint32_t capabilities = wl_get_u32(body, 0);
     unsigned char out[4];
 
-    CRTGFX_WL_TRACE("seat: capabilities=0x%x keyboard_bit=%d\n", capabilities,
-                     (capabilities & WL_SEAT_CAPABILITY_KEYBOARD) != 0u);
+    CRTGFX_WL_TRACE("seat: capabilities=0x%x keyboard_bit=%d pointer_bit=%d\n", capabilities,
+                     (capabilities & WL_SEAT_CAPABILITY_KEYBOARD) != 0u,
+                     (capabilities & WL_SEAT_CAPABILITY_POINTER) != 0u);
     if ((capabilities & WL_SEAT_CAPABILITY_KEYBOARD) != 0u && host->keyboard_id == 0u) {
       host->keyboard_id = host->next_id++;
       wl_put_u32(out, 0, host->keyboard_id);
       wl_send(host, host->seat_id, WL_SEAT_GET_KEYBOARD, out, sizeof(out), -1);
       CRTGFX_WL_TRACE("seat: requesting keyboard id=%u\n", host->keyboard_id);
     }
+    if ((capabilities & WL_SEAT_CAPABILITY_POINTER) != 0u && host->pointer_id == 0u) {
+      host->pointer_id = host->next_id++;
+      wl_put_u32(out, 0, host->pointer_id);
+      wl_send(host, host->seat_id, WL_SEAT_GET_POINTER, out, sizeof(out), -1);
+      CRTGFX_WL_TRACE("seat: requesting pointer id=%u\n", host->pointer_id);
+    }
+    return;
+  }
+  if (host->pointer_id != 0 && object_id == host->pointer_id) {
+    if (opcode == WL_POINTER_EVENT_MOTION) {
+      /* time(uint,0), surface_x(fixed,4), surface_y(fixed,8). */
+      int32_t x_fixed = (int32_t)wl_get_u32(body, 4);
+      int32_t y_fixed = (int32_t)wl_get_u32(body, 8);
+
+      host->pointer_x = (double)x_fixed / 256.0;
+      host->pointer_y = (double)y_fixed / 256.0;
+      if (host->toplevel != 0) {
+        crtgfx_event event = {0};
+        event.type = CRTGFX_EVENT_POINTER_MOTION;
+        event.data.pointer_motion.x = host->pointer_x;
+        event.data.pointer_motion.y = host->pointer_y;
+        crtgfx_weston_toplevel_note_event(host->toplevel, &event);
+      }
+      return;
+    }
+    if (opcode == WL_POINTER_EVENT_ENTER) {
+      /* serial(uint,0), surface(object,4), surface_x(fixed,8),
+       * surface_y(fixed,12) -- same shape as motion, plus a leading
+       * serial/surface pair; also gives a real initial position before
+       * any motion event has arrived yet. */
+      int32_t x_fixed = (int32_t)wl_get_u32(body, 8);
+      int32_t y_fixed = (int32_t)wl_get_u32(body, 12);
+
+      host->pointer_x = (double)x_fixed / 256.0;
+      host->pointer_y = (double)y_fixed / 256.0;
+      CRTGFX_WL_TRACE("pointer: enter x=%.2f y=%.2f\n", host->pointer_x, host->pointer_y);
+      return;
+    }
+    if (opcode == WL_POINTER_EVENT_BUTTON) {
+      /* serial(uint,0), time(uint,4), button(uint,8), state(uint,12). */
+      uint32_t button = wl_get_u32(body, 8);
+      uint32_t state = wl_get_u32(body, 12);
+      uint32_t crtgfx_button;
+
+      if (button == CRTGFX_BTN_LEFT) {
+        crtgfx_button = CRTGFX_POINTER_BUTTON_LEFT;
+      } else if (button == CRTGFX_BTN_RIGHT) {
+        crtgfx_button = CRTGFX_POINTER_BUTTON_RIGHT;
+      } else if (button == CRTGFX_BTN_MIDDLE) {
+        crtgfx_button = CRTGFX_POINTER_BUTTON_MIDDLE;
+      } else {
+        CRTGFX_WL_TRACE("pointer: unmapped button=0x%x state=%u ignored\n", button, state);
+        return; /* a real but unmapped button (side/extra buttons, ...) -- not queued */
+      }
+      if (host->toplevel != 0) {
+        crtgfx_event event = {0};
+        event.type = (state == WL_POINTER_BUTTON_STATE_PRESSED) ? CRTGFX_EVENT_POINTER_BUTTON_DOWN
+                                                                  : CRTGFX_EVENT_POINTER_BUTTON_UP;
+        event.data.pointer_button.button = crtgfx_button;
+        event.data.pointer_button.x = host->pointer_x;
+        event.data.pointer_button.y = host->pointer_y;
+        crtgfx_weston_toplevel_note_event(host->toplevel, &event);
+      }
+      return;
+    }
+    /* wl_pointer::leave/axis/frame/...: intentionally not acted on (no
+     * scroll-wheel support yet, no need to react to focus leaving), same
+     * "traced, not silently dropped" shape as wl_keyboard's own
+     * enter/leave/repeat_info handling just below. */
+    CRTGFX_WL_TRACE("pointer: event opcode=%u (0=enter 1=leave 2=motion 3=button 4=axis)\n", opcode);
     return;
   }
   if (host->keyboard_id != 0 && object_id == host->keyboard_id) {
