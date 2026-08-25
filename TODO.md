@@ -151,6 +151,53 @@ Current baseline, completed on Windows first and recorded in
 - `crtgfx_window_begin_frame()`/`crtgfx_window_end_frame()` provide the first
   BGRA8888 software buffer commit/present path. `crtgfx_window_smoke` covers
   automation and `crtgfx_window_demo` covers manual bring-up.
+- **Real keyboard/mouse input now flows through `crtgfx/window.h`'s public
+  `crtgfx_window_poll_event()` API on all three targets (2026-08-25,
+  the "notepad-capability" plan's phases 2/3 -- see `HISTORY.md`'s
+  matching dated entries).** Linux: a real `wl_seat`/`wl_keyboard`/
+  `wl_pointer` client (`src/arch/linux/window_wayland.c`) plus a new
+  `libcrtgfx/third_party/xkbcommon` port turning `(keycode, modifier
+  state)` into real composed UTF-8 text -- verified live against a real
+  compositor (actual typing/mouse activity captured as real
+  `KEY_DOWN`/`KEY_UP`/`TEXT`/`POINTER_MOTION`/`POINTER_BUTTON_*` events).
+  Windows: real `WM_KEYDOWN`/`WM_CHAR`/mouse-message handling in
+  `src/arch/windows/window_win32.c` -- verified live on this project's
+  own native Windows host (real typed "asdf" and mouse clicks captured
+  correctly). macOS: real `NSEventTypeKeyDown`/`FlagsChanged`/mouse-
+  event handling in `src/arch/macos/window_cocoa.c`, implemented and
+  object-code-verified for both `x86_64`/`arm64`, but not yet run on
+  real macOS hardware this session (no macOS host access) -- flagged in
+  the code itself, matching this project's own "reasoned but flagged
+  unverified" discipline; real-hardware confirmation is still open.
+- **Skia's real FreeType-backed font manager (`SkFontMgr_New_Custom_
+  Directory`, pointed at the bundled `libcrtgfx/assets/fonts/
+  DejaVuSansMono.ttf`) is now verified end to end on all three targets**
+  (`crtgfx_skia_raster_smoke: ok`, a real `canvas->drawString()`
+  producing real ink pixels): Windows and macOS were already verified;
+  **Linux was the last one, unblocked 2026-08-25 by fixing this
+  project's own imported static `libc++.a`** (see the next bullet) --
+  previously blocked entirely (`CRTGFX_ENABLE_SKIA` had to stay `OFF` on
+  Linux). `crtgfx_keyboard_interactive` (a manual, non-ctest demo
+  binary) now also draws real typed text on screen this same way when
+  built with `CRTGFX_ENABLE_SKIA=ON`, falling back to a plain gradient
+  fill otherwise.
+- **This project's own imported static `libc++.a` is now correct on
+  Linux (2026-08-25).** Two real, compounding bugs, both closed: (1)
+  the previously-reported "only 3 archive members, no locale/iostream
+  objects at all" was a stale build artifact, not a structural bug --
+  a genuinely fresh rebuild produces a full, correct archive with no
+  source changes needed; (2) fixing that exposed a real `__dso_handle`
+  multiple-definition conflict between `libc/src/arch/linux/common/
+  cxa_atexit.c`'s own hidden-visibility copy and a shim `libcxx`/
+  `libcxxabi` inject for macOS (whose `crt1.o` has no equivalent at
+  all) -- fixed at the CMake level, excluding the shim only from each
+  library's *static* object list on Linux (the *shared* `.so` targets
+  still need their own copy, since a hidden-visibility symbol can never
+  resolve across a shared-object boundary). Verified via a genuinely
+  clean, from-scratch rebuild and a real static-linked program using
+  `<iostream>`/`<locale>`/`<sstream>`, which ran and printed correct
+  output. Both `CRT_USE_IMPORTED_LIBCXX=ON` and the default `OFF`
+  config pass the full `ctest` suite with no regressions.
 
 Next work order:
 
@@ -181,15 +228,16 @@ Next work order:
      installs as a CRT-toolchain CPU archive on macOS; `tools/crt-ar` expands
      GN response files so this does not depend on Apple `ar` supporting them.
      No fake Skia headers are provided. **The deterministic CPU-raster
-     smoke gate itself is now cleared on both Windows and Linux (2026-08-23,
-     see the mingw32-unification entry and the matching Linux/WSL entry
-     just above it in HISTORY.md): `crtgfx_skia_raster_smoke` builds,
-     links, and runs (`crtgfx_skia_raster_smoke: ok`) on Windows (`CRTGFX_
-     ENABLE_SKIA=ON`/`CRT_USE_IMPORTED_LIBCXX=ON`, full suite 121/121) and
-     on Linux/WSL (same two flags, full suite 105/105) -- macOS not yet
-     re-verified at this exact link-time gate (last confirmed only through
-     "Skia's own build," i.e. `libskia.a` itself, not this smoke binary's
-     own link).** Real 2D drawing coverage beyond that one smoke binary, a
+     smoke gate, including the real FreeType-backed font manager and a
+     real `canvas->drawString()` producing real ink pixels, is now
+     cleared on all three targets** -- Windows (2026-08-23/24, `CRTGFX_
+     ENABLE_SKIA=ON`/`CRT_USE_IMPORTED_LIBCXX=ON`, full suite 121/121),
+     macOS (2026-08-25, `3840b1e` -- a real freetype-detection/sysroot-
+     libc++-clobbering fix, full suite 104/104), and Linux (2026-08-25,
+     unblocked by fixing this project's own imported static `libc++.a`,
+     see the "Current baseline" bullets above -- `crtgfx_skia_raster_
+     smoke: ok` via `tools/test_crtgfx_skia_smoke.py`'s own dedicated
+     build directory). Real 2D drawing coverage beyond that one smoke binary, a
      GPU backend, and Wayland presentation integration are all still open
      -- note the Linux entry's own record of a real, separate, still-open
      Wayland `present_software` connectivity difference between different
@@ -1188,52 +1236,7 @@ Next work order:
         vs-SetUnhandledExceptionFilter comparison, and the final
         RtlLookupFunctionEntry-gated design) and the exact repro
         commands used.
-3. **Run the Wayland/Weston protocol/library investigation as a separate
-   `libcrtgfx` sub-track.**
-   Decide what is protocol parsing, what is compositor policy, and what is
-   host-native window/GPU adapter code. Study Weston/wlroots/Wayland protocol
-   sources before importing code; import protocol XML/generated helpers only
-   when a tested boundary requires them.
-4. **Add input/event delivery to the `libcrtgfx` surface contract.**
-   Cover close, resize, focus, pointer, and keyboard shape across Linux
-   Wayland, Win32, and Cocoa. Keep OS-native event details behind
-   `src/arch/{linux,macos,windows}`.
-5. **Extend Skia integration beyond primitive CPU drawing.**
-   Add image/font/text staging after the CPU-raster surface smoke is stable.
-   Treat HarfBuzz/FreeType/ICU/platform-font discovery as explicit follow-up
-   dependencies, not hidden Skia side effects. FreeType itself is a real,
-   verified port (2.14.3, `shared-pass` on Linux/Windows -- see `HISTORY.md`'s
-   2026-08-24 entry and `porting/recipes/freetype.json`), and Skia's own real
-   `SkFontMgr_custom_directory` (FreeType-backed, pointed at the bundled
-   `libcrtgfx/assets/fonts/DejaVuSansMono.ttf`) is wired in and **verified
-   end to end on Windows** (a real `canvas->drawString()` producing real ink
-   pixels, `crtgfx_skia_raster_smoke` passing at 121/121 ctest -- see
-   `HISTORY.md`'s 2026-08-24 entry). Linux is NOT done: `CRTGFX_ENABLE_SKIA`
-   is back to its own prior `OFF` state in this session's WSL build
-   directory, blocked on the static-libc++ gap item just below -- this item
-   stays open until that's fixed and the same real text-rendering smoke test
-   passes on Linux too. This is the first of a three-phase "notepad-
-   capability" plan (phase 1: this item; phase 2: item 4 above, wiring
-   `window_win32.c`/`window_cocoa.c`'s own already-received native keyboard/
-   mouse events through to a new `crtgfx/window.h` public API -- a wiring/
-   API-design task, not a new-library one; phase 3: item 3 above, porting
-   `libxkbcommon` and adding `wl_seat`/`wl_keyboard` to the existing Wayland
-   client backend).
-6. **Fix this project's own imported libc++ static archive
-   (`sysroot/lib/libc++.a`) on Linux: missing all locale/iostream object
-   files.** Found 2026-08-24 (see `HISTORY.md`'s matching entry) trying to
-   link `crtgfx_skia_raster_smoke` statically on Linux -- `llvm-ar t
-   sysroot/lib/libc++.a` shows only 3 members total, none locale/iostream-
-   related, while the *shared* `libc++.so` (built from the same `tools/
-   crt-libcxx-build.py` source) has full content, confirmed via an isolated
-   test program linking cleanly against it. This blocks any C++ program
-   statically linking `<iostream>`/`<locale>` through this project's own
-   imported libc++ on Linux, not just Skia/fonts -- investigate `tools/
-   crt-libcxx-build.py`'s own static-archive assembly step (likely an
-   incomplete file list or a build-mode flag that silently excludes the
-   locale/iostream translation units from the `.a` specifically). A real
-   prerequisite for item 5 just above reaching Linux parity with Windows.
-7. **Add GPU and media handoff only after the frame/input contract is stable.**
+3. **Add GPU and media handoff only after the frame/input contract is stable.**
    Windows D3D, macOS Metal, Linux EGL/Vulkan/dmabuf, and `libcrtmedia`
    decoded-frame/audio handoff are later optimization/integration tranches,
    not prerequisites for the first Skia raster milestone.

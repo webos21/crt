@@ -10,6 +10,184 @@ substantive update.
 
 ## 2026-08-25
 
+- **Real keyboard/mouse input wired through `crtgfx/window.h`'s public
+  `crtgfx_window_poll_event()` API on all three targets -- the
+  "notepad-capability" plan's phases 2/3, phase 1 (fonts) already
+  recorded above/below.** Linux done first per explicit user direction.
+  - **Linux** (`src/arch/linux/window_wayland.c` +
+    `libcrtgfx/third_party/xkbcommon`, a new direct-compile port of
+    libxkbcommon 1.9.2): real `wl_seat`/`wl_keyboard`/`wl_pointer` wire-
+    protocol handling (opcodes/argument layouts confirmed against a real
+    fetched `wayland.xml`, not guessed), feeding `xkb_state` to turn
+    `(evdev keycode, modifier state)` into real composed UTF-8 text.
+    `parser.c`/`parser.h` (libxkbcommon's one real generated-file
+    dependency, a bison grammar) are pre-generated and committed with
+    full provenance -- this sandbox has no bison and no dist tarball
+    exists upstream for this release; the user installed bison
+    themselves in their own WSL terminal for the one-time generation.
+    A real, found bug fixed along the way: `wl_buffer::release` and
+    `wl_seat::capabilities` are both opcode 0 (every Wayland interface
+    numbers its own events from 0 independently), and the dispatch
+    chain's buffer-release check tested opcode alone with no `object_id`
+    check, silently swallowing every `wl_seat::capabilities` event
+    before it ever reached the real handler -- explaining why keyboard
+    input never worked at all on the first real-hardware test (Windows/
+    WM_KEYDOWN sends the analogous swallowed-message symptom, so this
+    class of bug was specific to the opcode-reuse-across-interfaces
+    trap, not something either platform shares). Also added `wl_pointer`
+    support after a user report caught it missing entirely (only
+    `wl_keyboard` had been wired up in the same pass). Verified live,
+    twice: once against WSLg's own compositor (protocol negotiation
+    only, WSLg never composites real pixel content -- a separate, real
+    WSLg-specific RDP/RAIL rendering limitation, not a bug here, later
+    confirmed by real hardware actually rendering correctly), and once
+    on the user's own real Linux hardware, with real typing captured as
+    real `KEY_DOWN`/`KEY_UP`/`TEXT` events end to end.
+  - **Windows** (`src/arch/windows/window_win32.c`): real `WM_KEYDOWN`/
+    `WM_KEYUP`/`WM_SYSKEYDOWN`/`WM_SYSKEYUP`/`WM_CHAR`/`WM_MOUSEMOVE`/
+    `WM_*BUTTONDOWN`/`WM_*BUTTONUP` handling. A VK_*-to-evdev-keycode
+    table (matching Linux's own evdev numbering, per `crtgfx/window.h`'s
+    documented cross-platform contract) disambiguates left/right Ctrl/
+    Alt/numpad-Enter via the real "extended key" lParam bit and left/
+    right Shift via the real PS/2 Set-1 scan code for right Shift
+    (0x36). `WM_CHAR` reassembles UTF-16 surrogate pairs into full
+    codepoints, hand-encoded to UTF-8 (no libc++/ICU dependency).
+    Verified live on this session's own native Windows host: real
+    typed "asdf" and real mouse clicks captured correctly, full
+    121/121 `ctest` regression clean.
+  - **macOS** (`src/arch/macos/window_cocoa.c`): real
+    `NSEventTypeKeyDown`/`KeyUp`/`FlagsChanged` (bare-modifier press/
+    release, diffed against the previous call's `NSEventModifierFlags`
+    since that event type carries no press-vs-release flag of its own)
+    and mouse-event handling, intercepted in the existing
+    `crtgfx_host_window_dispatch()` event loop before `-sendEvent:`
+    (queue our own event, still let AppKit's default handling run). A
+    real kVK_*-to-evdev table, matching the Win32 one's own shape. This
+    session had **no macOS host access at all** -- every NSEventType/
+    NSEventModifierFlags/kVK_* constant and calling-convention choice is
+    reasoned from Apple's own long-published, stable AppKit ABI, not
+    independently confirmed against a real running process, and flagged
+    as such in the code itself (matching this project's established
+    "reasoned but flagged unverified" discipline for exactly this
+    situation). What *was* checked: a real `clang -fsyntax-only` pass
+    and real object-code generation (not just parsing) for both
+    `--target=x86_64-apple-darwin` and `--target=arm64-apple-darwin`,
+    both clean. Real-hardware confirmation is still open.
+
+- **Two real GitHub Actions CI failures fixed building the new
+  libxkbcommon port (above), both invisible on any locally reused build
+  directory.** (1) `fatal error: 'stdio.h' file not found`: `crtgfx-
+  xkbcommon-build` had no ninja dependency edge forcing the `sysroot`
+  custom target (which stages this project's own libc headers) to run
+  first -- and deliberately can't have one (a real dependency cycle
+  through `crtgfx`, which needs `libxkbcommon.a` to link). Fixed by
+  pointing the compile straight at the repo's own `include/` directly,
+  matching how every other CMake-driven compile step in this project
+  already resolves libc headers. (2) `ninja: error: ...libxkbcommon.a
+  ... missing and no known rule to make it`: fixing (1) correctly
+  populated `CRTGFX_XKBCOMMON_LIBRARIES` unconditionally (it had been
+  wrongly `EXISTS`-gated at configure time, the same trap Skia's own
+  `CRTGFX_SKIA_LIBRARIES` deliberately uses *because* Skia is genuinely
+  optional -- libxkbcommon is not), which then exposed a second, deeper
+  problem: `crtgfx-xkbcommon-build` was a plain `add_custom_target`
+  (`COMMAND` only, no `OUTPUT`), so nothing in the ninja graph actually
+  claimed to produce the literal file path now referenced as a real
+  link input. Converted to a real `add_custom_command(OUTPUT ...)`.
+  Verified via a completely fresh build directory + `cmake --workflow
+  --preset linux-host-ninja-debug` (matching CI's own invocation
+  exactly): all targets build with zero errors, `crtgfx_window_smoke`/
+  `crtgfx_window_demo` (the two that previously failed to link) both
+  succeed, 103/103 `ctest` (`termios_echo_roundtrip_test` excluded --
+  a pre-existing, unrelated quirk needing a real controlling TTY, not a
+  regression from this work).
+
+- **`tools/test_crtgfx_skia_smoke.py`: same class of stale-CMake-cache
+  bug the script's own comment already learned to avoid for
+  `CRT_USE_IMPORTED_LIBCXX` (2026-08-23), just never applied to
+  `CRTGFX_ENABLE_SKIA` too.** Found on Windows: a dedicated build
+  directory that had already completed one full previous run (leaving
+  `CRTGFX_ENABLE_SKIA=ON` cached) hit `libcrtgfx/CMakeLists.txt`'s own
+  "`CRTGFX_ENABLE_SKIA=ON` requires `CRT_USE_IMPORTED_LIBCXX=ON` on
+  Windows" guard on the very next invocation's own Phase 0 (which
+  forces `CRT_USE_IMPORTED_LIBCXX=OFF` but left the stale
+  `CRTGFX_ENABLE_SKIA=ON` from the prior run untouched). Fixed by adding
+  an explicit `-DCRTGFX_ENABLE_SKIA=OFF` to Phase 0's own configure
+  command, mirroring the `CRT_USE_IMPORTED_LIBCXX` fix right next to it.
+  Verified by rerunning the exact failing invocation against the real,
+  affected stale directory: full pipeline (rootfs, libc++ staging,
+  freetype, Skia, link) completes end to end, `crtgfx_skia_raster_
+  smoke: ok`.
+
+- **This project's own imported static `libc++.a` fixed on Linux
+  (TODO.md's former item 6 -- the locale/iostream gap found 2026-08-24).**
+  Two real, distinct bugs, both closed:
+  1. The originally-reported symptom (`llvm-ar t sysroot/lib/libc++.a`
+     showing only 3 members, none locale/iostream-related, while the
+     shared `libc++.so` had full content) was a **stale artifact, not a
+     structural bug** -- `libcxx/src/CMakeLists.txt` already builds
+     `cxx_shared` and `cxx_static` from the exact same
+     `${LIBCXX_SOURCES}` list (confirmed by reading the real fetched
+     source directly), so they were never going to genuinely diverge. A
+     completely fresh `crt-libcxx-sysroot` rebuild produced a full,
+     correct archive (53 members, including `ios.cpp.o`/`iostream.cpp.
+     o`/`locale.cpp.o`/`ostream.cpp.o`) with zero source changes,
+     matching this project's own repeatedly-documented "a build
+     directory with existing artifacts is not a reliable test of new
+     wiring" trap.
+  2. Fixing (1) exposed a second, real, previously-hidden bug: statically
+     linking a real program against the now-complete `libc++.a` failed
+     with `multiple definition of __dso_handle`, between `libc/src/
+     arch/linux/common/cxa_atexit.c`'s own hidden-visibility copy (added
+     for Bionic/glibc-shaped `__cxa_atexit`/`__cxa_finalize` provision,
+     unrelated to libcxx) and a `__crt_dso_handle.cpp` shim `libcxx`/
+     `libcxxabi` inject via their own `recipe.json` (added 2026-08-22
+     for macOS, whose `crt1.o` provides no `__dso_handle` at all --
+     nothing had reconciled the two shims coexisting on Linux until
+     now). A first attempt disabled the shim's own content entirely on
+     Linux, but that broke the *shared* library instead (`relocation
+     R_X86_64_PC32 against undefined hidden symbol '__dso_handle' can
+     not be used when making a shared object` linking `libc++abi.so`) --
+     a hidden-visibility symbol can never resolve across a shared-object
+     boundary by design, so `cxx_shared`/`cxxabi_shared` (separate DSO
+     images that never statically embed `libc.a`'s own objects) still
+     need their own private copy, exactly like macOS always does. Real
+     fix: a CMake-level source-list exclusion, only on Linux, only for
+     the *static* object libraries (`libstdc++/third_party/{libcxx,
+     libcxxabi}/recipe.json`) -- the shared targets keep defining
+     `__dso_handle` unconditionally.
+  Verified twice: first via manual file edits (fast iteration), then via
+  a genuinely clean rebuild (`external/llvm-runtimes` wiped entirely,
+  real git clone + configure + build from nothing, no manual
+  intervention) to confirm the actual `recipe.json` patches apply
+  correctly through the normal fetch/configure/build lifecycle. A
+  minimal standalone program (`<iostream>`/`<locale>`/`<sstream>`)
+  compiled and statically linked against the fresh sysroot with `tools/
+  crt-c++`'s own default (static) runtime linkage, ran, and printed its
+  correct expected output. Full `ctest` suite (103/103) passes clean
+  under both `CRT_USE_IMPORTED_LIBCXX=ON` and the default `OFF` config.
+  This was the last concretely-open libcxx gap: shared linkage already
+  worked on all three platforms, and static linkage now works on Linux,
+  Windows, and macOS alike.
+
+- **Skia's real FreeType-backed font manager verified end to end on
+  Linux for the first time (TODO.md's former item 5, unblocked by the
+  static-libc++.a fix directly above).** `crtgfx_skia_raster_smoke`
+  (the same real crtgfx -> Skia -> FreeType pipeline already verified on
+  Windows/macOS) now builds, links, and runs on Linux too
+  (`crtgfx_skia_raster_smoke: ok`, via `tools/test_crtgfx_skia_smoke.
+  py`'s own dedicated build directory) -- nothing about the font-manager
+  wiring itself needed changing, the gap was purely the downstream
+  static-libc++.a bug. `crtgfx_keyboard_interactive` (converted from
+  `.c` to `.cc`) now also draws real typed text on screen the same way,
+  compile-time-gated behind `crtgfx/skia.h`'s own
+  `CRTGFX_HAS_SKIA_HEADERS` so it still builds and runs (falling back to
+  a plain gradient fill) with `CRTGFX_ENABLE_SKIA=OFF`. `crtgfx_skia_
+  raster_smoke`'s own Skia/FreeType/imported-libc++ compile+link wiring
+  was refactored out of its inline CMake block into a reusable
+  `crt_wire_skia_executable(target_name)` function so this second
+  consumer reuses the exact same, already hard-won, platform-specific
+  logic instead of a hand-copy risking silent drift.
+
 - **`crtgfx-skia-smoke` fixed on macOS: two more real bugs, found running
   it again right after the freetype/`make`-dependency fix just below.**
   User reported `cmake --build --preset macos-host-ninja-debug --target

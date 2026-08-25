@@ -9,29 +9,37 @@ current state so the next session doesn't have to re-derive it from
 means; if this page and `HISTORY.md`/`TODO.md` disagree, the dated entries
 in those two win.
 
-- **Skia's real FreeType-backed font manager wired in (2026-08-24):**
-  **real end-to-end text rendering verified on Windows (121/121 ctest);**
-  **Linux found and fixed two more real bugs (freetype needs `--with-pic`,**
-  **a `crtgfx_shared` link-order bug) but hit a separate, deeper, still-open**
-  **gap finishing the executable case.** `crtgfx` -> Skia ->
-  `SkFontMgr_New_Custom_Directory()` -> this project's own FreeType port,
-  a real `canvas->drawString()` producing real ink pixels, not a stub font
-  manager. One real Skia API-usage bug fixed along the way:
-  `matchFamilyStyle(nullptr, ...)` does not mean "match any font" the way
-  it reads -- `legacyMakeTypeface(nullptr, ...)` is the real way to ask
-  for a font manager's own default family. **Still open**: `sysroot/lib/
-  libc++.a` (this project's own imported libc++ *static* archive) is
-  missing all locale/iostream object files on Linux (confirmed via
-  `llvm-ar t` -- only 3 members total, none matching), blocking the
-  statically-linked `crtgfx_skia_raster_smoke` executable specifically
-  (Skia's own `SkSLString.cpp` needs `std::locale`/iostream for float-to-
-  string conversion) -- the *shared* `libcrtgfx.so` case links and works
-  fine, confirming the gap is specific to the static archive's own
-  incomplete build, not a Skia/font issue. `CRTGFX_ENABLE_SKIA` restored
-  to its own prior `OFF` state in this session's WSL build directory once
-  confirmed; the rest of the suite (102/102 non-tty tests) stayed clean.
-  See `HISTORY.md`'s matching entry and `TODO.md`'s new follow-up for the
-  full trail.
+- **Real keyboard/mouse input wired through `crtgfx/window.h`'s public
+  `crtgfx_window_poll_event()` API on all three targets (2026-08-25):**
+  **Linux and Windows verified live with real physical input; macOS**
+  **implemented and object-code-verified but not yet run on real**
+  **hardware (no macOS host access this session).** Linux: real
+  `wl_seat`/`wl_keyboard`/`wl_pointer` + a new `libcrtgfx/third_party/
+  xkbcommon` port. Windows: real `WM_KEYDOWN`/`WM_CHAR`/mouse-message
+  handling. macOS: real `NSEventTypeKeyDown`/`FlagsChanged`/mouse-event
+  handling, flagged in the code as reasoned-but-unverified pending real
+  hardware. See `TODO.md`'s "Current baseline" bullets and `HISTORY.md`'s
+  matching dated entry for the full trail.
+- **Skia's real FreeType-backed font manager: end-to-end text rendering**
+  **now verified on all three targets (Windows/macOS 2026-08-24,**
+  **Linux 2026-08-25).** `crtgfx` -> Skia -> `SkFontMgr_New_Custom_
+  Directory()` -> this project's own FreeType port, a real
+  `canvas->drawString()` producing real ink pixels, not a stub font
+  manager. Linux was the last one, unblocked by fixing this project's
+  own imported static `libc++.a` (next bullet) -- `crtgfx_keyboard_
+  interactive` (a manual demo binary) now also draws real typed text on
+  screen this same way. See `HISTORY.md`'s matching dated entries for
+  the full trail.
+- **This project's own imported static `libc++.a` fixed on Linux
+  (2026-08-25, resolving the gap this page previously listed as open).**
+  The originally-reported "only 3 archive members, no locale/iostream at
+  all" was a stale build artifact, not a structural bug -- a genuinely
+  fresh rebuild produces a full, correct archive with no source changes.
+  Fixing that exposed a real, second bug (a `__dso_handle` multiple-
+  definition conflict between `libc.a`'s own copy and a shim `libcxx`/
+  `libcxxabi` inject for macOS), fixed at the CMake level. Both `CRT_USE_
+  IMPORTED_LIBCXX=ON` and the default `OFF` config pass the full `ctest`
+  suite with no regressions. See `HISTORY.md`'s matching dated entry.
 - **New `freetype` port (2.14.3, 2026-08-24): `shared-pass` on Linux x64**
   **and Windows x64, macOS not attempted yet.** Phase 1 of the "notepad-
   capability" plan (real font rasterization -- see `TODO.md` for phases
