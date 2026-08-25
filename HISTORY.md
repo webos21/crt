@@ -10,6 +10,66 @@ substantive update.
 
 ## 2026-08-25
 
+- **`crtgfx-skia-smoke` fixed on macOS: two more real bugs, found running
+  it again right after the freetype/`make`-dependency fix just below.**
+  User reported `cmake --build --preset macos-host-ninja-debug --target
+  crtgfx-skia-smoke` failing to link `libcrtgfx.dylib` with dozens of
+  undefined `_FT_*` (FreeType) symbols from `libskia.a`'s own
+  `SkScalerContext_FreeType`/`SkFontScanner_FreeType` object files, and
+  asked whether the Skia build directory needed to be wiped.
+  1. **`CRTGFX_SKIA_LIBRARIES`'s own freetype auto-detection in
+     `libcrtgfx/CMakeLists.txt` only ever ran once per build directory's
+     CMake cache lifetime.** It was gated `if(NOT CRTGFX_SKIA_LIBRARIES
+     AND EXISTS libskia.a)` -- correct the *first* time this cache
+     variable gets populated, but once set (even to just `libskia.a`
+     alone, from an earlier configure before `libfreetype.a` existed on
+     macOS at all -- see the entry just below), it never re-evaluates on
+     any later configure, so `libfreetype.a` becoming available
+     afterward was silently never picked up. Fixed by splitting the
+     freetype-append into its own, unconditionally-re-evaluated check
+     (runs on every configure, appends `libfreetype.a` the moment it
+     exists on disk and isn't already in the list) -- self-healing via a
+     plain reconfigure, no cache wipe needed. Confirmed for real: with
+     only this fix, `cmake -S . -B <build-dir>` alone (no directory
+     deletion) correctly repopulated `CRTGFX_SKIA_LIBRARIES` with both
+     `libskia.a;libfreetype.a`.
+  2. **The deeper, previously-undiagnosed root cause of the recurring
+     "real imported libc++ gets silently reverted to the small bootstrap
+     ABI shim" symptom** first worked around manually on 2026-08-23/24
+     (see those dated entries) and hit *again* here on a completely
+     fresh build directory: the top-level `sysroot` custom target
+     (`CMakeLists.txt`) has no declared OUTPUT/BYPRODUCTS, so ninja
+     always considers it out of date and reruns its `cmake --install`
+     step on *every* build invocation that reaches it -- and every
+     `port-build-<name>` target for a configure-system recipe (`crt_add_
+     build_port_target`, same file) depends on it directly, so simply
+     building `port-build-freetype` (needed by `crtgfx-skia-build`)
+     retriggers it. `libstdc++/CMakeLists.txt`'s own `install(TARGETS
+     cxx cxx_shared ...)` uses those targets' `OUTPUT_NAME` (`c++`), the
+     exact same `${CRT_SYSROOT}/lib/libc++.a`/`.dylib` path `tools/
+     install_libcxx_runtimes.py`'s own staging step (the `crt-libcxx-
+     sysroot` target) writes the real, full imported libc++ to -- so
+     *any* later build activity that happened to reach `sysroot` again,
+     for any reason, silently clobbered an already-correctly-staged real
+     libc++ back to the small operator-new/delete/`__cxa_*`-only
+     bootstrap shim. Fixed at the actual source this time, not with
+     another manual re-stage: hoisted the pre-existing `CRT_USE_IMPORTED_
+     LIBCXX` `option()` earlier in the same file and wrapped the
+     `install(TARGETS cxx cxx_shared ...)` call in `if(NOT CRT_USE_
+     IMPORTED_LIBCXX)` -- once imported libc++ is the active choice, the
+     bootstrap's own library files are never installed into the sysroot
+     at all, so it no longer matters how many times `sysroot` reruns.
+  Verified for real, twice: (a) manually re-staged the real libc++.a,
+  explicitly reran the `sysroot` target directly (the exact action that
+  previously clobbered it), and confirmed the real 9.1MB archive was
+  untouched afterward; (b) a genuinely from-scratch `crtgfx-skia-smoke`
+  build (directory deleted first, Skia/libc++/freetype all rebuilt from
+  nothing) completed end to end and printed `crtgfx_skia_raster_smoke:
+  ok`. The default (`CRT_USE_IMPORTED_LIBCXX=OFF`) build path was also
+  re-verified unaffected: full default `cmake --build` plus the full
+  `ctest` suite (104/104) both still pass on the main preset after this
+  change.
+
 - **`crtgfx-skia-build` fixed on macOS: `freetype` failed to fetch its
   own implicit `make` build-tool dependency.** User reported the exact
   failure (`cmake --build --preset macos-host-ninja-debug --target
