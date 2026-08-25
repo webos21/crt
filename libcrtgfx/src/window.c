@@ -74,3 +74,10 @@ int crtgfx_window_end_frame(crtgfx_window* window) {
   }
   return crtgfx_weston_toplevel_end_frame(window);
 }
+
+int crtgfx_window_poll_event(crtgfx_window* window, crtgfx_event* out_event) {
+  if (window == 0 || out_event == 0) {
+    return CRTGFX_ERROR_INVALID_ARGUMENT;
+  }
+  return crtgfx_weston_toplevel_poll_event(window, out_event);
+}

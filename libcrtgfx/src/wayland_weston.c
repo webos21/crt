@@ -160,3 +160,38 @@ void crtgfx_weston_toplevel_note_close(crtgfx_weston_toplevel* toplevel) {
     toplevel->should_close = 1;
   }
 }
+
+void crtgfx_weston_toplevel_note_event(crtgfx_weston_toplevel* toplevel, const crtgfx_event* event) {
+  uint32_t tail;
+
+  if (toplevel == 0 || event == 0) {
+    return;
+  }
+  if (toplevel->event_queue_count >= CRTGFX_EVENT_QUEUE_CAPACITY) {
+    /* Full: drop the event rather than overwrite the oldest still-unread
+     * one -- an event lost because the caller fell behind should still
+     * be the *newest* one lost, not a silent gap in the middle of
+     * whatever the caller already started reading. */
+    return;
+  }
+  tail = (toplevel->event_queue_head + toplevel->event_queue_count) % CRTGFX_EVENT_QUEUE_CAPACITY;
+  toplevel->event_queue[tail] = *event;
+  toplevel->event_queue_count += 1;
+}
+
+int crtgfx_weston_toplevel_poll_event(crtgfx_window* window, crtgfx_event* out_event) {
+  crtgfx_weston_toplevel* toplevel;
+
+  if (window == 0 || out_event == 0) {
+    return CRTGFX_ERROR_INVALID_ARGUMENT;
+  }
+  toplevel = &window->toplevel;
+  if (toplevel->event_queue_count == 0) {
+    out_event->type = CRTGFX_EVENT_NONE;
+    return CRTGFX_OK;
+  }
+  *out_event = toplevel->event_queue[toplevel->event_queue_head];
+  toplevel->event_queue_head = (toplevel->event_queue_head + 1) % CRTGFX_EVENT_QUEUE_CAPACITY;
+  toplevel->event_queue_count -= 1;
+  return CRTGFX_OK;
+}

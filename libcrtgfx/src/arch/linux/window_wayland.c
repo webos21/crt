@@ -11,6 +11,8 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <xkbcommon/xkbcommon.h>
+
 /* Real Wayland client backend for Linux -- hand-rolled wire protocol, no
  * libwayland-client dependency, matching this project's own no-host-SDK
  * ethos (see libcrtgfx/src/arch/windows/window_win32.c: raw dllimport
@@ -29,7 +31,10 @@
  *    queue, so it operates on a single process-wide "active window"
  *    pointer; a real multi-window design needs a shared connection);
  *  - software (wl_shm) presentation only, no GPU/EGL path yet;
- *  - no keyboard/pointer/wl_seat input handling yet;
+ *  - keyboard input only (2026-08-25, Phase 3 of the "notepad-capability"
+ *    plan): wl_seat -> wl_keyboard, real UTF-8 text via this project's own
+ *    libxkbcommon port (libcrtgfx/third_party/xkbcommon/recipe.json) --
+ *    no wl_pointer/mouse handling yet, and no wl_touch;
  *  - wl_buffer lifetime is release-tracked: every presented wl_shm buffer
  *    stays mapped/open until the compositor sends wl_buffer::release, then
  *    this backend destroys the wl_buffer object and unmaps/closes its backing
@@ -86,6 +91,32 @@
 #define XDG_TOPLEVEL_SET_TITLE 2u
 #define XDG_TOPLEVEL_EVENT_CONFIGURE 0u
 #define XDG_TOPLEVEL_EVENT_CLOSE 1u
+/* wl_seat */
+#define WL_SEAT_GET_KEYBOARD 1u
+#define WL_SEAT_EVENT_CAPABILITIES 0u
+#define WL_SEAT_CAPABILITY_KEYBOARD (1u << 1)
+/* wl_keyboard -- event opcodes are declaration order in wayland.xml
+ * (keymap, enter, leave, key, modifiers, repeat_info since v4); request
+ * opcode (release, since v3) is never sent by this backend, which only
+ * ever binds wl_seat/wl_keyboard at version 1. */
+#define WL_KEYBOARD_EVENT_KEYMAP 0u
+#define WL_KEYBOARD_EVENT_ENTER 1u
+#define WL_KEYBOARD_EVENT_LEAVE 2u
+#define WL_KEYBOARD_EVENT_KEY 3u
+#define WL_KEYBOARD_EVENT_MODIFIERS 4u
+#define WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1 1u
+#define WL_KEYBOARD_KEY_STATE_RELEASED 0u
+#define WL_KEYBOARD_KEY_STATE_PRESSED 1u
+/* wl_keyboard::key's own raw keycode is a Linux evdev code; xkbcommon's
+ * own keycode space is offset by +8 (a real, historical X11-compatibility
+ * offset xkbcommon inherited) -- confirmed directly in wayland.xml's own
+ * wl_keyboard::keymap event doc ("to determine the xkb keycode, clients
+ * must add 8 to the key event keycode") and by reading real upstream
+ * libxkbcommon's own tools/interactive-wayland.c (its EVDEV_OFFSET, used
+ * exactly this way against a real wl_keyboard::key event). Applied only
+ * at the xkbcommon call boundary below -- crtgfx_event's own public
+ * keycode field (crtgfx/window.h) stays a plain evdev code. */
+#define CRTGFX_WL_XKB_KEYCODE_OFFSET 8u
 
 struct crtgfx_wl_buffer {
   uint32_t id;
@@ -107,11 +138,29 @@ struct crtgfx_host_window {
   uint32_t surface_id;
   uint32_t xdg_surface_id;
   uint32_t xdg_toplevel_id;
+  /* 0 means "no wl_seat/wl_keyboard bound" -- object id 0 is never a real
+   * Wayland object (id 1 is always wl_display, the lowest object id this
+   * backend or any real compositor ever allocates), so it doubles safely
+   * as an explicit "absent" sentinel without a separate bool. wl_seat is
+   * optional (unlike wl_compositor/wl_shm/xdg_wm_base): a compositor with
+   * no seat at all, or a seat with no keyboard capability, just means no
+   * keyboard events are ever queued -- not a connection failure. */
+  uint32_t seat_id;
+  uint32_t keyboard_id;
 
   int have_first_configure;
   uint32_t configure_serial;
 
   struct crtgfx_wl_buffer* buffers;
+
+  /* xkbcommon state for the currently bound keyboard -- xkb_keymap/
+   * xkb_state are both null until the real wl_keyboard::keymap event
+   * arrives (see wl_dispatch_message()'s own WL_KEYBOARD_EVENT_KEYMAP
+   * handling); xkb_context is created once, up front, in crtgfx_host_
+   * window_create(), and lives for the whole connection's lifetime. */
+  struct xkb_context* xkb_context;
+  struct xkb_keymap* xkb_keymap;
+  struct xkb_state* xkb_state;
 
   crtgfx_weston_toplevel* toplevel;
 };
@@ -127,6 +176,7 @@ struct crtgfx_wl_bootstrap {
   uint32_t compositor_name;
   uint32_t shm_name;
   uint32_t wm_base_name;
+  uint32_t seat_name; /* CRTGFX_WL_NAME_NONE if the compositor has no wl_seat at all */
   int sync_done;
 };
 
@@ -263,13 +313,34 @@ static void wl_destroy_all_buffers(struct crtgfx_host_window* host) {
   }
 }
 
-static int wl_read_exact(int fd, void* buf, size_t len, uint32_t timeout_ms) {
+/* out_fd (may be NULL): receives an SCM_RIGHTS fd if the kernel delivers
+ * one with this call, else left untouched by this call (never reset to
+ * -1 -- see wl_recv_message()'s own comment on why the header and body
+ * reads share one out_fd across both calls). Real POSIX/Linux fact this
+ * whole function exists to respect, not an implementation preference:
+ * ancillary data (SCM_RIGHTS) on an AF_UNIX SOCK_STREAM socket is
+ * delivered on the specific recvmsg() call that actually consumes the
+ * byte(s) it was sent alongside -- a plain read() cannot retrieve it at
+ * all (the kernel silently drops it), so *every* receive on this
+ * connection has to go through recvmsg() with a real control-message
+ * buffer attached, not just the ones a caller happens to expect an fd
+ * on. wl_keyboard::keymap (the only event this backend's own protocol
+ * subset ever receives an fd for) sends its fd alongside the very first
+ * bytes of that message, i.e. together with the 8-byte header -- but
+ * this function does not special-case that; it is correct for a
+ * compositor to have split those bytes across sendmsg() calls
+ * differently, so both this function's callers (the header read and the
+ * body read in wl_recv_message()) are equally prepared to receive it. */
+static int wl_read_exact(int fd, void* buf, size_t len, uint32_t timeout_ms, int* out_fd) {
   unsigned char* p = (unsigned char*)buf;
   size_t got = 0;
 
   while (got < len) {
     struct pollfd pfd;
     int pr;
+    struct msghdr msg;
+    struct iovec iov;
+    char cmsgbuf[CMSG_SPACE(sizeof(int))];
     ssize_t n;
 
     pfd.fd = fd;
@@ -285,7 +356,16 @@ static int wl_read_exact(int fd, void* buf, size_t len, uint32_t timeout_ms) {
     if (pr == 0) {
       return CRTGFX_ERROR_HOST;
     }
-    n = read(fd, p + got, len - got);
+
+    iov.iov_base = p + got;
+    iov.iov_len = len - got;
+    memset(&msg, 0, sizeof(msg));
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = cmsgbuf;
+    msg.msg_controllen = sizeof(cmsgbuf);
+
+    n = recvmsg(fd, &msg, 0);
     if (n < 0) {
       if (errno == EINTR) {
         continue;
@@ -295,21 +375,41 @@ static int wl_read_exact(int fd, void* buf, size_t len, uint32_t timeout_ms) {
     if (n == 0) {
       return CRTGFX_ERROR_HOST;
     }
+    if (out_fd != 0) {
+      struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
+
+      if (cmsg != 0 && cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS) {
+        memcpy(out_fd, CMSG_DATA(cmsg), sizeof(int));
+      }
+    }
     got += (size_t)n;
   }
   return CRTGFX_OK;
 }
 
+/* out_fd (may be NULL): set to -1 before either underlying wl_read_exact()
+ * call, then left as whichever of the two (if either) actually received
+ * an SCM_RIGHTS fd -- see wl_read_exact()'s own comment for why both the
+ * header and body reads have to be prepared to receive it. A caller that
+ * passes NULL here (every current call site except the ones expecting a
+ * wl_keyboard::keymap event) still receives messages correctly; it just
+ * cannot learn about an fd that arrived, which would otherwise leak the
+ * fd (never closed) -- WL_KEYBOARD_EVENT_KEYMAP is the only event this
+ * backend's own protocol subset ever sends an fd with, so every other
+ * caller passing NULL is safe by construction, not by luck. */
 static int wl_recv_message(
     struct crtgfx_host_window* host, uint32_t* out_object_id, uint32_t* out_opcode,
-    unsigned char* body, size_t body_cap, size_t* out_body_len, uint32_t timeout_ms) {
+    unsigned char* body, size_t body_cap, size_t* out_body_len, uint32_t timeout_ms, int* out_fd) {
   uint32_t header[2];
   uint32_t opcode;
   uint32_t size;
   size_t body_len;
   int rc;
 
-  rc = wl_read_exact(host->fd, header, sizeof(header), timeout_ms);
+  if (out_fd != 0) {
+    *out_fd = -1;
+  }
+  rc = wl_read_exact(host->fd, header, sizeof(header), timeout_ms, out_fd);
   if (rc != CRTGFX_OK) {
     return rc;
   }
@@ -323,7 +423,7 @@ static int wl_recv_message(
     return CRTGFX_ERROR_HOST;
   }
   if (body_len != 0u) {
-    rc = wl_read_exact(host->fd, body, body_len, timeout_ms);
+    rc = wl_read_exact(host->fd, body, body_len, timeout_ms, out_fd);
     if (rc != CRTGFX_OK) {
       return rc;
     }
@@ -334,9 +434,48 @@ static int wl_recv_message(
   return CRTGFX_OK;
 }
 
+/* Feeds a real wl_keyboard::key event through this backend's own
+ * xkbcommon state and queues the resulting crtgfx_event(s): always a
+ * KEY_DOWN/KEY_UP, and -- for a press that actually produces text (not
+ * Escape/arrows/bare-modifier/...) -- a following TEXT event carrying the
+ * real, already-composed UTF-8 xkb_state_key_get_utf8() returns. Does
+ * nothing if no keymap has been compiled yet (host->xkb_state == 0):
+ * a real compositor always sends wl_keyboard::keymap before the first
+ * key event on a freshly bound keyboard, but a key press that outraces
+ * it on a genuinely broken compositor should not crash on a null state. */
+static void wl_handle_keyboard_key(struct crtgfx_host_window* host, uint32_t key, uint32_t state) {
+  crtgfx_event event;
+  xkb_keycode_t xkb_keycode;
+
+  if (host->xkb_state == 0) {
+    return;
+  }
+  memset(&event, 0, sizeof(event));
+  event.type = (state == WL_KEYBOARD_KEY_STATE_PRESSED) ? CRTGFX_EVENT_KEY_DOWN : CRTGFX_EVENT_KEY_UP;
+  event.data.key.keycode = key;
+  /* CRTGFX_MOD_* is not populated here -- xkb_state_mod_name_is_active()
+   * needs real modifier-name strings (XKB_MOD_NAME_SHIFT/.../CTRL/...)
+   * this backend has not wired up yet; left as 0 (no modifiers reported)
+   * rather than guessed at, matching this project's own "don't claim a
+   * gap is closed until it really is" discipline. A future pass can add
+   * this without changing the event shape at all. */
+  crtgfx_weston_toplevel_note_event(host->toplevel, &event);
+
+  if (state != WL_KEYBOARD_KEY_STATE_PRESSED) {
+    return;
+  }
+  xkb_keycode = (xkb_keycode_t)(key + CRTGFX_WL_XKB_KEYCODE_OFFSET);
+  memset(&event, 0, sizeof(event));
+  event.type = CRTGFX_EVENT_TEXT;
+  if (xkb_state_key_get_utf8(host->xkb_state, xkb_keycode, event.data.text.utf8,
+                             sizeof(event.data.text.utf8)) > 0) {
+    crtgfx_weston_toplevel_note_event(host->toplevel, &event);
+  }
+}
+
 static void wl_dispatch_message(
     struct crtgfx_host_window* host, struct crtgfx_wl_bootstrap* boot, uint32_t object_id,
-    uint32_t opcode, const unsigned char* body, size_t body_len) {
+    uint32_t opcode, const unsigned char* body, size_t body_len, int fd) {
   (void)body_len;
 
   if (boot != 0 && object_id == host->registry_id && opcode == WL_REGISTRY_EVENT_GLOBAL) {
@@ -350,6 +489,8 @@ static void wl_dispatch_message(
       boot->shm_name = name;
     } else if (strcmp(interface, "xdg_wm_base") == 0) {
       boot->wm_base_name = name;
+    } else if (strcmp(interface, "wl_seat") == 0) {
+      boot->seat_name = name;
     }
     return;
   }
@@ -386,10 +527,106 @@ static void wl_dispatch_message(
     wl_destroy_released_buffer(host, object_id);
     return;
   }
+  if (host->seat_id != 0 && object_id == host->seat_id && opcode == WL_SEAT_EVENT_CAPABILITIES) {
+    uint32_t capabilities = wl_get_u32(body, 0);
+    unsigned char out[4];
+
+    if ((capabilities & WL_SEAT_CAPABILITY_KEYBOARD) != 0u && host->keyboard_id == 0u) {
+      host->keyboard_id = host->next_id++;
+      wl_put_u32(out, 0, host->keyboard_id);
+      wl_send(host, host->seat_id, WL_SEAT_GET_KEYBOARD, out, sizeof(out), -1);
+    }
+    return;
+  }
+  if (host->keyboard_id != 0 && object_id == host->keyboard_id) {
+    if (opcode == WL_KEYBOARD_EVENT_KEYMAP) {
+      uint32_t format = wl_get_u32(body, 0);
+      uint32_t size = wl_get_u32(body, 4);
+      void* mapping;
+
+      if (format != WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1 || fd < 0) {
+        if (fd >= 0) {
+          close(fd);
+        }
+        return;
+      }
+      /* MAP_SHARED, matching real upstream libxkbcommon's own tools/
+       * interactive-wayland.c example client exactly (confirmed by
+       * reading it directly) -- MAP_PRIVATE only becomes a real
+       * *requirement* from wl_keyboard version 7 onwards (wayland.xml's
+       * own doc comment), and this backend only ever binds wl_seat/
+       * wl_keyboard at version 1 (see crtgfx_host_window_create()). */
+      mapping = mmap(0, size, PROT_READ, MAP_SHARED, fd, 0);
+      close(fd);
+      if (mapping == MAP_FAILED) {
+        return;
+      }
+      if (host->xkb_state != 0) {
+        xkb_state_unref(host->xkb_state);
+        host->xkb_state = 0;
+      }
+      if (host->xkb_keymap != 0) {
+        xkb_keymap_unref(host->xkb_keymap);
+        host->xkb_keymap = 0;
+      }
+      /* size - 1: the mapped keymap string is NUL-terminated and `size`
+       * (the wire value) includes that trailing NUL -- matching real
+       * upstream libxkbcommon's own example exactly (confirmed by
+       * reading it directly, not guessed: passing the NUL byte itself
+       * into xkb_keymap_new_from_buffer()'s own length argument is not
+       * what any real client does). */
+      if (size > 0u) {
+        host->xkb_keymap = xkb_keymap_new_from_buffer(
+            host->xkb_context, (const char*)mapping, (size_t)(size - 1u),
+            XKB_KEYMAP_FORMAT_TEXT_V1, XKB_KEYMAP_COMPILE_NO_FLAGS);
+      }
+      munmap(mapping, size);
+      if (host->xkb_keymap != 0) {
+        host->xkb_state = xkb_state_new(host->xkb_keymap);
+      }
+      return;
+    }
+    if (opcode == WL_KEYBOARD_EVENT_KEY) {
+      uint32_t key = wl_get_u32(body, 8);
+      uint32_t state = wl_get_u32(body, 12);
+
+      wl_handle_keyboard_key(host, key, state);
+      return;
+    }
+    if (opcode == WL_KEYBOARD_EVENT_MODIFIERS) {
+      uint32_t mods_depressed = wl_get_u32(body, 4);
+      uint32_t mods_latched = wl_get_u32(body, 8);
+      uint32_t mods_locked = wl_get_u32(body, 12);
+      uint32_t group = wl_get_u32(body, 16);
+
+      /* xkb_state_update_mask(), not xkb_state_update_key(): a real
+       * Wayland *client* (this backend) is required to use the mask-
+       * based update -- confirmed by reading xkb_state_update_key()'s own
+       * doc comment directly ("intended for *server* applications and
+       * should not be used by *client* applications"). depressed_layout/
+       * latched_layout=0, locked_layout=group: matching real upstream
+       * libxkbcommon's own tools/interactive-wayland.c kbd_modifiers()
+       * exactly (confirmed by reading it directly, not guessed). */
+      xkb_state_update_mask(host->xkb_state, mods_depressed, mods_latched, mods_locked, 0, 0, group);
+      return;
+    }
+    /* wl_keyboard::enter/leave/repeat_info: intentionally ignored, see
+     * this function's own top-of-file scope note (no focus tracking, no
+     * client-side key-repeat timer yet). */
+    return;
+  }
   /* Anything else (wl_display::error/delete_id, wl_surface::enter/leave,
    * ...) is intentionally ignored. The message body has already been fully
    * consumed by wl_recv_message() either way, so ignoring it here is always
-   * safe (never leaves the stream mis-aligned). */
+   * safe (never leaves the stream mis-aligned). Closing a stray fd here
+   * too: WL_KEYBOARD_EVENT_KEYMAP is the only event this backend's own
+   * protocol subset ever attaches one to, and it is always fully consumed
+   * (closed) by that branch above -- this is a defensive backstop against
+   * an fd leak, not a path any real compositor this backend talks to is
+   * expected to exercise. */
+  if (fd >= 0) {
+    close(fd);
+  }
 }
 
 static int wl_pump(struct crtgfx_host_window* host, uint32_t timeout_ms) {
@@ -411,11 +648,12 @@ static int wl_pump(struct crtgfx_host_window* host, uint32_t timeout_ms) {
     uint32_t opcode;
     unsigned char body[CRTGFX_WL_MAX_MSG];
     size_t body_len;
+    int recv_fd;
 
-    if (wl_recv_message(host, &object_id, &opcode, body, sizeof(body), &body_len, 0) != CRTGFX_OK) {
+    if (wl_recv_message(host, &object_id, &opcode, body, sizeof(body), &body_len, 0, &recv_fd) != CRTGFX_OK) {
       break;
     }
-    wl_dispatch_message(host, 0, object_id, opcode, body, body_len);
+    wl_dispatch_message(host, 0, object_id, opcode, body, body_len, recv_fd);
 
     pfd.revents = 0;
     if (poll(&pfd, 1, 0) <= 0) {
@@ -485,8 +723,20 @@ int crtgfx_host_window_create(const crtgfx_window_desc* desc, crtgfx_weston_topl
   host->toplevel = toplevel;
   host->next_id = 2;
 
+  /* XKB_CONTEXT_NO_FLAGS: the real, documented "just give me a normal
+   * context" value (0) -- created once, up front, and kept for this
+   * connection's whole lifetime, independent of whether a keymap ever
+   * actually arrives (a compositor with no wl_seat, or a seat with no
+   * keyboard capability, just means this context never gets used). */
+  host->xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+  if (host->xkb_context == 0) {
+    free(host);
+    return CRTGFX_ERROR_HOST;
+  }
+
   rc = wl_connect(host);
   if (rc != CRTGFX_OK) {
+    xkb_context_unref(host->xkb_context);
     free(host);
     return rc;
   }
@@ -495,6 +745,7 @@ int crtgfx_host_window_create(const crtgfx_window_desc* desc, crtgfx_weston_topl
   boot.compositor_name = CRTGFX_WL_NAME_NONE;
   boot.shm_name = CRTGFX_WL_NAME_NONE;
   boot.wm_base_name = CRTGFX_WL_NAME_NONE;
+  boot.seat_name = CRTGFX_WL_NAME_NONE;
 
   host->registry_id = host->next_id++;
   off = wl_put_u32(body, 0, host->registry_id);
@@ -515,12 +766,13 @@ int crtgfx_host_window_create(const crtgfx_window_desc* desc, crtgfx_weston_topl
     uint32_t opcode;
     unsigned char rbody[CRTGFX_WL_MAX_MSG];
     size_t rlen;
+    int recv_fd;
 
-    rc = wl_recv_message(host, &object_id, &opcode, rbody, sizeof(rbody), &rlen, CRTGFX_WL_TIMEOUT_MS);
+    rc = wl_recv_message(host, &object_id, &opcode, rbody, sizeof(rbody), &rlen, CRTGFX_WL_TIMEOUT_MS, &recv_fd);
     if (rc != CRTGFX_OK) {
       goto fail;
     }
-    wl_dispatch_message(host, &boot, object_id, opcode, rbody, rlen);
+    wl_dispatch_message(host, &boot, object_id, opcode, rbody, rlen, recv_fd);
   }
 
   if (boot.compositor_name == CRTGFX_WL_NAME_NONE || boot.shm_name == CRTGFX_WL_NAME_NONE ||
@@ -564,6 +816,27 @@ int crtgfx_host_window_create(const crtgfx_window_desc* desc, crtgfx_weston_topl
     goto fail;
   }
 
+  /* wl_seat, unlike compositor/shm/wm_base just above, is optional: a
+   * compositor with no seat at all just means no keyboard events are ever
+   * queued, not a connection failure (see this file's own top-of-file
+   * scope note). Its own wl_seat::capabilities event (sent "on binding to
+   * the seat global", per wayland.xml's own doc) -- and, once that
+   * arrives with the keyboard bit set, the wl_keyboard::keymap/key/
+   * modifiers events that follow -- get processed by wl_dispatch_message()
+   * exactly like any other event, whichever loop below happens to read
+   * them first; no extra explicit roundtrip is added here for it. */
+  if (boot.seat_name != CRTGFX_WL_NAME_NONE) {
+    host->seat_id = host->next_id++;
+    off = wl_put_u32(body, 0, boot.seat_name);
+    off = wl_put_string(body, sizeof(body), off, "wl_seat");
+    off = wl_put_u32(body, off, 1);
+    off = wl_put_u32(body, off, host->seat_id);
+    if (wl_send(host, host->registry_id, WL_REGISTRY_BIND, body, off, -1) != CRTGFX_OK) {
+      rc = CRTGFX_ERROR_HOST;
+      goto fail;
+    }
+  }
+
   host->surface_id = host->next_id++;
   off = wl_put_u32(body, 0, host->surface_id);
   if (wl_send(host, host->compositor_id, WL_COMPOSITOR_CREATE_SURFACE, body, off, -1) != CRTGFX_OK) {
@@ -605,12 +878,13 @@ int crtgfx_host_window_create(const crtgfx_window_desc* desc, crtgfx_weston_topl
     uint32_t opcode;
     unsigned char rbody[CRTGFX_WL_MAX_MSG];
     size_t rlen;
+    int recv_fd;
 
-    rc = wl_recv_message(host, &object_id, &opcode, rbody, sizeof(rbody), &rlen, CRTGFX_WL_TIMEOUT_MS);
+    rc = wl_recv_message(host, &object_id, &opcode, rbody, sizeof(rbody), &rlen, CRTGFX_WL_TIMEOUT_MS, &recv_fd);
     if (rc != CRTGFX_OK) {
       goto fail;
     }
-    wl_dispatch_message(host, 0, object_id, opcode, rbody, rlen);
+    wl_dispatch_message(host, 0, object_id, opcode, rbody, rlen, recv_fd);
   }
 
   off = wl_put_u32(body, 0, host->configure_serial);
@@ -624,6 +898,13 @@ int crtgfx_host_window_create(const crtgfx_window_desc* desc, crtgfx_weston_topl
   return CRTGFX_OK;
 
 fail:
+  if (host->xkb_state != 0) {
+    xkb_state_unref(host->xkb_state);
+  }
+  if (host->xkb_keymap != 0) {
+    xkb_keymap_unref(host->xkb_keymap);
+  }
+  xkb_context_unref(host->xkb_context);
   close(host->fd);
   free(host);
   return (rc == CRTGFX_ERROR_UNSUPPORTED) ? CRTGFX_ERROR_UNSUPPORTED : CRTGFX_ERROR_HOST;
@@ -637,6 +918,13 @@ void crtgfx_host_window_destroy(crtgfx_host_window* host) {
     crtgfx_wl_active = 0;
   }
   wl_destroy_all_buffers(host);
+  if (host->xkb_state != 0) {
+    xkb_state_unref(host->xkb_state);
+  }
+  if (host->xkb_keymap != 0) {
+    xkb_keymap_unref(host->xkb_keymap);
+  }
+  xkb_context_unref(host->xkb_context);
   if (host->fd >= 0) {
     close(host->fd);
   }

@@ -90,6 +90,23 @@ if(EXISTS "${CRTGFX_SKIA_ROOT}/include/core/SkSurface.h" AND CRTGFX_SKIA_LIBRARI
 else()
   set(CRTGFX_SKIA_AVAILABLE_DEFAULT OFF)
 endif()
+
+# libxkbcommon's own fetch/build root/install prefix path math, defined
+# here (not only where the fetch/build custom targets themselves are,
+# further down inside the Python3_Interpreter_FOUND-gated block) for the
+# same reason CRTGFX_SKIA_INSTALL_PREFIX is defined this early: crtgfx_
+# backend_objects's own target_include_directories/target_link_libraries
+# calls need this path unconditionally, whether or not Python is available
+# to actually populate it.
+set(CRTGFX_XKBCOMMON_FETCH_ROOT "${CMAKE_BINARY_DIR}/external/xkbcommon" CACHE PATH "Local libxkbcommon fetch/build root")
+set(CRTGFX_XKBCOMMON_ROOT "${CRTGFX_XKBCOMMON_FETCH_ROOT}/src" CACHE PATH "libxkbcommon checkout root")
+set(CRTGFX_XKBCOMMON_BUILD_DIR "${CRTGFX_XKBCOMMON_FETCH_ROOT}/build" CACHE PATH "libxkbcommon build output directory")
+set(CRTGFX_XKBCOMMON_INSTALL_PREFIX "${CRTGFX_XKBCOMMON_FETCH_ROOT}/install" CACHE PATH "libxkbcommon install prefix")
+if(CRT_TARGET_OS STREQUAL "linux" AND EXISTS "${CRTGFX_XKBCOMMON_INSTALL_PREFIX}/lib/libxkbcommon.a")
+  set(CRTGFX_XKBCOMMON_LIBRARIES "${CRTGFX_XKBCOMMON_INSTALL_PREFIX}/lib/libxkbcommon.a" CACHE STRING "Libraries needed to link libxkbcommon into the Linux/Wayland backend" FORCE)
+else()
+  set(CRTGFX_XKBCOMMON_LIBRARIES "" CACHE STRING "Libraries needed to link libxkbcommon into the Linux/Wayland backend")
+endif()
 # Building Skia against the CRT is already a useful porting gate. Linking it
 # into libcrtgfx requires the full libc++ standard library, which is a later
 # explicit tranche; never make ordinary CRT workflows depend on a host libc++
@@ -428,6 +445,92 @@ if(Python3_Interpreter_FOUND)
     COMMENT "Building and running wayland_client_smoke in a dedicated build directory (this directory's own cache untouched)"
     USES_TERMINAL
   )
+
+  # libxkbcommon core (xkb_context/xkb_keymap/xkb_state), 2026-08-25: same
+  # "direct-compile, no Meson/Ninja/pkg-config" shape as Wayland core just
+  # above -- see libcrtgfx/third_party/xkbcommon/recipe.json's own notes
+  # for the one real difference (a pre-generated, committed bison output
+  # instead of a bison host-tool port) and the scope decision (core keymap/
+  # state API only, no xkbregistry, no Compose). Unlike Wayland, this DOES
+  # feed a real libcrtgfx backend directly (src/arch/linux/window_wayland.c
+  # -- Phase 3 of the "notepad-capability" plan, real keyboard input), so
+  # there is no separate crtgfx-xkbcommon-smoke target the way crtgfx-
+  # wayland-smoke exists standalone: the real wl_seat/wl_keyboard wiring
+  # itself, tested via a real smoke test elsewhere in this file, is what
+  # actually exercises this build end to end.
+  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/third_party/xkbcommon/recipe.json" CRTGFX_XKBCOMMON_RECIPE_JSON)
+  string(JSON CRTGFX_XKBCOMMON_RECIPE_VERSION GET "${CRTGFX_XKBCOMMON_RECIPE_JSON}" source version)
+  string(JSON CRTGFX_XKBCOMMON_RECIPE_REF GET "${CRTGFX_XKBCOMMON_RECIPE_JSON}" source ref)
+  string(JSON CRTGFX_XKBCOMMON_RECIPE_REPOSITORY GET "${CRTGFX_XKBCOMMON_RECIPE_JSON}" source repository)
+  string(JSON CRTGFX_XKBCOMMON_RECIPE_EXPECTED_COMMIT GET "${CRTGFX_XKBCOMMON_RECIPE_JSON}" source expected_commit)
+
+  set(CRTGFX_XKBCOMMON_VERSION "${CRTGFX_XKBCOMMON_RECIPE_VERSION}" CACHE STRING "libxkbcommon version label to fetch (default: libcrtgfx/third_party/xkbcommon/recipe.json's own source.version)")
+  set(CRTGFX_XKBCOMMON_REF "${CRTGFX_XKBCOMMON_RECIPE_REF}" CACHE STRING "Explicit libxkbcommon git ref/commit to fetch (default: libcrtgfx/third_party/xkbcommon/recipe.json's own source.ref)")
+  set(CRTGFX_XKBCOMMON_REPOSITORY "${CRTGFX_XKBCOMMON_RECIPE_REPOSITORY}" CACHE STRING "libxkbcommon git repository URL (default: libcrtgfx/third_party/xkbcommon/recipe.json's own source.repository)")
+  set(CRTGFX_XKBCOMMON_EXPECTED_COMMIT "${CRTGFX_XKBCOMMON_RECIPE_EXPECTED_COMMIT}" CACHE STRING "Expected libxkbcommon commit hash after fetch (default: libcrtgfx/third_party/xkbcommon/recipe.json's own source.expected_commit)")
+  # CRTGFX_XKBCOMMON_FETCH_ROOT/_ROOT/_BUILD_DIR/_INSTALL_PREFIX themselves
+  # are defined near the top of this file (alongside CRTGFX_SKIA_INSTALL_
+  # PREFIX), matching that variable's own precedent: crtgfx_backend_
+  # objects's own target_include_directories/target_link_libraries calls
+  # (further down this file) need CRTGFX_XKBCOMMON_INSTALL_PREFIX
+  # regardless of whether Python3_Interpreter_FOUND is true, the same
+  # "path math works even without the tool that populates it" reasoning
+  # CRTGFX_SKIA_INSTALL_PREFIX already established.
+
+  set(CRTGFX_XKBCOMMON_FETCH_ARGS)
+  if(CRTGFX_XKBCOMMON_EXPECTED_COMMIT)
+    list(APPEND CRTGFX_XKBCOMMON_FETCH_ARGS --expected-commit "${CRTGFX_XKBCOMMON_EXPECTED_COMMIT}")
+  endif()
+
+  set(CRTGFX_XKBCOMMON_BUILD_ARGS)
+  if(CRT_TARGET_OS STREQUAL "windows")
+    list(APPEND CRTGFX_XKBCOMMON_BUILD_ARGS --rootfs "${CMAKE_BINARY_DIR}/rootfs")
+    if(CRT_WINDOWS_KERNEL32_LIB)
+      get_filename_component(CRTGFX_XKBCOMMON_WINDOWS_SDK_LIBPATH "${CRT_WINDOWS_KERNEL32_LIB}" DIRECTORY)
+      list(APPEND CRTGFX_XKBCOMMON_BUILD_ARGS --windows-sdk-libpath "${CRTGFX_XKBCOMMON_WINDOWS_SDK_LIBPATH}")
+    endif()
+  endif()
+
+  add_custom_target(crtgfx-xkbcommon-configure
+    COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/fetch_xkbcommon.py"
+      --dest "${CRTGFX_XKBCOMMON_ROOT}"
+      --repo "${CRTGFX_XKBCOMMON_REPOSITORY}"
+      --version "${CRTGFX_XKBCOMMON_VERSION}"
+      --ref "${CRTGFX_XKBCOMMON_REF}"
+      ${CRTGFX_XKBCOMMON_FETCH_ARGS}
+    COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/build_xkbcommon.py"
+      --root "${CMAKE_SOURCE_DIR}"
+      --source "${CRTGFX_XKBCOMMON_ROOT}"
+      --build-dir "${CRTGFX_XKBCOMMON_BUILD_DIR}"
+      --install-prefix "${CRTGFX_XKBCOMMON_INSTALL_PREFIX}"
+      --sysroot "${CRT_SYSROOT}"
+      --target-os "${CRT_TARGET_OS}"
+      --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}"
+      ${CRTGFX_XKBCOMMON_BUILD_ARGS}
+      --configure-only
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Fetching libxkbcommon and writing its config.h with the CRT toolchain"
+    USES_TERMINAL
+  )
+
+  add_custom_target(crtgfx-xkbcommon-build
+    COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/build_xkbcommon.py"
+      --root "${CMAKE_SOURCE_DIR}"
+      --source "${CRTGFX_XKBCOMMON_ROOT}"
+      --build-dir "${CRTGFX_XKBCOMMON_BUILD_DIR}"
+      --install-prefix "${CRTGFX_XKBCOMMON_INSTALL_PREFIX}"
+      --sysroot "${CRT_SYSROOT}"
+      --target-os "${CRT_TARGET_OS}"
+      --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}"
+      ${CRTGFX_XKBCOMMON_BUILD_ARGS}
+    DEPENDS crtgfx-xkbcommon-configure
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Building and installing libxkbcommon's core keymap/state API with the CRT toolchain"
+    USES_TERMINAL
+  )
 endif()
 
 set(CRTGFX_CRT_STATIC_LIBS c m dl cxx)
@@ -527,6 +630,16 @@ target_include_directories(crtgfx_backend_objects PUBLIC
 target_include_directories(crtgfx_backend_objects PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
+if(CRT_TARGET_OS STREQUAL "linux")
+  # src/arch/linux/window_wayland.c's own wl_seat/wl_keyboard wiring
+  # (2026-08-25, Phase 3 of the "notepad-capability" plan) #includes
+  # <xkbcommon/xkbcommon.h> -- see libcrtgfx/third_party/xkbcommon/
+  # recipe.json for the port itself.
+  target_include_directories(crtgfx_backend_objects PRIVATE
+    "${CRTGFX_XKBCOMMON_INSTALL_PREFIX}/include"
+  )
+  add_dependencies(crtgfx_backend_objects crtgfx-xkbcommon-build)
+endif()
 set_target_properties(crtgfx_backend_objects PROPERTIES
   POSITION_INDEPENDENT_CODE ON
 )
@@ -627,6 +740,12 @@ add_library(crtgfx STATIC
   $<TARGET_OBJECTS:crtgfx_backend_objects>
   ${CRTGFX_SKIA_OBJECTS}
 )
+if(CRT_TARGET_OS STREQUAL "linux")
+  # CRTGFX_XKBCOMMON_LIBRARIES (further down) references libxkbcommon.a by
+  # a plain file path, not a real CMake target -- CMake has no way to know
+  # it needs building first without this explicit edge.
+  add_dependencies(crtgfx crtgfx-xkbcommon-build)
+endif()
 target_include_directories(crtgfx PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
@@ -657,6 +776,17 @@ if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_ENABLE_SKIA AND CRTGFX_SKIA_LIBRARI
   # where these libraries are declared avoids relying on that ordering at
   # all.
   target_link_libraries(crtgfx PRIVATE -Wl,--start-group)
+  # CRTGFX_XKBCOMMON_LIBRARIES (libxkbcommon.a, src/arch/linux/window_
+  # wayland.c's own wl_seat/wl_keyboard wiring, 2026-08-25) before
+  # CRTGFX_CRT_STATIC_LIBS: a plain, non-circular need for libc's own
+  # strndup/asprintf/mmap/eaccess -- listing it here (ahead of libc.a) is
+  # what lets libc.a, scanned after it, satisfy those references, matching
+  # every other "dependency before its own provider" ordering already
+  # established throughout this file. Empty and therefore a no-op unless
+  # this is actually a Linux host with libxkbcommon.a already built (see
+  # CRTGFX_XKBCOMMON_LIBRARIES's own definition, near CRTGFX_SKIA_
+  # LIBRARIES's, for the auto-detection).
+  target_link_libraries(crtgfx PRIVATE ${CRTGFX_XKBCOMMON_LIBRARIES})
   target_link_libraries(crtgfx PRIVATE ${CRTGFX_CRT_STATIC_LIBS})
   target_link_libraries(crtgfx PUBLIC ${CRTGFX_SKIA_LIBRARIES})
   target_link_libraries(crtgfx PRIVATE -Wl,--end-group)
@@ -685,6 +815,10 @@ else()
   if(CRTGFX_ENABLE_SKIA AND CRTGFX_SKIA_LIBRARIES)
     target_link_libraries(crtgfx PUBLIC ${CRTGFX_SKIA_LIBRARIES})
   endif()
+  # See the Linux+Skia branch's own, fuller comment on CRTGFX_XKBCOMMON_
+  # LIBRARIES just above (same file) -- empty and a no-op on any host
+  # other than Linux.
+  target_link_libraries(crtgfx PRIVATE ${CRTGFX_XKBCOMMON_LIBRARIES})
   target_link_libraries(crtgfx PRIVATE ${CRTGFX_CRT_STATIC_LIBS})
 endif()
 if(CRT_TARGET_OS STREQUAL "windows")
@@ -720,6 +854,9 @@ add_library(crtgfx_shared SHARED
   ${CRTGFX_SKIA_OBJECTS}
   ${CRTGFX_SHARED_EXTRA_SOURCES}
 )
+if(CRT_TARGET_OS STREQUAL "linux")
+  add_dependencies(crtgfx_shared crtgfx-xkbcommon-build)
+endif()
 target_include_directories(crtgfx_shared PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
@@ -769,6 +906,17 @@ else()
     # with this exact reordering before applying it here.
     target_link_libraries(crtgfx_shared PUBLIC ${CRTGFX_SKIA_LIBRARIES})
   endif()
+  # CRTGFX_XKBCOMMON_LIBRARIES (libxkbcommon.a): a plain, non-circular,
+  # pure-C dependency (strndup/asprintf/mmap/eaccess from libc, nothing
+  # from libc++/Skia at all) -- unlike CRTGFX_SKIA_LIBRARIES just above,
+  # this needs no special single-shared-library-scan ordering care, only
+  # "before CRTGFX_CRT_SHARED_LIBS" so libc, listed after it, can satisfy
+  # its own libc references. Applies whether or not CRTGFX_SHARED_SKIA_
+  # LINUX_GROUPED is set -- window_wayland.c (the one real consumer) is
+  # always compiled on Linux, independent of CRTGFX_ENABLE_SKIA. Empty and
+  # a no-op on any host other than Linux (see CRTGFX_XKBCOMMON_LIBRARIES's
+  # own definition, near CRTGFX_SKIA_LIBRARIES's).
+  target_link_libraries(crtgfx_shared PRIVATE ${CRTGFX_XKBCOMMON_LIBRARIES})
   target_link_libraries(crtgfx_shared PRIVATE ${CRTGFX_CRT_SHARED_LIBS})
   if(CRTGFX_SHARED_SKIA_LINUX_GROUPED)
     target_link_libraries(crtgfx_shared PRIVATE -Wl,--end-group)
