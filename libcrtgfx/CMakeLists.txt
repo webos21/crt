@@ -1178,6 +1178,26 @@ function(crt_wire_skia_executable target_name)
     # above (same reasoning; this target also #includes Skia headers
     # directly via crtgfx/skia.h).
     target_compile_definitions(${target_name} PRIVATE SK_BUILD_FOR_UNIX)
+    # emutls_link_stubs.c (__acrt_iob_func/__stdio_common_vfprintf link
+    # stubs -- see that file's own top comment: needed once -femulated-
+    # tls's own compiler-rt implementation, emutls.c, actually gets linked
+    # in, which any real Windows+Skia *executable* does once it fully
+    # resolves symbols at its own link time -- matches crtgfx_shared's own
+    # identical, separately-added copy just above for the DLL case).
+    # target_sources(), not a source added at this target's own original
+    # add_executable() call: this function is applied to more than one
+    # caller's target (crtgfx_skia_raster_smoke, crtgfx_keyboard_
+    # interactive, ...), and CMake supports adding sources to an already-
+    # defined target exactly this way. Found missing for real (2026-08-25):
+    # crtgfx_keyboard_interactive linked against Skia/FreeType fine but
+    # failed with `undefined symbol: __acrt_iob_func`/`__stdio_common_
+    # vfprintf` -- this function's own extraction from crtgfx_skia_raster_
+    # smoke's original inline block (which added this file directly to
+    # its own add_executable() sources) had carried over every compile/
+    # link *flag* but not this one *source file*, since the file list
+    # itself was never part of what got refactored into this function.
+    target_sources(${target_name} PRIVATE
+      "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/common/emutls_link_stubs.c")
   endif()
   # CRT_SKIA_FONTS_DIR: absolute path to the bundled real font(s) this
   # target's own real-text-rendering code scans via SkFontMgr_New_Custom_
@@ -1371,18 +1391,14 @@ endfunction()
 if(CRTGFX_ENABLE_SKIA)
   # CRT_STARTUP_END_OBJECTS deliberately not listed here -- see
   # crt_link_startup_end_objects()'s own comment (top-level CMakeLists.txt).
-  set(CRTGFX_SKIA_RASTER_SMOKE_EXTRA_SOURCES "")
-  if(CRT_TARGET_OS STREQUAL "windows")
-    # __acrt_iob_func/__stdio_common_vfprintf link stubs -- see that file's
-    # own top comment (needed once -femulated-tls's own compiler-rt
-    # implementation, emutls.c, actually gets linked in).
-    list(APPEND CRTGFX_SKIA_RASTER_SMOKE_EXTRA_SOURCES
-      "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/common/emutls_link_stubs.c")
-  endif()
+  # emutls_link_stubs.c (Windows-only) is added by crt_wire_skia_
+  # executable() itself now, via target_sources() -- not this add_
+  # executable() call's own source list -- since that function is shared
+  # with crtgfx_keyboard_interactive too (see that function's own comment
+  # for the real bug this consolidation fixed).
   add_executable(crtgfx_skia_raster_smoke
     ${CRT_STARTUP_OBJECTS}
     tests/skia_raster_smoke.cc
-    ${CRTGFX_SKIA_RASTER_SMOKE_EXTRA_SOURCES}
   )
   target_link_libraries(crtgfx_skia_raster_smoke PRIVATE crt_cxx_build_flags crtgfx)
   crt_wire_skia_executable(crtgfx_skia_raster_smoke)
