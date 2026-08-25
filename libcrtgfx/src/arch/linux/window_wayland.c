@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -12,6 +13,33 @@
 #include <unistd.h>
 
 #include <xkbcommon/xkbcommon.h>
+
+/* Opt-in wire-protocol tracing for the wl_seat/wl_keyboard/xkbcommon
+ * negotiation path -- set CRTGFX_WAYLAND_DEBUG=1 in the environment to
+ * enable, off by default (zero runtime cost beyond one getenv() call the
+ * first time it's checked). Added 2026-08-25: this negotiation path had
+ * never actually been exercised against a real, visibly-rendering
+ * compositor before (WSLg's own RDP/RAIL bridge registered windows but
+ * never composited their real pixel content, so no prior session could
+ * tell whether keyboard input was even reaching this code at all) --
+ * a permanent, opt-in trace facility is more useful here long-term than
+ * a one-off debug patch that just gets reverted after each investigation. */
+static int crtgfx_wl_debug_enabled(void) {
+  static int checked = 0;
+  static int enabled = 0;
+  if (!checked) {
+    const char* v = getenv("CRTGFX_WAYLAND_DEBUG");
+    enabled = (v != 0 && v[0] != '0' && v[0] != 0);
+    checked = 1;
+  }
+  return enabled;
+}
+#define CRTGFX_WL_TRACE(...)                             \
+  do {                                                   \
+    if (crtgfx_wl_debug_enabled()) {                     \
+      fprintf(stderr, "[crtgfx-wayland] " __VA_ARGS__);  \
+    }                                                    \
+  } while (0)
 
 /* Real Wayland client backend for Linux -- hand-rolled wire protocol, no
  * libwayland-client dependency, matching this project's own no-host-SDK
@@ -491,6 +519,7 @@ static void wl_dispatch_message(
       boot->wm_base_name = name;
     } else if (strcmp(interface, "wl_seat") == 0) {
       boot->seat_name = name;
+      CRTGFX_WL_TRACE("registry: wl_seat name=%u\n", name);
     }
     return;
   }
@@ -531,10 +560,13 @@ static void wl_dispatch_message(
     uint32_t capabilities = wl_get_u32(body, 0);
     unsigned char out[4];
 
+    CRTGFX_WL_TRACE("seat: capabilities=0x%x keyboard_bit=%d\n", capabilities,
+                     (capabilities & WL_SEAT_CAPABILITY_KEYBOARD) != 0u);
     if ((capabilities & WL_SEAT_CAPABILITY_KEYBOARD) != 0u && host->keyboard_id == 0u) {
       host->keyboard_id = host->next_id++;
       wl_put_u32(out, 0, host->keyboard_id);
       wl_send(host, host->seat_id, WL_SEAT_GET_KEYBOARD, out, sizeof(out), -1);
+      CRTGFX_WL_TRACE("seat: requesting keyboard id=%u\n", host->keyboard_id);
     }
     return;
   }
@@ -544,7 +576,9 @@ static void wl_dispatch_message(
       uint32_t size = wl_get_u32(body, 4);
       void* mapping;
 
+      CRTGFX_WL_TRACE("keyboard: keymap event format=%u size=%u fd=%d\n", format, size, fd);
       if (format != WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1 || fd < 0) {
+        CRTGFX_WL_TRACE("keyboard: keymap rejected (format=%u fd=%d)\n", format, fd);
         if (fd >= 0) {
           close(fd);
         }
@@ -584,12 +618,16 @@ static void wl_dispatch_message(
       if (host->xkb_keymap != 0) {
         host->xkb_state = xkb_state_new(host->xkb_keymap);
       }
+      CRTGFX_WL_TRACE("keyboard: keymap compiled=%d state=%d\n", host->xkb_keymap != 0,
+                       host->xkb_state != 0);
       return;
     }
     if (opcode == WL_KEYBOARD_EVENT_KEY) {
       uint32_t key = wl_get_u32(body, 8);
       uint32_t state = wl_get_u32(body, 12);
 
+      CRTGFX_WL_TRACE("keyboard: key=%u state=%u (xkb_state=%d)\n", key, state,
+                       host->xkb_state != 0);
       wl_handle_keyboard_key(host, key, state);
       return;
     }
@@ -598,6 +636,9 @@ static void wl_dispatch_message(
       uint32_t mods_latched = wl_get_u32(body, 8);
       uint32_t mods_locked = wl_get_u32(body, 12);
       uint32_t group = wl_get_u32(body, 16);
+
+      CRTGFX_WL_TRACE("keyboard: modifiers depressed=%u latched=%u locked=%u group=%u\n",
+                       mods_depressed, mods_latched, mods_locked, group);
 
       /* xkb_state_update_mask(), not xkb_state_update_key(): a real
        * Wayland *client* (this backend) is required to use the mask-
@@ -610,9 +651,16 @@ static void wl_dispatch_message(
       xkb_state_update_mask(host->xkb_state, mods_depressed, mods_latched, mods_locked, 0, 0, group);
       return;
     }
-    /* wl_keyboard::enter/leave/repeat_info: intentionally ignored, see
-     * this function's own top-of-file scope note (no focus tracking, no
-     * client-side key-repeat timer yet). */
+    /* wl_keyboard::enter/leave/repeat_info: intentionally not acted on
+     * (no focus tracking, no client-side key-repeat timer yet), but still
+     * traced -- opcode alone (enter=1, leave=2, repeat_info=5) tells a
+     * real diagnostic session whether the compositor ever gave this
+     * surface keyboard focus at all, which is the single most useful
+     * signal for "window opens but never receives input" reports (a
+     * missing/absent trace line here means the compositor's own window
+     * manager never focused the window -- a real environment/WM
+     * condition, not a protocol bug in this client). */
+    CRTGFX_WL_TRACE("keyboard: event opcode=%u (1=enter 2=leave 5=repeat_info)\n", opcode);
     return;
   }
   /* Anything else (wl_display::error/delete_id, wl_surface::enter/leave,
@@ -835,6 +883,9 @@ int crtgfx_host_window_create(const crtgfx_window_desc* desc, crtgfx_weston_topl
       rc = CRTGFX_ERROR_HOST;
       goto fail;
     }
+    CRTGFX_WL_TRACE("seat: bind requested name=%u id=%u\n", boot.seat_name, host->seat_id);
+  } else {
+    CRTGFX_WL_TRACE("seat: no wl_seat global advertised by this compositor\n");
   }
 
   host->surface_id = host->next_id++;
