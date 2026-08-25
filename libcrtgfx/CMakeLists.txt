@@ -1365,3 +1365,52 @@ elseif(CRT_TARGET_OS STREQUAL "windows")
 endif()
 crt_link_startup_end_objects(crtgfx_window_demo)
 add_dependencies(crtgfx_window_demo c crt1)
+
+# crtgfx_keyboard_interactive: manual, interactive keyboard-input
+# verification (see tests/window_keyboard_interactive_test.c's own
+# top-of-file comment for why it's not an automated ctest test -- it
+# needs a real human typing into the window it opens, and this sandbox
+# has no synthetic-input tool like wtype/ydotool to fake that). Added
+# 2026-08-25 as a real CMake target specifically so it can be built the
+# normal way (`cmake --build --preset ... --target
+# crtgfx_keyboard_interactive`) -- earlier in this port it only ever
+# existed as an ad hoc raw-clang compile in a scratch session, which a
+# real user on real hardware had no way to reproduce. Follows
+# crtgfx_window_demo's own exact shape immediately above (a manual,
+# non-ctest-registered demo executable), not crtgfx_window_smoke's
+# (which does register a ctest test).
+add_executable(crtgfx_keyboard_interactive
+  ${CRT_STARTUP_OBJECTS}
+  tests/window_keyboard_interactive_test.c
+)
+target_link_libraries(crtgfx_keyboard_interactive PRIVATE crt_build_flags c crtgfx)
+target_include_directories(crtgfx_keyboard_interactive PRIVATE
+  "${CMAKE_SOURCE_DIR}/libc/include"
+)
+target_link_libraries(crtgfx_keyboard_interactive PRIVATE crt_compiler_rt_builtins)
+target_link_options(crtgfx_keyboard_interactive PRIVATE
+  -nostdlib
+  -nostartfiles
+  -nodefaultlibs
+)
+if(CRT_TARGET_OS STREQUAL "macos")
+  target_link_options(crtgfx_keyboard_interactive PRIVATE
+    -Wl,-e,_start
+    -Wl,-dead_strip
+  )
+  target_link_libraries(crtgfx_keyboard_interactive PRIVATE System)
+elseif(CRT_TARGET_OS STREQUAL "linux")
+  target_link_options(crtgfx_keyboard_interactive PRIVATE
+    -Wl,-e,_start
+    -Wl,--gc-sections
+  )
+elseif(CRT_TARGET_OS STREQUAL "windows")
+  target_link_options(crtgfx_keyboard_interactive PRIVATE
+    -Wl,/entry:mainCRTStartup
+    -Wl,/subsystem:console
+    -Wl,/OPT:REF
+  )
+  target_link_libraries(crtgfx_keyboard_interactive PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+endif()
+crt_link_startup_end_objects(crtgfx_keyboard_interactive)
+add_dependencies(crtgfx_keyboard_interactive c crt1)
