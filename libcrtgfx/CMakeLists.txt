@@ -1106,40 +1106,39 @@ set_tests_properties(crtgfx_window_smoke_runs PROPERTIES
 )
 set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_window_smoke_runs)
 
-if(CRTGFX_ENABLE_SKIA)
-  # CRT_STARTUP_END_OBJECTS deliberately not listed here -- see
-  # crt_link_startup_end_objects()'s own comment (top-level CMakeLists.txt).
-  set(CRTGFX_SKIA_RASTER_SMOKE_EXTRA_SOURCES "")
-  if(CRT_TARGET_OS STREQUAL "windows")
-    # __acrt_iob_func/__stdio_common_vfprintf link stubs -- see that file's
-    # own top comment (needed once -femulated-tls's own compiler-rt
-    # implementation, emutls.c, actually gets linked in).
-    list(APPEND CRTGFX_SKIA_RASTER_SMOKE_EXTRA_SOURCES
-      "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/common/emutls_link_stubs.c")
-  endif()
-  add_executable(crtgfx_skia_raster_smoke
-    ${CRT_STARTUP_OBJECTS}
-    tests/skia_raster_smoke.cc
-    ${CRTGFX_SKIA_RASTER_SMOKE_EXTRA_SOURCES}
-  )
-  target_link_libraries(crtgfx_skia_raster_smoke PRIVATE crt_cxx_build_flags crtgfx)
+# crt_wire_skia_executable(target_name): every Skia-specific compile/link
+# flag a real, executable C++ crtgfx consumer needs, extracted into a
+# reusable function so a second such consumer (crtgfx_keyboard_interactive,
+# further down) can reuse the exact same, already hard-won, platform-
+# specific logic instead of a second hand-copy silently drifting out of
+# sync with this one over time. The caller is responsible for its own
+# add_executable()/crt_link_startup_end_objects()/add_dependencies()/
+# add_test() calls -- this function only adds the Skia/FreeType/imported-
+# libc++-specific pieces on top of whatever base wiring the target already
+# has (matching crtgfx_window_demo's own plain nostdlib/entry-point shape,
+# which crtgfx_keyboard_interactive already inherited when it was first
+# defined) -- every real fact and every platform-specific bug this
+# function's own body works around was found and confirmed exactly once,
+# for crtgfx_skia_raster_smoke specifically (see each block's own dated
+# comment for the full story); nothing here is guessed for the second
+# caller.
+function(crt_wire_skia_executable target_name)
   if(CRT_TARGET_OS STREQUAL "windows")
     # SK_BUILD_FOR_UNIX: see crtgfx_skia_objects's own, fuller comment just
     # above (same reasoning; this target also #includes Skia headers
     # directly via crtgfx/skia.h).
-    target_compile_definitions(crtgfx_skia_raster_smoke PRIVATE SK_BUILD_FOR_UNIX)
+    target_compile_definitions(${target_name} PRIVATE SK_BUILD_FOR_UNIX)
   endif()
   # CRT_SKIA_FONTS_DIR: absolute path to the bundled real font(s) this
-  # test's own real-text-rendering phase scans via SkFontMgr_New_Custom_
+  # target's own real-text-rendering code scans via SkFontMgr_New_Custom_
   # Directory() (porting/recipes/freetype.json's own DejaVuSansMono.ttf,
   # see libcrtgfx/assets/fonts/README.md for provenance/license) -- same
   # compile-time-path-define convention porting/tests/freetype_glyph_
   # test.c's own CRT_TEST_FONT_PATH already uses. port-build-freetype
-  # itself is an explicit dependency further down (crt_link_startup_end_
-  # objects()'s own add_dependencies() call already lists crtgfx here;
-  # this target also needs libfreetype.a built and installed before it can
-  # link at all, via CRTGFX_SKIA_LIBRARIES above).
-  target_compile_definitions(crtgfx_skia_raster_smoke PRIVATE
+  # itself is an explicit dependency the caller adds alongside its own
+  # add_dependencies() call (this target also needs libfreetype.a built
+  # and installed before it can link at all, via CRTGFX_SKIA_LIBRARIES).
+  target_compile_definitions(${target_name} PRIVATE
     CRT_SKIA_FONTS_DIR="${CMAKE_SOURCE_DIR}/libcrtgfx/assets/fonts")
   if(CRT_TARGET_OS STREQUAL "windows" AND CRT_USE_IMPORTED_LIBCXX)
     # -isystem${CRT_SYSROOT}/include/c++/v1, added *before* the libc/include
@@ -1148,7 +1147,7 @@ if(CRTGFX_ENABLE_SKIA)
     # what compiles skia_bridge.cc/Skia itself, not any host substitute. See
     # the CRTGFX_ENABLE_SKIA guard at the top of this file for the fuller
     # story of why this is required on Windows now.
-    target_compile_options(crtgfx_skia_raster_smoke PRIVATE
+    target_compile_options(${target_name} PRIVATE
       "-isystem${CRT_SYSROOT}/include/c++/v1"
     )
   endif()
@@ -1178,10 +1177,10 @@ if(CRTGFX_ENABLE_SKIA)
   # build_flags's own chain), which is what actually fixes the ordering
   # here -- target_include_directories()'s own BEFORE keyword only orders
   # within <INCLUDES>, a different slot entirely.
-  target_compile_options(crtgfx_skia_raster_smoke PRIVATE
+  target_compile_options(${target_name} PRIVATE
     "-isystem${CMAKE_SOURCE_DIR}/libc/include"
   )
-  target_include_directories(crtgfx_skia_raster_smoke SYSTEM BEFORE PRIVATE
+  target_include_directories(${target_name} SYSTEM BEFORE PRIVATE
     "${CRTGFX_SKIA_ROOT}"
   )
   if(CRT_TARGET_OS STREQUAL "windows" AND CRT_USE_IMPORTED_LIBCXX)
@@ -1189,7 +1188,7 @@ if(CRTGFX_ENABLE_SKIA)
     # itself), not the small bootstrap libstdc++/src/ ABI shim (`cxx`) --
     # see the CRTGFX_ENABLE_SKIA guard at the top of this file. Mirrors
     # tools/crt-c++'s own cxx_runtime_libs static-link selection.
-    target_link_libraries(crtgfx_skia_raster_smoke PRIVATE
+    target_link_libraries(${target_name} PRIVATE
       "${CRT_SYSROOT}/lib/libc++.a"
       "${CRT_SYSROOT}/lib/libc++abi.a"
       "${CRT_SYSROOT}/lib/libunwind.a"
@@ -1226,24 +1225,24 @@ if(CRTGFX_ENABLE_SKIA)
     # crtgfx already provides -- confirmed for real (2026-08-23): leaving
     # the `else()` branch's `cxx` mention in place put a second, different
     # libc++.a on the link line even after the ordering fix above.
-    target_link_libraries(crtgfx_skia_raster_smoke PRIVATE c)
+    target_link_libraries(${target_name} PRIVATE c)
   else()
-    target_link_libraries(crtgfx_skia_raster_smoke PRIVATE cxx c)
+    target_link_libraries(${target_name} PRIVATE cxx c)
   endif()
-  target_link_libraries(crtgfx_skia_raster_smoke PRIVATE crt_compiler_rt_builtins)
-  target_link_options(crtgfx_skia_raster_smoke PRIVATE
+  target_link_libraries(${target_name} PRIVATE crt_compiler_rt_builtins)
+  target_link_options(${target_name} PRIVATE
     -nostdlib
     -nostartfiles
     -nodefaultlibs
   )
   if(CRT_TARGET_OS STREQUAL "macos")
-    target_link_options(crtgfx_skia_raster_smoke PRIVATE
+    target_link_options(${target_name} PRIVATE
       -Wl,-e,_start
       -Wl,-dead_strip
     )
-    target_link_libraries(crtgfx_skia_raster_smoke PRIVATE System)
+    target_link_libraries(${target_name} PRIVATE System)
   elseif(CRT_TARGET_OS STREQUAL "linux")
-    target_link_options(crtgfx_skia_raster_smoke PRIVATE
+    target_link_options(${target_name} PRIVATE
       -Wl,-e,_start
       -Wl,--gc-sections
     )
@@ -1267,15 +1266,15 @@ if(CRTGFX_ENABLE_SKIA)
       # ld.bfd fragility around --start-group/PIE archive linking that lld
       # doesn't share. Requires `lld` installed on the build host when
       # CRTGFX_ENABLE_SKIA=ON on Linux (not a default Ubuntu package).
-      target_link_options(crtgfx_skia_raster_smoke PRIVATE -fuse-ld=lld)
+      target_link_options(${target_name} PRIVATE -fuse-ld=lld)
     endif()
   elseif(CRT_TARGET_OS STREQUAL "windows")
-    target_link_options(crtgfx_skia_raster_smoke PRIVATE
+    target_link_options(${target_name} PRIVATE
       -Wl,/entry:mainCRTStartup
       -Wl,/subsystem:console
       -Wl,/OPT:REF
     )
-    target_link_libraries(crtgfx_skia_raster_smoke PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+    target_link_libraries(${target_name} PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
     # uuid.lib: something reachable from this target's own link set (bisected
     # for real, 2026-08-23, down to needing *both* crtgfx.a and libskia.a
     # present together -- neither alone triggers it, and no embedded COFF
@@ -1294,7 +1293,7 @@ if(CRTGFX_ENABLE_SKIA)
     if(NOT CRTGFX_WINDOWS_UUID_LIB)
       set(CRTGFX_WINDOWS_UUID_LIB uuid.lib CACHE FILEPATH "Windows uuid import library")
     endif()
-    target_link_libraries(crtgfx_skia_raster_smoke PRIVATE "${CRTGFX_WINDOWS_UUID_LIB}")
+    target_link_libraries(${target_name} PRIVATE "${CRTGFX_WINDOWS_UUID_LIB}")
     # --allow-multiple-definition: clang_rt.builtins-x86_64.lib (this
     # target's own crt_compiler_rt_builtins, needed for __emutls_get_
     # address -- see tools/crt-cc's own -femulated-tls comment) is a real,
@@ -1313,10 +1312,30 @@ if(CRTGFX_ENABLE_SKIA)
     # multiple-definition behavior (matching GNU ld) is "keep the first
     # definition encountered" -- so this reliably keeps our real fprintf,
     # not the vendor archive's unused internal fallback.
-    target_link_options(crtgfx_skia_raster_smoke PRIVATE
+    target_link_options(${target_name} PRIVATE
       -Wl,--allow-multiple-definition
     )
   endif()
+endfunction()
+
+if(CRTGFX_ENABLE_SKIA)
+  # CRT_STARTUP_END_OBJECTS deliberately not listed here -- see
+  # crt_link_startup_end_objects()'s own comment (top-level CMakeLists.txt).
+  set(CRTGFX_SKIA_RASTER_SMOKE_EXTRA_SOURCES "")
+  if(CRT_TARGET_OS STREQUAL "windows")
+    # __acrt_iob_func/__stdio_common_vfprintf link stubs -- see that file's
+    # own top comment (needed once -femulated-tls's own compiler-rt
+    # implementation, emutls.c, actually gets linked in).
+    list(APPEND CRTGFX_SKIA_RASTER_SMOKE_EXTRA_SOURCES
+      "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/common/emutls_link_stubs.c")
+  endif()
+  add_executable(crtgfx_skia_raster_smoke
+    ${CRT_STARTUP_OBJECTS}
+    tests/skia_raster_smoke.cc
+    ${CRTGFX_SKIA_RASTER_SMOKE_EXTRA_SOURCES}
+  )
+  target_link_libraries(crtgfx_skia_raster_smoke PRIVATE crt_cxx_build_flags crtgfx)
+  crt_wire_skia_executable(crtgfx_skia_raster_smoke)
   crt_link_startup_end_objects(crtgfx_skia_raster_smoke)
   add_dependencies(crtgfx_skia_raster_smoke cxx c crt1 crtgfx port-build-freetype)
 
@@ -1381,9 +1400,14 @@ add_dependencies(crtgfx_window_demo c crt1)
 # (which does register a ctest test).
 add_executable(crtgfx_keyboard_interactive
   ${CRT_STARTUP_OBJECTS}
-  tests/window_keyboard_interactive_test.c
+  tests/window_keyboard_interactive_test.cc
 )
-target_link_libraries(crtgfx_keyboard_interactive PRIVATE crt_build_flags c crtgfx)
+# crt_cxx_build_flags, not crt_build_flags: this source is now a real .cc
+# file (see that file's own top comment for why -- optional, compile-time-
+# gated Skia+FreeType text rendering, matching crtgfx_skia_raster_smoke's
+# own identical choice, same reasoning: a plain C target's own crt_build_
+# flags never carries the C++-specific flags/standard tools/crt-c++ needs).
+target_link_libraries(crtgfx_keyboard_interactive PRIVATE crt_cxx_build_flags c crtgfx)
 target_include_directories(crtgfx_keyboard_interactive PRIVATE
   "${CMAKE_SOURCE_DIR}/libc/include"
 )
@@ -1414,3 +1438,15 @@ elseif(CRT_TARGET_OS STREQUAL "windows")
 endif()
 crt_link_startup_end_objects(crtgfx_keyboard_interactive)
 add_dependencies(crtgfx_keyboard_interactive c crt1)
+if(CRTGFX_ENABLE_SKIA)
+  # Real Skia+FreeType text rendering, added 2026-08-25 specifically to
+  # verify Linux end to end -- draws the actually-typed text on screen
+  # (crtgfx/skia.h's own CRTGFX_HAS_SKIA_HEADERS guard in the source file
+  # itself keeps this target buildable with CRTGFX_ENABLE_SKIA=OFF too,
+  # falling back to the plain gradient-fill behavior it always had).
+  # Reuses crt_wire_skia_executable() (this file, just above) rather than
+  # hand-copying crtgfx_skia_raster_smoke's own hard-won platform-specific
+  # link wiring a second time.
+  crt_wire_skia_executable(crtgfx_keyboard_interactive)
+  add_dependencies(crtgfx_keyboard_interactive port-build-freetype)
+endif()
