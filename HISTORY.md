@@ -24,8 +24,13 @@ substantive update.
   the generated installed `ffitarget.h` selects the Darwin ABI field through
   `CRT_TARGET_OS_MACOS` via a target-scoped post-install transformation. A
   fresh rebuild passes basic and `-O1` repeat-call tests against both
-  `libffi.a` and `libffi.dylib`; macOS is now `shared-pass`. Linux/Windows keep
-  their prior status only until the corrected common matrix is rerun there.
+  `libffi.a` and `libffi.dylib`; macOS is now `shared-pass`. The corrected
+  matrix was then run on real Linux arm64 and likewise passed all four tests
+  against `libffi.a` and `libffi.so`, promoting Linux to `shared-pass` without
+  any Linux-specific adaptation. A real Windows run subsequently passed the
+  same four tests against `libffi.a` and `libffi.dll.a`. The obsolete
+  calling-convention diagnosis and all related partial statuses are closed;
+  libffi is now `shared-pass` on Linux, macOS, and Windows.
 
 - **Synchronized the project status documents after completing the first
   three-host `libcrtgfx` CPU-raster milestone.** `STATUS.md` is now a concise

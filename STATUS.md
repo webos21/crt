@@ -125,11 +125,6 @@ statuses, and exceptions are maintained in:
 
 - The DNS resolver is intentionally small: synchronous UDP A-record lookup,
   without complete IPv6, TCP fallback, search-domain, or caching behavior.
-- libffi's former optimized arm64 repeat-call failure was traced to an
-  undersized test return buffer plus a Darwin `ffi_cif` consumer/library layout
-  mismatch, not a demonstrated calling-convention defect. macOS arm64 now
-  passes the complete static/shared matrix; Linux arm64 and Windows need the
-  corrected recipe rerun before their status is promoted.
 - Toybox `timeout` remains disabled until cross-process signal delivery and
   meaningful `SIGCHLD` `siginfo_t` data are complete.
 - Interactive POSIX job control remains deferred. The project mksh build does

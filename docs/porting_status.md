@@ -82,12 +82,6 @@ symlink/delete timing (both once open cross-cutting follow-ups from this
 queue) are fixed -- see the mbedTLS/curl sections below and `HISTORY.md`'s
 2026-08-15 entries.
 
-Still open:
-
-- The corrected libffi optimized-call matrix needs a fresh Linux arm64 and
-  Windows rerun before those two recipe statuses can be promoted. The former
-  arm64 calling-convention diagnosis was disproved; see the libffi section.
-
 `expat` and `freetype` (both added 2026-08-24) are graphics-stack dependencies
 outside the networking/TLS queue. Expat supports the Wayland scanner build;
 FreeType now feeds Skia's custom-directory font manager. The resulting
@@ -361,9 +355,9 @@ fixed mbedTLS confirms no regression, both statically and shared.
 - Build system: `configure`
 - Dependencies: `make`
 - Status:
-  - Linux: `partial`
+  - Linux: `shared-pass`
   - macOS: `shared-pass`
-  - Windows: `partial`
+  - Windows: `shared-pass`
 - Automated recipe tests:
   - `call-static`
   - `call-shared`
@@ -388,12 +382,12 @@ overwrote the next stack object. The recipe now adapts the generated installed
 upstream source unchanged and preserving the normal Bionic-shaped compiler
 surface.
 
-A fresh real macOS arm64 rebuild now passes all four official tests, including
-`repeat-call-static` and `repeat-call-shared` at `-O1`, so macOS is
-`shared-pass`. Linux keeps `__linux__` and Windows keeps `_WIN32` consistently,
-so the Darwin layout mismatch does not apply there. Their `partial` status is
-only awaiting a fresh run of the corrected common static/shared matrix, not an
-open callee-saved-register diagnosis.
+Fresh real macOS arm64, Linux arm64, and Windows runs now pass all four
+official tests, including `repeat-call-static` and `repeat-call-shared` at
+`-O1`, so all three hosts are `shared-pass`. Linux keeps `__linux__`
+consistently and Windows keeps `_WIN32` consistently, so neither needed the
+Darwin generated-header adaptation. The former callee-saved-register diagnosis
+and all related partial statuses are closed.
 
 ## expat
 
