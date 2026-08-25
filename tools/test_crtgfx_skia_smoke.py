@@ -1,32 +1,53 @@
 #!/usr/bin/env python3
-"""Build and run crtgfx_skia_raster_smoke, regardless of the calling build
-directory's own current CRTGFX_ENABLE_SKIA/CRT_USE_IMPORTED_LIBCXX cache
-values.
+"""Build (and, by default, run) a real crtgfx executable with
+CRTGFX_ENABLE_SKIA/CRT_USE_IMPORTED_LIBCXX turned on, regardless of the
+calling build directory's own current cache values for those two flags.
+Defaults to crtgfx_skia_raster_smoke (its own original, single-purpose
+role); pass --target to build any other real crtgfx executable target
+this same way instead (e.g. crtgfx_keyboard_interactive).
 
 Mirrors tools/test_libcxx_runtime.py's own role for crt-libcxx-smoke: a
 target a user can build directly (`cmake --build <dir> --target
 crtgfx-skia-smoke`) without first hand-running the multi-step reconfigure
 dance libcrtgfx/CMakeLists.txt's own CRTGFX_ENABLE_SKIA guard otherwise
 requires (crt-libcxx-sysroot, then crtgfx-skia-build, then a reconfigure
-with CRTGFX_ENABLE_SKIA=ON, only *then* can crtgfx_skia_raster_smoke even
+with CRTGFX_ENABLE_SKIA=ON, only *then* can a Skia-linked executable even
 be built) -- see that file's own FATAL_ERROR guard comments for why each
-step has to happen in that exact order.
+step has to happen in that exact order. Generalized 2026-08-25 after a
+user, having just been walked through that exact five-command manual
+sequence to get crtgfx_keyboard_interactive's own real Skia+FreeType text
+rendering built, correctly pushed back that this project already has a
+one-command answer for exactly this shape of problem (this file, for
+crtgfx_skia_raster_smoke) and asked for the same convenience here instead
+of a second manual dance -- a real, valid UX complaint, not a one-off.
 
 Unlike test_libcxx_runtime.py (which compiles its own smoke source
 directly through tools/crt-c++, entirely independent of the outer CMake
-project), crtgfx_skia_raster_smoke's own real build recipe -- Skia's own
+project), a real crtgfx executable's own build recipe -- Skia's own
 include path, SK_BUILD_FOR_UNIX, the imported-libc++ swap, and (Linux)
 the --start-group/-fuse-ld=lld fix, (Windows) uuid.lib/--allow-multiple-
-definition -- already lives correctly in libcrtgfx/CMakeLists.txt, tested
-and proven working there. Reimplementing that recipe a second time, by
-hand, in this script would risk drifting out of sync with it. Instead,
-this script drives a *separate, dedicated* nested CMake build directory
-(never the calling directory's own -- its own cached flags are left
-completely untouched) that reuses that exact, real CMakeLists.txt target.
-The first invocation is genuinely slow (a full libcxx + Skia fetch/build,
-matching crt-libcxx-sysroot/crtgfx-skia-build's own real cost elsewhere in
-this project); the dedicated directory is kept and reused incrementally
-on every later invocation, the same as any other CRT build directory.
+definition -- already lives correctly in libcrtgfx/CMakeLists.txt's own
+crt_wire_skia_executable() function, tested and proven working there.
+Reimplementing that recipe a second time, by hand, in this script would
+risk drifting out of sync with it. Instead, this script drives a
+*separate, dedicated* nested CMake build directory (never the calling
+directory's own -- its own cached flags are left completely untouched)
+that reuses that exact, real CMakeLists.txt target. The first invocation
+is genuinely slow (a full libcxx + Skia fetch/build, matching crt-libcxx-
+sysroot/crtgfx-skia-build's own real cost elsewhere in this project); the
+dedicated directory is kept and reused incrementally on every later
+invocation, the same as any other CRT build directory -- and is shared
+across every --target this script is asked to build (Skia/libc++/
+FreeType only need building once no matter how many different crtgfx
+executables get built against them afterward).
+
+--no-run (default: run, matching this script's own original behavior)
+skips the final "build it, then execute it and check its own exit code"
+step -- required for a target like crtgfx_keyboard_interactive, which
+needs a real human typing into a real window for up to 60 seconds and is
+not meant to be driven to a fixed pass/fail exit code from a build
+script the way crtgfx_skia_raster_smoke's own ctest-shaped PASS_REGULAR_
+EXPRESSION contract is.
 """
 
 import argparse
@@ -49,6 +70,17 @@ def main():
     parser.add_argument("--cmake-cxx-compiler", required=True)
     parser.add_argument("--target-os", required=True, choices=["linux", "macos", "windows"])
     parser.add_argument("--target-arch", default="host")
+    parser.add_argument("--target", default="crtgfx_skia_raster_smoke",
+                         help="Real crtgfx executable CMake target to build with Skia enabled "
+                              "(default: crtgfx_skia_raster_smoke). Assumes the built binary's own "
+                              "file name matches the target name -- true for every real target this "
+                              "script has been used with so far.")
+    parser.add_argument("--run", dest="run", action="store_true", default=True,
+                         help="Execute the built binary and check its exit code (default).")
+    parser.add_argument("--no-run", dest="run", action="store_false",
+                         help="Build only -- do not execute the binary (required for an interactive "
+                              "target like crtgfx_keyboard_interactive, which needs a real human typing "
+                              "into a real window rather than a fixed pass/fail exit code).")
     args = parser.parse_args()
 
     root = args.root.resolve()
@@ -144,15 +176,18 @@ def main():
 
     # Phase 2: now that libskia.a and the imported libc++ sysroot both
     # exist, CRTGFX_ENABLE_SKIA=ON's own guard is satisfied -- reconfigure
-    # in place (same build directory) to pick it up, then build and run
-    # the real smoke executable.
+    # in place (same build directory) to pick it up, then build the
+    # requested real target.
     run(["cmake", "-S", str(root), "-B", str(build_dir), "-DCRTGFX_ENABLE_SKIA=ON"])
-    run(["cmake", "--build", str(build_dir), "--target", "crtgfx_skia_raster_smoke"])
+    run(["cmake", "--build", str(build_dir), "--target", args.target])
 
     suffix = ".exe" if args.target_os == "windows" else ""
-    binary = build_dir / "libcrtgfx" / f"crtgfx_skia_raster_smoke{suffix}"
+    binary = build_dir / "libcrtgfx" / f"{args.target}{suffix}"
     if not binary.is_file():
-        raise SystemExit(f"expected smoke binary missing: {binary}")
+        raise SystemExit(f"expected binary missing: {binary}")
+    if not args.run:
+        print(f"built (not run, --no-run given): {binary}")
+        return
     # Matches crtgfx_skia_raster_smoke_runs' own ctest WORKING_DIRECTORY
     # (libcrtgfx/CMakeLists.txt) for consistency.
     run([str(binary)], cwd=str(root))

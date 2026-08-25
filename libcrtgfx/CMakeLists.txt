@@ -356,6 +356,56 @@ if(Python3_Interpreter_FOUND)
     USES_TERMINAL
   )
 
+  # crtgfx-keyboard-interactive-skia: builds crtgfx_keyboard_interactive
+  # with its OPTIONAL Skia+FreeType on-screen text rendering also turned
+  # on. IMPORTANT, easy to misread: this target has nothing to do with
+  # keyboard/mouse *input* itself -- that's real Wayland/xkbcommon wiring
+  # in src/arch/linux/window_wayland.c, unconditionally compiled into
+  # crtgfx/crtgfx_shared regardless of CRTGFX_ENABLE_SKIA, so the plain
+  # `cmake --build <dir> --target crtgfx_keyboard_interactive` (no flags,
+  # no dedicated directory, builds in seconds) already gets a fully
+  # working keyboard/mouse test on its own. This target exists purely for
+  # the separate, optional bonus of actually *seeing* typed characters
+  # drawn on screen (crtgfx/skia.h's own CRTGFX_HAS_SKIA_HEADERS-gated
+  # code path in that source file) -- hence the "-skia" suffix naming it
+  # explicitly as the augmented variant, not the one to reach for by
+  # default. Mirrors crtgfx-skia-smoke's own one-command convenience
+  # (added 2026-08-25 after a user, walked through the five-command
+  # manual CRTGFX_ENABLE_SKIA/CRT_USE_IMPORTED_LIBCXX reconfigure dance
+  # for exactly this, correctly pointed out this project already has a
+  # one-command answer for that shape of problem and asked why this
+  # target didn't get the same treatment -- a real, valid UX complaint).
+  # Reuses the *same* dedicated build directory as crtgfx-skia-smoke
+  # (tools/test_crtgfx_skia_smoke.py's own --build-dir), not a separate
+  # one -- Skia/libc++/FreeType only need building once regardless of
+  # which real crtgfx executable target gets built against them
+  # afterward, and the script itself already treats that directory as
+  # shared/reused across --target invocations. Also means the resulting
+  # binary lives in *that* dedicated directory's own tree, a completely
+  # separate crtgfx build/configure from whatever the calling directory
+  # (this one) is currently set to -- its own Wayland/xkbcommon wiring is
+  # unaffected either way, since neither directory's own CRTGFX_ENABLE_
+  # SKIA value changes how that part of the code behaves.
+  # --no-run: crtgfx_keyboard_interactive needs a real human typing into a
+  # real window for up to 60 seconds, unlike crtgfx_skia_raster_smoke's
+  # own fixed ctest-shaped pass/fail contract -- this target only builds
+  # the binary and reports its path; the user runs it themselves.
+  add_custom_target(crtgfx-keyboard-interactive-skia
+    COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_crtgfx_skia_smoke.py"
+      --root "${CMAKE_SOURCE_DIR}"
+      --build-dir "${CMAKE_BINARY_DIR}/crtgfx-skia-smoke"
+      --cmake-c-compiler "${CMAKE_C_COMPILER}"
+      --cmake-cxx-compiler "${CMAKE_CXX_COMPILER}"
+      --target-os "${CRT_TARGET_OS}"
+      --target-arch "${CRT_TARGET_ARCH}"
+      --target crtgfx_keyboard_interactive
+      --no-run
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Building crtgfx_keyboard_interactive with real Skia+FreeType text rendering in the same dedicated build directory crtgfx-skia-smoke uses (CRTGFX_ENABLE_SKIA/CRT_USE_IMPORTED_LIBCXX forced on there, this directory's own cache untouched) -- run the resulting binary yourself, it needs a real human typing into it"
+    USES_TERMINAL
+  )
+
   # Wayland core (wayland-scanner host tool + wayland-client), 2026-08-24:
   # same "external build, recipe.json is the single source of truth for
   # source pinning" shape as Skia just above, but with NO external build-
