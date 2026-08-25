@@ -10,16 +10,15 @@ means; if this page and `HISTORY.md`/`TODO.md` disagree, the dated entries
 in those two win.
 
 - **Real keyboard/mouse input wired through `crtgfx/window.h`'s public
-  `crtgfx_window_poll_event()` API on all three targets (2026-08-25):**
-  **Linux and Windows verified live with real physical input; macOS**
-  **implemented and object-code-verified but not yet run on real**
-  **hardware (no macOS host access this session).** Linux: real
+  `crtgfx_window_poll_event()` API on all three targets, all three now**
+  **verified live with real physical input (2026-08-25).** Linux: real
   `wl_seat`/`wl_keyboard`/`wl_pointer` + a new `libcrtgfx/third_party/
   xkbcommon` port. Windows: real `WM_KEYDOWN`/`WM_CHAR`/mouse-message
   handling. macOS: real `NSEventTypeKeyDown`/`FlagsChanged`/mouse-event
-  handling, flagged in the code as reasoned-but-unverified pending real
-  hardware. See `TODO.md`'s "Current baseline" bullets and `HISTORY.md`'s
-  matching dated entry for the full trail.
+  handling -- implemented as reasoned-but-unverified (no macOS host
+  access this session), then confirmed working on real macOS hardware by
+  the user the same day. See `TODO.md`'s "Current baseline" bullets and
+  `HISTORY.md`'s matching dated entry for the full trail.
 - **Skia's real FreeType-backed font manager: end-to-end text rendering**
   **now verified on all three targets (Windows/macOS 2026-08-24,**
   **Linux 2026-08-25).** `crtgfx` -> Skia -> `SkFontMgr_New_Custom_

@@ -72,7 +72,11 @@ substantive update.
     situation). What *was* checked: a real `clang -fsyntax-only` pass
     and real object-code generation (not just parsing) for both
     `--target=x86_64-apple-darwin` and `--target=arm64-apple-darwin`,
-    both clean. Real-hardware confirmation is still open.
+    both clean. **Real-hardware confirmation: closed the same day** --
+    the user confirmed live keyboard/mouse input (and, per the Skia
+    entry below, real typed text on screen) working correctly on real
+    macOS hardware, matching Linux/Windows. No corrections were needed
+    to the reasoned-but-unverified code above.
 
 - **Two real GitHub Actions CI failures fixed building the new
   libxkbcommon port (above), both invisible on any locally reused build
