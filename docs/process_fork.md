@@ -99,10 +99,11 @@ architecture and the `pselect()` atomicity fix that made it actually
 usable by GNU make's jobserver -- also now exercised for real by parallel
 `make -jN` port builds on Windows, see `HISTORY.md`'s 2026-08-11 entries.
 
-Still open, tracked in `TODO.md`: broader multi-fd redirection beyond the
-current shell smoke coverage, fork after malloc/pthread lock activity under
-real stress (many concurrent children), and command-substitution shell
-smoke tests.
+Coverage added after the original fork tranche now includes fd 3+ redirection,
+subshell/command-substitution patterns, concurrent-child stress, and GNU make
+jobserver-style pipe contention (`mksh_shell_smoke_test` and
+`process_stress_test`). The remaining Windows mechanism limits are documented
+in `windows_fork_emulation.md`, not kept as stale generic TODO entries here.
 
 ---
 

@@ -340,11 +340,11 @@ when possible, and document the difference explicitly.
 
 ## SQLite Follow-up Gaps
 
-SQLite amalgamation now builds on macOS through the recipe flow, but that result
-only proves that the library compiles and links against the CRT sysroot. The
-following items were exposed by SQLite and still need deeper implementation
-before file-backed SQLite databases should be treated as robust runtime
-validation.
+SQLite amalgamation now builds on Linux, macOS, and Windows through the recipe
+flow, in static and shared forms where the recipe supports them. The current
+runtime smoke remains an in-memory database round trip, so the items below are
+implemented PAL surfaces that still need deeper multi-process/file-backed
+validation before SQLite journaling/WAL robustness is claimed.
 
 | Area | Current state | Bionic-compatible direction |
 | --- | --- | --- |

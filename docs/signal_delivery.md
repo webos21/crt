@@ -300,26 +300,14 @@ per the caveat above):
   (0.21s), not the old bounded-5s-timeout behavior the honest no-op stub
   used to produce. Confirms the real, polled `SIGCHLD` mechanism described
   in "Windows" above actually fires, not merely that the build compiles.
-- Went further than the synthetic test, matching the Linux/macOS
-  real-world verification style: temporarily lifted `tools/crt-port-
-  build.py`'s hardcoded `jobs = 1 if target_os == "windows" ...`
-  restriction (a local, reverted-immediately test patch) and reran a real
-  port build (`zlib`, `./configure && make -j 8 && make install`) with
-  genuine parallel jobs on Windows -- something no Windows port build had
-  ever actually done before. **This found a second, separate, still-open
-  bug**: `make.exe: /system/bin/mksh: Bad file descriptor` followed by
-  `make.exe: INTERNAL: Exiting with 1 jobserver tokens available; should
-  be 8!` -- GNU Make's own process-spawn failure when creating a
-  *concurrent* recipe shell, not a `pselect()`/`SIGCHLD` symptom (that
-  mechanism is confirmed correct by the regression test above; this is a
-  distinct failure mode, not a hang). Points at a race or gap in this
-  Windows PAL's own concurrent process-spawn/fd-inheritance path, not at
-  anything in this document's own signal-delivery design. Not root-caused
-  this session -- reverted the test patch, rebuilt `zlib` normally (`-j 1`)
-  to restore a known-good state, reran full `ctest` (80/80, clean, no
-  residual corruption). `tools/crt-port-build.py`'s `jobs = 1 if
-  target_os == "windows"` restriction stays in place until this separate
-  bug is fixed; see `TODO.md`, "in progress", for the tracking entry.
+- The first Windows parallel-port experiment exposed a separate
+  `make.exe: /system/bin/mksh: Bad file descriptor` jobserver/fd-inheritance
+  bug after the `pselect()`/`SIGCHLD` mechanism itself was already confirmed.
+  That later investigation is now complete: the Windows process/fd path and
+  GNU make token accounting were fixed, stress-tested with real parallel port
+  builds, and the Windows-only serial restriction was removed. The full
+  diagnosis belongs in `HISTORY.md`; it is no longer an open signal-delivery
+  task.
 
 ## Regression Test
 

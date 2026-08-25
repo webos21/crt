@@ -22,9 +22,10 @@ Last synchronized with the source tree and git history: **2026-08-25**.
 - The rootfs contains the project-built mksh and audited toybox applets. The
   same shell/toolchain environment is used by porting tests rather than
   silently falling back to the host libc or shell.
-- The imported LLVM runtime path builds project-owned libunwind, libc++abi,
-  and libc++ for all three hosts. Static and shared C++ smoke tests, including
-  RTTI and exceptions, have passed on each host. Windows uses the documented
+- The imported LLVM runtime path builds libc++abi and libc++ on all three
+  hosts, plus project-owned libunwind on Linux and Windows. macOS deliberately
+  uses libSystem's unwinder. Static and shared C++ smoke tests, including RTTI
+  and exceptions, have passed on each host. Windows uses the documented
   DWARF-CFI exception policy rather than relying on a separate SEH-only C++
   runtime model.
 - The source-porting queue through curl has static and shared coverage on
@@ -124,8 +125,11 @@ statuses, and exceptions are maintained in:
 
 - The DNS resolver is intentionally small: synchronous UDP A-record lookup,
   without complete IPv6, TCP fallback, search-domain, or caching behavior.
-- Windows aarch64 still has the documented optimized repeated-call libffi
-  issue; the regression and current diagnosis live with the libffi recipe.
+- libffi's former optimized arm64 repeat-call failure was traced to an
+  undersized test return buffer plus a Darwin `ffi_cif` consumer/library layout
+  mismatch, not a demonstrated calling-convention defect. macOS arm64 now
+  passes the complete static/shared matrix; Linux arm64 and Windows need the
+  corrected recipe rerun before their status is promoted.
 - Toybox `timeout` remains disabled until cross-process signal delivery and
   meaningful `SIGCHLD` `siginfo_t` data are complete.
 - Interactive POSIX job control remains deferred. The project mksh build does

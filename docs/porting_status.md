@@ -84,18 +84,15 @@ queue) are fixed -- see the mbedTLS/curl sections below and `HISTORY.md`'s
 
 Still open:
 
-- libffi still has a correctness issue around repeated `ffi_call()` usage at
-  optimized levels, now confirmed aarch64-Windows-specific (x86_64 Windows
-  tested clean). See the libffi section below.
+- The corrected libffi optimized-call matrix needs a fresh Linux arm64 and
+  Windows rerun before those two recipe statuses can be promoted. The former
+  arm64 calling-convention diagnosis was disproved; see the libffi section.
 
-`expat` (2026-08-24) is a new port outside this queue -- added as a build
-dependency for the upcoming core Wayland external build (`wayland-scanner`
-needs it to parse protocol XML), not part of the networking/TLS chain above.
-See its own section below.
-
-`freetype` (2026-08-24) is another new port outside this queue -- Phase 1 of
-the "notepad-capability" plan (real font rasterization for `libcrtgfx`), not
-part of the networking/TLS chain above. See its own section below.
+`expat` and `freetype` (both added 2026-08-24) are graphics-stack dependencies
+outside the networking/TLS queue. Expat supports the Wayland scanner build;
+FreeType now feeds Skia's custom-directory font manager. The resulting
+Wayland/Skia/FreeType input-and-text milestone is complete on all three hosts;
+their package-specific status remains in the sections below.
 
 ## make
 
@@ -214,7 +211,7 @@ continue to be checked through `port-test-bzip2` or the aggregate
 - Version: `5.8.3`
 - Recipe: `porting/recipes/xz.json`
 - Build system: `configure`
-- Dependencies: none
+- Dependencies: `make`
 - Status:
   - Linux: `shared-pass`
   - macOS: `shared-pass`
@@ -237,7 +234,7 @@ outside this specific recipe.
 - Version: `10.47`
 - Recipe: `porting/recipes/pcre2.json`
 - Build system: `configure`
-- Dependencies: none
+- Dependencies: `make`
 - Status:
   - Linux: `shared-pass`
   - macOS: `shared-pass`
@@ -259,7 +256,7 @@ surface.
 - Version: `3.6.7`
 - Recipe: `porting/recipes/mbedtls.json`
 - Build system: `configure` recipe with `skip_configure`
-- Dependencies: none
+- Dependencies: `make`
 - Status:
   - Linux: `shared-pass`
   - macOS: `shared-pass`
@@ -306,7 +303,8 @@ Important follow-ups:
     silently dropped). Re-verified the same way as the original fix
     (`llvm-readobj --coff-exports` shows zero libc symbols; both
     `crypto-static`/`crypto-shared` recipe tests pass). This maintenance
-    gap itself is still open -- see `TODO.md`'s note section.
+    obligation remains standing -- see `TODO.md`'s Notice and
+    `porting/recipes/mbedtls.json`.
 - macOS `.dylib` install-name handling was fixed by recipe patches adding
   `-install_name @rpath/$@`.
 - Linux `getauxval()`/`<sys/auxv.h>` support was added generally after mbedTLS
@@ -364,7 +362,7 @@ fixed mbedTLS confirms no regression, both statically and shared.
 - Dependencies: `make`
 - Status:
   - Linux: `partial`
-  - macOS: `configure-pass`
+  - macOS: `shared-pass`
   - Windows: `partial`
 - Automated recipe tests:
   - `call-static`
@@ -372,39 +370,53 @@ fixed mbedTLS confirms no regression, both statically and shared.
   - `repeat-call-static`
   - `repeat-call-shared`
 
-libffi configures, builds, and installs useful artifacts, and its basic
-`ffi_call()` and closure paths work in isolation. Windows shared-library output
-and import-library use are now possible; the CRT implements the PE runtime
+libffi configures, builds, and installs static and shared artifacts on Linux,
+macOS, and Windows. Its basic `ffi_call()` path works against both build shapes,
+and Wayland's closure-based argument marshaling has run successfully in the
+three-host `crtgfx-wayland-smoke` path. Windows shared-library output and
+import-library use are also operational; the CRT implements the PE runtime
 pseudo-relocation support needed by ordinary consumers of `libffi.dll.a`.
 
-Status stays conservative because a correctness bug remains: calling
-`ffi_call()` and then a further libffi call in the same process can corrupt a
-callee-saved register at optimized levels on the affected paths -- **confirmed
-aarch64-Windows-specific**, not general Windows: the same repro (now a
-permanent test, `repeat-call-static`/`repeat-call-shared`) passes cleanly on
-x86_64 Windows at both `-O1` and `-O2`. This needs a focused `lldb` debugger
-pass on real aarch64 Windows hardware before libffi can be promoted to
-`shared-pass` there.
+The optimized repeat-call failure was a consumer ABI mismatch, not a proven
+libffi assembly defect. libffi requires `ffi_call()` return storage to be at
+least register-sized, so both tests now use `ffi_arg` rather than `int`. On
+macOS, the library was also built with `__APPLE__` while normal CRT consumers
+hide that host macro; this changed the public `ffi_cif` size by omitting
+Darwin's `aarch64_nfixedargs` field from the consumer. `ffi_prep_cif()` then
+overwrote the next stack object. The recipe now adapts the generated installed
+`ffitarget.h` to select that ABI field through `CRT_TARGET_OS_MACOS`, leaving
+upstream source unchanged and preserving the normal Bionic-shaped compiler
+surface.
+
+A fresh real macOS arm64 rebuild now passes all four official tests, including
+`repeat-call-static` and `repeat-call-shared` at `-O1`, so macOS is
+`shared-pass`. Linux keeps `__linux__` and Windows keeps `_WIN32` consistently,
+so the Darwin layout mismatch does not apply there. Their `partial` status is
+only awaiting a fresh run of the corrected common static/shared matrix, not an
+open callee-saved-register diagnosis.
 
 ## expat
 
 - Version: `2.8.3`
 - Recipe: `porting/recipes/expat.json`
 - Build system: `configure`
-- Dependencies: none
+- Dependencies: `make`
 - Status:
   - Linux: `shared-pass`
-  - macOS: `pending`
+  - macOS: `shared-pass`
   - Windows: `shared-pass`
 - Automated recipe tests:
   - `roundtrip-static`
   - `roundtrip-shared`
 
-Added outside the networking/TLS queue above, as a build dependency for the
-upcoming core Wayland external build: upstream `wayland-scanner` parses
+Added outside the networking/TLS queue above as a build dependency for the
+current core Wayland external build: upstream `wayland-scanner` parses
 protocol XML via expat. The tests run a real `XML_Parse()` round trip
 (nested elements, an attribute, character data) against both static and
-shared builds.
+shared builds. In addition to its earlier indirect use by the completed
+Wayland build, a fresh macOS arm64 `port-rebuild-expat` and
+`port-test-expat` run on 2026-08-25 passed both official round trips. Expat is
+therefore `shared-pass` on all three hosts.
 
 Windows needed two real, expat-specific fixes plus one general Windows
 infrastructure fix, all found and root-caused this session (2026-08-24):
@@ -439,19 +451,19 @@ See `porting/recipes/expat.json`'s own notes for the full trail and
 - Version: `2.14.3`
 - Recipe: `porting/recipes/freetype.json`
 - Build system: `configure`
-- Dependencies: none
+- Dependencies: `make`
 - Status:
   - Linux: `shared-pass`
-  - macOS: `pending`
+  - macOS: `shared-pass`
   - Windows: `shared-pass`
 - Automated recipe tests:
   - `glyph-rasterize-static`
   - `glyph-rasterize-shared`
 
-Added as Phase 1 of the "notepad-capability" plan: real text rendering
-needs a real font rasterizer, and Skia already has first-class, non-host
-support for FreeType (`skia_use_freetype`/`SkFontMgr_custom_*` GN targets
-exist upstream, just currently off). The tests run a real `FT_New_Face()`/
+Added as Phase 1 of the now-completed three-host CPU-raster/input/text
+milestone: real text rendering needs a real font rasterizer, and Skia has
+first-class, non-host support for FreeType
+(`skia_use_freetype`/`SkFontMgr_custom_*` GN targets). The tests run a real `FT_New_Face()`/
 `FT_Set_Pixel_Sizes()`/`FT_Load_Char(..., FT_LOAD_RENDER)` round trip
 against a bundled real font (`libcrtgfx/assets/fonts/DejaVuSansMono.ttf`)
 and check the rasterized `'A'` glyph bitmap has plausible non-zero

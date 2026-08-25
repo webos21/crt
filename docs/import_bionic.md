@@ -3,6 +3,10 @@
 This document defines how Android Bionic headers and source files are imported
 into this project.
 
+The policy sections are current. The many function-family "tranche" sections
+later in the file are an import/provenance ledger accumulated during bring-up,
+not the active task list; use `STATUS.md` and `TODO.md` for current state.
+
 ## Import Location
 
 Bionic source should be handled in two different locations:

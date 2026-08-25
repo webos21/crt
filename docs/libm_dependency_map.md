@@ -1,9 +1,9 @@
 # Libm Dependency Map
 
-This document records the planned import map for the next double-precision
-`libm` functions. The map is intentionally source-oriented: it lists the public
-symbol, candidate upstream source files, and private dependencies that must be
-present before the function is imported into `libm/src/freebsd/`.
+This document records the completed portable-source import map and the
+remaining long-double/optimization decisions for `libm`. The map is
+intentionally source-oriented: it lists public symbols, upstream source files,
+and private dependencies used under `libm/src/freebsd/`.
 
 ## Source Policy
 
@@ -76,7 +76,7 @@ not target-builtin dependent. By contrast, `__builtin_floorf`,
 `__builtin_roundf` are not used yet because Debug/O0 Linux and Windows builds
 lower them to recursive libcalls back into the same exported `*f` symbol.
 
-## Next Double-Precision Tranche
+## Double-Precision Import Record
 
 ### Trigonometric Core
 

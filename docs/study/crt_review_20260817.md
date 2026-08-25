@@ -1,3 +1,10 @@
+# Project Review Study (2026-08-17)
+
+> **문서 상태:** 2026-08-17 시점의 외부 관점 평가 기록이다. 당시의
+> 미완성도 평가는 현재 상태를 나타내지 않는다. 이후 imported libc++,
+> Skia/Wayland/FreeType 및 3개 OS input milestone까지 진행되었으므로
+> 현재 평가는 `STATUS.md`와 `docs/runtime_roadmap.md`를 따른다.
+
 webos21/crt 프로젝트는 Android Bionic libc를 가반으로 하여 Linux, macOS, Windows 등 다양한 운영체제에서 소스 코드 레벨의 크로스 플랫폼 빌드를 가능하게 하려는 야심 찬 C 런타임 및 플랫폼 추상화 레이어(PAL) 프로젝트입니다.
 제공된 저장소 정보를 바탕으로 이 프로젝트의 구현 시도와 방향성을 다각도로 분석 및 평가해 드립니다.
 ------------------------------
@@ -35,4 +42,3 @@ webos21/crt는 "POSIX/Android 코드를 수정 없이 Windows/macOS에서 네이
 * Android Bionic과 타 OS 간의 구체적인 소스 이식 메커니즘
 
 원하시는 주제를 말씀해 주시거나 새로운 질문을 남겨 주세요.
-

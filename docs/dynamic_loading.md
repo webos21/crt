@@ -11,6 +11,8 @@ dynamic loading API across the project targets:
 - `dlsym`
 - `dlclose`
 - `dlerror`
+- `dladdr`
+- `dl_iterate_phdr`
 
 This is a source-portability layer. It is not yet an Android linker
 implementation, an ELF loader, or a full Bionic namespace-compatible dynamic
@@ -18,8 +20,9 @@ linker.
 
 ## Public Surface
 
-The first public header is `include/dlfcn.h`. It defines the common flags and
-handles needed by configure probes and small runtime tests:
+The public surface is split between `include/dlfcn.h` and `include/link.h`.
+It defines the common flags, handles, image lookup, and loaded-image iteration
+needed by configure probes, libunwind, and runtime tests:
 
 - `RTLD_LAZY`
 - `RTLD_NOW`
@@ -31,6 +34,11 @@ handles needed by configure probes and small runtime tests:
 `dlerror` follows the usual one-shot behavior: after a failing operation,
 `dlerror()` returns a process-local diagnostic string once, then returns `NULL`
 until the next failure.
+
+`dladdr()` is implemented on all three hosts. `dl_iterate_phdr()` reports real
+ELF program headers on Linux; macOS/Windows use the documented empty-iteration
+result because Mach-O/PE images do not have ELF program headers. The permanent
+`dl_iterate_phdr_dladdr_test` covers those host-specific contracts.
 
 ## Source Layout
 
@@ -170,14 +178,17 @@ public API level, but not Bionic-complete at the dynamic-linker behavior level.
 
 ## Next Steps
 
-Recommended next work:
+The public bootstrap, `dladdr()`, `dl_iterate_phdr()`, and host-native shared
+artifact model are implemented. Remaining work is loader-level rather than
+header-level:
 
-1. Add a `libdl` ABI/header compile test that checks public constants and
-   prototypes across all targets.
-2. Define whether Linux grows a project ELF linker first or a temporary
-   host-libdl bridge.
-3. Add `dladdr` and, if needed, Android/Bionic extension placeholders with
-   documented `ENOTSUP` behavior.
-4. Decide the shared library build model for `libc.so`, `libm.so`, and
-   `libdl.so`.
-5. Start the `linker/` tranche once ELF loading becomes the main target.
+1. Decide when Linux needs a project ELF linker rather than the current honest
+   no-real-load policy; do not introduce a host-glibc bridge into the runtime
+   profile as a shortcut.
+2. Add `RTLD_NEXT`, scope/version/search-path behavior, and
+   `android_dlopen_ext` only with a real loader implementation that can honor
+   them.
+3. Add reference counting/unload semantics after real multi-image loading is
+   owned by the project.
+4. Coordinate export/version policy with `docs/shared_libraries.md` before
+   calling the dynamic ABI stable.

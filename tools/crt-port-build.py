@@ -1049,6 +1049,26 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
         run(make_args, make_work, env, f"{port_name}: make")
         run(install_args, make_work, env, f"{port_name}: make install")
 
+    # Some generated public headers defer ABI layout decisions to host
+    # compiler macros that the CRT wrapper intentionally hides from normal C
+    # consumers. Apply narrowly-scoped transformations to installed artifacts
+    # so their ABI follows the stable CRT target macros instead. Upstream
+    # source remains untouched, and an exact find match makes version drift
+    # fail loudly rather than silently producing a mismatched public header.
+    for patch_entry in os_overrides.get("post_install_patch", build.get("post_install_patch", [])):
+        patch_path = port_prefix / patch_entry["file"]
+        progress(f"{port_name}: post-install patch {patch_entry['file']}")
+        patch_text = patch_path.read_text(encoding="utf-8")
+        if patch_entry["find"] not in patch_text:
+            raise SystemExit(
+                f"{port_name}: post_install_patch text not found in {patch_path}\n"
+                f"looking for: {patch_entry['find']!r}"
+            )
+        patch_path.write_text(
+            patch_text.replace(patch_entry["find"], patch_entry["replace"]),
+            encoding="utf-8",
+        )
+
 
 def amalgamation_shared_base_name(port_name, archive_name):
     """Derive the shared-library base name ("sqlite3") from the recipe's

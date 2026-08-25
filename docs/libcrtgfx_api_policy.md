@@ -56,9 +56,9 @@ Exposing Skia headers fits that model better than wrapping Skia behind a new
 - Do not define a broad custom drawing abstraction before a real Skia bring-up
   demonstrates what is actually needed.
 
-## Planned Shape
+## Public API Shape
 
-The public include model should look roughly like this:
+The public include model is organized as follows:
 
 ```text
 libcrtgfx/include/
@@ -75,9 +75,9 @@ out/<preset>/external/skia/src/
   include/...       # fetched upstream Skia public headers
 ```
 
-`crtgfx/skia.h` should be a small bridge header, not a replacement drawing API.
-It may include selected Skia public headers and declare helpers that connect a
-`crtgfx_surface` to an `SkSurface`/`SkCanvas` once Skia is imported.
+`crtgfx/skia.h` is a small bridge header, not a replacement drawing API. It
+includes selected Skia public headers when available and declares helpers that
+connect a `crtgfx` framebuffer to an `SkSurface`/`SkCanvas`.
 
 Current bridge status (2026-08-18):
 

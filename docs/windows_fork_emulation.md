@@ -15,11 +15,10 @@ in `libc/src/arch/windows/common/syscall.c`'s `__crt_sys_fork()`:
   `__crt_windows_memcopy_fork()`. Verified on real Windows aarch64
   hardware.
 - **x86_64**: `libc/src/arch/windows/x86_64/fork_memcopy.c`, same function
-  name and design, ported from the aarch64 version. Verified on this
-  project's Windows aarch64 development machine's built-in x64 emulation
-  (Prism/xtajit) -- not yet re-verified on real x86_64 hardware, though
-  nothing in the mechanism is emulation-specific (see "Current Open
-  Issues").
+  name and design, ported from the aarch64 version. It was first verified
+  through the Windows aarch64 development machine's built-in x64 emulation
+  (Prism/xtajit), and has since passed the formal fork/runtime-reset suite and
+  real parallel port builds on a separate native Windows x86_64 machine.
 
 In both cases the child is a normal, fully `CreateProcessA`-registered
 process, so it has none of the restrictions a raw NT-level clone (the
@@ -57,10 +56,8 @@ Steps, in the order they actually happen:
    heap/stack addresses land at the *same* virtual addresses the calling
    process itself is using -- verified empirically on aarch64 (42/42
    matching addresses across independent launches; see history doc,
-   "Phase B") and, separately, on x86_64 under this machine's x64
-   emulation (deterministic, identical addresses across repeated runs of
-   a standalone probe; see "Current Open Issues" for what real x86_64
-   hardware has not re-confirmed). The child never runs
+   "Phase B"), then on x86_64 under emulation and on a separate native
+   Windows x86_64 machine. The child never runs
    `mainCRTStartup`; its first instruction is whatever the parent points
    `CONTEXT.Pc`/`CONTEXT.Rip` at in step 6.
 3. `WriteProcessMemory` copies three categories of memory into the child
@@ -264,19 +261,10 @@ unresolved about the mechanism itself.
 
 ## Current Open Issues
 
-- **x86_64: `ctest`'s own `fork_test`/`fork_signal_test`/
-  `fork_runtime_reset_test` suite has not been literally re-run on real
-  x86_64 hardware.** All *formal* test-suite verification so far ran under
-  this project's aarch64 development machine's built-in x64 emulation
-  (Prism/xtajit). Nothing in the mechanism (mitigation policy,
-  `WriteProcessMemory`, `SetThreadContext`) is emulation-specific, and the
-  emulation layer itself faithfully reproduced both the "ASLR still on"
-  and "ASLR successfully disabled" address behaviors this design depends
-  on -- and, separately, real x86_64 hardware (a different machine from
-  this project's own) has since run several real third-party port builds
-  successfully (which do exercise `fork()`-adjacent spawn/shell paths in
-  practice, just not through the literal `ctest` entries) -- but the
-  formal suite itself has not been re-run there.
+The formal fork/runtime-reset suite and real parallel port builds have now run
+on Windows x86_64 as well as the original aarch64 bring-up environment. The
+earlier x86_64 verification caveat is closed. Remaining mechanism limits are:
+
 - **Only the calling thread's stack survives into the child** (matches
   POSIX `fork()` semantics -- other threads do not survive into the child
   at all -- but pthread-created OS threads' own stacks are not otherwise

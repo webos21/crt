@@ -380,6 +380,13 @@ LLVM runtime components should be integrated deliberately:
 - Keep libc++ and libunwind integration separate from the minimal C libc/PAL
   bring-up so that the C runtime can boot independently.
 
+Current implementation status (2026-08-25): the project builds its pinned
+AOSP `libc++abi` and `libc++` lane for Linux, macOS, and Windows. The
+project-owned `libunwind` lane is used on Linux and Windows; macOS deliberately
+uses libSystem's unwinder while retaining the same imported Itanium C++ ABI
+surface. The sequence below is therefore the completed bring-up order, not an
+open task list.
+
 The layering should be:
 
 1. Minimal startup objects and freestanding libc/PAL.

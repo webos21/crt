@@ -79,11 +79,10 @@ Clang's default for `*-w64-mingw32` is native SEH (`.pdata`/`.xdata`, unwound
 by the Windows OS itself through `RtlUnwind`/`RtlVirtualUnwind`), but CRT
 builds with `-fdwarf-exceptions` instead, matching the Itanium DWARF CFI
 format already used on Linux and macOS. This keeps C++ exception unwinding
-running entirely on the project's own from-source LLVM libunwind on all three
-OSes rather than handing the actual unwind engine to a host OS facility --
-the same "own the toolchain" policy already applied to rejecting a
-host-installed `libunwind-dev` package on Linux and to never linking a host
-`libc++` as a substitute for Skia. See `docs/cxx_runtime.md`'s "Exceptions,
+on the imported Itanium C++ ABI path across all three hosts. Linux and Windows
+use the project's from-source LLVM libunwind; macOS deliberately uses
+libSystem's unwinder. Host libc++ is never linked as a substitute for the
+project-built runtime used by Skia. See `docs/cxx_runtime.md`'s "Exceptions,
 RTTI, And Unwind" section for the full technical detail.
 
 Rust may be used later for tooling or optional internal modules behind a stable C
@@ -115,9 +114,10 @@ under `docs/bringup/`.
 The next product-level target is an Electron-class rebuilt application runtime,
 documented in `docs/runtime_roadmap.md`: `libcrtgfx` (Skia + Wayland-style
 compositor boundary + Chromium Ozone path), `libcrtmedia` (FFmpeg/codecs/audio/
-video), and `libcrtjs` (QuickJS first, V8 later). Before that upper-runtime work
-starts in earnest, the remaining libc/PAL planned items in `TODO.md` should be
-reduced.
+video), and `libcrtjs` (QuickJS first, V8 later). The first `libcrtgfx`
+CPU-raster/input/text milestone is complete on Linux, macOS, and Windows. The
+remaining libc/PAL work and the next graphics/runtime stages are tracked in
+`TODO.md`.
 
 ## Prerequisites
 
@@ -670,13 +670,12 @@ cmake --preset macos-host-ninja-debug \
 
 `crtgfx-skia-build` installs Skia under
 `out/<preset>/external/skia/install`. This validates the selected Skia source
-against the CRT sysroot; it does not yet enable the Skia bridge by default.
-The default Skia archive requires the full project-owned libc++ standard
-library (`std::string`, shared ownership, streams, locale), and the current
-CRT supplies only its ABI/allocation bootstrap. Host libc++ is deliberately
-not linked as a substitute. The Skia bridge deliberately does not provide fake
-Skia headers; applications should include normal Skia headers through the CRT
-sysroot once the libc++ import tranche enables `CRTGFX_ENABLE_SKIA`.
+against the CRT sysroot. `crtgfx-skia-smoke` stages the imported project-owned
+libc++, links the real Skia bridge, and verifies deterministic CPU-raster and
+FreeType-backed text drawing. This complete path has passed on Linux, macOS,
+and Windows; host libc++ is deliberately not linked as a substitute. The Skia
+bridge does not provide fake headers: applications use normal Skia public
+headers through the CRT sysroot.
 
 ## Repository Layout
 
@@ -701,19 +700,57 @@ long-term structure.
 
 ## Design Documents
 
-See:
+The documentation has explicit ownership so current status is not maintained
+in several places:
 
-- `docs/project_meanings.md`
-- `docs/project_stacks.md`
-- `docs/runtime_roadmap.md`
-- `docs/bringup/hello_bringup.md`
-- `docs/header_abi.md`
-- `docs/dynamic_loading.md`
-- `docs/cxx_runtime.md`
-- `docs/linker_loader.md`
-- `docs/shared_libraries.md`
-- `docs/sysroot_ports.md`
-- `docs/porting_status.md`
+- [`STATUS.md`](STATUS.md): concise verified baseline and known limitations.
+- [`TODO.md`](TODO.md): actionable open or deferred work.
+- [`HISTORY.md`](HISTORY.md): completed work and investigation detail.
+- [`docs/porting_status.md`](docs/porting_status.md): per-library/per-host
+  recipe state. Recipe JSON is the machine-readable source of truth.
+
+Current direction and policy:
+
+- [`docs/project_meanings.md`](docs/project_meanings.md) and
+  [`docs/project_stacks.md`](docs/project_stacks.md): project scope and
+  foundational toolchain decisions.
+- [`docs/runtime_roadmap.md`](docs/runtime_roadmap.md): upper-runtime sequence
+  for `libcrtgfx`, `libcrtjs`, and `libcrtmedia`.
+- [`docs/header_abi.md`](docs/header_abi.md),
+  [`docs/import_bionic.md`](docs/import_bionic.md), and
+  [`docs/pthread_policy.md`](docs/pthread_policy.md): Bionic-facing ABI,
+  import, and runtime policy.
+- [`docs/sysroot_ports.md`](docs/sysroot_ports.md) and
+  [`docs/porting_status.md`](docs/porting_status.md): sysroot porting workflow
+  and package results.
+- [`docs/shared_libraries.md`](docs/shared_libraries.md),
+  [`docs/dynamic_loading.md`](docs/dynamic_loading.md), and
+  [`docs/linker_loader.md`](docs/linker_loader.md): shared artifacts and loader
+  boundary.
+- [`docs/cxx_runtime.md`](docs/cxx_runtime.md): bootstrap and imported LLVM C++
+  runtime policy and status.
+
+Current subsystem documents:
+
+- Graphics: [`docs/libcrtgfx_api_policy.md`](docs/libcrtgfx_api_policy.md) and
+  [`docs/libcrtgfx_wayland_plan.md`](docs/libcrtgfx_wayland_plan.md).
+- Process/thread/signal: [`docs/process_fork.md`](docs/process_fork.md),
+  [`docs/windows_fork_emulation.md`](docs/windows_fork_emulation.md),
+  [`docs/linux_pthread_lifecycle.md`](docs/linux_pthread_lifecycle.md),
+  [`docs/signal_delivery.md`](docs/signal_delivery.md), and
+  [`docs/job_control.md`](docs/job_control.md).
+- Shell/rootfs: [`docs/android_shell_environment.md`](docs/android_shell_environment.md),
+  [`docs/shell_import.md`](docs/shell_import.md), and
+  [`docs/toybox_applet_status.md`](docs/toybox_applet_status.md).
+
+Provenance and completed test ledgers include
+[`docs/bionic_libc_gaps.md`](docs/bionic_libc_gaps.md),
+[`docs/libm_dependency_map.md`](docs/libm_dependency_map.md), and
+[`docs/scanf_edge_matrix.md`](docs/scanf_edge_matrix.md). Older caveats in
+these ledgers do not override `STATUS.md` or `TODO.md`. Early bootstrap notes
+under [`docs/bringup/`](docs/bringup/) and dated architecture reviews under
+[`docs/study/`](docs/study/) are historical snapshots rather than current
+implementation status.
 
 ## License
 

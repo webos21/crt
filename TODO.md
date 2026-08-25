@@ -163,8 +163,12 @@ These are real remaining limitations, but none blocks the completed
 `libcrtgfx` CPU-raster milestone. Promote one into active work when a consumer
 or host investigation supplies the required evidence.
 
-- Isolate and fix the optimized repeated-call libffi register corruption on
-  Windows aarch64 using the existing regression on real hardware.
+- Rerun the corrected libffi static/shared call and optimized repeat-call
+  matrix on real Linux arm64 and Windows, then promote their recipe status if
+  clean. The former callee-saved-register diagnosis was disproved on macOS:
+  the tests used undersized return storage, and Darwin's `ffi_cif` layout
+  differed between the library and CRT consumer. Both causes are fixed and
+  the real macOS arm64 matrix is fully green.
 - Extend the resolver from its current synchronous UDP IPv4/A-record baseline
   when IPv6, TCP fallback, search domains, or caching becomes a consumer
   requirement.

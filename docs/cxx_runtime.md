@@ -1,6 +1,24 @@
 # C++ Runtime
 
-This document records the first C++ runtime policy for CRT.
+This document records the C++ runtime policy and current imported-runtime
+status for CRT.
+
+## Current Status
+
+- The small in-tree `cxx`/`cxx_shared` libraries remain the default bootstrap
+  ABI/allocation runtime when `CRT_USE_IMPORTED_LIBCXX=OFF`.
+- The opt-in imported runtime uses one pinned AOSP
+  `toolchain/llvm-project` revision for libc++, libc++abi, and libunwind source
+  recipes. It builds and stages static/shared libc++ and libc++abi on Linux,
+  macOS, and Windows.
+- Linux and Windows build project-owned LLVM libunwind. macOS deliberately
+  uses the libSystem unwinder and therefore excludes the libunwind recipe.
+- `crt-libcxx-smoke` passes static and shared vector/string/RTTI/exception
+  execution on all three hosts. Skia uses this imported runtime; host libc++ or
+  GNU libstdc++ is not a runtime substitute.
+- Windows CRT-targeted C++ uses the Itanium ABI/DWARF-CFI lane. A distinct
+  MSVC-ABI DLL bridge remains a narrow future interoperability lane, not the
+  core runtime ABI.
 
 ## Direction
 
@@ -12,13 +30,14 @@ The intended stack is the same separation Android uses: Bionic's small
 `libstdc++` ABI surface plus the separately maintained LLVM libc++, libc++abi,
 and libunwind projects. It is not a plan to hand-write STL containers.
 
-The intended stack is:
+The stack is:
 
-- project-owned C++ ABI bootstrap library, currently installed as `libc++.a`;
+- project-owned C++ ABI bootstrap library, installed when the imported runtime
+  is disabled;
 - compiler-rt builtins for compiler-generated helper calls;
-- libunwind for exception unwinding once exception support becomes active;
-- libc++abi for the full Itanium C++ ABI surface later;
-- libc++ as the C++ standard library later.
+- project-built LLVM libunwind on Linux/Windows and libSystem unwind on macOS;
+- imported libc++abi for the full Itanium C++ ABI surface;
+- imported libc++ as the C++ standard library.
 
 The first tranche provides only the minimal C++ ABI entry points needed before a
 full libc++abi import:
@@ -101,7 +120,9 @@ reference to `_tls_index` for the normal `/Zc:threadSafeInit` fast path, so full
 thread-safe local static support on Windows requires a PE TLS directory and
 loader TLS policy. Until that exists, Windows C++ frontend smoke tests use
 `-fno-threadsafe-statics`, while direct C ABI tests exercise `_Init_thread_*`.
-Exceptions and rich C++ object interop remain explicit future work.
+This bootstrap bridge does not make arbitrary MSVC-ABI C++ object or exception
+interop safe. The imported Itanium lane does support exceptions/RTTI inside
+CRT-targeted code; crossing into an unrelated MSVC-ABI DLL remains future work.
 
 ## Guard Variables
 
@@ -133,18 +154,15 @@ keeping plain C programs independent of the C++ runtime archive.
 ## Exceptions, RTTI, And Unwind
 
 The bootstrap `cxx` library still defaults to `-fno-exceptions` and
-`-fno-rtti`. The imported Android libc++/libc++abi lane is different: its build
-sets `CRT_CXX_ENABLE_EXCEPTIONS=1` and `CRT_CXX_ENABLE_RTTI=1`, and the macOS
-runtime smoke now verifies a real `std::runtime_error` throw/catch together
-with `std::vector` and `std::string`.
+`-fno-rtti`. The imported Android LLVM libc++/libc++abi lane sets
+`CRT_CXX_ENABLE_EXCEPTIONS=1` and `CRT_CXX_ENABLE_RTTI=1`; its static and
+shared smoke verifies a real `std::runtime_error` throw/catch together with
+`std::vector` and `std::string` on Linux, macOS, and Windows.
 
-macOS currently gets `_Unwind_*` from the documented libSystem PAL boundary.
-Linux and Windows must not fall back to a host C++ runtime. Their remaining
-gate is a CRT-built LLVM libunwind. The previously fetched
-`platform/external/libunwind` main checkout is not that source: its tip removed
-the Android build in 2021 because the repository was no longer used. Current
-AOSP LLVM runtime work lives in `toolchain/llvm-project`; its `libunwind`
-source must be wired as the next static/shared runtime component.
+Linux and Windows use the project-built LLVM libunwind recipe. macOS resolves
+`_Unwind_*` through the documented libSystem boundary. The retired
+`platform/external/libunwind` repository is not used; the pinned source comes
+from AOSP `toolchain/llvm-project`.
 
 ### Windows exception-table format: DWARF CFI, not native SEH
 
@@ -198,9 +216,8 @@ transitively reach the `__SEH__`-gated `<windows.h>` include in `unwind.h` via
 satisfy. See `tools/crt-libcxx-build.py`'s own comment at the flag's
 definition for the full empirical trail (confirmed via
 `clang++ --target=x86_64-w64-mingw32 -dM -E` showing `__SEH__` defined by
-default and undefined under `-fdwarf-exceptions`), and `TODO.md`'s C++
-runtime prerequisite section for the adoption plan this decision is step 1
-of.
+default and undefined under `-fdwarf-exceptions`), and `HISTORY.md`'s
+2026-08-21 C++ runtime entries for the adoption trail.
 
 ### Known cost: DWARF-compiled code has zero Windows-native unwind info
 
@@ -258,8 +275,8 @@ never for the first two -- see the honest scope breakdown below):
 `libc/src/arch/windows/common/dwarf_unwind_safety_net.c` installs a
 process-wide vectored exception handler (`AddVectoredExceptionHandler`) at
 CRT startup (both `crt1.c` for executables and `dllcrt.c` for DLLs). See
-that file's own top comment for the full empirical design story (TODO.md
-item 7), but the short version: the boundary-shim idea this section
+that file's own top comment for the full empirical design story, but the short
+version: the boundary-shim idea this section
 originally proposed ("wrap every native-callback entry point in a real-SEH
 frame") was tried and empirically DISPROVED first -- a single `-fseh-
 exceptions`-compiled `__try`/`__except` wrapped directly around a call into
@@ -333,38 +350,29 @@ The implementation policy is based on these upstream references:
 
 ## Next Steps
 
-**Update**: item 1 below is done -- `tests/cxx_frontend_test.cc`
-(`add_crt_cxx_test(cxx_frontend_test ...)` in `tests/CMakeLists.txt`) is a
-real C++ frontend compile/link/run probe, built and run via `ctest` on every
-host the project is configured for (not Linux/macOS-only as originally
-scoped), alongside `cxx_runtime_test` for the ABI hook surface itself.
-Remaining recommended next work:
+The imported runtime build/stage/smoke milestone is complete. Remaining work
+is narrower:
 
-1. Add a Windows policy probe that records which C++ ABI hooks Clang emits for
-   the selected target/profile.
-2. **Done (2026-08-18):** `operator new/delete`, array forms, sized delete,
-   and nothrow forms forward to the CRT allocator. `cxx_allocation_test`
-   validates that boundary on every host.
-3. **macOS complete:** Android libc++ and libc++abi build as static and shared
-   libraries through the CRT wrappers, install into the sysroot/rootfs, and
-   pass `crt-libcxx-smoke`. Use this runtime before enabling a real Skia link.
-   Skia's CPU-raster archive still uses `std::string`, shared ownership,
-   streams, and locale machinery even with GPU backends disabled. It must not
-   be satisfied by silently linking the host libc++.
-4. Build current AOSP LLVM libunwind from `toolchain/llvm-project`, then run
-   the same imported-runtime smoke on Linux and Windows.
-5. Start a separate Windows MSVC ABI bridge design with C ABI wrapper tests
-   before allowing C++ object or exception interop across the bridge.
+1. Add focused standard-library behavior coverage where host adaptation is
+   subtle, beginning with Windows `<filesystem>` UTF-32-to-UTF-16 paths.
+2. Keep the Windows DWARF fault safety net covered and decide separately
+   whether project-owned libunwind backtraces are worth adding; OS-native stack
+   walkers cannot recover full call stacks through untabled DWARF-only frames.
+3. Design the separate Windows MSVC ABI bridge with C-callable wrapper tests
+   before allowing C++ objects, allocation ownership, RTTI, or exceptions to
+   cross that boundary.
+4. Establish export/version policy before treating imported C++ shared
+   runtimes as ABI-stable distribution artifacts.
 
 ## Android LLVM Runtime Import
 
-`crt-libcxx-fetch` currently fetches Android's `platform/external/libcxx` and
-`platform/external/libcxxabi` repositories at one configurable
-`CRT_LIBCXX_ANDROID_REF` (default `refs/heads/main`) into
-`out/<preset>/external/llvm-runtimes/`. The project-owned metadata is under
-`libstdc++/third_party/`; no upstream source is committed there. The retired
-`platform/external/libunwind` repository is not fetched; current unwind work
-uses AOSP `toolchain/llvm-project/libunwind`.
+`crt-libcxx-fetch` reads the three project-owned recipes under
+`libstdc++/third_party/{libcxx,libcxxabi,libunwind}/recipe.json`. They use one
+pinned AOSP `toolchain/llvm-project` commit and sparse-check out only the
+required source/CMake support trees under
+`out/<preset>/external/llvm-runtimes/`; no upstream source is committed here.
+The libunwind recipe targets Linux and Windows only because macOS uses
+libSystem unwind.
 
 The CMake targets are deliberately staged:
 
@@ -381,17 +389,15 @@ cmake --build --preset <host-preset> --target crt-libcxx-smoke
 The sysroot target stages headers and runtime libraries. The smoke target then
 links and runs both static and shared forms of `tests/imported_libcxx_test.cc`
 using only the staged C++ headers and runtime. `CRT_USE_IMPORTED_LIBCXX=ON`
-makes `rootfs` and the Skia external
-build depend on that staged runtime rather than the bootstrap `cxx_shared`
-artifact. This mode is now verified on macOS; keep it host-explicit until the
-Linux and Windows smoke targets pass.
+makes `rootfs` and the Skia external build depend on that staged runtime rather
+than the bootstrap `cxx_shared` artifact. This mode and both smoke linkage
+shapes are verified on Linux, macOS, and Windows.
 
-The first import gate is source provenance and compiler mode. `tools/crt-c++`
-now retains the bootstrap default of `-fno-exceptions -fno-rtti`, but an
-external runtime build may explicitly set `CRT_CXX_ENABLE_EXCEPTIONS=1` and
-`CRT_CXX_ENABLE_RTTI=1`. The next gate is to build libc++/libc++abi/libunwind
-as one CRT static-and-shared set, then replace the bootstrap archive only after
-standard-library and Skia link/run tests pass on Linux, macOS, and Windows.
+`tools/crt-c++` retains the bootstrap default of `-fno-exceptions -fno-rtti`,
+while the external runtime build explicitly sets
+`CRT_CXX_ENABLE_EXCEPTIONS=1` and `CRT_CXX_ENABLE_RTTI=1`. The imported set is
+selected explicitly rather than silently replacing the bootstrap in every
+ordinary build.
 
 The macOS build now completes both libc++abi and libc++ static/shared outputs.
 It required the Bionic-main msun families recorded in the import manifest,
@@ -400,15 +406,14 @@ Bionic-shaped `<android/api-level.h>` host policy. `tools/crt-c++` also absorbs
 legacy `-lpthread`/`-lrt` into libc, matching modern Bionic, so Darwin
 libSystem symbols cannot preempt Bionic-shaped pthread objects.
 
-Darwin's system libc++ re-exports strong C++ symbols, so a static libc++ archive
-inside a normal macOS executable can be interposed by the system dylib. The
-verified macOS execution shape therefore uses `CRT_CXX_RUNTIME_LINKAGE=shared`
-and an rpath to the CRT sysroot. Static archives are still built and installed;
-static link/run coverage remains a Linux/Windows gate.
+Darwin's system libc++ exports overlapping strong C++ symbols, so linkage order
+and runtime paths remain deliberate. Both imported static and shared smoke
+shapes now pass on macOS; neither is permission to mix host-libc++ objects into
+the CRT C++ ABI lane.
 
 Windows configure uses the installed CRT `mksh.exe` as CMake's compiler
 launcher with `crt-cc`/`crt-c++` as `CMAKE_*_COMPILER_ARG1`, because native
-Windows cannot execute their shebangs directly. Shared DLL and import-library
-staging is prepared, but real Windows and Linux builds remain required before
-cross-host completion is claimed. macOS `Availability.h` is still not a
-Bionic public header.
+Windows cannot execute their shebangs directly. Static/shared runtime and
+import-library staging is verified on Windows and Linux as well as macOS.
+macOS `Availability.h` remains a host-private concern, not a Bionic public
+header.

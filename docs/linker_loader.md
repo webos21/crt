@@ -110,14 +110,30 @@ The loader boundary must preserve these rules:
 - Search paths must be explicit. Do not silently inherit Android, glibc, dyld,
   or Windows DLL search behavior and call it Bionic compatibility.
 
+## Completed Foundation
+
+The following prerequisites from the original loader plan are complete:
+
+- `libdl` provides the public host-adapter surface with permanent compile and
+  runtime tests, including `dladdr()` and `dl_iterate_phdr()` coverage.
+- CRT libraries are produced and exercised in both static and host-native
+  shared forms on Linux, macOS, and Windows.
+- startup and shared-library work covers init/fini arrays and the current
+  imported C++ runtime path.
+- the host-native and future project-ELF loader ownership boundary is recorded
+  in this document and `docs/shared_libraries.md`.
+
+These accomplishments do not imply that Linux can yet load arbitrary CRT-built
+ELF DSOs through a project-owned loader.
+
 ## Decision Points
 
 The project should start implementing a real ELF loader when at least one of
 these becomes blocking:
 
 - Linux `dlopen` needs to load CRT-built `.so` files.
-- `libc.so`/`libm.so`/`libdl.so` must become real shared libraries rather than
-  archives.
+- Linux must load CRT-built ELF DSOs without depending on the host glibc
+  loader.
 - ELF TLS is needed for compiler TLS, `errno`, C++ thread locals, or imported
   libraries.
 - complex libraries require `DT_NEEDED`, `RPATH`/`RUNPATH`, or init/fini arrays.
@@ -130,18 +146,14 @@ integration and small `libdl` smoke tests.
 The first shared-library artifact policy is documented in
 `docs/shared_libraries.md`.
 
-## Proposed Milestones
+## Remaining Milestones
 
-1. Keep current `libdl` host adapter as the public dynamic loading surface.
-2. Add compile-time and runtime tests for loader boundary guarantees.
-3. Define the shared object format policy for project libraries:
-   `libc.so`, `libm.so`, `libdl.so`, and `libc++.so`.
-4. Prototype a Linux-only ELF loader that can map one dependency-free shared
+1. Prototype a Linux-only ELF loader that can map one dependency-free shared
    object and resolve a small symbol table.
-5. Add relocation support for x86_64 and AArch64.
-6. Add `DT_NEEDED`, init/fini arrays, and symbol lookup scopes.
-7. Add ELF TLS and connect it to pthread, errno, and C++ runtime policy.
-8. Revisit Android linker namespace behavior and `android_dlopen_ext`.
+2. Add relocation support for x86_64 and AArch64.
+3. Add `DT_NEEDED`, init/fini arrays, and symbol lookup scopes.
+4. Add ELF TLS and connect it to pthread, errno, and C++ runtime policy.
+5. Revisit Android linker namespace behavior and `android_dlopen_ext`.
 
 ## Deferred Work
 

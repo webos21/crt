@@ -1,5 +1,12 @@
 # Bionic Libc Completeness Gaps Before `libcrtgfx`
 
+> **Status:** This is the completed pre-`libcrtgfx` audit ledger, not the
+> current work queue. Every high/medium/lower-priority item identified by this
+> sweep was subsequently implemented; later real-host corrections and
+> verification are recorded in `HISTORY.md`. Current limitations live in
+> `STATUS.md`/`TODO.md`. Caveats below are preserved as evidence of what was
+> known at the time each tranche landed.
+
 ## Goal
 
 `docs/runtime_roadmap.md`'s "Order Of Work" says to reduce the remaining
@@ -343,11 +350,11 @@ plausible graphics-stack consumer.
 Already known and tracked elsewhere, not new findings, listed here only for
 completeness against this same sweep:
 
-- **C++ exceptions/RTTI across the runtime boundary** -- `docs/
-  cxx_runtime.md` already documents this as deferred (`-fno-exceptions
-  -fno-rtti` required for now). Relevant to Skia/V8 eventually, but a
-  known, separately-scoped, larger effort, not a new finding from this
-  sweep.
+- **C++ exceptions/RTTI across the runtime boundary** -- this was deferred at
+  audit time. It is now implemented in the imported libc++/libc++abi lane and
+  passes static/shared smoke on all three hosts; the small bootstrap `cxx`
+  target deliberately remains `-fno-exceptions -fno-rtti`. See
+  `docs/cxx_runtime.md`.
 - **`pthread_cancel`** -- declared, but a real `ENOTSUP` stub
   (`libc/src/pthread.c`), matching `docs/import_bionic.md`'s "Cancellation
   and robust mutexes are still deferred."

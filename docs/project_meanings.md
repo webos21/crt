@@ -123,9 +123,10 @@ runtime, not Electron itself as the immediate port. The intended shape is:
 - `libcrtjs`: QuickJS first as the JavaScript bring-up engine, with V8 as the
   later browser-class target.
 
-This upper layer should start only after the remaining libc/PAL planned work is
-reduced enough that failures in graphics, media, or JavaScript engines point to
-real missing runtime surface rather than known low-level debt.
+That upper layer is now underway: the first `libcrtgfx` CPU-raster/input/text
+milestone passes on Linux, macOS, and Windows. New graphics, media, or
+JavaScript failures should continue to feed missing Bionic-compatible behavior
+back into the CRT/PAL rather than becoming upstream-specific patches.
 
 Bionic itself is also not a complete POSIX superset. Android's Bionic status
 documentation lists unsupported or intentionally omitted functionality such as

@@ -1,6 +1,11 @@
 
 # A. 로드맵에 언급된 상위 그래픽/미디어 레이어(Electron 대체)의 실현 가능성
 
+> **문서 상태:** 2026-08-17 시점의 방향성 검토 자료이다. 이후
+> `libcrtgfx`의 3개 OS native window, software frame, keyboard/mouse,
+> Skia CPU raster, FreeType text milestone이 완료되었다. 현재 구현 상태와
+> 다음 순서는 `STATUS.md`, `TODO.md`, `docs/runtime_roadmap.md`를 따른다.
+
 webos21/crt 프로젝트의 로드맵(docs/runtime_roadmap.md)에 명시된 상위 그래픽/미디어 레이어 구축을 통한 'Electron-class' 애플리케이션 런타임 대체 목표는 저수준 C 런타임(libc/PAL) 개발과는 차원이 다른 도전 과제입니다.
 이들이 구상하는 libcrtgfx(Skia + Wayland 계열), libcrtmedia(FFmpeg 기반), libcrtjs(QuickJS/V8 기반) 아키텍처의 실현 가능성(Feasibility)을 핵심 요소별로 나누어 현실적으로 평가해 드립니다.
 ------------------------------
@@ -192,4 +197,3 @@ Wayland를 타 OS에 올릴 때 발생하는 병목을 줄이기 위해 최신 �
 ## 4. 종합 평가: Wayland 선택은 이 프로젝트의 '숙명'
 질문하신 "굳이 써야 하는가?"에 대한 아키텍처적 답변은 "안드로이드 Bionic libc 소스 이식이라는 최초의 프로젝트 정체성을 유지하면서, Chromium 수준의 거대 GUI 엔진을 가장 적은 코드 수정으로 엮어내기 위한 필연적인 선택"입니다.
 비록 Windows와 macOS에서 최적화 지옥을 겪을지언정, "오픈소스가 이미 만들어 둔 리눅스/안드로이드용 Wayland 그래픽 패스를 그대로 날로 먹겠다(Leverage)"는 전략인 것입니다. 만약 이들이 Wayland를 포기한다면, 그것은 프로젝트의 하부 런타임(Bionic) 설계 사상 자체를 통째로 뒤흔들어야 하는 대공사가 될 것입니다.
-

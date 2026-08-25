@@ -40,8 +40,9 @@ the same `lib/` output directory.
 Windows shared libraries also use a project-owned minimal DLL entry point,
 `crtDllMainCRTStartup`, because the CRT build links with `-nostdlib` and does
 not import MSVC's `_DllMainCRTStartup`. The entry point currently returns
-success for all attach/detach events. It is the future hook for DLL-local
-runtime initialization, TLS, and destructor policy.
+success for all attach/detach events; on process attach it also runs the
+project's PE pseudo-relocator and installs the DWARF-unwind hardware-fault
+safety net. It remains the hook for any later DLL-local TLS/destructor policy.
 
 These are not yet final ABI-stable shared runtimes. They are build artifacts for
 the next compatibility tranche.
@@ -105,12 +106,15 @@ future `linker/` milestone documented in `docs/linker_loader.md`.
 
 ## Next Steps
 
-Recommended next work:
+Static/shared artifacts are part of the default build graph, Windows has a
+permanent export-hygiene regression, and port recipes exercise real shared
+load/run paths on all three hosts. Remaining distribution work is:
 
-1. Add artifact presence tests for static and shared runtime outputs.
-2. Add exported-symbol inspection tests per host.
-3. Define soname/install name/import library naming policy.
-4. Add a tiny project-owned shared probe library for host-native loader smoke
-   tests on Windows/macOS.
-5. Decide the first Linux ELF loader milestone before enabling Linux runtime
-   `dlopen` of CRT-built `.so` files.
+1. Add equivalent exported-symbol allowlist/visibility checks on Linux and
+   macOS, then tighten the current broad Windows exports.
+2. Define stable soname/install-name/version policy for core and imported C++
+   runtime libraries.
+3. Add a small project-owned shared probe when it can test behavior not already
+   covered by the real porting shared round trips.
+4. Decide the first Linux ELF-loader milestone before enabling Linux runtime
+   `dlopen()` of arbitrary CRT-built `.so` files.

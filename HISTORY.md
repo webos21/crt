@@ -10,6 +10,23 @@ substantive update.
 
 ## 2026-08-25
 
+- **Reconciled the expat/libffi matrix with fresh macOS arm64 recipe evidence
+  and resolved libffi's misleading optimized-call crash.** `port-rebuild-expat`
+  plus `port-test-expat` built and ran both static and shared XML round trips,
+  promoting expat's macOS status to `shared-pass`. libffi's first run exposed
+  a `repeat-call-static -O1` `SIGSEGV`, but the macOS crash report placed the
+  fault in `ffi_call_int()` copying from `0x100000000`, not in the previously
+  suspected callee-saved-register path. The committed tests had violated
+  libffi's documented register-sized `rvalue` contract by passing `int`, and
+  the library/consumer also disagreed on `ffi_cif` size: the library saw
+  `__APPLE__` and included `aarch64_nfixedargs`, while ordinary `crt-cc`
+  consumers intentionally hide that host macro. Tests now use `ffi_arg`, and
+  the generated installed `ffitarget.h` selects the Darwin ABI field through
+  `CRT_TARGET_OS_MACOS` via a target-scoped post-install transformation. A
+  fresh rebuild passes basic and `-O1` repeat-call tests against both
+  `libffi.a` and `libffi.dylib`; macOS is now `shared-pass`. Linux/Windows keep
+  their prior status only until the corrected common matrix is rerun there.
+
 - **Synchronized the project status documents after completing the first
   three-host `libcrtgfx` CPU-raster milestone.** `STATUS.md` is now a concise
   current snapshot instead of a second implementation diary: it separates the
@@ -18,8 +35,14 @@ substantive update.
   FreeType, imported-libc++, and keyboard/mouse work was removed from
   `TODO.md`; stale pre-input/pre-libc++ wording in the crtgfx API, Wayland,
   runtime-roadmap, and local README documents was updated to match the code
-  and the real macOS/Linux/Windows verification record. Detailed technical
-  history remains here rather than being duplicated into `STATUS.md`.
+  and the real macOS/Linux/Windows verification record. The root `README.md`'s
+  `Design Documents` section now maps current policy, subsystem references,
+  provenance ledgers, and historical bring-up/study material. The broader
+  documentation audit also synchronized the C++ runtime/unwinder policy,
+  `libdl` and shared library status, port recipe results, Windows fork
+  verification, process and signal state, and historical provenance notes.
+  Detailed technical history remains here rather than being duplicated into
+  `STATUS.md`.
 
 - **Real keyboard/mouse input wired through `crtgfx/window.h`'s public
   `crtgfx_window_poll_event()` API on all three targets -- the
