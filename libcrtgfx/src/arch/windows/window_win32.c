@@ -131,6 +131,8 @@ typedef struct crtgfx_win_bitmapinfo {
 #define HEAP_ZERO_MEMORY 0x00000008u
 #define WM_DESTROY 0x0002u
 #define WM_SIZE 0x0005u
+#define WM_SETFOCUS 0x0007u
+#define WM_KILLFOCUS 0x0008u
 #define WM_CLOSE 0x0010u
 #define WM_PAINT 0x000fu
 #define WM_NCCREATE 0x0081u
@@ -146,6 +148,11 @@ typedef struct crtgfx_win_bitmapinfo {
 #define WM_RBUTTONUP 0x0205u
 #define WM_MBUTTONDOWN 0x0207u
 #define WM_MBUTTONUP 0x0208u
+#define WM_MOUSEWHEEL 0x020au
+#define WM_MOUSEHWHEEL 0x020eu
+/* One wheel "notch" (real, standard Win32 constant, unchanged since the
+ * original Win32 API). */
+#define WHEEL_DELTA 120
 #define GWLP_USERDATA (-21)
 #define COLOR_WINDOW 5
 #define WS_OVERLAPPEDWINDOW 0x00cf0000u
@@ -165,6 +172,12 @@ typedef struct crtgfx_win_bitmapinfo {
  * one (LOWORD/HIWORD above are unsigned and would corrupt those). */
 #define GET_X_LPARAM(lparam) ((int)(short)LOWORD(lparam))
 #define GET_Y_LPARAM(lparam) ((int)(short)HIWORD(lparam))
+/* WM_MOUSEWHEEL/WM_MOUSEHWHEEL's own wParam packs the wheel rotation
+ * amount (signed, WHEEL_DELTA-scaled) in its high word and key-state
+ * flags (MK_CONTROL/...) in its low word -- same signed-HIWORD shape as
+ * GET_Y_LPARAM above, real standard Win32 macro, not this file's own
+ * invention. */
+#define GET_WHEEL_DELTA_WPARAM(wparam) ((int)(short)HIWORD(wparam))
 
 /* Real, standard Win32 virtual-key codes (winuser.h, unchanged since the
  * original Win32 API -- these are stable ABI constants, not guessed).
@@ -467,6 +480,16 @@ static LRESULT CRTGFX_WINAPI crtgfx_window_proc(HWND hwnd, UINT message, WPARAM 
                                          (uint32_t)HIWORD(lparam));
       }
       return 0;
+    case WM_SETFOCUS:
+      if (host != 0) {
+        crtgfx_weston_toplevel_note_focus(host->toplevel, 1);
+      }
+      return 0;
+    case WM_KILLFOCUS:
+      if (host != 0) {
+        crtgfx_weston_toplevel_note_focus(host->toplevel, 0);
+      }
+      return 0;
     case WM_PAINT: {
       PAINTSTRUCT paint;
       BeginPaint(hwnd, &paint);
@@ -586,6 +609,32 @@ static LRESULT CRTGFX_WINAPI crtgfx_window_proc(HWND hwnd, UINT message, WPARAM 
                                                                         : CRTGFX_POINTER_BUTTON_MIDDLE;
         event.data.pointer_button.x = (double)GET_X_LPARAM(lparam);
         event.data.pointer_button.y = (double)GET_Y_LPARAM(lparam);
+        crtgfx_weston_toplevel_note_event(host->toplevel, &event);
+      }
+      return 0;
+    case WM_MOUSEWHEEL:
+    case WM_MOUSEHWHEEL:
+      /* Sign/scale follow the wire value directly (see crtgfx/window.h's
+       * own CRTGFX_EVENT_POINTER_SCROLL doc comment) -- expressed here as
+       * fractional WHEEL_DELTA "notches", not re-normalized against
+       * Linux's own wl_pointer::axis convention. Real Win32 fact, not
+       * this file's own choice: unlike every other mouse message here,
+       * WM_MOUSEWHEEL/WM_MOUSEHWHEEL are sent to the currently *focused*
+       * window regardless of cursor position (or posted to the thread
+       * queue with hwnd looked up via WindowFromPoint() by the OS itself
+       * before this WndProc ever sees it) -- host is therefore not
+       * necessarily the window the cursor is physically over, matching
+       * every other native Windows application's own scroll behavior. */
+      if (host != 0) {
+        crtgfx_event event = {0};
+        double notches = (double)GET_WHEEL_DELTA_WPARAM(wparam) / (double)WHEEL_DELTA;
+
+        event.type = CRTGFX_EVENT_POINTER_SCROLL;
+        if (message == WM_MOUSEWHEEL) {
+          event.data.pointer_scroll.dy = notches;
+        } else {
+          event.data.pointer_scroll.dx = notches;
+        }
         crtgfx_weston_toplevel_note_event(host->toplevel, &event);
       }
       return 0;

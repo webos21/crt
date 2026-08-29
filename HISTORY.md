@@ -55,6 +55,118 @@ substantive update.
   - `libcrtgfx/CMakeLists.txt`'s `CRT_SKIA_FONTS_DIR` comment and the two font-
     manager call sites' own comments updated to name both bundled families.
 
+- **`libcrtgfx` Phase 1 of the window/event API completion plan: multi-window
+  support (Linux, Windows) and five new event types.** Linux done first per
+  explicit user direction (faster WSL build/verify loop), Windows verified
+  the same day.
+  - **Removed the one-active-window-per-process constraint on Linux**
+    (`src/arch/linux/window_wayland.c`): split the previous single `struct
+    crtgfx_host_window` (which doubled as both "the Wayland connection" and
+    "the one window") into a shared, process-wide `crtgfx_wl_connection`
+    (fd, registry-bound `wl_compositor`/`wl_shm`/`xdg_wm_base`/`wl_seat`/
+    `wl_keyboard`/`wl_pointer`, xkb state) and a per-window `crtgfx_host_
+    window` (its own `wl_surface`/`xdg_surface`/`xdg_toplevel`, its own
+    `wl_shm` buffers) -- created lazily on the first `crtgfx_host_window_
+    create()` call, reused by every window after that, torn down once the
+    last window sharing it is destroyed. A real, previously-latent
+    correctness gap this surfaced along the way: `wl_pointer::enter`/
+    `wl_keyboard::enter`/`leave` were never reading the `surface` argument
+    at all (there was only ever one possible destination before), so
+    routing a connection-wide seat event to the *right* window now needed
+    real pointer-focus/keyboard-focus tracking (`crtgfx_wl_connection::
+    pointer_focus_surface_id`/`keyboard_focus_surface_id`), which also
+    directly enables the new `CRTGFX_EVENT_FOCUS_IN`/`FOCUS_OUT` events
+    (fired from real `wl_keyboard::enter`/`leave`, never pointer hover).
+    A window's own `crtgfx_host_window_destroy()` now explicitly sends
+    `wl_surface`/`xdg_surface`/`xdg_toplevel` destroy requests for just its
+    own three objects, required now that closing the connection fd (which
+    used to implicitly destroy every server-side object, back when each
+    window had its own connection) is only correct once every window
+    sharing it is gone.
+  - **Confirmed the Windows backend already supported multiple windows
+    with zero code changes needed**, by direct code review before writing
+    anything: `crtgfx_register_window_class()` is idempotent, `WndProc`
+    already routes per-`HWND` via `GWLP_USERDATA` (set at `WM_NCCREATE`),
+    and `crtgfx_host_window_dispatch()`'s `PeekMessageA(..., hWnd=NULL,
+    ...)` already pumps every `HWND` on the thread -- this was the correct
+    design from when the input-handling work first landed, it just had
+    never been exercised with two windows open at once.
+  - **New event types** (`crtgfx/window.h`): `CRTGFX_EVENT_RESIZE` and
+    `CRTGFX_EVENT_CLOSE_REQUESTED` are queued from the *shared* `wayland_
+    weston.c` layer's own `crtgfx_weston_toplevel_note_size()`/`_note_
+    close()` (every backend already funnels its real resize/close signal
+    through those two calls, so this is one shared-layer change benefiting
+    all three hosts, not three separate ones -- confirmed by reading each
+    backend's own call sites, not assumed); `CRTGFX_EVENT_FOCUS_IN`/`_OUT`
+    via a new `crtgfx_weston_toplevel_note_focus()`, wired from Linux
+    `wl_keyboard::enter`/`leave` and Windows `WM_SETFOCUS`/`WM_KILLFOCUS`
+    (macOS not yet wired -- see below); `CRTGFX_EVENT_EXPOSE`, fired
+    exactly once per window from `crtgfx_weston_toplevel_show()`'s own
+    success path (a deliberately narrower stand-in for X11's damage-driven
+    Expose, which has no real equivalent on a compositor that always
+    composites from the client's last-committed buffer); `CRTGFX_EVENT_
+    POINTER_SCROLL`, wired from Linux `wl_pointer::axis` (opcode 4, never
+    handled before) and Windows `WM_MOUSEWHEEL`/`WM_MOUSEHWHEEL` (never
+    handled before), sign/scale left as each host's own raw wire value
+    rather than cross-host-normalized (flagged reasoned-but-not-physically-
+    verified this session -- no real scroll wheel reachable from WSL/WSLg).
+    `CRTGFX_EVENT_DPI_SCALE_CHANGED` is defined (stable wire shape) but
+    deliberately not fired by any backend yet -- real delivery needs
+    Windows per-monitor-DPI-awareness plumbing, macOS backingScaleFactor
+    tracking, and a Linux `wl_output` binding this backend does not have at
+    all; left an explicit, honest gap rather than a fake guess on one host.
+  - **Decided and documented the key-repeat policy**: pass through each
+    host's own native repeat behavior unchanged (no project-owned repeat
+    timer, no "is this a repeat" flag on `crtgfx_event`) -- every host
+    already re-delivers real press events at its own system repeat rate
+    correctly, and reimplementing that here would only risk disagreeing
+    with it.
+  - **Documented the previously-implicit event-queue/threading contract**
+    in `crtgfx/window.h`: multi-window semantics (one `crtgfx_window_pump_
+    events()` call dispatches for every live window sharing one process-
+    wide native event source), the single-thread-only requirement (matches
+    every backend's own real native constraint, not just a project
+    preference), `pump_events()`'s blocking-up-to-timeout_ms contract, and
+    the already-implemented per-window FIFO-with-drop-newest-on-overflow
+    queue policy (previously only documented in a `wayland_weston.c`
+    comment, not in the public header).
+  - **Real, permanent regression coverage added**: `crtgfx_window_smoke`
+    (`libcrtgfx/tests/window_smoke_test.c`) now creates a second window
+    while the first is still open, checks it is distinct and independently
+    reports a real size, destroys it, then confirms the first window still
+    works -- positioned ahead of the pre-existing single-window frame-cycle
+    check so it still runs (and still means something) even in a shell
+    context where `crtgfx_window_end_frame()`'s own real presentation fails
+    for unrelated reasons (see below).
+  - **Verified for real, not assumed**: on Linux (WSL/WSLg), `crtgfx_
+    window_smoke`'s new multi-window block reached and passed cleanly
+    (confirmed via `CRTGFX_WAYLAND_DEBUG=1` tracing: the registry/seat/
+    keymap negotiation sequence appears exactly once across both windows,
+    proving the second `crtgfx_host_window_create()` reused the existing
+    connection rather than opening a second one) before hitting this same
+    WSL shell session's own pre-existing, already-tracked `crtgfx_window_
+    end_frame` presentation failure (confirmed unrelated: the unmodified,
+    pre-Phase-1 code fails identically in the same shell session) -- see
+    TODO.md's own note on this WSL-specific `present_software` quirk. Full
+    default `ctest` stayed at the same 103/104 (only that one pre-existing,
+    environment-specific failure) before and after this change, confirming
+    no regression. On native Windows, `crtgfx_window_smoke` passed
+    completely end to end, including real frame presentation for both the
+    multi-window check and the original single-window cycle, and the full
+    default `ctest` suite stayed 120/120.
+  - **Decided and documented the `crtgfx/window.h` vs. planned `runtime.h`/
+    `surface.h`/`event_loop.h` split** (`docs/libcrtgfx_api_policy.md`):
+    keep the single header that has actually shipped and that every real
+    consumer already includes, rather than splitting it to match day-1
+    speculative planning that predates any real implementation -- revisit
+    only if the header itself grows large enough that a consumer needs
+    part of it without the rest.
+  - **Not done this pass, left open (see TODO.md)**: macOS was not touched
+    (no macOS hardware this session) -- it still has the pre-existing
+    single-window limitation, a `CRTGFX_EVENT_FOCUS_IN`/`OUT` gap
+    (`windowDidBecomeKey:`/`windowDidResignKey:` not wired), and no scroll-
+    wheel handling. `CRTGFX_EVENT_DPI_SCALE_CHANGED` is not fired by any
+    host yet.
 
 - **Reconciled the expat/libffi matrix with fresh macOS arm64 recipe evidence
   and resolved libffi's misleading optimized-call crash.** `port-rebuild-expat`

@@ -209,11 +209,27 @@ BGRA8888-premultiplied `crtgfx_framebuffer` contract against
 `WL_SHM_FORMAT_ARGB8888`, the same in-memory byte order).
 
 Known scope cuts, documented in the file itself, not silent:
-- one Wayland connection per window, no shared/global display object across
-  multiple simultaneous windows yet (`crtgfx_host_window_dispatch()` has no
-  window parameter at all, matching Win32's thread-global message queue, so
-  it operates on a single process-wide "active window");
 - object ids are never recycled.
+
+**Multi-window support (2026-08-29, Phase 1 of the window/event API
+completion plan):** the previous "one Wayland connection per window, no
+shared/global display object" cut is closed. `crtgfx_wl_connection` now
+holds the one shared fd and every registry-bound singleton (wl_compositor/
+wl_shm/xdg_wm_base/wl_seat/wl_keyboard/wl_pointer/xkb state) across every
+live window; `crtgfx_host_window` holds only what is genuinely per-window
+(its own wl_surface/xdg_surface/xdg_toplevel, its own wl_shm buffers).
+`crtgfx_host_window_dispatch()` still takes no window parameter -- that
+was never the actual limitation (it already matched Win32's own thread-
+global message-queue shape correctly) -- but now pumps the one shared
+connection and routes each event to the right window via real
+`wl_pointer`/`wl_keyboard` `enter`/`leave` focus tracking (previously
+unread from the wire at all, since there was only ever one possible
+destination). Verified live against a real WSLg compositor: a second
+window created while the first is still open reuses the existing
+connection (confirmed via `CRTGFX_WAYLAND_DEBUG=1` tracing -- the
+registry/seat/keymap negotiation sequence appears exactly once, not
+twice), and destroying the second window leaves the first fully
+functional.
 
 Input is no longer a scope cut: `wl_seat`/`wl_keyboard`/`wl_pointer` events
 feed the common queue, and xkbcommon converts keymap/modifier state into UTF-8
@@ -276,9 +292,20 @@ efficiently in the OS's own run-loop wait instead of Win32's
 "wait-up-to-N-milliseconds" primitive to poll with).
 
 Known scope cuts, documented in the file itself, not silent:
-- single window per process, matching Win32/Linux's own thread-global
-  dispatch shape (`crtgfx_host_window_dispatch()` takes no window
-  parameter);
+- single window per process (real multi-window routing has not been added
+  to this file, unlike Linux and Windows -- see this document's own Linux
+  Host Adapter section above for the shared-connection design and this
+  project's own Windows backend, which already routed correctly per-`HWND`
+  via `GWLP_USERDATA` before this pass ever started; both have real
+  multi-window evidence as of 2026-08-29, macOS does not yet). `crtgfx_
+  host_window_dispatch()` taking no window parameter is not itself the
+  limitation on any host (it matches Cocoa's own real per-process
+  `NSApplication` run loop, exactly as Linux's shared connection and
+  Win32's thread-global message queue also do) -- what is still missing
+  here specifically is per-`NSWindow` routing of the events this file's
+  own `crtgfx_cocoa_handle_event()` intercepts, plus a real keyboard-focus
+  signal (`windowDidBecomeKey:`/`windowDidResignKey:`) wired to `crtgfx_
+  weston_toplevel_note_focus()`;
 - `crtgfx_host_window_present_software()` copies the caller's pixel
   buffer into its own allocation each frame rather than wrapping it in
   place, avoiding a real tear/use-after-free hazard the very next

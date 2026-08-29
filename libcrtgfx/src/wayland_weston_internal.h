@@ -27,6 +27,10 @@ typedef struct crtgfx_weston_toplevel {
   uint32_t frame_pending;
   uint32_t frame_committed;
   int should_close;
+  /* Set once crtgfx_weston_toplevel_show() has queued this window's own
+   * one-time CRTGFX_EVENT_EXPOSE (see that function's comment) -- never
+   * re-fired on a later show() call for the same window. */
+  int expose_sent;
   crtgfx_event event_queue[CRTGFX_EVENT_QUEUE_CAPACITY];
   uint32_t event_queue_head;
   uint32_t event_queue_count;
@@ -48,6 +52,15 @@ int crtgfx_weston_toplevel_poll_event(crtgfx_window* window, crtgfx_event* out_e
 
 void crtgfx_weston_toplevel_note_size(crtgfx_weston_toplevel* toplevel, uint32_t width, uint32_t height);
 void crtgfx_weston_toplevel_note_close(crtgfx_weston_toplevel* toplevel);
+/* Queues CRTGFX_EVENT_FOCUS_IN (focused != 0) or CRTGFX_EVENT_FOCUS_OUT
+ * (focused == 0). *Keyboard* input focus only -- see crtgfx/window.h's
+ * own doc comment on CRTGFX_EVENT_FOCUS_IN/OUT for why pointer hover
+ * never calls this. Every host backend calls this from its own real
+ * keyboard-focus signal (Linux: wl_keyboard::enter/leave; Windows:
+ * WM_SETFOCUS/WM_KILLFOCUS; macOS: windowDidBecomeKey:/
+ * windowDidResignKey: -- not yet wired on macOS as of this comment, see
+ * TODO.md). */
+void crtgfx_weston_toplevel_note_focus(crtgfx_weston_toplevel* toplevel, int focused);
 /* Backend-facing push side of the event queue: any arch backend calls
  * this once per real native input event it receives (from its own
  * wl_keyboard/WM_KEYDOWN/NSEvent handler, ...), already translated into

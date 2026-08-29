@@ -71,10 +71,26 @@ void crtgfx_weston_toplevel_destroy(crtgfx_window* window) {
 }
 
 int crtgfx_weston_toplevel_show(crtgfx_window* window) {
+  int rc;
+
   if (window == 0 || window->toplevel.host == 0) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
-  return crtgfx_host_window_show(window->toplevel.host);
+  rc = crtgfx_host_window_show(window->toplevel.host);
+  /* CRTGFX_EVENT_EXPOSE: queued exactly once, on this window's first
+   * successful show() -- see crtgfx/window.h's own doc comment on
+   * CRTGFX_EVENT_EXPOSE for why this narrower "you are now mapped"
+   * semantic replaces X11-style damage-driven Expose here. A later
+   * show() call on an already-shown window (harmless on every backend --
+   * see e.g. crtgfx_host_window_show()'s own Linux comment) does not
+   * re-fire it. */
+  if (rc == CRTGFX_OK && !window->toplevel.expose_sent) {
+    crtgfx_event event = {0};
+    event.type = CRTGFX_EVENT_EXPOSE;
+    crtgfx_weston_toplevel_note_event(&window->toplevel, &event);
+    window->toplevel.expose_sent = 1;
+  }
+  return rc;
 }
 
 int crtgfx_weston_display_dispatch(uint32_t timeout_ms) {
@@ -148,17 +164,52 @@ int crtgfx_weston_toplevel_end_frame(crtgfx_window* window) {
 }
 
 void crtgfx_weston_toplevel_note_size(crtgfx_weston_toplevel* toplevel, uint32_t width, uint32_t height) {
-  if (toplevel != 0) {
-    toplevel->width = width;
-    toplevel->height = height;
-    toplevel->frame_committed = 0;
+  if (toplevel == 0) {
+    return;
   }
+  /* CRTGFX_EVENT_RESIZE only on a genuine change -- every backend calls
+   * this from its own native resize notification (Linux xdg_toplevel::
+   * configure, Windows WM_SIZE, macOS windowDidResize:), and at least
+   * Windows/macOS can and do call it with a size that already matches
+   * (e.g. crtgfx_host_window_get_size()'s own on-demand GetClientRect()
+   * re-check) -- queuing an event every single time would misrepresent
+   * "the size changed" as "get_size() was polled". */
+  if (toplevel->width != width || toplevel->height != height) {
+    crtgfx_event event = {0};
+    event.type = CRTGFX_EVENT_RESIZE;
+    event.data.resize.width = width;
+    event.data.resize.height = height;
+    crtgfx_weston_toplevel_note_event(toplevel, &event);
+  }
+  toplevel->width = width;
+  toplevel->height = height;
+  toplevel->frame_committed = 0;
 }
 
 void crtgfx_weston_toplevel_note_close(crtgfx_weston_toplevel* toplevel) {
-  if (toplevel != 0) {
-    toplevel->should_close = 1;
+  crtgfx_event event = {0};
+
+  if (toplevel == 0) {
+    return;
   }
+  toplevel->should_close = 1;
+  /* Additive: crtgfx_window_should_close()'s own polling contract is
+   * unchanged (still just reads the flag above) -- this only gives an
+   * event-driven caller the same signal through the queue instead of a
+   * separate poll, see crtgfx/window.h's own CRTGFX_EVENT_CLOSE_REQUESTED
+   * doc comment. */
+  event.type = CRTGFX_EVENT_CLOSE_REQUESTED;
+  crtgfx_weston_toplevel_note_event(toplevel, &event);
+}
+
+void crtgfx_weston_toplevel_note_focus(crtgfx_weston_toplevel* toplevel, int focused) {
+  crtgfx_event event = {0};
+
+  if (toplevel == 0) {
+    return;
+  }
+  event.type = focused ? CRTGFX_EVENT_FOCUS_IN : CRTGFX_EVENT_FOCUS_OUT;
+  crtgfx_weston_toplevel_note_event(toplevel, &event);
 }
 
 void crtgfx_weston_toplevel_note_event(crtgfx_weston_toplevel* toplevel, const crtgfx_event* event) {

@@ -38,6 +38,51 @@ int main(void) {
   if (rc != CRTGFX_OK) {
     return fail("create", rc);
   }
+
+  /* Multi-window check (2026-08-29, Phase 1): a second crtgfx_window_
+   * create() while the first is still open must succeed and behave
+   * independently -- deliberately checked here, ahead of the single-
+   * window frame-cycle test below, so it still runs (and still means
+   * something) even in a host/shell context where crtgfx_window_end_
+   * frame()'s own real presentation fails for unrelated reasons (a real,
+   * separate, already-tracked WSL-specific quirk -- see TODO.md/
+   * HISTORY.md). Deliberately does not exercise begin_frame/end_frame on
+   * the second window here (that path is already covered, single-
+   * window, by the rest of this file) -- this block exists to prove
+   * window B's own create/get_size/destroy do not disturb window A, not
+   * to duplicate the frame-cycle coverage. */
+  {
+    crtgfx_window_desc desc_b = desc;
+    crtgfx_window* window_b;
+    uint32_t width_b;
+    uint32_t height_b;
+
+    desc_b.title = "crtgfx smoke (window B)";
+    rc = crtgfx_window_create(&desc_b, &window_b);
+    if (rc != CRTGFX_OK) {
+      crtgfx_window_destroy(window);
+      return fail("second window create", rc);
+    }
+    if (window_b == window) {
+      crtgfx_window_destroy(window_b);
+      crtgfx_window_destroy(window);
+      return fail("second window aliases the first", 0);
+    }
+    rc = crtgfx_window_get_size(window_b, &width_b, &height_b);
+    if (rc != CRTGFX_OK || width_b == 0 || height_b == 0) {
+      crtgfx_window_destroy(window_b);
+      crtgfx_window_destroy(window);
+      return fail("second window get_size", rc);
+    }
+    /* Destroy window B first -- on a shared-connection backend (Linux),
+     * this exercises the exact path where destroying a non-last window
+     * must NOT tear down the connection every window on it depends on.
+     * Window A's own get_size() right below (already part of this
+     * file's original single-window flow) is what actually confirms it
+     * survived; no separate check duplicated here. */
+    crtgfx_window_destroy(window_b);
+  }
+
   rc = crtgfx_window_get_size(window, &width, &height);
   if (rc != CRTGFX_OK) {
     crtgfx_window_destroy(window);

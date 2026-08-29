@@ -53,23 +53,35 @@ static int crtgfx_wl_debug_enabled(void) {
  *
  * Scope, matching docs/libcrtgfx_wayland_plan.md's "start with the
  * simplest available path" direction:
- *  - one Wayland connection per window (no shared/global display object
- *    across multiple windows yet -- crtgfx_host_window_dispatch() has no
- *    window parameter at all, matching Win32's thread-global message
- *    queue, so it operates on a single process-wide "active window"
- *    pointer; a real multi-window design needs a shared connection);
+ *  - one shared Wayland connection per process (2026-08-29, Phase 1 of the
+ *    window/event API completion plan): crtgfx_wl_connection holds the fd
+ *    and every registry-bound singleton (wl_compositor/wl_shm/xdg_wm_base/
+ *    wl_seat/wl_keyboard/wl_pointer/xkb state), created on the first
+ *    crtgfx_host_window_create() call and reused by every window after
+ *    that; crtgfx_host_window itself only holds what is genuinely
+ *    per-window (its own wl_surface/xdg_surface/xdg_toplevel, its own
+ *    wl_shm buffers). Previously each window opened its own independent
+ *    connection -- harmless for exactly one window, but a real functional
+ *    bug for two: a second connection is a distinct client from the
+ *    compositor's own point of view, so its keyboard/pointer focus would
+ *    never track this project's own multi-window model at all, and every
+ *    window would have needlessly doubled up its own copy of the
+ *    compositor/shm/seat bindings and xkb state;
  *  - software (wl_shm) presentation only, no GPU/EGL path yet;
- *  - keyboard input only (2026-08-25, Phase 3 of the "notepad-capability"
- *    plan): wl_seat -> wl_keyboard, real UTF-8 text via this project's own
- *    libxkbcommon port (libcrtgfx/third_party/xkbcommon/recipe.json) --
- *    no wl_pointer/mouse handling yet, and no wl_touch;
+ *  - keyboard and pointer input, including real per-window keyboard-focus
+ *    routing (wl_keyboard::enter/leave) and pointer-focus routing
+ *    (wl_pointer::enter/leave) now that more than one window can share the
+ *    one real wl_seat this backend binds -- via this project's own
+ *    libxkbcommon port (libcrtgfx/third_party/xkbcommon/recipe.json) for
+ *    keyboard text composition; no wl_touch;
  *  - wl_buffer lifetime is release-tracked: every presented wl_shm buffer
  *    stays mapped/open until the compositor sends wl_buffer::release, then
  *    this backend destroys the wl_buffer object and unmaps/closes its backing
  *    storage. This is the first real frame-lifecycle contract shared with
  *    the higher crtgfx software-frame API;
- *  - object ids are allocated monotonically, never recycled (fine for a
- *    short-lived process, not for one that opens/closes many windows).
+ *  - object ids are allocated monotonically from one shared per-connection
+ *    counter, never recycled (fine for a short-lived process, not for one
+ *    that opens/closes many windows over a long run).
  *
  * If no Wayland compositor is reachable at all (no $WAYLAND_DISPLAY/
  * $XDG_RUNTIME_DIR, connection refused, ...) crtgfx_host_window_create()
@@ -103,7 +115,13 @@ static int crtgfx_wl_debug_enabled(void) {
 /* wl_buffer */
 #define WL_BUFFER_DESTROY 0u
 #define WL_BUFFER_EVENT_RELEASE 0u
-/* wl_surface */
+/* wl_surface -- destroy is request 0 in every core-protocol interface
+ * below that has one (confirmed consistent with this file's own already-
+ * verified attach=1/damage=2/commit=6, xdg_surface's own get_toplevel=1/
+ * ack_configure=4, and xdg_toplevel's own set_title=2, all taken directly
+ * from the real upstream .xml -- request 0 being "destroy" is core
+ * Wayland/xdg-shell convention, not a guess specific to this backend). */
+#define WL_SURFACE_DESTROY 0u
 #define WL_SURFACE_ATTACH 1u
 #define WL_SURFACE_DAMAGE 2u
 #define WL_SURFACE_COMMIT 6u
@@ -112,10 +130,12 @@ static int crtgfx_wl_debug_enabled(void) {
 #define XDG_WM_BASE_PONG 3u
 #define XDG_WM_BASE_EVENT_PING 0u
 /* xdg_surface */
+#define XDG_SURFACE_DESTROY 0u
 #define XDG_SURFACE_GET_TOPLEVEL 1u
 #define XDG_SURFACE_ACK_CONFIGURE 4u
 #define XDG_SURFACE_EVENT_CONFIGURE 0u
 /* xdg_toplevel */
+#define XDG_TOPLEVEL_DESTROY 0u
 #define XDG_TOPLEVEL_SET_TITLE 2u
 #define XDG_TOPLEVEL_EVENT_CONFIGURE 0u
 #define XDG_TOPLEVEL_EVENT_CLOSE 1u
@@ -138,6 +158,11 @@ static int crtgfx_wl_debug_enabled(void) {
 #define WL_POINTER_EVENT_LEAVE 1u
 #define WL_POINTER_EVENT_MOTION 2u
 #define WL_POINTER_EVENT_BUTTON 3u
+#define WL_POINTER_EVENT_AXIS 4u
+/* wl_pointer::axis's own axis enum: vertical_scroll=0, horizontal_scroll=1
+ * (real wayland.xml enum, not guessed). */
+#define WL_POINTER_AXIS_VERTICAL_SCROLL 0u
+#define WL_POINTER_AXIS_HORIZONTAL_SCROLL 1u
 #define WL_POINTER_BUTTON_STATE_RELEASED 0u
 #define WL_POINTER_BUTTON_STATE_PRESSED 1u
 /* Real Linux evdev button codes (linux/input-event-codes.h -- confirmed
@@ -178,7 +203,14 @@ struct crtgfx_wl_buffer {
   struct crtgfx_wl_buffer* next;
 };
 
-struct crtgfx_host_window {
+/* Shared, process-wide Wayland connection -- see this file's own top
+ * comment for why one shared connection replaces the previous one-
+ * connection-per-window design. Created lazily by the first crtgfx_host_
+ * window_create() call (crtgfx_wl_connection_create() below) and torn
+ * down once the last crtgfx_host_window sharing it is destroyed
+ * (crtgfx_wl_connection_destroy(), called from crtgfx_host_window_
+ * destroy() when its own windows list goes empty). */
+struct crtgfx_wl_connection {
   int fd;
   uint32_t next_id;
 
@@ -187,55 +219,90 @@ struct crtgfx_host_window {
   uint32_t compositor_id;
   uint32_t shm_id;
   uint32_t wm_base_id;
-  uint32_t surface_id;
-  uint32_t xdg_surface_id;
-  uint32_t xdg_toplevel_id;
-  /* 0 means "no wl_seat/wl_keyboard bound" -- object id 0 is never a real
-   * Wayland object (id 1 is always wl_display, the lowest object id this
-   * backend or any real compositor ever allocates), so it doubles safely
-   * as an explicit "absent" sentinel without a separate bool. wl_seat is
-   * optional (unlike wl_compositor/wl_shm/xdg_wm_base): a compositor with
-   * no seat at all, or a seat with no keyboard capability, just means no
-   * keyboard events are ever queued -- not a connection failure. */
+  /* 0 means "no wl_seat/wl_keyboard/wl_pointer bound" -- object id 0 is
+   * never a real Wayland object (id 1 is always wl_display, the lowest
+   * object id this backend or any real compositor ever allocates), so it
+   * doubles safely as an explicit "absent" sentinel without a separate
+   * bool. wl_seat is optional (unlike wl_compositor/wl_shm/xdg_wm_base):
+   * a compositor with no seat at all, or a seat with no keyboard/pointer
+   * capability, just means no keyboard/pointer events are ever queued --
+   * not a connection failure. */
   uint32_t seat_id;
   uint32_t keyboard_id;
   uint32_t pointer_id;
+
   /* wl_pointer::button carries no x/y of its own -- wayland.xml's own
    * doc says "The location of the click is given by the last motion,
    * warp or enter event", so the most recent one has to be tracked here
    * to fill in crtgfx_event.data.pointer_button.x/y on a button event. */
   double pointer_x;
   double pointer_y;
+  /* wl_surface object id of whichever window currently has pointer/
+   * keyboard focus, per the real wl_pointer::enter/leave and
+   * wl_keyboard::enter/leave events (see wl_dispatch_message() below) --
+   * 0 means "no window focused" (see the seat_id comment just above for
+   * why 0 is always a safe sentinel). The seat is bound once, shared by
+   * every window on this connection, so a connection-wide pointer/
+   * keyboard event has to be routed to the one specific crtgfx_host_
+   * window it actually belongs to now that more than one can exist --
+   * this is exactly the piece the previous one-connection-per-window
+   * design never needed, because there was only ever one window to route
+   * to in the first place. */
+  uint32_t pointer_focus_surface_id;
+  uint32_t keyboard_focus_surface_id;
+
+  /* xkbcommon state for the currently bound keyboard -- xkb_keymap/
+   * xkb_state are both null until the real wl_keyboard::keymap event
+   * arrives (see wl_dispatch_message()'s own WL_KEYBOARD_EVENT_KEYMAP
+   * handling); xkb_context is created once, up front, and lives for the
+   * whole connection's lifetime. One keyboard/keymap/state total, shared
+   * by every window -- a real Wayland seat has exactly one keyboard
+   * group, not one per surface. */
+  struct xkb_context* xkb_context;
+  struct xkb_keymap* xkb_keymap;
+  struct xkb_state* xkb_state;
+
+  /* Every live crtgfx_host_window sharing this connection (singly linked
+   * via crtgfx_host_window::next below) -- used both for object-id-based
+   * routing (crtgfx_wl_find_window_by_surface()/_owning_buffer() below)
+   * and as the reference count for when to tear the connection itself
+   * down (crtgfx_host_window_destroy() frees it once this list goes
+   * empty). */
+  struct crtgfx_host_window* windows;
+};
+
+struct crtgfx_host_window {
+  struct crtgfx_wl_connection* conn;
+  struct crtgfx_host_window* next;
+
+  uint32_t surface_id;
+  uint32_t xdg_surface_id;
+  uint32_t xdg_toplevel_id;
 
   int have_first_configure;
   uint32_t configure_serial;
 
   struct crtgfx_wl_buffer* buffers;
 
-  /* xkbcommon state for the currently bound keyboard -- xkb_keymap/
-   * xkb_state are both null until the real wl_keyboard::keymap event
-   * arrives (see wl_dispatch_message()'s own WL_KEYBOARD_EVENT_KEYMAP
-   * handling); xkb_context is created once, up front, in crtgfx_host_
-   * window_create(), and lives for the whole connection's lifetime. */
-  struct xkb_context* xkb_context;
-  struct xkb_keymap* xkb_keymap;
-  struct xkb_state* xkb_state;
-
   crtgfx_weston_toplevel* toplevel;
 };
 
-/* crtgfx_host_window_dispatch() (see libcrtgfx/include/crtgfx/window.h's
+/* The one shared connection for this process, or null if no window is
+ * currently open. crtgfx_host_window_dispatch() (see crtgfx/window.h's
  * crtgfx_window_pump_events()) takes no window argument, matching Win32's
- * thread-global message queue -- see this file's top comment. */
-static struct crtgfx_host_window* crtgfx_wl_active;
+ * thread-global message queue -- see this file's top comment; with a
+ * shared connection this is now the natural, correct shape rather than a
+ * limitation, since one poll()/drain pass on this one fd already carries
+ * traffic for every window. */
+static struct crtgfx_wl_connection* crtgfx_wl_conn;
 
-/* Only populated during crtgfx_host_window_create()'s initial registry
+/* Only populated during crtgfx_wl_connection_create()'s initial registry
  * roundtrip; passed through wl_dispatch_message() as an optional pointer. */
 struct crtgfx_wl_bootstrap {
   uint32_t compositor_name;
   uint32_t shm_name;
   uint32_t wm_base_name;
-  uint32_t seat_name; /* CRTGFX_WL_NAME_NONE if the compositor has no wl_seat at all */
+  uint32_t seat_name;
   int sync_done;
 };
 
@@ -280,9 +347,12 @@ static size_t wl_get_string(const unsigned char* body, size_t off, char* out, si
  * opcode, size counted from the start of the header (real upstream wire
  * format -- see this file's top comment). fd, when >= 0, rides as
  * SCM_RIGHTS ancillary data on the same sendmsg() call (only
- * wl_shm::create_pool needs this). */
+ * wl_shm::create_pool needs this). Takes the shared connection directly
+ * (not a crtgfx_host_window) -- every request this backend ever sends
+ * travels over the one shared fd, whether or not it is about a specific
+ * window's own object. */
 static int wl_send(
-    struct crtgfx_host_window* host, uint32_t object_id, uint32_t opcode, const void* body,
+    struct crtgfx_wl_connection* conn, uint32_t object_id, uint32_t opcode, const void* body,
     size_t body_len, int pass_fd) {
   uint32_t header[2];
   struct iovec iov[2];
@@ -320,8 +390,53 @@ static int wl_send(
   }
 
   total = sizeof(header) + body_len;
-  sent = sendmsg(host->fd, &msg, 0);
+  sent = sendmsg(conn->fd, &msg, 0);
   return (sent == (ssize_t)total) ? CRTGFX_OK : CRTGFX_ERROR_HOST;
+}
+
+/* Finds the crtgfx_host_window (out of every one sharing `conn`) whose
+ * own wl_surface, xdg_surface, or xdg_toplevel object id matches `id` --
+ * the routing primitive every per-window event branch in
+ * wl_dispatch_message() needs now that more than one window can share a
+ * connection. Returns null for id 0 or no match (a message for a window
+ * already destroyed, or a genuinely unrelated object -- both are
+ * legitimate, not bugs, so callers treat null as "ignore, not an error"). */
+static struct crtgfx_host_window* crtgfx_wl_find_window_by_surface(
+    struct crtgfx_wl_connection* conn, uint32_t id) {
+  struct crtgfx_host_window* w;
+
+  if (conn == 0 || id == 0) {
+    return 0;
+  }
+  for (w = conn->windows; w != 0; w = w->next) {
+    if (w->surface_id == id || w->xdg_surface_id == id || w->xdg_toplevel_id == id) {
+      return w;
+    }
+  }
+  return 0;
+}
+
+/* Same idea as crtgfx_wl_find_window_by_surface(), for wl_buffer ids --
+ * buffers are per-window (each window presents its own wl_shm content),
+ * so a wl_buffer::release has to be checked against every window sharing
+ * the connection, not just one. */
+static struct crtgfx_host_window* crtgfx_wl_find_window_owning_buffer(
+    struct crtgfx_wl_connection* conn, uint32_t id) {
+  struct crtgfx_host_window* w;
+
+  if (conn == 0) {
+    return 0;
+  }
+  for (w = conn->windows; w != 0; w = w->next) {
+    struct crtgfx_wl_buffer* b;
+
+    for (b = w->buffers; b != 0; b = b->next) {
+      if (b->id == id) {
+        return w;
+      }
+    }
+  }
+  return 0;
 }
 
 static void wl_buffer_destroy_storage(struct crtgfx_wl_buffer* buffer) {
@@ -337,27 +452,29 @@ static void wl_buffer_destroy_storage(struct crtgfx_wl_buffer* buffer) {
   free(buffer);
 }
 
-/* Returns 1 if `id` was actually a tracked wl_buffer (and destroys it),
- * 0 otherwise -- the caller needs this to know whether it may safely
- * treat the message as fully handled. See its own call site's comment:
- * wl_buffer::release and wl_seat::capabilities are BOTH opcode 0 (every
- * Wayland interface numbers its own events from 0 independently), so
- * "opcode == WL_BUFFER_EVENT_RELEASE" alone is not enough to identify a
- * message -- only checking that object_id genuinely names a buffer this
- * backend created actually disambiguates it. */
-static int wl_destroy_released_buffer(struct crtgfx_host_window* host, uint32_t id) {
+/* Returns 1 if `id` was actually a tracked wl_buffer belonging to some
+ * window on `conn` (and destroys it), 0 otherwise -- the caller needs
+ * this to know whether it may safely treat the message as fully handled.
+ * See its own call site's comment: wl_buffer::release and wl_seat::
+ * capabilities are BOTH opcode 0 (every Wayland interface numbers its own
+ * events from 0 independently), so "opcode == WL_BUFFER_EVENT_RELEASE"
+ * alone is not enough to identify a message -- only checking that
+ * object_id genuinely names a buffer this backend created actually
+ * disambiguates it. */
+static int wl_destroy_released_buffer(struct crtgfx_wl_connection* conn, uint32_t id) {
+  struct crtgfx_host_window* w = crtgfx_wl_find_window_owning_buffer(conn, id);
   struct crtgfx_wl_buffer** link;
 
-  if (host == 0) {
+  if (w == 0) {
     return 0;
   }
-  link = &host->buffers;
+  link = &w->buffers;
   while (*link != 0) {
     struct crtgfx_wl_buffer* buffer = *link;
 
     if (buffer->id == id) {
       *link = buffer->next;
-      (void)wl_send(host, id, WL_BUFFER_DESTROY, 0, 0, -1);
+      (void)wl_send(conn, id, WL_BUFFER_DESTROY, 0, 0, -1);
       wl_buffer_destroy_storage(buffer);
       return 1;
     }
@@ -466,7 +583,7 @@ static int wl_read_exact(int fd, void* buf, size_t len, uint32_t timeout_ms, int
  * backend's own protocol subset ever sends an fd with, so every other
  * caller passing NULL is safe by construction, not by luck. */
 static int wl_recv_message(
-    struct crtgfx_host_window* host, uint32_t* out_object_id, uint32_t* out_opcode,
+    struct crtgfx_wl_connection* conn, uint32_t* out_object_id, uint32_t* out_opcode,
     unsigned char* body, size_t body_cap, size_t* out_body_len, uint32_t timeout_ms, int* out_fd) {
   uint32_t header[2];
   uint32_t opcode;
@@ -477,7 +594,7 @@ static int wl_recv_message(
   if (out_fd != 0) {
     *out_fd = -1;
   }
-  rc = wl_read_exact(host->fd, header, sizeof(header), timeout_ms, out_fd);
+  rc = wl_read_exact(conn->fd, header, sizeof(header), timeout_ms, out_fd);
   if (rc != CRTGFX_OK) {
     return rc;
   }
@@ -491,7 +608,7 @@ static int wl_recv_message(
     return CRTGFX_ERROR_HOST;
   }
   if (body_len != 0u) {
-    rc = wl_read_exact(host->fd, body, body_len, timeout_ms, out_fd);
+    rc = wl_read_exact(conn->fd, body, body_len, timeout_ms, out_fd);
     if (rc != CRTGFX_OK) {
       return rc;
     }
@@ -503,19 +620,28 @@ static int wl_recv_message(
 }
 
 /* Feeds a real wl_keyboard::key event through this backend's own
- * xkbcommon state and queues the resulting crtgfx_event(s): always a
- * KEY_DOWN/KEY_UP, and -- for a press that actually produces text (not
- * Escape/arrows/bare-modifier/...) -- a following TEXT event carrying the
- * real, already-composed UTF-8 xkb_state_key_get_utf8() returns. Does
- * nothing if no keymap has been compiled yet (host->xkb_state == 0):
- * a real compositor always sends wl_keyboard::keymap before the first
- * key event on a freshly bound keyboard, but a key press that outraces
- * it on a genuinely broken compositor should not crash on a null state. */
-static void wl_handle_keyboard_key(struct crtgfx_host_window* host, uint32_t key, uint32_t state) {
+ * xkbcommon state and queues the resulting crtgfx_event(s) on whichever
+ * window currently holds keyboard focus (conn->keyboard_focus_surface_id,
+ * set from real wl_keyboard::enter/leave -- see wl_dispatch_message()):
+ * always a KEY_DOWN/KEY_UP, and -- for a press that actually produces
+ * text (not Escape/arrows/bare-modifier/...) -- a following TEXT event
+ * carrying the real, already-composed UTF-8 xkb_state_key_get_utf8()
+ * returns. Does nothing if no keymap has been compiled yet (conn->
+ * xkb_state == 0) or no window currently has keyboard focus: a real
+ * compositor always sends wl_keyboard::keymap before the first key event
+ * on a freshly bound keyboard, and always sends wl_keyboard::enter before
+ * the first key event too, but a key press that outraces either on a
+ * genuinely broken compositor should not crash on a null state/target. */
+static void wl_handle_keyboard_key(struct crtgfx_wl_connection* conn, uint32_t key, uint32_t state) {
+  struct crtgfx_host_window* target;
   crtgfx_event event;
   xkb_keycode_t xkb_keycode;
 
-  if (host->xkb_state == 0) {
+  if (conn->xkb_state == 0) {
+    return;
+  }
+  target = crtgfx_wl_find_window_by_surface(conn, conn->keyboard_focus_surface_id);
+  if (target == 0) {
     return;
   }
   memset(&event, 0, sizeof(event));
@@ -527,7 +653,7 @@ static void wl_handle_keyboard_key(struct crtgfx_host_window* host, uint32_t key
    * rather than guessed at, matching this project's own "don't claim a
    * gap is closed until it really is" discipline. A future pass can add
    * this without changing the event shape at all. */
-  crtgfx_weston_toplevel_note_event(host->toplevel, &event);
+  crtgfx_weston_toplevel_note_event(target->toplevel, &event);
 
   if (state != WL_KEYBOARD_KEY_STATE_PRESSED) {
     return;
@@ -535,18 +661,18 @@ static void wl_handle_keyboard_key(struct crtgfx_host_window* host, uint32_t key
   xkb_keycode = (xkb_keycode_t)(key + CRTGFX_WL_XKB_KEYCODE_OFFSET);
   memset(&event, 0, sizeof(event));
   event.type = CRTGFX_EVENT_TEXT;
-  if (xkb_state_key_get_utf8(host->xkb_state, xkb_keycode, event.data.text.utf8,
+  if (xkb_state_key_get_utf8(conn->xkb_state, xkb_keycode, event.data.text.utf8,
                              sizeof(event.data.text.utf8)) > 0) {
-    crtgfx_weston_toplevel_note_event(host->toplevel, &event);
+    crtgfx_weston_toplevel_note_event(target->toplevel, &event);
   }
 }
 
 static void wl_dispatch_message(
-    struct crtgfx_host_window* host, struct crtgfx_wl_bootstrap* boot, uint32_t object_id,
+    struct crtgfx_wl_connection* conn, struct crtgfx_wl_bootstrap* boot, uint32_t object_id,
     uint32_t opcode, const unsigned char* body, size_t body_len, int fd) {
   (void)body_len;
 
-  if (boot != 0 && object_id == host->registry_id && opcode == WL_REGISTRY_EVENT_GLOBAL) {
+  if (boot != 0 && object_id == conn->registry_id && opcode == WL_REGISTRY_EVENT_GLOBAL) {
     uint32_t name = wl_get_u32(body, 0);
     char interface[128];
 
@@ -563,34 +689,44 @@ static void wl_dispatch_message(
     }
     return;
   }
-  if (boot != 0 && object_id == host->sync_callback_id && opcode == WL_CALLBACK_EVENT_DONE) {
+  if (boot != 0 && object_id == conn->sync_callback_id && opcode == WL_CALLBACK_EVENT_DONE) {
     boot->sync_done = 1;
     return;
   }
-  if (object_id == host->wm_base_id && opcode == XDG_WM_BASE_EVENT_PING) {
+  if (object_id == conn->wm_base_id && opcode == XDG_WM_BASE_EVENT_PING) {
     unsigned char out[4];
 
     wl_put_u32(out, 0, wl_get_u32(body, 0));
-    wl_send(host, host->wm_base_id, XDG_WM_BASE_PONG, out, sizeof(out), -1);
+    wl_send(conn, conn->wm_base_id, XDG_WM_BASE_PONG, out, sizeof(out), -1);
     return;
   }
-  if (object_id == host->xdg_surface_id && opcode == XDG_SURFACE_EVENT_CONFIGURE) {
-    host->configure_serial = wl_get_u32(body, 0);
-    host->have_first_configure = 1;
-    return;
-  }
-  if (object_id == host->xdg_toplevel_id && opcode == XDG_TOPLEVEL_EVENT_CONFIGURE) {
-    uint32_t width = wl_get_u32(body, 0);
-    uint32_t height = wl_get_u32(body, 4);
+  if (object_id == conn->seat_id || object_id == conn->keyboard_id ||
+      object_id == conn->pointer_id) {
+    /* Handled in the seat/keyboard/pointer blocks below -- checked first,
+     * ahead of the per-window xdg_surface/xdg_toplevel branches, purely
+     * so those id comparisons never have to run for what is by far the
+     * highest-frequency traffic on this connection (pointer motion). */
+  } else {
+    struct crtgfx_host_window* w = crtgfx_wl_find_window_by_surface(conn, object_id);
 
-    if (width != 0u && height != 0u) {
-      crtgfx_weston_toplevel_note_size(host->toplevel, width, height);
+    if (w != 0 && object_id == w->xdg_surface_id && opcode == XDG_SURFACE_EVENT_CONFIGURE) {
+      w->configure_serial = wl_get_u32(body, 0);
+      w->have_first_configure = 1;
+      return;
     }
-    return;
-  }
-  if (object_id == host->xdg_toplevel_id && opcode == XDG_TOPLEVEL_EVENT_CLOSE) {
-    crtgfx_weston_toplevel_note_close(host->toplevel);
-    return;
+    if (w != 0 && object_id == w->xdg_toplevel_id && opcode == XDG_TOPLEVEL_EVENT_CONFIGURE) {
+      uint32_t width = wl_get_u32(body, 0);
+      uint32_t height = wl_get_u32(body, 4);
+
+      if (width != 0u && height != 0u) {
+        crtgfx_weston_toplevel_note_size(w->toplevel, width, height);
+      }
+      return;
+    }
+    if (w != 0 && object_id == w->xdg_toplevel_id && opcode == XDG_TOPLEVEL_EVENT_CLOSE) {
+      crtgfx_weston_toplevel_note_close(w->toplevel);
+      return;
+    }
   }
   /* Real, found bug (2026-08-25, real-hardware test): wl_buffer::release
    * and wl_seat::capabilities are BOTH opcode 0 -- every Wayland
@@ -611,58 +747,74 @@ static void wl_dispatch_message(
    * treating the message as consumed when object_id genuinely named a
    * buffer this backend created; otherwise fall through so the real
    * owner of opcode 0 on this object_id gets a chance to handle it. */
-  if (opcode == WL_BUFFER_EVENT_RELEASE && wl_destroy_released_buffer(host, object_id)) {
+  if (opcode == WL_BUFFER_EVENT_RELEASE && wl_destroy_released_buffer(conn, object_id)) {
     return;
   }
-  if (host->seat_id != 0 && object_id == host->seat_id && opcode == WL_SEAT_EVENT_CAPABILITIES) {
+  if (conn->seat_id != 0 && object_id == conn->seat_id && opcode == WL_SEAT_EVENT_CAPABILITIES) {
     uint32_t capabilities = wl_get_u32(body, 0);
     unsigned char out[4];
 
     CRTGFX_WL_TRACE("seat: capabilities=0x%x keyboard_bit=%d pointer_bit=%d\n", capabilities,
                      (capabilities & WL_SEAT_CAPABILITY_KEYBOARD) != 0u,
                      (capabilities & WL_SEAT_CAPABILITY_POINTER) != 0u);
-    if ((capabilities & WL_SEAT_CAPABILITY_KEYBOARD) != 0u && host->keyboard_id == 0u) {
-      host->keyboard_id = host->next_id++;
-      wl_put_u32(out, 0, host->keyboard_id);
-      wl_send(host, host->seat_id, WL_SEAT_GET_KEYBOARD, out, sizeof(out), -1);
-      CRTGFX_WL_TRACE("seat: requesting keyboard id=%u\n", host->keyboard_id);
+    if ((capabilities & WL_SEAT_CAPABILITY_KEYBOARD) != 0u && conn->keyboard_id == 0u) {
+      conn->keyboard_id = conn->next_id++;
+      wl_put_u32(out, 0, conn->keyboard_id);
+      wl_send(conn, conn->seat_id, WL_SEAT_GET_KEYBOARD, out, sizeof(out), -1);
+      CRTGFX_WL_TRACE("seat: requesting keyboard id=%u\n", conn->keyboard_id);
     }
-    if ((capabilities & WL_SEAT_CAPABILITY_POINTER) != 0u && host->pointer_id == 0u) {
-      host->pointer_id = host->next_id++;
-      wl_put_u32(out, 0, host->pointer_id);
-      wl_send(host, host->seat_id, WL_SEAT_GET_POINTER, out, sizeof(out), -1);
-      CRTGFX_WL_TRACE("seat: requesting pointer id=%u\n", host->pointer_id);
+    if ((capabilities & WL_SEAT_CAPABILITY_POINTER) != 0u && conn->pointer_id == 0u) {
+      conn->pointer_id = conn->next_id++;
+      wl_put_u32(out, 0, conn->pointer_id);
+      wl_send(conn, conn->seat_id, WL_SEAT_GET_POINTER, out, sizeof(out), -1);
+      CRTGFX_WL_TRACE("seat: requesting pointer id=%u\n", conn->pointer_id);
     }
     return;
   }
-  if (host->pointer_id != 0 && object_id == host->pointer_id) {
+  if (conn->pointer_id != 0 && object_id == conn->pointer_id) {
+    if (opcode == WL_POINTER_EVENT_ENTER) {
+      /* serial(uint,0), surface(object,4), surface_x(fixed,8),
+       * surface_y(fixed,12). Reading `surface` here (not done before
+       * multi-window support existed, since there was only ever one
+       * possible destination) is what lets pointer motion/button/axis
+       * below route to the right window. */
+      uint32_t surface_id = wl_get_u32(body, 4);
+      int32_t x_fixed = (int32_t)wl_get_u32(body, 8);
+      int32_t y_fixed = (int32_t)wl_get_u32(body, 12);
+
+      conn->pointer_focus_surface_id = surface_id;
+      conn->pointer_x = (double)x_fixed / 256.0;
+      conn->pointer_y = (double)y_fixed / 256.0;
+      CRTGFX_WL_TRACE("pointer: enter surface=%u x=%.2f y=%.2f\n", surface_id, conn->pointer_x,
+                       conn->pointer_y);
+      return;
+    }
+    if (opcode == WL_POINTER_EVENT_LEAVE) {
+      /* serial(uint,0), surface(object,4). */
+      uint32_t surface_id = wl_get_u32(body, 4);
+
+      if (conn->pointer_focus_surface_id == surface_id) {
+        conn->pointer_focus_surface_id = 0;
+      }
+      CRTGFX_WL_TRACE("pointer: leave surface=%u\n", surface_id);
+      return;
+    }
     if (opcode == WL_POINTER_EVENT_MOTION) {
       /* time(uint,0), surface_x(fixed,4), surface_y(fixed,8). */
       int32_t x_fixed = (int32_t)wl_get_u32(body, 4);
       int32_t y_fixed = (int32_t)wl_get_u32(body, 8);
+      struct crtgfx_host_window* target;
 
-      host->pointer_x = (double)x_fixed / 256.0;
-      host->pointer_y = (double)y_fixed / 256.0;
-      if (host->toplevel != 0) {
+      conn->pointer_x = (double)x_fixed / 256.0;
+      conn->pointer_y = (double)y_fixed / 256.0;
+      target = crtgfx_wl_find_window_by_surface(conn, conn->pointer_focus_surface_id);
+      if (target != 0) {
         crtgfx_event event = {0};
         event.type = CRTGFX_EVENT_POINTER_MOTION;
-        event.data.pointer_motion.x = host->pointer_x;
-        event.data.pointer_motion.y = host->pointer_y;
-        crtgfx_weston_toplevel_note_event(host->toplevel, &event);
+        event.data.pointer_motion.x = conn->pointer_x;
+        event.data.pointer_motion.y = conn->pointer_y;
+        crtgfx_weston_toplevel_note_event(target->toplevel, &event);
       }
-      return;
-    }
-    if (opcode == WL_POINTER_EVENT_ENTER) {
-      /* serial(uint,0), surface(object,4), surface_x(fixed,8),
-       * surface_y(fixed,12) -- same shape as motion, plus a leading
-       * serial/surface pair; also gives a real initial position before
-       * any motion event has arrived yet. */
-      int32_t x_fixed = (int32_t)wl_get_u32(body, 8);
-      int32_t y_fixed = (int32_t)wl_get_u32(body, 12);
-
-      host->pointer_x = (double)x_fixed / 256.0;
-      host->pointer_y = (double)y_fixed / 256.0;
-      CRTGFX_WL_TRACE("pointer: enter x=%.2f y=%.2f\n", host->pointer_x, host->pointer_y);
       return;
     }
     if (opcode == WL_POINTER_EVENT_BUTTON) {
@@ -670,6 +822,7 @@ static void wl_dispatch_message(
       uint32_t button = wl_get_u32(body, 8);
       uint32_t state = wl_get_u32(body, 12);
       uint32_t crtgfx_button;
+      struct crtgfx_host_window* target;
 
       if (button == CRTGFX_BTN_LEFT) {
         crtgfx_button = CRTGFX_POINTER_BUTTON_LEFT;
@@ -681,25 +834,51 @@ static void wl_dispatch_message(
         CRTGFX_WL_TRACE("pointer: unmapped button=0x%x state=%u ignored\n", button, state);
         return; /* a real but unmapped button (side/extra buttons, ...) -- not queued */
       }
-      if (host->toplevel != 0) {
+      target = crtgfx_wl_find_window_by_surface(conn, conn->pointer_focus_surface_id);
+      if (target != 0) {
         crtgfx_event event = {0};
         event.type = (state == WL_POINTER_BUTTON_STATE_PRESSED) ? CRTGFX_EVENT_POINTER_BUTTON_DOWN
                                                                   : CRTGFX_EVENT_POINTER_BUTTON_UP;
         event.data.pointer_button.button = crtgfx_button;
-        event.data.pointer_button.x = host->pointer_x;
-        event.data.pointer_button.y = host->pointer_y;
-        crtgfx_weston_toplevel_note_event(host->toplevel, &event);
+        event.data.pointer_button.x = conn->pointer_x;
+        event.data.pointer_button.y = conn->pointer_y;
+        crtgfx_weston_toplevel_note_event(target->toplevel, &event);
       }
       return;
     }
-    /* wl_pointer::leave/axis/frame/...: intentionally not acted on (no
-     * scroll-wheel support yet, no need to react to focus leaving), same
-     * "traced, not silently dropped" shape as wl_keyboard's own
-     * enter/leave/repeat_info handling just below. */
+    if (opcode == WL_POINTER_EVENT_AXIS) {
+      /* time(uint,0), axis(uint,4), value(fixed,8). Sign/scale taken
+       * directly from the wire value -- see crtgfx/window.h's own
+       * CRTGFX_EVENT_POINTER_SCROLL doc comment for why this is flagged
+       * reasoned-but-not-physically-verified this session (no real
+       * scroll wheel reachable from WSL/WSLg). */
+      uint32_t axis = wl_get_u32(body, 4);
+      int32_t value_fixed = (int32_t)wl_get_u32(body, 8);
+      double value = (double)value_fixed / 256.0;
+      struct crtgfx_host_window* target = crtgfx_wl_find_window_by_surface(
+          conn, conn->pointer_focus_surface_id);
+
+      if (target != 0 && (axis == WL_POINTER_AXIS_VERTICAL_SCROLL ||
+                           axis == WL_POINTER_AXIS_HORIZONTAL_SCROLL)) {
+        crtgfx_event event = {0};
+        event.type = CRTGFX_EVENT_POINTER_SCROLL;
+        if (axis == WL_POINTER_AXIS_VERTICAL_SCROLL) {
+          event.data.pointer_scroll.dy = value;
+        } else {
+          event.data.pointer_scroll.dx = value;
+        }
+        crtgfx_weston_toplevel_note_event(target->toplevel, &event);
+      }
+      return;
+    }
+    /* wl_pointer::frame/...: intentionally not acted on (this backend
+     * only ever binds wl_pointer at version 1, so frame -- a v5 addition
+     * -- is never actually sent; kept as a traced catch-all in case a
+     * future version bump changes that). */
     CRTGFX_WL_TRACE("pointer: event opcode=%u (0=enter 1=leave 2=motion 3=button 4=axis)\n", opcode);
     return;
   }
-  if (host->keyboard_id != 0 && object_id == host->keyboard_id) {
+  if (conn->keyboard_id != 0 && object_id == conn->keyboard_id) {
     if (opcode == WL_KEYBOARD_EVENT_KEYMAP) {
       uint32_t format = wl_get_u32(body, 0);
       uint32_t size = wl_get_u32(body, 4);
@@ -718,19 +897,19 @@ static void wl_dispatch_message(
        * reading it directly) -- MAP_PRIVATE only becomes a real
        * *requirement* from wl_keyboard version 7 onwards (wayland.xml's
        * own doc comment), and this backend only ever binds wl_seat/
-       * wl_keyboard at version 1 (see crtgfx_host_window_create()). */
+       * wl_keyboard at version 1 (see crtgfx_wl_connection_create()). */
       mapping = mmap(0, size, PROT_READ, MAP_SHARED, fd, 0);
       close(fd);
       if (mapping == MAP_FAILED) {
         return;
       }
-      if (host->xkb_state != 0) {
-        xkb_state_unref(host->xkb_state);
-        host->xkb_state = 0;
+      if (conn->xkb_state != 0) {
+        xkb_state_unref(conn->xkb_state);
+        conn->xkb_state = 0;
       }
-      if (host->xkb_keymap != 0) {
-        xkb_keymap_unref(host->xkb_keymap);
-        host->xkb_keymap = 0;
+      if (conn->xkb_keymap != 0) {
+        xkb_keymap_unref(conn->xkb_keymap);
+        conn->xkb_keymap = 0;
       }
       /* size - 1: the mapped keymap string is NUL-terminated and `size`
        * (the wire value) includes that trailing NUL -- matching real
@@ -739,16 +918,47 @@ static void wl_dispatch_message(
        * into xkb_keymap_new_from_buffer()'s own length argument is not
        * what any real client does). */
       if (size > 0u) {
-        host->xkb_keymap = xkb_keymap_new_from_buffer(
-            host->xkb_context, (const char*)mapping, (size_t)(size - 1u),
+        conn->xkb_keymap = xkb_keymap_new_from_buffer(
+            conn->xkb_context, (const char*)mapping, (size_t)(size - 1u),
             XKB_KEYMAP_FORMAT_TEXT_V1, XKB_KEYMAP_COMPILE_NO_FLAGS);
       }
       munmap(mapping, size);
-      if (host->xkb_keymap != 0) {
-        host->xkb_state = xkb_state_new(host->xkb_keymap);
+      if (conn->xkb_keymap != 0) {
+        conn->xkb_state = xkb_state_new(conn->xkb_keymap);
       }
-      CRTGFX_WL_TRACE("keyboard: keymap compiled=%d state=%d\n", host->xkb_keymap != 0,
-                       host->xkb_state != 0);
+      CRTGFX_WL_TRACE("keyboard: keymap compiled=%d state=%d\n", conn->xkb_keymap != 0,
+                       conn->xkb_state != 0);
+      return;
+    }
+    if (opcode == WL_KEYBOARD_EVENT_ENTER) {
+      /* serial(uint,0), surface(object,4), keys(array,8) -- the array's
+       * own contents (currently pressed keys) are not needed here, only
+       * which surface gained focus. Fires CRTGFX_EVENT_FOCUS_IN on that
+       * window via the shared crtgfx_weston_toplevel_note_focus() (see
+       * wayland_weston.c), the same function Windows/macOS will call
+       * from their own native focus signal. */
+      uint32_t surface_id = wl_get_u32(body, 4);
+      struct crtgfx_host_window* target = crtgfx_wl_find_window_by_surface(conn, surface_id);
+
+      conn->keyboard_focus_surface_id = surface_id;
+      CRTGFX_WL_TRACE("keyboard: enter surface=%u\n", surface_id);
+      if (target != 0) {
+        crtgfx_weston_toplevel_note_focus(target->toplevel, 1);
+      }
+      return;
+    }
+    if (opcode == WL_KEYBOARD_EVENT_LEAVE) {
+      /* serial(uint,0), surface(object,4). */
+      uint32_t surface_id = wl_get_u32(body, 4);
+      struct crtgfx_host_window* target = crtgfx_wl_find_window_by_surface(conn, surface_id);
+
+      if (conn->keyboard_focus_surface_id == surface_id) {
+        conn->keyboard_focus_surface_id = 0;
+      }
+      CRTGFX_WL_TRACE("keyboard: leave surface=%u\n", surface_id);
+      if (target != 0) {
+        crtgfx_weston_toplevel_note_focus(target->toplevel, 0);
+      }
       return;
     }
     if (opcode == WL_KEYBOARD_EVENT_KEY) {
@@ -756,8 +966,8 @@ static void wl_dispatch_message(
       uint32_t state = wl_get_u32(body, 12);
 
       CRTGFX_WL_TRACE("keyboard: key=%u state=%u (xkb_state=%d)\n", key, state,
-                       host->xkb_state != 0);
-      wl_handle_keyboard_key(host, key, state);
+                       conn->xkb_state != 0);
+      wl_handle_keyboard_key(conn, key, state);
       return;
     }
     if (opcode == WL_KEYBOARD_EVENT_MODIFIERS) {
@@ -777,19 +987,13 @@ static void wl_dispatch_message(
        * latched_layout=0, locked_layout=group: matching real upstream
        * libxkbcommon's own tools/interactive-wayland.c kbd_modifiers()
        * exactly (confirmed by reading it directly, not guessed). */
-      xkb_state_update_mask(host->xkb_state, mods_depressed, mods_latched, mods_locked, 0, 0, group);
+      xkb_state_update_mask(conn->xkb_state, mods_depressed, mods_latched, mods_locked, 0, 0, group);
       return;
     }
-    /* wl_keyboard::enter/leave/repeat_info: intentionally not acted on
-     * (no focus tracking, no client-side key-repeat timer yet), but still
-     * traced -- opcode alone (enter=1, leave=2, repeat_info=5) tells a
-     * real diagnostic session whether the compositor ever gave this
-     * surface keyboard focus at all, which is the single most useful
-     * signal for "window opens but never receives input" reports (a
-     * missing/absent trace line here means the compositor's own window
-     * manager never focused the window -- a real environment/WM
-     * condition, not a protocol bug in this client). */
-    CRTGFX_WL_TRACE("keyboard: event opcode=%u (1=enter 2=leave 5=repeat_info)\n", opcode);
+    /* wl_keyboard::repeat_info: intentionally not acted on -- see crtgfx/
+     * window.h's own key-repeat policy comment (pass through the host's
+     * own repeat, never a project-owned timer). */
+    CRTGFX_WL_TRACE("keyboard: event opcode=%u (5=repeat_info)\n", opcode);
     return;
   }
   /* Anything else (wl_display::error/delete_id, wl_surface::enter/leave,
@@ -806,14 +1010,14 @@ static void wl_dispatch_message(
   }
 }
 
-static int wl_pump(struct crtgfx_host_window* host, uint32_t timeout_ms) {
+static int wl_pump(struct crtgfx_wl_connection* conn, uint32_t timeout_ms) {
   struct pollfd pfd;
   int pr;
 
-  if (host == 0 || host->fd < 0) {
+  if (conn == 0 || conn->fd < 0) {
     return CRTGFX_OK;
   }
-  pfd.fd = host->fd;
+  pfd.fd = conn->fd;
   pfd.events = POLLIN;
   pfd.revents = 0;
   pr = poll(&pfd, 1, (int)timeout_ms);
@@ -827,10 +1031,10 @@ static int wl_pump(struct crtgfx_host_window* host, uint32_t timeout_ms) {
     size_t body_len;
     int recv_fd;
 
-    if (wl_recv_message(host, &object_id, &opcode, body, sizeof(body), &body_len, 0, &recv_fd) != CRTGFX_OK) {
+    if (wl_recv_message(conn, &object_id, &opcode, body, sizeof(body), &body_len, 0, &recv_fd) != CRTGFX_OK) {
       break;
     }
-    wl_dispatch_message(host, 0, object_id, opcode, body, body_len, recv_fd);
+    wl_dispatch_message(conn, 0, object_id, opcode, body, body_len, recv_fd);
 
     pfd.revents = 0;
     if (poll(&pfd, 1, 0) <= 0) {
@@ -840,7 +1044,7 @@ static int wl_pump(struct crtgfx_host_window* host, uint32_t timeout_ms) {
   return CRTGFX_OK;
 }
 
-static int wl_connect(struct crtgfx_host_window* host) {
+static int wl_connect(struct crtgfx_wl_connection* conn) {
   const char* runtime_dir = getenv("XDG_RUNTIME_DIR");
   const char* display = getenv("WAYLAND_DISPLAY");
   struct sockaddr_un addr;
@@ -877,44 +1081,62 @@ static int wl_connect(struct crtgfx_host_window* host) {
     close(fd);
     return CRTGFX_ERROR_UNSUPPORTED;
   }
-  host->fd = fd;
+  conn->fd = fd;
   return CRTGFX_OK;
 }
 
-int crtgfx_host_window_create(const crtgfx_window_desc* desc, crtgfx_weston_toplevel* toplevel) {
-  struct crtgfx_host_window* host;
+static void crtgfx_wl_connection_destroy(struct crtgfx_wl_connection* conn) {
+  if (conn == 0) {
+    return;
+  }
+  if (conn->xkb_state != 0) {
+    xkb_state_unref(conn->xkb_state);
+  }
+  if (conn->xkb_keymap != 0) {
+    xkb_keymap_unref(conn->xkb_keymap);
+  }
+  if (conn->xkb_context != 0) {
+    xkb_context_unref(conn->xkb_context);
+  }
+  if (conn->fd >= 0) {
+    close(conn->fd);
+  }
+  free(conn);
+}
+
+/* Connects and binds every connection-wide global this backend needs
+ * (wl_compositor/wl_shm/xdg_wm_base, plus the optional wl_seat) -- called
+ * once, by the first crtgfx_host_window_create() in the process. Every
+ * later call reuses the resulting connection instead of calling this
+ * again (see crtgfx_host_window_create() below). */
+static int crtgfx_wl_connection_create(struct crtgfx_wl_connection** out_conn) {
+  struct crtgfx_wl_connection* conn;
   struct crtgfx_wl_bootstrap boot;
   unsigned char body[512];
   size_t off;
   int rc;
 
-  if (desc == 0 || toplevel == 0) {
-    return CRTGFX_ERROR_INVALID_ARGUMENT;
-  }
-
-  host = (struct crtgfx_host_window*)calloc(1, sizeof(*host));
-  if (host == 0) {
+  conn = (struct crtgfx_wl_connection*)calloc(1, sizeof(*conn));
+  if (conn == 0) {
     return CRTGFX_ERROR_HOST;
   }
-  host->fd = -1;
-  host->toplevel = toplevel;
-  host->next_id = 2;
+  conn->fd = -1;
+  conn->next_id = 2;
 
   /* XKB_CONTEXT_NO_FLAGS: the real, documented "just give me a normal
    * context" value (0) -- created once, up front, and kept for this
    * connection's whole lifetime, independent of whether a keymap ever
    * actually arrives (a compositor with no wl_seat, or a seat with no
    * keyboard capability, just means this context never gets used). */
-  host->xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
-  if (host->xkb_context == 0) {
-    free(host);
+  conn->xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+  if (conn->xkb_context == 0) {
+    free(conn);
     return CRTGFX_ERROR_HOST;
   }
 
-  rc = wl_connect(host);
+  rc = wl_connect(conn);
   if (rc != CRTGFX_OK) {
-    xkb_context_unref(host->xkb_context);
-    free(host);
+    crtgfx_wl_connection_destroy(conn);
     return rc;
   }
 
@@ -924,16 +1146,16 @@ int crtgfx_host_window_create(const crtgfx_window_desc* desc, crtgfx_weston_topl
   boot.wm_base_name = CRTGFX_WL_NAME_NONE;
   boot.seat_name = CRTGFX_WL_NAME_NONE;
 
-  host->registry_id = host->next_id++;
-  off = wl_put_u32(body, 0, host->registry_id);
-  if (wl_send(host, 1, WL_DISPLAY_GET_REGISTRY, body, off, -1) != CRTGFX_OK) {
+  conn->registry_id = conn->next_id++;
+  off = wl_put_u32(body, 0, conn->registry_id);
+  if (wl_send(conn, 1, WL_DISPLAY_GET_REGISTRY, body, off, -1) != CRTGFX_OK) {
     rc = CRTGFX_ERROR_HOST;
     goto fail;
   }
 
-  host->sync_callback_id = host->next_id++;
-  off = wl_put_u32(body, 0, host->sync_callback_id);
-  if (wl_send(host, 1, WL_DISPLAY_SYNC, body, off, -1) != CRTGFX_OK) {
+  conn->sync_callback_id = conn->next_id++;
+  off = wl_put_u32(body, 0, conn->sync_callback_id);
+  if (wl_send(conn, 1, WL_DISPLAY_SYNC, body, off, -1) != CRTGFX_OK) {
     rc = CRTGFX_ERROR_HOST;
     goto fail;
   }
@@ -945,11 +1167,11 @@ int crtgfx_host_window_create(const crtgfx_window_desc* desc, crtgfx_weston_topl
     size_t rlen;
     int recv_fd;
 
-    rc = wl_recv_message(host, &object_id, &opcode, rbody, sizeof(rbody), &rlen, CRTGFX_WL_TIMEOUT_MS, &recv_fd);
+    rc = wl_recv_message(conn, &object_id, &opcode, rbody, sizeof(rbody), &rlen, CRTGFX_WL_TIMEOUT_MS, &recv_fd);
     if (rc != CRTGFX_OK) {
       goto fail;
     }
-    wl_dispatch_message(host, &boot, object_id, opcode, rbody, rlen, recv_fd);
+    wl_dispatch_message(conn, &boot, object_id, opcode, rbody, rlen, recv_fd);
   }
 
   if (boot.compositor_name == CRTGFX_WL_NAME_NONE || boot.shm_name == CRTGFX_WL_NAME_NONE ||
@@ -963,95 +1185,135 @@ int crtgfx_host_window_create(const crtgfx_window_desc* desc, crtgfx_weston_topl
     goto fail;
   }
 
-  host->compositor_id = host->next_id++;
+  conn->compositor_id = conn->next_id++;
   off = wl_put_u32(body, 0, boot.compositor_name);
   off = wl_put_string(body, sizeof(body), off, "wl_compositor");
   off = wl_put_u32(body, off, 1);
-  off = wl_put_u32(body, off, host->compositor_id);
-  if (wl_send(host, host->registry_id, WL_REGISTRY_BIND, body, off, -1) != CRTGFX_OK) {
+  off = wl_put_u32(body, off, conn->compositor_id);
+  if (wl_send(conn, conn->registry_id, WL_REGISTRY_BIND, body, off, -1) != CRTGFX_OK) {
     rc = CRTGFX_ERROR_HOST;
     goto fail;
   }
 
-  host->shm_id = host->next_id++;
+  conn->shm_id = conn->next_id++;
   off = wl_put_u32(body, 0, boot.shm_name);
   off = wl_put_string(body, sizeof(body), off, "wl_shm");
   off = wl_put_u32(body, off, 1);
-  off = wl_put_u32(body, off, host->shm_id);
-  if (wl_send(host, host->registry_id, WL_REGISTRY_BIND, body, off, -1) != CRTGFX_OK) {
+  off = wl_put_u32(body, off, conn->shm_id);
+  if (wl_send(conn, conn->registry_id, WL_REGISTRY_BIND, body, off, -1) != CRTGFX_OK) {
     rc = CRTGFX_ERROR_HOST;
     goto fail;
   }
 
-  host->wm_base_id = host->next_id++;
+  conn->wm_base_id = conn->next_id++;
   off = wl_put_u32(body, 0, boot.wm_base_name);
   off = wl_put_string(body, sizeof(body), off, "xdg_wm_base");
   off = wl_put_u32(body, off, 1);
-  off = wl_put_u32(body, off, host->wm_base_id);
-  if (wl_send(host, host->registry_id, WL_REGISTRY_BIND, body, off, -1) != CRTGFX_OK) {
+  off = wl_put_u32(body, off, conn->wm_base_id);
+  if (wl_send(conn, conn->registry_id, WL_REGISTRY_BIND, body, off, -1) != CRTGFX_OK) {
     rc = CRTGFX_ERROR_HOST;
     goto fail;
   }
 
   /* wl_seat, unlike compositor/shm/wm_base just above, is optional: a
-   * compositor with no seat at all just means no keyboard events are ever
-   * queued, not a connection failure (see this file's own top-of-file
-   * scope note). Its own wl_seat::capabilities event (sent "on binding to
-   * the seat global", per wayland.xml's own doc) -- and, once that
-   * arrives with the keyboard bit set, the wl_keyboard::keymap/key/
-   * modifiers events that follow -- get processed by wl_dispatch_message()
-   * exactly like any other event, whichever loop below happens to read
-   * them first; no extra explicit roundtrip is added here for it. */
+   * compositor with no seat at all just means no keyboard/pointer events
+   * are ever queued, not a connection failure (see this file's own
+   * top-of-file scope note). Its own wl_seat::capabilities event (sent
+   * "on binding to the seat global", per wayland.xml's own doc) -- and,
+   * once that arrives with the keyboard/pointer bit set, the events that
+   * follow -- get processed by wl_dispatch_message() exactly like any
+   * other event, whichever loop below happens to read them first; no
+   * extra explicit roundtrip is added here for it. */
   if (boot.seat_name != CRTGFX_WL_NAME_NONE) {
-    host->seat_id = host->next_id++;
+    conn->seat_id = conn->next_id++;
     off = wl_put_u32(body, 0, boot.seat_name);
     off = wl_put_string(body, sizeof(body), off, "wl_seat");
     off = wl_put_u32(body, off, 1);
-    off = wl_put_u32(body, off, host->seat_id);
-    if (wl_send(host, host->registry_id, WL_REGISTRY_BIND, body, off, -1) != CRTGFX_OK) {
+    off = wl_put_u32(body, off, conn->seat_id);
+    if (wl_send(conn, conn->registry_id, WL_REGISTRY_BIND, body, off, -1) != CRTGFX_OK) {
       rc = CRTGFX_ERROR_HOST;
       goto fail;
     }
-    CRTGFX_WL_TRACE("seat: bind requested name=%u id=%u\n", boot.seat_name, host->seat_id);
+    CRTGFX_WL_TRACE("seat: bind requested name=%u id=%u\n", boot.seat_name, conn->seat_id);
   } else {
     CRTGFX_WL_TRACE("seat: no wl_seat global advertised by this compositor\n");
   }
 
-  host->surface_id = host->next_id++;
+  *out_conn = conn;
+  return CRTGFX_OK;
+
+fail:
+  crtgfx_wl_connection_destroy(conn);
+  return (rc == CRTGFX_ERROR_UNSUPPORTED) ? CRTGFX_ERROR_UNSUPPORTED : CRTGFX_ERROR_HOST;
+}
+
+/* Creates this window's own wl_surface/xdg_surface/xdg_toplevel on an
+ * already-bound `conn` (shared or freshly created -- the caller does not
+ * distinguish) and waits for the first real xdg_surface::configure, the
+ * same per-window bring-up crtgfx_host_window_create() always did, just
+ * factored out so it can run against a connection that may already have
+ * other windows on it. */
+static int crtgfx_wl_window_attach(
+    struct crtgfx_wl_connection* conn, const crtgfx_window_desc* desc,
+    crtgfx_weston_toplevel* toplevel, struct crtgfx_host_window** out_host) {
+  struct crtgfx_host_window* host;
+  unsigned char body[512];
+  size_t off;
+  int rc;
+
+  host = (struct crtgfx_host_window*)calloc(1, sizeof(*host));
+  if (host == 0) {
+    return CRTGFX_ERROR_HOST;
+  }
+  host->conn = conn;
+  host->toplevel = toplevel;
+
+  host->surface_id = conn->next_id++;
   off = wl_put_u32(body, 0, host->surface_id);
-  if (wl_send(host, host->compositor_id, WL_COMPOSITOR_CREATE_SURFACE, body, off, -1) != CRTGFX_OK) {
+  if (wl_send(conn, conn->compositor_id, WL_COMPOSITOR_CREATE_SURFACE, body, off, -1) != CRTGFX_OK) {
     rc = CRTGFX_ERROR_HOST;
     goto fail;
   }
 
-  host->xdg_surface_id = host->next_id++;
+  host->xdg_surface_id = conn->next_id++;
   off = wl_put_u32(body, 0, host->xdg_surface_id);
   off = wl_put_u32(body, off, host->surface_id);
-  if (wl_send(host, host->wm_base_id, XDG_WM_BASE_GET_XDG_SURFACE, body, off, -1) != CRTGFX_OK) {
+  if (wl_send(conn, conn->wm_base_id, XDG_WM_BASE_GET_XDG_SURFACE, body, off, -1) != CRTGFX_OK) {
     rc = CRTGFX_ERROR_HOST;
     goto fail;
   }
 
-  host->xdg_toplevel_id = host->next_id++;
+  host->xdg_toplevel_id = conn->next_id++;
   off = wl_put_u32(body, 0, host->xdg_toplevel_id);
-  if (wl_send(host, host->xdg_surface_id, XDG_SURFACE_GET_TOPLEVEL, body, off, -1) != CRTGFX_OK) {
+  if (wl_send(conn, host->xdg_surface_id, XDG_SURFACE_GET_TOPLEVEL, body, off, -1) != CRTGFX_OK) {
     rc = CRTGFX_ERROR_HOST;
     goto fail;
   }
 
   off = wl_put_string(body, sizeof(body), 0, desc->title != 0 ? desc->title : "crtgfx");
   if (off == (size_t)-1 ||
-      wl_send(host, host->xdg_toplevel_id, XDG_TOPLEVEL_SET_TITLE, body, off, -1) != CRTGFX_OK) {
+      wl_send(conn, host->xdg_toplevel_id, XDG_TOPLEVEL_SET_TITLE, body, off, -1) != CRTGFX_OK) {
     rc = CRTGFX_ERROR_HOST;
     goto fail;
   }
 
   /* Initial "null commit" (no buffer attached yet) -- required by
    * xdg-shell to trigger the first configure sequence below. */
-  if (wl_send(host, host->surface_id, WL_SURFACE_COMMIT, 0, 0, -1) != CRTGFX_OK) {
+  if (wl_send(conn, host->surface_id, WL_SURFACE_COMMIT, 0, 0, -1) != CRTGFX_OK) {
     rc = CRTGFX_ERROR_HOST;
     goto fail;
   }
+
+  /* Temporarily linked into conn->windows *before* the first configure
+   * arrives, purely so wl_dispatch_message()'s object-id routing (which
+   * walks conn->windows) can find this window while waiting for it below
+   * -- unlinked again on failure, left linked by the caller (crtgfx_host_
+   * window_create()) on success. Sharing a connection with sibling
+   * windows means their own traffic can legitimately interleave with
+   * this wait, unlike the old one-connection-per-window design where
+   * every message read here was guaranteed to be about this window. */
+  host->next = conn->windows;
+  conn->windows = host;
 
   while (!host->have_first_configure) {
     uint32_t object_id;
@@ -1060,55 +1322,110 @@ int crtgfx_host_window_create(const crtgfx_window_desc* desc, crtgfx_weston_topl
     size_t rlen;
     int recv_fd;
 
-    rc = wl_recv_message(host, &object_id, &opcode, rbody, sizeof(rbody), &rlen, CRTGFX_WL_TIMEOUT_MS, &recv_fd);
+    rc = wl_recv_message(conn, &object_id, &opcode, rbody, sizeof(rbody), &rlen, CRTGFX_WL_TIMEOUT_MS, &recv_fd);
     if (rc != CRTGFX_OK) {
+      conn->windows = host->next;
       goto fail;
     }
-    wl_dispatch_message(host, 0, object_id, opcode, rbody, rlen, recv_fd);
+    wl_dispatch_message(conn, 0, object_id, opcode, rbody, rlen, recv_fd);
   }
 
   off = wl_put_u32(body, 0, host->configure_serial);
-  if (wl_send(host, host->xdg_surface_id, XDG_SURFACE_ACK_CONFIGURE, body, off, -1) != CRTGFX_OK) {
+  if (wl_send(conn, host->xdg_surface_id, XDG_SURFACE_ACK_CONFIGURE, body, off, -1) != CRTGFX_OK) {
+    conn->windows = host->next;
     rc = CRTGFX_ERROR_HOST;
     goto fail;
   }
 
-  toplevel->host = host;
-  crtgfx_wl_active = host;
+  *out_host = host;
   return CRTGFX_OK;
 
 fail:
-  if (host->xkb_state != 0) {
-    xkb_state_unref(host->xkb_state);
-  }
-  if (host->xkb_keymap != 0) {
-    xkb_keymap_unref(host->xkb_keymap);
-  }
-  xkb_context_unref(host->xkb_context);
-  close(host->fd);
   free(host);
-  return (rc == CRTGFX_ERROR_UNSUPPORTED) ? CRTGFX_ERROR_UNSUPPORTED : CRTGFX_ERROR_HOST;
+  return rc;
+}
+
+int crtgfx_host_window_create(const crtgfx_window_desc* desc, crtgfx_weston_toplevel* toplevel) {
+  struct crtgfx_host_window* host;
+  int created_connection = 0;
+  int rc;
+
+  if (desc == 0 || toplevel == 0) {
+    return CRTGFX_ERROR_INVALID_ARGUMENT;
+  }
+
+  if (crtgfx_wl_conn == 0) {
+    rc = crtgfx_wl_connection_create(&crtgfx_wl_conn);
+    if (rc != CRTGFX_OK) {
+      return rc;
+    }
+    created_connection = 1;
+  }
+
+  rc = crtgfx_wl_window_attach(crtgfx_wl_conn, desc, toplevel, &host);
+  if (rc != CRTGFX_OK) {
+    if (created_connection) {
+      crtgfx_wl_connection_destroy(crtgfx_wl_conn);
+      crtgfx_wl_conn = 0;
+    }
+    return rc;
+  }
+
+  toplevel->host = host;
+  return CRTGFX_OK;
 }
 
 void crtgfx_host_window_destroy(crtgfx_host_window* host) {
+  struct crtgfx_wl_connection* conn;
+  struct crtgfx_host_window** link;
+
   if (host == 0) {
     return;
   }
-  if (crtgfx_wl_active == host) {
-    crtgfx_wl_active = 0;
+  conn = host->conn;
+
+  if (conn->pointer_focus_surface_id == host->surface_id) {
+    conn->pointer_focus_surface_id = 0;
   }
+  if (conn->keyboard_focus_surface_id == host->surface_id) {
+    conn->keyboard_focus_surface_id = 0;
+  }
+
   wl_destroy_all_buffers(host);
-  if (host->xkb_state != 0) {
-    xkb_state_unref(host->xkb_state);
+
+  /* Explicit per-window object teardown -- required now that the
+   * connection is shared: closing conn->fd (which used to destroy every
+   * server-side object implicitly, back when each window had its own
+   * connection) is now only correct once every window sharing it is
+   * gone. A window being destroyed while sibling windows remain has to
+   * ask the compositor to destroy just its own three objects instead;
+   * best-effort (return values ignored) since there is nothing useful to
+   * do about a failed destroy request on an object already being torn
+   * down locally either way. */
+  if (host->xdg_toplevel_id != 0) {
+    (void)wl_send(conn, host->xdg_toplevel_id, XDG_TOPLEVEL_DESTROY, 0, 0, -1);
   }
-  if (host->xkb_keymap != 0) {
-    xkb_keymap_unref(host->xkb_keymap);
+  if (host->xdg_surface_id != 0) {
+    (void)wl_send(conn, host->xdg_surface_id, XDG_SURFACE_DESTROY, 0, 0, -1);
   }
-  xkb_context_unref(host->xkb_context);
-  if (host->fd >= 0) {
-    close(host->fd);
+  if (host->surface_id != 0) {
+    (void)wl_send(conn, host->surface_id, WL_SURFACE_DESTROY, 0, 0, -1);
+  }
+
+  link = &conn->windows;
+  while (*link != 0) {
+    if (*link == host) {
+      *link = host->next;
+      break;
+    }
+    link = &(*link)->next;
   }
   free(host);
+
+  if (conn->windows == 0) {
+    crtgfx_wl_connection_destroy(conn);
+    crtgfx_wl_conn = 0;
+  }
 }
 
 int crtgfx_host_window_show(crtgfx_host_window* host) {
@@ -1123,7 +1440,7 @@ int crtgfx_host_window_show(crtgfx_host_window* host) {
 }
 
 int crtgfx_host_window_dispatch(uint32_t timeout_ms) {
-  return wl_pump(crtgfx_wl_active, timeout_ms);
+  return wl_pump(crtgfx_wl_conn, timeout_ms);
 }
 
 int crtgfx_host_window_get_size(crtgfx_host_window* host, uint32_t* out_width, uint32_t* out_height) {
@@ -1137,6 +1454,7 @@ int crtgfx_host_window_get_size(crtgfx_host_window* host, uint32_t* out_width, u
 
 int crtgfx_host_window_present_software(
     crtgfx_host_window* host, const void* pixels, uint32_t width, uint32_t height, uint32_t stride) {
+  struct crtgfx_wl_connection* conn;
   int memfd;
   void* mapping;
   struct crtgfx_wl_buffer* submitted;
@@ -1152,8 +1470,9 @@ int crtgfx_host_window_present_software(
   if (stride > UINT32_MAX / height) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
+  conn = host->conn;
   size = stride * height;
-  (void)wl_pump(host, 0);
+  (void)wl_pump(conn, 0);
 
   memfd = memfd_create("crtgfx-shm", 0);
   if (memfd < 0) {
@@ -1170,30 +1489,30 @@ int crtgfx_host_window_present_software(
   }
   memcpy(mapping, pixels, size);
 
-  pool_id = host->next_id++;
+  pool_id = conn->next_id++;
   off = wl_put_u32(body, 0, pool_id);
   off = wl_put_u32(body, off, (uint32_t)size);
-  if (wl_send(host, host->shm_id, WL_SHM_CREATE_POOL, body, off, memfd) != CRTGFX_OK) {
+  if (wl_send(conn, conn->shm_id, WL_SHM_CREATE_POOL, body, off, memfd) != CRTGFX_OK) {
     munmap(mapping, size);
     close(memfd);
     return CRTGFX_ERROR_HOST;
   }
 
-  buffer_id = host->next_id++;
+  buffer_id = conn->next_id++;
   off = wl_put_u32(body, 0, buffer_id);
   off = wl_put_u32(body, off, 0); /* offset */
   off = wl_put_u32(body, off, width);
   off = wl_put_u32(body, off, height);
   off = wl_put_u32(body, off, stride);
   off = wl_put_u32(body, off, CRTGFX_WL_FORMAT_ARGB8888);
-  if (wl_send(host, pool_id, WL_SHM_POOL_CREATE_BUFFER, body, off, -1) != CRTGFX_OK) {
+  if (wl_send(conn, pool_id, WL_SHM_POOL_CREATE_BUFFER, body, off, -1) != CRTGFX_OK) {
     munmap(mapping, size);
     close(memfd);
     return CRTGFX_ERROR_HOST;
   }
   submitted = (struct crtgfx_wl_buffer*)calloc(1, sizeof(*submitted));
   if (submitted == 0) {
-    wl_send(host, buffer_id, WL_BUFFER_DESTROY, 0, 0, -1);
+    wl_send(conn, buffer_id, WL_BUFFER_DESTROY, 0, 0, -1);
     munmap(mapping, size);
     close(memfd);
     return CRTGFX_ERROR_HOST;
@@ -1201,12 +1520,12 @@ int crtgfx_host_window_present_software(
   /* A buffer created through a pool stays valid after the pool itself is
    * destroyed (real protocol guarantee) -- destroy it right away so the
    * object id table doesn't grow across repeated presents. */
-  wl_send(host, pool_id, WL_SHM_POOL_DESTROY, 0, 0, -1);
+  wl_send(conn, pool_id, WL_SHM_POOL_DESTROY, 0, 0, -1);
 
   off = wl_put_u32(body, 0, buffer_id);
   off = wl_put_u32(body, off, 0);
   off = wl_put_u32(body, off, 0);
-  if (wl_send(host, host->surface_id, WL_SURFACE_ATTACH, body, off, -1) != CRTGFX_OK) {
+  if (wl_send(conn, host->surface_id, WL_SURFACE_ATTACH, body, off, -1) != CRTGFX_OK) {
     free(submitted);
     munmap(mapping, size);
     close(memfd);
@@ -1217,14 +1536,14 @@ int crtgfx_host_window_present_software(
   off = wl_put_u32(body, off, 0);
   off = wl_put_u32(body, off, width);
   off = wl_put_u32(body, off, height);
-  if (wl_send(host, host->surface_id, WL_SURFACE_DAMAGE, body, off, -1) != CRTGFX_OK) {
+  if (wl_send(conn, host->surface_id, WL_SURFACE_DAMAGE, body, off, -1) != CRTGFX_OK) {
     free(submitted);
     munmap(mapping, size);
     close(memfd);
     return CRTGFX_ERROR_HOST;
   }
 
-  if (wl_send(host, host->surface_id, WL_SURFACE_COMMIT, 0, 0, -1) != CRTGFX_OK) {
+  if (wl_send(conn, host->surface_id, WL_SURFACE_COMMIT, 0, 0, -1) != CRTGFX_OK) {
     free(submitted);
     munmap(mapping, size);
     close(memfd);

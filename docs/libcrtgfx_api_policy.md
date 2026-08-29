@@ -63,9 +63,7 @@ The public include model is organized as follows:
 ```text
 libcrtgfx/include/
   crtgfx/
-    runtime.h       # init/shutdown and backend selection
-    surface.h       # native-independent surface/window handles
-    event_loop.h    # pump/wake/timer integration
+    window.h        # window/surface/frame/event API (runtime+surface+event_loop, one file)
     skia.h          # convenience include/bridge for Skia integration
 
 libcrtgfx/third_party/skia/
@@ -74,6 +72,25 @@ libcrtgfx/third_party/skia/
 out/<preset>/external/skia/src/
   include/...       # fetched upstream Skia public headers
 ```
+
+**Decided 2026-08-29, Phase 1 of the window/event API completion plan:**
+this project's day-1 planning (before any real implementation existed)
+originally called for a three-way `runtime.h`/`surface.h`/`event_loop.h`
+split; every real API that has actually shipped since (window/surface
+creation, software-frame present, keyboard/mouse/scroll/resize/focus/
+close/expose events, and now multi-window support) lives in one file,
+`crtgfx/window.h`, and every real consumer (`skia_bridge.cc`, the Skia/
+keyboard-interactive test binaries, `crtgfx_window_smoke`/`_demo`) already
+includes just that one header. Splitting it now would only churn already-
+tested, already-working consumer code for a purely organizational
+preference -- the original three-way split was a plausible *guess* at
+where natural seams might fall before any code existed to test that
+guess against, not a requirement discovered from real usage. The file
+that exists today has not caused any real navigation or maintenance pain
+in practice. This doc now records reality (one header) instead of the
+original speculative plan; revisit a real split only if/when `window.h`
+itself grows large enough that a consumer needs part of it without the
+rest, which has not happened.
 
 `crtgfx/skia.h` is a small bridge header, not a replacement drawing API. It
 includes selected Skia public headers when available and declares helpers that

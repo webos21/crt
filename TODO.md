@@ -152,19 +152,17 @@ toolchain underneath it.
 
 Open upper-runtime work, in recommended order:
 
-1. **Complete the `libcrtgfx` window/event contract.** Remove the current
-   one-active-window-per-process constraint (`crtgfx/window.h`,
-   `src/wayland_weston.c`, the three `src/arch/*/window_*.c` adapters) so
-   multiple `crtgfx_host_window` instances can coexist, sharing one Linux
-   `wl_display` connection. Add resize/close/focus/expose/DPI-scale events
-   and pointer wheel/scroll, and decide the key-repeat policy (pass through
-   the host's own repeat vs. define one). Specify the event-queue overflow
-   policy, delivery ordering, and the poll/wakeup/thread-ownership contract
-   for `crtgfx_window_poll_event()`. Reconcile `docs/libcrtgfx_api_policy.md`'s
-   documented `runtime.h`/`surface.h`/`event_loop.h` split against the
-   single `window.h` that actually exists today -- either update the policy
-   doc to match reality or actually split the header, but stop leaving the
-   two disagreeing.
+1. **Complete the `libcrtgfx` window/event contract.** Linux and Windows
+   done (multi-window, resize/close/focus/expose/scroll events, key-repeat
+   policy, queue/threading contract, header-split decision -- see
+   `HISTORY.md`'s 2026-08-29 entry for the full trail). Still open:
+   - macOS: still single-window; needs the same connection/window split
+     Linux got, `windowDidBecomeKey:`/`windowDidResignKey:` wired to
+     `crtgfx_weston_toplevel_note_focus()`, and scroll-wheel handling.
+   - `CRTGFX_EVENT_DPI_SCALE_CHANGED` is defined but not fired by any host
+     yet -- needs Windows per-monitor-DPI-awareness plumbing +
+     `WM_DPICHANGED`, macOS `backingScaleFactor` tracking, and a Linux
+     `wl_output` binding this backend does not have at all.
 2. **Add deterministic automated coverage for the above.** A project-internal
    synthetic event injector (feed `crtgfx_event`s into the queue directly, no
    real OS input needed) covering keyboard/modifier/text/pointer ordering,
