@@ -10,6 +10,29 @@ substantive update.
 
 ## 2026-08-29
 
+- **Fixed a real Windows CI break: LLVM's official release switched its
+  Windows installer format from `.exe` (NSIS) to `.msi`, starting with
+  `llvmorg-23.1.0`.** `.github/workflows/ci.yml`'s "Install LLVM (Windows)"
+  step matched asset names against a hardcoded `LLVM-*-<arch>.exe` pattern;
+  once GitHub's "latest release" advanced past 21.1.0 (the last release
+  confirmed, via the GitHub API, to still ship `.exe` installers) to
+  23.1.0, no asset matched at all (`LLVM-23.1.0-win64.msi`/`LLVM-23.1.0-
+  woa64.msi` are the real current names, confirmed directly against that
+  release's own asset list, not assumed), failing both Windows CI legs
+  with "Could not find an LLVM 'win64' installer asset in release
+  llvmorg-23.1.0". Fixed to match either extension (`.msi` or `.exe`,
+  so an older pinned release would still resolve correctly) and to pick
+  the right silent-install invocation for whichever the release actually
+  shipped: `msiexec /i ... /quiet /qn /norestart` for `.msi`, the
+  previous `/S` for the legacy NSIS `.exe`. Verified without touching
+  this session's own installed LLVM: (1) a static PowerShell parser pass
+  over the extracted script (`[System.Management.Automation.Language.
+  Parser]::ParseFile`) found no syntax errors, and (2) the real, current
+  "latest" LLVM release was queried live (read-only `Invoke-RestMethod`,
+  no download/install) and the fixed filter logic correctly matched
+  `LLVM-23.1.0-win64.msi` and `LLVM-23.1.0-woa64.msi` for the x64/arm64
+  matrix legs respectively.
+
 - **Adopted Pretendard GOV as `libcrtgfx`'s default typeface, keeping DejaVu
   Sans Mono available (explicit user direction).** Bundled all nine static
   weights (Thin through Black, `PretendardGOV-*.otf`, ~32MB total) from the

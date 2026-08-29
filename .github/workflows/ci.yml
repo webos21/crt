@@ -123,6 +123,19 @@ jobs:
       # requests/hour per source IP, which Actions runners can share and
       # exhaust; authenticated calls get 1000/hour and stopped failing
       # this step outright on the very second CI run.
+      #
+      # Real, found CI break (2026-08-29): upstream switched the Windows
+      # installer format from a `.exe` NSIS installer (every release
+      # through 21.1.0) to a `.msi` package starting with 23.1.0 -- this
+      # is a real llvm-project release-asset change, confirmed directly
+      # against both releases' own asset lists via the GitHub API, not
+      # assumed. `LLVM-*-win64.exe`/`LLVM-*-woa64.exe` simply no longer
+      # exist in a current "latest" release, so the old pattern always
+      # matched nothing. Matches either extension now (still correct
+      # against an older pinned release, should this script ever target
+      # one) and picks the right silent-install invocation for whichever
+      # one the release actually shipped: `/S` for the old NSIS `.exe`,
+      # `msiexec /i ... /quiet /qn` for the new `.msi`.
       - name: Install LLVM (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -131,14 +144,21 @@ jobs:
         run: |
           $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; "User-Agent" = "crt-ci" }
           $release = Invoke-RestMethod -Uri "https://api.github.com/repos/llvm/llvm-project/releases/latest" -Headers $headers
-          $asset = $release.assets | Where-Object { $_.name -like "LLVM-*-${{ matrix.llvm_asset }}.exe" } | Select-Object -First 1
+          $asset = $release.assets | Where-Object {
+            $_.name -like "LLVM-*-${{ matrix.llvm_asset }}.msi" -or $_.name -like "LLVM-*-${{ matrix.llvm_asset }}.exe"
+          } | Select-Object -First 1
           if (-not $asset) {
-            throw "Could not find an LLVM '${{ matrix.llvm_asset }}' installer asset in release $($release.tag_name)"
+            throw "Could not find an LLVM '${{ matrix.llvm_asset }}' installer asset (.msi or .exe) in release $($release.tag_name)"
           }
           Write-Host "Installing $($asset.name) from $($release.tag_name)"
-          $installer = Join-Path $env:RUNNER_TEMP "llvm-installer.exe"
+          $ext = [System.IO.Path]::GetExtension($asset.name)
+          $installer = Join-Path $env:RUNNER_TEMP "llvm-installer$ext"
           Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $installer
-          Start-Process -FilePath $installer -ArgumentList "/S" -Wait
+          if ($ext -eq ".msi") {
+            Start-Process -FilePath "msiexec.exe" -ArgumentList "/i", "`"$installer`"", "/quiet", "/qn", "/norestart" -Wait
+          } else {
+            Start-Process -FilePath $installer -ArgumentList "/S" -Wait
+          }
           $llvmBin = "C:\Program Files\LLVM\bin"
           if (-not (Test-Path $llvmBin)) {
             throw "Expected LLVM install at '$llvmBin' but it does not exist"
