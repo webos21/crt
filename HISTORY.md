@@ -10,6 +10,36 @@ substantive update.
 
 ## 2026-08-30
 
+- **Pinned Windows CI's LLVM install to a specific release (`llvmorg-
+  22.1.8`) instead of always fetching GitHub's "latest release".** Direct
+  motivation: the whole chain of CI breaks recorded below in this same
+  day's entries all trace back to one root cause -- `.github/workflows/
+  ci.yml` fetching "latest" meant llvm-project silently advancing to
+  23.1.0 broke this build with zero code changes on this project's own
+  side, three separate times in a row, and none of it could be reproduced
+  locally because this project's own real, verified compiler-version
+  matrix turned out to be scattered across four different versions with
+  no overlap: Windows CI alone was on 23.1.0 while Linux CI (Ubuntu apt)
+  runs Clang 18.1.3, macOS CI (Xcode 26.6) runs AppleClang 21.0.0, and
+  this session's own local Windows dev machine has 22.1.8 installed --
+  confirmed by reading each of the five real CI matrix legs' own
+  configure-step compiler-identification lines directly, not assumed.
+  22.1.8 was chosen specifically to match that already-installed local
+  environment (not arbitrarily), so this exact class of "found only by
+  CI, unreproducible locally" investigation does not recur next time
+  upstream LLVM moves -- matches this project's own established pin-for-
+  reproducibility discipline already used for Skia/libc++/libunwind's own
+  `recipe.json` `expected_commit`/`ref` fields, just not previously
+  applied to the CI compiler itself. Linux/macOS were deliberately left
+  as-is (their own OS-provided compilers, not a GitHub-release fetch --
+  pinning those would need different, heavier infrastructure and was not
+  what was asked for this pass). Verified read-only, without installing
+  anything: confirmed `llvmorg-22.1.8`'s own real release assets still
+  use the pre-23.1.0 `.exe` NSIS format (`LLVM-22.1.8-win64.exe`/`LLVM-
+  22.1.8-woa64.exe`), and the fetch-by-tag URL plus the existing dual-
+  extension asset filter both resolve correctly against that release's
+  real data.
+
 - **Fixed a third real CI break, this time in vendored mksh, and found +
   fixed a real backward-compatibility bug in the fix itself along the
   way.** After the `windows_session_id` fix (below) let both Windows CI

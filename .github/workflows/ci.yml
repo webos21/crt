@@ -114,9 +114,26 @@ jobs:
 
       # LLVM's own official installers are architecture-specific
       # (win64 = x64 host, woa64 = arm64/"Windows on Arm" host) and are
-      # fetched directly from the latest GitHub release rather than
-      # through a package manager, since chocolatey/winget LLVM package
-      # availability for the arm64 host case is not reliably native.
+      # fetched directly from a specific pinned GitHub release rather
+      # than through a package manager, since chocolatey/winget LLVM
+      # package availability for the arm64 host case is not reliably
+      # native.
+      #
+      # Pinned to a specific tag, not "latest" (changed 2026-08-30):
+      # fetching whatever LLVM happens to be "latest" on any given CI run
+      # means an upstream LLVM release can silently break this build with
+      # zero code changes on this project's own side -- exactly what
+      # happened when "latest" quietly advanced to 23.1.0 (see the two
+      # dated notes below, both real breaks found and fixed this way).
+      # Pinned to 22.1.8 specifically to match this project's own actual
+      # local development environment (confirmed installed and verified
+      # working on a real Windows dev machine this session), not chosen
+      # arbitrarily -- matches this project's own established pin-for-
+      # reproducibility discipline used everywhere else (Skia/libc++/
+      # libunwind's own recipe.json `expected_commit`/`ref` fields).
+      # Bump deliberately, in its own reviewed commit, when there is a
+      # real reason to (a security fix, a needed new diagnostic/target
+      # feature) -- not automatically.
       #
       # Authenticated with the auto-provided GITHUB_TOKEN (needs no repo
       # secret setup): unauthenticated GitHub API calls are capped at 60
@@ -124,26 +141,27 @@ jobs:
       # exhaust; authenticated calls get 1000/hour and stopped failing
       # this step outright on the very second CI run.
       #
-      # Real, found CI break (2026-08-29): upstream switched the Windows
-      # installer format from a `.exe` NSIS installer (every release
-      # through 21.1.0) to a `.msi` package starting with 23.1.0 -- this
-      # is a real llvm-project release-asset change, confirmed directly
-      # against both releases' own asset lists via the GitHub API, not
-      # assumed. `LLVM-*-win64.exe`/`LLVM-*-woa64.exe` simply no longer
-      # exist in a current "latest" release, so the old pattern always
-      # matched nothing. Matches either extension now (still correct
-      # against an older pinned release, should this script ever target
-      # one) and picks the right silent-install invocation for whichever
-      # one the release actually shipped: `/S` for the old NSIS `.exe`,
+      # Real, found CI break (2026-08-29, before the pin above existed):
+      # upstream switched the Windows installer format from a `.exe`
+      # NSIS installer (every release through 21.1.0, and still true of
+      # the 22.1.8 pin above) to a `.msi` package starting with 23.1.0 --
+      # a real llvm-project release-asset change, confirmed directly
+      # against multiple releases' own asset lists via the GitHub API,
+      # not assumed. Matches either extension (still correct today
+      # against 22.1.8's own `.exe` assets, and stays correct if this pin
+      # is ever deliberately bumped past the `.msi` switch later) and
+      # picks the right silent-install invocation for whichever the
+      # pinned release actually ships: `/S` for the old NSIS `.exe`,
       # `msiexec /i ... /quiet /qn` for the new `.msi`.
       - name: Install LLVM (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LLVM_PIN_TAG: llvmorg-22.1.8
         run: |
           $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; "User-Agent" = "crt-ci" }
-          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/llvm/llvm-project/releases/latest" -Headers $headers
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/llvm/llvm-project/releases/tags/$env:LLVM_PIN_TAG" -Headers $headers
           $asset = $release.assets | Where-Object {
             $_.name -like "LLVM-*-${{ matrix.llvm_asset }}.msi" -or $_.name -like "LLVM-*-${{ matrix.llvm_asset }}.exe"
           } | Select-Object -First 1
