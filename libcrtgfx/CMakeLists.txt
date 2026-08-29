@@ -1108,6 +1108,25 @@ install(DIRECTORY include/ DESTINATION include
   PATTERN ".gitkeep" EXCLUDE
 )
 if(CRTGFX_ENABLE_SKIA)
+  # Deliberately no trailing slash on the source path (unlike the plain
+  # `include/` install just above) -- CMake's install(DIRECTORY) keeps the
+  # source directory's own basename one level down when there is no
+  # trailing slash, which is exactly what is wanted here: every real Skia
+  # header, both this project's own consumer code (crtgfx/skia.h, skia_
+  # bridge.cc, the Skia test binaries) and Skia's own internal cross-
+  # header includes (never patched -- see docs/libcrtgfx_api_policy.md's
+  # "use normal Skia headers unmodified" policy), spells this exact same
+  # include as `#include "include/core/SkXxx.h"`, matching Skia's own
+  # upstream repo-relative path convention verbatim. Since the include
+  # search path is plain "${CRT_SYSROOT}/include" everywhere (the same
+  # one every other CRT header already resolves through, no Skia-specific
+  # -I flag), the only way that literal "include/core/..." prefix
+  # resolves is if the real files live one level deeper, at
+  # "${CRT_SYSROOT}/include/include/core/...". Renaming this destination
+  # (e.g. to "skia") would require rewriting every one of Skia's own
+  # internal header includes to match -- impractical, and would have to
+  # be redone on every future Skia version bump -- so the nested
+  # include/include/ path here is intentional, not a mistake.
   install(DIRECTORY "${CRTGFX_SKIA_ROOT}/include" DESTINATION include)
 endif()
 
@@ -1201,8 +1220,9 @@ function(crt_wire_skia_executable target_name)
   endif()
   # CRT_SKIA_FONTS_DIR: absolute path to the bundled real font(s) this
   # target's own real-text-rendering code scans via SkFontMgr_New_Custom_
-  # Directory() (porting/recipes/freetype.json's own DejaVuSansMono.ttf,
-  # see libcrtgfx/assets/fonts/README.md for provenance/license) -- same
+  # Directory() -- Pretendard GOV (the project-wide default as of
+  # 2026-08-29) and porting/recipes/freetype.json's own DejaVuSansMono.ttf,
+  # see libcrtgfx/assets/fonts/README.md for provenance/license -- same
   # compile-time-path-define convention porting/tests/freetype_glyph_
   # test.c's own CRT_TEST_FONT_PATH already uses. port-build-freetype
   # itself is an explicit dependency the caller adds alongside its own

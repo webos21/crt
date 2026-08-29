@@ -192,21 +192,20 @@ extern "C" int main() {
   }
 
 #if CRTGFX_HAS_SKIA_HEADERS
-  /* Real font manager set up once, outside the frame loop -- matching
-   * crtgfx_skia_raster_smoke.cc's own legacyMakeTypeface(nullptr, ...)
-   * use (a literal family-name match with no null-means-default
-   * fallback in SkFontMgr_Custom::onMatchFamilyStyle(), confirmed by
-   * reading src/ports/SkFontMgr_custom.cpp directly, is why that call
-   * and not matchFamilyStyle() is used to ask "any available font" of a
-   * custom-directory font manager holding exactly one real bundled font,
-   * DejaVuSansMono.ttf). Failure here is non-fatal to this manual demo --
-   * falls back to the plain gradient fill instead of refusing to run at
-   * all, since the whole point of this binary is verifying *input*, and
-   * text rendering is this session's own added bonus check, not this
-   * binary's original job. */
+  /* Real font manager set up once, outside the frame loop -- resolves the
+   * project's own bundled default typeface via crtgfx_skia_default_
+   * typeface() (crtgfx/skia.h), which tries "Pretendard GOV" first, then
+   * "DejaVu Sans Mono", then legacyMakeTypeface(nullptr, ...) as a last
+   * resort. See that function's doc comment for why a plain nullptr
+   * lookup alone is no longer trustworthy now that the fonts directory
+   * holds more than one real bundled family. Failure here is non-fatal to
+   * this manual demo -- falls back to the plain gradient fill instead of
+   * refusing to run at all, since the whole point of this binary is
+   * verifying *input*, and text rendering is this session's own added
+   * bonus check, not this binary's original job. */
   font_mgr = SkFontMgr_New_Custom_Directory(CRT_SKIA_FONTS_DIR);
   if (font_mgr) {
-    typeface = font_mgr->legacyMakeTypeface(nullptr, SkFontStyle());
+    typeface = crtgfx_skia_default_typeface(font_mgr.get(), SkFontStyle());
   }
   skia_ready = (typeface != nullptr);
   printf("keyboard_interactive: skia text rendering %s\n", skia_ready ? "enabled" : "unavailable");

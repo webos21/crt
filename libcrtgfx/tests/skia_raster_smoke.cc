@@ -94,28 +94,24 @@ extern "C" int main() {
   // Windows as of 2026-08-24), not a stub/empty font manager. Uses the
   // same real, documented SkFontMgr_New_Custom_Directory() API porting/
   // tests/freetype_glyph_test.c's own notes already point to, scanning
-  // the bundled libcrtgfx/assets/fonts/ directory (DejaVuSansMono.ttf).
+  // the bundled libcrtgfx/assets/fonts/ directory (Pretendard GOV,
+  // DejaVuSansMono.ttf -- see that directory's README.md).
   {
     sk_sp<SkFontMgr> font_mgr = SkFontMgr_New_Custom_Directory(CRT_SKIA_FONTS_DIR);
     if (!font_mgr) {
       crtgfx_window_destroy(window);
       return fail("SkFontMgr_New_Custom_Directory");
     }
-    // legacyMakeTypeface(nullptr, ...), not matchFamilyStyle(nullptr, ...):
-    // confirmed by reading src/ports/SkFontMgr_custom.cpp directly --
-    // SkFontMgr_Custom::onMatchFamilyStyle() does a literal family-name
-    // string match with no null-means-"any"/default-family fallback at
-    // all (a null familyName there just fails to match anything real and
-    // returns nullptr), whereas onLegacyMakeTypeface() explicitly falls
-    // back to the font manager's own already-selected fDefaultFamily
-    // whenever familyName is null. The bundled fonts directory holds
-    // exactly one real font (DejaVuSansMono.ttf), so no specific family
-    // name is needed or assumed -- this is the real, documented way to
-    // ask a custom-directory SkFontMgr for "any available font".
-    sk_sp<SkTypeface> typeface = font_mgr->legacyMakeTypeface(nullptr, SkFontStyle());
+    // crtgfx_skia_default_typeface() (crtgfx/skia.h): resolves "Pretendard
+    // GOV" by exact family-name match first, falling back to "DejaVu Sans
+    // Mono" and finally legacyMakeTypeface(nullptr, ...) -- see that
+    // function's own doc comment for why a plain nullptr lookup alone can
+    // no longer be trusted to mean "the project default" now that the
+    // fonts directory holds more than one real family.
+    sk_sp<SkTypeface> typeface = crtgfx_skia_default_typeface(font_mgr.get(), SkFontStyle());
     if (!typeface) {
       crtgfx_window_destroy(window);
-      return fail("legacyMakeTypeface found no typeface");
+      return fail("crtgfx_skia_default_typeface found no typeface");
     }
 
     SkFont font(typeface, 28.0f);

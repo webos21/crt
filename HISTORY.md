@@ -8,7 +8,53 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
-## 2026-08-25
+## 2026-08-29
+
+- **Adopted Pretendard GOV as `libcrtgfx`'s default typeface, keeping DejaVu
+  Sans Mono available (explicit user direction).** Bundled all nine static
+  weights (Thin through Black, `PretendardGOV-*.otf`, ~32MB total) from the
+  official `orioncactus/pretendard` v1.3.9 release (2023-11-05, the "Pretendard
+  GOV" variant for the Republic of Korea public-service environment), fetched
+  from that release's own unpkg CDN mirror
+  (`unpkg.com/pretendard-gov@1.3.9/dist/public/static/`) rather than the
+  107MB+ web/variable-font builds, into `libcrtgfx/assets/fonts/`, alongside a
+  new `libcrtgfx/assets/fonts/README.md` entry recording source, sha256 per
+  file, and the SIL OFL-1.1 license (`PretendardGOV-LICENSE.txt`, copied
+  unmodified). Embedded family name confirmed directly from each file's own
+  name table (`grep -a -o` on the binary, not assumed): `Pretendard GOV`.
+  `PretendardGOV-Regular.otf` is the one weight code currently draws with; the
+  other eight are staged for a future consumer that needs a specific weight.
+  - A real, found gap made this more than a file drop: `SkFontMgr_Custom::
+    onLegacyMakeTypeface(nullptr, ...)` (the call both `crtgfx_skia_raster_
+    smoke.cc` and `window_keyboard_interactive_test.cc` already used to ask a
+    custom-directory font manager for "any available font") falls back to
+    whichever family the directory scan registered first -- alphabetical on
+    every host observed, which would have kept silently resolving to "DejaVu
+    Sans Mono" now that two real families share the directory ("D" sorts
+    before "P"), never actually making Pretendard GOV the default. Fixed by
+    adding a new shared helper, `crtgfx_skia_default_typeface()` (`crtgfx/
+    skia.h`, implemented in `libcrtgfx/src/skia_bridge.cc`), that resolves by
+    exact family-name match instead: `matchFamilyStyle("Pretendard GOV", ...)`
+    first, falling back to `matchFamilyStyle("DejaVu Sans Mono", ...)`, then
+    `legacyMakeTypeface(nullptr, ...)` as a last-resort safety net. Both call
+    sites switched to it, centralizing what had been duplicated inline logic.
+  - Verified for real, not assumed: built and ran `crtgfx_skia_raster_smoke`
+    from a genuinely fresh dedicated build directory (full libc++abi/libc++
+    stage, FreeType port build, Skia CPU-raster build, `CRTGFX_ENABLE_SKIA=ON`)
+    on Windows -- `crtgfx_skia_raster_smoke: ok`, confirming `matchFamilyStyle`
+    actually finds "Pretendard GOV" in the now-ten-file fonts directory and
+    `drawString()` still produces real ink pixels with it. A first attempt
+    reusing an old ad-hoc build directory (`out/windows-imported-libcxx`, left
+    over from an earlier, unrelated investigation) hit a real `ld.lld` link
+    failure on `libc`'s own shared build (`could not open /DEF:...: invalid
+    argument`) -- confirmed unrelated to this change and specific to that
+    stale directory (the main `windows-host-ninja-debug` preset relinks the
+    same shared library cleanly with the same toolchain), not a toolchain
+    regression; resolved by using a genuinely fresh directory instead, per
+    this project's own "do not trust a long-lived `out/` directory" rule.
+  - `libcrtgfx/CMakeLists.txt`'s `CRT_SKIA_FONTS_DIR` comment and the two font-
+    manager call sites' own comments updated to name both bundled families.
+
 
 - **Reconciled the expat/libffi matrix with fresh macOS arm64 recipe evidence
   and resolved libffi's misleading optimized-call crash.** `port-rebuild-expat`
