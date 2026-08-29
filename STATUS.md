@@ -6,6 +6,9 @@ open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting_status.md`](docs/porting_status.md).
 
 Last synchronized with the source tree and git history: **2026-08-25**.
+Updated only on explicit request from here on, not as part of routine
+documentation passes -- see `TODO.md`'s Notice section. It may lag behind
+`HISTORY.md`/`TODO.md` between syncs; those two are the source of truth.
 
 ## Current Baseline
 

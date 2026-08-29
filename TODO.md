@@ -37,6 +37,14 @@ Detailed policy and provenance stay in `docs/` and import manifests.
   in the same pass. The reason is documented in
   [`porting/recipes/mbedtls.json`](porting/recipes/mbedtls.json) and
   [`docs/porting_status.md`](docs/porting_status.md).
+- Keep work status in exactly one place per purpose, not restated across all
+  three: [`HISTORY.md`](HISTORY.md) holds the detailed, dated record of what
+  was actually done and why; an item here in `TODO.md` should track live
+  progress in a line or two, not re-narrate what a finished sub-part already
+  accomplished (once something is done, move the detail to `HISTORY.md` and
+  cut it here rather than leaving both). [`STATUS.md`](STATUS.md) is updated
+  only when explicitly asked for, not as part of routine documentation
+  passes -- do not touch it on a normal work/doc-cleanup turn.
 
 
 ## Done
