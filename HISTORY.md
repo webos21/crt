@@ -8,6 +8,31 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-08-30
+
+- **Fixed a second, real Windows CI break exposed by the LLVM installer
+  fix just below: Clang 23.1.0 added a new `-Wunused-but-set-global`
+  diagnostic, and this project's own `libc/src/process.c` had genuinely
+  dead state that had been silently triggering it.** Once "Install LLVM
+  (Windows)" started succeeding again (previous entry), both Windows
+  matrix legs got one step further and failed for real at "Configure,
+  build, and test": `error: variable 'windows_session_id' set but not
+  used [-Werror,-Wunused-but-set-global]`. Traced by hand, not guessed:
+  `windows_session_id` (Windows-only branch of `__crt_sys_setsid()`) was
+  written once and never read anywhere -- the sibling `windows_process_
+  group` it was clearly meant to parallel *is* read back (`__crt_sys_
+  getpgrp()`), but this project's own cross-platform `getsid()`
+  (`libc/src/resource.c`) already independently approximates session id
+  as `getpgrp()` on every target, Windows included, so nothing was ever
+  going to consult `windows_session_id`. Removed the dead variable and
+  its one write; no behavior change (the value was never read), full
+  local `ctest` stayed 120/120 on Windows. GitHub's own raw Actions log
+  content needs an authenticated request this session had no token for
+  (the public API's job-logs/annotations endpoints returned 403/only a
+  generic "exit code 1", no compiler diagnostic) -- the user copied the
+  actual failing step's log directly from the Actions UI, which is what
+  surfaced the real error text quoted above.
+
 ## 2026-08-29
 
 - **Fixed a real Windows CI break: LLVM's official release switched its

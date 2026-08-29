@@ -63,7 +63,6 @@ long __crt_sys_waitpid(long pid, int* status, int options) {
 }
 #elif defined(CRT_TARGET_OS_WINDOWS)
 static long windows_process_group;
-static long windows_session_id;
 
 long __crt_sys_setpgid(long pid, long pgid) {
   long self = __crt_sys_getpid();
@@ -91,7 +90,15 @@ long __crt_sys_getpgrp(void) {
 long __crt_sys_setsid(void) {
   long self = __crt_sys_getpid();
 
-  windows_session_id = self;
+  /* No separate Windows session-id state tracked here: this project's
+   * own getsid() (libc/src/resource.c) already approximates it as
+   * getpgrp() on every target, Windows included, so a would-be
+   * windows_session_id mirroring windows_process_group just below would
+   * be set here and never read anywhere -- removed 2026-08-30 after a
+   * real Clang 23 upgrade turned that into a hard build error
+   * (-Werror,-Wunused-but-set-global), a new diagnostic class this
+   * project's own genuinely dead state had been quietly triggering
+   * unnoticed until then. */
   windows_process_group = self;
   return self;
 }
