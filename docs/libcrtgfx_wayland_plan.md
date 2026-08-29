@@ -292,20 +292,33 @@ efficiently in the OS's own run-loop wait instead of Win32's
 "wait-up-to-N-milliseconds" primitive to poll with).
 
 Known scope cuts, documented in the file itself, not silent:
-- single window per process (real multi-window routing has not been added
-  to this file, unlike Linux and Windows -- see this document's own Linux
-  Host Adapter section above for the shared-connection design and this
-  project's own Windows backend, which already routed correctly per-`HWND`
-  via `GWLP_USERDATA` before this pass ever started; both have real
-  multi-window evidence as of 2026-08-29, macOS does not yet). `crtgfx_
-  host_window_dispatch()` taking no window parameter is not itself the
-  limitation on any host (it matches Cocoa's own real per-process
-  `NSApplication` run loop, exactly as Linux's shared connection and
-  Win32's thread-global message queue also do) -- what is still missing
-  here specifically is per-`NSWindow` routing of the events this file's
-  own `crtgfx_cocoa_handle_event()` intercepts, plus a real keyboard-focus
-  signal (`windowDidBecomeKey:`/`windowDidResignKey:`) wired to `crtgfx_
-  weston_toplevel_note_focus()`;
+- **Multi-window support closed 2026-08-30** (Phase 1 of the window/event
+  API completion plan, same day as Linux and Windows): `crtgfx_cocoa_
+  windows` (a linked list, replacing the previous single `crtgfx_cocoa_
+  active` pointer) tracks every live window, and `crtgfx_host_window_
+  dispatch()` now resolves which one a given `NSEvent` actually belongs to
+  via `-[NSEvent window]` (`crtgfx_cocoa_find_window()`) before routing
+  it. `crtgfx_host_window_dispatch()` itself still takes no window
+  parameter -- that was never the actual limitation on any host (it
+  matches Cocoa's own real per-process `NSApplication` run loop, exactly
+  as Linux's shared connection and Win32's thread-global message queue
+  also do). Also added the same day: `CRTGFX_EVENT_FOCUS_IN`/`FOCUS_OUT`
+  via real `windowDidBecomeKey:`/`windowDidResignKey:` delegate callbacks,
+  and `CRTGFX_EVENT_POINTER_SCROLL` via real `NSEventTypeScrollWheel`.
+  Same verification status as the original 2026-08-25 keyboard/mouse
+  input work: reasoned from Apple's own long-published AppKit ABI, not
+  independently run on real macOS hardware this session (still no macOS
+  host access) -- flagged in the code itself, real-hardware confirmation
+  still open. A real, previously-latent build risk was found and fixed
+  along the way, in code that predates this pass and had already passed
+  on real hardware before: this file's whole `objc_msgSend` cast-and-call
+  pattern (the standard, unavoidable way to invoke it from plain C) trips
+  a genuinely new Clang diagnostic, `-Wcast-function-type-mismatch`, under
+  `-Werror` on at least one real, current LLVM.org build (22.1.8) --
+  suppressed at the build level (`libcrtgfx/CMakeLists.txt`, matching the
+  same cross-Clang-version-safe pattern this same day's mksh fix
+  established) rather than by rewriting the cast pattern, since there is
+  no alternative pattern that avoids it;
 - `crtgfx_host_window_present_software()` copies the caller's pixel
   buffer into its own allocation each frame rather than wrapping it in
   place, avoiding a real tear/use-after-free hazard the very next

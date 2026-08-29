@@ -131,9 +131,24 @@
  *
  * Scope cuts (documented, not silent, matching this project's own
  * discipline elsewhere):
- *  - single window per process, matching Win32's own thread-global
- *    message queue shape (crtgfx_host_window_dispatch() takes no window
- *    parameter, same as the Win32/Linux backends);
+ *  - multi-window support (added 2026-08-30, Phase 1 of the window/event
+ *    API completion plan, after Linux and Windows already had it): the
+ *    previous "single window per process" cut is closed -- crtgfx_cocoa_
+ *    windows (a linked list, replacing the old single crtgfx_cocoa_active
+ *    pointer) tracks every live window, and crtgfx_host_window_dispatch()
+ *    resolves which one a given NSEvent actually belongs to via
+ *    -[NSEvent window] before routing it (crtgfx_cocoa_find_window()).
+ *    crtgfx_host_window_dispatch() itself still takes no window parameter
+ *    -- that was never the actual limitation, since NSApplication's own
+ *    run loop is already a single real per-process event source, exactly
+ *    like Win32's thread-global message queue and Linux's now-shared
+ *    wl_display connection. Also added: CRTGFX_EVENT_FOCUS_IN/OUT via
+ *    real windowDidBecomeKey:/windowDidResignKey: delegate callbacks, and
+ *    CRTGFX_EVENT_POINTER_SCROLL via real NSEventTypeScrollWheel. Same
+ *    verification status as the keyboard/mouse input note just below:
+ *    reasoned from Apple's own long-published AppKit ABI/documentation,
+ *    not independently confirmed against a real running process this
+ *    session (no macOS host access);
  *  - keyboard/mouse input (added 2026-08-25, after Linux and Windows
  *    already had it verified on real hardware -- see this file's own
  *    "Keyboard/mouse input" comment further down for the full account):
@@ -300,6 +315,12 @@ extern void* memcpy(void* dst, const void* src, unsigned long size);
 #define CRTGFX_NSEVENT_OTHERMOUSEDOWN 25u
 #define CRTGFX_NSEVENT_OTHERMOUSEUP 26u
 #define CRTGFX_NSEVENT_OTHERMOUSEDRAGGED 27u
+/* Added 2026-08-30, Phase 1 multi-window/focus/scroll work -- same
+ * verification status as every other constant in this block (see this
+ * file's own top comment "Scope cuts"): a real, stable, long-published
+ * AppKit value, not independently confirmed against a real running
+ * process this session. */
+#define CRTGFX_NSEVENT_SCROLLWHEEL 22u
 
 /* Real, standard NSEventModifierFlags bits (NSEvent.h, same stability
  * note as above). */
@@ -325,16 +346,36 @@ struct crtgfx_host_window {
    * flags model (it is per-category, not per left/right key), not a bug
    * in this diffing logic. */
   NSUInteger last_modifier_flags;
+  /* crtgfx_cocoa_windows linked-list link (see that global's own
+   * comment) -- added 2026-08-30 for multi-window support. */
+  struct crtgfx_host_window* next;
 };
 
 static Class crtgfx_delegate_class;
-/* crtgfx_host_window_dispatch() takes no window parameter (this file's
- * own "single window per process" scope cut, matching Win32's own
- * thread-global message queue shape) -- but it now needs to reach the
- * active window's toplevel to queue keyboard/mouse events, so it needs
- * a global the same way src/arch/linux/window_wayland.c's own
- * crtgfx_wl_active already does for exactly the same reason. */
-static struct crtgfx_host_window* crtgfx_cocoa_active;
+/* Every live crtgfx_host_window on this process (added 2026-08-30,
+ * replacing the previous single crtgfx_cocoa_active pointer): crtgfx_
+ * host_window_dispatch() still takes no window parameter (matching
+ * NSApplication's own real per-process event queue -- there was never a
+ * per-window queue to route through here the way Linux's own per-
+ * connection fd needed), but it now has to find *which* tracked window a
+ * given NSEvent actually belongs to (crtgfx_cocoa_find_window() below,
+ * matching against -[NSEvent window]) instead of assuming there is only
+ * ever one. */
+static struct crtgfx_host_window* crtgfx_cocoa_windows;
+
+static struct crtgfx_host_window* crtgfx_cocoa_find_window(id ns_window) {
+  struct crtgfx_host_window* w;
+
+  if (ns_window == 0) {
+    return 0;
+  }
+  for (w = crtgfx_cocoa_windows; w != 0; w = w->next) {
+    if (w->window == ns_window) {
+      return w;
+    }
+  }
+  return 0;
+}
 
 /* -frame/-bounds both return NSRect by value. AAPCS64 (arm64) resolves
  * this through the ordinary objc_msgSend entry point; the x86_64 SysV
@@ -424,6 +465,15 @@ static unsigned short crtgfx_msgsend_ushort(id self, SEL op) {
  * rules, same verification-status note as this file's own top comment). */
 static NSPoint crtgfx_msgsend_point(id self, SEL op) {
   return ((NSPoint(*)(id, SEL))objc_msgSend)(self, op);
+}
+
+/* CGFloat (double, a single 8-byte scalar) is returned in a single FP
+ * register on both real ABIs this file targets -- no _stret entry point
+ * needed regardless of architecture, unlike crtgfx_msgsend_rect() above
+ * (same reasoning as crtgfx_msgsend_point()'s own comment). Used for
+ * -deltaX/-deltaY below (scroll wheel, added 2026-08-30). */
+static CGFloat crtgfx_msgsend_cgfloat(id self, SEL op) {
+  return ((CGFloat(*)(id, SEL))objc_msgSend)(self, op);
 }
 
 static const char* crtgfx_msgsend_utf8string(id ns_string) {
@@ -607,6 +657,33 @@ static void crtgfx_delegate_window_did_resize(id self, SEL _cmd, id notification
       toplevel, (uint32_t)bounds.size.width, (uint32_t)bounds.size.height);
 }
 
+/* windowDidBecomeKey:/windowDidResignKey: -- added 2026-08-30, Phase 1
+ * multi-window/focus work. *Keyboard* input focus only (matching crtgfx/
+ * window.h's own CRTGFX_EVENT_FOCUS_IN/OUT contract): "key window" is
+ * Cocoa's own real, standard term for "the window currently receiving
+ * keyboard events" (distinct from mouse hover, which these notifications
+ * do not fire for), the same notion Linux's wl_keyboard::enter/leave and
+ * Windows' WM_SETFOCUS/WM_KILLFOCUS both key focus events off of.
+ * Same verification status as this file's other 2026-08-25/08-30
+ * additions: reasoned from Apple's own long-published NSWindow
+ * documentation, not independently confirmed against a real running
+ * process this session. */
+static void crtgfx_delegate_window_did_become_key(id self, SEL _cmd, id notification) {
+  crtgfx_weston_toplevel* toplevel;
+  (void)_cmd;
+  (void)notification;
+  toplevel = (crtgfx_weston_toplevel*)crtgfx_delegate_toplevel(self);
+  crtgfx_weston_toplevel_note_focus(toplevel, 1);
+}
+
+static void crtgfx_delegate_window_did_resign_key(id self, SEL _cmd, id notification) {
+  crtgfx_weston_toplevel* toplevel;
+  (void)_cmd;
+  (void)notification;
+  toplevel = (crtgfx_weston_toplevel*)crtgfx_delegate_toplevel(self);
+  crtgfx_weston_toplevel_note_focus(toplevel, 0);
+}
+
 static Class crtgfx_ensure_delegate_class(void) {
   Class cls;
 
@@ -624,6 +701,12 @@ static Class crtgfx_ensure_delegate_class(void) {
   class_addMethod(
       cls, sel_registerName("windowDidResize:"),
       (IMP)crtgfx_delegate_window_did_resize, "v@:@");
+  class_addMethod(
+      cls, sel_registerName("windowDidBecomeKey:"),
+      (IMP)crtgfx_delegate_window_did_become_key, "v@:@");
+  class_addMethod(
+      cls, sel_registerName("windowDidResignKey:"),
+      (IMP)crtgfx_delegate_window_did_resign_key, "v@:@");
   objc_registerClassPair(cls);
   crtgfx_delegate_class = cls;
   return cls;
@@ -720,7 +803,8 @@ int crtgfx_host_window_create(const crtgfx_window_desc* desc, crtgfx_weston_topl
   host->window = window;
   host->delegate = delegate;
   toplevel->host = host;
-  crtgfx_cocoa_active = host;
+  host->next = crtgfx_cocoa_windows;
+  crtgfx_cocoa_windows = host;
 
   crtgfx_weston_toplevel_note_size(toplevel, desc->width, desc->height);
 
@@ -731,8 +815,14 @@ int crtgfx_host_window_create(const crtgfx_window_desc* desc, crtgfx_weston_topl
 }
 
 void crtgfx_host_window_destroy(crtgfx_host_window* host) {
-  if (crtgfx_cocoa_active == host) {
-    crtgfx_cocoa_active = 0;
+  struct crtgfx_host_window** link = &crtgfx_cocoa_windows;
+
+  while (*link != 0) {
+    if (*link == host) {
+      *link = host->next;
+      break;
+    }
+    link = &(*link)->next;
   }
   if (host->window != 0) {
     crtgfx_msgsend_void_id(host->window, sel_registerName("setDelegate:"), 0);
@@ -943,6 +1033,25 @@ static void crtgfx_cocoa_handle_event(struct crtgfx_host_window* host, id event)
     crtgfx_weston_toplevel_note_event(host->toplevel, &button_event);
     return;
   }
+
+  if (type == CRTGFX_NSEVENT_SCROLLWHEEL) {
+    /* -deltaX/-deltaY, not the higher-precision -scrollingDeltaX/Y:
+     * simpler, always-available API (matches this file's own established
+     * "reasoned simplicity" bar -- Windows' own WM_MOUSEWHEEL handling
+     * uses the equally coarse whole-notch WHEEL_DELTA unit, not a finer
+     * one). Sign/scale follow Cocoa's own convention directly, already
+     * adjusted by AppKit itself for the user's current natural-scrolling
+     * preference -- see crtgfx/window.h's own CRTGFX_EVENT_POINTER_SCROLL
+     * doc comment for why no further cross-host normalization is
+     * attempted, and this file's own top comment for this session's
+     * general verification status (reasoned, not run on real hardware). */
+    crtgfx_event scroll_event = {0};
+    scroll_event.type = CRTGFX_EVENT_POINTER_SCROLL;
+    scroll_event.data.pointer_scroll.dx = (double)crtgfx_msgsend_cgfloat(event, sel_registerName("deltaX"));
+    scroll_event.data.pointer_scroll.dy = (double)crtgfx_msgsend_cgfloat(event, sel_registerName("deltaY"));
+    crtgfx_weston_toplevel_note_event(host->toplevel, &scroll_event);
+    return;
+  }
 }
 
 static long crtgfx_now_ms(void) {
@@ -981,7 +1090,14 @@ int crtgfx_host_window_dispatch(uint32_t timeout_ms) {
     if (event == 0) {
       break;
     }
-    crtgfx_cocoa_handle_event(crtgfx_cocoa_active, event);
+    /* Multi-window routing (2026-08-30): which tracked window this event
+     * actually belongs to, not "the" single window -- see crtgfx_cocoa_
+     * windows' own comment. -[NSEvent window] returning nil (an event
+     * genuinely not associated with any window) is handled the same way
+     * crtgfx_cocoa_find_window()/crtgfx_cocoa_handle_event() already
+     * guard a null host: nothing queued, -sendEvent: still runs. */
+    crtgfx_cocoa_handle_event(
+        crtgfx_cocoa_find_window(crtgfx_msgsend_op(event, sel_registerName("window"))), event);
     crtgfx_msgsend_void_id(app, sel_registerName("sendEvent:"), event);
   }
 

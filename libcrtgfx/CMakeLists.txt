@@ -225,6 +225,41 @@ if(CRT_TARGET_OS STREQUAL "windows")
   set(CRTGFX_BACKEND_SOURCES src/arch/windows/window_win32.c)
 elseif(CRT_TARGET_OS STREQUAL "macos")
   set(CRTGFX_BACKEND_SOURCES src/arch/macos/window_cocoa.c)
+  # window_cocoa.c drives the Objective-C runtime from plain C by casting
+  # objc_msgSend (a real, variadic `id (*)(id, SEL, ...)` extern) to each
+  # call site's own exact, non-variadic signature before invoking it --
+  # the standard, unavoidable way to call objc_msgSend from C without the
+  # compiler's ObjC-mode-only special-casing of that one function. Found
+  # via this session's own cross-compile check (2026-08-30, no real macOS
+  # host -- see this target's own crt_build_flags link below, which is
+  # what actually made this reachable: -Wall/-Wextra bring in a real,
+  # fairly new Clang diagnostic, -Wcast-function-type-mismatch, that
+  # flags exactly this pattern under -Werror on this session's own local
+  # LLVM 22.1.8) -- a real, previously-latent risk in code that has
+  # actually passed on real macOS hardware before, not a bug in the cast
+  # pattern itself (every one of these casts is intentional and correct;
+  # C has no other supported way to call a function through a pointer
+  # typed differently than how it will actually be invoked here, and
+  # this is exactly what upstream Objective-C runtime headers themselves
+  # document as the required approach for non-ObjC-mode callers).
+  # Suppressed here, not by rewriting the cast pattern -- there is no
+  # alternative pattern that avoids it, only ways to hide the warning.
+  # -Wno-unknown-warning-option alongside it for the same cross-Clang-
+  # version reason established for shell/CMakeLists.txt's own mksh fix
+  # the same day: an older/different Clang (this exact file has been
+  # verified on real macOS hardware with whatever AppleClang version was
+  # current at the time, almost certainly one that predates this
+  # diagnostic entirely) must not choke on an unrecognized flag name
+  # either. set_source_files_properties(), not target_compile_options():
+  # crtgfx_backend_objects links crt_build_flags, whose own -Wall/-Wextra/
+  # -Werror land after a target's own target_compile_options() on the
+  # real command line (the exact ordering bug shell/CMakeLists.txt's own
+  # mksh fix found and fixed the same day) -- COMPILE_OPTIONS source-file
+  # properties are appended at the very end instead, reliably winning
+  # regardless of link order.
+  set_source_files_properties(${CRTGFX_BACKEND_SOURCES} PROPERTIES
+    COMPILE_OPTIONS "-Wno-cast-function-type-mismatch;-Wno-unknown-warning-option"
+  )
 elseif(CRT_TARGET_OS STREQUAL "linux")
   set(CRTGFX_BACKEND_SOURCES src/arch/linux/window_wayland.c)
 endif()

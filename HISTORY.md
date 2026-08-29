@@ -10,6 +10,82 @@ substantive update.
 
 ## 2026-08-30
 
+- **`libcrtgfx` Phase 1 window/event API completion, macOS: multi-window
+  support, focus events, and scroll events -- closing the macOS gap Linux
+  and Windows already closed this same day (see the dated entry below).**
+  `src/arch/macos/window_cocoa.c` changes, continuing the earlier "Linux
+  first, verify on Windows, macOS deferred (no hardware)" plan now that
+  Linux/Windows are done:
+  - **Multi-window**: replaced the single `crtgfx_cocoa_active` pointer
+    with `crtgfx_cocoa_windows`, a linked list of every live window, plus
+    `crtgfx_cocoa_find_window()` matching a given `NSEvent`'s own
+    `-window` against it. `crtgfx_host_window_dispatch()`'s own event
+    loop now resolves the right window per-event instead of assuming
+    there is only one -- this was always structurally simpler than
+    Linux's fix (no shared "connection" resource to split out at all:
+    `NSApplication`'s own run loop already *is* the one real per-process
+    event source, the same role Win32's thread-global message queue and
+    Linux's now-shared `wl_display` connection play).
+  - **`CRTGFX_EVENT_FOCUS_IN`/`FOCUS_OUT`**: new `windowDidBecomeKey:`/
+    `windowDidResignKey:` `NSWindowDelegate` methods (added to the same
+    runtime-defined delegate class `windowShouldClose:`/`windowWillClose:`/
+    `windowDidResize:` already used), calling the shared `crtgfx_weston_
+    toplevel_note_focus()` Linux/Windows already call from their own
+    native focus signal. *Keyboard* focus only, matching every other
+    backend's own contract -- Cocoa's "key window" is exactly that
+    notion, distinct from mouse hover.
+  - **`CRTGFX_EVENT_POINTER_SCROLL`**: wired from real
+    `NSEventTypeScrollWheel` (`-deltaX`/`-deltaY`, the simpler always-
+    available API, not the higher-precision `-scrollingDeltaX/Y` --
+    matches this file's own established simplicity bar and Windows'
+    equally coarse whole-notch `WM_MOUSEWHEEL` handling). Sign/scale left
+    as Cocoa's own convention directly, same "reasoned, not physically
+    verified" flag as the Linux/Windows scroll wiring from the day before.
+  - Same verification status as the original 2026-08-25 macOS keyboard/
+    mouse input work, and flagged the same way in the code itself: this
+    session has no macOS host access, so every NSEventType/AppKit
+    constant, delegate-callback, and calling-convention choice here is
+    reasoned from Apple's own long-published, stable AppKit ABI, not
+    independently confirmed against a real running process. What *was*
+    checked: a real `clang -fsyntax-only` pass and real object-code
+    generation (not just parsing) for both `--target=x86_64-apple-darwin`
+    and `--target=arm64-apple-darwin`, both clean, using the exact
+    compile flags the real CMake build produces (verified by reading the
+    actual flag list, not assumed).
+  - **A real, previously-latent bug was found this way, in code that
+    predates this pass and had already passed on real macOS hardware
+    before**: that same cross-compile check surfaced `-Werror,-Wcast-
+    function-type-mismatch` across roughly a dozen pre-existing call
+    sites in this file (`crtgfx_msgsend_rect()`, `crtgfx_msgsend_op()`,
+    and every other helper that casts `objc_msgSend` to its own call-
+    site-specific signature before invoking it) -- a genuinely new Clang
+    diagnostic (confirmed present on this session's own local LLVM.org
+    22.1.8) flagging the standard, unavoidable way any plain-C code has
+    to call `objc_msgSend` at all. Not a bug in the cast pattern itself
+    (there is no alternative that avoids it -- this is exactly what
+    Apple's own runtime headers document as required for a non-ObjC-mode
+    caller), so fixed by suppressing the diagnostic at the build level
+    (`libcrtgfx/CMakeLists.txt`, `-Wno-cast-function-type-mismatch` on
+    `window_cocoa.c` specifically) rather than by rewriting the pattern.
+    Learned directly from the very same day's mksh flag-ordering mistake
+    (see below) and applied correctly the first time here:
+    `set_source_files_properties()`, not `target_compile_options()` (this
+    target also links `crt_build_flags`, whose own `-Wall`/`-Wextra`/
+    `-Werror` would otherwise land after a plain `target_compile_
+    options()` suppression and silently re-enable it), plus the same
+    `-Wno-unknown-warning-option` companion flag so an older/different
+    Clang that predates this diagnostic (almost certainly whatever
+    AppleClang version last verified this file on real hardware) does not
+    choke on the unrecognized flag name either. Verified by direct object-
+    code generation with the exact flags/ordering the real build produces
+    for both target architectures, not just "it configured".
+  - Full local `ctest` re-confirmed unaffected on both other hosts this
+    session can actually run (120/120 Windows, 103/104 Linux -- the one
+    Linux failure is the same pre-existing, unrelated `crtgfx_window_
+    smoke` WSL quirk tracked elsewhere in this file/`TODO.md`), since
+    `libcrtgfx/CMakeLists.txt`'s own change is guarded to the macOS branch
+    only.
+
 - **Pinned Windows CI's LLVM install to a specific release (`llvmorg-
   22.1.8`) instead of always fetching GitHub's "latest release".** Direct
   motivation: the whole chain of CI breaks recorded below in this same

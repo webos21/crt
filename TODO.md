@@ -152,17 +152,18 @@ toolchain underneath it.
 
 Open upper-runtime work, in recommended order:
 
-1. **Complete the `libcrtgfx` window/event contract.** Linux and Windows
-   done (multi-window, resize/close/focus/expose/scroll events, key-repeat
-   policy, queue/threading contract, header-split decision -- see
-   `HISTORY.md`'s 2026-08-29 entry for the full trail). Still open:
-   - macOS: still single-window; needs the same connection/window split
-     Linux got, `windowDidBecomeKey:`/`windowDidResignKey:` wired to
-     `crtgfx_weston_toplevel_note_focus()`, and scroll-wheel handling.
-   - `CRTGFX_EVENT_DPI_SCALE_CHANGED` is defined but not fired by any host
-     yet -- needs Windows per-monitor-DPI-awareness plumbing +
-     `WM_DPICHANGED`, macOS `backingScaleFactor` tracking, and a Linux
-     `wl_output` binding this backend does not have at all.
+1. **Complete the `libcrtgfx` window/event contract.** Linux, Windows, and
+   macOS all done (multi-window, resize/close/focus/expose/scroll events,
+   key-repeat policy, queue/threading contract, header-split decision --
+   see `HISTORY.md`'s 2026-08-29/08-30 entries for the full trail). macOS
+   is implemented but not yet run on real hardware this session (no macOS
+   host access) -- flagged in the code itself, matching this project's own
+   "reasoned but flagged unverified" discipline; real-hardware confirmation
+   still open, same as the original 2026-08-25 macOS keyboard/mouse input
+   work. Still open: `CRTGFX_EVENT_DPI_SCALE_CHANGED` is defined but not
+   fired by any host yet -- needs Windows per-monitor-DPI-awareness
+   plumbing + `WM_DPICHANGED`, macOS `backingScaleFactor` tracking, and a
+   Linux `wl_output` binding this backend does not have at all.
 2. **Add deterministic automated coverage for the above.** A project-internal
    synthetic event injector (feed `crtgfx_event`s into the queue directly, no
    real OS input needed) covering keyboard/modifier/text/pointer ordering,
