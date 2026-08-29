@@ -10,6 +10,43 @@ substantive update.
 
 ## 2026-08-30
 
+- **Fixed a third real CI break, this time in vendored mksh, and found +
+  fixed a real backward-compatibility bug in the fix itself along the
+  way.** After the `windows_session_id` fix (below) let both Windows CI
+  legs get one step further, they failed again at the same "Configure,
+  build, and test" step: `shell/mksh/src/histrap.c:45:13: error: variable
+  'hstarted' set but not used [-Werror,-Wunused-but-set-global]` -- the
+  same new Clang 23 diagnostic, this time in real upstream mksh source
+  rather than this project's own code. Traced: `hstarted`'s only reader
+  (`sethistfile()`) is guarded by `#if HAVE_PERSISTENT_HISTORY`, which
+  this project's own mksh build sets to 0 -- a real, legitimate upstream
+  code shape (a variable only used when a compile-time feature is
+  enabled), not a bug in mksh. Per `shell/README.md`'s own stated policy
+  ("keep upstream source unmodified where possible"), suppressed at the
+  build level (`-Wno-unused-but-set-global` added to `crt_mksh`'s own
+  `target_compile_options`, `shell/CMakeLists.txt`) instead of patching
+  histrap.c, matching the same `-Wno-*`-per-target pattern already used
+  there for mksh's own other cross-Clang-version noise. A first attempt
+  at this fix was caught before pushing, not after: adding just `-Wno-
+  unused-but-set-global` alone rebuilt clean with the CI's Clang 23.1.0
+  in mind, but a real local rebuild with this session's own installed
+  Clang 22.1.8 (which does not recognize that flag name at all yet)
+  immediately failed with `error: unknown warning option '-Wno-unused-
+  but-set-global' ... [-Werror,-Wunknown-warning-option]` -- this
+  project's own `-Werror` promotes Clang's "unknown warning option"
+  complaint to a hard error too, so the fix as first written would have
+  traded the Clang-23-only CI break for a new one on every *older* Clang
+  this project still supports (Linux/macOS CI's own distro/Xcode Clang
+  included, both of which had been passing). Fixed for real by adding
+  the standard, well-known companion flag, `-Wno-unknown-warning-option`,
+  alongside it -- confirmed cross-version-safe by rebuilding `crt_mksh`
+  clean on both this session's own local Clang 22.1.8 (Windows) and a
+  genuinely separate WSL/Ubuntu Clang (Linux), plus a full default
+  `ctest` pass on both (120/120 Windows, 103/104 Linux -- the one Linux
+  failure is the same pre-existing, unrelated `crtgfx_window_smoke`
+  WSL-shell-context quirk tracked elsewhere in this file/`TODO.md`, not
+  a new regression).
+
 - **Fixed a second, real Windows CI break exposed by the LLVM installer
   fix just below: Clang 23.1.0 added a new `-Wunused-but-set-global`
   diagnostic, and this project's own `libc/src/process.c` had genuinely

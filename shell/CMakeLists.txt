@@ -112,6 +112,31 @@ if(EXISTS "${CRT_MKSH_ROOT}/Android.bp")
     -Wno-deprecated-declarations
     -Wno-unknown-attributes
     -Wno-unused-parameter
+    # Real Clang 23 upgrade break (2026-08-30, found via CI once the LLVM
+    # installer/version fixes just above let CI actually reach a build):
+    # mksh's own upstream src/histrap.c declares `static bool hstarted`
+    # and reads it back in sethistfile(), but that whole function is
+    # guarded by `#if HAVE_PERSISTENT_HISTORY`, which this project's own
+    # build leaves at 0 (HAVE_PERSISTENT_HISTORY=0 above) -- so in this
+    # project's specific configuration hstarted really is written
+    # (histinit()) and never read, a real new Clang 23 diagnostic
+    # (-Wunused-but-set-global, distinct from the older per-local-
+    # variable -Wunused-but-set-variable) correctly flagging that fact.
+    # Suppressed here rather than patched into upstream mksh source,
+    # matching this project's own shell/README.md policy ("keep upstream
+    # source unmodified where possible") -- this is a real, legitimate
+    # upstream code shape (a variable only used when a compile-time
+    # feature is enabled), not a bug in mksh. -Wno-unknown-warning-option
+    # is required alongside it, not decorative: confirmed for real that
+    # this project's own -Werror also promotes Clang's own "unknown
+    # warning option" complaint to a hard error, so -Wno-unused-but-set-
+    # global alone breaks every *older* Clang this project still supports
+    # (this session's own local Clang 22.1.8 does not recognize that
+    # flag name at all yet) the exact same way the missing flag broke
+    # Clang 23 -- the fix must work on both, not trade one CI break for
+    # another.
+    -Wno-unused-but-set-global
+    -Wno-unknown-warning-option
     -fno-asynchronous-unwind-tables
     -fno-strict-aliasing
     -fwrapv
