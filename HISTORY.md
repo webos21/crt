@@ -47,6 +47,34 @@ substantive update.
   WSL-shell-context quirk tracked elsewhere in this file/`TODO.md`, not
   a new regression).
 
+  **That fix still wasn't enough -- CI hit the exact same `hstarted`
+  error again, unchanged, confirmed same-day by re-running.** Root cause:
+  a second, real bug in the fix itself, a class this project's own
+  `libcrtgfx/CMakeLists.txt` awk-import comment had already documented
+  once before but this fix didn't apply. `crt_mksh` links `crt_build_
+  flags`, whose linked-INTERFACE `-Wall -Wextra -Werror` lands *after* a
+  target's own `target_compile_options()` on the real command line --
+  confirmed directly by inspecting the generated `build.ninja` rule for
+  `histrap.c.obj`, not assumed: `-Wall -Wextra -Werror` appeared *before*
+  every one of `crt_mksh`'s own `-Wno-*` flags, so `-Wall`/`-Wextra`
+  silently re-enabled `-Wunused-but-set-global` (and, it turns out,
+  always could have re-enabled the three older suppressions the exact
+  same way -- just never actually triggered, since mksh's current source
+  has no live deprecated-declaration/unknown-attribute/unused-parameter
+  warning to expose it). Fixed for real by moving all five `-Wno-*` flags
+  from `target_compile_options()` to `set_source_files_properties(${CRT_
+  MKSH_SOURCES} PROPERTIES COMPILE_OPTIONS ...)` -- the same mechanism
+  this file's own `CRT_AWK_SOURCES` block, and `libm`/`libc`'s own gdtoa/
+  regex imports, already use for exactly this reason (`COMPILE_OPTIONS`
+  source-file properties are appended at the very end of the real command
+  line, reliably winning "last flag wins" regardless of link order).
+  Verified this time by reading the actual generated `build.ninja` FLAGS
+  line directly, not just "it compiled" (which proves nothing on an older
+  Clang that does not emit the diagnostic being suppressed in the first
+  place): `-Wall -Wextra -Werror` now come first, every `-Wno-*` follows.
+  Full local rebuild + `ctest` re-confirmed clean on both hosts (120/120
+  Windows, 103/104 Linux, same one pre-existing failure).
+
 - **Fixed a second, real Windows CI break exposed by the LLVM installer
   fix just below: Clang 23.1.0 added a new `-Wunused-but-set-global`
   diagnostic, and this project's own `libc/src/process.c` had genuinely
