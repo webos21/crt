@@ -680,23 +680,42 @@ headers through the CRT sysroot.
 ## Repository Layout
 
 ```text
-docs/
-include/
-porting/
-platform/
-arch/
-cmake/
-libc/
-libm/
-libdl/
-libstdc++/
-linker/
-tests/
-tools/
+docs/            design docs, policy notes, per-subsystem status
+include/         public Bionic-compatible CRT headers
+libc/            libc source, plus per-host PAL under src/arch/{linux,macos,windows}/
+libm/            math library
+libdl/           dynamic-loading support library
+libstdc++/       C++ ABI bootstrap, plus the imported LLVM libc++/libc++abi/libunwind path
+linker/          dynamic linker support (scope placeholder, not yet implemented)
+libcrtgfx/       Skia CPU-raster graphics runtime: window/event/frame API, Wayland client, Skia+FreeType bridge
+libcrtjs/        QuickJS-first JavaScript runtime (skeleton only, not yet started)
+libcrtmedia/     FFmpeg-based media runtime (skeleton only, not yet started)
+porting/         recipe-driven upstream porting loop: recipes/, shims/, tests/
+shell/           project-built mksh, toybox, awk, and tiny_sh for the rootfs
+third_party/     imported Bionic/FreeBSD msun source (see third_party/bionic/import_manifest.json)
+tools/           build, porting, and CI helper scripts
+tests/           CRT/PAL unit and regression tests
 ```
 
-Only some of these directories exist today. The layout reflects the intended
-long-term structure.
+`libcrtgfx`, `libcrtjs`, and `libcrtmedia` share the same internal shape --
+common/host-independent code directly under `src/`, per-host code under
+`src/arch/{linux,macos,windows}/`, and vendored dependencies under
+`third_party/`:
+
+```text
+libcrtgfx/
+  include/
+  src/
+    *.c                        # common runtime code, directly under src/
+    arch/{linux,macos,windows}/
+  third_party/
+    skia/
+    wayland/
+    xkbcommon/
+```
+
+Build output lives entirely under the generated, non-source `out/<preset>/`
+tree (see `## Build`) and is not part of this layout.
 
 ## Design Documents
 
