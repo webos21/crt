@@ -136,24 +136,77 @@ libc++, and FreeType-backed typed text have all been verified on macOS, Linux,
 and Windows. The concise current state is in [`STATUS.md`](STATUS.md); the
 implementation trail is in [`HISTORY.md`](HISTORY.md).
 
+Build reproducibility for this milestone is closed: clean-build verified on
+all three hosts, FreeType's fetch now uses the stable SourceForge URL
+(`5b87197`), and libffi's three-host verification (`63e07ee`) landed the same
+way. The remaining work is the window/event/frame contract itself, not the
+toolchain underneath it.
+
 Open upper-runtime work, in recommended order:
 
-1. **Broaden deterministic graphics coverage.** Add a synthetic common-event
-   queue/input regression where host boundaries permit it, then add Skia paths,
-   images, clipping, layers, and representative shader tests without replacing
-   normal Skia headers with a project-owned drawing facade. Add a focused
-   Windows `<filesystem>` behavior test for UTF-32 `wchar_t` to UTF-16 path
-   handling.
-2. **Define and implement the GPU surface handoff.** Keep the software path as
-   the correctness baseline, then stage Direct3D, Metal, and Linux EGL/Vulkan/
-   dmabuf backends behind the same window/surface contract.
-3. **Start `libcrtjs` with QuickJS.** Use it to pressure-test timers, module
-   loading, filesystem, networking, dynamic loading, native bindings, and the
-   common event-loop boundary before attempting V8.
-4. **Start `libcrtmedia` with FFmpeg software decode.** Add decoded CPU-frame
-   and audio-buffer tests before host audio and GPU texture interop.
-5. **Revisit Chromium/Ozone and V8 only after those lower contracts produce
-   stable three-host evidence.**
+1. **Complete the `libcrtgfx` window/event contract.** Remove the current
+   one-active-window-per-process constraint (`crtgfx/window.h`,
+   `src/wayland_weston.c`, the three `src/arch/*/window_*.c` adapters) so
+   multiple `crtgfx_host_window` instances can coexist, sharing one Linux
+   `wl_display` connection. Add resize/close/focus/expose/DPI-scale events
+   and pointer wheel/scroll, and decide the key-repeat policy (pass through
+   the host's own repeat vs. define one). Specify the event-queue overflow
+   policy, delivery ordering, and the poll/wakeup/thread-ownership contract
+   for `crtgfx_window_poll_event()`. Reconcile `docs/libcrtgfx_api_policy.md`'s
+   documented `runtime.h`/`surface.h`/`event_loop.h` split against the
+   single `window.h` that actually exists today -- either update the policy
+   doc to match reality or actually split the header, but stop leaving the
+   two disagreeing.
+2. **Add deterministic automated coverage for the above.** A project-internal
+   synthetic event injector (feed `crtgfx_event`s into the queue directly, no
+   real OS input needed) covering keyboard/modifier/text/pointer ordering,
+   frame acquire/submit during a resize race, routing across two or more live
+   windows (needs item 1's multi-window support), and repeated create/destroy
+   cycles checked for fd/handle/memory leaks. Keep headless Linux's
+   `CRTGFX_ERROR_UNSUPPORTED` fallback path and real-compositor coverage
+   explicitly separated, matching `STATUS.md`'s "Graphics Checks" table.
+3. **Extend the software frame contract.** Define framebuffer generation and
+   lifetime across a resize, add pixel-format/alpha-mode/color-space metadata
+   to the frame struct, support damage rectangles and partial present instead
+   of always-full-frame, add a frame-callback/vsync/presentation-completion
+   notification, and make the producer/consumer acquire/release ownership
+   explicit on every host symmetrically (Linux already has real
+   `wl_buffer::release`; Windows/macOS copy into host-owned storage today --
+   document that as the same contract satisfied a different way, or close the
+   gap if a real consumer needs otherwise).
+4. **Broaden deterministic Skia CPU coverage.** Path, transform, clip,
+   save/restore, and layer tests; image decode/draw/scaling; one or two
+   representative shaders and blend modes; error paths for NaN/Inf and
+   invalid surface sizes; and the still-open focused Windows `<filesystem>`
+   behavior test for UTF-32 `wchar_t` to UTF-16 path handling. Keep normal
+   Skia headers as the public 2D API -- this is regression coverage, not a
+   project-owned drawing facade. Treat the resulting CPU path as the golden
+   reference every later GPU backend must match.
+5. **Define the `libcrtmedia` CPU frame handoff contract.** A CPU video
+   frame descriptor covering packed RGB/BGRA and planar YUV, per-plane
+   stride/dimensions, color range/space, timestamp, and frame ownership,
+   plus a CPU-only smoke that hands a synthetic RGBA/YUV frame to a Skia
+   `SkImage`/`SkSurface`. This is the gate before `libcrtmedia` itself starts.
+
+Once 1-5 land, run these tracks in parallel rather than gating one on
+another:
+
+- `libcrtmedia`: FFmpeg demux/software decode -> the CPU frame contract from
+  item 5 -> audio buffer handoff.
+- `libcrtgfx` GPU surface contract: an opaque GPU handle that never exposes a
+  host SDK type in a public header, a backend capability query with software
+  fallback, a shared lifetime/fence model across Direct3D, Metal, and Linux
+  EGL/Vulkan/dmabuf, and a decision between Skia Ganesh and Graphite for the
+  first real backend.
+- `libcrtjs` with QuickJS (independent of graphics/media): pressure-test
+  timers, module loading, filesystem, networking, dynamic loading, native
+  bindings, and the common event-loop boundary before attempting V8.
+
+Revisit Chromium/Ozone only after those three tracks produce stable
+three-host evidence -- a minimal Ozone platform probe first, not a full
+Chromium port. Full GPU backends, HarfBuzz/ICU font shaping, a full
+Weston/other-compositor import, and platform font discovery are deliberately
+not prerequisites for starting `libcrtmedia`.
 
 ## Planned
 
@@ -171,6 +224,10 @@ or host investigation supplies the required evidence.
 - Revisit a CRT-owned ELF loader/Android-linker boundary only after a real
   upper-runtime consumer requires behavior the host loader adapter cannot
   provide.
+- Harden FreeType's fetch beyond the single SourceForge URL fix (`5b87197`)
+  -- add retry-on-transient-failure, a documented fallback mirror, and
+  SHA-256 verification of the cached archive before reuse, matching the
+  reliability bar other `porting/recipes/*.json` ports already meet.
 
 ### Interactive job control (deferred until it's an actual priority)
 
