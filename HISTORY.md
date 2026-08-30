@@ -10,6 +10,85 @@ substantive update.
 
 ## 2026-08-30
 
+- **`libcrtgfx` deterministic Skia CPU-raster regression coverage**
+  (TODO.md's "Broaden deterministic Skia CPU coverage" item, first
+  sub-part landed). New `libcrtgfx/tests/skia_cpu_coverage_test.cc` and
+  `crtgfx_skia_cpu_coverage` ctest target, deliberately different in kind
+  from the existing `crtgfx_skia_raster_smoke`: it never calls
+  `crtgfx_window_create()` at all -- every test builds its own
+  `crtgfx_framebuffer` directly over a plain `malloc`'d buffer and hands
+  it straight to `crtgfx_skia_make_raster_surface()` (that function only
+  ever needs a `crtgfx_framebuffer`, confirmed by reading `skia_bridge.cc`
+  directly), so the whole file runs identically headless on every host's
+  CI runner with no real display connection needed -- matching Phase 2's
+  own `crtgfx_synthetic_event` precedent for the window/event side of this
+  API. 37 checks across 10 test functions:
+  - Path (straight-edge `SkPathBuilder` triangle + curved `quadTo` shape),
+    transform (translate+scale mapping verified against the untransformed
+    origin), clip (`clipRect` confinement plus confirming `restore()`
+    actually lifts it), a dedicated save/restore matrix-state test, and
+    `saveLayerAlpha(128)` composited onto an opaque backdrop (verified to
+    land in a mid-gray band, ruling out both "layer alpha ignored"
+    failure modes).
+  - A representative shader (`SkShaders::LinearGradient` via the new
+    `SkGradient`/`SkGradient::Colors` API -- this Skia checkout renamed
+    the classic `SkGradientShader.h`/`MakeLinear` surface; found by
+    grepping the real vendored headers, not assumed) and a representative
+    blend mode (`SkBlendMode::kMultiply` on two fully-opaque colors,
+    checked against its own exact deterministic result to distinguish it
+    from the default `kSrcOver`).
+  - Image draw/scaling via `SkImages::RasterFromBitmap` + nearest-neighbor
+    `drawImageRect` (a 2x2 four-color source scaled to 32x32, each
+    destination quadrant checked for its exact source color) -- real
+    encoded-image *decoding* is explicitly out of scope and documented as
+    such in the test file's own top comment: `tools/build_skia.py`
+    deliberately disables every codec this Skia build could have
+    (libpng/libjpeg-turbo/libwebp/wuffs), so there is no `SkCodec` surface
+    in this project's Skia integration to test at all today.
+  - Error paths: NaN/Inf coordinates fed to `drawRect`/`drawCircle`/
+    `scale()` (the only real assertion is "no crash, canvas still usable
+    afterward" -- a real SIGSEGV/SIGFPE here would fail the ctest target
+    itself, which is the intended signal), and every one of `crtgfx_skia_
+    make_raster_surface()`'s own guard clauses (null framebuffer, zero
+    width/height, too-small stride, null pixels, unrecognized pixel
+    format) exercised directly, plus a sanity check that an otherwise-
+    valid framebuffer is still accepted.
+  - Found live while writing this: `SkPath`'s own mutable `moveTo`/
+    `lineTo`/`quadTo`/`close` methods do not exist on this Skia revision
+    (m148) -- `SkPath` itself is immutable now; construction goes through
+    `SkPathBuilder(...).detach()` instead. Caught immediately by the real
+    compiler against the real vendored headers, not assumed from stale
+    Skia knowledge.
+  - **Verified for real**: Windows, in the existing Skia-enabled
+    `out/pretendard-font-skia-verify` build directory (already had a real
+    built `libskia.a`/`libfreetype.a`) -- all 37 checks pass, both run
+    directly and via `ctest` (`crtgfx_skia_cpu_coverage_runs`), and the
+    plain Skia-disabled default Windows build (`out/windows-host-ninja-
+    debug`, `CRTGFX_ENABLE_SKIA=OFF`) still configures/builds/passes its
+    full 121-test `ctest` suite unchanged, confirming the new `CMakeLists.
+    txt` block is correctly gated. Linux (WSL) -- the Skia-disabled
+    default build configures/builds/passes its ctest suite unchanged
+    (104/105, the one failure being the same pre-existing, unrelated
+    `crtgfx_window_smoke` WSLg quirk tracked elsewhere), and the new test
+    file itself was cross-compile syntax-checked clean against
+    `--target=x86_64-unknown-linux-gnu` with this project's own real
+    portable libc++ headers and the exact `-ffreestanding -fno-builtin
+    -Wall -Wextra -Werror` flags the real build uses (no Linux Skia build
+    exists locally to link/run it for real yet). macOS -- NOT verified at
+    all this session, not even syntax-checked: real Skia headers
+    transitively require Apple's own `TargetConditionals.h`, a genuine
+    macOS SDK header this Windows machine has no copy of, unlike
+    `window_cocoa.c`'s own hand-declared-ABI style which needs no host SDK
+    header at all. Flagged reasoned-but-unverified rather than silently
+    assumed: the specific new Skia APIs used here (`SkPathBuilder`,
+    `SkGradient`/`SkShaders::LinearGradient`, `SkBlendMode`,
+    `SkSamplingOptions`, `SkImages::RasterFromBitmap`) are all plain,
+    platform-independent Skia core headers with no Apple-specific
+    branching, and this project's general Skia+macOS toolchain path is
+    already verified elsewhere (`crtgfx_skia_raster_smoke`, per this
+    file's earlier macOS entries) -- but that is reasoning, not a real
+    build on this file specifically.
+
 - **`CRTGFX_EVENT_FRAME_COMPLETE` made genuinely asynchronous on macOS,
   verified end to end on real hardware.** User asked, after the previous
   commit's "extend the software frame contract" work, why macOS could

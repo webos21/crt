@@ -1520,6 +1520,34 @@ if(CRTGFX_ENABLE_SKIA)
     PASS_REGULAR_EXPRESSION "crtgfx_skia_raster_smoke: ok"
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_skia_raster_smoke_runs)
+
+  # crtgfx_skia_cpu_coverage: deterministic path/transform/clip/save-
+  # restore/layer/shader/blend-mode/image-scale/error-path regression
+  # coverage (tests/skia_cpu_coverage_test.cc, TODO.md's "Broaden
+  # deterministic Skia CPU coverage" item). Unlike crtgfx_skia_raster_
+  # smoke just above, this target never calls crtgfx_window_create() at
+  # all -- every test builds its own crtgfx_framebuffer directly over a
+  # plain malloc'd buffer, so it needs no real host window/display
+  # connection and runs identically headless on every CI runner, matching
+  # crtgfx_synthetic_event's own "deterministic, no real OS resource
+  # needed" property for the window/event side of this API. No port-
+  # build-freetype dependency, unlike crtgfx_skia_raster_smoke: this file
+  # draws no text at all.
+  add_executable(crtgfx_skia_cpu_coverage
+    ${CRT_STARTUP_OBJECTS}
+    tests/skia_cpu_coverage_test.cc
+  )
+  target_link_libraries(crtgfx_skia_cpu_coverage PRIVATE crt_cxx_build_flags crtgfx)
+  crt_wire_skia_executable(crtgfx_skia_cpu_coverage)
+  crt_link_startup_end_objects(crtgfx_skia_cpu_coverage)
+  add_dependencies(crtgfx_skia_cpu_coverage cxx c crt1 crtgfx)
+
+  add_test(NAME crtgfx_skia_cpu_coverage_runs COMMAND crtgfx_skia_cpu_coverage)
+  set_tests_properties(crtgfx_skia_cpu_coverage_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    PASS_REGULAR_EXPRESSION "crtgfx_skia_cpu_coverage: ok"
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_skia_cpu_coverage_runs)
 endif()
 
 # CRT_STARTUP_END_OBJECTS deliberately not listed here -- see

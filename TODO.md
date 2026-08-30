@@ -183,16 +183,29 @@ producer/consumer acquire/release ownership contract now documented
 explicitly on all three hosts. See `HISTORY.md`'s 2026-08-30 entries for the
 full trail; not a work-queue item anymore.
 
+**Deterministic Skia CPU coverage is mostly done** (2026-08-30): the new
+`crtgfx_skia_cpu_coverage` ctest target (37 checks, headless -- builds its own
+`crtgfx_framebuffer` directly, no `crtgfx_window_create()` needed) covers
+path/transform/clip/save-restore/layer, a representative shader
+(`SkShaders::LinearGradient`) and blend mode (`SkBlendMode::kMultiply`),
+image draw/scaling (via raw-pixel `SkImages::RasterFromBitmap`, not
+`SkCodec` -- this Skia build has no image codec linked at all, see
+`HISTORY.md`), and NaN/Inf/invalid-surface-size error paths. Verified for
+real on Windows (37/37, plus the plain Skia-disabled default build
+unaffected); Linux build/ctest unaffected and the new file itself cross-
+compile syntax-checked clean; macOS not verified at all this session (real
+Skia headers need Apple's own `TargetConditionals.h`, unlike `window_
+cocoa.c`'s own no-host-SDK style) -- flagged reasoned-but-unverified. See
+`HISTORY.md`'s 2026-08-30 entry for the full trail.
+
 Open upper-runtime work, in recommended order:
 
-1. **Broaden deterministic Skia CPU coverage.** Path, transform, clip,
-   save/restore, and layer tests; image decode/draw/scaling; one or two
-   representative shaders and blend modes; error paths for NaN/Inf and
-   invalid surface sizes; and the still-open focused Windows `<filesystem>`
-   behavior test for UTF-32 `wchar_t` to UTF-16 path handling. Keep normal
-   Skia headers as the public 2D API -- this is regression coverage, not a
-   project-owned drawing facade. Treat the resulting CPU path as the golden
-   reference every later GPU backend must match.
+1. **Close the last piece of Skia CPU coverage: the still-open focused
+   Windows `<filesystem>` behavior test for UTF-32 `wchar_t` to UTF-16 path
+   handling.** A different subsystem than the Skia work above (imported
+   libc++'s `<filesystem>`, not `libcrtgfx`) -- see `docs/cxx_runtime.md`'s
+   own note on this gap. Once this lands, the whole "Broaden deterministic
+   Skia CPU coverage" item can close.
 2. **Define the `libcrtmedia` CPU frame handoff contract.** A CPU video
    frame descriptor covering packed RGB/BGRA and planar YUV, per-plane
    stride/dimensions, color range/space, timestamp, and frame ownership,
