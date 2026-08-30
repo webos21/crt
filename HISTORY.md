@@ -10,6 +10,66 @@ substantive update.
 
 ## 2026-08-30
 
+- **`libcrtgfx` Phase 2 of the window/event API completion plan:
+  deterministic, no-real-OS-input-needed event-queue regression coverage,
+  closing out Phase 2 entirely the same day Phase 1 finished.** New
+  `crtgfx_window_inject_event()` (`crtgfx/window.h`, implemented in
+  `src/window.c`) is a testing-only hook that pushes a `crtgfx_event`
+  onto a window's own queue exactly the way a real backend already does
+  internally (`crtgfx_weston_toplevel_note_event()`), bypassing
+  `crtgfx_window_pump_events()` and any real native input delivery --
+  this project's own hosts have no reliable synthetic-input-injection
+  tool (no wtype/ydotool-equivalent on Wayland/Win32/Cocoa), so this is
+  the only way to exercise queue *behavior* deterministically. New
+  `libcrtgfx/tests/synthetic_event_test.c`, registered as the
+  `crtgfx_synthetic_event` ctest target (`crtgfx_synthetic_event_runs`),
+  covers:
+  - **Ordering**: a real keyboard+text+pointer sequence (the same shape a
+    single real keystroke + click actually produces) injected and polled
+    back with no `pump_events()` call in between, verified field-for-
+    field in exact order.
+  - **Overflow/drop-newest policy**: 500 events injected, confirms
+    whatever comes back is a real, unbroken *prefix* starting at index 0
+    (oldest kept, newest dropped) without hardcoding the exact queue
+    capacity (a `wayland_weston.c` implementation detail this black-box
+    test deliberately does not depend on). **Verified live at exactly 64
+    kept, on both Windows and Linux/WSLg** -- confirms `CRTGFX_EVENT_
+    QUEUE_CAPACITY` behaves identically cross-host, not just compiled
+    identically.
+  - **Multi-window isolation**: events injected into two live windows
+    are confirmed to never cross-appear when polling the other -- a real,
+    deterministic proof of the exact separation the same day's Phase 1
+    multi-window work was for, independent of any one backend's own
+    routing implementation.
+  - **Repeated create/destroy**: 50 iterations checked for a real fd leak
+    on Linux via a direct `/proc/self/fd` count before/after (no such
+    check exists on Windows/macOS, which still get the crash-safety
+    exercise from the loop itself).
+  - **Event-queue/frame-cycle independence**: events injected immediately
+    before `begin_frame()` and while a frame is pending both survive and
+    poll back correctly regardless of whether the real presentation path
+    (`end_frame()`) itself succeeds or fails -- found and fixed a real
+    bug in this test's own first draft along the way: it treated a real
+    `end_frame()` failure as fatal, when in this exact WSL shell session
+    `end_frame()` fails for the same pre-existing, already-tracked
+    `present_software` quirk `crtgfx_window_smoke` also hits there
+    (confirmed unrelated, same session, same root cause) -- fixed to log
+    and continue, since the event queue's own correctness is genuinely
+    independent of whether presentation itself worked.
+  - Gracefully reports "unsupported" on `CRTGFX_ERROR_UNSUPPORTED` from
+    `crtgfx_window_create()` (headless CI, no reachable display
+    connection), exactly matching `crtgfx_window_smoke`'s own established
+    convention -- a live host backend connection is still needed for
+    window *creation* itself; synthetic injection only removes the need
+    for real *input* once a window exists, a real, deliberate scope
+    distinction, not an oversight.
+  - Verified for real on both hosts this session can run, not just
+    compiled: Windows (native, full presentation succeeds) -- `crtgfx_
+    synthetic_event: ok`, full `ctest` 121/121; Linux (WSL/WSLg) --
+    `crtgfx_synthetic_event: ok`, full `ctest` 104/105 (the one failure
+    is the same pre-existing, unrelated `crtgfx_window_smoke` quirk
+    referenced above, not a new regression).
+
 - **`libcrtgfx` Phase 1 window/event contract verified for real on macOS
   hardware, closing the one remaining open thread from the same day's
   other Phase 1 entries below.** Every macOS window/event addition

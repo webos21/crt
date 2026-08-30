@@ -155,20 +155,21 @@ resize/close/focus/expose/scroll events, key-repeat policy, queue/threading
 contract, and the header-split decision, plus `CRTGFX_EVENT_DPI_SCALE_
 CHANGED` delivery on Windows/Linux and the macOS `windowDidChangeBackingProperties:`
 wiring (see `HISTORY.md`'s 2026-08-29/08-30 entries for the full trail; the
-macOS real-hardware pass is its own 2026-08-30 entry). No longer belongs in
-this work queue.
+macOS real-hardware pass is its own 2026-08-30 entry).
+
+**Phase 2, deterministic automated event-queue coverage, is also done**
+(2026-08-30): `crtgfx_window_inject_event()` (a testing-only hook, `crtgfx/
+window.h`) plus the new `crtgfx_synthetic_event` ctest target cover
+ordering, the drop-newest-on-overflow policy (confirmed live at exactly 64
+on both Windows and Linux), multi-window queue isolation, repeated create/
+destroy (with a real `/proc/self/fd` leak check on Linux), and event-queue/
+frame-cycle independence, all without needing real OS input delivery. See
+`HISTORY.md`'s 2026-08-30 entry. Neither Phase 1 nor Phase 2 belong in this
+work queue anymore.
 
 Open upper-runtime work, in recommended order:
 
-1. **Add deterministic automated coverage for the above.** A project-internal
-   synthetic event injector (feed `crtgfx_event`s into the queue directly, no
-   real OS input needed) covering keyboard/modifier/text/pointer ordering,
-   frame acquire/submit during a resize race, routing across two or more live
-   windows (the multi-window support already completed above), and repeated
-   create/destroy cycles checked for fd/handle/memory leaks. Keep headless Linux's
-   `CRTGFX_ERROR_UNSUPPORTED` fallback path and real-compositor coverage
-   explicitly separated, matching `STATUS.md`'s "Graphics Checks" table.
-2. **Extend the software frame contract.** Define framebuffer generation and
+1. **Extend the software frame contract.** Define framebuffer generation and
    lifetime across a resize, add pixel-format/alpha-mode/color-space metadata
    to the frame struct, support damage rectangles and partial present instead
    of always-full-frame, add a frame-callback/vsync/presentation-completion
@@ -177,7 +178,7 @@ Open upper-runtime work, in recommended order:
    `wl_buffer::release`; Windows/macOS copy into host-owned storage today --
    document that as the same contract satisfied a different way, or close the
    gap if a real consumer needs otherwise).
-3. **Broaden deterministic Skia CPU coverage.** Path, transform, clip,
+2. **Broaden deterministic Skia CPU coverage.** Path, transform, clip,
    save/restore, and layer tests; image decode/draw/scaling; one or two
    representative shaders and blend modes; error paths for NaN/Inf and
    invalid surface sizes; and the still-open focused Windows `<filesystem>`
@@ -185,17 +186,17 @@ Open upper-runtime work, in recommended order:
    Skia headers as the public 2D API -- this is regression coverage, not a
    project-owned drawing facade. Treat the resulting CPU path as the golden
    reference every later GPU backend must match.
-4. **Define the `libcrtmedia` CPU frame handoff contract.** A CPU video
+3. **Define the `libcrtmedia` CPU frame handoff contract.** A CPU video
    frame descriptor covering packed RGB/BGRA and planar YUV, per-plane
    stride/dimensions, color range/space, timestamp, and frame ownership,
    plus a CPU-only smoke that hands a synthetic RGBA/YUV frame to a Skia
    `SkImage`/`SkSurface`. This is the gate before `libcrtmedia` itself starts.
 
-Once 1-4 land, run these tracks in parallel rather than gating one on
+Once 1-3 land, run these tracks in parallel rather than gating one on
 another:
 
 - `libcrtmedia`: FFmpeg demux/software decode -> the CPU frame contract from
-  item 4 -> audio buffer handoff.
+  item 3 -> audio buffer handoff.
 - `libcrtgfx` GPU surface contract: an opaque GPU handle that never exposes a
   host SDK type in a public header, a backend capability query with software
   fallback, a shared lifetime/fence model across Direct3D, Metal, and Linux

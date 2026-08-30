@@ -272,6 +272,28 @@ int crtgfx_window_end_frame(crtgfx_window* window);
  * drains the queue crtgfx_window_pump_events() already filled. */
 int crtgfx_window_poll_event(crtgfx_window* window, crtgfx_event* out_event);
 
+/* Testing-only hook (added 2026-08-30, Phase 2 of the window/event API
+ * completion plan): pushes `*event` onto `window`'s own queue exactly as
+ * if a real host backend had just received it -- the same internal call
+ * (crtgfx_weston_toplevel_note_event()) every real backend already
+ * makes, exposed here so this project's own deterministic regression
+ * tests can exercise queue ordering, overflow, and multi-window routing
+ * without needing real OS input delivery or a synthetic-input tool this
+ * project's own hosts do not reliably have (no wtype/ydotool-equivalent
+ * on Wayland/Win32/Cocoa). A real application has no reason to call
+ * this -- it does not simulate anything a real backend does (no size/
+ * focus/close side effects, just the queue push) and bypasses
+ * crtgfx_window_pump_events() entirely, matching how a mocked event
+ * differs from the real native one it stands in for. Subject to the
+ * exact same per-window FIFO-with-drop-newest-on-overflow policy
+ * crtgfx_window_poll_event() documents above (crtgfx/window.h's own
+ * multi-window contract comment). Returns CRTGFX_ERROR_INVALID_ARGUMENT
+ * if window or event is null, CRTGFX_OK otherwise (including when the
+ * queue was already full and the event was silently dropped -- the same
+ * "caller fell behind" case a real backend's own queue push already
+ * treats as normal, not an error). */
+int crtgfx_window_inject_event(crtgfx_window* window, const crtgfx_event* event);
+
 #ifdef __cplusplus
 }
 #endif

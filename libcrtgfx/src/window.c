@@ -81,3 +81,11 @@ int crtgfx_window_poll_event(crtgfx_window* window, crtgfx_event* out_event) {
   }
   return crtgfx_weston_toplevel_poll_event(window, out_event);
 }
+
+int crtgfx_window_inject_event(crtgfx_window* window, const crtgfx_event* event) {
+  if (window == 0 || event == 0) {
+    return CRTGFX_ERROR_INVALID_ARGUMENT;
+  }
+  crtgfx_weston_toplevel_note_event(&window->toplevel, event);
+  return CRTGFX_OK;
+}

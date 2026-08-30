@@ -1210,6 +1210,60 @@ set_tests_properties(crtgfx_window_smoke_runs PROPERTIES
 )
 set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_window_smoke_runs)
 
+# crtgfx_synthetic_event: Phase 2 of the window/event API completion plan
+# (2026-08-30) -- deterministic event-queue coverage (ordering, overflow/
+# drop-newest, multi-window isolation) via crtgfx_window_inject_event(),
+# a testing-only hook needing no real OS input delivery. See tests/
+# synthetic_event_test.c's own top comment for the full scope and why it
+# still needs a real host backend connection (same as crtgfx_window_
+# smoke) even though it needs no real *input*. Mirrors crtgfx_window_
+# smoke's own target shape exactly -- same startup objects, same per-OS
+# link options, same crt_link_startup_end_objects()/add_dependencies()
+# calls -- since both are plain C executables linking the same crtgfx
+# library the same way.
+add_executable(crtgfx_synthetic_event
+  ${CRT_STARTUP_OBJECTS}
+  tests/synthetic_event_test.c
+)
+target_link_libraries(crtgfx_synthetic_event PRIVATE crt_build_flags c crtgfx)
+target_include_directories(crtgfx_synthetic_event PRIVATE
+  "${CMAKE_SOURCE_DIR}/libc/include"
+)
+target_link_libraries(crtgfx_synthetic_event PRIVATE crt_compiler_rt_builtins)
+target_link_options(crtgfx_synthetic_event PRIVATE
+  -nostdlib
+  -nostartfiles
+  -nodefaultlibs
+)
+if(CRT_TARGET_OS STREQUAL "macos")
+  target_link_options(crtgfx_synthetic_event PRIVATE
+    -Wl,-e,_start
+    -Wl,-dead_strip
+  )
+  target_link_libraries(crtgfx_synthetic_event PRIVATE System)
+elseif(CRT_TARGET_OS STREQUAL "linux")
+  target_link_options(crtgfx_synthetic_event PRIVATE
+    -Wl,-e,_start
+    -Wl,--gc-sections
+  )
+elseif(CRT_TARGET_OS STREQUAL "windows")
+  target_link_options(crtgfx_synthetic_event PRIVATE
+    -Wl,/entry:mainCRTStartup
+    -Wl,/subsystem:console
+    -Wl,/OPT:REF
+  )
+  target_link_libraries(crtgfx_synthetic_event PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+endif()
+crt_link_startup_end_objects(crtgfx_synthetic_event)
+add_dependencies(crtgfx_synthetic_event c crt1)
+
+add_test(NAME crtgfx_synthetic_event_runs COMMAND crtgfx_synthetic_event)
+set_tests_properties(crtgfx_synthetic_event_runs PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  PASS_REGULAR_EXPRESSION "crtgfx_synthetic_event: ok"
+)
+set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_synthetic_event_runs)
+
 # crt_wire_skia_executable(target_name): every Skia-specific compile/link
 # flag a real, executable C++ crtgfx consumer needs, extracted into a
 # reusable function so a second such consumer (crtgfx_keyboard_interactive,
