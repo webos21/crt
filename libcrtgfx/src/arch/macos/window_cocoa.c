@@ -143,12 +143,14 @@
  *    run loop is already a single real per-process event source, exactly
  *    like Win32's thread-global message queue and Linux's now-shared
  *    wl_display connection. Also added: CRTGFX_EVENT_FOCUS_IN/OUT via
- *    real windowDidBecomeKey:/windowDidResignKey: delegate callbacks, and
- *    CRTGFX_EVENT_POINTER_SCROLL via real NSEventTypeScrollWheel. Same
- *    verification status as the keyboard/mouse input note just below:
- *    reasoned from Apple's own long-published AppKit ABI/documentation,
- *    not independently confirmed against a real running process this
- *    session (no macOS host access);
+ *    real windowDidBecomeKey:/windowDidResignKey: delegate callbacks,
+ *    CRTGFX_EVENT_POINTER_SCROLL via real NSEventTypeScrollWheel, and
+ *    CRTGFX_EVENT_DPI_SCALE_CHANGED via real -backingScaleFactor read
+ *    from a real windowDidChangeBackingProperties: delegate callback.
+ *    Same verification status as the keyboard/mouse input note just
+ *    below: reasoned from Apple's own long-published AppKit ABI/
+ *    documentation, not independently confirmed against a real running
+ *    process this session (no macOS host access);
  *  - keyboard/mouse input (added 2026-08-25, after Linux and Windows
  *    already had it verified on real hardware -- see this file's own
  *    "Keyboard/mouse input" comment further down for the full account):
@@ -684,6 +686,42 @@ static void crtgfx_delegate_window_did_resign_key(id self, SEL _cmd, id notifica
   crtgfx_weston_toplevel_note_focus(toplevel, 0);
 }
 
+/* windowDidChangeBackingProperties: -- added 2026-08-30 for CRTGFX_EVENT_
+ * DPI_SCALE_CHANGED. Real, standard AppKit fact, not this file's own
+ * invention: NSWindow posts NSWindowDidChangeBackingPropertiesNotification
+ * whenever -backingScaleFactor (or colorSpace) changes -- e.g. the window
+ * moved to a display with a different DPI -- and, by the same "windowDid
+ * <X>Notification" <-> "windowDid<X>:" delegate-method convention already
+ * relied on above for windowDidResize:/windowDidBecomeKey:/
+ * windowDidResignKey:, NSWindow automatically calls this exact selector
+ * on its own delegate if it implements one, with no separate
+ * NSNotificationCenter registration needed. Reads the *current*
+ * -backingScaleFactor directly rather than diffing against the
+ * notification's own userInfo (NSBackingPropertyOldScaleFactorKey) --
+ * matches every other delegate handler in this file, which all read
+ * current state rather than the old/new pair a notification carries.
+ * Same verification status as this file's other 2026-08-25/08-30
+ * additions: reasoned from Apple's own long-published documentation, not
+ * independently confirmed against a real running process this session. */
+static void crtgfx_delegate_window_did_change_backing_properties(id self, SEL _cmd, id notification) {
+  crtgfx_weston_toplevel* toplevel;
+  id window;
+  crtgfx_event event = {0};
+  (void)_cmd;
+
+  toplevel = (crtgfx_weston_toplevel*)crtgfx_delegate_toplevel(self);
+  if (toplevel == 0) {
+    return;
+  }
+  window = crtgfx_msgsend_id(notification, sel_registerName("object"), 0);
+  if (window == 0) {
+    return;
+  }
+  event.type = CRTGFX_EVENT_DPI_SCALE_CHANGED;
+  event.data.dpi_scale.scale = (double)crtgfx_msgsend_cgfloat(window, sel_registerName("backingScaleFactor"));
+  crtgfx_weston_toplevel_note_event(toplevel, &event);
+}
+
 static Class crtgfx_ensure_delegate_class(void) {
   Class cls;
 
@@ -707,6 +745,9 @@ static Class crtgfx_ensure_delegate_class(void) {
   class_addMethod(
       cls, sel_registerName("windowDidResignKey:"),
       (IMP)crtgfx_delegate_window_did_resign_key, "v@:@");
+  class_addMethod(
+      cls, sel_registerName("windowDidChangeBackingProperties:"),
+      (IMP)crtgfx_delegate_window_did_change_backing_properties, "v@:@");
   objc_registerClassPair(cls);
   crtgfx_delegate_class = cls;
   return cls;

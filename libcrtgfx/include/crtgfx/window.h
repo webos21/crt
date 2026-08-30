@@ -107,15 +107,19 @@ typedef struct crtgfx_framebuffer {
  *    input device to test with); flagged here rather than silently
  *    assumed, matching this project's own "reasoned but flagged
  *    unverified" discipline.
- *  - CRTGFX_EVENT_DPI_SCALE_CHANGED is defined now (data.dpi_scale.scale,
- *    1.0 = 100%) so the public API/enum is stable, but is not yet fired
- *    by *any* backend -- real delivery needs Windows GetDpiForWindow()/
- *    WM_DPICHANGED plus a process-wide per-monitor-DPI-aware declaration,
- *    macOS NSWindow.backingScaleFactor/screen-change notifications, and a
- *    Linux wl_output binding this backend does not have at all yet (no
- *    wl_output support exists in this file today). Left as a real,
- *    explicit, still-open gap rather than a fake best-effort guess on any
- *    one host -- see TODO.md. */
+ *  - CRTGFX_EVENT_DPI_SCALE_CHANGED (data.dpi_scale.scale, 1.0 = 100%) is
+ *    delivered on all three hosts as of 2026-08-30: Windows fires it from
+ *    real WM_DPICHANGED (after a process-wide SetProcessDpiAwarenessContext
+ *    (DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) declaration, without
+ *    which Windows falls back to bitmap-stretching the window instead of
+ *    delivering real per-monitor DPI at all); Linux binds wl_output at
+ *    version 2 and fires it from real wl_output::scale combined with
+ *    wl_surface::enter/leave (which output a window is currently on);
+ *    macOS fires it from real -backingScaleFactor via a real
+ *    windowDidChangeBackingProperties: delegate callback, reasoned-but-
+ *    not-verified like the rest of this session's macOS work (no host
+ *    access) -- see HISTORY.md's 2026-08-30 entries for the full
+ *    per-host trail. */
 typedef enum crtgfx_event_type {
   CRTGFX_EVENT_NONE = 0,
   CRTGFX_EVENT_KEY_DOWN = 1,

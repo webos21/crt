@@ -10,6 +10,85 @@ substantive update.
 
 ## 2026-08-30
 
+- **`libcrtgfx` Phase 1 window/event API completion: `CRTGFX_EVENT_DPI_
+  SCALE_CHANGED` delivered on all three hosts, closing out Phase 1
+  entirely.** The one item left open after the same day's multi-window/
+  focus/scroll work (see the dated entries below).
+  - **Windows** (`src/arch/windows/window_win32.c`): `crtgfx_register_
+    window_class()` now calls `SetProcessDpiAwarenessContext(DPI_
+    AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)` once, before any window
+    exists -- confirmed required, not optional: without it Windows falls
+    back to bitmap-stretching the whole window on a non-96-DPI monitor
+    instead of ever delivering real per-monitor DPI information, and
+    `WM_DPICHANGED` would not fire meaningfully either. New `WM_
+    DPICHANGED` case fires `CRTGFX_EVENT_DPI_SCALE_CHANGED` (`new_dpi /
+    96.0`) and applies the real, Windows-suggested `RECT*` from `lParam`
+    via `SetWindowPos()` -- confirmed via winuser.h's own doc comment
+    that this is required, not cosmetic, for a Per-Monitor-V2-aware app
+    to end up the correct physical size after a real DPI change (e.g.
+    dragging the window to a different-DPI monitor). Every constant used
+    (`DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = (DPI_AWARENESS_
+    CONTEXT)-4`, `WM_DPICHANGED = 0x02E0`, `SWP_NOZORDER`/
+    `SWP_NOACTIVATE`) and both new function signatures (`SetProcessDpi
+    AwarenessContext`/`GetDpiForWindow`) were read directly from this
+    machine's own real Windows 10 SDK (10.0.28000.0) headers, not
+    assumed. Verified live on this session's own native Windows host:
+    `crtgfx_window_smoke` (including its own multi-window check) still
+    passes cleanly with the new process-wide DPI-awareness declaration
+    in place, and full `ctest` stayed 120/120. Not independently
+    triggered by a real cross-monitor DPI change this session (no
+    multi-DPI-monitor setup available) -- the awareness declaration and
+    message handling are real and SDK-confirmed, but the live `WM_
+    DPICHANGED` firing itself was not physically exercised.
+  - **Linux** (`src/arch/linux/window_wayland.c`): a real `wl_output`
+    binding, the one piece of core Wayland protocol this backend had
+    never implemented before at all. Bound at version 2 specifically
+    (not version 1 like every other global here) -- `wl_output::scale`
+    is a `since="2"` event in the real protocol, so binding at version 1
+    would silently never receive it. A real, multi-monitor-aware design:
+    every advertised `wl_output` global is bound immediately as its own
+    `wl_registry::global` event arrives (unlike the singleton globals,
+    which defer to a single named field in `crtgfx_wl_bootstrap` -- there
+    is no single "the" `wl_output` name to defer, since more than one can
+    exist), tracked in a new `crtgfx_wl_connection::outputs` list. Each
+    window's own `wl_surface::enter`/`leave` (previously caught only by
+    this file's generic "anything else is ignored" catch-all, now
+    real-handled) tracks which output it is currently considered on
+    (`current_output_id`, "most recently entered wins" if a window
+    briefly spans two -- a real, documented simplification, not an
+    oversight); `crtgfx_wl_note_dpi_scale()` fires the event by looking
+    up that output's own tracked scale, called from both directions
+    (`wl_surface::enter` and `wl_output::scale`) since the protocol does
+    not guarantee which arrives first. **Verified live against a real
+    WSLg compositor**, not just compiled: `CRTGFX_WAYLAND_DEBUG=1`
+    tracing on a real run shows `registry: wl_output name=11 id=4`
+    followed by `output: id=4 scale=1` -- a real `wl_output` global was
+    found, bound, and its real `scale` event received and parsed
+    correctly. Full `ctest` stayed at the same 103/104 (the one pre-
+    existing, unrelated `crtgfx_window_smoke` WSL `present_software`
+    quirk, confirmed unrelated in yesterday's entries).
+  - **macOS** (`src/arch/macos/window_cocoa.c`): a new `windowDidChange
+    BackingProperties:` delegate method reads the window's current real
+    `-backingScaleFactor` and fires the event -- relies on the same real,
+    standard AppKit "windowDid<X>Notification" <-> "windowDid<X>:"
+    delegate-method auto-registration convention this file's own
+    `windowDidResize:`/`windowDidBecomeKey:`/`windowDidResignKey:`
+    already rely on, not a separate `NSNotificationCenter` observer.
+    Same verification status as this same day's other macOS additions:
+    reasoned from Apple's own published documentation, confirmed via
+    real `clang -fsyntax-only` and real object-code generation for both
+    `--target=x86_64-apple-darwin` and `--target=arm64-apple-darwin`
+    (using the exact `-Wno-cast-function-type-mismatch`/`-Wno-unknown-
+    warning-option` flags the real CMake build now produces for this
+    file), not independently run on real macOS hardware this session.
+  - `crtgfx/window.h`'s own `CRTGFX_EVENT_DPI_SCALE_CHANGED` doc comment
+    updated from "not yet fired by any backend" to describe each host's
+    real delivery mechanism. `TODO.md`'s window/event-contract item
+    folded into the completed-milestone narrative (Phase 1 is fully done
+    on all three hosts now, with only macOS real-hardware confirmation
+    still open) and the remaining "Open upper-runtime work" list
+    renumbered down by one.
+
 - **`libcrtgfx` Phase 1 window/event API completion, macOS: multi-window
   support, focus events, and scroll events -- closing the macOS gap Linux
   and Windows already closed this same day (see the dated entry below).**

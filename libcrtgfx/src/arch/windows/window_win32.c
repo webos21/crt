@@ -153,6 +153,10 @@ typedef struct crtgfx_win_bitmapinfo {
 /* One wheel "notch" (real, standard Win32 constant, unchanged since the
  * original Win32 API). */
 #define WHEEL_DELTA 120
+/* Real, standard Win32 constant (winuser.h) -- confirmed directly
+ * against this machine's own real Windows 10 SDK (10.0.28000.0), not
+ * assumed. */
+#define WM_DPICHANGED 0x02e0u
 #define GWLP_USERDATA (-21)
 #define COLOR_WINDOW 5
 #define WS_OVERLAPPEDWINDOW 0x00cf0000u
@@ -163,6 +167,20 @@ typedef struct crtgfx_win_bitmapinfo {
 #define BI_RGB 0u
 #define DIB_RGB_COLORS 0u
 #define SRCCOPY 0x00cc0020u
+/* Real, standard Win32 constants (winuser.h), confirmed against this
+ * machine's own real SDK -- used by crtgfx_window_proc()'s own
+ * WM_DPICHANGED handling to reposition/resize the window to the rect
+ * Windows itself suggests for the new DPI. */
+#define SWP_NOZORDER 0x0004u
+#define SWP_NOACTIVATE 0x0010u
+/* DPI_AWARENESS_CONTEXT is a real opaque HANDLE-shaped type
+ * (DECLARE_HANDLE in the real SDK's windef.h) -- void* here matches
+ * this file's own established HANDLE-as-void* convention. The V2
+ * sentinel value (real, documented, confirmed directly against this
+ * machine's own real SDK's windef.h, not assumed) is a small negative
+ * integer cast to that pointer type, not a real pointer. */
+typedef void* DPI_AWARENESS_CONTEXT;
+#define CRTGFX_DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 ((DPI_AWARENESS_CONTEXT)(intptr_t)-4)
 
 #define LOWORD(value) ((WORD)((uintptr_t)(value) & 0xffffu))
 #define HIWORD(value) ((WORD)(((uintptr_t)(value) >> 16) & 0xffffu))
@@ -243,6 +261,18 @@ __declspec(dllimport) BOOL CRTGFX_WINAPI UpdateWindow(HWND hWnd);
 __declspec(dllimport) BOOL CRTGFX_WINAPI AdjustWindowRectEx(
     RECT* lpRect, DWORD dwStyle, BOOL bMenu, DWORD dwExStyle);
 __declspec(dllimport) BOOL CRTGFX_WINAPI GetClientRect(HWND hWnd, RECT* lpRect);
+__declspec(dllimport) BOOL CRTGFX_WINAPI SetWindowPos(
+    HWND hWnd, HWND hWndInsertAfter, int X, int Y, int cx, int cy, UINT uFlags);
+/* Real Win32 signatures, confirmed against this machine's own real SDK
+ * (10.0.28000.0) -- both exported from user32, same as every other
+ * dllimport in this file. SetProcessDpiAwarenessContext() needs calling
+ * exactly once, before any window is created (see crtgfx_register_
+ * window_class()'s own call below); without it, Windows falls back to
+ * bitmap-stretching the whole window on a non-96-DPI monitor instead of
+ * delivering real per-monitor DPI information at all, and WM_DPICHANGED
+ * (crtgfx_window_proc()'s own handling below) would not fire correctly. */
+__declspec(dllimport) BOOL CRTGFX_WINAPI SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT value);
+__declspec(dllimport) UINT CRTGFX_WINAPI GetDpiForWindow(HWND hwnd);
 __declspec(dllimport) HDC CRTGFX_WINAPI GetDC(HWND hWnd);
 __declspec(dllimport) int CRTGFX_WINAPI ReleaseDC(HWND hWnd, HDC hDC);
 __declspec(dllimport) LONG_PTR CRTGFX_WINAPI SetWindowLongPtrA(HWND hWnd, int nIndex, LONG_PTR dwNewLong);
@@ -638,6 +668,36 @@ static LRESULT CRTGFX_WINAPI crtgfx_window_proc(HWND hwnd, UINT message, WPARAM 
         crtgfx_weston_toplevel_note_event(host->toplevel, &event);
       }
       return 0;
+    case WM_DPICHANGED: {
+      /* wParam: LOWORD/HIWORD are the new X/Y-axis DPI (always equal in
+       * practice -- Windows has never shipped non-square DPI). lParam:
+       * a real RECT* Windows itself suggests for this window at the new
+       * DPI, sized/positioned so the window occupies the same *logical*
+       * screen area it did before -- both real, documented WM_DPICHANGED
+       * facts (winuser.h's own doc comment), confirmed against this
+       * machine's own real SDK, not assumed. Applying that suggested
+       * rect via SetWindowPos() is required, not optional UX polish: a
+       * Per-Monitor-V2-aware app (crtgfx_register_window_class()'s own
+       * SetProcessDpiAwarenessContext() call above) that ignores this
+       * message leaves its own window the wrong physical size after a
+       * real DPI change (e.g. dragging it to a different-DPI monitor) --
+       * every real Per-Monitor-V2 app handles this the same way. */
+      RECT* suggested = (RECT*)lparam;
+      UINT new_dpi = LOWORD(wparam);
+
+      if (host != 0) {
+        crtgfx_event event = {0};
+        event.type = CRTGFX_EVENT_DPI_SCALE_CHANGED;
+        event.data.dpi_scale.scale = (double)new_dpi / 96.0;
+        crtgfx_weston_toplevel_note_event(host->toplevel, &event);
+      }
+      if (suggested != 0) {
+        SetWindowPos(hwnd, 0, suggested->left, suggested->top,
+                     suggested->right - suggested->left, suggested->bottom - suggested->top,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+      }
+      return 0;
+    }
     default:
       return DefWindowProcA(hwnd, message, wparam, lparam);
   }
@@ -649,6 +709,17 @@ static int crtgfx_register_window_class(void) {
   if (crtgfx_window_class_atom != 0) {
     return CRTGFX_OK;
   }
+
+  /* Process-wide, must run before any window is created (this function
+   * always does, via crtgfx_host_window_create()'s own call, before its
+   * own CreateWindowExA() a few lines later) -- see this file's own
+   * SetProcessDpiAwarenessContext() dllimport comment for why. Return
+   * value intentionally ignored: this call can only fail if a DPI
+   * awareness mode was already set for the process (e.g. an app
+   * manifest declaring one), in which case that earlier declaration
+   * already governs and there is nothing wrong to report -- matching
+   * real Microsoft-documented guidance for this exact function. */
+  (void)SetProcessDpiAwarenessContext(CRTGFX_DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
   cls = (WNDCLASSEXA){0};
   cls.cbSize = sizeof(cls);

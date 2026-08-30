@@ -147,32 +147,29 @@ implementation trail is in [`HISTORY.md`](HISTORY.md).
 Build reproducibility for this milestone is closed: clean-build verified on
 all three hosts, FreeType's fetch now uses the stable SourceForge URL
 (`5b87197`), and libffi's three-host verification (`63e07ee`) landed the same
-way. The remaining work is the window/event/frame contract itself, not the
-toolchain underneath it.
+way.
+
+**The `libcrtgfx` window/event contract (Phase 1) is now also complete on
+all three hosts** -- multi-window, resize/close/focus/expose/scroll/DPI-
+scale-changed events, key-repeat policy, queue/threading contract, and the
+header-split decision (see `HISTORY.md`'s 2026-08-29/08-30 entries for the
+full trail). macOS is implemented but not yet run on real hardware this
+session (no macOS host access) -- flagged in the code itself, matching
+this project's own "reasoned but flagged unverified" discipline;
+real-hardware confirmation is the one still-open thread there, same as
+the original 2026-08-25 macOS keyboard/mouse input work.
 
 Open upper-runtime work, in recommended order:
 
-1. **Complete the `libcrtgfx` window/event contract.** Linux, Windows, and
-   macOS all done (multi-window, resize/close/focus/expose/scroll events,
-   key-repeat policy, queue/threading contract, header-split decision --
-   see `HISTORY.md`'s 2026-08-29/08-30 entries for the full trail). macOS
-   is implemented but not yet run on real hardware this session (no macOS
-   host access) -- flagged in the code itself, matching this project's own
-   "reasoned but flagged unverified" discipline; real-hardware confirmation
-   still open, same as the original 2026-08-25 macOS keyboard/mouse input
-   work. Still open: `CRTGFX_EVENT_DPI_SCALE_CHANGED` is defined but not
-   fired by any host yet -- needs Windows per-monitor-DPI-awareness
-   plumbing + `WM_DPICHANGED`, macOS `backingScaleFactor` tracking, and a
-   Linux `wl_output` binding this backend does not have at all.
-2. **Add deterministic automated coverage for the above.** A project-internal
+1. **Add deterministic automated coverage for the above.** A project-internal
    synthetic event injector (feed `crtgfx_event`s into the queue directly, no
    real OS input needed) covering keyboard/modifier/text/pointer ordering,
    frame acquire/submit during a resize race, routing across two or more live
-   windows (needs item 1's multi-window support), and repeated create/destroy
-   cycles checked for fd/handle/memory leaks. Keep headless Linux's
+   windows (the multi-window support already completed above), and repeated
+   create/destroy cycles checked for fd/handle/memory leaks. Keep headless Linux's
    `CRTGFX_ERROR_UNSUPPORTED` fallback path and real-compositor coverage
    explicitly separated, matching `STATUS.md`'s "Graphics Checks" table.
-3. **Extend the software frame contract.** Define framebuffer generation and
+2. **Extend the software frame contract.** Define framebuffer generation and
    lifetime across a resize, add pixel-format/alpha-mode/color-space metadata
    to the frame struct, support damage rectangles and partial present instead
    of always-full-frame, add a frame-callback/vsync/presentation-completion
@@ -181,7 +178,7 @@ Open upper-runtime work, in recommended order:
    `wl_buffer::release`; Windows/macOS copy into host-owned storage today --
    document that as the same contract satisfied a different way, or close the
    gap if a real consumer needs otherwise).
-4. **Broaden deterministic Skia CPU coverage.** Path, transform, clip,
+3. **Broaden deterministic Skia CPU coverage.** Path, transform, clip,
    save/restore, and layer tests; image decode/draw/scaling; one or two
    representative shaders and blend modes; error paths for NaN/Inf and
    invalid surface sizes; and the still-open focused Windows `<filesystem>`
@@ -189,17 +186,17 @@ Open upper-runtime work, in recommended order:
    Skia headers as the public 2D API -- this is regression coverage, not a
    project-owned drawing facade. Treat the resulting CPU path as the golden
    reference every later GPU backend must match.
-5. **Define the `libcrtmedia` CPU frame handoff contract.** A CPU video
+4. **Define the `libcrtmedia` CPU frame handoff contract.** A CPU video
    frame descriptor covering packed RGB/BGRA and planar YUV, per-plane
    stride/dimensions, color range/space, timestamp, and frame ownership,
    plus a CPU-only smoke that hands a synthetic RGBA/YUV frame to a Skia
    `SkImage`/`SkSurface`. This is the gate before `libcrtmedia` itself starts.
 
-Once 1-5 land, run these tracks in parallel rather than gating one on
+Once 1-4 land, run these tracks in parallel rather than gating one on
 another:
 
 - `libcrtmedia`: FFmpeg demux/software decode -> the CPU frame contract from
-  item 5 -> audio buffer handoff.
+  item 4 -> audio buffer handoff.
 - `libcrtgfx` GPU surface contract: an opaque GPU handle that never exposes a
   host SDK type in a public header, a backend capability query with software
   fallback, a shared lifetime/fence model across Direct3D, Metal, and Linux

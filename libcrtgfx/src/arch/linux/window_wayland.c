@@ -125,6 +125,15 @@ static int crtgfx_wl_debug_enabled(void) {
 #define WL_SURFACE_ATTACH 1u
 #define WL_SURFACE_DAMAGE 2u
 #define WL_SURFACE_COMMIT 6u
+/* wl_surface events (a separate opcode space from the requests just
+ * above, real wayland.xml declaration order: enter, leave, ...) -- added
+ * 2026-08-30 for CRTGFX_EVENT_DPI_SCALE_CHANGED: tell this backend which
+ * wl_output(s) a window's surface currently overlaps, needed to look up
+ * that output's own scale (WL_OUTPUT_EVENT_SCALE below). Previously
+ * caught only by this file's own generic "anything else is intentionally
+ * ignored" catch-all. */
+#define WL_SURFACE_EVENT_ENTER 0u
+#define WL_SURFACE_EVENT_LEAVE 1u
 /* xdg_wm_base */
 #define XDG_WM_BASE_GET_XDG_SURFACE 2u
 #define XDG_WM_BASE_PONG 3u
@@ -147,6 +156,19 @@ static int crtgfx_wl_debug_enabled(void) {
  * keyboard=2, touch=4. */
 #define WL_SEAT_CAPABILITY_POINTER (1u << 0)
 #define WL_SEAT_CAPABILITY_KEYBOARD (1u << 1)
+/* wl_output -- added 2026-08-30 for CRTGFX_EVENT_DPI_SCALE_CHANGED.
+ * `scale` (the real, standard, integer-only Wayland HiDPI mechanism --
+ * 1 = 100%, 2 = 200%, ...) was added in wl_output version 2 (real
+ * wayland.xml `since="2"` on that event), so this backend binds wl_
+ * output at version 2 specifically, unlike every other global here
+ * (bound at version 1, since nothing past their own version-1 event set
+ * is ever needed). geometry/mode/done/name/description events are all
+ * left unhandled (this backend only ever needs the one integer factor,
+ * not physical monitor geometry or naming), matching this file's own
+ * "reasoned minimal scope" bar elsewhere (e.g. the key-repeat policy,
+ * crtgfx/window.h's own doc comment). */
+#define WL_OUTPUT_BIND_VERSION 2u
+#define WL_OUTPUT_EVENT_SCALE 3u
 /* wl_pointer -- event opcodes are declaration order in wayland.xml
  * (enter, leave, motion, button, axis, frame since v5, ...); this
  * backend only ever binds wl_seat/wl_pointer at version 1, so nothing
@@ -201,6 +223,20 @@ struct crtgfx_wl_buffer {
   void* data;
   uint32_t size;
   struct crtgfx_wl_buffer* next;
+};
+
+/* One tracked wl_output global -- a real multi-monitor setup can
+ * advertise more than one, so this is a list, not a single field the
+ * way compositor_id/shm_id/wm_base_id are (those are real Wayland
+ * singletons; wl_output is not). Added 2026-08-30 for CRTGFX_EVENT_
+ * DPI_SCALE_CHANGED. */
+struct crtgfx_wl_output {
+  uint32_t id;
+  /* 1 until a real wl_output::scale event says otherwise -- 1 (100%) is
+   * also real wayland.xml's own documented default for a compositor that
+   * never sends scale at all (pre-v2 wl_output, or genuinely 100%). */
+  int32_t scale;
+  struct crtgfx_wl_output* next;
 };
 
 /* Shared, process-wide Wayland connection -- see this file's own top
@@ -262,6 +298,11 @@ struct crtgfx_wl_connection {
   struct xkb_keymap* xkb_keymap;
   struct xkb_state* xkb_state;
 
+  /* Every wl_output this connection has bound (see struct crtgfx_wl_
+   * output's own comment) -- added 2026-08-30 for CRTGFX_EVENT_DPI_
+   * SCALE_CHANGED. */
+  struct crtgfx_wl_output* outputs;
+
   /* Every live crtgfx_host_window sharing this connection (singly linked
    * via crtgfx_host_window::next below) -- used both for object-id-based
    * routing (crtgfx_wl_find_window_by_surface()/_owning_buffer() below)
@@ -283,6 +324,18 @@ struct crtgfx_host_window {
   uint32_t configure_serial;
 
   struct crtgfx_wl_buffer* buffers;
+
+  /* wl_output id this window's own surface most recently entered (real
+   * wl_surface::enter/leave, see wl_dispatch_message() below) -- 0 means
+   * "unknown/not yet entered any tracked output". A window briefly
+   * spanning two outputs (e.g. mid-drag across monitors) simplifies to
+   * "whichever it most recently entered", matching this file's own
+   * "reasoned minimal scope" bar elsewhere -- a compositor's own
+   * wl_surface::enter/leave ordering already reflects which output it
+   * considers primary for that surface at any given moment, this does
+   * not invent its own arbitration on top of that. Added 2026-08-30 for
+   * CRTGFX_EVENT_DPI_SCALE_CHANGED. */
+  uint32_t current_output_id;
 
   crtgfx_weston_toplevel* toplevel;
 };
@@ -437,6 +490,48 @@ static struct crtgfx_host_window* crtgfx_wl_find_window_owning_buffer(
     }
   }
   return 0;
+}
+
+/* Finds a tracked wl_output by its own object id (see struct crtgfx_wl_
+ * output's own comment) -- added 2026-08-30 for CRTGFX_EVENT_DPI_SCALE_
+ * CHANGED. */
+static struct crtgfx_wl_output* crtgfx_wl_find_output(struct crtgfx_wl_connection* conn, uint32_t id) {
+  struct crtgfx_wl_output* o;
+
+  if (conn == 0 || id == 0) {
+    return 0;
+  }
+  for (o = conn->outputs; o != 0; o = o->next) {
+    if (o->id == id) {
+      return o;
+    }
+  }
+  return 0;
+}
+
+/* Queues CRTGFX_EVENT_DPI_SCALE_CHANGED for `host` using whatever output
+ * it is currently on (host->current_output_id) -- called both when a
+ * window enters a (possibly new) output and when an already-current
+ * output's own scale changes, so either ordering of wl_surface::enter
+ * vs. wl_output::scale (not guaranteed by the protocol) still ends up
+ * correct once both pieces of information are known. Does nothing if the
+ * window's current output is unknown or that output's scale has not
+ * been learned yet (both real, legitimate states, not errors). Added
+ * 2026-08-30. */
+static void crtgfx_wl_note_dpi_scale(struct crtgfx_host_window* host) {
+  struct crtgfx_wl_output* output;
+  crtgfx_event event = {0};
+
+  if (host == 0 || host->current_output_id == 0) {
+    return;
+  }
+  output = crtgfx_wl_find_output(host->conn, host->current_output_id);
+  if (output == 0) {
+    return;
+  }
+  event.type = CRTGFX_EVENT_DPI_SCALE_CHANGED;
+  event.data.dpi_scale.scale = (double)output->scale;
+  crtgfx_weston_toplevel_note_event(host->toplevel, &event);
 }
 
 static void wl_buffer_destroy_storage(struct crtgfx_wl_buffer* buffer) {
@@ -686,6 +781,34 @@ static void wl_dispatch_message(
     } else if (strcmp(interface, "wl_seat") == 0) {
       boot->seat_name = name;
       CRTGFX_WL_TRACE("registry: wl_seat name=%u\n", name);
+    } else if (strcmp(interface, "wl_output") == 0) {
+      /* Bound immediately, not deferred into crtgfx_wl_bootstrap like the
+       * singleton globals above -- a real multi-monitor compositor can
+       * advertise more than one wl_output, so there is no single "the"
+       * name to store and bind later the way compositor_name/shm_name/
+       * wm_base_name/seat_name do. Bound at WL_OUTPUT_BIND_VERSION (2),
+       * not version 1 like every other global here -- see that macro's
+       * own comment for why version 2 specifically is required to ever
+       * receive wl_output::scale at all. */
+      struct crtgfx_wl_output* output = (struct crtgfx_wl_output*)calloc(1, sizeof(*output));
+      if (output != 0) {
+        unsigned char out[64];
+        size_t o;
+
+        output->id = conn->next_id++;
+        output->scale = 1;
+        o = wl_put_u32(out, 0, name);
+        o = wl_put_string(out, sizeof(out), o, "wl_output");
+        o = wl_put_u32(out, o, WL_OUTPUT_BIND_VERSION);
+        o = wl_put_u32(out, o, output->id);
+        if (wl_send(conn, conn->registry_id, WL_REGISTRY_BIND, out, o, -1) == CRTGFX_OK) {
+          output->next = conn->outputs;
+          conn->outputs = output;
+          CRTGFX_WL_TRACE("registry: wl_output name=%u id=%u\n", name, output->id);
+        } else {
+          free(output);
+        }
+      }
     }
     return;
   }
@@ -725,6 +848,44 @@ static void wl_dispatch_message(
     }
     if (w != 0 && object_id == w->xdg_toplevel_id && opcode == XDG_TOPLEVEL_EVENT_CLOSE) {
       crtgfx_weston_toplevel_note_close(w->toplevel);
+      return;
+    }
+    if (w != 0 && object_id == w->surface_id && opcode == WL_SURFACE_EVENT_ENTER) {
+      /* output(object,0) -- the only argument on this event. Added
+       * 2026-08-30 for CRTGFX_EVENT_DPI_SCALE_CHANGED; see struct
+       * crtgfx_host_window::current_output_id's own comment for the
+       * "most recent entered wins" simplification. */
+      w->current_output_id = wl_get_u32(body, 0);
+      crtgfx_wl_note_dpi_scale(w);
+      return;
+    }
+    if (w != 0 && object_id == w->surface_id && opcode == WL_SURFACE_EVENT_LEAVE) {
+      uint32_t left_output_id = wl_get_u32(body, 0);
+
+      if (w->current_output_id == left_output_id) {
+        w->current_output_id = 0;
+      }
+      return;
+    }
+  }
+  {
+    struct crtgfx_wl_output* output = crtgfx_wl_find_output(conn, object_id);
+
+    if (output != 0 && opcode == WL_OUTPUT_EVENT_SCALE) {
+      /* factor(int,0) -- the only argument on this event. May arrive
+       * before or after the wl_surface::enter that first associates a
+       * window with this output (protocol does not guarantee an order
+       * here) -- crtgfx_wl_note_dpi_scale() is called for every window
+       * currently on this output so either ordering ends up correct. */
+      struct crtgfx_host_window* w2;
+
+      output->scale = (int32_t)wl_get_u32(body, 0);
+      CRTGFX_WL_TRACE("output: id=%u scale=%d\n", output->id, output->scale);
+      for (w2 = conn->windows; w2 != 0; w2 = w2->next) {
+        if (w2->current_output_id == output->id) {
+          crtgfx_wl_note_dpi_scale(w2);
+        }
+      }
       return;
     }
   }
@@ -1086,8 +1247,16 @@ static int wl_connect(struct crtgfx_wl_connection* conn) {
 }
 
 static void crtgfx_wl_connection_destroy(struct crtgfx_wl_connection* conn) {
+  struct crtgfx_wl_output* output;
+
   if (conn == 0) {
     return;
+  }
+  output = conn->outputs;
+  while (output != 0) {
+    struct crtgfx_wl_output* next = output->next;
+    free(output);
+    output = next;
   }
   if (conn->xkb_state != 0) {
     xkb_state_unref(conn->xkb_state);
