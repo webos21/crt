@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
-"""Build (and, by default, run) a real crtgfx executable with
+"""Build (and, by default, run) one or more real crtgfx executables with
 CRTGFX_ENABLE_SKIA/CRT_USE_IMPORTED_LIBCXX turned on, regardless of the
 calling build directory's own current cache values for those two flags.
 Defaults to crtgfx_skia_raster_smoke (its own original, single-purpose
-role); pass --target to build any other real crtgfx executable target
-this same way instead (e.g. crtgfx_keyboard_interactive).
+role); pass --target (repeatable) to build one or more other real crtgfx
+executable targets this same way instead (e.g. crtgfx_keyboard_interactive,
+crtgfx_skia_cpu_coverage). Every requested target shares the same single
+configure/Skia-build pass (Phase 0-2 below run once, not once per target)
+-- added 2026-08-30 so `cmake --build <dir> --target crtgfx-skia-smoke`
+can build crtgfx_skia_cpu_coverage (tests/skia_cpu_coverage_test.cc)
+alongside crtgfx_skia_raster_smoke without a second full reconfigure dance,
+after the user pointed out both targets need the exact same Skia-enabled
+build and there was no reason to make them pay for it twice.
 
 Mirrors tools/test_libcxx_runtime.py's own role for crt-libcxx-smoke: a
 target a user can build directly (`cmake --build <dir> --target
@@ -70,22 +77,33 @@ def main():
     parser.add_argument("--cmake-cxx-compiler", required=True)
     parser.add_argument("--target-os", required=True, choices=["linux", "macos", "windows"])
     parser.add_argument("--target-arch", default="host")
-    parser.add_argument("--target", default="crtgfx_skia_raster_smoke",
-                         help="Real crtgfx executable CMake target to build with Skia enabled "
-                              "(default: crtgfx_skia_raster_smoke). Assumes the built binary's own "
-                              "file name matches the target name -- true for every real target this "
+    parser.add_argument("--target", dest="targets", action="append", default=[],
+                         help="Real crtgfx executable CMake target to build with Skia enabled. "
+                              "Repeatable -- pass --target more than once to build several targets "
+                              "in the same configure/Skia-build pass (default, if omitted entirely: "
+                              "just crtgfx_skia_raster_smoke). Assumes each built binary's own file "
+                              "name matches its target name -- true for every real target this "
                               "script has been used with so far.")
     parser.add_argument("--run", dest="run", action="store_true", default=True,
-                         help="Execute the built binary and check its exit code (default).")
+                         help="Execute each built binary and check its own exit code (default).")
     parser.add_argument("--no-run", dest="run", action="store_false",
-                         help="Build only -- do not execute the binary (required for an interactive "
+                         help="Build only -- do not execute any binary (required for an interactive "
                               "target like crtgfx_keyboard_interactive, which needs a real human typing "
-                              "into a real window rather than a fixed pass/fail exit code).")
+                              "into a real window rather than a fixed pass/fail exit code). Applies to "
+                              "every --target given in the same invocation, not per-target -- an "
+                              "interactive target should not currently be mixed with a ctest-shaped one "
+                              "in a single invocation.")
     args = parser.parse_args()
 
     root = args.root.resolve()
     build_dir = args.build_dir.resolve()
     build_dir.mkdir(parents=True, exist_ok=True)
+    # action="append" starts from [] (not None), so an omitted --target
+    # needs its own explicit fallback here rather than argparse's own
+    # `default=` handling -- true default filled in after parsing, not
+    # before, so a caller who DOES pass --target never sees the fallback
+    # mixed in alongside their own choice(s).
+    targets = args.targets or ["crtgfx_skia_raster_smoke"]
 
     # Phase 1: configure with CRT_USE_IMPORTED_LIBCXX=ON but CRTGFX_ENABLE_
     # SKIA still off -- crt-libcxx-sysroot and crtgfx-skia-build both need a
@@ -176,21 +194,25 @@ def main():
 
     # Phase 2: now that libskia.a and the imported libc++ sysroot both
     # exist, CRTGFX_ENABLE_SKIA=ON's own guard is satisfied -- reconfigure
-    # in place (same build directory) to pick it up, then build the
-    # requested real target.
+    # in place (same build directory) to pick it up, then build every
+    # requested real target. One reconfigure regardless of how many
+    # targets were requested -- CRTGFX_ENABLE_SKIA=ON is a directory-wide
+    # cache setting, not per-target, so there is nothing to redo between
+    # them.
     run(["cmake", "-S", str(root), "-B", str(build_dir), "-DCRTGFX_ENABLE_SKIA=ON"])
-    run(["cmake", "--build", str(build_dir), "--target", args.target])
 
     suffix = ".exe" if args.target_os == "windows" else ""
-    binary = build_dir / "libcrtgfx" / f"{args.target}{suffix}"
-    if not binary.is_file():
-        raise SystemExit(f"expected binary missing: {binary}")
-    if not args.run:
-        print(f"built (not run, --no-run given): {binary}")
-        return
-    # Matches crtgfx_skia_raster_smoke_runs' own ctest WORKING_DIRECTORY
-    # (libcrtgfx/CMakeLists.txt) for consistency.
-    run([str(binary)], cwd=str(root))
+    for target in targets:
+        run(["cmake", "--build", str(build_dir), "--target", target])
+        binary = build_dir / "libcrtgfx" / f"{target}{suffix}"
+        if not binary.is_file():
+            raise SystemExit(f"expected binary missing: {binary}")
+        if not args.run:
+            print(f"built (not run, --no-run given): {binary}")
+            continue
+        # Matches crtgfx_skia_raster_smoke_runs' own ctest WORKING_DIRECTORY
+        # (libcrtgfx/CMakeLists.txt) for consistency.
+        run([str(binary)], cwd=str(root))
 
 
 if __name__ == "__main__":

@@ -377,6 +377,13 @@ if(Python3_Interpreter_FOUND)
   # crtgfx-skia-build the way the real target's own dependents do -- those
   # run *inside* the dedicated directory the script itself drives, not
   # this (the calling) one.
+  # --target given twice (2026-08-30): crtgfx_skia_cpu_coverage (tests/
+  # skia_cpu_coverage_test.cc) needs the exact same Skia-enabled build as
+  # crtgfx_skia_raster_smoke, so it rides along in the same dedicated
+  # build directory/single configure pass instead of needing its own
+  # separate `cmake --build ... --target crtgfx-...` invocation -- see
+  # tools/test_crtgfx_skia_smoke.py's own docstring for why a repeated
+  # --target is now supported there specifically for this.
   add_custom_target(crtgfx-skia-smoke
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
       "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_crtgfx_skia_smoke.py"
@@ -386,8 +393,10 @@ if(Python3_Interpreter_FOUND)
       --cmake-cxx-compiler "${CMAKE_CXX_COMPILER}"
       --target-os "${CRT_TARGET_OS}"
       --target-arch "${CRT_TARGET_ARCH}"
+      --target crtgfx_skia_raster_smoke
+      --target crtgfx_skia_cpu_coverage
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    COMMENT "Building and running crtgfx_skia_raster_smoke in a dedicated build directory (CRTGFX_ENABLE_SKIA/CRT_USE_IMPORTED_LIBCXX forced on there, this directory's own cache untouched)"
+    COMMENT "Building and running crtgfx_skia_raster_smoke and crtgfx_skia_cpu_coverage in a dedicated build directory (CRTGFX_ENABLE_SKIA/CRT_USE_IMPORTED_LIBCXX forced on there, this directory's own cache untouched)"
     USES_TERMINAL
   )
 
