@@ -166,14 +166,23 @@ typedef struct crtgfx_damage_rect {
  *    varies by host precision, stated honestly rather than papered over:
  *    Linux requests a real `wl_surface::frame` callback (a genuine
  *    compositor-timed "ready for your next frame" signal, the same
- *    mechanism real Wayland vsync pacing uses); Windows/macOS fire it
- *    synchronously, immediately after their own real present call
- *    (`StretchDIBits`/`CALayer.setContents:`) returns, which is an
- *    accurate reflection of when their own software path actually
- *    finished (both are genuinely synchronous), not a real display-
- *    vsync timestamp the way Wayland's callback is -- a caller pacing
- *    strictly to real monitor refresh should not treat Windows/macOS's
- *    own completion timing as vsync-accurate. */
+ *    mechanism real Wayland vsync pacing uses); macOS requests a real
+ *    `-[CATransaction setCompletionBlock:]` callback on the same
+ *    transaction that presents the frame -- also genuinely asynchronous
+ *    (never fires inside `-commit` itself; live-measured on real
+ *    hardware to land tens of microseconds after `-commit` returns, on
+ *    the very next crtgfx_window_pump_events() cycle -- see
+ *    src/arch/macos/window_cocoa.c's own crtgfx_cocoa_frame_complete_
+ *    invoke for the full account), though still not a real display-vsync
+ *    timestamp the way Wayland's callback is, only "Core Animation has
+ *    processed this transaction"; Windows fires it synchronously,
+ *    immediately after its own real `StretchDIBits` present call
+ *    returns, which is an accurate reflection of when its own software
+ *    path actually finished, not a real display-vsync timestamp either.
+ *    A caller pacing strictly to real monitor refresh should not treat
+ *    Windows's own synchronous completion timing, or macOS/Linux's own
+ *    non-vsync-timed asynchronous completion timing, as vsync-accurate
+ *    on any host. */
 typedef enum crtgfx_event_type {
   CRTGFX_EVENT_NONE = 0,
   CRTGFX_EVENT_KEY_DOWN = 1,

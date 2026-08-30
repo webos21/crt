@@ -10,6 +10,70 @@ substantive update.
 
 ## 2026-08-30
 
+- **`CRTGFX_EVENT_FRAME_COMPLETE` made genuinely asynchronous on macOS,
+  verified end to end on real hardware.** User asked, after the previous
+  commit's "extend the software frame contract" work, why macOS could
+  only manage whole-frame damage and synchronous frame-complete (both
+  documented there as real host limitations) -- this session had real
+  macOS access, so it could investigate both claims directly instead of
+  taking the earlier reasoned-without-hardware writeup at face value.
+  - **Damage rects: confirmed genuinely stuck, for a different reason
+    than restated.** A real per-rect optimization would need a
+    persistent, reused pixel buffer that only the damaged rows get
+    copied into each frame -- but that directly conflicts with this same
+    backend's own "Present-path safety" design (a fresh malloc+full-copy
+    every frame, specifically because the *previous* frame's `CGImage`
+    may still be read asynchronously by the WindowServer when the next
+    frame is submitted; reusing one buffer for partial writes would
+    reintroduce exactly the tear/use-after-free hazard that design
+    avoids). A real fix needs genuine double/triple-buffering with
+    per-buffer liveness tracking, not a small change -- left as a real,
+    now better-understood gap, not attempted this pass.
+  - **`CRTGFX_EVENT_FRAME_COMPLETE`: the "must be synchronous on macOS"
+    premise was wrong, and is now fixed.** `-[CATransaction
+    setCompletionBlock:]` is a real, genuinely asynchronous completion
+    callback -- confirmed with two standalone real-window probes before
+    touching any project code: a plain Objective-C one (never fires
+    inside `-commit`, arrives 20-270us later, only after the run loop is
+    pumped) and, since `src/arch/macos/window_cocoa.c` is deliberately
+    plain C (no `-fblocks`, no ObjC compiler mode -- see that backend's
+    own `set_source_files_properties()` note in `libcrtgfx/CMakeLists.txt`
+    for why), a second probe hand-constructing a real Objective-C Block
+    literal byte-for-byte from plain C (Clang's Block ABI is public and
+    stable: `isa`/`flags`/`reserved`/`invoke`/`descriptor` header, a
+    captured plain-C pointer placed right after, no copy/dispose helper
+    needed since nothing captured is an Objective-C object reference) --
+    confirmed this construction is retained/copied correctly by a real
+    Apple API and still fires correctly, with captured data intact, well
+    after the function that declared it has returned. Implemented in
+    `window_cocoa.c` using that same technique: `crtgfx_host_window_
+    present_software()` now sets a completion block (capturing
+    `host->toplevel`) before `-commit`, and that block's own invoke
+    function posts `CRTGFX_EVENT_FRAME_COMPLETE` -- replacing the
+    previous synchronous "queue the event right after `-commit` returns"
+    code entirely, not just adding an alternative path.
+  - **Verified via the real PAL path itself, not just the standalone
+    probes**: extended the pre-existing manual `crtgfx_keyboard_
+    interactive` tool (`libcrtgfx/tests/window_keyboard_interactive_
+    test.cc`, already broadened for the same-day Phase 1 real-hardware
+    pass) to recognize `FRAME_COMPLETE` and log which loop iteration
+    submitted each frame versus which iteration actually observed its
+    completion. Ran it live for a full 60-second session: **658/658
+    `FRAME_COMPLETE` events arrived in the iteration immediately** *after*
+    **the one that submitted them, zero exceptions, zero synchronous
+    (same-iteration) deliveries**, consistently 55-60ms later (one
+    outlier at 1062ms, still asynchronous) -- a real, direct, end-to-end
+    confirmation through the actual shipped code path, matching the
+    standalone probes' own findings exactly.
+  - `crtgfx/window.h`'s own `CRTGFX_EVENT_FRAME_COMPLETE` doc comment and
+    `window_cocoa.c`'s own top-of-file "Scope cuts" section both updated
+    to describe macOS's real asynchronous mechanism and timing instead of
+    the old "fires synchronously" claim; the damage-rects bullet in the
+    same section now explains the real double-buffering reason a fix
+    isn't simple, instead of only stating the current behavior.
+  - Full default `cmake --build` and the full `ctest` suite (105/105)
+    both pass with no regressions.
+
 - **`libcrtgfx` software-frame contract extension (TODO.md item 1), the
   first upper-runtime work item after Phase 1/Phase 2 closed the same
   day.** Five pieces, all additive/backward-compatible with the existing

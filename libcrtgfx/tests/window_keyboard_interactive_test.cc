@@ -107,6 +107,8 @@ static const char* event_type_name(crtgfx_event_type type) {
       return "POINTER_SCROLL";
     case CRTGFX_EVENT_DPI_SCALE_CHANGED:
       return "DPI_SCALE_CHANGED";
+    case CRTGFX_EVENT_FRAME_COMPLETE:
+      return "FRAME_COMPLETE";
     default:
       return "?";
   }
@@ -187,6 +189,10 @@ extern "C" int main() {
   int should_quit;
   double start_time;
   double deadline_seconds;
+  /* See CRTGFX_EVENT_FRAME_COMPLETE's own case in the event switch below
+   * for why these are tracked. */
+  double last_end_frame_time = 0.0;
+  int last_end_frame_iteration = -1;
 #if CRTGFX_HAS_SKIA_HEADERS
   sk_sp<SkFontMgr> font_mgr;
   sk_sp<SkTypeface> typeface;
@@ -296,6 +302,23 @@ extern "C" int main() {
         case CRTGFX_EVENT_DPI_SCALE_CHANGED:
           printf("event: DPI_SCALE_CHANGED scale=%.3f\n", event.data.dpi_scale.scale);
           break;
+        case CRTGFX_EVENT_FRAME_COMPLETE:
+          /* iteration/last_end_frame_* track the most recent
+           * crtgfx_window_end_frame() call (set right after it, below) --
+           * printing how many loop iterations and how much wall-clock
+           * time separate "we submitted this frame" from "we observed
+           * its own FRAME_COMPLETE via poll_event()" is a real, direct
+           * way to see whether a host backend delivers this
+           * synchronously (arrives in the very same iteration, delta
+           * near zero) or genuinely asynchronously (arrives on a later
+           * iteration) -- see crtgfx/window.h's own CRTGFX_EVENT_FRAME_
+           * COMPLETE doc comment for the documented, honest per-host
+           * timing this is meant to empirically confirm. */
+          printf("event: FRAME_COMPLETE (submitted in iteration %d, observed in iteration %d, "
+                 "%.3f ms later)\n",
+                 last_end_frame_iteration, iteration,
+                 (monotonic_seconds() - last_end_frame_time) * 1000.0);
+          break;
         default:
           /* CLOSE_REQUESTED/FOCUS_IN/FOCUS_OUT/EXPOSE carry no payload
            * (see crtgfx_event's own doc comment, window.h) -- the event
@@ -330,6 +353,8 @@ extern "C" int main() {
       }
 #endif
       crtgfx_window_end_frame(window);
+      last_end_frame_time = monotonic_seconds();
+      last_end_frame_iteration = iteration;
     }
     /* poll(2) inside pump_events doesn't reliably block the full 50ms
      * requested (see monotonic_seconds()'s own comment above) -- a small

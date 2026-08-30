@@ -170,12 +170,18 @@ work queue anymore.
 **The software frame contract extension is also done** (2026-08-30):
 framebuffer `generation` tracking across a resize, damage rectangles/partial
 present (real per-rect `StretchDIBits`/`wl_surface::damage` on Windows/
-Linux, honestly whole-frame on macOS), a real `CRTGFX_EVENT_FRAME_COMPLETE`
-notification (genuinely asynchronous `wl_surface::frame`/`wl_callback::done`
-on Linux, synchronous on Windows/macOS), and the producer/consumer acquire/
-release ownership contract now documented explicitly on all three hosts. See
-`HISTORY.md`'s 2026-08-30 entry for the full trail; not a work-queue item
-anymore.
+Linux, honestly whole-frame on macOS -- confirmed on real macOS hardware to
+be a genuine, understood limitation, not an oversight: a real fix would
+need double/triple-buffering, which conflicts with this backend's own
+tear/use-after-free-avoiding fresh-copy-per-frame design), a real
+`CRTGFX_EVENT_FRAME_COMPLETE` notification (genuinely asynchronous on both
+Linux, via `wl_surface::frame`/`wl_callback::done`, and macOS, via
+`-[CATransaction setCompletionBlock:]` -- live-measured on real hardware,
+658/658 frames in one run delivered exactly one pump cycle later, never
+synchronously; synchronous only on Windows, via `StretchDIBits`), and the
+producer/consumer acquire/release ownership contract now documented
+explicitly on all three hosts. See `HISTORY.md`'s 2026-08-30 entries for the
+full trail; not a work-queue item anymore.
 
 Open upper-runtime work, in recommended order:
 

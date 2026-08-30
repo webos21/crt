@@ -137,10 +137,26 @@
  *    is inherently whole-image, unlike Windows' genuine partial
  *    StretchDIBits path or Linux's genuine per-rect wl_surface::damage;
  *    documented there as a real, honest capability difference, not a
- *    silently-dropped feature. CRTGFX_EVENT_FRAME_COMPLETE, added at the
- *    same time, fires synchronously right after this function's own
- *    CATransaction commit -- see that call site's own comment for why
- *    that specific point is the right one on this host;
+ *    silently-dropped feature. Investigated further (2026-08-30, real
+ *    macOS hardware, following the async CRTGFX_EVENT_FRAME_COMPLETE fix
+ *    just below): a real per-rect optimization would need a persistent,
+ *    reused backing buffer that only the *damaged* rows get copied into
+ *    each frame, instead of this function's own fresh malloc+full-buffer-
+ *    memcpy every frame -- but that directly conflicts with this same
+ *    file's own "Present-path safety" cut above (the fresh-copy-per-frame
+ *    design exists specifically because the *previous* frame's CGImage
+ *    may still be read by the WindowServer asynchronously when the next
+ *    frame is submitted; reusing one persistent buffer for partial writes
+ *    would reintroduce exactly the tear/use-after-free hazard that cut
+ *    was written to avoid). A real fix needs genuine double/triple-
+ *    buffering with per-buffer "still in use" tracking, not a small
+ *    change here -- left as a real, understood gap, not attempted this
+ *    pass. CRTGFX_EVENT_FRAME_COMPLETE, previously fired synchronously
+ *    right after this function's own CATransaction commit, is now
+ *    genuinely asynchronous instead, via that transaction's own
+ *    completion block -- verified for real on this session's own macOS
+ *    hardware (see crtgfx_cocoa_frame_complete_invoke's own top comment,
+ *    this file, for the full account and the live measurements);
  *  - multi-window support (added 2026-08-30, Phase 1 of the window/event
  *    API completion plan, after Linux and Windows already had it): the
  *    previous "single window per process" cut is closed -- crtgfx_cocoa_
@@ -428,6 +444,82 @@ static void crtgfx_msgsend_void_id(id self, SEL op, id arg) {
 
 static void crtgfx_msgsend_void_bool(id self, SEL op, BOOL arg) {
   ((void (*)(id, SEL, BOOL))objc_msgSend)(self, op, arg);
+}
+
+/* CRTGFX_EVENT_FRAME_COMPLETE, async version (added 2026-08-30, verified
+ * on real macOS hardware): `-[CATransaction setCompletionBlock:]` takes a
+ * genuine Objective-C Block object and invokes it *after* Core Animation
+ * has actually processed the transaction -- confirmed for real on this
+ * session's own macOS host (both a plain Objective-C probe and, below,
+ * this exact plain-C construction technique) to never fire synchronously
+ * inside `-commit` and to always land within one subsequent
+ * crtgfx_window_pump_events() cycle (the same `-[NSApplication
+ * nextEventMatchingMask:untilDate:inMode:dequeue:]` pump this file's own
+ * crtgfx_host_window_dispatch() already runs), delivered tens of
+ * microseconds after `-commit` returns -- a real, live-measured
+ * asynchronous completion signal, structurally the same shape as Linux's
+ * own wl_surface::frame/wl_callback::done round trip (window_wayland.c):
+ * queue now, real event arrives on a later pump. This supersedes the
+ * previous "fire synchronously right after -commit" cut documented at
+ * this file's own top comment and in crtgfx/window.h's own
+ * CRTGFX_EVENT_FRAME_COMPLETE doc comment (both updated the same day).
+ *
+ * Blocks are a real Objective-C/Clang-extension feature this file's own
+ * plain-C compilation (no -fblocks, no ObjC compiler mode -- see this
+ * backend's own set_source_files_properties() comment in libcrtgfx/
+ * CMakeLists.txt for why the whole file stays plain C) cannot create with
+ * `^{ ... }` literal syntax. Clang's Block ABI is public and stable
+ * (unchanged since introduction), so this hand-constructs the exact
+ * struct layout a real `^{ ... }` literal would generate instead:
+ * `isa` tags it as a stack block, `flags`/`reserved` are zero (no
+ * BLOCK_HAS_COPY_DISPOSE -- the only captured value is a plain C pointer,
+ * never an Objective-C object reference, so no retain/release helper is
+ * needed), `invoke` is the real call-back entry point (the block object
+ * itself arrives as invoke's own first argument, exactly like a method's
+ * hidden `self`), and `descriptor` is a shared, static, read-only
+ * constant, matching what a real compiler-emitted block would place in
+ * `__DATA_CONST`. `crtgfx_weston_toplevel*` is captured as an ordinary
+ * struct field placed directly after the fixed block header, exactly
+ * where a real compiler would place a captured local variable.
+ *
+ * Safety: `-[CATransaction setCompletionBlock:]`'s underlying property is
+ * `copy`, so it calls `Block_copy()` on our stack-declared literal
+ * *synchronously*, before that setter call returns -- confirmed for real
+ * (this session's own probe): the hand-rolled block below still fires
+ * correctly with its captured data intact even though the real, on-stack
+ * `struct crtgfx_cocoa_frame_complete_block` this function declares is
+ * long gone (this function has already returned to its own caller) by
+ * the time the copy actually gets invoked. `Block_copy()`'s own generic
+ * implementation, with BLOCK_HAS_COPY_DISPOSE unset, does a plain byte-
+ * for-byte copy of the whole struct to a new heap allocation -- exactly
+ * sufficient here, since every field (including the captured pointer) is
+ * plain data with no ownership of its own to transfer. */
+extern void* _NSConcreteStackBlock;
+
+struct crtgfx_cocoa_block_descriptor {
+  unsigned long reserved;
+  unsigned long size;
+};
+
+struct crtgfx_cocoa_frame_complete_block {
+  void* isa;
+  int flags;
+  int reserved;
+  void (*invoke)(struct crtgfx_cocoa_frame_complete_block* self);
+  struct crtgfx_cocoa_block_descriptor* descriptor;
+  /* Captured variable, placed right after the fixed block header -- see
+   * this block's own top comment for why this needs no copy/dispose
+   * helper (BLOCK_HAS_COPY_DISPOSE unset). */
+  crtgfx_weston_toplevel* toplevel;
+};
+
+static struct crtgfx_cocoa_block_descriptor crtgfx_cocoa_frame_complete_descriptor = {
+    0, sizeof(struct crtgfx_cocoa_frame_complete_block)};
+
+static void crtgfx_cocoa_frame_complete_invoke(struct crtgfx_cocoa_frame_complete_block* self) {
+  crtgfx_event event = {0};
+  event.type = CRTGFX_EVENT_FRAME_COMPLETE;
+  crtgfx_weston_toplevel_note_event(self->toplevel, &event);
 }
 
 static void crtgfx_msgsend_void_int(id self, SEL op, NSInteger arg) {
@@ -1258,34 +1350,33 @@ int crtgfx_host_window_present_software(
    * genuine benefit, but was NOT the fix for this file's real frame-
    * visibility bug (a clock_gettime() symbol collision elsewhere) --
    * see this file's own top comment ("Frame-visibility bug") and
-   * HISTORY.md for the full account of what the real bug actually was. */
+   * HISTORY.md for the full account of what the real bug actually was.
+   *
+   * CRTGFX_EVENT_FRAME_COMPLETE now rides this same transaction's own
+   * completion block (see that block's own top comment, this file,
+   * above) instead of firing synchronously right after -commit returns --
+   * genuinely asynchronous, verified on real macOS hardware. The
+   * completion block must be set *before* -commit (matching every real
+   * CATransaction usage, including this session's own verification
+   * probes); the captured toplevel pointer is read from `host` here,
+   * before this stack frame goes away. */
   crtgfx_msgsend_class_op(objc_getClass("CATransaction"), sel_registerName("begin"));
   crtgfx_msgsend_class_void_bool(
       objc_getClass("CATransaction"), sel_registerName("setDisableActions:"), 1);
+  {
+    struct crtgfx_cocoa_frame_complete_block completion_block;
+    completion_block.isa = &_NSConcreteStackBlock;
+    completion_block.flags = 0;
+    completion_block.reserved = 0;
+    completion_block.invoke = crtgfx_cocoa_frame_complete_invoke;
+    completion_block.descriptor = &crtgfx_cocoa_frame_complete_descriptor;
+    completion_block.toplevel = host->toplevel;
+    crtgfx_msgsend_void_id(
+        objc_getClass("CATransaction"), sel_registerName("setCompletionBlock:"),
+        (id)&completion_block);
+  }
   crtgfx_msgsend_void_id(layer, sel_registerName("setContents:"), (id)image);
   crtgfx_msgsend_class_op(objc_getClass("CATransaction"), sel_registerName("commit"));
   CGImageRelease(image);
-
-  /* CRTGFX_EVENT_FRAME_COMPLETE: fired synchronously right here, unlike
-   * Linux's own genuinely asynchronous wl_surface::frame/wl_callback::
-   * done round trip (window_wayland.c) -- see crtgfx/window.h's own doc
-   * comment on this event type for why that is a real, honest per-host
-   * timing difference, not an inconsistency. `-[CATransaction commit]`
-   * above is itself synchronous (it flushes immediately, not on the next
-   * run-loop idle -- see this file's own top comment "Frame-visibility
-   * bug" for why an *implicit* transaction would not have this property,
-   * which is exactly why this function uses an explicit one), so by the
-   * time control returns here the WindowServer has been handed this
-   * frame's content -- not proof it has been composited/displayed on
-   * screen yet (compositing happens on the WindowServer's own schedule,
-   * same caveat Windows' own synchronous StretchDIBits fire point has),
-   * matching this project's own already-established "synchronous with
-   * our own present call" semantics for this event on Windows/macOS.
-   * Added 2026-08-30. */
-  {
-    crtgfx_event event = {0};
-    event.type = CRTGFX_EVENT_FRAME_COMPLETE;
-    crtgfx_weston_toplevel_note_event(host->toplevel, &event);
-  }
   return CRTGFX_OK;
 }
