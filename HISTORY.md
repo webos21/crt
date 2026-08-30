@@ -10,6 +10,61 @@ substantive update.
 
 ## 2026-08-30
 
+- **`libcrtgfx` Phase 1 window/event contract verified for real on macOS
+  hardware, closing the one remaining open thread from the same day's
+  other Phase 1 entries below.** Every macOS window/event addition
+  (multi-window, focus in/out, scroll, DPI-scale-changed, and the
+  original 2026-08-25 keyboard/mouse input work) had only ever been
+  reasoned from Apple's own published AppKit documentation and confirmed
+  via `clang -fsyntax-only`/real object-code generation -- never run
+  against a live, on-screen `NSWindow`. This session had real Bash access
+  to an actual macOS machine, so it could finally close that gap directly
+  instead of leaving it flagged.
+  - **Genuinely clean, from-scratch build**: `out/` deleted entirely,
+    then a fresh `cmake --preset macos-host-ninja-debug` configure, a
+    full default `cmake --build`, the full `ctest` suite, and `cmake
+    --build --target crtgfx-wayland-smoke` all run in sequence with no
+    reused cache or artifacts. All green: configure/build/`crtgfx-
+    wayland-smoke` all exit 0, `ctest` 104/104 including `crtgfx_window_
+    smoke_runs` (0.60s) -- a real Cocoa window created, its own
+    multi-window create/get_size/destroy independence check, and the
+    repeated begin/end-frame cycle, all genuinely exercised against real
+    AppKit on real hardware for the first time, not just compiled.
+  - **Real, physically-driven event-delivery verification**, going
+    beyond the non-interactive ctest above: extended `libcrtgfx/tests/
+    window_keyboard_interactive_test.cc` (a pre-existing manual,
+    non-ctest tool from the original 2026-08-25 Linux keyboard work) so
+    its `event_type_name()`/main event switch recognize and print every
+    `crtgfx_event_type` this project defines, not just the keyboard ones
+    it originally covered -- `RESIZE`/`POINTER_SCROLL`/`DPI_SCALE_
+    CHANGED` print their own payload (new size, scroll delta, scale
+    factor), and `CLOSE_REQUESTED`/`FOCUS_IN`/`FOCUS_OUT`/`EXPOSE` print
+    by name. Built and ran `crtgfx_keyboard_interactive` twice against a
+    real, on-screen window, physically resizing it, scrolling over it,
+    typing into it, clicking it, switching focus away and back, and
+    (second run) clicking its real close button -- confirmed every one
+    of those actually round-trips through the real Cocoa backend
+    (`src/arch/macos/window_cocoa.c`) and arrives at the event queue
+    correctly: `EXPOSE`, `FOCUS_IN`, `FOCUS_OUT`, `RESIZE` (289 real
+    events across both runs, width/height genuinely changing live),
+    `POINTER_MOTION`/`POINTER_BUTTON_DOWN`/`POINTER_BUTTON_UP`,
+    `POINTER_SCROLL` (940 real events), `KEY_DOWN`/`KEY_UP`/`TEXT`
+    (real typed characters), and `CLOSE_REQUESTED` (the real title-bar
+    close button, second run: `keyboard_interactive: window close
+    requested` printed, then a clean exit). Not exercised: `CRTGFX_
+    EVENT_DPI_SCALE_CHANGED` -- would need an actual live display-scale
+    change (moving the window to a different-DPI display, or changing
+    System Settings' own display scaling), which nobody triggered this
+    pass; the Windows/Linux DPI-scale delivery mechanism (same day's
+    other entry) and the macOS `windowDidChangeBackingProperties:`
+    wiring stay in the "reasoned + object-code-confirmed, not physically
+    triggered" category for now -- the one specific item Phase 1's own
+    real-hardware confirmation does not yet cover on any host, not just
+    macOS.
+  - `TODO.md`'s Phase 1 entry updated to reflect real-hardware
+    confirmation and folded out of the active work queue, matching how
+    the CPU-raster milestone above it was already retired the same way.
+
 - **`libcrtgfx` Phase 1 window/event API completion: `CRTGFX_EVENT_DPI_
   SCALE_CHANGED` delivered on all three hosts, closing out Phase 1
   entirely.** The one item left open after the same day's multi-window/

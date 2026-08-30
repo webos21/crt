@@ -149,15 +149,14 @@ all three hosts, FreeType's fetch now uses the stable SourceForge URL
 (`5b87197`), and libffi's three-host verification (`63e07ee`) landed the same
 way.
 
-**The `libcrtgfx` window/event contract (Phase 1) is now also complete on
-all three hosts** -- multi-window, resize/close/focus/expose/scroll/DPI-
-scale-changed events, key-repeat policy, queue/threading contract, and the
-header-split decision (see `HISTORY.md`'s 2026-08-29/08-30 entries for the
-full trail). macOS is implemented but not yet run on real hardware this
-session (no macOS host access) -- flagged in the code itself, matching
-this project's own "reasoned but flagged unverified" discipline;
-real-hardware confirmation is the one still-open thread there, same as
-the original 2026-08-25 macOS keyboard/mouse input work.
+**The `libcrtgfx` window/event contract (Phase 1) is complete on all three
+hosts, including real macOS hardware confirmation** -- multi-window,
+resize/close/focus/expose/scroll events, key-repeat policy, queue/threading
+contract, and the header-split decision, plus `CRTGFX_EVENT_DPI_SCALE_
+CHANGED` delivery on Windows/Linux and the macOS `windowDidChangeBackingProperties:`
+wiring (see `HISTORY.md`'s 2026-08-29/08-30 entries for the full trail; the
+macOS real-hardware pass is its own 2026-08-30 entry). No longer belongs in
+this work queue.
 
 Open upper-runtime work, in recommended order:
 

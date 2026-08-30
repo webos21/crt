@@ -1,18 +1,30 @@
-/* Manual, interactive verification for real Linux/Wayland keyboard input
- * (wl_seat/wl_keyboard + libxkbcommon wiring in
- * src/arch/linux/window_wayland.c). NOT part of the automated ctest
- * suite -- it requires a human to actually type into the window that
- * appears (this environment has no synthetic-input tool like wtype/
- * ydotool available to inject key events programmatically), so it is
- * built and run ad hoc instead of being registered as a CMake test.
+/* Manual, interactive verification for real keyboard/pointer/window-state
+ * input, originally written for Linux/Wayland keyboard input (wl_seat/
+ * wl_keyboard + libxkbcommon wiring in src/arch/linux/window_wayland.c)
+ * and since reused as-is on every host: event_type_name()/the main event
+ * switch below print every crtgfx_event_type this project defines, not
+ * just keyboard, so the same binary also verifies RESIZE/FOCUS_IN/
+ * FOCUS_OUT/POINTER_SCROLL/DPI_SCALE_CHANGED/CLOSE_REQUESTED delivery
+ * against a real, live window on whatever host it's built for -- added
+ * 2026-08-30 verifying the Phase 1 window/event contract on real macOS
+ * hardware for the first time (multi-window/focus/scroll/DPI-scale work
+ * had, until then, only ever been reasoned from Apple's own AppKit docs
+ * and compile/object-code checked, never run against a live NSWindow --
+ * see HISTORY.md's 2026-08-30 entries). NOT part of the automated ctest
+ * suite -- it requires a human (or host automation like AppleScript/
+ * System Events) to actually interact with the window that appears
+ * (this environment has no synthetic-input tool like wtype/ydotool
+ * available to inject key events programmatically), so it is built and
+ * run ad hoc instead of being registered as a CMake test.
  *
- * Opens a real window against whatever live compositor is reachable
- * (WSLg's own Weston on this session's WSL host, or a real compositor on
- * real hardware), then drains crtgfx_window_poll_event() every 50ms for
- * up to ~60 seconds, printing every event it receives with a line-
- * buffered, unbuffered stdout write so a `tail -f` on the redirected
- * output shows keystrokes live. Exits early on Escape (evdev KEY_ESC=1)
- * or a window-close request.
+ * Opens a real window against whatever live compositor/window server is
+ * reachable (WSLg's own Weston on a WSL host, real Wayland/X11 on Linux,
+ * a real Win32 message loop on Windows, a real NSApplication run loop on
+ * macOS, ...), then drains crtgfx_window_poll_event() every 50ms for up
+ * to ~60 seconds, printing every event it receives with a line-buffered,
+ * unbuffered stdout write so a `tail -f` on the redirected output shows
+ * events live. Exits early on Escape (evdev KEY_ESC=1) or a window-close
+ * request.
  *
  * Real Skia+FreeType text rendering (added 2026-08-25, verifying Linux
  * end to end for the first time -- see TODO.md item 5/HISTORY.md's
@@ -81,6 +93,20 @@ static const char* event_type_name(crtgfx_event_type type) {
       return "POINTER_BUTTON_DOWN";
     case CRTGFX_EVENT_POINTER_BUTTON_UP:
       return "POINTER_BUTTON_UP";
+    case CRTGFX_EVENT_RESIZE:
+      return "RESIZE";
+    case CRTGFX_EVENT_CLOSE_REQUESTED:
+      return "CLOSE_REQUESTED";
+    case CRTGFX_EVENT_FOCUS_IN:
+      return "FOCUS_IN";
+    case CRTGFX_EVENT_FOCUS_OUT:
+      return "FOCUS_OUT";
+    case CRTGFX_EVENT_EXPOSE:
+      return "EXPOSE";
+    case CRTGFX_EVENT_POINTER_SCROLL:
+      return "POINTER_SCROLL";
+    case CRTGFX_EVENT_DPI_SCALE_CHANGED:
+      return "DPI_SCALE_CHANGED";
     default:
       return "?";
   }
@@ -259,7 +285,21 @@ extern "C" int main() {
           printf("event: TEXT utf8=\"%s\"\n", event.data.text.utf8);
           text_buffer_append(event.data.text.utf8);
           break;
+        case CRTGFX_EVENT_RESIZE:
+          printf("event: RESIZE width=%u height=%u\n", event.data.resize.width,
+                 event.data.resize.height);
+          break;
+        case CRTGFX_EVENT_POINTER_SCROLL:
+          printf("event: POINTER_SCROLL dx=%.3f dy=%.3f\n", event.data.pointer_scroll.dx,
+                 event.data.pointer_scroll.dy);
+          break;
+        case CRTGFX_EVENT_DPI_SCALE_CHANGED:
+          printf("event: DPI_SCALE_CHANGED scale=%.3f\n", event.data.dpi_scale.scale);
+          break;
         default:
+          /* CLOSE_REQUESTED/FOCUS_IN/FOCUS_OUT/EXPOSE carry no payload
+           * (see crtgfx_event's own doc comment, window.h) -- the event
+           * type name alone, via event_type_name(), is the whole message. */
           printf("event: %s\n", event_type_name(event.type));
           break;
       }
