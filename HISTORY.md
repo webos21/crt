@@ -10,6 +10,98 @@ substantive update.
 
 ## 2026-08-30
 
+- **`libcrtgfx` software-frame contract extension (TODO.md item 1), the
+  first upper-runtime work item after Phase 1/Phase 2 closed the same
+  day.** Five pieces, all additive/backward-compatible with the existing
+  `crtgfx_window_begin_frame()`/`crtgfx_window_end_frame()` pair:
+  - **Framebuffer generation/lifetime across a resize**: new `uint64_t
+    generation` field on both the public `crtgfx_framebuffer` (`crtgfx/
+    window.h`) and the internal `crtgfx_weston_toplevel`
+    (`wayland_weston_internal.h`), incremented only when `crtgfx_weston_
+    resize_software_buffer()` (`wayland_weston.c`) actually reallocates
+    the backing buffer -- not once per frame -- so a caller holding a
+    stale `crtgfx_framebuffer` across an unexpected resize can detect it
+    by comparing generations rather than guessing from width/height alone.
+  - **Pixel-format/alpha-mode/color-space metadata**: resolved as a
+    documentation-only decision, not new fields -- `crtgfx/window.h`'s
+    `crtgfx_pixel_format` doc comment now explains why no real consumer
+    (including `skia_bridge.cc`) tags a color space today, and
+    `BGRA8888_PREMULTIPLIED`'s own name already states its alpha mode, so
+    splitting that into separate fields would add API surface with no
+    current caller to validate it against.
+  - **Damage rectangles / partial present**: new `crtgfx_damage_rect
+    {x,y,width,height}` struct and `crtgfx_window_end_frame_damaged()`
+    (`window.c`, thin wrapper over the new `crtgfx_weston_toplevel_
+    end_frame_damaged()` in `wayland_weston.c`); `crtgfx_window_end_
+    frame()` becomes a thin `damage_rects=0/damage_rect_count=0` ("whole
+    frame changed") call to the same function. Real per-host handling,
+    not a shared approximation:
+    - **Windows** (`window_win32.c`): a genuine per-rect `StretchDIBits()`
+      1:1 sub-rect blit loop when rects are given, the previous
+      whole-client-rect stretch otherwise.
+    - **Linux** (`window_wayland.c`): a genuine separate real
+      `wl_surface::damage` wire request per caller-supplied rect (the
+      protocol allows any number before one commit; the compositor unions
+      them itself), the previous single whole-surface damage otherwise.
+    - **macOS** (`window_cocoa.c`): damage rects are accepted but honestly
+      ignored -- `layer.contents = image` always replaces the whole
+      `CALayer` content in one shot, there is no CoreAnimation API this
+      backend uses that presents a sub-rect in place of the previous one.
+      Documented as a real, honest per-host capability difference (every
+      backend still presents the *entire* correct frame either way; damage
+      rects are a bandwidth/perf optimization a caller may not always get),
+      not a contract violation.
+  - **Frame-callback/presentation-completion notification**: new
+    `CRTGFX_EVENT_FRAME_COMPLETE` event type (payload-less). Genuinely
+    different real timing per host, documented as such rather than
+    papered over:
+    - **Linux**: a real, asynchronous `wl_surface::frame` request/
+      `wl_callback::done` round trip -- `crtgfx_host_window_present_
+      software()` requests one callback per present (at most one
+      outstanding at a time, tracked via a new `frame_callback_id` field
+      on `crtgfx_host_window`), and `wl_dispatch_message()` fires the
+      event only once the compositor's own `done` actually arrives on a
+      later `crtgfx_host_window_dispatch()` call -- disambiguated from
+      every other opcode-0 event on this connection (`wl_buffer::
+      release`/`wl_seat::capabilities`) the same "match by object id, not
+      opcode alone" way that class of bug was fixed earlier this session.
+    - **Windows/macOS**: fired synchronously immediately after their own
+      already-synchronous present call returns (`StretchDIBits()` /
+      `[CATransaction commit]`) -- explicitly documented on both call
+      sites and in the event's own doc comment as NOT a real vsync
+      signal on these two hosts, unlike Linux's genuine compositor round
+      trip.
+  - **Symmetric producer/consumer acquire/release ownership,
+    documented explicitly for the first time**: a new doc comment block
+    on `crtgfx_window_begin_frame()` (`crtgfx/window.h`) states the
+    shared contract ("the caller's next `begin_frame()` never corrupts
+    pixels the host hasn't consumed yet") and how each host actually
+    satisfies it -- Linux via real `wl_buffer::release`-gated buffer
+    reuse (already existed), Windows/macOS via a synchronous copy into
+    host-owned storage before `end_frame()` returns (already existed on
+    macOS; already existed on Windows via `StretchDIBits()`'s own
+    synchronous GDI blit) -- closing the gap by documentation rather than
+    by changing either host's actual mechanism, since no real consumer
+    currently needs stronger ownership semantics than either already
+    provides.
+  - **Verification**: Windows -- full `cmake --build` (all targets) plus
+    full `ctest`, 121/121, plus direct runs of `crtgfx_window_smoke`/
+    `crtgfx_synthetic_event` (`: ok`). Linux (WSL/WSLg) -- full `cmake
+    --build` (all targets) plus full `ctest`; `crtgfx_synthetic_event_
+    runs` passes, `crtgfx_window_smoke_runs` fails with the same
+    pre-existing, already-tracked `end_frame (-3)` quirk confirmed
+    unrelated to this change by reproducing the identical failure against
+    the unmodified pre-change baseline (`git stash` back to the last
+    commit) before restoring these changes -- not a regression. macOS --
+    no real hardware this session (same constraint as Phase 1's original
+    landing): `clang -fsyntax-only` and real object-code generation for
+    both `--target=arm64-apple-darwin` and `--target=x86_64-apple-darwin`
+    with the exact `-Wall -Wextra -Werror -Wno-cast-function-type-
+    mismatch -Wno-unknown-warning-option` flags the real CMake build
+    applies, both clean -- flagged reasoned-but-not-run-on-real-hardware
+    in `window_cocoa.c`'s own top comment, matching this session's
+    established discipline for exactly this situation.
+
 - **`libcrtgfx` Phase 2 of the window/event API completion plan:
   deterministic, no-real-OS-input-needed event-queue regression coverage,
   closing out Phase 2 entirely the same day Phase 1 finished.** New

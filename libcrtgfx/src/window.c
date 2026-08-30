@@ -75,6 +75,14 @@ int crtgfx_window_end_frame(crtgfx_window* window) {
   return crtgfx_weston_toplevel_end_frame(window);
 }
 
+int crtgfx_window_end_frame_damaged(
+    crtgfx_window* window, const crtgfx_damage_rect* damage_rects, uint32_t damage_rect_count) {
+  if (window == 0) {
+    return CRTGFX_ERROR_INVALID_ARGUMENT;
+  }
+  return crtgfx_weston_toplevel_end_frame_damaged(window, damage_rects, damage_rect_count);
+}
+
 int crtgfx_window_poll_event(crtgfx_window* window, crtgfx_event* out_event) {
   if (window == 0 || out_event == 0) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;

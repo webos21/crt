@@ -131,6 +131,16 @@
  *
  * Scope cuts (documented, not silent, matching this project's own
  * discipline elsewhere):
+ *  - damage rects (added 2026-08-30, the software-frame contract
+ *    extension in TODO.md) are accepted but ignored by crtgfx_host_
+ *    window_present_software() below -- CALayer's own `contents` replace
+ *    is inherently whole-image, unlike Windows' genuine partial
+ *    StretchDIBits path or Linux's genuine per-rect wl_surface::damage;
+ *    documented there as a real, honest capability difference, not a
+ *    silently-dropped feature. CRTGFX_EVENT_FRAME_COMPLETE, added at the
+ *    same time, fires synchronously right after this function's own
+ *    CATransaction commit -- see that call site's own comment for why
+ *    that specific point is the right one on this host;
  *  - multi-window support (added 2026-08-30, Phase 1 of the window/event
  *    API completion plan, after Linux and Windows already had it): the
  *    previous "single window per process" cut is closed -- crtgfx_cocoa_
@@ -1173,7 +1183,8 @@ static void crtgfx_present_release_callback(void* info, const void* data, unsign
 }
 
 int crtgfx_host_window_present_software(
-    crtgfx_host_window* host, const void* pixels, uint32_t width, uint32_t height, uint32_t stride) {
+    crtgfx_host_window* host, const void* pixels, uint32_t width, uint32_t height, uint32_t stride,
+    const crtgfx_damage_rect* damage_rects, uint32_t damage_rect_count) {
   id content_view;
   id layer;
   unsigned long buffer_size;
@@ -1186,6 +1197,20 @@ int crtgfx_host_window_present_software(
       stride < width * 4u) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
+  /* damage_rects/damage_rect_count intentionally ignored -- honestly, not
+   * silently: `layer.contents = image` (below) always replaces the whole
+   * CALayer content in one shot, there is no CoreAnimation API this
+   * backend uses that presents a sub-rect of a CGImage in place of the
+   * previous one. See crtgfx/window.h's own crtgfx_window_end_frame_
+   * damaged() doc comment for why this is documented as a real, honest
+   * per-host capability difference (matching Windows' genuine partial
+   * StretchDIBits path and Linux's genuine per-rect wl_surface::damage)
+   * rather than a contract violation -- every backend still presents the
+   * *entire* current frame correctly either way, damage rects are purely
+   * a bandwidth/perf optimization a caller may not always get. Added
+   * 2026-08-30. */
+  (void)damage_rects;
+  (void)damage_rect_count;
   content_view = crtgfx_msgsend_op(host->window, sel_registerName("contentView"));
   if (content_view == 0) {
     return CRTGFX_ERROR_HOST;
@@ -1240,5 +1265,27 @@ int crtgfx_host_window_present_software(
   crtgfx_msgsend_void_id(layer, sel_registerName("setContents:"), (id)image);
   crtgfx_msgsend_class_op(objc_getClass("CATransaction"), sel_registerName("commit"));
   CGImageRelease(image);
+
+  /* CRTGFX_EVENT_FRAME_COMPLETE: fired synchronously right here, unlike
+   * Linux's own genuinely asynchronous wl_surface::frame/wl_callback::
+   * done round trip (window_wayland.c) -- see crtgfx/window.h's own doc
+   * comment on this event type for why that is a real, honest per-host
+   * timing difference, not an inconsistency. `-[CATransaction commit]`
+   * above is itself synchronous (it flushes immediately, not on the next
+   * run-loop idle -- see this file's own top comment "Frame-visibility
+   * bug" for why an *implicit* transaction would not have this property,
+   * which is exactly why this function uses an explicit one), so by the
+   * time control returns here the WindowServer has been handed this
+   * frame's content -- not proof it has been composited/displayed on
+   * screen yet (compositing happens on the WindowServer's own schedule,
+   * same caveat Windows' own synchronous StretchDIBits fire point has),
+   * matching this project's own already-established "synchronous with
+   * our own present call" semantics for this event on Windows/macOS.
+   * Added 2026-08-30. */
+  {
+    crtgfx_event event = {0};
+    event.type = CRTGFX_EVENT_FRAME_COMPLETE;
+    crtgfx_weston_toplevel_note_event(host->toplevel, &event);
+  }
   return CRTGFX_OK;
 }

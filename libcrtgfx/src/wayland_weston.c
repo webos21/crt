@@ -32,6 +32,10 @@ static int crtgfx_weston_resize_software_buffer(crtgfx_weston_toplevel* toplevel
   toplevel->software_buffer = buffer;
   toplevel->software_buffer_size = needed;
   toplevel->stride = stride;
+  /* See crtgfx/window.h's own crtgfx_framebuffer::generation comment --
+   * only this real-reallocation path bumps it, not the early "already
+   * the right size" return above. */
+  toplevel->generation += 1u;
   return CRTGFX_OK;
 }
 
@@ -145,11 +149,17 @@ int crtgfx_weston_toplevel_begin_frame(crtgfx_window* window, crtgfx_framebuffer
   out_framebuffer->height = window->toplevel.height;
   out_framebuffer->stride = window->toplevel.stride;
   out_framebuffer->format = CRTGFX_PIXEL_FORMAT_BGRA8888_PREMULTIPLIED;
+  out_framebuffer->generation = window->toplevel.generation;
   window->toplevel.frame_pending = 1;
   return CRTGFX_OK;
 }
 
 int crtgfx_weston_toplevel_end_frame(crtgfx_window* window) {
+  return crtgfx_weston_toplevel_end_frame_damaged(window, 0, 0);
+}
+
+int crtgfx_weston_toplevel_end_frame_damaged(
+    crtgfx_window* window, const crtgfx_damage_rect* damage_rects, uint32_t damage_rect_count) {
   if (window == 0) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
@@ -158,9 +168,20 @@ int crtgfx_weston_toplevel_end_frame(crtgfx_window* window) {
   }
   window->toplevel.frame_pending = 0;
   window->toplevel.frame_committed = 1;
+  /* CRTGFX_EVENT_FRAME_COMPLETE is deliberately NOT fired here: this
+   * function is synchronous only up to "the present request was
+   * submitted", not "the host finished consuming it" -- Linux's own real
+   * completion is a genuinely asynchronous wl_callback::done arriving on
+   * a *later* crtgfx_host_window_dispatch() call, while Windows/macOS's
+   * own presentation really is synchronous with this call. Firing it
+   * here would misrepresent Linux's own timing, so each backend's own
+   * crtgfx_host_window_present_software() (or, for Linux, its own later
+   * dispatch handling) is responsible for firing it at the point that is
+   * actually true for that host -- see crtgfx/window.h's own CRTGFX_
+   * EVENT_FRAME_COMPLETE doc comment. */
   return crtgfx_host_window_present_software(window->toplevel.host, window->toplevel.software_buffer,
                                              window->toplevel.width, window->toplevel.height,
-                                             window->toplevel.stride);
+                                             window->toplevel.stride, damage_rects, damage_rect_count);
 }
 
 void crtgfx_weston_toplevel_note_size(crtgfx_weston_toplevel* toplevel, uint32_t width, uint32_t height) {

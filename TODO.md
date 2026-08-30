@@ -167,18 +167,19 @@ frame-cycle independence, all without needing real OS input delivery. See
 `HISTORY.md`'s 2026-08-30 entry. Neither Phase 1 nor Phase 2 belong in this
 work queue anymore.
 
+**The software frame contract extension is also done** (2026-08-30):
+framebuffer `generation` tracking across a resize, damage rectangles/partial
+present (real per-rect `StretchDIBits`/`wl_surface::damage` on Windows/
+Linux, honestly whole-frame on macOS), a real `CRTGFX_EVENT_FRAME_COMPLETE`
+notification (genuinely asynchronous `wl_surface::frame`/`wl_callback::done`
+on Linux, synchronous on Windows/macOS), and the producer/consumer acquire/
+release ownership contract now documented explicitly on all three hosts. See
+`HISTORY.md`'s 2026-08-30 entry for the full trail; not a work-queue item
+anymore.
+
 Open upper-runtime work, in recommended order:
 
-1. **Extend the software frame contract.** Define framebuffer generation and
-   lifetime across a resize, add pixel-format/alpha-mode/color-space metadata
-   to the frame struct, support damage rectangles and partial present instead
-   of always-full-frame, add a frame-callback/vsync/presentation-completion
-   notification, and make the producer/consumer acquire/release ownership
-   explicit on every host symmetrically (Linux already has real
-   `wl_buffer::release`; Windows/macOS copy into host-owned storage today --
-   document that as the same contract satisfied a different way, or close the
-   gap if a real consumer needs otherwise).
-2. **Broaden deterministic Skia CPU coverage.** Path, transform, clip,
+1. **Broaden deterministic Skia CPU coverage.** Path, transform, clip,
    save/restore, and layer tests; image decode/draw/scaling; one or two
    representative shaders and blend modes; error paths for NaN/Inf and
    invalid surface sizes; and the still-open focused Windows `<filesystem>`
@@ -186,13 +187,13 @@ Open upper-runtime work, in recommended order:
    Skia headers as the public 2D API -- this is regression coverage, not a
    project-owned drawing facade. Treat the resulting CPU path as the golden
    reference every later GPU backend must match.
-3. **Define the `libcrtmedia` CPU frame handoff contract.** A CPU video
+2. **Define the `libcrtmedia` CPU frame handoff contract.** A CPU video
    frame descriptor covering packed RGB/BGRA and planar YUV, per-plane
    stride/dimensions, color range/space, timestamp, and frame ownership,
    plus a CPU-only smoke that hands a synthetic RGBA/YUV frame to a Skia
    `SkImage`/`SkSurface`. This is the gate before `libcrtmedia` itself starts.
 
-Once 1-3 land, run these tracks in parallel rather than gating one on
+Once 1-2 land, run these tracks in parallel rather than gating one on
 another:
 
 - `libcrtmedia`: FFmpeg demux/software decode -> the CPU frame contract from

@@ -79,6 +79,14 @@ static int crtgfx_wl_debug_enabled(void) {
  *    this backend destroys the wl_buffer object and unmaps/closes its backing
  *    storage. This is the first real frame-lifecycle contract shared with
  *    the higher crtgfx software-frame API;
+ *  - partial present is real: crtgfx_host_window_present_software()'s own
+ *    damage_rects, when given, become one real wl_surface::damage request
+ *    per rect instead of one covering the whole surface (2026-08-30, the
+ *    software-frame contract extension in TODO.md);
+ *  - CRTGFX_EVENT_FRAME_COMPLETE is driven by a real wl_surface::frame
+ *    request/wl_callback::done round trip, genuinely asynchronous (see
+ *    crtgfx_host_window::frame_callback_id's own comment) -- unlike
+ *    Windows/macOS, whose own presentation is synchronous (2026-08-30);
  *  - object ids are allocated monotonically from one shared per-connection
  *    counter, never recycled (fine for a short-lived process, not for one
  *    that opens/closes many windows over a long run).
@@ -124,6 +132,17 @@ static int crtgfx_wl_debug_enabled(void) {
 #define WL_SURFACE_DESTROY 0u
 #define WL_SURFACE_ATTACH 1u
 #define WL_SURFACE_DAMAGE 2u
+/* wl_surface::frame(new_id<wl_callback> callback) -- real wayland.xml
+ * request opcode 3 (destroy=0/attach=1/damage=2/frame=3/...). The
+ * resulting wl_callback fires exactly one wl_callback::done event "when
+ * it is a good time for the client to start drawing a new frame", which
+ * in practice only happens once the compositor has actually consumed/
+ * composited the just-committed buffer -- the real, standard Wayland
+ * mechanism this backend uses as its own genuinely asynchronous
+ * CRTGFX_EVENT_FRAME_COMPLETE signal (see crtgfx/window.h's own doc
+ * comment on that event type for why this is legitimately different
+ * timing from Windows/macOS's synchronous fire). Added 2026-08-30. */
+#define WL_SURFACE_FRAME 3u
 #define WL_SURFACE_COMMIT 6u
 /* wl_surface events (a separate opcode space from the requests just
  * above, real wayland.xml declaration order: enter, leave, ...) -- added
@@ -337,6 +356,18 @@ struct crtgfx_host_window {
    * CRTGFX_EVENT_DPI_SCALE_CHANGED. */
   uint32_t current_output_id;
 
+  /* Object id of this window's own currently-outstanding wl_surface::
+   * frame request (see WL_SURFACE_FRAME's own comment), or 0 if none is
+   * pending. At most one outstanding at a time: crtgfx_host_window_
+   * present_software() below only requests a new one once the previous
+   * one's own wl_callback::done has actually arrived (or none was ever
+   * requested yet) -- not because the protocol forbids more than one in
+   * flight, but because requesting a second before the first fires would
+   * leak the first's own object id for no observable benefit (this
+   * backend never recycles object ids -- see this file's own top-of-file
+   * scope note). Added 2026-08-30 for CRTGFX_EVENT_FRAME_COMPLETE. */
+  uint32_t frame_callback_id;
+
   crtgfx_weston_toplevel* toplevel;
 };
 
@@ -487,6 +518,28 @@ static struct crtgfx_host_window* crtgfx_wl_find_window_owning_buffer(
       if (b->id == id) {
         return w;
       }
+    }
+  }
+  return 0;
+}
+
+/* Finds the crtgfx_host_window whose own pending wl_surface::frame
+ * callback (frame_callback_id) matches `id` -- separate from crtgfx_wl_
+ * find_window_by_surface() above since a frame callback's own object id
+ * is not one of that function's three fixed per-window ids (surface/
+ * xdg_surface/xdg_toplevel), even though it lives in the same shared
+ * per-connection id space. Added 2026-08-30 for CRTGFX_EVENT_FRAME_
+ * COMPLETE. */
+static struct crtgfx_host_window* crtgfx_wl_find_window_by_frame_callback(
+    struct crtgfx_wl_connection* conn, uint32_t id) {
+  struct crtgfx_host_window* w;
+
+  if (conn == 0 || id == 0) {
+    return 0;
+  }
+  for (w = conn->windows; w != 0; w = w->next) {
+    if (w->frame_callback_id == id) {
+      return w;
     }
   }
   return 0;
@@ -815,6 +868,24 @@ static void wl_dispatch_message(
   if (boot != 0 && object_id == conn->sync_callback_id && opcode == WL_CALLBACK_EVENT_DONE) {
     boot->sync_done = 1;
     return;
+  }
+  if (boot == 0 && opcode == WL_CALLBACK_EVENT_DONE) {
+    /* Same disambiguation-by-object-id discipline as wl_buffer::release
+     * below (also opcode 0 on its own interface) -- a wl_callback::done
+     * for some other window's own frame_callback_id, or for an already-
+     * destroyed window (crtgfx_wl_find_window_by_frame_callback() finds
+     * nothing once a window is unlinked from conn->windows), is not an
+     * error, just nothing to do here. */
+    struct crtgfx_host_window* fw = crtgfx_wl_find_window_by_frame_callback(conn, object_id);
+
+    if (fw != 0) {
+      crtgfx_event event = {0};
+
+      fw->frame_callback_id = 0;
+      event.type = CRTGFX_EVENT_FRAME_COMPLETE;
+      crtgfx_weston_toplevel_note_event(fw->toplevel, &event);
+      return;
+    }
   }
   if (object_id == conn->wm_base_id && opcode == XDG_WM_BASE_EVENT_PING) {
     unsigned char out[4];
@@ -1622,7 +1693,8 @@ int crtgfx_host_window_get_size(crtgfx_host_window* host, uint32_t* out_width, u
 }
 
 int crtgfx_host_window_present_software(
-    crtgfx_host_window* host, const void* pixels, uint32_t width, uint32_t height, uint32_t stride) {
+    crtgfx_host_window* host, const void* pixels, uint32_t width, uint32_t height, uint32_t stride,
+    const crtgfx_damage_rect* damage_rects, uint32_t damage_rect_count) {
   struct crtgfx_wl_connection* conn;
   int memfd;
   void* mapping;
@@ -1701,15 +1773,64 @@ int crtgfx_host_window_present_software(
     return CRTGFX_ERROR_HOST;
   }
 
-  off = wl_put_u32(body, 0, 0);
-  off = wl_put_u32(body, off, 0);
-  off = wl_put_u32(body, off, width);
-  off = wl_put_u32(body, off, height);
-  if (wl_send(conn, host->surface_id, WL_SURFACE_DAMAGE, body, off, -1) != CRTGFX_OK) {
-    free(submitted);
-    munmap(mapping, size);
-    close(memfd);
-    return CRTGFX_ERROR_HOST;
+  /* damage_rects/damage_rect_count null/0 means "the whole frame changed"
+   * (crtgfx/window.h's own crtgfx_window_end_frame_damaged() contract) --
+   * unchanged from this function's own previous, only behavior: one
+   * wl_surface::damage covering the whole surface. Otherwise a real,
+   * separate wl_surface::damage request per caller-supplied rect -- the
+   * protocol allows any number of damage requests before the one commit
+   * below, the compositor unions them itself, so this is a genuine
+   * partial-present optimization, not an approximation of one. Added
+   * 2026-08-30. */
+  if (damage_rects == 0 || damage_rect_count == 0u) {
+    off = wl_put_u32(body, 0, 0);
+    off = wl_put_u32(body, off, 0);
+    off = wl_put_u32(body, off, width);
+    off = wl_put_u32(body, off, height);
+    if (wl_send(conn, host->surface_id, WL_SURFACE_DAMAGE, body, off, -1) != CRTGFX_OK) {
+      free(submitted);
+      munmap(mapping, size);
+      close(memfd);
+      return CRTGFX_ERROR_HOST;
+    }
+  } else {
+    uint32_t i;
+
+    for (i = 0; i < damage_rect_count; i += 1u) {
+      const crtgfx_damage_rect* rect = &damage_rects[i];
+
+      if (rect->width == 0u || rect->height == 0u) {
+        continue; /* a real but degenerate rect -- no-op, not a protocol error */
+      }
+      off = wl_put_u32(body, 0, rect->x);
+      off = wl_put_u32(body, off, rect->y);
+      off = wl_put_u32(body, off, rect->width);
+      off = wl_put_u32(body, off, rect->height);
+      if (wl_send(conn, host->surface_id, WL_SURFACE_DAMAGE, body, off, -1) != CRTGFX_OK) {
+        free(submitted);
+        munmap(mapping, size);
+        close(memfd);
+        return CRTGFX_ERROR_HOST;
+      }
+    }
+  }
+
+  /* Request this present's own wl_callback::done notification (see
+   * WL_SURFACE_FRAME's own comment) before the commit below, the same
+   * ordering real upstream clients use -- only if no previous one is
+   * still outstanding (see crtgfx_host_window::frame_callback_id's own
+   * comment for why at most one is ever requested at a time). Best-effort:
+   * if this request fails to send, CRTGFX_EVENT_FRAME_COMPLETE simply
+   * never fires for this present, which is a real, honest degradation
+   * (the caller's own event queue -- not the actual present, already
+   * committed by this point) rather than treated as a fatal error here. */
+  if (host->frame_callback_id == 0u) {
+    uint32_t new_callback_id = conn->next_id++;
+
+    off = wl_put_u32(body, 0, new_callback_id);
+    if (wl_send(conn, host->surface_id, WL_SURFACE_FRAME, body, off, -1) == CRTGFX_OK) {
+      host->frame_callback_id = new_callback_id;
+    }
   }
 
   if (wl_send(conn, host->surface_id, WL_SURFACE_COMMIT, 0, 0, -1) != CRTGFX_OK) {

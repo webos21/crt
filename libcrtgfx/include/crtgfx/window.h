@@ -26,6 +26,19 @@ typedef struct crtgfx_window_desc {
   uint32_t flags;
 } crtgfx_window_desc;
 
+/* The one real format every backend produces and consumes today. Named
+ * fully rather than split into separate alpha-mode/color-space fields:
+ * "PREMULTIPLIED" already states the alpha mode explicitly, and every
+ * backend's own real presentation path (Linux wl_shm ARGB8888, Windows
+ * StretchDIBits, macOS CGImage) treats the channel bytes as plain sRGB-
+ * range integers with no color management applied anywhere in this
+ * pipeline -- stated here in the doc comment (2026-08-30, software
+ * frame contract work) rather than as a `color_space` struct field with
+ * exactly one legal value and no real consumer asking for a second one
+ * yet (this project's own Skia bridge, `src/skia_bridge.cc`, does not
+ * tag a color space either -- `SkImageInfo::Make()`'s 4-arg overload
+ * defaults to none). Add a real field once a real second format/space
+ * exists to distinguish, not speculatively ahead of one. */
 typedef enum crtgfx_pixel_format {
   CRTGFX_PIXEL_FORMAT_BGRA8888_PREMULTIPLIED = 1,
 } crtgfx_pixel_format;
@@ -36,7 +49,31 @@ typedef struct crtgfx_framebuffer {
   uint32_t height;
   uint32_t stride;
   crtgfx_pixel_format format;
+  /* Incremented every time the backing allocation behind `pixels` is
+   * actually reallocated/resized (crtgfx_weston_resize_software_buffer(),
+   * `src/wayland_weston.c`) -- NOT once per frame, since most frames
+   * reuse the same allocation untouched. Added 2026-08-30 (software
+   * frame contract work) to make an already-real but previously-implicit
+   * invariant checkable: every crtgfx_framebuffer this API hands out is
+   * only valid for the begin_frame()/end_frame() pair that produced it
+   * (the existing, tight-loop usage every caller and test already
+   * follows) -- a caller that mistakenly held onto a `pixels` pointer or
+   * `stride` value across a later resize can compare generation numbers
+   * to detect that itself, rather than the size mismatch silently
+   * producing a wrong-looking image with no diagnostic signal at all. */
+  uint64_t generation;
 } crtgfx_framebuffer;
+
+/* A single dirty rectangle in framebuffer pixel coordinates (top-left
+ * origin, matching every crtgfx_event pointer coordinate's own
+ * convention). Added 2026-08-30 for crtgfx_window_end_frame_damaged()
+ * below. */
+typedef struct crtgfx_damage_rect {
+  uint32_t x;
+  uint32_t y;
+  uint32_t width;
+  uint32_t height;
+} crtgfx_damage_rect;
 
 /* Input events. Added 2026-08-24, Phase 2/3 of the "notepad-capability"
  * plan -- the first real input API this project has, so its own design
@@ -119,7 +156,24 @@ typedef struct crtgfx_framebuffer {
  *    windowDidChangeBackingProperties: delegate callback, reasoned-but-
  *    not-verified like the rest of this session's macOS work (no host
  *    access) -- see HISTORY.md's 2026-08-30 entries for the full
- *    per-host trail. */
+ *    per-host trail.
+ *
+ * Added 2026-08-30, software frame contract work:
+ *  - CRTGFX_EVENT_FRAME_COMPLETE fires once per crtgfx_window_end_frame()/
+ *    crtgfx_window_end_frame_damaged() call, when the host has finished
+ *    consuming that submitted buffer -- the real, per-host meaning of
+ *    "presentation completion" this backend can actually deliver today
+ *    varies by host precision, stated honestly rather than papered over:
+ *    Linux requests a real `wl_surface::frame` callback (a genuine
+ *    compositor-timed "ready for your next frame" signal, the same
+ *    mechanism real Wayland vsync pacing uses); Windows/macOS fire it
+ *    synchronously, immediately after their own real present call
+ *    (`StretchDIBits`/`CALayer.setContents:`) returns, which is an
+ *    accurate reflection of when their own software path actually
+ *    finished (both are genuinely synchronous), not a real display-
+ *    vsync timestamp the way Wayland's callback is -- a caller pacing
+ *    strictly to real monitor refresh should not treat Windows/macOS's
+ *    own completion timing as vsync-accurate. */
 typedef enum crtgfx_event_type {
   CRTGFX_EVENT_NONE = 0,
   CRTGFX_EVENT_KEY_DOWN = 1,
@@ -135,6 +189,7 @@ typedef enum crtgfx_event_type {
   CRTGFX_EVENT_EXPOSE = 11,
   CRTGFX_EVENT_POINTER_SCROLL = 12,
   CRTGFX_EVENT_DPI_SCALE_CHANGED = 13,
+  CRTGFX_EVENT_FRAME_COMPLETE = 14,
 } crtgfx_event_type;
 
 /* Key-repeat policy (decided 2026-08-29, Phase 1): a held key's repeat is
@@ -207,10 +262,10 @@ typedef struct crtgfx_event {
        * this field; it exists so the wire shape is stable once one does. */
       double scale;
     } dpi_scale;
-    /* CRTGFX_EVENT_CLOSE_REQUESTED/FOCUS_IN/FOCUS_OUT/EXPOSE carry no
-     * payload -- the event type alone is the whole message, and the
-     * crtgfx_window* a caller already polled it from is the "which
-     * window" answer. */
+    /* CRTGFX_EVENT_CLOSE_REQUESTED/FOCUS_IN/FOCUS_OUT/EXPOSE/
+     * FRAME_COMPLETE carry no payload -- the event type alone is the
+     * whole message, and the crtgfx_window* a caller already polled it
+     * from is the "which window" answer. */
   } data;
 } crtgfx_event;
 
@@ -262,8 +317,60 @@ int crtgfx_window_show(crtgfx_window* window);
 int crtgfx_window_pump_events(uint32_t timeout_ms);
 int crtgfx_window_get_size(crtgfx_window* window, uint32_t* out_width, uint32_t* out_height);
 int crtgfx_window_should_close(crtgfx_window* window);
+/* Software frame buffer ownership (documented explicitly 2026-08-30 --
+ * every host already satisfied this, just not stated together in one
+ * place before): from a successful crtgfx_window_begin_frame() until the
+ * matching crtgfx_window_end_frame()/_end_frame_damaged() call returns,
+ * the returned crtgfx_framebuffer's own `pixels` allocation is owned by
+ * the caller (the producer) -- free to write into it, never to be read
+ * or written by anything else. Once that end_frame call returns, the
+ * caller's own ownership ends and the allocation is once again this
+ * library's own to manage (realloc it on the next resize, or reuse it
+ * for the next begin_frame -- see crtgfx_framebuffer::generation's own
+ * comment above), regardless of whether the host has *finished*
+ * consuming the pixels it was just handed (CRTGFX_EVENT_FRAME_COMPLETE
+ * reports that separately, asynchronously, and a caller does not need to
+ * wait for it before calling begin_frame() again). Every real backend
+ * satisfies "the caller's next begin_frame() never corrupts pixels the
+ * host has not consumed yet" the same way in spirit -- guarantee the
+ * host has its own independent copy or confirmation before end_frame()
+ * returns -- but via different real mechanisms: Linux keeps the
+ * submitted `wl_shm` buffer itself alive and gates reusing that specific
+ * allocation on the compositor's own real `wl_buffer::release` (the
+ * producer/consumer handoff is the buffer object itself, not a copy);
+ * Windows' `StretchDIBits()` and macOS's `CGDataProviderCreateWithData()`
+ * path both copy the caller's pixels into host-owned storage before
+ * end_frame() returns, so the original allocation is immediately safe to
+ * reuse without waiting on anything host-side at all. Both are the same
+ * contract kept, through a different real policy -- not a gap on
+ * Windows/macOS, and not something a caller needs to know to use this
+ * API correctly either way. */
 int crtgfx_window_begin_frame(crtgfx_window* window, crtgfx_framebuffer* out_framebuffer);
+/* Presents the whole framebuffer -- a thin convenience wrapper over
+ * crtgfx_window_end_frame_damaged(window, 0, 0) below (an empty/null
+ * damage-rect list means "everything changed", the only behavior this
+ * function ever had before 2026-08-30). Prefer crtgfx_window_end_frame_
+ * damaged() directly once a caller can cheaply track what actually
+ * changed -- see that function's own comment for why. */
 int crtgfx_window_end_frame(crtgfx_window* window);
+/* Added 2026-08-30 (software frame contract work): presents only the
+ * pixels inside `damage_rects` (each in framebuffer pixel coordinates),
+ * letting a host that supports partial present skip re-sending/
+ * re-compositing the untouched remainder of the frame -- a real
+ * optimization on Linux (multiple real wl_surface::damage requests
+ * instead of one covering the whole surface). `damage_rects` may be
+ * null / `damage_rect_count` may be 0 to mean "the whole frame changed"
+ * (crtgfx_window_end_frame()'s own behavior). Rects outside the current
+ * framebuffer bounds, or an empty list on a host that has no partial-
+ * present path of its own, are never an error -- every host remains free
+ * to present more than what was strictly requested (in particular,
+ * macOS's own CALayer.contents replacement is inherently whole-image;
+ * see src/arch/macos/window_cocoa.c's own comment). This is a real,
+ * honest per-host capability difference, not a contract violation on
+ * hosts that cannot do better -- a caller must never depend on anything
+ * outside its declared damage actually staying unchanged on screen. */
+int crtgfx_window_end_frame_damaged(
+    crtgfx_window* window, const crtgfx_damage_rect* damage_rects, uint32_t damage_rect_count);
 /* Pops the oldest queued input event into *out_event. Returns CRTGFX_OK
  * with out_event->type != CRTGFX_EVENT_NONE if an event was popped,
  * CRTGFX_OK with out_event->type == CRTGFX_EVENT_NONE if the queue was

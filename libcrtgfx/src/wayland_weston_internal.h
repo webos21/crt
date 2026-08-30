@@ -31,6 +31,11 @@ typedef struct crtgfx_weston_toplevel {
    * one-time CRTGFX_EVENT_EXPOSE (see that function's comment) -- never
    * re-fired on a later show() call for the same window. */
   int expose_sent;
+  /* See crtgfx/window.h's own crtgfx_framebuffer::generation comment --
+   * incremented only when crtgfx_weston_resize_software_buffer() (below)
+   * actually reallocates software_buffer, not once per frame. Added
+   * 2026-08-30. */
+  uint64_t generation;
   crtgfx_event event_queue[CRTGFX_EVENT_QUEUE_CAPACITY];
   uint32_t event_queue_head;
   uint32_t event_queue_count;
@@ -48,6 +53,12 @@ int crtgfx_weston_toplevel_get_size(crtgfx_window* window, uint32_t* out_width, 
 int crtgfx_weston_toplevel_should_close(crtgfx_window* window);
 int crtgfx_weston_toplevel_begin_frame(crtgfx_window* window, crtgfx_framebuffer* out_framebuffer);
 int crtgfx_weston_toplevel_end_frame(crtgfx_window* window);
+/* Real implementation behind both crtgfx_window_end_frame() (calls this
+ * with damage_rects=0/damage_rect_count=0) and crtgfx_window_end_frame_
+ * damaged() -- see crtgfx/window.h's own comments on both for the public
+ * contract. Added 2026-08-30. */
+int crtgfx_weston_toplevel_end_frame_damaged(
+    crtgfx_window* window, const crtgfx_damage_rect* damage_rects, uint32_t damage_rect_count);
 int crtgfx_weston_toplevel_poll_event(crtgfx_window* window, crtgfx_event* out_event);
 
 void crtgfx_weston_toplevel_note_size(crtgfx_weston_toplevel* toplevel, uint32_t width, uint32_t height);
@@ -58,8 +69,7 @@ void crtgfx_weston_toplevel_note_close(crtgfx_weston_toplevel* toplevel);
  * never calls this. Every host backend calls this from its own real
  * keyboard-focus signal (Linux: wl_keyboard::enter/leave; Windows:
  * WM_SETFOCUS/WM_KILLFOCUS; macOS: windowDidBecomeKey:/
- * windowDidResignKey: -- not yet wired on macOS as of this comment, see
- * TODO.md). */
+ * windowDidResignKey:). */
 void crtgfx_weston_toplevel_note_focus(crtgfx_weston_toplevel* toplevel, int focused);
 /* Backend-facing push side of the event queue: any arch backend calls
  * this once per real native input event it receives (from its own
@@ -79,5 +89,14 @@ void crtgfx_host_window_destroy(crtgfx_host_window* host);
 int crtgfx_host_window_show(crtgfx_host_window* host);
 int crtgfx_host_window_dispatch(uint32_t timeout_ms);
 int crtgfx_host_window_get_size(crtgfx_host_window* host, uint32_t* out_width, uint32_t* out_height);
+/* damage_rects/damage_rect_count: added 2026-08-30 -- see crtgfx/
+ * window.h's own crtgfx_window_end_frame_damaged() comment for the
+ * public contract (damage_rects null / damage_rect_count 0 means "the
+ * whole frame changed", every backend's own previous, only behavior).
+ * A backend with no real partial-present path of its own (macOS) is
+ * free to ignore these and always present the whole frame regardless --
+ * documented there as a real, honest per-host capability difference,
+ * not a contract violation. */
 int crtgfx_host_window_present_software(
-    crtgfx_host_window* host, const void* pixels, uint32_t width, uint32_t height, uint32_t stride);
+    crtgfx_host_window* host, const void* pixels, uint32_t width, uint32_t height, uint32_t stride,
+    const crtgfx_damage_rect* damage_rects, uint32_t damage_rect_count);

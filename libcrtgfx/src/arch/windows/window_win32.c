@@ -830,7 +830,8 @@ int crtgfx_host_window_get_size(crtgfx_host_window* host, uint32_t* out_width, u
 }
 
 int crtgfx_host_window_present_software(
-    crtgfx_host_window* host, const void* pixels, uint32_t width, uint32_t height, uint32_t stride) {
+    crtgfx_host_window* host, const void* pixels, uint32_t width, uint32_t height, uint32_t stride,
+    const crtgfx_damage_rect* damage_rects, uint32_t damage_rect_count) {
   BITMAPINFO info;
   HDC dc;
   RECT rect;
@@ -860,11 +861,48 @@ int crtgfx_host_window_present_software(
   info.bmiHeader.biBitCount = 32;
   info.bmiHeader.biCompression = BI_RGB;
 
-  drawn = StretchDIBits(dc, 0, 0, client_width, client_height, 0, 0, (int)width, (int)height,
-                        pixels, &info, DIB_RGB_COLORS, SRCCOPY);
+  if (damage_rects == 0 || damage_rect_count == 0) {
+    drawn = StretchDIBits(dc, 0, 0, client_width, client_height, 0, 0, (int)width, (int)height,
+                          pixels, &info, DIB_RGB_COLORS, SRCCOPY);
+    if (drawn == 0) {
+      ReleaseDC(host->hwnd, dc);
+      return CRTGFX_ERROR_HOST;
+    }
+  } else {
+    /* Real, direct 1:1 blit of just the declared rects -- a genuine
+     * partial-present optimization (StretchDIBits() really does support
+     * an arbitrary source/dest sub-rect, confirmed against this
+     * machine's own real SDK signature), not a scaling API: source and
+     * dest use the exact same coordinates here, unlike the whole-frame
+     * path above which stretches to the current client size. See
+     * crtgfx/window.h's own crtgfx_window_end_frame_damaged() comment --
+     * damage rects are given in framebuffer pixel coordinates. */
+    uint32_t i;
+
+    for (i = 0; i < damage_rect_count; ++i) {
+      int x = (int)damage_rects[i].x;
+      int y = (int)damage_rects[i].y;
+      int w = (int)damage_rects[i].width;
+      int h = (int)damage_rects[i].height;
+
+      drawn = StretchDIBits(dc, x, y, w, h, x, y, w, h, pixels, &info, DIB_RGB_COLORS, SRCCOPY);
+      if (drawn == 0) {
+        ReleaseDC(host->hwnd, dc);
+        return CRTGFX_ERROR_HOST;
+      }
+    }
+  }
   ReleaseDC(host->hwnd, dc);
-  if (drawn == 0) {
-    return CRTGFX_ERROR_HOST;
+
+  /* CRTGFX_EVENT_FRAME_COMPLETE: fired synchronously, right here, since
+   * StretchDIBits() is itself synchronous -- see crtgfx/window.h's own
+   * doc comment on this event for why this is an accurate reflection of
+   * Windows' own real completion timing, not a real vsync signal. */
+  if (host->toplevel != 0) {
+    crtgfx_event event = {0};
+
+    event.type = CRTGFX_EVENT_FRAME_COMPLETE;
+    crtgfx_weston_toplevel_note_event(host->toplevel, &event);
   }
   return CRTGFX_OK;
 }
