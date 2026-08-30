@@ -10,6 +10,93 @@ substantive update.
 
 ## 2026-08-30
 
+- **`CRTGFX_EVENT_FRAME_COMPLETE` made genuinely asynchronous on Windows
+  too, via a real DXGI flip-model swap chain replacing GDI/
+  `StretchDIBits` entirely.** User asked, after Linux/macOS both landed
+  real async completion the same day, whether Windows could get the same
+  thing. Investigated empirically before writing any production code, the
+  same discipline as every other per-host claim this session:
+  - **Real, on-machine probes, not assumption**: a standalone probe
+    (plain Win32 SDK headers, not this project's own code) confirmed
+    `DwmGetCompositionTimingInfo()` returns `E_INVALIDARG` for a real GDI
+    `HWND`'s own handle, on every call, on this real Windows 11 machine --
+    the `hwnd=NULL` "desktop" form does return real, advancing counters,
+    but they tick every call regardless of whether the probe process ever
+    draws anything at all, i.e. not a per-window signal. Conclusion: no
+    honest per-buffer completion signal exists for plain GDI presentation
+    on this OS version at all.
+  - **The only real mechanism**: `IDXGISwapChain2::
+    GetFrameLatencyWaitableObject()`, a genuine per-swap-chain kernel
+    object the OS signals once that swap chain's own previously presented
+    buffer has actually been retired -- the real Windows analog of
+    Linux's `wl_surface::frame` and macOS's `CATransaction` completion
+    block. Requires a real DXGI flip-model swap chain, which requires
+    dropping GDI/`StretchDIBits` for the whole software-frame path (the
+    two are unrelated presentation pipelines; there is no way to keep
+    painting through GDI while asking DXGI for a completion signal on
+    content nobody is compositing).
+  - **Validated with a second standalone probe before touching production
+    code**: real `d3d11.h`/`dxgi1_3.h` SDK headers, a real window, real
+    per-frame `UpdateSubresource`/`Present`, real
+    `GetFrameLatencyWaitableObject()` polling -- confirmed the whole
+    pipeline works and that `Present()` can legitimately return
+    `DXGI_STATUS_OCCLUDED` (a real, documented non-error status, not a
+    failure) when the window isn't currently composited.
+  - **Ported into `window_win32.c` as a from-scratch, hand-rolled minimal
+    COM/DXGI/D3D11 surface** (`crtgfx_dxgi_*`/`crtgfx_d3d11_*` types),
+    matching this file's own established no-host-SDK-header style --
+    every real GUID and vtable slot count transcribed directly from this
+    machine's own real Windows 10 SDK (10.0.28000.0) headers, method by
+    method, and cross-checked against the second probe's own real,
+    working calls before landing (a COM vtable is a fixed binary ABI
+    where a wrong slot count silently calls the wrong function rather
+    than failing to compile, unlike this file's existing flat user32/
+    gdi32 dllimports). Reserved/unused vtable slots between IUnknown's
+    own 3 methods and whichever real method a given interface needed are
+    represented as counted `void* reserved[N]` arrays -- only the count
+    matters for layout, never their individual types.
+  - Real per-window D3D11 device (HARDWARE, falling back to WARP -- the
+    OS's own always-available software D3D11 rasterizer -- for a
+    headless/no-GPU-driver host) + DXGI swap chain
+    (`DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL`,
+    `DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT`,
+    `DXGI_FORMAT_B8G8R8A8_UNORM` -- the same byte layout the software
+    frame contract already used, no format conversion needed). `WM_SIZE`
+    now also calls a real `ResizeBuffers()` (guarded against a 0x0
+    minimize-triggered size, and safe by construction against DXGI's own
+    "release every outstanding buffer reference first" rule, since
+    `present_software()` always releases its `GetBuffer()` result before
+    returning). Damage rects still get a real partial-present path -- one
+    `UpdateSubresource()` per rect with a real `D3D11_BOX`, correctly
+    keeping `SrcRowPitch` as the *whole buffer's* stride rather than the
+    rect's own width (an easy-to-get-wrong `UpdateSubresource` subtlety,
+    confirmed against real D3D11 documentation).
+  - `CRTGFX_EVENT_FRAME_COMPLETE` is now queued asynchronously: a
+    `frame_complete_pending` flag set after each `Present()`, checked via
+    a non-blocking `WaitForSingleObject(waitable, 0)` both opportunistically
+    in `present_software()` (before the next present) and, the real
+    delivery path, once per `crtgfx_host_window_dispatch()` cycle across
+    every live window (a new process-wide `crtgfx_win_windows` list, the
+    same shape as Linux's `conn->windows`/macOS's `crtgfx_cocoa_windows`).
+  - **Verified for real, in the actual production code path, not just the
+    standalone probes**: full `cmake --build`/`ctest` 121/121 unchanged.
+    `crtgfx_window_smoke`/`crtgfx_skia_raster_smoke`/
+    `crtgfx_skia_cpu_coverage` all still pass. `crtgfx_keyboard_
+    interactive` (the same instrumented "which iteration submitted this
+    frame vs which iteration observed its completion" logging macOS's own
+    verification used) run live for real: **99/99 `FRAME_COMPLETE` events
+    delivered on the iteration *after* submission, zero delivered
+    synchronously, consistently ~78ms later**. A separate same-process
+    resize probe (found window via `FindWindowA` from within its own
+    process -- cross-process window lookup is blocked in this sandboxed
+    session) confirmed `ResizeBuffers()` and continued presentation
+    survive a real grow (320x200 -> 684x461 client) and a real shrink
+    (-> 184x111 client) in the same run.
+  - `crtgfx/window.h`'s own `CRTGFX_EVENT_FRAME_COMPLETE` doc comment and
+    the software-frame producer/consumer ownership comment both updated
+    to describe the new mechanism; every host is now genuinely
+    asynchronous, none of the three vsync-precise.
+
 - **`libcrtgfx` deterministic Skia CPU-raster regression coverage**
   (TODO.md's "Broaden deterministic Skia CPU coverage" item, first
   sub-part landed). New `libcrtgfx/tests/skia_cpu_coverage_test.cc` and

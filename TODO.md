@@ -169,19 +169,26 @@ work queue anymore.
 
 **The software frame contract extension is also done** (2026-08-30):
 framebuffer `generation` tracking across a resize, damage rectangles/partial
-present (real per-rect `StretchDIBits`/`wl_surface::damage` on Windows/
+present (real per-rect `UpdateSubresource`/`wl_surface::damage` on Windows/
 Linux, honestly whole-frame on macOS -- confirmed on real macOS hardware to
 be a genuine, understood limitation, not an oversight: a real fix would
 need double/triple-buffering, which conflicts with this backend's own
 tear/use-after-free-avoiding fresh-copy-per-frame design), a real
-`CRTGFX_EVENT_FRAME_COMPLETE` notification (genuinely asynchronous on both
-Linux, via `wl_surface::frame`/`wl_callback::done`, and macOS, via
-`-[CATransaction setCompletionBlock:]` -- live-measured on real hardware,
-658/658 frames in one run delivered exactly one pump cycle later, never
-synchronously; synchronous only on Windows, via `StretchDIBits`), and the
-producer/consumer acquire/release ownership contract now documented
-explicitly on all three hosts. See `HISTORY.md`'s 2026-08-30 entries for the
-full trail; not a work-queue item anymore.
+`CRTGFX_EVENT_FRAME_COMPLETE` notification -- **genuinely asynchronous on
+all three hosts now**: Linux via `wl_surface::frame`/`wl_callback::done`;
+macOS via `-[CATransaction setCompletionBlock:]` (live-measured on real
+hardware, 658/658 frames in one run delivered exactly one pump cycle later,
+never synchronously); Windows (added later the same day, after the user
+asked whether it could match the other two) via a real DXGI flip-model swap
+chain's `IDXGISwapChain2::GetFrameLatencyWaitableObject()`, replacing GDI/
+`StretchDIBits` entirely -- plain GDI has no per-window completion signal at
+all, empirically confirmed (`DwmGetCompositionTimingInfo()` returns
+`E_INVALIDARG` for a real GDI `HWND` on this machine, every call); live-
+measured the same way, 99/99 frames in one run delivered on the next
+iteration, never synchronously, ~78ms later -- and the producer/consumer
+acquire/release ownership contract now documented explicitly on all three
+hosts. See `HISTORY.md`'s 2026-08-30 entries for the full trail; not a
+work-queue item anymore.
 
 **Deterministic Skia CPU coverage is mostly done** (2026-08-30): the new
 `crtgfx_skia_cpu_coverage` ctest target (37 checks, headless -- builds its own

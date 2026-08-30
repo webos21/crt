@@ -29,9 +29,10 @@ typedef struct crtgfx_window_desc {
 /* The one real format every backend produces and consumes today. Named
  * fully rather than split into separate alpha-mode/color-space fields:
  * "PREMULTIPLIED" already states the alpha mode explicitly, and every
- * backend's own real presentation path (Linux wl_shm ARGB8888, Windows
- * StretchDIBits, macOS CGImage) treats the channel bytes as plain sRGB-
- * range integers with no color management applied anywhere in this
+ * backend's own real presentation path (Linux wl_shm ARGB8888, Windows a
+ * DXGI `DXGI_FORMAT_B8G8R8A8_UNORM` swap chain, macOS CGImage) treats the
+ * channel bytes as plain sRGB-range integers with no color management
+ * applied anywhere in this
  * pipeline -- stated here in the doc comment (2026-08-30, software
  * frame contract work) rather than as a `color_space` struct field with
  * exactly one legal value and no real consumer asking for a second one
@@ -175,14 +176,31 @@ typedef struct crtgfx_damage_rect {
  *    src/arch/macos/window_cocoa.c's own crtgfx_cocoa_frame_complete_
  *    invoke for the full account), though still not a real display-vsync
  *    timestamp the way Wayland's callback is, only "Core Animation has
- *    processed this transaction"; Windows fires it synchronously,
- *    immediately after its own real `StretchDIBits` present call
- *    returns, which is an accurate reflection of when its own software
- *    path actually finished, not a real display-vsync timestamp either.
- *    A caller pacing strictly to real monitor refresh should not treat
- *    Windows's own synchronous completion timing, or macOS/Linux's own
- *    non-vsync-timed asynchronous completion timing, as vsync-accurate
- *    on any host. */
+ *    processed this transaction"; Windows (added 2026-08-30, after
+ *    empirically confirming no per-window completion signal exists for a
+ *    plain GDI window on this project's own real dev machine --
+ *    `DwmGetCompositionTimingInfo()` returns `E_INVALIDARG` for a real
+ *    GDI `HWND` every time, and its own `hwnd=NULL` global-desktop form
+ *    advances regardless of whether this process draws anything at all,
+ *    neither of which is a real per-buffer signal) now presents through a
+ *    real DXGI flip-model swap chain instead of `StretchDIBits`
+ *    specifically to get one: `IDXGISwapChain2::
+ *    GetFrameLatencyWaitableObject()` is a genuine per-swap-chain kernel
+ *    object the OS signals once that swap chain's own previously
+ *    presented buffer has actually been retired, polled non-blocking from
+ *    `crtgfx_host_window_dispatch()` (see `src/arch/windows/
+ *    window_win32.c`'s own `crtgfx_win_poll_frame_complete()`) -- the
+ *    Windows analog of Linux's `wl_surface::frame` and macOS's
+ *    `CATransaction` completion block, and, like both of those, not
+ *    guaranteed vsync-precise (confirmed for real: an occluded/not-
+ *    currently-composited window's own `Present()` still returns a real,
+ *    documented non-error status, `DXGI_STATUS_OCCLUDED`, and the
+ *    waitable can signal faster than real display refresh in that case --
+ *    the same class of caveat Wayland's own callback and CATransaction's
+ *    own completion block already carry for a surface that is not
+ *    actually visible on screen right now). A caller pacing strictly to
+ *    real monitor refresh should not treat any of the three hosts' own
+ *    completion timing as vsync-accurate. */
 typedef enum crtgfx_event_type {
   CRTGFX_EVENT_NONE = 0,
   CRTGFX_EVENT_KEY_DOWN = 1,
@@ -347,10 +365,11 @@ int crtgfx_window_should_close(crtgfx_window* window);
  * submitted `wl_shm` buffer itself alive and gates reusing that specific
  * allocation on the compositor's own real `wl_buffer::release` (the
  * producer/consumer handoff is the buffer object itself, not a copy);
- * Windows' `StretchDIBits()` and macOS's `CGDataProviderCreateWithData()`
- * path both copy the caller's pixels into host-owned storage before
- * end_frame() returns, so the original allocation is immediately safe to
- * reuse without waiting on anything host-side at all. Both are the same
+ * Windows' `ID3D11DeviceContext::UpdateSubresource()` and macOS's
+ * `CGDataProviderCreateWithData()` path both copy the caller's pixels
+ * into host-owned storage before end_frame() returns, so the original
+ * allocation is immediately safe to reuse without waiting on anything
+ * host-side at all. Both are the same
  * contract kept, through a different real policy -- not a gap on
  * Windows/macOS, and not something a caller needs to know to use this
  * API correctly either way. */

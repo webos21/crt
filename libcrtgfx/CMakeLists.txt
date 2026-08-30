@@ -885,11 +885,41 @@ if(CRT_TARGET_OS STREQUAL "windows")
     PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES}
     NO_DEFAULT_PATH
   )
+  # d3d11.lib/dxgi.lib: real flat-export import libraries for
+  # D3D11CreateDevice()/CreateDXGIFactory1() (window_win32.c's own
+  # crtgfx_win_create_swap_chain(), added 2026-08-30 for a genuinely
+  # asynchronous CRTGFX_EVENT_FRAME_COMPLETE -- see that file's own top
+  # comment). dxguid.lib provides the real IID_* GUID *symbols* d3d11.h/
+  # dxgi1_2.h/dxgi1_3.h only `EXTERN_C const IID IID_...;` declare --
+  # this file defines its own equivalent GUID constants directly instead
+  # (crtgfx_iid_idxgi_factory2/crtgfx_iid_id3d11_texture2d/crtgfx_iid_
+  # idxgi_swapchain2), matching this file's own no-host-SDK-header style,
+  # so dxguid.lib itself is NOT needed here (confirmed via dxgi_probe.c,
+  # the real standalone probe this mechanism was validated with before
+  # landing here -- that probe DOES need dxguid.lib, since it uses the
+  # real SDK's own `IID_IDXGIFactory2`-style extern symbols directly, but
+  # this project's own hand-rolled constants sidestep that entirely).
+  find_file(CRTGFX_WINDOWS_D3D11_LIB
+    NAMES d3d11.lib
+    PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES}
+    NO_DEFAULT_PATH
+  )
+  find_file(CRTGFX_WINDOWS_DXGI_LIB
+    NAMES dxgi.lib
+    PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES}
+    NO_DEFAULT_PATH
+  )
   if(NOT CRTGFX_WINDOWS_USER32_LIB)
     set(CRTGFX_WINDOWS_USER32_LIB user32.lib CACHE FILEPATH "Windows user32 import library")
   endif()
   if(NOT CRTGFX_WINDOWS_GDI32_LIB)
     set(CRTGFX_WINDOWS_GDI32_LIB gdi32.lib CACHE FILEPATH "Windows gdi32 import library")
+  endif()
+  if(NOT CRTGFX_WINDOWS_D3D11_LIB)
+    set(CRTGFX_WINDOWS_D3D11_LIB d3d11.lib CACHE FILEPATH "Windows d3d11 import library")
+  endif()
+  if(NOT CRTGFX_WINDOWS_DXGI_LIB)
+    set(CRTGFX_WINDOWS_DXGI_LIB dxgi.lib CACHE FILEPATH "Windows dxgi import library")
   endif()
 endif()
 
@@ -1002,6 +1032,8 @@ if(CRT_TARGET_OS STREQUAL "windows")
     "${CRT_WINDOWS_KERNEL32_LIB}"
     "${CRTGFX_WINDOWS_USER32_LIB}"
     "${CRTGFX_WINDOWS_GDI32_LIB}"
+    "${CRTGFX_WINDOWS_D3D11_LIB}"
+    "${CRTGFX_WINDOWS_DXGI_LIB}"
   )
 elseif(CRT_TARGET_OS STREQUAL "macos")
   target_link_libraries(crtgfx PUBLIC ${CRTGFX_MACOS_FRAMEWORKS})
@@ -1108,6 +1140,8 @@ if(CRT_TARGET_OS STREQUAL "windows")
     "${CRT_WINDOWS_KERNEL32_LIB}"
     "${CRTGFX_WINDOWS_USER32_LIB}"
     "${CRTGFX_WINDOWS_GDI32_LIB}"
+    "${CRTGFX_WINDOWS_D3D11_LIB}"
+    "${CRTGFX_WINDOWS_DXGI_LIB}"
   )
   if(CRTGFX_ENABLE_SKIA)
     target_link_libraries(crtgfx_shared PRIVATE crt_compiler_rt_builtins)
