@@ -1,0 +1,44 @@
+# Normalize line endings for the whole repository: check out LF for
+# every text file, regardless of the checking-out client's own
+# core.autocrlf setting. Windows Git's common default (autocrlf=true)
+# was silently checking every shell/Python script under tools/ (and
+# every vendored shell/mksh, shell/toybox source file) out with CRLF
+# line endings on this project's own Windows machines -- harmless for
+# anything only ever *read* by a text editor or the Windows-native
+# build path, but a real, confirmed-live bug for a *shebang* script
+# later executed on Linux/macOS/WSL: `#!/bin/sh\r` makes the kernel
+# look for an interpreter literally named `/bin/sh` with a trailing
+# carriage return, which does not exist -- `bad interpreter: No such
+# file or directory`, confirmed for real (2026-08-31) trying to run
+# tools/crt-cc from a Windows-git-cloned checkout via WSL's own
+# /mnt/c/ path, see HISTORY.md's matching entry for the fuller trail.
+* text=auto eol=lf
+
+# Windows-native scripts keep their native CRLF -- both the correct
+# convention for these formats, and nothing on this project's own
+# Linux/macOS/WSL side ever executes a .cmd/.ps1 file directly.
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Known binary assets: never text-normalize these, regardless of git's
+# own content-based binary heuristic (which text=auto above already
+# relies on for everything not listed here) getting it right or not --
+# an explicit list costs nothing and removes any doubt for exactly the
+# assets a line-ending mistake would visibly and audibly break
+# (bundled fonts, mksh's own icon, vendored tarballs porting recipes
+# fetch-check against).
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.png binary
+*.ico binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.zip binary
+*.tar binary
+*.tgz binary
+*.tbz2 binary
+*.bz2 binary
+*.gz binary

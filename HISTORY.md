@@ -10,6 +10,44 @@ substantive update.
 
 ## 2026-08-31
 
+- **Added `.gitattributes` to force LF line endings repo-wide, fixing a
+  real, confirmed-live "bad interpreter" failure on WSL/Linux.** Found
+  while trying to verify the `libcrtmedia` CPU frame contract's own
+  `crtmedia_frame_skia_smoke` on real WSL Linux (see that entry, just
+  below): `tools/crt-cc` (and every other extensionless shebang script
+  under `tools/`, plus vendored `shell/toybox/`/`shell/mksh/` source)
+  had been checked out with CRLF line endings on this project's own
+  Windows machine (Git for Windows' common `core.autocrlf=true`
+  default, with no `.gitattributes` in the repo to override it for
+  paths that must stay LF to execute). A CRLF-mangled shebang line
+  (`#!/bin/sh\r`) makes the kernel look for an interpreter literally
+  named `/bin/sh` with a trailing carriage return, which does not
+  exist -- `bash: tools/crt-cc: /bin/sh^M: bad interpreter: No such
+  file or directory` -- breaking `tools/build_xkbcommon.py`'s own call
+  into `tools/crt-cc` partway through `crtgfx-skia-smoke`'s dependency
+  chain on a genuine WSL/Linux run from this exact checkout. Confirmed
+  this was purely a *checkout-time* artifact, not corrupted repository
+  content: the actual git blobs (`git show :path`) were already LF-only
+  throughout; `git add --renormalize .` found nothing to change. Fixed
+  with `* text=auto eol=lf` (plus explicit `*.cmd`/`*.ps1` keep-CRLF and
+  explicit `binary` rules for fonts/images/vendored archives, so
+  nothing relies solely on git's own content-sniffing heuristic for
+  assets a line-ending mistake would visibly/audibly break), then
+  force-recreated every tracked file in the local working tree
+  (`git ls-files -z | xargs -0 rm -f --` then `git checkout -- .`) to
+  actually pick up the new attributes locally -- `.gitattributes`
+  alone only changes *future* checkouts, not files already present
+  before it existed. Verified for real on WSL: `tools/crt-cc` now runs
+  (prints its own `CRT_SYSROOT is not set` error instead of the shell's
+  bad-interpreter error) and the fresh recheckout produced zero
+  unexpected diffs against the index (confirmed via `git status`) --
+  the one genuinely unrelated ctest failure surfaced while re-running
+  the suite afterward (`crtgfx_window_smoke_runs`, `end_frame (-3)`)
+  is this specific WSL session having no real display/compositor
+  connection, the exact condition `crtgfx_synthetic_event`'s own test
+  already documents and tolerates (`end_frame unavailable (-3),
+  continuing`) -- not a regression from this change.
+
 - **Windows `<filesystem>` UTF-32 `wchar_t` vs. real UTF-16 `WCHAR`:
   `std::filesystem` was completely non-functional on Windows, not just an
   untested edge case -- found, root-caused, and fixed for real.** Closes
