@@ -224,11 +224,34 @@ substantive update.
     build directory `crtgfx_skia_cpu_coverage` already uses, alongside
     that target and `crtgfx_skia_raster_smoke` -- all three pass
     together), and the full pre-existing 122-test ctest suite in the
-    plain default build still passes unaffected. Linux/macOS not
-    verified this session (no host available) -- both new source files
-    are plain portable C/C++ with no host-specific code, matching this
-    project's own established pattern for a first landing before a
-    later per-host confirmation pass.
+    plain default build still passes unaffected.
+  - **Also verified for real on WSL/Linux** (2026-08-31, prompted by the
+    user directly asking whether this had actually been checked on
+    WSL, not just assumed -- it had not been, and that question is what
+    started the CRLF investigation now recorded in this same date's own
+    `.gitattributes` entry, above). `crtmedia_frame_test` passed clean
+    on the first real Linux build (plain `clang`/`clang++`, no CRT
+    toolchain-wrapper involvement, so unaffected by the CRLF bug).
+    `crtmedia_frame_skia_smoke` needed the CRLF fix first (`tools/crt-
+    cc`, invoked by `tools/build_xkbcommon.py` partway through this
+    exact target's own dependency chain, is exactly the kind of call
+    site that surfaced it) plus one unrelated, self-inflicted cleanup:
+    an earlier attempt's own `kill -9` (used to stop a WSL git checkout
+    that looked hung on the drvfs-mounted `/mnt/c/` path) left a
+    corrupted partial `.clone-libcxxabi` checkout behind (top-level
+    monorepo files present, the sparse-checked-out `libcxxabi`
+    subdirectory itself missing) that `crt-libcxx-build.py --phase
+    fetch`'s own already-fetched short-circuit doesn't detect as
+    incomplete -- removing that one stale directory and re-fetching
+    cleanly fixed it. After both fixes, a genuine from-scratch run
+    (fetch+build imported libc++, then fetch+build FreeType, then
+    fetch+build Skia's own CPU-raster archive, then finally the two
+    real target executables) passed end to end: `crtmedia_frame_skia_
+    smoke: ok`. macOS still not verified this session (no host
+    available) -- both new source files are plain portable C/C++ with
+    no host-specific code, matching this project's own established
+    pattern for a first landing before a later per-host confirmation
+    pass.
 
 ## 2026-08-30
 

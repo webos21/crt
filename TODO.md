@@ -219,9 +219,10 @@ or Skia needed -- plane geometry, ownership/release, conversion math) and
 like `crtgfx_skia_cpu_coverage` -- wraps a synthetic RGBA8888 frame and a
 synthetic BGRA8888 frame directly as an `SkImage`, converts a synthetic
 YUV420P frame first, draws each through a real raster `SkSurface`, and
-checks the read-back pixels match). Verified for real on Windows (both
-targets passing, full existing ctest suite of 122 unaffected). See
-`HISTORY.md`'s 2026-08-31 entry for the full trail; not a work-queue item
+checks the read-back pixels match). Verified for real on both Windows and
+WSL/Linux (both targets passing on both hosts, full existing ctest suite
+unaffected); macOS not verified, no host available. See `HISTORY.md`'s
+2026-08-31 entry for the full trail; not a work-queue item
 anymore.
 
 Open upper-runtime work, in recommended order, now that the gate above is
