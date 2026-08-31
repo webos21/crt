@@ -247,11 +247,20 @@ substantive update.
     (fetch+build imported libc++, then fetch+build FreeType, then
     fetch+build Skia's own CPU-raster archive, then finally the two
     real target executables) passed end to end: `crtmedia_frame_skia_
-    smoke: ok`. macOS still not verified this session (no host
-    available) -- both new source files are plain portable C/C++ with
-    no host-specific code, matching this project's own established
-    pattern for a first landing before a later per-host confirmation
-    pass.
+    smoke: ok`.
+  - **Also verified for real on macOS** (2026-08-31, this session had
+    real macOS hardware access): `crtmedia_frame_test_runs` passed in
+    the plain default build (0.06s), and the full pre-existing ctest
+    suite stayed green (106/106, no regressions). `crtmedia_frame_skia_
+    smoke_runs` passed in the same `crtgfx-skia-smoke` dedicated,
+    `CRTGFX_ENABLE_SKIA=ON` build directory `crtgfx_skia_raster_smoke`/
+    `crtgfx_skia_cpu_coverage` already use on this host (all three
+    together, plus the already-built imported libc++/FreeType/Skia
+    dependency chain from earlier sessions still cached in that
+    directory): `crtmedia_frame_skia_smoke: ok`. No macOS-specific
+    issues found -- both new source files really are plain portable
+    C/C++ as intended, closing out the one remaining per-host gap this
+    contract had.
 
 ## 2026-08-30
 
