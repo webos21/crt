@@ -377,13 +377,20 @@ if(Python3_Interpreter_FOUND)
   # crtgfx-skia-build the way the real target's own dependents do -- those
   # run *inside* the dedicated directory the script itself drives, not
   # this (the calling) one.
-  # --target given twice (2026-08-30): crtgfx_skia_cpu_coverage (tests/
-  # skia_cpu_coverage_test.cc) needs the exact same Skia-enabled build as
-  # crtgfx_skia_raster_smoke, so it rides along in the same dedicated
-  # build directory/single configure pass instead of needing its own
-  # separate `cmake --build ... --target crtgfx-...` invocation -- see
-  # tools/test_crtgfx_skia_smoke.py's own docstring for why a repeated
-  # --target is now supported there specifically for this.
+  # --target given three times (2026-08-30, then again 2026-08-31):
+  # crtgfx_skia_cpu_coverage (tests/skia_cpu_coverage_test.cc) and
+  # crtmedia_frame_skia_smoke (libcrtmedia/tests/frame_skia_smoke.cc, see
+  # that target's own add_executable() comment above for why it is
+  # defined in *this* file despite its source living under libcrtmedia/)
+  # both need the exact same Skia-enabled build as crtgfx_skia_raster_
+  # smoke, so each rides along in the same dedicated build directory/
+  # single configure pass instead of needing its own separate `cmake
+  # --build ... --target crtgfx-...` invocation -- see tools/test_
+  # crtgfx_skia_smoke.py's own docstring for why a repeated --target is
+  # supported there specifically for this. That script's own binary-path
+  # assumption (`build_dir / "libcrtgfx" / target`) still holds for
+  # crtmedia_frame_skia_smoke: CMake places a target's build output under
+  # its *defining* CMakeLists.txt's own directory, not its source file's.
   add_custom_target(crtgfx-skia-smoke
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
       "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_crtgfx_skia_smoke.py"
@@ -395,8 +402,9 @@ if(Python3_Interpreter_FOUND)
       --target-arch "${CRT_TARGET_ARCH}"
       --target crtgfx_skia_raster_smoke
       --target crtgfx_skia_cpu_coverage
+      --target crtmedia_frame_skia_smoke
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    COMMENT "Building and running crtgfx_skia_raster_smoke and crtgfx_skia_cpu_coverage in a dedicated build directory (CRTGFX_ENABLE_SKIA/CRT_USE_IMPORTED_LIBCXX forced on there, this directory's own cache untouched)"
+    COMMENT "Building and running crtgfx_skia_raster_smoke, crtgfx_skia_cpu_coverage, and crtmedia_frame_skia_smoke in a dedicated build directory (CRTGFX_ENABLE_SKIA/CRT_USE_IMPORTED_LIBCXX forced on there, this directory's own cache untouched)"
     USES_TERMINAL
   )
 
@@ -1591,6 +1599,42 @@ if(CRTGFX_ENABLE_SKIA)
     PASS_REGULAR_EXPRESSION "crtgfx_skia_cpu_coverage: ok"
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_skia_cpu_coverage_runs)
+
+  # crtmedia_frame_skia_smoke: the real-Skia half of libcrtmedia's CPU
+  # frame handoff contract (TODO.md's "Define the libcrtmedia CPU frame
+  # handoff contract" item -- source at libcrtmedia/tests/frame_skia_
+  # smoke.cc, not under this directory). Registered here, not from
+  # libcrtmedia/CMakeLists.txt, because crt_wire_skia_executable() (used
+  # just above for crtgfx_skia_cpu_coverage) is a CMake function() defined
+  # in *this* file's own directory scope -- CMake function definitions do
+  # not propagate to a sibling directory's CMakeLists.txt, only to this
+  # directory's own descendants, and add_subdirectory(libcrtmedia) is a
+  # sibling of add_subdirectory(libcrtgfx) in the top-level CMakeLists.txt
+  # (libcrtmedia is processed after this file, but that only means its own
+  # `crtmedia`/`crtmedia_shared` targets are forward-referenced by name
+  # below, which CMake resolves fine at generate time -- targets are
+  # visible project-wide regardless of definition order, unlike functions/
+  # variables). libcrtmedia/tests/frame_test.c's own deterministic,
+  # Skia-free coverage of the same contract stays in libcrtmedia/
+  # CMakeLists.txt, where it belongs and needs none of this. Headless
+  # like crtgfx_skia_cpu_coverage just above (own top comment) -- no
+  # FreeType/port-build-freetype dependency either, since this draws no
+  # text.
+  add_executable(crtmedia_frame_skia_smoke
+    ${CRT_STARTUP_OBJECTS}
+    "${CMAKE_SOURCE_DIR}/libcrtmedia/tests/frame_skia_smoke.cc"
+  )
+  target_link_libraries(crtmedia_frame_skia_smoke PRIVATE crt_cxx_build_flags crtgfx crtmedia)
+  crt_wire_skia_executable(crtmedia_frame_skia_smoke)
+  crt_link_startup_end_objects(crtmedia_frame_skia_smoke)
+  add_dependencies(crtmedia_frame_skia_smoke cxx c crt1 crtgfx crtmedia)
+
+  add_test(NAME crtmedia_frame_skia_smoke_runs COMMAND crtmedia_frame_skia_smoke)
+  set_tests_properties(crtmedia_frame_skia_smoke_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    PASS_REGULAR_EXPRESSION "crtmedia_frame_skia_smoke: ok"
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_frame_skia_smoke_runs)
 endif()
 
 # CRT_STARTUP_END_OBJECTS deliberately not listed here -- see

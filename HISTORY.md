@@ -106,6 +106,92 @@ substantive update.
     with zero failures on both runs; the plain committed smoke test
     (`vector`/`string`/exceptions) still passes unaffected.
 
+- **Defined the `libcrtmedia` CPU frame handoff contract -- the gate
+  before `libcrtmedia` itself starts.** User asked to proceed straight to
+  this TODO.md item once the filesystem fix above landed. New public
+  header `libcrtmedia/include/crtmedia/frame.h`:
+  - `crtmedia_frame`: `crtmedia_pixel_format` (packed `RGBA8888`/
+    `BGRA8888` -- the two real byte orders this codebase's own hosts/
+    Skia bridge actually use -- plus planar `YUV420P`, FFmpeg's own
+    default software-decode output for the overwhelming majority of real
+    H.264/HEVC content), up to `CRTMEDIA_FRAME_MAX_PLANES` (4)
+    `crtmedia_frame_plane` entries (each with its own `stride`/`width`/
+    `height` -- a plane's own sample dimensions, not the frame's, for
+    chroma subsampling), `crtmedia_color_range`/`crtmedia_color_space`
+    (limited/full, BT.601/BT.709/BT.2020 -- `UNSPECIFIED` zero-value
+    default for the packed-RGB case where they do not apply),
+    `timestamp_us` (with a `CRTMEDIA_FRAME_TIMESTAMP_NONE` sentinel,
+    `INT64_MIN` rather than 0 or -1 since both those are real, valid
+    timestamps a decoder could produce), and a `release`/
+    `release_context` ownership pair -- a `release == NULL` frame is a
+    non-owning view, mirroring FFmpeg's own `AVFrame`/`AVBufferRef`
+    refcounting spirit without importing its actual machinery.
+  - `crtmedia_frame_describe_planes()`: fills in plane geometry (no data
+    pointers) for a format/width/height, handling 4:2:0 chroma rounding
+    for an odd luma dimension the same way real decoders do (`(width +
+    1) / 2`, not `width / 2`).
+  - `crtmedia_frame_convert_to_rgba()` (`libcrtmedia/src/frame_convert.
+    c`): packed RGBA8888/BGRA8888 passthrough/channel-swap, and a real
+    YUV420P->RGBA8888 conversion. Deliberately parameterized by each
+    color space's own real ITU-R `Kr`/`Kb` luma constants (derived
+    inverse-YCbCr matrix, `Kg = 1 - Kr - Kb`) rather than three separate
+    hand-picked coefficient sets, so BT.2020 needed no new formula, just
+    one more `(Kr, Kb)` pair. Verified the actual math is correct, not
+    just "runs without crashing", two ways: `libcrtmedia/tests/frame_
+    test.c`'s own flat-gray-frame case (Y=128, U=V=128 must convert to
+    flat gray regardless of color_space/color_range -- the one input
+    every real matrix agrees on) and `frame_skia_smoke.cc`'s own
+    pure-red case, whose Y/Cb/Cr input values were computed directly
+    from BT.709's real Kr/Kb (not memorized/approximated -- a first
+    attempt at hand-recalling "textbook" YCbCr values for red was wrong,
+    caught immediately by computing forward from the same constants the
+    implementation itself uses and comparing).
+  - Two ctest targets prove the contract, matching this project's
+    established pattern of a deterministic/host-resource-free test plus
+    a real-Skia one: `crtmedia_frame_test` (`libcrtmedia/CMakeLists.txt`,
+    mirrors `crtgfx_synthetic_event`'s own plain-C-executable shape --
+    plane geometry, release-callback ownership including the null-view
+    case, BGRA8888 channel-swap, and YUV420P conversion correctness) and
+    `crtmedia_frame_skia_smoke` (real Skia -- wraps a synthetic RGBA8888
+    frame and a synthetic BGRA8888 frame directly as an `SkImage`
+    (`SkImages::RasterFromPixmapCopy`, no conversion needed for either
+    packed byte order), converts a synthetic YUV420P frame via
+    `crtmedia_frame_convert_to_rgba()` first, draws each through a real
+    raster `SkSurface`, and reads the pixels back to confirm the color
+    survived the full round trip). The Skia-dependent target is defined
+    in `libcrtgfx/CMakeLists.txt`, not `libcrtmedia/CMakeLists.txt`, even
+    though its source lives at `libcrtmedia/tests/frame_skia_smoke.cc`:
+    `crt_wire_skia_executable()` (the function that wires Skia's own
+    include path, `SK_BUILD_FOR_UNIX`, the imported-libc++ swap, and
+    every host-specific link fix already discovered the hard way for
+    `crtgfx_skia_raster_smoke`/`crtgfx_skia_cpu_coverage`) is a CMake
+    `function()` defined in `libcrtgfx/CMakeLists.txt`'s own directory
+    scope, and CMake function definitions do not propagate to a sibling
+    directory -- reusing the already-proven function was judged safer
+    than either duplicating ~200 lines of hard-won, host-specific Skia
+    link plumbing or refactoring it into a shared `cmake/` module (a
+    real option, but a needless risk to a delicate, working build for a
+    single new consumer -- revisit if/when a second one outside
+    `libcrtgfx` needs it). `tools/test_crtgfx_skia_smoke.py`'s own
+    `crtgfx-skia-smoke` orchestration target (already generalized
+    2026-08-30 for repeated `--target`) now also builds and runs
+    `crtmedia_frame_skia_smoke` in the same dedicated Skia-enabled build
+    directory -- its own binary-path assumption (`build_dir /
+    "libcrtgfx" / target`) still holds, since CMake places a target's
+    build output under its *defining* CMakeLists.txt's own directory,
+    not its source file's.
+  - Verified for real on Windows: both new ctest targets pass
+    (`crtmedia_frame_test` in the plain default build, `crtmedia_frame_
+    skia_smoke` in the same dedicated `CRTGFX_ENABLE_SKIA=ON` nested
+    build directory `crtgfx_skia_cpu_coverage` already uses, alongside
+    that target and `crtgfx_skia_raster_smoke` -- all three pass
+    together), and the full pre-existing 122-test ctest suite in the
+    plain default build still passes unaffected. Linux/macOS not
+    verified this session (no host available) -- both new source files
+    are plain portable C/C++ with no host-specific code, matching this
+    project's own established pattern for a first landing before a
+    later per-host confirmation pass.
+
 ## 2026-08-30
 
 - **`CRTGFX_EVENT_FRAME_COMPLETE` made genuinely asynchronous on Windows

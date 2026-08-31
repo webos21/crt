@@ -205,19 +205,30 @@ Skia headers need Apple's own `TargetConditionals.h`, unlike `window_
 cocoa.c`'s own no-host-SDK style) -- flagged reasoned-but-unverified. See
 `HISTORY.md`'s 2026-08-30 entry for the full trail.
 
-Open upper-runtime work, in recommended order:
+**The `libcrtmedia` CPU frame handoff contract is done** (2026-08-31):
+`libcrtmedia/include/crtmedia/frame.h` defines `crtmedia_frame` (packed
+RGBA8888/BGRA8888 and planar YUV420P, per-plane stride/dimensions, color
+range/space, timestamp, and a release-callback ownership model),
+`crtmedia_frame_describe_planes()` (plane geometry for a given format/
+dimensions), and `crtmedia_frame_convert_to_rgba()` (real BT.601/BT.709/
+BT.2020 limited/full-range YUV->RGB, derived from each space's own ITU-R
+Kr/Kb constants rather than three hardcoded coefficient sets). Two ctest
+targets verify it: `crtmedia_frame_test` (deterministic, no host resource
+or Skia needed -- plane geometry, ownership/release, conversion math) and
+`crtmedia_frame_skia_smoke` (real Skia, gated behind `CRTGFX_ENABLE_SKIA`
+like `crtgfx_skia_cpu_coverage` -- wraps a synthetic RGBA8888 frame and a
+synthetic BGRA8888 frame directly as an `SkImage`, converts a synthetic
+YUV420P frame first, draws each through a real raster `SkSurface`, and
+checks the read-back pixels match). Verified for real on Windows (both
+targets passing, full existing ctest suite of 122 unaffected). See
+`HISTORY.md`'s 2026-08-31 entry for the full trail; not a work-queue item
+anymore.
 
-1. **Define the `libcrtmedia` CPU frame handoff contract.** A CPU video
-   frame descriptor covering packed RGB/BGRA and planar YUV, per-plane
-   stride/dimensions, color range/space, timestamp, and frame ownership,
-   plus a CPU-only smoke that hands a synthetic RGBA/YUV frame to a Skia
-   `SkImage`/`SkSurface`. This is the gate before `libcrtmedia` itself starts.
+Open upper-runtime work, in recommended order, now that the gate above is
+clear -- run these tracks in parallel rather than gating one on another:
 
-Once 1-2 land, run these tracks in parallel rather than gating one on
-another:
-
-- `libcrtmedia`: FFmpeg demux/software decode -> the CPU frame contract from
-  item 3 -> audio buffer handoff.
+- `libcrtmedia`: FFmpeg demux/software decode -> the CPU frame contract
+  above -> audio buffer handoff.
 - `libcrtgfx` GPU surface contract: an opaque GPU handle that never exposes a
   host SDK type in a public header, a backend capability query with software
   fallback, a shared lifetime/fence model across Direct3D, Metal, and Linux
