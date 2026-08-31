@@ -371,13 +371,27 @@ case "$target_os" in
     fi
     ;;
   windows)
-    if [ "${CRT_CXX_BUILDING_RUNTIME:-0}" = 1 ] && [ -n "$resource_dir" ]; then
+    if [ -n "$resource_dir" ]; then
       # -nostdlib deliberately suppresses Clang's automatic compiler-rt
-      # addition.  Runtime libraries nevertheless may lower 128-bit
-      # arithmetic to helpers such as __divti3, so link the matching
-      # compiler-owned builtins archive explicitly while bootstrapping
-      # libc++/libc++abi. Prefer the MinGW target archive, then the stock
-      # Windows archive supplied by an MSVC-layout LLVM installation.
+      # addition.  libc++.a's own object files may lower 128-bit
+      # arithmetic to helpers such as __divti3 (confirmed for real,
+      # 2026-08-31: <filesystem>'s own file_time_type conversion in
+      # operations.cpp does exactly this, via std::chrono::duration_cast
+      # on a __int128-based duration), so link the matching compiler-owned
+      # builtins archive explicitly. Originally gated behind
+      # CRT_CXX_BUILDING_RUNTIME=1 (only linked while *building* libc++/
+      # libc++abi/libunwind themselves) -- widened to every Windows client
+      # link after confirming this exact gap for real: the plain
+      # imported_libcxx_test.cc smoke test never happened to pull in any
+      # __int128 code path (vector/string/exceptions don't need one), so
+      # this was latent until the first real client actually needing one
+      # (a <filesystem> consumer) hit `undefined symbol: __divti3` at
+      # link time. Any Windows client of this project's imported libc++
+      # can transitively need a compiler-rt builtin the same way, not
+      # just the runtime's own build -- there is nothing
+      # CRT_CXX_BUILDING_RUNTIME-specific about needing this archive.
+      # Prefer the MinGW target archive, then the stock Windows archive
+      # supplied by an MSVC-layout LLVM installation.
       for candidate in \
         "${resource_dir}/lib/${target_arch}-w64-windows-gnu/libclang_rt.builtins.a" \
         "${resource_dir}/lib/windows/clang_rt.builtins-${target_arch}.lib"; do

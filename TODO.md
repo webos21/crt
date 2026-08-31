@@ -207,13 +207,7 @@ cocoa.c`'s own no-host-SDK style) -- flagged reasoned-but-unverified. See
 
 Open upper-runtime work, in recommended order:
 
-1. **Close the last piece of Skia CPU coverage: the still-open focused
-   Windows `<filesystem>` behavior test for UTF-32 `wchar_t` to UTF-16 path
-   handling.** A different subsystem than the Skia work above (imported
-   libc++'s `<filesystem>`, not `libcrtgfx`) -- see `docs/cxx_runtime.md`'s
-   own note on this gap. Once this lands, the whole "Broaden deterministic
-   Skia CPU coverage" item can close.
-2. **Define the `libcrtmedia` CPU frame handoff contract.** A CPU video
+1. **Define the `libcrtmedia` CPU frame handoff contract.** A CPU video
    frame descriptor covering packed RGB/BGRA and planar YUV, per-plane
    stride/dimensions, color range/space, timestamp, and frame ownership,
    plus a CPU-only smoke that hands a synthetic RGBA/YUV frame to a Skia

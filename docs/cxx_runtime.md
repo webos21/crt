@@ -353,8 +353,13 @@ The implementation policy is based on these upstream references:
 The imported runtime build/stage/smoke milestone is complete. Remaining work
 is narrower:
 
-1. Add focused standard-library behavior coverage where host adaptation is
-   subtle, beginning with Windows `<filesystem>` UTF-32-to-UTF-16 paths.
+1. Add further focused standard-library behavior coverage where host
+   adaptation is subtle. Windows `<filesystem>` UTF-32-`wchar_t`-to-UTF-16
+   path handling, the item that used to head this list, is done -- see
+   `HISTORY.md`'s 2026-08-31 entry for the full investigation (a real
+   client/library ABI mismatch caused by an existing `<print>` patch's
+   translation-unit-global `#undef`, plus several other real bugs found
+   and fixed along the way).
 2. Keep the Windows DWARF fault safety net covered and decide separately
    whether project-owned libunwind backtraces are worth adding; OS-native stack
    walkers cannot recover full call stacks through untabled DWARF-only frames.

@@ -8,6 +8,104 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-08-31
+
+- **Windows `<filesystem>` UTF-32 `wchar_t` vs. real UTF-16 `WCHAR`:
+  `std::filesystem` was completely non-functional on Windows, not just an
+  untested edge case -- found, root-caused, and fixed for real.** Closes
+  `TODO.md`'s open Skia-CPU-coverage item and `docs/cxx_runtime.md`'s
+  "Next Steps" item 1. This project compiles the imported libc++ (and
+  every client TU) with `-Xclang -fwchar-type=int` for Bionic-libc
+  compatibility, making `wchar_t` 4 bytes -- but every real Win32
+  wide-string API (`GetTempPathW`, `CreateFileW`, `FindFirstFileW`, ...)
+  reads/writes genuine 2-byte `WCHAR`/UTF-16. A live diagnostic proved the
+  severity before any fix was attempted: `fs::temp_directory_path()`
+  returned a single garbled character instead of a real path, file
+  operations silently no-op'd or corrupted. Three separate, real bugs
+  were found and fixed along the way to a clean, fully verified pass:
+  - **The core wchar_t/WCHAR conversion layer.** A new `char16_t`-based
+    helper header (`src/filesystem/crt_win32_wide.h`, this recipe's own
+    `extra_files` addition) provides `narrow()`/`widen()` -- `char16_t`
+    is portably guaranteed exactly 16 bits regardless of `wchar_t`'s own
+    width, making it the correct real-OS-call-boundary scratch type.
+    Applied at every real Win32 wide-string API call site this recipe
+    touches: `posix_compat.h` (`WinHandle`/`CreateFileW`, `mkdir`,
+    `symlink_file_dir`, `link`, `rename`, `chdir`, `statvfs`, `getcwd`,
+    `realpath`, `fchmodat`, `readlink`, plus `LIBCPP_REPARSE_DATA_BUFFER`'s
+    own `PathBuffer` field width), `path.cpp` (`__wide_to_char`/
+    `__char_to_wide`), and `operations.cpp` (`__temp_directory_path`).
+  - **A genuine SIGSEGV, found live**: the first version of
+    `__char_to_wide`'s fix unconditionally wrote through its `out`
+    pointer, crashing on the standard `MultiByteToWideChar` "measure
+    first" idiom (`out=nullptr`/`outlen=0` on the first call) -- a real
+    null-pointer write on the very first non-empty path concatenation.
+    Fixed by guarding both the scratch allocation and the `widen()` call
+    on the caller actually having supplied a real buffer.
+  - **A client/library ABI mismatch, the deepest and least obvious of the
+    three**: even after the crash was fixed, `path::string()` kept
+    returning garbled/truncated output. Root cause, found only by adding
+    real, ODR-checkable probe functions directly into the staged headers
+    (preprocessor `-dM -E`/`#error` canaries gave contradictory,
+    misleading answers -- the ODR-probe technique is the one that
+    actually pinned it down): an *existing*, pre-this-session patch to
+    `include/print` does `#undef _LIBCPP_WIN32API` to redirect that
+    header's own terminal-detection to a portable `isatty()` path (this
+    project's libc has no MSVC-CRT fd model). That `#undef` is
+    translation-unit-global and outlives the header entirely -- and
+    `<filesystem>`'s own `__filesystem/path.h` includes `<iomanip>` (for
+    `std::quoted`), which itself transitively includes `<print>` (its own
+    backward-compat block) *before* `path.h` reaches its own
+    `_LIBCPP_WIN32API`-gated `path::string()`/`_PathExport` machinery.
+    Any client TU that includes `<filesystem>` -- even one that never
+    touches `<print>` directly -- silently lost `_LIBCPP_WIN32API` for
+    the rest of the file, falling back to `path`'s POSIX (char-native)
+    `string_type`/`string()` implementation while `__pn_` was still
+    genuinely populated by real Win32 wide-string APIs elsewhere. Fixed
+    by scoping the existing `#undef` with `_Pragma("push_macro"/
+    "pop_macro")`, restored right before `<print>`'s own namespace
+    closes, in both `include/print` (client-visible) and the matching
+    build-directory copy; `src/print.cpp` (a separate, self-contained
+    translation unit) did not need the same treatment.
+  - **`directory_iterator`'s own `WIN32_FIND_DATAW::cFileName`**: found
+    only after the three fixes above were verified and `directory_entry
+    ::path().filename()` was still garbled. `cFileName` is declared
+    `WCHAR[MAX_PATH]` (this project's 4-byte `wchar_t`), but
+    `FindFirstFileW`/`FindNextFileW` write genuine 2-byte UTF-16 into it
+    -- same corruption class, a call site the original 16-patch sweep
+    had missed. Also found, on the *input* side of the same call: passing
+    `(root / "*").c_str()` straight to `FindFirstFileW`'s `lpFileName`
+    parameter handed it this project's own 4-byte buffer as if it were
+    real `WCHAR`, truncating every search pattern to its own first
+    character (kernel32 read the first real character's own zero high
+    byte back as an embedded NUL). Fixed on both sides: narrow the search
+    pattern before the call, and reinterpret + widen `cFileName`'s real
+    bytes on every entry via a small file-local helper. One notable
+    parser trap hit and worked around along the way: a local variable
+    literally named `__real` produces a confusing cascade of
+    "expected unqualified-id"/"expected expression" parse errors with no
+    diagnostic pointing at the real cause -- it collides with Clang/GCC's
+    own `__real`/`__imag` GNU complex-number extension keyword.
+  - **A separate, real `tools/crt-c++` gap, found live at link time**:
+    compiler-rt builtins (needed for `__divti3`-class 128-bit-arithmetic
+    helpers -- confirmed for real, `<filesystem>`'s own `file_time_type`
+    conversion lowers to one) were only ever linked while *building*
+    libc++/libc++abi/libunwind themselves (`CRT_CXX_BUILDING_RUNTIME=1`),
+    never for a normal client link. Latent until the first real
+    `<filesystem>` consumer (the plain `vector`/`string`/exceptions smoke
+    test never needed a `__int128` path). Widened to every Windows client
+    link.
+  - **Verified for real, twice**: once against a hand-iterated checkout
+    while debugging, and -- the verification that actually matters --
+    once more from a completely fresh `git clone`-equivalent checkout
+    (deleted the working `libcxx/` copy, kept the pristine `.clone-
+    libcxx/` cache, re-ran `fetch`/`configure`/`build`/install through
+    nothing but `recipe.json`'s own patches) to confirm the patches alone
+    reproduce the fix with no dependency on hand-edited state. A real
+    `fs_probe()` diagnostic (`temp_directory_path()`, `create_directory`,
+    `exists`, an `ofstream` write, `directory_iterator`, `remove`) passed
+    with zero failures on both runs; the plain committed smoke test
+    (`vector`/`string`/exceptions) still passes unaffected.
+
 ## 2026-08-30
 
 - **`CRTGFX_EVENT_FRAME_COMPLETE` made genuinely asynchronous on Windows
