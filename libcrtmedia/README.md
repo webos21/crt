@@ -17,3 +17,19 @@ deterministically; `tests/frame_skia_smoke.cc` (built and registered from
 own comment) hands a synthetic frame in each format to a real Skia
 `SkImage`/`SkSurface`. See `HISTORY.md`'s 2026-08-31 entry for the full
 design trail.
+
+A real FFmpeg-backed demux/software-decode bridge exists behind the
+`CRTMEDIA_ENABLE_FFMPEG` CMake option (default OFF, matching
+`CRTGFX_ENABLE_SKIA`'s own opt-in shape): `include/crtmedia/demux.h` +
+`src/demux.c` open a local file (`file` protocol only, no network yet),
+demux one container (MOV/MP4/M4A), and decode H.264 video into
+`crtmedia_frame` / AAC+MP3+PCM audio into the new
+`include/crtmedia/audio.h`'s `crtmedia_audio_buffer` -- no FFmpeg type is
+ever named in either public header. Built against `porting/recipes/
+ffmpeg.json` (LGPL-only, `--disable-x86asm`/`--disable-inline-asm`, see
+that recipe's own notes). `tests/demux_decode_test.c` verifies it
+end-to-end against a real, tiny, project-authored WAV fixture
+(`assets/test_tone.wav`). Verified on Linux (WSL); Windows and macOS not
+yet verified -- see `porting/recipes/ffmpeg.json`'s own `status`/`notes`
+for exactly what's blocking Windows and `HISTORY.md`'s 2026-09-01 entry
+for the full trail.

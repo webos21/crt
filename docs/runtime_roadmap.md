@@ -106,6 +106,17 @@ The first useful milestone is file/network media decode into frames and audio
 buffers using CRT files, sockets, threads, atomics, memory mapping, and dynamic
 loading.
 
+The first slice of that milestone is done: `porting/recipes/ffmpeg.json`
+(local `file`-protocol demux, MOV/MP4 container, H.264 video, AAC/MP3/PCM
+audio, LGPL-only, no assembly-optimized codec paths) plus `include/crtmedia/
+audio.h` and `include/crtmedia/demux.h`/`src/demux.c` (opaque demuxer, no
+FFmpeg type in either public header), verified end-to-end on Linux
+(`crtmedia_demux_test`). Windows configure succeeds; its `make` step hits a
+real, diagnosed GNU-Make/drive-letter-path blocker, not yet fixed. Network
+protocols, more codecs, and encode remain future work. See `HISTORY.md`'s
+2026-09-01 entry and `porting/recipes/ffmpeg.json`'s own notes for the full
+trail.
+
 ### libcrtjs
 
 `libcrtjs` is the JavaScript/application scripting layer.

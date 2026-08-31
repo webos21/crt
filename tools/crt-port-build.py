@@ -8,6 +8,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -388,6 +389,24 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
             env["CC"] = f"/system/bin/mksh {root_env}/tools/crt-cc"
             env["CXX"] = f"/system/bin/mksh {root_env}/tools/crt-c++"
             env["PATH"] = "/system/bin:/bin:/usr/bin"
+            # TMPDIR: a real bug, confirmed for real (2026-08-31, first
+            # ffmpeg.json Windows/mksh configure attempt) -- os.environ's
+            # own TEMP/TMP (Windows-style, backslash-separated, e.g.
+            # "C:\Users\Lee\AppData\Local\Temp") is otherwise inherited
+            # into this mksh-run environment untouched by the os.environ.
+            # copy() above, and FFmpeg's own configure (like any POSIX
+            # shell script) reads $TMPDIR unquoted/uninterpreted -- mksh's
+            # ordinary backslash-escapes-next-char word-expansion silently
+            # eats every backslash, producing a mangled, nonexistent path
+            # ("C:UsersLeeAppDataLocalTemp") that configure's own sanity
+            # test then fails to create files under ("Unable to create and
+            # execute files in ...", "Sanity test failed"). Every other
+            # path already forwarded into this same env (CRT_SYSROOT,
+            # root_env, build_dir_env, ...) already goes through path_for_
+            # crt_shell()'s backslash-to-forward-slash conversion for
+            # exactly this reason; TMPDIR was simply never one of them.
+            env["TMPDIR"] = path_for_crt_shell(
+                Path(os.environ.get("TEMP") or os.environ.get("TMP") or tempfile.gettempdir()))
         else:
             rootfs_path = os.pathsep.join(
                 str(rootfs / entry) for entry in ("system/bin", "bin", "usr/bin"))
@@ -864,6 +883,20 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
         # both Windows aarch64 and x86_64 -- mingw_triple is resolved once in
         # main() via detect_target_arch()/mingw_triple_for_arch().
         configure = [arg.replace("@CRT_MINGW_TRIPLE@", mingw_triple) for arg in configure]
+        # @ROOT@: the same gap this function's own @PORT_PREFIX@ comment
+        # above already documents finding once (curl's --with-X= flags) --
+        # confirmed for real again (2026-08-31, ffmpeg.json's own
+        # --cc=@ROOT@/tools/crt-cc): configure_args never substituted
+        # @ROOT@ at all, only @CRT_MINGW_TRIPLE@/@PORT_PREFIX@, so FFmpeg's
+        # own non-autoconf configure script (which needs --cc= passed
+        # explicitly -- unlike every other recipe here, it does not read
+        # $CC from the environment) received the literal, unsubstituted
+        # string "@ROOT@/tools/crt-cc" as its C compiler and failed its
+        # own compiler smoke test outright. Needed here for the same
+        # reason substitute_recipe_value()/apply_recipe_env() already
+        # support @ROOT@ for cflags/env/make_args/install_args/test
+        # fields -- configure_args was simply never wired to it.
+        configure = [arg.replace("@ROOT@", str(root)) for arg in configure]
         configure = [arg.replace("@PORT_PREFIX@", port_prefix_text) for arg in configure]
         if is_native_windows_configure(target_os):
             prefix = path_for_crt_shell(port_prefix) if use_crt_shell else path_for_msys_shell(port_prefix)

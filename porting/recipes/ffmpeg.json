@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "name": "ffmpeg",
+  "version": "8.1.2",
+  "source": {
+    "url": "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz",
+    "archive": "ffmpeg-8.1.2.tar.xz",
+    "source_dir": "ffmpeg-8.1.2",
+    "sha256": "464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c",
+    "sha1": "e918a340016f3f0633daa0b6a95e4ce3c58062ee",
+    "md5": "797de9b3657247cdb1ea3635cd3e6e1b"
+  },
+  "dependencies": ["make"],
+  "build": {
+    "system": "configure",
+    "configure_args": [
+      "--cc=@ROOT@/tools/crt-cc",
+      "--disable-programs",
+      "--disable-doc",
+      "--disable-avdevice",
+      "--disable-avfilter",
+      "--disable-network",
+      "--disable-everything",
+      "--enable-decoder=h264,aac,mp3,mp3float,pcm_s16le",
+      "--enable-demuxer=mov,mp3,wav",
+      "--enable-parser=h264,aac,mpegaudio",
+      "--enable-protocol=file",
+      "--disable-x86asm",
+      "--disable-inline-asm",
+      "--enable-pthreads",
+      "--disable-w32threads",
+      "--disable-os2threads",
+      "--disable-debug"
+    ],
+    "make_args": [],
+    "target_overrides": {
+      "windows": {
+        "configure_args": [
+          "--arch=x86_64",
+          "--target-os=mingw32",
+          "--enable-cross-compile",
+          "--host-cc=@ROOT@/tools/crt-cc"
+        ]
+      }
+    }
+  },
+  "tests": [],
+  "status": {
+    "linux": "shared-pass",
+    "macos": "untested",
+    "windows": "untested"
+  },
+  "notes": [
+    "First FFmpeg port for libcrtmedia's demux/software-decode work (TODO.md, HISTORY.md 2026-08-31's frame-contract entry -- this recipe is the very next step). Deliberately narrow scope for a first landing, matching this project's own established narrow-now-expand-later pattern (curl.json's own HTTP/HTTPS-only first pass is the closest precedent): local file demux only (--enable-protocol=file, --disable-network -- no http/rtsp/etc. yet), one container (mov -- covers MP4/MOV/M4A), one video codec (h264) and three audio codecs (aac/mp3/pcm_s16le) via --disable-everything + explicit --enable-decoder/--enable-demuxer/--enable-parser. No avdevice (capture/playback devices, irrelevant to file decode), no avfilter (this pass calls libswscale/libswresample directly, no filter graph needed), no encode.",
+    "License: this recipe deliberately never passes --enable-gpl or --enable-nonfree (both already default-off; there is no --disable- counterpart for either flag in ffmpeg's own configure -- confirmed directly by grepping configure's option parser, so passing --disable-gpl/--disable-nonfree explicitly would itself be a configure error, 'Unknown option'). H.264/AAC/MP3/PCM decode are all native LGPL components, so an LGPL-only build covers this pass's entire codec set with no GPL-licensed code involved. Per LICENSE.md's own stated policy for porting/recipes/*, FFmpeg's source is never committed to this repository -- its own license applies to whatever tools/crt-port-build.py downloads/builds; this note is the documentation of that choice, matching every other recipe's own convention (no recipe.json schema field for license exists anywhere in this porting system, confirmed).",
+    "--disable-x86asm/--disable-inline-asm: a deliberate, accepted first-pass tradeoff, not an oversight. FFmpeg's assembly-optimized decode paths need NASM/yasm as a build-time tool, which this project's toolchain does not provide (every other porting recipe here builds with plain C only). Portable C decode is slower than hand-written SIMD asm, but correctness and a working build come first; revisit once a real performance need is demonstrated, matching this project's own established 'no speculative work ahead of a demonstrated need' convention.",
+    "libpostproc does not exist in this FFmpeg version at all (confirmed directly: grepping configure's own LIBRARY_LIST finds avdevice/avfilter/swscale/avformat/avcodec/swresample/avutil only, no postproc) -- an earlier draft of this recipe's own configure_args included a stray --disable-postproc that would have failed configure outright ('Unknown option') had it not been caught before the first real build attempt.",
+    "8.1.2 (2026-06-17, the '8.1 Hoare' branch's latest point release) is FFmpeg's current stable release as of this port. No published SHA256 exists on ffmpeg.org's own download page (only PGP signatures) -- the checksums recorded above were computed directly against the downloaded tarball, matching every other recipe's own real-hash-computed convention here, not copied from a third party.",
+    "Confirmed for real (2026-08-31, first WSL/Linux build attempt): ./configure's own summary matched every intended decoder/demuxer/parser/protocol exactly (Enabled decoders: aac/mp3/mp3float/pcm_s16le/h264; parsers: aac/h264/mpegaudio; demuxers: mov/mp3/wav; protocols: file; no encoders/hwaccels/muxers/filters/bsfs/indevs/outdevs; 'License: LGPL version 2.1 or later'; 'threading support: pthreads'; 'network support: no'). Two real bugs found and fixed getting there, neither FFmpeg-specific: (1) tools/crt-port-build.py's own build_configure_port() unconditionally indexed build['make_args'] with no .get() fallback -- every other configure-system recipe here (curl.json, freetype.json, ...) happens to always include make_args (even an empty list), a de facto required field this schema never documented as such; fixed by adding \"make_args\": [] here. (2) The clean configure run above was misleading -- config.mak's own CC=gcc line (found only by directly grepping it, since nothing failed loudly at configure time) revealed FFmpeg's own hand-rolled, non-autoconf configure script had silently fallen back to bare host gcc instead of this project's own tools/crt-cc, because it never read $CC from the environment (this project's own convention for every other, autoconf-based recipe here) -- it needs --cc= passed explicitly. Fixed by adding --cc=@ROOT@/tools/crt-cc, which then surfaced a second, genuinely useful bug: tools/crt-port-build.py's own configure_args substitution never applied @ROOT@ at all (only @CRT_MINGW_TRIPLE@/@PORT_PREFIX@ were wired -- the exact same class of gap that function's own pre-existing comment already documents finding once before for @PORT_PREFIX@ during curl.json), so @ROOT@ passed through configure literally unsubstituted and failed configure's own compiler smoke test outright ('@ROOT@/tools/crt-cc is unable to create an executable file'). Fixed generally in tools/crt-port-build.py itself (not worked around locally here), matching the established precedent for the identical @PORT_PREFIX@ gap.",
+    "Windows target_overrides real bug found and fixed (2026-08-31, first Windows/MinGW build attempt): the original --build=@CRT_MINGW_TRIPLE@ (this project's usual convention for every other, autoconf-based recipe's own windows override) is not a flag FFmpeg's own hand-rolled configure understands at all ('Unknown option \"--build=x86_64-w64-mingw32\"', confirmed directly by grepping configure's own option parser -- it has --arch=/--target-os=/--cross-prefix=/--toolchain=, no --build=/--host= autoconf-triple pair). Replaced with --arch=x86_64 --target-os=mingw32 --enable-cross-compile, the standard MinGW-w64 flag set (--cross-prefix not needed since --cc=@ROOT@/tools/crt-cc, already unconditional in the base configure_args, is a full, already-target-correct compiler wrapper on its own).",
+    "Windows: configure now succeeds cleanly (2026-08-31/09-01, after three real, non-FFmpeg-specific fixes -- see the --host-cc= and TMPDIR notes above/below -- confirmed via ./configure's own summary matching every intended decoder/demuxer/parser/protocol exactly, same as the Linux run), but the subsequent `make` step hits a real, currently-unresolved blocker: this project's own porting/recipes/make.json's Windows make.exe is deliberately built without HAVE_DOS_PATHS ('Windows intentionally uses the POSIX-like musl config path rather than the upstream Win32 make path so failures expose CRT/PAL gaps', that recipe's own notes) -- GNU Make's own internal path-absoluteness check (used when it needs to re-exec itself after one of the Makefiles it read gets remade as a side effect of a rule, which FFmpeg's real build graph genuinely triggers once, right after generating libavutil/libavcodec/libavformat/libswresample/libswscale's five *.version files) only recognizes a leading '/' as absolute without that define, so it treats a real, valid drive-letter path (e.g. C:/Users/.../make.exe) as relative and corrupts it by prepending its own current directory (observed literally: 'make.exe: <cwd>/C:/Users/.../make.exe: No such file or directory'). This is a genuine GNU Make self-re-exec bug exposed by FFmpeg's own build graph shape (no other Windows recipe ported here so far -- freetype/mbedtls/expat/xz/zlib/libffi, all flatter/non-restarting Makefile trees -- has ever exercised this particular GNU Make code path), not an FFmpeg configure_args problem, and NOT fixed in this pass: doing so safely needs its own dedicated investigation, since make.json's own HAVE_DOS_PATHS is a single, global (not per-recipe) build-time define for every already-'manual-pass'-verified Windows recipe's own make.exe, and HAVE_DOS_PATHS changes several of GNU Make's own internal semantics pervasively (path separator character, case sensitivity, backslash-as-separator handling) in ways that risk silently regressing those already-verified builds if done without equally careful, isolated re-verification of each one -- out of scope for this pass to attempt blind.",
+    "status.linux verified for real (2026-08-31): libcrtmedia's own crtmedia_demux_test (libcrtmedia/tests/demux_decode_test.c, gated behind CRTMEDIA_ENABLE_FFMPEG) demuxes+decodes a real project-authored WAV fixture (libcrtmedia/assets/test_tone.wav) end to end and reports the exact expected sample count (2000). Getting the *link* to succeed (source compiled cleanly with zero errors on the first real attempt, a genuinely positive surprise for a codebase this size) needed one more real, non-FFmpeg-specific fix beyond this file: libcrtmedia/CMakeLists.txt's own crtmedia STATIC target needed the same -Wl,--start-group/--end-group treatment libcrtgfx's own crtgfx target already established for the identical GNU-ld single-pass static-archive-scan-order problem (libavutil.a/libswresample.a's own sin/cos/memchr/... references landing, on a plain link, after libm.a/libc.a had already been scanned) -- with the *entire* PRIVATE static-lib set (c/m/dl/cxx) and the FFmpeg archives inside one contiguous group (splitting them across separate target_link_libraries() calls, even in the 'right' source order, was confirmed for real not to survive CMake's own link-line generation intact), and with the *consumer* (crtmedia_demux_test) not also linking c/m directly itself (doing so was confirmed for real to reposition them ahead of crtmedia's own grouped/forwarded copies, reintroducing the same bug from the consumer side). Full existing ctest suite re-run afterward: 106/107 passing, the one pre-existing failure (crtgfx_window_smoke_runs, needs a real display connection WSL headless doesn't have) unrelated to and unaffected by this change."
+  ]
+}

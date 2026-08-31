@@ -8,6 +8,127 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-01
+
+- **`libcrtmedia`'s FFmpeg demux/software-decode bridge lands and is
+  verified end-to-end on Linux; Windows configure now succeeds too, with
+  one real, diagnosed-but-unfixed `make`-step blocker remaining.** Follows
+  the CPU frame handoff contract (2026-08-31, above) and the user's own
+  explicit choice to do FFmpeg SW decode before `libcrtgfx`'s GPU surface
+  contract. New: `porting/recipes/ffmpeg.json` (FFmpeg 8.1.2, LGPL-only,
+  local-`file`-protocol-only demux, one container (MOV/MP4/M4A), one video
+  codec (H.264) and three audio codecs (AAC/MP3/PCM) via `--disable-
+  everything` + explicit `--enable-decoder=`/`--enable-demuxer=`/
+  `--enable-parser=`, no assembly-optimized codec paths
+  (`--disable-x86asm --disable-inline-asm`, no NASM/yasm dependency this
+  project doesn't have) -- deliberately narrow first pass, matching
+  `curl.json`'s own HTTP/HTTPS-only precedent); `libcrtmedia/include/
+  crtmedia/audio.h` + `src/audio.c` (`crtmedia_audio_buffer`, mirroring
+  `frame.h`'s own release-callback ownership model); `libcrtmedia/include/
+  crtmedia/demux.h` + `src/demux.c` (opaque `crtmedia_demuxer` wrapping
+  real `AVFormatContext`/`AVCodecContext`/`SwrContext` internally -- no
+  FFmpeg type ever named in either public header, matching
+  `docs/libcrtgfx_api_policy.md`'s established no-host-SDK-type-in-a-
+  public-header policy); a new opt-in `CRTMEDIA_ENABLE_FFMPEG` CMake
+  option (default OFF, mirroring `CRTGFX_ENABLE_SKIA` exactly); a real,
+  tiny, project-authored WAV fixture (`libcrtmedia/assets/test_tone.wav`,
+  0.25s/8kHz/mono/16-bit PCM, generated via Python's stdlib `wave` module,
+  public domain -- see `assets/README.md`) and `tests/demux_decode_test.c`
+  (`crtmedia_demux_test` ctest target), which opens it, decodes every
+  buffer, and checks the real, exactly-known 2000-sample total.
+
+  Six real bugs found and fixed getting to a real, passing Linux build
+  (`crtmedia_demux_test: ok`, full existing 106/107-test ctest suite
+  otherwise unaffected -- the one pre-existing failure,
+  `crtgfx_window_smoke_runs`, needs a real display connection this WSL
+  session doesn't have, unrelated to this change):
+  1. `tools/crt-port-build.py`'s `build_configure_port()` unconditionally
+     indexed `build["make_args"]` with no `.get()` fallback -- a de facto
+     required recipe field this schema never documented as such; fixed by
+     adding `"make_args": []` to the recipe.
+  2. FFmpeg's own hand-rolled, non-autoconf `./configure` never reads `$CC`
+     from the environment (unlike every other, autoconf-based recipe
+     here) and silently fell back to bare host `gcc` until `--cc=` was
+     passed explicitly, which then surfaced (3.) `tools/crt-port-build.
+     py`'s own `configure_args` substitution never applying `@ROOT@` at
+     all (only `@CRT_MINGW_TRIPLE@`/`@PORT_PREFIX@` were wired -- the
+     exact same class of gap that function's own comment already
+     documented finding once before for `@PORT_PREFIX@` during `curl.
+     json`) -- fixed generally in the tool itself, not worked around
+     locally.
+  4. A CMake target-graph cycle (`sysroot` -> `crtmedia`/`crtmedia_shared`
+     -> `port-build-ffmpeg` -> `sysroot`) from an initial `add_dependencies
+     (crtmedia port-build-ffmpeg)` -- removed, relying purely on the
+     configure-time `EXISTS`-guard `FATAL_ERROR`s `CRTGFX_ENABLE_SKIA`
+     already established as this project's precedent for the identical
+     situation.
+  5. A real GNU-ld static-archive link-order bug: FFmpeg's own `.a` files
+     always landed after `libm.a`/`libc.a` on the final link line
+     regardless of `target_link_libraries()` call order, so ld.bfd's
+     single left-to-right archive scan already had `sin`/`cos`/`memchr`/
+     `strspn`/... behind it once it reached FFmpeg's own object files
+     needing them. Fixed the same way `libcrtgfx`'s own `crtgfx` target
+     already established: the *entire* PRIVATE static-lib set (c/m/dl/
+     cxx) and the FFmpeg archives wrapped together in one contiguous
+     `-Wl,--start-group`/`-Wl,--end-group` pair inside `crtmedia`'s own
+     declaration -- confirmed for real that splitting them across
+     separate `target_link_libraries()` calls (even in the "right" source
+     order) does not survive CMake's own link-line generation intact, and
+     that a *consumer* (`crtmedia_demux_test`) also linking `c`/`m`
+     directly itself repositions them ahead of `crtmedia`'s own grouped
+     copies, reintroducing the same bug from the consumer side -- neither
+     is enough alone, both had to be fixed together.
+  6. `src/demux.c`'s own EOF-tracking was originally a wrong function-
+     local `static int flushed` inside `crtmedia_demuxer_read()` (would
+     have incorrectly shared state across every demuxer instance) --
+     caught by self-review before it ever reached a real test failure,
+     moved into the `crtmedia_demuxer` struct itself.
+
+  Windows: `./configure` now succeeds cleanly too (same exact decoder/
+  demuxer/parser/protocol summary as Linux), after three more real,
+  Windows-specific fixes: (a) FFmpeg's configure has no autoconf-style
+  `--build=`/`--host=` triple pair at all (`--arch=`/`--target-os=`/
+  `--cross-prompt=`/`--toolchain=` instead) -- the original `--build=
+  @CRT_MINGW_TRIPLE@` override was simply wrong, replaced with
+  `--arch=x86_64 --target-os=mingw32 --enable-cross-compile`; (b) a real,
+  general `TMPDIR` bug in `tools/crt-port-build.py`'s own `make_env()`:
+  Windows' own backslash-separated `%TEMP%`/`%TMP%` was inherited
+  untouched into the mksh-run configure environment, and mksh's ordinary
+  backslash-escapes-next-character word expansion silently ate every
+  backslash unquoted (`C:\Users\...\Temp` became `C:UsersLeeAppDataLocal
+  Temp`), so configure's own sanity test failed to create files there at
+  all -- fixed the same way every other path already forwarded into that
+  environment is (`path_for_crt_shell()`'s backslash-to-forward-slash
+  conversion), just newly applied to `TMPDIR` too; (c) FFmpeg's own cross-
+  compile mode needs a *separate* host-side C11 compiler for its internal
+  build-time codegen tools (`--host-cc=`, defaulting to a bare `gcc` this
+  sandboxed rootfs-only `PATH` doesn't have) -- fixed by pointing
+  `--host-cc=` at the same `@ROOT@/tools/crt-cc` used for `--cc=`, valid
+  here since FFmpeg's "host" (build machine) and "target" are both this
+  same native-Windows/mingw environment.
+
+  The subsequent `make` step hits a new, real, but NOT fixed this pass
+  blocker: `porting/recipes/make.json`'s own Windows `make.exe` is
+  deliberately built without `HAVE_DOS_PATHS` ("Windows intentionally
+  uses the POSIX-like musl config path ... so failures expose CRT/PAL
+  gaps", that recipe's own notes) -- GNU Make's internal path-
+  absoluteness check (used when it re-execs itself after a Makefile it
+  read gets remade mid-build, which FFmpeg's real build graph genuinely
+  triggers once, right after generating five `*.version` files) only
+  recognizes a leading `/` as absolute without that define, so it treats
+  a real, valid drive-letter path as relative and corrupts it by
+  prepending its own current directory (`make.exe: <cwd>/C:/Users/.../
+  make.exe: No such file or directory`). Root-caused but deliberately not
+  "fixed" this pass: `HAVE_DOS_PATHS` is a single, global (not per-
+  recipe) define for every already-verified Windows port's own `make.exe`,
+  and it changes several of GNU Make's own internal semantics pervasively
+  (path separator character, case sensitivity, backslash-as-separator
+  handling) in ways that risk silently regressing those already-passing
+  builds without equally careful, isolated re-verification of each one --
+  see `porting/recipes/ffmpeg.json`'s own notes for the full reasoning.
+  macOS not attempted this pass (needs the user's own Mac, matching the
+  frame contract's own verification split).
+
 ## 2026-08-31
 
 - **Added `.gitattributes` to force LF line endings repo-wide, fixing a

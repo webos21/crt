@@ -225,11 +225,29 @@ full existing ctest suite unaffected each time). See `HISTORY.md`'s
 2026-08-31 entry for the full trail; not a work-queue item
 anymore.
 
+**`libcrtmedia`'s FFmpeg demux/software-decode bridge is done on Linux**
+(2026-09-01): `include/crtmedia/audio.h` (`crtmedia_audio_buffer`, mirroring
+`frame.h`'s own ownership/release-callback design) and `include/crtmedia/
+demux.h` + `src/demux.c` (open a local file, demux one container (MOV/MP4/
+M4A), decode H.264 video into `crtmedia_frame` / AAC+MP3+PCM audio into
+`crtmedia_audio_buffer` -- no FFmpeg type in either public header), behind
+a new opt-in `CRTMEDIA_ENABLE_FFMPEG` CMake option and `porting/recipes/
+ffmpeg.json` (LGPL-only, local-file-only, no encode/network/GPU/asm this
+pass). `crtmedia_demux_test` verifies it end-to-end against a real WAV
+fixture on WSL/Linux; full existing ctest suite unaffected. Windows
+configure now succeeds too, but the `make` step hits a real, diagnosed-but-
+unfixed GNU-Make self-re-exec/drive-letter-path blocker (see that recipe's
+own `notes`); macOS not attempted yet. See `HISTORY.md`'s 2026-09-01 entry
+for the full trail -- audio *output* (device playback) and further codecs/
+protocols remain open, not a work-queue item in this exact shape anymore.
+
 Open upper-runtime work, in recommended order, now that the gate above is
 clear -- run these tracks in parallel rather than gating one on another:
 
-- `libcrtmedia`: FFmpeg demux/software decode -> the CPU frame contract
-  above -> audio buffer handoff.
+- `libcrtmedia`: finish FFmpeg on Windows/macOS, then widen codec/protocol
+  coverage (network, HEVC/VP9/Opus/..., GPU/hwaccel decode) as real need
+  demonstrates it -- matching this project's own narrow-now-expand-later
+  pattern.
 - `libcrtgfx` GPU surface contract: an opaque GPU handle that never exposes a
   host SDK type in a public header, a backend capability query with software
   fallback, a shared lifetime/fence model across Direct3D, Metal, and Linux
