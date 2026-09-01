@@ -74,8 +74,13 @@ zlib -> libpng -> SQLite amalgamation -> bzip2 -> xz -> pcre2 -> mbedTLS -> curl
 ```
 
 `curl` closes the current networking/TLS porting queue: Linux, macOS, and
-Windows all pass real HTTP and HTTPS round trips against `example.com` for both
-static and shared libcurl.
+Windows all passed real HTTP and HTTPS round trips against `example.com` for
+both static and shared libcurl. **Windows has since regressed** (found
+2026-09-01, unrelated `ffmpeg` work) -- see the `curl` section below.
+
+`ffmpeg` (added 2026-09-01) is `libcrtmedia`'s first demux/software-decode
+port, outside the networking/TLS queue -- `shared-pass` on all three hosts.
+See the `ffmpeg` section below.
 
 mbedTLS's Windows DLL symbol-export hygiene and Windows `make install`
 symlink/delete timing (both once open cross-cutting follow-ups from this
@@ -313,15 +318,30 @@ Important follow-ups:
 - Status:
   - Linux: `shared-pass`
   - macOS: `shared-pass`
-  - Windows: `shared-pass`
+  - Windows: `partial`
 - Automated recipe tests:
   - `http-roundtrip-static`
   - `http-roundtrip-shared`
 
-curl is the final port in the current queue and is `shared-pass` on all three
-hosts. The tests perform real HTTP and HTTPS requests against `example.com`
-through libcurl, zlib, mbedTLS, DNS, sockets, non-blocking fd behavior, and the
-CRT sysroot. This is intentionally not a local loopback-only test.
+curl is the final port in the current queue and was `shared-pass` on all
+three hosts. The tests perform real HTTP and HTTPS requests against
+`example.com` through libcurl, zlib, mbedTLS, DNS, sockets, non-blocking fd
+behavior, and the CRT sysroot. This is intentionally not a local
+loopback-only test.
+
+**Windows regression, found 2026-09-01 (unrelated work, verifying `ffmpeg`
+on Windows):** `http-roundtrip-static` now fails at runtime with
+`curl_http_roundtrip_test: http://example.com/ failed: Out of memory` on
+the very first (plain HTTP) request, even though basic TCP connectivity to
+the test target works. Confirmed via a real A/B test this is NOT caused by
+`porting/recipes/make.json`'s new `HAVE_DOS_PATHS` cflag (reproduces
+identically with the pre-`HAVE_DOS_PATHS` `make.exe`), and NOT the
+previously-documented `pipe()`-misdetection "Out of memory" bug this
+file's own notes below already describe (`config.log` confirms `pipe()`
+correctly detects as `yes` this time). Also confirmed NOT a stale-
+dependency artifact (reproduces after a fully fresh `zlib`+`curl`
+rebuild). Not yet root-caused -- see `porting/recipes/curl.json`'s own
+notes for the full trail.
 
 The first curl tranche is scoped to HTTP/HTTPS and uses a project-owned CA
 policy: no default CA bundle is baked in, so deployment consumers must provide
@@ -513,3 +533,48 @@ builds on every host eventually.
 
 See `porting/recipes/freetype.json`'s own notes for the full trail and
 `HISTORY.md`'s 2026-08-24 entry.
+
+## ffmpeg
+
+- Version: `8.1.2`
+- Recipe: `porting/recipes/ffmpeg.json`
+- Build system: `configure`
+- Dependencies: `make`
+- Status:
+  - Linux: `shared-pass`
+  - macOS: `shared-pass`
+  - Windows: `shared-pass`
+- Automated recipe test: `libcrtmedia`'s own `crtmedia_demux_test` (not a
+  `porting/recipes/*.json` `tests[]` entry -- gated behind the
+  `CRTMEDIA_ENABLE_FFMPEG` CMake option instead, see `libcrtmedia/
+  CMakeLists.txt`)
+
+First FFmpeg port for `libcrtmedia`'s demux/software-decode bridge
+(`crtmedia/demux.h`/`audio.h`, `HISTORY.md`'s 2026-09-01 entries).
+Deliberately narrow first pass: local `file`-protocol demux only, one
+container (MOV/MP4/M4A), one video codec (H.264), three audio codecs
+(AAC/MP3/PCM), LGPL-only, no assembly-optimized codec paths. Verified end
+to end on all three hosts: `crtmedia_demux_test` demuxes+decodes a real,
+tiny, project-authored WAV fixture and checks the exact known sample
+count, not just that the library links.
+
+Windows needed five real, Windows-specific fixes beyond the ones common to
+every host (`--arch=`/`--target-os=`/`--host-cc=`/the `-U_WIN32` family/
+`HAVE_ALIGNED_MALLOC`): `porting/recipes/make.json`'s own Windows
+`make.exe` needed `-DHAVE_DOS_PATHS=1` (a real GNU Make self-re-exec bug,
+see that recipe's own notes), two more real `@ROOT@`/`@AR@` token-
+substitution gaps in `tools/crt-port-build.py` (the same backslash-eaten-
+by-mksh class of bug as `TMPDIR`'s own fix), a new `porting/shims/win32/
+install-sh` (this project's Windows rootfs has no real `install(1)`
+binary), and a `post_configure_patch` neutralizing FFmpeg's own
+unconditional `doc/examples` install (out of scope, would need `install(1)`
+support for zero benefit). See `porting/recipes/ffmpeg.json`'s own notes
+for the full per-fix trail and `HISTORY.md`'s 2026-09-01 entries for the
+dated narrative.
+
+`--disable-zlib` is set explicitly (base `configure_args`, all hosts):
+FFmpeg's own `./configure` auto-detects zlib and silently links
+`libavformat`'s optional compressed-metadata support against it whenever a
+`zlib` port build happens to already exist in the shared install prefix --
+undefined, build-order-dependent behavior for a feature never in this
+pass's scope. Made explicit and deterministic instead.

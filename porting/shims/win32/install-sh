@@ -1,0 +1,72 @@
+#!/bin/sh
+# Minimal install(1) replacement for this project's own Windows rootfs.
+#
+# Confirmed for real (2026-09-01, first ffmpeg.json Windows `make install`
+# attempt): this project's own toybox-backed rootfs has no `install` applet
+# at all (`porting/shims/win32/` doesn't have a precedent for this either --
+# every prior Windows-configure-based recipe's own Makefile happened to use
+# plain `cp`/`chmod` directly for its own install step, not a generic
+# `$(INSTALL)` variable, so this specific gap went unnoticed until FFmpeg's
+# own ffbuild/library.mak, the first recipe here whose Makefile actually
+# calls `$(INSTALL) -m MODE SRC... DEST`, BSD-install-style). `mksh: install:
+# inaccessible or not found` once library archives/headers/pkgconfig files
+# actually needed installing. `cp`/`chmod`/`mkdir`/`basename`, all this
+# script actually needs, ARE real, already-enabled toybox applets in this
+# rootfs (confirmed directly) -- this just gives Makefiles that expect a
+# generic install(1) a real one to call, without enabling a whole new
+# toybox applet project-wide for a need only one recipe has hit so far. See
+# [[toybox-flags-globals-generated-files]]-style discipline if a future
+# recipe's own need grows past what this minimal script covers -- a real
+# toybox `install` applet would be the more general fix at that point.
+#
+# Usage (the only shape any Makefile in this porting queue has needed so
+# far -- extend deliberately, don't guess ahead of a real need):
+#   install-sh -m MODE SRC... DEST
+# DEST is either an existing directory (each SRC copied into it, basename
+# preserved) or, when exactly one SRC is given and DEST is not an existing
+# directory, a full destination file path (copy, optionally renaming).
+set -e
+
+mode=""
+if [ "$1" = "-m" ]; then
+    mode="$2"
+    shift 2
+fi
+
+if [ "$#" -lt 2 ]; then
+    echo "install-sh: usage: install-sh [-m MODE] SRC... DEST" >&2
+    exit 1
+fi
+
+src_count=$(($# - 1))
+n=0
+dest=""
+for arg in "$@"; do
+    n=$((n + 1))
+    if [ "$n" -eq "$#" ]; then
+        dest="$arg"
+    fi
+done
+
+if [ -d "$dest" ]; then
+    n=0
+    for arg in "$@"; do
+        n=$((n + 1))
+        if [ "$n" -le "$src_count" ]; then
+            base=$(basename "$arg")
+            cp "$arg" "$dest/$base"
+            if [ -n "$mode" ]; then
+                chmod "$mode" "$dest/$base"
+            fi
+        fi
+    done
+else
+    if [ "$src_count" -ne 1 ]; then
+        echo "install-sh: multiple sources need an existing directory destination ($dest)" >&2
+        exit 1
+    fi
+    cp "$1" "$dest"
+    if [ -n "$mode" ]; then
+        chmod "$mode" "$dest"
+    fi
+fi

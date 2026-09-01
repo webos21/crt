@@ -1,9 +1,90 @@
+# FFmpeg-backed demux/decode bridge (crtmedia/demux.h, src/demux.c) --
+# opt-in, off by default, matching libcrtgfx's own CRTGFX_ENABLE_SKIA
+# pattern exactly (same reasoning: a plain default configure should not
+# suddenly need a slow third-party fetch+build just to compile this
+# library's own base sources). porting/recipes/ffmpeg.json's own
+# port-build-ffmpeg target (auto-registered by the top-level CMakeLists.
+# txt for every recipe under CRT_PORT_RECIPE_ROOT, no per-recipe CMake
+# code needed) installs into the same shared port-tests/install prefix
+# every other porting recipe here uses (freetype, wayland's expat/
+# libffi, ...) -- see docs/porting_status.md.
+set(CRTMEDIA_FFMPEG_PORT_PREFIX "${CMAKE_BINARY_DIR}/port-tests/install" CACHE PATH
+  "Shared porting/recipes install prefix (ffmpeg) for libcrtmedia's demux/decode bridge")
+set(CRTMEDIA_FFMPEG_LIBRARIES "")
+if(EXISTS "${CRTMEDIA_FFMPEG_PORT_PREFIX}/lib/libavformat.a" AND
+   EXISTS "${CRTMEDIA_FFMPEG_PORT_PREFIX}/lib/libavcodec.a" AND
+   EXISTS "${CRTMEDIA_FFMPEG_PORT_PREFIX}/lib/libswresample.a" AND
+   EXISTS "${CRTMEDIA_FFMPEG_PORT_PREFIX}/lib/libavutil.a")
+  # Link order matters for a plain (non-cyclic-group) static link: a
+  # library only satisfies symbols requested by something *already*
+  # queued before it, so this lists each library before whichever
+  # earlier one actually calls into it (avformat -> avcodec -> swresample
+  # -> avutil, matching FFmpeg's own real internal dependency direction).
+  set(CRTMEDIA_FFMPEG_LIBRARIES
+    "${CRTMEDIA_FFMPEG_PORT_PREFIX}/lib/libavformat.a"
+    "${CRTMEDIA_FFMPEG_PORT_PREFIX}/lib/libavcodec.a"
+    "${CRTMEDIA_FFMPEG_PORT_PREFIX}/lib/libswresample.a"
+    "${CRTMEDIA_FFMPEG_PORT_PREFIX}/lib/libavutil.a"
+  )
+endif()
+option(CRTMEDIA_ENABLE_FFMPEG "Build libcrtmedia's FFmpeg-backed demux/decode bridge when available" OFF)
+if(CRTMEDIA_ENABLE_FFMPEG AND NOT EXISTS "${CRTMEDIA_FFMPEG_PORT_PREFIX}/include/libavformat/avformat.h")
+  message(FATAL_ERROR "CRTMEDIA_ENABLE_FFMPEG=ON but ${CRTMEDIA_FFMPEG_PORT_PREFIX}/include/libavformat/avformat.h was not found")
+endif()
+if(CRTMEDIA_ENABLE_FFMPEG AND NOT CRTMEDIA_FFMPEG_LIBRARIES)
+  message(FATAL_ERROR "CRTMEDIA_ENABLE_FFMPEG=ON requires CRTMEDIA_FFMPEG_LIBRARIES. Run the port-build-ffmpeg target, then reconfigure.")
+endif()
+
 add_library(crtmedia STATIC
   src/runtime.c
   src/frame.c
   src/frame_convert.c
+  src/audio.c
 )
-target_link_libraries(crtmedia PRIVATE crt_build_flags c m dl cxx)
+target_link_libraries(crtmedia PRIVATE crt_build_flags)
+if(CRT_TARGET_OS STREQUAL "linux" AND CRTMEDIA_ENABLE_FFMPEG)
+  # --start-group/--end-group: the exact same real GNU-ld circular-
+  # archive-resolution gap libcrtgfx's own crtgfx target already
+  # documents and fixes this way (see that target's own fuller comment,
+  # same file shape) -- confirmed for real (2026-08-31) via crtmedia_
+  # demux_test's own generated link command: FFmpeg's own libavutil.a/
+  # libswresample.a always land *after* c/m on the final link line
+  # regardless of target_link_libraries() call order here, so ld.bfd's
+  # default single left-to-right archive pass already has libm.a/
+  # libc.a's own sin/cos/memchr/strspn/... behind it by the time it
+  # reaches FFmpeg's own object files that need them -- every one comes
+  # back "undefined reference" even though libm.a/libc.a both genuinely
+  # define them.
+  #
+  # A first attempt wrapped only "dl cxx" + CRTMEDIA_FFMPEG_LIBRARIES in
+  # the group, with "c m" added in a separate, earlier
+  # target_link_libraries() call (still nominally "before" the group
+  # markers in source order) -- confirmed for real this does NOT work:
+  # CMake does not preserve that inter-call ordering faithfully once
+  # transitive INTERFACE_LINK_LIBRARIES propagation is involved (ninja
+  # -t commands showed libc.a/libm.a hoisted entirely *outside* (before)
+  # the --start-group/--end-group pair, with only a second, duplicate
+  # libc.a landing inside it). crtgfx's own working precedent (this
+  # file's sibling, ~line 992-1006) puts its *entire* PRIVATE static-lib
+  # set -- CRTGFX_CRT_STATIC_LIBS (c/m/dl/cxx equivalent) included --
+  # inside one single group, not split across calls; matched exactly
+  # here: c/m/dl/cxx and the FFmpeg archives are now all inside the same
+  # start-group/end-group pair, in one contiguous sequence of calls.
+  target_link_libraries(crtmedia PRIVATE -Wl,--start-group)
+  target_link_libraries(crtmedia PRIVATE c m dl cxx)
+  target_link_libraries(crtmedia PRIVATE ${CRTMEDIA_FFMPEG_LIBRARIES})
+  target_link_libraries(crtmedia PRIVATE -Wl,--end-group)
+else()
+  target_link_libraries(crtmedia PRIVATE c m dl cxx)
+  if(CRTMEDIA_ENABLE_FFMPEG)
+    # macOS/Windows: no --start-group equivalent needed/used here yet
+    # (matching crtgfx's own Linux-only branch for the identical
+    # situation) -- plain ordering, not yet verified on either host for
+    # this specific FFmpeg-vs-libm/libc case; revisit if/when a real
+    # build surfaces the same undefined-reference gap there.
+    target_link_libraries(crtmedia PRIVATE ${CRTMEDIA_FFMPEG_LIBRARIES})
+  endif()
+endif()
 target_include_directories(crtmedia PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
@@ -16,6 +97,7 @@ add_library(crtmedia_shared SHARED
   src/runtime.c
   src/frame.c
   src/frame_convert.c
+  src/audio.c
 )
 if(CRT_TARGET_OS STREQUAL "windows")
   target_sources(crtmedia_shared PRIVATE $<TARGET_OBJECTS:crt_windows_dllcrt>)
@@ -36,6 +118,38 @@ if(CRT_TARGET_OS STREQUAL "windows")
   set_target_properties(crtmedia_shared PROPERTIES
     ARCHIVE_OUTPUT_NAME crtmedia_dll
   )
+endif()
+
+if(CRTMEDIA_ENABLE_FFMPEG)
+  # No add_dependencies(... port-build-ffmpeg) here -- confirmed for real
+  # (2026-08-31) this creates a genuine CMake target-graph cycle: the
+  # top-level "sysroot" target depends on crtmedia/crtmedia_shared (to
+  # stage them in), while port-build-ffmpeg itself depends on "sysroot"
+  # (an ordinary third-party port, built *against* the already-staged
+  # sysroot, exactly like every other porting/recipes/*.json target) --
+  # so crtmedia -> port-build-ffmpeg -> sysroot -> crtmedia is circular.
+  # The CRTMEDIA_FFMPEG_LIBRARIES/EXISTS guard above already enforces the
+  # real ordering at *configure* time (CRTMEDIA_ENABLE_FFMPEG=ON refuses
+  # to configure at all until port-build-ffmpeg has already been run
+  # once) -- matching libcrtgfx's own CRTGFX_ENABLE_SKIA precedent
+  # exactly, which uses the identical configure-time-guard-only pattern
+  # for the same reason.
+  target_sources(crtmedia PRIVATE src/demux.c)
+  target_include_directories(crtmedia PRIVATE "${CRTMEDIA_FFMPEG_PORT_PREFIX}/include")
+  # crtmedia's own PRIVATE link libraries call (including, on Linux, the
+  # --start-group/--end-group-wrapped CRTMEDIA_FFMPEG_LIBRARIES) already
+  # happened right after add_library(crtmedia ...) above -- see that
+  # call's own comment for why it has to live there and not here.
+
+  target_sources(crtmedia_shared PRIVATE src/demux.c)
+  target_include_directories(crtmedia_shared PRIVATE "${CRTMEDIA_FFMPEG_PORT_PREFIX}/include")
+  # Unlike crtmedia's own static archive (where an unresolved FFmpeg
+  # symbol is simply left for whatever final executable links crtmedia
+  # to resolve), crtmedia_shared is a real DLL/shared object -- Windows
+  # in particular requires every symbol resolved at link time (no lazy
+  # binding the way ELF .so allows), so this shared target must link the
+  # FFmpeg archives directly or the DLL build itself fails.
+  target_link_libraries(crtmedia_shared PRIVATE ${CRTMEDIA_FFMPEG_LIBRARIES})
 endif()
 
 install(TARGETS crtmedia crtmedia_shared
@@ -103,3 +217,112 @@ set_tests_properties(crtmedia_frame_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "crtmedia_frame_test: ok"
 )
 set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_frame_test_runs)
+
+# crtmedia_demux_test: real FFmpeg demux/decode coverage (crtmedia/demux.h,
+# src/demux.c) -- opens libcrtmedia/assets/test_tone.wav (a real, tiny,
+# project-authored WAV fixture -- see assets/README.md) and checks real
+# stream info and decoded PCM sample counts, not just that the calls
+# succeed without crashing. Gated behind CRTMEDIA_ENABLE_FFMPEG exactly
+# like the library's own demux.c sources above (same reasoning: needs a
+# real port-build-ffmpeg first). Same plain-C-executable shape as
+# crtmedia_frame_test just above.
+if(CRTMEDIA_ENABLE_FFMPEG)
+  add_executable(crtmedia_demux_test
+    ${CRT_STARTUP_OBJECTS}
+    tests/demux_decode_test.c
+  )
+  # Deliberately NOT linking c/m directly here (unlike crtmedia_frame_
+  # test just above): crtmedia itself now links c/m/dl/cxx PRIVATE inside
+  # its own --start-group/--end-group pair (see add_library(crtmedia ...)
+  # above). Confirmed for real (2026-08-31) that listing "c m" directly
+  # on *this* target's own link line -- even positioned after crtmedia --
+  # makes CMake's link-line generator resolve c/m's position from this
+  # call site (ahead of crtmedia's own forwarded, grouped libraries)
+  # rather than from inside crtmedia's group, which reintroduces the
+  # exact same single-pass archive-scan-order bug the group exists to
+  # fix (FFmpeg's own sin/cos/memchr/... references come back "undefined
+  # reference" again despite libm.a/libc.a genuinely defining them).
+  # Omitting c/m here lets crtmedia's own PRIVATE link libraries (STATIC
+  # library link libraries are still forwarded to consumers by CMake --
+  # only *usage requirements* like include dirs are not -- so this does
+  # not lose them) surface at the position crtmedia's own group markers
+  # put them.
+  target_link_libraries(crtmedia_demux_test PRIVATE crt_build_flags crtmedia)
+  target_include_directories(crtmedia_demux_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include"
+  )
+  target_compile_definitions(crtmedia_demux_test PRIVATE
+    CRTMEDIA_TEST_WAV_PATH="${CMAKE_SOURCE_DIR}/libcrtmedia/assets/test_tone.wav"
+  )
+  target_link_libraries(crtmedia_demux_test PRIVATE crt_compiler_rt_builtins)
+  target_link_options(crtmedia_demux_test PRIVATE
+    -nostdlib
+    -nostartfiles
+    -nodefaultlibs
+  )
+  if(CRT_TARGET_OS STREQUAL "macos")
+    target_link_options(crtmedia_demux_test PRIVATE
+      -Wl,-e,_start
+      -Wl,-dead_strip
+    )
+    # Explicit c/m/dl/cxx here, unlike the Linux branch's own deliberate
+    # omission just below (see that comment for why omitting them there
+    # is required to keep crtmedia's own --start-group/--end-group intact)
+    # -- macOS has no such group to disturb (crtmedia's own else() branch,
+    # add_library(crtmedia ...) above, links c/m/dl/cxx plainly, no
+    # grouping), and a real, different bug needs this here instead.
+    # Confirmed for real (2026-09-01): without this, crtmedia_demux_test
+    # crashed with EXC_BAD_ACCESS/Bus error inside real Darwin
+    # libsystem_pthread.dylib's own pthread_once(), called from FFmpeg's
+    # avcodec_find_decoder() -> av_codec_static_init's one-time
+    # registration guard. Root cause: this executable's own final link
+    # line put `-lSystem` (added by the target_link_libraries(...
+    # System) call just below) *before* crtmedia's own propagated PRIVATE
+    # c/m/dl/cxx (which land wherever CMake appends a linked static
+    # target's own forwarded dependencies -- confirmed, via `ninja -v`,
+    # to be *after* every directly-listed library including System, not
+    # at crtmedia's own position in the call sequence). Apple ld's
+    # dynamic-library symbol resolution does not care about archive scan
+    # order the way a static archive does: once `-lSystem` is reached
+    # with `pthread_once` still unresolved, its real, exported
+    # implementation satisfies the reference immediately, and this
+    # project's own `pthread_once` (libc/src/pthread.c, later in the
+    # link line inside `libc.a`) is never even consulted -- FFmpeg's
+    # `codec_mutex` was allocated using *this project's own*, much
+    # smaller `pthread_once_t` layout (from this project's own
+    # <pthread.h>, the only one crt-cc's own -nostdinc sysroot exposes),
+    # but the function that actually ran against it was real Darwin's,
+    # which expects its own, differently-sized opaque `pthread_once_t` --
+    # a real ABI mismatch, not a logic bug, causing an out-of-bounds/
+    # misaligned atomic access. Mirrors crtmedia_frame_test's own
+    # existing, already-working `c` link just above in this same file --
+    # extended here to `m`/`dl`/`cxx` too, not just `c`, since the same
+    # shadow-by-libSystem risk exists for whichever of that set FFmpeg's
+    # own code happens to call into. Placed *before* the System link
+    # immediately below, matching frame_test's own "the CRT library
+    # before whatever host fallback comes after" ordering intent.
+    target_link_libraries(crtmedia_demux_test PRIVATE c m dl cxx)
+    target_link_libraries(crtmedia_demux_test PRIVATE System)
+  elseif(CRT_TARGET_OS STREQUAL "linux")
+    target_link_options(crtmedia_demux_test PRIVATE
+      -Wl,-e,_start
+      -Wl,--gc-sections
+    )
+  elseif(CRT_TARGET_OS STREQUAL "windows")
+    target_link_options(crtmedia_demux_test PRIVATE
+      -Wl,/entry:mainCRTStartup
+      -Wl,/subsystem:console
+      -Wl,/OPT:REF
+    )
+    target_link_libraries(crtmedia_demux_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  endif()
+  crt_link_startup_end_objects(crtmedia_demux_test)
+  add_dependencies(crtmedia_demux_test c crt1 crtmedia)
+
+  add_test(NAME crtmedia_demux_test_runs COMMAND crtmedia_demux_test)
+  set_tests_properties(crtmedia_demux_test_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    PASS_REGULAR_EXPRESSION "crtmedia_demux_test: ok"
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_demux_test_runs)
+endif()

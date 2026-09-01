@@ -225,11 +225,51 @@ full existing ctest suite unaffected each time). See `HISTORY.md`'s
 2026-08-31 entry for the full trail; not a work-queue item
 anymore.
 
+**`libcrtmedia`'s FFmpeg demux/software-decode bridge is done on all three
+hosts** (2026-09-01): `include/crtmedia/audio.h` (`crtmedia_audio_buffer`,
+mirroring `frame.h`'s own ownership/release-callback design) and
+`include/crtmedia/demux.h` + `src/demux.c` (open a local file, demux one
+container (MOV/MP4/M4A), decode H.264 video into `crtmedia_frame` / AAC+
+MP3+PCM audio into `crtmedia_audio_buffer` -- no FFmpeg type in either
+public header), behind a new opt-in `CRTMEDIA_ENABLE_FFMPEG` CMake option
+and `porting/recipes/ffmpeg.json` (LGPL-only, local-file-only, no encode/
+network/GPU/asm this pass). `crtmedia_demux_test` verifies it end-to-end
+against a real WAV fixture, now passing for real on Linux (WSL), macOS,
+and native Windows (`porting/recipes/ffmpeg.json`'s own notes have the
+full per-host trail: two macOS-specific fixes -- a missing `<sys/
+sysctl.h>` host header routed to this project's own `sysconf()` fallback,
+and a real Apple-ld `pthread_once` ABI-shadowing bug; six Windows-specific
+fixes -- `porting/recipes/make.json`'s own `HAVE_DOS_PATHS` self-re-exec
+bug, two more `@ROOT@`/`@AR@` token-substitution gaps in `tools/crt-port-
+build.py`, a new `porting/shims/win32/install-sh` since this project's
+Windows rootfs has no real `install(1)`, and a `doc/examples`-install
+patch); full ctest suite clean on all three hosts (Windows 123/123, no
+regressions). See `HISTORY.md`'s 2026-09-01 entries for the full trail --
+audio *output* (device playback) and further codecs/protocols remain open,
+not a work-queue item in this exact shape anymore.
+
+**A real, unrelated Windows regression surfaced while verifying the above**:
+`curl`'s own `http-roundtrip-static` test now fails at runtime ("Out of
+memory") -- confirmed via a real A/B test this is unrelated to any
+`ffmpeg`/`make.json` change from this pass, not yet root-caused. See
+`porting/recipes/curl.json`'s own notes and `docs/porting_status.md`'s
+`curl` section (status downgraded from `shared-pass` to `partial` on
+Windows pending a real fix).
+
 Open upper-runtime work, in recommended order, now that the gate above is
 clear -- run these tracks in parallel rather than gating one on another:
 
-- `libcrtmedia`: FFmpeg demux/software decode -> the CPU frame contract
-  above -> audio buffer handoff.
+- `libcrtmedia`: widen codec/protocol coverage (network, HEVC/VP9/Opus/...,
+  GPU/hwaccel decode) as real need demonstrates it -- matching this
+  project's own narrow-now-expand-later pattern. A real, project-owned API
+  policy decision is still open too: whether the public surface should
+  model itself on AOSP's NDK media API (`AMediaCodec`/`AMediaExtractor`/
+  `AMediaFormat`) layered over the current internal FFmpeg bridge, matching
+  `libcrtgfx_api_policy.md`'s own "expose the real upstream API" precedent
+  -- but with the LGPL/FFmpeg-ABI-churn/audience differences that make
+  directly exposing FFmpeg's own headers (the literal Skia parallel) a
+  worse fit here than it was for Skia. Not written up yet -- deferred until
+  after this pass's own Windows/curl loose end is closed.
 - `libcrtgfx` GPU surface contract: an opaque GPU handle that never exposes a
   host SDK type in a public header, a backend capability query with software
   fallback, a shared lifetime/fence model across Direct3D, Metal, and Linux

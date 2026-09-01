@@ -8,6 +8,301 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-01
+
+- **`libcrtmedia`'s FFmpeg demux/software-decode bridge lands and is
+  verified end-to-end on Linux; Windows configure now succeeds too, with
+  one real, diagnosed-but-unfixed `make`-step blocker remaining.** Follows
+  the CPU frame handoff contract (2026-08-31, above) and the user's own
+  explicit choice to do FFmpeg SW decode before `libcrtgfx`'s GPU surface
+  contract. New: `porting/recipes/ffmpeg.json` (FFmpeg 8.1.2, LGPL-only,
+  local-`file`-protocol-only demux, one container (MOV/MP4/M4A), one video
+  codec (H.264) and three audio codecs (AAC/MP3/PCM) via `--disable-
+  everything` + explicit `--enable-decoder=`/`--enable-demuxer=`/
+  `--enable-parser=`, no assembly-optimized codec paths
+  (`--disable-x86asm --disable-inline-asm`, no NASM/yasm dependency this
+  project doesn't have) -- deliberately narrow first pass, matching
+  `curl.json`'s own HTTP/HTTPS-only precedent); `libcrtmedia/include/
+  crtmedia/audio.h` + `src/audio.c` (`crtmedia_audio_buffer`, mirroring
+  `frame.h`'s own release-callback ownership model); `libcrtmedia/include/
+  crtmedia/demux.h` + `src/demux.c` (opaque `crtmedia_demuxer` wrapping
+  real `AVFormatContext`/`AVCodecContext`/`SwrContext` internally -- no
+  FFmpeg type ever named in either public header, matching
+  `docs/libcrtgfx_api_policy.md`'s established no-host-SDK-type-in-a-
+  public-header policy); a new opt-in `CRTMEDIA_ENABLE_FFMPEG` CMake
+  option (default OFF, mirroring `CRTGFX_ENABLE_SKIA` exactly); a real,
+  tiny, project-authored WAV fixture (`libcrtmedia/assets/test_tone.wav`,
+  0.25s/8kHz/mono/16-bit PCM, generated via Python's stdlib `wave` module,
+  public domain -- see `assets/README.md`) and `tests/demux_decode_test.c`
+  (`crtmedia_demux_test` ctest target), which opens it, decodes every
+  buffer, and checks the real, exactly-known 2000-sample total.
+
+  Six real bugs found and fixed getting to a real, passing Linux build
+  (`crtmedia_demux_test: ok`, full existing 106/107-test ctest suite
+  otherwise unaffected -- the one pre-existing failure,
+  `crtgfx_window_smoke_runs`, needs a real display connection this WSL
+  session doesn't have, unrelated to this change):
+  1. `tools/crt-port-build.py`'s `build_configure_port()` unconditionally
+     indexed `build["make_args"]` with no `.get()` fallback -- a de facto
+     required recipe field this schema never documented as such; fixed by
+     adding `"make_args": []` to the recipe.
+  2. FFmpeg's own hand-rolled, non-autoconf `./configure` never reads `$CC`
+     from the environment (unlike every other, autoconf-based recipe
+     here) and silently fell back to bare host `gcc` until `--cc=` was
+     passed explicitly, which then surfaced (3.) `tools/crt-port-build.
+     py`'s own `configure_args` substitution never applying `@ROOT@` at
+     all (only `@CRT_MINGW_TRIPLE@`/`@PORT_PREFIX@` were wired -- the
+     exact same class of gap that function's own comment already
+     documented finding once before for `@PORT_PREFIX@` during `curl.
+     json`) -- fixed generally in the tool itself, not worked around
+     locally.
+  4. A CMake target-graph cycle (`sysroot` -> `crtmedia`/`crtmedia_shared`
+     -> `port-build-ffmpeg` -> `sysroot`) from an initial `add_dependencies
+     (crtmedia port-build-ffmpeg)` -- removed, relying purely on the
+     configure-time `EXISTS`-guard `FATAL_ERROR`s `CRTGFX_ENABLE_SKIA`
+     already established as this project's precedent for the identical
+     situation.
+  5. A real GNU-ld static-archive link-order bug: FFmpeg's own `.a` files
+     always landed after `libm.a`/`libc.a` on the final link line
+     regardless of `target_link_libraries()` call order, so ld.bfd's
+     single left-to-right archive scan already had `sin`/`cos`/`memchr`/
+     `strspn`/... behind it once it reached FFmpeg's own object files
+     needing them. Fixed the same way `libcrtgfx`'s own `crtgfx` target
+     already established: the *entire* PRIVATE static-lib set (c/m/dl/
+     cxx) and the FFmpeg archives wrapped together in one contiguous
+     `-Wl,--start-group`/`-Wl,--end-group` pair inside `crtmedia`'s own
+     declaration -- confirmed for real that splitting them across
+     separate `target_link_libraries()` calls (even in the "right" source
+     order) does not survive CMake's own link-line generation intact, and
+     that a *consumer* (`crtmedia_demux_test`) also linking `c`/`m`
+     directly itself repositions them ahead of `crtmedia`'s own grouped
+     copies, reintroducing the same bug from the consumer side -- neither
+     is enough alone, both had to be fixed together.
+  6. `src/demux.c`'s own EOF-tracking was originally a wrong function-
+     local `static int flushed` inside `crtmedia_demuxer_read()` (would
+     have incorrectly shared state across every demuxer instance) --
+     caught by self-review before it ever reached a real test failure,
+     moved into the `crtmedia_demuxer` struct itself.
+
+  Windows: `./configure` now succeeds cleanly too (same exact decoder/
+  demuxer/parser/protocol summary as Linux), after three more real,
+  Windows-specific fixes: (a) FFmpeg's configure has no autoconf-style
+  `--build=`/`--host=` triple pair at all (`--arch=`/`--target-os=`/
+  `--cross-prompt=`/`--toolchain=` instead) -- the original `--build=
+  @CRT_MINGW_TRIPLE@` override was simply wrong, replaced with
+  `--arch=x86_64 --target-os=mingw32 --enable-cross-compile`; (b) a real,
+  general `TMPDIR` bug in `tools/crt-port-build.py`'s own `make_env()`:
+  Windows' own backslash-separated `%TEMP%`/`%TMP%` was inherited
+  untouched into the mksh-run configure environment, and mksh's ordinary
+  backslash-escapes-next-character word expansion silently ate every
+  backslash unquoted (`C:\Users\...\Temp` became `C:UsersLeeAppDataLocal
+  Temp`), so configure's own sanity test failed to create files there at
+  all -- fixed the same way every other path already forwarded into that
+  environment is (`path_for_crt_shell()`'s backslash-to-forward-slash
+  conversion), just newly applied to `TMPDIR` too; (c) FFmpeg's own cross-
+  compile mode needs a *separate* host-side C11 compiler for its internal
+  build-time codegen tools (`--host-cc=`, defaulting to a bare `gcc` this
+  sandboxed rootfs-only `PATH` doesn't have) -- fixed by pointing
+  `--host-cc=` at the same `@ROOT@/tools/crt-cc` used for `--cc=`, valid
+  here since FFmpeg's "host" (build machine) and "target" are both this
+  same native-Windows/mingw environment.
+
+  The subsequent `make` step hits a new, real, but NOT fixed this pass
+  blocker: `porting/recipes/make.json`'s own Windows `make.exe` is
+  deliberately built without `HAVE_DOS_PATHS` ("Windows intentionally
+  uses the POSIX-like musl config path ... so failures expose CRT/PAL
+  gaps", that recipe's own notes) -- GNU Make's internal path-
+  absoluteness check (used when it re-execs itself after a Makefile it
+  read gets remade mid-build, which FFmpeg's real build graph genuinely
+  triggers once, right after generating five `*.version` files) only
+  recognizes a leading `/` as absolute without that define, so it treats
+  a real, valid drive-letter path as relative and corrupts it by
+  prepending its own current directory (`make.exe: <cwd>/C:/Users/.../
+  make.exe: No such file or directory`). Root-caused but deliberately not
+  "fixed" this pass: `HAVE_DOS_PATHS` is a single, global (not per-
+  recipe) define for every already-verified Windows port's own `make.exe`,
+  and it changes several of GNU Make's own internal semantics pervasively
+  (path separator character, case sensitivity, backslash-as-separator
+  handling) in ways that risk silently regressing those already-passing
+  builds without equally careful, isolated re-verification of each one --
+  see `porting/recipes/ffmpeg.json`'s own notes for the full reasoning.
+  macOS not attempted this pass (needs the user's own Mac, matching the
+  frame contract's own verification split).
+
+- **`libcrtmedia`'s FFmpeg demux/software-decode bridge verified for real
+  on macOS, closing that host's gap from the entry just above.** User
+  fetched the `libcrtmedia-ffmpeg-demux-decode` branch and asked to
+  confirm it actually compiles and runs on macOS, with real hardware
+  access available this session. Two real, macOS-specific bugs found and
+  fixed, neither present on Linux -- see `porting/recipes/ffmpeg.json`'s
+  own notes for the full account:
+  1. **`fatal error: 'sys/sysctl.h' file not found`, building
+     `libavutil/cpu.c`.** FFmpeg's own `./configure` detected `HAVE_
+     SYSCTL=1` via a link-level `check_func` (real Darwin `sysctl()`
+     genuinely links against real libSystem), but `<sys/sysctl.h>` itself
+     -- a real macOS/BSD-only header -- is not reachable through `tools/
+     crt-cc`'s own `-nostdinc` + project sysroot include path at all.
+     Fixed via a new `target_overrides.macos.post_configure_patch` in the
+     recipe (a pre-existing, generic mechanism, not new): flips `#define
+     HAVE_SYSCTL 1` to `0` in the generated `config.h` right after
+     `./configure`, routing FFmpeg's own `avpriv_cpu_count()` to the very
+     next fallback branch in the same function, `sysconf(_SC_
+     NPROCESSORS_ONLN)` -- already genuinely implemented in this
+     project's own libc (`libc/src/fd.c` already uses it internally) --
+     instead of adding a new Darwin-only header shim for something POSIX
+     already covers, matching this project's established policy
+     (`docs/porting_status.md`'s own sqlite-amalgamation entry states it
+     explicitly).
+  2. **`crtmedia_demux_test` crashed with `EXC_BAD_ACCESS`/Bus error**,
+     once FFmpeg itself built and linked cleanly -- inside real Darwin
+     `libsystem_pthread.dylib`'s own `pthread_once()`, called from
+     `avcodec_find_decoder()`'s one-time codec-registration guard.
+     Root-caused with `lldb`, not guessed: the faulting address was 4
+     bytes into FFmpeg's own `codec_mutex` global. This executable's own
+     real link line (confirmed via `ninja -v`) put `-lSystem` *before*
+     this project's own `libc.a` (which has its own real `pthread_once`,
+     `libc/src/pthread.c`) -- Apple ld resolves an undefined symbol from
+     whatever provides it first regardless of archive-vs-dylib kind, so
+     `-lSystem`'s real `pthread_once` satisfied the reference first and
+     this project's own implementation, later in the link line, was never
+     consulted. `codec_mutex` was allocated using this project's own,
+     much smaller `pthread_once_t` layout (the only `<pthread.h>`
+     `crt-cc`'s own sysroot exposes to FFmpeg's source), but the function
+     that actually ran against it was real Darwin's, expecting its own,
+     differently-sized opaque `pthread_once_t` -- a genuine ABI mismatch,
+     not memory corruption. Fixed in `libcrtmedia/CMakeLists.txt`:
+     `crtmedia_demux_test`'s own macOS branch now explicitly links `c m
+     dl cxx` directly, before `System`, mirroring `crtmedia_frame_test`'s
+     own pre-existing, already-working identical pattern in the same
+     file -- confirmed via `ninja -v` this moves `lib/libc.a` ahead of
+     `-lSystem` on the real link line. Deliberately **not** applied to
+     the Linux branch, which has its own, different, already-documented
+     reason for omitting the exact same explicit link (see that branch's
+     own comment) -- the two hosts need opposite treatment for the
+     same-looking line, not a shared fix.
+  Verified for real: `crtmedia_demux_test: ok` (the same real WAV
+  fixture, same exact 2000-sample check as Linux), and the full ctest
+  suite (107/107) passes with no regressions. `porting/recipes/
+  ffmpeg.json`'s own `status.macos` updated from `untested` to
+  `shared-pass`, matching Linux.
+
+- **`libcrtmedia`'s FFmpeg demux/software-decode bridge verified for real
+  on native Windows, closing out the last open host from the entries just
+  above.** `crtmedia_demux_test.exe` runs directly and reports
+  `crtmedia_demux_test: ok` against the same real WAV fixture/2000-sample
+  check as Linux/macOS; full ctest suite 123/123 passing, no regressions.
+  Picked back up specifically to resolve the GNU-Make self-re-exec
+  blocker the earlier Windows entry above deliberately left unfixed
+  ("I held off since it's a global change risking regressions on
+  already-verified ports" -- the user's own explicit instruction this
+  pass). Six real, Windows-specific fixes found and fixed in turn, each
+  by working straight through the next real build/link/runtime failure
+  (matching this whole recipe's own established discipline, not guessed
+  ahead of evidence):
+  1. **`porting/recipes/make.json`'s own Windows `make.exe` needed
+     `-DHAVE_DOS_PATHS=1`.** GNU Make re-execs itself (a real, ordinary
+     GNU Make behavior, not exotic) whenever a Makefile it read gets
+     remade mid-run -- FFmpeg's own build graph genuinely triggers this
+     once, right after regenerating five `*.version` files. Without
+     `HAVE_DOS_PATHS`, Make's own path-absoluteness check only recognizes
+     a leading `/`, so it treated a real drive-letter path as relative
+     and corrupted it. Picking `HAVE_DOS_PATHS` (a single, global define
+     for every Windows recipe's own shared `make.exe`, not per-recipe)
+     back up required real risk management, not just flipping the flag:
+     rebuilt and re-ran every other already-`shared-pass` Windows
+     recipe's own real test with the new `make.exe` before trusting it --
+     zlib/expat/xz/libffi/freetype all rebuild and re-test clean.
+     mbedtls (and curl, which depends on it) initially failed to *link*
+     (`duplicate symbol: __crt_wait32_shared` between `libc.a` and
+     `libmbedcrypto.dll.a`) -- confirmed via a real A/B test (swapping a
+     freshly-rebuilt pre-`HAVE_DOS_PATHS` `make.exe` binary back in and
+     re-running the exact same mbedtls rebuild) that this was pre-
+     existing, NOT caused by `HAVE_DOS_PATHS`: it reproduced byte-for-
+     byte identically with the old `make.exe`. Root-caused and fixed
+     separately, same day: `porting/recipes/mbedtls-windows-exclude-
+     symbols.rsp` (a known, standing maintenance-debt hand-generated
+     snapshot -- see `mbedtls.json`'s own notes, this is the *third* time
+     it's drifted stale) had simply never picked up libc's newer public
+     symbols (the `wait32`/`cnd_wait` family among them). Regenerated the
+     same documented way -- a fresh `llvm-nm --defined-only -g` dump of
+     `libc.a` (947 -> 1077 entries, confirmed a strict superset) --
+     confirmed via `llvm-readobj --coff-exports` that `libmbedcrypto.dll`'s
+     real export table still has zero libc symbols in it. Both `mbedtls`
+     tests and `curl`'s own build are unblocked by this alone.
+  2. **A second, real `@ROOT@` substitution bug**, found immediately
+     after (1): the earlier `@ROOT@` fix (2026-08-31, `--cc=` for
+     FFmpeg's configure) used plain `str(root)`, a raw Windows backslash
+     path. FFmpeg's own `./configure` smoke-tested fine with it
+     (subprocess-level argv, no shell re-parsing), but the same value
+     also lands verbatim in FFmpeg's own generated `config.mak` as
+     `CC=...`, which every subsequent `make` *recipe* line re-parses
+     through `mksh` (a POSIX shell) -- mksh's ordinary backslash-escapes-
+     next-character expansion silently ate every backslash unquoted
+     there (`C:\Users\...\crt-cc` became `C:UsersDevWorkscrt/tools/
+     crt-cc`, "inaccessible or not found"), the identical class of bug
+     already found and fixed for `TMPDIR` the day before. Fixed to match
+     `substitute_recipe_value()`'s own pre-existing `path_for_crt_shell()`-
+     on-windows treatment, which `configure_args`'s own `@ROOT@`
+     substitution had simply never matched.
+  3. **`--ar=` was needed too** -- the identical class of gap as `--cc=`/
+     `--host-cc=`: FFmpeg's own `ar_default="ar"` has no `$AR`
+     environment fallback, and this sandboxed Windows build's own
+     restricted `PATH` has no bare `ar`. Added a matching `@AR@`
+     substitution token (`env["AR"]`, the same already-correct
+     `llvm-ar` path every other recipe's own `make_env()` already
+     resolves), with the same `path_for_crt_shell()` treatment `@ROOT@`
+     needed.
+  4. **This project's Windows rootfs has no real `install(1)` binary at
+     all.** Every prior Windows configure-based recipe's own Makefile
+     happened to use plain `cp`/`chmod` directly, never a generic
+     `$(INSTALL)` variable, until FFmpeg's own `ffbuild/library.mak`
+     (BSD-`install`-style `$(INSTALL) -m MODE SRC... DEST`) -- the first
+     recipe here to actually need one. Fixed with a new, minimal,
+     project-owned `porting/shims/win32/install-sh` (`cp`+`chmod`+
+     `basename`, all real, already-enabled toybox applets in this
+     rootfs), wired in via a new `target_overrides.windows.make_args`
+     entry -- which needed the identical `@ROOT@` substitution gap fixed
+     a *third* time, in `make_args`/`install_args`'s own, separate
+     substitution code path (and confirmed it isn't simply reusable from
+     `configure_args`'s own local variable: that one is scoped inside an
+     `if not skip_configure` branch, and referencing it unconditionally
+     here would `NameError` for a `skip_configure` recipe like mbedtls).
+  5. **`doc/examples/Makefile`'s own unconditional `install:
+     install-examples` line** tries to install `doc/examples/*.c`
+     reference source regardless of which examples are actually
+     enabled -- never in this pass's scope (`--disable-programs` already
+     covers real example binaries; this is just source-file copying) and
+     would need `install(1)` support for zero real benefit. A second
+     `post_configure_patch` neutralizes that one line instead of
+     stretching `install-sh` to matter for a feature nobody needs.
+  6. **`--disable-zlib`**, found immediately after all five of the above
+     while linking `crtmedia_demux_test` itself (`undefined symbol:
+     uncompress`, `libavformat.a`'s own optional id3v2/mov compressed-
+     metadata support). FFmpeg's own configure auto-detects zlib and
+     links against it whenever a `zlib` port build happens to already
+     exist in the shared install prefix at ffmpeg-configure-time --
+     undefined, build-order-dependent behavior for a feature never in
+     this pass's scope, so added to the *base* `configure_args` (all
+     hosts, not just Windows) to make it deterministic. Re-verified for
+     real on Linux after this base-level change (`crtmedia_demux_test`
+     still passes, ctest still 106/107, same one pre-existing unrelated
+     failure) -- macOS not re-verified, needs the user's own Mac.
+  A **separate, real, currently-unfixed regression surfaced along the
+  way**, unrelated to any of the six fixes above: `curl`'s own
+  `http-roundtrip-static` test now fails at runtime with `Out of memory`
+  on its very first (plain HTTP) request. Confirmed via the same A/B
+  discipline (old vs. new `make.exe`) plus a fully fresh `zlib`+`curl`
+  rebuild that this is neither `HAVE_DOS_PATHS`-related nor the
+  previously-documented `pipe()`-misdetection "Out of memory" bug
+  (`config.log` confirms `pipe()` now correctly detects as `yes`) nor a
+  stale-dependency artifact. Not root-caused this pass -- tracked
+  separately (`porting/recipes/curl.json`'s own status downgraded from
+  `shared-pass` to `partial` on Windows, `docs/porting_status.md` updated
+  to match) rather than blocking the FFmpeg work it was found alongside.
+  `porting/recipes/ffmpeg.json`'s own `status.windows` updated from
+  `untested` to `shared-pass`, matching Linux/macOS -- `libcrtmedia`'s
+  FFmpeg demux/software-decode bridge is now verified on all three hosts.
+
 ## 2026-08-31
 
 - **Added `.gitattributes` to force LF line endings repo-wide, fixing a
