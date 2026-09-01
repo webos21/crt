@@ -736,6 +736,19 @@ struct winsock_api {
       void* lpProtocolInfo,
       unsigned int g,
       DWORD dwFlags);
+  /* Real Winsock select(), used only by poll_socket() below to answer a
+   * genuine "is this socket writable/failed right now" question -- see
+   * that function's own comment for why. Declared with void* fd_set/
+   * timeval parameters (rather than the real Winsock types) so this file
+   * never needs winsock2.h's own fd_set (array-of-SOCKET, utterly
+   * unrelated to this project's own bitmask <sys/select.h> fd_set of the
+   * same name) or struct timeval (Winsock's is always {long, long} even
+   * in a 64-bit process -- this project's own struct timeval widens
+   * tv_sec to time_t for Y2038, a real ABI mismatch) -- callers pass
+   * pointers to the small, privately-defined crt_ws_fd_set1/
+   * crt_ws_timeval structs below instead, byte-layout-compatible with
+   * what real Winsock expects for this narrow use. */
+  int (CRT_WINAPI* select)(int nfds, void* readfds, void* writefds, void* exceptfds, const void* timeout);
 };
 
 static struct winsock_api winsock;
@@ -2912,6 +2925,8 @@ static long init_winsock(void) {
   winsock.WSASocketA =
       (SOCKET(CRT_WINAPI*)(int, int, int, void*, unsigned int, DWORD))GetProcAddress(
           module, "WSASocketA");
+  winsock.select = (int (CRT_WINAPI*)(int, void*, void*, void*, const void*))GetProcAddress(
+      module, "select");
 
   if (winsock.WSAStartup == 0 ||
       winsock.WSAGetLastError == 0 ||
@@ -2931,7 +2946,8 @@ static long init_winsock(void) {
       winsock.closesocket == 0 ||
       winsock.ioctlsocket == 0 ||
       winsock.WSADuplicateSocketA == 0 ||
-      winsock.WSASocketA == 0) {
+      winsock.WSASocketA == 0 ||
+      winsock.select == 0) {
     return -ENOSYS;
   }
   if (winsock.WSAStartup((WORD)0x0202, data) != 0) {
@@ -3920,12 +3936,66 @@ static short poll_handle(int fd, HANDLE handle, short events) {
   return (short)(revents | POLLERR);
 }
 
+/* Byte-layout twins of real Winsock's own fd_set (a count + array of
+ * SOCKET, nothing like this project's own bitmask <sys/select.h>
+ * fd_set of the same name) and struct timeval (always {long, long} on
+ * Windows, even in a 64-bit process). Only ever used to talk to
+ * winsock.select() below -- see that field's own comment in struct
+ * winsock_api. */
+struct crt_ws_fd_set1 {
+  unsigned int fd_count;
+  SOCKET fd_array[1];
+};
+
+struct crt_ws_timeval {
+  long tv_sec;
+  long tv_usec;
+};
+
 static short poll_socket(SOCKET socket_handle, short events) {
   unsigned long bytes_available = 0;
   short revents = 0;
 
   if ((events & POLLOUT) != 0) {
-    revents |= POLLOUT;
+    /* A non-blocking connect() in progress must NOT be reported
+     * POLLOUT until the connection actually finishes -- confirmed for
+     * real chasing a curl "Failed sending data to the peer" failure on
+     * this exact PAL: this function used to set POLLOUT unconditionally
+     * for every socket, with no real readiness check at all. curl's own
+     * non-blocking-connect state machine (like any correct POSIX
+     * caller) treats POLLOUT as "the three-way handshake is done, it is
+     * safe to send now" and immediately calls send() the moment poll()
+     * says so; since this always fired instantly regardless of the real
+     * TCP handshake's progress, send() kept genuinely, correctly
+     * failing WSAEWOULDBLOCK (the connection was often still mid-
+     * handshake), and curl gave up rather than loop forever on a signal
+     * that was never going to change. A zero-timeout, single-socket
+     * winsock.select() answers the real question: writefds gets the
+     * socket back once it is actually writable (idle-and-connected, or
+     * a normal buffer-had-room case), exceptfds gets it back if the
+     * connect attempt itself failed (POSIX poll()'s own POLLERR/POLLHUP
+     * contract for a failed connect) -- exactly the real, non-blocking-
+     * connect completion check every other POSIX poll()/select()
+     * implementation performs, that this one had simply never done. */
+    struct crt_ws_fd_set1 write_set;
+    struct crt_ws_fd_set1 except_set;
+    struct crt_ws_timeval zero_timeout;
+
+    write_set.fd_count = 1;
+    write_set.fd_array[0] = socket_handle;
+    except_set.fd_count = 1;
+    except_set.fd_array[0] = socket_handle;
+    zero_timeout.tv_sec = 0;
+    zero_timeout.tv_usec = 0;
+
+    if (winsock.select(0, 0, &write_set, &except_set, &zero_timeout) == SOCKET_ERROR) {
+      return POLLERR;
+    }
+    if (except_set.fd_count != 0) {
+      revents |= POLLERR;
+    } else if (write_set.fd_count != 0) {
+      revents |= POLLOUT;
+    }
   }
   if ((events & POLLIN) != 0) {
     if (winsock.ioctlsocket(socket_handle, CRT_WS_FIONREAD, &bytes_available) == SOCKET_ERROR) {
@@ -4014,12 +4084,29 @@ static int translate_socket_option(int level, int optname) {
 long __crt_sys_socket(int domain, int type, int protocol) {
   SOCKET socket_handle;
   int fd;
+  /* Linux (and this project's own <sys/socket.h>, which declares
+   * SOCK_CLOEXEC unconditionally on every host so portable callers keep
+   * compiling everywhere -- same policy as eventfd()/epoll()/timerfd())
+   * lets a caller OR SOCK_CLOEXEC directly into `type` since kernel
+   * 2.6.27, atomically requesting a close-on-exec fd from socket(2)
+   * itself. Native Winsock has no such extension: passing the raw bit
+   * straight through in `type` (524288 == O_CLOEXEC/SOCK_CLOEXEC) makes
+   * winsock.socket() itself fail outright (confirmed for real: curl,
+   * which ORs in SOCK_CLOEXEC for every TCP socket it opens whenever the
+   * macro is defined, got a hard INVALID_SOCKET on this exact call and
+   * surfaced as a generic, misleading CURLE_COULDNT_CONNECT -- DNS and
+   * the wakeup-pipe path both already worked fine by this point). Strip
+   * the bit before calling Winsock and apply the same close-on-exec
+   * bookkeeping F_SETFD/FD_CLOEXEC already uses instead of silently
+   * dropping the caller's request. */
+  int cloexec_requested = (type & SOCK_CLOEXEC) != 0;
+  int native_type = type & ~SOCK_CLOEXEC;
   long init_result = init_winsock();
 
   if (init_result != 0) {
     return init_result;
   }
-  socket_handle = winsock.socket(domain, type, protocol);
+  socket_handle = winsock.socket(domain, native_type, protocol);
   if (socket_handle == INVALID_SOCKET) {
     return -map_wsa_error(winsock.WSAGetLastError());
   }
@@ -4027,6 +4114,9 @@ long __crt_sys_socket(int domain, int type, int protocol) {
   if (fd < 0) {
     winsock.closesocket(socket_handle);
     return -EMFILE;
+  }
+  if (cloexec_requested) {
+    fd_flags[fd] |= FD_CLOEXEC;
   }
   return fd;
 }
@@ -4121,6 +4211,27 @@ long __crt_sys_sendto(
     unsigned int addrlen) {
   SOCKET socket_handle = get_fd_socket(sockfd);
   int result;
+  /* MSG_NOSIGNAL (this project's own <sys/socket.h> declares it
+   * unconditionally on every host, same policy as SOCK_CLOEXEC/eventfd()
+   * above, so portable send()-then-suppress-SIGPIPE code keeps compiling
+   * everywhere) tells a real POSIX send() "never raise SIGPIPE for this
+   * call even if the peer already reset the connection" -- curl's own
+   * cf-socket.c ORs it into every send() once its configure detects the
+   * macro exists, unconditionally, on every OS. Real Winsock has no
+   * such flag and no SIGPIPE-on-broken-socket behavior to suppress in
+   * the first place (a broken connection already just surfaces as a
+   * normal WSAECONNRESET/WSAECONNABORTED return, never a signal) --
+   * passing the raw bit straight through makes winsock.send()/sendto()
+   * itself fail outright with WSAEOPNOTSUPP (10045), confirmed for real:
+   * curl's first real TCP data send on this exact PAL got a hard
+   * WSAEOPNOTSUPP here (DNS and the non-blocking-connect completion
+   * path, see poll_socket()'s own comment, both already worked fine by
+   * this point), surfaced through curl as a generic, misleading
+   * CURLE_SEND_ERROR ("Failed sending data to the peer"). Strip the bit
+   * before calling Winsock, matching the SOCK_CLOEXEC handling in
+   * __crt_sys_socket() above -- dropping it changes nothing about actual
+   * behavior here since Windows sockets never raise SIGPIPE regardless. */
+  flags &= ~MSG_NOSIGNAL;
 
   if (socket_handle == INVALID_SOCKET) {
     return -EBADF;

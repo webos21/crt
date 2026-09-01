@@ -318,30 +318,46 @@ Important follow-ups:
 - Status:
   - Linux: `shared-pass`
   - macOS: `shared-pass`
-  - Windows: `partial`
+  - Windows: `shared-pass`
 - Automated recipe tests:
   - `http-roundtrip-static`
   - `http-roundtrip-shared`
 
-curl is the final port in the current queue and was `shared-pass` on all
+curl is the final port in the current queue and is `shared-pass` on all
 three hosts. The tests perform real HTTP and HTTPS requests against
 `example.com` through libcurl, zlib, mbedTLS, DNS, sockets, non-blocking fd
 behavior, and the CRT sysroot. This is intentionally not a local
 loopback-only test.
 
 **Windows regression, found 2026-09-01 (unrelated work, verifying `ffmpeg`
-on Windows):** `http-roundtrip-static` now fails at runtime with
-`curl_http_roundtrip_test: http://example.com/ failed: Out of memory` on
-the very first (plain HTTP) request, even though basic TCP connectivity to
-the test target works. Confirmed via a real A/B test this is NOT caused by
-`porting/recipes/make.json`'s new `HAVE_DOS_PATHS` cflag (reproduces
-identically with the pre-`HAVE_DOS_PATHS` `make.exe`), and NOT the
-previously-documented `pipe()`-misdetection "Out of memory" bug this
-file's own notes below already describe (`config.log` confirms `pipe()`
-correctly detects as `yes` this time). Also confirmed NOT a stale-
-dependency artifact (reproduces after a fully fresh `zlib`+`curl`
-rebuild). Not yet root-caused -- see `porting/recipes/curl.json`'s own
-notes for the full trail.
+on Windows), fixed the same day:** `http-roundtrip-static` started failing
+at runtime with `curl_http_roundtrip_test: http://example.com/ failed: Out
+of memory` on the very first (plain HTTP) request, even though basic TCP
+connectivity to the test target worked -- confirmed NOT caused by
+`porting/recipes/make.json`'s `HAVE_DOS_PATHS` cflag (real A/B test) and
+NOT the previously-documented `pipe()`-misdetection "Out of memory" bug
+this file's own notes below already describe (`config.log` confirmed
+`pipe()` still detects as `yes`). Root-caused via real `lldb` debugging of
+the live binary plus a standalone probe built against this project's own
+CRT sysroot: four distinct, real, previously-invisible Windows PAL bugs in
+`libc/src/arch/windows/common/syscall.c`, none curl-specific, each one
+surfacing only once the prior fix let curl's logic run further than ever
+before -- `eventfd()`/`sys/eventfd.h` (added after this port's last
+Windows verification) falsely detected as usable by curl's link-only
+configure probes, sending curl down a permanently-`ENOSYS`-stubbed wakeup
+path; `SOCK_CLOEXEC` and (later) `MSG_NOSIGNAL` -- both declared
+unconditionally on every host by this project's own portable
+`<sys/socket.h>`, matching `eventfd()`'s own policy -- passed straight
+through to Winsock's `socket()`/`send()`, which do not understand either
+bit and fail the call outright; and `poll()`/`select()` unconditionally
+reporting a socket "writable" with no real check at all, so curl's
+non-blocking-connect completion check always lied and a subsequent
+`send()` genuinely, persistently returned `WSAEWOULDBLOCK`. Fixed
+generally (autoconf cache-variable priming for the first, `type`/`flags`
+bit-stripping for the second and fourth, and a real
+`winsock.select()`-backed writability check for the third) -- see
+`porting/recipes/curl.json`'s own notes for the full per-bug trail.
+Windows `ctest` stayed clean at 123/123 throughout.
 
 The first curl tranche is scoped to HTTP/HTTPS and uses a project-owned CA
 policy: no default CA bundle is baked in, so deployment consumers must provide

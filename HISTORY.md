@@ -10,6 +10,86 @@ substantive update.
 
 ## 2026-09-01
 
+- **Fixed the same-day `curl` Windows "Out of memory" regression (see the
+  `libcrtmedia`/`ffmpeg` entry below, which is what surfaced it) for
+  real: four distinct, previously-invisible Windows PAL bugs, all in
+  `libc/src/arch/windows/common/syscall.c`, none curl-specific.**
+  Root-caused with real `lldb` breakpoints on the live
+  `http-roundtrip-static.exe` (not guesswork) plus a standalone
+  `send()`/`connect()`/`select()` probe compiled straight against this
+  project's own CRT sysroot via `tools/crt-cc` for faster iteration.
+  Each bug surfaced only once the previous fix let curl's own logic run
+  further than it ever had on this PAL before:
+  1. `Curl_multi_handle()`'s init returns `NULL` on ANY internal failure,
+     and `easy_perform()` unconditionally maps that to the generic
+     `CURLE_OUT_OF_MEMORY` regardless of which one actually failed --
+     confirmed by breakpointing `Curl_probeipv6` (never reached) and
+     `Curl_wakeup_init` (reached, then failed). Real cause: this
+     project's own `eventfd()` (`libc/src/eventfd.c`, added later than
+     curl's own last Windows verification by `152393f` "Implement
+     sys/epoll.h, sys/eventfd.h, sys/timerfd.h") is a deliberate,
+     permanent `ENOSYS` stub on every non-Linux host, declared
+     unconditionally so portable code keeps compiling everywhere
+     (matching this project's own `inotify.c` precedent) -- but curl's
+     `./configure` only link-probes for `eventfd`/`sys/eventfd.h` (no
+     execution check), sees a linkable symbol, and reports "yes". Fixed
+     the way this recipe already handles curl's other Windows capability
+     gaps: primed `ac_cv_header_sys_eventfd_h=no`/`ac_cv_func_eventfd=no`
+     in `curl.json`'s own `configure_args`, an honest configure-capability
+     declaration, not a source patch.
+  2. With (1) fixed, the same generic-OOM masking recurred one call
+     further in: `__crt_sys_socket()` passed `type` straight through to
+     `winsock.socket()` with no handling for Linux's `SOCK_CLOEXEC`
+     extension bit, which this project's own `<sys/socket.h>` -- like
+     `eventfd()` -- declares unconditionally on every host. curl ORs
+     `SOCK_CLOEXEC` into every socket's `type` whenever the macro exists;
+     real Winsock has no such extension and failed the call outright.
+     Fixed generally: strip `SOCK_CLOEXEC` from `type` before calling
+     Winsock, apply the same close-on-exec bookkeeping `fcntl(F_SETFD,
+     FD_CLOEXEC)` already uses instead of silently dropping the request.
+  3. With (1)-(2) fixed, curl's non-blocking `connect()` correctly
+     returned `EINPROGRESS`, but the follow-up `send()` kept failing --
+     root-caused to `poll_socket()` (backing this project's own
+     `poll()`/`select()`) setting `POLLOUT` UNCONDITIONALLY for every
+     socket with no real readiness check at all. The standalone probe
+     proved it directly: a 20-iteration, 1-second-timeout retry loop
+     completed in 0.27 real seconds (not the ~20 it should have taken),
+     with `select()` claiming instant writability every time while
+     `send()` correctly, persistently returned `WSAEWOULDBLOCK` because
+     the real TCP handshake had not actually finished. Fixed generally:
+     added `select` to `syscall.c`'s own Winsock function-pointer table
+     (`GetProcAddress`-loaded like every other entry there) plus small,
+     privately-defined `crt_ws_fd_set1`/`crt_ws_timeval` structs
+     byte-layout-compatible with real Winsock's own (deliberately NOT
+     this project's differently-shaped, same-named POSIX types);
+     `poll_socket()`'s `POLLOUT` case now does a real zero-timeout
+     `winsock.select()` on the socket (writefds for genuine writability,
+     exceptfds for a failed connect) instead of asserting readiness.
+  4. One more instance of the same pattern surfaced at curl's first real
+     data `send()`: Winsock rejected it with `WSAEOPNOTSUPP` (confirmed
+     via a live `lldb` call into `winsock.WSAGetLastError()`), caused by
+     curl unconditionally OR-ing `MSG_NOSIGNAL` into `send()`'s flags --
+     again declared unconditionally by this project's own
+     `<sys/socket.h>`. Real Winsock has no SIGPIPE-suppression flag and
+     no SIGPIPE-on-broken-socket behavior to suppress in the first
+     place. Fixed in `__crt_sys_sendto()`: strip `MSG_NOSIGNAL` from
+     `flags` before calling Winsock.
+
+  Verified end to end: `cmake --build --preset windows-host-ninja-debug
+  --target port-test-curl` passes both `http-roundtrip-static` and
+  `http-roundtrip-shared` (`curl_http_roundtrip_test: ok http=200
+  https=200`) against real `http(s)://example.com/`. The shared test
+  needed one more `port-rebuild-mbedtls` first -- the same
+  stale-embedded-libc-symbol issue this recipe's own notes already
+  root-caused once before (mbedtls's own DLL hadn't been rebuilt since
+  these fixes landed, so `libmbedcrypto.dll` was still shadowing
+  pre-fix copies of the three fixed functions) -- confirming that
+  underlying gap is still real and still just worked around, not fixed.
+  Windows `ctest` stayed clean at 123/123 throughout. `curl` is
+  `shared-pass` on Windows again. See `porting/recipes/curl.json`'s own
+  notes for the full per-bug trail and `docs/porting_status.md`'s `curl`
+  section (status restored from the interim `partial`).
+
 - **`libcrtmedia`'s FFmpeg demux/software-decode bridge lands and is
   verified end-to-end on Linux; Windows configure now succeeds too, with
   one real, diagnosed-but-unfixed `make`-step blocker remaining.** Follows

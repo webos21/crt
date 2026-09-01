@@ -248,14 +248,6 @@ regressions). See `HISTORY.md`'s 2026-09-01 entries for the full trail --
 audio *output* (device playback) and further codecs/protocols remain open,
 not a work-queue item in this exact shape anymore.
 
-**A real, unrelated Windows regression surfaced while verifying the above**:
-`curl`'s own `http-roundtrip-static` test now fails at runtime ("Out of
-memory") -- confirmed via a real A/B test this is unrelated to any
-`ffmpeg`/`make.json` change from this pass, not yet root-caused. See
-`porting/recipes/curl.json`'s own notes and `docs/porting_status.md`'s
-`curl` section (status downgraded from `shared-pass` to `partial` on
-Windows pending a real fix).
-
 Open upper-runtime work, in recommended order, now that the gate above is
 clear -- run these tracks in parallel rather than gating one on another:
 
