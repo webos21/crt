@@ -265,6 +265,43 @@ if(CRTMEDIA_ENABLE_FFMPEG)
       -Wl,-e,_start
       -Wl,-dead_strip
     )
+    # Explicit c/m/dl/cxx here, unlike the Linux branch's own deliberate
+    # omission just below (see that comment for why omitting them there
+    # is required to keep crtmedia's own --start-group/--end-group intact)
+    # -- macOS has no such group to disturb (crtmedia's own else() branch,
+    # add_library(crtmedia ...) above, links c/m/dl/cxx plainly, no
+    # grouping), and a real, different bug needs this here instead.
+    # Confirmed for real (2026-09-01): without this, crtmedia_demux_test
+    # crashed with EXC_BAD_ACCESS/Bus error inside real Darwin
+    # libsystem_pthread.dylib's own pthread_once(), called from FFmpeg's
+    # avcodec_find_decoder() -> av_codec_static_init's one-time
+    # registration guard. Root cause: this executable's own final link
+    # line put `-lSystem` (added by the target_link_libraries(...
+    # System) call just below) *before* crtmedia's own propagated PRIVATE
+    # c/m/dl/cxx (which land wherever CMake appends a linked static
+    # target's own forwarded dependencies -- confirmed, via `ninja -v`,
+    # to be *after* every directly-listed library including System, not
+    # at crtmedia's own position in the call sequence). Apple ld's
+    # dynamic-library symbol resolution does not care about archive scan
+    # order the way a static archive does: once `-lSystem` is reached
+    # with `pthread_once` still unresolved, its real, exported
+    # implementation satisfies the reference immediately, and this
+    # project's own `pthread_once` (libc/src/pthread.c, later in the
+    # link line inside `libc.a`) is never even consulted -- FFmpeg's
+    # `codec_mutex` was allocated using *this project's own*, much
+    # smaller `pthread_once_t` layout (from this project's own
+    # <pthread.h>, the only one crt-cc's own -nostdinc sysroot exposes),
+    # but the function that actually ran against it was real Darwin's,
+    # which expects its own, differently-sized opaque `pthread_once_t` --
+    # a real ABI mismatch, not a logic bug, causing an out-of-bounds/
+    # misaligned atomic access. Mirrors crtmedia_frame_test's own
+    # existing, already-working `c` link just above in this same file --
+    # extended here to `m`/`dl`/`cxx` too, not just `c`, since the same
+    # shadow-by-libSystem risk exists for whichever of that set FFmpeg's
+    # own code happens to call into. Placed *before* the System link
+    # immediately below, matching frame_test's own "the CRT library
+    # before whatever host fallback comes after" ordering intent.
+    target_link_libraries(crtmedia_demux_test PRIVATE c m dl cxx)
     target_link_libraries(crtmedia_demux_test PRIVATE System)
   elseif(CRT_TARGET_OS STREQUAL "linux")
     target_link_options(crtmedia_demux_test PRIVATE

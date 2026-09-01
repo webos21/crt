@@ -129,6 +129,63 @@ substantive update.
   macOS not attempted this pass (needs the user's own Mac, matching the
   frame contract's own verification split).
 
+- **`libcrtmedia`'s FFmpeg demux/software-decode bridge verified for real
+  on macOS, closing that host's gap from the entry just above.** User
+  fetched the `libcrtmedia-ffmpeg-demux-decode` branch and asked to
+  confirm it actually compiles and runs on macOS, with real hardware
+  access available this session. Two real, macOS-specific bugs found and
+  fixed, neither present on Linux -- see `porting/recipes/ffmpeg.json`'s
+  own notes for the full account:
+  1. **`fatal error: 'sys/sysctl.h' file not found`, building
+     `libavutil/cpu.c`.** FFmpeg's own `./configure` detected `HAVE_
+     SYSCTL=1` via a link-level `check_func` (real Darwin `sysctl()`
+     genuinely links against real libSystem), but `<sys/sysctl.h>` itself
+     -- a real macOS/BSD-only header -- is not reachable through `tools/
+     crt-cc`'s own `-nostdinc` + project sysroot include path at all.
+     Fixed via a new `target_overrides.macos.post_configure_patch` in the
+     recipe (a pre-existing, generic mechanism, not new): flips `#define
+     HAVE_SYSCTL 1` to `0` in the generated `config.h` right after
+     `./configure`, routing FFmpeg's own `avpriv_cpu_count()` to the very
+     next fallback branch in the same function, `sysconf(_SC_
+     NPROCESSORS_ONLN)` -- already genuinely implemented in this
+     project's own libc (`libc/src/fd.c` already uses it internally) --
+     instead of adding a new Darwin-only header shim for something POSIX
+     already covers, matching this project's established policy
+     (`docs/porting_status.md`'s own sqlite-amalgamation entry states it
+     explicitly).
+  2. **`crtmedia_demux_test` crashed with `EXC_BAD_ACCESS`/Bus error**,
+     once FFmpeg itself built and linked cleanly -- inside real Darwin
+     `libsystem_pthread.dylib`'s own `pthread_once()`, called from
+     `avcodec_find_decoder()`'s one-time codec-registration guard.
+     Root-caused with `lldb`, not guessed: the faulting address was 4
+     bytes into FFmpeg's own `codec_mutex` global. This executable's own
+     real link line (confirmed via `ninja -v`) put `-lSystem` *before*
+     this project's own `libc.a` (which has its own real `pthread_once`,
+     `libc/src/pthread.c`) -- Apple ld resolves an undefined symbol from
+     whatever provides it first regardless of archive-vs-dylib kind, so
+     `-lSystem`'s real `pthread_once` satisfied the reference first and
+     this project's own implementation, later in the link line, was never
+     consulted. `codec_mutex` was allocated using this project's own,
+     much smaller `pthread_once_t` layout (the only `<pthread.h>`
+     `crt-cc`'s own sysroot exposes to FFmpeg's source), but the function
+     that actually ran against it was real Darwin's, expecting its own,
+     differently-sized opaque `pthread_once_t` -- a genuine ABI mismatch,
+     not memory corruption. Fixed in `libcrtmedia/CMakeLists.txt`:
+     `crtmedia_demux_test`'s own macOS branch now explicitly links `c m
+     dl cxx` directly, before `System`, mirroring `crtmedia_frame_test`'s
+     own pre-existing, already-working identical pattern in the same
+     file -- confirmed via `ninja -v` this moves `lib/libc.a` ahead of
+     `-lSystem` on the real link line. Deliberately **not** applied to
+     the Linux branch, which has its own, different, already-documented
+     reason for omitting the exact same explicit link (see that branch's
+     own comment) -- the two hosts need opposite treatment for the
+     same-looking line, not a shared fix.
+  Verified for real: `crtmedia_demux_test: ok` (the same real WAV
+  fixture, same exact 2000-sample check as Linux), and the full ctest
+  suite (107/107) passes with no regressions. `porting/recipes/
+  ffmpeg.json`'s own `status.macos` updated from `untested` to
+  `shared-pass`, matching Linux.
+
 ## 2026-08-31
 
 - **Added `.gitattributes` to force LF line endings repo-wide, fixing a

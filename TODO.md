@@ -234,17 +234,24 @@ M4A), decode H.264 video into `crtmedia_frame` / AAC+MP3+PCM audio into
 a new opt-in `CRTMEDIA_ENABLE_FFMPEG` CMake option and `porting/recipes/
 ffmpeg.json` (LGPL-only, local-file-only, no encode/network/GPU/asm this
 pass). `crtmedia_demux_test` verifies it end-to-end against a real WAV
-fixture on WSL/Linux; full existing ctest suite unaffected. Windows
-configure now succeeds too, but the `make` step hits a real, diagnosed-but-
-unfixed GNU-Make self-re-exec/drive-letter-path blocker (see that recipe's
-own `notes`); macOS not attempted yet. See `HISTORY.md`'s 2026-09-01 entry
-for the full trail -- audio *output* (device playback) and further codecs/
-protocols remain open, not a work-queue item in this exact shape anymore.
+fixture on WSL/Linux and now on real macOS hardware too (2026-09-01,
+`porting/recipes/ffmpeg.json`'s own notes have the full per-host trail:
+two real macOS-specific bugs found and fixed -- a missing `<sys/sysctl.h>`
+host header routed to this project's own already-implemented `sysconf()`
+fallback instead, and a real Apple-ld `pthread_once` ABI-shadowing bug
+from `-lSystem` landing before this project's own `libc.a` on the link
+line, fixed the same way `crtmedia_frame_test` already did); full existing
+ctest suite unaffected on both hosts. Windows configure now succeeds too,
+but the `make` step hits a real, diagnosed-but-unfixed GNU-Make self-
+re-exec/drive-letter-path blocker (see that recipe's own `notes`). See
+`HISTORY.md`'s 2026-09-01 entries for the full trail -- audio *output*
+(device playback), Windows, and further codecs/protocols remain open, not
+a work-queue item in this exact shape anymore.
 
 Open upper-runtime work, in recommended order, now that the gate above is
 clear -- run these tracks in parallel rather than gating one on another:
 
-- `libcrtmedia`: finish FFmpeg on Windows/macOS, then widen codec/protocol
+- `libcrtmedia`: finish FFmpeg on Windows, then widen codec/protocol
   coverage (network, HEVC/VP9/Opus/..., GPU/hwaccel decode) as real need
   demonstrates it -- matching this project's own narrow-now-expand-later
   pattern.
