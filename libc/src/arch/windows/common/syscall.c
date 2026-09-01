@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/eventfd.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
@@ -15,6 +16,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <private/crt_atomic.h>
 #include <private/crt_fd_table.h>
 #include <private/crt_fork_memcopy.h>
 #include <private/crt_signal.h>
@@ -193,6 +195,24 @@ struct crt_memory_status_ex {
  * Linux/macOS (where this already works today via a real host device file,
  * no code needed there -- see path_is_dev_zero()'s own comment). */
 #define CRT_FD_KIND_ZERO 4
+/* Unlike CRT_FD_KIND_URANDOM/CRT_FD_KIND_ZERO above, this one IS backed
+ * by a real Windows HANDLE -- a manual-reset Event object used purely as
+ * a wait/wake primitive (never touched by ReadFile()/WriteFile()) so a
+ * blocking read() on an empty eventfd can actually block efficiently in
+ * the kernel instead of busy-polling, and so poll()/select() can learn
+ * "readable" the same way they already do for a real handle. The actual
+ * eventfd counter/semaphore-mode state lives in the parallel
+ * fd_eventfd_counter[]/fd_eventfd_semaphore[] arrays below (see
+ * __crt_sys_eventfd2()'s own comment for the full read()/write()
+ * semantics and eventfd_lock's own comment for why one coarse global
+ * lock is enough here). Gives real, working eventfd() on Windows for
+ * the first time -- previously a permanent ENOSYS stub (see
+ * libc/src/eventfd.c and HISTORY.md's 2026-08-17 entry) that a portable
+ * consumer's own configure-time feature probe could still misdetect as
+ * usable, exactly the bug this fixes for real rather than routing
+ * around (see the curl Windows regression writeup in this same
+ * session's HISTORY.md entry). */
+#define CRT_FD_KIND_EVENTFD 5
 /* ERROR_NO_DATA (232): a genuinely overloaded Win32 error code -- also
  * the exact error ReadFile() returns on an anonymous pipe placed into
  * PIPE_NOWAIT mode (via SetNamedPipeHandleState()) when no data is
@@ -215,6 +235,7 @@ struct crt_memory_status_ex {
 #define CRT_PIPE_WAIT 0x00000000UL
 #define CRT_WAIT_OBJECT_0 0
 #define CRT_WAIT_FAILED 0xffffffffUL
+#define CRT_INFINITE 0xffffffffUL
 #define CRT_INFINITE 0xffffffffUL
 #define CRT_STARTF_USESTDHANDLES 0x00000100
 #define CRT_CREATE_NEW_PROCESS_GROUP 0x00000200
@@ -337,6 +358,13 @@ __declspec(dllimport) DWORD CRT_WINAPI SearchPathA(
     char* lpBuffer,
     char** lpFilePart);
 __declspec(dllimport) DWORD CRT_WINAPI WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds);
+__declspec(dllimport) HANDLE CRT_WINAPI CreateEventA(
+    void* lpEventAttributes,
+    BOOL bManualReset,
+    BOOL bInitialState,
+    const char* lpName);
+__declspec(dllimport) BOOL CRT_WINAPI SetEvent(HANDLE hEvent);
+__declspec(dllimport) BOOL CRT_WINAPI ResetEvent(HANDLE hEvent);
 __declspec(dllimport) BOOL CRT_WINAPI GetExitCodeProcess(HANDLE hProcess, DWORD* lpExitCode);
 __declspec(dllimport) DWORD CRT_WINAPI ResumeThread(HANDLE hThread);
 __declspec(dllimport) BOOL CRT_WINAPI TerminateProcess(HANDLE hProcess, unsigned int uExitCode);
@@ -600,6 +628,22 @@ static int fd_nonblock[CRT_FD_TABLE_SIZE];
  * poll_handle() below skips the PeekNamedPipe() call entirely for a
  * fd flagged here rather than trusting its result. */
 static unsigned char fd_pipe_write_only[CRT_FD_TABLE_SIZE];
+/* CRT_FD_KIND_EVENTFD's own counter/semaphore-mode state -- see that
+ * fd kind's own comment above and __crt_sys_eventfd2()'s own comment
+ * below for the real read()/write() semantics these back. Both arrays,
+ * and the Event HANDLE in fd_table[]'s own signaled state, are only
+ * ever touched while holding eventfd_lock. */
+static unsigned long long fd_eventfd_counter[CRT_FD_TABLE_SIZE];
+static unsigned char fd_eventfd_semaphore[CRT_FD_TABLE_SIZE];
+/* One coarse, global lock for every eventfd's counter + its Event
+ * HANDLE's signaled state together, rather than a per-fd lock: eventfd
+ * is not a hot path anywhere in this project (curl, its first real
+ * consumer, ends up NOT using it at all -- see curl.json's own notes --
+ * this exists for future/general portable-code consumers), and a single
+ * lock makes "the counter and the event's signaled state can never be
+ * observed out of sync by another thread" trivially true instead of
+ * something a per-fd lock would need just as much care to prove. */
+static crt_spinlock eventfd_lock = CRT_SPINLOCK_INIT;
 /* __crt_sys_tcgetattr()/__crt_sys_tcsetattr() round-trip fidelity: Windows
  * console mode (SetConsoleMode/GetConsoleMode) only exposes three of the
  * ~30 POSIX termios bits this PAL cares about (ISIG/IEXTEN via
@@ -3113,10 +3157,174 @@ static int alloc_zero_fd(void) {
   return -1;
 }
 
+/* See CRT_FD_KIND_EVENTFD's own comment: unlike alloc_urandom_fd()/
+ * alloc_zero_fd() above, this allocates a real Windows HANDLE (a
+ * manual-reset Event, used only as a wait/wake primitive -- never
+ * ReadFile()/WriteFile()'d). Returns -1 on either CreateEventA()
+ * failure or a full fd table; the caller distinguishes those the same
+ * way every other alloc_*_fd() caller in this file already does (a
+ * full table is -EMFILE, a real Win32 failure gets its own error via
+ * fail_last_error()). */
+static int alloc_eventfd_fd(unsigned long long initval, int semaphore) {
+  int fd;
+  HANDLE event_handle;
+
+  init_fd_table();
+  event_handle = CreateEventA(0, 1 /* manual reset */, initval != 0 ? 1 : 0, 0);
+  if (event_handle == 0) {
+    return -1;
+  }
+  for (fd = 3; fd < CRT_FD_TABLE_SIZE; ++fd) {
+    if (fd_kind[fd] == CRT_FD_KIND_NONE) {
+      fd_table[fd] = event_handle;
+      fd_kind[fd] = CRT_FD_KIND_EVENTFD;
+      fd_flags[fd] = 0;
+      fd_nonblock[fd] = 0;
+      fd_pipe_write_only[fd] = 0;
+      fd_termios_shadow_valid[fd] = 0;
+      fd_eventfd_counter[fd] = initval;
+      fd_eventfd_semaphore[fd] = (unsigned char)(semaphore != 0);
+      return fd;
+    }
+  }
+  CloseHandle(event_handle);
+  return -1;
+}
+
+/* Real eventfd2(2) semantics, backing both libc/src/eventfd.c's portable
+ * eventfd() wrapper (see that file's own comment -- this function has
+ * the exact name Linux's own real syscall trampoline uses there,
+ * __crt_sys_eventfd2(), so that dispatch stays a one-line "which real
+ * implementation" choice) and the counter/wait logic __crt_sys_read()/
+ * __crt_sys_write() below implement for a CRT_FD_KIND_EVENTFD fd:
+ * a real Win32 HANDLE, a 64-bit counter starting at `initval`, EFD_
+ * SEMAPHORE toggling read()'s own draining behavior (see there), and
+ * EFD_NONBLOCK/EFD_CLOEXEC mapped onto this project's own existing
+ * fd_nonblock[]/FD_CLOEXEC machinery -- the same one fcntl(F_SETFL,
+ * O_NONBLOCK)/fcntl(F_SETFD, FD_CLOEXEC) already use, so a caller that
+ * flips either later via fcntl() on an already-open eventfd (real,
+ * legal usage) keeps working exactly like it does for any other fd. */
+long __crt_sys_eventfd2(unsigned int initval, int flags) {
+  int fd;
+
+  if ((flags & ~(EFD_SEMAPHORE | EFD_CLOEXEC | EFD_NONBLOCK)) != 0) {
+    return -EINVAL;
+  }
+  fd = alloc_eventfd_fd((unsigned long long)initval, (flags & EFD_SEMAPHORE) != 0);
+  if (fd < 0) {
+    return -EMFILE;
+  }
+  if ((flags & EFD_NONBLOCK) != 0) {
+    fd_nonblock[fd] = 1;
+  }
+  if ((flags & EFD_CLOEXEC) != 0) {
+    fd_flags[fd] |= FD_CLOEXEC;
+  }
+  return fd;
+}
+
+/* Real eventfd(2) read() semantics: requires count >= sizeof(uint64_t)
+ * (EINVAL otherwise, matching real Linux); blocks (or EAGAINs, per
+ * fd_nonblock[]) while the counter is 0; once nonzero, either drains it
+ * to 0 and returns the full value (default mode) or decrements it by
+ * exactly 1 and returns 1 (EFD_SEMAPHORE mode). The event's signaled
+ * state is kept in lockstep with "counter != 0" -- ResetEvent() the
+ * instant a drain/decrement brings it back to 0, SetEvent() whenever a
+ * write (see eventfd_do_write() below) makes it nonzero again -- both
+ * always done while still holding eventfd_lock, so a waiter that just
+ * woke from WaitForSingleObject() and re-takes the lock always sees a
+ * counter/event pair that agree with each other. */
+static long eventfd_do_read(int fd, void* buf, unsigned long count) {
+  unsigned long long value;
+
+  if (count < sizeof(unsigned long long)) {
+    return -EINVAL;
+  }
+  if (buf == 0) {
+    return -EFAULT;
+  }
+  for (;;) {
+    crt_spin_lock(&eventfd_lock);
+    if (fd_eventfd_counter[fd] != 0) {
+      if (fd_eventfd_semaphore[fd]) {
+        value = 1;
+        fd_eventfd_counter[fd] -= 1;
+      } else {
+        value = fd_eventfd_counter[fd];
+        fd_eventfd_counter[fd] = 0;
+      }
+      if (fd_eventfd_counter[fd] == 0) {
+        ResetEvent(fd_table[fd]);
+      }
+      crt_spin_unlock(&eventfd_lock);
+      memcpy(buf, &value, sizeof(value));
+      return (long)sizeof(value);
+    }
+    crt_spin_unlock(&eventfd_lock);
+    if (fd_nonblock[fd]) {
+      return -EAGAIN;
+    }
+    if (WaitForSingleObject(fd_table[fd], CRT_INFINITE) == CRT_WAIT_FAILED) {
+      return fail_last_error();
+    }
+    /* Re-check under the lock rather than trusting the wakeup alone --
+     * a manual-reset event wakes every waiter at once, and only one of
+     * them (or a completely different thread's own blocking read())
+     * actually gets to consume the counter; everyone else loops back
+     * around to correctly find it already 0 again and goes back to
+     * waiting. */
+  }
+}
+
+/* Real eventfd(2) write() semantics: requires count >= sizeof(uint64_t)
+ * (EINVAL otherwise); adding UINT64_MAX itself is always EINVAL; adding
+ * any other value that would push the counter past UINT64_MAX-1 (the
+ * real, documented eventfd maximum) blocks (or EAGAINs) until a reader
+ * drains enough room. That last case is a deliberately simple, honest
+ * simplification: unlike the read-side wait above, a blocked writer
+ * here just polls on a short Sleep(1) loop rather than getting its own
+ * dedicated wait/wake path, since it requires cumulative write() values
+ * within reach of 2^64 to ever actually happen -- no real consumer of
+ * this project's own eventfd() does anything close to that. */
+static long eventfd_do_write(int fd, const void* buf, unsigned long count) {
+  static const unsigned long long max_counter = 0xfffffffffffffffeULL; /* UINT64_MAX - 1 */
+  unsigned long long add_value;
+
+  if (count < sizeof(unsigned long long)) {
+    return -EINVAL;
+  }
+  if (buf == 0) {
+    return -EFAULT;
+  }
+  memcpy(&add_value, buf, sizeof(add_value));
+  if (add_value == 0xffffffffffffffffULL /* UINT64_MAX */) {
+    return -EINVAL;
+  }
+  for (;;) {
+    crt_spin_lock(&eventfd_lock);
+    if (fd_eventfd_counter[fd] <= max_counter - add_value) {
+      fd_eventfd_counter[fd] += add_value;
+      if (add_value != 0) {
+        SetEvent(fd_table[fd]);
+      }
+      crt_spin_unlock(&eventfd_lock);
+      return (long)sizeof(add_value);
+    }
+    crt_spin_unlock(&eventfd_lock);
+    if (fd_nonblock[fd]) {
+      return -EAGAIN;
+    }
+    Sleep(1);
+  }
+}
+
 long __crt_sys_read(int fd, void* buf, unsigned long count) {
   HANDLE handle = get_fd_handle(fd);
   DWORD bytes_read = 0;
 
+  if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_EVENTFD) {
+    return eventfd_do_read(fd, buf, count);
+  }
   if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_SOCKET) {
     int result = winsock.recv((SOCKET)(uintptr_t)fd_table[fd], (char*)buf, (int)count, 0);
     return result == SOCKET_ERROR ? -map_wsa_send_recv_error(fd, winsock.WSAGetLastError()) : result;
@@ -3165,6 +3373,9 @@ long __crt_sys_write(int fd, const void* buf, unsigned long count) {
   HANDLE handle = get_fd_handle(fd);
   DWORD written = 0;
 
+  if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_EVENTFD) {
+    return eventfd_do_write(fd, buf, count);
+  }
   if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_SOCKET) {
     int result = winsock.send((SOCKET)(uintptr_t)fd_table[fd], (const char*)buf, (int)count, 0);
     return result == SOCKET_ERROR ? -map_wsa_send_recv_error(fd, winsock.WSAGetLastError()) : result;
@@ -3453,6 +3664,26 @@ static long close_fd_slot(int fd) {
     fd_table[fd] = 0;
     fd_kind[fd] = CRT_FD_KIND_NONE;
     fd_flags[fd] = 0;
+    return 0;
+  }
+  if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_EVENTFD) {
+    /* Unlike URANDOM/ZERO above, this fd kind DOES have a real HANDLE
+     * (the Event object, see CRT_FD_KIND_EVENTFD's own comment) that
+     * needs a real CloseHandle() -- get_fd_handle() below won't return
+     * it (it only ever returns CRT_FD_KIND_FILE handles), so this stays
+     * its own branch rather than falling through to the generic path. */
+    HANDLE event_handle = fd_table[fd];
+
+    crt_spin_lock(&eventfd_lock);
+    fd_table[fd] = 0;
+    fd_kind[fd] = CRT_FD_KIND_NONE;
+    fd_flags[fd] = 0;
+    fd_eventfd_counter[fd] = 0;
+    fd_eventfd_semaphore[fd] = 0;
+    crt_spin_unlock(&eventfd_lock);
+    if (event_handle != 0 && event_handle != INVALID_HANDLE_VALUE) {
+      CloseHandle(event_handle);
+    }
     return 0;
   }
   handle = get_fd_handle(fd);
@@ -4008,6 +4239,29 @@ static short poll_socket(SOCKET socket_handle, short events) {
   return revents;
 }
 
+/* CRT_FD_KIND_EVENTFD's own poll()/select() readiness: POLLIN exactly
+ * when the counter is nonzero (real Linux eventfd semantics), POLLOUT
+ * whenever there is still room for a write() to add at least 1 without
+ * blocking -- matches real eventfd's own poll() contract. Reads the
+ * counter under eventfd_lock, same as every other access to it. */
+static short poll_eventfd(int fd, short events) {
+  static const unsigned long long max_counter = 0xfffffffffffffffeULL; /* UINT64_MAX - 1 */
+  short revents = 0;
+  unsigned long long counter;
+
+  crt_spin_lock(&eventfd_lock);
+  counter = fd_eventfd_counter[fd];
+  crt_spin_unlock(&eventfd_lock);
+
+  if ((events & POLLIN) != 0 && counter != 0) {
+    revents |= POLLIN;
+  }
+  if ((events & POLLOUT) != 0 && counter < max_counter) {
+    revents |= POLLOUT;
+  }
+  return revents;
+}
+
 long __crt_sys_poll(struct pollfd* fds, unsigned long nfds, int timeout) {
   unsigned long i;
   long ready;
@@ -4027,6 +4281,8 @@ long __crt_sys_poll(struct pollfd* fds, unsigned long nfds, int timeout) {
       }
       if (fds[i].fd < CRT_FD_TABLE_SIZE && fd_kind[fds[i].fd] == CRT_FD_KIND_SOCKET) {
         fds[i].revents = poll_socket((SOCKET)(uintptr_t)fd_table[fds[i].fd], fds[i].events);
+      } else if (fds[i].fd < CRT_FD_TABLE_SIZE && fd_kind[fds[i].fd] == CRT_FD_KIND_EVENTFD) {
+        fds[i].revents = poll_eventfd(fds[i].fd, fds[i].events);
       } else {
         handle = get_fd_handle(fds[i].fd);
         if (handle == INVALID_HANDLE_VALUE) {
@@ -4891,6 +5147,22 @@ static long stat_virtual_pipe(struct stat* st) {
   return 0;
 }
 
+/* Real Linux reports an eventfd fd as an anonymous inode (a regular-
+ * file-shaped st_mode, not a char device or a FIFO) -- this is a
+ * reasonable, honest approximation of that (exact anon_inode device/
+ * inode numbers are not something any real caller of this project's
+ * eventfd() should be relying on). */
+static long stat_virtual_eventfd(struct stat* st) {
+  if (st == 0) {
+    return -EFAULT;
+  }
+  memset(st, 0, sizeof(*st));
+  st->st_mode = S_IFREG | S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
+  st->st_nlink = 1;
+  st->st_blksize = 4096;
+  return 0;
+}
+
 long __crt_sys_fstat(int fd, struct stat* st) {
   HANDLE handle;
   DWORD fstat_file_type;
@@ -4906,6 +5178,13 @@ long __crt_sys_fstat(int fd, struct stat* st) {
   }
   if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_ZERO) {
     return stat_virtual_dev_zero(st);
+  }
+  /* CRT_FD_KIND_EVENTFD DOES have a real HANDLE (the Event object), but
+   * it is not a CRT_FD_KIND_FILE one -- get_fd_handle() below only ever
+   * returns those, so this needs its own branch too, same reasoning as
+   * URANDOM/ZERO above (just for a different underlying reason). */
+  if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_EVENTFD) {
+    return stat_virtual_eventfd(st);
   }
   handle = get_fd_handle(fd);
   if (handle == INVALID_HANDLE_VALUE) {
@@ -4999,6 +5278,22 @@ long __crt_sys_ioctl(int fd, unsigned long request, void* arg) {
       return -map_wsa_error(winsock.WSAGetLastError());
     }
     *(int*)arg = (int)available;
+    return 0;
+  }
+  if (fd_kind[fd] == CRT_FD_KIND_EVENTFD) {
+    /* Real Linux FIONREAD on an eventfd reports sizeof(uint64_t) (8)
+     * when the counter is nonzero, 0 otherwise -- the exact byte count
+     * a read() would actually return right now, not the counter's own
+     * value. */
+    if (request != FIONREAD) {
+      return -ENOTTY;
+    }
+    if (arg == 0) {
+      return -EFAULT;
+    }
+    crt_spin_lock(&eventfd_lock);
+    *(int*)arg = fd_eventfd_counter[fd] != 0 ? (int)sizeof(unsigned long long) : 0;
+    crt_spin_unlock(&eventfd_lock);
     return 0;
   }
 

@@ -10,6 +10,54 @@ substantive update.
 
 ## 2026-09-01
 
+- **`eventfd()` gained a real, working Windows implementation, replacing
+  the permanent `ENOSYS` stub that caused the same-day `curl` regression
+  just below.** After that regression was fixed (by telling curl's own
+  configure to keep treating `eventfd` as unavailable on Windows -- an
+  honest capability declaration, curl never needed it), the user asked
+  whether `eventfd()` could be implemented for real on Windows instead
+  of staying a stub forever. It can, and now is: `libc/src/arch/
+  windows/common/syscall.c` gained a new `CRT_FD_KIND_EVENTFD` fd kind,
+  backed by a real Win32 manual-reset `Event` `HANDLE` (used purely as
+  a wait/wake primitive, never `ReadFile()`/`WriteFile()`'d) plus a
+  64-bit counter (`fd_eventfd_counter[]`) and semaphore-mode flag
+  (`fd_eventfd_semaphore[]`), both guarded by one coarse global spinlock
+  (`eventfd_lock` -- eventfd is not a hot path anywhere in this project,
+  so one lock keeping the counter and the event's signaled state
+  provably in sync beats a per-fd lock needing the same care for no real
+  benefit). Matches real Linux `eventfd2(2)` semantics: `write()`
+  accumulates (blocking, or `EAGAIN`, if it would push the counter past
+  `UINT64_MAX-1`, via a short, deliberately-simple `Sleep(1)` retry loop
+  -- an edge case no real consumer gets remotely close to), `read()`
+  either drains the whole counter (default mode) or decrements it by
+  exactly 1 (`EFD_SEMAPHORE`), blocking efficiently on the real Event
+  `HANDLE` via `WaitForSingleObject()` (re-checking the counter under
+  the lock after every wakeup, since a manual-reset event wakes every
+  waiter at once and only one of them actually gets to consume it) or
+  returning `EAGAIN` immediately under `EFD_NONBLOCK`. `EFD_NONBLOCK`/
+  `EFD_CLOEXEC` map onto this project's own existing `fd_nonblock[]`/
+  `FD_CLOEXEC` machinery, so `fcntl()` on an already-open eventfd keeps
+  working the same way it does for any other fd. `poll()`/`select()`
+  (`poll_eventfd()`), `fstat()` (reported as an anonymous-inode-shaped
+  regular file, matching real Linux), `ioctl(FIONREAD)`, and `close()`
+  (a real `CloseHandle()` this time, unlike `CRT_FD_KIND_URANDOM`/
+  `CRT_FD_KIND_ZERO`'s no-real-handle shortcut) all got matching
+  dispatch branches. `libc/src/eventfd.c`'s own `eventfd()` now
+  dispatches to this new `__crt_sys_eventfd2()` on Windows the same way
+  it already did to the real syscall trampoline on Linux -- one name,
+  two real backends, no stub involved on either. `tests/eventfd_test.c`
+  now runs its real-behavior branch (previously Linux-only) on Windows
+  too, extended with new `EFD_SEMAPHORE` coverage and a genuine
+  cross-thread blocking-`read()`-then-`write()`-wakes-it case (the part
+  of this implementation actually worth distrusting without a real
+  test) -- both pass. Full Windows `ctest` stayed clean at 123/123.
+  `porting/recipes/curl.json`'s own `ac_cv_func_eventfd=no` override is
+  deliberately KEPT despite this (see that recipe's own follow-up note):
+  curl's pipe-based wakeup is already thoroughly verified and switching
+  it now would only add re-verification risk for no functional gain.
+  See `docs/bionic_libc_gaps.md`'s own dated update for the doc-level
+  writeup.
+
 - **Fixed the same-day `curl` Windows "Out of memory" regression (see the
   `libcrtmedia`/`ffmpeg` entry below, which is what surfaced it) for
   real: four distinct, previously-invisible Windows PAL bugs, all in
