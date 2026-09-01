@@ -186,6 +186,123 @@ substantive update.
   ffmpeg.json`'s own `status.macos` updated from `untested` to
   `shared-pass`, matching Linux.
 
+- **`libcrtmedia`'s FFmpeg demux/software-decode bridge verified for real
+  on native Windows, closing out the last open host from the entries just
+  above.** `crtmedia_demux_test.exe` runs directly and reports
+  `crtmedia_demux_test: ok` against the same real WAV fixture/2000-sample
+  check as Linux/macOS; full ctest suite 123/123 passing, no regressions.
+  Picked back up specifically to resolve the GNU-Make self-re-exec
+  blocker the earlier Windows entry above deliberately left unfixed
+  ("I held off since it's a global change risking regressions on
+  already-verified ports" -- the user's own explicit instruction this
+  pass). Six real, Windows-specific fixes found and fixed in turn, each
+  by working straight through the next real build/link/runtime failure
+  (matching this whole recipe's own established discipline, not guessed
+  ahead of evidence):
+  1. **`porting/recipes/make.json`'s own Windows `make.exe` needed
+     `-DHAVE_DOS_PATHS=1`.** GNU Make re-execs itself (a real, ordinary
+     GNU Make behavior, not exotic) whenever a Makefile it read gets
+     remade mid-run -- FFmpeg's own build graph genuinely triggers this
+     once, right after regenerating five `*.version` files. Without
+     `HAVE_DOS_PATHS`, Make's own path-absoluteness check only recognizes
+     a leading `/`, so it treated a real drive-letter path as relative
+     and corrupted it. Picking `HAVE_DOS_PATHS` (a single, global define
+     for every Windows recipe's own shared `make.exe`, not per-recipe)
+     back up required real risk management, not just flipping the flag:
+     rebuilt and re-ran every other already-`shared-pass` Windows
+     recipe's own real test with the new `make.exe` before trusting it --
+     zlib/expat/xz/libffi/freetype all rebuild and re-test clean.
+     mbedtls (and curl, which depends on it) initially failed to *link*
+     (`duplicate symbol: __crt_wait32_shared` between `libc.a` and
+     `libmbedcrypto.dll.a`) -- confirmed via a real A/B test (swapping a
+     freshly-rebuilt pre-`HAVE_DOS_PATHS` `make.exe` binary back in and
+     re-running the exact same mbedtls rebuild) that this was pre-
+     existing, NOT caused by `HAVE_DOS_PATHS`: it reproduced byte-for-
+     byte identically with the old `make.exe`. Root-caused and fixed
+     separately, same day: `porting/recipes/mbedtls-windows-exclude-
+     symbols.rsp` (a known, standing maintenance-debt hand-generated
+     snapshot -- see `mbedtls.json`'s own notes, this is the *third* time
+     it's drifted stale) had simply never picked up libc's newer public
+     symbols (the `wait32`/`cnd_wait` family among them). Regenerated the
+     same documented way -- a fresh `llvm-nm --defined-only -g` dump of
+     `libc.a` (947 -> 1077 entries, confirmed a strict superset) --
+     confirmed via `llvm-readobj --coff-exports` that `libmbedcrypto.dll`'s
+     real export table still has zero libc symbols in it. Both `mbedtls`
+     tests and `curl`'s own build are unblocked by this alone.
+  2. **A second, real `@ROOT@` substitution bug**, found immediately
+     after (1): the earlier `@ROOT@` fix (2026-08-31, `--cc=` for
+     FFmpeg's configure) used plain `str(root)`, a raw Windows backslash
+     path. FFmpeg's own `./configure` smoke-tested fine with it
+     (subprocess-level argv, no shell re-parsing), but the same value
+     also lands verbatim in FFmpeg's own generated `config.mak` as
+     `CC=...`, which every subsequent `make` *recipe* line re-parses
+     through `mksh` (a POSIX shell) -- mksh's ordinary backslash-escapes-
+     next-character expansion silently ate every backslash unquoted
+     there (`C:\Users\...\crt-cc` became `C:UsersDevWorkscrt/tools/
+     crt-cc`, "inaccessible or not found"), the identical class of bug
+     already found and fixed for `TMPDIR` the day before. Fixed to match
+     `substitute_recipe_value()`'s own pre-existing `path_for_crt_shell()`-
+     on-windows treatment, which `configure_args`'s own `@ROOT@`
+     substitution had simply never matched.
+  3. **`--ar=` was needed too** -- the identical class of gap as `--cc=`/
+     `--host-cc=`: FFmpeg's own `ar_default="ar"` has no `$AR`
+     environment fallback, and this sandboxed Windows build's own
+     restricted `PATH` has no bare `ar`. Added a matching `@AR@`
+     substitution token (`env["AR"]`, the same already-correct
+     `llvm-ar` path every other recipe's own `make_env()` already
+     resolves), with the same `path_for_crt_shell()` treatment `@ROOT@`
+     needed.
+  4. **This project's Windows rootfs has no real `install(1)` binary at
+     all.** Every prior Windows configure-based recipe's own Makefile
+     happened to use plain `cp`/`chmod` directly, never a generic
+     `$(INSTALL)` variable, until FFmpeg's own `ffbuild/library.mak`
+     (BSD-`install`-style `$(INSTALL) -m MODE SRC... DEST`) -- the first
+     recipe here to actually need one. Fixed with a new, minimal,
+     project-owned `porting/shims/win32/install-sh` (`cp`+`chmod`+
+     `basename`, all real, already-enabled toybox applets in this
+     rootfs), wired in via a new `target_overrides.windows.make_args`
+     entry -- which needed the identical `@ROOT@` substitution gap fixed
+     a *third* time, in `make_args`/`install_args`'s own, separate
+     substitution code path (and confirmed it isn't simply reusable from
+     `configure_args`'s own local variable: that one is scoped inside an
+     `if not skip_configure` branch, and referencing it unconditionally
+     here would `NameError` for a `skip_configure` recipe like mbedtls).
+  5. **`doc/examples/Makefile`'s own unconditional `install:
+     install-examples` line** tries to install `doc/examples/*.c`
+     reference source regardless of which examples are actually
+     enabled -- never in this pass's scope (`--disable-programs` already
+     covers real example binaries; this is just source-file copying) and
+     would need `install(1)` support for zero real benefit. A second
+     `post_configure_patch` neutralizes that one line instead of
+     stretching `install-sh` to matter for a feature nobody needs.
+  6. **`--disable-zlib`**, found immediately after all five of the above
+     while linking `crtmedia_demux_test` itself (`undefined symbol:
+     uncompress`, `libavformat.a`'s own optional id3v2/mov compressed-
+     metadata support). FFmpeg's own configure auto-detects zlib and
+     links against it whenever a `zlib` port build happens to already
+     exist in the shared install prefix at ffmpeg-configure-time --
+     undefined, build-order-dependent behavior for a feature never in
+     this pass's scope, so added to the *base* `configure_args` (all
+     hosts, not just Windows) to make it deterministic. Re-verified for
+     real on Linux after this base-level change (`crtmedia_demux_test`
+     still passes, ctest still 106/107, same one pre-existing unrelated
+     failure) -- macOS not re-verified, needs the user's own Mac.
+  A **separate, real, currently-unfixed regression surfaced along the
+  way**, unrelated to any of the six fixes above: `curl`'s own
+  `http-roundtrip-static` test now fails at runtime with `Out of memory`
+  on its very first (plain HTTP) request. Confirmed via the same A/B
+  discipline (old vs. new `make.exe`) plus a fully fresh `zlib`+`curl`
+  rebuild that this is neither `HAVE_DOS_PATHS`-related nor the
+  previously-documented `pipe()`-misdetection "Out of memory" bug
+  (`config.log` confirms `pipe()` now correctly detects as `yes`) nor a
+  stale-dependency artifact. Not root-caused this pass -- tracked
+  separately (`porting/recipes/curl.json`'s own status downgraded from
+  `shared-pass` to `partial` on Windows, `docs/porting_status.md` updated
+  to match) rather than blocking the FFmpeg work it was found alongside.
+  `porting/recipes/ffmpeg.json`'s own `status.windows` updated from
+  `untested` to `shared-pass`, matching Linux/macOS -- `libcrtmedia`'s
+  FFmpeg demux/software-decode bridge is now verified on all three hosts.
+
 ## 2026-08-31
 
 - **Added `.gitattributes` to force LF line endings repo-wide, fixing a

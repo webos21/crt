@@ -29,7 +29,7 @@ ever named in either public header. Built against `porting/recipes/
 ffmpeg.json` (LGPL-only, `--disable-x86asm`/`--disable-inline-asm`, see
 that recipe's own notes). `tests/demux_decode_test.c` verifies it
 end-to-end against a real, tiny, project-authored WAV fixture
-(`assets/test_tone.wav`). Verified on Linux (WSL); Windows and macOS not
-yet verified -- see `porting/recipes/ffmpeg.json`'s own `status`/`notes`
-for exactly what's blocking Windows and `HISTORY.md`'s 2026-09-01 entry
-for the full trail.
+(`assets/test_tone.wav`). Verified end-to-end on all three hosts: Linux
+(WSL), macOS, and native Windows -- see `porting/recipes/ffmpeg.json`'s
+own `status`/`notes` for the full per-host fix trail and `HISTORY.md`'s
+2026-09-01 entries for the dated narrative.

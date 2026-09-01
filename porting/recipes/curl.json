@@ -123,7 +123,7 @@
   "status": {
     "linux": "shared-pass",
     "macos": "shared-pass",
-    "windows": "shared-pass"
+    "windows": "partial"
   },
   "notes": [
     "Last port in this queue before it closes out (bzip2 -> xz -> pcre2 -> mbedtls -> curl, see TODO.md; openssl stays held back until something actually needs it). Depends on zlib and mbedtls, both already shared-pass on all three OSes.",
