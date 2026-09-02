@@ -60,222 +60,71 @@ Active threads, not a flat list of one-off items.
 
 ### Upper runtime roadmap
 
-The upper-runtime work is now underway. The long-term target remains an
-Electron-class rebuilt native application runtime, but the first practical
-goal is narrower: a lightweight, Bionic-compatible UI/runtime stack that can
-prove JavaScript, graphics, media, event-loop, filesystem, dynamic-loading,
-threading, and host-window boundaries without trying to clone Electron's full
-desktop API ecosystem. See [`docs/runtime_roadmap.md`](docs/runtime_roadmap.md)
-and the 2026-08-17 study notes under [`docs/study/`](docs/study/).
+The completed CPU baseline is summarized in [`STATUS.md`](STATUS.md), and its
+dated implementation trail belongs in [`HISTORY.md`](HISTORY.md). The live
+queue below starts at the next compatibility boundary: a stable media API,
+software playback, GPU resource ownership, hardware decode, and the point at
+which QuickJS can safely bind those services without freezing a temporary API.
+The long-term target remains the Electron-class runtime described in
+[`docs/runtime_roadmap.md`](docs/runtime_roadmap.md).
 
-Initial source tree shape:
+1. **Decide the public media API policy.** Compare an Android NDK Media-shaped
+   C core (`AMediaFormat`/extractor/codec concepts), a WebRTC-shaped optional
+   realtime track layer, and a WebCodecs-shaped JavaScript binding. Keep
+   FFmpeg types private, retain the existing `crtmedia_demuxer_*` API as a
+   convenience layer, and document whether exact NDK source compatibility is
+   a later adapter rather than the core ABI.
+2. **Complete software-decode evidence.** Add real H.264+AAC MP4 and MP3
+   fixtures; verify threaded H.264 decode, PTS/DTS/duration ordering, EOF
+   drain/flush, malformed input, and static/shared behavior on all three
+   hosts. The existing WAV/PCM test remains the smallest baseline.
+3. **Separate extractor and codec.** Introduce opaque format, packet,
+   extractor, and codec objects; track selection, seek, flush, synchronous
+   polling, asynchronous callbacks, bounded queues, and backpressure. Rebuild
+   the current demux/decode convenience API on this layer.
+4. **Build the software player.** Add play/pause/seek/stop, a monotonic master
+   clock, A/V synchronization, buffering/frame-drop policy, and host audio
+   sinks (WASAPI, CoreAudio, and PipeWire/ALSA) while keeping decoded video on
+   the verified CPU-frame/Skia path.
+5. **Fix the common GPU resource contract.** Define opaque `crtgfx` GPU
+   device/surface and `crtmedia` GPU-frame objects, capability queries,
+   CPU/GPU memory kinds, retain/release, device affinity, and acquire/release
+   fences without exposing Direct3D, Metal, Vulkan, or FFmpeg types in public
+   headers. Software fallback must remain a first-class path.
+6. **Enable Skia GPU rendering.** Start with a Ganesh vertical slice and keep
+   Graphite as a later measured alternative: Direct3D on Windows, Metal on
+   macOS, and Vulkan/Wayland on Linux. Run the existing deterministic Skia
+   drawing coverage against GPU surfaces and add resize, device-loss, and
+   context-recreation tests.
+7. **Add hardware decode, phase A.** Enable FFmpeg D3D11VA/D3D12VA,
+   VideoToolbox, and VA-API backends, initially downloading decoded frames to
+   CPU memory so codec/device selection, fallback, and recovery can be proved
+   independently of zero-copy interop.
+8. **Add hardware decode, phase B.** Connect decoder-owned textures directly
+   to Skia: D3D resources on Windows, `CVPixelBuffer`/Metal textures on macOS,
+   and VA-API/DRM PRIME/dmabuf/Vulkan images on Linux. Tie decoder frame-pool
+   release to real GPU/presentation completion and retain CPU-copy fallback.
+9. **Add hardware encode and capture.** Stage camera, microphone, and screen
+   sources; hardware H.264/HEVC encode; mux/record; latency, bitrate, and
+   key-frame controls.
+10. **Expand network and streaming.** Add custom I/O and HTTP range first,
+    then buffering, reconnect/discontinuity handling, and HLS/DASH or the
+    justified FFmpeg protocol subset.
+11. **Add an optional WebRTC-shaped realtime layer.** Define source/track/sink
+    and execution-context contracts before deciding whether to port full
+    WebRTC for RTP/RTCP, jitter buffering, congestion control, and AEC/NS/AGC.
+12. **Expose the service through `libcrtjs`.** Start the QuickJS engine,
+    event loop, timers, modules, and native binding work after step 5 while
+    steps 6-8 continue in parallel. Bind media only after the extractor/codec/
+    player contracts are stable, using WebCodecs-like chunks/frames/queue
+    semantics and a higher-level asynchronous player API. V8 and a minimal
+    Chromium/Ozone probe remain later consumers of the same contracts.
 
-```text
-libcrtjs/
-  include/
-  src/
-    *.c                        # common runtime code, directly under src/
-    arch/{linux,macos,windows}/
-  third_party/quickjs/
-
-libcrtgfx/
-  include/
-  src/
-    *.c                        # common runtime code, directly under src/
-    arch/{linux,macos,windows}/
-  third_party/
-    skia/
-    wayland/
-
-libcrtmedia/
-  include/
-  src/
-    *.c                        # common runtime code, directly under src/
-    arch/{linux,macos,windows}/
-  third_party/ffmpeg/
-```
-
-No separate `src/common/` layer in any of the three upper-runtime
-libraries (2026-08-18, `libcrtgfx` first, then `libcrtjs`/`libcrtmedia`
-matched the same way) -- common/host-independent runtime code lives
-directly under `src/`, and only genuinely per-host code lives under
-`src/arch/{linux,macos,windows}/`. See `HISTORY.md`.
-
-Boundary decisions from `docs/study`:
-
-- Keep `libc`/PAL focused on Bionic-compatible low-level runtime behavior.
-  Graphics, JavaScript, media, host windows, GPU APIs, and application-level
-  event loops stay in sibling upper-runtime libraries, not in libc.
-- Start with **QuickJS** before V8. QuickJS is the smallest useful pressure
-  test for event-loop, timers, module loading, native bindings, filesystem,
-  dynamic loading, and process behavior. V8 waits until the C++ runtime,
-  JIT/code-memory policy, atomics, threading, dynamic loading, and signal/
-  exception story are stronger.
-- Start `libcrtgfx` with **Skia as renderer** and a **Wayland-compatible
-  boundary** as protocol/compositor vocabulary, but do not build a full
-  desktop environment first. The public 2D drawing surface should expose
-  normal Skia headers rather than a broad project-owned wrapper API; `crtgfx`
-  owns runtime/window/surface/event/backend integration around Skia. Keep Skia
-  independent from Wayland protocol parsing; host backends should map top-level
-  surfaces to native windows (`HWND`, `NSWindow`, Linux
-  Wayland/DRM/EGL/Vulkan/OpenGL as needed) and let Skia render directly to the
-  host-appropriate GPU/software target. See
-  [`docs/libcrtgfx_api_policy.md`](docs/libcrtgfx_api_policy.md).
-- Treat Wayland as a compatibility boundary and future Chromium/Ozone leverage
-  point, not as a reason to force Linux display-server internals into Windows
-  or macOS. SDL2/GLFW/WebGPU/Vulkan-style alternatives remain fallback
-  references if a host-native prototype proves the Wayland path too heavy.
-  Use WSLg, Wawona/Wayoa/Cocoa-Way-style projects, Weston, wlroots, and
-  Wayland protocol libraries as architecture references first; now that the
-  `crtgfx` surface/frame boundary has tests, import a full compositor only for
-  a concrete consumer rather than treating test availability as sufficient.
-  From WSLg specifically, take the top-level-surface-to-native-window, explicit
-  buffer handoff, and host-compositor presentation shape; exclude WSL/Linux
-  binary execution, distro/VM packaging, RDP rail integration, and vGPU/VA-API
-  dependency. See [`docs/libcrtgfx_wayland_plan.md`](docs/libcrtgfx_wayland_plan.md).
-- Start `libcrtmedia` after the JS/gfx skeleton exists. FFmpeg is the first
-  reference stack, with software decode first; GPU texture/audio-device handoff
-  comes only after `libcrtgfx` has a real surface/frame abstraction.
-
-The first `libcrtgfx` CPU-raster milestone is complete and no longer belongs
-in this work queue. Native windows, repeated software-frame presentation,
-Linux `wl_buffer::release`, keyboard/mouse input, Skia CPU raster, imported
-libc++, and FreeType-backed typed text have all been verified on macOS, Linux,
-and Windows. The concise current state is in [`STATUS.md`](STATUS.md); the
-implementation trail is in [`HISTORY.md`](HISTORY.md).
-
-Build reproducibility for this milestone is closed: clean-build verified on
-all three hosts, FreeType's fetch now uses the stable SourceForge URL
-(`5b87197`), and libffi's three-host verification (`63e07ee`) landed the same
-way.
-
-**The `libcrtgfx` window/event contract (Phase 1) is complete on all three
-hosts, including real macOS hardware confirmation** -- multi-window,
-resize/close/focus/expose/scroll events, key-repeat policy, queue/threading
-contract, and the header-split decision, plus `CRTGFX_EVENT_DPI_SCALE_
-CHANGED` delivery on Windows/Linux and the macOS `windowDidChangeBackingProperties:`
-wiring (see `HISTORY.md`'s 2026-08-29/08-30 entries for the full trail; the
-macOS real-hardware pass is its own 2026-08-30 entry).
-
-**Phase 2, deterministic automated event-queue coverage, is also done**
-(2026-08-30): `crtgfx_window_inject_event()` (a testing-only hook, `crtgfx/
-window.h`) plus the new `crtgfx_synthetic_event` ctest target cover
-ordering, the drop-newest-on-overflow policy (confirmed live at exactly 64
-on both Windows and Linux), multi-window queue isolation, repeated create/
-destroy (with a real `/proc/self/fd` leak check on Linux), and event-queue/
-frame-cycle independence, all without needing real OS input delivery. See
-`HISTORY.md`'s 2026-08-30 entry. Neither Phase 1 nor Phase 2 belong in this
-work queue anymore.
-
-**The software frame contract extension is also done** (2026-08-30):
-framebuffer `generation` tracking across a resize, damage rectangles/partial
-present (real per-rect `UpdateSubresource`/`wl_surface::damage` on Windows/
-Linux, honestly whole-frame on macOS -- confirmed on real macOS hardware to
-be a genuine, understood limitation, not an oversight: a real fix would
-need double/triple-buffering, which conflicts with this backend's own
-tear/use-after-free-avoiding fresh-copy-per-frame design), a real
-`CRTGFX_EVENT_FRAME_COMPLETE` notification -- **genuinely asynchronous on
-all three hosts now**: Linux via `wl_surface::frame`/`wl_callback::done`;
-macOS via `-[CATransaction setCompletionBlock:]` (live-measured on real
-hardware, 658/658 frames in one run delivered exactly one pump cycle later,
-never synchronously); Windows (added later the same day, after the user
-asked whether it could match the other two) via a real DXGI flip-model swap
-chain's `IDXGISwapChain2::GetFrameLatencyWaitableObject()`, replacing GDI/
-`StretchDIBits` entirely -- plain GDI has no per-window completion signal at
-all, empirically confirmed (`DwmGetCompositionTimingInfo()` returns
-`E_INVALIDARG` for a real GDI `HWND` on this machine, every call); live-
-measured the same way, 99/99 frames in one run delivered on the next
-iteration, never synchronously, ~78ms later -- and the producer/consumer
-acquire/release ownership contract now documented explicitly on all three
-hosts. See `HISTORY.md`'s 2026-08-30 entries for the full trail; not a
-work-queue item anymore.
-
-**Deterministic Skia CPU coverage is mostly done** (2026-08-30): the new
-`crtgfx_skia_cpu_coverage` ctest target (37 checks, headless -- builds its own
-`crtgfx_framebuffer` directly, no `crtgfx_window_create()` needed) covers
-path/transform/clip/save-restore/layer, a representative shader
-(`SkShaders::LinearGradient`) and blend mode (`SkBlendMode::kMultiply`),
-image draw/scaling (via raw-pixel `SkImages::RasterFromBitmap`, not
-`SkCodec` -- this Skia build has no image codec linked at all, see
-`HISTORY.md`), and NaN/Inf/invalid-surface-size error paths. Verified for
-real on Windows (37/37, plus the plain Skia-disabled default build
-unaffected); Linux build/ctest unaffected and the new file itself cross-
-compile syntax-checked clean; macOS not verified at all this session (real
-Skia headers need Apple's own `TargetConditionals.h`, unlike `window_
-cocoa.c`'s own no-host-SDK style) -- flagged reasoned-but-unverified. See
-`HISTORY.md`'s 2026-08-30 entry for the full trail.
-
-**The `libcrtmedia` CPU frame handoff contract is done** (2026-08-31):
-`libcrtmedia/include/crtmedia/frame.h` defines `crtmedia_frame` (packed
-RGBA8888/BGRA8888 and planar YUV420P, per-plane stride/dimensions, color
-range/space, timestamp, and a release-callback ownership model),
-`crtmedia_frame_describe_planes()` (plane geometry for a given format/
-dimensions), and `crtmedia_frame_convert_to_rgba()` (real BT.601/BT.709/
-BT.2020 limited/full-range YUV->RGB, derived from each space's own ITU-R
-Kr/Kb constants rather than three hardcoded coefficient sets). Two ctest
-targets verify it: `crtmedia_frame_test` (deterministic, no host resource
-or Skia needed -- plane geometry, ownership/release, conversion math) and
-`crtmedia_frame_skia_smoke` (real Skia, gated behind `CRTGFX_ENABLE_SKIA`
-like `crtgfx_skia_cpu_coverage` -- wraps a synthetic RGBA8888 frame and a
-synthetic BGRA8888 frame directly as an `SkImage`, converts a synthetic
-YUV420P frame first, draws each through a real raster `SkSurface`, and
-checks the read-back pixels match). Verified for real on all three hosts
-now (Windows, WSL/Linux, and macOS -- both targets passing on every host,
-full existing ctest suite unaffected each time). See `HISTORY.md`'s
-2026-08-31 entry for the full trail; not a work-queue item
-anymore.
-
-**`libcrtmedia`'s FFmpeg demux/software-decode bridge is done on all three
-hosts** (2026-09-01): `include/crtmedia/audio.h` (`crtmedia_audio_buffer`,
-mirroring `frame.h`'s own ownership/release-callback design) and
-`include/crtmedia/demux.h` + `src/demux.c` (open a local file, demux one
-container (MOV/MP4/M4A), decode H.264 video into `crtmedia_frame` / AAC+
-MP3+PCM audio into `crtmedia_audio_buffer` -- no FFmpeg type in either
-public header), behind a new opt-in `CRTMEDIA_ENABLE_FFMPEG` CMake option
-and `porting/recipes/ffmpeg.json` (LGPL-only, local-file-only, no encode/
-network/GPU/asm this pass). `crtmedia_demux_test` verifies it end-to-end
-against a real WAV fixture, now passing for real on Linux (WSL), macOS,
-and native Windows (`porting/recipes/ffmpeg.json`'s own notes have the
-full per-host trail: two macOS-specific fixes -- a missing `<sys/
-sysctl.h>` host header routed to this project's own `sysconf()` fallback,
-and a real Apple-ld `pthread_once` ABI-shadowing bug; six Windows-specific
-fixes -- `porting/recipes/make.json`'s own `HAVE_DOS_PATHS` self-re-exec
-bug, two more `@ROOT@`/`@AR@` token-substitution gaps in `tools/crt-port-
-build.py`, a new `porting/shims/win32/install-sh` since this project's
-Windows rootfs has no real `install(1)`, and a `doc/examples`-install
-patch); full ctest suite clean on all three hosts (Windows 123/123, no
-regressions). See `HISTORY.md`'s 2026-09-01 entries for the full trail --
-audio *output* (device playback) and further codecs/protocols remain open,
-not a work-queue item in this exact shape anymore.
-
-Open upper-runtime work, in recommended order, now that the gate above is
-clear -- run these tracks in parallel rather than gating one on another:
-
-- `libcrtmedia`: widen codec/protocol coverage (network, HEVC/VP9/Opus/...,
-  GPU/hwaccel decode) as real need demonstrates it -- matching this
-  project's own narrow-now-expand-later pattern. A real, project-owned API
-  policy decision is still open too: whether the public surface should
-  model itself on AOSP's NDK media API (`AMediaCodec`/`AMediaExtractor`/
-  `AMediaFormat`) layered over the current internal FFmpeg bridge, matching
-  `libcrtgfx_api_policy.md`'s own "expose the real upstream API" precedent
-  -- but with the LGPL/FFmpeg-ABI-churn/audience differences that make
-  directly exposing FFmpeg's own headers (the literal Skia parallel) a
-  worse fit here than it was for Skia. Not written up yet -- deferred until
-  after this pass's own Windows/curl loose end is closed.
-- `libcrtgfx` GPU surface contract: an opaque GPU handle that never exposes a
-  host SDK type in a public header, a backend capability query with software
-  fallback, a shared lifetime/fence model across Direct3D, Metal, and Linux
-  EGL/Vulkan/dmabuf, and a decision between Skia Ganesh and Graphite for the
-  first real backend.
-- `libcrtjs` with QuickJS (independent of graphics/media): pressure-test
-  timers, module loading, filesystem, networking, dynamic loading, native
-  bindings, and the common event-loop boundary before attempting V8.
-
-Revisit Chromium/Ozone only after those three tracks produce stable
-three-host evidence -- a minimal Ozone platform probe first, not a full
-Chromium port. Full GPU backends, HarfBuzz/ICU font shaping, a full
-Weston/other-compositor import, and platform font discovery are deliberately
-not prerequisites for starting `libcrtmedia`.
+Execution order is therefore: steps 1-5 form the sequential contract gate;
+Skia GPU, hardware decode, and the QuickJS core then proceed in parallel;
+zero-copy completion gates the GPU-aware JavaScript media binding, but not the
+initial QuickJS bring-up. A full compositor, complete font shaping, and every
+codec are not prerequisites for beginning QuickJS.
 
 ## Planned
 
