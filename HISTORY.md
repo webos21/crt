@@ -10,6 +10,51 @@ substantive update.
 
 ## 2026-09-02
 
+- **Rebuilt `crtmedia_demuxer_*` as a thin wrapper over the new
+  `crtmedia_extractor`/`crtmedia_codec` core, closing out `TODO.md`'s
+  original "Separate extractor and codec" step in full** -- picked up
+  immediately after the core itself landed and macOS re-verified it,
+  the same day.
+
+  `src/demux.c` no longer has any independent FFmpeg integration at
+  all -- no `AVFormatContext`/`AVCodecContext`/`AVPacket`/`AVFrame`
+  anywhere in the file, only `crtmedia/extractor.h` and `crtmedia/
+  codec.h`. `crtmedia_demuxer_open()` now composes one `crtmedia_
+  extractor` plus one `crtmedia_codec` per real "video/"/"audio/"-MIME-
+  prefixed track (classified via `crtmedia_extractor_track_format()`'s
+  own MIME string), auto-selecting each one immediately -- matching
+  `demux.h`'s own long-documented "no separate select-stream step"
+  contract, which a caller building directly on the new core would
+  otherwise have to do by hand. `crtmedia_demuxer_read()`'s own real
+  algorithm: drain every decodable stream's `crtmedia_codec` in index
+  order first (matching the original combined implementation's own
+  exact stream-check priority, including treating a per-stream codec
+  EOF exactly like "nothing ready yet" rather than a distinct signal --
+  the original implementation's own real behavior, since it never
+  distinguished per-stream `AVERROR_EOF` from `EAGAIN` either, relying
+  purely on the container-level EOF plus an empty drain pass to
+  terminate); only once nothing is ready does it read another raw
+  sample and queue it to the right track's codec. A real `CRTMEDIA_
+  WOULD_BLOCK` backpressure case (the new core's own queue can say
+  "not yet" -- a real, if practically rare for this project's own
+  narrow/low-reordering codec set, possibility `demux.c`'s own old,
+  single-combined-struct implementation never had to handle, since a
+  single `AVCodecContext`'s own `avcodec_send_packet()`/`receive_frame()`
+  pair was always used from the same call site) is handled correctly,
+  not glossed over: an unqueued sample is kept alive in the demuxer's
+  own state across `crtmedia_demuxer_read()` calls (never silently
+  dropped) until the codec actually has room.
+
+  **Verified for real: every existing `crtmedia_demux_*_test` passes
+  completely unchanged** -- same public API, same real observable
+  behavior (the WAV/PCM test, the H.264+AAC MP4 test with its own
+  threaded-decode/PTS-ordering/EOF-drain checks, the MP3 test, and the
+  malformed-input test all still pass exactly as before) -- proving
+  this was a real, transparent internal swap, not a behavior change
+  dressed up as a refactor. Full ctest suite re-run on both hosts after
+  the swap: Linux (WSL) 112/112, Windows 128/128, both 100%, zero
+  regressions. macOS not yet re-verified for this specific change.
+
 - **Implemented and verified `docs/libcrtmedia_api_policy.md`'s decided
   core -- `crtmedia_format`/`crtmedia_extractor`/`crtmedia_codec` -- on
   Linux and Windows.** The first real piece of `TODO.md`'s "Separate

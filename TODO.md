@@ -137,60 +137,64 @@ confirmation (alongside `crtmedia_demux_video_test`) that FFmpeg's own
 threaded H.264 decode works through this project's pthread PAL there. See
 `HISTORY.md`'s 2026-09-02 entry for the full trail.
 
-**Still open from this same step**: `crtmedia_demuxer_*` (`demux.h`) is
-still its own, separate, independent implementation -- not yet rebuilt as
-a thin wrapper over the new core, deliberately deferred to keep this pass's
-real regression risk to the new, isolated code only (see `demux.c`'s/
-`codec.c`'s own comments). A real, working core exists to rebuild it over
-whenever that becomes the next priority.
+**`crtmedia_demuxer_*` is now rebuilt as a thin wrapper over the new core,
+closing out TODO.md's original "Separate extractor and codec" step in
+full** (2026-09-02, same day): `demux.c` no longer has its own independent
+FFmpeg integration at all -- `crtmedia_demuxer_open()` composes one
+`crtmedia_extractor` plus one `crtmedia_codec` per real "video/"/"audio/"
+-MIME-prefixed track (auto-selected, matching this header's own documented
+"no separate select-stream step" contract), and `crtmedia_demuxer_read()`
+drains every stream's codec in index order before feeding more input --
+including a real, correct `CRTMEDIA_WOULD_BLOCK` backpressure path (an
+unqueued sample is kept alive across calls, never silently dropped, until
+room frees up). Every existing `crtmedia_demux_*_test` (the WAV/PCM,
+H.264+AAC MP4, MP3, and malformed-input coverage) passes completely
+unchanged -- same public API, same real observable behavior -- proving the
+rebuild is a real, transparent swap, not a behavior change. Full ctest
+suite clean on both re-run hosts (Linux 112/112, Windows 128/128, both
+100%, no regressions from the swap). macOS not yet re-verified for this
+specific change. See `HISTORY.md`'s 2026-09-02 entry for the full trail.
 
-1. **Rebuild `crtmedia_demuxer_*` over the new core.** Reimplement `demux.h`'s
-   existing `crtmedia_demuxer_open`/`_read`/`_close` as a thin convenience
-   wrapper composing `crtmedia_extractor` + one `crtmedia_codec` per track,
-   instead of its own independent FFmpeg integration -- the last piece of
-   TODO.md's original "Separate extractor and codec" item. Every existing
-   `crtmedia_demux_*_test` must keep passing unchanged (same public API,
-   same behavior) once this lands.
-2. **Build the software player.** Add play/pause/seek/stop, a monotonic master
+1. **Build the software player.** Add play/pause/seek/stop, a monotonic master
    clock, A/V synchronization, buffering/frame-drop policy, and host audio
    sinks (WASAPI, CoreAudio, and PipeWire/ALSA) while keeping decoded video on
    the verified CPU-frame/Skia path.
-3. **Fix the common GPU resource contract.** Define opaque `crtgfx` GPU
+2. **Fix the common GPU resource contract.** Define opaque `crtgfx` GPU
    device/surface and `crtmedia` GPU-frame objects, capability queries,
    CPU/GPU memory kinds, retain/release, device affinity, and acquire/release
    fences without exposing Direct3D, Metal, Vulkan, or FFmpeg types in public
    headers. Software fallback must remain a first-class path.
-4. **Enable Skia GPU rendering.** Start with a Ganesh vertical slice and keep
+3. **Enable Skia GPU rendering.** Start with a Ganesh vertical slice and keep
    Graphite as a later measured alternative: Direct3D on Windows, Metal on
    macOS, and Vulkan/Wayland on Linux. Run the existing deterministic Skia
    drawing coverage against GPU surfaces and add resize, device-loss, and
    context-recreation tests.
-5. **Add hardware decode, phase A.** Enable FFmpeg D3D11VA/D3D12VA,
+4. **Add hardware decode, phase A.** Enable FFmpeg D3D11VA/D3D12VA,
    VideoToolbox, and VA-API backends, initially downloading decoded frames to
    CPU memory so codec/device selection, fallback, and recovery can be proved
    independently of zero-copy interop.
-6. **Add hardware decode, phase B.** Connect decoder-owned textures directly
+5. **Add hardware decode, phase B.** Connect decoder-owned textures directly
    to Skia: D3D resources on Windows, `CVPixelBuffer`/Metal textures on macOS,
    and VA-API/DRM PRIME/dmabuf/Vulkan images on Linux. Tie decoder frame-pool
    release to real GPU/presentation completion and retain CPU-copy fallback.
-7. **Add hardware encode and capture.** Stage camera, microphone, and screen
+6. **Add hardware encode and capture.** Stage camera, microphone, and screen
    sources; hardware H.264/HEVC encode; mux/record; latency, bitrate, and
    key-frame controls.
-8. **Expand network and streaming.** Add custom I/O and HTTP range first,
+7. **Expand network and streaming.** Add custom I/O and HTTP range first,
    then buffering, reconnect/discontinuity handling, and HLS/DASH or the
    justified FFmpeg protocol subset.
-9. **Add an optional WebRTC-shaped realtime layer.** Define source/track/sink
+8. **Add an optional WebRTC-shaped realtime layer.** Define source/track/sink
    and execution-context contracts before deciding whether to port full
    WebRTC for RTP/RTCP, jitter buffering, congestion control, and AEC/NS/AGC.
-10. **Expose the service through `libcrtjs`.** Start the QuickJS engine,
-    event loop, timers, modules, and native binding work after step 3 while
-    steps 4-6 continue in parallel. Bind media only after the extractor/codec/
+9. **Expose the service through `libcrtjs`.** Start the QuickJS engine,
+    event loop, timers, modules, and native binding work after step 2 while
+    steps 3-5 continue in parallel. Bind media only after the extractor/codec/
     player contracts are stable, using WebCodecs-like chunks/frames/queue
-    semantics (a close match to step 1's own `crtmedia_codec` shape) and a
-    higher-level asynchronous player API. V8 and a minimal Chromium/Ozone
-    probe remain later consumers of the same contracts.
+    semantics (a close match to the already-implemented `crtmedia_codec`'s
+    own shape) and a higher-level asynchronous player API. V8 and a minimal
+    Chromium/Ozone probe remain later consumers of the same contracts.
 
-Execution order is therefore: steps 1-3 form the sequential contract gate;
+Execution order is therefore: steps 1-2 form the sequential contract gate;
 Skia GPU, hardware decode, and the QuickJS core then proceed in parallel;
 zero-copy completion gates the GPU-aware JavaScript media binding, but not the
 initial QuickJS bring-up. A full compositor, complete font shaping, and every

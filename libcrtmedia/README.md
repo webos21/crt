@@ -41,14 +41,16 @@ decode path specifically), plus `tests/demux_decode_malformed_test.c`
 (null args, a nonexistent path, non-media bytes, a truncated real
 fixture -- no crash, a real defined error/EOF outcome every time). See
 `assets/README.md` for the new fixtures' own provenance and `HISTORY.md`'s
-2026-09-02 entry for the full trail. Verified on Linux and Windows; macOS
-not yet re-verified for this specific coverage.
+2026-09-02 entry for the full trail. Verified on all three hosts, Linux,
+Windows, and macOS (macOS re-verified the same day, `crtmedia_demux_video_
+test` doubling as the first real confirmation that FFmpeg's own threaded
+H.264 decode works through this project's pthread PAL on macOS too).
 
 The public media API policy -- an `AMediaFormat`/`AMediaExtractor`/
 `AMediaCodec`-shaped core layered under the existing, retained
 `crtmedia_demuxer_*` convenience API, FFmpeg never in a public header --
 is decided in `docs/libcrtmedia_api_policy.md`. The core itself is now
-implemented and verified on Linux and Windows: `include/crtmedia/format.h`
+implemented and verified on all three hosts: `include/crtmedia/format.h`
 (`crtmedia_format`, a real key-value store including `csd-0` codec-config
 buffers for H.264/AAC), `include/crtmedia/extractor.h` (`crtmedia_
 extractor`, demux-only, no decode), and `include/crtmedia/codec.h`
@@ -57,8 +59,14 @@ extractor`, demux-only, no decode), and `include/crtmedia/codec.h`
 backpressure). `tests/format_test.c` covers the key-value store
 deterministically; `tests/extractor_codec_test.c` decodes the same real
 MP4 fixture `demux_decode_video_test.c` covers, end to end through the
-new core, and gets the identical real result. `crtmedia_demuxer_*`
-(`demux.h`) is not yet rebuilt over this new core -- still its own,
-separate, independent implementation for now, deliberately deferred (see
-`TODO.md`'s own next step). See `HISTORY.md`'s 2026-09-02 entry for the
-full trail.
+new core, and gets the identical real result.
+
+`crtmedia_demuxer_*` (`demux.h`) is now rebuilt over this new core too --
+`src/demux.c` composes one `crtmedia_extractor` plus one `crtmedia_codec`
+per decodable track instead of its own independent FFmpeg integration
+(no `AVFormatContext`/`AVCodecContext` in the file at all anymore), with
+a real `CRTMEDIA_WOULD_BLOCK` backpressure path that never silently drops
+an unqueued sample. Every existing `crtmedia_demux_*_test` passes
+completely unchanged after the rebuild -- verified on Linux and Windows
+(macOS not yet re-verified for this specific change). See `HISTORY.md`'s
+2026-09-02 entry for the full trail.

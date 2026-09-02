@@ -160,7 +160,7 @@ libcrtmedia/include/
   crtmedia/
     frame.h          # crtmedia_frame -- CPU video frame contract (existing, unchanged)
     audio.h          # crtmedia_audio_buffer -- PCM audio buffer contract (existing, unchanged)
-    demux.h          # crtmedia_demuxer_* -- convenience/pull-model API (existing, still its own independent implementation -- not yet rebuilt as a thin wrapper over format.h/extractor.h/codec.h, see TODO.md's own next step)
+    demux.h          # crtmedia_demuxer_* -- convenience/pull-model API, now a thin wrapper over extractor.h/codec.h (rebuilt and verified, 2026-09-02)
     format.h         # crtmedia_format -- key-value format description (implemented and verified, 2026-09-02)
     extractor.h      # crtmedia_extractor -- demux-only, no decode (implemented and verified, 2026-09-02)
     codec.h          # crtmedia_codec -- async buffer-queue decode (implemented and verified, 2026-09-02; encode remains future work)
@@ -168,12 +168,13 @@ libcrtmedia/include/
 
 `format.h`/`extractor.h`/`codec.h` are implemented and verified end to end
 on Linux and Windows (`crtmedia_format_test`, `crtmedia_extractor_codec_
-test` -- see `HISTORY.md`'s 2026-09-02 entry for the full trail). `demux.h`
-is not yet rebuilt over this new core -- `crtmedia_demuxer_*` remains its
-own, separate, independent FFmpeg integration for now, a deliberate,
-explicitly-scoped deferral to keep the new core's own landing isolated
-from already-working code (`TODO.md` tracks the wrapper rebuild as its own
-next step). `frame.h`/`audio.h` are unaffected either way: decoded
-output, from either API layer, keeps landing in the same
+test` -- see `HISTORY.md`'s 2026-09-02 entry for the full trail), and
+`demux.h` is now rebuilt over this new core too -- `crtmedia_demuxer_*` is
+a real, thin wrapper composing `crtmedia_extractor` + one `crtmedia_codec`
+per decodable track, no longer its own independent FFmpeg integration.
+Every existing `crtmedia_demux_*_test` passes completely unchanged after
+the rebuild, confirming it as a transparent internal swap. `frame.h`/
+`audio.h` are unaffected either way: decoded output, from either API
+layer, keeps landing in the same
 `crtmedia_frame`/`crtmedia_audio_buffer` contracts already verified against
 Skia and FFmpeg.
