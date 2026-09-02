@@ -13,8 +13,11 @@
  * comment), not a stub -- added after a portable consumer's own
  * configure-time feature probe (curl's) misdetected the original
  * ENOSYS-stub version as usable and broke; see HISTORY.md's dated entry
- * for that regression. macOS still gets the ENOSYS-stub branch below (no
- * real or emulated implementation there yet). */
+ * for that regression. macOS also runs the real-behavior branch as of
+ * 2026-09-02: a real, from-scratch emulation too (a real pipe(2) pair as
+ * the underlying kernel object -- see libc/src/fd.c's own "Real
+ * eventfd() emulation for macOS" comment), added for the same
+ * curl-threaded-resolver reason. */
 #include <errno.h>
 #include <poll.h>
 #include <pthread.h>
@@ -28,7 +31,7 @@ static int fail(const char* message) {
   return 1;
 }
 
-#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_WINDOWS)
+#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_WINDOWS) || defined(CRT_TARGET_OS_MACOS)
 
 struct blocking_read_ctx {
   int fd;
@@ -45,7 +48,7 @@ static void* blocking_read_thread(void* arg) {
 #endif
 
 int main(void) {
-#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_WINDOWS)
+#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_WINDOWS) || defined(CRT_TARGET_OS_MACOS)
   int fd;
   eventfd_t value = 0;
   struct pollfd pfd;

@@ -11,10 +11,10 @@
  * comment), added 2026-09-01 after a portable consumer's own configure-
  * time feature probe (curl's) misdetected the original ENOSYS-stub
  * version as usable and broke -- see HISTORY.md's dated entry for that
- * regression and its fix. eventfd() still returns ENOSYS on macOS
- * (no real syscall and no emulation there yet), matching this project's
- * existing libc/src/inotify.c precedent for a Linux-only kernel feature
- * with no real host equivalent to fall back to. */
+ * regression and its fix. macOS also gets a real, from-scratch emulation
+ * (a real pipe(2) pair as the underlying kernel object -- see
+ * libc/src/fd.c's own "Real eventfd() emulation for macOS" comment),
+ * added 2026-09-02 for the same reason. */
 
 #include <fcntl.h> /* O_CLOEXEC/O_NONBLOCK, reused below -- same values
                      * real Linux/Bionic's own EFD_CLOEXEC/EFD_NONBLOCK

@@ -10,7 +10,10 @@
     "sha1": "c4a973118684745cb03c38987d131ccbce9e7ab1",
     "md5": "6e50e38c398737269ec002749bcc5d0d"
   },
-  "dependencies": ["zlib", "mbedtls"],
+  "dependencies": [
+    "zlib",
+    "mbedtls"
+  ],
   "build": {
     "system": "configure",
     "configure_args": [
@@ -61,8 +64,7 @@
       },
       "macos": {
         "configure_args": [
-          "--disable-ipv6",
-          "--disable-threaded-resolver"
+          "--disable-ipv6"
         ]
       }
     }
@@ -86,7 +88,11 @@
       "target_overrides": {
         "windows": {
           "cflags": [
-            "-U_WIN32", "-U_WIN32_WCE", "-U__WIN32__", "-UWIN32", "-U__MINGW32__"
+            "-U_WIN32",
+            "-U_WIN32_WCE",
+            "-U__WIN32__",
+            "-UWIN32",
+            "-U__MINGW32__"
           ]
         }
       }
@@ -112,7 +118,11 @@
         },
         "windows": {
           "cflags": [
-            "-U_WIN32", "-U_WIN32_WCE", "-U__WIN32__", "-UWIN32", "-U__MINGW32__"
+            "-U_WIN32",
+            "-U_WIN32_WCE",
+            "-U__WIN32__",
+            "-UWIN32",
+            "-U__MINGW32__"
           ],
           "link_args": [
             "@PORT_PREFIX@/lib/libcurl.dll.a"
@@ -163,6 +173,7 @@
     "**(4) One more, smaller instance of the same eventfd/SOCK_CLOEXEC pattern surfaced once (1)-(3) let curl reach its very first real data `send()`: Winsock rejected it outright with `WSAEOPNOTSUPP` (10045, confirmed via a live `lldb` call into `winsock.WSAGetLastError()`), caused by curl's `cf-socket.c` unconditionally OR-ing `MSG_NOSIGNAL` (`0x4000`) into every `send()`'s flags whenever the macro is defined -- which this project's own `<sys/socket.h>` again declares unconditionally on every host. Real Winsock has no SIGPIPE-suppression flag and no SIGPIPE-on-broken-socket behavior to suppress in the first place (a broken connection already just surfaces as an ordinary `WSAECONNRESET`/`WSAECONNABORTED` return there, never a signal), so passing the raw bit through made `winsock.send()`/`winsock.sendto()` itself refuse the call. Fixed in `__crt_sys_sendto()`: strip `MSG_NOSIGNAL` from `flags` before calling Winsock -- dropping it changes nothing about actual behavior on this platform.",
     "**All four fixes verified together for real** (not just reasoned): a standalone `send()`/`connect()`/`select()` probe compiled directly against this project's own CRT sysroot via `tools/crt-cc` (bypassing the port-test harness for faster iteration during root-causing) went from `send()` returning persistent `EAGAIN` (bug 3) all the way to a real 56-byte HTTP request landing in one call once (3) was fixed; `cmake --build --preset windows-host-ninja-debug --target port-test-curl` then passed **both** `http-roundtrip-static` and `http-roundtrip-shared` end to end (`curl_http_roundtrip_test: ok http=200 https=200`) against real `http(s)://example.com/` -- the shared test needed one more `port-rebuild-mbedtls` first, the exact same stale-embedded-libc-symbol issue this recipe's own fix (6) above already root-caused and worked around (mbedtls's own DLL hadn't been rebuilt since these four libc fixes landed, so `libmbedcrypto.dll` was still shadowing pre-fix copies of `__crt_sys_socket`/`poll_socket`/`__crt_sys_sendto`; a plain `port-rebuild-mbedtls` followed by `port-rebuild-curl` resolved it, confirming that underlying gap is still real and still just worked around, not fixed). Full Windows `ctest` stayed clean at 123/123 throughout. **curl is `shared-pass` on Windows again, closing this regression out.**",
     "**Follow-up, same day: `eventfd()` itself was then given a real (not stubbed) Windows implementation** (see `docs/bionic_libc_gaps.md`'s own dated update and `HISTORY.md` for the implementation writeup) -- but this recipe's own `ac_cv_header_sys_eventfd_h=no`/`ac_cv_func_eventfd=no` override from fix (1) above is DELIBERATELY KEPT, not reverted, even though curl's own configure would now correctly detect `eventfd` as genuinely usable. curl's pipe-based wakeup path is already thoroughly verified end to end (this whole regression's own fix trail, immediately above) and switching it to the newly-real `eventfd` path now would only add re-verification risk for zero functional benefit to curl specifically -- there is no reason to prefer one working wakeup mechanism over another already-proven one. Revisit only if a real, specific reason to prefer `eventfd` for curl on Windows ever comes up.",
-    "**Follow-up, same day: `--disable-threaded-resolver` on Windows was tested and found unnecessary, then removed.** The user asked whether it was actually still needed, noting the exact same flag was once added defensively on Linux while root-causing an unrelated bug, then deliberately removed once the real fix (the `fcntl()` `O_NONBLOCK` gap) made it provably unneeded (see this file's own Linux verification note above and `HISTORY.md`'s dated entry for that precedent) -- no equivalent note existed anywhere explaining why Windows still had it, suggesting the same pattern: a defensive flag added early while chasing what turned out to be four separate, since-fixed real bugs (see the fix (1)-(4) trail above), never revisited. Tested directly: removed from `target_overrides.windows.configure_args`, forced a fresh `port-rebuild-curl`. `config.log` now shows `checking whether to enable the threaded resolver ... result: yes`, and `curl_config.h` shows `USE_RESOLV_THREADED 1`/`HAVE_THREADS_POSIX 1` -- curl's real pthread-based async resolver is genuinely compiled in and used. `http-roundtrip-static`/`-shared` both passed `ok http=200 https=200` across 6 consecutive runs (timing-sensitive threaded code specifically checked for flakiness, not just a single pass), and the full Windows `ctest` suite stayed clean at 123/123. Removed for good -- Windows now uses curl's real default threaded resolver, same as Linux. (macOS's own `--disable-threaded-resolver` is unrelated and stays: that one guards a real, separately-documented worker-pool completion-notification bug, not a since-fixed-and-forgotten defensive flag -- see this file's own macOS threaded-resolver note above.)"
+    "**Follow-up, same day: `--disable-threaded-resolver` on Windows was tested and found unnecessary, then removed.** The user asked whether it was actually still needed, noting the exact same flag was once added defensively on Linux while root-causing an unrelated bug, then deliberately removed once the real fix (the `fcntl()` `O_NONBLOCK` gap) made it provably unneeded (see this file's own Linux verification note above and `HISTORY.md`'s dated entry for that precedent) -- no equivalent note existed anywhere explaining why Windows still had it, suggesting the same pattern: a defensive flag added early while chasing what turned out to be four separate, since-fixed real bugs (see the fix (1)-(4) trail above), never revisited. Tested directly: removed from `target_overrides.windows.configure_args`, forced a fresh `port-rebuild-curl`. `config.log` now shows `checking whether to enable the threaded resolver ... result: yes`, and `curl_config.h` shows `USE_RESOLV_THREADED 1`/`HAVE_THREADS_POSIX 1` -- curl's real pthread-based async resolver is genuinely compiled in and used. `http-roundtrip-static`/`-shared` both passed `ok http=200 https=200` across 6 consecutive runs (timing-sensitive threaded code specifically checked for flakiness, not just a single pass), and the full Windows `ctest` suite stayed clean at 123/123. Removed for good -- Windows now uses curl's real default threaded resolver, same as Linux. (macOS's own `--disable-threaded-resolver` is unrelated and stays: that one guards a real, separately-documented worker-pool completion-notification bug, not a since-fixed-and-forgotten defensive flag -- see this file's own macOS threaded-resolver note above.)",
+    "**2026-09-02: macOS `--disable-threaded-resolver` removed for real, not just deleted -- the worker-pool completion-path hang the note above attributed this flag to was root-caused and fixed.** Asked to implement real macOS `eventfd()` (it had been a permanent `ENOSYS` stub, see `docs/bionic_libc_gaps.md`), wire it into this port, and remove this flag all the way through to a passing test. The real eventfd() implementation itself (a `pipe(2)` pair plus a software counter, see `libc/src/fd.c`) turned out NOT to be the fix -- the hang reproduced identically with it in place. The actual cause: this project's own macOS `pthread_create()` looked up the real Apple `pthread_create` via `dlsym(RTLD_NEXT, \"pthread_create\")`, but this project's own `RTLD_NEXT` is explicitly unimplemented (`libdl/src/arch/macos/dl_macos.c`), and `tools/crt-cc` force-links this project's own `libdl.a` (not Apple's dlsym from `-lSystem`) into every macOS binary -- so `pthread_create()` returned `ENOSYS` every single time, for every port, silently. curl's DNS-resolver thread pool never got a worker thread as a result; `Curl_thrdq_send()` discards `Curl_thrdpool_signal()`'s error, so the query just sat on the queue forever with `curl_multi_wakeup()` never firing -- exactly this note's own \"worker-pool completion path\" symptom, now actually traced to its root instead of worked around. Fixed in `libc/src/pthread.c`: every macOS pthread entry point that needs a real Apple implementation (`pthread_create` and friends) now looks it up by exact dylib path via `__crt_macho_find_symbol_in_loaded_image(\"/usr/lib/system/libsystem_pthread.dylib\", ...)` first -- the same pattern this project already uses for `getaddrinfo`/`getifaddrs` -- falling back to the (still-broken) `dlsym(RTLD_NEXT, ...)` only if that ever fails. A second, independent, real gap found and fixed along the way: macOS `socket()` didn't handle `SOCK_CLOEXEC` (this project's own portable `<sys/socket.h>` defines it as `O_CLOEXEC` so Linux-style code compiles, including this port's own `cf-socket.c`, but real Darwin `socket(2)` has no such bit and passing it through corrupted `type` into a value the kernel rejected) -- stripped before the syscall, applied afterward via a real `fcntl(F_SETFD, FD_CLOEXEC)`, same as this OS's other missing atomic-flag syscalls. With both fixed, `--disable-threaded-resolver` was removed from `configure_args` and `port-test-curl` rerun for real: `http-roundtrip-static` and `http-roundtrip-shared` both pass `ok http=200 https=200` over curl's genuine pthread threaded resolver, matching Linux/Windows. Full `ctest` stayed clean at 107/107. See `HISTORY.md`'s dated entry for the complete writeup."
   ]
 }
