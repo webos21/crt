@@ -105,12 +105,40 @@ whole existing ctest suite, and `memfd_create_test` itself all verified
 passing on both Linux (WSL) and Windows after the real fix -- 100% on
 both hosts, no known ctest failures left on either.
 
-1. **Separate extractor and codec.** Implement `docs/libcrtmedia_api_policy.md`'s
-   decided core: opaque `crtmedia_format`/`crtmedia_extractor`/`crtmedia_codec`
-   objects (async buffer-queue decode, `AMediaCodec`-shaped, FFmpeg never in a
-   public header); track selection, seek, flush, bounded queues, and
-   backpressure. Rebuild `crtmedia_demuxer_*` as a thin convenience wrapper
-   over this layer rather than a parallel implementation.
+**`docs/libcrtmedia_api_policy.md`'s decided core is implemented and verified
+on Linux and Windows** (2026-09-02): `crtmedia_format` (`format.h`/`format.c`,
+a real key-value store -- int32/int64/string/buffer, the last for real H.264
+SPS/PPS/AAC AudioSpecificConfig codec-config data under a new
+`CRTMEDIA_FORMAT_KEY_CSD` key), `crtmedia_extractor` (`extractor.h`/
+`extractor.c`, demux-only -- no `AVCodecContext` at all, track selection,
+raw owned `crtmedia_sample` output), and `crtmedia_codec` (`codec.h`/
+`codec.c`, the real async buffer-queue decoder -- `queue_input`/
+`dequeue_output`/`flush`, `CRTMEDIA_WOULD_BLOCK` backpressure, the same
+explicit multi-threaded H.264 decode as `demux.c`'s own). `crtmedia_
+extractor_codec_test` decodes the same real MP4 fixture `crtmedia_demux_
+video_test` already covers through the older convenience API, end to end
+through the new core, and gets the exact same real result (25 video
+frames, correct PTS ordering, correct audio sample range) -- proving the
+new layer is a real, correct alternative path, not just code that
+compiles. `crtmedia_format_test` covers the key-value store deterministically.
+Full ctest suite clean on both hosts (Linux 112/112, Windows 128/128, both
+100%). **macOS not yet verified**, needs the user's own Mac. See
+`HISTORY.md`'s 2026-09-02 entry for the full trail.
+
+**Still open from this same step**: `crtmedia_demuxer_*` (`demux.h`) is
+still its own, separate, independent implementation -- not yet rebuilt as
+a thin wrapper over the new core, deliberately deferred to keep this pass's
+real regression risk to the new, isolated code only (see `demux.c`'s/
+`codec.c`'s own comments). A real, working core exists to rebuild it over
+whenever that becomes the next priority.
+
+1. **Rebuild `crtmedia_demuxer_*` over the new core.** Reimplement `demux.h`'s
+   existing `crtmedia_demuxer_open`/`_read`/`_close` as a thin convenience
+   wrapper composing `crtmedia_extractor` + one `crtmedia_codec` per track,
+   instead of its own independent FFmpeg integration -- the last piece of
+   TODO.md's original "Separate extractor and codec" item. Every existing
+   `crtmedia_demux_*_test` must keep passing unchanged (same public API,
+   same behavior) once this lands.
 2. **Build the software player.** Add play/pause/seek/stop, a monotonic master
    clock, A/V synchronization, buffering/frame-drop policy, and host audio
    sinks (WASAPI, CoreAudio, and PipeWire/ALSA) while keeping decoded video on

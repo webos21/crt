@@ -40,6 +40,7 @@ add_library(crtmedia STATIC
   src/frame.c
   src/frame_convert.c
   src/audio.c
+  src/format.c
 )
 target_link_libraries(crtmedia PRIVATE crt_build_flags)
 if(CRT_TARGET_OS STREQUAL "linux" AND CRTMEDIA_ENABLE_FFMPEG)
@@ -98,6 +99,7 @@ add_library(crtmedia_shared SHARED
   src/frame.c
   src/frame_convert.c
   src/audio.c
+  src/format.c
 )
 if(CRT_TARGET_OS STREQUAL "windows")
   target_sources(crtmedia_shared PRIVATE $<TARGET_OBJECTS:crt_windows_dllcrt>)
@@ -134,14 +136,19 @@ if(CRTMEDIA_ENABLE_FFMPEG)
   # once) -- matching libcrtgfx's own CRTGFX_ENABLE_SKIA precedent
   # exactly, which uses the identical configure-time-guard-only pattern
   # for the same reason.
-  target_sources(crtmedia PRIVATE src/demux.c)
+  # src/extractor.c/src/codec.c: docs/libcrtmedia_api_policy.md's decided
+  # core (crtmedia_format/crtmedia_extractor/crtmedia_codec, TODO.md's
+  # "Separate extractor and codec" item) -- src/demux.c (crtmedia_demuxer_*)
+  # stays its own, separate, already-verified implementation for now, not
+  # yet rebuilt over this new core (see that policy doc's own Decision).
+  target_sources(crtmedia PRIVATE src/demux.c src/extractor.c src/codec.c)
   target_include_directories(crtmedia PRIVATE "${CRTMEDIA_FFMPEG_PORT_PREFIX}/include")
   # crtmedia's own PRIVATE link libraries call (including, on Linux, the
   # --start-group/--end-group-wrapped CRTMEDIA_FFMPEG_LIBRARIES) already
   # happened right after add_library(crtmedia ...) above -- see that
   # call's own comment for why it has to live there and not here.
 
-  target_sources(crtmedia_shared PRIVATE src/demux.c)
+  target_sources(crtmedia_shared PRIVATE src/demux.c src/extractor.c src/codec.c)
   target_include_directories(crtmedia_shared PRIVATE "${CRTMEDIA_FFMPEG_PORT_PREFIX}/include")
   # Unlike crtmedia's own static archive (where an unresolved FFmpeg
   # symbol is simply left for whatever final executable links crtmedia
@@ -217,6 +224,55 @@ set_tests_properties(crtmedia_frame_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "crtmedia_frame_test: ok"
 )
 set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_frame_test_runs)
+
+# crtmedia_format_test: deterministic, FFmpeg-free coverage for crtmedia/
+# format.h (docs/libcrtmedia_api_policy.md's decided core, TODO.md's
+# "Separate extractor and codec" item) -- unconditional, not gated behind
+# CRTMEDIA_ENABLE_FFMPEG, since crtmedia_format itself has no FFmpeg
+# dependency at all (see src/format.c's own top comment). Same plain-C-
+# executable shape as crtmedia_frame_test just above.
+add_executable(crtmedia_format_test
+  ${CRT_STARTUP_OBJECTS}
+  tests/format_test.c
+)
+target_link_libraries(crtmedia_format_test PRIVATE crt_build_flags c crtmedia)
+target_include_directories(crtmedia_format_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/libc/include"
+)
+target_link_libraries(crtmedia_format_test PRIVATE crt_compiler_rt_builtins)
+target_link_options(crtmedia_format_test PRIVATE
+  -nostdlib
+  -nostartfiles
+  -nodefaultlibs
+)
+if(CRT_TARGET_OS STREQUAL "macos")
+  target_link_options(crtmedia_format_test PRIVATE
+    -Wl,-e,_start
+    -Wl,-dead_strip
+  )
+  target_link_libraries(crtmedia_format_test PRIVATE System)
+elseif(CRT_TARGET_OS STREQUAL "linux")
+  target_link_options(crtmedia_format_test PRIVATE
+    -Wl,-e,_start
+    -Wl,--gc-sections
+  )
+elseif(CRT_TARGET_OS STREQUAL "windows")
+  target_link_options(crtmedia_format_test PRIVATE
+    -Wl,/entry:mainCRTStartup
+    -Wl,/subsystem:console
+    -Wl,/OPT:REF
+  )
+  target_link_libraries(crtmedia_format_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+endif()
+crt_link_startup_end_objects(crtmedia_format_test)
+add_dependencies(crtmedia_format_test c crt1 crtmedia)
+
+add_test(NAME crtmedia_format_test_runs COMMAND crtmedia_format_test)
+set_tests_properties(crtmedia_format_test_runs PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  PASS_REGULAR_EXPRESSION "crtmedia_format_test: ok"
+)
+set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_format_test_runs)
 
 # crtmedia_demux_test: real FFmpeg demux/decode coverage (crtmedia/demux.h,
 # src/demux.c) -- opens libcrtmedia/assets/test_tone.wav (a real, tiny,
@@ -485,4 +541,62 @@ if(CRTMEDIA_ENABLE_FFMPEG)
     PASS_REGULAR_EXPRESSION "crtmedia_demux_malformed_test: ok"
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_demux_malformed_test_runs)
+endif()
+
+# crtmedia_extractor_codec_test: real end-to-end coverage for docs/
+# libcrtmedia_api_policy.md's decided core (crtmedia_extractor +
+# crtmedia_codec, crtmedia/extractor.h + crtmedia/codec.h) driven together
+# against the same real MP4 fixture crtmedia_demux_video_test already
+# verifies through the older crtmedia_demuxer_* convenience API -- proving
+# the new async buffer-queue core decodes the exact same real content
+# correctly. Same gating/shape as crtmedia_demux_video_test above.
+if(CRTMEDIA_ENABLE_FFMPEG)
+  add_executable(crtmedia_extractor_codec_test
+    ${CRT_STARTUP_OBJECTS}
+    tests/extractor_codec_test.c
+  )
+  target_link_libraries(crtmedia_extractor_codec_test PRIVATE crt_build_flags crtmedia)
+  target_include_directories(crtmedia_extractor_codec_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include"
+  )
+  target_compile_definitions(crtmedia_extractor_codec_test PRIVATE
+    CRTMEDIA_TEST_VIDEO_PATH="${CMAKE_SOURCE_DIR}/libcrtmedia/assets/test_video.mp4"
+  )
+  target_link_libraries(crtmedia_extractor_codec_test PRIVATE crt_compiler_rt_builtins)
+  target_link_options(crtmedia_extractor_codec_test PRIVATE
+    -nostdlib
+    -nostartfiles
+    -nodefaultlibs
+  )
+  if(CRT_TARGET_OS STREQUAL "macos")
+    target_link_options(crtmedia_extractor_codec_test PRIVATE
+      -Wl,-e,_start
+      -Wl,-dead_strip
+    )
+    # See crtmedia_demux_test's own matching block above for the full
+    # pthread_once/-lSystem-ordering reasoning this mirrors.
+    target_link_libraries(crtmedia_extractor_codec_test PRIVATE c m dl cxx)
+    target_link_libraries(crtmedia_extractor_codec_test PRIVATE System)
+  elseif(CRT_TARGET_OS STREQUAL "linux")
+    target_link_options(crtmedia_extractor_codec_test PRIVATE
+      -Wl,-e,_start
+      -Wl,--gc-sections
+    )
+  elseif(CRT_TARGET_OS STREQUAL "windows")
+    target_link_options(crtmedia_extractor_codec_test PRIVATE
+      -Wl,/entry:mainCRTStartup
+      -Wl,/subsystem:console
+      -Wl,/OPT:REF
+    )
+    target_link_libraries(crtmedia_extractor_codec_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  endif()
+  crt_link_startup_end_objects(crtmedia_extractor_codec_test)
+  add_dependencies(crtmedia_extractor_codec_test c crt1 crtmedia)
+
+  add_test(NAME crtmedia_extractor_codec_test_runs COMMAND crtmedia_extractor_codec_test)
+  set_tests_properties(crtmedia_extractor_codec_test_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    PASS_REGULAR_EXPRESSION "crtmedia_extractor_codec_test: ok"
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_extractor_codec_test_runs)
 endif()

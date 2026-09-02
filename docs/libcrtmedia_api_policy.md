@@ -160,17 +160,20 @@ libcrtmedia/include/
   crtmedia/
     frame.h          # crtmedia_frame -- CPU video frame contract (existing, unchanged)
     audio.h          # crtmedia_audio_buffer -- PCM audio buffer contract (existing, unchanged)
-    demux.h          # crtmedia_demuxer_* -- convenience/pull-model API (existing; becomes a thin wrapper over format.h/extractor.h/codec.h once those land)
-    format.h         # crtmedia_format -- key-value format description (new, not yet implemented)
-    extractor.h       # crtmedia_extractor -- demux-only, no decode (new, not yet implemented)
-    codec.h           # crtmedia_codec -- async buffer-queue decode/encode (new, not yet implemented)
+    demux.h          # crtmedia_demuxer_* -- convenience/pull-model API (existing, still its own independent implementation -- not yet rebuilt as a thin wrapper over format.h/extractor.h/codec.h, see TODO.md's own next step)
+    format.h         # crtmedia_format -- key-value format description (implemented and verified, 2026-09-02)
+    extractor.h      # crtmedia_extractor -- demux-only, no decode (implemented and verified, 2026-09-02)
+    codec.h          # crtmedia_codec -- async buffer-queue decode (implemented and verified, 2026-09-02; encode remains future work)
 ```
 
-`format.h`/`extractor.h`/`codec.h` do not exist yet -- this document fixes
-their intended shape and relationship to the already-shipped `frame.h`/
-`audio.h`/`demux.h` before they are written, matching how
-`libcrtgfx_api_policy.md` was written before `crtgfx/window.h` existed in
-its current form. `frame.h`/`audio.h` are unaffected either way: decoded
+`format.h`/`extractor.h`/`codec.h` are implemented and verified end to end
+on Linux and Windows (`crtmedia_format_test`, `crtmedia_extractor_codec_
+test` -- see `HISTORY.md`'s 2026-09-02 entry for the full trail). `demux.h`
+is not yet rebuilt over this new core -- `crtmedia_demuxer_*` remains its
+own, separate, independent FFmpeg integration for now, a deliberate,
+explicitly-scoped deferral to keep the new core's own landing isolated
+from already-working code (`TODO.md` tracks the wrapper rebuild as its own
+next step). `frame.h`/`audio.h` are unaffected either way: decoded
 output, from either API layer, keeps landing in the same
 `crtmedia_frame`/`crtmedia_audio_buffer` contracts already verified against
 Skia and FFmpeg.

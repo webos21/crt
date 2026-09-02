@@ -10,6 +10,78 @@ substantive update.
 
 ## 2026-09-02
 
+- **Implemented and verified `docs/libcrtmedia_api_policy.md`'s decided
+  core -- `crtmedia_format`/`crtmedia_extractor`/`crtmedia_codec` -- on
+  Linux and Windows.** The first real piece of `TODO.md`'s "Separate
+  extractor and codec" step, picked up right after the policy decision
+  itself and the software-decode-evidence/`memfd_create()` work earlier
+  the same day.
+
+  - **`crtmedia_format` (`format.h`/`format.c`)**: a real key-value
+    store, shaped after `AMediaFormat` -- `int32`/`int64`/`string`/
+    `buffer` value types over a fixed-size (32-entry) array, not a
+    growable allocation (matching this project's own small/simple/
+    deterministic-memory design intent for these media contracts).
+    `CRTMEDIA_FORMAT_KEY_CSD` (`"csd-0"`, deliberately matching
+    `AMediaFormat`'s own real key name -- a real point of shape
+    alignment even without a full compatibility claim) carries real
+    codec-config data (H.264 SPS/PPS in `avcC` form, AAC's own
+    `AudioSpecificConfig`) a decoder needs before it can decode any real
+    sample at all -- a real gap found and fixed while designing `crtmedia_
+    codec_create_decoder()`: without it, `avcodec_open2()` for H.264
+    fails outright (no SPS/PPS to parse), something the original design
+    sketch (int32/int64/string only) hadn't accounted for.
+  - **`crtmedia_extractor` (`extractor.h`/`extractor.c`)**: demux-only,
+    genuinely no `AVCodecContext` at all -- only `AVFormatContext`/
+    `AVPacket`. Track selection (a real per-stream selected-bitmap,
+    matching `AMediaExtractor`'s own "only selected tracks produce
+    samples" contract -- FFmpeg's own `av_read_frame()` has no such
+    concept built in), `crtmedia_sample` as a real owned/release-callback
+    output (crtmedia/frame.h's/audio.h's own established ownership idiom,
+    not `AMediaExtractor`'s own caller-provided-fixed-buffer-plus-retry
+    convention -- a deliberate simplification, not a compatibility gap,
+    matching `docs/libcrtmedia_api_policy.md`'s own "shape, not literal
+    API" decision), and `SEEK_PREVIOUS_SYNC`-only seek (the real, narrow
+    first-pass scope).
+  - **`crtmedia_codec` (`codec.h`/`codec.c`)**: the real async buffer-
+    queue decoder -- `queue_input()`/`dequeue_output()`/`flush()`, a new
+    `CRTMEDIA_WOULD_BLOCK` result (`crtmedia/frame.h`) for real, expected
+    backpressure (input queue full, or no output ready yet) rather than
+    an error. Deliberately not `AMediaCodec`'s own raw indexed-buffer-pool
+    bookkeeping (real hardware/`ANativeWindow` zero-copy machinery this
+    project's software-only decode has no use for yet) -- hands out an
+    owned `crtmedia_frame`/`crtmedia_audio_buffer` per decoded output
+    instead, reusing the exact same contracts `crtmedia_demuxer_*` already
+    established. Same explicit multi-threaded H.264 decode
+    (`thread_count = 2`) as `demux.c`'s own equivalent path, for the same
+    real pthread-PAL-pressure-testing reason.
+  - `fill_video_frame()`/`fill_audio_buffer()` in `codec.c` are a
+    deliberate near-duplicate of `demux.c`'s own same-named functions,
+    not shared via a refactor -- `crtmedia_demuxer_*` stays its own,
+    separate, already-verified implementation this pass (see `docs/
+    libcrtmedia_api_policy.md`'s own Decision and the entry directly
+    below), so sharing code now would mean touching already-working
+    `demux.c` mid-way through landing this new, separate layer -- a real
+    regression risk for no real benefit until the wrapper rebuild
+    (`TODO.md`'s own next step) actually happens.
+
+  **Verified for real, not just compiled**: `crtmedia_extractor_codec_
+  test` (new) drives `crtmedia_extractor` + two `crtmedia_codec`
+  instances (one video, one audio) against the exact same real MP4
+  fixture `crtmedia_demux_video_test` already covers through the older
+  `crtmedia_demuxer_*` API, and gets the identical real result through
+  the new, independent code path: 25 decoded video frames with non-
+  decreasing PTS, a real decoded audio sample count in the expected
+  ~1-second range, and a real H.264 `csd-0` (SPS/PPS) actually present
+  and consumed. `crtmedia_format_test` (new) covers the key-value store
+  deterministically (set/get round trips for every value type, type-
+  mismatch and missing-key error handling, value replacement, null-
+  argument handling). Both new tests pass individually and through
+  `ctest` on Linux (WSL) and native Windows; full ctest suite clean on
+  both -- **Linux 112/112, Windows 128/128, both 100%**, no regressions
+  from either the earlier `memfd_create()` fix or this new core. macOS
+  not verified (needs the user's own Mac).
+
 - **Root-caused and fixed the `crtgfx_window_smoke` WSL ctest failure for
   real -- a genuine `memfd_create()` bug this project's own history had
   repeatedly, incorrectly dismissed as an unfixable "no reachable Wayland

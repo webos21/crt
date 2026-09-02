@@ -25,6 +25,14 @@ typedef enum crtmedia_result {
   CRTMEDIA_OK = 0,
   CRTMEDIA_ERROR_INVALID_ARGUMENT = -1,
   CRTMEDIA_ERROR_UNSUPPORTED = -2,
+  /* crtmedia_codec.h's own async queue only -- no decoded output is ready
+   * yet (queue more input first) or the input queue is momentarily full
+   * (dequeue output first) -- a real, expected, non-fatal backpressure
+   * signal, not an error condition a caller should treat as failure.
+   * Named to match this project's own existing crtmedia_result naming,
+   * not AMediaCodec's own INFO_TRY_AGAIN_LATER -- see docs/libcrtmedia_
+   * api_policy.md's own Decision on why exact NDK naming is not adopted. */
+  CRTMEDIA_WOULD_BLOCK = -3,
 } crtmedia_result;
 
 /* Every format this contract currently covers: two packed 8-bit-per-

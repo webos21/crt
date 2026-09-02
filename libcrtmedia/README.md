@@ -47,6 +47,18 @@ not yet re-verified for this specific coverage.
 The public media API policy -- an `AMediaFormat`/`AMediaExtractor`/
 `AMediaCodec`-shaped core layered under the existing, retained
 `crtmedia_demuxer_*` convenience API, FFmpeg never in a public header --
-is decided in `docs/libcrtmedia_api_policy.md`; the core itself
-(`crtmedia_format`/`crtmedia_extractor`/`crtmedia_codec`) is not
-implemented yet.
+is decided in `docs/libcrtmedia_api_policy.md`. The core itself is now
+implemented and verified on Linux and Windows: `include/crtmedia/format.h`
+(`crtmedia_format`, a real key-value store including `csd-0` codec-config
+buffers for H.264/AAC), `include/crtmedia/extractor.h` (`crtmedia_
+extractor`, demux-only, no decode), and `include/crtmedia/codec.h`
+(`crtmedia_codec`, the real async buffer-queue decoder --
+`queue_input`/`dequeue_output`/`flush`, `CRTMEDIA_WOULD_BLOCK`
+backpressure). `tests/format_test.c` covers the key-value store
+deterministically; `tests/extractor_codec_test.c` decodes the same real
+MP4 fixture `demux_decode_video_test.c` covers, end to end through the
+new core, and gets the identical real result. `crtmedia_demuxer_*`
+(`demux.h`) is not yet rebuilt over this new core -- still its own,
+separate, independent implementation for now, deliberately deferred (see
+`TODO.md`'s own next step). See `HISTORY.md`'s 2026-09-02 entry for the
+full trail.
