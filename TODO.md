@@ -297,6 +297,24 @@ or host investigation supplies the required evidence.
   -- add retry-on-transient-failure, a documented fallback mirror, and
   SHA-256 verification of the cached archive before reuse, matching the
   reliability bar other `porting/recipes/*.json` ports already meet.
+- **`porting/recipes/curl.json`'s macOS `target_overrides` has no
+  `ac_cv_func_eventfd=no`/`ac_cv_header_sys_eventfd_h=no` guard, unlike
+  Windows's.** `libc/src/eventfd.c` still returns `ENOSYS` on macOS (only
+  Windows got a real implementation, 2026-09-01), and curl's own
+  `./configure` link-only probe cannot tell a linkable-but-`ENOSYS`-stub
+  symbol from a genuinely working one -- the exact same false-positive
+  that caused the Windows "Out of memory" regression this same date (see
+  `HISTORY.md`'s dated entry). macOS's curl build hasn't been
+  reconfigured/rebuilt since `eventfd.c` was introduced (`152393f`,
+  2026-08-17), so this has not yet been *observed* failing, only
+  reasoned as a real, live risk -- the next real `port-rebuild-curl` on
+  macOS could reproduce the identical regression. Two ways to close it,
+  neither done yet: add the same defensive `ac_cv_*=no` overrides
+  Windows has (fast, matches precedent), or implement a real macOS
+  `eventfd()` (kqueue- or `dispatch_semaphore`-backed wait/wake, mirroring
+  the Windows `CRT_FD_KIND_EVENTFD` implementation's shape but with a
+  different underlying primitive -- no macOS hardware in this session to
+  do that work directly).
 
 ### Interactive job control (deferred until it's an actual priority)
 

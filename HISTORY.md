@@ -10,6 +10,47 @@ substantive update.
 
 ## 2026-09-01
 
+- **`eventfd2`'s Linux raw syscall trampoline (`libc/src/arch/linux/
+  {x86_64,aarch64}/syscall.S`, added 2026-08-17) is now independently
+  verified on real Linux hardware, closing the "reasoned but not
+  verified" caveat that had stood on it since it was written from this
+  Windows-only session.** A fresh `git clone` onto WSL Ubuntu-26.04's
+  own ext4 filesystem (never the shared `/mnt/c` tree, whose Windows
+  `core.autocrlf=true` checkout corrupts shell-script shebangs for a
+  Linux exec -- the established discipline for this) built and ran
+  `tests/eventfd_test.c` for real: real Linux kernel `6.18.33.2`,
+  accumulate/drain, `EFD_SEMAPHORE`, and the newly-added cross-thread
+  blocking-read/wake coverage (see the entry just below) all passed.
+  `epoll`/`timerfd`'s own trampolines remain unverified on real
+  hardware from this session -- this only closes the gap for
+  `eventfd2` specifically.
+
+- **`porting/recipes/curl.json`'s Windows `--disable-threaded-resolver`
+  was tested and found unnecessary, then removed.** Asked whether it
+  was still actually needed, noting the identical flag was once added
+  defensively on Linux while root-causing an unrelated bug, then
+  deliberately removed once the real fix made it provably unneeded (see
+  this same file's own entry on that, and `curl.json`'s own Linux
+  verification note) -- with no equivalent note anywhere explaining why
+  Windows still had it, the same pattern was suspected: a defensive
+  flag added early while chasing what turned out to be four separate,
+  since-fixed real bugs (the same-day regression fix below), never
+  revisited. Tested directly, not just reasoned: removed from
+  `configure_args`, forced a fresh `port-rebuild-curl`. `config.log`
+  now shows the threaded resolver genuinely enabled
+  (`USE_RESOLV_THREADED 1`/`HAVE_THREADS_POSIX 1`, not disabled), and
+  `http-roundtrip-static`/`-shared` both passed `ok http=200 https=200`
+  across 6 consecutive runs (checked specifically for flakiness, since
+  this exercises curl's own pthread-based async resolver worker pool --
+  exactly the kind of timing-sensitive code most likely to hide a
+  problem behind a single passing run). Full Windows `ctest` stayed
+  clean at 123/123. Windows now uses curl's real default threaded
+  resolver, same as Linux -- macOS's own `--disable-threaded-resolver`
+  is unrelated and unaffected (it guards a real, separately-documented
+  worker-pool completion-notification bug there, not a stale defensive
+  flag). See `porting/recipes/curl.json`'s own notes for the full
+  writeup.
+
 - **`eventfd()` gained a real, working Windows implementation, replacing
   the permanent `ENOSYS` stub that caused the same-day `curl` regression
   just below.** After that regression was fixed (by telling curl's own
