@@ -55,6 +55,20 @@ substantive update.
   the swap: Linux (WSL) 112/112, Windows 128/128, both 100%, zero
   regressions. macOS not yet re-verified for this specific change.
 
+- **macOS re-verified for the `crtmedia_demuxer_*`-over-the-new-core
+  rebuild too** (landed later the same day than the two items below
+  it, from the same non-macOS session, flagged "macOS not yet
+  re-verified for this specific change"). Rebuilt `libcrtmedia` (the
+  change is entirely internal to `src/demux.c`, no header/API surface
+  touched) and reran all four `crtmedia_demux_*_test` binaries on
+  macOS: the WAV/PCM test, the H.264+AAC MP4 test (still exercising
+  FFmpeg's threaded decode, now via the new `crtmedia_extractor`/
+  `crtmedia_codec` core underneath instead of `demux.c`'s own direct
+  FFmpeg calls), the MP3 test, and the malformed-input test -- all pass
+  unchanged, confirming the swap is transparent on macOS too, not just
+  Linux/Windows. Full `ctest` suite clean at 112/112, matching Linux
+  and Windows exactly.
+
 - **Implemented and verified `docs/libcrtmedia_api_policy.md`'s decided
   core -- `crtmedia_format`/`crtmedia_extractor`/`crtmedia_codec` -- on
   Linux and Windows.** The first real piece of `TODO.md`'s "Separate
