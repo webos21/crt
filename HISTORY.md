@@ -10,6 +10,175 @@ substantive update.
 
 ## 2026-09-01
 
+- **`eventfd2`'s Linux raw syscall trampoline (`libc/src/arch/linux/
+  {x86_64,aarch64}/syscall.S`, added 2026-08-17) is now independently
+  verified on real Linux hardware, closing the "reasoned but not
+  verified" caveat that had stood on it since it was written from this
+  Windows-only session.** A fresh `git clone` onto WSL Ubuntu-26.04's
+  own ext4 filesystem (never the shared `/mnt/c` tree, whose Windows
+  `core.autocrlf=true` checkout corrupts shell-script shebangs for a
+  Linux exec -- the established discipline for this) built and ran
+  `tests/eventfd_test.c` for real: real Linux kernel `6.18.33.2`,
+  accumulate/drain, `EFD_SEMAPHORE`, and the newly-added cross-thread
+  blocking-read/wake coverage (see the entry just below) all passed.
+  `epoll`/`timerfd`'s own trampolines remain unverified on real
+  hardware from this session -- this only closes the gap for
+  `eventfd2` specifically.
+
+- **`porting/recipes/curl.json`'s Windows `--disable-threaded-resolver`
+  was tested and found unnecessary, then removed.** Asked whether it
+  was still actually needed, noting the identical flag was once added
+  defensively on Linux while root-causing an unrelated bug, then
+  deliberately removed once the real fix made it provably unneeded (see
+  this same file's own entry on that, and `curl.json`'s own Linux
+  verification note) -- with no equivalent note anywhere explaining why
+  Windows still had it, the same pattern was suspected: a defensive
+  flag added early while chasing what turned out to be four separate,
+  since-fixed real bugs (the same-day regression fix below), never
+  revisited. Tested directly, not just reasoned: removed from
+  `configure_args`, forced a fresh `port-rebuild-curl`. `config.log`
+  now shows the threaded resolver genuinely enabled
+  (`USE_RESOLV_THREADED 1`/`HAVE_THREADS_POSIX 1`, not disabled), and
+  `http-roundtrip-static`/`-shared` both passed `ok http=200 https=200`
+  across 6 consecutive runs (checked specifically for flakiness, since
+  this exercises curl's own pthread-based async resolver worker pool --
+  exactly the kind of timing-sensitive code most likely to hide a
+  problem behind a single passing run). Full Windows `ctest` stayed
+  clean at 123/123. Windows now uses curl's real default threaded
+  resolver, same as Linux -- macOS's own `--disable-threaded-resolver`
+  is unrelated and unaffected (it guards a real, separately-documented
+  worker-pool completion-notification bug there, not a stale defensive
+  flag). See `porting/recipes/curl.json`'s own notes for the full
+  writeup.
+
+- **`eventfd()` gained a real, working Windows implementation, replacing
+  the permanent `ENOSYS` stub that caused the same-day `curl` regression
+  just below.** After that regression was fixed (by telling curl's own
+  configure to keep treating `eventfd` as unavailable on Windows -- an
+  honest capability declaration, curl never needed it), the user asked
+  whether `eventfd()` could be implemented for real on Windows instead
+  of staying a stub forever. It can, and now is: `libc/src/arch/
+  windows/common/syscall.c` gained a new `CRT_FD_KIND_EVENTFD` fd kind,
+  backed by a real Win32 manual-reset `Event` `HANDLE` (used purely as
+  a wait/wake primitive, never `ReadFile()`/`WriteFile()`'d) plus a
+  64-bit counter (`fd_eventfd_counter[]`) and semaphore-mode flag
+  (`fd_eventfd_semaphore[]`), both guarded by one coarse global spinlock
+  (`eventfd_lock` -- eventfd is not a hot path anywhere in this project,
+  so one lock keeping the counter and the event's signaled state
+  provably in sync beats a per-fd lock needing the same care for no real
+  benefit). Matches real Linux `eventfd2(2)` semantics: `write()`
+  accumulates (blocking, or `EAGAIN`, if it would push the counter past
+  `UINT64_MAX-1`, via a short, deliberately-simple `Sleep(1)` retry loop
+  -- an edge case no real consumer gets remotely close to), `read()`
+  either drains the whole counter (default mode) or decrements it by
+  exactly 1 (`EFD_SEMAPHORE`), blocking efficiently on the real Event
+  `HANDLE` via `WaitForSingleObject()` (re-checking the counter under
+  the lock after every wakeup, since a manual-reset event wakes every
+  waiter at once and only one of them actually gets to consume it) or
+  returning `EAGAIN` immediately under `EFD_NONBLOCK`. `EFD_NONBLOCK`/
+  `EFD_CLOEXEC` map onto this project's own existing `fd_nonblock[]`/
+  `FD_CLOEXEC` machinery, so `fcntl()` on an already-open eventfd keeps
+  working the same way it does for any other fd. `poll()`/`select()`
+  (`poll_eventfd()`), `fstat()` (reported as an anonymous-inode-shaped
+  regular file, matching real Linux), `ioctl(FIONREAD)`, and `close()`
+  (a real `CloseHandle()` this time, unlike `CRT_FD_KIND_URANDOM`/
+  `CRT_FD_KIND_ZERO`'s no-real-handle shortcut) all got matching
+  dispatch branches. `libc/src/eventfd.c`'s own `eventfd()` now
+  dispatches to this new `__crt_sys_eventfd2()` on Windows the same way
+  it already did to the real syscall trampoline on Linux -- one name,
+  two real backends, no stub involved on either. `tests/eventfd_test.c`
+  now runs its real-behavior branch (previously Linux-only) on Windows
+  too, extended with new `EFD_SEMAPHORE` coverage and a genuine
+  cross-thread blocking-`read()`-then-`write()`-wakes-it case (the part
+  of this implementation actually worth distrusting without a real
+  test) -- both pass. Full Windows `ctest` stayed clean at 123/123.
+  `porting/recipes/curl.json`'s own `ac_cv_func_eventfd=no` override is
+  deliberately KEPT despite this (see that recipe's own follow-up note):
+  curl's pipe-based wakeup is already thoroughly verified and switching
+  it now would only add re-verification risk for no functional gain.
+  See `docs/bionic_libc_gaps.md`'s own dated update for the doc-level
+  writeup.
+
+- **Fixed the same-day `curl` Windows "Out of memory" regression (see the
+  `libcrtmedia`/`ffmpeg` entry below, which is what surfaced it) for
+  real: four distinct, previously-invisible Windows PAL bugs, all in
+  `libc/src/arch/windows/common/syscall.c`, none curl-specific.**
+  Root-caused with real `lldb` breakpoints on the live
+  `http-roundtrip-static.exe` (not guesswork) plus a standalone
+  `send()`/`connect()`/`select()` probe compiled straight against this
+  project's own CRT sysroot via `tools/crt-cc` for faster iteration.
+  Each bug surfaced only once the previous fix let curl's own logic run
+  further than it ever had on this PAL before:
+  1. `Curl_multi_handle()`'s init returns `NULL` on ANY internal failure,
+     and `easy_perform()` unconditionally maps that to the generic
+     `CURLE_OUT_OF_MEMORY` regardless of which one actually failed --
+     confirmed by breakpointing `Curl_probeipv6` (never reached) and
+     `Curl_wakeup_init` (reached, then failed). Real cause: this
+     project's own `eventfd()` (`libc/src/eventfd.c`, added later than
+     curl's own last Windows verification by `152393f` "Implement
+     sys/epoll.h, sys/eventfd.h, sys/timerfd.h") is a deliberate,
+     permanent `ENOSYS` stub on every non-Linux host, declared
+     unconditionally so portable code keeps compiling everywhere
+     (matching this project's own `inotify.c` precedent) -- but curl's
+     `./configure` only link-probes for `eventfd`/`sys/eventfd.h` (no
+     execution check), sees a linkable symbol, and reports "yes". Fixed
+     the way this recipe already handles curl's other Windows capability
+     gaps: primed `ac_cv_header_sys_eventfd_h=no`/`ac_cv_func_eventfd=no`
+     in `curl.json`'s own `configure_args`, an honest configure-capability
+     declaration, not a source patch.
+  2. With (1) fixed, the same generic-OOM masking recurred one call
+     further in: `__crt_sys_socket()` passed `type` straight through to
+     `winsock.socket()` with no handling for Linux's `SOCK_CLOEXEC`
+     extension bit, which this project's own `<sys/socket.h>` -- like
+     `eventfd()` -- declares unconditionally on every host. curl ORs
+     `SOCK_CLOEXEC` into every socket's `type` whenever the macro exists;
+     real Winsock has no such extension and failed the call outright.
+     Fixed generally: strip `SOCK_CLOEXEC` from `type` before calling
+     Winsock, apply the same close-on-exec bookkeeping `fcntl(F_SETFD,
+     FD_CLOEXEC)` already uses instead of silently dropping the request.
+  3. With (1)-(2) fixed, curl's non-blocking `connect()` correctly
+     returned `EINPROGRESS`, but the follow-up `send()` kept failing --
+     root-caused to `poll_socket()` (backing this project's own
+     `poll()`/`select()`) setting `POLLOUT` UNCONDITIONALLY for every
+     socket with no real readiness check at all. The standalone probe
+     proved it directly: a 20-iteration, 1-second-timeout retry loop
+     completed in 0.27 real seconds (not the ~20 it should have taken),
+     with `select()` claiming instant writability every time while
+     `send()` correctly, persistently returned `WSAEWOULDBLOCK` because
+     the real TCP handshake had not actually finished. Fixed generally:
+     added `select` to `syscall.c`'s own Winsock function-pointer table
+     (`GetProcAddress`-loaded like every other entry there) plus small,
+     privately-defined `crt_ws_fd_set1`/`crt_ws_timeval` structs
+     byte-layout-compatible with real Winsock's own (deliberately NOT
+     this project's differently-shaped, same-named POSIX types);
+     `poll_socket()`'s `POLLOUT` case now does a real zero-timeout
+     `winsock.select()` on the socket (writefds for genuine writability,
+     exceptfds for a failed connect) instead of asserting readiness.
+  4. One more instance of the same pattern surfaced at curl's first real
+     data `send()`: Winsock rejected it with `WSAEOPNOTSUPP` (confirmed
+     via a live `lldb` call into `winsock.WSAGetLastError()`), caused by
+     curl unconditionally OR-ing `MSG_NOSIGNAL` into `send()`'s flags --
+     again declared unconditionally by this project's own
+     `<sys/socket.h>`. Real Winsock has no SIGPIPE-suppression flag and
+     no SIGPIPE-on-broken-socket behavior to suppress in the first
+     place. Fixed in `__crt_sys_sendto()`: strip `MSG_NOSIGNAL` from
+     `flags` before calling Winsock.
+
+  Verified end to end: `cmake --build --preset windows-host-ninja-debug
+  --target port-test-curl` passes both `http-roundtrip-static` and
+  `http-roundtrip-shared` (`curl_http_roundtrip_test: ok http=200
+  https=200`) against real `http(s)://example.com/`. The shared test
+  needed one more `port-rebuild-mbedtls` first -- the same
+  stale-embedded-libc-symbol issue this recipe's own notes already
+  root-caused once before (mbedtls's own DLL hadn't been rebuilt since
+  these fixes landed, so `libmbedcrypto.dll` was still shadowing
+  pre-fix copies of the three fixed functions) -- confirming that
+  underlying gap is still real and still just worked around, not fixed.
+  Windows `ctest` stayed clean at 123/123 throughout. `curl` is
+  `shared-pass` on Windows again. See `porting/recipes/curl.json`'s own
+  notes for the full per-bug trail and `docs/porting_status.md`'s `curl`
+  section (status restored from the interim `partial`).
+
 - **`libcrtmedia`'s FFmpeg demux/software-decode bridge lands and is
   verified end-to-end on Linux; Windows configure now succeeds too, with
   one real, diagnosed-but-unfixed `make`-step blocker remaining.** Follows

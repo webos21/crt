@@ -128,6 +128,26 @@ All four items originally listed here are now **done** -- see `HISTORY.md`'s
   PAL/event-loop design question for whichever layer actually needs
   portable multiplexed I/O, not a libc-parity concern).
 
+  **Update 2026-09-01: `eventfd()` gained a real (not stubbed) Windows
+  implementation.** A portable consumer's own configure-time feature
+  probe (curl's) link-detected the ENOSYS-stub `eventfd()`/`<sys/
+  eventfd.h>` above as usable and broke as a result (see `HISTORY.md`'s
+  dated entry and `porting/recipes/curl.json`'s own notes for the full
+  regression writeup) -- rather than route around it again, `eventfd()`
+  was actually implemented for real on Windows: a manual-reset Win32
+  Event `HANDLE` as the wait/wake primitive plus a 64-bit counter
+  (`CRT_FD_KIND_EVENTFD` in `libc/src/arch/windows/common/syscall.c`),
+  matching real Linux `eventfd2(2)` semantics -- accumulate-on-write,
+  drain-or-decrement-on-read (`EFD_SEMAPHORE`), `EFD_NONBLOCK`/
+  `EFD_CLOEXEC` mapped onto this project's existing `fcntl()` machinery,
+  and real `poll()`/`select()` integration. `epoll`/`timerfd` remain
+  `ENOSYS`-stubbed on Windows for now (no consumer has hit the same
+  false-positive-detection problem for either of those yet) -- same
+  future-work shape as `eventfd()` had before this update, should one
+  come up. `tests/eventfd_test.c` now runs its real-behavior branch (not
+  just the `ENOSYS` check) on Windows too, extended with `EFD_SEMAPHORE`
+  and a genuine cross-thread blocking-read/wake coverage case.
+
   Linux gets real raw syscall trampolines (`libc/src/arch/linux/
   {x86_64,aarch64}/syscall.S`: `eventfd2`, `epoll_create1`/`epoll_ctl`/
   `epoll_pwait` -- `epoll_wait()` is implemented over `epoll_pwait` with a
