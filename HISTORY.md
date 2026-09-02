@@ -48,6 +48,83 @@ substantive update.
   user's own separate verification, same as every other macOS-touching
   change this session could not run directly.
 
+- **macOS `getegid()` re-verified on real hardware** (this same session,
+  from real macOS), closing the "not independently run-tested" caveat the
+  entry just above carried. A `tools/crt-cc`-built probe calling this
+  project's own `getegid()` returned `20`, identically matching the real
+  system's own `getegid()` from a plain `clang`-built binary run in the
+  same shell on the same machine -- the real Darwin/XNU BSD syscall 43
+  trampoline (both the `dup`/`pipe`-adjacent nearby-anchor reasoning and
+  the raw syscall number itself) is confirmed correct, not just plausibly
+  reasoned. This machine is arm64, so this exercises `libc/src/arch/macos/
+  aarch64/syscall.S`'s own trampoline specifically; the x86_64 one (an
+  identical, mechanically-derived trampoline in the same file pair) was
+  not separately re-run on real x86_64 hardware.
+
+- **Implemented and verified the macOS host audio sink backend for
+  `crtmedia/audio_sink.h`** (`src/arch/macos/audio_sink_coreaudio.c`),
+  completing all three planned backends (WASAPI/Windows and ALSA-or-
+  PulseAudio/Linux both already landed, see the entry below) and closing
+  `TODO.md`'s "Add the CoreAudio (macOS) host audio sink backend" item.
+  Real CoreAudio `AudioQueue` (`AudioQueueNewOutput`/`AudioQueueAllocateBuffer`/
+  `AudioQueueEnqueueBuffer`/`AudioQueueStart`/`AudioQueueGetCurrentTime`),
+  matching this header's own top comment ("CoreAudio's own callback-driven
+  AudioQueue") and this project's established "no host SDK header in a
+  source file that talks to a real host API" convention (`libcrtgfx/src/
+  arch/macos/window_cocoa.c`, `src/arch/windows/audio_sink_wasapi.c`) --
+  every CoreAudio type/struct field/constant was read directly from this
+  real machine's own Xcode SDK headers (`AudioToolbox.framework`/
+  `CoreAudioTypes.framework`), not guessed, then cross-checked by building
+  and running a small throwaway probe with real `clang`/`-framework
+  AudioToolbox` (a real `AudioQueueNewOutput`/`Start`/write-a-real-440Hz-
+  sine-wave/`GetCurrentTime` round trip that produced genuine, audible
+  playback and a real, monotonically-advancing `mSampleTime`) before any
+  of it landed in this project's own hand-declared header-free version.
+
+  Unlike `window_cocoa.c`/`audio_sink_wasapi.c` (both deliberately isolated
+  from this project's own libc headers to dodge a real Win32-header/macro-
+  collision risk that does not exist here), this file uses this project's
+  own `<pthread.h>` normally, matching Linux's own `audio_sink_linux.c`
+  precedent -- CoreAudio's hand-declared types have no name collision risk
+  with this project's own headers, and a real `pthread_mutex_t`/
+  `pthread_cond_t` is exactly what its own buffer-pool design needs (a
+  fixed pool of pre-allocated `AudioQueueBuffer`s, `crtmedia_audio_sink_
+  write()` blocking via a real `pthread_cond_wait()` for one to come free,
+  the real output callback marking one free again once CoreAudio has
+  genuinely finished playing it and waking any writer). Reasoned through
+  and confirmed *before* writing the real file, not after: this project's
+  own macOS `pthread_mutex_t`/`pthread_cond_t` are a from-scratch userspace
+  implementation over real `os_sync_wait_on_address`/
+  `os_sync_wake_by_address_any` (a raw wait/wake primitive keyed purely on
+  a shared memory address, with no notion of "which library created this
+  calling thread"), never a wrapper around Apple's own opaque
+  `pthread_mutex_t` the way this same day's earlier `pthread_create()` fix
+  wraps Apple's real `pthread_create` (see this file's own eventfd/curl
+  entry) -- so locking/signaling this project's own mutex/cond from a real
+  foreign thread CoreAudio spawns internally for its own output callback
+  carries none of the real ABI-mismatch risk `crtmedia_demux_test`'s own
+  documented `pthread_once`/`-lSystem` bug was.
+
+  Wired into `libcrtmedia/CMakeLists.txt`: `crtmedia_backend_objects` gains
+  a macOS branch (using `crt_build_flags` like Linux, unlike Windows's own
+  isolated build), a new `CRTMEDIA_MACOS_FRAMEWORKS` (`-framework
+  AudioToolbox`) linked `PUBLIC` on `crtmedia` and `PRIVATE` on
+  `crtmedia_shared` (mirroring `libcrtgfx`'s own `CRTGFX_MACOS_FRAMEWORKS`/
+  Windows's own `ole32.lib` precedent exactly), and `crtmedia_audio_sink_
+  test` gains a macOS link-options branch with the same explicit `c m dl
+  cxx` before `System` ordering `crtmedia_demux_test` already established
+  (avoids the identical real `-lSystem`-shadowing risk).
+
+  Verified for real on this real macOS host: `crtmedia_audio_sink_test`
+  passes -- argument validation, then a real open/write/get_position/close
+  cycle against the real default output device (genuine audio hardware
+  present, so this exercises the real device path, not just the graceful-
+  degradation `CRTMEDIA_ERROR_UNSUPPORTED` branch this same test also
+  covers on a headless host) -- run 5 consecutive times with zero
+  flakiness (the real cross-thread buffer-pool wait/wake path was the
+  specific concern worth checking more than once). Full `ctest` suite
+  clean at 114/114, matching Linux (114/114) and Windows (130/130) exactly.
+
 - **Added the Linux host audio sink backend for `crtmedia/audio_sink.h`
   (`src/arch/linux/audio_sink_linux.c`), continuing `TODO.md`'s "Finish the
   software player" step right after the Windows/WASAPI backend landed the

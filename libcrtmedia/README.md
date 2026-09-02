@@ -93,16 +93,27 @@ falls back to a hand-rolled real PulseAudio native-protocol client spoken
 directly over the real `$PULSE_SERVER` Unix socket (its own wire format
 has no public header at all -- confirmed byte-for-byte via a real
 `strace` capture against WSLg's own bundled `libpulse.so`, not guessed).
-Neither backend ever links a host client library (no `libasound`/
-`libpulse`), matching this project's own established no-host-client-
-library policy. `tests/audio_sink_test.c` verified for real: against the
-real default Windows audio device (opens it, writes real silence,
-confirms playback position never moves backwards, drains on close), and
-on real WSL against WSLg's own live PulseAudio bridge (the full real
-AUTH/stream-creation/data-write/position-query/drain exchange). A real
-`getegid()` libc gap (hardcoded to 0 on every platform) was found and
-fixed on Linux along the way -- the Pulse backend's own required
-`SCM_CREDENTIALS` handshake needs a real gid. The macOS (CoreAudio)
-backend, buffering/frame-drop policy wiring, and the full demux+decode+
-sink+clock render-loop pipeline are not yet built. See `HISTORY.md`'s
-2026-09-02 entries for the full trail.
+Its macOS backend, `src/arch/macos/audio_sink_coreaudio.c`, drives real
+CoreAudio `AudioQueue` (`AudioQueueNewOutput`/`AudioQueueAllocateBuffer`/
+`AudioQueueEnqueueBuffer`) directly, also without `#include`-ing any
+AudioToolbox header -- every type/constant read from this project's own
+real macOS SDK and cross-checked against a real throwaway probe before
+landing, matching `window_cocoa.c`'s own established convention. None of
+the three backends ever links a host client library (no `libasound`/
+`libpulse`/`AudioToolbox.framework` header), matching this project's own
+established no-host-client-library policy. `tests/audio_sink_test.c`
+verified for real: against the real default Windows audio device (opens
+it, writes real silence, confirms playback position never moves
+backwards, drains on close), on real WSL against WSLg's own live
+PulseAudio bridge (the full real AUTH/stream-creation/data-write/
+position-query/drain exchange), and on real macOS hardware (the same real
+open/write/get_position/close cycle against the real default output
+device, run 5 consecutive times with no flakiness). A real `getegid()`
+libc gap (hardcoded to 0 on every platform) was found and fixed on both
+Linux and macOS along the way -- the Pulse backend's own required
+`SCM_CREDENTIALS` handshake needs a real gid; the macOS fix was confirmed
+against real hardware too (this project's own `getegid()` returned the
+same value as the real system's own). Buffering/frame-drop policy wiring
+and the full demux+decode+sink+clock render-loop pipeline are the only
+remaining pieces of the software player. See `HISTORY.md`'s 2026-09-02
+entries for the full trail.
