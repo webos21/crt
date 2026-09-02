@@ -32,7 +32,7 @@ gid_t getgid(void) {
   return getegid();
 }
 
-#if defined(CRT_TARGET_OS_LINUX)
+#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS)
 long __crt_sys_getegid(void);
 #endif
 
@@ -44,16 +44,27 @@ long __crt_sys_getegid(void);
  * process gid was not actually 0 -- confirmed for real via strace against
  * the live WSLg PulseAudio server: `sendmsg(...) = -1 EPERM (Operation
  * not permitted)`, the kernel correctly rejecting a spoofed SCM_CREDENTIALS
- * gid the sending process does not actually hold. Fixed on Linux via the
- * real getegid() syscall (matching geteuid()'s own already-real
- * implementation, fd.c) -- macOS/Windows keep the previous hardcoded 0
- * (this project's own synthetic single-user identity model there, per
- * this file's own top comment; unlike geteuid()/getuid(), no real
- * consumer has yet needed a genuine macOS/Windows gid, so extending this
- * fix there is left a real, separate, flagged follow-up rather than
- * guessed at here). */
+ * gid the sending process does not actually hold. Fixed on Linux the same
+ * day via a real getegid() syscall (matching geteuid()'s own already-real
+ * implementation, fd.c); fixed on macOS too, the following day, the same
+ * way (`__crt_sys_getegid()`'s own macOS trampolines, libc/src/arch/macos/
+ * {x86_64,aarch64}/syscall.S -- reasoned from real, already-wired-and-
+ * confirmed nearby BSD syscall numbers in the exact same classic table,
+ * not run-tested on real macOS hardware from this Windows-only dev
+ * session; see those trampolines' own comments for the full reasoning).
+ *
+ * Windows keeps the previous hardcoded 0 -- not a gap, unlike the Linux/
+ * macOS case: Windows has no real POSIX gid concept at all, and 0 here is
+ * the deliberately correct value under this PAL's own synthetic single-
+ * user identity model (`__crt_sys_geteuid()` returns the same hardcoded 0
+ * on Windows for the identical reason -- see its own comment,
+ * libc/src/arch/windows/common/syscall.c -- and this file's own
+ * `synthetic_passwd`/`synthetic_group` are both built around uid/gid 0
+ * being the one resolvable identity). Extending this to a "real" Windows
+ * value would mean inventing one Windows itself has no equivalent for,
+ * not fixing a real omission. */
 gid_t getegid(void) {
-#if defined(CRT_TARGET_OS_LINUX)
+#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS)
   long result = __crt_sys_getegid();
 
   if (result < 0 && result >= -4095) {

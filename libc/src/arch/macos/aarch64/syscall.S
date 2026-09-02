@@ -1117,6 +1117,33 @@ ___crt_sys_geteuid:
   neg x0, x0
   ret
 
+/* getegid() -- Darwin/XNU BSD syscall number 43, from the classic BSD
+ * syscall table this project's own already-tested/wired ___crt_sys_
+ * dup=41 / ___crt_sys_pipe=42 sit in immediately before it (see those two
+ * trampolines above) -- getegid is the very next slot in that same,
+ * essentially unchanged-for-decades numbering, matching the identical
+ * x86_64 reasoning (libc/src/arch/macos/x86_64/syscall.S's own
+ * ___crt_sys_getegid, same comment in full). Added 2026-09-02 as the real
+ * macOS counterpart to a real bug found and fixed on Linux the same day
+ * (HISTORY.md's 2026-09-02 entry) -- see that x86_64 comment for the
+ * full story. NOT independently verified on real macOS hardware from
+ * this session (Windows-only dev environment), matching this file's own
+ * established unverified-syscall-trampoline discipline. */
+.globl ___crt_sys_getegid
+.p2align 2
+___crt_sys_getegid:
+  mov x16, #43
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  stp x29, x30, [sp, #-16]!
+  mov x29, sp
+  bl ___crt_macos_to_bionic_errno
+  ldp x29, x30, [sp], #16
+  neg x0, x0
+  ret
+
 .globl ___crt_sys_fchown
 .p2align 2
 ___crt_sys_fchown:

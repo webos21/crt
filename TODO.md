@@ -178,13 +178,18 @@ first, then against this project's own hand-rolled client). A real, load-
 bearing libc gap was found and fixed along the way: `getegid()` was
 hardcoded to return 0 on every platform, which made the Pulse backend's own
 required `SCM_CREDENTIALS` handshake fail with `EPERM` whenever the real
-process gid was not actually 0 -- now a real syscall on Linux (`geteuid()`'s
-own already-real implementation had no `getegid()` counterpart until now);
-still hardcoded 0 on macOS/Windows, a real, separate, flagged follow-up, not
-yet needed by any current consumer there. Full ctest suite clean on both
-re-run hosts (Linux 114/114, Windows 130/130, both 100%). macOS not yet
-re-verified for either the WASAPI landing or this one. See `HISTORY.md`'s
-2026-09-02 entries for the full trail.
+process gid was not actually 0 -- now a real syscall on both Linux and
+macOS (`geteuid()`'s own already-real implementation had no `getegid()`
+counterpart until now; the macOS trampolines are reasoned from real,
+already-confirmed nearby BSD syscall numbers, not run-tested on real macOS
+hardware from this Windows-only dev session). Deliberately still hardcoded
+0 on Windows -- not a gap: Windows has no real POSIX gid concept, and 0
+there is the same intentional synthetic-single-user-identity value
+`geteuid()` already returns for the identical reason. Full ctest suite
+clean on both re-run hosts (Linux 114/114, Windows 130/130, both 100%).
+macOS not yet re-verified for the WASAPI/Linux-backend landing or the
+macOS `getegid()` fix. See `HISTORY.md`'s 2026-09-02 entries for the full
+trail.
 
 1. **Finish the software player.** Add the CoreAudio (macOS) host audio
    sink backend (WASAPI and ALSA/PipeWire are both already done, see

@@ -1127,6 +1127,41 @@ ___crt_sys_geteuid:
   negq %rax
   retq
 
+/* getegid() -- Darwin/XNU BSD syscall number 43 (0x2b), from the classic
+ * BSD syscall table this project's own already-tested/wired ___crt_sys_
+ * dup=41 (0x29) / ___crt_sys_pipe=42 (0x2a) sit in immediately before it
+ * (see those two trampolines above) -- getegid is the very next slot in
+ * that same, essentially unchanged-for-decades numbering. Added
+ * 2026-09-02 as the real macOS counterpart to a real bug found and fixed
+ * on Linux the same day (HISTORY.md's 2026-09-02 entry): libc/src/
+ * user_group.c's getegid() had been hardcoded to return 0 on every
+ * platform, which made libcrtmedia's own Linux PulseAudio audio sink
+ * backend's required SCM_CREDENTIALS handshake fail with a real EPERM
+ * whenever the real process gid was not actually 0. No current macOS
+ * consumer needs a real value yet, but wiring this now keeps getegid()/
+ * getgid() real everywhere getuid()/geteuid() already are (see
+ * ___crt_sys_geteuid just above), rather than leaving a silent, easy-to-
+ * rediscover-the-hard-way asymmetry. NOT independently verified on real
+ * macOS hardware from this session (Windows-only dev environment) --
+ * matching the same caveat ___crt_sys_sendmsg/___crt_sys_recvmsg
+ * (this file's own recvfrom/accept-anchored reasoning, same kind of
+ * nearby-anchor evidence as used here) and linkat()'s own trampolines
+ * carried until real hardware verification closed each one. */
+.globl ___crt_sys_getegid
+.p2align 4, 0x90
+___crt_sys_getegid:
+  movq $0x200002b, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
+  negq %rax
+  retq
+
 .globl ___crt_sys_fchown
 .p2align 4, 0x90
 ___crt_sys_fchown:

@@ -10,6 +10,44 @@ substantive update.
 
 ## 2026-09-02
 
+- **Closed the macOS half of the `getegid()` gap the Linux audio sink
+  backend found the same day** (`libc/src/user_group.c`, `libc/src/arch/
+  macos/{x86_64,aarch64}/syscall.S`) -- a real, separate follow-up flagged
+  in that same landing's own entry below, picked up right after it. Real
+  `__crt_sys_getegid()` syscall trampolines on both macOS architectures
+  (Darwin/XNU BSD syscall number 43), reasoned from real, already-tested-
+  and-wired nearby syscall numbers in the exact same classic BSD table
+  this project's own `syscall.S` files already rely on elsewhere:
+  `___crt_sys_dup` (41) and `___crt_sys_pipe` (42), both already confirmed
+  and in real use in these same files, sit immediately before getegid's
+  own slot in that unchanged-for-decades numbering -- the same kind of
+  nearby-anchor reasoning this project's own `___crt_sys_sendmsg`/
+  `___crt_sys_recvmsg` trampolines already used (2026-08-16 entry). NOT
+  independently run-tested on real macOS hardware from this Windows-only
+  dev session -- flagged the same honest way as every other unverified
+  syscall trampoline here (see `docs/` and this file's own 2026-08-16
+  entry for the established discipline), pending real macOS verification
+  the user does separately.
+
+  `getegid()` (`user_group.c`) now calls this real trampoline on macOS
+  too, matching the Linux fix's own exact shape. Windows deliberately
+  keeps its pre-existing hardcoded 0 -- not a gap: `__crt_sys_geteuid()`
+  already returns the identical hardcoded 0 there for a real, documented
+  reason (`libc/src/arch/windows/common/syscall.c`'s own comment --
+  this PAL's synthetic single-user identity model, `user_group.c`'s own
+  `synthetic_passwd`/`synthetic_group` both built around uid/gid 0 being
+  the one resolvable identity), so a "real" Windows gid would mean
+  inventing a value Windows itself has no POSIX equivalent for, not fixing
+  a real omission.
+
+  Full ctest suite clean on both re-run hosts (the only two this session
+  can actually execute): Linux (WSL) 114/114, Windows 130/130, both 100%,
+  zero regressions -- the macOS-only assembly additions do not affect
+  either host's own build. macOS itself (both the real syscall's own
+  correctness and a real re-run of the existing suite there) awaits the
+  user's own separate verification, same as every other macOS-touching
+  change this session could not run directly.
+
 - **Added the Linux host audio sink backend for `crtmedia/audio_sink.h`
   (`src/arch/linux/audio_sink_linux.c`), continuing `TODO.md`'s "Finish the
   software player" step right after the Windows/WASAPI backend landed the
