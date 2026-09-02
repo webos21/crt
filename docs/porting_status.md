@@ -594,3 +594,24 @@ FFmpeg's own `./configure` auto-detects zlib and silently links
 `zlib` port build happens to already exist in the shared install prefix --
 undefined, build-order-dependent behavior for a feature never in this
 pass's scope. Made explicit and deterministic instead.
+
+**Re-verified on macOS 2026-09-02**, asked directly after Linux/Windows
+were confirmed passing, and specifically because that same day's session
+had just fixed a real, previously-silent macOS bug that could plausibly
+have affected this port: `pthread_create()` returning `ENOSYS` for every
+`tools/crt-cc`-linked macOS binary (see `HISTORY.md`'s dated entry and
+`porting/recipes/curl.json`'s own notes for the full root-cause writeup)
+-- FFmpeg is built with `--enable-pthreads` and genuinely compiles its
+`libavcodec/pthread{,_frame,_slice}.o` frame/slice-threading objects, so
+it was a real candidate for having quietly never been able to spin up a
+worker thread, the same way curl's DNS resolver hadn't. Forced a full
+`port-rebuild-ffmpeg` against the fixed sysroot (fresh configure log
+confirms `threading support: pthreads`) and reran `crtmedia_demux_test`:
+still `crtmedia_demux_test: ok`, full `ctest` still 107/107. Caveat worth
+recording honestly: this test fixture (`test_tone.wav`, PCM-only) never
+actually exercises FFmpeg's own frame/slice thread pool (that only
+engages for codecs like H.264 that request it), so this re-verification
+confirms the demux/decode path is unaffected by that day's fixes, not
+that FFmpeg's threaded decode path specifically now works where it
+didn't before -- no regression was introduced, and no prior failure was
+observed to have been silently caused by the `pthread_create` bug either.
