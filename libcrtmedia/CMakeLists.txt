@@ -326,3 +326,163 @@ if(CRTMEDIA_ENABLE_FFMPEG)
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_demux_test_runs)
 endif()
+
+# crtmedia_demux_video_test / crtmedia_demux_mp3_test / crtmedia_demux_
+# malformed_test: TODO.md's upper-runtime roadmap step 1 ("Complete
+# software-decode evidence") -- real H.264+AAC/MP3 fixture coverage
+# (assets/test_video.mp4, assets/test_tone.mp3, see assets/README.md),
+# threaded H.264 decode (src/demux.c's own explicit thread_count=2 for
+# video streams), PTS ordering, EOF drain/flush, and malformed-input
+# handling. Same plain-C-executable shape and same per-OS link-order
+# reasoning as crtmedia_demux_test just above (see that block's own
+# comments for why crtmedia's own PRIVATE link libraries are handled the
+# way they are on each host) -- duplicated per test target rather than
+# factored into a shared CMake function, matching this file's own
+# existing crtmedia_frame_test/crtmedia_demux_test precedent (no shared
+# "build a startup-object test executable" helper exists anywhere in this
+# codebase to reuse).
+if(CRTMEDIA_ENABLE_FFMPEG)
+  add_executable(crtmedia_demux_video_test
+    ${CRT_STARTUP_OBJECTS}
+    tests/demux_decode_video_test.c
+  )
+  target_link_libraries(crtmedia_demux_video_test PRIVATE crt_build_flags crtmedia)
+  target_include_directories(crtmedia_demux_video_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include"
+  )
+  target_compile_definitions(crtmedia_demux_video_test PRIVATE
+    CRTMEDIA_TEST_VIDEO_PATH="${CMAKE_SOURCE_DIR}/libcrtmedia/assets/test_video.mp4"
+  )
+  target_link_libraries(crtmedia_demux_video_test PRIVATE crt_compiler_rt_builtins)
+  target_link_options(crtmedia_demux_video_test PRIVATE
+    -nostdlib
+    -nostartfiles
+    -nodefaultlibs
+  )
+  if(CRT_TARGET_OS STREQUAL "macos")
+    target_link_options(crtmedia_demux_video_test PRIVATE
+      -Wl,-e,_start
+      -Wl,-dead_strip
+    )
+    # See crtmedia_demux_test's own matching block above for the full
+    # pthread_once/-lSystem-ordering reasoning this mirrors.
+    target_link_libraries(crtmedia_demux_video_test PRIVATE c m dl cxx)
+    target_link_libraries(crtmedia_demux_video_test PRIVATE System)
+  elseif(CRT_TARGET_OS STREQUAL "linux")
+    target_link_options(crtmedia_demux_video_test PRIVATE
+      -Wl,-e,_start
+      -Wl,--gc-sections
+    )
+  elseif(CRT_TARGET_OS STREQUAL "windows")
+    target_link_options(crtmedia_demux_video_test PRIVATE
+      -Wl,/entry:mainCRTStartup
+      -Wl,/subsystem:console
+      -Wl,/OPT:REF
+    )
+    target_link_libraries(crtmedia_demux_video_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  endif()
+  crt_link_startup_end_objects(crtmedia_demux_video_test)
+  add_dependencies(crtmedia_demux_video_test c crt1 crtmedia)
+
+  add_test(NAME crtmedia_demux_video_test_runs COMMAND crtmedia_demux_video_test)
+  set_tests_properties(crtmedia_demux_video_test_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    PASS_REGULAR_EXPRESSION "crtmedia_demux_video_test: ok"
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_demux_video_test_runs)
+
+  add_executable(crtmedia_demux_mp3_test
+    ${CRT_STARTUP_OBJECTS}
+    tests/demux_decode_mp3_test.c
+  )
+  target_link_libraries(crtmedia_demux_mp3_test PRIVATE crt_build_flags crtmedia)
+  target_include_directories(crtmedia_demux_mp3_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include"
+  )
+  target_compile_definitions(crtmedia_demux_mp3_test PRIVATE
+    CRTMEDIA_TEST_MP3_PATH="${CMAKE_SOURCE_DIR}/libcrtmedia/assets/test_tone.mp3"
+  )
+  target_link_libraries(crtmedia_demux_mp3_test PRIVATE crt_compiler_rt_builtins)
+  target_link_options(crtmedia_demux_mp3_test PRIVATE
+    -nostdlib
+    -nostartfiles
+    -nodefaultlibs
+  )
+  if(CRT_TARGET_OS STREQUAL "macos")
+    target_link_options(crtmedia_demux_mp3_test PRIVATE
+      -Wl,-e,_start
+      -Wl,-dead_strip
+    )
+    target_link_libraries(crtmedia_demux_mp3_test PRIVATE c m dl cxx)
+    target_link_libraries(crtmedia_demux_mp3_test PRIVATE System)
+  elseif(CRT_TARGET_OS STREQUAL "linux")
+    target_link_options(crtmedia_demux_mp3_test PRIVATE
+      -Wl,-e,_start
+      -Wl,--gc-sections
+    )
+  elseif(CRT_TARGET_OS STREQUAL "windows")
+    target_link_options(crtmedia_demux_mp3_test PRIVATE
+      -Wl,/entry:mainCRTStartup
+      -Wl,/subsystem:console
+      -Wl,/OPT:REF
+    )
+    target_link_libraries(crtmedia_demux_mp3_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  endif()
+  crt_link_startup_end_objects(crtmedia_demux_mp3_test)
+  add_dependencies(crtmedia_demux_mp3_test c crt1 crtmedia)
+
+  add_test(NAME crtmedia_demux_mp3_test_runs COMMAND crtmedia_demux_mp3_test)
+  set_tests_properties(crtmedia_demux_mp3_test_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    PASS_REGULAR_EXPRESSION "crtmedia_demux_mp3_test: ok"
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_demux_mp3_test_runs)
+
+  add_executable(crtmedia_demux_malformed_test
+    ${CRT_STARTUP_OBJECTS}
+    tests/demux_decode_malformed_test.c
+  )
+  target_link_libraries(crtmedia_demux_malformed_test PRIVATE crt_build_flags crtmedia)
+  target_include_directories(crtmedia_demux_malformed_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include"
+  )
+  target_compile_definitions(crtmedia_demux_malformed_test PRIVATE
+    CRTMEDIA_TEST_VIDEO_PATH="${CMAKE_SOURCE_DIR}/libcrtmedia/assets/test_video.mp4"
+    CRTMEDIA_TEST_SCRATCH_DIR="${CMAKE_BINARY_DIR}"
+  )
+  target_link_libraries(crtmedia_demux_malformed_test PRIVATE crt_compiler_rt_builtins)
+  target_link_options(crtmedia_demux_malformed_test PRIVATE
+    -nostdlib
+    -nostartfiles
+    -nodefaultlibs
+  )
+  if(CRT_TARGET_OS STREQUAL "macos")
+    target_link_options(crtmedia_demux_malformed_test PRIVATE
+      -Wl,-e,_start
+      -Wl,-dead_strip
+    )
+    target_link_libraries(crtmedia_demux_malformed_test PRIVATE c m dl cxx)
+    target_link_libraries(crtmedia_demux_malformed_test PRIVATE System)
+  elseif(CRT_TARGET_OS STREQUAL "linux")
+    target_link_options(crtmedia_demux_malformed_test PRIVATE
+      -Wl,-e,_start
+      -Wl,--gc-sections
+    )
+  elseif(CRT_TARGET_OS STREQUAL "windows")
+    target_link_options(crtmedia_demux_malformed_test PRIVATE
+      -Wl,/entry:mainCRTStartup
+      -Wl,/subsystem:console
+      -Wl,/OPT:REF
+    )
+    target_link_libraries(crtmedia_demux_malformed_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  endif()
+  crt_link_startup_end_objects(crtmedia_demux_malformed_test)
+  add_dependencies(crtmedia_demux_malformed_test c crt1 crtmedia)
+
+  add_test(NAME crtmedia_demux_malformed_test_runs COMMAND crtmedia_demux_malformed_test)
+  set_tests_properties(crtmedia_demux_malformed_test_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    PASS_REGULAR_EXPRESSION "crtmedia_demux_malformed_test: ok"
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_demux_malformed_test_runs)
+endif()

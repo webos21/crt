@@ -96,6 +96,24 @@ crtmedia_result crtmedia_demuxer_open(const char* path, crtmedia_demuxer** out_d
       continue;
     }
     stream->codec_ctx = avcodec_alloc_context3(codec);
+    if (stream->codec_ctx != NULL && stream->type == CRTMEDIA_STREAM_VIDEO) {
+      /* Explicit, deliberate multi-threaded decode for video -- not just
+       * relying on avcodec_alloc_context3()'s own ambient default (0
+       * "auto" thread_count with both FF_THREAD_FRAME/FF_THREAD_SLICE
+       * already implicitly allowed, which in practice often does not
+       * actually spin up more than one thread for a short/simple/single-
+       * slice-per-frame stream like this pass's own small H.264 test
+       * fixture). Requesting a real thread_count > 1 here, and letting
+       * TODO.md's "verify threaded H.264 decode" step check the decoded
+       * output is still correct, is a genuine, real exercise of this
+       * project's own Bionic-style pthread implementation cooperating
+       * with FFmpeg's internal decode-thread pool under this project's
+       * own sysroot -- exactly the kind of real third-party-consumer PAL
+       * pressure-test this whole porting effort exists for, not a
+       * cosmetic setting. */
+      stream->codec_ctx->thread_count = 2;
+      stream->codec_ctx->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
+    }
     if (stream->codec_ctx == NULL ||
         avcodec_parameters_to_context(stream->codec_ctx, avstream->codecpar) < 0 ||
         avcodec_open2(stream->codec_ctx, codec, NULL) < 0) {

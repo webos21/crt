@@ -33,3 +33,20 @@ end-to-end against a real, tiny, project-authored WAV fixture
 (WSL), macOS, and native Windows -- see `porting/recipes/ffmpeg.json`'s
 own `status`/`notes` for the full per-host fix trail and `HISTORY.md`'s
 2026-09-01 entries for the dated narrative.
+
+Real H.264+AAC (MP4) and MP3 fixture coverage exists too:
+`tests/demux_decode_video_test.c` (threaded H.264 decode, PTS ordering,
+EOF drain/flush) and `tests/demux_decode_mp3_test.c` (the `mp3`/`mp3float`
+decode path specifically), plus `tests/demux_decode_malformed_test.c`
+(null args, a nonexistent path, non-media bytes, a truncated real
+fixture -- no crash, a real defined error/EOF outcome every time). See
+`assets/README.md` for the new fixtures' own provenance and `HISTORY.md`'s
+2026-09-02 entry for the full trail. Verified on Linux and Windows; macOS
+not yet re-verified for this specific coverage.
+
+The public media API policy -- an `AMediaFormat`/`AMediaExtractor`/
+`AMediaCodec`-shaped core layered under the existing, retained
+`crtmedia_demuxer_*` convenience API, FFmpeg never in a public header --
+is decided in `docs/libcrtmedia_api_policy.md`; the core itself
+(`crtmedia_format`/`crtmedia_extractor`/`crtmedia_codec`) is not
+implemented yet.

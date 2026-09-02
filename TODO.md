@@ -68,57 +68,65 @@ which QuickJS can safely bind those services without freezing a temporary API.
 The long-term target remains the Electron-class runtime described in
 [`docs/runtime_roadmap.md`](docs/runtime_roadmap.md).
 
-1. **Complete software-decode evidence.** Add real H.264+AAC MP4 and MP3
-   fixtures; verify threaded H.264 decode, PTS/DTS/duration ordering, EOF
-   drain/flush, malformed input, and static/shared behavior on all three
-   hosts. The existing WAV/PCM test remains the smallest baseline. Continue
-   against the existing `crtmedia_demuxer_*` shape -- not gated on step 2.
-2. **Separate extractor and codec.** Implement `docs/libcrtmedia_api_policy.md`'s
+**Software-decode evidence is done on Linux and Windows** (2026-09-02): real
+H.264+AAC MP4 (`assets/test_video.mp4`) and MP3 (`assets/test_tone.mp3`)
+fixtures, `crtmedia_demux_video_test`/`crtmedia_demux_mp3_test`/
+`crtmedia_demux_malformed_test` cover threaded H.264 decode (`src/demux.c`
+now explicitly requests `thread_count = 2`), PTS ordering, EOF drain/flush,
+and malformed-input handling (null args, a nonexistent path, non-media
+bytes, a truncated real fixture) -- all real, evidence-based checks, not
+link-only smoke. Full ctest suite clean on both hosts (Linux 109/110 --
+the one failure is the pre-existing, unrelated `crtgfx_window_smoke_runs`
+headless-display gap; Windows 126/126). **macOS not yet re-verified**,
+needs the user's own Mac, matching every prior FFmpeg-on-macOS pass. See
+`HISTORY.md`'s 2026-09-02 entry for the full trail.
+
+1. **Separate extractor and codec.** Implement `docs/libcrtmedia_api_policy.md`'s
    decided core: opaque `crtmedia_format`/`crtmedia_extractor`/`crtmedia_codec`
    objects (async buffer-queue decode, `AMediaCodec`-shaped, FFmpeg never in a
    public header); track selection, seek, flush, bounded queues, and
    backpressure. Rebuild `crtmedia_demuxer_*` as a thin convenience wrapper
    over this layer rather than a parallel implementation.
-3. **Build the software player.** Add play/pause/seek/stop, a monotonic master
+2. **Build the software player.** Add play/pause/seek/stop, a monotonic master
    clock, A/V synchronization, buffering/frame-drop policy, and host audio
    sinks (WASAPI, CoreAudio, and PipeWire/ALSA) while keeping decoded video on
    the verified CPU-frame/Skia path.
-4. **Fix the common GPU resource contract.** Define opaque `crtgfx` GPU
+3. **Fix the common GPU resource contract.** Define opaque `crtgfx` GPU
    device/surface and `crtmedia` GPU-frame objects, capability queries,
    CPU/GPU memory kinds, retain/release, device affinity, and acquire/release
    fences without exposing Direct3D, Metal, Vulkan, or FFmpeg types in public
    headers. Software fallback must remain a first-class path.
-5. **Enable Skia GPU rendering.** Start with a Ganesh vertical slice and keep
+4. **Enable Skia GPU rendering.** Start with a Ganesh vertical slice and keep
    Graphite as a later measured alternative: Direct3D on Windows, Metal on
    macOS, and Vulkan/Wayland on Linux. Run the existing deterministic Skia
    drawing coverage against GPU surfaces and add resize, device-loss, and
    context-recreation tests.
-6. **Add hardware decode, phase A.** Enable FFmpeg D3D11VA/D3D12VA,
+5. **Add hardware decode, phase A.** Enable FFmpeg D3D11VA/D3D12VA,
    VideoToolbox, and VA-API backends, initially downloading decoded frames to
    CPU memory so codec/device selection, fallback, and recovery can be proved
    independently of zero-copy interop.
-7. **Add hardware decode, phase B.** Connect decoder-owned textures directly
+6. **Add hardware decode, phase B.** Connect decoder-owned textures directly
    to Skia: D3D resources on Windows, `CVPixelBuffer`/Metal textures on macOS,
    and VA-API/DRM PRIME/dmabuf/Vulkan images on Linux. Tie decoder frame-pool
    release to real GPU/presentation completion and retain CPU-copy fallback.
-8. **Add hardware encode and capture.** Stage camera, microphone, and screen
+7. **Add hardware encode and capture.** Stage camera, microphone, and screen
    sources; hardware H.264/HEVC encode; mux/record; latency, bitrate, and
    key-frame controls.
-9. **Expand network and streaming.** Add custom I/O and HTTP range first,
+8. **Expand network and streaming.** Add custom I/O and HTTP range first,
    then buffering, reconnect/discontinuity handling, and HLS/DASH or the
    justified FFmpeg protocol subset.
-10. **Add an optional WebRTC-shaped realtime layer.** Define source/track/sink
-    and execution-context contracts before deciding whether to port full
-    WebRTC for RTP/RTCP, jitter buffering, congestion control, and AEC/NS/AGC.
-11. **Expose the service through `libcrtjs`.** Start the QuickJS engine,
-    event loop, timers, modules, and native binding work after step 4 while
-    steps 5-7 continue in parallel. Bind media only after the extractor/codec/
+9. **Add an optional WebRTC-shaped realtime layer.** Define source/track/sink
+   and execution-context contracts before deciding whether to port full
+   WebRTC for RTP/RTCP, jitter buffering, congestion control, and AEC/NS/AGC.
+10. **Expose the service through `libcrtjs`.** Start the QuickJS engine,
+    event loop, timers, modules, and native binding work after step 3 while
+    steps 4-6 continue in parallel. Bind media only after the extractor/codec/
     player contracts are stable, using WebCodecs-like chunks/frames/queue
-    semantics (a close match to step 2's own `crtmedia_codec` shape) and a
+    semantics (a close match to step 1's own `crtmedia_codec` shape) and a
     higher-level asynchronous player API. V8 and a minimal Chromium/Ozone
     probe remain later consumers of the same contracts.
 
-Execution order is therefore: steps 1-4 form the sequential contract gate;
+Execution order is therefore: steps 1-3 form the sequential contract gate;
 Skia GPU, hardware decode, and the QuickJS core then proceed in parallel;
 zero-copy completion gates the GPU-aware JavaScript media binding, but not the
 initial QuickJS bring-up. A full compositor, complete font shaping, and every

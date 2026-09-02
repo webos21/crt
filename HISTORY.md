@@ -10,6 +10,63 @@ substantive update.
 
 ## 2026-09-02
 
+- **`libcrtmedia`'s software-decode evidence completed on Linux and
+  Windows** (`TODO.md`'s upper-runtime roadmap, former step 1). Real
+  H.264+AAC MP4 and MP3 fixtures, generated with a real `ffmpeg` binary
+  (`imageio-ffmpeg`'s bundled static build -- a local, dev-time-only
+  generation tool, not part of this project's own toolchain or a
+  committed dependency; see `libcrtmedia/assets/README.md`'s own updated
+  provenance notes): `test_video.mp4` (1s, 64x64, 25 fps synthetic
+  `testsrc`, H.264 Constrained Baseline/`yuv420p`/no B-frames + 44.1 kHz
+  mono AAC sine tone) and `test_tone.mp3` (1s, 8 kHz mono MP3 sine tone).
+  Three new tests, `crtmedia_demux_video_test`/`crtmedia_demux_mp3_test`/
+  `crtmedia_demux_malformed_test` (`libcrtmedia/tests/`), cover what
+  `TODO.md`'s own item called for:
+  - **Threaded H.264 decode**: `src/demux.c` now explicitly sets
+    `AVCodecContext.thread_count = 2`/`thread_type = FF_THREAD_FRAME |
+    FF_THREAD_SLICE` for video streams (previously left at whatever
+    `avcodec_alloc_context3()`'s own ambient default happened to be) --
+    a deliberate choice, not just a test-only setting, since a correct,
+    complete decode under real multi-threading is genuine evidence this
+    project's own Bionic-style pthread implementation cooperates
+    correctly with FFmpeg's internal decode-thread pool, matching this
+    whole porting effort's "real third-party consumer pressure-tests the
+    PAL" philosophy.
+  - **PTS ordering**: `crtmedia_demux_video_test` checks every decoded
+    video frame's own `timestamp_us` is non-decreasing across the whole
+    25-frame sequence (valid because the fixture's own `bframes=0`
+    encode means decode order already equals presentation order -- no
+    reordering to account for).
+  - **EOF drain/flush**: already implemented in `src/demux.c` before this
+    session (a real `avcodec_send_packet(NULL)` flush once
+    `av_read_frame()` reports true EOF, then draining whatever each
+    decoder was still holding internally) but never exercised by a
+    multi-stream/multi-frame fixture before now -- the WAV-only test
+    predating this entry only ever had one buffered frame in flight at a
+    time.
+  - **Malformed input**: null `path`/`out_demuxer` (already-documented
+    `CRTMEDIA_ERROR_INVALID_ARGUMENT`), a nonexistent path, 256 zero bytes
+    with a plausible `.mp4` name (real `avformat` probe rejection), and a
+    real fixture prefix-truncated to 512 bytes (generated from the real,
+    already-checked-in `test_video.mp4` at test run time, not a second
+    committed binary asset -- see `crtmedia_demux_malformed_test.c`'s own
+    top comment) -- confirmed no crash and a real, defined outcome
+    (an error return, or a short/bounded EOF strictly short of the full
+    25-frame count) in every case.
+  - **MP3-specific decoder coverage**: `crtmedia_demux_mp3_test` exercises
+    the `mp3`/`mp3float` decode path specifically, distinct from the
+    existing WAV test's `pcm_s16le` path, with a generous sample-count
+    tolerance band (not an exact match, unlike the WAV fixture) since
+    MP3's own fixed-size-frame/encoder-priming framing does not decode to
+    a clean, exactly-predictable sample total the way raw PCM does.
+
+  Verified for real: all four `crtmedia_demux_*` tests pass individually
+  and through `ctest` on both Linux (WSL, 109/110 -- the one failure is
+  the pre-existing, unrelated `crtgfx_window_smoke_runs` headless-display
+  gap) and native Windows (126/126, no regressions). macOS not
+  re-verified this pass -- needs the user's own Mac, matching every prior
+  FFmpeg-on-macOS verification in this project.
+
 - **Decided and documented `libcrtmedia`'s public media API policy**,
   closing `TODO.md`'s "In Progress" step 1. New `docs/
   libcrtmedia_api_policy.md`: the public core will be a project-owned C
