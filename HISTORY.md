@@ -10,6 +10,46 @@ substantive update.
 
 ## 2026-09-02
 
+- **macOS re-verified for both the `memfd_create()` WSL fix and
+  `libcrtmedia`'s software-decode evidence** (both landed earlier the
+  same day from a non-macOS session, each explicitly flagged "not
+  re-verified on macOS, needs the user's own Mac" -- see the entries
+  below and `TODO.md`'s own notes). Asked directly to check git
+  history and close both gaps for real, not just re-read the existing
+  notes.
+
+  **`memfd_create()`**: the WSL symptom this fix closed (`open()`+
+  `unlink()` on a CWD-relative path, then `ftruncate()` failing with
+  `ENOENT` because WSL's DrvFs bridge does not preserve POSIX
+  delete-while-open semantics) cannot occur on macOS through the same
+  code path that hit it on WSL at all -- `memfd_create()` is only ever
+  called from `libcrtgfx/src/arch/linux/window_wayland.c` (confirmed
+  by grep; macOS's own `libcrtgfx/src/arch/macos/` backend never calls
+  it), and real macOS (APFS) honors delete-while-open correctly the
+  way WSL's DrvFs does not, so even the *old* CWD-relative version
+  would not have reproduced this specific failure there. Verified
+  directly rather than only reasoned: rebuilt and ran
+  `memfd_create_test` (the portable, OS-independent unit test for the
+  function itself, exercising the exact `open()`+`unlink()`+
+  `ftruncate()`+`mmap()` sequence the fix touched) and
+  `crtgfx_window_smoke` -- both pass on macOS, and the full `ctest`
+  suite is clean at 110/110.
+
+  **`libcrtmedia`'s software-decode evidence**: rebuilt and ran all
+  three new tests on macOS for the first time --
+  `crtmedia_demux_video_test`, `crtmedia_demux_mp3_test`, and
+  `crtmedia_demux_malformed_test` -- all pass, alongside the
+  pre-existing `crtmedia_demux_test`. `crtmedia_demux_video_test` in
+  particular is the first real confirmation that FFmpeg's own threaded
+  H.264 decode (`src/demux.c`'s explicit `thread_count = 2` for video
+  streams, added in this same evidence pass) actually works through
+  this project's own pthread PAL on macOS -- a genuine exercise of the
+  exact `pthread_create()` path this same day's earlier
+  `RTLD_NEXT`/`dlsym` fix (see the eventfd/curl entry below) repaired,
+  in a completely different consumer than curl's DNS resolver. Full
+  `ctest` suite clean at 110/110 (up from 107, the three new tests
+  newly discovered by that same rebuild's CMake reconfigure).
+
 - **Root-caused and fixed the `crtgfx_window_smoke` WSL ctest failure for
   real -- a genuine `memfd_create()` bug this project's own history had
   repeatedly, incorrectly dismissed as an unfixable "no reachable Wayland
