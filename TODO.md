@@ -68,19 +68,21 @@ which QuickJS can safely bind those services without freezing a temporary API.
 The long-term target remains the Electron-class runtime described in
 [`docs/runtime_roadmap.md`](docs/runtime_roadmap.md).
 
-**Software-decode evidence is done on Linux and Windows** (2026-09-02): real
-H.264+AAC MP4 (`assets/test_video.mp4`) and MP3 (`assets/test_tone.mp3`)
-fixtures, `crtmedia_demux_video_test`/`crtmedia_demux_mp3_test`/
-`crtmedia_demux_malformed_test` cover threaded H.264 decode (`src/demux.c`
-now explicitly requests `thread_count = 2`), PTS ordering, EOF drain/flush,
-and malformed-input handling (null args, a nonexistent path, non-media
-bytes, a truncated real fixture) -- all real, evidence-based checks, not
-link-only smoke. Full ctest suite clean on both hosts, **including the
-long-standing `crtgfx_window_smoke` WSL failure, now genuinely fixed**
-(Linux 110/110, Windows 126/126, both 100%) -- see the entry directly
-below. **macOS not yet re-verified**, needs the user's own Mac, matching
-every prior FFmpeg-on-macOS pass. See `HISTORY.md`'s 2026-09-02 entry for
-the full trail.
+**Software-decode evidence is done on Linux, Windows, and macOS**
+(2026-09-02): real H.264+AAC MP4 (`assets/test_video.mp4`) and MP3
+(`assets/test_tone.mp3`) fixtures, `crtmedia_demux_video_test`/
+`crtmedia_demux_mp3_test`/`crtmedia_demux_malformed_test` cover threaded
+H.264 decode (`src/demux.c` now explicitly requests `thread_count = 2`),
+PTS ordering, EOF drain/flush, and malformed-input handling (null args, a
+nonexistent path, non-media bytes, a truncated real fixture) -- all real,
+evidence-based checks, not link-only smoke. Full ctest suite clean on all
+three hosts, **including the long-standing `crtgfx_window_smoke` WSL
+failure, now genuinely fixed** (Linux 110/110, Windows 126/126, macOS
+110/110, all 100%) -- see the entry directly below. macOS re-verified the
+same day from real macOS hardware (`crtmedia_demux_video_test` in
+particular doubling as the first real confirmation that FFmpeg's own
+threaded H.264 decode actually works through this project's pthread PAL
+on macOS). See `HISTORY.md`'s 2026-09-02 entry for the full trail.
 
 **The `crtgfx_window_smoke` WSL failure, repeatedly dismissed throughout
 this project's own history as "no reachable Wayland compositor," was
@@ -103,7 +105,14 @@ there at all), caught by the same full-ctest-on-every-host discipline
 this project already applies everywhere else. `crtgfx_window_smoke`, the
 whole existing ctest suite, and `memfd_create_test` itself all verified
 passing on both Linux (WSL) and Windows after the real fix -- 100% on
-both hosts, no known ctest failures left on either.
+both hosts, no known ctest failures left on either. **Re-verified on
+macOS the same day**: the WSL-specific failure mode cannot occur there
+through the same path at all (`memfd_create()` is only ever called from
+`libcrtgfx`'s Linux-only Wayland backend; macOS's own backend never
+calls it, and real macOS/APFS honors delete-while-open correctly where
+WSL's DrvFs does not) -- confirmed directly rather than only reasoned,
+by running `memfd_create_test` and `crtgfx_window_smoke` for real on
+macOS hardware (both pass, full ctest 110/110).
 
 **`docs/libcrtmedia_api_policy.md`'s decided core is implemented and verified
 on Linux and Windows** (2026-09-02): `crtmedia_format` (`format.h`/`format.c`,
