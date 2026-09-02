@@ -89,6 +89,22 @@ struct sockaddr_storage {
  * this SOL_SOCKET/SO_PEERCRED one -- not added speculatively here. */
 #define SO_PEERCRED 17
 
+/* SO_PASSCRED (real Linux UAPI value, asm-generic/socket.h): asks the
+ * kernel to attach an SCM_CREDENTIALS ancillary message (see below) to
+ * every AF_UNIX message this socket receives -- added 2026-09-02 for
+ * libcrtmedia's own PulseAudio native-protocol audio sink backend
+ * (src/arch/linux/audio_sink_linux.c), which sets it the same way the
+ * real libpulse client library does (confirmed via a real strace capture
+ * against a live PulseAudio server, not guessed) before sending its own
+ * first control message. Linux-only in real, meaningful effect (no
+ * Windows/macOS equivalent -- macOS's own peer-credential mechanism is
+ * the separate SO_PEERCRED/LOCAL_PEERCRED getsockopt() path just above,
+ * not an ancillary message), but declared unconditionally here, matching
+ * SO_PEERCRED's own precedent immediately above: the constant existing
+ * does not imply this project's own non-Linux AF_UNIX implementations
+ * actually honor it at the setsockopt() level. */
+#define SO_PASSCRED 16
+
 struct ucred {
   pid_t pid;
   uid_t uid;
@@ -229,6 +245,12 @@ struct cmsghdr {
 };
 
 #define SCM_RIGHTS 0x01
+/* Real Linux UAPI value (bits/socket.h) -- the ancillary-message type
+ * SO_PASSCRED-enabled sockets attach, carrying a struct ucred (pid/uid/
+ * gid) identifying the actual sender; also what a client proactively
+ * sendmsg()s on its own first message to a PulseAudio server (see
+ * SO_PASSCRED's own comment above for the real, confirmed source). */
+#define SCM_CREDENTIALS 0x02
 
 /* Real Darwin/XNU aligns ancillary-data records to 4 bytes
  * (__DARWIN_ALIGNBYTES32, i.e. sizeof(uint32_t) - 1), not to sizeof(size_t)

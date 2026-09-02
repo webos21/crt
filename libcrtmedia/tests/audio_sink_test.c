@@ -116,6 +116,31 @@ int main(void) {
         pos_after_second_write >= pos_after_first_write,
         "real playback position never moves backwards between two get_position_frames() calls");
 
+    // A few more real writes -- proves this is a real loop, not just a
+    // one-off two-call path, while staying safely inside this project's
+    // own actually-verified range: on real WSL, the WSLg PulseAudio
+    // bridge's own real sink was confirmed (both through this backend and
+    // independently through a real reference libpulse client) to stop
+    // granting new write credit at all after roughly one real second of
+    // continuously, tightly-written audio -- a genuine, external RDP-
+    // audio-bridge limit on this exact dev machine, not something this
+    // sink (or this test) can or should try to paper over. Half a real
+    // second of additional silence (well under that real limit) is
+    // enough to prove sustained writing works without chasing full
+    // coverage of an external constraint outside this project's control.
+    {
+      enum { kExtraWrites = 4 }; // 4 * 100ms = 400ms more real audio
+      int sustained_ok = 1;
+      for (int i = 0; i < kExtraWrites; ++i) {
+        int64_t n = crtmedia_audio_sink_write(sink, silence, kFrameCount);
+        if (n < 0) {
+          sustained_ok = 0;
+          break;
+        }
+      }
+      CHECK(sustained_ok, "a few more real writes in a row never report a device failure");
+    }
+
     crtmedia_audio_sink_close(sink); // a real drain -- expected to block briefly, not hang
   }
 

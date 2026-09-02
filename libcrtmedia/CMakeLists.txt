@@ -39,24 +39,45 @@ endif()
 # crtmedia/audio_sink.h (TODO.md's upper-runtime roadmap "Build the
 # software player" step -- "host audio sinks: WASAPI, CoreAudio, and
 # PipeWire/ALSA"). Mirrors libcrtgfx's own crtgfx_backend_objects OBJECT
-# library exactly (libcrtgfx/CMakeLists.txt, ~line 807) and for the same
-# reason: src/arch/windows/audio_sink_wasapi.c hand-rolls every COM type/
-# vtable it needs (see that file's own top comment) rather than #include-ing
-# any host SDK header, so it is deliberately compiled with only this
-# library's own include/src on its path -- not this project's own libc --
-# to keep that isolation real rather than accidental. Only the Windows
-# backend exists so far (ALSA/PipeWire and CoreAudio are each their own,
-# separate, not-yet-landed pass); CRTMEDIA_BACKEND_SOURCES stays empty on
-# Linux/macOS until those land, and no crtmedia_backend_objects target is
-# created at all in that case (an OBJECT library with zero sources is a
-# real CMake error, not a harmless no-op).
+# library (libcrtgfx/CMakeLists.txt, ~line 807), including that target's
+# own Linux-only crt_build_flags exception below -- src/arch/windows/
+# audio_sink_wasapi.c hand-rolls every COM type/vtable it needs (see that
+# file's own top comment) rather than #include-ing any host SDK header,
+# so it is deliberately compiled with only this library's own include/src
+# on its path, not this project's own libc, to keep that isolation real
+# rather than accidental; src/arch/linux/audio_sink_linux.c has no such
+# concern (this project's own libc *is* the right Linux syscall surface,
+# see that file's own top comment) and needs crt_build_flags for its own
+# real <time.h>/<sys/ioctl.h>/<sys/socket.h>/... includes to resolve at
+# all. macOS (CoreAudio) is its own, separate, not-yet-landed pass;
+# CRTMEDIA_BACKEND_SOURCES stays empty there until it lands, and no
+# crtmedia_backend_objects target is created at all in that case (an
+# OBJECT library with zero sources is a real CMake error, not a harmless
+# no-op).
 set(CRTMEDIA_BACKEND_SOURCES "")
 if(CRT_TARGET_OS STREQUAL "windows")
   list(APPEND CRTMEDIA_BACKEND_SOURCES src/arch/windows/audio_sink_wasapi.c)
+elseif(CRT_TARGET_OS STREQUAL "linux")
+  # src/arch/linux/audio_sink_linux.c: raw ALSA kernel PCM ioctl, falling
+  # back to a hand-rolled real PulseAudio native-protocol client -- see
+  # that file's own top comment for the full reasoning (both transports
+  # confirmed for real; no libasound/libpulse link, matching this
+  # library's own WASAPI backend precedent of never linking a host client
+  # library). Uses this project's own libc headers normally (unlike
+  # audio_sink_wasapi.c's own deliberate no-libc isolation) -- there is no
+  # Windows-style "avoid the host SDK" concern on Linux, since this
+  # project's own libc *is* the appropriate Linux syscall surface; only
+  # the ALSA kernel UAPI struct/ioctl layout and the PulseAudio wire
+  # protocol itself (neither part of this project's own bundled headers)
+  # are hand-transcribed within that file.
+  list(APPEND CRTMEDIA_BACKEND_SOURCES src/arch/linux/audio_sink_linux.c)
 endif()
 set(CRTMEDIA_BACKEND_OBJECTS "")
 if(CRTMEDIA_BACKEND_SOURCES)
   add_library(crtmedia_backend_objects OBJECT ${CRTMEDIA_BACKEND_SOURCES})
+  if(CRT_TARGET_OS STREQUAL "linux")
+    target_link_libraries(crtmedia_backend_objects PRIVATE crt_build_flags)
+  endif()
   target_include_directories(crtmedia_backend_objects PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
   )
@@ -397,18 +418,18 @@ set_tests_properties(crtmedia_player_test_runs PROPERTIES
 )
 set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_player_test_runs)
 
-# crtmedia_audio_sink_test: real coverage for crtmedia/audio_sink.h's
-# Windows (WASAPI) backend (src/arch/windows/audio_sink_wasapi.c, TODO.md's
-# upper-runtime roadmap "Build the software player" step -- "host audio
-# sinks") -- argument validation plus a real open/write/get_position/close
-# cycle against the real default host audio device when one is available
-# (see tests/audio_sink_test.c's own top comment for the graceful-
-# degradation contract when it is not). Windows-only for now, matching
-# CRTMEDIA_BACKEND_SOURCES above (no ALSA/PipeWire or CoreAudio backend
-# exists yet -- each is its own, separate, not-yet-landed pass). Same
-# plain-C-executable shape as crtmedia_frame_test above, no FFmpeg
-# dependency (unconditional on CRTMEDIA_ENABLE_FFMPEG).
-if(CRT_TARGET_OS STREQUAL "windows")
+# crtmedia_audio_sink_test: real coverage for crtmedia/audio_sink.h's real
+# per-host backends (src/arch/windows/audio_sink_wasapi.c, src/arch/linux/
+# audio_sink_linux.c, TODO.md's upper-runtime roadmap "Build the software
+# player" step -- "host audio sinks") -- argument validation plus a real
+# open/write/get_position/close cycle against the real default host audio
+# device when one is available (see tests/audio_sink_test.c's own top
+# comment for the graceful-degradation contract when it is not). Built
+# whenever a real backend exists (CRTMEDIA_BACKEND_SOURCES above -- macOS/
+# CoreAudio is its own, separate, not-yet-landed pass). Same plain-C-
+# executable shape as crtmedia_frame_test above, no FFmpeg dependency
+# (unconditional on CRTMEDIA_ENABLE_FFMPEG).
+if(CRTMEDIA_BACKEND_SOURCES)
   add_executable(crtmedia_audio_sink_test
     ${CRT_STARTUP_OBJECTS}
     tests/audio_sink_test.c
@@ -422,11 +443,20 @@ if(CRT_TARGET_OS STREQUAL "windows")
     -nostdlib
     -nostartfiles
     -nodefaultlibs
-    -Wl,/entry:mainCRTStartup
-    -Wl,/subsystem:console
-    -Wl,/OPT:REF
   )
-  target_link_libraries(crtmedia_audio_sink_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  if(CRT_TARGET_OS STREQUAL "linux")
+    target_link_options(crtmedia_audio_sink_test PRIVATE
+      -Wl,-e,_start
+      -Wl,--gc-sections
+    )
+  elseif(CRT_TARGET_OS STREQUAL "windows")
+    target_link_options(crtmedia_audio_sink_test PRIVATE
+      -Wl,/entry:mainCRTStartup
+      -Wl,/subsystem:console
+      -Wl,/OPT:REF
+    )
+    target_link_libraries(crtmedia_audio_sink_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  endif()
   crt_link_startup_end_objects(crtmedia_audio_sink_test)
   add_dependencies(crtmedia_audio_sink_test c crt1 crtmedia)
 

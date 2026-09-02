@@ -755,6 +755,23 @@ __crt_sys_geteuid:
   ret
 .size __crt_sys_geteuid, . - __crt_sys_geteuid
 
+/* __NR_getegid = 177 (asm-generic/unistd.h) -- same generic syscall-
+ * numbering table __crt_sys_geteuid's own already-verified #175 above
+ * comes from; reasoned from that same real, confirmed source (2026-09-02,
+ * added alongside the x86_64 getegid trampoline -- see that file's own
+ * comment for the real bug this fixes), not run-tested on real aarch64
+ * hardware, matching this project's own established "unverified syscall
+ * trampoline" discipline for architectures this dev session cannot
+ * directly execute. */
+.globl __crt_sys_getegid
+.type __crt_sys_getegid, %function
+.p2align 2
+__crt_sys_getegid:
+  mov x8, #177
+  svc #0
+  ret
+.size __crt_sys_getegid, . - __crt_sys_getegid
+
 .globl __crt_sys_fchown
 .type __crt_sys_fchown, %function
 .p2align 2

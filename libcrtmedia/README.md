@@ -79,16 +79,30 @@ real audio track exists, `WAIT`/`PRESENT_NOW`/`DROP` per-frame timing
 decisions) -- `tests/player_test.c` covers it against the real host clock.
 `include/crtmedia/audio_sink.h` is the host-independent audio-output
 contract (`_open`/`_close`/`_write`/`_get_position_frames`, no host audio
-API type ever named); its first real backend,
+API type ever named); its Windows backend,
 `src/arch/windows/audio_sink_wasapi.c`, drives real WASAPI (`IMMDevice
 Enumerator`/`IAudioClient`/`IAudioRenderClient`) directly, without
 `#include`-ing any Windows SDK header -- matching `libcrtgfx/src/arch/
 windows/window_win32.c`'s own hand-rolled-COM-vtable convention exactly,
 built as its own `crtmedia_backend_objects` OBJECT library mirroring
-`libcrtgfx`'s own `crtgfx_backend_objects`. `tests/audio_sink_test.c`
-verified for real against the real default Windows audio device: opens
-it, writes real silence, confirms playback position never moves
-backwards, and drains on close. The macOS (CoreAudio) and Linux
-(ALSA/PipeWire) backends, buffering/frame-drop policy wiring, and the
-full demux+decode+sink+clock render-loop pipeline are not yet built. See
-`HISTORY.md`'s 2026-09-02 entry for the full trail.
+`libcrtgfx`'s own `crtgfx_backend_objects`. Its Linux backend,
+`src/arch/linux/audio_sink_linux.c`, tries a raw ALSA kernel PCM ioctl
+first (`/dev/snd/pcmC*D*p`, the same real UAPI Android's own NDK audio
+stack ultimately rests on via `tinyalsa` at its lowest HAL layer), then
+falls back to a hand-rolled real PulseAudio native-protocol client spoken
+directly over the real `$PULSE_SERVER` Unix socket (its own wire format
+has no public header at all -- confirmed byte-for-byte via a real
+`strace` capture against WSLg's own bundled `libpulse.so`, not guessed).
+Neither backend ever links a host client library (no `libasound`/
+`libpulse`), matching this project's own established no-host-client-
+library policy. `tests/audio_sink_test.c` verified for real: against the
+real default Windows audio device (opens it, writes real silence,
+confirms playback position never moves backwards, drains on close), and
+on real WSL against WSLg's own live PulseAudio bridge (the full real
+AUTH/stream-creation/data-write/position-query/drain exchange). A real
+`getegid()` libc gap (hardcoded to 0 on every platform) was found and
+fixed on Linux along the way -- the Pulse backend's own required
+`SCM_CREDENTIALS` handshake needs a real gid. The macOS (CoreAudio)
+backend, buffering/frame-drop policy wiring, and the full demux+decode+
+sink+clock render-loop pipeline are not yet built. See `HISTORY.md`'s
+2026-09-02 entries for the full trail.

@@ -32,8 +32,37 @@ gid_t getgid(void) {
   return getegid();
 }
 
+#if defined(CRT_TARGET_OS_LINUX)
+long __crt_sys_getegid(void);
+#endif
+
+/* A real gap found and fixed 2026-09-02 by libcrtmedia's own PulseAudio
+ * native-protocol audio sink backend (src/arch/linux/audio_sink_linux.c):
+ * this returned a hardcoded 0 unconditionally, so the SCM_CREDENTIALS
+ * ancillary message that sink sends on its very first message to a real
+ * PulseAudio server (gid=getgid()) carried a false gid whenever the real
+ * process gid was not actually 0 -- confirmed for real via strace against
+ * the live WSLg PulseAudio server: `sendmsg(...) = -1 EPERM (Operation
+ * not permitted)`, the kernel correctly rejecting a spoofed SCM_CREDENTIALS
+ * gid the sending process does not actually hold. Fixed on Linux via the
+ * real getegid() syscall (matching geteuid()'s own already-real
+ * implementation, fd.c) -- macOS/Windows keep the previous hardcoded 0
+ * (this project's own synthetic single-user identity model there, per
+ * this file's own top comment; unlike geteuid()/getuid(), no real
+ * consumer has yet needed a genuine macOS/Windows gid, so extending this
+ * fix there is left a real, separate, flagged follow-up rather than
+ * guessed at here). */
 gid_t getegid(void) {
+#if defined(CRT_TARGET_OS_LINUX)
+  long result = __crt_sys_getegid();
+
+  if (result < 0 && result >= -4095) {
+    return (gid_t)__set_errno((int)-result);
+  }
+  return (gid_t)result;
+#else
   return 0;
+#endif
 }
 
 char* getlogin(void) {

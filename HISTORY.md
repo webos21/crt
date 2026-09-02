@@ -10,6 +10,166 @@ substantive update.
 
 ## 2026-09-02
 
+- **Added the Linux host audio sink backend for `crtmedia/audio_sink.h`
+  (`src/arch/linux/audio_sink_linux.c`), continuing `TODO.md`'s "Finish the
+  software player" step right after the Windows/WASAPI backend landed the
+  same day.** Two real, hand-rolled transports, in order, matching that
+  step's own "ALSA/PipeWire" naming:
+
+  1. **Raw ALSA kernel PCM ioctl** (`/dev/snd/pcmC*D*p`) -- every struct/
+     ioctl-number is a mechanical transcription of the real
+     `/usr/include/sound/asound.h` kernel UAPI header (a host-side
+     kernel-headers package, confirmed against this project's own WSL
+     host, never included -- it is not part of this project's own
+     bundled sysroot). Chosen deliberately as the closest real precedent
+     to Android's own NDK audio stack: real AAudio/OpenSL ES both
+     ultimately rest on the same raw kernel ioctl protocol at their
+     lowest HAL layer via `tinyalsa` (a minimal reimplementation of this
+     exact UAPI, not full `alsa-lib`) rather than any userspace client
+     library, matching this project's own established "no host client
+     library" policy for exactly the ABI-mismatch-risk reasons the macOS
+     `pthread_once`/`-lSystem` `crtmedia_demux_test` entry already
+     documents. This WSL dev loop itself has no real `/dev/snd/pcm*`
+     device at all (confirmed: only `timer` exists under `/dev/snd`
+     there), so this path is only exercised via its own real, graceful
+     `CRTMEDIA_ERROR_UNSUPPORTED` fallback here -- real verification on
+     genuine Linux audio hardware is a real, separate, flagged follow-up.
+  2. **A hand-rolled real PulseAudio native-protocol client**, spoken
+     directly over the Unix domain socket at `$PULSE_SERVER`/
+     `$XDG_RUNTIME_DIR/pulse/native` -- WSLg's own real audio bridge to
+     the Windows host, and also what nearly every modern Linux desktop
+     exposes today (a PipeWire install's own `pipewire-pulse`
+     compatibility server included), making this the one path
+     genuinely, audibly verifiable inside this project's own WSL dev
+     loop. The native protocol has no public header at all (intentionally
+     undocumented, internal to PulseAudio's own implementation) -- every
+     command opcode/tag-encoding byte used here was confirmed for real,
+     not guessed, by building a throwaway reference C client against
+     WSLg's own real `libpulse.so.0.24.3` (found under its internal
+     distro, `/mnt/wslg/distro/usr/lib/x86_64-linux-gnu/`) and capturing
+     its exact real wire bytes via `strace -xx` against the real, live
+     `$PULSE_SERVER` socket -- the same "verify for real, don't guess"
+     discipline this project's own `memfd_create()` fix already used
+     `strace` for, applied here to reverse-engineer an entirely
+     undocumented wire protocol byte-for-byte instead of a single kernel
+     API quirk.
+
+  **A real, load-bearing libc gap found and fixed along the way**:
+  `getegid()` (`libc/src/user_group.c`) was hardcoded to return 0
+  unconditionally on every platform -- the Pulse backend's own first
+  message to the server must carry a real `SCM_CREDENTIALS` ancillary
+  record (confirmed required via the same real reference-client trace),
+  and the real Linux kernel correctly rejected it with `EPERM` whenever
+  the real process gid was not actually 0 (`sendmsg(...) = -1 EPERM`,
+  confirmed via `strace`) -- a false/spoofed credential, not a permission
+  bug. Fixed with real `__crt_sys_getegid()` syscall trampolines
+  (`libc/src/arch/linux/x86_64/syscall.S`, syscall 108 -- verified for
+  real on this project's own WSL host; `libc/src/arch/linux/aarch64/
+  syscall.S`, syscall 177 -- reasoned from the same real, confirmed
+  `asm-generic/unistd.h` numbering table `geteuid()`'s own already-real
+  aarch64 trampoline (175) comes from, not run-tested on real aarch64
+  hardware, matching this project's own established unverified-syscall-
+  trampoline discipline). `getegid()` on macOS/Windows keeps the
+  pre-existing hardcoded 0 -- a real, separate, flagged follow-up, not
+  needed by any current consumer there (unlike `geteuid()`/`getuid()`,
+  already real everywhere).
+
+  **A second real bug found and fixed via the same live-server
+  verification, this one a genuine design flaw, not an environment
+  quirk**: an early version of the Pulse write-side flow control seeded
+  a small, deliberately "conservative" 4096-byte initial write credit,
+  reasoning a too-small guess would only cost one extra wait cycle before
+  the real server's own `REQUEST` flow-control messages took over. False,
+  confirmed for real against the live WSLg server: a real PulseAudio sink
+  does not start actually playing -- and so never starts emitting
+  `REQUEST` credit grants at all -- until its own server-side buffer
+  reaches its real `prebuf` threshold, which defaults to the stream's own
+  full negotiated `tlength` when left "auto" (this file's own
+  `CREATE_PLAYBACK_STREAM` request leaves it auto); a 4096-byte first
+  write left the stream permanently below that real threshold, so every
+  later write blocked forever, a real, reproducible deadlock, not
+  flakiness. Fixed by seeding one full real second's worth of the
+  stream's own actual rate/format/channels as the initial credit instead
+  -- comfortably above any real prebuf threshold this project's own
+  current per-call buffer sizes would still leave unfilled, letting the
+  first real write go out unconstrained (matching the real reference
+  client's own observed behavior: it sent its own first buffer in one
+  shot, no credit wait at all) so the stream actually starts playing and
+  the real flow-control loop genuinely begins.
+
+  A third, real, purely environmental finding, not a bug in this file,
+  recorded directly in its own top comment for whoever debugs this next:
+  WSLg's own bundled PulseAudio listens with a real, small `listen()`
+  backlog (5, confirmed via `ss -xl`) and its own accept loop was
+  observed, for real, to eventually stop draining that backlog under
+  rapid repeated manual reconnects during this same debugging session
+  (many test runs back-to-back within seconds -- well outside a normal
+  single-pass `ctest` run's own real cadence) -- every subsequent
+  `connect()` then blocks in the real kernel's own `unix_wait_for_peer`
+  indefinitely (confirmed via `/proc/<pid>/wchan` and `/proc/<pid>/
+  status`, not guessed), recoverable only via `wsl --shutdown` from
+  PowerShell. A single real `ctest` pass never triggered this.
+
+  Two more real bugs surfaced writing a real, sustained-writing regression
+  test to exercise the fix above end to end (a `crtmedia_audio_sink_write`
+  loop past the initial credit, not just the original two calls):
+
+  - A real off-by-one in `CRTMEDIA_PULSE_COMMAND_REQUEST` payload parsing
+    -- `[u32 stream_index]['L'][u32 byte_count]` was read starting at that
+    second `'L'` tag byte itself instead of just past it, so every real
+    credit grant came back with that tag byte silently substituted for
+    its own true high byte. Harmless by accident on a short run (still a
+    real, if wrong, positive number -- one such garbled grant read back
+    as roughly 1.2 billion, and `0x4C`, the corrupted high byte, is
+    literally the ASCII `'L'` tag), but a real, confirmed contributor to
+    intermittent stalls on a longer one, once a later grant's own true
+    small value produced a garbled *small* number instead. Fixed by
+    reading from the real correct offset.
+  - A real, separate design bug in how a credit grant's arrival was
+    noticed at all: the write-side wait loop polled by waiting for a
+    reply tagged with a sentinel value no real reply could ever carry,
+    meaning it could only ever return via this file's own real
+    10-second-deadline timeout, never the instant a real
+    `CRTMEDIA_PULSE_COMMAND_REQUEST` actually raised credit above zero.
+    Refactored into a shared `pulse_poll_until()` polling core two
+    distinct real conditions are layered onto (`pulse_wait_for_reply()`
+    for a specific reply tag, `pulse_wait_for_credit()` for credit alone,
+    regardless of which -- if any -- tagged reply happens to deliver it),
+    so a real grant is noticed and acted on immediately.
+
+  Applying both fixes did **not** make unbounded sustained writing pass,
+  and this turned out to be neither bug: continuously, tightly writing
+  real audio (no pacing between calls) reliably stalls this exact dev
+  machine's own WSLg PulseAudio bridge after roughly one real second, with
+  no further `REQUEST` ever arriving -- confirmed to be a genuine property
+  of the bridge itself, not this file's own client logic, by writing a
+  second, independent throwaway probe against the real reference
+  `libpulse.so` client and hitting the exact same real stall the same way
+  (tight ~100ms chunks, stalling at roughly the same one-second mark).
+  The regression test was scaled back to a handful of real writes
+  (comfortably inside this now-confirmed real, safely-verified range)
+  rather than chasing full coverage of a real, external RDP-audio-bridge
+  limit outside this project's own control -- both real fixes above stay
+  landed regardless, since they are genuine correctness improvements
+  within that range (and beyond it, on a real, non-WSLg PulseAudio/
+  PipeWire-pulse host without this exact bridge's own real ceiling).
+
+  **Verified for real** (after every fix above, following a clean `wsl
+  --shutdown`): `crtmedia_audio_sink_test` opened the real live WSLg
+  PulseAudio bridge, ran the full real AUTH/`SET_CLIENT_NAME`/
+  `CREATE_PLAYBACK_STREAM` handshake, wrote six real buffers of
+  interleaved S16 silence in a row (correctly gated by real server-sent
+  `REQUEST` credit grants once the initial allowance was spent, confirmed
+  via direct instrumentation showing the exact real command/tag/credit
+  sequence), queried real playback position via `GET_PLAYBACK_LATENCY`,
+  and drained on close via a real `DRAIN_PLAYBACK_STREAM` round trip --
+  `crtmedia_audio_sink_test: ok`, exit 0, repeated across multiple clean
+  single-pass runs. Full ctest suite clean on both re-run hosts, each a
+  single clean pass after a fresh `wsl --shutdown`: Linux (WSL) 114/114,
+  Windows 130/130, both 100%, zero regressions from the new backend, the
+  `getegid()` fix, or the two Pulse-parsing/wait-logic fixes above. macOS
+  (CoreAudio) remains the one host audio sink backend not yet landed.
+
 - **Started `TODO.md`'s upper-runtime roadmap "Build the software player"
   step: a real master clock/state machine/A/V-sync core
   (`crtmedia/player.h`/`player.c`), then a real, working Windows (WASAPI)

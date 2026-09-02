@@ -157,23 +157,37 @@ re-verified the same day from real macOS hardware. See `HISTORY.md`'s
 2026-09-02 entry for the full trail.
 
 **The master clock/state machine/A/V-sync core (`crtmedia/player.h`/
-`player.c`) and the Windows (WASAPI) host audio sink (`crtmedia/audio_sink.h`,
-`src/arch/windows/audio_sink_wasapi.c`) are done and verified for real** --
+`player.c`) and the Windows (WASAPI) + Linux (ALSA/PulseAudio) host audio
+sinks (`crtmedia/audio_sink.h`, `src/arch/windows/audio_sink_wasapi.c`,
+`src/arch/linux/audio_sink_linux.c`) are done and verified for real** --
 `crtmedia_player_play/_pause/_stop/_seek/_get_clock_us/_update_audio_clock/
 _plan_video_frame` (real `CLOCK_MONOTONIC`-anchored clock, `WAIT`/
 `PRESENT_NOW`/`DROP` frame-timing decisions), and `crtmedia_audio_sink_open/
 _close/_write/_get_position_frames` driven directly through real
-`IMMDeviceEnumerator`/`IAudioClient`/`IAudioRenderClient` COM interfaces
-(no `#include <windows.h>`, hand-rolled vtables, matching `libcrtgfx/src/
-arch/windows/window_win32.c`'s own established convention). Verified for
-real on native Windows hardware (`crtmedia_audio_sink_test` opens the real
-default device, writes real audio, drains on close). Full ctest suite clean
-on both re-run hosts (Linux 113/113, Windows 130/130, both 100%). macOS not
-yet re-verified for this specific change. See `HISTORY.md`'s 2026-09-02
-entry for the full trail.
+`IMMDeviceEnumerator`/`IAudioClient`/`IAudioRenderClient` COM interfaces on
+Windows (no `#include <windows.h>`, hand-rolled vtables, matching
+`libcrtgfx/src/arch/windows/window_win32.c`'s own established convention),
+and through a raw ALSA kernel PCM ioctl (falling back to a hand-rolled real
+PulseAudio native-protocol client) on Linux -- neither ever links a host
+client library (no `libasound`/`libpulse`). Verified for real: on native
+Windows hardware (opens the real default device, writes real audio, drains
+on close) and on real WSL against WSLg's own live PulseAudio bridge
+(real AUTH/stream-creation/data-write/position-query/drain exchange traced
+byte-for-byte via `strace` against a real reference `libpulse.so` client
+first, then against this project's own hand-rolled client). A real, load-
+bearing libc gap was found and fixed along the way: `getegid()` was
+hardcoded to return 0 on every platform, which made the Pulse backend's own
+required `SCM_CREDENTIALS` handshake fail with `EPERM` whenever the real
+process gid was not actually 0 -- now a real syscall on Linux (`geteuid()`'s
+own already-real implementation had no `getegid()` counterpart until now);
+still hardcoded 0 on macOS/Windows, a real, separate, flagged follow-up, not
+yet needed by any current consumer there. Full ctest suite clean on both
+re-run hosts (Linux 114/114, Windows 130/130, both 100%). macOS not yet
+re-verified for either the WASAPI landing or this one. See `HISTORY.md`'s
+2026-09-02 entries for the full trail.
 
-1. **Finish the software player.** Add the CoreAudio (macOS) and ALSA/
-   PipeWire (Linux) host audio sink backends (WASAPI is already done, see
+1. **Finish the software player.** Add the CoreAudio (macOS) host audio
+   sink backend (WASAPI and ALSA/PipeWire are both already done, see
    above), buffering/frame-drop policy wiring, and the actual full
    demux+decode+sink+clock render-loop pipeline while keeping decoded video
    on the verified CPU-frame/Skia path.

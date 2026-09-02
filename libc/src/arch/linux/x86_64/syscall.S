@@ -736,6 +736,15 @@ __crt_sys_geteuid:
   retq
 .size __crt_sys_geteuid, . - __crt_sys_geteuid
 
+.globl __crt_sys_getegid
+.type __crt_sys_getegid, @function
+.p2align 4, 0x90
+__crt_sys_getegid:
+  movq $108, %rax
+  syscall
+  retq
+.size __crt_sys_getegid, . - __crt_sys_getegid
+
 .globl __crt_sys_fchown
 .type __crt_sys_fchown, @function
 .p2align 4, 0x90
