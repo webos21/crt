@@ -41,6 +41,7 @@ add_library(crtmedia STATIC
   src/frame_convert.c
   src/audio.c
   src/format.c
+  src/player.c
 )
 target_link_libraries(crtmedia PRIVATE crt_build_flags)
 if(CRT_TARGET_OS STREQUAL "linux" AND CRTMEDIA_ENABLE_FFMPEG)
@@ -100,6 +101,7 @@ add_library(crtmedia_shared SHARED
   src/frame_convert.c
   src/audio.c
   src/format.c
+  src/player.c
 )
 if(CRT_TARGET_OS STREQUAL "windows")
   target_sources(crtmedia_shared PRIVATE $<TARGET_OBJECTS:crt_windows_dllcrt>)
@@ -273,6 +275,56 @@ set_tests_properties(crtmedia_format_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "crtmedia_format_test: ok"
 )
 set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_format_test_runs)
+
+# crtmedia_player_test: deterministic (real host clock, generous
+# tolerance), FFmpeg-free coverage for crtmedia/player.h (TODO.md's
+# upper-runtime roadmap "Build the software player" step) -- unconditional,
+# not gated behind CRTMEDIA_ENABLE_FFMPEG, matching crtmedia_format_test's
+# own reasoning (no FFmpeg dependency at all, see src/player.c's own top
+# comment). Same plain-C-executable shape as crtmedia_frame_test/crtmedia_
+# format_test above.
+add_executable(crtmedia_player_test
+  ${CRT_STARTUP_OBJECTS}
+  tests/player_test.c
+)
+target_link_libraries(crtmedia_player_test PRIVATE crt_build_flags c crtmedia)
+target_include_directories(crtmedia_player_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/libc/include"
+)
+target_link_libraries(crtmedia_player_test PRIVATE crt_compiler_rt_builtins)
+target_link_options(crtmedia_player_test PRIVATE
+  -nostdlib
+  -nostartfiles
+  -nodefaultlibs
+)
+if(CRT_TARGET_OS STREQUAL "macos")
+  target_link_options(crtmedia_player_test PRIVATE
+    -Wl,-e,_start
+    -Wl,-dead_strip
+  )
+  target_link_libraries(crtmedia_player_test PRIVATE System)
+elseif(CRT_TARGET_OS STREQUAL "linux")
+  target_link_options(crtmedia_player_test PRIVATE
+    -Wl,-e,_start
+    -Wl,--gc-sections
+  )
+elseif(CRT_TARGET_OS STREQUAL "windows")
+  target_link_options(crtmedia_player_test PRIVATE
+    -Wl,/entry:mainCRTStartup
+    -Wl,/subsystem:console
+    -Wl,/OPT:REF
+  )
+  target_link_libraries(crtmedia_player_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+endif()
+crt_link_startup_end_objects(crtmedia_player_test)
+add_dependencies(crtmedia_player_test c crt1 crtmedia)
+
+add_test(NAME crtmedia_player_test_runs COMMAND crtmedia_player_test)
+set_tests_properties(crtmedia_player_test_runs PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  PASS_REGULAR_EXPRESSION "crtmedia_player_test: ok"
+)
+set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_player_test_runs)
 
 # crtmedia_demux_test: real FFmpeg demux/decode coverage (crtmedia/demux.h,
 # src/demux.c) -- opens libcrtmedia/assets/test_tone.wav (a real, tiny,
