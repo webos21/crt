@@ -115,7 +115,7 @@ by running `memfd_create_test` and `crtgfx_window_smoke` for real on
 macOS hardware (both pass, full ctest 110/110).
 
 **`docs/libcrtmedia_api_policy.md`'s decided core is implemented and verified
-on Linux and Windows** (2026-09-02): `crtmedia_format` (`format.h`/`format.c`,
+on Linux, Windows, and macOS** (2026-09-02): `crtmedia_format` (`format.h`/`format.c`,
 a real key-value store -- int32/int64/string/buffer, the last for real H.264
 SPS/PPS/AAC AudioSpecificConfig codec-config data under a new
 `CRTMEDIA_FORMAT_KEY_CSD` key), `crtmedia_extractor` (`extractor.h`/
@@ -130,8 +130,11 @@ through the new core, and gets the exact same real result (25 video
 frames, correct PTS ordering, correct audio sample range) -- proving the
 new layer is a real, correct alternative path, not just code that
 compiles. `crtmedia_format_test` covers the key-value store deterministically.
-Full ctest suite clean on both hosts (Linux 112/112, Windows 128/128, both
-100%). **macOS not yet verified**, needs the user's own Mac. See
+Full ctest suite clean on all three hosts (Linux 112/112, Windows 128/128,
+macOS 112/112, all 100%). macOS re-verified the same day from real macOS
+hardware -- `crtmedia_extractor_codec_test` doubling as a second real
+confirmation (alongside `crtmedia_demux_video_test`) that FFmpeg's own
+threaded H.264 decode works through this project's pthread PAL there. See
 `HISTORY.md`'s 2026-09-02 entry for the full trail.
 
 **Still open from this same step**: `crtmedia_demuxer_*` (`demux.h`) is

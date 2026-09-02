@@ -122,6 +122,23 @@ substantive update.
   `ctest` suite clean at 110/110 (up from 107, the three new tests
   newly discovered by that same rebuild's CMake reconfigure).
 
+- **macOS re-verified for `docs/libcrtmedia_api_policy.md`'s decided
+  core too** (`crtmedia_format`/`crtmedia_extractor`/`crtmedia_codec`,
+  landed later the same day than the two items just above, from the
+  same non-macOS session, with the same "macOS not verified" caveat --
+  see the entry above). Built and ran both new tests on macOS for the
+  first time: `crtmedia_format_test` (the key-value store, deterministic,
+  no FFmpeg/threading involved) and `crtmedia_extractor_codec_test` --
+  the latter a second real confirmation, alongside `crtmedia_demux_
+  video_test` above, that FFmpeg's own threaded H.264 decode
+  (`codec.c`'s own `thread_count = 2`) works through this project's
+  pthread PAL on macOS, this time through the new `crtmedia_extractor`+
+  `crtmedia_codec` code path rather than the older `crtmedia_demuxer_*`
+  convenience API -- same real MP4 fixture, same real result (25 video
+  frames, correct PTS ordering, correct audio sample range, a real
+  H.264 `csd-0` consumed). Both pass; full `ctest` suite clean at
+  112/112, matching Linux (112/112) and Windows (128/128) exactly.
+
 - **Root-caused and fixed the `crtgfx_window_smoke` WSL ctest failure for
   real -- a genuine `memfd_create()` bug this project's own history had
   repeatedly, incorrectly dismissed as an unfixable "no reachable Wayland
