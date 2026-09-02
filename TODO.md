@@ -75,11 +75,35 @@ fixtures, `crtmedia_demux_video_test`/`crtmedia_demux_mp3_test`/
 now explicitly requests `thread_count = 2`), PTS ordering, EOF drain/flush,
 and malformed-input handling (null args, a nonexistent path, non-media
 bytes, a truncated real fixture) -- all real, evidence-based checks, not
-link-only smoke. Full ctest suite clean on both hosts (Linux 109/110 --
-the one failure is the pre-existing, unrelated `crtgfx_window_smoke_runs`
-headless-display gap; Windows 126/126). **macOS not yet re-verified**,
-needs the user's own Mac, matching every prior FFmpeg-on-macOS pass. See
-`HISTORY.md`'s 2026-09-02 entry for the full trail.
+link-only smoke. Full ctest suite clean on both hosts, **including the
+long-standing `crtgfx_window_smoke` WSL failure, now genuinely fixed**
+(Linux 110/110, Windows 126/126, both 100%) -- see the entry directly
+below. **macOS not yet re-verified**, needs the user's own Mac, matching
+every prior FFmpeg-on-macOS pass. See `HISTORY.md`'s 2026-09-02 entry for
+the full trail.
+
+**The `crtgfx_window_smoke` WSL failure, repeatedly dismissed throughout
+this project's own history as "no reachable Wayland compositor," was
+actually a real, fixable `memfd_create()` bug -- root-caused via `strace`,
+not re-guessed, and fixed for real** (2026-09-02, found asking whether it
+was really worth living with). `libc/src/mman.c`'s own `memfd_create()`
+emulation (`open()` a real file, `unlink()` it immediately, keep using the
+now-nameless fd) created that file at a bare relative path in the
+caller's own current working directory -- on WSL, that CWD is very often
+`/mnt/c/...` (DrvFs, a 9p bridge to the real Windows NTFS volume), which
+does not preserve POSIX "delete-while-open" semantics the way a native
+filesystem does: `open()`/`unlink()` both succeeded, but the next
+`ftruncate()` on the resulting fd failed with `ENOENT`. A real Wayland/
+WSLg connection was present the entire time. Fixed with a new
+`memfd_tmpdir()` helper (`$TMPDIR`, then `$TEMP`/`$TMP`, then a `/tmp`
+fallback -- a real `getenv()`-based directory choice, not another
+CWD-relative guess) -- a first attempt hardcoded `/tmp` outright, which
+then broke `memfd_create_test` on Windows for real (`/tmp` does not exist
+there at all), caught by the same full-ctest-on-every-host discipline
+this project already applies everywhere else. `crtgfx_window_smoke`, the
+whole existing ctest suite, and `memfd_create_test` itself all verified
+passing on both Linux (WSL) and Windows after the real fix -- 100% on
+both hosts, no known ctest failures left on either.
 
 1. **Separate extractor and codec.** Implement `docs/libcrtmedia_api_policy.md`'s
    decided core: opaque `crtmedia_format`/`crtmedia_extractor`/`crtmedia_codec`

@@ -10,6 +10,78 @@ substantive update.
 
 ## 2026-09-02
 
+- **Root-caused and fixed the `crtgfx_window_smoke` WSL ctest failure for
+  real -- a genuine `memfd_create()` bug this project's own history had
+  repeatedly, incorrectly dismissed as an unfixable "no reachable Wayland
+  compositor" environment limitation.** Asked, after yet another ctest run
+  showed the same familiar single failure, whether it was actually worth
+  fixing rather than continuing to note-and-move-on; root-caused with
+  `strace` (installed by the user mid-investigation) instead of repeating
+  the earlier assumption.
+
+  **Real root cause**: `libc/src/mman.c`'s `memfd_create()` emulation
+  (this project's own libc has no real Linux `memfd_create` syscall
+  wrapper -- it fakes one, matching real `memfd_create()` semantics via
+  `open()` a real file with `O_CREAT | O_EXCL`, `unlink()` it immediately,
+  then keep using the now-nameless fd, relying on ordinary POSIX
+  "delete-while-open" behavior) created that file at a bare relative path
+  (`crt_memfd_XXXXXX.tmp`), resolved against whatever the *caller's own*
+  current working directory happened to be. `crtgfx_window_smoke` (and
+  every other Linux ctest target) runs with `WORKING_DIRECTORY
+  "${CMAKE_SOURCE_DIR}"` -- on this WSL setup, that is `/mnt/c/Users/Lee/
+  DevWorks/crt`, mounted via DrvFs (`mount` confirms `9p`, a protocol
+  bridge to the real Windows NTFS volume via `\\.\C:` -- not a native
+  Linux filesystem, unlike WSL's own `/` root, real `ext4`). DrvFs does
+  not correctly preserve "delete-while-open": `strace -f -e trace=memfd_
+  create,ftruncate,mmap,sendmsg,recvmsg` on a real, direct run showed the
+  full Wayland registry/seat/keyboard handshake succeeding cleanly (a real
+  WSLg compositor connection, exactly as this project's history already
+  established elsewhere) followed by `open()`+`unlink()` both succeeding
+  but the very next `ftruncate(fd, size)` failing with `ENOENT` -- DrvFs
+  orphans the underlying file once its last directory entry is removed,
+  instead of keeping it reachable through the still-open fd the way ext4/
+  APFS/HFS+ do. `crtgfx_host_window_present_software()` (`libcrtgfx/src/
+  arch/linux/window_wayland.c`) correctly treats that as a real error
+  (`CRTGFX_ERROR_HOST`), which is exactly what surfaced as `crtgfx_window_
+  smoke`'s own `end_frame (-3)` failure -- a real, live WSLg connection
+  was present this entire time; the actual break was `memfd_create()`'s
+  own filesystem assumption, not display connectivity, contradicting the
+  "no reachable compositor" explanation this project's own git history had
+  repeated across many prior entries (2026-08-24 through 2026-09-01) every
+  time this exact failure recurred.
+
+  **Fix**: relocate the temp file to a real, known-good, non-CWD-relative
+  directory instead of trusting the caller's own CWD. A new `memfd_tmpdir()`
+  helper checks `$TMPDIR` (the real POSIX convention, matching `stdio.c`'s
+  own `get_tmpdir()` used by `tmpnam()`/`tempnam()` -- not reused directly
+  since that one is `static` to its own file, but the same real
+  precedent), then `$TEMP`/`$TMP` (Windows' own real per-process
+  environment), then a final `/tmp` fallback. A first attempt hardcoded
+  `/tmp` outright (reasoning: a fixed, known-good location on every host
+  this project targets) -- confirmed for real this was a second, genuine
+  bug, not a shortcut: `/tmp` does not exist at all on this project's own
+  Windows host (`memfd_create_test.exe` failed with `ENOENT` for real),
+  caught only because this project's own "verify every host, not just the
+  one you're debugging on" discipline was applied here too, even though
+  nothing about the *original* bug was Windows-specific. Also added
+  process-id-based uniqueness (`crt_memfd_<pid>_<counter>.tmp`) to the
+  temp filename now that every caller on the whole system shares one
+  directory instead of whatever distinct CWD each process happened to
+  have before.
+
+  **Verified for real, both symptoms and the underlying mechanism, on
+  both hosts**: `crtgfx_window_smoke: ok` and `memfd_create_test: ok`
+  individually, and the full existing `ctest` suite -- Linux (WSL)
+  **110/110, 100%** (up from the long-standing 109/110/106/107/whichever
+  count this exact single failure had been the sole blemish on across
+  dozens of prior entries) and Windows **126/126, 100%**, both with zero
+  known failures. No regression found on either host. macOS not
+  re-verified (this bug's own trigger, `memfd_create()`'s Linux-only Wayland
+  consumer, does not exist on macOS at all -- `libcrtgfx/src/arch/macos/`
+  uses Cocoa's own real presentation path, never this function -- so this
+  fix has no macOS-side behavior to verify beyond the same build-level
+  compile check every shared `libc/src/*.c` file already gets there).
+
 - **`libcrtmedia`'s software-decode evidence completed on Linux and
   Windows** (`TODO.md`'s upper-runtime roadmap, former step 1). Real
   H.264+AAC MP4 and MP3 fixtures, generated with a real `ffmpeg` binary

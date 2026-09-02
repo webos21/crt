@@ -2,6 +2,8 @@
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -203,8 +205,39 @@ int posix_madvise(void* addr, size_t length, int advice) {
   return (int)result;
 }
 
+/* A real, known-writable directory for memfd_create()'s own temp-file
+ * trick below -- NOT a bare relative path in whatever the caller's own
+ * current working directory happens to be, and not a bare hardcoded
+ * "/tmp" either (a real regression found and fixed the same day this
+ * function's own directory choice was first changed away from CWD: bare
+ * "/tmp" does not exist on this project's own Windows host at all --
+ * confirmed directly via memfd_create_test.exe there, ENOENT). Checks
+ * $TMPDIR first (the real POSIX convention, matching get_tmpdir() in
+ * stdio.c's own tmpnam()/tempnam() -- not reused directly since it is
+ * static to that file, but the same real precedent), then $TEMP/$TMP
+ * (Windows' own real per-process environment, always set by a real
+ * Windows session), then a final "/tmp" fallback for a POSIX host with
+ * none of those set (matches this same function's own most recent, only
+ * previously-tested environment, WSL, which really does have a real
+ * native-filesystem "/tmp"). */
+static const char* memfd_tmpdir(void) {
+  const char* dir = getenv("TMPDIR");
+  if (dir != 0 && dir[0] != '\0') {
+    return dir;
+  }
+  dir = getenv("TEMP");
+  if (dir != 0 && dir[0] != '\0') {
+    return dir;
+  }
+  dir = getenv("TMP");
+  if (dir != 0 && dir[0] != '\0') {
+    return dir;
+  }
+  return "/tmp";
+}
+
 int memfd_create(const char* name, unsigned int flags) {
-  char path[32] = "crt_memfd_XXXXXX.tmp";
+  char path[4096];
   static unsigned long counter;
   unsigned long attempt;
 
@@ -222,12 +255,35 @@ int memfd_create(const char* name, unsigned int flags) {
     unsigned long value = counter++;
     int fd;
 
-    path[11] = (char)('0' + (value / 100000UL) % 10UL);
-    path[12] = (char)('0' + (value / 10000UL) % 10UL);
-    path[13] = (char)('0' + (value / 1000UL) % 10UL);
-    path[14] = (char)('0' + (value / 100UL) % 10UL);
-    path[15] = (char)('0' + (value / 10UL) % 10UL);
-    path[16] = (char)('0' + value % 10UL);
+    /* A real, confirmed-live bug (2026-09-02, root-caused via strace, not
+     * guessed): this project's own libcrtgfx Linux Wayland backend calls
+     * memfd_create() from crtgfx_host_window_present_software() with the
+     * caller's CWD often sitting on whatever filesystem the whole build/
+     * test tree happens to be on -- on WSL specifically, that is very
+     * often `/mnt/c/...` (DrvFs, a 9p-protocol bridge to the real Windows
+     * NTFS volume, confirmed via `mount`), which does NOT correctly
+     * preserve this function's own core trick (open() a real file,
+     * unlink() it immediately, keep using the now-nameless fd -- ordinary
+     * "delete-while-open" semantics every real Unix-native filesystem,
+     * ext4 included, honors correctly). Confirmed directly via strace:
+     * open()+unlink() both succeeded, but the very next ftruncate() on
+     * the resulting fd failed with ENOENT -- DrvFs orphans the underlying
+     * file once its last directory entry is removed instead of keeping
+     * it reachable through the still-open fd the way a native filesystem
+     * does. This surfaced as `crtgfx_window_smoke`'s own real end_frame()
+     * failure (CRTGFX_ERROR_HOST) on every WSL run, previously
+     * mis-attributed (see this project's own git history) to "no
+     * reachable Wayland compositor" -- a real WSLg connection was present
+     * the whole time; the actual break was this function's own filesystem
+     * assumption, not display connectivity. memfd_tmpdir() (above) fixes
+     * this by using a real, known-good, non-CWD-relative directory
+     * instead. */
+    int written = snprintf(path, sizeof(path), "%s/crt_memfd_%d_%06lu.tmp", memfd_tmpdir(), (int)getpid(),
+                            value % 1000000UL);
+    if (written < 0 || (size_t)written >= sizeof(path)) {
+      errno = ENAMETOOLONG;
+      return -1;
+    }
 
     fd = open(path, O_CREAT | O_EXCL | O_RDWR, 0600);
     if (fd < 0) {
