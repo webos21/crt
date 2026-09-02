@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/eventfd.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
@@ -13,6 +14,7 @@
 #include <sys/vfs.h>
 #include <unistd.h>
 
+#include <private/crt_atomic.h>
 #include <private/crt_fd_table.h>
 
 #ifndef TMP_MAX
@@ -1345,11 +1347,307 @@ restart:
 }
 #endif
 
+#if defined(CRT_TARGET_OS_MACOS)
+/* Real eventfd() emulation for macOS (added 2026-09-02): macOS has no
+ * eventfd(2) syscall, and until now libc/src/eventfd.c's own eventfd()
+ * always returned ENOSYS here for this host -- a real, unimplemented gap,
+ * not just an unconfirmed one (see include/sys/eventfd.h's own history).
+ * curl's own configure-time feature probe treats a merely-*declared*
+ * eventfd() as proof of a real, usable implementation (the exact same
+ * class of misdetection already found and fixed for the pre-emulation
+ * Windows stub, HISTORY.md's 2026-09-01 entry) -- with the ENOSYS stub
+ * still in place here, --disable-threaded-resolver was the only way to
+ * keep curl's own resolver-thread wakeup path from silently depending on
+ * a syscall that always fails.
+ *
+ * Design: a real pipe(2) pair is the actual kernel object backing each
+ * eventfd -- unlike Windows (no POSIX fd/poll-compatible kernel object to
+ * repurpose at all, hence that port's own from-scratch Win32 Event
+ * HANDLE + software wait/wake machinery, libc/src/arch/windows/common/
+ * syscall.c's own CRT_FD_KIND_EVENTFD), macOS already has a real,
+ * poll()/select()/kqueue-compatible, cross-thread-signalable kernel
+ * primitive sitting right there. The pipe's read end is the fd handed
+ * back to the caller; its write end is kept purely internal (never
+ * exposed), used only as a level-triggered "readable" signal: exactly
+ * one byte sits in the pipe whenever this eventfd's own software counter
+ * (below) is nonzero, and the pipe is drained back to empty the moment
+ * the counter returns to zero -- maintained as an invariant by every one
+ * of read/write below, including the "counter still nonzero but we just
+ * physically consumed the one real byte via a blocking wait" case (the
+ * `have_poke_byte` re-poke below), which a naive single-byte-per-write
+ * model would otherwise desync from the real counter value in
+ * EFD_SEMAPHORE mode. This gives real, correct poll()/select()/kqueue
+ * readability and real blocking-read wakeup for free, from the real
+ * kernel, without reimplementing that part at all -- only the counter/
+ * semaphore-mode bookkeeping on top is this project's own, matching real
+ * eventfd(2) read()/write() semantics (see the Windows CRT_FD_KIND_
+ * EVENTFD comment just referenced for the full semantics being matched;
+ * not repeated a second time here).
+ *
+ * Known, accepted gap: unlike a real Linux eventfd (one shared open file
+ * description, correctly followed across dup()/dup2()/fork()), this
+ * table is keyed by the exact fd number eventfd() itself returned -- a
+ * dup()'d copy would read/write the real pipe bytes directly, with none
+ * of this file's own counter/semaphore logic applied. No known consumer
+ * of this project's eventfd() (curl's resolver-thread wakeup pipe chief
+ * among them) ever dup()s it; revisit if one ever does. */
+#define CRT_MACOS_EVENTFD_MAX 32
+
+struct macos_eventfd_entry {
+  int read_fd;
+  int write_fd;
+  unsigned long long counter;
+  unsigned char semaphore;
+  unsigned char in_use;
+};
+
+static struct macos_eventfd_entry macos_eventfd_table[CRT_MACOS_EVENTFD_MAX];
+static crt_spinlock macos_eventfd_lock = CRT_SPINLOCK_INIT;
+
+/* Caller must hold macos_eventfd_lock. */
+static struct macos_eventfd_entry* macos_eventfd_find_locked(int fd) {
+  int i;
+  for (i = 0; i < CRT_MACOS_EVENTFD_MAX; ++i) {
+    if (macos_eventfd_table[i].in_use && macos_eventfd_table[i].read_fd == fd) {
+      return &macos_eventfd_table[i];
+    }
+  }
+  return 0;
+}
+
+static int macos_is_eventfd(int fd) {
+  int found;
+  crt_spin_lock(&macos_eventfd_lock);
+  found = macos_eventfd_find_locked(fd) != 0;
+  crt_spin_unlock(&macos_eventfd_lock);
+  return found;
+}
+
+long __crt_sys_eventfd2(unsigned int initval, int flags) {
+  int pipefd[2];
+  int i;
+  struct macos_eventfd_entry* entry;
+
+  /* Raw-negative-errno return convention throughout this function
+   * (matching Linux's own real eventfd2(2) syscall and Windows's own
+   * __crt_sys_eventfd2() -- see that function's own comment), NOT the
+   * "-1 and set errno" convention macos_eventfd_read()/_write()/_close()
+   * below use: libc/src/eventfd.c's own eventfd() wrapper runs this
+   * function's result through the same normalize_syscall_result() it
+   * already uses for Linux/Windows, which expects exactly this shape. */
+  if ((flags & ~(EFD_CLOEXEC | EFD_NONBLOCK | EFD_SEMAPHORE)) != 0) {
+    return -EINVAL;
+  }
+  if (pipe(pipefd) != 0) {
+    return -errno;
+  }
+  /* The write end is a pure implementation detail -- never handed to the
+   * caller -- so it must never leak across exec() regardless of the
+   * caller's own EFD_CLOEXEC choice for the read end (applied normally,
+   * below). */
+  if (__crt_fd_set_cloexec(pipefd[1], 1) != 0 ||
+      ((flags & EFD_CLOEXEC) != 0 && __crt_fd_set_cloexec(pipefd[0], 1) != 0) ||
+      ((flags & EFD_NONBLOCK) != 0 && __crt_fd_set_status_flags(pipefd[0], O_NONBLOCK) != 0)) {
+    int saved_errno = errno;
+    __crt_sys_close(pipefd[0]);
+    __crt_sys_close(pipefd[1]);
+    return -saved_errno;
+  }
+
+  crt_spin_lock(&macos_eventfd_lock);
+  entry = 0;
+  for (i = 0; i < CRT_MACOS_EVENTFD_MAX; ++i) {
+    if (!macos_eventfd_table[i].in_use) {
+      entry = &macos_eventfd_table[i];
+      break;
+    }
+  }
+  if (entry == 0) {
+    crt_spin_unlock(&macos_eventfd_lock);
+    __crt_sys_close(pipefd[0]);
+    __crt_sys_close(pipefd[1]);
+    return -EMFILE;
+  }
+  entry->read_fd = pipefd[0];
+  entry->write_fd = pipefd[1];
+  entry->counter = (unsigned long long)initval;
+  entry->semaphore = (unsigned char)((flags & EFD_SEMAPHORE) != 0);
+  entry->in_use = 1;
+  crt_spin_unlock(&macos_eventfd_lock);
+
+  if (initval != 0) {
+    /* Real Darwin write(2) (this file's own __crt_sys_write, not the
+     * public write() below): looping back into this exact table entry's
+     * own dispatch would be correct in spirit but pointless indirection
+     * for a single internal poke byte. */
+    unsigned char poke = 1;
+    __crt_sys_write(pipefd[1], &poke, 1);
+  }
+  return pipefd[0];
+}
+
+static long macos_eventfd_read(int fd, void* buf, unsigned long count) {
+  struct macos_eventfd_entry* entry;
+  unsigned long long value;
+  int nonblock;
+  int have_poke_byte = 0; /* set once a blocking wait below has already
+                            * physically consumed the pipe's one real
+                            * byte itself, so the "drain"/"restore" steps
+                            * once a value is found know not to double-
+                            * count it. */
+
+  if (count < sizeof(eventfd_t)) {
+    return __set_errno(EINVAL);
+  }
+  nonblock = (__crt_fd_get_status_flags(fd) & O_NONBLOCK) != 0;
+
+  for (;;) {
+    crt_spin_lock(&macos_eventfd_lock);
+    entry = macos_eventfd_find_locked(fd);
+    if (entry == 0) {
+      /* Closed out from under us by another thread mid-wait -- real
+       * Linux eventfd has no equivalent race (a real open file
+       * description keeps the counter alive until every fd referencing
+       * it is closed), but this is at least a safe, honest EBADF rather
+       * than touching freed state. */
+      crt_spin_unlock(&macos_eventfd_lock);
+      return __set_errno(EBADF);
+    }
+    if (entry->counter != 0) {
+      if (entry->semaphore) {
+        value = 1;
+        entry->counter -= 1;
+      } else {
+        value = entry->counter;
+        entry->counter = 0;
+      }
+      if (entry->counter == 0) {
+        if (!have_poke_byte) {
+          /* Fast path (no blocking wait happened): the pipe's own real
+           * byte has been sitting there untouched since whichever write()
+           * first set the counter nonzero -- drain it now so the pipe's
+           * real readiness matches "counter is 0" again. Non-blocking
+           * regardless of this fd's own O_NONBLOCK: the byte is known to
+           * be there (we just made the counter 0 ourselves, under this
+           * same lock), so this can never actually block. */
+          unsigned char discard;
+          __crt_sys_read(entry->read_fd, &discard, 1);
+        }
+      } else if (have_poke_byte) {
+        /* EFD_SEMAPHORE, counter > 1: our own blocking wait below already
+         * physically consumed the pipe's one real byte, but the counter
+         * is still nonzero (more semaphore "posts" remain) -- restore the
+         * pipe's own readiness signal so another waiter's poll()/blocking
+         * read() still sees this eventfd as readable. Also naturally
+         * wakes exactly one other thread already blocked in the wait
+         * below, if any -- the correct cascading behavior for multiple
+         * concurrent semaphore-mode waiters. */
+        unsigned char poke = 1;
+        __crt_sys_write(entry->write_fd, &poke, 1);
+      }
+      crt_spin_unlock(&macos_eventfd_lock);
+      memcpy(buf, &value, sizeof(value));
+      return (long)sizeof(value);
+    }
+    crt_spin_unlock(&macos_eventfd_lock);
+    if (nonblock) {
+      return __set_errno(EAGAIN);
+    }
+    /* Real blocking wait: pause on the real pipe fd until a writer's own
+     * poke byte arrives, then loop back and re-check the counter under
+     * the lock (another reader may have won the race for it in the
+     * meantime -- looping, not assuming, is what keeps this correct
+     * under concurrent readers). */
+    {
+      unsigned char poke;
+      long n = __crt_sys_read(fd, &poke, 1);
+      if (n < 0 && n != -EINTR) {
+        return __set_errno((int)-n);
+      }
+      if (n == 1) {
+        have_poke_byte = 1;
+      }
+    }
+  }
+}
+
+static long macos_eventfd_write(int fd, const void* buf, unsigned long count) {
+  struct macos_eventfd_entry* entry;
+  unsigned long long value;
+  unsigned char was_zero;
+
+  if (count < sizeof(eventfd_t)) {
+    return __set_errno(EINVAL);
+  }
+  memcpy(&value, buf, sizeof(value));
+  if (value == (unsigned long long)-1) {
+    return __set_errno(EINVAL);
+  }
+
+  crt_spin_lock(&macos_eventfd_lock);
+  entry = macos_eventfd_find_locked(fd);
+  if (entry == 0) {
+    crt_spin_unlock(&macos_eventfd_lock);
+    return __set_errno(EBADF);
+  }
+  /* Real eventfd(2) semantics: a write that would take the counter past
+   * UINT64_MAX-1 blocks (or EAGAINs, non-blocking) until enough reads
+   * make room. No consumer of this project's eventfd() ever writes more
+   * than a handful of times between reads (a resolver-thread wakeup
+   * pipe has at most one pending "wake up" outstanding at a time), so
+   * genuinely blocking a writer here -- which would need its own,
+   * separate wait/wake path on top of everything above, for a case real
+   * usage never reaches -- is accepted as a documented, narrow gap: this
+   * returns EAGAIN unconditionally on overflow instead, even for a
+   * blocking fd. */
+  if (entry->counter > (unsigned long long)-2 - value) {
+    crt_spin_unlock(&macos_eventfd_lock);
+    return __set_errno(EAGAIN);
+  }
+  was_zero = (unsigned char)(entry->counter == 0);
+  entry->counter += value;
+  if (was_zero && value != 0) {
+    unsigned char poke = 1;
+    __crt_sys_write(entry->write_fd, &poke, 1);
+  }
+  crt_spin_unlock(&macos_eventfd_lock);
+  return (long)sizeof(value);
+}
+
+/* No-op if fd was never a tracked eventfd's read end -- close() below
+ * still closes fd itself either way. */
+static void macos_eventfd_close(int fd) {
+  struct macos_eventfd_entry* entry;
+  int write_fd;
+
+  crt_spin_lock(&macos_eventfd_lock);
+  entry = macos_eventfd_find_locked(fd);
+  if (entry == 0) {
+    crt_spin_unlock(&macos_eventfd_lock);
+    return;
+  }
+  write_fd = entry->write_fd;
+  entry->in_use = 0;
+  crt_spin_unlock(&macos_eventfd_lock);
+  __crt_sys_close(write_fd);
+}
+#endif /* CRT_TARGET_OS_MACOS */
+
 ssize_t read(int fd, void* buf, size_t count) {
+#if defined(CRT_TARGET_OS_MACOS)
+  if (macos_is_eventfd(fd)) {
+    return (ssize_t)macos_eventfd_read(fd, buf, (unsigned long)count);
+  }
+#endif
   return (ssize_t)normalize_syscall_result(__crt_sys_read(fd, buf, (unsigned long)count));
 }
 
 ssize_t write(int fd, const void* buf, size_t count) {
+#if defined(CRT_TARGET_OS_MACOS)
+  if (macos_is_eventfd(fd)) {
+    return (ssize_t)macos_eventfd_write(fd, buf, (unsigned long)count);
+  }
+#endif
   return (ssize_t)normalize_syscall_result(__crt_sys_write(fd, buf, (unsigned long)count));
 }
 
@@ -1694,6 +1992,9 @@ int close(int fd) {
   if (fd < 0) {
     return (int)__set_errno(EBADF);
   }
+#if defined(CRT_TARGET_OS_MACOS)
+  macos_eventfd_close(fd);
+#endif
   return (int)normalize_syscall_result(__crt_sys_close(fd));
 }
 

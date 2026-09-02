@@ -10,6 +10,9 @@
 #include <private/crt_atomic.h>
 #include <private/crt_tls.h>
 #include <private/crt_wait.h>
+#if defined(CRT_TARGET_OS_MACOS)
+#include <private/crt_macho_symbol.h>
+#endif
 
 long __crt_sys_thread_id(void);
 void __crt_sys_thread_exit(int status) __attribute__((noreturn));
@@ -126,6 +129,36 @@ typedef void (*crt_macos_pthread_exit_fn)(void*) __attribute__((noreturn));
 #define CRT_RTLD_NEXT ((void*)-1)
 
 void* dlsym(void* handle, const char* symbol);
+
+/* Every real pthread_* entry point this file calls through to (thread
+ * creation itself has no raw Darwin syscall this project can drive
+ * directly the way Linux's clone(2)-based path above does, so macOS
+ * threads are real Apple pthreads underneath, created via Apple's own
+ * libsystem_pthread.dylib) -- looked up by exact dylib path with
+ * __crt_macho_find_symbol_in_loaded_image(), the same real-Darwin-
+ * symbol pattern already used for getaddrinfo()/getifaddrs() (see
+ * socket.c's macos_host_resolve_hostname(), ifaddrs.c), NOT
+ * dlsym(RTLD_NEXT, ...): this project's own RTLD_NEXT is explicitly
+ * unimplemented (libdl/src/arch/macos/dl_macos.c's
+ * crt_dl_backend_sym()) and libdl.a's own dlsym() -- not Apple's --
+ * is what every crt-cc-linked binary actually gets (tools/crt-cc
+ * force-links libdl.a ahead of -lSystem for every macOS target), so
+ * dlsym(CRT_RTLD_NEXT, "pthread_create") always failed and every
+ * pthread_create() on macOS always returned ENOSYS. Found while
+ * chasing curl's own threaded-resolver hang: its DNS worker thread
+ * never spawned at all, and Curl_thrdq_send() discards
+ * Curl_thrdpool_signal()'s error, so the query just sat on the queue
+ * forever and curl_multi_wakeup() never fired -- see HISTORY.md's
+ * dated entry. The dlsym(RTLD_NEXT, ...) call stays as a second
+ * attempt only for a build where the exact dylib path ever moves. */
+static void* crt_macos_pthread_symbol(const char* name) {
+  void* sym = __crt_macho_find_symbol_in_loaded_image(
+      "/usr/lib/system/libsystem_pthread.dylib", name);
+  if (sym == 0) {
+    sym = dlsym(CRT_RTLD_NEXT, name);
+  }
+  return sym;
+}
 #endif
 
 typedef struct crt_pthread_control {
@@ -1667,17 +1700,17 @@ int pthread_create(
 #elif defined(CRT_TARGET_OS_MACOS)
   {
     crt_macos_pthread_create_fn create_fn =
-        (crt_macos_pthread_create_fn)dlsym(CRT_RTLD_NEXT, "pthread_create");
+        (crt_macos_pthread_create_fn)crt_macos_pthread_symbol("pthread_create");
     crt_macos_pthread_attr_init_fn attr_init_fn =
-        (crt_macos_pthread_attr_init_fn)dlsym(CRT_RTLD_NEXT, "pthread_attr_init");
+        (crt_macos_pthread_attr_init_fn)crt_macos_pthread_symbol("pthread_attr_init");
     crt_macos_pthread_attr_destroy_fn attr_destroy_fn =
-        (crt_macos_pthread_attr_destroy_fn)dlsym(CRT_RTLD_NEXT, "pthread_attr_destroy");
+        (crt_macos_pthread_attr_destroy_fn)crt_macos_pthread_symbol("pthread_attr_destroy");
     crt_macos_pthread_attr_setstack_fn attr_setstack_fn =
-        (crt_macos_pthread_attr_setstack_fn)dlsym(CRT_RTLD_NEXT, "pthread_attr_setstack");
+        (crt_macos_pthread_attr_setstack_fn)crt_macos_pthread_symbol("pthread_attr_setstack");
     crt_macos_pthread_attr_setstacksize_fn attr_setstacksize_fn =
-        (crt_macos_pthread_attr_setstacksize_fn)dlsym(CRT_RTLD_NEXT, "pthread_attr_setstacksize");
+        (crt_macos_pthread_attr_setstacksize_fn)crt_macos_pthread_symbol("pthread_attr_setstacksize");
     crt_macos_pthread_attr_setguardsize_fn attr_setguardsize_fn =
-        (crt_macos_pthread_attr_setguardsize_fn)dlsym(CRT_RTLD_NEXT, "pthread_attr_setguardsize");
+        (crt_macos_pthread_attr_setguardsize_fn)crt_macos_pthread_symbol("pthread_attr_setguardsize");
     union {
       void* align_ptr;
       long long align_ll;
@@ -1737,7 +1770,7 @@ int pthread_create(
     }
     if (control->detached) {
       crt_macos_pthread_detach_fn detach_fn =
-          (crt_macos_pthread_detach_fn)dlsym(CRT_RTLD_NEXT, "pthread_detach");
+          (crt_macos_pthread_detach_fn)crt_macos_pthread_symbol("pthread_detach");
       if (detach_fn == 0) {
         return ENOSYS;
       }
@@ -1784,7 +1817,7 @@ int pthread_detach(pthread_t thread) {
 #elif defined(CRT_TARGET_OS_MACOS)
   {
     crt_macos_pthread_detach_fn detach_fn =
-        (crt_macos_pthread_detach_fn)dlsym(CRT_RTLD_NEXT, "pthread_detach");
+        (crt_macos_pthread_detach_fn)crt_macos_pthread_symbol("pthread_detach");
     if (detach_fn == 0) {
       return ENOSYS;
     }
@@ -1847,7 +1880,7 @@ int pthread_join(pthread_t thread, void** retval) {
 #elif defined(CRT_TARGET_OS_MACOS)
   {
     crt_macos_pthread_join_fn join_fn =
-        (crt_macos_pthread_join_fn)dlsym(CRT_RTLD_NEXT, "pthread_join");
+        (crt_macos_pthread_join_fn)crt_macos_pthread_symbol("pthread_join");
     void* native_result = 0;
     int result;
 
@@ -2027,7 +2060,7 @@ void pthread_exit(void* retval) {
 #elif defined(CRT_TARGET_OS_MACOS)
   {
     crt_macos_pthread_exit_fn exit_fn =
-        (crt_macos_pthread_exit_fn)dlsym(CRT_RTLD_NEXT, "pthread_exit");
+        (crt_macos_pthread_exit_fn)crt_macos_pthread_symbol("pthread_exit");
     if (exit_fn != 0) {
       exit_fn(retval);
     }

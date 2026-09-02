@@ -148,6 +148,30 @@ All four items originally listed here are now **done** -- see `HISTORY.md`'s
   just the `ENOSYS` check) on Windows too, extended with `EFD_SEMAPHORE`
   and a genuine cross-thread blocking-read/wake coverage case.
 
+  **Update 2026-09-02: `eventfd()` gained a real (not stubbed)
+  macOS implementation too**, for the same reason as Windows's above --
+  investigated on real macOS hardware while getting curl's own
+  `--disable-threaded-resolver` configure workaround off macOS (see
+  `HISTORY.md`'s dated entry and `porting/recipes/curl.json`'s own
+  notes). Unlike Windows (no POSIX fd/poll-compatible kernel object to
+  repurpose, hence the from-scratch Win32 Event `HANDLE` design above),
+  macOS already has one: a real `pipe(2)` pair, which is natively
+  `poll()`/`select()`/`kqueue`-compatible and cross-thread-signalable on
+  its own. The emulation is a software counter/semaphore layer on top
+  of that pipe, with one invariant driving it -- exactly one byte sits
+  in the pipe whenever the counter is nonzero, drained the moment it
+  returns to zero -- so real readiness/blocking-wait never needs
+  reimplementing (`libc/src/fd.c`'s own "Real eventfd() emulation for
+  macOS" comment has the full design, including the double-consumption
+  hazard a blocking reader and the "drain to zero" path both racing for
+  the same physical byte, and how re-poking the pipe after a
+  `EFD_SEMAPHORE` blocking read restores the invariant for other
+  waiters). `epoll`/`timerfd` remain `ENOSYS`-stubbed on macOS for now,
+  same future-work shape as before. `tests/eventfd_test.c` runs its
+  real-behavior branch on macOS too now, run 20 times back-to-back
+  specifically checking the cross-thread blocking-wakeup case for
+  flakiness (none found).
+
   Linux gets real raw syscall trampolines (`libc/src/arch/linux/
   {x86_64,aarch64}/syscall.S`: `eventfd2`, `epoll_create1`/`epoll_ctl`/
   `epoll_pwait` -- `epoll_wait()` is implemented over `epoll_pwait` with a

@@ -8,6 +8,133 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-02
+
+- **Real macOS `eventfd()` implemented, `curl.json`'s macOS
+  `--disable-threaded-resolver` removed, and the actual bug it had
+  been covering for -- curl's real threaded-resolver hang -- was
+  root-caused and fixed for real.** Asked to check whether macOS
+  eventfd had ever actually been verified (it hadn't: `libc/src/
+  eventfd.c` was still a permanent `ENOSYS` stub there, see `docs/
+  bionic_libc_gaps.md`'s own gap entry), implement it, wire it into
+  the curl port, and remove the workaround flag all the way through to
+  a passing test -- not just remove the flag and hope.
+
+  **(1) Real macOS `eventfd()`**, mirroring Windows's own real
+  implementation (2026-09-01) but with a different underlying
+  primitive: a `pipe(2)` pair (already `poll()`/`select()`/`kqueue`-
+  compatible and cross-thread-signalable for free on this OS, unlike
+  Windows) plus a software counter/semaphore layer on top, one
+  invariant driving the whole thing -- exactly one byte sits in the
+  pipe iff the counter is nonzero. See `libc/src/fd.c`'s own "Real
+  eventfd() emulation for macOS" comment and `docs/
+  bionic_libc_gaps.md`'s dated update for the full design (including
+  the double-consumption hazard between a blocking reader and the
+  drain-to-zero path racing for the same physical byte). Verified with
+  `tests/eventfd_test.c`'s real-behavior branch (accumulate/drain,
+  `poll()` readiness, `EAGAIN`-on-empty, `EFD_SEMAPHORE`, genuine
+  cross-thread blocking wakeup), run 20 times back-to-back with zero
+  flakiness in the wakeup case; full `ctest` stayed clean at 107/107.
+
+  **(2) A genuine, previously-undiscovered, three-week-silent macOS
+  regression in mbedtls surfaced purely as a side effect of trying to
+  rebuild curl for this work**, and had to be fixed before curl could
+  even be rebuilt: `tools/crt-cc` unconditionally strips `__APPLE__`
+  on every macOS compile (`a4c48b6`, 2026-08-18, to keep this
+  project's own sysroot "Bionic-shaped, not Darwin-shaped"), but
+  mbedtls's own `entropy_poll.c` hard-`#error`s unless `__APPLE__` (or
+  `unix`/`__unix__`/`__unix`) is defined -- mbedtls had last been
+  verified working on macOS `dba680e` (2026-08-14), *before*
+  `-U__APPLE__` even existed, and its install stamp was never
+  invalidated/rebuilt again on macOS until this session forced one.
+  Fixed with `target_overrides.macos.env.CFLAGS = "-O2 -D__unix__"` in
+  `porting/recipes/mbedtls.json` -- the exact same technique already
+  proven in that same recipe's pre-existing Windows override, and
+  confirmed equivalent by reading `entropy_poll.c` itself: both
+  `__APPLE__` and `__unix__` route to the identical generic
+  `fopen("/dev/urandom", "rb")` fallback. `port-rebuild-mbedtls` and
+  `port-test-mbedtls` (`crypto-static`/`crypto-shared`) both verified
+  clean afterward.
+
+  **(3) The real bug `--disable-threaded-resolver` had been covering
+  for, finally root-caused: `pthread_create()` on macOS always
+  returned `ENOSYS`, silently, for any binary linked the normal way
+  through `tools/crt-cc`.** macOS threads have no raw Darwin syscall
+  this project drives directly (unlike Linux's `clone(2)`-based path),
+  so `pthread_create()` there calls through to the real Apple
+  `libsystem_pthread.dylib` entry points -- but it looked those up with
+  `dlsym(RTLD_NEXT, "pthread_create")`, and this project's own
+  `RTLD_NEXT` is explicitly unimplemented (`libdl/src/arch/macos/
+  dl_macos.c`'s `crt_dl_backend_sym()` sets an error and returns null
+  for it outright). `tools/crt-cc` force-links `libdl.a` ahead of
+  `-lSystem` for every macOS target, so it's this project's *own*
+  broken `dlsym()` that every `crt-cc`-linked binary gets, not Apple's
+  real one -- meaning `pthread_create()` failed every time, for every
+  port, the whole time. This had gone completely unnoticed because
+  every first-party `ctest` binary happened to escape it by accident:
+  none of them reference `dlsym` directly, so the linker never pulls
+  `libdl.a`'s definition in for them at all, and they get Apple's real
+  (RTLD_NEXT-correct) `dlsym` from the already-required `-lSystem`
+  dependency instead -- a link-order coincidence, not a design that
+  was ever supposed to matter. curl's own DNS-resolver thread pool
+  does reference `dlsym` (transitively, through this exact
+  `pthread_create()` path), so it got this project's broken one and
+  silently never spawned its worker thread at all; `Curl_thrdq_send()`
+  discards `Curl_thrdpool_signal()`'s error (`(void)
+  Curl_thrdpool_signal(...)`), so the DNS query just sat on the queue
+  forever with nothing to service it, `curl_multi_wakeup()` never
+  fired, and `curl_multi_wait()`'s `poll()` loop just kept timing out
+  until curl's own resolve/operation timeout gave up -- exactly the
+  "Resolving timed out"/"Timeout was reached" symptom this recipe's
+  own notes had long attributed to "curl's own worker-pool completion
+  path," never previously traced further. Confirmed with a minimal,
+  cleanly-statically-linked reproduction outside curl entirely: a
+  thread spawned via this project's own `pthread_create()` calling
+  `getaddrinfo()` never even entered its thread body, and
+  `pthread_create()` itself returned `38` (this project's own `ENOSYS`
+  value) -- fixed, it returned `0` and the thread ran and resolved DNS
+  correctly. Fixed by giving macOS `pthread_create()` (and every other
+  macOS pthread entry point sharing this same lookup: `pthread_attr_
+  init`/`_destroy`/`_setstack`/`_setstacksize`/`_setguardsize`,
+  `pthread_detach`, `pthread_join`, `pthread_exit`) the same
+  exact-dylib-path lookup pattern this project already uses
+  successfully elsewhere for calling through to real Darwin
+  implementations (`socket.c`'s `macos_host_resolve_hostname()` for
+  `getaddrinfo`/`freeaddrinfo`, `ifaddrs.c` for `getifaddrs`/
+  `freeifaddrs`): `__crt_macho_find_symbol_in_loaded_image(
+  "/usr/lib/system/libsystem_pthread.dylib", ...)` first, falling
+  back to the (still-broken, but harmless to keep trying) `dlsym(
+  RTLD_NEXT, ...)` only if that ever fails. See `libc/src/pthread.c`'s
+  new `crt_macos_pthread_symbol()` helper and its doc comment.
+
+  **(4) A second, independent, real gap found and fixed along the
+  way while chasing this: macOS `socket()` did not handle
+  `SOCK_CLOEXEC`.** This project's own `<sys/socket.h>` defines
+  `SOCK_CLOEXEC` (as `O_CLOEXEC`) so Linux-style portable code compiles
+  everywhere, including curl's `cf-socket.c` (`socktype |=
+  SOCK_CLOEXEC` whenever its own configure probe finds the macro
+  defined) -- but real Darwin `socket(2)` has no such bit in `type` at
+  all, so passing it straight through corrupted `type` into a value
+  Darwin's kernel does not recognize (observed: `EPROTONOSUPPORT`).
+  Fixed the same way this OS already handles its other missing atomic-
+  flag syscalls (`pipe()`'s missing `pipe2()`, `eventfd()`'s own
+  `EFD_CLOEXEC` above): strip the bit before the raw syscall, apply it
+  afterward with a real `fcntl(F_SETFD, FD_CLOEXEC)`. This was not
+  actually on the path of the resolver hang (that failed well before
+  any socket was ever opened) but is a real, independent correctness
+  fix now verified in place.
+
+  With (1)-(4) all fixed, `porting/recipes/curl.json`'s macOS
+  `--disable-threaded-resolver` was removed from `configure_args` (the
+  user's explicit ask) and `port-test-curl` rerun for real: both
+  `http-roundtrip-static` and `http-roundtrip-shared` now pass `ok
+  http=200 https=200` against `example.com` over curl's genuine
+  pthread-based threaded resolver, matching the bar Linux/Windows
+  already meet in this same recipe. Full `ctest` stayed clean at
+  107/107 throughout. See `porting/recipes/curl.json`'s and
+  `porting/recipes/mbedtls.json`'s own notes for the port-recipe-level
+  writeups.
+
 ## 2026-09-01
 
 - **`eventfd2`'s Linux raw syscall trampoline (`libc/src/arch/linux/

@@ -11,6 +11,7 @@
 #include <sys/utsname.h>
 #include <unistd.h>
 
+#include <private/crt_fd_table.h>
 #include <private/crt_tls.h>
 
 #if defined(CRT_TARGET_OS_MACOS)
@@ -80,6 +81,9 @@ void* dlsym(void* handle, const char* symbol);
 #endif
 
 long __crt_sys_socket(int domain, int type, int protocol);
+#if defined(CRT_TARGET_OS_MACOS)
+long __crt_sys_close(int fd);
+#endif
 long __crt_sys_bind(int sockfd, const void* addr, unsigned int addrlen);
 long __crt_sys_listen(int sockfd, int backlog);
 long __crt_sys_accept(int sockfd, void* addr, unsigned int* addrlen);
@@ -467,7 +471,34 @@ static void from_darwin_sockaddr(
 #endif
 
 int socket(int domain, int type, int protocol) {
+#if defined(CRT_TARGET_OS_MACOS)
+  /* Darwin's real socket(2) has no SOCK_CLOEXEC/SOCK_NONBLOCK bits in
+   * `type` at all (that is a Linux/Bionic-only extension this project's
+   * own <sys/socket.h> still defines, as SOCK_CLOEXEC == O_CLOEXEC, so
+   * portable Linux-style callers -- e.g. curl's cf-socket.c doing
+   * `socktype |= SOCK_CLOEXEC` whenever its own configure probe finds
+   * the macro defined -- compile and link on macOS too). Passing that
+   * bit straight through to the raw Darwin syscall corrupts `type` into
+   * a value Darwin's kernel does not recognize at all, so the syscall
+   * itself fails (observed: EPROTONOSUPPORT, sometimes surfacing as
+   * other errno values depending on which unrecognized bits happen to
+   * be set) -- it is never silently ignored. So: strip the bit before
+   * the syscall and apply the same effect afterward via a real
+   * fcntl(F_SETFD, FD_CLOEXEC), the same emulate-after-the-fact pattern
+   * already used for pipe()'s own missing pipe2() on this OS (see
+   * __crt_sys_eventfd2() above, and pipe() below). */
+  int cloexec = (type & SOCK_CLOEXEC) != 0;
+  long result = __crt_sys_socket(domain, type & ~SOCK_CLOEXEC, protocol);
+  int fd = (int)normalize_socket_result(result);
+  if (fd >= 0 && cloexec && __crt_fd_set_cloexec(fd, 1) != 0) {
+    int saved_errno = errno;
+    __crt_sys_close(fd);
+    return (int)__set_errno(saved_errno);
+  }
+  return fd;
+#else
   return (int)normalize_socket_result(__crt_sys_socket(domain, type, protocol));
+#endif
 }
 
 int bind(int sockfd, const struct sockaddr* addr, socklen_t addrlen) {
