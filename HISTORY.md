@@ -135,6 +135,27 @@ substantive update.
   `porting/recipes/mbedtls.json`'s own notes for the port-recipe-level
   writeups.
 
+- **`ffmpeg`'s macOS port re-verified after the `pthread_create()` fix
+  above, since it was a real candidate for the same class of bug.**
+  Asked to confirm macOS still passes alongside Linux/Windows; this
+  session's own `pthread_create()`/`RTLD_NEXT` fix (previous entry)
+  made it worth checking directly rather than trusting the existing
+  `status.macos: shared-pass` (dated 2026-09-01, *before* that fix):
+  FFmpeg is built with `--enable-pthreads` and genuinely compiles
+  `libavcodec/pthread{,_frame,_slice}.o`, so it could plausibly have
+  been silently unable to spin up a frame/slice-threading worker the
+  same way curl's DNS resolver was. Forced a full `port-rebuild-
+  ffmpeg` against the fixed sysroot (fresh configure log confirms
+  `threading support: pthreads`) and reran `libcrtmedia`'s
+  `crtmedia_demux_test`: still `crtmedia_demux_test: ok`, full `ctest`
+  still 107/107 -- no regression. Recorded honestly rather than
+  overclaimed: the test fixture (`test_tone.wav`, PCM-only) never
+  actually exercises FFmpeg's own frame/slice thread pool (only
+  codecs like H.264 request it), so this confirms the demux/decode
+  path survived unaffected, not that a previously-broken threaded-
+  decode path now specifically works. See `docs/porting_status.md`'s
+  and `porting/recipes/ffmpeg.json`'s own notes for the same writeup.
+
 ## 2026-09-01
 
 - **`eventfd2`'s Linux raw syscall trampoline (`libc/src/arch/linux/
