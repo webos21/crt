@@ -157,45 +157,54 @@ re-verified the same day from real macOS hardware. See `HISTORY.md`'s
 2026-09-02 entry for the full trail.
 
 **The master clock/state machine/A/V-sync core (`crtmedia/player.h`/
-`player.c`) and the Windows (WASAPI) + Linux (ALSA/PulseAudio) host audio
-sinks (`crtmedia/audio_sink.h`, `src/arch/windows/audio_sink_wasapi.c`,
-`src/arch/linux/audio_sink_linux.c`) are done and verified for real** --
-`crtmedia_player_play/_pause/_stop/_seek/_get_clock_us/_update_audio_clock/
-_plan_video_frame` (real `CLOCK_MONOTONIC`-anchored clock, `WAIT`/
-`PRESENT_NOW`/`DROP` frame-timing decisions), and `crtmedia_audio_sink_open/
-_close/_write/_get_position_frames` driven directly through real
-`IMMDeviceEnumerator`/`IAudioClient`/`IAudioRenderClient` COM interfaces on
-Windows (no `#include <windows.h>`, hand-rolled vtables, matching
-`libcrtgfx/src/arch/windows/window_win32.c`'s own established convention),
-and through a raw ALSA kernel PCM ioctl (falling back to a hand-rolled real
-PulseAudio native-protocol client) on Linux -- neither ever links a host
-client library (no `libasound`/`libpulse`). Verified for real: on native
-Windows hardware (opens the real default device, writes real audio, drains
-on close) and on real WSL against WSLg's own live PulseAudio bridge
-(real AUTH/stream-creation/data-write/position-query/drain exchange traced
-byte-for-byte via `strace` against a real reference `libpulse.so` client
-first, then against this project's own hand-rolled client). A real, load-
-bearing libc gap was found and fixed along the way: `getegid()` was
-hardcoded to return 0 on every platform, which made the Pulse backend's own
-required `SCM_CREDENTIALS` handshake fail with `EPERM` whenever the real
-process gid was not actually 0 -- now a real syscall on both Linux and
-macOS (`geteuid()`'s own already-real implementation had no `getegid()`
-counterpart until now; the macOS trampolines are reasoned from real,
-already-confirmed nearby BSD syscall numbers, not run-tested on real macOS
-hardware from this Windows-only dev session). Deliberately still hardcoded
-0 on Windows -- not a gap: Windows has no real POSIX gid concept, and 0
-there is the same intentional synthetic-single-user-identity value
+`player.c`) and all three host audio sinks (`crtmedia/audio_sink.h`,
+`src/arch/windows/audio_sink_wasapi.c`, `src/arch/linux/audio_sink_linux.c`,
+`src/arch/macos/audio_sink_coreaudio.c`) are done and verified for real on
+Linux, Windows, and macOS** -- `crtmedia_player_play/_pause/_stop/_seek/
+_get_clock_us/_update_audio_clock/_plan_video_frame` (real `CLOCK_MONOTONIC`-
+anchored clock, `WAIT`/`PRESENT_NOW`/`DROP` frame-timing decisions), and
+`crtmedia_audio_sink_open/_close/_write/_get_position_frames` driven
+directly through real `IMMDeviceEnumerator`/`IAudioClient`/
+`IAudioRenderClient` COM interfaces on Windows (no `#include <windows.h>`,
+hand-rolled vtables, matching `libcrtgfx/src/arch/windows/window_win32.c`'s
+own established convention), a raw ALSA kernel PCM ioctl (falling back to a
+hand-rolled real PulseAudio native-protocol client) on Linux, and real
+CoreAudio `AudioQueue` (`AudioQueueNewOutput`/`AudioQueueAllocateBuffer`/
+`AudioQueueEnqueueBuffer`, no `#include <AudioToolbox/...>`, matching the
+same hand-declared-ABI convention) on macOS -- none of the three ever links
+a host client library (no `libasound`/`libpulse`, no `AudioToolbox.framework`
+header). Verified for real: on native Windows hardware (opens the real
+default device, writes real audio, drains on close), on real WSL against
+WSLg's own live PulseAudio bridge (real AUTH/stream-creation/data-write/
+position-query/drain exchange traced byte-for-byte via `strace` against a
+real reference `libpulse.so` client first, then against this project's own
+hand-rolled client), and on real macOS hardware (every CoreAudio type/
+constant/function hand-declared below was read directly from this exact
+machine's own real SDK headers, then cross-checked against a real
+throwaway probe built with real `clang`/`-framework AudioToolbox` --
+real `AudioQueueNewOutput`/`Start`/write-a-real-sine-wave/
+`AudioQueueGetCurrentTime` round trip -- before landing in this project's
+own `tools/crt-cc`-built `crtmedia_audio_sink_test`, which then also
+passed for real, 5 consecutive runs). A real, load-bearing libc gap was
+found and fixed along the way: `getegid()` was hardcoded to return 0 on
+every platform, which made the Pulse backend's own required
+`SCM_CREDENTIALS` handshake fail with `EPERM` whenever the real process gid
+was not actually 0 -- now a real syscall on both Linux and macOS
+(`geteuid()`'s own already-real implementation had no `getegid()`
+counterpart until now). The macOS `getegid()` trampoline was re-verified on
+real macOS hardware too: a `tools/crt-cc`-built probe's `getegid()`
+returned `20`, identically matching the real system's own `getegid()` from
+a plain `clang`-built binary run in the same shell. Deliberately still
+hardcoded 0 on Windows -- not a gap: Windows has no real POSIX gid concept,
+and 0 there is the same intentional synthetic-single-user-identity value
 `geteuid()` already returns for the identical reason. Full ctest suite
-clean on both re-run hosts (Linux 114/114, Windows 130/130, both 100%).
-macOS not yet re-verified for the WASAPI/Linux-backend landing or the
-macOS `getegid()` fix. See `HISTORY.md`'s 2026-09-02 entries for the full
-trail.
+clean on all three hosts (Linux 114/114, Windows 130/130, macOS 114/114,
+all 100%). See `HISTORY.md`'s 2026-09-02 entries for the full trail.
 
-1. **Finish the software player.** Add the CoreAudio (macOS) host audio
-   sink backend (WASAPI and ALSA/PipeWire are both already done, see
-   above), buffering/frame-drop policy wiring, and the actual full
-   demux+decode+sink+clock render-loop pipeline while keeping decoded video
-   on the verified CPU-frame/Skia path.
+1. **Finish the software player.** Buffering/frame-drop policy wiring and
+   the actual full demux+decode+sink+clock render-loop pipeline (all three
+   host audio sink backends are now done, see above) while keeping decoded
+   video on the verified CPU-frame/Skia path.
 2. **Fix the common GPU resource contract.** Define opaque `crtgfx` GPU
    device/surface and `crtmedia` GPU-frame objects, capability queries,
    CPU/GPU memory kinds, retain/release, device affinity, and acquire/release

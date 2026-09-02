@@ -1,12 +1,12 @@
-// Real coverage for crtmedia/audio_sink.h's Windows (WASAPI) backend --
-// argument validation, then a real open/write/get_position/close cycle
-// against the real default host audio device when one is actually
-// available. Matches crtgfx_window_smoke's own established graceful-
-// degradation pattern (libcrtgfx/tests/window_smoke.c) for a headless/
-// no-device environment: CRTMEDIA_ERROR_UNSUPPORTED from crtmedia_audio_
-// sink_open() is treated as a real, valid, non-failing outcome here, not
-// a test failure -- this project's own CI/WSL dev loop genuinely has no
-// audio device at all.
+// Real coverage for crtmedia/audio_sink.h's per-host backends (WASAPI on
+// Windows, ALSA/PulseAudio on Linux, CoreAudio on macOS) -- argument
+// validation, then a real open/write/get_position/close cycle against the
+// real default host audio device when one is actually available. Matches
+// crtgfx_window_smoke's own established graceful-degradation pattern
+// (libcrtgfx/tests/window_smoke.c) for a headless/no-device environment:
+// CRTMEDIA_ERROR_UNSUPPORTED from crtmedia_audio_sink_open() is treated as
+// a real, valid, non-failing outcome here, not a test failure -- this
+// project's own CI/WSL dev loop genuinely has no audio device at all.
 
 #include "crtmedia/audio_sink.h"
 

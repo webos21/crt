@@ -49,11 +49,14 @@ endif()
 # concern (this project's own libc *is* the right Linux syscall surface,
 # see that file's own top comment) and needs crt_build_flags for its own
 # real <time.h>/<sys/ioctl.h>/<sys/socket.h>/... includes to resolve at
-# all. macOS (CoreAudio) is its own, separate, not-yet-landed pass;
-# CRTMEDIA_BACKEND_SOURCES stays empty there until it lands, and no
-# crtmedia_backend_objects target is created at all in that case (an
-# OBJECT library with zero sources is a real CMake error, not a harmless
-# no-op).
+# all. src/arch/macos/audio_sink_coreaudio.c (real CoreAudio AudioQueue)
+# also uses this project's own libc headers normally, same as Linux's own
+# audio_sink_linux.c -- there is no Windows-style header-collision concern
+# on macOS either (CoreAudio's own hand-declared types do not collide with
+# this project's own headers), and that file genuinely needs a real
+# pthread_mutex_t/pthread_cond_t for its own buffer-pool bookkeeping (see
+# that file's own top comment for why locking/signaling this project's own
+# mutex/cond from a real foreign CoreAudio-spawned thread is safe).
 set(CRTMEDIA_BACKEND_SOURCES "")
 if(CRT_TARGET_OS STREQUAL "windows")
   list(APPEND CRTMEDIA_BACKEND_SOURCES src/arch/windows/audio_sink_wasapi.c)
@@ -71,11 +74,19 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
   # protocol itself (neither part of this project's own bundled headers)
   # are hand-transcribed within that file.
   list(APPEND CRTMEDIA_BACKEND_SOURCES src/arch/linux/audio_sink_linux.c)
+elseif(CRT_TARGET_OS STREQUAL "macos")
+  # src/arch/macos/audio_sink_coreaudio.c: real CoreAudio AudioQueue
+  # playback -- see that file's own top comment for the full reasoning
+  # (every type/constant/function hand-declared from this exact machine's
+  # own real SDK headers, cross-checked against a real throwaway probe on
+  # real hardware before landing here) and CRTMEDIA_MACOS_FRAMEWORKS below
+  # for the real -framework link this file's own AudioQueue calls need.
+  list(APPEND CRTMEDIA_BACKEND_SOURCES src/arch/macos/audio_sink_coreaudio.c)
 endif()
 set(CRTMEDIA_BACKEND_OBJECTS "")
 if(CRTMEDIA_BACKEND_SOURCES)
   add_library(crtmedia_backend_objects OBJECT ${CRTMEDIA_BACKEND_SOURCES})
-  if(CRT_TARGET_OS STREQUAL "linux")
+  if(CRT_TARGET_OS STREQUAL "linux" OR CRT_TARGET_OS STREQUAL "macos")
     target_link_libraries(crtmedia_backend_objects PRIVATE crt_build_flags)
   endif()
   target_include_directories(crtmedia_backend_objects PUBLIC
@@ -105,6 +116,19 @@ if(CRT_TARGET_OS STREQUAL "windows")
   endif()
 endif()
 
+# src/arch/macos/audio_sink_coreaudio.c drives real CoreAudio from plain C
+# without #include-ing any host SDK header (that file's own top comment) --
+# the AudioToolbox framework still needs to be on the link line, the same
+# way libcrtgfx's own CRTGFX_MACOS_FRAMEWORKS (that file's own ~line 943)
+# puts Foundation/AppKit/QuartzCore/CoreGraphics/objc on window_cocoa.c's
+# link line for the identical reason: a static archive member with
+# undefined AudioToolbox symbols only resolves once something links this
+# framework in, and crtmedia_shared (a real .dylib) needs it resolved at
+# its own link time regardless.
+if(CRT_TARGET_OS STREQUAL "macos")
+  set(CRTMEDIA_MACOS_FRAMEWORKS "-framework AudioToolbox")
+endif()
+
 add_library(crtmedia STATIC
   src/runtime.c
   src/frame.c
@@ -124,6 +148,12 @@ if(CRT_TARGET_OS STREQUAL "windows")
   # link fails with unresolved CoInitializeEx/CoCreateInstance/
   # CoUninitialize symbols.
   target_link_libraries(crtmedia PUBLIC "${CRTMEDIA_WINDOWS_OLE32_LIB}")
+endif()
+if(CRT_TARGET_OS STREQUAL "macos")
+  # PUBLIC, matching the Windows ole32.lib case just above for the same
+  # "a plain static archive needs this forwarded to whatever finally
+  # links it" reason.
+  target_link_libraries(crtmedia PUBLIC ${CRTMEDIA_MACOS_FRAMEWORKS})
 endif()
 if(CRT_TARGET_OS STREQUAL "linux" AND CRTMEDIA_ENABLE_FFMPEG)
   # --start-group/--end-group: the exact same real GNU-ld circular-
@@ -198,6 +228,11 @@ if(CRT_TARGET_OS STREQUAL "windows")
   # FFmpeg CRTMEDIA_FFMPEG_LIBRARIES/crtmedia_shared block's own identical
   # static-vs-shared distinction further down this file).
   target_link_libraries(crtmedia_shared PRIVATE "${CRTMEDIA_WINDOWS_OLE32_LIB}")
+endif()
+if(CRT_TARGET_OS STREQUAL "macos")
+  # crtmedia_shared is a real .dylib -- needs AudioToolbox resolved at its
+  # own link time too, matching crtmedia's own reasoning just above.
+  target_link_libraries(crtmedia_shared PRIVATE ${CRTMEDIA_MACOS_FRAMEWORKS})
 endif()
 target_include_directories(crtmedia_shared PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -420,15 +455,15 @@ set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_player_test_ru
 
 # crtmedia_audio_sink_test: real coverage for crtmedia/audio_sink.h's real
 # per-host backends (src/arch/windows/audio_sink_wasapi.c, src/arch/linux/
-# audio_sink_linux.c, TODO.md's upper-runtime roadmap "Build the software
-# player" step -- "host audio sinks") -- argument validation plus a real
-# open/write/get_position/close cycle against the real default host audio
-# device when one is available (see tests/audio_sink_test.c's own top
-# comment for the graceful-degradation contract when it is not). Built
-# whenever a real backend exists (CRTMEDIA_BACKEND_SOURCES above -- macOS/
-# CoreAudio is its own, separate, not-yet-landed pass). Same plain-C-
-# executable shape as crtmedia_frame_test above, no FFmpeg dependency
-# (unconditional on CRTMEDIA_ENABLE_FFMPEG).
+# audio_sink_linux.c, src/arch/macos/audio_sink_coreaudio.c, TODO.md's
+# upper-runtime roadmap "Build the software player" step -- "host audio
+# sinks") -- argument validation plus a real open/write/get_position/close
+# cycle against the real default host audio device when one is available
+# (see tests/audio_sink_test.c's own top comment for the graceful-
+# degradation contract when it is not). Built whenever a real backend
+# exists (CRTMEDIA_BACKEND_SOURCES above). Same plain-C-executable shape as
+# crtmedia_frame_test above, no FFmpeg dependency (unconditional on
+# CRTMEDIA_ENABLE_FFMPEG).
 if(CRTMEDIA_BACKEND_SOURCES)
   add_executable(crtmedia_audio_sink_test
     ${CRT_STARTUP_OBJECTS}
@@ -449,6 +484,19 @@ if(CRTMEDIA_BACKEND_SOURCES)
       -Wl,-e,_start
       -Wl,--gc-sections
     )
+  elseif(CRT_TARGET_OS STREQUAL "macos")
+    target_link_options(crtmedia_audio_sink_test PRIVATE
+      -Wl,-e,_start
+      -Wl,-dead_strip
+    )
+    # Explicit c/m/dl/cxx before System, matching crtmedia_demux_test's own
+    # identical fix just above in this same file (that target's own
+    # comment has the full real pthread_once/-lSystem ABI-mismatch
+    # writeup) -- this project's own pthread_mutex_t/pthread_cond_t
+    # (audio_sink_coreaudio.c's own buffer-pool lock) need to resolve to
+    # this project's own pthread.c, not get shadowed by real Darwin's.
+    target_link_libraries(crtmedia_audio_sink_test PRIVATE c m dl cxx)
+    target_link_libraries(crtmedia_audio_sink_test PRIVATE System)
   elseif(CRT_TARGET_OS STREQUAL "windows")
     target_link_options(crtmedia_audio_sink_test PRIVATE
       -Wl,/entry:mainCRTStartup
