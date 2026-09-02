@@ -10,6 +10,43 @@ substantive update.
 
 ## 2026-09-02
 
+- **Decided and documented `libcrtmedia`'s public media API policy**,
+  closing `TODO.md`'s "In Progress" step 1. New `docs/
+  libcrtmedia_api_policy.md`: the public core will be a project-owned C
+  API modeled on Android NDK Media's shape (`AMediaFormat`/
+  `AMediaExtractor`/`AMediaCodec`'s key-value-format-plus-async-buffer-
+  queue design), not literal AOSP header/symbol adoption and not a direct
+  exposure of FFmpeg's own API -- deliberately not repeating `libcrtgfx_
+  api_policy.md`'s "expose the real upstream headers" precedent, for two
+  concrete reasons that don't apply to Skia/graphics: (1) FFmpeg here is
+  built LGPL-only (`porting/recipes/ffmpeg.json`'s own deliberate choice)
+  -- an opaque `crtmedia_*` handle keeps the LGPL relink boundary at
+  `libcrtmedia`'s own shared-library edge instead of pushing it into every
+  consumer's translation units the way exposing `AVFormatContext`'s own
+  public struct fields would; (2) audience mismatch -- Skia's own API *is*
+  the API a drawing app wants, while FFmpeg's demux/decode structs are
+  plumbing real consumers (a player, `libcrtjs`'s future WebCodecs-shaped
+  binding) want one abstraction layer above, which is exactly why Android
+  built `AMediaCodec` over its own Stagefright engine in the first place.
+  Three layers: (1) new `crtmedia_format`/`crtmedia_extractor`/
+  `crtmedia_codec` core (async buffer-queue, not yet implemented -- the
+  queue model is chosen now specifically because `TODO.md`'s own later
+  steps, GPU frame contract and hardware decode, need it and migrating a
+  synchronous API later would cost more); (2) the existing, already-
+  verified-on-all-three-hosts `crtmedia_demuxer_*` (`demux.h`) stays as a
+  supported convenience API, reimplemented over the new core rather than
+  deleted or treated as legacy; (3) a WebCodecs-shaped `libcrtjs` binding
+  and an optional WebRTC-shaped realtime track layer are real future work,
+  not designed yet, only fixed in their place relative to the core. Exact
+  AOSP NDK source compatibility (literal `AMediaCodec_*` symbols) is
+  explicitly deferred to a later, optional, demonstrated-need-only
+  adapter -- shipping it as the default would silently claim the Android
+  framework/APK compatibility `docs/runtime_roadmap.md`'s own Non-Goals
+  already disclaim, since the real implementation underneath is FFmpeg,
+  not AOSP's own media framework. `TODO.md`'s upper-runtime roadmap
+  renumbered (former step 1 removed/completed; steps 2-12 became 1-11;
+  "steps 1-5 form the sequential gate" became "steps 1-4").
+
 - **Real macOS `eventfd()` implemented, `curl.json`'s macOS
   `--disable-threaded-resolver` removed, and the actual bug it had
   been covering for -- curl's real threaded-resolver hang -- was
