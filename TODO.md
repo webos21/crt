@@ -201,46 +201,80 @@ and 0 there is the same intentional synthetic-single-user-identity value
 clean on all three hosts (Linux 114/114, Windows 130/130, macOS 114/114,
 all 100%). See `HISTORY.md`'s 2026-09-02 entries for the full trail.
 
-1. **Finish the software player.** Buffering/frame-drop policy wiring and
-   the actual full demux+decode+sink+clock render-loop pipeline (all three
-   host audio sink backends are now done, see above) while keeping decoded
-   video on the verified CPU-frame/Skia path.
-2. **Fix the common GPU resource contract.** Define opaque `crtgfx` GPU
+**The software player is now fully done** (2026-09-03): the buffering/
+frame-drop policy and the full demux+decode+sink+clock render-loop pipeline
+this step's own last remaining piece asked for now exist as real, working,
+verified code -- `libcrtmedia/tests/playback_pipeline_test.c`, a real
+integration test (not a new public API surface: `crtmedia/player.h`'s own
+top comment already documents the render loop as the caller's own,
+separate responsibility, matching this test's own role as the real,
+working reference for that composition, one layer below where a future
+higher-level convenience API -- step 9's own `libcrtjs` binding layer --
+would eventually live). It drives `crtmedia_extractor` + `crtmedia_codec`
+(per-track, already proven together by `crtmedia_extractor_codec_test`) +
+`crtmedia_player` (the real clock/A-V-sync core) + `crtmedia_audio_sink` (a
+real per-host backend, or a graceful `CRTMEDIA_ERROR_UNSUPPORTED`) against
+the same real MP4 fixture end to end: real samples flow from the extractor
+into the right track's codec, decoded audio is written straight through to
+a real audio sink (blocking on real device backpressure) and anchors the
+player's own clock via `crtmedia_player_update_audio_clock()`, and decoded
+video frames are held in a small, real, bounded local lookahead queue
+(`CRTMEDIA_PIPELINE_VIDEO_LOOKAHEAD`, 3 frames -- the concrete buffering
+policy itself: decode is never allowed to run more than 3 frames ahead of
+real presentation) that `crtmedia_player_plan_video_frame()` drains via
+real `WAIT` (a real, bounded sleep)/`PRESENT_NOW`/`DROP` decisions. A real
+mid-stream audio device failure (this exact dev environment's own WSLg
+PulseAudio bridge genuinely, externally stops responding after roughly one
+real second of continuous audio, already documented in `audio_sink_linux.
+c`'s own top comment) is handled gracefully -- the render loop drops to a
+real video-only, wall-clock-paced remainder rather than failing outright,
+matching `crtmedia_player.h`'s own documented supported shape for exactly
+that case. Verified for real: the fixture's real ~1 real second of content
+takes a real, correctly-paced ~1 real second of wall-clock time to play on
+Windows (confirming `WAIT`'s own real sleeps genuinely pace the loop, not
+a spin-through), and completes gracefully inside the real audio-failure
+path on Linux/WSL. Full ctest suite clean, single-pass, on both re-run
+hosts: Linux (WSL) 115/115, Windows 131/131, both 100%. macOS not yet
+re-verified for this specific step. See `HISTORY.md`'s 2026-09-03 entry
+for the full trail.
+
+1. **Fix the common GPU resource contract.** Define opaque `crtgfx` GPU
    device/surface and `crtmedia` GPU-frame objects, capability queries,
    CPU/GPU memory kinds, retain/release, device affinity, and acquire/release
    fences without exposing Direct3D, Metal, Vulkan, or FFmpeg types in public
    headers. Software fallback must remain a first-class path.
-3. **Enable Skia GPU rendering.** Start with a Ganesh vertical slice and keep
+2. **Enable Skia GPU rendering.** Start with a Ganesh vertical slice and keep
    Graphite as a later measured alternative: Direct3D on Windows, Metal on
    macOS, and Vulkan/Wayland on Linux. Run the existing deterministic Skia
    drawing coverage against GPU surfaces and add resize, device-loss, and
    context-recreation tests.
-4. **Add hardware decode, phase A.** Enable FFmpeg D3D11VA/D3D12VA,
+3. **Add hardware decode, phase A.** Enable FFmpeg D3D11VA/D3D12VA,
    VideoToolbox, and VA-API backends, initially downloading decoded frames to
    CPU memory so codec/device selection, fallback, and recovery can be proved
    independently of zero-copy interop.
-5. **Add hardware decode, phase B.** Connect decoder-owned textures directly
+4. **Add hardware decode, phase B.** Connect decoder-owned textures directly
    to Skia: D3D resources on Windows, `CVPixelBuffer`/Metal textures on macOS,
    and VA-API/DRM PRIME/dmabuf/Vulkan images on Linux. Tie decoder frame-pool
    release to real GPU/presentation completion and retain CPU-copy fallback.
-6. **Add hardware encode and capture.** Stage camera, microphone, and screen
+5. **Add hardware encode and capture.** Stage camera, microphone, and screen
    sources; hardware H.264/HEVC encode; mux/record; latency, bitrate, and
    key-frame controls.
-7. **Expand network and streaming.** Add custom I/O and HTTP range first,
+6. **Expand network and streaming.** Add custom I/O and HTTP range first,
    then buffering, reconnect/discontinuity handling, and HLS/DASH or the
    justified FFmpeg protocol subset.
-8. **Add an optional WebRTC-shaped realtime layer.** Define source/track/sink
+7. **Add an optional WebRTC-shaped realtime layer.** Define source/track/sink
    and execution-context contracts before deciding whether to port full
    WebRTC for RTP/RTCP, jitter buffering, congestion control, and AEC/NS/AGC.
-9. **Expose the service through `libcrtjs`.** Start the QuickJS engine,
-    event loop, timers, modules, and native binding work after step 2 while
-    steps 3-5 continue in parallel. Bind media only after the extractor/codec/
-    player contracts are stable, using WebCodecs-like chunks/frames/queue
-    semantics (a close match to the already-implemented `crtmedia_codec`'s
-    own shape) and a higher-level asynchronous player API. V8 and a minimal
-    Chromium/Ozone probe remain later consumers of the same contracts.
+8. **Expose the service through `libcrtjs`.** Start the QuickJS engine,
+   event loop, timers, modules, and native binding work after step 1 while
+   steps 2-4 continue in parallel. Bind media only after the extractor/codec/
+   player contracts are stable, using WebCodecs-like chunks/frames/queue
+   semantics (a close match to the already-implemented `crtmedia_codec`'s
+   own shape) and a higher-level asynchronous player API. V8 and a minimal
+   Chromium/Ozone probe remain later consumers of the same contracts.
 
-Execution order is therefore: steps 1-2 form the sequential contract gate;
+Execution order is therefore: step 1 (the GPU resource contract) is the
+sequential gate the software player's own completion was waiting behind;
 Skia GPU, hardware decode, and the QuickJS core then proceed in parallel;
 zero-copy completion gates the GPU-aware JavaScript media binding, but not the
 initial QuickJS bring-up. A full compositor, complete font shaping, and every

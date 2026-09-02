@@ -841,4 +841,68 @@ if(CRTMEDIA_ENABLE_FFMPEG)
     PASS_REGULAR_EXPRESSION "crtmedia_extractor_codec_test: ok"
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_extractor_codec_test_runs)
+
+  # crtmedia_playback_pipeline_test: TODO.md's upper-runtime roadmap
+  # "Finish the software player" step's own last remaining piece -- a
+  # real, working demux+decode+sink+clock render loop, proving crtmedia_
+  # extractor/crtmedia_codec (already proven together by crtmedia_
+  # extractor_codec_test above) actually compose with crtmedia_player
+  # (the real clock/A-V-sync core) and crtmedia_audio_sink (a real
+  # per-host backend, or a graceful CRTMEDIA_ERROR_UNSUPPORTED) against
+  # the same real MP4 fixture -- see tests/playback_pipeline_test.c's own
+  # top comment for the full reasoning, including its own real, concrete
+  # video buffering/frame-drop policy. Same gating/shape as crtmedia_
+  # extractor_codec_test just above (needs CRTMEDIA_ENABLE_FFMPEG for the
+  # extractor/codec pair; the audio_sink backend itself is already
+  # unconditionally part of plain `crtmedia` whenever CRTMEDIA_BACKEND_
+  # SOURCES is non-empty for this OS, no extra gate needed here).
+  add_executable(crtmedia_playback_pipeline_test
+    ${CRT_STARTUP_OBJECTS}
+    tests/playback_pipeline_test.c
+  )
+  target_link_libraries(crtmedia_playback_pipeline_test PRIVATE crt_build_flags crtmedia)
+  target_include_directories(crtmedia_playback_pipeline_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include"
+  )
+  target_compile_definitions(crtmedia_playback_pipeline_test PRIVATE
+    CRTMEDIA_TEST_VIDEO_PATH="${CMAKE_SOURCE_DIR}/libcrtmedia/assets/test_video.mp4"
+  )
+  target_link_libraries(crtmedia_playback_pipeline_test PRIVATE crt_compiler_rt_builtins)
+  target_link_options(crtmedia_playback_pipeline_test PRIVATE
+    -nostdlib
+    -nostartfiles
+    -nodefaultlibs
+  )
+  if(CRT_TARGET_OS STREQUAL "macos")
+    target_link_options(crtmedia_playback_pipeline_test PRIVATE
+      -Wl,-e,_start
+      -Wl,-dead_strip
+    )
+    # See crtmedia_demux_test's own matching block above for the full
+    # pthread_once/-lSystem-ordering reasoning this mirrors.
+    target_link_libraries(crtmedia_playback_pipeline_test PRIVATE c m dl cxx)
+    target_link_libraries(crtmedia_playback_pipeline_test PRIVATE System)
+  elseif(CRT_TARGET_OS STREQUAL "linux")
+    target_link_options(crtmedia_playback_pipeline_test PRIVATE
+      -Wl,-e,_start
+      -Wl,--gc-sections
+    )
+  elseif(CRT_TARGET_OS STREQUAL "windows")
+    target_link_options(crtmedia_playback_pipeline_test PRIVATE
+      -Wl,/entry:mainCRTStartup
+      -Wl,/subsystem:console
+      -Wl,/OPT:REF
+    )
+    target_link_libraries(crtmedia_playback_pipeline_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  endif()
+  crt_link_startup_end_objects(crtmedia_playback_pipeline_test)
+  add_dependencies(crtmedia_playback_pipeline_test c crt1 crtmedia)
+
+  add_test(NAME crtmedia_playback_pipeline_test_runs COMMAND crtmedia_playback_pipeline_test)
+  set_tests_properties(crtmedia_playback_pipeline_test_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    PASS_REGULAR_EXPRESSION "crtmedia_playback_pipeline_test: ok"
+    TIMEOUT 30
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_playback_pipeline_test_runs)
 endif()

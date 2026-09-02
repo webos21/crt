@@ -113,7 +113,21 @@ libc gap (hardcoded to 0 on every platform) was found and fixed on both
 Linux and macOS along the way -- the Pulse backend's own required
 `SCM_CREDENTIALS` handshake needs a real gid; the macOS fix was confirmed
 against real hardware too (this project's own `getegid()` returned the
-same value as the real system's own). Buffering/frame-drop policy wiring
-and the full demux+decode+sink+clock render-loop pipeline are the only
-remaining pieces of the software player. See `HISTORY.md`'s 2026-09-02
-entries for the full trail.
+same value as the real system's own). The software player is now fully
+done: `tests/playback_pipeline_test.c` is a real, working
+demux+decode+sink+clock render loop against the same real MP4 fixture --
+`crtmedia_extractor`/`crtmedia_codec` feed a real `crtmedia_audio_sink`
+(written straight through, blocking on real device backpressure, anchoring
+`crtmedia_player`'s own clock) and a small, real, bounded local video
+lookahead queue (`CRTMEDIA_PIPELINE_VIDEO_LOOKAHEAD`, 3 frames -- the
+concrete buffering policy: decode never runs more than 3 frames ahead of
+real presentation) that `crtmedia_player_plan_video_frame()` drains via
+real `WAIT`/`PRESENT_NOW`/`DROP` decisions, gracefully falling back to
+real video-only wall-clock pacing on a genuine mid-stream audio device
+failure rather than failing outright. A deliberate integration test, not
+a new public API -- `crtmedia/player.h`'s own top comment already
+documents that composition as the caller's own job. Verified for real:
+the fixture's ~1-second content takes a real, correctly-paced ~1 real
+second of wall-clock time on Windows; completes correctly through a real
+audio-failure fallback on Linux/WSL. See `HISTORY.md`'s 2026-09-03 entry
+for the full trail.

@@ -8,6 +8,87 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-03
+
+- **Closed out `TODO.md`'s upper-runtime roadmap "Finish the software
+  player" step in full** -- the real buffering/frame-drop policy and the
+  full demux+decode+sink+clock render-loop pipeline that step's own last
+  remaining piece asked for, picked up right after the macOS CoreAudio
+  backend/`getegid()` verification landed the day before (all three host
+  audio sink backends done, per that entry).
+
+  `libcrtmedia/tests/playback_pipeline_test.c` is the real, working
+  deliverable -- a genuine integration test, not a new persisted public
+  API: `crtmedia/player.h`'s own top comment already documents the actual
+  render loop tying extractor/codec/an audio sink/a caller-owned render
+  surface together as "each their own, separate piece" this project
+  leaves to the caller, so this file is the real reference for exactly
+  that composition, one layer below where a future higher-level
+  convenience API (`TODO.md` step 8's own `libcrtjs` binding layer) would
+  eventually live -- matching `extractor_codec_test.c`'s own identical
+  role one layer further down.
+
+  The loop itself: real samples flow from `crtmedia_extractor` into the
+  right track's `crtmedia_codec` (mirroring `extractor_codec_test.c`'s
+  own already-proven feed loop exactly); each real decoded audio buffer is
+  written straight through to a real `crtmedia_audio_sink` (blocking on
+  real device backpressure, no local lookahead -- audio already *is* the
+  pacing signal once it reaches a real device) and anchors the player's
+  own clock via `crtmedia_player_update_audio_clock()`; decoded video
+  frames go into a small, real, bounded local lookahead queue
+  (`CRTMEDIA_PIPELINE_VIDEO_LOOKAHEAD`, 3 frames -- the concrete buffering
+  policy itself: decode is never allowed to run more than 3 frames ahead
+  of real presentation, gating further video `queue_input()` calls until
+  the local queue has real room) that `crtmedia_player_plan_video_frame()`
+  drains via real `WAIT` (an actual bounded sleep, re-planning the same
+  frame once the real clock has advanced)/`PRESENT_NOW`/`DROP` decisions,
+  releasing every frame exactly once either way.
+
+  **A real bug found and fixed via this exact test, not guessed**: the
+  first version treated any `crtmedia_audio_sink_write()` return `<= 0` as
+  a fatal device failure. `audio_sink.h`'s own documented contract is
+  explicit that `0` is a real, valid, non-error "nothing accepted this
+  call, simply retry" result, distinct from a genuine negative failure --
+  treating it as fatal would have made a real, momentary backend stall
+  (not a real failure) abort playback outright. Fixed with a bounded
+  retry loop for `0` and reserving the "give up" path for a real negative
+  return only.
+
+  **A second real design gap surfaced the same way, then fixed as a real
+  behavioral improvement, not a test workaround**: on a genuine negative
+  write failure, the loop kept calling `crtmedia_audio_sink_write()` again
+  on the very next decoded audio buffer -- confirmed for real against
+  WSLg's own PulseAudio bridge (already documented, `audio_sink_linux.c`'s
+  own 2026-09-02 entry, as genuinely stopping to respond after roughly one
+  real second of continuous audio): each further call re-hit that
+  backend's own real 10-second internal deadline before failing again,
+  compounding into 20+ real seconds of wall time for what should have
+  been one real failure. Fixed by dropping the sink entirely (set to
+  `NULL`, no further write attempts) the instant a real negative failure
+  occurs, letting the render loop fall back to a real video-only, wall-
+  clock-paced remainder -- exactly `crtmedia_player.h`'s own documented
+  supported "a video-only stream free-runs on real host wall-clock time"
+  shape, just reached mid-playback instead of from the start, and a real,
+  sensible thing for any real player to do on a genuine mid-stream audio
+  device failure, not merely a fix scoped to this one test/environment.
+  Deliberately does not call `crtmedia_audio_sink_close()` on the failed
+  sink in this path either: a sink already reporting a real failure may
+  itself be unable to complete its own real drain, and this short-lived
+  test process exits regardless.
+
+  **Verified for real**: on native Windows hardware, the fixture's real
+  ~1-second duration (25 real video frames, ~1 second of real 44100Hz
+  audio -- the same fixture `extractor_codec_test.c` already verified)
+  took a real, correctly-paced ~1.0 real second of wall-clock time to
+  play, confirming `WAIT`'s own real sleeps genuinely pace the loop rather
+  than spinning through it instantly or hanging. On real WSL, the loop hit
+  the already-documented real WSLg PulseAudio one-second stall exactly
+  once, handled it via the graceful video-only fallback above, and still
+  completed correctly (`crtmedia_playback_pipeline_test: ok`) in a real,
+  bounded ~10 real seconds. Full ctest suite clean, single clean pass on
+  both re-run hosts: Linux (WSL) 115/115, Windows 131/131, both 100%, zero
+  regressions. macOS not yet re-verified for this specific step.
+
 ## 2026-09-02
 
 - **Closed the macOS half of the `getegid()` gap the Linux audio sink
