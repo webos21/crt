@@ -151,9 +151,10 @@ room frees up). Every existing `crtmedia_demux_*_test` (the WAV/PCM,
 H.264+AAC MP4, MP3, and malformed-input coverage) passes completely
 unchanged -- same public API, same real observable behavior -- proving the
 rebuild is a real, transparent swap, not a behavior change. Full ctest
-suite clean on both re-run hosts (Linux 112/112, Windows 128/128, both
-100%, no regressions from the swap). macOS not yet re-verified for this
-specific change. See `HISTORY.md`'s 2026-09-02 entry for the full trail.
+suite clean on all three re-run hosts (Linux 112/112, Windows 128/128,
+macOS 112/112, all 100%, no regressions from the swap). macOS
+re-verified the same day from real macOS hardware. See `HISTORY.md`'s
+2026-09-02 entry for the full trail.
 
 1. **Build the software player.** Add play/pause/seek/stop, a monotonic master
    clock, A/V synchronization, buffering/frame-drop policy, and host audio

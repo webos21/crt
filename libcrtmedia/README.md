@@ -67,6 +67,6 @@ per decodable track instead of its own independent FFmpeg integration
 (no `AVFormatContext`/`AVCodecContext` in the file at all anymore), with
 a real `CRTMEDIA_WOULD_BLOCK` backpressure path that never silently drops
 an unqueued sample. Every existing `crtmedia_demux_*_test` passes
-completely unchanged after the rebuild -- verified on Linux and Windows
-(macOS not yet re-verified for this specific change). See `HISTORY.md`'s
+completely unchanged after the rebuild -- verified on Linux, Windows,
+and macOS (macOS re-verified the same day). See `HISTORY.md`'s
 2026-09-02 entry for the full trail.
