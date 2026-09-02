@@ -10,6 +10,126 @@ substantive update.
 
 ## 2026-09-02
 
+- **Started `TODO.md`'s upper-runtime roadmap "Build the software player"
+  step: a real master clock/state machine/A/V-sync core
+  (`crtmedia/player.h`/`player.c`), then a real, working Windows (WASAPI)
+  host audio sink (`crtmedia/audio_sink.h`,
+  `src/arch/windows/audio_sink_wasapi.c`).** Picked up the same day as the
+  extractor/codec core landing and its macOS re-verification, below.
+
+  **`crtmedia_player`**: an opaque `crtmedia_player_create`/`_release`/
+  `_play`/`_pause`/`_stop`/`_seek`/`_get_state`/`_get_clock_us`/`_update_
+  audio_clock`/`_plan_video_frame` API, host-independent (no FFmpeg type,
+  no host audio API type, no `crtgfx` type). The real master clock is
+  anchored to this project's own libc `clock_gettime(CLOCK_MONOTONIC,
+  ...)` (already the established cross-platform monotonic time source
+  here -- no new per-host time API needed): a `(clock_base_us,
+  host_base_us)` pair, where `get_clock_us()` while `PLAYING` adds real
+  elapsed host time since the last anchor, and otherwise just returns the
+  frozen `clock_base_us`. `crtmedia_player_seek()`/`_update_audio_clock()`
+  both re-anchor immediately and take effect regardless of play/pause/
+  stop state, so a caller can pre-seek before the first `play()` --
+  audio is documented as this player's own reference clock once a real
+  audio track exists (matching real players' own established practice:
+  audible glitches from clock drift are far more noticeable than an
+  occasional dropped/duplicated video frame), with `update_audio_clock()`
+  as the real feedback path from whatever component is actually writing
+  decoded audio to a host sink. `crtmedia_player_plan_video_frame()`
+  compares a frame's own PTS against the current clock and returns one of
+  `WAIT` (with a real, computed, never-negative wait), `PRESENT_NOW`, or
+  `DROP` (more than `CRTMEDIA_PLAYER_LATE_DROP_THRESHOLD_US` == 100ms
+  behind -- a real, deliberate threshold in the same range real media
+  players commonly use, not an arbitrary placeholder).
+
+  **A real bug found and fixed by `player_test.c`'s own real-clock
+  assertions, not by inspection**: an early version of `crtmedia_player_
+  play()` force-reset `clock_base_us` to 0 whenever leaving `IDLE`/
+  `STOPPED`, silently discarding a real pre-`play()` seek. Fixed by
+  leaving `clock_base_us` completely untouched in `play()` -- it already
+  holds the correct starting value in every real case (0 from a fresh
+  player or a real `stop()`, the exact frozen value from a real `pause()`,
+  or a real pre-seek position). `player.h`'s own `get_clock_us()` doc
+  comment was also corrected: it had claimed "reads 0 for IDLE/STOPPED" as
+  an absolute invariant, which is not true after a pre-seek -- rewritten
+  to describe "holds whatever value it was last anchored to."
+  `player_test.c` covers pre-seek-before-play, pause-freezes-exactly,
+  resume-from-frozen, stop-resets-to-0, `update_audio_clock` re-anchoring,
+  all three `plan_video_frame` outcomes, and null-argument handling, using
+  the real host clock with generous (20ms sleep, wide-tolerance)
+  real-time assertions rather than a fake/injectable clock.
+
+  **`crtmedia_audio_sink` (Windows/WASAPI backend)**: a host-independent
+  public contract (`crtmedia_audio_sink_open`/`_close`/`_write`/`_get_
+  position_frames`) -- no `IAudioClient`/`AudioQueueRef`/`snd_pcm_t` (or
+  any other host audio type) in the public header, matching this
+  project's established "no host/upstream SDK type in a public header"
+  policy, and matching `crtgfx_window_create()`'s own established
+  graceful-degradation contract: `CRTMEDIA_ERROR_UNSUPPORTED` (not a
+  crash/hang) when no usable host audio device/backend exists.
+  `src/arch/windows/audio_sink_wasapi.c` drives real `IMMDeviceEnumerator`/
+  `IMMDevice`/`IAudioClient`/`IAudioRenderClient` COM interfaces directly
+  against the real default shared-mode render endpoint -- deliberately
+  without `#include <windows.h>`/`<mmdeviceapi.h>`/`<Audioclient.h>` or
+  any other host SDK header, following `libcrtgfx/src/arch/windows/
+  window_win32.c`'s own established convention exactly: every COM
+  type/vtable is hand-declared, and every real IID/CLSID/enum/struct
+  value below (`IID_IMMDeviceEnumerator`, `CLSID_MMDeviceEnumerator`,
+  `IID_IMMDevice`, `IID_IAudioClient`, `IID_IAudioRenderClient`,
+  `WAVEFORMATEX`, `AUDCLNT_SHAREMODE_SHARED`, `CLSCTX_INPROC_SERVER`,
+  `WAVE_FORMAT_PCM`/`WAVE_FORMAT_IEEE_FLOAT`, `eRender`/`eConsole`) is a
+  mechanical transcription of the real Windows SDK's own headers
+  (`um/mmdeviceapi.h`, `um/Audioclient.h`, `shared/mmreg.h`,
+  `shared/wtypesbase.h`, `um/AudioSessionTypes.h`, `um/combaseapi.h`,
+  10.0.28000.0 -- read directly for this transcription, never included),
+  each vtable declared only up to and including the last method this
+  file actually calls, with `void* reserved_N` placeholders standing in
+  for every earlier, unused real method (only the *count* matters for
+  correct binary layout). `crtmedia_audio_sink_write()`'s own blocking
+  contract is real, genuine backpressure: it polls `IAudioClient::
+  GetCurrentPadding()` and blocks until the device has real room for at
+  least one frame, matching what makes a render loop built on this sink
+  naturally self-pace to real time without its own separate audio-timing
+  logic. `crtmedia_audio_sink_get_position_frames()` reports frames
+  actually, audibly reached (total frames ever written minus what
+  `GetCurrentPadding()` says is still queued ahead of playback), distinct
+  from "how many frames have been written so far" on purpose (a real
+  device always buffers some amount ahead of what is actually audible).
+  `crtmedia_audio_sink_close()` performs a real drain (blocks until
+  `GetCurrentPadding()` reaches 0) before `Stop()`/`Release()`/
+  `CoUninitialize()`.
+
+  Mirrors `libcrtgfx`'s own `crtgfx_backend_objects` OBJECT-library
+  isolation exactly (`libcrtmedia/CMakeLists.txt`'s new `crtmedia_backend_
+  objects` target): this backend file is compiled with only `libcrtmedia/
+  include`/`src` on its own path, not this project's own libc, so it uses
+  `GetProcessHeap()`/`HeapAlloc()`/`HeapFree()` in place of `malloc()`/
+  `free()` (no libc on this translation unit's path at all), matching
+  `window_win32.c`'s own identical precedent. `crtmedia`/`crtmedia_shared`
+  link the new `ole32.lib` (`CoInitializeEx`/`CoCreateInstance`/
+  `CoUninitialize`) via the same `find_file()`-with-`CACHE`-fallback
+  pattern as `libcrtgfx`'s own `CRTGFX_WINDOWS_D3D11_LIB` -- `PUBLIC` on
+  the static `crtmedia` target (so every test executable that links it
+  inherits `ole32.lib` transitively without listing it themselves,
+  matching `crtgfx`'s own identical reasoning for its own Windows system
+  libs) and `PRIVATE` but linked directly on `crtmedia_shared` (a real
+  DLL, which -- unlike a static archive -- must resolve every symbol at
+  its own link time).
+
+  **Verified for real, on native Windows hardware, not just compiled**:
+  `crtmedia_audio_sink_test` opens the real default render device,
+  writes two real 100ms buffers of interleaved S16 silence 20ms apart,
+  confirms `get_position_frames()` never reports playback moving
+  backwards, and closes (a real drain) -- ran to completion,
+  `crtmedia_audio_sink_test: ok`, real audible silence actually played
+  through the real default device. Full ctest suite re-run on both
+  Linux (WSL) and Windows after this and the master-clock work above:
+  Linux 113/113, Windows 130/130, both 100%, zero regressions (Linux has
+  no audio backend yet at all -- `CRTMEDIA_BACKEND_SOURCES` stays empty
+  there, the new object library/test are Windows-only for now). macOS
+  (CoreAudio) and Linux (ALSA/PipeWire) backends, buffering/frame-drop
+  wiring, and the actual full demux+decode+sink+clock render-loop pipeline
+  remain -- each its own, separate, not-yet-landed pass.
+
 - **Rebuilt `crtmedia_demuxer_*` as a thin wrapper over the new
   `crtmedia_extractor`/`crtmedia_codec` core, closing out `TODO.md`'s
   original "Separate extractor and codec" step in full** -- picked up

@@ -156,10 +156,27 @@ macOS 112/112, all 100%, no regressions from the swap). macOS
 re-verified the same day from real macOS hardware. See `HISTORY.md`'s
 2026-09-02 entry for the full trail.
 
-1. **Build the software player.** Add play/pause/seek/stop, a monotonic master
-   clock, A/V synchronization, buffering/frame-drop policy, and host audio
-   sinks (WASAPI, CoreAudio, and PipeWire/ALSA) while keeping decoded video on
-   the verified CPU-frame/Skia path.
+**The master clock/state machine/A/V-sync core (`crtmedia/player.h`/
+`player.c`) and the Windows (WASAPI) host audio sink (`crtmedia/audio_sink.h`,
+`src/arch/windows/audio_sink_wasapi.c`) are done and verified for real** --
+`crtmedia_player_play/_pause/_stop/_seek/_get_clock_us/_update_audio_clock/
+_plan_video_frame` (real `CLOCK_MONOTONIC`-anchored clock, `WAIT`/
+`PRESENT_NOW`/`DROP` frame-timing decisions), and `crtmedia_audio_sink_open/
+_close/_write/_get_position_frames` driven directly through real
+`IMMDeviceEnumerator`/`IAudioClient`/`IAudioRenderClient` COM interfaces
+(no `#include <windows.h>`, hand-rolled vtables, matching `libcrtgfx/src/
+arch/windows/window_win32.c`'s own established convention). Verified for
+real on native Windows hardware (`crtmedia_audio_sink_test` opens the real
+default device, writes real audio, drains on close). Full ctest suite clean
+on both re-run hosts (Linux 113/113, Windows 130/130, both 100%). macOS not
+yet re-verified for this specific change. See `HISTORY.md`'s 2026-09-02
+entry for the full trail.
+
+1. **Finish the software player.** Add the CoreAudio (macOS) and ALSA/
+   PipeWire (Linux) host audio sink backends (WASAPI is already done, see
+   above), buffering/frame-drop policy wiring, and the actual full
+   demux+decode+sink+clock render-loop pipeline while keeping decoded video
+   on the verified CPU-frame/Skia path.
 2. **Fix the common GPU resource contract.** Define opaque `crtgfx` GPU
    device/surface and `crtmedia` GPU-frame objects, capability queries,
    CPU/GPU memory kinds, retain/release, device affinity, and acquire/release

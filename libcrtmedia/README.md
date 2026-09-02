@@ -70,3 +70,25 @@ an unqueued sample. Every existing `crtmedia_demux_*_test` passes
 completely unchanged after the rebuild -- verified on Linux, Windows,
 and macOS (macOS re-verified the same day). See `HISTORY.md`'s
 2026-09-02 entry for the full trail.
+
+The software player (`TODO.md`'s upper-runtime roadmap) is under way:
+`include/crtmedia/player.h`/`src/player.c` is a host-independent master
+clock/play-pause-seek-stop state machine/A/V-sync core (real
+`CLOCK_MONOTONIC`-anchored clock, audio as the reference clock once a
+real audio track exists, `WAIT`/`PRESENT_NOW`/`DROP` per-frame timing
+decisions) -- `tests/player_test.c` covers it against the real host clock.
+`include/crtmedia/audio_sink.h` is the host-independent audio-output
+contract (`_open`/`_close`/`_write`/`_get_position_frames`, no host audio
+API type ever named); its first real backend,
+`src/arch/windows/audio_sink_wasapi.c`, drives real WASAPI (`IMMDevice
+Enumerator`/`IAudioClient`/`IAudioRenderClient`) directly, without
+`#include`-ing any Windows SDK header -- matching `libcrtgfx/src/arch/
+windows/window_win32.c`'s own hand-rolled-COM-vtable convention exactly,
+built as its own `crtmedia_backend_objects` OBJECT library mirroring
+`libcrtgfx`'s own `crtgfx_backend_objects`. `tests/audio_sink_test.c`
+verified for real against the real default Windows audio device: opens
+it, writes real silence, confirms playback position never moves
+backwards, and drains on close. The macOS (CoreAudio) and Linux
+(ALSA/PipeWire) backends, buffering/frame-drop policy wiring, and the
+full demux+decode+sink+clock render-loop pipeline are not yet built. See
+`HISTORY.md`'s 2026-09-02 entry for the full trail.

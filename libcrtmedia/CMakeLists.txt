@@ -35,6 +35,55 @@ if(CRTMEDIA_ENABLE_FFMPEG AND NOT CRTMEDIA_FFMPEG_LIBRARIES)
   message(FATAL_ERROR "CRTMEDIA_ENABLE_FFMPEG=ON requires CRTMEDIA_FFMPEG_LIBRARIES. Run the port-build-ffmpeg target, then reconfigure.")
 endif()
 
+# crtmedia_backend_objects: real per-host audio output backends for
+# crtmedia/audio_sink.h (TODO.md's upper-runtime roadmap "Build the
+# software player" step -- "host audio sinks: WASAPI, CoreAudio, and
+# PipeWire/ALSA"). Mirrors libcrtgfx's own crtgfx_backend_objects OBJECT
+# library exactly (libcrtgfx/CMakeLists.txt, ~line 807) and for the same
+# reason: src/arch/windows/audio_sink_wasapi.c hand-rolls every COM type/
+# vtable it needs (see that file's own top comment) rather than #include-ing
+# any host SDK header, so it is deliberately compiled with only this
+# library's own include/src on its path -- not this project's own libc --
+# to keep that isolation real rather than accidental. Only the Windows
+# backend exists so far (ALSA/PipeWire and CoreAudio are each their own,
+# separate, not-yet-landed pass); CRTMEDIA_BACKEND_SOURCES stays empty on
+# Linux/macOS until those land, and no crtmedia_backend_objects target is
+# created at all in that case (an OBJECT library with zero sources is a
+# real CMake error, not a harmless no-op).
+set(CRTMEDIA_BACKEND_SOURCES "")
+if(CRT_TARGET_OS STREQUAL "windows")
+  list(APPEND CRTMEDIA_BACKEND_SOURCES src/arch/windows/audio_sink_wasapi.c)
+endif()
+set(CRTMEDIA_BACKEND_OBJECTS "")
+if(CRTMEDIA_BACKEND_SOURCES)
+  add_library(crtmedia_backend_objects OBJECT ${CRTMEDIA_BACKEND_SOURCES})
+  target_include_directories(crtmedia_backend_objects PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+  )
+  target_include_directories(crtmedia_backend_objects PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+  )
+  set_target_properties(crtmedia_backend_objects PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+  )
+  set(CRTMEDIA_BACKEND_OBJECTS $<TARGET_OBJECTS:crtmedia_backend_objects>)
+endif()
+
+if(CRT_TARGET_OS STREQUAL "windows")
+  # ole32.lib: the real flat-export import library for CoInitializeEx()/
+  # CoCreateInstance()/CoUninitialize() (src/arch/windows/audio_sink_wasapi.c's
+  # own COM bootstrapping) -- same find_file()-with-CACHE-fallback pattern
+  # as libcrtgfx/CMakeLists.txt's own CRTGFX_WINDOWS_D3D11_LIB (~line 910).
+  find_file(CRTMEDIA_WINDOWS_OLE32_LIB
+    NAMES ole32.lib
+    PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES}
+    NO_DEFAULT_PATH
+  )
+  if(NOT CRTMEDIA_WINDOWS_OLE32_LIB)
+    set(CRTMEDIA_WINDOWS_OLE32_LIB ole32.lib CACHE FILEPATH "Windows ole32 import library")
+  endif()
+endif()
+
 add_library(crtmedia STATIC
   src/runtime.c
   src/frame.c
@@ -42,8 +91,19 @@ add_library(crtmedia STATIC
   src/audio.c
   src/format.c
   src/player.c
+  ${CRTMEDIA_BACKEND_OBJECTS}
 )
 target_link_libraries(crtmedia PRIVATE crt_build_flags)
+if(CRT_TARGET_OS STREQUAL "windows")
+  # PUBLIC, not PRIVATE: matches crtgfx's own identical reasoning (that
+  # target's own CRTGFX_WINDOWS_D3D11_LIB/_DXGI_LIB linking, ~line 1038) --
+  # crtmedia is a plain static archive, so anything that links it (every
+  # crtmedia_*_test target below, none of which mention ole32.lib
+  # themselves) needs this forwarded transitively or the final executable
+  # link fails with unresolved CoInitializeEx/CoCreateInstance/
+  # CoUninitialize symbols.
+  target_link_libraries(crtmedia PUBLIC "${CRTMEDIA_WINDOWS_OLE32_LIB}")
+endif()
 if(CRT_TARGET_OS STREQUAL "linux" AND CRTMEDIA_ENABLE_FFMPEG)
   # --start-group/--end-group: the exact same real GNU-ld circular-
   # archive-resolution gap libcrtgfx's own crtgfx target already
@@ -102,11 +162,22 @@ add_library(crtmedia_shared SHARED
   src/audio.c
   src/format.c
   src/player.c
+  ${CRTMEDIA_BACKEND_OBJECTS}
 )
 if(CRT_TARGET_OS STREQUAL "windows")
   target_sources(crtmedia_shared PRIVATE $<TARGET_OBJECTS:crt_windows_dllcrt>)
 endif()
 target_link_libraries(crtmedia_shared PRIVATE crt_build_flags c_shared m_shared dl_shared cxx_shared)
+if(CRT_TARGET_OS STREQUAL "windows")
+  # Unlike crtmedia's own static archive (where a PUBLIC link on an
+  # unresolved symbol simply defers resolution to whatever links it later),
+  # crtmedia_shared is a real DLL -- Windows requires every symbol resolved
+  # at this target's own link time, so ole32.lib must be linked here
+  # directly too (matches crtmedia's own reasoning just above, and the
+  # FFmpeg CRTMEDIA_FFMPEG_LIBRARIES/crtmedia_shared block's own identical
+  # static-vs-shared distinction further down this file).
+  target_link_libraries(crtmedia_shared PRIVATE "${CRTMEDIA_WINDOWS_OLE32_LIB}")
+endif()
 target_include_directories(crtmedia_shared PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
@@ -325,6 +396,47 @@ set_tests_properties(crtmedia_player_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "crtmedia_player_test: ok"
 )
 set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_player_test_runs)
+
+# crtmedia_audio_sink_test: real coverage for crtmedia/audio_sink.h's
+# Windows (WASAPI) backend (src/arch/windows/audio_sink_wasapi.c, TODO.md's
+# upper-runtime roadmap "Build the software player" step -- "host audio
+# sinks") -- argument validation plus a real open/write/get_position/close
+# cycle against the real default host audio device when one is available
+# (see tests/audio_sink_test.c's own top comment for the graceful-
+# degradation contract when it is not). Windows-only for now, matching
+# CRTMEDIA_BACKEND_SOURCES above (no ALSA/PipeWire or CoreAudio backend
+# exists yet -- each is its own, separate, not-yet-landed pass). Same
+# plain-C-executable shape as crtmedia_frame_test above, no FFmpeg
+# dependency (unconditional on CRTMEDIA_ENABLE_FFMPEG).
+if(CRT_TARGET_OS STREQUAL "windows")
+  add_executable(crtmedia_audio_sink_test
+    ${CRT_STARTUP_OBJECTS}
+    tests/audio_sink_test.c
+  )
+  target_link_libraries(crtmedia_audio_sink_test PRIVATE crt_build_flags c crtmedia)
+  target_include_directories(crtmedia_audio_sink_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include"
+  )
+  target_link_libraries(crtmedia_audio_sink_test PRIVATE crt_compiler_rt_builtins)
+  target_link_options(crtmedia_audio_sink_test PRIVATE
+    -nostdlib
+    -nostartfiles
+    -nodefaultlibs
+    -Wl,/entry:mainCRTStartup
+    -Wl,/subsystem:console
+    -Wl,/OPT:REF
+  )
+  target_link_libraries(crtmedia_audio_sink_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  crt_link_startup_end_objects(crtmedia_audio_sink_test)
+  add_dependencies(crtmedia_audio_sink_test c crt1 crtmedia)
+
+  add_test(NAME crtmedia_audio_sink_test_runs COMMAND crtmedia_audio_sink_test)
+  set_tests_properties(crtmedia_audio_sink_test_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    PASS_REGULAR_EXPRESSION "crtmedia_audio_sink_test: ok"
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_audio_sink_test_runs)
+endif()
 
 # crtmedia_demux_test: real FFmpeg demux/decode coverage (crtmedia/demux.h,
 # src/demux.c) -- opens libcrtmedia/assets/test_tone.wav (a real, tiny,
