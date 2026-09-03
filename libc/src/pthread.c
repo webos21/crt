@@ -35,6 +35,29 @@ void __crt_sys_thread_exit(int status) __attribute__((noreturn));
 #define CRT_COND_SEQUENCE_WORD 0
 #define CRT_COND_WAITERS_WORD 1
 #define CRT_COND_SHARED_WORD 2
+/* A real, confirmed-for-real gap found and fixed 2026-09-03 (libcrtgfx's
+ * own crtgfx_gpu_fence, built the same day, needed a real monotonic-
+ * clock cond timeout and found this instead): pthread_condattr_setclock()
+ * always correctly stored the requested clock in the condattr's own
+ * bits, and pthread_condattr_getclock() always correctly read it back --
+ * but nothing downstream ever consulted it. pthread_cond_init() never
+ * captured which clock a cond var was actually created with anywhere in
+ * its own real storage, and pthread_cond_timedwait() unconditionally
+ * treated every `abstime` as a real CLOCK_REALTIME deadline regardless,
+ * silently making PTHREAD_COND_CLOCK_MONOTONIC a real no-op: a caller
+ * doing the textbook-correct pthread_condattr_setclock(&attr,
+ * PTHREAD_COND_CLOCK_MONOTONIC) -> pthread_cond_init(&cond, &attr) ->
+ * clock_gettime(CLOCK_MONOTONIC, &ts) + offset -> pthread_cond_timedwait()
+ * sequence got a deadline expressed in CLOCK_MONOTONIC's own epoch
+ * (typically "time since boot", a small number) misread as a
+ * CLOCK_REALTIME one (seconds since 1970, a huge number) -- already far
+ * in the real past, so pthread_cond_timedwait() returned ETIMEDOUT
+ * instantly every real time instead of actually waiting. Confirmed for
+ * real on native Windows via a real, failing crtgfx_gpu_test before this
+ * fix landed. This word is the real fix: cond_clock_id() (below) reads
+ * it back, cond_timedwait's own real wait loop uses it instead of always
+ * calling realtime_until(). */
+#define CRT_COND_CLOCK_WORD 3
 #define CRT_BARRIER_COUNT_WORD 0
 #define CRT_BARRIER_WAITERS_WORD 1
 #define CRT_BARRIER_GENERATION_WORD 2
@@ -248,6 +271,17 @@ static int cond_shared(const pthread_cond_t* cond) {
   return cond->__private[CRT_COND_SHARED_WORD] != 0;
 }
 
+/* Real clock this cond var was actually configured with (CRT_COND_CLOCK_
+ * WORD, see that define's own comment) -- CLOCK_MONOTONIC only when
+ * pthread_cond_init() was given a real attr with PTHREAD_COND_CLOCK_
+ * MONOTONIC; CLOCK_REALTIME otherwise, matching a statically-initialized
+ * PTHREAD_COND_INITIALIZER cond var's own real, zero-filled storage and
+ * pthread_condattr_init()'s own real PTHREAD_COND_CLOCK_REALTIME
+ * default. */
+static clockid_t cond_clock_id(const pthread_cond_t* cond) {
+  return (cond->__private[CRT_COND_CLOCK_WORD] == PTHREAD_COND_CLOCK_MONOTONIC) ? CLOCK_MONOTONIC : CLOCK_REALTIME;
+}
+
 static int barrier_shared(const pthread_barrier_t* barrier) {
   return barrier->__private[CRT_BARRIER_SHARED_WORD] != 0;
 }
@@ -271,7 +305,15 @@ static void clear_mutex_owner(pthread_mutex_t* mutex) {
   mutex->__private[CRT_MUTEX_OWNER_HIGH_WORD] = 0;
 }
 
-static int realtime_until(const struct timespec* abstime, struct timespec* remaining) {
+/* Real, clock-parameterized deadline-to-remaining-time computation --
+ * shared by realtime_until() (below, always CLOCK_REALTIME -- POSIX
+ * gives pthread_mutex_timedlock() no clock-attribute concept at all, so
+ * its own real caller must keep using this exact real behavior
+ * unconditionally) and pthread_cond_timedwait()'s own real wait loop
+ * (which, unlike a mutex, must honor a real cond var's own configured
+ * clock -- see CRT_COND_CLOCK_WORD's own comment above for the real gap
+ * this exists to close). */
+static int clock_until(clockid_t clock_id, const struct timespec* abstime, struct timespec* remaining) {
   struct timespec now;
   time_t sec;
   long nsec;
@@ -282,7 +324,7 @@ static int realtime_until(const struct timespec* abstime, struct timespec* remai
   if (abstime->tv_sec < 0 || (abstime->tv_sec == 0 && abstime->tv_nsec == 0)) {
     return ETIMEDOUT;
   }
-  if (clock_gettime(CLOCK_REALTIME, &now) != 0) {
+  if (clock_gettime(clock_id, &now) != 0) {
     return errno;
   }
 
@@ -298,6 +340,10 @@ static int realtime_until(const struct timespec* abstime, struct timespec* remai
   remaining->tv_sec = sec;
   remaining->tv_nsec = nsec;
   return 0;
+}
+
+static int realtime_until(const struct timespec* abstime, struct timespec* remaining) {
+  return clock_until(CLOCK_REALTIME, abstime, remaining);
 }
 
 static int pthread_key_is_valid(pthread_key_t key) {
@@ -658,6 +704,12 @@ int pthread_cond_init(pthread_cond_t* cond, const pthread_condattr_t* attr) {
   cond->__private[CRT_COND_WAITERS_WORD] = 0;
   cond->__private[CRT_COND_SHARED_WORD] =
       (attr != 0 && (*attr & CRT_CONDATTR_PSHARED_BIT) != 0) ? 1 : 0;
+  /* Real fix, see CRT_COND_CLOCK_WORD's own comment above: actually
+   * capture attr's own real configured clock (PTHREAD_COND_CLOCK_
+   * REALTIME when attr is null, matching pthread_condattr_init()'s own
+   * real default) instead of silently discarding it. */
+  cond->__private[CRT_COND_CLOCK_WORD] =
+      (attr != 0) ? (int32_t)(*attr & CRT_CONDATTR_CLOCK_MASK) : PTHREAD_COND_CLOCK_REALTIME;
   return 0;
 }
 
@@ -746,7 +798,10 @@ int pthread_cond_timedwait(
   while (crt_atomic_load_acquire(cond_sequence(cond)) == sequence) {
     struct timespec remaining;
 
-    result = realtime_until(abstime, &remaining);
+    /* Real fix, see CRT_COND_CLOCK_WORD's own comment above: honors this
+     * cond var's own actually-configured clock instead of always
+     * silently treating `abstime` as CLOCK_REALTIME. */
+    result = clock_until(cond_clock_id(cond), abstime, &remaining);
     if (result != 0) {
       break;
     }

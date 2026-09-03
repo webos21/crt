@@ -10,6 +10,64 @@ substantive update.
 
 ## 2026-09-03
 
+- **Fixed the real `pthread_cond_timedwait()`/`PTHREAD_COND_CLOCK_
+  MONOTONIC` gap flagged as a follow-up while building the GPU resource
+  contract earlier the same day** (`libc/src/pthread.c`) -- closing out
+  that entry's own real workaround for real, not leaving it standing.
+
+  The real bug: `pthread_condattr_setclock(attr, PTHREAD_COND_CLOCK_
+  MONOTONIC)` correctly stored the requested clock in the condattr's own
+  bits (`pthread_condattr_getclock()` correctly read it back), but
+  `pthread_cond_init()` never actually captured which clock a cond var
+  was created with anywhere in its own real storage, and `pthread_cond_
+  timedwait()` unconditionally called `realtime_until()`, which always
+  treated `abstime` as a `CLOCK_REALTIME` deadline regardless --
+  `PTHREAD_COND_CLOCK_MONOTONIC` was a silent real no-op: a caller doing
+  the textbook-correct `pthread_condattr_setclock()` ->
+  `pthread_cond_init()` -> `clock_gettime(CLOCK_MONOTONIC, ...)` + offset
+  -> `pthread_cond_timedwait()` sequence got a deadline expressed in
+  `CLOCK_MONOTONIC`'s own epoch (typically "time since boot", a small
+  number) misread as a `CLOCK_REALTIME` one (seconds since 1970, a huge
+  number) -- already far in the real past, so `pthread_cond_timedwait()`
+  returned `ETIMEDOUT` instantly every real time instead of actually
+  waiting.
+
+  Fixed with a new `CRT_COND_CLOCK_WORD` in `pthread_cond_t`'s own
+  existing, mostly-unused `__private[12]` storage (only 3 of 12 words
+  were previously in use): `pthread_cond_init()` now genuinely captures
+  `attr`'s own real configured clock (`PTHREAD_COND_CLOCK_REALTIME` when
+  `attr` is null, matching `pthread_condattr_init()`'s own real default,
+  and matching a statically-initialized `PTHREAD_COND_INITIALIZER` cond
+  var's own real, zero-filled storage). The former single-clock
+  `realtime_until()` was split into a new, clock-parameterized
+  `clock_until(clock_id, abstime, remaining)` -- `realtime_until()`
+  itself now just calls it with `CLOCK_REALTIME` hardcoded, kept
+  unconditionally for `pthread_mutex_timedlock()`'s own real caller
+  (POSIX gives mutexes no clock-attribute concept at all, unlike cond
+  vars -- that real behavior must never change), while `pthread_cond_
+  timedwait()`'s own real wait loop now calls `clock_until(cond_clock_id
+  (cond), ...)`, a small new helper reading the real stored clock back.
+
+  **Verified for real, deliberately by measuring real elapsed wall time,
+  not just checking a return code** (a real, correct `ETIMEDOUT` and the
+  original bug's own instant, wrong one both "return `ETIMEDOUT`"
+  equally): a new case in `tests/pthread_cond_test.c` runs the exact real
+  textbook `pthread_condattr_setclock(PTHREAD_COND_CLOCK_MONOTONIC)` ->
+  `pthread_cond_init()` -> `pthread_cond_timedwait()` sequence end to
+  end, measures real `CLOCK_MONOTONIC` elapsed time across the call, and
+  requires it be at least 5ms for a real 20ms request (the original bug
+  returned in well under 1ms). `libcrtgfx/src/gpu.c`'s own `crtgfx_gpu_
+  fence` -- built the same day around the since-worked-around version of
+  this exact bug -- was reverted to its originally-intended, more
+  principled `CLOCK_MONOTONIC` (immune to a real wall-clock adjustment
+  mid-wait) now that the real bug underneath it is fixed, and `crtgfx_
+  gpu_test`'s own real cross-thread fence wait/signal/timeout coverage
+  re-verified it end to end. Full ctest suite clean, single-pass, on both
+  re-run hosts: Linux (WSL) 117/117, Windows 133/133, both 100%, zero
+  regressions to this foundational libc change (`pthread_mutex_
+  timedlock()`'s own real `CLOCK_REALTIME`-only behavior confirmed
+  unchanged). macOS not yet re-verified for this fix.
+
 - **Closed out `TODO.md`'s upper-runtime roadmap "Fix the common GPU
   resource contract" step** -- the sequential gate before Skia GPU
   rendering and hardware decode can begin, picked up right after the

@@ -118,30 +118,31 @@ crtgfx_result crtgfx_gpu_fence_create(crtgfx_gpu_device* device, crtgfx_gpu_fenc
     return CRTGFX_ERROR_UNSUPPORTED;
   }
   pthread_mutex_init(&fence->lock, NULL);
-  /* Real, confirmed-for-real gap found while building this file
-   * (2026-09-03), NOT worked around silently: this project's own
-   * pthread_condattr_setclock(PTHREAD_COND_CLOCK_MONOTONIC) stores the
-   * requested clock in the attr's own bits (pthread_condattr_getclock()
-   * correctly reads it back), but pthread_cond_timedwait() (libc/src/
-   * pthread.c) never actually consults it -- realtime_until() always
-   * treats `abstime` as a real CLOCK_REALTIME deadline regardless. Using
-   * a CLOCK_MONOTONIC-based deadline here (this project's own usual
-   * preference elsewhere, e.g. crtmedia/player.c, src/arch/linux/
-   * audio_sink_linux.c) produced a deadline already far in CLOCK_
-   * REALTIME's own past (a different epoch entirely), so crtgfx_gpu_
-   * fence_wait() returned CRTGFX_ERROR_TIMEOUT instantly every real
-   * time, confirmed directly via crtgfx_gpu_test's own real timing
-   * assertions on real Windows hardware. Using this pthread
-   * implementation's own real, already-tested default clock
-   * (CLOCK_REALTIME, plain pthread_cond_init(&fence->cond, NULL), no
-   * condattr at all -- matching tests/pthread_cond_test.c's own real,
-   * working usage) instead, here, deliberately -- a real wall-clock
-   * jump mid-wait is a rare edge case for a real, short, bounded fence
-   * timeout, not worth carrying the confirmed-broken monotonic path for.
-   * The real pthread_cond_timedwait()/PTHREAD_COND_CLOCK_MONOTONIC gap
-   * itself is a real, separate, flagged follow-up (see the spawn_task
-   * chip from this same session), not this file's own job to fix. */
-  pthread_cond_init(&fence->cond, NULL);
+  /* A real, confirmed-for-real libc gap (2026-09-02) was found while
+   * first building this file: pthread_condattr_setclock(PTHREAD_COND_
+   * CLOCK_MONOTONIC) stored the requested clock but pthread_cond_
+   * timedwait() (libc/src/pthread.c) never actually consulted it,
+   * silently always treating `abstime` as CLOCK_REALTIME -- confirmed
+   * directly via crtgfx_gpu_test's own real timing assertions on real
+   * Windows hardware (a CLOCK_MONOTONIC-based deadline read back as
+   * already far in CLOCK_REALTIME's own past, an instant, wrong
+   * CRTGFX_ERROR_TIMEOUT every real time). That earlier version of this
+   * function used the plain default clock (CLOCK_REALTIME, no condattr
+   * at all) as a real, deliberate workaround. The underlying bug is now
+   * fixed for real (2026-09-03, libc/src/pthread.c's own CRT_COND_CLOCK_
+   * WORD -- pthread_cond_init()/pthread_cond_timedwait() now genuinely
+   * honor a cond var's own configured clock; verified via tests/
+   * pthread_cond_test.c's own new, real, elapsed-wall-time-measuring
+   * PTHREAD_COND_CLOCK_MONOTONIC coverage), so this reverts to the
+   * originally-intended, more principled CLOCK_MONOTONIC -- immune to a
+   * real wall-clock adjustment mid-wait, matching this project's own
+   * usual preference elsewhere (crtmedia/player.c, src/arch/linux/
+   * audio_sink_linux.c). */
+  pthread_condattr_t attr;
+  pthread_condattr_init(&attr);
+  pthread_condattr_setclock(&attr, PTHREAD_COND_CLOCK_MONOTONIC);
+  pthread_cond_init(&fence->cond, &attr);
+  pthread_condattr_destroy(&attr);
   fence->signaled = 0;
   *out_fence = fence;
   return CRTGFX_OK;
@@ -152,9 +153,9 @@ crtgfx_result crtgfx_gpu_fence_wait(crtgfx_gpu_fence* fence, uint64_t timeout_us
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
   struct timespec deadline;
-  /* CLOCK_REALTIME, not CLOCK_MONOTONIC -- see crtgfx_gpu_fence_create()'s
-   * own comment above for the real, confirmed reason. */
-  clock_gettime(CLOCK_REALTIME, &deadline);
+  /* CLOCK_MONOTONIC, matching crtgfx_gpu_fence_create()'s own cond var
+   * (see that function's own comment above). */
+  clock_gettime(CLOCK_MONOTONIC, &deadline);
   deadline.tv_sec += (time_t)(timeout_us / 1000000);
   deadline.tv_nsec += (long)((timeout_us % 1000000) * 1000);
   if (deadline.tv_nsec >= 1000000000L) {

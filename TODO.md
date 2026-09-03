@@ -269,16 +269,27 @@ working CPU fence is. `crtmedia_gpu_frame_create_cpu()` is the matching real
 software-fallback producer, built directly on the already-existing
 `crtmedia_frame_describe_planes()`.
 
-A real, separate, flagged follow-up was found and worked around while
-building this (not fixed here, out of this step's own scope): this
+A real libc gap found while building this was flagged as a separate
+follow-up and has since been fixed in full (2026-09-03, same day): this
 project's own `pthread_condattr_setclock(PTHREAD_COND_CLOCK_MONOTONIC)`
-stores the requested clock but `pthread_cond_timedwait()` never actually
-honors it, always treating the deadline as `CLOCK_REALTIME` regardless --
+stored the requested clock but `pthread_cond_timedwait()` never actually
+honored it, always treating the deadline as `CLOCK_REALTIME` regardless --
 confirmed for real on Windows via `crtgfx_gpu_test`'s own real timing
 assertions (a monotonic-clock deadline read as an already-past realtime one
-caused instant, incorrect timeouts). `crtgfx_gpu_fence` uses the
-already-working default `CLOCK_REALTIME` clock instead, deliberately, with
-the real bug documented directly in `gpu.c`'s own comment.
+caused instant, incorrect timeouts). `libc/src/pthread.c` now genuinely
+captures a cond var's own configured clock (`CRT_COND_CLOCK_WORD`) and
+honors it in `pthread_cond_timedwait()`; `crtgfx_gpu_fence` reverted to its
+originally-intended `CLOCK_MONOTONIC` (wall-clock-jump immunity) now that
+the real bug underneath it is fixed. Verified for real via a new,
+elapsed-wall-time-measuring `PTHREAD_COND_CLOCK_MONOTONIC` case in
+`tests/pthread_cond_test.c` (the exact regression this bug caused --
+returning instantly instead of actually waiting -- is only catchable by
+measuring real elapsed time, not just checking the return code) and via
+`crtgfx_gpu_test` itself passing again with the real `CLOCK_MONOTONIC`
+fence restored, on both Linux (WSL) and Windows. Full ctest suite clean,
+single-pass, on both: Linux 117/117, Windows 133/133, both 100%, zero
+regressions to this foundational libc change. See `HISTORY.md`'s
+2026-09-03 entry for the full trail.
 
 `crtgfx_gpu_test`/`crtmedia_gpu_frame_test` verified for real on Windows and
 Linux (WSL) -- real argument validation, the honest capability report, a
