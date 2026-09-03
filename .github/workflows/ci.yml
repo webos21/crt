@@ -77,12 +77,30 @@ jobs:
       # is kept and still safe: it only skips Recommends-level packages,
       # not the hard Depends (the actual libc++1/libc++abi1/libunwind
       # runtime .so files) apt resolves for these -dev packages
-      # regardless. ----
+      # regardless.
+      #
+      # libvulkan-dev/mesa-vulkan-drivers (added 2026-09-03, TODO.md's
+      # "Enable Skia GPU rendering" Linux/Vulkan vertical slice):
+      # libcrtgfx/CMakeLists.txt's own find_library(CRTGFX_LINUX_VULKAN_LIB
+      # vulkan) only wires src/arch/linux/gpu_vulkan.c in when it finds a
+      # real, unversioned libvulkan.so -- provided by -dev, not the bare
+      # libvulkan1 runtime package. Without it, CRTGFX_LINUX_VULKAN_LIB
+      # is genuinely absent (not just this backend skipped, but CI never
+      # even compiles/links it), so a real regression in that file could
+      # go unnoticed by this workflow. mesa-vulkan-drivers additionally
+      # gives the runner a real, if software-only (llvmpipe), Vulkan
+      # device -- without it, crtgfx_gpu_test's own device_count>0 branch
+      # (real device create/retain/release/fence) never actually runs
+      # here, only the honest 0-device fallback. Confirmed for real that
+      # CMake itself tolerates libvulkan-dev's absence gracefully (find_
+      # library()'s own configure-time result feeds a real if()-guard
+      # everywhere it's used) -- this addition is for real *coverage*,
+      # not because the build breaks without it.
       - name: Install build tools (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang lld ninja-build cmake libc++-dev libc++abi-dev
+          sudo apt-get install -y --no-install-recommends clang lld ninja-build cmake libc++-dev libc++abi-dev libvulkan-dev mesa-vulkan-drivers
           clang --version
           clang++ --version
           ld.lld --version

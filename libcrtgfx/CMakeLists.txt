@@ -1077,10 +1077,21 @@ if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_ENABLE_SKIA AND CRTGFX_SKIA_LIBRARI
   # LIBRARIES's, for the auto-detection).
   target_link_libraries(crtgfx PRIVATE ${CRTGFX_XKBCOMMON_LIBRARIES})
   # CRTGFX_LINUX_VULKAN_LIB (src/arch/linux/gpu_vulkan.c, 2026-09-03) --
-  # empty and a no-op unless find_library() actually found a real
-  # libvulkan.so on this host (see that variable's own find_library()
-  # call, near CRTGFX_BACKEND_SOURCES's own linux branch).
-  target_link_libraries(crtgfx PRIVATE ${CRTGFX_LINUX_VULKAN_LIB})
+  # real, explicit if()-guard, NOT the same "empty string when absent, so
+  # a bare ${...} expansion is already a safe no-op" trick CRTGFX_XKBCOMMON_
+  # LIBRARIES/CRTGFX_CRT_STATIC_LIBS above rely on. Confirmed for real
+  # (2026-09-03, a genuine CI break on both Linux legs, no libvulkan-dev
+  # installed there): find_library() sets a *not-found* result to the
+  # literal string "CRTGFX_LINUX_VULKAN_LIB-NOTFOUND", not an empty one --
+  # target_link_libraries() specifically recognizes that "-NOTFOUND" suffix
+  # and fails the whole CMake *generate* step outright ("used in this
+  # project but set to NOTFOUND"), later than -- and so more confusingly
+  # than -- the configure-time `if(CRTGFX_LINUX_VULKAN_LIB)`/message(STATUS
+  # ...) guard already used everywhere else this variable appears (which
+  # correctly, silently skipped adding the real Vulkan backend at all).
+  if(CRTGFX_LINUX_VULKAN_LIB)
+    target_link_libraries(crtgfx PRIVATE ${CRTGFX_LINUX_VULKAN_LIB})
+  endif()
   target_link_libraries(crtgfx PRIVATE ${CRTGFX_CRT_STATIC_LIBS})
   target_link_libraries(crtgfx PUBLIC ${CRTGFX_SKIA_LIBRARIES})
   target_link_libraries(crtgfx PRIVATE -Wl,--end-group)
@@ -1109,12 +1120,15 @@ else()
   if(CRTGFX_ENABLE_SKIA AND CRTGFX_SKIA_LIBRARIES)
     target_link_libraries(crtgfx PUBLIC ${CRTGFX_SKIA_LIBRARIES})
   endif()
-  # See the Linux+Skia branch's own, fuller comment on CRTGFX_XKBCOMMON_
-  # LIBRARIES/CRTGFX_LINUX_VULKAN_LIB just above (same file) -- both empty
-  # and a no-op on any host other than Linux (and, for the Vulkan one,
-  # only non-empty when find_library() actually found a real libvulkan).
+  # CRTGFX_XKBCOMMON_LIBRARIES: empty and a no-op on any host other than
+  # Linux (see the Linux+Skia branch's own, fuller comment just above).
   target_link_libraries(crtgfx PRIVATE ${CRTGFX_XKBCOMMON_LIBRARIES})
-  target_link_libraries(crtgfx PRIVATE ${CRTGFX_LINUX_VULKAN_LIB})
+  # CRTGFX_LINUX_VULKAN_LIB: real if()-guard required here too, NOT a bare
+  # ${...} expansion -- see the Linux+Skia branch's own, fuller comment
+  # just above (same file) for the real CI break this guards against.
+  if(CRTGFX_LINUX_VULKAN_LIB)
+    target_link_libraries(crtgfx PRIVATE ${CRTGFX_LINUX_VULKAN_LIB})
+  endif()
   target_link_libraries(crtgfx PRIVATE ${CRTGFX_CRT_STATIC_LIBS})
 endif()
 if(CRT_TARGET_OS STREQUAL "windows")
@@ -1259,9 +1273,17 @@ else()
   # own definition, near CRTGFX_SKIA_LIBRARIES's).
   target_link_libraries(crtgfx_shared PRIVATE ${CRTGFX_XKBCOMMON_LIBRARIES})
   # CRTGFX_LINUX_VULKAN_LIB (src/arch/linux/gpu_vulkan.c, 2026-09-03) --
-  # same shape as CRTGFX_XKBCOMMON_LIBRARIES just above: empty and a no-op
-  # unless find_library() actually found a real libvulkan.so on this host.
-  target_link_libraries(crtgfx_shared PRIVATE ${CRTGFX_LINUX_VULKAN_LIB})
+  # real if()-guard required, NOT the same "bare ${...} expansion is
+  # already a safe no-op when empty" shape CRTGFX_XKBCOMMON_LIBRARIES above
+  # gets away with. See crtgfx's own, fuller comment (same file, its
+  # CRTGFX_LINUX_VULKAN_LIB linking just above) for the real CI break this
+  # guards against: find_library() sets a *not-found* result to the
+  # literal string "CRTGFX_LINUX_VULKAN_LIB-NOTFOUND", not an empty one,
+  # and target_link_libraries() fails the whole CMake generate step
+  # outright on that "-NOTFOUND" suffix.
+  if(CRTGFX_LINUX_VULKAN_LIB)
+    target_link_libraries(crtgfx_shared PRIVATE ${CRTGFX_LINUX_VULKAN_LIB})
+  endif()
   target_link_libraries(crtgfx_shared PRIVATE ${CRTGFX_CRT_SHARED_LIBS})
   if(CRTGFX_SHARED_SKIA_LINUX_GROUPED)
     target_link_libraries(crtgfx_shared PRIVATE -Wl,--end-group)

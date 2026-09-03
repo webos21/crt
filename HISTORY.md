@@ -164,6 +164,42 @@ substantive update.
   presentation and the Windows/D3D12 and macOS/Metal backends remain
   explicit, separate follow-up steps -- see `TODO.md`.
 
+  **Real CI break found and fixed the same day, right after this landed**:
+  GitHub Actions' own `linux-amd64`/`linux-arm64` legs failed at the CMake
+  *configure* step (both architectures), not build or test. Root cause,
+  confirmed by reproducing the exact failure locally (a fresh clone,
+  `libvulkan.so` deliberately hidden, matching CI's own runner -- it has
+  no `libvulkan-dev` installed): `find_library(CRTGFX_LINUX_VULKAN_LIB
+  vulkan)` sets a *not-found* result to the literal string
+  `"CRTGFX_LINUX_VULKAN_LIB-NOTFOUND"`, not an empty one --
+  `target_link_libraries(crtgfx PRIVATE ${CRTGFX_LINUX_VULKAN_LIB})` (and
+  the matching `crtgfx_shared` copy), written to mirror `CRTGFX_XKBCOMMON_
+  LIBRARIES`'s own "empty string when absent, so a bare `${...}` expansion
+  is already a safe no-op" shape, does not actually have that shape for a
+  raw `find_library()` result -- CMake's own `target_link_libraries()`
+  specifically recognizes a `-NOTFOUND`-suffixed argument and fails the
+  whole *generate* step outright ("used in this project, but... set to
+  NOTFOUND"), which is why this surfaced as a configure-stage failure
+  distinct from (and more confusing than) the real, working `if(CRTGFX_
+  LINUX_VULKAN_LIB)` guard already used everywhere else this variable
+  appears. Fixed by wrapping all three real `target_link_libraries(...
+  ${CRTGFX_LINUX_VULKAN_LIB})` call sites in an explicit `if()` guard.
+  Reproduced and verified for real, twice: the exact CI failure (fresh
+  clone, `libvulkan.so` hidden, unfixed CMakeLists.txt) and the exact CI
+  fix (same setup, fixed CMakeLists.txt) via `cmake --workflow --preset
+  linux-host-ninja-debug` end to end (configure+build+111/111 tests),
+  matching this repo's own `.github/workflows/ci.yml` invocation exactly.
+  `.github/workflows/ci.yml` also gained `libvulkan-dev`/`mesa-vulkan-
+  drivers` in its Linux apt step -- not required for the fix (CMake now
+  tolerates their absence gracefully), but real, valuable coverage:
+  without them, CI would silently never compile `gpu_vulkan.c` at all, and
+  without `mesa-vulkan-drivers` specifically, `crtgfx_gpu_test`'s own real
+  device_count>0 branch (device create/retain/release/fence) would never
+  run there, only the honest 0-device fallback. Verified for real with
+  `mesa-vulkan-drivers`' own `dzn` ICD deliberately hidden too (matching a
+  real CI runner: software `llvmpipe` only, no hardware-backed device) --
+  `crtgfx_gpu_test` passes identically either way.
+
 - **macOS re-verified for both the common GPU resource contract and the
   `pthread_cond_timedwait()`/`PTHREAD_COND_CLOCK_MONOTONIC` fix** (both
   landed the same day from a non-macOS session; see the two entries below
