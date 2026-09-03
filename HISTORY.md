@@ -10,6 +10,45 @@ substantive update.
 
 ## 2026-09-03
 
+- **macOS re-verified for both the common GPU resource contract and the
+  `pthread_cond_timedwait()`/`PTHREAD_COND_CLOCK_MONOTONIC` fix** (both
+  landed the same day from a non-macOS session; see the two entries below
+  for the full original writeups). Rebuilt and ran the real evidence for
+  each on real macOS hardware rather than trusting the existing "macOS not
+  yet re-verified" notes.
+
+  **The `pthread_cond_timedwait()` fix** needed no macOS-specific work at
+  all to verify, and none to land in the first place: `libc/src/pthread.c`'s
+  `pthread_cond_init()`/`pthread_cond_timedwait()`/`CRT_COND_CLOCK_WORD`
+  logic is entirely portable, with no `CRT_TARGET_OS_MACOS` branch anywhere
+  near it -- macOS's own `pthread_mutex_t`/`pthread_cond_t` are this
+  project's own from-scratch userspace implementation over real `os_sync_
+  wait_on_address`/`os_sync_wake_by_address_any` (confirmed earlier this
+  same week while building the macOS CoreAudio audio sink backend), never
+  a wrapper around Apple's own opaque pthread objects the way `pthread_
+  create()` itself is. So the fix simply needed a rebuild, not a port.
+  `tests/pthread_cond_test.c`'s new elapsed-wall-time-measuring
+  `PTHREAD_COND_CLOCK_MONOTONIC` case passed for real on macOS (the exact
+  regression this bug caused -- returning in well under 1ms instead of the
+  requested 20ms -- is only catchable by measuring real elapsed time, which
+  this test does).
+
+  **The common GPU resource contract**: `crtgfx_gpu_test` (real argument
+  validation, the honest `CRTGFX_GPU_BACKEND_NONE`/0-devices capability
+  report, and -- the specific piece that depends on the `pthread_cond_
+  timedwait()` fix above -- a real cross-thread `crtgfx_gpu_fence` wait/
+  signal/timeout using the fence's own real `PTHREAD_COND_CLOCK_MONOTONIC`
+  deadline, a real `pthread_create()`'d signaler thread) and `crtmedia_
+  gpu_frame_test` (real, correctly-strided, independently-addressable
+  plane storage for both packed RGBA8888 and chroma-subsampled planar
+  YUV420P `crtmedia_gpu_frame`) both pass on macOS. `crtgfx_gpu_test`
+  passing is itself a second, independent real confirmation that the
+  `PTHREAD_COND_CLOCK_MONOTONIC` fix above genuinely works on this host,
+  not just the standalone unit test.
+
+  Full `ctest` suite clean at 117/117, matching Linux (117/117) and
+  Windows (133/133) exactly.
+
 - **Fixed the real `pthread_cond_timedwait()`/`PTHREAD_COND_CLOCK_
   MONOTONIC` gap flagged as a follow-up while building the GPU resource
   contract earlier the same day** (`libc/src/pthread.c`) -- closing out

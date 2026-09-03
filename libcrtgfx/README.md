@@ -79,8 +79,14 @@ real, working, host-independent CPU synchronization primitive right now
 (built on this project's own `pthread_mutex_t`/`pthread_cond_t`) --
 "software fallback must remain a first-class path" is exactly what a real,
 working CPU fence is. `crtgfx_gpu_test` covers real argument validation,
-the honest capability report, and a real cross-thread wait/signal/timeout.
-See `HISTORY.md`'s 2026-09-03 entry for the full trail.
+the honest capability report, and a real cross-thread wait/signal/timeout
+-- verified on Linux, Windows, and macOS. Landing this also surfaced and
+fixed a real, previously-latent libc bug: `pthread_cond_timedwait()` never
+actually honored `pthread_condattr_setclock(PTHREAD_COND_CLOCK_MONOTONIC)`,
+always treating the deadline as `CLOCK_REALTIME` -- fixed in
+`libc/src/pthread.c`, re-verified for real (elapsed wall time, not just
+the return code) on all three hosts. See `HISTORY.md`'s 2026-09-03 entry
+for the full trail.
 
 See `docs/libcrtgfx_api_policy.md` for the API boundary decision.
 See `docs/libcrtgfx_wayland_plan.md` for the Wayland/compositor plan.

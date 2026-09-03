@@ -286,20 +286,29 @@ elapsed-wall-time-measuring `PTHREAD_COND_CLOCK_MONOTONIC` case in
 returning instantly instead of actually waiting -- is only catchable by
 measuring real elapsed time, not just checking the return code) and via
 `crtgfx_gpu_test` itself passing again with the real `CLOCK_MONOTONIC`
-fence restored, on both Linux (WSL) and Windows. Full ctest suite clean,
-single-pass, on both: Linux 117/117, Windows 133/133, both 100%, zero
-regressions to this foundational libc change. See `HISTORY.md`'s
-2026-09-03 entry for the full trail.
-
-`crtgfx_gpu_test`/`crtmedia_gpu_frame_test` verified for real on Windows and
-Linux (WSL) -- real argument validation, the honest capability report, a
-real cross-thread fence wait/signal/timeout (a real `pthread_create()`'d
-signaler thread), and real, correctly-strided, independently-addressable
-plane storage for both a packed (RGBA8888) and chroma-subsampled planar
-(YUV420P) `crtmedia_gpu_frame`. Full ctest suite clean, single-pass, on both
-re-run hosts: Linux (WSL) 117/117, Windows 133/133, both 100%. macOS not yet
-re-verified for this step. See `HISTORY.md`'s 2026-09-03 entry for the full
+fence restored, on both Linux (WSL) and Windows. **Re-verified on real
+macOS hardware too**: this fix lives entirely in `libc/src/pthread.c`'s
+own portable `pthread_cond_init()`/`pthread_cond_timedwait()` (no
+`CRT_TARGET_OS_MACOS`-specific code path -- macOS's own `pthread_mutex_t`/
+`pthread_cond_t` are this project's own from-scratch userspace
+implementation, not a wrapper around Apple's opaque ones, unlike
+`pthread_create()`), so it needed only a rebuild, not a port: the same
+elapsed-wall-time-measuring `tests/pthread_cond_test.c` case and
+`crtgfx_gpu_test`'s own real `CLOCK_MONOTONIC` fence both pass for real.
+Full ctest suite clean, single-pass, on all three hosts: Linux 117/117,
+Windows 133/133, macOS 117/117, all 100%, zero regressions to this
+foundational libc change. See `HISTORY.md`'s 2026-09-03 entry for the full
 trail.
+
+`crtgfx_gpu_test`/`crtmedia_gpu_frame_test` verified for real on Windows,
+Linux (WSL), and macOS -- real argument validation, the honest capability
+report, a real cross-thread fence wait/signal/timeout (a real
+`pthread_create()`'d signaler thread), and real, correctly-strided,
+independently-addressable plane storage for both a packed (RGBA8888) and
+chroma-subsampled planar (YUV420P) `crtmedia_gpu_frame`. Full ctest suite
+clean, single-pass, on all three hosts: Linux (WSL) 117/117, Windows
+133/133, macOS 117/117, all 100%. See `HISTORY.md`'s 2026-09-03 entry for
+the full trail.
 
 1. **Enable Skia GPU rendering.** Start with a Ganesh vertical slice and keep
    Graphite as a later measured alternative: Direct3D on Windows, Metal on
