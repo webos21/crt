@@ -233,10 +233,16 @@ that case. Verified for real: the fixture's real ~1 real second of content
 takes a real, correctly-paced ~1 real second of wall-clock time to play on
 Windows (confirming `WAIT`'s own real sleeps genuinely pace the loop, not
 a spin-through), and completes gracefully inside the real audio-failure
-path on Linux/WSL. Full ctest suite clean, single-pass, on both re-run
-hosts: Linux (WSL) 115/115, Windows 131/131, both 100%. macOS not yet
-re-verified for this specific step. See `HISTORY.md`'s 2026-09-03 entry
-for the full trail.
+path on Linux/WSL. **Re-verified on macOS the same week, from real macOS
+hardware**: `crtmedia_playback_pipeline_test` runs against the real,
+already-verified CoreAudio backend (not the graceful-degradation path) and
+plays the fixture's ~1 real second of content in a real, correctly-paced
+~1.19 real second of wall-clock time (5 consecutive runs, 1.19s/1.20s/
+1.19s and two more, no flakiness) -- the real device-backpressure-paced
+path, genuinely exercised, not just the fallback. Full ctest suite clean,
+single-pass, on all three hosts: Linux (WSL) 115/115, Windows 131/131,
+macOS 115/115, all 100%. See `HISTORY.md`'s 2026-09-03 entry for the full
+trail.
 
 1. **Fix the common GPU resource contract.** Define opaque `crtgfx` GPU
    device/surface and `crtmedia` GPU-frame objects, capability queries,

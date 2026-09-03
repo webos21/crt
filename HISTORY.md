@@ -89,6 +89,21 @@ substantive update.
   both re-run hosts: Linux (WSL) 115/115, Windows 131/131, both 100%, zero
   regressions. macOS not yet re-verified for this specific step.
 
+- **macOS re-verified for the software player's render-loop pipeline too**
+  (real macOS hardware, picked up right after the entry above landed).
+  Rebuilt and ran `crtmedia_playback_pipeline_test` against the real,
+  already-verified CoreAudio backend from the day before (2026-09-02's own
+  entry) -- unlike Linux/WSL's own run, this genuinely exercises the real
+  device-backpressure-paced path throughout, never the graceful audio-
+  failure fallback (no equivalent of WSLg's own PulseAudio bridge stall
+  exists on real CoreAudio). The same real MP4 fixture's ~1 real second of
+  content played in a real, correctly-paced ~1.19 real second of wall-
+  clock time, confirmed consistent across 5 consecutive runs (1.19s,
+  1.20s, 1.19s, and two more, no flakiness) -- `WAIT`'s own real sleeps and
+  the real audio-sink backpressure both genuinely pace the loop on this
+  host too, not just Windows's. Full `ctest` suite clean at 115/115,
+  matching Linux (115/115) and Windows (131/131) exactly.
+
 ## 2026-09-02
 
 - **Closed the macOS half of the `getegid()` gap the Linux audio sink
