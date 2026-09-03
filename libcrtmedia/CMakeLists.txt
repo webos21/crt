@@ -136,6 +136,7 @@ add_library(crtmedia STATIC
   src/audio.c
   src/format.c
   src/player.c
+  src/gpu_frame.c
   ${CRTMEDIA_BACKEND_OBJECTS}
 )
 target_link_libraries(crtmedia PRIVATE crt_build_flags)
@@ -213,6 +214,7 @@ add_library(crtmedia_shared SHARED
   src/audio.c
   src/format.c
   src/player.c
+  src/gpu_frame.c
   ${CRTMEDIA_BACKEND_OBJECTS}
 )
 if(CRT_TARGET_OS STREQUAL "windows")
@@ -353,6 +355,55 @@ set_tests_properties(crtmedia_frame_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "crtmedia_frame_test: ok"
 )
 set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_frame_test_runs)
+
+# crtmedia_gpu_frame_test: deterministic, host-resource-free coverage for
+# crtmedia/gpu_frame.h (TODO.md's upper-runtime roadmap "Fix the common
+# GPU resource contract" step, crtmedia's own half -- see libcrtgfx/
+# CMakeLists.txt's own crtgfx_gpu_test for the crtgfx device/surface/fence
+# half). Same plain-C-executable shape as crtmedia_frame_test just above,
+# unconditional, no FFmpeg dependency.
+add_executable(crtmedia_gpu_frame_test
+  ${CRT_STARTUP_OBJECTS}
+  tests/gpu_frame_test.c
+)
+target_link_libraries(crtmedia_gpu_frame_test PRIVATE crt_build_flags c crtmedia)
+target_include_directories(crtmedia_gpu_frame_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/libc/include"
+)
+target_link_libraries(crtmedia_gpu_frame_test PRIVATE crt_compiler_rt_builtins)
+target_link_options(crtmedia_gpu_frame_test PRIVATE
+  -nostdlib
+  -nostartfiles
+  -nodefaultlibs
+)
+if(CRT_TARGET_OS STREQUAL "macos")
+  target_link_options(crtmedia_gpu_frame_test PRIVATE
+    -Wl,-e,_start
+    -Wl,-dead_strip
+  )
+  target_link_libraries(crtmedia_gpu_frame_test PRIVATE System)
+elseif(CRT_TARGET_OS STREQUAL "linux")
+  target_link_options(crtmedia_gpu_frame_test PRIVATE
+    -Wl,-e,_start
+    -Wl,--gc-sections
+  )
+elseif(CRT_TARGET_OS STREQUAL "windows")
+  target_link_options(crtmedia_gpu_frame_test PRIVATE
+    -Wl,/entry:mainCRTStartup
+    -Wl,/subsystem:console
+    -Wl,/OPT:REF
+  )
+  target_link_libraries(crtmedia_gpu_frame_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+endif()
+crt_link_startup_end_objects(crtmedia_gpu_frame_test)
+add_dependencies(crtmedia_gpu_frame_test c crt1 crtmedia)
+
+add_test(NAME crtmedia_gpu_frame_test_runs COMMAND crtmedia_gpu_frame_test)
+set_tests_properties(crtmedia_gpu_frame_test_runs PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  PASS_REGULAR_EXPRESSION "crtmedia_gpu_frame_test: ok"
+)
+set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_gpu_frame_test_runs)
 
 # crtmedia_format_test: deterministic, FFmpeg-free coverage for crtmedia/
 # format.h (docs/libcrtmedia_api_policy.md's decided core, TODO.md's
@@ -902,7 +953,16 @@ if(CRTMEDIA_ENABLE_FFMPEG)
   set_tests_properties(crtmedia_playback_pipeline_test_runs PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     PASS_REGULAR_EXPRESSION "crtmedia_playback_pipeline_test: ok"
-    TIMEOUT 30
+    # Real headroom for this test's own documented worst real case: one
+    # real mid-stream Linux Pulse audio-device stall (up to
+    # CRTMEDIA_PULSE_REPLY_DEADLINE_US, ~10s, audio_sink_linux.c) before
+    # the real graceful video-only fallback kicks in -- confirmed for
+    # real (2026-09-03) against this exact dev machine's own WSLg
+    # PulseAudio bridge; 30s was too tight and produced a real, false
+    # ctest TIMEOUT on a run that was genuinely still making progress,
+    # not hung. See tests/playback_pipeline_test.c's own matching
+    # wall_elapsed_us upper-bound comment.
+    TIMEOUT 45
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_playback_pipeline_test_runs)
 endif()

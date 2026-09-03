@@ -10,6 +10,124 @@ substantive update.
 
 ## 2026-09-03
 
+- **Closed out `TODO.md`'s upper-runtime roadmap "Fix the common GPU
+  resource contract" step** -- the sequential gate before Skia GPU
+  rendering and hardware decode can begin, picked up right after the
+  user's own macOS re-verification of the software player's render-loop
+  pipeline confirmed that prior step complete.
+
+  Genuinely greenfield work, confirmed by direct exploration before
+  designing anything: zero public GPU API existed anywhere in this
+  project. `crtgfx_framebuffer` (a plain CPU pixel struct) was the only
+  resource-handoff type in `crtgfx/window.h`. Windows (`window_win32.c`)
+  already has a real, *private* D3D11 device + DXGI swap chain, but only
+  to make `CRTGFX_EVENT_FRAME_COMPLETE` genuinely asynchronous (GDI has
+  no completion signal) -- created per-window, never exposed. macOS/Linux
+  had no GPU objects at all. `libcrtmedia` had zero GPU/hwaccel code
+  anywhere. No doc committed to a backend choice or type name. Landed the
+  same way this project's own established pattern always has for a step
+  like this (`crtmedia/format.h`+`extractor.h`+`codec.h` before FFmpeg
+  decode was wired in; `crtmedia/frame.h`+`audio.h` before any decoder
+  existed at all): a real, working, host-independent *contract*, with a
+  real reference implementation that honestly reports "no backend yet"
+  where that is true, not a header-only stub.
+
+  **`crtgfx/gpu.h` + `src/gpu.c`** (new): opaque `crtgfx_gpu_device`/
+  `_surface`/`_fence`; real `crtgfx_gpu_backend`/`crtgfx_gpu_memory_kind`
+  enums (naming Direct3D/Metal/Vulkan only as symbolic tags -- confirmed
+  this does not violate the "no host SDK type in a public header" policy,
+  exactly like `crtmedia_pixel_format` already names RGBA8888/YUV420P
+  without importing any FFmpeg type); a new `CRTGFX_ERROR_TIMEOUT` added
+  to the existing `crtgfx_result` enum (`window.h`) for the fence's own
+  real timeout case. `crtgfx_gpu_query_capabilities()` honestly reports
+  `CRTGFX_GPU_BACKEND_NONE`/0 devices everywhere today (the private
+  Windows D3D11 device is not wired to this -- that real integration is
+  a later step's job); `crtgfx_gpu_device_create()`/`crtgfx_gpu_surface_
+  create()` correctly, always report `CRTGFX_ERROR_UNSUPPORTED` as a
+  result -- the same graceful "no usable host backend right now"
+  contract `crtgfx_window_create()` already uses, not a lie. Device
+  retain/release is real, atomic shared ownership (`<stdatomic.h>`, a
+  real, already-existing public C11 wrapper over Clang's own
+  `__c11_atomic_*` builtins, previously unused outside `libc`'s own
+  tests) -- a future decode thread and a future render thread may both
+  need to hold the same real device for zero-copy interop. `gpu.h`'s own
+  doc comment records a real note for whoever builds the next step:
+  `window_win32.c`'s existing private per-window D3D11 device is a real,
+  live candidate for replacement by `crtgfx_gpu_surface_create()` once a
+  real backend lands (Skia's `GrDirectContext` and the presentation swap
+  chain will very likely need to share one real device), not a second
+  mechanism to keep running alongside it.
+
+  `crtgfx_gpu_fence`, unlike device/surface, is a real, working,
+  host-independent CPU synchronization primitive *right now* -- this
+  step's own "software fallback must remain a first-class path"
+  requirement is exactly what a real, working CPU fence already is, with
+  no GPU device required at all (`device == NULL` is valid input to
+  `crtgfx_gpu_fence_create()`, not an error -- the only reachable case
+  today). Built on this project's own already-proven `pthread_mutex_t`/
+  `pthread_cond_t` pattern (matching `audio_sink_coreaudio.c`'s own real
+  producer/consumer wait/broadcast shape).
+
+  **A real pthread bug found and worked around while building the fence,
+  not fixed here** (flagged as its own separate follow-up): this
+  project's own `pthread_condattr_setclock(PTHREAD_COND_CLOCK_MONOTONIC)`
+  correctly stores the requested clock in the condattr's own bits
+  (`pthread_condattr_getclock()` reads it back correctly), but
+  `pthread_cond_init()` never actually captures which clock a cond var
+  was created with, and `pthread_cond_timedwait()` (`libc/src/pthread.c`)
+  unconditionally treats `abstime` as a `CLOCK_REALTIME` deadline
+  regardless -- confirmed for real on native Windows: `crtgfx_gpu_fence`
+  originally used the textbook-correct monotonic-clock pattern, and
+  `crtgfx_gpu_test`'s own real timing assertions (a 50ms fence timeout, a
+  real cross-thread signal test) failed instantly every real time, since
+  a `CLOCK_MONOTONIC`-based deadline (a small "time since boot" number)
+  read back as an already-far-in-the-past `CLOCK_REALTIME` deadline
+  (seconds since 1970). Fixed *in this file* by using this pthread
+  implementation's own real, already-tested default clock instead
+  (`CLOCK_REALTIME`, plain `pthread_cond_init(&fence->cond, NULL)`,
+  matching `tests/pthread_cond_test.c`'s own real, working usage) --
+  the real underlying `pthread_cond_timedwait()` gap itself is a real,
+  separate, flagged follow-up task, not this step's own job to fix.
+
+  **`libcrtmedia/include/crtmedia/gpu_frame.h` + `src/gpu_frame.c`**
+  (new): a real, transparent `crtmedia_gpu_frame` struct, deliberately
+  mirroring `crtmedia_frame`/`crtmedia_audio_buffer`'s own established
+  shape (neither sibling is opaque, unlike `crtgfx`'s own device/surface/
+  fence -- each library follows its own already-established convention).
+  Deliberately its own, fully independent contract from `crtgfx/gpu.h`
+  -- confirmed for real before designing anything that `libcrtmedia` has
+  zero build dependency on `libcrtgfx` today (no `target_link_libraries`/
+  `add_subdirectory` edge exists anywhere) -- `crtmedia_gpu_memory_kind`
+  and the `device_id` field mirror `crtgfx`'s own shape without literally
+  sharing the type, matching the already-established `CRTMEDIA_AUDIO_
+  TIMESTAMP_NONE`-is-its-own-constant-not-shared-with-`CRTMEDIA_FRAME_
+  TIMESTAMP_NONE` precedent (`crtmedia/audio.h`) exactly. `crtmedia_gpu_
+  frame_create_cpu()` is the real software-fallback producer that exists
+  today (no real hardware-decode producer exists anywhere in this
+  project yet, confirmed by grep) -- built directly on the already-
+  existing, already-tested `crtmedia_frame_describe_planes()` (`crtmedia/
+  frame.h`) for its own real plane-layout math, one single real
+  allocation backing every plane, not a second stride-math
+  implementation.
+
+  **Verified for real**: `crtgfx_gpu_test` (real argument validation on
+  every function; the honest `CRTGFX_GPU_BACKEND_NONE`/0-device report;
+  signal-before-wait returning immediately, level-triggered not edge-
+  triggered; a real, genuine timeout on a never-signaled fence; and a
+  real cross-thread test -- a real `pthread_create()`'d signaler thread
+  sleeps then signals, the main thread's own `wait()` must actually block
+  for a real, measurable amount of wall time and then return `CRTGFX_OK`,
+  proving a genuine blocking wait/wake, not a busy-poll or a coincidental
+  instant return) and `crtmedia_gpu_frame_test` (real, correctly-strided,
+  independently-addressable plane storage -- a real byte pattern written
+  through each plane's own `data`/`stride` and read back -- for both a
+  packed RGBA8888 frame and a chroma-subsampled three-plane YUV420P one;
+  real ownership/release; a non-owning view that does not attempt to free
+  static storage) both pass, single clean pass, on Windows and Linux
+  (WSL) -- the two hosts this session can actually execute. Full ctest
+  suite clean on both: Linux (WSL) 117/117, Windows 133/133, both 100%,
+  zero regressions. macOS not yet re-verified for this step.
+
 - **Closed out `TODO.md`'s upper-runtime roadmap "Finish the software
   player" step in full** -- the real buffering/frame-drop policy and the
   full demux+decode+sink+clock render-loop pipeline that step's own last

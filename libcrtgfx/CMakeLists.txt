@@ -1,6 +1,7 @@
 set(CRTGFX_COMMON_SOURCES
   src/window.c
   src/wayland_weston.c
+  src/gpu.c
 )
 
 # Skia's own source pin/sparse-checkout/local-patch record now lives in
@@ -1314,6 +1315,59 @@ set_tests_properties(crtgfx_synthetic_event_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "crtgfx_synthetic_event: ok"
 )
 set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_synthetic_event_runs)
+
+# crtgfx_gpu_test: real coverage for crtgfx/gpu.h (TODO.md's upper-runtime
+# roadmap "Fix the common GPU resource contract" step) -- argument
+# validation, crtgfx_gpu_query_capabilities()'s own real, honest
+# CRTGFX_GPU_BACKEND_NONE/0-devices report, and a real, working,
+# cross-thread crtgfx_gpu_fence wait/signal/timeout (a real
+# pthread_create()'d signaler thread). Needs no real host window/display
+# connection (unlike crtgfx_synthetic_event above), so no rootfs/backend
+# dependency -- same plain-C-executable shape as libcrtmedia's own
+# crtmedia_player_test (real pthread_create() usage, no host GPU/display
+# resource needed at all).
+add_executable(crtgfx_gpu_test
+  ${CRT_STARTUP_OBJECTS}
+  tests/gpu_test.c
+)
+target_link_libraries(crtgfx_gpu_test PRIVATE crt_build_flags c crtgfx)
+target_include_directories(crtgfx_gpu_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/libc/include"
+)
+target_link_libraries(crtgfx_gpu_test PRIVATE crt_compiler_rt_builtins)
+target_link_options(crtgfx_gpu_test PRIVATE
+  -nostdlib
+  -nostartfiles
+  -nodefaultlibs
+)
+if(CRT_TARGET_OS STREQUAL "macos")
+  target_link_options(crtgfx_gpu_test PRIVATE
+    -Wl,-e,_start
+    -Wl,-dead_strip
+  )
+  target_link_libraries(crtgfx_gpu_test PRIVATE System)
+elseif(CRT_TARGET_OS STREQUAL "linux")
+  target_link_options(crtgfx_gpu_test PRIVATE
+    -Wl,-e,_start
+    -Wl,--gc-sections
+  )
+elseif(CRT_TARGET_OS STREQUAL "windows")
+  target_link_options(crtgfx_gpu_test PRIVATE
+    -Wl,/entry:mainCRTStartup
+    -Wl,/subsystem:console
+    -Wl,/OPT:REF
+  )
+  target_link_libraries(crtgfx_gpu_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+endif()
+crt_link_startup_end_objects(crtgfx_gpu_test)
+add_dependencies(crtgfx_gpu_test c crt1)
+
+add_test(NAME crtgfx_gpu_test_runs COMMAND crtgfx_gpu_test)
+set_tests_properties(crtgfx_gpu_test_runs PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  PASS_REGULAR_EXPRESSION "crtgfx_gpu_test: ok"
+)
+set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_gpu_test_runs)
 
 # crt_wire_skia_executable(target_name): every Skia-specific compile/link
 # flag a real, executable C++ crtgfx consumer needs, extracted into a

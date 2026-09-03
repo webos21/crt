@@ -62,5 +62,25 @@ Current baseline:
   `crtgfx_keyboard_interactive` draws typed text with the same path. This is
   verified on Linux, macOS, and Windows; host libc++ is not a substitute.
 
+`include/crtgfx/gpu.h` (TODO.md's upper-runtime roadmap "Fix the common GPU
+resource contract" step) is the real, host-independent shape a later real GPU
+backend will implement underneath -- `crtgfx_gpu_device`/`_surface`/`_fence`
+(opaque), `crtgfx_gpu_backend`/`crtgfx_gpu_memory_kind` (real enums, no host
+SDK type ever named as anything but a symbolic tag), capability queries,
+real atomic device retain/release, and device affinity. No real GPU backend
+exists on any host yet (Windows' own private per-window D3D11 device,
+`window_win32.c`, exists solely for `CRTGFX_EVENT_FRAME_COMPLETE`'s own
+async-present signaling, not wired to this contract) -- `crtgfx_gpu_query_
+capabilities()` honestly reports `CRTGFX_GPU_BACKEND_NONE`/0 devices
+everywhere today, and device/surface creation correctly, always reports
+`CRTGFX_ERROR_UNSUPPORTED`, the same graceful contract `crtgfx_window_
+create()` already uses. `crtgfx_gpu_fence`, unlike device/surface, is a
+real, working, host-independent CPU synchronization primitive right now
+(built on this project's own `pthread_mutex_t`/`pthread_cond_t`) --
+"software fallback must remain a first-class path" is exactly what a real,
+working CPU fence is. `crtgfx_gpu_test` covers real argument validation,
+the honest capability report, and a real cross-thread wait/signal/timeout.
+See `HISTORY.md`'s 2026-09-03 entry for the full trail.
+
 See `docs/libcrtgfx_api_policy.md` for the API boundary decision.
 See `docs/libcrtgfx_wayland_plan.md` for the Wayland/compositor plan.

@@ -244,47 +244,91 @@ single-pass, on all three hosts: Linux (WSL) 115/115, Windows 131/131,
 macOS 115/115, all 100%. See `HISTORY.md`'s 2026-09-03 entry for the full
 trail.
 
-1. **Fix the common GPU resource contract.** Define opaque `crtgfx` GPU
-   device/surface and `crtmedia` GPU-frame objects, capability queries,
-   CPU/GPU memory kinds, retain/release, device affinity, and acquire/release
-   fences without exposing Direct3D, Metal, Vulkan, or FFmpeg types in public
-   headers. Software fallback must remain a first-class path.
-2. **Enable Skia GPU rendering.** Start with a Ganesh vertical slice and keep
+**The common GPU resource contract is done** (2026-09-03), closing out the
+sequential gate before Skia GPU rendering and hardware decode can begin:
+`crtgfx/gpu.h` (`crtgfx_gpu_device`/`_surface`/`_fence`, opaque;
+`crtgfx_gpu_backend`/`crtgfx_gpu_memory_kind` real enums; real atomic
+device retain/release; device affinity via a real `device_index`) and
+`crtmedia/gpu_frame.h` (a real, transparent `crtmedia_gpu_frame`, mirroring
+`crtmedia_frame`/`crtmedia_audio_buffer`'s own established shape, not
+`crtgfx`'s opaque one -- the two contracts are deliberately independent,
+`libcrtmedia` has no build dependency on `libcrtgfx`). No real GPU backend
+exists on any host yet (confirmed by direct exploration before landing this:
+Windows' own private per-window D3D11 device, `window_win32.c`, exists
+solely for `CRTGFX_EVENT_FRAME_COMPLETE`'s own async-present signaling, not
+wired to this contract; macOS/Linux have no GPU objects at all) --
+`crtgfx_gpu_query_capabilities()` honestly reports `CRTGFX_GPU_BACKEND_NONE`/
+0 devices everywhere today, and device/surface creation correctly, always
+reports `CRTGFX_ERROR_UNSUPPORTED`, the same graceful contract
+`crtgfx_window_create()` already uses -- real device creation on each host is
+explicitly later, separate steps below. `crtgfx_gpu_fence`, unlike device/
+surface, is a real, working, host-independent CPU synchronization primitive
+right now (built on this project's own `pthread_mutex_t`/`pthread_cond_t`) --
+"software fallback must remain a first-class path" is exactly what a real,
+working CPU fence is. `crtmedia_gpu_frame_create_cpu()` is the matching real
+software-fallback producer, built directly on the already-existing
+`crtmedia_frame_describe_planes()`.
+
+A real, separate, flagged follow-up was found and worked around while
+building this (not fixed here, out of this step's own scope): this
+project's own `pthread_condattr_setclock(PTHREAD_COND_CLOCK_MONOTONIC)`
+stores the requested clock but `pthread_cond_timedwait()` never actually
+honors it, always treating the deadline as `CLOCK_REALTIME` regardless --
+confirmed for real on Windows via `crtgfx_gpu_test`'s own real timing
+assertions (a monotonic-clock deadline read as an already-past realtime one
+caused instant, incorrect timeouts). `crtgfx_gpu_fence` uses the
+already-working default `CLOCK_REALTIME` clock instead, deliberately, with
+the real bug documented directly in `gpu.c`'s own comment.
+
+`crtgfx_gpu_test`/`crtmedia_gpu_frame_test` verified for real on Windows and
+Linux (WSL) -- real argument validation, the honest capability report, a
+real cross-thread fence wait/signal/timeout (a real `pthread_create()`'d
+signaler thread), and real, correctly-strided, independently-addressable
+plane storage for both a packed (RGBA8888) and chroma-subsampled planar
+(YUV420P) `crtmedia_gpu_frame`. Full ctest suite clean, single-pass, on both
+re-run hosts: Linux (WSL) 117/117, Windows 133/133, both 100%. macOS not yet
+re-verified for this step. See `HISTORY.md`'s 2026-09-03 entry for the full
+trail.
+
+1. **Enable Skia GPU rendering.** Start with a Ganesh vertical slice and keep
    Graphite as a later measured alternative: Direct3D on Windows, Metal on
    macOS, and Vulkan/Wayland on Linux. Run the existing deterministic Skia
    drawing coverage against GPU surfaces and add resize, device-loss, and
-   context-recreation tests.
-3. **Add hardware decode, phase A.** Enable FFmpeg D3D11VA/D3D12VA,
+   context-recreation tests. `window_win32.c`'s existing private per-window
+   D3D11 device is a real, live candidate for replacement by
+   `crtgfx_gpu_surface_create()` once a real device exists (see that
+   function's own doc comment, `crtgfx/gpu.h`) -- not a second mechanism to
+   keep alongside it.
+2. **Add hardware decode, phase A.** Enable FFmpeg D3D11VA/D3D12VA,
    VideoToolbox, and VA-API backends, initially downloading decoded frames to
    CPU memory so codec/device selection, fallback, and recovery can be proved
    independently of zero-copy interop.
-4. **Add hardware decode, phase B.** Connect decoder-owned textures directly
+3. **Add hardware decode, phase B.** Connect decoder-owned textures directly
    to Skia: D3D resources on Windows, `CVPixelBuffer`/Metal textures on macOS,
    and VA-API/DRM PRIME/dmabuf/Vulkan images on Linux. Tie decoder frame-pool
    release to real GPU/presentation completion and retain CPU-copy fallback.
-5. **Add hardware encode and capture.** Stage camera, microphone, and screen
+4. **Add hardware encode and capture.** Stage camera, microphone, and screen
    sources; hardware H.264/HEVC encode; mux/record; latency, bitrate, and
    key-frame controls.
-6. **Expand network and streaming.** Add custom I/O and HTTP range first,
+5. **Expand network and streaming.** Add custom I/O and HTTP range first,
    then buffering, reconnect/discontinuity handling, and HLS/DASH or the
    justified FFmpeg protocol subset.
-7. **Add an optional WebRTC-shaped realtime layer.** Define source/track/sink
+6. **Add an optional WebRTC-shaped realtime layer.** Define source/track/sink
    and execution-context contracts before deciding whether to port full
    WebRTC for RTP/RTCP, jitter buffering, congestion control, and AEC/NS/AGC.
-8. **Expose the service through `libcrtjs`.** Start the QuickJS engine,
-   event loop, timers, modules, and native binding work after step 1 while
-   steps 2-4 continue in parallel. Bind media only after the extractor/codec/
-   player contracts are stable, using WebCodecs-like chunks/frames/queue
-   semantics (a close match to the already-implemented `crtmedia_codec`'s
-   own shape) and a higher-level asynchronous player API. V8 and a minimal
+7. **Expose the service through `libcrtjs`.** Start the QuickJS engine,
+   event loop, timers, modules, and native binding work now while steps 1-3
+   continue in parallel. Bind media only after the extractor/codec/player
+   contracts are stable, using WebCodecs-like chunks/frames/queue semantics
+   (a close match to the already-implemented `crtmedia_codec`'s own shape)
+   and a higher-level asynchronous player API. V8 and a minimal
    Chromium/Ozone probe remain later consumers of the same contracts.
 
-Execution order is therefore: step 1 (the GPU resource contract) is the
-sequential gate the software player's own completion was waiting behind;
-Skia GPU, hardware decode, and the QuickJS core then proceed in parallel;
-zero-copy completion gates the GPU-aware JavaScript media binding, but not the
-initial QuickJS bring-up. A full compositor, complete font shaping, and every
-codec are not prerequisites for beginning QuickJS.
+Execution order is therefore: Skia GPU, hardware decode, and the QuickJS
+core now proceed in parallel (the GPU resource contract that gated them is
+done); zero-copy completion gates the GPU-aware JavaScript media binding,
+but not the initial QuickJS bring-up. A full compositor, complete font
+shaping, and every codec are not prerequisites for beginning QuickJS.
 
 ## Planned
 

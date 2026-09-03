@@ -13,6 +13,11 @@ typedef enum crtgfx_result {
   CRTGFX_ERROR_INVALID_ARGUMENT = -1,
   CRTGFX_ERROR_UNSUPPORTED = -2,
   CRTGFX_ERROR_HOST = -3,
+  /* crtgfx/gpu.h's own crtgfx_gpu_fence_wait() only -- a real, expected,
+   * non-fatal "not signaled within the given timeout" result, distinct
+   * from CRTGFX_ERROR_HOST (a genuine host/device failure). Added
+   * 2026-09-03 for the GPU resource contract. */
+  CRTGFX_ERROR_TIMEOUT = -4,
 } crtgfx_result;
 
 enum {
