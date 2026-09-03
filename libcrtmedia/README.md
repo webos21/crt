@@ -129,5 +129,9 @@ a new public API -- `crtmedia/player.h`'s own top comment already
 documents that composition as the caller's own job. Verified for real:
 the fixture's ~1-second content takes a real, correctly-paced ~1 real
 second of wall-clock time on Windows; completes correctly through a real
-audio-failure fallback on Linux/WSL. See `HISTORY.md`'s 2026-09-03 entry
-for the full trail.
+audio-failure fallback on Linux/WSL; and on real macOS hardware plays in a
+real, correctly-paced ~1.19 real second of wall-clock time through the
+real CoreAudio backend's own device-backpressure path (5 consecutive runs,
+no flakiness) -- macOS is the one host whose run never needs the audio-
+failure fallback at all. See `HISTORY.md`'s 2026-09-03 entry for the full
+trail.
