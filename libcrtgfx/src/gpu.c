@@ -12,15 +12,17 @@
 
 #include "crtgfx/gpu.h"
 
+#include "gpu_internal.h"
+
 #include <errno.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <time.h>
 
-struct crtgfx_gpu_device {
-  atomic_int refcount;
-};
+/* struct crtgfx_gpu_device itself now lives in gpu_internal.h, shared with
+ * src/arch/linux/gpu_vulkan.c (the real Ganesh/Vulkan offscreen vertical
+ * slice, 2026-09-03) -- see that header's own top comment for why. */
 
 /* No real fields yet -- crtgfx_gpu_surface_create() never actually
  * constructs one today (see gpu.h's own top comment: unreachable until a
@@ -43,26 +45,51 @@ crtgfx_result crtgfx_gpu_query_capabilities(crtgfx_gpu_capabilities* out_caps) {
   if (out_caps == NULL) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
+#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
+  /* Real backend, Linux only (src/arch/linux/gpu_vulkan.c) -- see that
+   * file's own top comment. Windows/macOS fall through to the honest
+   * NONE/0 report below, same as Linux did before this landed. */
+  return crtgfx_gpu_vulkan_query_capabilities(out_caps);
+#else
   /* Real, honest report -- see this file's own top comment and gpu.h's
    * own top comment for why this is CRTGFX_GPU_BACKEND_NONE/0 on every
-   * real code path in this project today, not a placeholder. */
+   * real code path on this host today, not a placeholder. */
   out_caps->backend = CRTGFX_GPU_BACKEND_NONE;
   out_caps->device_count = 0;
   return CRTGFX_OK;
+#endif
 }
 
 crtgfx_result crtgfx_gpu_device_create(uint32_t device_index, crtgfx_gpu_device** out_device) {
-  (void)device_index;
   if (out_device == NULL) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
-  /* crtgfx_gpu_query_capabilities() always reports 0 real devices today
-   * (no real backend exists on any host yet -- see this file's own top
+#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
+  {
+    crtgfx_gpu_device* device = (crtgfx_gpu_device*)calloc(1, sizeof(crtgfx_gpu_device));
+    crtgfx_result result;
+    if (device == NULL) {
+      return CRTGFX_ERROR_UNSUPPORTED;
+    }
+    result = crtgfx_gpu_vulkan_device_create(device_index, device);
+    if (result != CRTGFX_OK) {
+      free(device);
+      return result;
+    }
+    atomic_init(&device->refcount, 1);
+    *out_device = device;
+    return CRTGFX_OK;
+  }
+#else
+  (void)device_index;
+  /* crtgfx_gpu_query_capabilities() reports 0 real devices on this host
+   * today (no real backend exists here yet -- see this file's own top
    * comment), so `device_index` is never in a real valid range and there
    * is nothing real to construct -- matching crtgfx_window_create()'s
    * own established "no usable host backend right now" contract, not a
    * crash/hang. */
   return CRTGFX_ERROR_UNSUPPORTED;
+#endif
 }
 
 crtgfx_result crtgfx_gpu_device_retain(crtgfx_gpu_device* device) {
@@ -80,6 +107,9 @@ void crtgfx_gpu_device_release(crtgfx_gpu_device* device) {
   /* atomic_fetch_sub_explicit() returns the value *before* the
    * subtraction -- 1 means this was the last real reference. */
   if (atomic_fetch_sub_explicit(&device->refcount, 1, memory_order_acq_rel) == 1) {
+#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
+    crtgfx_gpu_vulkan_device_destroy(device);
+#endif
     free(device);
   }
 }

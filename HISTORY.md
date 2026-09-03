@@ -10,6 +10,160 @@ substantive update.
 
 ## 2026-09-03
 
+- **Enable Skia GPU rendering: Linux/Vulkan offscreen vertical slice.**
+  TODO.md's next upper-runtime roadmap step after the GPU resource
+  contract, naming a Ganesh vertical slice as the starting point. Two real
+  pivots, both found by hands-on verification rather than assumed:
+
+  **D3D11 vs D3D12.** Exploring the already-fetched local Skia checkout
+  showed Ganesh's "d3d" backend is D3D12-only (`GrD3DBackendContext` holds
+  `ID3D12Device`/`ID3D12CommandQueue`, no D3D11 type anywhere) -- confirmed
+  against the real built `libskia.a` (zero Ganesh objects; the build had
+  `skia_enable_ganesh`/`skia_use_direct3d` off entirely). Confirmed with
+  the user: target D3D12 for the eventual Windows step.
+
+  **Windows/D3D12-first vs Linux/Vulkan-first.** The user pointed out this
+  session's own Windows build-environment friction and asked whether WSL
+  could support a real Vulkan test instead. `vulkaninfo` first showed only
+  Mesa `llvmpipe` (software). The user then installed Mesa's `dzn` driver
+  (Vulkan-over-D3D12); `vulkaninfo` then showed a real, hardware-backed
+  device: `Microsoft Direct3D12 (Intel(R) UHD Graphics 630)`,
+  `DRIVER_ID_MESA_DOZEN`, alongside `llvmpipe`. `window_wayland.c` (this
+  project's hand-rolled Wayland client) has no real `wl_display*`/
+  `wl_surface*` libwayland-client ABI pointers at all -- only a raw
+  connection fd and wire-protocol integer object IDs -- so it cannot feed
+  `vkCreateWaylandSurfaceKHR` directly; `VK_EXT_headless_surface` is
+  present, though, and this project's own CPU-raster tests already verify
+  by drawing offscreen and reading pixels back, not by eyeballing a
+  window. There is also no portable, standard Vulkan API to force device
+  loss (unlike D3D12's clean `ID3D12Device::RemoveDevice()`) -- confirmed
+  via Skia's own vendored Vulkan headers and `GrVkGpu::checkVkResult`
+  (only reacts to a real driver-returned `VK_ERROR_DEVICE_LOST`, never
+  synthesizes one). Given real hardware-accelerated Vulkan was reachable
+  and zero regression risk to any shipped presentation code (offscreen
+  rendering never touches `window_wayland.c`'s existing software frame
+  path), this vertical slice targeted Linux/Vulkan first; Windows/D3D12
+  and macOS/Metal are separate, later roadmap steps.
+
+  **Shipped**: `tools/build_skia.py`'s `default_gn_args()` sets
+  `skia_enable_ganesh`/`skia_use_vulkan` true (Linux branch only) and
+  `skia_use_vma` false (avoiding a `third_party/externals/
+  vulkanmemoryallocator` vendor checkout this project's fetch pipeline
+  does not provide). `libcrtgfx/src/arch/linux/gpu_vulkan.c` (new) is the
+  first real `crtgfx_gpu_device` backend anywhere in this project: a
+  hand-declared minimal Vulkan 1.1 subset (matching the D3D11 COM-vtable/
+  ALSA-UAPI/Pulse-wire-protocol precedent already established elsewhere in
+  this codebase, not a vendored header), real instance/device/queue
+  creation, and device ordering that prefers a real hardware-backed device
+  (`dzn`) over the always-available `llvmpipe` software fallback.
+  `libcrtgfx/src/gpu_internal.h` (new) gives `struct crtgfx_gpu_device`
+  its real Vulkan fields, shared between `src/gpu.c` (host-independent
+  dispatch, unchanged on every other host) and the new backend.
+  `crtgfx_gpu_query_capabilities()`/`crtgfx_gpu_device_create()` are now
+  genuinely real on Linux when a real `libvulkan` is found at configure
+  time (`find_library`, gated -- absent it, Linux keeps the prior, honest
+  `NONE`/`UNSUPPORTED` behavior, a new optional capability, not a new hard
+  dependency). `crtgfx_gpu_surface_create()` deliberately still reports
+  `CRTGFX_ERROR_UNSUPPORTED` everywhere, including with a real device now
+  -- no host can yet present a Ganesh-drawn surface to a real on-screen
+  window.
+
+  `crtgfx_skia_make_gpu_context()`/`crtgfx_skia_make_gpu_offscreen_surface()`
+  (`libcrtgfx/src/skia_bridge.cc`, declared in `crtgfx/skia.h` behind
+  `CRTGFX_HAVE_VULKAN`) build a real `GrDirectContext` from a
+  `crtgfx_gpu_device`'s own real handles and a real, GPU-backed offscreen
+  `SkSurface` via `SkSurfaces::RenderTarget()` -- deliberately separate
+  from, and not implying stability of, the public `crtgfx_gpu_surface`
+  contract. `tests/skia_reference_scene.h` (new) is a small, deterministic
+  drawing scene (a path, a linear gradient, an alpha-blended overlay)
+  shared between `skia_cpu_coverage_test.cc` (new `test_reference_scene()`,
+  additive, the existing 10 tests untouched) and the new
+  `crtgfx_skia_gpu_offscreen_smoke` (`tests/skia_gpu_offscreen_smoke.cc`)
+  -- the same real drawing checked against both backends, not just "both
+  draw something." The new target covers real draw+readback, a real
+  resize (redrawing at 2x dimensions), and device-loss+recreation: the
+  closest safe, portable approximation Vulkan actually offers (no
+  synthetic device-loss trigger exists) -- destroy the real `VkDevice`
+  exactly once, null the `crtgfx_gpu_device`'s own handle fields so the
+  later real release performs no second destroy, confirm a subsequent
+  real Ganesh call fails cleanly, then confirm `crtgfx_gpu_device_create()`
+  recovers a genuinely new, working device. An earlier version of this
+  test destroyed the device once directly and then let the normal release
+  path destroy it a *second* time; the real Vulkan Loader's own parameter
+  validation aborted the whole process (`VUID-vkDestroyDevice-device-
+  parameter`) -- real, spec-documented undefined behavior, not a bug in
+  this project's own teardown code, and exactly why no portable "simulate
+  this safely" Vulkan API exists.
+
+  Two further real, non-obvious findings along the way:
+
+  1. This project's own `dlopen()` has no real ELF dynamic loading yet on
+     Linux (confirmed reading `libdl/src/arch/linux/dl_linux.c` directly
+     -- a non-`NULL` filename unconditionally reports "not implemented
+     yet"), so `gpu_vulkan.c`/`skia_bridge.cc` link `libvulkan` directly
+     and resolve its functions at link time, matching `window_win32.c`'s
+     own `D3D11CreateDevice` extern-import precedent rather than the
+     dlopen()-based bootstrap originally planned.
+
+  2. A real ELF symbol-interposition bug: this project's own statically-
+     linked `readdir()`/`opendir()`/`closedir()`/`fdopendir()` were
+     exported as `GLOBAL` dynamic symbols into every Linux executable
+     (confirmed via `readelf --dyn-syms`) -- default ELF symbol
+     interposition rules let the main executable's own global symbols
+     silently override the same-named symbol a *shared library*
+     (`libvulkan.so.1`) resolves at runtime, so the real system Vulkan
+     loader's own internal directory-scanning calls (used to discover
+     `/usr/share/vulkan/icd.d/*.json`) were silently redirected into this
+     project's own `readdir()`, whose `dirent` ABI does not match glibc's
+     real one -- confirmed via `strace`: real `"gfxstream_vk_icd.json"`
+     read back as `"k_icd.json"` (truncated), every real ICD `open()`
+     failed `ENOENT`, and `vkCreateInstance()` correctly, but misleadingly,
+     reported `VK_ERROR_INCOMPATIBLE_DRIVER` -- reproduced with plain host
+     gcc + real system headers in the same environment, which succeeded
+     outright, proving the bug lived in this project's own link output,
+     not the Vulkan environment. Fixed with `-Wl,--exclude-libs,ALL`
+     (keeps symbols from a static archive out of the final dynamic symbol
+     table) on `crtgfx`'s own `INTERFACE` link options and directly on
+     `crtgfx_shared`, both gated on a real `libvulkan` actually being
+     linked in -- a systemic fix relevant to any future real host-library
+     integration on Linux, not just this one.
+
+  A third, separate real finding while wiring up Ganesh itself:
+  `skia_use_vma=false` (chosen to avoid the new vendor checkout) turned
+  out to compile Ganesh's own internal memory-allocator fallback path out
+  entirely (`GrVkGpu::Make()`), not just make it optional as its own doc
+  comments elsewhere had assumed -- a `null` `fMemoryAllocator` under this
+  exact build config made `GrDirectContexts::MakeVulkan()` fail silently
+  (`SkDEBUGFAIL` is a no-op in this project's own official/release Skia
+  build) against an otherwise completely valid instance/device/queue.
+  Fixed with a real, deliberately minimal `skgpu::VulkanMemoryAllocator`
+  in `skia_bridge.cc` -- one dedicated `VkDeviceMemory` per allocation, no
+  suballocation, correct but not space- or count-efficient, matching the
+  real, bounded implementation `VulkanAMDMemoryAllocator.cpp` was read
+  directly to confirm the exact real contract (`allocateImageMemory`/
+  `allocateBufferMemory` allocate only, the caller binds; `getAllocInfo`/
+  `mapMemory`/`unmapMemory`/`freeMemory` round out the rest).
+
+  Also required requesting Vulkan 1.1, not 1.0, in both the instance
+  (`gpu_vulkan.c`) and `GrVkBackendContext::fMaxAPIVersion`
+  (`skia_bridge.cc`) -- Skia's own Ganesh Vulkan backend refuses anything
+  below 1.1 (`src/gpu/vk/VulkanUtilsPriv.cpp`'s own real, fatal check),
+  even though both real devices on this host (`dzn`: 1.2, `llvmpipe`: 1.4)
+  genuinely support more; and enabling every real, supported
+  `VkPhysicalDeviceFeatures` at device creation (not an all-zero struct)
+  -- an all-disabled feature set also made `MakeVulkan()` fail silently.
+
+  Real GPU rendering verified end to end: real device selection (`dzn`
+  preferred over `llvmpipe`), real draw, real readback, real resize, real
+  device-loss detection and recovery -- `crtgfx_skia_gpu_offscreen_smoke`
+  passing in full on Linux (WSL). Full ctest suite clean on Linux (WSL)
+  and Windows (this slice's Linux-only GN/CMake branches left the Windows
+  path untouched, verified, not assumed). macOS re-verification pending --
+  this slice touches no macOS code at all (`gpu.c` there is unchanged,
+  still honest `CRTGFX_GPU_BACKEND_NONE`/`UNSUPPORTED`). Live on-screen
+  presentation and the Windows/D3D12 and macOS/Metal backends remain
+  explicit, separate follow-up steps -- see `TODO.md`.
+
 - **macOS re-verified for both the common GPU resource contract and the
   `pthread_cond_timedwait()`/`PTHREAD_COND_CLOCK_MONOTONIC` fix** (both
   landed the same day from a non-macOS session; see the two entries below

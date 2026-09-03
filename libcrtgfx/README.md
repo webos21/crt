@@ -68,13 +68,14 @@ backend will implement underneath -- `crtgfx_gpu_device`/`_surface`/`_fence`
 (opaque), `crtgfx_gpu_backend`/`crtgfx_gpu_memory_kind` (real enums, no host
 SDK type ever named as anything but a symbolic tag), capability queries,
 real atomic device retain/release, and device affinity. No real GPU backend
-exists on any host yet (Windows' own private per-window D3D11 device,
-`window_win32.c`, exists solely for `CRTGFX_EVENT_FRAME_COMPLETE`'s own
-async-present signaling, not wired to this contract) -- `crtgfx_gpu_query_
-capabilities()` honestly reports `CRTGFX_GPU_BACKEND_NONE`/0 devices
-everywhere today, and device/surface creation correctly, always reports
-`CRTGFX_ERROR_UNSUPPORTED`, the same graceful contract `crtgfx_window_
-create()` already uses. `crtgfx_gpu_fence`, unlike device/surface, is a
+existed on any host when this contract first landed (Windows' own private
+per-window D3D11 device, `window_win32.c`, exists solely for
+`CRTGFX_EVENT_FRAME_COMPLETE`'s own async-present signaling, not wired to
+this contract) -- `crtgfx_gpu_query_capabilities()` honestly reported
+`CRTGFX_GPU_BACKEND_NONE`/0 devices everywhere, and device/surface creation
+correctly, always reported `CRTGFX_ERROR_UNSUPPORTED`, the same graceful
+contract `crtgfx_window_create()` already uses (Linux now has a real
+backend -- see below). `crtgfx_gpu_fence`, unlike device/surface, is a
 real, working, host-independent CPU synchronization primitive right now
 (built on this project's own `pthread_mutex_t`/`pthread_cond_t`) --
 "software fallback must remain a first-class path" is exactly what a real,
@@ -87,6 +88,41 @@ always treating the deadline as `CLOCK_REALTIME` -- fixed in
 `libc/src/pthread.c`, re-verified for real (elapsed wall time, not just
 the return code) on all three hosts. See `HISTORY.md`'s 2026-09-03 entry
 for the full trail.
+
+**Enable Skia GPU rendering -- Linux/Vulkan offscreen vertical slice**
+(2026-09-03, TODO.md's next roadmap step): `src/arch/linux/gpu_vulkan.c` is
+the first real `crtgfx_gpu_device` backend anywhere in this project --
+`crtgfx_gpu_query_capabilities()`/`crtgfx_gpu_device_create()` are now
+genuinely real on Linux (when a real `libvulkan` is found at configure
+time; absent it, Linux keeps the prior honest `NONE`/`UNSUPPORTED`
+behavior). Prefers a real hardware-backed device (confirmed against Mesa's
+`dzn`, Vulkan-over-D3D12) over the always-available `llvmpipe` software
+fallback. `crtgfx_gpu_surface_create()` deliberately still reports
+`CRTGFX_ERROR_UNSUPPORTED` everywhere, including with a real device now --
+no host can yet present a Ganesh-drawn surface to a real on-screen window
+(`window_wayland.c` has no real `wl_surface*` to hand Vulkan's WSI, and
+Windows/macOS have no real GPU backend yet either). Real Ganesh/Vulkan
+*rendering* correctness is proven offscreen instead: `crtgfx_skia_make_
+gpu_context()`/`crtgfx_skia_make_gpu_offscreen_surface()` (`skia_bridge.cc`,
+declared in `crtgfx/skia.h` behind `CRTGFX_HAVE_VULKAN`) build a real
+`GrDirectContext`/GPU-backed `SkSurface`; `crtgfx_skia_gpu_offscreen_smoke`
+draws the same reference scene `skia_cpu_coverage_test.cc` can also draw
+(`tests/skia_reference_scene.h`) and covers real draw+readback, resize,
+and device-loss+recreation (the closest safe, portable equivalent Vulkan
+offers to D3D12's clean `RemoveDevice()`). Landing this surfaced a real,
+systemic ELF symbol-interposition bug, unrelated to Vulkan specifically:
+this project's own statically-linked `readdir()`/`opendir()` were being
+exported into every Linux executable's dynamic symbol table, silently
+shadowing the real system Vulkan loader's own internal directory-scanning
+calls -- fixed with `-Wl,--exclude-libs,ALL`, relevant to any future real
+host-library integration on Linux. Verified for real on Linux (WSL) and
+Windows (this slice's own Linux-only branches left Windows untouched);
+macOS re-verification pending (no macOS code touched at all). Windows/
+D3D12, macOS/Metal, and live on-screen presentation remain explicit,
+separate follow-up steps. See `HISTORY.md`'s 2026-09-03 entry for the full
+trail, including two further real findings (this project's own `dlopen()`
+has no real ELF dynamic loading yet, and `skia_use_vma=false` silently
+disabled Ganesh's own internal memory-allocator fallback entirely).
 
 See `docs/libcrtgfx_api_policy.md` for the API boundary decision.
 See `docs/libcrtgfx_wayland_plan.md` for the Wayland/compositor plan.

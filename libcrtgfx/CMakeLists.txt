@@ -263,6 +263,47 @@ elseif(CRT_TARGET_OS STREQUAL "macos")
   )
 elseif(CRT_TARGET_OS STREQUAL "linux")
   set(CRTGFX_BACKEND_SOURCES src/arch/linux/window_wayland.c)
+  # Ganesh/Vulkan offscreen vertical slice (2026-09-03, TODO.md's "Enable
+  # Skia GPU rendering" step) -- the first real crtgfx_gpu_device backend
+  # anywhere in this project (see crtgfx/gpu.h's own top comment).
+  # Linux-only for now; Windows (D3D12)/macOS (Metal) are separate, later
+  # roadmap steps. Only wired in when a real libvulkan is actually found:
+  # this project's own dlopen() has no real ELF dynamic loading yet
+  # (confirmed by reading libdl/src/arch/linux/dl_linux.c directly), so
+  # src/arch/linux/gpu_vulkan.c links against libvulkan directly rather
+  # than dlopen()/dlsym()-ing it at runtime -- optional, not a new hard
+  # dependency for every Linux consumer of crtgfx, matching this project's
+  # own "backend absent -> honest degrade, not a build failure" precedent
+  # (CRTGFX_ENABLE_SKIA's own optional-port shape). find_library() looks
+  # for the unversioned libvulkan.so (the Vulkan Loader's own -dev
+  # package, e.g. Ubuntu's libvulkan-dev) -- a bare libvulkan.so.1 runtime
+  # package (libvulkan1) is not enough to link against by name.
+  find_library(CRTGFX_LINUX_VULKAN_LIB vulkan)
+  if(CRTGFX_LINUX_VULKAN_LIB)
+    list(APPEND CRTGFX_BACKEND_SOURCES src/arch/linux/gpu_vulkan.c)
+    # Directory-scoped, not per-target: src/gpu.c (compiled into
+    # crtgfx_common_objects) and src/arch/linux/gpu_vulkan.c (compiled
+    # into crtgfx_backend_objects) share struct crtgfx_gpu_device's own
+    # real field layout via src/gpu_internal.h -- both compilation units
+    # MUST see CRTGFX_HAVE_VULKAN identically, or the Vulkan-only fields
+    # silently disagree on the struct's own real size between the two
+    # object libraries (a real, silent memory-corruption risk, not just a
+    # build inconsistency). add_compile_definitions() here applies to
+    # every target this CMakeLists.txt still goes on to create in this
+    # directory (both crtgfx_common_objects and crtgfx_backend_objects,
+    # further down) -- two separate target_compile_definitions() calls
+    # could drift out of sync in a way this single call cannot.
+    add_compile_definitions(CRTGFX_HAVE_VULKAN=1)
+    # See the real -Wl,--exclude-libs,ALL fix and its own full "why"
+    # comment further down, right after add_library(crtgfx STATIC ...) --
+    # deferred to there because target_link_options() needs the `crtgfx`
+    # target to already exist, and it is not defined until much later in
+    # this same file. CRTGFX_LINUX_VULKAN_LIB (this if-branch's own
+    # condition) stays true for the rest of this configure run, so that
+    # later block's own identical condition re-evaluates the same way.
+  else()
+    message(STATUS "libcrtgfx: libvulkan not found (install libvulkan-dev to enable it) -- crtgfx_gpu_device_create() stays CRTGFX_ERROR_UNSUPPORTED on Linux, same as Windows/macOS today")
+  endif()
 endif()
 
 if(Python3_Interpreter_FOUND)
@@ -392,6 +433,23 @@ if(Python3_Interpreter_FOUND)
   # assumption (`build_dir / "libcrtgfx" / target`) still holds for
   # crtmedia_frame_skia_smoke: CMake places a target's build output under
   # its *defining* CMakeLists.txt's own directory, not its source file's.
+  set(CRTGFX_SKIA_SMOKE_TARGETS
+    crtgfx_skia_raster_smoke
+    crtgfx_skia_cpu_coverage
+    crtmedia_frame_skia_smoke
+  )
+  if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB)
+    # crtgfx_skia_gpu_offscreen_smoke (2026-09-03) -- only ever defined on
+    # Linux with a real libvulkan found (same condition its own add_
+    # executable() above is gated on); the nested build directory this
+    # custom target drives re-evaluates that same find_library() call
+    # itself, on the same host, so it stays consistent.
+    list(APPEND CRTGFX_SKIA_SMOKE_TARGETS crtgfx_skia_gpu_offscreen_smoke)
+  endif()
+  set(CRTGFX_SKIA_SMOKE_TARGET_ARGS)
+  foreach(CRTGFX_SKIA_SMOKE_TARGET IN LISTS CRTGFX_SKIA_SMOKE_TARGETS)
+    list(APPEND CRTGFX_SKIA_SMOKE_TARGET_ARGS --target "${CRTGFX_SKIA_SMOKE_TARGET}")
+  endforeach()
   add_custom_target(crtgfx-skia-smoke
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
       "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_crtgfx_skia_smoke.py"
@@ -401,11 +459,9 @@ if(Python3_Interpreter_FOUND)
       --cmake-cxx-compiler "${CMAKE_CXX_COMPILER}"
       --target-os "${CRT_TARGET_OS}"
       --target-arch "${CRT_TARGET_ARCH}"
-      --target crtgfx_skia_raster_smoke
-      --target crtgfx_skia_cpu_coverage
-      --target crtmedia_frame_skia_smoke
+      ${CRTGFX_SKIA_SMOKE_TARGET_ARGS}
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    COMMENT "Building and running crtgfx_skia_raster_smoke, crtgfx_skia_cpu_coverage, and crtmedia_frame_skia_smoke in a dedicated build directory (CRTGFX_ENABLE_SKIA/CRT_USE_IMPORTED_LIBCXX forced on there, this directory's own cache untouched)"
+    COMMENT "Building and running ${CRTGFX_SKIA_SMOKE_TARGETS} in a dedicated build directory (CRTGFX_ENABLE_SKIA/CRT_USE_IMPORTED_LIBCXX forced on there, this directory's own cache untouched)"
     USES_TERMINAL
   )
 
@@ -852,6 +908,24 @@ if(CRTGFX_ENABLE_SKIA)
     # UNIX (via target_os="linux"), never SK_BUILD_FOR_WIN.
     target_compile_definitions(crtgfx_skia_objects PRIVATE SK_BUILD_FOR_UNIX)
   endif()
+  if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB)
+    # Real Ganesh/Vulkan offscreen vertical slice (2026-09-03). Skia's own
+    # public include/gpu/ganesh/vk/GrVkTypes.h #includes include/private/
+    # gpu/vk/SkiaVulkan.h, which only pulls in Skia's own vendored real
+    # Vulkan headers (include/third_party/vulkan/vulkan/vulkan_core.h) when
+    # SK_USE_INTERNAL_VULKAN_HEADERS is defined at the *consumer's* own
+    # compile time too -- this is normally a GN public_config Skia's own
+    # BUILD.gn applies automatically to every real GN dependent
+    # (config("use_skia_vulkan_headers"), applied wherever skia_use_vulkan
+    # is true), but this project links Skia via a hand-collected .a file
+    # with hand-written CMake, not a real GN dependency graph, so that
+    # propagation has to be reproduced by hand here -- confirmed by reading
+    # both files directly, not assumed. Must match tools/build_skia.py's
+    # own Linux-branch skia_use_vulkan=true exactly (same condition), or
+    # skia_bridge.cc would silently see incompatible Ganesh Vulkan struct
+    # layouts against what libskia.a itself was actually built with.
+    target_compile_definitions(crtgfx_skia_objects PRIVATE SK_USE_INTERNAL_VULKAN_HEADERS)
+  endif()
   if(CRT_TARGET_OS STREQUAL "windows" AND CRT_USE_IMPORTED_LIBCXX)
     # -isystem${CRT_SYSROOT}/include/c++/v1, via target_compile_options (not
     # target_include_directories) so it lands in <FLAGS>, ahead of
@@ -1002,6 +1076,11 @@ if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_ENABLE_SKIA AND CRTGFX_SKIA_LIBRARI
   # CRTGFX_XKBCOMMON_LIBRARIES's own definition, near CRTGFX_SKIA_
   # LIBRARIES's, for the auto-detection).
   target_link_libraries(crtgfx PRIVATE ${CRTGFX_XKBCOMMON_LIBRARIES})
+  # CRTGFX_LINUX_VULKAN_LIB (src/arch/linux/gpu_vulkan.c, 2026-09-03) --
+  # empty and a no-op unless find_library() actually found a real
+  # libvulkan.so on this host (see that variable's own find_library()
+  # call, near CRTGFX_BACKEND_SOURCES's own linux branch).
+  target_link_libraries(crtgfx PRIVATE ${CRTGFX_LINUX_VULKAN_LIB})
   target_link_libraries(crtgfx PRIVATE ${CRTGFX_CRT_STATIC_LIBS})
   target_link_libraries(crtgfx PUBLIC ${CRTGFX_SKIA_LIBRARIES})
   target_link_libraries(crtgfx PRIVATE -Wl,--end-group)
@@ -1031,9 +1110,11 @@ else()
     target_link_libraries(crtgfx PUBLIC ${CRTGFX_SKIA_LIBRARIES})
   endif()
   # See the Linux+Skia branch's own, fuller comment on CRTGFX_XKBCOMMON_
-  # LIBRARIES just above (same file) -- empty and a no-op on any host
-  # other than Linux.
+  # LIBRARIES/CRTGFX_LINUX_VULKAN_LIB just above (same file) -- both empty
+  # and a no-op on any host other than Linux (and, for the Vulkan one,
+  # only non-empty when find_library() actually found a real libvulkan).
   target_link_libraries(crtgfx PRIVATE ${CRTGFX_XKBCOMMON_LIBRARIES})
+  target_link_libraries(crtgfx PRIVATE ${CRTGFX_LINUX_VULKAN_LIB})
   target_link_libraries(crtgfx PRIVATE ${CRTGFX_CRT_STATIC_LIBS})
 endif()
 if(CRT_TARGET_OS STREQUAL "windows")
@@ -1051,6 +1132,49 @@ set_target_properties(crtgfx PROPERTIES
   OUTPUT_NAME crtgfx
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
 )
+
+if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB)
+  # Real, confirmed-for-real bug found bringing up src/arch/linux/
+  # gpu_vulkan.c (2026-09-03): the real system libvulkan.so.1 loader
+  # itself calls real glibc readdir()/opendir() internally, to scan
+  # /usr/share/vulkan/icd.d/*.json and discover the actual GPU driver
+  # (ICD) to load. This project's own statically-linked libc exports its
+  # own GLOBAL readdir()/opendir()/closedir()/fdopendir() symbols into
+  # every executable's dynamic symbol table (confirmed via `readelf
+  # --dyn-syms`) -- default ELF symbol interposition rules let the *main
+  # executable's* own global symbols silently override the same-named
+  # symbol a *shared library* (libvulkan.so.1) resolves at runtime, so
+  # libvulkan.so.1's own directory-scanning calls were silently
+  # redirected into this project's own readdir(), not glibc's real one.
+  # This project's own dirent ABI does not match glibc's real one, so the
+  # loader read back truncated/corrupted filenames (confirmed via
+  # `strace`: real "gfxstream_vk_icd.json" read back as "k_icd.json"),
+  # every real *_icd.json open() failed ENOENT, and vkCreateInstance()
+  # correctly, but misleadingly, reported VK_ERROR_INCOMPATIBLE_DRIVER
+  # (confirmed by reproducing the exact same real vkCreateInstance() call
+  # via plain host gcc + real system headers in the same environment,
+  # which succeeded outright -- VK_SUCCESS, 2 real devices -- proving the
+  # interop bug lived in this project's own link output, not in the
+  # Vulkan environment or gpu_vulkan.c's own hand-rolled bindings).
+  #
+  # -Wl,--exclude-libs,ALL is the standard, real fix: it keeps symbols
+  # that came from a *static archive* (this project's own libc.a/libm.a/
+  # libdl.a/libcrtgfx.a, all linked in as .a members, never as a real
+  # .so of their own) out of the final executable's/shared-object's own
+  # dynamic symbol table, so a real host .so's own internal libc calls
+  # resolve to the real glibc it was itself linked against, not to this
+  # project's own same-named implementation. Applied as crtgfx's own
+  # INTERFACE link option so it reaches every real consumer's own final
+  # link line automatically (crtgfx_gpu_test today; the offscreen Ganesh/
+  # Vulkan smoke test and any future Linux GPU test tomorrow), without
+  # needing this fix repeated on each one by hand -- and on crtgfx_shared
+  # directly below (its own real .so link step, not propagated the same
+  # way a static archive's INTERFACE options are). Scoped to only apply
+  # when a real libvulkan is actually being linked in at all -- no reason
+  # to change any other Linux target's own dynamic symbol visibility
+  # otherwise.
+  target_link_options(crtgfx INTERFACE -Wl,--exclude-libs,ALL)
+endif()
 
 set(CRTGFX_SHARED_EXTRA_SOURCES "")
 # Windows + Skia only: crtgfx_shared -- unlike the plain `crtgfx` static
@@ -1134,6 +1258,10 @@ else()
   # a no-op on any host other than Linux (see CRTGFX_XKBCOMMON_LIBRARIES's
   # own definition, near CRTGFX_SKIA_LIBRARIES's).
   target_link_libraries(crtgfx_shared PRIVATE ${CRTGFX_XKBCOMMON_LIBRARIES})
+  # CRTGFX_LINUX_VULKAN_LIB (src/arch/linux/gpu_vulkan.c, 2026-09-03) --
+  # same shape as CRTGFX_XKBCOMMON_LIBRARIES just above: empty and a no-op
+  # unless find_library() actually found a real libvulkan.so on this host.
+  target_link_libraries(crtgfx_shared PRIVATE ${CRTGFX_LINUX_VULKAN_LIB})
   target_link_libraries(crtgfx_shared PRIVATE ${CRTGFX_CRT_SHARED_LIBS})
   if(CRTGFX_SHARED_SKIA_LINUX_GROUPED)
     target_link_libraries(crtgfx_shared PRIVATE -Wl,--end-group)
@@ -1171,6 +1299,14 @@ elseif(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_ENABLE_SKIA)
   # -fuse-ld=lld: see crtgfx_skia_raster_smoke's own, fuller comment (same
   # file, its Linux branch) for the full ld.bfd-vs-lld story.
   target_link_options(crtgfx_shared PRIVATE -fuse-ld=lld)
+endif()
+if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB)
+  # See crtgfx's own, fuller comment (same file, right after
+  # set_target_properties(crtgfx PROPERTIES ...)) for the real bug this
+  # fixes. PRIVATE here, not INTERFACE: crtgfx_shared has its own real
+  # .so link step (unlike the plain `crtgfx` static archive), so this
+  # only needs to apply directly to it, not propagate further.
+  target_link_options(crtgfx_shared PRIVATE -Wl,--exclude-libs,ALL)
 endif()
 crt_configure_shared_runtime(crtgfx_shared)
 set_target_properties(crtgfx_shared PROPERTIES
@@ -1411,6 +1547,13 @@ function(crt_wire_skia_executable target_name)
     # itself was never part of what got refactored into this function.
     target_sources(${target_name} PRIVATE
       "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/common/emutls_link_stubs.c")
+  endif()
+  if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB)
+    # See crtgfx_skia_objects's own, fuller comment on SK_USE_INTERNAL_
+    # VULKAN_HEADERS just above -- this target also #includes Skia's own
+    # public Ganesh Vulkan headers directly (e.g. GrVkTypes.h), so it
+    # needs the identical define at its own compile time too.
+    target_compile_definitions(${target_name} PRIVATE SK_USE_INTERNAL_VULKAN_HEADERS)
   endif()
   # CRT_SKIA_FONTS_DIR: absolute path to the bundled real font(s) this
   # target's own real-text-rendering code scans via SkFontMgr_New_Custom_
@@ -1653,6 +1796,39 @@ if(CRTGFX_ENABLE_SKIA)
     PASS_REGULAR_EXPRESSION "crtgfx_skia_cpu_coverage: ok"
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_skia_cpu_coverage_runs)
+
+  # crtgfx_skia_gpu_offscreen_smoke: the real Ganesh/Vulkan offscreen
+  # vertical slice's own rendering-correctness coverage (2026-09-03,
+  # TODO.md's "Enable Skia GPU rendering" step -- see that file's own top
+  # comment for the full design record). Linux + a real libvulkan found at
+  # configure time only, matching src/arch/linux/gpu_vulkan.c's own real
+  # scope -- Windows/macOS keep their existing Skia CPU-raster-only targets
+  # untouched. Same headless shape as crtgfx_skia_cpu_coverage just above
+  # (no crtgfx_window/host display connection needed at all).
+  if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB)
+    add_executable(crtgfx_skia_gpu_offscreen_smoke
+      ${CRT_STARTUP_OBJECTS}
+      tests/skia_gpu_offscreen_smoke.cc
+    )
+    target_link_libraries(crtgfx_skia_gpu_offscreen_smoke PRIVATE crt_cxx_build_flags crtgfx)
+    # gpu_internal.h (src/gpu_internal.h, not installed/public) -- this
+    # test reaches into crtgfx_gpu_device's own real Vulkan handles
+    # directly (crtgfx_skia_make_gpu_context()'s own real caller shape,
+    # and the device-loss test's own deliberate vkDestroyDevice() call).
+    target_include_directories(crtgfx_skia_gpu_offscreen_smoke PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    crt_wire_skia_executable(crtgfx_skia_gpu_offscreen_smoke)
+    crt_link_startup_end_objects(crtgfx_skia_gpu_offscreen_smoke)
+    add_dependencies(crtgfx_skia_gpu_offscreen_smoke cxx c crt1 crtgfx)
+
+    add_test(NAME crtgfx_skia_gpu_offscreen_smoke_runs COMMAND crtgfx_skia_gpu_offscreen_smoke)
+    set_tests_properties(crtgfx_skia_gpu_offscreen_smoke_runs PROPERTIES
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+      PASS_REGULAR_EXPRESSION "crtgfx_skia_gpu_offscreen_smoke: (ok|skipped)"
+    )
+    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_skia_gpu_offscreen_smoke_runs)
+  endif()
 
   # crtmedia_frame_skia_smoke: the real-Skia half of libcrtmedia's CPU
   # frame handoff contract (TODO.md's "Define the libcrtmedia CPU frame

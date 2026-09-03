@@ -471,6 +471,22 @@ def default_gn_args(root, sysroot, target_os, target_arch, freetype_prefix=None)
         args["target_os"] = gn_string("linux")
         if target_arch in ("aarch64", "arm64"):
             args["target_cpu"] = gn_string("arm64")
+        # Linux-only Ganesh/Vulkan vertical slice (2026-09-03, TODO.md's
+        # "Enable Skia GPU rendering" step) -- Windows/macOS stay CPU-raster
+        # only for now, their own later roadmap steps. Skia vendors its own
+        # Vulkan headers (include/third_party/vulkan/, SK_USE_INTERNAL_
+        # VULKAN_HEADERS) when skia_use_vulkan is on, so no external Vulkan
+        # SDK dependency is added here. skia_use_vma defaults to tracking
+        # skia_use_vulkan in Skia's own gn/skia.gni, which would otherwise
+        # pull in a third_party/externals/vulkanmemoryallocator vendor
+        # checkout this project's fetch pipeline does not provide -- forced
+        # off here; Skia's own GrVkGpu::Make() falls back to constructing
+        # its own allocator internally when the caller-supplied
+        # GrVkBackendContext.fMemoryAllocator is null, so this costs nothing
+        # (confirmed by reading src/gpu/ganesh/vk/GrVkGpu.cpp directly).
+        args["skia_enable_ganesh"] = "true"
+        args["skia_use_vulkan"] = "true"
+        args["skia_use_vma"] = "false"
 
     return args
 

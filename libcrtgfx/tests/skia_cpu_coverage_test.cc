@@ -53,6 +53,8 @@
 #include "include/core/SkTileMode.h"
 #include "include/effects/SkGradient.h"
 
+#include "skia_reference_scene.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -118,6 +120,8 @@ class ScratchSurface {
   bool valid() const { return surface_ != nullptr; }
   SkCanvas* canvas() { return surface_->getCanvas(); }
   Bgra pixel(int x, int y) const { return read_pixel(pixels_, stride_, x, y); }
+  const void* pixels_ptr() const { return pixels_; }
+  uint32_t stride_bytes() const { return stride_; }
 
  private:
   uint32_t width_;
@@ -445,6 +449,22 @@ void test_invalid_surface_sizes() {
          crtgfx_skia_make_raster_surface(&fb) != nullptr);
 }
 
+// The shared reference scene (tests/skia_reference_scene.h) drawn and
+// checked on the CPU-raster path -- new, additive coverage (2026-09-03,
+// TODO.md's "Enable Skia GPU rendering" step), not a replacement for any
+// test above. skia_gpu_offscreen_smoke.cc draws and checks the exact same
+// scene against a real Ganesh/Vulkan-backed surface, so a real cross-
+// backend rendering difference shows up as this same shared assertion
+// failing in both places, not two independently drifting expectations.
+void test_reference_scene() {
+  ScratchSurface s(crtgfx_test::kReferenceSceneWidth, crtgfx_test::kReferenceSceneHeight);
+  if (!report("reference scene: surface created", s.valid())) return;
+  crtgfx_test::draw_reference_scene(s.canvas());
+  crtgfx_test::check_reference_scene(
+      s.pixels_ptr(), s.stride_bytes(),
+      [](const char* name, bool ok) { report(name, ok); });
+}
+
 }  // namespace
 
 extern "C" int main() {
@@ -458,6 +478,7 @@ extern "C" int main() {
   test_image_draw_scale();
   test_nan_inf_error_paths();
   test_invalid_surface_sizes();
+  test_reference_scene();
 
   if (g_failures == 0) {
     puts("crtgfx_skia_cpu_coverage: ok");
