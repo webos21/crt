@@ -586,6 +586,34 @@ if(CRT_TARGET_OS STREQUAL "windows")
   endforeach()
   list(REMOVE_DUPLICATES CRT_WINDOWS_SDK_LIB_CANDIDATES)
   list(SORT CRT_WINDOWS_SDK_LIB_CANDIDATES COMPARE NATURAL ORDER DESCENDING)
+  # CRT_MINGW_W64_HEADERS_INCLUDE_ROOT (2026-09-04, the Windows/D3D12
+  # Ganesh vertical slice): window_win32.c's own D3D11 code (and every
+  # other Windows host adapter in this project) has always hand-declared
+  # what it needs specifically to avoid ever depending on real header
+  # trees at all, but Skia's own public Ganesh D3D header (include/gpu/
+  # ganesh/d3d/GrD3DTypes.h) unconditionally `#include <d3d12.h>`/
+  # `<dxgi1_4.h>` -- a real, forced exception (see docs/
+  # libcrtgfx_api_policy.md's own "third-party source being ported"
+  # Non-Goals clause), not something this project's own code can hand-
+  # declare around the way window_win32.c/gpu_win32.c otherwise do.
+  #
+  # This deliberately does NOT point at the raw Microsoft Windows SDK's
+  # own Include/*/um tree (an earlier real attempt this same slice made,
+  # since reverted) -- confirmed for real (2026-09-03/04) that raw SDK
+  # d3d12.h assumes a full real MSVC compile environment (MSVC-only
+  # architecture macros, MSVC-only atomic/fence compiler intrinsics in
+  # winnt.h) this project's mingw-target clang cannot satisfy. Instead
+  # this points at mingw-w64's own real, complete, clang/gcc-native
+  # header set (tools/fetch_mingw_w64_headers.py, wired below as the
+  # crtgfx-mingw-w64-headers-fetch target) -- the standard, well-
+  # precedented fix every other mingw-target D3D/DirectX project uses
+  # for this exact class of problem. Empty (not FATAL_ERROR) on any
+  # non-Windows host, or before the fetch target has run -- mirrors
+  # CRT_WINDOWS_KERNEL32_LIB's own "warn, let the caller degrade"
+  # precedent just below, not a hard requirement for hosts that never
+  # build CRTGFX_ENABLE_SKIA with D3D12 in the first place.
+  set(CRT_MINGW_W64_HEADERS_DIR "${CMAKE_BINARY_DIR}/mingw-w64-headers")
+  set(CRT_MINGW_W64_HEADERS_INCLUDE_ROOT "${CRT_MINGW_W64_HEADERS_DIR}/mingw-w64-headers/include")
 
   find_file(CRT_WINDOWS_KERNEL32_LIB
     NAMES kernel32.lib

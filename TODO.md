@@ -310,15 +310,115 @@ clean, single-pass, on all three hosts: Linux (WSL) 117/117, Windows
 133/133, macOS 117/117, all 100%. See `HISTORY.md`'s 2026-09-03 entry for
 the full trail.
 
-1. **Enable Skia GPU rendering.** Start with a Ganesh vertical slice and keep
-   Graphite as a later measured alternative: Direct3D on Windows, Metal on
-   macOS, and Vulkan/Wayland on Linux. Run the existing deterministic Skia
-   drawing coverage against GPU surfaces and add resize, device-loss, and
-   context-recreation tests. `window_win32.c`'s existing private per-window
-   D3D11 device is a real, live candidate for replacement by
-   `crtgfx_gpu_surface_create()` once a real device exists (see that
-   function's own doc comment, `crtgfx/gpu.h`) -- not a second mechanism to
-   keep alongside it.
+**Enable Skia GPU rendering -- Linux/Vulkan offscreen vertical slice landed
+(2026-09-03).** This step went through two real pivots, each found by
+hands-on verification, not assumed up front. First: exploring the already-
+fetched Skia checkout showed Ganesh's "d3d" backend is D3D12-only
+(`GrD3DBackendContext` holds `ID3D12Device`/`ID3D12CommandQueue`, no D3D11
+type anywhere) -- confirmed against the real built `libskia.a` (zero Ganesh
+objects; the roadmap text above's own "Direct3D on Windows" phrasing
+predates this correction). Second, and larger: the user asked to check
+whether WSL could support a real Vulkan test instead of starting on
+Windows, given this session's own Windows build-environment friction.
+Direct WSL verification found only Mesa `llvmpipe` (software) at first;
+installing Mesa's `dzn` driver (Vulkan-over-D3D12) then produced a real,
+hardware-backed device (`Microsoft Direct3D12 (Intel(R) UHD Graphics 630)`,
+`DRIVER_ID_MESA_DOZEN`) alongside `llvmpipe`. Given real hardware-
+accelerated Vulkan was reachable and zero regression risk to any shipped
+presentation code, this vertical slice targeted **Linux/Vulkan first**;
+Windows/D3D12 and macOS/Metal are real, separate, later roadmap steps, not
+dropped.
+
+Real, shipped scope: `tools/build_skia.py` enables `skia_enable_ganesh`/
+`skia_use_vulkan` on Linux only (`skia_use_vma` forced off -- see below);
+`libcrtgfx/src/arch/linux/gpu_vulkan.c` (new) is the first real
+`crtgfx_gpu_device` backend anywhere in this project -- a hand-declared
+minimal Vulkan 1.1 subset (matching this project's own no-host-SDK-header
+policy), real instance/device/queue creation, hardware-preferred device
+ordering. `crtgfx_gpu_query_capabilities()`/`crtgfx_gpu_device_create()`
+are now genuinely real on Linux (when a real `libvulkan` is found at
+configure time); `crtgfx_gpu_surface_create()` deliberately still reports
+`CRTGFX_ERROR_UNSUPPORTED` everywhere, including with a real device now --
+no host can yet present a Ganesh-drawn surface to a real on-screen window
+(`window_wayland.c` has no real `wl_surface*` to hand Vulkan's WSI). A new
+`crtgfx_skia_make_gpu_context()`/`crtgfx_skia_make_gpu_offscreen_surface()`
+pair (`skia_bridge.cc`) proves real Ganesh/Vulkan rendering correctness
+offscreen instead, checked via a scene shared with the CPU-raster path
+(`tests/skia_reference_scene.h`) -- `crtgfx_skia_gpu_offscreen_smoke`
+covers real draw+readback, resize, and device-loss+recreation (the closest
+safe, portable equivalent Vulkan offers to D3D12's clean
+`RemoveDevice()` -- a genuine double-`vkDestroyDevice()` aborted the
+process the first time this test was written; the real, safe design tears
+down exactly once).
+
+Two further real, non-obvious findings along the way: (1) this project's
+own `dlopen()` has no real ELF dynamic loading yet (confirmed reading
+`libdl/src/arch/linux/dl_linux.c`), so the Vulkan backend links
+`libvulkan` directly instead, matching `window_win32.c`'s own
+`D3D11CreateDevice` extern-import precedent; (2) a real symbol-
+interposition bug -- this project's own statically-linked `readdir()`/
+`opendir()` were exported into every Linux executable's dynamic symbol
+table, silently shadowing the real system Vulkan loader's own internal
+directory-scanning calls (it needs them to find `/usr/share/vulkan/
+icd.d/*.json`), corrupting filenames read back and producing a misleading
+`VK_ERROR_INCOMPATIBLE_DRIVER`. Fixed with `-Wl,--exclude-libs,ALL` on any
+Linux target that links a real Vulkan-touching `crtgfx`/`crtgfx_shared`
+(see `libcrtgfx/CMakeLists.txt`'s own full comment) -- a systemic fix
+relevant to any future real host-library integration, not just this one.
+`skia_use_vma=false` (avoiding a `third_party/externals/
+vulkanmemoryallocator` vendor checkout this project's fetch pipeline does
+not provide) also turned out to compile out Ganesh's own internal
+memory-allocator fallback entirely, not just make it optional --
+`skia_bridge.cc` supplies its own real, deliberately minimal
+(one-dedicated-`VkDeviceMemory`-per-allocation, no suballocation)
+`skgpu::VulkanMemoryAllocator` instead.
+
+Full ctest suite clean on Linux (WSL) and Windows; macOS re-verification
+pending (this slice touches no macOS code at all -- `gpu.c` there is
+unchanged, still honest `CRTGFX_GPU_BACKEND_NONE`/`UNSUPPORTED`). See
+`HISTORY.md`'s 2026-09-03 entry for the full trail.
+
+**Enable Skia GPU rendering -- Windows/D3D12 offscreen vertical slice
+landed (2026-09-04).** Same additive shape as the Linux/Vulkan slice
+above: `gpu_win32.c` (new, real D3D12 device/queue/adapter creation,
+hand-declared, no host headers) sits alongside `window_win32.c`'s own
+existing, untouched D3D11 presentation pipeline. The real, larger part of
+this step turned out to be Skia's own public `GrD3DTypes.h` forcing real
+`<d3d12.h>`/`<dxgi1_4.h>` -- pointing those at the raw Microsoft Windows
+SDK directly hit a genuine, structural dead end (its own `winnt.h` needs
+real MSVC-only architecture macros *and* MSVC-only atomic intrinsics
+clang only implements for its `*-windows-msvc` target, not this
+project's mingw one). Fix: vendor mingw-w64's own real, clang/gcc-native
+header set instead (`tools/fetch_mingw_w64_headers.py`, new, pinned to
+its `v14.0.0` tag), with `libstdc++/third_party/win32_shim`'s existing
+minimal shims now `#include_next`-forwarding to it when available. Along
+the way: a real, previously-latent `tools/crt-ar` bug (response-file
+expansion defeating its own purpose once `libskia.a`'s object count grew
+past Windows' command-line length limit) and a real ownership bug in
+`skia_bridge.cc` (a raw-pointer assignment into a `gr_cp<T>` COM
+smart-pointer field that would have double-released the device) were
+both found and fixed. `crtgfx_skia_gpu_offscreen_smoke` passes every
+sub-check on real Windows hardware, including the full `RemoveDevice()`
+device-loss/recovery cycle. Full ctest suite clean, single-pass, on
+Windows (131/131) and Linux/WSL (crtgfx-skia-smoke 115/115 + main
+117/117, confirming zero regression to the Vulkan slice or the unrelated
+libcxx/libunwind bootstrap from the shared win32_shim/crt-ar changes);
+macOS re-verification stays separately pending, same as the Vulkan slice.
+See `HISTORY.md`'s 2026-09-04 entry for the full trail (the raw-SDK dead
+end, every individual header/link gap found, and how each was fixed).
+
+1. **Finish Skia GPU rendering: live presentation, then macOS.**
+   The real remaining scope after the Linux/Vulkan and Windows/D3D12
+   offscreen slices above: wire `crtgfx_gpu_surface_create()` to an
+   actual on-screen window on each platform (Linux needs either a real
+   `wl_display*`/`wl_surface*`-capable Wayland backend or a deliberate
+   scoped exception to link real `libwayland-client` for just the Vulkan
+   WSI boundary; Windows has no such gap -- `window_win32.c`'s own
+   D3D11 swap chain already has everything D3D12 presentation would
+   need, this is real design work, not a blocker); then Metal on macOS
+   (still needs its own first real `crtgfx_gpu_device` backend, mirroring
+   `gpu_vulkan.c`/`gpu_win32.c`); Graphite stays a later, separately-
+   measured alternative to Ganesh throughout.
 2. **Add hardware decode, phase A.** Enable FFmpeg D3D11VA/D3D12VA,
    VideoToolbox, and VA-API backends, initially downloading decoded frames to
    CPU memory so codec/device selection, fallback, and recovery can be proved

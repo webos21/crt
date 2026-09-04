@@ -21,6 +21,17 @@
 #ifndef CRT_WIN32_SHIM_NTVERP_H
 #define CRT_WIN32_SHIM_NTVERP_H
 
+/* Windows/D3D12 Ganesh vertical slice (2026-09-04): see windows.h's own
+ * matching comment in this directory for the full "why". #include_next
+ * to mingw-w64's own real ntverp.h when it is on the include path
+ * (D3D12-touching Windows compiles only); a true no-op otherwise (this
+ * shim's own single constant below, unchanged). */
+#if defined(__has_include_next) && __has_include_next(<ntverp.h>)
+#include_next <ntverp.h>
+#else
+
 #define VER_PRODUCTBUILD 10011
+
+#endif /* __has_include_next(<ntverp.h>) */
 
 #endif /* CRT_WIN32_SHIM_NTVERP_H */

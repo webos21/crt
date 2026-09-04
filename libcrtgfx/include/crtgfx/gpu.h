@@ -64,11 +64,19 @@ extern "C" {
 /* The real backend actually selected on this host, if any -- naming
  * Direct3D/Metal/Vulkan as tags here does not violate this project's own
  * "no host SDK type in a public header" policy (see this file's own top
- * comment); CRTGFX_GPU_BACKEND_NONE is the only value any real code path
- * in this project can produce today. */
+ * comment).
+ *
+ * CRTGFX_GPU_BACKEND_D3D11 was renamed to _D3D12 2026-09-03, the same day
+ * the Windows offscreen vertical slice actually landed: Ganesh's own D3D
+ * backend turned out to be D3D12-only (confirmed by reading Skia's own
+ * GrD3DBackendContext directly -- it holds ID3D12Device/
+ * ID3D12CommandQueue, no D3D11 type anywhere), so the originally-assumed
+ * D3D11 tag never matched any real code path this project ever built --
+ * a deliberate, real rename of a same-week, still-unreleased enum value,
+ * not a silent behavior change to anything shipped. */
 typedef enum crtgfx_gpu_backend {
   CRTGFX_GPU_BACKEND_NONE = 0,
-  CRTGFX_GPU_BACKEND_D3D11 = 1,
+  CRTGFX_GPU_BACKEND_D3D12 = 1,
   CRTGFX_GPU_BACKEND_METAL = 2,
   CRTGFX_GPU_BACKEND_VULKAN = 3,
 } crtgfx_gpu_backend;

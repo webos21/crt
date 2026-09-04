@@ -27,6 +27,21 @@
 #ifndef CRT_WIN32_SHIM_WINERROR_H
 #define CRT_WIN32_SHIM_WINERROR_H
 
+/* Windows/D3D12 Ganesh vertical slice (2026-09-04): see windows.h's own
+ * matching comment in this directory for the full "why" -- mingw-w64's
+ * own real, complete winerror.h (vendored via tools/fetch_mingw_w64_
+ * headers.py for D3D12-touching Windows compiles only) is a strict
+ * superset of this shim's own narrow 49-constant list, and mingw-w64's
+ * own windows.h chain reaches for <winerror.h> via a plain angle
+ * include internally, which would otherwise still resolve back to this
+ * file (-I always wins). #include_next steps past this file to reach
+ * it when available; a true no-op otherwise (this shim's own narrower
+ * constants below, unchanged) for the libunwind/libcxx bootstrap build,
+ * which never puts mingw-w64-headers on its own include path. */
+#if defined(__has_include_next) && __has_include_next(<winerror.h>)
+#include_next <winerror.h>
+#else
+
 #define ERROR_INVALID_FUNCTION 1L
 #define ERROR_FILE_NOT_FOUND 2L
 #define ERROR_PATH_NOT_FOUND 3L
@@ -76,5 +91,7 @@
 #define ERROR_RETRY 1237L
 #define ERROR_OPEN_FILES 2401L
 #define ERROR_DEVICE_IN_USE 2404L
+
+#endif /* __has_include_next(<winerror.h>) */
 
 #endif /* CRT_WIN32_SHIM_WINERROR_H */

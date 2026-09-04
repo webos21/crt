@@ -58,7 +58,38 @@ def main():
         archiver = shutil.which("llvm-ar") or shutil.which("ar")
     if not archiver:
         raise SystemExit("crt-ar: neither CRT_HOST_AR, llvm-ar, nor ar was found")
-    subprocess.run([archiver] + expand_response_files(sys.argv[1:]), check=True)
+    # Windows/D3D12 Ganesh vertical slice (2026-09-04), real, confirmed
+    # necessary: this module's own docstring already establishes that
+    # expansion exists *only* for the Apple system ar, which does not
+    # understand @response-file arguments -- GNU/LLVM ar (used
+    # everywhere else, including here on Windows via CRT_HOST_AR/
+    # shutil.which("llvm-ar")) understands them natively. A real,
+    # previously-latent bug this slice's own libskia.a link surfaced for
+    # the first time: expand_response_files() always flattened @file
+    # into a plain argv regardless of archiver, and this function passed
+    # that flattened list straight to subprocess.run() with no response
+    # file of its own -- fine while the object list was short enough to
+    # fit under Windows' real CreateProcess command-line length limit,
+    # but libskia.a's own object count grew enough once Ganesh's D3D
+    # backend (+ d3d12allocator, + spirv-cross) joined the CPU-raster
+    # sources already being linked that the assembled command line
+    # finally exceeded it -- confirmed for real: `FileNotFoundError:
+    # [WinError 206]` (ERROR_FILENAME_EXCED_RANGE, which Windows' own
+    # CreateProcess also returns for a too-long assembled command line,
+    # not only a too-long single path) from Python's own subprocess.run.
+    # Real fix, matching the docstring's own stated scope: only expand
+    # for the one archiver that actually needs it (the real Apple system
+    # ar, i.e. plain "ar" on macOS -- llvm-ar identifies itself by name,
+    # including when resolved through a project-configured CRT_HOST_AR
+    # pointing straight at an llvm-ar binary) -- everywhere else, hand
+    # the original, still-a-response-file arguments straight through
+    # unexpanded, restoring the response file's own entire real purpose
+    # (avoiding exactly this class of command-line-length limit) instead
+    # of defeating it.
+    archiver_name = os.path.basename(archiver).lower()
+    needs_expansion = sys.platform == "darwin" and "llvm" not in archiver_name and "gnu" not in archiver_name
+    archiver_args = expand_response_files(sys.argv[1:]) if needs_expansion else sys.argv[1:]
+    subprocess.run([archiver] + archiver_args, check=True)
 
 
 if __name__ == "__main__":

@@ -13,6 +13,72 @@ def run(args, cwd=None, env=None):
     subprocess.run(args, cwd=cwd, env=env, check=True)
 
 
+def ensure_skia_external(source, dep_path):
+    """A real, narrow, single-external fetch -- NOT a `tools/git-sync-deps`
+    invocation. Confirmed for real (2026-09-03, the Windows/D3D12 Ganesh
+    vertical slice's own first real build attempts) that `skia_enable_
+    ganesh=true` + `skia_use_direct3d=true` need two real `third_party/
+    externals/...` vendor checkouts at real ninja-build time, not just
+    gn-gen time, neither reachable via any GN flag that could disable it
+    independently of the backend itself:
+
+    - `spirv-cross`: Ganesh's own real shader pipeline compiles SkSL to
+      SPIR-V, then (for any backend that does not consume SPIR-V directly
+      -- D3D's own HLSL, unlike Vulkan) uses SPIRV-Cross to translate that
+      into the target shading language. This is why the already-landed
+      Linux/Vulkan vertical slice never hit either of these fetches at
+      all -- Vulkan's own shader pipeline has no cross-compilation step
+      to need spirv-cross for, and (see skia_bridge.cc's own
+      DumbD3DMemoryAllocator comment) Vulkan's own separate skia_use_vma
+      flag can genuinely disable that one's vendor dependency, unlike
+      D3D's.
+    - `d3d12allocator`: confirmed by reading BUILD.gn directly --
+      GrD3DAMDMemoryAllocator.cpp (Skia's own real default D3D12 memory-
+      allocator fallback) is compiled into libskia.a unconditionally
+      whenever skia_use_direct3d is true, with no independent GN flag to
+      disable just that compilation the way Vulkan's own skia_use_vma
+      can -- true regardless of whether any real consumer (like this
+      project's own custom DumbD3DMemoryAllocator, skia_bridge.cc) ever
+      actually calls into Skia's own fallback at runtime.
+
+    Confirmed for real that `tools/git-sync-deps` itself is NOT an
+    acceptable way to satisfy either of these (see clone_ref()'s own
+    comment in fetch_skia.py: a real, prior attempt found it
+    unconditionally downloads unrelated multi-gigabyte content -- an
+    entire Emscripten/WASM toolchain alone, 8.6GB and counting before
+    being killed -- regardless of which real GN features are actually
+    enabled). This function instead performs exactly the same real,
+    bounded, single-external fetch fetch_skia.py's own clone_ref()
+    already does for Skia itself (`--filter=blob:none --depth 1`, then
+    fetch the one real, DEPS-pinned commit) -- applied to one real
+    dependency at a time, not "sync everything Skia's own DEPS file
+    lists."
+
+    The real pinned commit is read directly out of Skia's own DEPS file
+    (not hardcoded here) so this stays correct if this project's own
+    pinned Skia version/commit is ever bumped later -- DEPS's own real
+    line shape is `"third_party/externals/<name>" : "<repo>@<sha>",`.
+    Idempotent (skips if already present) so a repeat build does not
+    re-fetch it.
+    """
+    dest = source / dep_path
+    if dest.exists():
+        return
+    deps_text = (source / "DEPS").read_text(encoding="utf-8")
+    match = re.search(
+        rf'"{re.escape(dep_path)}"\s*:\s*"([^"@]+)@([0-9a-f]{{40}})"', deps_text)
+    if not match:
+        raise SystemExit(
+            f"Could not find {dep_path}'s own real pinned commit in {source / 'DEPS'} -- "
+            "Skia's own DEPS file shape may have changed."
+        )
+    repo, commit = match.group(1), match.group(2)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    run(["git", "clone", "--filter=blob:none", "--no-checkout", "--depth", "1", repo, str(dest)])
+    run(["git", "fetch", "--depth", "1", "origin", commit], cwd=dest)
+    run(["git", "checkout", "--detach", "FETCH_HEAD"], cwd=dest)
+
+
 def pin_gn_script_executable(source, host_python):
     """Skia's own .gn dotfile hardcodes `script_executable = "python3"` --
     a real, unconditional upstream requirement `gn gen` needs to resolve,
@@ -247,7 +313,8 @@ def gn_list(values):
 # setup below, instead of reinventing include-path detection here.
 
 
-def default_gn_args(root, sysroot, target_os, target_arch, freetype_prefix=None):
+def default_gn_args(root, sysroot, target_os, target_arch, freetype_prefix=None,
+                     mingw_w64_headers_root=None):
     # .cmd wrappers on Windows: tools/crt-cc/tools/crt-c++ are #!/bin/sh
     # scripts CreateProcess cannot run directly, and (unlike this
     # project's own CMake integration, which launches them via mksh.exe
@@ -381,7 +448,92 @@ def default_gn_args(root, sysroot, target_os, target_arch, freetype_prefix=None)
             # matching Windows needs (see tools/crt-libcxx-build.py's own
             # common_cmake_args()) -- reused here rather than duplicated,
             # since it already covers everything this file needs too.
-            ([f"-I{root / 'libstdc++' / 'third_party' / 'win32_shim'}"] if target_os == "windows" else [])
+            ([f"-I{root / 'libstdc++' / 'third_party' / 'win32_shim'}"] if target_os == "windows" else []) +
+            # mingw-w64's own real Win32 API headers (2026-09-04, the
+            # Windows/D3D12 Ganesh vertical slice) -- see the
+            # target_os == "windows" branch's own, fuller comment further
+            # down for why this is forced (Skia's own public GrD3DTypes.h
+            # #includes <d3d12.h>/<dxgi1_4.h> directly, not vendored the
+            # way Vulkan's are) and tools/fetch_mingw_w64_headers.py's own
+            # top comment for why mingw-w64's header set specifically,
+            # not the raw Microsoft Windows SDK's (a real, confirmed dead
+            # end under this project's mingw-target clang -- raw SDK
+            # d3d12.h assumes a full real MSVC compile environment,
+            # including MSVC-only architecture macros and MSVC-only
+            # atomic/fence compiler intrinsics in winnt.h, that clang only
+            # implements for its own `*-windows-msvc` target, not this
+            # project's `--target=x86_64-w64-mingw32` one). Assembled
+            # here, not appended post-hoc after this dict literal, because
+            # gn_list() immediately stringifies its input --
+            # args["extra_cflags"] is already a formatted GN string by
+            # the time the windows branch below runs, with no cheap way
+            # back to a Python list to append to.
+            #
+            # Plain -I, not -isystem: must be able to out-rank the
+            # win32_shim -I just above for angle-bracket <windows.h> et
+            # al (mingw-w64-headers/include is a real, complete, clang/
+            # gcc-native header set -- a strict superset of win32_shim's
+            # own narrow, libunwind-oriented declarations -- see win32_
+            # shim/windows.h's own top comment for the #include_next
+            # mechanism that lets this -I win without regressing that
+            # shim's own, separate real use). Ordered *after* win32_shim
+            # above (not before) so win32_shim's own io.h/direct.h/
+            # excpt.h -- real files mingw-w64-headers/include does not
+            # provide at all (they ship in the separate, not-vendored
+            # mingw-w64-crt instead) -- remain reachable exactly as
+            # before; only the files both directories provide (windows.h,
+            # winerror.h, winioctl.h, psapi.h, ntverp.h) actually depend
+            # on win32_shim's own #include_next forwarding to get here.
+            #
+            # windows_short_path(): defensive, matching this same
+            # function's own established precedent for the host Python
+            # path above and the (now-removed) raw Windows SDK Include
+            # root this replaced -- CRT_MINGW_W64_HEADERS_INCLUDE_ROOT
+            # normally lives under this project's own build directory, so
+            # a literal space is unlikely but not impossible (an outer
+            # build invoked from a user directory that has one).
+            ([f"-I{windows_short_path(mingw_w64_headers_root)}".replace("\\", "/"),
+              # -include win32_shim/mingw_w64_compat.h (2026-09-04, real,
+              # confirmed necessary): forces this project's own real,
+              # narrow compatibility declarations (_WCHAR_T_DEFINED/
+              # _WCTYPE_T_DEFINED pre-defines, a real _wcsicmp
+              # declaration) to land before anything else in the TU,
+              # ahead of mingw-w64's own real windows.h chain -- see that
+              # file's own top comment for the full "why" (a real,
+              # confirmed wctype_t width conflict and an illegal-in-C++
+              # wchar_t typedef attempt this otherwise triggers). -include
+              # takes its file as a separate argument (unlike -I/-isystem,
+              # which also accept a glued form) -- two real, separate list
+              # elements here, not one glued string.
+              "-include",
+              str(root / "libstdc++" / "third_party" / "win32_shim" / "mingw_w64_compat.h").replace("\\", "/"),
+              # -DGPU_TEST_UTILS=1 (2026-09-04, real, confirmed
+              # necessary): Skia's own BUILD.gn only defines this
+              # (skia_private config) when `is_skia_dev_build &&
+              # !is_canvaskit` -- our own is_official_build=true GN args
+              # above make is_skia_dev_build false, matching a real
+              # "official" (non-dev) Skia build's own real intent. But
+              # Skia's own real D3D backend code (src/gpu/ganesh/d3d/
+              # GrD3DBackendSurface.cpp's own always-compiled, never
+              # itself GPU_TEST_UTILS-gated GrD3DBackendTextureData::
+              # equal()) unconditionally calls operator==() on
+              # GrD3DBackendSurfaceInfo -- a real operator only defined
+              # under `#if defined(GPU_TEST_UTILS)` in Skia's own
+              # GrD3DTypesPriv.h. Confirmed for real: `invalid operands
+              # to binary expression` without this -- a genuine Skia-
+              # upstream gap this milestone's D3D backend has for
+              # official (non-dev) builds specifically, not something
+              # wrong in this project's own setup (the already-landed
+              # Linux/Vulkan slice never needed this -- Ganesh's Vulkan
+              # backend's own always-compiled code apparently never hits
+              # the same pattern). Defined directly via extra_cflags
+              # (not by flipping is_skia_dev_build=true as a GN arg) to
+              # stay narrow -- is_skia_dev_build also adds
+              # SK_ALLOW_STATIC_GLOBAL_INITIALIZERS=1 and touches other,
+              # unrelated BUILD.gn branches this slice has no real need
+              # for.
+              "-DGPU_TEST_UTILS=1"]
+             if target_os == "windows" and mingw_w64_headers_root else [])
         ),
         # -fno-exceptions/-fno-rtti here are Skia's own genuine preference
         # (matches CRTGFX_SKIA's own "no fake Skia headers, no exceptions
@@ -460,6 +612,31 @@ def default_gn_args(root, sysroot, target_os, target_arch, freetype_prefix=None)
             args["target_cpu"] = gn_string("arm64")
         elif target_arch in ("x86_64", "amd64", "x64"):
             args["target_cpu"] = gn_string("x64")
+        # Windows-only Ganesh/D3D12 offscreen vertical slice (2026-09-03,
+        # TODO.md's "Enable Skia GPU rendering" step -- the Linux/Vulkan
+        # slice's own sibling). Confirmed for real, reading src/gpu/
+        # ganesh/d3d/GrD3DGpu.cpp/BUILD.gn directly: unlike Vulkan's
+        # skia_use_vma, there is no separate flag gating D3D's own
+        # internal memory-allocator fallback -- it is unconditional C++
+        # once skia_use_direct3d is true, and it needs a real vendor
+        # checkout (third_party/externals/d3d12allocator) this project's
+        # fetch pipeline does not provide. Rather than wiring that new
+        # external in, libcrtgfx/src/skia_bridge.cc supplies its own real,
+        # minimal GrD3DMemoryAllocator instead (a 2-pure-virtual-method
+        # interface, much smaller than Vulkan's own) -- so no allocator-
+        # related GN arg is needed here at all, only the two real backend-
+        # enabling flags.
+        args["skia_enable_ganesh"] = "true"
+        args["skia_use_direct3d"] = "true"
+        # Real Windows SDK -isystem<root>/um and -isystem<root>/shared
+        # (needed for Skia's *own* GrD3D*.cpp sources to find <d3d12.h>/
+        # <dxgi1_4.h>) are assembled directly into extra_cflags's own
+        # base-dict list comprehension above (gn_list() there immediately
+        # stringifies, so appending after the fact isn't cheap) -- see
+        # that list's own trailing comment for the "why forced" story.
+        # libcrtgfx/CMakeLists.txt adds the matching -isystem to
+        # crtgfx_skia_objects/crt_wire_skia_executable() separately, for
+        # skia_bridge.cc's own real GrD3DTypes.h include.
     elif target_os == "macos":
         # This is a CRT/PAL build of Skia, not Skia's native Cocoa/CoreGraphics
         # port. Select Skia's generic POSIX source set while the wrapper
@@ -471,6 +648,22 @@ def default_gn_args(root, sysroot, target_os, target_arch, freetype_prefix=None)
         args["target_os"] = gn_string("linux")
         if target_arch in ("aarch64", "arm64"):
             args["target_cpu"] = gn_string("arm64")
+        # Linux-only Ganesh/Vulkan vertical slice (2026-09-03, TODO.md's
+        # "Enable Skia GPU rendering" step) -- Windows/macOS stay CPU-raster
+        # only for now, their own later roadmap steps. Skia vendors its own
+        # Vulkan headers (include/third_party/vulkan/, SK_USE_INTERNAL_
+        # VULKAN_HEADERS) when skia_use_vulkan is on, so no external Vulkan
+        # SDK dependency is added here. skia_use_vma defaults to tracking
+        # skia_use_vulkan in Skia's own gn/skia.gni, which would otherwise
+        # pull in a third_party/externals/vulkanmemoryallocator vendor
+        # checkout this project's fetch pipeline does not provide -- forced
+        # off here; Skia's own GrVkGpu::Make() falls back to constructing
+        # its own allocator internally when the caller-supplied
+        # GrVkBackendContext.fMemoryAllocator is null, so this costs nothing
+        # (confirmed by reading src/gpu/ganesh/vk/GrVkGpu.cpp directly).
+        args["skia_enable_ganesh"] = "true"
+        args["skia_use_vulkan"] = "true"
+        args["skia_use_vma"] = "false"
 
     return args
 
@@ -517,6 +710,18 @@ def main():
     parser.add_argument("--install-prefix", required=True, help="Skia install prefix used by libcrtgfx")
     parser.add_argument("--sysroot", required=True, help="CRT sysroot")
     parser.add_argument("--rootfs", default="", help="CRT rootfs (Windows only, for mksh.exe)")
+    parser.add_argument(
+        "--mingw-w64-headers-root", default="",
+        help="mingw-w64-headers/include root, as fetched by tools/fetch_mingw_w64_headers.py "
+             "(Windows only, D3D12 Ganesh vertical slice) -- Skia's own public "
+             "include/gpu/ganesh/d3d/GrD3DTypes.h unconditionally #includes <d3d12.h>/"
+             "<dxgi1_4.h>, a real, forced exception to this project's own no-host-SDK-header "
+             "policy Skia itself requires (see docs/libcrtgfx_api_policy.md); mingw-w64's own "
+             "header set is used instead of the raw Microsoft Windows SDK's, which is a real, "
+             "confirmed dead end under this project's mingw-target clang (see tools/"
+             "fetch_mingw_w64_headers.py's own top comment). Omit when not building with "
+             "skia_use_direct3d=true."
+    )
     parser.add_argument("--target-os", required=True, choices=["linux", "macos", "windows"])
     parser.add_argument("--target-arch", default="host")
     parser.add_argument("--gn", default="", help="path to gn; defaults to Skia bin/gn or PATH")
@@ -696,7 +901,16 @@ def main():
         )
     env["CRT_CXX_STANDARD_INCLUDE_FLAGS"] = f"-isystem{libcxx_headers}"
 
-    gn_args = default_gn_args(root, sysroot, args.target_os, args.target_arch, freetype_prefix)
+    if args.target_os == "windows":
+        # See ensure_skia_external()'s own top comment for the full "why"
+        # -- two real, narrow, single-external fetches, not tools/git-
+        # sync-deps.
+        ensure_skia_external(source, "third_party/externals/spirv-cross")
+        ensure_skia_external(source, "third_party/externals/d3d12allocator")
+
+    gn_args = default_gn_args(
+        root, sysroot, args.target_os, args.target_arch, freetype_prefix,
+        mingw_w64_headers_root=args.mingw_w64_headers_root or None)
     args_gn = build_dir / "args.gn"
     write_args_file(args_gn, gn_args, args.gn_arg)
     run([gn, "gen", str(build_dir)], cwd=source, env=env)
