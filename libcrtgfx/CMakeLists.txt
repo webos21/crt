@@ -223,7 +223,31 @@ if(CRTGFX_ENABLE_SKIA AND CRT_TARGET_OS STREQUAL "windows" AND
 endif()
 
 if(CRT_TARGET_OS STREQUAL "windows")
-  set(CRTGFX_BACKEND_SOURCES src/arch/windows/window_win32.c)
+  set(CRTGFX_BACKEND_SOURCES
+    src/arch/windows/window_win32.c
+    src/arch/windows/gpu_win32.c
+  )
+  # Windows/D3D12 offscreen vertical slice (2026-09-03, TODO.md's "Enable
+  # Skia GPU rendering" step -- the Linux/Vulkan slice's own sibling; see
+  # crtgfx/gpu.h's own top comment). Unlike Linux's libvulkan-dev (a real
+  # host package that is sometimes genuinely absent, hence that slice's
+  # own find_library()-gated, if()-guarded design), d3d12.lib ships in
+  # every real Windows 10+ SDK exactly like d3d11.lib/dxgi.lib already do
+  # below -- so gpu_win32.c is compiled unconditionally here, and
+  # CRTGFX_HAVE_D3D12 defined unconditionally, matching this project's own
+  # existing treatment of D3D11 as always-available on this host rather
+  # than reintroducing the whole "guard every ${VAR} link-line expansion"
+  # discipline the Linux CRTGFX_LINUX_VULKAN_LIB break just taught this
+  # session -- there is no real "maybe absent" case to guard against here.
+  # (CRT_TARGET_OS_WINDOWS=1 is applied to crtgfx_backend_objects itself
+  # further down, right after that target is actually created -- see that
+  # call's own, fuller comment for a real, narrow gap this exposed.)
+  # Directory-scoped (not per-target), matching CRTGFX_HAVE_VULKAN's own
+  # precedent just above: src/gpu.c (crtgfx_common_objects) and
+  # src/arch/windows/gpu_win32.c (crtgfx_backend_objects) share struct
+  # crtgfx_gpu_device's own real field layout via src/gpu_internal.h, and
+  # both compilation units must see this define identically.
+  add_compile_definitions(CRTGFX_HAVE_D3D12=1)
 elseif(CRT_TARGET_OS STREQUAL "macos")
   set(CRTGFX_BACKEND_SOURCES src/arch/macos/window_cocoa.c)
   # window_cocoa.c drives the Objective-C runtime from plain C by casting
@@ -351,6 +375,18 @@ if(Python3_Interpreter_FOUND)
     # exactly (the *rootfs* mksh.exe, not the sysroot's -- only the
     # rootfs carries toybox's applet aliases these wrapper scripts call).
     list(APPEND CRTGFX_SKIA_BUILD_ARGS --rootfs "${CMAKE_BINARY_DIR}/rootfs")
+    # Windows/D3D12 offscreen vertical slice (2026-09-04) -- see tools/
+    # build_skia.py's own --mingw-w64-headers-root comment for the full
+    # "why" (Skia's own public GrD3DTypes.h forces real <d3d12.h>/
+    # <dxgi1_4.h>, and the raw Microsoft SDK's own versions of those are a
+    # real dead end under this project's mingw-target clang -- see
+    # tools/fetch_mingw_w64_headers.py's own top comment). CRT_MINGW_W64_
+    # HEADERS_INCLUDE_ROOT itself is computed once, at the root
+    # CMakeLists.txt level. Always set (unlike the raw-SDK-include probe
+    # this replaced, which could come back empty on a host with no
+    # installed SDK) -- crtgfx-mingw-w64-headers-fetch, DEPENDS'd on
+    # below, fetches it into place before this ever runs.
+    list(APPEND CRTGFX_SKIA_BUILD_ARGS --mingw-w64-headers-root "${CRT_MINGW_W64_HEADERS_INCLUDE_ROOT}")
   endif()
 
   add_custom_target(crtgfx-skia-fetch
@@ -365,6 +401,28 @@ if(Python3_Interpreter_FOUND)
     USES_TERMINAL
   )
 
+  # crtgfx-mingw-w64-headers-fetch (2026-09-04, Windows/D3D12 Ganesh
+  # vertical slice): see tools/fetch_mingw_w64_headers.py's own top
+  # comment for the full "why". Windows-only -- CRTGFX_SKIA_BUILD_ARGS
+  # only ever references CRT_MINGW_W64_HEADERS_INCLUDE_ROOT inside this
+  # same file's own `if(CRT_TARGET_OS STREQUAL "windows")` block above,
+  # and libcrtgfx/CMakeLists.txt's own crtgfx_skia_objects/crt_wire_
+  # skia_executable() consumers of it are equally Windows-only, so this
+  # target (and the DEPENDS on it below) only needs to exist there.
+  if(CRT_TARGET_OS STREQUAL "windows")
+    add_custom_target(crtgfx-mingw-w64-headers-fetch
+      COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
+        "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/fetch_mingw_w64_headers.py"
+        --dest "${CRT_MINGW_W64_HEADERS_DIR}"
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+      COMMENT "Fetching mingw-w64's own Win32 API headers into ${CRT_MINGW_W64_HEADERS_DIR}"
+      USES_TERMINAL
+    )
+    set(CRTGFX_SKIA_MINGW_HEADERS_DEPENDS crtgfx-mingw-w64-headers-fetch)
+  else()
+    set(CRTGFX_SKIA_MINGW_HEADERS_DEPENDS)
+  endif()
+
   add_custom_target(crtgfx-skia-configure
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
       "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/build_skia.py"
@@ -377,7 +435,7 @@ if(Python3_Interpreter_FOUND)
       --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}"
       ${CRTGFX_SKIA_BUILD_ARGS}
       --configure-only
-    DEPENDS crtgfx-skia-fetch port-build-freetype
+    DEPENDS crtgfx-skia-fetch port-build-freetype ${CRTGFX_SKIA_MINGW_HEADERS_DEPENDS}
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     COMMENT "Configuring Skia with the CRT toolchain"
     USES_TERMINAL
@@ -394,7 +452,7 @@ if(Python3_Interpreter_FOUND)
       --target-os "${CRT_TARGET_OS}"
       --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}"
       ${CRTGFX_SKIA_BUILD_ARGS}
-    DEPENDS crtgfx-skia-fetch port-build-freetype
+    DEPENDS crtgfx-skia-fetch port-build-freetype ${CRTGFX_SKIA_MINGW_HEADERS_DEPENDS}
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     COMMENT "Building Skia CPU raster with the CRT toolchain"
     USES_TERMINAL
@@ -438,12 +496,16 @@ if(Python3_Interpreter_FOUND)
     crtgfx_skia_cpu_coverage
     crtmedia_frame_skia_smoke
   )
-  if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB)
-    # crtgfx_skia_gpu_offscreen_smoke (2026-09-03) -- only ever defined on
-    # Linux with a real libvulkan found (same condition its own add_
-    # executable() above is gated on); the nested build directory this
-    # custom target drives re-evaluates that same find_library() call
-    # itself, on the same host, so it stays consistent.
+  if((CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB) OR
+     CRT_TARGET_OS STREQUAL "windows")
+    # crtgfx_skia_gpu_offscreen_smoke (2026-09-03, extended to Windows/
+    # D3D12 the same day) -- only ever defined on Linux with a real
+    # libvulkan found, or on Windows (D3D12 always available there, no
+    # gate needed -- see CRTGFX_BACKEND_SOURCES's own Windows branch,
+    # further up); same condition its own add_executable() below is gated
+    # on. The nested build directory this custom target drives re-
+    # evaluates that same real condition itself, on the same host, so it
+    # stays consistent.
     list(APPEND CRTGFX_SKIA_SMOKE_TARGETS crtgfx_skia_gpu_offscreen_smoke)
   endif()
   set(CRTGFX_SKIA_SMOKE_TARGET_ARGS)
@@ -864,6 +926,30 @@ set_target_properties(crtgfx_common_objects PROPERTIES
 add_library(crtgfx_backend_objects OBJECT ${CRTGFX_BACKEND_SOURCES})
 if(CRT_TARGET_OS STREQUAL "linux")
   target_link_libraries(crtgfx_backend_objects PRIVATE crt_build_flags)
+elseif(CRT_TARGET_OS STREQUAL "windows")
+  # CRT_TARGET_OS_WINDOWS=1 -- a real, narrow gap found while actually
+  # building src/arch/windows/gpu_win32.c for the first time (2026-09-03).
+  # gpu_internal.h's own #if defined(CRT_TARGET_OS_WINDOWS) && defined(
+  # CRTGFX_HAVE_D3D12) guard (mirroring the Linux side's own CRT_TARGET_
+  # OS_LINUX + CRTGFX_HAVE_VULKAN double-check) silently never matched:
+  # CRT_TARGET_OS_WINDOWS is normally only defined via crt_build_flags's
+  # own INTERFACE compile definition (root CMakeLists.txt), and this
+  # target deliberately does NOT link crt_build_flags on Windows the way
+  # it does on Linux just above (window_win32.c's own established "no
+  # dependency on this project's own headers at all" style -- crt_build_
+  # flags also brings stricter warning/freestanding flags that style does
+  # not want here). Confirmed for real: without this, struct crtgfx_gpu_
+  # device compiled with zero D3D12 fields in gpu_win32.c's own
+  # translation unit while gpu.c's (crtgfx_common_objects, which DOES
+  # link crt_build_flags unconditionally on every OS) compiled with them
+  # -- a real, silent struct-layout mismatch between the two object files
+  # sharing this one struct, not just a build error (it did surface as
+  # one here, "no member named 'd3d12_device'", but only because gpu_
+  # win32.c itself also references those same fields -- gpu.c's own
+  # dispatch code alone would have compiled "successfully" against a
+  # differently-sized struct). Added narrowly here, not by linking the
+  # whole crt_build_flags interface target, for exactly that reason.
+  target_compile_definitions(crtgfx_backend_objects PRIVATE CRT_TARGET_OS_WINDOWS=1)
 endif()
 target_include_directories(crtgfx_backend_objects PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -925,6 +1011,82 @@ if(CRTGFX_ENABLE_SKIA)
     # skia_bridge.cc would silently see incompatible Ganesh Vulkan struct
     # layouts against what libskia.a itself was actually built with.
     target_compile_definitions(crtgfx_skia_objects PRIVATE SK_USE_INTERNAL_VULKAN_HEADERS)
+  endif()
+  if(CRT_TARGET_OS STREQUAL "windows")
+    # Windows/D3D12 offscreen vertical slice (2026-09-03, real headers
+    # switched 2026-09-04) -- Skia's own public include/gpu/ganesh/d3d/
+    # GrD3DTypes.h unconditionally #includes <d3d12.h>/<dxgi1_4.h>, a
+    # real, forced exception to this project's own no-host-header policy
+    # (see docs/libcrtgfx_api_policy.md). skia_bridge.cc's own D3D12
+    # branch transitively includes it, so this target needs the same
+    # real flags tools/build_skia.py's own sibling call already adds for
+    # Skia's *own* GrD3D*.cpp sources -- see that file's own comments
+    # for the full "why" behind each one (mingw-w64's header set, not
+    # the raw Microsoft Windows SDK's -- a real, confirmed dead end
+    # under this project's mingw-target clang; and win32_shim/
+    # mingw_w64_compat.h's own real, narrow compatibility fixes).
+    #
+    # Both -I dirs, in this exact order: win32_shim FIRST, matching
+    # tools/build_skia.py's own real order, is not optional -- win32_shim
+    # provides excpt.h/malloc.h/DXProgrammableCapture.h (real files
+    # mingw-w64-headers does not, needed unconditionally by mingw's own
+    # real windows.h/rpc.h/GrD3DGpu.cpp chains -- see each shim file's
+    # own top comment), AND its own windows.h/winerror.h/winioctl.h/
+    # psapi.h/ntverp.h #include_next-forward to mingw-w64-headers' real
+    # versions (see win32_shim/windows.h's own top comment) -- reversing
+    # this order would either lose that forwarding (files found in
+    # mingw-w64-headers directly, never reaching win32_shim's own
+    # #include_next logic) or make win32_shim's exclusive files
+    # (excpt.h/malloc.h/DXProgrammableCapture.h) unreachable. A first
+    # attempt at this target's own flags omitted win32_shim entirely
+    # (mistakenly assumed here to be irrelevant to this specific
+    # target) -- confirmed for real (2026-09-04) this breaks: `fatal
+    # error: 'excpt.h' file not found` from mingw's own windows.h.
+    # target_compile_options(), not target_include_directories(): lands
+    # in <FLAGS>, matching this file's own established
+    # -isystem${CRT_SYSROOT}/include/c++/v1 precedent just below (see
+    # that block's own fuller comment on why <INCLUDES> alone cannot
+    # reliably win the real ordering this project's own custom
+    # CMAKE_CXX_COMPILE_OBJECT rule needs).
+    target_compile_options(crtgfx_skia_objects PRIVATE
+      "-I${CMAKE_SOURCE_DIR}/libstdc++/third_party/win32_shim"
+      "-I${CRT_MINGW_W64_HEADERS_INCLUDE_ROOT}"
+      # -include mingw_w64_compat.h: see tools/build_skia.py's own
+      # matching comment (same file's own fuller reasoning) -- this
+      # target #includes the same real mingw-w64 headers, transitively,
+      # and needs the same real, narrow compatibility declarations
+      # forced ahead of them.
+      "-include" "${CMAKE_SOURCE_DIR}/libstdc++/third_party/win32_shim/mingw_w64_compat.h"
+      # -Wno-pragma-pack (2026-09-04, real, confirmed necessary): this
+      # project's own -Wall -Wextra -Werror (crt_cxx_build_flags) turns
+      # mingw-w64's own real, expected, harmless #pragma pack(push,N)/
+      # pack() nesting (winnt.h/wingdi.h/... intentionally narrowing/
+      # restoring struct alignment for real Win32 ABI structs, exactly
+      # as every other real Windows consumer's build does) into hard
+      # errors -- confirmed for real: `error: the current #pragma pack
+      # alignment value is modified in the included file
+      # [-Werror,-Wpragma-pack]`, 20 of them, hit only once this
+      # project's own code (not just Skia's, which already builds these
+      # headers warning-suppressed via tools/build_skia.py's own -w)
+      # started #including real mingw-w64 headers directly.
+      "-Wno-pragma-pack"
+      # -Wno-unused-value/-Wno-ignored-attributes (2026-09-04, real,
+      # confirmed necessary, same real cause as -Wno-pragma-pack just
+      # above): mingw-w64's own real combaseapi.h (reached transitively
+      # via <d3d12.h> -> ... -> objbase.h) has a `static_cast<IUnknown
+      # *>(*pp);` (a real, deliberate no-op cast, part of its own
+      # `IID_PPV_ARGS`-equivalent macro machinery's own compile-time
+      # type check) and two `__forceinline` functions (CoCreateInstance/
+      # CoCreateInstanceEx) that intentionally redeclare a `dllimport`
+      # declaration inline -- both real, harmless, expected mingw-w64
+      # patterns, confirmed via `error: expression result unused
+      # [-Werror,-Wunused-value]` / `error: 'CoCreateInstance'
+      # redeclared inline; 'dllimport' attribute ignored
+      # [-Werror,-Wignored-attributes]`.
+      "-Wno-unused-value"
+      "-Wno-ignored-attributes"
+    )
+    add_dependencies(crtgfx_skia_objects crtgfx-mingw-w64-headers-fetch)
   endif()
   if(CRT_TARGET_OS STREQUAL "windows" AND CRT_USE_IMPORTED_LIBCXX)
     # -isystem${CRT_SYSROOT}/include/c++/v1, via target_compile_options (not
@@ -992,6 +1154,30 @@ if(CRT_TARGET_OS STREQUAL "windows")
     PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES}
     NO_DEFAULT_PATH
   )
+  # d3d12.lib (2026-09-03, gpu_win32.c's own real device/queue/adapter
+  # creation) -- same real, always-available-on-any-real-Windows-10+-SDK
+  # shape as d3d11.lib/dxgi.lib just above; dxguid.lib is NOT needed here
+  # either, for the identical reason (gpu_win32.c hand-declares its own
+  # real IID_* constants rather than linking the SDK's own extern GUID
+  # symbols -- see that file's own top comment).
+  find_file(CRTGFX_WINDOWS_D3D12_LIB
+    NAMES d3d12.lib
+    PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES}
+    NO_DEFAULT_PATH
+  )
+  # d3dcompiler.lib (2026-09-04, real, confirmed necessary): Skia's own
+  # real src/gpu/ganesh/d3d/GrD3DPipelineStateBuilder.cpp calls the real,
+  # standard D3DCompile() (compiles Ganesh's own SkSL-generated HLSL
+  # source into real shader bytecode at runtime) -- confirmed via `ld.lld:
+  # error: undefined symbol: D3DCompile`. Same real, always-available-on-
+  # any-real-Windows-10+-SDK shape as d3d11.lib/dxgi.lib/d3d12.lib above
+  # (D3DCompile is a stable, decades-old D3D API, not gated behind any
+  # optional SDK component).
+  find_file(CRTGFX_WINDOWS_D3DCOMPILER_LIB
+    NAMES d3dcompiler.lib
+    PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES}
+    NO_DEFAULT_PATH
+  )
   if(NOT CRTGFX_WINDOWS_USER32_LIB)
     set(CRTGFX_WINDOWS_USER32_LIB user32.lib CACHE FILEPATH "Windows user32 import library")
   endif()
@@ -1003,6 +1189,12 @@ if(CRT_TARGET_OS STREQUAL "windows")
   endif()
   if(NOT CRTGFX_WINDOWS_DXGI_LIB)
     set(CRTGFX_WINDOWS_DXGI_LIB dxgi.lib CACHE FILEPATH "Windows dxgi import library")
+  endif()
+  if(NOT CRTGFX_WINDOWS_D3D12_LIB)
+    set(CRTGFX_WINDOWS_D3D12_LIB d3d12.lib CACHE FILEPATH "Windows d3d12 import library")
+  endif()
+  if(NOT CRTGFX_WINDOWS_D3DCOMPILER_LIB)
+    set(CRTGFX_WINDOWS_D3DCOMPILER_LIB d3dcompiler.lib CACHE FILEPATH "Windows d3dcompiler import library")
   endif()
 endif()
 
@@ -1138,6 +1330,8 @@ if(CRT_TARGET_OS STREQUAL "windows")
     "${CRTGFX_WINDOWS_GDI32_LIB}"
     "${CRTGFX_WINDOWS_D3D11_LIB}"
     "${CRTGFX_WINDOWS_DXGI_LIB}"
+    "${CRTGFX_WINDOWS_D3D12_LIB}"
+    "${CRTGFX_WINDOWS_D3DCOMPILER_LIB}"
   )
 elseif(CRT_TARGET_OS STREQUAL "macos")
   target_link_libraries(crtgfx PUBLIC ${CRTGFX_MACOS_FRAMEWORKS})
@@ -1301,6 +1495,8 @@ if(CRT_TARGET_OS STREQUAL "windows")
     "${CRTGFX_WINDOWS_GDI32_LIB}"
     "${CRTGFX_WINDOWS_D3D11_LIB}"
     "${CRTGFX_WINDOWS_DXGI_LIB}"
+    "${CRTGFX_WINDOWS_D3D12_LIB}"
+    "${CRTGFX_WINDOWS_D3DCOMPILER_LIB}"
   )
   if(CRTGFX_ENABLE_SKIA)
     target_link_libraries(crtgfx_shared PRIVATE crt_compiler_rt_builtins)
@@ -1577,6 +1773,48 @@ function(crt_wire_skia_executable target_name)
     # needs the identical define at its own compile time too.
     target_compile_definitions(${target_name} PRIVATE SK_USE_INTERNAL_VULKAN_HEADERS)
   endif()
+  if(CRT_TARGET_OS STREQUAL "windows")
+    # See crtgfx_skia_objects's own, fuller comment on the real win32_
+    # shim + mingw-w64-headers -I pair just above (same file, including
+    # why the order matters) -- this target's own real D3D12 code
+    # (tests/skia_gpu_offscreen_smoke.cc's own CRTGFX_HAVE_D3D12 branch)
+    # #includes <d3d12.h> directly too, so it needs the identical flags
+    # at its own compile time.
+    target_compile_options(${target_name} PRIVATE
+      "-I${CMAKE_SOURCE_DIR}/libstdc++/third_party/win32_shim"
+      "-I${CRT_MINGW_W64_HEADERS_INCLUDE_ROOT}"
+      "-include" "${CMAKE_SOURCE_DIR}/libstdc++/third_party/win32_shim/mingw_w64_compat.h"
+      # -Wno-pragma-pack (2026-09-04, real, confirmed necessary): this
+      # project's own -Wall -Wextra -Werror (crt_cxx_build_flags) turns
+      # mingw-w64's own real, expected, harmless #pragma pack(push,N)/
+      # pack() nesting (winnt.h/wingdi.h/... intentionally narrowing/
+      # restoring struct alignment for real Win32 ABI structs, exactly
+      # as every other real Windows consumer's build does) into hard
+      # errors -- confirmed for real: `error: the current #pragma pack
+      # alignment value is modified in the included file
+      # [-Werror,-Wpragma-pack]`, 20 of them, hit only once this
+      # project's own code (not just Skia's, which already builds these
+      # headers warning-suppressed via tools/build_skia.py's own -w)
+      # started #including real mingw-w64 headers directly.
+      "-Wno-pragma-pack"
+      # -Wno-unused-value/-Wno-ignored-attributes (2026-09-04, real,
+      # confirmed necessary, same real cause as -Wno-pragma-pack just
+      # above): mingw-w64's own real combaseapi.h (reached transitively
+      # via <d3d12.h> -> ... -> objbase.h) has a `static_cast<IUnknown
+      # *>(*pp);` (a real, deliberate no-op cast, part of its own
+      # `IID_PPV_ARGS`-equivalent macro machinery's own compile-time
+      # type check) and two `__forceinline` functions (CoCreateInstance/
+      # CoCreateInstanceEx) that intentionally redeclare a `dllimport`
+      # declaration inline -- both real, harmless, expected mingw-w64
+      # patterns, confirmed via `error: expression result unused
+      # [-Werror,-Wunused-value]` / `error: 'CoCreateInstance'
+      # redeclared inline; 'dllimport' attribute ignored
+      # [-Werror,-Wignored-attributes]`.
+      "-Wno-unused-value"
+      "-Wno-ignored-attributes"
+    )
+    add_dependencies(${target_name} crtgfx-mingw-w64-headers-fetch)
+  endif()
   # CRT_SKIA_FONTS_DIR: absolute path to the bundled real font(s) this
   # target's own real-text-rendering code scans via SkFontMgr_New_Custom_
   # Directory() -- Pretendard GOV (the project-wide default as of
@@ -1819,24 +2057,34 @@ if(CRTGFX_ENABLE_SKIA)
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_skia_cpu_coverage_runs)
 
-  # crtgfx_skia_gpu_offscreen_smoke: the real Ganesh/Vulkan offscreen
-  # vertical slice's own rendering-correctness coverage (2026-09-03,
-  # TODO.md's "Enable Skia GPU rendering" step -- see that file's own top
-  # comment for the full design record). Linux + a real libvulkan found at
-  # configure time only, matching src/arch/linux/gpu_vulkan.c's own real
-  # scope -- Windows/macOS keep their existing Skia CPU-raster-only targets
-  # untouched. Same headless shape as crtgfx_skia_cpu_coverage just above
-  # (no crtgfx_window/host display connection needed at all).
-  if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB)
+  # crtgfx_skia_gpu_offscreen_smoke: the real Ganesh GPU offscreen vertical
+  # slice's own rendering-correctness coverage (2026-09-03, TODO.md's
+  # "Enable Skia GPU rendering" step -- see that file's own top comment
+  # for the full design record). Cross-platform, not duplicated: this one
+  # source file's own draw/readback/resize logic already only calls
+  # crtgfx_skia_make_gpu_context()/crtgfx_skia_make_gpu_offscreen_surface()
+  # (skia_bridge.cc), which now have real per-OS implementations behind
+  # the same two names/signatures for both Vulkan and D3D12 -- only the
+  # device-loss test's own low-level handle-teardown step branches by OS
+  # internally (see that file's own #if). Linux needs a real libvulkan
+  # found at configure time (src/arch/linux/gpu_vulkan.c's own real,
+  # optional scope); Windows needs nothing extra (D3D12 always available
+  # there, matching CRTGFX_BACKEND_SOURCES's own Windows branch further
+  # up) -- macOS keeps its existing Skia CPU-raster-only targets untouched
+  # (no real Metal backend yet). Same headless shape as crtgfx_skia_cpu_
+  # coverage just above (no crtgfx_window/host display connection needed
+  # at all).
+  if((CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB) OR
+     CRT_TARGET_OS STREQUAL "windows")
     add_executable(crtgfx_skia_gpu_offscreen_smoke
       ${CRT_STARTUP_OBJECTS}
       tests/skia_gpu_offscreen_smoke.cc
     )
     target_link_libraries(crtgfx_skia_gpu_offscreen_smoke PRIVATE crt_cxx_build_flags crtgfx)
     # gpu_internal.h (src/gpu_internal.h, not installed/public) -- this
-    # test reaches into crtgfx_gpu_device's own real Vulkan handles
+    # test reaches into crtgfx_gpu_device's own real per-OS handles
     # directly (crtgfx_skia_make_gpu_context()'s own real caller shape,
-    # and the device-loss test's own deliberate vkDestroyDevice() call).
+    # and the device-loss test's own deliberate low-level teardown call).
     target_include_directories(crtgfx_skia_gpu_offscreen_smoke PRIVATE
       "${CMAKE_CURRENT_SOURCE_DIR}/src"
     )

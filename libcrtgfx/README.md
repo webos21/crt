@@ -74,8 +74,8 @@ per-window D3D11 device, `window_win32.c`, exists solely for
 this contract) -- `crtgfx_gpu_query_capabilities()` honestly reported
 `CRTGFX_GPU_BACKEND_NONE`/0 devices everywhere, and device/surface creation
 correctly, always reported `CRTGFX_ERROR_UNSUPPORTED`, the same graceful
-contract `crtgfx_window_create()` already uses (Linux now has a real
-backend -- see below). `crtgfx_gpu_fence`, unlike device/surface, is a
+contract `crtgfx_window_create()` already uses (Linux and Windows now
+have real backends -- see below). `crtgfx_gpu_fence`, unlike device/surface, is a
 real, working, host-independent CPU synchronization primitive right now
 (built on this project's own `pthread_mutex_t`/`pthread_cond_t`) --
 "software fallback must remain a first-class path" is exactly what a real,
@@ -123,6 +123,45 @@ separate follow-up steps. See `HISTORY.md`'s 2026-09-03 entry for the full
 trail, including two further real findings (this project's own `dlopen()`
 has no real ELF dynamic loading yet, and `skia_use_vma=false` silently
 disabled Ganesh's own internal memory-allocator fallback entirely).
+
+**Enable Skia GPU rendering -- Windows/D3D12 offscreen vertical slice**
+(2026-09-04): `src/arch/windows/gpu_win32.c` (new, hand-declared, no host
+headers) is the second real `crtgfx_gpu_device` backend, additive
+alongside `window_win32.c`'s existing, untouched D3D11 presentation
+pipeline -- real device/queue/adapter creation, hardware-preferred
+ordering with a WARP fallback, real vtable slots/IIDs verified directly
+against the local Windows SDK headers. Skia's own public `GrD3DTypes.h`
+forces real `<d3d12.h>`/`<dxgi1_4.h>`, same as the Vulkan slice's own
+Vulkan-header exception -- but the raw Microsoft Windows SDK's own
+versions of those are a real, confirmed dead end under this project's
+mingw-target clang (`winnt.h` assumes real MSVC-only architecture macros
+and atomic intrinsics clang only implements for its `*-windows-msvc`
+target), so this project vendors mingw-w64's own real, clang/gcc-native
+header set instead (`tools/fetch_mingw_w64_headers.py`, pinned to its
+`v14.0.0` tag) -- `libstdc++/third_party/win32_shim`'s existing minimal
+shims now `#include_next`-forward to it when available, falling back to
+their own narrow declarations otherwise (a true no-op for the unrelated
+libcxx/libunwind bootstrap build, which never puts it on its own include
+path). `crtgfx_skia_make_gpu_context()`/`crtgfx_skia_make_gpu_offscreen_
+surface()` gained a real `#elif defined(CRTGFX_HAVE_D3D12)` branch
+(`skia_bridge.cc`) mirroring the Vulkan one -- same shared declarations
+in `crtgfx/skia.h`, same `tests/skia_gpu_offscreen_smoke.cc` draw/
+readback/resize coverage, with D3D12's own real, clean
+`ID3D12Device5::RemoveDevice()` + `GetDeviceRemovedReason()` standing in
+for Vulkan's own double-`vkDestroyDevice()`-avoiding device-loss design.
+Landing this also caught and fixed a real, previously-latent `tools/
+crt-ar` bug (its own response-file expansion defeated the response
+file's entire purpose once `libskia.a`'s object count -- Ganesh's D3D
+backend plus `d3d12allocator`/`spirv-cross` -- grew past Windows' real
+command-line length limit) and a real ownership bug in `skia_bridge.cc`
+(a raw-pointer assignment into a `gr_cp<T>` COM smart-pointer field that
+would have double-released the device, only caught once a real, complete
+`<d3d12.h>` was finally available to compile against). Verified for real
+on Windows (`crtgfx_skia_gpu_offscreen_smoke`'s full device-loss/recovery
+cycle included) and Linux/WSL (confirming zero regression to the Vulkan
+slice or the libcxx/libunwind bootstrap from the shared win32_shim/
+crt-ar changes); macOS re-verification stays separately pending, same as
+the Vulkan slice. See `HISTORY.md`'s 2026-09-04 entry for the full trail.
 
 See `docs/libcrtgfx_api_policy.md` for the API boundary decision.
 See `docs/libcrtgfx_wayland_plan.md` for the Wayland/compositor plan.

@@ -38,6 +38,23 @@ struct crtgfx_gpu_device {
   void* vk_device;
   void* vk_queue;
   uint32_t vk_queue_family_index;
+#elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
+  /* Real D3D12/DXGI handles (2026-09-03, the Windows/D3D12 offscreen
+   * vertical slice -- the Linux/Vulkan slice's own sibling). The real
+   * ID3D12Device, ID3D12CommandQueue, and IDXGIAdapter1 COM interfaces
+   * are all real, pointer-sized COM object pointers -- void* here for
+   * the identical reason the Vulkan fields above use it:
+   * real COM pointers are ABI-identical regardless of which header
+   * declared the type name (this header never includes the real
+   * <d3d12.h>/<dxgi1_4.h> Skia's own consumer code, skia_bridge.cc,
+   * separately does -- gpu_win32.c itself stays real-host-header-free,
+   * hand-declaring only what it needs, matching window_win32.c's own
+   * established D3D11 convention). Real ownership (fill-in at create,
+   * teardown at release) lives in src/arch/windows/gpu_win32.c, not here.
+   */
+  void* d3d12_device;
+  void* d3d12_command_queue;
+  void* dxgi_adapter;
 #endif
 };
 
@@ -51,4 +68,12 @@ struct crtgfx_gpu_device {
 crtgfx_result crtgfx_gpu_vulkan_query_capabilities(crtgfx_gpu_capabilities* out_caps);
 crtgfx_result crtgfx_gpu_vulkan_device_create(uint32_t device_index, struct crtgfx_gpu_device* device);
 void crtgfx_gpu_vulkan_device_destroy(struct crtgfx_gpu_device* device);
+#elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
+/* Real backend hooks -- src/arch/windows/gpu_win32.c. Same real shape as
+ * the Vulkan hooks above (gpu.c still owns all argument validation and
+ * the crtgfx_gpu_device allocation/refcount/free; these only fill in or
+ * tear down the real D3D12-specific fields declared above). */
+crtgfx_result crtgfx_gpu_win32_query_capabilities(crtgfx_gpu_capabilities* out_caps);
+crtgfx_result crtgfx_gpu_win32_device_create(uint32_t device_index, struct crtgfx_gpu_device* device);
+void crtgfx_gpu_win32_device_destroy(struct crtgfx_gpu_device* device);
 #endif

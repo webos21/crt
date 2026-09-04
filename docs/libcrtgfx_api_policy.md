@@ -172,12 +172,23 @@ the current Skia CPU-raster integration obey:
   This should be additive and narrow, not the primary drawing API.
 - ~~Which GPU API should be the first backend after the completed
   CPU-raster baseline, and whether Ganesh or Graphite is the better first
-  Skia path.~~ Resolved 2026-09-03: Ganesh, Linux/Vulkan first (an
-  offscreen vertical slice -- `crtgfx_gpu_device`/Ganesh rendering
-  correctness only, no live on-screen presentation yet). Windows/D3D12 and
-  macOS/Metal are separate, later steps; Graphite remains a later,
-  separately-measured alternative to Ganesh throughout, not evaluated yet.
-  See `HISTORY.md`'s 2026-09-03 entry and `libcrtgfx/README.md`.
+  Skia path.~~ Resolved 2026-09-03/04: Ganesh, Linux/Vulkan first, then
+  Windows/D3D12 (both offscreen vertical slices -- `crtgfx_gpu_device`/
+  Ganesh rendering correctness only, no live on-screen presentation yet).
+  Windows/D3D12 needed a second real exception to the no-host-SDK-header
+  policy above, beyond Skia's own public `GrD3DTypes.h` forcing real
+  `<d3d12.h>`/`<dxgi1_4.h>`: the raw Microsoft Windows SDK's own versions
+  of those headers are a real, confirmed dead end under this project's
+  mingw-target clang (real MSVC-only architecture macros and atomic
+  intrinsics clang does not implement for this target), so this project
+  vendors mingw-w64's own real, clang/gcc-native header set instead
+  (`tools/fetch_mingw_w64_headers.py`) -- still real host headers, still
+  scoped to the same D3D12-touching translation units, just sourced from
+  mingw-w64 rather than the Microsoft SDK. macOS/Metal is the one
+  remaining separate, later step; Graphite remains a later, separately-
+  measured alternative to Ganesh throughout, not evaluated yet. See
+  `HISTORY.md`'s 2026-09-03 and 2026-09-04 entries and
+  `libcrtgfx/README.md`.
 - How to grow from the completed FreeType custom-directory baseline into
   HarfBuzz shaping, ICU, fallback fonts, and platform font discovery.
 - How `libcrtmedia` should hand decoded frames to Skia: CPU pixel buffer first,

@@ -20,6 +20,17 @@
 #ifndef CRT_WIN32_SHIM_PSAPI_H
 #define CRT_WIN32_SHIM_PSAPI_H
 
+/* Windows/D3D12 Ganesh vertical slice (2026-09-04): see windows.h's own
+ * matching comment in this directory for the full "why". #include_next
+ * to mingw-w64's own real, complete psapi.h when it is on the include
+ * path (D3D12-touching Windows compiles only) -- it does its own,
+ * equivalent EnumProcessModules->K32EnumProcessModules redirect, so
+ * nothing further is needed in that case. A true no-op otherwise (this
+ * shim's own narrower declaration below, unchanged). */
+#if defined(__has_include_next) && __has_include_next(<psapi.h>)
+#include_next <psapi.h>
+#else
+
 #include "windows.h"
 
 #ifdef __cplusplus
@@ -34,5 +45,7 @@ __declspec(dllimport) BOOL __stdcall K32EnumProcessModules(
 #endif
 
 #define EnumProcessModules K32EnumProcessModules
+
+#endif /* __has_include_next(<psapi.h>) */
 
 #endif /* CRT_WIN32_SHIM_PSAPI_H */

@@ -378,18 +378,47 @@ pending (this slice touches no macOS code at all -- `gpu.c` there is
 unchanged, still honest `CRTGFX_GPU_BACKEND_NONE`/`UNSUPPORTED`). See
 `HISTORY.md`'s 2026-09-03 entry for the full trail.
 
-1. **Finish Skia GPU rendering: live presentation, then Windows/macOS.**
-   The real remaining scope after the Linux/Vulkan offscreen slice above:
-   wire `crtgfx_gpu_surface_create()` to an actual on-screen window (needs
-   either a real `wl_display*`/`wl_surface*`-capable Wayland backend, a
-   deliberate scoped exception to link real `libwayland-client` for just
-   the Vulkan WSI boundary, or equivalent work once Windows/macOS land);
-   then Direct3D 12 on Windows (`window_win32.c`'s existing private
-   per-window D3D11 device is a real, live candidate for replacement --
-   see `crtgfx_gpu_device_create()`'s own doc comment, `crtgfx/gpu.h` --
-   but Ganesh's own D3D backend is D3D12-only, so this is a real device
-   migration, not an extension); Metal on macOS; Graphite stays a later,
-   separately-measured alternative to Ganesh throughout.
+**Enable Skia GPU rendering -- Windows/D3D12 offscreen vertical slice
+landed (2026-09-04).** Same additive shape as the Linux/Vulkan slice
+above: `gpu_win32.c` (new, real D3D12 device/queue/adapter creation,
+hand-declared, no host headers) sits alongside `window_win32.c`'s own
+existing, untouched D3D11 presentation pipeline. The real, larger part of
+this step turned out to be Skia's own public `GrD3DTypes.h` forcing real
+`<d3d12.h>`/`<dxgi1_4.h>` -- pointing those at the raw Microsoft Windows
+SDK directly hit a genuine, structural dead end (its own `winnt.h` needs
+real MSVC-only architecture macros *and* MSVC-only atomic intrinsics
+clang only implements for its `*-windows-msvc` target, not this
+project's mingw one). Fix: vendor mingw-w64's own real, clang/gcc-native
+header set instead (`tools/fetch_mingw_w64_headers.py`, new, pinned to
+its `v14.0.0` tag), with `libstdc++/third_party/win32_shim`'s existing
+minimal shims now `#include_next`-forwarding to it when available. Along
+the way: a real, previously-latent `tools/crt-ar` bug (response-file
+expansion defeating its own purpose once `libskia.a`'s object count grew
+past Windows' command-line length limit) and a real ownership bug in
+`skia_bridge.cc` (a raw-pointer assignment into a `gr_cp<T>` COM
+smart-pointer field that would have double-released the device) were
+both found and fixed. `crtgfx_skia_gpu_offscreen_smoke` passes every
+sub-check on real Windows hardware, including the full `RemoveDevice()`
+device-loss/recovery cycle. Full ctest suite clean, single-pass, on
+Windows (131/131) and Linux/WSL (crtgfx-skia-smoke 115/115 + main
+117/117, confirming zero regression to the Vulkan slice or the unrelated
+libcxx/libunwind bootstrap from the shared win32_shim/crt-ar changes);
+macOS re-verification stays separately pending, same as the Vulkan slice.
+See `HISTORY.md`'s 2026-09-04 entry for the full trail (the raw-SDK dead
+end, every individual header/link gap found, and how each was fixed).
+
+1. **Finish Skia GPU rendering: live presentation, then macOS.**
+   The real remaining scope after the Linux/Vulkan and Windows/D3D12
+   offscreen slices above: wire `crtgfx_gpu_surface_create()` to an
+   actual on-screen window on each platform (Linux needs either a real
+   `wl_display*`/`wl_surface*`-capable Wayland backend or a deliberate
+   scoped exception to link real `libwayland-client` for just the Vulkan
+   WSI boundary; Windows has no such gap -- `window_win32.c`'s own
+   D3D11 swap chain already has everything D3D12 presentation would
+   need, this is real design work, not a blocker); then Metal on macOS
+   (still needs its own first real `crtgfx_gpu_device` backend, mirroring
+   `gpu_vulkan.c`/`gpu_win32.c`); Graphite stays a later, separately-
+   measured alternative to Ganesh throughout.
 2. **Add hardware decode, phase A.** Enable FFmpeg D3D11VA/D3D12VA,
    VideoToolbox, and VA-API backends, initially downloading decoded frames to
    CPU memory so codec/device selection, fallback, and recovery can be proved

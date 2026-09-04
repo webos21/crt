@@ -8,6 +8,211 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-04
+
+- **Enable Skia GPU rendering: Windows/D3D12 offscreen vertical slice.**
+  TODO.md's own next step after the Linux/Vulkan slice (2026-09-03,
+  below): additive D3D12 device support, mirroring `gpu_vulkan.c`'s own
+  shape, without touching `window_win32.c`'s existing, working D3D11
+  presentation pipeline.
+
+  **`gpu_win32.c` (device/queue/adapter creation) landed clean first.**
+  Hand-declared minimal D3D12/DXGI COM surface, matching this project's
+  own no-host-SDK-header policy -- real vtable slot numbers/IIDs
+  transcribed directly from the local Windows SDK headers (`grep -oE`
+  against the real C-mode vtable structs, not assumed). One real,
+  caught-before-it-shipped bug: an earlier subagent report had
+  `GetDeviceRemovedReason` at vtable slot 37; direct extraction from
+  `um/d3d12.h` showed the real slot is 39 (the report miscounted around
+  `CreateFence`) -- verifying ABI facts directly against the real headers,
+  not trusting a summarized report, caught this before it became a live
+  ABI bug. `crtgfx_gpu_test` passed real device creation/retain/release
+  against real hardware immediately.
+
+  **The real dead end: raw Windows SDK headers for Skia's own Ganesh D3D
+  backend.** Skia's public `include/gpu/ganesh/d3d/GrD3DTypes.h`
+  unconditionally `#include`s `<d3d12.h>`/`<dxgi1_4.h>` -- real Windows
+  SDK headers, not vendored the way Vulkan's are, a forced exception to
+  this project's own header policy. Pointing `-isystem` straight at the
+  local Windows SDK's `um`/`shared` dirs looked promising at first
+  (`-fms-compatibility`/`-fms-compatibility-version=19.38` fixed a real
+  `basetsd.h` `_MSC_VER`-gated typedef conflict and a `char16_t`/
+  `char32_t`-disabling side effect), but hit a real, structural wall:
+  `d3d12.h` itself does `#include "windows.h"` (quoted, resolves relative
+  to its own SDK directory, bypassing any include-search-order trick),
+  pulling in the SDK's *complete* real `windows.h` -- whose own `winnt.h`
+  assumes real MSVC-only architecture macros (`_M_AMD64`) *and* real
+  MSVC-only atomic/memory-fence compiler intrinsics (`ReadNoFence`,
+  `WriteRelease8`, ...) that clang only implements under its own
+  `*-windows-msvc` target's `-fms-compatibility` mode, not this project's
+  `--target=x86_64-w64-mingw32` one. Presented to the user as a genuine
+  fork with three real options (patch the raw SDK headers indefinitely,
+  split D3D12-touching translation units onto a `*-windows-msvc` target
+  risking ABI drift from the rest of the mingw-built project, or switch
+  to mingw-w64's own header set); the user chose the third.
+
+  **Pivot: vendor mingw-w64's own real, clang/gcc-native header set**
+  instead of the raw Microsoft SDK's. `tools/fetch_mingw_w64_headers.py`
+  (new) does a real, narrow sparse clone (`--filter=blob:none` +
+  cone-mode sparse-checkout, mirroring `fetch_skia.py`'s own
+  `clone_ref()`) of `mingw-w64-headers/include` + `crt/` from
+  `github.com/mingw-w64/mingw-w64` pinned to the `v14.0.0` tag (real,
+  dereferenced commit `9b3dd0125792fe94d16cacdc596dbd42fca1b369` --
+  `git ls-remote --tags` without `^{}` returns the *tag object's* own
+  hash for an annotated tag, not the commit `git checkout` actually lands
+  on; caught this the first time the fetch script's own commit-mismatch
+  check fired for real). `_mingw.h` itself is not a static file in this
+  header set -- the real mingw-w64-headers build normally *generates* it
+  from `crt/_mingw.h.in` via a full `./configure`; the script instead
+  does the two real substitutions that template actually needs by hand
+  (`@DEFAULT_MSVCRT_VERSION@` -> `0xE00`, `@DEFAULT_WIN32_WINNT@` ->
+  `0x0A00`, both real `configure.ac` defaults) rather than invoking real
+  autotools for two tokens in one file. `crt/` itself turned out to be
+  the *full* mingw-w64-crt header source tree (84 files, mostly real
+  C-standard-library headers like `string.h`/`stdio.h` that would shadow
+  this project's own libc) -- the script flattens only the real
+  mingw-internal support headers (`_*.h`, plus `vadefs.h` -- needed
+  because clang's own bundled `vadefs.h` `#include_next`s a real one) and
+  the small, mingw-specific `sec_api/` subdirectory into `include/`,
+  leaving every real C-standard-library name to fall through to this
+  project's own libc via `-isystem`, unshadowed.
+
+  **`libstdc++/third_party/win32_shim/windows.h`** (this project's own
+  existing minimal shim, previously only for libunwind/libcxx's narrow
+  needs) **now `#include_next`s to mingw-w64's real, complete version
+  when it's on the include path**, via `__has_include_next`, falling back
+  to its own narrow declarations otherwise -- a true no-op for every
+  build that never adds mingw-w64-headers to its own path. The same
+  `#include_next` treatment was applied to `winerror.h`/`winioctl.h`/
+  `psapi.h`/`ntverp.h` (mingw-w64-headers provides real, complete
+  versions of all four too). A genuine, unrelated bug this same
+  restructuring caught: `win32_shim/winapifamily.h` only ever defined
+  `WINAPI_PARTITION_DESKTOP`, not `_APP`/`_SYSTEM`/`_GAMES` -- real
+  Windows SDK/mingw-w64 `rpcdce.h` gates its entire core RPC type block
+  (`RPC_BINDING_HANDLE`/`UUID`/`RPC_IF_HANDLE`/...) behind
+  `WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_APP | _SYSTEM | _GAMES)`,
+  which silently evaluated false (undefined macros read as 0 in `#if`)
+  and skipped the whole block -- fixed by defining all five partition
+  macros true, matching this shim's own existing desktop-only reasoning.
+
+  **New, narrow shims for what mingw-w64-headers genuinely doesn't
+  provide**, each with a real, confirmed reason (not guessed): `excpt.h`
+  (a genuine MSVC CRT header `rpc.h`/`windows.h` need unconditionally,
+  outside mingw-w64-headers' own scope -- real, stable, publicly
+  documented SEH constants/types, never actually invoked by this
+  project's own code); `malloc.h` (`#include_next`s this project's own
+  real libc `malloc.h`, plus two extra real `__mingw_aligned_malloc`/
+  `__mingw_aligned_free` declarations clang's own bundled `mm_malloc.h`
+  needs for SSE intrinsics -- avoids vendoring mingw's own `malloc.h` at
+  all, which transitively pulled in `corecrt.h`'s real `wctype_t`
+  typedef, `unsigned short`, directly conflicting with this project's own
+  libc `unsigned long`); `mingw_w64_compat.h` (force-included via
+  `-include` ahead of everything else in D3D12-touching TUs: pre-defines
+  `_WCHAR_T_DEFINED`/`_WCTYPE_T_DEFINED` so mingw's own `rpcndr.h`/
+  `corecrt.h` skip their own conflicting fallback typedefs entirely --
+  `wchar_t` is a C++ builtin keyword regardless, and this project's own
+  libc never references either guard macro; a real `_wcsicmp` declaration
+  `stralign.h` needs; a real `_countof` macro, simplified from mingw's
+  own bounds-checked C++ template form since this project's own usage is
+  always a plain array); `DXProgrammableCapture.h` (the one real Windows
+  SDK header mingw-w64-headers genuinely omits -- declares the one real,
+  stable `IDXGraphicsAnalysis` COM interface Skia's `GrD3DGpu.cpp` uses
+  for optional PIX capture hooks, paired with a real `__CRT_UUID_DECL` so
+  mingw's own `IID_PPV_ARGS` macro -- which Skia's source calls directly,
+  expanding through `__mingw_uuidof<T>()` -- resolves for real at link
+  time, matching every other real mingw-w64 COM header's own
+  `MIDL_INTERFACE`+`__CRT_UUID_DECL` pairing).
+
+  **`-DGPU_TEST_UTILS=1`**: Skia's own `BUILD.gn` only defines this
+  (`is_skia_dev_build && !is_canvaskit`) for dev builds, not this
+  project's `is_official_build=true` one -- but Skia's own real, always-
+  compiled `GrD3DBackendSurface.cpp` (`GrD3DBackendTextureData::equal()`)
+  unconditionally calls `operator==()` on `GrD3DBackendSurfaceInfo`, a
+  real operator only defined under this same macro in Skia's own
+  `GrD3DTypesPriv.h` -- a genuine Skia-upstream gap for official D3D
+  builds specifically (the Linux/Vulkan slice never hit the equivalent,
+  Ganesh's Vulkan backend apparently never needs it). Defined directly
+  via `extra_cflags` rather than flipping `is_skia_dev_build=true`
+  wholesale, to avoid that flag's other, unrelated `BUILD.gn` effects.
+
+  **`tools/crt-ar`'s own real, previously-latent response-file bug**,
+  surfaced only once `libskia.a`'s own object count grew enough (Ganesh's
+  D3D backend + `d3d12allocator` + `spirv-cross` joining the already-large
+  CPU-raster set) to exceed Windows' real `CreateProcess` command-line
+  length limit: `expand_response_files()` always flattened Skia's own
+  `@file` object list into a plain argv, regardless of archiver, then
+  handed that flattened list to `subprocess.run()` with no response file
+  of its own -- fine while short, but `FileNotFoundError: [WinError 206]`
+  (`ERROR_FILENAME_EXCED_RANGE`) once it wasn't. The module's own
+  docstring already established that expansion exists *only* for the
+  Apple system `ar` (doesn't understand `@file`) -- GNU/LLVM `ar`
+  (resolved here via `CRT_HOST_AR`/`llvm-ar`) understands it natively.
+  Fixed by only expanding when the resolved archiver is genuinely the
+  Apple system one (`sys.platform == "darwin"` and the archiver name
+  doesn't look like llvm/gnu ar), passing the original `@file` straight
+  through everywhere else -- restoring the response file's entire real
+  purpose instead of defeating it.
+
+  **Two real bugs in this project's own new code**, both caught only
+  once a real, complete `<d3d12.h>` was finally available to compile
+  against for the first time: (1) `skia_bridge.cc`'s
+  `crtgfx_skia_make_gpu_context()` assigned raw `ID3D12Device*`/
+  `IDXGIAdapter1*`/`ID3D12CommandQueue*` pointers directly into
+  `GrD3DBackendContext`'s own `gr_cp<T>` (COM smart-pointer) fields via
+  plain `=` -- `gr_cp<T>` has no implicit-from-raw-pointer assignment
+  (compile error caught this), but the *correct* fix is not just making
+  it compile: using `gr_cp<T>`'s adopting single-argument constructor
+  (no `AddRef()`) would have left `crtgfx_gpu_device_release()`'s own,
+  separate, later `Release()` double-releasing the same COM object once
+  `backend_context`'s own destructor ran first. Fixed with `.retain()`
+  (a real `AddRef()`), giving the backend context its own independent
+  reference. (2) `tests/skia_gpu_offscreen_smoke.cc`'s own D3D12 branch
+  claimed it "already gets the real `<d3d12.h>` transitively (via
+  `crtgfx/skia.h` -> `GrD3DTypes.h`)" -- false: `crtgfx/skia.h` only ever
+  includes the backend-agnostic `GrDirectContext.h`, never
+  `GrD3DTypes.h`; fixed with a real, direct `#include <d3d12.h>`.
+
+  **`d3dcompiler.lib`**: Skia's own `GrD3DPipelineStateBuilder.cpp` calls
+  the real, standard `D3DCompile()` (compiles Ganesh's own SkSL-generated
+  HLSL at runtime) -- linked alongside `d3d11.lib`/`dxgi.lib`/`d3d12.lib`,
+  same always-available-on-any-real-SDK shape.
+
+  **`libcrtgfx/CMakeLists.txt`'s own `crtgfx_skia_objects`/
+  `crt_wire_skia_executable()` targets were initially missing
+  `-I<win32_shim>` entirely** (a first attempt assumed, wrongly, that
+  win32_shim was irrelevant to these targets specifically, since only
+  `tools/build_skia.py`'s own GN build had needed it before) -- confirmed
+  via `fatal error: 'excpt.h' file not found` once these targets started
+  `#include`-ing real mingw-w64 headers too. Fixed by adding the same
+  `-I<win32_shim> -I<mingw-w64-headers>` pair, in that exact order
+  (win32_shim first, so its own `#include_next` forwarding and its
+  exclusive files like `excpt.h`/`malloc.h`/`DXProgrammableCapture.h`
+  both keep working). This project's own `-Wall -Wextra -Werror` also
+  turned mingw-w64's real, expected `#pragma pack` nesting and two other
+  harmless, known mingw-w64 header patterns (`combaseapi.h`'s own no-op
+  `static_cast`, two intentionally-redeclared-inline `dllimport`
+  functions) into hard errors -- `-Wno-pragma-pack`/`-Wno-unused-value`/
+  `-Wno-ignored-attributes` fixed `skia_bridge.cc`; the test file's own
+  target needed a source-level `#pragma clang diagnostic push/ignored/
+  pop` instead, scoped around just the `#include <d3d12.h>` line, since
+  its command-line `-Wno-unused-value` landed *before* this project's own
+  inherited `-Wall -Wextra` (which re-enables `-Wunused-value`) and was
+  silently undone by it.
+
+  **Fully verified for real**: `crtgfx_skia_gpu_offscreen_smoke` passes
+  every sub-check on real Windows hardware -- device creation, a real
+  Ganesh/D3D12 context, draw+readback+reference-scene checks at the
+  initial size and after a 2x resize, and the full device-loss/recovery
+  cycle (`ID3D12Device5::RemoveDevice()` -> `GetDeviceRemovedReason()`
+  confirms real removal -> a fresh `crtgfx_gpu_device_create()` recovers
+  -> the recovered device draws correctly all over again). Full `ctest`
+  clean, single-pass, on both re-verified hosts: Windows 131/131, Linux
+  (WSL, confirming zero regression to the Vulkan slice and the unrelated
+  libcxx/libunwind bootstrap build from the shared `win32_shim`/`crt-ar`
+  changes) crtgfx-skia-smoke 115/115 and the main build directory
+  117/117, all 100%. macOS untouched by this slice (same as the Vulkan
+  one) -- its own re-verification stays separately pending.
+
 ## 2026-09-03
 
 - **Enable Skia GPU rendering: Linux/Vulkan offscreen vertical slice.**

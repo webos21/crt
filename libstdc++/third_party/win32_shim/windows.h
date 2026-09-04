@@ -70,6 +70,63 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* Windows/D3D12 Ganesh vertical slice (2026-09-04): a second, distinct
+ * real need for this shim, unrelated to libunwind/libcxx above. Skia's
+ * own public include/gpu/ganesh/d3d/GrD3DTypes.h (and, transitively, the
+ * project's own third_party/externals/d3d12allocator vendor checkout)
+ * unconditionally #include <d3d12.h>/<dxgi1_4.h>. An earlier attempt at
+ * this slice tried pointing those at the raw Microsoft Windows SDK's own
+ * um/shared headers directly -- confirmed for real (2026-09-03/04) that
+ * this is a real dead end, not just a missing-flag problem: d3d12.h
+ * itself does `#include "windows.h"` (quoted, resolves relative to
+ * d3d12.h's own SDK um/ directory first, bypassing this shim's own -I
+ * priority entirely), pulling in the raw SDK's *complete* windows.h,
+ * whose own winnt.h assumes real MSVC-only architecture macros
+ * (_M_AMD64) *and* real MSVC-only atomic/memory-fence compiler
+ * intrinsics (ReadNoFence/WriteRelease8/...) that clang only implements
+ * under its `*-windows-msvc` target's own -fms-compatibility mode, not
+ * this project's `--target=x86_64-w64-mingw32` one -- exactly the class
+ * of problem the mingw-w64 project's own real header set exists to
+ * avoid. This project now vendors that header set instead (see
+ * tools/fetch_mingw_w64_headers.py, wired in by libcrtgfx/CMakeLists.txt
+ * only for CRTGFX_HAVE_D3D12 Windows builds) -- it is written to compile
+ * clean under plain clang/gcc, no MSVC compatibility mode needed.
+ *
+ * mingw-w64's own d3d12.h/dxgi1_4.h use a plain angle `#include
+ * <windows.h>`, which (like every other angle include in this project's
+ * Windows builds) still resolves to *this* shim first, for the same
+ * real reason described above (-I always wins over -isystem, regardless
+ * of position on the command line) -- so without help, D3D12 builds
+ * would see only this shim's own narrow, libunwind-oriented windows.h
+ * instead of mingw-w64's real, complete one. Fix: when mingw-w64's own
+ * headers are ALSO on the include path (true only for the D3D12-
+ * touching compiles that add them; never true for the plain libunwind/
+ * libcxx bootstrap build above, which puts nothing else Windows-header-
+ * shaped on its own path), #include_next steps past this file to reach
+ * them, and this shim's own narrower declarations below are skipped
+ * entirely -- mingw-w64's real windows.h is a strict superset of
+ * everything this shim hand-declares. __has_include_next both makes
+ * this a real no-op (identical behavior to before this change) for the
+ * libunwind/libcxx build, and avoids a hard error on any older clang
+ * that lacks the extension. winerror.h/winioctl.h/psapi.h/ntverp.h in
+ * this same directory get the identical treatment, each guarding its
+ * own narrower content -- see each file's own matching comment; io.h/
+ * direct.h/excpt.h do not, since mingw-w64-headers/include does not
+ * provide those at all (they ship in mingw-w64-crt instead, a separate,
+ * not-vendored piece -- this project supplies its own libc), so there is
+ * nothing to defer to for those three. */
+#if defined(__has_include_next)
+#if __has_include_next(<windows.h>)
+#include_next <windows.h>
+#else
+#define CRT_WIN32_SHIM_WINDOWS_H_OWN_CONTENT 1
+#endif
+#else
+#define CRT_WIN32_SHIM_WINDOWS_H_OWN_CONTENT 1
+#endif
+
+#ifdef CRT_WIN32_SHIM_WINDOWS_H_OWN_CONTENT
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -458,5 +515,7 @@ static inline intptr_t _get_osfhandle(int fd) {
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
+
+#endif /* CRT_WIN32_SHIM_WINDOWS_H_OWN_CONTENT */
 
 #endif /* CRT_WIN32_SHIM_WINDOWS_H */
