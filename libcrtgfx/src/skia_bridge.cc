@@ -408,4 +408,78 @@ sk_sp<SkSurface> crtgfx_skia_make_gpu_offscreen_surface(
   return SkSurfaces::RenderTarget(context, skgpu::Budgeted::kNo, info);
 }
 
-#endif  // CRTGFX_HAVE_VULKAN / CRTGFX_HAVE_D3D12
+#elif defined(CRTGFX_HAVE_METAL)
+
+// Real Ganesh/Metal offscreen vertical slice (2026-09-04) -- the macOS
+// sibling of the Vulkan/D3D12 branches above (see crtgfx/skia.h's own,
+// fuller comment on both functions below). Real <Metal/Metal.h>-adjacent
+// headers are forced here by Skia's own public GrMtlBackendContext.h/
+// GrMtlTypes.h (GrMtlTypes.h itself #includes <TargetConditionals.h>;
+// GrMtlBackendContext.h #includes include/ports/SkCFObject.h, which
+// #imports <CoreFoundation/CoreFoundation.h>) -- a real, deliberate
+// exception to this project's own no-host-SDK-header policy, already
+// codified in docs/libcrtgfx_api_policy.md's own "third-party source
+// being ported" Non-Goals clause, exactly like the D3D12 branch's own
+// GrD3DTypes.h. This translation unit is compiled with tools/crt-c++'s
+// own -fcrt-real-apple-sdk sentinel specifically because of this
+// #include (libcrtgfx/CMakeLists.txt) -- see that flag's own top comment
+// in tools/crt-c++ for the exact real <sys/cdefs.h>-shadowing/
+// ptrcheck.h compile failure it fixes, and the separate, real -dead_strip
+// interaction (a real Metal device-creation crash deep in Apple's own
+// LaunchServices internals) it also avoids for this exact executable at
+// link time. src/arch/macos/gpu_metal.c itself stays real-host-header-
+// free (drives the Objective-C runtime directly, matching window_
+// cocoa.c's own convention) -- only this file needs the real headers.
+
+#include "gpu_internal.h"
+
+#include "include/gpu/ganesh/SkSurfaceGanesh.h"
+#include "include/gpu/ganesh/mtl/GrMtlBackendContext.h"
+#include "include/gpu/ganesh/mtl/GrMtlDirectContext.h"
+
+sk_sp<GrDirectContext> crtgfx_skia_make_gpu_context(const crtgfx_gpu_device* device) {
+  if (device == nullptr || device->mtl_device == nullptr || device->mtl_command_queue == nullptr) {
+    return nullptr;
+  }
+
+  // GrMtlBackendContext's own fDevice/fQueue are sk_cfp<GrMTLHandle> (a
+  // CoreFoundation-style CFRetain/CFRelease smart pointer -- real
+  // Objective-C objects are toll-free-bridged with CFRetain/CFRelease on
+  // Apple platforms, so this works identically to a real -retain/
+  // -release message send). .retain(), not sk_cfp's own single-argument
+  // "adopt, no extra ref" constructor -- matching the D3D12 branch's own
+  // .retain() reasoning exactly: `device` itself keeps its own, separate
+  // reference (crtgfx_gpu_device_release() still owns and eventually
+  // releases the real one, via gpu_metal.c's own plain -release message
+  // sends), so this must take its own, independent reference rather than
+  // adopt the existing one outright.
+  GrMtlBackendContext backend_context;
+  backend_context.fDevice.retain(device->mtl_device);
+  backend_context.fQueue.retain(device->mtl_command_queue);
+
+  // No memory-allocator field to supply at all here -- unlike the Vulkan/
+  // D3D12 branches above, GrMtlBackendContext declares only fDevice/
+  // fQueue (confirmed by reading Skia's own public GrMtlBackendContext.h
+  // directly): Ganesh's own Metal backend allocates through Metal's own
+  // real, built-in resource/heap management, needing no caller-supplied
+  // substitute.
+  return GrDirectContexts::MakeMetal(backend_context);
+}
+
+sk_sp<SkSurface> crtgfx_skia_make_gpu_offscreen_surface(
+    GrDirectContext* context, uint32_t width, uint32_t height) {
+  if (context == nullptr || width == 0 || height == 0) {
+    return nullptr;
+  }
+  SkImageInfo info = SkImageInfo::Make(
+      (int)width, (int)height, kBGRA_8888_SkColorType, kPremul_SkAlphaType);
+  // SkSurfaces::RenderTarget() -- confirmed backend-agnostic, the exact
+  // same real call already proven for Vulkan and D3D12 (see this file's
+  // own Vulkan branch, above): Ganesh's own GrResourceProvider allocates
+  // and owns a real backing MTLTexture internally; this vertical slice
+  // never hand-manages one itself (see crtgfx/skia.h's own comment on why
+  // that is deliberate, not a shortcut).
+  return SkSurfaces::RenderTarget(context, skgpu::Budgeted::kNo, info);
+}
+
+#endif  // CRTGFX_HAVE_VULKAN / CRTGFX_HAVE_D3D12 / CRTGFX_HAVE_METAL

@@ -45,31 +45,32 @@ sk_sp<SkSurface> crtgfx_skia_make_raster_surface(const crtgfx_framebuffer* frame
 // fails.
 sk_sp<SkTypeface> crtgfx_skia_default_typeface(SkFontMgr* font_mgr, const SkFontStyle& style);
 
-#if defined(CRTGFX_HAVE_VULKAN) || defined(CRTGFX_HAVE_D3D12)
+#if defined(CRTGFX_HAVE_VULKAN) || defined(CRTGFX_HAVE_D3D12) || defined(CRTGFX_HAVE_METAL)
 #include "crtgfx/gpu.h"
 #include "include/gpu/ganesh/GrDirectContext.h"
 
 // Real Ganesh GPU offscreen vertical slice (2026-09-03, TODO.md's "Enable
 // Skia GPU rendering" step -- Linux/Vulkan first, Windows/D3D12 the same
-// week). Deliberately separate from, and not implying any stability of,
-// the public crtgfx_gpu_surface contract (crtgfx/gpu.h) -- crtgfx_gpu_
-// surface_create() itself still, correctly, stays CRTGFX_ERROR_UNSUPPORTED
-// everywhere (no host can yet actually present a Ganesh-drawn surface to
-// a real on-screen window). These two functions exist purely to prove
-// real Ganesh *rendering* correctness offscreen -- see tests/skia_gpu_
-// offscreen_smoke.cc, this vertical slice's own real, cross-platform
-// coverage (the same source file, same two function names, calls whichever
-// real per-OS implementation below CMakeLists.txt actually built).
+// week, macOS/Metal the following week). Deliberately separate from, and
+// not implying any stability of, the public crtgfx_gpu_surface contract
+// (crtgfx/gpu.h) -- crtgfx_gpu_surface_create() itself still, correctly,
+// stays CRTGFX_ERROR_UNSUPPORTED everywhere (no host can yet actually
+// present a Ganesh-drawn surface to a real on-screen window). These two
+// functions exist purely to prove real Ganesh *rendering* correctness
+// offscreen -- see tests/skia_gpu_offscreen_smoke.cc, this vertical
+// slice's own real, cross-platform coverage (the same source file, same
+// two function names, calls whichever real per-OS implementation below
+// CMakeLists.txt actually built).
 //
-// Only declared when CRTGFX_HAVE_VULKAN or CRTGFX_HAVE_D3D12 is defined
-// (CMakeLists.txt only defines either when a real backend was actually
-// found/is actually available at configure time -- see src/arch/linux/
-// gpu_vulkan.c's and src/arch/windows/gpu_win32.c's own top comments) --
-// macOS builds never see these declarations at all today (no real Metal
-// backend yet), matching gpu.c's own real per-host dispatch. Exactly one
-// of the two real per-OS implementations (skia_bridge.cc) is ever compiled
-// into a given build -- both share these same two declarations, never
-// both defined in the same translation unit.
+// Only declared when CRTGFX_HAVE_VULKAN, CRTGFX_HAVE_D3D12, or CRTGFX_
+// HAVE_METAL is defined (CMakeLists.txt only defines one of these when a
+// real backend was actually found/is actually available at configure
+// time -- see src/arch/linux/gpu_vulkan.c's, src/arch/windows/gpu_win32.c's,
+// and src/arch/macos/gpu_metal.c's own top comments), matching gpu.c's
+// own real per-host dispatch. Exactly one of the three real per-OS
+// implementations (skia_bridge.cc) is ever compiled into a given build --
+// all three share these same two declarations, never more than one
+// defined in the same translation unit.
 //
 // Builds a real GrDirectContext directly from `device`'s own real per-OS
 // handles (Vulkan: VkInstance/VkPhysicalDevice/VkDevice/VkQueue/queue

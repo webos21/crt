@@ -490,6 +490,53 @@ def common_cmake_args(root, install_prefix, sysroot, rootfs, target_os, windows_
         cxx_flags += " -fno-typed-cxx-new-delete"
     if target_os == "macos":
         cxx_flags = f"-U__APPLE__ {cxx_flags}"
+        # -fvisibility=hidden -fvisibility-inlines-hidden (2026-09-04,
+        # real, confirmed necessary -- the macOS/Metal Ganesh GPU vertical
+        # slice's own runtime crash chase): this project's own imported
+        # libc++/libc++abi is statically linked into every macOS C++
+        # executable, but a real Ganesh Metal/Cocoa consumer also
+        # dynamically links real Apple frameworks (Foundation/AppKit/
+        # CoreFoundation/Metal, via CRTGFX_MACOS_FRAMEWORKS -- needed for
+        # window_cocoa.c/gpu_metal.c's own real Objective-C runtime calls)
+        # -- and those frameworks transitively pull the *real* system
+        # /usr/lib/libc++.1.dylib into the very same process. C++ template
+        # instantiations (e.g. std::__1::num_get<char>::__stage2_float_
+        # prep, std::locale::use_facet) are ABI-weak/exported symbols by
+        # default; when the *same* weak symbol name exists in both this
+        # project's own statically-linked libc++.a and the real, already-
+        # loaded system dylib, dyld's own two-level-namespace weak-symbol
+        # coalescing silently redirects calls meant for our own copy to
+        # the dylib's copy instead -- even though `nm` on the final
+        # executable shows our own copy still present and locally defined.
+        # Confirmed for real via `lldb -o "b __cxa_throw"`: a real, 100%-
+        # reproducible `std::bad_cast` (SkSL::stod() -> std::__1::
+        # __input_arithmetic<float> -> num_get<char>::__stage2_float_prep
+        # -> std::locale::use_facet()) crashing tests/skia_gpu_offscreen_
+        # smoke.cc's own real gradient draw (the first code path in this
+        # whole project to both (a) dynamically link a real Apple
+        # framework and (b) exercise heavy std::locale-dependent std::
+        # stringstream parsing, via Skia's own built-in SkSL module
+        # source) -- every one of those bad_cast stack frames resolved to
+        # `libc++.1.dylib`, the *real* system dylib, not this project's
+        # own statically-linked copy, despite our own locale/facet state
+        # having been built up entirely inside our own copy's static
+        # initializers. This is the standard, Apple-documented failure
+        # mode for "a statically-embedded C++ runtime coexisting with
+        # real system frameworks in the same process" (the same reason
+        # e.g. the Android NDK's own static libc++ is built this exact
+        # way) -- hidden visibility demotes these symbols to Mach-O
+        # `private_extern` in the final object files, which are never
+        # eligible for dyld's cross-image weak-symbol coalescing, so our
+        # own statically-linked copy's functions only ever call each
+        # other, never the real system dylib's (and vice versa). Applied
+        # to libcxx/libcxxabi/libunwind uniformly via this shared CMAKE_
+        # CXX_FLAGS/CMAKE_C_FLAGS variable (not a per-recipe override) --
+        # every one of the three needs the identical treatment, since a
+        # partial fix (e.g. libcxx hidden but libcxxabi still exported)
+        # would just move the same coalescing hazard to a different
+        # symbol set.
+        cxx_flags += " -fvisibility=hidden -fvisibility-inlines-hidden"
+        c_flags_extra += " -fvisibility=hidden"
     c_flags = c_flags_extra
     if target_os == "windows":
         # Clang's default exception-table format for the *-w64-mingw32

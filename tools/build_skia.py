@@ -225,6 +225,62 @@ def windows_short_path(path):
     return buffer.value
 
 
+def enable_skia_objcc_extra_cflags(source):
+    """Skia's own gn/skia/BUILD.gn declares extra_cflags/extra_cflags_c/
+    extra_cflags_cc (each wired into config("extra_flags")'s own
+    cflags/cflags_c/cflags_cc, applied to every target in the whole build
+    via default_configs) -- but no extra_cflags_objcc, the one GN natively
+    routes only to .m/.mm (Objective-C/Objective-C++) compiles specifically
+    (gn/toolchain/BUILD.gn's own tool("objcxx") already includes
+    {{cflags_objcc}} on its command line, alongside the general {{cflags}}
+    every other tool already gets -- this is GN's own existing per-source-
+    type flag routing, not something this patch invents).
+
+    The macOS Ganesh Metal vertical slice needs exactly this: Skia's own
+    vendored Ganesh Metal backend is entirely real Objective-C++ (25 real
+    .mm files, zero .cpp, confirmed by listing gpu/ganesh/mtl/ directly),
+    and those files #import real Apple headers (<Metal/Metal.h>,
+    <Foundation/Foundation.h>, transitively <TargetConditionals.h>/
+    <CoreFoundation/CoreFoundation.h>) that need tools/crt-c++'s own
+    -fcrt-real-apple-sdk sentinel (see that flag's own top comment in
+    tools/crt-c++) to compile at all under this project's own -nostdinc/
+    -U__APPLE__ policy. Routing that sentinel through the *existing*
+    extra_cflags (cflags_cc, applied to every .cc file too) would apply it
+    -- and its real-SDK-header-search-path reordering -- to every other
+    Skia source file as well, risking exactly the same real Apple-header-
+    shadows-this-project's-Bionic-header class of bug this project has
+    already hit once for real (crtmedia_demux_test's own pthread_once/
+    -lSystem bug, HISTORY.md). extra_cflags_objcc, routed only to .mm
+    files by GN's own existing tool-specific flag plumbing, needs no such
+    scoping of its own -- it is structurally unreachable for anything but
+    the files that actually need it.
+
+    A minimal, mechanical addition mirroring the three cflags_c/cflags_cc/
+    et al. lines this same file already has, not a new mechanism:
+    `extra_cflags_objcc = []` alongside the sibling declare_args() above
+    it, `cflags_objcc = extra_cflags_objcc` alongside the sibling
+    cflags/cflags_c/cflags_cc assignments in config("extra_flags") below.
+    Idempotent (checks the current content first) so a re-run against an
+    already-patched fetch is a no-op, matching pin_gn_script_executable()'s
+    own established discipline just above.
+    """
+    build_gn = source / "gn" / "skia" / "BUILD.gn"
+    text = build_gn.read_text(encoding="utf-8")
+    if "extra_cflags_objcc" in text:
+        return
+    patched, count = re.subn(
+        r"^(\s*)extra_cflags_cc = \[\]$", r"\1extra_cflags_cc = []\n\1extra_cflags_objcc = []",
+        text, count=1, flags=re.MULTILINE)
+    if count != 1:
+        raise SystemExit(f'{build_gn}: could not find `extra_cflags_cc = []` to patch (declare_args)')
+    patched, count = re.subn(
+        r"^(\s*)cflags_cc = extra_cflags_cc$", r"\1cflags_cc = extra_cflags_cc\n\1cflags_objcc = extra_cflags_objcc",
+        patched, count=1, flags=re.MULTILINE)
+    if count != 1:
+        raise SystemExit(f'{build_gn}: could not find `cflags_cc = extra_cflags_cc` to patch (config("extra_flags"))')
+    build_gn.write_text(patched, encoding="utf-8")
+
+
 def normalize_target_arch(target_arch_arg):
     """Resolves an explicit --target-arch to "aarch64" or "x86_64" --
     same normalization tools/crt-libcxx-build.py's own
@@ -644,6 +700,87 @@ def default_gn_args(root, sysroot, target_os, target_arch, freetype_prefix=None,
         args["target_os"] = gn_string("linux")
         if target_arch in ("aarch64", "arm64"):
             args["target_cpu"] = gn_string("arm64")
+        # macOS-only Ganesh/Metal vertical slice (2026-09-04, TODO.md's
+        # "Enable Skia GPU rendering" step -- Linux/Vulkan and Windows/
+        # D3D12 both already landed the same week). Unlike either of
+        # those, Metal needs no separate third_party/externals/... vendor
+        # fetch at all (confirmed by reading gn/gpu.gni/BUILD.gn directly:
+        # skia_use_metal's own real cost is skia_gpu_metal_sources, real
+        # Objective-C++ .mm sources, plus -framework Metal/Foundation --
+        # no spirv-cross the way skia_use_direct3d needs, since Ganesh's
+        # own SkSL codegen targets MSL natively; and GrMtlBackendContext
+        # itself is only two fields (fDevice/fQueue), no separate memory-
+        # allocator interface to substitute the way Vulkan's/D3D12's own
+        # vertical slices both needed). skia_use_vma is Vulkan-specific
+        # and irrelevant here.
+        args["skia_enable_ganesh"] = "true"
+        args["skia_use_metal"] = "true"
+        # -fcrt-real-apple-sdk (tools/crt-c++'s own sentinel -- see that
+        # flag's own top comment) and -DSK_BUILD_FOR_MAC, routed to BOTH
+        # extra_cflags_cc (.cc/.cpp, GN's pre-existing mechanism -- see
+        # config("extra_flags") in gn/skia/BUILD.gn) and extra_cflags_objcc
+        # (.m/.mm, enable_skia_objcc_extra_cflags() above patches gn/skia/
+        # BUILD.gn to wire that GN arg to cflags_objcc the identical way).
+        #
+        # This was originally scoped to extra_cflags_objcc ONLY (Ganesh
+        # Metal's own real .mm sources, which #import real Apple headers
+        # transitively -- <Metal/Metal.h>, <TargetConditionals.h>,
+        # <CoreFoundation/CoreFoundation.h> -- that this project's own
+        # -nostdinc/-U__APPLE__ policy would otherwise break; see -fcrt-
+        # real-apple-sdk's own comment for the <sys/cdefs.h>-shadowing/
+        # ptrcheck.h failure this fixes) on the theory that widening it to
+        # every other Skia .cc file was an unnecessary ABI-mismatch risk.
+        # That theory was WRONG -- confirmed for real (2026-09-04), via a
+        # genuine runtime crash in the finished vertical slice: the real
+        # offscreen GPU smoke test (tests/skia_gpu_offscreen_smoke.cc)
+        # crashed nondeterministically (EXC_BAD_ACCESS deep in SkSL::
+        # Parser one run, an uncaught `std::bad_cast` abort deep in the
+        # same SkSL module-compile path the next run -- classic memory-
+        # corruption symptoms, not a single reproducible bug) the first
+        # time it actually drew the shared reference scene's gradient
+        # through Ganesh (GrGradientShader::MakeLinear -> SkRuntimeEffect
+        # -> SkSL::Compiler::compileModule -> SkSL::ModuleLoader), while
+        # the identical scene through the CPU-raster backend (crtgfx_
+        # skia_cpu_coverage, which never touches SkSL/ModuleLoader at all)
+        # passed cleanly, isolating the fault to that one code path.
+        #
+        # Root cause, found by reading src/base/SkSemaphore.cpp directly:
+        # SkMutex (used pervasively inside Skia, including SkSL::
+        # ModuleLoader's own thread-safety guard) is built on SkSemaphore,
+        # whose real OS-backing implementation is chosen by #if defined(
+        # SK_BUILD_FOR_MAC) -> dispatch_semaphore_t (correct, real,
+        # working) vs. a #else fallback using plain POSIX sem_init()/
+        # sem_wait() -- which that file's own authors already flag with an
+        # explicit comment: "It's important we test for Mach before this.
+        # This code will compile but not work there." Real Darwin's
+        # sem_init() for *unnamed* semaphores is a long-standing, well-
+        # known permanently-stubbed syscall (ENOSYS) -- exactly the "will
+        # compile but not work" case that comment warns about. Since
+        # SkSemaphore.cpp is a plain .cpp file, it only ever saw SK_BUILD_
+        # FOR_UNIX (this function's own long-standing target_os="linux"
+        # trick's own -DSK_BUILD_FOR_UNIX, added unconditionally below for
+        # both macOS and Windows) and never SK_BUILD_FOR_MAC while that
+        # define was objcc-only -- landing it silently in the broken
+        # fallback branch on every real macOS build, Metal or not.
+        #
+        # Fixed by widening -DSK_BUILD_FOR_MAC (and -fcrt-real-apple-sdk,
+        # needed for SkSemaphore.cpp's own #include <dispatch/dispatch.h>
+        # and SkMemory_malloc.cpp's own #include <malloc/malloc.h>, both
+        # real Apple SDK headers) to extra_cflags_cc too -- both macros
+        # coexisting with SK_BUILD_FOR_UNIX is harmless (independent -D's,
+        # not a single enum; every real chain that tests both checks
+        # SK_BUILD_FOR_UNIX first, e.g. SkMemory_malloc.cpp's own #if
+        # SK_BUILD_FOR_MAC/#elif SK_BUILD_FOR_ANDROID-or-UNIX chain, which
+        # simply now correctly picks the SK_BUILD_FOR_MAC branch first,
+        # matching what any real, native macOS Skia build would do -- not
+        # a regression, the originally-intended, correct behavior).
+        # -fno-exceptions/-fno-rtti (this function's own long-standing,
+        # OS-independent default, set once above) stay in force for macOS
+        # too -- re-specified here since GN args are whole-list replaces,
+        # not appends, per key.
+        args["extra_cflags_cc"] = gn_list(
+            ["-fno-exceptions", "-fno-rtti", "-fcrt-real-apple-sdk", "-DSK_BUILD_FOR_MAC"])
+        args["extra_cflags_objcc"] = gn_list(["-fcrt-real-apple-sdk", "-DSK_BUILD_FOR_MAC"])
     elif target_os == "linux":
         args["target_os"] = gn_string("linux")
         if target_arch in ("aarch64", "arm64"):
@@ -770,6 +907,14 @@ def main():
     env["CRT_SYSROOT"] = str(sysroot)
     env["CRT_TARGET_OS"] = args.target_os
     pin_gn_script_executable(source, sys.executable)
+    if args.target_os == "macos":
+        # See enable_skia_objcc_extra_cflags()'s own top comment -- needed
+        # so this file's own macOS branch below can route -fcrt-real-
+        # apple-sdk to Skia's own vendored Ganesh Metal .mm sources
+        # specifically, via extra_cflags_objcc, without also reaching
+        # every other Skia source file the way extra_cflags/extra_cflags_cc
+        # would.
+        enable_skia_objcc_extra_cflags(source)
     if args.target_os == "windows":
         # See pin_gcc_toolchain_python()'s own comment for the full story --
         # a real, separate "python3" gap from script_executable's own,
