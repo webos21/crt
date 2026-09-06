@@ -249,7 +249,24 @@ if(CRT_TARGET_OS STREQUAL "windows")
   # both compilation units must see this define identically.
   add_compile_definitions(CRTGFX_HAVE_D3D12=1)
 elseif(CRT_TARGET_OS STREQUAL "macos")
-  set(CRTGFX_BACKEND_SOURCES src/arch/macos/window_cocoa.c)
+  set(CRTGFX_BACKEND_SOURCES
+    src/arch/macos/window_cocoa.c
+    src/arch/macos/gpu_metal.c
+  )
+  # macOS/Metal offscreen vertical slice (2026-09-04, TODO.md's "Enable
+  # Skia GPU rendering" step -- the Linux/Vulkan and Windows/D3D12
+  # slices' own sibling; see crtgfx/gpu.h's own top comment). Metal.
+  # framework ships on every real macOS host exactly like d3d12.lib on
+  # every real Windows 10+ SDK -- gpu_metal.c is compiled unconditionally
+  # here, and CRTGFX_HAVE_METAL defined unconditionally, matching that
+  # same D3D12 precedent (no "maybe absent" case to guard against, unlike
+  # Linux's own find_library()-gated libvulkan). Directory-scoped (not
+  # per-target), matching CRTGFX_HAVE_VULKAN/CRTGFX_HAVE_D3D12's own
+  # precedent: src/gpu.c (crtgfx_common_objects) and src/arch/macos/
+  # gpu_metal.c (crtgfx_backend_objects) share struct crtgfx_gpu_device's
+  # own real field layout via src/gpu_internal.h, and both compilation
+  # units must see this define identically.
+  add_compile_definitions(CRTGFX_HAVE_METAL=1)
   # window_cocoa.c drives the Objective-C runtime from plain C by casting
   # objc_msgSend (a real, variadic `id (*)(id, SEL, ...)` extern) to each
   # call site's own exact, non-variadic signature before invoking it --
@@ -950,6 +967,20 @@ elseif(CRT_TARGET_OS STREQUAL "windows")
   # differently-sized struct). Added narrowly here, not by linking the
   # whole crt_build_flags interface target, for exactly that reason.
   target_compile_definitions(crtgfx_backend_objects PRIVATE CRT_TARGET_OS_WINDOWS=1)
+elseif(CRT_TARGET_OS STREQUAL "macos")
+  # CRT_TARGET_OS_MACOS=1 -- the same real, narrow gap as the Windows
+  # branch just above (see that branch's own fuller comment for the full
+  # "why", found for real building gpu_win32.c the same week): this
+  # target does not link crt_build_flags on macOS either (window_cocoa.c's
+  # own established "no dependency on this project's own headers at all"
+  # style), so src/arch/macos/gpu_metal.c's own gpu_internal.h #if
+  # defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL) guard needs
+  # this defined explicitly here too, or struct crtgfx_gpu_device risks
+  # the identical silent layout mismatch against src/gpu.c's own
+  # crtgfx_common_objects compile (which does link crt_build_flags on
+  # every OS). Added proactively rather than waiting to rediscover the
+  # same real bug a third time.
+  target_compile_definitions(crtgfx_backend_objects PRIVATE CRT_TARGET_OS_MACOS=1)
 endif()
 target_include_directories(crtgfx_backend_objects PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -1088,6 +1119,70 @@ if(CRTGFX_ENABLE_SKIA)
     )
     add_dependencies(crtgfx_skia_objects crtgfx-mingw-w64-headers-fetch)
   endif()
+  if(CRT_TARGET_OS STREQUAL "macos")
+    # macOS/Metal offscreen vertical slice (2026-09-04) -- Skia's own
+    # public include/gpu/ganesh/mtl/GrMtlBackendContext.h (transitively,
+    # via GrMtlTypes.h/include/ports/SkCFObject.h) #includes real
+    # <TargetConditionals.h>/<CoreFoundation/CoreFoundation.h>/<Metal/
+    # Metal.h>, a real, forced exception to this project's own no-host-
+    # SDK-header policy (see docs/libcrtgfx_api_policy.md), exactly like
+    # the D3D12 branch's own GrD3DTypes.h above.
+    #
+    # Unlike tools/crt-c++'s own GN-driven Skia build (its own -fcrt-real-
+    # apple-sdk sentinel, see that flag's own top comment for the fuller
+    # real-SDK-header story this mirrors), this target compiles through
+    # plain CMAKE_CXX_COMPILER (clang++ -- see CMakePresets.json; this
+    # project's regular CMake build has never gone through the tools/crt-
+    # c++ wrapper script at all, only GN's external Skia/libc++ builds do)
+    # via crt_cxx_build_flags's own hand-built freestanding flags, so that
+    # sentinel string is not a real clang argument here at all -- confirmed
+    # for real (2026-09-04): `error: unknown argument: '-fcrt-real-apple-
+    # sdk'`. The real, underlying fix is reproduced directly instead:
+    # -isysroot/-F<Frameworks>/-isystem<usr/include>, ahead of this
+    # project's own sysroot -- fixing the identical real <sys/cdefs.h>-
+    # shadowing/<ptrcheck.h> compile failure tools/crt-c++'s own comment
+    # documents. No -D__APPLE__ needed here (unlike that wrapper, which
+    # explicitly -U__APPLE__'s every macOS compile by default): this plain
+    # clang++ invocation already predefines __APPLE__ on its own, confirmed
+    # by this file's own crt_build_flags never passing -U__APPLE__ at all.
+    #
+    # Ordering (real, confirmed necessary, 2026-09-04): a first version of
+    # this fix added only -isysroot/-F/-isystem<usr/include> here, relying
+    # on "own PRIVATE target_compile_options land in <FLAGS> ahead of
+    # crt_cxx_build_flags's own inherited chain" (confirmed true elsewhere
+    # in this function) to put the new -isystem<usr/include> ahead of
+    # crt_cxx_build_flags's own -isystem${CMAKE_SOURCE_DIR}/include -- but
+    # that also put it ahead of crt_cxx_build_flags's *own* -isystem<SDK>/
+    # usr/include/c++/v1 (CRT_CXX_STANDARD_INCLUDE_FLAGS, computed once at
+    # the top-level CMakeLists.txt and inherited here as a plain, non-cache
+    # CMake variable -- this file's own add_subdirectory(libcrtgfx) child
+    # scope sees it directly), which libc++'s own <cstdio>/<cerrno>/...
+    # headers require to be searched *first* (their own #include_next
+    # chain expects to find libc++'s own thin wrapper before continuing on
+    # to the real system header) -- confirmed for real: "<cstdio> tried
+    # including <stdio.h> but didn't find libc++'s <stdio.h> header./...
+    # your header search paths are not configured properly". Re-adding
+    # CRT_CXX_STANDARD_INCLUDE_FLAGS/CRT_CXX_RESOURCE_DIR here too, ahead
+    # of the new plain <usr/include> entry, restores the required relative
+    # order for this one translation unit; crt_cxx_build_flags's own later,
+    # now-redundant copies of the same two entries are harmless (a repeated
+    # -isystem path is simply never reached, the first occurrence already
+    # won).
+    execute_process(
+      COMMAND xcrun --sdk macosx --show-sdk-path
+      OUTPUT_VARIABLE CRTGFX_MACOS_REAL_SDK_PATH
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(NOT CRTGFX_MACOS_REAL_SDK_PATH)
+      message(FATAL_ERROR "crtgfx_skia_objects (macOS/Metal): 'xcrun --sdk macosx --show-sdk-path' failed")
+    endif()
+    target_compile_options(crtgfx_skia_objects PRIVATE
+      -isysroot "${CRTGFX_MACOS_REAL_SDK_PATH}"
+      "-F${CRTGFX_MACOS_REAL_SDK_PATH}/System/Library/Frameworks"
+      ${CRT_CXX_STANDARD_INCLUDE_FLAGS}
+      "-isystem${CRTGFX_MACOS_REAL_SDK_PATH}/usr/include"
+    )
+  endif()
   if(CRT_TARGET_OS STREQUAL "windows" AND CRT_USE_IMPORTED_LIBCXX)
     # -isystem${CRT_SYSROOT}/include/c++/v1, via target_compile_options (not
     # target_include_directories) so it lands in <FLAGS>, ahead of
@@ -1212,6 +1307,10 @@ if(CRT_TARGET_OS STREQUAL "macos")
     "-framework AppKit"
     "-framework QuartzCore"
     "-framework CoreGraphics"
+    # src/arch/macos/gpu_metal.c (2026-09-04, the macOS/Metal offscreen
+    # vertical slice) drives real Metal.framework the same objc_msgSend-
+    # direct way, for the identical reason.
+    "-framework Metal"
     objc
   )
 endif()
@@ -1513,6 +1612,13 @@ if(CRT_TARGET_OS STREQUAL "windows")
   endif()
 elseif(CRT_TARGET_OS STREQUAL "macos")
   target_link_libraries(crtgfx_shared PRIVATE ${CRTGFX_MACOS_FRAMEWORKS})
+  # No -dead_strip skip needed here (unlike crtgfx_skia_gpu_offscreen_
+  # smoke's own real Metal-device-creation crash workaround, see that
+  # target's own comment): crt_configure_shared_runtime() (CMakeLists.txt,
+  # this dylib's own real link-flag source) never adds -Wl,-dead_strip on
+  # macOS at all -- confirmed by reading that function directly -- so the
+  # real -dead_strip + C++/libc++ + Metal/LaunchServices interaction this
+  # project confirmed elsewhere simply cannot trigger on this target.
 elseif(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_ENABLE_SKIA)
   # -fuse-ld=lld: see crtgfx_skia_raster_smoke's own, fuller comment (same
   # file, its Linux branch) for the full ld.bfd-vs-lld story.
@@ -1740,6 +1846,22 @@ set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_gpu_test_runs)
 # comment for the full story); nothing here is guessed for the second
 # caller.
 function(crt_wire_skia_executable target_name)
+  # Optional second argument: SKIP_MACOS_DEAD_STRIP (2026-09-04, the macOS/
+  # Metal offscreen vertical slice). Real, confirmed necessary for exactly
+  # one caller so far, crtgfx_skia_gpu_offscreen_smoke -- see the -Wl,
+  # -dead_strip block below, and CRTGFX_MACOS_REAL_SDK_FLAGS's own top
+  # comment further up, for the full real crash this avoids. Deliberately
+  # NOT applied to every macOS caller of this shared function: crtgfx_
+  # skia_raster_smoke/crtgfx_skia_cpu_coverage/crtmedia_frame_skia_smoke/
+  # crtgfx_keyboard_interactive never call crtgfx_gpu_device_create()/
+  # crtgfx_skia_make_gpu_context() at all (no Ganesh Metal device is ever
+  # actually created in those binaries, dead-stripped or not), so keeping
+  # -dead_strip for them is both safe and, unlike the GPU offscreen smoke
+  # target, still a real, wanted binary-size win.
+  set(crt_wire_skia_executable_skip_dead_strip FALSE)
+  if(ARGC GREATER 1 AND ARGV1 STREQUAL "SKIP_MACOS_DEAD_STRIP")
+    set(crt_wire_skia_executable_skip_dead_strip TRUE)
+  endif()
   if(CRT_TARGET_OS STREQUAL "windows")
     # SK_BUILD_FOR_UNIX: see crtgfx_skia_objects's own, fuller comment just
     # above (same reasoning; this target also #includes Skia headers
@@ -1923,10 +2045,10 @@ function(crt_wire_skia_executable target_name)
     -nodefaultlibs
   )
   if(CRT_TARGET_OS STREQUAL "macos")
-    target_link_options(${target_name} PRIVATE
-      -Wl,-e,_start
-      -Wl,-dead_strip
-    )
+    target_link_options(${target_name} PRIVATE -Wl,-e,_start)
+    if(NOT crt_wire_skia_executable_skip_dead_strip)
+      target_link_options(${target_name} PRIVATE -Wl,-dead_strip)
+    endif()
     target_link_libraries(${target_name} PRIVATE System)
   elseif(CRT_TARGET_OS STREQUAL "linux")
     target_link_options(${target_name} PRIVATE
@@ -2064,18 +2186,17 @@ if(CRTGFX_ENABLE_SKIA)
   # source file's own draw/readback/resize logic already only calls
   # crtgfx_skia_make_gpu_context()/crtgfx_skia_make_gpu_offscreen_surface()
   # (skia_bridge.cc), which now have real per-OS implementations behind
-  # the same two names/signatures for both Vulkan and D3D12 -- only the
-  # device-loss test's own low-level handle-teardown step branches by OS
-  # internally (see that file's own #if). Linux needs a real libvulkan
-  # found at configure time (src/arch/linux/gpu_vulkan.c's own real,
-  # optional scope); Windows needs nothing extra (D3D12 always available
-  # there, matching CRTGFX_BACKEND_SOURCES's own Windows branch further
-  # up) -- macOS keeps its existing Skia CPU-raster-only targets untouched
-  # (no real Metal backend yet). Same headless shape as crtgfx_skia_cpu_
-  # coverage just above (no crtgfx_window/host display connection needed
-  # at all).
+  # the same three names/signatures for Vulkan, D3D12, and (2026-09-04)
+  # Metal -- only the device-loss test's own low-level handle-teardown
+  # step branches by OS internally (see that file's own #if). Linux needs
+  # a real libvulkan found at configure time (src/arch/linux/gpu_vulkan.c's
+  # own real, optional scope); Windows and macOS need nothing extra
+  # (D3D12/Metal both always available there, matching CRTGFX_BACKEND_
+  # SOURCES's own Windows/macOS branches further up). Same headless shape
+  # as crtgfx_skia_cpu_coverage just above (no crtgfx_window/host display
+  # connection needed at all).
   if((CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB) OR
-     CRT_TARGET_OS STREQUAL "windows")
+     CRT_TARGET_OS STREQUAL "windows" OR CRT_TARGET_OS STREQUAL "macos")
     add_executable(crtgfx_skia_gpu_offscreen_smoke
       ${CRT_STARTUP_OBJECTS}
       tests/skia_gpu_offscreen_smoke.cc
@@ -2088,7 +2209,16 @@ if(CRTGFX_ENABLE_SKIA)
     target_include_directories(crtgfx_skia_gpu_offscreen_smoke PRIVATE
       "${CMAKE_CURRENT_SOURCE_DIR}/src"
     )
-    crt_wire_skia_executable(crtgfx_skia_gpu_offscreen_smoke)
+    # SKIP_MACOS_DEAD_STRIP: this test's own real MTLCreateSystemDefault
+    # Device()-driven device creation (via crtgfx_gpu_device_create() ->
+    # src/arch/macos/gpu_metal.c) needs -dead_strip left off this
+    # executable's own final macOS link -- see crt_wire_skia_executable()'s
+    # own top comment (this file, above) and CRTGFX_MACOS_REAL_SDK_FLAGS's
+    # own top comment for the real, separately-confirmed -dead_strip +
+    # C++/libc++ interaction (a real Metal device-creation crash deep in
+    # Apple's own LaunchServices internals) this avoids. A no-op on every
+    # non-macOS target, matching that argument's own guard.
+    crt_wire_skia_executable(crtgfx_skia_gpu_offscreen_smoke SKIP_MACOS_DEAD_STRIP)
     crt_link_startup_end_objects(crtgfx_skia_gpu_offscreen_smoke)
     add_dependencies(crtgfx_skia_gpu_offscreen_smoke cxx c crt1 crtgfx)
 

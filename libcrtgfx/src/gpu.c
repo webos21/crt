@@ -54,6 +54,10 @@ crtgfx_result crtgfx_gpu_query_capabilities(crtgfx_gpu_capabilities* out_caps) {
   /* Real backend, Windows only (src/arch/windows/gpu_win32.c) -- see that
    * file's own top comment. */
   return crtgfx_gpu_win32_query_capabilities(out_caps);
+#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
+  /* Real backend, macOS only (src/arch/macos/gpu_metal.c) -- see that
+   * file's own top comment. */
+  return crtgfx_gpu_metal_query_capabilities(out_caps);
 #else
   /* Real, honest report -- see this file's own top comment and gpu.h's
    * own top comment for why this is CRTGFX_GPU_BACKEND_NONE/0 on every
@@ -100,6 +104,22 @@ crtgfx_result crtgfx_gpu_device_create(uint32_t device_index, crtgfx_gpu_device*
     *out_device = device;
     return CRTGFX_OK;
   }
+#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
+  {
+    crtgfx_gpu_device* device = (crtgfx_gpu_device*)calloc(1, sizeof(crtgfx_gpu_device));
+    crtgfx_result result;
+    if (device == NULL) {
+      return CRTGFX_ERROR_UNSUPPORTED;
+    }
+    result = crtgfx_gpu_metal_device_create(device_index, device);
+    if (result != CRTGFX_OK) {
+      free(device);
+      return result;
+    }
+    atomic_init(&device->refcount, 1);
+    *out_device = device;
+    return CRTGFX_OK;
+  }
 #else
   (void)device_index;
   /* crtgfx_gpu_query_capabilities() reports 0 real devices on this host
@@ -131,6 +151,8 @@ void crtgfx_gpu_device_release(crtgfx_gpu_device* device) {
     crtgfx_gpu_vulkan_device_destroy(device);
 #elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
     crtgfx_gpu_win32_device_destroy(device);
+#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
+    crtgfx_gpu_metal_device_destroy(device);
 #endif
     free(device);
   }

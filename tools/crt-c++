@@ -59,12 +59,76 @@ windows_host_arg() {
   esac
 }
 
+# -fcrt-real-apple-sdk: a sentinel, not a real clang flag -- stripped below,
+# never forwarded to $cxx. Opt-in, per-*compile* (not per-target/per-build)
+# escape hatch for the one real, narrow class of file this project's own
+# no-host-SDK-header policy cannot cover: a translation unit that itself
+# #includes a real Apple system/framework header transitively (Skia's own
+# vendored Ganesh Metal backend .mm sources, and libcrtgfx/src/skia_bridge.cc's
+# own Metal branch, which #includes Skia's public GrMtlBackendContext.h --
+# that header itself #imports <CoreFoundation/CoreFoundation.h> and
+# #includes <TargetConditionals.h>, the real, documented "third-party
+# source being ported" exception docs/libcrtgfx_api_policy.md's own Non-
+# Goals clause already codified for the D3D12 slice's GrD3DTypes.h).
+#
+# Two real, separately-confirmed problems solving this needs (2026-09-04,
+# found via a real standalone .mm probe on this exact machine, built with
+# real clang directly first, then bisected against this wrapper's own
+# common_flags one flag at a time until the exact minimal fix was found --
+# not guessed):
+#
+# 1. This project's own $CRT_SYSROOT/include/sys/cdefs.h -- a deliberately
+#    minimal, Bionic-shaped stub -- shadows the real macOS SDK's own
+#    <sys/cdefs.h> for any compile whose -isystem search order puts this
+#    project's own sysroot first (the normal, correct order for every
+#    other file in this project). Real Darwin system headers (Block.h,
+#    malloc.h, and others) route through their own real <sys/cdefs.h> to
+#    reach <ptrcheck.h> (`#if __has_include(<ptrcheck.h>) #include
+#    <ptrcheck.h> #endif`), which defines the real, or real-but-empty-
+#    fallback, `__single`/`__unsafe_indexable`/`__sized_by_or_null(...)`
+#    bounds-safety attribute macros those same real headers already use
+#    unconditionally on this machine's SDK (Xcode 26.1) -- shadowed by
+#    this project's own cdefs.h, those macros are simply never defined at
+#    all, and real Darwin headers fail to parse (`error: expected ';'
+#    after top level declarator` on the raw `__single`/etc. tokens).
+#    Confirmed real and load-bearing, not a guess: a real standalone .mm
+#    probe reproduced this exact failure with this project's own sysroot
+#    -isystem positioned first, and it vanished the instant the real SDK's
+#    own -isystem/-isysroot/-F were moved earlier on the actual command
+#    line instead -- command-line order is genuinely what decides which
+#    <sys/cdefs.h> wins, not merely which one is "more specific"; a later
+#    -I (searched before -isystem paths in general) was tried too and only
+#    partially fixed it, confirming this is a real order-of-search-path
+#    effect, not a search-tier one. Since reordering this project's own,
+#    always-present $CRT_SYSROOT -isystem would risk exactly the same
+#    real-Apple-header-shadows-this-project's-Bionic-header class of ABI
+#    mismatch this project has already hit once for real (crtmedia_demux_
+#    test's own pthread_once/-lSystem bug, HISTORY.md) for every *other*
+#    file compiled under this same flag if applied broadly, this is
+#    deliberately a per-compile opt-in, not a global reordering -- see
+#    apple_sdk_search_flags's own insertion point below, ahead of $CRT_
+#    SYSROOT's own -isystem only when this one sentinel is present on this
+#    one compile's own command line.
+# 2. This project's own -U__APPLE__ (added unconditionally for every
+#    other macOS C++ compile, see the case "$target_os" block below) has
+#    to be canceled back for this same compile too, or none of those same
+#    real headers' own __APPLE__-gated declarations (TargetConditionals.h
+#    chief among them) are reachable at all regardless of search order.
+#    -D__APPLE__=1 after -U__APPLE__ on the same actual command line wins
+#    (clang processes -U/-D for the same macro in strict left-to-right
+#    order) -- see this file's own -U__APPLE__ case branch below for
+#    where this is added back.
+want_real_apple_sdk=0
+
 user_args=""
 for arg in "$@"; do
   if [ "$target_os" = windows ]; then
     arg=$(windows_host_arg "$arg")
   fi
   case "$arg" in
+    -fcrt-real-apple-sdk)
+      want_real_apple_sdk=1
+      ;;
     -lpthread|-lrt)
       # Bionic merged these historical libraries into libc. Let the CRT libc
       # selected below satisfy their symbols instead of leaking a host
@@ -135,12 +199,42 @@ for arg in "$@"; do
   esac
 done
 
-common_flags="-ffreestanding -fno-builtin -Xclang -fwchar-type=int -ffunction-sections -fdata-sections$cxx_language_flags -nostdinc -nostdinc++ $cxx_standard_include_flags -isystem${CRT_SYSROOT}/include"
+# apple_sdk_search_flags: only ever computed/non-empty when -fcrt-real-
+# apple-sdk was actually on this compile's own command line (see that
+# sentinel's own top comment above) -- inserted here, ahead of $CRT_
+# SYSROOT's own -isystem below, specifically so the real macOS SDK's own
+# <sys/cdefs.h> (and everything real Darwin system/framework headers
+# transitively need) wins the search for this one compile, without
+# reordering anything for every other macOS compile this same wrapper
+# handles. xcrun discovers the real SDK path directly from this real
+# machine's own Xcode/Command Line Tools install (never hardcoded, the
+# same "ask the real environment" precedent as `"$cxx" -print-resource-
+# dir` just above) -- clang's own resource-dir headers
+# (<stdarg.h>/<ptrcheck.h>/...) are needed alongside the SDK's own
+# usr/include for the identical real reason.
+apple_sdk_search_flags=""
+if [ "$target_os" = macos ] && [ "$want_real_apple_sdk" -eq 1 ]; then
+  apple_sdk_path="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
+  if [ -z "$apple_sdk_path" ]; then
+    echo "crt-c++: -fcrt-real-apple-sdk requested but 'xcrun --sdk macosx --show-sdk-path' failed" >&2
+    exit 1
+  fi
+  apple_sdk_search_flags="-isysroot $apple_sdk_path -F$apple_sdk_path/System/Library/Frameworks -isystem $apple_sdk_path/usr/include -isystem $resource_dir/include"
+fi
+
+common_flags="-ffreestanding -fno-builtin -Xclang -fwchar-type=int -ffunction-sections -fdata-sections$cxx_language_flags -nostdinc -nostdinc++ $cxx_standard_include_flags $apple_sdk_search_flags -isystem${CRT_SYSROOT}/include"
 case "$target_os" in
   macos)
     common_flags="$common_flags -DCRT_TARGET_OS_MACOS=1"
     if [ "$is_asm_source" -eq 0 ]; then
       common_flags="$common_flags -U__APPLE__"
+      if [ "$want_real_apple_sdk" -eq 1 ]; then
+        # Cancels the -U__APPLE__ just added, for this compile only -- see
+        # -fcrt-real-apple-sdk's own top comment (item 2) for why real
+        # Darwin headers need this back, and why a later -D always wins
+        # over an earlier -U for the same macro on the same command line.
+        common_flags="$common_flags -D__APPLE__=1"
+      fi
     fi
     ;;
   linux) common_flags="$common_flags -DCRT_TARGET_OS_LINUX=1" ;;
@@ -284,10 +378,49 @@ case "$target_os" in
       crt_core_libs="${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a"
     fi
     libs="$libs $cxx_runtime_libs $crt_core_libs ${CRT_SYSROOT}/lib/libclang_rt.builtins.a -lSystem"
+    # -dead_strip is skipped, only for a -fcrt-real-apple-sdk link -- a
+    # real, confirmed-for-real (2026-09-04) interaction, not guessed: a
+    # real Metal.framework MTLCreateSystemDefaultDevice() call, made from
+    # this project's own minimal-_start macOS executable, deterministically
+    # crashed deep inside Apple's own closed-source LaunchServices/
+    # CoreServicesInternal internals (a real std::vector::push_back
+    # reallocation calling free() on a pointer libsystem_malloc's own
+    # ___BUG_IN_CLIENT_OF_LIBMALLOC_POINTER_BEING_FREED_WAS_NOT_ALLOCATED
+    # check rejects) -- 100% reproducible, every run, with -dead_strip
+    # present, and 100% absent, every run, the instant it was dropped from
+    # an otherwise-identical link (bisected by hand, one flag at a time,
+    # against a real standalone .mm probe, not guessed). This project's
+    # own crt1.S/libc.a/libc++.a were independently cleared first: a hybrid
+    # link (this project's own crt1.o + libc.a, or + libc++.a/libc++abi.a
+    # too, but a normal non-dead-stripped link otherwise) reproduced the
+    # real, correct device creation every time -- ruling out this
+    # project's own process bootstrap, contrary to what this class of
+    # crash originally looked like. `-Wl,-u,_calloc` (the one exported
+    # symbol observed to disappear between a working and a crashing build
+    # in one specific bisection pass) did NOT fix it once isolated, so the
+    # real mechanism is not narrowed down to one specific stripped symbol
+    # -- recorded here as a confirmed, reproducible interaction to avoid
+    # re-litigating with -ObjC/-no_dead_strip_inits_and_terms (both tried
+    # for real here too, neither helped) before the real root cause inside
+    # ld64's own dead-code-stripping and Apple's closed-source Metal/
+    # IOSurface/LaunchServices internals is fully understood. Every other
+    # macOS executable this project links keeps -dead_strip unchanged --
+    # this is scoped to exactly the files that opted into real Apple SDK
+    # headers via -fcrt-real-apple-sdk in the first place (Skia's own
+    # vendored Ganesh Metal backend .mm sources and this project's own
+    # skia_bridge.cc Metal branch), not a global policy change.
     if [ "$shared_mode" -eq 1 ]; then
-      entry="-Wl,-dead_strip"
+      if [ "$want_real_apple_sdk" -eq 1 ]; then
+        entry=""
+      else
+        entry="-Wl,-dead_strip"
+      fi
     else
-      entry="-Wl,-e,_start -Wl,-dead_strip"
+      if [ "$want_real_apple_sdk" -eq 1 ]; then
+        entry="-Wl,-e,_start"
+      else
+        entry="-Wl,-e,_start -Wl,-dead_strip"
+      fi
     fi
     if [ "$runtime_linkage" = shared ]; then
       entry="$entry -Wl,-rpath,${CRT_SYSROOT}/lib"

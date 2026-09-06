@@ -55,6 +55,22 @@ struct crtgfx_gpu_device {
   void* d3d12_device;
   void* d3d12_command_queue;
   void* dxgi_adapter;
+#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
+  /* Real Metal handles (2026-09-04, the Windows/D3D12 and Linux/Vulkan
+   * offscreen vertical slices' own macOS sibling). `id<MTLDevice>`/
+   * `id<MTLCommandQueue>` are real, opaque Objective-C object pointers --
+   * void* here for the identical reason the Vulkan/D3D12 fields above
+   * use it: an Objective-C `id` is ABI-identical regardless of which
+   * header (or no header at all) declared the type name. This header
+   * never includes the real <Metal/Metal.h> Skia's own consumer code,
+   * skia_bridge.cc, separately does (via GrMtlBackendContext.h) --
+   * src/arch/macos/gpu_metal.c itself stays real-host-header-free,
+   * driving the Objective-C runtime directly via objc_msgSend, matching
+   * window_cocoa.c's own established convention. Real ownership (fill-in
+   * at create, teardown at release) lives in src/arch/macos/gpu_metal.c,
+   * not here. */
+  void* mtl_device;
+  void* mtl_command_queue;
 #endif
 };
 
@@ -76,4 +92,12 @@ void crtgfx_gpu_vulkan_device_destroy(struct crtgfx_gpu_device* device);
 crtgfx_result crtgfx_gpu_win32_query_capabilities(crtgfx_gpu_capabilities* out_caps);
 crtgfx_result crtgfx_gpu_win32_device_create(uint32_t device_index, struct crtgfx_gpu_device* device);
 void crtgfx_gpu_win32_device_destroy(struct crtgfx_gpu_device* device);
+#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
+/* Real backend hooks -- src/arch/macos/gpu_metal.c. Same real shape as
+ * the Vulkan/D3D12 hooks above (gpu.c still owns all argument validation
+ * and the crtgfx_gpu_device allocation/refcount/free; these only fill in
+ * or tear down the real Metal-specific fields declared above). */
+crtgfx_result crtgfx_gpu_metal_query_capabilities(crtgfx_gpu_capabilities* out_caps);
+crtgfx_result crtgfx_gpu_metal_device_create(uint32_t device_index, struct crtgfx_gpu_device* device);
+void crtgfx_gpu_metal_device_destroy(struct crtgfx_gpu_device* device);
 #endif
