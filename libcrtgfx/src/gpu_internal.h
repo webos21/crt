@@ -231,6 +231,9 @@ void crtgfx_gpu_vulkan_surface_destroy(struct crtgfx_gpu_surface* surface);
 crtgfx_result crtgfx_gpu_vulkan_surface_acquire(struct crtgfx_gpu_surface* surface, uint64_t timeout_us);
 crtgfx_result crtgfx_gpu_vulkan_surface_clear(struct crtgfx_gpu_surface* surface, float r, float g, float b, float a);
 crtgfx_result crtgfx_gpu_vulkan_surface_present(struct crtgfx_gpu_surface* surface);
+/* Real swapchain recreation (2026-09-07) -- see crtgfx/gpu.h's own
+ * crtgfx_gpu_surface_resize() comment for the full contract. */
+crtgfx_result crtgfx_gpu_vulkan_surface_resize(struct crtgfx_gpu_surface* surface, uint32_t width, uint32_t height);
 #elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
 /* Real backend hooks -- src/arch/windows/gpu_win32.c. Same real shape as
  * the Vulkan hooks above (gpu.c still owns all argument validation and
@@ -251,6 +254,9 @@ void crtgfx_gpu_win32_surface_destroy(struct crtgfx_gpu_surface* surface);
 crtgfx_result crtgfx_gpu_win32_surface_acquire(struct crtgfx_gpu_surface* surface, uint64_t timeout_us);
 crtgfx_result crtgfx_gpu_win32_surface_clear(struct crtgfx_gpu_surface* surface, float r, float g, float b, float a);
 crtgfx_result crtgfx_gpu_win32_surface_present(struct crtgfx_gpu_surface* surface);
+/* Real swap-chain recreation (2026-09-07) -- see crtgfx/gpu.h's own
+ * crtgfx_gpu_surface_resize() comment for the full contract. */
+crtgfx_result crtgfx_gpu_win32_surface_resize(struct crtgfx_gpu_surface* surface, uint32_t width, uint32_t height);
 #elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
 /* Real backend hooks -- src/arch/macos/gpu_metal.c. Same real shape as
  * the Vulkan/D3D12 hooks above (gpu.c still owns all argument validation
@@ -271,4 +277,7 @@ void crtgfx_gpu_metal_surface_destroy(struct crtgfx_gpu_surface* surface);
 crtgfx_result crtgfx_gpu_metal_surface_acquire(struct crtgfx_gpu_surface* surface, uint64_t timeout_us);
 crtgfx_result crtgfx_gpu_metal_surface_clear(struct crtgfx_gpu_surface* surface, float r, float g, float b, float a);
 crtgfx_result crtgfx_gpu_metal_surface_present(struct crtgfx_gpu_surface* surface);
+/* Real drawable-size update (2026-09-07) -- see crtgfx/gpu.h's own
+ * crtgfx_gpu_surface_resize() comment for the full contract. */
+crtgfx_result crtgfx_gpu_metal_surface_resize(struct crtgfx_gpu_surface* surface, uint32_t width, uint32_t height);
 #endif

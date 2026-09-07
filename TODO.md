@@ -491,13 +491,31 @@ default-config ctest also reconfirmed clean, 111/111.
    2, one device, a real swapchain-backed surface, 120 presented frames,
    and exit 0; `crtgfx_gpu_test_runs` also passes when run outside the
    sandbox. Metal rejects acquire budgets below one second because
-   `nextDrawable` exposes a fixed wait, not an arbitrary timeout. Still
-   open: real Linux on-screen verification outside WSL, macOS x86_64
-   native execution, resize/swapchain recreation on all GPU hosts, visual
-   verification beyond successful present calls, and wiring the
-   already-proven offscreen Ganesh pipeline onto a surface's own acquired
-   image. Graphite stays a later, separately-measured alternative to
-   Ganesh throughout.
+   `nextDrawable` exposes a fixed wait, not an arbitrary timeout.
+
+   **Resize/swapchain recreation on all GPU hosts is done (2026-09-07
+   follow-up).** New `crtgfx_gpu_surface_resize()` (crtgfx/gpu.h): real
+   `ResizeBuffers()`/back-buffer/RTV recreation on Windows, real
+   `oldSwapchain`-based swapchain recreation on Linux/Vulkan, and a real
+   `-setDrawableSize:` update (with the points-to-pixels `-contentsScale`
+   conversion `crtgfx_gpu_metal_surface_create()`'s own convention already
+   established) on macOS/Metal. **Real, live-verified on Windows**: the
+   demo window was actually dragged through dozens of live resizes via a
+   real `SetWindowPos` script while running, every resize succeeded, and
+   the demo completed its full run and exited 0; full ctest 133/133.
+   Linux compiles clean via WSL (ctest 116/116, the one known non-
+   interactive-WSL-runner `termios_echo_roundtrip_test` limitation
+   excluded, not a regression); macOS is reasoned-but-unverified this
+   session (no hardware). See `docs/libcrtgfx_wayland_plan.md`'s own
+   "Resize/swapchain recreation on all GPU hosts" section for the full
+   per-host trail.
+
+   Still open: real Linux on-screen verification outside WSL, macOS
+   x86_64 native execution, real macOS on-screen resize/Retina
+   verification, visual verification beyond successful present calls, and
+   wiring the already-proven offscreen Ganesh pipeline onto a surface's
+   own acquired image. Graphite stays a later, separately-measured
+   alternative to Ganesh throughout.
 2. **Add hardware decode, phase A.** Enable FFmpeg D3D11VA/D3D12VA,
    VideoToolbox, and VA-API backends, initially downloading decoded frames to
    CPU memory so codec/device selection, fallback, and recovery can be proved

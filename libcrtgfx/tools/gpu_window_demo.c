@@ -3,7 +3,12 @@
  * deliberately not registered with headless CTest.
  * Usage: crtgfx_gpu_window_demo [frame-count]; omitted/zero runs until close.
  * Animates a submitted solid-color clear, not a Ganesh scene. A finite
- * run fails if it closes early or cannot make progress for 60 attempts. */
+ * run fails if it closes early or cannot make progress for 60 attempts.
+ * Also drains CRTGFX_EVENT_RESIZE and calls crtgfx_gpu_surface_resize()
+ * (2026-09-07) -- a live, on-screen exercise of the resize/swapchain-
+ * recreation contract, not just a compile-time check: dragging this
+ * demo's own window edge on a real desktop session resizes the real
+ * swapchain/layer in place instead of leaving it stale. */
 
 #include "crtgfx/gpu.h"
 #include "crtgfx/window.h"
@@ -75,6 +80,27 @@ int main(int argc, char** argv) {
   tick = 0;
   while (!failed && !crtgfx_window_should_close(window)) {
     float phase = (float)(tick % 256u) / 255.0f;
+    crtgfx_event event;
+
+    /* Drain every queued event (crtgfx_window_pump_events() below is what
+     * actually receives new ones) before this frame's acquire/clear/
+     * present -- a resize must land before the next acquire() sees a
+     * mismatched window size, matching every real presentation loop's own
+     * "handle resize, then render" ordering. */
+    while (crtgfx_window_poll_event(window, &event) == CRTGFX_OK && event.type != CRTGFX_EVENT_NONE) {
+      if (event.type == CRTGFX_EVENT_RESIZE) {
+        rc = crtgfx_gpu_surface_resize(surface, event.data.resize.width, event.data.resize.height);
+        if (rc != CRTGFX_OK) {
+          fprintf(stderr, "crtgfx_gpu_window_demo: resize to %ux%u failed (%d)\n", event.data.resize.width,
+                  event.data.resize.height, rc);
+          failed = 1;
+          break;
+        }
+        fprintf(stderr, "crtgfx_gpu_window_demo: resized to %ux%u\n", event.data.resize.width,
+                event.data.resize.height);
+      }
+    }
+    if (failed) break;
 
     rc = crtgfx_gpu_surface_acquire(surface, 1000000u);
     if (rc == CRTGFX_OK) {

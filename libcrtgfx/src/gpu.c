@@ -390,6 +390,24 @@ crtgfx_result crtgfx_gpu_surface_clear(crtgfx_gpu_surface* surface, float r, flo
 #endif
 }
 
+crtgfx_result crtgfx_gpu_surface_resize(crtgfx_gpu_surface* surface, uint32_t width, uint32_t height) {
+  if (surface == NULL) {
+    return CRTGFX_ERROR_INVALID_ARGUMENT;
+  }
+  if (width == 0u || height == 0u) {
+    return CRTGFX_ERROR_INVALID_ARGUMENT;
+  }
+#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
+  return crtgfx_gpu_vulkan_surface_resize(surface, width, height);
+#elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
+  return crtgfx_gpu_win32_surface_resize(surface, width, height);
+#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
+  return crtgfx_gpu_metal_surface_resize(surface, width, height);
+#else
+  return CRTGFX_ERROR_UNSUPPORTED;
+#endif
+}
+
 crtgfx_result crtgfx_gpu_surface_present(crtgfx_gpu_surface* surface) {
   if (surface == NULL) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;

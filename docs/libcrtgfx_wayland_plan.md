@@ -292,10 +292,78 @@ objects using Clang 22 and CRT headers (`--target=arm64-apple-macos11` /
 `--target=x86_64-apple-macos11`, `-std=c99 -nostdinc`, Clang resource
 headers plus `include`, `libcrtgfx/include`, `libcrtgfx/src`, definitions
 `CRT_TARGET_OS_MACOS=1` and `CRTGFX_HAVE_METAL=1`). No native macOS link or
-run was possible on this Windows host. macOS runtime/visual/Retina/resize
-checks, Windows/Linux swapchain recreation and Ganesh-to-surface rendering
-remain open. Skia was disabled in the Windows default-config regression;
-its offscreen backend was not revalidated in this pass.
+run was possible on this Windows host. Skia was disabled in the Windows
+default-config regression; its offscreen backend was not revalidated in
+that pass.
+
+### Resize/swapchain recreation on all GPU hosts (2026-09-07 follow-up)
+
+Closes the "Windows/Linux swapchain recreation" item this section left
+open above. New `crtgfx_gpu_surface_resize(surface, width, height)`
+(crtgfx/gpu.h) -- a caller drives this from its own CRTGFX_EVENT_RESIZE
+handling, the same event a software-presented window already used to
+learn its framebuffer changed size; this contract has no implicit
+auto-resize of its own. Rejected between acquire()/present() (same
+out-of-order misuse guard every other call already has), rejected for a
+0x0 request, and a real, cheap no-op for an unchanged size.
+
+- **Windows/D3D12**: real, standard idiom -- release every back-buffer
+  `ID3D12Resource*` (the RTV heap itself is reused, sized once at create()
+  time and never resized since buffer count never changes), a real fence-
+  signal-then-wait GPU idle (D3D12 has no single wait-idle call, same
+  pattern `crtgfx_gpu_win32_surface_destroy()` already used), `IDXGISwap
+  Chain3::ResizeBuffers()`, re-`GetBuffer()` each new back buffer, re-
+  `CreateRenderTargetView()` each one at its existing descriptor slot.
+- **Linux/Vulkan**: real, standard idiom -- build a new `VkSwapchainKHR`
+  with `oldSwapchain` set to the current one (spec-correct create-before-
+  destroy ordering), `vkDeviceWaitIdle()`, destroy the old swapchain,
+  re-fetch its own real images (the count is allowed to legitimately
+  differ across a resize, handled by reallocating the image array rather
+  than assuming it stays fixed).
+- **macOS/Metal**: no swapchain/layer recreation at all -- Metal's own
+  `CAMetalLayer` stays the same object; only `-setDrawableSize:` needs a
+  fresh call (AppKit keeps the layer's own `bounds` in sync with its
+  content view automatically, but `drawableSize` is a separate property
+  real Metal apps must set explicitly on every resize). Real, non-obvious
+  unit bridge this function must do that the Windows/Linux ones do not:
+  `crtgfx_gpu_surface_resize()`'s own `width`/`height` arrive in
+  CRTGFX_EVENT_RESIZE's own units (real Cocoa *points*), but this
+  surface's own `width`/`height` fields (and `crtgfx_gpu_surface_get_
+  size()`'s own report) are real backing-store *pixels*, matching
+  `crtgfx_gpu_metal_surface_create()`'s own already-established
+  "always trust the real, already-scaled `-drawableSize`, never the
+  caller's raw request" convention -- this function reads the layer's own
+  `-contentsScale` (set once, correctly, by `crtgfx_cocoa_get_metal_
+  layer()` at surface-create time) and applies it before comparing
+  against or storing into the real-pixel fields. Reasoned-but-not-
+  locally-verified this session (no macOS hardware).
+
+Verification: **Windows, real and live** -- `crtgfx_gpu_window_demo.exe`
+run against a real, visible desktop window while a separate script
+(`SetWindowPos`) dragged the window through dozens of live size changes
+(DWM's own resize-animation intermediate sizes included, e.g. 799x479 ->
+... -> 600x391, then two more explicit target sizes); every single
+`CRTGFX_EVENT_RESIZE` was drained, every `crtgfx_gpu_surface_resize()`
+call succeeded, the demo kept animating and presenting throughout with no
+crash or hang, and it completed its full requested 2000-frame run and
+exited 0 afterward. Full `ctest` 133/133, zero regressions. **Linux**:
+`crtgfx_gpu_window_demo`/`crtgfx` build clean via WSL (compile-only, same
+real structural limitation as the rest of this vertical slice -- WSL has
+no real Wayland compositor to actually open a window against), full
+`ctest` 116/116 (`termios_echo_roundtrip_test` excluded, a pre-existing,
+unrelated non-interactive-WSL-runner limitation, not a regression -- see
+this project's own memory on that). **macOS**: not compiled or run this
+session (no macOS hardware) -- reasoned from `crtgfx_cocoa_get_metal_
+layer()`'s own already-verified real scale-handling precedent, flagged
+unverified, matching every other macOS-only addition in this file.
+Real on-screen macOS/Retina resize verification remains the user's own
+separate step, same as this file's other macOS-only work.
+
+Still open: Ganesh-to-surface rendering (wiring the already-proven
+offscreen Ganesh pipeline onto a surface's own acquired image instead of
+the current deliberate solid-color `_clear()` stand-in), real Linux
+on-screen verification outside WSL, macOS x86_64 native execution, and
+real macOS on-screen resize/Retina verification.
 
 ## Linux Native Wayland Backend + GPU Presentation (2026-09-07, first cut)
 

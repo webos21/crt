@@ -266,6 +266,73 @@ crtgfx_result crtgfx_gpu_metal_surface_clear(
   return CRTGFX_OK;
 }
 
+/* Real drawable-size update (2026-09-07, closing the "resize on all GPU
+ * hosts" gap this vertical slice's own follow-up work left open -- see
+ * crtgfx/gpu.h's own crtgfx_gpu_surface_resize() comment for the full,
+ * host-independent contract). Simpler than the Vulkan/D3D12 siblings --
+ * a CAMetalLayer is not itself recreated on resize the way a
+ * VkSwapchainKHR/IDXGISwapChain3 is; AppKit already keeps the layer's own
+ * `bounds` in sync with its content view, but `drawableSize` itself is a
+ * separate property real Metal apps must set explicitly on every live
+ * resize (it does not track `bounds` automatically) -- this function is
+ * that explicit set, real per-host work no different in kind from the
+ * Vulkan/D3D12 siblings' own explicit recreation, just far cheaper
+ * because Metal owns the drawable pool itself.
+ *
+ * Real unit mismatch this function must bridge, not just a naming detail:
+ * `width`/`height` here arrive in the same units as CRTGFX_EVENT_RESIZE's
+ * own payload (crtgfx/window.h) -- Cocoa *points* (crtgfx_weston_toplevel_
+ * note_size()'s own callers in window_cocoa.c always pass a content
+ * view's `-bounds` size directly, never multiplied by scale) -- but this
+ * struct's own `width`/`height` fields (and crtgfx_gpu_surface_get_size()'s
+ * own report) are real device *pixels*, matching crtgfx_gpu_metal_surface_
+ * create()'s own established convention of reading the real, already-
+ * scaled `-drawableSize` back from the layer rather than trusting its own
+ * width/height parameters. window_cocoa.c's own crtgfx_cocoa_get_metal_
+ * layer() (called once, at surface-create time) is the real source of
+ * that scale (`-backingScaleFactor` at the time of that call, applied via
+ * `-setContentsScale:`) -- this function reads the layer's own `-
+ * contentsScale` back (unchanged since create(), since nothing yet wires
+ * CRTGFX_EVENT_DPI_SCALE_CHANGED into an updated `-setContentsScale:`
+ * call -- a real, separate, not-yet-wired gap, not silently assumed away)
+ * rather than re-deriving it from a window this file has no handle to,
+ * and applies it to `width`/`height` before comparing against or storing
+ * into this struct's own real-pixel fields -- the same real conversion
+ * crtgfx_cocoa_get_metal_layer() already performs, just read back instead
+ * of recomputed. Reasoned-but-not-locally-verified this session (no
+ * macOS hardware -- matches every other macOS-only addition's own
+ * discipline, see docs/libcrtgfx_wayland_plan.md). */
+crtgfx_result crtgfx_gpu_metal_surface_resize(struct crtgfx_gpu_surface* surface, uint32_t width, uint32_t height) {
+  crtgfx_mtl_size size;
+  double scale;
+  uint32_t pixel_width;
+  uint32_t pixel_height;
+
+  if (surface->mtl_drawable_acquired) {
+    /* Same real, honest misuse guard as every other out-of-order call this
+     * contract already rejects. */
+    return CRTGFX_ERROR_HOST;
+  }
+
+  scale = ((double (*)(id, SEL))objc_msgSend)(surface->mtl_layer, sel_registerName("contentsScale"));
+  if (scale <= 0.0) scale = 1.0;
+  pixel_width = (uint32_t)((double)width * scale);
+  pixel_height = (uint32_t)((double)height * scale);
+  if (pixel_width == surface->width && pixel_height == surface->height) {
+    /* Real, cheap no-op -- see crtgfx/gpu.h's own comment on this
+     * function. */
+    return CRTGFX_OK;
+  }
+
+  size.width = (double)pixel_width;
+  size.height = (double)pixel_height;
+  ((void (*)(id, SEL, crtgfx_mtl_size))objc_msgSend)(
+      surface->mtl_layer, sel_registerName("setDrawableSize:"), size);
+  surface->width = pixel_width;
+  surface->height = pixel_height;
+  return CRTGFX_OK;
+}
+
 crtgfx_result crtgfx_gpu_metal_surface_present(struct crtgfx_gpu_surface* surface) {
   id command;
   if (!surface->mtl_drawable_acquired) return CRTGFX_ERROR_HOST;

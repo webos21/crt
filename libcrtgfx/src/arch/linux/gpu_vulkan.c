@@ -1376,6 +1376,155 @@ crtgfx_result crtgfx_gpu_vulkan_surface_clear(struct crtgfx_gpu_surface* surface
   return CRTGFX_OK;
 }
 
+/* Real swapchain recreation (2026-09-07, closing the "resize on all GPU
+ * hosts" gap this vertical slice's own follow-up work left open -- see
+ * crtgfx/gpu.h's own crtgfx_gpu_surface_resize() comment for the full,
+ * host-independent contract). Vulkan's own real, documented idiom: build
+ * a brand-new VkSwapchainKHR with `oldSwapchain` set to the surface's
+ * current one (the spec guarantees the old swapchain stays valid to
+ * present through only until vkCreateSwapchainKHR() itself returns, not
+ * any longer -- this function creates the replacement first, then retires
+ * the old one, matching that ordering exactly), fetch its own real images
+ * fresh (the count can legitimately differ from before -- caps.min/
+ * maxImageCount are themselves allowed to change across a real resize),
+ * and swap the surface's own vk_swapchain/vk_images/vk_image_count/width/
+ * height over to the new ones. The per-surface sync objects (semaphores,
+ * frame fence, command pool/buffer) are not recreated -- they are not
+ * swapchain-size-dependent, same reasoning as crtgfx_gpu_win32_surface_
+ * resize()'s own choice to reuse its RTV heap rather than rebuild it. */
+crtgfx_result crtgfx_gpu_vulkan_surface_resize(struct crtgfx_gpu_surface* surface, uint32_t width, uint32_t height) {
+  VkDevice vk_device = (VkDevice)surface->device->vk_device;
+  VkPhysicalDevice physical_device = (VkPhysicalDevice)surface->device->vk_physical_device;
+  VkSurfaceKHR vk_surface = (VkSurfaceKHR)surface->vk_surface;
+  VkSwapchainKHR old_swapchain = (VkSwapchainKHR)surface->vk_swapchain;
+  VkSurfaceCapabilitiesKHR caps;
+  VkSurfaceFormatKHR formats[64];
+  uint32_t format_count = 64u;
+  VkFormat chosen_format = CRTGFX_VK_FORMAT_B8G8R8A8_UNORM;
+  VkColorSpaceKHR chosen_color_space = CRTGFX_VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+  uint32_t image_count;
+  VkExtent2D extent;
+  VkSwapchainCreateInfoKHR swapchain_info;
+  VkImage raw_images[CRTGFX_GPU_VULKAN_MAX_SWAPCHAIN_IMAGES];
+  uint32_t real_image_count = CRTGFX_GPU_VULKAN_MAX_SWAPCHAIN_IMAGES;
+  VkSwapchainKHR new_swapchain = NULL;
+  void** new_image_array;
+  VkResult result;
+  uint32_t i;
+
+  if (surface->vk_image_acquired) {
+    /* Same real, honest misuse guard as every other out-of-order call this
+     * contract already rejects -- recreating the swapchain while an image
+     * is acquired is not real, defined Vulkan behavior. */
+    return CRTGFX_ERROR_HOST;
+  }
+  if (width == surface->width && height == surface->height) {
+    /* Real, cheap no-op -- see crtgfx/gpu.h's own comment on this
+     * function. */
+    return CRTGFX_OK;
+  }
+
+  if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, vk_surface, &caps) != CRTGFX_VK_SUCCESS) {
+    return CRTGFX_ERROR_HOST;
+  }
+  /* Same real format/color-space probe as crtgfx_gpu_vulkan_surface_
+   * create() above -- not persisted on the surface itself beyond
+   * vk_format, so re-derived fresh here rather than assumed unchanged. */
+  result = vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, vk_surface, &format_count, formats);
+  if ((result == CRTGFX_VK_SUCCESS || result == CRTGFX_VK_INCOMPLETE) && format_count > 0u) {
+    chosen_format = formats[0].format;
+    chosen_color_space = formats[0].colorSpace;
+    for (i = 0; i < format_count; ++i) {
+      if (formats[i].format == CRTGFX_VK_FORMAT_B8G8R8A8_UNORM) {
+        chosen_format = formats[i].format;
+        chosen_color_space = formats[i].colorSpace;
+        break;
+      }
+    }
+  }
+
+  /* Same real currentExtent-or-clamped-request convention as create(). */
+  if (caps.currentExtent.width != 0xFFFFFFFFu) {
+    extent = caps.currentExtent;
+  } else {
+    extent.width = width;
+    if (extent.width < caps.minImageExtent.width) extent.width = caps.minImageExtent.width;
+    if (extent.width > caps.maxImageExtent.width) extent.width = caps.maxImageExtent.width;
+    extent.height = height;
+    if (extent.height < caps.minImageExtent.height) extent.height = caps.minImageExtent.height;
+    if (extent.height > caps.maxImageExtent.height) extent.height = caps.maxImageExtent.height;
+  }
+  if (extent.width == 0u || extent.height == 0u) {
+    return CRTGFX_ERROR_HOST;
+  }
+
+  image_count = caps.minImageCount + 1u;
+  if (caps.maxImageCount > 0u && image_count > caps.maxImageCount) {
+    image_count = caps.maxImageCount;
+  }
+  if (image_count > CRTGFX_GPU_VULKAN_MAX_SWAPCHAIN_IMAGES) {
+    image_count = CRTGFX_GPU_VULKAN_MAX_SWAPCHAIN_IMAGES;
+  }
+
+  swapchain_info.sType = CRTGFX_VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+  swapchain_info.pNext = NULL;
+  swapchain_info.flags = 0;
+  swapchain_info.surface = vk_surface;
+  swapchain_info.minImageCount = image_count;
+  swapchain_info.imageFormat = chosen_format;
+  swapchain_info.imageColorSpace = chosen_color_space;
+  swapchain_info.imageExtent = extent;
+  swapchain_info.imageArrayLayers = 1;
+  swapchain_info.imageUsage = CRTGFX_VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | CRTGFX_VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  swapchain_info.imageSharingMode = CRTGFX_VK_SHARING_MODE_EXCLUSIVE;
+  swapchain_info.queueFamilyIndexCount = 0;
+  swapchain_info.pQueueFamilyIndices = NULL;
+  swapchain_info.preTransform = ((caps.supportedTransforms & CRTGFX_VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) != 0u)
+                                     ? CRTGFX_VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
+                                     : caps.currentTransform;
+  swapchain_info.compositeAlpha = CRTGFX_VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+  swapchain_info.presentMode = CRTGFX_VK_PRESENT_MODE_FIFO_KHR;
+  swapchain_info.clipped = 1;
+  swapchain_info.oldSwapchain = old_swapchain;
+
+  if (vkCreateSwapchainKHR(vk_device, &swapchain_info, NULL, &new_swapchain) != CRTGFX_VK_SUCCESS) {
+    return CRTGFX_ERROR_HOST;
+  }
+
+  /* Real spec requirement: the GPU must be done with the old swapchain's
+   * own images before it is destroyed -- same "no separate wait-idle step
+   * of its own" reasoning as crtgfx_gpu_vulkan_surface_destroy() above. */
+  vkDeviceWaitIdle(vk_device);
+  vkDestroySwapchainKHR(vk_device, old_swapchain, NULL);
+
+  result = vkGetSwapchainImagesKHR(vk_device, new_swapchain, &real_image_count, raw_images);
+  if ((result != CRTGFX_VK_SUCCESS && result != CRTGFX_VK_INCOMPLETE) || real_image_count == 0u) {
+    /* The new swapchain itself is still real and valid even though this
+     * one query failed -- left attached to the surface below (matches
+     * crtgfx/gpu.h's own "safe to release, not otherwise usable" contract
+     * for a failed resize) rather than leaking it. */
+    surface->vk_swapchain = (void*)new_swapchain;
+    return CRTGFX_ERROR_HOST;
+  }
+  new_image_array = (void**)calloc(real_image_count, sizeof(void*));
+  if (new_image_array == NULL) {
+    surface->vk_swapchain = (void*)new_swapchain;
+    return CRTGFX_ERROR_HOST;
+  }
+  for (i = 0; i < real_image_count; ++i) {
+    new_image_array[i] = (void*)raw_images[i];
+  }
+
+  free(surface->vk_images);
+  surface->vk_swapchain = (void*)new_swapchain;
+  surface->vk_images = new_image_array;
+  surface->vk_image_count = real_image_count;
+  surface->vk_format = chosen_format;
+  surface->width = extent.width;
+  surface->height = extent.height;
+  return CRTGFX_OK;
+}
+
 crtgfx_result crtgfx_gpu_vulkan_surface_present(struct crtgfx_gpu_surface* surface) {
   VkSwapchainKHR swapchain = (VkSwapchainKHR)surface->vk_swapchain;
   VkSemaphore wait_sem = (VkSemaphore)surface->vk_render_finished_semaphore;

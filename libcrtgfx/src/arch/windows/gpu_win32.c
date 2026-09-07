@@ -1189,6 +1189,110 @@ crtgfx_result crtgfx_gpu_win32_surface_clear(struct crtgfx_gpu_surface* surface,
   return CRTGFX_OK;
 }
 
+/* Real swap-chain recreation (2026-09-07, closing the "resize on all GPU
+ * hosts" gap this vertical slice's own follow-up work left open -- see
+ * crtgfx/gpu.h's own crtgfx_gpu_surface_resize() comment for the full,
+ * host-independent contract). D3D12/DXGI's own real, documented resize
+ * idiom: every real reference to a back buffer (this file's own
+ * ID3D12Resource* array and the RTV descriptor heap's own views onto
+ * them) must be released before IDXGISwapChain3::ResizeBuffers() is
+ * called -- unlike Vulkan's own vkCreateSwapchainKHR(..., oldSwapchain),
+ * there is no "hand the old swap chain in, get a new one back" option
+ * here; the *same* swap chain object is resized in place, so this
+ * function reuses `surface->dxgi_swapchain`/`d3d12_rtv_heap` (already
+ * sized to `d3d12_buffer_count`, which never changes) rather than
+ * recreating either. Same real fence-signal-then-wait GPU idle pattern
+ * crtgfx_gpu_win32_surface_destroy() already uses above (D3D12 has no
+ * single wait-idle call) -- every real back-buffer resource must not be
+ * released while the GPU may still be using it. */
+crtgfx_result crtgfx_gpu_win32_surface_resize(struct crtgfx_gpu_surface* surface, uint32_t width, uint32_t height) {
+  crtgfx_dxgi_swapchain3* swap_chain = (crtgfx_dxgi_swapchain3*)surface->dxgi_swapchain;
+  crtgfx_d3d12_device* d3d_device = (crtgfx_d3d12_device*)surface->device->d3d12_device;
+  crtgfx_d3d12_fence* fence = (crtgfx_d3d12_fence*)surface->d3d12_fence;
+  crtgfx_d3d12_command_queue* queue = (crtgfx_d3d12_command_queue*)surface->device->d3d12_command_queue;
+  crtgfx_d3d12_descriptor_heap* rtv_heap = (crtgfx_d3d12_descriptor_heap*)surface->d3d12_rtv_heap;
+  crtgfx_d3d12_cpu_descriptor_handle rtv_start;
+  size_t rtv_descriptor_size = surface->d3d12_rtv_descriptor_size;
+  uint32_t buffer_count = surface->d3d12_buffer_count;
+  uint32_t i;
+  HRESULT hr;
+
+  if (surface->d3d12_image_acquired) {
+    /* Same real, honest misuse guard as every other out-of-order call this
+     * contract already rejects -- recreating the swap chain while an
+     * image is acquired is not real, defined D3D12 behavior. */
+    return CRTGFX_ERROR_HOST;
+  }
+  if (width == surface->width && height == surface->height) {
+    /* Real, cheap no-op -- see crtgfx/gpu.h's own comment on this
+     * function. */
+    return CRTGFX_OK;
+  }
+
+  /* Real GPU idle wait -- same fence-signal-then-wait pattern as crtgfx_
+   * gpu_win32_surface_destroy() above (D3D12 has no single wait-idle
+   * call). Every back buffer below must not be released while the GPU
+   * may still be using it. */
+  {
+    uint64_t wait_value = surface->d3d12_fence_next_value++;
+    if (FAILED(queue->lpVtbl->Signal(queue, fence, wait_value))) {
+      return CRTGFX_ERROR_HOST;
+    }
+    if (fence->lpVtbl->GetCompletedValue(fence) < wait_value && surface->d3d12_fence_event != NULL) {
+      if (FAILED(fence->lpVtbl->SetEventOnCompletion(fence, wait_value, (HANDLE)surface->d3d12_fence_event))) {
+        return CRTGFX_ERROR_HOST;
+      }
+      while (fence->lpVtbl->GetCompletedValue(fence) < wait_value) {
+        if (WaitForSingleObject((HANDLE)surface->d3d12_fence_event, 0xffffffffu) != 0u) break;
+      }
+    }
+  }
+
+  /* Release every real back-buffer reference (the RTV heap's own views
+   * onto them go stale but need no explicit release -- CreateRenderTarget
+   * View() below simply overwrites each descriptor in place, same as
+   * crtgfx_gpu_win32_surface_create()'s own first-time fill). Leaves
+   * `surface->d3d12_back_buffers[i]` NULL until re-fetched just below --
+   * a real ResizeBuffers() failure after this point leaves the surface in
+   * the same "safe to release, not otherwise usable" state crtgfx/gpu.h's
+   * own crtgfx_gpu_surface_resize() comment documents, matching a failed
+   * crtgfx_gpu_surface_create()'s own contract. */
+  for (i = 0; i < buffer_count; ++i) {
+    if (surface->d3d12_back_buffers[i] != NULL) {
+      ((crtgfx_dxgi_unknown*)surface->d3d12_back_buffers[i])
+          ->lpVtbl->Release((crtgfx_dxgi_unknown*)surface->d3d12_back_buffers[i]);
+      surface->d3d12_back_buffers[i] = NULL;
+    }
+  }
+
+  hr = swap_chain->lpVtbl->ResizeBuffers(
+      swap_chain, buffer_count, width, height, CRTGFX_DXGI_FORMAT_B8G8R8A8_UNORM, 0);
+  if (FAILED(hr)) {
+    return CRTGFX_ERROR_HOST;
+  }
+
+  for (i = 0; i < buffer_count; ++i) {
+    crtgfx_d3d12_resource* buffer = NULL;
+    hr = swap_chain->lpVtbl->GetBuffer(swap_chain, i, &crtgfx_iid_id3d12_resource, (void**)&buffer);
+    if (FAILED(hr) || buffer == NULL) {
+      return CRTGFX_ERROR_HOST;
+    }
+    surface->d3d12_back_buffers[i] = (void*)buffer;
+  }
+
+  rtv_heap->lpVtbl->GetCPUDescriptorHandleForHeapStart(rtv_heap, &rtv_start);
+  for (i = 0; i < buffer_count; ++i) {
+    crtgfx_d3d12_cpu_descriptor_handle handle;
+    handle.ptr = rtv_start.ptr + (size_t)i * rtv_descriptor_size;
+    d3d_device->lpVtbl->CreateRenderTargetView(
+        d3d_device, (crtgfx_d3d12_resource*)surface->d3d12_back_buffers[i], NULL, handle);
+  }
+
+  surface->width = width;
+  surface->height = height;
+  return CRTGFX_OK;
+}
+
 crtgfx_result crtgfx_gpu_win32_surface_present(struct crtgfx_gpu_surface* surface) {
   crtgfx_dxgi_swapchain3* swap_chain = (crtgfx_dxgi_swapchain3*)surface->dxgi_swapchain;
   HRESULT hr;

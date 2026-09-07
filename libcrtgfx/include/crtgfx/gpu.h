@@ -143,6 +143,40 @@ crtgfx_result crtgfx_gpu_surface_acquire(crtgfx_gpu_surface* surface, uint64_t t
  * ARGUMENT for a null surface. */
 crtgfx_result crtgfx_gpu_surface_clear(crtgfx_gpu_surface* surface, float r, float g, float b, float a);
 
+/* Resizes `surface`'s live swapchain/layer to `width`x`height` (2026-09-07,
+ * closing the "resize/swapchain recreation on all GPU hosts" gap this
+ * contract's own top comment left open) -- a caller drives this from its
+ * own CRTGFX_EVENT_RESIZE handling (crtgfx/window.h), the same event a
+ * software-presented window already uses to know its framebuffer changed
+ * size; this contract has no implicit auto-resize of its own (Vulkan's own
+ * VK_ERROR_OUT_OF_DATE_KHR keeps surfacing as CRTGFX_ERROR_HOST from
+ * acquire()/present() until a caller actually calls this). Must NOT be
+ * called between a successful acquire() and the matching present() --
+ * CRTGFX_ERROR_HOST, matching every other out-of-order misuse this
+ * contract already rejects the same way, since recreating the swapchain
+ * out from under an in-flight acquired image is not real, defined
+ * behavior on any of the three backends. `width`/`height` of 0 is
+ * CRTGFX_ERROR_INVALID_ARGUMENT (mirrors crtgfx_gpu_surface_create()'s own
+ * real minimum). `width`/`height` are in the same units as the
+ * CRTGFX_EVENT_RESIZE payload this call is meant to be driven from, NOT
+ * necessarily crtgfx_gpu_surface_get_size()'s own real-device-pixel report
+ * -- on Windows/Linux the two coincide (no logical/physical pixel
+ * distinction on either host), but on macOS the event (and this
+ * function's own parameters) are real Cocoa *points*, while get_size()
+ * reports real backing-store pixels (crtgfx_gpu_metal_surface_create()'s
+ * own already-established convention); the Metal backend performs its own
+ * real points-to-pixels conversion internally (its own current
+ * `-contentsScale`), the same real scale crtgfx_gpu_surface_create() used
+ * on that same surface. A same-*point*-size call is a real, cheap no-op,
+ * not an error -- a caller does not need to pre-filter unchanged sizes
+ * itself. Returns CRTGFX_
+ * ERROR_INVALID_ARGUMENT for a null surface, CRTGFX_ERROR_HOST if the
+ * real host-level recreation itself fails (the surface is left in a
+ * real, safe-to-release-but-otherwise-unusable state in that case,
+ * exactly like a failed crtgfx_gpu_surface_create() would have been --
+ * never a partially-torn-down crash). */
+crtgfx_result crtgfx_gpu_surface_resize(crtgfx_gpu_surface* surface, uint32_t width, uint32_t height);
+
 /* Presents `surface`'s currently acquired image (real GPU work already
  * submitted via crtgfx_gpu_surface_clear() above must complete before the
  * backend actually shows it -- this call itself does not block on that;
