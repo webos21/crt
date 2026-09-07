@@ -10,6 +10,122 @@ substantive update.
 
 ## 2026-09-07
 
+- **Wired the offscreen Ganesh pipeline onto a live GPU surface's own
+  acquired image, closing out TODO.md's "Finish live GPU presentation
+  everywhere" step in full.** New `crtgfx_skia_wrap_gpu_surface()`/
+  `crtgfx_skia_gpu_surface_present()` (`libcrtgfx/include/crtgfx/skia.h`,
+  `libcrtgfx/src/skia_bridge.cc`) wrap `crtgfx_gpu_surface_acquire()`'s
+  own real swapchain/layer image as a real, GPU-backed `SkSurface` via
+  `SkSurfaces::WrapBackendRenderTarget()` -- a render target, not a
+  sampled texture, matching none of the three real swapchains/layers
+  this project creates requesting sampling usage -- instead of letting
+  Ganesh allocate its own backing image the way `crtgfx_skia_make_gpu_
+  offscreen_surface()` already does. A new per-backend `ganesh_wrapped`
+  guard field (`libcrtgfx/src/gpu_internal.h`) rejects mixing this path
+  with the existing solid-color `crtgfx_gpu_surface_clear()`/`crtgfx_gpu_
+  surface_present()` path mid-frame, the same out-of-order-misuse
+  discipline every other guard in this contract already has.
+
+  Real per-backend present mechanics, confirmed directly against this
+  repo's own vendored Skia checkout (not memory), turned out to differ
+  materially:
+  - **Vulkan** (`gpu_vulkan.c`'s own fields): one `GrDirectContext::
+    flush(surface, GrFlushInfo, &newState)` call does the entire real
+    finalization -- Ganesh itself signals the *existing* `vk_render_
+    finished_semaphore` (via `GrFlushInfo::fSignalSemaphores`, no new
+    semaphore needed) and transitions the image to `VK_IMAGE_LAYOUT_
+    PRESENT_SRC_KHR` (via `skgpu::MutableTextureStates::MakeVulkan()`),
+    so the existing, unchanged `crtgfx_gpu_vulkan_surface_present()`
+    presents afterward with zero changes of its own.
+  - **D3D12** (`gpu_win32.c`'s own fields): no equivalent flush-time
+    mechanism exists at all (confirmed: no `include/gpu/d3d/...
+    MutableTextureState.h` in this vendored checkout) -- real, manual
+    work instead: read back whatever resource state Ganesh's own flush
+    left the wrapped back buffer in (`GrBackendRenderTargets::
+    GetD3DTextureResourceInfo()`), record one small extra
+    `ResourceBarrier` back to `D3D12_RESOURCE_STATE_PRESENT` on this
+    surface's own already-open command list/allocator (unused this frame
+    since `_clear()` was not called), sign the same fence `_clear()`
+    already uses. Uses the *real* `<d3d12.h>` COM interfaces already
+    force-included in `skia_bridge.cc` (`GrD3DTypes.h`) directly --
+    `reinterpret_cast`-ing this surface's own `void*` fields straight to
+    their real `ID3D12GraphicsCommandList`/`ID3D12CommandQueue`/
+    `ID3D12Fence` types, no new `gpu_win32.c` hook needed.
+  - **Metal** (`gpu_metal.c`'s own fields): simplest of the three --
+    `MTLTexture` has no image-layout/resource-state concept at all, so
+    the only real per-host work is a new, small `gpu_metal.c` hook
+    (`crtgfx_gpu_metal_surface_prepare_ganesh_present()`) handing
+    Ganesh's already-flushed drawable a fresh presenting command buffer
+    from the same shared queue, mirroring `crtgfx_gpu_metal_surface_
+    clear()`'s own last step -- kept in `gpu_metal.c` rather than `skia_
+    bridge.cc` (unlike the other two) because that file already owns
+    100% of this project's real Objective-C/Metal ABI knowledge and
+    `skia_bridge.cc`'s own Metal branch hand-declares none of it.
+
+  **A real bug found and fixed the same day, via live testing, not
+  reasoning alone**: the first working version used an async `context->
+  submit(GrSyncCpu::kNo)` on every backend. A real, live resize
+  immediately after the first Ganesh-drawn frame on Windows/D3D12 failed
+  `CRTGFX_ERROR_HOST` from `IDXGISwapChain3::ResizeBuffers()`. Root
+  cause: Ganesh defers actually releasing a wrapped resource's own extra
+  COM reference until it has confirmed the GPU is truly done with it, not
+  merely once the caller's own `sk_sp<SkSurface>` is reset -- an async
+  submit leaves that release still pending when the very next frame's
+  `crtgfx_gpu_surface_resize()` call runs, and DXGI's own `ResizeBuffers()`
+  requires every real reference to the previous images to be gone first.
+  Fixed by using `GrSyncCpu::kYes` (a synchronous submit) on all three
+  backends, not just the one caught failing -- the same real class of
+  risk applies in principle to Vulkan/Metal too, even though only the
+  Windows path could be live-tested this session. A genuinely missing
+  `#include "include/core/SkColorSpace.h"` (needed for `sk_sp<SkColorSpace>`'s
+  own destructor to see a complete type when passing `nullptr` to
+  `WrapBackendRenderTarget()`'s `colorSpace` parameter) was also found and
+  fixed the same way, via a real build failure, not anticipated up front.
+
+  New manual demo, `crtgfx_skia_gpu_window_demo` (`libcrtgfx/tools/
+  skia_gpu_window_demo.cc`, wired in the same dedicated `crtgfx-skia-
+  smoke` build directory as `crtgfx_skia_gpu_offscreen_smoke`, never
+  `add_test()`-registered -- needs a real desktop session): draws the
+  exact same shared reference scene (`tests/skia_reference_scene.h`) the
+  offscreen smoke test already proves pixel-correct, but through this new
+  wrap/present pair onto a real on-screen window every frame instead, and
+  reuses the resize demo's own `CRTGFX_EVENT_RESIZE`-draining loop
+  unchanged.
+
+  Verification -- **Windows, real and live**: `crtgfx_skia_gpu_offscreen_
+  smoke` still passes every check after the new `ganesh_wrapped` guard
+  additions (zero regression). `crtgfx_skia_gpu_window_demo` ran against a
+  real, visible window: a 60-frame and a 3000-frame run both completed
+  cleanly (exit 0); a live-resize pass (the same `SetWindowPos`-script
+  technique the earlier resize work used) is what caught the `GrSyncCpu`
+  bug above -- after the fix, 7 live resizes across a 2000-frame run all
+  succeeded and the run completed cleanly. Screenshot-based pixel
+  verification was attempted but not achievable this session
+  (`PrintWindow`/GDI `BitBlt`/`CopyFromScreen` all failed or returned a
+  blank capture in this sandboxed session -- a real environment
+  limitation on screen capture, not a rendering problem, distinguished
+  from the demo's own zero-error frame-by-frame log). Full Windows
+  `ctest` 133/133 (plain build) and the registered `crtgfx_skia_gpu_
+  offscreen_smoke_runs` (skia-smoke build) both clean. **Linux**:
+  `crtgfx_skia_gpu_offscreen_smoke` and the new `crtgfx_skia_gpu_window_
+  demo` both build and link cleanly via WSL, and the offscreen smoke test
+  passes in full there too (same real, hardware-backed `dzn` Vulkan
+  device the earlier Linux GPU work already used); full plain Linux
+  `ctest` 116/116 (`termios_echo_roundtrip_test` excluded, the known
+  pre-existing non-interactive-WSL-runner limitation). **macOS**: `gpu_
+  metal.c`'s own new hook and guard additions cross-compile cleanly to
+  Mach-O objects on both `arm64`/`x86_64-apple-macos11` -- `skia_
+  bridge.cc`'s own Metal branch could not be cross-compiled at all this
+  session (it needs real Apple SDK headers via `xcrun --sdk macosx
+  --show-sdk-path`, only available on real macOS/Xcode, a genuine
+  structural gap distinct from every other macOS-only piece of this
+  project, which deliberately avoids needing real SDK headers at all).
+  Real on-screen macOS verification (does the reference scene actually
+  render through a real Ganesh-wrapped `CAMetalLayer` drawable) remains
+  the user's own separate step on real hardware. See `docs/
+  libcrtgfx_wayland_plan.md`'s own "Ganesh-to-surface rendering" section
+  for the same full trail.
+
 - **Root-caused, on real Linux aarch64 hardware, why the native-Wayland GPU
   presentation vertical slice (`de9adc3`) has never actually shown a window
   on screen: a real, reproducible deadlock inside Mesa's own lavapipe

@@ -550,13 +550,45 @@ default-config ctest also reconfirmed clean, 111/111.
    path (`crtgfx_skia_gpu_offscreen_smoke`, no `wl_surface` involved)
    is unaffected and already verified on this same host.
 
-   Also still open: macOS x86_64 native execution, visual verification
-   beyond successful present calls (the Windows/macOS resize pass
-   confirmed liveness/no-crash and continued animation through resize,
-   not pixel-exact post-resize framebuffer content), and wiring the
-   already-proven offscreen Ganesh pipeline onto a surface's own
-   acquired image. Graphite stays a later, separately-measured
-   alternative to Ganesh throughout.
+   **Ganesh-to-surface rendering is done (2026-09-07, same day, this
+   step's own last remaining piece).** New `crtgfx_skia_wrap_gpu_
+   surface()`/`crtgfx_skia_gpu_surface_present()` (`crtgfx/skia.h`)
+   wrap the acquired swapchain/layer image as a real, GPU-backed
+   `SkSurface` (`SkSurfaces::WrapBackendRenderTarget()`) instead of
+   letting Ganesh allocate its own, so a real Ganesh-drawn frame (not
+   just a solid clear) reaches the screen. Per-backend present mechanics
+   differ materially: Vulkan does the whole finalize (semaphore signal +
+   `VK_IMAGE_LAYOUT_PRESENT_SRC_KHR` transition) inside one `flush()`
+   call; D3D12 needs one small extra manual `ResourceBarrier` (no Vulkan-
+   equivalent flush-time mechanism exists); Metal needs neither, just a
+   fresh presenting command buffer (`MTLTexture` has no layout concept).
+   **A real bug found and fixed via live testing**: an async
+   `GrSyncCpu::kNo` submit left Ganesh holding a wrapped resource's own
+   COM reference past the point a live resize needed it released,
+   failing `ResizeBuffers()` on Windows the first time resize followed a
+   Ganesh-drawn frame -- fixed with a synchronous `GrSyncCpu::kYes`
+   submit on all three backends. Verified real and live on Windows (new
+   `crtgfx_skia_gpu_window_demo`: clean multi-thousand-frame runs, and a
+   live-resize pass -- same `SetWindowPos` technique as above -- that is
+   what caught the bug, 7/7 resizes succeeded after the fix); `crtgfx_
+   skia_gpu_offscreen_smoke` still passes in full (zero regression). Linux
+   compiles and runs the offscreen path clean via WSL. macOS: only
+   `gpu_metal.c`'s own small addition could be cross-compile-checked
+   (Mach-O, both architectures) -- `skia_bridge.cc`'s own Metal branch
+   needs real Apple SDK headers (`xcrun`) unavailable on this host, a
+   structural gap distinct from every other macOS-only piece of this
+   project. See `docs/libcrtgfx_wayland_plan.md`'s own "Ganesh-to-surface
+   rendering" section for the full per-host trail.
+
+   Still open: macOS x86_64 native execution, visual verification beyond
+   successful present calls on Windows (the resize pass confirmed
+   liveness/no-crash and continued animation through resize, not pixel-
+   exact post-resize framebuffer content -- this session's own screenshot
+   attempts for the new Ganesh demo failed on a real, unrelated screen-
+   capture restriction in this sandboxed environment, not a rendering
+   problem), and real on-screen macOS verification of the new Ganesh path
+   specifically. Graphite stays a later, separately-measured alternative
+   to Ganesh throughout.
 2. **Add hardware decode, phase A.** Enable FFmpeg D3D11VA/D3D12VA,
    VideoToolbox, and VA-API backends, initially downloading decoded frames to
    CPU memory so codec/device selection, fallback, and recovery can be proved

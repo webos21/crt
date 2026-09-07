@@ -1287,6 +1287,7 @@ crtgfx_result crtgfx_gpu_vulkan_surface_acquire(struct crtgfx_gpu_surface* surfa
   }
   surface->vk_current_image_index = image_index;
   surface->vk_image_acquired = 1;
+  surface->ganesh_wrapped = 0;
   return CRTGFX_OK;
 }
 
@@ -1304,6 +1305,14 @@ crtgfx_result crtgfx_gpu_vulkan_surface_clear(struct crtgfx_gpu_surface* surface
   VkSubmitInfo submit_info;
 
   if (!surface->vk_image_acquired) {
+    return CRTGFX_ERROR_HOST;
+  }
+  if (surface->ganesh_wrapped) {
+    /* Real, honest misuse guard (2026-09-07, the Ganesh-wrap vertical
+     * slice): this frame's image was handed to crtgfx_skia_wrap_gpu_
+     * surface() instead -- mixing the solid-color stand-in with a real
+     * Ganesh-drawn frame is real, rejected misuse, matching every other
+     * out-of-order guard in this file. */
     return CRTGFX_ERROR_HOST;
   }
 
@@ -1532,6 +1541,15 @@ crtgfx_result crtgfx_gpu_vulkan_surface_present(struct crtgfx_gpu_surface* surfa
   VkResult result;
 
   if (!surface->vk_image_acquired) {
+    return CRTGFX_ERROR_HOST;
+  }
+  if (surface->ganesh_wrapped) {
+    /* Real, honest misuse guard (2026-09-07, the Ganesh-wrap vertical
+     * slice): this frame's image was handed to crtgfx_skia_wrap_gpu_
+     * surface() -- a caller must present it via crtgfx_skia_gpu_surface_
+     * present() (which itself clears this flag before deferring to this
+     * exact function), not this function directly, matching crtgfx_gpu_
+     * vulkan_surface_clear()'s own identical guard above. */
     return CRTGFX_ERROR_HOST;
   }
 

@@ -98,6 +98,44 @@ sk_sp<GrDirectContext> crtgfx_skia_make_gpu_context(const crtgfx_gpu_device* dev
 // crtgfx_skia_make_raster_surface()'s own validation convention.
 sk_sp<SkSurface> crtgfx_skia_make_gpu_offscreen_surface(
     GrDirectContext* context, uint32_t width, uint32_t height);
+
+// Wires the offscreen Ganesh pipeline above onto a live crtgfx_gpu_surface's
+// own acquired image (2026-09-07, TODO.md's "Finish live GPU presentation
+// everywhere" -- the last remaining piece the Windows/Linux/macOS resize
+// work, same day, explicitly deferred). Unlike crtgfx_skia_make_gpu_
+// offscreen_surface() above (Ganesh allocates and owns its own backing
+// image), this *wraps* the real swapchain/layer image crtgfx_gpu_surface_
+// acquire() (crtgfx/gpu.h) already produced -- SkSurfaces::
+// WrapBackendRenderTarget(), a render target rather than a sampled
+// texture: none of the three real swapchains/layers this project creates
+// request sampling usage. `surface` must be between a successful crtgfx_
+// gpu_surface_acquire() and crtgfx_skia_gpu_surface_present() (below) --
+// never crtgfx_gpu_surface_clear()/crtgfx_gpu_surface_present(), the
+// separate, non-Ganesh solid-color path this contract's own vertical
+// slice already proved and still supports unchanged (calling either of
+// those two directly on a Ganesh-wrapped frame is real, rejected misuse,
+// CRTGFX_ERROR_HOST, matching every other out-of-order guard already in
+// that contract). Returns null for a null context/surface, an unacquired
+// surface, or a surface already wrapped this frame.
+sk_sp<SkSurface> crtgfx_skia_wrap_gpu_surface(GrDirectContext* context, crtgfx_gpu_surface* surface);
+
+// Flushes and submits every real Ganesh draw recorded into the SkSurface
+// crtgfx_skia_wrap_gpu_surface() returned, performs whatever real, per-
+// backend work is needed to bring the image back into a presentable
+// state (Vulkan: an explicit VK_IMAGE_LAYOUT_PRESENT_SRC_KHR transition
+// requested as part of the same flush, which also signals the exact
+// semaphore crtgfx_gpu_surface_present() already waits on; D3D12: one
+// small extra resource-barrier command list submitted after Ganesh's own,
+// on the same command queue; Metal: no transition needed at all, MTLTexture
+// has no layout/state concept, just a fresh presenting command buffer on
+// the same command queue), then defers to the existing, unchanged crtgfx_
+// gpu_surface_present() (crtgfx/gpu.h) for the actual real present call.
+// Must be called exactly once per crtgfx_skia_wrap_gpu_surface() call, in
+// place of calling crtgfx_gpu_surface_present() directly. Returns CRTGFX_
+// ERROR_INVALID_ARGUMENT for a null argument, CRTGFX_ERROR_HOST if
+// `gpu_surface` was not wrapped this frame or any real step fails.
+crtgfx_result crtgfx_skia_gpu_surface_present(
+    GrDirectContext* context, SkSurface* surface, crtgfx_gpu_surface* gpu_surface);
 #endif
 
 #endif

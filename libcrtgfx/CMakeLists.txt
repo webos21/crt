@@ -2389,6 +2389,37 @@ if(CRTGFX_ENABLE_SKIA)
     set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_skia_gpu_offscreen_smoke_runs)
   endif()
 
+  # crtgfx_skia_gpu_window_demo: manual, real on-screen verification for
+  # the Ganesh-on-swapchain vertical slice (2026-09-07, TODO.md's "Finish
+  # live GPU presentation everywhere" step's own last remaining piece) --
+  # see tools/skia_gpu_window_demo.cc's own top comment for the full
+  # "why". Same real gating condition as crtgfx_skia_gpu_offscreen_smoke
+  # just above (a real libvulkan on Linux; always available on Windows/
+  # macOS), same crt_wire_skia_executable() wiring -- this target additionally
+  # needs a real desktop session to actually show a window, exactly like
+  # tools/gpu_window_demo.c's own plain (non-Ganesh) sibling, so it is
+  # never add_test()-registered/run automatically the way crtgfx_skia_
+  # gpu_offscreen_smoke is.
+  if((CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB) OR
+     CRT_TARGET_OS STREQUAL "windows" OR CRT_TARGET_OS STREQUAL "macos")
+    add_executable(crtgfx_skia_gpu_window_demo
+      ${CRT_STARTUP_OBJECTS}
+      tools/skia_gpu_window_demo.cc
+    )
+    target_link_libraries(crtgfx_skia_gpu_window_demo PRIVATE crt_cxx_build_flags crtgfx)
+    # tests/ (not src/, unlike crtgfx_skia_gpu_offscreen_smoke just above --
+    # this demo only ever calls the public crtgfx/skia.h API, never reaches
+    # into gpu_internal.h itself) -- for tests/skia_reference_scene.h, the
+    # same shared, deterministic scene crtgfx_skia_gpu_offscreen_smoke
+    # already proves pixel-correct offscreen.
+    target_include_directories(crtgfx_skia_gpu_window_demo PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+    )
+    crt_wire_skia_executable(crtgfx_skia_gpu_window_demo SKIP_MACOS_DEAD_STRIP)
+    crt_link_startup_end_objects(crtgfx_skia_gpu_window_demo)
+    add_dependencies(crtgfx_skia_gpu_window_demo cxx c crt1 crtgfx)
+  endif()
+
   # crtmedia_frame_skia_smoke: the real-Skia half of libcrtmedia's CPU
   # frame handoff contract (TODO.md's "Define the libcrtmedia CPU frame
   # handoff contract" item -- source at libcrtmedia/tests/frame_skia_

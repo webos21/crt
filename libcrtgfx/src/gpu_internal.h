@@ -126,6 +126,17 @@ struct crtgfx_gpu_surface {
    * CRTGFX_ERROR_HOST rather than passing a stale/undefined image index
    * to the driver. */
   int vk_image_acquired;
+  /* 1 between a successful crtgfx_skia_wrap_gpu_surface() (crtgfx/skia.h,
+   * 2026-09-07 -- wiring the offscreen Ganesh pipeline onto this surface's
+   * own acquired image) and the matching crtgfx_skia_gpu_surface_present()
+   * -- lets crtgfx_gpu_surface_clear()/the plain crtgfx_gpu_surface_
+   * present() reject being called directly on a Ganesh-wrapped frame
+   * (mixing the two real presentation paths mid-frame is real, rejected
+   * misuse, not a silent corruption), matching every other out-of-order
+   * guard in this struct. Reset to 0 by _surface_acquire(); cleared by
+   * crtgfx_skia_gpu_surface_present() itself just before it defers to the
+   * plain crtgfx_gpu_surface_present() at its own last step. */
+  int ganesh_wrapped;
 #elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
   /* Real D3D12/DXGI swap-chain presentation (2026-09-07, the Windows leg
    * of "Finish live GPU presentation everywhere", following the Linux
@@ -170,6 +181,9 @@ struct crtgfx_gpu_surface {
    * vk_image_acquired. */
   int d3d12_image_acquired;
   int d3d12_frame_submitted;
+  /* Same real Ganesh-wrap-in-progress guard as the Vulkan branch's own
+   * ganesh_wrapped field above -- see that field's own comment. */
+  int ganesh_wrapped;
 #elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
   /* Real CAMetalLayer drawable presentation (2026-09-07, the macOS leg of
    * "Finish live GPU presentation everywhere"). Simpler than the Vulkan/
@@ -199,6 +213,9 @@ struct crtgfx_gpu_surface {
   /* Same real out-of-order-call guard as the Vulkan/D3D12 branches' own
    * acquired flags. */
   int mtl_drawable_acquired;
+  /* Same real Ganesh-wrap-in-progress guard as the Vulkan branch's own
+   * ganesh_wrapped field above -- see that field's own comment. */
+  int ganesh_wrapped;
 #else
   int reserved;
 #endif
@@ -280,4 +297,24 @@ crtgfx_result crtgfx_gpu_metal_surface_present(struct crtgfx_gpu_surface* surfac
 /* Real drawable-size update (2026-09-07) -- see crtgfx/gpu.h's own
  * crtgfx_gpu_surface_resize() comment for the full contract. */
 crtgfx_result crtgfx_gpu_metal_surface_resize(struct crtgfx_gpu_surface* surface, uint32_t width, uint32_t height);
+/* Real hook for crtgfx_skia_gpu_surface_present() (crtgfx/skia.h,
+ * src/skia_bridge.cc, 2026-09-07 -- wiring the offscreen Ganesh pipeline
+ * onto this surface's own acquired image). Metal has no image-layout/
+ * resource-state concept a caller must transition before presenting
+ * (unlike the Vulkan/D3D12 siblings), so the only real per-host work
+ * needed after Ganesh's own flush+submit is handing a fresh command
+ * buffer (from the same shared crtgfx_gpu_device::mtl_command_queue) into
+ * this surface's own mtl_command_buffer field, mirroring exactly what
+ * crtgfx_gpu_metal_surface_clear() already does at its own last step --
+ * so the existing, unchanged crtgfx_gpu_metal_surface_present() can then
+ * present it. Kept in gpu_metal.c rather than skia_bridge.cc's own Metal
+ * branch (unlike the Vulkan/D3D12 siblings, which do this inline using
+ * real host headers already force-included there) because gpu_metal.c
+ * already owns 100% of this project's real Objective-C/Metal ABI
+ * knowledge and skia_bridge.cc's own Metal branch hand-declares none of
+ * it -- keeping that knowledge centralized here matches this project's
+ * own established per-backend ownership boundary. Returns CRTGFX_ERROR_
+ * HOST if surface->mtl_drawable_acquired is false or the command buffer
+ * cannot be created. */
+crtgfx_result crtgfx_gpu_metal_surface_prepare_ganesh_present(struct crtgfx_gpu_surface* surface);
 #endif

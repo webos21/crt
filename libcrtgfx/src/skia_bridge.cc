@@ -1,5 +1,6 @@
 #include "crtgfx/skia.h"
 
+#include "include/core/SkColorSpace.h"
 #include "include/core/SkImageInfo.h"
 
 sk_sp<SkSurface> crtgfx_skia_make_raster_surface(const crtgfx_framebuffer* framebuffer) {
@@ -39,10 +40,16 @@ sk_sp<SkTypeface> crtgfx_skia_default_typeface(SkFontMgr* font_mgr, const SkFont
 #include <cstdio>
 
 #include "include/gpu/GpuTypes.h"
+#include "include/gpu/MutableTextureState.h"
+#include "include/gpu/ganesh/GrBackendSurface.h"
 #include "include/gpu/ganesh/SkSurfaceGanesh.h"
+#include "include/gpu/ganesh/vk/GrVkBackendSemaphore.h"
+#include "include/gpu/ganesh/vk/GrVkBackendSurface.h"
 #include "include/gpu/ganesh/vk/GrVkDirectContext.h"
+#include "include/gpu/ganesh/vk/GrVkTypes.h"
 #include "include/gpu/vk/VulkanBackendContext.h"
 #include "include/gpu/vk/VulkanMemoryAllocator.h"
+#include "include/gpu/vk/VulkanMutableTextureState.h"
 #include "include/gpu/vk/VulkanTypes.h"
 
 namespace {
@@ -258,6 +265,104 @@ sk_sp<SkSurface> crtgfx_skia_make_gpu_offscreen_surface(
   return SkSurfaces::RenderTarget(context, skgpu::Budgeted::kNo, info);
 }
 
+// Wires the offscreen Ganesh pipeline above onto a live crtgfx_gpu_
+// surface's own acquired VkImage (2026-09-07 -- see crtgfx/skia.h's own,
+// fuller comment on both functions). Real Vulkan core types/constants
+// used directly here (VkImage, VK_IMAGE_LAYOUT_*, VK_IMAGE_USAGE_*,
+// VK_SHARING_MODE_EXCLUSIVE, VK_QUEUE_FAMILY_IGNORED) are already real,
+// not hand-declared -- this branch's own crtgfx_skia_make_gpu_context()
+// above already uses real VkInstance/VkPhysicalDevice/VkDevice/VkQueue,
+// confirming Skia's own vendored real vulkan_core.h (SK_USE_INTERNAL_
+// VULKAN_HEADERS) is already transitively available in this translation
+// unit via VulkanTypes.h/VulkanBackendContext.h.
+sk_sp<SkSurface> crtgfx_skia_wrap_gpu_surface(GrDirectContext* context, crtgfx_gpu_surface* surface) {
+  if (context == nullptr || surface == nullptr || !surface->vk_image_acquired || surface->ganesh_wrapped) {
+    return nullptr;
+  }
+
+  GrVkImageInfo image_info;
+  image_info.fImage = reinterpret_cast<VkImage>(surface->vk_images[surface->vk_current_image_index]);
+  // fAlloc left default-constructed (fMemory=VK_NULL_HANDLE): a real,
+  // spec-documented, legal "borrowed" render-target shape (VulkanTypes.h's
+  // own comment on VulkanAlloc::fMemory) -- this project's own real
+  // VkDeviceMemory backing this swapchain image is never owned or freed
+  // through this allocation record; crtgfx_gpu_vulkan_surface_destroy()
+  // (gpu_vulkan.c) is the only real owner, via vkDestroySwapchainKHR().
+  image_info.fImageTiling = VK_IMAGE_TILING_OPTIMAL;
+  // A freshly-acquired image's own real layout -- matches crtgfx_gpu_
+  // vulkan_surface_clear()'s own first barrier's own identical oldLayout
+  // assumption (gpu_vulkan.c), the real, same-shaped stand-in this
+  // function replaces for a caller that chooses the Ganesh path instead.
+  image_info.fImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  image_info.fFormat = static_cast<VkFormat>(surface->vk_format);
+  // Matches this swapchain's own real VkImageUsageFlags exactly (gpu_
+  // vulkan.c's own crtgfx_gpu_vulkan_surface_create()) -- no SAMPLED_BIT,
+  // matching this function's own choice of WrapBackendRenderTarget (not
+  // WrapBackendTexture) below.
+  image_info.fImageUsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  image_info.fSampleCount = 1;
+  image_info.fLevelCount = 1;
+  image_info.fCurrentQueueFamily = surface->device->vk_queue_family_index;
+  image_info.fProtected = skgpu::Protected::kNo;
+  image_info.fSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+  GrBackendRenderTarget backend_target = GrBackendRenderTargets::MakeVk(
+      static_cast<int>(surface->width), static_cast<int>(surface->height), image_info);
+  sk_sp<SkSurface> sk_surface = SkSurfaces::WrapBackendRenderTarget(
+      context, backend_target, kTopLeft_GrSurfaceOrigin, kBGRA_8888_SkColorType, nullptr, nullptr);
+  if (sk_surface != nullptr) {
+    surface->ganesh_wrapped = 1;
+  }
+  return sk_surface;
+}
+
+crtgfx_result crtgfx_skia_gpu_surface_present(
+    GrDirectContext* context, SkSurface* surface, crtgfx_gpu_surface* gpu_surface) {
+  if (context == nullptr || surface == nullptr || gpu_surface == nullptr) {
+    return CRTGFX_ERROR_INVALID_ARGUMENT;
+  }
+  if (!gpu_surface->ganesh_wrapped) {
+    return CRTGFX_ERROR_HOST;
+  }
+
+  // Ganesh itself, as part of this one real flush/submit, both signals
+  // the *existing* vk_render_finished_semaphore (the exact one crtgfx_
+  // gpu_vulkan_surface_present() -- unchanged, called at the very end of
+  // this function -- already waits on) and transitions the image to the
+  // real, required VK_IMAGE_LAYOUT_PRESENT_SRC_KHR -- no manual barrier/
+  // command buffer needed on this project's own side at all, unlike the
+  // D3D12 branch below (which has no equivalent flush-time mechanism).
+  GrBackendSemaphore signal_semaphore = GrBackendSemaphores::MakeVk(
+      reinterpret_cast<VkSemaphore>(gpu_surface->vk_render_finished_semaphore));
+  GrFlushInfo flush_info;
+  flush_info.fNumSemaphores = 1;
+  flush_info.fSignalSemaphores = &signal_semaphore;
+  skgpu::MutableTextureState new_state =
+      skgpu::MutableTextureStates::MakeVulkan(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_QUEUE_FAMILY_IGNORED);
+  context->flush(surface, flush_info, &new_state);
+  // GrSyncCpu::kYes, not kNo (2026-09-07, found for real via crtgfx_skia_
+  // gpu_window_demo -- a real, live resize immediately after the first
+  // Ganesh-drawn frame failed CRTGFX_ERROR_HOST on Windows/D3D12: Ganesh
+  // itself defers actually releasing a wrapped resource's own extra COM/
+  // driver reference until it has confirmed the GPU is really done with
+  // it, not merely until the caller's own sk_sp<SkSurface> is reset() --
+  // an async submit() leaves that release still pending when the very
+  // next frame's crtgfx_gpu_surface_resize() call runs, and DXGI's own
+  // real ResizeBuffers()/Vulkan's own real vkCreateSwapchainKHR both
+  // require every real reference to the previous images to be gone
+  // first. A synchronous submit here blocks until the GPU has actually
+  // finished, so Ganesh's own internal tracking can release that
+  // reference before this function returns -- real, same real class of
+  // fix on all three backends (Metal/D3D12 below), matching crtgfx_skia_
+  // gpu_offscreen_smoke.cc's own already-established GrSyncCpu::kYes
+  // convention throughout, chosen here for real correctness over the
+  // otherwise-real one-frame-of-latency win an async submit would give.
+  context->submit(GrSyncCpu::kYes);
+
+  gpu_surface->ganesh_wrapped = 0;
+  return crtgfx_gpu_surface_present(gpu_surface);
+}
+
 #elif defined(CRTGFX_HAVE_D3D12)
 
 // Real Ganesh/D3D12 offscreen vertical slice (2026-09-03) -- the Windows
@@ -273,8 +378,10 @@ sk_sp<SkSurface> crtgfx_skia_make_gpu_offscreen_surface(
 
 #include "gpu_internal.h"
 
+#include "include/gpu/ganesh/GrBackendSurface.h"
 #include "include/gpu/ganesh/SkSurfaceGanesh.h"
 #include "include/gpu/ganesh/d3d/GrD3DBackendContext.h"
+#include "include/gpu/ganesh/d3d/GrD3DBackendSurface.h"
 #include "include/gpu/ganesh/d3d/GrD3DDirectContext.h"
 #include "include/gpu/ganesh/d3d/GrD3DTypes.h"
 
@@ -408,6 +515,126 @@ sk_sp<SkSurface> crtgfx_skia_make_gpu_offscreen_surface(
   return SkSurfaces::RenderTarget(context, skgpu::Budgeted::kNo, info);
 }
 
+// Wires the offscreen Ganesh pipeline above onto a live crtgfx_gpu_
+// surface's own acquired back buffer (2026-09-07 -- see crtgfx/skia.h's
+// own, fuller comment on both functions). Unlike the Vulkan branch above,
+// D3D12 has no flush-time "transition for me" mechanism (confirmed: no
+// include/gpu/d3d/...MutableTextureState.h exists in this checkout at
+// all) -- crtgfx_skia_gpu_surface_present() below does real, manual work
+// instead: reads back whatever real resource state Ganesh's own flush
+// left the wrapped resource in, then records one small extra resource-
+// barrier command list (reusing this surface's own already-open, real
+// ID3D12GraphicsCommandList/ID3D12CommandAllocator -- Reset() by crtgfx_
+// gpu_win32_surface_acquire(), otherwise unused this frame since crtgfx_
+// gpu_win32_surface_clear() was not called) on the *same* shared
+// ID3D12CommandQueue Ganesh's own context was built against. Uses the
+// real <d3d12.h> COM interfaces already force-included in this branch
+// (GrD3DTypes.h) directly -- reinterpret_cast-ing this surface's own
+// void* fields straight to their real ID3D12GraphicsCommandList/
+// ID3D12CommandAllocator/ID3D12Fence/ID3D12CommandQueue types (ABI-
+// identical regardless of which translation unit's type system names
+// them -- gpu_win32.c's own hand-declared vtable structs are a different,
+// but ABI-compatible, representation of these same real COM objects; the
+// same reasoning tests/skia_gpu_offscreen_smoke.cc's own device-loss test
+// already relies on for these exact same void* fields).
+sk_sp<SkSurface> crtgfx_skia_wrap_gpu_surface(GrDirectContext* context, crtgfx_gpu_surface* surface) {
+  if (context == nullptr || surface == nullptr || !surface->d3d12_image_acquired || surface->ganesh_wrapped) {
+    return nullptr;
+  }
+
+  GrD3DTextureResourceInfo info;
+  info.fResource.retain(reinterpret_cast<ID3D12Resource*>(
+      surface->d3d12_back_buffers[surface->d3d12_current_buffer_index]));
+  // A freshly-acquired back buffer's own real state, matching crtgfx_gpu_
+  // win32_surface_clear()'s own first barrier's own identical state_before
+  // assumption (gpu_win32.c), the real, same-shaped stand-in this
+  // function replaces for a caller that chooses the Ganesh path instead.
+  info.fResourceState = D3D12_RESOURCE_STATE_PRESENT;
+  info.fFormat = DXGI_FORMAT_B8G8R8A8_UNORM;
+  info.fSampleCount = 1;
+  info.fLevelCount = 1;
+
+  GrBackendRenderTarget backend_target = GrBackendRenderTargets::MakeD3D(
+      static_cast<int>(surface->width), static_cast<int>(surface->height), info);
+  sk_sp<SkSurface> sk_surface = SkSurfaces::WrapBackendRenderTarget(
+      context, backend_target, kTopLeft_GrSurfaceOrigin, kBGRA_8888_SkColorType, nullptr, nullptr);
+  if (sk_surface != nullptr) {
+    surface->ganesh_wrapped = 1;
+  }
+  return sk_surface;
+}
+
+crtgfx_result crtgfx_skia_gpu_surface_present(
+    GrDirectContext* context, SkSurface* surface, crtgfx_gpu_surface* gpu_surface) {
+  if (context == nullptr || surface == nullptr || gpu_surface == nullptr) {
+    return CRTGFX_ERROR_INVALID_ARGUMENT;
+  }
+  if (!gpu_surface->ganesh_wrapped) {
+    return CRTGFX_ERROR_HOST;
+  }
+
+  // SkSurface::BackendHandleAccess::kFlushRead itself performs Ganesh's
+  // own real flush of every draw recorded into `surface` (the real,
+  // documented meaning of the "Flush" in this access mode's own name),
+  // returning a real, live snapshot of the wrapped resource's current
+  // state right afterward.
+  GrBackendRenderTarget backend_target =
+      SkSurfaces::GetBackendRenderTarget(surface, SkSurface::BackendHandleAccess::kFlushRead);
+  // GrSyncCpu::kYes -- see the Vulkan branch's own crtgfx_skia_gpu_
+  // surface_present() comment above for the real, found-for-real reason
+  // (a live crtgfx_gpu_surface_resize() call the very next frame needs
+  // every wrapped resource's own extra COM reference already released,
+  // which Ganesh only guarantees once it has confirmed the GPU is really
+  // done, not merely once flushed/submitted).
+  context->submit(GrSyncCpu::kYes);
+
+  GrD3DTextureResourceInfo info = GrBackendRenderTargets::GetD3DTextureResourceInfo(backend_target);
+  if (!info.fResource) {
+    return CRTGFX_ERROR_HOST;
+  }
+
+  ID3D12GraphicsCommandList* command_list =
+      reinterpret_cast<ID3D12GraphicsCommandList*>(gpu_surface->d3d12_command_list);
+  ID3D12CommandQueue* command_queue =
+      reinterpret_cast<ID3D12CommandQueue*>(gpu_surface->device->d3d12_command_queue);
+  ID3D12Fence* fence = reinterpret_cast<ID3D12Fence*>(gpu_surface->d3d12_fence);
+
+  D3D12_RESOURCE_BARRIER barrier = {};
+  barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+  barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+  barrier.Transition.pResource = info.fResource.get();
+  barrier.Transition.Subresource = 0;
+  barrier.Transition.StateBefore = info.fResourceState;
+  barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+  command_list->ResourceBarrier(1, &barrier);
+  if (FAILED(command_list->Close())) {
+    return CRTGFX_ERROR_HOST;
+  }
+  ID3D12CommandList* lists[] = {command_list};
+  command_queue->ExecuteCommandLists(1, lists);
+
+  // Same real monotonic-fence-value bookkeeping crtgfx_gpu_win32_surface_
+  // clear() already uses (gpu_win32.c) -- keeps this Ganesh-drawn frame
+  // indistinguishable, from crtgfx_gpu_win32_surface_acquire()'s own next
+  // real wait, from one _clear() itself produced.
+  uint64_t signal_value = gpu_surface->d3d12_fence_next_value++;
+  if (FAILED(command_queue->Signal(fence, signal_value))) {
+    return CRTGFX_ERROR_HOST;
+  }
+  gpu_surface->d3d12_fence_values[gpu_surface->d3d12_current_buffer_index] = signal_value;
+  gpu_surface->d3d12_frame_submitted = 1;
+
+  // Real, correct bookkeeping for Ganesh's own shared, refcounted
+  // GrD3DResourceState (GrD3DTypesMinimal.h's own comment) -- not load-
+  // bearing for this vertical slice (a fresh GrBackendRenderTarget is
+  // built every frame, never reused across crtgfx_skia_wrap_gpu_
+  // surface() calls), but real, correct hygiene regardless.
+  GrBackendRenderTargets::SetD3DResourceState(&backend_target, D3D12_RESOURCE_STATE_PRESENT);
+
+  gpu_surface->ganesh_wrapped = 0;
+  return crtgfx_gpu_surface_present(gpu_surface);
+}
+
 #elif defined(CRTGFX_HAVE_METAL)
 
 // Real Ganesh/Metal offscreen vertical slice (2026-09-04) -- the macOS
@@ -433,9 +660,12 @@ sk_sp<SkSurface> crtgfx_skia_make_gpu_offscreen_surface(
 
 #include "gpu_internal.h"
 
+#include "include/gpu/ganesh/GrBackendSurface.h"
 #include "include/gpu/ganesh/SkSurfaceGanesh.h"
 #include "include/gpu/ganesh/mtl/GrMtlBackendContext.h"
+#include "include/gpu/ganesh/mtl/GrMtlBackendSurface.h"
 #include "include/gpu/ganesh/mtl/GrMtlDirectContext.h"
+#include "include/gpu/ganesh/mtl/GrMtlTypes.h"
 
 sk_sp<GrDirectContext> crtgfx_skia_make_gpu_context(const crtgfx_gpu_device* device) {
   if (device == nullptr || device->mtl_device == nullptr || device->mtl_command_queue == nullptr) {
@@ -480,6 +710,64 @@ sk_sp<SkSurface> crtgfx_skia_make_gpu_offscreen_surface(
   // never hand-manages one itself (see crtgfx/skia.h's own comment on why
   // that is deliberate, not a shortcut).
   return SkSurfaces::RenderTarget(context, skgpu::Budgeted::kNo, info);
+}
+
+// Wires the offscreen Ganesh pipeline above onto a live crtgfx_gpu_
+// surface's own acquired drawable texture (2026-09-07 -- see crtgfx/
+// skia.h's own, fuller comment on both functions). Simplest of the three
+// real backends -- MTLTexture has no image-layout/resource-state concept
+// at all, unlike the Vulkan/D3D12 branches above, so crtgfx_skia_gpu_
+// surface_present() below needs no manual barrier of its own; the only
+// real per-host work is handing Ganesh's own flushed/submitted drawable a
+// fresh presenting command buffer, via the new crtgfx_gpu_metal_surface_
+// prepare_ganesh_present() hook (gpu_metal.c -- see that function's own
+// declaration in gpu_internal.h for why this one piece lives there rather
+// than here, unlike the Vulkan/D3D12 siblings).
+sk_sp<SkSurface> crtgfx_skia_wrap_gpu_surface(GrDirectContext* context, crtgfx_gpu_surface* surface) {
+  if (context == nullptr || surface == nullptr || !surface->mtl_drawable_acquired || surface->ganesh_wrapped) {
+    return nullptr;
+  }
+
+  GrMtlTextureInfo texture_info;
+  texture_info.fTexture.retain(surface->mtl_drawable_texture);
+
+  GrBackendRenderTarget backend_target = GrBackendRenderTargets::MakeMtl(
+      static_cast<int>(surface->width), static_cast<int>(surface->height), texture_info);
+  sk_sp<SkSurface> sk_surface = SkSurfaces::WrapBackendRenderTarget(
+      context, backend_target, kTopLeft_GrSurfaceOrigin, kBGRA_8888_SkColorType, nullptr, nullptr);
+  if (sk_surface != nullptr) {
+    surface->ganesh_wrapped = 1;
+  }
+  return sk_surface;
+}
+
+crtgfx_result crtgfx_skia_gpu_surface_present(
+    GrDirectContext* context, SkSurface* surface, crtgfx_gpu_surface* gpu_surface) {
+  if (context == nullptr || surface == nullptr || gpu_surface == nullptr) {
+    return CRTGFX_ERROR_INVALID_ARGUMENT;
+  }
+  if (!gpu_surface->ganesh_wrapped) {
+    return CRTGFX_ERROR_HOST;
+  }
+
+  // Ganesh submits its own internal command buffer(s), drawing into the
+  // wrapped texture, against the same shared crtgfx_gpu_device::mtl_
+  // command_queue this surface's own device was built against.
+  // GrSyncCpu::kYes -- see the Vulkan branch's own crtgfx_skia_gpu_
+  // surface_present() comment (this file, above) for the real, found-for-
+  // real reason (not independently re-verified for Metal specifically, no
+  // macOS hardware this session, but the same real Ganesh-internal
+  // deferred-release risk applies in principle -- see crtgfx_gpu_metal_
+  // surface_resize()'s own top comment for this frame's other real
+  // reasoned-but-unverified pieces).
+  context->flushAndSubmit(surface, GrSyncCpu::kYes);
+
+  if (crtgfx_gpu_metal_surface_prepare_ganesh_present(gpu_surface) != CRTGFX_OK) {
+    return CRTGFX_ERROR_HOST;
+  }
+
+  gpu_surface->ganesh_wrapped = 0;
+  return crtgfx_gpu_surface_present(gpu_surface);
 }
 
 #endif  // CRTGFX_HAVE_VULKAN / CRTGFX_HAVE_D3D12 / CRTGFX_HAVE_METAL

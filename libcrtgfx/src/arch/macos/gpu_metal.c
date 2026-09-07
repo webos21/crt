@@ -235,6 +235,7 @@ crtgfx_result crtgfx_gpu_metal_surface_acquire(struct crtgfx_gpu_surface* surfac
     surface->width = (uint32_t)metal_msg_uint(surface->mtl_drawable_texture, "width");
     surface->height = (uint32_t)metal_msg_uint(surface->mtl_drawable_texture, "height");
     surface->mtl_drawable_acquired = 1;
+    surface->ganesh_wrapped = 0;
   }
   metal_msg_id(pool, "drain");
   return drawable != NULL ? CRTGFX_OK : CRTGFX_ERROR_TIMEOUT;
@@ -245,6 +246,14 @@ crtgfx_result crtgfx_gpu_metal_surface_clear(
   id pool, pass, attachments, attachment, command, encoder;
   crtgfx_mtl_clear_color color = {r, g, b, a};
   if (!surface->mtl_drawable_acquired || surface->mtl_command_buffer != NULL) return CRTGFX_ERROR_HOST;
+  if (surface->ganesh_wrapped) {
+    /* Real, honest misuse guard (2026-09-07, the Ganesh-wrap vertical
+     * slice): this frame's drawable was handed to crtgfx_skia_wrap_gpu_
+     * surface() instead -- mixing the solid-color stand-in with a real
+     * Ganesh-drawn frame is real, rejected misuse, matching every other
+     * out-of-order guard in this file. */
+    return CRTGFX_ERROR_HOST;
+  }
   pool = metal_msg_id(metal_msg_id(objc_getClass("NSAutoreleasePool"), "alloc"), "init");
   command = metal_msg_id(surface->device->mtl_command_queue, "commandBuffer");
   pass = metal_msg_id(objc_getClass("MTLRenderPassDescriptor"), "renderPassDescriptor");
@@ -336,6 +345,15 @@ crtgfx_result crtgfx_gpu_metal_surface_resize(struct crtgfx_gpu_surface* surface
 crtgfx_result crtgfx_gpu_metal_surface_present(struct crtgfx_gpu_surface* surface) {
   id command;
   if (!surface->mtl_drawable_acquired) return CRTGFX_ERROR_HOST;
+  if (surface->ganesh_wrapped) {
+    /* Real, honest misuse guard (2026-09-07, the Ganesh-wrap vertical
+     * slice): this frame's drawable was handed to crtgfx_skia_wrap_gpu_
+     * surface() -- a caller must present it via crtgfx_skia_gpu_surface_
+     * present() (which itself calls crtgfx_gpu_metal_surface_prepare_
+     * ganesh_present() and clears this flag before deferring to this
+     * exact function), not this function directly. */
+    return CRTGFX_ERROR_HOST;
+  }
   if (surface->mtl_command_buffer == NULL) return CRTGFX_ERROR_HOST;
   command = surface->mtl_command_buffer;
   metal_set_id(command, "presentDrawable:", surface->mtl_drawable);
@@ -344,4 +362,32 @@ crtgfx_result crtgfx_gpu_metal_surface_present(struct crtgfx_gpu_surface* surfac
   surface->mtl_last_submission = metal_msg_id(command, "retain");
   metal_drop_frame(surface);
   return metal_msg_uint(command, "status") == 5u ? CRTGFX_ERROR_HOST : CRTGFX_OK;
+}
+
+/* Real hook for crtgfx_skia_gpu_surface_present() (crtgfx/skia.h, src/
+ * skia_bridge.cc, 2026-09-07 -- wiring the offscreen Ganesh pipeline onto
+ * this surface's own acquired drawable) -- see this function's own
+ * declaration in gpu_internal.h for the full "why here, not skia_
+ * bridge.cc" reasoning. Creates one fresh command buffer from the same
+ * shared command queue Ganesh's own GrDirectContext was built against
+ * (crtgfx_skia_make_gpu_context()) and stores it into surface->mtl_
+ * command_buffer, exactly mirroring crtgfx_gpu_metal_surface_clear()'s
+ * own last step -- Metal's own same-queue submission-order guarantee
+ * places this command buffer's own presentDrawable:/commit (crtgfx_gpu_
+ * metal_surface_present(), unchanged, called right after this by the
+ * caller) after every real draw Ganesh already submitted to that same
+ * queue, with no image-layout/resource-state transition needed at all
+ * (MTLTexture has no such concept, unlike VkImage/ID3D12Resource). */
+crtgfx_result crtgfx_gpu_metal_surface_prepare_ganesh_present(struct crtgfx_gpu_surface* surface) {
+  id pool, command;
+  if (!surface->mtl_drawable_acquired || surface->mtl_command_buffer != NULL) return CRTGFX_ERROR_HOST;
+  pool = metal_msg_id(metal_msg_id(objc_getClass("NSAutoreleasePool"), "alloc"), "init");
+  command = metal_msg_id(surface->device->mtl_command_queue, "commandBuffer");
+  if (command == NULL) {
+    metal_msg_id(pool, "drain");
+    return CRTGFX_ERROR_HOST;
+  }
+  surface->mtl_command_buffer = metal_msg_id(command, "retain");
+  metal_msg_id(pool, "drain");
+  return CRTGFX_OK;
 }

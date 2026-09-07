@@ -1120,6 +1120,7 @@ crtgfx_result crtgfx_gpu_win32_surface_acquire(struct crtgfx_gpu_surface* surfac
   surface->d3d12_current_buffer_index = index;
   surface->d3d12_image_acquired = 1;
   surface->d3d12_frame_submitted = 0;
+  surface->ganesh_wrapped = 0;
   return CRTGFX_OK;
 }
 
@@ -1138,6 +1139,14 @@ crtgfx_result crtgfx_gpu_win32_surface_clear(struct crtgfx_gpu_surface* surface,
   HRESULT hr;
 
   if (!surface->d3d12_image_acquired || surface->d3d12_frame_submitted) {
+    return CRTGFX_ERROR_HOST;
+  }
+  if (surface->ganesh_wrapped) {
+    /* Real, honest misuse guard (2026-09-07, the Ganesh-wrap vertical
+     * slice): this frame's back buffer was handed to crtgfx_skia_wrap_
+     * gpu_surface() instead -- mixing the solid-color stand-in with a
+     * real Ganesh-drawn frame is real, rejected misuse, matching every
+     * other out-of-order guard in this file. */
     return CRTGFX_ERROR_HOST;
   }
 
@@ -1298,6 +1307,15 @@ crtgfx_result crtgfx_gpu_win32_surface_present(struct crtgfx_gpu_surface* surfac
   HRESULT hr;
 
   if (!surface->d3d12_image_acquired || !surface->d3d12_frame_submitted) {
+    return CRTGFX_ERROR_HOST;
+  }
+  if (surface->ganesh_wrapped) {
+    /* Real, honest misuse guard (2026-09-07, the Ganesh-wrap vertical
+     * slice): this frame's back buffer was handed to crtgfx_skia_wrap_
+     * gpu_surface() -- a caller must present it via crtgfx_skia_gpu_
+     * surface_present() (which itself clears this flag and sets
+     * d3d12_frame_submitted before deferring to this exact function),
+     * not this function directly. */
     return CRTGFX_ERROR_HOST;
   }
   /* SyncInterval=1, matching window_win32.c's own D3D11 swap chain's own
