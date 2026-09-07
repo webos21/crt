@@ -10,6 +10,38 @@ substantive update.
 
 ## 2026-09-07
 
+- **Windows GPU presentation now runs; macOS presentation wiring is
+  implemented and cross-compiled, pending native execution.** Continued
+  the in-progress D3D12/DXGI surface work after the Windows demo build.
+  GPU windows bypass the software D3D11 swapchain; surface creation,
+  RTV clear, command submission, fence reuse, and DXGI Present are wired
+  through the common acquire/clear/present API. Real execution exposed a
+  driver access violation: the SDK C ABI for
+  `GetCPUDescriptorHandleForHeapStart` requires an explicit result pointer,
+  not a struct-by-value return. Corrected that ABI, the swapchain's extra
+  QueryInterface reference, and allocator synchronization (one allocator
+  requires waiting for the latest submission, not only a backbuffer's last
+  fence). Timed waits recheck completion after stale event wakeups; frame
+  ordering is guarded and destruction waits for submitted work.
+  On macOS, GPU windows receive a retained CAMetalLayer surface, pixel
+  drawable sizing follows resize/backing-scale changes, and Metal records
+  a clear render pass then commits/presents the drawable. Autorelease and
+  retained frame/submission lifetimes are explicit. Metal's fixed drawable
+  wait cannot honor sub-second budgets: acquire returns UNSUPPORTED for
+  those requests, documented in the public header.
+  `crtgfx_gpu_window_demo [frame-count]` now checks live API ordering and
+  returns failure on rendering errors, early close, or finite-run stalls.
+  Windows x86_64 default static/shared build passes, CTest **133/133**,
+  and the real desktop demo submits **600 frames and exits 0** (backend
+  D3D12, three enumerated devices). This verifies calls/submission, not
+  screenshot-based visual correctness. macOS arm64 and x86_64 compile
+  `gpu.c`, `gpu_metal.c`, and `window_cocoa.c` to Mach-O objects using
+  Clang 22, CRT headers, and no Apple SDK headers; native macOS linking,
+  execution, visual/resize verification remain open. No upstream source
+  was patched. Ganesh-to-surface rendering and Windows/Linux swapchain
+  recreation remain separate work; see `TODO.md` and
+  `docs/libcrtgfx_wayland_plan.md`.
+
 - **Landed the Linux vertical slice of "Finish live GPU presentation
   everywhere" (TODO.md's next upper-runtime roadmap step): a new,
   independent native Wayland backend giving Vulkan a real, live window to

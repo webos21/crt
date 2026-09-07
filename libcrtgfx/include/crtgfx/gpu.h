@@ -8,58 +8,11 @@
 extern "C" {
 #endif
 
-/* GPU resource contract (TODO.md's upper-runtime roadmap "Fix the common
- * GPU resource contract" step) -- the sequential gate before "Enable Skia
- * GPU rendering" and both hardware-decode steps can begin. Defines the
- * real, host-independent shape a later real GPU backend (Direct3D 11 on
- * Windows, Metal on macOS, Vulkan on Linux) will implement underneath,
- * matching this project's own established pattern of landing a real,
- * tested contract before a real backend exists behind it (crtmedia/
- * format.h+extractor.h+codec.h before FFmpeg decode was wired in;
- * crtmedia/frame.h+audio.h before any decoder existed at all).
- *
- * No host SDK type ever appears here -- matching this project's own
- * established "no host/upstream SDK type in a public header" policy
- * (docs/libcrtgfx_api_policy.md's own Non-Goals): crtgfx_gpu_backend
- * *names* Direct3D/Metal/Vulkan as enum tags (exactly how crtmedia_
- * pixel_format already names RGBA8888/YUV420P without importing any
- * FFmpeg type), it never includes a host header or typedefs a host
- * pointer type.
- *
- * Zero public GPU API exists anywhere in this project before this file
- * (confirmed by direct exploration, 2026-09-03): `crtgfx_framebuffer`
- * (crtgfx/window.h) is the only resource-handoff type that has ever
- * existed, entirely CPU-buffer based. Windows (window_win32.c) already
- * has a real, *private* D3D11 device + DXGI swap chain, but it exists
- * solely to make CRTGFX_EVENT_FRAME_COMPLETE genuinely asynchronous
- * (GDI has no completion signal) -- created per-window, never exposed,
- * not wired to this contract. macOS/Linux have no GPU objects at all
- * yet. That is why crtgfx_gpu_query_capabilities() honestly reports
- * CRTGFX_GPU_BACKEND_NONE/0 devices everywhere today, and crtgfx_gpu_
- * device_create()/crtgfx_gpu_surface_create() correctly, always fail
- * CRTGFX_ERROR_UNSUPPORTED as a result -- the same real "no usable host
- * backend right now" contract crtgfx_window_create() already uses, not
- * a stub that lies about capability. Real device/surface creation on
- * each host is explicitly later, separate roadmap steps.
- *
- * "Software fallback must remain a first-class path" (this step's own
- * documented requirement) is why crtgfx_gpu_fence -- unlike device/
- * surface -- gets a real, working, host-independent implementation now:
- * a fence has genuine standalone CPU-side synchronization utility with
- * no GPU device required at all (`device == NULL` is valid input to
- * crtgfx_gpu_fence_create(), not an error -- the only reachable case
- * today), built on this project's own already-proven pthread_mutex_t/
- * pthread_cond_t pattern (matching libcrtmedia/src/arch/macos/audio_
- * sink_coreaudio.c's own real producer/consumer wait/broadcast shape).
- *
- * Note for a future real backend: window_win32.c's existing private
- * per-window D3D11 device creation is a real, live candidate for
- * replacement once a real backend lands here -- Skia's GrDirectContext
- * and the presentation swap chain will very likely need to share one
- * real device, so crtgfx_gpu_surface_create(device, window, ...) is
- * intended to become the *sole* path a window acquires its presentation
- * device/swap chain through, not a second mechanism running alongside
- * the existing private one forever. */
+/* Host-independent GPU devices and presentation surfaces for D3D12,
+ * Metal, and Vulkan. No host SDK types appear in the public ABI.
+ * GPU_PRESENTATION windows use acquire/clear/present; ordinary software
+ * windows retain the framebuffer path. Public fences are CPU-side
+ * pthread synchronization, not GPU command-completion fences. */
 
 /* The real backend actually selected on this host, if any -- naming
  * Direct3D/Metal/Vulkan as tags here does not violate this project's own
@@ -81,32 +34,17 @@ typedef enum crtgfx_gpu_backend {
   CRTGFX_GPU_BACKEND_VULKAN = 3,
 } crtgfx_gpu_backend;
 
-/* Where a real resource's own backing storage actually lives -- host-
- * visible CPU memory (the only kind this project can produce anywhere
- * today, matching this step's own "software fallback must remain a
- * first-class path" requirement) or opaque, device-resident GPU memory
- * (not yet reachable via any real code path in this project). */
+/* Backing storage location: host-visible CPU or device-resident GPU. */
 typedef enum crtgfx_gpu_memory_kind {
   CRTGFX_GPU_MEMORY_CPU = 1,
   CRTGFX_GPU_MEMORY_GPU = 2,
 } crtgfx_gpu_memory_kind;
 
-/* Opaque, forward-declared only -- no internal fields defined until a
- * real backend actually needs them; adding unused fields speculatively
- * ahead of a real consumer would contradict this project's own
- * established "no speculative fields" convention (crtmedia/frame.h's
- * own CRTMEDIA_FRAME_MAX_PLANES comment states this same policy
- * explicitly). A real device is shared, reference-counted storage (see
- * crtgfx_gpu_device_retain() below) -- a future decode thread and a
- * future render thread may both need to hold it for real zero-copy
- * interop once a real backend exists. */
+/* Opaque shared device, with explicit retain/release ownership. */
 typedef struct crtgfx_gpu_device crtgfx_gpu_device;
 
-/* A real GPU-backed presentation target tied to one crtgfx_window and
- * one crtgfx_gpu_device -- the eventual real replacement for window_
- * win32.c's own private per-window swap chain (see this file's own top
- * comment). Single-owner (create/release, no retain -- unlike a device,
- * a surface has exactly one real owner, the window it presents to). */
+/* Single-owner surface tied to a window and device. The caller owns and
+ * releases the surface; the window does not release it automatically. */
 typedef struct crtgfx_gpu_surface crtgfx_gpu_surface;
 
 /* A real, working, host-independent CPU synchronization primitive today
@@ -118,30 +56,16 @@ typedef struct crtgfx_gpu_fence crtgfx_gpu_fence;
 
 typedef struct crtgfx_gpu_capabilities {
   crtgfx_gpu_backend backend;
-  /* Real, enumerable GPU device count on this host -- 0 today
-   * everywhere (see this file's own top comment); crtgfx_gpu_device_
-   * create()'s own `device_index` argument is only ever valid in
-   * [0, device_count). */
+  /* Enumerable devices; valid device_index range is [0, device_count). */
   uint32_t device_count;
 } crtgfx_gpu_capabilities;
 
-/* Fills `*out_caps` with this host's own real, current GPU capability --
- * CRTGFX_GPU_BACKEND_NONE/device_count=0 on every real code path in this
- * project today (see this file's own top comment), a real, honest report
- * a caller can act on to fall back to the already-working CPU
- * crtgfx_framebuffer path, not a placeholder that will silently start
- * lying once a real backend lands (a real backend updates this function
- * itself). Returns CRTGFX_ERROR_INVALID_ARGUMENT for a null out_caps. */
+/* Reports usable devices; an unavailable backend reports NONE/0 so callers
+ * can select software fallback. Null out_caps is INVALID_ARGUMENT. */
 crtgfx_result crtgfx_gpu_query_capabilities(crtgfx_gpu_capabilities* out_caps);
 
-/* Creates a real device for `device_index` (see crtgfx_gpu_capabilities::
- * device_count above for the valid range) with an initial refcount of 1
- * -- matching crtgfx_window_create()'s own established "no usable host
- * backend right now" graceful-degradation contract exactly: returns
- * CRTGFX_ERROR_UNSUPPORTED (never a crash/hang) on every real code path
- * in this project today, since crtgfx_gpu_query_capabilities() always
- * reports 0 real devices to request one of. Returns CRTGFX_ERROR_
- * INVALID_ARGUMENT for a null out_device. */
+/* Creates device_index with refcount 1. Unavailable devices/backends
+ * return UNSUPPORTED; null out_device returns INVALID_ARGUMENT. */
 crtgfx_result crtgfx_gpu_device_create(uint32_t device_index, crtgfx_gpu_device** out_device);
 
 /* Real, atomic shared-ownership increment (a future decode thread and a
@@ -154,14 +78,11 @@ crtgfx_result crtgfx_gpu_device_retain(crtgfx_gpu_device* device);
  * count reaches 0. A NULL device is a safe no-op. */
 void crtgfx_gpu_device_release(crtgfx_gpu_device* device);
 
-/* Creates a real GPU-backed presentation surface for `window`, backed by
- * `device`. Same real "no usable backend right now" contract as crtgfx_
- * gpu_device_create() -- CRTGFX_ERROR_UNSUPPORTED on every real code
- * path in this project today (device_create() itself already never
- * succeeds, so this is correctly, structurally unreachable in practice
- * until a real backend lands, but its own real argument validation is
- * exercised regardless). Returns CRTGFX_ERROR_INVALID_ARGUMENT for a
- * null device/window/out_surface. */
+/* Creates a GPU presentation surface for a GPU_PRESENTATION window:
+ * Vulkan/native Wayland, D3D12/DXGI, or Metal/CAMetalLayer. Unsupported
+ * windows/backends return CRTGFX_ERROR_UNSUPPORTED. The window and device
+ * must outlive the surface; release it before destroying either one.
+ * Returns CRTGFX_ERROR_INVALID_ARGUMENT for null arguments. */
 crtgfx_result crtgfx_gpu_surface_create(
     crtgfx_gpu_device* device, crtgfx_window* window, crtgfx_gpu_surface** out_surface);
 
@@ -178,8 +99,8 @@ void crtgfx_gpu_surface_release(crtgfx_gpu_surface* surface);
  * time (CRTGFX_WINDOW_GPU_PRESENTATION), never both at once. Same real
  * "no usable backend right now" contract as every other function in this
  * file -- CRTGFX_ERROR_UNSUPPORTED, never a crash/hang, wherever a real
- * backend does not exist (today: every host except Linux with both a
- * real libvulkan and a real native-Wayland-backend window).
+ * backend does not exist. Windows/macOS use DXGI/CAMetalLayer; Linux
+ * requires Vulkan and a native-Wayland-backend window.
  *
  * crtgfx_gpu_surface_clear() is this vertical slice's own deliberate,
  * honestly-scoped stand-in for a full Ganesh/Skia render onto the
@@ -207,15 +128,18 @@ crtgfx_result crtgfx_gpu_surface_get_size(crtgfx_gpu_surface* surface, uint32_t*
  * the first acquired image). Returns CRTGFX_OK once an image is ready,
  * CRTGFX_ERROR_TIMEOUT if `timeout_us` elapses first (a real, expected,
  * non-fatal outcome, matching crtgfx_gpu_fence_wait()'s own contract), or
- * CRTGFX_ERROR_INVALID_ARGUMENT for a null surface. */
+ * CRTGFX_ERROR_INVALID_ARGUMENT for a null surface. Metal supports only
+ * its fixed approximately one-second drawable wait and returns
+ * CRTGFX_ERROR_UNSUPPORTED for timeout_us < 1000000. Windows waits use
+ * millisecond timer granularity (rounded up). */
 crtgfx_result crtgfx_gpu_surface_acquire(crtgfx_gpu_surface* surface, uint64_t timeout_us);
 
 /* Fills `surface`'s currently acquired image with a solid RGBA color
- * (each channel [0, 1]) via real, submitted GPU work -- see this
+ * (each channel [0, 1]) via GPU work (Metal commits at present) -- see this
  * section's own top comment for why this stands in for a full Ganesh
  * render in this vertical slice. Must be called between a successful
  * crtgfx_gpu_surface_acquire() and the matching crtgfx_gpu_surface_
- * present() -- CRTGFX_ERROR_HOST otherwise. Returns CRTGFX_ERROR_INVALID_
+ * present(), exactly once per frame. Returns CRTGFX_ERROR_INVALID_
  * ARGUMENT for a null surface. */
 crtgfx_result crtgfx_gpu_surface_clear(crtgfx_gpu_surface* surface, float r, float g, float b, float a);
 
@@ -223,17 +147,13 @@ crtgfx_result crtgfx_gpu_surface_clear(crtgfx_gpu_surface* surface, float r, flo
  * submitted via crtgfx_gpu_surface_clear() above must complete before the
  * backend actually shows it -- this call itself does not block on that;
  * the backend's own real per-frame synchronization guarantees correct
- * ordering). Must follow a successful crtgfx_gpu_surface_acquire() --
+ * ordering). Must follow a successful acquire() and clear() --
  * CRTGFX_ERROR_HOST otherwise. Returns CRTGFX_ERROR_INVALID_ARGUMENT for
  * a null surface. */
 crtgfx_result crtgfx_gpu_surface_present(crtgfx_gpu_surface* surface);
 
-/* Creates a real, working fence. `device` may be NULL -- a host-CPU
- * fence with no device affinity, the only reachable case today (see
- * this file's own top comment); a non-NULL device is accepted
- * structurally for a future real backend, unreachable until one exists
- * (device_create() never succeeds today). Returns CRTGFX_ERROR_INVALID_
- * ARGUMENT for a null out_fence. */
+/* Creates a CPU-side fence. device may be NULL and does not attach this
+ * fence to a GPU queue. Null out_fence returns INVALID_ARGUMENT. */
 crtgfx_result crtgfx_gpu_fence_create(crtgfx_gpu_device* device, crtgfx_gpu_fence** out_fence);
 
 /* Blocks the calling thread for up to `timeout_us` microseconds until

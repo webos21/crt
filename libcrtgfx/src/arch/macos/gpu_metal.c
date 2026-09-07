@@ -61,6 +61,7 @@ typedef unsigned long NSUInteger;
 
 extern id objc_msgSend(id self, SEL op, ...);
 extern SEL sel_registerName(const char* name);
+extern id objc_getClass(const char* name);
 
 /* Real, exported Metal.framework C functions -- MTLCreateSystemDefault
  * Device() is declared here too (not just MTLCopyAllDevices()) only for
@@ -76,7 +77,7 @@ static id metal_msg_id(id self, const char* selector_name) {
 
 static NSUInteger metal_msg_uint(id self, const char* selector_name) {
   SEL sel = sel_registerName(selector_name);
-  return (NSUInteger)((id (*)(id, SEL))objc_msgSend)(self, sel);
+  return ((NSUInteger (*)(id, SEL))objc_msgSend)(self, sel);
 }
 
 static id metal_msg_id_at_index(id self, const char* selector_name, NSUInteger index) {
@@ -166,4 +167,114 @@ void crtgfx_gpu_metal_device_destroy(struct crtgfx_gpu_device* device) {
   if (device->mtl_device != 0) {
     metal_msg_id((id)device->mtl_device, "release");
   }
+}
+
+/* Objective-C ABI subset from Apple's CAMetalLayer and Metal render-pass
+ * documentation. Explicit argument types are required on Apple arm64;
+ * sending these through a variadic declaration changes register placement.
+ * Runtime verification requires a macOS host. */
+typedef struct { double red, green, blue, alpha; } crtgfx_mtl_clear_color;
+typedef struct { double width, height; } crtgfx_mtl_size;
+
+static void metal_set_id(id object, const char* selector, id value) {
+  ((void (*)(id, SEL, id))objc_msgSend)(object, sel_registerName(selector), value);
+}
+
+static void metal_set_uint(id object, const char* selector, NSUInteger value) {
+  ((void (*)(id, SEL, NSUInteger))objc_msgSend)(object, sel_registerName(selector), value);
+}
+
+static void metal_drop_frame(struct crtgfx_gpu_surface* surface) {
+  metal_msg_id(surface->mtl_command_buffer, "release");
+  metal_msg_id(surface->mtl_drawable, "release");
+  surface->mtl_command_buffer = NULL;
+  surface->mtl_drawable = NULL;
+  surface->mtl_drawable_texture = NULL;
+  surface->mtl_drawable_acquired = 0;
+}
+
+crtgfx_result crtgfx_gpu_metal_surface_create(
+    struct crtgfx_gpu_device* device, void* layer, uint32_t width, uint32_t height,
+    struct crtgfx_gpu_surface* surface) {
+  crtgfx_mtl_size size;
+  if (layer == NULL || width == 0 || height == 0) return CRTGFX_ERROR_INVALID_ARGUMENT;
+  size = ((crtgfx_mtl_size (*)(id, SEL))objc_msgSend)(layer, sel_registerName("drawableSize"));
+  surface->device = device;
+  surface->mtl_layer = metal_msg_id(layer, "retain");
+  surface->width = (uint32_t)size.width;
+  surface->height = (uint32_t)size.height;
+  metal_set_id(layer, "setDevice:", device->mtl_device);
+  metal_set_uint(layer, "setPixelFormat:", 80u); /* MTLPixelFormatBGRA8Unorm */
+  ((void (*)(id, SEL, unsigned char))objc_msgSend)(layer, sel_registerName("setFramebufferOnly:"), 1);
+  ((void (*)(id, SEL, unsigned char))objc_msgSend)(layer, sel_registerName("setAllowsNextDrawableTimeout:"), 1);
+  return CRTGFX_OK;
+}
+
+void crtgfx_gpu_metal_surface_destroy(struct crtgfx_gpu_surface* surface) {
+  metal_drop_frame(surface);
+  if (surface->mtl_last_submission != NULL) {
+    metal_msg_id(surface->mtl_last_submission, "waitUntilCompleted");
+    metal_msg_id(surface->mtl_last_submission, "release");
+  }
+  metal_msg_id(surface->mtl_layer, "release");
+}
+
+crtgfx_result crtgfx_gpu_metal_surface_acquire(struct crtgfx_gpu_surface* surface, uint64_t timeout_us) {
+  id pool, drawable;
+  if (surface->mtl_drawable_acquired) return CRTGFX_ERROR_HOST;
+  /* CAMetalLayer has a fixed ~1s timeout, not a caller-supplied deadline.
+   * Refuse shorter budgets rather than silently block past them. */
+  if (timeout_us < 1000000u) return CRTGFX_ERROR_UNSUPPORTED;
+  if (surface->mtl_last_submission != NULL &&
+      metal_msg_uint(surface->mtl_last_submission, "status") == 5u) return CRTGFX_ERROR_HOST;
+  pool = metal_msg_id(metal_msg_id(objc_getClass("NSAutoreleasePool"), "alloc"), "init");
+  drawable = metal_msg_id(surface->mtl_layer, "nextDrawable");
+  if (drawable != NULL) {
+    surface->mtl_drawable = metal_msg_id(drawable, "retain");
+    surface->mtl_drawable_texture = metal_msg_id(drawable, "texture");
+    surface->width = (uint32_t)metal_msg_uint(surface->mtl_drawable_texture, "width");
+    surface->height = (uint32_t)metal_msg_uint(surface->mtl_drawable_texture, "height");
+    surface->mtl_drawable_acquired = 1;
+  }
+  metal_msg_id(pool, "drain");
+  return drawable != NULL ? CRTGFX_OK : CRTGFX_ERROR_TIMEOUT;
+}
+
+crtgfx_result crtgfx_gpu_metal_surface_clear(
+    struct crtgfx_gpu_surface* surface, float r, float g, float b, float a) {
+  id pool, pass, attachments, attachment, command, encoder;
+  crtgfx_mtl_clear_color color = {r, g, b, a};
+  if (!surface->mtl_drawable_acquired || surface->mtl_command_buffer != NULL) return CRTGFX_ERROR_HOST;
+  pool = metal_msg_id(metal_msg_id(objc_getClass("NSAutoreleasePool"), "alloc"), "init");
+  command = metal_msg_id(surface->device->mtl_command_queue, "commandBuffer");
+  pass = metal_msg_id(objc_getClass("MTLRenderPassDescriptor"), "renderPassDescriptor");
+  attachments = metal_msg_id(pass, "colorAttachments");
+  attachment = metal_msg_id_at_index(attachments, "objectAtIndexedSubscript:", 0);
+  metal_set_id(attachment, "setTexture:", surface->mtl_drawable_texture);
+  metal_set_uint(attachment, "setLoadAction:", 2u); /* Clear */
+  metal_set_uint(attachment, "setStoreAction:", 1u); /* Store */
+  ((void (*)(id, SEL, crtgfx_mtl_clear_color))objc_msgSend)(attachment, sel_registerName("setClearColor:"), color);
+  encoder = ((id (*)(id, SEL, id))objc_msgSend)(command, sel_registerName("renderCommandEncoderWithDescriptor:"), pass);
+  if (encoder == NULL) {
+    metal_msg_id(pool, "drain");
+    return CRTGFX_ERROR_HOST;
+  }
+  metal_msg_id(encoder, "endEncoding");
+  metal_msg_id(surface->mtl_command_buffer, "release");
+  surface->mtl_command_buffer = metal_msg_id(command, "retain");
+  metal_msg_id(pool, "drain");
+  return CRTGFX_OK;
+}
+
+crtgfx_result crtgfx_gpu_metal_surface_present(struct crtgfx_gpu_surface* surface) {
+  id command;
+  if (!surface->mtl_drawable_acquired) return CRTGFX_ERROR_HOST;
+  if (surface->mtl_command_buffer == NULL) return CRTGFX_ERROR_HOST;
+  command = surface->mtl_command_buffer;
+  metal_set_id(command, "presentDrawable:", surface->mtl_drawable);
+  metal_msg_id(command, "commit");
+  metal_msg_id(surface->mtl_last_submission, "release");
+  surface->mtl_last_submission = metal_msg_id(command, "retain");
+  metal_drop_frame(surface);
+  return metal_msg_uint(command, "status") == 5u ? CRTGFX_ERROR_HOST : CRTGFX_OK;
 }

@@ -466,10 +466,16 @@ default-config ctest also reconfirmed clean, 111/111.
    offscreen Ganesh pipeline onto a surface's own acquired image (today's
    `_clear()` is a deliberate, honest stand-in, not Ganesh); swapchain
    recreation on resize; native-backend software/multi-window/clipboard
-   parity (legacy stays the default there); and Windows/macOS themselves,
-   which have no structural gap -- their own existing swap chain/layer
-   presentation code already has everything GPU presentation would need,
-   this is real, separate wiring work, not a blocker. Graphite stays a
+   parity (legacy stays the default there). Windows D3D12/DXGI and macOS
+   CAMetalLayer/Metal acquire/clear/present wiring is now implemented
+   (2026-09-07 follow-up). Windows x86_64 static/shared build and CTest
+   133/133 pass; the desktop demo submits 600 frames and exits 0, including
+   live API ordering checks. macOS arm64/x86_64 object compilation passes
+   without Apple SDK headers; native linking/execution, visual animation,
+   resize and Retina/backing-scale verification still need a macOS host.
+   Metal rejects acquire budgets below one second because nextDrawable
+   exposes a fixed wait, not an arbitrary timeout. Windows/Linux resize
+   recreation and visual verification remain open. Graphite stays a
    later, separately-measured alternative to Ganesh throughout.
 2. **Add hardware decode, phase A.** Enable FFmpeg D3D11VA/D3D12VA,
    VideoToolbox, and VA-API backends, initially downloading decoded frames to

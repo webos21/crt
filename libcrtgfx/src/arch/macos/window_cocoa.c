@@ -316,6 +316,7 @@ extern void free(void* ptr);
 extern void* memcpy(void* dst, const void* src, unsigned long size);
 
 #include "wayland_weston_internal.h"
+#include "window_cocoa_gpu.h"
 
 #define CRTGFX_NSWINDOW_STYLE_TITLED 1u
 #define CRTGFX_NSWINDOW_STYLE_CLOSABLE 2u
@@ -360,6 +361,7 @@ extern void* memcpy(void* dst, const void* src, unsigned long size);
 struct crtgfx_host_window {
   id window;
   id delegate;
+  id metal_layer; /* Borrowed from the content view. */
   crtgfx_weston_toplevel* toplevel;
   /* Cocoa reports a bare modifier-key press/release (Shift/Control/
    * Option/Command alone, no other key) as NSEventTypeFlagsChanged, not
@@ -759,6 +761,10 @@ static void crtgfx_delegate_window_did_resize(id self, SEL _cmd, id notification
   bounds = crtgfx_msgsend_rect(content_view, sel_registerName("bounds"));
   crtgfx_weston_toplevel_note_size(
       toplevel, (uint32_t)bounds.size.width, (uint32_t)bounds.size.height);
+  {
+    void* layer;
+    (void)crtgfx_cocoa_get_metal_layer(toplevel, &layer);
+  }
 }
 
 /* windowDidBecomeKey:/windowDidResignKey: -- added 2026-08-30, Phase 1
@@ -821,6 +827,10 @@ static void crtgfx_delegate_window_did_change_backing_properties(id self, SEL _c
   }
   event.type = CRTGFX_EVENT_DPI_SCALE_CHANGED;
   event.data.dpi_scale.scale = (double)crtgfx_msgsend_cgfloat(window, sel_registerName("backingScaleFactor"));
+  {
+    void* layer;
+    (void)crtgfx_cocoa_get_metal_layer(toplevel, &layer);
+  }
   crtgfx_weston_toplevel_note_event(toplevel, &event);
 }
 
@@ -934,6 +944,18 @@ int crtgfx_host_window_create(const crtgfx_window_desc* desc, crtgfx_weston_topl
 
   content_view = crtgfx_msgsend_op(window, sel_registerName("contentView"));
   crtgfx_msgsend_void_bool(content_view, sel_registerName("setWantsLayer:"), 1);
+  if ((desc->flags & CRTGFX_WINDOW_GPU_PRESENTATION) != 0) {
+    layer = crtgfx_msgsend_class_op(objc_getClass("CAMetalLayer"), sel_registerName("alloc"));
+    layer = crtgfx_msgsend_op(layer, sel_registerName("init"));
+    if (layer == 0) {
+      crtgfx_msgsend_void(window, sel_registerName("release"));
+      free(host);
+      return CRTGFX_ERROR_UNSUPPORTED;
+    }
+    crtgfx_msgsend_void_id(content_view, sel_registerName("setLayer:"), layer);
+    host->metal_layer = layer;
+    crtgfx_msgsend_void(layer, sel_registerName("release"));
+  }
   layer = crtgfx_msgsend_op(content_view, sel_registerName("layer"));
   crtgfx_msgsend_void_id(layer, sel_registerName("setContentsGravity:"), (id)kCAGravityResize);
 
@@ -1289,6 +1311,7 @@ int crtgfx_host_window_present_software(
       stride < width * 4u) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
+  if (host->metal_layer != 0) return CRTGFX_ERROR_UNSUPPORTED;
   /* damage_rects/damage_rect_count intentionally ignored -- honestly, not
    * silently: `layer.contents = image` (below) always replaces the whole
    * CALayer content in one shot, there is no CoreAnimation API this
@@ -1379,4 +1402,24 @@ int crtgfx_host_window_present_software(
   crtgfx_msgsend_class_op(objc_getClass("CATransaction"), sel_registerName("commit"));
   CGImageRelease(image);
   return CRTGFX_OK;
+}
+
+int crtgfx_cocoa_get_metal_layer(const crtgfx_weston_toplevel* toplevel, void** out_layer) {
+  crtgfx_host_window* host;
+  id view;
+  NSRect bounds;
+  NSSize size;
+  CGFloat scale;
+  if (toplevel == 0 || toplevel->host == 0 || out_layer == 0) return 0;
+  host = toplevel->host;
+  if (host->metal_layer == 0 || host->window == 0) return 0;
+  view = crtgfx_msgsend_op(host->window, sel_registerName("contentView"));
+  bounds = crtgfx_msgsend_rect(view, sel_registerName("bounds"));
+  scale = crtgfx_msgsend_cgfloat(host->window, sel_registerName("backingScaleFactor"));
+  size.width = bounds.size.width * scale;
+  size.height = bounds.size.height * scale;
+  ((void (*)(id, SEL, CGFloat))objc_msgSend)(host->metal_layer, sel_registerName("setContentsScale:"), scale);
+  ((void (*)(id, SEL, NSSize))objc_msgSend)(host->metal_layer, sel_registerName("setDrawableSize:"), size);
+  *out_layer = host->metal_layer;
+  return 1;
 }

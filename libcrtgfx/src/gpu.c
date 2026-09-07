@@ -30,6 +30,21 @@
  * host/config never sees these Linux-only includes at all. */
 #include "arch/linux/window_wayland_native.h"
 #include "wayland_weston_internal.h"
+#elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
+/* Only for crtgfx_gpu_surface_create()'s own real Windows/D3D12 branch
+ * below -- resolving a crtgfx_window's real live HWND (window_win32.c,
+ * via crtgfx_win32_get_hwnd()) and the shared toplevel struct's own real
+ * width/height. Same reasoning as the Linux branch above. */
+#include "arch/windows/window_win32_gpu.h"
+#include "wayland_weston_internal.h"
+#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
+/* Only for crtgfx_gpu_surface_create()'s own real macOS/Metal branch
+ * below -- resolving a crtgfx_window's real live CAMetalLayer `id`
+ * (window_cocoa.c, via crtgfx_cocoa_get_metal_layer()) and the shared
+ * toplevel struct's own real width/height. Same reasoning as the Linux
+ * branch above. */
+#include "arch/macos/window_cocoa_gpu.h"
+#include "wayland_weston_internal.h"
 #endif
 
 /* struct crtgfx_gpu_device/crtgfx_gpu_surface themselves now live in
@@ -200,6 +215,62 @@ crtgfx_result crtgfx_gpu_surface_create(
     *out_surface = surface;
     return CRTGFX_OK;
   }
+#elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
+  {
+    void* hwnd_handle = NULL;
+    crtgfx_gpu_surface* surface;
+    crtgfx_result result;
+
+    /* Only GPU windows expose their HWND here: software windows already
+     * own a D3D11 swapchain and cannot accept another flip swapchain. */
+    if (crtgfx_win32_get_hwnd(&window->toplevel, &hwnd_handle) == 0) {
+      return CRTGFX_ERROR_UNSUPPORTED;
+    }
+
+    surface = (crtgfx_gpu_surface*)calloc(1, sizeof(crtgfx_gpu_surface));
+    if (surface == NULL) {
+      return CRTGFX_ERROR_UNSUPPORTED;
+    }
+    result = crtgfx_gpu_win32_surface_create(
+        device, hwnd_handle, window->toplevel.width, window->toplevel.height, surface);
+    if (result != CRTGFX_OK) {
+      free(surface);
+      return result;
+    }
+    *out_surface = surface;
+    return CRTGFX_OK;
+  }
+#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
+  {
+    void* metal_layer_handle = NULL;
+    crtgfx_gpu_surface* surface;
+    crtgfx_result result;
+
+    /* window_cocoa.c only gives a window a real CAMetalLayer-backed
+     * content view when it was created with CRTGFX_WINDOW_GPU_PRESENTATION
+     * (crtgfx/window.h) -- crtgfx_cocoa_get_metal_layer() is the single
+     * real source of truth for that, so this function never needs to
+     * duplicate the check. A software-presented window (the ordinary
+     * plain-CALayer content view) correctly fails here with the same
+     * honest CRTGFX_ERROR_UNSUPPORTED this function already returned for
+     * every window before today. */
+    if (crtgfx_cocoa_get_metal_layer(&window->toplevel, &metal_layer_handle) == 0) {
+      return CRTGFX_ERROR_UNSUPPORTED;
+    }
+
+    surface = (crtgfx_gpu_surface*)calloc(1, sizeof(crtgfx_gpu_surface));
+    if (surface == NULL) {
+      return CRTGFX_ERROR_UNSUPPORTED;
+    }
+    result = crtgfx_gpu_metal_surface_create(
+        device, metal_layer_handle, window->toplevel.width, window->toplevel.height, surface);
+    if (result != CRTGFX_OK) {
+      free(surface);
+      return result;
+    }
+    *out_surface = surface;
+    return CRTGFX_OK;
+  }
 #else
   (void)device;
   (void)window;
@@ -218,6 +289,10 @@ void crtgfx_gpu_surface_release(crtgfx_gpu_surface* surface) {
   }
 #if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
   crtgfx_gpu_vulkan_surface_destroy(surface);
+#elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
+  crtgfx_gpu_win32_surface_destroy(surface);
+#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
+  crtgfx_gpu_metal_surface_destroy(surface);
 #endif
   free(surface);
 }
@@ -226,7 +301,12 @@ crtgfx_result crtgfx_gpu_surface_get_size(crtgfx_gpu_surface* surface, uint32_t*
   if (surface == NULL || out_width == NULL || out_height == NULL) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
-#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
+#if (defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)) || \
+    (defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)) || \
+    (defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL))
+  /* width/height are named identically across all three real per-host
+   * branches of struct crtgfx_gpu_surface (gpu_internal.h) -- one shared
+   * read, no per-host dispatch needed. */
   *out_width = surface->width;
   *out_height = surface->height;
   return CRTGFX_OK;
@@ -241,6 +321,10 @@ crtgfx_result crtgfx_gpu_surface_acquire(crtgfx_gpu_surface* surface, uint64_t t
   }
 #if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
   return crtgfx_gpu_vulkan_surface_acquire(surface, timeout_us);
+#elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
+  return crtgfx_gpu_win32_surface_acquire(surface, timeout_us);
+#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
+  return crtgfx_gpu_metal_surface_acquire(surface, timeout_us);
 #else
   (void)timeout_us;
   return CRTGFX_ERROR_UNSUPPORTED;
@@ -253,6 +337,10 @@ crtgfx_result crtgfx_gpu_surface_clear(crtgfx_gpu_surface* surface, float r, flo
   }
 #if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
   return crtgfx_gpu_vulkan_surface_clear(surface, r, g, b, a);
+#elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
+  return crtgfx_gpu_win32_surface_clear(surface, r, g, b, a);
+#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
+  return crtgfx_gpu_metal_surface_clear(surface, r, g, b, a);
 #else
   (void)r;
   (void)g;
@@ -268,6 +356,10 @@ crtgfx_result crtgfx_gpu_surface_present(crtgfx_gpu_surface* surface) {
   }
 #if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
   return crtgfx_gpu_vulkan_surface_present(surface);
+#elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
+  return crtgfx_gpu_win32_surface_present(surface);
+#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
+  return crtgfx_gpu_metal_surface_present(surface);
 #else
   return CRTGFX_ERROR_UNSUPPORTED;
 #endif

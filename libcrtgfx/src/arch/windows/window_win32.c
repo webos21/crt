@@ -1,4 +1,5 @@
 #include "wayland_weston_internal.h"
+#include "window_win32_gpu.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -556,6 +557,22 @@ struct crtgfx_host_window {
    * same "at most one outstanding, checked on a later dispatch() call"
    * shape as window_wayland.c's own frame_callback_id). */
   int frame_complete_pending;
+  /* Set once, at crtgfx_host_window_create() time, from desc->flags &
+   * CRTGFX_WINDOW_GPU_PRESENTATION (2026-09-07, "Finish live GPU
+   * presentation everywhere" -- the Windows leg, following the Linux
+   * native-Wayland-backend vertical slice). Windows needs no second
+   * window backend the way Linux did (this file already owns a real,
+   * live HWND unconditionally) -- this flag only ever gates whether the
+   * private D3D11 presentation swap chain below gets created at all: a
+   * GPU-presentation window instead gets a real swap chain later, against
+   * this same HWND, from crtgfx_gpu_surface_create() (src/arch/windows/
+   * gpu_win32.c, via crtgfx_win32_get_hwnd() -- window_win32_gpu.h). Kept
+   * so crtgfx_host_window_present_software() can explicitly refuse
+   * (CRTGFX_ERROR_INVALID_ARGUMENT) on such a window instead of silently
+   * no-op'ing via the existing swap_chain==0 check alone -- matching
+   * Linux's own crtgfx_native_wl_window_present_software()'s explicit
+   * CRTGFX_ERROR_UNSUPPORTED. */
+  int gpu_presentation;
   /* crtgfx_win_windows linked-list link -- needed so crtgfx_host_window_
    * dispatch() (which, unlike present_software(), has no specific host
    * window handed to it) can poll every live window's own waitable once
@@ -1224,6 +1241,7 @@ int crtgfx_host_window_create(const crtgfx_window_desc* desc, crtgfx_weston_topl
   }
 
   host->hwnd = hwnd;
+  host->gpu_presentation = (desc->flags & CRTGFX_WINDOW_GPU_PRESENTATION) != 0u;
   toplevel->host = host;
 
   /* Real DXGI swap chain, needed for a genuinely asynchronous
@@ -1232,8 +1250,21 @@ int crtgfx_host_window_create(const crtgfx_window_desc* desc, crtgfx_weston_topl
    * desc->width/height, which is the *outer* size AdjustWindowRectEx()
    * expanded above to account for the title bar/borders) -- matches
    * every other backend's own "ask the host for the real client size,
-   * don't assume the caller's requested size" discipline. */
-  {
+   * don't assume the caller's requested size" discipline.
+   *
+   * Skipped entirely for a GPU-presentation window (struct crtgfx_host_
+   * window::gpu_presentation's own comment) -- that window's real
+   * presentation swap chain is created later, against this same HWND, by
+   * crtgfx_gpu_surface_create() (src/arch/windows/gpu_win32.c). Two real
+   * DXGI flip-model swap chains simultaneously bound to the same HWND is
+   * not a real, supported configuration; only ever creating one or the
+   * other per window, decided once here at creation time, is what keeps
+   * that from ever being attempted. host->swap_chain stays 0 in that
+   * case, which crtgfx_host_window_present_software() (below),
+   * crtgfx_win_destroy_swap_chain()/_resize_swap_chain()/
+   * poll_frame_complete() (all already null-check it) already treat as a
+   * safe, correct no-op/refusal. */
+  if (!host->gpu_presentation) {
     RECT client_rect;
     uint32_t client_width = desc->width;
     uint32_t client_height = desc->height;
@@ -1340,8 +1371,19 @@ int crtgfx_host_window_present_software(
   crtgfx_d3d11_texture2d* back_buffer;
   HRESULT hr;
 
-  if (host == 0 || host->hwnd == 0 || host->swap_chain == 0 || pixels == 0 || width == 0 ||
-      height == 0 || stride < width * 4u) {
+  if (host == 0 || host->hwnd == 0 || pixels == 0 || width == 0 || height == 0 ||
+      stride < width * 4u) {
+    return CRTGFX_ERROR_INVALID_ARGUMENT;
+  }
+  if (host->gpu_presentation) {
+    /* See struct crtgfx_host_window::gpu_presentation's own comment --
+     * this window never got a private D3D11 swap chain, by design.
+     * Explicit refusal, not just falling through to the swap_chain==0
+     * check below (which would report the same error either way, but
+     * this states the real reason). */
+    return CRTGFX_ERROR_INVALID_ARGUMENT;
+  }
+  if (host->swap_chain == 0) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
 
@@ -1433,4 +1475,18 @@ int crtgfx_host_window_present_software(
    * crtgfx/window.h's own CRTGFX_EVENT_FRAME_COMPLETE doc comment. */
   host->frame_complete_pending = 1;
   return CRTGFX_OK;
+}
+
+int crtgfx_win32_get_hwnd(const crtgfx_weston_toplevel* toplevel, void** out_hwnd) {
+  const crtgfx_host_window* host;
+
+  if (toplevel == 0 || toplevel->host == 0 || out_hwnd == 0) {
+    return 0;
+  }
+  host = toplevel->host;
+  if (host->hwnd == 0 || !host->gpu_presentation) {
+    return 0;
+  }
+  *out_hwnd = (void*)host->hwnd;
+  return 1;
 }

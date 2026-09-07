@@ -257,6 +257,46 @@ non-GNOME/Mutter compositor (wlroots-based ones like Sway, or KDE's
 KWin) -- the protocol used here is universal core+stable-xdg-shell, so it
 should behave the same, but that is not independently confirmed yet.
 
+## Windows/macOS GPU Presentation Wiring (2026-09-07)
+
+The common surface API now dispatches to D3D12/DXGI and Metal/CAMetalLayer
+as well as Vulkan. This remains a solid-color acquire/clear/present slice,
+not Ganesh rendering onto the window. Create windows with
+`CRTGFX_WINDOW_GPU_PRESENTATION`; ordinary software windows retain their
+existing presentation paths. Release the surface before its window/device.
+
+- Windows GPU windows skip their private software D3D11 swapchain. The
+  surface owns the D3D12 flip swapchain, referenced backbuffers, RTV heap,
+  command allocator/list, fence and event. One allocator means acquisition
+  must wait for the latest submission regardless of the current image.
+  Finite waits use rounded-up milliseconds and recheck the fence after
+  wakeup, including stale events from earlier timeouts. The SDK C ABI's
+  explicit output pointer for descriptor-handle returns is essential;
+  returning that struct by value crashed the driver in the first live run.
+- macOS GPU windows install CAMetalLayer. Resize/backing-scale callbacks
+  refresh drawableSize in pixels; acquire retains nextDrawable, clear
+  records an MTLRenderPass with clear/store actions, and present commits
+  the command buffer with presentDrawable. Surface destruction waits for
+  its last submission. Apple's nextDrawable has a fixed approximately
+  one-second wait, so budgets below one second return UNSUPPORTED rather
+  than silently exceeding the requested wait. See Apple's
+  [nextDrawable documentation](https://developer.apple.com/documentation/quartzcore/cametallayer/nextdrawable%28%29?language=objc).
+
+Validation: Windows x86_64 default static/shared build, CTest 133/133,
+and `crtgfx_gpu_window_demo.exe 600` succeed (600 submitted frames, exit 0).
+The demo checks size and invalid acquire/clear/present ordering, supports
+a finite frame limit, and reports errors through its exit code. This is
+submission validation, not screenshot-based visual validation. Both macOS
+architectures compile the common GPU, Metal, and Cocoa sources to Mach-O
+objects using Clang 22 and CRT headers (`--target=arm64-apple-macos11` /
+`--target=x86_64-apple-macos11`, `-std=c99 -nostdinc`, Clang resource
+headers plus `include`, `libcrtgfx/include`, `libcrtgfx/src`, definitions
+`CRT_TARGET_OS_MACOS=1` and `CRTGFX_HAVE_METAL=1`). No native macOS link or
+run was possible on this Windows host. macOS runtime/visual/Retina/resize
+checks, Windows/Linux swapchain recreation and Ganesh-to-surface rendering
+remain open. Skia was disabled in the Windows default-config regression;
+its offscreen backend was not revalidated in this pass.
+
 ## Linux Native Wayland Backend + GPU Presentation (2026-09-07, first cut)
 
 TODO.md's "Finish live GPU presentation everywhere" roadmap step starts on
@@ -366,10 +406,9 @@ once the native backend needs real parity with the legacy one); retiring
 the legacy backend (Phase 4, only once the native backend has real parity);
 real swapchain recreation on resize (`VK_ERROR_OUT_OF_DATE_KHR` currently
 surfaces as a real, honest `CRTGFX_ERROR_HOST` from `crtgfx_gpu_surface_
-acquire()`/`_present()` rather than being handled); Windows/macOS live GPU
-presentation wiring (their own real, separate, lower-risk follow-up -- no
-structural gap on either host, just wiring `crtgfx_gpu_surface_create()` to
-each host's own already-existing swap chain/layer code).
+acquire()`/`_present()` rather than being handled). Windows/macOS wiring
+was implemented in the follow-up recorded above, with native macOS
+validation still outstanding.
 
 A real CMake dependency-graph cycle was found and fixed along the way:
 `crtgfx-wayland-build` (needed to build the real `libwayland-client`/

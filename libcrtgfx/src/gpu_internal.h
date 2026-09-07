@@ -126,6 +126,79 @@ struct crtgfx_gpu_surface {
    * CRTGFX_ERROR_HOST rather than passing a stale/undefined image index
    * to the driver. */
   int vk_image_acquired;
+#elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
+  /* Real D3D12/DXGI swap-chain presentation (2026-09-07, the Windows leg
+   * of "Finish live GPU presentation everywhere", following the Linux
+   * native-Wayland-backend vertical slice) -- same real per-field shape
+   * as the Vulkan branch above, adapted to D3D12's own real conventions
+   * (an explicit RTV descriptor heap instead of Vulkan's plain VkImage
+   * array; per-back-buffer fence *values* against one shared ID3D12Fence,
+   * D3D12's own real synchronization primitive, rather than Vulkan's
+   * separate per-frame VkFence objects). Not retained, same reasoning as
+   * the Vulkan branch's own `device` field. */
+  crtgfx_gpu_device* device;
+  /* Real IDXGISwapChain3* -- void* for the same "no host SDK type in a
+   * shared header" reason every other Windows/Vulkan handle in this file
+   * already uses. */
+  void* dxgi_swapchain;
+  /* malloc'd array of `d3d12_buffer_count` real ID3D12Resource* back
+   * buffers (GetBuffer adds references, individually released during
+   * surface teardown) and one RTV descriptor heap (a single, small,
+   * CPU-visible heap sized to the same buffer count) so crtgfx_gpu_
+   * win32_surface_clear() can create/reuse each buffer's own render
+   * target view without a new heap per frame. */
+  void** d3d12_back_buffers;
+  void* d3d12_rtv_heap;
+  size_t d3d12_rtv_descriptor_size;
+  uint32_t d3d12_buffer_count;
+  uint32_t width;
+  uint32_t height;
+  /* One command allocator + one command list, reset and re-recorded each
+   * frame (D3D12's own real, standard single-buffered command-recording
+   * shape -- matches the Vulkan branch's own single vk_command_buffer). */
+  void* d3d12_command_allocator;
+  void* d3d12_command_list;
+  /* Monotonic submit fence. Per-image values record submissions, but
+   * acquire waits for the latest value because all images share the
+   * same command allocator/list. */
+  void* d3d12_fence;
+  uint64_t* d3d12_fence_values;
+  uint64_t d3d12_fence_next_value;
+  void* d3d12_fence_event;
+  uint32_t d3d12_current_buffer_index;
+  /* Same real out-of-order-call guard as the Vulkan branch's own
+   * vk_image_acquired. */
+  int d3d12_image_acquired;
+  int d3d12_frame_submitted;
+#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
+  /* Real CAMetalLayer drawable presentation (2026-09-07, the macOS leg of
+   * "Finish live GPU presentation everywhere"). Simpler than the Vulkan/
+   * D3D12 branches above -- Metal's own `-presentDrawable:`/command-buffer
+   * completion handles GPU/CPU synchronization internally, so no explicit
+   * fence/semaphore fields are needed here at all, matching gpu_metal.c's
+   * own established "Metal's real ABI is Objective-C messages, no hand-
+   * declared vtable/struct layout needed" precedent. Every `id`/`void*`
+   * field is a real, opaque Objective-C object pointer, ABI-identical
+   * regardless of which header (or none) declared the type name, same
+   * reasoning as crtgfx_gpu_device's own mtl_device/mtl_command_queue
+   * fields. Not retained beyond this surface's own real Cocoa retain/
+   * release discipline (crtgfx_gpu_metal_surface_create()'s own comment). */
+  crtgfx_gpu_device* device;
+  /* CAMetalLayer retained by this surface and the window's content view. */
+  void* mtl_layer;
+  uint32_t width;
+  uint32_t height;
+  /* Held between a successful crtgfx_gpu_metal_surface_acquire() and the
+   * matching crtgfx_gpu_metal_surface_present() -- id<CAMetalDrawable>,
+   * id<MTLTexture>, and the id<MTLCommandBuffer> _clear() records into
+   * and _present() commits. */
+  void* mtl_drawable;
+  void* mtl_drawable_texture;
+  void* mtl_command_buffer;
+  void* mtl_last_submission;
+  /* Same real out-of-order-call guard as the Vulkan/D3D12 branches' own
+   * acquired flags. */
+  int mtl_drawable_acquired;
 #else
   int reserved;
 #endif
@@ -166,6 +239,18 @@ crtgfx_result crtgfx_gpu_vulkan_surface_present(struct crtgfx_gpu_surface* surfa
 crtgfx_result crtgfx_gpu_win32_query_capabilities(crtgfx_gpu_capabilities* out_caps);
 crtgfx_result crtgfx_gpu_win32_device_create(uint32_t device_index, struct crtgfx_gpu_device* device);
 void crtgfx_gpu_win32_device_destroy(struct crtgfx_gpu_device* device);
+/* Real surface/swap-chain hooks (2026-09-07) -- same real shape as the
+ * Vulkan surface hooks above. `hwnd` is a real, live HWND from window_
+ * win32.c (via crtgfx_win32_get_hwnd() -- window_win32_gpu.h); gpu.c's
+ * own caller resolves this, not this header, matching the Vulkan branch's
+ * own wl_display/wl_surface resolution split. */
+crtgfx_result crtgfx_gpu_win32_surface_create(
+    struct crtgfx_gpu_device* device, void* hwnd, uint32_t width, uint32_t height,
+    struct crtgfx_gpu_surface* surface);
+void crtgfx_gpu_win32_surface_destroy(struct crtgfx_gpu_surface* surface);
+crtgfx_result crtgfx_gpu_win32_surface_acquire(struct crtgfx_gpu_surface* surface, uint64_t timeout_us);
+crtgfx_result crtgfx_gpu_win32_surface_clear(struct crtgfx_gpu_surface* surface, float r, float g, float b, float a);
+crtgfx_result crtgfx_gpu_win32_surface_present(struct crtgfx_gpu_surface* surface);
 #elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
 /* Real backend hooks -- src/arch/macos/gpu_metal.c. Same real shape as
  * the Vulkan/D3D12 hooks above (gpu.c still owns all argument validation
@@ -174,4 +259,16 @@ void crtgfx_gpu_win32_device_destroy(struct crtgfx_gpu_device* device);
 crtgfx_result crtgfx_gpu_metal_query_capabilities(crtgfx_gpu_capabilities* out_caps);
 crtgfx_result crtgfx_gpu_metal_device_create(uint32_t device_index, struct crtgfx_gpu_device* device);
 void crtgfx_gpu_metal_device_destroy(struct crtgfx_gpu_device* device);
+/* Real surface/drawable hooks (2026-09-07) -- same real shape as the
+ * Vulkan/D3D12 surface hooks above. `mtl_layer` is a real, live
+ * CAMetalLayer `id` from window_cocoa.c (via crtgfx_cocoa_get_metal_
+ * layer() -- window_cocoa_gpu.h); gpu.c's own caller resolves this, not
+ * this header, matching the other two platforms' own split. */
+crtgfx_result crtgfx_gpu_metal_surface_create(
+    struct crtgfx_gpu_device* device, void* mtl_layer, uint32_t width, uint32_t height,
+    struct crtgfx_gpu_surface* surface);
+void crtgfx_gpu_metal_surface_destroy(struct crtgfx_gpu_surface* surface);
+crtgfx_result crtgfx_gpu_metal_surface_acquire(struct crtgfx_gpu_surface* surface, uint64_t timeout_us);
+crtgfx_result crtgfx_gpu_metal_surface_clear(struct crtgfx_gpu_surface* surface, float r, float g, float b, float a);
+crtgfx_result crtgfx_gpu_metal_surface_present(struct crtgfx_gpu_surface* surface);
 #endif
