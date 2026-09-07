@@ -408,6 +408,7 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
     # accepted limitation.
     if(EXISTS "${CRTGFX_WAYLAND_INSTALL_PREFIX}/lib/libwayland-client.a")
       list(APPEND CRTGFX_BACKEND_SOURCES src/arch/linux/window_wayland_native.c)
+      add_compile_definitions(CRTGFX_HAVE_NATIVE_WAYLAND=1)
       # libffi.a alongside libwayland-client.a itself -- see CRTGFX_WAYLAND_
       # PORT_PREFIX's own comment (near the top of this file) for why real
       # libwayland-client genuinely needs it at link time.

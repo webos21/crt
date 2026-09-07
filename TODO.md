@@ -448,7 +448,23 @@ recovery cycle included, real virtio-gpu-backed Vulkan device (not a
 null backend) -- see `HISTORY.md`'s 2026-09-07 entry (topmost). Full
 default-config ctest also reconfirmed clean, 111/111.
 
-1. **Finish live GPU presentation everywhere.** Linux lands first
+1. **Finish live GPU presentation everywhere.** **Real GitHub Actions CI
+   break from this whole item's own Linux landing, found and fixed
+   2026-09-07 (same day, separate pass)**: a fresh `out/` (no `crtgfx-
+   wayland-build` run yet, exactly CI's own runner) failed to compile
+   `libcrtgfx/src/gpu.c` (`crtgfx_native_wl_get_surface_handles`
+   undeclared), and once that was fixed, `crtgfx_gpu_test_runs` failed
+   next (`query_capabilities()`/`device_create()` disagreeing on device
+   availability) -- both the identical class of bug, a `#if` guard
+   requiring `CRTGFX_HAVE_NATIVE_WAYLAND` where it should not have (or
+   the reverse). Fixed; `cmake --workflow --preset linux-host-ninja-
+   debug` now passes 111/111 from a genuinely fresh `out/`, matching
+   `ci.yml` exactly. See `HISTORY.md`'s 2026-09-07 entry (topmost) for
+   the full two-bug writeup, plus two smaller CI-sandbox network-EPERM/
+   EACCES hardening fixes (`tests/socket_network_test.c`, `tests/
+   sendmsg_scm_rights_test.c`) landed alongside.
+
+   Linux lands first
    (2026-09-07): a new, independent native Wayland backend
    (`window_wayland_native.c`, real `libwayland-client` + `xdg-shell`)
    gives Vulkan a live `wl_display`/`wl_surface` pair, selected per-window

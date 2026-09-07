@@ -1606,10 +1606,14 @@ int crtgfx_host_window_create(const crtgfx_window_desc* desc, crtgfx_weston_topl
    * own top comment for the full design. Unlike the other four entry
    * points below (which dispatch by reading an already-created host's own
    * backend_tag), this is the one place the choice is actually made: by
-   * the CRTGFX_WINDOW_GPU_PRESENTATION desc flag, before any connection
+  * the CRTGFX_WINDOW_GPU_PRESENTATION desc flag, before any connection
    * for this window exists at all. */
   if ((desc->flags & CRTGFX_WINDOW_GPU_PRESENTATION) != 0u) {
+#if defined(CRTGFX_HAVE_NATIVE_WAYLAND)
     return crtgfx_native_wl_window_create(desc, toplevel);
+#else
+    return CRTGFX_ERROR_UNSUPPORTED;
+#endif
   }
 
   if (crtgfx_wl_conn == 0) {
@@ -1640,10 +1644,12 @@ void crtgfx_host_window_destroy(crtgfx_host_window* host) {
   if (host == 0) {
     return;
   }
+#if defined(CRTGFX_HAVE_NATIVE_WAYLAND)
   if (crtgfx_wl_backend_tag(host) == CRTGFX_WL_BACKEND_TAG_NATIVE) {
     crtgfx_native_wl_window_destroy((void*)host);
     return;
   }
+#endif
   conn = host->conn;
 
   if (conn->pointer_focus_surface_id == host->surface_id) {
@@ -1694,9 +1700,11 @@ int crtgfx_host_window_show(crtgfx_host_window* host) {
   if (host == 0) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
+#if defined(CRTGFX_HAVE_NATIVE_WAYLAND)
   if (crtgfx_wl_backend_tag(host) == CRTGFX_WL_BACKEND_TAG_NATIVE) {
     return crtgfx_native_wl_window_show((void*)host);
   }
+#endif
   /* Wayland has no separate "show" request: a toplevel becomes visible/
    * mapped once a real buffer is attached and committed, which
    * crtgfx_host_window_present_software() already does on the first
@@ -1728,16 +1736,27 @@ int crtgfx_host_window_dispatch(uint32_t timeout_ms) {
    *    a real combined poll() (both fds in one pollfd array) is
    *    straightforward future work once a real caller actually exercises
    *    this combination -- not done speculatively ahead of one. */
-  int have_native = crtgfx_native_wl_has_connection();
+  int have_native = 0;
+#if defined(CRTGFX_HAVE_NATIVE_WAYLAND)
+  have_native = crtgfx_native_wl_has_connection();
+#endif
   if (crtgfx_wl_conn != 0 && have_native) {
     int rc = wl_pump(crtgfx_wl_conn, 0);
     if (rc != CRTGFX_OK) {
       return rc;
     }
+#if defined(CRTGFX_HAVE_NATIVE_WAYLAND)
     return crtgfx_native_wl_dispatch(timeout_ms);
+#else
+    return CRTGFX_OK;
+#endif
   }
   if (have_native) {
+#if defined(CRTGFX_HAVE_NATIVE_WAYLAND)
     return crtgfx_native_wl_dispatch(timeout_ms);
+#else
+    return CRTGFX_OK;
+#endif
   }
   return wl_pump(crtgfx_wl_conn, timeout_ms);
 }
@@ -1746,9 +1765,11 @@ int crtgfx_host_window_get_size(crtgfx_host_window* host, uint32_t* out_width, u
   if (host == 0 || out_width == 0 || out_height == 0) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
+#if defined(CRTGFX_HAVE_NATIVE_WAYLAND)
   if (crtgfx_wl_backend_tag(host) == CRTGFX_WL_BACKEND_TAG_NATIVE) {
     return crtgfx_native_wl_window_get_size((void*)host, out_width, out_height);
   }
+#endif
   *out_width = host->toplevel->width;
   *out_height = host->toplevel->height;
   return CRTGFX_OK;
@@ -1770,10 +1791,12 @@ int crtgfx_host_window_present_software(
   if (host == 0 || pixels == 0 || width == 0 || height == 0 || stride < width * 4u) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
+#if defined(CRTGFX_HAVE_NATIVE_WAYLAND)
   if (crtgfx_wl_backend_tag(host) == CRTGFX_WL_BACKEND_TAG_NATIVE) {
     return crtgfx_native_wl_window_present_software(
         (void*)host, pixels, width, height, stride, damage_rects, damage_rect_count);
   }
+#endif
   if (stride > UINT32_MAX / height) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }

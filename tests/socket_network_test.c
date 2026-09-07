@@ -20,7 +20,9 @@ static int fail_errno(const char* message) {
 }
 
 static int network_unavailable_ok(int fd) {
-  close(fd);
+  if (fd >= 0) {
+    close(fd);
+  }
   printf("socket_network_test: ok (network unavailable)\n");
   return 0;
 }
@@ -73,6 +75,9 @@ int main(void) {
 
   server = socket(AF_INET, SOCK_STREAM, 0);
   if (server < 0) {
+    if (errno == EPERM || errno == EACCES) {
+      return network_unavailable_ok(server);
+    }
     return fail("server socket");
   }
   if (setsockopt(server, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) != 0) {
@@ -104,6 +109,10 @@ int main(void) {
 
   client = socket(AF_INET, SOCK_STREAM, 0);
   if (client < 0) {
+    if (errno == EPERM || errno == EACCES) {
+      close(server);
+      return network_unavailable_ok(client);
+    }
     close(server);
     return fail("client socket");
   }

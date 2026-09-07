@@ -10,6 +10,96 @@ substantive update.
 
 ## 2026-09-07
 
+- **Fixed the real GitHub Actions CI break the Linux native Wayland
+  backend + GPU presentation work (`de9adc3`) left behind, reproduced
+  and closed on a genuinely fresh `out/` (matching CI's own always-fresh
+  runner exactly): `cmake --workflow --preset linux-host-ninja-debug`
+  now passes 111/111 from scratch.** Reported directly ("out 폴더
+  caching 때문에 문제가 나오지 않아서 out 폴더를 지웠더니... 에러가
+  발생한다"), plus two smaller CI-sandbox network hardening fixes found
+  and fixed alongside in the same local session before this pass.
+
+  1. **Compile break: `libcrtgfx/src/gpu.c:201` -- `call to undeclared
+     function 'crtgfx_native_wl_get_surface_handles'` / `incomplete
+     definition of type 'struct crtgfx_window'`.** Root cause: a real
+     `#if` guard-granularity mismatch. This file's own top-of-file
+     `#include "arch/linux/window_wayland_native.h"` (declares that
+     function) and `#include "wayland_weston_internal.h"` (gives
+     `struct crtgfx_window` its full definition) are only pulled in
+     under `defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
+     && defined(CRTGFX_HAVE_NATIVE_WAYLAND)` -- but `crtgfx_gpu_surface_
+     create()`'s own code that *calls* that function was guarded by only
+     the first two of those three (`CRTGFX_HAVE_NATIVE_WAYLAND` missing).
+     A genuinely fresh `out/` (no `crtgfx-wayland-build` run yet, so
+     `CRTGFX_HAVE_NATIVE_WAYLAND` is undefined) with a real `libvulkan`
+     found (`CRTGFX_HAVE_VULKAN=1` alone) hits exactly this gap --
+     precisely GitHub CI's own runner shape every time (see
+     `libvulkan-dev`/`mesa-vulkan-drivers` already in `ci.yml`'s Linux
+     apt step). An already-correct, already-written honest-`CRTGFX_
+     ERROR_UNSUPPORTED` fallback sat directly below with the identical
+     `#elif` condition as the broken `#if` -- unreachable dead code, not
+     a missing branch. Fixed by adding `&& defined(CRTGFX_HAVE_NATIVE_
+     WAYLAND)` to the one guard that needed it, which made the existing
+     fallback reachable exactly when it should be.
+  2. **A second, related bug this same fix chain exposed once the build
+     got past step 1: `crtgfx_gpu_test_runs` failing** (`device_create()
+     reports CRTGFX_ERROR_UNSUPPORTED today` / `... leaves *out_device
+     untouched on failure`, both from the `caps.device_count == 0`
+     branch of `libcrtgfx/tests/gpu_test.c`). Root cause: the *opposite*
+     shape of the same guard-granularity bug, on `crtgfx_gpu_query_
+     capabilities()` this time -- it was gated on all three of
+     `CRT_TARGET_OS_LINUX`/`CRTGFX_HAVE_VULKAN`/`CRTGFX_HAVE_NATIVE_
+     WAYLAND`, while `crtgfx_gpu_device_create()` right below it (and
+     every other surface-lifecycle function in this same file --
+     acquire/clear/present/get_size/release) was correctly gated on just
+     the first two (querying/creating a plain Vulkan device needs no
+     Wayland connection or window at all, matching `crtgfx_skia_gpu_
+     offscreen_smoke`'s own real, working offscreen-only usage). On a
+     fresh `out/`, this made `query_capabilities()` falsely report
+     `device_count == 0`/`BACKEND_NONE` while `device_create(0, ...)`
+     found and created a real device anyway -- exactly the contradiction
+     `gpu_test.c`'s own real invariant check caught. `crtgfx_gpu_vulkan_
+     query_capabilities()`'s own declaration lives in `gpu_internal.h`
+     (not either of the native-Wayland-only headers), confirming the
+     extra guard was never actually needed for this function. Fixed by
+     dropping `CRTGFX_HAVE_NATIVE_WAYLAND` from this one guard, matching
+     `device_create()`'s already-correct shape.
+
+  Verified for real, twice, from a genuinely wiped `out/linux-host-
+  ninja-debug` each time (not an incremental rebuild -- this project's
+  own repeated "a local dev tree with an existing `out/` is not a
+  reliable test of new CMake-level wiring" lesson, and exactly how the
+  user reproduced the original break): `cmake --workflow --preset
+  linux-host-ninja-debug` (the identical command `.github/workflows/
+  ci.yml` runs) -- **100% tests passed, 111/111**, matching this
+  session's own already-committed Linux baseline.
+
+  Two further, smaller CI-hardening fixes landed in the same local
+  session (already present when this pass started, not part of the two
+  bugs above): `tests/socket_network_test.c` and `tests/sendmsg_scm_
+  rights_test.c` now treat `EPERM`/`EACCES` from `socket()` *or*
+  `bind()` (loopback `AF_INET`) as the same honest "network unavailable
+  in this sandbox" outcome their existing `network_unavailable_ok()`
+  helper already established for a different real CI/sandbox
+  restriction (see this file's earlier `SCM_CREDENTIALS`/real-process-
+  gid `EPERM` entry) -- a network-isolated CI runner or sandboxed
+  container can legitimately deny raw socket creation or loopback bind
+  entirely, which is not this project's own bug to work around by
+  disabling the check, only to recognize honestly rather than fail the
+  whole test suite over. `libcrtgfx/src/arch/linux/window_wayland.c`
+  also gained `#if defined(CRTGFX_HAVE_NATIVE_WAYLAND)` guards around
+  every `crtgfx_native_wl_*` call site its own dual-backend dispatch
+  logic (`de9adc3`) added -- a real, necessary companion to `libcrtgfx/
+  CMakeLists.txt`'s own `add_compile_definitions(CRTGFX_HAVE_NATIVE_
+  WAYLAND=1)` (only defined once `window_wayland_native.c` is actually
+  in `CRTGFX_BACKEND_SOURCES`): without these, `window_wayland.c` --
+  which always compiles, unlike `window_wayland_native.c` itself --
+  would reference `crtgfx_native_wl_*` symbols that do not exist in the
+  link at all on a build where the native backend was never built,
+  a real undefined-symbol link failure this project's own established
+  Skia-not-built/libunwind-not-built "empty and a no-op" precedent
+  elsewhere already avoids for the identical reason.
+
 - **Windows and macOS GPU presentation now run.** Continued
   the in-progress D3D12/DXGI surface work after the Windows demo build.
   GPU windows bypass the software D3D11 swapchain; surface creation,

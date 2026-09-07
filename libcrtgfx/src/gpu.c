@@ -20,7 +20,7 @@
 #include <stdlib.h>
 #include <time.h>
 
-#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
+#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN) && defined(CRTGFX_HAVE_NATIVE_WAYLAND)
 /* Only for crtgfx_gpu_surface_create()'s own real Linux/Vulkan branch
  * below -- resolving a native-backend crtgfx_window's real live wl_
  * display/wl_surface pair (window_wayland_native.c) and the shared
@@ -66,7 +66,24 @@ crtgfx_result crtgfx_gpu_query_capabilities(crtgfx_gpu_capabilities* out_caps) {
 #if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
   /* Real backend, Linux only (src/arch/linux/gpu_vulkan.c) -- see that
    * file's own top comment. Windows/macOS fall through to the honest
-   * NONE/0 report below, same as Linux did before this landed. */
+   * NONE/0 report below, same as Linux did before this landed.
+   *
+   * Deliberately NOT also gated on CRTGFX_HAVE_NATIVE_WAYLAND (unlike
+   * crtgfx_gpu_surface_create()'s own guard just below in this file):
+   * crtgfx_gpu_vulkan_query_capabilities()/crtgfx_gpu_device_create()
+   * (right below) only ever enumerate/create a plain Vulkan device --
+   * genuinely no Wayland connection or window involved at all, matching
+   * crtgfx_skia_gpu_offscreen_smoke's own real, working offscreen-only
+   * usage. This guard used to require CRTGFX_HAVE_NATIVE_WAYLAND too,
+   * which made this function report device_count=0/BACKEND_NONE on any
+   * build with a real libvulkan found but crtgfx-wayland-build never run
+   * (a fresh out/ directory's own first CMake workflow pass, exactly
+   * CI's own always-fresh runner) -- while crtgfx_gpu_device_create()
+   * right below (correctly never gated on native Wayland) still found
+   * and created a real device anyway. That mismatch is exactly what
+   * crtgfx_gpu_test caught: query_capabilities() reporting 0 devices,
+   * then device_create(0, ...) succeeding regardless, contradicting its
+   * own device_count == 0 report. */
   return crtgfx_gpu_vulkan_query_capabilities(out_caps);
 #elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
   /* Real backend, Windows only (src/arch/windows/gpu_win32.c) -- see that
@@ -181,7 +198,25 @@ crtgfx_result crtgfx_gpu_surface_create(
   if (device == NULL || window == NULL || out_surface == NULL) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
-#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
+  /* CRTGFX_HAVE_NATIVE_WAYLAND, not just CRTGFX_HAVE_VULKAN, matching the
+   * #include guard at the top of this file: crtgfx_native_wl_get_surface_
+   * handles() (window_wayland_native.h) and struct crtgfx_window's own
+   * full definition (wayland_weston_internal.h) are only actually visible
+   * to this translation unit when the native Wayland backend was built
+   * (libwayland-client.a exists, libcrtgfx/CMakeLists.txt's own EXISTS
+   * check). A build with a real libvulkan found but crtgfx-wayland-build
+   * never run (CRTGFX_HAVE_VULKAN=1 alone -- exactly a fresh `out/`
+   * wipe's own CMake workflow, before the Wayland one-time bootstrap
+   * step has ever run) has no business calling into a function this
+   * translation unit never declared: `error: call to undeclared
+   * function 'crtgfx_native_wl_get_surface_handles'` plus `incomplete
+   * definition of type 'struct crtgfx_window'` (both real, reproduced on
+   * a genuinely fresh out/ directory, matching GitHub CI's own always-
+   * fresh runner). The already-correct honest-CRTGFX_ERROR_UNSUPPORTED
+   * fallback right below was already written for exactly this case but
+   * was unreachable: an `#elif` with the identical condition as this
+   * `#if` can never be taken. */
+#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN) && defined(CRTGFX_HAVE_NATIVE_WAYLAND)
   {
     void* wl_display_handle = NULL;
     void* wl_surface_handle = NULL;
@@ -215,6 +250,11 @@ crtgfx_result crtgfx_gpu_surface_create(
     *out_surface = surface;
     return CRTGFX_OK;
   }
+#elif defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
+  (void)device;
+  (void)window;
+  (void)out_surface;
+  return CRTGFX_ERROR_UNSUPPORTED;
 #elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
   {
     void* hwnd_handle = NULL;
