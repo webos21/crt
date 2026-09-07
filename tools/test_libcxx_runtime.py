@@ -175,6 +175,24 @@ def main():
             run_env["PATH"] = str(sysroot / "bin") + os.pathsep + run_env.get("PATH", "")
         subprocess.run([str(binary)], env=run_env, check=True)
 
+        sdk_object = binary.with_name(f"{binary.stem}_string_sdk.o")
+        sdk_flags = ["-fcrt-real-apple-sdk"] if args.target_os == "macos" else []
+        subprocess.run(command + typed_new_delete_flag + sdk_flags + [
+            "-std=c++17", "-O2", "-c",
+            str(root / "tests" / "imported_libcxx_string_sdk.cc"),
+            "-o", str(sdk_object),
+        ], env=env, check=True)
+        string_binary = binary.with_name(f"{binary.stem}_string_abi{binary.suffix}")
+        # Load the host's C++ runtime transitively to exercise coalescing too.
+        framework_flags = ["-framework", "Foundation"] if args.target_os == "macos" else []
+        subprocess.run(command + typed_new_delete_flag + [
+            "-std=c++17", "-O2",
+            str(root / "tests" / "imported_libcxx_string_abi_test.cc"),
+            str(sdk_object), *framework_flags, "-o", str(string_binary),
+        ], env=env, check=True)
+        print("+", string_binary, flush=True)
+        subprocess.run([str(string_binary)], env=run_env, check=True, timeout=30)
+
 
 if __name__ == "__main__":
     main()

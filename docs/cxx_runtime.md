@@ -348,6 +348,34 @@ The implementation policy is based on these upstream references:
   `_Init_thread_*` state machine, used as reference material only rather than
   imported source.
 
+## Apple SDK Consumers And String ABI
+
+The imported libc++ uses ABI v1 with Bionic's default string layout. Apple
+SDK translation units may define `__APPLE__`, but must use exactly the same
+layout as the runtime library. The pinned LLVM header otherwise enables
+`_LIBCPP_ABI_ALTERNATE_STRING_LAYOUT` on Apple arm64. A compiler or optimization
+change cannot repair the resulting caller/callee layout mismatch.
+
+Both standalone runtime configurations persist `_LIBCPP_CRT_BIONIC_ABI` in
+`__config_site`; the libcxx recipe's documented header patch prevents that
+platform-inferred override. This preserves the existing ABI rather than
+converting CRT strings to Apple's layout. Rebuild/stage libc++ and rebuild
+SDK consumers after updating. Skia's upstream source needs no change.
+
+Static `crtgfx` consumers additionally hide embedded `std::__1` definitions
+from Mach-O exports. Frameworks load Apple's libc++ into the same process;
+without this isolation dyld can coalesce weak locale/template symbols and
+mix the two runtimes' state, producing `std::bad_cast` even with correct
+string layout. Shared-runtime integration has separate export requirements;
+the static unexported list is not applied to libc++.dylib.
+
+`crt-libcxx-smoke` tests short/long string insertion and ownership across
+ordinary CRT and Apple SDK translation units with both static/shared CRT
+libc++ linkage. The Skia-enabled CTest `crtgfx_skia_sksl_test_runs` exercises
+successful compilation and float/identifier error-message construction
+without requiring a GPU. See HISTORY.md's 2026-09-07 entry for live Metal
+verification and the original failure evidence.
+
 ## Next Steps
 
 The imported runtime build/stage/smoke milestone is complete. Remaining work

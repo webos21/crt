@@ -407,18 +407,28 @@ macOS re-verification stays separately pending, same as the Vulkan slice.
 See `HISTORY.md`'s 2026-09-04 entry for the full trail (the raw-SDK dead
 end, every individual header/link gap found, and how each was fixed).
 
-1. **Finish Skia GPU rendering: live presentation, then macOS.**
-   The real remaining scope after the Linux/Vulkan and Windows/D3D12
-   offscreen slices above: wire `crtgfx_gpu_surface_create()` to an
-   actual on-screen window on each platform (Linux needs either a real
-   `wl_display*`/`wl_surface*`-capable Wayland backend or a deliberate
-   scoped exception to link real `libwayland-client` for just the Vulkan
-   WSI boundary; Windows has no such gap -- `window_win32.c`'s own
-   D3D11 swap chain already has everything D3D12 presentation would
-   need, this is real design work, not a blocker); then Metal on macOS
-   (still needs its own first real `crtgfx_gpu_device` backend, mirroring
-   `gpu_vulkan.c`/`gpu_win32.c`); Graphite stays a later, separately-
-   measured alternative to Ganesh throughout.
+**macOS/Metal offscreen shader rendering is verified (2026-09-07).**
+The SkSL string corruption was a libc++ caller/callee layout mismatch
+triggered by `__APPLE__` in SDK consumers. The installed ABI policy and
+static-runtime symbol isolation now fix it; real Metal gradient/readback,
+resize, and device/context recreation pass. See `HISTORY.md` and
+`docs/cxx_runtime.md`. New string ABI and SkSL regression tests are ready
+for Linux/Windows reruns; those hosts were not rerun in this macOS pass.
+
+The broader macOS run passed 115/116 tests. Investigate
+`crtgfx_skia_raster_smoke_runs`: FreeType-backed `drawString()` produces
+no ink pixels. The failure also occurs without the new C++ symbol-isolation
+link option. SkSL compilation and Metal shader readback pass independently.
+
+1. **Finish live GPU presentation everywhere.** Wire
+   `crtgfx_gpu_surface_create()` to an actual on-screen window on each
+   platform (Linux needs either a real `wl_display*`/`wl_surface*`-
+   capable Wayland backend or a deliberate scoped exception to link real
+   `libwayland-client` for just the Vulkan WSI boundary; Windows and
+   macOS have no such gap -- their own existing swap chain/layer
+   presentation code already has everything GPU presentation would
+   need, this is real design work, not a blocker). Graphite stays a
+   later, separately-measured alternative to Ganesh throughout.
 2. **Add hardware decode, phase A.** Enable FFmpeg D3D11VA/D3D12VA,
    VideoToolbox, and VA-API backends, initially downloading decoded frames to
    CPU memory so codec/device selection, fallback, and recovery can be proved

@@ -8,6 +8,205 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-07
+
+- **Resolved the macOS SkSL `std::string::insert(0, ...)` corruption.**
+  The imported libc++ is compiled with `-U__APPLE__`, but Skia's Metal
+  SDK consumers restore `__APPLE__`. At the pinned AOSP LLVM revision,
+  `include/__configuration/abi.h` automatically selects
+  `_LIBCPP_ABI_ALTERNATE_STRING_LAYOUT` on Apple arm64. Consequently
+  SkSLParser/SkSLCompiler constructed strings with a different layout
+  from the compiled `insert()` implementation. The GPU-free expression
+  `"floating-point value is too large: " + std::string(".0001")`
+  reproduced this directly: normal CRT compilation returned 40 correct
+  characters; SDK-enabled compilation returned length 0 and wrong data.
+  This resolves the previously unidentified invalid-free mechanism in
+  the investigation below; compiler swaps could not fix an ABI mismatch.
+  The existing `max_align_t` adjustment was not the cause or the fix.
+
+  `tools/crt-libcxx-build.py` now emits `_LIBCPP_CRT_BIONIC_ABI` into
+  the installed `__config_site` for both standalone runtime drivers.
+  A recorded libcxx recipe patch suppresses only the Apple-inferred
+  string-layout override under that marker. ABI-v1 Bionic layout and
+  the existing `__1` namespace remain unchanged; Skia sources are unmodified.
+  Rebuild/stage the runtime headers, then rebuild affected SDK consumers.
+
+  A second, independently reproduced `std::bad_cast` after this fix
+  came from framework-loaded host libc++ weak-symbol coalescing. Static
+  `crtgfx` consumers now inherit a Mach-O unexported-symbol list for
+  `std::__1`, keeping the embedded runtime's locale/facet definitions
+  local. This is static-runtime isolation, not permission to exchange
+  CRT C++ objects with Apple's libc++.
+
+  Verification on macOS arm64: rebuilt imported libc++ static/shared,
+  passed both original runtime smokes plus new cross-translation-unit
+  string/stream tests (ordinary CRT caller, SDK-enabled callee, Foundation
+  loaded); rebuilt all 779 Skia targets at normal release flags; passed
+  CPU raster coverage and the new GPU-free `crtgfx_skia_sksl_test` (20
+  repetitions of valid shader, overflowing float, unknown identifier).
+  Outside the sandbox, real Metal offscreen rendering passed gradient
+  pixels, readback, resized surfaces, and device/context recreation.
+  Linux/Windows were not executed during this pass; the common regression
+  sources and unchanged non-Apple layout allow the same checks there.
+
+  The full Skia-enabled build completed, including shared libraries;
+  CTest passed 115/116. `crtgfx_skia_raster_smoke_runs` still reports
+  `drawString produced no pixels`. Relinking that test without the new
+  unexported-symbol option reproduces the same failure, so removing
+  symbol isolation is not a remedy. This separate FreeType/raster issue
+  remains open; the full suite is not claimed clean.
+
+## 2026-09-06..2026-09-07
+
+- **macOS/Metal Skia GPU vertical slice (2026-09-06, `gpu-ganesh-metal-macos-slice`,
+  landed as commit `249eef7`): the device/context/surface pipeline works
+  end to end on real Apple Silicon hardware (device enumeration via
+  `MTLCopyAllDevices()`, command queue, `GrDirectContext`, offscreen
+  `SkSurface`, a real non-shader Ganesh draw), and three real, unrelated
+  bugs found along the way were fixed** (`-fcrt-real-apple-sdk` sentinel
+  in `tools/crt-c++` for real-Apple-SDK-header shadowing and a
+  `-Wl,-dead_strip` + Foundation/LaunchServices crash; `SK_BUILD_FOR_MAC`
+  widened from Metal `.mm` files only to all Skia `.cc` files in
+  `tools/build_skia.py`, fixing a real, Skia-author-documented
+  `sem_init()`-on-Darwin bug in `SkSemaphore.cpp`). **Left open at landing
+  time: Ganesh's SkSL-shader path (anything needing a `SkRuntimeEffect`,
+  e.g. a linear gradient) crashes deterministically the first time Skia's
+  built-in SkSL module source is parsed** -- this entry is the multi-day
+  investigation into that crash that followed.
+
+  **Root-caused to a genuine memory-safety bug, not a compiler bug --
+  confirmed but not yet fixed.** The crash's own visible symptom moved
+  under nearly every knob turned (default `-O3`: `SkSL::Parser::call()`'s
+  hidden sret pointer corrupted; `-O0`: no crash, but a silently-wrong
+  `unique_ptr<Program>` and a spurious "missing 'main' function"; `-O3`
+  with tail-call optimization off: back to the original `fill_n`/`stod()`
+  crash; `-O3` with real C++ exceptions instead of `-fno-exceptions`:
+  `basic_string::insert` builds an "unknown identifier" message with a
+  freed pointer) -- which independently ruled out every one of those
+  knobs as the actual cause, since none of them made the underlying
+  corruption go away, only relocated where it became visible.
+
+  **Two real, permanent fixes landed along the way, both real bugs, both
+  independent of the crash itself:**
+  - `include/stddef.h`: `max_align_t` was `typedef long double
+    max_align_t;` (Bionic's own convention, and identical to Apple's own
+    real SDK `stddef.h`) -- correct on every other target this project
+    builds for, but wrong on Apple's arm64 ABI specifically, where `long
+    double` is a plain 8-byte IEEE double (`__LDBL_MANT_DIG__ == 53`, not
+    AAPCS64's own 113-bit quad precision), giving `alignof(max_align_t)
+    == 8` when the platform's real allocator/`operator new` guarantee is
+    16. Confirmed for real via a probe built through the exact same
+    toolchain path Skia uses. Harmless on native Apple software (nothing
+    there sizes its own allocators off `alignof(max_align_t)`), but not
+    harmless here: Skia's own vendored `src/sksl/SkSLMemoryPool.h` sets
+    its arena's sub-allocation alignment to exactly `alignof(std::
+    max_align_t)`, so an 8-byte value there was silently handing out
+    only-8-byte-aligned SkSL AST allocations from an arena whose own
+    top-level allocation (this project's `malloc()`) is reliably
+    16-byte aligned. Fixed by giving Apple/arm64 its own `__attribute__
+    ((aligned(16)))`-forced `max_align_t`, diverging from Apple's own
+    (Skia-unsafe) value on this one point rather than patching Skia's
+    own vendored source (this project's standing policy). Real,
+    verified via the same probe (now reports 16) -- but confirmed
+    *not* the cause of the SkSL crash (the crash reproduces identically
+    with the fix applied).
+  - `-Wl,-unexported_symbols_list` on `*St3__1*`/`*NSt3__1*` (the dyld
+    two-level-namespace weak-symbol-coalescing fix for the separate,
+    already-diagnosed `std::bad_cast` crash from an earlier session) was
+    re-verified for real this time, not just assumed: a from-scratch,
+    27-line, Skia/Metal/GPU-free program that does nothing but
+    `std::stringstream(".0001") >> float` fails to parse `.0001`
+    correctly *and* throws `std::bad_cast` when linked without this
+    flag, and succeeds cleanly (20,000/20,000 calls) with it. Still not
+    wired into `libcrtgfx/CMakeLists.txt`'s own permanent link options
+    for the real `crtgfx_skia_gpu_offscreen_smoke` target -- remains a
+    real, open follow-up.
+
+  **A genuinely minimal, GPU/Metal-free repro was found**, narrowing
+  the entire investigation down from "any Skia GPU draw" to one call:
+  `SkRuntimeEffect::MakeForShader(SkString("half4 main(float2 c){...}"))`
+  alone reproduces the exact same crash with zero window/surface/canvas/
+  Metal device involved, in a ~2MB standalone binary linked directly
+  against the project's own `libskia.a`/imported libc++. Forcing
+  `SkSL::Parser::floatLiteral()`'s own "floating-point value is too
+  large" error path with a deliberately absurd literal (instead of
+  relying on the built-in module's own `.0001`/`1.` literals tripping
+  `SkSL::stod()`) reproduces it just as reliably and needs no dependency
+  on the built-in module's exact content at all.
+
+  **Confirmed a real, genuine heap-safety violation, and that it is not
+  a compiler bug, by swapping compilers on both sides of the crashing
+  call.** Relinking the repro against the project's own real system
+  allocator (`libc/src/malloc.c`'s `malloc.c.o` stripped out of `libc.a`,
+  `-lSystem` supplying the real one instead) turns the crash from an
+  unpredictable downstream symptom into an immediate, clean `malloc:
+  *** error ... pointer being freed was not allocated` -- and running
+  under Apple's own guard-malloc (`DYLD_INSERT_LIBRARIES=/usr/lib/
+  libgmalloc.dylib`) confirms it as a real invalid-free, not merely a
+  double-count. Installed Homebrew LLVM (`brew install llvm`, Homebrew
+  clang 23.1.0, since removed again after this test) specifically to
+  cross-compile: recompiling *only* `SkSLParser.cpp` (the caller,
+  `CRT_HOST_CXX=/opt/homebrew/opt/llvm/bin/clang++`) with the real
+  `libskia.a`/libc++ otherwise untouched still crashes identically;
+  separately recompiling *only* libc++'s own `string.cpp` (the callee,
+  `basic_string::insert`/`__grow_by_and_replace`) with Homebrew clang
+  and relinking it in place of the Apple-clang-built one, caller
+  untouched, *also* still crashes identically. Neither swap changes the
+  crash at all -- ruling out a miscompilation on either side of the
+  call, regardless of which of the two real, independent LLVM forks
+  (Apple Clang 21.0.0, confirmed a stable, non-beta Xcode 26.6 release,
+  not the "beta toolchain" this investigation first assumed; Homebrew
+  Clang 23.1.0) produced the code.
+
+  **LLVM IR for both sides of the call was hand-verified against
+  source and found correct on both**: `SkSLParser.cpp`'s own
+  `"floating-point value is too large: " + std::string(s)` compiles to
+  `operator+(const char*, basic_string&&) -> insert(0, lhs)` exactly per
+  libc++'s own header; libc++'s own precompiled `insert()`/
+  `__grow_by_and_replace` (built once, standalone, via the exact CMake
+  invocation `tools/crt-libcxx-build.py` uses, at `-O0`) matches its own
+  source line for line, including the not-taken fast path and the actual
+  `__grow_by_and_replace` call's argument list. `_LIBCPP_BIG_ENDIAN`/
+  `__BYTE_ORDER__` (relevant because `basic_string`'s short/long-string
+  bit-packing has a real, documented big-endian-only code path) was
+  checked directly and is correctly Little Endian; the `__annotate_new`/
+  `__annotate_delete`/`__annotate_increase` ASan-container-annotation
+  hooks were confirmed to be genuine no-ops (`_LIBCPP_HAS_ASAN &&
+  _LIBCPP_INSTRUMENTED_WITH_ASAN`, neither defined here).
+
+  **`SkSL::Parser::error()`'s whole forwarding chain into
+  `SkSL::Compiler::handleError()`** (`Parser::error(Token, string_view)`
+  -> `Parser::error(Position, string_view)` -> `ErrorReporter::error()`
+  -> `skstd::contains()` -> `handleError()`) was read end to end and is
+  correct: every hop passes the `string_view` by value, `skstd::
+  contains()` is a pure, read-only `str.find()`, and the original
+  concatenated `std::string` temporary's lifetime legitimately spans the
+  whole chain as one C++ full-expression. A same-night hypothesis that
+  the crashing `msg` was a stale reference aliasing `Compiler::
+  fErrorText`'s own reallocated buffer (formed from a live-process trace
+  showing a 115-byte, "tfloating-point value is..."-prefixed string
+  arriving at `handleError()`) did not survive reading this chain's
+  actual source and is explicitly retracted here rather than recorded
+  as a finding -- the exact line where the corruption is introduced
+  remains unidentified.
+
+  **Left as the real, unresolved next step** (see `TODO.md`): the
+  crash is proven to be a real invalid-free/heap-safety violation
+  reachable through `SkSL::Parser::floatLiteral()`'s error-message
+  construction, proven independent of which of two real, unrelated LLVM
+  forks compiles either side of the call, and reproducible in a ~30-line
+  standalone program with no GPU/Metal/window/canvas involved at all --
+  but the exact line responsible for the corruption was not found. A
+  hardware watchpoint set on the exact buffer `operator new` returns
+  (confirmed workable in this same investigation, once linked against
+  the real system allocator) is the concrete next tool to keep using;
+  none of the scratch repro binaries or diagnostic scripts from this
+  investigation were kept in the tree (all lived under `/tmp` and the
+  session's own scratchpad directory), so reproducing them again means
+  re-deriving the same handful of `crt-c++`/link invocations recorded
+  above, not restoring saved files. Nothing from this investigation was
+  committed except the `max_align_t` fix.
+
 ## 2026-09-04
 
 - **Enable Skia GPU rendering: Windows/D3D12 offscreen vertical slice.**

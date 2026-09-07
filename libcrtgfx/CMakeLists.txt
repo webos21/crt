@@ -1320,6 +1320,13 @@ add_library(crtgfx STATIC
   $<TARGET_OBJECTS:crtgfx_backend_objects>
   ${CRTGFX_SKIA_OBJECTS}
 )
+if(CRT_TARGET_OS STREQUAL "macos" AND CRT_USE_IMPORTED_LIBCXX)
+  # Frameworks load Apple's libc++ too. Keep this embedded runtime's weak
+  # std::__1 definitions local, so dyld cannot mix locale/facet instances.
+  set(CRTGFX_LIBCXX_UNEXPORTED "${CMAKE_SOURCE_DIR}/libstdc++/third_party/libcxx/libc++.unexported.exp")
+  target_link_options(crtgfx INTERFACE "LINKER:-unexported_symbols_list,${CRTGFX_LIBCXX_UNEXPORTED}")
+  set_property(TARGET crtgfx APPEND PROPERTY INTERFACE_LINK_DEPENDS "${CRTGFX_LIBCXX_UNEXPORTED}")
+endif()
 if(CRT_TARGET_OS STREQUAL "linux")
   # CRTGFX_XKBCOMMON_LIBRARIES (further down) references libxkbcommon.a by
   # a plain file path, not a real CMake target -- CMake has no way to know
@@ -2178,6 +2185,18 @@ if(CRTGFX_ENABLE_SKIA)
     PASS_REGULAR_EXPRESSION "crtgfx_skia_cpu_coverage: ok"
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_skia_cpu_coverage_runs)
+
+  add_executable(crtgfx_skia_sksl_test ${CRT_STARTUP_OBJECTS} tests/skia_sksl_test.cc)
+  target_link_libraries(crtgfx_skia_sksl_test PRIVATE crt_cxx_build_flags crtgfx)
+  crt_wire_skia_executable(crtgfx_skia_sksl_test)
+  crt_link_startup_end_objects(crtgfx_skia_sksl_test)
+  add_dependencies(crtgfx_skia_sksl_test cxx c crt1 crtgfx)
+  add_test(NAME crtgfx_skia_sksl_test_runs COMMAND crtgfx_skia_sksl_test)
+  set_tests_properties(crtgfx_skia_sksl_test_runs PROPERTIES
+    TIMEOUT 30
+    PASS_REGULAR_EXPRESSION "crtgfx_skia_sksl_test: ok"
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_skia_sksl_test_runs)
 
   # crtgfx_skia_gpu_offscreen_smoke: the real Ganesh GPU offscreen vertical
   # slice's own rendering-correctness coverage (2026-09-03, TODO.md's

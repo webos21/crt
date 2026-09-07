@@ -687,6 +687,9 @@ def common_cmake_args(root, install_prefix, sysroot, rootfs, target_os, windows_
         "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY",
         f"-DCMAKE_INSTALL_PREFIX={install_prefix}",
         "-DCMAKE_BUILD_TYPE=Debug",
+        # Both standalone drivers generate libc++ headers. Persist the ABI
+        # choice in __config_site so SDK-using consumers get the same layout.
+        "-DLIBCXX_EXTRA_SITE_DEFINES=_LIBCPP_CRT_BIONIC_ABI",
         f"-DCMAKE_CXX_FLAGS={cxx_flags}",
         f"-DCMAKE_C_FLAGS={c_flags}",
     ] + compiler_arg_options
