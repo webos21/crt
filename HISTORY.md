@@ -10,8 +10,7 @@ substantive update.
 
 ## 2026-09-07
 
-- **Windows GPU presentation now runs; macOS presentation wiring is
-  implemented and cross-compiled, pending native execution.** Continued
+- **Windows and macOS GPU presentation now run.** Continued
   the in-progress D3D12/DXGI surface work after the Windows demo build.
   GPU windows bypass the software D3D11 swapchain; surface creation,
   RTV clear, command submission, fence reuse, and DXGI Present are wired
@@ -34,12 +33,19 @@ substantive update.
   Windows x86_64 default static/shared build passes, CTest **133/133**,
   and the real desktop demo submits **600 frames and exits 0** (backend
   D3D12, three enumerated devices). This verifies calls/submission, not
-  screenshot-based visual correctness. macOS arm64 and x86_64 compile
-  `gpu.c`, `gpu_metal.c`, and `window_cocoa.c` to Mach-O objects using
-  Clang 22, CRT headers, and no Apple SDK headers; native macOS linking,
-  execution, visual/resize verification remain open. No upstream source
-  was patched. Ganesh-to-surface rendering and Windows/Linux swapchain
-  recreation remain separate work; see `TODO.md` and
+  screenshot-based visual correctness. macOS arm64 now also links and
+  runs on this real macOS host: `crtgfx_gpu_window_demo 120` reports
+  backend **2** (`CRTGFX_GPU_BACKEND_METAL`), **1** Metal device, creates
+  a real swapchain-backed surface, presents **120** frames, and exits 0.
+  The focused GPU API test also passes outside the sandbox:
+  `ctest --test-dir out/macos-host-ninja-debug -R crtgfx_gpu_test_runs`
+  is **1/1**. The same test fails inside the sandbox because Metal device
+  enumeration reports no usable device there, so WindowServer/Metal
+  validation must be run outside the sandbox. macOS x86_64 remains
+  compile-only from this commit's original cross-check; resize/Retina
+  visual inspection is still a follow-up. No upstream source was patched.
+  Ganesh-to-surface rendering and Windows/Linux swapchain recreation
+  remain separate work; see `TODO.md` and
   `docs/libcrtgfx_wayland_plan.md`.
 
 - **Landed the Linux vertical slice of "Finish live GPU presentation

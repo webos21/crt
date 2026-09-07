@@ -470,13 +470,18 @@ default-config ctest also reconfirmed clean, 111/111.
    CAMetalLayer/Metal acquire/clear/present wiring is now implemented
    (2026-09-07 follow-up). Windows x86_64 static/shared build and CTest
    133/133 pass; the desktop demo submits 600 frames and exits 0, including
-   live API ordering checks. macOS arm64/x86_64 object compilation passes
-   without Apple SDK headers; native linking/execution, visual animation,
-   resize and Retina/backing-scale verification still need a macOS host.
-   Metal rejects acquire budgets below one second because nextDrawable
-   exposes a fixed wait, not an arbitrary timeout. Windows/Linux resize
-   recreation and visual verification remain open. Graphite stays a
-   later, separately-measured alternative to Ganesh throughout.
+   live API ordering checks. macOS arm64 is now natively verified on this
+   real macOS host too: `crtgfx_gpu_window_demo 120` reports Metal backend
+   2, one device, a real swapchain-backed surface, 120 presented frames,
+   and exit 0; `crtgfx_gpu_test_runs` also passes when run outside the
+   sandbox. Metal rejects acquire budgets below one second because
+   `nextDrawable` exposes a fixed wait, not an arbitrary timeout. Still
+   open: real Linux on-screen verification outside WSL, macOS x86_64
+   native execution, resize/swapchain recreation on all GPU hosts, visual
+   verification beyond successful present calls, and wiring the
+   already-proven offscreen Ganesh pipeline onto a surface's own acquired
+   image. Graphite stays a later, separately-measured alternative to
+   Ganesh throughout.
 2. **Add hardware decode, phase A.** Enable FFmpeg D3D11VA/D3D12VA,
    VideoToolbox, and VA-API backends, initially downloading decoded frames to
    CPU memory so codec/device selection, fallback, and recovery can be proved
