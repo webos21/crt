@@ -516,19 +516,47 @@ default-config ctest also reconfirmed clean, 111/111.
    `-setDrawableSize:` path succeeded every single time (zero failures
    in the demo's own resize-error log path), and the process stayed
    alive and responsive throughout, confirmed by screenshots taken
-   mid-resize showing the live animated color still updating. All three
-   hosts are now real-hardware-verified for resize/swapchain recreation,
-   closing this item out in full. See `docs/libcrtgfx_wayland_plan.md`'s
-   own "Resize/swapchain recreation on all GPU hosts" section for the
-   full per-host trail.
+   mid-resize showing the live animated color still updating. Windows and
+   macOS are real-hardware-verified for resize/swapchain recreation.
+   **Linux is not** -- see `docs/libcrtgfx_wayland_plan.md`'s own
+   "Resize/swapchain recreation on all GPU hosts" section for the
+   per-host trail, and the real, open blocker just below.
 
-   Still open: real Linux on-screen verification outside WSL, macOS
-   x86_64 native execution, visual verification beyond successful
-   present calls (this pass confirmed liveness/no-crash and continued
-   animation through resize, not pixel-exact post-resize framebuffer
-   content), and wiring the already-proven offscreen Ganesh pipeline onto
-   a surface's own acquired image. Graphite stays a later, separately-
-   measured alternative to Ganesh throughout.
+   **Real Linux on-screen verification (not WSL), attempted 2026-09-07,
+   found and root-caused a genuine external blocker, not yet resolved:**
+   `crtgfx_gpu_window_demo` deadlocks 100% reproducibly inside
+   `vkGetPhysicalDeviceSurfaceCapabilitiesKHR` on real Linux aarch64
+   hardware (GNOME/Wayland, Mesa 25.2.8/lavapipe) -- surface *creation*
+   itself never completes, so `crtgfx_gpu_surface_resize()` was never
+   actually reachable to test at all on this host. Root-caused with real
+   evidence (via `lldb`, once a real unrelated debuginfod-network-hang
+   snag in this sandbox was found and fixed) to be a genuine deadlock
+   entirely inside Mesa's own lavapipe driver + libwayland-client
+   (`wl_proxy_create_wrapper` self-locking a non-recursive `wl_display`
+   mutex) -- confirmed NOT this project's own bug (its own code appears
+   only at the correct, standard Vulkan API call site, nothing above it
+   in the backtrace) and NOT the `VkLayer_MESA_device_select` deadlock
+   class already known and fixed upstream for a *different* scenario
+   (Mesa issue #15168/MR !38252 -- the compositor itself deadlocking
+   talking to itself during GPU hotplug; ruled out here specifically,
+   `NODEVICE_SELECT=1` doesn't change this hang at all). No existing
+   upstream Mesa issue matches after a thorough search. See `HISTORY.md`'s
+   2026-09-07 entry (topmost) for the full investigation trail (every
+   hypothesis tested and ruled out) and the real backtrace. A complete
+   draft bug report is saved at `docs/issue_mesa.md`, ready to file
+   (this session has no GitLab login to submit it directly). Until Mesa
+   fixes this (or a workaround is found), real Linux on-screen GPU
+   presentation stays blocked upstream -- the offscreen Ganesh/Vulkan
+   path (`crtgfx_skia_gpu_offscreen_smoke`, no `wl_surface` involved)
+   is unaffected and already verified on this same host.
+
+   Also still open: macOS x86_64 native execution, visual verification
+   beyond successful present calls (the Windows/macOS resize pass
+   confirmed liveness/no-crash and continued animation through resize,
+   not pixel-exact post-resize framebuffer content), and wiring the
+   already-proven offscreen Ganesh pipeline onto a surface's own
+   acquired image. Graphite stays a later, separately-measured
+   alternative to Ganesh throughout.
 2. **Add hardware decode, phase A.** Enable FFmpeg D3D11VA/D3D12VA,
    VideoToolbox, and VA-API backends, initially downloading decoded frames to
    CPU memory so codec/device selection, fallback, and recovery can be proved

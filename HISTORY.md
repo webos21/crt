@@ -10,6 +10,84 @@ substantive update.
 
 ## 2026-09-07
 
+- **Root-caused, on real Linux aarch64 hardware, why the native-Wayland GPU
+  presentation vertical slice (`de9adc3`) has never actually shown a window
+  on screen: a real, reproducible deadlock inside Mesa's own lavapipe
+  driver, not a bug in this project's code.** The user asked directly to
+  verify the just-landed resize/swapchain-recreation work
+  (`crtgfx_gpu_surface_resize()`, `0fbf8d3`) on this real machine (not
+  WSL, which bypasses the native Wayland backend entirely and so was
+  never a real test of this path). `crtgfx_gpu_window_demo` hangs 100%
+  reproducibly inside `vkGetPhysicalDeviceSurfaceCapabilitiesKHR`, on the
+  main thread, immediately after `vkCreateWaylandSurfaceKHR` and
+  `vkGetPhysicalDeviceSurfaceSupportKHR` have both already returned
+  `VK_SUCCESS` for the same real `VkSurfaceKHR` -- meaning
+  `crtgfx_gpu_surface_resize()` itself was never actually reachable to
+  test at all; surface *creation* never completes.
+
+  Root-caused with real evidence, not guessed, across several sessions:
+  1. Independently confirmed this is not a blanket "lavapipe + this
+     GNOME session is broken" issue -- `vkcube-wayland` (installed via
+     `vulkan-tools`) renders continuously on the identical host/
+     compositor/Mesa version, no hang.
+  2. Ruled out several real, testable hypotheses one at a time:
+     `VkLayer_MESA_device_select` involvement (`NODEVICE_SELECT=1`, no
+     change), every Vulkan implicit layer at once
+     (`VK_LOADER_LAYERS_DISABLE=~implicit~`, no change), llvmpipe's own
+     worker-thread pool (`LP_NUM_THREADS=1`, no change), and a starved
+     client-side Wayland event queue (an explicit `wl_display_roundtrip()`
+     inserted right after `vkCreateWaylandSurfaceKHR`, confirmed to
+     complete normally on its own, still doesn't unblock the later
+     capabilities call).
+  3. `gdb` couldn't attach (this sandbox blocks `PTRACE_ATTACH`/`SEIZE` to
+     an already-running process; a batch-mode `gdb -ex run` session
+     partially worked but the interactive-signal/multi-Bash-call
+     choreography needed for a clean multi-thread backtrace kept
+     breaking). `lldb` (`lldb-18`) succeeded once one unrelated real
+     snag was found and fixed: it hung on `target create` for *any*
+     binary, tracked down to a debuginfod (external symbol server)
+     network lookup that never returns in this sandbox --
+     `settings set symbols.enable-external-lookup false` fixed it, then
+     a small Python script driven through `lldb -b -o "command script
+     import ..."` (launch, sleep, `process.Stop()`, dump every thread's
+     full backtrace, kill) got a clean, complete, single-shot capture.
+  4. The real backtrace: the main thread is blocked in
+     `pthread_mutex_lock`, called from `libwayland-client.so.0`'s own
+     real `wl_proxy_create_wrapper()`, called from three frames of
+     `libvulkan_lvp.so`-internal code, called from this project's own
+     (correct, standard) `vkGetPhysicalDeviceSurfaceCapabilitiesKHR`
+     call site. This project's own code appears nowhere above that call
+     site. All 10 other threads are llvmpipe's own idle rasterizer
+     worker pool (`pthread_cond_wait`), unrelated. Since only the main
+     thread ever touches the Wayland connection and it is the very
+     thread trying to (re-)acquire `wl_display`'s own non-recursive
+     mutex, this is a self-deadlock inside Mesa's own call chain, not a
+     multi-thread race.
+  5. Searched `gitlab.freedesktop.org/mesa/mesa`'s own issue tracker
+     thoroughly (direct WebFetch/curl are blocked there by Anubis bot
+     protection, but the real, JS-capable Browser pane gets through)
+     across many keyword combinations -- no existing issue matches.
+     Found and ruled out the closest match, #15168 ("Deadlock in
+     vkEnumeratePhysicalDevices during monitor hotplug on dual-GPU (i915
+     + nouveau) -- regression in 25.2", the exact same installed Mesa
+     25.2.8, fixed by MR !38252 but only in 25.3, never backported to
+     25.2): that one is the Wayland *compositor itself* (mutter/zink)
+     deadlocking talking to itself during GPU hotplug, fixed entirely
+     within the `device-select`/`zink` layer (confirmed by reading the
+     MR's own file scope) -- a different process role and a different
+     code path from this project's own plain-client, no-hotplug
+     scenario, consistent with `NODEVICE_SELECT=1` not helping here.
+
+  A full draft Mesa GitLab issue (title, system info, exact repro steps,
+  the real backtrace, and everything ruled out above) is saved at
+  `docs/issue_mesa.md`, not yet filed upstream (this session has no
+  GitLab login) -- the user will submit it from their own account.
+  `crtgfx_gpu_surface_resize()` itself stays unverified on real Linux
+  on-screen hardware until this upstream Mesa blocker is fixed or
+  otherwise routed around; the offscreen Ganesh/Vulkan path
+  (`crtgfx_skia_gpu_offscreen_smoke`, no `wl_surface` involved) remains
+  unaffected and already verified.
+
 - **Real macOS/Metal hardware verification of `crtgfx_gpu_surface_resize()`
   (live window resize/swapchain recreation), closing the "reasoned but
   not locally verified" gap the entry below left open the same day.**
