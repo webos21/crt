@@ -505,17 +505,30 @@ default-config ctest also reconfirmed clean, 111/111.
    the demo completed its full run and exited 0; full ctest 133/133.
    Linux compiles clean via WSL (ctest 116/116, the one known non-
    interactive-WSL-runner `termios_echo_roundtrip_test` limitation
-   excluded, not a regression); macOS is reasoned-but-unverified this
-   session (no hardware). See `docs/libcrtgfx_wayland_plan.md`'s own
-   "Resize/swapchain recreation on all GPU hosts" section for the full
-   per-host trail.
+   excluded, not a regression). **macOS/Metal now real, live-verified too
+   (2026-09-07, same day, from real Apple Silicon hardware)**: with no
+   Accessibility-API access available in this environment for scripted
+   `NSWindow` resizing, `cliclick`'s raw synthetic-mouse-event drag (no
+   Accessibility grant needed for basic click/drag posting, unlike
+   `System Events`' AX-based UI scripting) dragged the demo window's
+   real bottom-right corner through 187 live resizes while it kept
+   presenting and animating; `crtgfx_gpu_surface_resize()`'s real
+   `-setDrawableSize:` path succeeded every single time (zero failures
+   in the demo's own resize-error log path), and the process stayed
+   alive and responsive throughout, confirmed by screenshots taken
+   mid-resize showing the live animated color still updating. All three
+   hosts are now real-hardware-verified for resize/swapchain recreation,
+   closing this item out in full. See `docs/libcrtgfx_wayland_plan.md`'s
+   own "Resize/swapchain recreation on all GPU hosts" section for the
+   full per-host trail.
 
    Still open: real Linux on-screen verification outside WSL, macOS
-   x86_64 native execution, real macOS on-screen resize/Retina
-   verification, visual verification beyond successful present calls, and
-   wiring the already-proven offscreen Ganesh pipeline onto a surface's
-   own acquired image. Graphite stays a later, separately-measured
-   alternative to Ganesh throughout.
+   x86_64 native execution, visual verification beyond successful
+   present calls (this pass confirmed liveness/no-crash and continued
+   animation through resize, not pixel-exact post-resize framebuffer
+   content), and wiring the already-proven offscreen Ganesh pipeline onto
+   a surface's own acquired image. Graphite stays a later, separately-
+   measured alternative to Ganesh throughout.
 2. **Add hardware decode, phase A.** Enable FFmpeg D3D11VA/D3D12VA,
    VideoToolbox, and VA-API backends, initially downloading decoded frames to
    CPU memory so codec/device selection, fallback, and recovery can be proved

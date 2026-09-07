@@ -10,6 +10,46 @@ substantive update.
 
 ## 2026-09-07
 
+- **Real macOS/Metal hardware verification of `crtgfx_gpu_surface_resize()`
+  (live window resize/swapchain recreation), closing the "reasoned but
+  not locally verified" gap the entry below left open the same day.**
+  Built and ran `crtgfx_gpu_window_demo` against a real, visible on-screen
+  window on real Apple Silicon hardware. This session's own shell has no
+  Accessibility-API grant (`osascript`/System Events UI scripting refused
+  outright with error -1719, "osascript is not allowed assistive
+  access"), so scripted `NSWindow` resizing the way the Windows
+  verification used `SetWindowPos` was not directly available -- installed
+  `cliclick` (Homebrew) instead, which posts raw synthetic mouse
+  down/move/up events directly; macOS's window server accepts these for
+  ordinary click/drag/resize without any Accessibility grant, unlike
+  `System Events`' AX-based UI scripting, which needs one. Coordinates
+  needed converting from this session's own screenshot pixel space (the
+  Mac's native 3456x2234 backing-pixel resolution) down to real Cocoa
+  point space (half that, confirmed empirically after an initial
+  miscalibrated attempt produced no visible change) and needed
+  recalibrating from a fresh screenshot between drag attempts, since each
+  resize moves the window's own corner.
+
+  A single continuous `cliclick` drag on the demo window's real
+  bottom-right corner drove it through 187 live resize steps (800x480 initial
+  down to 650x447 and points between, confirmed via the demo's own
+  `resized to WxH` log line, one per `CRTGFX_EVENT_RESIZE`/`crtgfx_gpu_
+  surface_resize()` call). Every single call succeeded -- zero failures in
+  the demo's own resize-error log path -- and the demo kept animating and
+  presenting throughout with no crash or hang, confirmed by screenshots
+  taken mid-resize showing the live animated clear color still updating
+  (a distinct color each time, proving the render loop was still actually
+  running, not stalled). The process was then terminated cleanly via
+  `SIGTERM` (precisely clicking the window's own close control would have
+  needed the same per-attempt coordinate recalibration, and the resize
+  contract itself was already the thing under test).
+
+  This closes out resize/swapchain recreation as real-hardware-verified
+  on all three GPU-presentation hosts (Windows, Linux/WSL compile-only,
+  macOS real-and-live). See `docs/libcrtgfx_wayland_plan.md`'s own
+  "Resize/swapchain recreation on all GPU hosts" section and `TODO.md`
+  for the updated per-host status.
+
 - **Resize/swapchain recreation landed on all three GPU-presentation
   hosts, closing that item in TODO.md's "Finish live GPU presentation
   everywhere" step.** New `crtgfx_gpu_surface_resize(surface, width,

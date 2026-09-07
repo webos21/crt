@@ -335,8 +335,8 @@ out-of-order misuse guard every other call already has), rejected for a
   caller's raw request" convention -- this function reads the layer's own
   `-contentsScale` (set once, correctly, by `crtgfx_cocoa_get_metal_
   layer()` at surface-create time) and applies it before comparing
-  against or storing into the real-pixel fields. Reasoned-but-not-
-  locally-verified this session (no macOS hardware).
+  against or storing into the real-pixel fields. **Real, live-verified
+  on macOS the same day** (see the verification paragraph below).
 
 Verification: **Windows, real and live** -- `crtgfx_gpu_window_demo.exe`
 run against a real, visible desktop window while a separate script
@@ -352,18 +352,34 @@ real structural limitation as the rest of this vertical slice -- WSL has
 no real Wayland compositor to actually open a window against), full
 `ctest` 116/116 (`termios_echo_roundtrip_test` excluded, a pre-existing,
 unrelated non-interactive-WSL-runner limitation, not a regression -- see
-this project's own memory on that). **macOS**: not compiled or run this
-session (no macOS hardware) -- reasoned from `crtgfx_cocoa_get_metal_
-layer()`'s own already-verified real scale-handling precedent, flagged
-unverified, matching every other macOS-only addition in this file.
-Real on-screen macOS/Retina resize verification remains the user's own
-separate step, same as this file's other macOS-only work.
+this project's own memory on that). **macOS, real and live (2026-09-07,
+same day, from real Apple Silicon hardware)**: `crtgfx_gpu_window_demo`
+run against a real, visible on-screen window; this session's own shell
+has no Accessibility-API grant (`osascript`/System Events UI scripting
+refused with error -1719), so `cliclick` was used instead -- it posts
+raw synthetic mouse events directly, which macOS's window server accepts
+for ordinary click/drag/resize without an Accessibility grant, unlike
+AX-based UI scripting. A `cliclick` drag on the demo window's real
+bottom-right corner (recalibrated between attempts from fresh
+screenshots, since the coordinate math needed converting this session's
+screenshot pixel space down to real Cocoa point space) drove the window
+through 187 live resize steps in one continuous drag; every single
+`crtgfx_gpu_surface_resize()` call succeeded (zero failures in the
+demo's own resize-error log path), and the demo kept animating and
+presenting throughout with no crash or hang, confirmed by screenshots
+taken mid-resize showing the live animated clear color still updating.
+The process was then terminated cleanly (`SIGTERM`) rather than via the
+window's own close control, since precisely clicking that control needed
+the same per-attempt coordinate recalibration and the resize contract
+itself was already the thing under test.
 
 Still open: Ganesh-to-surface rendering (wiring the already-proven
 offscreen Ganesh pipeline onto a surface's own acquired image instead of
 the current deliberate solid-color `_clear()` stand-in), real Linux
 on-screen verification outside WSL, macOS x86_64 native execution, and
-real macOS on-screen resize/Retina verification.
+pixel-exact post-resize framebuffer verification (this pass confirmed
+liveness/no-crash and continued animation through resize, not
+pixel-exact content).
 
 ## Linux Native Wayland Backend + GPU Presentation (2026-09-07, first cut)
 
