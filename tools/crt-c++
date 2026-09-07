@@ -119,6 +119,7 @@ windows_host_arg() {
 #    order) -- see this file's own -U__APPLE__ case branch below for
 #    where this is added back.
 want_real_apple_sdk=0
+source_file=""
 
 user_args=""
 for arg in "$@"; do
@@ -142,9 +143,52 @@ for arg in "$@"; do
         user_args="$user_args $(printf '%s\n' "$arg")"
       fi
       ;;
+    *.cc|*.cpp|*.cxx|*.c|*.mm|*.m|*.S|*.s)
+      # Remember the actual source file being compiled -- see the -fcrt-
+      # real-apple-sdk per-file narrowing right after this loop, which
+      # needs to know which file this compile is actually for.
+      source_file="$arg"
+      user_args="$user_args $(printf '%s\n' "$arg")"
+      ;;
     *) user_args="$user_args $(printf '%s\n' "$arg")" ;;
   esac
 done
+
+# extra_cflags_cc (a single, blanket GN arg -- see tools/build_skia.py)
+# puts -fcrt-real-apple-sdk on literally every Skia .cc file's own command
+# line -- it was widened there (2026-09-04) from extra_cflags_objcc (.mm
+# files only) because two plain C++ files transitively need real Apple
+# headers too (SkSemaphore.cpp's <dispatch/dispatch.h>, SkMemory_malloc.
+# cpp's <malloc/malloc.h> -- see tools/build_skia.py's own comment for the
+# full sem_init()-on-Darwin history this fixed). GN's extra_cflags_cc has
+# no per-file granularity, so that widening is a blanket flag on every
+# .cc file's own command line -- confirmed empirically (2026-09-07,
+# rebuilding after an attempted narrow allowlist here) that it is not
+# just those two files either: src/utils/mac/SkCTFont.cpp,
+# SkCTFontCreateExactCopy.cpp and SkCreateCGImageRef.cpp all fail to
+# compile without it too (real ApplicationServices.h/CoreText/CoreGraphics
+# headers), and there is no reason to expect that list is exhaustive.
+# Denying the two specific files confirmed to actively break under real
+# Apple headers is the narrow, evidence-backed fix instead: SkOSFile_
+# posix.cpp and SkOSFile_stdio.cpp are the only Skia sources that call
+# opendir()/readdir()/stat() directly (grepped for real, 2026-09-07), and
+# they want this project's own <dirent.h>/<sys/stat.h> (Bionic shape),
+# not Apple's -- confirmed via lldb that SkOSFile_posix.cpp compiled
+# under the real Apple SDK reads entry->d_name at the wrong byte offset
+# (struct dirent's own real-vs-Bionic layouts disagree on where d_name
+# starts), so SkOSFile::Iter::next() never matches a single real font
+# file and every Skia typeface silently ends up fontless. Widening this
+# project's own <dirent.h> to match Apple's real layout instead (this
+# project's headers describe this project's own from-scratch libc, not
+# Apple's) or dropping the flag from extra_cflags_cc entirely (reopening
+# the sem_init()-on-Darwin bug for every other file) would both be worse
+# fixes than simply keeping these two specific files on this project's
+# own POSIX headers, same as before the 2026-09-04 widening.
+if [ "$target_os" = macos ] && [ "$want_real_apple_sdk" -eq 1 ]; then
+  case "$source_file" in
+    */SkOSFile_posix.cpp|*/SkOSFile_stdio.cpp) want_real_apple_sdk=0 ;;
+  esac
+fi
 
 compile_only=0
 shared_mode=0

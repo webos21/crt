@@ -10,6 +10,83 @@ substantive update.
 
 ## 2026-09-07
 
+- **Resolved the remaining `crtgfx_skia_raster_smoke_runs` FreeType/font
+  failure ("drawString produced no pixels"), left open by the entry
+  directly below.** Root cause: `-fcrt-real-apple-sdk` (see that
+  sentinel's own comment in `tools/crt-c++`) had been widened
+  (2026-09-04, see the `gpu-ganesh-metal-macos-slice` entry further
+  below) from Objective-C++ `.mm` files only to literally every Skia
+  `.cc` file, via `extra_cflags_cc` in `tools/build_skia.py`. GN's
+  `extra_cflags_cc` has no per-file granularity, so that one blanket
+  flag reached `src/ports/SkOSFile_posix.cpp` too, which never needed a
+  real Apple header at all -- confirmed for real via live lldb tracing:
+  `struct dirent` has a different byte offset for `d_name` in this
+  project's own `include/dirent.h` (offset 9: `ino_t d_ino; unsigned
+  char d_type; char d_name[256];`) than in Apple's real 64-bit-inode
+  `<dirent.h>` (offset 21: `d_ino`(8) + `d_seekoff`(8) + `d_reclen`(2) +
+  `d_namlen`(2) + `d_type`(1)). `opendir()`/`readdir()` both succeeded
+  (confirmed via `nm`: this project's own non-weak `_opendir`/`_readdir`
+  Mach-O symbols), but `SkOSFile::Iter::next()` read `entry->d_name` at
+  the wrong offset -- landing in zero-padding for short names like `.`
+  and `..`, the first two entries any `readdir()` returns -- so it
+  matched zero real font files. `SkFontMgr_New_Custom_Directory` came
+  back with an empty font manager, `crtgfx_skia_default_typeface()`
+  silently fell through its whole match chain to
+  `legacyMakeTypeface(nullptr, ...)` (non-null but fontless), and
+  `SkTypeface_FreeType::onCharsToGlyphs()` zero-filled every glyph ID
+  without ever reaching `FT_Open_Face`. The full chain was traced live,
+  frame by frame: `SkCanvas::drawString` -> `onCharsToGlyphs` -> `AutoFT
+  Access`/`getFaceRec()`/`FaceRec::Make()` (null because `makeFontData()`
+  is null) -> `crtgfx_skia_default_typeface()`'s fallback chain ->
+  `DirectorySystemFontLoader::load_directory_fonts()` ->
+  `SkOSFile::Iter::next()`.
+
+  Fixed in `tools/crt-c++` itself: the wrapper now tracks which source
+  file it is actually compiling and force-disables
+  `-fcrt-real-apple-sdk`'s real-header-reordering effect for
+  `SkOSFile_posix.cpp` and `SkOSFile_stdio.cpp` specifically (the only
+  two Skia sources that call `opendir()`/`readdir()`/`stat()` directly,
+  confirmed by grepping the vendored tree), regardless of the blanket
+  flag GN puts on their command line. An initial attempt did the
+  opposite -- an allowlist keeping the real SDK only for the two files
+  `tools/build_skia.py`'s own comment already named
+  (`SkSemaphore.cpp`/`SkMemory_malloc.cpp`) -- but rebuilding
+  immediately proved that list incomplete: `src/utils/mac/SkCTFont.cpp`,
+  `SkCTFontCreateExactCopy.cpp`, and `SkCreateCGImageRef.cpp` also
+  failed to compile without real `ApplicationServices.h`/CoreText/
+  CoreGraphics headers, with no reason to expect that second list is
+  exhaustive either. Denying the two confirmed-bad files is the
+  narrow, evidence-backed fix; widening this project's own `<dirent.h>`
+  to match Apple's real layout, or dropping the flag from
+  `extra_cflags_cc` entirely (reopening the `sem_init()`-on-Darwin bug
+  the 2026-09-04 widening fixed), would both have been worse.
+
+  A real methodological trap along the way, worth recording: ninja
+  hashes the literal command line it invokes, not a wrapper script's
+  internal logic, so editing `tools/crt-c++` alone does not make ninja
+  recompile anything -- objects already built under the old wrapper
+  behavior are (wrongly) considered up to date. An initial rebuild after
+  landing the fix reused ~17 objects left over from the earlier,
+  abandoned allowlist attempt (whose command lines never changed), and
+  that mixed-flag build produced a real crash (`SkString::equals` on a
+  garbage pointer inside `GrGLSLVaryingHandler::addAttribute`, deep in
+  Ganesh shader-variable naming, reached from
+  `crtgfx_skia_gpu_offscreen_smoke`) that reproduced consistently,
+  including outside this session's own sandbox. Bisected by stashing the
+  `tools/crt-c++` change, fully cleaning Skia's `obj/`, and rebuilding
+  from scratch with the original (pre-fix) wrapper: the GPU offscreen
+  test passed cleanly. Restoring the fix and repeating a genuinely full
+  clean rebuild (not just relinking) made both
+  `crtgfx_skia_raster_smoke` and `crtgfx_skia_gpu_offscreen_smoke` pass
+  -- the crash was stale-object contamination from the iteration
+  process, not a defect in the final fix itself.
+
+  Verification on macOS arm64: full clean rebuild of Skia (817 ninja
+  steps) and of the whole `crtgfx-skia-smoke` preset; `ctest` now passes
+  116/116, including both `crtgfx_skia_raster_smoke_runs` (real
+  Pretendard GOV / DejaVu Sans Mono glyphs now rasterize) and
+  `crtgfx_skia_gpu_offscreen_smoke_runs`.
+
 - **Resolved the macOS SkSL `std::string::insert(0, ...)` corruption.**
   The imported libc++ is compiled with `-U__APPLE__`, but Skia's Metal
   SDK consumers restore `__APPLE__`. At the pinned AOSP LLVM revision,

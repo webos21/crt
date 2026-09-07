@@ -374,8 +374,11 @@ memory-allocator fallback entirely, not just make it optional --
 `skgpu::VulkanMemoryAllocator` instead.
 
 Full ctest suite clean on Linux (WSL) and Windows; macOS re-verification
-pending (this slice touches no macOS code at all -- `gpu.c` there is
-unchanged, still honest `CRTGFX_GPU_BACKEND_NONE`/`UNSUPPORTED`). See
+was pending at landing time (this slice touches no macOS code at all --
+`gpu.c` there was unchanged, still honest `CRTGFX_GPU_BACKEND_NONE`/
+`UNSUPPORTED`) -- macOS got its own separate GPU backend via the
+Metal slice below instead, so this Vulkan slice's own macOS gap closed
+that way rather than by re-running this exact code there. See
 `HISTORY.md`'s 2026-09-03 entry for the full trail.
 
 **Enable Skia GPU rendering -- Windows/D3D12 offscreen vertical slice
@@ -403,22 +406,29 @@ device-loss/recovery cycle. Full ctest suite clean, single-pass, on
 Windows (131/131) and Linux/WSL (crtgfx-skia-smoke 115/115 + main
 117/117, confirming zero regression to the Vulkan slice or the unrelated
 libcxx/libunwind bootstrap from the shared win32_shim/crt-ar changes);
-macOS re-verification stays separately pending, same as the Vulkan slice.
+macOS re-verification was separately pending at landing time, same as
+the Vulkan slice -- closed by the macOS/Metal slice directly below.
 See `HISTORY.md`'s 2026-09-04 entry for the full trail (the raw-SDK dead
 end, every individual header/link gap found, and how each was fixed).
 
-**macOS/Metal offscreen shader rendering is verified (2026-09-07).**
-The SkSL string corruption was a libc++ caller/callee layout mismatch
-triggered by `__APPLE__` in SDK consumers. The installed ABI policy and
-static-runtime symbol isolation now fix it; real Metal gradient/readback,
-resize, and device/context recreation pass. See `HISTORY.md` and
-`docs/cxx_runtime.md`. New string ABI and SkSL regression tests are ready
-for Linux/Windows reruns; those hosts were not rerun in this macOS pass.
-
-The broader macOS run passed 115/116 tests. Investigate
-`crtgfx_skia_raster_smoke_runs`: FreeType-backed `drawString()` produces
-no ink pixels. The failure also occurs without the new C++ symbol-isolation
-link option. SkSL compilation and Metal shader readback pass independently.
+**Skia GPU rendering is now enabled and verified on all three target
+hosts -- macOS/Metal is the last of the three to land (2026-09-07),
+closing out the macOS gap the Linux/Vulkan and Windows/D3D12 slices
+above each left open.** The SkSL string corruption blocking this slice
+was a libc++ caller/callee layout mismatch triggered by `__APPLE__` in
+SDK consumers; the installed ABI policy and static-runtime symbol
+isolation fix it, and real Metal gradient/readback, resize, and device/
+context recreation all pass. A second, separate bug found and fixed the
+same day -- `crtgfx_skia_raster_smoke_runs`'s FreeType-backed
+`drawString()` producing no ink pixels, a `-fcrt-real-apple-sdk`-widened
+`struct dirent` layout mismatch in `SkOSFile_posix.cpp`, unrelated to the
+C++ symbol-isolation link option -- closed the macOS-side gap
+completely: full ctest suite clean, 116/116. See `HISTORY.md`'s
+2026-09-07 entries and `docs/cxx_runtime.md` for the full trail. New
+string ABI and SkSL regression tests landed in this pass are ready for a
+Linux/Windows rerun; those two hosts were not rerun in this macOS-only
+pass, so their own already-clean ctest runs above stay the last
+confirmed result for each.
 
 1. **Finish live GPU presentation everywhere.** Wire
    `crtgfx_gpu_surface_create()` to an actual on-screen window on each
