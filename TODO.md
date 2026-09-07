@@ -426,23 +426,18 @@ C++ symbol-isolation link option -- closed the macOS-side gap
 completely: full ctest suite clean, 116/116. See `HISTORY.md`'s
 2026-09-07 entries and `docs/cxx_runtime.md` for the full trail.
 
-**Windows reran clean the same day**: a full rebuild (Skia + the new
-`_LIBCPP_CRT_BIONIC_ABI`-patched libc++) plus the new `crtgfx_skia_sksl_test`
-and `crtgfx_skia_gpu_offscreen_smoke` (its own full device-loss/recovery
-cycle included) both pass, and the full ctest suite is clean, 132/132 (up
-from 131 -- the new SkSL test). Linux was not re-run the same way this
-time: the ABI patch's own real guard (`#if defined(__APPLE__) &&
-!defined(_LIBCPP_CRT_BIONIC_ABI)`, `libstdc++/third_party/libcxx/
-recipe.json`) only ever changes behavior when `__APPLE__` is defined,
-which Linux (like Windows) never does -- a full from-scratch Linux
-rebuild was started to confirm this directly but a local WSL/DrvFs
-(`/mnt/c/...`) environment-speed limitation made it impractically slow
-to finish in-session (Skia's own ~800-object rebuild alone was tracking
-toward 5+ hours); Windows' own already-clean rerun on the identical
-patch, plus the guard's own unconditional-no-op-outside-`__APPLE__`
-shape, is the accepted basis for treating Linux as unaffected without
-a from-scratch local rerun. Linux's own last real, full rebuild-and-test
-run stays the one recorded further above.
+**Windows and Linux both reran clean the same day**, closing the "not
+rerun" gap completely: full from-scratch rebuilds (Skia + the new
+`_LIBCPP_CRT_BIONIC_ABI`-patched libc++) plus the new
+`crtgfx_skia_sksl_test` and `crtgfx_skia_gpu_offscreen_smoke` (its own
+full device-loss/recovery cycle included) pass on both -- Windows full
+ctest 132/132, Linux (WSL) full ctest 116/116 (both up by one, the new
+SkSL test), zero regressions on either. The Linux rebuild was genuinely
+slow in this local WSL/DrvFs (`/mnt/c/...`) environment (the ~800-object
+Skia rebuild alone took several hours of real wall-clock time, confirmed
+throughout via `ps` as real, ongoing work rather than a hang) but did
+complete and pass in full. All three hosts (Linux, Windows, macOS) are
+now empirically confirmed clean for this patch.
 
 1. **Finish live GPU presentation everywhere.** Wire
    `crtgfx_gpu_surface_create()` to an actual on-screen window on each

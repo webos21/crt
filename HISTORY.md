@@ -10,26 +10,27 @@ substantive update.
 
 ## 2026-09-07
 
-- **Re-verified Windows against the macOS libc++ ABI patch
-  (`_LIBCPP_CRT_BIONIC_ABI`) and the new SkSL/string-ABI regression
-  tests, closing the "not rerun on Linux/Windows" gap the macOS-only
-  pass below left open, for Windows.** A full rebuild (Skia plus libc++
-  recompiled with the new site-define) plus `crtgfx_skia_sksl_test`
-  (new) and `crtgfx_skia_gpu_offscreen_smoke` (its own full device-loss/
-  recovery cycle) both pass; full ctest suite clean, 132/132 (up from
-  131 -- the new SkSL test). Linux was not re-verified the same way this
-  time: a from-scratch rebuild was started to confirm it directly, but
-  this local WSL/DrvFs (`/mnt/c/...`) environment made the ~800-object
-  Skia rebuild alone impractically slow to finish in-session (tracking
-  toward 5+ hours at its observed rate, confirmed still making real
-  progress via `ps`, not hung). Accepted Windows' own clean rerun plus a
-  direct read of the patch's own real guard (`#if defined(__APPLE__) &&
-  !defined(_LIBCPP_CRT_BIONIC_ABI)`, `libstdc++/third_party/libcxx/
-  recipe.json`) -- which only ever changes behavior when `__APPLE__` is
-  defined, true on neither Linux nor Windows -- as sufficient grounds
-  to treat Linux as unaffected without completing that from-scratch
-  local rerun; Linux's own last real, full rebuild-and-test run (Vulkan
-  slice, 2026-09-04) stays the last empirically confirmed result there.
+- **Re-verified both Windows and Linux against the macOS libc++ ABI
+  patch (`_LIBCPP_CRT_BIONIC_ABI`) and the new SkSL/string-ABI
+  regression tests, closing the "not rerun on Linux/Windows" gap the
+  macOS-only pass below left open.** Full from-scratch rebuilds (Skia
+  plus libc++ recompiled with the new site-define) plus
+  `crtgfx_skia_sksl_test` (new) and `crtgfx_skia_gpu_offscreen_smoke`
+  (its own full device-loss/recovery cycle) both pass on both hosts;
+  full ctest suite clean on each -- Windows 132/132, Linux (WSL)
+  116/116 (both up by one, the new SkSL test), zero regressions on
+  either. The Linux rebuild was genuinely slow in this local WSL/DrvFs
+  (`/mnt/c/...`) environment (the ~800-object Skia rebuild alone took
+  several hours of real wall-clock time; confirmed throughout via `ps`
+  as real, ongoing work, never a hang, before it completed and passed
+  in full) -- an initial status update in this same entry reported it
+  as skipped in favor of relying on Windows' own result plus a read of
+  the patch's own real `#if defined(__APPLE__) &&
+  !defined(_LIBCPP_CRT_BIONIC_ABI)` guard (`libstdc++/third_party/
+  libcxx/recipe.json`), before the backgrounded rebuild actually
+  finished and produced this real, empirical result instead. All three
+  hosts (Linux, Windows, macOS) are now empirically confirmed clean for
+  this patch.
 
 - **Resolved the remaining `crtgfx_skia_raster_smoke_runs` FreeType/font
   failure ("drawString produced no pixels"), left open by the entry
