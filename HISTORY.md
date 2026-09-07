@@ -10,6 +10,45 @@ substantive update.
 
 ## 2026-09-07
 
+- **Verified the full Skia GPU (Ganesh/Vulkan) implementation on real
+  Linux aarch64 hardware for the first time -- every prior Linux GPU
+  verification in this file was WSL/DrvFs, never bare-metal.** The user
+  asked directly for this distinction ("WSL이 아닌 실제 linux에서의
+  검증"). Two environment gaps needed installing before the build could
+  even start (neither a source bug): `lld-18` (this project's own
+  `-fuse-ld=lld` fix for a Linux `ld.bfd`-specific runtime-loader bug
+  needs the package actually present -- WSL/Ubuntu 26.04 apparently had
+  it already, this Ubuntu 24.04 aarch64 host did not), and
+  `libvulkan-dev` (`find_library(CRTGFX_LINUX_VULKAN_LIB vulkan)` looks
+  for the unversioned `libvulkan.so` the `-dev` package provides;
+  `libvulkan1`/`mesa-vulkan-drivers` alone were already installed but
+  only carry the versioned `libvulkan.so.1`). Once both were in place,
+  `cmake --build <dir> --target crtgfx-skia-smoke` (the one-command
+  dedicated-build-directory driver, `tools/test_crtgfx_skia_smoke.py`)
+  built and ran `crtgfx_skia_raster_smoke`, `crtgfx_skia_cpu_coverage`,
+  `crtmedia_frame_skia_smoke`, and (real libvulkan now found)
+  `crtgfx_skia_gpu_offscreen_smoke` -- its own full device-create/draw/
+  resize/device-loss/recovery cycle -- all passing, in 4m29s real time
+  (the ~800-object Skia rebuild that took multiple hours under WSL/DrvFs
+  elsewhere in this file finished in minutes on real hardware). Manually
+  followed up with `crtgfx_skia_sksl_test` (not part of that target's
+  default set) in the same nested build directory: also passes. This
+  host's Vulkan device is virtio-gpu-backed (`Virtio 1.0 GPU`, confirmed
+  via `lshw`), a paravirtualized VM device rather than a discrete GPU --
+  a real, if unusual, hardware-adjacent Vulkan ICD (`virtio_icd.json`/
+  `lvp_icd.json` both present), not a null/stub backend.
+
+  One false alarm during verification, not a real regression: `ctest` on
+  the plain default (non-Skia) build directory initially showed
+  `crtgfx_gpu_test_runs`/`crtmedia_gpu_frame_test_runs`/`crtmedia_
+  audio_sink_test_runs` as "Not Run" (empty `Command`) -- turned out to
+  be simply forgetting to `cmake --build` after reconfiguring back to
+  `CRTGFX_ENABLE_SKIA=OFF`/`CRT_USE_IMPORTED_LIBCXX=OFF` (the earlier
+  Skia-verification reconfigure had touched this same outer build
+  directory's cache), so those three executables genuinely did not exist
+  on disk yet. A real build afterward produced the documented baseline
+  exactly: full default suite, **111/111 passing**, zero regressions.
+
 - **Re-verified both Windows and Linux against the macOS libc++ ABI
   patch (`_LIBCPP_CRT_BIONIC_ABI`) and the new SkSL/string-ABI
   regression tests, closing the "not rerun on Linux/Windows" gap the

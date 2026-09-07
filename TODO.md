@@ -439,6 +439,15 @@ throughout via `ps` as real, ongoing work rather than a hang) but did
 complete and pass in full. All three hosts (Linux, Windows, macOS) are
 now empirically confirmed clean for this patch.
 
+**Every Linux GPU verification above was WSL/DrvFs -- closed that gap
+the same day, real bare-metal Linux aarch64 (Ubuntu 24.04)**: after
+installing `lld-18`/`libvulkan-dev` (neither pre-installed on this host,
+unlike WSL/Ubuntu 26.04), `crtgfx-skia-smoke`'s full target set plus
+`crtgfx_skia_sksl_test` all pass, GPU offscreen smoke's own device-loss/
+recovery cycle included, real virtio-gpu-backed Vulkan device (not a
+null backend) -- see `HISTORY.md`'s 2026-09-07 entry (topmost). Full
+default-config ctest also reconfirmed clean, 111/111.
+
 1. **Finish live GPU presentation everywhere.** Wire
    `crtgfx_gpu_surface_create()` to an actual on-screen window on each
    platform (Linux needs either a real `wl_display*`/`wl_surface*`-
