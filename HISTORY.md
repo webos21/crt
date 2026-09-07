@@ -10,6 +10,27 @@ substantive update.
 
 ## 2026-09-07
 
+- **Re-verified Windows against the macOS libc++ ABI patch
+  (`_LIBCPP_CRT_BIONIC_ABI`) and the new SkSL/string-ABI regression
+  tests, closing the "not rerun on Linux/Windows" gap the macOS-only
+  pass below left open, for Windows.** A full rebuild (Skia plus libc++
+  recompiled with the new site-define) plus `crtgfx_skia_sksl_test`
+  (new) and `crtgfx_skia_gpu_offscreen_smoke` (its own full device-loss/
+  recovery cycle) both pass; full ctest suite clean, 132/132 (up from
+  131 -- the new SkSL test). Linux was not re-verified the same way this
+  time: a from-scratch rebuild was started to confirm it directly, but
+  this local WSL/DrvFs (`/mnt/c/...`) environment made the ~800-object
+  Skia rebuild alone impractically slow to finish in-session (tracking
+  toward 5+ hours at its observed rate, confirmed still making real
+  progress via `ps`, not hung). Accepted Windows' own clean rerun plus a
+  direct read of the patch's own real guard (`#if defined(__APPLE__) &&
+  !defined(_LIBCPP_CRT_BIONIC_ABI)`, `libstdc++/third_party/libcxx/
+  recipe.json`) -- which only ever changes behavior when `__APPLE__` is
+  defined, true on neither Linux nor Windows -- as sufficient grounds
+  to treat Linux as unaffected without completing that from-scratch
+  local rerun; Linux's own last real, full rebuild-and-test run (Vulkan
+  slice, 2026-09-04) stays the last empirically confirmed result there.
+
 - **Resolved the remaining `crtgfx_skia_raster_smoke_runs` FreeType/font
   failure ("drawString produced no pixels"), left open by the entry
   directly below.** Root cause: `-fcrt-real-apple-sdk` (see that
