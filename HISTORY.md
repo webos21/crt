@@ -8,6 +8,55 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-08
+
+- **Real macOS/Metal hardware verification of Ganesh-to-surface
+  rendering (`crtgfx_skia_wrap_gpu_surface()`/`crtgfx_skia_gpu_surface_
+  present()`, landed `9a6dcc8`), closing "Finish live GPU presentation
+  everywhere" as real-hardware-verified on all three GPU-presentation
+  hosts.** `skia_bridge.cc`'s own Metal branch had never actually been
+  compiled anywhere before this session (it needs real Apple SDK headers
+  via `xcrun`, unavailable in every environment that touched this code
+  before) -- doing so for the first time, on real Apple Silicon hardware,
+  immediately surfaced a real, previously-unreachable linkage bug: `gpu_
+  internal.h` (shared by every per-backend `.c` file and by `skia_
+  bridge.cc` itself, a `.cc` TU) declared `crtgfx_gpu_metal_surface_
+  prepare_ganesh_present()` and its siblings with no `extern "C"` guard,
+  unlike the already-guarded public `crtgfx/gpu.h`. The Vulkan/D3D12
+  branches of `skia_bridge.cc` never hit this because they only read
+  struct *fields* from this header, never call a *function* declared in
+  it -- Metal's new hook is the first one this file actually calls, so a
+  C++ compile mangled the call site's expected symbol while `gpu_
+  metal.c`'s own C definition stayed unmangled: real link-time "symbol(s)
+  not found," confirmed via the linker's own diagnostic (it matched the
+  unmangled symbol already sitting in `libcrtgfx.a` and named the missing
+  `extern "C"` directly). Fixed by wrapping this header's own function-
+  declaration block in the same `#ifdef __cplusplus extern "C" { ...`
+  guard `crtgfx/gpu.h` already established (`libcrtgfx/src/gpu_
+  internal.h`) -- a one-file fix, no other source needed touching.
+
+  Verification on macOS arm64: full `crtgfx-skia-smoke` preset rebuild
+  clean; `ctest` 116/116 (`crtgfx_skia_gpu_offscreen_smoke_runs`
+  included, zero regression). `crtgfx_skia_gpu_window_demo` run against a
+  real, visible on-screen window; `screencapture` (working cleanly in
+  this environment, unlike the Windows session's own failed `PrintWindow`/
+  GDI capture attempts) gave genuine visual proof rather than only a
+  zero-error log -- a screenshot taken mid-run, cropped and upscaled
+  around the wrapped surface's own top-left corner, shows exactly the
+  expected shared reference scene (`tests/skia_reference_scene.h`): a
+  green top-left triangle, a red-to-blue top-right linear gradient, and
+  an alpha-blended pink-toned bottom-left overlay, matching that file's
+  own documented per-quadrant layout by eye. A separate bounded
+  120-frame run exited 0 cleanly. Still open on macOS: x86_64 native
+  execution (only arm64 exercised), pixel-exact (not just visually-by-eye)
+  framebuffer verification, and live resize composed with this Ganesh-
+  wrap path specifically (each verified real separately -- plain resize,
+  Ganesh-wrap alone -- but this session's own coordinate-based window-drag
+  automation, with no Accessibility-API grant available to query real
+  window bounds, proved too imprecise to reliably re-drive a combined
+  check). See `docs/libcrtgfx_wayland_plan.md`'s own "Ganesh-to-surface
+  rendering" section and `TODO.md` for the full per-host trail.
+
 ## 2026-09-07
 
 - **Wired the offscreen Ganesh pipeline onto a live GPU surface's own

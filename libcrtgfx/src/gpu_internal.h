@@ -221,6 +221,23 @@ struct crtgfx_gpu_surface {
 #endif
 };
 
+/* Every hook below is defined in a plain .c backend file (real C linkage),
+ * but this header is also included directly by src/skia_bridge.cc (a .cc
+ * TU) -- confirmed load-bearing for real, not just tidiness: crtgfx_gpu_
+ * metal_surface_prepare_ganesh_present() is the first of these hooks
+ * skia_bridge.cc actually *calls* rather than only accessing struct
+ * fields of (the Vulkan/D3D12 branches above only ever touch fields), and
+ * without this guard a C++ compile mangles this declaration while gpu_
+ * metal.c's own C definition stays unmangled, so real macOS hardware
+ * linking skia_bridge.cc against gpu_metal.c failed with a genuine
+ * "symbol(s) not found" -- caught only once both were actually built and
+ * linked together on real macOS hardware for the first time (2026-09-08),
+ * matching crtgfx/gpu.h's own already-established extern "C" convention
+ * for the identical reason. */
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
 /* Real backend hooks -- src/arch/linux/gpu_vulkan.c. Mirror crtgfx_gpu_
  * query_capabilities()/crtgfx_gpu_device_create()'s own public contract in
@@ -317,4 +334,8 @@ crtgfx_result crtgfx_gpu_metal_surface_resize(struct crtgfx_gpu_surface* surface
  * HOST if surface->mtl_drawable_acquired is false or the command buffer
  * cannot be created. */
 crtgfx_result crtgfx_gpu_metal_surface_prepare_ganesh_present(struct crtgfx_gpu_surface* surface);
+#endif
+
+#ifdef __cplusplus
+} /* extern "C" */
 #endif

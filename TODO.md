@@ -572,23 +572,48 @@ default-config ctest also reconfirmed clean, 111/111.
    live-resize pass -- same `SetWindowPos` technique as above -- that is
    what caught the bug, 7/7 resizes succeeded after the fix); `crtgfx_
    skia_gpu_offscreen_smoke` still passes in full (zero regression). Linux
-   compiles and runs the offscreen path clean via WSL. macOS: only
-   `gpu_metal.c`'s own small addition could be cross-compile-checked
-   (Mach-O, both architectures) -- `skia_bridge.cc`'s own Metal branch
-   needs real Apple SDK headers (`xcrun`) unavailable on this host, a
-   structural gap distinct from every other macOS-only piece of this
-   project. See `docs/libcrtgfx_wayland_plan.md`'s own "Ganesh-to-surface
-   rendering" section for the full per-host trail.
+   compiles and runs the offscreen path clean via WSL.
 
-   Still open: macOS x86_64 native execution, visual verification beyond
-   successful present calls on Windows (the resize pass confirmed
-   liveness/no-crash and continued animation through resize, not pixel-
-   exact post-resize framebuffer content -- this session's own screenshot
-   attempts for the new Ganesh demo failed on a real, unrelated screen-
-   capture restriction in this sandboxed environment, not a rendering
-   problem), and real on-screen macOS verification of the new Ganesh path
-   specifically. Graphite stays a later, separately-measured alternative
-   to Ganesh throughout.
+   **macOS is now real-hardware-verified too (2026-09-08, from real Apple
+   Silicon hardware) -- `skia_bridge.cc`'s own Metal branch had never
+   actually been compiled anywhere before this, and doing so for the
+   first time immediately found a real, previously-unreachable bug**:
+   `gpu_internal.h` (shared by every per-backend `.c` file and by
+   `skia_bridge.cc`, a `.cc` TU) declared `crtgfx_gpu_metal_surface_
+   prepare_ganesh_present()` and its siblings with no `extern "C"` guard
+   at all, unlike the already-`extern "C"`-wrapped public `crtgfx/gpu.h`.
+   The Vulkan/D3D12 branches never surfaced this, because `skia_bridge.cc`
+   only ever reads their struct *fields*, never calls a function declared
+   in this header -- Metal's new `_prepare_ganesh_present()` hook is the
+   first one it actually calls, and a C++ compile mangled that call site
+   while `gpu_metal.c`'s own C definition stayed unmangled: "symbol(s) not
+   found" at real link time. Fixed by wrapping this header's own function-
+   declaration block in the same `#ifdef __cplusplus extern "C" { ...`
+   guard `crtgfx/gpu.h` already established (`libcrtgfx/src/gpu_
+   internal.h`). After the fix: full `crtgfx-skia-smoke` preset rebuilds
+   clean and `ctest` passes 116/116; `crtgfx_skia_gpu_window_demo` run
+   live against a real on-screen window presents the shared reference
+   scene through the real Metal swapchain every frame -- a screenshot
+   taken mid-run and cropped in shows the exact expected scene (green
+   top-left triangle, red-to-blue top-right gradient, alpha-blended
+   bottom-left overlay), pixel-shape-correct by eye, not just "present()
+   returned OK" -- and a bounded 120-frame pass exits 0 cleanly. This
+   closes "Finish live GPU presentation everywhere" as real-hardware-
+   verified on all three GPU-presentation hosts. See `docs/
+   libcrtgfx_wayland_plan.md`'s own "Ganesh-to-surface rendering" section
+   for the full per-host trail.
+
+   Still open: macOS x86_64 native execution, pixel-exact (not just
+   visually-by-eye) post-render framebuffer verification on macOS, live
+   resize composed with the new Ganesh-wrap path specifically on macOS
+   (each was verified real separately -- resize alone and Ganesh-wrap
+   alone -- but not yet together on this host, and this session's own
+   coordinate-based window-resize automation proved too imprecise to
+   reliably re-drive for this specific composition check), and visual
+   verification beyond successful present calls on Windows (the resize
+   pass there confirmed liveness/no-crash and continued animation through
+   resize, not pixel-exact post-resize framebuffer content). Graphite
+   stays a later, separately-measured alternative to Ganesh throughout.
 2. **Add hardware decode, phase A.** Enable FFmpeg D3D11VA/D3D12VA,
    VideoToolbox, and VA-API backends, initially downloading decoded frames to
    CPU memory so codec/device selection, fallback, and recovery can be proved
