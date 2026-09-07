@@ -1,4 +1,5 @@
 #include "wayland_weston_internal.h"
+#include "window_wayland_native.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -332,6 +333,12 @@ struct crtgfx_wl_connection {
 };
 
 struct crtgfx_host_window {
+  /* MUST stay the first field, set to CRTGFX_WL_BACKEND_TAG_LEGACY in
+   * crtgfx_wl_window_attach() below -- window_wayland_native.h's own top
+   * comment explains why (the dual-backend dispatch mechanism this file's
+   * own crtgfx_host_window_*() entry points use, added 2026-09-07). Every
+   * other field below is completely unchanged from before that date. */
+  uint32_t backend_tag;
   struct crtgfx_wl_connection* conn;
   struct crtgfx_host_window* next;
 
@@ -1505,6 +1512,7 @@ static int crtgfx_wl_window_attach(
   if (host == 0) {
     return CRTGFX_ERROR_HOST;
   }
+  host->backend_tag = CRTGFX_WL_BACKEND_TAG_LEGACY;
   host->conn = conn;
   host->toplevel = toplevel;
 
@@ -1594,6 +1602,16 @@ int crtgfx_host_window_create(const crtgfx_window_desc* desc, crtgfx_weston_topl
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
 
+  /* Dual-backend dispatch (2026-09-07) -- see window_wayland_native.h's
+   * own top comment for the full design. Unlike the other four entry
+   * points below (which dispatch by reading an already-created host's own
+   * backend_tag), this is the one place the choice is actually made: by
+   * the CRTGFX_WINDOW_GPU_PRESENTATION desc flag, before any connection
+   * for this window exists at all. */
+  if ((desc->flags & CRTGFX_WINDOW_GPU_PRESENTATION) != 0u) {
+    return crtgfx_native_wl_window_create(desc, toplevel);
+  }
+
   if (crtgfx_wl_conn == 0) {
     rc = crtgfx_wl_connection_create(&crtgfx_wl_conn);
     if (rc != CRTGFX_OK) {
@@ -1620,6 +1638,10 @@ void crtgfx_host_window_destroy(crtgfx_host_window* host) {
   struct crtgfx_host_window** link;
 
   if (host == 0) {
+    return;
+  }
+  if (crtgfx_wl_backend_tag(host) == CRTGFX_WL_BACKEND_TAG_NATIVE) {
+    crtgfx_native_wl_window_destroy((void*)host);
     return;
   }
   conn = host->conn;
@@ -1672,6 +1694,9 @@ int crtgfx_host_window_show(crtgfx_host_window* host) {
   if (host == 0) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
+  if (crtgfx_wl_backend_tag(host) == CRTGFX_WL_BACKEND_TAG_NATIVE) {
+    return crtgfx_native_wl_window_show((void*)host);
+  }
   /* Wayland has no separate "show" request: a toplevel becomes visible/
    * mapped once a real buffer is attached and committed, which
    * crtgfx_host_window_present_software() already does on the first
@@ -1680,12 +1705,49 @@ int crtgfx_host_window_show(crtgfx_host_window* host) {
 }
 
 int crtgfx_host_window_dispatch(uint32_t timeout_ms) {
+  /* Dual-backend dispatch (2026-09-07): unlike the other four entry
+   * points, this one has no `host` argument at all -- it is genuinely
+   * global, pumping every live window on whichever backend(s) currently
+   * have an open connection (crtgfx/window.h's own multi-window contract
+   * comment). Three real cases:
+   *  - only the legacy backend has ever created a window: fall straight
+   *    through to its own wl_pump(), byte-for-byte the same behavior this
+   *    function always had before today;
+   *  - only the native backend has: delegate the full timeout budget to
+   *    it, same shape;
+   *  - both are live at once (a real, if not yet exercised by any of this
+   *    project's own demos, combination -- a legacy software window and a
+   *    native Vulkan window open in the same process): split the budget,
+   *    non-blocking-drain the legacy connection's own already-pending
+   *    traffic first, then give the native connection the full requested
+   *    timeout. A real, honest, documented limitation rather than a
+   *    genuine two-fd poll(): the legacy window stays fully responsive to
+   *    anything already queued, but a legacy-only event arriving *during*
+   *    the native connection's own blocking wait has to wait for the next
+   *    crtgfx_window_pump_events() call to be picked up. Growing this into
+   *    a real combined poll() (both fds in one pollfd array) is
+   *    straightforward future work once a real caller actually exercises
+   *    this combination -- not done speculatively ahead of one. */
+  int have_native = crtgfx_native_wl_has_connection();
+  if (crtgfx_wl_conn != 0 && have_native) {
+    int rc = wl_pump(crtgfx_wl_conn, 0);
+    if (rc != CRTGFX_OK) {
+      return rc;
+    }
+    return crtgfx_native_wl_dispatch(timeout_ms);
+  }
+  if (have_native) {
+    return crtgfx_native_wl_dispatch(timeout_ms);
+  }
   return wl_pump(crtgfx_wl_conn, timeout_ms);
 }
 
 int crtgfx_host_window_get_size(crtgfx_host_window* host, uint32_t* out_width, uint32_t* out_height) {
   if (host == 0 || out_width == 0 || out_height == 0) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
+  }
+  if (crtgfx_wl_backend_tag(host) == CRTGFX_WL_BACKEND_TAG_NATIVE) {
+    return crtgfx_native_wl_window_get_size((void*)host, out_width, out_height);
   }
   *out_width = host->toplevel->width;
   *out_height = host->toplevel->height;
@@ -1707,6 +1769,10 @@ int crtgfx_host_window_present_software(
 
   if (host == 0 || pixels == 0 || width == 0 || height == 0 || stride < width * 4u) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
+  }
+  if (crtgfx_wl_backend_tag(host) == CRTGFX_WL_BACKEND_TAG_NATIVE) {
+    return crtgfx_native_wl_window_present_software(
+        (void*)host, pixels, width, height, stride, damage_rects, damage_rect_count);
   }
   if (stride > UINT32_MAX / height) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;

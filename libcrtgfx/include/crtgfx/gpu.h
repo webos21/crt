@@ -168,6 +168,66 @@ crtgfx_result crtgfx_gpu_surface_create(
 /* A NULL surface is a safe no-op. */
 void crtgfx_gpu_surface_release(crtgfx_gpu_surface* surface);
 
+/* Presentation contract (2026-09-07, "Finish live GPU presentation
+ * everywhere" -- Linux lands first): the real acquire/present handshake
+ * every real swapchain-backed surface needs, shaped to parallel crtgfx/
+ * window.h's own crtgfx_window_begin_frame()/_end_frame() software
+ * contract rather than replace it -- a real crtgfx_gpu_surface and a
+ * window's own CPU crtgfx_framebuffer are two independent, real
+ * presentation paths a window picks between at crtgfx_window_create()
+ * time (CRTGFX_WINDOW_GPU_PRESENTATION), never both at once. Same real
+ * "no usable backend right now" contract as every other function in this
+ * file -- CRTGFX_ERROR_UNSUPPORTED, never a crash/hang, wherever a real
+ * backend does not exist (today: every host except Linux with both a
+ * real libvulkan and a real native-Wayland-backend window).
+ *
+ * crtgfx_gpu_surface_clear() is this vertical slice's own deliberate,
+ * honestly-scoped stand-in for a full Ganesh/Skia render onto the
+ * acquired image (crtgfx/gpu.h's own top comment already documents that
+ * intent as this contract's eventual real consumer) -- a real, working,
+ * minimal "draw" primitive (a solid RGBA clear, real GPU work, really
+ * presented) proving the whole acquire/submit/present pipeline end to
+ * end, not a placeholder. Wiring the already-proven offscreen Ganesh
+ * pipeline (src/skia_bridge.cc) onto a surface's own acquired image
+ * instead is real, separate follow-up work, not implemented by this
+ * function. */
+
+/* Real, live extent of `surface`'s current swapchain -- a caller that
+ * already holds a crtgfx_gpu_surface has no reason to also separately
+ * track the crtgfx_window* it came from just to ask this. Returns
+ * CRTGFX_ERROR_INVALID_ARGUMENT for a null surface/out_width/out_height. */
+crtgfx_result crtgfx_gpu_surface_get_size(crtgfx_gpu_surface* surface, uint32_t* out_width, uint32_t* out_height);
+
+/* Acquires `surface`'s next presentable image, blocking the calling
+ * thread for up to `timeout_us` microseconds if the backend's own real
+ * presentation engine is not yet ready to hand one over. Must be paired
+ * with a later crtgfx_gpu_surface_present() call before acquiring again
+ * (calling this twice in a row without an intervening present() is a
+ * real, rejected misuse -- CRTGFX_ERROR_HOST, not a silent overwrite of
+ * the first acquired image). Returns CRTGFX_OK once an image is ready,
+ * CRTGFX_ERROR_TIMEOUT if `timeout_us` elapses first (a real, expected,
+ * non-fatal outcome, matching crtgfx_gpu_fence_wait()'s own contract), or
+ * CRTGFX_ERROR_INVALID_ARGUMENT for a null surface. */
+crtgfx_result crtgfx_gpu_surface_acquire(crtgfx_gpu_surface* surface, uint64_t timeout_us);
+
+/* Fills `surface`'s currently acquired image with a solid RGBA color
+ * (each channel [0, 1]) via real, submitted GPU work -- see this
+ * section's own top comment for why this stands in for a full Ganesh
+ * render in this vertical slice. Must be called between a successful
+ * crtgfx_gpu_surface_acquire() and the matching crtgfx_gpu_surface_
+ * present() -- CRTGFX_ERROR_HOST otherwise. Returns CRTGFX_ERROR_INVALID_
+ * ARGUMENT for a null surface. */
+crtgfx_result crtgfx_gpu_surface_clear(crtgfx_gpu_surface* surface, float r, float g, float b, float a);
+
+/* Presents `surface`'s currently acquired image (real GPU work already
+ * submitted via crtgfx_gpu_surface_clear() above must complete before the
+ * backend actually shows it -- this call itself does not block on that;
+ * the backend's own real per-frame synchronization guarantees correct
+ * ordering). Must follow a successful crtgfx_gpu_surface_acquire() --
+ * CRTGFX_ERROR_HOST otherwise. Returns CRTGFX_ERROR_INVALID_ARGUMENT for
+ * a null surface. */
+crtgfx_result crtgfx_gpu_surface_present(crtgfx_gpu_surface* surface);
+
 /* Creates a real, working fence. `device` may be NULL -- a host-CPU
  * fence with no device affinity, the only reachable case today (see
  * this file's own top comment); a non-NULL device is accepted

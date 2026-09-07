@@ -20,20 +20,23 @@
 #include <stdlib.h>
 #include <time.h>
 
-/* struct crtgfx_gpu_device itself now lives in gpu_internal.h, shared with
- * src/arch/linux/gpu_vulkan.c (the real Ganesh/Vulkan offscreen vertical
- * slice, 2026-09-03) -- see that header's own top comment for why. */
+#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
+/* Only for crtgfx_gpu_surface_create()'s own real Linux/Vulkan branch
+ * below -- resolving a native-backend crtgfx_window's real live wl_
+ * display/wl_surface pair (window_wayland_native.c) and the shared
+ * toplevel struct's own real width/height (wayland_weston_internal.h) it
+ * needs to pass into crtgfx_gpu_vulkan_surface_create(). Guarded the same
+ * way gpu_internal.h's own Vulkan-only struct fields are -- every other
+ * host/config never sees these Linux-only includes at all. */
+#include "arch/linux/window_wayland_native.h"
+#include "wayland_weston_internal.h"
+#endif
 
-/* No real fields yet -- crtgfx_gpu_surface_create() never actually
- * constructs one today (see gpu.h's own top comment: unreachable until a
- * real crtgfx_gpu_device exists). Declared as a real, if currently
- * unused, struct rather than left fully opaque with no definition at
- * all, so crtgfx_gpu_surface_release()'s own real free() below has a
- * real, correctly-sized object to release once a future backend does
- * start allocating one. */
-struct crtgfx_gpu_surface {
-  int reserved;
-};
+/* struct crtgfx_gpu_device/crtgfx_gpu_surface themselves now live in
+ * gpu_internal.h, shared with src/arch/linux/gpu_vulkan.c (the real
+ * Ganesh/Vulkan offscreen vertical slice, 2026-09-03, and the native-
+ * Wayland-backend swapchain vertical slice, 2026-09-07) -- see that
+ * header's own top comment for why. */
 
 struct crtgfx_gpu_fence {
   pthread_mutex_t lock;
@@ -163,19 +166,111 @@ crtgfx_result crtgfx_gpu_surface_create(
   if (device == NULL || window == NULL || out_surface == NULL) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
-  /* Real, structurally unreachable today: crtgfx_gpu_device_create()
-   * never succeeds, so no real caller can ever obtain a real `device` to
-   * pass here at all (see gpu.h's own top comment) -- this argument
-   * validation is the only part of this function any real caller can
-   * exercise until a future backend lands. */
+#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
+  {
+    void* wl_display_handle = NULL;
+    void* wl_surface_handle = NULL;
+    crtgfx_gpu_surface* surface;
+    crtgfx_result result;
+
+    /* `window` is only ever a real, live target here if it was created
+     * with CRTGFX_WINDOW_GPU_PRESENTATION (crtgfx/window.h) -- the native
+     * Wayland backend's own crtgfx_native_wl_get_surface_handles() is the
+     * single real source of truth for that (checks the backend tag
+     * itself, see window_wayland_native.h's own comment), so this
+     * function never needs to duplicate that check. A legacy (software)
+     * window, or any other real reason a live connection is not
+     * available, both correctly fail here with the same honest CRTGFX_
+     * ERROR_UNSUPPORTED this function already returned for every window
+     * before today. */
+    if (crtgfx_native_wl_get_surface_handles(&window->toplevel, &wl_display_handle, &wl_surface_handle) == 0) {
+      return CRTGFX_ERROR_UNSUPPORTED;
+    }
+
+    surface = (crtgfx_gpu_surface*)calloc(1, sizeof(crtgfx_gpu_surface));
+    if (surface == NULL) {
+      return CRTGFX_ERROR_UNSUPPORTED;
+    }
+    result = crtgfx_gpu_vulkan_surface_create(
+        device, wl_display_handle, wl_surface_handle, window->toplevel.width, window->toplevel.height, surface);
+    if (result != CRTGFX_OK) {
+      free(surface);
+      return result;
+    }
+    *out_surface = surface;
+    return CRTGFX_OK;
+  }
+#else
+  (void)device;
+  (void)window;
+  /* Real, structurally unreachable today on this host: crtgfx_gpu_device_
+   * create() never succeeds here, so no real caller can ever obtain a
+   * real `device` to pass at all (see gpu.h's own top comment) -- this
+   * argument validation is the only part of this function any real
+   * caller can exercise until a future backend lands. */
   return CRTGFX_ERROR_UNSUPPORTED;
+#endif
 }
 
 void crtgfx_gpu_surface_release(crtgfx_gpu_surface* surface) {
   if (surface == NULL) {
     return;
   }
+#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
+  crtgfx_gpu_vulkan_surface_destroy(surface);
+#endif
   free(surface);
+}
+
+crtgfx_result crtgfx_gpu_surface_get_size(crtgfx_gpu_surface* surface, uint32_t* out_width, uint32_t* out_height) {
+  if (surface == NULL || out_width == NULL || out_height == NULL) {
+    return CRTGFX_ERROR_INVALID_ARGUMENT;
+  }
+#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
+  *out_width = surface->width;
+  *out_height = surface->height;
+  return CRTGFX_OK;
+#else
+  return CRTGFX_ERROR_UNSUPPORTED;
+#endif
+}
+
+crtgfx_result crtgfx_gpu_surface_acquire(crtgfx_gpu_surface* surface, uint64_t timeout_us) {
+  if (surface == NULL) {
+    return CRTGFX_ERROR_INVALID_ARGUMENT;
+  }
+#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
+  return crtgfx_gpu_vulkan_surface_acquire(surface, timeout_us);
+#else
+  (void)timeout_us;
+  return CRTGFX_ERROR_UNSUPPORTED;
+#endif
+}
+
+crtgfx_result crtgfx_gpu_surface_clear(crtgfx_gpu_surface* surface, float r, float g, float b, float a) {
+  if (surface == NULL) {
+    return CRTGFX_ERROR_INVALID_ARGUMENT;
+  }
+#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
+  return crtgfx_gpu_vulkan_surface_clear(surface, r, g, b, a);
+#else
+  (void)r;
+  (void)g;
+  (void)b;
+  (void)a;
+  return CRTGFX_ERROR_UNSUPPORTED;
+#endif
+}
+
+crtgfx_result crtgfx_gpu_surface_present(crtgfx_gpu_surface* surface) {
+  if (surface == NULL) {
+    return CRTGFX_ERROR_INVALID_ARGUMENT;
+  }
+#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
+  return crtgfx_gpu_vulkan_surface_present(surface);
+#else
+  return CRTGFX_ERROR_UNSUPPORTED;
+#endif
 }
 
 crtgfx_result crtgfx_gpu_fence_create(crtgfx_gpu_device* device, crtgfx_gpu_fence** out_fence) {

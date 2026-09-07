@@ -10,6 +10,158 @@ substantive update.
 
 ## 2026-09-07
 
+- **Landed the Linux vertical slice of "Finish live GPU presentation
+  everywhere" (TODO.md's next upper-runtime roadmap step): a new,
+  independent native Wayland backend giving Vulkan a real, live window to
+  present into, plus the swapchain/acquire/present plumbing on top of
+  it.** Following the user's own explicit direction (a dual-backend
+  strangler-fig migration, given as an ASCII-diagrammed 4-phase roadmap,
+  not a special-cased GPU exception bolted onto the existing hand-rolled
+  backend), this session is Phase 2: the legacy backend (`window_
+  wayland.c`) stays completely frozen, and a new backend (`window_
+  wayland_native.c`, real `libwayland-client` + real `xdg-shell`) owns a
+  GPU-presenting window's entire lifecycle from creation, selected
+  per-window via the new `CRTGFX_WINDOW_GPU_PRESENTATION` desc flag
+  (`crtgfx/window.h`). See `docs/libcrtgfx_wayland_plan.md`'s own new
+  "Linux Native Wayland Backend + GPU Presentation" section for the full
+  architecture record; summarized here:
+
+  - **`window_wayland_native.c`**: real registry (`wl_compositor`/
+    `xdg_wm_base`/`wl_seat`, bound at version 1), one `xdg_toplevel`
+    window with the real `configure`/`ack_configure` handshake and
+    `close` handling, real keyboard input (same xkbcommon keymap-compile-
+    then-translate-each-key shape the legacy backend already uses, ported
+    to real `wl_keyboard_listener` callbacks instead of hand-parsed wire
+    messages) and real pointer input (motion/button/scroll). WSL is a
+    deliberate, permanent bypass (`/proc/sys/kernel/osrelease` containing
+    "microsoft" -- the standard signal), not a target to make real
+    presentation work through, matching this project's own established
+    stance for the earlier offscreen Vulkan slice -- **verified for
+    real**: the new `crtgfx_gpu_window_demo` exits promptly on this
+    session's own WSL host with a clear, graceful message, no hang, no
+    crash.
+  - **`window_wayland.c`**: only a small addition -- a dispatch check at
+    the top of `crtgfx_host_window_create()` (does the desc flag say
+    native?), and a `backend_tag` first field on `struct crtgfx_host_
+    window` (relying on C11 6.7.2.1p15's real guarantee that a pointer to
+    a struct, suitably converted, points to its own initial member -- the
+    same technique real `struct sockaddr`/`sockaddr_in` and Win32
+    OVERLAPPED-family APIs already use) so the other four shared entry
+    points can tell which backend owns an opaque `crtgfx_host_window*`
+    before touching it. Every other line is unchanged. `crtgfx_host_
+    window_dispatch()` (the one entry point with no `host` parameter, a
+    real global pump) now handles both backends being live in the same
+    process at once, splitting the poll budget between them -- a real,
+    documented, honest limitation rather than a genuine combined `poll()`
+    over both fds, since no real demo in this project exercises that
+    combination yet.
+  - **`tools/build_wayland.py`**: extended to also fetch and generate
+    `xdg-shell` protocol bindings -- previously core `wayland.xml` only.
+    `xdg-shell.xml` comes from a real, separately pinned sparse checkout
+    of `wayland-protocols` (`ee78491a237eaff9389a0ccf8680521d074407d3`,
+    stable/xdg-shell only, `--filter=blob:none --no-checkout` + cone
+    sparse-checkout, confirmed via a real fetch that this only pulls the
+    one directory needed). The same real `wayland-scanner` this project
+    already builds handles it (confirmed by reading its own real `src/
+    scanner.c` directly -- nothing in it is `wayland.xml`-specific).
+  - **`src/arch/linux/gpu_vulkan.c`** (previously offscreen-only): now
+    probes (`vkEnumerateInstance/DeviceExtensionProperties`) and, when
+    available, enables `VK_KHR_surface`/`VK_KHR_wayland_surface` on every
+    instance and `VK_KHR_swapchain` on every device it creates -- probed,
+    not forced, specifically so a host with no real WSI support (headless
+    CI, a pure-compute ICD) keeps getting exactly the same zero-extension
+    instance/device this file always created before today, and the
+    already-verified offscreen Ganesh vertical slice
+    (`crtgfx_skia_gpu_offscreen_smoke`) stays unaffected -- confirmed for
+    real via this session's own WSL run: `crtgfx_gpu_query_capabilities()`
+    still correctly reports 2 real devices (dzn + llvmpipe) after this
+    change. Added real `VkSurfaceKHR`/`VkSwapchainKHR` creation
+    (`crtgfx_gpu_vulkan_surface_create()`, sized to the surface's own
+    current extent, real presentation-queue-support check via
+    `vkGetPhysicalDeviceSurfaceSupportKHR()`, a real `VkFormat` preference
+    for `B8G8R8A8_UNORM`) and a real, minimal per-frame acquire/submit/
+    present cycle (`_acquire()`/`_clear()`/`_present()`, single-frame-in-
+    flight synchronization via one fence + two semaphores, matching any
+    introductory real Vulkan swapchain sample's own shape -- multi-frame-
+    in-flight is real, later work). Every Vulkan type/struct/enum value
+    added was cross-checked verbatim against this repo's own real,
+    already-vendored Skia Vulkan header (`vulkan_core.h`, not memory) --
+    one real recollection error caught this way before it shipped:
+    `VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL` is `7`, not the initially-
+    guessed `6`. `VkWaylandSurfaceCreateInfoKHR`/
+    `vkCreateWaylandSurfaceKHR()` themselves are the one piece flagged as
+    reasoned-but-not-locally-verified (Skia's own vendored header is
+    core-only, no platform-specific `vulkan_wayland.h`) -- the struct
+    shape is the same stable, spec-frozen pattern every other platform
+    surface extension already uses, and the one enum value that *could*
+    be checked (`VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR =
+    1000006000`) was, and matched.
+  - **`src/gpu.c`/`crtgfx/gpu.h`**: `crtgfx_gpu_surface_create()` gained
+    a real Linux/Vulkan branch (resolves the native backend's own live
+    `wl_display`/`wl_surface` pair via the new `crtgfx_native_wl_get_
+    surface_handles()`, then calls into `gpu_vulkan.c`); `struct crtgfx_
+    gpu_surface` moved from `gpu.c` into `gpu_internal.h` (mirroring
+    `crtgfx_gpu_device`'s own existing shared-struct precedent) so a real
+    per-host backend can fill in its own fields. A new, small, additive
+    public contract exists now (`crtgfx_gpu_surface_get_size()`/
+    `_acquire()`/`_clear()`/`_present()`), paralleling `crtgfx_window_
+    begin_frame()`/`_end_frame()`'s own shape rather than replacing it.
+    `crtgfx_gpu_surface_clear()` is a deliberate, honestly-scoped stand-in
+    for a full Ganesh/Skia render onto the acquired image -- real,
+    minimal, working GPU-submitted draw work (a solid RGBA clear) proving
+    the whole pipeline end to end; wiring the already-proven offscreen
+    Ganesh pipeline onto a surface's own image instead is real, separate,
+    deferred follow-up, not attempted this pass.
+  - **`tools/gpu_window_demo.c`** (new): a manual, real on-screen
+    verification demo (same "run it yourself" shape as `crtgfx_window_
+    demo`/`crtgfx_keyboard_interactive`, not wired into `ctest`) --
+    opens a real `CRTGFX_WINDOW_GPU_PRESENTATION` window and presents a
+    continuously animated solid color through the full real pipeline
+    above.
+
+  **A real, self-inflicted bug found and fixed during this session's own
+  first compile attempts, worth recording**: several doc comments used
+  `wl_display*`/`wl_surface*`-style shorthand notation; the literal `*/`
+  substring inside that prose prematurely closed the enclosing C block
+  comment, so everything after it silently got parsed as real code --
+  producing a cascade of confusing "unknown type name" errors in
+  completely unrelated-looking places. Fixed by rewording every such
+  comment to avoid a literal `/*`/`*/` appearing in prose at all.
+
+  **A real CMake dependency-graph cycle was also found and fixed**:
+  `crtgfx-wayland-build` (needed for the real `libwayland-client`/
+  `xdg-shell` bindings) transitively needs `port-build-expat`/
+  `port-build-libffi`, which need the root `sysroot` target, which itself
+  `DEPENDS` on `crtgfx`/`crtgfx_shared` (to stage `libcrtgfx.so` into the
+  rootfs) -- an initial `add_dependencies(crtgfx crtgfx-wayland-build)`
+  closed that into a real cycle CMake correctly refused to generate
+  ("Cyclic dependencies are allowed only among static libraries").
+  Root CMakeLists.txt already documents fixing an identical-shaped
+  problem for `crtgfx_skia_objects`/`crt-libcxx-sysroot` the same way
+  this fix now follows: a configure-time `EXISTS` check on the real,
+  already-built `.a` file instead of a real `add_dependencies()` edge,
+  degrading gracefully (native backend simply not compiled in) rather
+  than a hard cycle or a `FATAL_ERROR`, since this feature is on by
+  default whenever a real `libvulkan` is found (unlike Skia's own opt-in
+  flag).
+
+  **Fully verified on this session's own real WSL environment**: the real
+  `libwayland-client`+`xdg-shell` build now lands in the *main* build
+  tree (previously only the standalone `crtgfx-wayland-smoke` shadow
+  directory exercised it); `crtgfx`/`crtgfx_shared` both build clean with
+  `window_wayland_native.c` genuinely compiled in (confirmed via a real,
+  non-trivial-size `.o` file, not just a clean exit code); `crtgfx_gpu_
+  window_demo` links and runs, correctly reporting 2 real Vulkan devices
+  then gracefully failing at `crtgfx_window_create()` with `CRTGFX_ERROR_
+  UNSUPPORTED` (the WSL bypass) in well under a second, no hang; full
+  `ctest` 117/117, zero regression to the legacy Wayland backend, the
+  offscreen Ganesh/Vulkan slice, or anything else. Real on-screen
+  verification (does a window actually appear and animate on a real
+  GNOME/Mutter or wlroots compositor) is explicitly the user's own
+  separate next step on real Linux hardware, not WSL -- mirroring the
+  macOS Metal slice's own real-hardware verification precedent elsewhere
+  in this file.
+
 - **Verified the full Skia GPU (Ganesh/Vulkan) implementation on real
   Linux aarch64 hardware for the first time -- every prior Linux GPU
   verification in this file was WSL/DrvFs, never bare-metal.** The user

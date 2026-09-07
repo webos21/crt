@@ -448,14 +448,28 @@ recovery cycle included, real virtio-gpu-backed Vulkan device (not a
 null backend) -- see `HISTORY.md`'s 2026-09-07 entry (topmost). Full
 default-config ctest also reconfirmed clean, 111/111.
 
-1. **Finish live GPU presentation everywhere.** Wire
-   `crtgfx_gpu_surface_create()` to an actual on-screen window on each
-   platform (Linux needs either a real `wl_display*`/`wl_surface*`-
-   capable Wayland backend or a deliberate scoped exception to link real
-   `libwayland-client` for just the Vulkan WSI boundary; Windows and
-   macOS have no such gap -- their own existing swap chain/layer
-   presentation code already has everything GPU presentation would
-   need, this is real design work, not a blocker). Graphite stays a
+1. **Finish live GPU presentation everywhere.** Linux lands first
+   (2026-09-07): a new, independent native Wayland backend
+   (`window_wayland_native.c`, real `libwayland-client` + `xdg-shell`)
+   gives Vulkan a live `wl_display`/`wl_surface` pair, selected per-window
+   via the new `CRTGFX_WINDOW_GPU_PRESENTATION` flag; the frozen legacy
+   backend keeps every existing software window unchanged. `crtgfx_gpu_
+   surface_create()` now has a real Linux/Vulkan branch (real
+   `VkSurfaceKHR`/`VkSwapchainKHR`), plus a new `crtgfx_gpu_surface_
+   acquire()`/`_clear()`/`_present()` contract and a manual demo
+   (`crtgfx_gpu_window_demo`). Compiles/links clean, WSL bypass verified
+   graceful (no hang), full ctest 117/117 -- see `docs/
+   libcrtgfx_wayland_plan.md`'s own "Linux Native Wayland Backend + GPU
+   Presentation" section and `HISTORY.md`'s 2026-09-07 entry for the full
+   record. Real on-screen verification is the user's own next step on
+   real Linux hardware (not WSL). Still open: wiring the already-proven
+   offscreen Ganesh pipeline onto a surface's own acquired image (today's
+   `_clear()` is a deliberate, honest stand-in, not Ganesh); swapchain
+   recreation on resize; native-backend software/multi-window/clipboard
+   parity (legacy stays the default there); and Windows/macOS themselves,
+   which have no structural gap -- their own existing swap chain/layer
+   presentation code already has everything GPU presentation would need,
+   this is real, separate wiring work, not a blocker. Graphite stays a
    later, separately-measured alternative to Ganesh throughout.
 2. **Add hardware decode, phase A.** Enable FFmpeg D3D11VA/D3D12VA,
    VideoToolbox, and VA-API backends, initially downloading decoded frames to

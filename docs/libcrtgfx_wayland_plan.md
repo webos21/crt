@@ -257,6 +257,142 @@ non-GNOME/Mutter compositor (wlroots-based ones like Sway, or KDE's
 KWin) -- the protocol used here is universal core+stable-xdg-shell, so it
 should behave the same, but that is not independently confirmed yet.
 
+## Linux Native Wayland Backend + GPU Presentation (2026-09-07, first cut)
+
+TODO.md's "Finish live GPU presentation everywhere" roadmap step starts on
+Linux, driven by a real structural gap the Linux Host Adapter section above
+does not have an answer for: Vulkan's own `vkCreateWaylandSurfaceKHR()`
+needs a *live* `struct wl_display*`/`struct wl_surface*` from a real
+`libwayland-client` connection, and the hand-rolled backend's own wire-
+protocol object ids can never be retrofitted into one after the fact (two
+independent client-side object-id allocators cannot safely share one wire
+connection to the same compositor).
+
+**Chosen design, the user's own explicit direction: a dual-backend
+strangler-fig migration, not a special-cased GPU exception bolted onto the
+existing backend.** Two fully independent Linux window backends now exist
+behind the same public `crtgfx/window.h` API:
+
+- **Legacy backend** (`window_wayland.c`, the hand-rolled wire-protocol
+  client documented above): frozen as of this date. Continues to own every
+  software-presented window exactly as before -- this pass added only a
+  small dispatch check at the very top of `crtgfx_host_window_create()`
+  (does `desc->flags` have `CRTGFX_WINDOW_GPU_PRESENTATION`?) and a
+  `backend_tag` first field on `struct crtgfx_host_window` purely so the
+  other four shared entry points (`_destroy`/`_show`/`_get_size`/
+  `_present_software`) can tell which backend actually owns a given opaque
+  `crtgfx_host_window*` before touching it -- every other line of this
+  file is untouched.
+- **Native backend** (`window_wayland_native.c`, new): real
+  `libwayland-client` + real `xdg-shell` protocol bindings (both built by
+  `tools/build_wayland.py`/`tools/fetch_wayland.py`, already documented
+  above as "Wayland core... not wired into libcrtgfx's own backend" --
+  that gap is now closed, and `xdg-shell.xml` itself is now also fetched,
+  via a real, separately pinned sparse checkout of `wayland-protocols`,
+  the same `tools/build_wayland.py`). Owns a GPU-presenting window's
+  *entire* lifecycle from creation -- its own connection, registry
+  (`wl_compositor`/`xdg_wm_base`/`wl_seat`, all bound at protocol version
+  1), surface/`xdg_surface`/`xdg_toplevel`, real keyboard input (same
+  xkbcommon keymap-compile-then-translate shape the legacy backend already
+  uses) and real pointer input (motion/button/scroll). A window selects
+  this backend at `crtgfx_window_create()` time via the new
+  `CRTGFX_WINDOW_GPU_PRESENTATION` desc flag (`crtgfx/window.h`) -- see
+  that flag's own doc comment for the full "why" and for the deliberate
+  WSL bypass (`/proc/sys/kernel/osrelease` containing "microsoft" makes
+  `crtgfx_host_window_create()` return `CRTGFX_ERROR_UNSUPPORTED`
+  immediately, before ever attempting a real connection -- verified for
+  real on this session's own WSL host: `crtgfx_gpu_window_demo` exits
+  promptly with a clear message, no hang, no crash).
+
+Both backends can coexist in the same process (a legacy software window and
+a native GPU window open at once); `crtgfx_host_window_dispatch()` (the one
+entry point with no `host` parameter, since it is genuinely global) now
+checks which backend(s) have a live connection and pumps accordingly --
+delegates the full timeout budget to whichever single backend is actually in
+use (the common case, and the only one any real demo in this project
+exercises so far), or splits the budget (non-blocking-drain the legacy
+connection, then block on the native one) if both happen to be live at
+once, a real, documented, honest limitation rather than a genuine two-fd
+`poll()` -- see that function's own comment for the exact policy.
+
+**Real GPU plumbing landed alongside the native backend, not left for
+later**: `src/arch/linux/gpu_vulkan.c` (previously offscreen-only, see
+TODO.md's "Enable Skia GPU rendering" step) now probes and, when available,
+enables `VK_KHR_surface`/`VK_KHR_wayland_surface` on every instance it
+creates and `VK_KHR_swapchain` on every device -- probed, not forced, so a
+host with no real WSI support (headless CI, a pure-compute ICD) gets
+exactly the same zero-extension instance/device this file always created
+before today, and the already-verified offscreen Ganesh vertical slice
+(`crtgfx_skia_gpu_offscreen_smoke`) is unaffected. `crtgfx_gpu_surface_
+create()` (`src/gpu.c`, `crtgfx/gpu.h`) gained a real Linux/Vulkan branch:
+resolves the native backend's own live `wl_display`/`wl_surface` pair
+(`crtgfx_native_wl_get_surface_handles()`), creates a real `VkSurfaceKHR`,
+checks real presentation-queue support, and builds a real `VkSwapchainKHR`
+sized to the surface's own current extent. A new, small, additive
+presentation contract exists in `crtgfx/gpu.h`, paralleling
+`crtgfx_window_begin_frame()`/`_end_frame()`'s own shape rather than
+replacing it: `crtgfx_gpu_surface_get_size()`/`_acquire()`/`_clear()`/
+`_present()`. `crtgfx_gpu_surface_clear()` is this vertical slice's own
+deliberate, honestly-scoped stand-in for a full Ganesh/Skia render onto the
+acquired image -- a real, minimal "draw" primitive (a solid RGBA clear,
+real submitted GPU work, really presented) proving the whole real
+acquire/submit/present pipeline end to end. Wiring the already-proven
+offscreen Ganesh pipeline (`src/skia_bridge.cc`) onto a surface's own
+acquired image instead of an offscreen image is real, separate, deferred
+follow-up work, not attempted in this pass.
+
+A new manual demo, `crtgfx_gpu_window_demo` (`libcrtgfx/tools/
+gpu_window_demo.c`, same "run it yourself, needs a real compositor" shape
+as `crtgfx_window_demo`/`crtgfx_keyboard_interactive` -- not wired into
+`ctest`), opens a real `CRTGFX_WINDOW_GPU_PRESENTATION` window and presents
+a continuously animated solid color through the full real pipeline above.
+
+**Verification status, stated honestly**: this session's own real
+environment (Windows+WSL2) compiled and linked everything end to end --
+`crtgfx`/`crtgfx_shared` both build clean with `window_wayland_native.c`
+genuinely compiled in, the real `libwayland-client`+`xdg-shell` build now
+lands in the *main* build tree (not just the standalone `crtgfx-wayland-
+smoke` shadow directory that already existed), `crtgfx_gpu_window_demo`
+links and runs, and the WSL bypass was confirmed for real (prompt, graceful
+exit, no hang). Full `ctest`: 117/117, zero regression to the legacy
+backend or anything else. Real **on-screen** verification (does a window
+actually appear and animate on a real GNOME/Mutter or wlroots compositor)
+is explicitly the user's own separate step on real Linux hardware, not
+WSL -- mirroring the macOS Metal slice's own real-hardware verification
+precedent recorded above. Also explicitly not attempted this pass, matching
+the approved plan's own non-goals: software (`wl_shm`) presentation,
+multi-window, or clipboard support in the native backend (a later Phase 3,
+once the native backend needs real parity with the legacy one); retiring
+the legacy backend (Phase 4, only once the native backend has real parity);
+real swapchain recreation on resize (`VK_ERROR_OUT_OF_DATE_KHR` currently
+surfaces as a real, honest `CRTGFX_ERROR_HOST` from `crtgfx_gpu_surface_
+acquire()`/`_present()` rather than being handled); Windows/macOS live GPU
+presentation wiring (their own real, separate, lower-risk follow-up -- no
+structural gap on either host, just wiring `crtgfx_gpu_surface_create()` to
+each host's own already-existing swap chain/layer code).
+
+A real CMake dependency-graph cycle was found and fixed along the way:
+`crtgfx-wayland-build` (needed to build the real `libwayland-client`/
+`xdg-shell` bindings used by `window_wayland_native.c`) transitively needs
+`port-build-expat`/`port-build-libffi`, which need the root `sysroot`
+target, which itself `DEPENDS` on `crtgfx`/`crtgfx_shared` (to stage
+`libcrtgfx.so` into the rootfs) -- wiring `crtgfx`/`crtgfx_backend_objects`
+to `add_dependencies()` on `crtgfx-wayland-build` directly closed that into
+a real cycle CMake correctly refused to generate. Fixed the same way root
+`CMakeLists.txt` already documents fixing an identical-shaped problem for
+`crtgfx_skia_objects`/`crt-libcxx-sysroot` (see that file's own comment
+right after `add_custom_target(sysroot ...)`): sidestep the ninja
+dependency graph entirely via a configure-time `EXISTS` check on the real,
+already-built `.a` file, degrading gracefully (the native backend simply
+is not compiled in) on a from-scratch configure that has never run
+`crtgfx-wayland-build`, rather than either a hard cycle or a `FATAL_ERROR`
+(this feature is on by default whenever a real `libvulkan` is found, unlike
+Skia's own opt-in `CRTGFX_ENABLE_SKIA` flag, so a `FATAL_ERROR` would break
+every existing from-scratch Linux+Vulkan configure, not just one a user
+deliberately opted into). Run `cmake --build . --target crtgfx-wayland-
+build` once, then reconfigure, to pick up the native backend on a build
+tree that has never built it before.
+
 ## macOS Host Adapter (done, first cut)
 
 `libcrtgfx/src/arch/macos/window_cocoa.c` (2026-08-18) implements the

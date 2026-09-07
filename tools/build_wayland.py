@@ -45,6 +45,52 @@ import shutil
 import subprocess
 from pathlib import Path
 
+#: Real, pinned wayland-protocols repository/commit (2026-09-07, Linux
+#: live GPU presentation vertical slice's own native Wayland backend)
+#: providing stable/xdg-shell/xdg-shell.xml -- core wayland.xml (fetched
+#: separately, see libcrtgfx/third_party/wayland/recipe.json) has no
+#: xdg_wm_base/xdg_surface/xdg_toplevel interfaces at all; those are a
+#: real, separate, "stable" (not core) Wayland protocol extension
+#: maintained in this separate repository, needed by any real toplevel
+#: window (matching what window_wayland.c's own legacy hand-rolled
+#: implementation already has to know about xdg-shell's own wire opcodes/
+#: argument layouts for the identical real reason). Pinned to the 1.49
+#: release tag; real, dereferenced commit (`git ls-remote --tags
+#: https://gitlab.freedesktop.org/wayland/wayland-protocols.git
+#: 'refs/tags/1.49^{}'` on 2026-09-07 -- 1.49 is an annotated tag, so the
+#: bare tag ref alone would give the tag object's own hash, not the real
+#: commit `git checkout` lands on).
+_XDG_SHELL_PROTOCOLS_REPO = "https://gitlab.freedesktop.org/wayland/wayland-protocols.git"
+_XDG_SHELL_PROTOCOLS_COMMIT = "ee78491a237eaff9389a0ccf8680521d074407d3"
+
+
+def ensure_xdg_shell_protocol(dest):
+    """Real, narrow sparse clone of wayland-protocols' own stable/xdg-shell
+    directory only (mirroring tools/build_skia.py's own
+    ensure_skia_external() sparse-checkout technique -- see that
+    function's own docstring for the shared reasoning: a real, bounded
+    --filter=blob:none + --depth 1 + cone-mode sparse-checkout fetch, not
+    a full wayland-protocols clone, which also contains dozens of other,
+    unrelated unstable/staging protocols this project has no use for).
+    Idempotent: skips the real clone entirely if xdg-shell.xml is already
+    present (so re-running this script across incremental CMake builds
+    does not re-fetch every time)."""
+    xml_path = dest / "stable" / "xdg-shell" / "xdg-shell.xml"
+    if xml_path.is_file():
+        return xml_path
+    dest.mkdir(parents=True, exist_ok=True)
+    run(
+        ["git", "clone", "--filter=blob:none", "--no-checkout", "--depth", "1", _XDG_SHELL_PROTOCOLS_REPO, str(dest)],
+        cwd=None,
+    )
+    run(["git", "sparse-checkout", "init", "--cone"], cwd=dest)
+    run(["git", "sparse-checkout", "set", "stable/xdg-shell"], cwd=dest)
+    run(["git", "fetch", "--depth", "1", "origin", _XDG_SHELL_PROTOCOLS_COMMIT], cwd=dest)
+    run(["git", "checkout", "--detach", "FETCH_HEAD"], cwd=dest)
+    if not xml_path.is_file():
+        raise SystemExit(f"xdg-shell.xml missing after fetch: {xml_path}")
+    return xml_path
+
 
 def run(args, cwd=None, env=None):
     print("+", " ".join(str(arg) for arg in args), flush=True)
@@ -336,10 +382,15 @@ def main():
         return
 
     # --- Phase 2: run wayland-scanner to generate the client-side protocol
-    # bindings from the real core protocol/wayland.xml (no wayland-
-    # protocols/xdg-shell needed for this -- core wayland.xml alone is
-    # what libwayland-client.c itself needs to build; see recipe.json's
-    # own notes on why wayland-protocols is deferred). ---
+    # bindings from the real core protocol/wayland.xml. wayland-protocols/
+    # xdg-shell was deferred when this comment was first written (core
+    # wayland.xml alone is what libwayland-client.c itself needs to
+    # build) -- no longer true as of 2026-09-07 (Linux live GPU
+    # presentation vertical slice): the new native Wayland backend needs
+    # a real xdg_wm_base/xdg_surface/xdg_toplevel toplevel window, a
+    # separate, "stable" (not core) protocol extension -- generated the
+    # same way, just from a second, separately-fetched XML (see
+    # ensure_xdg_shell_protocol() above), immediately below. ---
     protocol_xml = source / "protocol" / "wayland.xml"
     client_protocol_core_h = generated / "wayland-client-protocol-core.h"
     client_protocol_h = generated / "wayland-client-protocol.h"
@@ -348,6 +399,17 @@ def main():
     run([str(scanner_bin), "-c", "client-header", str(protocol_xml), str(client_protocol_core_h)], cwd=root, env=env)
     run([str(scanner_bin), "client-header", str(protocol_xml), str(client_protocol_h)], cwd=root, env=env)
     run([str(scanner_bin), "public-code", str(protocol_xml), str(protocol_c)], cwd=root, env=env)
+
+    # xdg-shell: same real scanner, a second, separately-fetched XML.
+    # wayland-scanner is generic -- it works on any valid Wayland
+    # protocol XML, not just the core one, confirmed by reading its own
+    # real src/scanner.c directly (nothing in it is wayland.xml-specific).
+    xdg_shell_protocols_dir = build_dir / "xdg-shell-protocols"
+    xdg_shell_xml = ensure_xdg_shell_protocol(xdg_shell_protocols_dir)
+    xdg_shell_client_h = generated / "xdg-shell-client-protocol.h"
+    xdg_shell_protocol_c = generated / "xdg-shell-protocol.c"
+    run([str(scanner_bin), "client-header", str(xdg_shell_xml), str(xdg_shell_client_h)], cwd=root, env=env)
+    run([str(scanner_bin), "public-code", str(xdg_shell_xml), str(xdg_shell_protocol_c)], cwd=root, env=env)
 
     # --- Phase 3: compile wayland-client's own real sources against
     # this project's own expat is not needed here (only the scanner needs
@@ -366,6 +428,12 @@ def main():
         src / "wayland-os.c",
         src / "wayland-util.c",
         protocol_c,
+        # xdg-shell's own generated public-code -- bundled straight into
+        # the same libwayland-client.a (not a second archive): any real
+        # consumer of a toplevel window needs both together, and this
+        # avoids a second SONAME-versioning/link-ordering ceremony for
+        # one small protocol's worth of marshaling glue.
+        xdg_shell_protocol_c,
     ]
     client_objs = []
     for source_file in client_sources:
@@ -391,6 +459,7 @@ def main():
         shutil.copy2(src / header, include_dir / header)
     shutil.copy2(client_protocol_h, include_dir / "wayland-client-protocol.h")
     shutil.copy2(client_protocol_core_h, include_dir / "wayland-client-protocol-core.h")
+    shutil.copy2(xdg_shell_client_h, include_dir / "xdg-shell-client-protocol.h")
     # wayland-client-core.h itself #includes "wayland-version.h" -- a
     # consumer compiling against the installed headers alone (not this
     # build's own -I.../generated) needs it installed alongside the

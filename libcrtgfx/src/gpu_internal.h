@@ -74,6 +74,63 @@ struct crtgfx_gpu_device {
 #endif
 };
 
+/* A real GPU-backed presentation target -- gpu.c owns the allocation/
+ * free the same way it owns crtgfx_gpu_device's, a real backend (today:
+ * src/arch/linux/gpu_vulkan.c, 2026-09-07) only fills in and tears down
+ * its own host-specific fields. Unlike crtgfx_gpu_device, there is no
+ * host-independent field at all here (no refcount -- crtgfx_gpu_surface
+ * is single-owner, see crtgfx/gpu.h's own comment on crtgfx_gpu_surface_
+ * create()) -- every field is behind the same real per-host #if/#elif
+ * chain crtgfx_gpu_device's own Vulkan/D3D12/Metal fields already use. */
+struct crtgfx_gpu_surface {
+#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
+  /* Not retained -- a surface's own lifetime is documented (crtgfx/gpu.h)
+   * to never outlive the device it was created against; this is a plain
+   * back-reference for crtgfx_gpu_vulkan_surface_*() to reach the real
+   * VkInstance/VkPhysicalDevice/VkDevice/VkQueue it needs, not a second
+   * ownership relationship. */
+  crtgfx_gpu_device* device;
+  /* Real VkSurfaceKHR/VkSwapchainKHR -- non-dispatchable handles, void*
+   * for the same reason crtgfx_gpu_device's own Vulkan fields above are:
+   * pointer-sized and ABI-identical regardless of which header declared
+   * the type name, on this project's 64-bit-only real targets. */
+  void* vk_surface;
+  void* vk_swapchain;
+  /* malloc'd array of `vk_image_count` real VkImage handles -- each one
+   * owned by vk_swapchain itself (never individually destroyed, per the
+   * real Vulkan spec's own VkSwapchainKHR contract); only the array
+   * storage itself is this struct's own to free. */
+  void** vk_images;
+  uint32_t vk_image_count;
+  uint32_t vk_format; /* real VkFormat the swapchain was created with */
+  uint32_t width;
+  uint32_t height;
+  /* Real per-frame synchronization: one semaphore each side of a real
+   * vkCmdClearColorImage() submission (signaled by acquire, waited-on by
+   * the submit; signaled by the submit, waited-on by present), and one
+   * fence gating command-buffer reuse (signaled once the GPU has actually
+   * finished the previous frame's submission) -- the same minimal, real,
+   * single-frame-in-flight synchronization shape any introductory real
+   * Vulkan swapchain sample uses; a future multi-frame-in-flight
+   * improvement is real, later work, not attempted in this first vertical
+   * slice. */
+  void* vk_image_available_semaphore;
+  void* vk_render_finished_semaphore;
+  void* vk_command_pool;
+  void* vk_command_buffer;
+  void* vk_frame_fence;
+  uint32_t vk_current_image_index;
+  /* 1 between a successful crtgfx_gpu_vulkan_surface_acquire() and the
+   * matching crtgfx_gpu_vulkan_surface_present() -- lets _clear()/
+   * _present() reject being called out of order with a real, honest
+   * CRTGFX_ERROR_HOST rather than passing a stale/undefined image index
+   * to the driver. */
+  int vk_image_acquired;
+#else
+  int reserved;
+#endif
+};
+
 #if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
 /* Real backend hooks -- src/arch/linux/gpu_vulkan.c. Mirror crtgfx_gpu_
  * query_capabilities()/crtgfx_gpu_device_create()'s own public contract in
@@ -84,6 +141,23 @@ struct crtgfx_gpu_device {
 crtgfx_result crtgfx_gpu_vulkan_query_capabilities(crtgfx_gpu_capabilities* out_caps);
 crtgfx_result crtgfx_gpu_vulkan_device_create(uint32_t device_index, struct crtgfx_gpu_device* device);
 void crtgfx_gpu_vulkan_device_destroy(struct crtgfx_gpu_device* device);
+/* Real surface/swapchain hooks (2026-09-07) -- same real "gpu.c validates
+ * and allocates, this only fills in/tears down its own host-specific
+ * fields" shape as the device hooks just above. `wl_display`/`wl_surface`
+ * are real, live `struct wl_display*`/`struct wl_surface*` from the
+ * native Wayland backend (src/arch/linux/window_wayland_native.c, via
+ * crtgfx_native_wl_get_surface_handles() -- gpu.c's own caller resolves
+ * this, not this header, to keep this header buildable without ever
+ * needing <wayland-client.h> itself); void* here for the same "no host
+ * SDK type leaked into a shared header" reason every other Vulkan handle
+ * in this file already uses. */
+crtgfx_result crtgfx_gpu_vulkan_surface_create(
+    struct crtgfx_gpu_device* device, void* wl_display, void* wl_surface, uint32_t width, uint32_t height,
+    struct crtgfx_gpu_surface* surface);
+void crtgfx_gpu_vulkan_surface_destroy(struct crtgfx_gpu_surface* surface);
+crtgfx_result crtgfx_gpu_vulkan_surface_acquire(struct crtgfx_gpu_surface* surface, uint64_t timeout_us);
+crtgfx_result crtgfx_gpu_vulkan_surface_clear(struct crtgfx_gpu_surface* surface, float r, float g, float b, float a);
+crtgfx_result crtgfx_gpu_vulkan_surface_present(struct crtgfx_gpu_surface* surface);
 #elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
 /* Real backend hooks -- src/arch/windows/gpu_win32.c. Same real shape as
  * the Vulkan hooks above (gpu.c still owns all argument validation and

@@ -22,6 +22,31 @@ typedef enum crtgfx_result {
 
 enum {
   CRTGFX_WINDOW_VISIBLE = 1u << 0,
+  /* Real GPU presentation requested for this window (2026-09-07, the
+   * "Finish live GPU presentation everywhere" roadmap step -- Linux
+   * lands first). On Linux specifically, this selects the new native
+   * Wayland backend (real libwayland-client, src/arch/linux/
+   * window_wayland_native.c) instead of the legacy hand-rolled one
+   * (src/arch/linux/window_wayland.c) -- Vulkan's own real WSI needs a
+   * live wl_surface* from a real libwayland-client connection, which
+   * wire-protocol object IDs alone can never provide (two independent
+   * client-side object-ID allocators cannot safely share one connection,
+   * so a legacy-backend window's own surface can never be "upgraded"
+   * after creation). This flag must be set at crtgfx_window_create()
+   * time, before any real connection is made for this window -- see
+   * docs/libcrtgfx_wayland_plan.md's own dual-backend section for the
+   * full design and its own real, honest current feature scope (Vulkan-
+   * only; no software wl_shm/multi-window/clipboard yet). Windows/macOS
+   * currently ignore this bit entirely (their own existing swap chain/
+   * layer presentation code has no equivalent backend split to make --
+   * see that same doc). Gracefully returns CRTGFX_ERROR_UNSUPPORTED,
+   * matching this project's own established "no usable host backend
+   * right now" contract, on any host/environment where real GPU
+   * presentation genuinely is not available (no compositor reachable,
+   * WSL specifically -- see window_wayland_native.c's own WSL-detection
+   * comment for why that one environment is a deliberate, permanent
+   * bypass rather than a target to make work). */
+  CRTGFX_WINDOW_GPU_PRESENTATION = 1u << 1,
 };
 
 typedef struct crtgfx_window_desc {
