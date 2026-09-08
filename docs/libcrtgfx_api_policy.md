@@ -83,10 +83,23 @@ out/<preset>/external/skia/src/
   include/...       # fetched upstream Skia public headers
 ```
 
-The `crt-gfx-simple` install component contains only `window.h` and
-libcrtgfx. The advanced `crt-gfx` component adds `gpu.h`, `skia.h`, and the
-real Skia include tree when Skia is enabled. This packaging boundary prevents
-Simple Graphics consumers from accidentally depending on the advanced API.
+This split is physical, not just a header-install boundary (2026-09-08,
+TODO.md's decided item): `libcrtgfx/CMakeLists.txt` compiles window/input/
+software-framebuffer code into its own `crtgfx_window`/`crtgfx_window_shared`
+targets (output name `crtgfx`, so `libcrtgfx.so`/`.dll`/`.dylib` stays the
+familiar filename), the GPU device/surface API into `crtgfx_gpu`/
+`crtgfx_gpu_shared` (linking `crtgfx_window`), and the Skia bridge into
+`crtgfx_skia`/`crtgfx_skia_shared` (linking `crtgfx_gpu`, so it also pulls
+`crtgfx_window` transitively) -- three separate object graphs, not one
+archive/shared object with headers hidden per stage. The `crt-gfx-simple`
+install component installs only `window.h` plus `crtgfx_window`/
+`crtgfx_window_shared` -- no GPU or Skia object code ever reaches a Simple
+Graphics `03-gfx-simple` distribution at all. The advanced `crt-gfx`
+component adds `gpu.h`/`crtgfx_gpu(_shared)` and, when Skia is enabled,
+`skia.h`/`crtgfx_skia(_shared)` plus the real Skia include tree. This
+packaging boundary prevents Simple Graphics consumers from accidentally
+depending on the advanced API, now enforced by the linker as well as by
+what headers are staged.
 
 **Decided 2026-08-29, Phase 1 of the window/event API completion plan:**
 this project's day-1 planning (before any real implementation existed)

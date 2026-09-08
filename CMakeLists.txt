@@ -840,12 +840,12 @@ endif()
 # why) before they compile. Deliberately NOT wired as an add_dependencies()
 # edge onto crt-libcxx-sysroot/sysroot the way crtgfx-skia-build's own
 # identical-looking need just above is: crtgfx_skia_objects's compiled
-# output is folded directly into the `crtgfx` STATIC_LIBRARY via
-# $<TARGET_OBJECTS:...> (libcrtgfx/CMakeLists.txt), and `sysroot` (this
-# file, just above) itself DEPENDS on `crtgfx` -- so crtgfx_skia_objects ->
+# output used to fold directly into the single monolithic `crtgfx`
+# STATIC_LIBRARY via $<TARGET_OBJECTS:...>, and `sysroot` (this file, just
+# above) itself used to DEPENDS on `crtgfx` -- so crtgfx_skia_objects ->
 # crt-libcxx-sysroot -> crt-libcxx-build -> crt-libcxx-configure -> (its
 # own pre-existing add_dependencies(crt-libcxx-configure sysroot) just
-# above) -> sysroot -> crtgfx -> crtgfx_skia_objects is a real dependency
+# above) -> sysroot -> crtgfx -> crtgfx_skia_objects was a real dependency
 # cycle -- confirmed for real (2026-08-23): "CMake Generate step failed"
 # with exactly this strongly-connected component reported. crtgfx-skia-
 # build has no such loop back to itself, since nothing in `sysroot`
@@ -855,6 +855,15 @@ endif()
 # exists, tell the user which target to run first" pattern already used
 # there for Skia's own SkSurface.h/CRTGFX_SKIA_LIBRARIES, sidestepping the
 # ninja dependency graph entirely rather than trying to widen it correctly.
+# NOTE (2026-09-08, libcrtgfx's own physical window/GPU/Skia split):
+# `sysroot`'s real DEPENDS list above no longer mentions crtgfx at all --
+# it was scoped down to the crt-c component only as part of the
+# distribution-stages restructuring, so the literal cycle described above
+# may no longer exist. Left this guard (and its own reasoning) in place
+# rather than trying the add_dependencies() edge now, since that would be
+# an unverified change outside this pass's own scope -- a real future
+# reconfirmation (does crtgfx_skia_objects -> crt-libcxx-sysroot -> ... ->
+# crtgfx_skia now generate cleanly?) belongs in TODO.md, not assumed here.
 
 if(Python3_Interpreter_FOUND)
   # CRT_ROOTFS itself is now set earlier, right after add_subdirectory(shell)
@@ -1196,7 +1205,12 @@ if(Python3_Interpreter_FOUND)
     )
   endif()
 
-  add_custom_target(crt-gfx-simple-build DEPENDS crtgfx crtgfx_shared crtgfx_window_smoke crtgfx_synthetic_event)
+  # crtgfx_window/crtgfx_window_shared (not the old monolithic crtgfx/
+  # crtgfx_shared, superseded by libcrtgfx's own physical window/GPU/Skia
+  # split, TODO.md's decided item) -- this is what makes the Simple
+  # Graphics stage's own dist actually window-only: no GPU/Skia object
+  # code ever gets pulled into this DEPENDS list at all.
+  add_custom_target(crt-gfx-simple-build DEPENDS crtgfx_window crtgfx_window_shared crtgfx_window_smoke crtgfx_synthetic_event)
   add_custom_target(crt-gfx-simple-test
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtgfx_window_smoke_runs"
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtgfx_synthetic_event_runs"
@@ -1215,7 +1229,22 @@ if(Python3_Interpreter_FOUND)
     USES_TERMINAL
   )
 
-  add_custom_target(crt-gfx-build DEPENDS crtgfx crtgfx_shared crtgfx_gpu_test)
+  # crtgfx_gpu/crtgfx_gpu_shared PUBLIC-link crtgfx_window/crtgfx_window_
+  # shared transitively, but both are listed explicitly here so `ninja`
+  # actually builds every one of these targets, not just whatever crtgfx_
+  # gpu_test's own transitive closure happens to need. Deliberately does
+  # NOT depend on crtgfx_skia/crtgfx_skia_raster_smoke etc. -- Skia stays
+  # opt-in (CRTGFX_ENABLE_SKIA), matching this target's own pre-split
+  # scope, which never forced the optional Skia build either.
+  # Also DEPENDS crt-gfx-simple-build (not just this stage's own targets):
+  # crt-gfx-test's own ctest filter below is the broad "^crtgfx_.*_runs",
+  # which matches crtgfx_window_smoke_runs/crtgfx_synthetic_event_runs
+  # too -- a real, confirmed gap found running `crt-gfx-build` alone from
+  # a genuinely fresh out/ (2026-09-08): those two tests are registered
+  # globally regardless of which aggregate target built them, but nothing
+  # in crt-gfx-build's own (pre-this-fix) DEPENDS ever built them, so
+  # ctest correctly reported them "Not Run" rather than a false pass.
+  add_custom_target(crt-gfx-build DEPENDS crt-gfx-simple-build crtgfx_window crtgfx_window_shared crtgfx_gpu crtgfx_gpu_shared crtgfx_gpu_test)
   add_custom_target(crt-gfx-test
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtgfx_.*_runs"
     DEPENDS crt-gfx-build

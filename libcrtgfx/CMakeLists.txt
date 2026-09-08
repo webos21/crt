@@ -1,8 +1,36 @@
-set(CRTGFX_COMMON_SOURCES
+# Physically separate source graphs (TODO.md's decided-but-until-now-
+# unimplemented "libcrtgfx must be split so window/input/software-
+# framebuffer, the GPU backend, and the Skia bridge become physically
+# separate source/object graphs" item): CRTGFX_WINDOW_SOURCES feeds
+# crtgfx_window_objects/crtgfx_window(_shared) alone -- no GPU or Skia
+# code compiles into it at all, matching docs/libcrtgfx_api_policy.md's
+# Simple Graphics contract for real, not just via a header-install
+# COMPONENT split. src/gpu.c moves to CRTGFX_GPU_SOURCES (see the
+# per-OS CRTGFX_WINDOW_BACKEND_SOURCES/CRTGFX_GPU_BACKEND_SOURCES block
+# below) --
+# window.c never references GPU/Skia at all (confirmed directly), but
+# gpu.c calls three tiny accessor functions defined in the window
+# backend files (crtgfx_native_wl_get_surface_handles/
+# crtgfx_win32_get_hwnd/crtgfx_cocoa_get_metal_layer) -- a real,
+# one-directional dependency (GPU needs window, window never needs GPU),
+# resolved by crtgfx_gpu(_shared) linking crtgfx_window(_shared) below,
+# not a cycle.
+set(CRTGFX_WINDOW_SOURCES
   src/window.c
   src/wayland_weston.c
+)
+set(CRTGFX_GPU_SOURCES
   src/gpu.c
 )
+# Per-OS backend files (window_win32.c/gpu_win32.c, window_cocoa.c/
+# gpu_metal.c, window_wayland.c+window_wayland_native.c/gpu_vulkan.c)
+# populate these two below -- kept separate from CRTGFX_WINDOW_SOURCES/
+# CRTGFX_GPU_SOURCES (the "common" files, always compiled with
+# crt_build_flags) because the backend files get a different, narrower
+# compile-flag treatment (see crtgfx_window_backend_objects/crtgfx_gpu_
+# backend_objects's own comments, further down, for why).
+set(CRTGFX_WINDOW_BACKEND_SOURCES)
+set(CRTGFX_GPU_BACKEND_SOURCES)
 
 # Skia's own source pin/sparse-checkout/local-patch record now lives in
 # libcrtgfx/third_party/skia/recipe.json (2026-08-22, matching libstdc++/
@@ -169,8 +197,9 @@ endif()
 # hoisted here for the same reason CRTGFX_XKBCOMMON_INSTALL_PREFIX (just
 # above) is: src/arch/linux/window_wayland_native.c (2026-09-07, the
 # "Finish live GPU presentation everywhere" Linux native-Wayland-backend
-# slice) needs this path at crtgfx_backend_objects/crtgfx/crtgfx_shared's
-# own target_include_directories/target_link_libraries call sites further
+# slice) needs this path at crtgfx_window_backend_objects/crtgfx_window(
+# _shared)'s own target_include_directories/target_link_libraries call
+# sites further
 # down this file, unconditionally of whether Python is available to
 # actually populate it. Previously these four paths were only ever defined
 # much further down, inside the Python3_Interpreter_FOUND-gated block that
@@ -197,9 +226,10 @@ set(CRTGFX_WAYLAND_PORT_PREFIX "${CMAKE_BINARY_DIR}/port-tests/install" CACHE PA
 # Unlike CRTGFX_XKBCOMMON_LIBRARIES (always on for Linux -- libxkbcommon
 # backs the legacy hand-rolled backend's own keyboard input, which every
 # Linux build compiles), real libwayland-client is only actually needed by
-# the new native backend, which only exists in CRTGFX_BACKEND_SOURCES when
-# CRTGFX_LINUX_VULKAN_LIB was found (see the Linux CRTGFX_BACKEND_SOURCES
-# block below, where this is overridden to the real .a path with FORCE, in
+# the new native backend, which only exists in CRTGFX_WINDOW_BACKEND_SOURCES
+# when CRTGFX_LINUX_VULKAN_LIB was found (see the Linux CRTGFX_WINDOW_
+# BACKEND_SOURCES/CRTGFX_GPU_BACKEND_SOURCES block below, where this is
+# overridden to the real .a path with FORCE, in
 # lockstep with window_wayland_native.c being added to the sources list) --
 # find_library(CRTGFX_LINUX_VULKAN_LIB vulkan) has not run yet at this
 # point in the file, so "" is the only correct default here, matching
@@ -228,8 +258,10 @@ endif()
 # built --target=*-w64-mingw32 (Itanium/GNU C++ ABI) via tools/crt-cc/tools/
 # crt-c++, regardless of this outer CMake project's own target -- that real
 # standard library must be THIS project's own imported libc++ (staged at
-# ${CRT_SYSROOT}/include/c++/v1 by the crt-libcxx-sysroot target), not a host
-# substitute. Before CMakeLists.txt's mingw32 unification, crt_cxx_build_
+# ${CRT_LIBCXX_SYSROOT}/include/c++/v1 by the crt-libcxx-sysroot target,
+# the 02-cxx cumulative dist stage -- not ${CRT_SYSROOT}, the 01-c-only
+# stage, which never has libc++ at all since today's distribution-stage
+# restructuring split them apart), not a host substitute. Before CMakeLists.txt's mingw32 unification, crt_cxx_build_
 # flags's own Windows fallback (CRT_CXX_STANDARD_INCLUDE_DIRS, see that
 # file's own comment) silently supplied the *real host MSVC STL* instead
 # (found via a direct `clang++ -v` compiler probe, since regular CMake C++
@@ -261,15 +293,13 @@ endif()
 # since crtgfx_skia_objects's own output is folded into the `crtgfx`
 # STATIC_LIBRARY that `sysroot` itself depends on.
 if(CRTGFX_ENABLE_SKIA AND CRT_TARGET_OS STREQUAL "windows" AND
-   NOT EXISTS "${CRT_SYSROOT}/include/c++/v1")
-  message(FATAL_ERROR "CRTGFX_ENABLE_SKIA=ON on Windows but ${CRT_SYSROOT}/include/c++/v1 was not found. Run the crt-libcxx-sysroot target first (with CRT_USE_IMPORTED_LIBCXX=ON), then reconfigure.")
+   NOT EXISTS "${CRT_LIBCXX_SYSROOT}/include/c++/v1")
+  message(FATAL_ERROR "CRTGFX_ENABLE_SKIA=ON on Windows but ${CRT_LIBCXX_SYSROOT}/include/c++/v1 was not found. Run the crt-libcxx-sysroot target first (with CRT_USE_IMPORTED_LIBCXX=ON), then reconfigure.")
 endif()
 
 if(CRT_TARGET_OS STREQUAL "windows")
-  set(CRTGFX_BACKEND_SOURCES
-    src/arch/windows/window_win32.c
-    src/arch/windows/gpu_win32.c
-  )
+  list(APPEND CRTGFX_WINDOW_BACKEND_SOURCES src/arch/windows/window_win32.c)
+  list(APPEND CRTGFX_GPU_BACKEND_SOURCES src/arch/windows/gpu_win32.c)
   # Windows/D3D12 offscreen vertical slice (2026-09-03, TODO.md's "Enable
   # Skia GPU rendering" step -- the Linux/Vulkan slice's own sibling; see
   # crtgfx/gpu.h's own top comment). Unlike Linux's libvulkan-dev (a real
@@ -282,20 +312,19 @@ if(CRT_TARGET_OS STREQUAL "windows")
   # than reintroducing the whole "guard every ${VAR} link-line expansion"
   # discipline the Linux CRTGFX_LINUX_VULKAN_LIB break just taught this
   # session -- there is no real "maybe absent" case to guard against here.
-  # (CRT_TARGET_OS_WINDOWS=1 is applied to crtgfx_backend_objects itself
+  # (CRT_TARGET_OS_WINDOWS=1 is applied to crtgfx_gpu_objects itself
   # further down, right after that target is actually created -- see that
   # call's own, fuller comment for a real, narrow gap this exposed.)
   # Directory-scoped (not per-target), matching CRTGFX_HAVE_VULKAN's own
-  # precedent just above: src/gpu.c (crtgfx_common_objects) and
-  # src/arch/windows/gpu_win32.c (crtgfx_backend_objects) share struct
-  # crtgfx_gpu_device's own real field layout via src/gpu_internal.h, and
-  # both compilation units must see this define identically.
+  # precedent just above: src/gpu.c and src/arch/windows/gpu_win32.c
+  # (both now crtgfx_gpu_objects, since the window/GPU physical split)
+  # share struct crtgfx_gpu_device's own real field layout via
+  # src/gpu_internal.h, and both compilation units must see this define
+  # identically.
   add_compile_definitions(CRTGFX_HAVE_D3D12=1)
 elseif(CRT_TARGET_OS STREQUAL "macos")
-  set(CRTGFX_BACKEND_SOURCES
-    src/arch/macos/window_cocoa.c
-    src/arch/macos/gpu_metal.c
-  )
+  list(APPEND CRTGFX_WINDOW_BACKEND_SOURCES src/arch/macos/window_cocoa.c)
+  list(APPEND CRTGFX_GPU_BACKEND_SOURCES src/arch/macos/gpu_metal.c)
   # macOS/Metal offscreen vertical slice (2026-09-04, TODO.md's "Enable
   # Skia GPU rendering" step -- the Linux/Vulkan and Windows/D3D12
   # slices' own sibling; see crtgfx/gpu.h's own top comment). Metal.
@@ -305,48 +334,54 @@ elseif(CRT_TARGET_OS STREQUAL "macos")
   # same D3D12 precedent (no "maybe absent" case to guard against, unlike
   # Linux's own find_library()-gated libvulkan). Directory-scoped (not
   # per-target), matching CRTGFX_HAVE_VULKAN/CRTGFX_HAVE_D3D12's own
-  # precedent: src/gpu.c (crtgfx_common_objects) and src/arch/macos/
-  # gpu_metal.c (crtgfx_backend_objects) share struct crtgfx_gpu_device's
-  # own real field layout via src/gpu_internal.h, and both compilation
-  # units must see this define identically.
+  # precedent: src/gpu.c and src/arch/macos/gpu_metal.c (both now
+  # crtgfx_gpu_objects, since the window/GPU physical split) share struct
+  # crtgfx_gpu_device's own real field layout via src/gpu_internal.h, and
+  # both compilation units must see this define identically.
   add_compile_definitions(CRTGFX_HAVE_METAL=1)
-  # window_cocoa.c drives the Objective-C runtime from plain C by casting
-  # objc_msgSend (a real, variadic `id (*)(id, SEL, ...)` extern) to each
-  # call site's own exact, non-variadic signature before invoking it --
-  # the standard, unavoidable way to call objc_msgSend from C without the
-  # compiler's ObjC-mode-only special-casing of that one function. Found
-  # via this session's own cross-compile check (2026-08-30, no real macOS
-  # host -- see this target's own crt_build_flags link below, which is
-  # what actually made this reachable: -Wall/-Wextra bring in a real,
-  # fairly new Clang diagnostic, -Wcast-function-type-mismatch, that
-  # flags exactly this pattern under -Werror on this session's own local
-  # LLVM 22.1.8) -- a real, previously-latent risk in code that has
-  # actually passed on real macOS hardware before, not a bug in the cast
-  # pattern itself (every one of these casts is intentional and correct;
-  # C has no other supported way to call a function through a pointer
-  # typed differently than how it will actually be invoked here, and
-  # this is exactly what upstream Objective-C runtime headers themselves
-  # document as the required approach for non-ObjC-mode callers).
-  # Suppressed here, not by rewriting the cast pattern -- there is no
-  # alternative pattern that avoids it, only ways to hide the warning.
-  # -Wno-unknown-warning-option alongside it for the same cross-Clang-
-  # version reason established for shell/CMakeLists.txt's own mksh fix
-  # the same day: an older/different Clang (this exact file has been
-  # verified on real macOS hardware with whatever AppleClang version was
-  # current at the time, almost certainly one that predates this
-  # diagnostic entirely) must not choke on an unrecognized flag name
-  # either. set_source_files_properties(), not target_compile_options():
-  # crtgfx_backend_objects links crt_build_flags, whose own -Wall/-Wextra/
-  # -Werror land after a target's own target_compile_options() on the
-  # real command line (the exact ordering bug shell/CMakeLists.txt's own
-  # mksh fix found and fixed the same day) -- COMPILE_OPTIONS source-file
-  # properties are appended at the very end instead, reliably winning
-  # regardless of link order.
-  set_source_files_properties(${CRTGFX_BACKEND_SOURCES} PROPERTIES
+  # window_cocoa.c/gpu_metal.c both drive the Objective-C runtime from
+  # plain C by casting objc_msgSend (a real, variadic `id (*)(id, SEL,
+  # ...)` extern) to each call site's own exact, non-variadic signature
+  # before invoking it -- the standard, unavoidable way to call
+  # objc_msgSend from C without the compiler's ObjC-mode-only
+  # special-casing of that one function. Found via this session's own
+  # cross-compile check (2026-08-30, no real macOS host -- see this
+  # target's own crt_build_flags link below, which is what actually made
+  # this reachable: -Wall/-Wextra bring in a real, fairly new Clang
+  # diagnostic, -Wcast-function-type-mismatch, that flags exactly this
+  # pattern under -Werror on this session's own local LLVM 22.1.8) -- a
+  # real, previously-latent risk in code that has actually passed on real
+  # macOS hardware before, not a bug in the cast pattern itself (every one
+  # of these casts is intentional and correct; C has no other supported
+  # way to call a function through a pointer typed differently than how it
+  # will actually be invoked here, and this is exactly what upstream
+  # Objective-C runtime headers themselves document as the required
+  # approach for non-ObjC-mode callers). Suppressed here, not by
+  # rewriting the cast pattern -- there is no alternative pattern that
+  # avoids it, only ways to hide the warning. -Wno-unknown-warning-option
+  # alongside it for the same cross-Clang-version reason established for
+  # shell/CMakeLists.txt's own mksh fix the same day: an older/different
+  # Clang (this exact file has been verified on real macOS hardware with
+  # whatever AppleClang version was current at the time, almost certainly
+  # one that predates this diagnostic entirely) must not choke on an
+  # unrecognized flag name either. set_source_files_properties(), not
+  # target_compile_options(): crtgfx_window_objects/crtgfx_gpu_objects
+  # both link crt_build_flags, whose own -Wall/-Wextra/-Werror land after
+  # a target's own target_compile_options() on the real command line (the
+  # exact ordering bug shell/CMakeLists.txt's own mksh fix found and
+  # fixed the same day) -- COMPILE_OPTIONS source-file properties are
+  # appended at the very end instead, reliably winning regardless of
+  # link order. Applies to both files even though they now feed two
+  # different OBJECT libraries -- set_source_files_properties() is keyed
+  # by source path, not by which target consumes it.
+  set_source_files_properties(
+    src/arch/macos/window_cocoa.c
+    src/arch/macos/gpu_metal.c
+    PROPERTIES
     COMPILE_OPTIONS "-Wno-cast-function-type-mismatch;-Wno-unknown-warning-option"
   )
 elseif(CRT_TARGET_OS STREQUAL "linux")
-  set(CRTGFX_BACKEND_SOURCES src/arch/linux/window_wayland.c)
+  list(APPEND CRTGFX_WINDOW_BACKEND_SOURCES src/arch/linux/window_wayland.c)
   # Ganesh/Vulkan offscreen vertical slice (2026-09-03, TODO.md's "Enable
   # Skia GPU rendering" step) -- the first real crtgfx_gpu_device backend
   # anywhere in this project (see crtgfx/gpu.h's own top comment).
@@ -381,7 +416,7 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
     )
   endif()
   if(CRTGFX_LINUX_VULKAN_LIB)
-    list(APPEND CRTGFX_BACKEND_SOURCES src/arch/linux/gpu_vulkan.c)
+    list(APPEND CRTGFX_GPU_BACKEND_SOURCES src/arch/linux/gpu_vulkan.c)
     # Native Wayland backend (2026-09-07, "Finish live GPU presentation
     # everywhere") -- real libwayland-client, gated on the exact same
     # CRTGFX_LINUX_VULKAN_LIB condition as gpu_vulkan.c itself: this
@@ -405,9 +440,10 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
     # (right after add_custom_target(sysroot ...)) already documents for
     # an identical-shaped problem: crtgfx-wayland-build needs port-build-
     # expat/port-build-libffi, which need the `sysroot` target, which
-    # itself DEPENDS on `crtgfx`/`crtgfx_shared` (to stage libcrtgfx.so
-    # into the rootfs) -- crtgfx (or crtgfx_backend_objects) depending
-    # back on crtgfx-wayland-build closes that into a real cycle CMake
+    # itself builds crtgfx_window/crtgfx_gpu/crtgfx_skia (to stage
+    # libcrtgfx*.so into the rootfs) -- any of those (or
+    # crtgfx_window_objects/crtgfx_gpu_objects) depending back on
+    # crtgfx-wayland-build closes that into a real cycle CMake
     # correctly refuses to generate ("Cyclic dependencies are allowed
     # only among static libraries"). Unlike CRTGFX_ENABLE_SKIA's own
     # identical-in-spirit EXISTS-check precedent (a FATAL_ERROR, since
@@ -426,30 +462,31 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
     # at configure time, matching CRTGFX_SKIA_LIBRARIES's own same real,
     # accepted limitation.
     if(CRTGFX_LINUX_WAYLAND_CLIENT_LIB AND EXISTS "${CRTGFX_WAYLAND_XDG_SHELL_LIBRARY}")
-      list(APPEND CRTGFX_BACKEND_SOURCES src/arch/linux/window_wayland_native.c)
+      list(APPEND CRTGFX_WINDOW_BACKEND_SOURCES src/arch/linux/window_wayland_native.c)
       add_compile_definitions(CRTGFX_HAVE_NATIVE_WAYLAND=1)
       set(CRTGFX_WAYLAND_CLIENT_LIBRARIES "${CRTGFX_WAYLAND_XDG_SHELL_LIBRARY};${CRTGFX_LINUX_WAYLAND_CLIENT_LIB}" CACHE STRING "Libraries needed to link real libwayland-client into the Linux native Wayland backend" FORCE)
     else()
       message(STATUS "libcrtgfx: native Wayland Vulkan WSI needs host libwayland-client.so.0 plus ${CRTGFX_WAYLAND_XDG_SHELL_LIBRARY}; run 'cmake --build . --target crtgfx-wayland-build' then reconfigure after installing the host Wayland runtime to enable it")
     endif()
-    # Directory-scoped, not per-target: src/gpu.c (compiled into
-    # crtgfx_common_objects) and src/arch/linux/gpu_vulkan.c (compiled
-    # into crtgfx_backend_objects) share struct crtgfx_gpu_device's own
+    # Directory-scoped, not per-target: src/gpu.c and
+    # src/arch/linux/gpu_vulkan.c (both now crtgfx_gpu_objects, since
+    # the window/GPU physical split) share struct crtgfx_gpu_device's own
     # real field layout via src/gpu_internal.h -- both compilation units
     # MUST see CRTGFX_HAVE_VULKAN identically, or the Vulkan-only fields
     # silently disagree on the struct's own real size between the two
     # object libraries (a real, silent memory-corruption risk, not just a
     # build inconsistency). add_compile_definitions() here applies to
     # every target this CMakeLists.txt still goes on to create in this
-    # directory (both crtgfx_common_objects and crtgfx_backend_objects,
+    # directory (both crtgfx_window_objects and crtgfx_gpu_objects,
     # further down) -- two separate target_compile_definitions() calls
     # could drift out of sync in a way this single call cannot.
     add_compile_definitions(CRTGFX_HAVE_VULKAN=1)
     # See the real -Wl,--exclude-libs,ALL fix and its own full "why"
-    # comment further down, right after add_library(crtgfx STATIC ...) --
-    # deferred to there because target_link_options() needs the `crtgfx`
-    # target to already exist, and it is not defined until much later in
-    # this same file. CRTGFX_LINUX_VULKAN_LIB (this if-branch's own
+    # comment further down, right after add_library(crtgfx_gpu STATIC
+    # ...) -- deferred to there because target_link_options() needs the
+    # `crtgfx_gpu` target (the one that actually links libvulkan.so) to
+    # already exist, and it is not defined until much later in this same
+    # file. CRTGFX_LINUX_VULKAN_LIB (this if-branch's own
     # condition) stays true for the rest of this configure run, so that
     # later block's own identical condition re-evaluates the same way.
   else()
@@ -557,7 +594,16 @@ if(Python3_Interpreter_FOUND)
       --source "${CRTGFX_SKIA_ROOT}"
       --build-dir "${CRTGFX_SKIA_BUILD_DIR}"
       --install-prefix "${CRTGFX_SKIA_INSTALL_PREFIX}"
-      --sysroot "${CRT_SYSROOT}"
+      # CRT_LIBCXX_SYSROOT (dist/02-cxx), not CRT_SYSROOT (dist/01-c) --
+      # Skia genuinely needs real libc++ headers/libs, which only live in
+      # the cumulative C++ stage since today's distribution-stage
+      # restructuring split them apart. Real, confirmed bug (2026-09-08):
+      # this was still CRT_SYSROOT immediately after that restructuring
+      # landed, and crtgfx-skia-smoke failed outright with "CRT_USE_
+      # IMPORTED_LIBCXX headers not found" pointing at .../dist/01-c/
+      # include/c++/v1 (a stage that never has libc++ at all) the first
+      # time Skia was actually built again after it.
+      --sysroot "${CRT_LIBCXX_SYSROOT}"
       --target-os "${CRT_TARGET_OS}"
       --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}"
       ${CRTGFX_SKIA_BUILD_ARGS}
@@ -575,7 +621,9 @@ if(Python3_Interpreter_FOUND)
       --source "${CRTGFX_SKIA_ROOT}"
       --build-dir "${CRTGFX_SKIA_BUILD_DIR}"
       --install-prefix "${CRTGFX_SKIA_INSTALL_PREFIX}"
-      --sysroot "${CRT_SYSROOT}"
+      # CRT_LIBCXX_SYSROOT, not CRT_SYSROOT -- see crtgfx-skia-configure's
+      # own, fuller comment on its identical --sysroot argument just above.
+      --sysroot "${CRT_LIBCXX_SYSROOT}"
       --target-os "${CRT_TARGET_OS}"
       --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}"
       ${CRTGFX_SKIA_BUILD_ARGS}
@@ -628,7 +676,7 @@ if(Python3_Interpreter_FOUND)
     # crtgfx_skia_gpu_offscreen_smoke (2026-09-03, extended to Windows/
     # D3D12 the same day) -- only ever defined on Linux with a real
     # libvulkan found, or on Windows (D3D12 always available there, no
-    # gate needed -- see CRTGFX_BACKEND_SOURCES's own Windows branch,
+    # gate needed -- see CRTGFX_GPU_BACKEND_SOURCES's own Windows branch,
     # further up); same condition its own add_executable() below is gated
     # on. The nested build directory this custom target drives re-
     # evaluates that same real condition itself, on the same host, so it
@@ -980,17 +1028,22 @@ if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_ENABLE_SKIA AND CRT_USE_IMPORTED_LI
   # split that doesn't apply on Linux), this is set once, project-wide for
   # Linux+Skia+imported-libc++, and flows through every existing consumer
   # of CRTGFX_CRT_STATIC_LIBS/CRTGFX_CRT_SHARED_LIBS unchanged.
+  # CRT_LIBCXX_SYSROOT (dist/02-cxx), not CRT_SYSROOT (dist/01-c) -- see
+  # crtgfx-skia-configure's own, fuller comment (this file, above) for why:
+  # the C-only 01-c stage never has libc++ at all since today's
+  # distribution-stage restructuring split it out into its own cumulative
+  # 02-cxx stage.
   list(REMOVE_ITEM CRTGFX_CRT_STATIC_LIBS cxx)
   list(APPEND CRTGFX_CRT_STATIC_LIBS
-    "${CRT_SYSROOT}/lib/libc++.a"
-    "${CRT_SYSROOT}/lib/libc++abi.a"
-    "${CRT_SYSROOT}/lib/libunwind.a"
+    "${CRT_LIBCXX_SYSROOT}/lib/libc++.a"
+    "${CRT_LIBCXX_SYSROOT}/lib/libc++abi.a"
+    "${CRT_LIBCXX_SYSROOT}/lib/libunwind.a"
   )
   list(REMOVE_ITEM CRTGFX_CRT_SHARED_LIBS cxx_shared)
   list(APPEND CRTGFX_CRT_SHARED_LIBS
-    "${CRT_SYSROOT}/lib/libc++.so"
-    "${CRT_SYSROOT}/lib/libc++abi.so"
-    "${CRT_SYSROOT}/lib/libunwind.so"
+    "${CRT_LIBCXX_SYSROOT}/lib/libc++.so"
+    "${CRT_LIBCXX_SYSROOT}/lib/libc++abi.so"
+    "${CRT_LIBCXX_SYSROOT}/lib/libunwind.so"
   )
 elseif(CRT_TARGET_OS STREQUAL "macos" AND CRTGFX_ENABLE_SKIA AND CRT_USE_IMPORTED_LIBCXX)
   # Same substitution, same reason, as the Linux branch just above -- this
@@ -1008,27 +1061,61 @@ elseif(CRT_TARGET_OS STREQUAL "macos" AND CRTGFX_ENABLE_SKIA AND CRT_USE_IMPORTE
   # notes (Darwin's own libSystem already provides a real native unwinder;
   # matches upstream LLVM's own LIBCXXABI_USE_LLVM_UNWINDER=OFF default for
   # Apple targets).
+  # CRT_LIBCXX_SYSROOT, not CRT_SYSROOT -- see the Linux branch's own,
+  # fuller comment just above.
   list(REMOVE_ITEM CRTGFX_CRT_STATIC_LIBS cxx)
   list(APPEND CRTGFX_CRT_STATIC_LIBS
-    "${CRT_SYSROOT}/lib/libc++.a"
-    "${CRT_SYSROOT}/lib/libc++abi.a"
+    "${CRT_LIBCXX_SYSROOT}/lib/libc++.a"
+    "${CRT_LIBCXX_SYSROOT}/lib/libc++abi.a"
   )
   list(REMOVE_ITEM CRTGFX_CRT_SHARED_LIBS cxx_shared)
   list(APPEND CRTGFX_CRT_SHARED_LIBS
-    "${CRT_SYSROOT}/lib/libc++.dylib"
-    "${CRT_SYSROOT}/lib/libc++abi.dylib"
+    "${CRT_LIBCXX_SYSROOT}/lib/libc++.dylib"
+    "${CRT_LIBCXX_SYSROOT}/lib/libc++abi.dylib"
   )
 endif()
 
-add_library(crtgfx_common_objects OBJECT ${CRTGFX_COMMON_SOURCES})
-target_link_libraries(crtgfx_common_objects PRIVATE crt_build_flags)
-target_include_directories(crtgfx_common_objects PUBLIC
+# Physical window/GPU split (TODO.md's decided item): the pre-existing
+# "common" (always crt_build_flags) vs "backend" (Linux-only crt_build_
+# flags; Windows/macOS get nothing extra, or -- gpu_*.c specifically --
+# only the narrow CRT_TARGET_OS_* struct-layout-sync define below) split
+# is kept exactly as it was, just partitioned twice now: once by that
+# existing common/backend axis, and once more by window-vs-GPU. This is
+# the minimal-risk transformation -- every compile-flag *decision* below
+# is unchanged from before the split, only which source files it applies
+# to moved. Four OBJECT libraries feed the two real library pairs
+# (crtgfx_window(_shared) = window_common + window_backend;
+# crtgfx_gpu(_shared) = gpu_common + gpu_backend).
+
+add_library(crtgfx_window_common_objects OBJECT ${CRTGFX_WINDOW_SOURCES})
+target_link_libraries(crtgfx_window_common_objects PRIVATE crt_build_flags)
+target_include_directories(crtgfx_window_common_objects PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
-target_include_directories(crtgfx_common_objects PRIVATE
+target_include_directories(crtgfx_window_common_objects PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
-set_target_properties(crtgfx_common_objects PROPERTIES
+set_target_properties(crtgfx_window_common_objects PROPERTIES
+  POSITION_INDEPENDENT_CODE ON
+)
+
+# gpu.c is the one "common" (non-backend) GPU source -- always gets
+# crt_build_flags on every OS, exactly like window.c/wayland_weston.c
+# above (this is the same unconditional linkage the old, single
+# crtgfx_common_objects already gave gpu.c before the split; gpu.c's own
+# CRT_TARGET_OS_WINDOWS/CRT_TARGET_OS_MACOS therefore keep coming from
+# crt_build_flags's own INTERFACE compile definition here, matching the
+# gpu_common_objects/gpu_backend_objects sync requirement documented on
+# the backend target below).
+add_library(crtgfx_gpu_common_objects OBJECT ${CRTGFX_GPU_SOURCES})
+target_link_libraries(crtgfx_gpu_common_objects PRIVATE crt_build_flags)
+target_include_directories(crtgfx_gpu_common_objects PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
+target_include_directories(crtgfx_gpu_common_objects PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+set_target_properties(crtgfx_gpu_common_objects PROPERTIES
   POSITION_INDEPENDENT_CODE ON
 )
 
@@ -1047,9 +1134,58 @@ set_target_properties(crtgfx_common_objects PROPERTIES
 # against the wrong struct layouts and linking against symbols not actually
 # present in the final -nostdlib/-nodefaultlibs executable at all. Scoped to
 # Linux only so Windows/macOS keep the original no-flags freedom.
-add_library(crtgfx_backend_objects OBJECT ${CRTGFX_BACKEND_SOURCES})
+#
+# window_win32.c/window_cocoa.c/window_wayland.c/window_wayland_native.c
+# never touch struct crtgfx_gpu_device (window ⟂ gpu -- window code has
+# zero GPU/Skia references, confirmed directly), so unlike the GPU
+# backend target below, this one needs no CRT_TARGET_OS_* define at all
+# on Windows/macOS -- there is no shared struct layout to keep in sync.
+add_library(crtgfx_window_backend_objects OBJECT ${CRTGFX_WINDOW_BACKEND_SOURCES})
 if(CRT_TARGET_OS STREQUAL "linux")
-  target_link_libraries(crtgfx_backend_objects PRIVATE crt_build_flags)
+  target_link_libraries(crtgfx_window_backend_objects PRIVATE crt_build_flags)
+endif()
+target_include_directories(crtgfx_window_backend_objects PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
+target_include_directories(crtgfx_window_backend_objects PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+if(CRT_TARGET_OS STREQUAL "linux")
+  # src/arch/linux/window_wayland.c's own wl_seat/wl_keyboard wiring
+  # (2026-08-25, Phase 3 of the "notepad-capability" plan) #includes
+  # <xkbcommon/xkbcommon.h> -- see libcrtgfx/third_party/xkbcommon/
+  # recipe.json for the port itself.
+  target_include_directories(crtgfx_window_backend_objects PRIVATE
+    "${CRTGFX_XKBCOMMON_INSTALL_PREFIX}/include"
+  )
+  add_dependencies(crtgfx_window_backend_objects crtgfx-xkbcommon-build)
+  if(CRTGFX_LINUX_VULKAN_LIB)
+    # src/arch/linux/window_wayland_native.c (2026-09-07) #includes real
+    # <wayland-client.h>/<xdg-shell-client-protocol.h> from this install
+    # prefix -- see the CRTGFX_WINDOW_SOURCES/CRTGFX_GPU_SOURCES Linux
+    # block above for why this is gated on CRTGFX_LINUX_VULKAN_LIB rather
+    # than unconditional like CRTGFX_XKBCOMMON_INSTALL_PREFIX just above.
+    # Deliberately no add_dependencies(... crtgfx-wayland-build) here,
+    # unlike crtgfx-xkbcommon-build just above -- see that same block for
+    # the real ninja dependency-graph cycle that would create (crtgfx-
+    # wayland-build -> port-build-expat/libffi -> sysroot -> crtgfx_
+    # window). Harmless to add unconditionally: this include directory
+    # simply does not exist yet on a from-scratch configure that has never
+    # run crtgfx-wayland-build, and window_wayland_native.c is correctly
+    # excluded from CRTGFX_WINDOW_SOURCES in that same case (see above),
+    # so nothing here ever actually needs to resolve a header from it.
+    target_include_directories(crtgfx_window_backend_objects PRIVATE
+      "${CRTGFX_WAYLAND_INSTALL_PREFIX}/include"
+    )
+  endif()
+endif()
+set_target_properties(crtgfx_window_backend_objects PROPERTIES
+  POSITION_INDEPENDENT_CODE ON
+)
+
+add_library(crtgfx_gpu_backend_objects OBJECT ${CRTGFX_GPU_BACKEND_SOURCES})
+if(CRT_TARGET_OS STREQUAL "linux")
+  target_link_libraries(crtgfx_gpu_backend_objects PRIVATE crt_build_flags)
 elseif(CRT_TARGET_OS STREQUAL "windows")
   # CRT_TARGET_OS_WINDOWS=1 -- a real, narrow gap found while actually
   # building src/arch/windows/gpu_win32.c for the first time (2026-09-03).
@@ -1062,69 +1198,53 @@ elseif(CRT_TARGET_OS STREQUAL "windows")
   # it does on Linux just above (window_win32.c's own established "no
   # dependency on this project's own headers at all" style -- crt_build_
   # flags also brings stricter warning/freestanding flags that style does
-  # not want here). Confirmed for real: without this, struct crtgfx_gpu_
-  # device compiled with zero D3D12 fields in gpu_win32.c's own
-  # translation unit while gpu.c's (crtgfx_common_objects, which DOES
-  # link crt_build_flags unconditionally on every OS) compiled with them
-  # -- a real, silent struct-layout mismatch between the two object files
-  # sharing this one struct, not just a build error (it did surface as
-  # one here, "no member named 'd3d12_device'", but only because gpu_
-  # win32.c itself also references those same fields -- gpu.c's own
-  # dispatch code alone would have compiled "successfully" against a
-  # differently-sized struct). Added narrowly here, not by linking the
-  # whole crt_build_flags interface target, for exactly that reason.
-  target_compile_definitions(crtgfx_backend_objects PRIVATE CRT_TARGET_OS_WINDOWS=1)
+  # not want here -- gpu_win32.c inherited that same style, so this stays
+  # narrow rather than linking the whole interface target). Confirmed for
+  # real: without this, struct crtgfx_gpu_device compiled with zero D3D12
+  # fields in gpu_win32.c's own translation unit while gpu.c's (now
+  # crtgfx_gpu_common_objects, which DOES link crt_build_flags
+  # unconditionally on every OS) compiled with them -- a real, silent
+  # struct-layout mismatch between the two object files sharing this one
+  # struct, not just a build error (it did surface as one here, "no
+  # member named 'd3d12_device'", but only because gpu_win32.c itself
+  # also references those same fields -- gpu.c's own dispatch code alone
+  # would have compiled "successfully" against a differently-sized
+  # struct). Added narrowly here, not by linking the whole crt_build_
+  # flags interface target, for exactly that reason.
+  target_compile_definitions(crtgfx_gpu_backend_objects PRIVATE CRT_TARGET_OS_WINDOWS=1)
 elseif(CRT_TARGET_OS STREQUAL "macos")
   # CRT_TARGET_OS_MACOS=1 -- the same real, narrow gap as the Windows
   # branch just above (see that branch's own fuller comment for the full
   # "why", found for real building gpu_win32.c the same week): this
   # target does not link crt_build_flags on macOS either (window_cocoa.c's
   # own established "no dependency on this project's own headers at all"
-  # style), so src/arch/macos/gpu_metal.c's own gpu_internal.h #if
-  # defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL) guard needs
-  # this defined explicitly here too, or struct crtgfx_gpu_device risks
-  # the identical silent layout mismatch against src/gpu.c's own
-  # crtgfx_common_objects compile (which does link crt_build_flags on
-  # every OS). Added proactively rather than waiting to rediscover the
-  # same real bug a third time.
-  target_compile_definitions(crtgfx_backend_objects PRIVATE CRT_TARGET_OS_MACOS=1)
+  # style, inherited by gpu_metal.c), so src/arch/macos/gpu_metal.c's own
+  # gpu_internal.h #if defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_
+  # HAVE_METAL) guard needs this defined explicitly here too, or struct
+  # crtgfx_gpu_device risks the identical silent layout mismatch against
+  # src/gpu.c's own crtgfx_gpu_common_objects compile (which does link
+  # crt_build_flags on every OS). Added proactively rather than waiting
+  # to rediscover the same real bug a third time.
+  target_compile_definitions(crtgfx_gpu_backend_objects PRIVATE CRT_TARGET_OS_MACOS=1)
 endif()
-target_include_directories(crtgfx_backend_objects PUBLIC
+target_include_directories(crtgfx_gpu_backend_objects PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
-target_include_directories(crtgfx_backend_objects PRIVATE
+target_include_directories(crtgfx_gpu_backend_objects PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
-if(CRT_TARGET_OS STREQUAL "linux")
-  # src/arch/linux/window_wayland.c's own wl_seat/wl_keyboard wiring
-  # (2026-08-25, Phase 3 of the "notepad-capability" plan) #includes
-  # <xkbcommon/xkbcommon.h> -- see libcrtgfx/third_party/xkbcommon/
-  # recipe.json for the port itself.
-  target_include_directories(crtgfx_backend_objects PRIVATE
-    "${CRTGFX_XKBCOMMON_INSTALL_PREFIX}/include"
+if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB)
+  # src/arch/linux/gpu_vulkan.c #includes window_wayland_native.h for the
+  # real struct wl_display*/wl_surface* types VkWaylandSurfaceCreateInfoKHR
+  # needs (confirmed directly: it never calls a real wayland-client.so
+  # function itself, only uses the types, so this is a compile-time-only
+  # header need -- CRTGFX_WAYLAND_CLIENT_LIBRARIES, the actual link-time
+  # library, stays a crtgfx_window-only dependency below).
+  target_include_directories(crtgfx_gpu_backend_objects PRIVATE
+    "${CRTGFX_WAYLAND_INSTALL_PREFIX}/include"
   )
-  add_dependencies(crtgfx_backend_objects crtgfx-xkbcommon-build)
-  if(CRTGFX_LINUX_VULKAN_LIB)
-    # src/arch/linux/window_wayland_native.c (2026-09-07) #includes real
-    # <wayland-client.h>/<xdg-shell-client-protocol.h> from this install
-    # prefix -- see CRTGFX_BACKEND_SOURCES's own Linux block above for why
-    # this is gated on CRTGFX_LINUX_VULKAN_LIB rather than unconditional
-    # like CRTGFX_XKBCOMMON_INSTALL_PREFIX just above. Deliberately no
-    # add_dependencies(... crtgfx-wayland-build) here, unlike crtgfx-
-    # xkbcommon-build just above -- see CRTGFX_BACKEND_SOURCES's own Linux
-    # block for the real ninja dependency-graph cycle that would create
-    # (crtgfx-wayland-build -> port-build-expat/libffi -> sysroot ->
-    # crtgfx). Harmless to add unconditionally: this include directory
-    # simply does not exist yet on a from-scratch configure that has never
-    # run crtgfx-wayland-build, and window_wayland_native.c is correctly
-    # excluded from CRTGFX_BACKEND_SOURCES in that same case (see above),
-    # so nothing here ever actually needs to resolve a header from it.
-    target_include_directories(crtgfx_backend_objects PRIVATE
-      "${CRTGFX_WAYLAND_INSTALL_PREFIX}/include"
-    )
-  endif()
 endif()
-set_target_properties(crtgfx_backend_objects PROPERTIES
+set_target_properties(crtgfx_gpu_backend_objects PROPERTIES
   POSITION_INDEPENDENT_CODE ON
 )
 
@@ -1201,7 +1321,7 @@ if(CRTGFX_ENABLE_SKIA)
     # error: 'excpt.h' file not found` from mingw's own windows.h.
     # target_compile_options(), not target_include_directories(): lands
     # in <FLAGS>, matching this file's own established
-    # -isystem${CRT_SYSROOT}/include/c++/v1 precedent just below (see
+    # -isystem${CRT_LIBCXX_SYSROOT}/include/c++/v1 precedent just below (see
     # that block's own fuller comment on why <INCLUDES> alone cannot
     # reliably win the real ordering this project's own custom
     # CMAKE_CXX_COMPILE_OBJECT rule needs).
@@ -1310,8 +1430,10 @@ if(CRTGFX_ENABLE_SKIA)
     )
   endif()
   if(CRT_TARGET_OS STREQUAL "windows" AND CRT_USE_IMPORTED_LIBCXX)
-    # -isystem${CRT_SYSROOT}/include/c++/v1, via target_compile_options (not
-    # target_include_directories) so it lands in <FLAGS>, ahead of
+    # -isystem${CRT_LIBCXX_SYSROOT}/include/c++/v1 (dist/02-cxx, not
+    # CRT_SYSROOT/dist/01-c -- see crtgfx-skia-configure's own, fuller
+    # comment further up this file for why), via target_compile_options
+    # (not target_include_directories) so it lands in <FLAGS>, ahead of
     # crt_cxx_build_flags's own inherited chain -- see the matching, fuller
     # comment on crtgfx_skia_raster_smoke's own libc/include isystem just
     # below for why <INCLUDES> can never win that ordering on this project's
@@ -1319,7 +1441,7 @@ if(CRTGFX_ENABLE_SKIA)
     # above (top of this file) for why this project's own imported libc++,
     # not any host substitute, is required here.
     target_compile_options(crtgfx_skia_objects PRIVATE
-      "-isystem${CRT_SYSROOT}/include/c++/v1"
+      "-isystem${CRT_LIBCXX_SYSROOT}/include/c++/v1"
     )
   endif()
   target_include_directories(crtgfx_skia_objects SYSTEM BEFORE PUBLIC
@@ -1336,7 +1458,11 @@ if(CRTGFX_ENABLE_SKIA)
   set(CRTGFX_SKIA_OBJECTS $<TARGET_OBJECTS:crtgfx_skia_objects>)
 endif()
 if(CRT_TARGET_OS STREQUAL "windows")
-  target_compile_definitions(crtgfx_backend_objects PRIVATE
+  target_compile_definitions(crtgfx_window_backend_objects PRIVATE
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX
+  )
+  target_compile_definitions(crtgfx_gpu_backend_objects PRIVATE
     WIN32_LEAN_AND_MEAN
     NOMINMAX
   )
@@ -1441,156 +1567,151 @@ if(CRT_TARGET_OS STREQUAL "macos")
   )
 endif()
 
-add_library(crtgfx STATIC
-  $<TARGET_OBJECTS:crtgfx_common_objects>
-  $<TARGET_OBJECTS:crtgfx_backend_objects>
-  ${CRTGFX_SKIA_OBJECTS}
+# --- crtgfx_window (STATIC): window/input/software-framebuffer only.
+# No GPU or Skia object code, no Vulkan/D3D12/Metal/libskia.a on its
+# link line -- this is what makes docs/libcrtgfx_api_policy.md's Simple
+# Graphics contract real rather than just a header-install COMPONENT.
+add_library(crtgfx_window STATIC
+  $<TARGET_OBJECTS:crtgfx_window_common_objects>
+  $<TARGET_OBJECTS:crtgfx_window_backend_objects>
 )
-if(CRT_TARGET_OS STREQUAL "macos" AND CRT_USE_IMPORTED_LIBCXX)
-  # Frameworks load Apple's libc++ too. Keep this embedded runtime's weak
-  # std::__1 definitions local, so dyld cannot mix locale/facet instances.
-  set(CRTGFX_LIBCXX_UNEXPORTED "${CMAKE_SOURCE_DIR}/libstdc++/third_party/libcxx/libc++.unexported.exp")
-  target_link_options(crtgfx INTERFACE "LINKER:-unexported_symbols_list,${CRTGFX_LIBCXX_UNEXPORTED}")
-  set_property(TARGET crtgfx APPEND PROPERTY INTERFACE_LINK_DEPENDS "${CRTGFX_LIBCXX_UNEXPORTED}")
-endif()
 if(CRT_TARGET_OS STREQUAL "linux")
   # CRTGFX_XKBCOMMON_LIBRARIES (further down) references libxkbcommon.a by
   # a plain file path, not a real CMake target -- CMake has no way to know
   # it needs building first without this explicit edge.
-  add_dependencies(crtgfx crtgfx-xkbcommon-build)
-  # Deliberately no add_dependencies(crtgfx crtgfx-wayland-build) here --
-  # see CRTGFX_BACKEND_SOURCES's own Linux block (libcrtgfx/CMakeLists.txt,
-  # near the top) for the real ninja dependency-graph cycle that edge
-  # would create. CRTGFX_WAYLAND_CLIENT_LIBRARIES (below) is a plain file
-  # path (empty unless libwayland-client.a already existed on disk at
-  # configure time), not a real CMake target reference, so there is no
-  # ninja edge to add here the way crtgfx-xkbcommon-build's real target
-  # dependency just above needs.
+  add_dependencies(crtgfx_window crtgfx-xkbcommon-build)
+  # Deliberately no add_dependencies(crtgfx_window crtgfx-wayland-build)
+  # here -- see the CRTGFX_WINDOW_BACKEND_SOURCES/CRTGFX_GPU_BACKEND_
+  # SOURCES Linux block (libcrtgfx/CMakeLists.txt, near the top) for the
+  # real ninja dependency-graph cycle that edge would create.
+  # CRTGFX_WAYLAND_CLIENT_LIBRARIES (below) is a plain file path (empty
+  # unless libwayland-client.a already existed on disk at configure
+  # time), not a real CMake target reference, so there is no ninja edge
+  # to add here the way crtgfx-xkbcommon-build's real target dependency
+  # just above needs.
 endif()
-target_include_directories(crtgfx PUBLIC
+target_include_directories(crtgfx_window PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
-if(CRTGFX_ENABLE_SKIA)
-  target_include_directories(crtgfx PUBLIC "${CRTGFX_SKIA_ROOT}")
-endif()
-if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_ENABLE_SKIA AND CRTGFX_SKIA_LIBRARIES)
-  # --start-group/--end-group: a real GNU-ld circular-archive-resolution
-  # gap, confirmed for real (2026-08-23) via the generated link command for
-  # crtgfx_skia_raster_smoke -- libskia.a's own undefined needs (`atan2f`/
-  # `sinf`/`cosf`/`floor`/`sqrtf` from libm, `operator new`/`delete` from
-  # libc++/libc++abi, even `__dso_handle` from libc's own cxa_atexit.c.o)
-  # get scanned by ld.bfd's default single left-to-right archive pass
-  # *after* libm.a/libc++.a(=cxx)/libc.a already passed, since libskia.a
-  # (PUBLIC) is always the last of `crtgfx`'s own dependencies on the final
-  # link line regardless of call order here. The exact same class of gap
-  # tools/crt-cc's own Linux branch already documents and fixes the
-  # identical way for its own, separate link recipes. Wrapped here, in
-  # `crtgfx`'s own INTERFACE_LINK_LIBRARIES, rather than on each consumer
-  # (crtgfx_skia_raster_smoke, crtgfx_shared, ...): a consumer-side
-  # target_link_libraries()/target_link_options() pairing for the group
-  # markers does NOT reliably bracket `crtgfx`'s own flattened transitive
-  # dependencies -- confirmed for real that CMake re-positions a static
-  # library's own propagated INTERFACE_LINK_LIBRARIES independently of
-  # where a *consumer's own* separately-added flags land, splitting an
-  # attempted --start-group/--end-group pair with `crtgfx`'s own libm.a/
-  # libdl.a/libskia.a landing outside it. Declaring the group directly
-  # where these libraries are declared avoids relying on that ordering at
-  # all.
-  target_link_libraries(crtgfx PRIVATE -Wl,--start-group)
+if(CRT_TARGET_OS STREQUAL "linux")
   # CRTGFX_XKBCOMMON_LIBRARIES (libxkbcommon.a, src/arch/linux/window_
   # wayland.c's own wl_seat/wl_keyboard wiring, 2026-08-25) before
   # CRTGFX_CRT_STATIC_LIBS: a plain, non-circular need for libc's own
   # strndup/asprintf/mmap/eaccess -- listing it here (ahead of libc.a) is
-  # what lets libc.a, scanned after it, satisfy those references, matching
-  # every other "dependency before its own provider" ordering already
-  # established throughout this file. Empty and therefore a no-op unless
-  # this is actually a Linux host with libxkbcommon.a already built (see
-  # CRTGFX_XKBCOMMON_LIBRARIES's own definition, near CRTGFX_SKIA_
-  # LIBRARIES's, for the auto-detection).
-  target_link_libraries(crtgfx PRIVATE ${CRTGFX_XKBCOMMON_LIBRARIES})
+  # what lets libc.a, scanned after it, satisfy those references. Empty
+  # and therefore a no-op unless this is actually a Linux host with
+  # libxkbcommon.a already built (see CRTGFX_XKBCOMMON_LIBRARIES's own
+  # definition, near CRTGFX_SKIA_LIBRARIES's, for the auto-detection).
+  target_link_libraries(crtgfx_window PRIVATE ${CRTGFX_XKBCOMMON_LIBRARIES})
   # CRTGFX_WAYLAND_CLIENT_LIBRARIES (host libwayland-client.so.0 plus the
   # generated xdg-shell protocol archive, src/arch/linux/window_wayland_
-  # native.c): same "empty string is a safe bare
-  # ${...} no-op" shape as CRTGFX_XKBCOMMON_LIBRARIES just above -- set to
-  # "" whenever the native backend was not added to CRTGFX_BACKEND_SOURCES
-  # (see that variable's own hoisted-block comment near CRTGFX_XKBCOMMON_
-  # LIBRARIES's definition). Needs libc's own memfd_create/socket/connect/
-  # poll, so it goes before CRTGFX_CRT_STATIC_LIBS the same way.
-  target_link_libraries(crtgfx PRIVATE ${CRTGFX_WAYLAND_CLIENT_LIBRARIES})
-  # CRTGFX_LINUX_VULKAN_LIB (src/arch/linux/gpu_vulkan.c, 2026-09-03) --
-  # real, explicit if()-guard, NOT the same "empty string when absent, so
-  # a bare ${...} expansion is already a safe no-op" trick CRTGFX_XKBCOMMON_
-  # LIBRARIES/CRTGFX_CRT_STATIC_LIBS above rely on. Confirmed for real
-  # (2026-09-03, a genuine CI break on both Linux legs, no libvulkan-dev
-  # installed there): find_library() sets a *not-found* result to the
-  # literal string "CRTGFX_LINUX_VULKAN_LIB-NOTFOUND", not an empty one --
-  # target_link_libraries() specifically recognizes that "-NOTFOUND" suffix
-  # and fails the whole CMake *generate* step outright ("used in this
-  # project but set to NOTFOUND"), later than -- and so more confusingly
-  # than -- the configure-time `if(CRTGFX_LINUX_VULKAN_LIB)`/message(STATUS
-  # ...) guard already used everywhere else this variable appears (which
-  # correctly, silently skipped adding the real Vulkan backend at all).
-  if(CRTGFX_LINUX_VULKAN_LIB)
-    target_link_libraries(crtgfx PRIVATE ${CRTGFX_LINUX_VULKAN_LIB})
-  endif()
-  target_link_libraries(crtgfx PRIVATE ${CRTGFX_CRT_STATIC_LIBS})
-  target_link_libraries(crtgfx PUBLIC ${CRTGFX_SKIA_LIBRARIES})
-  target_link_libraries(crtgfx PRIVATE -Wl,--end-group)
-else()
-  # Skia first, CRT_STATIC_LIBS (libc++.a on macOS, once CRTGFX_ENABLE_SKIA
-  # AND CRT_USE_IMPORTED_LIBCXX swap it in below) second -- reversed from
-  # the seemingly more natural "runtime libs, then Skia" order on purpose.
-  # Apple ld (this else() branch's only real user: macOS) scans each
-  # static archive once, left-to-right, only pulling members needed by
-  # symbols already outstanding at that point -- unlike Linux's --start-
-  # group/--end-group branch just above, ld64 has no bracket-and-rescan
-  # equivalent. libskia.a's own SkSL compiler/parser/debug-trace code
-  # makes extensive std::string/iostream/locale/shared_ptr use, so
-  # libc++.a must still be "ahead" in scan order when ld reaches it --
-  # i.e. mentioned *after* libskia.a on the link line, the reverse of the
-  # intuitive "dependencies of a thing come after it" ordering. Confirmed
-  # for real (2026-08-23): with CRT_STATIC_LIBS linked first (the original
-  # order), crtgfx_skia_raster_smoke/libcrtgfx.dylib both failed with
-  # dozens of undefined std::__1::... symbols from libskia.a's own object
-  # files, even after fixing which libc++.a was being linked at all (see
-  # the CRTGFX_CRT_STATIC_LIBS/SHARED_LIBS macOS substitution above this
-  # if/else) and after removing a stray duplicate hardcoded relink on
-  # crtgfx_skia_raster_smoke's own target -- only reordering these two
-  # calls (no --start-group equivalent, no force_load, no per-consumer
-  # override needed) made the link line pass.
-  if(CRTGFX_ENABLE_SKIA AND CRTGFX_SKIA_LIBRARIES)
-    target_link_libraries(crtgfx PUBLIC ${CRTGFX_SKIA_LIBRARIES})
-  endif()
-  # CRTGFX_XKBCOMMON_LIBRARIES: empty and a no-op on any host other than
-  # Linux (see the Linux+Skia branch's own, fuller comment just above).
-  target_link_libraries(crtgfx PRIVATE ${CRTGFX_XKBCOMMON_LIBRARIES})
-  # CRTGFX_WAYLAND_CLIENT_LIBRARIES: empty and a no-op whenever the native
-  # backend was not added to CRTGFX_BACKEND_SOURCES -- see the Linux+Skia
-  # branch's own, fuller comment just above (same file).
-  target_link_libraries(crtgfx PRIVATE ${CRTGFX_WAYLAND_CLIENT_LIBRARIES})
-  # CRTGFX_LINUX_VULKAN_LIB: real if()-guard required here too, NOT a bare
-  # ${...} expansion -- see the Linux+Skia branch's own, fuller comment
-  # just above (same file) for the real CI break this guards against.
-  if(CRTGFX_LINUX_VULKAN_LIB)
-    target_link_libraries(crtgfx PRIVATE ${CRTGFX_LINUX_VULKAN_LIB})
-  endif()
-  target_link_libraries(crtgfx PRIVATE ${CRTGFX_CRT_STATIC_LIBS})
+  # native.c): same "empty string is a safe bare ${...} no-op" shape as
+  # CRTGFX_XKBCOMMON_LIBRARIES just above -- set to "" whenever the
+  # native backend was not added to CRTGFX_WINDOW_BACKEND_SOURCES (see
+  # that variable's own hoisted-block comment near CRTGFX_XKBCOMMON_
+  # LIBRARIES's definition). Needs libc's own memfd_create/socket/
+  # connect/poll, so it goes before CRTGFX_CRT_STATIC_LIBS the same way.
+  target_link_libraries(crtgfx_window PRIVATE ${CRTGFX_WAYLAND_CLIENT_LIBRARIES})
 endif()
+# CRTGFX_CRT_STATIC_LIBS (c/m/dl/cxx): every host, not just Linux -- this
+# file's own pre-split shape linked it unconditionally too (inside the
+# "no Skia" else() branch, which every non-Linux-Skia-grouped host,
+# including plain Windows/macOS, always took). No --start-group/
+# --end-group wrapper needed here (unlike crtgfx_skia, below) -- window
+# code has no Skia-shaped circular archive-resolution need against it.
+target_link_libraries(crtgfx_window PRIVATE ${CRTGFX_CRT_STATIC_LIBS})
 if(CRT_TARGET_OS STREQUAL "windows")
-  target_link_libraries(crtgfx PUBLIC
+  # d3d11.lib/dxgi.lib: window_win32.c's own crtgfx_win_create_swap_
+  # chain() (D3D11-based CPU-framebuffer presentation) -- see that file's
+  # own top comment. No d3d12.lib/d3dcompiler.lib here: those are
+  # crtgfx_gpu's/crtgfx_skia's own, real GPU-API-only needs (gpu_win32.c/
+  # Skia's D3D12 Ganesh backend), not part of the Simple Graphics
+  # contract.
+  target_link_libraries(crtgfx_window PUBLIC
     "${CRT_WINDOWS_KERNEL32_LIB}"
     "${CRTGFX_WINDOWS_USER32_LIB}"
     "${CRTGFX_WINDOWS_GDI32_LIB}"
     "${CRTGFX_WINDOWS_D3D11_LIB}"
     "${CRTGFX_WINDOWS_DXGI_LIB}"
-    "${CRTGFX_WINDOWS_D3D12_LIB}"
-    "${CRTGFX_WINDOWS_D3DCOMPILER_LIB}"
   )
 elseif(CRT_TARGET_OS STREQUAL "macos")
-  target_link_libraries(crtgfx PUBLIC ${CRTGFX_MACOS_FRAMEWORKS})
+  # Metal.framework excluded -- window_cocoa.c never references it
+  # directly (gpu_metal.c's own real Metal use lives in crtgfx_gpu).
+  target_link_libraries(crtgfx_window PUBLIC
+    "-framework Foundation"
+    "-framework AppKit"
+    "-framework QuartzCore"
+    "-framework CoreGraphics"
+    objc
+  )
 endif()
-set_target_properties(crtgfx PROPERTIES
+set_target_properties(crtgfx_window PROPERTIES
   OUTPUT_NAME crtgfx
+  ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+)
+
+# --- crtgfx_gpu (STATIC): the GPU device/surface API (crtgfx/gpu.h).
+# Links crtgfx_window PUBLIC for the three tiny window-backend accessor
+# functions gpu.c calls (crtgfx_native_wl_get_surface_handles/
+# crtgfx_win32_get_hwnd/crtgfx_cocoa_get_metal_layer) -- a real,
+# one-directional dependency (confirmed directly: window.c never
+# references GPU code at all), not a cycle. PUBLIC so a consumer that
+# links only crtgfx_gpu (e.g. crtgfx_gpu_window_demo) still gets
+# crtgfx/window.h's own symbols transitively.
+add_library(crtgfx_gpu STATIC
+  $<TARGET_OBJECTS:crtgfx_gpu_common_objects>
+  $<TARGET_OBJECTS:crtgfx_gpu_backend_objects>
+)
+target_link_libraries(crtgfx_gpu PUBLIC crtgfx_window)
+target_include_directories(crtgfx_gpu PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
+if(CRT_TARGET_OS STREQUAL "linux")
+  # CRTGFX_LINUX_VULKAN_LIB (src/arch/linux/gpu_vulkan.c, 2026-09-03) --
+  # real, explicit if()-guard, NOT a bare ${...} expansion: find_library()
+  # sets a *not-found* result to the literal string "CRTGFX_LINUX_VULKAN_
+  # LIB-NOTFOUND", not an empty one -- target_link_libraries() specifically
+  # recognizes that "-NOTFOUND" suffix and fails the whole CMake *generate*
+  # step outright ("used in this project but set to NOTFOUND"). Confirmed
+  # for real (2026-09-03, a genuine CI break on both Linux legs, no
+  # libvulkan-dev installed there).
+  if(CRTGFX_LINUX_VULKAN_LIB)
+    target_link_libraries(crtgfx_gpu PRIVATE ${CRTGFX_LINUX_VULKAN_LIB})
+  endif()
+endif()
+# CRTGFX_CRT_STATIC_LIBS: every host, not just Linux -- see crtgfx_window's
+# own, fuller comment (same file, its identical call) for why. No
+# --start-group/--end-group wrapper needed here (unlike crtgfx_skia,
+# below) -- GPU code has no Skia-shaped circular archive-resolution need
+# against it.
+target_link_libraries(crtgfx_gpu PRIVATE ${CRTGFX_CRT_STATIC_LIBS})
+if(CRT_TARGET_OS STREQUAL "windows")
+  # d3d12.lib: gpu_win32.c's own real device/queue/adapter creation.
+  # dxgi.lib again here (also on crtgfx_window): gpu_win32.c's own real
+  # adapter enumeration/swapchain code uses real IDXGIFactory/IDXGIAdapter
+  # types too (confirmed directly -- it never references a real
+  # ID3D11Device type, only IDXGI*), independent of crtgfx_window's own
+  # D3D11-specific need. d3dcompiler.lib deliberately NOT here -- Skia's
+  # own D3D12 Ganesh backend (GrD3DPipelineStateBuilder.cpp) is the real
+  # D3DCompile() consumer, so that goes on crtgfx_skia instead.
+  target_link_libraries(crtgfx_gpu PUBLIC
+    "${CRTGFX_WINDOWS_DXGI_LIB}"
+    "${CRTGFX_WINDOWS_D3D12_LIB}"
+  )
+elseif(CRT_TARGET_OS STREQUAL "macos")
+  # gpu_metal.c drives real Metal.framework the same objc_msgSend-direct
+  # way window_cocoa.c drives AppKit -- see CRTGFX_WINDOW_BACKEND_SOURCES/
+  # CRTGFX_GPU_BACKEND_SOURCES's own macOS block, above, for the fuller
+  # story. CoreGraphics again here (also on crtgfx_window): gpu_metal.c's
+  # own CAMetalLayer/drawable sizing code uses real CGRect/CGSize types
+  # too.
+  target_link_libraries(crtgfx_gpu PUBLIC
+    "-framework Metal"
+    "-framework CoreGraphics"
+  )
+endif()
+set_target_properties(crtgfx_gpu PROPERTIES
+  OUTPUT_NAME crtgfx_gpu
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
 )
 
@@ -1620,150 +1741,329 @@ if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB)
   #
   # -Wl,--exclude-libs,ALL is the standard, real fix: it keeps symbols
   # that came from a *static archive* (this project's own libc.a/libm.a/
-  # libdl.a/libcrtgfx.a, all linked in as .a members, never as a real
+  # libdl.a/libcrtgfx*.a, all linked in as .a members, never as a real
   # .so of their own) out of the final executable's/shared-object's own
   # dynamic symbol table, so a real host .so's own internal libc calls
   # resolve to the real glibc it was itself linked against, not to this
-  # project's own same-named implementation. Applied as crtgfx's own
-  # INTERFACE link option so it reaches every real consumer's own final
-  # link line automatically (crtgfx_gpu_test today; the offscreen Ganesh/
-  # Vulkan smoke test and any future Linux GPU test tomorrow), without
-  # needing this fix repeated on each one by hand -- and on crtgfx_shared
+  # project's own same-named implementation. Applied as crtgfx_gpu's own
+  # INTERFACE link option (the target that actually links libvulkan.so
+  # now) so it reaches every real consumer's own final link line
+  # automatically (crtgfx_gpu_test today; the offscreen Ganesh/Vulkan
+  # smoke test and any future Linux GPU test tomorrow), without needing
+  # this fix repeated on each one by hand -- and on crtgfx_gpu_shared
   # directly below (its own real .so link step, not propagated the same
   # way a static archive's INTERFACE options are). Scoped to only apply
   # when a real libvulkan is actually being linked in at all -- no reason
   # to change any other Linux target's own dynamic symbol visibility
   # otherwise.
-  target_link_options(crtgfx INTERFACE -Wl,--exclude-libs,ALL)
+  target_link_options(crtgfx_gpu INTERFACE -Wl,--exclude-libs,ALL)
 endif()
 
-set(CRTGFX_SHARED_EXTRA_SOURCES "")
-# Windows + Skia only: crtgfx_shared -- unlike the plain `crtgfx` static
-# archive, which only records crtgfx_skia_objects's own unresolved real-
-# libc++/emutls references for whatever later links it in (crtgfx_skia_
-# raster_smoke, already fixed) -- is itself a real DLL, so it must fully
-# resolve those same references at its own link time. See crtgfx_skia_
-# raster_smoke's own matching comments just above (imported libc++,
-# uuid.lib, --allow-multiple-definition, emutls_link_stubs.c) for the full
-# story of each piece; this mirrors all of them for the shared/DLL case.
-if(CRT_TARGET_OS STREQUAL "windows" AND CRTGFX_ENABLE_SKIA)
-  list(APPEND CRTGFX_SHARED_EXTRA_SOURCES
-    "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/common/emutls_link_stubs.c")
+# --- crtgfx_skia (STATIC): the Skia CPU/GPU bridge (crtgfx/skia.h).
+# Links crtgfx_gpu PUBLIC (transitively pulls crtgfx_window too) --
+# skia_bridge.cc needs gpu_internal.h's struct layout and (on macOS)
+# calls a real function gpu_metal.c defines
+# (crtgfx_gpu_metal_surface_prepare_ganesh_present()).
+if(CRTGFX_ENABLE_SKIA)
+  add_library(crtgfx_skia STATIC $<TARGET_OBJECTS:crtgfx_skia_objects>)
+  target_link_libraries(crtgfx_skia PUBLIC crtgfx_gpu)
+  if(CRT_TARGET_OS STREQUAL "macos" AND CRT_USE_IMPORTED_LIBCXX)
+    # Frameworks load Apple's libc++ too. Keep this embedded runtime's weak
+    # std::__1 definitions local, so dyld cannot mix locale/facet instances.
+    # Scoped to crtgfx_skia now (the only one of the three that actually
+    # links libc++.a at all) rather than the old monolithic crtgfx.
+    set(CRTGFX_LIBCXX_UNEXPORTED "${CMAKE_SOURCE_DIR}/libstdc++/third_party/libcxx/libc++.unexported.exp")
+    target_link_options(crtgfx_skia INTERFACE "LINKER:-unexported_symbols_list,${CRTGFX_LIBCXX_UNEXPORTED}")
+    set_property(TARGET crtgfx_skia APPEND PROPERTY INTERFACE_LINK_DEPENDS "${CRTGFX_LIBCXX_UNEXPORTED}")
+  endif()
+  target_include_directories(crtgfx_skia PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CRTGFX_SKIA_ROOT}"
+  )
+  if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_SKIA_LIBRARIES)
+    # --start-group/--end-group: a real GNU-ld circular-archive-resolution
+    # gap, confirmed for real (2026-08-23) via the generated link command for
+    # crtgfx_skia_raster_smoke -- libskia.a's own undefined needs (`atan2f`/
+    # `sinf`/`cosf`/`floor`/`sqrtf` from libm, `operator new`/`delete` from
+    # libc++/libc++abi, even `__dso_handle` from libc's own cxa_atexit.c.o)
+    # get scanned by ld.bfd's default single left-to-right archive pass
+    # *after* libm.a/libc++.a(=cxx)/libc.a already passed, since libskia.a
+    # (PUBLIC) is always the last of `crtgfx_skia`'s own dependencies on
+    # the final link line regardless of call order here. The exact same
+    # class of gap tools/crt-cc's own Linux branch already documents and
+    # fixes the identical way for its own, separate link recipes. Wrapped
+    # here, in `crtgfx_skia`'s own INTERFACE_LINK_LIBRARIES, rather than
+    # on each consumer: a consumer-side target_link_libraries()/target_
+    # link_options() pairing for the group markers does NOT reliably
+    # bracket `crtgfx_skia`'s own flattened transitive dependencies --
+    # confirmed for real that CMake re-positions a static library's own
+    # propagated INTERFACE_LINK_LIBRARIES independently of where a
+    # *consumer's own* separately-added flags land. Declaring the group
+    # directly where these libraries are declared avoids relying on that
+    # ordering at all.
+    target_link_libraries(crtgfx_skia PRIVATE -Wl,--start-group)
+    target_link_libraries(crtgfx_skia PRIVATE ${CRTGFX_CRT_STATIC_LIBS})
+    target_link_libraries(crtgfx_skia PUBLIC ${CRTGFX_SKIA_LIBRARIES})
+    target_link_libraries(crtgfx_skia PRIVATE -Wl,--end-group)
+  else()
+    # Skia first, CRT_STATIC_LIBS (libc++.a on macOS, once CRT_USE_
+    # IMPORTED_LIBCXX swaps it in below) second -- reversed from the
+    # seemingly more natural "runtime libs, then Skia" order on purpose.
+    # Apple ld (this else() branch's own real user: macOS) scans each
+    # static archive once, left-to-right, only pulling members needed by
+    # symbols already outstanding at that point -- unlike Linux's
+    # --start-group/--end-group branch just above, ld64 has no
+    # bracket-and-rescan equivalent. libskia.a's own SkSL compiler/
+    # parser/debug-trace code makes extensive std::string/iostream/
+    # locale/shared_ptr use, so libc++.a must still be "ahead" in scan
+    # order when ld reaches it -- i.e. mentioned *after* libskia.a on the
+    # link line, the reverse of the intuitive "dependencies of a thing
+    # come after it" ordering. Confirmed for real (2026-08-23): with
+    # CRT_STATIC_LIBS linked first (the original order),
+    # crtgfx_skia_raster_smoke/libcrtgfx.dylib both failed with dozens of
+    # undefined std::__1::... symbols from libskia.a's own object files,
+    # even after fixing which libc++.a was being linked at all (see the
+    # CRTGFX_CRT_STATIC_LIBS/SHARED_LIBS macOS substitution further up)
+    # and after removing a stray duplicate hardcoded relink on crtgfx_
+    # skia_raster_smoke's own target -- only reordering these two calls
+    # (no --start-group equivalent, no force_load, no per-consumer
+    # override needed) made the link line pass.
+    if(CRTGFX_SKIA_LIBRARIES)
+      target_link_libraries(crtgfx_skia PUBLIC ${CRTGFX_SKIA_LIBRARIES})
+    endif()
+    target_link_libraries(crtgfx_skia PRIVATE ${CRTGFX_CRT_STATIC_LIBS})
+  endif()
+  if(CRT_TARGET_OS STREQUAL "windows")
+    # d3dcompiler.lib (2026-09-04, real, confirmed necessary): Skia's own
+    # real src/gpu/ganesh/d3d/GrD3DPipelineStateBuilder.cpp calls the
+    # real, standard D3DCompile() (compiles Ganesh's own SkSL-generated
+    # HLSL source into real shader bytecode at runtime) -- confirmed via
+    # `ld.lld: error: undefined symbol: D3DCompile`.
+    target_link_libraries(crtgfx_skia PUBLIC "${CRTGFX_WINDOWS_D3DCOMPILER_LIB}")
+  endif()
+  set_target_properties(crtgfx_skia PROPERTIES
+    OUTPUT_NAME crtgfx_skia
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  )
 endif()
-add_library(crtgfx_shared SHARED
-  $<TARGET_OBJECTS:crtgfx_common_objects>
-  $<TARGET_OBJECTS:crtgfx_backend_objects>
-  ${CRTGFX_SKIA_OBJECTS}
-  ${CRTGFX_SHARED_EXTRA_SOURCES}
+
+# --- crtgfx_window_shared (SHARED): the Simple Graphics DLL/.so/.dylib.
+add_library(crtgfx_window_shared SHARED
+  $<TARGET_OBJECTS:crtgfx_window_common_objects>
+  $<TARGET_OBJECTS:crtgfx_window_backend_objects>
 )
 if(CRT_TARGET_OS STREQUAL "linux")
-  add_dependencies(crtgfx_shared crtgfx-xkbcommon-build)
-  # Deliberately no add_dependencies(crtgfx_shared crtgfx-wayland-build)
-  # here -- same real ninja dependency-graph cycle as crtgfx's own
-  # identical comment above (CRTGFX_BACKEND_SOURCES's own Linux block has
-  # the full "why").
+  add_dependencies(crtgfx_window_shared crtgfx-xkbcommon-build)
+  # Deliberately no add_dependencies(crtgfx_window_shared crtgfx-wayland-
+  # build) here -- same real ninja dependency-graph cycle as crtgfx_
+  # window's own identical comment above.
 endif()
-target_include_directories(crtgfx_shared PUBLIC
+target_include_directories(crtgfx_window_shared PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
-if(CRTGFX_ENABLE_SKIA)
-  target_include_directories(crtgfx_shared PUBLIC "${CRTGFX_SKIA_ROOT}")
+if(CRT_TARGET_OS STREQUAL "linux")
+  # CRTGFX_XKBCOMMON_LIBRARIES/CRTGFX_WAYLAND_CLIENT_LIBRARIES: see
+  # crtgfx_window's own, fuller comment (same file, its identical calls)
+  # for why these go before CRTGFX_CRT_SHARED_LIBS. No --start-group/
+  # --end-group wrapper here (unlike crtgfx_skia_shared, below) -- window
+  # code has no Skia-shaped circular archive-resolution need.
+  target_link_libraries(crtgfx_window_shared PRIVATE ${CRTGFX_XKBCOMMON_LIBRARIES})
+  target_link_libraries(crtgfx_window_shared PRIVATE ${CRTGFX_WAYLAND_CLIENT_LIBRARIES})
 endif()
-if(CRT_TARGET_OS STREQUAL "windows" AND CRTGFX_ENABLE_SKIA AND CRT_USE_IMPORTED_LIBCXX)
-  # Real imported libc++/libc++abi/libunwind DLL import libraries (Itanium
-  # ABI, matching Skia itself), not the bootstrap libstdc++/src/ ABI shim
-  # (`cxx_shared`) -- swapped in for just the C++ runtime member of
-  # CRTGFX_CRT_SHARED_LIBS, keeping c_shared/m_shared/dl_shared as-is.
-  target_link_libraries(crtgfx_shared PRIVATE
-    c_shared m_shared dl_shared
-    "${CRT_SYSROOT}/lib/libc++.dll.a"
-    "${CRT_SYSROOT}/lib/libc++abi.dll.a"
-    "${CRT_SYSROOT}/lib/libunwind.dll.a"
-  )
-else()
-  set(CRTGFX_SHARED_SKIA_LINUX_GROUPED OFF)
-  if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_ENABLE_SKIA AND CRTGFX_SKIA_LIBRARIES)
-    set(CRTGFX_SHARED_SKIA_LINUX_GROUPED ON)
-    # --start-group/--end-group: see `crtgfx`'s own, fuller comment (same
-    # file, its CRTGFX_CRT_STATIC_LIBS/CRTGFX_SKIA_LIBRARIES linking just
-    # above) for the full story -- the identical GNU-ld circular-archive-
-    # resolution gap applies to crtgfx_shared's own link too.
-    target_link_libraries(crtgfx_shared PRIVATE -Wl,--start-group)
-  endif()
-  if(CRTGFX_SHARED_SKIA_LINUX_GROUPED)
-    # CRTGFX_SKIA_LIBRARIES (libskia.a + libfreetype.a, see that variable's
-    # own comment) BEFORE CRTGFX_CRT_SHARED_LIBS here, not after: found for
-    # real (2026-08-24) wiring Skia's own real FreeType font manager in --
-    # ld.lld/GNU ld resolve each SHARED library's own undefined-symbol
-    # contribution in a single left-to-right scan (unlike a static archive
-    # inside --start-group/--end-group, which genuinely does get rescanned
-    # on every pass); cxx_shared's own real libc++.so was already "passed"
-    # by the time libskia.a's later archive-member extraction discovered
-    # NEW undefined libc++ symbols it needed (SkSLString.cpp's own float-
-    # to-string conversion via <sstream>/<locale> -- std::locale::classic()
-    # and friends), so those stayed unresolved
-    # (`ld.lld: error: undefined symbol: std::__1::locale::classic()`)
-    # even though libc++.so genuinely exports them (confirmed directly via
-    # `nm -D`) and an isolated iostream/locale-only test program links
-    # against the exact same libc++.so cleanly. Putting libskia.a/
-    # libfreetype.a first means every libc++ symbol THEY need is already
-    # a known undefined the following cxx_shared/libc++.so scan resolves
-    # in its own single pass -- confirmed fixed by a real manual relink
-    # with this exact reordering before applying it here.
-    target_link_libraries(crtgfx_shared PUBLIC ${CRTGFX_SKIA_LIBRARIES})
-  endif()
-  # CRTGFX_XKBCOMMON_LIBRARIES (libxkbcommon.a): a plain, non-circular,
-  # pure-C dependency (strndup/asprintf/mmap/eaccess from libc, nothing
-  # from libc++/Skia at all) -- unlike CRTGFX_SKIA_LIBRARIES just above,
-  # this needs no special single-shared-library-scan ordering care, only
-  # "before CRTGFX_CRT_SHARED_LIBS" so libc, listed after it, can satisfy
-  # its own libc references. Applies whether or not CRTGFX_SHARED_SKIA_
-  # LINUX_GROUPED is set -- window_wayland.c (the one real consumer) is
-  # always compiled on Linux, independent of CRTGFX_ENABLE_SKIA. Empty and
-  # a no-op on any host other than Linux (see CRTGFX_XKBCOMMON_LIBRARIES's
-  # own definition, near CRTGFX_SKIA_LIBRARIES's).
-  target_link_libraries(crtgfx_shared PRIVATE ${CRTGFX_XKBCOMMON_LIBRARIES})
-  # CRTGFX_WAYLAND_CLIENT_LIBRARIES (host libwayland-client.so.0 plus the
-  # generated xdg-shell archive, src/arch/linux/window_wayland_native.c):
-  # same "empty and a no-op" shape as
-  # CRTGFX_XKBCOMMON_LIBRARIES just above -- see crtgfx's own, fuller
-  # comment (same file, its CRTGFX_WAYLAND_CLIENT_LIBRARIES linking) for
-  # why.
-  target_link_libraries(crtgfx_shared PRIVATE ${CRTGFX_WAYLAND_CLIENT_LIBRARIES})
-  # CRTGFX_LINUX_VULKAN_LIB (src/arch/linux/gpu_vulkan.c, 2026-09-03) --
-  # real if()-guard required, NOT the same "bare ${...} expansion is
-  # already a safe no-op when empty" shape CRTGFX_XKBCOMMON_LIBRARIES above
-  # gets away with. See crtgfx's own, fuller comment (same file, its
-  # CRTGFX_LINUX_VULKAN_LIB linking just above) for the real CI break this
-  # guards against: find_library() sets a *not-found* result to the
-  # literal string "CRTGFX_LINUX_VULKAN_LIB-NOTFOUND", not an empty one,
-  # and target_link_libraries() fails the whole CMake generate step
-  # outright on that "-NOTFOUND" suffix.
-  if(CRTGFX_LINUX_VULKAN_LIB)
-    target_link_libraries(crtgfx_shared PRIVATE ${CRTGFX_LINUX_VULKAN_LIB})
-  endif()
-  target_link_libraries(crtgfx_shared PRIVATE ${CRTGFX_CRT_SHARED_LIBS})
-  if(CRTGFX_SHARED_SKIA_LINUX_GROUPED)
-    target_link_libraries(crtgfx_shared PRIVATE -Wl,--end-group)
-  endif()
-endif()
-target_link_libraries(crtgfx_shared PRIVATE crt_build_flags)
-if(NOT CRTGFX_SHARED_SKIA_LINUX_GROUPED AND CRTGFX_ENABLE_SKIA AND CRTGFX_SKIA_LIBRARIES)
-  target_link_libraries(crtgfx_shared PUBLIC ${CRTGFX_SKIA_LIBRARIES})
-endif()
+# CRTGFX_CRT_SHARED_LIBS (c_shared/m_shared/dl_shared/cxx_shared): every
+# real host, not just Linux -- this is a genuine, real DLL/.so/.dylib
+# link step, so it must resolve its own libc references (calloc/free/
+# memset/memcpy/... -- window.c/wayland_weston.c/window_win32.c all call
+# these) itself, unlike the plain `crtgfx_window` static archive, which
+# only *records* them for whatever later links it in. Confirmed for real
+# (2026-09-08): a first version of this split scoped this line to Linux
+# only, matching where the *xkbcommon/wayland* libraries above it
+# actually apply -- but CRTGFX_CRT_SHARED_LIBS itself is unconditional,
+# and omitting it broke the Windows crtgfx_window_shared link outright
+# (`ld.lld: error: undefined symbol: calloc/free/memset/realloc/memcpy`).
+target_link_libraries(crtgfx_window_shared PRIVATE ${CRTGFX_CRT_SHARED_LIBS})
+target_link_libraries(crtgfx_window_shared PRIVATE crt_build_flags)
 if(CRT_TARGET_OS STREQUAL "windows")
-  target_sources(crtgfx_shared PRIVATE $<TARGET_OBJECTS:crt_windows_dllcrt>)
-  target_link_libraries(crtgfx_shared PRIVATE
+  target_sources(crtgfx_window_shared PRIVATE $<TARGET_OBJECTS:crt_windows_dllcrt>)
+  target_link_libraries(crtgfx_window_shared PRIVATE
     "${CRT_WINDOWS_KERNEL32_LIB}"
     "${CRTGFX_WINDOWS_USER32_LIB}"
     "${CRTGFX_WINDOWS_GDI32_LIB}"
     "${CRTGFX_WINDOWS_D3D11_LIB}"
     "${CRTGFX_WINDOWS_DXGI_LIB}"
-    "${CRTGFX_WINDOWS_D3D12_LIB}"
-    "${CRTGFX_WINDOWS_D3DCOMPILER_LIB}"
   )
-  if(CRTGFX_ENABLE_SKIA)
-    target_link_libraries(crtgfx_shared PRIVATE crt_compiler_rt_builtins)
+elseif(CRT_TARGET_OS STREQUAL "macos")
+  target_link_libraries(crtgfx_window_shared PRIVATE
+    "-framework Foundation"
+    "-framework AppKit"
+    "-framework QuartzCore"
+    "-framework CoreGraphics"
+    objc
+  )
+  # No -dead_strip skip needed here (unlike crtgfx_skia_gpu_offscreen_
+  # smoke's own real Metal-device-creation crash workaround, see that
+  # target's own comment): crt_configure_shared_runtime() (CMakeLists.txt,
+  # this dylib's own real link-flag source) never adds -Wl,-dead_strip on
+  # macOS at all -- confirmed by reading that function directly.
+endif()
+crt_configure_shared_runtime(crtgfx_window_shared)
+set_target_properties(crtgfx_window_shared PROPERTIES
+  OUTPUT_NAME crtgfx
+  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+  ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
+if(CRT_TARGET_OS STREQUAL "windows")
+  set_target_properties(crtgfx_window_shared PROPERTIES
+    ARCHIVE_OUTPUT_NAME crtgfx_dll
+  )
+endif()
+
+# --- crtgfx_gpu_shared (SHARED): the GPU device/surface DLL/.so/.dylib.
+add_library(crtgfx_gpu_shared SHARED
+  $<TARGET_OBJECTS:crtgfx_gpu_common_objects>
+  $<TARGET_OBJECTS:crtgfx_gpu_backend_objects>
+)
+target_link_libraries(crtgfx_gpu_shared PUBLIC crtgfx_window_shared)
+target_include_directories(crtgfx_gpu_shared PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
+if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB)
+  target_link_libraries(crtgfx_gpu_shared PRIVATE ${CRTGFX_LINUX_VULKAN_LIB})
+endif()
+# CRTGFX_CRT_SHARED_LIBS: every real host, not just Linux -- see
+# crtgfx_window_shared's own, fuller comment (same file, its identical
+# call) for why this must be unconditional for a real DLL/.so/.dylib
+# link step (a real, confirmed bug the first version of this split hit).
+target_link_libraries(crtgfx_gpu_shared PRIVATE ${CRTGFX_CRT_SHARED_LIBS})
+target_link_libraries(crtgfx_gpu_shared PRIVATE crt_build_flags)
+if(CRT_TARGET_OS STREQUAL "windows")
+  target_sources(crtgfx_gpu_shared PRIVATE $<TARGET_OBJECTS:crt_windows_dllcrt>)
+  target_link_libraries(crtgfx_gpu_shared PRIVATE
+    "${CRTGFX_WINDOWS_DXGI_LIB}"
+    "${CRTGFX_WINDOWS_D3D12_LIB}"
+  )
+elseif(CRT_TARGET_OS STREQUAL "macos")
+  target_link_libraries(crtgfx_gpu_shared PRIVATE
+    "-framework Metal"
+    "-framework CoreGraphics"
+  )
+endif()
+if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB)
+  # See crtgfx_gpu's own, fuller comment (same file, right after
+  # set_target_properties(crtgfx_gpu PROPERTIES ...)) for the real bug
+  # this fixes. PRIVATE here, not INTERFACE: crtgfx_gpu_shared has its
+  # own real .so link step (unlike the plain `crtgfx_gpu` static
+  # archive), so this only needs to apply directly to it, not propagate
+  # further.
+  target_link_options(crtgfx_gpu_shared PRIVATE -Wl,--exclude-libs,ALL)
+endif()
+crt_configure_shared_runtime(crtgfx_gpu_shared)
+set_target_properties(crtgfx_gpu_shared PROPERTIES
+  OUTPUT_NAME crtgfx_gpu
+  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+  ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
+if(CRT_TARGET_OS STREQUAL "windows")
+  set_target_properties(crtgfx_gpu_shared PROPERTIES
+    ARCHIVE_OUTPUT_NAME crtgfx_gpu_dll
+  )
+endif()
+
+# --- crtgfx_skia_shared (SHARED): the Skia bridge DLL/.so/.dylib.
+if(CRTGFX_ENABLE_SKIA)
+  set(CRTGFX_SHARED_EXTRA_SOURCES "")
+  # Windows + Skia only: crtgfx_skia_shared -- unlike the plain `crtgfx_
+  # skia` static archive, which only records crtgfx_skia_objects's own
+  # unresolved real-libc++/emutls references for whatever later links it
+  # in (crtgfx_skia_raster_smoke, already fixed) -- is itself a real DLL,
+  # so it must fully resolve those same references at its own link time.
+  # See crtgfx_skia_raster_smoke's own matching comments (imported
+  # libc++, uuid.lib, --allow-multiple-definition, emutls_link_stubs.c)
+  # for the full story of each piece; this mirrors all of them for the
+  # shared/DLL case.
+  if(CRT_TARGET_OS STREQUAL "windows")
+    list(APPEND CRTGFX_SHARED_EXTRA_SOURCES
+      "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/common/emutls_link_stubs.c")
+  endif()
+  add_library(crtgfx_skia_shared SHARED
+    $<TARGET_OBJECTS:crtgfx_skia_objects>
+    ${CRTGFX_SHARED_EXTRA_SOURCES}
+  )
+  target_link_libraries(crtgfx_skia_shared PUBLIC crtgfx_gpu_shared)
+  target_include_directories(crtgfx_skia_shared PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CRTGFX_SKIA_ROOT}"
+  )
+  if(CRT_TARGET_OS STREQUAL "windows" AND CRT_USE_IMPORTED_LIBCXX)
+    # Real imported libc++/libc++abi/libunwind DLL import libraries
+    # (Itanium ABI, matching Skia itself), not the bootstrap libstdc++/
+    # src/ ABI shim (`cxx_shared`) -- swapped in for just the C++
+    # runtime member of CRTGFX_CRT_SHARED_LIBS, keeping c_shared/
+    # m_shared/dl_shared as-is. CRT_LIBCXX_SYSROOT (dist/02-cxx), not
+    # CRT_SYSROOT -- see crtgfx-skia-configure's own, fuller comment
+    # further up this file for why.
+    target_link_libraries(crtgfx_skia_shared PRIVATE
+      c_shared m_shared dl_shared
+      "${CRT_LIBCXX_SYSROOT}/lib/libc++.dll.a"
+      "${CRT_LIBCXX_SYSROOT}/lib/libc++abi.dll.a"
+      "${CRT_LIBCXX_SYSROOT}/lib/libunwind.dll.a"
+    )
+  else()
+    set(CRTGFX_SHARED_SKIA_LINUX_GROUPED OFF)
+    if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_SKIA_LIBRARIES)
+      set(CRTGFX_SHARED_SKIA_LINUX_GROUPED ON)
+      # --start-group/--end-group: see `crtgfx_skia`'s own, fuller
+      # comment (same file, its CRTGFX_CRT_STATIC_LIBS/CRTGFX_SKIA_
+      # LIBRARIES linking) for the full story -- the identical GNU-ld
+      # circular-archive-resolution gap applies to crtgfx_skia_shared's
+      # own link too.
+      target_link_libraries(crtgfx_skia_shared PRIVATE -Wl,--start-group)
+    endif()
+    if(CRTGFX_SHARED_SKIA_LINUX_GROUPED)
+      # CRTGFX_SKIA_LIBRARIES (libskia.a + libfreetype.a, see that
+      # variable's own comment) BEFORE CRTGFX_CRT_SHARED_LIBS here, not
+      # after: found for real (2026-08-24) wiring Skia's own real
+      # FreeType font manager in -- ld.lld/GNU ld resolve each SHARED
+      # library's own undefined-symbol contribution in a single
+      # left-to-right scan (unlike a static archive inside --start-
+      # group/--end-group, which genuinely does get rescanned on every
+      # pass); cxx_shared's own real libc++.so was already "passed" by
+      # the time libskia.a's later archive-member extraction discovered
+      # NEW undefined libc++ symbols it needed (SkSLString.cpp's own
+      # float-to-string conversion via <sstream>/<locale> --
+      # std::locale::classic() and friends), so those stayed unresolved
+      # (`ld.lld: error: undefined symbol: std::__1::locale::classic()`)
+      # even though libc++.so genuinely exports them (confirmed directly
+      # via `nm -D`) and an isolated iostream/locale-only test program
+      # links against the exact same libc++.so cleanly. Putting
+      # libskia.a/libfreetype.a first means every libc++ symbol THEY
+      # need is already a known undefined the following cxx_shared/
+      # libc++.so scan resolves in its own single pass -- confirmed
+      # fixed by a real manual relink with this exact reordering before
+      # landing here.
+      target_link_libraries(crtgfx_skia_shared PUBLIC ${CRTGFX_SKIA_LIBRARIES})
+    endif()
+    # Unconditional (matches this block's own pre-split shape exactly):
+    # a real DLL/.so/.dylib link step, on every host, needs this
+    # resolved at its own link time.
+    target_link_libraries(crtgfx_skia_shared PRIVATE ${CRTGFX_CRT_SHARED_LIBS})
+    if(CRTGFX_SHARED_SKIA_LINUX_GROUPED)
+      target_link_libraries(crtgfx_skia_shared PRIVATE -Wl,--end-group)
+    endif()
+  endif()
+  target_link_libraries(crtgfx_skia_shared PRIVATE crt_build_flags)
+  if(NOT CRTGFX_SHARED_SKIA_LINUX_GROUPED AND CRTGFX_SKIA_LIBRARIES AND
+     NOT (CRT_TARGET_OS STREQUAL "windows" AND CRT_USE_IMPORTED_LIBCXX))
+    target_link_libraries(crtgfx_skia_shared PUBLIC ${CRTGFX_SKIA_LIBRARIES})
+  endif()
+  if(CRT_TARGET_OS STREQUAL "windows")
+    target_sources(crtgfx_skia_shared PRIVATE $<TARGET_OBJECTS:crt_windows_dllcrt>)
+    target_link_libraries(crtgfx_skia_shared PRIVATE "${CRTGFX_WINDOWS_D3DCOMPILER_LIB}")
+    target_link_libraries(crtgfx_skia_shared PRIVATE crt_compiler_rt_builtins)
     find_file(CRTGFX_WINDOWS_UUID_LIB
       NAMES Uuid.Lib uuid.lib
       PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES}
@@ -1772,49 +2072,37 @@ if(CRT_TARGET_OS STREQUAL "windows")
     if(NOT CRTGFX_WINDOWS_UUID_LIB)
       set(CRTGFX_WINDOWS_UUID_LIB uuid.lib CACHE FILEPATH "Windows uuid import library")
     endif()
-    target_link_libraries(crtgfx_shared PRIVATE "${CRTGFX_WINDOWS_UUID_LIB}")
-    target_link_options(crtgfx_shared PRIVATE -Wl,--allow-multiple-definition)
+    target_link_libraries(crtgfx_skia_shared PRIVATE "${CRTGFX_WINDOWS_UUID_LIB}")
+    target_link_options(crtgfx_skia_shared PRIVATE -Wl,--allow-multiple-definition)
+  elseif(CRT_TARGET_OS STREQUAL "linux")
+    # -fuse-ld=lld: see crtgfx_skia_raster_smoke's own, fuller comment
+    # (same file, its Linux branch) for the full ld.bfd-vs-lld story.
+    target_link_options(crtgfx_skia_shared PRIVATE -fuse-ld=lld)
   endif()
-elseif(CRT_TARGET_OS STREQUAL "macos")
-  target_link_libraries(crtgfx_shared PRIVATE ${CRTGFX_MACOS_FRAMEWORKS})
-  # No -dead_strip skip needed here (unlike crtgfx_skia_gpu_offscreen_
-  # smoke's own real Metal-device-creation crash workaround, see that
-  # target's own comment): crt_configure_shared_runtime() (CMakeLists.txt,
-  # this dylib's own real link-flag source) never adds -Wl,-dead_strip on
-  # macOS at all -- confirmed by reading that function directly -- so the
-  # real -dead_strip + C++/libc++ + Metal/LaunchServices interaction this
-  # project confirmed elsewhere simply cannot trigger on this target.
-elseif(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_ENABLE_SKIA)
-  # -fuse-ld=lld: see crtgfx_skia_raster_smoke's own, fuller comment (same
-  # file, its Linux branch) for the full ld.bfd-vs-lld story.
-  target_link_options(crtgfx_shared PRIVATE -fuse-ld=lld)
-endif()
-if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB)
-  # See crtgfx's own, fuller comment (same file, right after
-  # set_target_properties(crtgfx PROPERTIES ...)) for the real bug this
-  # fixes. PRIVATE here, not INTERFACE: crtgfx_shared has its own real
-  # .so link step (unlike the plain `crtgfx` static archive), so this
-  # only needs to apply directly to it, not propagate further.
-  target_link_options(crtgfx_shared PRIVATE -Wl,--exclude-libs,ALL)
-endif()
-crt_configure_shared_runtime(crtgfx_shared)
-set_target_properties(crtgfx_shared PROPERTIES
-  OUTPUT_NAME crtgfx
-  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-  ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-  WINDOWS_EXPORT_ALL_SYMBOLS ON
-)
-if(CRT_TARGET_OS STREQUAL "windows")
-  set_target_properties(crtgfx_shared PROPERTIES
-    ARCHIVE_OUTPUT_NAME crtgfx_dll
+  crt_configure_shared_runtime(crtgfx_skia_shared)
+  set_target_properties(crtgfx_skia_shared PROPERTIES
+    OUTPUT_NAME crtgfx_skia
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
   )
+  if(CRT_TARGET_OS STREQUAL "windows")
+    set_target_properties(crtgfx_skia_shared PROPERTIES
+      ARCHIVE_OUTPUT_NAME crtgfx_skia_dll
+    )
+  endif()
 endif()
 
-install(TARGETS crtgfx crtgfx_shared
+install(TARGETS crtgfx_window crtgfx_window_shared
   ARCHIVE DESTINATION lib COMPONENT crt-gfx-simple
   LIBRARY DESTINATION lib COMPONENT crt-gfx-simple
   RUNTIME DESTINATION bin COMPONENT crt-gfx-simple
+)
+install(TARGETS crtgfx_gpu crtgfx_gpu_shared
+  ARCHIVE DESTINATION lib COMPONENT crt-gfx
+  LIBRARY DESTINATION lib COMPONENT crt-gfx
+  RUNTIME DESTINATION bin COMPONENT crt-gfx
 )
 install(FILES include/crtgfx/window.h
   DESTINATION include/crtgfx
@@ -1825,6 +2113,11 @@ install(FILES include/crtgfx/gpu.h
   COMPONENT crt-gfx
 )
 if(CRTGFX_ENABLE_SKIA)
+  install(TARGETS crtgfx_skia crtgfx_skia_shared
+    ARCHIVE DESTINATION lib COMPONENT crt-gfx
+    LIBRARY DESTINATION lib COMPONENT crt-gfx
+    RUNTIME DESTINATION bin COMPONENT crt-gfx
+  )
   install(FILES include/crtgfx/skia.h
     DESTINATION include/crtgfx
     COMPONENT crt-gfx
@@ -1857,7 +2150,7 @@ add_executable(crtgfx_window_smoke
   ${CRT_STARTUP_OBJECTS}
   tests/window_smoke_test.c
 )
-target_link_libraries(crtgfx_window_smoke PRIVATE crt_build_flags c crtgfx)
+target_link_libraries(crtgfx_window_smoke PRIVATE crt_build_flags c crtgfx_window)
 target_include_directories(crtgfx_window_smoke PRIVATE
   "${CMAKE_SOURCE_DIR}/libc/include"
 )
@@ -1911,7 +2204,7 @@ add_executable(crtgfx_synthetic_event
   ${CRT_STARTUP_OBJECTS}
   tests/synthetic_event_test.c
 )
-target_link_libraries(crtgfx_synthetic_event PRIVATE crt_build_flags c crtgfx)
+target_link_libraries(crtgfx_synthetic_event PRIVATE crt_build_flags c crtgfx_window)
 target_include_directories(crtgfx_synthetic_event PRIVATE
   "${CMAKE_SOURCE_DIR}/libc/include"
 )
@@ -1964,7 +2257,7 @@ add_executable(crtgfx_gpu_test
   ${CRT_STARTUP_OBJECTS}
   tests/gpu_test.c
 )
-target_link_libraries(crtgfx_gpu_test PRIVATE crt_build_flags c crtgfx)
+target_link_libraries(crtgfx_gpu_test PRIVATE crt_build_flags c crtgfx_gpu)
 target_include_directories(crtgfx_gpu_test PRIVATE
   "${CMAKE_SOURCE_DIR}/libc/include"
 )
@@ -2124,14 +2417,17 @@ function(crt_wire_skia_executable target_name)
   target_compile_definitions(${target_name} PRIVATE
     CRT_SKIA_FONTS_DIR="${CMAKE_SOURCE_DIR}/libcrtgfx/assets/fonts")
   if(CRT_TARGET_OS STREQUAL "windows" AND CRT_USE_IMPORTED_LIBCXX)
-    # -isystem${CRT_SYSROOT}/include/c++/v1, added *before* the libc/include
-    # one just below (both via target_compile_options, so both land in
-    # <FLAGS> in call order) -- this project's own imported libc++, matching
-    # what compiles skia_bridge.cc/Skia itself, not any host substitute. See
-    # the CRTGFX_ENABLE_SKIA guard at the top of this file for the fuller
-    # story of why this is required on Windows now.
+    # -isystem${CRT_LIBCXX_SYSROOT}/include/c++/v1 (dist/02-cxx, not
+    # CRT_SYSROOT/dist/01-c -- see crtgfx-skia-configure's own, fuller
+    # comment further up this file for why), added *before* the libc/
+    # include one just below (both via target_compile_options, so both
+    # land in <FLAGS> in call order) -- this project's own imported
+    # libc++, matching what compiles skia_bridge.cc/Skia itself, not any
+    # host substitute. See the CRTGFX_ENABLE_SKIA guard at the top of
+    # this file for the fuller story of why this is required on Windows
+    # now.
     target_compile_options(${target_name} PRIVATE
-      "-isystem${CRT_SYSROOT}/include/c++/v1"
+      "-isystem${CRT_LIBCXX_SYSROOT}/include/c++/v1"
     )
   endif()
   # -isystem<repo>/libc/include, via target_compile_options (NOT target_
@@ -2171,19 +2467,22 @@ function(crt_wire_skia_executable target_name)
     # itself), not the small bootstrap libstdc++/src/ ABI shim (`cxx`) --
     # see the CRTGFX_ENABLE_SKIA guard at the top of this file. Mirrors
     # tools/crt-c++'s own cxx_runtime_libs static-link selection.
+    # CRT_LIBCXX_SYSROOT (dist/02-cxx), not CRT_SYSROOT -- see crtgfx-
+    # skia-configure's own, fuller comment further up this file for why.
     target_link_libraries(${target_name} PRIVATE
-      "${CRT_SYSROOT}/lib/libc++.a"
-      "${CRT_SYSROOT}/lib/libc++abi.a"
-      "${CRT_SYSROOT}/lib/libunwind.a"
+      "${CRT_LIBCXX_SYSROOT}/lib/libc++.a"
+      "${CRT_LIBCXX_SYSROOT}/lib/libc++abi.a"
+      "${CRT_LIBCXX_SYSROOT}/lib/libunwind.a"
       c
     )
   elseif(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_ENABLE_SKIA AND CRTGFX_SKIA_LIBRARIES)
     # Deliberately NOT an explicit `cxx c` link here, unlike the other
-    # branches -- `crtgfx`'s own --start-group/--end-group-wrapped link
-    # (see that target's own, fuller comment) already PRIVATE-propagates
-    # cxx/c/m/dl transitively, *inside* the group. An explicit mention
-    # here would land *outside* it (this call happens before `crtgfx`
-    # itself gets flattened into the link line) and CMake's own link-line
+    # branches -- `crtgfx_skia`'s own --start-group/--end-group-wrapped
+    # link (see that target's own, fuller comment) already PRIVATE-
+    # propagates cxx/c/m/dl transitively, *inside* the group. An explicit
+    # mention here would land *outside* it (this call happens before
+    # `crtgfx_skia` itself gets flattened into the link line) and CMake's
+    # own link-line
     # de-duplication keeps only that first, ungrouped occurrence, silently
     # dropping the grouped one -- confirmed for real (2026-08-23): with
     # this explicit link left in, `lib/libc++.a`(=cxx) landed *before*
@@ -2192,22 +2491,23 @@ function(crt_wire_skia_executable target_name)
     # unresolved even with the group fix in place for libm's symbols.
   elseif(CRT_TARGET_OS STREQUAL "macos" AND CRT_USE_IMPORTED_LIBCXX)
     # No explicit libc++/libc++abi relink needed here at all (unlike the
-    # Windows branch above) -- crtgfx's own CRTGFX_CRT_STATIC_LIBS swap
-    # (see that swap's own comment, same file) already propagates the
-    # real imported libc++.a/libc++abi.a to every consumer, and crtgfx's
-    # own build now links Skia's libraries *before* CRTGFX_CRT_STATIC_LIBS
-    # (see the plain else() branch of crtgfx's own target_link_libraries
-    # calls, above in this file) specifically so libc++.a lands *after*
-    # libskia.a on the final link line -- Apple ld's single-pass,
-    # left-to-right static-archive scan needs it there, since libskia.a's
-    # own extensive std::string/iostream/locale use (SkSL's compiler/
-    # parser/debug-trace code) must still be outstanding when ld reaches
-    # it. All this branch needs to do is what the `else()` below does for
-    # every other platform *except* stop it from also linking the small
-    # bootstrap libstdc++/src/ ABI shim (`cxx`) on top of the real one
-    # crtgfx already provides -- confirmed for real (2026-08-23): leaving
-    # the `else()` branch's `cxx` mention in place put a second, different
-    # libc++.a on the link line even after the ordering fix above.
+    # Windows branch above) -- crtgfx_skia's own CRTGFX_CRT_STATIC_LIBS
+    # swap (see that swap's own comment, same file) already propagates
+    # the real imported libc++.a/libc++abi.a to every consumer, and
+    # crtgfx_skia's own build links Skia's libraries *before* CRTGFX_CRT_
+    # STATIC_LIBS (see the plain else() branch of crtgfx_skia's own
+    # target_link_libraries calls, above in this file) specifically so
+    # libc++.a lands *after* libskia.a on the final link line -- Apple
+    # ld's single-pass, left-to-right static-archive scan needs it there,
+    # since libskia.a's own extensive std::string/iostream/locale use
+    # (SkSL's compiler/parser/debug-trace code) must still be outstanding
+    # when ld reaches it. All this branch needs to do is what the
+    # `else()` below does for every other platform *except* stop it from
+    # also linking the small bootstrap libstdc++/src/ ABI shim (`cxx`) on
+    # top of the real one crtgfx_skia already provides -- confirmed for
+    # real (2026-08-23): leaving the `else()` branch's `cxx` mention in
+    # place put a second, different libc++.a on the link line even after
+    # the ordering fix above.
     target_link_libraries(${target_name} PRIVATE c)
   else()
     target_link_libraries(${target_name} PRIVATE cxx c)
@@ -2313,10 +2613,10 @@ if(CRTGFX_ENABLE_SKIA)
     ${CRT_STARTUP_OBJECTS}
     tests/skia_raster_smoke.cc
   )
-  target_link_libraries(crtgfx_skia_raster_smoke PRIVATE crt_cxx_build_flags crtgfx)
+  target_link_libraries(crtgfx_skia_raster_smoke PRIVATE crt_cxx_build_flags crtgfx_skia)
   crt_wire_skia_executable(crtgfx_skia_raster_smoke)
   crt_link_startup_end_objects(crtgfx_skia_raster_smoke)
-  add_dependencies(crtgfx_skia_raster_smoke cxx c crt1 crtgfx port-build-freetype)
+  add_dependencies(crtgfx_skia_raster_smoke cxx c crt1 crtgfx_skia port-build-freetype)
 
   add_test(NAME crtgfx_skia_raster_smoke_runs COMMAND crtgfx_skia_raster_smoke)
   set_tests_properties(crtgfx_skia_raster_smoke_runs PROPERTIES
@@ -2341,10 +2641,10 @@ if(CRTGFX_ENABLE_SKIA)
     ${CRT_STARTUP_OBJECTS}
     tests/skia_cpu_coverage_test.cc
   )
-  target_link_libraries(crtgfx_skia_cpu_coverage PRIVATE crt_cxx_build_flags crtgfx)
+  target_link_libraries(crtgfx_skia_cpu_coverage PRIVATE crt_cxx_build_flags crtgfx_skia)
   crt_wire_skia_executable(crtgfx_skia_cpu_coverage)
   crt_link_startup_end_objects(crtgfx_skia_cpu_coverage)
-  add_dependencies(crtgfx_skia_cpu_coverage cxx c crt1 crtgfx)
+  add_dependencies(crtgfx_skia_cpu_coverage cxx c crt1 crtgfx_skia)
 
   add_test(NAME crtgfx_skia_cpu_coverage_runs COMMAND crtgfx_skia_cpu_coverage)
   set_tests_properties(crtgfx_skia_cpu_coverage_runs PROPERTIES
@@ -2354,10 +2654,10 @@ if(CRTGFX_ENABLE_SKIA)
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_skia_cpu_coverage_runs)
 
   add_executable(crtgfx_skia_sksl_test ${CRT_STARTUP_OBJECTS} tests/skia_sksl_test.cc)
-  target_link_libraries(crtgfx_skia_sksl_test PRIVATE crt_cxx_build_flags crtgfx)
+  target_link_libraries(crtgfx_skia_sksl_test PRIVATE crt_cxx_build_flags crtgfx_skia)
   crt_wire_skia_executable(crtgfx_skia_sksl_test)
   crt_link_startup_end_objects(crtgfx_skia_sksl_test)
-  add_dependencies(crtgfx_skia_sksl_test cxx c crt1 crtgfx)
+  add_dependencies(crtgfx_skia_sksl_test cxx c crt1 crtgfx_skia)
   add_test(NAME crtgfx_skia_sksl_test_runs COMMAND crtgfx_skia_sksl_test)
   set_tests_properties(crtgfx_skia_sksl_test_runs PROPERTIES
     TIMEOUT 30
@@ -2387,7 +2687,7 @@ if(CRTGFX_ENABLE_SKIA)
       ${CRT_STARTUP_OBJECTS}
       tests/skia_gpu_offscreen_smoke.cc
     )
-    target_link_libraries(crtgfx_skia_gpu_offscreen_smoke PRIVATE crt_cxx_build_flags crtgfx)
+    target_link_libraries(crtgfx_skia_gpu_offscreen_smoke PRIVATE crt_cxx_build_flags crtgfx_skia)
     # gpu_internal.h (src/gpu_internal.h, not installed/public) -- this
     # test reaches into crtgfx_gpu_device's own real per-OS handles
     # directly (crtgfx_skia_make_gpu_context()'s own real caller shape,
@@ -2406,7 +2706,7 @@ if(CRTGFX_ENABLE_SKIA)
     # non-macOS target, matching that argument's own guard.
     crt_wire_skia_executable(crtgfx_skia_gpu_offscreen_smoke SKIP_MACOS_DEAD_STRIP)
     crt_link_startup_end_objects(crtgfx_skia_gpu_offscreen_smoke)
-    add_dependencies(crtgfx_skia_gpu_offscreen_smoke cxx c crt1 crtgfx)
+    add_dependencies(crtgfx_skia_gpu_offscreen_smoke cxx c crt1 crtgfx_skia)
 
     add_test(NAME crtgfx_skia_gpu_offscreen_smoke_runs COMMAND crtgfx_skia_gpu_offscreen_smoke)
     set_tests_properties(crtgfx_skia_gpu_offscreen_smoke_runs PROPERTIES
@@ -2433,7 +2733,7 @@ if(CRTGFX_ENABLE_SKIA)
       ${CRT_STARTUP_OBJECTS}
       tools/skia_gpu_window_demo.cc
     )
-    target_link_libraries(crtgfx_skia_gpu_window_demo PRIVATE crt_cxx_build_flags crtgfx)
+    target_link_libraries(crtgfx_skia_gpu_window_demo PRIVATE crt_cxx_build_flags crtgfx_skia)
     # tests/ (not src/, unlike crtgfx_skia_gpu_offscreen_smoke just above --
     # this demo only ever calls the public crtgfx/skia.h API, never reaches
     # into gpu_internal.h itself) -- for tests/skia_reference_scene.h, the
@@ -2444,7 +2744,7 @@ if(CRTGFX_ENABLE_SKIA)
     )
     crt_wire_skia_executable(crtgfx_skia_gpu_window_demo SKIP_MACOS_DEAD_STRIP)
     crt_link_startup_end_objects(crtgfx_skia_gpu_window_demo)
-    add_dependencies(crtgfx_skia_gpu_window_demo cxx c crt1 crtgfx)
+    add_dependencies(crtgfx_skia_gpu_window_demo cxx c crt1 crtgfx_skia)
   endif()
 
   # crtmedia_frame_skia_smoke: the real-Skia half of libcrtmedia's CPU
@@ -2471,10 +2771,10 @@ if(CRTGFX_ENABLE_SKIA)
     ${CRT_STARTUP_OBJECTS}
     "${CMAKE_SOURCE_DIR}/libcrtmedia/tests/frame_skia_smoke.cc"
   )
-  target_link_libraries(crtmedia_frame_skia_smoke PRIVATE crt_cxx_build_flags crtgfx crtmedia)
+  target_link_libraries(crtmedia_frame_skia_smoke PRIVATE crt_cxx_build_flags crtgfx_skia crtmedia)
   crt_wire_skia_executable(crtmedia_frame_skia_smoke)
   crt_link_startup_end_objects(crtmedia_frame_skia_smoke)
-  add_dependencies(crtmedia_frame_skia_smoke cxx c crt1 crtgfx crtmedia)
+  add_dependencies(crtmedia_frame_skia_smoke cxx c crt1 crtgfx_skia crtmedia)
 
   add_test(NAME crtmedia_frame_skia_smoke_runs COMMAND crtmedia_frame_skia_smoke)
   set_tests_properties(crtmedia_frame_skia_smoke_runs PROPERTIES
@@ -2490,7 +2790,7 @@ add_executable(crtgfx_window_demo
   ${CRT_STARTUP_OBJECTS}
   tools/window_demo.c
 )
-target_link_libraries(crtgfx_window_demo PRIVATE crt_build_flags c crtgfx)
+target_link_libraries(crtgfx_window_demo PRIVATE crt_build_flags c crtgfx_window)
 target_include_directories(crtgfx_window_demo PRIVATE
   "${CMAKE_SOURCE_DIR}/libc/include"
 )
@@ -2540,7 +2840,7 @@ add_executable(crtgfx_gpu_window_demo
   ${CRT_STARTUP_OBJECTS}
   tools/gpu_window_demo.c
 )
-target_link_libraries(crtgfx_gpu_window_demo PRIVATE crt_build_flags c crtgfx)
+target_link_libraries(crtgfx_gpu_window_demo PRIVATE crt_build_flags c crtgfx_gpu)
 target_include_directories(crtgfx_gpu_window_demo PRIVATE
   "${CMAKE_SOURCE_DIR}/libc/include"
 )
@@ -2594,7 +2894,7 @@ add_executable(crtgfx_keyboard_interactive
 # gated Skia+FreeType text rendering, matching crtgfx_skia_raster_smoke's
 # own identical choice, same reasoning: a plain C target's own crt_build_
 # flags never carries the C++-specific flags/standard tools/crt-c++ needs).
-target_link_libraries(crtgfx_keyboard_interactive PRIVATE crt_cxx_build_flags c crtgfx)
+target_link_libraries(crtgfx_keyboard_interactive PRIVATE crt_cxx_build_flags c crtgfx_window)
 target_include_directories(crtgfx_keyboard_interactive PRIVATE
   "${CMAKE_SOURCE_DIR}/libc/include"
 )
@@ -2633,7 +2933,13 @@ if(CRTGFX_ENABLE_SKIA)
   # falling back to the plain gradient-fill behavior it always had).
   # Reuses crt_wire_skia_executable() (this file, just above) rather than
   # hand-copying crtgfx_skia_raster_smoke's own hard-won platform-specific
-  # link wiring a second time.
+  # link wiring a second time. crtgfx_skia PUBLIC-links crtgfx_gpu, which
+  # PUBLIC-links crtgfx_window -- this target already links crtgfx_window
+  # directly above, and CMake deduplicates the repeated mention, so
+  # linking crtgfx_skia here (needed for the real Skia bridge symbols
+  # this file's own CRTGFX_HAS_SKIA_HEADERS-gated code path calls) is
+  # additive, not a conflict.
+  target_link_libraries(crtgfx_keyboard_interactive PRIVATE crtgfx_skia)
   crt_wire_skia_executable(crtgfx_keyboard_interactive)
-  add_dependencies(crtgfx_keyboard_interactive port-build-freetype)
+  add_dependencies(crtgfx_keyboard_interactive crtgfx_skia port-build-freetype)
 endif()

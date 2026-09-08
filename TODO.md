@@ -807,14 +807,125 @@ the in-tree (non-packaged) build, so it is not yet known whether this is
 specific to the packaged/standalone invocation path or a real, general
 gap in `std::ios_base::Init`'s global-constructor handling on Windows.
 
-**Decided, not yet implemented:** `libcrtgfx` must be split so window/
-input/software-framebuffer, the GPU backend, and the Skia bridge become
-physically separate source/object graphs. The current state is only an
-`install(COMPONENT ...)` split -- every stage still links one
-`crtgfx_shared` containing GPU+Skia code, and only the *public headers*
-installed per stage differ. This has to land before
-`crt-gfx-simple-dist`/`crt-gfx-media-dist` can be considered real, per the
-decision recorded here.
+**`libcrtgfx` physical window/GPU/Skia split -- done and verified on
+Windows (window+GPU+Skia, full `ctest` 127/127 clean); Linux window+GPU
+verified, Linux Skia verification still running in the background
+(2026-09-08).** Closes out the decision recorded here
+that the previous `install(COMPONENT ...)`-only split (one `crtgfx_shared`
+containing GPU+Skia code regardless of stage, only the *public headers*
+differing) was not real -- `crt-gfx-simple-dist`/`crt-gfx-media-dist`
+needed this before either could be considered real.
+
+Design (confirmed via two real Explore passes over the 2639-line
+`libcrtgfx/CMakeLists.txt` plus every external consumer in the repo, then
+an explicit user decision): three separate CMake target pairs replace the
+old monolithic `crtgfx`/`crtgfx_shared` --
+`crtgfx_window`/`crtgfx_window_shared` (window/input/software framebuffer,
+`OUTPUT_NAME crtgfx`, so `libcrtgfx.so`/`.dll`/`.dylib` keeps its familiar
+filename), `crtgfx_gpu`/`crtgfx_gpu_shared` (the GPU device/surface API,
+links `crtgfx_window` for three tiny window-backend accessor functions --
+confirmed a real, one-directional dependency, not a cycle: window code
+never references GPU/Skia at all), and `crtgfx_skia`/`crtgfx_skia_shared`
+(the Skia bridge, links `crtgfx_gpu`, transitively pulls `crtgfx_window`
+too). Four `OBJECT` libraries feed the two non-Skia pairs (`crtgfx_window_
+common_objects`/`_backend_objects`, `crtgfx_gpu_common_objects`/
+`_backend_objects`), preserving the pre-split "common always gets
+`crt_build_flags`, backend gets it only on Linux" compile-flag treatment
+exactly, just re-partitioned by source file. No source files moved on
+disk -- this is a target-graph reorganization, not a file move like the
+`tests/` split earlier today.
+
+Per-platform link-library reassignment was verified against the real
+source, not guessed: Windows `d3d11.lib`/`dxgi.lib` -> `crtgfx_window`
+(window's own D3D11-based CPU-framebuffer presentation), `dxgi.lib`
+(again)/`d3d12.lib` -> `crtgfx_gpu` (confirmed `gpu_win32.c` never
+references a real `ID3D11Device` type, only `IDXGI*`), `d3dcompiler.lib`
+-> `crtgfx_skia` (confirmed via this file's own existing comment: Skia's
+own `GrD3DPipelineStateBuilder.cpp` is the real `D3DCompile()` consumer,
+not `gpu_win32.c`); macOS `Foundation`/`AppKit`/`QuartzCore`/
+`CoreGraphics`/`objc` -> `crtgfx_window`, `Metal`/`CoreGraphics` (again)
+-> `crtgfx_gpu`; Linux `gpu_vulkan.c` confirmed to need Wayland client
+*headers* (real `wl_display`/`wl_surface` types in
+`VkWaylandSurfaceCreateInfoKHR`) but never calls a real `wl_*()` function
+itself, so `crtgfx_gpu`'s own Wayland need is compile-time-only --
+`CRTGFX_WAYLAND_CLIENT_LIBRARIES` (the real link-time library) stays a
+`crtgfx_window`-only dependency, matching what actually calls
+`wl_display_connect()`. The delicate Linux `--start-group`/`--end-group`
+circular-archive-resolution wrapper and the macOS "Skia libraries before
+`CRTGFX_CRT_STATIC_LIBS` in link-line scan order" trick both moved
+verbatim to `crtgfx_skia`, the one target that still has Skia's own real
+circular need against libc/libm/libc++.
+
+**Three real bugs were found and fixed via live building, not just
+review:**
+1. The first version of this split scoped `CRTGFX_CRT_SHARED_LIBS` (libc/
+   libm/libdl/cxx, shared form) to Linux-only on all three `_shared`
+   targets, copying the visual shape of the neighboring Linux-only
+   xkbcommon/Wayland-client lines above it -- but the original code
+   linked it unconditionally (every host) inside the "else" branch of a
+   differently-shaped `if/else`. Windows `crtgfx_window_shared` failed
+   outright with `ld.lld: error: undefined symbol: calloc/free/memset/
+   realloc/memcpy` until fixed; `crtgfx_gpu_shared`/`crtgfx_skia_shared`
+   (and the STATIC `crtgfx_window`/`crtgfx_gpu`, non-fatal there but
+   still a real behavioral deviation from the pre-split code) had the
+   identical latent bug, fixed the same way.
+2. `crt-gfx-build`'s own `DEPENDS` never actually built `crtgfx_window_
+   smoke`/`crtgfx_synthetic_event` (a pre-existing gap, not introduced by
+   this split), so `crt-gfx-test`'s own broad `^crtgfx_.*_runs` ctest
+   filter reported them "Not Run" on a genuinely fresh Linux build that
+   had only run `crt-gfx-build` -- fixed by adding `crt-gfx-simple-build`
+   to `crt-gfx-build`'s own `DEPENDS`.
+3. **The big one**: every real-imported-libc++ reference throughout
+   `libcrtgfx/CMakeLists.txt` (Skia's own `--sysroot` argument to `tools/
+   build_skia.py`, the `CRTGFX_CRT_STATIC_LIBS`/`_SHARED_LIBS` libc++
+   swap, `crtgfx_skia_objects`'s and `crt_wire_skia_executable()`'s own
+   `-isystem`/link-library paths -- 14 call sites in total) still pointed
+   at `CRT_SYSROOT` (today's C-only `dist/01-c` stage), not
+   `CRT_LIBCXX_SYSROOT` (the cumulative C++ stage, `dist/02-cxx`, a real
+   superset of `01-c` that actually has `include/c++/v1`/`libc++.a`).
+   This is a real regression from *today's earlier* distribution-stage
+   restructuring (which split the old single unified sysroot into 01-c/
+   02-cxx), not from this split itself -- `CRTGFX_ENABLE_SKIA` had been
+   off in every build all day, so nothing had exercised this path since.
+   The exact same class of bug the user already found and fixed in
+   `crt-port-build.py` (commit `ee62624`). `crtgfx-skia-smoke` failed
+   outright with "CRT_USE_IMPORTED_LIBCXX headers not found: .../dist/
+   01-c/include/c++/v1" the first time Skia was actually built again
+   after today's restructuring landed. All 14 call sites fixed.
+
+**Verified for real, both hosts, from a genuinely fresh `out/`** (the
+user cleared it to test the new build structure): `crt-gfx-simple-build`/
+`crt-gfx-simple-test` (window-only -- confirmed no D3D12/Metal/Skia/
+libskia.a anywhere on that link line) and `crt-gfx-build`/`crt-gfx-test`
+(adds GPU) both pass clean on Windows and Linux -- 3/3 on each host, plus
+the non-test demo executables (`crtgfx_window_demo`/`crtgfx_gpu_window_
+demo`) build clean on Windows. **Skia is now real-verified on Windows**:
+`crtgfx-skia-smoke`'s full target set (`crtgfx_skia_raster_smoke`,
+`crtgfx_skia_cpu_coverage`, `crtmedia_frame_skia_smoke`, `crtgfx_skia_gpu_
+offscreen_smoke`) all pass, including `crtgfx_skia_gpu_offscreen_smoke`'s
+full device-loss/recovery cycle (real D3D12 `RemoveDevice()`/
+`GetDeviceRemovedReason()`/recreate-and-redraw) -- covers the two
+highest-risk pieces that moved (the D3DCOMPILER reassignment, the real
+imported-libc++ paths) plus the cross-library `crtmedia_frame_skia_smoke`
+consumer. Full Windows `ctest` clean, 127/127, after also building the
+`crtmedia`/`cxx_*` targets `crt-gfx-build`/`crt-gfx-test` alone don't
+force. **Linux `crtgfx-skia-smoke` was started the same way (with the fix
+already applied) and was still running in the background at the time of
+this entry** -- update once it completes.
+
+Top-level `CMakeLists.txt`'s `crt-gfx-simple-build`/`crt-gfx-build`
+`DEPENDS` lists were updated to the new target names; `install()` in
+`libcrtgfx/CMakeLists.txt` now does three separate `install(TARGETS ...)`
+calls (`crt-gfx-simple` component for window, `crt-gfx` component for
+GPU and, when enabled, Skia) instead of one. `docs/libcrtgfx_api_policy.md`
+updated to describe the real physical split rather than an install-
+component-only one. Not yet done: macOS build/verification (no hardware
+this session, matching this whole restructuring effort's established
+pattern); re-confirming (or fixing) whether the `sysroot`/`crtgfx_skia_
+objects` dependency-cycle concern documented in the top-level
+`CMakeLists.txt` (right before the Python3-gated block) still applies now
+that `sysroot` no longer `DEPENDS` on any `crtgfx*` target at all -- flagged
+in that comment but not resolved this pass.
 
 ## Planned
 

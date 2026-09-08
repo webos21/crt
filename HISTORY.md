@@ -10,6 +10,95 @@ substantive update.
 
 ## 2026-09-08
 
+- **`libcrtgfx` physically split into `crtgfx_window`/`crtgfx_gpu`/
+  `crtgfx_skia` (window, GPU, and Skia now separate CMake target pairs,
+  STATIC+SHARED each), closing out the decision recorded in `TODO.md`
+  that the earlier `install(COMPONENT ...)`-only split (one monolithic
+  `crtgfx`/`crtgfx_shared` containing GPU+Skia code regardless of stage)
+  was not real.** `crtgfx_window`/`crtgfx_window_shared` (`OUTPUT_NAME
+  crtgfx`, keeping the familiar `libcrtgfx.so`/`.dll`/`.dylib` filename)
+  compile only window.c/wayland_weston.c/the per-OS window backend files;
+  `crtgfx_gpu`/`crtgfx_gpu_shared` link `crtgfx_window` (a real, confirmed
+  one-directional dependency for three tiny window-backend accessor
+  functions gpu.c calls -- window code never references GPU/Skia at all);
+  `crtgfx_skia`/`crtgfx_skia_shared` link `crtgfx_gpu`. Four `OBJECT`
+  libraries (`crtgfx_window_common_objects`/`_backend_objects`,
+  `crtgfx_gpu_common_objects`/`_backend_objects`) feed the two non-Skia
+  pairs, preserving the pre-split "common always gets `crt_build_flags`,
+  backend gets it only on Linux" compile-flag treatment exactly, just
+  re-partitioned by source file -- no source files moved on disk. Design
+  produced by two real Explore passes over the 2639-line `libcrtgfx/
+  CMakeLists.txt` and every external consumer in the repo (the only real
+  cross-library consumer anywhere: `crtmedia_frame_skia_smoke`), then an
+  explicit user decision between three separate libraries vs. one
+  same-named library rebuilt differently per stage.
+
+  Per-platform link-library reassignment was verified against the real
+  source, not guessed: Windows `d3d11.lib`/`dxgi.lib` -> `crtgfx_window`,
+  `dxgi.lib` (again)/`d3d12.lib` -> `crtgfx_gpu` (confirmed `gpu_win32.c`
+  never references a real `ID3D11Device` type, only `IDXGI*`),
+  `d3dcompiler.lib` -> `crtgfx_skia` (Skia's own `GrD3DPipelineStateBuilder
+  .cpp` is the real `D3DCompile()` consumer, not `gpu_win32.c`); macOS
+  `Foundation`/`AppKit`/`QuartzCore`/`CoreGraphics`/`objc` -> `crtgfx_
+  window`, `Metal`/`CoreGraphics` (again) -> `crtgfx_gpu`; Linux `gpu_
+  vulkan.c` needs Wayland client *headers* only (real `wl_display`/
+  `wl_surface` types in `VkWaylandSurfaceCreateInfoKHR`, confirmed it
+  never calls a real `wl_*()` function itself), so `CRTGFX_WAYLAND_CLIENT_
+  LIBRARIES` (the actual link-time library) stays `crtgfx_window`-only.
+  The Linux `--start-group`/`--end-group` circular-archive-resolution
+  wrapper and the macOS "Skia libraries before `CRTGFX_CRT_STATIC_LIBS`
+  in link-line scan order" trick both moved verbatim to `crtgfx_skia`,
+  the one target with Skia's own real circular need against libc/libm/
+  libc++.
+
+  **Three real bugs found and fixed via live building:**
+  1. The first version scoped `CRTGFX_CRT_SHARED_LIBS` to Linux-only on
+     all three `_shared` targets (copying the visual shape of the
+     neighboring Linux-only xkbcommon/Wayland-client lines above it),
+     but the original code linked it unconditionally, every host --
+     Windows `crtgfx_window_shared` failed outright with `ld.lld: error:
+     undefined symbol: calloc/free/memset/realloc/memcpy` until fixed;
+     the other two `_shared` targets (and the STATIC libraries, non-fatal
+     there but still a real deviation) had the identical latent bug.
+  2. `crt-gfx-build`'s own `DEPENDS` never built `crtgfx_window_smoke`/
+     `crtgfx_synthetic_event` (pre-existing, not introduced by this
+     split) -- `crt-gfx-test`'s broad `^crtgfx_.*_runs` ctest filter
+     reported them "Not Run" on a genuinely fresh Linux build that had
+     only run `crt-gfx-build`; fixed by adding `crt-gfx-simple-build` to
+     `crt-gfx-build`'s own `DEPENDS`.
+  3. **The significant one**: every real-imported-libc++ reference in
+     `libcrtgfx/CMakeLists.txt` (Skia's own `--sysroot` argument to
+     `tools/build_skia.py`, the `CRTGFX_CRT_STATIC_LIBS`/`_SHARED_LIBS`
+     libc++ swap, `crtgfx_skia_objects`'s and `crt_wire_skia_executable()`
+     's own `-isystem`/link-library paths -- 14 call sites) still pointed
+     at `CRT_SYSROOT` (today's C-only `dist/01-c` stage) instead of
+     `CRT_LIBCXX_SYSROOT` (the cumulative C++ stage, `dist/02-cxx`, a
+     real superset of `01-c`). A real regression from *today's earlier*
+     distribution-stage restructuring (which split the old single
+     unified sysroot into 01-c/02-cxx) -- `CRTGFX_ENABLE_SKIA` had been
+     off all day, so nothing had exercised this path since. The exact
+     same class of bug the user already found and fixed in `crt-port-
+     build.py` (commit `ee62624`, same day). `crtgfx-skia-smoke` failed
+     outright with "CRT_USE_IMPORTED_LIBCXX headers not found: .../
+     dist/01-c/include/c++/v1" the first time Skia was actually built
+     again after today's restructuring landed. All 14 call sites fixed.
+
+  **Verified for real, both hosts, from a genuinely fresh `out/`** (user-
+  cleared to test the new build structure): `crt-gfx-simple-build`/
+  `crt-gfx-simple-test` (window-only, confirmed no D3D12/Metal/Skia/
+  libskia.a anywhere on that link line) and `crt-gfx-build`/`crt-gfx-test`
+  (adds GPU) both pass clean, 3/3, on Windows and Linux; the non-test
+  demo executables build clean on Windows. **Skia real-verified on
+  Windows**: `crtgfx-skia-smoke`'s full target set -- `crtgfx_skia_raster_
+  smoke`, `crtgfx_skia_cpu_coverage`, `crtmedia_frame_skia_smoke` (the one
+  real cross-library consumer), `crtgfx_skia_gpu_offscreen_smoke` -- all
+  pass, including the offscreen smoke's full real D3D12 device-loss/
+  recovery cycle (`RemoveDevice()`/`GetDeviceRemovedReason()`/recreate-
+  and-redraw-correctly). Full Windows `ctest` clean, 127/127. Linux
+  `crtgfx-skia-smoke` was started with the fix already applied and was
+  still running in the background at commit time -- TODO.md tracks it as
+  the one open item, along with macOS (no hardware this session).
+
 - **Fixed a real, genuine data race in `pthread_bionic_api_test.c` (not a
   regression from the dist-stages restructuring), found by the user on a
   fresh `cmake --workflow --preset linux-host-ninja-debug` run
