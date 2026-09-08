@@ -10,6 +10,36 @@ substantive update.
 
 ## 2026-09-08
 
+- **Fixed a real, genuine data race in `pthread_bionic_api_test.c` (not a
+  regression from the dist-stages restructuring), found by the user on a
+  fresh `cmake --workflow --preset linux-host-ninja-debug` run
+  (`pthread_bionic_api_test_runs` failing: "name child").** The test's
+  own `worker()` thread called `pthread_setname_np(pthread_self(),
+  "worker")` while, concurrently, `main()` (right after `pthread_create()`
+  returns) called `pthread_setname_np(thread, "child")` then immediately
+  `pthread_getname_np(thread, ...)` on the very same thread -- two
+  unsynchronized writes to the same `crt_pthread_control::context.name`
+  field from two different threads, a genuine data race regardless of
+  which one happens to "usually" win the timing. Confirmed by reading
+  `pthread_setname_np()`/`pthread_getname_np()` (`libc/src/pthread.c`):
+  a plain `memcpy()` into that shared per-thread-control field, no lock,
+  no atomic -- exactly the kind of race that only surfaces when
+  scheduling happens to interleave the two writes/reads unluckily (could
+  not reproduce it in 300+ direct repeated runs, nor under artificial
+  CPU load, on this same host -- consistent with a narrow, genuine race
+  window, not a deterministic bug, and consistent with the file's own
+  git history predating the restructuring entirely, "e2b8eac upgrade the
+  pthread"). Fixed by removing the child thread's own conflicting
+  self-rename: it served no distinct test purpose (self-rename via
+  `pthread_setname_np(pthread_self(), ...)` was already covered,
+  race-free, by `main()`'s own check on itself earlier in the same
+  file) and was the sole source of the race. Verified for real: 500
+  direct repeated runs of the fixed binary, zero failures; a genuinely
+  fresh `cmake --workflow --preset linux-host-ninja-debug` (wiped `out/`,
+  matching both the user's own original repro and this project's
+  standing "don't trust an existing `out/`" discipline) passes 100%,
+  100/100, twice over.
+
 - **`crt-libcxx-dist` (02-cxx) landed and verified end-to-end on Windows
   and Linux; the former top-level `tests/` split into `libc/tests/` and
   `libstdc++/tests/`, matching `libcrtgfx/tests/`/`libcrtmedia/tests/`'s

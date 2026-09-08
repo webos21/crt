@@ -10,10 +10,21 @@ static int fail(const char* message) {
 }
 
 static void* worker(void* arg) {
+  /* Deliberately does not call pthread_setname_np(pthread_self(), ...)
+   * here: the parent's own pthread_setname_np(thread, "child") call
+   * right after pthread_create() (below) writes the exact same
+   * crt_pthread_control::context.name this thread's own self-rename
+   * would -- two unsynchronized, conflicting writes to the same field
+   * from two threads is a genuine data race, not a false alarm: caught
+   * for real ("pthread_bionic_api_test: name child" failing) when
+   * scheduling happened to interleave the two writes so the parent's
+   * later pthread_getname_np(thread, ...) observed "worker" (or a
+   * partially-overwritten name) instead of the "child" it had just set.
+   * Self-rename (pthread_setname_np() on one's own pthread_self()) is
+   * already covered separately, race-free, by main()'s own check on
+   * itself above -- this thread has nothing left to prove by racing to
+   * rename itself too. */
   (void)arg;
-  if (pthread_setname_np(pthread_self(), "worker") != 0) {
-    return (void*)1;
-  }
   return 0;
 }
 
