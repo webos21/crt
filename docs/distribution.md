@@ -100,6 +100,8 @@ The activation scripts and wrappers accept these externally supplied values:
 
 - `CRT_CC`, `CRT_CXX`: C and C++ compiler executables;
 - `CRT_AR`, `CRT_RANLIB`: archive tools;
+- `CRT_WINDOWS_SDK_LIBPATH`: Windows SDK `um/x64` or `um/arm64` import-library
+  directory needed by the freestanding Windows link.
 
 For a packaged distribution, source `activate.sh` or call `activate.cmd`, then
 build the application normally. The wrappers select the installed CRT sysroot
@@ -107,6 +109,9 @@ and its freestanding/default-runtime policy. `crt-toolchain.cmake` is provided
 for CMake consumers and selects those wrappers. An embedded vendor toolchain
 that cannot use the Clang-compatible wrappers remains authoritative and must
 consume the packaged headers, startup objects, and libraries directly.
+On Windows, `activate.cmd` derives `CRT_WINDOWS_SDK_LIBPATH` from
+`WindowsSdkDir` and `WindowsSDKLibVersion` when run from a Developer Command
+Prompt; otherwise set it explicitly.
 
 Clang configuration files can provide GCC-spec-like defaults for a particular
 driver name, but they are a convenience layer rather than the distribution

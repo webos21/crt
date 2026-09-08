@@ -10,6 +10,28 @@ substantive update.
 
 ## 2026-09-08
 
+- **Built the complete cumulative Windows distribution chain for the first
+  time through `05-js`.** `crt-gfx-simple-dist`, `crt-gfx-media-dist`, and
+  `crt-js-dist` now produce and verify `03-gfx-simple`, `04-gfx-media`, and
+  `05-js` directories plus zip archives on top of the already verified C/C++
+  stages. The default preset had Skia and FFmpeg disabled, so this is evidence
+  for the physical window/GPU/base-media/JS-skeleton packaging boundaries,
+  not an option-ON Skia/FFmpeg release claim. `crt-gfx-media-test` passed all
+  three Graphics and five Media tests; `crt-js-test` built the static/shared
+  skeleton pair. A direct consumer built and ran `libc/tests/hello.c` through
+  the packaged wrapper, and an `llvm-nm` audit found no GPU/Skia symbols in
+  the Simple Graphics `libcrtgfx.a`.
+
+  The standalone pass exposed an omitted Windows toolchain input: freestanding
+  links need the external SDK import-library directory even though CRT must not
+  bundle that SDK. `CRT_WINDOWS_SDK_LIBPATH` is now part of the manifest and
+  documented activation contract; `activate.cmd` derives it from
+  `WindowsSdkDir`/`WindowsSDKLibVersion` in a Developer Command Prompt and
+  normalizes discovered compiler paths for the CRT mksh launcher. The
+  structural verifier now also rejects GPU/Skia library filenames in
+  `03-gfx-simple`. The generated activation path was verified by compiling and
+  running the same standalone C sample successfully.
+
 - **`libcrtgfx` physically split into `crtgfx_window`/`crtgfx_gpu`/
   `crtgfx_skia` (window, GPU, and Skia now separate CMake target pairs,
   STATIC+SHARED each), closing out the decision recorded in `TODO.md`

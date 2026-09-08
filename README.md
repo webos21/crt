@@ -158,6 +158,8 @@ On Windows use `call out\<preset>\dist\02-cxx\activate.cmd`. CMake consumers
 may use the packaged `crt-toolchain.cmake`, which selects the packaged wrappers.
 An embedded vendor toolchain that cannot use those Clang-compatible wrappers
 should remain authoritative and consume CRT's packaged sysroot directly.
+The Windows activation script discovers the SDK import-library directory from
+a Developer Command Prompt, or accepts an explicit `CRT_WINDOWS_SDK_LIBPATH`.
 
 The in-repository wrappers `tools/crt-cc` and `tools/crt-c++` enforce the
 freestanding/sysroot/default-runtime boundary. Configure/make ports are driven

@@ -780,23 +780,29 @@ bundles Clang/LLVM/LLD or a vendor compiler. Full design in
   `docs/android_shell_environment.md`, `docs/bringup/hello_bringup.md`,
   `AGENTS.md`.
 
-**Wired but never actually run:**
-- `crt-gfx-simple-dist`/`crt-gfx-media-dist`/`crt-js-dist` are defined in
-  the top-level `CMakeLists.txt` but none has been built even once -- no
-  `03-gfx-simple`/`04-gfx-media`/`05-js` directory exists under any
-  `out/*/dist/` yet. This is the immediate next step.
-- Because `crt-cc`'s libc++ auto-injection was removed, `crtgfx_shared`/
-  `crtmedia_shared`/`crtjs_shared` specifically (as opposed to
-  `libstdc++`'s own tests, now verified above) still need one real full
-  build + `ctest` pass to confirm zero regression -- not done yet, and no
-  longer covered automatically by the default workflow now that it stops
-  at `crt-c-build`.
+**Upper distribution follow-up:**
+- Windows now has real cumulative `03-gfx-simple`, `04-gfx-media`, and
+  `05-js` directories and archives (2026-09-08). All three structural
+  verifiers pass. The default preset used for this first packaging pass had
+  `CRTGFX_ENABLE_SKIA=OFF` and `CRTMEDIA_ENABLE_FFMPEG=OFF`, so `04` proves
+  the GPU/base-media packaging boundary, not the optional Skia/FFmpeg payload;
+  an option-ON distribution pass remains required. Linux/macOS upper-stage
+  distributions have not been run yet.
+- The Windows shared libraries affected by removal of `crt-cc`'s implicit
+  libc++ injection now build successfully. `crt-gfx-media-test` passes its
+  three Graphics and five Media tests, and `crt-js-test` builds both current
+  JS skeleton libraries. Equivalent Linux/macOS upper-target reruns remain.
 - macOS: neither `crt-c-dist` nor `crt-libcxx-dist` has been built or
   verified there yet (Windows and Linux both are, as of 2026-09-08).
-- `verify_dist.py`'s acceptance checks are much thinner than
+- `verify_dist.py`'s acceptance checks are still thinner than
   `docs/distribution.md`'s own "Distribution Acceptance" list -- no check
   yet for a path containing spaces, no absolute source/build path leakage
-  check, no external CMake/configure-make consumer check.
+  check, no external CMake/configure-make consumer check. Windows now has a
+  direct packaged-wrapper C compile/link/run pass and Simple Graphics rejects
+  GPU/Skia headers and library filenames; those checks still need to become a
+  cross-host automated acceptance target. Debug artifacts currently contain
+  source/build paths, so path remapping or release stripping must be decided
+  before enabling a hard leakage check.
 
 **New open item: root-cause the `<iostream>` static-init crash found
 above.** A real, reproducible segfault (this project's own DWARF-unwind

@@ -55,6 +55,14 @@ def main() -> None:
     if args.stage == "03-gfx-simple":
         if (dist / "include" / "crtgfx" / "gpu.h").exists() or (dist / "include" / "crtgfx" / "skia.h").exists():
             raise SystemExit("Simple Graphics unexpectedly exposes GPU/Skia headers")
+        advanced_libraries = [
+            path for directory in (dist / "lib", dist / "bin") if directory.is_dir()
+            for path in directory.iterdir()
+            if "crtgfx_gpu" in path.name.lower() or "crtgfx_skia" in path.name.lower()
+        ]
+        if advanced_libraries:
+            raise SystemExit("Simple Graphics contains advanced libraries: " +
+                             ", ".join(map(str, advanced_libraries)))
     if args.stage >= "04-gfx-media":
         require(dist / "include" / "crtgfx" / "gpu.h")
         require(dist / "include" / "crtmedia")

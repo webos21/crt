@@ -122,6 +122,9 @@ if not defined CRT_HOST_CC for /f "delims=" %%I in ('where clang.exe 2^>nul') do
 if not defined CRT_HOST_CXX for /f "delims=" %%I in ('where clang++.exe 2^>nul') do if not defined CRT_HOST_CXX set "CRT_HOST_CXX=%%I"
 if not defined CRT_HOST_CC set "CRT_HOST_CC=clang"
 if not defined CRT_HOST_CXX set "CRT_HOST_CXX=clang++"
+set "CRT_HOST_CC=%CRT_HOST_CC:\\=/%"
+set "CRT_HOST_CXX=%CRT_HOST_CXX:\\=/%"
+if not defined CRT_WINDOWS_SDK_LIBPATH if defined WindowsSdkDir if defined WindowsSDKLibVersion set "CRT_WINDOWS_SDK_LIBPATH=%WindowsSdkDir%Lib\\%WindowsSDKLibVersion%um\\__WINDOWS_SDK_ARCH__"
 if not defined AR set "AR=llvm-ar"
 if defined CRT_AR set "AR=%CRT_AR%"
 if not defined RANLIB set "RANLIB=llvm-ranlib"
@@ -129,8 +132,9 @@ if defined CRT_RANLIB set "RANLIB=%CRT_RANLIB%"
 set "CRT_MKSH_EXE=%CRT_SYSROOT%system\\bin\\mksh.exe"
 set "CC=%CRT_SYSROOT%tools\\crt-cc.cmd"
 set "CXX=%CRT_SYSROOT%tools\\crt-c++.cmd"
-set "PATH=%CRT_SYSROOT%tools;%CRT_SYSROOT%system\bin;%PATH%"
-""".replace("__TARGET_OS__", target_os).replace("__TARGET_ARCH__", target_arch),
+set "PATH=%CRT_SYSROOT%tools;%CRT_SYSROOT%system\\bin;%PATH%"
+""".replace("__TARGET_OS__", target_os).replace("__TARGET_ARCH__", target_arch).replace(
+            "__WINDOWS_SDK_ARCH__", "x64" if target_arch == "x86_64" else "arm64"),
         encoding="utf-8",
     )
     wrapper_suffix = ".cmd" if target_os == "windows" else ""
@@ -161,7 +165,7 @@ set(CMAKE_CXX_FLAGS_INIT "${CMAKE_C_FLAGS_INIT} -nostdinc++ -isystem${CRT_DISTRI
         },
         "default_compile_options": ["-ffreestanding", "-fno-builtin", "-nostdinc"],
         "external_toolchain_environment": [
-            "CRT_CC", "CRT_CXX", "CRT_AR", "CRT_RANLIB"
+            "CRT_CC", "CRT_CXX", "CRT_AR", "CRT_RANLIB", "CRT_WINDOWS_SDK_LIBPATH"
         ],
     }
     (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
