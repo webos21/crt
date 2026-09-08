@@ -10,6 +10,13 @@
 # for why that positioning silently doesn't hold on Ninja, and why it's
 # linked in via that helper instead, once, right after this function's
 # last target_link_libraries()/target_link_options() call below.
+#
+# add_crt_test()/add_crt_cxx_test() are defined in the top-level
+# CMakeLists.txt (not here) -- this directory and libstdc++/tests both
+# need them, and a function defined inside one add_subdirectory()'d file
+# is not visible to a sibling add_subdirectory() tree, only to root scope
+# and whatever root processes afterward. See the top-level file's own
+# comment at their definition site.
 add_executable(hello_c
   ${CRT_STARTUP_OBJECTS}
   hello.c
@@ -48,112 +55,6 @@ set_tests_properties(hello_c_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "Hello from freestanding CRT"
 )
 set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS hello_c_runs)
-
-function(add_crt_test test_name source_file)
-  set(CRT_TEST_EXTRA_SOURCES "")
-  if(CRT_TARGET_OS STREQUAL "windows" AND CRT_EFFECTIVE_ARCH_FOR_FLAGS MATCHES "^(arm64|ARM64|aarch64|x86_64|AMD64|x64)$")
-    # The ctest suite exercises fork() directly (fork_test, fork_signal_test,
-    # fork_runtime_reset_test, ...) and needs the startup self-relaunch that
-    # memory-copy fork() depends on -- opt in for every test binary rather
-    # than auditing which ones call fork() transitively. See that file's own
-    # top comment for why this is opt-in rather than linked into every
-    # Windows binary.
-    set(CRT_TEST_EXTRA_SOURCES "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/common/fork_capable_relaunch.c")
-  endif()
-  # CRT_STARTUP_END_OBJECTS deliberately not listed here -- see
-  # crt_link_startup_end_objects()'s own comment (top-level CMakeLists.txt)
-  # and this function's own final target_link_libraries() call below.
-  add_executable(${test_name}
-    ${CRT_STARTUP_OBJECTS}
-    ${source_file}
-    ${CRT_TEST_EXTRA_SOURCES}
-  )
-  target_link_libraries(${test_name} PRIVATE crt_build_flags c)
-  target_include_directories(${test_name} PRIVATE
-    "${CMAKE_SOURCE_DIR}/libc/include"
-  )
-  if(ARGN)
-    target_link_libraries(${test_name} PRIVATE ${ARGN})
-  endif()
-  target_link_libraries(${test_name} PRIVATE crt_compiler_rt_builtins)
-  target_link_options(${test_name} PRIVATE
-    -nostdlib
-    -nostartfiles
-    -nodefaultlibs
-  )
-  if(CRT_TARGET_OS STREQUAL "macos")
-    target_link_options(${test_name} PRIVATE
-      -Wl,-e,_start
-      -Wl,-dead_strip
-    )
-    target_link_libraries(${test_name} PRIVATE System)
-  elseif(CRT_TARGET_OS STREQUAL "linux")
-    target_link_options(${test_name} PRIVATE
-      -Wl,-e,_start
-      -Wl,--gc-sections
-    )
-  elseif(CRT_TARGET_OS STREQUAL "windows")
-    target_link_options(${test_name} PRIVATE
-      -Wl,/entry:mainCRTStartup
-      -Wl,/subsystem:console
-      -Wl,/OPT:REF
-    )
-    target_link_libraries(${test_name} PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
-  endif()
-  crt_link_startup_end_objects(${test_name})
-  add_dependencies(${test_name} c crt1)
-  add_test(NAME ${test_name}_runs COMMAND ${test_name})
-  set_tests_properties(${test_name}_runs PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-  )
-  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS ${test_name}_runs)
-endfunction()
-
-function(add_crt_cxx_test test_name source_file)
-  # CRT_STARTUP_END_OBJECTS deliberately not listed here -- see
-  # crt_link_startup_end_objects()'s own comment (top-level CMakeLists.txt)
-  # and this function's own final target_link_libraries() call below.
-  add_executable(${test_name}
-    ${CRT_STARTUP_OBJECTS}
-    ${source_file}
-  )
-  target_link_libraries(${test_name} PRIVATE crt_cxx_build_flags cxx c)
-  target_include_directories(${test_name} PRIVATE
-    "${CMAKE_SOURCE_DIR}/libc/include"
-  )
-  target_link_libraries(${test_name} PRIVATE crt_compiler_rt_builtins)
-  target_link_options(${test_name} PRIVATE
-    -nostdlib
-    -nostartfiles
-    -nodefaultlibs
-  )
-  if(CRT_TARGET_OS STREQUAL "macos")
-    target_link_options(${test_name} PRIVATE
-      -Wl,-e,_start
-      -Wl,-dead_strip
-    )
-    target_link_libraries(${test_name} PRIVATE System)
-  elseif(CRT_TARGET_OS STREQUAL "linux")
-    target_link_options(${test_name} PRIVATE
-      -Wl,-e,_start
-      -Wl,--gc-sections
-    )
-  elseif(CRT_TARGET_OS STREQUAL "windows")
-    target_link_options(${test_name} PRIVATE
-      -Wl,/entry:mainCRTStartup
-      -Wl,/subsystem:console
-      -Wl,/OPT:REF
-    )
-    target_link_libraries(${test_name} PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
-  endif()
-  crt_link_startup_end_objects(${test_name})
-  add_dependencies(${test_name} cxx c crt1)
-  add_test(NAME ${test_name}_runs COMMAND ${test_name})
-  set_tests_properties(${test_name}_runs PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-  )
-  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS ${test_name}_runs)
-endfunction()
 
 add_crt_test(string_memory_test string_memory_test.c)
 set_tests_properties(string_memory_test_runs PROPERTIES
@@ -300,23 +201,6 @@ target_link_libraries(dl_iterate_phdr_dladdr_test PRIVATE dl)
 add_dependencies(dl_iterate_phdr_dladdr_test dl)
 set_tests_properties(dl_iterate_phdr_dladdr_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "dl_iterate_phdr_dladdr_test: ok"
-)
-
-add_crt_test(cxx_runtime_test cxx_runtime_test.c)
-target_link_libraries(cxx_runtime_test PRIVATE cxx)
-add_dependencies(cxx_runtime_test cxx)
-set_tests_properties(cxx_runtime_test_runs PROPERTIES
-  PASS_REGULAR_EXPRESSION "cxx_runtime_test: ok"
-)
-
-add_crt_cxx_test(cxx_frontend_test cxx_frontend_test.cc)
-set_tests_properties(cxx_frontend_test_runs PROPERTIES
-  PASS_REGULAR_EXPRESSION "cxx_frontend_test: ok"
-)
-
-add_crt_cxx_test(cxx_allocation_test cxx_allocation_test.cc)
-set_tests_properties(cxx_allocation_test_runs PROPERTIES
-  PASS_REGULAR_EXPRESSION "cxx_allocation_test: ok"
 )
 
 add_crt_test(printf_test printf_test.c m)
@@ -705,17 +589,17 @@ if(CRT_TARGET_OS STREQUAL "windows")
   target_link_libraries(windows_export_hygiene_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
   crt_link_startup_end_objects(windows_export_hygiene_test)
   add_dependencies(windows_export_hygiene_test c crt1 c_shared m_shared dl_shared cxx_shared)
-  add_test(NAME windows_export_hygiene_runs
+  add_test(NAME windows_export_hygiene_test_runs
     COMMAND windows_export_hygiene_test
       "$<TARGET_FILE:c_shared>"
       "$<TARGET_FILE:m_shared>"
       "$<TARGET_FILE:dl_shared>"
       "$<TARGET_FILE:cxx_shared>"
   )
-  set_tests_properties(windows_export_hygiene_runs PROPERTIES
+  set_tests_properties(windows_export_hygiene_test_runs PROPERTIES
     PASS_REGULAR_EXPRESSION "windows_export_hygiene_test: ok"
   )
-  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS windows_export_hygiene_runs)
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS windows_export_hygiene_test_runs)
 
   # Permanent regression test for libc/src/arch/windows/common/
   # pseudo_reloc.c's _pei386_runtime_relocator() -- see that file's own
@@ -1017,6 +901,3 @@ if(CRT_TARGET_OS STREQUAL "windows")
     PASS_REGULAR_EXPRESSION "windows_dwarf_unwind_safety_net_test: ok"
   )
 endif()
-get_property(CRT_REGISTERED_TESTS GLOBAL PROPERTY CRT_REGISTERED_TESTS)
-list(LENGTH CRT_REGISTERED_TESTS CRT_REGISTERED_TEST_COUNT)
-message(STATUS "CRT registered tests for ${CRT_TARGET_OS}/${CRT_TARGET_ARCH}: ${CRT_REGISTERED_TEST_COUNT}")

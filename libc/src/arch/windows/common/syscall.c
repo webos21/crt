@@ -1027,7 +1027,7 @@ static long fail_last_error(void) {
  * (ERROR_ALREADY_EXISTS, surfacing as `ln`'s "File exists") or gets
  * refused a new create at that exact path (ERROR_ACCESS_DENIED, a
  * pending-delete file's own create restriction). See
- * tests/windows_symlink_delete_race_test.c's own comment for the
+ * libc/tests/windows_symlink_delete_race_test.c's own comment for the
  * regression this guards. Bounded, short retry loop -- the same practical
  * idiom Git for Windows/Node.js use for the identical Windows quirk, not a
  * fix for a real, persistent sharing violation, which still correctly

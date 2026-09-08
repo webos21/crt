@@ -283,7 +283,7 @@ honors it in `pthread_cond_timedwait()`; `crtgfx_gpu_fence` reverted to its
 originally-intended `CLOCK_MONOTONIC` (wall-clock-jump immunity) now that
 the real bug underneath it is fixed. Verified for real via a new,
 elapsed-wall-time-measuring `PTHREAD_COND_CLOCK_MONOTONIC` case in
-`tests/pthread_cond_test.c` (the exact regression this bug caused --
+`libc/tests/pthread_cond_test.c` (the exact regression this bug caused --
 returning instantly instead of actually waiting -- is only catchable by
 measuring real elapsed time, not just checking the return code) and via
 `crtgfx_gpu_test` itself passing again with the real `CLOCK_MONOTONIC`
@@ -294,7 +294,7 @@ own portable `pthread_cond_init()`/`pthread_cond_timedwait()` (no
 `pthread_cond_t` are this project's own from-scratch userspace
 implementation, not a wrapper around Apple's opaque ones, unlike
 `pthread_create()`), so it needed only a rebuild, not a port: the same
-elapsed-wall-time-measuring `tests/pthread_cond_test.c` case and
+elapsed-wall-time-measuring `libc/tests/pthread_cond_test.c` case and
 `crtgfx_gpu_test`'s own real `CLOCK_MONOTONIC` fence both pass for real.
 Full ctest suite clean, single-pass, on all three hosts: Linux 117/117,
 Windows 133/133, macOS 117/117, all 100%, zero regressions to this
@@ -462,7 +462,7 @@ default-config ctest also reconfirmed clean, 111/111.
    debug` now passes 111/111 from a genuinely fresh `out/`, matching
    `ci.yml` exactly. See `HISTORY.md`'s 2026-09-07 entry (topmost) for
    the full two-bug writeup, plus two smaller CI-sandbox network-EPERM/
-   EACCES hardening fixes (`tests/socket_network_test.c`, `tests/
+   EACCES hardening fixes (`libc/tests/socket_network_test.c`, `tests/
    sendmsg_scm_rights_test.c`) landed alongside.
 
    Linux lands first
@@ -699,19 +699,70 @@ bundles Clang/LLVM/LLD or a vendor compiler. Full design in
 `docs/refine/interim-restructure.txt` (the working restructuring plan) and
 `docs/distribution.md` (the published contract). Not yet committed.
 
-**Done and verified:**
-- The `crt-c-dist` (01-c) chain is real and working: `crt-c-build`/
-  `crt-c-test`/`crt-c-dist` targets, new `tools/create_dist.py`/
-  `tools/verify_dist.py`, and CMake install `COMPONENT`s across
-  `libc`/`libdl`/`libm`. Built and archived on **both Windows**
-  (`crt-development-windows-x86_64-01-c.zip`) **and Linux/WSL**
-  (`crt-development-linux-x86_64-01-c.tar.xz`, 2026-09-08), both passing
-  `verify_dist.py`'s structural checks. Linux also passed a real
-  acceptance check beyond `verify_dist.py`'s own coverage: a `hello.c`
-  compiled and linked with only the packaged `tools/crt-cc` wrapper
-  (`CRT_CC=clang`, no project build tree involved) from `/tmp`, outside
-  the source/build trees, ran and printed correctly. macOS not yet
-  attempted (no hardware in this session).
+**Done and verified, both Windows and Linux/WSL (2026-09-08):**
+- The `crt-c-dist` (01-c) chain: `crt-c-build`/`crt-c-test`/`crt-c-dist`
+  targets, new `tools/create_dist.py`/`tools/verify_dist.py`, and CMake
+  install `COMPONENT`s across `libc`/`libdl`/`libm`/`shell`. Built and
+  archived on Windows (`crt-development-windows-x86_64-01-c.zip`) and
+  Linux (`crt-development-linux-x86_64-01-c.tar.xz`), both passing
+  `verify_dist.py`. Linux additionally passed a real acceptance check
+  beyond `verify_dist.py`'s own coverage: a `hello.c` compiled, linked,
+  and run using only the packaged `tools/crt-cc` wrapper, entirely
+  outside the source/build trees. macOS not yet attempted (no hardware
+  in this session).
+- The `crt-libcxx-dist` (02-cxx) chain: `crt-libcxx-sysroot` now calls
+  `create_dist.py --base 01-c` instead of the old
+  `install_libcxx_runtimes.py` path straight into `CRT_SYSROOT`. Built
+  and archived on both hosts (`crt-development-{windows-x86_64,linux-
+  x86_64}-02-cxx.{zip,tar.xz}`), both passing `verify_dist.py`, and
+  `crt-libcxx-smoke` (the project's own existing real static+shared
+  libc++ link/run check) passes against the new `02-cxx` sysroot
+  location on both hosts. A real, novel gap was found doing a from-
+  scratch acceptance compile against the packaged Windows dist directly
+  (not through this project's own build tree): a plain `<iostream>`/
+  `std::cout` program built and linked cleanly via the packaged
+  `tools/crt-c++` wrapper but segfaulted at runtime with this project's
+  own documented DWARF-unwind-safety-net message
+  (`docs/cxx_runtime.md`'s "Known cost" section); the identical program
+  rewritten to use `<cstdio>`/`std::printf` instead (matching every
+  existing real test's own established pattern, none of which use
+  `<iostream>`) ran correctly. Root cause not yet isolated -- suspected
+  `std::ios_base::Init`'s global-constructor path through this project's
+  own Windows `.ctors` walker, not yet confirmed. **Not fixed, not
+  root-caused, tracked below as a new open item.**
+- **Split the former top-level `tests/` (107 source files, one
+  `CMakeLists.txt`) into `libc/tests/` and `libstdc++/tests/`**, matching
+  `libcrtgfx/tests/`/`libcrtmedia/tests/`'s already-established
+  per-library convention (those two needed no changes -- they already
+  live under their own library, referenced via plain relative paths
+  directly from that library's own `CMakeLists.txt`, no separate
+  `tests/CMakeLists.txt` of their own). `add_crt_test()`/
+  `add_crt_cxx_test()` are now defined at the top-level `CMakeLists.txt`
+  (a function defined inside one `add_subdirectory()` tree is not visible
+  to a sibling tree); the two new `libc/tests/CMakeLists.txt`/
+  `libstdc++/tests/CMakeLists.txt` are `add_subdirectory()`'d from the
+  top level at the exact same point the old single `add_subdirectory(
+  tests)` was (preserving the existing, already-hard-won `CRT_ROOTFS`
+  ordering guarantee documented in that file -- see its own comment).
+  `tools/test_libcxx_runtime.py`'s three hardcoded `tests/imported_
+  libcxx_*.cc` paths, `docs/bringup/hello_bringup.md`'s literal example
+  command, `docs/cxx_runtime.md`, `docs/android_shell_environment.md`,
+  a `libc/src/arch/windows/common/syscall.c` comment, and `AGENTS.md`'s
+  own project-layout section were all updated to match. **A real,
+  pre-existing bug was found and fixed along the way** (unrelated to the
+  file move itself, surfaced by actually running `crt-c-test` for the
+  first time against the newer `crt-c-build`/`crt-c-test` targets added
+  earlier this same day): `windows_export_hygiene_runs` was registered
+  under a name that does not end in `_test_runs`, so the top-level
+  `CMakeLists.txt`'s own `CRT_C_TEST_TARGETS` derivation (which strips a
+  trailing `_runs` and looks for a same-named target) silently never
+  found `windows_export_hygiene_test`, so `crt-c-build` never depended on
+  it and it went unbuilt -- fixed by renaming the registered test to
+  `windows_export_hygiene_test_runs`, matching every other test's own
+  `<target>_runs` convention. Full `ctest` clean on both hosts after
+  every fix: Windows 127/127, Linux 103/103 (includes the moved
+  `libc/tests`/`libstdc++/tests` runs; Windows also covers the
+  Windows-only fixtures Linux does not register).
 - Default `cmake --workflow --preset <host>` now stops at the C stage:
   `CMakePresets.json` build/test presets retarget to `crt-c-build` and
   filter out `crtgfx_`/`crtmedia_`/`crtjs_`/`*cxx` tests; the `rootfs`
@@ -726,28 +777,35 @@ bundles Clang/LLVM/LLD or a vendor compiler. Full design in
   `docs/cxx_runtime.md`, `docs/libcrtgfx_api_policy.md`,
   `docs/project_meanings.md`, `docs/project_stacks.md`,
   `docs/runtime_roadmap.md`, `docs/sysroot_ports.md`,
-  `docs/android_shell_environment.md`, `docs/bringup/hello_bringup.md`.
+  `docs/android_shell_environment.md`, `docs/bringup/hello_bringup.md`,
+  `AGENTS.md`.
 
 **Wired but never actually run:**
-- `crt-libcxx-dist` (02-cxx; `crt-libcxx-sysroot` now calls
-  `create_dist.py --base 01-c` instead of the old
-  `install_libcxx_runtimes.py` path straight into `CRT_SYSROOT`) and
-  `crt-gfx-simple-dist`/`crt-gfx-media-dist`/`crt-js-dist` are all defined
-  in the top-level `CMakeLists.txt` but none has been built even once --
-  no `02-cxx`/`03-gfx-simple`/`04-gfx-media`/`05-js` directory exists under
-  any `out/*/dist/` yet. This is the immediate next step.
-- Because `crt-cc`'s libc++ auto-injection was removed, every existing
-  C++-bearing shared target (`crtgfx_shared`, `crtmedia_shared`,
-  `crtjs_shared`) needs one real full build + `ctest` pass to confirm zero
-  regression -- not done yet, and no longer covered automatically by the
-  default workflow now that it stops at `crt-c-build`.
-- macOS: `crt-c-dist` itself has not been built or verified there yet
-  (Windows and Linux both are, as of 2026-09-08).
-- `AGENTS.md` is on the plan's own doc-sync list but has not been touched.
+- `crt-gfx-simple-dist`/`crt-gfx-media-dist`/`crt-js-dist` are defined in
+  the top-level `CMakeLists.txt` but none has been built even once -- no
+  `03-gfx-simple`/`04-gfx-media`/`05-js` directory exists under any
+  `out/*/dist/` yet. This is the immediate next step.
+- Because `crt-cc`'s libc++ auto-injection was removed, `crtgfx_shared`/
+  `crtmedia_shared`/`crtjs_shared` specifically (as opposed to
+  `libstdc++`'s own tests, now verified above) still need one real full
+  build + `ctest` pass to confirm zero regression -- not done yet, and no
+  longer covered automatically by the default workflow now that it stops
+  at `crt-c-build`.
+- macOS: neither `crt-c-dist` nor `crt-libcxx-dist` has been built or
+  verified there yet (Windows and Linux both are, as of 2026-09-08).
 - `verify_dist.py`'s acceptance checks are much thinner than
   `docs/distribution.md`'s own "Distribution Acceptance" list -- no check
   yet for a path containing spaces, no absolute source/build path leakage
   check, no external CMake/configure-make consumer check.
+
+**New open item: root-cause the `<iostream>` static-init crash found
+above.** A real, reproducible segfault (this project's own DWARF-unwind
+safety-net message, not a silent corruption) when a plain `<iostream>`
+program is built via the packaged `02-cxx` dist's `tools/crt-c++`
+wrapper on Windows and run; `<cstdio>` works. Not yet reproduced against
+the in-tree (non-packaged) build, so it is not yet known whether this is
+specific to the packaged/standalone invocation path or a real, general
+gap in `std::ios_base::Init`'s global-constructor handling on Windows.
 
 **Decided, not yet implemented:** `libcrtgfx` must be split so window/
 input/software-framebuffer, the GPU backend, and the Skia bridge become

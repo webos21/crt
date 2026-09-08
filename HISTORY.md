@@ -10,6 +10,59 @@ substantive update.
 
 ## 2026-09-08
 
+- **`crt-libcxx-dist` (02-cxx) landed and verified end-to-end on Windows
+  and Linux; the former top-level `tests/` split into `libc/tests/` and
+  `libstdc++/tests/`, matching `libcrtgfx/tests/`/`libcrtmedia/tests/`'s
+  already-established per-library convention.** Continuation of this same
+  day's distribution-stages work (below).
+
+  **02-cxx**: built and archived on both hosts
+  (`crt-development-{windows-x86_64,linux-x86_64}-02-cxx.{zip,tar.xz}`),
+  both passing `verify_dist.py`, and `crt-libcxx-smoke` (the project's
+  own existing real static+shared libc++ link/run check) passes against
+  the new `02-cxx` sysroot location on both hosts. A real, novel gap was
+  found doing a from-scratch acceptance compile against the packaged
+  Windows dist directly, outside this project's own build tree: a plain
+  `<iostream>`/`std::cout` program built and linked cleanly via the
+  packaged `tools/crt-c++` wrapper but segfaulted at runtime with this
+  project's own documented DWARF-unwind-safety-net message
+  (`docs/cxx_runtime.md`'s "Known cost" section, the same mechanism
+  `libc/src/arch/windows/common/dwarf_unwind_safety_net.c` implements);
+  the identical program rewritten to use `<cstdio>`/`std::printf`
+  instead -- matching every existing real test's own established
+  pattern, none of which use `<iostream>` -- ran correctly. Not fixed or
+  root-caused this pass (suspected `std::ios_base::Init`'s global-
+  constructor path through this project's own Windows `.ctors` walker,
+  not confirmed); tracked as a new open item in `TODO.md`.
+
+  **Test-directory split**: `add_crt_test()`/`add_crt_cxx_test()` moved
+  to the top-level `CMakeLists.txt` (a function defined inside one
+  `add_subdirectory()` tree is not visible to a sibling tree, and
+  `libc/tests`/`libstdc++/tests` are now separate trees); the two new
+  `libc/tests/CMakeLists.txt`/`libstdc++/tests/CMakeLists.txt` are
+  `add_subdirectory()`'d from the top level at the exact point the old
+  single `add_subdirectory(tests)` was, preserving the existing
+  `CRT_ROOTFS`-must-already-be-set ordering guarantee that file's own
+  comment documents (a real CI break the first time, per an earlier
+  entry). `tools/test_libcxx_runtime.py`'s three hardcoded
+  `tests/imported_libcxx_*.cc` paths, `docs/bringup/hello_bringup.md`'s
+  literal example command, `docs/cxx_runtime.md`,
+  `docs/android_shell_environment.md`, a
+  `libc/src/arch/windows/common/syscall.c` comment, and `AGENTS.md`'s own
+  project-layout section were all updated to match. **A real,
+  pre-existing bug was found and fixed along the way**, unrelated to the
+  file move itself but surfaced by running the newer `crt-c-build`/
+  `crt-c-test` targets (added earlier this same day) for the first time:
+  `windows_export_hygiene_runs` was registered under a name not ending in
+  `_test_runs`, so `CRT_C_TEST_TARGETS`'s derivation (strips a trailing
+  `_runs`, looks for a same-named target) silently never found
+  `windows_export_hygiene_test`, so `crt-c-build` never depended on it
+  and it went unbuilt, failing `crt-c-test` with "Not Run" -- fixed by
+  renaming the registered test to `windows_export_hygiene_test_runs`,
+  matching every other test's own `<target>_runs` convention. Full
+  `ctest` clean on both hosts after every fix: Windows 127/127, Linux
+  103/103.
+
 - **Introduced cumulative CRT distribution stages, with `01-c` verified
   end-to-end on Windows and Linux.** The public build/dist contract is now
   `01-c` (libc/libm/libdl/startup/shell/make/mksh/toybox), `02-cxx`

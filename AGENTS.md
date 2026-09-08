@@ -156,6 +156,14 @@ runtime은 다음 계층으로 나누어 설계한다.
     라이브러리별 `src/arch/`에 둔다. `libdl/`은 이미 이 패턴을 따르고 있고
     (아래 참고), libm/libstdc++도 arch-specific 코드가 필요해지면 동일한
     패턴을 따른다.
+  - `tests/`: libc/libdl/pthread/shell-level unit, ABI, PAL, and integration
+    tests -- the former top-level `tests/` (dist-stage policy: each library
+    owns its own tests, matching `libcrtgfx/tests/`/`libcrtmedia/tests/`'s
+    already-established shape). `add_crt_test()`/`add_crt_cxx_test()`
+    themselves stay defined at the top-level `CMakeLists.txt` (shared by
+    this directory and `libstdc++/tests/`, which are separate
+    `add_subdirectory()` trees and cannot see a function defined in a
+    sibling tree).
 - `libm/`
   - 결과 파일: `libm.so`, `libm.a`
   - The math library. Traditionally Unix systems kept stuff like sin(3) and
@@ -173,6 +181,10 @@ runtime은 다음 계층으로 나누어 설계한다.
   - 결과 파일: `libc++.so`
   - The C++ ABI support functions. Stuff like __cxa_guard_acquire and
     __cxa_pure_virtual live here.
+  - `tests/`: C/C++-ABI-boundary and imported-libc++ tests (`cxx_runtime_
+    test`, `cxx_frontend_test`, `cxx_allocation_test`; `imported_libcxx_
+    test.cc` and friends, compiled/run directly by `tools/test_libcxx_
+    runtime.py` rather than through this directory's own CMakeLists.txt).
 - `shell/`
   - 결과 파일: `/system/bin/sh`, `/system/bin/toybox`
   - Android-like shell and command applet environment. This is a core runtime
@@ -187,8 +199,6 @@ runtime은 다음 계층으로 나누어 설계한다.
   - 결과 파일: `/system/bin/linker`
   - The dynamic linker. It is responsible for loading the ELF executable into
     memory and resolving references to symbols.
-- `tests/`
-  - Unit, ABI, PAL, and integration tests.
 - `third_party/`
   - Import provenance: upstream manifests, license notes, and source-family
     review docs for imported Bionic/OpenBSD code (`third_party/bionic/`).

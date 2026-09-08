@@ -422,7 +422,7 @@ cmake --build --preset <host-preset> --target crt-libcxx-dist
 `tools/crt-c++`, with exceptions/RTTI enabled only for the imported runtime.
 The C++ build consumes `dist/01-c`; the sysroot/dist targets create the
 cumulative `dist/02-cxx` headers and runtime libraries. The smoke target then
-links and runs both static and shared forms of `tests/imported_libcxx_test.cc`
+links and runs both static and shared forms of `libstdc++/tests/imported_libcxx_test.cc`
 using only the staged C++ headers and runtime. `CRT_USE_IMPORTED_LIBCXX=ON`
 makes `rootfs` and the Skia external build depend on that staged runtime rather
 than the bootstrap `cxx_shared` artifact. This mode and both smoke linkage

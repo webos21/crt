@@ -149,7 +149,7 @@ macOS) -- so a literal `"/proc/self/exe"` handed to a raw `execve(2)`/
 `ENOENT` too.
 
 This went unnoticed for a while because the only *self-relaunch* code that
-exercised it in `ctest` runs (`tests/windows_fd_snapshot_test.c`'s fork+exec
+exercised it in `ctest` runs (`libc/tests/windows_fd_snapshot_test.c`'s fork+exec
 subtest, `tests/rootfs_process_test.c`'s `/proc/self/exe` checks) turned out
 to not actually run that code path on macOS the way it looked at a glance --
 easy to misread when skimming, since the guard is a `#if` several lines above

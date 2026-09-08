@@ -656,6 +656,123 @@ if(CRT_TARGET_OS STREQUAL "windows")
   )
 endif()
 
+# add_crt_test()/add_crt_cxx_test(): shared test-binary helpers, defined
+# here at root scope (not inside libc/tests/CMakeLists.txt or
+# libstdc++/tests/CMakeLists.txt) because both of those are separate
+# add_subdirectory() trees -- a function defined in one is not visible
+# to a sibling tree, only to root scope and whatever root processes
+# afterward. Every unqualified variable a function body reads (
+# CRT_STARTUP_OBJECTS, CRT_WINDOWS_SYSTEM_LIBS, ...) is looked up
+# against the *calling* directory's scope at call time, not the
+# definition site, so it is safe for these to be defined here and
+# called later from libc/tests and libstdc++/tests once
+# add_subdirectory(libc) has set CRT_STARTUP_OBJECTS via PARENT_SCOPE.
+function(add_crt_test test_name source_file)
+  set(CRT_TEST_EXTRA_SOURCES "")
+  if(CRT_TARGET_OS STREQUAL "windows" AND CRT_EFFECTIVE_ARCH_FOR_FLAGS MATCHES "^(arm64|ARM64|aarch64|x86_64|AMD64|x64)$")
+    # The ctest suite exercises fork() directly (fork_test, fork_signal_test,
+    # fork_runtime_reset_test, ...) and needs the startup self-relaunch that
+    # memory-copy fork() depends on -- opt in for every test binary rather
+    # than auditing which ones call fork() transitively. See that file's own
+    # top comment for why this is opt-in rather than linked into every
+    # Windows binary.
+    set(CRT_TEST_EXTRA_SOURCES "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/common/fork_capable_relaunch.c")
+  endif()
+  # CRT_STARTUP_END_OBJECTS deliberately not listed here -- see
+  # crt_link_startup_end_objects()'s own comment further up this file
+  # and this function's own final target_link_libraries() call below.
+  add_executable(${test_name}
+    ${CRT_STARTUP_OBJECTS}
+    ${source_file}
+    ${CRT_TEST_EXTRA_SOURCES}
+  )
+  target_link_libraries(${test_name} PRIVATE crt_build_flags c)
+  target_include_directories(${test_name} PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include"
+  )
+  if(ARGN)
+    target_link_libraries(${test_name} PRIVATE ${ARGN})
+  endif()
+  target_link_libraries(${test_name} PRIVATE crt_compiler_rt_builtins)
+  target_link_options(${test_name} PRIVATE
+    -nostdlib
+    -nostartfiles
+    -nodefaultlibs
+  )
+  if(CRT_TARGET_OS STREQUAL "macos")
+    target_link_options(${test_name} PRIVATE
+      -Wl,-e,_start
+      -Wl,-dead_strip
+    )
+    target_link_libraries(${test_name} PRIVATE System)
+  elseif(CRT_TARGET_OS STREQUAL "linux")
+    target_link_options(${test_name} PRIVATE
+      -Wl,-e,_start
+      -Wl,--gc-sections
+    )
+  elseif(CRT_TARGET_OS STREQUAL "windows")
+    target_link_options(${test_name} PRIVATE
+      -Wl,/entry:mainCRTStartup
+      -Wl,/subsystem:console
+      -Wl,/OPT:REF
+    )
+    target_link_libraries(${test_name} PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  endif()
+  crt_link_startup_end_objects(${test_name})
+  add_dependencies(${test_name} c crt1)
+  add_test(NAME ${test_name}_runs COMMAND ${test_name})
+  set_tests_properties(${test_name}_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS ${test_name}_runs)
+endfunction()
+
+function(add_crt_cxx_test test_name source_file)
+  # CRT_STARTUP_END_OBJECTS deliberately not listed here -- see
+  # crt_link_startup_end_objects()'s own comment further up this file
+  # and this function's own final target_link_libraries() call below.
+  add_executable(${test_name}
+    ${CRT_STARTUP_OBJECTS}
+    ${source_file}
+  )
+  target_link_libraries(${test_name} PRIVATE crt_cxx_build_flags cxx c)
+  target_include_directories(${test_name} PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include"
+  )
+  target_link_libraries(${test_name} PRIVATE crt_compiler_rt_builtins)
+  target_link_options(${test_name} PRIVATE
+    -nostdlib
+    -nostartfiles
+    -nodefaultlibs
+  )
+  if(CRT_TARGET_OS STREQUAL "macos")
+    target_link_options(${test_name} PRIVATE
+      -Wl,-e,_start
+      -Wl,-dead_strip
+    )
+    target_link_libraries(${test_name} PRIVATE System)
+  elseif(CRT_TARGET_OS STREQUAL "linux")
+    target_link_options(${test_name} PRIVATE
+      -Wl,-e,_start
+      -Wl,--gc-sections
+    )
+  elseif(CRT_TARGET_OS STREQUAL "windows")
+    target_link_options(${test_name} PRIVATE
+      -Wl,/entry:mainCRTStartup
+      -Wl,/subsystem:console
+      -Wl,/OPT:REF
+    )
+    target_link_libraries(${test_name} PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  endif()
+  crt_link_startup_end_objects(${test_name})
+  add_dependencies(${test_name} cxx c crt1)
+  add_test(NAME ${test_name}_runs COMMAND ${test_name})
+  set_tests_properties(${test_name}_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS ${test_name}_runs)
+endfunction()
+
 add_subdirectory(libc)
 add_subdirectory(libm)
 add_subdirectory(libdl)
@@ -665,29 +782,38 @@ add_subdirectory(libcrtgfx)
 add_subdirectory(libcrtjs)
 add_subdirectory(libcrtmedia)
 
-# Hoisted ahead of add_subdirectory(tests) below, out of the
-# if(Python3_Interpreter_FOUND) block further down that otherwise defines
-# it (that block also defines the real "rootfs" custom target itself,
-# which genuinely does need targets add_subdirectory(shell) just defined
-# above -- only the plain path *variable* needs to exist this early, not
-# the target). tests/CMakeLists.txt's mksh-interpreter tests
-# (mksh_subshell_status_test.c, mksh_shell_smoke_test.c) reference
-# ${CRT_ROOTFS} directly in their own set_tests_properties(... ENVIRONMENT
-# ...) calls -- on a from-scratch configure (a genuinely fresh clone, not
-# a tree with a CRT_ROOTFS value already sitting in CMakeCache.txt from
-# any earlier configure), add_subdirectory(tests) used to run before this
-# variable was ever set at all, so those tests' own ENVIRONMENT baked in a
-# literal empty "CRT_ROOTFS=" and every case failed outright with
-# posix_spawn() ENOENT trying to resolve /bin/sh with no rootfs to
-# resolve it against. Reproduced directly from a genuine fresh clone
-# (this exact failure is also what broke CI, which always starts from a
-# clean checkout) -- a locally re-used out/ directory never surfaced it,
-# since CRT_ROOTFS was already cached from a much earlier configure.
+# Hoisted ahead of add_subdirectory(libc/tests)/add_subdirectory(
+# libstdc++/tests) below, out of the if(Python3_Interpreter_FOUND) block
+# further down that otherwise defines it (that block also defines the
+# real "rootfs" custom target itself, which genuinely does need targets
+# add_subdirectory(shell) just defined above -- only the plain path
+# *variable* needs to exist this early, not the target). libc/tests/
+# CMakeLists.txt's mksh-interpreter tests (mksh_subshell_status_test.c,
+# mksh_shell_smoke_test.c) reference ${CRT_ROOTFS} directly in their own
+# set_tests_properties(... ENVIRONMENT ...) calls -- on a from-scratch
+# configure (a genuinely fresh clone, not a tree with a CRT_ROOTFS value
+# already sitting in CMakeCache.txt from any earlier configure),
+# add_subdirectory(tests) used to run before this variable was ever set
+# at all, so those tests' own ENVIRONMENT baked in a literal empty
+# "CRT_ROOTFS=" and every case failed outright with posix_spawn() ENOENT
+# trying to resolve /bin/sh with no rootfs to resolve it against.
+# Reproduced directly from a genuine fresh clone (this exact failure is
+# also what broke CI, which always starts from a clean checkout) -- a
+# locally re-used out/ directory never surfaced it, since CRT_ROOTFS was
+# already cached from a much earlier configure. Splitting the former
+# tests/ into libc/tests and libstdc++/tests (each its own
+# add_subdirectory() tree, physically nested under the library it tests)
+# keeps this exact ordering guarantee -- both are still processed here,
+# at the same point in this file, not from within libc/CMakeLists.txt or
+# libstdc++/CMakeLists.txt themselves (those run earlier, at
+# add_subdirectory(libc)/add_subdirectory(libstdc++) above, before
+# CRT_ROOTFS below is set).
 if(Python3_Interpreter_FOUND)
   set(CRT_ROOTFS "${CMAKE_BINARY_DIR}/rootfs" CACHE PATH "Android-like runtime root filesystem")
 endif()
 
-add_subdirectory(tests)
+add_subdirectory(libc/tests)
+add_subdirectory(libstdc++/tests)
 
 install(DIRECTORY include/ DESTINATION include COMPONENT crt-c)
 

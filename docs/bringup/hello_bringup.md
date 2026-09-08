@@ -133,7 +133,7 @@ clang \
   -nodefaultlibs \
   -I out/macos-host-ninja-debug/dist/01-c/include \
   out/macos-host-ninja-debug/sysroot/lib/crt1.o \
-  tests/hello.c \
+  libc/tests/hello.c \
   out/macos-host-ninja-debug/sysroot/lib/libc.a \
   out/macos-host-ninja-debug/sysroot/lib/libclang_rt.builtins.a \
   -Wl,-e,_start \
