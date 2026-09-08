@@ -47,7 +47,7 @@ used by the porting tests themselves.
 
 The compiler sysroot and runtime rootfs are intentionally separate:
 
-- `out/<preset>/sysroot`
+- `out/<preset>/dist/01-c`
   - compiler-facing headers, libraries, startup objects, and runtime archives;
   - used by `tools/crt-cc`, `tools/crt-c++`, CMake, and package builds.
 - `out/<preset>/rootfs`

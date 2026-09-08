@@ -271,9 +271,11 @@ if(EXISTS "${CRT_MKSH_ROOT}/Android.bp")
   add_dependencies(crt_shell_artifacts crt_mksh)
   install(TARGETS crt_mksh
     RUNTIME DESTINATION system/bin
+    COMPONENT crt-c
   )
   install(FILES "${CRT_MKSH_ROOT}/mkshrc"
     DESTINATION system/etc
+    COMPONENT crt-c
   )
 endif()
 
@@ -684,6 +686,7 @@ if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
   add_dependencies(crt_shell_artifacts crt_toybox)
   install(TARGETS crt_toybox
     RUNTIME DESTINATION system/bin
+    COMPONENT crt-c
   )
 endif()
 
@@ -770,11 +773,13 @@ if(EXISTS "${CRT_AWK_ROOT}/src/awk.h")
   add_dependencies(crt_shell_artifacts crt_awk)
   install(TARGETS crt_awk
     RUNTIME DESTINATION system/bin
+    COMPONENT crt-c
   )
 endif()
 
 install(TARGETS crt_tiny_sh
   RUNTIME DESTINATION system/bin
+  COMPONENT crt-c
 )
 
 add_custom_target(crt_shell_inventory

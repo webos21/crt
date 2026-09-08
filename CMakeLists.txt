@@ -2,7 +2,9 @@ cmake_minimum_required(VERSION 3.25)
 
 set(CRT_TARGET_OS "macos" CACHE STRING "Target OS personality")
 set(CRT_TARGET_ARCH "host" CACHE STRING "Target architecture")
-set(CRT_SYSROOT "${CMAKE_BINARY_DIR}/sysroot" CACHE PATH "Project sysroot")
+set(CRT_DIST_ROOT "${CMAKE_BINARY_DIR}/dist" CACHE PATH "Cumulative staged CRT distributions")
+set(CRT_SYSROOT "${CRT_DIST_ROOT}/01-c" CACHE PATH "C-stage sysroot used by wrappers and porting tests")
+set(CRT_LIBCXX_SYSROOT "${CRT_DIST_ROOT}/02-cxx" CACHE PATH "C++-stage cumulative sysroot")
 
 if(CRT_TARGET_OS STREQUAL "windows")
   set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
@@ -200,6 +202,15 @@ find_package(Python3 COMPONENTS Interpreter QUIET)
 enable_testing()
 
 if(Python3_Interpreter_FOUND)
+  set(CRT_DIST_TOOL_ARGS
+    --cc "${CMAKE_C_COMPILER}"
+    --cxx "${CMAKE_CXX_COMPILER}"
+    --ar "${CMAKE_AR}"
+    --ranlib "${CMAKE_RANLIB}"
+  )
+  if(CMAKE_C_COMPILER_TARGET)
+    list(APPEND CRT_DIST_TOOL_ARGS --target-triple "${CMAKE_C_COMPILER_TARGET}")
+  endif()
   add_custom_target(check-import-manifest
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/check_import_manifest.py"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
@@ -548,7 +559,7 @@ if(CRT_USE_COMPILER_RT)
     message(STATUS "compiler-rt builtins: ${CRT_COMPILER_RT_BUILTINS}")
     add_library(crt_compiler_rt_builtins INTERFACE)
     target_link_libraries(crt_compiler_rt_builtins INTERFACE "${CRT_COMPILER_RT_BUILTINS}")
-    install(FILES "${CRT_COMPILER_RT_BUILTINS}" DESTINATION lib RENAME libclang_rt.builtins.a)
+    install(FILES "${CRT_COMPILER_RT_BUILTINS}" DESTINATION lib RENAME libclang_rt.builtins.a COMPONENT crt-c)
   else()
     message(STATUS "compiler-rt builtins not found by ${CMAKE_C_COMPILER}")
     add_library(crt_compiler_rt_builtins INTERFACE)
@@ -678,12 +689,12 @@ endif()
 
 add_subdirectory(tests)
 
-install(DIRECTORY include/ DESTINATION include)
+install(DIRECTORY include/ DESTINATION include COMPONENT crt-c)
 
 add_custom_target(sysroot
-  COMMAND "${CMAKE_COMMAND}" --install "${CMAKE_BINARY_DIR}" --prefix "${CRT_SYSROOT}"
-  DEPENDS c c_shared m m_shared dl dl_shared cxx cxx_shared crtgfx crtgfx_shared crtjs crtjs_shared crtmedia crtmedia_shared crt1 crt_shell_artifacts
-  COMMENT "Installing CRT headers, libraries, and startup objects into ${CRT_SYSROOT}"
+  COMMAND "${CMAKE_COMMAND}" --install "${CMAKE_BINARY_DIR}" --prefix "${CRT_SYSROOT}" --component crt-c
+  DEPENDS c c_shared m m_shared dl dl_shared crt1 crt_shell_artifacts
+  COMMENT "Installing the C runtime stage into ${CRT_SYSROOT}"
 )
 if(TARGET crt-libcxx-configure)
   add_dependencies(crt-libcxx-configure sysroot)
@@ -736,25 +747,6 @@ if(Python3_Interpreter_FOUND)
   else()
     set(CRT_ROOTFS_ALL_KEYWORD)
   endif()
-  set(CRT_ROOTFS_CXX_LIBRARY "$<TARGET_FILE:cxx_shared>")
-  set(CRT_ROOTFS_CXX_ABI_LIBRARY "")
-  if(CRT_USE_IMPORTED_LIBCXX)
-    if(CRT_TARGET_OS STREQUAL "windows")
-      set(CRT_ROOTFS_CXX_LIBRARY "${CRT_SYSROOT}/bin/c++.dll")
-      set(CRT_ROOTFS_CXX_ABI_LIBRARY "${CRT_SYSROOT}/bin/c++abi.dll")
-    elseif(CRT_TARGET_OS STREQUAL "macos")
-      set(CRT_ROOTFS_CXX_LIBRARY "${CRT_SYSROOT}/lib/libc++.dylib")
-      set(CRT_ROOTFS_CXX_ABI_LIBRARY "${CRT_SYSROOT}/lib/libc++abi.1.dylib")
-    else()
-      set(CRT_ROOTFS_CXX_LIBRARY "${CRT_SYSROOT}/lib/libc++.so")
-      set(CRT_ROOTFS_CXX_ABI_LIBRARY "${CRT_SYSROOT}/lib/libc++abi.so.1")
-    endif()
-  endif()
-  set(CRT_ROOTFS_CXX_ABI_ARGUMENTS "")
-  if(CRT_ROOTFS_CXX_ABI_LIBRARY)
-    list(APPEND CRT_ROOTFS_CXX_ABI_ARGUMENTS
-      --runtime-library "${CRT_ROOTFS_CXX_ABI_LIBRARY}")
-  endif()
   add_custom_target(rootfs ${CRT_ROOTFS_ALL_KEYWORD}
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
       "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_rootfs.py"
@@ -768,19 +760,12 @@ if(Python3_Interpreter_FOUND)
       --runtime-library "$<TARGET_FILE:c_shared>"
       --runtime-library "$<TARGET_FILE:m_shared>"
       --runtime-library "$<TARGET_FILE:dl_shared>"
-      --runtime-library "${CRT_ROOTFS_CXX_LIBRARY}"
-      ${CRT_ROOTFS_CXX_ABI_ARGUMENTS}
-      --runtime-library "$<TARGET_FILE:crtgfx_shared>"
-      --runtime-library "$<TARGET_FILE:crtjs_shared>"
-      --runtime-library "$<TARGET_FILE:crtmedia_shared>"
     DEPENDS sysroot crt_shell_artifacts
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     COMMENT "Creating Android-like CRT rootfs at ${CRT_ROOTFS}"
     USES_TERMINAL
   )
-  if(CRT_USE_IMPORTED_LIBCXX)
-    add_dependencies(rootfs crt-libcxx-sysroot)
-  elseif(CRT_TARGET_OS STREQUAL "windows" AND TARGET crt-libcxx-configure)
+  if(CRT_TARGET_OS STREQUAL "windows" AND TARGET crt-libcxx-configure)
     # Windows only, and only the other direction from the
     # CRT_USE_IMPORTED_LIBCXX=ON case just above (mutually exclusive, to
     # avoid a real dependency cycle: rootfs -> crt-libcxx-sysroot ->
@@ -1025,5 +1010,122 @@ if(Python3_Interpreter_FOUND)
   )
   add_custom_target(port-test-recipes
     DEPENDS ${CRT_AUTOMATED_PORT_TEST_TARGETS}
+  )
+endif()
+
+# Public stage targets. The default workflow deliberately stops at 01-c;
+# later distributions are cumulative and depend on the preceding stage.
+# tools/create_dist.py copies wrappers and metadata, never a compiler/linker.
+if(Python3_Interpreter_FOUND)
+  add_custom_target(crt-c-build
+    DEPENDS c c_shared m m_shared dl dl_shared crt1 crt_shell_artifacts port-build-make
+  )
+
+  get_property(CRT_ALL_REGISTERED_TESTS GLOBAL PROPERTY CRT_REGISTERED_TESTS)
+  set(CRT_C_TEST_TARGETS)
+  foreach(CRT_REGISTERED_TEST IN LISTS CRT_ALL_REGISTERED_TESTS)
+    if(NOT CRT_REGISTERED_TEST MATCHES "^(crtgfx_|crtmedia_|crtjs_)" AND
+       NOT CRT_REGISTERED_TEST MATCHES "cxx")
+      string(REGEX REPLACE "_runs$" "" CRT_REGISTERED_TEST_TARGET "${CRT_REGISTERED_TEST}")
+      if(TARGET "${CRT_REGISTERED_TEST_TARGET}")
+        list(APPEND CRT_C_TEST_TARGETS "${CRT_REGISTERED_TEST_TARGET}")
+      endif()
+    endif()
+  endforeach()
+  add_dependencies(crt-c-build ${CRT_C_TEST_TARGETS})
+  add_custom_target(crt-c-test
+    COMMAND "${CMAKE_COMMAND}" -DCRT_BINARY_DIR="${CMAKE_BINARY_DIR}"
+      -DCRT_CTEST="${CMAKE_CTEST_COMMAND}"
+      -P "${CMAKE_SOURCE_DIR}/cmake/run_core_tests.cmake"
+    DEPENDS ${CRT_C_TEST_TARGETS} crt_shell_artifacts
+    USES_TERMINAL
+  )
+  add_custom_target(crt-c-dist
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
+      --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
+      --dest "${CRT_DIST_ROOT}/01-c" --component crt-c
+      --port-prefix "${CRT_PORT_TEST_ROOT}/install"
+      --cmake "${CMAKE_COMMAND}" --stage 01-c
+      --target-os "${CRT_TARGET_OS}" --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" ${CRT_DIST_TOOL_ARGS} --archive
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
+      --dist "${CRT_DIST_ROOT}/01-c" --stage 01-c
+    DEPENDS crt-c-build
+    USES_TERMINAL
+  )
+
+  if(TARGET crt-libcxx-build)
+    add_dependencies(crt-libcxx-sysroot crt-c-dist)
+    add_custom_target(crt-libcxx-test DEPENDS crt-libcxx-smoke)
+    add_custom_target(crt-libcxx-dist
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
+        --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
+        --dest "${CRT_DIST_ROOT}/02-cxx" --base "${CRT_DIST_ROOT}/01-c"
+        --component crt-cxx --libcxx-install "${CRT_LIBCXX_INSTALL_PREFIX}"
+        --cmake "${CMAKE_COMMAND}" --stage 02-cxx
+        --target-os "${CRT_TARGET_OS}" --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" ${CRT_DIST_TOOL_ARGS} --archive
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
+        --dist "${CRT_DIST_ROOT}/02-cxx" --stage 02-cxx
+      DEPENDS crt-c-dist crt-libcxx-build
+      USES_TERMINAL
+    )
+  endif()
+
+  add_custom_target(crt-gfx-simple-build DEPENDS crtgfx crtgfx_shared crtgfx_window_smoke crtgfx_synthetic_event)
+  add_custom_target(crt-gfx-simple-test
+    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtgfx_window_smoke_runs"
+    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtgfx_synthetic_event_runs"
+    DEPENDS crt-gfx-simple-build
+    USES_TERMINAL
+  )
+  add_custom_target(crt-gfx-simple-dist
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
+      --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
+      --dest "${CRT_DIST_ROOT}/03-gfx-simple" --base "${CRT_DIST_ROOT}/02-cxx"
+      --component crt-gfx-simple --cmake "${CMAKE_COMMAND}" --stage 03-gfx-simple
+      --target-os "${CRT_TARGET_OS}" --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" ${CRT_DIST_TOOL_ARGS} --archive
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
+      --dist "${CRT_DIST_ROOT}/03-gfx-simple" --stage 03-gfx-simple
+    DEPENDS crt-libcxx-dist crt-gfx-simple-build
+    USES_TERMINAL
+  )
+
+  add_custom_target(crt-gfx-build DEPENDS crtgfx crtgfx_shared crtgfx_gpu_test)
+  add_custom_target(crt-gfx-test
+    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtgfx_.*_runs"
+    DEPENDS crt-gfx-build
+    USES_TERMINAL
+  )
+  add_custom_target(crt-media-build DEPENDS crtmedia crtmedia_shared)
+  add_custom_target(crt-media-test
+    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtmedia_.*_runs"
+    DEPENDS crt-media-build
+    USES_TERMINAL
+  )
+  add_custom_target(crt-gfx-media-build DEPENDS crt-gfx-build crt-media-build)
+  add_custom_target(crt-gfx-media-test DEPENDS crt-gfx-test crt-media-test)
+  add_custom_target(crt-gfx-media-dist
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
+      --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
+      --dest "${CRT_DIST_ROOT}/04-gfx-media" --base "${CRT_DIST_ROOT}/03-gfx-simple"
+      --component crt-gfx --component crt-media --cmake "${CMAKE_COMMAND}" --stage 04-gfx-media
+      --target-os "${CRT_TARGET_OS}" --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" ${CRT_DIST_TOOL_ARGS} --archive
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
+      --dist "${CRT_DIST_ROOT}/04-gfx-media" --stage 04-gfx-media
+    DEPENDS crt-gfx-simple-dist crt-gfx-media-build
+    USES_TERMINAL
+  )
+
+  add_custom_target(crt-js-build DEPENDS crtjs crtjs_shared)
+  add_custom_target(crt-js-test DEPENDS crt-js-build)
+  add_custom_target(crt-js-dist
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
+      --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
+      --dest "${CRT_DIST_ROOT}/05-js" --base "${CRT_DIST_ROOT}/04-gfx-media"
+      --component crt-js --cmake "${CMAKE_COMMAND}" --stage 05-js
+      --target-os "${CRT_TARGET_OS}" --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" ${CRT_DIST_TOOL_ARGS} --archive
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
+      --dist "${CRT_DIST_ROOT}/05-js" --stage 05-js
+    DEPENDS crt-gfx-media-dist crt-js-build
+    USES_TERMINAL
   )
 endif()

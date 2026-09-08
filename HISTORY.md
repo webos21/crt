@@ -10,6 +10,50 @@ substantive update.
 
 ## 2026-09-08
 
+- **Introduced cumulative CRT distribution stages, with `01-c` verified
+  end-to-end on Windows and Linux.** The public build/dist contract is now
+  `01-c` (libc/libm/libdl/startup/shell/make/mksh/toybox), `02-cxx`
+  (+libc++/libc++abi/libunwind), `03-gfx-simple` (+window/input/software
+  framebuffer), `04-gfx-media` (+GPU API/Skia/Vulkan/D3D12/Metal/FFmpeg),
+  and `05-js` (+QuickJS), each stage built only from the previous stage's
+  installed output under `out/<preset>/dist/<stage>/`, never bundling
+  Clang/LLVM/LLD or a vendor compiler. New `crt-c-build`/`crt-c-test`/
+  `crt-c-dist` (plus the equivalent skeleton targets for the later stages)
+  CMake targets, `tools/create_dist.py` (emits headers/libs/startup
+  objects/wrappers/`crt-toolchain.cmake`/`manifest.json`/a platform
+  archive) and `tools/verify_dist.py` (structural and
+  compiler-not-bundled checks), and CMake install `COMPONENT`s across
+  `libc`/`libdl`/`libm`/`shell`. The default `cmake --workflow --preset
+  <host>` now stops at the C stage (`CMakePresets.json` retargeted to
+  `crt-c-build`, gfx/media/js/cxx tests filtered out of its test preset);
+  `rootfs` was trimmed to C-only artifacts; `tools/crt-cc` no longer
+  auto-injects `libc++` into a C-driven shared link -- that selection now
+  belongs entirely to `tools/crt-c++`, making the 01-c/02-cxx boundary a
+  real, enforced one rather than a packaging convention;
+  `tools/crt-env.*`/`CRT_SYSROOT` now point at `out/<preset>/dist/01-c`.
+
+  `crt-c-dist` itself is real and verified on **both Windows and
+  Linux/WSL** (2026-09-08): built and archived
+  (`crt-development-windows-x86_64-01-c.zip`,
+  `crt-development-linux-x86_64-01-c.tar.xz`), both passing
+  `verify_dist.py`. Linux additionally passed a real acceptance check
+  beyond that script's own coverage: a `hello.c` compiled, linked, and run
+  using only the packaged `tools/crt-cc` wrapper (`CRT_CC=clang`) from
+  `/tmp`, entirely outside the source/build trees. macOS not attempted
+  this pass (no hardware in this session).
+
+  Deliberately not done yet, tracked in `TODO.md`'s new "CRT distribution
+  stages" entry: `crt-libcxx-dist` (02-cxx)/`crt-gfx-simple-dist`/
+  `crt-gfx-media-dist`/`crt-js-dist` are wired in `CMakeLists.txt` but have
+  never been built; the `crt-cc` libc++-injection removal has not yet been
+  regression-tested against `crtgfx_shared`/`crtmedia_shared`/
+  `crtjs_shared`; `libcrtgfx`'s window/GPU/Skia split is only an
+  install-`COMPONENT` split so far -- one physical `crtgfx_shared` still
+  contains GPU+Skia code for every stage, only the installed public
+  headers differ per stage. Physically separating window/GPU/Skia into
+  distinct source/object graphs is a decided requirement before
+  `03-gfx-simple-dist`/`04-gfx-media-dist` can be considered real.
+
 - **Hardware decode, phase A: landed the opt-in decode-side API and its
   real fallback/recovery contract, verified zero-regression on Windows and
   Linux; actual per-host hwaccel enablement in the FFmpeg build itself

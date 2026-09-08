@@ -337,11 +337,12 @@ if(CRTMEDIA_ENABLE_FFMPEG)
 endif()
 
 install(TARGETS crtmedia crtmedia_shared
-  ARCHIVE DESTINATION lib
-  LIBRARY DESTINATION lib
-  RUNTIME DESTINATION bin
+  ARCHIVE DESTINATION lib COMPONENT crt-media
+  LIBRARY DESTINATION lib COMPONENT crt-media
+  RUNTIME DESTINATION bin COMPONENT crt-media
 )
 install(DIRECTORY include/ DESTINATION include
+  COMPONENT crt-media
   PATTERN ".gitkeep" EXCLUDE
 )
 

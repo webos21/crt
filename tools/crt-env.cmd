@@ -38,7 +38,7 @@ if "%CRT_ENV_TARGET_OS%"=="" (
 set "CRT_ENV_TOOLS_DIR=%~dp0"
 for %%I in ("%CRT_ENV_TOOLS_DIR%..") do set "CRT_ENV_ROOT=%%~fI"
 
-set "CRT_SYSROOT=%CRT_ENV_ROOT%\out\%CRT_ENV_PRESET%\sysroot"
+set "CRT_SYSROOT=%CRT_ENV_ROOT%\out\%CRT_ENV_PRESET%\dist\01-c"
 set "CRT_TARGET_OS=%CRT_ENV_TARGET_OS%"
 set "CC=%CRT_ENV_ROOT%\tools\crt-cc"
 set "CXX=%CRT_ENV_ROOT%\tools\crt-c++"

@@ -20,8 +20,16 @@ The central hypothesis is:
 > solving files, sockets, threads, memory mapping, TLS, dynamic loading, and
 > related OS primitives.
 
-The intended scope includes libc, libm, libdl, libstdc++, and eventually the
-dynamic linker, with support limited to 64-bit x86 and 64-bit ARM.
+The intended runtime scope includes libc, libm, libdl, libstdc++, and optional
+graphics/media/JavaScript layers, with support limited to 64-bit x86 and
+64-bit ARM. The `linker/` directory is reserved, but implementing a CRT-owned
+dynamic linker is deferred outside the current roadmap.
+
+The deliverable is a cumulative staged sysroot, not a bundled toolchain.
+`01-c`, `02-cxx`, `03-gfx-simple`, `04-gfx-media`, and `05-js` let an
+embedded product stop at the capability level it needs. Every distribution
+uses an external host or board-vendor compiler; see
+[`distribution.md`](distribution.md).
 
 In short, the project is best described as:
 
@@ -114,11 +122,13 @@ above a more consistent low-level runtime and concentrate on graphics,
 window-system integration, application lifecycle, input, fonts, clipboard,
 accessibility, and packaging.
 
-The long-term upper-runtime target is now an Electron-class rebuilt application
-runtime, not Electron itself as the immediate port. The intended shape is:
+The upper runtime is delivered as optional cumulative capability stages, not
+as an Electron clone. Electron/Chromium is only a later portability benchmark.
+The intended shape is:
 
-- `libcrtgfx`: Skia, a Wayland-compatible compositor boundary, and a future
-  Chromium Ozone backend path.
+- `libcrtgfx`: a Simple Graphics window/input/software-framebuffer layer, then
+  Skia, a Wayland-compatible compositor boundary, and a future Chromium Ozone
+  backend path.
 - `libcrtmedia`: FFmpeg plus explicit codec, audio, and video libraries.
 - `libcrtjs`: QuickJS first as the JavaScript bring-up engine, with V8 as the
   later browser-class target.

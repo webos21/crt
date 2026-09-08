@@ -65,8 +65,9 @@ dated implementation trail belongs in [`HISTORY.md`](HISTORY.md). The live
 queue below starts at the next compatibility boundary: a stable media API,
 software playback, GPU resource ownership, hardware decode, and the point at
 which QuickJS can safely bind those services without freezing a temporary API.
-The long-term target remains the Electron-class runtime described in
-[`docs/runtime_roadmap.md`](docs/runtime_roadmap.md).
+The product target is the staged embedded/native runtime described in
+[`docs/runtime_roadmap.md`](docs/runtime_roadmap.md). Electron/Chromium remains
+only a long-term portability benchmark, not the product definition.
 
 **Software-decode evidence is done on Linux, Windows, and macOS**
 (2026-09-02): real H.264+AAC MP4 (`assets/test_video.mp4`) and MP3
@@ -687,6 +688,75 @@ core now proceed in parallel (the GPU resource contract that gated them is
 done); zero-copy completion gates the GPU-aware JavaScript media binding,
 but not the initial QuickJS bring-up. A full compositor, complete font
 shaping, and every codec are not prerequisites for beginning QuickJS.
+
+### CRT distribution stages (01-c -> 05-js) -- in progress (2026-09-08)
+
+Restructuring build output into cumulative, independently-consumable
+stages -- `01-c`, `02-cxx`, `03-gfx-simple`, `04-gfx-media`, `05-js` under
+`out/<preset>/dist/` -- where stage N is built only from stage N-1's
+installed output, never the source tree, and no CRT distribution ever
+bundles Clang/LLVM/LLD or a vendor compiler. Full design in
+`docs/refine/interim-restructure.txt` (the working restructuring plan) and
+`docs/distribution.md` (the published contract). Not yet committed.
+
+**Done and verified:**
+- The `crt-c-dist` (01-c) chain is real and working: `crt-c-build`/
+  `crt-c-test`/`crt-c-dist` targets, new `tools/create_dist.py`/
+  `tools/verify_dist.py`, and CMake install `COMPONENT`s across
+  `libc`/`libdl`/`libm`. Built and archived on **both Windows**
+  (`crt-development-windows-x86_64-01-c.zip`) **and Linux/WSL**
+  (`crt-development-linux-x86_64-01-c.tar.xz`, 2026-09-08), both passing
+  `verify_dist.py`'s structural checks. Linux also passed a real
+  acceptance check beyond `verify_dist.py`'s own coverage: a `hello.c`
+  compiled and linked with only the packaged `tools/crt-cc` wrapper
+  (`CRT_CC=clang`, no project build tree involved) from `/tmp`, outside
+  the source/build trees, ran and printed correctly. macOS not yet
+  attempted (no hardware in this session).
+- Default `cmake --workflow --preset <host>` now stops at the C stage:
+  `CMakePresets.json` build/test presets retarget to `crt-c-build` and
+  filter out `crtgfx_`/`crtmedia_`/`crtjs_`/`*cxx` tests; the `rootfs`
+  target was trimmed to C-only artifacts (no more cxx/gfx/media/js
+  runtime libraries staged into it).
+- `tools/crt-cc` no longer auto-injects `libc++` into a C-driven shared
+  link; that selection now belongs entirely to `tools/crt-c++`, so the
+  01-c/02-cxx boundary is a real, enforced one, not just a packaging
+  convention.
+- README/STATUS/TODO/HISTORY and most of the plan's doc list are already
+  rewritten to the staged model: `docs/distribution.md` (new),
+  `docs/cxx_runtime.md`, `docs/libcrtgfx_api_policy.md`,
+  `docs/project_meanings.md`, `docs/project_stacks.md`,
+  `docs/runtime_roadmap.md`, `docs/sysroot_ports.md`,
+  `docs/android_shell_environment.md`, `docs/bringup/hello_bringup.md`.
+
+**Wired but never actually run:**
+- `crt-libcxx-dist` (02-cxx; `crt-libcxx-sysroot` now calls
+  `create_dist.py --base 01-c` instead of the old
+  `install_libcxx_runtimes.py` path straight into `CRT_SYSROOT`) and
+  `crt-gfx-simple-dist`/`crt-gfx-media-dist`/`crt-js-dist` are all defined
+  in the top-level `CMakeLists.txt` but none has been built even once --
+  no `02-cxx`/`03-gfx-simple`/`04-gfx-media`/`05-js` directory exists under
+  any `out/*/dist/` yet. This is the immediate next step.
+- Because `crt-cc`'s libc++ auto-injection was removed, every existing
+  C++-bearing shared target (`crtgfx_shared`, `crtmedia_shared`,
+  `crtjs_shared`) needs one real full build + `ctest` pass to confirm zero
+  regression -- not done yet, and no longer covered automatically by the
+  default workflow now that it stops at `crt-c-build`.
+- macOS: `crt-c-dist` itself has not been built or verified there yet
+  (Windows and Linux both are, as of 2026-09-08).
+- `AGENTS.md` is on the plan's own doc-sync list but has not been touched.
+- `verify_dist.py`'s acceptance checks are much thinner than
+  `docs/distribution.md`'s own "Distribution Acceptance" list -- no check
+  yet for a path containing spaces, no absolute source/build path leakage
+  check, no external CMake/configure-make consumer check.
+
+**Decided, not yet implemented:** `libcrtgfx` must be split so window/
+input/software-framebuffer, the GPU backend, and the Skia bridge become
+physically separate source/object graphs. The current state is only an
+`install(COMPONENT ...)` split -- every stage still links one
+`crtgfx_shared` containing GPU+Skia code, and only the *public headers*
+installed per stage differ. This has to land before
+`crt-gfx-simple-dist`/`crt-gfx-media-dist` can be considered real, per the
+decision recorded here.
 
 ## Planned
 

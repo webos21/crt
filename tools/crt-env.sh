@@ -97,7 +97,7 @@ if [ -z "$_crt_env_target_os" ]; then
   esac
 fi
 
-export CRT_SYSROOT="$_crt_env_root/out/$_crt_env_preset/sysroot"
+export CRT_SYSROOT="$_crt_env_root/out/$_crt_env_preset/dist/01-c"
 export CRT_TARGET_OS="$_crt_env_target_os"
 export CC="$_crt_env_root/tools/crt-cc"
 export CXX="$_crt_env_root/tools/crt-c++"

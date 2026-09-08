@@ -4,7 +4,15 @@ This document records the initial API boundary decision for `libcrtgfx`.
 
 ## Decision
 
-Expose Skia as the public 2D graphics API.
+The graphics surface has two explicit capability levels.
+
+- **Simple Graphics** exposes `crtgfx/window.h`: native windows,
+  keyboard/mouse events, and a CPU-writable software framebuffer. It excludes
+  Skia CPU raster/text, Skia GPU, and the public GPU header.
+- **Advanced Graphics** adds `crtgfx/gpu.h`, Skia's normal public headers,
+  Skia CPU/GPU rendering, and native Vulkan/D3D12/Metal presentation.
+
+Within the advanced level, expose Skia as the public 2D graphics API.
 
 `libcrtgfx` should not invent a parallel 2D drawing API for paths, paints,
 fonts, images, canvases, shaders, or text layout unless a concrete porting need
@@ -23,8 +31,9 @@ does not standardize for this project:
 - Wayland-compatible compositor boundary and host adapter policy;
 - handoff points for `libcrtjs` and `libcrtmedia`.
 
-In short: Skia owns drawing. `libcrtgfx` owns where the drawing goes, how it is
-presented, and how it crosses the host/platform boundary.
+In short: Simple Graphics owns only the window/input/framebuffer contract.
+At the advanced level Skia owns drawing, while `libcrtgfx` owns where drawing
+goes, how it is presented, and how it crosses the host/platform boundary.
 
 ## Rationale
 
@@ -64,6 +73,7 @@ The public include model is organized as follows:
 libcrtgfx/include/
   crtgfx/
     window.h        # window/surface/frame/event API (runtime+surface+event_loop, one file)
+    gpu.h           # advanced GPU device/surface/frame/fence contract
     skia.h          # convenience include/bridge for Skia integration
 
 libcrtgfx/third_party/skia/
@@ -72,6 +82,11 @@ libcrtgfx/third_party/skia/
 out/<preset>/external/skia/src/
   include/...       # fetched upstream Skia public headers
 ```
+
+The `crt-gfx-simple` install component contains only `window.h` and
+libcrtgfx. The advanced `crt-gfx` component adds `gpu.h`, `skia.h`, and the
+real Skia include tree when Skia is enabled. This packaging boundary prevents
+Simple Graphics consumers from accidentally depending on the advanced API.
 
 **Decided 2026-08-29, Phase 1 of the window/event API completion plan:**
 this project's day-1 planning (before any real implementation existed)

@@ -54,7 +54,7 @@ if ([string]::IsNullOrWhiteSpace($TargetOS)) {
   }
 }
 
-$env:CRT_SYSROOT = Join-Path $RepoRoot "out\$Preset\sysroot"
+$env:CRT_SYSROOT = Join-Path $RepoRoot "out\$Preset\dist\01-c"
 $env:CRT_TARGET_OS = $TargetOS
 $env:CC = Join-Path $RepoRoot "tools\crt-cc"
 $env:CXX = Join-Path $RepoRoot "tools\crt-c++"

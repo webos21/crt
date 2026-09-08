@@ -5,7 +5,7 @@ does not repeat the implementation diary in [`HISTORY.md`](HISTORY.md), the
 open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting_status.md`](docs/porting_status.md).
 
-Last synchronized with the source tree and git history: **2026-09-02**.
+Last synchronized with the source tree and git history: **2026-09-08**.
 Updated only on explicit request from here on, not as part of routine
 documentation passes -- see `TODO.md`'s Notice section. It may lag behind
 `HISTORY.md`/`TODO.md` between syncs; those two are the source of truth.
@@ -17,9 +17,12 @@ documentation passes -- see `TODO.md`'s Notice section. It may lag behind
 - The project provides a Bionic-compatible rebuild-oriented runtime for
   Linux, macOS, and Windows. It is not a glibc binary-compatibility layer, a
   WSL/container replacement, or an Android APK runtime.
-- The default build produces static and shared forms of `libc`, `libm`,
-  `libdl`, the C++ runtime, and the upper-runtime skeleton libraries. It also
-  stages a compiler sysroot and an Android-like rootfs.
+- The default workflow builds and tests only the C stage. Explicit cumulative
+  distributions then add C++, Simple Graphics, advanced Graphics/Media, and
+  JavaScript under `out/<preset>/dist/`.
+- No distribution bundles LLVM/Clang/LLD. Desktop and embedded consumers
+  provide the host or vendor toolchain; CRT supplies the staged sysroot,
+  startup/runtime objects, wrappers, configuration, and manifest.
 - Public headers and ABI policy follow Bionic/Linux shapes. Host SDK details
   stay behind per-host PAL adapters, including the Windows LLP64 boundary.
 - The rootfs contains the project-built mksh and audited toybox applets. The
@@ -73,15 +76,14 @@ The software/CPU graphics baseline is complete on all three hosts:
   Linux, and Windows systems.
 - A separate headless Skia CPU suite covers paths, transforms, clipping,
   save/restore/layers, representative shader/blend behavior, raw raster images,
-  and invalid numeric/surface inputs. It does not yet claim image-codec or GPU
-  coverage.
+  and invalid numeric/surface inputs.
+- The common opaque GPU device/surface/frame/fence contract is implemented.
+  Ganesh renders through Vulkan on Linux, D3D12 on Windows, and Metal on
+  macOS. Live GPU presentation and resize/swapchain recreation have been
+  verified on all three hosts.
 
-Windows now uses the GPU for final presentation, but Skia still renders into a
-CPU surface and uploads it. macOS similarly hands a CPU image to a
-hardware-composited layer, and Linux remains on `wl_shm`. Therefore a Skia GPU
-renderer, cross-host GPU resource/fence contract, decoder-texture zero-copy,
-full Wayland compositor, font-shaping stack, and Chromium Ozone backend are not
-completion claims.
+Decoder-texture zero-copy, full font shaping/fallback/ICU, a full Wayland
+compositor, and a Chromium Ozone backend are not completion claims.
 
 ### libcrtmedia
 
@@ -116,11 +118,10 @@ target.
 
 ### Upper Runtime Direction
 
-- `libcrtmedia` and `libcrtgfx` next establish the extractor/codec/player and
-  opaque GPU device/frame/fence contracts.
-- Skia GPU rendering, FFmpeg hardware decode, and the QuickJS core then proceed
-  in parallel rather than waiting for graphics/media to become indefinitely
-  "complete".
+- The runtime is packaged through the cumulative C, C++, Simple Graphics,
+  Graphics/Media, and JavaScript stages.
+- FFmpeg hardware decode/zero-copy and the QuickJS core proceed on top of the
+  completed GPU rendering/presentation contract.
 - JavaScript media/gfx binding follows the stable native contracts, using a
   WebCodecs-like asynchronous shape; WebRTC-style realtime services, V8, and a
   Chromium/Ozone probe remain later layers.
@@ -138,7 +139,8 @@ The normal host check is:
 cmake --workflow --preset <host-preset>
 ```
 
-It configures, builds, and runs the registered CTest suite. The CI matrix also
+It configures, builds, and runs the C-stage CTest suite. Upper layers use their
+explicit `*-build`, `*-test`, and `*-dist` targets. The CI matrix also
 covers Linux aarch64/x86_64, Windows aarch64/x86_64, and macOS. Exact test
 counts are intentionally not frozen in this document because adding a test
 would otherwise make the status text stale; the workflow result is the source
@@ -151,7 +153,7 @@ of truth.
 | Multi-window creation and software frame lifecycle | `crtgfx_window_smoke` | visible animation via `crtgfx_window_demo` |
 | Event ordering, overflow, isolation, and repeated lifecycle | `crtgfx_synthetic_event` | native event translation remains manually inspectable |
 | Skia CPU raster and FreeType ink pixels | `crtgfx-skia-smoke` / `crtgfx_skia_raster_smoke` | visual text quality is manually inspectable |
-| Broader deterministic Skia CPU drawing | `crtgfx_skia_cpu_coverage` | GPU equivalence is not implemented yet |
+| Broader deterministic Skia CPU drawing | `crtgfx_skia_cpu_coverage` | compare with the per-host GPU smoke |
 | Keyboard and pointer event translation | synthetic common-queue coverage plus host adapter tests | `crtgfx_keyboard_interactive` |
 | Skia-backed interactive typed text | one-command `crtgfx-keyboard-interactive-skia` build | run the resulting interactive binary |
 | Wayland source/toolchain integration | `crtgfx-wayland-smoke` | Linux host adapter needs a reachable compositor for the live path |
@@ -203,11 +205,10 @@ statuses, and exceptions are maintained in:
 - The Linux adapter uses project-owned wire handling and does not yet recycle
   Wayland object ids. It has been exercised on the available compositor, not
   across every compositor implementation.
-- Skia coverage is CPU-only. Image codecs, shaping, fallback fonts, ICU, and
-  platform font discovery are not yet completion claims.
-- Windows has DXGI/D3D11 presentation, but no host has a Skia GPU render path
-  or a common opaque GPU resource/fence API. Metal and Linux Vulkan/dmabuf
-  paths remain future work.
+- Image codecs, shaping, fallback fonts, ICU, and platform font discovery are
+  not yet completion claims.
+- GPU decode-texture import and dmabuf-style zero-copy remain future work even
+  though Skia GPU rendering and live native presentation are complete.
 - WSLg can negotiate the Wayland protocol while still differing from a normal
   Linux compositor in visible presentation behavior. It is useful evidence,
   but is not a substitute for a real Linux desktop run.
@@ -230,10 +231,10 @@ statuses, and exceptions are maintained in:
    fixtures and split extractor, packet, and codec responsibilities.
 2. Build a software playback session with audio output, bounded queues, and
    A/V synchronization on all three hosts.
-3. Define the opaque cross-library GPU device/surface/frame/fence contract.
-4. Proceed in parallel with Skia GPU rendering, FFmpeg hardware decode, and
-   QuickJS core/event-loop integration; retain software/CPU fallback as the
-   correctness baseline.
+3. Add distribution acceptance tests that compile/link/run outside the source
+   and build trees and reject bundled compilers or absolute build paths.
+4. Proceed with FFmpeg hardware decode and QuickJS core/event-loop integration;
+   retain software/CPU fallback as the correctness baseline.
 5. Connect hardware decoder textures to Skia without CPU copies, then expose
    stable media/gfx services to QuickJS with WebCodecs-like queue semantics.
 6. Continue closing the focused CRT/PAL limitations above when an upstream

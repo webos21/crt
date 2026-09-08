@@ -1,779 +1,203 @@
 # CRT
 
-CRT is an experimental Bionic-compatible OS Abstraction Runtime / PAL.
+CRT is a Bionic-compatible cross-platform C runtime and Platform Adaptation
+Layer (PAL). It lets Linux/BSD/Android-style native libraries and applications
+be rebuilt from the same source as native Linux, Windows, and macOS
+executables.
 
-The project aims to provide a low-level runtime surface, based on Android Bionic
-libc, that makes Linux, BSD, and Android native source code easier to rebuild
-across Linux, Windows, macOS, and Android.
-
-The first deliverable looks like a C runtime library, but the broader goal is a
-portable low-level foundation for native libraries and applications.
-
-## Goal
-
-CRT exposes a Bionic-compatible libc/API/ABI surface while hiding host operating
-system differences behind explicit platform adaptation layers.
-
-The central idea is:
-
-> If Linux/BSD/Android-style low-level runtime facilities are made portable at
-> the libc/PAL layer, upper layers can focus on graphics, application lifecycle,
-> event integration, packaging, and host UX instead of repeatedly solving files,
-> sockets, threads, TLS, memory mapping, dynamic loading, errno, signals, clocks,
-> and process basics for each OS.
-
-This project focuses on rebuild-based source portability. It is not a container,
-VM, subsystem, or full foreign userspace emulator.
-
-## Non-Goals
-
-CRT is not trying to provide:
-
-- Docker/LXC-style Linux execution.
-- A Windows Subsystem for Linux style environment.
-- Unmodified execution of arbitrary Linux binaries.
-- Unmodified execution of Android APKs.
-- A complete Android framework, HAL, Binder service, package manager, or ART
-  environment.
-- Full glibc binary ABI compatibility for existing Linux binaries.
-- Direct ports of specific GUI toolkits such as Qt, GTK, or Enlightenment.
-
-Large projects such as Qt, GTK, Enlightenment, Chromium, or Chrome are useful as
-examples and long-term compatibility benchmarks, not as immediate porting
-targets.
+The primary target is a Linux-kernel embedded device: set-top boxes,
+Raspberry-Pi-class consoles, industrial HMIs, and automotive IVI systems.
+Native desktop builds provide a fast development and debugging loop and can
+also be shipped as desktop applications.
 
 ## Scope
 
-The intended runtime scope includes:
+CRT owns the low-level portability boundary: files, sockets, threads, TLS,
+memory mapping, clocks, signals, process basics, dynamic-loading policy,
+startup objects, libc/libm/libdl, and the C++ runtime. Higher layers add a
+window/input/software-framebuffer API, accelerated graphics and media, and a
+JavaScript runtime.
 
-- `libc`
-- `libm`
-- `libdl`
-- `libstdc++` / C++ ABI support
-- dynamic linker support, later
-- platform adaptation layers for Linux, Windows, macOS, and Android
-- architecture support for x86_64 and aarch64 only
+The compatibility model is source rebuilding against a Bionic-shaped public
+surface. CRT does not aim to run unmodified glibc binaries or APKs, reproduce
+Android Framework, provide a container/VM, or directly port Qt, GTK,
+Enlightenment, Chromium, or Electron.
 
-## Stack
+The `linker/` directory is retained for a possible future CRT-owned loader,
+but linker implementation is outside the current roadmap.
 
-The current baseline decisions are:
+## Toolchain Policy
 
-- Base runtime: Android Bionic libc
-- Language: C99 + architecture-specific assembly
-- Primary compiler: LLVM Clang
-- Primary linker: LLD
-- Compiler runtime: compiler-rt
-- C++ runtime direction: libunwind and libc++
-- Build system: CMake
-- Default generator: Ninja
-- Test integration: CTest
+Clang/LLVM, LLD, and compiler-rt are the primary development toolchain, but
+CRT distributions **never bundle a compiler or linker**. Embedded devices use
+their vendor/dedicated toolchain. A distribution contains the CRT sysroot,
+startup objects, runtime libraries, wrappers, CMake configuration, and a
+manifest that records the external toolchain contract.
 
-The project ABI intentionally follows the Linux/Bionic-style runtime surface
-rather than each host OS ABI where those differ. In particular, all CRT targets
-are built with `-Xclang -fwchar-type=int` so `wchar_t` and wide string literals
-are signed 32-bit on Windows as well as on Linux/macOS. External libraries built
-against the CRT sysroot must use the same flag.
+The Windows C++ lane uses the Bionic/Itanium ABI and project-built libunwind.
+Windows C++ exceptions are compiled as DWARF CFI (`-fdwarf-exceptions`) rather
+than depending on the OS-owned SEH unwind engine. See
+[`docs/cxx_runtime.md`](docs/cxx_runtime.md).
 
-The same reasoning applies to the C++ exception-table format on Windows.
-Clang's default for `*-w64-mingw32` is native SEH (`.pdata`/`.xdata`, unwound
-by the Windows OS itself through `RtlUnwind`/`RtlVirtualUnwind`), but CRT
-builds with `-fdwarf-exceptions` instead, matching the Itanium DWARF CFI
-format already used on Linux and macOS. This keeps C++ exception unwinding
-on the imported Itanium C++ ABI path across all three hosts. Linux and Windows
-use the project's from-source LLVM libunwind; macOS deliberately uses
-libSystem's unwinder. Host libc++ is never linked as a substitute for the
-project-built runtime used by Skia. See `docs/cxx_runtime.md`'s "Exceptions,
-RTTI, And Unwind" section for the full technical detail.
+## Staged Runtime
 
-Rust may be used later for tooling or optional internal modules behind a stable C
-ABI, but the core runtime must remain buildable without requiring Rust.
+CRT is built and verified as cumulative distributions:
 
-## Current Status
+| Stage | Includes |
+| --- | --- |
+| `01-c` | libc/libm/libdl, startup, shell, mksh, toybox, awk, make |
+| `02-cxx` | `01-c` + libc++/libc++abi/libunwind |
+| `03-gfx-simple` | `02-cxx` + window, keyboard/mouse, software framebuffer |
+| `04-gfx-media` | `03-gfx-simple` + Skia CPU/GPU, Vulkan/D3D12/Metal, FFmpeg |
+| `05-js` | `04-gfx-media` + QuickJS bindings |
 
-The project has moved beyond the initial hello-world bring-up. The current
-repository builds a Bionic-compatible CRT/PAL baseline with:
+Simple Graphics deliberately excludes Skia CPU raster/text and Skia GPU. Its
+drawing surface is the CPU-writable framebuffer in `crtgfx/window.h`.
 
-- `libc`, `libm`, `libdl`, and a small C++ ABI bootstrap, each available as
-  static and host-native shared artifacts.
-- Bionic/Linux-style public headers and type policy through the CRT sysroot.
-- Linux, macOS, and Windows startup, syscall/PAL, fd, process, socket, signal,
-  pthread, TLS, mmap, stdio, locale, wchar, math, dynamic-loading, and rootfs
-  support at the level needed by the current tests and ports.
-- Android-like rootfs output with mksh and selected toybox applets as core
-  project artifacts, not ordinary third-party ports.
-- Recipe-backed porting tests under `out/<preset>/port-tests/`, with zlib,
-  libpng, SQLite amalgamation, bzip2, xz, pcre2, mbedTLS, and curl verified
-  through the current documented status. curl is `shared-pass` on Linux,
-  macOS, and Windows, including real HTTP and HTTPS round trips against
-  `example.com` for both static and shared libcurl.
-
-For the authoritative short-form snapshot, see `STATUS.md`. For the per-port
-matrix, see `docs/porting_status.md`. Historical first-bring-up notes are kept
-under `docs/bringup/`.
-
-The next product-level target is an Electron-class rebuilt application runtime,
-documented in `docs/runtime_roadmap.md`: `libcrtgfx` (Skia + Wayland-style
-compositor boundary + Chromium Ozone path), `libcrtmedia` (FFmpeg/codecs/audio/
-video), and `libcrtjs` (QuickJS first, V8 later). The first `libcrtgfx`
-CPU-raster/input/text milestone is complete on Linux, macOS, and Windows. The
-remaining libc/PAL work and the next graphics/runtime stages are tracked in
-`TODO.md`.
+Each upper stage consumes the preceding installed `dist` tree so internal
+verification exercises the same boundary delivered to users. Full details,
+artifact layout, package naming, and acceptance rules are in
+[`docs/distribution.md`](docs/distribution.md).
 
 ## Prerequisites
 
-### Common
-
-All platforms need:
-
-- Git
-- CMake 3.25 or newer
-- LLVM Clang
-- LLVM Clang++
-- compiler-rt from the active Clang installation
-
-Ninja is the default generator for all host presets.
+All hosts need Git, CMake 3.25+, Ninja, Python 3, Clang, LLD, and suitable
+archive tools. These are build-machine prerequisites, not distribution
+contents.
 
 ### Linux
 
-Install:
-
-- CMake
-- Ninja
-- Clang/LLVM
-- LLD
-- compiler-rt
-- libc++ and libc++abi, matching the installed Clang's major version (for
-  example `libc++-18-dev`/`libc++abi-18-dev` alongside Clang 18 on Ubuntu).
-  This project's C++ runtime direction is libc++, not GNU libstdc++ (see
-  "Stack" above) -- Apple Clang defaults to libc++ unconditionally, so
-  macOS needs nothing extra here, but a stock Ubuntu/Debian Clang install
-  defaults to GNU libstdc++ instead, which does not work with this
-  project's own Bionic-compatible C headers (GNU libstdc++'s own header
-  wrappers pull in real glibc-internal headers this project never
-  exposes). Without this installed, the C++ build fails immediately with
-  `'bits/c++config.h' file not found` or `'features.h' file not found`;
-  see `HISTORY.md`'s 2026-08-18 entry for the full diagnosis.
-
-Example package names vary by distribution, but the required commands should be
-available on `PATH`:
+For Debian/Ubuntu, a representative base setup is:
 
 ```sh
-git --version
-cmake --version
-ninja --version
-clang --version
-clang++ --version
-ld.lld --version
+sudo apt install git cmake ninja-build python3 clang lld compiler-rt
 ```
+
+Simple Graphics additionally needs a running Wayland compositor and the
+Wayland/xkbcommon runtime. Advanced graphics normally adds:
+
+```sh
+sudo apt install libvulkan-dev libwayland-dev mesa-vulkan-drivers vulkan-tools
+```
+
+`mesa-vulkan-drivers` may be replaced with the GPU vendor's Vulkan ICD. The
+current Linux FFmpeg recipe does not enable VA-API. When that path is enabled,
+the usual development/runtime set is `libva-dev`, `libva2`, `libva-drm2`, a
+vendor VA driver, and optional `vainfo`. Embedded images should satisfy the
+same capabilities with board-vendor packages rather than copying desktop
+package lists.
 
 ### Windows 11
 
-Install:
-
-- Git for Windows
-- CMake
-- Ninja
-- LLVM/Clang
-- Visual Studio Build Tools 2022 with the Windows SDK
-- Windows Developer Mode enabled
-
-The Windows SDK provides import libraries such as `kernel32.lib` and
-`synchronization.lib`, which are needed by the current Windows backend. Use a
-Developer PowerShell or Developer Command Prompt so the Windows SDK library
-paths are visible to the linker.
-
-Windows Developer Mode is required for non-elevated symlink creation. Several
-porting recipes install shared-library aliases with `ln -s`/`symlink()` (for
-example SONAME-style `libfoo.so` links), and the Windows PAL maps those calls to
-Windows reparse-point symlinks. Without Developer Mode, those install steps can
-fail with `EPERM` unless the build runs elevated.
-
-The configure preset sets `CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY` because
-CRT controls its own startup and C runtime boundary. This avoids CMake's default
-compiler check trying to link a hosted MSVC runtime executable before CRT has
-configured its own targets.
-
-The build also disables CMake's default Windows C standard libraries for CRT
-targets, and does the same for C++ after the C++ runtime bootstrap is enabled.
-This prevents CMake's hosted MSVC defaults such as `oldnames.lib` from being
-added to freestanding `clang++` links. CMake tries to locate the required
-Windows SDK import libraries from the installed SDK. If that fails, either run
-from a Visual Studio Developer shell or pass them explicitly:
-
-```powershell
-cmake --preset windows-host-ninja-debug `
-  -DCRT_WINDOWS_KERNEL32_LIB="C:\Path\To\kernel32.lib" `
-  -DCRT_WINDOWS_SYNCHRONIZATION_LIB="C:\Path\To\synchronization.lib"
-```
-
-Useful checks:
-
-```powershell
-git --version
-cmake --version
-ninja --version
-clang --version
-lld-link --version
-where kernel32.lib
-where synchronization.lib
-```
-
-Windows Defender's real-time scanning inspects every file the build writes,
-which is significant here given how many small object files, port-build
-artifacts, and rootfs entries a full build and porting-loop run produce.
-Adding process and folder exclusions noticeably speeds up local builds. From
-an elevated PowerShell session:
-
-```powershell
-# Add Process Exclusions
-Add-MpPreference -ExclusionProcess "cmake.exe", "ninja.exe", "clang.exe", "clang++.exe", "clang-cl.exe", "lld.exe", "llvm-nm.exe"
-
-# Add Folder Exclusions (Update paths based on your actual machine setup)
-Add-MpPreference -ExclusionPath "C:\Program Files\LLVM"
-Add-MpPreference -ExclusionPath "C:\path\to\your\projects\build"
-```
+Install Git, CMake, Ninja, Python, LLVM for Windows, and a Windows 10/11 SDK.
+Run CMake from a shell where the SDK import libraries are discoverable. The
+CRT Windows target is `*-w64-mingw32` for the common Itanium ABI lane even
+though the host SDK supplies the native system and graphics import libraries.
 
 ### macOS
 
-Install:
-
-- Xcode or Xcode Command Line Tools
-- CMake
-- Ninja
-
-Useful checks:
-
-```sh
-xcode-select -p
-clang --version
-cmake --version
-ninja --version
-```
-
-## Provenance Checks
-
-Imported Bionic and FreeBSD/msun source provenance is tracked in
-`third_party/bionic/import_manifest.json`. After changing imported files or
-their policy, run:
-
-```sh
-python3 tools/check_import_manifest.py
-```
-
-When CMake finds Python, the same check is available as:
-
-```sh
-cmake --build --preset macos-host-ninja-debug --target check-import-manifest
-```
+Install Xcode Command Line Tools, CMake, Ninja, and Python 3. Metal and the
+required system frameworks come from the platform SDK.
 
 ## Build
 
-CTest reads generated metadata from each `out/<preset>/` directory. After adding
-or removing tests, run the matching `cmake --preset ...` step on every host
-before comparing test counts. The configure log prints `CRT registered tests`
-for the selected OS preset; the count should match across macOS, Linux, and
-Windows unless a test is intentionally gated by platform.
-
-CMake caches the selected compiler and target OS in each `out/<preset>/`
-directory. If a build command shows the wrong compiler, such as `/usr/bin/cc` or
-`/usr/bin/c++`, or the wrong target define, such as `CRT_TARGET_OS_MACOS=1` in a
-Linux build, clear or refresh that preset's build directory before rebuilding:
-
-```sh
-cmake --fresh --preset <os-host-ninja-debug>
-```
-
-If your CMake does not support `--fresh`, remove the matching `out/<preset>/`
-directory and configure again.
-
-CTest does not build missing test executables. If CTest reports `Unable to find
-executable`, rerun the matching build preset or use the workflow preset:
-
-```sh
-cmake --workflow --preset <os-host-ninja-debug>
-```
-
-### Sysroot
-
-Install the project sysroot into the matching build directory:
-
-```sh
-cmake --build --preset <os-host-ninja-debug> --target sysroot
-```
-
-The generated sysroot is installed under:
-
-```text
-out/<preset>/sysroot/
-  include/
-    public CRT headers
-  lib/
-    crt1.o
-    libc.a
-    libdl.a
-    libm.a
-    libc++.a
-    libc.dylib / libc.so / c.dll
-    libdl.dylib / libdl.so / dl.dll
-    libm.dylib / libm.so / m.dll
-    libc++.dylib / libc++.so / c++.dll
-    libclang_rt.builtins.a
-```
-
-### macOS
-
-The currently verified preset is macOS host debug:
-
-```sh
-cmake --preset macos-host-ninja-debug
-cmake --build --preset macos-host-ninja-debug
-ctest --preset macos-host-ninja-debug
-```
-
-Or run configure, build, and test in one step:
-
-```sh
-cmake --workflow --preset macos-host-ninja-debug
-```
-
-Install the project sysroot into the build directory:
-
-```sh
-cmake --build --preset macos-host-ninja-debug --target sysroot
-```
-
-### Linux
-
-On a Linux host with Clang and Ninja installed:
-
-```sh
-cmake --preset linux-host-ninja-debug
-cmake --build --preset linux-host-ninja-debug
-ctest --preset linux-host-ninja-debug
-cmake --build --preset linux-host-ninja-debug --target sysroot
-```
-
-Or run configure, build, and test in one step:
+The default workflow configures, builds, and tests only the C stage:
 
 ```sh
 cmake --workflow --preset linux-host-ninja-debug
-```
-
-The test executable is expected at:
-
-```text
-out/linux-host-ninja-debug/tests/hello_c
-```
-
-### Windows 11
-
-Open a Developer PowerShell or Developer Command Prompt with the Windows SDK
-environment configured, then run:
-
-```powershell
-cmake --preset windows-host-ninja-debug
-cmake --build --preset windows-host-ninja-debug
-ctest --preset windows-host-ninja-debug
-cmake --build --preset windows-host-ninja-debug --target sysroot
-```
-
-Or run configure, build, and test in one step:
-
-```powershell
+cmake --workflow --preset macos-host-ninja-debug
 cmake --workflow --preset windows-host-ninja-debug
 ```
 
-The test executable is expected at:
-
-```text
-out/windows-host-ninja-debug/tests/hello_c.exe
-```
-
-The Windows bring-up intentionally links `kernel32` for the OS boundary while
-still avoiding the hosted C runtime with `-nostdlib`, `-nostartfiles`, and
-`-nodefaultlibs`.
-
-## Porting Tests
-
-Porting tests validate whether unmodified upstream library source can be rebuilt
-against the CRT sysroot. This is separate from the normal CRT unit test flow in
-`## Build`.
-
-The porting loop is also how the CRT grows. When an upstream package fails, the
-preferred fix is to fill the missing Bionic-compatible CRT/sysroot/PAL surface,
-not to patch the upstream package or expose host SDK headers by accident.
-
-The implementation loop for each port is:
-
-1. Run upstream `configure` or a direct `crt-cc` compile/link/run test to expose
-   missing headers, types, symbols, or behavior.
-2. Check how Android Bionic defines or implements the required surface.
-3. Decide the CRT/PAL/sysroot extension policy and implement it in this
-   repository.
-4. Re-run the same porting test. If it fails again, return to step 1 and repeat
-   with the next missing surface.
-
-Bionic is the compatibility reference for this loop. New public headers, types,
-macros, symbols, errno values, return-value behavior, and ABI shapes should be
-checked against Android Bionic before they are added to the CRT sysroot. Host
-OS-specific APIs may still be used behind PAL adapters, but they should not
-define the public CRT surface unless a documented compatibility shim is being
-added deliberately.
-
-The intended user workflow is:
-
-1. Build and install the CRT sysroot for the current host preset.
-2. Download and extract upstream source archives under `out/<preset>/port-tests/src`.
-3. Load the CRT porting environment.
-4. Run the upstream project's native `configure`, `make`, and `make install`.
-5. Record the result in `docs/porting_status.md` and the matching recipe.
-
-The porting work area is always under the build tree:
-
-```text
-out/<preset>/port-tests/
-  downloads/
-  src/
-  build/
-  install/
-  logs/
-```
-
-### Recipes
-
-Porting recipes live under `porting/recipes/`. A recipe is the source of truth
-for one upstream library's porting metadata:
-
-- `source.url`: upstream archive URL.
-- `source.archive`: expected archive filename.
-- `source.source_dir`: extracted source directory name.
-- `source.sha256`: authoritative archive integrity hash.
-- `source.sha1` and `source.md5`: compatibility metadata only.
-- `dependencies`: other recipes that must be installed into `PORT_PREFIX` first.
-- `build.system`: initial build driver, such as `configure`, `amalgamation`, or
-  `manual`.
-- `build.automated`: optional boolean; `false` records an upstream build flow
-  that exists but is not yet included in aggregate CMake port builds.
-- `build.configure_args`: arguments appended before `--prefix=$PORT_PREFIX`.
-- `build.sources`, `build.archive`, and `build.install_headers`: direct
-  single-source/amalgamation build inputs when the upstream archive has no
-  configure script.
-- `build.cflags`: recipe-owned feature switches for the upstream package, kept
-  separate from `CRT_EXTRA_CFLAGS`.
-- `build.env`: recipe-specific configure/cache variables for CRT toolchain
-  capability declarations.
-- `status`: per-host result for Linux, macOS, and Windows.
-- `notes`: known gaps, required CRT surface, or follow-up policy.
-
-The human-readable success matrix is maintained in
-`docs/porting_status.md`.
-
-The long-term Windows porting environment is an Android-like shell and command
-rootfs running on this CRT/PAL rather than MSYS/Git Bash as a runtime
-compatibility layer. See `docs/android_shell_environment.md`. The initial
-rootfs scaffold can be created with:
+Focused stage commands use the matching build preset:
 
 ```sh
-cmake --build --preset windows-host-ninja-debug --target rootfs
+cmake --build --preset <preset> --target crt-c-build
+cmake --build --preset <preset> --target crt-c-test
+cmake --build --preset <preset> --target crt-c-dist
+
+cmake --build --preset <preset> --target crt-libcxx-build
+cmake --build --preset <preset> --target crt-libcxx-test
+cmake --build --preset <preset> --target crt-libcxx-dist
+
+cmake --build --preset <preset> --target crt-gfx-simple-build
+cmake --build --preset <preset> --target crt-gfx-simple-test
+cmake --build --preset <preset> --target crt-gfx-simple-dist
+
+cmake --build --preset <preset> --target crt-gfx-media-build
+cmake --build --preset <preset> --target crt-gfx-media-test
+cmake --build --preset <preset> --target crt-gfx-media-dist
+
+cmake --build --preset <preset> --target crt-js-build
+cmake --build --preset <preset> --target crt-js-test
+cmake --build --preset <preset> --target crt-js-dist
 ```
 
-### Environment
+The outputs are cumulative directories and archives under
+`out/<preset>/dist/`. A later `*-dist` target builds preceding stages as
+dependencies.
 
-First install the CRT sysroot:
+Advanced graphics must be configured with a completed imported libc++ and
+Skia build. The existing `crtgfx-skia-fetch`, `crtgfx-skia-configure`,
+`crtgfx-skia-build`, and `crtgfx-skia-smoke` targets retain that explicit
+bring-up path. FFmpeg remains controlled by `CRTMEDIA_ENABLE_FFMPEG`.
+
+## Using A Distribution
+
+Select a stage, then provide the external compiler tools:
 
 ```sh
-cmake --build --preset macos-host-ninja-debug --target sysroot
+export CRT_CC=/path/to/clang
+export CRT_CXX=/path/to/clang++
+export CRT_AR=/path/to/llvm-ar
+export CRT_RANLIB=/path/to/llvm-ranlib
+. out/<preset>/dist/02-cxx/activate.sh
 ```
 
-Load the CRT porting environment from the repository root. On Linux/macOS, or
-from Git Bash/MSYS on Windows:
+On Windows use `call out\<preset>\dist\02-cxx\activate.cmd`. CMake consumers
+may use the packaged `crt-toolchain.cmake`, which selects the packaged wrappers.
+An embedded vendor toolchain that cannot use those Clang-compatible wrappers
+should remain authoritative and consume CRT's packaged sysroot directly.
 
-```sh
-. tools/crt-env.sh macos-host-ninja-debug
-```
-
-On Windows, use the command-file environment helper to avoid PowerShell
-execution-policy restrictions:
-
-```bat
-call tools\crt-env.cmd windows-host-ninja-debug
-```
-
-From PowerShell, open a configured `cmd.exe` session instead:
-
-```powershell
-cmd /k tools\crt-env.cmd windows-host-ninja-debug
-```
-
-`tools\crt-env.ps1` is also available if your PowerShell execution policy allows
-local scripts.
-
-The environment helpers intentionally reset `CPPFLAGS` and `LDFLAGS` to the CRT
-port prefix instead of appending the previous shell values. Use
-`CRT_EXTRA_CPPFLAGS`, `CRT_EXTRA_LDFLAGS`, `CRT_EXTRA_CFLAGS`,
-`CRT_EXTRA_CXXFLAGS`, or `CRT_EXTRA_LIBS` when an upstream package needs extra
-flags.
-
-### Manual Examples
-
-Example zlib build from an extracted upstream source directory:
-
-```sh
-cd /path/to/zlib-1.3.1
-./configure --static --prefix="$PORT_PREFIX"
-make -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 2)"
-make install
-```
-
-Example libpng build after zlib has been installed into `PORT_PREFIX`:
-
-```sh
-cd /path/to/libpng-1.6.57
-./configure --disable-shared --enable-static --prefix="$PORT_PREFIX"
-make -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 2)"
-make install
-```
-
-The wrappers use only CRT sysroot libc headers plus Clang resource headers, and
-link configure test executables with CRT startup/static runtime archives. See
-`docs/sysroot_ports.md`.
-
-### Automation
-
-CMake provides recipe-backed porting targets. They still run the upstream
-`configure && make && make install` flow under `out/<preset>/port-tests`, but
-they make the common test path easier to repeat.
-
-On Linux and macOS, the recipe targets normally let the host POSIX shell and
-host userland drive upstream `configure`/`make`. That does not mean the produced
-libraries are host-libc builds: `CC`/`CXX` still point at `tools/crt-cc` and
-`tools/crt-c++`, which use the CRT sysroot headers, startup objects, and
-libraries. On macOS, `otool -L` will still show `/usr/lib/libSystem.B.dylib` on
-the final Mach-O files because libSystem is the PAL/backend boundary for Darwin
-syscalls, dyld, pthreads, and process services. The porting audit checks for
-the more important distinction: port dylibs should record this project's CRT
-dylibs (`@rpath/libc.dylib`, plus libm/libdl/libc++ where used), and ordinary
-libc/POSIX symbols such as malloc, stdio, sockets, pthreads, time, and string
-functions should resolve through the CRT layer rather than directly from
-libSystem. The current macOS port install tree has been rebuilt and audited
-with `otool -L`/`nm -m -u` on that basis.
-
-On native Windows, Autoconf `configure` scripts are POSIX shell scripts. The
-CMake port targets may be launched from PowerShell or `cmd.exe`, but configure
-recipes still require Git Bash or MSYS2 build tools (`bash` or `sh`, plus
-`make`) to be installed and visible in `PATH`. If the shell is not discoverable,
-set `CRT_PORT_SHELL` to the full path of `bash.exe` or `sh.exe` before running
-the CMake port target:
-
-```bat
-set CRT_PORT_SHELL=C:\msys64\usr\bin\bash.exe
-cmake --build --preset windows-host-ninja-debug --target port-rebuild-zlib
-```
-
-This shell is only used to run upstream configure/make scripts. The compiled
-objects and libraries still use the CRT sysroot wrappers and the Windows native
-Clang/LLD toolchain selected by the preset.
-
-List the available recipes:
-
-```sh
-cmake --build --preset macos-host-ninja-debug --target port-list
-```
-
-Fetch and extract all recipe sources:
-
-```sh
-cmake --build --preset macos-host-ninja-debug --target port-fetch
-```
-
-Fetch and extract one recipe source:
-
-```sh
-cmake --build --preset macos-host-ninja-debug --target port-fetch-zlib
-```
-
-Per-recipe fetch targets also fetch recipe dependencies. For example,
-`port-fetch-libpng` fetches both libpng and zlib because libpng declares zlib in
-`dependencies`.
-
-Build an automated recipe against the CRT sysroot:
-
-```sh
-cmake --build --preset macos-host-ninja-debug --target port-build-zlib
-cmake --build --preset macos-host-ninja-debug --target port-build-libpng
-cmake --build --preset macos-host-ninja-debug --target port-build-sqlite-amalgamation
-```
-
-Force an automated recipe to rebuild:
-
-```sh
-cmake --build --preset macos-host-ninja-debug --target port-rebuild-zlib
-```
-
-Build aggregate recipe groups:
-
-```sh
-cmake --build --preset macos-host-ninja-debug --target port-build-configure
-cmake --build --preset macos-host-ninja-debug --target port-rebuild-configure
-cmake --build --preset macos-host-ninja-debug --target port-build-recipes
-cmake --build --preset macos-host-ninja-debug --target port-rebuild-recipes
-```
-
-Run recipe-declared runtime checks:
-
-```sh
-cmake --build --preset macos-host-ninja-debug --target port-test-xz
-cmake --build --preset macos-host-ninja-debug --target port-test-recipes
-```
-
-`port-test-<name>` first ensures the corresponding `port-build-<name>` target is
-installed, then compiles and runs the checks declared in that recipe's `tests`
-array. `port-test-recipes` runs every recipe that currently declares automated
-tests. These tests now cover real static/shared round trips for zlib, bzip2,
-xz, libpng, pcre2, mbedTLS, and curl where the recipe declares the matching
-test entries; curl intentionally uses real `example.com` HTTP/HTTPS checks
-rather than a local loopback-only substitute.
-
-`tools/fetch_ports.py` and `tools/crt-port-build.py` are the lower-level helpers
-used by those CMake targets. They read recipes from `porting/recipes/` and are
-kept for project automation and agent-side regression checks. Automated port
-builds also ignore inherited host `CPPFLAGS`, `CFLAGS`, `CXXFLAGS`, `LDFLAGS`,
-and `LIBS`; pass project-specific additions through the matching `CRT_EXTRA_*`
-variables.
-
-CMake target names are generated from the recipes at configure time. If a new
-recipe file is added, rerun the matching `cmake --preset ...` command before
-using its `port-fetch-<name>`, `port-build-<name>`, or `port-test-<name>` target.
-
-### Skia For libcrtgfx
-
-Skia is treated as a core `libcrtgfx` dependency, not as an ordinary host
-library and not as an upstream source patch. The source/build automation lives
-behind dedicated CMake targets so it can use the same CRT sysroot discipline as
-the porting recipes:
-
-```sh
-cmake --build --preset macos-host-ninja-debug --target crtgfx-skia-fetch
-cmake --build --preset macos-host-ninja-debug --target crtgfx-skia-configure
-cmake --build --preset macos-host-ninja-debug --target crtgfx-skia-build
-```
-
-The default Skia source track is the Chrome/Skia milestone `m148`. Override it
-at configure time when needed:
-
-```sh
-cmake --preset macos-host-ninja-debug -DCRTGFX_SKIA_VERSION=m149
-cmake --preset macos-host-ninja-debug \
-  -DCRTGFX_SKIA_REF=refs/heads/chrome/m148 \
-  -DCRTGFX_SKIA_EXPECTED_COMMIT=<full-commit-hash>
-```
-
-`crtgfx-skia-build` installs Skia under
-`out/<preset>/external/skia/install`. This validates the selected Skia source
-against the CRT sysroot. `crtgfx-skia-smoke` stages the imported project-owned
-libc++, links the real Skia bridge, and verifies deterministic CPU-raster and
-FreeType-backed text drawing. This complete path has passed on Linux, macOS,
-and Windows; host libc++ is deliberately not linked as a substitute. The Skia
-bridge does not provide fake headers: applications use normal Skia public
-headers through the CRT sysroot.
+The in-repository wrappers `tools/crt-cc` and `tools/crt-c++` enforce the
+freestanding/sysroot/default-runtime boundary. Configure/make ports are driven
+by `tools/crt-port-build.py` and project-owned recipes in `porting/recipes`.
+Upstream sources are not patched merely to hide a missing CRT surface; the
+missing Bionic API/type/symbol/behavior is implemented in CRT first.
 
 ## Repository Layout
 
 ```text
-docs/            design docs, policy notes, per-subsystem status
-include/         public Bionic-compatible CRT headers
-libc/            libc source, plus per-host PAL under src/arch/{linux,macos,windows}/
-libm/            math library
-libdl/           dynamic-loading support library
-libstdc++/       C++ ABI bootstrap, plus the imported LLVM libc++/libc++abi/libunwind path
-linker/          dynamic linker support (scope placeholder, not yet implemented)
-libcrtgfx/       Skia CPU-raster graphics runtime: window/event/frame API, Wayland client, Skia+FreeType bridge
-libcrtjs/        QuickJS-first JavaScript runtime (skeleton only, not yet started)
-libcrtmedia/     FFmpeg-based media runtime (skeleton only, not yet started)
-porting/         recipe-driven upstream porting loop: recipes/, shims/, tests/
-shell/           project-built mksh, toybox, awk, and tiny_sh for the rootfs
-third_party/     imported Bionic/FreeBSD msun source (see third_party/bionic/import_manifest.json)
-tools/           build, porting, and CI helper scripts
-tests/           CRT/PAL unit and regression tests
+include/          Bionic-compatible public headers
+libc/             libc, PAL, startup, OS/architecture backends
+libm/             math runtime
+libdl/            dynamic-loading API and host backends
+libstdc++/        bootstrap ABI shim and imported libc++ build integration
+shell/            tiny shell, mksh, toybox, and awk
+libcrtgfx/        window/input/framebuffer and advanced Skia/GPU integration
+libcrtmedia/      media runtime and optional FFmpeg integration
+libcrtjs/         QuickJS integration
+porting/recipes/  upstream porting test recipes
+tools/            wrappers, rootfs/dist builders, porting automation
+tests/            unit, ABI, PAL, and integration tests
+docs/             design, policy, roadmap, and verification documents
 ```
 
-`libcrtgfx`, `libcrtjs`, and `libcrtmedia` share the same internal shape --
-common/host-independent code directly under `src/`, per-host code under
-`src/arch/{linux,macos,windows}/`, and vendored dependencies under
-`third_party/`:
+## Core Documents
 
-```text
-libcrtgfx/
-  include/
-  src/
-    *.c                        # common runtime code, directly under src/
-    arch/{linux,macos,windows}/
-  third_party/
-    skia/
-    wayland/
-    xkbcommon/
-```
+- [Project meaning](docs/project_meanings.md)
+- [Stack and toolchain policy](docs/project_stacks.md)
+- [Distribution stages](docs/distribution.md)
+- [Runtime roadmap](docs/runtime_roadmap.md)
+- [C++ runtime](docs/cxx_runtime.md)
+- [Graphics API policy](docs/libcrtgfx_api_policy.md)
+- [Media API policy](docs/libcrtmedia_api_policy.md)
+- [Sysroot porting](docs/sysroot_ports.md)
+- [Current status](STATUS.md), [work queue](TODO.md), and [history](HISTORY.md)
 
-Build output lives entirely under the generated, non-source `out/<preset>/`
-tree (see `## Build`) and is not part of this layout.
+## License And Provenance
 
-## Design Documents
-
-The documentation has explicit ownership so current status is not maintained
-in several places:
-
-- [`STATUS.md`](STATUS.md): concise verified baseline and known limitations.
-- [`TODO.md`](TODO.md): actionable open or deferred work.
-- [`HISTORY.md`](HISTORY.md): completed work and investigation detail.
-- [`docs/porting_status.md`](docs/porting_status.md): per-library/per-host
-  recipe state. Recipe JSON is the machine-readable source of truth.
-
-Current direction and policy:
-
-- [`docs/project_meanings.md`](docs/project_meanings.md) and
-  [`docs/project_stacks.md`](docs/project_stacks.md): project scope and
-  foundational toolchain decisions.
-- [`docs/runtime_roadmap.md`](docs/runtime_roadmap.md): upper-runtime sequence
-  for `libcrtgfx`, `libcrtjs`, and `libcrtmedia`.
-- [`docs/header_abi.md`](docs/header_abi.md),
-  [`docs/import_bionic.md`](docs/import_bionic.md), and
-  [`docs/pthread_policy.md`](docs/pthread_policy.md): Bionic-facing ABI,
-  import, and runtime policy.
-- [`docs/sysroot_ports.md`](docs/sysroot_ports.md) and
-  [`docs/porting_status.md`](docs/porting_status.md): sysroot porting workflow
-  and package results.
-- [`docs/shared_libraries.md`](docs/shared_libraries.md),
-  [`docs/dynamic_loading.md`](docs/dynamic_loading.md), and
-  [`docs/linker_loader.md`](docs/linker_loader.md): shared artifacts and loader
-  boundary.
-- [`docs/cxx_runtime.md`](docs/cxx_runtime.md): bootstrap and imported LLVM C++
-  runtime policy and status.
-
-Current subsystem documents:
-
-- Graphics: [`docs/libcrtgfx_api_policy.md`](docs/libcrtgfx_api_policy.md) and
-  [`docs/libcrtgfx_wayland_plan.md`](docs/libcrtgfx_wayland_plan.md).
-- Process/thread/signal: [`docs/process_fork.md`](docs/process_fork.md),
-  [`docs/windows_fork_emulation.md`](docs/windows_fork_emulation.md),
-  [`docs/linux_pthread_lifecycle.md`](docs/linux_pthread_lifecycle.md),
-  [`docs/signal_delivery.md`](docs/signal_delivery.md), and
-  [`docs/job_control.md`](docs/job_control.md).
-- Shell/rootfs: [`docs/android_shell_environment.md`](docs/android_shell_environment.md),
-  [`docs/shell_import.md`](docs/shell_import.md), and
-  [`docs/toybox_applet_status.md`](docs/toybox_applet_status.md).
-
-Provenance and completed test ledgers include
-[`docs/bionic_libc_gaps.md`](docs/bionic_libc_gaps.md),
-[`docs/libm_dependency_map.md`](docs/libm_dependency_map.md), and
-[`docs/scanf_edge_matrix.md`](docs/scanf_edge_matrix.md). Older caveats in
-these ledgers do not override `STATUS.md` or `TODO.md`. Early bootstrap notes
-under [`docs/bringup/`](docs/bringup/) and dated architecture reviews under
-[`docs/study/`](docs/study/) are historical snapshots rather than current
-implementation status.
-
-## License
-
-See [`LICENSE.md`](LICENSE.md). CRT follows the same per-file license policy
-as Android Bionic: project-owned code uses a default BSD-style license, and
-code imported or adapted from Bionic and other upstream projects (mksh,
-toybox, awk, ...) keeps its own original license.
+Project-owned code and imported upstream families retain their applicable
+license and provenance records. Bionic/OpenBSD imports are tracked under
+`third_party/`; external runtime, graphics, media, shell, and porting sources
+have project-owned recipe or import metadata next to their integration.

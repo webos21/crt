@@ -1812,14 +1812,23 @@ if(CRT_TARGET_OS STREQUAL "windows")
 endif()
 
 install(TARGETS crtgfx crtgfx_shared
-  ARCHIVE DESTINATION lib
-  LIBRARY DESTINATION lib
-  RUNTIME DESTINATION bin
+  ARCHIVE DESTINATION lib COMPONENT crt-gfx-simple
+  LIBRARY DESTINATION lib COMPONENT crt-gfx-simple
+  RUNTIME DESTINATION bin COMPONENT crt-gfx-simple
 )
-install(DIRECTORY include/ DESTINATION include
-  PATTERN ".gitkeep" EXCLUDE
+install(FILES include/crtgfx/window.h
+  DESTINATION include/crtgfx
+  COMPONENT crt-gfx-simple
+)
+install(FILES include/crtgfx/gpu.h
+  DESTINATION include/crtgfx
+  COMPONENT crt-gfx
 )
 if(CRTGFX_ENABLE_SKIA)
+  install(FILES include/crtgfx/skia.h
+    DESTINATION include/crtgfx
+    COMPONENT crt-gfx
+  )
   # Deliberately no trailing slash on the source path (unlike the plain
   # `include/` install just above) -- CMake's install(DIRECTORY) keeps the
   # source directory's own basename one level down when there is no
@@ -1839,7 +1848,7 @@ if(CRTGFX_ENABLE_SKIA)
   # internal header includes to match -- impractical, and would have to
   # be redone on every future Skia version bump -- so the nested
   # include/include/ path here is intentional, not a mistake.
-  install(DIRECTORY "${CRTGFX_SKIA_ROOT}/include" DESTINATION include)
+  install(DIRECTORY "${CRTGFX_SKIA_ROOT}/include" DESTINATION include COMPONENT crt-gfx)
 endif()
 
 # CRT_STARTUP_END_OBJECTS deliberately not listed here -- see

@@ -415,11 +415,13 @@ cmake --build --preset <host-preset> --target crt-libcxx-configure
 cmake --build --preset <host-preset> --target crt-libcxx-build
 cmake --build --preset <host-preset> --target crt-libcxx-sysroot
 cmake --build --preset <host-preset> --target crt-libcxx-smoke
+cmake --build --preset <host-preset> --target crt-libcxx-dist
 ```
 
 `crt-libcxx-configure` and `crt-libcxx-build` always use `tools/crt-cc` and
 `tools/crt-c++`, with exceptions/RTTI enabled only for the imported runtime.
-The sysroot target stages headers and runtime libraries. The smoke target then
+The C++ build consumes `dist/01-c`; the sysroot/dist targets create the
+cumulative `dist/02-cxx` headers and runtime libraries. The smoke target then
 links and runs both static and shared forms of `tests/imported_libcxx_test.cc`
 using only the staged C++ headers and runtime. `CRT_USE_IMPORTED_LIBCXX=ON`
 makes `rootfs` and the Skia external build depend on that staged runtime rather
@@ -430,7 +432,8 @@ shapes are verified on Linux, macOS, and Windows.
 while the external runtime build explicitly sets
 `CRT_CXX_ENABLE_EXCEPTIONS=1` and `CRT_CXX_ENABLE_RTTI=1`. The imported set is
 selected explicitly rather than silently replacing the bootstrap in every
-ordinary build.
+ordinary build. The resulting distribution contains no LLVM/Clang/LLD
+executable; the consumer supplies its host or embedded-vendor toolchain.
 
 The macOS build now completes both libc++abi and libc++ static/shared outputs.
 It required the Bionic-main msun families recorded in the import manifest,

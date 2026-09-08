@@ -8,9 +8,9 @@ the CRT project.
 External libraries should be buildable from their original source trees with a
 normal `./configure && make && make install` flow while using:
 
-- CRT public headers from `out/<preset>/sysroot/include`;
-- CRT startup object from `out/<preset>/sysroot/lib/crt1.o`;
-- CRT static archives from `out/<preset>/sysroot/lib`;
+- CRT public headers from `out/<preset>/dist/01-c/include`;
+- CRT startup object from `out/<preset>/dist/01-c/lib/crt1.o`;
+- CRT static archives from `out/<preset>/dist/01-c/lib`;
 - compiler runtime builtins installed into the CRT sysroot;
 - Clang resource headers only for compiler intrinsic headers such as
   `arm_neon.h`, not for hosted libc headers.
@@ -109,7 +109,7 @@ The user-facing workflow assumes that upstream archives are downloaded and
 extracted manually. First install the CRT sysroot:
 
 ```sh
-cmake --build --preset macos-host-ninja-debug --target sysroot
+cmake --build --preset macos-host-ninja-debug --target crt-c-dist
 mkdir -p out/macos-host-ninja-debug/port-tests/src
 mkdir -p out/macos-host-ninja-debug/port-tests/install
 ```
@@ -139,7 +139,7 @@ local scripts.
 
 The env files set:
 
-- `CRT_SYSROOT=out/<preset>/sysroot`;
+- `CRT_SYSROOT=out/<preset>/dist/01-c`;
 - `CRT_TARGET_OS`;
 - `CC=tools/crt-cc`;
 - `CXX=tools/crt-c++`;
@@ -401,7 +401,7 @@ The libpng run required adding real CRT surface for:
   configure.
 - The port prefix is separate from the CRT sysroot. Third-party dependency
   headers and archives go under `out/<preset>/port-tests/install`, while CRT
-  headers and runtime objects stay under `out/<preset>/sysroot`.
+  headers and runtime objects stay under `out/<preset>/dist/01-c`.
 - `libtool` may print harmless macOS probing warnings around command-line length
   and versioned symbols. These are recorded as configure-tool noise unless they
   block the build.

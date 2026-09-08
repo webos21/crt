@@ -421,13 +421,13 @@ if(CRT_TARGET_OS STREQUAL "windows")
 endif()
 
 install(TARGETS c c_shared
-  ARCHIVE DESTINATION lib
-  LIBRARY DESTINATION lib
-  RUNTIME DESTINATION bin
+  ARCHIVE DESTINATION lib COMPONENT crt-c
+  LIBRARY DESTINATION lib COMPONENT crt-c
+  RUNTIME DESTINATION bin COMPONENT crt-c
 )
-install(FILES "$<TARGET_OBJECTS:crt1>" DESTINATION lib RENAME crt1.o)
+install(FILES "$<TARGET_OBJECTS:crt1>" DESTINATION lib RENAME crt1.o COMPONENT crt-c)
 if(CRT_TARGET_OS STREQUAL "linux")
-  install(FILES "$<TARGET_OBJECTS:crt1_init_array>" DESTINATION lib RENAME crt1_init_array.o)
+  install(FILES "$<TARGET_OBJECTS:crt1_init_array>" DESTINATION lib RENAME crt1_init_array.o COMPONENT crt-c)
 endif()
 if(CRT_TARGET_OS STREQUAL "windows")
   # crt_windows_dllcrt (crtDllMainCRTStartup, dllcrt.c) has so far only
@@ -436,10 +436,10 @@ if(CRT_TARGET_OS STREQUAL "windows")
   # copy into the sysroot the way crt1.o is installed for EXE builds.
   # tools/crt-cc's own -shared support needs exactly that (see its
   # comment on dllcrt.o) to build a DLL for a third-party port.
-  install(FILES "$<TARGET_OBJECTS:crt_windows_dllcrt>" DESTINATION lib RENAME dllcrt.o)
-  install(FILES "$<TARGET_OBJECTS:crt1_ctors_begin>" DESTINATION lib RENAME crt1_ctors_begin.o)
-  install(FILES "$<TARGET_OBJECTS:crt1_ctors_end>" DESTINATION lib RENAME crt1_ctors_end.o)
-  install(FILES "$<TARGET_OBJECTS:crt1_ctors_walker>" DESTINATION lib RENAME crt1_ctors_walker.o)
-  install(FILES "$<TARGET_OBJECTS:crt1_pseudo_reloc>" DESTINATION lib RENAME crt1_pseudo_reloc.o)
-  install(FILES "$<TARGET_OBJECTS:crt1_dwarf_safety_net>" DESTINATION lib RENAME crt1_dwarf_safety_net.o)
+  install(FILES "$<TARGET_OBJECTS:crt_windows_dllcrt>" DESTINATION lib RENAME dllcrt.o COMPONENT crt-c)
+  install(FILES "$<TARGET_OBJECTS:crt1_ctors_begin>" DESTINATION lib RENAME crt1_ctors_begin.o COMPONENT crt-c)
+  install(FILES "$<TARGET_OBJECTS:crt1_ctors_end>" DESTINATION lib RENAME crt1_ctors_end.o COMPONENT crt-c)
+  install(FILES "$<TARGET_OBJECTS:crt1_ctors_walker>" DESTINATION lib RENAME crt1_ctors_walker.o COMPONENT crt-c)
+  install(FILES "$<TARGET_OBJECTS:crt1_pseudo_reloc>" DESTINATION lib RENAME crt1_pseudo_reloc.o COMPONENT crt-c)
+  install(FILES "$<TARGET_OBJECTS:crt1_dwarf_safety_net>" DESTINATION lib RENAME crt1_dwarf_safety_net.o COMPONENT crt-c)
 endif()

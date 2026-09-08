@@ -74,9 +74,9 @@ option(CRT_USE_IMPORTED_LIBCXX "Use a successfully staged Android libc++ runtime
 # longer matters, because the bootstrap one is never in the running.
 if(NOT CRT_USE_IMPORTED_LIBCXX)
   install(TARGETS cxx cxx_shared
-    ARCHIVE DESTINATION lib
-    LIBRARY DESTINATION lib
-    RUNTIME DESTINATION bin
+    ARCHIVE DESTINATION lib COMPONENT crt-cxx
+    LIBRARY DESTINATION lib COMPONENT crt-cxx
+    RUNTIME DESTINATION bin COMPONENT crt-cxx
   )
 endif()
 
@@ -195,11 +195,19 @@ if(Python3_Interpreter_FOUND)
     USES_TERMINAL
   )
   add_custom_target(crt-libcxx-sysroot
-    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/install_libcxx_runtimes.py"
-      --install-prefix "${CRT_LIBCXX_INSTALL_PREFIX}"
-      --sysroot "${CRT_SYSROOT}"
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
+      --root "${CMAKE_SOURCE_DIR}"
+      --build-dir "${CMAKE_BINARY_DIR}"
+      --dest "${CRT_LIBCXX_SYSROOT}"
+      --base "${CRT_SYSROOT}"
+      --component crt-cxx
+      --libcxx-install "${CRT_LIBCXX_INSTALL_PREFIX}"
+      --cmake "${CMAKE_COMMAND}"
+      --stage 02-cxx
+      --target-os "${CRT_TARGET_OS}"
+      --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}"
     DEPENDS crt-libcxx-build
-    COMMENT "Staging Android libc++ runtime into the CRT sysroot"
+    COMMENT "Creating the cumulative C++ CRT sysroot"
     USES_TERMINAL
   )
   set(CRT_LIBCXX_SMOKE_BINARY
@@ -207,7 +215,7 @@ if(Python3_Interpreter_FOUND)
   add_custom_target(crt-libcxx-smoke
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_libcxx_runtime.py"
       --root "${CMAKE_SOURCE_DIR}"
-      --sysroot "${CRT_SYSROOT}"
+      --sysroot "${CRT_LIBCXX_SYSROOT}"
       --target-os "${CRT_TARGET_OS}"
       --output "${CRT_LIBCXX_SMOKE_BINARY}"
       ${CRT_LIBCXX_PLATFORM_ARGUMENTS}

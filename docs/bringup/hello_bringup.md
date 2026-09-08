@@ -131,7 +131,7 @@ clang \
   -nostdlib \
   -nostartfiles \
   -nodefaultlibs \
-  -I out/macos-host-ninja-debug/sysroot/include \
+  -I out/macos-host-ninja-debug/dist/01-c/include \
   out/macos-host-ninja-debug/sysroot/lib/crt1.o \
   tests/hello.c \
   out/macos-host-ninja-debug/sysroot/lib/libc.a \

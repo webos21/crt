@@ -210,6 +210,11 @@ The recommended language strategy is therefore:
 The primary compiler toolchain should be LLVM Clang, with LLD as the primary
 linker and compiler-rt as the preferred compiler runtime companion.
 
+This is a development and validation choice, not a packaging choice. CRT never
+ships LLVM/Clang/LLD in its OS distributions. An embedded board's dedicated
+compiler and target toolchain remain authoritative; CRT supplies a sysroot,
+startup/runtime objects, wrappers, and toolchain metadata.
+
 The primary build system should be CMake with Ninja as the default generator.
 Tests should be integrated through CTest. Hand-written Makefiles may exist only
 as convenience wrappers, not as the authoritative build graph.
@@ -236,12 +241,12 @@ works well with LLVM projects; and is widely supported by IDEs and native
 library ecosystems. Ninja should be the default generator because it is fast,
 simple, and predictable.
 
-The intended user workflow should look like:
+The default project workflow deliberately stops at the C runtime stage:
 
 ```sh
-cmake --preset linux-x86_64-debug
-cmake --build --preset linux-x86_64-debug
-ctest --preset linux-x86_64-debug
+cmake --workflow --preset linux-host-ninja-debug
+cmake --build --preset linux-host-ninja-debug --target crt-libcxx-dist
+cmake --build --preset linux-host-ninja-debug --target crt-gfx-simple-dist
 ```
 
 The build layout should include explicit toolchain files, for example:
@@ -262,7 +267,9 @@ CMakePresets.json
 CMakeLists.txt
 ```
 
-Secondary compiler validation should be added after the Clang build is stable:
+Secondary/vendor compiler validation should be added after the Clang build is
+stable. It is also a distribution acceptance test, because no compiler is
+embedded in the package:
 
 - GCC on Linux, to catch accidental Clang-only assumptions.
 - Apple Clang on macOS, where system integration requires it.
