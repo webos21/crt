@@ -1536,7 +1536,21 @@ def main():
     port_test_root = build_dir / "port-tests"
     source_root = Path(args.source_root) if args.source_root else port_test_root / "src"
     work_root = Path(args.work_root) if args.work_root else port_test_root / "build"
-    sysroot = build_dir / "sysroot"
+    # Matches CMakeLists.txt's own CRT_SYSROOT = ${CRT_DIST_ROOT}/01-c
+    # (CRT_DIST_ROOT = ${CMAKE_BINARY_DIR}/dist) -- the "sysroot" CMake
+    # target's own install command (this same file's --skip-sysroot-build
+    # fallback below invokes it by name) deposits the C stage there, not
+    # into a flat "sysroot" directory directly under build_dir. Was a
+    # stale literal left over from before the cumulative-distribution-
+    # stages restructuring introduced dist/01-c -- every real per-recipe
+    # port build (e.g. "make") failed with a real, reproducible "file not
+    # found" for this project's own sysroot headers (alloca.h, etc.) even
+    # though they had just been installed correctly, because this one
+    # Python-side path computation never followed CMakeLists.txt's own
+    # move; every other build_*.py driver already receives its sysroot
+    # path as an explicit --sysroot CLI argument from CMakeLists.txt
+    # instead of recomputing it like this, so it did not share this bug.
+    sysroot = build_dir / "dist" / "01-c"
     port_prefix = Path(args.install_prefix) if args.install_prefix else port_test_root / "install"
     source_root = source_root.resolve()
     work_root = work_root.resolve()
