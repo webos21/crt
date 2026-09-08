@@ -1191,6 +1191,21 @@ if(Python3_Interpreter_FOUND)
   if(TARGET crt-libcxx-build)
     add_dependencies(crt-libcxx-sysroot crt-c-dist)
     add_custom_target(crt-libcxx-test DEPENDS crt-libcxx-smoke)
+    # crt-cxx component install (libstdc++/CMakeLists.txt) only installs
+    # the bootstrap `cxx`/`cxx_shared` targets' own build output (its own
+    # install(TARGETS ...) call is guarded the identical way, `if(NOT
+    # CRT_USE_IMPORTED_LIBCXX)`) -- without CRT_USE_IMPORTED_LIBCXX, this
+    # dist stage's real content IS that bootstrap ABI shim, not the
+    # separate real-Android-libc++ build crt-libcxx-build itself produces.
+    # Missing this dependency is a real, reproducible bug: `cmake --build
+    # --target crt-libcxx-dist` from a tree where nothing else happened to
+    # build `cxx`/`cxx_shared` first failed outright ("file INSTALL cannot
+    # find .../lib/libc++.a") because ninja had no reason to build them at
+    # all before running this install step.
+    set(CRT_LIBCXX_DIST_DEPENDS crt-c-dist crt-libcxx-build)
+    if(NOT CRT_USE_IMPORTED_LIBCXX)
+      list(APPEND CRT_LIBCXX_DIST_DEPENDS cxx cxx_shared)
+    endif()
     add_custom_target(crt-libcxx-dist
       COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
         --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
@@ -1200,7 +1215,7 @@ if(Python3_Interpreter_FOUND)
         --target-os "${CRT_TARGET_OS}" --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" ${CRT_DIST_TOOL_ARGS} --archive
       COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
         --dist "${CRT_DIST_ROOT}/02-cxx" --stage 02-cxx
-      DEPENDS crt-c-dist crt-libcxx-build
+      DEPENDS ${CRT_LIBCXX_DIST_DEPENDS}
       USES_TERMINAL
     )
   endif()
