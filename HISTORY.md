@@ -117,9 +117,31 @@ substantive update.
   pass, including the offscreen smoke's full real D3D12 device-loss/
   recovery cycle (`RemoveDevice()`/`GetDeviceRemovedReason()`/recreate-
   and-redraw-correctly). Full Windows `ctest` clean, 127/127. Linux
-  `crtgfx-skia-smoke` was started with the fix already applied and was
-  still running in the background at commit time -- TODO.md tracks it as
-  the one open item, along with macOS (no hardware this session).
+  `crtgfx-skia-smoke` was started with the fix already applied but did not
+  finish in that session (see 2026-09-09 follow-up below); macOS remains
+  unattempted, no hardware in these sessions.
+
+## 2026-09-09
+
+- **Linux `crtgfx-skia-smoke` verification completed for the physical
+  window/GPU/Skia split above.** The prior session's background Linux
+  build never actually finished -- WSL was restarted (independently,
+  between sessions) partway through its from-scratch bootstrap, silently
+  killing the detached build process and wiping its `/tmp` log (tmpfs);
+  `TODO.md` still correctly recorded it as "still running" rather than
+  claiming a result that was never observed. Rebuilt `crtgfx-skia-smoke`
+  from scratch against the same dedicated shadow build directory and this
+  time let it run to completion under proper background-task tracking
+  (not a manually-detached shell `&`, which does not get a completion
+  notification). All four targets passed: `crtgfx_skia_raster_smoke`,
+  `crtgfx_skia_cpu_coverage`, `crtmedia_frame_skia_smoke`, and
+  `crtgfx_skia_gpu_offscreen_smoke` -- the last including its full
+  device-loss/recovery cycle, this time against Linux's real Vulkan/Ganesh
+  path (via the `dzn` Vulkan-on-D3D12 WSL translation layer: device
+  create/context/draw/readback, forced device loss, clean failure with no
+  crash/hang, then a fresh device recreated and redrawing correctly).
+  This closes out the libcrtgfx split's last tracked open item besides
+  macOS (still unattempted, no hardware in these sessions).
 
 - **Fixed a real, genuine data race in `pthread_bionic_api_test.c` (not a
   regression from the dist-stages restructuring), found by the user on a

@@ -813,14 +813,18 @@ the in-tree (non-packaged) build, so it is not yet known whether this is
 specific to the packaged/standalone invocation path or a real, general
 gap in `std::ios_base::Init`'s global-constructor handling on Windows.
 
-**`libcrtgfx` physical window/GPU/Skia split -- done and verified on
-Windows (window+GPU+Skia, full `ctest` 127/127 clean); Linux window+GPU
-verified, Linux Skia verification still running in the background
-(2026-09-08).** Closes out the decision recorded here
-that the previous `install(COMPONENT ...)`-only split (one `crtgfx_shared`
-containing GPU+Skia code regardless of stage, only the *public headers*
-differing) was not real -- `crt-gfx-simple-dist`/`crt-gfx-media-dist`
-needed this before either could be considered real.
+**`libcrtgfx` physical window/GPU/Skia split -- done and verified on both
+Windows and Linux (window+GPU+Skia; Windows full `ctest` 127/127 clean;
+Linux `crtgfx-skia-smoke`'s four targets --
+`crtgfx_skia_raster_smoke`/`crtgfx_skia_cpu_coverage`/
+`crtmedia_frame_skia_smoke`/`crtgfx_skia_gpu_offscreen_smoke`, the last
+including its device-loss/recovery cycle -- all pass, 2026-09-09).** Closes
+out the decision recorded here that the previous `install(COMPONENT ...)`-
+only split (one `crtgfx_shared` containing GPU+Skia code regardless of
+stage, only the *public headers* differing) was not real --
+`crt-gfx-simple-dist`/`crt-gfx-media-dist` needed this before either could
+be considered real. macOS still not attempted (no hardware available in
+these sessions).
 
 Design (confirmed via two real Explore passes over the 2639-line
 `libcrtgfx/CMakeLists.txt` plus every external consumer in the repo, then
