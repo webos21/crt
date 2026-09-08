@@ -189,10 +189,10 @@ set(CRTGFX_WAYLAND_INSTALL_PREFIX "${CRTGFX_WAYLAND_FETCH_ROOT}/install" CACHE P
 # build directory. Real libwayland-client genuinely needs libffi.a at
 # link time (confirmed via the crtgfx-wayland-smoke build's own real link
 # command, 2026-09-07: real wayland-client.c uses libffi's ffi_call() for
-# its own generic wl_closure_invoke() listener dispatch), so this is
-# folded into CRTGFX_WAYLAND_CLIENT_LIBRARIES below alongside libwayland-
-# client.a itself, not tracked as a separate variable a consumer would
-# have to remember to also link.
+# its own generic wl_closure_invoke() listener dispatch). This dependency
+# remains part of the standalone CRT Wayland port; the Vulkan WSI backend
+# uses the host Wayland shared library and inherits its host libffi
+# dependency instead.
 set(CRTGFX_WAYLAND_PORT_PREFIX "${CMAKE_BINARY_DIR}/port-tests/install" CACHE PATH "Shared porting/recipes install prefix (expat/libffi) for the Wayland build")
 # Unlike CRTGFX_XKBCOMMON_LIBRARIES (always on for Linux -- libxkbcommon
 # backs the legacy hand-rolled backend's own keyboard input, which every
@@ -206,6 +206,7 @@ set(CRTGFX_WAYLAND_PORT_PREFIX "${CMAKE_BINARY_DIR}/port-tests/install" CACHE PA
 # CRTGFX_XKBCOMMON_LIBRARIES's own established "empty string is a safe bare
 # ${...} no-op" convention for every non-Linux/not-yet-available case.
 set(CRTGFX_WAYLAND_CLIENT_LIBRARIES "" CACHE STRING "Libraries needed to link real libwayland-client into the Linux native Wayland backend" FORCE)
+set(CRTGFX_WAYLAND_XDG_SHELL_LIBRARY "${CRTGFX_WAYLAND_INSTALL_PREFIX}/lib/libxdg-shell-protocol.a" CACHE FILEPATH "Generated xdg-shell protocol glue for the Linux native Wayland backend")
 # Building Skia against the CRT is already a useful porting gate. Linking it
 # into libcrtgfx requires the full libc++ standard library, which is a later
 # explicit tranche; never make ordinary CRT workflows depend on a host libc++
@@ -362,6 +363,23 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
   # package, e.g. Ubuntu's libvulkan-dev) -- a bare libvulkan.so.1 runtime
   # package (libvulkan1) is not enough to link against by name.
   find_library(CRTGFX_LINUX_VULKAN_LIB vulkan)
+  # Vulkan WSI drivers are host shared objects and use the host Wayland
+  # client's private wl_display layout.  The native presentation backend
+  # must therefore create its wl_display through that exact shared library,
+  # rather than through the CRT-built static port (whose Bionic-compatible
+  # pthread_mutex_t changes the private layout).  A versioned runtime SONAME
+  # is sufficient; development headers still come from our pinned port.
+  find_library(CRTGFX_LINUX_WAYLAND_CLIENT_LIB NAMES wayland-client wayland-client.so.0)
+  if(NOT CRTGFX_LINUX_WAYLAND_CLIENT_LIB)
+    # Runtime-only distributions commonly install the versioned SONAME but
+    # not the unversioned linker name supplied by a -dev package.
+    unset(CRTGFX_LINUX_WAYLAND_CLIENT_LIB CACHE)
+    find_file(CRTGFX_LINUX_WAYLAND_CLIENT_LIB
+      NAMES libwayland-client.so.0
+      PATHS /lib /usr/lib /usr/local/lib
+      PATH_SUFFIXES "${CMAKE_LIBRARY_ARCHITECTURE}"
+    )
+  endif()
   if(CRTGFX_LINUX_VULKAN_LIB)
     list(APPEND CRTGFX_BACKEND_SOURCES src/arch/linux/gpu_vulkan.c)
     # Native Wayland backend (2026-09-07, "Finish live GPU presentation
@@ -377,7 +395,8 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
     # would just return CRTGFX_ERROR_UNSUPPORTED unconditionally there
     # regardless, matching every other "no usable host backend right now"
     # case in this project.
-    # Gated on the real .a already existing on disk, NOT wired via
+    # Gated on the generated xdg-shell archive already existing on disk,
+    # NOT wired via
     # add_dependencies() onto crtgfx-wayland-build the way crtgfx_backend_
     # objects's own crtgfx-xkbcommon-build edge is -- sidesteps a real,
     # confirmed-for-real (2026-09-07) ninja dependency-graph cycle,
@@ -406,15 +425,12 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
     # CMake's own file(GLOB)-free EXISTS check here is only re-evaluated
     # at configure time, matching CRTGFX_SKIA_LIBRARIES's own same real,
     # accepted limitation.
-    if(EXISTS "${CRTGFX_WAYLAND_INSTALL_PREFIX}/lib/libwayland-client.a")
+    if(CRTGFX_LINUX_WAYLAND_CLIENT_LIB AND EXISTS "${CRTGFX_WAYLAND_XDG_SHELL_LIBRARY}")
       list(APPEND CRTGFX_BACKEND_SOURCES src/arch/linux/window_wayland_native.c)
       add_compile_definitions(CRTGFX_HAVE_NATIVE_WAYLAND=1)
-      # libffi.a alongside libwayland-client.a itself -- see CRTGFX_WAYLAND_
-      # PORT_PREFIX's own comment (near the top of this file) for why real
-      # libwayland-client genuinely needs it at link time.
-      set(CRTGFX_WAYLAND_CLIENT_LIBRARIES "${CRTGFX_WAYLAND_INSTALL_PREFIX}/lib/libwayland-client.a;${CRTGFX_WAYLAND_PORT_PREFIX}/lib/libffi.a" CACHE STRING "Libraries needed to link real libwayland-client into the Linux native Wayland backend" FORCE)
+      set(CRTGFX_WAYLAND_CLIENT_LIBRARIES "${CRTGFX_WAYLAND_XDG_SHELL_LIBRARY};${CRTGFX_LINUX_WAYLAND_CLIENT_LIB}" CACHE STRING "Libraries needed to link real libwayland-client into the Linux native Wayland backend" FORCE)
     else()
-      message(STATUS "libcrtgfx: libwayland-client.a not built yet at ${CRTGFX_WAYLAND_INSTALL_PREFIX}/lib -- run 'cmake --build . --target crtgfx-wayland-build' then reconfigure to enable the native Wayland (CRTGFX_WINDOW_GPU_PRESENTATION) backend; crtgfx_gpu_surface_create()/CRTGFX_WINDOW_GPU_PRESENTATION stay CRTGFX_ERROR_UNSUPPORTED on Linux until then")
+      message(STATUS "libcrtgfx: native Wayland Vulkan WSI needs host libwayland-client.so.0 plus ${CRTGFX_WAYLAND_XDG_SHELL_LIBRARY}; run 'cmake --build . --target crtgfx-wayland-build' then reconfigure after installing the host Wayland runtime to enable it")
     endif()
     # Directory-scoped, not per-target: src/gpu.c (compiled into
     # crtgfx_common_objects) and src/arch/linux/gpu_vulkan.c (compiled
@@ -1492,8 +1508,9 @@ if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_ENABLE_SKIA AND CRTGFX_SKIA_LIBRARI
   # CRTGFX_XKBCOMMON_LIBRARIES's own definition, near CRTGFX_SKIA_
   # LIBRARIES's, for the auto-detection).
   target_link_libraries(crtgfx PRIVATE ${CRTGFX_XKBCOMMON_LIBRARIES})
-  # CRTGFX_WAYLAND_CLIENT_LIBRARIES (libwayland-client.a, src/arch/linux/
-  # window_wayland_native.c, 2026-09-07): same "empty string is a safe bare
+  # CRTGFX_WAYLAND_CLIENT_LIBRARIES (host libwayland-client.so.0 plus the
+  # generated xdg-shell protocol archive, src/arch/linux/window_wayland_
+  # native.c): same "empty string is a safe bare
   # ${...} no-op" shape as CRTGFX_XKBCOMMON_LIBRARIES just above -- set to
   # "" whenever the native backend was not added to CRTGFX_BACKEND_SOURCES
   # (see that variable's own hoisted-block comment near CRTGFX_XKBCOMMON_
@@ -1706,8 +1723,9 @@ else()
   # a no-op on any host other than Linux (see CRTGFX_XKBCOMMON_LIBRARIES's
   # own definition, near CRTGFX_SKIA_LIBRARIES's).
   target_link_libraries(crtgfx_shared PRIVATE ${CRTGFX_XKBCOMMON_LIBRARIES})
-  # CRTGFX_WAYLAND_CLIENT_LIBRARIES (libwayland-client.a, src/arch/linux/
-  # window_wayland_native.c, 2026-09-07): same "empty and a no-op" shape as
+  # CRTGFX_WAYLAND_CLIENT_LIBRARIES (host libwayland-client.so.0 plus the
+  # generated xdg-shell archive, src/arch/linux/window_wayland_native.c):
+  # same "empty and a no-op" shape as
   # CRTGFX_XKBCOMMON_LIBRARIES just above -- see crtgfx's own, fuller
   # comment (same file, its CRTGFX_WAYLAND_CLIENT_LIBRARIES linking) for
   # why.

@@ -10,6 +10,22 @@ substantive update.
 
 ## 2026-09-08
 
+- **Corrected the apparent Mesa lavapipe Wayland WSI deadlock and completed
+  real Linux aarch64 presentation verification.** With ptrace enabled, LLDB
+  showed that this was not a Mesa bug: crtgfx created `wl_display` through a
+  CRT-built static libwayland-client whose private structure used the
+  Bionic-compatible 40-byte `pthread_mutex_t`, while lavapipe called the host
+  `libwayland-client.so.0` built around glibc's 48-byte mutex. Disassembly
+  confirmed the two implementations addressed the same display mutex at
+  different offsets (`0x128` versus `0x118`), so host Wayland interpreted a
+  live event-queue pointer as a mutex and blocked forever. The Linux native
+  Vulkan backend now links the host Wayland SONAME used by Mesa, while the
+  pinned CRT Wayland build emits its generated xdg-shell metadata separately
+  as `libxdg-shell-protocol.a`. LLDB then observed
+  `vkGetPhysicalDeviceSurfaceCapabilitiesKHR` return `VK_SUCCESS`; the real
+  `crtgfx_gpu_window_demo 1` created a swapchain, presented one frame, and
+  exited 0.
+
 - **Real macOS/Metal hardware verification of Ganesh-to-surface
   rendering (`crtgfx_skia_wrap_gpu_surface()`/`crtgfx_skia_gpu_surface_
   present()`, landed `9a6dcc8`), closing "Finish live GPU presentation
@@ -243,15 +259,10 @@ substantive update.
      code path from this project's own plain-client, no-hotplug
      scenario, consistent with `NODEVICE_SELECT=1` not helping here.
 
-  A full draft Mesa GitLab issue (title, system info, exact repro steps,
-  the real backtrace, and everything ruled out above) is saved at
-  `docs/issue_mesa.md`, not yet filed upstream (this session has no
-  GitLab login) -- the user will submit it from their own account.
-  `crtgfx_gpu_surface_resize()` itself stays unverified on real Linux
-  on-screen hardware until this upstream Mesa blocker is fixed or
-  otherwise routed around; the offscreen Ganesh/Vulkan path
-  (`crtgfx_skia_gpu_offscreen_smoke`, no `wl_surface` involved) remains
-  unaffected and already verified.
+  Superseded by the 2026-09-08 entry above: ptrace-enabled follow-up found
+  that this apparent external blocker was the project's mixed static/shared
+  libwayland-client ABI, then fixed it. The Mesa issue draft was withdrawn
+  without being filed.
 
 - **Real macOS/Metal hardware verification of `crtgfx_gpu_surface_resize()`
   (live window resize/swapchain recreation), closing the "reasoned but

@@ -518,37 +518,20 @@ default-config ctest also reconfirmed clean, 111/111.
    alive and responsive throughout, confirmed by screenshots taken
    mid-resize showing the live animated color still updating. Windows and
    macOS are real-hardware-verified for resize/swapchain recreation.
-   **Linux is not** -- see `docs/libcrtgfx_wayland_plan.md`'s own
-   "Resize/swapchain recreation on all GPU hosts" section for the
-   per-host trail, and the real, open blocker just below.
-
-   **Real Linux on-screen verification (not WSL), attempted 2026-09-07,
-   found and root-caused a genuine external blocker, not yet resolved:**
-   `crtgfx_gpu_window_demo` deadlocks 100% reproducibly inside
-   `vkGetPhysicalDeviceSurfaceCapabilitiesKHR` on real Linux aarch64
-   hardware (GNOME/Wayland, Mesa 25.2.8/lavapipe) -- surface *creation*
-   itself never completes, so `crtgfx_gpu_surface_resize()` was never
-   actually reachable to test at all on this host. Root-caused with real
-   evidence (via `lldb`, once a real unrelated debuginfod-network-hang
-   snag in this sandbox was found and fixed) to be a genuine deadlock
-   entirely inside Mesa's own lavapipe driver + libwayland-client
-   (`wl_proxy_create_wrapper` self-locking a non-recursive `wl_display`
-   mutex) -- confirmed NOT this project's own bug (its own code appears
-   only at the correct, standard Vulkan API call site, nothing above it
-   in the backtrace) and NOT the `VkLayer_MESA_device_select` deadlock
-   class already known and fixed upstream for a *different* scenario
-   (Mesa issue #15168/MR !38252 -- the compositor itself deadlocking
-   talking to itself during GPU hotplug; ruled out here specifically,
-   `NODEVICE_SELECT=1` doesn't change this hang at all). No existing
-   upstream Mesa issue matches after a thorough search. See `HISTORY.md`'s
-   2026-09-07 entry (topmost) for the full investigation trail (every
-   hypothesis tested and ruled out) and the real backtrace. A complete
-   draft bug report is saved at `docs/issue_mesa.md`, ready to file
-   (this session has no GitLab login to submit it directly). Until Mesa
-   fixes this (or a workaround is found), real Linux on-screen GPU
-   presentation stays blocked upstream -- the offscreen Ganesh/Vulkan
-   path (`crtgfx_skia_gpu_offscreen_smoke`, no `wl_surface` involved)
-   is unaffected and already verified on this same host.
+   **Linux surface creation/presentation is now real-verified
+   (2026-09-08); interactive resize remains to be exercised.** Enabling
+   ptrace exposed that the apparent lavapipe deadlock was our mixed
+   libwayland-client ABI: a CRT-static implementation created the opaque
+   object while Mesa called the host shared implementation. Their private
+   Wayland layouts put the display mutex at different offsets, and their
+   Bionic/glibc mutex ABIs were incompatible as well. The native Vulkan
+   backend now uses the same host
+   `libwayland-client.so.0` as Mesa. LLDB observed the previously hanging
+   capabilities call return `VK_SUCCESS`, and a real one-frame run created
+   the swapchain, presented, and exited 0. The remaining Linux item is a live
+   compositor-driven window resize that reaches
+   `crtgfx_gpu_surface_resize()`; it is no longer blocked by surface
+   creation.
 
    **Ganesh-to-surface rendering is done (2026-09-07, same day, this
    step's own last remaining piece).** New `crtgfx_skia_wrap_gpu_

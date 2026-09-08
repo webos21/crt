@@ -455,6 +455,19 @@ def main():
     run([ar, "rcs", str(static_archive)] + [str(o) for o in client_objs], cwd=root, env=env)
     run([ranlib, str(static_archive)], cwd=root, env=env)
 
+    # Keep the generated xdg-shell interface tables available separately.
+    # Linux Vulkan WSI must use the host's libwayland-client.so: Mesa is
+    # linked to that same SONAME and passes our wl_display/wl_surface objects
+    # back through it.  Linking this CRT-built libwayland-client.a into the
+    # application as well would create two implementations whose private
+    # wl_display layouts differ with pthread_mutex_t's host ABI.  The xdg
+    # protocol object contains only public interface metadata and marshaling
+    # wrappers, so it is safe and useful as a small standalone archive.
+    xdg_shell_archive = lib_dir / "libxdg-shell-protocol.a"
+    xdg_shell_obj = obj_dir / f"{xdg_shell_protocol_c.name}.client.o"
+    run([ar, "rcs", str(xdg_shell_archive), str(xdg_shell_obj)], cwd=root, env=env)
+    run([ranlib, str(xdg_shell_archive)], cwd=root, env=env)
+
     for header in ("wayland-util.h", "wayland-client.h", "wayland-client-core.h"):
         shutil.copy2(src / header, include_dir / header)
     shutil.copy2(client_protocol_h, include_dir / "wayland-client-protocol.h")
