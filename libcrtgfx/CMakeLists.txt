@@ -1945,9 +1945,24 @@ if(CRT_TARGET_OS STREQUAL "windows")
     "${CRTGFX_WINDOWS_D3D12_LIB}"
   )
 elseif(CRT_TARGET_OS STREQUAL "macos")
+  # objc: gpu_metal.c drives real Metal.framework via direct objc_
+  # msgSend/objc_getClass/sel_registerName calls (same reasoning as
+  # crtgfx_window_shared's own identical need for window_cocoa.c's own
+  # AppKit use, just above) -- the plain static `crtgfx_gpu` target
+  # never needed this listed explicitly because it links crtgfx_window
+  # PUBLIC, whose own macOS framework list is PUBLIC and already
+  # includes objc; crtgfx_gpu_shared links crtgfx_window_shared PUBLIC
+  # instead, but crtgfx_window_shared's own framework list (just above)
+  # is scoped PRIVATE, so it never propagates here -- a real, confirmed
+  # bug (2026-09-09): crtgfx_gpu_shared's own real .dylib link failed
+  # outright ("undefined symbols: _objc_getClass/_objc_msgSend/_sel_
+  # registerName") the first time anything actually forced this shared
+  # library to link (crt-gfx-media-dist), since nothing before that had
+  # ever built it standalone.
   target_link_libraries(crtgfx_gpu_shared PRIVATE
     "-framework Metal"
     "-framework CoreGraphics"
+    objc
   )
 endif()
 if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB)
