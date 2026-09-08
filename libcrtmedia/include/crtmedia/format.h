@@ -48,6 +48,23 @@ typedef struct crtmedia_format crtmedia_format;
  * returning CRTMEDIA_ERROR_UNSUPPORTED for a track with no real config
  * data is expected, not a bug. */
 #define CRTMEDIA_FORMAT_KEY_CSD "csd-0"
+/* int32, video only, opt-in (2026-09-08, TODO.md's "hardware decode,
+ * phase A" step) -- unset/0 (the default) means today's exact existing
+ * software-only decode behavior, byte-identical, for every caller that
+ * does not set this key (crtmedia_demuxer_* never does). A caller passes
+ * 1 to *attempt* real hardware-accelerated decode (D3D11VA on Windows,
+ * VideoToolbox on macOS, VAAPI on Linux) via crtmedia_codec_create_
+ * decoder() (crtmedia/codec.h); that function always falls back to
+ * software automatically if hardware device creation or codec open
+ * fails on this host, matching this project's own established "software
+ * fallback must remain a first-class path" precedent (crtgfx_gpu_query_
+ * capabilities()) -- this key is never a hard requirement. See crtmedia_
+ * codec_is_hardware_accelerated() for the real, honest report of which
+ * path a given decoder instance actually ended up using. Decoded hardware
+ * frames are downloaded to real CPU memory before being handed back
+ * (crtmedia_frame, possibly CRTMEDIA_PIXEL_FORMAT_NV12) -- zero-copy GPU-
+ * texture interop is phase B, not this key's scope. */
+#define CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE "prefer-hardware-decode"
 
 /* Creates an empty format. Returns CRTMEDIA_ERROR_INVALID_ARGUMENT for a
  * null out_format. */

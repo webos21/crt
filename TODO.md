@@ -597,10 +597,70 @@ default-config ctest also reconfirmed clean, 111/111.
    pass there confirmed liveness/no-crash and continued animation through
    resize, not pixel-exact post-resize framebuffer content). Graphite
    stays a later, separately-measured alternative to Ganesh throughout.
-2. **Add hardware decode, phase A.** Enable FFmpeg D3D11VA/D3D12VA,
-   VideoToolbox, and VA-API backends, initially downloading decoded frames to
-   CPU memory so codec/device selection, fallback, and recovery can be proved
-   independently of zero-copy interop.
+2. **Add hardware decode, phase A -- in progress (2026-09-08).** Enable FFmpeg
+   D3D11VA/D3D12VA, VideoToolbox, and VA-API backends, initially downloading
+   decoded frames to CPU memory so codec/device selection, fallback, and
+   recovery can be proved independently of zero-copy interop.
+
+   **The opt-in decode-side API and its real fallback/recovery contract are
+   done and verified on Windows and Linux, zero regression.** New `crtmedia_
+   codec.c` support (opt-in via `CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE`,
+   crtmedia/format.h -- unset/0 is today's exact existing software-only
+   behavior, byte-identical, for every existing caller including `crtmedia_
+   demuxer_*`): `av_hwdevice_ctx_create()` for the host's real hwaccel type
+   (D3D11VA/VideoToolbox/VAAPI), a real `get_format` callback, `av_hwframe_
+   transfer_data()` downloading a still-hardware-resident frame to real CPU
+   memory, and a real, tested fallback -- either device creation or
+   `avcodec_open2()` itself failing with the hw context attached tears it
+   down and retries once with a genuinely fresh, plain software
+   `AVCodecContext`. New `crtmedia_codec_is_hardware_accelerated()` reports,
+   honestly, which path a given decoder instance actually used. New
+   `CRTMEDIA_PIXEL_FORMAT_NV12` (crtmedia/frame.h) -- every real hardware
+   H.264 decoder on all three platforms produces this, not I420 --
+   `crtmedia_frame_describe_planes()`/`crtmedia_frame_convert_to_rgba()`
+   both extended for it. New `crtmedia_hw_decode_test` (gated
+   `CRTMEDIA_ENABLE_FFMPEG`) opts in against the existing real MP4 fixture
+   and passes on both hosts, correctly and honestly reporting hardware
+   decode as not active on either (see below) and exercising the graceful-
+   fallback path for real. Full `ctest` clean on both: Windows 134/134,
+   Linux 117/117 (`termios_echo_roundtrip_test` excluded, the known
+   pre-existing non-interactive-WSL-runner limitation).
+
+   **Actually enabling the real per-host hwaccel in the FFmpeg build itself
+   is not done this pass -- two real, separate blockers found, neither
+   fixed yet, and the attempt was fully reverted rather than leaving
+   `porting/recipes/ffmpeg.json` in a broken state.** (1) Windows: `--enable-
+   d3d11va` fails configure's own dependency check for `ID3D11VideoDecoder`/
+   `ID3D11VideoContext` even with mingw-w64's real header set on the
+   include path -- this recipe's own base `configure_args` deliberately
+   `-U_WIN32 -U_WIN32_WCE -U__WIN32__ -UWIN32 -U__MINGW32__` (routing
+   FFmpeg's own portable code through POSIX-shaped paths instead of assuming
+   a full MSVCRT, this project's own established convention) appears to
+   also suppress declarations inside the real D3D11 headers that are
+   themselves gated behind those same macros -- a real, structural
+   conflict between that convention and D3D11VA's own header needs, not
+   yet resolved. (2) Linux: found something more serious than VA-API
+   itself while chasing it -- this WSL environment's own `ar`/`nm`
+   (GNU Binutils 2.46, confirmed pre-existing, not installed alongside
+   `libva-dev`) segfaults with `Relink ... for IFUNC symbol 'ceil'`
+   archiving this project's own `libavformat.a`/`libavcodec.a` against its
+   own IFUNC-using `libm.so`, on the *plain, unmodified baseline* configure
+   -- a real, external binutils regression in this environment, unrelated
+   to VA-API or this feature, that blocks any fresh FFmpeg rebuild here at
+   all right now (the already-installed FFmpeg libraries from before this
+   regression appeared were untouched and still work, which is how the
+   opt-in API above could still be verified). Two real, generically useful
+   fixes were kept from this attempt despite the revert: `tools/crt-port-
+   build.py` gained `@NM@`/`@BUILD_DIR@` configure_args substitution (the
+   identical class of gap `@AR@`/`@ROOT@` already needed and were fixed
+   for, found again here) -- unused by `ffmpeg.json` right now, but real
+   and ready whenever hwaccel enablement is revisited.
+
+   Still open: root-causing and fixing the Windows D3D11VA header-
+   visibility conflict, resolving (or working around) the Linux binutils
+   regression, then actually re-adding and verifying `--enable-d3d11va`/
+   `--enable-vaapi`/`--enable-videotoolbox` for real; macOS is entirely
+   unattempted this pass (no hardware this session).
 3. **Add hardware decode, phase B.** Connect decoder-owned textures directly
    to Skia: D3D resources on Windows, `CVPixelBuffer`/Metal textures on macOS,
    and VA-API/DRM PRIME/dmabuf/Vulkan images on Linux. Tie decoder frame-pool

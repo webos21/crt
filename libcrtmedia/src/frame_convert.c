@@ -95,6 +95,51 @@ static crtmedia_result convert_yuv420p_to_rgba(const crtmedia_frame* src, crtmed
   return CRTMEDIA_OK;
 }
 
+/* NV12 (2026-09-08, "hardware decode, phase A" -- every real hardware
+ * H.264 decoder this project now supports produces this, not YUV420P).
+ * Same real per-pixel math as convert_yuv420p_to_rgba() above (same
+ * yuv_kr_kb()/ycbcr_to_rgb(), same limited/full range scaling) -- only
+ * the chroma plane layout differs: one interleaved U/V plane (real NV12
+ * byte order -- U at the even offset, V at the odd offset, per plane 1's
+ * own stride = chroma_width * 2, matching crtmedia_frame_describe_
+ * planes()'s own NV12 layout) instead of two separate planes. */
+static crtmedia_result convert_nv12_to_rgba(const crtmedia_frame* src, crtmedia_frame* dst) {
+  if (src->plane_count < 2 || src->planes[0].data == NULL || src->planes[1].data == NULL) {
+    return CRTMEDIA_ERROR_INVALID_ARGUMENT;
+  }
+
+  double kr, kb;
+  yuv_kr_kb(src->color_space, &kr, &kb);
+
+  int limited = src->color_range != CRTMEDIA_COLOR_RANGE_FULL;
+  double luma_scale = limited ? 255.0 / 219.0 : 1.0;
+  double chroma_scale = limited ? 255.0 / 224.0 : 1.0;
+
+  const uint8_t* y_plane = (const uint8_t*)src->planes[0].data;
+  const uint8_t* uv_plane = (const uint8_t*)src->planes[1].data;
+  uint8_t* dst_base = (uint8_t*)dst->planes[0].data;
+
+  for (uint32_t row = 0; row < src->height; ++row) {
+    const uint8_t* y_row = y_plane + (size_t)row * src->planes[0].stride;
+    const uint8_t* uv_row = uv_plane + (size_t)(row / 2) * src->planes[1].stride;
+    uint8_t* dst_row = dst_base + (size_t)row * dst->planes[0].stride;
+
+    for (uint32_t col = 0; col < src->width; ++col) {
+      double y = limited ? ((double)y_row[col] - 16.0) * luma_scale : (double)y_row[col];
+      double cb = 128.0 + ((double)uv_row[(col / 2) * 2 + 0] - 128.0) * chroma_scale;
+      double cr = 128.0 + ((double)uv_row[(col / 2) * 2 + 1] - 128.0) * chroma_scale;
+
+      uint8_t r, g, b;
+      ycbcr_to_rgb(y, cb, cr, kr, kb, &r, &g, &b);
+      dst_row[col * 4 + 0] = r;
+      dst_row[col * 4 + 1] = g;
+      dst_row[col * 4 + 2] = b;
+      dst_row[col * 4 + 3] = 255;
+    }
+  }
+  return CRTMEDIA_OK;
+}
+
 static crtmedia_result convert_packed_rgb_to_rgba(const crtmedia_frame* src, crtmedia_frame* dst) {
   if (src->planes[0].data == NULL) {
     return CRTMEDIA_ERROR_INVALID_ARGUMENT;
@@ -132,6 +177,8 @@ crtmedia_result crtmedia_frame_convert_to_rgba(const crtmedia_frame* src, crtmed
       return convert_packed_rgb_to_rgba(src, dst);
     case CRTMEDIA_PIXEL_FORMAT_YUV420P:
       return convert_yuv420p_to_rgba(src, dst);
+    case CRTMEDIA_PIXEL_FORMAT_NV12:
+      return convert_nv12_to_rgba(src, dst);
     default:
       return CRTMEDIA_ERROR_UNSUPPORTED;
   }

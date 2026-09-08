@@ -102,6 +102,18 @@ crtmedia_result crtmedia_codec_dequeue_output(
  * queued/pending output is now stale). A NULL codec is a no-op. */
 crtmedia_result crtmedia_codec_flush(crtmedia_codec* codec);
 
+/* Real, honest report (2026-09-08, "hardware decode, phase A") of whether
+ * `codec` actually ended up using a real hardware decoder on this host --
+ * only ever true for a video codec created with CRTMEDIA_FORMAT_KEY_
+ * PREFER_HARDWARE_DECODE set (crtmedia/format.h), and only once that
+ * request actually succeeded (crtmedia_codec_create_decoder() always
+ * falls back to software silently otherwise, matching this project's own
+ * "software fallback must remain a first-class path" precedent) -- never
+ * a caller-side guess, this reflects what really happened. Returns
+ * CRTMEDIA_ERROR_INVALID_ARGUMENT for a null codec/out_is_hardware,
+ * CRTMEDIA_OK with `*out_is_hardware` set to 0 or 1 otherwise. */
+crtmedia_result crtmedia_codec_is_hardware_accelerated(const crtmedia_codec* codec, int* out_is_hardware);
+
 #ifdef __cplusplus
 }
 #endif

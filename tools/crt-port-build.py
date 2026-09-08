@@ -933,6 +933,58 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
         # generated config.mak).
         ar_for_configure = path_for_crt_shell(env["AR"]) if target_os == "windows" else env["AR"]
         configure = [arg.replace("@AR@", ar_for_configure) for arg in configure]
+        # @NM@ (2026-09-08, ffmpeg.json's own --enable-d3d11va need): same
+        # class of gap as @AR@ just above -- FFmpeg's own nm_default="nm"
+        # (configure, no $NM environment fallback, the identical class of
+        # gap already found for $CC/$AR) resolves to plain "nm" with no
+        # path, which this sandboxed Windows build's own restricted PATH
+        # does not contain. Confirmed for real: without this, configure
+        # itself does not merely fail cleanly the way a missing $CC/$AR
+        # does -- one of its own D3D11VA-specific check_* probes shells out
+        # to the unresolved "nm" ("nm: inaccessible or not found"), and
+        # mksh's own job-control bookkeeping then spins into a genuine,
+        # non-terminating hang (repeated "internal error: check_job: job
+        # started" with the underlying `./configure` process still alive
+        # and the build log never advancing, confirmed by directly
+        # inspecting the running process list, not just a slow build).
+        # env["NM"] already resolves the real tool correctly (this
+        # function's own find_windows_host_tool(("llvm-nm.exe", ...))
+        # fallback, set unconditionally for every Windows recipe, not just
+        # autoconf/libtool ones) -- reused here via the same @TOKEN@
+        # substitution mechanism and the same path_for_crt_shell()
+        # treatment @AR@ needed (this value also lands in FFmpeg's own
+        # generated config.mak, re-parsed by mksh, which eats raw
+        # backslashes the identical way @ROOT@'s own comment documents).
+        # Unlike @AR@ above (env["AR"] is set unconditionally, every
+        # target_os), env["NM"] is only ever populated inside make_env()'s
+        # own `if target_os == "windows":` block -- @NM@ itself likewise
+        # only ever appears in ffmpeg.json's own windows-only configure_
+        # args, so this substitution is windows-only too (unlike @AR@'s
+        # own unconditional replace() call, doing this unconditionally
+        # would raise KeyError on Linux/macOS, confirmed for real building
+        # this same recipe's own new --enable-vaapi addition there).
+        if target_os == "windows":
+            nm_for_configure = path_for_crt_shell(env["NM"])
+            configure = [arg.replace("@NM@", nm_for_configure) for arg in configure]
+        # @BUILD_DIR@ (2026-09-08, ffmpeg.json's own --enable-d3d11va need):
+        # same class of gap as @ROOT@/@AR@/@NM@ above -- FFmpeg's own
+        # hwcontext_d3d11va.c needs real <d3d11.h>/<dxva.h> (mingw-w64's
+        # own real, complete header set, not the raw Microsoft SDK -- see
+        # the top-level CMakeLists.txt's own CRT_MINGW_W64_HEADERS_
+        # INCLUDE_ROOT comment for why), fetched per-preset into
+        # <build_dir>/mingw-w64-headers/mingw-w64-headers/include -- the
+        # same real path CRT_MINGW_W64_HEADERS_INCLUDE_ROOT already
+        # computes for every other mingw-target-D3D consumer in this
+        # project (skia_bridge.cc's own D3D12 branch, gpu_win32.c's
+        # target). configure_args' own cflags-carrying entries (ffmpeg.json's
+        # own --extra-cflags=) need this same real, already-fetched path
+        # -- substitute_recipe_value()'s own pre-existing @BUILD_DIR@
+        # token (used by cflags/env/make_args/install_args, see this
+        # function's own apply_recipe_env() caller) was simply never wired
+        # into configure_args either, the identical gap @ROOT@ itself once
+        # was before this same file's own 2026-08-31 fix.
+        build_dir_for_configure = path_for_crt_shell(preset_build_dir) if target_os == "windows" else str(preset_build_dir)
+        configure = [arg.replace("@BUILD_DIR@", build_dir_for_configure) for arg in configure]
         if is_native_windows_configure(target_os):
             prefix = path_for_crt_shell(port_prefix) if use_crt_shell else path_for_msys_shell(port_prefix)
         else:

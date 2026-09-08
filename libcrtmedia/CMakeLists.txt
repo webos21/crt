@@ -114,6 +114,36 @@ if(CRT_TARGET_OS STREQUAL "windows")
   if(NOT CRTMEDIA_WINDOWS_OLE32_LIB)
     set(CRTMEDIA_WINDOWS_OLE32_LIB ole32.lib CACHE FILEPATH "Windows ole32 import library")
   endif()
+
+  # d3d11.lib/dxgi.lib (2026-09-08, "hardware decode, phase A") -- FFmpeg's
+  # own hwcontext_d3d11va.c (compiled into libavutil.a once porting/
+  # recipes/ffmpeg.json's --enable-d3d11va sticks) calls real D3D11/DXGI
+  # device-creation APIs directly; ole32.lib above (already linked, for
+  # src/arch/windows/audio_sink_wasapi.c's own COM bootstrapping) already
+  # covers its CoCreateInstance/CoInitializeEx calls. Own, independent
+  # find_file() calls rather than reusing libcrtgfx's own identically-
+  # named CRTGFX_WINDOWS_D3D11_LIB/_DXGI_LIB CACHE variables (~libcrtgfx/
+  # CMakeLists.txt line 1368) -- matching this file's own CRTMEDIA_
+  # WINDOWS_OLE32_LIB precedent just above (an independent lookup even
+  # though libcrtgfx already resolves the identical real ole32.lib
+  # concept for its own D3D11 window-presentation code) rather than
+  # reaching into a sibling subdirectory's own variables.
+  find_file(CRTMEDIA_WINDOWS_D3D11_LIB
+    NAMES d3d11.lib
+    PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES}
+    NO_DEFAULT_PATH
+  )
+  find_file(CRTMEDIA_WINDOWS_DXGI_LIB
+    NAMES dxgi.lib
+    PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES}
+    NO_DEFAULT_PATH
+  )
+  if(NOT CRTMEDIA_WINDOWS_D3D11_LIB)
+    set(CRTMEDIA_WINDOWS_D3D11_LIB d3d11.lib CACHE FILEPATH "Windows d3d11 import library")
+  endif()
+  if(NOT CRTMEDIA_WINDOWS_DXGI_LIB)
+    set(CRTMEDIA_WINDOWS_DXGI_LIB dxgi.lib CACHE FILEPATH "Windows dxgi import library")
+  endif()
 endif()
 
 # src/arch/macos/audio_sink_coreaudio.c drives real CoreAudio from plain C
@@ -126,7 +156,15 @@ endif()
 # framework in, and crtmedia_shared (a real .dylib) needs it resolved at
 # its own link time regardless.
 if(CRT_TARGET_OS STREQUAL "macos")
-  set(CRTMEDIA_MACOS_FRAMEWORKS "-framework AudioToolbox")
+  # VideoToolbox/CoreVideo/CoreMedia (2026-09-08, "hardware decode, phase
+  # A"): FFmpeg's own hwcontext_videotoolbox.c (compiled into libavutil.a
+  # once porting/recipes/ffmpeg.json's --enable-videotoolbox sticks) calls
+  # real VideoToolbox session APIs, which return real CVPixelBuffer/
+  # CMSampleBuffer objects (CoreVideo/CoreMedia) internally -- all three
+  # frameworks, same real "a static archive member with undefined symbols
+  # only resolves once something links this framework in" reasoning
+  # AudioToolbox's own comment just above already documents.
+  set(CRTMEDIA_MACOS_FRAMEWORKS "-framework AudioToolbox" "-framework VideoToolbox" "-framework CoreVideo" "-framework CoreMedia")
 endif()
 
 add_library(crtmedia STATIC
@@ -149,6 +187,13 @@ if(CRT_TARGET_OS STREQUAL "windows")
   # link fails with unresolved CoInitializeEx/CoCreateInstance/
   # CoUninitialize symbols.
   target_link_libraries(crtmedia PUBLIC "${CRTMEDIA_WINDOWS_OLE32_LIB}")
+  # PUBLIC, same reasoning as ole32.lib just above -- only actually needed
+  # once CRTMEDIA_ENABLE_FFMPEG's own --enable-d3d11va sticks (see the
+  # CRTMEDIA_WINDOWS_D3D11_LIB/_DXGI_LIB find_file() comment, above), but
+  # harmless to always link (a real, always-present Windows 10+ import
+  # library) rather than threading a second CRTMEDIA_ENABLE_FFMPEG guard
+  # through this already-unconditional Windows block.
+  target_link_libraries(crtmedia PUBLIC "${CRTMEDIA_WINDOWS_D3D11_LIB}" "${CRTMEDIA_WINDOWS_DXGI_LIB}")
 endif()
 if(CRT_TARGET_OS STREQUAL "macos")
   # PUBLIC, matching the Windows ole32.lib case just above for the same
@@ -230,6 +275,7 @@ if(CRT_TARGET_OS STREQUAL "windows")
   # FFmpeg CRTMEDIA_FFMPEG_LIBRARIES/crtmedia_shared block's own identical
   # static-vs-shared distinction further down this file).
   target_link_libraries(crtmedia_shared PRIVATE "${CRTMEDIA_WINDOWS_OLE32_LIB}")
+  target_link_libraries(crtmedia_shared PRIVATE "${CRTMEDIA_WINDOWS_D3D11_LIB}" "${CRTMEDIA_WINDOWS_DXGI_LIB}")
 endif()
 if(CRT_TARGET_OS STREQUAL "macos")
   # crtmedia_shared is a real .dylib -- needs AudioToolbox resolved at its
@@ -892,6 +938,60 @@ if(CRTMEDIA_ENABLE_FFMPEG)
     PASS_REGULAR_EXPRESSION "crtmedia_extractor_codec_test: ok"
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_extractor_codec_test_runs)
+
+  # crtmedia_hw_decode_test: TODO.md's "hardware decode, phase A" step
+  # (2026-09-08) -- see tests/hw_decode_test.c's own top comment for the
+  # full "why". Same real gating/shape as crtmedia_extractor_codec_test
+  # just above (same core API, same real MP4 fixture); this test opts
+  # into CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE, that one never does.
+  add_executable(crtmedia_hw_decode_test
+    ${CRT_STARTUP_OBJECTS}
+    tests/hw_decode_test.c
+  )
+  target_link_libraries(crtmedia_hw_decode_test PRIVATE crt_build_flags crtmedia)
+  target_include_directories(crtmedia_hw_decode_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include"
+  )
+  target_compile_definitions(crtmedia_hw_decode_test PRIVATE
+    CRTMEDIA_TEST_VIDEO_PATH="${CMAKE_SOURCE_DIR}/libcrtmedia/assets/test_video.mp4"
+  )
+  target_link_libraries(crtmedia_hw_decode_test PRIVATE crt_compiler_rt_builtins)
+  target_link_options(crtmedia_hw_decode_test PRIVATE
+    -nostdlib
+    -nostartfiles
+    -nodefaultlibs
+  )
+  if(CRT_TARGET_OS STREQUAL "macos")
+    target_link_options(crtmedia_hw_decode_test PRIVATE
+      -Wl,-e,_start
+      -Wl,-dead_strip
+    )
+    # See crtmedia_demux_test's own matching block above for the full
+    # pthread_once/-lSystem-ordering reasoning this mirrors.
+    target_link_libraries(crtmedia_hw_decode_test PRIVATE c m dl cxx)
+    target_link_libraries(crtmedia_hw_decode_test PRIVATE System)
+  elseif(CRT_TARGET_OS STREQUAL "linux")
+    target_link_options(crtmedia_hw_decode_test PRIVATE
+      -Wl,-e,_start
+      -Wl,--gc-sections
+    )
+  elseif(CRT_TARGET_OS STREQUAL "windows")
+    target_link_options(crtmedia_hw_decode_test PRIVATE
+      -Wl,/entry:mainCRTStartup
+      -Wl,/subsystem:console
+      -Wl,/OPT:REF
+    )
+    target_link_libraries(crtmedia_hw_decode_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  endif()
+  crt_link_startup_end_objects(crtmedia_hw_decode_test)
+  add_dependencies(crtmedia_hw_decode_test c crt1 crtmedia)
+
+  add_test(NAME crtmedia_hw_decode_test_runs COMMAND crtmedia_hw_decode_test)
+  set_tests_properties(crtmedia_hw_decode_test_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    PASS_REGULAR_EXPRESSION "crtmedia_hw_decode_test: ok"
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_hw_decode_test_runs)
 
   # crtmedia_playback_pipeline_test: TODO.md's upper-runtime roadmap
   # "Finish the software player" step's own last remaining piece -- a

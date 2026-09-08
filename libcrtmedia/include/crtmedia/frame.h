@@ -39,17 +39,28 @@ typedef enum crtmedia_result {
  * channel RGB layouts (the two byte orders real hosts/GPU APIs actually
  * use -- RGBA8888 is OpenGL/most software's own default, BGRA8888 matches
  * libcrtgfx's own crtgfx_framebuffer convention, see crtgfx/window.h),
- * plus one planar YUV layout (I420/YUV420P, 8-bit 4:2:0 -- FFmpeg's own
+ * one planar YUV layout (I420/YUV420P, 8-bit 4:2:0 -- FFmpeg's own
  * default software-decode output for the overwhelming majority of real
- * H.264/HEVC content). Deliberately not NV12 or any 10/12-bit format yet:
- * nothing in this codebase produces or consumes one today, and this
- * project's own established convention (see docs/libcrtgfx_api_policy.md's
- * window.h split discussion) is to add a real field/value once a real
- * consumer needs it, not speculatively ahead of one. */
+ * H.264/HEVC content), and one semi-planar YUV layout (NV12, 8-bit 4:2:0
+ * with interleaved UV -- added 2026-09-08, "hardware decode, phase A":
+ * every real hardware H.264 decoder this project now supports, D3D11VA/
+ * VideoToolbox/VAAPI alike, produces NV12, not I420, so this is a real,
+ * demonstrated consumer, not speculative). Deliberately not any 10/12-bit
+ * format yet: nothing in this codebase produces or consumes one today,
+ * and this project's own established convention (see docs/
+ * libcrtgfx_api_policy.md's window.h split discussion) is to add a real
+ * field/value once a real consumer needs it, not speculatively ahead of
+ * one. */
 typedef enum crtmedia_pixel_format {
   CRTMEDIA_PIXEL_FORMAT_RGBA8888 = 1,
   CRTMEDIA_PIXEL_FORMAT_BGRA8888 = 2,
   CRTMEDIA_PIXEL_FORMAT_YUV420P = 3,
+  /* 2 planes: full-resolution Y, then a half-resolution-each-dimension
+   * interleaved-UV plane (U/V bytes alternating, stride >= chroma_width *
+   * 2) -- crtmedia_frame_describe_planes()'s own comment on plane width/
+   * height applies identically (this plane's own width is chroma_width,
+   * not chroma_width * 2 -- "width" means sample columns, not bytes). */
+  CRTMEDIA_PIXEL_FORMAT_NV12 = 4,
 } crtmedia_pixel_format;
 
 /* Luma quantization range. Only meaningful for a YUV frame; a packed RGB
@@ -180,7 +191,7 @@ void crtmedia_frame_release(crtmedia_frame* frame);
  * height) -- this function never allocates and never touches dst->
  * release/release_context. Every output pixel's own alpha channel is set
  * to 255 (opaque); no source format this contract defines carries an
- * alpha plane. For CRTMEDIA_PIXEL_FORMAT_YUV420P input, the conversion
+ * alpha plane. For CRTMEDIA_PIXEL_FORMAT_YUV420P/_NV12 input, the conversion
  * matrix is derived from src->color_space's own real ITU-R Kr/Kb luma
  * constants (BT.601/BT.709/BT.2020) and src->color_range's limited/full
  * scaling -- CRTMEDIA_COLOR_SPACE_UNSPECIFIED/CRTMEDIA_COLOR_RANGE_

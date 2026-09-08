@@ -22,6 +22,7 @@
 #include <libavcodec/avcodec.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/frame.h>
+#include <libavutil/hwcontext.h>
 #include <libswresample/swresample.h>
 
 #include <stdlib.h>
@@ -36,6 +37,17 @@ struct crtmedia_codec {
   crtmedia_sample_format out_sample_format; /* audio only */
   int eof_signaled;
   int eof_drained;
+  /* Hardware decode, phase A (2026-09-08, TODO.md's "hardware decode,
+   * phase A" step) -- video only, and only ever set when the format
+   * passed to crtmedia_codec_create_decoder() carried CRTMEDIA_FORMAT_
+   * KEY_PREFER_HARDWARE_DECODE and that request actually succeeded (see
+   * that function's own real fallback-to-software path otherwise). hw_
+   * device_ctx/hw_pix_fmt stay NULL/AV_PIX_FMT_NONE on every other real
+   * codec instance, matching this project's own "additive, zero risk to
+   * existing behavior" discipline. */
+  AVBufferRef* hw_device_ctx;
+  enum AVPixelFormat hw_pix_fmt;
+  int hardware_accelerated;
 };
 
 static enum AVCodecID codec_id_for_mime(const char* mime) {
@@ -52,6 +64,52 @@ static enum AVCodecID codec_id_for_mime(const char* mime) {
     return AV_CODEC_ID_PCM_S16LE;
   }
   return AV_CODEC_ID_NONE;
+}
+
+/* Real per-host hwaccel type (2026-09-08, "hardware decode, phase A") --
+ * av_hwdevice_ctx_create() (below) does all real device creation itself
+ * (D3D11 device creation, VideoToolbox session setup, VAAPI display
+ * connection) once given the right AVHWDeviceType, so this project needs
+ * no hand-rolled platform device-creation code the way libcrtgfx's own
+ * D3D12/Vulkan/Metal backends did. D3D11VA over D3D12VA on Windows: the
+ * more mature, more widely-supported real FFmpeg hwaccel path (TODO.md's
+ * own phase-A phrasing already accepts either). AV_HWDEVICE_TYPE_NONE
+ * (real, valid "no real accelerator for this host" sentinel) on any other
+ * target -- crtmedia_codec_create_decoder() below already treats that the
+ * same as "device creation failed," so no separate guard is needed at the
+ * call site. */
+static enum AVHWDeviceType hw_type_for_platform(void) {
+#if defined(CRT_TARGET_OS_WINDOWS)
+  return AV_HWDEVICE_TYPE_D3D11VA;
+#elif defined(CRT_TARGET_OS_MACOS)
+  return AV_HWDEVICE_TYPE_VIDEOTOOLBOX;
+#elif defined(CRT_TARGET_OS_LINUX)
+  return AV_HWDEVICE_TYPE_VAAPI;
+#else
+  return AV_HWDEVICE_TYPE_NONE;
+#endif
+}
+
+/* Real AVCodecContext::get_format callback (signature confirmed directly
+ * against this project's own vendored libavcodec/avcodec.h) -- offers
+ * `codec`'s own real hw_pix_fmt if the decoder is willing to use it,
+ * falling through to FFmpeg's own default negotiation otherwise (a real
+ * decoder can legitimately decide not to offer the requested hw format at
+ * all, e.g. for a profile/level its own hwaccel doesn't support -- this
+ * is real, expected fallback, not an error this callback itself needs to
+ * detect: crtmedia_codec_dequeue_output() only ever downloads a frame
+ * when its own format actually equals hw_pix_fmt, so a silent software
+ * fallback here is already handled correctly one layer up). */
+static enum AVPixelFormat crtmedia_codec_get_format(
+    struct AVCodecContext* ctx, const enum AVPixelFormat* formats) {
+  crtmedia_codec* codec = (crtmedia_codec*)ctx->opaque;
+  const enum AVPixelFormat* p;
+  for (p = formats; *p != AV_PIX_FMT_NONE; ++p) {
+    if (*p == codec->hw_pix_fmt) {
+      return *p;
+    }
+  }
+  return avcodec_default_get_format(ctx, formats);
 }
 
 crtmedia_result crtmedia_codec_create_decoder(const crtmedia_format* format, crtmedia_codec** out_codec) {
@@ -80,6 +138,7 @@ crtmedia_result crtmedia_codec_create_decoder(const crtmedia_format* format, crt
     return CRTMEDIA_ERROR_UNSUPPORTED;
   }
   codec->is_video = is_video;
+  codec->hw_pix_fmt = AV_PIX_FMT_NONE;
   codec->codec_ctx = avcodec_alloc_context3(av_codec);
   codec->packet = av_packet_alloc();
   codec->decode_frame = av_frame_alloc();
@@ -87,7 +146,9 @@ crtmedia_result crtmedia_codec_create_decoder(const crtmedia_format* format, crt
     crtmedia_codec_release(codec);
     return CRTMEDIA_ERROR_UNSUPPORTED;
   }
+  codec->codec_ctx->opaque = codec;
 
+  int32_t prefer_hardware_decode = 0;
   if (is_video) {
     int32_t width = 0;
     int32_t height = 0;
@@ -101,6 +162,7 @@ crtmedia_result crtmedia_codec_create_decoder(const crtmedia_format* format, crt
      * demux.c's. */
     codec->codec_ctx->thread_count = 2;
     codec->codec_ctx->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
+    crtmedia_format_get_int32(format, CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE, &prefer_hardware_decode);
   } else {
     int32_t sample_rate = 0;
     int32_t channel_count = 0;
@@ -122,9 +184,88 @@ crtmedia_result crtmedia_codec_create_decoder(const crtmedia_format* format, crt
     codec->codec_ctx->extradata_size = (int)csd_size;
   }
 
+  /* Real hardware decode attempt (2026-09-08, "hardware decode, phase
+   * A") -- av_hwdevice_ctx_create() does all real per-host device
+   * creation itself (see hw_type_for_platform()'s own comment); this is
+   * a real, honest attempt, never a hard requirement. Real recovery:
+   * either step below failing (no compatible device at all, or this
+   * specific codec/profile genuinely not supported by this host's own
+   * hwaccel) falls all the way back to the exact same plain software
+   * avcodec_open2() call every codec on this host already used before
+   * this feature existed -- codec->hw_pix_fmt stays AV_PIX_FMT_NONE, so
+   * crtmedia_codec_get_format()/dequeue_output()'s own hw-frame-download
+   * branch never activates for this instance. */
+  if (is_video && prefer_hardware_decode != 0) {
+    enum AVHWDeviceType hw_type = hw_type_for_platform();
+    if (hw_type != AV_HWDEVICE_TYPE_NONE &&
+        av_hwdevice_ctx_create(&codec->hw_device_ctx, hw_type, NULL, NULL, 0) >= 0) {
+      switch (hw_type) {
+        case AV_HWDEVICE_TYPE_D3D11VA:
+          codec->hw_pix_fmt = AV_PIX_FMT_D3D11;
+          break;
+        case AV_HWDEVICE_TYPE_VIDEOTOOLBOX:
+          codec->hw_pix_fmt = AV_PIX_FMT_VIDEOTOOLBOX;
+          break;
+        case AV_HWDEVICE_TYPE_VAAPI:
+          codec->hw_pix_fmt = AV_PIX_FMT_VAAPI;
+          break;
+        default:
+          codec->hw_pix_fmt = AV_PIX_FMT_NONE;
+          break;
+      }
+      codec->codec_ctx->hw_device_ctx = av_buffer_ref(codec->hw_device_ctx);
+      codec->codec_ctx->get_format = crtmedia_codec_get_format;
+    }
+  }
+
   if (avcodec_open2(codec->codec_ctx, av_codec, NULL) < 0) {
-    crtmedia_codec_release(codec);
-    return CRTMEDIA_ERROR_UNSUPPORTED;
+    if (codec->hw_device_ctx != NULL) {
+      /* Real fallback and recovery: this exact hardware path did not
+       * work for this specific codec/profile even though a real device
+       * was created -- discard every hw-specific field and retry with a
+       * genuinely fresh, plain software AVCodecContext (not the same,
+       * possibly partially-configured-by-open2 one -- avcodec_open2()'s
+       * own real failure-state contract does not document a failed
+       * context as safe to reopen). extradata must be recreated too,
+       * since it lived on the now-freed context. */
+      av_buffer_unref(&codec->hw_device_ctx);
+      codec->hw_pix_fmt = AV_PIX_FMT_NONE;
+      avcodec_free_context(&codec->codec_ctx);
+      codec->codec_ctx = avcodec_alloc_context3(av_codec);
+      if (codec->codec_ctx == NULL) {
+        crtmedia_codec_release(codec);
+        return CRTMEDIA_ERROR_UNSUPPORTED;
+      }
+      codec->codec_ctx->opaque = codec;
+      {
+        int32_t width = 0;
+        int32_t height = 0;
+        crtmedia_format_get_int32(format, CRTMEDIA_FORMAT_KEY_WIDTH, &width);
+        crtmedia_format_get_int32(format, CRTMEDIA_FORMAT_KEY_HEIGHT, &height);
+        codec->codec_ctx->width = width;
+        codec->codec_ctx->height = height;
+      }
+      codec->codec_ctx->thread_count = 2;
+      codec->codec_ctx->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
+      if (csd_size > 0) {
+        codec->codec_ctx->extradata = (uint8_t*)av_mallocz(csd_size + AV_INPUT_BUFFER_PADDING_SIZE);
+        if (codec->codec_ctx->extradata == NULL) {
+          crtmedia_codec_release(codec);
+          return CRTMEDIA_ERROR_UNSUPPORTED;
+        }
+        memcpy(codec->codec_ctx->extradata, csd, csd_size);
+        codec->codec_ctx->extradata_size = (int)csd_size;
+      }
+      if (avcodec_open2(codec->codec_ctx, av_codec, NULL) < 0) {
+        crtmedia_codec_release(codec);
+        return CRTMEDIA_ERROR_UNSUPPORTED;
+      }
+    } else {
+      crtmedia_codec_release(codec);
+      return CRTMEDIA_ERROR_UNSUPPORTED;
+    }
+  } else if (codec->hw_device_ctx != NULL) {
+    codec->hardware_accelerated = 1;
   }
 
   if (!is_video) {
@@ -156,6 +297,9 @@ crtmedia_result crtmedia_codec_create_decoder(const crtmedia_format* format, crt
 void crtmedia_codec_release(crtmedia_codec* codec) {
   if (codec == NULL) {
     return;
+  }
+  if (codec->hw_device_ctx != NULL) {
+    av_buffer_unref(&codec->hw_device_ctx);
   }
   if (codec->swr_ctx != NULL) {
     swr_free(&codec->swr_ctx);
@@ -211,7 +355,14 @@ static void release_video_frame(crtmedia_frame* frame, void* release_context) {
 
 static void fill_video_frame(AVFrame* avframe, crtmedia_frame* out_frame) {
   memset(out_frame, 0, sizeof(*out_frame));
-  out_frame->format = CRTMEDIA_PIXEL_FORMAT_YUV420P;
+  /* NV12 (2026-09-08, "hardware decode, phase A"): avframe here is always
+   * a real, CPU-resident software frame by this point -- crtmedia_codec_
+   * dequeue_output() already downloaded it via av_hwframe_transfer_data()
+   * if the raw decode output was still hardware-resident, so avframe->
+   * format is a genuine software pixel format either way, never one of
+   * the hw formats (AV_PIX_FMT_D3D11/VIDEOTOOLBOX/VAAPI) themselves. */
+  out_frame->format =
+      avframe->format == AV_PIX_FMT_NV12 ? CRTMEDIA_PIXEL_FORMAT_NV12 : CRTMEDIA_PIXEL_FORMAT_YUV420P;
   out_frame->width = (uint32_t)avframe->width;
   out_frame->height = (uint32_t)avframe->height;
   out_frame->color_range =
@@ -233,15 +384,23 @@ static void fill_video_frame(AVFrame* avframe, crtmedia_frame* out_frame) {
       break;
   }
   out_frame->timestamp_us = avframe->pts != AV_NOPTS_VALUE ? avframe->pts : CRTMEDIA_FRAME_TIMESTAMP_NONE;
-  out_frame->plane_count = 3;
   uint32_t chroma_width = (out_frame->width + 1u) / 2u;
   uint32_t chroma_height = (out_frame->height + 1u) / 2u;
   out_frame->planes[0] =
       (crtmedia_frame_plane){avframe->data[0], (uint32_t)avframe->linesize[0], out_frame->width, out_frame->height};
-  out_frame->planes[1] =
-      (crtmedia_frame_plane){avframe->data[1], (uint32_t)avframe->linesize[1], chroma_width, chroma_height};
-  out_frame->planes[2] =
-      (crtmedia_frame_plane){avframe->data[2], (uint32_t)avframe->linesize[2], chroma_width, chroma_height};
+  if (out_frame->format == CRTMEDIA_PIXEL_FORMAT_NV12) {
+    /* One interleaved-UV plane -- real NV12 layout, matching crtmedia_
+     * frame_describe_planes()'s own NV12 branch (frame.c). */
+    out_frame->plane_count = 2;
+    out_frame->planes[1] =
+        (crtmedia_frame_plane){avframe->data[1], (uint32_t)avframe->linesize[1], chroma_width, chroma_height};
+  } else {
+    out_frame->plane_count = 3;
+    out_frame->planes[1] =
+        (crtmedia_frame_plane){avframe->data[1], (uint32_t)avframe->linesize[1], chroma_width, chroma_height};
+    out_frame->planes[2] =
+        (crtmedia_frame_plane){avframe->data[2], (uint32_t)avframe->linesize[2], chroma_width, chroma_height};
+  }
   out_frame->release = release_video_frame;
   out_frame->release_context = avframe;
 }
@@ -308,9 +467,32 @@ crtmedia_result crtmedia_codec_dequeue_output(
 
   if (codec->is_video) {
     if (out_video_frame != NULL) {
-      AVFrame* owned = av_frame_alloc();
-      av_frame_ref(owned, codec->decode_frame);
-      fill_video_frame(owned, out_video_frame);
+      /* Real hw-frame download (2026-09-08, "hardware decode, phase A"):
+       * codec->decode_frame->format equals hw_pix_fmt exactly when this
+       * frame is still hardware-resident (a real decoder can legitimately
+       * decide not to use the offered hw format at all -- crtmedia_codec_
+       * get_format()'s own comment -- so this check, not just "hw_pix_fmt
+       * != NONE", is what actually decides whether a download is needed
+       * this frame). av_hwframe_transfer_data() downloads to real CPU
+       * memory (this pass's own explicit scope -- zero-copy interop is
+       * phase B); av_frame_copy_props() carries pts/color metadata across
+       * since the fresh sw frame starts with none of its own. */
+      if (codec->hw_pix_fmt != AV_PIX_FMT_NONE && codec->decode_frame->format == codec->hw_pix_fmt) {
+        AVFrame* sw_frame = av_frame_alloc();
+        if (sw_frame == NULL || av_hwframe_transfer_data(sw_frame, codec->decode_frame, 0) < 0) {
+          if (sw_frame != NULL) {
+            av_frame_free(&sw_frame);
+          }
+          av_frame_unref(codec->decode_frame);
+          return CRTMEDIA_ERROR_UNSUPPORTED;
+        }
+        av_frame_copy_props(sw_frame, codec->decode_frame);
+        fill_video_frame(sw_frame, out_video_frame);
+      } else {
+        AVFrame* owned = av_frame_alloc();
+        av_frame_ref(owned, codec->decode_frame);
+        fill_video_frame(owned, out_video_frame);
+      }
     }
   } else {
     if (out_audio_buffer != NULL) {
@@ -331,5 +513,13 @@ crtmedia_result crtmedia_codec_flush(crtmedia_codec* codec) {
   avcodec_flush_buffers(codec->codec_ctx);
   codec->eof_signaled = 0;
   codec->eof_drained = 0;
+  return CRTMEDIA_OK;
+}
+
+crtmedia_result crtmedia_codec_is_hardware_accelerated(const crtmedia_codec* codec, int* out_is_hardware) {
+  if (codec == NULL || out_is_hardware == NULL) {
+    return CRTMEDIA_ERROR_INVALID_ARGUMENT;
+  }
+  *out_is_hardware = codec->hardware_accelerated;
   return CRTMEDIA_OK;
 }

@@ -44,6 +44,23 @@ crtmedia_result crtmedia_frame_describe_planes(
       return CRTMEDIA_OK;
     }
 
+    case CRTMEDIA_PIXEL_FORMAT_NV12: {
+      /* Same real 4:2:0 chroma-dimension rounding as YUV420P above --
+       * this plane's own "width" is chroma sample columns (matching this
+       * function's own documented width/height convention), not the
+       * interleaved-UV byte stride, which is chroma_width * 2. */
+      uint32_t chroma_width = (width + 1u) / 2u;
+      uint32_t chroma_height = (height + 1u) / 2u;
+      out_planes[0].width = width;
+      out_planes[0].height = height;
+      out_planes[0].stride = width;
+      out_planes[1].width = chroma_width;
+      out_planes[1].height = chroma_height;
+      out_planes[1].stride = chroma_width * 2u;
+      *out_plane_count = 2;
+      return CRTMEDIA_OK;
+    }
+
     default:
       return CRTMEDIA_ERROR_INVALID_ARGUMENT;
   }
