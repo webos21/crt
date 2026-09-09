@@ -172,23 +172,31 @@ mksh/toybox environment for configure/build commands, and never require
 MSYS/Git Bash. Extend the same recipe model to `04 -> 05-js` once the first
 three transitions are stable.
 
-The `02-cxx -> 03-gfx-simple` deterministic asset, schema-v2 OS identity,
-standalone build entry point, and isolated Windows acceptance are implemented.
-The Linux source path also carries and builds the pinned libxkbcommon port
-instead of borrowing its headers or library from the host. Its source-only
-build has passed from a directory containing spaces; complete the remaining
-standalone graphics build/CTest/example/verification pass on Linux and the
-whole isolated transition on macOS, then add the
-`03-gfx-simple -> 04-gfx-media` asset and entry point with Skia and FFmpeg
-actually enabled. Keep the separately listed Windows C++ initialization
-failure open; the stage runner deliberately has no retry that could hide it.
+**Done and verified on all three hosts (2026-09-09):** the `02-cxx ->
+03-gfx-simple` deterministic asset, schema-v2 OS identity, standalone build
+entry point, and isolated stage-build acceptance (configure/build/ctest/
+install/example-rebuild-and-run/`verify_dist.py`, from a path containing
+spaces). The Linux source path also carries and builds the pinned
+libxkbcommon port instead of borrowing its headers or library from the host.
+Four real macOS-only bugs (`DYLD_LIBRARY_PATH` poisoning host tools, a
+missing `-fcrt-real-apple-sdk` sentinel in `crt-cc`, `--sysroot=` fighting
+`-syslibroot`, and `CMAKE_SYSROOT`-relative RPATH stripping) and one
+Windows-only bug (`mksh` backslash-path exec) were found and fixed along the
+way -- full trail in `HISTORY.md`. Windows was re-verified clean against the
+final, merged fix set.
+
+Next: add the `03-gfx-simple -> 04-gfx-media` asset and entry point with
+Skia and FFmpeg actually enabled (the default packaging pass everywhere
+still has `CRTGFX_ENABLE_SKIA=OFF`/`CRTMEDIA_ENABLE_FFMPEG=OFF` -- this
+transition's acceptance must not settle for that). Keep the separately
+listed Windows C++ initialization failure open; the stage runner
+deliberately has no retry that could hide it.
 
 Acceptance must start from freshly extracted archives in a path containing
 spaces, reject access to in-tree CRT headers/libraries/build artifacts,
 rebuild and run the packaged examples, and exercise representative configure,
-amalgamation, and dependency-chain ports. Windows is the first implementation
-host; repeat the complete isolated chain on Linux and macOS before moving the
-resolved details to `HISTORY.md`. Also root-cause the Windows packaged-mksh
+amalgamation, and dependency-chain ports -- apply the same bar to
+`03-gfx-simple -> 04-gfx-media`. Also root-cause the Windows packaged-mksh
 here-document temporary-file diagnostic before treating configure probe
 results as authoritative; zlib completes and passes static/shared round-trip
 tests, but its configure log still contains that diagnostic.

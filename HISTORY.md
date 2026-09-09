@@ -11,6 +11,228 @@ substantive update.
 
 ## 2026-09-09
 
+- **Fixed 4 real macOS-only bugs in the `02-cxx -> 03-gfx-simple` isolated
+  stage build -- the first real exercise of `tools/crt-cc` as an external
+  SDK compiler -- then re-verified the whole transition clean on Windows in
+  a separate session.** Every other macOS build in this project either links
+  host clang directly (the top-level CMake build) or invokes `crt-cc`
+  without CMake's own sysroot machinery in the way (`crt-port-build.py`'s
+  porting system); the isolated stage-source SDK bootstrap
+  (`crt-toolchain.cmake`, `distribution/stages/03-gfx-simple`) was the first
+  consumer to hit both at once. Running the documented end-user upgrade
+  (`./tools/crt-stage-build.py --recipe stages/recipes/03-gfx-simple.json
+  ...`) surfaced four bugs in sequence, each found and fixed live: (1)
+  `build_stage_03_gfx_simple.py`'s `runtime_env()` set `DYLD_LIBRARY_PATH`
+  unconditionally and threaded it through every subprocess it spawns,
+  including the real host `cmake`/`ninja`/`ctest` themselves (linked
+  against the real system libc++) -- pointing dyld at this stage's own
+  from-scratch, ABI-incompatible `libc++.1.dylib` aborted them outright
+  (`Symbol not found: __ZNSt12length_errorD1Ev`); fixed by never setting it
+  there at all (confirmed via `otool -L` that this stage's own test
+  binaries don't need it -- they link only real, absolute-path system
+  frameworks). (2) `tools/crt-cc` had no equivalent of `tools/crt-c++`'s own
+  `-fcrt-real-apple-sdk` sentinel, so linking `crtgfx_window_shared.dylib`
+  (needs real Foundation/AppKit/QuartzCore/CoreGraphics/objc) failed with
+  `ld: library 'objc' not found`; ported the sentinel mechanism (parsed and
+  stripped from `"$@"` via a shift-and-requeue rotation, zero cost when
+  absent) and wired it onto `crtgfx_window`/`crtgfx_window_shared` in
+  `distribution/stages/03-gfx-simple/CMakeLists.txt`. (3) Even with (2)
+  fixed, CMake's own `--sysroot=$CRT_SYSROOT` (appended to every
+  compile/link once `CMAKE_SYSROOT` is set -- this project's own top-level
+  build and porting system never trigger this) still won the linker's
+  `-syslibroot` over `crt-cc`'s new `-isysroot`, breaking even a plain
+  `-lSystem` link; fixed by stripping any `--sysroot=` on every macOS
+  invocation of `crt-cc` (its own `-isystem`/explicit lib paths already
+  cover what `--sysroot` would have added). (4) The resulting executable
+  then crashed before `main()` (`dyld: Library not loaded:
+  @rpath/libcrtgfx.dylib ... tried: '/lib/libcrtgfx.dylib'`) because CMake's
+  default rpath computation, once `CMAKE_SYSROOT` is set, strips the
+  sysroot prefix from any absolute library path underneath it -- correct
+  for real cross-compilation onto a separate device filesystem, wrong here;
+  fixed by setting `CMAKE_BUILD_RPATH`/`CMAKE_INSTALL_RPATH` explicitly to
+  the real, absolute `lib` directory in the generated `crt-toolchain.cmake`
+  (`tools/create_dist.py`). Verified end to end, repeatedly, after each fix,
+  on the macOS session: the full `02-cxx -> 03-gfx-simple` upgrade
+  (configure, build, ctest, install, then build and run
+  `examples/gfx-simple` against the finished installed SDK) completes clean
+  (`CRT stage ready`), and the full `cmake --workflow --preset
+  macos-host-ninja-debug` still passes 100/100 -- the porting system's own
+  existing `crt-cc` usage (make/zlib/etc, which never passes `--sysroot=` or
+  the sentinel) is unaffected. The user separately reported the same
+  `02-cxx -> 03-gfx-simple` transition passing on real Linux hardware this
+  same testing round (Linux never triggers `CMAKE_SYSROOT`-driven macOS
+  link behavior to begin with, so none of the four bugs above were
+  reachable there); not independently re-run with a captured transcript in
+  this session. This (Windows) session then rebuilt the entire `02-cxx`
+  dist from the post-fix tree (`crt-libcxx-dist`, so the packaged
+  `03-gfx-simple` recipe/source asset it carries is re-pinned against this
+  exact commit) and reran the full isolated `02-cxx -> 03-gfx-simple` stage
+  build from a clean `--output`/`--work-root`: `crt-cc.cmd` compiler
+  detection, 14/14 build, `crtgfx_window_smoke_runs`/
+  `crtgfx_synthetic_event_runs` both pass via ctest, install, the packaged
+  `examples/gfx-simple` rebuilt fully externally against only the installed
+  SDK and ran (`crtgfx_window_demo: presented=1`), and `verify_dist.py
+  --stage 03-gfx-simple` passed -- confirming the four macOS-only fixes
+  above (each provably gated behind `target_os == macos` or the literal
+  `-fcrt-real-apple-sdk` sentinel by construction) cause no Windows
+  regression.
+
+- **Fixed `CRT_HOST_CC`/`CRT_HOST_CXX` backslash paths breaking mksh exec on
+  Windows (`02-cxx -> 03-gfx-simple`).** Running
+  `tools/crt-stage-build.py` from PowerShell with `$env:CRT_CC =
+  "C:\Program Files\LLVM\bin\clang.exe"` (the natural way to write a path in
+  PowerShell) failed CMake's compiler check with `... clang.exe: inaccessible
+  or not found`, even though the file genuinely exists: `mksh.exe` (which
+  `crt-cc`/`crt-c++` run under on Windows) only recognizes a literal exec
+  path when it contains a forward slash, and treats a bare backslash path as
+  a single command name to search `$PATH` for instead -- the same class of
+  bug already documented from the libc++ bootstrap work
+  (mksh/CMake Windows gotchas), hit again in this new code path. Fixed at
+  the two points that turn external input (a CLI arg or the `CRT_CC`/
+  `CRT_CXX` env vars) into `CRT_HOST_CC`/`CRT_HOST_CXX`:
+  `crt-libcxx-build.py`'s `--host-cc`/`--host-cxx` handling (covers `01-c ->
+  02-cxx`, since `build_stage_02_cxx.py` forwards `CRT_CC` to this same
+  file) and `build_stage_03_gfx_simple.py`'s `runtime_env()` (`02-cxx ->
+  03-gfx-simple`) -- both now normalize with `Path(...).as_posix()` before
+  assigning `CRT_HOST_CC`/`CRT_HOST_CXX`. Verified for real: regenerated the
+  `02-cxx -> 03-gfx-simple` stage-source asset/recipe so the packaged
+  `build_stage_03_gfx_simple.py` picked up the fix, then reran
+  `crt-stage-build.py` with the exact same backslash `CRT_CC`/`CRT_CXX`
+  values that had just failed -- static/shared `crtgfx_window` built, both
+  ctests passed, the packaged example rebuilt externally and ran
+  (`presented=1`), `verify_dist.py` passed.
+
+- **Implemented the `02-cxx -> 03-gfx-simple` isolated source-stage
+  transition**, extending the pinned-recipe source-stage model (`01-c ->
+  02-cxx`) one more hop. Recipe schema bumped to v2
+  (`distribution/stage_recipe.schema.json`): adds a required `target.os`
+  field, closing a real gap found reviewing the plan before implementing it
+  -- source-stage asset content already varied by target OS
+  (`create_stage_source.py`'s `required_source_paths()` already filtered
+  per-OS), but the asset filename and recipe never recorded which OS it was
+  for, so two different OSes' assets for the same stage would collide under
+  the same filename in one GitHub Release. Asset names now carry the target
+  OS (`crt-development-<os>-<stage>-source.tar.xz`), and
+  `crt-stage-build.py` rejects a recipe whose target OS doesn't match the
+  predecessor SDK's own manifest. Shared validation
+  (`tools/crt_stage_recipe.py`, new) replaces the independently-hardcoded
+  `validate_recipe()` that used to live only in `crt-stage-build.py`: a
+  `STAGE_SUCCESSORS` table (`01-c -> 02-cxx -> 03-gfx-simple ->
+  04-gfx-media`) plus one `validate_recipe()`/`recipe_filename_for_stage()`
+  pair now used by both `crt-stage-build.py` and `verify_dist.py`, avoiding
+  the same "list duplicated in two files, one gets updated" drift risk
+  already fixed once for `DIST_PORTING_TOOLS`/`DIST_PORTING_DIRS`/
+  `DIST_WRAPPER_TOOLS`; added to `DIST_PORTING_TOOLS` so it actually ships.
+  `libcrtgfx/cmake/crtgfx_window_sources.cmake` (new) factors the window
+  source-file inventory out of `libcrtgfx/CMakeLists.txt` into a pure-data
+  module (source lists only, no `add_library()`/`target_link_libraries()`
+  control flow) that both the main in-tree build and the new standalone
+  `distribution/stages/03-gfx-simple/CMakeLists.txt` `include()` -- so a new
+  backend or source file can't be added to one and silently missed by the
+  other; the native Wayland Vulkan-WSI source
+  (`window_wayland_native.c`) deliberately stays out of the Simple Graphics
+  stage's own source list (only the header ships, since the legacy backend
+  dispatches through it). `tools/build_stage_03_gfx_simple.py` (new)
+  mirrors `build_stage_02_cxx.py`'s shape: stage `02-cxx` to scratch,
+  configure+build the standalone CMake project, install into the staged
+  SDK, run the window/synthetic-event ctest, rebuild the packaged example
+  as a genuinely external CMake consumer and run it bounded, update
+  manifest `built_from` provenance, run `verify_dist.py`, and only then
+  atomically publish. On Linux it also builds the pinned libxkbcommon
+  source port and records it under a new manifest.json
+  `redistributed_dependencies` inventory (headers, static library, license,
+  recipe provenance) -- the first concrete instance of the
+  transitive-dependency-inventory rule; `verify_dist.py` now rejects a
+  Linux `03-gfx-simple` SDK with an incomplete xkbcommon declaration.
+  `tools/crt-cc` also started preserving the real argv (`"$@"`) on
+  Linux/macOS instead of the word-split `$user_args` reconstruction in this
+  same pass, fixing real path-with-spaces argument flattening there
+  (confirmed by the xkbcommon build, which compiles from a path containing
+  spaces); Windows still uses the word-split path, tracked separately.
+  Verified for real on Windows: rebuilt `02-cxx` so it carries the new
+  pinned `03-gfx-simple` recipe (`crt-libcxx-dist`, `verify_dist.py`
+  passes), then ran a genuinely fresh, from-scratch `crt-stage-build.py`
+  against that `02-cxx` into a brand-new output directory (itself
+  containing a space) -- static+shared `crtgfx_window` built, both ctests
+  passed, the packaged example rebuilt fully externally and ran
+  (`presented=1`), `verify_dist.py` passed.
+
+- Fixed `tools/fetch_ports.py` tracked as non-executable (`100644`) despite
+  a real `#!/usr/bin/env python3` shebang and being one of the porting
+  tools packaged verbatim into every SDK -- same class of bug as
+  `crt-stage-build.py` below. `create_dist.py` copies it with
+  `shutil.copy2` (preserves mode bits), so this fix also propagates into
+  future dist builds automatically. Verified: `crt-c-dist` repackages it
+  `100755`; full `cmake --workflow --preset macos-host-ninja-debug` still
+  passes 100/100.
+
+- **Fixed two real bugs found running the documented end-user `01-c ->
+  02-cxx` upgrade flow against a freshly packaged `01-c` SDK.** (1)
+  `verify_dist.py` imports `DIST_PORTING_TOOLS`/`DIST_PORTING_DIRS`/
+  `DIST_WRAPPER_TOOLS` from `create_dist.py`, which in turn imports
+  `TOYBOX_APPLETS` from `create_rootfs.py`; `create_stage_source.py`'s own
+  curated `02-cxx` project-paths list never picked up either new transitive
+  dependency, so the packaged stage's own standalone `verify_dist.py` run
+  failed outright with `ModuleNotFoundError: No module named 'create_dist'`
+  -- fixed by adding both `tools/create_dist.py` and `tools/create_rootfs.py`
+  to that list. (2) `tools/crt-stage-build.py` is the one tool in this
+  project specifically documented for direct end-user execution from an
+  extracted SDK, but was tracked in git as `100644`, never executable --
+  `chmod +x`, now `100755`. Verified end to end: rebuilt `crt-c-dist`, then
+  ran `./tools/crt-stage-build.py` directly from the packaged `01-c` dist
+  with `--asset` pointing at the locally generated `02-cxx` source-stage
+  tarball -- the full `01-c -> 02-cxx` upgrade completed (`CRT stage
+  ready`), including the imported libc++ build, both smoke tests, and
+  `verify_dist.py`; full `cmake --workflow --preset macos-host-ninja-debug`
+  still passes 100/100.
+
+- Fixed `create_stage_source.py` hardcoding the `02-cxx` stage's source
+  paths (`libcxx`, `libcxxabi`, `libunwind`, `cmake`, `runtimes`, `libc`)
+  unconditionally, even though
+  `libstdc++/third_party/libunwind/recipe.json` declares
+  `"target_os": ["linux", "windows"]` -- Darwin uses its own libSystem
+  unwinder instead, and `crt-libcxx-build.py`'s own fetch phase already
+  never clones libunwind there. Building `crt-c-dist` on macOS (which
+  chains through `crt-stage-02-source`) failed outright: `stage source
+  inputs are missing: sources/libunwind`. Fixed by adding
+  `required_source_paths()`, which filters each stage's `source_paths`
+  against its own `libstdc++/third_party/<name>/recipe.json` `target_os`
+  gate when one exists (`cmake`/`runtimes`/`libc` have no such recipe --
+  plain sparse-checkout subtrees of the same upstream monorepo, not their
+  own gated component -- so they stay unconditionally required); wired a
+  new `--target-os` argument through from `CMakeLists.txt`
+  (`crt-stage-02-source`) so the script can apply this gate. Verified:
+  `crt-c-dist` on macOS now completes and verifies clean, the generated
+  source-stage tarball's `sources/` tree correctly omits `libunwind`; full
+  `cmake --workflow --preset macos-host-ninja-debug` still passes 100/100.
+
+- **Pinned the `01-c -> 02-cxx` stage recipe into `crt-c-dist`; split
+  `manifest.json`'s shell-environment declaration by target OS; consolidated
+  the dist-file lists.** New `crt-stage-02-source` CMake target generates
+  the pinned release-shaped `02-cxx` source asset + recipe (via
+  `create_stage_source.py`, depends on `crt-libcxx-fetch`), and `crt-c-dist`
+  now copies that recipe into `01-c` via `--stage-recipe`, so a packaged
+  `01-c` SDK carries the pinned transition to `02-cxx` (new
+  `CRT_STAGE_SOURCE_ROOT` cache var for the generated asset/recipe output
+  directory). `manifest.json`'s `shell_environment` now differs correctly
+  by target OS: Windows keeps the existing `crt-mksh-toybox`/
+  `crt_shell_default:true` declaration, Linux/macOS get a new
+  `host-posix-shell`/`crt_shell_default:false` declaration (matching the
+  real, already-shipped policy: mksh is Windows-only); `verify_dist.py`
+  checks both forms per target OS. Also consolidated a real duplication
+  risk found while reviewing this: the list of files/directories
+  `create_dist.py` copies into every packaged distribution (porting
+  drivers, `porting/{recipes,tests,shims}`, the `crt-cc`/`crt-c++` wrapper
+  pair) previously existed as independently hardcoded tuples in both
+  `create_dist.py` and `verify_dist.py` -- add a file to one, forget the
+  other, and verification silently drifts from what actually ships. Now
+  defined once in `create_dist.py` (`DIST_PORTING_TOOLS`,
+  `DIST_PORTING_DIRS`, `DIST_WRAPPER_TOOLS`) and imported by
+  `verify_dist.py`. Found and fixed a real gap in the same pass:
+  `verify_dist.py` never checked that `porting/shims/` was actually
+  packaged (only `recipes/` and `tests/` had specific-file checks) -- now
+  all three `DIST_PORTING_DIRS` are checked for presence and non-emptiness.
+
 - **Fixed a real Linux `crt-port-build.py --sdk-root` libpng build failure
   down to a wrongly-shared `MKSH_DEFAULT_TMPDIR` compile definition, and
   restored the original host-shell-for-Linux/macOS port-build policy.**
