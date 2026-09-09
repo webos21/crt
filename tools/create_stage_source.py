@@ -22,6 +22,22 @@ STAGES = {
             "tools/crt-libcxx-build.py",
             "tools/install_libcxx_runtimes.py",
             "tools/test_libcxx_runtime.py",
+            # verify_dist.py imports DIST_PORTING_TOOLS/DIST_PORTING_DIRS/
+            # DIST_WRAPPER_TOOLS from create_dist.py (added the same day as
+            # this stage-source packaging itself, e400ad9 "chained sdk") --
+            # a real, confirmed bug (2026-09-09) when this list didn't also
+            # carry create_dist.py: the packaged 02-cxx stage's own
+            # standalone verify_dist.py run failed outright with
+            # "ModuleNotFoundError: No module named 'create_dist'", since
+            # nothing else in a real end-user SDK (no full repo checkout)
+            # would ever put create_dist.py next to it on sys.path.
+            # create_dist.py itself imports TOYBOX_APPLETS from
+            # create_rootfs.py, one more transitive hop -- confirmed by
+            # actually reading create_dist.py's own imports rather than
+            # fixing this one file at a time and hitting the next
+            # ModuleNotFoundError on the next run.
+            "tools/create_dist.py",
+            "tools/create_rootfs.py",
             "tools/verify_dist.py",
             "tools/crt-cc",
             "tools/crt-c++",
