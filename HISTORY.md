@@ -11,6 +11,32 @@ substantive update.
 
 ## 2026-09-09
 
+- **Fixed `crtgfx-wayland-smoke`'s own `CRT_SYSROOT` pointing at a
+  nonexistent flat `sysroot/` directory.** `cmake --build --preset
+  linux-host-ninja-debug --target crtgfx-wayland-smoke` got all the way
+  through fetching/building expat, libffi, and Wayland (client + xdg-shell
+  protocol) and only failed at the very last step, `crt-cc`'s own final
+  link of `wayland_client_smoke`: `clang: error: no such file or
+  directory` for every one of `$CRT_SYSROOT/lib/{crt1.o,
+  crt1_init_array.o, libc.a, libm.a, libdl.a, libclang_rt.builtins.a}`.
+  Root cause: `tools/test_crtgfx_wayland_smoke.py` set
+  `env["CRT_SYSROOT"] = str(build_dir / "sysroot")`, a stale literal from
+  before the cumulative-distribution-stages restructuring moved the
+  `sysroot` CMake target's real install location to `${CRT_DIST_ROOT}/
+  01-c` (`CMakeLists.txt`'s own `CRT_SYSROOT = ${CRT_DIST_ROOT}/01-c`
+  cache variable) -- the exact same stale-literal mistake
+  `tools/crt-port-build.py`'s own `main()` already had and fixed for this
+  same reason (see that file's own comment). All the files really existed,
+  just under `dist/01-c/lib`, not the no-longer-existent flat `sysroot/
+  lib`. `tools/test_crtgfx_skia_smoke.py`, the sibling script this one's
+  own docstring cites, does not share the bug (never references
+  `CRT_SYSROOT` as a path at all). Fix: `env["CRT_SYSROOT"] =
+  str(build_dir / "dist" / "01-c")`. Verified with a full rebuild:
+  `crtgfx-wayland-smoke` now builds and runs
+  `wayland_client_smoke` end to end against a real, live Wayland
+  compositor on this host -- `wayland_client_smoke: ok globals=27 (live
+  compositor round trip)`, exit 0.
+
 - **Fixed 4 real macOS-only bugs in the `02-cxx -> 03-gfx-simple` isolated
   stage build -- the first real exercise of `tools/crt-cc` as an external
   SDK compiler -- then re-verified the whole transition clean on Windows in

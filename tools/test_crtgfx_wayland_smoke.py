@@ -140,7 +140,20 @@ def main():
     crt_cc = root / "tools" / f"crt-cc{cc_suffix}"
 
     env = os.environ.copy()
-    env["CRT_SYSROOT"] = str(build_dir / "sysroot")
+    # Matches CMakeLists.txt's own CRT_SYSROOT = ${CRT_DIST_ROOT}/01-c (the
+    # "sysroot" CMake target's own install command, built two lines above,
+    # deposits the C stage there, not into a flat "sysroot" directory
+    # directly under build_dir) -- same stale-literal bug as tools/
+    # crt-port-build.py's own main() had before the cumulative-
+    # distribution-stages restructuring introduced dist/01-c, confirmed for
+    # real the same way: a fresh `cmake --build --target crtgfx-wayland-
+    # smoke` got through expat/libffi/Wayland and only failed at the very
+    # last step, crt-cc's own final link, with "no such file or directory"
+    # for every one of $CRT_SYSROOT/lib/{crt1.o,crt1_init_array.o,libc.a,
+    # libm.a,libdl.a,libclang_rt.builtins.a} -- all of which really exist,
+    # just under dist/01-c/lib instead of a literal sysroot/lib that no
+    # longer exists at all.
+    env["CRT_SYSROOT"] = str(build_dir / "dist" / "01-c")
     env["CRT_TARGET_OS"] = args.target_os
     if args.target_arch != "host":
         env["CRT_TARGET_ARCH"] = args.target_arch
