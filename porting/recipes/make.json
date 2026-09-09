@@ -6,7 +6,7 @@
     "url": "https://android.googlesource.com/toolchain/make/+archive/44fc4fe66a484b91844c302f03eaa8438e065d17.tar.gz",
     "archive": "toolchain-make-44fc4fe66a484b91844c302f03eaa8438e065d17.tar.gz",
     "source_dir": "toolchain-make-44fc4fe66a484b91844c302f03eaa8438e065d17",
-    "sha256": "906db787d0283d7440110b4ad9ccf7f1bed1c45420a2b54a49bc81076feda11e",
+    "sha256": null,
     "sha1": null,
     "md5": null
   },
@@ -129,6 +129,7 @@
   "notes": [
     "AOSP does not carry make under platform/external; it carries GNU make source under toolchain/make and prebuilts under platform/prebuilts/build-tools.",
     "The Gitiles +archive gzip hash is not stable across downloads, so the recipe pins the exact commit in the URL instead of using an archive checksum.",
+    "2026-09-09: source.sha256 was set to a real value (906db787...) by an unrelated commit (e400ad9, \"chained sdk\") and broke port-fetch-make outright on the very next fresh fetch -- \"sha256 mismatch, expected 906db787... actual dcd7f1ba...\", exactly the byte-instability the note directly above already warned about (same commit, same extracted content, different gzip bytes). Reverted back to null; do not re-pin this recipe's sha256 from a single successful download.",
     "This recipe follows Android.bp's cc_binary_host source list so make can bootstrap without requiring an existing make executable.",
     "Windows intentionally uses the POSIX-like musl config path rather than the upstream Win32 make path so failures expose CRT/PAL gaps.",
     "make is not Windows-specific: tools/crt-port-build.py's build_port() unconditionally builds and installs this port before any 'configure'-system recipe on every host (not gated on target_os), and make_env() prefers the freshly-built PORT_PREFIX/bin/make over host make via $MAKE on all three OSes. So this project's own make has already driven every real ./configure && make && make install run for zlib/libpng/libffi on both Linux and macOS, all confirmed passing by the user on real hardware -- see those recipes' own status. Kept at manual-pass (matching Windows) rather than a higher tier since no standalone make --version/$(wildcard ...)-style direct check has been separately recorded for Linux/macOS, only its indirect, repeated use as the build driver for other ports.",
