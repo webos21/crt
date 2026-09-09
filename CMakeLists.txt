@@ -1193,6 +1193,21 @@ if(Python3_Interpreter_FOUND)
     COMMENT "Creating the pinned 01-c -> 02-cxx source asset and recipe"
     USES_TERMINAL
   )
+  set(CRT_STAGE_03_SOURCE_DEPENDS)
+  if(CRT_TARGET_OS STREQUAL "linux")
+    list(APPEND CRT_STAGE_03_SOURCE_DEPENDS crtgfx-xkbcommon-build)
+  endif()
+  add_custom_target(crt-stage-03-source
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_stage_source.py"
+      --root "${CMAKE_SOURCE_DIR}" --stage 03-gfx-simple
+      --target-os "${CRT_TARGET_OS}"
+      --source-root "${CMAKE_BINARY_DIR}/external"
+      --output-dir "${CRT_STAGE_SOURCE_ROOT}"
+      --release-tag development --allow-dirty
+    DEPENDS ${CRT_STAGE_03_SOURCE_DEPENDS}
+    COMMENT "Creating the pinned 02-cxx -> 03-gfx-simple source asset and recipe"
+    USES_TERMINAL
+  )
   add_custom_target(crt-c-dist
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
       --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
@@ -1230,11 +1245,12 @@ if(Python3_Interpreter_FOUND)
         --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
         --dest "${CRT_DIST_ROOT}/02-cxx" --base "${CRT_DIST_ROOT}/01-c"
         --component crt-cxx --libcxx-install "${CRT_LIBCXX_INSTALL_PREFIX}"
+        --stage-recipe "${CRT_STAGE_SOURCE_ROOT}/03-gfx-simple.json"
         --cmake "${CMAKE_COMMAND}" --stage 02-cxx
         --target-os "${CRT_TARGET_OS}" --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" ${CRT_DIST_TOOL_ARGS} --archive
       COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
         --dist "${CRT_DIST_ROOT}/02-cxx" --stage 02-cxx
-      DEPENDS ${CRT_LIBCXX_DIST_DEPENDS}
+      DEPENDS ${CRT_LIBCXX_DIST_DEPENDS} crt-stage-03-source
       USES_TERMINAL
     )
   endif()
@@ -1251,11 +1267,19 @@ if(Python3_Interpreter_FOUND)
     DEPENDS crt-gfx-simple-build
     USES_TERMINAL
   )
+  set(CRT_GFX_SIMPLE_DIST_ARGS)
+  if(CRT_TARGET_OS STREQUAL "linux")
+    list(APPEND CRT_GFX_SIMPLE_DIST_ARGS
+      --xkbcommon-install "${CRTGFX_XKBCOMMON_INSTALL_PREFIX}"
+      --xkbcommon-source "${CRTGFX_XKBCOMMON_ROOT}"
+    )
+  endif()
   add_custom_target(crt-gfx-simple-dist
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
       --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
       --dest "${CRT_DIST_ROOT}/03-gfx-simple" --base "${CRT_DIST_ROOT}/02-cxx"
       --component crt-gfx-simple --cmake "${CMAKE_COMMAND}" --stage 03-gfx-simple
+      ${CRT_GFX_SIMPLE_DIST_ARGS}
       --target-os "${CRT_TARGET_OS}" --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" ${CRT_DIST_TOOL_ARGS} --archive
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
       --dist "${CRT_DIST_ROOT}/03-gfx-simple" --stage 03-gfx-simple

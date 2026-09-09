@@ -15,10 +15,8 @@
 # one-directional dependency (GPU needs window, window never needs GPU),
 # resolved by crtgfx_gpu(_shared) linking crtgfx_window(_shared) below,
 # not a cycle.
-set(CRTGFX_WINDOW_SOURCES
-  src/window.c
-  src/wayland_weston.c
-)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/crtgfx_window_sources.cmake")
+set(CRTGFX_WINDOW_SOURCES ${CRTGFX_WINDOW_COMMON_SOURCES})
 set(CRTGFX_GPU_SOURCES
   src/gpu.c
 )
@@ -298,7 +296,7 @@ if(CRTGFX_ENABLE_SKIA AND CRT_TARGET_OS STREQUAL "windows" AND
 endif()
 
 if(CRT_TARGET_OS STREQUAL "windows")
-  list(APPEND CRTGFX_WINDOW_BACKEND_SOURCES src/arch/windows/window_win32.c)
+  list(APPEND CRTGFX_WINDOW_BACKEND_SOURCES ${CRTGFX_WINDOW_BACKEND_WINDOWS_SOURCES})
   list(APPEND CRTGFX_GPU_BACKEND_SOURCES src/arch/windows/gpu_win32.c)
   # Windows/D3D12 offscreen vertical slice (2026-09-03, TODO.md's "Enable
   # Skia GPU rendering" step -- the Linux/Vulkan slice's own sibling; see
@@ -323,7 +321,7 @@ if(CRT_TARGET_OS STREQUAL "windows")
   # identically.
   add_compile_definitions(CRTGFX_HAVE_D3D12=1)
 elseif(CRT_TARGET_OS STREQUAL "macos")
-  list(APPEND CRTGFX_WINDOW_BACKEND_SOURCES src/arch/macos/window_cocoa.c)
+  list(APPEND CRTGFX_WINDOW_BACKEND_SOURCES ${CRTGFX_WINDOW_BACKEND_MACOS_SOURCES})
   list(APPEND CRTGFX_GPU_BACKEND_SOURCES src/arch/macos/gpu_metal.c)
   # macOS/Metal offscreen vertical slice (2026-09-04, TODO.md's "Enable
   # Skia GPU rendering" step -- the Linux/Vulkan and Windows/D3D12
@@ -381,7 +379,7 @@ elseif(CRT_TARGET_OS STREQUAL "macos")
     COMPILE_OPTIONS "-Wno-cast-function-type-mismatch;-Wno-unknown-warning-option"
   )
 elseif(CRT_TARGET_OS STREQUAL "linux")
-  list(APPEND CRTGFX_WINDOW_BACKEND_SOURCES src/arch/linux/window_wayland.c)
+  list(APPEND CRTGFX_WINDOW_BACKEND_SOURCES ${CRTGFX_WINDOW_BACKEND_LINUX_SOURCES})
   # Ganesh/Vulkan offscreen vertical slice (2026-09-03, TODO.md's "Enable
   # Skia GPU rendering" step) -- the first real crtgfx_gpu_device backend
   # anywhere in this project (see crtgfx/gpu.h's own top comment).
@@ -462,7 +460,7 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
     # at configure time, matching CRTGFX_SKIA_LIBRARIES's own same real,
     # accepted limitation.
     if(CRTGFX_LINUX_WAYLAND_CLIENT_LIB AND EXISTS "${CRTGFX_WAYLAND_XDG_SHELL_LIBRARY}")
-      list(APPEND CRTGFX_WINDOW_BACKEND_SOURCES src/arch/linux/window_wayland_native.c)
+      list(APPEND CRTGFX_WINDOW_BACKEND_SOURCES ${CRTGFX_WINDOW_NATIVE_WAYLAND_SOURCES})
       add_compile_definitions(CRTGFX_HAVE_NATIVE_WAYLAND=1)
       set(CRTGFX_WAYLAND_CLIENT_LIBRARIES "${CRTGFX_WAYLAND_XDG_SHELL_LIBRARY};${CRTGFX_LINUX_WAYLAND_CLIENT_LIB}" CACHE STRING "Libraries needed to link real libwayland-client into the Linux native Wayland backend" FORCE)
     else()

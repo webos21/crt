@@ -172,10 +172,16 @@ mksh/toybox environment for configure/build commands, and never require
 MSYS/Git Bash. Extend the same recipe model to `04 -> 05-js` once the first
 three transitions are stable.
 
-Next add the `03-gfx-simple` and `04-gfx-media` deterministic assets, recipes,
-build entry points, and isolated Windows acceptance. Keep the separately
-listed Windows C++ initialization failure open; the stage runner deliberately
-has no retry that could hide it.
+The `02-cxx -> 03-gfx-simple` deterministic asset, schema-v2 OS identity,
+standalone build entry point, and isolated Windows acceptance are implemented.
+The Linux source path also carries and builds the pinned libxkbcommon port
+instead of borrowing its headers or library from the host. Its source-only
+build has passed from a directory containing spaces; complete the remaining
+standalone graphics build/CTest/example/verification pass on Linux and the
+whole isolated transition on macOS, then add the
+`03-gfx-simple -> 04-gfx-media` asset and entry point with Skia and FFmpeg
+actually enabled. Keep the separately listed Windows C++ initialization
+failure open; the stage runner deliberately has no retry that could hide it.
 
 Acceptance must start from freshly extracted archives in a path containing
 spaces, reject access to in-tree CRT headers/libraries/build artifacts,
@@ -187,12 +193,24 @@ here-document temporary-file diagnostic before treating configure probe
 results as authoritative; zlib completes and passes static/shared round-trip
 tests, but its configure log still contains that diagnostic.
 
-Implement the distribution rule that every stage carries the redistributable
-headers and static/import/runtime libraries of its transitive external
-dependencies. Add a structured dependency inventory to `manifest.json`, copy
-and verify the declared files (including notices), scan binaries for
-undeclared non-system `.so`/`.dylib`/`.dll` dependencies, and explicitly list
-OS/framework/device-driver prerequisites that remain outside the archive.
+The first concrete implementation of the redistributable-dependency rule is
+in place for Linux Simple Graphics: `03-gfx-simple` carries libxkbcommon's
+public headers, static library, license, and recipe provenance, records them in
+the structured `redistributed_dependencies` manifest inventory, and
+`verify_dist.py` rejects a missing declaration or file. Generalize that model
+to later graphics/media ports and transitive dependencies; add generic
+manifest-driven verification rather than the current xkbcommon-specific
+check, scan binaries for undeclared non-system `.so`/`.dylib`/`.dll`
+dependencies, and explicitly inventory OS/framework/device-driver
+prerequisites that remain outside the archive.
+
+Path-with-spaces coverage exposed argument flattening in the compiler wrappers.
+Linux/macOS `crt-cc` now preserves the original argument vector and the staged
+libxkbcommon build exercises that fix. Windows `crt-cc` and every `crt-c++`
+host path still use transformed/flattened argument strings; the Windows stage
+builders currently copy inputs to a short temporary path. Track and fix those
+remaining wrapper cases rather than treating that relocation as final path-
+with-spaces acceptance.
 
 ## Planned
 

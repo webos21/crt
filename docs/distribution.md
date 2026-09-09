@@ -131,6 +131,7 @@ against an arbitrary branch. Instead, it contains a catalog of stage recipes
 that records, at minimum:
 
 - the input and output stage IDs;
+- the target OS, which must match the preceding SDK;
 - an immutable CRT GitHub Release asset URL;
 - the source commit represented by that asset;
 - the archive byte size and SHA-256 digest;
@@ -150,13 +151,16 @@ integrity and reproducibility boundary. A development build may generate a
 local source asset and matching recipe, but a published recipe must never use
 a mutable branch URL or an unfilled digest.
 
-`tools/create_stage_source.py` implements the first asset producer for
-`02-cxx`. It packages the already-fetched pinned libc++/libc++abi/libunwind
-trees together with the CRT recipes, patches, standalone CMake drivers,
-wrappers, and smoke sources they require. Archive entry ordering, timestamps,
-owners, and modes are normalized before SHA-256 calculation. It refuses a
-dirty meta-toolchain tree for release output unless local testing explicitly
-opts in.
+`tools/create_stage_source.py` produces the `02-cxx` and `03-gfx-simple`
+assets. The former packages the already-fetched pinned
+libc++/libc++abi/libunwind trees; the latter packages the selected OS window
+backend and, on Linux, the pinned libxkbcommon source port. Both carry only the
+CRT recipes, standalone build files, wrappers, tests, and source files needed
+for that target. Asset names include the target OS, and schema-v2 recipes bind
+that OS to both the predecessor SDK and the archive metadata. Archive entry
+ordering, timestamps, owners, and modes are normalized before SHA-256
+calculation. The producer refuses a dirty meta-toolchain tree for release
+output unless local testing explicitly opts in.
 
 Every SDK carries `tools/crt-stage-build.py`. Given an input SDK and a
 published recipe, it checks the input stage, byte size, SHA-256, embedded CRT
@@ -164,6 +168,17 @@ commit, archive path safety, and build entry point before executing anything.
 The `02-cxx` entry point copies `01-c` to a new output, builds the imported C++
 runtime against that copy, overlays the installed headers/libraries, runs the
 static/shared imported-libc++ smoke, and verifies the resulting distribution.
+The `03-gfx-simple` entry point similarly builds the window-only standalone
+CMake project against `02-cxx`; it deliberately excludes GPU/native-Wayland
+Vulkan coupling, runs window and synthetic-input tests, installs and rebuilds
+the external example, and verifies the cumulative SDK. On Linux it first
+builds libxkbcommon from the pinned source asset and carries its headers,
+static library, license, and recipe provenance in the result. These files are
+listed under `redistributed_dependencies` in `manifest.json`; distribution
+verification rejects a Linux `03-gfx-simple` SDK whose xkbcommon declaration
+or declared payload is incomplete. This is the first implemented port-library
+instance of the transitive dependency rule, not an exemption for future
+graphics/media ports.
 Release packaging may add generated recipes under `stages/recipes/` with
 `create_dist.py --stage-recipe <recipe>`; development packages do not claim a
 downloadable transition until such a fully pinned recipe exists.

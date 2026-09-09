@@ -63,19 +63,21 @@ Graphics result. Full details, artifact layout, package naming, and acceptance
 rules are in
 [`docs/distribution.md`](docs/distribution.md).
 
-Release engineering creates an upper-stage source asset and its recipe only
-after the component sources have been fetched at their pinned revisions. For
-the first transition:
+Release engineering creates an OS-qualified upper-stage source asset and its
+recipe only after the component sources have been fetched at their pinned
+revisions. For example:
 
 ```sh
 python3 tools/create_stage_source.py --root . --stage 02-cxx \
+  --target-os <linux|macos|windows> \
   --source-root out/<preset>/external/llvm-runtimes \
   --output-dir out/<preset>/stage-sources --release-tag <tag>
 ```
 
 The command emits a deterministic source archive plus a recipe containing its
-exact byte size, CRT commit, and SHA-256. After the asset and recipe are
-published, an extracted `01-c` SDK consumes them with its packaged
+target OS, exact byte size, CRT commit, and SHA-256. Asset names include the
+target OS because source payloads differ by backend. After the asset and recipe
+are published, an extracted predecessor SDK consumes them with its packaged
 `tools/crt-stage-build.py`; a local `--asset` override is available for
 pre-publication acceptance without weakening digest verification.
 

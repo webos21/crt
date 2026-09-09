@@ -20,7 +20,10 @@ from create_rootfs import TOYBOX_APPLETS
 # drift risk (add a file to one, forget the other, and verify_dist.py
 # either false-fails a good distribution or silently stops checking a
 # real one).
-DIST_PORTING_TOOLS = ("crt-port-build.py", "fetch_ports.py", "crt-native-tool", "crt-stage-build.py")
+DIST_PORTING_TOOLS = (
+    "crt-port-build.py", "fetch_ports.py", "crt-native-tool", "crt-stage-build.py",
+    "crt_stage_recipe.py",
+)
 DIST_PORTING_DIRS = ("recipes", "tests", "shims")
 DIST_WRAPPER_TOOLS = ("crt-cc", "crt-c++", "crt-cc.cmd", "crt-c++.cmd")
 
@@ -84,6 +87,40 @@ def copy_port_tools(port_prefix: Path | None, destination: Path) -> None:
         shutil.copy2(item, target_bin / item.name)
 
 
+def copy_xkbcommon(install: Path | None, source: Path | None, root: Path,
+                   destination: Path) -> dict | None:
+    """Copy the Linux Simple Graphics source port and its provenance."""
+    if not install:
+        return None
+    headers = install / "include" / "xkbcommon"
+    library = install / "lib" / "libxkbcommon.a"
+    license_file = source / "LICENSE" if source else None
+    if not headers.is_dir() or not library.is_file() or not license_file or not license_file.is_file():
+        raise SystemExit("xkbcommon install/source is incomplete for Simple Graphics packaging")
+    header_dest = destination / "include" / "xkbcommon"
+    if header_dest.exists():
+        shutil.rmtree(header_dest)
+    shutil.copytree(headers, header_dest)
+    (destination / "lib").mkdir(parents=True, exist_ok=True)
+    shutil.copy2(library, destination / "lib" / library.name)
+    notice = destination / "share" / "licenses" / "xkbcommon" / "LICENSE"
+    notice.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(license_file, notice)
+    provenance = destination / "share" / "crt" / "dependencies" / "xkbcommon"
+    provenance.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(root / "libcrtgfx" / "third_party" / "xkbcommon" / "recipe.json",
+                 provenance / "recipe.json")
+    return {
+        "name": "xkbcommon",
+        "kind": "private-static-port",
+        "headers": ["include/xkbcommon"],
+        "link_artifacts": ["lib/libxkbcommon.a"],
+        "runtime_artifacts": [],
+        "notices": ["share/licenses/xkbcommon/LICENSE"],
+        "provenance": "share/crt/dependencies/xkbcommon/recipe.json",
+    }
+
+
 def copy_porting_sdk(root: Path, destination: Path) -> None:
     """Install the optional source-porting workflow, but not upstream sources."""
     tools_dest = destination / "tools"
@@ -138,7 +175,8 @@ def install_wrapper_applets(destination: Path, target_os: str) -> None:
 
 
 def write_sdk_files(root: Path, destination: Path, target_os: str, target_arch: str,
-                    target_triple: str, stage: str, tools: dict[str, str]) -> None:
+                    target_triple: str, stage: str, tools: dict[str, str],
+                    redistributed_dependencies: list[dict]) -> None:
     tools_dest = destination / "tools"
     tools_dest.mkdir(parents=True, exist_ok=True)
     for name in DIST_WRAPPER_TOOLS:
@@ -223,6 +261,7 @@ set(CMAKE_CXX_FLAGS_INIT "${CMAKE_C_FLAGS_INIT} -nostdinc++ -isystem${CRT_DISTRI
         "external_toolchain_environment": [
             "CRT_CC", "CRT_CXX", "CRT_AR", "CRT_RANLIB", "CRT_WINDOWS_SDK_LIBPATH"
         ],
+        "redistributed_dependencies": redistributed_dependencies,
         "optional_tools": {
             "porting": {
                 "included": True,
@@ -255,6 +294,8 @@ def main() -> None:
     parser.add_argument("--component", action="append", default=[])
     parser.add_argument("--libcxx-install", type=Path)
     parser.add_argument("--port-prefix", type=Path)
+    parser.add_argument("--xkbcommon-install", type=Path)
+    parser.add_argument("--xkbcommon-source", type=Path)
     parser.add_argument("--stage-recipe", action="append", default=[], type=Path)
     parser.add_argument("--cmake", default="cmake")
     parser.add_argument("--stage", required=True)
@@ -278,12 +319,27 @@ def main() -> None:
     build_dir = args.build_dir.resolve()
     destination = args.dest.resolve()
     copy_base(args.base.resolve() if args.base else None, destination)
+    inherited_dependencies = []
+    inherited_manifest = destination / "manifest.json"
+    if inherited_manifest.is_file():
+        inherited_dependencies = json.loads(
+            inherited_manifest.read_text(encoding="utf-8")
+        ).get("redistributed_dependencies", [])
     (destination / "tmp").mkdir(parents=True, exist_ok=True)
     for component in args.component:
         install_component(args.cmake, build_dir, destination, component)
     if args.libcxx_install:
         copy_libcxx(args.libcxx_install.resolve(), destination)
     copy_port_tools(args.port_prefix.resolve() if args.port_prefix else None, destination)
+    redistributed_dependencies = list(inherited_dependencies)
+    xkbcommon = copy_xkbcommon(
+        args.xkbcommon_install.resolve() if args.xkbcommon_install else None,
+        args.xkbcommon_source.resolve() if args.xkbcommon_source else None,
+        root, destination,
+    )
+    if xkbcommon and not any(item.get("name") == "xkbcommon"
+                             for item in redistributed_dependencies):
+        redistributed_dependencies.append(xkbcommon)
     copy_porting_sdk(root, destination)
     copy_stage_recipes([recipe.resolve() for recipe in args.stage_recipe], destination)
     install_wrapper_applets(destination, args.target_os)
@@ -291,6 +347,7 @@ def main() -> None:
         root, destination, args.target_os, normalized_arch,
         args.target_triple or f"{normalized_arch}-{args.target_os}", args.stage,
         {"cc": args.cc, "cxx": args.cxx, "ar": args.ar, "ranlib": args.ranlib},
+        redistributed_dependencies,
     )
     if args.archive:
         archive_format = "zip" if args.target_os == "windows" else "xztar"

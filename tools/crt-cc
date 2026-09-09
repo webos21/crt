@@ -63,12 +63,12 @@ windows_host_arg() {
 }
 
 user_args=""
-for arg in "$@"; do
-  if [ "$target_os" = windows ]; then
+if [ "$target_os" = windows ]; then
+  for arg in "$@"; do
     arg=$(windows_host_arg "$arg")
-  fi
-  user_args="$user_args $(printf '%s\n' "$arg")"
-done
+    user_args="$user_args $(printf '%s\n' "$arg")"
+  done
+fi
 
 compile_only=0
 shared_mode=0
@@ -200,14 +200,21 @@ esac
 # provided architecture-intrinsic headers like arm_neon.h/immintrin.h --
 # separate from anything in CRT_SYSROOT) is passed as its own quoted
 # "-isystem" "$resource_dir/include" argument pair directly on each exec
-# line below, NOT folded into $common_flags: common_flags/user_args/libs
-# are all plain, unquoted-expanded strings throughout this script (relying
-# on word-splitting to turn them back into separate argv entries), which
-# silently breaks apart any single value that itself contains a space --
-# and a stock Windows LLVM install's resource-dir is almost always under
-# "C:\Program Files\...". Quoting just this one pair sidesteps that
-# without a wider rewrite of how this script builds argument lists.
+# line below, NOT folded into $common_flags. Linux/macOS execution preserves
+# the original user argument vector with "$@"; Windows still uses the
+# transformed, word-split $user_args string and therefore needs this explicit
+# pair because a stock Windows LLVM install's resource-dir is almost always
+# under "C:\Program Files\...". The remaining Windows flattening limitation
+# is tracked separately rather than obscured by this targeted exception.
 if [ "$compile_only" -eq 1 ]; then
+  if [ "$target_os" != windows ]; then
+    if [ -n "$resource_dir" ]; then
+      # shellcheck disable=SC2086
+      exec "$cc" $common_flags -isystem "${resource_dir}/include" "$@"
+    fi
+    # shellcheck disable=SC2086
+    exec "$cc" $common_flags "$@"
+  fi
   if [ -n "$resource_dir" ]; then
     # shellcheck disable=SC2086
     exec "$cc" $common_flags -isystem "${resource_dir}/include" $user_args
@@ -223,6 +230,17 @@ fi
 # linked for real later. This matters on macOS where ld64 rejects `-r` together
 # with `-dead_strip`, and it is the right model for ELF/COFF too.
 if [ "$relocatable_mode" -eq 1 ]; then
+  if [ "$target_os" != windows ]; then
+    if [ "$target_os" = macos ]; then
+      set -- "$@" -Wl,-keep_private_externs
+    fi
+    if [ -n "$resource_dir" ]; then
+      # shellcheck disable=SC2086
+      exec "$cc" $common_flags -isystem "${resource_dir}/include" "$@"
+    fi
+    # shellcheck disable=SC2086
+    exec "$cc" $common_flags "$@"
+  fi
   if [ "$target_os" = macos ]; then
     user_args="$user_args -Wl,-keep_private_externs"
   fi
@@ -423,6 +441,14 @@ esac
 # accumulator here) -- a space-containing Windows SDK path
 # ("C:\Program Files (x86)\...") would otherwise get torn into multiple
 # broken argv entries by word splitting.
+if [ "$target_os" != windows ]; then
+  if [ -n "$resource_dir" ]; then
+    # shellcheck disable=SC2086
+    exec "$cc" $common_flags -isystem "${resource_dir}/include" -nostdlib -nostartfiles -nodefaultlibs $entry $prelibs "$@" $libs
+  fi
+  # shellcheck disable=SC2086
+  exec "$cc" $common_flags -nostdlib -nostartfiles -nodefaultlibs $entry $prelibs "$@" $libs
+fi
 if [ -n "${CRT_WINDOWS_SDK_LIBPATH:-}" ]; then
   if [ -n "$resource_dir" ]; then
     # shellcheck disable=SC2086

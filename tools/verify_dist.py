@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 from create_dist import DIST_PORTING_TOOLS, DIST_PORTING_DIRS, DIST_WRAPPER_TOOLS
+from crt_stage_recipe import recipe_filename_for_stage, validate_recipe
 
 
 BANNED_TOOLS = {
@@ -59,15 +60,17 @@ def main() -> None:
             "porting/recipes/zlib.json", "porting/recipes/make.json",
             "porting/tests/zlib_roundtrip.c"):
         require(dist / relative)
-    if args.stage == "01-c":
-        recipe_path = dist / "stages" / "recipes" / "02-cxx.json"
+    if args.stage in ("01-c", "02-cxx"):
+        recipe_path = dist / "stages" / "recipes" / recipe_filename_for_stage(args.stage)
         require(recipe_path)
         recipe = json.loads(recipe_path.read_text(encoding="utf-8"))
-        source = recipe.get("source", {})
-        if (recipe.get("input_stage") != "01-c" or
-                recipe.get("output_stage") != "02-cxx" or
-                not re.fullmatch(r"[0-9a-f]{64}", source.get("sha256", ""))):
-            raise SystemExit("01-c does not contain a valid pinned 02-cxx stage recipe")
+        try:
+            validate_recipe(recipe)
+        except ValueError as exc:
+            raise SystemExit(f"{args.stage} contains an invalid successor recipe: {exc}") from exc
+        if (recipe["input_stage"] != args.stage or
+                recipe["target"]["os"] != manifest.get("target", {}).get("os")):
+            raise SystemExit(f"{args.stage} contains a successor recipe for the wrong stage or OS")
     make_recipe = json.loads((dist / "porting" / "recipes" / "make.json").read_text(encoding="utf-8"))
     make_source = make_recipe.get("source", {})
     # A real sha256 pin is preferred, but porting/recipes/make.json's own
@@ -115,6 +118,18 @@ def main() -> None:
         require(dist / "examples" / "gfx-simple" / "main.c")
         require(dist / "examples" / "gfx-simple" / "CMakeLists.txt")
         require(dist / "examples" / "bin" / f"crtgfx_window_demo{suffix}")
+        if manifest.get("target", {}).get("os") == "linux":
+            dependencies = manifest.get("redistributed_dependencies", [])
+            xkbcommon = next((item for item in dependencies
+                              if item.get("name") == "xkbcommon"), None)
+            if not xkbcommon:
+                raise SystemExit("Linux Simple Graphics does not declare its xkbcommon port")
+            for relative in (
+                    "include/xkbcommon/xkbcommon.h",
+                    "lib/libxkbcommon.a",
+                    "share/licenses/xkbcommon/LICENSE",
+                    "share/crt/dependencies/xkbcommon/recipe.json"):
+                require(dist / relative)
     if args.stage == "03-gfx-simple":
         if (dist / "include" / "crtgfx" / "gpu.h").exists() or (dist / "include" / "crtgfx" / "skia.h").exists():
             raise SystemExit("Simple Graphics unexpectedly exposes GPU/Skia headers")

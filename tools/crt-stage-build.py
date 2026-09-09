@@ -4,14 +4,15 @@
 import argparse
 import hashlib
 import json
-import re
 import shutil
 import subprocess
 import sys
 import tarfile
 import urllib.parse
 import urllib.request
-from pathlib import Path, PurePosixPath
+from pathlib import Path
+
+from crt_stage_recipe import validate_recipe
 
 
 def load_recipe(location: str) -> tuple[dict, str]:
@@ -21,35 +22,6 @@ def load_recipe(location: str) -> tuple[dict, str]:
             return json.load(response), location
     path = Path(location).resolve()
     return json.loads(path.read_text(encoding="utf-8")), path.as_uri()
-
-
-def validate_recipe(recipe: dict) -> None:
-    required = ("schema_version", "input_stage", "output_stage", "source", "build")
-    if (not isinstance(recipe, dict) or any(key not in recipe for key in required) or
-            recipe["schema_version"] != 1 or
-            not isinstance(recipe["input_stage"], str) or
-            not re.fullmatch(r"[0-9]{2}-[a-z0-9-]+", recipe["input_stage"]) or
-            not isinstance(recipe["output_stage"], str) or
-            not re.fullmatch(r"[0-9]{2}-[a-z0-9-]+", recipe["output_stage"]) or
-            not isinstance(recipe["source"], dict) or
-            not isinstance(recipe["build"], dict)):
-        raise SystemExit("invalid or unsupported CRT stage recipe")
-    source = recipe["source"]
-    archive = source.get("archive", "")
-    archive_path = PurePosixPath(archive) if isinstance(archive, str) else None
-    if (not isinstance(source.get("size"), int) or source["size"] <= 0 or
-            not re.fullmatch(r"[0-9a-f]{64}", source.get("sha256", "")) or
-            not re.fullmatch(r"[0-9a-f]{40}", source.get("source_commit", "")) or
-            not source.get("url") or
-            archive_path is None or archive_path.name != archive or
-            "\\" in archive or not archive.endswith(".tar.xz")):
-        raise SystemExit("stage recipe source identity is incomplete")
-    entrypoint = recipe["build"].get("entrypoint", "")
-    entrypoint_path = PurePosixPath(entrypoint) if isinstance(entrypoint, str) else None
-    if (entrypoint_path is None or not entrypoint.endswith(".py") or
-            entrypoint_path.is_absolute() or ".." in entrypoint_path.parts or
-            "\\" in entrypoint):
-        raise SystemExit("stage recipe build entrypoint is missing")
 
 
 def fetch(url: str, destination: Path) -> None:
@@ -103,9 +75,16 @@ def main() -> None:
         raise SystemExit(f"predecessor SDK manifest is missing: {manifest_path}")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     recipe, recipe_location = load_recipe(args.recipe)
-    validate_recipe(recipe)
+    try:
+        validate_recipe(recipe)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     if manifest.get("stage") != recipe["input_stage"]:
         raise SystemExit(f"recipe requires {recipe['input_stage']}, SDK is {manifest.get('stage')}")
+    sdk_os = manifest.get("target", {}).get("os")
+    recipe_os = recipe["target"]["os"]
+    if sdk_os != recipe_os:
+        raise SystemExit(f"recipe targets {recipe_os}, SDK targets {sdk_os}")
 
     work_root = args.work_root.resolve()
     cache = (args.cache.resolve() if args.cache else work_root / "downloads")
@@ -120,6 +99,7 @@ def main() -> None:
     safe_extract(archive, source_dir)
     stage_metadata = json.loads((source_dir / "stage.json").read_text(encoding="utf-8"))
     if (stage_metadata.get("stage") != recipe["output_stage"] or
+            stage_metadata.get("target") != recipe["target"] or
             stage_metadata.get("source_commit") != recipe["source"]["source_commit"]):
         raise SystemExit("stage archive metadata does not match its recipe")
     entrypoint = (source_dir / recipe["build"]["entrypoint"]).resolve()

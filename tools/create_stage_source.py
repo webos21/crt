@@ -39,6 +39,7 @@ STAGES = {
             "tools/create_dist.py",
             "tools/create_rootfs.py",
             "tools/verify_dist.py",
+            "tools/crt_stage_recipe.py",
             "tools/crt-cc",
             "tools/crt-c++",
             "tools/crt-cc.cmd",
@@ -49,6 +50,55 @@ STAGES = {
             "libstdc++/tests/imported_libcxx_string_abi_test.cc",
         ),
         "source_paths": ("libcxx", "libcxxabi", "libunwind", "cmake", "runtimes", "libc"),
+    },
+    "03-gfx-simple": {
+        "input_stage": "02-cxx",
+        "entrypoint": "tools/build_stage_03_gfx_simple.py",
+        "project_paths": (
+            "LICENSE.md",
+            "distribution/stages/03-gfx-simple/CMakeLists.txt",
+            "tools/build_stage_03_gfx_simple.py",
+            "tools/build_xkbcommon.py",
+            "tools/create_dist.py",
+            "tools/create_rootfs.py",
+            "tools/verify_dist.py",
+            "tools/crt_stage_recipe.py",
+            "tools/crt-cc",
+            "tools/crt-c++",
+            "tools/crt-cc.cmd",
+            "tools/crt-c++.cmd",
+            "libcrtgfx/cmake/crtgfx_window_sources.cmake",
+            "libcrtgfx/include/crtgfx/window.h",
+            "libcrtgfx/src/window.c",
+            "libcrtgfx/src/wayland_weston.c",
+            "libcrtgfx/src/wayland_weston_internal.h",
+            "libcrtgfx/tests/window_smoke_test.c",
+            "libcrtgfx/tests/synthetic_event_test.c",
+            "libcrtgfx/tools/window_demo.c",
+            "examples/README.md",
+            "examples/gfx-simple/CMakeLists.txt",
+        ),
+        "project_paths_by_os": {
+            "windows": (
+                "libcrtgfx/src/arch/windows/window_win32.c",
+                "libcrtgfx/src/arch/windows/window_win32_gpu.h",
+            ),
+            "macos": (
+                "libcrtgfx/src/arch/macos/window_cocoa.c",
+                "libcrtgfx/src/arch/macos/window_cocoa_gpu.h",
+            ),
+            "linux": (
+                "libcrtgfx/src/arch/linux/window_wayland.c",
+                # The legacy backend dispatches through this shared interface
+                # even when the native Vulkan/Wayland implementation itself
+                # is intentionally excluded from the Simple Graphics stage.
+                "libcrtgfx/src/arch/linux/window_wayland_native.h",
+                "libcrtgfx/third_party/xkbcommon/recipe.json",
+                "libcrtgfx/third_party/xkbcommon/generated",
+            ),
+        },
+        "source_paths": (),
+        "source_paths_by_os": {"linux": ("xkbcommon/src",)},
     },
 }
 
@@ -66,7 +116,10 @@ def required_source_paths(root: Path, spec: dict, target_os: str) -> tuple:
     upstream monorepo, not their own separately-gated component) is
     always required, unchanged from before this function existed."""
     required = []
-    for name in spec["source_paths"]:
+    candidates = tuple(spec.get("source_paths", ())) + tuple(
+        spec.get("source_paths_by_os", {}).get(target_os, ())
+    )
+    for name in candidates:
         recipe_path = root / "libstdc++" / "third_party" / name / "recipe.json"
         if recipe_path.exists():
             recipe = json.loads(recipe_path.read_text(encoding="utf-8"))
@@ -75,6 +128,12 @@ def required_source_paths(root: Path, spec: dict, target_os: str) -> tuple:
                 continue
         required.append(name)
     return tuple(required)
+
+
+def required_project_paths(spec: dict, target_os: str) -> tuple:
+    return tuple(spec["project_paths"]) + tuple(
+        spec.get("project_paths_by_os", {}).get(target_os, ())
+    )
 
 
 def git(root: Path, *args: str) -> str:
@@ -88,7 +147,12 @@ def add_path(tar: tarfile.TarFile, source: Path, archive: PurePosixPath) -> None
     """Add one tree with stable ordering and metadata."""
     paths = [source]
     if source.is_dir():
-        paths.extend(sorted(source.rglob("*"), key=lambda p: p.as_posix()))
+        paths.extend(sorted(
+            (path for path in source.rglob("*")
+             if not any(part in (".git", ".hg", ".svn")
+                        for part in path.relative_to(source).parts)),
+            key=lambda p: p.as_posix(),
+        ))
     for path in paths:
         relative = path.relative_to(source)
         name = archive if relative == Path(".") else archive / PurePosixPath(relative.as_posix())
@@ -127,22 +191,24 @@ def main() -> None:
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     spec = STAGES[args.stage]
+    project_paths = required_project_paths(spec, args.target_os)
     source_paths = required_source_paths(root, spec, args.target_os)
     commit = git(root, "rev-parse", "HEAD")
     if not args.allow_dirty and git(root, "status", "--porcelain"):
         raise SystemExit("refusing to create a release source asset from a dirty worktree; use --allow-dirty only for local testing")
 
-    missing = [path for path in spec["project_paths"] if not (root / path).exists()]
+    missing = [path for path in project_paths if not (root / path).exists()]
     missing += [f"sources/{path}" for path in source_paths if not (source_root / path).exists()]
     if missing:
         raise SystemExit("stage source inputs are missing: " + ", ".join(missing))
 
-    asset_name = f"crt-{args.release_tag}-{args.stage}-source.tar.xz"
+    asset_name = f"crt-{args.release_tag}-{args.target_os}-{args.stage}-source.tar.xz"
     asset = output_dir / asset_name
     metadata = {
-        "format": 1,
+        "format": 2,
         "stage": args.stage,
         "input_stage": spec["input_stage"],
+        "target": {"os": args.target_os},
         "source_commit": commit,
         "entrypoint": spec["entrypoint"],
     }
@@ -154,16 +220,17 @@ def main() -> None:
             info.mode = 0o644
             info.mtime = 0
             tar.addfile(info, io.BytesIO(payload))
-            for relative in spec["project_paths"]:
+            for relative in project_paths:
                 add_path(tar, root / relative, PurePosixPath(relative))
             for relative in source_paths:
                 add_path(tar, source_root / relative, PurePosixPath("sources") / relative)
 
     digest = hashlib.sha256(asset.read_bytes()).hexdigest()
     recipe = {
-        "schema_version": 1,
+        "schema_version": 2,
         "input_stage": spec["input_stage"],
         "output_stage": args.stage,
+        "target": {"os": args.target_os},
         "source": {
             "url": f"{args.repository_url.rstrip('/')}/releases/download/{args.release_tag}/{asset_name}",
             "archive": asset_name,
