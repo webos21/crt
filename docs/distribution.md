@@ -24,10 +24,12 @@ external toolchain contract.
 | `04-gfx-media` | `03-gfx-simple` plus the GPU API, Skia CPU/GPU rendering, Vulkan/D3D12/Metal presentation, and FFmpeg media | accelerated UI and playback |
 | `05-js` | `04-gfx-media` plus QuickJS and CRT bindings | JavaScript application runtime |
 
-Each stage is cumulative and independently consumable. Stage N is produced
-from the installed output of stage N-1, not by treating the source tree as an
-implicit SDK. This makes the same packaging boundary part of normal project
-verification.
+Each binary stage is cumulative and independently consumable. The repository
+build currently creates each later directory by copying the preceding
+installed stage and overlaying the new component. That proves artifact
+inheritance, but it is not by itself proof that the new component can be
+rebuilt without repository headers or libraries. The separate source-stage
+chain below supplies that stronger boundary.
 
 Simple Graphics intentionally excludes Skia CPU raster and text, Skia GPU,
 and the public `crtgfx/gpu.h` surface. Its drawing contract is the mapped
@@ -89,10 +91,44 @@ Windows packages are emitted as `.zip`; Linux and macOS packages as
 scripts, wrappers, and `crt-toolchain.cmake` in addition to the cumulative
 headers and libraries.
 
+Each directory also carries the CRT mksh/toybox shell environment, optional
+Python porting drivers, recipes/tests/shims, and the examples appropriate to
+that stage. Python is an orchestration convenience and is declared in the
+manifest when required; configure and make commands themselves run through
+the packaged CRT mksh. MSYS and Git Bash are not distribution prerequisites.
+
 Archive names carry version, OS, architecture, and stage, for example
 `crt-development-windows-x86_64-01-c.zip` and
 `crt-development-linux-aarch64-04-gfx-media.tar.xz`. A release replaces the
 `development` token with the project release version.
+
+## Source-stage bootstrap chain
+
+The CRT GitHub repository is the meta-toolchain: it produces both the binary
+SDK archives above and immutable source assets for the individual upper
+stages. A released binary SDK does not clone the live repository or build
+against an arbitrary branch. Instead, it contains a catalog of stage recipes
+that records, at minimum:
+
+- the input and output stage IDs;
+- an immutable CRT GitHub Release asset URL;
+- the source commit represented by that asset;
+- the archive byte size and SHA-256 digest;
+- the required preceding binary stage and external tools;
+- configure/build/install/test entry points and expected installed artifacts.
+
+The first supported transitions are `01-c -> 02-cxx`, then
+`02-cxx -> 03-gfx-simple -> 04-gfx-media`. Thus `01-c` can fetch the pinned
+libc++/libc++abi/libunwind source package and build `02-cxx`; `02-cxx` can
+fetch the Simple Graphics and advanced Graphics/Media packages and build them
+in dependency order. The `04-gfx-media -> 05-js` transition follows the same
+model after these transitions are stable.
+
+The SHA-256 is over the exact release asset bytes, not merely a Git ref. Git
+commit IDs remain provenance metadata, while the digest is the download
+integrity and reproducibility boundary. A development build may generate a
+local source asset and matching recipe, but a published recipe must never use
+a mutable branch URL or an unfilled digest.
 
 ## External Toolchain Contract
 
@@ -128,9 +164,14 @@ and build trees using the packaged directory. At minimum they must verify:
 2. static and shared runtime linkage;
 3. a path containing spaces;
 4. one CMake consumer and one configure/make consumer where applicable;
-5. no accidental absolute source/build paths in installed files;
-6. no compiler or linker executable in the archive;
-7. the manifest's OS, architecture, stage, compiler inputs, and option set.
+5. the next stage fetched from its pinned source asset, SHA-256 verified,
+   built and tested using only the preceding extracted stage;
+6. no access to repository headers, libraries, or build outputs during that
+   isolated stage build;
+7. packaged examples rebuilt and run at the appropriate stage;
+8. no accidental absolute source/build paths in installed files;
+9. no compiler or linker executable in the archive;
+10. the manifest's OS, architecture, stage, compiler inputs, and option set.
 
 ## Linux Host And Device Capabilities
 

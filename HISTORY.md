@@ -11,6 +11,36 @@ substantive update.
 
 ## 2026-09-09
 
+- **Completed the first hands-on distribution SDK slice.** Graphics stages
+  now install both runnable demo binaries and rebuildable source/CMake examples:
+  the window-only demo in `03-gfx-simple`, the GPU presentation demo in
+  `04-gfx-media`, and the Skia GPU demo when Skia is enabled. The window demo
+  gained a bounded frame-count mode suitable for unattended acceptance; a
+  packaged Windows `03-gfx-simple` example was configured and rebuilt outside
+  the repository tree and ran 120 presented frames, and the packaged Windows
+  GPU demo likewise ran 120 presented frames. Generated CMake toolchain files
+  suppress CMake's implicit Windows system-library injection so external
+  consumers link only through the CRT wrapper contract. Distribution
+  verification now checks the stage-appropriate example files/binaries and
+  recursively rejects GPU/Skia material from the Simple Graphics stage.
+
+- **Made the source-porting surface an explicit optional distribution
+  payload.** Every stage now packages the port fetch/build drivers, recipes,
+  tests, compatibility shims, and user documentation, with Python 3.9+ and
+  network requirements recorded in `manifest.json`; LLVM/Clang/LLD remain
+  external and are not bundled. The packaged fetch driver resolves recipes
+  relative to the extracted SDK, and the previously unpinned GNU make source
+  archive now has a verified SHA-256 baseline. Fetching make and zlib using
+  only the packaged catalog was verified. On Windows, packaged-SDK mode now
+  treats the extracted stage itself as `CRT_ROOTFS`, installs the complete
+  enabled Toybox applet set plus extensionless toybox/mksh/make/awk names,
+  and runs configure/make through the packaged CRT mksh rather than MSYS or
+  Git Bash.
+  A fresh external zlib work/install tree completed configure, static and
+  shared builds, installation, and both round-trip execution tests through
+  that path. The remaining mksh here-document diagnostic and the isolated
+  inter-stage source-build chain remain active in `TODO.md`.
+
 - **Linux `crtgfx-skia-smoke` verification completed for the physical
   window/GPU/Skia split above.** The prior session's background Linux
   build never actually finished -- WSL was restarted (independently,

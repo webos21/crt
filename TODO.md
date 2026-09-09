@@ -1,8 +1,9 @@
 # TODO: CRT Shell, Rootfs, And Porting Loop
 
-This file tracks the shell/rootfs/porting work queue. The list is ordered by
-state: completed work first, current work second, and planned follow-up last.
-Detailed policy and provenance stay in `docs/` and import manifests.
+This file tracks the shell/rootfs/porting work queue. Only current work and
+planned follow-up stay here; completed work moves to `HISTORY.md` in reverse
+chronological order. Detailed policy and provenance stay in `docs/` and import
+manifests.
 
 ## Notice
 
@@ -157,6 +158,29 @@ Still open:
 - The `sysroot`/`crtgfx_skia_objects` dependency-cycle comment in the
   top-level `CMakeLists.txt` needs reconfirming now that `sysroot` no
   longer `DEPENDS` on any `crtgfx*` target at all.
+
+### Hands-on distribution SDK and isolated stage acceptance
+
+Turn each packaged stage into the bootstrap SDK for the next one, while the
+CRT GitHub repository remains the meta-toolchain that produces the binary and
+source packages. Add versioned stage recipes whose immutable CRT GitHub
+Release source assets are pinned by URL, source commit, size, and SHA-256:
+`01-c` must fetch/build/test `02-cxx`; `02-cxx` must fetch/build/test
+`03-gfx-simple` and then `04-gfx-media` (with `04` consuming the installed
+`03` result). Keep the compiler/linker external, use the packaged CRT
+mksh/toybox environment for configure/build commands, and never require
+MSYS/Git Bash. Extend the same recipe model to `04 -> 05-js` once the first
+three transitions are stable.
+
+Acceptance must start from freshly extracted archives in a path containing
+spaces, reject access to in-tree CRT headers/libraries/build artifacts,
+rebuild and run the packaged examples, and exercise representative configure,
+amalgamation, and dependency-chain ports. Windows is the first implementation
+host; repeat the complete isolated chain on Linux and macOS before moving the
+resolved details to `HISTORY.md`. Also root-cause the Windows packaged-mksh
+here-document temporary-file diagnostic before treating configure probe
+results as authoritative; zlib completes and passes static/shared round-trip
+tests, but its configure log still contains that diagnostic.
 
 ## Planned
 

@@ -195,12 +195,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dest", default=None, help="destination source root")
     parser.add_argument("--cache", default=None, help="archive cache directory")
-    parser.add_argument("--recipe-dir", default="porting/recipes", help="directory containing porting recipes")
+    parser.add_argument("--recipe-dir", default=None, help="directory containing porting recipes")
     parser.add_argument("--port", action="append", help="recipe name to fetch; defaults to all recipes")
     parser.add_argument("--list", action="store_true", help="list recipes and exit")
     args = parser.parse_args()
 
-    recipes = load_recipes(args.recipe_dir)
+    sdk_root = Path(__file__).resolve().parents[1]
+    recipe_dir = Path(args.recipe_dir).resolve() if args.recipe_dir else sdk_root / "porting" / "recipes"
+    recipes = load_recipes(recipe_dir)
     if args.list:
         list_recipes(recipes)
         return

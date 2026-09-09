@@ -9,6 +9,8 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+from create_rootfs import TOYBOX_APPLETS
+
 
 def copy_base(source: Path | None, destination: Path) -> None:
     if destination.exists():
@@ -69,19 +71,48 @@ def copy_port_tools(port_prefix: Path | None, destination: Path) -> None:
         shutil.copy2(item, target_bin / item.name)
 
 
+def copy_porting_sdk(root: Path, destination: Path) -> None:
+    """Install the optional source-porting workflow, but not upstream sources."""
+    tools_dest = destination / "tools"
+    tools_dest.mkdir(parents=True, exist_ok=True)
+    for name in ("crt-port-build.py", "fetch_ports.py", "crt-native-tool"):
+        shutil.copy2(root / "tools" / name, tools_dest / name)
+
+    porting_dest = destination / "porting"
+    for directory in ("recipes", "tests", "shims"):
+        target = porting_dest / directory
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(root / "porting" / directory, target)
+    shutil.copy2(root / "porting" / "DISTRIBUTION_README.md",
+                 porting_dest / "README.md")
+
+
 def install_wrapper_applets(destination: Path, target_os: str) -> None:
-    """Install the Toybox command names used internally by CRT wrappers."""
+    """Install every enabled Toybox applet needed by the packaged mksh."""
     suffix = ".exe" if target_os == "windows" else ""
     toybox = destination / "system" / "bin" / f"toybox{suffix}"
     if not toybox.is_file():
         raise SystemExit(f"distribution does not contain Toybox: {toybox}")
-    for name in ("printf", "sed", "uname"):
+    if suffix:
+        # Keep the dispatcher itself directly runnable by CRT's POSIX-shaped
+        # PATH search as well as the individual applet aliases below.
+        shutil.copy2(toybox, toybox.with_name("toybox"))
+    for name in TOYBOX_APPLETS:
         alias = toybox.with_name(f"{name}{suffix}")
         shutil.copy2(toybox, alias)
         if suffix:
             # The CRT mksh/PAL PATH search does not append PATHEXT. Keep an
             # extensionless PE alias as rootfs creation already does.
             shutil.copy2(toybox, toybox.with_name(name))
+    if suffix:
+        # CRT's exec/PATH layer deliberately does not emulate PATHEXT.
+        # Keep extensionless names for the other packaged shell tools too,
+        # matching create_rootfs.py's runnable rootfs layout.
+        for name in ("mksh", "sh", "make", "awk"):
+            executable = destination / "system" / "bin" / f"{name}.exe"
+            if executable.is_file():
+                shutil.copy2(executable, executable.with_name(name))
 
 
 def write_sdk_files(root: Path, destination: Path, target_os: str, target_arch: str,
@@ -143,6 +174,9 @@ get_filename_component(CRT_DISTRIBUTION_ROOT "${CMAKE_CURRENT_LIST_DIR}" ABSOLUT
 set(CMAKE_SYSROOT "${CRT_DISTRIBUTION_ROOT}")
 set(CMAKE_C_COMPILER "${CRT_DISTRIBUTION_ROOT}/tools/crt-cc__WRAPPER_SUFFIX__" CACHE FILEPATH "CRT C compiler wrapper")
 set(CMAKE_CXX_COMPILER "${CRT_DISTRIBUTION_ROOT}/tools/crt-c++__WRAPPER_SUFFIX__" CACHE FILEPATH "CRT C++ compiler wrapper")
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+set(CMAKE_C_STANDARD_LIBRARIES "" CACHE STRING "CRT wrapper supplies the C runtime" FORCE)
+set(CMAKE_CXX_STANDARD_LIBRARIES "" CACHE STRING "CRT wrapper supplies the C++ runtime" FORCE)
 if(DEFINED ENV{CRT_AR} AND NOT "$ENV{CRT_AR}" STREQUAL "")
   set(CMAKE_AR "$ENV{CRT_AR}" CACHE FILEPATH "External archiver")
 endif()
@@ -167,6 +201,18 @@ set(CMAKE_CXX_FLAGS_INIT "${CMAKE_C_FLAGS_INIT} -nostdinc++ -isystem${CRT_DISTRI
         "external_toolchain_environment": [
             "CRT_CC", "CRT_CXX", "CRT_AR", "CRT_RANLIB", "CRT_WINDOWS_SDK_LIBPATH"
         ],
+        "optional_tools": {
+            "porting": {
+                "included": True,
+                "python": {"required": True, "minimum_version": "3.9"},
+                "network_required_for_fetch": True,
+                "standalone_smoke_ports": ["zlib"],
+            }
+        },
+        "shell_environment": {
+            "provider": "crt-mksh-toybox",
+            "external_posix_shell_required": False,
+        },
     }
     (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     (destination / "VERSION").write_text("development\n", encoding="utf-8")
@@ -203,11 +249,13 @@ def main() -> None:
     build_dir = args.build_dir.resolve()
     destination = args.dest.resolve()
     copy_base(args.base.resolve() if args.base else None, destination)
+    (destination / "tmp").mkdir(parents=True, exist_ok=True)
     for component in args.component:
         install_component(args.cmake, build_dir, destination, component)
     if args.libcxx_install:
         copy_libcxx(args.libcxx_install.resolve(), destination)
     copy_port_tools(args.port_prefix.resolve() if args.port_prefix else None, destination)
+    copy_porting_sdk(root, destination)
     install_wrapper_applets(destination, args.target_os)
     write_sdk_files(
         root, destination, args.target_os, normalized_arch,

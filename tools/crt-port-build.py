@@ -279,6 +279,8 @@ def native_windows_tool_command(root, root_env, shell, target_os, path):
 
 def rootfs_mksh_path(preset_build_dir, target_os):
     name = "mksh.exe" if target_os == "windows" and os.name == "nt" else "mksh"
+    if (preset_build_dir / "manifest.json").is_file():
+        return preset_build_dir / "system" / "bin" / name
     return preset_build_dir / "rootfs" / "system" / "bin" / name
 
 
@@ -356,6 +358,7 @@ def copy_source(src, dst):
 
 def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os, mingw_triple, use_crt_shell=False):
     env = os.environ.copy()
+    packaged_sdk = (root / "manifest.json").is_file()
     if target_os == "windows":
         # tools/crt-cc/tools/crt-c++ read $CRT_TARGET_ARCH to pick
         # --target=<arch>-w64-mingw32; if unset, they fall back to
@@ -382,7 +385,8 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
     env["CRT_SYSROOT"] = sysroot_env
     env["CRT_TARGET_OS"] = target_os
     if use_crt_shell:
-        rootfs = (preset_build_dir / "rootfs").resolve()
+        rootfs = (preset_build_dir if packaged_sdk else
+                  preset_build_dir / "rootfs").resolve()
         shell = rootfs_mksh_path(preset_build_dir, target_os)
         if is_native_windows_configure(target_os):
             env["CRT_ROOTFS"] = str(rootfs)
@@ -407,6 +411,10 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
             # exactly this reason; TMPDIR was simply never one of them.
             env["TMPDIR"] = path_for_crt_shell(
                 Path(os.environ.get("TEMP") or os.environ.get("TMP") or tempfile.gettempdir()))
+            if packaged_sdk:
+                # mksh only accepts an absolute TMPDIR. Use the packaged
+                # rootfs's real /tmp instead of a drive-qualified host path.
+                env["TMPDIR"] = "/tmp"
         else:
             rootfs_path = os.pathsep.join(
                 str(rootfs / entry) for entry in ("system/bin", "bin", "usr/bin"))
@@ -572,6 +580,11 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
         env["CC"] = f"{root_env}/tools/crt-cc" if use_msys_paths else str(root / "tools" / "crt-cc")
         env["CXX"] = f"{root_env}/tools/crt-c++" if use_msys_paths else str(root / "tools" / "crt-c++")
         env["PATH"] = f"{tools_dir_env}{os.pathsep}{env.get('PATH', '')}"
+    if packaged_sdk:
+        suffix = ".exe" if target_os == "windows" else ""
+        packaged_make = root / "system" / "bin" / f"make{suffix}"
+        if packaged_make.is_file():
+            env["MAKE"] = "/system/bin/make" if use_crt_shell else str(packaged_make)
     env["AR"] = env.get("AR") or find_llvm_tool("llvm-ar") or shutil.which("ar") or "ar"
     env["RANLIB"] = env.get("RANLIB") or find_llvm_tool("llvm-ranlib") or shutil.which("ranlib") or "ranlib"
     env["STRIP"] = env.get("STRIP") or find_llvm_tool("llvm-strip") or shutil.which("strip") or "strip"
@@ -1510,7 +1523,8 @@ def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, por
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--preset", required=True)
+    parser.add_argument("--preset", default=None, help="repository build preset (repository mode)")
+    parser.add_argument("--sdk-root", default=None, help="extracted CRT distribution root (packaged SDK mode)")
     parser.add_argument("--target-os", default=None)
     parser.add_argument("--target-arch", default=None, help="aarch64/arm64 or x86_64/amd64/x64; auto-detected via CRT_TARGET_ARCH env var or platform.machine() if omitted")
     parser.add_argument("--source-root", default=None)
@@ -1526,14 +1540,22 @@ def main():
     parser.add_argument("--jobs", type=int, default=None, help="override make -jN (default: 1 on Windows via --use-crt-shell, else CPU count); for reproducing/testing the Windows jobserver bug")
     args = parser.parse_args()
 
-    root = Path(__file__).resolve().parents[1]
+    if bool(args.preset) == bool(args.sdk_root):
+        raise SystemExit(
+            "exactly one of --preset (repository mode) or --sdk-root "
+            "(packaged SDK mode) is required")
+
+    packaged_mode = args.sdk_root is not None
+    root = (Path(args.sdk_root).resolve() if packaged_mode else
+            Path(__file__).resolve().parents[1])
     recipe_dir = Path(args.recipe_dir)
     if not recipe_dir.is_absolute():
         recipe_dir = root / recipe_dir
     recipe_dir = recipe_dir.resolve()
     recipes = load_recipes(recipe_dir)
-    build_dir = (root / "out" / args.preset).resolve()
-    port_test_root = build_dir / "port-tests"
+    build_dir = root if packaged_mode else (root / "out" / args.preset).resolve()
+    port_test_root = ((Path.cwd() / "crt-port-work").resolve()
+                      if packaged_mode else build_dir / "port-tests")
     source_root = Path(args.source_root) if args.source_root else port_test_root / "src"
     work_root = Path(args.work_root) if args.work_root else port_test_root / "build"
     # Matches CMakeLists.txt's own CRT_SYSROOT = ${CRT_DIST_ROOT}/01-c
@@ -1550,16 +1572,32 @@ def main():
     # move; every other build_*.py driver already receives its sysroot
     # path as an explicit --sysroot CLI argument from CMakeLists.txt
     # instead of recomputing it like this, so it did not share this bug.
-    sysroot = build_dir / "dist" / "01-c"
+    sysroot = root if packaged_mode else build_dir / "dist" / "01-c"
     port_prefix = Path(args.install_prefix) if args.install_prefix else port_test_root / "install"
     source_root = source_root.resolve()
     work_root = work_root.resolve()
     sysroot = sysroot.resolve()
     port_prefix = port_prefix.resolve()
-    target_os = args.target_os or args.preset.split("-host-", 1)[0]
+    if packaged_mode:
+        manifest_path = root / "manifest.json"
+        if not manifest_path.is_file():
+            raise SystemExit(f"packaged SDK manifest not found: {manifest_path}")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        target_os = args.target_os or manifest.get("target", {}).get("os")
+        if not args.target_arch:
+            args.target_arch = manifest.get("target", {}).get("arch")
+    else:
+        target_os = args.target_os or args.preset.split("-host-", 1)[0]
+    if not target_os:
+        raise SystemExit("target OS is missing from the arguments and SDK manifest")
     mingw_triple = mingw_triple_for_arch(detect_target_arch(args.target_arch))
 
-    if not args.skip_sysroot_build:
+    # An extracted SDK is self-hosting at the shell/tool level: configure
+    # and make recipes use its own mksh/toybox environment by default.
+    # The compiler itself remains the user's/device vendor's external LLVM.
+    if packaged_mode:
+        args.use_crt_shell = True
+    if not packaged_mode and not args.skip_sysroot_build:
         target = "rootfs" if args.use_crt_shell else "sysroot"
         run(["cmake", "--build", "--preset", args.preset, "--target", target], root, os.environ.copy(), f"cmake target {target}")
     port_prefix.mkdir(parents=True, exist_ok=True)
@@ -1573,9 +1611,10 @@ def main():
                 progress(f"{port}: remove install stamp for rebuild")
                 stamp.unlink()
 
+    built = {"make"} if packaged_mode else set()
     for port in args.port:
         progress(f"{port}: requested")
-        build_port(root, build_dir, work_root, source_root, sysroot, port_prefix, recipes, port, target_os, mingw_triple, args.use_crt_shell, args.configure_only, jobs=args.jobs)
+        build_port(root, build_dir, work_root, source_root, sysroot, port_prefix, recipes, port, target_os, mingw_triple, args.use_crt_shell, args.configure_only, built=built, jobs=args.jobs)
         if args.test:
             run_port_tests(root, build_dir, work_root, sysroot, port_prefix, recipes[port], target_os, mingw_triple, args.use_crt_shell)
 

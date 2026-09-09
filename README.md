@@ -54,9 +54,13 @@ CRT is built and verified as cumulative distributions:
 Simple Graphics deliberately excludes Skia CPU raster/text and Skia GPU. Its
 drawing surface is the CPU-writable framebuffer in `crtgfx/window.h`.
 
-Each upper stage consumes the preceding installed `dist` tree so internal
-verification exercises the same boundary delivered to users. Full details,
-artifact layout, package naming, and acceptance rules are in
+The normal repository build currently proves that every later binary package
+inherits the preceding installed `dist` tree. A separate source-stage chain is
+being added for the stronger boundary: `01-c` fetches a SHA-256-pinned CRT
+GitHub Release source asset and builds/tests `02-cxx`; `02-cxx` then builds
+`03-gfx-simple`, followed by `04-gfx-media` against the installed Simple
+Graphics result. Full details, artifact layout, package naming, and acceptance
+rules are in
 [`docs/distribution.md`](docs/distribution.md).
 
 ## Prerequisites
@@ -135,7 +139,10 @@ cmake --build --preset <preset> --target crt-js-dist
 
 The outputs are cumulative directories and archives under
 `out/<preset>/dist/`. A later `*-dist` target builds preceding stages as
-dependencies.
+dependencies. This dependency establishes cumulative package contents; the
+source-stage bootstrap commands described above will separately verify that a
+freshly extracted predecessor SDK can produce the next stage without reading
+repository headers, libraries, or build outputs.
 
 Advanced graphics must be configured with a completed imported libc++ and
 Skia build. The existing `crtgfx-skia-fetch`, `crtgfx-skia-configure`,
@@ -162,10 +169,13 @@ The Windows activation script discovers the SDK import-library directory from
 a Developer Command Prompt, or accepts an explicit `CRT_WINDOWS_SDK_LIBPATH`.
 
 The in-repository wrappers `tools/crt-cc` and `tools/crt-c++` enforce the
-freestanding/sysroot/default-runtime boundary. Configure/make ports are driven
-by `tools/crt-port-build.py` and project-owned recipes in `porting/recipes`.
-Upstream sources are not patched merely to hide a missing CRT surface; the
-missing Bionic API/type/symbol/behavior is implemented in CRT first.
+freestanding/sysroot/default-runtime boundary. Every stage also packages
+optional Python port fetch/build drivers, pinned recipes, tests/shims, and the
+examples appropriate to that stage. Configure/make work runs through the
+packaged CRT mksh and Toybox tools; MSYS and Git Bash are not distribution
+prerequisites. Upstream sources are not patched merely to hide a missing CRT
+surface; the missing Bionic API/type/symbol/behavior is implemented in CRT
+first.
 
 ## Repository Layout
 

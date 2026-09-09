@@ -30,6 +30,22 @@ def main() -> None:
     manifest = json.loads((dist / "manifest.json").read_text(encoding="utf-8"))
     if manifest.get("stage") != args.stage or manifest.get("compiler_bundled") is not False:
         raise SystemExit("manifest stage/compiler_bundled contract is invalid")
+    porting = manifest.get("optional_tools", {}).get("porting", {})
+    if porting.get("included") is not True or porting.get("python", {}).get("required") is not True:
+        raise SystemExit("manifest does not describe the optional packaged porting tools")
+    shell = manifest.get("shell_environment", {})
+    if (shell.get("provider") != "crt-mksh-toybox" or
+            shell.get("external_posix_shell_required") is not False):
+        raise SystemExit("manifest does not declare the CRT-owned shell environment")
+    for relative in (
+            "tools/crt-port-build.py", "tools/fetch_ports.py",
+            "tools/crt-native-tool", "porting/README.md",
+            "porting/recipes/zlib.json", "porting/recipes/make.json",
+            "porting/tests/zlib_roundtrip.c"):
+        require(dist / relative)
+    make_recipe = json.loads((dist / "porting" / "recipes" / "make.json").read_text(encoding="utf-8"))
+    if not make_recipe.get("source", {}).get("sha256"):
+        raise SystemExit("packaged make recipe does not pin its source archive SHA-256")
     bundled = sorted(path for path in dist.rglob("*") if path.is_file() and path.name.lower() in BANNED_TOOLS)
     if bundled:
         raise SystemExit("compiler/linker executable was bundled: " + ", ".join(map(str, bundled)))
@@ -41,6 +57,10 @@ def main() -> None:
     if not any((dist / "lib").glob("libc.a")):
         raise SystemExit("C stage does not contain the static libc archive")
     suffix = ".exe" if manifest.get("target", {}).get("os") == "windows" else ""
+    for tool in ("mksh", "sh", "make", "awk", "toybox"):
+        require(dist / "system" / "bin" / f"{tool}{suffix}")
+        if suffix:
+            require(dist / "system" / "bin" / tool)
     for applet in ("printf", "sed", "uname"):
         require(dist / "system" / "bin" / f"{applet}{suffix}")
         if suffix:
@@ -52,13 +72,18 @@ def main() -> None:
             raise SystemExit("C++ stage does not contain libc++")
     if args.stage >= "03-gfx-simple":
         require(dist / "include" / "crtgfx" / "window.h")
+        require(dist / "examples" / "README.md")
+        require(dist / "examples" / "gfx-simple" / "main.c")
+        require(dist / "examples" / "gfx-simple" / "CMakeLists.txt")
+        require(dist / "examples" / "bin" / f"crtgfx_window_demo{suffix}")
     if args.stage == "03-gfx-simple":
         if (dist / "include" / "crtgfx" / "gpu.h").exists() or (dist / "include" / "crtgfx" / "skia.h").exists():
             raise SystemExit("Simple Graphics unexpectedly exposes GPU/Skia headers")
         advanced_libraries = [
-            path for directory in (dist / "lib", dist / "bin") if directory.is_dir()
-            for path in directory.iterdir()
-            if "crtgfx_gpu" in path.name.lower() or "crtgfx_skia" in path.name.lower()
+            path for directory in (dist / "lib", dist / "bin", dist / "examples") if directory.is_dir()
+            for path in directory.rglob("*") if path.is_file()
+            if "crtgfx_gpu" in path.name.lower() or "crtgfx_skia" in path.name.lower() or
+               "gfx-gpu" in path.as_posix().lower() or "gfx-skia" in path.as_posix().lower()
         ]
         if advanced_libraries:
             raise SystemExit("Simple Graphics contains advanced libraries: " +
@@ -66,6 +91,14 @@ def main() -> None:
     if args.stage >= "04-gfx-media":
         require(dist / "include" / "crtgfx" / "gpu.h")
         require(dist / "include" / "crtmedia")
+        require(dist / "examples" / "gfx-gpu" / "main.c")
+        require(dist / "examples" / "gfx-gpu" / "CMakeLists.txt")
+        require(dist / "examples" / "bin" / f"crtgfx_gpu_window_demo{suffix}")
+        if (dist / "include" / "crtgfx" / "skia.h").exists():
+            require(dist / "examples" / "gfx-skia" / "main.cc")
+            require(dist / "examples" / "gfx-skia" / "CMakeLists.txt")
+            require(dist / "examples" / "gfx-skia" / "skia_reference_scene.h")
+            require(dist / "examples" / "bin" / f"crtgfx_skia_gpu_window_demo{suffix}")
     if args.stage >= "05-js":
         require(dist / "include" / "crtjs")
     print(f"CRT distribution verified: {dist}")

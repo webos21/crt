@@ -1,6 +1,7 @@
 #include "crtgfx/window.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 
 static void draw_demo_frame(crtgfx_window* window, unsigned int tick) {
   crtgfx_framebuffer framebuffer;
@@ -23,10 +24,11 @@ static void draw_demo_frame(crtgfx_window* window, unsigned int tick) {
   (void)crtgfx_window_end_frame(window);
 }
 
-int main(void) {
+int main(int argc, char** argv) {
   crtgfx_window_desc desc;
   crtgfx_window* window;
   unsigned int tick;
+  unsigned long frame_limit = argc > 1 ? strtoul(argv[1], NULL, 10) : 0;
   int rc;
 
   desc.title = "crtgfx Windows Wayland surface";
@@ -41,11 +43,16 @@ int main(void) {
   }
 
   tick = 0;
-  while (!crtgfx_window_should_close(window)) {
+  while (!crtgfx_window_should_close(window) &&
+         (frame_limit == 0 || tick < frame_limit)) {
     draw_demo_frame(window, tick++);
     crtgfx_window_pump_events(16);
   }
 
   crtgfx_window_destroy(window);
+  fprintf(stderr, "crtgfx_window_demo: presented=%u\n", tick);
+  if (frame_limit != 0 && tick != frame_limit) {
+    return 1;
+  }
   return 0;
 }

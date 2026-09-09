@@ -1225,7 +1225,7 @@ if(Python3_Interpreter_FOUND)
   # split, TODO.md's decided item) -- this is what makes the Simple
   # Graphics stage's own dist actually window-only: no GPU/Skia object
   # code ever gets pulled into this DEPENDS list at all.
-  add_custom_target(crt-gfx-simple-build DEPENDS crtgfx_window crtgfx_window_shared crtgfx_window_smoke crtgfx_synthetic_event)
+  add_custom_target(crt-gfx-simple-build DEPENDS crtgfx_window crtgfx_window_shared crtgfx_window_smoke crtgfx_synthetic_event crtgfx_window_demo)
   add_custom_target(crt-gfx-simple-test
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtgfx_window_smoke_runs"
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtgfx_synthetic_event_runs"
@@ -1259,7 +1259,7 @@ if(Python3_Interpreter_FOUND)
   # globally regardless of which aggregate target built them, but nothing
   # in crt-gfx-build's own (pre-this-fix) DEPENDS ever built them, so
   # ctest correctly reported them "Not Run" rather than a false pass.
-  add_custom_target(crt-gfx-build DEPENDS crt-gfx-simple-build crtgfx_window crtgfx_window_shared crtgfx_gpu crtgfx_gpu_shared crtgfx_gpu_test)
+  add_custom_target(crt-gfx-build DEPENDS crt-gfx-simple-build crtgfx_window crtgfx_window_shared crtgfx_gpu crtgfx_gpu_shared crtgfx_gpu_test crtgfx_gpu_window_demo)
   add_custom_target(crt-gfx-test
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtgfx_.*_runs"
     DEPENDS crt-gfx-build
@@ -1271,7 +1271,11 @@ if(Python3_Interpreter_FOUND)
     DEPENDS crt-media-build
     USES_TERMINAL
   )
-  add_custom_target(crt-gfx-media-build DEPENDS crt-gfx-build crt-media-build)
+  set(CRT_GFX_MEDIA_BUILD_DEPENDS crt-gfx-build crt-media-build)
+  if(TARGET crtgfx_skia_gpu_window_demo)
+    list(APPEND CRT_GFX_MEDIA_BUILD_DEPENDS crtgfx_skia_gpu_window_demo)
+  endif()
+  add_custom_target(crt-gfx-media-build DEPENDS ${CRT_GFX_MEDIA_BUILD_DEPENDS})
   add_custom_target(crt-gfx-media-test DEPENDS crt-gfx-test crt-media-test)
   add_custom_target(crt-gfx-media-dist
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"

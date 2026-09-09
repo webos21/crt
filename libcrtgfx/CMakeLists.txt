@@ -2760,6 +2760,19 @@ if(CRTGFX_ENABLE_SKIA)
     crt_wire_skia_executable(crtgfx_skia_gpu_window_demo SKIP_MACOS_DEAD_STRIP)
     crt_link_startup_end_objects(crtgfx_skia_gpu_window_demo)
     add_dependencies(crtgfx_skia_gpu_window_demo cxx c crt1 crtgfx_skia)
+
+    install(TARGETS crtgfx_skia_gpu_window_demo
+      RUNTIME DESTINATION examples/bin COMPONENT crt-gfx
+    )
+    install(FILES tools/skia_gpu_window_demo.cc
+      DESTINATION examples/gfx-skia RENAME main.cc COMPONENT crt-gfx
+    )
+    install(FILES tests/skia_reference_scene.h
+      DESTINATION examples/gfx-skia COMPONENT crt-gfx
+    )
+    install(FILES "${CMAKE_SOURCE_DIR}/examples/gfx-skia/CMakeLists.txt"
+      DESTINATION examples/gfx-skia COMPONENT crt-gfx
+    )
   endif()
 
   # crtmedia_frame_skia_smoke: the real-Skia half of libcrtmedia's CPU
@@ -2837,6 +2850,21 @@ endif()
 crt_link_startup_end_objects(crtgfx_window_demo)
 add_dependencies(crtgfx_window_demo c crt1)
 
+install(TARGETS crtgfx_window_demo
+  RUNTIME DESTINATION examples/bin COMPONENT crt-gfx-simple
+)
+install(FILES tools/window_demo.c
+  DESTINATION examples/gfx-simple RENAME main.c COMPONENT crt-gfx-simple
+)
+install(FILES
+  "${CMAKE_SOURCE_DIR}/examples/README.md"
+  DESTINATION examples COMPONENT crt-gfx-simple
+)
+install(FILES
+  "${CMAKE_SOURCE_DIR}/examples/gfx-simple/CMakeLists.txt"
+  DESTINATION examples/gfx-simple COMPONENT crt-gfx-simple
+)
+
 # crtgfx_gpu_window_demo: manual, real on-screen verification for the
 # native-Wayland-backend GPU presentation vertical slice (2026-09-07) --
 # see tools/gpu_window_demo.c's own top comment for the full "why", and
@@ -2886,6 +2914,17 @@ elseif(CRT_TARGET_OS STREQUAL "windows")
 endif()
 crt_link_startup_end_objects(crtgfx_gpu_window_demo)
 add_dependencies(crtgfx_gpu_window_demo c crt1)
+
+install(TARGETS crtgfx_gpu_window_demo
+  RUNTIME DESTINATION examples/bin COMPONENT crt-gfx
+)
+install(FILES tools/gpu_window_demo.c
+  DESTINATION examples/gfx-gpu RENAME main.c COMPONENT crt-gfx
+)
+install(FILES
+  "${CMAKE_SOURCE_DIR}/examples/gfx-gpu/CMakeLists.txt"
+  DESTINATION examples/gfx-gpu COMPONENT crt-gfx
+)
 
 # crtgfx_keyboard_interactive: manual, interactive keyboard-input
 # verification (see tests/window_keyboard_interactive_test.c's own
