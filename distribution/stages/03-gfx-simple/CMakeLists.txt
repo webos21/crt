@@ -56,6 +56,28 @@ elseif(CRT_STAGE_TARGET_OS STREQUAL "macos")
   foreach(target crtgfx_window crtgfx_window_shared)
     target_compile_options(${target} PRIVATE
       -Wno-cast-function-type-mismatch -Wno-unknown-warning-option)
+    # -fcrt-real-apple-sdk (tools/crt-cc's own sentinel, added 2026-09-09
+    # specifically for this real gap -- see that file's own top comment):
+    # window_cocoa.c needs no real Apple headers to *compile* (hand-
+    # declared Objective-C ABI, no #include of any Cocoa header), but the
+    # frameworks/objc just below are real Darwin libraries this project
+    # never builds itself, and crt-cc's own default link has nothing
+    # pointing at them at all -- confirmed for real, 2026-09-09: linking
+    # crtgfx_window_shared.dylib (and every executable below that pulls
+    # crtgfx_window's own AppKit-touching object code out of the static
+    # archive) failed outright with "ld: library 'objc' not found" without
+    # it, the first time anything actually linked this stage's own output
+    # through the packaged tools/crt-cc standalone (every other consumer
+    # of window_cocoa.c so far only ever built through this project's own
+    # top-level CMake, which links host clang directly instead). PRIVATE,
+    # matching the frameworks/objc entry just below -- CMake still forwards
+    # a static library's own link libraries onto its consumers regardless
+    # of PRIVATE scope, since crtgfx_window can never resolve its own
+    # external symbols by itself; confirmed for real by the frameworks/
+    # objc entry below already reaching crtgfx_window_smoke/synthetic_
+    # event/window_demo's own link lines despite the identical PRIVATE
+    # scope, before this same fix was added here.
+    target_link_libraries(${target} PRIVATE -fcrt-real-apple-sdk)
     target_link_libraries(${target} PRIVATE
       "-framework Foundation" "-framework AppKit" "-framework QuartzCore"
       "-framework CoreGraphics" objc)

@@ -33,6 +33,24 @@ def publish_tree(staged: Path, output: Path) -> None:
         shutil.rmtree(publish_root, ignore_errors=True)
 
 
+# Deliberately never sets DYLD_LIBRARY_PATH/LD_LIBRARY_PATH pointing at
+# this stage's own from-scratch lib/ -- confirmed twice, for real
+# (2026-09-09), that this env reaches every subprocess this script spawns
+# (configure/build/install *and* ctest, all real host tools -- cmake and
+# ctest are both linked against the real macOS system libc++), so setting
+# it here breaks the host tool itself before this stage's own C ever gets
+# a chance to run: "Symbol not found: __ZNSt12length_errorD1Ev ... Expected
+# in: .../sdk/lib/libc++.1.dylib" aborted cmake's own configure, then
+# ctest itself the same way once configure/build were fixed to stop
+# poisoning cmake/ninja specifically. This stage's own test binaries
+# (crtgfx_window_smoke/crtgfx_synthetic_event) do not need it in the end
+# anyway -- confirmed via `otool -L`, they link only real, absolute-path
+# system frameworks (Foundation/AppKit/.../libobjc/libSystem), no SDK-
+# relative dylib at all. A future stage whose own test binaries *do* need
+# to find an SDK-relative shared library at runtime should set it as a
+# per-test CTest ENVIRONMENT property in that stage's own CMakeLists.txt
+# (`set_tests_properties(... PROPERTIES ENVIRONMENT "DYLD_LIBRARY_PATH=...")`)
+# instead -- that reaches only the spawned test process, never ctest's own.
 def runtime_env(sdk: Path, manifest: dict) -> dict[str, str]:
     env = os.environ.copy()
     target_os = manifest["target"]["os"]
@@ -57,10 +75,6 @@ def runtime_env(sdk: Path, manifest: dict) -> dict[str, str]:
     if target_os == "windows":
         env["CRT_MKSH_EXE"] = str(sdk / "system" / "bin" / "mksh.exe")
         env["PATH"] = str(sdk / "bin") + os.pathsep + env.get("PATH", "")
-    elif target_os == "macos":
-        env["DYLD_LIBRARY_PATH"] = str(sdk / "lib")
-    else:
-        env["LD_LIBRARY_PATH"] = str(sdk / "lib")
     return env
 
 

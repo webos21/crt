@@ -81,6 +81,88 @@ for arg in "$@"; do
   esac
 done
 
+# -fcrt-real-apple-sdk: a sentinel, not a real clang flag -- mirrors tools/
+# crt-c++'s own identical sentinel (see that file's own top comment for the
+# full "why": a translation unit that itself needs real Apple system/
+# framework headers or libraries, this project's no-host-SDK-header policy
+# cannot otherwise cover). Missing here until now (2026-09-09): every real
+# per-backend macOS .c file needing it so far (window_cocoa.c, gpu_metal.c)
+# was believed to need no real headers at all (hand-declared Objective-C
+# ABI, driven via objc_msgSend directly) and therefore no real *libraries*
+# either -- true for compiling them, but the isolated stage-source SDK
+# bootstrap (distribution/stages/03-gfx-simple, an actual external
+# consumer building through the packaged tools/crt-cc for the first time,
+# rather than this project's own top-level CMake build linking host clang
+# directly) proved that wrong for *linking*: real Foundation/AppKit/
+# QuartzCore/CoreGraphics/objc are real Darwin libraries this project
+# never builds itself.
+#
+# A caller-supplied "--sysroot=..." is stripped unconditionally on macOS
+# here too (not just for a -fcrt-real-apple-sdk compile), for a real,
+# confirmed reason found bringing this up (2026-09-09), not preemptively:
+# crt-toolchain.cmake (this project's own packaged, generic CMake
+# integration for external consumers -- distribution/stages/03-gfx-simple
+# is the first real one) sets CMAKE_SYSROOT, which makes CMake itself
+# append a real "--sysroot=$CRT_SYSROOT" to *every* compile and link line
+# it generates, regardless of what crt-cc itself already does with
+# $CRT_SYSROOT -- this project's own internal top-level build and its
+# porting system (tools/crt-port-build.py, which sets $CRT_SYSROOT as an
+# env var and never passes a --sysroot flag at all) never do this, so this
+# exact interaction had never come up before. Confirmed for real via
+# `clang -v`, in two stages: first with a real Apple framework/library
+# actually requested (-fcrt-real-apple-sdk's own apple_sdk_search_flags,
+# below, adding a matching -isysroot/-F<real SDK>/System/Library/
+# Frameworks) -- Apple's Darwin driver still derived the linker's own
+# -syslibroot from the unstripped --sysroot=$CRT_SYSROOT instead of
+# -isysroot, so real frameworks/`-lobjc` failed to resolve regardless
+# ("ld: library 'objc' not found"). Stripping --sysroot= only in that
+# scope then surfaced a second, more fundamental case once a plain,
+# ordinary consumer executable (examples/gfx-simple, no
+# -fcrt-real-apple-sdk at all, a real third party neither knowing nor
+# needing to know about this project's own internal sentinel) linked
+# against the finished, installed libcrtgfx.dylib: even the completely
+# unconditional, always-present "-lSystem" (every macOS Mach-O binary
+# needs it, real-Apple-frameworks or not) failed the exact same way
+# ("ld: library 'System' not found"), because the unstripped
+# --sysroot=$CRT_SYSROOT was still hijacking -syslibroot away from the
+# real Apple SDK for every macOS link crt-toolchain.cmake drives, not
+# just the handful that ask for real frameworks. This project's own
+# -isystem${CRT_SYSROOT}/include (added unconditionally below, independent
+# of this) and its own explicit ${CRT_SYSROOT}/lib/... paths on every
+# macOS link (further below) already cover everything --sysroot's own
+# header/library-search side would have done, so dropping it always on
+# macOS loses nothing for any existing caller (porting system and this
+# project's own top-level build never passed it to begin with) and fixes
+# every consumer routed through crt-toolchain.cmake instead.
+#
+# Parsed and stripped from "$@" here, in place, using a shift-and-requeue
+# rotation rather than a word-split rebuild (unlike tools/crt-c++'s own
+# $user_args, which accepts that fragility on every platform) specifically
+# so this costs nothing and changes nothing on Linux/Windows, or on macOS
+# calls that pass neither token -- see the resource_dir comment below for
+# why raw, unmodified "$@" is deliberately preserved for Linux/macOS
+# otherwise.
+want_real_apple_sdk=0
+for arg in "$@"; do
+  if [ "$arg" = "-fcrt-real-apple-sdk" ]; then
+    want_real_apple_sdk=1
+    break
+  fi
+done
+if [ "$want_real_apple_sdk" -eq 1 ] || [ "$target_os" = macos ]; then
+  original_argc=$#
+  i=0
+  while [ "$i" -lt "$original_argc" ]; do
+    arg=$1
+    shift
+    case "$arg" in
+      -fcrt-real-apple-sdk|--sysroot=*) ;;
+      *) set -- "$@" "$arg" ;;
+    esac
+    i=$((i + 1))
+  done
+fi
+
 # Assembly source (a bare *.S/*.s positional argument, or an explicit
 # -x assembler/-x assembler-with-cpp) needs __APPLE__ left alone on macOS,
 # unlike every C/C++ translation unit -- see the -U__APPLE__ case branch
@@ -112,12 +194,36 @@ for arg in "$@"; do
   esac
 done
 
-common_flags="-ffreestanding -fno-builtin -Xclang -fwchar-type=int -ffunction-sections -fdata-sections -nostdinc -isystem${CRT_SYSROOT}/include"
+# apple_sdk_search_flags: only ever computed/non-empty when -fcrt-real-
+# apple-sdk was actually present on this compile's own command line (see
+# that sentinel's own top comment above) -- see tools/crt-c++'s own
+# identical mechanism for the fuller "why" (real Apple SDK headers/
+# frameworks a caller's real Darwin library needs, ahead of $CRT_
+# SYSROOT's own -isystem so the real macOS SDK wins the search for this
+# one compile only, not reordered globally).
+apple_sdk_search_flags=""
+if [ "$target_os" = macos ] && [ "$want_real_apple_sdk" -eq 1 ]; then
+  apple_sdk_path="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
+  if [ -z "$apple_sdk_path" ]; then
+    echo "crt-cc: -fcrt-real-apple-sdk requested but 'xcrun --sdk macosx --show-sdk-path' failed" >&2
+    exit 1
+  fi
+  apple_sdk_search_flags="-isysroot $apple_sdk_path -F$apple_sdk_path/System/Library/Frameworks -isystem $apple_sdk_path/usr/include -isystem $resource_dir/include"
+fi
+
+common_flags="-ffreestanding -fno-builtin -Xclang -fwchar-type=int -ffunction-sections -fdata-sections -nostdinc $apple_sdk_search_flags -isystem${CRT_SYSROOT}/include"
 case "$target_os" in
   macos)
     common_flags="$common_flags -DCRT_TARGET_OS_MACOS=1"
     if [ "$is_asm_source" -eq 0 ]; then
       common_flags="$common_flags -U__APPLE__"
+      if [ "$want_real_apple_sdk" -eq 1 ]; then
+        # Cancels the -U__APPLE__ just added, for this compile only -- see
+        # -fcrt-real-apple-sdk's own top comment for why real Darwin
+        # headers need this back, and why a later -D always wins over an
+        # earlier -U for the same macro on the same command line.
+        common_flags="$common_flags -D__APPLE__=1"
+      fi
     fi
     ;;
   linux) common_flags="$common_flags -DCRT_TARGET_OS_LINUX=1" ;;
@@ -307,12 +413,26 @@ cxx_runtime_lib=""
 
 case "$target_os" in
   macos)
+    # -dead_strip is skipped, only for a -fcrt-real-apple-sdk link -- see
+    # tools/crt-c++'s own identical, already-hard-won comment (same real
+    # ld64 dead-code-stripping-vs-Apple's-closed-source-Metal/IOSurface/
+    # LaunchServices-internals interaction) for the fuller "why". Scoped
+    # to exactly the executables/shared libraries that opted into real
+    # Apple SDK frameworks in the first place, not a global policy change.
     if [ "$shared_mode" -eq 1 ]; then
       libs="$libs ${CRT_SYSROOT}/lib/libc.dylib ${CRT_SYSROOT}/lib/libm.dylib ${CRT_SYSROOT}/lib/libdl.dylib $cxx_runtime_lib ${CRT_SYSROOT}/lib/libclang_rt.builtins.a -lSystem"
-      entry="-Wl,-dead_strip -Wl,-rpath,${CRT_SYSROOT}/lib"
+      if [ "$want_real_apple_sdk" -eq 1 ]; then
+        entry="-Wl,-rpath,${CRT_SYSROOT}/lib"
+      else
+        entry="-Wl,-dead_strip -Wl,-rpath,${CRT_SYSROOT}/lib"
+      fi
     else
       libs="$libs ${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a $cxx_runtime_lib ${CRT_SYSROOT}/lib/libclang_rt.builtins.a -lSystem"
-      entry="-Wl,-e,_start -Wl,-dead_strip"
+      if [ "$want_real_apple_sdk" -eq 1 ]; then
+        entry="-Wl,-e,_start"
+      else
+        entry="-Wl,-e,_start -Wl,-dead_strip"
+      fi
     fi
     ;;
   linux)

@@ -245,6 +245,24 @@ if(DEFINED ENV{CRT_RANLIB} AND NOT "$ENV{CRT_RANLIB}" STREQUAL "")
 endif()
 set(CMAKE_C_FLAGS_INIT "-ffreestanding -fno-builtin -nostdinc -isystem${CRT_DISTRIBUTION_ROOT}/include")
 set(CMAKE_CXX_FLAGS_INIT "${CMAKE_C_FLAGS_INIT} -nostdinc++ -isystem${CRT_DISTRIBUTION_ROOT}/include/c++/v1")
+# CMake's own default rpath computation, once CMAKE_SYSROOT is set above,
+# treats it as a real target-device filesystem root and strips it from
+# any absolute library path found underneath -- appropriate for real
+# cross-compilation onto a separate device filesystem, but wrong here:
+# CRT_DISTRIBUTION_ROOT is just wherever this SDK happens to be unpacked
+# on this same host, not a chroot the consumer executable will actually
+# run inside. Confirmed for real (2026-09-09): linking examples/gfx-
+# simple against this stage's own installed libcrtgfx.dylib produced a
+# real, reproducible "-rpath /lib" (the sysroot prefix silently stripped
+# from the real "${CRT_DISTRIBUTION_ROOT}/lib" path) and the resulting
+# executable failed to even start -- "dyld: Library not loaded: @rpath/
+# libcrtgfx.dylib ... tried: '/lib/libcrtgfx.dylib' (no such file)".
+# Setting CMAKE_BUILD_RPATH explicitly overrides that sysroot-relative
+# default with the real, absolute lib directory instead, matching how
+# this SDK's own wrapper scripts (tools/crt-cc) already reference
+# ${CRT_SYSROOT}/lib/... by absolute path throughout.
+set(CMAKE_BUILD_RPATH "${CRT_DISTRIBUTION_ROOT}/lib")
+set(CMAKE_INSTALL_RPATH "${CRT_DISTRIBUTION_ROOT}/lib")
 """.replace("__WRAPPER_SUFFIX__", wrapper_suffix)
     (destination / "crt-toolchain.cmake").write_text(toolchain, encoding="utf-8")
     manifest = {
