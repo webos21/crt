@@ -1185,6 +1185,7 @@ if(Python3_Interpreter_FOUND)
   add_custom_target(crt-stage-02-source
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_stage_source.py"
       --root "${CMAKE_SOURCE_DIR}" --stage 02-cxx
+      --target-os "${CRT_TARGET_OS}"
       --source-root "${CRT_LIBCXX_FETCH_ROOT}"
       --output-dir "${CRT_STAGE_SOURCE_ROOT}"
       --release-tag development --allow-dirty

@@ -37,6 +37,30 @@ STAGES = {
 }
 
 
+def required_source_paths(root: Path, spec: dict, target_os: str) -> tuple:
+    """Filters spec["source_paths"] down to the ones this target_os actually
+    needs -- e.g. libunwind (tools/crt-libcxx-build.py's own libstdc++/
+    third_party/libunwind/recipe.json) is deliberately never fetched on
+    macOS at all (Darwin's own libSystem unwinder is used instead; see
+    that recipe.json's own notes), so requiring "sources/libunwind" to
+    exist there is a real, confirmed bug (2026-09-09) -- it can never
+    exist on a real macOS build, only ever on Linux/Windows. A source_
+    paths entry with no matching libstdc++/third_party/<name>/recipe.json
+    (cmake/runtimes/libc -- plain sparse-checkout subtrees of the same
+    upstream monorepo, not their own separately-gated component) is
+    always required, unchanged from before this function existed."""
+    required = []
+    for name in spec["source_paths"]:
+        recipe_path = root / "libstdc++" / "third_party" / name / "recipe.json"
+        if recipe_path.exists():
+            recipe = json.loads(recipe_path.read_text(encoding="utf-8"))
+            allowed = recipe.get("target_os")
+            if allowed is not None and target_os not in allowed:
+                continue
+        required.append(name)
+    return tuple(required)
+
+
 def git(root: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", *args], cwd=root, text=True, capture_output=True, check=True
@@ -74,6 +98,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--stage", required=True, choices=sorted(STAGES))
+    parser.add_argument("--target-os", required=True, help="linux/windows/macos -- gates which source_paths entries this build actually needs (see required_source_paths())")
     parser.add_argument("--source-root", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--release-tag", required=True)
@@ -86,12 +111,13 @@ def main() -> None:
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     spec = STAGES[args.stage]
+    source_paths = required_source_paths(root, spec, args.target_os)
     commit = git(root, "rev-parse", "HEAD")
     if not args.allow_dirty and git(root, "status", "--porcelain"):
         raise SystemExit("refusing to create a release source asset from a dirty worktree; use --allow-dirty only for local testing")
 
     missing = [path for path in spec["project_paths"] if not (root / path).exists()]
-    missing += [f"sources/{path}" for path in spec["source_paths"] if not (source_root / path).exists()]
+    missing += [f"sources/{path}" for path in source_paths if not (source_root / path).exists()]
     if missing:
         raise SystemExit("stage source inputs are missing: " + ", ".join(missing))
 
@@ -114,7 +140,7 @@ def main() -> None:
             tar.addfile(info, io.BytesIO(payload))
             for relative in spec["project_paths"]:
                 add_path(tar, root / relative, PurePosixPath(relative))
-            for relative in spec["source_paths"]:
+            for relative in source_paths:
                 add_path(tar, source_root / relative, PurePosixPath("sources") / relative)
 
     digest = hashlib.sha256(asset.read_bytes()).hexdigest()
