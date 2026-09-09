@@ -185,12 +185,48 @@ Windows-only bug (`mksh` backslash-path exec) were found and fixed along the
 way -- full trail in `HISTORY.md`. Windows was re-verified clean against the
 final, merged fix set.
 
-Next: add the `03-gfx-simple -> 04-gfx-media` asset and entry point with
-Skia and FFmpeg actually enabled (the default packaging pass everywhere
-still has `CRTGFX_ENABLE_SKIA=OFF`/`CRTMEDIA_ENABLE_FFMPEG=OFF` -- this
-transition's acceptance must not settle for that). Keep the separately
-listed Windows C++ initialization failure open; the stage runner
-deliberately has no retry that could hide it.
+**In progress:** `03-gfx-simple -> 04-gfx-media`, with Skia and FFmpeg
+actually enabled for this transition's acceptance (the default packaging
+pass everywhere still has `CRTGFX_ENABLE_SKIA=OFF`/
+`CRTMEDIA_ENABLE_FFMPEG=OFF`, which this transition must not settle for).
+Design is written up in full at
+`C:\Users\Lee\.claude\plans\soft-orbiting-swan.md` (approved 2026-09-09) --
+read that before continuing rather than re-deriving the design. Key
+decision already made: Skia/FFmpeg/FreeType are fetched and built live by
+the stage entrypoint script via their own already-pinned mechanisms
+(`libcrtgfx/third_party/skia/recipe.json` + `fetch_skia.py`/`build_skia.py`;
+`porting/recipes/{ffmpeg,freetype}.json` + the already-packaged
+`crt-port-build.py`), not bundled into the stage-source tarball the way
+03's small xkbcommon dependency was -- Skia alone is ~189MB even shallow.
+
+Landed so far (Windows-verified, `crt-gfx-media-dist` still passes):
+`libcrtgfx/cmake/crtgfx_gpu_sources.cmake` (GPU source-file lists) and
+`libcrtgfx/cmake/crtgfx_gpu_targets.cmake` (`crtgfx_gpu`/`crtgfx_gpu_shared`
+target definitions, as `if(TARGET ...)`-guarded functions so the same
+module works from both the in-tree build and the future standalone stage
+project). `crtgfx_skia`/`crtgfx_skia_shared` are NOT extracted yet --
+they carry even more real, hard-won link-order logic (Windows
+`uuid.lib`/`--allow-multiple-definition`/`emutls_link_stubs.c`, macOS
+reversed archive-scan order, Linux `--start-group`/`--end-group`) and
+should get the same shared-module treatment before writing the standalone
+`distribution/stages/04-gfx-media/CMakeLists.txt`, not hand-duplicated.
+Remaining: the crtgfx_skia extraction, a `crtmedia` equivalent (not yet
+investigated for the same shared-vs-duplicate risk -- check before
+assuming it's simple), the new standalone CMakeLists.txt, a new
+`tools/build_stage_04_gfx_media.py`, `create_stage_source.py`'s
+`STAGES["04-gfx-media"]` entry, generalizing `verify_dist.py`'s
+xkbcommon-only `redistributed_dependencies` check, and the top-level
+`crt-stage-04-source` CMake target -- then a real end-to-end isolated
+build (expect multi-hour Skia/FFmpeg build time and 1-3 real bugs found
+along the way, matching every prior stage transition's own pattern). Keep
+the separately listed Windows C++ initialization failure open; the stage
+runner deliberately has no retry that could hide it.
+
+A real, pre-existing, unrelated gap was found and flagged while verifying
+this (not yet fixed): `crt-media-test`'s own DEPENDS never builds its 5
+test executables first (same class of gap `crt-gfx-test` already had fixed
+a day earlier) -- see the queued background task, or fix directly if
+picked up before that runs.
 
 Acceptance must start from freshly extracted archives in a path containing
 spaces, reject access to in-tree CRT headers/libraries/build artifacts,
