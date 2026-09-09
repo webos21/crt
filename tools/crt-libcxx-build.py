@@ -835,10 +835,14 @@ def main():
     # libstdc++/CMakeLists.txt) so this bootstrap always uses the exact
     # same compiler the rest of the project was told to use, on every
     # host, rather than re-deriving its own separate guess.
+    # See build_stage_03_gfx_simple.py's matching comment: mksh.exe on
+    # Windows only recognizes a literal exec path with a forward slash,
+    # and --host-cc/--host-cxx (or the CRT_CC/CRT_CXX env vars callers
+    # derive them from) commonly arrive as raw Windows backslash paths.
     if args.host_cc:
-        env["CRT_HOST_CC"] = args.host_cc
+        env["CRT_HOST_CC"] = Path(args.host_cc).as_posix()
     if args.host_cxx:
-        env["CRT_HOST_CXX"] = args.host_cxx
+        env["CRT_HOST_CXX"] = Path(args.host_cxx).as_posix()
     if args.target_os in ("linux", "macos"):
         # No --host-cc/--host-cxx given (e.g. a direct manual invocation
         # of this script rather than through the CMake targets) -- fall

@@ -42,10 +42,18 @@ def runtime_env(sdk: Path, manifest: dict) -> dict[str, str]:
         "CRT_TARGET_OS": target_os,
         "CRT_TARGET_ARCH": manifest["target"]["arch"],
     })
+    # mksh.exe's own exec/command-lookup only recognizes a literal path
+    # (vs. a bare $PATH-searched command name) when it contains a forward
+    # slash -- a raw Windows backslash path (exactly what a PowerShell
+    # $env:CRT_CC assignment naturally produces) makes mksh report
+    # "inaccessible or not found" even though the file genuinely exists
+    # (confirmed for real, 2026-09; see the project's own mksh/CMake
+    # Windows-gotchas notes). crt-cc/crt-c++ run under mksh on Windows and
+    # exec "$CRT_HOST_CC"/"$CRT_HOST_CXX" directly, so normalize here.
     if os.environ.get("CRT_CC"):
-        env["CRT_HOST_CC"] = os.environ["CRT_CC"]
+        env["CRT_HOST_CC"] = Path(os.environ["CRT_CC"]).as_posix()
     if os.environ.get("CRT_CXX"):
-        env["CRT_HOST_CXX"] = os.environ["CRT_CXX"]
+        env["CRT_HOST_CXX"] = Path(os.environ["CRT_CXX"]).as_posix()
     if target_os == "windows":
         env["CRT_MKSH_EXE"] = str(sdk / "system" / "bin" / "mksh.exe")
         env["PATH"] = str(sdk / "bin") + os.pathsep + env.get("PATH", "")
