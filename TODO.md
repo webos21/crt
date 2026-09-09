@@ -60,882 +60,103 @@ Active threads, not a flat list of one-off items.
 
 ### Upper runtime roadmap
 
-The completed CPU baseline is summarized in [`STATUS.md`](STATUS.md), and its
-dated implementation trail belongs in [`HISTORY.md`](HISTORY.md). The live
-queue below starts at the next compatibility boundary: a stable media API,
-software playback, GPU resource ownership, hardware decode, and the point at
-which QuickJS can safely bind those services without freezing a temporary API.
+The completed CPU baseline is summarized in [`STATUS.md`](STATUS.md); the full
+dated implementation trail lives in [`HISTORY.md`](HISTORY.md) -- software-
+decode evidence, the WSL `memfd_create()` fix behind `crtgfx_window_smoke`,
+`libcrtmedia`'s format/extractor/codec/demuxer core, the player clock/state
+machine and all three host audio sinks, the software player, the common GPU
+resource contract, Skia GPU rendering on Linux/Vulkan + Windows/D3D12 +
+macOS/Metal, and GPU presentation (resize/swapchain recreation, Ganesh-to-
+surface rendering) are all done and verified on Linux, Windows, and macOS.
 The product target is the staged embedded/native runtime described in
-[`docs/runtime_roadmap.md`](docs/runtime_roadmap.md). Electron/Chromium remains
-only a long-term portability benchmark, not the product definition.
+[`docs/runtime_roadmap.md`](docs/runtime_roadmap.md); Electron/Chromium
+remains only a long-term portability benchmark, not the product definition.
 
-**Software-decode evidence is done on Linux, Windows, and macOS**
-(2026-09-02): real H.264+AAC MP4 (`assets/test_video.mp4`) and MP3
-(`assets/test_tone.mp3`) fixtures, `crtmedia_demux_video_test`/
-`crtmedia_demux_mp3_test`/`crtmedia_demux_malformed_test` cover threaded
-H.264 decode (`src/demux.c` now explicitly requests `thread_count = 2`),
-PTS ordering, EOF drain/flush, and malformed-input handling (null args, a
-nonexistent path, non-media bytes, a truncated real fixture) -- all real,
-evidence-based checks, not link-only smoke. Full ctest suite clean on all
-three hosts, **including the long-standing `crtgfx_window_smoke` WSL
-failure, now genuinely fixed** (Linux 110/110, Windows 126/126, macOS
-110/110, all 100%) -- see the entry directly below. macOS re-verified the
-same day from real macOS hardware (`crtmedia_demux_video_test` in
-particular doubling as the first real confirmation that FFmpeg's own
-threaded H.264 decode actually works through this project's pthread PAL
-on macOS). See `HISTORY.md`'s 2026-09-02 entry for the full trail.
+Still open within "live GPU presentation everywhere": macOS x86_64 native
+execution; pixel-exact (not just visually-by-eye) post-render framebuffer
+verification on macOS; live resize composed with the Ganesh-wrap path
+specifically on macOS (each verified separately, not yet together); and
+pixel-exact (not just liveness) post-resize verification on Windows.
+Graphite stays a later, separately-measured alternative to Ganesh.
 
-**The `crtgfx_window_smoke` WSL failure, repeatedly dismissed throughout
-this project's own history as "no reachable Wayland compositor," was
-actually a real, fixable `memfd_create()` bug -- root-caused via `strace`,
-not re-guessed, and fixed for real** (2026-09-02, found asking whether it
-was really worth living with). `libc/src/mman.c`'s own `memfd_create()`
-emulation (`open()` a real file, `unlink()` it immediately, keep using the
-now-nameless fd) created that file at a bare relative path in the
-caller's own current working directory -- on WSL, that CWD is very often
-`/mnt/c/...` (DrvFs, a 9p bridge to the real Windows NTFS volume), which
-does not preserve POSIX "delete-while-open" semantics the way a native
-filesystem does: `open()`/`unlink()` both succeeded, but the next
-`ftruncate()` on the resulting fd failed with `ENOENT`. A real Wayland/
-WSLg connection was present the entire time. Fixed with a new
-`memfd_tmpdir()` helper (`$TMPDIR`, then `$TEMP`/`$TMP`, then a `/tmp`
-fallback -- a real `getenv()`-based directory choice, not another
-CWD-relative guess) -- a first attempt hardcoded `/tmp` outright, which
-then broke `memfd_create_test` on Windows for real (`/tmp` does not exist
-there at all), caught by the same full-ctest-on-every-host discipline
-this project already applies everywhere else. `crtgfx_window_smoke`, the
-whole existing ctest suite, and `memfd_create_test` itself all verified
-passing on both Linux (WSL) and Windows after the real fix -- 100% on
-both hosts, no known ctest failures left on either. **Re-verified on
-macOS the same day**: the WSL-specific failure mode cannot occur there
-through the same path at all (`memfd_create()` is only ever called from
-`libcrtgfx`'s Linux-only Wayland backend; macOS's own backend never
-calls it, and real macOS/APFS honors delete-while-open correctly where
-WSL's DrvFs does not) -- confirmed directly rather than only reasoned,
-by running `memfd_create_test` and `crtgfx_window_smoke` for real on
-macOS hardware (both pass, full ctest 110/110).
-
-**`docs/libcrtmedia_api_policy.md`'s decided core is implemented and verified
-on Linux, Windows, and macOS** (2026-09-02): `crtmedia_format` (`format.h`/`format.c`,
-a real key-value store -- int32/int64/string/buffer, the last for real H.264
-SPS/PPS/AAC AudioSpecificConfig codec-config data under a new
-`CRTMEDIA_FORMAT_KEY_CSD` key), `crtmedia_extractor` (`extractor.h`/
-`extractor.c`, demux-only -- no `AVCodecContext` at all, track selection,
-raw owned `crtmedia_sample` output), and `crtmedia_codec` (`codec.h`/
-`codec.c`, the real async buffer-queue decoder -- `queue_input`/
-`dequeue_output`/`flush`, `CRTMEDIA_WOULD_BLOCK` backpressure, the same
-explicit multi-threaded H.264 decode as `demux.c`'s own). `crtmedia_
-extractor_codec_test` decodes the same real MP4 fixture `crtmedia_demux_
-video_test` already covers through the older convenience API, end to end
-through the new core, and gets the exact same real result (25 video
-frames, correct PTS ordering, correct audio sample range) -- proving the
-new layer is a real, correct alternative path, not just code that
-compiles. `crtmedia_format_test` covers the key-value store deterministically.
-Full ctest suite clean on all three hosts (Linux 112/112, Windows 128/128,
-macOS 112/112, all 100%). macOS re-verified the same day from real macOS
-hardware -- `crtmedia_extractor_codec_test` doubling as a second real
-confirmation (alongside `crtmedia_demux_video_test`) that FFmpeg's own
-threaded H.264 decode works through this project's pthread PAL there. See
-`HISTORY.md`'s 2026-09-02 entry for the full trail.
-
-**`crtmedia_demuxer_*` is now rebuilt as a thin wrapper over the new core,
-closing out TODO.md's original "Separate extractor and codec" step in
-full** (2026-09-02, same day): `demux.c` no longer has its own independent
-FFmpeg integration at all -- `crtmedia_demuxer_open()` composes one
-`crtmedia_extractor` plus one `crtmedia_codec` per real "video/"/"audio/"
--MIME-prefixed track (auto-selected, matching this header's own documented
-"no separate select-stream step" contract), and `crtmedia_demuxer_read()`
-drains every stream's codec in index order before feeding more input --
-including a real, correct `CRTMEDIA_WOULD_BLOCK` backpressure path (an
-unqueued sample is kept alive across calls, never silently dropped, until
-room frees up). Every existing `crtmedia_demux_*_test` (the WAV/PCM,
-H.264+AAC MP4, MP3, and malformed-input coverage) passes completely
-unchanged -- same public API, same real observable behavior -- proving the
-rebuild is a real, transparent swap, not a behavior change. Full ctest
-suite clean on all three re-run hosts (Linux 112/112, Windows 128/128,
-macOS 112/112, all 100%, no regressions from the swap). macOS
-re-verified the same day from real macOS hardware. See `HISTORY.md`'s
-2026-09-02 entry for the full trail.
-
-**The master clock/state machine/A/V-sync core (`crtmedia/player.h`/
-`player.c`) and all three host audio sinks (`crtmedia/audio_sink.h`,
-`src/arch/windows/audio_sink_wasapi.c`, `src/arch/linux/audio_sink_linux.c`,
-`src/arch/macos/audio_sink_coreaudio.c`) are done and verified for real on
-Linux, Windows, and macOS** -- `crtmedia_player_play/_pause/_stop/_seek/
-_get_clock_us/_update_audio_clock/_plan_video_frame` (real `CLOCK_MONOTONIC`-
-anchored clock, `WAIT`/`PRESENT_NOW`/`DROP` frame-timing decisions), and
-`crtmedia_audio_sink_open/_close/_write/_get_position_frames` driven
-directly through real `IMMDeviceEnumerator`/`IAudioClient`/
-`IAudioRenderClient` COM interfaces on Windows (no `#include <windows.h>`,
-hand-rolled vtables, matching `libcrtgfx/src/arch/windows/window_win32.c`'s
-own established convention), a raw ALSA kernel PCM ioctl (falling back to a
-hand-rolled real PulseAudio native-protocol client) on Linux, and real
-CoreAudio `AudioQueue` (`AudioQueueNewOutput`/`AudioQueueAllocateBuffer`/
-`AudioQueueEnqueueBuffer`, no `#include <AudioToolbox/...>`, matching the
-same hand-declared-ABI convention) on macOS -- none of the three ever links
-a host client library (no `libasound`/`libpulse`, no `AudioToolbox.framework`
-header). Verified for real: on native Windows hardware (opens the real
-default device, writes real audio, drains on close), on real WSL against
-WSLg's own live PulseAudio bridge (real AUTH/stream-creation/data-write/
-position-query/drain exchange traced byte-for-byte via `strace` against a
-real reference `libpulse.so` client first, then against this project's own
-hand-rolled client), and on real macOS hardware (every CoreAudio type/
-constant/function hand-declared below was read directly from this exact
-machine's own real SDK headers, then cross-checked against a real
-throwaway probe built with real `clang`/`-framework AudioToolbox` --
-real `AudioQueueNewOutput`/`Start`/write-a-real-sine-wave/
-`AudioQueueGetCurrentTime` round trip -- before landing in this project's
-own `tools/crt-cc`-built `crtmedia_audio_sink_test`, which then also
-passed for real, 5 consecutive runs). A real, load-bearing libc gap was
-found and fixed along the way: `getegid()` was hardcoded to return 0 on
-every platform, which made the Pulse backend's own required
-`SCM_CREDENTIALS` handshake fail with `EPERM` whenever the real process gid
-was not actually 0 -- now a real syscall on both Linux and macOS
-(`geteuid()`'s own already-real implementation had no `getegid()`
-counterpart until now). The macOS `getegid()` trampoline was re-verified on
-real macOS hardware too: a `tools/crt-cc`-built probe's `getegid()`
-returned `20`, identically matching the real system's own `getegid()` from
-a plain `clang`-built binary run in the same shell. Deliberately still
-hardcoded 0 on Windows -- not a gap: Windows has no real POSIX gid concept,
-and 0 there is the same intentional synthetic-single-user-identity value
-`geteuid()` already returns for the identical reason. Full ctest suite
-clean on all three hosts (Linux 114/114, Windows 130/130, macOS 114/114,
-all 100%). See `HISTORY.md`'s 2026-09-02 entries for the full trail.
-
-**The software player is now fully done** (2026-09-03): the buffering/
-frame-drop policy and the full demux+decode+sink+clock render-loop pipeline
-this step's own last remaining piece asked for now exist as real, working,
-verified code -- `libcrtmedia/tests/playback_pipeline_test.c`, a real
-integration test (not a new public API surface: `crtmedia/player.h`'s own
-top comment already documents the render loop as the caller's own,
-separate responsibility, matching this test's own role as the real,
-working reference for that composition, one layer below where a future
-higher-level convenience API -- step 9's own `libcrtjs` binding layer --
-would eventually live). It drives `crtmedia_extractor` + `crtmedia_codec`
-(per-track, already proven together by `crtmedia_extractor_codec_test`) +
-`crtmedia_player` (the real clock/A-V-sync core) + `crtmedia_audio_sink` (a
-real per-host backend, or a graceful `CRTMEDIA_ERROR_UNSUPPORTED`) against
-the same real MP4 fixture end to end: real samples flow from the extractor
-into the right track's codec, decoded audio is written straight through to
-a real audio sink (blocking on real device backpressure) and anchors the
-player's own clock via `crtmedia_player_update_audio_clock()`, and decoded
-video frames are held in a small, real, bounded local lookahead queue
-(`CRTMEDIA_PIPELINE_VIDEO_LOOKAHEAD`, 3 frames -- the concrete buffering
-policy itself: decode is never allowed to run more than 3 frames ahead of
-real presentation) that `crtmedia_player_plan_video_frame()` drains via
-real `WAIT` (a real, bounded sleep)/`PRESENT_NOW`/`DROP` decisions. A real
-mid-stream audio device failure (this exact dev environment's own WSLg
-PulseAudio bridge genuinely, externally stops responding after roughly one
-real second of continuous audio, already documented in `audio_sink_linux.
-c`'s own top comment) is handled gracefully -- the render loop drops to a
-real video-only, wall-clock-paced remainder rather than failing outright,
-matching `crtmedia_player.h`'s own documented supported shape for exactly
-that case. Verified for real: the fixture's real ~1 real second of content
-takes a real, correctly-paced ~1 real second of wall-clock time to play on
-Windows (confirming `WAIT`'s own real sleeps genuinely pace the loop, not
-a spin-through), and completes gracefully inside the real audio-failure
-path on Linux/WSL. **Re-verified on macOS the same week, from real macOS
-hardware**: `crtmedia_playback_pipeline_test` runs against the real,
-already-verified CoreAudio backend (not the graceful-degradation path) and
-plays the fixture's ~1 real second of content in a real, correctly-paced
-~1.19 real second of wall-clock time (5 consecutive runs, 1.19s/1.20s/
-1.19s and two more, no flakiness) -- the real device-backpressure-paced
-path, genuinely exercised, not just the fallback. Full ctest suite clean,
-single-pass, on all three hosts: Linux (WSL) 115/115, Windows 131/131,
-macOS 115/115, all 100%. See `HISTORY.md`'s 2026-09-03 entry for the full
-trail.
-
-**The common GPU resource contract is done** (2026-09-03), closing out the
-sequential gate before Skia GPU rendering and hardware decode can begin:
-`crtgfx/gpu.h` (`crtgfx_gpu_device`/`_surface`/`_fence`, opaque;
-`crtgfx_gpu_backend`/`crtgfx_gpu_memory_kind` real enums; real atomic
-device retain/release; device affinity via a real `device_index`) and
-`crtmedia/gpu_frame.h` (a real, transparent `crtmedia_gpu_frame`, mirroring
-`crtmedia_frame`/`crtmedia_audio_buffer`'s own established shape, not
-`crtgfx`'s opaque one -- the two contracts are deliberately independent,
-`libcrtmedia` has no build dependency on `libcrtgfx`). No real GPU backend
-exists on any host yet (confirmed by direct exploration before landing this:
-Windows' own private per-window D3D11 device, `window_win32.c`, exists
-solely for `CRTGFX_EVENT_FRAME_COMPLETE`'s own async-present signaling, not
-wired to this contract; macOS/Linux have no GPU objects at all) --
-`crtgfx_gpu_query_capabilities()` honestly reports `CRTGFX_GPU_BACKEND_NONE`/
-0 devices everywhere today, and device/surface creation correctly, always
-reports `CRTGFX_ERROR_UNSUPPORTED`, the same graceful contract
-`crtgfx_window_create()` already uses -- real device creation on each host is
-explicitly later, separate steps below. `crtgfx_gpu_fence`, unlike device/
-surface, is a real, working, host-independent CPU synchronization primitive
-right now (built on this project's own `pthread_mutex_t`/`pthread_cond_t`) --
-"software fallback must remain a first-class path" is exactly what a real,
-working CPU fence is. `crtmedia_gpu_frame_create_cpu()` is the matching real
-software-fallback producer, built directly on the already-existing
-`crtmedia_frame_describe_planes()`.
-
-A real libc gap found while building this was flagged as a separate
-follow-up and has since been fixed in full (2026-09-03, same day): this
-project's own `pthread_condattr_setclock(PTHREAD_COND_CLOCK_MONOTONIC)`
-stored the requested clock but `pthread_cond_timedwait()` never actually
-honored it, always treating the deadline as `CLOCK_REALTIME` regardless --
-confirmed for real on Windows via `crtgfx_gpu_test`'s own real timing
-assertions (a monotonic-clock deadline read as an already-past realtime one
-caused instant, incorrect timeouts). `libc/src/pthread.c` now genuinely
-captures a cond var's own configured clock (`CRT_COND_CLOCK_WORD`) and
-honors it in `pthread_cond_timedwait()`; `crtgfx_gpu_fence` reverted to its
-originally-intended `CLOCK_MONOTONIC` (wall-clock-jump immunity) now that
-the real bug underneath it is fixed. Verified for real via a new,
-elapsed-wall-time-measuring `PTHREAD_COND_CLOCK_MONOTONIC` case in
-`libc/tests/pthread_cond_test.c` (the exact regression this bug caused --
-returning instantly instead of actually waiting -- is only catchable by
-measuring real elapsed time, not just checking the return code) and via
-`crtgfx_gpu_test` itself passing again with the real `CLOCK_MONOTONIC`
-fence restored, on both Linux (WSL) and Windows. **Re-verified on real
-macOS hardware too**: this fix lives entirely in `libc/src/pthread.c`'s
-own portable `pthread_cond_init()`/`pthread_cond_timedwait()` (no
-`CRT_TARGET_OS_MACOS`-specific code path -- macOS's own `pthread_mutex_t`/
-`pthread_cond_t` are this project's own from-scratch userspace
-implementation, not a wrapper around Apple's opaque ones, unlike
-`pthread_create()`), so it needed only a rebuild, not a port: the same
-elapsed-wall-time-measuring `libc/tests/pthread_cond_test.c` case and
-`crtgfx_gpu_test`'s own real `CLOCK_MONOTONIC` fence both pass for real.
-Full ctest suite clean, single-pass, on all three hosts: Linux 117/117,
-Windows 133/133, macOS 117/117, all 100%, zero regressions to this
-foundational libc change. See `HISTORY.md`'s 2026-09-03 entry for the full
-trail.
-
-`crtgfx_gpu_test`/`crtmedia_gpu_frame_test` verified for real on Windows,
-Linux (WSL), and macOS -- real argument validation, the honest capability
-report, a real cross-thread fence wait/signal/timeout (a real
-`pthread_create()`'d signaler thread), and real, correctly-strided,
-independently-addressable plane storage for both a packed (RGBA8888) and
-chroma-subsampled planar (YUV420P) `crtmedia_gpu_frame`. Full ctest suite
-clean, single-pass, on all three hosts: Linux (WSL) 117/117, Windows
-133/133, macOS 117/117, all 100%. See `HISTORY.md`'s 2026-09-03 entry for
-the full trail.
-
-**Enable Skia GPU rendering -- Linux/Vulkan offscreen vertical slice landed
-(2026-09-03).** This step went through two real pivots, each found by
-hands-on verification, not assumed up front. First: exploring the already-
-fetched Skia checkout showed Ganesh's "d3d" backend is D3D12-only
-(`GrD3DBackendContext` holds `ID3D12Device`/`ID3D12CommandQueue`, no D3D11
-type anywhere) -- confirmed against the real built `libskia.a` (zero Ganesh
-objects; the roadmap text above's own "Direct3D on Windows" phrasing
-predates this correction). Second, and larger: the user asked to check
-whether WSL could support a real Vulkan test instead of starting on
-Windows, given this session's own Windows build-environment friction.
-Direct WSL verification found only Mesa `llvmpipe` (software) at first;
-installing Mesa's `dzn` driver (Vulkan-over-D3D12) then produced a real,
-hardware-backed device (`Microsoft Direct3D12 (Intel(R) UHD Graphics 630)`,
-`DRIVER_ID_MESA_DOZEN`) alongside `llvmpipe`. Given real hardware-
-accelerated Vulkan was reachable and zero regression risk to any shipped
-presentation code, this vertical slice targeted **Linux/Vulkan first**;
-Windows/D3D12 and macOS/Metal are real, separate, later roadmap steps, not
-dropped.
-
-Real, shipped scope: `tools/build_skia.py` enables `skia_enable_ganesh`/
-`skia_use_vulkan` on Linux only (`skia_use_vma` forced off -- see below);
-`libcrtgfx/src/arch/linux/gpu_vulkan.c` (new) is the first real
-`crtgfx_gpu_device` backend anywhere in this project -- a hand-declared
-minimal Vulkan 1.1 subset (matching this project's own no-host-SDK-header
-policy), real instance/device/queue creation, hardware-preferred device
-ordering. `crtgfx_gpu_query_capabilities()`/`crtgfx_gpu_device_create()`
-are now genuinely real on Linux (when a real `libvulkan` is found at
-configure time); `crtgfx_gpu_surface_create()` deliberately still reports
-`CRTGFX_ERROR_UNSUPPORTED` everywhere, including with a real device now --
-no host can yet present a Ganesh-drawn surface to a real on-screen window
-(`window_wayland.c` has no real `wl_surface*` to hand Vulkan's WSI). A new
-`crtgfx_skia_make_gpu_context()`/`crtgfx_skia_make_gpu_offscreen_surface()`
-pair (`skia_bridge.cc`) proves real Ganesh/Vulkan rendering correctness
-offscreen instead, checked via a scene shared with the CPU-raster path
-(`tests/skia_reference_scene.h`) -- `crtgfx_skia_gpu_offscreen_smoke`
-covers real draw+readback, resize, and device-loss+recreation (the closest
-safe, portable equivalent Vulkan offers to D3D12's clean
-`RemoveDevice()` -- a genuine double-`vkDestroyDevice()` aborted the
-process the first time this test was written; the real, safe design tears
-down exactly once).
-
-Two further real, non-obvious findings along the way: (1) this project's
-own `dlopen()` has no real ELF dynamic loading yet (confirmed reading
-`libdl/src/arch/linux/dl_linux.c`), so the Vulkan backend links
-`libvulkan` directly instead, matching `window_win32.c`'s own
-`D3D11CreateDevice` extern-import precedent; (2) a real symbol-
-interposition bug -- this project's own statically-linked `readdir()`/
-`opendir()` were exported into every Linux executable's dynamic symbol
-table, silently shadowing the real system Vulkan loader's own internal
-directory-scanning calls (it needs them to find `/usr/share/vulkan/
-icd.d/*.json`), corrupting filenames read back and producing a misleading
-`VK_ERROR_INCOMPATIBLE_DRIVER`. Fixed with `-Wl,--exclude-libs,ALL` on any
-Linux target that links a real Vulkan-touching `crtgfx`/`crtgfx_shared`
-(see `libcrtgfx/CMakeLists.txt`'s own full comment) -- a systemic fix
-relevant to any future real host-library integration, not just this one.
-`skia_use_vma=false` (avoiding a `third_party/externals/
-vulkanmemoryallocator` vendor checkout this project's fetch pipeline does
-not provide) also turned out to compile out Ganesh's own internal
-memory-allocator fallback entirely, not just make it optional --
-`skia_bridge.cc` supplies its own real, deliberately minimal
-(one-dedicated-`VkDeviceMemory`-per-allocation, no suballocation)
-`skgpu::VulkanMemoryAllocator` instead.
-
-Full ctest suite clean on Linux (WSL) and Windows; macOS re-verification
-was pending at landing time (this slice touches no macOS code at all --
-`gpu.c` there was unchanged, still honest `CRTGFX_GPU_BACKEND_NONE`/
-`UNSUPPORTED`) -- macOS got its own separate GPU backend via the
-Metal slice below instead, so this Vulkan slice's own macOS gap closed
-that way rather than by re-running this exact code there. See
-`HISTORY.md`'s 2026-09-03 entry for the full trail.
-
-**Enable Skia GPU rendering -- Windows/D3D12 offscreen vertical slice
-landed (2026-09-04).** Same additive shape as the Linux/Vulkan slice
-above: `gpu_win32.c` (new, real D3D12 device/queue/adapter creation,
-hand-declared, no host headers) sits alongside `window_win32.c`'s own
-existing, untouched D3D11 presentation pipeline. The real, larger part of
-this step turned out to be Skia's own public `GrD3DTypes.h` forcing real
-`<d3d12.h>`/`<dxgi1_4.h>` -- pointing those at the raw Microsoft Windows
-SDK directly hit a genuine, structural dead end (its own `winnt.h` needs
-real MSVC-only architecture macros *and* MSVC-only atomic intrinsics
-clang only implements for its `*-windows-msvc` target, not this
-project's mingw one). Fix: vendor mingw-w64's own real, clang/gcc-native
-header set instead (`tools/fetch_mingw_w64_headers.py`, new, pinned to
-its `v14.0.0` tag), with `libstdc++/third_party/win32_shim`'s existing
-minimal shims now `#include_next`-forwarding to it when available. Along
-the way: a real, previously-latent `tools/crt-ar` bug (response-file
-expansion defeating its own purpose once `libskia.a`'s object count grew
-past Windows' command-line length limit) and a real ownership bug in
-`skia_bridge.cc` (a raw-pointer assignment into a `gr_cp<T>` COM
-smart-pointer field that would have double-released the device) were
-both found and fixed. `crtgfx_skia_gpu_offscreen_smoke` passes every
-sub-check on real Windows hardware, including the full `RemoveDevice()`
-device-loss/recovery cycle. Full ctest suite clean, single-pass, on
-Windows (131/131) and Linux/WSL (crtgfx-skia-smoke 115/115 + main
-117/117, confirming zero regression to the Vulkan slice or the unrelated
-libcxx/libunwind bootstrap from the shared win32_shim/crt-ar changes);
-macOS re-verification was separately pending at landing time, same as
-the Vulkan slice -- closed by the macOS/Metal slice directly below.
-See `HISTORY.md`'s 2026-09-04 entry for the full trail (the raw-SDK dead
-end, every individual header/link gap found, and how each was fixed).
-
-**Skia GPU rendering is now enabled and verified on all three target
-hosts -- macOS/Metal is the last of the three to land (2026-09-07),
-closing out the macOS gap the Linux/Vulkan and Windows/D3D12 slices
-above each left open.** The SkSL string corruption blocking this slice
-was a libc++ caller/callee layout mismatch triggered by `__APPLE__` in
-SDK consumers; the installed ABI policy and static-runtime symbol
-isolation fix it, and real Metal gradient/readback, resize, and device/
-context recreation all pass. A second, separate bug found and fixed the
-same day -- `crtgfx_skia_raster_smoke_runs`'s FreeType-backed
-`drawString()` producing no ink pixels, a `-fcrt-real-apple-sdk`-widened
-`struct dirent` layout mismatch in `SkOSFile_posix.cpp`, unrelated to the
-C++ symbol-isolation link option -- closed the macOS-side gap
-completely: full ctest suite clean, 116/116. See `HISTORY.md`'s
-2026-09-07 entries and `docs/cxx_runtime.md` for the full trail.
-
-**Windows and Linux both reran clean the same day**, closing the "not
-rerun" gap completely: full from-scratch rebuilds (Skia + the new
-`_LIBCPP_CRT_BIONIC_ABI`-patched libc++) plus the new
-`crtgfx_skia_sksl_test` and `crtgfx_skia_gpu_offscreen_smoke` (its own
-full device-loss/recovery cycle included) pass on both -- Windows full
-ctest 132/132, Linux (WSL) full ctest 116/116 (both up by one, the new
-SkSL test), zero regressions on either. The Linux rebuild was genuinely
-slow in this local WSL/DrvFs (`/mnt/c/...`) environment (the ~800-object
-Skia rebuild alone took several hours of real wall-clock time, confirmed
-throughout via `ps` as real, ongoing work rather than a hang) but did
-complete and pass in full. All three hosts (Linux, Windows, macOS) are
-now empirically confirmed clean for this patch.
-
-**Every Linux GPU verification above was WSL/DrvFs -- closed that gap
-the same day, real bare-metal Linux aarch64 (Ubuntu 24.04)**: after
-installing `lld-18`/`libvulkan-dev` (neither pre-installed on this host,
-unlike WSL/Ubuntu 26.04), `crtgfx-skia-smoke`'s full target set plus
-`crtgfx_skia_sksl_test` all pass, GPU offscreen smoke's own device-loss/
-recovery cycle included, real virtio-gpu-backed Vulkan device (not a
-null backend) -- see `HISTORY.md`'s 2026-09-07 entry (topmost). Full
-default-config ctest also reconfirmed clean, 111/111.
-
-1. **Finish live GPU presentation everywhere.** **Real GitHub Actions CI
-   break from this whole item's own Linux landing, found and fixed
-   2026-09-07 (same day, separate pass)**: a fresh `out/` (no `crtgfx-
-   wayland-build` run yet, exactly CI's own runner) failed to compile
-   `libcrtgfx/src/gpu.c` (`crtgfx_native_wl_get_surface_handles`
-   undeclared), and once that was fixed, `crtgfx_gpu_test_runs` failed
-   next (`query_capabilities()`/`device_create()` disagreeing on device
-   availability) -- both the identical class of bug, a `#if` guard
-   requiring `CRTGFX_HAVE_NATIVE_WAYLAND` where it should not have (or
-   the reverse). Fixed; `cmake --workflow --preset linux-host-ninja-
-   debug` now passes 111/111 from a genuinely fresh `out/`, matching
-   `ci.yml` exactly. See `HISTORY.md`'s 2026-09-07 entry (topmost) for
-   the full two-bug writeup, plus two smaller CI-sandbox network-EPERM/
-   EACCES hardening fixes (`libc/tests/socket_network_test.c`, `tests/
-   sendmsg_scm_rights_test.c`) landed alongside.
-
-   Linux lands first
-   (2026-09-07): a new, independent native Wayland backend
-   (`window_wayland_native.c`, real `libwayland-client` + `xdg-shell`)
-   gives Vulkan a live `wl_display`/`wl_surface` pair, selected per-window
-   via the new `CRTGFX_WINDOW_GPU_PRESENTATION` flag; the frozen legacy
-   backend keeps every existing software window unchanged. `crtgfx_gpu_
-   surface_create()` now has a real Linux/Vulkan branch (real
-   `VkSurfaceKHR`/`VkSwapchainKHR`), plus a new `crtgfx_gpu_surface_
-   acquire()`/`_clear()`/`_present()` contract and a manual demo
-   (`crtgfx_gpu_window_demo`). Compiles/links clean, WSL bypass verified
-   graceful (no hang), full ctest 117/117 -- see `docs/
-   libcrtgfx_wayland_plan.md`'s own "Linux Native Wayland Backend + GPU
-   Presentation" section and `HISTORY.md`'s 2026-09-07 entry for the full
-   record. Real on-screen verification is the user's own next step on
-   real Linux hardware (not WSL). Still open: wiring the already-proven
-   offscreen Ganesh pipeline onto a surface's own acquired image (today's
-   `_clear()` is a deliberate, honest stand-in, not Ganesh); swapchain
-   recreation on resize; native-backend software/multi-window/clipboard
-   parity (legacy stays the default there). Windows D3D12/DXGI and macOS
-   CAMetalLayer/Metal acquire/clear/present wiring is now implemented
-   (2026-09-07 follow-up). Windows x86_64 static/shared build and CTest
-   133/133 pass; the desktop demo submits 600 frames and exits 0, including
-   live API ordering checks. macOS arm64 is now natively verified on this
-   real macOS host too: `crtgfx_gpu_window_demo 120` reports Metal backend
-   2, one device, a real swapchain-backed surface, 120 presented frames,
-   and exit 0; `crtgfx_gpu_test_runs` also passes when run outside the
-   sandbox. Metal rejects acquire budgets below one second because
-   `nextDrawable` exposes a fixed wait, not an arbitrary timeout.
-
-   **Resize/swapchain recreation on all GPU hosts is done (2026-09-07
-   follow-up).** New `crtgfx_gpu_surface_resize()` (crtgfx/gpu.h): real
-   `ResizeBuffers()`/back-buffer/RTV recreation on Windows, real
-   `oldSwapchain`-based swapchain recreation on Linux/Vulkan, and a real
-   `-setDrawableSize:` update (with the points-to-pixels `-contentsScale`
-   conversion `crtgfx_gpu_metal_surface_create()`'s own convention already
-   established) on macOS/Metal. **Real, live-verified on Windows**: the
-   demo window was actually dragged through dozens of live resizes via a
-   real `SetWindowPos` script while running, every resize succeeded, and
-   the demo completed its full run and exited 0; full ctest 133/133.
-   Linux compiles clean via WSL (ctest 116/116, the one known non-
-   interactive-WSL-runner `termios_echo_roundtrip_test` limitation
-   excluded, not a regression). **macOS/Metal now real, live-verified too
-   (2026-09-07, same day, from real Apple Silicon hardware)**: with no
-   Accessibility-API access available in this environment for scripted
-   `NSWindow` resizing, `cliclick`'s raw synthetic-mouse-event drag (no
-   Accessibility grant needed for basic click/drag posting, unlike
-   `System Events`' AX-based UI scripting) dragged the demo window's
-   real bottom-right corner through 187 live resizes while it kept
-   presenting and animating; `crtgfx_gpu_surface_resize()`'s real
-   `-setDrawableSize:` path succeeded every single time (zero failures
-   in the demo's own resize-error log path), and the process stayed
-   alive and responsive throughout, confirmed by screenshots taken
-   mid-resize showing the live animated color still updating. Windows and
-   macOS are real-hardware-verified for resize/swapchain recreation.
-   **Linux surface creation/presentation is now real-verified
-   (2026-09-08); interactive resize remains to be exercised.** Enabling
-   ptrace exposed that the apparent lavapipe deadlock was our mixed
-   libwayland-client ABI: a CRT-static implementation created the opaque
-   object while Mesa called the host shared implementation. Their private
-   Wayland layouts put the display mutex at different offsets, and their
-   Bionic/glibc mutex ABIs were incompatible as well. The native Vulkan
-   backend now uses the same host
-   `libwayland-client.so.0` as Mesa. LLDB observed the previously hanging
-   capabilities call return `VK_SUCCESS`, and a real one-frame run created
-   the swapchain, presented, and exited 0. The remaining Linux item is a live
-   compositor-driven window resize that reaches
-   `crtgfx_gpu_surface_resize()`; it is no longer blocked by surface
-   creation.
-
-   **Ganesh-to-surface rendering is done (2026-09-07, same day, this
-   step's own last remaining piece).** New `crtgfx_skia_wrap_gpu_
-   surface()`/`crtgfx_skia_gpu_surface_present()` (`crtgfx/skia.h`)
-   wrap the acquired swapchain/layer image as a real, GPU-backed
-   `SkSurface` (`SkSurfaces::WrapBackendRenderTarget()`) instead of
-   letting Ganesh allocate its own, so a real Ganesh-drawn frame (not
-   just a solid clear) reaches the screen. Per-backend present mechanics
-   differ materially: Vulkan does the whole finalize (semaphore signal +
-   `VK_IMAGE_LAYOUT_PRESENT_SRC_KHR` transition) inside one `flush()`
-   call; D3D12 needs one small extra manual `ResourceBarrier` (no Vulkan-
-   equivalent flush-time mechanism exists); Metal needs neither, just a
-   fresh presenting command buffer (`MTLTexture` has no layout concept).
-   **A real bug found and fixed via live testing**: an async
-   `GrSyncCpu::kNo` submit left Ganesh holding a wrapped resource's own
-   COM reference past the point a live resize needed it released,
-   failing `ResizeBuffers()` on Windows the first time resize followed a
-   Ganesh-drawn frame -- fixed with a synchronous `GrSyncCpu::kYes`
-   submit on all three backends. Verified real and live on Windows (new
-   `crtgfx_skia_gpu_window_demo`: clean multi-thousand-frame runs, and a
-   live-resize pass -- same `SetWindowPos` technique as above -- that is
-   what caught the bug, 7/7 resizes succeeded after the fix); `crtgfx_
-   skia_gpu_offscreen_smoke` still passes in full (zero regression). Linux
-   compiles and runs the offscreen path clean via WSL.
-
-   **macOS is now real-hardware-verified too (2026-09-08, from real Apple
-   Silicon hardware) -- `skia_bridge.cc`'s own Metal branch had never
-   actually been compiled anywhere before this, and doing so for the
-   first time immediately found a real, previously-unreachable bug**:
-   `gpu_internal.h` (shared by every per-backend `.c` file and by
-   `skia_bridge.cc`, a `.cc` TU) declared `crtgfx_gpu_metal_surface_
-   prepare_ganesh_present()` and its siblings with no `extern "C"` guard
-   at all, unlike the already-`extern "C"`-wrapped public `crtgfx/gpu.h`.
-   The Vulkan/D3D12 branches never surfaced this, because `skia_bridge.cc`
-   only ever reads their struct *fields*, never calls a function declared
-   in this header -- Metal's new `_prepare_ganesh_present()` hook is the
-   first one it actually calls, and a C++ compile mangled that call site
-   while `gpu_metal.c`'s own C definition stayed unmangled: "symbol(s) not
-   found" at real link time. Fixed by wrapping this header's own function-
-   declaration block in the same `#ifdef __cplusplus extern "C" { ...`
-   guard `crtgfx/gpu.h` already established (`libcrtgfx/src/gpu_
-   internal.h`). After the fix: full `crtgfx-skia-smoke` preset rebuilds
-   clean and `ctest` passes 116/116; `crtgfx_skia_gpu_window_demo` run
-   live against a real on-screen window presents the shared reference
-   scene through the real Metal swapchain every frame -- a screenshot
-   taken mid-run and cropped in shows the exact expected scene (green
-   top-left triangle, red-to-blue top-right gradient, alpha-blended
-   bottom-left overlay), pixel-shape-correct by eye, not just "present()
-   returned OK" -- and a bounded 120-frame pass exits 0 cleanly. This
-   closes "Finish live GPU presentation everywhere" as real-hardware-
-   verified on all three GPU-presentation hosts. See `docs/
-   libcrtgfx_wayland_plan.md`'s own "Ganesh-to-surface rendering" section
-   for the full per-host trail.
-
-   Still open: macOS x86_64 native execution, pixel-exact (not just
-   visually-by-eye) post-render framebuffer verification on macOS, live
-   resize composed with the new Ganesh-wrap path specifically on macOS
-   (each was verified real separately -- resize alone and Ganesh-wrap
-   alone -- but not yet together on this host, and this session's own
-   coordinate-based window-resize automation proved too imprecise to
-   reliably re-drive for this specific composition check), and visual
-   verification beyond successful present calls on Windows (the resize
-   pass there confirmed liveness/no-crash and continued animation through
-   resize, not pixel-exact post-resize framebuffer content). Graphite
-   stays a later, separately-measured alternative to Ganesh throughout.
-2. **Add hardware decode, phase A -- in progress (2026-09-08).** Enable FFmpeg
-   D3D11VA/D3D12VA, VideoToolbox, and VA-API backends, initially downloading
-   decoded frames to CPU memory so codec/device selection, fallback, and
-   recovery can be proved independently of zero-copy interop.
-
-   **The opt-in decode-side API and its real fallback/recovery contract are
-   done and verified on Windows and Linux, zero regression.** New `crtmedia_
-   codec.c` support (opt-in via `CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE`,
-   crtmedia/format.h -- unset/0 is today's exact existing software-only
-   behavior, byte-identical, for every existing caller including `crtmedia_
-   demuxer_*`): `av_hwdevice_ctx_create()` for the host's real hwaccel type
-   (D3D11VA/VideoToolbox/VAAPI), a real `get_format` callback, `av_hwframe_
-   transfer_data()` downloading a still-hardware-resident frame to real CPU
-   memory, and a real, tested fallback -- either device creation or
-   `avcodec_open2()` itself failing with the hw context attached tears it
-   down and retries once with a genuinely fresh, plain software
-   `AVCodecContext`. New `crtmedia_codec_is_hardware_accelerated()` reports,
-   honestly, which path a given decoder instance actually used. New
-   `CRTMEDIA_PIXEL_FORMAT_NV12` (crtmedia/frame.h) -- every real hardware
-   H.264 decoder on all three platforms produces this, not I420 --
-   `crtmedia_frame_describe_planes()`/`crtmedia_frame_convert_to_rgba()`
-   both extended for it. New `crtmedia_hw_decode_test` (gated
-   `CRTMEDIA_ENABLE_FFMPEG`) opts in against the existing real MP4 fixture
-   and passes on both hosts, correctly and honestly reporting hardware
-   decode as not active on either (see below) and exercising the graceful-
-   fallback path for real. Full `ctest` clean on both: Windows 134/134,
-   Linux 117/117 (`termios_echo_roundtrip_test` excluded, the known
-   pre-existing non-interactive-WSL-runner limitation).
-
-   **Actually enabling the real per-host hwaccel in the FFmpeg build itself
-   is not done this pass -- two real, separate blockers found, neither
-   fixed yet, and the attempt was fully reverted rather than leaving
-   `porting/recipes/ffmpeg.json` in a broken state.** (1) Windows: `--enable-
-   d3d11va` fails configure's own dependency check for `ID3D11VideoDecoder`/
-   `ID3D11VideoContext` even with mingw-w64's real header set on the
-   include path -- this recipe's own base `configure_args` deliberately
-   `-U_WIN32 -U_WIN32_WCE -U__WIN32__ -UWIN32 -U__MINGW32__` (routing
-   FFmpeg's own portable code through POSIX-shaped paths instead of assuming
-   a full MSVCRT, this project's own established convention) appears to
-   also suppress declarations inside the real D3D11 headers that are
-   themselves gated behind those same macros -- a real, structural
-   conflict between that convention and D3D11VA's own header needs, not
-   yet resolved. (2) Linux: found something more serious than VA-API
-   itself while chasing it -- this WSL environment's own `ar`/`nm`
-   (GNU Binutils 2.46, confirmed pre-existing, not installed alongside
-   `libva-dev`) segfaults with `Relink ... for IFUNC symbol 'ceil'`
-   archiving this project's own `libavformat.a`/`libavcodec.a` against its
-   own IFUNC-using `libm.so`, on the *plain, unmodified baseline* configure
-   -- a real, external binutils regression in this environment, unrelated
-   to VA-API or this feature, that blocks any fresh FFmpeg rebuild here at
-   all right now (the already-installed FFmpeg libraries from before this
-   regression appeared were untouched and still work, which is how the
-   opt-in API above could still be verified). Two real, generically useful
-   fixes were kept from this attempt despite the revert: `tools/crt-port-
-   build.py` gained `@NM@`/`@BUILD_DIR@` configure_args substitution (the
-   identical class of gap `@AR@`/`@ROOT@` already needed and were fixed
-   for, found again here) -- unused by `ffmpeg.json` right now, but real
-   and ready whenever hwaccel enablement is revisited.
-
-   Still open: root-causing and fixing the Windows D3D11VA header-
-   visibility conflict, resolving (or working around) the Linux binutils
-   regression, then actually re-adding and verifying `--enable-d3d11va`/
-   `--enable-vaapi`/`--enable-videotoolbox` for real; macOS is entirely
-   unattempted this pass (no hardware this session).
-3. **Add hardware decode, phase B.** Connect decoder-owned textures directly
-   to Skia: D3D resources on Windows, `CVPixelBuffer`/Metal textures on macOS,
-   and VA-API/DRM PRIME/dmabuf/Vulkan images on Linux. Tie decoder frame-pool
-   release to real GPU/presentation completion and retain CPU-copy fallback.
-4. **Add hardware encode and capture.** Stage camera, microphone, and screen
-   sources; hardware H.264/HEVC encode; mux/record; latency, bitrate, and
-   key-frame controls.
-5. **Expand network and streaming.** Add custom I/O and HTTP range first,
+1. **Add hardware decode, phase A.** The opt-in decode-side API and its
+   fallback/recovery contract are done and verified on Windows and Linux
+   (`HISTORY.md`'s 2026-09-08 entry). Actually enabling the real per-host
+   hwaccel in the FFmpeg build itself is not done -- two real, separate
+   blockers, neither fixed: (1) Windows `--enable-d3d11va` fails
+   configure's own `ID3D11VideoDecoder`/`ID3D11VideoContext` dependency
+   check, likely conflicting with this project's `-U_WIN32`-style
+   portable-path convention; (2) Linux -- this WSL environment's own
+   `ar`/`nm` (Binutils 2.46) segfaults (`Relink ... for IFUNC symbol
+   'ceil'`) archiving `libavformat.a`/`libavcodec.a` against `libm.so`
+   even on a plain baseline configure, a real external binutils
+   regression blocking any fresh FFmpeg rebuild here right now, unrelated
+   to VA-API itself. macOS is entirely unattempted (no hardware in these
+   sessions).
+2. **Add hardware decode, phase B.** Connect decoder-owned textures
+   directly to Skia: D3D resources on Windows, `CVPixelBuffer`/Metal
+   textures on macOS, and VA-API/DRM PRIME/dmabuf/Vulkan images on Linux.
+   Tie decoder frame-pool release to real GPU/presentation completion and
+   retain CPU-copy fallback.
+3. **Add hardware encode and capture.** Stage camera, microphone, and
+   screen sources; hardware H.264/HEVC encode; mux/record; latency,
+   bitrate, and key-frame controls.
+4. **Expand network and streaming.** Add custom I/O and HTTP range first,
    then buffering, reconnect/discontinuity handling, and HLS/DASH or the
    justified FFmpeg protocol subset.
-6. **Add an optional WebRTC-shaped realtime layer.** Define source/track/sink
-   and execution-context contracts before deciding whether to port full
-   WebRTC for RTP/RTCP, jitter buffering, congestion control, and AEC/NS/AGC.
-7. **Expose the service through `libcrtjs`.** Start the QuickJS engine,
-   event loop, timers, modules, and native binding work now while steps 1-3
-   continue in parallel. Bind media only after the extractor/codec/player
-   contracts are stable, using WebCodecs-like chunks/frames/queue semantics
-   (a close match to the already-implemented `crtmedia_codec`'s own shape)
-   and a higher-level asynchronous player API. V8 and a minimal
+5. **Add an optional WebRTC-shaped realtime layer.** Define source/track/
+   sink and execution-context contracts before deciding whether to port
+   full WebRTC for RTP/RTCP, jitter buffering, congestion control, and
+   AEC/NS/AGC.
+6. **Expose the service through `libcrtjs`.** Start the QuickJS engine,
+   event loop, timers, modules, and native binding work now while steps
+   1-3 continue in parallel. Bind media only after the extractor/codec/
+   player contracts are stable, using WebCodecs-like chunks/frames/queue
+   semantics and a higher-level asynchronous player API. V8 and a minimal
    Chromium/Ozone probe remain later consumers of the same contracts.
 
-Execution order is therefore: Skia GPU, hardware decode, and the QuickJS
-core now proceed in parallel (the GPU resource contract that gated them is
-done); zero-copy completion gates the GPU-aware JavaScript media binding,
-but not the initial QuickJS bring-up. A full compositor, complete font
-shaping, and every codec are not prerequisites for beginning QuickJS.
+Execution order: Skia GPU, hardware decode, and the QuickJS core proceed in
+parallel (the GPU resource contract that gated them is done); zero-copy
+completion gates the GPU-aware JavaScript media binding, but not the
+initial QuickJS bring-up.
 
-### CRT distribution stages (01-c -> 05-js) -- in progress (2026-09-08)
+### CRT distribution stages (01-c -> 05-js)
 
-Restructuring build output into cumulative, independently-consumable
-stages -- `01-c`, `02-cxx`, `03-gfx-simple`, `04-gfx-media`, `05-js` under
-`out/<preset>/dist/` -- where stage N is built only from stage N-1's
-installed output, never the source tree, and no CRT distribution ever
-bundles Clang/LLVM/LLD or a vendor compiler. Full design in
-`docs/refine/interim-restructure.txt` (the working restructuring plan) and
-`docs/distribution.md` (the published contract). Not yet committed.
+Full design in `docs/refine/interim-restructure.txt`; published contract in
+[`docs/distribution.md`](docs/distribution.md). Full dated trail (the
+`crt-c-dist`/`crt-libcxx-dist`/`crt-gfx-simple-dist`/`crt-gfx-media-dist`/
+`crt-js-dist` chain, the top-level `tests/` split into `libc/tests` +
+`libstdc++/tests`, the `libcrtgfx` physical window/GPU/Skia split, and every
+bug found along the way) is in [`HISTORY.md`](HISTORY.md).
 
-**Done and verified, both Windows and Linux/WSL (2026-09-08):**
-- The `crt-c-dist` (01-c) chain: `crt-c-build`/`crt-c-test`/`crt-c-dist`
-  targets, new `tools/create_dist.py`/`tools/verify_dist.py`, and CMake
-  install `COMPONENT`s across `libc`/`libdl`/`libm`/`shell`. Built and
-  archived on Windows (`crt-development-windows-x86_64-01-c.zip`) and
-  Linux (`crt-development-linux-x86_64-01-c.tar.xz`), both passing
-  `verify_dist.py`. Linux additionally passed a real acceptance check
-  beyond `verify_dist.py`'s own coverage: a `hello.c` compiled, linked,
-  and run using only the packaged `tools/crt-cc` wrapper, entirely
-  outside the source/build trees. macOS not yet attempted (no hardware
-  in this session).
-- The `crt-libcxx-dist` (02-cxx) chain: `crt-libcxx-sysroot` now calls
-  `create_dist.py --base 01-c` instead of the old
-  `install_libcxx_runtimes.py` path straight into `CRT_SYSROOT`. Built
-  and archived on both hosts (`crt-development-{windows-x86_64,linux-
-  x86_64}-02-cxx.{zip,tar.xz}`), both passing `verify_dist.py`, and
-  `crt-libcxx-smoke` (the project's own existing real static+shared
-  libc++ link/run check) passes against the new `02-cxx` sysroot
-  location on both hosts. A real, novel gap was found doing a from-
-  scratch acceptance compile against the packaged Windows dist directly
-  (not through this project's own build tree): a plain `<iostream>`/
-  `std::cout` program built and linked cleanly via the packaged
-  `tools/crt-c++` wrapper but segfaulted at runtime with this project's
-  own documented DWARF-unwind-safety-net message
-  (`docs/cxx_runtime.md`'s "Known cost" section); the identical program
-  rewritten to use `<cstdio>`/`std::printf` instead (matching every
-  existing real test's own established pattern, none of which use
-  `<iostream>`) ran correctly. Root cause not yet isolated -- suspected
-  `std::ios_base::Init`'s global-constructor path through this project's
-  own Windows `.ctors` walker, not yet confirmed. **Not fixed, not
-  root-caused, tracked below as a new open item.**
-- **Split the former top-level `tests/` (107 source files, one
-  `CMakeLists.txt`) into `libc/tests/` and `libstdc++/tests/`**, matching
-  `libcrtgfx/tests/`/`libcrtmedia/tests/`'s already-established
-  per-library convention (those two needed no changes -- they already
-  live under their own library, referenced via plain relative paths
-  directly from that library's own `CMakeLists.txt`, no separate
-  `tests/CMakeLists.txt` of their own). `add_crt_test()`/
-  `add_crt_cxx_test()` are now defined at the top-level `CMakeLists.txt`
-  (a function defined inside one `add_subdirectory()` tree is not visible
-  to a sibling tree); the two new `libc/tests/CMakeLists.txt`/
-  `libstdc++/tests/CMakeLists.txt` are `add_subdirectory()`'d from the
-  top level at the exact same point the old single `add_subdirectory(
-  tests)` was (preserving the existing, already-hard-won `CRT_ROOTFS`
-  ordering guarantee documented in that file -- see its own comment).
-  `tools/test_libcxx_runtime.py`'s three hardcoded `tests/imported_
-  libcxx_*.cc` paths, `docs/bringup/hello_bringup.md`'s literal example
-  command, `docs/cxx_runtime.md`, `docs/android_shell_environment.md`,
-  a `libc/src/arch/windows/common/syscall.c` comment, and `AGENTS.md`'s
-  own project-layout section were all updated to match. **A real,
-  pre-existing bug was found and fixed along the way** (unrelated to the
-  file move itself, surfaced by actually running `crt-c-test` for the
-  first time against the newer `crt-c-build`/`crt-c-test` targets added
-  earlier this same day): `windows_export_hygiene_runs` was registered
-  under a name that does not end in `_test_runs`, so the top-level
-  `CMakeLists.txt`'s own `CRT_C_TEST_TARGETS` derivation (which strips a
-  trailing `_runs` and looks for a same-named target) silently never
-  found `windows_export_hygiene_test`, so `crt-c-build` never depended on
-  it and it went unbuilt -- fixed by renaming the registered test to
-  `windows_export_hygiene_test_runs`, matching every other test's own
-  `<target>_runs` convention. Full `ctest` clean on both hosts after
-  every fix: Windows 127/127, Linux 103/103 (includes the moved
-  `libc/tests`/`libstdc++/tests` runs; Windows also covers the
-  Windows-only fixtures Linux does not register).
-- Default `cmake --workflow --preset <host>` now stops at the C stage:
-  `CMakePresets.json` build/test presets retarget to `crt-c-build` and
-  filter out `crtgfx_`/`crtmedia_`/`crtjs_`/`*cxx` tests; the `rootfs`
-  target was trimmed to C-only artifacts (no more cxx/gfx/media/js
-  runtime libraries staged into it).
-- `tools/crt-cc` no longer auto-injects `libc++` into a C-driven shared
-  link; that selection now belongs entirely to `tools/crt-c++`, so the
-  01-c/02-cxx boundary is a real, enforced one, not just a packaging
-  convention.
-- README/STATUS/TODO/HISTORY and most of the plan's doc list are already
-  rewritten to the staged model: `docs/distribution.md` (new),
-  `docs/cxx_runtime.md`, `docs/libcrtgfx_api_policy.md`,
-  `docs/project_meanings.md`, `docs/project_stacks.md`,
-  `docs/runtime_roadmap.md`, `docs/sysroot_ports.md`,
-  `docs/android_shell_environment.md`, `docs/bringup/hello_bringup.md`,
-  `AGENTS.md`.
+**Done and verified on real hardware on all three hosts -- Linux, Windows,
+macOS (2026-09-09):** the full `01-c` through `05-js` cumulative dist chain,
+and the `libcrtgfx` window/GPU/Skia physical split. Two real macOS-only
+bugs were found and fixed along the way: `crtgfx_gpu_shared`'s missing
+`-lobjc` (`gpu_metal.c`'s direct `objc_msgSend`/... calls, never propagated
+from `crtgfx_window_shared`'s `PRIVATE`-scoped framework list --
+`f1596c8`), and `crt-libcxx-dist`'s missing dependency on the bootstrap
+`cxx`/`cxx_shared` targets (`446540c`).
 
-**Upper distribution follow-up:**
-- Windows now has real cumulative `03-gfx-simple`, `04-gfx-media`, and
-  `05-js` directories and archives (2026-09-08). All three structural
-  verifiers pass. The default preset used for this first packaging pass had
-  `CRTGFX_ENABLE_SKIA=OFF` and `CRTMEDIA_ENABLE_FFMPEG=OFF`, so `04` proves
-  the GPU/base-media packaging boundary, not the optional Skia/FFmpeg payload;
-  an option-ON distribution pass remains required. Linux/macOS upper-stage
-  distributions have not been run yet.
-- The Windows shared libraries affected by removal of `crt-cc`'s implicit
-  libc++ injection now build successfully. `crt-gfx-media-test` passes its
-  three Graphics and five Media tests, and `crt-js-test` builds both current
-  JS skeleton libraries. Equivalent Linux/macOS upper-target reruns remain.
-- macOS: neither `crt-c-dist` nor `crt-libcxx-dist` has been built or
-  verified there yet (Windows and Linux both are, as of 2026-09-08).
+Still open:
+- The default packaging pass everywhere has `CRTGFX_ENABLE_SKIA=OFF` and
+  `CRTMEDIA_ENABLE_FFMPEG=OFF`; an option-ON Skia/FFmpeg distribution pass
+  has not been run.
 - `verify_dist.py`'s acceptance checks are still thinner than
-  `docs/distribution.md`'s own "Distribution Acceptance" list -- no check
-  yet for a path containing spaces, no absolute source/build path leakage
-  check, no external CMake/configure-make consumer check. Windows now has a
-  direct packaged-wrapper C compile/link/run pass and Simple Graphics rejects
-  GPU/Skia headers and library filenames; those checks still need to become a
-  cross-host automated acceptance target. Debug artifacts currently contain
-  source/build paths, so path remapping or release stripping must be decided
-  before enabling a hard leakage check.
-
-**New open item: root-cause the `<iostream>` static-init crash found
-above.** A real, reproducible segfault (this project's own DWARF-unwind
-safety-net message, not a silent corruption) when a plain `<iostream>`
-program is built via the packaged `02-cxx` dist's `tools/crt-c++`
-wrapper on Windows and run; `<cstdio>` works. Not yet reproduced against
-the in-tree (non-packaged) build, so it is not yet known whether this is
-specific to the packaged/standalone invocation path or a real, general
-gap in `std::ios_base::Init`'s global-constructor handling on Windows.
-
-**`libcrtgfx` physical window/GPU/Skia split -- done and verified on both
-Windows and Linux (window+GPU+Skia; Windows full `ctest` 127/127 clean;
-Linux `crtgfx-skia-smoke`'s four targets --
-`crtgfx_skia_raster_smoke`/`crtgfx_skia_cpu_coverage`/
-`crtmedia_frame_skia_smoke`/`crtgfx_skia_gpu_offscreen_smoke`, the last
-including its device-loss/recovery cycle -- all pass, 2026-09-09).** Closes
-out the decision recorded here that the previous `install(COMPONENT ...)`-
-only split (one `crtgfx_shared` containing GPU+Skia code regardless of
-stage, only the *public headers* differing) was not real --
-`crt-gfx-simple-dist`/`crt-gfx-media-dist` needed this before either could
-be considered real. macOS still not attempted (no hardware available in
-these sessions).
-
-Design (confirmed via two real Explore passes over the 2639-line
-`libcrtgfx/CMakeLists.txt` plus every external consumer in the repo, then
-an explicit user decision): three separate CMake target pairs replace the
-old monolithic `crtgfx`/`crtgfx_shared` --
-`crtgfx_window`/`crtgfx_window_shared` (window/input/software framebuffer,
-`OUTPUT_NAME crtgfx`, so `libcrtgfx.so`/`.dll`/`.dylib` keeps its familiar
-filename), `crtgfx_gpu`/`crtgfx_gpu_shared` (the GPU device/surface API,
-links `crtgfx_window` for three tiny window-backend accessor functions --
-confirmed a real, one-directional dependency, not a cycle: window code
-never references GPU/Skia at all), and `crtgfx_skia`/`crtgfx_skia_shared`
-(the Skia bridge, links `crtgfx_gpu`, transitively pulls `crtgfx_window`
-too). Four `OBJECT` libraries feed the two non-Skia pairs (`crtgfx_window_
-common_objects`/`_backend_objects`, `crtgfx_gpu_common_objects`/
-`_backend_objects`), preserving the pre-split "common always gets
-`crt_build_flags`, backend gets it only on Linux" compile-flag treatment
-exactly, just re-partitioned by source file. No source files moved on
-disk -- this is a target-graph reorganization, not a file move like the
-`tests/` split earlier today.
-
-Per-platform link-library reassignment was verified against the real
-source, not guessed: Windows `d3d11.lib`/`dxgi.lib` -> `crtgfx_window`
-(window's own D3D11-based CPU-framebuffer presentation), `dxgi.lib`
-(again)/`d3d12.lib` -> `crtgfx_gpu` (confirmed `gpu_win32.c` never
-references a real `ID3D11Device` type, only `IDXGI*`), `d3dcompiler.lib`
--> `crtgfx_skia` (confirmed via this file's own existing comment: Skia's
-own `GrD3DPipelineStateBuilder.cpp` is the real `D3DCompile()` consumer,
-not `gpu_win32.c`); macOS `Foundation`/`AppKit`/`QuartzCore`/
-`CoreGraphics`/`objc` -> `crtgfx_window`, `Metal`/`CoreGraphics` (again)
--> `crtgfx_gpu`; Linux `gpu_vulkan.c` confirmed to need Wayland client
-*headers* (real `wl_display`/`wl_surface` types in
-`VkWaylandSurfaceCreateInfoKHR`) but never calls a real `wl_*()` function
-itself, so `crtgfx_gpu`'s own Wayland need is compile-time-only --
-`CRTGFX_WAYLAND_CLIENT_LIBRARIES` (the real link-time library) stays a
-`crtgfx_window`-only dependency, matching what actually calls
-`wl_display_connect()`. The delicate Linux `--start-group`/`--end-group`
-circular-archive-resolution wrapper and the macOS "Skia libraries before
-`CRTGFX_CRT_STATIC_LIBS` in link-line scan order" trick both moved
-verbatim to `crtgfx_skia`, the one target that still has Skia's own real
-circular need against libc/libm/libc++.
-
-**Three real bugs were found and fixed via live building, not just
-review:**
-1. The first version of this split scoped `CRTGFX_CRT_SHARED_LIBS` (libc/
-   libm/libdl/cxx, shared form) to Linux-only on all three `_shared`
-   targets, copying the visual shape of the neighboring Linux-only
-   xkbcommon/Wayland-client lines above it -- but the original code
-   linked it unconditionally (every host) inside the "else" branch of a
-   differently-shaped `if/else`. Windows `crtgfx_window_shared` failed
-   outright with `ld.lld: error: undefined symbol: calloc/free/memset/
-   realloc/memcpy` until fixed; `crtgfx_gpu_shared`/`crtgfx_skia_shared`
-   (and the STATIC `crtgfx_window`/`crtgfx_gpu`, non-fatal there but
-   still a real behavioral deviation from the pre-split code) had the
-   identical latent bug, fixed the same way.
-2. `crt-gfx-build`'s own `DEPENDS` never actually built `crtgfx_window_
-   smoke`/`crtgfx_synthetic_event` (a pre-existing gap, not introduced by
-   this split), so `crt-gfx-test`'s own broad `^crtgfx_.*_runs` ctest
-   filter reported them "Not Run" on a genuinely fresh Linux build that
-   had only run `crt-gfx-build` -- fixed by adding `crt-gfx-simple-build`
-   to `crt-gfx-build`'s own `DEPENDS`.
-3. **The big one**: every real-imported-libc++ reference throughout
-   `libcrtgfx/CMakeLists.txt` (Skia's own `--sysroot` argument to `tools/
-   build_skia.py`, the `CRTGFX_CRT_STATIC_LIBS`/`_SHARED_LIBS` libc++
-   swap, `crtgfx_skia_objects`'s and `crt_wire_skia_executable()`'s own
-   `-isystem`/link-library paths -- 14 call sites in total) still pointed
-   at `CRT_SYSROOT` (today's C-only `dist/01-c` stage), not
-   `CRT_LIBCXX_SYSROOT` (the cumulative C++ stage, `dist/02-cxx`, a real
-   superset of `01-c` that actually has `include/c++/v1`/`libc++.a`).
-   This is a real regression from *today's earlier* distribution-stage
-   restructuring (which split the old single unified sysroot into 01-c/
-   02-cxx), not from this split itself -- `CRTGFX_ENABLE_SKIA` had been
-   off in every build all day, so nothing had exercised this path since.
-   The exact same class of bug the user already found and fixed in
-   `crt-port-build.py` (commit `ee62624`). `crtgfx-skia-smoke` failed
-   outright with "CRT_USE_IMPORTED_LIBCXX headers not found: .../dist/
-   01-c/include/c++/v1" the first time Skia was actually built again
-   after today's restructuring landed. All 14 call sites fixed.
-
-**Verified for real, both hosts, from a genuinely fresh `out/`** (the
-user cleared it to test the new build structure): `crt-gfx-simple-build`/
-`crt-gfx-simple-test` (window-only -- confirmed no D3D12/Metal/Skia/
-libskia.a anywhere on that link line) and `crt-gfx-build`/`crt-gfx-test`
-(adds GPU) both pass clean on Windows and Linux -- 3/3 on each host, plus
-the non-test demo executables (`crtgfx_window_demo`/`crtgfx_gpu_window_
-demo`) build clean on Windows. **Skia is now real-verified on Windows**:
-`crtgfx-skia-smoke`'s full target set (`crtgfx_skia_raster_smoke`,
-`crtgfx_skia_cpu_coverage`, `crtmedia_frame_skia_smoke`, `crtgfx_skia_gpu_
-offscreen_smoke`) all pass, including `crtgfx_skia_gpu_offscreen_smoke`'s
-full device-loss/recovery cycle (real D3D12 `RemoveDevice()`/
-`GetDeviceRemovedReason()`/recreate-and-redraw) -- covers the two
-highest-risk pieces that moved (the D3DCOMPILER reassignment, the real
-imported-libc++ paths) plus the cross-library `crtmedia_frame_skia_smoke`
-consumer. Full Windows `ctest` clean, 127/127, after also building the
-`crtmedia`/`cxx_*` targets `crt-gfx-build`/`crt-gfx-test` alone don't
-force. **Linux `crtgfx-skia-smoke` was started the same way (with the fix
-already applied) and was still running in the background at the time of
-this entry** -- update once it completes.
-
-Top-level `CMakeLists.txt`'s `crt-gfx-simple-build`/`crt-gfx-build`
-`DEPENDS` lists were updated to the new target names; `install()` in
-`libcrtgfx/CMakeLists.txt` now does three separate `install(TARGETS ...)`
-calls (`crt-gfx-simple` component for window, `crt-gfx` component for
-GPU and, when enabled, Skia) instead of one. `docs/libcrtgfx_api_policy.md`
-updated to describe the real physical split rather than an install-
-component-only one. Not yet done: macOS build/verification (no hardware
-this session, matching this whole restructuring effort's established
-pattern); re-confirming (or fixing) whether the `sysroot`/`crtgfx_skia_
-objects` dependency-cycle concern documented in the top-level
-`CMakeLists.txt` (right before the Python3-gated block) still applies now
-that `sysroot` no longer `DEPENDS` on any `crtgfx*` target at all -- flagged
-in that comment but not resolved this pass.
+  `docs/distribution.md`'s own "Distribution Acceptance" list -- no path-
+  with-spaces check, no absolute source/build path leakage check (debug
+  artifacts currently contain those paths, so path remapping or release
+  stripping must be decided first), no external CMake/configure-make
+  consumer check.
+- The `<iostream>` static-init crash found packaging `02-cxx` on Windows
+  (a real, reproducible segfault via this project's own DWARF-unwind
+  safety net; `<cstdio>` works) is not root-caused -- suspected
+  `std::ios_base::Init`'s global-constructor path through the Windows
+  `.ctors` walker, not confirmed, and not yet reproduced against the
+  in-tree (non-packaged) build.
+- The `sysroot`/`crtgfx_skia_objects` dependency-cycle comment in the
+  top-level `CMakeLists.txt` needs reconfirming now that `sysroot` no
+  longer `DEPENDS` on any `crtgfx*` target at all.
 
 ## Planned
 
@@ -957,6 +178,7 @@ or host investigation supplies the required evidence.
   -- add retry-on-transient-failure, a documented fallback mirror, and
   SHA-256 verification of the cached archive before reuse, matching the
   reliability bar other `porting/recipes/*.json` ports already meet.
+
 ### Interactive job control (deferred until it's an actual priority)
 
 `docs/job_control.md`'s "Interactive Job Control" section has the decided

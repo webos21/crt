@@ -8,6 +8,69 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+
+## 2026-09-09
+
+- **Linux `crtgfx-skia-smoke` verification completed for the physical
+  window/GPU/Skia split above.** The prior session's background Linux
+  build never actually finished -- WSL was restarted (independently,
+  between sessions) partway through its from-scratch bootstrap, silently
+  killing the detached build process and wiping its `/tmp` log (tmpfs);
+  `TODO.md` still correctly recorded it as "still running" rather than
+  claiming a result that was never observed. Rebuilt `crtgfx-skia-smoke`
+  from scratch against the same dedicated shadow build directory and this
+  time let it run to completion under proper background-task tracking
+  (not a manually-detached shell `&`, which does not get a completion
+  notification). All four targets passed: `crtgfx_skia_raster_smoke`,
+  `crtgfx_skia_cpu_coverage`, `crtmedia_frame_skia_smoke`, and
+  `crtgfx_skia_gpu_offscreen_smoke` -- the last including its full
+  device-loss/recovery cycle, this time against Linux's real Vulkan/Ganesh
+  path (via the `dzn` Vulkan-on-D3D12 WSL translation layer: device
+  create/context/draw/readback, forced device loss, clean failure with no
+  crash/hang, then a fresh device recreated and redrawing correctly).
+
+- **Fixed `crt-libcxx-dist`: missing dependency on the bootstrap `cxx`/
+  `cxx_shared` targets (`446540c`).** Without `CRT_USE_IMPORTED_LIBCXX`,
+  `libstdc++/CMakeLists.txt`'s own `crt-cxx` component
+  `install(TARGETS cxx cxx_shared ...)` installs the bootstrap ABI shim's
+  own build output, but `crt-libcxx-dist`'s `DEPENDS` never built it --
+  only `crt-c-dist`/`crt-libcxx-build` did, and those build the separate
+  real-Android libc++ instead. Building `crt-libcxx-dist` alone, from a
+  tree where nothing else had already built `cxx`/`cxx_shared`, failed
+  outright: `CMake Error: file INSTALL cannot find ".../lib/libc++.a"`.
+  Fixed by adding `cxx`/`cxx_shared` to `crt-libcxx-dist`'s own `DEPENDS`,
+  guarded by the same `if(NOT CRT_USE_IMPORTED_LIBCXX)` condition
+  `libstdc++/CMakeLists.txt`'s own install rule already uses. Verified on
+  real macOS hardware: `crt-libcxx-dist` completes clean (builds
+  `cxx`/`cxx_shared`, installs, `verify_dist.py` passes); full
+  `cmake --workflow --preset macos-host-ninja-debug` still passes 100/100.
+
+- **Fixed `crtgfx_gpu_shared`'s macOS link: missing `-lobjc` (`f1596c8`).**
+  `gpu_metal.c` drives `Metal.framework` via direct `objc_msgSend`/
+  `objc_getClass`/`sel_registerName` calls. The plain static `crtgfx_gpu`
+  target never needed `objc` listed explicitly because it links
+  `crtgfx_window` `PUBLIC`, whose own macOS framework list is `PUBLIC` and
+  already includes `objc`. `crtgfx_gpu_shared` links
+  `crtgfx_window_shared` `PUBLIC` instead, but `crtgfx_window_shared`'s own
+  framework list is scoped `PRIVATE`, so it never propagates --
+  `crtgfx_gpu_shared` never declared its own need for `objc` either, so
+  its real `.dylib` link failed outright the first time anything forced
+  it to build standalone (`crt-gfx-media-dist`):
+  `Undefined symbols: _objc_getClass, _objc_msgSend, _sel_registerName`.
+  Fixed by adding `objc` to `crtgfx_gpu_shared`'s own macOS `PRIVATE` link
+  libraries, matching `crtgfx_window_shared`'s identical pattern. Verified
+  on real macOS hardware: `crt-gfx-media-dist` now completes clean; full
+  `cmake --workflow --preset macos-host-ninja-debug` still passes 100/100.
+
+- **The full `01-c` -> `05-js` cumulative distribution chain and the
+  `libcrtgfx` physical window/GPU/Skia split (above) are now both verified
+  on real hardware on all three target hosts -- Linux, Windows, and
+  macOS.** The two macOS fixes directly above were found doing this pass
+  for real on macOS hardware, not guessed. This closes out every
+  remaining "not yet run on Linux/macOS"/"no hardware this session" open
+  item both `TODO.md` entries for this work had been carrying since
+  2026-09-08.
+
 ## 2026-09-08
 
 - **Built the complete cumulative Windows distribution chain for the first
@@ -118,30 +181,8 @@ substantive update.
   recovery cycle (`RemoveDevice()`/`GetDeviceRemovedReason()`/recreate-
   and-redraw-correctly). Full Windows `ctest` clean, 127/127. Linux
   `crtgfx-skia-smoke` was started with the fix already applied but did not
-  finish in that session (see 2026-09-09 follow-up below); macOS remains
-  unattempted, no hardware in these sessions.
-
-## 2026-09-09
-
-- **Linux `crtgfx-skia-smoke` verification completed for the physical
-  window/GPU/Skia split above.** The prior session's background Linux
-  build never actually finished -- WSL was restarted (independently,
-  between sessions) partway through its from-scratch bootstrap, silently
-  killing the detached build process and wiping its `/tmp` log (tmpfs);
-  `TODO.md` still correctly recorded it as "still running" rather than
-  claiming a result that was never observed. Rebuilt `crtgfx-skia-smoke`
-  from scratch against the same dedicated shadow build directory and this
-  time let it run to completion under proper background-task tracking
-  (not a manually-detached shell `&`, which does not get a completion
-  notification). All four targets passed: `crtgfx_skia_raster_smoke`,
-  `crtgfx_skia_cpu_coverage`, `crtmedia_frame_skia_smoke`, and
-  `crtgfx_skia_gpu_offscreen_smoke` -- the last including its full
-  device-loss/recovery cycle, this time against Linux's real Vulkan/Ganesh
-  path (via the `dzn` Vulkan-on-D3D12 WSL translation layer: device
-  create/context/draw/readback, forced device loss, clean failure with no
-  crash/hang, then a fresh device recreated and redrawing correctly).
-  This closes out the libcrtgfx split's last tracked open item besides
-  macOS (still unattempted, no hardware in these sessions).
+  finish in that session (see the 2026-09-09 entries above); macOS
+  remained unattempted at the time, no hardware in that session.
 
 - **Fixed a real, genuine data race in `pthread_bionic_api_test.c` (not a
   regression from the dist-stages restructuring), found by the user on a
