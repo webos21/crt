@@ -16,10 +16,9 @@
 # resolved by crtgfx_gpu(_shared) linking crtgfx_window(_shared) below,
 # not a cycle.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/crtgfx_window_sources.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/crtgfx_gpu_sources.cmake")
 set(CRTGFX_WINDOW_SOURCES ${CRTGFX_WINDOW_COMMON_SOURCES})
-set(CRTGFX_GPU_SOURCES
-  src/gpu.c
-)
+set(CRTGFX_GPU_SOURCES ${CRTGFX_GPU_COMMON_SOURCES})
 # Per-OS backend files (window_win32.c/gpu_win32.c, window_cocoa.c/
 # gpu_metal.c, window_wayland.c+window_wayland_native.c/gpu_vulkan.c)
 # populate these two below -- kept separate from CRTGFX_WINDOW_SOURCES/
@@ -297,7 +296,7 @@ endif()
 
 if(CRT_TARGET_OS STREQUAL "windows")
   list(APPEND CRTGFX_WINDOW_BACKEND_SOURCES ${CRTGFX_WINDOW_BACKEND_WINDOWS_SOURCES})
-  list(APPEND CRTGFX_GPU_BACKEND_SOURCES src/arch/windows/gpu_win32.c)
+  list(APPEND CRTGFX_GPU_BACKEND_SOURCES ${CRTGFX_GPU_BACKEND_WINDOWS_SOURCES})
   # Windows/D3D12 offscreen vertical slice (2026-09-03, TODO.md's "Enable
   # Skia GPU rendering" step -- the Linux/Vulkan slice's own sibling; see
   # crtgfx/gpu.h's own top comment). Unlike Linux's libvulkan-dev (a real
@@ -322,7 +321,7 @@ if(CRT_TARGET_OS STREQUAL "windows")
   add_compile_definitions(CRTGFX_HAVE_D3D12=1)
 elseif(CRT_TARGET_OS STREQUAL "macos")
   list(APPEND CRTGFX_WINDOW_BACKEND_SOURCES ${CRTGFX_WINDOW_BACKEND_MACOS_SOURCES})
-  list(APPEND CRTGFX_GPU_BACKEND_SOURCES src/arch/macos/gpu_metal.c)
+  list(APPEND CRTGFX_GPU_BACKEND_SOURCES ${CRTGFX_GPU_BACKEND_MACOS_SOURCES})
   # macOS/Metal offscreen vertical slice (2026-09-04, TODO.md's "Enable
   # Skia GPU rendering" step -- the Linux/Vulkan and Windows/D3D12
   # slices' own sibling; see crtgfx/gpu.h's own top comment). Metal.
@@ -414,7 +413,7 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
     )
   endif()
   if(CRTGFX_LINUX_VULKAN_LIB)
-    list(APPEND CRTGFX_GPU_BACKEND_SOURCES src/arch/linux/gpu_vulkan.c)
+    list(APPEND CRTGFX_GPU_BACKEND_SOURCES ${CRTGFX_GPU_BACKEND_LINUX_SOURCES})
     # Native Wayland backend (2026-09-07, "Finish live GPU presentation
     # everywhere") -- real libwayland-client, gated on the exact same
     # CRTGFX_LINUX_VULKAN_LIB condition as gpu_vulkan.c itself: this
