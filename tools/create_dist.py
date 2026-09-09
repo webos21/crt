@@ -75,7 +75,8 @@ def copy_porting_sdk(root: Path, destination: Path) -> None:
     """Install the optional source-porting workflow, but not upstream sources."""
     tools_dest = destination / "tools"
     tools_dest.mkdir(parents=True, exist_ok=True)
-    for name in ("crt-port-build.py", "fetch_ports.py", "crt-native-tool"):
+    for name in ("crt-port-build.py", "fetch_ports.py", "crt-native-tool",
+                 "crt-stage-build.py"):
         shutil.copy2(root / "tools" / name, tools_dest / name)
 
     porting_dest = destination / "porting"
@@ -86,6 +87,15 @@ def copy_porting_sdk(root: Path, destination: Path) -> None:
         shutil.copytree(root / "porting" / directory, target)
     shutil.copy2(root / "porting" / "DISTRIBUTION_README.md",
                  porting_dest / "README.md")
+
+
+def copy_stage_recipes(recipes: list[Path], destination: Path) -> None:
+    if not recipes:
+        return
+    recipe_dest = destination / "stages" / "recipes"
+    recipe_dest.mkdir(parents=True, exist_ok=True)
+    for recipe in recipes:
+        shutil.copy2(recipe, recipe_dest / recipe.name)
 
 
 def install_wrapper_applets(destination: Path, target_os: str) -> None:
@@ -227,6 +237,7 @@ def main() -> None:
     parser.add_argument("--component", action="append", default=[])
     parser.add_argument("--libcxx-install", type=Path)
     parser.add_argument("--port-prefix", type=Path)
+    parser.add_argument("--stage-recipe", action="append", default=[], type=Path)
     parser.add_argument("--cmake", default="cmake")
     parser.add_argument("--stage", required=True)
     parser.add_argument("--target-os", required=True)
@@ -256,6 +267,7 @@ def main() -> None:
         copy_libcxx(args.libcxx_install.resolve(), destination)
     copy_port_tools(args.port_prefix.resolve() if args.port_prefix else None, destination)
     copy_porting_sdk(root, destination)
+    copy_stage_recipes([recipe.resolve() for recipe in args.stage_recipe], destination)
     install_wrapper_applets(destination, args.target_os)
     write_sdk_files(
         root, destination, args.target_os, normalized_arch,

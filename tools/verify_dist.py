@@ -40,7 +40,8 @@ def main() -> None:
         raise SystemExit("manifest does not declare the CRT-owned shell environment")
     for relative in (
             "tools/crt-port-build.py", "tools/fetch_ports.py",
-            "tools/crt-native-tool", "porting/README.md",
+            "tools/crt-native-tool", "tools/crt-stage-build.py",
+            "porting/README.md",
             "porting/recipes/zlib.json", "porting/recipes/make.json",
             "porting/tests/zlib_roundtrip.c"):
         require(dist / relative)

@@ -63,6 +63,22 @@ Graphics result. Full details, artifact layout, package naming, and acceptance
 rules are in
 [`docs/distribution.md`](docs/distribution.md).
 
+Release engineering creates an upper-stage source asset and its recipe only
+after the component sources have been fetched at their pinned revisions. For
+the first transition:
+
+```sh
+python3 tools/create_stage_source.py --root . --stage 02-cxx \
+  --source-root out/<preset>/external/llvm-runtimes \
+  --output-dir out/<preset>/stage-sources --release-tag <tag>
+```
+
+The command emits a deterministic source archive plus a recipe containing its
+exact byte size, CRT commit, and SHA-256. After the asset and recipe are
+published, an extracted `01-c` SDK consumes them with its packaged
+`tools/crt-stage-build.py`; a local `--asset` override is available for
+pre-publication acceptance without weakening digest verification.
+
 ## Prerequisites
 
 All hosts need Git, CMake 3.25+, Ninja, Python 3, Clang, LLD, and suitable
@@ -143,6 +159,15 @@ dependencies. This dependency establishes cumulative package contents; the
 source-stage bootstrap commands described above will separately verify that a
 freshly extracted predecessor SDK can produce the next stage without reading
 repository headers, libraries, or build outputs.
+
+A stage is a self-contained sysroot for its advertised surface. Its
+`include/`, `lib/`, and Windows `bin/` directories therefore include the
+redistributable headers, link artifacts, and `.so`/`.dylib`/`.dll` runtime
+files of external libraries required by that stage, not only CRT-owned files.
+OS frameworks/system libraries and device-specific GPU/video drivers are
+documented manifest prerequisites instead of silently copied or assumed. The
+exact transitive packaging and licensing rule is in
+[`docs/distribution.md`](docs/distribution.md).
 
 Advanced graphics must be configured with a completed imported libc++ and
 Skia build. The existing `crtgfx-skia-fetch`, `crtgfx-skia-configure`,

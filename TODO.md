@@ -172,6 +172,11 @@ mksh/toybox environment for configure/build commands, and never require
 MSYS/Git Bash. Extend the same recipe model to `04 -> 05-js` once the first
 three transitions are stable.
 
+Next add the `03-gfx-simple` and `04-gfx-media` deterministic assets, recipes,
+build entry points, and isolated Windows acceptance. Keep the separately
+listed Windows C++ initialization failure open; the stage runner deliberately
+has no retry that could hide it.
+
 Acceptance must start from freshly extracted archives in a path containing
 spaces, reject access to in-tree CRT headers/libraries/build artifacts,
 rebuild and run the packaged examples, and exercise representative configure,
@@ -181,6 +186,13 @@ resolved details to `HISTORY.md`. Also root-cause the Windows packaged-mksh
 here-document temporary-file diagnostic before treating configure probe
 results as authoritative; zlib completes and passes static/shared round-trip
 tests, but its configure log still contains that diagnostic.
+
+Implement the distribution rule that every stage carries the redistributable
+headers and static/import/runtime libraries of its transitive external
+dependencies. Add a structured dependency inventory to `manifest.json`, copy
+and verify the declared files (including notices), scan binaries for
+undeclared non-system `.so`/`.dylib`/`.dll` dependencies, and explicitly list
+OS/framework/device-driver prerequisites that remain outside the archive.
 
 ## Planned
 

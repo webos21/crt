@@ -11,6 +11,35 @@ substantive update.
 
 ## 2026-09-09
 
+- **Completed the first isolated source-stage transition on Windows:
+  packaged `01-c -> 02-cxx`.** `create_stage_source.py` produces a normalized
+  libc++/libc++abi/libunwind source asset and a release recipe pinned by CRT
+  commit, byte size, and SHA-256; two independent generations produced the
+  identical digest
+  `b7a32d2737cb8ac632cbdc4927ee7e6a25b9012bf2622442b2c2277922bff850`.
+  The generic runner packaged inside `01-c` validates that identity and safe
+  extraction before invoking the asset's stage-owned build entry point. A
+  full run from `out/stage chain test/` built and installed all three
+  runtimes against a copied `01-c` SDK, passed static/shared runtime and
+  cross-boundary string ABI smoke tests, passed `verify_dist.py`, and emitted
+  the cumulative `02-cxx` SDK without reading repository headers or libraries
+  during the runtime build. The current Windows shell wrappers flatten argv
+  containing spaces, so the verified entry point copies its build inputs to a
+  short host temporary directory and publishes output only after all checks
+  pass. One earlier full attempt's first shared execution took the already
+  tracked `0xffffffff` DWARF-safety-net path; that same executable then passed
+  20 consecutive reruns and the clean full transition above passed, so the
+  underlying Windows initialization investigation remains open in `TODO.md`
+  rather than being hidden by a retry policy.
+
+- **Re-verified the Windows `01-c` distribution as the first source-stage
+  bootstrap SDK.** A fresh `crt-c-dist` run packages the CRT-owned
+  mksh/toybox environment, porting catalog, and generic `crt-stage-build.py`
+  runner and passes `verify_dist.py`. The make recipe intentionally retains
+  `sha256: null`: its immutable 40-hex Gitiles commit URL is the integrity
+  anchor because repeated downloads of that commit have byte-unstable gzip
+  containers.
+
 - **Completed the first hands-on distribution SDK slice.** Graphics stages
   now install both runnable demo binaries and rebuildable source/CMake examples:
   the window-only demo in `03-gfx-simple`, the GPU presentation demo in
@@ -29,9 +58,11 @@ substantive update.
   tests, compatibility shims, and user documentation, with Python 3.9+ and
   network requirements recorded in `manifest.json`; LLVM/Clang/LLD remain
   external and are not bundled. The packaged fetch driver resolves recipes
-  relative to the extracted SDK, and the previously unpinned GNU make source
-  archive now has a verified SHA-256 baseline. Fetching make and zlib using
-  only the packaged catalog was verified. On Windows, packaged-SDK mode now
+  relative to the extracted SDK. GNU make deliberately keeps `sha256: null`:
+  its source URL pins an immutable 40-hex Gitiles commit, while Gitiles emits
+  byte-unstable gzip containers for the same commit. The verifier therefore
+  accepts that commit-locked URL as make's integrity anchor. Fetching make and
+  zlib using only the packaged catalog was verified. On Windows, packaged-SDK mode now
   treats the extracted stage itself as `CRT_ROOTFS`, installs the complete
   enabled Toybox applet set plus extensionless toybox/mksh/make/awk names,
   and runs configure/make through the packaged CRT mksh rather than MSYS or

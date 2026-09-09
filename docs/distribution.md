@@ -31,6 +31,26 @@ inheritance, but it is not by itself proof that the new component can be
 rebuilt without repository headers or libraries. The separate source-stage
 chain below supplies that stronger boundary.
 
+Each stage is also a self-contained development sysroot for its declared
+capabilities. If a stage exposes an external library through its public API,
+link interface, or runtime dependency, the distribution must install that
+library's required public headers under `include/` and its redistributable
+link/runtime artifacts under `lib/` and, on Windows where appropriate,
+`bin/`. This includes static archives and import libraries needed for linking
+as well as the corresponding `.so`, `.dylib`, or `.dll` files needed to run.
+The rule applies transitively: an application must not need an undeclared
+developer package merely because CRT linked one of its stage libraries to an
+external dependency.
+
+OS-owned libraries and frameworks that are part of the documented minimum
+target OS, and device-specific GPU/video drivers such as Vulkan ICDs or VA-API
+drivers, remain target prerequisites rather than copied CRT payloads. Every
+such exception must be explicit in `manifest.json`; source/version/license
+metadata must accompany every third-party artifact that CRT does redistribute.
+Package construction and acceptance must fail when a manifest-declared header,
+link artifact, runtime library, or notice is absent, or when a binary dependency
+scan finds an undeclared non-system `.so`, `.dylib`, or `.dll` dependency.
+
 Simple Graphics intentionally excludes Skia CPU raster and text, Skia GPU,
 and the public `crtgfx/gpu.h` surface. Its drawing contract is the mapped
 software framebuffer in `crtgfx/window.h`. The Windows implementation may use
@@ -89,7 +109,7 @@ out/<preset>/dist/05-js/
 Windows packages are emitted as `.zip`; Linux and macOS packages as
 `.tar.xz`. Every directory contains `manifest.json`, `VERSION`, activation
 scripts, wrappers, and `crt-toolchain.cmake` in addition to the cumulative
-headers and libraries.
+CRT and required redistributable dependency headers and libraries.
 
 Each directory also carries the CRT mksh/toybox shell environment, optional
 Python porting drivers, recipes/tests/shims, and the examples appropriate to
@@ -129,6 +149,24 @@ commit IDs remain provenance metadata, while the digest is the download
 integrity and reproducibility boundary. A development build may generate a
 local source asset and matching recipe, but a published recipe must never use
 a mutable branch URL or an unfilled digest.
+
+`tools/create_stage_source.py` implements the first asset producer for
+`02-cxx`. It packages the already-fetched pinned libc++/libc++abi/libunwind
+trees together with the CRT recipes, patches, standalone CMake drivers,
+wrappers, and smoke sources they require. Archive entry ordering, timestamps,
+owners, and modes are normalized before SHA-256 calculation. It refuses a
+dirty meta-toolchain tree for release output unless local testing explicitly
+opts in.
+
+Every SDK carries `tools/crt-stage-build.py`. Given an input SDK and a
+published recipe, it checks the input stage, byte size, SHA-256, embedded CRT
+commit, archive path safety, and build entry point before executing anything.
+The `02-cxx` entry point copies `01-c` to a new output, builds the imported C++
+runtime against that copy, overlays the installed headers/libraries, runs the
+static/shared imported-libc++ smoke, and verifies the resulting distribution.
+Release packaging may add generated recipes under `stages/recipes/` with
+`create_dist.py --stage-recipe <recipe>`; development packages do not claim a
+downloadable transition until such a fully pinned recipe exists.
 
 ## External Toolchain Contract
 
@@ -171,7 +209,13 @@ and build trees using the packaged directory. At minimum they must verify:
 7. packaged examples rebuilt and run at the appropriate stage;
 8. no accidental absolute source/build paths in installed files;
 9. no compiler or linker executable in the archive;
-10. the manifest's OS, architecture, stage, compiler inputs, and option set.
+10. every declared external dependency's headers, link artifacts, and runtime
+    libraries are present, and its provenance/license metadata is recorded;
+11. a binary dependency scan finds no undeclared non-system `.so`, `.dylib`,
+    or `.dll` dependency;
+12. OS-owned or device-driver prerequisites excluded from the archive are
+    explicitly named in the manifest;
+13. the manifest's OS, architecture, stage, compiler inputs, and option set.
 
 ## Linux Host And Device Capabilities
 
