@@ -1592,10 +1592,27 @@ def main():
         raise SystemExit("target OS is missing from the arguments and SDK manifest")
     mingw_triple = mingw_triple_for_arch(detect_target_arch(args.target_arch))
 
-    # An extracted SDK is self-hosting at the shell/tool level: configure
-    # and make recipes use its own mksh/toybox environment by default.
-    # The compiler itself remains the user's/device vendor's external LLVM.
-    if packaged_mode:
+    # Windows only: an extracted SDK is self-hosting at the shell/tool
+    # level there because Windows has no POSIX-compatible shell of its
+    # own to run `configure` with (the whole reason mksh/toybox exist as
+    # real project artifacts at all -- see docs/android_shell_
+    # environment.md's own "Goal" section). Linux/macOS already have a
+    # real, fast, native POSIX shell -- this project's own rootfs mksh
+    # is a from-scratch, freestanding-libc reimplementation there and
+    # measurably slower for a port's own configure+make (real syscall/
+    # exec overhead per shell fork, not a micro-benchmark artifact),
+    # with no correctness reason to prefer it once the host already has
+    # a working shell. This used to be the default everywhere
+    # (--use-crt-shell was always opt-in); a packaged-SDK-mode forced it
+    # on unconditionally, which silently regressed Linux/macOS port
+    # builds from "fast, host /bin/sh" to "slow, this project's own
+    # mksh" the moment --sdk-root was used instead of --preset, with no
+    # way to opt back out short of this fix. Confirmed for real: the
+    # forced-on mksh path also exposed a genuine, separate
+    # MKSH_DEFAULT_TMPDIR="/data/local" bug (fixed in shell/CMakeLists.txt,
+    # see that commit) that a host-shell libpng configure never would
+    # have hit at all.
+    if packaged_mode and target_os == "windows":
         args.use_crt_shell = True
     if not packaged_mode and not args.skip_sysroot_build:
         target = "rootfs" if args.use_crt_shell else "sysroot"

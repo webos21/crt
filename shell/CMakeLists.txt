@@ -211,11 +211,49 @@ if(EXISTS "${CRT_MKSH_ROOT}/Android.bp")
     HAVE_ST_MTIMENSEC=0
     HAVE_PERSISTENT_HISTORY=0
     MKSH_BUILD_R=593
-    MKSH_DEFAULT_PROFILEDIR="/system/etc"
-    MKSHRC_PATH="/system/etc/mkshrc"
-    MKSH_DEFAULT_EXECSHELL="/system/bin/sh"
-    MKSH_DEFAULT_TMPDIR="/data/local"
   )
+  # MKSH_DEFAULT_PROFILEDIR/MKSHRC_PATH/MKSH_DEFAULT_EXECSHELL/MKSH_DEFAULT_
+  # TMPDIR: real Android-rootfs absolute paths (/system/etc, /data/local),
+  # NOT shared across every host the way the definitions above are --
+  # docs/android_shell_environment.md's own "Initial Namespace Policy" is
+  # explicit that CRT_ROOTFS absolute-path mapping (`/data/local` ->
+  # `<CRT_ROOTFS>/data/local`, etc.) is a *Windows-only* PAL feature.
+  # Linux/macOS have no such mapping at all -- these paths hit the real,
+  # literal host filesystem there, confirmed for real via `strace`:
+  # `statx(AT_FDCWD, "/data/local", ...) = -1 ENOENT` on a real Linux
+  # host, which made every mksh heredoc (`can't create temporary file`)
+  # fail immediately, which in turn broke every autoconf-generated
+  # `configure` script run through crt-port-build.py's own host-targeted
+  # `crt_mksh` (found via a real `libpng` port build failing with exactly
+  # this symptom -- `zlib`'s own hand-written, non-autoconf `configure`
+  # never happened to need a heredoc, so it never exposed this). Real,
+  # literal host paths for Linux/macOS instead: `/tmp` (genuinely exists,
+  # writable, on every real Linux/macOS system -- unlike `/data/local`),
+  # `/etc`/`/etc/mkshrc` (the real, standard POSIX system-profile
+  # location; harmless even though this project doesn't actually
+  # populate it, exactly like a real, fresh install without one -- a
+  # missing profile/rc file is silently skipped, not an error, on every
+  # real shell), and `/bin/sh` (a real, essentially-always-present
+  # fallback, unlike `/system/bin/sh`). Windows keeps the original
+  # Android-style paths unchanged -- CRT_ROOTFS mapping there really does
+  # make them resolve under the prepared rootfs (`rootfs/data/local/
+  # tmp/`, `rootfs/system/etc/mkshrc`), matching docs/
+  # android_shell_environment.md's own documented rootfs layout.
+  if(CRT_TARGET_OS STREQUAL "windows")
+    target_compile_definitions(crt_mksh PRIVATE
+      MKSH_DEFAULT_PROFILEDIR="/system/etc"
+      MKSHRC_PATH="/system/etc/mkshrc"
+      MKSH_DEFAULT_EXECSHELL="/system/bin/sh"
+      MKSH_DEFAULT_TMPDIR="/data/local"
+    )
+  else()
+    target_compile_definitions(crt_mksh PRIVATE
+      MKSH_DEFAULT_PROFILEDIR="/etc"
+      MKSHRC_PATH="/etc/mkshrc"
+      MKSH_DEFAULT_EXECSHELL="/bin/sh"
+      MKSH_DEFAULT_TMPDIR="/tmp"
+    )
+  endif()
   target_link_options(crt_mksh PRIVATE
     -nostdlib
     -nostartfiles

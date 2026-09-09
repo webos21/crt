@@ -11,6 +11,56 @@ substantive update.
 
 ## 2026-09-09
 
+- **Fixed a real Linux `crt-port-build.py --sdk-root` libpng build failure
+  down to a wrongly-shared `MKSH_DEFAULT_TMPDIR` compile definition, and
+  restored the original host-shell-for-Linux/macOS port-build policy.**
+  Building `libpng` from a packaged `01-c` Linux SDK
+  (`./tools/crt-port-build.py --source-root ./tmp --sdk-root . --port libpng`)
+  failed with `./configure: can't create temporary file : No such file or
+  directory` (repeated) and cascading follow-on symptoms (`install: target
+  '/crt-port-work/build/work/libpng/conftest.dir/': No such file or
+  directory`, `id: bad uid 1000`, ending in `configure: error: C compiler
+  cannot create executables`); `zlib` had built successfully just before it.
+  Root-caused via direct reproduction and
+  `strace -f -e trace=statx,openat,...`: `shell/CMakeLists.txt` compiled
+  `crt_mksh` with `MKSH_DEFAULT_TMPDIR="/data/local"` unconditionally for
+  every target OS. `docs/android_shell_environment.md`'s own "Initial
+  Namespace Policy" documents `CRT_ROOTFS` absolute-path mapping
+  (`/data/local` -> `<CRT_ROOTFS>/data/local`, etc.) as a **Windows-only**
+  PAL feature; on this real Linux host `$TMPDIR` is genuinely unset, so
+  mksh's `maketemp()` fell back to the literal, nonexistent `/data/local`
+  (confirmed: `statx(AT_FDCWD, "/data/local", ...) = -1 ENOENT`), so every
+  heredoc in libpng's autoconf-generated `configure` failed to create its
+  backing temp file. `zlib`'s own configure is hand-written and never uses a
+  heredoc, which is why it never hit this. Fix: made
+  `MKSH_DEFAULT_PROFILEDIR`/`MKSHRC_PATH`/`MKSH_DEFAULT_EXECSHELL`/
+  `MKSH_DEFAULT_TMPDIR` OS-conditional in `shell/CMakeLists.txt` -- Windows
+  keeps the original Android-rootfs-style values (correct there, since
+  `CRT_ROOTFS` really does map them under the prepared rootfs); Linux/macOS
+  get real, literal host paths (`/etc`, `/etc/mkshrc`, `/bin/sh`, `/tmp`).
+  Verified via `strace` that the rebuilt `crt_mksh` now checks `/tmp` and a
+  plain heredoc succeeds, then via a full, successful end-to-end libpng
+  configure+make+install run (exit 0).
+  Separately, `crt-port-build.py`'s `main()` had
+  `if packaged_mode: args.use_crt_shell = True` -- forcing every packaged-SDK
+  port build through this project's own rootfs mksh instead of the host
+  shell, on every OS, regressing the original policy (mksh only where the
+  host has no native POSIX shell, i.e. Windows; Linux/macOS use the fast
+  host shell, `--use-crt-shell` staying opt-in). The forced-on mksh path is
+  also what exposed the `MKSH_DEFAULT_TMPDIR` bug above -- a host-shell
+  libpng configure would never have hit it. Fix: narrowed the condition to
+  `if packaged_mode and target_os == "windows"`. Verified by rebuilding
+  `crt-c-dist`, re-fetching zlib/libpng sources, and timing both port builds
+  with the host shell: zlib in 1.564s and libpng in 8.142s (vs. 17.3s for
+  just the mksh "make install" phase alone previously), with fully-qualified
+  host paths and plain host `cp`/`chmod`/`rm`/`install`/`make` invocations in
+  the logs, and `grep -i mksh` over the complete libpng build log returning
+  zero matches (confirming no mksh/rootfs involvement at all). The earlier
+  install-path truncation artifact
+  (`make[3]: Leaving directory '/crt-port-work/build/work/libpng'`, missing
+  its real prefix) is also absent under the host shell, confirming it too
+  was an mksh-routing symptom rather than a separate bug.
+
 - **Completed the first isolated source-stage transition on Windows:
   packaged `01-c -> 02-cxx`.** `create_stage_source.py` produces a normalized
   libc++/libc++abi/libunwind source asset and a release recipe pinned by CRT
