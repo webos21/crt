@@ -6,6 +6,8 @@ import json
 import re
 from pathlib import Path
 
+from create_dist import DIST_PORTING_TOOLS, DIST_PORTING_DIRS, DIST_WRAPPER_TOOLS
+
 
 BANNED_TOOLS = {
     "clang", "clang.exe", "clang++", "clang++.exe", "lld", "lld.exe",
@@ -25,9 +27,10 @@ def main() -> None:
     args = parser.parse_args()
     dist = args.dist.resolve()
 
-    for relative in ("manifest.json", "VERSION", "LICENSE.md", "tools/crt-cc",
-                     "tools/crt-c++", "crt-toolchain.cmake"):
+    for relative in ("manifest.json", "VERSION", "LICENSE.md", "crt-toolchain.cmake"):
         require(dist / relative)
+    for name in DIST_WRAPPER_TOOLS:
+        require(dist / "tools" / name)
     manifest = json.loads((dist / "manifest.json").read_text(encoding="utf-8"))
     if manifest.get("stage") != args.stage or manifest.get("compiler_bundled") is not False:
         raise SystemExit("manifest stage/compiler_bundled contract is invalid")
@@ -35,16 +38,36 @@ def main() -> None:
     if porting.get("included") is not True or porting.get("python", {}).get("required") is not True:
         raise SystemExit("manifest does not describe the optional packaged porting tools")
     shell = manifest.get("shell_environment", {})
-    if (shell.get("provider") != "crt-mksh-toybox" or
-            shell.get("external_posix_shell_required") is not False):
-        raise SystemExit("manifest does not declare the CRT-owned shell environment")
+    if manifest.get("target", {}).get("os") == "windows":
+        if (shell.get("provider") != "crt-mksh-toybox" or
+                shell.get("external_posix_shell_required") is not False or
+                shell.get("crt_shell_default") is not True):
+            raise SystemExit("Windows manifest does not declare the CRT-owned shell environment")
+    elif (shell.get("provider") != "host-posix-shell" or
+          shell.get("external_posix_shell_required") is not True or
+          shell.get("crt_shell_default") is not False):
+        raise SystemExit("Linux/macOS manifest does not declare the host-shell policy")
+    for name in DIST_PORTING_TOOLS:
+        require(dist / "tools" / name)
+    for directory in DIST_PORTING_DIRS:
+        target = dist / "porting" / directory
+        require(target)
+        if not any(target.iterdir()):
+            raise SystemExit(f"porting/{directory} was packaged empty")
     for relative in (
-            "tools/crt-port-build.py", "tools/fetch_ports.py",
-            "tools/crt-native-tool", "tools/crt-stage-build.py",
             "porting/README.md",
             "porting/recipes/zlib.json", "porting/recipes/make.json",
             "porting/tests/zlib_roundtrip.c"):
         require(dist / relative)
+    if args.stage == "01-c":
+        recipe_path = dist / "stages" / "recipes" / "02-cxx.json"
+        require(recipe_path)
+        recipe = json.loads(recipe_path.read_text(encoding="utf-8"))
+        source = recipe.get("source", {})
+        if (recipe.get("input_stage") != "01-c" or
+                recipe.get("output_stage") != "02-cxx" or
+                not re.fullmatch(r"[0-9a-f]{64}", source.get("sha256", ""))):
+            raise SystemExit("01-c does not contain a valid pinned 02-cxx stage recipe")
     make_recipe = json.loads((dist / "porting" / "recipes" / "make.json").read_text(encoding="utf-8"))
     make_source = make_recipe.get("source", {})
     # A real sha256 pin is preferred, but porting/recipes/make.json's own

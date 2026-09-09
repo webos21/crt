@@ -12,6 +12,19 @@ from pathlib import Path
 from create_rootfs import TOYBOX_APPLETS
 
 
+# What "ships in every packaged distribution" is, on purpose, a single
+# definition. verify_dist.py imports these same three names instead of
+# re-declaring its own copy of this list -- before this, the set of files
+# copied here and the set of files verify_dist.py required existed as two
+# independently maintained tuples in two different files, which is a real
+# drift risk (add a file to one, forget the other, and verify_dist.py
+# either false-fails a good distribution or silently stops checking a
+# real one).
+DIST_PORTING_TOOLS = ("crt-port-build.py", "fetch_ports.py", "crt-native-tool", "crt-stage-build.py")
+DIST_PORTING_DIRS = ("recipes", "tests", "shims")
+DIST_WRAPPER_TOOLS = ("crt-cc", "crt-c++", "crt-cc.cmd", "crt-c++.cmd")
+
+
 def copy_base(source: Path | None, destination: Path) -> None:
     if destination.exists():
         shutil.rmtree(destination)
@@ -75,12 +88,11 @@ def copy_porting_sdk(root: Path, destination: Path) -> None:
     """Install the optional source-porting workflow, but not upstream sources."""
     tools_dest = destination / "tools"
     tools_dest.mkdir(parents=True, exist_ok=True)
-    for name in ("crt-port-build.py", "fetch_ports.py", "crt-native-tool",
-                 "crt-stage-build.py"):
+    for name in DIST_PORTING_TOOLS:
         shutil.copy2(root / "tools" / name, tools_dest / name)
 
     porting_dest = destination / "porting"
-    for directory in ("recipes", "tests", "shims"):
+    for directory in DIST_PORTING_DIRS:
         target = porting_dest / directory
         if target.exists():
             shutil.rmtree(target)
@@ -129,7 +141,7 @@ def write_sdk_files(root: Path, destination: Path, target_os: str, target_arch: 
                     target_triple: str, stage: str, tools: dict[str, str]) -> None:
     tools_dest = destination / "tools"
     tools_dest.mkdir(parents=True, exist_ok=True)
-    for name in ("crt-cc", "crt-c++", "crt-cc.cmd", "crt-c++.cmd"):
+    for name in DIST_WRAPPER_TOOLS:
         shutil.copy2(root / "tools" / name, tools_dest / name)
     shutil.copy2(root / "LICENSE.md", destination / "LICENSE.md")
 
@@ -219,10 +231,16 @@ set(CMAKE_CXX_FLAGS_INIT "${CMAKE_C_FLAGS_INIT} -nostdinc++ -isystem${CRT_DISTRI
                 "standalone_smoke_ports": ["zlib"],
             }
         },
-        "shell_environment": {
+        "shell_environment": ({
             "provider": "crt-mksh-toybox",
             "external_posix_shell_required": False,
-        },
+            "crt_shell_default": True,
+        } if target_os == "windows" else {
+            "provider": "host-posix-shell",
+            "external_posix_shell_required": True,
+            "crt_shell_default": False,
+            "crt_shell_available": True,
+        }),
     }
     (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     (destination / "VERSION").write_text("development\n", encoding="utf-8")

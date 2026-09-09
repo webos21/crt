@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.25)
 set(CRT_TARGET_OS "macos" CACHE STRING "Target OS personality")
 set(CRT_TARGET_ARCH "host" CACHE STRING "Target architecture")
 set(CRT_DIST_ROOT "${CMAKE_BINARY_DIR}/dist" CACHE PATH "Cumulative staged CRT distributions")
+set(CRT_STAGE_SOURCE_ROOT "${CMAKE_BINARY_DIR}/stage-sources" CACHE PATH "Generated source-stage assets and recipes")
 set(CRT_SYSROOT "${CRT_DIST_ROOT}/01-c" CACHE PATH "C-stage sysroot used by wrappers and porting tests")
 set(CRT_LIBCXX_SYSROOT "${CRT_DIST_ROOT}/02-cxx" CACHE PATH "C++-stage cumulative sysroot")
 
@@ -1175,16 +1176,33 @@ if(Python3_Interpreter_FOUND)
     DEPENDS ${CRT_C_TEST_TARGETS} crt_shell_artifacts
     USES_TERMINAL
   )
+  # A packaged 01-c SDK must carry the pinned recipe that advances it to
+  # 02-cxx. Generate the release-shaped source asset and recipe after fetching
+  # the pinned runtime sources; only the recipe is copied into 01-c. The
+  # development package permits a dirty meta-toolchain tree because its exact
+  # asset bytes are still SHA-256 locked. Formal release generation omits that
+  # opt-in and therefore requires a clean tree.
+  add_custom_target(crt-stage-02-source
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_stage_source.py"
+      --root "${CMAKE_SOURCE_DIR}" --stage 02-cxx
+      --source-root "${CRT_LIBCXX_FETCH_ROOT}"
+      --output-dir "${CRT_STAGE_SOURCE_ROOT}"
+      --release-tag development --allow-dirty
+    DEPENDS crt-libcxx-fetch
+    COMMENT "Creating the pinned 01-c -> 02-cxx source asset and recipe"
+    USES_TERMINAL
+  )
   add_custom_target(crt-c-dist
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
       --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
       --dest "${CRT_DIST_ROOT}/01-c" --component crt-c
       --port-prefix "${CRT_PORT_TEST_ROOT}/install"
+      --stage-recipe "${CRT_STAGE_SOURCE_ROOT}/02-cxx.json"
       --cmake "${CMAKE_COMMAND}" --stage 01-c
       --target-os "${CRT_TARGET_OS}" --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" ${CRT_DIST_TOOL_ARGS} --archive
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
       --dist "${CRT_DIST_ROOT}/01-c" --stage 01-c
-    DEPENDS crt-c-build
+    DEPENDS crt-c-build crt-stage-02-source
     USES_TERMINAL
   )
 
