@@ -21,6 +21,39 @@ def require(path: Path) -> None:
         raise SystemExit(f"distribution is missing: {path}")
 
 
+def require_any(directory: Path, patterns: tuple[str, ...], description: str) -> None:
+    if not any(path.is_file() for pattern in patterns for path in directory.glob(pattern)):
+        raise SystemExit(f"distribution is missing {description} under {directory}")
+
+
+def validate_redistributed_dependencies(dist: Path, manifest: dict) -> dict[str, dict]:
+    """Validate every declared dependency without hardcoding its file layout."""
+    dependencies = manifest.get("redistributed_dependencies", [])
+    if not isinstance(dependencies, list):
+        raise SystemExit("manifest redistributed_dependencies must be a list")
+    by_name: dict[str, dict] = {}
+    for item in dependencies:
+        if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+            raise SystemExit("redistributed dependency entries require a string name")
+        name = item["name"]
+        if name in by_name:
+            raise SystemExit(f"redistributed dependency is declared twice: {name}")
+        if not isinstance(item.get("kind"), str):
+            raise SystemExit(f"redistributed dependency {name} has no kind")
+        for field in ("headers", "link_artifacts", "runtime_artifacts", "notices"):
+            paths = item.get(field)
+            if not isinstance(paths, list) or not all(isinstance(path, str) for path in paths):
+                raise SystemExit(f"redistributed dependency {name}.{field} must be a string list")
+            for relative in paths:
+                require(dist / relative)
+        provenance = item.get("provenance")
+        if not isinstance(provenance, str):
+            raise SystemExit(f"redistributed dependency {name} has no provenance path")
+        require(dist / provenance)
+        by_name[name] = item
+    return by_name
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dist", required=True, type=Path)
@@ -35,6 +68,7 @@ def main() -> None:
     manifest = json.loads((dist / "manifest.json").read_text(encoding="utf-8"))
     if manifest.get("stage") != args.stage or manifest.get("compiler_bundled") is not False:
         raise SystemExit("manifest stage/compiler_bundled contract is invalid")
+    redistributed = validate_redistributed_dependencies(dist, manifest)
     porting = manifest.get("optional_tools", {}).get("porting", {})
     if porting.get("included") is not True or porting.get("python", {}).get("required") is not True:
         raise SystemExit("manifest does not describe the optional packaged porting tools")
@@ -94,6 +128,11 @@ def main() -> None:
 
     require(dist / "include" / "stdio.h")
     require(dist / "system" / "bin")
+    # An extracted SDK is also the Windows CRT_ROOTFS.  Both general POSIX
+    # temporary-file users (/tmp) and crt_mksh heredocs (/data/local) need
+    # their writable namespace present before any configure script runs.
+    for relative in ("tmp", "data/local", "data/local/tmp"):
+        require(dist / relative)
     if not any((dist / "system" / "bin").glob("make*")):
         raise SystemExit("C stage does not contain make")
     if not any((dist / "lib").glob("libc.a")):
@@ -119,10 +158,7 @@ def main() -> None:
         require(dist / "examples" / "gfx-simple" / "CMakeLists.txt")
         require(dist / "examples" / "bin" / f"crtgfx_window_demo{suffix}")
         if manifest.get("target", {}).get("os") == "linux":
-            dependencies = manifest.get("redistributed_dependencies", [])
-            xkbcommon = next((item for item in dependencies
-                              if item.get("name") == "xkbcommon"), None)
-            if not xkbcommon:
+            if "xkbcommon" not in redistributed:
                 raise SystemExit("Linux Simple Graphics does not declare its xkbcommon port")
             for relative in (
                     "include/xkbcommon/xkbcommon.h",
@@ -153,6 +189,36 @@ def main() -> None:
             require(dist / "examples" / "gfx-skia" / "CMakeLists.txt")
             require(dist / "examples" / "gfx-skia" / "skia_reference_scene.h")
             require(dist / "examples" / "bin" / f"crtgfx_skia_gpu_window_demo{suffix}")
+        if manifest.get("built_from", {}).get("stage") == "03-gfx-simple":
+            # The isolated transition is deliberately option-ON, unlike the
+            # ordinary cumulative packaging target that shares this stage
+            # label and remains default-OFF for Skia/FFmpeg.
+            for name in ("freetype", "ffmpeg", "skia"):
+                if name not in redistributed:
+                    raise SystemExit(
+                        f"isolated 04-gfx-media does not declare its {name} dependency")
+            for relative in (
+                    "include/freetype2",
+                    "include/libavformat/avformat.h",
+                    "include/libavcodec/avcodec.h",
+                    "include/libswresample/swresample.h",
+                    "include/libavutil/avutil.h",
+                    "include/include/core/SkSurface.h",
+                    "lib/libfreetype.a",
+                    "lib/libavformat.a", "lib/libavcodec.a",
+                    "lib/libswresample.a", "lib/libavutil.a",
+                    "lib/libskia.a",
+                    "include/crtgfx/skia.h"):
+                require(dist / relative)
+            require_any(dist / "lib", ("libcrtgfx_gpu.a",), "static crtgfx_gpu")
+            require_any(dist / "lib", ("libcrtgfx_skia.a",), "static crtgfx_skia")
+            require_any(dist / "lib", ("libcrtmedia.a",), "static crtmedia")
+            require_any(dist / "lib", ("*crtgfx_gpu*dll*", "libcrtgfx_gpu.so*",
+                                        "libcrtgfx_gpu.dylib"), "shared crtgfx_gpu")
+            require_any(dist / "lib", ("*crtgfx_skia*dll*", "libcrtgfx_skia.so*",
+                                        "libcrtgfx_skia.dylib"), "shared crtgfx_skia")
+            require_any(dist / "lib", ("*crtmedia*dll*", "libcrtmedia.so*",
+                                        "libcrtmedia.dylib"), "shared crtmedia")
     if args.stage >= "05-js":
         require(dist / "include" / "crtjs")
     print(f"CRT distribution verified: {dist}")

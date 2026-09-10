@@ -329,6 +329,9 @@ struct crt_rtl_user_process_information {
 };
 
 __declspec(dllimport) HANDLE CRT_WINAPI GetStdHandle(DWORD nStdHandle);
+/* TEMPORARY, for the 2026-09-10 handle-leak investigation -- see
+ * crt_debug_spawn_trace()'s own comment. Remove together with it. */
+__declspec(dllimport) BOOL CRT_WINAPI GetProcessHandleCount(HANDLE hProcess, DWORD* pdwHandleCount);
 __declspec(dllimport) DWORD CRT_WINAPI GetLastError(void);
 __declspec(dllimport) void CRT_WINAPI SetLastError(DWORD dwErrCode);
 __declspec(dllimport) BOOL CRT_WINAPI GetConsoleMode(HANDLE hConsoleHandle, DWORD* lpMode);
@@ -1703,6 +1706,75 @@ static void format_hex_u64(unsigned long long value, char buffer[17]) {
   buffer[16] = 0;
 }
 
+/* TEMPORARY diagnostic for the 2026-09-10 04-gfx-media isolated-stage
+ * "can't fork - try again" investigation -- off unless CRT_DEBUG_SPAWN is
+ * set, so it costs nothing in the normal case. Remove once the real root
+ * cause of the spawn failure during FreeType's `make install` is found and
+ * fixed; this is not meant to become permanent instrumentation. */
+static void crt_debug_spawn_trace(const char* label, unsigned long long value) {
+  /* Single buffer + single write(): earlier separate write() calls per
+   * field were not atomic against other processes sharing this same
+   * (inherited, redirected) stderr -- concurrent writers (a fork()ed
+   * child racing its own parent, or sibling spawns) interleaved mid-line
+   * and corrupted/lost trace lines. Also stamps the PID so lines from
+   * different processes sharing one log can be told apart. */
+  char line[160];
+  char hex[17];
+  DWORD pid = GetCurrentProcessId();
+  size_t len;
+  size_t label_len;
+
+  if (getenv("CRT_DEBUG_SPAWN") == 0) {
+    return;
+  }
+  format_hex_u64(value, hex);
+  label_len = strlen(label);
+  if (label_len > 96) {
+    label_len = 96;
+  }
+  len = 0;
+  line[len++] = 'p'; line[len++] = 'i'; line[len++] = 'd'; line[len++] = '=';
+  {
+    char pidbuf[11];
+    int i = 10;
+    DWORD v = pid;
+
+    pidbuf[10] = 0;
+    if (v == 0) {
+      pidbuf[--i] = '0';
+    }
+    while (v > 0 && i > 0) {
+      pidbuf[--i] = (char)('0' + (v % 10));
+      v /= 10;
+    }
+    memcpy(line + len, pidbuf + i, (size_t)(10 - i));
+    len += (size_t)(10 - i);
+  }
+  memcpy(line + len, " crt-debug: ", 12);
+  len += 12;
+  memcpy(line + len, label, label_len);
+  len += label_len;
+  memcpy(line + len, "=0x", 3);
+  len += 3;
+  memcpy(line + len, hex, 16);
+  len += 16;
+  line[len++] = '\n';
+  write(2, line, len);
+}
+
+/* TEMPORARY, see crt_debug_spawn_trace() above. */
+static void crt_debug_handle_count(const char* label) {
+  DWORD count = 0;
+
+  if (getenv("CRT_DEBUG_SPAWN") == 0) {
+    return;
+  }
+  if (!GetProcessHandleCount(GetCurrentProcess(), &count)) {
+    count = 0xffffffffU;
+  }
+  crt_debug_spawn_trace(label, (unsigned long long)count);
+}
+
 static int parse_hex_u64(const char* text, unsigned long long* value) {
   unsigned long long result = 0;
   int digits = 0;
@@ -2722,9 +2794,11 @@ static long remember_child_process(DWORD pid, HANDLE process) {
       child_process_table[i] = process;
       child_pid_table[i] = pid;
       child_notified_table[i] = 0;
+      crt_debug_spawn_trace("remember_child_slot", (unsigned long long)i);
       return (long)pid;
     }
   }
+  crt_debug_spawn_trace("remember_child_table_full", (unsigned long long)CRT_FD_TABLE_SIZE);
   return -EMFILE;
 }
 
@@ -2818,6 +2892,7 @@ static HANDLE find_child_process(long pid, int* index) {
 }
 
 static void forget_child_process_at(int index) {
+  crt_debug_spawn_trace("forget_child_slot", (unsigned long long)index);
   child_process_table[index] = 0;
   child_pid_table[index] = 0;
   child_notified_table[index] = 0;
@@ -3650,6 +3725,7 @@ static long close_fd_slot(int fd) {
   HANDLE handle;
 
   init_fd_table();
+  crt_debug_spawn_trace("close_fd", (unsigned long long)(unsigned int)fd);
   if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_SOCKET) {
     SOCKET socket_handle = (SOCKET)(uintptr_t)fd_table[fd];
     fd_table[fd] = 0;
@@ -4060,6 +4136,8 @@ long __crt_sys_dup(int oldfd) {
   if (oldfd >= 0 && oldfd < CRT_FD_TABLE_SIZE) {
     fd_flags[fd] = fd_flags[oldfd] & ~FD_CLOEXEC;
   }
+  crt_debug_spawn_trace("dup_old_new", ((unsigned long long)(unsigned int)oldfd << 32) |
+                                            (unsigned long long)(unsigned int)fd);
   return fd;
 }
 
@@ -4128,6 +4206,8 @@ long __crt_sys_pipe(int pipefd[2]) {
   fd_pipe_write_only[write_fd] = 1;
   pipefd[0] = read_fd;
   pipefd[1] = write_fd;
+  crt_debug_spawn_trace("pipe_read_write", ((unsigned long long)(unsigned int)read_fd << 32) |
+                                                (unsigned long long)(unsigned int)write_fd);
   return 0;
 }
 
@@ -5960,14 +6040,17 @@ long __crt_sys_fork(void) {
   void* child_process = 0;
   long result;
 
+  crt_debug_handle_count("fork_entry_handles");
   memset(old_inherit_flags, 0, sizeof(old_inherit_flags));
   fd_set_inherit_for_fork(inherit_touched, old_inherit_flags);
   result = __crt_windows_memcopy_fork(&child_pid, &child_process);
+  crt_debug_handle_count("fork_after_memcopy_handles");
   fd_restore_inherit_after_fork(inherit_touched, old_inherit_flags);
 
   if (result <= 0) {
     return result;
   }
+  crt_debug_spawn_trace("remember_from_memcopy_fork", 1);
   return remember_child_process((DWORD)child_pid, (HANDLE)child_process);
 }
 #else
@@ -6267,6 +6350,9 @@ long __crt_sys_posix_spawn(
             &startup,
             &process);
     process_error = process_created ? 0 : GetLastError();
+    if (!process_created) {
+      crt_debug_spawn_trace("native_createprocess_gle", (unsigned long long)process_error);
+    }
     restore_native_spawn_stdio_inherit(
         native_stdio_handles, native_stdio_old_flags, native_stdio_touched);
     __crt_fd_snapshot_dispose(&fd_snapshot);
@@ -6283,6 +6369,7 @@ long __crt_sys_posix_spawn(
       *pid = (long)process.dwProcessId;
       RETURN(0);
     }
+    crt_debug_spawn_trace("remember_from_native_spawn", 1);
     remembered = remember_child_process(process.dwProcessId, process.hProcess);
     if (remembered < 0) {
       CloseHandle(process.hProcess);
@@ -6293,7 +6380,9 @@ long __crt_sys_posix_spawn(
     }
     RETURN(0);
   }
+  crt_debug_handle_count("spawn_entry_handles");
   result = __crt_fd_snapshot_export(&fd_snapshot);
+  crt_debug_handle_count("after_export_handles");
   if (result != 0) {
     RETURN(result);
   }
@@ -6420,6 +6509,7 @@ long __crt_sys_posix_spawn(
   process_error = process_created ? 0 : GetLastError();
   fd_restore_inherit_after_fork(spawn_inherit_touched, spawn_old_inherit_flags);
   if (!process_created) {
+    crt_debug_spawn_trace("createprocess_gle", (unsigned long long)process_error);
     free(environment_block);
     if (fd_snapshot_ready) {
       __crt_fd_snapshot_dispose(&fd_snapshot);
@@ -6441,6 +6531,7 @@ long __crt_sys_posix_spawn(
     fd_snapshot_pipe_read = 0;
     result = fd_snapshot_prepare_child_duplicates(
         &fd_snapshot, process.hProcess, process.dwProcessId);
+    crt_debug_handle_count("after_prepare_dup_handles");
     if (result == 0) {
       result = __crt_fd_snapshot_encode(&fd_snapshot, fd_snapshot_text, sizeof(fd_snapshot_text));
       if (result != 0) {
@@ -6479,6 +6570,7 @@ long __crt_sys_posix_spawn(
   if (fd_snapshot_ready) {
     __crt_fd_snapshot_dispose(&fd_snapshot);
   }
+  crt_debug_handle_count("after_dispose_handles");
   CloseHandle(process.hThread);
   if (pid != 0 && *pid == CRT_SPAWN_PRIVATE_WAIT_PID) {
     private_wait_process = process.hProcess;
@@ -6486,6 +6578,7 @@ long __crt_sys_posix_spawn(
     *pid = (long)process.dwProcessId;
     RETURN(0);
   }
+  crt_debug_spawn_trace("remember_from_pipe_spawn", 1);
   remembered = remember_child_process(process.dwProcessId, process.hProcess);
   if (remembered < 0) {
     CloseHandle(process.hProcess);
@@ -6545,6 +6638,7 @@ long __crt_sys_waitpid(long pid, int* status, int options) {
   }
   process = find_child_process(pid, &index);
   if (process == 0) {
+    crt_debug_spawn_trace("waitpid_echild_for_pid", (unsigned long long)(unsigned long)pid);
     return -ECHILD;
   }
   child_pid = child_pid_table[index];
@@ -6564,6 +6658,7 @@ long __crt_sys_waitpid(long pid, int* status, int options) {
   }
   forget_child_process_at(index);
   CloseHandle(process);
+  crt_debug_handle_count("after_waitpid_reap_handles");
   if (status != 0) {
     *status = ((int)exit_code & 0xff) << 8;
   }

@@ -83,24 +83,6 @@ elseif(CRT_TARGET_OS STREQUAL "macos")
   # for the real -framework link this file's own AudioQueue calls need.
   list(APPEND CRTMEDIA_BACKEND_SOURCES src/arch/macos/audio_sink_coreaudio.c)
 endif()
-set(CRTMEDIA_BACKEND_OBJECTS "")
-if(CRTMEDIA_BACKEND_SOURCES)
-  add_library(crtmedia_backend_objects OBJECT ${CRTMEDIA_BACKEND_SOURCES})
-  if(CRT_TARGET_OS STREQUAL "linux" OR CRT_TARGET_OS STREQUAL "macos")
-    target_link_libraries(crtmedia_backend_objects PRIVATE crt_build_flags)
-  endif()
-  target_include_directories(crtmedia_backend_objects PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/include"
-  )
-  target_include_directories(crtmedia_backend_objects PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
-  )
-  set_target_properties(crtmedia_backend_objects PROPERTIES
-    POSITION_INDEPENDENT_CODE ON
-  )
-  set(CRTMEDIA_BACKEND_OBJECTS $<TARGET_OBJECTS:crtmedia_backend_objects>)
-endif()
-
 if(CRT_TARGET_OS STREQUAL "windows")
   # ole32.lib: the real flat-export import library for CoInitializeEx()/
   # CoCreateInstance()/CoUninitialize() (src/arch/windows/audio_sink_wasapi.c's
@@ -167,175 +149,14 @@ if(CRT_TARGET_OS STREQUAL "macos")
   set(CRTMEDIA_MACOS_FRAMEWORKS "-framework AudioToolbox" "-framework VideoToolbox" "-framework CoreVideo" "-framework CoreMedia")
 endif()
 
-add_library(crtmedia STATIC
-  src/runtime.c
-  src/frame.c
-  src/frame_convert.c
-  src/audio.c
-  src/format.c
-  src/player.c
-  src/gpu_frame.c
-  ${CRTMEDIA_BACKEND_OBJECTS}
-)
-target_link_libraries(crtmedia PRIVATE crt_build_flags)
-if(CRT_TARGET_OS STREQUAL "windows")
-  # PUBLIC, not PRIVATE: matches crtgfx's own identical reasoning (that
-  # target's own CRTGFX_WINDOWS_D3D11_LIB/_DXGI_LIB linking, ~line 1038) --
-  # crtmedia is a plain static archive, so anything that links it (every
-  # crtmedia_*_test target below, none of which mention ole32.lib
-  # themselves) needs this forwarded transitively or the final executable
-  # link fails with unresolved CoInitializeEx/CoCreateInstance/
-  # CoUninitialize symbols.
-  target_link_libraries(crtmedia PUBLIC "${CRTMEDIA_WINDOWS_OLE32_LIB}")
-  # PUBLIC, same reasoning as ole32.lib just above -- only actually needed
-  # once CRTMEDIA_ENABLE_FFMPEG's own --enable-d3d11va sticks (see the
-  # CRTMEDIA_WINDOWS_D3D11_LIB/_DXGI_LIB find_file() comment, above), but
-  # harmless to always link (a real, always-present Windows 10+ import
-  # library) rather than threading a second CRTMEDIA_ENABLE_FFMPEG guard
-  # through this already-unconditional Windows block.
-  target_link_libraries(crtmedia PUBLIC "${CRTMEDIA_WINDOWS_D3D11_LIB}" "${CRTMEDIA_WINDOWS_DXGI_LIB}")
-endif()
-if(CRT_TARGET_OS STREQUAL "macos")
-  # PUBLIC, matching the Windows ole32.lib case just above for the same
-  # "a plain static archive needs this forwarded to whatever finally
-  # links it" reason.
-  target_link_libraries(crtmedia PUBLIC ${CRTMEDIA_MACOS_FRAMEWORKS})
-endif()
-if(CRT_TARGET_OS STREQUAL "linux" AND CRTMEDIA_ENABLE_FFMPEG)
-  # --start-group/--end-group: the exact same real GNU-ld circular-
-  # archive-resolution gap libcrtgfx's own crtgfx target already
-  # documents and fixes this way (see that target's own fuller comment,
-  # same file shape) -- confirmed for real (2026-08-31) via crtmedia_
-  # demux_test's own generated link command: FFmpeg's own libavutil.a/
-  # libswresample.a always land *after* c/m on the final link line
-  # regardless of target_link_libraries() call order here, so ld.bfd's
-  # default single left-to-right archive pass already has libm.a/
-  # libc.a's own sin/cos/memchr/strspn/... behind it by the time it
-  # reaches FFmpeg's own object files that need them -- every one comes
-  # back "undefined reference" even though libm.a/libc.a both genuinely
-  # define them.
-  #
-  # A first attempt wrapped only "dl cxx" + CRTMEDIA_FFMPEG_LIBRARIES in
-  # the group, with "c m" added in a separate, earlier
-  # target_link_libraries() call (still nominally "before" the group
-  # markers in source order) -- confirmed for real this does NOT work:
-  # CMake does not preserve that inter-call ordering faithfully once
-  # transitive INTERFACE_LINK_LIBRARIES propagation is involved (ninja
-  # -t commands showed libc.a/libm.a hoisted entirely *outside* (before)
-  # the --start-group/--end-group pair, with only a second, duplicate
-  # libc.a landing inside it). crtgfx's own working precedent (this
-  # file's sibling, ~line 992-1006) puts its *entire* PRIVATE static-lib
-  # set -- CRTGFX_CRT_STATIC_LIBS (c/m/dl/cxx equivalent) included --
-  # inside one single group, not split across calls; matched exactly
-  # here: c/m/dl/cxx and the FFmpeg archives are now all inside the same
-  # start-group/end-group pair, in one contiguous sequence of calls.
-  target_link_libraries(crtmedia PRIVATE -Wl,--start-group)
-  target_link_libraries(crtmedia PRIVATE c m dl cxx)
-  target_link_libraries(crtmedia PRIVATE ${CRTMEDIA_FFMPEG_LIBRARIES})
-  target_link_libraries(crtmedia PRIVATE -Wl,--end-group)
-else()
-  target_link_libraries(crtmedia PRIVATE c m dl cxx)
-  if(CRTMEDIA_ENABLE_FFMPEG)
-    # macOS/Windows: no --start-group equivalent needed/used here yet
-    # (matching crtgfx's own Linux-only branch for the identical
-    # situation) -- plain ordering, not yet verified on either host for
-    # this specific FFmpeg-vs-libm/libc case; revisit if/when a real
-    # build surfaces the same undefined-reference gap there.
-    target_link_libraries(crtmedia PRIVATE ${CRTMEDIA_FFMPEG_LIBRARIES})
-  endif()
-endif()
-target_include_directories(crtmedia PUBLIC
-  "${CMAKE_CURRENT_SOURCE_DIR}/include"
-)
-set_target_properties(crtmedia PROPERTIES
-  OUTPUT_NAME crtmedia
-  ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-)
-
-add_library(crtmedia_shared SHARED
-  src/runtime.c
-  src/frame.c
-  src/frame_convert.c
-  src/audio.c
-  src/format.c
-  src/player.c
-  src/gpu_frame.c
-  ${CRTMEDIA_BACKEND_OBJECTS}
-)
-if(CRT_TARGET_OS STREQUAL "windows")
-  target_sources(crtmedia_shared PRIVATE $<TARGET_OBJECTS:crt_windows_dllcrt>)
-endif()
-target_link_libraries(crtmedia_shared PRIVATE crt_build_flags c_shared m_shared dl_shared cxx_shared)
-if(CRT_TARGET_OS STREQUAL "windows")
-  # Unlike crtmedia's own static archive (where a PUBLIC link on an
-  # unresolved symbol simply defers resolution to whatever links it later),
-  # crtmedia_shared is a real DLL -- Windows requires every symbol resolved
-  # at this target's own link time, so ole32.lib must be linked here
-  # directly too (matches crtmedia's own reasoning just above, and the
-  # FFmpeg CRTMEDIA_FFMPEG_LIBRARIES/crtmedia_shared block's own identical
-  # static-vs-shared distinction further down this file).
-  target_link_libraries(crtmedia_shared PRIVATE "${CRTMEDIA_WINDOWS_OLE32_LIB}")
-  target_link_libraries(crtmedia_shared PRIVATE "${CRTMEDIA_WINDOWS_D3D11_LIB}" "${CRTMEDIA_WINDOWS_DXGI_LIB}")
-endif()
-if(CRT_TARGET_OS STREQUAL "macos")
-  # crtmedia_shared is a real .dylib -- needs AudioToolbox resolved at its
-  # own link time too, matching crtmedia's own reasoning just above.
-  target_link_libraries(crtmedia_shared PRIVATE ${CRTMEDIA_MACOS_FRAMEWORKS})
-endif()
-target_include_directories(crtmedia_shared PUBLIC
-  "${CMAKE_CURRENT_SOURCE_DIR}/include"
-)
-crt_configure_shared_runtime(crtmedia_shared)
-set_target_properties(crtmedia_shared PROPERTIES
-  OUTPUT_NAME crtmedia
-  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-  ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-  WINDOWS_EXPORT_ALL_SYMBOLS ON
-)
-if(CRT_TARGET_OS STREQUAL "windows")
-  set_target_properties(crtmedia_shared PROPERTIES
-    ARCHIVE_OUTPUT_NAME crtmedia_dll
-  )
-endif()
-
-if(CRTMEDIA_ENABLE_FFMPEG)
-  # No add_dependencies(... port-build-ffmpeg) here -- confirmed for real
-  # (2026-08-31) this creates a genuine CMake target-graph cycle: the
-  # top-level "sysroot" target depends on crtmedia/crtmedia_shared (to
-  # stage them in), while port-build-ffmpeg itself depends on "sysroot"
-  # (an ordinary third-party port, built *against* the already-staged
-  # sysroot, exactly like every other porting/recipes/*.json target) --
-  # so crtmedia -> port-build-ffmpeg -> sysroot -> crtmedia is circular.
-  # The CRTMEDIA_FFMPEG_LIBRARIES/EXISTS guard above already enforces the
-  # real ordering at *configure* time (CRTMEDIA_ENABLE_FFMPEG=ON refuses
-  # to configure at all until port-build-ffmpeg has already been run
-  # once) -- matching libcrtgfx's own CRTGFX_ENABLE_SKIA precedent
-  # exactly, which uses the identical configure-time-guard-only pattern
-  # for the same reason.
-  # src/extractor.c/src/codec.c: docs/libcrtmedia_api_policy.md's decided
-  # core (crtmedia_format/crtmedia_extractor/crtmedia_codec, TODO.md's
-  # "Separate extractor and codec" item) -- src/demux.c (crtmedia_demuxer_*)
-  # stays its own, separate, already-verified implementation for now, not
-  # yet rebuilt over this new core (see that policy doc's own Decision).
-  target_sources(crtmedia PRIVATE src/demux.c src/extractor.c src/codec.c)
-  target_include_directories(crtmedia PRIVATE "${CRTMEDIA_FFMPEG_PORT_PREFIX}/include")
-  # crtmedia's own PRIVATE link libraries call (including, on Linux, the
-  # --start-group/--end-group-wrapped CRTMEDIA_FFMPEG_LIBRARIES) already
-  # happened right after add_library(crtmedia ...) above -- see that
-  # call's own comment for why it has to live there and not here.
-
-  target_sources(crtmedia_shared PRIVATE src/demux.c src/extractor.c src/codec.c)
-  target_include_directories(crtmedia_shared PRIVATE "${CRTMEDIA_FFMPEG_PORT_PREFIX}/include")
-  # Unlike crtmedia's own static archive (where an unresolved FFmpeg
-  # symbol is simply left for whatever final executable links crtmedia
-  # to resolve), crtmedia_shared is a real DLL/shared object -- Windows
-  # in particular requires every symbol resolved at link time (no lazy
-  # binding the way ELF .so allows), so this shared target must link the
-  # FFmpeg archives directly or the DLL build itself fails.
-  target_link_libraries(crtmedia_shared PRIVATE ${CRTMEDIA_FFMPEG_LIBRARIES})
-endif()
-
+# crtmedia/crtmedia_shared are defined in one shared module so the in-tree
+# build and the isolated 04-gfx-media stage cannot drift in source selection,
+# FFmpeg archive ordering, or per-host shared-runtime linkage.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/crtmedia_targets.cmake")
+set(CRTMEDIA_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
+set(CRTMEDIA_CRT_STATIC_LIBS c m dl cxx)
+set(CRTMEDIA_CRT_SHARED_LIBS c_shared m_shared dl_shared cxx_shared)
+crt_add_crtmedia_targets()
 install(TARGETS crtmedia crtmedia_shared
   ARCHIVE DESTINATION lib COMPONENT crt-media
   LIBRARY DESTINATION lib COMPONENT crt-media

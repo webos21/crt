@@ -1208,6 +1208,16 @@ if(Python3_Interpreter_FOUND)
     COMMENT "Creating the pinned 02-cxx -> 03-gfx-simple source asset and recipe"
     USES_TERMINAL
   )
+  add_custom_target(crt-stage-04-source
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_stage_source.py"
+      --root "${CMAKE_SOURCE_DIR}" --stage 04-gfx-media
+      --target-os "${CRT_TARGET_OS}"
+      --source-root "${CMAKE_BINARY_DIR}/external"
+      --output-dir "${CRT_STAGE_SOURCE_ROOT}"
+      --release-tag development --allow-dirty
+    COMMENT "Creating the pinned 03-gfx-simple -> 04-gfx-media source asset and recipe"
+    USES_TERMINAL
+  )
   add_custom_target(crt-c-dist
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
       --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
@@ -1279,11 +1289,12 @@ if(Python3_Interpreter_FOUND)
       --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
       --dest "${CRT_DIST_ROOT}/03-gfx-simple" --base "${CRT_DIST_ROOT}/02-cxx"
       --component crt-gfx-simple --cmake "${CMAKE_COMMAND}" --stage 03-gfx-simple
+      --stage-recipe "${CRT_STAGE_SOURCE_ROOT}/04-gfx-media.json"
       ${CRT_GFX_SIMPLE_DIST_ARGS}
       --target-os "${CRT_TARGET_OS}" --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" ${CRT_DIST_TOOL_ARGS} --archive
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
       --dist "${CRT_DIST_ROOT}/03-gfx-simple" --stage 03-gfx-simple
-    DEPENDS crt-libcxx-dist crt-gfx-simple-build
+    DEPENDS crt-libcxx-dist crt-gfx-simple-build crt-stage-04-source
     USES_TERMINAL
   )
 
@@ -1308,7 +1319,21 @@ if(Python3_Interpreter_FOUND)
     DEPENDS crt-gfx-build
     USES_TERMINAL
   )
-  add_custom_target(crt-media-build DEPENDS crtmedia crtmedia_shared)
+  # crt-media-test's filter below selects all five always-registered media
+  # tests, so its build aggregate must produce their executables as well as
+  # the two libraries. A real clean-tree Windows run (2026-09-09) exposed
+  # the omission: ctest found all five registrations but reported every one
+  # Not Run until the executables were built manually. Keep this symmetric
+  # with crt-gfx-simple-build's test-target dependencies above.
+  add_custom_target(crt-media-build DEPENDS
+    crtmedia
+    crtmedia_shared
+    crtmedia_frame_test
+    crtmedia_gpu_frame_test
+    crtmedia_format_test
+    crtmedia_player_test
+    crtmedia_audio_sink_test
+  )
   add_custom_target(crt-media-test
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtmedia_.*_runs"
     DEPENDS crt-media-build

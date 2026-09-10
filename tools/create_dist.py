@@ -343,7 +343,13 @@ def main() -> None:
         inherited_dependencies = json.loads(
             inherited_manifest.read_text(encoding="utf-8")
         ).get("redistributed_dependencies", [])
-    (destination / "tmp").mkdir(parents=True, exist_ok=True)
+    # These are runtime-writable namespace directories, not build outputs.
+    # Keep them in every cumulative SDK so the extracted distribution can be
+    # used directly as CRT_ROOTFS.  In particular, Windows crt_mksh uses the
+    # Android-compatible /data/local default for here-document temporary
+    # files; $TMPDIR=/tmp does not override that internal mksh default.
+    for relative in ("tmp", "data/local", "data/local/tmp"):
+        (destination / relative).mkdir(parents=True, exist_ok=True)
     for component in args.component:
         install_component(args.cmake, build_dir, destination, component)
     if args.libcxx_install:

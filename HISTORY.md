@@ -8,8 +8,201 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-10
+
+- **Fixed the packaged Windows CRT rootfs layout that prevented mksh
+  here-documents and therefore real autoconf port builds.** The isolated 04
+  run reached FreeType's unmodified `configure` and failed at its first
+  here-document with `can't create temporary file`. A minimal reproduction
+  proved that `mktemp /tmp/...` already worked, while a plain mksh heredoc
+  failed: Windows `crt_mksh` deliberately uses the Android-compatible
+  compile-time default `/data/local` for heredoc backing files, independently
+  of the port driver's `$TMPDIR=/tmp`, but `create_dist.py` had packaged only
+  `tmp/`. Every cumulative SDK now creates `tmp/`, `data/local/`, and
+  `data/local/tmp/`, and `verify_dist.py` rejects a distribution missing any
+  of that writable namespace. Rebuilt and verified Windows stages 01, 02, and
+  03; a heredoc executed successfully from the regenerated 03 SDK; and the 04
+  source asset reproduced twice with SHA-256
+  `0bd15e8f497bdfbdcacc2d14b2af68a026cd81906653a6a1dd4bfeb4be66da8e`.
+
+- **Extracted the Skia and media target construction needed by the isolated
+  `03-gfx-simple -> 04-gfx-media` build without duplicating its hard-won link
+  logic.** `libcrtgfx/cmake/crtgfx_skia_targets.cmake` now owns the Skia
+  OBJECT/static/shared target functions, parameterized for both the main tree
+  and a standalone stage project while preserving the existing Windows
+  Win32-shim, `uuid.lib`, multiple-definition and emutls-stub handling; Linux
+  archive groups; and macOS archive order and unexported-symbol policy.
+  `libcrtmedia/cmake/crtmedia_targets.cmake` similarly owns the backend OBJECT
+  library plus static/shared `crtmedia` targets, including the distinct
+  FFmpeg static-group and shared-library rules. In-tree-only helper and
+  dependency targets are guarded, while the original CMakeLists files still
+  own platform source selection, dependency discovery, installation, and
+  tests.
+
+  Verified from fresh Windows build directories: the combined gfx/media
+  target passed 3/3 gfx and 5/5 media tests, and a default-option
+  `crt-gfx-media-dist` rebuilt and verified the full cumulative `02-cxx ->
+  03-gfx-simple -> 04-gfx-media` packaging chain. A separate Skia-ON
+  configure/generate check exercised all three shared Skia target functions.
+  That check used a configure-only placeholder for the unavailable external
+  Skia archive/header root, so it is deliberately not claimed as a real Skia
+  compile/link; the pinned Skia + FreeType + FFmpeg option-ON build remains
+  the next isolated-stage acceptance step.
+
+- **Added the standalone `04-gfx-media` CMake project and verified its target
+  graph through the installed `03-gfx-simple` SDK on Windows.** The project
+  refuses missing Skia, FreeType, or FFmpeg artifacts instead of silently
+  falling back to the default-OFF product build; imports the predecessor's
+  installed window libraries; calls the shared GPU, Skia, and media target
+  modules; registers headless GPU/Skia/media coverage including a real
+  FFmpeg-backed WAV demux test; and installs both rebuildable GPU examples.
+  A configure/generate-only pass with placeholder dependency files succeeded
+  through the packaged `crt-cc`/`crt-c++` wrappers and exposed one standalone
+  wiring gap: `crtgfx_skia_shared`'s internal `find_file(uuid.lib)` retained a
+  `-NOTFOUND` cache value outside the main build, so the standalone caller now
+  supplies the same bare `uuid.lib` form used for its other Windows SDK import
+  libraries. The generated graph contains every intended library, test, demo,
+  and install target. No placeholder was compiled; real option-ON acceptance
+  remains gated on the stage builder fetching and building the pinned ports.
+
+- **Added the `04-gfx-media` isolated stage driver, keeping every external
+  dependency inside the cumulative SDK contract.**
+  `tools/build_stage_04_gfx_media.py` copies the 03 SDK to scratch space,
+  installs the pinned FreeType and FFmpeg ports directly into that staged SDK,
+  fetches and verifies the pinned Skia checkout, fetches the pinned mingw-w64
+  D3D header subset on Windows, builds Skia against the staged SDK and
+  FreeType, and then configures/builds/tests/installs the standalone 04
+  project. It records FreeType, FFmpeg, and Skia headers, libraries, notices,
+  and recipe provenance in `redistributed_dependencies`; rebuilds and runs
+  both packaged examples; invokes `verify_dist.py`; and exposes the result only
+  through the existing atomic publish pattern. The final SDK therefore carries
+  the graphics/media port libraries it links rather than borrowing them from a
+  build tree or host installation. Python compilation and the complete CLI
+  contract passed; the standalone CMake target graph was regenerated after
+  adding per-test-only shared-library search paths. The driver has not yet run
+  its multi-hour live fetch/build, so this entry claims implementation and
+  structural validation only, not isolated-stage acceptance.
+
+- **Registered the deterministic, OS-specific `04-gfx-media` source stage.**
+  `create_stage_source.py` now packages the standalone project and driver;
+  shared GPU/Skia/media modules; the exact CRT-owned sources, tests, fonts,
+  WAV fixture, and rebuildable examples; the pinned Skia/FreeType/FFmpeg
+  recipes; and the wrapper tools Skia's GN build invokes. Per-host additions
+  carry only the selected GPU/audio backend, with Windows also carrying the
+  emutls source and the complete Win32 shim (not merely its compatibility
+  header, because the real D3D include chain needs its forwarding and
+  exclusive headers). Upstream Skia/FreeType/FFmpeg bytes remain excluded and
+  are fetched by their existing pins. Generated the Windows asset twice from
+  the dirty development tree: both runs produced SHA-256
+  `f3d1d6b1007f2e39ad5821a0e3bd6d3e6d031710d8a6c5c60451465ded37655e`,
+  and direct archive inspection confirmed the critical driver, target
+  modules, recipes, test asset, emutls source, Win32 shim, and example files.
+
+- **Generalized distribution verification for declared port libraries and
+  the option-ON isolated 04 result.** `verify_dist.py` now validates every
+  `redistributed_dependencies` entry through its declared header, link,
+  runtime, notice, and provenance paths, rejects malformed or duplicate
+  declarations, and retains the Linux Simple Graphics xkbcommon requirement
+  through that common map. An `04-gfx-media` manifest whose `built_from.stage`
+  is `03-gfx-simple` must additionally carry FreeType, FFmpeg, and Skia
+  declarations; their canonical headers/static archives; all GPU/Skia/media
+  static and shared libraries; and the Skia API/example surface. The ordinary
+  default-OFF cumulative 04 package deliberately remains valid because it has
+  no isolated `built_from` marker. Python compilation passed, and the existing
+  Windows 03 and default-OFF 04 distributions both re-verified successfully.
+
+- **Connected the 04 source recipe to the correct predecessor distribution.**
+  The top-level build now exposes `crt-stage-04-source`, and
+  `crt-gfx-simple-dist` depends on it and passes its generated recipe to
+  `create_dist.py`. This mirrors the established `02-cxx`-carries-03-recipe
+  contract: the SDK that can perform a transition owns the successor recipe,
+  so the 04 recipe belongs in 03 rather than in the already-produced 04
+  package. The earlier checklist wording that suggested attaching it to
+  `crt-gfx-media-dist` was corrected at the same time. Reconfigured the fresh
+  Windows tree, built `crt-stage-04-source`, then rebuilt
+  `crt-gfx-simple-dist`; the resulting 03 SDK contains
+  `stages/recipes/04-gfx-media.json` with schema v2, the correct input/output
+  stages and Windows identity, and the 03 distribution re-verified cleanly.
+
+- **Fixed the first real isolated-04 driver failure: missing port source
+  fetch.** The first Windows run from the generated archive reached the new
+  entrypoint and failed immediately with `source not found: .../freetype-
+  2.14.3`. `crt-port-build.py` is intentionally build-only: repository mode
+  supplies sources through separate `port-fetch-*` CMake dependencies, but an
+  extracted stage has no repository target graph. The 04 driver now invokes
+  the predecessor SDK's packaged `fetch_ports.py` first, selecting FreeType
+  and FFmpeg so its dependency resolver also fetches `make`, verifying each
+  recipe checksum, and only then invokes the build driver against that exact
+  source root. This is a general stage-orchestration edge, not a FreeType
+  source or CRT/PAL failure.
+
+- **Root-caused the real isolated-04 FreeType `make install` "can't fork -
+  try again" failure: disproved the `-jN` hypothesis and found the real
+  mechanism, a Windows-PAL handle leak proportional to pipeline execution.**
+  The `--jobs 1` workaround already landed for this failure (previous
+  entry's own follow-on) turned out not to fix it: re-running the identical
+  isolated FreeType port build with `--jobs 1` already in effect reproduced
+  the exact same failure, ruling out `make -jN` concurrency as the cause.
+  Instrumented `libc/src/arch/windows/common/syscall.c` with a
+  `CRT_DEBUG_SPAWN=1`-gated diagnostic (`crt_debug_spawn_trace()`/
+  `crt_debug_handle_count()`, real Win32 `GetProcessHandleCount()` plus
+  per-call fd/handle tracing across `dup()`/`close()`/`pipe()`/
+  `__crt_sys_fork()`/`__crt_sys_posix_spawn()`) and used it to reproduce the
+  failure directly against FreeType's real `configure`, confirming mksh's
+  own `Ttoo_many_files` ("too many open files in shell") message and
+  repeated toybox `expr`/`basename` "inaccessible or not found" failures
+  are both downstream of the same cause: this project's own
+  `CRT_FD_TABLE_SIZE` (64) fd-table cap being exhausted by a real,
+  unbounded handle leak, not an actual Windows-imposed resource limit
+  (`GetProcessHandleCount()` on the live process showed it climbing past
+  130 well before Windows itself would ever complain).
+
+  Narrowed the leak to pipeline execution specifically with a minimal,
+  deterministic, FreeType-independent repro: from any extracted
+  `03-gfx-simple` SDK, `mksh.exe -c 'i=0; while [ $i -lt 10 ]; do echo hi |
+  /system/bin/sed.exe "s/hi/bye/" >/dev/null; i=$((i+1)); done'` leaks
+  exactly +1 real Windows handle per loop iteration; the identical loop
+  using a plain external command, or a redirected subshell with no pipe,
+  leaks nothing (verified both, repeatedly, zero growth). This explains why
+  FreeType -- whose real autoconf `configure` is unusually pipeline-heavy,
+  via the `AS_LINENO` self-test's `sed | sed` chain and many `` `expr ...`
+  `` command-substitution calls -- is the first real port in this whole
+  stage chain to run enough pipeline activity to hit the 64-slot cap; ports
+  landed earlier (zlib, libpng, xz, libffi, mbedtls, ...) apparently never
+  exercised pipes densely enough to expose this.
+
+  Traced the leak down to inside a single pipe-mode `__crt_sys_posix_spawn()`
+  call: its own `spawn_entry_handles` -> `after_waitpid_reap_handles`
+  checkpoints (the full spawn-fd-snapshot-export/`fd_snapshot_prepare_
+  child_duplicates()`/dispose/wait-reap cycle for one pipeline stage) net a
+  persistent +5 real handles that never unwind back to the pre-spawn
+  baseline, even though every individual `DuplicateHandle()`/`CloseHandle()`
+  pair inspected by hand in that code appeared balanced on paper. Not yet
+  isolated to the exact unbalanced line -- that is the concrete next step,
+  not a re-investigation from scratch; the diagnostic and the exact repro
+  command above are reusable as-is. See `TODO.md`'s in-progress note for
+  the full detail. Verified the diagnostic itself is inert and safe on the
+  ordinary (non-debug) path: full Windows `ctest` after landing it passed
+  124/127, the only 3 failures being pre-existing `libstdc++` test binaries
+  this target set doesn't build (unrelated, not a regression).
+
 
 ## 2026-09-09
+
+- **Fixed `crt-media-test` failing to build the five tests it runs.** The
+  top-level `crt-media-build` aggregate depended only on `crtmedia` and
+  `crtmedia_shared`, while `crt-media-test` immediately ran CTest's broad
+  `^crtmedia_.*_runs` filter. From a build tree where the test executables
+  did not already exist, CTest therefore registered all five tests but
+  reported each one `Not Run`/`Unable to find executable`; manually building
+  the five targets first merely hid the missing dependency edge. Added
+  `crtmedia_frame_test`, `crtmedia_gpu_frame_test`, `crtmedia_format_test`,
+  `crtmedia_player_test`, and `crtmedia_audio_sink_test` to
+  `crt-media-build`'s own `DEPENDS`, matching the already-fixed
+  `crt-gfx-simple-build` pattern. Verified from a new, separately configured
+  Windows build directory with no reusable test executables: invoking only
+  `cmake --build ... --target crt-media-test` built all five binaries and
+  passed 5/5 tests without a preceding manual build step.
 
 - **Fixed `crtgfx-wayland-smoke`'s own `CRT_SYSROOT` pointing at a
   nonexistent flat `sysroot/` directory.** `cmake --build --preset

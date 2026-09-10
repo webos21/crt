@@ -199,43 +199,101 @@ the stage entrypoint script via their own already-pinned mechanisms
 `crt-port-build.py`), not bundled into the stage-source tarball the way
 03's small xkbcommon dependency was -- Skia alone is ~189MB even shallow.
 
-Landed so far (Windows-verified, `crt-gfx-media-dist` still passes):
-`libcrtgfx/cmake/crtgfx_gpu_sources.cmake` (GPU source-file lists) and
-`libcrtgfx/cmake/crtgfx_gpu_targets.cmake` (`crtgfx_gpu`/`crtgfx_gpu_shared`
-target definitions, as `if(TARGET ...)`-guarded functions so the same
-module works from both the in-tree build and the future standalone stage
-project). `crtgfx_skia`/`crtgfx_skia_shared` are NOT extracted yet --
-they carry even more real, hard-won link-order logic (Windows
-`uuid.lib`/`--allow-multiple-definition`/`emutls_link_stubs.c`, macOS
-reversed archive-scan order, Linux `--start-group`/`--end-group`) and
-should get the same shared-module treatment before writing the standalone
-`distribution/stages/04-gfx-media/CMakeLists.txt`, not hand-duplicated.
-Remaining: the crtgfx_skia extraction, a `crtmedia` equivalent (not yet
-investigated for the same shared-vs-duplicate risk -- check before
-assuming it's simple), the new standalone CMakeLists.txt, a new
-`tools/build_stage_04_gfx_media.py`, `create_stage_source.py`'s
-`STAGES["04-gfx-media"]` entry, generalizing `verify_dist.py`'s
-xkbcommon-only `redistributed_dependencies` check, and the top-level
-`crt-stage-04-source` CMake target -- then a real end-to-end isolated
-build (expect multi-hour Skia/FFmpeg build time and 1-3 real bugs found
-along the way, matching every prior stage transition's own pattern). Keep
-the separately listed Windows C++ initialization failure open; the stage
+Landed so far (Windows-verified): shared modules now own the reusable target
+definitions for all three layers needed by the standalone stage project:
+`libcrtgfx/cmake/crtgfx_gpu_{sources,targets}.cmake`,
+`libcrtgfx/cmake/crtgfx_skia_targets.cmake`, and
+`libcrtmedia/cmake/crtmedia_targets.cmake`. The Skia module retains the
+existing Windows `uuid.lib`/`--allow-multiple-definition`/
+`emutls_link_stubs.c`, macOS reversed archive-scan order, and Linux
+`--start-group`/`--end-group` rules; the media module retains the backend
+OBJECT-library boundary and FFmpeg static/shared link rules. In-tree-only
+targets are guarded so the same modules can be called by the main build and
+the future standalone project. Fresh Windows builds passed gfx 3/3 and media
+5/5 tests; a fresh default-option `crt-gfx-media-dist` rebuilt and verified
+the complete `02-cxx -> 03-gfx-simple -> 04-gfx-media` packaging chain. A
+Skia-ON configure/generate pass also exercised all three extracted Skia
+functions; the real Skia compile/link remains part of the isolated option-ON
+acceptance below. The standalone
+`distribution/stages/04-gfx-media/CMakeLists.txt` is also present and passes
+a Windows configure/generate check through the installed 03 SDK wrappers. It
+requires Skia, FreeType, and FFmpeg artifacts up front, consumes the installed
+03 window libraries, registers GPU/Skia/media smoke tests, and installs the
+GPU/Skia examples; this check used placeholders and therefore is structural
+evidence only, not option-ON build acceptance.
+
+Stage checklist (remove completed items from this in-progress list only after
+their result is recorded in `HISTORY.md`):
+
+- [x] Extract reusable GPU, Skia, and crtmedia target modules and preserve the
+  existing per-host link rules.
+- [x] Add the option-ON standalone `04-gfx-media` CMake project and verify its
+  generated Windows target graph through the installed 03 SDK wrappers.
+- [x] Add `tools/build_stage_04_gfx_media.py`: copy the predecessor SDK, build
+  FreeType and FFmpeg through the packaged port driver, fetch/build pinned
+  Skia, configure/build/test/install the standalone project, rebuild its two
+  packaged examples, verify the result, and publish atomically.
+- [x] Register `STAGES["04-gfx-media"]` and its complete CRT-owned source,
+  recipe, test, example, Win32-shim, and port-library inputs in
+  `create_stage_source.py`.
+- [x] Generalize `verify_dist.py`'s redistributed-dependency validation and
+  require the option-ON GPU/Skia/media artifacts and examples in stage 04.
+- [x] Add `crt-stage-04-source` and attach its successor recipe to the
+  predecessor `crt-gfx-simple-dist` SDK.
+- [ ] Run the real Windows isolated acceptance from freshly extracted inputs
+  under a path containing spaces; expect a multi-hour Skia/FFmpeg build and
+  record every discovered defect before removing this in-progress section.
+  The `--jobs 1` fix already in `build_stage_04_gfx_media.py` does **not**
+  fix the "can't fork - try again" failure -- confirmed directly (2026-09-10)
+  by reproducing the identical failure with `--jobs 1` already in effect.
+  Root-caused instead, with hard evidence: a real, general Windows-PAL
+  handle leak in `__crt_sys_posix_spawn()`'s fd-snapshot export/child-
+  duplicate path (`libc/src/arch/windows/common/syscall.c`), proportional
+  to *pipeline* (`cmd1 | cmd2`) execution specifically, not to `make -jN`
+  concurrency at all. Minimal, deterministic repro (no FreeType/configure
+  needed): from an extracted `03-gfx-simple` SDK, with `CRT_ROOTFS`/`PATH`
+  pointed at it,
+  `mksh.exe -c 'i=0; while [ $i -lt 10 ]; do echo hi | /system/bin/sed.exe
+  "s/hi/bye/" >/dev/null; i=$((i+1)); done'` leaks exactly +1 real Windows
+  handle (via `GetProcessHandleCount`) per loop iteration; the identical
+  loop with a plain external command or a redirected subshell (no pipe)
+  leaks nothing. FreeType's real autoconf `configure` is pipeline-heavy
+  (the `AS_LINENO` self-test's `sed | sed` chain, many `` `expr ...` ``
+  substitutions) and is the first real port in this stage chain to run
+  enough of that to exhaust `CRT_FD_TABLE_SIZE` (64), which is what
+  actually produces the misleading "can't fork"/"expr: inaccessible or
+  not found" symptom. Traced the leak down to inside a single pipe-mode
+  `__crt_sys_posix_spawn()` call (`spawn_entry_handles` -> `after_
+  waitpid_reap_handles` nets +5 handles for one isolated pipeline stage
+  that should return to baseline) but not yet to the exact unbalanced
+  `DuplicateHandle`/`CloseHandle` line inside the fd-snapshot export/
+  `fd_snapshot_prepare_child_duplicates()`/dispose sequence -- that is the
+  next concrete step, not a full re-investigation. A `CRT_DEBUG_SPAWN=1`-
+  gated diagnostic (`crt_debug_spawn_trace()`/`crt_debug_handle_count()` in
+  `syscall.c`, zero cost when unset, verified not to regress the full
+  Windows `ctest` suite -- 124/127 passed, the only 3 failures being
+  pre-existing unrelated `libstdc++` test binaries this target set doesn't
+  build) is already in place and is exactly what produced the repro above;
+  reuse it rather than re-deriving instrumentation from scratch.
+- [ ] Repeat the final isolated acceptance on Linux and macOS before calling
+  the transition complete. WSL `Ubuntu-26.04` already has CMake, Ninja,
+  Clang, and Python, but this checkout currently has no Linux 03 predecessor
+  SDK; build the Linux 01->02->03 chain there first. Treat CPU/FFmpeg/Skia
+  results separately from Vulkan/native-Wayland live-presentation evidence.
+
+Keep the separately listed Windows C++ initialization failure open; the stage
 runner deliberately has no retry that could hide it.
 
-A real, pre-existing, unrelated gap was found and flagged while verifying
-this (not yet fixed): `crt-media-test`'s own DEPENDS never builds its 5
-test executables first (same class of gap `crt-gfx-test` already had fixed
-a day earlier) -- see the queued background task, or fix directly if
-picked up before that runs.
+The pre-existing `crt-media-test` dependency gap found during this work is
+fixed: `crt-media-build` now builds all five executables that its CTest filter
+runs, and a fresh Windows invocation passed 5/5 without a manual precursor
+build (full evidence in `HISTORY.md`).
 
 Acceptance must start from freshly extracted archives in a path containing
 spaces, reject access to in-tree CRT headers/libraries/build artifacts,
 rebuild and run the packaged examples, and exercise representative configure,
 amalgamation, and dependency-chain ports -- apply the same bar to
-`03-gfx-simple -> 04-gfx-media`. Also root-cause the Windows packaged-mksh
-here-document temporary-file diagnostic before treating configure probe
-results as authoritative; zlib completes and passes static/shared round-trip
-tests, but its configure log still contains that diagnostic.
+`03-gfx-simple -> 04-gfx-media`.
 
 The first concrete implementation of the redistributable-dependency rule is
 in place for Linux Simple Graphics: `03-gfx-simple` carries libxkbcommon's
