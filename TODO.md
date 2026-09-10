@@ -324,32 +324,81 @@ their result is recorded in `HISTORY.md`):
      `system/bin/sh<suffix>` before the alias loops run (verified:
      `sh.exe` is now byte-identical to `mksh.exe`, in `system/bin/`,
      `bin/`, and `usr/bin/` alike).
-  3. **A third, different, not-yet-root-caused bug immediately behind
-     these two:** with both packaging fixes in place, `install-sh` now
-     actually runs, gets much further again, and hits `./builds/unix/
-     libtool: test: .: unexpected operator/operand` during the shared
-     library's dlname-destination-directory check -- the `test -d
-     "$dldir" || mkdir -p "$dldir"` line libtool generates for its
-     install-mode `-dlopen` handling. The variable being tested/echoed
-     comes out containing roughly 120 stray, individually-printed `.`
-     tokens before the real path (`../bin`), and the resulting `mkdir -p`
-     creates the wrong directory (`.../lib/.` instead of `.../bin`),
-     which is why the following `install-sh -c ... ../bin/libfreetype-
-     6.dll` then fails with "Is not a directory". Not yet investigated
-     further -- likely a real mksh word-splitting/`test`-builtin/
-     parameter-expansion interaction bug hit by this specific libtool-
-     generated code shape, now that libtool's install mode is actually
-     exercised against mksh instead of dying earlier on the two bugs
-     above. Next session: minimize a standalone mksh repro of whatever
-     shell construct produces this (candidates: the specific
-     `case`/parameter-expansion idiom libtool's own `func_dirname`-style
-     logic uses, or a `$dldir`-building loop) before touching
-     `shell/mksh/src/*` blindly.
+  3. **A third, different bug immediately behind these two -- root-caused,
+     fix strategy not yet decided (needs a call on which layer should own
+     it; see below, not implemented yet).** With both packaging fixes in
+     place, `install-sh` now actually runs, gets much further again, and
+     hits `./builds/unix/libtool: test: .: unexpected operator/operand`
+     during the shared library's dlname-destination-directory check.
+     Confirmed this is **not** an mksh bug: isolated, minimal mksh tests
+     of the exact parameter expansions involved (`${1%/*}`, both as a
+     named variable and as a raw positional parameter, matching
+     libtool's own `func_dirname`) all behave correctly. The real cause
+     is in GNU libtool's own generated `func_normal_abspath` (vendored
+     per-port as `builds/unix/ltmain.sh`, FreeType ships 2.5.4): its
+     absolute-path classification `case $func_normal_abspath_tpath in
+     ///*) ;; //*) ...;; /*) ;; *) # relative, prepend $cwd ;; esac` only
+     recognizes a leading `/` as absolute -- confirmed directly (`case
+     "C:/Users/.../install6/lib" in /*) ... ; *) echo RELATIVE; esac`
+     prints RELATIVE). This PAL represents every Windows absolute path as
+     `C:/...` (drive letter + forward slashes, never remapped under a
+     synthetic POSIX root), so `func_normal_abspath` treats every such
+     path as *relative* and prepends `` `pwd` ``, producing a garbled,
+     doubled path (real cwd's component chain glued in front of the
+     already-absolute target) -- which is what the ~120 stray `.` lines
+     actually are: `func_relative_path`'s own ascend-the-tree loop
+     legitimately iterating once per bogus extra path component that
+     doubling created, each iteration verbose-echoed by libtool as
+     `install: .`. GNU libtool's own codebase already has the right
+     idiom for this elsewhere in the exact same file (`ltmain.sh:977`:
+     `case ... in [\\/]*|[A-Za-z]:\\*) ;; esac`, used by a *different*
+     function) -- `func_normal_abspath` was just never given the same
+     treatment upstream. This is reached because FreeType's `configure`
+     ends up with `$bindir` set, taking libtool's `func_relative_path`
+     branch instead of its simpler hardcoded `../bin` fallback; but
+     `func_normal_abspath` is called throughout libtool for other
+     purposes too (RPATH, `-L`/`-I` canonicalization, ...), so this is a
+     structural incompatibility every autoconf/libtool-based Windows port
+     can hit, not a FreeType-only one-off.
+
+     **Fix strategy -- needs a decision, not implemented yet:**
+     (a) Patch each port's vendored `ltmain.sh` via `crt-port-build.py`'s
+     existing `apply_source_patches()` mechanism (recipe JSON
+     `build.patches`, already used for other libtool/autoconf
+     compatibility fixes -- see its call site comments) to also treat
+     `[A-Za-z]:[\\/]*` as absolute in `func_normal_abspath`. Narrow,
+     precedented (mirrors libtool's own established idiom), reusable
+     across ports via the same recipe-JSON mechanism already in place --
+     but the fix isn't just the classification `case` arm: the rest of
+     the function's `sed`-based component-walking loop
+     (`_G_pathcar`/`_G_pathcdr`, anchored on a leading `/`) also assumes
+     POSIX-rooted paths, so a naive patch that only fixes the
+     classification without also handling the drive-letter prefix
+     through the rest of the algorithm risks a *worse*, silent bug (an
+     effectively infinite loop) instead of today's visible failure --
+     must be worked out and tested carefully, one port's `ltmain.sh` at a
+     time.
+     (b) Give this PAL a real POSIX-rooted view of Windows drives (e.g.
+     `/c/...` <-> `C:/...`, matching MSYS2/Cygwin/WSL), and have
+     `crt-port-build.py` pass that form to `configure`/`--prefix`/etc.
+     for autoconf/libtool-driven ports specifically. Fixes the root
+     mismatch generally (any future libtool internal that assumes
+     POSIX-absolute paths keeps working, not just this one function) but
+     is a broad, higher-risk change to this PAL's fundamental path
+     representation, touching `translate_path_for_host()` and everywhere
+     that depends on it.
+     (c) A narrow, single-port workaround: avoid triggering
+     `func_relative_path` at all for this port (e.g. don't pass
+     `--bindir` explicitly) so libtool falls back to its simple
+     hardcoded `../bin` heuristic. Fast, but doesn't generalize --
+     `func_normal_abspath` is reachable from other libtool code paths
+     too, so this class of bug will likely resurface on a later port
+     (FFmpeg, Skia) regardless.
   The `CRT_DEBUG_SPAWN=1`-gated diagnostic and `crt_createprocess_with_retry()`
-  are deliberately still in place, both for bug 3 above and because the
-  retry itself is reasonable, low-risk defense-in-depth for genuine
-  transient `CreateProcessA` flakiness even though none of these three
-  turned out to be transient.
+  are deliberately still in place: harmless, low-risk defense-in-depth for
+  genuine transient `CreateProcessA` flakiness even though none of these
+  three turned out to be transient, and useful if bug 3's eventual fix
+  needs the same kind of evidence-gathering.
 - [ ] Repeat the final isolated acceptance on Linux and macOS before calling
   the transition complete. WSL `Ubuntu-26.04` already has CMake, Ninja,
   Clang, and Python, but this checkout currently has no Linux 03 predecessor
