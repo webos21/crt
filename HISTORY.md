@@ -186,6 +186,60 @@ substantive update.
   124/127, the only 3 failures being pre-existing `libstdc++` test binaries
   this target set doesn't build (unrelated, not a regression).
 
+- **Fixed the real cause of the pipeline handle leak from the entry above:
+  `close_fd_slot()` silently no-opped `CloseHandle()` for fd 0/1/2.**
+  Continued the investigation to the actual unbalanced line rather than
+  stopping at "traced to inside `__crt_sys_posix_spawn()`". Precise
+  per-substep `GetProcessHandleCount()` checkpointing (new checkpoints
+  bracketing `CreatePipe()`, `CreateProcessA()`, and the parent's post-fork
+  `close(0)`) isolated the jump to a single, minimal, CRT-PAL-free repro:
+  a bare Win32 `CreateProcessA(..., bInheritHandles=TRUE, CREATE_SUSPENDED,
+  ...)` costs a real, one-time (not per-call) handle-table warm-up (+5
+  after accounting for the process/thread handles it returns) -- a genuine
+  Windows characteristic, not a bug, and a red herring for this
+  investigation. The real, per-iteration leak turned out to be
+  `libc/src/arch/windows/common/syscall.c`'s `close_fd_slot()`: fd 0/1/2
+  unconditionally returned before ever calling `CloseHandle()`, on the
+  unstated assumption that fd number implies "the process's real original
+  std handle, don't touch it." That assumption breaks the instant fd 0-2
+  has been redirected (`dup2()`, a pipe, `open()`) -- at that point the
+  handle sitting in the slot is whatever was last put there, exactly as
+  closeable as any other fd -- and mksh's own `XPCLOSE` (used by the
+  `TPIPE` case in `shell/mksh/src/exec.c` to drop the parent's now-unneeded
+  copy of a pipe's read end from fd 0, right after forking/spawning the
+  last stage of a pipeline) hits exactly that case on every single
+  pipeline. Confirmed by isolating a matching, independent correctness gap
+  in the same code path while investigating (not the leak's cause, but a
+  real bug on its own): the `TPIPE` case saved the original fd 0 via
+  `e->savefd[0] = savefd(0)` before the loop but, unlike fd 1
+  (`restfd(1, e->savefd[1])`, already existing), never explicitly restored
+  it -- relying on `quitenv()`, which a `while`/`for` loop body never
+  triggers between iterations, so the *next* iteration's fresh `savefd(0)`
+  silently overwrote the previous one before it was ever restored. Fixed
+  both: added the missing `restfd(0, e->savefd[0])` symmetrically in
+  `exec.c`, and made `close_fd_slot()` actually call `CloseHandle()` for
+  fd 0-2 -- but only once confirming, via a live `GetStdHandle()`
+  comparison (this PAL never calls `SetStdHandle()`, so it stays an exact,
+  current check rather than a fd-number proxy for "original"), that the
+  handle in the slot is not genuinely still the untouched original std
+  handle. The naive, unconditional version of the `close_fd_slot()` fix
+  (no `GetStdHandle()` guard) broke a real, reproduced case immediately --
+  a `crt-c++.cmd`-driven libcxxabi compile started failing outright -- so
+  the guard is load-bearing, not defensive-programming caution.
+
+  Verified thoroughly: the minimal repro from the entry above now holds
+  `GetProcessHandleCount()` perfectly flat across 30 loop iterations
+  (previously +1/iteration, confirmed via the same instrumentation); a
+  fresh `01-c -> 05-js` cumulative dist rebuild (the same one that broke
+  under the naive fix) passes cleanly end to end; the full Windows `ctest`
+  suite still passes 124/127, identical to before this fix (the same 3
+  pre-existing, unrelated `libstdc++` gaps, no new regression). Re-running
+  the real isolated FreeType port build against the fixed SDK gets far
+  further than before (hundreds of successful `install-sh` installs
+  instead of failing within the first few), but still eventually hits a
+  second, different, not-yet-root-caused failure -- see `TODO.md`'s
+  in-progress note for that one; it is not a recurrence of this bug.
+
 
 ## 2026-09-09
 

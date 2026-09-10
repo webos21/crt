@@ -243,38 +243,62 @@ their result is recorded in `HISTORY.md`):
 - [ ] Run the real Windows isolated acceptance from freshly extracted inputs
   under a path containing spaces; expect a multi-hour Skia/FFmpeg build and
   record every discovered defect before removing this in-progress section.
-  The `--jobs 1` fix already in `build_stage_04_gfx_media.py` does **not**
-  fix the "can't fork - try again" failure -- confirmed directly (2026-09-10)
-  by reproducing the identical failure with `--jobs 1` already in effect.
-  Root-caused instead, with hard evidence: a real, general Windows-PAL
-  handle leak in `__crt_sys_posix_spawn()`'s fd-snapshot export/child-
-  duplicate path (`libc/src/arch/windows/common/syscall.c`), proportional
-  to *pipeline* (`cmd1 | cmd2`) execution specifically, not to `make -jN`
-  concurrency at all. Minimal, deterministic repro (no FreeType/configure
-  needed): from an extracted `03-gfx-simple` SDK, with `CRT_ROOTFS`/`PATH`
-  pointed at it,
-  `mksh.exe -c 'i=0; while [ $i -lt 10 ]; do echo hi | /system/bin/sed.exe
-  "s/hi/bye/" >/dev/null; i=$((i+1)); done'` leaks exactly +1 real Windows
-  handle (via `GetProcessHandleCount`) per loop iteration; the identical
-  loop with a plain external command or a redirected subshell (no pipe)
-  leaks nothing. FreeType's real autoconf `configure` is pipeline-heavy
-  (the `AS_LINENO` self-test's `sed | sed` chain, many `` `expr ...` ``
-  substitutions) and is the first real port in this stage chain to run
-  enough of that to exhaust `CRT_FD_TABLE_SIZE` (64), which is what
-  actually produces the misleading "can't fork"/"expr: inaccessible or
-  not found" symptom. Traced the leak down to inside a single pipe-mode
-  `__crt_sys_posix_spawn()` call (`spawn_entry_handles` -> `after_
-  waitpid_reap_handles` nets +5 handles for one isolated pipeline stage
-  that should return to baseline) but not yet to the exact unbalanced
-  `DuplicateHandle`/`CloseHandle` line inside the fd-snapshot export/
-  `fd_snapshot_prepare_child_duplicates()`/dispose sequence -- that is the
-  next concrete step, not a full re-investigation. A `CRT_DEBUG_SPAWN=1`-
-  gated diagnostic (`crt_debug_spawn_trace()`/`crt_debug_handle_count()` in
-  `syscall.c`, zero cost when unset, verified not to regress the full
-  Windows `ctest` suite -- 124/127 passed, the only 3 failures being
-  pre-existing unrelated `libstdc++` test binaries this target set doesn't
-  build) is already in place and is exactly what produced the repro above;
-  reuse it rather than re-deriving instrumentation from scratch.
+  **The original "can't fork - try again" failure is root-caused and
+  fixed (2026-09-10-11), not just diagnosed.** Real cause:
+  `close_fd_slot()` (`libc/src/arch/windows/common/syscall.c`) silently
+  skipped `CloseHandle()` for fd 0/1/2 unconditionally, on the assumption
+  fd number implied "the process's original std handle" -- wrong once
+  fd 0-2 had been redirected (dup2/pipe), which is exactly what mksh's own
+  `XPCLOSE` (dropping the parent's copy of a pipe's read end from fd 0
+  after forking the last stage of a pipeline) does. That silently orphaned
+  the real handle every `cmd1 | cmd2` pipeline execution. Fixed to compare
+  against `GetStdHandle()` live (this PAL never calls `SetStdHandle()`, so
+  it stays an exact original-handle check) and only skip the close when fd
+  0-2 is genuinely still the original. A companion mksh correctness fix
+  (`shell/mksh/src/exec.c`'s `TPIPE` case) now also explicitly restores fd
+  0 via `restfd(0, e->savefd[0])` after a pipeline, mirroring the existing
+  fd 1 restore, instead of leaving it to `quitenv()` (which a `while`/`for`
+  loop body never triggers between iterations) -- a real, independent
+  stdin-correctness gap, confirmed not to be the leak's own cause but worth
+  keeping regardless. Verified: the minimal repro (`mksh.exe -c 'i=0;
+  while [ $i -lt 30 ]; do echo hi | /system/bin/sed.exe "s/hi/bye/"
+  >/dev/null; i=$((i+1)); done'`) now holds `GetProcessHandleCount()`
+  perfectly flat across all 30 iterations (was +1/iteration before); the
+  full `01-c -> 05-js` cumulative dist chain still rebuilds cleanly
+  (including a `crt-c++.cmd`-driven libcxxabi compile that broke outright
+  under an earlier, overly-blunt attempt at this fix -- see the live
+  `GetStdHandle()` check above, added specifically to fix that); the full
+  Windows `ctest` suite still passes 124/127 (same 3 pre-existing, unrelated
+  `libstdc++` gaps as before, no regression). The `CRT_DEBUG_SPAWN=1`-gated
+  diagnostic (`crt_debug_spawn_trace()`/`crt_debug_handle_count()` in
+  `syscall.c`) that found this is still in place, deliberately kept (not
+  yet cleaned up) because of the second issue below.
+
+  **A second, different, not-yet-root-caused failure surfaces further into
+  the real isolated FreeType `make install`, now that the leak no longer
+  masks it.** With the fix above, the identical isolated FreeType port
+  build gets *far* further (hundreds of successful `install-sh` header/
+  library installs, not failing within the first few commands) before
+  hitting `CreateProcessA` failing with `GetLastError()=2`
+  (`ERROR_FILE_NOT_FOUND`) -- which mksh's own `crt_mksh_spawn_exec_child()`
+  fast path surfaces as the same generic "can't fork - try again" message,
+  making it look superficially like a recurrence of the fixed bug. Seen
+  twice in one run, both times at the *exact same logical point*:
+  installing `objs/.libs/libfreetype-6.dll` to `.../lib/../bin/` (the
+  `install-sh` binary itself, an absolute path that succeeded moments
+  earlier for the `.la`/`.dll.a` install of the same library -- not a
+  literally-missing file). Not yet determined whether this is a real,
+  reproducible PAL bug (e.g. a `mkdir -p .../bin` race right before this
+  specific spawn, since this is the first install target under a freshly-
+  created subdirectory) or host-environment flakiness (real-time antivirus
+  scanning interfering with a rapidly-spawned small EXE, a known class of
+  Windows flakiness unrelated to this PAL) -- re-run the exact same
+  isolated port build again first to check whether it recurs at the same
+  point (deterministic, real bug) or moves/disappears (environmental); only
+  then decide between root-causing it directly or adding a narrowly-scoped,
+  explicitly-logged retry specifically for this `CreateProcessA` failure
+  mode (not a blanket retry -- `TODO.md`'s own long-standing rule that the
+  stage runner must not silently hide a real failure still applies).
 - [ ] Repeat the final isolated acceptance on Linux and macOS before calling
   the transition complete. WSL `Ubuntu-26.04` already has CMake, Ninja,
   Clang, and Python, but this checkout currently has no Linux 03 predecessor

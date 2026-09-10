@@ -282,6 +282,28 @@ execute(struct op * volatile t,
 		i = exchild(t, flags | XPCLOSE | XPIPEST, xerrok, 0);
 		if (!(flags&XBGND) && !(flags&XXCOM))
 			rv = i;
+		/*
+		 * stdin of first: restore it here, mirroring stdout's own
+		 * restfd(1, ...)/e->savefd[1]=0 pair above, rather than
+		 * leaving it to quitenv() (which only runs once the current
+		 * execution environment is popped). A `while`/`for` loop body
+		 * runs every iteration's TPIPE in the *same*, reused
+		 * environment, so without this the next iteration's
+		 * e->savefd[0] = savefd(0) above overwrites this iteration's
+		 * still-unrestored value before quitenv() ever sees it,
+		 * leaving fd 0 wrong (still the prior pipe's read end, not
+		 * this shell's real stdin) for anything run later in the same
+		 * environment -- a real, independent correctness gap, not
+		 * just about the fd/handle leak below. (On this project's own
+		 * Windows PAL this specific fd also happened to be a genuine
+		 * leaked handle on its own account -- see close_fd_slot()'s
+		 * own comment in libc/src/arch/windows/common/syscall.c for
+		 * the actual root cause and fix for that; this restfd() call
+		 * is correct and worth keeping regardless of that separate
+		 * bug, on any host.)
+		 */
+		restfd(0, e->savefd[0]);
+		e->savefd[0] = 0;
 		break;
 
 	case TLIST:

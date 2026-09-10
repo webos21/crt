@@ -3766,7 +3766,38 @@ static long close_fd_slot(int fd) {
   if (handle == INVALID_HANDLE_VALUE) {
     return -EBADF;
   }
-  if (fd >= 0 && fd <= 2) {
+  /* fd 0/1/2 used to skip CloseHandle() entirely here (return before
+   * reaching it) whenever fd was 0-2, presumably out of caution about
+   * releasing the process's real original console std handle. That
+   * protected the wrong thing: fd_table[fd] holds whatever handle
+   * *currently* occupies the slot, which after any redirect/dup2/pipe is
+   * no longer the original std handle at all -- it's exactly as closeable
+   * as any other fd's handle, and by the time close() targets fd 0-2
+   * explicitly (e.g. mksh's own `XPCLOSE`, used after forking/spawning the
+   * last stage of a pipeline to drop the parent's now-unneeded copy of the
+   * pipe's read end from fd 0) that is always the case, not the original
+   * handle. Unconditionally no-opping the real release left that handle
+   * open with no fd pointing at it -- a real, measurable Windows handle
+   * leak: exactly +1 real handle (via GetProcessHandleCount()) per
+   * `cmd1 | cmd2` pipeline executed, confirmed with a minimal repro
+   * (`while ...; do echo hi | sed ... >/dev/null; done`) and root-caused
+   * to this exact skip, not to `make -jN` concurrency as first suspected
+   * (see HISTORY.md's 2026-09-10 entries). Eventually exhausts this
+   * project's own small CRT_FD_TABLE_SIZE and surfaces as a misleading
+   * "can't fork - try again"/EMFILE-style failure deep into a
+   * pipeline-heavy autoconf `configure` run.
+   *
+   * Still protect the one case that *is* real: fd 0-2 genuinely still
+   * holding the original, never-redirected std handle (nothing in this
+   * PAL ever calls SetStdHandle(), so GetStdHandle() keeps returning that
+   * original value regardless of what fd_table[]/dup2()/pipe() have done
+   * to the fd *number* -- an exact, live equality check, not a fd-number
+   * proxy for it). Closing that one for real broke a real, reproduced
+   * case (a `crt-c++.cmd`-driven libcxxabi compile started failing
+   * outright once the blanket skip above was simply removed). */
+  if ((fd == 0 && handle == GetStdHandle(STD_INPUT_HANDLE)) ||
+      (fd == 1 && handle == GetStdHandle(STD_OUTPUT_HANDLE)) ||
+      (fd == 2 && handle == GetStdHandle(STD_ERROR_HANDLE))) {
     fd_table[fd] = 0;
     fd_kind[fd] = CRT_FD_KIND_NONE;
     fd_flags[fd] = 0;
@@ -6383,6 +6414,7 @@ long __crt_sys_posix_spawn(
   crt_debug_handle_count("spawn_entry_handles");
   result = __crt_fd_snapshot_export(&fd_snapshot);
   crt_debug_handle_count("after_export_handles");
+  crt_debug_spawn_trace("export_entry_count", (unsigned long long)fd_snapshot.count);
   if (result != 0) {
     RETURN(result);
   }
@@ -6412,6 +6444,7 @@ long __crt_sys_posix_spawn(
       __crt_fd_snapshot_dispose(&fd_snapshot);
       RETURN(fail_last_error());
     }
+    crt_debug_handle_count("after_createpipe_handles");
     (void)SetHandleInformation(fd_snapshot_pipe_write, HANDLE_FLAG_INHERIT, 0);
     format_hex_u64((unsigned long long)(uintptr_t)fd_snapshot_pipe_read, bootstrap_pipe_text);
     creation_flags |= CRT_CREATE_SUSPENDED;
@@ -6495,6 +6528,7 @@ long __crt_sys_posix_spawn(
   memset(&process, 0, sizeof(process));
   memset(spawn_old_inherit_flags, 0, sizeof(spawn_old_inherit_flags));
   fd_clear_inherit_for_spawn(spawn_inherit_touched, spawn_old_inherit_flags);
+  crt_debug_handle_count("before_createprocessa_handles");
   process_created = CreateProcessA(
           application_path,
           command_line,
@@ -6507,7 +6541,13 @@ long __crt_sys_posix_spawn(
           &startup,
           &process);
   process_error = process_created ? 0 : GetLastError();
+  if (process_created) {
+    crt_debug_handle_count("right_after_createprocessa_handles");
+  }
   fd_restore_inherit_after_fork(spawn_inherit_touched, spawn_old_inherit_flags);
+  if (process_created) {
+    crt_debug_handle_count("after_createprocess_handles");
+  }
   if (!process_created) {
     crt_debug_spawn_trace("createprocess_gle", (unsigned long long)process_error);
     free(environment_block);
@@ -6529,9 +6569,11 @@ long __crt_sys_posix_spawn(
 
     CloseHandle(fd_snapshot_pipe_read);
     fd_snapshot_pipe_read = 0;
+    crt_debug_handle_count("after_close_readend_handles");
     result = fd_snapshot_prepare_child_duplicates(
         &fd_snapshot, process.hProcess, process.dwProcessId);
     crt_debug_handle_count("after_prepare_dup_handles");
+    crt_debug_spawn_trace("prepare_dup_remaining_count", (unsigned long long)fd_snapshot.count);
     if (result == 0) {
       result = __crt_fd_snapshot_encode(&fd_snapshot, fd_snapshot_text, sizeof(fd_snapshot_text));
       if (result != 0) {
