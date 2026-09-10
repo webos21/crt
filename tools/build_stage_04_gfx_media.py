@@ -236,7 +236,8 @@ def add_redistributed_dependencies(asset: Path, staged: Path,
         copy_dependency_record(
             staged, "skia", asset / "libcrtgfx" / "third_party" / "skia" / "recipe.json",
             first_existing(skia_source, ("LICENSE",)),
-            ["include/include"], ["lib/libskia.a"], []),
+            ["include/include", "include/modules/skcms"],
+            ["lib/libskia.a"], []),
     ]
     retained = [item for item in manifest.get("redistributed_dependencies", [])
                 if item.get("name") not in {"freetype", "ffmpeg", "skia"}]

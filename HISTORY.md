@@ -10,6 +10,21 @@ substantive update.
 
 ## 2026-09-11
 
+- **Closed the Skia public-header packaging gap exposed after the libc++
+  ordering fix.** The next full Windows run rebuilt/installed FreeType and
+  FFmpeg, built pinned Skia through 834/834 edges, and passed the former
+  `<cwchar>` failure before standalone compilation stopped at
+  `include/core/SkColorSpace.h`: `build_skia.py` had installed Skia's
+  top-level `include/` tree but not its referenced
+  `modules/skcms/skcms.h`. Inspection of the exact pinned m148 commit showed
+  that header's complete external closure is the two-file
+  `modules/skcms/{skcms.h,src/skcms_public.h}` surface. The installer now
+  copies both without redistributing skcms implementation sources; standalone
+  configure, the dependency manifest, and `verify_dist.py` all require them.
+  A focused install test and C++ syntax check against the real pinned headers
+  passed (apart from the expected `#pragma once in main file` warning), as did
+  Python compilation and `git diff --check`.
+
 - **Fixed the packaged C++ header-order contract exposed by the second full
   isolated-04 Windows run.** With the complete external toolchain environment
   supplied, that run rebuilt and installed FreeType and FFmpeg, completed all

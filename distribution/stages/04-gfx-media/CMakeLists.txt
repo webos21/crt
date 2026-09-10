@@ -34,6 +34,8 @@ set(CRTMEDIA_CRT_SHARED_LIBS)
 
 foreach(required_file
     "${CRTGFX_SKIA_ROOT}/include/core/SkSurface.h"
+    "${CRT_STAGE_SKIA_PREFIX}/include/modules/skcms/skcms.h"
+    "${CRT_STAGE_SKIA_PREFIX}/include/modules/skcms/src/skcms_public.h"
     "${CRT_STAGE_SKIA_PREFIX}/lib/libskia.a"
     "${CRT_STAGE_FREETYPE_PREFIX}/lib/libfreetype.a"
     "${CRT_STAGE_FFMPEG_PREFIX}/include/libavformat/avformat.h"

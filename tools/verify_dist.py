@@ -204,6 +204,8 @@ def main() -> None:
                     "include/libswresample/swresample.h",
                     "include/libavutil/avutil.h",
                     "include/include/core/SkSurface.h",
+                    "include/modules/skcms/skcms.h",
+                    "include/modules/skcms/src/skcms_public.h",
                     "lib/libfreetype.a",
                     "lib/libavformat.a", "lib/libavcodec.a",
                     "lib/libswresample.a", "lib/libavutil.a",

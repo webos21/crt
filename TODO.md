@@ -237,6 +237,16 @@ their result is recorded in `HISTORY.md`):
   and with the compatibility environment used for an older predecessor SDK.
   The regenerated source asset has SHA-256
   `454f812f52bbd12c65b6f0502ca9f9c32d58e009ccbec3c2a550defd8ee620cb`.
+  The full rerun from that asset confirmed the header-order fix: FreeType and
+  FFmpeg installed, Skia completed 834/834 edges, and standalone compilation
+  passed the former `<cwchar>` failure. It then exposed the next packaging
+  gap: installed `include/include/core/SkColorSpace.h` includes
+  `modules/skcms/skcms.h`, but `build_skia.py` currently installs only Skia's
+  top-level `include/` tree and `libskia.a`. The required two-file public
+  skcms include closure is now installed and enforced by standalone configure,
+  dependency provenance, and final dist verification; focused installation
+  and pinned-header compilation pass. Regenerate from the committed fix and
+  rerun; no final output was published.
 
   A deliberately space-containing install prefix then exposed another real
   acceptance defect: FFmpeg constructs `-I${prefix}/include` as an unquoted

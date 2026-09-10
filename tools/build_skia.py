@@ -824,6 +824,18 @@ def install_artifacts(source, build_dir, install_prefix):
     lib_dst = install_prefix / "lib"
     lib_dst.mkdir(parents=True, exist_ok=True)
     copy_tree(include_src, include_dst / "include")
+    # Skia's public include/core/SkColorSpace.h reaches outside the top-level
+    # include tree for this public C API header. Installing only include/
+    # therefore produces a self-inconsistent SDK that builds Skia itself but
+    # fails every downstream consumer at its first SkColorSpace include.
+    for relative in (Path("modules/skcms/skcms.h"),
+                     Path("modules/skcms/src/skcms_public.h")):
+        skcms_src = source / relative
+        if not skcms_src.is_file():
+            raise SystemExit(f"required Skia public header is missing: {skcms_src}")
+        skcms_dst = include_dst / relative
+        skcms_dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(skcms_src, skcms_dst)
 
     candidates = [
         build_dir / "libskia.a",
