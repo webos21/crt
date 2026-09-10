@@ -242,6 +242,7 @@ struct crt_memory_status_ex {
 #define CRT_CREATE_SUSPENDED 0x00000004
 #define CRT_ERROR_BROKEN_PIPE 109
 #define CRT_ERROR_HANDLE_EOF 38
+#define CRT_ERROR_FILE_NOT_FOUND 2
 #define CRT_STATUS_SUCCESS 0x00000000UL
 #define CRT_STATUS_PROCESS_CLONED 0x00000129UL
 #define CRT_RTL_CLONE_PROCESS_FLAGS_INHERIT_HANDLES 0x00000002UL
@@ -6225,6 +6226,123 @@ long __crt_sys_kill(long pid, int sig) {
   return -ENOSYS;
 }
 
+/*
+ * A second, separate spawn-path issue found once the pipeline handle leak
+ * above was fixed (see close_fd_slot()'s comment and HISTORY.md's
+ * 2026-09-10 entries): CreateProcessA() was observed, repeatedly, to fail
+ * with ERROR_FILE_NOT_FOUND (2) deep into an isolated FreeType port
+ * build's `make install`. This retry was added suspecting transient
+ * Windows CreateProcessA flakiness under bursty spawn load (a real,
+ * documented class of Windows behavior -- loader-lock/image-section
+ * contention, real-time antivirus hooking process creation, etc.), before
+ * the per-attempt application_path logging below existed to say
+ * otherwise. It turned out NOT to be transient: logging the exact path on
+ * every retry proved the failure 100% deterministic and path-specific
+ * (the same application_path failing every single time, across
+ * independent runs) -- two real packaging bugs (a packaged dist SDK's own
+ * `bin/sh` never existing, then `system/bin/sh.exe` being the wrong
+ * binary), fixed in create_dist.py, not a PAL race at all. See
+ * HISTORY.md's 2026-09-10 entry and crt-dist-porting-examples-design.md
+ * for the full chain. The retry stays anyway, for two reasons: it is
+ * genuinely harmless, low-risk defense-in-depth for the transient-
+ * flakiness class of problem it was built for, should that ever occur for
+ * real; and its logging is what makes a *future* ERROR_FILE_NOT_FOUND
+ * failure -- transient or not -- immediately diagnosable by the exact
+ * path it names, instead of requiring this same investigation again.
+ * Every other CreateProcessA() failure is returned to the caller exactly
+ * as before, on the first attempt, with no added delay: this must never
+ * silently hide a real, persistent failure (this project's own stage-
+ * runner rule), and a genuinely missing/broken application_path fails
+ * identically on every retry, so it still surfaces, just after a brief,
+ * visible delay. Each retry is logged unconditionally (not gated behind
+ * CRT_DEBUG_SPAWN) via a direct write(2, ...) -- mirroring
+ * crt_debug_spawn_trace()'s single-write-call rationale so concurrent
+ * siblings sharing inherited stderr can't interleave/corrupt the line --
+ * so a retry storm would be loud and visible in build logs, not silently
+ * absorbed.
+ */
+#define CRT_SPAWN_CREATEPROCESS_RETRY_MAX 5
+static void crt_log_createprocess_retry(
+    const char* application_path, int attempt, int attempt_max) {
+  char line[4096];
+  size_t len = 0;
+  size_t path_len = strlen(application_path);
+  const char* prefix = "crt: CreateProcessA transient ERROR_FILE_NOT_FOUND for '";
+  const char* mid = "', retrying (attempt ";
+  size_t prefix_len = strlen(prefix);
+  size_t mid_len = strlen(mid);
+
+  if (path_len > sizeof(line) - prefix_len - mid_len - 32) {
+    path_len = sizeof(line) - prefix_len - mid_len - 32;
+  }
+  memcpy(line + len, prefix, prefix_len);
+  len += prefix_len;
+  memcpy(line + len, application_path, path_len);
+  len += path_len;
+  memcpy(line + len, mid, mid_len);
+  len += mid_len;
+  {
+    char numbuf[12];
+    int i;
+
+    i = 11;
+    numbuf[i] = 0;
+    do {
+      numbuf[--i] = (char)('0' + (attempt % 10));
+      attempt /= 10;
+    } while (attempt > 0 && i > 0);
+    memcpy(line + len, numbuf + i, (size_t)(11 - i));
+    len += (size_t)(11 - i);
+  }
+  line[len++] = '/';
+  {
+    char numbuf[12];
+    int i;
+
+    i = 11;
+    numbuf[i] = 0;
+    do {
+      numbuf[--i] = (char)('0' + (attempt_max % 10));
+      attempt_max /= 10;
+    } while (attempt_max > 0 && i > 0);
+    memcpy(line + len, numbuf + i, (size_t)(11 - i));
+    len += (size_t)(11 - i);
+  }
+  line[len++] = ')';
+  line[len++] = '\n';
+  write(2, line, len);
+}
+
+static BOOL crt_createprocess_with_retry(
+    const char* application_path,
+    char* command_line,
+    DWORD creation_flags,
+    void* environment_block,
+    const char* current_directory,
+    struct crt_startupinfo* startup,
+    struct crt_process_information* process,
+    DWORD* out_error) {
+  int attempt;
+  BOOL created = 0;
+  DWORD error = 0;
+
+  for (attempt = 1; attempt <= CRT_SPAWN_CREATEPROCESS_RETRY_MAX; ++attempt) {
+    created = CreateProcessA(
+        application_path, command_line, 0, 0, 1, creation_flags,
+        environment_block, current_directory, startup, process);
+    error = created ? 0 : GetLastError();
+    if (created || error != (DWORD)CRT_ERROR_FILE_NOT_FOUND ||
+        attempt == CRT_SPAWN_CREATEPROCESS_RETRY_MAX) {
+      break;
+    }
+    crt_log_createprocess_retry(
+        application_path, attempt, CRT_SPAWN_CREATEPROCESS_RETRY_MAX);
+    Sleep((DWORD)(10 * attempt));
+  }
+  *out_error = error;
+  return created;
+}
+
 struct crt_windows_spawn_context {
   char application_path[4096];
   char command_line[8192];
@@ -6369,18 +6487,15 @@ long __crt_sys_posix_spawn(
     memset(native_stdio_old_flags, 0, sizeof(native_stdio_old_flags));
     set_native_spawn_stdio_inherit(
         &startup, native_stdio_handles, native_stdio_old_flags, native_stdio_touched);
-    process_created = CreateProcessA(
+    process_created = crt_createprocess_with_retry(
             application_path,
             command_line,
-            0,
-            0,
-            1,
             creation_flags,
             environment_block,
             current_directory,
             &startup,
-            &process);
-    process_error = process_created ? 0 : GetLastError();
+            &process,
+            &process_error);
     if (!process_created) {
       crt_debug_spawn_trace("native_createprocess_gle", (unsigned long long)process_error);
     }
@@ -6529,18 +6644,15 @@ long __crt_sys_posix_spawn(
   memset(spawn_old_inherit_flags, 0, sizeof(spawn_old_inherit_flags));
   fd_clear_inherit_for_spawn(spawn_inherit_touched, spawn_old_inherit_flags);
   crt_debug_handle_count("before_createprocessa_handles");
-  process_created = CreateProcessA(
+  process_created = crt_createprocess_with_retry(
           application_path,
           command_line,
-          0,
-          0,
-          1,
           creation_flags,
           environment_block,
           current_directory,
           &startup,
-          &process);
-  process_error = process_created ? 0 : GetLastError();
+          &process,
+          &process_error);
   if (process_created) {
     crt_debug_handle_count("right_after_createprocessa_handles");
   }

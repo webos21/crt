@@ -150,7 +150,31 @@ def copy_stage_recipes(recipes: list[Path], destination: Path) -> None:
 def install_wrapper_applets(destination: Path, target_os: str) -> None:
     """Install every enabled Toybox applet needed by the packaged mksh."""
     suffix = ".exe" if target_os == "windows" else ""
-    toybox = destination / "system" / "bin" / f"toybox{suffix}"
+    system_bin = destination / "system" / "bin"
+    mksh = system_bin / f"mksh{suffix}"
+    if mksh.is_file():
+        # shell/CMakeLists.txt's own `install(TARGETS crt_tiny_sh ...)`
+        # rule (OUTPUT_NAME "sh", part of the base crt-c component, every
+        # platform) always lands directly at system/bin/sh<suffix> --
+        # crt_tiny_sh only understands `-c <command>` (see
+        # shell/tiny_sh/tiny_sh.c), not being run *as* a script, which is
+        # exactly how a "#!/bin/sh" shebang line invokes its interpreter.
+        # create_rootfs.py's own in-tree rootfs already gets this right by
+        # explicitly aliasing "sh"/"sh.exe" to mksh (a full shell) and
+        # keeping the tiny one under a separate "tiny-sh" name -- this
+        # packaged/cumulative dist never got the equivalent treatment, so
+        # every packaged SDK's own "sh" was silently the tiny, -c-only
+        # shell instead, standing unnoticed until /bin/sh's own path
+        # resolution got fixed below (see that comment): FreeType's
+        # generated `install-sh` (invoked as a real multi-line script via
+        # its own "#!/bin/sh" shebang, not as `sh -c ...`) then failed
+        # instead with "sh: only -c scripts are supported by crt tiny sh"
+        # -- found for real, 2026-09-10, immediately after the /bin/sh
+        # path fix let that shebang resolve to a real file at all. Must
+        # run before the extensionless-alias loop below, which copies
+        # system/bin/sh<suffix> onward from whatever it is at that point.
+        shutil.copy2(mksh, system_bin / f"sh{suffix}")
+    toybox = system_bin / f"toybox{suffix}"
     if not toybox.is_file():
         raise SystemExit(f"distribution does not contain Toybox: {toybox}")
     if suffix:
@@ -172,6 +196,43 @@ def install_wrapper_applets(destination: Path, target_os: str) -> None:
             executable = destination / "system" / "bin" / f"{name}.exe"
             if executable.is_file():
                 shutil.copy2(executable, executable.with_name(name))
+    # Also alias the shell interpreter (and the other tools commonly named
+    # in a hardcoded shebang line) into bin/ and usr/bin/, not just
+    # system/bin/. This cumulative dist directory is used directly as
+    # CRT_ROOTFS -- by activate.sh/activate.cmd above, and by
+    # crt-port-build.py's packaged-SDK mode -- and CRT_ROOTFS's whole
+    # premise (and its own PATH, "/system/bin:/bin:/usr/bin") is that
+    # /bin and /usr/bin resolve too, not just /system/bin. Before this,
+    # this dist's own top-level bin/ held only compiled native runtime
+    # DLLs (libc.dll etc, from copy_libcxx/install_component in main()),
+    # so any script whose shebang is a literal "#!/bin/sh" -- which is
+    # how essentially every autoconf/libtool-generated script starts,
+    # including libtool's own generated `install-sh` driver -- failed
+    # CreateProcessA() with ERROR_FILE_NOT_FOUND every single time,
+    # deterministically. Found and root-caused 2026-09-10 chasing
+    # FreeType's isolated `make install`'s "can't fork - try again":
+    # syscall.c's crt_createprocess_with_retry() (added first, suspecting
+    # transient CreateProcessA flakiness under bursty spawn load) logs the
+    # exact application_path on each retry, and it was always the same,
+    # permanently-nonexistent ".../bin/sh" -- proving this is a real,
+    # deterministic packaging gap, not a race. Deliberately narrow (just
+    # these four names, not every Toybox applet): the concrete, reproduced
+    # failure is /bin/sh specifically, and duplicating the full ~266MB
+    # system/bin Toybox-applet set into two more directories per dist
+    # stage isn't justified without a concrete case needing it -- add more
+    # names here if/when a specific absolute shebang path is found to
+    # need one. Mirrors create_rootfs.py's own ROOTFS_DIRS/shell_dir loop
+    # over ("system/bin", "bin", "usr/bin") for the in-tree, non-packaged
+    # rootfs -- this packaged dist was simply never given the same
+    # treatment.
+    for alias_dir_name in ("bin", "usr/bin"):
+        alias_dir = destination / alias_dir_name
+        alias_dir.mkdir(parents=True, exist_ok=True)
+        for name in ("mksh", "sh", "make", "awk"):
+            for candidate_name in (f"{name}{suffix}", name):
+                source = destination / "system" / "bin" / candidate_name
+                if source.is_file():
+                    shutil.copy2(source, alias_dir / candidate_name)
 
 
 def write_sdk_files(root: Path, destination: Path, target_os: str, target_arch: str,

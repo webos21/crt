@@ -274,31 +274,82 @@ their result is recorded in `HISTORY.md`):
   `syscall.c`) that found this is still in place, deliberately kept (not
   yet cleaned up) because of the second issue below.
 
-  **A second, different, not-yet-root-caused failure surfaces further into
-  the real isolated FreeType `make install`, now that the leak no longer
-  masks it.** With the fix above, the identical isolated FreeType port
-  build gets *far* further (hundreds of successful `install-sh` header/
-  library installs, not failing within the first few commands) before
-  hitting `CreateProcessA` failing with `GetLastError()=2`
-  (`ERROR_FILE_NOT_FOUND`) -- which mksh's own `crt_mksh_spawn_exec_child()`
-  fast path surfaces as the same generic "can't fork - try again" message,
-  making it look superficially like a recurrence of the fixed bug. Seen
-  twice in one run, both times at the *exact same logical point*:
-  installing `objs/.libs/libfreetype-6.dll` to `.../lib/../bin/` (the
-  `install-sh` binary itself, an absolute path that succeeded moments
-  earlier for the `.la`/`.dll.a` install of the same library -- not a
-  literally-missing file). Not yet determined whether this is a real,
-  reproducible PAL bug (e.g. a `mkdir -p .../bin` race right before this
-  specific spawn, since this is the first install target under a freshly-
-  created subdirectory) or host-environment flakiness (real-time antivirus
-  scanning interfering with a rapidly-spawned small EXE, a known class of
-  Windows flakiness unrelated to this PAL) -- re-run the exact same
-  isolated port build again first to check whether it recurs at the same
-  point (deterministic, real bug) or moves/disappears (environmental); only
-  then decide between root-causing it directly or adding a narrowly-scoped,
-  explicitly-logged retry specifically for this `CreateProcessA` failure
-  mode (not a blanket retry -- `TODO.md`'s own long-standing rule that the
-  stage runner must not silently hide a real failure still applies).
+  **A second, different failure that surfaced further into the real
+  isolated FreeType `make install` once the leak stopped masking it is
+  now also root-caused and fixed (2026-09-10), and led to two more real
+  packaging bugs found the same way.** All three were found by adding a
+  narrowly-scoped, explicitly-logged retry around `CreateProcessA()`
+  itself (`crt_createprocess_with_retry()` in `syscall.c`, retries only
+  `GetLastError()==ERROR_FILE_NOT_FOUND`, up to 5 attempts with a short
+  backoff, every retry and every final failure logged unconditionally via
+  `write(2, ...)` so nothing is silently hidden -- this project's own rule
+  that the stage runner must never mask a real failure still applies, and
+  a permanently-broken path still fails identically on every attempt and
+  is still reported). Originally added suspecting transient Windows
+  flakiness under bursty spawn load (a real, documented class of problem);
+  logging the exact `application_path` on every retry instead proved all
+  three failures deterministic and path-specific, not transient:
+  1. **`/bin/sh` did not exist in a packaged/isolated dist SDK at all.**
+     Every `#!/bin/sh` shebang (how essentially every autoconf/libtool-
+     generated script starts, including libtool's own generated
+     `install-sh`) failed `CreateProcessA()` with `ERROR_FILE_NOT_FOUND`
+     on every attempt. Cause: a packaged dist's own top-level `bin/`
+     holds only compiled native runtime DLLs (`libc.dll` etc.); only
+     `system/bin/` had the packaged shell/toybox set.
+     `create_rootfs.py`'s own in-tree, non-packaged rootfs already
+     aliases the same executables into `bin/` and `usr/bin/` too (its
+     `ROOTFS_DIRS`/`shell_dir` loop); the packaged dist
+     (`create_dist.py`) never got the same treatment. Fixed by extending
+     `install_wrapper_applets()` in `create_dist.py` to alias `mksh`/
+     `sh`/`make`/`awk` into `bin/` and `usr/bin/` too (deliberately not
+     every Toybox applet -- the concrete failure is `/bin/sh`
+     specifically, and the full Toybox applet set already costs
+     ~266MB in `system/bin/` alone; tripling that without a concrete
+     case needing it isn't justified).
+  2. **Once `/bin/sh` resolved to a real file, running it failed
+     instead with `sh: only -c scripts are supported by crt tiny sh`.**
+     `system/bin/sh.exe` (and therefore the new `bin/sh`/`usr/bin/sh`
+     aliases above) was never mksh -- `shell/CMakeLists.txt`'s own
+     `install(TARGETS crt_tiny_sh ...)` rule (`OUTPUT_NAME sh`, part of
+     the base `crt-c` component, every OS) always lands directly at
+     `system/bin/sh<suffix>`, and nothing in the packaged-dist flow ever
+     overwrote it with mksh the way `create_rootfs.py` deliberately does
+     for the in-tree rootfs (`install_alias(mksh_dest, .../sh, ...)`,
+     keeping the tiny single-command shell under a separate `tiny-sh`
+     name instead). `crt_tiny_sh` only understands `-c <command>` (see
+     `shell/tiny_sh/tiny_sh.c`), not being run *as* a script -- exactly
+     how a `#!/bin/sh` shebang invokes its interpreter, and exactly what
+     `install-sh` (a real multi-line script) needs. Fixed by having
+     `install_wrapper_applets()` copy `system/bin/mksh<suffix>` over
+     `system/bin/sh<suffix>` before the alias loops run (verified:
+     `sh.exe` is now byte-identical to `mksh.exe`, in `system/bin/`,
+     `bin/`, and `usr/bin/` alike).
+  3. **A third, different, not-yet-root-caused bug immediately behind
+     these two:** with both packaging fixes in place, `install-sh` now
+     actually runs, gets much further again, and hits `./builds/unix/
+     libtool: test: .: unexpected operator/operand` during the shared
+     library's dlname-destination-directory check -- the `test -d
+     "$dldir" || mkdir -p "$dldir"` line libtool generates for its
+     install-mode `-dlopen` handling. The variable being tested/echoed
+     comes out containing roughly 120 stray, individually-printed `.`
+     tokens before the real path (`../bin`), and the resulting `mkdir -p`
+     creates the wrong directory (`.../lib/.` instead of `.../bin`),
+     which is why the following `install-sh -c ... ../bin/libfreetype-
+     6.dll` then fails with "Is not a directory". Not yet investigated
+     further -- likely a real mksh word-splitting/`test`-builtin/
+     parameter-expansion interaction bug hit by this specific libtool-
+     generated code shape, now that libtool's install mode is actually
+     exercised against mksh instead of dying earlier on the two bugs
+     above. Next session: minimize a standalone mksh repro of whatever
+     shell construct produces this (candidates: the specific
+     `case`/parameter-expansion idiom libtool's own `func_dirname`-style
+     logic uses, or a `$dldir`-building loop) before touching
+     `shell/mksh/src/*` blindly.
+  The `CRT_DEBUG_SPAWN=1`-gated diagnostic and `crt_createprocess_with_retry()`
+  are deliberately still in place, both for bug 3 above and because the
+  retry itself is reasonable, low-risk defense-in-depth for genuine
+  transient `CreateProcessA` flakiness even though none of these three
+  turned out to be transient.
 - [ ] Repeat the final isolated acceptance on Linux and macOS before calling
   the transition complete. WSL `Ubuntu-26.04` already has CMake, Ninja,
   Clang, and Python, but this checkout currently has no Linux 03 predecessor

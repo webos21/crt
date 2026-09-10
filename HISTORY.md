@@ -240,6 +240,82 @@ substantive update.
   second, different, not-yet-root-caused failure -- see `TODO.md`'s
   in-progress note for that one; it is not a recurrence of this bug.
 
+- **Root-caused and fixed the second failure from the entry above --
+  which turned out to be two separate, real packaging bugs, found by
+  adding a diagnostic that ended up mattering more than the fix it was
+  built for.** Added `crt_createprocess_with_retry()` in `syscall.c`: a
+  narrowly-scoped retry around `CreateProcessA()` for
+  `GetLastError()==ERROR_FILE_NOT_FOUND` only (every other failure code
+  still returns to the caller immediately, on the first attempt), up to 5
+  attempts with a short backoff, logging every retry and the final
+  application_path unconditionally via `write(2, ...)` (not gated behind
+  `CRT_DEBUG_SPAWN`) so a retry storm would be loud, not silently
+  absorbed -- built suspecting transient Windows `CreateProcessA`
+  flakiness under bursty spawn load (a real, documented class of Windows
+  behavior). The logging proved otherwise: re-running the identical
+  isolated FreeType install reproduced the exact same failure, at the
+  exact same two install steps, on every one of several independent runs
+  -- and for the first time showed *which* `application_path` was
+  failing: `.../dist/03-gfx-simple/bin/sh`, every time, never varying.
+  That is a real, permanent, deterministic bug, not a race.
+
+  Root cause 1: **a packaged/isolated dist SDK's own top-level `bin/`
+  never contained a shell at all.** `create_dist.py`'s cumulative dist
+  directory is used directly as `CRT_ROOTFS` (by `activate.sh`/
+  `activate.cmd` and by `crt-port-build.py`'s packaged-SDK mode), and
+  `CRT_ROOTFS`'s whole premise -- and its own `PATH`,
+  `/system/bin:/bin:/usr/bin` -- is that `/bin` and `/usr/bin` resolve,
+  not just `/system/bin`. But this dist's own `bin/` held only compiled
+  native runtime DLLs (`libc.dll` etc., from `copy_libcxx`/
+  `install_component`), so a literal `#!/bin/sh` shebang -- how
+  essentially every autoconf/libtool-generated script starts, including
+  libtool's own generated `install-sh` -- had nothing to resolve to.
+  `create_rootfs.py`'s own in-tree, non-packaged rootfs already gets this
+  right (its `ROOTFS_DIRS`/`shell_dir` loop installs the shell and every
+  Toybox applet into `system/bin/`, `bin/`, *and* `usr/bin/` alike); the
+  packaged dist never got the same treatment. Fixed by extending
+  `create_dist.py`'s `install_wrapper_applets()` to alias `mksh`/`sh`/
+  `make`/`awk` into `bin/` and `usr/bin/` too -- deliberately narrow (not
+  every Toybox applet): the concrete, reproduced failure is `/bin/sh`
+  specifically, and `system/bin/` alone already costs ~266MB from the
+  full Toybox-applet set; tripling that per dist stage isn't justified
+  without a concrete case needing it.
+
+  Root cause 2, found immediately behind root cause 1: once `/bin/sh`
+  resolved to a real file, running it failed instead with `sh: only -c
+  scripts are supported by crt tiny sh`. **`system/bin/sh.exe` (and so
+  the new `bin/sh`/`usr/bin/sh` aliases from the fix above) was never
+  mksh.** `shell/CMakeLists.txt`'s own `install(TARGETS crt_tiny_sh ...)`
+  rule (`OUTPUT_NAME sh`, part of the base `crt-c` component, on every
+  target OS) always lands directly at `system/bin/sh<suffix>`, and
+  nothing in the packaged-dist flow ever overwrote it with mksh --
+  unlike `create_rootfs.py`'s in-tree rootfs, which deliberately aliases
+  `sh`/`sh.exe` to mksh and keeps the tiny single-command shell under a
+  separate `tiny-sh` name instead. `crt_tiny_sh` only understands `-c
+  <command>` (`shell/tiny_sh/tiny_sh.c`), not being run *as* a script --
+  exactly how a `#!/bin/sh` shebang invokes its interpreter, and exactly
+  what `install-sh` (a real multi-line script) needs. Fixed by having
+  `install_wrapper_applets()` copy `system/bin/mksh<suffix>` over
+  `system/bin/sh<suffix>` before its alias loops run. Verified: `sh.exe`
+  is now byte-identical to `mksh.exe` in `system/bin/`, `bin/`, and
+  `usr/bin/` alike (`cmp` clean).
+
+  Verified end to end: a fresh `crt-gfx-simple-dist` rebuild plus
+  `verify_dist.py` passed after each fix; re-running the identical
+  isolated FreeType install got past both former failure points cleanly
+  (no more `createprocess_gle`/`ERROR_FILE_NOT_FOUND` and no more `only
+  -c scripts` anywhere in the log) and reached much further into the real
+  `make install` -- but hit a third, different, not-yet-root-caused
+  failure right behind these two (`libtool: test: .: unexpected
+  operator/operand`, a garbled dlname-destination-directory value with
+  the resulting `mkdir -p` landing in the wrong place). See `TODO.md`'s
+  in-progress note for that one; it is not a recurrence of either bug
+  above. The `CRT_DEBUG_SPAWN=1` diagnostic and
+  `crt_createprocess_with_retry()` are deliberately kept in place, both
+  for that third issue and because the retry itself is reasonable,
+  low-risk defense-in-depth for genuine transient `CreateProcessA`
+  flakiness even though none of these three turned out to be transient.
+
 
 ## 2026-09-09
 
