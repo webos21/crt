@@ -253,6 +253,9 @@ export CRT_TARGET_OS="__TARGET_OS__"
 export CRT_TARGET_ARCH="__TARGET_ARCH__"
 export CRT_HOST_CC="${CRT_CC:-${CRT_HOST_CC:-clang}}"
 export CRT_HOST_CXX="${CRT_CXX:-${CRT_HOST_CXX:-clang++}}"
+if [ -d "$_crt_dist_root/include/c++/v1" ]; then
+  export CRT_CXX_STANDARD_INCLUDE_FLAGS="-isystem$_crt_dist_root/include/c++/v1"
+fi
 export CC="$_crt_dist_root/tools/crt-cc"
 export CXX="$_crt_dist_root/tools/crt-c++"
 export AR="${CRT_AR:-${AR:-llvm-ar}}"
@@ -276,6 +279,7 @@ if not defined CRT_HOST_CC set "CRT_HOST_CC=clang"
 if not defined CRT_HOST_CXX set "CRT_HOST_CXX=clang++"
 set "CRT_HOST_CC=%CRT_HOST_CC:\\=/%"
 set "CRT_HOST_CXX=%CRT_HOST_CXX:\\=/%"
+if exist "%CRT_SYSROOT%include\\c++\\v1" set "CRT_CXX_STANDARD_INCLUDE_FLAGS=-isystem%CRT_SYSROOT%include/c++/v1"
 if not defined CRT_WINDOWS_SDK_LIBPATH if defined WindowsSdkDir if defined WindowsSDKLibVersion set "CRT_WINDOWS_SDK_LIBPATH=%WindowsSdkDir%Lib\\%WindowsSDKLibVersion%um\\__WINDOWS_SDK_ARCH__"
 if not defined AR set "AR=llvm-ar"
 if defined CRT_AR set "AR=%CRT_AR%"
@@ -305,7 +309,7 @@ if(DEFINED ENV{CRT_RANLIB} AND NOT "$ENV{CRT_RANLIB}" STREQUAL "")
   set(CMAKE_RANLIB "$ENV{CRT_RANLIB}" CACHE FILEPATH "External ranlib")
 endif()
 set(CMAKE_C_FLAGS_INIT "-ffreestanding -fno-builtin -nostdinc -isystem${CRT_DISTRIBUTION_ROOT}/include")
-set(CMAKE_CXX_FLAGS_INIT "${CMAKE_C_FLAGS_INIT} -nostdinc++ -isystem${CRT_DISTRIBUTION_ROOT}/include/c++/v1")
+set(CMAKE_CXX_FLAGS_INIT "-ffreestanding -fno-builtin -nostdinc -nostdinc++ -isystem${CRT_DISTRIBUTION_ROOT}/include/c++/v1 -isystem${CRT_DISTRIBUTION_ROOT}/include")
 # CMake's own default rpath computation, once CMAKE_SYSROOT is set above,
 # treats it as a real target-device filesystem root and strips it from
 # any absolute library path found underneath -- appropriate for real

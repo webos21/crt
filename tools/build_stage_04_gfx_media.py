@@ -48,6 +48,12 @@ def runtime_env(sdk: Path, manifest: dict) -> dict[str, str]:
         "CRT_ROOTFS": str(sdk),
         "CRT_TARGET_OS": target["os"],
         "CRT_TARGET_ARCH": target["arch"],
+        # The predecessor may have been packaged before crt-c++ learned to
+        # infer the cumulative SDK's canonical libc++ include directory.
+        # Preserve the wrapper's required C++-before-C include order while
+        # bootstrapping the next stage from any otherwise-valid 03 SDK.
+        "CRT_CXX_STANDARD_INCLUDE_FLAGS":
+            f"-isystem{sdk / 'include' / 'c++' / 'v1'}",
     })
     if os.environ.get("CRT_CC"):
         env["CRT_HOST_CC"] = Path(os.environ["CRT_CC"]).as_posix()

@@ -10,6 +10,23 @@ substantive update.
 
 ## 2026-09-11
 
+- **Fixed the packaged C++ header-order contract exposed by the second full
+  isolated-04 Windows run.** With the complete external toolchain environment
+  supplied, that run rebuilt and installed FreeType and FFmpeg, completed all
+  834 pinned Skia/D3D12 Ninja edges, and configured the standalone project;
+  its first C++ compile then failed because `crt-c++` applied `-nostdinc++`
+  without placing the packaged libc++ headers before the CRT C headers, so
+  `<cwchar>` rejected the conflicting `mbstate_t`. `crt-c++` now infers the
+  canonical `include/c++/v1` path for cumulative 02+ SDKs while preserving the
+  explicit override, the 04 runner supplies that override so already-built 03
+  predecessors remain usable, and generated activation scripts/toolchain files
+  encode the same ordering. Both the updated wrapper without the override and
+  the older packaged wrapper with the runner's compatibility environment
+  compiled `imported_libcxx_test.cc` successfully. Generated SDK files were
+  inspected, Python compilation and `git diff --check` passed, and the fresh
+  Windows 04 source asset has SHA-256
+  `454f812f52bbd12c65b6f0502ca9f9c32d58e009ccbec3c2a550defd8ee620cb`.
+
 - **Made the isolated 04 stage fail before its multi-hour dependency build
   when the external compiler contract is incomplete.** The first complete
   `03-gfx-simple -> 04-gfx-media` entrypoint attempt from a fresh Windows

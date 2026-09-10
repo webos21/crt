@@ -223,8 +223,14 @@ done
 
 # C++ standard library headers must come before the CRT C headers. libc++'s
 # wrappers such as <cstddef> intentionally include their own <stddef.h> first
-# and then forward to the C header underneath.
+# and then forward to the C header underneath. A cumulative 02+ SDK owns this
+# canonical location, so ordinary activated/standalone SDK use must not depend
+# on a build-driver-only environment variable. Keep the override for unusual
+# layouts, but infer the packaged layout when it exists; 01-c remains C-only.
 cxx_standard_include_flags="${CRT_CXX_STANDARD_INCLUDE_FLAGS:-}"
+if [ -z "$cxx_standard_include_flags" ] && [ -d "${CRT_SYSROOT}/include/c++/v1" ]; then
+  cxx_standard_include_flags="-isystem${CRT_SYSROOT}/include/c++/v1"
+fi
 cxx_language_flags=""
 if [ "${CRT_CXX_ENABLE_EXCEPTIONS:-0}" != "1" ]; then
   cxx_language_flags="$cxx_language_flags -fno-exceptions"

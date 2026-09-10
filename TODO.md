@@ -228,28 +228,15 @@ their result is recorded in `HISTORY.md`):
 - [ ] Run the real Windows isolated acceptance from freshly extracted inputs
   under a path containing spaces; expect a multi-hour Skia/FFmpeg build and
   record every discovered defect before removing this in-progress section.
-  The Windows PAL/mksh child-accounting defect found by FFmpeg is fixed and
-  moved to `HISTORY.md`, including direct completion-order and 40-child stress
-  regressions. A fresh FFmpeg configure plus a real continuation through
-  build/install now produces all five expected static archives, headers, and
-  pkg-config metadata. The recipe declares no standalone tests; its real
-  demux/decode acceptance belongs to the 04 media smoke below. The official
-  Windows 03 SDK has now also been rebuilt with the final `waitpid(-1)`/mksh
-  reconciliation and verified again. It generated the fresh 04 source asset
-  with SHA-256
-  `aa15ceddd35275715496509005f4ef0d18677df7f6b8e696159a89a5638eb1f7`.
-
-  The first complete-entrypoint attempt from that asset rebuilt and installed
-  FreeType and FFmpeg, then built pinned Skia/D3D12 through all 834 Ninja
-  edges and installed `libskia.a`. It exposed a stage-runner contract gap only
-  when the standalone CMake compiler probe began: the direct invocation had
-  omitted the manifest-required external `CRT_CC`/`CRT_CXX`/`CRT_AR`/
-  `CRT_RANLIB` environment, but the runner did not reject that before the
-  multi-hour dependency build and `crt-cc` eventually reported bare `clang`
-  as inaccessible. The up-front manifest-driven environment check is now in
-  place and the regenerated source asset has SHA-256
-  `a397cf8d0ba58d14e372d2482655bcd8d80787f5661a376a3d680ff0fb701850`.
-  Rerun from a new fresh root with the full external-toolchain contract active.
+  The Windows PAL/mksh, external-toolchain fail-fast, and libc++ header-order
+  defects found by the preceding full runs are fixed and recorded in
+  `HISTORY.md`. The latest run got through fresh FreeType/FFmpeg installs,
+  all 834 pinned Skia/D3D12 Ninja edges, and standalone configure before the
+  header-order failure; no final output was published. Focused compilation now
+  passes both with the updated wrapper's automatic packaged-libc++ discovery
+  and with the compatibility environment used for an older predecessor SDK.
+  The regenerated source asset has SHA-256
+  `454f812f52bbd12c65b6f0502ca9f9c32d58e009ccbec3c2a550defd8ee620cb`.
 
   A deliberately space-containing install prefix then exposed another real
   acceptance defect: FFmpeg constructs `-I${prefix}/include` as an unquoted
