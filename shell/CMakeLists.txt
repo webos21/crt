@@ -521,9 +521,29 @@ if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
     )
     set_tests_properties(crt_mksh_rootfs_pipeline_runs PROPERTIES
       PASS_REGULAR_EXPRESSION "HELLO"
+      FAIL_REGULAR_EXPRESSION "internal error: check_job"
       DEPENDS crt_mksh_rootfs_external_runs
     )
     set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_mksh_rootfs_pipeline_runs)
+
+    # Windows' MKSH_NOPROSPECTOFWORK build cannot mask SIGCHLD while a
+    # pipeline is assembled. A fast child can therefore be reaped by a nested
+    # command-substitution wait before the final process marks the job started;
+    # jobs.c must reconcile that already-recorded state instead of leaving the
+    # job permanently PRUNNING (first exposed by FFmpeg's configure probes).
+    add_test(NAME crt_mksh_rootfs_pipeline_reap_race_runs
+      COMMAND "${CMAKE_COMMAND}" -E env
+        "CRT_ROOTFS=${CMAKE_BINARY_DIR}/rootfs"
+        "PATH=/system/bin:/bin:/usr/bin"
+        "$<TARGET_FILE:crt_mksh>" -c "i=0; while [ \"$i\" -lt 100 ]; do out=$(printf x | sed s/x/y/); test \"$out\" = y || exit 1; i=$((i+1)); done; echo pipeline-reap-ok"
+    )
+    set_tests_properties(crt_mksh_rootfs_pipeline_reap_race_runs PROPERTIES
+      PASS_REGULAR_EXPRESSION "pipeline-reap-ok"
+      FAIL_REGULAR_EXPRESSION "internal error: check_job"
+      DEPENDS crt_mksh_rootfs_pipeline_runs
+      TIMEOUT 30
+    )
+    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_mksh_rootfs_pipeline_reap_race_runs)
 
     add_test(NAME crt_mksh_rootfs_redirection_runs
       COMMAND "${CMAKE_COMMAND}" -E env
@@ -533,7 +553,7 @@ if(EXISTS "${CRT_TOYBOX_ROOT}/Android.bp")
     )
     set_tests_properties(crt_mksh_rootfs_redirection_runs PROPERTIES
       PASS_REGULAR_EXPRESSION "redir"
-      DEPENDS crt_mksh_rootfs_pipeline_runs
+      DEPENDS crt_mksh_rootfs_pipeline_reap_race_runs
     )
     set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt_mksh_rootfs_redirection_runs)
 

@@ -40,6 +40,12 @@ set -e
 
 windows_host_arg() {
   case "$1" in
+    /[A-Za-z]|/[A-Za-z]/*)
+      drive=${1#/}
+      drive=${drive%%/*}
+      rest=${1#??}
+      printf '%s:%s\n' "$drive" "$rest"
+      ;;
     /*)
       if [ -n "${CRT_ROOTFS:-}" ]; then
         rootfs=$(printf '%s\n' "$CRT_ROOTFS" | sed 's|\\|/|g')
@@ -51,12 +57,20 @@ windows_host_arg() {
     -I/*|-L/*)
       prefix=${1%%/*}
       path=/${1#*/}
-      if [ -n "${CRT_ROOTFS:-}" ]; then
+      case "$path" in
+        /[A-Za-z]|/[A-Za-z]/*)
+          drive=${path#/}
+          drive=${drive%%/*}
+          rest=${path#??}
+          printf '%s%s:%s\n' "$prefix" "$drive" "$rest"
+          ;;
+        *) if [ -n "${CRT_ROOTFS:-}" ]; then
         rootfs=$(printf '%s\n' "$CRT_ROOTFS" | sed 's|\\|/|g')
         printf '%s%s/%s\n' "$prefix" "$rootfs" "${path#/}"
       else
         printf '%s\n' "$1"
-      fi
+          fi ;;
+      esac
       ;;
     *) printf '%s\n' "$1" ;;
   esac

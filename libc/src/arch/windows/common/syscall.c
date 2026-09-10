@@ -234,8 +234,8 @@ struct crt_memory_status_ex {
 #define CRT_PIPE_NOWAIT 0x00000001UL
 #define CRT_PIPE_WAIT 0x00000000UL
 #define CRT_WAIT_OBJECT_0 0
+#define CRT_WAIT_TIMEOUT 258
 #define CRT_WAIT_FAILED 0xffffffffUL
-#define CRT_INFINITE 0xffffffffUL
 #define CRT_INFINITE 0xffffffffUL
 #define CRT_STARTF_USESTDHANDLES 0x00000100
 #define CRT_CREATE_NEW_PROCESS_GROUP 0x00000200
@@ -330,6 +330,8 @@ struct crt_rtl_user_process_information {
 };
 
 __declspec(dllimport) HANDLE CRT_WINAPI GetStdHandle(DWORD nStdHandle);
+/* Used by windows_posix_drive_letter() below -- see its comment. */
+__declspec(dllimport) DWORD CRT_WINAPI GetLogicalDrives(void);
 /* TEMPORARY, for the 2026-09-10 handle-leak investigation -- see
  * crt_debug_spawn_trace()'s own comment. Remove together with it. */
 __declspec(dllimport) BOOL CRT_WINAPI GetProcessHandleCount(HANDLE hProcess, DWORD* pdwHandleCount);
@@ -362,6 +364,11 @@ __declspec(dllimport) DWORD CRT_WINAPI SearchPathA(
     char* lpBuffer,
     char** lpFilePart);
 __declspec(dllimport) DWORD CRT_WINAPI WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds);
+__declspec(dllimport) DWORD CRT_WINAPI WaitForMultipleObjects(
+    DWORD nCount,
+    const HANDLE* lpHandles,
+    BOOL bWaitAll,
+    DWORD dwMilliseconds);
 __declspec(dllimport) HANDLE CRT_WINAPI CreateEventA(
     void* lpEventAttributes,
     BOOL bManualReset,
@@ -1112,11 +1119,64 @@ static const char* windows_rootfs(void) {
   return root != 0 && root[0] != 0 ? root : 0;
 }
 
+/*
+ * Recognizes a POSIX-style Windows drive path ("/c/Users/...", the
+ * MSYS2/Cygwin/WSL convention) and, only when the single letter names a
+ * drive that genuinely exists on this host (checked live via
+ * GetLogicalDrives(), never assumed), returns 1 with the uppercased
+ * drive letter and a pointer to the remainder of the path (the part
+ * after "/x"). Added 2026-09-10 so GNU autoconf/libtool-generated shell
+ * code -- which only recognizes a leading "/" as an absolute path (see
+ * func_normal_abspath in any vendored ltmain.sh) -- has a real, working
+ * way to spell an absolute Windows path. Before this, this PAL's own
+ * "/x/..." never meant anything but a CRT_ROOTFS-relative path (e.g.
+ * "/system/bin"), which is why this function must run *before* that
+ * fallback below and, symmetrically, why it is gated on a real,
+ * existing drive letter: any CRT_ROOTFS whose own layout happened to
+ * have a real single-letter top-level entry (none do today -- see
+ * ROOTFS_DIRS in create_rootfs.py) could only collide with this if that
+ * same single letter also names a currently-mounted Windows drive, and
+ * even then only for a path that continues past the single letter
+ * exactly the way a drive path would. This function does not change how
+ * any existing path is interpreted: it only gives meaning to inputs
+ * ("/c/...", "/d/...", etc.) nothing in this codebase has ever produced
+ * before -- see the port-build side of this fix in crt-port-build.py,
+ * the only place that emits this form today, for autoconf/libtool
+ * `configure --prefix=...`/`--bindir=...` arguments specifically.
+ */
+static int windows_posix_drive_letter(
+    const char* path, char* out_letter, const char** out_rest) {
+  char letter;
+  char upper;
+  DWORD drives;
+
+  if (path == 0 || path[0] != '/') {
+    return 0;
+  }
+  letter = path[1];
+  if (!((letter >= 'a' && letter <= 'z') || (letter >= 'A' && letter <= 'Z'))) {
+    return 0;
+  }
+  if (path[2] != 0 && path[2] != '/') {
+    return 0;
+  }
+  upper = (letter >= 'a' && letter <= 'z') ? (char)(letter - 'a' + 'A') : letter;
+  drives = GetLogicalDrives();
+  if (drives == 0 || (drives & (1UL << (upper - 'A'))) == 0) {
+    return 0;
+  }
+  *out_letter = upper;
+  *out_rest = path[2] == '/' ? path + 3 : path + 2;
+  return 1;
+}
+
 static const char* translate_path_for_host(const char* path, char buffer[4096]) {
   const char* root;
   size_t root_len;
   size_t out;
   size_t in;
+  char drive_letter;
+  const char* drive_rest;
 
   if (path == 0) {
     return 0;
@@ -1134,6 +1194,22 @@ static const char* translate_path_for_host(const char* path, char buffer[4096]) 
   }
   if (windows_native_absolute_path(path) || path[0] != '/') {
     return path;
+  }
+  if (windows_posix_drive_letter(path, &drive_letter, &drive_rest)) {
+    size_t rest_len = strlen(drive_rest);
+
+    if (rest_len + 4 >= 4096) {
+      return path;
+    }
+    buffer[0] = drive_letter;
+    buffer[1] = ':';
+    buffer[2] = '\\';
+    out = 3;
+    for (in = 0; drive_rest[in] != 0; ++in) {
+      buffer[out++] = drive_rest[in] == '/' ? '\\' : drive_rest[in];
+    }
+    buffer[out] = 0;
+    return buffer;
   }
   root = windows_rootfs();
   if (root == 0) {
@@ -4043,6 +4119,28 @@ long __crt_sys_mkdir(const char* path, unsigned int mode) {
   const char* host_path = translate_path_for_host(path, translated_path);
   (void)mode;
   if (!CreateDirectoryA(host_path, 0)) {
+    DWORD error = GetLastError();
+
+    /* CreateDirectoryA("C:\\") reports ERROR_ACCESS_DENIED rather than
+     * ERROR_ALREADY_EXISTS for an existing drive root. The same result can
+     * occur for another existing directory whose parent ACL does not grant
+     * create-child access, even though GetFileAttributesA() can still prove
+     * that the requested directory itself already exists. POSIX mkdir()
+     * must report EEXIST in that case. This matters in particular for
+     * `mkdir -p /c/...`: the POSIX-drive spelling is translated above to
+     * "C:\\...", and Toybox deliberately calls mkdir() for each component,
+     * starting with the drive root. Preserve genuine access failures by
+     * applying this correction only when the exact path is an existing
+     * directory. */
+    if (error == CRT_WIN_ERROR_ACCESS_DENIED) {
+      DWORD attrs = GetFileAttributesA(host_path);
+
+      if (attrs != INVALID_FILE_ATTRIBUTES &&
+          (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+        return -EEXIST;
+      }
+    }
+    SetLastError(error);
     return fail_last_error();
   }
   return 0;
@@ -5686,7 +5784,30 @@ long __crt_sys_lstat_path(const char* path, struct stat* st) {
 long __crt_sys_unlink(const char* path) {
   char translated_path[4096];
   const char* host_path = translate_path_for_host(path, translated_path);
+  DWORD attrs;
   int attempt;
+
+  /* DeleteFileA rejects a directory symbolic link with ACCESS_DENIED even
+   * though POSIX unlink() removes the link itself, not the directory it
+   * targets. Windows marks that object as both DIRECTORY and REPARSE_POINT;
+   * RemoveDirectoryA removes the directory-link entry without following it.
+   * This is not ordinary rmdir semantics: require REPARSE_POINT explicitly
+   * so unlink("real-directory") continues through DeleteFileA and fails. */
+  attrs = GetFileAttributesA(host_path);
+  if (attrs != INVALID_FILE_ATTRIBUTES &&
+      (attrs & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) ==
+          (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) {
+    for (attempt = 0; attempt < WINDOWS_DELETE_RACE_RETRY_ATTEMPTS; ++attempt) {
+      if (RemoveDirectoryA(host_path)) {
+        return 0;
+      }
+      if (!windows_is_delete_race_error(GetLastError())) {
+        break;
+      }
+      Sleep(WINDOWS_DELETE_RACE_RETRY_SLEEP_MS);
+    }
+    return fail_last_error();
+  }
 
   /* Same delete-pending/handle-timing race as __crt_sys_symlink()'s own
    * retry above (see that function's comment) -- a lingering scanner/
@@ -6754,6 +6875,9 @@ long __crt_sys_posix_spawn(
 
 long __crt_sys_waitpid(long pid, int* status, int options) {
   HANDLE process;
+  HANDLE wait_handles[CRT_FD_TABLE_SIZE];
+  int wait_indices[CRT_FD_TABLE_SIZE];
+  DWORD wait_count = 0;
   DWORD wait_result;
   DWORD exit_code = 127;
   int index = -1;
@@ -6790,21 +6914,55 @@ long __crt_sys_waitpid(long pid, int* status, int options) {
     }
     return (long)child_pid;
   }
-  process = find_child_process(pid, &index);
-  if (process == 0) {
-    crt_debug_spawn_trace("waitpid_echild_for_pid", (unsigned long long)(unsigned long)pid);
-    return -ECHILD;
-  }
-  child_pid = child_pid_table[index];
-  wait_result = WaitForSingleObject(process, timeout);
-  if (wait_result != CRT_WAIT_OBJECT_0 && (options & WNOHANG) != 0) {
-    return 0;
-  }
-  if (wait_result == CRT_WAIT_FAILED) {
-    return fail_last_error();
-  }
-  if (wait_result != CRT_WAIT_OBJECT_0) {
-    return -ECHILD;
+  /* waitpid(-1) must wait for whichever child exits first. Selecting the
+   * first registered handle and then blocking on it is not equivalent: a
+   * later child may already be done while the first is still running. That
+   * mismatch deadlocked mksh job accounting and, in FFmpeg's configure,
+   * left completed command-substitution fork children registered until the
+   * fixed 64-slot table filled with EMFILE. Windows supports exactly 64
+   * handles in one WaitForMultipleObjects() call, matching this table. */
+  if (pid == -1) {
+    int i;
+
+    for (i = 0; i < CRT_FD_TABLE_SIZE; ++i) {
+      if (child_process_table[i] != 0) {
+        wait_handles[wait_count] = child_process_table[i];
+        wait_indices[wait_count] = i;
+        ++wait_count;
+      }
+    }
+    if (wait_count == 0) {
+      return -ECHILD;
+    }
+    wait_result = WaitForMultipleObjects(wait_count, wait_handles, 0, timeout);
+    if (wait_result == CRT_WAIT_TIMEOUT && (options & WNOHANG) != 0) {
+      return 0;
+    }
+    if (wait_result == CRT_WAIT_FAILED ||
+        wait_result < CRT_WAIT_OBJECT_0 ||
+        wait_result >= CRT_WAIT_OBJECT_0 + wait_count) {
+      return fail_last_error();
+    }
+    index = wait_indices[wait_result - CRT_WAIT_OBJECT_0];
+    process = child_process_table[index];
+    child_pid = child_pid_table[index];
+  } else {
+    process = find_child_process(pid, &index);
+    if (process == 0) {
+      crt_debug_spawn_trace("waitpid_echild_for_pid", (unsigned long long)(unsigned long)pid);
+      return -ECHILD;
+    }
+    child_pid = child_pid_table[index];
+    wait_result = WaitForSingleObject(process, timeout);
+    if (wait_result != CRT_WAIT_OBJECT_0 && (options & WNOHANG) != 0) {
+      return 0;
+    }
+    if (wait_result == CRT_WAIT_FAILED) {
+      return fail_last_error();
+    }
+    if (wait_result != CRT_WAIT_OBJECT_0) {
+      return -ECHILD;
+    }
   }
   if (!GetExitCodeProcess(process, &exit_code)) {
     long result = fail_last_error();

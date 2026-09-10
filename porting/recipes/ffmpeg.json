@@ -23,6 +23,7 @@
       "--disable-avfilter",
       "--disable-network",
       "--disable-everything",
+      "--disable-autodetect",
       "--enable-decoder=h264,aac,mp3,mp3float,pcm_s16le",
       "--enable-demuxer=mov,mp3,wav",
       "--enable-parser=h264,aac,mpegaudio",
@@ -44,6 +45,8 @@
           "--enable-cross-compile",
           "--host-cc=@ROOT@/tools/crt-cc",
           "--ar=@AR@",
+          "--nm=@NM@",
+          "--disable-response-files",
           "--extra-cflags=-U_WIN32 -U_WIN32_WCE -U__WIN32__ -UWIN32 -U__MINGW32__"
         ],
         "make_args": [

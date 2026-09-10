@@ -412,9 +412,16 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
             env["TMPDIR"] = path_for_crt_shell(
                 Path(os.environ.get("TEMP") or os.environ.get("TMP") or tempfile.gettempdir()))
             if packaged_sdk:
-                # mksh only accepts an absolute TMPDIR. Use the packaged
-                # rootfs's real /tmp instead of a drive-qualified host path.
-                env["TMPDIR"] = "/tmp"
+                # mksh needs a leading-slash absolute path, but this value is
+                # also consumed by configure scripts when they construct argv
+                # for *native* Windows tools. FFmpeg, concretely, gives
+                # $FFTMPDIR/test.a directly to llvm-ar during its response-file
+                # probe. Plain "/tmp" works through the CRT PAL but has no
+                # meaning to that native process. Use the packaged SDK's real,
+                # writable tmp directory in POSIX-drive form: CRT programs map
+                # it in translate_path_for_host(), while crt-native-tool maps
+                # the same positional argument back to C:/... for LLVM.
+                env["TMPDIR"] = path_for_msys_shell(rootfs / "tmp")
         else:
             rootfs_path = os.pathsep.join(
                 str(rootfs / entry) for entry in ("system/bin", "bin", "usr/bin"))
@@ -999,7 +1006,31 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
         build_dir_for_configure = path_for_crt_shell(preset_build_dir) if target_os == "windows" else str(preset_build_dir)
         configure = [arg.replace("@BUILD_DIR@", build_dir_for_configure) for arg in configure]
         if is_native_windows_configure(target_os):
-            prefix = path_for_crt_shell(port_prefix) if use_crt_shell else path_for_msys_shell(port_prefix)
+            # Always the POSIX-drive form ("/c/Users/...", path_for_msys_
+            # shell's existing conversion -- already used for the non-
+            # crt_shell/MSYS branch below, just never for use_crt_shell),
+            # not path_for_crt_shell's plain "C:/Users/..." (backslash-to-
+            # forward-slash only). GNU autoconf/libtool-generated configure
+            # scripts derive $bindir/$libdir/etc. from --prefix and later
+            # feed them through libtool's own func_normal_abspath, which
+            # only recognizes a leading "/" as an absolute path (confirmed
+            # directly: `case "C:/Users/..." in /*) ...; *) echo RELATIVE;
+            # esac` prints RELATIVE) -- a "C:/..." --prefix silently made
+            # every derived install path look *relative* to libtool,
+            # wrongly prepending `pwd` and producing a garbled, doubled
+            # path. Root-caused 2026-09-10 via FreeType's isolated install
+            # hitting exactly this in func_relative_path's dlname-install
+            # logic (libtool: test: .: unexpected operator/operand, a
+            # ~120-line runaway ascend-the-tree loop) -- see TODO.md's
+            # in-progress note and syscall.c's windows_posix_drive_letter()
+            # comment for the PAL-side half of this fix (recognizing
+            # "/c/..." as real -- and only real -- Windows drive paths, so
+            # every other syscall this prefix eventually reaches, e.g. the
+            # real install-sh copy, still resolves it correctly). This
+            # form was always used already for the non-crt_shell (MSYS)
+            # branch below; crt_shell (this project's own mksh, the
+            # default) was simply never given the same treatment.
+            prefix = path_for_msys_shell(port_prefix)
         else:
             prefix = str(port_prefix)
         configure.append(f"--prefix={prefix}")

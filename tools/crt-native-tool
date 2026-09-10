@@ -45,6 +45,32 @@ tool="$1"
 shift
 export CRT_SPAWN_NATIVE_WINDOWS=1
 
+# Arguments consumed by this script are written by CRT-hosted POSIX tools.
+# Native Windows programs do not pass through libc's path translation, so a
+# POSIX-drive path that is deliberately used inside Autoconf/Libtool
+# ("/c/Users/...") must cross back to its native spelling before llvm-ar,
+# llvm-ranlib, llvm-strip, or ld.lld sees it.  FreeType's real `make install`
+# first exposed this boundary: install-sh successfully copied libfreetype.a
+# through the CRT PAL, then the immediately-following native llvm-ranlib was
+# handed the same `/c/.../libfreetype.a` and could not open it.  This wrapper
+# always runs under the packaged CRT mksh on Windows, so use its array support
+# to preserve every argument boundary (including spaces) while converting only
+# an argument that is itself an absolute POSIX-drive path.  Options containing
+# paths keep their existing spelling; crt-port-build.py already supplies those
+# in native form (for example `-LC:/...`).
+set -A native_args --
+for arg do
+  case "$arg" in
+    /[A-Za-z]|/[A-Za-z]/*)
+      drive=${arg#/}
+      drive=${drive%%/*}
+      rest=${arg#??}
+      arg="${drive}:${rest}"
+      ;;
+  esac
+  native_args[${#native_args[*]}]="$arg"
+done
+
 # ld.lld.exe is a multi-personality binary: invoked bare (no -m), it
 # defaults to its generic ELF frontend (confirmed for real: `ld.lld.exe
 # --help` lists PowerPC/ELF-only options, no PE/COFF ones at all). This
@@ -92,8 +118,8 @@ case "$tool_base_lc" in
       aarch64|arm64) pe_emulation=arm64pe ;;
       *) pe_emulation=i386pep ;;
     esac
-    exec "$tool" -m "$pe_emulation" "$@"
+    exec "$tool" -m "$pe_emulation" "${native_args[@]}"
     ;;
 esac
 
-exec "$tool" "$@"
+exec "$tool" "${native_args[@]}"

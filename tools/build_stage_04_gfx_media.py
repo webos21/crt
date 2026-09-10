@@ -37,6 +37,12 @@ def publish_tree(staged: Path, output: Path) -> None:
 def runtime_env(sdk: Path, manifest: dict) -> dict[str, str]:
     env = os.environ.copy()
     target = manifest["target"]
+    required = manifest.get("external_toolchain_environment", [])
+    missing = [name for name in required if not os.environ.get(name)]
+    if missing:
+        raise SystemExit(
+            "external toolchain environment is incomplete; set before "
+            "starting the stage build: " + ", ".join(missing))
     env.update({
         "CRT_SYSROOT": str(sdk),
         "CRT_ROOTFS": str(sdk),

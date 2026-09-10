@@ -37,7 +37,12 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-enum { TOKEN_COUNT = 6, CHILD_COUNT = 40 };
+enum {
+  TOKEN_COUNT = 6,
+  CHILD_COUNT = 40,
+  FAST_CHILD_STATUS = 42,
+  SLOW_CHILD_STATUS = 43
+};
 
 static int fail(const char* message) {
   fprintf(stderr, "process_stress_test: %s\n", message);
@@ -131,6 +136,36 @@ static int run_worker(int argc, char** argv) {
   return WORKER_OK;
 }
 
+/* waitpid(-1) means the first child whose state changes, not the first child
+ * registered by the parent. Windows used to select the first process handle
+ * and block on it, even when a later registered child had already exited. */
+static int test_wait_any_completion_order(void) {
+  pid_t slow_pid;
+  pid_t fast_pid;
+  pid_t got;
+  int status = 0;
+  char* slow_argv[] = {"/proc/self/exe", "slow-child", 0};
+  char* fast_argv[] = {"/proc/self/exe", "fast-child", 0};
+
+  if (posix_spawn(&slow_pid, "/proc/self/exe", 0, 0, slow_argv, environ) != 0 ||
+      posix_spawn(&fast_pid, "/proc/self/exe", 0, 0, fast_argv, environ) != 0) {
+    return fail("wait-any child spawn");
+  }
+  sleep(1);
+  got = waitpid(-1, &status, 0);
+  if (got != fast_pid || !WIFEXITED(status) ||
+      WEXITSTATUS(status) != FAST_CHILD_STATUS) {
+    (void)waitpid(slow_pid, 0, 0);
+    (void)waitpid(fast_pid, 0, 0);
+    return fail("waitpid(-1) ignored already-completed child");
+  }
+  if (waitpid(slow_pid, &status, 0) != slow_pid || !WIFEXITED(status) ||
+      WEXITSTATUS(status) != SLOW_CHILD_STATUS) {
+    return fail("slow child wait");
+  }
+  return 0;
+}
+
 static int run_parent(void) {
   int job_pipe[2];
   int secret_pipe[2];
@@ -144,6 +179,10 @@ static int run_parent(void) {
   char job_w_arg[16];
   char secret_r_arg[16];
   char secret_w_arg[16];
+
+  if (test_wait_any_completion_order() != 0) {
+    return 1;
+  }
 
   if (pipe(job_pipe) != 0) {
     return fail("job pipe");
@@ -300,6 +339,13 @@ static int run_parent(void) {
 int main(int argc, char** argv) {
   if (argc >= 2 && strcmp(argv[1], "worker") == 0) {
     return run_worker(argc, argv);
+  }
+  if (argc >= 2 && strcmp(argv[1], "fast-child") == 0) {
+    return FAST_CHILD_STATUS;
+  }
+  if (argc >= 2 && strcmp(argv[1], "slow-child") == 0) {
+    sleep(2);
+    return SLOW_CHILD_STATUS;
   }
   return run_parent();
 }

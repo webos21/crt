@@ -225,180 +225,43 @@ evidence only, not option-ON build acceptance.
 Stage checklist (remove completed items from this in-progress list only after
 their result is recorded in `HISTORY.md`):
 
-- [x] Extract reusable GPU, Skia, and crtmedia target modules and preserve the
-  existing per-host link rules.
-- [x] Add the option-ON standalone `04-gfx-media` CMake project and verify its
-  generated Windows target graph through the installed 03 SDK wrappers.
-- [x] Add `tools/build_stage_04_gfx_media.py`: copy the predecessor SDK, build
-  FreeType and FFmpeg through the packaged port driver, fetch/build pinned
-  Skia, configure/build/test/install the standalone project, rebuild its two
-  packaged examples, verify the result, and publish atomically.
-- [x] Register `STAGES["04-gfx-media"]` and its complete CRT-owned source,
-  recipe, test, example, Win32-shim, and port-library inputs in
-  `create_stage_source.py`.
-- [x] Generalize `verify_dist.py`'s redistributed-dependency validation and
-  require the option-ON GPU/Skia/media artifacts and examples in stage 04.
-- [x] Add `crt-stage-04-source` and attach its successor recipe to the
-  predecessor `crt-gfx-simple-dist` SDK.
 - [ ] Run the real Windows isolated acceptance from freshly extracted inputs
   under a path containing spaces; expect a multi-hour Skia/FFmpeg build and
   record every discovered defect before removing this in-progress section.
-  **The original "can't fork - try again" failure is root-caused and
-  fixed (2026-09-10-11), not just diagnosed.** Real cause:
-  `close_fd_slot()` (`libc/src/arch/windows/common/syscall.c`) silently
-  skipped `CloseHandle()` for fd 0/1/2 unconditionally, on the assumption
-  fd number implied "the process's original std handle" -- wrong once
-  fd 0-2 had been redirected (dup2/pipe), which is exactly what mksh's own
-  `XPCLOSE` (dropping the parent's copy of a pipe's read end from fd 0
-  after forking the last stage of a pipeline) does. That silently orphaned
-  the real handle every `cmd1 | cmd2` pipeline execution. Fixed to compare
-  against `GetStdHandle()` live (this PAL never calls `SetStdHandle()`, so
-  it stays an exact original-handle check) and only skip the close when fd
-  0-2 is genuinely still the original. A companion mksh correctness fix
-  (`shell/mksh/src/exec.c`'s `TPIPE` case) now also explicitly restores fd
-  0 via `restfd(0, e->savefd[0])` after a pipeline, mirroring the existing
-  fd 1 restore, instead of leaving it to `quitenv()` (which a `while`/`for`
-  loop body never triggers between iterations) -- a real, independent
-  stdin-correctness gap, confirmed not to be the leak's own cause but worth
-  keeping regardless. Verified: the minimal repro (`mksh.exe -c 'i=0;
-  while [ $i -lt 30 ]; do echo hi | /system/bin/sed.exe "s/hi/bye/"
-  >/dev/null; i=$((i+1)); done'`) now holds `GetProcessHandleCount()`
-  perfectly flat across all 30 iterations (was +1/iteration before); the
-  full `01-c -> 05-js` cumulative dist chain still rebuilds cleanly
-  (including a `crt-c++.cmd`-driven libcxxabi compile that broke outright
-  under an earlier, overly-blunt attempt at this fix -- see the live
-  `GetStdHandle()` check above, added specifically to fix that); the full
-  Windows `ctest` suite still passes 124/127 (same 3 pre-existing, unrelated
-  `libstdc++` gaps as before, no regression). The `CRT_DEBUG_SPAWN=1`-gated
-  diagnostic (`crt_debug_spawn_trace()`/`crt_debug_handle_count()` in
-  `syscall.c`) that found this is still in place, deliberately kept (not
-  yet cleaned up) because of the second issue below.
+  The Windows PAL/mksh child-accounting defect found by FFmpeg is fixed and
+  moved to `HISTORY.md`, including direct completion-order and 40-child stress
+  regressions. A fresh FFmpeg configure plus a real continuation through
+  build/install now produces all five expected static archives, headers, and
+  pkg-config metadata. The recipe declares no standalone tests; its real
+  demux/decode acceptance belongs to the 04 media smoke below. The official
+  Windows 03 SDK has now also been rebuilt with the final `waitpid(-1)`/mksh
+  reconciliation and verified again. It generated the fresh 04 source asset
+  with SHA-256
+  `aa15ceddd35275715496509005f4ef0d18677df7f6b8e696159a89a5638eb1f7`.
 
-  **A second, different failure that surfaced further into the real
-  isolated FreeType `make install` once the leak stopped masking it is
-  now also root-caused and fixed (2026-09-10), and led to two more real
-  packaging bugs found the same way.** All three were found by adding a
-  narrowly-scoped, explicitly-logged retry around `CreateProcessA()`
-  itself (`crt_createprocess_with_retry()` in `syscall.c`, retries only
-  `GetLastError()==ERROR_FILE_NOT_FOUND`, up to 5 attempts with a short
-  backoff, every retry and every final failure logged unconditionally via
-  `write(2, ...)` so nothing is silently hidden -- this project's own rule
-  that the stage runner must never mask a real failure still applies, and
-  a permanently-broken path still fails identically on every attempt and
-  is still reported). Originally added suspecting transient Windows
-  flakiness under bursty spawn load (a real, documented class of problem);
-  logging the exact `application_path` on every retry instead proved all
-  three failures deterministic and path-specific, not transient:
-  1. **`/bin/sh` did not exist in a packaged/isolated dist SDK at all.**
-     Every `#!/bin/sh` shebang (how essentially every autoconf/libtool-
-     generated script starts, including libtool's own generated
-     `install-sh`) failed `CreateProcessA()` with `ERROR_FILE_NOT_FOUND`
-     on every attempt. Cause: a packaged dist's own top-level `bin/`
-     holds only compiled native runtime DLLs (`libc.dll` etc.); only
-     `system/bin/` had the packaged shell/toybox set.
-     `create_rootfs.py`'s own in-tree, non-packaged rootfs already
-     aliases the same executables into `bin/` and `usr/bin/` too (its
-     `ROOTFS_DIRS`/`shell_dir` loop); the packaged dist
-     (`create_dist.py`) never got the same treatment. Fixed by extending
-     `install_wrapper_applets()` in `create_dist.py` to alias `mksh`/
-     `sh`/`make`/`awk` into `bin/` and `usr/bin/` too (deliberately not
-     every Toybox applet -- the concrete failure is `/bin/sh`
-     specifically, and the full Toybox applet set already costs
-     ~266MB in `system/bin/` alone; tripling that without a concrete
-     case needing it isn't justified).
-  2. **Once `/bin/sh` resolved to a real file, running it failed
-     instead with `sh: only -c scripts are supported by crt tiny sh`.**
-     `system/bin/sh.exe` (and therefore the new `bin/sh`/`usr/bin/sh`
-     aliases above) was never mksh -- `shell/CMakeLists.txt`'s own
-     `install(TARGETS crt_tiny_sh ...)` rule (`OUTPUT_NAME sh`, part of
-     the base `crt-c` component, every OS) always lands directly at
-     `system/bin/sh<suffix>`, and nothing in the packaged-dist flow ever
-     overwrote it with mksh the way `create_rootfs.py` deliberately does
-     for the in-tree rootfs (`install_alias(mksh_dest, .../sh, ...)`,
-     keeping the tiny single-command shell under a separate `tiny-sh`
-     name instead). `crt_tiny_sh` only understands `-c <command>` (see
-     `shell/tiny_sh/tiny_sh.c`), not being run *as* a script -- exactly
-     how a `#!/bin/sh` shebang invokes its interpreter, and exactly what
-     `install-sh` (a real multi-line script) needs. Fixed by having
-     `install_wrapper_applets()` copy `system/bin/mksh<suffix>` over
-     `system/bin/sh<suffix>` before the alias loops run (verified:
-     `sh.exe` is now byte-identical to `mksh.exe`, in `system/bin/`,
-     `bin/`, and `usr/bin/` alike).
-  3. **A third, different bug immediately behind these two -- root-caused,
-     fix strategy not yet decided (needs a call on which layer should own
-     it; see below, not implemented yet).** With both packaging fixes in
-     place, `install-sh` now actually runs, gets much further again, and
-     hits `./builds/unix/libtool: test: .: unexpected operator/operand`
-     during the shared library's dlname-destination-directory check.
-     Confirmed this is **not** an mksh bug: isolated, minimal mksh tests
-     of the exact parameter expansions involved (`${1%/*}`, both as a
-     named variable and as a raw positional parameter, matching
-     libtool's own `func_dirname`) all behave correctly. The real cause
-     is in GNU libtool's own generated `func_normal_abspath` (vendored
-     per-port as `builds/unix/ltmain.sh`, FreeType ships 2.5.4): its
-     absolute-path classification `case $func_normal_abspath_tpath in
-     ///*) ;; //*) ...;; /*) ;; *) # relative, prepend $cwd ;; esac` only
-     recognizes a leading `/` as absolute -- confirmed directly (`case
-     "C:/Users/.../install6/lib" in /*) ... ; *) echo RELATIVE; esac`
-     prints RELATIVE). This PAL represents every Windows absolute path as
-     `C:/...` (drive letter + forward slashes, never remapped under a
-     synthetic POSIX root), so `func_normal_abspath` treats every such
-     path as *relative* and prepends `` `pwd` ``, producing a garbled,
-     doubled path (real cwd's component chain glued in front of the
-     already-absolute target) -- which is what the ~120 stray `.` lines
-     actually are: `func_relative_path`'s own ascend-the-tree loop
-     legitimately iterating once per bogus extra path component that
-     doubling created, each iteration verbose-echoed by libtool as
-     `install: .`. GNU libtool's own codebase already has the right
-     idiom for this elsewhere in the exact same file (`ltmain.sh:977`:
-     `case ... in [\\/]*|[A-Za-z]:\\*) ;; esac`, used by a *different*
-     function) -- `func_normal_abspath` was just never given the same
-     treatment upstream. This is reached because FreeType's `configure`
-     ends up with `$bindir` set, taking libtool's `func_relative_path`
-     branch instead of its simpler hardcoded `../bin` fallback; but
-     `func_normal_abspath` is called throughout libtool for other
-     purposes too (RPATH, `-L`/`-I` canonicalization, ...), so this is a
-     structural incompatibility every autoconf/libtool-based Windows port
-     can hit, not a FreeType-only one-off.
+  The first complete-entrypoint attempt from that asset rebuilt and installed
+  FreeType and FFmpeg, then built pinned Skia/D3D12 through all 834 Ninja
+  edges and installed `libskia.a`. It exposed a stage-runner contract gap only
+  when the standalone CMake compiler probe began: the direct invocation had
+  omitted the manifest-required external `CRT_CC`/`CRT_CXX`/`CRT_AR`/
+  `CRT_RANLIB` environment, but the runner did not reject that before the
+  multi-hour dependency build and `crt-cc` eventually reported bare `clang`
+  as inaccessible. The up-front manifest-driven environment check is now in
+  place and the regenerated source asset has SHA-256
+  `a397cf8d0ba58d14e372d2482655bcd8d80787f5661a376a3d680ff0fb701850`.
+  Rerun from a new fresh root with the full external-toolchain contract active.
 
-     **Fix strategy -- needs a decision, not implemented yet:**
-     (a) Patch each port's vendored `ltmain.sh` via `crt-port-build.py`'s
-     existing `apply_source_patches()` mechanism (recipe JSON
-     `build.patches`, already used for other libtool/autoconf
-     compatibility fixes -- see its call site comments) to also treat
-     `[A-Za-z]:[\\/]*` as absolute in `func_normal_abspath`. Narrow,
-     precedented (mirrors libtool's own established idiom), reusable
-     across ports via the same recipe-JSON mechanism already in place --
-     but the fix isn't just the classification `case` arm: the rest of
-     the function's `sed`-based component-walking loop
-     (`_G_pathcar`/`_G_pathcdr`, anchored on a leading `/`) also assumes
-     POSIX-rooted paths, so a naive patch that only fixes the
-     classification without also handling the drive-letter prefix
-     through the rest of the algorithm risks a *worse*, silent bug (an
-     effectively infinite loop) instead of today's visible failure --
-     must be worked out and tested carefully, one port's `ltmain.sh` at a
-     time.
-     (b) Give this PAL a real POSIX-rooted view of Windows drives (e.g.
-     `/c/...` <-> `C:/...`, matching MSYS2/Cygwin/WSL), and have
-     `crt-port-build.py` pass that form to `configure`/`--prefix`/etc.
-     for autoconf/libtool-driven ports specifically. Fixes the root
-     mismatch generally (any future libtool internal that assumes
-     POSIX-absolute paths keeps working, not just this one function) but
-     is a broad, higher-risk change to this PAL's fundamental path
-     representation, touching `translate_path_for_host()` and everywhere
-     that depends on it.
-     (c) A narrow, single-port workaround: avoid triggering
-     `func_relative_path` at all for this port (e.g. don't pass
-     `--bindir` explicitly) so libtool falls back to its simple
-     hardcoded `../bin` heuristic. Fast, but doesn't generalize --
-     `func_normal_abspath` is reachable from other libtool code paths
-     too, so this class of bug will likely resurface on a later port
-     (FFmpeg, Skia) regardless.
-  The `CRT_DEBUG_SPAWN=1`-gated diagnostic and `crt_createprocess_with_retry()`
-  are deliberately still in place: harmless, low-risk defense-in-depth for
-  genuine transient `CreateProcessA` flakiness even though none of these
-  three turned out to be transient, and useful if bug 3's eventual fix
-  needs the same kind of evidence-gathering.
+  A deliberately space-containing install prefix then exposed another real
+  acceptance defect: FFmpeg constructs `-I${prefix}/include` as an unquoted
+  compiler option, so Clang receives separate `Install` and `19/include`
+  operands. Keep this recorded rather than hiding it; first rerun with only
+  the work/source path containing spaces and a no-space install prefix to
+  finish separating the PAL fix from FFmpeg prefix quoting. The next run is
+  the complete stage entrypoint from the fresh asset and one fresh root: it
+  must rebuild FreeType and FFmpeg, fetch/build pinned Skia against staged
+  FreeType, build/test/install the standalone 04 project, rebuild/run the GPU
+  and Skia examples, inventory all three redistributed port libraries, and
+  pass `verify_dist.py` before publishing the output.
 - [ ] Repeat the final isolated acceptance on Linux and macOS before calling
   the transition complete. WSL `Ubuntu-26.04` already has CMake, Ninja,
   Clang, and Python, but this checkout currently has no Linux 03 predecessor

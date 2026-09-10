@@ -617,7 +617,7 @@ exchild(struct op *t, int flags,
 #ifndef MKSH_NOPROSPECTOFWORK
 		sigprocmask(SIG_SETMASK, &omask, NULL);
 #endif
-		errorf("can't fork - try again");
+		errorf("can't fork - try again: %s", cstrerror(errno));
 	}
 	p->pid = cldpid ? cldpid : (procpid = getpid());
 
@@ -1239,6 +1239,15 @@ j_waitj(Job *j,
 	if (flags & JW_ASYNCNOTIFY)
 		j->flags |= JF_W_ASYNCNOTIFY;
 
+#ifdef MKSH_NOPROSPECTOFWORK
+	/* Synchronous wait(-1) can legitimately reap a process from a pipeline
+	 * that is still being assembled while another foreground job is waited.
+	 * check_job() records the Proc state but cannot finish the Job until
+	 * JF_STARTED and last_proc are set. Reconcile that deferred state now,
+	 * after JF_WAITING makes it safe for check_job() to retain the job. */
+	check_job(j);
+#endif
+
 #ifndef MKSH_UNEMPLOYED
 	if (!Flag(FMONITOR))
 #endif
@@ -1541,8 +1550,10 @@ check_job(Job *j)
 
 	/* XXX debugging (nasty - interrupt routine using shl_out) */
 	if (!(j->flags & JF_STARTED)) {
+#ifndef MKSH_NOPROSPECTOFWORK
 		internal_warningf("check_job: job started (flags 0x%X)",
 		    (unsigned int)j->flags);
+#endif
 		return;
 	}
 

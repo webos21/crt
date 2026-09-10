@@ -8,7 +8,88 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-11
+
+- **Made the isolated 04 stage fail before its multi-hour dependency build
+  when the external compiler contract is incomplete.** The first complete
+  `03-gfx-simple -> 04-gfx-media` entrypoint attempt from a fresh Windows
+  asset successfully rebuilt and installed FreeType and FFmpeg,
+  fetched the pinned mingw-w64 headers, and built all 834 Skia/D3D12
+  Ninja edges through the final `libskia.a` link and install. The subsequent
+  standalone CMake compiler probe then failed because that direct invocation
+  had omitted the predecessor manifest's required `CRT_CC`, `CRT_CXX`,
+  `CRT_AR`, and `CRT_RANLIB` environment; the port driver had resolved its
+  native tools independently, while the packaged
+  `crt-cc.cmd` consumer correctly refused an unavailable bare `clang`.
+
+  `build_stage_04_gfx_media.py` now validates every name in
+  `external_toolchain_environment` before fetching or building anything and
+  reports the complete missing set. A real negative invocation without the
+  five Windows variables exited 1 with all of `CRT_CC`, `CRT_CXX`,
+  `CRT_AR`, `CRT_RANLIB`, and `CRT_WINDOWS_SDK_LIBPATH` named, and
+  published no output tree. Regenerated the Windows 04 source asset with this
+  guard at SHA-256
+  `a397cf8d0ba58d14e372d2482655bcd8d80787f5661a376a3d680ff0fb701850`.
+  The full option-ON stage acceptance remains in `TODO.md`; this entry closes
+  only the late-failure contract gap.
+
 ## 2026-09-10
+
+- **Restored Windows `waitpid(-1)` completion-order semantics and completed
+  the isolated FFmpeg static build/install.** The Windows PAL formerly chose
+  the first registered child handle and blocked on it, rather than returning
+  whichever child had actually exited first. FFmpeg's configure exposed both
+  consequences under mksh: memory-copy command-substitution children
+  accumulated until the 64-slot child table returned `EMFILE`, while changing
+  mksh to wait for only one job PID left other pipeline children unreaped.
+  `__crt_sys_waitpid(-1)` now waits over the whole 64-entry registry with
+  `WaitForMultipleObjects()`. The matching `MKSH_NOPROSPECTOFWORK` race now
+  records a process reaped while its pipeline Job is still being assembled
+  and reconciles that deferred state at `j_waitj()` once `JF_STARTED` and
+  `JF_WAITING` make the update safe, without reporting the old
+  `check_job: job started` internal warning.
+
+  Added a portable regression that registers a slow child before a fast one
+  and proves `waitpid(-1)` returns the already-completed fast child; it passes
+  together with the existing 40-child registry drain and all 15 mksh tests.
+  Rebuilt and verified the Windows `01-c -> 02-cxx -> 03-gfx-simple` SDK.
+  Against that SDK, a fresh FFmpeg 8.1.2 configure completed in 1868.9 seconds
+  with Bionic, pthreads, static libraries, the requested H.264/AAC/MP3/PCM
+  decoders, MOV/MP3/WAV demuxers, and file protocol. Continuing from that
+  successful configure tree then built and installed all five expected
+  archives (`libavformat`, `libavcodec`, `libswresample`, `libswscale`, and
+  `libavutil`) plus their headers and pkg-config files. The remaining
+  Skia/standalone-media acceptance stays in `TODO.md`.
+
+- **Fixed GNU Libtool's Windows absolute-prefix incompatibility in the
+  packaged CRT porting path, and completed FreeType's isolated install and
+  runtime tests.** FreeType 2.14.3's generated Libtool treats only a leading
+  `/` as absolute inside `func_normal_abspath`; the former `C:/...` prefix was
+  therefore classified as relative, doubled with `pwd`, and eventually
+  failed its install path calculation. `crt-port-build.py` now gives native
+  Windows Autoconf/Libtool builds a POSIX-drive prefix such as `/c/...`, while
+  the Windows PAL recognizes that form only for a drive reported by
+  `GetLogicalDrives()` and translates it before the existing `CRT_ROOTFS`
+  fallback. The first real retry exposed two boundary details and fixed both:
+  Win32 reports `ERROR_ACCESS_DENIED`, not `ERROR_ALREADY_EXISTS`, when
+  `CreateDirectoryA()` is attempted on a drive root, so `mkdir()` now returns
+  the POSIX-required `EEXIST` when attributes prove the target is an existing
+  directory; and native LLVM tools do not pass through the PAL, so
+  `crt-native-tool` converts a positional `/c/...` argument back to `c:/...`
+  while preserving argument boundaries, including spaces.
+
+  Rebuilt and verified the full Windows `01-c -> 02-cxx -> 03-gfx-simple`
+  distribution chain, then confirmed the regenerated 03 SDK's Toybox
+  `mkdir -p /c/Users/...` succeeds. Against that SDK, FreeType configure
+  completed in 105.9 seconds, its real single-job static/shared build in
+  257.2 seconds, and `make install` installed the DLL, import library, static
+  archive, headers, pkg-config file, and aclocal metadata under the `/c/...`
+  prefix. The recipe's two real consumers then both passed: one linked
+  `libfreetype.a`, one linked `libfreetype.dll.a`, and each rasterized a glyph
+  from the bundled DejaVuSansMono font and printed
+  `freetype_glyph_test: ok`. The larger option-ON isolated 04 stage remains
+  in progress at its next dependency (FFmpeg); this entry records only the
+  completed general path/PAL fix and FreeType acceptance.
 
 - **Fixed the packaged Windows CRT rootfs layout that prevented mksh
   here-documents and therefore real autoconf port builds.** The isolated 04
