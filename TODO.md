@@ -197,10 +197,13 @@ recipe inside a stage's own source asset; `build_stage_02_cxx.py` copies
 it forward. Verified end to end: a fresh `01-c -> 02-cxx -> 03-gfx-simple`
 chain, all isolated, all from real packaged SDKs.
 
-**In progress:** `03-gfx-simple -> 04-gfx-media`, with Skia and FFmpeg
-actually enabled for this transition's acceptance (the default packaging
-pass everywhere still has `CRTGFX_ENABLE_SKIA=OFF`/
-`CRTMEDIA_ENABLE_FFMPEG=OFF`, which this transition must not settle for).
+**The isolated `03-gfx-simple -> 04-gfx-media` upgrade is now verified end
+to end on macOS (2026-09-11), Skia and FFmpeg actually enabled.** All 8
+ctest binaries pass, both packaged examples build/link/run live, and
+`verify_dist.py` passes. Nine real, previously-unexercised bugs were found
+and fixed reaching that state -- full trail in `HISTORY.md`'s 2026-09-11
+entry. **Still in progress:** Windows and Linux acceptance for this same
+transition (see the checklist below).
 Design is written up in full at
 `C:\Users\Lee\.claude\plans\soft-orbiting-swan.md` (approved 2026-09-09) --
 read that before continuing rather than re-deriving the design. Key
@@ -273,11 +276,12 @@ their result is recorded in `HISTORY.md`):
   FreeType, build/test/install the standalone 04 project, rebuild/run the GPU
   and Skia examples, inventory all three redistributed port libraries, and
   pass `verify_dist.py` before publishing the output.
-- [ ] Repeat the final isolated acceptance on Linux and macOS before calling
-  the transition complete. WSL `Ubuntu-26.04` already has CMake, Ninja,
-  Clang, and Python, but this checkout currently has no Linux 03 predecessor
-  SDK; build the Linux 01->02->03 chain there first. Treat CPU/FFmpeg/Skia
-  results separately from Vulkan/native-Wayland live-presentation evidence.
+- [ ] Repeat the final isolated acceptance on Linux before calling the
+  transition complete (macOS is done, see `HISTORY.md`'s 2026-09-11 entry).
+  WSL `Ubuntu-26.04` already has CMake, Ninja, Clang, and Python, but this
+  checkout currently has no Linux 03 predecessor SDK; build the Linux
+  01->02->03 chain there first. Treat CPU/FFmpeg/Skia results separately
+  from Vulkan/native-Wayland live-presentation evidence.
 
 Keep the separately listed Windows C++ initialization failure open; the stage
 runner deliberately has no retry that could hide it.

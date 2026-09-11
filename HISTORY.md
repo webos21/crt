@@ -10,6 +10,103 @@ substantive update.
 
 ## 2026-09-11
 
+- **Verified the isolated `03-gfx-simple -> 04-gfx-media` upgrade end to
+  end on macOS, with Skia and FFmpeg actually enabled (`d1c996d`).** The
+  first complete run of this transition on real macOS hardware: all 8
+  ctest binaries pass, both packaged examples (`gfx-gpu`, `gfx-skia`)
+  build/link/run live (a real Metal swapchain and a real Ganesh-drawn
+  scene actually presented on screen), and `verify_dist.py` passes. Nine
+  real, previously-unexercised bugs were found and fixed reaching that
+  state, each the first real exercise of a code path this stage's own
+  standalone/isolated build machinery had never actually completed on
+  macOS before:
+  - `tools/create_stage_source.py`: the `"04-gfx-media"` stage's own
+    `project_paths_by_os` never listed the three `window_*_gpu.h`/
+    `window_wayland_native.h` headers `libcrtgfx/src/gpu.c` `#include`s
+    per OS, nor the shared `wayland_weston_internal.h` all three depend
+    on -- "file not found" packaging the stage source.
+  - `tools/crt-c++`: never stripped a caller-supplied `--sysroot=`, unlike
+    `tools/crt-cc`'s own identical fix (2026-09-09, see this file's
+    earlier entry) -- clang's Darwin driver derives the linker's
+    `-syslibroot` from `--sysroot` in preference to `-isysroot`, so a
+    real-Apple-SDK dylib link failed with `ld: library 'System' not
+    found` despite `-isysroot` pointing at a real Xcode SDK.
+  - `distribution/stages/04-gfx-media/CMakeLists.txt`: the imported
+    `crtgfx_window` wrapper (a plain `IMPORTED` stub around the
+    predecessor SDK's already-built `libcrtgfx.a`) carried none of that
+    real target's own `PRIVATE` macOS framework/objc link libraries --
+    those are a CMake build-graph property of the STATIC target that
+    built the `.a`, not something recorded inside the archive file
+    itself. `crtgfx_gpu_test`/`crtgfx_gpu_window_demo` failed outright
+    with dozens of undefined `objc_msgSend`/`kCAGravityResize`/... symbols
+    already inside the imported archive.
+  - `libcrtgfx/cmake/crtgfx_skia_targets.cmake`: `crtgfx_skia_shared`
+    needed its own `objc` + CoreFoundation/Foundation/Metal framework
+    links -- Skia's own ARC-enabled Metal/Ganesh backend and
+    `skia_bridge.cc`'s own `SkCFObject.h` use are `crtgfx_skia_shared`'s
+    own direct link-time need, never covered by `crtgfx_gpu_shared`'s
+    separate (`PRIVATE`, non-propagating) framework list. `CRTGFX_ENABLE_
+    SKIA` is opt-in and `OFF` by default in-tree, so this was also the
+    first time this project's own `crtgfx_skia_shared` had ever actually
+    been linked for macOS with a real Metal-enabled `libskia.a` at all.
+  - `distribution/stages/04-gfx-media/CMakeLists.txt`:
+    `crt_stage_register_test()` blindly added the predecessor SDK's
+    `lib/` to `DYLD_LIBRARY_PATH` for every ctest binary. dyld's
+    `DYLD_LIBRARY_PATH` override resolves a dependency by leaf filename
+    against every listed directory ahead of that dependency's own real
+    path, even an already-absolute one -- since that directory carries
+    this project's own `libc++.1.dylib`/`libc++abi.1.dylib` under the
+    exact same leaf names real Apple frameworks use internally, it
+    hijacked every test binary linking any such framework (Foundation/
+    CoreAudio/AudioToolboxCore/...), corrupting them (Bus error/
+    Segmentation fault, or `crtgfx_skia_raster_smoke`'s own bogus
+    weak-symbol mismatch) even though every one of this project's own
+    real dependencies already resolved fine via embedded absolute paths
+    or `@rpath` + this stage's own linker-baked `-Wl,-rpath` entries.
+    Root-caused by reproducing the exact failing `ctest` `COMMAND` by
+    hand and bisecting by environment variable; confirmed every affected
+    binary runs clean (`<name>: ok`, exit 0) with `DYLD_LIBRARY_PATH`
+    unset entirely. Removed the predecessor-SDK override entirely on
+    macOS (proven unneeded, actively harmful); fixed the unconditional
+    `${CMAKE_BINARY_DIR}/bin` path while here too (shared libs land in
+    `/lib`, not `/bin`, on macOS/Linux).
+  - `examples/gfx-gpu/CMakeLists.txt`, `examples/gfx-skia/CMakeLists.txt`:
+    a plain `find_library()` file path carries none of the PUBLIC-link-
+    library propagation a real CMake target would, so `crtgfx_gpu`'s/
+    `crtgfx_skia`'s own transitive PUBLIC dependencies (the window
+    library; for `gfx-skia`, also `libskia.a`/`libfreetype.a` themselves,
+    needed for Skia API `skia_bridge.cc` itself never calls but
+    `skia_reference_scene.h` does) never reached these standalone
+    examples' own link lines. `gfx-skia` also needed `CRTGFX_HAVE_METAL`/
+    `_D3D12`/`_VULKAN` defined (a separate CMake project scope than the
+    stage's own `add_compile_definitions()`, see below) and an explicit
+    C++17 standard (Skia's public headers use `std::is_same_v`/
+    `std::size`/`std::data`).
+  - `tools/create_dist.py`: the generated manifest's
+    `external_toolchain_environment` was unconditional for every
+    `target_os`, so a macOS run failed immediately demanding
+    `CRT_WINDOWS_SDK_LIBPATH` be set even though the target was macOS.
+  - `include/wchar.h`, `include/stdatomic.h`: real Apple headers reachable
+    via `-fcrt-real-apple-sdk` redefine `mbstate_t` (fixed with the same
+    `_MBSTATE_T` guard real BSD/Darwin headers use) and get reached from
+    a C++ TU (`skia_bridge.cc`) via this project's own C-only
+    `<stdatomic.h>`, where a bare `_Bool` is invalid in C++.
+  - `distribution/stages/04-gfx-media/CMakeLists.txt`: this standalone
+    project never included the in-tree `libcrtgfx/CMakeLists.txt` that
+    normally defines `CRTGFX_HAVE_METAL`/`_D3D12` (per host) and
+    `CRTGFX_HAVE_VULKAN` (once a real `libvulkan` is found) --
+    `gpu_internal.h`'s own struct fields fell through to their bodyless
+    `#else int reserved;` branch while `gpu_metal.c`'s real field
+    accesses were compiled unconditionally.
+
+  Also added a `CRT_STAGE_KEEP_TMP=1` debug knob to `tools/build_stage_
+  04_gfx_media.py` that skips its own temp-tree cleanup on failure --
+  used throughout this investigation to inspect crashing ctest binaries
+  directly and re-run failing sub-steps in isolation, without repeating
+  the multi-minute Skia/FreeType/FFmpeg rebuild each time. Full `cmake
+  --workflow --preset macos-host-ninja-debug` (100/100) and `crt-js-dist`
+  confirmed still green after the fix set.
+
 - **Fixed the isolated `01-c -> 02-cxx` upgrade: a packaged `02-cxx` SDK
   never carried the pinned recipe to advance it one stage further
   (`d2eab26`).** `verify_dist.py` requires a packaged `02-cxx` SDK to carry
