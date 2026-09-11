@@ -21,6 +21,116 @@ def cmake_path(path: Path) -> str:
     return path.resolve().as_posix()
 
 
+# Mach-O magic numbers (32/64-bit, either endianness) and the fat
+# (universal) binary magic -- checked against each file's own first four
+# bytes so rewrite_stale_macho_rpaths() below can skip straight past the
+# thousands of plain-text files in a real staged tree (Skia's own
+# installed include/ alone) without paying for a real `otool` invocation
+# on each one.
+_MACHO_MAGICS = frozenset((
+    b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe",
+    b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",
+    b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
+))
+
+
+def rewrite_stale_macho_rpaths(root: Path, old_root: Path, new_root: Path) -> None:
+    """install_name_tool -rpath's every Mach-O file under root whose own
+    LC_RPATH still points somewhere under old_root, rewriting it to the
+    equivalent path under new_root.
+
+    macOS-only, and needed for real: this stage is built entirely inside a
+    throwaway tempfile.mkdtemp() (old_root, see main()'s own temp_root),
+    then copied to the real, requested --output (new_root) only once
+    finished. The predecessor SDK's own crt-toolchain.cmake computes
+    CRT_DISTRIBUTION_ROOT as `get_filename_component(... "${CMAKE_CURRENT_
+    LIST_DIR}" ABSOLUTE)` -- deliberately self-relocating ("wherever this
+    SDK happens to be unpacked", by design, for the normal "download once,
+    build in place" case) -- and both CMAKE_BUILD_RPATH/CMAKE_INSTALL_
+    RPATH and tools/crt-c++'s own `-Wl,-rpath,${CRT_SYSROOT}/lib` derive
+    from it. So every RPATH-bearing binary built while old_root was still
+    "where this SDK lives" gets old_root's own (about-to-be-deleted) path
+    baked in, not new_root's -- a real, confirmed bug (2026-09-11): a
+    published crtgfx_skia_gpu_window_demo failed outright with "Library
+    not loaded: @rpath/libcrtgfx_skia.dylib ... tried:
+    '<old_root>/lib/libcrtgfx_skia.dylib' (no such file)" once old_root
+    (already deleted by main()'s own `finally: shutil.rmtree(temp_root)`)
+    was gone. Note DYLD_LIBRARY_PATH is NOT a workaround here -- pointing
+    it at the real lib/ "fixes" that error but immediately reintroduces
+    the leaf-name dyld-hijack bug crt_stage_register_test() itself was
+    fixed for (distribution/stages/04-gfx-media/CMakeLists.txt's own
+    2026-09-11 entry): real Apple frameworks' own libc++.1.dylib gets
+    silently swapped for this project's ABI-incompatible one.
+    dyld's own @rpath resolution consults every already-loaded image's own
+    RPATH entries, so fixing only the top-level executable would usually
+    be enough in practice -- every Mach-O file in the tree is rewritten
+    here anyway regardless, since it costs little and does not depend on
+    that aggregation behavior for a dylib some future consumer might
+    dlopen() directly."""
+    # Two candidate spellings of old_root, both checked below: ld64 bakes
+    # the *real*, symlink-resolved path (/private/var/folders/... on
+    # macOS) into some LC_RPATH commands (e.g. CMake's own automatic
+    # RPATH) but the raw, unresolved tempfile.mkdtemp() spelling (/var/
+    # folders/...) into others (tools/crt-c++'s own -Wl,-rpath uses
+    # $CRT_SYSROOT verbatim) -- confirmed for real, 2026-09-11: matching
+    # only one form left the other spelling's own stale entry (a second,
+    # separate LC_RPATH command in the same file) silently unrewritten,
+    # dangling at an already-deleted temp path forever, even though the
+    # file also carried a second, correctly-rewritten entry that happened
+    # to make the binary still run.
+    old_strs = {str(old_root), str(old_root.resolve())}
+    new_str = str(new_root.resolve())
+    for path in root.rglob("*"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            with path.open("rb") as handle:
+                magic = handle.read(4)
+        except OSError:
+            continue
+        if magic not in _MACHO_MAGICS:
+            continue
+        listing = subprocess.run(
+            ["otool", "-l", str(path)], capture_output=True, text=True, check=False)
+        lines = listing.stdout.splitlines()
+        existing_rpaths = set()
+        for index, line in enumerate(lines):
+            if line.strip() != "cmd LC_RPATH" or index + 2 >= len(lines):
+                continue
+            path_line = lines[index + 2].strip()
+            if path_line.startswith("path "):
+                existing_rpaths.add(path_line[len("path "):].rsplit(" (offset", 1)[0])
+        for value in list(existing_rpaths):
+            matched_old = next(
+                (old_str for old_str in old_strs
+                 if value == old_str or value.startswith(old_str + os.sep)),
+                None)
+            if matched_old is None:
+                continue
+            new_value = new_str + value[len(matched_old):]
+            if new_value in existing_rpaths:
+                # A second, differently-spelled RPATH entry for the exact
+                # same real directory already exists in this file (e.g.
+                # both the raw and the /private-resolved form of the same
+                # TMPDIR path -- confirmed for real, 2026-09-11: dyld
+                # tolerates two RPATH strings that happen to resolve to
+                # one real directory, but rejects two byte-identical
+                # LC_RPATH commands outright ("duplicate LC_RPATH") the
+                # instant rewriting both stale spellings to the same new
+                # path would have made them identical). Drop this one
+                # instead of creating that duplicate; the other spelling
+                # is either already correct or gets rewritten to the same
+                # new_value by its own turn through this same loop.
+                subprocess.run(
+                    ["install_name_tool", "-delete_rpath", value, str(path)],
+                    check=True)
+            else:
+                subprocess.run(
+                    ["install_name_tool", "-rpath", value, new_value, str(path)],
+                    check=True)
+                existing_rpaths.add(new_value)
+
+
 def publish_tree(staged: Path, output: Path) -> None:
     """Copy beside the destination, then expose the final name atomically."""
     publish_root = Path(tempfile.mkdtemp(
@@ -29,6 +139,12 @@ def publish_tree(staged: Path, output: Path) -> None:
     candidate = publish_root / output.name
     try:
         shutil.copytree(staged, candidate)
+        if sys.platform == "darwin":
+            # Rewrite while still under the hidden publish_root, targeting
+            # the real final `output` path, so the atomic os.replace()
+            # below still exposes either a fully-correct tree or nothing
+            # -- never a half-patched one visible at the real output path.
+            rewrite_stale_macho_rpaths(candidate, staged, output)
         os.replace(candidate, output)
     finally:
         shutil.rmtree(publish_root, ignore_errors=True)
