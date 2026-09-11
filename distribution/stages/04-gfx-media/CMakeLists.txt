@@ -100,8 +100,23 @@ elseif(CRT_TARGET_OS STREQUAL "macos")
   set_property(TARGET crtgfx_window_shared PROPERTY INTERFACE_LINK_LIBRARIES
     "${CMAKE_SYSROOT}/lib/libcrtgfx.dylib")
 elseif(CRT_TARGET_OS STREQUAL "linux")
+  # Same class of bug as the macOS branch above, for Linux's own missing
+  # transitive dependency instead of Objective-C frameworks (2026-09-11):
+  # window_wayland.c.o (already inside the predecessor SDK's libcrtgfx.a)
+  # calls real libxkbcommon symbols (xkb_context_new/xkb_state_*/
+  # xkb_keymap_*) that 03-gfx-simple's own real STATIC target links
+  # PRIVATE (libcrtgfx/CMakeLists.txt's CRTGFX_XKBCOMMON_LIBRARIES) --
+  # again, a build-graph property of that target, not recorded inside the
+  # .a itself. crtgfx_gpu_test happened not to hit this (it never
+  # exercises the keyboard/xkb code path), but crtgfx_gpu_window_demo
+  # (creates a real window with input handling) failed outright with
+  # undefined references to every xkb_* symbol above. The predecessor SDK
+  # already carries the pinned static libxkbcommon.a as a declared
+  # redistributed dependency (03-gfx-simple's own manifest.json
+  # redistributed_dependencies entry) at this exact path -- re-listing it
+  # here, the same way the macOS branch re-lists its frameworks, fixes it.
   set_property(TARGET crtgfx_window PROPERTY INTERFACE_LINK_LIBRARIES
-    "${CMAKE_SYSROOT}/lib/libcrtgfx.a")
+    "${CMAKE_SYSROOT}/lib/libcrtgfx.a" "${CMAKE_SYSROOT}/lib/libxkbcommon.a")
   set_property(TARGET crtgfx_window_shared PROPERTY INTERFACE_LINK_LIBRARIES
     "${CMAKE_SYSROOT}/lib/libcrtgfx.so")
 else()
@@ -131,8 +146,115 @@ elseif(CRT_TARGET_OS STREQUAL "macos")
   set(CRTGFX_LIBCXX_UNEXPORTED
     "${CRT_STAGE_SOURCE_ROOT}/libstdc++/third_party/libcxx/libc++.unexported.exp")
 elseif(CRT_TARGET_OS STREQUAL "linux")
+  # Plain find_library() here comes up empty on a real multiarch Debian/
+  # Ubuntu host (confirmed for real, 2026-09-11, running this isolated
+  # stage against a real Ubuntu aarch64 host that genuinely has
+  # libvulkan-dev installed: "Could not find CRTGFX_LINUX_VULKAN_LIB").
+  # Root cause: this stage's own crt-toolchain.cmake sets
+  # CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY (needed so CMake's
+  # compiler-identification probe doesn't try to fully link against this
+  # freestanding sysroot the normal way), which makes CMake's compiler-ABI
+  # detection skip the executable-link probe entirely ("Check for working
+  # C compiler ... - skipped") -- and that link probe (parsing a verbose
+  # `-L.../lib/aarch64-linux-gnu` line) is the *only* thing that ever
+  # populates CMAKE_LIBRARY_ARCHITECTURE/CMAKE_C_IMPLICIT_LINK_DIRECTORIES,
+  # both confirmed empty here via direct inspection. Without a populated
+  # CMAKE_LIBRARY_ARCHITECTURE, find_library() only searches plain
+  # `/usr/lib`, `/lib`, etc, never the real
+  # `/usr/lib/aarch64-linux-gnu/libvulkan.so` a `libvulkan-dev` install
+  # actually uses -- the in-tree libcrtgfx/CMakeLists.txt's own identical
+  # find_library(CRTGFX_LINUX_VULKAN_LIB vulkan) call never hits this,
+  # since the main build's own ABI probe is a normal executable link.
+  # Fixed the same way that file's own CRTGFX_LINUX_WAYLAND_CLIENT_LIB
+  # fallback already handles a versioned-only install: retry via
+  # find_file() with the real Debian/Ubuntu multiarch directory name, read
+  # from dpkg-architecture directly rather than trusting CMake's own
+  # (here, broken) derivation of it. dpkg-architecture is Debian/Ubuntu-
+  # only by design (this project's own Linux ports are only exercised on
+  # Debian/Ubuntu hosts -- WSL/Ubuntu, real Ubuntu -- per every other
+  # Linux-specific comment in this codebase); find_program() failing
+  # cleanly on a non-Debian host just leaves this fallback a no-op, same
+  # as before this fix on such a host.
   find_library(CRTGFX_LINUX_VULKAN_LIB NAMES vulkan vulkan.so.1
-    NO_CMAKE_FIND_ROOT_PATH REQUIRED)
+    NO_CMAKE_FIND_ROOT_PATH)
+  if(NOT CRTGFX_LINUX_VULKAN_LIB)
+    find_program(CRT_DPKG_ARCHITECTURE_EXECUTABLE dpkg-architecture)
+    if(CRT_DPKG_ARCHITECTURE_EXECUTABLE)
+      execute_process(
+        COMMAND "${CRT_DPKG_ARCHITECTURE_EXECUTABLE}" -qDEB_HOST_MULTIARCH
+        OUTPUT_VARIABLE CRT_HOST_MULTIARCH_TRIPLET
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+      )
+    endif()
+    if(CRT_HOST_MULTIARCH_TRIPLET)
+      unset(CRTGFX_LINUX_VULKAN_LIB CACHE)
+      find_file(CRTGFX_LINUX_VULKAN_LIB
+        NAMES libvulkan.so libvulkan.so.1
+        PATHS /lib /usr/lib /usr/local/lib
+        PATH_SUFFIXES "${CRT_HOST_MULTIARCH_TRIPLET}"
+      )
+    endif()
+  endif()
+  if(NOT CRTGFX_LINUX_VULKAN_LIB)
+    message(FATAL_ERROR "Could not find CRTGFX_LINUX_VULKAN_LIB using the "
+      "following names: vulkan, vulkan.so.1")
+  endif()
+  # A second, separate real bug found immediately after fixing the above
+  # (2026-09-11): every executable linking CRTGFX_LINUX_VULKAN_LIB (e.g.
+  # crtgfx_gpu_test) failed with dozens of `undefined reference to
+  # 'strcmp@GLIBC_2.17'`/etc, straight out of libvulkan.so itself, plus
+  # `warning: libc.so.6, needed by .../libvulkan.so, not found (try using
+  # -rpath or -rpath-link)`. Root cause: this stage links every executable
+  # fully freestanding (crt-toolchain.cmake's own --sysroot=/-nostdinc/no
+  # default -lc), so GNU ld's own default for an EXECUTABLE (unlike a
+  # `-shared` library, which defaults to --allow-shlib-undefined) is
+  # --no-allow-shlib-undefined -- it insists on verifying every symbol
+  # libvulkan.so's own NEEDED entries (libc.so.6/libm.so.6/
+  # ld-linux-aarch64.so.1) would provide, and can only do that by actually
+  # locating those files at link time. The `-rpath` already set on these
+  # targets (crtgfx_gpu_targets.cmake) only affects the *runtime* loader,
+  # not this link-time verification pass -- confirmed for real: adding
+  # `-rpath-link` pointing at libvulkan.so's own directory (where the
+  # real host libc.so.6/libm.so.6/ld-linux-aarch64.so.1 already live
+  # alongside it, Ubuntu's usrmerged /lib -> /usr/lib multiarch layout)
+  # is exactly the linker's own suggested fix and made a standalone
+  # reproduction of the identical failing link succeed immediately, with
+  # no effect on the resulting binary (-rpath-link is link-time-only,
+  # never embedded). Directory-scoped so every current and future target
+  # in this stage that links CRTGFX_LINUX_VULKAN_LIB picks it up
+  # automatically, matching how CRTGFX_HAVE_VULKAN below is also set
+  # once, project-wide, rather than repeated per target.
+  get_filename_component(CRT_LINUX_VULKAN_LIB_DIR "${CRTGFX_LINUX_VULKAN_LIB}" DIRECTORY)
+  add_link_options("-Wl,-rpath-link,${CRT_LINUX_VULKAN_LIB_DIR}")
+  # A third, unrelated real bug found linking `lib/libcrtmedia.so` (2026-09-11):
+  # `libavutil.a(tx_float_neon.o): relocation R_AARCH64_ADR_PREL_PG_HI21
+  # against symbol 'ff_tx_tab_32_float' which may bind externally can not
+  # be used when making a shared object; recompile with -fPIC`. Root
+  # cause is narrower than the message suggests: `libavutil/aarch64/
+  # asm.S`'s own `movrel` macro already emits the correct PIC-safe
+  # `adrp`+`add :lo12:` sequence for this project's own `--enable-pic`
+  # FFmpeg build (porting/recipes/ffmpeg.json) -- ld's complaint is about
+  # the *symbol's* ordinary global (non-hidden) ELF visibility, not the
+  # instruction sequence: it cannot assume an in-page-relative reference
+  # to a symbol that could still be preempted by another shared object
+  # stays valid. FFmpeg's own real `--enable-shared` build sidesteps this
+  # with a linker version script demoting non-public symbols to local
+  # scope at *its own* `.so` link -- never triggered here, since this
+  # recipe only ever builds FFmpeg static and it is this project's own,
+  # separate `libcrtmedia.so` link that first exposes it. `-Wl,-Bsymbolic`
+  # forces every default-visibility symbol reference resolved within this
+  # project's own final shared-library link to bind to the definition
+  # already present in that same link -- exactly the guarantee ld was
+  # refusing to assume -- without needing to patch FFmpeg's own visibility
+  # annotations or Makefile (see porting/recipes/ffmpeg.json's own notes
+  # for the two dead ends tried first: `--enable-pic` alone does not touch
+  # this, and `--disable-neon` trades it for a *worse*, unconditional
+  # undefined-reference failure from a genuine upstream Makefile gap).
+  # Harmless for the executables linked in this same directory (`-Bsymbolic`
+  # only changes shared-object symbol binding; ld accepts and no-ops it
+  # for a plain executable link).
+  add_link_options("-Wl,-Bsymbolic")
   set(CRTGFX_GPU_BACKEND_SOURCES ${CRTGFX_GPU_BACKEND_LINUX_SOURCES})
 endif()
 # libcrtgfx/src/gpu_internal.h's own struct crtgfx_gpu_device/crtgfx_gpu_

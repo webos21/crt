@@ -439,7 +439,30 @@ function(crt_add_crtgfx_skia_shared_target)
     elseif(CRT_TARGET_OS STREQUAL "linux")
       # -fuse-ld=lld: see crtgfx_skia_raster_smoke's own, fuller comment
       # (same file, its Linux branch) for the full ld.bfd-vs-lld story.
-      target_link_options(crtgfx_skia_shared PRIVATE -fuse-ld=lld)
+      # -Wl,--no-dependent-libraries: a second, separate real bug found
+      # linking crtgfx_skia_shared through lld specifically for the first
+      # time against the 04-gfx-media isolated stage's own imported
+      # prebuilt libc++.a/libc++abi.a/libunwind.a (CRT_USE_IMPORTED_LIBCXX,
+      # set ON only there -- the in-tree build's own bootstrap cxx/
+      # cxx_shared targets never exercised this): `ld.lld: error:
+      # .../libc++.a(memory.cpp.o): unable to find library from dependent
+      # library specifier: pthread`, repeated for several libc++/libc++abi/
+      # libunwind objects. Root cause: Clang embeds an ELF ".deplibs"
+      # section recording `#pragma comment(lib, "pthread")`-style autolink
+      # requests in these objects (upstream libc++/libc++abi assume a
+      # traditional glibc split -lpthread) -- ld.bfd (every other Linux
+      # link in this whole project, none of which sets -fuse-ld=lld) never
+      # reads or acts on that section at all, but lld actively tries to
+      # resolve it by searching this freestanding sysroot's own -L paths
+      # for a real libpthread.a/.so, which does not and will never exist
+      # here (this project's own bionic-compatible libc bakes pthread
+      # symbols directly into libc.a, no separate libpthread). Fixed with
+      # lld's own documented flag for exactly this: skip reading embedded
+      # dependent-library specifiers entirely, matching how ld.bfd already
+      # (silently) behaves. Co-scoped with -fuse-ld=lld above, so this is a
+      # harmless no-op wherever lld isn't actually the active linker.
+      target_link_options(crtgfx_skia_shared PRIVATE -fuse-ld=lld
+        -Wl,--no-dependent-libraries)
     elseif(CRT_TARGET_OS STREQUAL "macos")
       # objc: Skia's own Metal/Ganesh backend (GrMtlCommandBuffer.cpp,
       # GrMtlGpu.cpp, GrMtlOpsRenderPass.cpp, ...), already compiled into

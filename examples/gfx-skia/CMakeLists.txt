@@ -114,4 +114,46 @@ target_include_directories(crtgfx_skia_example PRIVATE "${CRTGFX_INCLUDE_DIR}")
 target_link_libraries(crtgfx_skia_example PRIVATE
   "${CRTGFX_SKIA_LIBRARY}" "${CRTGFX_GPU_LIBRARY}" "${CRTGFX_WINDOW_LIBRARY}"
   "${CRTGFX_SKIA_STATIC_LIBRARY}" "${CRTGFX_FREETYPE_LIBRARY}")
+if(NOT WIN32 AND NOT APPLE)
+  # Same real, confirmed bug as examples/gfx-gpu/CMakeLists.txt's own
+  # matching fix (see that file's fuller comment for the full story):
+  # this freestanding executable link defaults to --no-allow-shlib-
+  # undefined, so the real host libvulkan.so must be locatable via
+  # -rpath-link at link time, and libc++abi.so.1's own `_Unwind_*`
+  # symbols need libunwind.so linked directly and explicitly (it carries
+  # no NEEDED entry for it at all -- LIBCXXABI_USE_LLVM_UNWINDER=OFF, and
+  # this project's own imported libcxx now builds with
+  # LIBCXX_ENABLE_ABI_LINKER_SCRIPT=OFF, trading away the upstream ABI
+  # linker script that used to auto-add `-lunwind` for any libc++.so
+  # consumer -- see that recipe's own notes).
+  find_library(CRTGFX_EXAMPLE_VULKAN_LIB NAMES vulkan vulkan.so.1
+    NO_CMAKE_FIND_ROOT_PATH)
+  if(NOT CRTGFX_EXAMPLE_VULKAN_LIB)
+    find_program(CRT_DPKG_ARCHITECTURE_EXECUTABLE dpkg-architecture)
+    if(CRT_DPKG_ARCHITECTURE_EXECUTABLE)
+      execute_process(
+        COMMAND "${CRT_DPKG_ARCHITECTURE_EXECUTABLE}" -qDEB_HOST_MULTIARCH
+        OUTPUT_VARIABLE CRT_HOST_MULTIARCH_TRIPLET
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+      )
+    endif()
+    if(CRT_HOST_MULTIARCH_TRIPLET)
+      unset(CRTGFX_EXAMPLE_VULKAN_LIB CACHE)
+      find_file(CRTGFX_EXAMPLE_VULKAN_LIB
+        NAMES libvulkan.so libvulkan.so.1
+        PATHS /lib /usr/lib /usr/local/lib
+        PATH_SUFFIXES "${CRT_HOST_MULTIARCH_TRIPLET}"
+      )
+    endif()
+  endif()
+  target_link_options(crtgfx_skia_example PRIVATE
+    "-Wl,-rpath-link,${CMAKE_SYSROOT}/lib")
+  if(CRTGFX_EXAMPLE_VULKAN_LIB)
+    get_filename_component(CRT_EXAMPLE_VULKAN_LIB_DIR "${CRTGFX_EXAMPLE_VULKAN_LIB}" DIRECTORY)
+    target_link_options(crtgfx_skia_example PRIVATE
+      "-Wl,-rpath-link,${CRT_EXAMPLE_VULKAN_LIB_DIR}")
+  endif()
+  target_link_libraries(crtgfx_skia_example PRIVATE "${CMAKE_SYSROOT}/lib/libunwind.so")
+endif()
 

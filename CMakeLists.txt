@@ -225,6 +225,7 @@ target_compile_options(crt_build_flags INTERFACE
   -fno-builtin
   -Xclang
   -fwchar-type=int
+  -fPIC
   -ffunction-sections
   -fdata-sections
   -Wall

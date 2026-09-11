@@ -276,12 +276,36 @@ their result is recorded in `HISTORY.md`):
   FreeType, build/test/install the standalone 04 project, rebuild/run the GPU
   and Skia examples, inventory all three redistributed port libraries, and
   pass `verify_dist.py` before publishing the output.
-- [ ] Repeat the final isolated acceptance on Linux before calling the
-  transition complete (macOS is done, see `HISTORY.md`'s 2026-09-11 entry).
-  WSL `Ubuntu-26.04` already has CMake, Ninja, Clang, and Python, but this
-  checkout currently has no Linux 03 predecessor SDK; build the Linux
-  01->02->03 chain there first. Treat CPU/FFmpeg/Skia results separately
-  from Vulkan/native-Wayland live-presentation evidence.
+- [ ] Finish the Linux isolated acceptance (macOS is done, see `HISTORY.md`'s
+  2026-09-11 entry). Run on real Linux/aarch64 hardware (not WSL): all 8
+  ctest binaries (`crtgfx_gpu_test`, `crtmedia_*_test`,
+  `crtgfx_skia_raster_smoke`) pass end to end from a real packaged
+  `03-gfx-simple` SDK. Eight real bugs found and fixed reaching that
+  state -- full trail in `HISTORY.md`'s 2026-09-11 entry (Vulkan
+  `find_library()`/`-rpath-link`, FFmpeg `--enable-pic`/`-Bsymbolic`,
+  missing libxkbcommon on the imported `crtgfx_window` target, project-
+  wide `-fPIC`/`-ffunction-sections`/`-fdata-sections` for the TLS-model
+  shared-library bug, `LIBCXX_ENABLE_ABI_LINKER_SCRIPT=OFF` for the
+  `libc++.so` runtime-loading bug, and explicit `libunwind.so` linking in
+  both packaged examples). **Still open:** the `examples/gfx-gpu`/
+  `examples/gfx-skia` standalone rebuild and the final `verify_dist.py`
+  pass were still running when this was last updated -- rerun
+  `./tools/crt-stage-build.py --sdk-root . --recipe
+  ./stages/recipes/04-gfx-media.json --work-root ./tmp --output
+  ./out-04-gfx-media --asset ../../stage-sources/crt-development-linux-
+  04-gfx-media-source.tar.xz` from inside a freshly rebuilt `dist/
+  03-gfx-simple` (needs `crt-gfx-simple-dist` rebuilt first so the fixes
+  above are actually in the packaged SDK/stage-source) and confirm it
+  reaches `CRT stage ready` before removing this bullet. Iterating on any
+  further fix here does NOT need a full from-scratch rerun each time:
+  `tools/build_stage_04_gfx_media.py`'s own `finally: shutil.rmtree(
+  temp_root)` is what wipes the from-scratch Skia/FreeType/FFmpeg build
+  on every run (by design, for a genuine from-scratch acceptance pass) --
+  set `CRT_STAGE_KEEP_TMP=1` once to keep that temp tree around, then
+  re-run just the affected `cmake --build`/example step directly against
+  it instead of the whole script, for fast iteration. Treat CPU/FFmpeg/
+  Skia results separately from Vulkan/native-Wayland live-presentation
+  evidence.
 
 Keep the separately listed Windows C++ initialization failure open; the stage
 runner deliberately has no retry that could hide it.

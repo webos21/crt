@@ -538,7 +538,36 @@ case "$target_os" in
       if [ -f "${CRT_SYSROOT}/lib/libunwind.so" ]; then
         cxx_unwind_lib="${CRT_SYSROOT}/lib/libunwind.so"
       fi
-      cxx_runtime_libs="${CRT_SYSROOT}/lib/libc++.so $cxx_abi_lib $cxx_unwind_lib"
+      # libc++.so itself is not a real ELF shared object: LLVM's own
+      # upstream libc++ build (LIBCXX_ENABLE_ABI_LINKER_SCRIPT) installs
+      # it as a tiny GNU-ld linker script ("INPUT(libc++.so.1 -lc++abi
+      # -lunwind)", confirmed for real by reading the installed file
+      # directly -- 37 bytes, `file` reports "ASCII text"), a link-time-
+      # only convenience so `-lc++` still pulls in libc++abi/libunwind
+      # automatically. `ld` understands and follows that script fine at
+      # *link* time, but because the script itself carries no ELF header
+      # (hence no DT_SONAME), the NEEDED entry `ld` records in whatever
+      # links against it literally reads "libc++.so" -- something no
+      # dynamic loader will ever find at runtime (this project's own
+      # packaged sysroot never installs anything under that exact name;
+      # only the real, versioned libc++.so.1 exists). A real, confirmed
+      # bug (2026-09-11): crtgfx_skia_raster_smoke, whose own libcrtgfx.so
+      # dependency was built through this exact branch, failed at runtime
+      # with `error while loading shared libraries: .../libc++.so: file
+      # too short` -- the loader trying to mmap the 37-byte script itself
+      # as though it were the real, versioned library. Fixed by linking
+      # the real, versioned file directly instead of the linker-script
+      # name: libc++.so.1 carries its own real `DT_SONAME=libc++.so.1`
+      # (confirmed via readelf -d), so `ld` records that correct, real
+      # name as the NEEDED entry instead, and it resolves at runtime like
+      # any other real shared object. Falls back to the old linker-script
+      # path if for any reason the versioned file isn't present (an older
+      # or differently-built sysroot), rather than failing outright.
+      cxx_lib="${CRT_SYSROOT}/lib/libc++.so"
+      if [ -f "${CRT_SYSROOT}/lib/libc++.so.1" ]; then
+        cxx_lib="${CRT_SYSROOT}/lib/libc++.so.1"
+      fi
+      cxx_runtime_libs="$cxx_lib $cxx_abi_lib $cxx_unwind_lib"
     else
       cxx_abi_lib=""
       if [ -f "${CRT_SYSROOT}/lib/libc++abi.a" ]; then

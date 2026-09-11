@@ -10,6 +10,154 @@ substantive update.
 
 ## 2026-09-11
 
+- **Linux isolated `03-gfx-simple -> 04-gfx-media` acceptance, Skia and
+  FFmpeg enabled: eight real, previously-unexercised bugs found and
+  fixed running it for the first time on real Linux/aarch64 hardware.**
+  Every one of these is the first real exercise of a code path this
+  project's own in-repo Linux build/tests never happen to reach (option-ON
+  Skia/FFmpeg, a genuinely freestanding link into a *shared* library, or
+  a standalone external-consumer rebuild against a packaged SDK).
+  `crtgfx_gpu_test`/`crtmedia_*_test`/`crtgfx_skia_raster_smoke` (8/8)
+  passed end to end (`./tools/crt-stage-build.py --sdk-root . --recipe
+  ./stages/recipes/04-gfx-media.json ...` from inside a real packaged
+  `03-gfx-simple`); the packaged-example rebuild (`examples/gfx-gpu`,
+  `examples/gfx-skia`) and final `verify_dist.py` pass were still running
+  at the time of this entry -- see `TODO.md`'s own checklist for the
+  exact point this leaves off at.
+  - `distribution/stages/04-gfx-media/CMakeLists.txt`: plain
+    `find_library(CRTGFX_LINUX_VULKAN_LIB NAMES vulkan vulkan.so.1
+    NO_CMAKE_FIND_ROOT_PATH REQUIRED)` came up empty on a real Ubuntu/
+    aarch64 host that genuinely has `libvulkan-dev` installed. Root
+    cause: this stage's own `crt-toolchain.cmake` sets
+    `CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY`, which makes CMake's
+    compiler-ABI detection skip the executable-link probe ("Check for
+    working C compiler ... - skipped") -- the *only* thing that ever
+    populates `CMAKE_LIBRARY_ARCHITECTURE`/`CMAKE_C_IMPLICIT_LINK_
+    DIRECTORIES` (confirmed empty via direct inspection), so `find_
+    library()` never searches the real `/usr/lib/aarch64-linux-gnu`. The
+    in-tree `libcrtgfx/CMakeLists.txt`'s own identical call never hits
+    this (a normal executable-link ABI probe there). Fixed with a
+    `find_file()` fallback using the real Debian/Ubuntu multiarch
+    directory name, read from `dpkg-architecture -qDEB_HOST_MULTIARCH`
+    directly (Debian/Ubuntu-only by design, matching this project's own
+    Linux ports; a clean no-op on any other host).
+  - `distribution/stages/04-gfx-media/CMakeLists.txt`: every executable
+    linking `CRTGFX_LINUX_VULKAN_LIB` then failed with dozens of
+    `undefined reference to 'strcmp@GLIBC_2.17'`/etc straight out of
+    `libvulkan.so`, plus `warning: libc.so.6, needed by .../libvulkan.so,
+    not found`. Root cause: this stage links every executable fully
+    freestanding (no default `-lc`), so GNU ld's default for an
+    EXECUTABLE (unlike `-shared`) is `--no-allow-shlib-undefined` -- it
+    insists on verifying every symbol `libvulkan.so`'s own NEEDED entries
+    (`libc.so.6`/`libm.so.6`/`ld-linux-aarch64.so.1`) would provide, and
+    can only do that by locating those files, which the existing
+    `-rpath` (runtime-only) does not help with. Fixed with `-rpath-link`
+    pointing at `libvulkan.so`'s own directory (the same one glibc itself
+    already lives in, on this Ubuntu usrmerged host).
+  - `porting/recipes/ffmpeg.json`: linking `libcrtmedia.so` (the first
+    time this project links FFmpeg's static archives into a *shared*
+    library at all -- every prior Linux verification only linked them
+    into a static lib or an executable) failed with `libavutil.a
+    (tx_float_neon.o): relocation R_AARCH64_ADR_PREL_PG_HI21 ... may bind
+    externally can not be used when making a shared object; recompile
+    with -fPIC`. `--enable-pic` alone (added, and needed regardless for
+    the rest of FFmpeg's C code) did not silence this specific diagnostic
+    by itself, confirmed by isolating it. `--disable-neon` was tried next
+    and made things *worse*: FFmpeg 8.1.2's own `libavutil/aarch64/
+    Makefile` puts `tx_float_init.o` (unconditionally referencing
+    `ff_tx_fft2_float_neon`/etc, no `#if HAVE_NEON` guard at all,
+    confirmed by reading the file) in the unconditional `OBJS +=` list
+    while the actual definitions (`tx_float_neon.o`) sit in the
+    conditional `NEON-OBJS +=` list -- a genuine upstream Makefile
+    inconsistency for this exact release/architecture, not something a
+    configure flag on this project's side can route around; reverted.
+    The real fix landed in `distribution/stages/04-gfx-media/
+    CMakeLists.txt`'s own Linux link options instead: `-Wl,-Bsymbolic`,
+    which forces every default-visibility symbol reference resolved
+    within this project's own final shared-library link to bind to the
+    definition already present in that link -- exactly the guarantee
+    ld's `adrp`+`add` diagnostic was refusing to assume on its own,
+    without patching FFmpeg's own visibility or Makefile.
+  - `distribution/stages/04-gfx-media/CMakeLists.txt`: `crtgfx_gpu_
+    window_demo` failed with undefined `xkb_context_new`/`xkb_state_*`/
+    `xkb_keymap_*` linking the predecessor SDK's own `libcrtgfx.a`
+    (`window_wayland.c.o` already inside it calls real libxkbcommon).
+    Same class of bug as this same file's already-fixed macOS
+    frameworks gap: the `crtgfx_window` IMPORTED wrapper around that `.a`
+    carries none of the real STATIC target's own PRIVATE link libraries
+    (`CRTGFX_XKBCOMMON_LIBRARIES`, a CMake build-graph property, not
+    something recorded inside the archive). `crtgfx_gpu_test` never hit
+    this (it never exercises the keyboard/xkb code path). Fixed by
+    re-listing the predecessor SDK's own pinned `libxkbcommon.a`
+    (already a declared `redistributed_dependencies` entry there) on the
+    IMPORTED target's own `INTERFACE_LINK_LIBRARIES`.
+  - Project-wide (`CMakeLists.txt`'s `crt_build_flags`,
+    `tools/crt-libcxx-build.py`): linking `libcrtgfx_skia.so` (the first
+    real shared-library consumer of the imported libc++abi) failed with
+    `relocation R_AARCH64_TLSLE_ADD_TPREL_HI12 against ...eh_globals
+    cannot be used with -shared`. Root cause: without `-fPIC`, clang
+    defaults every `thread_local` variable (libcxxabi/src/
+    cxa_exception_storage.cpp's own per-thread `eh_globals`) to the
+    Local-Exec TLS model, valid only linked directly into a final
+    executable's own static TLS block, never into a shared library.
+    Fixed by adding `-fPIC` (plus `-ffunction-sections`/
+    `-fdata-sections`, so any consumer's own `-Wl,--gc-sections` can
+    still discard unused runtime code/data) unconditionally to both the
+    in-tree `crt_build_flags`/`crt_cxx_build_flags` (covering libc,
+    libcrtgfx, libcrtmedia, libcrtjs alike) and the imported libc++/
+    libc++abi/libunwind build (`tools/crt-libcxx-build.py`), rather than
+    scoping it narrowly to Linux/libcxxabi alone -- a deliberate,
+    requested policy: every one of this project's own C/C++ runtime
+    layers should be shared-library-safe from the start, not patched
+    build-by-build as each new shared-library consumer happens to expose
+    the gap. Rebuilt and reran the complete in-tree `ctest` suite after
+    the project-wide change: 111/111 passing (3 of those --
+    `cxx_runtime_test_runs`/`cxx_frontend_test_runs`/
+    `cxx_allocation_test_runs` -- needed an explicit `cmake --build
+    --target` first; a separate, pre-existing "not part of the default
+    build target" gap unrelated to this change, confirmed by building
+    them with the *old* flags too).
+  - `libstdc++/third_party/libcxx/recipe.json`,
+    `tools/crt-c++`: with `-fPIC` above landing, `libcrtgfx_skia.so`
+    itself linked, but running `crtgfx_skia_raster_smoke` then failed at
+    *runtime*: `error while loading shared libraries: .../libc++.so: file
+    too short`. Root cause: upstream libcxx's own default (with an
+    out-of-tree libc++abi/libunwind pair, this recipe's own
+    `LIBCXX_CXX_ABI=system-libcxxabi` mode) installs `lib/libc++.so` as a
+    37-byte GNU-ld linker script (`INPUT(libc++.so.1 -lc++abi
+    -lunwind)`, confirmed directly -- `file` reports plain ASCII text),
+    a link-time-only convenience so a plain `-lc++` still pulls in
+    libc++abi/libunwind automatically; `ld` understands and follows it
+    when linking, but the dynamic loader does not, and tries to mmap the
+    37-byte script itself. Fixed at the root: `-DLIBCXX_ENABLE_ABI_
+    LINKER_SCRIPT=OFF` in the libcxx recipe installs a real, self-
+    contained, directly-loadable `libc++.so` instead (confirmed via
+    `file`/`readelf -d`: a real ELF, already carrying its own `NEEDED
+    libc++abi.so.1`/`libatomic.so.1` entries). `tools/crt-c++`'s own
+    shared-mode Linux link additionally hardened to reference the real,
+    versioned `libc++.so.1` directly instead of the (now non-script, but
+    still indirection-prone by name) `libc++.so`, falling back to the
+    old name if the versioned file isn't present.
+  - `examples/gfx-gpu/CMakeLists.txt`, `examples/gfx-skia/CMakeLists.txt`:
+    disabling the ABI linker script above traded away its own real
+    benefit -- automatically adding `-lunwind` for any `-lc++`/libc++.so
+    consumer -- so rebuilding these two standalone examples (external
+    consumers of the finished SDK, `crtgfx_gpu_example`/
+    `crtgfx_skia_example`) failed with undefined `_Unwind_RaiseException`/
+    `_Unwind_GetIP`/etc from `libc++abi.so.1`: confirmed via `readelf -d`
+    that `libc++abi.so.1` carries no NEEDED entry for `libunwind.so` at
+    all (`libstdc++/third_party/libcxxabi/recipe.json`'s own
+    `LIBCXXABI_USE_LLVM_UNWINDER=OFF` builds it against the portable
+    Itanium `_Unwind_*` ABI surface without linking a concrete unwinder
+    itself, by design). `-rpath-link` alone cannot fix this (there is no
+    NEEDED entry to locate); fixed by linking `libunwind.so` directly
+    and explicitly in both example `CMakeLists.txt` files, the same
+    explicit-`.so`-path convention already used there for the other CRT
+    libraries. The real host `libvulkan.so` these two examples also
+    transitively need (via `CRTGFX_GPU_LIBRARY`/`CRTGFX_WINDOW_LIBRARY`)
+    is fixed the same `-rpath-link` + `dpkg-architecture` way as the
+    in-repo `CRTGFX_LINUX_VULKAN_LIB` fix above.
+
 - **Fixed stale temp-directory RPATH entries left in every published
   isolated-stage macOS SDK (`a5bea8f`).** Found immediately after the
   entry below, testing its own published output directly: every isolated

@@ -481,8 +481,30 @@ def common_cmake_args(root, install_prefix, sysroot, rootfs, target_os, windows_
     # meet, at the one-time cost of a debug-info format one full version
     # behind current -- a fully acceptable trade for a from-source
     # runtime bootstrap, not shipped as this project's own public ABI.
-    cxx_flags = "-D__BIONIC__ -gdwarf-4"
-    c_flags_extra = "-gdwarf-4"
+    # -fPIC: unconditional, every target OS -- this imported libc++/
+    # libc++abi/libunwind archive is a general-purpose runtime any later
+    # consumer may need to link into a shared library, not just a plain
+    # executable (confirmed necessary for real, 2026-09-11, the isolated
+    # `03-gfx-simple -> 04-gfx-media` stage's own first attempt to link it
+    # into libcrtgfx_skia.so: `ld.lld: error: relocation
+    # R_AARCH64_TLSLE_ADD_TPREL_HI12 against ...eh_globals cannot be used
+    # with -shared`, from libcxxabi/src/cxa_exception_storage.cpp's own
+    # `thread_local eh_globals` -- without -fPIC, clang defaults `thread_
+    # local` codegen to the Local-Exec TLS model, valid only when linked
+    # directly into a final executable's own static TLS block; -fPIC also
+    # switches the default to Global-Dynamic, valid in a shared library
+    # too). Every prior Linux consumer of this same archive
+    # (crtmedia_demux_test, crtgfx_gpu_test, ...) only ever linked it into
+    # a plain executable, so none of them exercised this until now.
+    # -ffunction-sections/-fdata-sections: unconditional too, so any later
+    # consumer's own `-Wl,--gc-sections` link (this project's own
+    # convention throughout, e.g. tools/crt-cc's common_flags) can
+    # actually discard whichever of this runtime's many functions/globals
+    # a given consumer doesn't reference, instead of pulling in the whole
+    # per-translation-unit object wholesale the way a plain (non-sectioned)
+    # compile would force.
+    cxx_flags = "-fPIC -ffunction-sections -fdata-sections -D__BIONIC__ -gdwarf-4"
+    c_flags_extra = "-fPIC -ffunction-sections -fdata-sections -gdwarf-4"
     toolchain_cxx = (
         os.environ.get("CRT_HOST_CXX") or shutil.which("clang++") or shutil.which("clang++-18") or shutil.which("c++")
     )
