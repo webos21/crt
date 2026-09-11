@@ -1182,14 +1182,28 @@ if(Python3_Interpreter_FOUND)
   # development package permits a dirty meta-toolchain tree because its exact
   # asset bytes are still SHA-256 locked. Formal release generation omits that
   # opt-in and therefore requires a clean tree.
+  #
+  # --successor-recipe embeds crt-stage-03-source's own already-generated
+  # 03-gfx-simple.json *inside* this 02-cxx asset (at stages/recipes/03-gfx-
+  # simple.json) -- verify_dist.py requires a packaged 02-cxx SDK to carry
+  # it (the cumulative-chain contract: 02-cxx must be able to bootstrap
+  # 03-gfx-simple with nothing but a downloaded source asset, no git/CMake
+  # at all), and the isolated tools/build_stage_02_cxx.py entrypoint that
+  # actually produces a real 02-cxx SDK has no other way to obtain it. A
+  # real, confirmed bug (2026-09-11) without this: the documented isolated
+  # 01-c -> 02-cxx upgrade failed outright at its own final verify_dist.py
+  # step ("distribution is missing: .../stages/recipes/03-gfx-simple.json").
+  # DEPENDS crt-stage-03-source (defined just below) for this exact reason
+  # -- its own recipe.json must already exist on disk before this runs.
   add_custom_target(crt-stage-02-source
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_stage_source.py"
       --root "${CMAKE_SOURCE_DIR}" --stage 02-cxx
       --target-os "${CRT_TARGET_OS}"
       --source-root "${CRT_LIBCXX_FETCH_ROOT}"
       --output-dir "${CRT_STAGE_SOURCE_ROOT}"
+      --successor-recipe "${CRT_STAGE_SOURCE_ROOT}/03-gfx-simple.json"
       --release-tag development --allow-dirty
-    DEPENDS crt-libcxx-fetch
+    DEPENDS crt-libcxx-fetch crt-stage-03-source
     COMMENT "Creating the pinned 01-c -> 02-cxx source asset and recipe"
     USES_TERMINAL
   )

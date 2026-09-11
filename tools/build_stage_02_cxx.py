@@ -91,6 +91,20 @@ def main() -> None:
     }
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
+    # verify_dist.py requires a packaged 02-cxx SDK to carry the pinned
+    # recipe that advances it one stage further, the same cumulative-chain
+    # contract 01-c's own dist already satisfies for this stage -- see
+    # tools/create_stage_source.py's own --successor-recipe comment for the
+    # full "why" and the real, confirmed bug (2026-09-11) this closes.
+    # create_stage_source.py already embedded it inside this stage's own
+    # source asset (CMakeLists.txt's crt-stage-02-source target), at
+    # exactly this same relative path, so it only needs copying forward.
+    successor_recipe = asset / "stages" / "recipes" / "03-gfx-simple.json"
+    if successor_recipe.is_file():
+        recipe_dest = staged / "stages" / "recipes" / "03-gfx-simple.json"
+        recipe_dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(successor_recipe, recipe_dest)
+
     # The smoke executable also passes through the current shell-based
     # compiler wrapper. Keep its path in the same short temporary tree as the
     # runtime build; --work-root remains the runner-owned location for future

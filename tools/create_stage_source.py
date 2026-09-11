@@ -11,6 +11,8 @@ import subprocess
 import tarfile
 from pathlib import Path, PurePosixPath
 
+from crt_stage_recipe import STAGE_SUCCESSORS
+
 
 STAGES = {
     "02-cxx": {
@@ -270,6 +272,29 @@ def main() -> None:
     parser.add_argument("--release-tag", required=True)
     parser.add_argument("--repository-url", default="https://github.com/webos21/crt")
     parser.add_argument("--allow-dirty", action="store_true")
+    # verify_dist.py requires a packaged 01-c/02-cxx SDK to carry the
+    # pinned recipe.json that advances it one stage further (the "cumulative
+    # chain" contract: each stage's own dist output can bootstrap the next
+    # one with no other input than a downloaded source asset). The *main*
+    # CMake-driven pipeline satisfies this via create_dist.py's own
+    # --stage-recipe (copying an already-generated <successor>.json
+    # straight into that dist output), entirely outside this script -- but
+    # the *isolated*, standalone stage-build path (crt-stage-build.py ->
+    # tools/build_stage_0N_*.py, meant to run with only a previous stage's
+    # packaged SDK and a downloaded asset, no git checkout or CMake at all)
+    # has no equivalent, and never did: a real, confirmed bug (2026-09-11),
+    # found running the documented end-user upgrade from a real packaged
+    # dist/01-c -- verify_dist.py failed outright ("distribution is
+    # missing: .../stages/recipes/03-gfx-simple.json") the first time
+    # 01-c -> 02-cxx was exercised this way, since build_stage_02_cxx.py's
+    # own output never carried it. Fixed by optionally embedding an
+    # already-generated successor recipe (produced the identical way the
+    # main pipeline already does, via this same script one stage further
+    # out) inside *this* stage's own source asset, at stages/recipes/
+    # <successor>.json -- the isolated build_stage_0N_*.py entrypoint then
+    # only needs to copy it into its own output, no git/CMake required.
+    parser.add_argument("--successor-recipe", type=Path, default=None,
+        help="path to an already-generated <successor-stage>.json recipe to embed at stages/recipes/<successor-stage>.json inside this stage's own asset")
     args = parser.parse_args()
 
     root = args.root.resolve()
@@ -287,6 +312,14 @@ def main() -> None:
     missing += [f"sources/{path}" for path in source_paths if not (source_root / path).exists()]
     if missing:
         raise SystemExit("stage source inputs are missing: " + ", ".join(missing))
+
+    successor_stage = None
+    if args.successor_recipe is not None:
+        successor_stage = STAGE_SUCCESSORS.get(args.stage)
+        if successor_stage is None:
+            raise SystemExit(f"--successor-recipe given but stage {args.stage!r} has no successor")
+        if not args.successor_recipe.is_file():
+            raise SystemExit(f"--successor-recipe file not found: {args.successor_recipe}")
 
     asset_name = f"crt-{args.release_tag}-{args.target_os}-{args.stage}-source.tar.xz"
     asset = output_dir / asset_name
@@ -310,6 +343,9 @@ def main() -> None:
                 add_path(tar, root / relative, PurePosixPath(relative))
             for relative in source_paths:
                 add_path(tar, source_root / relative, PurePosixPath("sources") / relative)
+            if successor_stage is not None:
+                add_path(tar, args.successor_recipe,
+                          PurePosixPath("stages") / "recipes" / f"{successor_stage}.json")
 
     digest = hashlib.sha256(asset.read_bytes()).hexdigest()
     recipe = {
