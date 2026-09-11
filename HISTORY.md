@@ -10,6 +10,44 @@ substantive update.
 
 ## 2026-09-11
 
+- **Fixed the isolated `01-c -> 02-cxx` upgrade: a packaged `02-cxx` SDK
+  never carried the pinned recipe to advance it one stage further
+  (`d2eab26`).** `verify_dist.py` requires a packaged `02-cxx` SDK to carry
+  `stages/recipes/03-gfx-simple.json` -- the cumulative-chain contract
+  every stage must satisfy: bootstrap the next stage from nothing but a
+  downloaded source asset, no git checkout or CMake at all. The main
+  CMake-driven pipeline already satisfies this for every stage via
+  `create_dist.py`'s own `--stage-recipe`, entirely outside the isolated
+  stage-build path -- but `tools/build_stage_02_cxx.py` (the standalone
+  entrypoint `crt-stage-build.py` actually runs when a real end user
+  upgrades a real packaged `01-c` SDK) had no equivalent at all. Found for
+  real running exactly that: a fresh `01-c` (from a from-scratch macOS
+  `crt-c-dist` rebuild) advanced to `02-cxx` via `./tools/crt-stage-
+  build.py --recipe ./stages/recipes/02-cxx.json ...`, and the run's own
+  final `verify_dist.py` step failed outright --
+  `distribution is missing: .../stages/recipes/03-gfx-simple.json`.
+
+  Fixed with a new `tools/create_stage_source.py --successor-recipe
+  <path>` option: when generating a stage's own source asset, it can now
+  embed an already-generated `<successor-stage>.json` recipe (produced
+  the identical way one stage further out, via this same script) inside
+  that asset itself, at `stages/recipes/<successor-stage>.json`.
+  `CMakeLists.txt`'s `crt-stage-02-source` target now `DEPENDS
+  crt-stage-03-source` and passes its own freshly generated
+  `03-gfx-simple.json` this way; `build_stage_02_cxx.py` then just copies
+  the embedded file into its own output -- no git/CMake needed at
+  isolated build time.
+
+  Verified end to end on macOS arm64: rebuilt `dist/01-c` from scratch,
+  ran the real isolated `01-c -> 02-cxx` upgrade standalone -- completed
+  ("CRT stage ready"), and the output correctly carried `stages/recipes/
+  03-gfx-simple.json`. Chained that same fresh `02-cxx` output straight
+  into a `02-cxx -> 03-gfx-simple` upgrade too, confirming the full
+  isolated chain still composes correctly end to end. Full `cmake
+  --workflow --preset macos-host-ninja-debug` still passes 100/100, and
+  `crt-js-dist` (the full CMake-driven `01-c..05-js` chain) still builds
+  and verifies clean -- zero regression to the main pipeline.
+
 - **Closed the Skia public-header packaging gap exposed after the libc++
   ordering fix.** The next full Windows run rebuilt/installed FreeType and
   FFmpeg, built pinned Skia through 834/834 edges, and passed the former

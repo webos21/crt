@@ -185,6 +185,18 @@ Windows-only bug (`mksh` backslash-path exec) were found and fixed along the
 way -- full trail in `HISTORY.md`. Windows was re-verified clean against the
 final, merged fix set.
 
+**The isolated `01-c -> 02-cxx` upgrade is also now verified on macOS
+(2026-09-11).** A real, confirmed bug found running it for the first
+time from a real packaged `01-c`: a packaged `02-cxx` SDK never carried
+the pinned recipe to advance it one stage further
+(`stages/recipes/03-gfx-simple.json`), so the isolated upgrade's own
+final `verify_dist.py` step failed outright. Fixed (`d2eab26`,
+`HISTORY.md`'s 2026-09-11 entry) with a new `tools/create_stage_source.py
+--successor-recipe` option that embeds an already-generated successor
+recipe inside a stage's own source asset; `build_stage_02_cxx.py` copies
+it forward. Verified end to end: a fresh `01-c -> 02-cxx -> 03-gfx-simple`
+chain, all isolated, all from real packaged SDKs.
+
 **In progress:** `03-gfx-simple -> 04-gfx-media`, with Skia and FFmpeg
 actually enabled for this transition's acceptance (the default packaging
 pass everywhere still has `CRTGFX_ENABLE_SKIA=OFF`/
