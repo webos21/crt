@@ -157,3 +157,34 @@ if(NOT WIN32 AND NOT APPLE)
   target_link_libraries(crtgfx_skia_example PRIVATE "${CMAKE_SYSROOT}/lib/libunwind.so")
 endif()
 
+if(WIN32)
+  # main.cc #includes real Skia public headers directly (SkCanvas.h etc.)
+  # -- same real "direct Skia consumer" needs as this project's own
+  # crtgfx_skia_raster_smoke/skia_gpu_window_demo (distribution/stages/
+  # 04-gfx-media/CMakeLists.txt's own fuller comment on both), which this
+  # standalone project cannot reach directly, so the SDK bundles the two
+  # header sets and the emutls stub archive it needs under these fixed,
+  # documented locations instead. Real, confirmed bug (2026-09-12): this
+  # example was never actually rebuilt+linked purely from an installed SDK
+  # until the 04-gfx-media isolated stage acceptance exercised it for the
+  # first time. Windows-only: SK_BUILD_FOR_UNIX and the win32_shim/
+  # mingw-w64-headers/emutls-stub bundle only exist to work around this
+  # mingw-target clang's own _WIN32 predefine tricking SkFeatures.h into
+  # thinking it is real MSVC/clang-cl (see crtgfx_skia_raster_smoke's own
+  # matching comment in distribution/stages/04-gfx-media/CMakeLists.txt)
+  # -- native Linux/macOS clang never hits this at all, so neither the
+  # SDK nor this file bundles/needs any of it on those two hosts.
+  find_path(CRT_WIN32_SHIM_DIR mingw_w64_compat.h
+    PATHS "${CMAKE_SYSROOT}/include/crt-win32-shim" NO_DEFAULT_PATH REQUIRED)
+  find_path(CRT_MINGW_W64_HEADERS_DIR _mingw.h
+    PATHS "${CMAKE_SYSROOT}/include/crt-mingw-w64-headers" NO_DEFAULT_PATH REQUIRED)
+  find_library(CRT_STAGE_EMUTLS_STUB_LIBRARY NAMES crt_stage_emutls_stub
+    PATHS "${CMAKE_SYSROOT}/lib" NO_DEFAULT_PATH REQUIRED)
+  target_compile_definitions(crtgfx_skia_example PRIVATE SK_BUILD_FOR_UNIX)
+  target_compile_options(crtgfx_skia_example PRIVATE
+    "-I${CRT_WIN32_SHIM_DIR}"
+    "-I${CRT_MINGW_W64_HEADERS_DIR}"
+    "-include" "${CRT_WIN32_SHIM_DIR}/mingw_w64_compat.h"
+    -Wno-pragma-pack -Wno-unused-value -Wno-ignored-attributes)
+  target_link_libraries(crtgfx_skia_example PRIVATE "${CRT_STAGE_EMUTLS_STUB_LIBRARY}")
+endif()

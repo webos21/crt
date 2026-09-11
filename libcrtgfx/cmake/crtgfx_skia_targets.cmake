@@ -355,15 +355,84 @@ function(crt_add_crtgfx_skia_shared_target)
       "${CRTGFX_SKIA_ROOT}"
     )
     if(CRT_TARGET_OS STREQUAL "windows" AND CRT_USE_IMPORTED_LIBCXX)
+      # CRTGFX_SKIA_LIBRARIES (libskia.a + libfreetype.a) here, before the
+      # c_shared/libc++.dll.a relink just below -- same real ordering
+      # principle `crtgfx_skia` (the static target, same file, its own
+      # "Skia first, CRT_STATIC_LIBS second" comment) already documents in
+      # full: libskia.a's own extensive std::string/iostream/locale use
+      # must still be an outstanding undefined need when the following
+      # libc++ scan resolves it. This function's own top comment already
+      # says crtgfx_skia_shared "must fully resolve those same references
+      # at its own link time" (mirroring crtgfx_skia_raster_smoke) -- but
+      # nothing in this specific branch actually linked
+      # CRTGFX_SKIA_LIBRARIES at all, and the later, general-case link
+      # further down explicitly excludes this exact branch
+      # (`NOT (CRT_TARGET_OS STREQUAL "windows" AND
+      # CRT_USE_IMPORTED_LIBCXX)`) with no comment explaining why -- a
+      # real, silent gap, not a deliberate exclusion: `libcrtgfx_skia.dll`
+      # never actually needed its own full link to succeed anywhere
+      # in-tree (ctest only exercises the static `crtgfx_skia` via
+      # crtgfx_skia_raster_smoke, never this DLL directly), so it went
+      # unnoticed until the standalone stage's own
+      # crtgfx_skia_gpu_window_demo/crtgfx_skia_raster_smoke linked
+      # crtgfx_skia_shared directly and hit dozens of undefined
+      # SkImageInfo::/SkSurfaces::/GrDirectContext:: symbols (2026-09-11).
+      #
+      # PUBLIC really is required here, confirmed the hard way (2026-09-12):
+      # tried PRIVATE first, reasoning that consumers should only ever need
+      # crtgfx_skia_shared's own exported symbols -- broke the link outright
+      # ("undefined symbol: SkPaint::SkPaint()", SkCanvas::drawRect(), ...)
+      # for both crtgfx_skia_raster_smoke.exe and
+      # crtgfx_skia_gpu_window_demo.exe. Real reason: crtgfx_skia_shared's
+      # own compiled objects (skia_bridge.cc) only reference a narrow slice
+      # of Skia (SkImageInfo, SkSurfaces::WrapPixels, SkFontMgr), so
+      # WINDOWS_EXPORT_ALL_SYMBOLS only ever pulls -- and exports -- that
+      # slice out of libskia.a; these two "direct Skia consumer" executables
+      # (distribution/stages/04-gfx-media/CMakeLists.txt's own
+      # `skia_direct_consumer` loop) use much more of Skia's API directly
+      # (SkPaint/SkCanvas/SkFont/SkPathBuilder/...) and can only get those
+      # symbols by linking libskia.a themselves too -- PUBLIC is what makes
+      # that happen automatically for them.
+      #
+      # This does mean two independent copies of Skia/FreeType end up in
+      # the same process on Windows (the DLL's own, plus each direct
+      # consumer's). That combination genuinely crashed once (SIGABRT
+      # inside SkFontMgr::matchFamilyStyle()) when a SkFontMgr* built by a
+      # direct consumer's own copy was handed across the DLL boundary into
+      # an *out-of-line* crtgfx_skia_default_typeface() compiled into the
+      # DLL's separate copy -- see that function's own comment in
+      # crtgfx/skia.h (now `inline`, precisely to keep any one Skia object
+      # and the code operating on it always in the same copy) for the full
+      # story and why that was the right fix instead of this PRIVATE
+      # attempt. Any *future* crtgfx_skia_shared bridge function that
+      # accepts or returns a Skia object a direct consumer also touches
+      # needs the same inline treatment, not another look at this flag.
+      target_link_libraries(crtgfx_skia_shared PUBLIC ${CRTGFX_SKIA_LIBRARIES})
       # Real imported libc++/libc++abi/libunwind DLL import libraries
       # (Itanium ABI, matching Skia itself), not the bootstrap libstdc++/
       # src/ ABI shim (`cxx_shared`) -- swapped in for just the C++
-      # runtime member of CRTGFX_CRT_SHARED_LIBS, keeping c_shared/
-      # m_shared/dl_shared as-is. CRT_LIBCXX_SYSROOT (dist/02-cxx), not
-      # CRT_SYSROOT -- see crtgfx-skia-configure's own, fuller comment
-      # further up this file for why.
+      # runtime member of CRTGFX_CRT_SHARED_LIBS, keeping the rest of
+      # CRTGFX_CRT_SHARED_LIBS (c_shared/m_shared/dl_shared, in-tree) as-is
+      # -- ${CRTGFX_CRT_SHARED_LIBS}, not those three names hardcoded
+      # literally: in-tree they resolve as real CMake target names (never
+      # subject to CMake's own bare-word "-l<name>" library-name
+      # conversion, since a recognized target is linked directly), but
+      # this same literal text has no such target in the standalone stage
+      # build (CRTGFX_CRT_SHARED_LIBS is deliberately an *empty* list
+      # there instead -- see this file's own top-of-file comment on that
+      # variable -- because the crt-cc/crt-c++ wrapper already links the
+      # matching shared C runtime transparently for a -shared build). A
+      # hardcoded "c_shared m_shared dl_shared" is just plain, unrecognized
+      # text there, so CMake mis-converts it into "-lc_shared -lm_shared
+      # -ldl_shared" the same way CRTGFX_WINDOWS_DXGI_LIB's own bare
+      # "dxgi.lib" was (see that variable's comment, same fix class) --
+      # found for real 2026-09-11 the same way, `libcrtgfx_skia.dll`'s own
+      # first real standalone link failing "unable to find library
+      # -lc_shared". CRT_LIBCXX_SYSROOT (dist/02-cxx), not CRT_SYSROOT --
+      # see crtgfx-skia-configure's own, fuller comment further up this
+      # file for why.
       target_link_libraries(crtgfx_skia_shared PRIVATE
-        c_shared m_shared dl_shared
+        ${CRTGFX_CRT_SHARED_LIBS}
         "${CRT_LIBCXX_SYSROOT}/lib/libc++.dll.a"
         "${CRT_LIBCXX_SYSROOT}/lib/libc++abi.dll.a"
         "${CRT_LIBCXX_SYSROOT}/lib/libunwind.dll.a"
@@ -423,6 +492,24 @@ function(crt_add_crtgfx_skia_shared_target)
         target_sources(crtgfx_skia_shared PRIVATE $<TARGET_OBJECTS:crt_windows_dllcrt>)
       endif()
       target_link_libraries(crtgfx_skia_shared PRIVATE "${CRTGFX_WINDOWS_D3DCOMPILER_LIB}")
+      # d3d12.lib, own explicit link, not relying on crtgfx_gpu_shared's
+      # own d3d12/dxgi need to propagate here -- same reasoning as
+      # d3dcompiler.lib just above (Skia's own Ganesh D3D12 backend, now
+      # that CRTGFX_SKIA_LIBRARIES is actually linked into this DLL, is a
+      # real, direct D3D12SerializeRootSignature() caller). Unlike the
+      # static crtgfx_skia (which links crtgfx_gpu PUBLIC, and that
+      # target's own d3d12.lib link is PUBLIC too, so it already
+      # propagates), crtgfx_gpu_shared's own d3d12.lib/dxgi.lib link
+      # (crtgfx_gpu_targets.cmake, same file's sibling function) is
+      # PRIVATE by design ("a real DLL/.so/.dylib link step must resolve
+      # its own [needs] itself", that block's own comment) -- correct for
+      # crtgfx_gpu_shared's own needs, but it means nothing propagates to
+      # crtgfx_skia_shared just from linking crtgfx_gpu_shared PUBLIC.
+      # Found for real 2026-09-11: `undefined symbol:
+      # D3D12SerializeRootSignature` the first time this DLL's own link
+      # actually pulled in libskia.a's Ganesh D3D12 object code (right
+      # after the CRTGFX_SKIA_LIBRARIES fix above).
+      target_link_libraries(crtgfx_skia_shared PRIVATE "${CRTGFX_WINDOWS_D3D12_LIB}")
       if(TARGET crt_compiler_rt_builtins)
         target_link_libraries(crtgfx_skia_shared PRIVATE crt_compiler_rt_builtins)
       endif()

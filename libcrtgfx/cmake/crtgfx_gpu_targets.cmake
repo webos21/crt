@@ -74,30 +74,87 @@ function(crt_add_crtgfx_gpu_common_targets)
     "${CRTGFX_ROOT}/src"
   )
 
+  # CRT_TARGET_OS_<OS>/CRTGFX_HAVE_<BACKEND>: gpu_internal.h's own per-OS
+  # #if/#elif chain gates struct crtgfx_gpu_device/crtgfx_gpu_surface's
+  # real field layout on these. crtgfx_gpu_common_objects (src/gpu.c,
+  # created just above) and crtgfx_gpu_backend_objects (the per-OS backend
+  # file, created below) MUST see them identically -- gpu.c is the one
+  # that actually calloc(1, sizeof(crtgfx_gpu_device))/calloc(1,
+  # sizeof(crtgfx_gpu_surface))s these structs, so if it disagrees with
+  # the backend file on which fields exist, it allocates too little and
+  # the backend file's own field writes silently corrupt heap memory past
+  # the end of that allocation -- a real, silent memory-corruption risk,
+  # not just a build inconsistency (matches the in-tree
+  # libcrtgfx/CMakeLists.txt's own identical warning on its own
+  # directory-scoped add_compile_definitions(CRTGFX_HAVE_VULKAN=1) call).
+  # add_compile_definitions() here (not target_compile_definitions() on
+  # crtgfx_gpu_backend_objects alone, this function's own former approach)
+  # is directory-scoped, so it reaches every target this call's caller
+  # directory still goes on to create -- both GPU object libraries alike,
+  # in-tree or standalone -- exactly like the in-tree file's own
+  # equivalent calls. Found as a real, latent gap in this extracted shared
+  # module (2026-09-11): CRTGFX_HAVE_D3D12/_METAL/_VULKAN were never
+  # defined anywhere in this file at all (not even target-scoped), so
+  # gpu_internal.h's #elif chain silently never activated for the
+  # standalone stage build -- struct crtgfx_gpu_device carried only its
+  # host-independent refcount field, and the first real compile of
+  # src/arch/windows/gpu_win32.c through the standalone 04-gfx-media
+  # project (the isolated stage's whole point: Skia/D3D12 actually
+  # exercised, not configure-only) failed outright referencing fields
+  # that, from its own compiler's point of view, did not exist. Adding
+  # only CRTGFX_HAVE_D3D12 the same target-scoped way CRT_TARGET_OS_
+  # WINDOWS was previously applied here would have "fixed" that compile
+  # error while introducing exactly the silent-corruption risk described
+  # above (crtgfx_gpu_common_objects would still allocate the smaller,
+  # pre-D3D12 struct size while crtgfx_gpu_backend_objects wrote into the
+  # larger one) -- so CRT_TARGET_OS_WINDOWS/_MACOS moved to
+  # add_compile_definitions() here too, not just the new HAVE_* defines.
+  if(CRT_TARGET_OS STREQUAL "linux")
+    # CRTGFX_HAVE_VULKAN mirrors the in-tree file's own identical gating:
+    # only defined once a real libvulkan was actually found to link
+    # against (CRTGFX_LINUX_VULKAN_LIB), matching gpu_vulkan.c's own
+    # always-on-when-Vulkan-found convention -- there is no "maybe absent
+    # but still compiled" case for this backend, unlike Windows/macOS
+    # where CRTGFX_HAVE_D3D12/_METAL are unconditional (see their own
+    # branches below).
+    add_compile_definitions(CRT_TARGET_OS_LINUX=1)
+    if(CRTGFX_LINUX_VULKAN_LIB)
+      add_compile_definitions(CRTGFX_HAVE_VULKAN=1)
+    endif()
+  elseif(CRT_TARGET_OS STREQUAL "windows")
+    # d3d12.lib ships in every real Windows 10+ SDK exactly like
+    # d3d11.lib/dxgi.lib already do (crtgfx_window's own D3D11 backend) --
+    # so gpu_win32.c is compiled unconditionally, and CRTGFX_HAVE_D3D12
+    # defined unconditionally, matching the in-tree file's own identical
+    # treatment of D3D11 as always-available on this host.
+    add_compile_definitions(CRT_TARGET_OS_WINDOWS=1)
+    add_compile_definitions(CRTGFX_HAVE_D3D12=1)
+  elseif(CRT_TARGET_OS STREQUAL "macos")
+    # Metal.framework ships on every real macOS host exactly like
+    # d3d12.lib on every real Windows 10+ SDK -- gpu_metal.c is compiled
+    # unconditionally, and CRTGFX_HAVE_METAL defined unconditionally,
+    # matching that same D3D12 precedent (no "maybe absent" case here
+    # either, unlike Linux's own find_library()-gated libvulkan).
+    add_compile_definitions(CRT_TARGET_OS_MACOS=1)
+    add_compile_definitions(CRTGFX_HAVE_METAL=1)
+  endif()
+
   add_library(crtgfx_gpu_backend_objects OBJECT ${CRTGFX_GPU_BACKEND_SOURCES})
   if(CRT_TARGET_OS STREQUAL "linux")
     if(TARGET crt_build_flags)
       target_link_libraries(crtgfx_gpu_backend_objects PRIVATE crt_build_flags)
     endif()
   elseif(CRT_TARGET_OS STREQUAL "windows")
-    # CRT_TARGET_OS_WINDOWS=1: gpu_internal.h's own #if defined(CRT_TARGET_
-    # OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12) guard needs this defined
-    # even when crt_build_flags itself is not linked here (this target
-    # deliberately does not link it on Windows -- see crt_build_flags's own
-    # Windows-specific notes elsewhere in this project for why), matching
-    # the Linux side's own identical CRT_TARGET_OS_LINUX + CRTGFX_HAVE_
-    # VULKAN double-check. Found as a real, narrow gap building
-    # src/arch/windows/gpu_win32.c for the first time (2026-09-03).
-    target_compile_definitions(crtgfx_gpu_backend_objects PRIVATE CRT_TARGET_OS_WINDOWS=1)
     # WIN32_LEAN_AND_MEAN/NOMINMAX: matches crtgfx_window_backend_objects's
     # own identical definition (libcrtgfx/CMakeLists.txt, not moved here --
-    # that target isn't part of this shared module).
+    # that target isn't part of this shared module). Target-scoped (not
+    # add_compile_definitions() like the OS/HAVE defines above) is safe
+    # here specifically because neither macro affects gpu_internal.h's
+    # struct layout -- no cross-object-library ABI risk to guard against.
     target_compile_definitions(crtgfx_gpu_backend_objects PRIVATE
       WIN32_LEAN_AND_MEAN
       NOMINMAX
     )
-  elseif(CRT_TARGET_OS STREQUAL "macos")
-    target_compile_definitions(crtgfx_gpu_backend_objects PRIVATE CRT_TARGET_OS_MACOS=1)
   endif()
   target_include_directories(crtgfx_gpu_backend_objects PUBLIC
     "${CRTGFX_ROOT}/include"
@@ -241,6 +298,62 @@ function(crt_add_crtgfx_gpu_shared_target)
     # link step (unlike the plain crtgfx_gpu static archive), so this only
     # needs to apply directly to it, not propagate further.
     target_link_options(crtgfx_gpu_shared PRIVATE -Wl,--exclude-libs,ALL)
+  endif()
+  if(CRT_TARGET_OS STREQUAL "windows")
+    # Real, confirmed-for-real bug (2026-09-11/12, standalone 04-gfx-media
+    # isolated stage build): WINDOWS_EXPORT_ALL_SYMBOLS ON (set below) makes
+    # CMake pass lld's own --export-all-symbols, which exports every GLOBAL
+    # symbol in this target's link -- including ones pulled in from a
+    # static archive, not just this target's own real source objects.
+    # In-tree, CRTGFX_CRT_SHARED_LIBS (c_shared/m_shared/dl_shared/
+    # cxx_shared) is what crtgfx_gpu_shared links for libc, so any libc
+    # symbol it needs resolves against a real shared libc DLL via an import
+    # thunk, never a static-archive body -- nothing to over-export. The
+    # standalone stage project has no such shared libc DLL to link
+    # (CRTGFX_CRT_SHARED_LIBS is empty there, distribution/stages/
+    # 04-gfx-media/CMakeLists.txt), but tools/crt-c++'s own wrapper
+    # *unconditionally* appends the real static ${CRT_SYSROOT}/lib/libc.a
+    # to every link line regardless of what CMake explicitly requested --
+    # so libcrtgfx_gpu.dll ends up with real static
+    # fopen/ftell/fseek/fwrite/fflush/fclose bodies baked in (pulled in by
+    # whatever crtgfx_gpu's own sources reference from libc/src/stdio.c's
+    # single translation unit) and then auto-exported. Any consumer that
+    # also references the same names against its own implicit libc.a link
+    # (every consumer, via that same wrapper -- here, Skia/FreeType inside
+    # crtgfx_skia_raster_smoke.exe/crtgfx_skia_gpu_window_demo.exe, the only
+    # two executables that link the SHARED crtgfx_gpu_shared transitively
+    # via crtgfx_skia_shared PUBLIC crtgfx_gpu_shared, not the plain static
+    # crtgfx_gpu archive crtgfx_gpu_window_demo.exe uses instead) sees two
+    # real definitions of each -- one from libc.a directly, one from
+    # libcrtgfx_gpu_dll.dll.a's own auto-generated import thunk -- and lld
+    # correctly refuses to pick one ("duplicate symbol: fopen").
+    #
+    # -Wl,--exclude-libs,ALL (the Linux/Vulkan case's own fix, right above)
+    # is an ELF-only lld option -- confirmed for real: lld's MinGW/PE
+    # driver (what this project's Windows target actually links with)
+    # rejects it outright ("unknown argument: --exclude-libs"; verified
+    # directly via `ld.lld -m i386pep --help`, which lists
+    # --exclude-symbols=<symbol[,...]> as the PE-target equivalent instead,
+    # a real, narrower, per-symbol form of the same "don't auto-export
+    # something pulled from a static archive" fix -- not a guess). One
+    # -Wl,--exclude-symbols=<name> per name, not a single comma-joined
+    # -Wl,--exclude-symbols=a,b,c: Clang's -Wl, splits its whole argument on
+    # *every* comma before forwarding to the linker (confirmed directly via
+    # `clang -###`), which would tear a comma-joined list into bogus
+    # trailing positional arguments. Matches this file's/crt-cc's own
+    # existing one-value-per-Wl, convention (kernel32.lib, dxgi.lib, ...).
+    # Only the six names actually observed colliding are listed -- if a
+    # future consumer pulls a different libc.a symbol through both paths,
+    # extend this list the same evidence-driven way this one was found,
+    # rather than pre-guessing a longer list now.
+    target_link_options(crtgfx_gpu_shared PRIVATE
+      -Wl,--exclude-symbols=fopen
+      -Wl,--exclude-symbols=fclose
+      -Wl,--exclude-symbols=fwrite
+      -Wl,--exclude-symbols=fseek
+      -Wl,--exclude-symbols=ftell
+      -Wl,--exclude-symbols=fflush
+    )
   endif()
   if(COMMAND crt_configure_shared_runtime)
     crt_configure_shared_runtime(crtgfx_gpu_shared)

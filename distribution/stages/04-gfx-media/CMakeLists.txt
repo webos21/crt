@@ -68,10 +68,26 @@ add_library(crtgfx_window_shared INTERFACE IMPORTED GLOBAL)
 target_include_directories(crtgfx_window INTERFACE "${CMAKE_SYSROOT}/include")
 target_include_directories(crtgfx_window_shared INTERFACE "${CMAKE_SYSROOT}/include")
 if(CRT_TARGET_OS STREQUAL "windows")
+  # libcrtgfx.a's own object code (window_win32.c, built as part of the
+  # 03-gfx-simple predecessor SDK) calls real user32.lib/gdi32.lib/
+  # d3d11.lib/dxgi.lib Win32 API functions -- a plain static archive
+  # carries no dependency metadata, so this imported INTERFACE target
+  # must declare them explicitly, the same four (matching
+  # libcrtgfx/CMakeLists.txt's own in-tree target_link_libraries(crtgfx_
+  # window PUBLIC ...) list, kernel32.lib excepted -- tools/crt-cc already
+  # appends that one unconditionally to every link). Found missing
+  # 2026-09-11: the first real link of anything against this standalone
+  # crtgfx_window (crtgfx_gpu_test, once the GPU struct/link fixes above
+  # got it this far) failed "undefined symbol: CreateWindowExA" and
+  # friends. "-Wl,<name>.lib", not bare "<name>.lib": see
+  # CRTGFX_WINDOWS_DXGI_LIB's own comment below for why a bare name gets
+  # silently mis-converted to "-l<name>" by CMake here.
   set_property(TARGET crtgfx_window PROPERTY INTERFACE_LINK_LIBRARIES
-    "${CMAKE_SYSROOT}/lib/libcrtgfx.a")
+    "${CMAKE_SYSROOT}/lib/libcrtgfx.a"
+    -Wl,user32.lib -Wl,gdi32.lib -Wl,d3d11.lib -Wl,dxgi.lib)
   set_property(TARGET crtgfx_window_shared PROPERTY INTERFACE_LINK_LIBRARIES
-    "${CMAKE_SYSROOT}/lib/libcrtgfx_dll.dll.a")
+    "${CMAKE_SYSROOT}/lib/libcrtgfx_dll.dll.a"
+    -Wl,user32.lib -Wl,gdi32.lib -Wl,d3d11.lib -Wl,dxgi.lib)
 elseif(CRT_TARGET_OS STREQUAL "macos")
   # crtgfx_window here is only an IMPORTED stub around the predecessor
   # SDK's already-built libcrtgfx.a, not the real distribution/stages/
@@ -131,10 +147,32 @@ include("${CRTMEDIA_ROOT}/cmake/crtmedia_targets.cmake")
 set(CRTGFX_GPU_SOURCES ${CRTGFX_GPU_COMMON_SOURCES})
 if(CRT_TARGET_OS STREQUAL "windows")
   set(CRTGFX_GPU_BACKEND_SOURCES ${CRTGFX_GPU_BACKEND_WINDOWS_SOURCES})
-  set(CRTGFX_WINDOWS_DXGI_LIB dxgi.lib)
-  set(CRTGFX_WINDOWS_D3D12_LIB d3d12.lib)
-  set(CRTGFX_WINDOWS_D3DCOMPILER_LIB d3dcompiler.lib)
-  set(CRTGFX_WINDOWS_UUID_LIB uuid.lib)
+  # "-Wl,<name>.lib", not a bare "<name>.lib": CMake's own target_link_
+  # libraries() treats a bare word with no path separator as a library
+  # *name* to resolve via its own "-l<name>" GNU convention (stripping the
+  # extension and prepending -l) for this toolchain file's platform
+  # settings -- confirmed directly (2026-09-11) by inspecting the actual
+  # failing link command, which showed literal "-ldxgi"/"-ld3d12", not
+  # "dxgi.lib"/"d3d12.lib". ld.lld's MinGW-flavor driver then fails
+  # "unable to find library -ldxgi" even with the correct
+  # -Wl,/libpath:${CRT_WINDOWS_SDK_LIBPATH} present (confirmed via a
+  # direct, isolated clang/lld repro: -l<name> and -Wl,/libpath: don't
+  # share a search-path list for this linker flavor/mode; a bare
+  # positional "dxgi.lib" argument doesn't work either -- clang's own
+  # driver rejects it outright, "no such file or directory", before ever
+  # reaching the linker, since it isn't a real file relative to the
+  # build's cwd). "-Wl,<name>.lib" is the one form that reaches the
+  # linker as a raw, unmodified positional argument -- exactly how
+  # crt-cc's own hardcoded kernel32.lib/synchronization.lib already do it
+  # (tools/crt-cc's own $libs accumulator: "-Wl,kernel32.lib
+  # -Wl,synchronization.lib") -- confirmed working via the same isolated
+  # repro. A leading "-" also makes CMake pass the whole string straight
+  # through verbatim, never subject to its own -l<name> conversion,
+  # which is what actually fixes this (not just a stylistic match).
+  set(CRTGFX_WINDOWS_DXGI_LIB -Wl,dxgi.lib)
+  set(CRTGFX_WINDOWS_D3D12_LIB -Wl,d3d12.lib)
+  set(CRTGFX_WINDOWS_D3DCOMPILER_LIB -Wl,d3dcompiler.lib)
+  set(CRTGFX_WINDOWS_UUID_LIB -Wl,uuid.lib)
   set(CRTGFX_WIN32_SHIM_ROOT
     "${CRT_STAGE_SOURCE_ROOT}/libstdc++/third_party/win32_shim")
   set(CRT_MINGW_W64_HEADERS_INCLUDE_ROOT "${CRT_STAGE_MINGW_W64_HEADERS_ROOT}")
@@ -297,9 +335,11 @@ crt_add_crtgfx_skia_shared_target()
 
 if(CRT_TARGET_OS STREQUAL "windows")
   set(CRTMEDIA_BACKEND_SOURCES src/arch/windows/audio_sink_wasapi.c)
-  set(CRTMEDIA_WINDOWS_OLE32_LIB ole32.lib)
-  set(CRTMEDIA_WINDOWS_D3D11_LIB d3d11.lib)
-  set(CRTMEDIA_WINDOWS_DXGI_LIB dxgi.lib)
+  # "-Wl,<name>.lib", not bare "<name>.lib": same CMake bare-name-to-"-l"
+  # mis-conversion as CRTGFX_WINDOWS_DXGI_LIB above, same fix.
+  set(CRTMEDIA_WINDOWS_OLE32_LIB -Wl,ole32.lib)
+  set(CRTMEDIA_WINDOWS_D3D11_LIB -Wl,d3d11.lib)
+  set(CRTMEDIA_WINDOWS_DXGI_LIB -Wl,dxgi.lib)
 elseif(CRT_TARGET_OS STREQUAL "macos")
   set(CRTMEDIA_BACKEND_SOURCES src/arch/macos/audio_sink_coreaudio.c)
   set(CRTMEDIA_MACOS_FRAMEWORKS
@@ -421,9 +461,94 @@ target_link_libraries(crtgfx_gpu_window_demo PRIVATE crtgfx_gpu)
 add_executable(crtgfx_skia_gpu_window_demo
   "${CRTGFX_ROOT}/tools/skia_gpu_window_demo.cc")
 target_compile_options(crtgfx_skia_gpu_window_demo PRIVATE ${stage_cxx_options})
+target_compile_definitions(crtgfx_skia_gpu_window_demo PRIVATE
+  "CRT_SKIA_FONTS_DIR=\"${CRTGFX_ROOT}/assets/fonts\"")
 target_include_directories(crtgfx_skia_gpu_window_demo PRIVATE
   "${CRTGFX_ROOT}/tests" "${CRTGFX_SKIA_ROOT}")
 target_link_libraries(crtgfx_skia_gpu_window_demo PRIVATE crtgfx_skia_shared)
+
+if(CRT_TARGET_OS STREQUAL "windows")
+  # Both direct Skia-header consumers (crtgfx_skia_raster_smoke.cc,
+  # skia_gpu_window_demo.cc -- both #include real Skia public headers,
+  # transitively reaching real D3D12/DXGI headers through GrD3DTypes.h)
+  # need the identical treatment crtgfx_skia_objects's own, fuller comment
+  # above (same file, crtgfx_gpu_targets.cmake era) already documents in
+  # full for that object target -- extracted from the in-tree-only
+  # crt_wire_skia_executable() (libcrtgfx/CMakeLists.txt), never itself
+  # moved into a shared module, so this stage's own two direct consumers
+  # never got it. Without SK_BUILD_FOR_UNIX specifically: SkFeatures.h
+  # auto-detects purely from _WIN32 (which this mingw-target clang
+  # predefines too) and has no way to tell this project's own GNU-ABI
+  # build apart from real MSVC/clang-cl, so SK_ALWAYS_INLINE expands to
+  # the bare MSVC keyword __forceinline and SkTypes.h tries to #include
+  # <crtdbg.h> under SK_DEBUG -- neither exists/parses here. Found for
+  # real 2026-09-11 exactly that way: `error: unknown type name
+  # '__forceinline'` then `fatal error: 'crtdbg.h' file not found`, the
+  # same failure shape crt_wire_skia_executable()'s own comment already
+  # documented for the in-tree case. The wrapper (crt-cc/crt-c++) already
+  # supplies -nostdlib/-nostartfiles/entry-point/libc++-include-ordering/
+  # sysroot-includes transparently for a standalone build (unlike the
+  # in-tree raw-CMake-flags path crt_wire_skia_executable() targets), so
+  # only the genuinely Skia/D3D12-specific pieces are needed here, not
+  # that whole function ported wholesale.
+  # A separate OBJECT library, not target_sources(<exe> PRIVATE
+  # CRTGFX_EMUTLS_STUB_SOURCE) directly on each C++ executable below: this
+  # stage's own ${stage_cxx_options} (target_compile_options(<exe> PRIVATE
+  # ${stage_cxx_options}), already applied to each of these two
+  # executables above) includes -std=c++17, and target_compile_options()
+  # applies to every source of a target uniformly regardless of that
+  # source's own language -- CMake does not exempt a .c file added later
+  # via target_sources() from options already collected for the target.
+  # Found for real 2026-09-11: `error: invalid argument '-std=c++17' not
+  # allowed with 'C'` compiling emutls_link_stubs.c this exact way. A
+  # small dedicated OBJECT library, compiled with only stage_c_options
+  # (never touched by -std=c++17 at all), sidesteps the ambiguity
+  # entirely -- matching this project's own established pattern of using
+  # OBJECT libraries wherever a source needs independent compile flags
+  # from its consumer (crtgfx_gpu_common_objects, crtgfx_skia_objects,
+  # ...), rather than trying to make one target serve two languages'
+  # worth of flags at once.
+  add_library(crtgfx_stage_emutls_stub OBJECT "${CRTGFX_EMUTLS_STUB_SOURCE}")
+  target_compile_options(crtgfx_stage_emutls_stub PRIVATE ${stage_c_options})
+  foreach(skia_direct_consumer
+      crtgfx_skia_raster_smoke crtgfx_skia_gpu_window_demo)
+    target_compile_definitions(${skia_direct_consumer} PRIVATE SK_BUILD_FOR_UNIX)
+    target_sources(${skia_direct_consumer} PRIVATE
+      $<TARGET_OBJECTS:crtgfx_stage_emutls_stub>)
+    target_compile_options(${skia_direct_consumer} PRIVATE
+      "-I${CRTGFX_WIN32_SHIM_ROOT}"
+      "-I${CRT_MINGW_W64_HEADERS_INCLUDE_ROOT}"
+      "-include" "${CRTGFX_WIN32_SHIM_ROOT}/mingw_w64_compat.h"
+      -Wno-pragma-pack -Wno-unused-value -Wno-ignored-attributes)
+  endforeach()
+
+  # examples/gfx-skia needs this exact same "direct Skia consumer"
+  # treatment -- its own main.cc *is* skia_gpu_window_demo.cc (installed
+  # verbatim below) -- but it is a wholly standalone CMake project built
+  # later, purely from this installed SDK, with no view of
+  # CRT_STAGE_SOURCE_ROOT or the fetched mingw-w64 checkout (neither lives
+  # in the SDK today). Real, confirmed bug (2026-09-12): without bundling
+  # these, examples/gfx-skia hit the identical `unknown type name
+  # '__forceinline''/'crtdbg.h' file not found` failure this stage's own
+  # crtgfx_skia_raster_smoke/skia_gpu_window_demo already hit and fixed
+  # above -- the fix just never reached the one consumer living outside
+  # this CMakeLists.txt entirely. Bundle the two header sets under a
+  # clearly CRT-prefixed, won't-collide destination, and wrap the emutls
+  # stub object in a real installable static archive (examples/gfx-skia
+  # has no access to CRTGFX_EMUTLS_STUB_SOURCE's own .c file either, and
+  # even if it did, compiling it directly risks the exact -std=c++17
+  # conflict this OBJECT-library split already exists to avoid).
+  install(DIRECTORY "${CRTGFX_WIN32_SHIM_ROOT}/"
+    DESTINATION include/crt-win32-shim)
+  install(DIRECTORY "${CRT_MINGW_W64_HEADERS_INCLUDE_ROOT}/"
+    DESTINATION include/crt-mingw-w64-headers)
+  add_library(crtgfx_stage_emutls_stub_lib STATIC
+    $<TARGET_OBJECTS:crtgfx_stage_emutls_stub>)
+  set_target_properties(crtgfx_stage_emutls_stub_lib PROPERTIES
+    OUTPUT_NAME crt_stage_emutls_stub
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+  install(TARGETS crtgfx_stage_emutls_stub_lib ARCHIVE DESTINATION lib)
+endif()
 
 install(TARGETS crtgfx_gpu crtgfx_gpu_shared crtgfx_skia crtgfx_skia_shared
                 crtmedia crtmedia_shared

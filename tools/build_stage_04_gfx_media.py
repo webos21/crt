@@ -2,6 +2,7 @@
 """Build an option-ON cumulative 04-gfx-media SDK from 03-gfx-simple."""
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -150,6 +151,43 @@ def publish_tree(staged: Path, output: Path) -> None:
         shutil.rmtree(publish_root, ignore_errors=True)
 
 
+def touch_tree(root: Path) -> None:
+    """Stamp every file under root with the current time.
+
+    Real, confirmed bug (2026-09-12, --reuse-work-root's own first use):
+    the extracted stage-source tarball's members (and this project's own
+    shutil.copytree(asset, build_asset) copy of them, which preserves
+    mtimes via copy2) all carry a normalized, reproducible epoch-0 mtime --
+    deliberate, for reproducible packaging, but it defeats CMake's
+    install(FILES ...) staleness check (a plain destination-mtime >=
+    source-mtime comparison) the moment a *persistent* --work-root already
+    has an older run's copy of the same file sitting in `staged` at that
+    exact same epoch-0 mtime: CMake sees "not older" and skips re-copying
+    the fixed file, silently reinstalling stale content run after run. Only
+    matters with --reuse-work-root (a one-shot temp_root never has a prior
+    install to collide with); called on build_asset right after it exists,
+    before anything reads or installs from it, so every file this run
+    actually uses is unconditionally newer than whatever a previous run
+    left behind in `staged`.
+    """
+    for path in root.rglob("*"):
+        if path.is_file():
+            os.utime(path, None)  # None -- os.utime's own "stamp with now" form.
+
+
+def fingerprint(paths: list[Path]) -> str:
+    """A stable content hash of a fixed set of files, used to key the
+    --work-root's own reusable FreeType/FFmpeg/Skia build cache (see
+    "reuse the persistent --work-root" below) -- any change to a pinned
+    recipe, this project's own build driver, or the predecessor SDK itself
+    changes the hash, so a stale cache can never silently be reused."""
+    digest = hashlib.sha256()
+    for path in paths:
+        digest.update(path.name.encode("utf-8"))
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:32]
+
+
 def runtime_env(sdk: Path, manifest: dict) -> dict[str, str]:
     env = os.environ.copy()
     target = manifest["target"]
@@ -223,13 +261,14 @@ def existing_relative_files(root: Path, patterns: tuple[str, ...]) -> list[str]:
     return sorted(set(found))
 
 
-def build_ports(asset: Path, staged: Path, temp_root: Path,
-                manifest: dict, env: dict[str, str]) -> None:
+def fetch_port_sources(asset: Path, staged: Path, temp_root: Path,
+                       env: dict[str, str]) -> Path:
+    """Only the fetch+checksum-verify step -- always run, even when the
+    slow configure/make/install below is skipped by the --work-root cache,
+    because add_redistributed_dependencies() still needs a real verified
+    source checkout to read each port's LICENSE file out of. Cheap: this is
+    a download+extract, not a build."""
     source_root = temp_root / "port-sources"
-    # crt-port-build.py is intentionally build-only. Repository-mode CMake
-    # normally gives it sources via port-fetch-* dependencies; an extracted
-    # SDK has no such target graph, so reproduce that edge explicitly with
-    # the packaged, checksum-verifying fetch driver.
     run([
         sys.executable, str(staged / "tools" / "fetch_ports.py"),
         "--dest", str(source_root),
@@ -237,6 +276,11 @@ def build_ports(asset: Path, staged: Path, temp_root: Path,
         "--port", "freetype",
         "--port", "ffmpeg",
     ], env, asset)
+    return source_root
+
+
+def build_ports(asset: Path, source_root: Path, staged: Path, temp_root: Path,
+                manifest: dict, env: dict[str, str]) -> None:
     driver = staged / "tools" / "crt-port-build.py"
     command = [
         sys.executable, str(driver),
@@ -271,8 +315,11 @@ def build_ports(asset: Path, staged: Path, temp_root: Path,
     run(command, env, asset)
 
 
-def build_skia(asset: Path, staged: Path, temp_root: Path,
-               manifest: dict, env: dict[str, str]) -> tuple[Path, Path | None]:
+def fetch_skia_source(asset: Path, temp_root: Path,
+                      env: dict[str, str]) -> Path:
+    """Only the fetch+expected-commit-verify step -- always run for the
+    same license-lookup reason as fetch_port_sources() above, even when the
+    slow ninja build below is skipped by the --work-root cache."""
     recipe_path = asset / "libcrtgfx" / "third_party" / "skia" / "recipe.json"
     recipe = json.loads(recipe_path.read_text(encoding="utf-8"))
     source_spec = recipe["source"]
@@ -290,8 +337,30 @@ def build_skia(asset: Path, staged: Path, temp_root: Path,
     if source_spec.get("sync_deps"):
         fetch.append("--sync-deps")
     run(fetch, env, asset)
+    return source
 
-    mingw_checkout: Path | None = None
+
+def fetch_mingw_w64_headers(asset: Path, temp_root: Path,
+                            env: dict[str, str]) -> Path:
+    """Always run (not cached alongside the Skia build): the final stage
+    CMakeLists.txt configure step below needs CRT_STAGE_MINGW_W64_HEADERS_
+    ROOT on every run regardless of whether the Skia *build* itself was
+    skipped by the --work-root cache -- it is what
+    crtgfx_skia_raster_smoke/crtgfx_skia_gpu_window_demo's own win32_shim
+    compile flags need, not something build_skia.py consumes and discards.
+    Cheap: a headers-only sparse checkout, not a build."""
+    mingw_checkout = temp_root / "mingw-w64"
+    run([
+        sys.executable,
+        str(asset / "tools" / "fetch_mingw_w64_headers.py"),
+        "--dest", str(mingw_checkout),
+    ], env, asset)
+    return mingw_checkout
+
+
+def build_skia(asset: Path, source: Path, mingw_checkout: Path | None,
+               staged: Path, temp_root: Path, manifest: dict,
+               env: dict[str, str]) -> None:
     build = [
         sys.executable, str(asset / "tools" / "build_skia.py"),
         "--root", str(asset),
@@ -304,19 +373,13 @@ def build_skia(asset: Path, staged: Path, temp_root: Path,
         "--freetype-prefix", str(staged),
     ]
     if manifest["target"]["os"] == "windows":
-        mingw_checkout = temp_root / "mingw-w64"
-        run([
-            sys.executable,
-            str(asset / "tools" / "fetch_mingw_w64_headers.py"),
-            "--dest", str(mingw_checkout),
-        ], env, asset)
+        assert mingw_checkout is not None
         build.extend([
             "--rootfs", str(staged),
             "--mingw-w64-headers-root",
             str(mingw_checkout / "mingw-w64-headers" / "include"),
         ])
     run(build, env, asset)
-    return source, mingw_checkout
 
 
 def add_redistributed_dependencies(asset: Path, staged: Path,
@@ -363,6 +426,8 @@ def add_redistributed_dependencies(asset: Path, staged: Path,
 def build_example(staged: Path, temp_root: Path, name: str,
                   executable_name: str, env: dict[str, str]) -> None:
     build_dir = temp_root / f"example-{name}"
+    if build_dir.exists():
+        shutil.rmtree(build_dir)
     run([
         "cmake", "-S", str(staged / "examples" / name),
         "-B", str(build_dir), "-G", "Ninja",
@@ -381,6 +446,21 @@ def main() -> None:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--recipe-location", required=True)
     parser.add_argument("--source-sha256", required=True)
+    # Off by default: a plain --work-root with no flag reproduces this
+    # script's original from-scratch-every-time behavior exactly (still the
+    # right default for a genuine, unconditional final acceptance run).
+    # Pass this during iterative debugging of the *stage CMakeLists.txt/
+    # cmake modules* themselves -- FreeType/FFmpeg/Skia are pinned, external,
+    # and unaffected by that kind of fix, so re-running their real
+    # multi-hour configure/make/ninja for every single fix-and-retry cycle
+    # was pure waste (confirmed for real, 2026-09-11: 9 isolated reruns in
+    # one session, each paying that same ~90 minute tax to re-verify a
+    # one-line CMakeLists.txt change).
+    parser.add_argument("--reuse-work-root", action="store_true",
+                        help="Keep --work-root between runs and skip "
+                             "FreeType/FFmpeg/Skia's own build step when "
+                             "their pinned recipes and the predecessor SDK "
+                             "have not changed since the last run.")
     args = parser.parse_args()
 
     sdk = args.sdk_root.resolve()
@@ -389,18 +469,23 @@ def main() -> None:
     if output.exists():
         raise SystemExit(f"output already exists: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
-    Path(args.work_root).resolve().mkdir(parents=True, exist_ok=True)
+    work_root = args.work_root.resolve()
+    work_root.mkdir(parents=True, exist_ok=True)
 
-    temp_root = Path(tempfile.mkdtemp(prefix="crt-stage-04-gfx-media-"))
+    if args.reuse_work_root:
+        temp_root = work_root
+    else:
+        # Own private scratch dir, discarded in `finally` below -- the
+        # original, still-default, always-genuinely-from-scratch behavior.
+        temp_root = Path(tempfile.mkdtemp(
+            prefix="crt-stage-04-gfx-media-", dir=work_root))
     try:
         staged = temp_root / "sdk"
-        shutil.copytree(sdk, staged)
-        manifest_path = staged / "manifest.json"
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest_path_probe = sdk / "manifest.json"
+        manifest = json.loads(manifest_path_probe.read_text(encoding="utf-8"))
         if manifest.get("stage") != "03-gfx-simple":
             raise SystemExit("04-gfx-media requires a 03-gfx-simple predecessor SDK")
         target_os = manifest["target"]["os"]
-        env = runtime_env(staged, manifest)
         if target_os == "windows" and not os.environ.get("CRT_WINDOWS_SDK_LIBPATH"):
             raise SystemExit("CRT_WINDOWS_SDK_LIBPATH is required on Windows")
 
@@ -409,13 +494,69 @@ def main() -> None:
         build_asset = asset
         if target_os == "windows":
             build_asset = temp_root / "source"
+            if build_asset.exists():
+                shutil.rmtree(build_asset)
             shutil.copytree(asset, build_asset)
+        touch_tree(build_asset)
 
-        build_ports(build_asset, staged, temp_root, manifest, env)
-        skia_source, mingw_checkout = build_skia(
-            build_asset, staged, temp_root, manifest, env)
+        # Cache keys: any change to a pinned recipe, this project's own
+        # build driver, or the predecessor SDK invalidates the matching
+        # cache tier automatically -- see fingerprint()'s own comment.
+        ports_key = fingerprint([
+            manifest_path_probe,
+            build_asset / "porting" / "recipes" / "freetype.json",
+            build_asset / "porting" / "recipes" / "ffmpeg.json",
+        ])
+        skia_key = ports_key + "-" + fingerprint([
+            build_asset / "libcrtgfx" / "third_party" / "skia" / "recipe.json",
+            build_asset / "tools" / "build_skia.py",
+        ] + ([build_asset / "tools" / "fetch_mingw_w64_headers.py"]
+             if target_os == "windows" else []))
+        cache_dir = temp_root / ".crt-stage-cache"
+        ports_marker = cache_dir / "ports.key"
+        skia_marker = cache_dir / "skia.key"
+
+        ports_cached = (args.reuse_work_root and staged.is_dir() and
+                        ports_marker.is_file() and
+                        ports_marker.read_text(encoding="utf-8").strip() == ports_key)
+        if not ports_cached:
+            # Either not reusing the work-root, or the predecessor SDK/
+            # FreeType/FFmpeg pins changed since the cached staged tree was
+            # built -- a stale staged tree cannot be layered on top of, so
+            # start over from the declared predecessor SDK. This also
+            # necessarily invalidates any cached Skia build (it was built
+            # against the staged tree being discarded here).
+            if staged.exists():
+                shutil.rmtree(staged)
+            shutil.copytree(sdk, staged)
+        env = runtime_env(staged, manifest)
+
+        port_sources = fetch_port_sources(build_asset, staged, temp_root, env)
+        if ports_cached:
+            print(f"+ [work-root cache] reusing FreeType/FFmpeg install "
+                  f"already in {staged} (key {ports_key})", flush=True)
+        else:
+            build_ports(build_asset, port_sources, staged, temp_root, manifest, env)
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            ports_marker.write_text(ports_key, encoding="utf-8")
+
+        skia_source = fetch_skia_source(build_asset, temp_root, env)
+        mingw_checkout = (fetch_mingw_w64_headers(build_asset, temp_root, env)
+                          if target_os == "windows" else None)
+        skia_cached = (ports_cached and skia_marker.is_file() and
+                       skia_marker.read_text(encoding="utf-8").strip() == skia_key)
+        if skia_cached:
+            print(f"+ [work-root cache] reusing Skia build already in "
+                  f"{staged} (key {skia_key})", flush=True)
+        else:
+            build_skia(build_asset, skia_source, mingw_checkout, staged,
+                      temp_root, manifest, env)
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            skia_marker.write_text(skia_key, encoding="utf-8")
 
         build_dir = temp_root / "gfx-media-build"
+        if build_dir.exists():
+            shutil.rmtree(build_dir)
         configure = [
             "cmake", "-S", str(build_asset / "distribution" / "stages" / "04-gfx-media"),
             "-B", str(build_dir), "-G", "Ninja",
@@ -443,8 +584,9 @@ def main() -> None:
             "source_sha256": args.source_sha256,
         }
         add_redistributed_dependencies(
-            build_asset, staged, temp_root / "port-sources", skia_source, manifest)
-        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+            build_asset, staged, port_sources, skia_source, manifest)
+        (staged / "manifest.json").write_text(
+            json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
         build_example(staged, temp_root, "gfx-gpu", "crtgfx_gpu_example", env)
         build_example(staged, temp_root, "gfx-skia", "crtgfx_skia_example", env)
@@ -462,10 +604,14 @@ def main() -> None:
         # here even when main() above raised, so a CalledProcessError from
         # `ctest`/`cmake --build` leaves nothing behind to look at. Added
         # 2026-09-11 debugging the isolated 03-gfx-simple -> 04-gfx-media
-        # stage upgrade's own real ctest crashes.
+        # stage upgrade's own real ctest crashes. --reuse-work-root (its
+        # own, complementary reason to keep temp_root: reusing the
+        # FreeType/FFmpeg/Skia build across runs, not post-mortem
+        # debugging) already keeps it via args.reuse_work_root below --
+        # combined here so either reason suffices.
         if os.environ.get("CRT_STAGE_KEEP_TMP"):
             print(f"CRT_STAGE_KEEP_TMP set: keeping {temp_root}")
-        else:
+        elif not args.reuse_work_root:
             shutil.rmtree(temp_root, ignore_errors=True)
 
 

@@ -8,6 +8,168 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-11..2026-09-12
+
+- **Completed the real, Skia/FFmpeg-actually-ON, end-to-end
+  `03-gfx-simple -> 04-gfx-media` isolated stage acceptance on Windows.**
+  `out/` was deleted and rebuilt clean per the user's request, then the
+  isolated run (`tools/crt-stage-build.py` end to end, from a no-space
+  extraction root, `CRTGFX_ENABLE_SKIA=ON`/`CRTMEDIA_ENABLE_FFMPEG=ON`
+  genuinely exercised) went through eighteen full or partial attempts,
+  each one reaching further before hitting the next previously-latent
+  gap -- every one of them real, none guessed, each confirmed by direct
+  reproduction (manual `clang`/`lld`/`mksh` isolation, `llvm-objdump`/
+  `llvm-readobj` inspection, `ld.lld --help` for the two different lld
+  driver flavors this project's own Windows/Linux targets actually use,
+  bisection via temporary `fprintf(stderr, ...); fflush(stderr);` probes
+  compiled and run directly against the isolated SDK) before being fixed.
+  Run 18, from source asset SHA-256
+  `c931d6b71d4912c0f31dc8edbec3e2d0aa45c4a609b79f4a73000377f0aaf602`,
+  reached ctest 8/8, install, both packaged examples rebuilt purely from
+  the installed SDK and run externally with real bounded-frame GPU
+  presentation (`crtgfx_gpu_window_demo`/`crtgfx_skia_gpu_window_demo`
+  both `presented=1`), `verify_dist.py`, and the atomic publish
+  (`CRT stage ready`) -- the complete acceptance bar this section of
+  `TODO.md` has required since this transition began.
+
+  Continuing on directly from the six bugs already recorded in-progress
+  in `TODO.md` (`gpu_internal.h` defines, bare-Windows-lib-name CMake
+  mis-conversion, missing `crtgfx_window` system-lib propagation, the
+  `CRTGFX_CRT_SHARED_LIBS` hardcoded-literal gap, and the direct-Skia-
+  consumer win32_shim/`SK_BUILD_FOR_UNIX` flags), the following further
+  real, previously-latent bugs were found and fixed, in the order hit:
+
+  - `crtgfx_skia_targets.cmake`'s Windows/`CRT_USE_IMPORTED_LIBCXX`
+    branch never linked `CRTGFX_SKIA_LIBRARIES` (`libskia.a`/
+    `libfreetype.a`) into `crtgfx_skia_shared` at all, contradicting that
+    function's own top comment -- `libcrtgfx_skia.dll` failed with dozens
+    of undefined `SkImageInfo::`/`SkSurfaces::`/`GrDirectContext::`
+    symbols. Fixed by adding the link inside that branch.
+  - `crtgfx_gpu_shared`'s own `d3d12.lib` link is deliberately `PRIVATE`
+    (a real DLL must resolve its own needs), so it never propagated to
+    `crtgfx_skia_shared`, whose Ganesh D3D12 backend also calls
+    `D3D12SerializeRootSignature` directly -- undefined at
+    `crtgfx_skia_shared`'s own link. Fixed by adding `crtgfx_skia_shared`'s
+    own explicit `d3d12.lib` link, matching the existing `d3dcompiler.lib`
+    precedent on the same target.
+  - `crtgfx_gpu_shared`'s `WINDOWS_EXPORT_ALL_SYMBOLS ON` auto-exports
+    every global symbol in its own link, including ones pulled from a
+    *statically* linked archive -- in-tree this never mattered
+    (`CRTGFX_CRT_SHARED_LIBS` resolves libc against a real shared DLL
+    there), but the standalone stage's `tools/crt-c++` wrapper
+    unconditionally appends the real static `libc.a` to every link
+    regardless of what CMake explicitly requested, so
+    `libcrtgfx_gpu.dll` ended up with real static
+    `fopen`/`ftell`/`fseek`/`fwrite`/`fflush`/`fclose` bodies baked in and
+    auto-exported. Any consumer that also implicitly links `libc.a`
+    itself (every consumer, via the same wrapper) then saw two real
+    definitions of each -- `crtgfx_skia_raster_smoke.exe` failed
+    `duplicate symbol: fopen`. First fix attempt, `-Wl,--exclude-libs,ALL`
+    (the existing fix for the same underlying mechanism on Linux/Vulkan,
+    same file), turned out to be an ELF-only lld option -- confirmed
+    directly via `ld.lld -m i386pep --help`, which lld's actual MinGW/PE
+    driver rejects outright (`unknown argument: --exclude-libs`) and
+    which instead documents `--exclude-symbols=<symbol[,...]>` as the real
+    PE-target equivalent. Landed as one `-Wl,--exclude-symbols=<name>`
+    per confirmed-colliding name (not one comma-joined
+    `-Wl,--exclude-symbols=a,b,c` -- confirmed via `clang -###` that
+    Clang's `-Wl,` splits its whole argument on every comma before
+    forwarding to the linker, which would tear a joined list into bogus
+    trailing positional arguments).
+  - `crtgfx_skia_shared` linking `CRTGFX_SKIA_LIBRARIES` `PUBLIC` (the
+    fix two bullets up) meant every direct-Skia-header consumer in the
+    same CMake project (`crtgfx_skia_raster_smoke.exe`,
+    `crtgfx_skia_gpu_window_demo.exe`) *also* statically re-linked the
+    same `libskia.a`/`libfreetype.a` into its own image, on top of
+    already getting every `Sk*`/`Gr*` symbol through the DLL's own
+    auto-exported import library -- two independent copies of Skia and
+    FreeType in one process. `crtgfx_skia_raster_smoke.exe` aborted
+    (SIGABRT) inside `SkFontMgr::matchFamilyStyle()` the moment a
+    `SkFontMgr` built by the *executable's own* copy (it calls
+    `SkFontMgr_New_Custom_Directory()` directly) was handed across the
+    DLL boundary into an *out-of-line* `crtgfx_skia_default_typeface()`
+    compiled into the DLL's *separate* copy -- bisected via temporary
+    `fprintf`/`fflush` probes added at each step of
+    `skia_raster_smoke.cc` and rebuilt directly against the isolated
+    SDK, confirming `crtgfx_skia_make_raster_surface()`/`getCanvas()`/
+    `drawRect()` (entirely DLL-side, both the object and the code
+    operating on it) worked fine just before it. Reverting `PUBLIC` to
+    `PRIVATE` was tried first and broken the link outright for both
+    direct consumers (`undefined symbol: SkPaint::SkPaint()`, ...) --
+    `PUBLIC` is genuinely required. The real fix: `crtgfx_skia_default_
+    typeface()` now lives `inline` in `crtgfx/skia.h` instead of
+    out-of-line in `skia_bridge.cc`, so it always compiles into, and
+    operates using, whichever copy of Skia its caller already has --
+    never crossing the DLL boundary for this specific function again.
+  - `crtgfx_skia_raster_smoke.exe` ran to real completion and exited 0
+    every time, yet ctest's `PASS_REGULAR_EXPRESSION` reliably saw no
+    output at all (reproduced directly and repeatedly outside ctest too).
+    This project's own libc stdio buffers stdout fully once redirected to
+    a file/pipe, and something in this specific exit path -- after a real
+    `crtgfx_window_destroy()` teardown, unlike every other ctest-
+    registered executable in this stage, which never creates a window at
+    all -- does not reliably flush it before the process actually exits.
+    An explicit `fflush(stdout)` right after the final `puts()` fixed it,
+    reproduced clean across five consecutive runs; the deeper libc/
+    process-exit gap this masks is not chased further here (out of scope
+    for this stage's own acceptance).
+  - `examples/gfx-gpu`/`examples/gfx-skia` (both already existed, both
+    already followed the `CMAKE_SYSROOT`/`find_library` pattern
+    `examples/gfx-simple` established) had never actually been rebuilt
+    purely from an installed SDK until this stage exercised them for the
+    first time, and both only linked their own GPU/Skia library, not the
+    base `crtgfx` (window) library their `main.c`/`main.cc` (installed
+    verbatim from `libcrtgfx/tools/gpu_window_demo.c`/
+    `skia_gpu_window_demo.cc`) also call directly -- undefined
+    `crtgfx_window_create` and friends. Fixed by linking the base library
+    in both.
+  - The `--reuse-work-root` caching this investigation's own tooling
+    added partway through (see below) reuses the persistent `staged` SDK
+    tree across runs; the extracted stage-source tarball's files (and
+    this project's own `shutil.copytree` copy of them, which preserves
+    mtimes) all carry a normalized, reproducible epoch-0 mtime, which
+    defeated CMake's `install(FILES ...)` staleness check
+    (destination-mtime >= source-mtime) the moment a persisted `staged`
+    already had an earlier run's copy of the same file at that same
+    epoch-0 mtime -- the just-fixed `examples/gfx-gpu` link fix silently
+    kept reinstalling its own pre-fix content run after run. Fixed by
+    stamping every file under the fresh source copy with the current
+    time right after establishing it, before anything reads or installs
+    from it.
+  - `examples/gfx-skia`'s `main.cc` (`skia_gpu_window_demo.cc`) is a
+    direct Skia-header consumer exactly like the in-stage executables
+    above, but as a wholly separate CMake project it had no access to
+    `CRT_STAGE_SOURCE_ROOT`'s win32_shim headers, the fetched mingw-w64
+    headers, the `SK_BUILD_FOR_UNIX`/`CRTGFX_HAVE_D3D12` compile
+    definitions, or the emutls stub object -- none of which the SDK
+    bundled for an external consumer. Fixed by having the stage's own
+    `CMakeLists.txt` install the win32_shim and mingw-w64 header sets
+    under fixed `include/crt-win32-shim`/`include/crt-mingw-w64-headers`
+    SDK locations plus a real installable `crt_stage_emutls_stub` static
+    archive, and having `examples/gfx-skia/CMakeLists.txt` reference all
+    of it plus the same `CRTGFX_HAVE_D3D12=1` define and, matching
+    `crtgfx_skia_shared`'s own `PUBLIC` link above, its own direct
+    `libskia.a`/`libfreetype.a` link (exact paths, not
+    `find_library(NAMES skia/freetype ...)` -- both `libfreetype.a` and
+    `libfreetype.dll.a` exist side by side and `find_library`'s suffix
+    search order is not guaranteed to prefer the static one).
+
+  Also landed along the way: `tools/build_stage_04_gfx_media.py`'s own
+  `--work-root` argument was accepted but never actually used -- every
+  run built FreeType/FFmpeg/Skia into its own private, always-deleted
+  temp directory regardless, discarding a ~90-minute build every single
+  retry even when only the stage's own `CMakeLists.txt` had changed. A
+  new opt-in `--reuse-work-root` flag (also threaded through
+  `tools/crt-stage-build.py`) now persists `--work-root` and skips
+  FreeType/FFmpeg/Skia's own build step, via content-hash markers, when
+  their pinned recipes and the predecessor SDK have not changed since the
+  last run -- the default (no flag) is still a genuine, unconditional
+  from-scratch run, used for run 18's own final, successful pass, and the
+  first attempt (temp-dir-based, no `--reuse-work-root`) already lost a
+  fully-built dependency set to the always-on cleanup before it could be
+  rescued once its own bug (the `--exclude-libs`/`--exclude-symbols`
+  mistake above) surfaced.
+
 ## 2026-09-11
 
 - **Linux isolated `03-gfx-simple -> 04-gfx-media` acceptance, Skia and

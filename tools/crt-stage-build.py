@@ -67,6 +67,12 @@ def main() -> None:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--cache", type=Path)
     parser.add_argument("--asset", type=Path, help="local asset override; still checked against the recipe")
+    # Forwarded only if given -- not every stage entrypoint understands it
+    # (currently just tools/build_stage_04_gfx_media.py; see its own
+    # --reuse-work-root help text for what it does and why it exists).
+    parser.add_argument("--reuse-work-root", action="store_true",
+                        help="Pass through to the stage entrypoint, if it "
+                             "supports keeping --work-root between runs.")
     args = parser.parse_args()
 
     sdk_root = args.sdk_root.resolve()
@@ -109,7 +115,7 @@ def main() -> None:
         raise SystemExit("stage entrypoint escapes the extracted source") from exc
     if not entrypoint.is_file():
         raise SystemExit(f"stage entrypoint is missing: {entrypoint}")
-    subprocess.run([
+    command = [
         sys.executable, str(entrypoint),
         "--sdk-root", str(sdk_root),
         "--asset-root", str(source_dir),
@@ -117,7 +123,10 @@ def main() -> None:
         "--output", str(args.output.resolve()),
         "--recipe-location", recipe_location,
         "--source-sha256", recipe["source"]["sha256"],
-    ], check=True)
+    ]
+    if args.reuse_work_root:
+        command.append("--reuse-work-root")
+    subprocess.run(command, check=True)
 
 
 if __name__ == "__main__":

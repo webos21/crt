@@ -43,7 +43,48 @@ sk_sp<SkSurface> crtgfx_skia_make_raster_surface(const crtgfx_framebuffer* frame
 // with DejaVu first. font_mgr may be null (mirrors SkFontMgr_New_Custom_
 // Directory()'s own possible-null return); returns null if every attempt
 // fails.
-sk_sp<SkTypeface> crtgfx_skia_default_typeface(SkFontMgr* font_mgr, const SkFontStyle& style);
+//
+// inline, not declared here + defined in skia_bridge.cc: real, confirmed
+// bug (2026-09-12, standalone 04-gfx-media isolated stage build). Both
+// known call sites (crtgfx_skia_raster_smoke.cc, and this project's other
+// "direct Skia consumer" executables -- see distribution/stages/
+// 04-gfx-media/CMakeLists.txt's own `skia_direct_consumer` loop) call real
+// Skia API (SkFontMgr_New_Custom_Directory() et al) directly themselves,
+// which on Windows means they link libcrtgfx's own bundled libskia.a
+// *again*, on top of already linking crtgfx_skia_shared (the DLL already
+// has its own separate copy, needed for crtgfx_skia_shared's own bridge
+// functions like crtgfx_skia_make_raster_surface() to work at all) --
+// necessary, not a bug in itself: crtgfx_skia_shared's own compiled
+// object never references the wide swath of Sk*/Gr* symbols a direct Skia
+// consumer's own source needs (SkPaint, SkCanvas, SkFont, ...), so
+// WINDOWS_EXPORT_ALL_SYMBOLS never pulls those members out of libskia.a
+// into the DLL to export in the first place -- a direct consumer genuinely
+// cannot link against the DLL's exports alone. But an *out-of-line*
+// crtgfx_skia_default_typeface(), compiled once into the DLL's own copy of
+// Skia, silently handed a SkFontMgr* whose vtable/allocator/internal
+// globals belong to the *caller's own separate* copy of the exact same
+// Skia code -- confirmed for real: crtgfx_skia_raster_smoke.exe aborted
+// (SIGABRT) inside SkFontMgr::matchFamilyStyle() the moment a font_mgr
+// built by the EXE's own libskia.a crossed into the DLL's copy of this
+// function, even though crtgfx_skia_make_raster_surface()/getCanvas()/
+// drawRect() -- object and methods both entirely on the DLL's own side --
+// worked fine just before it. inline compiles this function directly into
+// each direct-Skia-consumer's own translation unit instead, so the
+// SkFontMgr it operates on and the Skia code operating on it are always
+// the same copy; skia_bridge.cc no longer defines this one.
+inline sk_sp<SkTypeface> crtgfx_skia_default_typeface(SkFontMgr* font_mgr, const SkFontStyle& style) {
+  if (font_mgr == nullptr) {
+    return nullptr;
+  }
+  sk_sp<SkTypeface> typeface = font_mgr->matchFamilyStyle("Pretendard GOV", style);
+  if (!typeface) {
+    typeface = font_mgr->matchFamilyStyle("DejaVu Sans Mono", style);
+  }
+  if (!typeface) {
+    typeface = font_mgr->legacyMakeTypeface(nullptr, style);
+  }
+  return typeface;
+}
 
 #if defined(CRTGFX_HAVE_VULKAN) || defined(CRTGFX_HAVE_D3D12) || defined(CRTGFX_HAVE_METAL)
 #include "crtgfx/gpu.h"

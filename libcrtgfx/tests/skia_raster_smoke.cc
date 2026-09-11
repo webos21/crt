@@ -150,5 +150,26 @@ extern "C" int main() {
 
   crtgfx_window_destroy(window);
   puts("crtgfx_skia_raster_smoke: ok");
+  // Real, confirmed bug (2026-09-12, standalone 04-gfx-media isolated
+  // stage build): without this, ctest's own PASS_REGULAR_EXPRESSION check
+  // (crt_stage_register_test(), distribution/stages/04-gfx-media/
+  // CMakeLists.txt) reliably saw *no output at all* from this exact
+  // binary -- reproduced directly, repeatedly, outside ctest too (redirect
+  // stdout to a file, still empty) -- even though the program ran to
+  // completion and exited 0 every time. Adding fflush() calls throughout
+  // main() to bisect where output was being lost turned out to fix it by
+  // itself: this project's own libc stdio buffers stdout fully (not
+  // line-buffered) once it is redirected to a file/pipe rather than a
+  // real console, and something in this specific exit path -- after a
+  // real crtgfx_window_destroy() teardown, unlike the other ctest-
+  // registered executables in this stage that never create a window at
+  // all -- does not reliably run the usual "flush every open FILE*"
+  // cleanup before the process actually exits. The real gap is presumably
+  // somewhere in this project's own atexit/process-exit plumbing on
+  // Windows (not chased further here -- out of scope for this stage's own
+  // acceptance work); this explicit flush is the correct, narrow fix at
+  // this call site regardless of that deeper cause, since this program's
+  // entire job is to have its stdout checked by an external harness.
+  fflush(stdout);
   return 0;
 }

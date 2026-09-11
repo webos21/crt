@@ -197,94 +197,44 @@ recipe inside a stage's own source asset; `build_stage_02_cxx.py` copies
 it forward. Verified end to end: a fresh `01-c -> 02-cxx -> 03-gfx-simple`
 chain, all isolated, all from real packaged SDKs.
 
-**The isolated `03-gfx-simple -> 04-gfx-media` upgrade is now verified end
-to end on macOS (2026-09-11), Skia and FFmpeg actually enabled.** All 8
-ctest binaries pass, both packaged examples build/link/run live, and
-`verify_dist.py` passes. Nine real, previously-unexercised bugs were found
-and fixed reaching that state -- full trail in `HISTORY.md`'s 2026-09-11
-entry. **Still in progress:** Windows and Linux acceptance for this same
+**`03-gfx-simple -> 04-gfx-media`, Skia and FFmpeg genuinely enabled, is
+now done and verified end to end on macOS (2026-09-11) and Windows
+(2026-09-12)** (the default packaging pass everywhere still has
+`CRTGFX_ENABLE_SKIA=OFF`/`CRTMEDIA_ENABLE_FFMPEG=OFF`; this transition does
+not settle for that). Both hosts reached ctest 8/8, both packaged examples
+(`examples/gfx-gpu`/`examples/gfx-skia`) rebuilt purely from the installed
+SDK and run live, `verify_dist.py`, and the atomic publish. Nine real bugs
+on macOS and eighteen on Windows were found and fixed getting there -- full
+trail in `HISTORY.md`'s 2026-09-11 (macOS) and 2026-09-11..2026-09-12
+(Windows) entries. The Windows source asset that reached publish has
+SHA-256 `c931d6b71d4912c0f31dc8edbec3e2d0aa45c4a609b79f4a73000377f0aaf602`.
+`tools/build_stage_04_gfx_media.py` also gained an opt-in
+`--reuse-work-root` flag (persists `--work-root`, skips FreeType/FFmpeg/
+Skia's own build when their pins/predecessor SDK are unchanged) for faster
+iteration, alongside the existing `CRT_STAGE_KEEP_TMP=1` post-mortem-only
+escape hatch; the default (no flag, no env var) stays a genuine
+from-scratch run every time. **Still open:** Linux acceptance for this same
 transition (see the checklist below).
-Design is written up in full at
-`C:\Users\Lee\.claude\plans\soft-orbiting-swan.md` (approved 2026-09-09) --
-read that before continuing rather than re-deriving the design. Key
-decision already made: Skia/FFmpeg/FreeType are fetched and built live by
-the stage entrypoint script via their own already-pinned mechanisms
-(`libcrtgfx/third_party/skia/recipe.json` + `fetch_skia.py`/`build_skia.py`;
-`porting/recipes/{ffmpeg,freetype}.json` + the already-packaged
-`crt-port-build.py`), not bundled into the stage-source tarball the way
-03's small xkbcommon dependency was -- Skia alone is ~189MB even shallow.
 
-Landed so far (Windows-verified): shared modules now own the reusable target
-definitions for all three layers needed by the standalone stage project:
-`libcrtgfx/cmake/crtgfx_gpu_{sources,targets}.cmake`,
-`libcrtgfx/cmake/crtgfx_skia_targets.cmake`, and
-`libcrtmedia/cmake/crtmedia_targets.cmake`. The Skia module retains the
-existing Windows `uuid.lib`/`--allow-multiple-definition`/
-`emutls_link_stubs.c`, macOS reversed archive-scan order, and Linux
-`--start-group`/`--end-group` rules; the media module retains the backend
-OBJECT-library boundary and FFmpeg static/shared link rules. In-tree-only
-targets are guarded so the same modules can be called by the main build and
-the future standalone project. Fresh Windows builds passed gfx 3/3 and media
-5/5 tests; a fresh default-option `crt-gfx-media-dist` rebuilt and verified
-the complete `02-cxx -> 03-gfx-simple -> 04-gfx-media` packaging chain. A
-Skia-ON configure/generate pass also exercised all three extracted Skia
-functions; the real Skia compile/link remains part of the isolated option-ON
-acceptance below. The standalone
-`distribution/stages/04-gfx-media/CMakeLists.txt` is also present and passes
-a Windows configure/generate check through the installed 03 SDK wrappers. It
-requires Skia, FreeType, and FFmpeg artifacts up front, consumes the installed
-03 window libraries, registers GPU/Skia/media smoke tests, and installs the
-GPU/Skia examples; this check used placeholders and therefore is structural
-evidence only, not option-ON build acceptance.
+Still open, deliberately deferred (not blocking this transition, not chased
+further during this pass): the FFmpeg `-I${prefix}/include` unquoted-arg
+defect (only manifests with a space-containing *install prefix*) -- the
+Windows run used a no-space extraction root throughout because of exactly
+this, not the space-containing path the acceptance bar below calls for; not
+revisited until that defect is actually fixed.
 
 Stage checklist (remove completed items from this in-progress list only after
 their result is recorded in `HISTORY.md`):
 
-- [ ] Run the real Windows isolated acceptance from freshly extracted inputs
-  under a path containing spaces; expect a multi-hour Skia/FFmpeg build and
-  record every discovered defect before removing this in-progress section.
-  The Windows PAL/mksh, external-toolchain fail-fast, and libc++ header-order
-  defects found by the preceding full runs are fixed and recorded in
-  `HISTORY.md`. The latest run got through fresh FreeType/FFmpeg installs,
-  all 834 pinned Skia/D3D12 Ninja edges, and standalone configure before the
-  header-order failure; no final output was published. Focused compilation now
-  passes both with the updated wrapper's automatic packaged-libc++ discovery
-  and with the compatibility environment used for an older predecessor SDK.
-  That tested source asset had SHA-256
-  `454f812f52bbd12c65b6f0502ca9f9c32d58e009ccbec3c2a550defd8ee620cb`.
-  The full rerun from that asset confirmed the header-order fix: FreeType and
-  FFmpeg installed, Skia completed 834/834 edges, and standalone compilation
-  passed the former `<cwchar>` failure. It then exposed the next packaging
-  gap: installed `include/include/core/SkColorSpace.h` includes
-  `modules/skcms/skcms.h`, but `build_skia.py` currently installs only Skia's
-  top-level `include/` tree and `libskia.a`. The required two-file public
-  skcms include closure is now installed and enforced by standalone configure,
-  dependency provenance, and final dist verification; focused installation
-  and pinned-header compilation pass. The fresh asset generated from committed
-  fix `8b6bfc4` has SHA-256
-  `3c20e93eb10b4502b704d4be9d63e53328b18870e558e0e001731e9ba4c48082`.
-  Rerun it; no final output has yet been published.
-
-  A deliberately space-containing install prefix then exposed another real
-  acceptance defect: FFmpeg constructs `-I${prefix}/include` as an unquoted
-  compiler option, so Clang receives separate `Install` and `19/include`
-  operands. Keep this recorded rather than hiding it; first rerun with only
-  the work/source path containing spaces and a no-space install prefix to
-  finish separating the PAL fix from FFmpeg prefix quoting. The next run is
-  the complete stage entrypoint from the fresh asset and one fresh root: it
-  must rebuild FreeType and FFmpeg, fetch/build pinned Skia against staged
-  FreeType, build/test/install the standalone 04 project, rebuild/run the GPU
-  and Skia examples, inventory all three redistributed port libraries, and
-  pass `verify_dist.py` before publishing the output.
-- [ ] Finish the Linux isolated acceptance (macOS is done, see `HISTORY.md`'s
-  2026-09-11 entry). Run on real Linux/aarch64 hardware (not WSL): all 8
-  ctest binaries (`crtgfx_gpu_test`, `crtmedia_*_test`,
-  `crtgfx_skia_raster_smoke`) pass end to end from a real packaged
-  `03-gfx-simple` SDK. Eight real bugs found and fixed reaching that
-  state -- full trail in `HISTORY.md`'s 2026-09-11 entry (Vulkan
-  `find_library()`/`-rpath-link`, FFmpeg `--enable-pic`/`-Bsymbolic`,
-  missing libxkbcommon on the imported `crtgfx_window` target, project-
-  wide `-fPIC`/`-ffunction-sections`/`-fdata-sections` for the TLS-model
+- [ ] Finish the Linux isolated acceptance. Run on real Linux/aarch64
+  hardware (not WSL): all 8 ctest binaries (`crtgfx_gpu_test`,
+  `crtmedia_*_test`, `crtgfx_skia_raster_smoke`) pass end to end from a
+  real packaged `03-gfx-simple` SDK. Eight real bugs found and fixed
+  reaching that state -- full trail in `HISTORY.md`'s 2026-09-11 entry
+  (Vulkan `find_library()`/`-rpath-link`, FFmpeg
+  `--enable-pic`/`-Bsymbolic`, missing libxkbcommon on the imported
+  `crtgfx_window` target, project-wide
+  `-fPIC`/`-ffunction-sections`/`-fdata-sections` for the TLS-model
   shared-library bug, `LIBCXX_ENABLE_ABI_LINKER_SCRIPT=OFF` for the
   `libc++.so` runtime-loading bug, and explicit `libunwind.so` linking in
   both packaged examples). **Still open:** the `examples/gfx-gpu`/
@@ -297,15 +247,12 @@ their result is recorded in `HISTORY.md`):
   03-gfx-simple` (needs `crt-gfx-simple-dist` rebuilt first so the fixes
   above are actually in the packaged SDK/stage-source) and confirm it
   reaches `CRT stage ready` before removing this bullet. Iterating on any
-  further fix here does NOT need a full from-scratch rerun each time:
-  `tools/build_stage_04_gfx_media.py`'s own `finally: shutil.rmtree(
-  temp_root)` is what wipes the from-scratch Skia/FreeType/FFmpeg build
-  on every run (by design, for a genuine from-scratch acceptance pass) --
-  set `CRT_STAGE_KEEP_TMP=1` once to keep that temp tree around, then
-  re-run just the affected `cmake --build`/example step directly against
-  it instead of the whole script, for fast iteration. Treat CPU/FFmpeg/
-  Skia results separately from Vulkan/native-Wayland live-presentation
-  evidence.
+  further fix here does NOT need a full from-scratch rerun each time: pass
+  `--reuse-work-root` (`tools/build_stage_04_gfx_media.py`, threaded
+  through `crt-stage-build.py`) to persist the FreeType/FFmpeg/Skia
+  build across reruns instead of the older `CRT_STAGE_KEEP_TMP=1`
+  post-mortem-only workaround. Treat CPU/FFmpeg/Skia results separately
+  from Vulkan/native-Wayland live-presentation evidence.
 
 Keep the separately listed Windows C++ initialization failure open; the stage
 runner deliberately has no retry that could hide it.
