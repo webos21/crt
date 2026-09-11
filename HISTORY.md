@@ -10,6 +10,52 @@ substantive update.
 
 ## 2026-09-11
 
+- **Fixed stale temp-directory RPATH entries left in every published
+  isolated-stage macOS SDK (`a5bea8f`).** Found immediately after the
+  entry below, testing its own published output directly: every isolated
+  stage upgrade (`crt-stage-build.py`) builds entirely inside a throwaway
+  `tempfile.mkdtemp()`, then copies the result to the real, requested
+  `--output` only once finished. The predecessor SDK's own `crt-
+  toolchain.cmake` computes `CRT_DISTRIBUTION_ROOT` as wherever it
+  currently sits (deliberately self-relocating, for the normal "download
+  once, build in place" case), and both `CMAKE_BUILD_RPATH`/
+  `CMAKE_INSTALL_RPATH` and `tools/crt-c++`'s own `-Wl,-rpath` derive
+  from it -- so every RPATH-bearing dylib/executable built while the SDK
+  still lived in that temp directory got the temp path baked in, not the
+  final output path. Confirmed for real: a published `crtgfx_skia_gpu_
+  window_demo` failed outright once its own build-time temp directory was
+  cleaned up (`Library not loaded: @rpath/libcrtgfx_skia.dylib ...
+  tried: '<temp>/sdk/lib/libcrtgfx_skia.dylib' (no such file)`), and
+  every dylib in the published `04-gfx-media` SDK's own `lib/` carried
+  the identical stale RPATH. `DYLD_LIBRARY_PATH` is not a workaround here
+  -- pointing it at the real `lib/` "fixes" that error but reintroduces
+  the leaf-name dyld-hijack bug fixed in the entry below (real Apple
+  frameworks' own `libc++.1.dylib` gets silently swapped for this
+  project's ABI-incompatible one).
+
+  Fixed with a new `rewrite_stale_macho_rpaths()` helper (duplicated into
+  each of the three affected `build_stage_NN_*.py` entrypoints, matching
+  this project's own existing per-stage-source duplication for
+  `publish_tree()` itself) that walks the published tree and
+  `install_name_tool -rpath`'s every Mach-O file's stale `LC_RPATH`
+  entries to the real final location. Two real follow-up wrinkles found
+  fixing this: `tempfile.mkdtemp()` returns `TMPDIR`'s own path as-is
+  (`/var/folders/...` on macOS), but ld64 bakes the *real*, symlink-
+  resolved path (`/private/var/folders/...`) into some `LC_RPATH`
+  commands and the raw form into others (`crt-c++`'s own `-Wl,-rpath`
+  uses `$CRT_SYSROOT` verbatim; CMake's own automatic RPATH computation
+  resolves it) -- both spellings of the temp root have to be checked, or
+  whichever one goes unmatched dangles forever even in an otherwise-
+  successfully-rewritten file. And rewriting two differently-spelled
+  stale entries in the same file to the identical new path creates two
+  byte-identical `LC_RPATH` commands, which dyld rejects outright
+  (`duplicate LC_RPATH`) -- the second rewrite deletes the entry instead
+  once the target value is already present. Verified end to end:
+  `crtgfx_skia_gpu_window_demo` now runs correctly from the published
+  `out-04-gfx-media/examples/bin`, with its own temp build directory
+  already deleted, and every Mach-O file in the published tree scanned
+  clean of any lingering temp-dir RPATH entry.
+
 - **Verified the isolated `03-gfx-simple -> 04-gfx-media` upgrade end to
   end on macOS, with Skia and FFmpeg actually enabled (`d1c996d`).** The
   first complete run of this transition on real macOS hardware: all 8
