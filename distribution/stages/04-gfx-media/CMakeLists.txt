@@ -73,8 +73,30 @@ if(CRT_TARGET_OS STREQUAL "windows")
   set_property(TARGET crtgfx_window_shared PROPERTY INTERFACE_LINK_LIBRARIES
     "${CMAKE_SYSROOT}/lib/libcrtgfx_dll.dll.a")
 elseif(CRT_TARGET_OS STREQUAL "macos")
+  # crtgfx_window here is only an IMPORTED stub around the predecessor
+  # SDK's already-built libcrtgfx.a, not the real distribution/stages/
+  # 03-gfx-simple/CMakeLists.txt STATIC target -- so none of that file's
+  # own PRIVATE "-framework Foundation/AppKit/QuartzCore/CoreGraphics
+  # objc" entries (needed to resolve window_cocoa.c's real AppKit/objc
+  # symbols baked into that .a) travel with it: PRIVATE link libraries of
+  # a STATIC library are a CMake build-graph property of that library's
+  # own target, not something recorded inside the .a file itself, so a
+  # plain IMPORTED wrapper around the archive path has no way to know
+  # about them. A real, confirmed bug (2026-09-11): crtgfx_gpu_test and
+  # crtgfx_gpu_window_demo -- both link crtgfx_gpu PUBLIC, which links
+  # this crtgfx_window PUBLIC -- failed outright with dozens of undefined
+  # objc_msgSend/objc_getClass/kCAGravityResize/... symbols, all from
+  # window_cocoa.c.o already inside the imported archive. Re-listing the
+  # same frameworks/objc here (this time as part of the IMPORTED target's
+  # own INTERFACE_LINK_LIBRARIES, the only kind of link info an IMPORTED
+  # target can carry) fixes it. libcrtgfx.dylib below needs none of this:
+  # a real shared library resolves its own dependencies at its own link
+  # time and records them as load commands the dynamic linker follows
+  # automatically, unlike a static archive.
   set_property(TARGET crtgfx_window PROPERTY INTERFACE_LINK_LIBRARIES
-    "${CMAKE_SYSROOT}/lib/libcrtgfx.a")
+    "${CMAKE_SYSROOT}/lib/libcrtgfx.a"
+    "-framework Foundation" "-framework AppKit" "-framework QuartzCore"
+    "-framework CoreGraphics" objc)
   set_property(TARGET crtgfx_window_shared PROPERTY INTERFACE_LINK_LIBRARIES
     "${CMAKE_SYSROOT}/lib/libcrtgfx.dylib")
 elseif(CRT_TARGET_OS STREQUAL "linux")
@@ -112,6 +134,27 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
   find_library(CRTGFX_LINUX_VULKAN_LIB NAMES vulkan vulkan.so.1
     NO_CMAKE_FIND_ROOT_PATH REQUIRED)
   set(CRTGFX_GPU_BACKEND_SOURCES ${CRTGFX_GPU_BACKEND_LINUX_SOURCES})
+endif()
+# libcrtgfx/src/gpu_internal.h's own struct crtgfx_gpu_device/crtgfx_gpu_
+# surface field sets (and gpu_metal.c/gpu_vulkan.c/gpu_win32.c's own real
+# field accesses into them) are all behind a per-backend #if defined(CRT_
+# TARGET_OS_<os>) && defined(CRTGFX_HAVE_<backend>) guard -- the in-tree
+# libcrtgfx/CMakeLists.txt defines CRTGFX_HAVE_METAL/_D3D12 unconditionally
+# per host and CRTGFX_HAVE_VULKAN once a real libvulkan is found, but this
+# standalone stage project never included that file, only the shared
+# crtgfx_gpu_*.cmake *source list* modules -- a real, confirmed bug
+# (2026-09-11): without this, gpu_internal.h's own structs fell through to
+# their bodyless "#else int reserved;" branch while gpu_metal.c's real
+# field accesses (device->mtl_device, surface->height, ...) were compiled
+# unconditionally, failing outright with "no member named 'height' in
+# 'struct crtgfx_gpu_surface'" the first time this stage's own macOS build
+# actually reached that file.
+if(CRT_TARGET_OS STREQUAL "windows")
+  add_compile_definitions(CRTGFX_HAVE_D3D12=1)
+elseif(CRT_TARGET_OS STREQUAL "macos")
+  add_compile_definitions(CRTGFX_HAVE_METAL=1)
+elseif(CRT_TARGET_OS STREQUAL "linux")
+  add_compile_definitions(CRTGFX_HAVE_VULKAN=1)
 endif()
 list(TRANSFORM CRTGFX_GPU_SOURCES PREPEND "${CRTGFX_ROOT}/")
 list(TRANSFORM CRTGFX_GPU_BACKEND_SOURCES PREPEND "${CRTGFX_ROOT}/")
@@ -152,21 +195,64 @@ endif()
 
 enable_testing()
 function(crt_stage_register_test name target expected)
+  set(predecessor_runtime "")
   if(CRT_TARGET_OS STREQUAL "windows")
     set(runtime_variable PATH)
+    # Windows DLLs (this stage's own crtgfx_gpu_dll.dll/crtmedia_dll.dll
+    # included) land in RUNTIME_OUTPUT_DIRECTORY, i.e. .../bin -- unlike
+    # the macOS/Linux LIBRARY_OUTPUT_DIRECTORY case just below.
+    set(own_runtime "${CMAKE_BINARY_DIR}/bin")
     set(predecessor_runtime "${CMAKE_SYSROOT}/bin")
   elseif(CRT_TARGET_OS STREQUAL "macos")
     set(runtime_variable DYLD_LIBRARY_PATH)
-    set(predecessor_runtime "${CMAKE_SYSROOT}/lib")
+    set(own_runtime "${CMAKE_BINARY_DIR}/lib")
+    # No predecessor_runtime (${CMAKE_SYSROOT}/lib) here, unlike Windows/
+    # Linux just above/below -- a real, confirmed bug (2026-09-11): every
+    # one of this stage's own 8 ctest binaries failed (Bus error/
+    # Segmentation fault, or crtgfx_skia_raster_smoke's own "Symbol not
+    # found: __ZnamSt19__type_descriptor_t, expected as weak-def export
+    # from some loaded dylib") the first time this function's own env
+    # wrapping was ever actually exercised end-to-end (isolated 03-gfx-
+    # simple -> 04-gfx-media stage upgrade). Root-caused directly (ran
+    # each failing ctest COMMAND by hand, then bisected by env var):
+    # dyld's DYLD_LIBRARY_PATH override resolves a dependency by *leaf
+    # filename* against every directory listed, ahead of that
+    # dependency's own recorded path -- even an already-absolute one.
+    # ${CMAKE_SYSROOT}/lib (the predecessor SDK) contains this project's
+    # own imported libc++.1.dylib/libc++abi.1.dylib, under the exact same
+    # leaf names as the real system copies. Every one of these test
+    # executables links at least one real Apple framework (Foundation/
+    # AppKit/CoreAudio/AudioToolboxCore/...), and those frameworks
+    # transitively load the *real* /usr/lib/libc++.1.dylib themselves --
+    # DYLD_LIBRARY_PATH silently swaps in this project's own, ABI-
+    # incompatible libc++.1.dylib for that unrelated real framework's own
+    # internal use instead, corrupting it. Confirmed directly: every
+    # affected binary here ran perfectly (`<name>: ok`, exit 0) with
+    # DYLD_LIBRARY_PATH unset entirely, resolving 100% of its own real
+    # CRT dependencies (libcrtgfx.dylib/libcrtgfx_gpu.dylib/libcrtgfx_
+    # skia.dylib/the imported libc++.dylib) via already-embedded absolute
+    # paths or @rpath + this stage's own linker-baked -Wl,-rpath entries
+    # (see tools/crt-cc's/tools/crt-c++'s own shared-link "entry" logic
+    # and CMAKE_BUILD_RPATH/CMAKE_INSTALL_RPATH in the generated crt-
+    # toolchain.cmake) -- so, unlike Windows/Linux above/below, nothing
+    # here ever actually needed this predecessor_runtime override, only
+    # ever amounted to a live landmine once a real Apple framework was in
+    # the picture (which no prior consumer of this shared cmake helper --
+    # this function only exists in this stage -- had ever exercised
+    # before Skia/Metal made that the norm here).
   else()
     set(runtime_variable LD_LIBRARY_PATH)
+    set(own_runtime "${CMAKE_BINARY_DIR}/lib")
     set(predecessor_runtime "${CMAKE_SYSROOT}/lib")
   endif()
   # Scope the newly-built and predecessor shared-library paths to each test;
   # never poison the host cmake/ctest process itself with CRT libc++.
+  set(env_modify --modify "${runtime_variable}=path_list_prepend:${own_runtime}")
+  if(predecessor_runtime)
+    list(APPEND env_modify --modify "${runtime_variable}=path_list_prepend:${predecessor_runtime}")
+  endif()
   add_test(NAME ${name} COMMAND "${CMAKE_COMMAND}" -E env
-    --modify "${runtime_variable}=path_list_prepend:${CMAKE_BINARY_DIR}/bin"
-    --modify "${runtime_variable}=path_list_prepend:${predecessor_runtime}"
+    ${env_modify}
     "$<TARGET_FILE:${target}>")
   set_tests_properties(${name} PROPERTIES PASS_REGULAR_EXPRESSION "${expected}")
 endfunction()

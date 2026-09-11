@@ -131,6 +131,11 @@ STAGES = {
             "libcrtgfx/include",
             "libcrtgfx/src/gpu.c",
             "libcrtgfx/src/gpu_internal.h",
+            # All three per-OS window_*_gpu.h/window_wayland_native.h headers
+            # below #include this shared internal header (despite its name,
+            # it is not Linux/Wayland-specific -- see the matching
+            # "03-gfx-simple" entry, which already got this right).
+            "libcrtgfx/src/wayland_weston_internal.h",
             "libcrtgfx/src/skia_bridge.cc",
             "libcrtgfx/tests/gpu_test.c",
             "libcrtgfx/tests/skia_raster_smoke.cc",
@@ -167,6 +172,11 @@ STAGES = {
         "project_paths_by_os": {
             "windows": (
                 "libcrtgfx/src/arch/windows/gpu_win32.c",
+                # libcrtgfx/src/gpu.c #includes this directly; missing here
+                # produced "file not found" isolated-stage build failures
+                # (2026-09-11) -- see the matching "03-gfx-simple" entry,
+                # which already got this right.
+                "libcrtgfx/src/arch/windows/window_win32_gpu.h",
                 "libcrtmedia/src/arch/windows/audio_sink_wasapi.c",
                 "libc/src/arch/windows/common/emutls_link_stubs.c",
                 # The whole shim is required: Skia's D3D include chain uses
@@ -175,11 +185,21 @@ STAGES = {
             ),
             "macos": (
                 "libcrtgfx/src/arch/macos/gpu_metal.c",
+                # libcrtgfx/src/gpu.c #includes this directly; missing here
+                # produced "file not found" isolated-stage build failures
+                # (2026-09-11) -- see the matching "03-gfx-simple" entry,
+                # which already got this right.
+                "libcrtgfx/src/arch/macos/window_cocoa_gpu.h",
                 "libcrtmedia/src/arch/macos/audio_sink_coreaudio.c",
                 "libstdc++/third_party/libcxx/libc++.unexported.exp",
             ),
             "linux": (
                 "libcrtgfx/src/arch/linux/gpu_vulkan.c",
+                # libcrtgfx/src/gpu.c #includes this directly; missing here
+                # produced "file not found" isolated-stage build failures
+                # (2026-09-11) -- see the matching "03-gfx-simple" entry,
+                # which already got this right.
+                "libcrtgfx/src/arch/linux/window_wayland_native.h",
                 "libcrtmedia/src/arch/linux/audio_sink_linux.c",
             ),
         },

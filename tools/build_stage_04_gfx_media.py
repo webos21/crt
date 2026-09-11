@@ -337,7 +337,20 @@ def main() -> None:
         publish_tree(staged, output)
         print(f"CRT stage ready: {output}")
     finally:
-        shutil.rmtree(temp_root, ignore_errors=True)
+        # CRT_STAGE_KEEP_TMP=1: skip cleanup and keep temp_root (the build
+        # tree, staged SDK copy, and port/Skia build directories) around for
+        # post-mortem inspection after a failure -- e.g. re-running a
+        # crashing ctest binary directly under lldb/otool with the exact
+        # same on-disk layout it just failed with. Without this, temp_root
+        # (a fresh tempfile.mkdtemp() every run) is unconditionally deleted
+        # here even when main() above raised, so a CalledProcessError from
+        # `ctest`/`cmake --build` leaves nothing behind to look at. Added
+        # 2026-09-11 debugging the isolated 03-gfx-simple -> 04-gfx-media
+        # stage upgrade's own real ctest crashes.
+        if os.environ.get("CRT_STAGE_KEEP_TMP"):
+            print(f"CRT_STAGE_KEEP_TMP set: keeping {temp_root}")
+        else:
+            shutil.rmtree(temp_root, ignore_errors=True)
 
 
 if __name__ == "__main__":

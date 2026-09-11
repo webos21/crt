@@ -136,60 +136,78 @@ function(crt_add_crtgfx_skia_object_target)
       # SDK-header policy (see docs/libcrtgfx_api_policy.md), exactly like
       # the D3D12 branch's own GrD3DTypes.h above.
       #
-      # Unlike tools/crt-c++'s own GN-driven Skia build (its own -fcrt-real-
-      # apple-sdk sentinel, see that flag's own top comment for the fuller
-      # real-SDK-header story this mirrors), this target compiles through
-      # plain CMAKE_CXX_COMPILER (clang++ -- see CMakePresets.json; this
-      # project's regular CMake build has never gone through the tools/crt-
-      # c++ wrapper script at all, only GN's external Skia/libc++ builds do)
-      # via crt_cxx_build_flags's own hand-built freestanding flags, so that
-      # sentinel string is not a real clang argument here at all -- confirmed
-      # for real (2026-09-04): `error: unknown argument: '-fcrt-real-apple-
-      # sdk'`. The real, underlying fix is reproduced directly instead:
-      # -isysroot/-F<Frameworks>/-isystem<usr/include>, ahead of this
-      # project's own sysroot -- fixing the identical real <sys/cdefs.h>-
-      # shadowing/<ptrcheck.h> compile failure tools/crt-c++'s own comment
-      # documents. No -D__APPLE__ needed here (unlike that wrapper, which
-      # explicitly -U__APPLE__'s every macOS compile by default): this plain
-      # clang++ invocation already predefines __APPLE__ on its own, confirmed
-      # by this file's own crt_build_flags never passing -U__APPLE__ at all.
-      #
-      # Ordering (real, confirmed necessary, 2026-09-04): a first version of
-      # this fix added only -isysroot/-F/-isystem<usr/include> here, relying
-      # on "own PRIVATE target_compile_options land in <FLAGS> ahead of
-      # crt_cxx_build_flags's own inherited chain" (confirmed true elsewhere
-      # in this function) to put the new -isystem<usr/include> ahead of
-      # crt_cxx_build_flags's own -isystem${CMAKE_SOURCE_DIR}/include -- but
-      # that also put it ahead of crt_cxx_build_flags's *own* -isystem<SDK>/
-      # usr/include/c++/v1 (CRT_CXX_STANDARD_INCLUDE_FLAGS, computed once at
-      # the top-level CMakeLists.txt and inherited here as a plain, non-cache
-      # CMake variable -- this file's own add_subdirectory(libcrtgfx) child
-      # scope sees it directly), which libc++'s own <cstdio>/<cerrno>/...
-      # headers require to be searched *first* (their own #include_next
-      # chain expects to find libc++'s own thin wrapper before continuing on
-      # to the real system header) -- confirmed for real: "<cstdio> tried
-      # including <stdio.h> but didn't find libc++'s <stdio.h> header./...
-      # your header search paths are not configured properly". Re-adding
-      # CRT_CXX_STANDARD_INCLUDE_FLAGS/CRT_CXX_RESOURCE_DIR here too, ahead
-      # of the new plain <usr/include> entry, restores the required relative
-      # order for this one translation unit; crt_cxx_build_flags's own later,
-      # now-redundant copies of the same two entries are harmless (a repeated
-      # -isystem path is simply never reached, the first occurrence already
-      # won).
-      execute_process(
-        COMMAND xcrun --sdk macosx --show-sdk-path
-        OUTPUT_VARIABLE CRTGFX_MACOS_REAL_SDK_PATH
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-      )
-      if(NOT CRTGFX_MACOS_REAL_SDK_PATH)
-        message(FATAL_ERROR "crtgfx_skia_objects (macOS/Metal): 'xcrun --sdk macosx --show-sdk-path' failed")
+      # Two real calling contexts now share this function (2026-09-11):
+      # the in-tree build (plain CMAKE_CXX_COMPILER=clang++, no wrapper --
+      # see CMakePresets.json) and the isolated distribution/stages/
+      # 04-gfx-media project, which compiles through tools/crt-c++
+      # instead (crt-toolchain.cmake's own CMAKE_CXX_COMPILER). Detected
+      # via `if(TARGET crt_cxx_build_flags)` -- that INTERFACE library only
+      # ever exists in the in-tree build, matching this same file's own
+      # existing use of the identical check just above for the Windows
+      # branch. The two need genuinely different fixes, not just different
+      # flag spellings:
+      if(TARGET crt_cxx_build_flags)
+        # In-tree build: plain clang++ predefines __APPLE__ on its own and
+        # has no -U__APPLE__/-isystem${CRT_SYSROOT}/include of its own to
+        # fight with, so the manual, hand-ordered fix below (confirmed
+        # necessary and correctly ordered for real, 2026-09-04) is enough:
+        # -isysroot/-F<Frameworks>/-isystem<usr/include>, with
+        # CRT_CXX_STANDARD_INCLUDE_FLAGS re-added ahead of the new
+        # <usr/include> entry so libc++'s own <cstdio>/<cerrno>/... headers
+        # still find their own thin wrapper first via #include_next
+        # (confirmed for real: without this re-add, "<cstdio> tried
+        # including <stdio.h> but didn't find libc++'s <stdio.h> header").
+        # "own PRIVATE target_compile_options land in <FLAGS> ahead of
+        # crt_cxx_build_flags's own inherited chain" is what makes this
+        # ordering hold in the in-tree build specifically.
+        execute_process(
+          COMMAND xcrun --sdk macosx --show-sdk-path
+          OUTPUT_VARIABLE CRTGFX_MACOS_REAL_SDK_PATH
+          OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        if(NOT CRTGFX_MACOS_REAL_SDK_PATH)
+          message(FATAL_ERROR "crtgfx_skia_objects (macOS/Metal): 'xcrun --sdk macosx --show-sdk-path' failed")
+        endif()
+        target_compile_options(crtgfx_skia_objects PRIVATE
+          -isysroot "${CRTGFX_MACOS_REAL_SDK_PATH}"
+          "-F${CRTGFX_MACOS_REAL_SDK_PATH}/System/Library/Frameworks"
+          ${CRT_CXX_STANDARD_INCLUDE_FLAGS}
+          "-isystem${CRTGFX_MACOS_REAL_SDK_PATH}/usr/include"
+        )
+      else()
+        # Isolated stage build (tools/crt-c++): the identical manual
+        # reproduction above does NOT work here -- a real, confirmed bug
+        # (2026-09-11), found completing the first-ever real macOS build
+        # of this standalone project. CMake's own default compile rule
+        # places <INCLUDES> (target_include_directories, carrying this
+        # target's own -isystem${CMAKE_SYSROOT}/include from this
+        # function's PRIVATE include dirs below) *before* <FLAGS>
+        # (target_compile_options, carrying the manual -isysroot/-F/
+        # -isystem<usr/include> above) in the actual generated command
+        # line -- the opposite order the in-tree build's own <FLAGS>-vs-
+        # <FLAGS> comment above relies on, since that's a different axis
+        # (ordering *within* <FLAGS>, not <INCLUDES> vs <FLAGS>). This
+        # project's own minimal sys/cdefs.h (found first via <INCLUDES>)
+        # therefore still shadowed the real one real Darwin headers like
+        # Block.h/malloc.h need to reach <ptrcheck.h>'s own real
+        # __single/__sized_by_or_null/... bounds-safety macros --
+        # confirmed for real: "error: expected ';' after top level
+        # declarator" on Block.h's own real, unmodified declarations, the
+        # exact failure class tools/crt-c++'s own -fcrt-real-apple-sdk
+        # sentinel exists specifically to fix. That sentinel already gets
+        # this exact ordering right internally (its own apple_sdk_search_
+        # flags is placed ahead of its own -isystem${CRT_SYSROOT}/include
+        # inside common_flags, a single combined string this rule's own
+        # <INCLUDES>-before-<FLAGS> split can't pull apart) and already
+        # restores -D__APPLE__=1 (needed here too: Skia's own public
+        # include/ports/SkCFObject.h, transitively required by
+        # GrMtlBackendContext.h, is itself `#ifdef __APPLE__`-gated, and
+        # crt-c++ -U__APPLE__'s every macOS compile by default) -- so the
+        # real fix for this calling context is to hand it the sentinel
+        # directly instead of reproducing (and, as it turns out here,
+        # mis-ordering) the same exception by hand a second time.
+        target_compile_options(crtgfx_skia_objects PRIVATE -fcrt-real-apple-sdk)
       endif()
-      target_compile_options(crtgfx_skia_objects PRIVATE
-        -isysroot "${CRTGFX_MACOS_REAL_SDK_PATH}"
-        "-F${CRTGFX_MACOS_REAL_SDK_PATH}/System/Library/Frameworks"
-        ${CRT_CXX_STANDARD_INCLUDE_FLAGS}
-        "-isystem${CRTGFX_MACOS_REAL_SDK_PATH}/usr/include"
-      )
     endif()
     if(CRT_TARGET_OS STREQUAL "windows" AND CRT_USE_IMPORTED_LIBCXX)
       # -isystem${CRT_LIBCXX_SYSROOT}/include/c++/v1 (dist/02-cxx, not
@@ -422,6 +440,48 @@ function(crt_add_crtgfx_skia_shared_target)
       # -fuse-ld=lld: see crtgfx_skia_raster_smoke's own, fuller comment
       # (same file, its Linux branch) for the full ld.bfd-vs-lld story.
       target_link_options(crtgfx_skia_shared PRIVATE -fuse-ld=lld)
+    elseif(CRT_TARGET_OS STREQUAL "macos")
+      # objc: Skia's own Metal/Ganesh backend (GrMtlCommandBuffer.cpp,
+      # GrMtlGpu.cpp, GrMtlOpsRenderPass.cpp, ...), already compiled into
+      # CRTGFX_SKIA_LIBRARIES' libskia.a above, is real Objective-C++
+      # under ARC -- its object code calls the ARC runtime directly
+      # (objc_storeWeak/objc_loadWeakRetained/objc_initWeak/objc_
+      # storeStrong/objc_msgSend/...), independent of and in addition to
+      # crtgfx_gpu_shared's own separate, already-resolved objc need
+      # (gpu_metal.c's plain objc_msgSend calls, see crt_add_crtgfx_gpu_
+      # shared_target()'s own comment). That PRIVATE objc on crtgfx_gpu_
+      # shared does not help here: it only resolved crtgfx_gpu_shared's
+      # own link, and PRIVATE link libraries of a SHARED library never
+      # propagate to a further consumer's own link -- crtgfx_skia_shared
+      # is itself a second, independent real .dylib link, pulling
+      # libskia.a's ARC object code in directly, so it must resolve
+      # those symbols itself. A real, confirmed bug (2026-09-11), first
+      # hit building the isolated 03-gfx-simple -> 04-gfx-media stage
+      # upgrade (CRTGFX_ENABLE_SKIA is opt-in and OFF by default in the
+      # in-tree build, so this is also the first time this project's own
+      # crtgfx_skia_shared has ever actually been linked for macOS with
+      # a real Metal-enabled libskia.a at all): "ld: symbol(s) not found
+      # for architecture arm64" on every _objc_storeWeak/_objc_
+      # loadWeakRetained/_objc_initWeak/... reference.
+      #
+      # CoreFoundation/Foundation/Metal: same real-first-link discovery,
+      # one rebuild later -- once the objc *runtime* itself resolved,
+      # libskia.a's own Metal backend and skia_bridge.cc's own SkCFObject.h
+      # use (see that header's own #ifdef __APPLE__ story) still left
+      # _CFRetain/_CFRelease/___CFConstantStringClassReference
+      # (CoreFoundation), _NSLog/_OBJC_CLASS_$_NSString (Foundation), and
+      # _OBJC_CLASS_$_MTL* -- every Cocoa class reference GrMtlCommand
+      # Buffer.cpp/GrMtlUtil.cpp/GrMtlDepthStencil.cpp/... instantiate --
+      # (Metal) undefined. Same root cause as objc just above: these are
+      # crtgfx_skia_shared's own direct, first-ever real link-time need,
+      # not something crtgfx_gpu_shared's own (PRIVATE, non-propagating)
+      # framework list could ever have covered here.
+      target_link_libraries(crtgfx_skia_shared PRIVATE
+        objc
+        "-framework CoreFoundation"
+        "-framework Foundation"
+        "-framework Metal"
+      )
     endif()
     if(COMMAND crt_configure_shared_runtime)
       crt_configure_shared_runtime(crtgfx_skia_shared)

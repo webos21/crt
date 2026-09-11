@@ -11,11 +11,30 @@ extern "C" {
 #endif
 
 typedef __WINT_TYPE__ wint_t;
+/* _MBSTATE_T: the same controlled-redefinition sentinel real BSD/Darwin
+ * headers use for this exact typedef (Apple's own <sys/_types/_mbstate_t.h>
+ * guards itself identically) -- not this project's own invention. Needed
+ * for real, not preemptively: a translation unit compiled with real Apple
+ * SDK headers reachable (-fcrt-real-apple-sdk, tools/crt-c++/crt-cc's own
+ * sentinel -- e.g. libcrtgfx/src/skia_bridge.cc's real CoreFoundation/
+ * Metal use) can end up with both this header's own mbstate_t and Apple's
+ * real __darwin_mbstate_t-backed one reachable in the same TU; without a
+ * shared guard both definitions run, and clang correctly rejects the
+ * result as a genuine, incompatible typedef redefinition ('struct
+ * mbstate_t' vs '__darwin_mbstate_t') -- confirmed for real, 2026-09-11,
+ * building the isolated 04-gfx-media distribution stage on macOS.
+ * Whichever definition is reachable first in a given TU wins; every
+ * caller in this project only ever treats mbstate_t as opaque storage
+ * handed to mbrlen()/mbrtowc()/etc., so which concrete layout wins here
+ * is never observable. */
+#ifndef _MBSTATE_T
+#define _MBSTATE_T
 typedef struct {
   unsigned int codepoint;
   unsigned char expected;
   unsigned char seen;
 } mbstate_t;
+#endif
 
 #define WCHAR_MAX __WCHAR_MAX__
 #ifdef __WCHAR_UNSIGNED__

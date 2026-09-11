@@ -27,6 +27,27 @@
 
 #ifdef __cplusplus
 extern "C" {
+/* _Bool is a real C99/C11 keyword, but not a C++ one (C++ spells the same
+ * one-byte boolean type "bool" instead) -- clang rejects a bare _Bool
+ * outright when this header is reached from a .cc/.cpp TU. Real-world C++
+ * code including <stdatomic.h> directly is rare but real (this project's
+ * own no-real-Apple-SDK-header default made it rarer still to notice: a
+ * translation unit needing actual real Apple headers -- e.g. libcrtgfx/
+ * src/skia_bridge.cc's own real CoreFoundation/Metal use, tools/crt-c++'s
+ * -fcrt-real-apple-sdk sentinel -- naturally has both this project's own
+ * -isystem${CRT_SYSROOT}/include and the real SDK's own usr/include on
+ * its search path at once; this project's own copy of this header sits
+ * first in that order and so wins, unlike the real SDK's own <stdatomic.h>,
+ * which already handles C++ by falling back to <atomic>/std::atomic).
+ * Confirmed for real, 2026-09-11, building the isolated 04-gfx-media
+ * distribution stage on macOS: skia_bridge.cc's own compile reached this
+ * header and failed immediately on "unknown type name '_Bool'". bool and
+ * _Bool are the identical one-byte type under a different spelling in
+ * every real C/C++ implementation this project targets, so aliasing here
+ * costs nothing. */
+typedef bool __crt_atomic_bool_t;
+#else
+typedef _Bool __crt_atomic_bool_t;
 #endif
 
 typedef enum {
@@ -53,7 +74,7 @@ typedef enum {
  * need uchar.h, itself a documented, still-open gap (see
  * docs/bionic_libc_gaps.md's "Lower priority" list); add
  * atomic_char16_t/atomic_char32_t alongside whenever that header lands. */
-typedef _Atomic(_Bool) atomic_bool;
+typedef _Atomic(__crt_atomic_bool_t) atomic_bool;
 typedef _Atomic(char) atomic_char;
 typedef _Atomic(signed char) atomic_schar;
 typedef _Atomic(unsigned char) atomic_uchar;
@@ -161,12 +182,12 @@ typedef struct {
 #define ATOMIC_FLAG_INIT \
   { 0 }
 
-static inline _Bool atomic_flag_test_and_set_explicit(
+static inline __crt_atomic_bool_t atomic_flag_test_and_set_explicit(
     volatile atomic_flag* object, memory_order order) {
   return __c11_atomic_exchange(&object->__flag, 1, order);
 }
 
-static inline _Bool atomic_flag_test_and_set(volatile atomic_flag* object) {
+static inline __crt_atomic_bool_t atomic_flag_test_and_set(volatile atomic_flag* object) {
   return atomic_flag_test_and_set_explicit(object, memory_order_seq_cst);
 }
 

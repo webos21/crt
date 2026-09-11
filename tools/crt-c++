@@ -144,6 +144,33 @@ for arg in "$@"; do
     -fcrt-real-apple-sdk)
       want_real_apple_sdk=1
       ;;
+    --sysroot=*)
+      if [ "$target_os" != macos ]; then
+        user_args="$user_args $(printf '%s\n' "$arg")"
+        continue
+      fi
+      # Unconditionally dropped on macOS, not just when -fcrt-real-apple-
+      # sdk is present -- this project's own $CRT_SYSROOT is already
+      # threaded through explicitly below (-isystem${CRT_SYSROOT}/include,
+      # -L${CRT_SYSROOT}/lib, real absolute lib paths, ...), so a caller-
+      # supplied --sysroot=$CRT_SYSROOT (CMake's CMAKE_SYSROOT injects one
+      # onto every compile/link automatically once set, see distribution/
+      # stages/*/CMakeLists.txt's own crt-toolchain.cmake) is pure noise
+      # at best. At worst it actively breaks the link: clang's Darwin
+      # driver derives the linker's own -syslibroot from --sysroot in
+      # preference to -isysroot, so a real-Apple-SDK link (-fcrt-real-
+      # apple-sdk's own -isysroot, added below) still ends up searching
+      # for -lSystem and friends under $CRT_SYSROOT instead of the real
+      # SDK -- confirmed for real (2026-09-11), linking the isolated 04-
+      # gfx-media stage's own libcrtgfx_skia.dylib: "ld: library 'System'
+      # not found" despite -isysroot pointing at a real Xcode SDK, the
+      # exact same root cause tools/crt-cc's own identical fix (2026-09-
+      # 09) already documents for the plain-C wrapper -- crt-c++ simply
+      # never got the same fix when want_real_apple_sdk's own link path
+      # was first exercised for real for a .dylib link (skia_bridge.cc's
+      # own prior real use was compile-only through this stage's own
+      # in-tree calling context, which never hits this wrapper at all).
+      ;;
     -lpthread|-lrt)
       # Bionic merged these historical libraries into libc. Let the CRT libc
       # selected below satisfy their symbols instead of leaking a host

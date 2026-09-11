@@ -341,9 +341,29 @@ set(CMAKE_INSTALL_RPATH "${CRT_DISTRIBUTION_ROOT}/lib")
             name: Path(value).name if value else "" for name, value in tools.items()
         },
         "default_compile_options": ["-ffreestanding", "-fno-builtin", "-nostdinc"],
-        "external_toolchain_environment": [
-            "CRT_CC", "CRT_CXX", "CRT_AR", "CRT_RANLIB", "CRT_WINDOWS_SDK_LIBPATH"
-        ],
+        # Windows genuinely has no usable bare "clang"/"ar"/"ranlib" (a
+        # fresh CMake compiler probe there needs CRT_CC/CRT_CXX explicitly,
+        # and the raw Windows SDK import-library path has no other source)
+        # -- confirmed for real, HISTORY.md's own "isolated 04 stage" entry,
+        # where the first complete Windows 03 -> 04 run got all the way
+        # through a multi-hour FreeType/FFmpeg/Skia build before failing at
+        # its own standalone CMake configure for exactly this reason. macOS
+        # and Linux have no equivalent gap: bare clang/clang++/ar/ranlib
+        # already resolve to real, directly usable system tools there (this
+        # whole distribution-stage machinery has run repeatedly on macOS
+        # this same day without ever setting any of these) -- CRT_CC/
+        # CRT_CXX/CRT_AR/CRT_RANLIB stay purely optional overrides on those
+        # two hosts (runtime_env() in tools/build_stage_04_gfx_media.py
+        # already only *applies* them when present, never requires them).
+        # A real, confirmed bug fixed the same day this comment was written
+        # (2026-09-11): this list was unconditional for every target_os, so
+        # the isolated 03 -> 04 upgrade's very first real macOS attempt
+        # failed immediately demanding CRT_WINDOWS_SDK_LIBPATH be set even
+        # though the target was macOS.
+        "external_toolchain_environment": (
+            ["CRT_CC", "CRT_CXX", "CRT_AR", "CRT_RANLIB", "CRT_WINDOWS_SDK_LIBPATH"]
+            if target_os == "windows" else []
+        ),
         "redistributed_dependencies": redistributed_dependencies,
         "optional_tools": {
             "porting": {
