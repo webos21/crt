@@ -43,25 +43,36 @@ than depending on the OS-owned SEH unwind engine. See
 
 CRT is built and verified as cumulative distributions:
 
-| Stage | Includes |
+| Stage | Advertised surface |
 | --- | --- |
 | `01-c` | libc/libm/libdl, startup, shell, mksh, toybox, awk, make |
 | `02-cxx` | `01-c` + libc++/libc++abi/libunwind |
 | `03-gfx-simple` | `02-cxx` + window, keyboard/mouse, software framebuffer |
 | `04-gfx-media` | `03-gfx-simple` + Skia CPU/GPU, Vulkan/D3D12/Metal, FFmpeg |
-| `05-js` | `04-gfx-media` + QuickJS bindings |
+| `05-js` | `04-gfx-media` + JavaScript runtime/bindings layer |
 
 Simple Graphics deliberately excludes Skia CPU raster/text and Skia GPU. Its
 drawing surface is the CPU-writable framebuffer in `crtgfx/window.h`.
 
-The normal repository build currently proves that every later binary package
-inherits the preceding installed `dist` tree. A separate source-stage chain is
-being added for the stronger boundary: `01-c` fetches a SHA-256-pinned CRT
-GitHub Release source asset and builds/tests `02-cxx`; `02-cxx` then builds
-`03-gfx-simple`, followed by `04-gfx-media` against the installed Simple
-Graphics result. Full details, artifact layout, package naming, and acceptance
-rules are in
+The normal repository build proves that every later binary package inherits
+the preceding installed `dist` tree. The stronger source-stage boundary is
+also implemented: a packaged predecessor SDK fetches a SHA-256-pinned CRT
+GitHub Release source asset and builds/tests the next stage without using the
+repository build tree. `02-cxx -> 03-gfx-simple` is verified on all three
+hosts; the complete `01-c -> 02-cxx -> 03-gfx-simple` chain is explicitly
+recorded on Windows and macOS; and the option-ON `03-gfx-simple ->
+04-gfx-media` transition is complete on Windows and macOS, with Linux final
+example/verification/publication checks still open. `04-gfx-media -> 05-js`
+has not yet been added. Full details, artifact layout, package naming, and
+acceptance rules are in
 [`docs/distribution.md`](docs/distribution.md).
+
+The current `05-js` package contains the installable `libcrtjs` skeleton. The
+QuickJS engine, event loop, modules, and JavaScript-visible graphics/media
+bindings remain planned work rather than a current completion claim. Likewise,
+the ordinary developer preset keeps Skia and FFmpeg disabled by default;
+release-grade `04-gfx-media` acceptance uses the separate option-ON isolated
+stage path.
 
 Release engineering creates an OS-qualified upper-stage source asset and its
 recipe only after the component sources have been fetched at their pinned
@@ -215,10 +226,13 @@ libstdc++/        bootstrap ABI shim and imported libc++ build integration
 shell/            tiny shell, mksh, toybox, and awk
 libcrtgfx/        window/input/framebuffer and advanced Skia/GPU integration
 libcrtmedia/      media runtime and optional FFmpeg integration
-libcrtjs/         QuickJS integration
+libcrtjs/         JavaScript runtime skeleton; QuickJS integration is planned
 porting/recipes/  upstream porting test recipes
 tools/            wrappers, rootfs/dist builders, porting automation
-tests/            unit, ABI, PAL, and integration tests
+libc/tests/       libc, PAL, shell-level, ABI, and integration tests
+libstdc++/tests/  C/C++ ABI-boundary tests
+libcrtgfx/tests/  window, input, software, GPU, and Skia tests
+libcrtmedia/tests/ frame, codec, player, audio, and FFmpeg tests
 docs/             design, policy, roadmap, and verification documents
 ```
 

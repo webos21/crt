@@ -141,8 +141,10 @@ from `crtgfx_window_shared`'s `PRIVATE`-scoped framework list --
 
 Still open:
 - The default packaging pass everywhere has `CRTGFX_ENABLE_SKIA=OFF` and
-  `CRTMEDIA_ENABLE_FFMPEG=OFF`; an option-ON Skia/FFmpeg distribution pass
-  has not been run.
+  `CRTMEDIA_ENABLE_FFMPEG=OFF`. The isolated `03-gfx-simple -> 04-gfx-media`
+  path below has exercised both options on macOS and Windows (and reached
+  ctest 8/8 on Linux), but the separate in-repository cumulative
+  `crt-gfx-media-dist` target has not yet been run with both options enabled.
 - `verify_dist.py`'s acceptance checks are still thinner than
   `docs/distribution.md`'s own "Distribution Acceptance" list -- no path-
   with-spaces check, no absolute source/build path leakage check (debug
@@ -172,97 +174,49 @@ mksh/toybox environment for configure/build commands, and never require
 MSYS/Git Bash. Extend the same recipe model to `04 -> 05-js` once the first
 three transitions are stable.
 
-**Done and verified on all three hosts (2026-09-09):** the `02-cxx ->
-03-gfx-simple` deterministic asset, schema-v2 OS identity, standalone build
-entry point, and isolated stage-build acceptance (configure/build/ctest/
-install/example-rebuild-and-run/`verify_dist.py`, from a path containing
-spaces). The Linux source path also carries and builds the pinned
-libxkbcommon port instead of borrowing its headers or library from the host.
-Four real macOS-only bugs (`DYLD_LIBRARY_PATH` poisoning host tools, a
-missing `-fcrt-real-apple-sdk` sentinel in `crt-cc`, `--sysroot=` fighting
-`-syslibroot`, and `CMAKE_SYSROOT`-relative RPATH stripping) and one
-Windows-only bug (`mksh` backslash-path exec) were found and fixed along the
-way -- full trail in `HISTORY.md`. Windows was re-verified clean against the
-final, merged fix set.
-
-**The isolated `01-c -> 02-cxx` upgrade is also now verified on macOS
-(2026-09-11).** A real, confirmed bug found running it for the first
-time from a real packaged `01-c`: a packaged `02-cxx` SDK never carried
-the pinned recipe to advance it one stage further
-(`stages/recipes/03-gfx-simple.json`), so the isolated upgrade's own
-final `verify_dist.py` step failed outright. Fixed (`d2eab26`,
-`HISTORY.md`'s 2026-09-11 entry) with a new `tools/create_stage_source.py
---successor-recipe` option that embeds an already-generated successor
-recipe inside a stage's own source asset; `build_stage_02_cxx.py` copies
-it forward. Verified end to end: a fresh `01-c -> 02-cxx -> 03-gfx-simple`
-chain, all isolated, all from real packaged SDKs.
-
-**`03-gfx-simple -> 04-gfx-media`, Skia and FFmpeg genuinely enabled, is
-now done and verified end to end on macOS (2026-09-11) and Windows
-(2026-09-12)** (the default packaging pass everywhere still has
-`CRTGFX_ENABLE_SKIA=OFF`/`CRTMEDIA_ENABLE_FFMPEG=OFF`; this transition does
-not settle for that). Both hosts reached ctest 8/8, both packaged examples
-(`examples/gfx-gpu`/`examples/gfx-skia`) rebuilt purely from the installed
-SDK and run live, `verify_dist.py`, and the atomic publish. Nine real bugs
-on macOS and eighteen on Windows were found and fixed getting there -- full
-trail in `HISTORY.md`'s 2026-09-11 (macOS) and 2026-09-11..2026-09-12
-(Windows) entries. The Windows source asset that reached publish has
-SHA-256 `c931d6b71d4912c0f31dc8edbec3e2d0aa45c4a609b79f4a73000377f0aaf602`.
-`tools/build_stage_04_gfx_media.py` also gained an opt-in
-`--reuse-work-root` flag (persists `--work-root`, skips FreeType/FFmpeg/
-Skia's own build when their pins/predecessor SDK are unchanged) for faster
-iteration, alongside the existing `CRT_STAGE_KEEP_TMP=1` post-mortem-only
-escape hatch; the default (no flag, no env var) stays a genuine
-from-scratch run every time. **Still open:** Linux acceptance for this same
-transition (see the checklist below).
-
-Still open, deliberately deferred (not blocking this transition, not chased
-further during this pass): the FFmpeg `-I${prefix}/include` unquoted-arg
-defect (only manifests with a space-containing *install prefix*) -- the
-Windows run used a no-space extraction root throughout because of exactly
-this, not the space-containing path the acceptance bar below calls for; not
-revisited until that defect is actually fixed.
+Completed evidence is kept in `HISTORY.md`: `02-cxx -> 03-gfx-simple` passed
+the full isolated acceptance bar on Linux, Windows, and macOS; `01-c ->
+02-cxx -> 03-gfx-simple` is explicitly recorded end to end on Windows and
+macOS; and the option-ON `03-gfx-simple -> 04-gfx-media` transition is complete
+on macOS and Windows. Do not infer the missing Linux `01-c -> 02-cxx` result
+from a cumulative CMake dist build or from a later-stage test pass.
 
 Stage checklist (remove completed items from this in-progress list only after
 their result is recorded in `HISTORY.md`):
 
-- [ ] Finish the Linux isolated acceptance. Run on real Linux/aarch64
-  hardware (not WSL): all 8 ctest binaries (`crtgfx_gpu_test`,
-  `crtmedia_*_test`, `crtgfx_skia_raster_smoke`) pass end to end from a
-  real packaged `03-gfx-simple` SDK. Eight real bugs found and fixed
-  reaching that state -- full trail in `HISTORY.md`'s 2026-09-11 entry
-  (Vulkan `find_library()`/`-rpath-link`, FFmpeg
-  `--enable-pic`/`-Bsymbolic`, missing libxkbcommon on the imported
-  `crtgfx_window` target, project-wide
-  `-fPIC`/`-ffunction-sections`/`-fdata-sections` for the TLS-model
-  shared-library bug, `LIBCXX_ENABLE_ABI_LINKER_SCRIPT=OFF` for the
-  `libc++.so` runtime-loading bug, and explicit `libunwind.so` linking in
-  both packaged examples). **Still open:** the `examples/gfx-gpu`/
-  `examples/gfx-skia` standalone rebuild and the final `verify_dist.py`
-  pass were still running when this was last updated -- rerun
-  `./tools/crt-stage-build.py --sdk-root . --recipe
-  ./stages/recipes/04-gfx-media.json --work-root ./tmp --output
-  ./out-04-gfx-media --asset ../../stage-sources/crt-development-linux-
-  04-gfx-media-source.tar.xz` from inside a freshly rebuilt `dist/
-  03-gfx-simple` (needs `crt-gfx-simple-dist` rebuilt first so the fixes
-  above are actually in the packaged SDK/stage-source) and confirm it
-  reaches `CRT stage ready` before removing this bullet. Iterating on any
-  further fix here does NOT need a full from-scratch rerun each time: pass
-  `--reuse-work-root` (`tools/build_stage_04_gfx_media.py`, threaded
-  through `crt-stage-build.py`) to persist the FreeType/FFmpeg/Skia
-  build across reruns instead of the older `CRT_STAGE_KEEP_TMP=1`
-  post-mortem-only workaround. Treat CPU/FFmpeg/Skia results separately
-  from Vulkan/native-Wayland live-presentation evidence.
+- [ ] **Finish Linux `03-gfx-simple -> 04-gfx-media` acceptance.** The real
+  Linux/aarch64 run already passes all 8 stage tests; rebuild and run both
+  installed-SDK examples, pass final `verify_dist.py`, and reach the atomic
+  `CRT stage ready` publish. Record the final asset SHA-256 and result in
+  `HISTORY.md`, then remove this item. Use `--reuse-work-root` only for
+  iteration; the final acceptance run must use the normal fresh-build path.
+  Keep CPU/FFmpeg/Skia evidence distinct from live Vulkan/native-Wayland
+  presentation evidence.
+- [ ] **Establish Linux `01-c -> 02-cxx` isolated evidence.** HISTORY records
+  this transition end to end on Windows and macOS but not unambiguously on
+  Linux. Run it from a freshly extracted Linux `01-c` SDK, confirm the
+  resulting `02-cxx` carries `stages/recipes/03-gfx-simple.json`, passes its
+  tests and `verify_dist.py`, and record the result before claiming the full
+  `01-c -> 02-cxx -> 03-gfx-simple` isolated chain on all three hosts.
+- [ ] **Close path-with-spaces acceptance.** Fix the FFmpeg
+  `-I${prefix}/include` argument handling and the remaining Windows/all-host
+  wrapper argument flattening, then repeat the affected isolated transition
+  with a space-containing install prefix. A short temporary relocation is
+  diagnostic scaffolding, not completion evidence.
+- [ ] **Extend the recipe chain to `04-gfx-media -> 05-js`.** Start only after
+  the Linux and path-with-spaces items above are closed; require the same
+  pinned asset, predecessor-only build, test, external-consumer, verification,
+  and atomic-publish contract used by the earlier transitions.
 
 Keep the `<iostream>` static-init crash open (listed under "CRT distribution
 stages" above, not re-described here); the stage runner deliberately has no
 retry that could hide it.
 
-Acceptance must start from freshly extracted archives in a path containing
-spaces, reject access to in-tree CRT headers/libraries/build artifacts,
-rebuild and run the packaged examples, and exercise representative configure,
-amalgamation, and dependency-chain ports -- apply the same bar to
-`03-gfx-simple -> 04-gfx-media`.
+Acceptance must start from freshly extracted archives, reject access to
+in-tree CRT headers/libraries/build artifacts, rebuild and run the packaged
+examples, and exercise representative configure, amalgamation, and dependency-
+chain ports. A separate space-containing-prefix pass is mandatory wherever the
+normal fresh run uses a no-space workaround.
 
 The redistributable-dependency rule now covers four ports: `03-gfx-simple`
 declares libxkbcommon (Linux), and `04-gfx-media` declares

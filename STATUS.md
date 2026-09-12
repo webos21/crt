@@ -104,10 +104,17 @@ hosts:
 - `crtmedia_demux_test` performs a real WAV/PCM demux/decode round trip and has
   passed on all three hosts. FFmpeg was re-verified on macOS after the
   `pthread_create()` fix with pthread support enabled.
+- The public format/extractor/codec split is implemented. The extractor owns
+  demux-only track/sample access, while asynchronous codec queues own software
+  decode and explicit output-buffer release.
+- `crtmedia_player` supplies the software playback state machine, clocks,
+  seek/reset behavior, bounded render planning, and CPU-frame delivery.
+- Host audio sinks are implemented and exercised through WASAPI on Windows,
+  raw ALSA or PulseAudio-compatible output on Linux, and CoreAudio on macOS.
 
-This evidence does not yet prove real H.264/AAC/MP3 runtime decoding,
-threaded video decode, seeking/track selection, audio-device playback,
-network streaming, encoding/capture, hardware decode, or GPU-frame handoff.
+This evidence does not yet prove production-complete seeking/track selection,
+network streaming, encoding/capture, hardware decode enabled in each host
+FFmpeg build, decoder-texture zero-copy, or GPU-frame handoff.
 
 ### libcrtjs
 
@@ -122,11 +129,13 @@ target.
   Graphics/Media, and JavaScript stages.
 - Each cumulative stage can also be bootstrapped and verified in isolation,
   purely from its own predecessor's already-packaged SDK rather than the
-  in-repo build tree: `01-c -> 02-cxx -> 03-gfx-simple` is done and verified
-  on Linux, Windows, and macOS; `03-gfx-simple -> 04-gfx-media`, with Skia
-  and FFmpeg genuinely enabled (not the in-repo cumulative pass's default-OFF
-  state), is done and verified on macOS and Windows, with Linux acceptance
-  still in progress.
+  in-repo build tree. `02-cxx -> 03-gfx-simple` is done on Linux, Windows, and
+  macOS; the complete `01-c -> 02-cxx -> 03-gfx-simple` chain is explicitly
+  recorded on Windows and macOS, while the Linux `01-c -> 02-cxx` evidence
+  remains open. `03-gfx-simple -> 04-gfx-media`, with Skia and FFmpeg genuinely
+  enabled (not the in-repo cumulative pass's default-OFF state), is complete
+  on macOS and Windows; Linux passes the 8 stage tests but still needs the
+  packaged-example, final verification, and atomic-publish checks.
 - FFmpeg hardware decode/zero-copy and the QuickJS core proceed on top of the
   completed GPU rendering/presentation contract.
 - JavaScript media/gfx binding follows the stable native contracts, using a
@@ -172,7 +181,9 @@ of truth.
 | --- | --- | --- |
 | CPU plane geometry, ownership, and color conversion | `crtmedia_frame_test` | none for the covered formats |
 | CPU frame handoff into Skia | `crtmedia_frame_skia_smoke` | GPU texture handoff is not implemented |
-| FFmpeg local-file demux/software decode | `crtmedia_demux_test` with WAV/PCM | real H.264+AAC/MP3 fixtures and audio/video playback |
+| Extractor/codec separation and software decode queues | `crtmedia_extractor_codec_test` plus `crtmedia_demux_test` | broader fixture/seek/track-selection coverage |
+| Player clock/state and CPU-frame planning | `crtmedia_player_test` | longer mixed audio/video sessions and underrun/recovery coverage |
+| Host audio output contract | `crtmedia_audio_sink_test` | real-device behavior remains host/environment dependent |
 
 Headless Linux is allowed to report `CRTGFX_ERROR_UNSUPPORTED` for native
 window creation. That verifies graceful fallback, not live presentation; a
@@ -223,29 +234,34 @@ statuses, and exceptions are maintained in:
 
 ### libcrtmedia And libcrtjs
 
-- The public media API policy is not fixed yet. The current demuxer combines
-  extraction and decode and lacks packet/codec separation, seek, track
-  selection, bounded asynchronous queues, and a playback session/clock.
-- Only CPU frames are public. Hardware decoder surfaces, device affinity,
-  fences, CPU-download fallback, and zero-copy Skia import are not defined.
-- No host audio sink, network protocol, mux/encode, capture, adaptive
-  streaming, or realtime/WebRTC layer exists.
+- The software extractor/codec/player and all three host audio sinks exist,
+  but seeking/track-selection breadth, long-running queue/backpressure
+  behavior, and richer compressed-media fixtures still need expansion.
+- Hardware-decode negotiation and CPU fallback are defined at the API level,
+  but host FFmpeg hwaccels are not yet enabled successfully. Decoder surfaces,
+  device affinity, fences, CPU-download fallback, and zero-copy Skia import
+  are not complete.
+- No network protocol layer, mux/encode, capture, adaptive streaming, or
+  realtime/WebRTC service exists.
 - QuickJS has not been imported. Event-loop/timer/module/native-binding work
   and JavaScript media/gfx APIs remain open.
 
 ## Next Priorities
 
-1. Decide and document the media API policy, then add real H.264+AAC/MP3
-   fixtures and split extractor, packet, and codec responsibilities.
-2. Build a software playback session with audio output, bounded queues, and
-   A/V synchronization on all three hosts.
-3. Add distribution acceptance tests that compile/link/run outside the source
-   and build trees and reject bundled compilers or absolute build paths.
-4. Proceed with FFmpeg hardware decode and QuickJS core/event-loop integration;
-   retain software/CPU fallback as the correctness baseline.
-5. Connect hardware decoder textures to Skia without CPU copies, then expose
-   stable media/gfx services to QuickJS with WebCodecs-like queue semantics.
-6. Continue closing the focused CRT/PAL limitations above when an upstream
+1. Finish the Linux option-ON `03-gfx-simple -> 04-gfx-media` external-example,
+   `verify_dist.py`, and atomic-publish checks; separately establish the
+   missing Linux `01-c -> 02-cxx` isolated evidence.
+2. Close distribution acceptance gaps: space-containing prefixes, absolute
+   path leakage, external consumers, and generic dependency validation.
+3. Enable and verify real FFmpeg hardware decode per host while retaining the
+   software/CPU fallback as the correctness baseline.
+4. Connect hardware decoder textures to Skia without CPU copies, including
+   device/fence ownership and CPU-download recovery.
+5. Bring up QuickJS core/event-loop/timers/modules, then expose stable
+   media/gfx services with WebCodecs-like queue semantics.
+6. Add capture/encode and network/adaptive/realtime services only after the
+   native playback and zero-copy contracts are stable.
+7. Continue closing the focused CRT/PAL limitations above when an upstream
    consumer exposes a concrete requirement, following the Bionic-first
    porting discipline in `AGENTS.md`.
 

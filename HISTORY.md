@@ -8,6 +8,21 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-12
+
+- **Reconciled the root project documents with the current implementation and
+  Git evidence.** `TODO.md` now keeps the remaining isolated-stage work as
+  explicit completion checklists instead of repeating the completed macOS and
+  Windows investigations; it distinguishes the default-OFF cumulative dist
+  target from the option-ON isolated path and no longer infers an undocumented
+  Linux `01-c -> 02-cxx` result. `STATUS.md` now reflects the implemented
+  extractor/codec split, software player, and all three host audio sinks, and
+  replaces completed media priorities with the actual hardware-decode,
+  zero-copy, QuickJS, and distribution-acceptance work. `README.md` now marks
+  `05-js`/QuickJS accurately as a skeleton/planned integration, reports the
+  source-stage acceptance state by host, and points at the real library-owned
+  test layout. No implementation or historical investigation record changed.
+
 ## 2026-09-11..2026-09-12
 
 - **Completed the real, Skia/FFmpeg-actually-ON, end-to-end
