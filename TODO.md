@@ -59,187 +59,144 @@ newest entry first) rather than leaving it here.
 
 Active threads, not a flat list of one-off items.
 
-### Upper runtime roadmap
+### Distribution isolated-stage acceptance
 
-The completed CPU baseline is summarized in [`STATUS.md`](STATUS.md); the full
-dated implementation trail lives in [`HISTORY.md`](HISTORY.md) -- software-
-decode evidence, the WSL `memfd_create()` fix behind `crtgfx_window_smoke`,
-`libcrtmedia`'s format/extractor/codec/demuxer core, the player clock/state
-machine and all three host audio sinks, the software player, the common GPU
-resource contract, Skia GPU rendering on Linux/Vulkan + Windows/D3D12 +
-macOS/Metal, and GPU presentation (resize/swapchain recreation, Ganesh-to-
-surface rendering) are all done and verified on Linux, Windows, and macOS.
-The product target is the staged embedded/native runtime described in
-[`docs/runtime_roadmap.md`](docs/runtime_roadmap.md); Electron/Chromium
-remains only a long-term portability benchmark, not the product definition.
-
-Still open within "live GPU presentation everywhere": macOS x86_64 native
-execution; pixel-exact (not just visually-by-eye) post-render framebuffer
-verification on macOS; live resize composed with the Ganesh-wrap path
-specifically on macOS (each verified separately, not yet together); and
-pixel-exact (not just liveness) post-resize verification on Windows.
-Graphite stays a later, separately-measured alternative to Ganesh.
-
-1. **Add hardware decode, phase A.** The opt-in decode-side API and its
-   fallback/recovery contract are done and verified on Windows and Linux
-   (`HISTORY.md`'s 2026-09-08 entry). Actually enabling the real per-host
-   hwaccel in the FFmpeg build itself is not done -- two real, separate
-   blockers, neither fixed: (1) Windows `--enable-d3d11va` fails
-   configure's own `ID3D11VideoDecoder`/`ID3D11VideoContext` dependency
-   check, likely conflicting with this project's `-U_WIN32`-style
-   portable-path convention; (2) Linux -- this WSL environment's own
-   `ar`/`nm` (Binutils 2.46) segfaults (`Relink ... for IFUNC symbol
-   'ceil'`) archiving `libavformat.a`/`libavcodec.a` against `libm.so`
-   even on a plain baseline configure, a real external binutils
-   regression blocking any fresh FFmpeg rebuild here right now, unrelated
-   to VA-API itself. macOS is entirely unattempted (no hardware in these
-   sessions).
-2. **Add hardware decode, phase B.** Connect decoder-owned textures
-   directly to Skia: D3D resources on Windows, `CVPixelBuffer`/Metal
-   textures on macOS, and VA-API/DRM PRIME/dmabuf/Vulkan images on Linux.
-   Tie decoder frame-pool release to real GPU/presentation completion and
-   retain CPU-copy fallback.
-3. **Add hardware encode and capture.** Stage camera, microphone, and
-   screen sources; hardware H.264/HEVC encode; mux/record; latency,
-   bitrate, and key-frame controls.
-4. **Expand network and streaming.** Add custom I/O and HTTP range first,
-   then buffering, reconnect/discontinuity handling, and HLS/DASH or the
-   justified FFmpeg protocol subset.
-5. **Add an optional WebRTC-shaped realtime layer.** Define source/track/
-   sink and execution-context contracts before deciding whether to port
-   full WebRTC for RTP/RTCP, jitter buffering, congestion control, and
-   AEC/NS/AGC.
-6. **Expose the service through `libcrtjs`.** Start the QuickJS engine,
-   event loop, timers, modules, and native binding work now while steps
-   1-3 continue in parallel. Bind media only after the extractor/codec/
-   player contracts are stable, using WebCodecs-like chunks/frames/queue
-   semantics and a higher-level asynchronous player API. V8 and a minimal
-   Chromium/Ozone probe remain later consumers of the same contracts.
-
-Execution order: Skia GPU, hardware decode, and the QuickJS core proceed in
-parallel (the GPU resource contract that gated them is done); zero-copy
-completion gates the GPU-aware JavaScript media binding, but not the
-initial QuickJS bring-up.
-
-### CRT distribution stages (01-c -> 05-js)
-
-Full design in `docs/refine/interim-restructure.txt`; published contract in
-[`docs/distribution.md`](docs/distribution.md). Full dated trail (the
-`crt-c-dist`/`crt-libcxx-dist`/`crt-gfx-simple-dist`/`crt-gfx-media-dist`/
-`crt-js-dist` chain, the top-level `tests/` split into `libc/tests` +
-`libstdc++/tests`, the `libcrtgfx` physical window/GPU/Skia split, and every
-bug found along the way) is in [`HISTORY.md`](HISTORY.md).
-
-**Done and verified on real hardware on all three hosts -- Linux, Windows,
-macOS (2026-09-09):** the full `01-c` through `05-js` cumulative dist chain,
-and the `libcrtgfx` window/GPU/Skia physical split. Two real macOS-only
-bugs were found and fixed along the way: `crtgfx_gpu_shared`'s missing
-`-lobjc` (`gpu_metal.c`'s direct `objc_msgSend`/... calls, never propagated
-from `crtgfx_window_shared`'s `PRIVATE`-scoped framework list --
-`f1596c8`), and `crt-libcxx-dist`'s missing dependency on the bootstrap
-`cxx`/`cxx_shared` targets (`446540c`).
-
-Still open:
-- The default packaging pass everywhere has `CRTGFX_ENABLE_SKIA=OFF` and
-  `CRTMEDIA_ENABLE_FFMPEG=OFF`. The isolated `03-gfx-simple -> 04-gfx-media`
-  path below has exercised both options on macOS and Windows (and reached
-  ctest 8/8 on Linux), but the separate in-repository cumulative
-  `crt-gfx-media-dist` target has not yet been run with both options enabled.
-- `verify_dist.py`'s acceptance checks are still thinner than
-  `docs/distribution.md`'s own "Distribution Acceptance" list -- no path-
-  with-spaces check, no absolute source/build path leakage check (debug
-  artifacts currently contain those paths, so path remapping or release
-  stripping must be decided first), no external CMake/configure-make
-  consumer check.
-- The `<iostream>` static-init crash found packaging `02-cxx` on Windows
-  (a real, reproducible segfault via this project's own DWARF-unwind
-  safety net; `<cstdio>` works) is not root-caused -- suspected
-  `std::ios_base::Init`'s global-constructor path through the Windows
-  `.ctors` walker, not confirmed, and not yet reproduced against the
-  in-tree (non-packaged) build.
-- The `sysroot`/`crtgfx_skia_objects` dependency-cycle comment in the
-  top-level `CMakeLists.txt` needs reconfirming now that `sysroot` no
-  longer `DEPENDS` on any `crtgfx*` target at all.
-
-### Hands-on distribution SDK and isolated stage acceptance
-
-Turn each packaged stage into the bootstrap SDK for the next one, while the
-CRT GitHub repository remains the meta-toolchain that produces the binary and
-source packages. Add versioned stage recipes whose immutable CRT GitHub
-Release source assets are pinned by URL, source commit, size, and SHA-256:
-`01-c` must fetch/build/test `02-cxx`; `02-cxx` must fetch/build/test
-`03-gfx-simple` and then `04-gfx-media` (with `04` consuming the installed
-`03` result). Keep the compiler/linker external, use the packaged CRT
-mksh/toybox environment for configure/build commands, and never require
-MSYS/Git Bash. Extend the same recipe model to `04 -> 05-js` once the first
-three transitions are stable.
-
-Completed evidence is kept in `HISTORY.md`: `02-cxx -> 03-gfx-simple` passed
-the full isolated acceptance bar on Linux, Windows, and macOS; `01-c ->
-02-cxx -> 03-gfx-simple` is explicitly recorded end to end on Windows and
-macOS; and the option-ON `03-gfx-simple -> 04-gfx-media` transition is complete
-on macOS and Windows. Do not infer the missing Linux `01-c -> 02-cxx` result
-from a cumulative CMake dist build or from a later-stage test pass.
-
-Stage checklist (remove completed items from this in-progress list only after
-their result is recorded in `HISTORY.md`):
-
-- [ ] **Finish Linux `03-gfx-simple -> 04-gfx-media` acceptance.** The real
-  Linux/aarch64 run already passes all 8 stage tests; rebuild and run both
-  installed-SDK examples, pass final `verify_dist.py`, and reach the atomic
-  `CRT stage ready` publish. Record the final asset SHA-256 and result in
-  `HISTORY.md`, then remove this item. Use `--reuse-work-root` only for
-  iteration; the final acceptance run must use the normal fresh-build path.
-  Keep CPU/FFmpeg/Skia evidence distinct from live Vulkan/native-Wayland
-  presentation evidence.
-- [ ] **Establish Linux `01-c -> 02-cxx` isolated evidence.** HISTORY records
-  this transition end to end on Windows and macOS but not unambiguously on
-  Linux. Run it from a freshly extracted Linux `01-c` SDK, confirm the
-  resulting `02-cxx` carries `stages/recipes/03-gfx-simple.json`, passes its
-  tests and `verify_dist.py`, and record the result before claiming the full
-  `01-c -> 02-cxx -> 03-gfx-simple` isolated chain on all three hosts.
-- [ ] **Close path-with-spaces acceptance.** Fix the FFmpeg
-  `-I${prefix}/include` argument handling and the remaining Windows/all-host
-  wrapper argument flattening, then repeat the affected isolated transition
-  with a space-containing install prefix. A short temporary relocation is
-  diagnostic scaffolding, not completion evidence.
-- [ ] **Extend the recipe chain to `04-gfx-media -> 05-js`.** Start only after
-  the Linux and path-with-spaces items above are closed; require the same
-  pinned asset, predecessor-only build, test, external-consumer, verification,
-  and atomic-publish contract used by the earlier transitions.
-
-Keep the `<iostream>` static-init crash open (listed under "CRT distribution
-stages" above, not re-described here); the stage runner deliberately has no
-retry that could hide it.
+The cumulative `01-c` through `05-js` distribution chain and the physical
+`libcrtgfx` window/GPU/Skia split are complete on Linux, Windows, and macOS;
+the dated evidence belongs in [`HISTORY.md`](HISTORY.md). This active list now
+contains only the isolated-stage results that are still missing. Distribution
+hardening and later `05-js` work are Planned below.
 
 Acceptance must start from freshly extracted archives, reject access to
-in-tree CRT headers/libraries/build artifacts, rebuild and run the packaged
-examples, and exercise representative configure, amalgamation, and dependency-
-chain ports. A separate space-containing-prefix pass is mandatory wherever the
-normal fresh run uses a no-space workaround.
+in-tree CRT headers, libraries, and build artifacts, rebuild and run packaged
+examples, and exercise the required tests and external consumers. Record each
+result in `HISTORY.md` before removing it here.
 
-The redistributable-dependency rule now covers four ports: `03-gfx-simple`
-declares libxkbcommon (Linux), and `04-gfx-media` declares
-FreeType/FFmpeg/Skia -- each carries its public headers, static library,
-license, and recipe provenance in the structured `redistributed_dependencies`
-manifest inventory, and `verify_dist.py` rejects a missing declaration or
-file. Still not done: `verify_dist.py`'s own check is four hardcoded
-`if "<name>" not in redistributed` blocks (`tools/verify_dist.py`), one per
-port, not the generic, manifest-driven validator this was meant to become --
-a fifth port still means a fifth hardcoded block. Add that generic check,
-scan binaries for undeclared non-system `.so`/`.dylib`/`.dll` dependencies,
-and explicitly inventory OS/framework/device-driver prerequisites that remain
-outside the archive.
-
-Path-with-spaces coverage exposed argument flattening in the compiler wrappers.
-Linux/macOS `crt-cc` now preserves the original argument vector and the staged
-libxkbcommon build exercises that fix. Windows `crt-cc` and every `crt-c++`
-host path still use transformed/flattened argument strings; the Windows stage
-builders currently copy inputs to a short temporary path. Track and fix those
-remaining wrapper cases rather than treating that relocation as final path-
-with-spaces acceptance.
+- [ ] **Establish Linux `01-c -> 02-cxx` isolated evidence.** Run from a
+  freshly extracted Linux `01-c` SDK, confirm that the resulting `02-cxx`
+  carries `stages/recipes/03-gfx-simple.json`, and pass its tests and
+  `verify_dist.py`. Windows and macOS already have unambiguous end-to-end
+  evidence; do not infer the Linux result from a cumulative build or a later
+  stage pass.
+- [ ] **Finish Linux `03-gfx-simple -> 04-gfx-media` acceptance.** The real
+  Linux/aarch64 run already passes all eight stage tests; rebuild and run both
+  installed-SDK examples, pass final `verify_dist.py`, and reach the atomic
+  `CRT stage ready` publish. Use `--reuse-work-root` only for iteration; final
+  evidence requires the normal fresh-build path. Keep CPU/FFmpeg/Skia evidence
+  distinct from live Vulkan/native-Wayland presentation evidence.
+- [ ] **Close path-with-spaces acceptance.** Fix FFmpeg's
+  `-I${prefix}/include` argument handling and the remaining Windows `crt-cc`
+  and all-host `crt-c++` argument flattening, then repeat the affected isolated
+  transition with a space-containing install prefix. A short temporary
+  relocation remains diagnostic scaffolding, not completion evidence.
 
 ## Planned
+
+### Upper runtime roadmap
+
+The completed cross-host baseline and its exact validation evidence stay in
+[`STATUS.md`](STATUS.md) and [`HISTORY.md`](HISTORY.md); the product boundary
+and dependency order stay in [`docs/runtime_roadmap.md`](docs/runtime_roadmap.md).
+Promote one tranche at a time into In Progress when its prerequisite evidence
+and acceptance host are available.
+
+1. **Finish live GPU presentation evidence.** Close the remaining macOS/x86_64
+   live path, pixel-exact macOS checks, resize-plus-Ganesh coverage on macOS,
+   and pixel-exact resize coverage on Windows. Keep Graphite as a later backend
+   rather than part of the current Ganesh acceptance bar.
+2. **Hardware video decode.** Complete Phase A backend bring-up and tests.
+   The current blockers are the Windows D3D11VA configure path, a WSL-hosted
+   binutils 2.46 `ar`/`nm` crash, and an unattempted macOS pass. Preserve a
+   software fallback and report hardware use separately from decode success.
+3. **Zero-copy decoded textures.** Add explicit ownership and synchronization
+   for D3D surfaces, `CVPixelBuffer`/Metal textures, and VAAPI/Vulkan or native
+   Linux surfaces; retain a measured copy fallback where interop is absent.
+4. **Encode and capture.** Build capture, conversion, hardware/software encode,
+   timestamp, and muxing paths on top of the accepted media frame contract.
+5. **Networking and streaming.** Add transport, buffering, back-pressure,
+   reconnect, and protocol integration only after local media timing is stable.
+6. **WebRTC, then JavaScript.** Treat WebRTC as a consumer-driven integration
+   milestone. Build the real QuickJS core and CRT bindings before extending
+   isolated distribution acceptance from `04-gfx-media` to `05-js`; a stage
+   skeleton alone is not completion.
+
+The intended execution order is live GPU evidence, hardware decode, zero-copy
+interop, encode/capture, networking/streaming, WebRTC, and finally the complete
+JavaScript application-runtime layer.
+
+### Distribution hardening and deferred stage work
+
+- Decide whether default-OFF cumulative packaging plus option-ON isolated-stage
+  acceptance is the official policy, or add an explicit option-ON cumulative
+  preset/target that does not rebuild expensive dependencies unnecessarily.
+- Reconfirm the top-level `sysroot`/`crtgfx_skia_objects` dependency-cycle
+  comment now that `sysroot` has no `crtgfx*` dependency. Test the edge with a
+  fresh configure, generate, and build before changing the explanation.
+- Bring `verify_dist.py` up to the published acceptance contract: keep generic
+  validation of every declared `redistributed_dependencies` inventory, split
+  stage-required names/layout from schema validation, scan binaries for
+  undeclared non-system dynamic dependencies, inventory external OS/framework/
+  device-driver prerequisites, and decide path remapping or release stripping
+  before rejecting absolute debug paths.
+- Add an explicit external CMake/configure-make consumer check where the stage
+  contract requires it. Keep the space-containing-prefix run in the active
+  acceptance list until it passes.
+- Extend `04-gfx-media -> 05-js` only after the real QuickJS core and bindings
+  exist and the active Linux and path-with-spaces prerequisites are closed.
+  Apply the same pinned asset, predecessor-only build, test, external-consumer,
+  verification, and atomic-publish contract as the earlier transitions.
+
+### Windows process signals and Toybox `timeout`
+
+Close the two confirmed Windows PAL gaps that keep Toybox `timeout` disabled:
+`__crt_sys_kill()` currently supports only the calling process's
+`kill(pid, 0)` probe and returns `ENOSYS` for a real child or process group,
+while `deliver_signal()` synthesizes `SA_SIGINFO` with the caller's pid and
+zero `si_code`/`si_status` even when the Windows child registry already knows
+which child exited and its exit code. Keep this tranche limited to
+non-interactive child lifecycle and timeout enforcement; Ctrl-C/Ctrl-Break,
+foreground-terminal arbitration, stopped-child reporting, and re-enabling
+mksh job control remain in the separate deferred section below.
+
+1. **Freeze the Bionic-facing contract and reproduce each failure.** Check
+   Bionic's `kill()` pid-domain, errno, default-action, and `SIGCHLD`
+   `siginfo_t` rules before changing the PAL. Add bounded Windows regressions
+   for a live/dead foreign-pid `kill(pid, 0)` probe, positive child signaling,
+   negative process-group signaling, and a child exiting with status 7 whose
+   `SA_SIGINFO` handler must observe the real pid, `CLD_EXITED`, and status 7.
+   Retain direct consumer evidence that `timeout 2 sleep 10` currently runs
+   for roughly 10 seconds instead of enforcing its deadline.
+2. **Thread real child-exit information through signal dispatch.** Extend the
+   private signal backend/dispatch interface so Windows can pass a populated
+   `siginfo_t` from `child_process_table`/`child_pid_table` and
+   `GetExitCodeProcess()` without changing `raise()`'s self-delivery contract.
+   Natural exits must report `CLD_EXITED` and the actual status; a termination
+   mechanism introduced below must distinguish `CLD_KILLED` and its signal.
+   Preserve the existing once-per-state-change notification and blocked-
+   `SIGCHLD`/`pselect()` behavior.
+3. **Implement positive-pid `kill()` with explicit, honest semantics.** Use
+   documented Windows APIs for existence/access probing and `SIGKILL`; design
+   a CRT-owned cooperative delivery channel for catchable signals so
+   `SIGTERM`/user handlers are not silently reduced to unconditional
+   `TerminateProcess()`. Define PID-reuse protection, permissions, pending-
+   signal coalescing, and delivery checkpoints up front. Unsupported signals
+   must fail explicitly rather than report success without delivery.
+4. **Implement the non-interactive process-group subset needed by
+   `timeout`.** Connect the CRT-managed pgid to real spawned-child membership
+   and support Toybox's default `kill(-pgid, SIGTERM)`/`SIGKILL` path, including
+   descendants. Evaluate documented Windows process groups and Job Objects
+   against the post-`fork()` `setpgid(0, 0)` lifecycle before choosing the
+   mechanism; do not pull in undocumented suspend/resume APIs or claim full
+   POSIX job control as part of this tranche.
+5. **Accept through the real packaged consumer.** Require positive-pid and
+   process-group signal tests, correct `SIGCHLD` pid/code/status for natural
+   and killed exits, `timeout 2 sleep 10` completing near two seconds with
+   status 124, `timeout --preserve-status 10 sh -c 'exit 7'` returning 7, and
+   the TERM-to-KILL `-k` path. Re-run the existing `pselect_sigchld`, process-
+   stress, fd-snapshot, fork, waitpid, shell, and full Windows CTest coverage;
+   rebuild the packaged shell/dist and repeat the timeout cases there. Only
+   then enable the applet, update `docs/toybox_applet_status.md`, move the
+   completed record to `HISTORY.md`, and remove this Planned section.
 
 ### Focused CRT/PAL follow-ups
 
@@ -250,8 +207,6 @@ or host investigation supplies the required evidence.
 - Extend the resolver from its current synchronous UDP IPv4/A-record baseline
   when IPv6, TCP fallback, search domains, or caching becomes a consumer
   requirement.
-- Complete cross-process signal delivery and meaningful `SIGCHLD` `siginfo_t`
-  data before enabling toybox `timeout`.
 - Revisit a CRT-owned ELF loader/Android-linker boundary only after a real
   upper-runtime consumer requires behavior the host loader adapter cannot
   provide.
@@ -259,6 +214,11 @@ or host investigation supplies the required evidence.
   -- add retry-on-transient-failure, a documented fallback mirror, and
   SHA-256 verification of the cached archive before reuse, matching the
   reliability bar other `porting/recipes/*.json` ports already meet.
+- Root-cause the packaged Windows `02-cxx` `<iostream>` static-initialization
+  crash. Reproduce it against packaged and in-tree builds, compare `.ctors`
+  and `std::ios_base::Init` startup behavior, and keep the stage runner free of
+  retries that could hide the fault. `<cstdio>` working is a diagnostic fact,
+  not evidence that C++ startup is complete.
 
 ### Interactive job control (deferred until it's an actual priority)
 
@@ -303,7 +263,7 @@ while enabling `df`/`stty`) now lives in
 [`docs/toybox_applet_status.md`](docs/toybox_applet_status.md) -- this
 bullet stays a pointer. Still open there: `expand`/`logger`/`fold`/
 `uudecode`/`cal`/`split`/`strings` (a `globals.h` fix, plus a per-applet
-`flags.h` check); `timeout` (hang fixed, two deeper gaps remain: real
-`SIGCHLD` `siginfo_t` data, cross-process `kill()`); and a confirmed-not-
-guessed deferred list (`ps`/`top`/`iotop`/`pgrep`/`pkill`, `mount`/
+`flags.h` check); `timeout` (tracked by the concrete Windows process-signal
+plan above); and a confirmed-not-guessed deferred list
+(`ps`/`top`/`iotop`/`pgrep`/`pkill`, `mount`/
 `umount`, `ifconfig`, `login`, procfs-heavy commands).
