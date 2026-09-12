@@ -10,6 +10,79 @@ substantive update.
 
 ## 2026-09-12
 
+- **Confirmed that serial FreeType/FFmpeg builds are no longer required by the
+  Windows isolated 04 stage, and validated the new immutable warm cache end to
+  end.** A complete option-ON `03-gfx-simple -> 04-gfx-media` run with
+  `--dependency-jobs 4` passed the 8/8 standalone tests, rebuilt and ran both
+  installed GPU examples (`presented=1`), passed `verify_dist.py`, and published
+  atomically. The 12-logical-CPU host completed FreeType's make phase in
+  123.3s (retained serial runs: 328-358s) and FFmpeg's in 739.1s (serial:
+  1672-1769s); the complete cache-populating acceptance run took 4108.4s.
+  This proves that the old Windows `-j1` precaution is not needed for these
+  dependency builds: the earlier `can't fork` failure was a CRT Windows PAL
+  handle leak already fixed and stress-tested, not a parallel-make ordering
+  requirement. The stage default therefore moved from serial to
+  `min(host CPU count, 4)`; callers can still select `-j1` or another explicit
+  value. This does not introduce an untried parallel mode in the underlying
+  port machinery: `crt-port-build.py` has already used CPU-count parallelism
+  by default on Linux/macOS, and on Windows since its earlier GNU Make
+  jobserver fixes and scale test.
+
+  Repeating the exact source/SDK/toolchain inputs against the same work root
+  reused the independently verified FreeType/FFmpeg and Skia install layers in
+  1.0s and 1.9s. The full acceptance bar still ran after reuse and passed in
+  78.6s. Fresh and warm outputs each contain the same 5,084 file paths; 5 newly
+  linked PE DLL/EXE files differ in hash but have equal size, with `llvm-readobj`
+  confirming their expected per-link `TimeDateStamp` changes while entry point,
+  image base, and image size remain equal.
+
+  After changing the default, the regenerated Windows source asset has SHA-256
+  `d534bfc11067681ea685013c525b7400e12773cad752f20bebd60453072eddd1`.
+  A third full warm acceptance run deliberately omitted
+  `--dependency-jobs`; the driver reported the resolved `-j4` default and
+  passed the complete bar again in 77.2s. The timings also reject two more
+  invasive changes for now: the standalone 04 compile is only about 23s and
+  verification plus atomic publication remain a small fraction of a cold
+  dependency build, so weakening always-run archive/acceptance boundaries or
+  merging `crtmedia` static/shared compilation would add build-graph risk for
+  little iteration benefit. The performance item is therefore complete; the
+  separate normal cache-free Linux stage acceptance remains in `TODO.md`'s
+  existing distribution checklist.
+
+- **Made isolated `04-gfx-media` development retries measurable and replaced
+  their unsafe mutable staged-SDK cache.** `build_stage_04_gfx_media.py` now
+  reports elapsed time for dependency fetch/build, standalone configure/build/
+  test/install, installed-example rebuild/run, distribution verification, and
+  atomic publish. `crt-stage-build.py` forwards an explicit
+  `--dependency-jobs N` to the 04 entrypoint; after the measured acceptance
+  described above, its default is the host CPU count capped at 4.
+  The underlying port driver's stale help text now matches its already-
+  implemented all-host CPU-count default.
+
+  `--reuse-work-root` no longer trusts and layers onto a prior run's mutable
+  `sdk/` tree. Every run begins with a clean predecessor copy, then applies
+  independently captured FreeType/FFmpeg and Skia install deltas only after
+  validating every cached file against the layer inventory. Keys cover the
+  predecessor SDK's actual file/symlink content (normalizing only
+  `manifest.json`'s volatile `created_utc`), target/toolchain identity, pinned
+  recipes, and relevant build helpers; Skia is additionally keyed from the
+  actual post-port tree. An invalid key also clears the matching port/Skia
+  work directory, preventing an old `*.installed` stamp from skipping a
+  required rebuild, and unsafe cache-relative paths are rejected.
+
+  Seven focused Python tests verify the bounded default, timestamp-only cache
+  stability, real SDK content invalidation, clean-tree layer replay including
+  removal, corrupted-layer rejection, job-count propagation, parent-traversal
+  rejection, and
+  Windows read-only work-tree cleanup.
+  Python compilation and `git diff --check` pass. The unchanged Windows normal
+  boundary was also rebuilt through `crt-c-build`, followed by the default
+  Windows preset at 117/117 tests passing; a dirty development 04 source asset
+  containing the new driver was generated successfully (SHA-256
+  `d534bfc11067681ea685013c525b7400e12773cad752f20bebd60453072eddd1`).
+  Complete Windows job-count and cache measurements are recorded above; the
+  remaining Linux final acceptance stays live in `TODO.md`.
+
 - **Reconciled the root project documents with the current implementation and
   Git evidence.** `TODO.md` now keeps the remaining isolated-stage work as
   explicit completion checklists instead of repeating the completed macOS and

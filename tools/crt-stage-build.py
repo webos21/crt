@@ -73,7 +73,14 @@ def main() -> None:
     parser.add_argument("--reuse-work-root", action="store_true",
                         help="Pass through to the stage entrypoint, if it "
                              "supports keeping --work-root between runs.")
+    parser.add_argument(
+        "--dependency-jobs", type=int,
+        help="Pass an explicit FreeType/FFmpeg make -jN value to stage "
+             "entrypoints that support it (04-gfx-media currently). "
+             "Omit to use the entrypoint's bounded CPU-count default.")
     args = parser.parse_args()
+    if args.dependency_jobs is not None and args.dependency_jobs < 1:
+        parser.error("--dependency-jobs must be at least 1")
 
     sdk_root = args.sdk_root.resolve()
     manifest_path = sdk_root / "manifest.json"
@@ -126,6 +133,8 @@ def main() -> None:
     ]
     if args.reuse_work_root:
         command.append("--reuse-work-root")
+    if args.dependency_jobs is not None:
+        command.extend(["--dependency-jobs", str(args.dependency_jobs)])
     subprocess.run(command, check=True)
 
 

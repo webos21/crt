@@ -2,20 +2,57 @@
 """Build an option-ON cumulative 04-gfx-media SDK from 03-gfx-simple."""
 
 import argparse
+from contextlib import contextmanager
 import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
+
+
+DEFAULT_DEPENDENCY_JOBS = max(1, min(os.cpu_count() or 2, 4))
 
 
 def run(command: list[str], env: dict[str, str] | None = None,
         cwd: Path | None = None) -> None:
     print("+", " ".join(command), flush=True)
     subprocess.run(command, check=True, env=env, cwd=cwd)
+
+
+class PhaseTimings:
+    """Print and retain coarse stage timings without changing build behavior."""
+
+    def __init__(self) -> None:
+        self.started = time.monotonic()
+        self.records: list[tuple[str, float, str]] = []
+
+    @contextmanager
+    def measure(self, name: str):
+        print(f"==> {name}", flush=True)
+        started = time.monotonic()
+        status = "ok"
+        try:
+            yield
+        except BaseException:
+            status = "failed"
+            raise
+        finally:
+            elapsed = time.monotonic() - started
+            self.records.append((name, elapsed, status))
+            print(f"<== {name}: {status} ({elapsed:.1f}s)", flush=True)
+
+    def report(self) -> None:
+        if not self.records:
+            return
+        print("Stage phase timing summary:", flush=True)
+        for name, elapsed, status in self.records:
+            print(f"  {elapsed:9.1f}s  {status:6s}  {name}", flush=True)
+        print(f"  {time.monotonic() - self.started:9.1f}s  total", flush=True)
 
 
 def cmake_path(path: Path) -> str:
@@ -148,7 +185,7 @@ def publish_tree(staged: Path, output: Path) -> None:
             rewrite_stale_macho_rpaths(candidate, staged, output)
         os.replace(candidate, output)
     finally:
-        shutil.rmtree(publish_root, ignore_errors=True)
+        remove_tree(publish_root, ignore_errors=True)
 
 
 def touch_tree(root: Path) -> None:
@@ -160,15 +197,12 @@ def touch_tree(root: Path) -> None:
     mtimes via copy2) all carry a normalized, reproducible epoch-0 mtime --
     deliberate, for reproducible packaging, but it defeats CMake's
     install(FILES ...) staleness check (a plain destination-mtime >=
-    source-mtime comparison) the moment a *persistent* --work-root already
-    has an older run's copy of the same file sitting in `staged` at that
-    exact same epoch-0 mtime: CMake sees "not older" and skips re-copying
-    the fixed file, silently reinstalling stale content run after run. Only
-    matters with --reuse-work-root (a one-shot temp_root never has a prior
-    install to collide with); called on build_asset right after it exists,
-    before anything reads or installs from it, so every file this run
-    actually uses is unconditionally newer than whatever a previous run
-    left behind in `staged`.
+    source-mtime comparison) whenever the freshly-copied predecessor already
+    contains the older version of the same file at that exact epoch-0 mtime:
+    CMake sees "not older" and skips re-copying the fixed file. Called on
+    build_asset right after it exists, before anything reads or installs from
+    it, so every file this run actually uses is unconditionally newer than
+    the predecessor's installed copy.
     """
     for path in root.rglob("*"):
         if path.is_file():
@@ -176,16 +210,222 @@ def touch_tree(root: Path) -> None:
 
 
 def fingerprint(paths: list[Path]) -> str:
-    """A stable content hash of a fixed set of files, used to key the
-    --work-root's own reusable FreeType/FFmpeg/Skia build cache (see
-    "reuse the persistent --work-root" below) -- any change to a pinned
-    recipe, this project's own build driver, or the predecessor SDK itself
-    changes the hash, so a stale cache can never silently be reused."""
+    """Return a stable content hash for an ordered collection of files."""
     digest = hashlib.sha256()
-    for path in paths:
-        digest.update(path.name.encode("utf-8"))
+    for index, path in enumerate(paths):
+        # Cache identity follows content, not the temporary directory where a
+        # source asset happened to be extracted for this invocation.
+        digest.update(str(index).encode("ascii"))
+        digest.update(b"\0")
         digest.update(path.read_bytes())
+        digest.update(b"\0")
     return digest.hexdigest()[:32]
+
+
+def file_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def path_identity(path: Path) -> str:
+    if path.is_symlink():
+        return "symlink:" + os.readlink(path)
+    if path.is_file():
+        return "file:" + file_digest(path)
+    raise SystemExit(f"stage cache entry is not a file or symlink: {path}")
+
+
+def tree_inventory(root: Path, normalize_manifest: bool = False) -> dict[str, str]:
+    """Describe every file/symlink by relative path and stable content.
+
+    The predecessor manifest's creation time records when an archive was
+    packaged, not an SDK input that can affect dependency binaries. Excluding
+    only that field prevents timestamp-only repacks from discarding a valid
+    multi-hour cache while all actual SDK files remain covered.
+    """
+    inventory: dict[str, str] = {}
+    for path in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
+        relative = path.relative_to(root).as_posix()
+        if path.is_symlink():
+            inventory[relative] = path_identity(path)
+        elif path.is_file():
+            if normalize_manifest and relative == "manifest.json":
+                manifest = json.loads(path.read_text(encoding="utf-8"))
+                manifest.pop("created_utc", None)
+                content = json.dumps(
+                    manifest, sort_keys=True, separators=(",", ":")
+                ).encode("utf-8")
+                inventory[relative] = (
+                    "file:" + hashlib.sha256(content).hexdigest())
+            else:
+                inventory[relative] = path_identity(path)
+    return inventory
+
+
+def inventory_fingerprint(inventory: dict[str, str]) -> str:
+    digest = hashlib.sha256()
+    for relative, identity in sorted(inventory.items()):
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(identity.encode("utf-8"))
+        digest.update(b"\0")
+    return digest.hexdigest()[:32]
+
+
+def toolchain_identity(target_os: str) -> str:
+    """Fingerprint the external compiler tools that produce cached objects."""
+    defaults = {
+        "CRT_CC": "clang",
+        "CRT_CXX": "clang++",
+        "CRT_AR": "llvm-ar" if target_os == "windows" else "ar",
+        "CRT_RANLIB": "llvm-ranlib" if target_os == "windows" else "ranlib",
+    }
+    digest = hashlib.sha256()
+    digest.update(target_os.encode("utf-8"))
+    digest.update(b"\0")
+    if target_os == "windows":
+        # The versioned SDK library directory is part of the effective linker
+        # toolchain even though the CRT SDK deliberately does not redistribute
+        # Microsoft's import libraries.
+        digest.update(os.environ.get(
+            "CRT_WINDOWS_SDK_LIBPATH", "<unset>").encode("utf-8"))
+        digest.update(b"\0")
+    for variable, default in defaults.items():
+        configured = os.environ.get(variable, default)
+        resolved = shutil.which(configured) or configured
+        try:
+            result = subprocess.run(
+                [configured, "--version"], capture_output=True, text=True,
+                check=False, timeout=30)
+            version = result.stdout + result.stderr
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            version = f"unavailable:{type(exc).__name__}:{exc}"
+        digest.update(variable.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(str(Path(resolved).resolve()).encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(version.encode("utf-8", errors="replace"))
+        digest.update(b"\0")
+    return digest.hexdigest()[:32]
+
+
+def remove_readonly_and_retry(function, path: str, _exc_info) -> None:
+    """Permit removal of read-only files left by Windows source checkouts."""
+    os.chmod(path, stat.S_IWRITE)
+    function(path)
+
+
+def remove_tree(path: Path, ignore_errors: bool = False) -> None:
+    shutil.rmtree(
+        path, ignore_errors=ignore_errors,
+        onerror=None if ignore_errors else remove_readonly_and_retry)
+
+
+def remove_path(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.is_dir():
+        remove_tree(path)
+
+
+def safe_layer_path(root: Path, relative: str) -> Path:
+    path = Path(relative)
+    if path.is_absolute() or not path.parts or ".." in path.parts:
+        raise SystemExit(f"unsafe stage cache layer path: {relative!r}")
+    candidate = root / path
+    try:
+        candidate.parent.resolve().relative_to(root.resolve())
+    except ValueError as exc:
+        raise SystemExit(
+            f"stage cache layer path escapes through a symlink: {relative!r}") from exc
+    return candidate
+
+
+def copy_layer_entry(source: Path, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.exists() or destination.is_symlink():
+        remove_path(destination)
+    if source.is_symlink():
+        destination.symlink_to(
+            os.readlink(source), target_is_directory=source.is_dir())
+    else:
+        shutil.copy2(source, destination)
+
+
+def capture_install_layer(staged: Path, before: dict[str, str],
+                          layer: Path) -> None:
+    """Atomically snapshot only files changed by one dependency build tier."""
+    after = tree_inventory(staged)
+    changed = {
+        relative: identity for relative, identity in sorted(after.items())
+        if before.get(relative) != identity
+    }
+    removed = sorted(set(before) - set(after))
+    candidate = layer.with_name(layer.name + ".new")
+    if candidate.exists():
+        remove_tree(candidate)
+    candidate.mkdir(parents=True)
+    for relative in changed:
+        copy_layer_entry(
+            safe_layer_path(staged, relative),
+            safe_layer_path(candidate, relative))
+    (candidate / ".layer.json").write_text(json.dumps({
+        "format": 2,
+        "changed": changed,
+        "removed": removed,
+    }, indent=2) + "\n", encoding="utf-8")
+    if layer.exists():
+        remove_tree(layer)
+    os.replace(candidate, layer)
+
+
+def validate_install_layer(layer: Path) -> dict:
+    metadata = json.loads(
+        (layer / ".layer.json").read_text(encoding="utf-8"))
+    if metadata.get("format") != 2:
+        raise SystemExit(f"unsupported stage cache layer format: {layer}")
+    if (not isinstance(metadata.get("changed"), dict) or
+            not isinstance(metadata.get("removed"), list)):
+        raise SystemExit(f"malformed stage cache layer metadata: {layer}")
+    for relative, expected_identity in metadata["changed"].items():
+        if not isinstance(relative, str) or not isinstance(expected_identity, str):
+            raise SystemExit(f"malformed stage cache layer entry: {layer}")
+        source = safe_layer_path(layer, relative)
+        actual = path_identity(source)
+        if actual != expected_identity:
+            raise SystemExit(
+                f"stage cache layer content mismatch: {source} "
+                f"(expected {expected_identity}, got {actual})")
+    for relative in metadata["removed"]:
+        if not isinstance(relative, str):
+            raise SystemExit(f"malformed stage cache removal entry: {layer}")
+        safe_layer_path(layer, relative)
+    return metadata
+
+
+def install_layer_valid(layer: Path) -> bool:
+    try:
+        validate_install_layer(layer)
+        return True
+    except (OSError, ValueError, KeyError, TypeError, SystemExit) as exc:
+        print(f"+ [work-root cache] rejecting invalid layer {layer}: {exc}",
+              flush=True)
+        return False
+
+
+def apply_install_layer(layer: Path, staged: Path) -> None:
+    # Validate every cached byte before changing the clean predecessor copy.
+    metadata = validate_install_layer(layer)
+    for relative in metadata["removed"]:
+        destination = safe_layer_path(staged, relative)
+        if destination.exists() or destination.is_symlink():
+            remove_path(destination)
+    for relative in metadata["changed"]:
+        source = safe_layer_path(layer, relative)
+        copy_layer_entry(source, safe_layer_path(staged, relative))
 
 
 def runtime_env(sdk: Path, manifest: dict) -> dict[str, str]:
@@ -280,7 +520,7 @@ def fetch_port_sources(asset: Path, staged: Path, temp_root: Path,
 
 
 def build_ports(asset: Path, source_root: Path, staged: Path, temp_root: Path,
-                manifest: dict, env: dict[str, str]) -> None:
+                manifest: dict, env: dict[str, str], jobs: int) -> None:
     driver = staged / "tools" / "crt-port-build.py"
     command = [
         sys.executable, str(driver),
@@ -304,11 +544,10 @@ def build_ports(asset: Path, source_root: Path, staged: Path, temp_root: Path,
         # (the AS_LINENO self-test's `sed | sed` chain, repeated `` `expr
         # ...` `` substitutions) and is the first real port in this stage
         # chain to run enough of that to exhaust CRT_FD_TABLE_SIZE (64).
-        # See TODO.md's in-progress note for the full repro and the current
-        # best lead on where the leak actually is; --jobs 1 is kept anyway
-        # since stage acceptance values a deterministic build over port-
-        # level throughput, not because it addresses this failure.
-        "--jobs", "1",
+        # See HISTORY.md for the full repro and fix. This stage now uses a
+        # measured, bounded parallel default; this is not a workaround for
+        # that already-fixed handle leak.
+        "--jobs", str(jobs),
         "--port", "freetype",
         "--port", "ffmpeg",
     ]
@@ -427,7 +666,7 @@ def build_example(staged: Path, temp_root: Path, name: str,
                   executable_name: str, env: dict[str, str]) -> None:
     build_dir = temp_root / f"example-{name}"
     if build_dir.exists():
-        shutil.rmtree(build_dir)
+        remove_tree(build_dir)
     run([
         "cmake", "-S", str(staged / "examples" / name),
         "-B", str(build_dir), "-G", "Ninja",
@@ -457,11 +696,21 @@ def main() -> None:
     # one session, each paying that same ~90 minute tax to re-verify a
     # one-line CMakeLists.txt change).
     parser.add_argument("--reuse-work-root", action="store_true",
-                        help="Keep --work-root between runs and skip "
-                             "FreeType/FFmpeg/Skia's own build step when "
-                             "their pinned recipes and the predecessor SDK "
-                             "have not changed since the last run.")
+                        help="Keep verified dependency install layers under "
+                             "--work-root and apply them to a clean predecessor "
+                             "SDK when its content, recipes, build tools and "
+                             "external toolchain identity have not changed.")
+    parser.add_argument(
+        "--dependency-jobs", type=int, default=DEFAULT_DEPENDENCY_JOBS,
+        help="make -jN used for FreeType/FFmpeg (default: CPU count capped "
+             f"at 4; resolves to {DEFAULT_DEPENDENCY_JOBS} on this host)")
     args = parser.parse_args()
+    if args.dependency_jobs < 1:
+        parser.error("--dependency-jobs must be at least 1")
+    print(f"Dependency build parallelism: -j{args.dependency_jobs}",
+          flush=True)
+
+    timings = PhaseTimings()
 
     sdk = args.sdk_root.resolve()
     asset = args.asset_root.resolve()
@@ -495,19 +744,22 @@ def main() -> None:
         if target_os == "windows":
             build_asset = temp_root / "source"
             if build_asset.exists():
-                shutil.rmtree(build_asset)
+                remove_tree(build_asset)
             shutil.copytree(asset, build_asset)
         touch_tree(build_asset)
 
-        # Cache keys: any change to a pinned recipe, this project's own
-        # build driver, or the predecessor SDK invalidates the matching
-        # cache tier automatically -- see fingerprint()'s own comment.
-        ports_key = fingerprint([
-            manifest_path_probe,
+        # Hash the predecessor's real content, not its volatile packaging
+        # timestamp. This covers installed headers, libraries, wrappers and
+        # toolchain files that the dependency builds actually consume.
+        with timings.measure("fingerprint predecessor SDK and toolchain"):
+            predecessor_key = inventory_fingerprint(
+                tree_inventory(sdk, normalize_manifest=True))
+            compiler_key = toolchain_identity(target_os)
+        ports_key = predecessor_key + "-" + compiler_key + "-" + fingerprint([
             build_asset / "porting" / "recipes" / "freetype.json",
             build_asset / "porting" / "recipes" / "ffmpeg.json",
         ])
-        skia_key = ports_key + "-" + fingerprint([
+        skia_inputs_key = fingerprint([
             build_asset / "libcrtgfx" / "third_party" / "skia" / "recipe.json",
             build_asset / "tools" / "build_skia.py",
         ] + ([build_asset / "tools" / "fetch_mingw_w64_headers.py"]
@@ -515,48 +767,89 @@ def main() -> None:
         cache_dir = temp_root / ".crt-stage-cache"
         ports_marker = cache_dir / "ports.key"
         skia_marker = cache_dir / "skia.key"
+        ports_layer = cache_dir / "ports-layer"
+        skia_layer = cache_dir / "skia-layer"
 
-        ports_cached = (args.reuse_work_root and staged.is_dir() and
-                        ports_marker.is_file() and
-                        ports_marker.read_text(encoding="utf-8").strip() == ports_key)
-        if not ports_cached:
-            # Either not reusing the work-root, or the predecessor SDK/
-            # FreeType/FFmpeg pins changed since the cached staged tree was
-            # built -- a stale staged tree cannot be layered on top of, so
-            # start over from the declared predecessor SDK. This also
-            # necessarily invalidates any cached Skia build (it was built
-            # against the staged tree being discarded here).
+        ports_cached = (
+            args.reuse_work_root and ports_layer.is_dir() and
+            (ports_layer / ".layer.json").is_file() and
+            ports_marker.is_file() and
+            ports_marker.read_text(encoding="utf-8").strip() == ports_key and
+            install_layer_valid(ports_layer))
+        # Always start from the declared predecessor. Cache reuse applies
+        # immutable dependency deltas to this clean copy; it never treats a
+        # previous run's mutable 04-stage tree as a trustworthy cache.
+        with timings.measure("prepare clean predecessor SDK copy"):
             if staged.exists():
-                shutil.rmtree(staged)
+                remove_tree(staged)
             shutil.copytree(sdk, staged)
         env = runtime_env(staged, manifest)
 
-        port_sources = fetch_port_sources(build_asset, staged, temp_root, env)
+        with timings.measure("fetch and verify FreeType/FFmpeg sources"):
+            port_sources = fetch_port_sources(
+                build_asset, staged, temp_root, env)
         if ports_cached:
-            print(f"+ [work-root cache] reusing FreeType/FFmpeg install "
-                  f"already in {staged} (key {ports_key})", flush=True)
+            with timings.measure("reuse cached FreeType/FFmpeg install"):
+                apply_install_layer(ports_layer, staged)
+                print(f"+ [work-root cache] reusing FreeType/FFmpeg install "
+                      f"layer in {staged} (key {ports_key})", flush=True)
         else:
-            build_ports(build_asset, port_sources, staged, temp_root, manifest, env)
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            ports_marker.write_text(ports_key, encoding="utf-8")
+            before_ports = tree_inventory(staged) if args.reuse_work_root else {}
+            port_build_root = temp_root / "port-build"
+            if port_build_root.exists():
+                remove_tree(port_build_root)
+            with timings.measure(
+                    f"build and install FreeType/FFmpeg (-j{args.dependency_jobs})"):
+                build_ports(build_asset, port_sources, staged, temp_root,
+                            manifest, env, args.dependency_jobs)
+            if args.reuse_work_root:
+                with timings.measure("capture FreeType/FFmpeg install layer"):
+                    cache_dir.mkdir(parents=True, exist_ok=True)
+                    capture_install_layer(staged, before_ports, ports_layer)
+                    ports_marker.write_text(ports_key, encoding="utf-8")
 
-        skia_source = fetch_skia_source(build_asset, temp_root, env)
-        mingw_checkout = (fetch_mingw_w64_headers(build_asset, temp_root, env)
-                          if target_os == "windows" else None)
-        skia_cached = (ports_cached and skia_marker.is_file() and
-                       skia_marker.read_text(encoding="utf-8").strip() == skia_key)
+        # Skia consumes the installed FreeType result, so key it from the
+        # actual post-port staged content rather than assuming equal recipes
+        # necessarily produced equal archives on every toolchain revision.
+        with timings.measure("fingerprint installed FreeType/FFmpeg layer"):
+            skia_key = inventory_fingerprint(
+                tree_inventory(staged)) + "-" + skia_inputs_key
+
+        with timings.measure("fetch and verify Skia source"):
+            skia_source = fetch_skia_source(build_asset, temp_root, env)
+        mingw_checkout = None
+        if target_os == "windows":
+            with timings.measure("fetch and verify MinGW-w64 headers"):
+                mingw_checkout = fetch_mingw_w64_headers(
+                    build_asset, temp_root, env)
+        skia_cached = (
+            args.reuse_work_root and skia_layer.is_dir() and
+            (skia_layer / ".layer.json").is_file() and
+            skia_marker.is_file() and
+            skia_marker.read_text(encoding="utf-8").strip() == skia_key and
+            install_layer_valid(skia_layer))
         if skia_cached:
-            print(f"+ [work-root cache] reusing Skia build already in "
-                  f"{staged} (key {skia_key})", flush=True)
+            with timings.measure("reuse cached Skia install"):
+                apply_install_layer(skia_layer, staged)
+                print(f"+ [work-root cache] reusing Skia build already in "
+                      f"{staged} (key {skia_key})", flush=True)
         else:
-            build_skia(build_asset, skia_source, mingw_checkout, staged,
-                      temp_root, manifest, env)
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            skia_marker.write_text(skia_key, encoding="utf-8")
+            before_skia = tree_inventory(staged) if args.reuse_work_root else {}
+            skia_build_root = temp_root / "skia-build"
+            if skia_build_root.exists():
+                remove_tree(skia_build_root)
+            with timings.measure("build and install Skia"):
+                build_skia(build_asset, skia_source, mingw_checkout, staged,
+                           temp_root, manifest, env)
+            if args.reuse_work_root:
+                with timings.measure("capture Skia install layer"):
+                    cache_dir.mkdir(parents=True, exist_ok=True)
+                    capture_install_layer(staged, before_skia, skia_layer)
+                    skia_marker.write_text(skia_key, encoding="utf-8")
 
         build_dir = temp_root / "gfx-media-build"
         if build_dir.exists():
-            shutil.rmtree(build_dir)
+            remove_tree(build_dir)
         configure = [
             "cmake", "-S", str(build_asset / "distribution" / "stages" / "04-gfx-media"),
             "-B", str(build_dir), "-G", "Ninja",
@@ -572,27 +865,39 @@ def main() -> None:
             configure.append(
                 "-DCRT_STAGE_MINGW_W64_HEADERS_ROOT=" +
                 cmake_path(mingw_checkout / "mingw-w64-headers" / "include"))
-        run(configure, env)
-        run(["cmake", "--build", str(build_dir)], env)
-        run(["ctest", "--test-dir", str(build_dir), "--output-on-failure"], env)
-        run(["cmake", "--install", str(build_dir)], env)
+        with timings.measure("configure 04-gfx-media"):
+            run(configure, env)
+        with timings.measure("build 04-gfx-media"):
+            run(["cmake", "--build", str(build_dir)], env)
+        with timings.measure("test 04-gfx-media"):
+            run(["ctest", "--test-dir", str(build_dir),
+                 "--output-on-failure"], env)
+        with timings.measure("install 04-gfx-media"):
+            run(["cmake", "--install", str(build_dir)], env)
 
-        manifest["stage"] = "04-gfx-media"
-        manifest["built_from"] = {
-            "stage": "03-gfx-simple",
-            "source_recipe": args.recipe_location,
-            "source_sha256": args.source_sha256,
-        }
-        add_redistributed_dependencies(
-            build_asset, staged, port_sources, skia_source, manifest)
-        (staged / "manifest.json").write_text(
-            json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        with timings.measure("write dependency provenance and manifest"):
+            manifest["stage"] = "04-gfx-media"
+            manifest["built_from"] = {
+                "stage": "03-gfx-simple",
+                "source_recipe": args.recipe_location,
+                "source_sha256": args.source_sha256,
+            }
+            add_redistributed_dependencies(
+                build_asset, staged, port_sources, skia_source, manifest)
+            (staged / "manifest.json").write_text(
+                json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
-        build_example(staged, temp_root, "gfx-gpu", "crtgfx_gpu_example", env)
-        build_example(staged, temp_root, "gfx-skia", "crtgfx_skia_example", env)
-        run([sys.executable, str(build_asset / "tools" / "verify_dist.py"),
-             "--dist", str(staged), "--stage", "04-gfx-media"], env)
-        publish_tree(staged, output)
+        with timings.measure("rebuild and run installed gfx-gpu example"):
+            build_example(
+                staged, temp_root, "gfx-gpu", "crtgfx_gpu_example", env)
+        with timings.measure("rebuild and run installed gfx-skia example"):
+            build_example(
+                staged, temp_root, "gfx-skia", "crtgfx_skia_example", env)
+        with timings.measure("verify 04-gfx-media distribution"):
+            run([sys.executable, str(build_asset / "tools" / "verify_dist.py"),
+                 "--dist", str(staged), "--stage", "04-gfx-media"], env)
+        with timings.measure("publish 04-gfx-media atomically"):
+            publish_tree(staged, output)
         print(f"CRT stage ready: {output}")
     finally:
         # CRT_STAGE_KEEP_TMP=1: skip cleanup and keep temp_root (the build
@@ -607,12 +912,14 @@ def main() -> None:
         # stage upgrade's own real ctest crashes. --reuse-work-root (its
         # own, complementary reason to keep temp_root: reusing the
         # FreeType/FFmpeg/Skia build across runs, not post-mortem
-        # debugging) already keeps it via args.reuse_work_root below --
-        # combined here so either reason suffices.
+        # debugging) already keeps it via args.reuse_work_root below; that
+        # work root now holds immutable dependency layers plus this run's
+        # disposable staged copy, so either reason still suffices.
         if os.environ.get("CRT_STAGE_KEEP_TMP"):
             print(f"CRT_STAGE_KEEP_TMP set: keeping {temp_root}")
         elif not args.reuse_work_root:
-            shutil.rmtree(temp_root, ignore_errors=True)
+            remove_tree(temp_root, ignore_errors=True)
+        timings.report()
 
 
 if __name__ == "__main__":

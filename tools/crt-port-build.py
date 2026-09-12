@@ -1568,7 +1568,7 @@ def main():
     parser.add_argument("--use-crt-shell", action="store_true", help="run configure recipes with the CRT rootfs mksh")
     parser.add_argument("--configure-only", action="store_true", help="stop configure recipes after ./configure")
     parser.add_argument("--test", action="store_true", help="run recipe-declared port tests after the port is installed")
-    parser.add_argument("--jobs", type=int, default=None, help="override make -jN (default: 1 on Windows via --use-crt-shell, else CPU count); for reproducing/testing the Windows jobserver bug")
+    parser.add_argument("--jobs", type=int, default=None, help="override make -jN (default: CPU count on every OS); useful for bounded acceptance or performance measurements")
     args = parser.parse_args()
 
     if bool(args.preset) == bool(args.sdk_root):
