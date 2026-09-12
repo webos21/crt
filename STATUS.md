@@ -5,7 +5,7 @@ does not repeat the implementation diary in [`HISTORY.md`](HISTORY.md), the
 open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting_status.md`](docs/porting_status.md).
 
-Last synchronized with the source tree and git history: **2026-09-08**.
+Last synchronized with the source tree and git history: **2026-09-12**.
 Updated only on explicit request from here on, not as part of routine
 documentation passes -- see `TODO.md`'s Notice section. It may lag behind
 `HISTORY.md`/`TODO.md` between syncs; those two are the source of truth.
@@ -120,6 +120,13 @@ target.
 
 - The runtime is packaged through the cumulative C, C++, Simple Graphics,
   Graphics/Media, and JavaScript stages.
+- Each cumulative stage can also be bootstrapped and verified in isolation,
+  purely from its own predecessor's already-packaged SDK rather than the
+  in-repo build tree: `01-c -> 02-cxx -> 03-gfx-simple` is done and verified
+  on Linux, Windows, and macOS; `03-gfx-simple -> 04-gfx-media`, with Skia
+  and FFmpeg genuinely enabled (not the in-repo cumulative pass's default-OFF
+  state), is done and verified on macOS and Windows, with Linux acceptance
+  still in progress.
 - FFmpeg hardware decode/zero-copy and the QuickJS core proceed on top of the
   completed GPU rendering/presentation contract.
 - JavaScript media/gfx binding follows the stable native contracts, using a
@@ -127,7 +134,8 @@ target.
   Chromium/Ozone probe remain later layers.
 
 The sequencing and ownership boundaries are recorded in
-[`docs/runtime_roadmap.md`](docs/runtime_roadmap.md).
+[`docs/runtime_roadmap.md`](docs/runtime_roadmap.md); the isolated-acceptance
+trail is in `HISTORY.md`, open work in `TODO.md`.
 
 ## Verification Model
 

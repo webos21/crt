@@ -254,13 +254,9 @@ their result is recorded in `HISTORY.md`):
   post-mortem-only workaround. Treat CPU/FFmpeg/Skia results separately
   from Vulkan/native-Wayland live-presentation evidence.
 
-Keep the separately listed Windows C++ initialization failure open; the stage
-runner deliberately has no retry that could hide it.
-
-The pre-existing `crt-media-test` dependency gap found during this work is
-fixed: `crt-media-build` now builds all five executables that its CTest filter
-runs, and a fresh Windows invocation passed 5/5 without a manual precursor
-build (full evidence in `HISTORY.md`).
+Keep the `<iostream>` static-init crash open (listed under "CRT distribution
+stages" above, not re-described here); the stage runner deliberately has no
+retry that could hide it.
 
 Acceptance must start from freshly extracted archives in a path containing
 spaces, reject access to in-tree CRT headers/libraries/build artifacts,
@@ -268,16 +264,18 @@ rebuild and run the packaged examples, and exercise representative configure,
 amalgamation, and dependency-chain ports -- apply the same bar to
 `03-gfx-simple -> 04-gfx-media`.
 
-The first concrete implementation of the redistributable-dependency rule is
-in place for Linux Simple Graphics: `03-gfx-simple` carries libxkbcommon's
-public headers, static library, license, and recipe provenance, records them in
-the structured `redistributed_dependencies` manifest inventory, and
-`verify_dist.py` rejects a missing declaration or file. Generalize that model
-to later graphics/media ports and transitive dependencies; add generic
-manifest-driven verification rather than the current xkbcommon-specific
-check, scan binaries for undeclared non-system `.so`/`.dylib`/`.dll`
-dependencies, and explicitly inventory OS/framework/device-driver
-prerequisites that remain outside the archive.
+The redistributable-dependency rule now covers four ports: `03-gfx-simple`
+declares libxkbcommon (Linux), and `04-gfx-media` declares
+FreeType/FFmpeg/Skia -- each carries its public headers, static library,
+license, and recipe provenance in the structured `redistributed_dependencies`
+manifest inventory, and `verify_dist.py` rejects a missing declaration or
+file. Still not done: `verify_dist.py`'s own check is four hardcoded
+`if "<name>" not in redistributed` blocks (`tools/verify_dist.py`), one per
+port, not the generic, manifest-driven validator this was meant to become --
+a fifth port still means a fifth hardcoded block. Add that generic check,
+scan binaries for undeclared non-system `.so`/`.dylib`/`.dll` dependencies,
+and explicitly inventory OS/framework/device-driver prerequisites that remain
+outside the archive.
 
 Path-with-spaces coverage exposed argument flattening in the compiler wrappers.
 Linux/macOS `crt-cc` now preserves the original argument vector and the staged
