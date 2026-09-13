@@ -15,6 +15,22 @@ if(WIN32)
   find_library(CRTGFX_WINDOW_LIBRARY NAMES crtgfx_dll
     PATHS "${CMAKE_SYSROOT}/lib" NO_DEFAULT_PATH REQUIRED)
 else()
+  if(NOT APPLE)
+    # Linux-only: prefer the static archives (.a) over the identically-
+    # named shared libraries also installed under ${CMAKE_SYSROOT}/lib --
+    # same real, confirmed bug as examples/gfx-gpu/CMakeLists.txt's own
+    # matching fix (see that file's fuller comment for the full story
+    # and evidence): find_library()'s default suffix order (.so before
+    # .a) picks the *shared* libcrtgfx(_gpu|_skia).so here, which carries
+    # its own NEEDED entry on this project's own SHARED, unversioned
+    # libc.so -- reintroducing the readdir()/opendir() vs real host
+    # libvulkan.so.1 collision in a form `-Wl,--exclude-libs,ALL` (below)
+    # cannot reach, since that flag only scrubs symbols from STATIC
+    # ARCHIVES linked into *this* link, never a separate already-built
+    # shared object's own exports. Preferring the static archives avoids
+    # linking any shared libcrtgfx*.so at all.
+    list(INSERT CMAKE_FIND_LIBRARY_SUFFIXES 0 "${CMAKE_STATIC_LIBRARY_SUFFIX}")
+  endif()
   find_library(CRTGFX_SKIA_LIBRARY NAMES crtgfx_skia
     PATHS "${CMAKE_SYSROOT}/lib" NO_DEFAULT_PATH REQUIRED)
   find_library(CRTGFX_GPU_LIBRARY NAMES crtgfx_gpu
@@ -154,6 +170,22 @@ if(NOT WIN32 AND NOT APPLE)
     target_link_options(crtgfx_skia_example PRIVATE
       "-Wl,-rpath-link,${CRT_EXAMPLE_VULKAN_LIB_DIR}")
   endif()
+  if(NOT CRTGFX_EXAMPLE_VULKAN_LIB)
+    message(FATAL_ERROR "Could not find a real host libvulkan.so/.so.1")
+  endif()
+  # Same real, confirmed bug as examples/gfx-gpu/CMakeLists.txt's own
+  # matching fix (see that file's fuller comment for the full story):
+  # once CRTGFX_GPU_LIBRARY/CRTGFX_WINDOW_LIBRARY resolve to the static
+  # archives (the CMAKE_FIND_LIBRARY_SUFFIXES fix above), their own
+  # embedded gpu_vulkan.c.o/window_wayland.c.o object code carries plain
+  # undefined references to real vkCreateInstance/.../xkb_context_new/...
+  # that a shared-library link used to satisfy "for free" via NEEDED-
+  # entry walking, but a static archive never records. Order matters
+  # (ld only pulls a static archive member to satisfy an already
+  # outstanding undefined symbol): libxkbcommon.a must come after
+  # libcrtgfx.a (CRTGFX_WINDOW_LIBRARY, linked above).
+  target_link_libraries(crtgfx_skia_example PRIVATE
+    "${CRTGFX_EXAMPLE_VULKAN_LIB}" "${CMAKE_SYSROOT}/lib/libxkbcommon.a")
   target_link_libraries(crtgfx_skia_example PRIVATE "${CMAKE_SYSROOT}/lib/libunwind.so")
   # Same real, confirmed bug as examples/gfx-gpu/CMakeLists.txt's own
   # matching fix (see that file's fuller comment): DT_RUNPATH is not
@@ -164,6 +196,19 @@ if(NOT WIN32 AND NOT APPLE)
   # direct NEEDED entry for it, resolved via its own already-correct
   # RUNPATH before libcrtgfx.so's transitive need is ever processed.
   target_link_libraries(crtgfx_skia_example PRIVATE "${CMAKE_SYSROOT}/lib/libc++.so.1")
+  # Same real bug as examples/gfx-gpu/CMakeLists.txt's own matching fix
+  # (see that file's fuller comment for the full standalone repro and
+  # evidence): this example resolves CRTGFX_GPU_LIBRARY via a plain
+  # find_library() path rather than the real `crtgfx_gpu` CMake target,
+  # so that target's own INTERFACE `-Wl,--exclude-libs,ALL`
+  # (crtgfx_gpu_targets.cmake, 2026-09-03 -- the real fix for real
+  # libvulkan.so.1 readdir()/opendir() calls getting hijacked by this
+  # project's own same-named, globally-exported, statically-linked
+  # implementations) never reaches this executable's own link line.
+  # Necessary but NOT sufficient on its own: see the CMAKE_FIND_LIBRARY_
+  # SUFFIXES fix above for the transitive shared libc.so wrinkle this
+  # flag cannot reach by itself.
+  target_link_options(crtgfx_skia_example PRIVATE -Wl,--exclude-libs,ALL)
 endif()
 
 if(WIN32)

@@ -74,53 +74,56 @@ result in `HISTORY.md` before removing it here.
 
 - [ ] **Finish Linux `03-gfx-simple -> 04-gfx-media` acceptance.** All
   eight stage tests pass, and both `examples/gfx-gpu`/`examples/gfx-skia`
-  now build, link, and *load* correctly against a real packaged SDK (a
-  real `--reuse-work-root` temp-directory regression, a real
-  `libcrtgfx.so` RPATH gap, and two real explicit-link gaps were found
-  and fixed reaching that state -- see `HISTORY.md`'s 2026-09-13 entry).
-  **Blocked on the real architectural finding below, not a packaging
-  defect:** `crtgfx_gpu_example` still fails
-  (`crtgfx_gpu_window_demo: no usable GPU backend on this host (rc=0,
-  device_count=0)`) even after granting `video`/`render` group access
-  and confirming real `/dev/dri` permission -- that was a red herring,
-  disproven and recorded in `HISTORY.md`. `--reuse-work-root` (plus
+  now build, link, *load*, and correctly enumerate a real Vulkan device
+  (`device_count=1`) against a real packaged SDK -- a real
+  `--reuse-work-root` temp-directory regression, a real `libcrtgfx.so`
+  RPATH gap, and a real `readdir`/`opendir` symbol-collision gap (plus
+  its own follow-on Vulkan/`libxkbcommon.a` explicit-link gap) were all
+  found and fixed reaching that state -- see `HISTORY.md`'s 2026-09-13
+  entry. **Blocked on the real architectural finding below, not a
+  packaging defect:** `crtgfx_gpu_example` now fails one step later,
+  `crtgfx_window_create failed (-2)`. `--reuse-work-root` (plus
   `CRT_STAGE_KEEP_TMP=1` for standalone example-only iteration without
   reconfiguring the whole stage) is fine for iteration once the real
   blocker below is fixed; final evidence still requires the normal
-  fresh-build path. Keep CPU/FFmpeg/Skia evidence distinct from live
-  Vulkan/native-Wayland presentation evidence.
-- [ ] **Fix real host GPU libraries corrupting their own internal glibc
-  calls when linked into a `crt-cc`-built executable.** Root-caused
-  2026-09-13 (`HISTORY.md`): a minimal C program calling only
-  `vkCreateInstance`/`vkEnumeratePhysicalDevices` against the real
-  `/usr/lib/aarch64-linux-gnu/libvulkan.so.1` succeeds when built with
-  plain system `clang` (real glibc throughout) and fails
-  (`VK_ERROR_INCOMPATIBLE_DRIVER`) when built with this project's own
-  `crt-cc` -- `strace` shows the Vulkan loader's own ICD-manifest
-  directory scan reading corrupted filenames, the signature of a `struct
-  dirent` read at the wrong field offsets. Suspected cause: this
-  project's own `libc.so`/`libdl.so` (loaded to satisfy the executable's
-  own direct NEEDED entries) and real glibc (`libc.so.6`, pulled in
-  transitively by `libvulkan.so.1` itself) coexist in one process under
-  different SONAMEs, but plain unversioned symbol lookups for common
-  POSIX names (`opendir`/`readdir`/`dlopen`) resolve through the whole
-  process's single global scope in load order, not strictly through each
-  library's own dependency chain -- this project's own `libdl.so` is
-  confirmed (`nm -D`) to export a real `dlopen` under that exact name.
-  Any future direct link of a real host shared library depending on real
-  glibc (Vulkan today; D3D12/Metal don't apply on Linux, but any other
-  future host-library dependency would) is suspect until this is fixed.
-  Real candidate fixes, none attempted yet: isolate such host libraries
-  into a separate symbol namespace via `dlmopen()`/`LM_ID_NEWLM` (blocked
-  on this project's own `dlopen()` not being implemented yet -- see
-  `libcrtgfx/src/arch/linux/gpu_vulkan.c`'s own top comment); hide this
-  project's own conflicting POSIX symbol exports from the global scope
-  (`-Wl,--exclude-libs`/hidden visibility, verified narrow enough not to
-  break this project's own internal use of the same symbols); or stop
-  linking real host GPU libraries directly into a process built against
-  this project's own libc. Needs its own dedicated investigation, not a
-  quick patch -- do not fold this back into the stage-04 checklist above
-  until it has a real, evidenced fix.
+  fresh-build path, AND regenerating the pinned stage-source asset
+  (`ninja crt-stage-04-source`, then copying the resulting
+  `stage-sources/04-gfx-media.json` over the target dist's own
+  `stages/recipes/04-gfx-media.json`) whenever `examples/gfx-gpu`,
+  `examples/gfx-skia`, or anything else the asset bundles changes --
+  the isolated acceptance test extracts that pinned tarball, not the
+  live repo tree, so an uncommitted (or even committed but not yet
+  re-pinned) source change is silently invisible to it otherwise. Keep
+  CPU/FFmpeg/Skia evidence distinct from live Vulkan/native-Wayland
+  presentation evidence.
+- [ ] **Fix this project's own `libunwind.so` colliding with a real host
+  library's `__register_frame`/`__deregister_frame` calls when linked
+  directly into a `crt-cc`-built executable.** Root-caused 2026-09-13
+  (`HISTORY.md`): the same "our own shared library's global symbol
+  export collides with a real host library's internal call" shape as
+  the now-fixed `readdir`/`opendir`-vs-`libc.so` case, just one level
+  further in and for a different symbol family. With Vulkan device
+  enumeration now fixed (see the acceptance item above),
+  `crtgfx_gpu_example` gets one step further and then fails
+  `crtgfx_window_create failed (-2)` (`CRTGFX_ERROR_UNSUPPORTED`),
+  preceded by repeated `libunwind: __unw_add_dynamic_fde: bad fde: FDE
+  is really a CIE` warnings, right as `strace` shows it `openat()`-ing
+  the real host `/lib/aarch64-linux-gnu/libVkLayer_MESA_device_select.so`
+  Vulkan layer. `readelf --dyn-syms` on the example confirms this
+  project's own `libunwind.so` (linked directly and explicitly --
+  needed for `libc++abi.so.1`'s own `_Unwind_*` symbols, see the
+  2026-09-13 RPATH entry) still exports `__register_frame`/
+  `__deregister_frame`/`__unw_add_dynamic_fde` as `GLOBAL DEFAULT`.
+  Unlike the `readdir`/`opendir` case, `-Wl,--exclude-libs,ALL` cannot
+  reach this at all: `libunwind.so` is a separate, already-built shared
+  object (not a static archive on the failing link), and the flag only
+  ever strips static-archive-contributed symbols from the *current*
+  link's own dynamic symbol table. Needs its own investigation into a
+  real fix (symbol versioning on this project's own `libunwind.so`, a
+  linker version script demoting these three symbols to local/hidden
+  scope on `libunwind.so`'s own link while confirming nothing in this
+  project's own C++ exception-handling path still needs them exported,
+  or some other isolation mechanism) -- not attempted yet.
 - [ ] **Close path-with-spaces acceptance.** Fix FFmpeg's
   `-I${prefix}/include` argument handling and the remaining Windows `crt-cc`
   and all-host `crt-c++` argument flattening, then repeat the affected isolated

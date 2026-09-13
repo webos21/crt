@@ -110,51 +110,108 @@ substantive update.
   no usable GPU backend on this host (rc=0, device_count=0)`, proving
   device permissions were never the real blocker.
 
-  **Root-caused instead to a real, previously-undiscovered architectural
-  problem: directly linking a real host shared library that itself
-  depends on real glibc (`/lib/aarch64-linux-gnu/libvulkan.so.1`) into a
-  process built against this project's own, ABI-incompatible libc
-  corrupts that library's own internal glibc calls.** Isolated with a
-  minimal, hand-written C program calling only `vkCreateInstance`/
-  `vkEnumeratePhysicalDevices` against the same real `libvulkan.so.1`:
-  built with plain system `clang` (real glibc throughout), it succeeds
-  (`rc=0, count=1`, the same `llvmpipe`/Mesa software device
-  `vulkaninfo` reports); built with this project's own `crt-cc` (same
-  source, same `libvulkan.so.1`), it fails identically
-  (`vkCreateInstance` returns `-9`, `VK_ERROR_INCOMPATIBLE_DRIVER`).
-  `strace`ing the failing binary shows exactly where: the Vulkan
-  loader's own ICD-manifest directory scan (`opendir`/`readdir` against
-  `/usr/share/vulkan/icd.d`) succeeds at opening the directory, but the
-  filenames it then tries to `openat()` are corrupted fragments of real
-  ones (`"SA_device_select.json"`, `"TEL_nullhw.json"`, bare
-  `".json"`/`"d.json"`/`"cd.json"`/`"icd.json"` instead of a real
-  `<name>.json` under that directory) -- the signature of a `struct
-  dirent` read at the wrong field offsets, not a missing-file problem.
-  This project's own `libc.so`/`libdl.so` are loaded into the same
-  process (to satisfy this executable's own direct NEEDED entries)
-  alongside real glibc (`libc.so.6`, pulled in transitively by
-  `libvulkan.so.1` itself) under different SONAMEs, so both coexist
-  rather than conflicting at load time -- but plain, unversioned dynamic
-  symbol lookups for common POSIX names (`opendir`/`readdir`/`dlopen`/
-  ...) resolve through the process's single global scope in load order,
-  not strictly through each library's own declared dependency chain.
-  This project's own `libdl.so` is confirmed (via `nm -D`) to export a
-  real, defined `dlopen` under that exact name, and the Vulkan loader's
-  own ICD discovery code needs exactly `opendir`/`readdir`/`dlopen`, the
-  same short list -- consistent with (though not yet proven symbol-by-
-  symbol) real glibc's own `readdir()` call inside `libvulkan.so.1`
-  getting bound to this project's own, differently-laid-out
-  implementation instead, corrupting the `dirent` it reads. Genuinely
-  architectural, not a packaging bug: fixing it needs either isolating
-  such host libraries into a separate symbol namespace (`dlmopen()`
-  with `LM_ID_NEWLM` -- this project's own `dlopen()` does not work yet,
-  per `libcrtgfx/src/arch/linux/gpu_vulkan.c`'s own top comment),
-  hiding this project's own conflicting POSIX symbol exports from the
-  global scope, or not linking real host GPU libraries directly into a
-  process built against this project's own libc at all -- out of scope
-  for this acceptance pass. Left open in `TODO.md` as a real, separate,
-  deeper investigation rather than folded into this stage's own
-  checklist.
+  **Root-caused instead to a real symbol collision -- confirmed for
+  real, not just theorized -- and traced to code that already existed
+  and was already fixed for its own consumers back on 2026-09-03; the
+  gap was only that `examples/gfx-gpu`/`examples/gfx-skia` could never
+  reach that existing fix.** Isolated with a minimal, hand-written C
+  program calling only `vkCreateInstance`/`vkEnumeratePhysicalDevices`
+  against the real `/lib/aarch64-linux-gnu/libvulkan.so.1`: built with
+  plain system `clang` (real glibc throughout), it succeeds (`rc=0,
+  count=1`, the same `llvmpipe`/Mesa software device `vulkaninfo`
+  reports); built with this project's own `crt-cc` (same source, same
+  `libvulkan.so.1`), it fails identically (`vkCreateInstance` returns
+  `-9`, `VK_ERROR_INCOMPATIBLE_DRIVER`). `strace`ing the failing binary
+  shows exactly where: the Vulkan loader's own ICD-manifest directory
+  scan (`opendir`/`readdir` against `/usr/share/vulkan/icd.d`) succeeds
+  at opening the directory, but the filenames it then tries to
+  `openat()` are corrupted fragments of real ones (`"SA_device_select.
+  json"`, `".json"`, `"cd.json"`, `"icd.json"`) -- the signature of a
+  `struct dirent` read at the wrong field offsets. `readelf --dyn-syms`
+  on the failing binary confirms it: `crt-cc`'s own default (non-
+  `-shared`) link mode statically embeds `libc.a`'s own `readdir`/
+  `opendir` and exports them as `GLOBAL DEFAULT`, unhidden -- so plain,
+  unversioned dynamic symbol lookups for these common POSIX names
+  resolve through the whole process's single global scope in load
+  order, and `libvulkan.so.1`'s own internal calls bind to *this
+  executable's own* implementation instead of real glibc.
+  `LD_DEBUG=bindings` proves the exact binding directly: `binding file
+  /lib/aarch64-linux-gnu/libvulkan.so.1 ... to .../vktest2 ...: normal
+  symbol 'opendir' [GLIBC_2.17]`. Adding `-Wl,--exclude-libs,ALL` to the
+  same minimal repro's own link fixes it completely (`rc=0, count=1`).
+  This is *not* a new discovery: `libcrtgfx/cmake/crtgfx_gpu_targets.
+  cmake` already carries this exact fix, dated 2026-09-03
+  (`target_link_options(crtgfx_gpu INTERFACE -Wl,--exclude-libs,ALL)`
+  and the `crtgfx_gpu_shared` equivalent), with an almost identical
+  root-cause comment -- but `examples/gfx-gpu`/`examples/gfx-skia`
+  resolve `CRTGFX_GPU_LIBRARY`/`CRTGFX_WINDOW_LIBRARY` via plain
+  `find_library()` file paths rather than the real `crtgfx_gpu`/
+  `crtgfx_window` CMake targets (a standalone, separately-configured
+  project, see this file's own 2026-09-11 entries), so none of that
+  target's INTERFACE link options ever reached these two executables'
+  own link lines. Adding the identical flag to both examples was
+  necessary but, on the first attempt, *not sufficient*: a fresh full
+  stage rerun with only that flag added still hit the identical
+  `device_count=0`. `readelf --dyn-syms` on the actual rebuilt example
+  and its direct link dependencies showed the flag had worked for the
+  executable itself, but a second, distinct source of the same two
+  symbols remained -- this project's own *shared* `libc.so`, pulled in
+  transitively because `find_library()`'s default suffix order (`.so`
+  before `.a`) had picked the *shared* `libcrtgfx(_gpu).so` all along,
+  which carries a real NEEDED entry on that shared `libc.so`
+  (confirmed via `readelf -d`). `-Wl,--exclude-libs,ALL` cannot reach
+  this: it only strips symbols contributed by static archives linked
+  into the *current* link, never symbols a separate, already-built
+  shared object exports on its own -- and `readelf -V` confirms this
+  project's own `libc.so` carries *no* symbol version information at
+  all, so glibc's dynamic linker treats its unversioned `readdir`/
+  `opendir` as satisfying libvulkan.so.1's versioned `readdir@GLIBC_
+  2.17` lookup too. The complete fix: make both examples prefer the
+  *static* archives over the identically-named shared libraries
+  (`list(INSERT CMAKE_FIND_LIBRARY_SUFFIXES 0 ".a")` ahead of their
+  `find_library()` calls, Linux-only), so no shared `libcrtgfx*.so` --
+  and therefore no transitive shared `libc.so` -- is ever linked at
+  all, matching `crt-cc`'s own default-mode design (embed everything
+  statically, scrub the executable's own dynamic symbol table via
+  `--exclude-libs,ALL`). That surfaced one more, final gap: the real
+  in-tree `crtgfx_gpu`/`crtgfx_window` CMake targets carry Vulkan
+  (`crtgfx_gpu_targets.cmake`) and `libxkbcommon.a`
+  (`distribution/stages/04-gfx-media/CMakeLists.txt`'s own
+  `INTERFACE_LINK_LIBRARIES` re-listing) as real link dependencies,
+  and CMake's own PRIVATE-dependency-of-a-STATIC-library propagation
+  forwards both onto every real consumer automatically -- exactly the
+  propagation these two plain-`find_library()`-based examples still
+  bypass, now that they link the static archives too. Explicitly
+  linking the real host `libvulkan.so`/`.so.1` (already found and used
+  for `-rpath-link`, just never actually linked) and the SDK's own
+  `libxkbcommon.a` fixed the resulting undefined-reference errors.
+  **Verified for real with a genuine, fresh, non-`--reuse-work-root`
+  full isolated stage acceptance run** (pinned stage-source asset
+  regenerated via `crt-stage-04-source` to pick up these fixes; ctest
+  8/8 clean): `crtgfx_gpu_window_demo: backend=3 device_count=1` --
+  a real Vulkan device now enumerates correctly, closing out the
+  original `dlopen`/symbol-collision question for good.
+
+  **A further, distinct instance of the same collision family surfaced
+  immediately afterward, now blocking window creation instead of GPU
+  enumeration -- left open as its own separate item, not folded into
+  this one.** With device enumeration now fixed, the same run hit
+  `crtgfx_window_create failed (-2)` (`CRTGFX_ERROR_UNSUPPORTED`),
+  preceded by repeated `libunwind: __unw_add_dynamic_fde: bad fde: FDE
+  is really a CIE` warnings, right as `strace` shows the process
+  `openat()`-ing the real host `/lib/aarch64-linux-gnu/libVkLayer_MESA_
+  device_select.so` Vulkan layer. `readelf --dyn-syms` on the example
+  confirms this project's own `libunwind.so` -- linked directly and
+  explicitly (see the `libc++abi`/`_Unwind_*` entry above) -- still
+  exports `__register_frame`/`__deregister_frame`/`__unw_add_dynamic_
+  fde` as `GLOBAL DEFAULT`: the same "our own shared library's global
+  symbol export collides with a real host library's internal call"
+  shape as the `libc.so` wrinkle above, just for a different symbol
+  family and a different one of this project's own shared libraries
+  (`libunwind.so` instead of `libc.so`) -- and, being a separate
+  already-built `.so` rather than a static archive on this link,
+  `-Wl,--exclude-libs,ALL` cannot reach it either. Not yet fixed; see
+  `TODO.md`.
 
 ## 2026-09-12
 

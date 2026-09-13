@@ -13,6 +13,38 @@ if(WIN32)
   find_library(CRTGFX_WINDOW_LIBRARY NAMES crtgfx_dll
     PATHS "${CMAKE_SYSROOT}/lib" NO_DEFAULT_PATH REQUIRED)
 else()
+  if(NOT APPLE)
+    # Linux-only: prefer the static archives (.a) over the identically-
+    # named shared libraries also installed under ${CMAKE_SYSROOT}/lib --
+    # a sixth real, confirmed bug (2026-09-13), found chasing the fifth
+    # one's own `-Wl,--exclude-libs,ALL` fix (below) failing to actually
+    # resolve a real GPU device in the full stage build despite fixing
+    # the standalone repro. crt-cc's own default (non-`-shared`) link
+    # mode is built entirely around embedding everything statically and
+    # scrubbing this executable's own dynamic symbol table via that flag
+    # -- but find_library()'s default suffix order (.so before .a) picks
+    # the *shared* libcrtgfx(_gpu).so here instead, which carries its own
+    # NEEDED entry on this project's own SHARED libc.so (confirmed via
+    # `readelf -d libcrtgfx.so`). That shared libc.so re-introduces the
+    # exact readdir()/opendir() collision `--exclude-libs,ALL` was
+    # supposed to prevent, in a form the flag cannot reach: it only
+    # suppresses symbols contributed by STATIC ARCHIVES linked into
+    # *this* link command, never symbols a separate, already-built
+    # shared object exports on its own -- confirmed directly: with the
+    # flag applied, `readelf --dyn-syms` on this project's own libc.so
+    # still shows readdir/opendir as GLOBAL DEFAULT. Further confirmed
+    # via `readelf -V` that libc.so carries *no* symbol version
+    # information at all, while the real host libvulkan.so.1 looks up
+    # the versioned `readdir@GLIBC_2.17` -- glibc's dynamic linker treats
+    # an unversioned definition as satisfying *any* versioned lookup, so
+    # this project's own libc.so still wins over the real, correctly-
+    # versioned host libc.so.6. Preferring the static archives avoids
+    # linking any shared libcrtgfx*.so at all, so no transitive shared
+    # libc.so is ever pulled in, and the executable's own combined
+    # static-archive symbols are fully covered by `--exclude-libs,ALL`
+    # (below), matching crt-cc's intended default-mode design.
+    list(INSERT CMAKE_FIND_LIBRARY_SUFFIXES 0 "${CMAKE_STATIC_LIBRARY_SUFFIX}")
+  endif()
   find_library(CRTGFX_GPU_LIBRARY NAMES crtgfx_gpu
     PATHS "${CMAKE_SYSROOT}/lib" NO_DEFAULT_PATH REQUIRED)
   find_library(CRTGFX_WINDOW_LIBRARY NAMES crtgfx
@@ -100,6 +132,41 @@ if(NOT WIN32 AND NOT APPLE)
     target_link_options(crtgfx_gpu_example PRIVATE
       "-Wl,-rpath-link,${CRT_EXAMPLE_VULKAN_LIB_DIR}")
   endif()
+  if(NOT CRTGFX_EXAMPLE_VULKAN_LIB)
+    message(FATAL_ERROR "Could not find a real host libvulkan.so/.so.1")
+  endif()
+  # A seventh real, confirmed bug (2026-09-13), found right after the
+  # sixth (CMAKE_FIND_LIBRARY_SUFFIXES, above): once CRTGFX_GPU_LIBRARY/
+  # CRTGFX_WINDOW_LIBRARY resolve to the *static* archives instead, the
+  # link fails outright with dozens of undefined references --
+  # vkCreateInstance/vkEnumeratePhysicalDevices/.../gpu_vulkan.c.o's own
+  # real Vulkan calls, and xkb_context_new/xkb_state_.../window_wayland.
+  # c.o's own real libxkbcommon calls. Both symbol sets used to resolve
+  # "for free" while linking the *shared* libcrtgfx(_gpu).so, because a
+  # shared library's own real NEEDED entries (recorded at ITS OWN link
+  # time) get silently walked and satisfied by ld's default `--allow-
+  # shlib-undefined`-for-transitive-needs handling -- but a static
+  # archive records no such thing: its members are just object code with
+  # plain undefined symbol references, which this standalone project's
+  # own plain find_library()-based link (bypassing the real `crtgfx_gpu`/
+  # `crtgfx_window` CMake targets' own INTERFACE_LINK_LIBRARIES entirely,
+  # see this file's fifth-bug comment above) never supplies. The in-tree/
+  # in-stage crtgfx_gpu CMake target already carries both as real link
+  # dependencies (crtgfx_gpu_targets.cmake's own `target_link_libraries(
+  # crtgfx_gpu PRIVATE ${CRTGFX_LINUX_VULKAN_LIB})`, and distribution/
+  # stages/04-gfx-media/CMakeLists.txt's own crtgfx_window INTERFACE_
+  # LINK_LIBRARIES re-listing libxkbcommon.a) -- CMake's own PRIVATE-
+  # dependency-of-a-STATIC-library propagation forwards both onto every
+  # real in-tree/in-stage consumer's link line automatically, which is
+  # exactly the propagation this standalone project's plain find_library()
+  # bypasses and must replicate by hand, same as every other fix in this
+  # file. Order matters here (ld only pulls a static archive member to
+  # satisfy an *already outstanding* undefined symbol): libxkbcommon.a
+  # must come after libcrtgfx.a (CRTGFX_WINDOW_LIBRARY, linked above) on
+  # the command line, which appending here achieves; libvulkan.so, being
+  # a real shared library, has no such ordering constraint.
+  target_link_libraries(crtgfx_gpu_example PRIVATE
+    "${CRTGFX_EXAMPLE_VULKAN_LIB}" "${CMAKE_SYSROOT}/lib/libxkbcommon.a")
   target_link_libraries(crtgfx_gpu_example PRIVATE "${CMAKE_SYSROOT}/lib/libunwind.so")
   # A fourth real, confirmed bug (2026-09-13), found right after fixing
   # the libunwind.so gap above: even with that fix, the rebuilt example
@@ -128,5 +195,40 @@ if(NOT WIN32 AND NOT APPLE)
   # transitive need for the same SONAME -- an already-loaded dependency
   # is never re-resolved via a different (here, absent) RPATH.
   target_link_libraries(crtgfx_gpu_example PRIVATE "${CMAKE_SYSROOT}/lib/libc++.so.1")
+  # A fifth real bug (2026-09-13) -- turned out to be the SAME one
+  # libcrtgfx/cmake/crtgfx_gpu_targets.cmake's own `crtgfx_gpu` INTERFACE
+  # target already found and fixed on 2026-09-03, just never reachable
+  # here: this example resolves CRTGFX_GPU_LIBRARY/CRTGFX_WINDOW_LIBRARY
+  # via plain find_library() file paths, not the real `crtgfx_gpu` CMake
+  # target, so that target's own INTERFACE `-Wl,--exclude-libs,ALL`
+  # never propagates onto this executable's own link line the way it
+  # does for every in-tree/in-stage consumer. Symptom looked identical
+  # to (and was originally misdiagnosed here as) a separate, deeper
+  # "real host library corrupts its own glibc calls" architecture
+  # problem: `crtgfx_gpu_window_demo: no usable GPU backend on this host
+  # (rc=0, device_count=0)` even with confirmed working `/dev/dri`
+  # permissions. Confirmed for real with a minimal standalone repro
+  # (a bare C program calling only vkCreateInstance/
+  # vkEnumeratePhysicalDevices against this same real
+  # `/lib/aarch64-linux-gnu/libvulkan.so.1`): built via crt-cc without
+  # this flag, `vkCreateInstance` returns `VK_ERROR_INCOMPATIBLE_DRIVER`
+  # (-9); `readelf --dyn-syms` on that binary shows `readdir`/`opendir`
+  # exported as GLOBAL DEFAULT symbols (crt-cc's own default, non-
+  # `-shared` link mode statically embeds libc.a's own implementations
+  # of them, unhidden); `LD_DEBUG=bindings` running it shows
+  # `libvulkan.so.1`'s own internal calls to `readdir`/`opendir`
+  # (`[GLIBC_2.17]`-versioned) binding to *this executable itself*
+  # instead of real glibc -- corrupting the real loader's own
+  # `/usr/share/vulkan/icd.d` manifest scan (confirmed via `strace`:
+  # the filenames it then tries to open are corrupted fragments, the
+  # signature of a `struct dirent` read at the wrong offsets). Adding
+  # this exact flag to the same standalone repro made both calls
+  # succeed (`rc=0, count=1`, the real `llvmpipe` device `vulkaninfo`
+  # also reports) -- matches `crtgfx_gpu_targets.cmake`'s own fix and
+  # comment for the identical root cause exactly. Necessary but NOT
+  # sufficient on its own here, though: see the sixth bug's own comment
+  # above (CMAKE_FIND_LIBRARY_SUFFIXES) for the transitive shared libc.so
+  # wrinkle this flag cannot reach by itself.
+  target_link_options(crtgfx_gpu_example PRIVATE -Wl,--exclude-libs,ALL)
 endif()
 
