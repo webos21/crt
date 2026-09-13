@@ -1254,9 +1254,14 @@ not yet a full socket/network event backend.
 `realpath` currently validates that the path exists, returns an absolute
 normalized path, and supports the common `resolved_path == NULL` allocation
 extension; it does not yet walk and expand every symlink component. Linux and
-macOS implement `readlink` and `symlink` through host syscalls. Windows returns
-`ENOSYS` for `readlink`/`symlink` until the project defines a reparse-point
-policy that is robust without requiring Developer Mode or elevated privileges.
+macOS implement `readlink` and `symlink` through host syscalls. Windows uses
+real filesystem symbolic links through `CreateSymbolicLinkA` and reads their
+reparse-point target with `FSCTL_GET_REPARSE_POINT`; `lstat` opens the reparse
+point itself instead of following it. The supported Windows build/porting
+contract requires Developer Mode. CRT intentionally does not substitute
+Cygwin/MSYS marker files, shortcut files, or MSYS2 deep copies because those
+representations are not transparent to native SDK consumers and do not all
+preserve POSIX dangling/relative-link semantics.
 Directory iteration is exposed through a bootstrap `dirent.h` and
 `opendir`/`readdir`/`closedir`. Linux uses `getdents64`, macOS uses
 `getdirentries64`, and Windows maps to `FindFirstFileA`/`FindNextFileA`.

@@ -212,6 +212,47 @@ substantive update.
   already-built `.so` rather than a static archive on this link,
   `-Wl,--exclude-libs,ALL` cannot reach it either. Not yet fixed; see
   `TODO.md`.
+- **Completed the native-Windows portion of path-with-spaces distribution
+  acceptance.** From extracted `03-gfx-simple` and `04-gfx-media` SDK copies,
+  with the SDK, source/build tree, install prefix, and external consumer build
+  directories all containing spaces, the installed C `gfx-simple` example
+  rebuilt and ran (`presented=1`), and the C++/Skia GPU example rebuilt and ran
+  with a real Ganesh surface (`backend=1`, `device_count=3`, `presented=1`).
+  FFmpeg 8.1.2 then configured successfully in 1688.8s, built with the ported
+  GNU Make at `-j4`, installed all selected headers/static archives into the
+  space-containing prefix, and linked and ran a fresh external
+  `avformat_version()` consumer from that installed result. The ordinary
+  Windows preset then rebuilt cleanly and passed all 117/117 CTest cases.
+
+  The fixes preserve compiler arguments as arrays through `crt-cc` and
+  `crt-c++`, keep wrapper-owned SDK paths as individual argv entries, and pass
+  port include/library/rpath directories through dedicated environment values
+  rather than flattening them into `CPPFLAGS`/`LDFLAGS`. Packaged Windows ports
+  use stable guest `/tools/...` command names when generated build files must
+  reparse them; FFmpeg's private temporary directory remains a real short host
+  path because its own configure script redirects through an unquoted temp
+  variable, while all user-controlled paths under acceptance retain spaces.
+  The generated `ffbuild/config.sh` prefix is quoted and installed `.pc` paths
+  are escaped by exact recipe patches, without modifying upstream source.
+  `--configure-only` also no longer writes a false installation-complete stamp.
+  The stage 02/03/04 runners no longer copy Windows source assets into a short
+  host-temporary tree, and generated CMake toolchains no longer flatten SDK
+  include paths into their initial flag strings. Shell/Python/recipe syntax and
+  an external installed-FFmpeg link/run passed. Linux/macOS execution of the
+  same cross-host wrapper changes remains active in `TODO.md` for real-host
+  evidence.
+
+- **Made Windows Developer Mode an explicit distribution and porting host
+  requirement.** The Windows PAL already implements `symlink()` with real
+  `CreateSymbolicLinkA` reparse points and implements `readlink()`/
+  `lstat()` against that representation. The supported contract now says so
+  directly: Windows builds and isolated source stages require Developer Mode,
+  and CRT will not substitute Cygwin marker files, MSYS shortcut files, or
+  MSYS2 deep copies. Those representations are not uniformly visible to the
+  native Python, CMake, LLVM, and Windows-loader consumers of an extracted SDK
+  and do not preserve all dangling, relative, and SONAME-style link behavior.
+  The stale import note that still described the Windows calls as `ENOSYS` was
+  corrected at the same time.
 
 ## 2026-09-12
 

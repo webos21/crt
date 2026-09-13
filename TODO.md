@@ -124,11 +124,13 @@ result in `HISTORY.md` before removing it here.
   scope on `libunwind.so`'s own link while confirming nothing in this
   project's own C++ exception-handling path still needs them exported,
   or some other isolation mechanism) -- not attempted yet.
-- [ ] **Close path-with-spaces acceptance.** Fix FFmpeg's
-  `-I${prefix}/include` argument handling and the remaining Windows `crt-cc`
-  and all-host `crt-c++` argument flattening, then repeat the affected isolated
-  transition with a space-containing install prefix. A short temporary
-  relocation remains diagnostic scaffolding, not completion evidence.
+- [ ] **Finish non-Windows path-with-spaces acceptance.** Native Windows is
+  complete, including extracted 03/04 SDK examples and a real FFmpeg
+  configure/`make -j4`/install/external-consumer run with spaces in the SDK,
+  source/build, install, and consumer paths; see `HISTORY.md` (2026-09-13).
+  On Linux and macOS, exercise the same all-host `crt-c++`, generated CMake
+  toolchain, and port include/library/rpath changes from space-containing SDK
+  and install paths. Record each real-host result before closing this item.
 
 ## Planned
 

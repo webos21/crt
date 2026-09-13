@@ -127,6 +127,15 @@ Run CMake from a shell where the SDK import libraries are discoverable. The
 CRT Windows target is `*-w64-mingw32` for the common Itanium ABI lane even
 though the host SDK supplies the native system and graphics import libraries.
 
+Windows **Developer Mode must be enabled** for every supported CRT build and
+porting environment. CRT deliberately implements Bionic/POSIX `symlink()` as
+a real Windows filesystem symbolic link, and source extraction plus GNU-style
+build/install steps rely on dangling, relative, and SONAME-style links. CRT
+does not emulate these links as Cygwin marker files, MSYS shortcut files, or
+MSYS2 deep copies. A Windows run without Developer Mode is outside the
+supported build contract and may fail with `EPERM` or a host permission error
+when it first creates a symbolic link.
+
 ### macOS
 
 Install Xcode Command Line Tools, CMake, Ninja, and Python 3. Metal and the

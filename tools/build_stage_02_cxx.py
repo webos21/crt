@@ -139,14 +139,11 @@ def main() -> None:
     if output.exists():
         raise SystemExit(f"output already exists: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
-    # Keep partial products away from the requested output. The imported
-    # runtime is first built and tested in a short host-temporary path; only a
-    # completely verified cumulative SDK is copied into place. The verified
-    # asset is allowed to live in a path containing spaces, but the current
-    # POSIX-shell Windows wrappers still flatten compiler argv internally.
-    # Copy build inputs to a short temporary path until that general wrapper
-    # limitation is fixed and exercised separately by consumer acceptance.
-    temp_root = Path(tempfile.mkdtemp(prefix="crt-stage-02-cxx-"))
+    # Keep partial products away from the requested output. Build below the
+    # caller-owned work root so a space-containing work path exercises the
+    # same wrapper contract instead of being hidden by the host temp folder.
+    work.mkdir(parents=True, exist_ok=True)
+    temp_root = Path(tempfile.mkdtemp(prefix="crt-stage-02-cxx-", dir=work))
     staged = temp_root / "sdk"
     shutil.copytree(sdk, staged)
     integration = temp_root / "integration"
@@ -212,10 +209,8 @@ def main() -> None:
         shutil.copy2(successor_recipe, recipe_dest)
 
     # The smoke executable also passes through the current shell-based
-    # compiler wrapper. Keep its path in the same short temporary tree as the
-    # runtime build; --work-root remains the runner-owned location for future
-    # diagnostics and stages whose tools can preserve arbitrary argv.
-    work.mkdir(parents=True, exist_ok=True)
+    # compiler wrapper. Keep it in the same runner-owned work tree as the
+    # runtime build so a space-containing --work-root covers this command too.
     smoke = temp_root / ("imported_libcxx_test.exe" if target_os == "windows" else "imported_libcxx_test")
     test_command = [
         sys.executable, str(integration / "tools" / "test_libcxx_runtime.py"),

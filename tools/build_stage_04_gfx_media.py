@@ -738,14 +738,7 @@ def main() -> None:
         if target_os == "windows" and not os.environ.get("CRT_WINDOWS_SDK_LIBPATH"):
             raise SystemExit("CRT_WINDOWS_SDK_LIBPATH is required on Windows")
 
-        # Preserve the path-with-spaces acceptance input, while retaining the
-        # same explicit Windows wrapper workaround as stages 02 and 03.
         build_asset = asset
-        if target_os == "windows":
-            build_asset = temp_root / "source"
-            if build_asset.exists():
-                remove_tree(build_asset)
-            shutil.copytree(asset, build_asset)
         touch_tree(build_asset)
 
         # Hash the predecessor's real content, not its volatile packaging

@@ -111,6 +111,15 @@ Windows packages are emitted as `.zip`; Linux and macOS packages as
 scripts, wrappers, and `crt-toolchain.cmake` in addition to the cumulative
 CRT and required redistributable dependency headers and libraries.
 
+Windows build and source-stage hosts must have Developer Mode enabled. The
+supported Windows contract uses real filesystem symbolic links for the
+Bionic/POSIX `symlink()` surface, upstream source-archive links, and GNU-style
+install aliases. Cygwin/MSYS marker or shortcut links and MSYS2's default
+deep-copy behavior are deliberately not alternative backends: they are not
+transparent to the native Python, CMake, LLVM, and Windows-loader processes
+that consume a CRT SDK. Disabling Developer Mode therefore makes the host
+unsupported for producing or validating Windows distributions.
+
 Each directory also carries the CRT mksh/toybox shell environment, optional
 Python porting drivers, recipes/tests/shims, and the examples appropriate to
 that stage. Python is an orchestration convenience and is declared in the

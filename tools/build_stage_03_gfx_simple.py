@@ -249,9 +249,11 @@ def main() -> None:
     if output.exists():
         raise SystemExit(f"output already exists: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
-    Path(args.work_root).resolve().mkdir(parents=True, exist_ok=True)
+    work_root = Path(args.work_root).resolve()
+    work_root.mkdir(parents=True, exist_ok=True)
 
-    temp_root = Path(tempfile.mkdtemp(prefix="crt-stage-03-gfx-simple-"))
+    temp_root = Path(tempfile.mkdtemp(
+        prefix="crt-stage-03-gfx-simple-", dir=work_root))
     staged = temp_root / "sdk"
     shutil.copytree(sdk, staged)
     manifest_path = staged / "manifest.json"
@@ -259,16 +261,7 @@ def main() -> None:
     target_os = manifest["target"]["os"]
     env = runtime_env(staged, manifest)
 
-    # The verified source asset may be extracted below a path containing
-    # spaces, but the current Windows crt-cc.cmd -> mksh -> crt-cc chain
-    # still flattens quoted compiler argv. Keep this the same explicit,
-    # Windows-only workaround used by build_stage_02_cxx.py: preserve the
-    # acceptance input/output paths, but compile from a short temporary copy.
-    # This does not claim that the general wrapper limitation is fixed.
     build_asset = asset
-    if target_os == "windows":
-        build_asset = temp_root / "source"
-        shutil.copytree(asset, build_asset)
 
     if target_os == "linux":
         install_xkbcommon(build_asset, staged, temp_root, manifest, env)

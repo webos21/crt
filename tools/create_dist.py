@@ -308,8 +308,8 @@ endif()
 if(DEFINED ENV{CRT_RANLIB} AND NOT "$ENV{CRT_RANLIB}" STREQUAL "")
   set(CMAKE_RANLIB "$ENV{CRT_RANLIB}" CACHE FILEPATH "External ranlib")
 endif()
-set(CMAKE_C_FLAGS_INIT "-ffreestanding -fno-builtin -nostdinc -isystem${CRT_DISTRIBUTION_ROOT}/include")
-set(CMAKE_CXX_FLAGS_INIT "-ffreestanding -fno-builtin -nostdinc -nostdinc++ -isystem${CRT_DISTRIBUTION_ROOT}/include/c++/v1 -isystem${CRT_DISTRIBUTION_ROOT}/include")
+set(CMAKE_C_FLAGS_INIT "-ffreestanding -fno-builtin -nostdinc")
+set(CMAKE_CXX_FLAGS_INIT "-ffreestanding -fno-builtin -nostdinc -nostdinc++")
 # CMake's own default rpath computation, once CMAKE_SYSROOT is set above,
 # treats it as a real target-device filesystem root and strips it from
 # any absolute library path found underneath -- appropriate for real

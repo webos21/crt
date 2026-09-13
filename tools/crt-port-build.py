@@ -381,6 +381,13 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
     sysroot_env = path_for_shell(sysroot) if is_native_windows_configure(target_os) else str(sysroot)
     port_prefix_env = path_for_shell(port_prefix) if is_native_windows_configure(target_os) else str(port_prefix)
     tools_dir_env = path_for_shell(root / "tools") if is_native_windows_configure(target_os) else str(root / "tools")
+    if packaged_sdk and is_native_windows_configure(target_os) and use_crt_shell:
+        # The CRT shell resolves guest-absolute paths below CRT_ROOTFS. Use a
+        # stable, space-free command name for wrapper scripts stored inside a
+        # packaged SDK; FFmpeg persists --cc/--ar command strings in config.mak
+        # and necessarily reparses them later. The SDK's host extraction path
+        # may contain spaces, but `/tools/...` never does from the guest view.
+        root_env = ""
 
     env["CRT_SYSROOT"] = sysroot_env
     env["CRT_TARGET_OS"] = target_os
@@ -412,16 +419,17 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
             env["TMPDIR"] = path_for_crt_shell(
                 Path(os.environ.get("TEMP") or os.environ.get("TMP") or tempfile.gettempdir()))
             if packaged_sdk:
-                # mksh needs a leading-slash absolute path, but this value is
-                # also consumed by configure scripts when they construct argv
-                # for *native* Windows tools. FFmpeg, concretely, gives
-                # $FFTMPDIR/test.a directly to llvm-ar during its response-file
-                # probe. Plain "/tmp" works through the CRT PAL but has no
-                # meaning to that native process. Use the packaged SDK's real,
-                # writable tmp directory in POSIX-drive form: CRT programs map
-                # it in translate_path_for_host(), while crt-native-tool maps
-                # the same positional argument back to C:/... for LLVM.
-                env["TMPDIR"] = path_for_msys_shell(rootfs / "tmp")
+                # This value is consumed by both CRT programs and native LLVM
+                # tools.  Keep it as a real Windows drive path which both can
+                # open, normalize its separators for mksh, and use the 8.3 form
+                # when available.  The latter is not a workaround for the SDK,
+                # source, build, or install prefix under test: FFmpeg's own
+                # configure redirects to $FFTMPDIR without quoting it, so its
+                # private scratch directory independently cannot contain a
+                # space.  All user-controlled distribution paths remain in
+                # their original, space-containing form throughout the build.
+                host_tmp = Path(os.environ.get("TEMP") or os.environ.get("TMP") or tempfile.gettempdir())
+                env["TMPDIR"] = path_for_crt_shell(windows_short_path(host_tmp))
         else:
             rootfs_path = os.pathsep.join(
                 str(rootfs / entry) for entry in ("system/bin", "bin", "usr/bin"))
@@ -604,9 +612,14 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
                 env[tool_var] = native_windows_tool_command(root, root_env, shell, target_os, tool_path)
     env["PKG_CONFIG_LIBDIR"] = f"{port_prefix_env}/lib/pkgconfig"
     env["PKG_CONFIG_PATH"] = env["PKG_CONFIG_LIBDIR"]
-    include_flags = f"-I{port_prefix_env}/include"
-    lib_flags = f"-L{port_prefix_env}/lib"
-    env["CPPFLAGS"] = join_flags(include_flags, env.get("CRT_EXTRA_CPPFLAGS", ""))
+    # CPPFLAGS/LDFLAGS are shell strings, not argv vectors. Embedding a
+    # space-containing prefix in `-I<prefix>/include` or `-L<prefix>/lib`
+    # loses the argument boundary when an upstream configure/Makefile expands
+    # the variable. Pass these project-owned search paths through dedicated
+    # environment entries; crt-cc/crt-c++ append each as one quoted argument.
+    env["CRT_PORT_INCLUDE_DIR"] = f"{port_prefix_env}/include"
+    env["CRT_PORT_LIBRARY_DIR"] = f"{port_prefix_env}/lib"
+    env["CPPFLAGS"] = join_flags(env.get("CRT_EXTRA_CPPFLAGS", ""))
     env["CFLAGS"] = join_flags(env.get("CRT_PORT_CFLAGS", "-O2"), env.get("CRT_EXTRA_CFLAGS", ""))
     env["CXXFLAGS"] = join_flags(env.get("CRT_PORT_CXXFLAGS", "-O2"), env.get("CRT_EXTRA_CXXFLAGS", ""))
     # -rpath here (macOS/Linux only -- PE/COFF has no rpath concept, and
@@ -628,8 +641,9 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
     # system's own zlib package) instead of this project's own,
     # freshly-built one sitting right next to libpng16.so in the same
     # PORT_PREFIX/lib directory.
-    rpath_flag = f"-Wl,-rpath,{port_prefix_env}/lib" if target_os in ("macos", "linux") else ""
-    env["LDFLAGS"] = join_flags(lib_flags, rpath_flag, env.get("CRT_EXTRA_LDFLAGS", ""))
+    if target_os in ("macos", "linux"):
+        env["CRT_PORT_RPATH_DIR"] = f"{port_prefix_env}/lib"
+    env["LDFLAGS"] = join_flags(env.get("CRT_EXTRA_LDFLAGS", ""))
     env["LIBS"] = env.get("CRT_EXTRA_LIBS", "")
     env["DESTDIR"] = ""
     env["CRT_PORT_BUILD_DIR"] = build_dir_env
@@ -793,7 +807,7 @@ def apply_recipe_env(env, recipe, target_os, root, preset_build_dir=None, work_b
 
 
 def substitute_recipe_value(value, root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os):
-    replacements = {
+    path_replacements = {
         "@ROOT@": root,
         "@BUILD_DIR@": preset_build_dir,
         "@WORK_ROOT@": work_build_dir,
@@ -801,9 +815,16 @@ def substitute_recipe_value(value, root, preset_build_dir, work_build_dir, sysro
         "@PORT_PREFIX@": port_prefix,
     }
     result = str(value)
-    for token, path in replacements.items():
+    for token, path in path_replacements.items():
         text = path_for_crt_shell(path) if target_os == "windows" else str(path)
         result = result.replace(token, text)
+    prefix_for_posix_shell = (
+        path_for_msys_shell(port_prefix) if target_os == "windows"
+        else str(port_prefix)
+    )
+    result = result.replace("@PORT_PREFIX_POSIX@", prefix_for_posix_shell)
+    result = result.replace(
+        "@PORT_PREFIX_PKGCONFIG@", prefix_for_posix_shell.replace(" ", "\\ "))
     return result
 
 
@@ -932,7 +953,11 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
         # (cflags/env/make_args/install_args/test, just below) already
         # gets this right via path_for_crt_shell() on windows; configure_
         # args just never matched that -- fixed to match here.
-        root_for_configure = path_for_crt_shell(root) if target_os == "windows" else str(root)
+        if (target_os == "windows" and use_crt_shell and
+                (root / "manifest.json").is_file()):
+            root_for_configure = ""
+        else:
+            root_for_configure = path_for_crt_shell(root) if target_os == "windows" else str(root)
         configure = [arg.replace("@ROOT@", root_for_configure) for arg in configure]
         configure = [arg.replace("@PORT_PREFIX@", port_prefix_text) for arg in configure]
         # @AR@: same class of gap as @ROOT@ just above, found immediately
@@ -1100,12 +1125,19 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
             patch_path = work / patch_entry["file"]
             progress(f"{port_name}: post-configure patch {patch_entry['file']}")
             patch_text = patch_path.read_text(encoding="utf-8")
-            if patch_entry["find"] not in patch_text:
+            patch_find = substitute_recipe_value(
+                patch_entry["find"], root, preset_build_dir, work,
+                sysroot, port_prefix, target_os)
+            patch_replace = substitute_recipe_value(
+                patch_entry["replace"], root, preset_build_dir, work,
+                sysroot, port_prefix, target_os)
+            if patch_find not in patch_text:
                 raise SystemExit(
                     f"{port_name}: post_configure_patch text not found in {patch_path}\n"
-                    f"looking for: {patch_entry['find']!r}"
+                    f"looking for: {patch_find!r}"
                 )
-            patch_path.write_text(patch_text.replace(patch_entry["find"], patch_entry["replace"]), encoding="utf-8")
+            patch_path.write_text(
+                patch_text.replace(patch_find, patch_replace), encoding="utf-8")
     if configure_only:
         progress(f"{port_name}: configure-only stop")
         return
@@ -1154,7 +1186,11 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
     # very recipe this function's own pre-existing comment, just below,
     # already cites as make_args/install_args's reason to exist) would hit
     # a real NameError referencing it unconditionally here.
-    root_for_make_args = path_for_crt_shell(root) if target_os == "windows" else str(root)
+    if (target_os == "windows" and use_crt_shell and
+            (root / "manifest.json").is_file()):
+        root_for_make_args = ""
+    else:
+        root_for_make_args = path_for_crt_shell(root) if target_os == "windows" else str(root)
     override_make_args = [
         arg.replace("@PORT_PREFIX@", port_prefix_text).replace("@ROOT@", root_for_make_args)
         for arg in build.get("target_overrides", {}).get(target_os, {}).get("make_args", [])
@@ -1237,13 +1273,19 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
         patch_path = port_prefix / patch_entry["file"]
         progress(f"{port_name}: post-install patch {patch_entry['file']}")
         patch_text = patch_path.read_text(encoding="utf-8")
-        if patch_entry["find"] not in patch_text:
+        patch_find = substitute_recipe_value(
+            patch_entry["find"], root, preset_build_dir, work,
+            sysroot, port_prefix, target_os)
+        patch_replace = substitute_recipe_value(
+            patch_entry["replace"], root, preset_build_dir, work,
+            sysroot, port_prefix, target_os)
+        if patch_find not in patch_text:
             raise SystemExit(
                 f"{port_name}: post_install_patch text not found in {patch_path}\n"
-                f"looking for: {patch_entry['find']!r}"
+                f"looking for: {patch_find!r}"
             )
         patch_path.write_text(
-            patch_text.replace(patch_entry["find"], patch_entry["replace"]),
+            patch_text.replace(patch_find, patch_replace),
             encoding="utf-8",
         )
 
@@ -1544,6 +1586,11 @@ def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, por
         build_amalgamation_port(preset_build_dir, work, port_prefix, recipe, env, target_os)
     elif build["system"] == "android_host_tool":
         build_android_host_tool_port(preset_build_dir, work, port_prefix, recipe, env, target_os)
+    if configure_only:
+        # A configure probe has not installed the port. Writing the ordinary
+        # completion stamp here made the next real build silently skip it.
+        built.add(port)
+        return
     if not configure_only:
         alias_unix_static_libs_for_windows_link(port_prefix, target_os)
     stamp.parent.mkdir(parents=True, exist_ok=True)
