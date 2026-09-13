@@ -72,84 +72,14 @@ in-tree CRT headers, libraries, and build artifacts, rebuild and run packaged
 examples, and exercise the required tests and external consumers. Record each
 result in `HISTORY.md` before removing it here.
 
-- [ ] **Finish Linux `03-gfx-simple -> 04-gfx-media` acceptance.**
-  `examples/gfx-gpu` is now fully done: all eight stage tests pass, and
-  it builds, links, loads, enumerates a real Vulkan device
-  (`device_count=1`), creates a real native-Wayland-backed window, and
-  reaches live GPU frame presentation (`presented=1`) against a real
-  packaged SDK -- a real `--reuse-work-root` temp-directory regression, a
-  real `libcrtgfx.so` RPATH gap, a real `readdir`/`opendir` symbol-
-  collision gap, a real `libunwind.so` `__register_frame`/
-  `__deregister_frame` symbol-collision gap, a missing
-  `CRTGFX_HAVE_NATIVE_WAYLAND` compile-definition gap in this standalone
-  stage project, and a missing `libxdg-shell-protocol.a`/real-host-
-  `libwayland-client.so` packaging-and-link gap were all found and fixed
-  reaching that state -- see `HISTORY.md`'s 2026-09-13 entry for the full
-  story. **`examples/gfx-skia` is not done yet -- blocked on the real,
-  still-open crash below, not a packaging defect:** it now gets all the
-  way to a real Ganesh-wrapped swapchain surface (a real, separate
-  `VK_IMAGE_USAGE_TRANSFER_SRC_BIT` gap in `crtgfx_skia_wrap_gpu_surface`
-  was found and fixed reaching *that* state, also in the 2026-09-13
-  entry), then segfaults in the draw/present path that follows -- see the
-  dedicated item below. `--reuse-work-root` (plus `CRT_STAGE_KEEP_TMP=1`
-  for standalone example-only iteration without reconfiguring the whole
-  stage) is fine for iteration once the real blocker below is fixed;
-  final evidence still requires the normal fresh-build path, AND
-  regenerating the pinned stage-source asset (`ninja crt-stage-04-source`,
-  then copying the resulting `stage-sources/04-gfx-media.json` over the
-  target dist's own `stages/recipes/04-gfx-media.json`) whenever
-  `examples/gfx-gpu`, `examples/gfx-skia`, `distribution/stages/
-  04-gfx-media/CMakeLists.txt`, or anything else the asset bundles
-  changes -- the isolated acceptance test extracts that pinned tarball,
-  not the live repo tree, so an uncommitted (or even committed but not
-  yet re-pinned) source change is silently invisible to it otherwise.
-  Also note: `crtgfx-wayland-build` (produces `libxdg-shell-protocol.a`,
-  needed for `CRTGFX_HAVE_NATIVE_WAYLAND` to ever be enabled at all) is
-  not wired into any aggregate `ninja` target's own `DEPENDS` -- run it
-  once by hand (`ninja crtgfx-wayland-build`, then reconfigure) on a
-  fresh `out/`, matching `libcrtgfx/CMakeLists.txt`'s own existing
-  `CRTGFX_LINUX_WAYLAND_CLIENT_LIB`-not-found message. Keep CPU/FFmpeg/
-  Skia evidence distinct from live Vulkan/native-Wayland presentation
-  evidence.
-- [ ] **Root-cause the `SkSL::stod` crash blocking live `examples/
-  gfx-skia` presentation.** Found 2026-09-13 (`HISTORY.md`) chasing the
-  now-fixed `crtgfx_skia_wrap_gpu_surface` bug: with that fixed,
-  `crtgfx_skia_gpu_window_demo` gets a real, non-null Ganesh-wrapped
-  `SkSurface` for the first time, then segfaults somewhere in the
-  draw/present path that follows (`crtgfx_test::draw_reference_scene()`/
-  `crtgfx_skia_gpu_surface_present()`, both in `libcrtgfx/tools/
-  skia_gpu_window_demo.cc`). A `gdb -batch -ex run -ex bt` backtrace
-  showed an alarmingly deep (~38,500-frame) stack, every single frame
-  reporting the identical return address inside `SkSL::stod(std::
-  basic_string_view<char>, float*)` -- not yet distinguished between a
-  genuine unbounded/runaway recursion inside Skia's own SkSL numeric-
-  literal parser (plausible: `SkSL::stod` is Skia's own hand-rolled
-  locale-independent `strtod`-equivalent, used while compiling an SkSL
-  shader string, and this project's own libc's locale/numeric-parsing
-  behavior has not been cross-checked against what Skia's implementation
-  assumes) and a corrupted or frame-pointer-omitted stack confusing
-  `gdb`'s own unwinder into looping on one address (this stage's own
-  Skia build may not preserve frame pointers -- not yet checked). Not
-  part of the symbol-collision/packaging-gap family the rest of this
-  investigation was -- a genuinely separate, deeper Skia-internal (or
-  toolchain-ABI/locale) issue. Next steps, none attempted yet: check
-  `tools/build_skia.py`'s own GN args for frame-pointer/backtrace-quality
-  settings (`enable_frame_pointers`-equivalent) before trusting the
-  backtrace shape further; find which real SkSL shader source (Skia's
-  own built-in Ganesh Vulkan shaders, compiled lazily on first real draw)
-  is actually being parsed when this first triggers; and check whether
-  this project's own libc `strtof`/locale handling diverges from what
-  `SkSL::stod` expects. `CRT_STAGE_KEEP_TMP=1` plus manually rebuilding
-  just `crtgfx_skia_objects`/`libskia.a` (via each stage's own preserved
-  `gfx-media-build`/`skia-build` ninja directories, `CRT_SYSROOT` set by
-  hand) is far faster than a full stage rebuild for iterating on this.
 - [ ] **Finish non-Windows path-with-spaces acceptance.** Native Windows is
   complete, including extracted 03/04 SDK examples and a real FFmpeg
   configure/`make -j4`/install/external-consumer run with spaces in the SDK,
   source/build, install, and consumer paths; see `HISTORY.md` (2026-09-13).
-  On Linux and macOS, exercise the same all-host `crt-c++`, generated CMake
-  toolchain, and port include/library/rpath changes from space-containing SDK
-  and install paths. Record each real-host result before closing this item.
+  The real macOS run is currently in progress. Linux still needs a recorded
+  run of the same all-host `crt-c++`, generated CMake toolchain, and port
+  include/library/rpath changes from space-containing SDK and install paths.
+  Record each real-host result before closing this item.
 
 ## Planned
 
@@ -203,7 +133,7 @@ JavaScript application-runtime layer.
   contract requires it. Keep the space-containing-prefix run in the active
   acceptance list until it passes.
 - Extend `04-gfx-media -> 05-js` only after the real QuickJS core and bindings
-  exist and the active Linux and path-with-spaces prerequisites are closed.
+  exist and the active path-with-spaces prerequisite is closed.
   Apply the same pinned asset, predecessor-only build, test, external-consumer,
   verification, and atomic-publish contract as the earlier transitions.
 

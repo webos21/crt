@@ -129,13 +129,10 @@ target.
   Graphics/Media, and JavaScript stages.
 - Each cumulative stage can also be bootstrapped and verified in isolation,
   purely from its own predecessor's already-packaged SDK rather than the
-  in-repo build tree. `02-cxx -> 03-gfx-simple` is done on Linux, Windows, and
-  macOS; the complete `01-c -> 02-cxx -> 03-gfx-simple` chain is explicitly
-  recorded on Windows and macOS, while the Linux `01-c -> 02-cxx` evidence
-  remains open. `03-gfx-simple -> 04-gfx-media`, with Skia and FFmpeg genuinely
-  enabled (not the in-repo cumulative pass's default-OFF state), is complete
-  on macOS and Windows; Linux passes the 8 stage tests but still needs the
-  packaged-example, final verification, and atomic-publish checks.
+  in-repo build tree. The complete predecessor-only chain through
+  `03-gfx-simple -> 04-gfx-media`, with Skia and FFmpeg genuinely enabled
+  (not the in-repo cumulative pass's default-OFF state), is complete on
+  Linux, Windows, and macOS.
 - FFmpeg hardware decode/zero-copy and the QuickJS core proceed on top of the
   completed GPU rendering/presentation contract.
 - JavaScript media/gfx binding follows the stable native contracts, using a
@@ -248,10 +245,9 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-1. Finish the Linux option-ON `03-gfx-simple -> 04-gfx-media` external-example,
-   `verify_dist.py`, and atomic-publish checks; separately establish the
-   missing Linux `01-c -> 02-cxx` isolated evidence.
-2. Close distribution acceptance gaps: space-containing prefixes, absolute
+1. Finish the macOS path-with-spaces acceptance now in progress, then record
+   the corresponding Linux path-with-spaces evidence.
+2. Close the remaining distribution hardening gaps: absolute
    path leakage, external consumers, and generic dependency validation.
 3. Enable and verify real FFmpeg hardware decode per host while retaining the
    software/CPU fallback as the correctness baseline.

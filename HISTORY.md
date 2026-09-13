@@ -10,6 +10,17 @@ substantive update.
 
 ## 2026-09-13
 
+- **Completed Linux isolated-stage acceptance through the option-ON
+  `03-gfx-simple -> 04-gfx-media` transition on real hardware.** The final
+  run closed the previously recorded `examples/gfx-skia`/`SkSL::stod`
+  interruption and completed the remaining packaged-example, distribution
+  verification, and atomic-publication checks. Together with the separately
+  recorded `01-c -> 02-cxx` result below and the already-complete
+  `02-cxx -> 03-gfx-simple` transition, Linux now has the same complete
+  predecessor-only chain through `04-gfx-media` as Windows and macOS. This
+  completion was reported from the real Linux acceptance host; it was not
+  re-run on the Windows documentation host.
+
 - **Established Linux `01-c -> 02-cxx` isolated evidence.** Rebuilt the
   full dist chain from a clean `out/` on real Linux/aarch64 hardware,
   extracted a fresh `dist/01-c`, and ran the isolated `crt-stage-build.py`

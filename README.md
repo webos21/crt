@@ -58,13 +58,10 @@ The normal repository build proves that every later binary package inherits
 the preceding installed `dist` tree. The stronger source-stage boundary is
 also implemented: a packaged predecessor SDK fetches a SHA-256-pinned CRT
 GitHub Release source asset and builds/tests the next stage without using the
-repository build tree. `02-cxx -> 03-gfx-simple` is verified on all three
-hosts; the complete `01-c -> 02-cxx -> 03-gfx-simple` chain is explicitly
-recorded on Windows and macOS; and the option-ON `03-gfx-simple ->
-04-gfx-media` transition is complete on Windows and macOS, with Linux final
-example/verification/publication checks still open. `04-gfx-media -> 05-js`
-has not yet been added. Full details, artifact layout, package naming, and
-acceptance rules are in
+repository build tree. The complete predecessor-only chain through the
+option-ON `03-gfx-simple -> 04-gfx-media` transition is verified on Linux,
+Windows, and macOS. `04-gfx-media -> 05-js` has not yet been added. Full
+details, artifact layout, package naming, and acceptance rules are in
 [`docs/distribution.md`](docs/distribution.md).
 
 The current `05-js` package contains the installable `libcrtjs` skeleton. The
