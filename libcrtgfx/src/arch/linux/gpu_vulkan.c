@@ -404,6 +404,7 @@ typedef uint32_t VkCompositeAlphaFlagBitsKHR;
 #define CRTGFX_VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR 0x00000001u
 
 typedef VkFlags VkImageUsageFlags;
+#define CRTGFX_VK_IMAGE_USAGE_TRANSFER_SRC_BIT 0x00000001u
 #define CRTGFX_VK_IMAGE_USAGE_TRANSFER_DST_BIT 0x00000002u
 #define CRTGFX_VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT 0x00000010u
 
@@ -1088,7 +1089,39 @@ crtgfx_result crtgfx_gpu_vulkan_surface_create(
   swapchain_info.imageColorSpace = chosen_color_space;
   swapchain_info.imageExtent = extent;
   swapchain_info.imageArrayLayers = 1;
+  /* A tenth real, confirmed bug (2026-09-13), found chasing crtgfx_skia_
+   * wrap_gpu_surface() (skia_bridge.cc) failing at GrVkGpu::onWrapBackend
+   * RenderTarget()'s own check_image_info() -- confirmed with a one-off
+   * debug fprintf patched directly into a throwaway extracted copy of
+   * Skia's own vendored src/gpu/ganesh/vk/GrVkGpu.cc: Ganesh unconditionally
+   * requires BOTH VK_IMAGE_USAGE_TRANSFER_SRC_BIT and _DST_BIT set on any
+   * VkImage it wraps as a render target (that file's own check_image_info(),
+   * "We currently require everything to be made with transfer bits set"),
+   * but this swapchain was only ever created with _DST_BIT -- missing
+   * _SRC_BIT unconditionally failed every real Ganesh-Vulkan wrap of a live
+   * swapchain image, even though the plain (non-Ganesh) crtgfx_gpu_surface_
+   * clear()/_present() path (this same file) never needed it and kept
+   * working throughout this whole investigation. Added conditionally, not
+   * unconditionally: VkSurfaceCapabilitiesKHR::supportedUsageFlags is the
+   * real, spec-documented source of truth for which VK_IMAGE_USAGE_* bits a
+   * given surface's own presentable images can actually be created with --
+   * every real desktop Linux Vulkan/WSI implementation this project targets
+   * advertises TRANSFER_SRC_BIT support (confirmed for real: llvmpipe on
+   * this host does), but a future/unusual host that does not would
+   * otherwise fail vkCreateSwapchainKHR() outright with VK_ERROR_
+   * INITIALIZATION_FAILED for requesting an unsupported usage bit -- the
+   * same probe-first, zero-regression-risk discipline as this file's own
+   * VK_KHR_wayland_surface/VK_KHR_swapchain extension probing
+   * (crtgfx_gpu_vulkan_create_instance()/_device_create()). A host without
+   * TRANSFER_SRC_BIT support here also cannot support crtgfx_skia_wrap_
+   * gpu_surface() at all -- skia_bridge.cc's own image_info.fImageUsageFlags
+   * must exactly match this swapchain's own real, created usage flags (a
+   * mismatch there is exactly this same bug moved one layer over), so it
+   * mirrors this same conditional. */
   swapchain_info.imageUsage = CRTGFX_VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | CRTGFX_VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  if ((caps.supportedUsageFlags & CRTGFX_VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0u) {
+    swapchain_info.imageUsage |= CRTGFX_VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+  }
   swapchain_info.imageSharingMode = CRTGFX_VK_SHARING_MODE_EXCLUSIVE;
   swapchain_info.queueFamilyIndexCount = 0;
   swapchain_info.pQueueFamilyIndices = NULL;
@@ -1166,6 +1199,7 @@ crtgfx_result crtgfx_gpu_vulkan_surface_create(
   surface->vk_images = image_array;
   surface->vk_image_count = real_image_count;
   surface->vk_format = chosen_format;
+  surface->vk_image_usage_flags = swapchain_info.imageUsage;
   surface->width = extent.width;
   surface->height = extent.height;
   surface->vk_image_available_semaphore = (void*)image_available_sem;
@@ -1484,7 +1518,39 @@ crtgfx_result crtgfx_gpu_vulkan_surface_resize(struct crtgfx_gpu_surface* surfac
   swapchain_info.imageColorSpace = chosen_color_space;
   swapchain_info.imageExtent = extent;
   swapchain_info.imageArrayLayers = 1;
+  /* A tenth real, confirmed bug (2026-09-13), found chasing crtgfx_skia_
+   * wrap_gpu_surface() (skia_bridge.cc) failing at GrVkGpu::onWrapBackend
+   * RenderTarget()'s own check_image_info() -- confirmed with a one-off
+   * debug fprintf patched directly into a throwaway extracted copy of
+   * Skia's own vendored src/gpu/ganesh/vk/GrVkGpu.cc: Ganesh unconditionally
+   * requires BOTH VK_IMAGE_USAGE_TRANSFER_SRC_BIT and _DST_BIT set on any
+   * VkImage it wraps as a render target (that file's own check_image_info(),
+   * "We currently require everything to be made with transfer bits set"),
+   * but this swapchain was only ever created with _DST_BIT -- missing
+   * _SRC_BIT unconditionally failed every real Ganesh-Vulkan wrap of a live
+   * swapchain image, even though the plain (non-Ganesh) crtgfx_gpu_surface_
+   * clear()/_present() path (this same file) never needed it and kept
+   * working throughout this whole investigation. Added conditionally, not
+   * unconditionally: VkSurfaceCapabilitiesKHR::supportedUsageFlags is the
+   * real, spec-documented source of truth for which VK_IMAGE_USAGE_* bits a
+   * given surface's own presentable images can actually be created with --
+   * every real desktop Linux Vulkan/WSI implementation this project targets
+   * advertises TRANSFER_SRC_BIT support (confirmed for real: llvmpipe on
+   * this host does), but a future/unusual host that does not would
+   * otherwise fail vkCreateSwapchainKHR() outright with VK_ERROR_
+   * INITIALIZATION_FAILED for requesting an unsupported usage bit -- the
+   * same probe-first, zero-regression-risk discipline as this file's own
+   * VK_KHR_wayland_surface/VK_KHR_swapchain extension probing
+   * (crtgfx_gpu_vulkan_create_instance()/_device_create()). A host without
+   * TRANSFER_SRC_BIT support here also cannot support crtgfx_skia_wrap_
+   * gpu_surface() at all -- skia_bridge.cc's own image_info.fImageUsageFlags
+   * must exactly match this swapchain's own real, created usage flags (a
+   * mismatch there is exactly this same bug moved one layer over), so it
+   * mirrors this same conditional. */
   swapchain_info.imageUsage = CRTGFX_VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | CRTGFX_VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  if ((caps.supportedUsageFlags & CRTGFX_VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0u) {
+    swapchain_info.imageUsage |= CRTGFX_VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+  }
   swapchain_info.imageSharingMode = CRTGFX_VK_SHARING_MODE_EXCLUSIVE;
   swapchain_info.queueFamilyIndexCount = 0;
   swapchain_info.pQueueFamilyIndices = NULL;
@@ -1529,6 +1595,7 @@ crtgfx_result crtgfx_gpu_vulkan_surface_resize(struct crtgfx_gpu_surface* surfac
   surface->vk_images = new_image_array;
   surface->vk_image_count = real_image_count;
   surface->vk_format = chosen_format;
+  surface->vk_image_usage_flags = swapchain_info.imageUsage;
   surface->width = extent.width;
   surface->height = extent.height;
   return CRTGFX_OK;

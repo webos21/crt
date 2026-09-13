@@ -193,25 +193,130 @@ substantive update.
   original `dlopen`/symbol-collision question for good.
 
   **A further, distinct instance of the same collision family surfaced
-  immediately afterward, now blocking window creation instead of GPU
-  enumeration -- left open as its own separate item, not folded into
-  this one.** With device enumeration now fixed, the same run hit
-  `crtgfx_window_create failed (-2)` (`CRTGFX_ERROR_UNSUPPORTED`),
-  preceded by repeated `libunwind: __unw_add_dynamic_fde: bad fde: FDE
-  is really a CIE` warnings, right as `strace` shows the process
-  `openat()`-ing the real host `/lib/aarch64-linux-gnu/libVkLayer_MESA_
-  device_select.so` Vulkan layer. `readelf --dyn-syms` on the example
-  confirms this project's own `libunwind.so` -- linked directly and
-  explicitly (see the `libc++abi`/`_Unwind_*` entry above) -- still
-  exports `__register_frame`/`__deregister_frame`/`__unw_add_dynamic_
-  fde` as `GLOBAL DEFAULT`: the same "our own shared library's global
-  symbol export collides with a real host library's internal call"
-  shape as the `libc.so` wrinkle above, just for a different symbol
-  family and a different one of this project's own shared libraries
-  (`libunwind.so` instead of `libc.so`) -- and, being a separate
-  already-built `.so` rather than a static archive on this link,
-  `-Wl,--exclude-libs,ALL` cannot reach it either. Not yet fixed; see
-  `TODO.md`.
+  immediately afterward, blocking window creation instead of GPU
+  enumeration -- root-caused and fixed the same day.** With device
+  enumeration fixed, the same run hit `crtgfx_window_create failed
+  (-2)` (`CRTGFX_ERROR_UNSUPPORTED`), preceded by repeated `libunwind:
+  __unw_add_dynamic_fde: bad fde: FDE is really a CIE` warnings, right
+  as `strace` showed the process `openat()`-ing the real host
+  `/lib/aarch64-linux-gnu/libVkLayer_MESA_device_select.so` Vulkan
+  layer. `readelf --dyn-syms` confirmed this project's own
+  `libunwind.so` (linked directly and explicitly -- needed for
+  `libc++abi.so.1`'s own `_Unwind_*` symbols) still exports
+  `__register_frame`/`__deregister_frame`/`__unw_add_dynamic_fde` (plus
+  the matching `__unw_add_dynamic_eh_frame_section`/
+  `__unw_remove_dynamic_fde`/`__unw_remove_dynamic_eh_frame_section`
+  siblings) as `GLOBAL DEFAULT`: the same "our own shared library's
+  global symbol export collides with a real host library's internal
+  call" shape as the `libc.so` wrinkle above, just for a different
+  symbol family, and one `-Wl,--exclude-libs,ALL` cannot reach at all
+  (`libunwind.so` is a separate, already-built shared object, not a
+  static archive on this link). Traced the real host side too: real
+  `/lib/aarch64-linux-gnu/libgcc_s.so.1` exports the identical family
+  under `@@GLIBC_2.0`/`@@GCC_3.0` version tags, and is a genuine `NEEDED`
+  of `/snap/mesa-2404/.../libvulkan_lvp.so` (the real llvmpipe Vulkan
+  ICD, itself `NEEDED` by `libgcc_s.so.1` for its own bundled `libLLVM.so`
+  JIT's dynamic frame registration) -- confirming this project's own
+  `libunwind.so` was simply winning the load-order race and hijacking a
+  real host JIT's own frame-registration calls. Nothing in this
+  project's own tree calls any of these six symbols directly (grepped
+  clean) -- they exist in `libunwind.so` only as its own public
+  "foreign JIT" registration API. **Fixed** by patching the imported
+  `libunwind` recipe (`libstdc++/third_party/libunwind/recipe.json`) to
+  apply a `-Wl,--version-script=` demoting exactly these six symbols to
+  local/hidden scope on `unwind_shared`'s own link, leaving every real
+  `_Unwind_*`/`unw_*` public API symbol exported unchanged. Verified via
+  `readelf --dyn-syms` after rebuilding: the six symbols are gone from
+  `libunwind.so`'s dynamic table; `_Unwind_Resume`/`unw_init_local`/etc.
+  remain.
+
+  **Fixing the `libunwind.so` collision surfaced two more real, distinct
+  bugs in the same "standalone stage project never fully replicates the
+  in-tree build" family, both found and fixed the same day reaching a
+  fully working `examples/gfx-gpu`.** First: with the collision gone,
+  `crtgfx_window_create` still failed (-2) with zero Vulkan API calls at
+  all (confirmed via `VK_LOADER_DEBUG=all`) -- a one-off debug `fprintf`
+  patched into a throwaway extracted copy of `gpu.c` confirmed
+  `crtgfx_gpu_surface_create()`'s own `#elif defined(CRT_TARGET_OS_LINUX)
+  && defined(CRTGFX_HAVE_VULKAN)` fallback (unconditional `return
+  CRTGFX_ERROR_UNSUPPORTED`) was compiling instead of its real
+  native-Wayland-backed body, because `distribution/stages/04-gfx-media/
+  CMakeLists.txt` -- like its own already-documented `CRTGFX_HAVE_VULKAN`
+  gap from 2026-09-11 -- never defines `CRTGFX_HAVE_NATIVE_WAYLAND` for
+  its own compiles at all (the in-tree `libcrtgfx/CMakeLists.txt` only
+  defines it when `crtgfx-wayland-build` has actually been run once,
+  producing `libxdg-shell-protocol.a`, which this `out/` never had until
+  now). Fixed by running `crtgfx-wayland-build` once and adding the same
+  `add_compile_definitions(CRTGFX_HAVE_NATIVE_WAYLAND=1)` this stage's own
+  Vulkan/D3D12/Metal block already sets its siblings in. Second: with
+  that fixed, `crtgfx_window_create()` succeeded for the first time ever
+  in this investigation, but linking `examples/gfx-gpu`/`examples/gfx-
+  skia` (now statically embedding real `wl_display_connect`/
+  `wl_proxy_marshal_flags`/`xdg_surface_interface`/... calls from
+  `window_wayland_native.c.o`) failed with dozens of undefined
+  references -- the exact same "plain `find_library()` bypasses every
+  real CMake target's own propagated link dependency" pattern as the
+  already-fixed Vulkan/`libxkbcommon.a` case, just for the native Wayland
+  backend's own two dependencies: the SDK's own generated
+  `libxdg-shell-protocol.a` (ABI-independent glue, never previously
+  packaged into any dist stage at all -- a real `create_dist.py` gap,
+  fixed with a new `copy_wayland_xdg_shell()` mirroring `copy_xkbcommon()`)
+  and the *real host* `libwayland-client.so.0` (deliberately not this
+  project's own freestanding-built one: Vulkan WSI drivers are host
+  shared objects using the host Wayland client's own private `wl_display`
+  layout, which the native backend must match exactly). Fixed by adding
+  both to `distribution/stages/04-gfx-media/CMakeLists.txt`'s own
+  `crtgfx_window` `INTERFACE_LINK_LIBRARIES` (the real in-tree/in-stage
+  path) and explicitly to both example projects (the standalone path).
+  **Verified with a genuine fresh full isolated stage acceptance run**
+  (pinned stage-source asset regenerated again): ctest 8/8, and
+  `crtgfx_gpu_window_demo` now runs completely end to end --
+  `device_count=1` -> real window created -> real swapchain-backed
+  surface created -> **`presented=1`**, live GPU frame presentation via
+  the native Wayland backend, closing out this entire investigation
+  thread for `examples/gfx-gpu`.
+
+  **`examples/gfx-skia` hit one more real, distinct bug past that point,
+  also root-caused and fixed the same day.** `crtgfx_skia_wrap_gpu_
+  surface()` (`skia_bridge.cc`) failed with `sk_surface == nullptr` and
+  no obvious cause -- its own early guard (`vk_image_acquired`/
+  `ganesh_wrapped`) passed cleanly. A one-off debug `fprintf` chain
+  patched directly into throwaway extracted copies of Skia's own
+  vendored `src/gpu/ganesh/surface/SkSurface_Ganesh.cpp` and
+  `src/gpu/ganesh/vk/GrVkGpu.cpp` traced it to `GrVkGpu::
+  onWrapBackendRenderTarget()`'s own `check_image_info()`: Ganesh
+  unconditionally requires both `VK_IMAGE_USAGE_TRANSFER_SRC_BIT` and
+  `_DST_BIT` set on any `VkImage` it wraps as a render target ("We
+  currently require everything to be made with transfer bits set"), but
+  `gpu_vulkan.c`'s own swapchain was only ever created with `_DST_BIT`
+  (the plain, non-Ganesh `crtgfx_gpu_surface_clear()`/`_present()` path
+  never needed `_SRC_BIT`, so this had never surfaced before). Fixed at
+  the real source, not by just adding the bit to `skia_bridge.cc`'s own
+  hardcoded copy: `gpu_vulkan.c`'s own `crtgfx_gpu_vulkan_surface_
+  create()`/`_resize()` now conditionally OR in `_TRANSFER_SRC_BIT`
+  based on this surface's own real `VkSurfaceCapabilitiesKHR::
+  supportedUsageFlags` (probe-first, matching this file's own established
+  `VK_KHR_wayland_surface`/`VK_KHR_swapchain` extension-probing
+  discipline), and a new `crtgfx_gpu_surface::vk_image_usage_flags` field
+  (`gpu_internal.h`) records the real, live value so `skia_bridge.cc`
+  reads it directly instead of keeping a second, independently
+  hardcoded copy that could silently drift out of sync again. Verified:
+  the debug trace confirmed `check_image_info`/`wrapBackendRenderTarget`/
+  `createDevice` all now succeed and return a real, non-null `SkSurface`.
+
+  **A further, distinct, and still-unresolved crash was found immediately
+  past that point -- left open, not investigated further today.** With
+  the wrap itself now succeeding, `crtgfx_skia_gpu_window_demo` segfaults
+  (SIGSEGV) somewhere in the draw/present path that follows. A `gdb`
+  backtrace showed an alarmingly deep (~38,500 frame) stack, every frame
+  reporting the identical return address inside `SkSL::stod(std::
+  basic_string_view<char>, float*)` -- consistent with either a genuine
+  unbounded/runaway recursion inside Skia's own SkSL numeric-literal
+  parser, or a corrupted/frame-pointer-omitted stack confusing `gdb`'s
+  unwinder into looping on one address; not distinguished yet. Not part
+  of the symbol-collision/packaging-gap family this whole investigation
+  otherwise was -- a genuinely separate, deeper Skia-internal (or
+  toolchain-ABI) issue. See `TODO.md`.
 - **Completed the native-Windows portion of path-with-spaces distribution
   acceptance.** From extracted `03-gfx-simple` and `04-gfx-media` SDK copies,
   with the SDK, source/build tree, install prefix, and external consumer build

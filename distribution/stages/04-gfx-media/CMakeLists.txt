@@ -131,8 +131,57 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
   # redistributed dependency (03-gfx-simple's own manifest.json
   # redistributed_dependencies entry) at this exact path -- re-listing it
   # here, the same way the macOS branch re-lists its frameworks, fixes it.
+  #
+  # A second, separate instance of the exact same class of bug (2026-09-13,
+  # found once CRTGFX_HAVE_NATIVE_WAYLAND was actually enabled for the
+  # predecessor SDK's own libcrtgfx.a for the first time -- see
+  # libcrtgfx/CMakeLists.txt's own CRTGFX_LINUX_WAYLAND_CLIENT_LIB comment
+  # for why the *real host* libwayland-client.so.0, not this project's own
+  # freestanding-built one, is required here): window_wayland_native.c.o
+  # (also already inside the predecessor SDK's libcrtgfx.a) calls real
+  # libwayland-client symbols (wl_display_connect/wl_proxy_marshal_flags/
+  # .../xdg_surface_interface/...) that 03-gfx-simple's own real STATIC
+  # target links PRIVATE (CRTGFX_WAYLAND_CLIENT_LIBRARIES) -- again a
+  # build-graph property of that target, not recorded inside the .a
+  # itself. libxdg-shell-protocol.a (the generated xdg-shell protocol
+  # marshaling glue, ABI-independent unlike libwayland-client.so itself)
+  # is a real redistributed SDK dependency exactly like libxkbcommon.a
+  # (see create_dist.py's own copy_wayland_xdg_shell()); the real host
+  # libwayland-client.so is resolved fresh below, mirroring
+  # CRTGFX_LINUX_VULKAN_LIB's own find_library()/find_file() fallback and
+  # -rpath-link treatment just past this if/elseif chain (real host
+  # libwayland-client.so needs real host glibc symbols resolved the same
+  # way).
+  find_library(CRTGFX_LINUX_WAYLAND_CLIENT_LIB NAMES wayland-client wayland-client.so.0
+    NO_CMAKE_FIND_ROOT_PATH)
+  if(NOT CRTGFX_LINUX_WAYLAND_CLIENT_LIB)
+    find_program(CRT_DPKG_ARCHITECTURE_EXECUTABLE dpkg-architecture)
+    if(CRT_DPKG_ARCHITECTURE_EXECUTABLE)
+      execute_process(
+        COMMAND "${CRT_DPKG_ARCHITECTURE_EXECUTABLE}" -qDEB_HOST_MULTIARCH
+        OUTPUT_VARIABLE CRT_HOST_MULTIARCH_TRIPLET
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+      )
+    endif()
+    if(CRT_HOST_MULTIARCH_TRIPLET)
+      unset(CRTGFX_LINUX_WAYLAND_CLIENT_LIB CACHE)
+      find_file(CRTGFX_LINUX_WAYLAND_CLIENT_LIB
+        NAMES libwayland-client.so.0
+        PATHS /lib /usr/lib /usr/local/lib
+        PATH_SUFFIXES "${CRT_HOST_MULTIARCH_TRIPLET}"
+      )
+    endif()
+  endif()
+  if(NOT CRTGFX_LINUX_WAYLAND_CLIENT_LIB)
+    message(FATAL_ERROR "Could not find CRTGFX_LINUX_WAYLAND_CLIENT_LIB using the "
+      "following names: wayland-client, wayland-client.so.0")
+  endif()
+  get_filename_component(CRT_LINUX_WAYLAND_CLIENT_LIB_DIR "${CRTGFX_LINUX_WAYLAND_CLIENT_LIB}" DIRECTORY)
+  add_link_options("-Wl,-rpath-link,${CRT_LINUX_WAYLAND_CLIENT_LIB_DIR}")
   set_property(TARGET crtgfx_window PROPERTY INTERFACE_LINK_LIBRARIES
-    "${CMAKE_SYSROOT}/lib/libcrtgfx.a" "${CMAKE_SYSROOT}/lib/libxkbcommon.a")
+    "${CMAKE_SYSROOT}/lib/libcrtgfx.a" "${CMAKE_SYSROOT}/lib/libxkbcommon.a"
+    "${CMAKE_SYSROOT}/lib/libxdg-shell-protocol.a" "${CRTGFX_LINUX_WAYLAND_CLIENT_LIB}")
   set_property(TARGET crtgfx_window_shared PROPERTY INTERFACE_LINK_LIBRARIES
     "${CMAKE_SYSROOT}/lib/libcrtgfx.so")
 else()
@@ -315,6 +364,39 @@ elseif(CRT_TARGET_OS STREQUAL "macos")
   add_compile_definitions(CRTGFX_HAVE_METAL=1)
 elseif(CRT_TARGET_OS STREQUAL "linux")
   add_compile_definitions(CRTGFX_HAVE_VULKAN=1)
+  # A ninth real, confirmed bug in this same "standalone stage project
+  # never included the in-tree libcrtgfx/CMakeLists.txt" family
+  # (2026-09-13, found immediately after fixing the eighth --
+  # examples/gfx-gpu/CMakeLists.txt's own matching comment has the fuller
+  # story): gpu.c's own crtgfx_gpu_surface_create() is guarded `#if
+  # defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN) &&
+  # defined(CRTGFX_HAVE_NATIVE_WAYLAND)` for its real native-Wayland-
+  # backed Vulkan surface path, falling through to an unconditional
+  # `return CRTGFX_ERROR_UNSUPPORTED;` `#elif` branch whenever
+  # CRTGFX_HAVE_NATIVE_WAYLAND alone is missing -- exactly the in-tree
+  # libcrtgfx/CMakeLists.txt's own add_compile_definitions(CRTGFX_HAVE_
+  # NATIVE_WAYLAND=1) this standalone stage project's own gpu.c compile
+  # never received, since (like CRTGFX_HAVE_VULKAN above) this project
+  # never included that file, only the shared crtgfx_gpu_*.cmake source
+  # list modules. Confirmed for real: with only CRTGFX_HAVE_VULKAN
+  # defined, `crtgfx_window_create()` correctly created a real, live
+  # native-backend window (this file's own crtgfx_window INTERFACE_LINK_
+  # LIBRARIES fix, above, already covers that link), but the very next
+  # call, `crtgfx_gpu_surface_create()`, failed immediately with
+  # CRTGFX_ERROR_UNSUPPORTED and *no* Vulkan API calls at all (confirmed
+  # via VK_LOADER_DEBUG=all: zero surface/extension-related loader
+  # activity, meaning the unconditional #elif branch above returned
+  # before ever reaching a single vk*() call) -- a one-off debug fprintf
+  # patched directly into this stage's own extracted gpu.c source
+  # confirmed the #elif branch, not the real ifdef'd body, was compiling.
+  # Defined unconditionally here (not EXISTS-gated like
+  # CRTGFX_WAYLAND_XDG_SHELL_LIBRARY's own graceful-degrade convention
+  # elsewhere in this file): this stage's own crtgfx_window INTERFACE_
+  # LINK_LIBRARIES fix just above already hard-requires (FATAL_ERROR) a
+  # real CRTGFX_LINUX_WAYLAND_CLIENT_LIB, so by the time this line runs
+  # the native Wayland backend is already a hard requirement for this
+  # stage on Linux, not an optional one.
+  add_compile_definitions(CRTGFX_HAVE_NATIVE_WAYLAND=1)
 endif()
 list(TRANSFORM CRTGFX_GPU_SOURCES PREPEND "${CRTGFX_ROOT}/")
 list(TRANSFORM CRTGFX_GPU_BACKEND_SOURCES PREPEND "${CRTGFX_ROOT}/")

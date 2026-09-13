@@ -174,6 +174,42 @@ if(NOT WIN32 AND NOT APPLE)
     message(FATAL_ERROR "Could not find a real host libvulkan.so/.so.1")
   endif()
   # Same real, confirmed bug as examples/gfx-gpu/CMakeLists.txt's own
+  # matching eighth-bug fix (see that file's fuller comment for the full
+  # story, including why the *real host* libwayland-client.so.0 is
+  # required rather than a project-own freestanding-built one): once
+  # CRTGFX_HAVE_NATIVE_WAYLAND was actually enabled for the predecessor
+  # SDK's own libcrtgfx.a, its embedded window_wayland_native.c.o object
+  # code carries plain undefined references to real wl_display_connect/
+  # wl_proxy_marshal_flags/.../xdg_surface_interface/... this standalone
+  # project's own plain find_library()-based link never supplies.
+  find_library(CRTGFX_EXAMPLE_WAYLAND_CLIENT_LIB NAMES wayland-client wayland-client.so.0
+    NO_CMAKE_FIND_ROOT_PATH)
+  if(NOT CRTGFX_EXAMPLE_WAYLAND_CLIENT_LIB)
+    find_program(CRT_DPKG_ARCHITECTURE_EXECUTABLE dpkg-architecture)
+    if(CRT_DPKG_ARCHITECTURE_EXECUTABLE)
+      execute_process(
+        COMMAND "${CRT_DPKG_ARCHITECTURE_EXECUTABLE}" -qDEB_HOST_MULTIARCH
+        OUTPUT_VARIABLE CRT_HOST_MULTIARCH_TRIPLET
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+      )
+    endif()
+    if(CRT_HOST_MULTIARCH_TRIPLET)
+      unset(CRTGFX_EXAMPLE_WAYLAND_CLIENT_LIB CACHE)
+      find_file(CRTGFX_EXAMPLE_WAYLAND_CLIENT_LIB
+        NAMES libwayland-client.so.0
+        PATHS /lib /usr/lib /usr/local/lib
+        PATH_SUFFIXES "${CRT_HOST_MULTIARCH_TRIPLET}"
+      )
+    endif()
+  endif()
+  if(NOT CRTGFX_EXAMPLE_WAYLAND_CLIENT_LIB)
+    message(FATAL_ERROR "Could not find a real host libwayland-client.so/.so.0")
+  endif()
+  get_filename_component(CRT_EXAMPLE_WAYLAND_CLIENT_LIB_DIR "${CRTGFX_EXAMPLE_WAYLAND_CLIENT_LIB}" DIRECTORY)
+  target_link_options(crtgfx_skia_example PRIVATE
+    "-Wl,-rpath-link,${CRT_EXAMPLE_WAYLAND_CLIENT_LIB_DIR}")
+  # Same real, confirmed bug as examples/gfx-gpu/CMakeLists.txt's own
   # matching fix (see that file's fuller comment for the full story):
   # once CRTGFX_GPU_LIBRARY/CRTGFX_WINDOW_LIBRARY resolve to the static
   # archives (the CMAKE_FIND_LIBRARY_SUFFIXES fix above), their own
@@ -182,10 +218,11 @@ if(NOT WIN32 AND NOT APPLE)
   # that a shared-library link used to satisfy "for free" via NEEDED-
   # entry walking, but a static archive never records. Order matters
   # (ld only pulls a static archive member to satisfy an already
-  # outstanding undefined symbol): libxkbcommon.a must come after
-  # libcrtgfx.a (CRTGFX_WINDOW_LIBRARY, linked above).
+  # outstanding undefined symbol): libxkbcommon.a/libxdg-shell-protocol.a
+  # must come after libcrtgfx.a (CRTGFX_WINDOW_LIBRARY, linked above).
   target_link_libraries(crtgfx_skia_example PRIVATE
-    "${CRTGFX_EXAMPLE_VULKAN_LIB}" "${CMAKE_SYSROOT}/lib/libxkbcommon.a")
+    "${CRTGFX_EXAMPLE_VULKAN_LIB}" "${CMAKE_SYSROOT}/lib/libxkbcommon.a"
+    "${CMAKE_SYSROOT}/lib/libxdg-shell-protocol.a" "${CRTGFX_EXAMPLE_WAYLAND_CLIENT_LIB}")
   target_link_libraries(crtgfx_skia_example PRIVATE "${CMAKE_SYSROOT}/lib/libunwind.so")
   # Same real, confirmed bug as examples/gfx-gpu/CMakeLists.txt's own
   # matching fix (see that file's fuller comment): DT_RUNPATH is not

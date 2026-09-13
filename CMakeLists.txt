@@ -1327,6 +1327,24 @@ if(Python3_Interpreter_FOUND)
       --xkbcommon-install "${CRTGFX_XKBCOMMON_INSTALL_PREFIX}"
       --xkbcommon-source "${CRTGFX_XKBCOMMON_ROOT}"
     )
+    # libxdg-shell-protocol.a: a real, confirmed packaging gap (2026-09-13,
+    # found running examples/gfx-gpu's own standalone rebuild against a
+    # real packaged SDK once CRTGFX_HAVE_NATIVE_WAYLAND was actually
+    # enabled for the first time -- see create_dist.py's own
+    # copy_wayland_xdg_shell() docstring for the full story). Only passed
+    # when crtgfx-wayland-build has actually produced it (EXISTS check,
+    # matching libcrtgfx/CMakeLists.txt's own CRTGFX_HAVE_NATIVE_WAYLAND
+    # gate) -- create_dist.py's own copy_wayland_xdg_shell() silently no-ops
+    # on a missing --wayland-xdg-shell-install, matching copy_xkbcommon()'s
+    # existing convention, so a from-scratch configure that has never run
+    # crtgfx-wayland-build still packages a (native-Wayland-less) dist
+    # exactly as before this fix.
+    if(EXISTS "${CRTGFX_WAYLAND_XDG_SHELL_LIBRARY}")
+      list(APPEND CRT_GFX_SIMPLE_DIST_ARGS
+        --wayland-xdg-shell-install "${CRTGFX_WAYLAND_INSTALL_PREFIX}"
+        --wayland-build-dir "${CRTGFX_WAYLAND_BUILD_DIR}"
+      )
+    endif()
   endif()
   add_custom_target(crt-gfx-simple-dist
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"

@@ -121,6 +121,85 @@ def copy_xkbcommon(install: Path | None, source: Path | None, root: Path,
     }
 
 
+def copy_wayland_xdg_shell(install: Path | None, build_dir: Path | None,
+                            destination: Path) -> dict | None:
+    """Copy the generated xdg-shell protocol glue archive libcrtgfx's own
+    Linux native Wayland backend (window_wayland_native.c) needs at link
+    time -- a real, confirmed packaging gap (2026-09-13): libcrtgfx.a's own
+    window_wayland_native.c.o carries plain undefined references to
+    xdg_surface_interface/xdg_wm_base_interface/... (the generated xdg-shell
+    protocol marshaling code libcrtgfx/CMakeLists.txt's own
+    CRTGFX_WAYLAND_CLIENT_LIBRARIES links PRIVATE into the real crtgfx_window
+    CMake target -- CMake's own PRIVATE-dependency-of-a-STATIC-library
+    propagation forwards it onto every real in-tree/in-stage consumer's link
+    line automatically), but this generated archive was never copied into
+    the packaged SDK's own lib/ directory at all (unlike libxkbcommon.a,
+    packaged via copy_xkbcommon() above for the exact same "a real
+    crtgfx_window dependency this SDK must redistribute for external
+    consumers to link against" reason) -- confirmed for real: examples/
+    gfx-gpu's own standalone rebuild against a real packaged SDK failed
+    outright with "undefined reference to xdg_surface_interface" once its
+    own CMakeLists.txt started explicitly linking it (see that file's own
+    comment). Unlike libxkbcommon.a and the real host libwayland-client.so
+    itself, this archive is pure generated protocol-marshaling glue with no
+    Bionic-vs-glibc ABI sensitivity at all (see libcrtgfx/CMakeLists.txt's
+    own CRTGFX_LINUX_WAYLAND_CLIENT_LIB comment for why *that* one must stay
+    the real host .so, resolved per-consumer via find_library(), never
+    copied here) -- safe to redistribute as a plain static archive exactly
+    like libxkbcommon.a."""
+    if not install:
+        return None
+    library = install / "lib" / "libxdg-shell-protocol.a"
+    protocols_checkout = build_dir / "xdg-shell-protocols" if build_dir else None
+    license_file = protocols_checkout / "COPYING" if protocols_checkout else None
+    if not library.is_file() or not license_file or not license_file.is_file():
+        raise SystemExit("wayland xdg-shell install/build-dir is incomplete for native Wayland packaging")
+    (destination / "lib").mkdir(parents=True, exist_ok=True)
+    shutil.copy2(library, destination / "lib" / library.name)
+    notice = destination / "share" / "licenses" / "wayland-protocols" / "COPYING"
+    notice.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(license_file, notice)
+    # No recipes/*.json entry backs this fetch (tools/build_wayland.py pins
+    # its own repository/commit as module-level constants, not through the
+    # recipe.json/porting system xkbcommon's own provenance doc references
+    # above) -- write an equivalent minimal provenance doc here instead of
+    # leaving verify_dist.py's own "every redistributed dependency names a
+    # real provenance file" check with nothing to point at. `git rev-parse
+    # HEAD` against the still-present checkout (tools/build_wayland.py's own
+    # ensure_xdg_shell_protocol() leaves it on disk after fetching) records
+    # the *actual* commit this specific archive was generated from, rather
+    # than trusting the pinned constant never drifted from what was really
+    # checked out.
+    provenance_dir = destination / "share" / "crt" / "dependencies" / "wayland-protocols-xdg-shell"
+    provenance_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=protocols_checkout,
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+    except (subprocess.CalledProcessError, OSError):
+        commit = None
+    (provenance_dir / "provenance.json").write_text(
+        json.dumps({
+            "name": "wayland-protocols-xdg-shell",
+            "repository": "https://gitlab.freedesktop.org/wayland/wayland-protocols.git",
+            "sparse_path": "stable/xdg-shell",
+            "commit": commit,
+            "generated_by": "tools/build_wayland.py (wayland-scanner public-code/client-header)",
+        }, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "name": "wayland-protocols-xdg-shell",
+        "kind": "private-static-port",
+        "headers": [],
+        "link_artifacts": ["lib/libxdg-shell-protocol.a"],
+        "runtime_artifacts": [],
+        "notices": ["share/licenses/wayland-protocols/COPYING"],
+        "provenance": "share/crt/dependencies/wayland-protocols-xdg-shell/provenance.json",
+    }
+
+
 def copy_porting_sdk(root: Path, destination: Path) -> None:
     """Install the optional source-porting workflow, but not upstream sources."""
     tools_dest = destination / "tools"
@@ -399,6 +478,8 @@ def main() -> None:
     parser.add_argument("--port-prefix", type=Path)
     parser.add_argument("--xkbcommon-install", type=Path)
     parser.add_argument("--xkbcommon-source", type=Path)
+    parser.add_argument("--wayland-xdg-shell-install", type=Path)
+    parser.add_argument("--wayland-build-dir", type=Path)
     parser.add_argument("--stage-recipe", action="append", default=[], type=Path)
     parser.add_argument("--cmake", default="cmake")
     parser.add_argument("--stage", required=True)
@@ -449,6 +530,14 @@ def main() -> None:
     if xkbcommon and not any(item.get("name") == "xkbcommon"
                              for item in redistributed_dependencies):
         redistributed_dependencies.append(xkbcommon)
+    wayland_xdg_shell = copy_wayland_xdg_shell(
+        args.wayland_xdg_shell_install.resolve() if args.wayland_xdg_shell_install else None,
+        args.wayland_build_dir.resolve() if args.wayland_build_dir else None,
+        destination,
+    )
+    if wayland_xdg_shell and not any(item.get("name") == "wayland-protocols-xdg-shell"
+                                     for item in redistributed_dependencies):
+        redistributed_dependencies.append(wayland_xdg_shell)
     copy_porting_sdk(root, destination)
     copy_stage_recipes([recipe.resolve() for recipe in args.stage_recipe], destination)
     install_wrapper_applets(destination, args.target_os)

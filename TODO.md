@@ -72,58 +72,77 @@ in-tree CRT headers, libraries, and build artifacts, rebuild and run packaged
 examples, and exercise the required tests and external consumers. Record each
 result in `HISTORY.md` before removing it here.
 
-- [ ] **Finish Linux `03-gfx-simple -> 04-gfx-media` acceptance.** All
-  eight stage tests pass, and both `examples/gfx-gpu`/`examples/gfx-skia`
-  now build, link, *load*, and correctly enumerate a real Vulkan device
-  (`device_count=1`) against a real packaged SDK -- a real
-  `--reuse-work-root` temp-directory regression, a real `libcrtgfx.so`
-  RPATH gap, and a real `readdir`/`opendir` symbol-collision gap (plus
-  its own follow-on Vulkan/`libxkbcommon.a` explicit-link gap) were all
-  found and fixed reaching that state -- see `HISTORY.md`'s 2026-09-13
-  entry. **Blocked on the real architectural finding below, not a
-  packaging defect:** `crtgfx_gpu_example` now fails one step later,
-  `crtgfx_window_create failed (-2)`. `--reuse-work-root` (plus
-  `CRT_STAGE_KEEP_TMP=1` for standalone example-only iteration without
-  reconfiguring the whole stage) is fine for iteration once the real
-  blocker below is fixed; final evidence still requires the normal
-  fresh-build path, AND regenerating the pinned stage-source asset
-  (`ninja crt-stage-04-source`, then copying the resulting
-  `stage-sources/04-gfx-media.json` over the target dist's own
-  `stages/recipes/04-gfx-media.json`) whenever `examples/gfx-gpu`,
-  `examples/gfx-skia`, or anything else the asset bundles changes --
-  the isolated acceptance test extracts that pinned tarball, not the
-  live repo tree, so an uncommitted (or even committed but not yet
-  re-pinned) source change is silently invisible to it otherwise. Keep
-  CPU/FFmpeg/Skia evidence distinct from live Vulkan/native-Wayland
-  presentation evidence.
-- [ ] **Fix this project's own `libunwind.so` colliding with a real host
-  library's `__register_frame`/`__deregister_frame` calls when linked
-  directly into a `crt-cc`-built executable.** Root-caused 2026-09-13
-  (`HISTORY.md`): the same "our own shared library's global symbol
-  export collides with a real host library's internal call" shape as
-  the now-fixed `readdir`/`opendir`-vs-`libc.so` case, just one level
-  further in and for a different symbol family. With Vulkan device
-  enumeration now fixed (see the acceptance item above),
-  `crtgfx_gpu_example` gets one step further and then fails
-  `crtgfx_window_create failed (-2)` (`CRTGFX_ERROR_UNSUPPORTED`),
-  preceded by repeated `libunwind: __unw_add_dynamic_fde: bad fde: FDE
-  is really a CIE` warnings, right as `strace` shows it `openat()`-ing
-  the real host `/lib/aarch64-linux-gnu/libVkLayer_MESA_device_select.so`
-  Vulkan layer. `readelf --dyn-syms` on the example confirms this
-  project's own `libunwind.so` (linked directly and explicitly --
-  needed for `libc++abi.so.1`'s own `_Unwind_*` symbols, see the
-  2026-09-13 RPATH entry) still exports `__register_frame`/
-  `__deregister_frame`/`__unw_add_dynamic_fde` as `GLOBAL DEFAULT`.
-  Unlike the `readdir`/`opendir` case, `-Wl,--exclude-libs,ALL` cannot
-  reach this at all: `libunwind.so` is a separate, already-built shared
-  object (not a static archive on the failing link), and the flag only
-  ever strips static-archive-contributed symbols from the *current*
-  link's own dynamic symbol table. Needs its own investigation into a
-  real fix (symbol versioning on this project's own `libunwind.so`, a
-  linker version script demoting these three symbols to local/hidden
-  scope on `libunwind.so`'s own link while confirming nothing in this
-  project's own C++ exception-handling path still needs them exported,
-  or some other isolation mechanism) -- not attempted yet.
+- [ ] **Finish Linux `03-gfx-simple -> 04-gfx-media` acceptance.**
+  `examples/gfx-gpu` is now fully done: all eight stage tests pass, and
+  it builds, links, loads, enumerates a real Vulkan device
+  (`device_count=1`), creates a real native-Wayland-backed window, and
+  reaches live GPU frame presentation (`presented=1`) against a real
+  packaged SDK -- a real `--reuse-work-root` temp-directory regression, a
+  real `libcrtgfx.so` RPATH gap, a real `readdir`/`opendir` symbol-
+  collision gap, a real `libunwind.so` `__register_frame`/
+  `__deregister_frame` symbol-collision gap, a missing
+  `CRTGFX_HAVE_NATIVE_WAYLAND` compile-definition gap in this standalone
+  stage project, and a missing `libxdg-shell-protocol.a`/real-host-
+  `libwayland-client.so` packaging-and-link gap were all found and fixed
+  reaching that state -- see `HISTORY.md`'s 2026-09-13 entry for the full
+  story. **`examples/gfx-skia` is not done yet -- blocked on the real,
+  still-open crash below, not a packaging defect:** it now gets all the
+  way to a real Ganesh-wrapped swapchain surface (a real, separate
+  `VK_IMAGE_USAGE_TRANSFER_SRC_BIT` gap in `crtgfx_skia_wrap_gpu_surface`
+  was found and fixed reaching *that* state, also in the 2026-09-13
+  entry), then segfaults in the draw/present path that follows -- see the
+  dedicated item below. `--reuse-work-root` (plus `CRT_STAGE_KEEP_TMP=1`
+  for standalone example-only iteration without reconfiguring the whole
+  stage) is fine for iteration once the real blocker below is fixed;
+  final evidence still requires the normal fresh-build path, AND
+  regenerating the pinned stage-source asset (`ninja crt-stage-04-source`,
+  then copying the resulting `stage-sources/04-gfx-media.json` over the
+  target dist's own `stages/recipes/04-gfx-media.json`) whenever
+  `examples/gfx-gpu`, `examples/gfx-skia`, `distribution/stages/
+  04-gfx-media/CMakeLists.txt`, or anything else the asset bundles
+  changes -- the isolated acceptance test extracts that pinned tarball,
+  not the live repo tree, so an uncommitted (or even committed but not
+  yet re-pinned) source change is silently invisible to it otherwise.
+  Also note: `crtgfx-wayland-build` (produces `libxdg-shell-protocol.a`,
+  needed for `CRTGFX_HAVE_NATIVE_WAYLAND` to ever be enabled at all) is
+  not wired into any aggregate `ninja` target's own `DEPENDS` -- run it
+  once by hand (`ninja crtgfx-wayland-build`, then reconfigure) on a
+  fresh `out/`, matching `libcrtgfx/CMakeLists.txt`'s own existing
+  `CRTGFX_LINUX_WAYLAND_CLIENT_LIB`-not-found message. Keep CPU/FFmpeg/
+  Skia evidence distinct from live Vulkan/native-Wayland presentation
+  evidence.
+- [ ] **Root-cause the `SkSL::stod` crash blocking live `examples/
+  gfx-skia` presentation.** Found 2026-09-13 (`HISTORY.md`) chasing the
+  now-fixed `crtgfx_skia_wrap_gpu_surface` bug: with that fixed,
+  `crtgfx_skia_gpu_window_demo` gets a real, non-null Ganesh-wrapped
+  `SkSurface` for the first time, then segfaults somewhere in the
+  draw/present path that follows (`crtgfx_test::draw_reference_scene()`/
+  `crtgfx_skia_gpu_surface_present()`, both in `libcrtgfx/tools/
+  skia_gpu_window_demo.cc`). A `gdb -batch -ex run -ex bt` backtrace
+  showed an alarmingly deep (~38,500-frame) stack, every single frame
+  reporting the identical return address inside `SkSL::stod(std::
+  basic_string_view<char>, float*)` -- not yet distinguished between a
+  genuine unbounded/runaway recursion inside Skia's own SkSL numeric-
+  literal parser (plausible: `SkSL::stod` is Skia's own hand-rolled
+  locale-independent `strtod`-equivalent, used while compiling an SkSL
+  shader string, and this project's own libc's locale/numeric-parsing
+  behavior has not been cross-checked against what Skia's implementation
+  assumes) and a corrupted or frame-pointer-omitted stack confusing
+  `gdb`'s own unwinder into looping on one address (this stage's own
+  Skia build may not preserve frame pointers -- not yet checked). Not
+  part of the symbol-collision/packaging-gap family the rest of this
+  investigation was -- a genuinely separate, deeper Skia-internal (or
+  toolchain-ABI/locale) issue. Next steps, none attempted yet: check
+  `tools/build_skia.py`'s own GN args for frame-pointer/backtrace-quality
+  settings (`enable_frame_pointers`-equivalent) before trusting the
+  backtrace shape further; find which real SkSL shader source (Skia's
+  own built-in Ganesh Vulkan shaders, compiled lazily on first real draw)
+  is actually being parsed when this first triggers; and check whether
+  this project's own libc `strtof`/locale handling diverges from what
+  `SkSL::stod` expects. `CRT_STAGE_KEEP_TMP=1` plus manually rebuilding
+  just `crtgfx_skia_objects`/`libskia.a` (via each stage's own preserved
+  `gfx-media-build`/`skia-build` ninja directories, `CRT_SYSROOT` set by
+  hand) is far faster than a full stage rebuild for iterating on this.
 - [ ] **Finish non-Windows path-with-spaces acceptance.** Native Windows is
   complete, including extracted 03/04 SDK examples and a real FFmpeg
   configure/`make -j4`/install/external-consumer run with spaces in the SDK,

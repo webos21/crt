@@ -103,6 +103,18 @@ struct crtgfx_gpu_surface {
   void** vk_images;
   uint32_t vk_image_count;
   uint32_t vk_format; /* real VkFormat the swapchain was created with */
+  /* Real VkImageUsageFlags the swapchain (and therefore every one of its
+   * own vk_images above) was actually created with -- gpu_vulkan.c's own
+   * crtgfx_gpu_vulkan_surface_create()/_resize() conditionally add
+   * VK_IMAGE_USAGE_TRANSFER_SRC_BIT to VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT/
+   * _TRANSFER_DST_BIT based on this real surface's own VkSurfaceCapabilities
+   * KHR::supportedUsageFlags (see that file's own tenth-bug comment), so
+   * there is no single fixed constant a second translation unit could just
+   * redeclare -- skia_bridge.cc's own crtgfx_skia_wrap_gpu_surface() reads
+   * this field directly instead, guaranteeing the GrVkImageInfo it builds
+   * always describes this image's own *real*, current usage flags exactly,
+   * with no possibility of the two ever drifting out of sync again. */
+  uint32_t vk_image_usage_flags;
   uint32_t width;
   uint32_t height;
   /* Real per-frame synchronization: one semaphore each side of a real

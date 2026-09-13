@@ -285,11 +285,27 @@ sk_sp<SkSurface> crtgfx_skia_wrap_gpu_surface(GrDirectContext* context, crtgfx_g
   // function replaces for a caller that chooses the Ganesh path instead.
   image_info.fImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
   image_info.fFormat = static_cast<VkFormat>(surface->vk_format);
-  // Matches this swapchain's own real VkImageUsageFlags exactly (gpu_
-  // vulkan.c's own crtgfx_gpu_vulkan_surface_create()) -- no SAMPLED_BIT,
-  // matching this function's own choice of WrapBackendRenderTarget (not
-  // WrapBackendTexture) below.
-  image_info.fImageUsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  // A real, confirmed bug (2026-09-13): this used to hardcode
+  // VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+  // which *used* to match gpu_vulkan.c's own swapchain creation exactly --
+  // until GrVkGpu::onWrapBackendRenderTarget()'s own check_image_info()
+  // (Skia's vendored src/gpu/ganesh/vk/GrVkGpu.cpp) turned out to
+  // unconditionally require VK_IMAGE_USAGE_TRANSFER_SRC_BIT too ("We
+  // currently require everything to be made with transfer bits set"),
+  // confirmed via a one-off debug fprintf patched directly into a
+  // throwaway extracted copy of that file: SkSurfaces::WrapBackendRenderTarget
+  // silently returned null with zero Vulkan API calls, all the way down to
+  // this exact check. Fixed at the real source (gpu_vulkan.c's own
+  // crtgfx_gpu_vulkan_surface_create()/_resize(), conditionally probing
+  // VkSurfaceCapabilitiesKHR::supportedUsageFlags first -- see that file's
+  // own matching comment) rather than just adding the bit here too: a
+  // second hardcoded copy of "what this swapchain's images were created
+  // with" is exactly the kind of drift this project has already been
+  // burned by elsewhere. Reading the real, live value the swapchain was
+  // actually created with guarantees this can never silently disagree
+  // with it again, on this host or a future one whose surface does not
+  // support TRANSFER_SRC_BIT at all.
+  image_info.fImageUsageFlags = surface->vk_image_usage_flags;
   image_info.fSampleCount = 1;
   image_info.fLevelCount = 1;
   image_info.fCurrentQueueFamily = surface->device->vk_queue_family_index;

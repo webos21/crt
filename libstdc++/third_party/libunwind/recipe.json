@@ -5,12 +5,22 @@
     "type": "git",
     "repository": "https://android.googlesource.com/toolchain/llvm-project",
     "ref": "37f38d1f3276b62fba09462ab4807dce846c732d",
-    "sparse_paths": ["libunwind", "cmake", "runtimes/cmake"],
+    "sparse_paths": [
+      "libunwind",
+      "cmake",
+      "runtimes/cmake"
+    ],
     "checkout_subdir": "libunwind",
-    "extra_checkout_dirs": ["cmake", "runtimes/cmake"]
+    "extra_checkout_dirs": [
+      "cmake",
+      "runtimes/cmake"
+    ]
   },
   "dependencies": [],
-  "target_os": ["linux", "windows"],
+  "target_os": [
+    "linux",
+    "windows"
+  ],
   "cmake": {
     "driver": "libstdc++/third_party/libunwind/standalone",
     "options": [
@@ -24,10 +34,14 @@
     ],
     "target_overrides": {
       "windows": {
-        "options": ["-DLIBUNWIND_HAS_PTHREAD_LIB=OFF"]
+        "options": [
+          "-DLIBUNWIND_HAS_PTHREAD_LIB=OFF"
+        ]
       }
     },
-    "build_targets": ["unwind"]
+    "build_targets": [
+      "unwind"
+    ]
   },
   "patches": [
     {
@@ -35,6 +49,12 @@
       "find": "add_library_flags_if(MINGW \"${MINGW_LIBRARIES}\")",
       "replace": "# CRT: see ../libcxxabi/recipe.json's own matching patch note --\n# MINGW_LIBRARIES names a real mingw-w64 distribution's own CRT stub\n# import libraries this project's sysroot has never had and will never\n# provide (this project's --target=*-w64-mingw32 is ABI-compatibility-\n# only; tools/crt-c++ already supplies the real link line). Deliberately\n# no-op'd -- do not re-add.",
       "reason": "Same as libcxxabi/recipe.json's matching patch: confirmed for real (\"lld: error: unable to find library -lmingw32\" and 15 siblings) building libc++abi; libunwind's own src/CMakeLists.txt has the identical line."
+    },
+    {
+      "file": "src/CMakeLists.txt",
+      "find": "add_library(unwind_shared SHARED)\ntarget_link_libraries(unwind_shared PUBLIC unwind_shared_objects)",
+      "replace": "add_library(unwind_shared SHARED)\nif(UNIX AND NOT APPLE)\n  # CRT (2026-09-13): hide libunwind's own dynamic-frame-registration API\n  # (__register_frame/__deregister_frame/__unw_add_dynamic_fde and their\n  # eh_frame_section/remove_dynamic_fde siblings) from this .so's own\n  # dynamic symbol table on ELF hosts. Confirmed for real running the\n  # isolated 03-gfx-simple -> 04-gfx-media stage acceptance's own\n  # examples/gfx-gpu against a real host: this project's own libunwind.so\n  # is linked directly into every such executable (needed for libc++abi.\n  # so.1's own _Unwind_* symbols, which carry no NEEDED entry of their\n  # own -- LIBCXXABI_USE_LLVM_UNWINDER=OFF, see ../libcxxabi/recipe.\n  # json's own notes), and plain, unversioned dynamic symbol lookups for\n  # common names resolve through the whole process's single global scope\n  # in load order, not strictly through each library's own dependency\n  # chain -- the same shape as the readdir()/opendir() vs real\n  # libvulkan.so.1 collision this project already fixed elsewhere (see\n  # libcrtgfx/cmake/crtgfx_gpu_targets.cmake). Confirmed via readelf\n  # --dyn-syms: this library exports all six of these as GLOBAL DEFAULT;\n  # confirmed at runtime (`libunwind: __unw_add_dynamic_fde: bad fde:\n  # FDE is really a CIE`, then `crtgfx_window_create failed (-2)`) that\n  # real host Mesa Vulkan drivers (llvmpipe's libvulkan_lvp.so, which\n  # NEEDs the real host libgcc_s.so.1 for its own libLLVM.so JIT's frame\n  # registration) get their own internal dynamic-frame-registration\n  # calls hijacked into this library's differently-laid-out\n  # implementation instead of the real libgcc_s.so.1 provider (confirmed\n  # present via `readelf -d`: a real NEEDED entry, exporting the\n  # identical GLIBC-versioned symbol names). Nothing in this project's\n  # own tree calls any of these six symbols directly (grepped clean) --\n  # they exist here only as libunwind's own public \"foreign JIT\"\n  # registration API, never actually needed by this project's own code\n  # -- so hiding them from the *dynamic* symbol table (they remain\n  # callable from within this .so's own translation units) is safe and\n  # lets the real host provider handle real host callers correctly,\n  # matching how a normal system-clang-built binary behaves.\n  set(CRT_LIBUNWIND_HIDE_DYNAMIC_REGISTRATION_MAP\n    \"${CMAKE_CURRENT_BINARY_DIR}/crt_libunwind_hide_dynamic_registration.map\")\n  file(WRITE \"${CRT_LIBUNWIND_HIDE_DYNAMIC_REGISTRATION_MAP}\" [[{\n  global: *;\n  local:\n    __register_frame;\n    __deregister_frame;\n    __unw_add_dynamic_fde;\n    __unw_add_dynamic_eh_frame_section;\n    __unw_remove_dynamic_fde;\n    __unw_remove_dynamic_eh_frame_section;\n};\n]])\n  target_link_options(unwind_shared PRIVATE\n    \"-Wl,--version-script=${CRT_LIBUNWIND_HIDE_DYNAMIC_REGISTRATION_MAP}\")\nendif()\ntarget_link_libraries(unwind_shared PUBLIC unwind_shared_objects)",
+      "reason": "Confirmed for real (2026-09-13, HISTORY.md): running the isolated 03-gfx-simple -> 04-gfx-media stage acceptance's examples/gfx-gpu against a real host hit `crtgfx_window_create failed (-2)` preceded by `libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE`, right as strace showed the real host libVkLayer_MESA_device_select.so / libvulkan_lvp.so (llvmpipe) loading -- readelf --dyn-syms confirmed this project's own libunwind.so exports __register_frame/__deregister_frame/__unw_add_dynamic_fde (and the matching eh_frame_section/remove_dynamic_fde siblings) as GLOBAL DEFAULT, colliding with the real host libgcc_s.so.1's own versioned equivalents that libvulkan_lvp.so's own NEEDED entries (and its libLLVM.so JIT) actually expect."
     }
   ],
   "notes": [

@@ -135,6 +135,52 @@ if(NOT WIN32 AND NOT APPLE)
   if(NOT CRTGFX_EXAMPLE_VULKAN_LIB)
     message(FATAL_ERROR "Could not find a real host libvulkan.so/.so.1")
   endif()
+  # An eighth real, confirmed bug (2026-09-13), found immediately after
+  # fixing the sixth/seventh (CMAKE_FIND_LIBRARY_SUFFIXES/Vulkan+
+  # libxkbcommon.a, above) once CRTGFX_HAVE_NATIVE_WAYLAND was actually
+  # enabled for the predecessor SDK's own libcrtgfx.a for the first time:
+  # window_wayland_native.c.o (also already inside libcrtgfx.a) calls real
+  # libwayland-client symbols (wl_display_connect/wl_proxy_marshal_flags/
+  # .../xdg_surface_interface/...) this standalone project's own plain
+  # find_library()-based link never supplies, for the exact same
+  # propagation-bypass reason as the seventh bug -- see
+  # distribution/stages/04-gfx-media/CMakeLists.txt's own matching
+  # crtgfx_window INTERFACE_LINK_LIBRARIES fix for the fuller story,
+  # including why the *real host* libwayland-client.so.0 (not a project-
+  # own freestanding-built one) is required: Vulkan WSI drivers are host
+  # shared objects using the host Wayland client's own private wl_display
+  # layout, which the native presentation backend must match. libxdg-
+  # shell-protocol.a (generated protocol-marshaling glue, no ABI
+  # sensitivity, unlike libwayland-client.so itself) is a real
+  # redistributed SDK dependency exactly like libxkbcommon.a (see
+  # create_dist.py's own copy_wayland_xdg_shell()).
+  find_library(CRTGFX_EXAMPLE_WAYLAND_CLIENT_LIB NAMES wayland-client wayland-client.so.0
+    NO_CMAKE_FIND_ROOT_PATH)
+  if(NOT CRTGFX_EXAMPLE_WAYLAND_CLIENT_LIB)
+    find_program(CRT_DPKG_ARCHITECTURE_EXECUTABLE dpkg-architecture)
+    if(CRT_DPKG_ARCHITECTURE_EXECUTABLE)
+      execute_process(
+        COMMAND "${CRT_DPKG_ARCHITECTURE_EXECUTABLE}" -qDEB_HOST_MULTIARCH
+        OUTPUT_VARIABLE CRT_HOST_MULTIARCH_TRIPLET
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+      )
+    endif()
+    if(CRT_HOST_MULTIARCH_TRIPLET)
+      unset(CRTGFX_EXAMPLE_WAYLAND_CLIENT_LIB CACHE)
+      find_file(CRTGFX_EXAMPLE_WAYLAND_CLIENT_LIB
+        NAMES libwayland-client.so.0
+        PATHS /lib /usr/lib /usr/local/lib
+        PATH_SUFFIXES "${CRT_HOST_MULTIARCH_TRIPLET}"
+      )
+    endif()
+  endif()
+  if(NOT CRTGFX_EXAMPLE_WAYLAND_CLIENT_LIB)
+    message(FATAL_ERROR "Could not find a real host libwayland-client.so/.so.0")
+  endif()
+  get_filename_component(CRT_EXAMPLE_WAYLAND_CLIENT_LIB_DIR "${CRTGFX_EXAMPLE_WAYLAND_CLIENT_LIB}" DIRECTORY)
+  target_link_options(crtgfx_gpu_example PRIVATE
+    "-Wl,-rpath-link,${CRT_EXAMPLE_WAYLAND_CLIENT_LIB_DIR}")
   # A seventh real, confirmed bug (2026-09-13), found right after the
   # sixth (CMAKE_FIND_LIBRARY_SUFFIXES, above): once CRTGFX_GPU_LIBRARY/
   # CRTGFX_WINDOW_LIBRARY resolve to the *static* archives instead, the
@@ -166,7 +212,8 @@ if(NOT WIN32 AND NOT APPLE)
   # the command line, which appending here achieves; libvulkan.so, being
   # a real shared library, has no such ordering constraint.
   target_link_libraries(crtgfx_gpu_example PRIVATE
-    "${CRTGFX_EXAMPLE_VULKAN_LIB}" "${CMAKE_SYSROOT}/lib/libxkbcommon.a")
+    "${CRTGFX_EXAMPLE_VULKAN_LIB}" "${CMAKE_SYSROOT}/lib/libxkbcommon.a"
+    "${CMAKE_SYSROOT}/lib/libxdg-shell-protocol.a" "${CRTGFX_EXAMPLE_WAYLAND_CLIENT_LIB}")
   target_link_libraries(crtgfx_gpu_example PRIVATE "${CMAKE_SYSROOT}/lib/libunwind.so")
   # A fourth real, confirmed bug (2026-09-13), found right after fixing
   # the libunwind.so gap above: even with that fix, the rebuilt example
