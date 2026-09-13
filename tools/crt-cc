@@ -338,18 +338,35 @@ run_cc() {
   if [ -n "${CRT_PORT_INCLUDE_DIR:-}" ]; then
     set -- "-I${CRT_PORT_INCLUDE_DIR}" "$@"
   fi
+  # Order matters here: ${CRT_SYSROOT}/include must be searched before
+  # $resource_dir/include, not after -- a real, confirmed regression
+  # (2026-09-13) from this function's own introduction, first hit
+  # bootstrapping libc++ on macOS (tools/crt-libcxx-build.py, which
+  # always takes the plain $resource_dir branch below: it never passes
+  # -fcrt-real-apple-sdk). libc++'s own <climits> does a plain
+  # `#include <limits.h>`, which restarts the search from the top of the
+  # include path rather than continuing after wherever <climits> itself
+  # was found -- so whichever of $resource_dir/include or ${CRT_SYSROOT}/
+  # include comes first wins outright. Clang's own bundled resource-dir
+  # limits.h only chains forward via `#include_next <limits.h>` when
+  # __STDC_HOSTED__ is true; -ffreestanding (in $common_flags, every
+  # target) makes it 0, so once resource_dir wins the search first, this
+  # project's own ${CRT_SYSROOT}/include/limits.h (PATH_MAX/NAME_MAX/...)
+  # is never reached at all. Confirmed directly: filesystem/operations.cpp
+  # failed with "use of undeclared identifier 'PATH_MAX'" the first time
+  # this exact ordering was exercised on macOS after it was introduced.
   if [ -n "$apple_sdk_path" ]; then
     # shellcheck disable=SC2086
     exec "$cc" $common_flags -isysroot "$apple_sdk_path" \
       "-F$apple_sdk_path/System/Library/Frameworks" \
       -isystem "$apple_sdk_path/usr/include" \
-      -isystem "$resource_dir/include" \
-      "-isystem${CRT_SYSROOT}/include" "$@"
+      "-isystem${CRT_SYSROOT}/include" \
+      -isystem "$resource_dir/include" "$@"
   fi
   if [ -n "$resource_dir" ]; then
     # shellcheck disable=SC2086
-    exec "$cc" $common_flags -isystem "$resource_dir/include" \
-      "-isystem${CRT_SYSROOT}/include" "$@"
+    exec "$cc" $common_flags "-isystem${CRT_SYSROOT}/include" \
+      -isystem "$resource_dir/include" "$@"
   fi
   # shellcheck disable=SC2086
   exec "$cc" $common_flags "-isystem${CRT_SYSROOT}/include" "$@"
