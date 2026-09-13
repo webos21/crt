@@ -155,6 +155,15 @@ if(NOT WIN32 AND NOT APPLE)
       "-Wl,-rpath-link,${CRT_EXAMPLE_VULKAN_LIB_DIR}")
   endif()
   target_link_libraries(crtgfx_skia_example PRIVATE "${CMAKE_SYSROOT}/lib/libunwind.so")
+  # Same real, confirmed bug as examples/gfx-gpu/CMakeLists.txt's own
+  # matching fix (see that file's fuller comment): DT_RUNPATH is not
+  # transitive, and libcrtgfx.so's own NEEDED libc++.so has no RPATH of
+  # its own, so it falls through to the host's own real (also ABI-
+  # linker-script-shaped) llvm-18 libc++.so instead. Linking the SDK's
+  # own real libc++.so.1 directly here too gives this executable a
+  # direct NEEDED entry for it, resolved via its own already-correct
+  # RUNPATH before libcrtgfx.so's transitive need is ever processed.
+  target_link_libraries(crtgfx_skia_example PRIVATE "${CMAKE_SYSROOT}/lib/libc++.so.1")
 endif()
 
 if(WIN32)

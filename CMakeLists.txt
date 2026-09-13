@@ -427,6 +427,35 @@ function(crt_configure_shared_runtime target_name)
     target_link_options(${target_name} PRIVATE
       -Wl,--gc-sections
     )
+    # $ORIGIN RPATH: a real, confirmed bug (2026-09-13), found packaging
+    # this exact .so into the 03-gfx-simple -> 04-gfx-media isolated
+    # stage and rebuilding examples/gfx-gpu genuinely externally against
+    # it for the first time. This library's own NEEDED entries (libc.so/
+    # libm.so/libdl.so/libc++.so) carry no RPATH/RUNPATH of their own at
+    # all (confirmed via `readelf -d`), so any consumer executable's own
+    # RUNPATH -- which is NOT transitive, unlike the older, deprecated
+    # RPATH -- never helps resolve *this* library's own dependencies,
+    # only the consumer's own direct ones. Without this, ld.so falls
+    # through to the ordinary system search for `libc++.so` specifically
+    # and can land on an unrelated, incompatible same-named file already
+    # on the host (confirmed for real: a real Ubuntu/llvm-18 host's own
+    # `/lib/aarch64-linux-gnu/libc++.so`, itself an ABI linker script --
+    # not a real ELF -- failing to even load: "file too short"). `$ORIGIN`
+    # is the standard, portable fix for a self-contained shared-library
+    # distribution: it resolves relative to *this .so's own* install
+    # location at runtime, so it keeps working correctly wherever this
+    # exact file is copied to (the in-tree build directory, or any
+    # packaged distribution stage), matching every sibling CRT runtime
+    # library (libc.so/libm.so/libdl.so/libc++.so/libc++abi.so.1/
+    # libunwind.so) already living in the same directory at every one of
+    # those locations. CMake passes the literal string through
+    # unexpanded (it recognizes `$ORIGIN` specially, rather than treating
+    # it as a CMake variable reference) -- confirmed via `readelf -d`
+    # after this change.
+    set_target_properties(${target_name} PROPERTIES
+      BUILD_RPATH "$ORIGIN"
+      INSTALL_RPATH "$ORIGIN"
+    )
   endif()
 endfunction()
 

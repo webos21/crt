@@ -72,18 +72,55 @@ in-tree CRT headers, libraries, and build artifacts, rebuild and run packaged
 examples, and exercise the required tests and external consumers. Record each
 result in `HISTORY.md` before removing it here.
 
-- [ ] **Establish Linux `01-c -> 02-cxx` isolated evidence.** Run from a
-  freshly extracted Linux `01-c` SDK, confirm that the resulting `02-cxx`
-  carries `stages/recipes/03-gfx-simple.json`, and pass its tests and
-  `verify_dist.py`. Windows and macOS already have unambiguous end-to-end
-  evidence; do not infer the Linux result from a cumulative build or a later
-  stage pass.
-- [ ] **Finish Linux `03-gfx-simple -> 04-gfx-media` acceptance.** The real
-  Linux/aarch64 run already passes all eight stage tests; rebuild and run both
-  installed-SDK examples, pass final `verify_dist.py`, and reach the atomic
-  `CRT stage ready` publish. Use `--reuse-work-root` only for iteration; final
-  evidence requires the normal fresh-build path. Keep CPU/FFmpeg/Skia evidence
-  distinct from live Vulkan/native-Wayland presentation evidence.
+- [ ] **Finish Linux `03-gfx-simple -> 04-gfx-media` acceptance.** All
+  eight stage tests pass, and both `examples/gfx-gpu`/`examples/gfx-skia`
+  now build, link, and *load* correctly against a real packaged SDK (a
+  real `--reuse-work-root` temp-directory regression, a real
+  `libcrtgfx.so` RPATH gap, and two real explicit-link gaps were found
+  and fixed reaching that state -- see `HISTORY.md`'s 2026-09-13 entry).
+  **Blocked on the real architectural finding below, not a packaging
+  defect:** `crtgfx_gpu_example` still fails
+  (`crtgfx_gpu_window_demo: no usable GPU backend on this host (rc=0,
+  device_count=0)`) even after granting `video`/`render` group access
+  and confirming real `/dev/dri` permission -- that was a red herring,
+  disproven and recorded in `HISTORY.md`. `--reuse-work-root` (plus
+  `CRT_STAGE_KEEP_TMP=1` for standalone example-only iteration without
+  reconfiguring the whole stage) is fine for iteration once the real
+  blocker below is fixed; final evidence still requires the normal
+  fresh-build path. Keep CPU/FFmpeg/Skia evidence distinct from live
+  Vulkan/native-Wayland presentation evidence.
+- [ ] **Fix real host GPU libraries corrupting their own internal glibc
+  calls when linked into a `crt-cc`-built executable.** Root-caused
+  2026-09-13 (`HISTORY.md`): a minimal C program calling only
+  `vkCreateInstance`/`vkEnumeratePhysicalDevices` against the real
+  `/usr/lib/aarch64-linux-gnu/libvulkan.so.1` succeeds when built with
+  plain system `clang` (real glibc throughout) and fails
+  (`VK_ERROR_INCOMPATIBLE_DRIVER`) when built with this project's own
+  `crt-cc` -- `strace` shows the Vulkan loader's own ICD-manifest
+  directory scan reading corrupted filenames, the signature of a `struct
+  dirent` read at the wrong field offsets. Suspected cause: this
+  project's own `libc.so`/`libdl.so` (loaded to satisfy the executable's
+  own direct NEEDED entries) and real glibc (`libc.so.6`, pulled in
+  transitively by `libvulkan.so.1` itself) coexist in one process under
+  different SONAMEs, but plain unversioned symbol lookups for common
+  POSIX names (`opendir`/`readdir`/`dlopen`) resolve through the whole
+  process's single global scope in load order, not strictly through each
+  library's own dependency chain -- this project's own `libdl.so` is
+  confirmed (`nm -D`) to export a real `dlopen` under that exact name.
+  Any future direct link of a real host shared library depending on real
+  glibc (Vulkan today; D3D12/Metal don't apply on Linux, but any other
+  future host-library dependency would) is suspect until this is fixed.
+  Real candidate fixes, none attempted yet: isolate such host libraries
+  into a separate symbol namespace via `dlmopen()`/`LM_ID_NEWLM` (blocked
+  on this project's own `dlopen()` not being implemented yet -- see
+  `libcrtgfx/src/arch/linux/gpu_vulkan.c`'s own top comment); hide this
+  project's own conflicting POSIX symbol exports from the global scope
+  (`-Wl,--exclude-libs`/hidden visibility, verified narrow enough not to
+  break this project's own internal use of the same symbols); or stop
+  linking real host GPU libraries directly into a process built against
+  this project's own libc. Needs its own dedicated investigation, not a
+  quick patch -- do not fold this back into the stage-04 checklist above
+  until it has a real, evidenced fix.
 - [ ] **Close path-with-spaces acceptance.** Fix FFmpeg's
   `-I${prefix}/include` argument handling and the remaining Windows `crt-cc`
   and all-host `crt-c++` argument flattening, then repeat the affected isolated

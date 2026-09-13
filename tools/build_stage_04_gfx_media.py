@@ -782,7 +782,38 @@ def main() -> None:
         with timings.measure("prepare clean predecessor SDK copy"):
             if staged.exists():
                 remove_tree(staged)
-            shutil.copytree(sdk, staged)
+            # ignore=_skip_work_root: a real, confirmed bug (2026-09-13),
+            # hit for real running this script's own documented invocation
+            # (--sdk-root . --work-root ./tmp, i.e. work_root nested inside
+            # sdk -- exactly how tools/crt-stage-build.py's own callers and
+            # every isolated-stage session so far have actually run this).
+            # temp_root (and therefore `staged`, temp_root/"sdk") lives
+            # under work_root since the --reuse-work-root feature landed
+            # (dir=work_root, both branches -- see main()'s own temp_root
+            # assignment), which is itself already a subdirectory of `sdk`
+            # in that invocation shape. A plain shutil.copytree(sdk, staged)
+            # therefore tries to copy sdk into a destination that is
+            # already one of its own descendants: every file copytree
+            # writes into `staged` makes `sdk`'s own directory tree (which
+            # `staged` sits inside of) larger, so the *same* recursive walk
+            # that is still copying `sdk` keeps discovering more of its own
+            # already-written output to copy next, confirmed for real via
+            # the exact failure this produces -- shutil.Error with a path
+            # like ".../sdk/tmp/build/04-gfx-media/<tmpdir>/sdk/tmp/build/
+            # 04-gfx-media/<tmpdir>/sdk/..." repeating until it hits a
+            # filesystem path-length limit. Fixed by excluding work_root
+            # itself (wherever it appears, matched by resolved path, not
+            # name) from the copy -- it is this script's own scratch space,
+            # never meant to be part of the staged predecessor SDK copy in
+            # the first place, regardless of whether it happens to be
+            # nested inside `sdk` or not.
+            work_root_resolved = work_root.resolve()
+
+            def _skip_work_root(directory: str, names):
+                base = Path(directory).resolve()
+                return {name for name in names if (base / name).resolve() == work_root_resolved}
+
+            shutil.copytree(sdk, staged, ignore=_skip_work_root)
         env = runtime_env(staged, manifest)
 
         with timings.measure("fetch and verify FreeType/FFmpeg sources"):

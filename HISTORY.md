@@ -8,6 +8,154 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-13
+
+- **Established Linux `01-c -> 02-cxx` isolated evidence.** Rebuilt the
+  full dist chain from a clean `out/` on real Linux/aarch64 hardware,
+  extracted a fresh `dist/01-c`, and ran the isolated `crt-stage-build.py`
+  upgrade directly against it: static and shared
+  `imported_libcxx_test`/`imported_libcxx_string_abi_test` all pass,
+  `verify_dist.py` passes, `CRT stage ready`, and the resulting `02-cxx`
+  carries `stages/recipes/03-gfx-simple.json` (confirmed present) --
+  exactly the acceptance bar this item required. No code changes needed;
+  the existing pipeline already handles this correctly on Linux.
+
+- **Fixed a real regression in the isolated `03-gfx-simple ->
+  04-gfx-media` stage build's own temp-directory handling
+  (`tools/build_stage_04_gfx_media.py`), introduced by the `--reuse-
+  work-root` optimization landed the same week.** Running this
+  project's own long-documented invocation (`--sdk-root . --work-root
+  ./tmp`, i.e. `--work-root` nested inside `--sdk-root`, exactly how
+  every isolated-stage session on this host has run it) failed almost
+  immediately: `shutil.copytree(sdk, staged)` raised a `shutil.Error`
+  whose message was a single path repeating `sdk/tmp/build/04-gfx-media/
+  <tmpdir>/sdk/tmp/build/04-gfx-media/<tmpdir>/sdk/...` until hitting a
+  filesystem path-length limit. Root cause: `main()`'s own `temp_root`
+  now always resolves under `work_root` (`tempfile.mkdtemp(dir=
+  work_root)`, both the `--reuse-work-root` and default branches), and
+  `staged = temp_root/"sdk"` therefore also lives under `work_root` --
+  in this invocation shape, `work_root` is itself already a subdirectory
+  of `sdk`. Copying `sdk` into a destination that is already one of
+  `sdk`'s own descendants means every file the copy writes makes `sdk`'s
+  own tree larger, so the same recursive walk keeps discovering more of
+  its own just-written output to copy next. Fixed by excluding
+  `work_root` itself (matched by resolved path, not name) from the
+  `copytree` via a custom `ignore` callback -- it is this script's own
+  scratch space, never meant to be part of the staged predecessor SDK
+  copy regardless of whether it happens to be nested inside `sdk`.
+  Verified for real: the "prepare clean predecessor SDK copy" phase that
+  previously failed in ~25s now completes in ~0.3s, both with and
+  without `--reuse-work-root`.
+
+- **Fixed a real, previously-unexercised RPATH gap in `libcrtgfx.so`
+  (`CMakeLists.txt`'s `crt_configure_shared_runtime()`), found running
+  the isolated `examples/gfx-gpu` standalone rebuild against a real
+  packaged `03-gfx-simple` SDK for the first time to completion.** After
+  the copytree fix above let the full stage build run again,
+  `crtgfx_gpu_example` failed at runtime: `error while loading shared
+  libraries: /lib/aarch64-linux-gnu/libc++.so: file too short` -- the
+  *host's own* real `llvm-18` package's identically-named ABI linker
+  script (confirmed via `file`/`cat`: the same 37-byte `INPUT(...)`
+  shape this project's own now-disabled one used to be, per the
+  2026-09-11 `LIBCXX_ENABLE_ABI_LINKER_SCRIPT=OFF` entry). Root cause,
+  confirmed via `readelf -d`: the executable's own RUNPATH correctly
+  lists the SDK's `lib/` first, but `libcrtgfx.so` itself -- which is
+  what actually needs `libc++.so` -- carries no RPATH/RUNPATH of its own
+  at all, and DT_RUNPATH (unlike the older, deprecated DT_RPATH) is not
+  transitive: it only ever governs resolving the object that carries it
+  own *direct* NEEDED entries, never a dependency's dependency. Without
+  an RPATH of its own, `libcrtgfx.so`'s search for `libc++.so` falls
+  through to the ordinary system search and lands on the host's broken
+  copy. Fixed by adding `$ORIGIN` to `BUILD_RPATH`/`INSTALL_RPATH` for
+  every Linux shared-runtime target `crt_configure_shared_runtime()`
+  configures (`crtgfx_window_shared`, `crtgfx_gpu_shared`,
+  `crtmedia_shared`, `crtjs_shared`) -- the standard, portable fix for a
+  self-contained shared-library distribution: it resolves relative to
+  wherever *that .so itself* is actually installed, correct in the
+  in-tree build directory and in every packaged distribution stage
+  alike, since every sibling CRT runtime library already lives in the
+  same directory at each of those locations. Confirmed via `readelf -d`
+  after the fix (`RUNPATH: [$ORIGIN:...]`); full in-tree `ctest` suite
+  re-run clean, 111/111.
+  `examples/gfx-gpu/CMakeLists.txt`/`examples/gfx-skia/CMakeLists.txt`
+  additionally needed the SDK's own `libc++.so.1` and `libunwind.so`
+  linked directly and explicitly (not just transitively through
+  `libcrtgfx.so`/`libcrtgfx_skia.so`): `libcrtgfx.so`'s own literal
+  NEEDED entry is `libc++.so` (matching the SONAME the in-tree bootstrap
+  libc++ it was built against declares for itself), a *different*
+  literal string than the SDK's own real, versioned `libc++.so.1` --
+  giving the executable its own direct NEEDED for the real file (via its
+  own already-correct RUNPATH) makes the loader resolve and load it
+  *before* `libcrtgfx.so`'s separate transitive need for the bare
+  `libc++.so` name is ever processed, so an already-loaded dependency
+  satisfies it without a second, independent search. Likewise
+  `libc++abi.so.1`'s own `_Unwind_*` symbols have no NEEDED entry
+  pointing at `libunwind.so` at all (`LIBCXXABI_USE_LLVM_UNWINDER=OFF`,
+  see that recipe's own notes) and needed the identical direct-link
+  treatment. Verified for real, standalone (manually reconfiguring/
+  rebuilding just `examples/gfx-gpu` against a `CRT_STAGE_KEEP_TMP=1`-
+  preserved SDK copy, without re-running the ~12-minute Skia/FreeType/
+  FFmpeg build each time): `crtgfx_gpu_example` now loads and runs past
+  every library-resolution step, reaching its own real application logic
+  (`crtgfx_gpu_query_capabilities()`) cleanly.
+
+  **A first attempt to explain the remaining live-GPU-presentation
+  failure as a host account permission gap (`video`/`render` group
+  membership) turned out to be wrong -- recorded here, then disproven
+  the same day, so it is not rediscovered blind.** After the account was
+  actually added to both groups (`sudo usermod -aG video,render cmjo`)
+  and the session restarted -- confirmed via `id`/`getent group` and via
+  `os.access("/dev/dri/renderD128", os.R_OK|os.W_OK)` returning `True`
+  -- a genuine fresh rerun hit the *identical* `crtgfx_gpu_window_demo:
+  no usable GPU backend on this host (rc=0, device_count=0)`, proving
+  device permissions were never the real blocker.
+
+  **Root-caused instead to a real, previously-undiscovered architectural
+  problem: directly linking a real host shared library that itself
+  depends on real glibc (`/lib/aarch64-linux-gnu/libvulkan.so.1`) into a
+  process built against this project's own, ABI-incompatible libc
+  corrupts that library's own internal glibc calls.** Isolated with a
+  minimal, hand-written C program calling only `vkCreateInstance`/
+  `vkEnumeratePhysicalDevices` against the same real `libvulkan.so.1`:
+  built with plain system `clang` (real glibc throughout), it succeeds
+  (`rc=0, count=1`, the same `llvmpipe`/Mesa software device
+  `vulkaninfo` reports); built with this project's own `crt-cc` (same
+  source, same `libvulkan.so.1`), it fails identically
+  (`vkCreateInstance` returns `-9`, `VK_ERROR_INCOMPATIBLE_DRIVER`).
+  `strace`ing the failing binary shows exactly where: the Vulkan
+  loader's own ICD-manifest directory scan (`opendir`/`readdir` against
+  `/usr/share/vulkan/icd.d`) succeeds at opening the directory, but the
+  filenames it then tries to `openat()` are corrupted fragments of real
+  ones (`"SA_device_select.json"`, `"TEL_nullhw.json"`, bare
+  `".json"`/`"d.json"`/`"cd.json"`/`"icd.json"` instead of a real
+  `<name>.json` under that directory) -- the signature of a `struct
+  dirent` read at the wrong field offsets, not a missing-file problem.
+  This project's own `libc.so`/`libdl.so` are loaded into the same
+  process (to satisfy this executable's own direct NEEDED entries)
+  alongside real glibc (`libc.so.6`, pulled in transitively by
+  `libvulkan.so.1` itself) under different SONAMEs, so both coexist
+  rather than conflicting at load time -- but plain, unversioned dynamic
+  symbol lookups for common POSIX names (`opendir`/`readdir`/`dlopen`/
+  ...) resolve through the process's single global scope in load order,
+  not strictly through each library's own declared dependency chain.
+  This project's own `libdl.so` is confirmed (via `nm -D`) to export a
+  real, defined `dlopen` under that exact name, and the Vulkan loader's
+  own ICD discovery code needs exactly `opendir`/`readdir`/`dlopen`, the
+  same short list -- consistent with (though not yet proven symbol-by-
+  symbol) real glibc's own `readdir()` call inside `libvulkan.so.1`
+  getting bound to this project's own, differently-laid-out
+  implementation instead, corrupting the `dirent` it reads. Genuinely
+  architectural, not a packaging bug: fixing it needs either isolating
+  such host libraries into a separate symbol namespace (`dlmopen()`
+  with `LM_ID_NEWLM` -- this project's own `dlopen()` does not work yet,
+  per `libcrtgfx/src/arch/linux/gpu_vulkan.c`'s own top comment),
+  hiding this project's own conflicting POSIX symbol exports from the
+  global scope, or not linking real host GPU libraries directly into a
+  process built against this project's own libc at all -- out of scope
+  for this acceptance pass. Left open in `TODO.md` as a real, separate,
+  deeper investigation rather than folded into this stage's own
+  checklist.
+
 ## 2026-09-12
 
 - **Confirmed that serial FreeType/FFmpeg builds are no longer required by the

@@ -101,5 +101,32 @@ if(NOT WIN32 AND NOT APPLE)
       "-Wl,-rpath-link,${CRT_EXAMPLE_VULKAN_LIB_DIR}")
   endif()
   target_link_libraries(crtgfx_gpu_example PRIVATE "${CMAKE_SYSROOT}/lib/libunwind.so")
+  # A fourth real, confirmed bug (2026-09-13), found right after fixing
+  # the libunwind.so gap above: even with that fix, the rebuilt example
+  # still failed at *runtime*, this time against a real, correctly-
+  # installed `${CMAKE_SYSROOT}/lib/libc++.so` -- `error while loading
+  # shared libraries: /lib/aarch64-linux-gnu/libc++.so: file too short`,
+  # the *host's own* real llvm-18 package's identical-by-name ABI linker
+  # script (confirmed via `file`/`cat`: same 37-byte `INPUT(...)` shape
+  # this project's own now-disabled one used to be). Root cause: this
+  # executable's own `readelf -d` RUNPATH correctly lists
+  # `${CMAKE_SYSROOT}/lib` first -- but DT_RUNPATH (unlike the older,
+  # deprecated DT_RPATH) is *not* transitive: it only ever governs
+  # resolving the object that carries it own *direct* NEEDED entries,
+  # never a dependency's dependency. `libcrtgfx.so` itself needs
+  # `libc++.so` (confirmed via its own `readelf -d`: a real NEEDED entry,
+  # but no RPATH/RUNPATH of its own at all), so the dynamic loader falls
+  # through to the ordinary system search *for that one transitive need
+  # specifically*, landing on the host's own broken same-named file --
+  # this executable's own correct RUNPATH is consulted only for its own
+  # direct links (`libcrtgfx_gpu.so`/`libcrtgfx.so`/`libunwind.so.1`,
+  # which is why those already resolved fine). Fixed by linking the
+  # SDK's own real `libc++.so.1` directly and explicitly here too: once
+  # this executable has its *own* direct NEEDED entry for it, satisfied
+  # via its own already-correct RUNPATH, the loader resolves and loads
+  # the SDK's real copy *before* processing `libcrtgfx.so`'s own
+  # transitive need for the same SONAME -- an already-loaded dependency
+  # is never re-resolved via a different (here, absent) RPATH.
+  target_link_libraries(crtgfx_gpu_example PRIVATE "${CMAKE_SYSROOT}/lib/libc++.so.1")
 endif()
 
