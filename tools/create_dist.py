@@ -325,7 +325,11 @@ def write_sdk_files(root: Path, destination: Path, target_os: str, target_arch: 
 
     (destination / "activate.sh").write_text(
         """#!/bin/sh
-_crt_dist_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+# When sourced by Bash, $0 names the shell rather than this file.  Bash's
+# BASH_SOURCE preserves the activation script path; zsh already exposes the
+# sourced filename through $0, and direct execution retains the old fallback.
+_crt_activate_source=${BASH_SOURCE:-$0}
+_crt_dist_root=$(CDPATH= cd -- "$(dirname -- "$_crt_activate_source")" && pwd)
 export CRT_SYSROOT="$_crt_dist_root"
 export CRT_ROOTFS="$_crt_dist_root"
 export CRT_TARGET_OS="__TARGET_OS__"

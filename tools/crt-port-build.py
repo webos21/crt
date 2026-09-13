@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import atexit
 import ctypes
 import json
 import os
@@ -11,6 +12,26 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+
+
+def posix_command_alias(path, name):
+    """Return a whitespace-free executable alias for a POSIX command path.
+
+    Autoconf scripts commonly expand $CC/$CXX/$MAKE through unquoted `$*`;
+    quotes embedded in an environment-variable value are ordinary characters
+    at that point and cannot preserve a path containing spaces. Keep every
+    user-selected SDK/source/build/install path unchanged, but expose the
+    command itself through a short-lived /tmp symlink, analogous to the
+    stable /tools names used inside the Windows CRT rootfs.
+    """
+    path = Path(path).resolve()
+    if not any(character.isspace() for character in str(path)):
+        return str(path)
+    alias_dir = Path(tempfile.mkdtemp(prefix="crt-port-tools-"))
+    alias = alias_dir / name
+    alias.symlink_to(path)
+    atexit.register(shutil.rmtree, alias_dir, ignore_errors=True)
+    return str(alias)
 
 
 def load_recipes(recipe_dir):
@@ -434,8 +455,9 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
             rootfs_path = os.pathsep.join(
                 str(rootfs / entry) for entry in ("system/bin", "bin", "usr/bin"))
             env["CRT_ROOTFS"] = str(rootfs)
-            env["CC"] = f"{shell} {root / 'tools' / 'crt-cc'}"
-            env["CXX"] = f"{shell} {root / 'tools' / 'crt-c++'}"
+            shell = posix_command_alias(shell, "mksh")
+            env["CC"] = posix_command_alias(root / "tools" / "crt-cc", "crt-cc")
+            env["CXX"] = posix_command_alias(root / "tools" / "crt-c++", "crt-c++")
             env["PATH"] = f"{rootfs_path}{os.pathsep}{env.get('PATH', '')}"
         cache = read_cmake_cache(preset_build_dir / "CMakeCache.txt")
         kernel32 = cache.get("CRT_WINDOWS_KERNEL32_LIB")
@@ -588,18 +610,35 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
         make_suffix = ".exe" if target_os == "windows" else ""
         port_make = port_prefix / "bin" / f"make{make_suffix}"
         if port_make.exists():
-            env["MAKE"] = path_for_crt_shell(windows_short_path(port_make)) if target_os == "windows" else str(port_make)
+            env["MAKE"] = (
+                path_for_crt_shell(windows_short_path(port_make))
+                if target_os == "windows"
+                else posix_command_alias(port_make, "make")
+            )
         else:
             env["MAKE"] = env.get("MAKE") or find_host_make(target_os) or "make"
     else:
-        env["CC"] = f"{root_env}/tools/crt-cc" if use_msys_paths else str(root / "tools" / "crt-cc")
-        env["CXX"] = f"{root_env}/tools/crt-c++" if use_msys_paths else str(root / "tools" / "crt-c++")
+        env["CC"] = (
+            f"{root_env}/tools/crt-cc"
+            if use_msys_paths
+            else posix_command_alias(root / "tools" / "crt-cc", "crt-cc")
+        )
+        env["CXX"] = (
+            f"{root_env}/tools/crt-c++"
+            if use_msys_paths
+            else posix_command_alias(root / "tools" / "crt-c++", "crt-c++")
+        )
         env["PATH"] = f"{tools_dir_env}{os.pathsep}{env.get('PATH', '')}"
     if packaged_sdk:
         suffix = ".exe" if target_os == "windows" else ""
         packaged_make = root / "system" / "bin" / f"make{suffix}"
         if packaged_make.is_file():
-            env["MAKE"] = "/system/bin/make" if use_crt_shell else str(packaged_make)
+            env["MAKE"] = (
+                "/system/bin/make"
+                if use_crt_shell
+                else (str(packaged_make) if target_os == "windows"
+                      else posix_command_alias(packaged_make, "make"))
+            )
     env["AR"] = env.get("AR") or find_llvm_tool("llvm-ar") or shutil.which("ar") or "ar"
     env["RANLIB"] = env.get("RANLIB") or find_llvm_tool("llvm-ranlib") or shutil.which("ranlib") or "ranlib"
     env["STRIP"] = env.get("STRIP") or find_llvm_tool("llvm-strip") or shutil.which("strip") or "strip"
@@ -770,7 +809,12 @@ def apply_recipe_env(env, recipe, target_os, root, preset_build_dir=None, work_b
         "include_dirs", []
     )
     if include_dirs:
-        flags = " ".join(f"-I{path_for_crt_shell(root / d)}" for d in include_dirs)
+        # CPPFLAGS is a shell command fragment. Quote each complete -I
+        # argument so both direct shlex consumers below and upstream
+        # configure/Makefile eval preserve a space-containing repository.
+        flags = shlex.join(
+            [f"-I{path_for_crt_shell(root / d)}" for d in include_dirs]
+        )
         env["CPPFLAGS"] = f"{flags} {env['CPPFLAGS']}" if env.get("CPPFLAGS") else flags
     # force_include: same path-templating as include_dirs, but for a file
     # unconditionally prepended to every translation unit via -include
@@ -802,7 +846,11 @@ def apply_recipe_env(env, recipe, target_os, root, preset_build_dir=None, work_b
         "force_include", []
     )
     if force_include:
-        flags = " ".join(f"-include {path_for_crt_shell(root / f)}" for f in force_include)
+        flags = shlex.join([
+            arg
+            for include_file in force_include
+            for arg in ("-include", path_for_crt_shell(root / include_file))
+        ])
         env["CFLAGS"] = f"{flags} {env['CFLAGS']}" if env.get("CFLAGS") else flags
 
 
@@ -824,6 +872,8 @@ def substitute_recipe_value(value, root, preset_build_dir, work_build_dir, sysro
     )
     result = result.replace("@PORT_PREFIX_POSIX@", prefix_for_posix_shell)
     result = result.replace(
+        "@PORT_PREFIX_MAKE@", prefix_for_posix_shell.replace(" ", "\\ "))
+    result = result.replace(
         "@PORT_PREFIX_PKGCONFIG@", prefix_for_posix_shell.replace(" ", "\\ "))
     return result
 
@@ -836,7 +886,12 @@ def substitute_recipe_values(values, root, preset_build_dir, work_build_dir, sys
 
 
 def command_value_argv(value, preset_build_dir, target_os):
-    argv = shlex.split(value)
+    # Project-owned command values are normally shell-quoted by make_env(),
+    # but accept an existing bare executable path as one argv element too.
+    # This keeps callers robust when an inherited CC/AR path contains spaces
+    # without arguments, while retaining multi-token command support.
+    value = str(value)
+    argv = [value] if Path(value).is_file() else shlex.split(value)
     if target_os == "windows" and argv and argv[0] == "/system/bin/mksh":
         argv[0] = str(rootfs_mksh_path(preset_build_dir, target_os))
     return argv
@@ -845,7 +900,10 @@ def command_value_argv(value, preset_build_dir, target_os):
 def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env, target_os, mingw_triple, use_crt_shell=False, configure_only=False, jobs=None):
     port_name = recipe["name"]
     build = recipe["build"]
+    sysroot = Path(env["CRT_SYSROOT"])
     shell = rootfs_mksh_path(preset_build_dir, target_os)
+    if target_os != "windows":
+        shell = Path(posix_command_alias(shell, "mksh"))
     # @PORT_PREFIX@ substitution, computed once up front so both
     # configure_args (below) and make_args/install_args (further down)
     # can use it: needed whenever a recipe's own configure step must

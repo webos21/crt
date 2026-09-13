@@ -8,6 +8,42 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-14
+
+- **Completed Linux path-with-spaces distribution acceptance on WSL2 Ubuntu
+  26.04/x86_64 and fixed every packaging boundary it exposed.** A fresh clone
+  at `/home/lee/crt path acceptance/source tree` built and verified the full
+  `crt-gfx-simple-dist` target. The resulting `03-gfx-simple` SDK was then
+  copied to a separate `/home/lee/Linux path acceptance final 20260914/sdk
+  root`; from that extracted SDK, with no in-tree CRT headers or libraries,
+  the installed `gfx-simple` CMake project rebuilt in another spaced path and
+  ran under WSLg (`presented=1`), and packaged `crt-c++` compiled/linked/ran a
+  shared-runtime frontend consumer from spaced source/output paths
+  (`cxx_frontend_test: ok`). Finally zlib 1.3.1 configured through packaged
+  mksh, built at `-j4`, installed to a spaced prefix, and passed both static
+  and shared round-trip consumers; `readelf` confirmed the shared consumer's
+  RUNPATH is the exact spaced install `lib` directory and installed libz's
+  RUNPATH retains both the spaced SDK and port prefixes.
+
+  The fixes keep Linux wrapper-owned sysroot objects/libraries as real argv
+  entries; let packaged `crt-cc`/`crt-c++` discover `<sdk>` from their guarded
+  `<sdk>/tools` location when the generated CMake toolchain is used without
+  activation; and make sourced `activate.sh` use Bash's real source filename
+  instead of `$0`. `crt-port-build.py` now supplies temporary whitespace-free
+  POSIX command aliases for CC/CXX/MAKE/CONFIG_SHELL because many unmodified
+  configure scripts re-expand those variables through unquoted `$*` (embedded
+  quotes cannot protect them), while every user-controlled SDK/source/work/
+  install path remains unchanged and space-containing. Recipe flags retain
+  complete `-I`/`-include` argv boundaries, and zlib's generated Makefile
+  receives a recipe-declared escaped prefix for its own unquoted install
+  commands. The packaged Linux `gfx-simple` example now follows the already-
+  established Linux external-example policy: select `libcrtgfx.a`, add the
+  redistributed `libxkbcommon.a` explicitly, and hide archive symbols from
+  host DSOs, avoiding an unnecessary shared libc++/libatomic dependency chain
+  in this C-only stage. The final SDK was regenerated and `verify_dist.py`
+  passed; the ordinary Windows preset also rebuilt cleanly and passed all
+  117/117 CTest cases.
+
 ## 2026-09-13
 
 - **Completed Linux isolated-stage acceptance through the option-ON

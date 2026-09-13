@@ -19,6 +19,14 @@
     "env": {
       "CFLAGS": "-O2"
     },
+    "post_configure_patch": [
+      {
+        "file": "Makefile",
+        "find": "prefix =@PORT_PREFIX_POSIX@",
+        "replace": "prefix =@PORT_PREFIX_MAKE@",
+        "reason": "zlib 1.3.1 emits its prefix unquoted into shell recipe arguments. Escape whitespace in the generated Makefile value so an unchanged space-containing install prefix remains one path during make install; upstream source is not modified."
+      }
+    ],
     "make_args": [],
     "target_overrides": {
       "windows": {

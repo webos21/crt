@@ -72,14 +72,13 @@ in-tree CRT headers, libraries, and build artifacts, rebuild and run packaged
 examples, and exercise the required tests and external consumers. Record each
 result in `HISTORY.md` before removing it here.
 
-- [ ] **Finish non-Windows path-with-spaces acceptance.** Native Windows is
-  complete, including extracted 03/04 SDK examples and a real FFmpeg
-  configure/`make -j4`/install/external-consumer run with spaces in the SDK,
-  source/build, install, and consumer paths; see `HISTORY.md` (2026-09-13).
-  The real macOS run is currently in progress. Linux still needs a recorded
-  run of the same all-host `crt-c++`, generated CMake toolchain, and port
-  include/library/rpath changes from space-containing SDK and install paths.
-  Record each real-host result before closing this item.
+- [ ] **Finish macOS path-with-spaces acceptance.** Native Windows is complete
+  with extracted 03/04 examples and FFmpeg, and Linux is now complete on WSL2
+  Ubuntu 26.04/x86_64 with a freshly generated/extracted 03 SDK, CMake C
+  example, shared-runtime `crt-c++` consumer, and zlib configure/`make -j4`/
+  install/static+shared consumers across space-containing SDK/source/build/
+  install paths; see `HISTORY.md` (2026-09-13 and 2026-09-14). The real macOS
+  run remains in progress; record it before closing this item.
 
 ## Planned
 

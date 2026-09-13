@@ -2,6 +2,21 @@
 set -eu
 
 if [ -z "${CRT_SYSROOT:-}" ]; then
+  # A packaged SDK installs this wrapper at <sdk>/tools/crt-cc.  Let the
+  # generated CMake toolchain work on its own, as documented, without making
+  # every build command inherit activate.sh's environment first.  The
+  # manifest guard keeps an in-repository wrapper from mistaking its parent
+  # checkout for an installed SDK.
+  _crt_wrapper_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+  _crt_packaged_root=$(CDPATH= cd -- "$_crt_wrapper_dir/.." && pwd)
+  if [ -f "$_crt_packaged_root/manifest.json" ]; then
+    CRT_SYSROOT=$_crt_packaged_root
+    CRT_ROOTFS=${CRT_ROOTFS:-$_crt_packaged_root}
+    export CRT_SYSROOT CRT_ROOTFS
+  fi
+fi
+
+if [ -z "${CRT_SYSROOT:-}" ]; then
   echo "crt-cc: CRT_SYSROOT is not set" >&2
   exit 1
 fi
@@ -632,7 +647,47 @@ if [ "$target_os" = windows ]; then
     ${CRT_WINDOWS_SDK_LIBPATH:+"-Wl,/libpath:${CRT_WINDOWS_SDK_LIBPATH}"}
 fi
 
-# Non-Windows paths retain their established link recipe here; their internal
-# SDK-path accumulators are addressed by the cross-host C++ acceptance work.
-# shellcheck disable=SC2086
-run_cc -nostdlib -nostartfiles -nodefaultlibs $entry $prelibs "$@" $libs
+# Keep non-Windows wrapper-owned sysroot paths as argv entries too. The
+# historical $libs expansion preserved user argv but still split every
+# internally-added SDK path when CRT_SYSROOT contained a space.
+if [ "$target_os" = linux ]; then
+  if [ "$shared_mode" -eq 1 ]; then
+    run_cc -nostdlib -nostartfiles -nodefaultlibs \
+      -Wl,--gc-sections "-Wl,-rpath,${CRT_SYSROOT}/lib" \
+      "$@" "-L${CRT_SYSROOT}/lib" \
+      "${CRT_SYSROOT}/lib/libc.so" "${CRT_SYSROOT}/lib/libm.so" \
+      "${CRT_SYSROOT}/lib/libdl.so" \
+      "${CRT_SYSROOT}/lib/libclang_rt.builtins.a"
+  fi
+  run_cc -nostdlib -nostartfiles -nodefaultlibs \
+    -Wl,-e,_start -Wl,--gc-sections \
+    "$@" "${CRT_SYSROOT}/lib/crt1.o" "-L${CRT_SYSROOT}/lib" \
+    "${CRT_SYSROOT}/lib/crt1_init_array.o" -Wl,--start-group \
+    "${CRT_SYSROOT}/lib/libc.a" "${CRT_SYSROOT}/lib/libm.a" \
+    "${CRT_SYSROOT}/lib/libdl.a" \
+    "${CRT_SYSROOT}/lib/libclang_rt.builtins.a" -Wl,--end-group
+fi
+
+if [ "$target_os" = macos ]; then
+  if [ "$shared_mode" -eq 1 ]; then
+    set -- "$@" "-L${CRT_SYSROOT}/lib" \
+      "${CRT_SYSROOT}/lib/libc.dylib" "${CRT_SYSROOT}/lib/libm.dylib" \
+      "${CRT_SYSROOT}/lib/libdl.dylib" \
+      "${CRT_SYSROOT}/lib/libclang_rt.builtins.a" -lSystem
+    if [ "$want_real_apple_sdk" -eq 1 ]; then
+      run_cc -nostdlib -nostartfiles -nodefaultlibs \
+        "-Wl,-rpath,${CRT_SYSROOT}/lib" "$@"
+    fi
+    run_cc -nostdlib -nostartfiles -nodefaultlibs -Wl,-dead_strip \
+      "-Wl,-rpath,${CRT_SYSROOT}/lib" "$@"
+  fi
+  set -- "$@" "${CRT_SYSROOT}/lib/crt1.o" "-L${CRT_SYSROOT}/lib" \
+    "${CRT_SYSROOT}/lib/libc.a" "${CRT_SYSROOT}/lib/libm.a" \
+    "${CRT_SYSROOT}/lib/libdl.a" \
+    "${CRT_SYSROOT}/lib/libclang_rt.builtins.a" -lSystem
+  if [ "$want_real_apple_sdk" -eq 1 ]; then
+    run_cc -nostdlib -nostartfiles -nodefaultlibs -Wl,-e,_start "$@"
+  fi
+  run_cc -nostdlib -nostartfiles -nodefaultlibs \
+    -Wl,-e,_start -Wl,-dead_strip "$@"
+fi

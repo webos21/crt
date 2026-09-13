@@ -2,6 +2,19 @@
 set -eu
 
 if [ -z "${CRT_SYSROOT:-}" ]; then
+  # Packaged wrappers live at <sdk>/tools.  Auto-discover only a parent with
+  # the distribution manifest so crt-toolchain.cmake is sufficient by
+  # itself, while repository-mode callers still have to name their sysroot.
+  _crt_wrapper_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+  _crt_packaged_root=$(CDPATH= cd -- "$_crt_wrapper_dir/.." && pwd)
+  if [ -f "$_crt_packaged_root/manifest.json" ]; then
+    CRT_SYSROOT=$_crt_packaged_root
+    CRT_ROOTFS=${CRT_ROOTFS:-$_crt_packaged_root}
+    export CRT_SYSROOT CRT_ROOTFS
+  fi
+fi
+
+if [ -z "${CRT_SYSROOT:-}" ]; then
   echo "crt-c++: CRT_SYSROOT is not set" >&2
   exit 1
 fi
@@ -906,6 +919,50 @@ if [ "$target_os" = windows ]; then
   run_cxx "$@"
 fi
 
+if [ "$target_os" = linux ]; then
+  if [ "$shared_mode" -eq 1 ]; then
+    set -- "$@" "-L${CRT_SYSROOT}/lib"
+    if [ "${CRT_CXX_BUILDING_RUNTIME:-0}" != 1 ]; then
+      if [ "$runtime_linkage" = shared ]; then
+        set -- "$@" "$cxx_lib"
+      else
+        set -- "$@" "${CRT_SYSROOT}/lib/libc++.a"
+      fi
+      if [ -n "${cxx_abi_lib:-}" ]; then set -- "$@" "$cxx_abi_lib"; fi
+      if [ -n "${cxx_unwind_lib:-}" ]; then set -- "$@" "$cxx_unwind_lib"; fi
+    fi
+    set -- "$@" "${CRT_SYSROOT}/lib/libc.so" \
+      "${CRT_SYSROOT}/lib/libm.so" "${CRT_SYSROOT}/lib/libdl.so" \
+      "${CRT_SYSROOT}/lib/libclang_rt.builtins.a"
+    run_cxx -nostdlib -nostartfiles -nodefaultlibs \
+      -Wl,--gc-sections "-Wl,-rpath,${CRT_SYSROOT}/lib" "$@"
+  fi
+
+  set -- "$@" "${CRT_SYSROOT}/lib/crt1.o" "-L${CRT_SYSROOT}/lib" \
+    "${CRT_SYSROOT}/lib/crt1_init_array.o" -Wl,--start-group
+  if [ "${CRT_CXX_BUILDING_RUNTIME:-0}" != 1 ]; then
+    if [ "$runtime_linkage" = shared ]; then
+      set -- "$@" "$cxx_lib"
+    else
+      set -- "$@" "${CRT_SYSROOT}/lib/libc++.a"
+    fi
+    if [ -n "${cxx_abi_lib:-}" ]; then set -- "$@" "$cxx_abi_lib"; fi
+    if [ -n "${cxx_unwind_lib:-}" ]; then set -- "$@" "$cxx_unwind_lib"; fi
+  fi
+  set -- "$@" "${CRT_SYSROOT}/lib/libc.a" \
+    "${CRT_SYSROOT}/lib/libm.a" "${CRT_SYSROOT}/lib/libdl.a" \
+    "${CRT_SYSROOT}/lib/libclang_rt.builtins.a" -Wl,--end-group
+  if [ "$runtime_linkage" = shared ]; then
+    run_cxx -nostdlib -nostartfiles -nodefaultlibs \
+      -Wl,-e,_start -Wl,--gc-sections \
+      "-Wl,-rpath,${CRT_SYSROOT}/lib" "$@"
+  fi
+  run_cxx -nostdlib -nostartfiles -nodefaultlibs \
+    -Wl,-e,_start -Wl,--gc-sections "$@"
+fi
+
+# macOS retains the established recipe here until its separate real-host
+# path-with-spaces run supplies equivalent evidence.
 if [ -n "$compiler_rt_builtins" ]; then
   # shellcheck disable=SC2086
   run_cxx -nostdlib -nostartfiles -nodefaultlibs $entry $prelibs "$@" $libs "$compiler_rt_builtins"
