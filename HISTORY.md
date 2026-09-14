@@ -10,6 +10,28 @@ substantive update.
 
 ## 2026-09-14
 
+- **Reproduced both sides of the Linux CRT-libc/host-glibc namespace
+  collision independently on WSL2 Ubuntu 26.04/x86_64 and corrected the
+  completion ledger.** WSLg exposes `/dev/dxg`, a working Mesa Dozen Vulkan
+  ICD, `VK_KHR_wayland_surface`, and real Wayland presentation (`vkcube
+  --wsi wayland --c 10` exits 0), so it is sufficient for this loader-level
+  regression even though it does not replace native-Linux GPU acceptance. A
+  minimal CRT C executable linked directly to the host `libvulkan.so.1`, with
+  CRT static-archive symbols still globally visible, reproduces
+  `vkCreateInstance=-9`/`device_count=0`; the host loader's GLIBC-versioned
+  `opendir`/`readdir` resolve to the executable's incompatible unversioned CRT
+  definitions. A separate shared-libc++ `std::istringstream >> float` probe,
+  linked in the real example's Vulkan-before-libc++ order and with
+  `--exclude-libs,ALL`, keeps Vulkan's directory calls on glibc but then
+  deterministically SIGSEGVs. `LD_DEBUG=bindings` proves libc++'s unversioned
+  `strtof_l` resolves to `/usr/lib/x86_64-linux-gnu/libc.so.6`. The same WSL
+  SDK's `libc++.so.1` directly `DT_NEEDED` `libatomic.so.1`, independently
+  confirming the new Linux prerequisite on x86_64 as well as the previously
+  accepted aarch64 host. Updated `TODO.md`, `STATUS.md`, `README.md`, and the
+  runtime roadmap to distinguish completed cross-host prerequisite/path
+  audits and low-level Vulkan presentation from the still-incomplete Linux
+  option-ON 04 packaged-Skia/atomic-publication acceptance.
+
 - **Completed the macOS half of the external-prerequisite host acceptance
   item, closing the gap it found.** Regenerated `03-gfx-simple` (via
   `crt-gfx-simple-dist`) and, from that extracted SDK, a fresh option-ON

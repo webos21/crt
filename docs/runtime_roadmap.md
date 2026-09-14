@@ -40,22 +40,20 @@ is not complete merely because an in-tree target links.
   presentation are implemented with Vulkan/Wayland, D3D12/Win32, and
   Metal/Cocoa.
 - Skia CPU raster/text and Ganesh GPU paths build and run on Linux, Windows,
-  and macOS. Live presentation exists on Windows and macOS; the remaining
-  pixel-exact and resize combinations there are evidence gaps, not a missing
-  common API. On Linux, the packaged Ganesh GPU example (`crtgfx_gpu_example`)
-  presents live, but the packaged Skia example (`crtgfx_skia_example`)
-  crashes on a real, root-caused symbol-resolution bug (see `TODO.md`), so
-  Linux Skia live presentation is not yet demonstrated through the isolated
-  packaged path.
+  and macOS. Low-level live GPU presentation exists on all three hosts. The
+  packaged Skia/Ganesh path is accepted on Windows and macOS; on Linux its
+  low-level GPU example presents but its packaged Skia example crashes on the
+  symbol-resolution bug tracked in `TODO.md`. The remaining pixel-exact and
+  resize combinations are separate evidence gaps, not a missing common API.
 - The software media baseline includes FFmpeg-backed demux/decode, the common
   frame/audio/player contracts, and native audio sinks. Hardware decode and
   decoded-texture interop remain separate, explicitly reported capabilities.
 - The cumulative binary-package chain reaches the current `05-js` skeleton.
   Predecessor-only isolated-stage acceptance through the option-ON
-  `03-gfx-simple -> 04-gfx-media` transition, including paths containing
-  spaces, is complete on Windows and macOS. On Linux the isolated stage-build
-  tool has not yet completed that transition -- see the previous bullet and
-  `TODO.md`.
+  `03-gfx-simple -> 04-gfx-media` transition is complete on Windows and
+  macOS. Linux's dependency inventory, low-level Vulkan path, and independent
+  path-with-spaces evidence pass, but its packaged Skia example still prevents
+  final verification/atomic publication.
 - `libcrtjs` still contains skeleton libraries only. QuickJS, its event loop,
   modules, and graphics/media bindings have not been implemented.
 

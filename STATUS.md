@@ -79,8 +79,10 @@ The software/CPU graphics baseline is complete on all three hosts:
   and invalid numeric/surface inputs.
 - The common opaque GPU device/surface/frame/fence contract is implemented.
   Ganesh renders through Vulkan on Linux, D3D12 on Windows, and Metal on
-  macOS. Live GPU presentation and resize/swapchain recreation have been
-  verified on all three hosts.
+  macOS. The low-level GPU presentation path and resize/swapchain recreation
+  have been verified on all three hosts. Packaged Skia/Ganesh live
+  presentation remains blocked on Linux by the open CRT-libc/glibc symbol-
+  namespace collision recorded in `TODO.md`; Windows and macOS pass it.
 
 Decoder-texture zero-copy, full font shaping/fallback/ICU, a full Wayland
 compositor, and a Chromium Ozone backend are not completion claims.
@@ -132,7 +134,9 @@ target.
   in-repo build tree. The complete predecessor-only chain through
   `03-gfx-simple -> 04-gfx-media`, with Skia and FFmpeg genuinely enabled
   (not the in-repo cumulative pass's default-OFF state), is complete on
-  Linux, Windows, and macOS.
+  Windows and macOS. Linux's external-prerequisite/ELF audit is complete and
+  its low-level Vulkan example presents, but the packaged Skia example still
+  crashes before final verification/atomic publication.
 - FFmpeg hardware decode/zero-copy and the QuickJS core proceed on top of the
   completed GPU rendering/presentation contract.
 - JavaScript media/gfx binding follows the stable native contracts, using a
@@ -223,8 +227,8 @@ statuses, and exceptions are maintained in:
   across every compositor implementation.
 - Image codecs, shaping, fallback fonts, ICU, and platform font discovery are
   not yet completion claims.
-- GPU decode-texture import and dmabuf-style zero-copy remain future work even
-  though Skia GPU rendering and live native presentation are complete.
+- GPU decode-texture import and dmabuf-style zero-copy remain future work.
+  Linux packaged Skia live presentation also remains open as described above.
 - WSLg can negotiate the Wayland protocol while still differing from a normal
   Linux compositor in visible presentation behavior. It is useful evidence,
   but is not a substitute for a real Linux desktop run.
