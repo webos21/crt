@@ -22,10 +22,32 @@
       "--disable-mmap",
       "--with-pic"
     ],
+    "patches": [
+      {
+        "file": "configure",
+        "find": "inode_src=`ls -id $abs_ft2_dir | awk '{print $1}'`\ninode_dst=`ls -id $abs_curr_dir | awk '{print $1}'`",
+        "replace": "inode_src=`ls -id \"$abs_ft2_dir\" | awk '{print $1}'`\ninode_dst=`ls -id \"$abs_curr_dir\" | awk '{print $1}'`",
+        "reason": "A real, confirmed bug (2026-09-13), found running this project's own path-with-spaces acceptance for the first time on macOS: this top-level configure wrapper's own $abs_ft2_dir/$abs_curr_dir (both `pwd`-derived) are used completely unquoted in these two `ls -id` calls, so a space anywhere in the build tree's own path (this project's own --work-root, deliberately space-containing under this acceptance run) word-splits each into several bogus `ls` arguments -- confirmed directly: a cascade of `ls: <fragment>: No such file or directory`, followed by `./configure: line 102: test: too many arguments` once the resulting empty $inode_src/$inode_dst reach the next comparison, then a nonsensical, truncated Makefile path (`No such file or directory` for a mangled relative fragment of the real one) once configure presses on regardless. Not Windows/mksh-specific and not related to MAKE detection (a separate, already-fixed gap in tools/crt-port-build.py's own MAKE selection) -- this fires from a plain `sh ./configure` on any POSIX host the instant its own working directory contains a space, independent of any flag this project passes."
+      },
+      {
+        "file": "builds/unix/install.mk",
+        "find": "\t$(LIBTOOL) --mode=install $(INSTALL)                             \\\n                                  $(PROJECT_LIBRARY) $(DESTDIR)$(libdir)",
+        "replace": "\t$(LIBTOOL) --mode=install $(INSTALL)                             \\\n                                  $(PROJECT_LIBRARY) \"$(DESTDIR)$(libdir)\"",
+        "reason": "A real, confirmed bug (2026-09-13), found running this project's own path-with-spaces acceptance for the first time on macOS, one step past the top-level configure/MAKE fixes above: `$(DESTDIR)$(libdir)` is completely unquoted in this recipe line, so `make install`'s own real `/bin/sh -c` execution of the fully-expanded command word-splits it -- confirmed directly: `libtool: error: '<truncated-fragment>/lib' must be an absolute directory name`, libtool itself rejecting the last, mangled word-split fragment as not starting with `/`. This is only the one line actually exercised so far (libtool's own install mode is the first one in this Makefile to *validate* its destination argument and so the first to fail loudly) -- builds/unix/install.mk has several more `$(DESTDIR)$(...)`-interpolating recipe lines (header/pkgconfig/aclocal installation) that are equally unquoted and may need the same fix once install actually reaches them; add narrowly, one real failure at a time, matching this whole recipe's own already-established practice, rather than preemptively patching lines never yet confirmed to break."
+      }
+    ],
     "env": {
       "CFLAGS": "-O2"
     },
     "make_args": [],
+    "post_configure_patch": [
+      {
+        "file": "builds/unix/unix-def.mk",
+        "find": "TOP_DIR := $(shell cd $(TOP_DIR); pwd)",
+        "replace": "TOP_DIR := $(TOP_DIR)",
+        "reason": "Originally a Windows-only target_overrides fix (drive-letter colon colliding with GNU Make's own static-pattern-rule syntax once TOP_DIR was recomputed absolute). Promoted to apply on every host (2026-09-13, this project's own path-with-spaces acceptance on macOS): the same absolute recomputation breaks a completely different way once TOP_DIR contains a space instead of a colon -- `include $(TOP_DIR)/builds/modules.mk` silently splits into multiple bogus `include` targets (GNU Make's own include directive splits on whitespace), and `$(shell $(CAT) $(TOP_DIR)/include/freetype/freetype.h)` word-splits the same way, both confirmed directly (`cat: <fragment>: No such file or directory`, `No rule to make target '<truncated-path>/builds/modules.mk'`) building this port from a deliberately space-containing --work-root for the first time. The original fix already generalizes: keeping TOP_DIR at its already-relative default (`TOP_DIR ?= .` in the top Makefile) is safe on every host, confirmed via the same real, no-recursive-submake reasoning that justified it for Windows -- no host-specific behavior depends on TOP_DIR being absolute."
+      }
+    ],
     "target_overrides": {
       "windows": {
         "configure_args": [
@@ -34,13 +56,6 @@
         "configure_cwd": "builds/unix",
         "pre_configure_copy": [
           {"src": "builds/unix/unix.mk", "dst": "config.mk"}
-        ],
-        "post_configure_patch": [
-          {
-            "file": "builds/unix/unix-def.mk",
-            "find": "TOP_DIR := $(shell cd $(TOP_DIR); pwd)",
-            "replace": "TOP_DIR := $(TOP_DIR)"
-          }
         ],
         "env": {
           "RC": ""

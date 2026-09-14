@@ -57,28 +57,12 @@ newest entry first) rather than leaving it here.
 
 ## In Progress
 
-Active threads, not a flat list of one-off items.
-
-### Distribution isolated-stage acceptance
-
-The cumulative `01-c` through `05-js` distribution chain and the physical
-`libcrtgfx` window/GPU/Skia split are complete on Linux, Windows, and macOS;
-the dated evidence belongs in [`HISTORY.md`](HISTORY.md). This active list now
-contains only the isolated-stage results that are still missing. Distribution
-hardening and later `05-js` work are Planned below.
-
-Acceptance must start from freshly extracted archives, reject access to
-in-tree CRT headers, libraries, and build artifacts, rebuild and run packaged
-examples, and exercise the required tests and external consumers. Record each
-result in `HISTORY.md` before removing it here.
-
-- [ ] **Finish macOS path-with-spaces acceptance.** Native Windows is complete
-  with extracted 03/04 examples and FFmpeg, and Linux is now complete on WSL2
-  Ubuntu 26.04/x86_64 with a freshly generated/extracted 03 SDK, CMake C
-  example, shared-runtime `crt-c++` consumer, and zlib configure/`make -j4`/
-  install/static+shared consumers across space-containing SDK/source/build/
-  install paths; see `HISTORY.md` (2026-09-13 and 2026-09-14). The real macOS
-  run remains in progress; record it before closing this item.
+Active threads, not a flat list of one-off items. Nothing is active right now:
+the cumulative `01-c` through `05-js` distribution chain and the physical
+`libcrtgfx` window/GPU/Skia split are complete on Linux, Windows, and macOS,
+including isolated-stage acceptance and path-with-spaces acceptance on all
+three hosts; the dated evidence belongs in [`HISTORY.md`](HISTORY.md).
+Distribution hardening and later `05-js` work are Planned below.
 
 ## Planned
 
@@ -132,9 +116,9 @@ JavaScript application-runtime layer.
   contract requires it. Keep the space-containing-prefix run in the active
   acceptance list until it passes.
 - Extend `04-gfx-media -> 05-js` only after the real QuickJS core and bindings
-  exist and the active path-with-spaces prerequisite is closed.
-  Apply the same pinned asset, predecessor-only build, test, external-consumer,
-  verification, and atomic-publish contract as the earlier transitions.
+  exist. Apply the same pinned asset, predecessor-only build, test,
+  external-consumer, verification, and atomic-publish contract as the earlier
+  transitions.
 
 ### Windows process signals and Toybox `timeout`
 

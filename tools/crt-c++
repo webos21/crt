@@ -505,10 +505,42 @@ fi
 
 # See the matching comment in tools/crt-cc for why shared_mode changes
 # which start object/entry-point flags apply.
+#
+# macOS below still builds $libs/$entry/$prelibs/$crt_core_libs/
+# $cxx_runtime_libs as flat, space-joined strings (Linux and Windows
+# above now assemble their own real argv directly via quoted `set --`,
+# never through these), then expands them unquoted at the final run_cxx
+# call far below. Enumerating every macOS combination as fully-quoted,
+# per-case direct run_cxx calls the way Linux/Windows do would mean
+# hand-duplicating this same logic across four independent booleans
+# (CRT_CXX_BUILDING_RUNTIME, runtime_linkage, shared_mode,
+# want_real_apple_sdk, sometimes all four in the same branch) -- real,
+# error-prone repetition for no benefit. Instead, every ${CRT_SYSROOT}
+# substituted into these five variables from here through the end of the
+# macOS branch below uses $crt_sysroot_link, a copy of $CRT_SYSROOT with
+# any embedded space replaced by \001 (a real byte no real filesystem
+# path ever contains) -- so the later unquoted word-split these
+# accumulators still get expanded with only ever splits at genuine token
+# boundaries (real spaces the code itself inserts between flags/paths),
+# never inside a path. Restored back to real spaces one already-split
+# argv word at a time immediately before the final run_cxx call far
+# below -- see that restoration's own comment for why a plain `tr` on
+# the whole string first doesn't work instead (spaces between DIFFERENT
+# tokens would collapse back before the safe word-split ever ran).
+# Existence checks below (`[ -f ... ]`) test the real, unmangled
+# $CRT_SYSROOT instead -- those are already-quoted, never expanded
+# unquoted, so they need no \001 protection, and testing the mangled
+# path there would just make every one of them fail unconditionally the
+# moment $CRT_SYSROOT actually contained a space. A real, confirmed bug
+# (2026-09-13/14), found running this project's own path-with-spaces
+# acceptance on macOS: a cascade of `clang: error: no such file or
+# directory: '<fragment>'`, one per word a space-containing $CRT_SYSROOT
+# had been split into.
+crt_sysroot_link=$(printf '%s' "$CRT_SYSROOT" | tr ' ' '\001')
 if [ "$shared_mode" -eq 1 ]; then
-  libs="-L${CRT_SYSROOT}/lib"
+  libs="-L${crt_sysroot_link}/lib"
 else
-  libs="${CRT_SYSROOT}/lib/crt1.o -L${CRT_SYSROOT}/lib"
+  libs="${crt_sysroot_link}/lib/crt1.o -L${crt_sysroot_link}/lib"
 fi
 # See the matching declaration in tools/crt-cc: prelibs holds objects that
 # must land on the link line *before* the user arguments -- currently only
@@ -533,14 +565,14 @@ case "$target_os" in
         echo "crt-c++: imported shared libc++ runtime is not staged" >&2
         exit 1
       fi
-      cxx_runtime_libs="${CRT_SYSROOT}/lib/libc++.dylib ${CRT_SYSROOT}/lib/libc++abi.dylib"
+      cxx_runtime_libs="${crt_sysroot_link}/lib/libc++.dylib ${crt_sysroot_link}/lib/libc++abi.dylib"
     else
       cxx_abi_lib=""
       if [ -f "${CRT_SYSROOT}/lib/libc++abi.a" ]; then
-        cxx_abi_lib="${CRT_SYSROOT}/lib/libc++abi.a"
+        cxx_abi_lib="${crt_sysroot_link}/lib/libc++abi.a"
       fi
-      notweak_list="${CRT_SYSROOT}/lib/libc++.notweak.exp"
-      if [ ! -f "$notweak_list" ]; then
+      notweak_list="${crt_sysroot_link}/lib/libc++.notweak.exp"
+      if [ ! -f "${CRT_SYSROOT}/lib/libc++.notweak.exp" ]; then
         echo "crt-c++: imported static libc++ Darwin link metadata is not staged" >&2
         exit 1
       fi
@@ -549,14 +581,14 @@ case "$target_os" in
       # not-weak policy so dyld cannot interpose the host C++ runtime. Avoid
       # force-loading the whole archive: that would run unused iostream
       # initializers and change ordinary static archive semantics.
-      cxx_runtime_libs="-Wl,-u,__Znwm -Wl,-u,__ZnwmSt11align_val_t -Wl,-force_symbols_not_weak_list,$notweak_list ${CRT_SYSROOT}/lib/libc++.a $cxx_abi_lib"
+      cxx_runtime_libs="-Wl,-u,__Znwm -Wl,-u,__ZnwmSt11align_val_t -Wl,-force_symbols_not_weak_list,$notweak_list ${crt_sysroot_link}/lib/libc++.a $cxx_abi_lib"
     fi
     if [ "$shared_mode" -eq 1 ] || [ "$runtime_linkage" = shared ]; then
-      crt_core_libs="${CRT_SYSROOT}/lib/libc.dylib ${CRT_SYSROOT}/lib/libm.dylib ${CRT_SYSROOT}/lib/libdl.dylib"
+      crt_core_libs="${crt_sysroot_link}/lib/libc.dylib ${crt_sysroot_link}/lib/libm.dylib ${crt_sysroot_link}/lib/libdl.dylib"
     else
-      crt_core_libs="${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a"
+      crt_core_libs="${crt_sysroot_link}/lib/libc.a ${crt_sysroot_link}/lib/libm.a ${crt_sysroot_link}/lib/libdl.a"
     fi
-    libs="$libs $cxx_runtime_libs $crt_core_libs ${CRT_SYSROOT}/lib/libclang_rt.builtins.a -lSystem"
+    libs="$libs $cxx_runtime_libs $crt_core_libs ${crt_sysroot_link}/lib/libclang_rt.builtins.a -lSystem"
     # -dead_strip is skipped, only for a -fcrt-real-apple-sdk link -- a
     # real, confirmed-for-real (2026-09-04) interaction, not guessed: a
     # real Metal.framework MTLCreateSystemDefaultDevice() call, made from
@@ -602,7 +634,7 @@ case "$target_os" in
       fi
     fi
     if [ "$runtime_linkage" = shared ]; then
-      entry="$entry -Wl,-rpath,${CRT_SYSROOT}/lib"
+      entry="$entry -Wl,-rpath,${crt_sysroot_link}/lib"
     fi
     ;;
   linux)
@@ -961,11 +993,27 @@ if [ "$target_os" = linux ]; then
     -Wl,-e,_start -Wl,--gc-sections "$@"
 fi
 
-# macOS retains the established recipe here until its separate real-host
-# path-with-spaces run supplies equivalent evidence.
-if [ -n "$compiler_rt_builtins" ]; then
-  # shellcheck disable=SC2086
-  run_cxx -nostdlib -nostartfiles -nodefaultlibs $entry $prelibs "$@" $libs "$compiler_rt_builtins"
-fi
+# Only macOS ever reaches here now -- Linux and Windows both call
+# run_cxx (which execs) inside their own blocks above. $entry/$prelibs/
+# $libs (and $compiler_rt_builtins, always empty on macOS) are still the
+# flat, \001-sentinel-encoded strings the macOS case branch above built.
+# Word-split them here, exactly once: safe now that any real space
+# inside $CRT_SYSROOT was replaced by \001 for every path substituted
+# into these variables above, so this only ever splits at genuine token
+# boundaries (the real spaces the code itself put between distinct
+# flags/paths), never inside a single path. Restore each resulting
+# word's own real spaces immediately afterward, one already-split argv
+# word at a time -- decoding \001 back to space on the whole, not-yet-
+# split string first would just let the newly-restored spaces get
+# re-split all over again by this same word-split.
 # shellcheck disable=SC2086
-run_cxx -nostdlib -nostartfiles -nodefaultlibs $entry $prelibs "$@" $libs
+set -- -nostdlib -nostartfiles -nodefaultlibs $entry $prelibs "$@" $libs $compiler_rt_builtins
+original_argc=$#
+i=0
+while [ "$i" -lt "$original_argc" ]; do
+  arg=$1
+  shift
+  set -- "$@" "$(printf '%s' "$arg" | tr '\001' ' ')"
+  i=$((i + 1))
+done
+run_cxx "$@"

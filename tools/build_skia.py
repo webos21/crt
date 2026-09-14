@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -394,6 +395,33 @@ def default_gn_args(root, sysroot, target_os, target_arch, freetype_prefix=None,
     crt_cc = root / "tools" / f"crt-cc{cmd_suffix}"
     crt_cxx = root / "tools" / f"crt-c++{cmd_suffix}"
     crt_ar = root / "tools" / ("crt-ar.cmd" if target_os == "windows" else "crt-ar")
+    if target_os != "windows" and " " in str(root):
+        # A real, confirmed bug (2026-09-14), found running this project's
+        # own path-with-spaces acceptance for Skia specifically: `gn gen`
+        # failed with `Command '.../tools/crt-cc --version' returned non-
+        # zero exit status 126` -- GN's own gcc_like_toolchain() probes
+        # "cc"/"cxx" via a plain `subprocess.check_output(cmd, shell=True)`
+        # (gn/is_clang.py), exactly like the .cmd-wrapper comment above
+        # already documents for the separate Windows/mksh gap, except here
+        # a real /bin/sh -c "<unquoted cc path> --version" is what breaks:
+        # the space in `root` splits the command into multiple words, and
+        # since the first word (a real directory, e.g. "/private/tmp/crt")
+        # is not executable, sh reports exit 126 ("permission denied"), not
+        # the more familiar "no such file" 127. Same root cause and same
+        # fix shape as tools/crt-port-build.py's own CC/CXX symlink fix:
+        # keep using this project's own real wrapper (never fall back to a
+        # host compiler), just expose it to GN through space-free symlinks
+        # instead of the real, space-containing path. crt-cc/crt-c++/crt-ar
+        # never inspect their own $0/invocation path for anything, so a
+        # symlink changes nothing about their behavior.
+        short_tools_dir = Path(tempfile.mkdtemp(prefix="crt-skia-cc-"))
+        short_cc = short_tools_dir / "crt-cc"
+        short_cxx = short_tools_dir / "crt-c++"
+        short_ar = short_tools_dir / "crt-ar"
+        short_cc.symlink_to(crt_cc)
+        short_cxx.symlink_to(crt_cxx)
+        short_ar.symlink_to(crt_ar)
+        crt_cc, crt_cxx, crt_ar = short_cc, short_cxx, short_ar
 
     # freetype_prefix set (porting/recipes/freetype.json's own shared
     # port_prefix, see main()'s own --freetype-prefix): wire Skia's real

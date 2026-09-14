@@ -1036,6 +1036,21 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
         # generated config.mak).
         ar_for_configure = path_for_crt_shell(env["AR"]) if target_os == "windows" else env["AR"]
         configure = [arg.replace("@AR@", ar_for_configure) for arg in configure]
+        # @CC@/@CXX@ (2026-09-14, macOS path-with-spaces acceptance): same
+        # class of gap as @AR@ above, for a different reason -- FFmpeg's own
+        # hand-rolled configure never reads $CC/$CXX at all (confirmed via
+        # grep: no '$CC'/'${CC}' fallback anywhere in it), relying solely on
+        # the explicit --cc=/--host-cc= flags, which porting/recipes/
+        # ffmpeg.json previously built from the raw @ROOT@ token directly
+        # (bypassing env["CC"] -- and therefore its posix_command_alias()
+        # space-safety above -- entirely). Confirmed for real: FFmpeg's own
+        # C-compiler-works check failed the moment $CC's replacement (the
+        # raw, space-containing SDK root) was actually invoked. Reuses
+        # env["CC"]/env["CXX"] as-is (already whichever of the real path or
+        # a short alias make_env() resolved them to), matching @AR@'s own
+        # unconditional-replace shape since CC/CXX are set on every host.
+        configure = [arg.replace("@CC@", env["CC"]) for arg in configure]
+        configure = [arg.replace("@CXX@", env["CXX"]) for arg in configure]
         # @NM@ (2026-09-08, ffmpeg.json's own --enable-d3d11va need): same
         # class of gap as @AR@ just above -- FFmpeg's own nm_default="nm"
         # (configure, no $NM environment fallback, the identical class of
@@ -1114,6 +1129,34 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
             # branch below; crt_shell (this project's own mksh, the
             # default) was simply never given the same treatment.
             prefix = path_for_msys_shell(port_prefix)
+        elif " " in str(port_prefix):
+            # GNU Libtool's own func_mode_install (~10000-line generated
+            # script) builds its install command as a single flat,
+            # pre-substituted string and hands it to a generic eval-based
+            # func_show_eval helper -- losing the distinction between "space
+            # that's part of a path" and "space that separates arguments"
+            # the moment the string is built. Confirmed for real (2026-09-
+            # 13), root-causing a FreeType install failure that survived
+            # even after quoting the Makefile-level recipe line that called
+            # it (porting/recipes/freetype.json's own "patches" entry):
+            # `install: target directory '.../lib/libfreetype.6.dylib' does
+            # not exist`, traced to func_mode_install's own `func_show_eval
+            # "$install_prog $instname $destdir/$name" 'exit $?'` -- a real,
+            # structural GNU Libtool limitation, too large and risky to
+            # patch directly (unlike the one-line Makefile fix above).
+            # Worked around the same way as posix_command_alias() above:
+            # keep using the real, space-containing port_prefix everywhere
+            # else (it's the actual install location every other tool in
+            # this pipeline still reads/writes), but hand configure a
+            # short, space-free symlink to it instead, so every path
+            # Libtool/Make derive from $(prefix) becomes short and safe
+            # automatically. Symlinks are transparent to file I/O, so files
+            # written through this symlink land in the real prefix as usual.
+            short_prefix_dir = Path(tempfile.mkdtemp(prefix="crt-port-prefix-"))
+            short_prefix = short_prefix_dir / "prefix"
+            short_prefix.symlink_to(port_prefix, target_is_directory=True)
+            atexit.register(shutil.rmtree, short_prefix_dir, ignore_errors=True)
+            prefix = str(short_prefix)
         else:
             prefix = str(port_prefix)
         configure.append(f"--prefix={prefix}")

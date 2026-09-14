@@ -44,6 +44,140 @@ substantive update.
   passed; the ordinary Windows preset also rebuilt cleanly and passed all
   117/117 CTest cases.
 
+- **Completed the macOS portion of path-with-spaces distribution
+  acceptance, closing the item out on all three hosts (native Windows
+  2026-09-13, Linux above, macOS here).** From a completely space-
+  containing tree (`/tmp/crt path with spaces test/...` for the SDK,
+  work root, and output), the full isolated `03-gfx-simple ->
+  04-gfx-media` stage build now runs end to end: real FreeType/FFmpeg
+  configure+`make -j4`+install, a real Skia GN configure+ninja build,
+  the standalone `04-gfx-media` CMake project's 8/8 ctest binaries, and
+  both packaged `gfx-gpu`/`gfx-skia` examples rebuilt against the
+  installed SDK and actually presenting a window (`presented=1`) from
+  the final space-containing published location -- followed by a clean
+  `verify_dist.py` and atomic publish. `cmake --workflow --preset
+  macos-host-ninja-debug` remains 100/100 throughout. Ten real,
+  previously-undiscovered bugs were found and fixed getting there, each
+  isolated via direct manual reproduction before the full (multi-minute)
+  stage build was re-run:
+
+  - `tools/crt-cc`'s and `tools/crt-c++`'s own macOS/Linux link-flag
+    construction built `$libs`/`$entry`/`$crt_libs`-style accumulators as
+    flat, space-joined strings, then expanded them unquoted at the final
+    `exec`/`run_cc`/`run_cxx` call. Confirmed for real: `clang: error: no
+    such file or directory: 'spaces'` (one such error per word a space-
+    containing `$CRT_SYSROOT` had been split into) building the C
+    `gfx-simple` example from a space-containing SDK. Fixed for macOS in
+    `tools/crt-c++` by replacing embedded spaces in `$CRT_SYSROOT` with
+    `\001` (a byte no real path ever contains) for the duration of
+    building those flat accumulators, then decoding back to real spaces
+    one already-split `argv` word at a time (via the same shift-and-
+    requeue rotation already used elsewhere in this file for
+    `-fcrt-real-apple-sdk`/`--sysroot=` stripping) immediately before the
+    final `run_cxx` call -- `tools/crt-cc` needed no equivalent macOS
+    change here since the Linux commit above had already restructured it
+    into fully-quoted, per-case direct `run_cc` calls covering macOS too.
+  - A second, distinct bug in that same `tools/crt-c++` sentinel
+    substitution surfaced only once Skia's own GN build actually probed
+    `crt-c++ --version` (see the `build_skia.py` fix below): several
+    `[ -f ... ]` staged-artifact existence checks (shared
+    `libc++.dylib`/`libc++abi.dylib`, static `libc++.notweak.exp`) tested
+    the *mangled*, `\001`-substituted path instead of the real
+    `$CRT_SYSROOT`. Since these are already fully double-quoted (never
+    expanded unquoted, so never at word-splitting risk), they never
+    needed the sentinel at all; using it anyway meant every such check
+    failed unconditionally -- `crt-c++: imported static libc++ Darwin
+    link metadata is not staged` -- the instant `$CRT_SYSROOT` genuinely
+    contained a space, even though the real file existed. Fixed by
+    testing `$CRT_SYSROOT` directly in every one of these checks while
+    leaving the *values* assigned into the flat accumulators on the
+    sentinel-encoded path, matching the one place (the final unquoted
+    expansion) that substitution actually protects.
+  - `tools/build_skia.py`'s `default_gn_args()` passes `tools/crt-cc`/
+    `tools/crt-c++` (raw paths under `--root`, i.e. inside the space-
+    containing SDK/source tree) as GN's `cc`/`cxx` toolchain args. GN's
+    own `gn/is_clang.py` probes them via a plain
+    `subprocess.check_output('%s --version' % cc, shell=True)` -- a
+    third-party, structural limitation (the same "flat string handed to
+    a shell" shape as GNU Libtool's `func_show_eval`, see below) with no
+    way to quote around it from the caller's side. Confirmed for real:
+    `gn gen` failed with `/bin/sh: /private/tmp/crt: is a directory`
+    (exit 126 -- the shell tokenized the space-containing path into
+    words and tried to execute the first one, a real directory) the
+    first time Skia's GN build actually reached this probe. Fixed the
+    same way as every other unfixable-third-party-consumer case below:
+    when `root` contains a space, `default_gn_args()` now creates short,
+    space-free symlinks (via `tempfile.mkdtemp()`) to `crt-cc`/`crt-c++`/
+    `crt-ar` and passes those to GN instead, on every non-Windows host.
+  - FreeType's own top-level `configure` runs `$MAKE -v` inside an
+    unquoted backtick expression to check the make version, breaking on
+    a space-containing packaged-make path (`GNU make (>= 3.81) ... is
+    required`, even though a suitable make was genuinely present).
+    Fixed the same way `tools/crt-port-build.py`'s own `posix_command_
+    alias()` (introduced by the Linux commit above) now fixes CC/CXX/
+    CONFIG_SHELL: expose the packaged `make` binary to `configure`
+    through a short, space-free symlink instead of its own real path.
+  - FreeType's own top-level `configure` also runs `` ls -id
+    $abs_ft2_dir `` / `` ls -id $abs_curr_dir `` unquoted, cascading
+    into `ls: /private/tmp/crt: No such file or directory`, then
+    `./configure: line 102: test: too many arguments`, then a truncated
+    generated Makefile path. Fixed with a new `porting/recipes/
+    freetype.json` `"patches"` entry quoting both variables in that one
+    line -- this project's own documented, narrow, exact-substring patch
+    mechanism, not a general patch system.
+  - A genuine, pre-existing bug in `tools/crt-port-build.py` itself,
+    unrelated to spaces but only now reached: `build_configure_port()`
+    referenced `sysroot` in its `post_configure_patch`/
+    `post_install_patch` handling without ever receiving it as a local
+    (`NameError: name 'sysroot' is not defined`) -- fixed the same way
+    as the Linux commit above, by deriving it locally from
+    `env["CRT_SYSROOT"]`.
+  - FreeType's `builds/unix/unix-def.mk` sets `TOP_DIR := $(shell cd
+    $(TOP_DIR); pwd)`, and both `include $(TOP_DIR)/...` and `$(shell
+    $(CAT) $(TOP_DIR)/...)` elsewhere are unquoted, so GNU Make itself
+    splits a space-containing `$(TOP_DIR)` into multiple words --
+    `cat: <fragment>: No such file or directory`, then `No rule to make
+    target '<truncated>/builds/modules.mk'`. This exact line already had
+    a Windows-only `post_configure_patch` fix (a different reason: MSYS
+    `pwd` mis-translating drive letters); promoted it from `porting/
+    recipes/freetype.json`'s `target_overrides.windows` to the top-level
+    `build.post_configure_patch` so it applies on every host.
+  - FreeType's `builds/unix/install.mk` runs `$(LIBTOOL) --mode=install
+    $(INSTALL) $(PROJECT_LIBRARY) $(DESTDIR)$(libdir)` unquoted,
+    producing `libtool: error: 'test2/sdk-copy/lib' must be an absolute
+    directory name` once the Makefile-level path was long enough to
+    contain a space. Quoted via a second `porting/recipes/freetype.json`
+    patch entry (noted: ~16 more similarly-unquoted lines exist in that
+    file, deferred until actually exercised).
+  - Even after that Makefile-level quote fix, install still failed one
+    level deeper: `install: target directory '.../lib/libfreetype.6.
+    dylib' does not exist`, inside GNU Libtool itself. Traced through
+    Libtool's ~10000-line generated script; confirmed by direct `sh -c`
+    micro-testing that `func_append`'s own `eval`-based implementation is
+    safe (POSIX exempts an assignment's RHS from word-splitting even
+    through `eval`), before finding the real bug at `func_mode_install`'s
+    `func_show_eval "$install_prog $instname $destdir/$name" 'exit $?'`:
+    a flat, pre-substituted string handed to a generic `eval`, losing
+    argument-boundary information -- a well-known, structural GNU
+    Libtool limitation, too large and risky to patch directly. Worked
+    around instead by making `--prefix=` itself resolve through a short,
+    space-free symlink (`tempfile.mkdtemp()`) in `tools/crt-port-
+    build.py` whenever `port_prefix` contains a space, so every path
+    Libtool/Make derive from `$(prefix)` becomes short and safe
+    automatically.
+  - `porting/recipes/ffmpeg.json`'s `--cc=@ROOT@/tools/crt-cc` (and the
+    matching `--host-cc=` on Windows) embeds the raw, space-containing
+    SDK root directly, bypassing `env["CC"]` (and its space-safety fix)
+    entirely -- confirmed FFmpeg's own hand-rolled `configure` never
+    reads `$CC` at all (only the explicit `--cc=`/`--host-cc=` flags).
+    Fixed by adding a new `@CC@`/`@CXX@` `configure_args` substitution
+    token to `tools/crt-port-build.py` (mirroring the existing `@AR@`/
+    `@NM@` pattern) and switching `ffmpeg.json` to `--cc=@CC@`/
+    `--host-cc=@CC@`, so FFmpeg picks up the same resolved `env["CC"]`.
+
+  With this, path-with-spaces distribution acceptance is complete on all
+  three hosts; there is no longer an open item for it in `TODO.md`.
+
 ## 2026-09-13
 
 - **Completed Linux isolated-stage acceptance through the option-ON
