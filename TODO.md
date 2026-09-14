@@ -73,126 +73,25 @@ blocking the same example, tracked below. The isolated stage-build tool's
 own pipeline still cannot reach `verify_dist.py`/atomic publish on Linux as
 a result.
 
-- [ ] **Root-cause and fix a Skia-internal heap corruption crashing live
-  Linux `examples/gfx-skia` presentation.** Found 2026-09-14 immediately
-  after the `strtof_l` fix above let execution reach this code path for the
-  first time; not caused by, or related to, that fix or the ELF-symbol-
-  collision family of bugs above. Reliably reproducible (3/3 direct re-runs,
-  each within ~20s): `crtgfx_skia_example` reaches real Ganesh Vulkan shader
-  codegen, then aborts with glibc's `munmap_chunk(): invalid pointer` freeing
-  a `std::string`'s old internal buffer (32 bytes, holding the legible,
-  intact text `"wangs_formula_max_fdiff_p2_ff2"` -- a builtin tessellation
-  function's mangled name, built by `SkSL::FunctionDeclaration::
-  mangledName()`, `skia-source/src/sksl/ir/SkSLFunctionDeclaration.cpp:517`,
-  growing to append `"f2"`). The buffer's own content is intact, so this
-  reads as heap-metadata corruption from an earlier, unrelated
-  out-of-bounds write elsewhere in Skia landing on this buffer's neighboring
-  malloc chunk header, not a bug in `mangledName()`'s own (ordinary,
-  non-recursive) logic -- see `HISTORY.md`'s 2026-09-14 entry for the full
-  trace, including a red herring (an early `gdb` run appeared to show
-  ~17,611 frames of identical-PC recursion, later shown to be an artifact of
-  `gdb`'s own overhead interacting with the corruption non-deterministically,
-  not genuine recursion: disassembly confirmed the repeated PC is a loop
-  branch, not a call). Skia's own compiled objects carry no
-  variable/argument-level DWARF debug info, blocking straightforward `gdb`
-  source-level inspection of exactly which write is at fault.
-  A parallel finding while diagnosing this (`CRT_1.0` versioning applied,
-  see above) is architecturally relevant here too: this project's usual
-  "default-runtime" hybrid linkage genuinely produces *more than one*
-  independent instance of `libc/src/malloc.c`'s own allocator in the same
-  process (a statically-linked `libc.a` copy inside an executable, plus the
-  separate copy inside the shared `libc.so` `libc++.so.1` resolves through)
-  -- `free_unlocked()`/`realloc()` cannot tell these apart today (same
-  `CRT_BLOCK_MAGIC` compile-time constant in every instance), so a pointer
-  crossing instances would silently corrupt the *wrong* instance's
-  free-list. Plausible, not yet confirmed as *this* bug's own root cause.
-  Diagnostic plan, staged cheapest-first (an external architecture review
-  received 2026-09-14 independently endorsed this exact order over jumping
-  straight to AddressSanitizer, which hit a hard `.preinit_array`-not-
-  allowed-in-a-DSO wall trying to replace `libc.so`'s own allocator):
-  1. **`CRT_ENABLE_DEBUG_MALLOC_OWNER`(-> being folded into a broader
-     `CRT_ENABLE_DEBUG_MALLOC`): done, 2026-09-14.** Added a
-     `#ifdef CRT_DEBUG_MALLOC_OWNER`-guarded `owner` field to `block_header`
-     (set to `&heap_head`, a naturally distinct address per compiled
-     allocator instance), checked in `free_unlocked()`/`realloc()`, trapping
-     immediately via `__builtin_trap()` on a cross-instance free/realloc
-     instead of silently corrupting the wrong instance's state. Verified:
-     full in-tree `ctest` 112/112 passes with the option on or off;
-     disassembly of the built `libc.so` confirms `crt_malloc_check_owner()`
-     is actually called from `free_unlocked()`/`realloc()` and compares
-     against `&heap_head` before an unconditional `brk #0x1` on mismatch. A
-     synthetic two-instance repro (static-`malloc()` pointer freed through a
-     separately-linked `.so`'s `free()`) did *not* trip the trap, tracing
-     back to a real, separate ELF nuance worth its own note: an object with
-     *no* version information at all (like this project's own plain,
-     unscripted executables) can satisfy *any* named version request from
-     another object, so the executable's own unversioned `malloc`/`free`
-     export can still win a versioned lookup ahead of `libc.so`'s own
-     `@@CRT_1.0` -- unlike the real `crtgfx_skia_example`/glibc case, where
-     `LD_DEBUG=bindings` has directly confirmed correct resolution. The
-     synthetic repro is therefore not trusted as a stand-in for the real
-     scenario; the mechanism must be exercised against the real isolated
-     Skia rebuild directly, not a simplified 2-file model.
-  2. **Double-free detection and canary padding: done, 2026-09-14.** Folded
-     into the same `CRT_ENABLE_DEBUG_MALLOC` flag/`block_header` layout as
-     the owner cookie above (the option and macro were renamed from
-     `..._OWNER` accordingly). `free_unlocked()`/`realloc()` now trap on a
-     repeat free of an already-freed block (previously just flipped
-     `block.free = 1` again with no check), and every allocation path
-     (`malloc()`/`calloc()`/`realloc()`/`posix_memalign()`'s own internal
-     call, unified through `malloc_unlocked()`) paints the slack between
-     the caller's own requested size and its `align_size()`-rounded block
-     size with a fixed `0xFD` canary pattern, checked at `free()`/`realloc()`
-     time -- that slack already existed (every allocation already rounds up
-     to a multiple of `sizeof(block_header)`, 32 bytes), so this costs
-     nothing extra to fill/check. Verified: full in-tree `ctest` 112/112
-     passes with the option on or off (no false positives from the more
-     invasive checks); two throwaway positive tests confirm both mechanisms
-     actually fire -- a deliberate 6-byte overflow into a 20-byte
-     allocation's own canary slack traps at `free()`, and a second `free()`
-     of an already-freed 16-byte block traps immediately, both via
-     `__builtin_trap()` (`SIGTRAP`, confirmed via the process's own exit
-     status). Neither test was a false success: each allocation's *first*,
-     in-bounds `free()` completed normally before the deliberately-bad
-     second operation. Catches many heap-buffer-overflow shapes (including,
-     plausibly, this one) without the cost of the
-     heavier guard-page allocator below.
-  3. **`CRT_ENABLE_GUARD_MALLOC` (only if 1-2 do not catch it).** A separate,
-     much slower diagnostic allocator: one `mmap()` per allocation, user
-     data flush against a trailing `PROT_NONE` guard page (not merely
-     "somewhere in a guard-adjacent mapping" -- must sit at the guard
-     page's edge to catch small overflows), `free()` transitioning to
-     `mprotect(PROT_NONE)` plus a delayed-`munmap()` quarantine rather than
-     an immediate `munmap()` (so a reused address cannot silently mask a
-     use-after-free). Modeled on LLVM's GWP-ASan; not yet started.
-  4. Once the exact faulting write is caught, fix it in Skia's own code (or
-     file it upstream if it is a genuine upstream bug, per this project's
-     own no-upstream-patching-to-hide-CRT-gaps discipline -- confirm first
-     whether it is CRT-side or Skia-side before assuming either).
-  5. Remove or permanently keep `CRT_ENABLE_DEBUG_MALLOC`/
-     `CRT_ENABLE_GUARD_MALLOC` as regular CRT diagnostic build modes
-     (leaning toward keeping both -- they will very likely earn their keep
-     again once FFmpeg hardware decode and QuickJS/V8 add their own
-     allocation-heavy paths) once the bug is closed.
-- [ ] **`crt-libcxx-build` does not relink the imported libc++/libc++abi/
-  libunwind lane when `libc.so` changes.** Found 2026-09-14 applying the
-  `libc.so` symbol-versioning fix above: a full `ninja` rebuild, and even a
-  full `crt-gfx-simple-dist` rebuild, left `libc++.so.1`'s own `strtof_l`
-  reference unversioned, because `crt-libcxx-build`'s nested `cmake --build
-  .../external/llvm-runtimes/build/{libunwind,libcxxabi,libcxx}` sub-builds
-  only track their own source/configure-flag inputs for staleness, never
-  the actual bytes of `${CRT_SYSROOT}/lib/libc.so` -- confirmed via `ninja:
-  no work to do.` for both the `libunwind` and `libcxx` phases even after
-  `libc.so` genuinely changed. Worked around by hand this time (deleting
-  `out/.../external/llvm-runtimes/build/{libunwind,libcxxabi,libcxx}`
-  before rebuilding), but the gap itself is unfixed: any future
-  `libc.so`-ABI-affecting change will silently fail to propagate to this
-  lane the same way. Needs either a real `DEPENDS`/`BYPRODUCTS` edge from
-  `crt-libcxx-build` onto `c_shared`'s actual output, or a documented,
-  enforced convention (e.g. a fingerprint check inside `tools/crt-libcxx-
-  build.py` itself, matching `tools/build_stage_04_gfx_media.py`'s own
-  `inventory_fingerprint()`/`toolchain_identity()` pattern) that forces a
-  clean rebuild when the predecessor sysroot's content changes.
+- [ ] **Root-cause and fix the Skia heap corruption blocking live Linux
+  `examples/gfx-skia` presentation.** The earlier `strtof_l` collision is
+  fixed; the example now reaches Ganesh Vulkan shader generation and aborts
+  while freeing a corrupted `std::string` allocation. Rebuild and run the
+  real isolated Linux 04 path with the now-complete
+  `CRT_ENABLE_DEBUG_MALLOC` owner/double-free/canary diagnostics. If they do
+  not catch the first invalid operation, add `CRT_ENABLE_GUARD_MALLOC` with
+  trailing guard pages and delayed-unmap quarantine. Once localized, fix the
+  CRT/Skia ownership or out-of-bounds defect, add permanent expected-fault
+  regressions, and complete `verify_dist.py`/atomic publication. The full
+  diagnosis and completed diagnostic-allocator work are recorded in
+  `HISTORY.md`'s 2026-09-14 entries.
+- [ ] **Make imported libc++/libc++abi/libunwind relink when the predecessor
+  `libc.so` changes.** The nested build currently treats the sysroot library
+  as an untracked link input and can silently retain stale symbol references.
+  Add a real dependency edge or a predecessor-inventory fingerprint that
+  forces the affected nested build directories fresh; then prove an actual
+  `libc.so` change propagates without manual deletion. The discovery and
+  temporary clean-rebuild workaround are recorded in `HISTORY.md`.
 
 ### Distribution hardening
 
@@ -232,10 +131,11 @@ An external architecture review (2026-09-14, prompted by the Skia heap-
 corruption investigation above) looked at `libc/src/malloc.c`,
 `libc/CMakeLists.txt`, `libcrtgfx/CMakeLists.txt`, the malloc test suite, and
 the Linux Skia/Wayland/Vulkan boundary, and proposed a P0/P1/P2-ranked set of
-structural improvements. None of these block the Skia bug fix above and none
-are started; do not begin any of them ahead of that fix. Promote items here
-into "In Progress" individually once a concrete need or consumer justifies
-the cost, per this file's usual promotion discipline.
+structural improvements. The cheap `CRT_ENABLE_DEBUG_MALLOC` diagnostic used
+by the active Skia investigation is implemented; the broader architecture
+changes below remain unstarted and do not block that investigation. Promote
+them into "In Progress" individually once a concrete need or consumer
+justifies the cost, per this file's usual promotion discipline.
 
 P0:
 
@@ -356,6 +256,12 @@ P2:
     protocol vs. host-native) rather than one file family that
     conditionally reinterprets its own objects would be easier to maintain
     as both paths keep evolving.
+11. **Make binary/package/ABI lint an explicit acceptance gate.** Extend the
+    distribution dependency and absolute-path checks with a separately
+    runnable ABI audit: compare public exports and unresolved imports against
+    the stage's declared symbol/dependency manifests, reject accidental host
+    ABI leakage, and retain a baseline suitable for detecting incompatible
+    changes between released CRT ABI versions.
 
 ### Upper runtime roadmap
 

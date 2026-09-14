@@ -10,6 +10,33 @@ substantive update.
 
 ## 2026-09-14
 
+- **Added the first opt-in CRT allocator diagnostic mode while isolating
+  the Linux Skia heap corruption (`761b421`).** The opt-in
+  `CRT_ENABLE_DEBUG_MALLOC` build now gives every block an allocator-instance
+  owner cookie and caller-requested size. `free()`/`realloc()` trap on a
+  cross-instance pointer, an already-freed block, or corruption of the fixed
+  `0xFD` pattern painted into existing alignment slack. All allocation paths
+  funnel through `malloc_unlocked()`, so malloc/calloc/realloc and the backing
+  allocation used by `posix_memalign()` receive the same diagnostics. The
+  ordinary in-tree suite passed 112/112 with the option both disabled and
+  enabled; disposable positive probes also confirmed that a deliberate
+  overflow into canary slack and a second free each terminate at the intended
+  `__builtin_trap()` after a valid first free. Those positive probes were not
+  retained as repository tests, so permanent expected-fault coverage remains
+  tracked with the allocator stress work in `TODO.md`.
+
+  - The owner cookie uses the address of each compiled allocator instance's
+    private `heap_head`. A simplified executable-plus-shared-library probe did
+    not model the real Skia process reliably: an unversioned executable export
+    can satisfy a dependent object's named symbol-version request and win the
+    lookup before `libc.so@@CRT_1.0`. The diagnostic must therefore be judged
+    on the real isolated Linux 04 rebuild, not that two-file surrogate.
+  - AddressSanitizer had already hit its `.preinit_array`-in-a-DSO limitation
+    while replacing this project's own `libc.so` allocator. If the cheap mode
+    does not catch the first invalid operation, the next diagnostic remains a
+    separate guard allocator with data flush against a trailing `PROT_NONE`
+    page and delayed-unmap quarantine.
+
 - **Validated the already-landed private Linux libc ELF namespace
   (`370c41d`'s `CRT_1.0` version script) on WSL2 x86_64, and fixed the
   x86_64 static-C++ linker path exposed by that clean rebuild.** A fresh

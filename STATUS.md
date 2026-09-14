@@ -81,8 +81,10 @@ The software/CPU graphics baseline is complete on all three hosts:
   Ganesh renders through Vulkan on Linux, D3D12 on Windows, and Metal on
   macOS. The low-level GPU presentation path and resize/swapchain recreation
   have been verified on all three hosts. Packaged Skia/Ganesh live
-  presentation remains blocked on Linux by the open CRT-libc/glibc symbol-
-  namespace collision recorded in `TODO.md`; Windows and macOS pass it.
+  presentation remains blocked on Linux by a separate Skia heap corruption;
+  the earlier CRT-libc/glibc symbol collision is fixed with CRT's private
+  `CRT_1.0` ELF namespace on both aarch64 and x86_64. Windows and macOS pass
+  the packaged live path.
 
 Decoder-texture zero-copy, full font shaping/fallback/ICU, a full Wayland
 compositor, and a Chromium Ozone backend are not completion claims.
@@ -249,17 +251,21 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-1. Close the remaining distribution hardening gaps: absolute
+1. Localize and fix the Linux Skia heap corruption using the opt-in CRT malloc
+   diagnostics, then complete isolated 04 verification and atomic publication.
+2. Make the imported libc++/libc++abi/libunwind build automatically relink
+   when its predecessor `libc.so` changes.
+3. Close the remaining distribution hardening gaps: absolute
    path leakage, external consumers, and generic dependency validation.
-2. Enable and verify real FFmpeg hardware decode per host while retaining the
+4. Enable and verify real FFmpeg hardware decode per host while retaining the
    software/CPU fallback as the correctness baseline.
-3. Connect hardware decoder textures to Skia without CPU copies, including
+5. Connect hardware decoder textures to Skia without CPU copies, including
    device/fence ownership and CPU-download recovery.
-4. Bring up QuickJS core/event-loop/timers/modules, then expose stable
+6. Bring up QuickJS core/event-loop/timers/modules, then expose stable
    media/gfx services with WebCodecs-like queue semantics.
-5. Add capture/encode and network/adaptive/realtime services only after the
+7. Add capture/encode and network/adaptive/realtime services only after the
    native playback and zero-copy contracts are stable.
-6. Continue closing the focused CRT/PAL limitations above when an upstream
+8. Continue closing the focused CRT/PAL limitations above when an upstream
    consumer exposes a concrete requirement, following the Bionic-first
    porting discipline in `AGENTS.md`.
 
