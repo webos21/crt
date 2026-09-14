@@ -76,15 +76,32 @@ a result.
 - [ ] **Root-cause and fix the Skia heap corruption blocking live Linux
   `examples/gfx-skia` presentation.** The earlier `strtof_l` collision is
   fixed; the example now reaches Ganesh Vulkan shader generation and aborts
-  while freeing a corrupted `std::string` allocation. Rebuild and run the
-  real isolated Linux 04 path with the now-complete
-  `CRT_ENABLE_DEBUG_MALLOC` owner/double-free/canary diagnostics. If they do
-  not catch the first invalid operation, add `CRT_ENABLE_GUARD_MALLOC` with
-  trailing guard pages and delayed-unmap quarantine. Once localized, fix the
-  CRT/Skia ownership or out-of-bounds defect, add permanent expected-fault
-  regressions, and complete `verify_dist.py`/atomic publication. The full
-  diagnosis and completed diagnostic-allocator work are recorded in
-  `HISTORY.md`'s 2026-09-14 entries.
+  while freeing a corrupted `std::string` allocation. Running the real
+  isolated Linux 04 path with `CRT_ENABLE_DEBUG_MALLOC` did trap, but the
+  trap was a false positive in the diagnostic itself (`malloc_usable_size()`
+  fixed, see `HISTORY.md`'s 2026-09-14 entries) rather than the original
+  Skia defect; the original scenario has not yet been re-run against the
+  corrected diagnostic. **Currently blocked on a second, not-yet-fixed
+  defect that fix uncovered**: `regex_test_runs` now traps
+  (`SIGTRAP`) under `CRT_ENABLE_DEBUG_MALLOC`. GDB hardware watchpoints
+  root-caused it precisely to `realloc()`'s own reallocate-and-copy path in
+  `libc/src/malloc.c` (`copy_size = header->block.size < size ? ... : size;`,
+  around line 544): it copies the *old* block's full `align_size()`-rounded
+  capacity instead of its `requested_size`, so growing a request (e.g.
+  `regcomp.c`'s `stripsnug()` -> `reallocarray()`) overwrites the *new*
+  block's freshly painted canary with old slack bytes. Same defect class as
+  the `malloc_usable_size()` fix -- the canary logic, not a genuine bug in
+  the CRT/NetBSD regex engine or in Skia; not a real memory-safety issue on
+  its own since the copy stays within the new block's actual capacity. Fix
+  `copy_size` to use `requested_size` under `CRT_DEBUG_MALLOC` (owner
+  currently implementing this fix directly), re-run the full `ctest` suite,
+  then re-run the real isolated Linux 04 Skia scenario against the corrected
+  diagnostic before concluding whether `CRT_ENABLE_GUARD_MALLOC` is needed.
+  Once the original Skia defect is localized, fix the CRT/Skia ownership or
+  out-of-bounds defect, add permanent expected-fault regressions, and
+  complete `verify_dist.py`/atomic publication. The full diagnosis and
+  completed diagnostic-allocator work are recorded in `HISTORY.md`'s
+  2026-09-14 entries.
 - [ ] **Make imported libc++/libc++abi/libunwind relink when the predecessor
   `libc.so` changes.** The nested build currently treats the sysroot library
   as an untracked link input and can silently retain stale symbol references.

@@ -10,6 +10,49 @@ substantive update.
 
 ## 2026-09-14
 
+- **Validated `CRT_ENABLE_DEBUG_MALLOC` against the real Skia scenario,
+  fixed a false positive it produced, and used it to find a second,
+  still-open defect of the same class.** Rebuilding and running the real
+  isolated Linux 04 `crtgfx_skia_example` under the owner/double-free/canary
+  diagnostics (`761b421`, below) did trap -- but on `skgpu::KeyBuilder`'s
+  `skia_private::TArray<uint32_t, true>::push_back()`, not the originally
+  targeted `std::string` corruption. GDB backtrace plus reading
+  `src/gpu/KeyBuilder.h` and `src/base/SkContainers.cpp` traced this to
+  `SkContainerAllocator::allocate()`'s own `sk_allocate_throw()` ->
+  `sk_malloc_size()` -> this project's `malloc_usable_size()` call: Skia
+  deliberately grows a container into whatever `malloc_usable_size()`
+  reports as safely usable, a standard allocator-agnostic optimization, but
+  this project's `malloc_usable_size()` reported the full `align_size()`-
+  rounded block capacity while the canary logic protected only the
+  originally requested size -- so a legitimate, documented usable-size
+  consumer tripped the canary. Confirmed as the diagnostic's own design gap,
+  not a genuine Skia or CRT bug, and fixed by having `malloc_usable_size()`
+  report `header->block.requested_size` instead of `header->block.size`
+  under `CRT_DEBUG_MALLOC` (`libc/src/malloc.c`; non-debug behavior and the
+  `aligned_header` path are unchanged).
+
+  That fix immediately exposed a second, previously masked trap: the
+  in-tree `regex_test_runs` ctest started failing with `SIGTRAP`. The same
+  GDB-watchpoint technique (a conditional breakpoint on
+  `crt_malloc_paint_canary` for the exact allocation size, then a hardware
+  watchpoint on the computed canary address) caught the exact corrupting
+  instruction -- `libc/src/string/bcopy.c:99`'s `memcpy`, called from
+  `realloc()` (`libc/src/malloc.c:544`), called from `reallocarray()`,
+  called from `regcomp.c`'s `stripsnug()` shrink-to-fit -- and showed the
+  same design gap in a second place: `realloc()`'s reallocate-and-copy path
+  computes `copy_size` from the *old* block's full rounded `block.size`
+  rather than its `requested_size`, so growing a request copies old
+  alignment-slack bytes on top of the *new* block's freshly painted canary.
+  Not a genuine bug in the imported NetBSD/Bionic regex engine or a real
+  memory-safety defect (the copy stays inside the new block's actual
+  capacity) -- the same false-positive class as the `malloc_usable_size()`
+  case above. The fix (use `requested_size` for `copy_size` under
+  `CRT_DEBUG_MALLOC`) is understood but not yet applied; tracked as the
+  active blocker in `TODO.md`. The original Skia `std::string`/
+  `mangledName()`/`wangs_formula`/`munmap_chunk` corruption has not yet been
+  re-tested against the corrected diagnostic and remains the actual open
+  target.
+
 - **Added the first opt-in CRT allocator diagnostic mode while isolating
   the Linux Skia heap corruption (`761b421`).** The opt-in
   `CRT_ENABLE_DEBUG_MALLOC` build now gives every block an allocator-instance

@@ -403,7 +403,30 @@ size_t malloc_usable_size(const void* ptr) {
   crt_spin_lock(&heap_lock);
   header = ((const block_header*)ptr) - 1;
   if (header->block.magic == CRT_BLOCK_MAGIC) {
+#ifdef CRT_DEBUG_MALLOC
+    /* Report only the caller's own requested size here, not the full
+     * align_size()-rounded block capacity: crt_malloc_check_canary()
+     * treats everything beyond the requested size as forbidden canary
+     * territory, and malloc_usable_size()'s own standard, documented
+     * contract ("safe to use up to this many bytes without a realloc")
+     * is exactly what legitimate callers use to write past their own
+     * original request without it counting as an overflow. Skia's own
+     * SkContainerAllocator::allocate() does exactly this (sk_allocate_
+     * throw() -> sk_malloc_size() -> this same function), which is
+     * *why* this branch exists: reporting the full rounded capacity here
+     * while the canary still protects only the requested size turned
+     * every such legitimate "grow into the usable-size slack" consumer
+     * into a canary false positive -- confirmed for real, 2026-09-14,
+     * diagnosing the Skia TArray<uint32_t> growth path in HISTORY.md's
+     * dated entry (a real trap, but of this diagnostic's own making, not
+     * a genuine bug in Skia or elsewhere). Tightening what this function
+     * reports keeps the canary's own promise honest instead: nothing
+     * that only ever asks this function "how much can I safely use"
+     * before writing can now believe it owns the canary's own territory. */
+    size = header->block.free ? 0 : header->block.requested_size;
+#else
     size = header->block.free ? 0 : header->block.size;
+#endif
   } else {
     aligned = ((const aligned_header*)ptr) - 1;
     size = aligned->magic == CRT_ALIGNED_MAGIC ? aligned->requested_size : 0;
