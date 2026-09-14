@@ -58,11 +58,13 @@ newest entry first) rather than leaving it here.
 ## In Progress
 
 Active threads, not a flat list of one-off items. Nothing is active right now:
-the cumulative `01-c` through `05-js` distribution chain and the physical
-`libcrtgfx` window/GPU/Skia split are complete on Linux, Windows, and macOS,
-including isolated-stage acceptance and path-with-spaces acceptance on all
-three hosts; the dated evidence belongs in [`HISTORY.md`](HISTORY.md).
-Distribution hardening and later `05-js` work are Planned below.
+the cumulative binary-package chain through the current `05-js` skeleton and
+the physical `libcrtgfx` window/GPU/Skia split are complete. Predecessor-only
+isolated-stage acceptance is complete through the option-ON
+`03-gfx-simple -> 04-gfx-media` transition on Linux, Windows, and macOS,
+including path-with-spaces acceptance on all three hosts; the dated evidence
+belongs in [`HISTORY.md`](HISTORY.md). Distribution hardening and the real
+QuickJS-backed `04-gfx-media -> 05-js` transition are Planned below.
 
 ## Planned
 
@@ -113,8 +115,8 @@ JavaScript application-runtime layer.
   device-driver prerequisites, and decide path remapping or release stripping
   before rejecting absolute debug paths.
 - Add an explicit external CMake/configure-make consumer check where the stage
-  contract requires it. Keep the space-containing-prefix run in the active
-  acceptance list until it passes.
+  contract requires it. Preserve the now-complete three-host
+  space-containing-prefix run as a regression acceptance requirement.
 - Extend `04-gfx-media -> 05-js` only after the real QuickJS core and bindings
   exist. Apply the same pinned asset, predecessor-only build, test,
   external-consumer, verification, and atomic-publish contract as the earlier

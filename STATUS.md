@@ -5,7 +5,7 @@ does not repeat the implementation diary in [`HISTORY.md`](HISTORY.md), the
 open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting_status.md`](docs/porting_status.md).
 
-Last synchronized with the source tree and git history: **2026-09-12**.
+Last synchronized with the source tree and git history: **2026-09-14**.
 Updated only on explicit request from here on, not as part of routine
 documentation passes -- see `TODO.md`'s Notice section. It may lag behind
 `HISTORY.md`/`TODO.md` between syncs; those two are the source of truth.
@@ -245,19 +245,17 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-1. Finish the macOS path-with-spaces acceptance now in progress, then record
-   the corresponding Linux path-with-spaces evidence.
-2. Close the remaining distribution hardening gaps: absolute
+1. Close the remaining distribution hardening gaps: absolute
    path leakage, external consumers, and generic dependency validation.
-3. Enable and verify real FFmpeg hardware decode per host while retaining the
+2. Enable and verify real FFmpeg hardware decode per host while retaining the
    software/CPU fallback as the correctness baseline.
-4. Connect hardware decoder textures to Skia without CPU copies, including
+3. Connect hardware decoder textures to Skia without CPU copies, including
    device/fence ownership and CPU-download recovery.
-5. Bring up QuickJS core/event-loop/timers/modules, then expose stable
+4. Bring up QuickJS core/event-loop/timers/modules, then expose stable
    media/gfx services with WebCodecs-like queue semantics.
-6. Add capture/encode and network/adaptive/realtime services only after the
+5. Add capture/encode and network/adaptive/realtime services only after the
    native playback and zero-copy contracts are stable.
-7. Continue closing the focused CRT/PAL limitations above when an upstream
+6. Continue closing the focused CRT/PAL limitations above when an upstream
    consumer exposes a concrete requirement, following the Bionic-first
    porting discipline in `AGENTS.md`.
 
