@@ -8,6 +8,44 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-15
+
+- **Confirmed the remaining Linux Skia heap corruption is a Mesa lavapipe/
+  llvmpipe defect, not a Skia or CRT bug.** Installed
+  `vulkan-validationlayers` (`VK_LAYER_KHRONOS_validation` 1.3.275) and
+  re-ran the same preserved isolated-04 `crtgfx_skia_example` from
+  2026-09-14 with it force-enabled via `VK_INSTANCE_LAYERS` (confirmed
+  active on both the instance and device via `VK_LOADER_DEBUG=layer`). The
+  layer printed zero VUID errors or warnings before the abort -- no
+  CPU-visible Vulkan API misuse -- yet the process still aborted with
+  glibc's `free(): invalid next size (fast)` inside
+  `libvulkan_lvp.so`, this time from `GrInstallVkShaderModule()` ->
+  `vkCreateShaderModule()` (`src/gpu/ganesh/vk/GrVkUtil.cpp`) rather than
+  the prior run's `GrVkCommandPool::reset()` -> `vkResetCommandPool()`.
+  Reading both call sites directly in the vendored Skia source confirms
+  each is stock, unmodified upstream code with no defect of its own:
+  `GrInstallVkShaderModule()` computes `VkShaderModuleCreateInfo::codeSize`
+  correctly in bytes (`spirv.fBinary.size() * sizeof(uint32_t)`), and
+  `GrVkPrimaryCommandBuffer::finished()` uses the standard
+  `vkGetFenceStatus()` check before `GrVkCommandPool::reset()` is ever
+  called. The crash site moving between two otherwise-unrelated Vulkan
+  entry points depending only on whether an instrumenting layer is present
+  is the signature of a corruption written earlier and only *detected*
+  whichever `free()` inside the ICD next happens to touch the damaged
+  chunk, not a single deterministic call-site misuse -- combined with the
+  validation layer's clean pass, this now points at a genuine defect inside
+  Mesa's own lavapipe/llvmpipe software Vulkan driver (`mesa-vulkan-
+  drivers` `25.2.8-0ubuntu0.24.04.2`, the only Vulkan device this
+  aarch64 host enumerates -- no hardware GPU is present). A web search for
+  a matching public Mesa or Skia issue found nothing, so this may be
+  unreported or specific to this exact driver/ICD combination. This closes
+  out the "is it CRT, Skia, or Mesa" question this investigation opened
+  with `CRT_ENABLE_DEBUG_MALLOC`: it is none of this project's own code.
+  Recorded in `TODO.md` as a confirmed external blocker needing a decision
+  (different Mesa build, real GPU hardware, an upstream bug report, or
+  accepting it as a tracked environment limitation) rather than further
+  CRT/Skia-side chasing.
+
 ## 2026-09-14
 
 - **Re-ran the real isolated Linux 04 Skia scenario against the fully

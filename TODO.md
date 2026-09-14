@@ -73,46 +73,57 @@ blocking the same example, tracked below. The isolated stage-build tool's
 own pipeline still cannot reach `verify_dist.py`/atomic publish on Linux as
 a result.
 
-- [ ] **Root-cause and fix the Skia heap corruption blocking live Linux
-  `examples/gfx-skia` presentation.** The earlier `strtof_l` collision is
-  fixed; the example reaches Ganesh Vulkan shader generation and then
-  aborts. `CRT_ENABLE_DEBUG_MALLOC`'s owner/double-free/canary diagnostics,
-  and the `malloc_usable_size()`/moved-`realloc()`/48-byte-header-alignment
-  false positives they had produced, are now fully fixed and validated (see
-  `HISTORY.md`'s 2026-09-14 entries). **Re-running the real isolated Linux
-  04 rebuild against the corrected allocator (3/3 runs, deterministic)
-  confirms this bug is not in CRT's own allocator at all**: the diagnostics
-  stay completely silent -- no CRT-side trap -- and the process still aborts
-  with glibc's own `free(): invalid next size (fast)` corruption detector.
-  A GDB backtrace at the abort shows the corrupted heap belongs to *glibc
-  itself*, entirely inside Mesa's lavapipe/llvmpipe Vulkan ICD
-  (`libvulkan_lvp.so`, a host library reached via `libvulkan.so.1`), called
-  from Skia's own unmodified upstream `GrVkCommandPool::reset()` ->
-  `vkResetCommandPool()`. This is a `VkCommandPool`/`VkCommandBuffer`
-  allocation the host ICD owns and manages entirely with its own (glibc)
-  allocator -- exactly the already-documented Host ABI firewall boundary
-  (P0 item 3 below) -- so `CRT_ENABLE_DEBUG_MALLOC`, which only instruments
-  this project's own allocator instances, structurally cannot see this
-  corruption regardless of how correct it is. That also explains why the
-  earlier owner/canary/double-free work never caught it. (Frames deeper
-  than `GrVkCommandPool::reset()` in the raw backtrace show 40+ identical
-  `GrVkResourceProvider::checkCommandBuffers()` entries; reading that
-  function confirms it is a plain non-recursive loop, so those frames are a
-  GDB stack-unwinding artifact on this optimized, AArch64-PAC-signed build,
-  not real recursion -- do not read them as evidence of a recursion bug.)
-  **Next diagnostic step**: reproduce under the Vulkan validation layer
-  (`VK_LAYER_KHRONOS_validation`; not installed on this host --
-  `vulkaninfo --summary` lists no validation layer, `dpkg -l` confirms
-  `vulkan-validationlayers` is absent) to get an actionable Vulkan-API-
-  misuse report before deciding whether this is a genuine Skia Ganesh
-  command-pool-lifecycle bug or a Mesa lavapipe defect; only then decide
-  the fix and file it in the correct place (Skia-side patch, upstream Mesa
-  report, or -- if the validation layer finds nothing -- a deeper GDB
-  session on the lavapipe side). `verify_dist.py`/atomic publication stays
-  blocked until this is fixed.
+- [ ] **Confirmed external Mesa lavapipe/llvmpipe defect blocking live Linux
+  `examples/gfx-skia` presentation; decide how to proceed.** The earlier
+  `strtof_l` collision is fixed; `CRT_ENABLE_DEBUG_MALLOC`'s owner/double-
+  free/canary diagnostics (and the false positives they had produced) are
+  fully fixed and validated (see `HISTORY.md`'s 2026-09-14 entries).
+  Re-running the real isolated Linux 04 rebuild against the corrected
+  allocator stays completely silent on the CRT side -- confirming this
+  crash is not a CRT bug -- while the process still aborts with glibc's own
+  `free(): invalid next size (fast)` corruption detector, entirely inside
+  Mesa's lavapipe/llvmpipe Vulkan ICD (`libvulkan_lvp.so`), the only Vulkan
+  device this host enumerates (`device_count=1`, no hardware GPU present).
+  **Reproducing under `VK_LAYER_KHRONOS_validation` (installed 2026-09-15)
+  raised the confidence from "likely Mesa" to "confirmed Mesa, not Skia or
+  CRT"**: with the validation layer active on both instance and device, it
+  printed zero VUID errors or warnings before the abort -- no CPU-visible
+  Vulkan API misuse was detected -- yet the corruption still fired, this
+  time from a *different* call site (`GrInstallVkShaderModule()` ->
+  `vkCreateShaderModule()` instead of the earlier run's `GrVkCommandPool::
+  reset()` -> `vkResetCommandPool()`). Both call sites are stock, unmodified
+  upstream Skia (confirmed by reading `GrVkUtil.cpp`/`GrVkCommandPool.cpp`
+  directly: `GrInstallVkShaderModule()` computes `codeSize` in bytes
+  correctly per spec; `GrVkPrimaryCommandBuffer::finished()` uses the
+  standard `vkGetFenceStatus()` check before `reset()`). The crash site
+  *shifting* between two unrelated Vulkan entry points depending only on
+  whether an instrumenting layer is present is the signature of a timing-
+  sensitive corruption whose write happens earlier and is only *detected*
+  whenever the next `free()` inside the ICD happens to touch the damaged
+  chunk -- not a single deterministic misuse at one call site. Combined with
+  the validation layer's clean pass, this is now attributed to a genuine
+  defect inside Mesa's lavapipe/llvmpipe software Vulkan driver itself
+  (installed version `25.2.8-0ubuntu0.24.04.2`), not to Skia or CRT; no
+  matching public Mesa/Skia issue was found in a web search, so it may be
+  unreported, version-specific, or specific to this ICD combination.
+  (Frames deeper than the two named call sites show many identical-looking
+  `GrVkResourceProvider::checkCommandBuffers()`-style entries in the raw
+  backtrace; reading that function confirms it is a plain non-recursive
+  loop, so those are a GDB stack-unwinding artifact on this optimized,
+  AArch64-PAC-signed build, not evidence of real recursion.)
+  **This is now outside this project's own scope to fix directly** (a host
+  Vulkan ICD defect, not a CRT/PAL gap) -- decide with the project owner
+  whether to (a) try a different/newer Mesa build on this host, (b) test on
+  real GPU hardware if any becomes available (this host currently
+  enumerates only the software `llvmpipe` device), (c) file a Mesa bug
+  report with this evidence, or (d) accept it as a documented, tracked
+  external-environment limitation and unblock other Linux 04 work while
+  leaving `verify_dist.py`/atomic publication blocked specifically on this
+  upstream issue rather than continuing to treat it as this project's own
+  defect to chase.
   A separate, non-blocking SDK-isolation gap was also confirmed while
-  setting up this run and is tracked in the imported-libc++ item just
-  below: it did not affect this result only by coincidence.
+  setting up this investigation and is tracked in the imported-libc++ item
+  just below: it did not affect these results only by coincidence.
 - [ ] **Make imported libc++/libc++abi/libunwind relink when the predecessor
   `libc.so` changes.** The nested build currently treats the sysroot library
   as an untracked link input and can silently retain stale symbol references.
