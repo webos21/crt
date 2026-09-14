@@ -74,41 +74,65 @@ own pipeline still cannot reach `verify_dist.py`/atomic publish on Linux as
 a result.
 
 - [ ] **Root-cause the Linux Skia heap corruption blocking `examples/gfx-skia`
-  presentation -- CRT and Skia are cleared; a Mesa lavapipe/llvmpipe defect
-  is the leading suspect but not yet certain enough to file upstream or
-  set aside.** `strtof_l` is fixed; `CRT_ENABLE_DEBUG_MALLOC` is fully fixed
-  and validated, and a real isolated-04 rerun against it stays completely
-  silent while the process still aborts with glibc's own `free(): invalid
-  next size (fast)` inside Mesa's lavapipe ICD (`libvulkan_lvp.so`) -- not a
-  CRT bug. Reproducing under `VK_LAYER_KHRONOS_validation` printed zero VUID
-  errors/warnings before the abort, yet the crash site moved to a different,
-  equally stock/unmodified Skia call site -- consistent with, but not proof
-  of, a Mesa-internal defect. Full evidence: `HISTORY.md`'s 2026-09-15
-  entries. Next steps, in order (do not skip ahead -- each depends on the
-  one before it giving a clean result):
-  1. Fix the imported-libc++/libc++abi/libunwind absolute-RUNPATH gap (item
-     just below) first. Every further diagnosis here depends on the
-     isolated SDK actually being self-contained, and the 2026-09-15 finding
-     shows it currently is not.
-  2. With a genuinely self-contained SDK, audit host/CRT symbol binding on
-     the real arm64 example with `LD_DEBUG=bindings`: `malloc`/`calloc`/
-     `realloc`/`free`, `memcpy`/`memmove`/`pthread_*`, `opendir`/`readdir`,
-     and the Vulkan loader/ICD entry points. Any of these binding across
-     the CRT/glibc boundary unexpectedly (the same class of bug `370c41d`
-     already fixed once for `strtof_l`/`readdir`) must be fixed before
-     trusting any further Vulkan-level diagnosis.
-  3. Re-run under `VK_LAYER_KHRONOS_validation` with the lavapipe ICD
-     pinned explicitly (`VK_ICD_FILENAMES`), aiming to catch the *first*
-     VUID rather than the heap abort itself. A VUID hit means a Skia/Ganesh
-     or CRT Vulkan-lifecycle bug to fix directly; a clean pass with the
-     failure still lavapipe-only calls for a minimal standalone repro and a
-     Mesa version/ICD comparison; a clean pass that also fails elsewhere
-     calls for tracing command-pool/buffer create-alloc-reset-destroy calls
-     by handle.
+  presentation -- CRT's own allocator is cleared and the two observed Skia
+  call sites are stock/spec-correct; the failure is strongly isolated to
+  the Mesa lavapipe/llvmpipe 25.2.8 ICD path on this host, but not yet
+  confirmed as a Mesa defect** (`VK_LAYER_KHRONOS_validation` only checks
+  Vulkan-API-visible misuse -- it does not check ELF symbol interposition,
+  the CRT/host ABI boundary, a wrongly-loaded runtime, or a driver's own
+  internal memory safety, so it cannot by itself clear CRT/Skia or convict
+  Mesa). `strtof_l` is fixed; `CRT_ENABLE_DEBUG_MALLOC` is complete and
+  validated (guard-malloc work stays deferred -- the owner/double-free/
+  canary trio was sufficient to clear CRT's own allocator, so there is no
+  concrete need for it yet). A real isolated-04 rerun against the corrected
+  allocator stays completely silent while the process still aborts with
+  glibc's own `free(): invalid next size (fast)` inside Mesa's lavapipe ICD
+  (`libvulkan_lvp.so`); reproducing under the validation layer printed zero
+  VUID errors/warnings before the abort, yet the crash site moved to a
+  different, equally stock/unmodified Skia call site. Full evidence:
+  `HISTORY.md`'s 2026-09-15 entries. Next steps, in order (each is meant to
+  close off one remaining alternative explanation before spending real time
+  on a Mesa A/B comparison or any upstream patch):
+  1. ~~Cheap host-ABI-binding sanity check~~ -- **done 2026-09-15**: a
+     direct `LD_DEBUG=bindings,libs` audit of the preserved failing example
+     found zero exceptions -- every host/Mesa library (including
+     `libvulkan_lvp.so` and its own `libLLVM.so.20.1` JIT dependency) binds
+     `malloc`/`calloc`/`realloc`/`free`, `memcpy`/`memmove`, `pthread_*`,
+     and `opendir`/`readdir` to real glibc; every CRT-owned object binds
+     the same symbols to CRT's own versioned `libc.so`; no binding crosses
+     between them in either direction. This rules out a second ELF-
+     interposition-class bug. Full detail: `HISTORY.md`'s 2026-09-15
+     entries.
+  2. **Active next step**: fix the imported-libc++/libc++abi/libunwind
+     absolute-RUNPATH gap (item just below). Do this before the Mesa A/B
+     comparison in step 3: an A/B test is only meaningful once the SDK
+     genuinely only depends on itself, not on this checkout's own `out/`
+     tree.
+  3. **Mesa A/B comparison**, only after step 2: install a different Mesa/
+     lavapipe build into a separate prefix (do not overwrite the system
+     package) and select it via `VK_ICD_FILENAMES` against the same
+     example. Outcomes: passes on a newer Mesa -> treat 25.2.8/aarch64
+     lavapipe as a confirmed, version-specific defect (record a minimum
+     supported Mesa version or known limitation); still fails on a newer
+     Mesa -> write a minimal standalone repro and file it upstream; passes
+     on real GPU hardware if any becomes available -> stage itself is
+     sound, software-ICD-only limitation; fails on another ICD too ->
+     re-open the CRT/Skia Vulkan integration boundary as the suspect.
   4. Once root-caused, fix it in the right place (CRT, Skia, or a Mesa bug
-     report), then re-run the full real isolated Linux arm64 04 build from
-     fresh libc++/FreeType/FFmpeg/Skia and complete `verify_dist.py`/atomic
-     publication.
+     report -- do not start a Mesa upstream patch or a Skia source change
+     before step 3's A/B result), then re-run the full real isolated Linux
+     arm64 04 build from fresh libc++/FreeType/FFmpeg/Skia and complete
+     `verify_dist.py`/atomic publication.
+  **Separately, reconsider whether one known external software-ICD defect
+  should keep blocking `verify_dist.py`/atomic publication entirely** (a
+  policy question, not yet decided): a reasonable split is to keep
+  option-ON build/link/packaging, CPU and offscreen-GPU automated tests,
+  and `verify_dist.py`/dependency/RUNPATH checks as hard requirements,
+  while tracking real on-screen presentation as a separate host-acceptance
+  record and an isolated, single, already-known-defective software ICD as
+  an explicit external limitation -- without ever substituting an
+  option-OFF pass for it. Decide this with the project owner once step 3
+  gives a real answer, not before.
 - [ ] **Make imported libc++/libc++abi/libunwind self-contained in a
   packaged SDK: fix their baked-in absolute RUNPATH, and relink them when
   the predecessor `libc.so` changes.** Two distinct, confirmed gaps in the

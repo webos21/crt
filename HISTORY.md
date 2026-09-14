@@ -10,8 +10,34 @@ substantive update.
 
 ## 2026-09-15
 
-- **Confirmed the remaining Linux Skia heap corruption is a Mesa lavapipe/
-  llvmpipe defect, not a Skia or CRT bug.** Installed
+- **Closed off the "another ELF symbol-interposition/host-ABI-mixing bug"
+  explanation for the Skia/lavapipe heap corruption with a direct
+  `LD_DEBUG=bindings,libs` audit.** Re-ran the preserved failing
+  `crtgfx_skia_example` under `LD_DEBUG=bindings,libs` (18.5k lines
+  captured) and checked every symbol category the review below asked
+  about. Result: completely clean separation, no exceptions found. Every
+  host/Mesa library (`libvulkan.so.1`, every Mesa Vulkan ICD including
+  `libvulkan_lvp.so`, `libwayland-client.so.0`, `libLLVM.so.20.1` --
+  lavapipe JIT-compiles shaders through LLVM at runtime, confirmed by its
+  own binding list -- `libc++abi.so.1`, and the validation/device-select
+  layers) binds `malloc`/`calloc`/`realloc`/`free`, `memcpy`/`memmove`,
+  every `pthread_*` symbol, and `opendir`/`readdir` to real host
+  `/lib/aarch64-linux-gnu/libc.so.6`, with zero exceptions -- `readdir`/
+  `opendir` still resolve to glibc exactly as `370c41d` intended. Every
+  CRT-owned object (the executable itself, and the imported `libc++.so.1`)
+  binds its own `malloc`/`free`/`memcpy`/`memmove`/`pthread_mutex_*` to
+  CRT's own `libc.so`, versioned `[CRT_1.0]`. A direct search for any
+  binding crossing between the CRT checkout's `dist/01-c/lib` and host
+  glibc in either direction found zero matches. This directly confirms
+  there is no second ELF-interposition-class bug hiding in this crash;
+  combined with the validation-layer pass and the unmodified-Skia-source
+  reading already recorded above, the remaining explanation space is now
+  down to "Mesa lavapipe's own internal defect" versus "not yet tested on
+  a different Mesa build/ICD" -- exactly what the next two TODO.md steps
+  (imported-libc++ RUNPATH fix, then a Mesa A/B comparison) are for.
+
+- **Strongly isolated the remaining Linux Skia heap corruption to the Mesa
+  lavapipe/llvmpipe ICD path, short of a confirmed Mesa defect.** Installed
   `vulkan-validationlayers` (`VK_LAYER_KHRONOS_validation` 1.3.275) and
   re-ran the same preserved isolated-04 `crtgfx_skia_example` from
   2026-09-14 with it force-enabled via `VK_INSTANCE_LAYERS` (confirmed
@@ -33,18 +59,25 @@ substantive update.
   is the signature of a corruption written earlier and only *detected*
   whichever `free()` inside the ICD next happens to touch the damaged
   chunk, not a single deterministic call-site misuse -- combined with the
-  validation layer's clean pass, this now points at a genuine defect inside
+  validation layer's clean pass, this points at a likely defect inside
   Mesa's own lavapipe/llvmpipe software Vulkan driver (`mesa-vulkan-
   drivers` `25.2.8-0ubuntu0.24.04.2`, the only Vulkan device this
   aarch64 host enumerates -- no hardware GPU is present). A web search for
   a matching public Mesa or Skia issue found nothing, so this may be
-  unreported or specific to this exact driver/ICD combination. This closes
-  out the "is it CRT, Skia, or Mesa" question this investigation opened
-  with `CRT_ENABLE_DEBUG_MALLOC`: it is none of this project's own code.
-  Recorded in `TODO.md` as a confirmed external blocker needing a decision
-  (different Mesa build, real GPU hardware, an upstream bug report, or
-  accepting it as a tracked environment limitation) rather than further
-  CRT/Skia-side chasing.
+  unreported or specific to this exact driver/ICD combination.
+  **This is strong evidence, not yet a confirmed conviction**: the
+  validation layer only checks Vulkan-API-visible misuse (command-pool
+  lifecycle, shader-module arguments, and similar CPU-side contract rules)
+  -- it does not check ELF symbol interposition, the CRT/host ABI boundary,
+  a wrongly-loaded runtime library, or a driver's own internal memory
+  safety, any of which could still in principle produce this exact
+  signature. Reviewed 2026-09-15 afternoon and re-scoped in `TODO.md`
+  accordingly: before a Mesa A/B comparison or any upstream patch, first
+  run a cheap `LD_DEBUG=bindings,libs` host-ABI sanity check (closing off
+  the "another ELF symbol-interposition bug" explanation directly rather
+  than by assumption) and fix the imported-libc++ RUNPATH gap below (so a
+  Mesa A/B test is actually run against a self-contained SDK) -- see
+  `TODO.md`'s current ordered next-steps list for the full plan.
 
 - **Re-ran the real isolated Linux 04 Skia scenario against the fully
   corrected `CRT_ENABLE_DEBUG_MALLOC` allocator and proved the remaining
