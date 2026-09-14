@@ -433,6 +433,114 @@ substantive update.
   once more when the real fix lands); it will be corrected together with
   the real fix, in the same pass that closes this item.
 
+- **Fixed the `readdir`/`opendir`-vs-`strtof_l` Linux ELF symbol collision by
+  giving `libc.so` its own private ELF symbol-version namespace, confirmed
+  working; this closes that specific collision but exposed a second, separate,
+  pre-existing Skia bug that still blocks live Linux Skia presentation (see
+  the next entry).** Implemented the direction chosen and validated (via a
+  disposable repro) in the entry above: `libc/CMakeLists.txt` now links
+  `c_shared` (Linux only) with `-Wl,--version-script=` against a generated
+  map file tagging the library's entire dynamic export surface with a single
+  `CRT_1.0` version node (`CRT_1.0 { global: *; };`). Confirmed via
+  `readelf --version-info`: all ~1040 exported symbols (`readdir`,
+  `opendir`, `strtof_l`, `malloc`, ...) now carry `@@CRT_1.0`.
+  - **Real, separate build-system gap found applying this**: after a full
+    `ninja -C out/... ` rebuild and even a full `crt-gfx-simple-dist`
+    rebuild, `libc++.so.1`'s own `strtof_l` reference was *still*
+    unversioned (`readelf --version-info` showed no `Version needs`
+    section at all) -- the fix had no effect. Root cause: `libstdc++/
+    CMakeLists.txt`'s `crt-libcxx-build` custom target has no declared
+    `OUTPUT`/`BYPRODUCTS`, and its own nested `cmake --build
+    .../external/llvm-runtimes/build/{libunwind,libcxxabi,libcxx}` sub-
+    builds check *their own* tracked inputs (source files, configure
+    flags) for staleness -- none of which include the actual bytes of
+    `${CRT_SYSROOT}/lib/libc.so`, an external runtime dependency resolved
+    only through a raw link flag, invisible to their own ninja dependency
+    graphs. Confirmed directly: re-running the dist build showed `ninja:
+    no work to do.` for both the `libunwind` and `libcxx` build phases
+    even though `libc.so`'s own content (and version tags) had genuinely
+    changed. Worked around by deleting `out/.../external/llvm-runtimes/
+    build/{libunwind,libcxxabi,libcxx}` to force a real reconfigure+
+    rebuild -- after that, `readelf --version-info` on the freshly
+    packaged `dist/03-gfx-simple/lib/libc++.so.1` correctly showed
+    `File: libc.so, Name: CRT_1.0` in its own `Version needs` section.
+    This is a real, standing gap in `crt-libcxx-build`'s own dependency
+    tracking (not fixed here -- any future `libc.so` ABI-affecting change
+    will silently fail to propagate to the imported libc++/libc++abi/
+    libunwind lane the same way, unless someone remembers to blow away
+    `external/llvm-runtimes/build` by hand); left as a `TODO.md` follow-up
+    rather than fixed in this same pass, to keep this fix's own diff
+    reviewable.
+  - **Verified working**: full in-tree `ctest` -- 112/112 passed. A fresh
+    isolated `03-gfx-simple -> 04-gfx-media` stage rebuild (with the nested
+    libcxx build forced fresh) showed `crtgfx_gpu_example` still reaching
+    live presentation (`presented=1`, `device_count=1`, confirming the
+    already-fixed `readdir`/`opendir`-vs-Vulkan collision was *not*
+    regressed), and `crtgfx_skia_example`'s crash *signature changed*: no
+    longer the original `SIGSEGV` inside glibc's `strtof_l` with
+    uninitialized locale/TLS state -- confirmed via `gdb`, and via
+    `LD_DEBUG=bindings` on the in-tree `crtgfx_gpu_window_demo`, that
+    `readdir`/`opendir` still correctly bind to real glibc's `libc.so.6`
+    for host Vulkan/Mesa libraries needing them. The process now runs
+    measurably further (through Ganesh scene setup, into real SPIR-V
+    shader codegen) before failing on an entirely different, unrelated
+    crash -- see the next entry.
+
+- **Found a second, separate, pre-existing memory-corruption bug in Skia's
+  own SPIR-V codegen, previously masked by the `strtof_l` crash above (which
+  always happened first, before execution ever reached this code path); not
+  caused by, or related to, the ELF symbol-versioning work.** With the
+  `strtof_l` crash fixed, `crtgfx_skia_example` now reliably reaches Ganesh
+  Vulkan shader codegen before aborting with glibc's `munmap_chunk():
+  invalid pointer` (confirmed 3/3 direct re-runs, each within ~20s,
+  `exit=134`/`SIGABRT` every time -- reliably reproducible, unlike the
+  *shape* of the crash under `gdb`, see below).
+  - `gdb -batch -ex "run 1" -ex "bt full"` (cross-checked independently on
+    the same binary by the project owner, same result) shows a completely
+    ordinary, non-recursive call chain: `SkSL::FunctionDeclaration::
+    mangledName()` (`skia-source/src/sksl/ir/SkSLFunctionDeclaration.cpp:
+    517`, building `"funcname_returntypeparamtypes"` for a builtin
+    tessellation function whose name mangles to `wangs_formula_max_
+    fdiff_p2_ff2`) appends `"f2"` to its `std::string result`; the append
+    needs to grow the string, so `libc++`'s `__grow_by_and_replace`
+    allocates a fresh, larger buffer (confirmed successful: `operator new`
+    returns a valid new 64-byte block and the old content is copied in
+    correctly), then frees the *old* 32-byte buffer -- and `free()` itself
+    aborts inside glibc's `munmap_chunk()`, meaning the malloc chunk header
+    immediately preceding that old buffer is corrupted. The buffer's own
+    content (`"wangs_formula_max_fdiff_p2_ff2"`) is intact, legible text,
+    not garbage, so this reads as a heap-metadata corruption caused by an
+    earlier, unrelated out-of-bounds write elsewhere in Skia's own code
+    landing on this buffer's neighboring chunk header, not a bug in
+    `mangledName()`'s own (straightforward, non-recursive) logic.
+  - One earlier `gdb` run before this had shown what first looked like
+    unbounded recursion -- an identical return PC repeated across 17,611
+    stack frames, all inside `mangledName()` -- and a second attempt to get
+    a fuller backtrace under `gdb` ran for 26+ minutes at 99% CPU without
+    ever finishing (killed manually; two other stray helper processes from
+    that same investigation, including a broken `until` polling loop that
+    could never terminate, were found still running and killed at the same
+    time). Disassembling the repeated PC showed it is a loop-branch
+    instruction (`subs x21, x21, #0x8; b.ne ...`) inside `mangledName()`'s
+    own parameter-iteration loop, not a `bl` (call) instruction, and the
+    plain, un-debugged re-runs above completed in under 20 seconds every
+    time -- so the very large/non-terminating frame counts seen under
+    `gdb` are consistent with `this->parameters()` returning a corrupted,
+    non-deterministic (ASLR/heap-layout-dependent) size in some runs rather
+    than genuine, reproducible unbounded recursion; the simpler, ordinary
+    trace above is the one to trust for root-causing this.
+  - Skia's own compiled objects carry function-name debug symbols but no
+    variable/argument-level DWARF info (confirmed: `gdb` breakpoints on
+    Skia source lines fail with "No source file", and `this`/local
+    variables are unreadable even at a fresh, non-crashed breakpoint hit on
+    `SkSL::FunctionDeclaration::mangledName`), which blocks straightforward
+    source-level inspection of exactly which write is at fault. Not yet
+    root-caused to an exact line; recommended next step is enabling
+    AddressSanitizer for this project's Skia build (would catch the
+    out-of-bounds write at the exact point it happens, rather than only
+    when its corrupted metadata is later read) -- not yet attempted. See
+    `TODO.md`.
+
 ## 2026-09-13
 
 - **Completed Linux isolated-stage acceptance through the option-ON

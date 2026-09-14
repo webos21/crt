@@ -419,6 +419,58 @@ if(CRT_TARGET_OS STREQUAL "windows")
     ARCHIVE_OUTPUT_NAME c_dll
   )
 endif()
+if(CRT_TARGET_OS STREQUAL "linux")
+  # CRT_1.0 ELF symbol-version namespace (2026-09-14): this library's own
+  # ~1000 exported dynamic symbols (readdir/opendir/strtof_l/the full POSIX
+  # surface) previously carried no version information at all (confirmed
+  # via `readelf -V`). A plain, unversioned reference resolves through the
+  # whole process's single global symbol scope in breadth-first load
+  # order, not through each library's own dependency chain -- the same
+  # root cause already fixed once for libunwind.so's own dynamic-frame-
+  # registration API (see ../libstdc++/third_party/libunwind/recipe.json's
+  # own patch), and confirmed for real (2026-09-14, isolated
+  # 03-gfx-simple -> 04-gfx-media stage acceptance) driving a genuine
+  # crash: `crtgfx_skia_example`'s own DT_NEEDED lists real host
+  # libvulkan.so.1/libwayland-client.so.0 (which transitively pull in real
+  # glibc's own libc.so.6) *before* libc++.so.1 (whose own transitive need
+  # is this library), so libc++.so.1's unversioned `strtof_l` reference
+  # loses the breadth-first race to real glibc's own `strtof_l` -- called
+  # with locale/TLS state this project's own `_start`/crt1.o never
+  # initializes the glibc way, segfaulting inside `__strtof_l_internal`.
+  # Reordering link order instead (tried and reverted) only trades this
+  # crash for the already-fixed readdir/opendir-vs-Vulkan collision, since
+  # this library also unversioned-exports those -- link order cannot
+  # satisfy both symbol families at once.
+  #
+  # Giving this library's entire export surface one private version node
+  # fixes both directions without picking a side: ELF versioned symbol
+  # lookup filters candidates by version-STRING match rather than
+  # "first found wins", so once every consumer that calls into this
+  # library (libc++.so/libc++abi.so/libunwind.so/libcrtgfx.so/every
+  # executable) is rebuilt against it, references this library's own
+  # sources actually make (`strtof_l@CRT_1.0`, `readdir@CRT_1.0`, ...)
+  # correctly skip real glibc's `@GLIBC_2.17`-style definitions wherever
+  # both are present in scope, and real glibc-linked libraries' own
+  # `@GLIBC_2.17` references correctly keep skipping this library's
+  # same-named symbols -- independent of load/link order either way.
+  # Validated the version-filtered-resolution mechanism itself with a
+  # disposable, minimal repro (two same-named-but-differently-versioned
+  # symbols pulled from two libraries in varying NEEDED order) before
+  # applying it here; see TODO.md's dated note for that result.
+  #
+  # A single `global: *;` pattern (rather than enumerating specific
+  # symbol families) versions the *entire* current export surface in one
+  # step -- simpler than deciding per-symbol-family safety, and matching
+  # how real glibc versions its own entire export surface rather than
+  # only the historically-conflicting parts of it.
+  set(CRT_LIBC_VERSION_MAP "${CMAKE_CURRENT_BINARY_DIR}/crt_libc_version.map")
+  file(WRITE "${CRT_LIBC_VERSION_MAP}" [[CRT_1.0 {
+  global: *;
+};
+]])
+  set_target_properties(c_shared PROPERTIES LINK_DEPENDS "${CRT_LIBC_VERSION_MAP}")
+  target_link_options(c_shared PRIVATE "-Wl,--version-script=${CRT_LIBC_VERSION_MAP}")
+endif()
 
 install(TARGETS c c_shared
   ARCHIVE DESTINATION lib COMPONENT crt-c
