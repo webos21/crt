@@ -27,8 +27,10 @@ substantive update.
   primary LLD with `--no-dependent-libraries`, since all CRT archives are
   already listed in the wrapper's explicit group. The official static/
   shared exception/RTTI and string-ABI smoke matrix passes in all four
-  cases. This is x86_64 implementation evidence, not a claim that the
-  native-Linux arm64 merge or full isolated 04 acceptance is complete.
+  cases. Together with native-Linux arm64 commit `370c41d`, this closes the
+  symbol-collision fix across both Linux architectures; it does not claim
+  full isolated 04 acceptance, which remains blocked by the separately
+  documented Skia heap corruption.
 
 - **Reproduced both sides of the Linux CRT-libc/host-glibc namespace
   collision independently on WSL2 Ubuntu 26.04/x86_64 and corrected the

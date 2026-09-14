@@ -42,9 +42,10 @@ is not complete merely because an in-tree target links.
 - Skia CPU raster/text and Ganesh GPU paths build and run on Linux, Windows,
   and macOS. Low-level live GPU presentation exists on all three hosts. The
   packaged Skia/Ganesh path is accepted on Windows and macOS; on Linux its
-  low-level GPU example presents but its packaged Skia example crashes on the
-  symbol-resolution bug tracked in `TODO.md`. The remaining pixel-exact and
-  resize combinations are separate evidence gaps, not a missing common API.
+  low-level GPU example presents and the former libc/glibc symbol collision
+  is fixed on aarch64 and x86_64, but a separate Skia heap corruption still
+  crashes the packaged example. The remaining pixel-exact and resize
+  combinations are separate evidence gaps, not a missing common API.
 - The software media baseline includes FFmpeg-backed demux/decode, the common
   frame/audio/player contracts, and native audio sinks. Hardware decode and
   decoded-texture interop remain separate, explicitly reported capabilities.

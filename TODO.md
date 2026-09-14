@@ -61,13 +61,14 @@ Active threads, not a flat list of one-off items. The cumulative binary-package
 chain through the current `05-js` skeleton and the physical `libcrtgfx`
 window/GPU/Skia split are complete. Predecessor-only isolated-stage
 build/package/verify acceptance through the option-ON
-`03-gfx-simple -> 04-gfx-media` transition is complete on Windows and macOS;
-the dated evidence belongs in [`HISTORY.md`](HISTORY.md). **On Linux it is
-not complete**: the `readdir`/`opendir`-vs-`strtof_l` ELF symbol collision
-that used to crash `crtgfx_skia_example` immediately is fixed and validated
-on both Linux/aarch64 and WSL2 Ubuntu 26.04/x86_64 (`libc.so`'s own `CRT_1.0`
-ELF symbol-version namespace; see `HISTORY.md`'s 2026-09-14 entries) -- but
-that fix uncovered a second, separate, pre-existing Skia heap-corruption bug
+`03-gfx-simple -> 04-gfx-media` transition, including path-with-spaces
+acceptance, is complete on Windows and macOS; the dated evidence belongs in
+[`HISTORY.md`](HISTORY.md). **On Linux it is still not complete**: the
+`readdir`/`opendir`-vs-`strtof_l` ELF symbol collision that used to crash
+`crtgfx_skia_example` immediately is fixed and validated on both
+Linux/aarch64 and WSL2 Ubuntu 26.04/x86_64 (`libc.so`'s own `CRT_1.0` ELF
+symbol-version namespace; see `HISTORY.md`'s 2026-09-14 entries) -- but that
+fix uncovered a second, separate, pre-existing Skia heap-corruption bug
 blocking the same example, tracked below. The isolated stage-build tool's
 own pipeline still cannot reach `verify_dist.py`/atomic publish on Linux as
 a result.
