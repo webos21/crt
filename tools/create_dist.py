@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from create_rootfs import TOYBOX_APPLETS
+from crt_dist_prerequisites import external_prerequisites_for
 
 
 # What "ships in every packaged distribution" is, on purpose, a single
@@ -22,7 +23,7 @@ from create_rootfs import TOYBOX_APPLETS
 # real one).
 DIST_PORTING_TOOLS = (
     "crt-port-build.py", "fetch_ports.py", "crt-native-tool", "crt-stage-build.py",
-    "crt_stage_recipe.py",
+    "crt_stage_recipe.py", "crt_dist_prerequisites.py",
 )
 DIST_PORTING_DIRS = ("recipes", "tests", "shims")
 DIST_WRAPPER_TOOLS = ("crt-cc", "crt-c++", "crt-cc.cmd", "crt-c++.cmd")
@@ -447,6 +448,7 @@ set(CMAKE_INSTALL_RPATH "${CRT_DISTRIBUTION_ROOT}/lib")
             ["CRT_CC", "CRT_CXX", "CRT_AR", "CRT_RANLIB", "CRT_WINDOWS_SDK_LIBPATH"]
             if target_os == "windows" else []
         ),
+        "external_prerequisites": external_prerequisites_for(target_os, stage),
         "redistributed_dependencies": redistributed_dependencies,
         "optional_tools": {
             "porting": {

@@ -7,6 +7,7 @@ import re
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from create_dist import DIST_PORTING_TOOLS, DIST_PORTING_DIRS, DIST_WRAPPER_TOOLS
+from crt_dist_prerequisites import external_prerequisites_for
 from crt_stage_recipe import recipe_filename_for_stage, validate_recipe
 
 
@@ -19,6 +20,10 @@ SUPPORTED_STAGES = (
     "01-c", "02-cxx", "03-gfx-simple", "04-gfx-media", "05-js",
 )
 SUPPORTED_TARGET_OSES = {"linux", "macos", "windows"}
+EXTERNAL_PREREQUISITE_KINDS = {
+    "device-driver", "host-library", "os-framework", "os-runtime",
+    "runtime-service",
+}
 
 
 def require(path: Path) -> None:
@@ -123,6 +128,58 @@ def validate_redistributed_dependencies(dist: Path, manifest: dict) -> dict[str,
     return by_name
 
 
+def validate_external_prerequisites(manifest: dict) -> dict[str, dict]:
+    """Require the canonical cumulative, non-redistributed runtime contract."""
+    prerequisites = manifest.get("external_prerequisites")
+    if not isinstance(prerequisites, list):
+        raise SystemExit("manifest external_prerequisites must be a list")
+    by_id: dict[str, dict] = {}
+    for item in prerequisites:
+        if not isinstance(item, dict):
+            raise SystemExit("external prerequisite entries must be objects")
+        prerequisite_id = require_string(item.get("id"),
+                                         "external prerequisite id")
+        if prerequisite_id in by_id:
+            raise SystemExit(
+                f"external prerequisite is declared twice: {prerequisite_id}")
+        kind = require_string(item.get("kind"),
+                              f"external prerequisite {prerequisite_id}.kind")
+        if kind not in EXTERNAL_PREREQUISITE_KINDS:
+            raise SystemExit(
+                f"external prerequisite {prerequisite_id}.kind is unsupported: {kind}")
+        if item.get("bundled") is not False:
+            raise SystemExit(
+                f"external prerequisite {prerequisite_id}.bundled must be false")
+        if not require_string_list(
+                item.get("required_for"),
+                f"external prerequisite {prerequisite_id}.required_for"):
+            raise SystemExit(
+                f"external prerequisite {prerequisite_id}.required_for must not be empty")
+        if not require_string_list(
+                item.get("components"),
+                f"external prerequisite {prerequisite_id}.components"):
+            raise SystemExit(
+                f"external prerequisite {prerequisite_id}.components must not be empty")
+        by_id[prerequisite_id] = item
+
+    target_os = manifest["target"]["os"]
+    stage = manifest["stage"]
+    expected = external_prerequisites_for(target_os, stage)
+    expected_by_id = {item["id"]: item for item in expected}
+    if by_id.keys() != expected_by_id.keys():
+        missing = sorted(expected_by_id.keys() - by_id.keys())
+        unexpected = sorted(by_id.keys() - expected_by_id.keys())
+        raise SystemExit(
+            "manifest external_prerequisites do not match the target/stage contract; "
+            f"missing={missing}, unexpected={unexpected}")
+    for prerequisite_id, expected_item in expected_by_id.items():
+        if by_id[prerequisite_id] != expected_item:
+            raise SystemExit(
+                f"external prerequisite contradicts the target/stage contract: "
+                f"{prerequisite_id}")
+    return by_id
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dist", required=True, type=Path)
@@ -137,6 +194,7 @@ def main() -> None:
     manifest = validate_manifest_schema(
         json.loads((dist / "manifest.json").read_text(encoding="utf-8")),
         args.stage)
+    validate_external_prerequisites(manifest)
     redistributed = validate_redistributed_dependencies(dist, manifest)
     porting = manifest.get("optional_tools", {}).get("porting", {})
     if porting.get("included") is not True or porting.get("python", {}).get("required") is not True:

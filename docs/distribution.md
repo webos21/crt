@@ -170,6 +170,33 @@ relative paths. Verification rejects absolute, drive-relative, parent-
 traversing, non-normalized, or symlink-escaping entries before checking that
 the declared header, link, runtime, notice, and provenance payload exists.
 
+`external_prerequisites` is the complementary, non-payload contract. Each
+entry has a stable `id`, a `kind` (`os-runtime`, `os-framework`,
+`host-library`, `runtime-service`, or `device-driver`), non-empty
+`required_for` capabilities and `components`, and `bundled: false`. The list
+is cumulative by stage and canonical for the manifest's target OS. The
+verifier rejects missing, duplicate, unexpected, malformed, or target/stage-
+contradictory entries; adding or removing a prerequisite therefore requires a
+reviewed change to the common producer/verifier definition rather than an
+ad-hoc manifest edit.
+
+| Target/stage | External runtime contract added at that stage |
+| --- | --- |
+| Windows `01-c` | Windows kernel/API-set runtime |
+| Windows `03-gfx-simple` | USER32, D3D11, and DXGI desktop presentation runtime |
+| Windows `04-gfx-media` | D3D12/DXGI/shader compiler, COM, and a compatible display driver |
+| macOS `01-c` | libSystem |
+| macOS `03-gfx-simple` | Foundation, AppKit, QuartzCore, CoreGraphics, and Objective-C runtime |
+| macOS `04-gfx-media` | Metal, AudioToolbox, VideoToolbox, CoreVideo, and CoreMedia |
+| Linux `01-c` | Linux kernel syscall ABI |
+| Linux `03-gfx-simple` | reachable Wayland compositor with xdg-shell |
+| Linux `04-gfx-media` | host Wayland client and Vulkan loader libraries plus a target-GPU Vulkan ICD |
+
+`02-cxx` adds no OS prerequisite beyond `01-c`; the current `05-js` skeleton
+adds none beyond `04-gfx-media`. Compiler/toolchain inputs remain in the
+separate external-toolchain fields and redistributable third-party ports
+remain in `redistributed_dependencies`.
+
 The first supported transitions are `01-c -> 02-cxx`, then
 `02-cxx -> 03-gfx-simple -> 04-gfx-media`. Thus `01-c` can fetch the pinned
 libc++/libc++abi/libunwind source package and build `02-cxx`; `02-cxx` can

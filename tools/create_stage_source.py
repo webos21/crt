@@ -42,6 +42,7 @@ STAGES = {
             "tools/create_rootfs.py",
             "tools/verify_dist.py",
             "tools/crt_stage_recipe.py",
+            "tools/crt_dist_prerequisites.py",
             "tools/crt-cc",
             "tools/crt-c++",
             "tools/crt-cc.cmd",
@@ -65,6 +66,7 @@ STAGES = {
             "tools/create_rootfs.py",
             "tools/verify_dist.py",
             "tools/crt_stage_recipe.py",
+            "tools/crt_dist_prerequisites.py",
             "tools/crt-cc",
             "tools/crt-c++",
             "tools/crt-cc.cmd",
@@ -116,6 +118,7 @@ STAGES = {
             "tools/create_rootfs.py",
             "tools/verify_dist.py",
             "tools/crt_stage_recipe.py",
+            "tools/crt_dist_prerequisites.py",
             # build_skia.py's GN arguments invoke these from --root. They
             # must come from the verified stage asset, not a full checkout.
             "tools/crt-cc",

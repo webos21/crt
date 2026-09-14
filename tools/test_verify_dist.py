@@ -9,7 +9,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from verify_dist import validate_manifest_schema, validate_redistributed_dependencies
+from crt_dist_prerequisites import external_prerequisites_for
+from verify_dist import (
+    validate_external_prerequisites,
+    validate_manifest_schema,
+    validate_redistributed_dependencies,
+)
 
 
 def valid_manifest() -> dict:
@@ -28,6 +33,8 @@ def valid_manifest() -> dict:
         },
         "default_compile_options": ["-ffreestanding"],
         "external_toolchain_environment": ["CRT_CC"],
+        "external_prerequisites": external_prerequisites_for(
+            "windows", "04-gfx-media"),
         "redistributed_dependencies": [],
     }
 
@@ -110,6 +117,37 @@ class RedistributedDependencyTests(unittest.TestCase):
         missing["redistributed_dependencies"][0]["headers"] = ["include/missing"]
         with self.assertRaises(SystemExit):
             validate_redistributed_dependencies(self.dist, missing)
+
+
+class ExternalPrerequisiteTests(unittest.TestCase):
+    def test_cumulative_contract_for_every_target_and_stage(self) -> None:
+        for target_os in ("linux", "macos", "windows"):
+            previous_ids: set[str] = set()
+            for stage in ("01-c", "02-cxx", "03-gfx-simple",
+                          "04-gfx-media", "05-js"):
+                with self.subTest(target_os=target_os, stage=stage):
+                    manifest = valid_manifest()
+                    manifest["target"]["os"] = target_os
+                    manifest["stage"] = stage
+                    manifest["external_prerequisites"] = (
+                        external_prerequisites_for(target_os, stage))
+                    validated = validate_external_prerequisites(manifest)
+                    self.assertTrue(previous_ids <= set(validated))
+                    previous_ids = set(validated)
+
+    def test_rejects_missing_duplicate_and_contradictory_entries(self) -> None:
+        for mutation in ("missing", "duplicate", "contradictory"):
+            with self.subTest(mutation=mutation):
+                manifest = valid_manifest()
+                if mutation == "missing":
+                    manifest["external_prerequisites"].pop()
+                elif mutation == "duplicate":
+                    manifest["external_prerequisites"].append(
+                        copy.deepcopy(manifest["external_prerequisites"][0]))
+                else:
+                    manifest["external_prerequisites"][0]["bundled"] = True
+                with self.assertRaises(SystemExit):
+                    validate_external_prerequisites(manifest)
 
 
 if __name__ == "__main__":

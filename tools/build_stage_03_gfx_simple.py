@@ -10,6 +10,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from crt_dist_prerequisites import external_prerequisites_for
+
 
 def run(command: list[str], env: dict[str, str] | None = None) -> None:
     print("+", " ".join(command), flush=True)
@@ -285,6 +287,8 @@ def main() -> None:
     run(["cmake", "--install", str(build_dir)], env)
 
     manifest["stage"] = "03-gfx-simple"
+    manifest["external_prerequisites"] = external_prerequisites_for(
+        target_os, "03-gfx-simple")
     manifest["built_from"] = {
         "stage": "02-cxx",
         "source_recipe": args.recipe_location,

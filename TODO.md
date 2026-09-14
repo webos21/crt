@@ -70,13 +70,14 @@ Harden the completed cross-host distribution baseline before adding another
 large upper-runtime dependency. Work in independently verifiable tranches and
 move each completed tranche into [`HISTORY.md`](HISTORY.md):
 
-1. **External prerequisite inventory.** Define one portable manifest schema
-   for OS/framework/device-driver prerequisites that intentionally remain
-   outside the archive, populate it for each host/stage, and make
-   `verify_dist.py` reject incomplete or contradictory declarations. This is
-   the active verifier tranche. Generic dependency payload validation,
-   manifest schema/target completeness, and dependency-path confinement are
-   complete in [`HISTORY.md`](HISTORY.md).
+1. **External prerequisite host acceptance.** The portable cumulative schema,
+   three-host/stage inventory, producer/isolated-upgrade integration, strict
+   verifier, and Windows binary-import audit are complete in
+   [`HISTORY.md`](HISTORY.md). On real Linux and macOS hosts, regenerate at
+   least `03-gfx-simple` and option-ON `04-gfx-media`, confirm their manifests
+   contain the canonical entries, and compare actual ELF/Mach-O dependencies
+   and runtime availability with those declarations. Record the two host
+   results, then remove this item.
 2. **Binary dependency and absolute-path policy.** Scan installed binaries for
    undeclared non-system `.so`, `.dylib`, or `.dll` dependencies. Decide path
    remapping or release stripping before rejecting absolute source/build/debug

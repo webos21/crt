@@ -10,6 +10,24 @@ substantive update.
 
 ## 2026-09-14
 
+- **Defined and enforced the external runtime prerequisite contract up to the
+  Linux/macOS host-acceptance boundary.** Added one shared cumulative inventory
+  for all stages and Windows, macOS, and Linux, separating OS runtimes and
+  frameworks, host libraries, runtime services, and device drivers from both
+  redistributed port payloads and external compiler inputs. `create_dist.py`
+  now writes the canonical list, isolated `02-cxx -> 03-gfx-simple` and
+  `03-gfx-simple -> 04-gfx-media` upgrades replace it when advancing the
+  stage, and every source-stage asset plus binary SDK carries the shared
+  module. `verify_dist.py` rejects missing, duplicate, unexpected, malformed,
+  bundled, or target/stage-contradictory declarations. Expanded the focused
+  unit suite from 6 to 8 cases, including cumulative contracts across all 15
+  target/stage pairs. A complete import scan of the existing Windows isolated
+  04 SDK confirmed the declared runtime families in real packaged binaries:
+  KERNEL32/API-set, USER32, D3D11, D3D12, DXGI, D3DCOMPILER_47, and OLE32;
+  CRT-owned DLLs remain package payload rather than external prerequisites.
+  The matching Linux ELF/runtime and macOS Mach-O/framework comparisons remain
+  explicitly tracked in `TODO.md` for their real-host acceptance runs.
+
 - **Hardened the distribution manifest schema and confined every declared
   dependency path to the SDK root.** `verify_dist.py` now validates the common
   format/stage/target/compiler/toolchain identity before applying stage layout

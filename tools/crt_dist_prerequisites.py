@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""Canonical external runtime prerequisites for cumulative CRT stages."""
+
+from copy import deepcopy
+
+
+STAGE_ORDER = {
+    "01-c": 1,
+    "02-cxx": 2,
+    "03-gfx-simple": 3,
+    "04-gfx-media": 4,
+    "05-js": 5,
+}
+
+
+_BASE = {
+    "windows": ({
+        "id": "windows-system-runtime",
+        "kind": "os-runtime",
+        "required_for": ["base-runtime"],
+        "components": [
+            "KERNEL32.dll",
+            "api-ms-win-core-synch-l1-2-0.dll",
+        ],
+        "bundled": False,
+    },),
+    "macos": ({
+        "id": "macos-system-runtime",
+        "kind": "os-runtime",
+        "required_for": ["base-runtime"],
+        "components": ["libSystem.B.dylib"],
+        "bundled": False,
+    },),
+    "linux": ({
+        "id": "linux-kernel-runtime",
+        "kind": "os-runtime",
+        "required_for": ["base-runtime"],
+        "components": ["Linux kernel syscall ABI"],
+        "bundled": False,
+    },),
+}
+
+_GFX_SIMPLE = {
+    "windows": ({
+        "id": "windows-desktop-graphics-runtime",
+        "kind": "os-runtime",
+        "required_for": ["window-system", "software-framebuffer-presentation"],
+        "components": ["USER32.dll", "d3d11.dll", "dxgi.dll"],
+        "bundled": False,
+    },),
+    "macos": ({
+        "id": "macos-cocoa-window-runtime",
+        "kind": "os-framework",
+        "required_for": ["window-system", "software-framebuffer-presentation"],
+        "components": [
+            "Foundation.framework",
+            "AppKit.framework",
+            "QuartzCore.framework",
+            "CoreGraphics.framework",
+            "libobjc.A.dylib",
+        ],
+        "bundled": False,
+    },),
+    "linux": ({
+        "id": "linux-wayland-compositor",
+        "kind": "runtime-service",
+        "required_for": ["window-system", "software-framebuffer-presentation"],
+        "components": ["Wayland compositor with xdg-shell support"],
+        "bundled": False,
+    },),
+}
+
+_GFX_MEDIA = {
+    "windows": (
+        {
+            "id": "windows-d3d12-runtime",
+            "kind": "os-runtime",
+            "required_for": ["gpu-rendering"],
+            "components": ["d3d12.dll", "dxgi.dll", "D3DCOMPILER_47.dll"],
+            "bundled": False,
+        },
+        {
+            "id": "windows-com-runtime",
+            "kind": "os-runtime",
+            "required_for": ["media"],
+            "components": ["ole32.dll"],
+            "bundled": False,
+        },
+        {
+            "id": "windows-gpu-driver",
+            "kind": "device-driver",
+            "required_for": ["gpu-rendering", "hardware-video"],
+            "components": ["D3D11/D3D12-compatible display driver"],
+            "bundled": False,
+        },
+    ),
+    "macos": (
+        {
+            "id": "macos-metal-runtime",
+            "kind": "os-framework",
+            "required_for": ["gpu-rendering"],
+            "components": ["Metal.framework"],
+            "bundled": False,
+        },
+        {
+            "id": "macos-media-runtime",
+            "kind": "os-framework",
+            "required_for": ["media", "hardware-video"],
+            "components": [
+                "AudioToolbox.framework",
+                "VideoToolbox.framework",
+                "CoreVideo.framework",
+                "CoreMedia.framework",
+            ],
+            "bundled": False,
+        },
+    ),
+    "linux": (
+        {
+            "id": "linux-wayland-client-runtime",
+            "kind": "host-library",
+            "required_for": ["gpu-presentation"],
+            "components": ["libwayland-client.so.0"],
+            "bundled": False,
+        },
+        {
+            "id": "linux-vulkan-loader",
+            "kind": "host-library",
+            "required_for": ["gpu-rendering"],
+            "components": ["libvulkan.so.1"],
+            "bundled": False,
+        },
+        {
+            "id": "linux-vulkan-driver",
+            "kind": "device-driver",
+            "required_for": ["gpu-rendering"],
+            "components": ["Vulkan ICD for the target GPU"],
+            "bundled": False,
+        },
+    ),
+}
+
+
+def external_prerequisites_for(target_os: str, stage: str) -> list[dict]:
+    """Return the exact cumulative external-runtime contract for one SDK."""
+    if target_os not in _BASE:
+        raise ValueError(f"unsupported prerequisite target OS: {target_os}")
+    if stage not in STAGE_ORDER:
+        raise ValueError(f"unsupported prerequisite stage: {stage}")
+    prerequisites = list(_BASE[target_os])
+    if STAGE_ORDER[stage] >= STAGE_ORDER["03-gfx-simple"]:
+        prerequisites.extend(_GFX_SIMPLE[target_os])
+    if STAGE_ORDER[stage] >= STAGE_ORDER["04-gfx-media"]:
+        prerequisites.extend(_GFX_MEDIA[target_os])
+    return deepcopy(prerequisites)

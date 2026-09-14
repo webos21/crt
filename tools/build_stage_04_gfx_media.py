@@ -14,6 +14,8 @@ import tempfile
 import time
 from pathlib import Path
 
+from crt_dist_prerequisites import external_prerequisites_for
+
 
 DEFAULT_DEPENDENCY_JOBS = max(1, min(os.cpu_count() or 2, 4))
 
@@ -901,6 +903,8 @@ def main() -> None:
 
         with timings.measure("write dependency provenance and manifest"):
             manifest["stage"] = "04-gfx-media"
+            manifest["external_prerequisites"] = external_prerequisites_for(
+                target_os, "04-gfx-media")
             manifest["built_from"] = {
                 "stage": "03-gfx-simple",
                 "source_recipe": args.recipe_location,
