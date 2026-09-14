@@ -63,88 +63,135 @@ window/GPU/Skia split are complete. Predecessor-only isolated-stage
 build/package/verify acceptance through the option-ON
 `03-gfx-simple -> 04-gfx-media` transition is complete on Windows and macOS;
 the dated evidence belongs in [`HISTORY.md`](HISTORY.md). **On Linux it is
-not complete**: its prerequisite/ELF inventory, low-level Vulkan presentation,
-and independent path-with-spaces evidence pass, but the isolated stage-build
-tool runs both packaged examples *before* `verify_dist.py`/atomic publish and
-`crtgfx_skia_example` crashes there every time. The tool therefore has never
-reached `verify_dist.py` or produced a published `dist/04-gfx-media` on Linux
-at all. An earlier revision of this paragraph and commit `15fcb1e` overstated
-that result; see `HISTORY.md`'s 2026-09-14 corrections and the dedicated item
-below.
+not complete**: the `readdir`/`opendir`-vs-`strtof_l` ELF symbol collision
+that used to crash `crtgfx_skia_example` immediately is fixed and validated
+on both Linux/aarch64 and WSL2 Ubuntu 26.04/x86_64 (`libc.so`'s own `CRT_1.0`
+ELF symbol-version namespace; see `HISTORY.md`'s 2026-09-14 entries) -- but
+that fix uncovered a second, separate, pre-existing Skia heap-corruption bug
+blocking the same example, tracked below. The isolated stage-build tool's
+own pipeline still cannot reach `verify_dist.py`/atomic publish on Linux as
+a result.
 
-- [ ] **Root-cause and fix the `SkSL::stod`/`strtof_l` crash blocking live
-  Linux `examples/gfx-skia` presentation.** 100% reproducible as of
-  2026-09-14 (re-confirmed across three independent isolated-stage rebuilds
-  this session; `crtgfx_gpu_example` is unaffected). Root cause is now fully
-  understood -- see `HISTORY.md`'s 2026-09-14 correction entry for the full
-  trace: real glibc's own `strtof_l` (not this project's own, correctly
-  implemented one in `libc/src/locale_l.c`) gets called with uninitialized
-  glibc-internal locale/TLS state and crashes, because
-  `crtgfx_skia_example`'s `DT_NEEDED` order lets real glibc's `libc.so.6`
-  (pulled in transitively by `libvulkan.so.1`/`libwayland-client.so.0`) win
-  the ELF dynamic linker's breadth-first global-scope search for the
-  unversioned `strtof_l` symbol, ahead of this project's own `libc.so`. A
-  naive fix (reordering `target_link_libraries()` so `libc++.so.1`/
-  `libunwind.so` link first) does fix this but was found to regress a
-  separate, already-fixed collision -- `readdir`/`opendir` then
-  incorrectly bind to this project's own `libc.so` instead of real glibc,
-  breaking Vulkan device enumeration (`device_count=0`) -- so it was
-  reverted. This is a genuine architectural tension: this project's own
-  `libc.so` unversioned-exports the entire POSIX symbol surface as
-  global-default, which cannot simultaneously satisfy both symbol families'
-  correct resolution via link order alone.
-  **Chosen direction: give `libc.so` its own private
-  ELF symbol-version namespace** (e.g. a single `CRT_1.0` node covering the
-  whole export surface via `-Wl,--version-script=`, reusing the same
-  mechanism the `libunwind.so` `__register_frame` fix already proved out).
-  Versioned symbol lookup filters breadth-first global-scope candidates by
-  version-string match rather than "first found wins", so once every
-  consumer that calls into `libc.so` (`libc++.so`/`libc++abi.so`/
-  `libunwind.so`/`libcrtgfx.so`/every executable) is rebuilt against the
-  newly-versioned `libc.so`, `strtof_l@CRT_1.0` and `readdir@CRT_1.0`
-  correctly skip real glibc's `@GLIBC_2.17` definitions (and vice versa) --
-  independent of link order, resolving the tension above without picking a
-  side. A single whole-surface version node is preferred over scoping only
-  the `_l`-suffixed locale family: it needs no per-symbol-family safety
-  judgment and mirrors how real glibc versions its own entire export
-  surface; fall back to narrow scoping only if whole-surface versioning is
-  found to break something real glibc-linked-library interop depends on.
-  Before touching the real `libc.so` build (which forces a full
-  `libc++`/`libc++abi`/`libunwind`/`libcrtgfx` rebuild plus the ~13-minute
-  isolated Skia stage rebuild per iteration), validate the version-filtered
-  resolution mechanism itself with a small, disposable two-`.so` repro
-  (`readelf --version-info`/`LD_DEBUG=bindings`) outside the real build.
-  **Done, 2026-09-14, confirmed:** a throwaway four-`.so` repro (two "base"
-  libs each exporting a same-named symbol returning a different value --
-  one under a `GLIBC_2.17`-style node standing in for real glibc, one under
-  a private `CRT_1.0` node standing in for a re-versioned `libc.so`; two
-  "consumer" libs, each linked against one base lib so its own `DT_VERNEED`
-  records that specific version) reproduced the real bug exactly when built
-  *without* versioning -- with the "glibc" base lib listed first in
-  `DT_NEEDED` order (mirroring `crtgfx_skia_example`'s real order), the
-  "CRT" consumer incorrectly bound to the "glibc" base lib's definition
-  (`LD_DEBUG=bindings` showed both consumers binding to the same, first-found
-  library). Rebuilding the identical layout *with* the version scripts fixed
-  it: each consumer correctly bound to its own base lib's definition
-  regardless of `DT_NEEDED` order (`LD_DEBUG=bindings` showed
-  `` `foo' [GLIBC_2.17]`` and `` `foo' [CRT_1.0]`` resolving to their
-  respective libraries). This confirmed the chosen direction mechanically
-  before paying the real rebuild cost. The whole-surface `CRT_1.0` map is now
-  implemented in the real Linux `libc.so` build and validated through a clean
-  libc++ rebuild on WSL2 Ubuntu 26.04/x86_64; `libc++.so.1` records
-  `strtof_l@CRT_1.0`. That host also carries two minimal,
-  real-provider reproductions (2026-09-14; full evidence in `HISTORY.md`): a
-  plain CRT C executable linked to host `libvulkan.so.1` fails physical-device
-  enumeration with `VK_ERROR_INCOMPATIBLE_DRIVER` when its CRT `opendir`/
-  `readdir` exports remain visible, while a shared-libc++ locale-stream probe
-  using `--exclude-libs,ALL` keeps Vulkan's directory calls on glibc but binds
-  libc++'s `strtof_l` to glibc and SIGSEGVs. With the new map, both probes
-  pass simultaneously and `LD_DEBUG=bindings` shows Vulkan directory calls
-  reaching `GLIBC_2.2.5` while libc++ locale parsing reaches `CRT_1.0`.
-  Proceed by merging the independently tested native-Linux arm64 work,
-  preserving these two cases as a permanent Linux-only regression, and then
-  completing the full isolated Linux 04 transition on native hardware. Do
-  not accept link-order changes as a fix.
+- [ ] **Root-cause and fix a Skia-internal heap corruption crashing live
+  Linux `examples/gfx-skia` presentation.** Found 2026-09-14 immediately
+  after the `strtof_l` fix above let execution reach this code path for the
+  first time; not caused by, or related to, that fix or the ELF-symbol-
+  collision family of bugs above. Reliably reproducible (3/3 direct re-runs,
+  each within ~20s): `crtgfx_skia_example` reaches real Ganesh Vulkan shader
+  codegen, then aborts with glibc's `munmap_chunk(): invalid pointer` freeing
+  a `std::string`'s old internal buffer (32 bytes, holding the legible,
+  intact text `"wangs_formula_max_fdiff_p2_ff2"` -- a builtin tessellation
+  function's mangled name, built by `SkSL::FunctionDeclaration::
+  mangledName()`, `skia-source/src/sksl/ir/SkSLFunctionDeclaration.cpp:517`,
+  growing to append `"f2"`). The buffer's own content is intact, so this
+  reads as heap-metadata corruption from an earlier, unrelated
+  out-of-bounds write elsewhere in Skia landing on this buffer's neighboring
+  malloc chunk header, not a bug in `mangledName()`'s own (ordinary,
+  non-recursive) logic -- see `HISTORY.md`'s 2026-09-14 entry for the full
+  trace, including a red herring (an early `gdb` run appeared to show
+  ~17,611 frames of identical-PC recursion, later shown to be an artifact of
+  `gdb`'s own overhead interacting with the corruption non-deterministically,
+  not genuine recursion: disassembly confirmed the repeated PC is a loop
+  branch, not a call). Skia's own compiled objects carry no
+  variable/argument-level DWARF debug info, blocking straightforward `gdb`
+  source-level inspection of exactly which write is at fault.
+  A parallel finding while diagnosing this (`CRT_1.0` versioning applied,
+  see above) is architecturally relevant here too: this project's usual
+  "default-runtime" hybrid linkage genuinely produces *more than one*
+  independent instance of `libc/src/malloc.c`'s own allocator in the same
+  process (a statically-linked `libc.a` copy inside an executable, plus the
+  separate copy inside the shared `libc.so` `libc++.so.1` resolves through)
+  -- `free_unlocked()`/`realloc()` cannot tell these apart today (same
+  `CRT_BLOCK_MAGIC` compile-time constant in every instance), so a pointer
+  crossing instances would silently corrupt the *wrong* instance's
+  free-list. Plausible, not yet confirmed as *this* bug's own root cause.
+  Diagnostic plan, staged cheapest-first (an external architecture review
+  received 2026-09-14 independently endorsed this exact order over jumping
+  straight to AddressSanitizer, which hit a hard `.preinit_array`-not-
+  allowed-in-a-DSO wall trying to replace `libc.so`'s own allocator):
+  1. **`CRT_ENABLE_DEBUG_MALLOC_OWNER`(-> being folded into a broader
+     `CRT_ENABLE_DEBUG_MALLOC`): done, 2026-09-14.** Added a
+     `#ifdef CRT_DEBUG_MALLOC_OWNER`-guarded `owner` field to `block_header`
+     (set to `&heap_head`, a naturally distinct address per compiled
+     allocator instance), checked in `free_unlocked()`/`realloc()`, trapping
+     immediately via `__builtin_trap()` on a cross-instance free/realloc
+     instead of silently corrupting the wrong instance's state. Verified:
+     full in-tree `ctest` 112/112 passes with the option on or off;
+     disassembly of the built `libc.so` confirms `crt_malloc_check_owner()`
+     is actually called from `free_unlocked()`/`realloc()` and compares
+     against `&heap_head` before an unconditional `brk #0x1` on mismatch. A
+     synthetic two-instance repro (static-`malloc()` pointer freed through a
+     separately-linked `.so`'s `free()`) did *not* trip the trap, tracing
+     back to a real, separate ELF nuance worth its own note: an object with
+     *no* version information at all (like this project's own plain,
+     unscripted executables) can satisfy *any* named version request from
+     another object, so the executable's own unversioned `malloc`/`free`
+     export can still win a versioned lookup ahead of `libc.so`'s own
+     `@@CRT_1.0` -- unlike the real `crtgfx_skia_example`/glibc case, where
+     `LD_DEBUG=bindings` has directly confirmed correct resolution. The
+     synthetic repro is therefore not trusted as a stand-in for the real
+     scenario; the mechanism must be exercised against the real isolated
+     Skia rebuild directly, not a simplified 2-file model.
+  2. **Double-free detection and canary padding: done, 2026-09-14.** Folded
+     into the same `CRT_ENABLE_DEBUG_MALLOC` flag/`block_header` layout as
+     the owner cookie above (the option and macro were renamed from
+     `..._OWNER` accordingly). `free_unlocked()`/`realloc()` now trap on a
+     repeat free of an already-freed block (previously just flipped
+     `block.free = 1` again with no check), and every allocation path
+     (`malloc()`/`calloc()`/`realloc()`/`posix_memalign()`'s own internal
+     call, unified through `malloc_unlocked()`) paints the slack between
+     the caller's own requested size and its `align_size()`-rounded block
+     size with a fixed `0xFD` canary pattern, checked at `free()`/`realloc()`
+     time -- that slack already existed (every allocation already rounds up
+     to a multiple of `sizeof(block_header)`, 32 bytes), so this costs
+     nothing extra to fill/check. Verified: full in-tree `ctest` 112/112
+     passes with the option on or off (no false positives from the more
+     invasive checks); two throwaway positive tests confirm both mechanisms
+     actually fire -- a deliberate 6-byte overflow into a 20-byte
+     allocation's own canary slack traps at `free()`, and a second `free()`
+     of an already-freed 16-byte block traps immediately, both via
+     `__builtin_trap()` (`SIGTRAP`, confirmed via the process's own exit
+     status). Neither test was a false success: each allocation's *first*,
+     in-bounds `free()` completed normally before the deliberately-bad
+     second operation. Catches many heap-buffer-overflow shapes (including,
+     plausibly, this one) without the cost of the
+     heavier guard-page allocator below.
+  3. **`CRT_ENABLE_GUARD_MALLOC` (only if 1-2 do not catch it).** A separate,
+     much slower diagnostic allocator: one `mmap()` per allocation, user
+     data flush against a trailing `PROT_NONE` guard page (not merely
+     "somewhere in a guard-adjacent mapping" -- must sit at the guard
+     page's edge to catch small overflows), `free()` transitioning to
+     `mprotect(PROT_NONE)` plus a delayed-`munmap()` quarantine rather than
+     an immediate `munmap()` (so a reused address cannot silently mask a
+     use-after-free). Modeled on LLVM's GWP-ASan; not yet started.
+  4. Once the exact faulting write is caught, fix it in Skia's own code (or
+     file it upstream if it is a genuine upstream bug, per this project's
+     own no-upstream-patching-to-hide-CRT-gaps discipline -- confirm first
+     whether it is CRT-side or Skia-side before assuming either).
+  5. Remove or permanently keep `CRT_ENABLE_DEBUG_MALLOC`/
+     `CRT_ENABLE_GUARD_MALLOC` as regular CRT diagnostic build modes
+     (leaning toward keeping both -- they will very likely earn their keep
+     again once FFmpeg hardware decode and QuickJS/V8 add their own
+     allocation-heavy paths) once the bug is closed.
+- [ ] **`crt-libcxx-build` does not relink the imported libc++/libc++abi/
+  libunwind lane when `libc.so` changes.** Found 2026-09-14 applying the
+  `libc.so` symbol-versioning fix above: a full `ninja` rebuild, and even a
+  full `crt-gfx-simple-dist` rebuild, left `libc++.so.1`'s own `strtof_l`
+  reference unversioned, because `crt-libcxx-build`'s nested `cmake --build
+  .../external/llvm-runtimes/build/{libunwind,libcxxabi,libcxx}` sub-builds
+  only track their own source/configure-flag inputs for staleness, never
+  the actual bytes of `${CRT_SYSROOT}/lib/libc.so` -- confirmed via `ninja:
+  no work to do.` for both the `libunwind` and `libcxx` phases even after
+  `libc.so` genuinely changed. Worked around by hand this time (deleting
+  `out/.../external/llvm-runtimes/build/{libunwind,libcxxabi,libcxx}`
+  before rebuilding), but the gap itself is unfixed: any future
+  `libc.so`-ABI-affecting change will silently fail to propagate to this
+  lane the same way. Needs either a real `DEPENDS`/`BYPRODUCTS` edge from
+  `crt-libcxx-build` onto `c_shared`'s actual output, or a documented,
+  enforced convention (e.g. a fingerprint check inside `tools/crt-libcxx-
+  build.py` itself, matching `tools/build_stage_04_gfx_media.py`'s own
+  `inventory_fingerprint()`/`toolchain_identity()` pattern) that forces a
+  clean rebuild when the predecessor sysroot's content changes.
 
 ### Distribution hardening
 
@@ -175,7 +222,139 @@ move each completed tranche into [`HISTORY.md`](HISTORY.md):
    `04-gfx-media -> 05-js` only after the real QuickJS core and bindings exist.
    Apply the same pinned asset, predecessor-only build, test, external-consumer,
    verification, and atomic-publish contract as the earlier transitions.
+
 ## Planned
+
+### CRT allocator and runtime architecture hardening
+
+An external architecture review (2026-09-14, prompted by the Skia heap-
+corruption investigation above) looked at `libc/src/malloc.c`,
+`libc/CMakeLists.txt`, `libcrtgfx/CMakeLists.txt`, the malloc test suite, and
+the Linux Skia/Wayland/Vulkan boundary, and proposed a P0/P1/P2-ranked set of
+structural improvements. None of these block the Skia bug fix above and none
+are started; do not begin any of them ahead of that fix. Promote items here
+into "In Progress" individually once a concrete need or consumer justifies
+the cost, per this file's usual promotion discipline.
+
+P0:
+
+1. **Separate the bootstrap allocator from a production allocator.**
+   `libc/src/malloc.c` is a clear, easy-to-audit design for CRT bring-up,
+   but its `malloc()`/`free()`/new-chunk paths are all linear scans
+   (`append_chunk()` walks the whole chunk list to find its tail;
+   `malloc_unlocked()` first-fits linearly; `coalesce_free_blocks()`
+   rescans the whole free list on every `free()`), all under one global
+   `heap_lock` spinlock -- `O(N)` per operation as allocation count `N`
+   grows, a real risk once Skia/FFmpeg/QuickJS/libc++ are all allocating
+   heavily through it. Keep this implementation as the bootstrap/reference/
+   diagnostic allocator; evaluate LLVM's Scudo Hardened Allocator (size-
+   class allocators, per-thread caches, mmap-backed large allocations,
+   built-in quarantine, official standalone build support) as the long-term
+   production allocator -- a natural fit given this project's own Bionic-
+   compatibility framing, since Scudo has been Android's own default
+   allocator since Android 11.
+2. **Keep `CRT_ENABLE_DEBUG_MALLOC`/`CRT_ENABLE_GUARD_MALLOC` as permanent
+   diagnostic build modes**, not one-off throwaway debugging code, once the
+   Skia bug above is closed with them -- see that item's own numbered plan
+   for the current state of each.
+3. **Draw an explicit "Host ABI firewall" boundary in the Linux graphics/
+   media code.** The Vulkan GPU path already documents the specific reason
+   it must use the *real host* `libwayland-client.so.0` rather than this
+   project's own hand-rolled Wayland wire client: the host Vulkan WSI
+   driver expects `libwayland-client`'s own private `wl_display` object
+   layout, which differs from what this project's own Bionic-compatible
+   `pthread_mutex_t` would produce if this project built that library
+   itself. The same class of boundary will keep recurring as FFmpeg
+   hardware acceleration, VA-API, PipeWire, and EGL are added. Write down
+   the rule explicitly as project policy rather than re-deriving it per
+   integration: a host library's own opaque objects (`wl_display*`,
+   `VkInstance`, `VkDevice`, `AVHWDeviceContext`, ...) are only ever
+   created and destroyed by that same host library -- never reinterpreted
+   through, or allocated via, this project's own memory/object structures.
+4. **Remove the "build once, then reconfigure" CMake pattern.** The native
+   Wayland Vulkan WSI backend's own `CRTGFX_HAVE_NATIVE_WAYLAND` gate
+   checks `EXISTS` on a generated `libxdg-shell-protocol.a` at *configure*
+   time, so a genuinely clean tree needs `configure -> build
+   crtgfx-wayland-build -> reconfigure -> build` -- already documented as a
+   deliberate, temporary workaround for a real dependency-cycle risk, not
+   a permanent design. Skia's own external/nested-build integration is
+   accumulating similar shape. The durable fix is a physically separate
+   superbuild stage (libc++/Wayland/Skia/FFmpeg as one dependency-prefix-
+   producing phase) feeding a single, cycle-free runtime configure for
+   `libcrtgfx`/`libcrtmedia` -- not another one-off `EXISTS` gate per new
+   dependency. Budget real effort here given `05-js`'s QuickJS/V8 work will
+   add at least one more such external dependency.
+
+P1:
+
+5. **Decouple `libc/src/malloc.c` from Windows fork emulation.**
+   `heap_os_region_base[]`/`heap_os_region_size[]`/
+   `__crt_malloc_os_region_count()`/`_base()`/`_size()` are this
+   allocator's own OS-region bookkeeping, consumed directly by
+   `arch/windows/*/fork_memcopy.c`. A future allocator swap (Scudo or
+   otherwise) cannot honor this interface as-is. Extract a small, allocator-
+   agnostic `crt_heap_region_count()`/`crt_heap_region_get()`-shaped
+   interface between "whatever malloc implementation is active" and "the
+   Windows fork snapshot walker" before attempting an allocator swap.
+6. **Stop letting a compile macro change a shared struct's own layout.**
+   `libcrtgfx/CMakeLists.txt` already carries a load-bearing comment
+   explaining why `CRTGFX_HAVE_VULKAN` must be a directory-wide
+   `add_compile_definitions()`, not a per-target one: `src/gpu.c` and
+   `gpu_vulkan.c` both see the same `struct crtgfx_gpu_device`, and a
+   mismatched definition between translation units changes that struct's
+   own size, corrupting memory. The current fix (matching the definition
+   everywhere) is correct, but the underlying shape -- one macro flip away
+   from real memory corruption -- is itself worth removing as a class of
+   bug: give `crtgfx_gpu_device` a fixed `{backend tag, ops vtable, opaque
+   backend pointer}` layout and hide `CRTGFX_HAVE_VULKAN`/`_D3D12`/`_METAL`
+   backend-specific fields entirely inside each backend's own translation
+   unit, so the macro only ever changes which code exists, never the
+   common struct's own layout.
+7. **Move `tools/crt_dist_prerequisites.py`-style manifest thinking to
+   `libc.so`'s own ELF export surface.** The current `CRT_1.0 { global: *;
+   };` whole-surface version script (`libc/CMakeLists.txt`) is the right
+   *shape* of fix for the collision it solves (see the Skia item above),
+   but long-term, generating the version-script/export list from an
+   explicit Bionic-compatibility symbol manifest (public headers ->
+   manifest -> generated `.map` file) would prevent accidental exports and
+   give a real basis for `CRT_1.0`/`CRT_1.1`/`CRT_2.0`-style ABI evolution,
+   rather than hand-maintaining `global: *;` indefinitely.
+8. **Add an upper-stage smoke gate to routine CI**, not just the C stage.
+   Every recent Linux ELF-collision-family bug (`libc` vs host glibc,
+   `libc` vs `libc++`, `libc++` vs Skia, Wayland vs Vulkan, Skia vs Vulkan)
+   showed up specifically at a *stage boundary*, not within `01-c` alone.
+   Full Skia/FFmpeg builds are too slow for every PR, but a per-PR
+   `02-cxx` smoke plus a headless `libcrtgfx` smoke, with a nightly full-
+   Skia/FFmpeg/predecessor-only-dist/binary-import-audit pass from a
+   genuinely empty build directory and cache (this project's own CMake
+   state has already been shown to interact with external-build artifact
+   presence -- see item 4), would have caught several of the bugs in
+   `HISTORY.md`'s dated entries closer to when they were introduced.
+9. **Grow the allocator test suite past API-correctness coverage.** The
+   existing `libc/tests/malloc_test.c`-family coverage (malloc/calloc/
+   realloc/large-allocation/alignment correctness, a 4-thread/200-iteration
+   contention test) is solid for what it checks, but does not yet cover
+   the shapes this investigation actually needed: large-N random alloc/
+   free/realloc stress, higher thread counts, size-distribution/
+   fragmentation workloads, RSS recovery after large free, fork under
+   fragmentation/many-region conditions, and (once built) expected-fault
+   tests for `CRT_ENABLE_GUARD_MALLOC`/double-free/cross-instance-owner
+   detection. Track ops/sec, p50/p99 allocation latency, peak RSS, and a
+   fragmentation ratio so a future bootstrap-to-Scudo decision (item 1) has
+   numbers behind it, not just impression.
+
+P2:
+
+10. **Split the Linux Wayland backend into two independent implementations**
+    instead of one code path that changes object universes depending on
+    whether Vulkan is enabled. `STATUS.md` already records a real, current
+    limitation in the hand-rolled path (the software-window adapter does
+    not recycle Wayland object IDs); the GPU path already uses the real
+    host `libwayland-client.so.0` entirely separately. Making that an
+    explicit `crtgfx` Wayland abstraction with two backends (CRT wire
+    protocol vs. host-native) rather than one file family that
+    conditionally reinterprets its own objects would be easier to maintain
+    as both paths keep evolving.
 
 ### Upper runtime roadmap
 

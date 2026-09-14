@@ -249,6 +249,43 @@ elseif(CRT_TARGET_OS STREQUAL "windows")
   target_compile_definitions(crt_build_flags INTERFACE CRT_TARGET_OS_WINDOWS=1)
 endif()
 
+# CRT_ENABLE_DEBUG_MALLOC (2026-09-14, diagnosing the Skia/SkSL heap-
+# corruption bug in HISTORY.md's dated entry): a temporary diagnostic build
+# mode, not a permanent/shipped option (though TODO.md's own dated item
+# leans toward keeping it as one, given upcoming FFmpeg/QuickJS allocation-
+# heavy paths). Three independent, cheap checks in libc/src/malloc.c, each
+# guarded by this same macro (that file's own CRT_DEBUG_MALLOC comments have
+# the full mechanism for each):
+#   - Cross-instance owner mismatch: this project's own hand-rolled
+#     allocator has no way today to tell "a real allocation from *this*
+#     compiled instance" apart from "a real allocation from a *different*
+#     instance of the same allocator" -- and this project's usual hybrid
+#     linkage genuinely produces more than one instance in the same process
+#     (a statically-linked libc.a copy inside an executable, plus a
+#     separate copy inside the shared libc.so any dynamically-loaded
+#     consumer like libc++.so.1 resolves through). A per-block owner tag
+#     traps immediately on a cross-instance free/realloc instead of
+#     silently corrupting the wrong instance's free-list under the wrong
+#     instance's own lock.
+#   - Double free: free_unlocked() today just re-sets an already-free
+#     block's `free` flag with no check at all.
+#   - Canary padding: align_size() already rounds every allocation up to a
+#     multiple of sizeof(block_header), so real, unused slack already sits
+#     between a request's own size and its block's rounded size; filling it
+#     with a fixed byte pattern and checking it at free()/realloc() time
+#     catches many heap-buffer-overflow shapes that write past the
+#     requested size but stay within that already-allocated slack.
+# All three turn "corrupts something else, crashes much later and
+# elsewhere" into "traps at the exact call that reveals the corruption" --
+# cheap enough to try before reaching for a heavier guard-page allocator or
+# AddressSanitizer (the latter hit a hard wall trying to replace libc.so's
+# own allocator: its runtime's own .preinit_array section is not allowed in
+# a shared library at all).
+option(CRT_ENABLE_DEBUG_MALLOC "Diagnostic build: detect cross-instance frees, double frees, and heap-buffer-overflow-into-slack via this project's own allocator" OFF)
+if(CRT_ENABLE_DEBUG_MALLOC)
+  target_compile_definitions(crt_build_flags INTERFACE CRT_DEBUG_MALLOC=1)
+endif()
+
 add_library(crt_cxx_build_flags INTERFACE)
 target_link_libraries(crt_cxx_build_flags INTERFACE crt_build_flags)
 set(CRT_CXX_STANDARD_INCLUDE_DIRS)

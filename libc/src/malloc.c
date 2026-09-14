@@ -20,6 +20,47 @@ union block_header {
     int free;
     block_header* next;
     uint64_t magic;
+#ifdef CRT_DEBUG_MALLOC
+    /* CRT_DEBUG_MALLOC (2026-09-14, diagnosing the Skia/SkSL heap-
+     * corruption bug in HISTORY.md's dated entry): this project's own
+     * hand-rolled allocator is compiled into more than one independent
+     * instance in the same process whenever both a shared libc.so and a
+     * statically-linked libc.a copy are present (this project's usual
+     * "default-runtime" hybrid linkage) -- each instance has its own
+     * private heap_head/heap_lock and its own separate set of mmap()'d
+     * regions, but CRT_BLOCK_MAGIC is the identical compile-time constant
+     * in every instance (same source file), so free_unlocked()/realloc()
+     * cannot tell "a real block header from *some* instance" apart from
+     * "a real block header from *this* instance" -- confirmed for real:
+     * neither function checks anything beyond the magic today. A pointer
+     * that crosses instances (allocated by one, freed or reallocated by
+     * the other) would pass the magic check and then have its header
+     * mutated under the *wrong* instance's heap_lock, corrupting that
+     * instance's own free-list bookkeeping -- a plausible, previously
+     * unconsidered explanation for silent, later-manifesting heap
+     * corruption (matching this project's own currently-open Skia bug).
+     * `owner` records which instance's own heap_head this block belongs
+     * to (the address of that instance's own static heap_head variable
+     * is itself a distinct value per instance, requiring no separate ID
+     * allocation scheme); free_unlocked()/realloc() trap immediately on
+     * a mismatch instead of silently corrupting the wrong instance's
+     * state, turning a "corrupts something else, crashes much later and
+     * elsewhere" bug into "traps at the exact free() call that crosses
+     * instances". Guarded out by default: an extra pointer per block
+     * header changes this struct's own layout, so it must never be on
+     * unless every translation unit in a given build is compiled with
+     * this same definition.
+     *
+     * `requested_size` records the caller's own pre-`align_size()` request
+     * (set in malloc_unlocked(), the one place every allocation path --
+     * malloc()/calloc()/realloc()/posix_memalign()'s own internal call --
+     * funnels through), so the real, otherwise-wasted slack between it and
+     * `size` (the rounded block capacity) can be painted with a canary
+     * pattern and checked at free()/realloc() time -- see
+     * crt_malloc_paint_canary()/crt_malloc_check_canary() below. */
+    const void* owner;
+    size_t requested_size;
+#endif
   } block;
   long double align;
 };
@@ -33,6 +74,65 @@ typedef struct {
 
 static block_header* heap_head;
 static crt_spinlock heap_lock = CRT_SPINLOCK_INIT;
+
+#ifdef CRT_DEBUG_MALLOC
+/* &heap_head itself is the identity: a distinct, stable address per
+ * compiled instance of this allocator (this project's own static libc.a
+ * copy in an executable vs. the separate copy inside libc.so each have
+ * their own heap_head variable), needing no separate ID-allocation
+ * scheme. See block_header's own CRT_DEBUG_MALLOC comment above
+ * for the full "why". */
+static void crt_malloc_set_owner(block_header* header) {
+  header->block.owner = (const void*)&heap_head;
+}
+
+static void crt_malloc_check_owner(const block_header* header) {
+  if (header->block.owner != (const void*)&heap_head) {
+    /* A real cross-instance free/realloc: trap immediately here, at the
+     * exact call that crosses instances, instead of silently mutating
+     * the wrong instance's free-list under the wrong instance's
+     * heap_lock and corrupting it in a way that only crashes much later,
+     * somewhere unrelated. */
+    __builtin_trap();
+  }
+}
+
+/* CRT_MALLOC_CANARY_BYTE: an arbitrary, unlikely-to-occur-by-chance byte
+ * pattern (matching the shape ASan/MSVC debug heaps use for the same
+ * purpose) painted into the real, already-allocated slack between a
+ * request's own size and its rounded block capacity. */
+#define CRT_MALLOC_CANARY_BYTE 0xFDu
+
+static void crt_malloc_paint_canary(block_header* header, size_t requested_size) {
+  header->block.requested_size = requested_size;
+  if (requested_size < header->block.size) {
+    memset((unsigned char*)(header + 1) + requested_size, CRT_MALLOC_CANARY_BYTE,
+           header->block.size - requested_size);
+  }
+}
+
+static void crt_malloc_check_canary(const block_header* header) {
+  const unsigned char* slack;
+  size_t slack_len;
+  size_t i;
+
+  if (header->block.requested_size >= header->block.size) {
+    return;
+  }
+  slack = (const unsigned char*)(header + 1) + header->block.requested_size;
+  slack_len = header->block.size - header->block.requested_size;
+  for (i = 0; i < slack_len; i++) {
+    if (slack[i] != (unsigned char)CRT_MALLOC_CANARY_BYTE) {
+      /* Something wrote past its own requested size, into the rounding
+       * slack this project's own align_size() already reserved for it --
+       * a real heap-buffer-overflow, caught here at free()/realloc() time
+       * rather than only much later when it happens to corrupt a
+       * neighboring block's own header. */
+      __builtin_trap();
+    }
+  }
+}
+#endif
 
 void __crt_malloc_after_fork_child(void) {
   heap_lock.state.value = 0;
@@ -142,6 +242,9 @@ static block_header* append_chunk(size_t size) {
   header->block.free = 1;
   header->block.next = 0;
   header->block.magic = CRT_BLOCK_MAGIC;
+#ifdef CRT_DEBUG_MALLOC
+  crt_malloc_set_owner(header);
+#endif
 
   if (heap_head == 0) {
     heap_head = header;
@@ -168,6 +271,13 @@ static void split_block(block_header* header, size_t size) {
   next->block.free = 1;
   next->block.next = header->block.next;
   next->block.magic = CRT_BLOCK_MAGIC;
+#ifdef CRT_DEBUG_MALLOC
+  /* header itself keeps whatever owner it already had (set when it was
+   * first created by append_chunk(), or by this same function during an
+   * earlier split of a larger free block) -- only the freshly-carved-off
+   * `next` sibling needs a new owner tag. */
+  crt_malloc_set_owner(next);
+#endif
 
   header->block.size = size;
   header->block.next = next;
@@ -191,6 +301,14 @@ static void coalesce_free_blocks(void) {
 static void* malloc_unlocked(size_t size) {
   block_header* current;
   size_t alignment = sizeof(block_header);
+#ifdef CRT_DEBUG_MALLOC
+  /* The caller's own pre-align_size() request, captured here once: every
+   * allocation path (malloc()/calloc()/realloc()'s own internal calls/
+   * posix_memalign()'s own internal call) funnels through this one
+   * function, so painting the canary here covers all of them uniformly
+   * rather than needing a separate paint call at each call site. */
+  size_t requested_size = (size == 0) ? 1 : size;
+#endif
 
   if (size == 0) {
     size = 1;
@@ -206,6 +324,9 @@ static void* malloc_unlocked(size_t size) {
     if (current->block.free && current->block.size >= size) {
       split_block(current, size);
       current->block.free = 0;
+#ifdef CRT_DEBUG_MALLOC
+      crt_malloc_paint_canary(current, requested_size);
+#endif
       return current + 1;
     }
     current = current->block.next;
@@ -217,6 +338,9 @@ static void* malloc_unlocked(size_t size) {
   }
   split_block(current, size);
   current->block.free = 0;
+#ifdef CRT_DEBUG_MALLOC
+  crt_malloc_paint_canary(current, requested_size);
+#endif
   return current + 1;
 }
 
@@ -237,6 +361,17 @@ static void free_unlocked(void* ptr) {
     ptr = aligned->allocation;
     header = ((block_header*)ptr) - 1;
   }
+#ifdef CRT_DEBUG_MALLOC
+  crt_malloc_check_owner(header);
+  if (header->block.free) {
+    /* Double free: this block is already on the free list. Trap here,
+     * at the exact repeat free() call, instead of silently re-marking it
+     * free (today's behavior) and letting coalesce_free_blocks() merge it
+     * a second time, corrupting the free-list structure itself. */
+    __builtin_trap();
+  }
+  crt_malloc_check_canary(header);
+#endif
   header->block.free = 1;
   coalesce_free_blocks();
 }
@@ -349,23 +484,45 @@ void* realloc(void* ptr, size_t size) {
     crt_spin_unlock(&heap_lock);
     return new_ptr;
   }
-  size = align_size(size);
-  if (header->block.size >= size) {
-    split_block(header, size);
-    crt_spin_unlock(&heap_lock);
-    return ptr;
+#ifdef CRT_DEBUG_MALLOC
+  crt_malloc_check_owner(header);
+  if (header->block.free) {
+    /* Same reasoning as free_unlocked()'s own check: realloc() of an
+     * already-freed block is a use-after-free, not a valid resize. */
+    __builtin_trap();
   }
+  crt_malloc_check_canary(header);
+#endif
+  {
+    /* Preserve the caller's own pre-align_size() request: `size` gets
+     * overwritten by align_size() immediately below. Harmless, always-
+     * declared even with CRT_DEBUG_MALLOC off (used in place of `size` for
+     * the reallocate-and-copy malloc_unlocked() call either way, which is
+     * exactly equivalent there since malloc_unlocked() re-rounds its own
+     * argument regardless) so this block does not need its own #else
+     * duplicate; only the canary repaint below is actually conditional. */
+    size_t original_request = size;
+    size = align_size(size);
+    if (header->block.size >= size) {
+      split_block(header, size);
+#ifdef CRT_DEBUG_MALLOC
+      crt_malloc_paint_canary(header, original_request);
+#endif
+      crt_spin_unlock(&heap_lock);
+      return ptr;
+    }
 
-  new_ptr = malloc_unlocked(size);
-  if (new_ptr == 0) {
+    new_ptr = malloc_unlocked(original_request);
+    if (new_ptr == 0) {
+      crt_spin_unlock(&heap_lock);
+      return 0;
+    }
+    copy_size = header->block.size < size ? header->block.size : size;
+    memcpy(new_ptr, ptr, copy_size);
+    free_unlocked(ptr);
     crt_spin_unlock(&heap_lock);
-    return 0;
+    return new_ptr;
   }
-  copy_size = header->block.size < size ? header->block.size : size;
-  memcpy(new_ptr, ptr, copy_size);
-  free_unlocked(ptr);
-  crt_spin_unlock(&heap_lock);
-  return new_ptr;
 }
 
 int posix_memalign(void** memptr, size_t alignment, size_t size) {
