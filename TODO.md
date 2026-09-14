@@ -75,30 +75,44 @@ a result.
 
 - [ ] **Root-cause and fix the Skia heap corruption blocking live Linux
   `examples/gfx-skia` presentation.** The earlier `strtof_l` collision is
-  fixed; the example now reaches Ganesh Vulkan shader generation and aborts
-  while freeing a corrupted `std::string` allocation. Running the real
-  isolated Linux 04 path with `CRT_ENABLE_DEBUG_MALLOC` did trap, but the
-  trap was a diagnostic false positive, not the original Skia defect. The
-  diagnostic's `malloc_usable_size()` and moved-`realloc()` false positives,
-  its 48-byte-header payload-alignment error, and the corresponding focused
-  regressions are now fixed; fresh native Windows and WSL Linux C-stage suites
-  pass with the option both OFF and ON. The focused tests also passed the
-  existing single-build five-host GitHub CI matrix (Linux x86_64/aarch64,
-  Windows x86_64/aarch64, macOS arm64), but that first CI tranche exercised
-  only the ordinary allocator because the option defaults OFF. A second
-  `malloc_debug_test` executable now directly overlays a debug-compiled
-  `malloc.c` while reusing the normal libc archive, so both allocator layouts
-  run in each existing CI job without a second full configure/build; native
-  Windows and WSL Linux full C-stage suites pass with that structure. Push
-  this corrected coverage through the same five-host matrix. After it passes,
-  re-run the real isolated Linux arm64 04
-  scenario with fresh imported libc++ artifacts. If the corrected cheap
-  diagnostics still do not localize the original corruption, proceed to the
-  separately planned dedicated/aligned canary and guard-malloc work;
-  otherwise fix the localized CRT/Skia defect and complete
-  `verify_dist.py`/atomic publication.
-  The completed allocator-diagnostic corrections are recorded in
-  `HISTORY.md`'s 2026-09-14 entries.
+  fixed; the example reaches Ganesh Vulkan shader generation and then
+  aborts. `CRT_ENABLE_DEBUG_MALLOC`'s owner/double-free/canary diagnostics,
+  and the `malloc_usable_size()`/moved-`realloc()`/48-byte-header-alignment
+  false positives they had produced, are now fully fixed and validated (see
+  `HISTORY.md`'s 2026-09-14 entries). **Re-running the real isolated Linux
+  04 rebuild against the corrected allocator (3/3 runs, deterministic)
+  confirms this bug is not in CRT's own allocator at all**: the diagnostics
+  stay completely silent -- no CRT-side trap -- and the process still aborts
+  with glibc's own `free(): invalid next size (fast)` corruption detector.
+  A GDB backtrace at the abort shows the corrupted heap belongs to *glibc
+  itself*, entirely inside Mesa's lavapipe/llvmpipe Vulkan ICD
+  (`libvulkan_lvp.so`, a host library reached via `libvulkan.so.1`), called
+  from Skia's own unmodified upstream `GrVkCommandPool::reset()` ->
+  `vkResetCommandPool()`. This is a `VkCommandPool`/`VkCommandBuffer`
+  allocation the host ICD owns and manages entirely with its own (glibc)
+  allocator -- exactly the already-documented Host ABI firewall boundary
+  (P0 item 3 below) -- so `CRT_ENABLE_DEBUG_MALLOC`, which only instruments
+  this project's own allocator instances, structurally cannot see this
+  corruption regardless of how correct it is. That also explains why the
+  earlier owner/canary/double-free work never caught it. (Frames deeper
+  than `GrVkCommandPool::reset()` in the raw backtrace show 40+ identical
+  `GrVkResourceProvider::checkCommandBuffers()` entries; reading that
+  function confirms it is a plain non-recursive loop, so those frames are a
+  GDB stack-unwinding artifact on this optimized, AArch64-PAC-signed build,
+  not real recursion -- do not read them as evidence of a recursion bug.)
+  **Next diagnostic step**: reproduce under the Vulkan validation layer
+  (`VK_LAYER_KHRONOS_validation`; not installed on this host --
+  `vulkaninfo --summary` lists no validation layer, `dpkg -l` confirms
+  `vulkan-validationlayers` is absent) to get an actionable Vulkan-API-
+  misuse report before deciding whether this is a genuine Skia Ganesh
+  command-pool-lifecycle bug or a Mesa lavapipe defect; only then decide
+  the fix and file it in the correct place (Skia-side patch, upstream Mesa
+  report, or -- if the validation layer finds nothing -- a deeper GDB
+  session on the lavapipe side). `verify_dist.py`/atomic publication stays
+  blocked until this is fixed.
+  A separate, non-blocking SDK-isolation gap was also confirmed while
+  setting up this run and is tracked in the imported-libc++ item just
+  below: it did not affect this result only by coincidence.
 - [ ] **Make imported libc++/libc++abi/libunwind relink when the predecessor
   `libc.so` changes.** The nested build currently treats the sysroot library
   as an untracked link input and can silently retain stale symbol references.
@@ -106,6 +120,32 @@ a result.
   forces the affected nested build directories fresh; then prove an actual
   `libc.so` change propagates without manual deletion. The discovery and
   temporary clean-rebuild workaround are recorded in `HISTORY.md`.
+  **A second, distinct packaging gap in the same three files was confirmed
+  2026-09-14, setting up an isolated Linux 04 Skia rerun**: `libc++.so.1`,
+  `libc++abi.so.1`, and `libunwind.so.1` each carry a baked-in *absolute*
+  `RUNPATH` of `<this-checkout>/out/linux-host-ninja-debug/dist/01-c/lib`
+  (confirmed via `readelf -d` on all three, inside a freshly copied isolated
+  SDK) instead of `$ORIGIN` or anything inside the packaged SDK itself --
+  traced to `tools/crt-cc`/`tools/crt-c++` unconditionally baking
+  `-Wl,-rpath,${CRT_SYSROOT}/lib` into every shared link they produce
+  (needed so the imported-libc++ external build's own in-tree correctness
+  checks can run against `CRT_SYSROOT` at *that* build's configure time),
+  with no later relink/patch step when `create_dist.py`'s `--libcxx-install`
+  copies the raw built `.so` files into a packaged distribution stage. This
+  means an isolated stage's own `libc++.so.1` (and transitively anything
+  that resolves `libc.so`/`libm.so`/`libdl.so` through it, i.e. every C++
+  consumer) silently depends on this exact checkout's own `out/` tree still
+  existing and still holding a compatible `libc.so`, not on the packaged
+  SDK's own copy -- breaking the isolated-stage contract's own "self-
+  contained SDK" premise even when the relink-staleness bug above is fixed.
+  It did not change the 2026-09-14 Skia rerun's result only by coincidence:
+  that exact external directory happened to hold a byte-identical, freshly
+  rebuilt `libc.so` at the time (confirmed via `md5sum`). Fix by relinking
+  (or `patchelf --set-rpath`-ing) these three imported libraries to
+  `$ORIGIN` as a step in whichever install/dist path installs them, the
+  same portability fix already applied to every CRT-owned shared library
+  via `crt_configure_shared_runtime()`'s own `$ORIGIN` `BUILD_RPATH`/
+  `INSTALL_RPATH` (`CMakeLists.txt`).
 
 ### Distribution hardening
 
