@@ -20,6 +20,10 @@ int main(void) {
   unsigned char* reused;
   unsigned char* large;
   unsigned char* aligned;
+  unsigned char* aligned32;
+  unsigned char* aligned_page;
+  unsigned char* moved;
+  unsigned char* moved_grown;
   size_t i;
 
   bytes = (unsigned char*)malloc(16);
@@ -32,6 +36,11 @@ int main(void) {
   if (malloc_usable_size(bytes) < 16 || malloc_usable_size(0) != 0) {
     return fail("malloc usable size");
   }
+#ifdef CRT_DEBUG_MALLOC
+  if (malloc_usable_size(bytes) != 16) {
+    return fail("debug malloc usable size");
+  }
+#endif
 
   grown = (unsigned char*)realloc(bytes, 64);
   if (grown == 0) {
@@ -91,6 +100,49 @@ int main(void) {
   if (posix_memalign((void**)&aligned, 3, 8) != EINVAL) {
     return fail("posix memalign invalid");
   }
+
+  /* CRT_DEBUG_MALLOC grows block_header from 32 to 48 bytes on the 64-bit
+   * targets. Payload alignment must stay independent of that private header
+   * size: posix_memalign(32) must not take the ordinary malloc shortcut and
+   * return the first mapping's base+48 address. Exercise both a sub-header-
+   * size and page-size request on every host. */
+  aligned32 = 0;
+  if (posix_memalign((void**)&aligned32, 32, 19) != 0 || aligned32 == 0 ||
+      ((size_t)aligned32 & 31u) != 0) {
+    return fail("posix memalign 32");
+  }
+  memset(aligned32, 0x3c, 19);
+  free(aligned32);
+
+  aligned_page = 0;
+  if (posix_memalign((void**)&aligned_page, 4096, 33) != 0 || aligned_page == 0 ||
+      ((size_t)aligned_page & 4095u) != 0) {
+    return fail("posix memalign page");
+  }
+  memset(aligned_page, 0x6d, 33);
+  free(aligned_page);
+
+  /* Force realloc's allocate/copy/free path with non-alignment-sized requests.
+   * In diagnostic builds the old physical block includes canary slack; only
+   * requested bytes may be copied into the freshly canaried replacement. */
+  moved = (unsigned char*)malloc(37);
+  if (moved == 0) {
+    return fail("moved realloc malloc");
+  }
+  for (i = 0; i < 37; ++i) {
+    moved[i] = (unsigned char)(0xa0u + (i & 15u));
+  }
+  moved_grown = (unsigned char*)realloc(moved, 1024u * 1024u + 37u);
+  if (moved_grown == 0) {
+    free(moved);
+    return fail("moved realloc grow");
+  }
+  for (i = 0; i < 37; ++i) {
+    if (moved_grown[i] != (unsigned char)(0xa0u + (i & 15u))) {
+      return fail("moved realloc preserve");
+    }
+  }
+  free(moved_grown);
 
   free(reused);
   free(zeros);

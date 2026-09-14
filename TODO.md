@@ -78,30 +78,25 @@ a result.
   fixed; the example now reaches Ganesh Vulkan shader generation and aborts
   while freeing a corrupted `std::string` allocation. Running the real
   isolated Linux 04 path with `CRT_ENABLE_DEBUG_MALLOC` did trap, but the
-  trap was a false positive in the diagnostic itself (`malloc_usable_size()`
-  fixed, see `HISTORY.md`'s 2026-09-14 entries) rather than the original
-  Skia defect; the original scenario has not yet been re-run against the
-  corrected diagnostic. **Currently blocked on a second, not-yet-fixed
-  defect that fix uncovered**: `regex_test_runs` now traps
-  (`SIGTRAP`) under `CRT_ENABLE_DEBUG_MALLOC`. GDB hardware watchpoints
-  root-caused it precisely to `realloc()`'s own reallocate-and-copy path in
-  `libc/src/malloc.c` (`copy_size = header->block.size < size ? ... : size;`,
-  around line 544): it copies the *old* block's full `align_size()`-rounded
-  capacity instead of its `requested_size`, so growing a request (e.g.
-  `regcomp.c`'s `stripsnug()` -> `reallocarray()`) overwrites the *new*
-  block's freshly painted canary with old slack bytes. Same defect class as
-  the `malloc_usable_size()` fix -- the canary logic, not a genuine bug in
-  the CRT/NetBSD regex engine or in Skia; not a real memory-safety issue on
-  its own since the copy stays within the new block's actual capacity. Fix
-  `copy_size` to use `requested_size` under `CRT_DEBUG_MALLOC` (owner
-  currently implementing this fix directly), re-run the full `ctest` suite,
-  then re-run the real isolated Linux 04 Skia scenario against the corrected
-  diagnostic before concluding whether `CRT_ENABLE_GUARD_MALLOC` is needed.
-  Once the original Skia defect is localized, fix the CRT/Skia ownership or
-  out-of-bounds defect, add permanent expected-fault regressions, and
-  complete `verify_dist.py`/atomic publication. The full diagnosis and
-  completed diagnostic-allocator work are recorded in `HISTORY.md`'s
-  2026-09-14 entries.
+  trap was a diagnostic false positive, not the original Skia defect. The
+  diagnostic's `malloc_usable_size()` and moved-`realloc()` false positives,
+  its 48-byte-header payload-alignment error, and the corresponding focused
+  regressions are now fixed; fresh native Windows and WSL Linux C-stage suites
+  pass with the option both OFF and ON (dated evidence in `HISTORY.md`). Keep
+  the remaining work in this order:
+  1. Push the focused tests through the existing single-build five-host GitHub
+     CI matrix (Linux x86_64/aarch64, Windows x86_64/aarch64, macOS arm64).
+     Do not duplicate every CI leg for this compile-time diagnostic: the
+     common allocator contract stays in the ordinary `malloc_test`, while the
+     diagnostic-only canary branch has explicit local Windows/WSL ON coverage.
+  2. After all five CI legs pass, re-run the real isolated Linux arm64 04
+     scenario with fresh imported libc++ artifacts. If the corrected cheap
+     diagnostics still do not localize the original corruption, proceed to
+     the separately planned dedicated/aligned canary and guard-malloc work;
+     otherwise fix the localized CRT/Skia defect and complete
+     `verify_dist.py`/atomic publication.
+  The completed allocator-diagnostic corrections are recorded in
+  `HISTORY.md`'s 2026-09-14 entries.
 - [ ] **Make imported libc++/libc++abi/libunwind relink when the predecessor
   `libc.so` changes.** The nested build currently treats the sysroot library
   as an untracked link input and can silently retain stale symbol references.

@@ -55,7 +55,8 @@ union block_header {
      * (set in malloc_unlocked(), the one place every allocation path --
      * malloc()/calloc()/realloc()/posix_memalign()'s own internal call --
      * funnels through), so the real, otherwise-wasted slack between it and
-     * `size` (the rounded block capacity) can be painted with a canary
+     * `size` (the CRT_MALLOC_ALIGNMENT-rounded block capacity) can be painted
+     * with a canary
      * pattern and checked at free()/realloc() time -- see
      * crt_malloc_paint_canary()/crt_malloc_check_canary() below. */
     const void* owner;
@@ -64,6 +65,22 @@ union block_header {
   } block;
   long double align;
 };
+
+/* Payload alignment is an ABI requirement, not a property of the allocator's
+ * private metadata size. The original allocator happened to have a 32-byte
+ * block_header, so using sizeof(block_header) in the power-of-two rounding
+ * expression worked by accident. CRT_DEBUG_MALLOC adds owner/requested_size
+ * and makes the header 48 bytes on the supported 64-bit targets; 48 is not a
+ * power of two, and also must not make posix_memalign(32) fall through to a
+ * merely 16-byte-aligned malloc result. Keep the two concepts separate. */
+#define CRT_MALLOC_ALIGNMENT ((size_t)__alignof__(max_align_t))
+typedef char crt_malloc_alignment_must_be_power_of_two
+    [(CRT_MALLOC_ALIGNMENT != 0 &&
+      (CRT_MALLOC_ALIGNMENT & (CRT_MALLOC_ALIGNMENT - 1)) == 0)
+         ? 1
+         : -1];
+typedef char crt_malloc_header_must_preserve_payload_alignment
+    [(sizeof(block_header) % CRT_MALLOC_ALIGNMENT) == 0 ? 1 : -1];
 
 typedef struct {
   uint64_t magic;
@@ -199,7 +216,7 @@ size_t __crt_malloc_os_region_size(int index) {
 }
 
 static size_t align_size(size_t size) {
-  size_t alignment = sizeof(block_header);
+  size_t alignment = CRT_MALLOC_ALIGNMENT;
   return (size + alignment - 1) & ~(alignment - 1);
 }
 
@@ -300,7 +317,7 @@ static void coalesce_free_blocks(void) {
 
 static void* malloc_unlocked(size_t size) {
   block_header* current;
-  size_t alignment = sizeof(block_header);
+  size_t alignment = CRT_MALLOC_ALIGNMENT;
 #ifdef CRT_DEBUG_MALLOC
   /* The caller's own pre-align_size() request, captured here once: every
    * allocation path (malloc()/calloc()/realloc()'s own internal calls/
@@ -457,7 +474,7 @@ void* realloc(void* ptr, size_t size) {
   aligned_header* aligned;
   void* new_ptr;
   size_t copy_size;
-  size_t alignment = sizeof(block_header);
+  size_t alignment = CRT_MALLOC_ALIGNMENT;
 
   if (ptr == 0) {
     return malloc(size);
@@ -540,7 +557,18 @@ void* realloc(void* ptr, size_t size) {
       crt_spin_unlock(&heap_lock);
       return 0;
     }
+#ifdef CRT_DEBUG_MALLOC
+    /* Only the caller's old requested bytes carry realloc's preservation
+     * contract. block.size also includes canary padding in this diagnostic
+     * mode; copying that physical span can overwrite the new allocation's
+     * freshly painted canary (the regex_test regression recorded in
+     * HISTORY.md, 2026-09-14). Cap by both logical request sizes. */
+    copy_size = header->block.requested_size < original_request
+                    ? header->block.requested_size
+                    : original_request;
+#else
     copy_size = header->block.size < size ? header->block.size : size;
+#endif
     memcpy(new_ptr, ptr, copy_size);
     free_unlocked(ptr);
     crt_spin_unlock(&heap_lock);
@@ -557,7 +585,7 @@ int posix_memalign(void** memptr, size_t alignment, size_t size) {
       (alignment & (alignment - 1)) != 0) {
     return EINVAL;
   }
-  if (alignment <= sizeof(block_header)) {
+  if (alignment <= CRT_MALLOC_ALIGNMENT) {
     allocation = malloc(size);
     if (allocation == 0) return ENOMEM;
     *memptr = allocation;

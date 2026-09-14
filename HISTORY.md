@@ -10,6 +10,35 @@ substantive update.
 
 ## 2026-09-14
 
+- **Fixed the remaining debug-malloc false positive and a shared payload-
+  alignment defect, with focused allocator regressions and native Windows /
+  WSL Linux ON/OFF acceptance.** The moved `realloc()` path now preserves
+  only `min(old requested_size, new requested_size)` when
+  `CRT_DEBUG_MALLOC` is enabled, rather than copying the old rounded physical
+  capacity over the replacement allocation's freshly painted canary. This
+  resolves the diagnosed `regex_test_runs` trap without changing ordinary
+  non-debug realloc behavior. The same review found that the allocator had
+  incorrectly used `sizeof(block_header)` as both its power-of-two rounding
+  value and payload-alignment contract: enabling the diagnostic grows that
+  private header to 48 bytes, which is not a power of two and could also let
+  `posix_memalign(32)` return only a 16-byte-aligned payload. Allocation
+  rounding and the `posix_memalign()` shortcut now use an explicit
+  `max_align_t` alignment, with compile-time checks that it is a power of two
+  and that the private header preserves payload alignment.
+
+  `malloc_test` now permanently checks 32-byte and page alignment, forces the
+  allocate/copy/free realloc path with a non-rounded 37-byte request, and in
+  diagnostic builds checks the requested-size `malloc_usable_size()` policy.
+  Fresh separate builds passed the complete C-stage suite with
+  `CRT_ENABLE_DEBUG_MALLOC` both OFF and ON: native Windows x86_64 passed
+  118/118 in each mode; WSL2 Ubuntu 26.04 x86_64 passed 101/101 in each mode.
+  These changes are common to static/shared libc and are not Linux-only. The
+  existing single-build five-host GitHub workflow remains unchanged: its
+  ordinary `malloc_test` receives the common regressions without doubling CI
+  cost, while the diagnostic-only branch is covered by the explicit local ON
+  runs above. The original isolated Linux arm64 Skia corruption remains open
+  and will be re-run after this tranche passes that five-host CI matrix.
+
 - **Validated `CRT_ENABLE_DEBUG_MALLOC` against the real Skia scenario,
   fixed a false positive it produced, and used it to find a second,
   still-open defect of the same class.** Rebuilding and running the real

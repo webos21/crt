@@ -269,8 +269,8 @@ endif()
 #     instance's own lock.
 #   - Double free: free_unlocked() today just re-sets an already-free
 #     block's `free` flag with no check at all.
-#   - Canary padding: align_size() already rounds every allocation up to a
-#     multiple of sizeof(block_header), so real, unused slack already sits
+#   - Canary padding: align_size() already rounds every allocation up to the
+#     allocator's max_align_t payload alignment, so real, unused slack sits
 #     between a request's own size and its block's rounded size; filling it
 #     with a fixed byte pattern and checking it at free()/realloc() time
 #     catches many heap-buffer-overflow shapes that write past the
