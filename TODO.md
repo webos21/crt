@@ -59,12 +59,19 @@ newest entry first) rather than leaving it here.
 
 Active threads, not a flat list of one-off items. The cumulative binary-package
 chain through the current `05-js` skeleton and the physical `libcrtgfx`
-window/GPU/Skia split are complete. Predecessor-only isolated-stage build/
-package/verify acceptance is complete through the option-ON
-`03-gfx-simple -> 04-gfx-media` transition on Linux, Windows, and macOS,
-including path-with-spaces acceptance on all three hosts; the dated evidence
-belongs in [`HISTORY.md`](HISTORY.md). This does not include live Linux
-Skia/GPU presentation, which still crashes -- see the dedicated item below.
+window/GPU/Skia split are complete. Predecessor-only isolated-stage
+build/package/verify acceptance through the option-ON
+`03-gfx-simple -> 04-gfx-media` transition, including path-with-spaces
+acceptance, is complete on Windows and macOS; the dated evidence belongs in
+[`HISTORY.md`](HISTORY.md). **On Linux it is not complete**: the isolated
+stage-build tool's own pipeline runs both packaged examples *before*
+`verify_dist.py`/atomic publish, and `crtgfx_skia_example` crashes there
+every time, so the tool has never actually reached `verify_dist.py` or
+produced a published `dist/04-gfx-media` on Linux at all -- not merely a
+"presentation is incomplete" gap layered on top of an otherwise-finished
+acceptance. (An earlier revision of this paragraph, and the `15fcb1e` commit
+before it, both overstated this as complete; see `HISTORY.md`'s 2026-09-14
+correction entries.) See the dedicated item below.
 
 - [ ] **Root-cause and fix the `SkSL::stod`/`strtof_l` crash blocking live
   Linux `examples/gfx-skia` presentation.** 100% reproducible as of
@@ -86,16 +93,46 @@ Skia/GPU presentation, which still crashes -- see the dedicated item below.
   reverted. This is a genuine architectural tension: this project's own
   `libc.so` unversioned-exports the entire POSIX symbol surface as
   global-default, which cannot simultaneously satisfy both symbol families'
-  correct resolution via link order alone. A real fix needs either
-  glibc-incompatible symbol versioning on `libc.so`'s own build (large,
-  touches every consumer) or a narrow, per-symbol-family visibility
-  mechanism (mirroring the existing `libunwind.so`
-  `__register_frame`/`__deregister_frame` version-script fix) proven safe
-  specifically for `strtof_l`/the `_l`-suffixed locale family, i.e. that
-  does not affect `readdir`/`opendir`/`fdopendir`, which
-  `libcrtmedia/src/arch/linux/audio_sink_linux.c` legitimately needs from
-  `libc.so`'s own export in shared-mode builds. Neither approach has been
-  attempted yet.
+  correct resolution via link order alone.
+  **Chosen direction (not yet implemented): give `libc.so` its own private
+  ELF symbol-version namespace** (e.g. a single `CRT_1.0` node covering the
+  whole export surface via `-Wl,--version-script=`, reusing the same
+  mechanism the `libunwind.so` `__register_frame` fix already proved out).
+  Versioned symbol lookup filters breadth-first global-scope candidates by
+  version-string match rather than "first found wins", so once every
+  consumer that calls into `libc.so` (`libc++.so`/`libc++abi.so`/
+  `libunwind.so`/`libcrtgfx.so`/every executable) is rebuilt against the
+  newly-versioned `libc.so`, `strtof_l@CRT_1.0` and `readdir@CRT_1.0`
+  correctly skip real glibc's `@GLIBC_2.17` definitions (and vice versa) --
+  independent of link order, resolving the tension above without picking a
+  side. A single whole-surface version node is preferred over scoping only
+  the `_l`-suffixed locale family: it needs no per-symbol-family safety
+  judgment and mirrors how real glibc versions its own entire export
+  surface; fall back to narrow scoping only if whole-surface versioning is
+  found to break something real glibc-linked-library interop depends on.
+  Before touching the real `libc.so` build (which forces a full
+  `libc++`/`libc++abi`/`libunwind`/`libcrtgfx` rebuild plus the ~13-minute
+  isolated Skia stage rebuild per iteration), validate the version-filtered
+  resolution mechanism itself with a small, disposable two-`.so` repro
+  (`readelf --version-info`/`LD_DEBUG=bindings`) outside the real build.
+  **Done, 2026-09-14, confirmed:** a throwaway four-`.so` repro (two "base"
+  libs each exporting a same-named symbol returning a different value --
+  one under a `GLIBC_2.17`-style node standing in for real glibc, one under
+  a private `CRT_1.0` node standing in for a re-versioned `libc.so`; two
+  "consumer" libs, each linked against one base lib so its own `DT_VERNEED`
+  records that specific version) reproduced the real bug exactly when built
+  *without* versioning -- with the "glibc" base lib listed first in
+  `DT_NEEDED` order (mirroring `crtgfx_skia_example`'s real order), the
+  "CRT" consumer incorrectly bound to the "glibc" base lib's definition
+  (`LD_DEBUG=bindings` showed both consumers binding to the same, first-found
+  library). Rebuilding the identical layout *with* the version scripts fixed
+  it: each consumer correctly bound to its own base lib's definition
+  regardless of `DT_NEEDED` order (`LD_DEBUG=bindings` showed
+  `` `foo' [GLIBC_2.17]`` and `` `foo' [CRT_1.0]`` resolving to their
+  respective libraries). This confirms the chosen direction is mechanically
+  sound before paying the real `libc.so`-rebuild iteration cost; the
+  remaining work is applying it to the real `libc.so` build and rebuilding
+  every consumer.
 
 ### Distribution hardening
 
@@ -126,6 +163,20 @@ move each completed tranche into [`HISTORY.md`](HISTORY.md):
    `04-gfx-media -> 05-js` only after the real QuickJS core and bindings exist.
    Apply the same pinned asset, predecessor-only build, test, external-consumer,
    verification, and atomic-publish contract as the earlier transitions.
+4. **Verify `libatomic.so.1` on Linux/x86_64.** The 2026-09-14 Linux
+   ELF-dependency finding (`HISTORY.md`) was confirmed on Linux/aarch64 only
+   -- this host has no Linux/x86_64 preset or toolchain to cross-check
+   against. Clang/libc++ commonly outlines 16-byte atomic operations
+   (`__atomic_compare_exchange_16` and similar) to `libatomic` on x86_64 too
+   whenever `-mcx16` is not set, so the current architecture-independent
+   Linux declaration in `tools/crt_dist_prerequisites.py` is plausible as-is
+   -- but unconfirmed. On a real Linux/x86_64 host (or x86_64 WSL), build
+   through `02-cxx` and check `readelf -d lib/libc++.so*` for
+   `libatomic.so.1`. If x86_64 genuinely does not need it, extend
+   `external_prerequisites_for()` to take the target architecture rather
+   than assuming one Linux-wide answer; if it does, no code change is
+   needed beyond recording the confirmation in `HISTORY.md`. Do not add an
+   `arch` parameter speculatively ahead of this result.
 
 ## Planned
 

@@ -40,16 +40,22 @@ is not complete merely because an in-tree target links.
   presentation are implemented with Vulkan/Wayland, D3D12/Win32, and
   Metal/Cocoa.
 - Skia CPU raster/text and Ganesh GPU paths build and run on Linux, Windows,
-  and macOS. Live presentation exists on all three hosts; the remaining
-  pixel-exact and resize combinations are evidence gaps, not a missing common
-  API.
+  and macOS. Live presentation exists on Windows and macOS; the remaining
+  pixel-exact and resize combinations there are evidence gaps, not a missing
+  common API. On Linux, the packaged Ganesh GPU example (`crtgfx_gpu_example`)
+  presents live, but the packaged Skia example (`crtgfx_skia_example`)
+  crashes on a real, root-caused symbol-resolution bug (see `TODO.md`), so
+  Linux Skia live presentation is not yet demonstrated through the isolated
+  packaged path.
 - The software media baseline includes FFmpeg-backed demux/decode, the common
   frame/audio/player contracts, and native audio sinks. Hardware decode and
   decoded-texture interop remain separate, explicitly reported capabilities.
 - The cumulative binary-package chain reaches the current `05-js` skeleton.
-  Predecessor-only isolated-stage acceptance is complete through the option-ON
-  `03-gfx-simple -> 04-gfx-media` transition on Linux, Windows, and macOS,
-  including paths containing spaces.
+  Predecessor-only isolated-stage acceptance through the option-ON
+  `03-gfx-simple -> 04-gfx-media` transition, including paths containing
+  spaces, is complete on Windows and macOS. On Linux the isolated stage-build
+  tool has not yet completed that transition -- see the previous bullet and
+  `TODO.md`.
 - `libcrtjs` still contains skeleton libraries only. QuickJS, its event loop,
   modules, and graphics/media bindings have not been implemented.
 

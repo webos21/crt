@@ -59,9 +59,12 @@ the preceding installed `dist` tree. The stronger source-stage boundary is
 also implemented: a packaged predecessor SDK fetches a SHA-256-pinned CRT
 GitHub Release source asset and builds/tests the next stage without using the
 repository build tree. The complete predecessor-only chain through the
-option-ON `03-gfx-simple -> 04-gfx-media` transition is verified on Linux,
-Windows, and macOS. `04-gfx-media -> 05-js` has not yet been added. Full
-details, artifact layout, package naming, and acceptance rules are in
+option-ON `03-gfx-simple -> 04-gfx-media` transition is verified on Windows
+and macOS. On Linux, the isolated stage-build tool still fails before
+reaching its own verification/publish steps -- its packaged Skia example
+crashes on a real, root-caused (but not yet fixed) symbol-resolution bug;
+see `TODO.md`. `04-gfx-media -> 05-js` has not yet been added. Full details,
+artifact layout, package naming, and acceptance rules are in
 [`docs/distribution.md`](docs/distribution.md).
 
 The current `05-js` package contains the installable `libcrtjs` skeleton. The

@@ -414,6 +414,25 @@ substantive update.
     family specifically -- neither attempted yet. Remains open; see
     `TODO.md`.
 
+- **Second correction: `README.md`, `docs/runtime_roadmap.md`, and this
+  file's own just-landed `TODO.md` wording (`6f9b3fc`) all still overstated
+  Linux completion after the correction above.** Reviewing a proposed
+  strtof_l root-fix plan surfaced that `TODO.md`'s own "In Progress" summary
+  paragraph (written earlier the same day) said isolated build/package/
+  verify acceptance "is complete... on Linux", which understates the actual
+  gap: `tools/build_stage_04_gfx_media.py`'s own pipeline runs both packaged
+  examples *before* `verify_dist.py`/atomic publish, so `crtgfx_skia_
+  example`'s crash means the tool has never reached `verify_dist.py` or
+  produced a published `dist/04-gfx-media` on Linux at all -- not merely an
+  otherwise-complete acceptance with a presentation gap on top. Corrected
+  that paragraph, and the matching Linux claims in `README.md` and
+  `docs/runtime_roadmap.md` (both said Skia live presentation and the
+  option-ON transition were done on all three hosts). `STATUS.md` carries
+  the same overstatement but is deliberately left uncorrected here --
+  fixing it now would mean editing it twice (once now to say "still open",
+  once more when the real fix lands); it will be corrected together with
+  the real fix, in the same pass that closes this item.
+
 ## 2026-09-13
 
 - **Completed Linux isolated-stage acceptance through the option-ON
