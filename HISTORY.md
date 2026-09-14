@@ -38,8 +38,16 @@ substantive update.
   cost, while the diagnostic-only branch is covered by the explicit local ON
   runs above. Commit `9b5619d` then passed all five ordinary CI legs -- Linux
   x86_64/aarch64, Windows x86_64/aarch64, and macOS arm64 -- in GitHub Actions
-  run `34839721735`. The original isolated Linux arm64 Skia corruption remains
-  open; re-running that real stage-04 scenario is the next step.
+  run `34839721735`. That run covered the ordinary allocator only; the missing
+  in-job debug-layout execution was identified immediately afterward. It is
+  now covered without a second project configure/build: `malloc_debug_test`
+  compiles the same `malloc_test.c` plus a direct `CRT_DEBUG_MALLOC` build of
+  `malloc.c`, whose symbols override only the allocator object that would
+  otherwise be selected from the normal libc archive. The rest of libc and
+  the workflow remain shared. The resulting single-build suites passed
+  119/119 on native Windows x86_64 and 102/102 on WSL Linux x86_64; five-host
+  CI confirmation is tracked as the immediate next step in `TODO.md`. The
+  original isolated Linux arm64 Skia corruption remains open.
 
 - **Validated `CRT_ENABLE_DEBUG_MALLOC` against the real Skia scenario,
   fixed a false positive it produced, and used it to find a second,

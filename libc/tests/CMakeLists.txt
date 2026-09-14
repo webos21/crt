@@ -76,6 +76,22 @@ set_tests_properties(malloc_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "malloc_test: ok"
 )
 
+# Exercise the same allocator contract a second time with the diagnostic
+# layout enabled, without configuring/building the whole project twice in CI.
+# malloc.c is linked directly into this executable before libc.a; its malloc
+# family definitions therefore satisfy the symbols and keep the archive's
+# ordinary malloc.c object from being selected, while the rest of libc still
+# comes from the normal build. Applying CRT_DEBUG_MALLOC to this target also
+# enables malloc_test.c's diagnostic-only assertions.
+add_crt_test(malloc_debug_test malloc_test.c)
+target_sources(malloc_debug_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/libc/src/malloc.c"
+)
+target_compile_definitions(malloc_debug_test PRIVATE CRT_DEBUG_MALLOC=1)
+set_tests_properties(malloc_debug_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "malloc_test: ok"
+)
+
 add_crt_test(malloc_contention_test malloc_contention_test.c)
 set_tests_properties(malloc_contention_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "malloc_contention_test: ok"

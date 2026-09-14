@@ -84,8 +84,14 @@ a result.
   regressions are now fixed; fresh native Windows and WSL Linux C-stage suites
   pass with the option both OFF and ON. The focused tests also passed the
   existing single-build five-host GitHub CI matrix (Linux x86_64/aarch64,
-  Windows x86_64/aarch64, macOS arm64) without duplicating the workflow; dated
-  evidence is in `HISTORY.md`. Next, re-run the real isolated Linux arm64 04
+  Windows x86_64/aarch64, macOS arm64), but that first CI tranche exercised
+  only the ordinary allocator because the option defaults OFF. A second
+  `malloc_debug_test` executable now directly overlays a debug-compiled
+  `malloc.c` while reusing the normal libc archive, so both allocator layouts
+  run in each existing CI job without a second full configure/build; native
+  Windows and WSL Linux full C-stage suites pass with that structure. Push
+  this corrected coverage through the same five-host matrix. After it passes,
+  re-run the real isolated Linux arm64 04
   scenario with fresh imported libc++ artifacts. If the corrected cheap
   diagnostics still do not localize the original corruption, proceed to the
   separately planned dedicated/aligned canary and guard-malloc work;
