@@ -189,13 +189,17 @@ ad-hoc manifest edit.
 | macOS `03-gfx-simple` | Foundation, AppKit, QuartzCore, CoreGraphics, CoreFoundation, and Objective-C runtime |
 | macOS `04-gfx-media` | Metal, AudioToolbox, VideoToolbox, CoreVideo, and CoreMedia |
 | Linux `01-c` | Linux kernel syscall ABI |
+| Linux `02-cxx` | `libatomic.so.1` (libc++'s own out-of-line atomics on aarch64) |
 | Linux `03-gfx-simple` | reachable Wayland compositor with xdg-shell |
 | Linux `04-gfx-media` | host Wayland client and Vulkan loader libraries plus a target-GPU Vulkan ICD |
 
-`02-cxx` adds no OS prerequisite beyond `01-c`; the current `05-js` skeleton
-adds none beyond `04-gfx-media`. Compiler/toolchain inputs remain in the
-separate external-toolchain fields and redistributable third-party ports
-remain in `redistributed_dependencies`.
+`02-cxx` adds no OS prerequisite beyond `01-c` on Windows or macOS; on Linux
+it adds `libatomic.so.1`, a genuine, confirmed `DT_NEEDED` of `libc++.so`
+itself found regenerating a fresh SDK and comparing its real ELF dependencies
+against this table (2026-09-14, Linux ELF dependency acceptance -- see
+`HISTORY.md`). The current `05-js` skeleton adds none beyond `04-gfx-media`.
+Compiler/toolchain inputs remain in the separate external-toolchain fields
+and redistributable third-party ports remain in `redistributed_dependencies`.
 
 The first supported transitions are `01-c -> 02-cxx`, then
 `02-cxx -> 03-gfx-simple -> 04-gfx-media`. Thus `01-c` can fetch the pinned

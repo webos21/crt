@@ -284,6 +284,136 @@ substantive update.
   With this, path-with-spaces distribution acceptance is complete on all
   three hosts; there is no longer an open item for it in `TODO.md`.
 
+- **Completed the Linux half of the external-prerequisite host acceptance
+  item, closing the gap it found; this closes the item across all three
+  hosts.** Regenerated a genuinely clean `03-gfx-simple` (native Wayland
+  compile-time support off, the default/canonical form -- see below for why
+  that distinction matters) and, separately, an option-ON
+  `03-gfx-simple -> 04-gfx-media` isolated stage build with native Wayland
+  compiled in (a build-time requirement for `04-gfx-media` itself, not a
+  change to what `03-gfx-simple` ships by default). Swept every ELF file in
+  each SDK (`readelf -d ... | grep NEEDED`) for genuinely external (non-
+  CRT-owned, non-redistributed-payload) `DT_NEEDED` entries and diffed the
+  result against `tools/crt_dist_prerequisites.py`'s declared components,
+  the same method the macOS `otool -L` sweep above used.
+  - Found one real, confirmed gap: **`libatomic.so.1`** is a genuine, direct
+    `DT_NEEDED` of `libc++.so`/`libc++.so.1` (`readelf -d` shows it ahead of
+    even `libc++abi.so.1`) from the earliest stage `libc++` exists --
+    `02-cxx` -- onward, so `03-gfx-simple`, `04-gfx-media`, and every later
+    cumulative stage inherit it too. Clang's libc++ uses out-of-line atomic
+    operations for wide (16-byte) values on aarch64 and links `libatomic.so.1`
+    to provide them; this is baked into libc++'s own build, unconditional on
+    any of this project's own link flags. It was undeclared anywhere in
+    `tools/crt_dist_prerequisites.py` for Linux, at any stage -- confirmed by
+    checking the freshly regenerated `02-cxx` dist's own manifest (only
+    `linux-kernel-runtime`, inherited from `_BASE`) against its own
+    `lib/libc++.so`'s real `NEEDED` entries. Fixed by adding a new `_CXX`
+    prerequisite tier to `tools/crt_dist_prerequisites.py` (parallel to the
+    existing `_GFX_SIMPLE`/`_GFX_MEDIA` tiers, applied once
+    `STAGE_ORDER[stage] >= STAGE_ORDER["02-cxx"]`) declaring
+    `linux-libatomic-runtime` -> `["libatomic.so.1"]`; Windows and macOS get
+    an empty `_CXX` tuple each (neither host's own C++ runtime needs a
+    separate atomics library the same way), so this fix does not reopen or
+    change either already-closed host's own acceptance result. Verified by
+    rebuilding `02-cxx` and `03-gfx-simple` and re-running `verify_dist.py`
+    against both -- it correctly rejected the pre-fix manifests
+    (`missing=['linux-libatomic-runtime']`) and accepted the post-fix ones.
+  - Also investigated an apparent second finding -- an earlier, contaminated
+    local `03-gfx-simple` sweep (before this session's clean rebuild) showed
+    `libwayland-client.so.0` as a `NEEDED` entry, which would have been a gap
+    since the default/canonical `03-gfx-simple` declares only
+    `linux-wayland-compositor` (a `runtime-service`, not a soname -- matching
+    this project's own hand-rolled Wayland wire-protocol client used when
+    native Wayland is off). Confirmed this was local-environment
+    contamination from an earlier, unrelated `crtgfx-wayland-build` bootstrap
+    left over in `out/.../external/wayland`, not a real default-build gap:
+    moved that directory aside, reconfigured (`CRTGFX_HAVE_NATIVE_WAYLAND`
+    dropped to 0 occurrences in `build.ninja`, confirming native Wayland is
+    genuinely opt-in and absent by default), and re-swept a truly clean
+    `03-gfx-simple` -- `libwayland-client.so.0` was gone, `libatomic.so.1`
+    remained (the real, now-fixed gap above). Restored the bootstrap
+    afterward to build the option-ON `04-gfx-media` SDK, whose own manifest
+    already correctly declared `linux-wayland-client-runtime` ->
+    `["libwayland-client.so.0"]` and `linux-vulkan-loader`/
+    `linux-vulkan-driver` from the existing `740fce9` prerequisite work --
+    the final option-ON `04-gfx-media` ELF sweep (`libcrtgfx_gpu.so`,
+    `libcrtgfx_skia.so`, and both packaged GPU example binaries) found
+    `libatomic.so.1`, `libvulkan.so.1`, and `libwayland-client.so.0` as the
+    complete set of genuinely external `NEEDED` entries, all three already
+    declared -- no further gap.
+  - Functional confirmation alongside the ELF sweep, using
+    `CRT_STAGE_KEEP_TMP=1` to preserve the staged SDK past the (expected,
+    still-open -- see the correction below) `crtgfx_skia_example` crash so
+    its manifest and binaries could be inspected directly:
+    `crtgfx_gpu_example` builds, links, enumerates a real Vulkan device
+    (`device_count=1`), and reaches live presentation (`presented=1`)
+    against the packaged SDK exactly as before; `crtgfx_skia_example`
+    reproduces the identical `SkSL::stod`/`strtof_l` crash.
+
+- **Correction: the 2026-09-13 `15fcb1e` claim that Linux isolated-stage
+  acceptance was complete through option-ON `04-gfx-media`, including that
+  the `examples/gfx-skia`/`SkSL::stod` crash was closed, was false.**
+  Re-running the exact same isolated `03-gfx-simple -> 04-gfx-media`
+  acceptance multiple times this session (once during the ELF-dependency
+  audit above, once more with `CRT_STAGE_KEEP_TMP=1` to preserve evidence)
+  reproduced the identical, 100%-deterministic `SIGSEGV` in
+  `crtgfx_skia_gpu_window_demo`/`crtgfx_skia_example` every single time
+  (`crtgfx_gpu_example` is unaffected and fully works). `TODO.md`'s matching
+  "Root-cause the `SkSL::stod` crash" item is restored below with the
+  now-complete root cause, since `15fcb1e` deleted it as resolved.
+  - The crash is not inside Skia's own SkSL parser. `gdb -batch -ex run -ex
+    "bt 25" -ex "info registers"` on the crashing process, together with
+    `nm -C`/`readelf -s` on `libc++.so.1` and this project's own `libc.so`,
+    traced it to glibc's own `__GI_____strtof_l_internal`
+    (`stdlib/strtod_l.c:561`) being called with a locale/TLS state that was
+    never initialized -- this project's own `_start`/`crt1.o` entirely
+    replaces `__libc_start_main`, so glibc's own startup sequence never
+    runs. `libc++.so.1` has an undefined reference to `strtof_l`
+    (`std::__1::__locale::__strtof<float>` calls it) that it expects its own
+    real, direct `NEEDED` (`libc.so`, this project's own -- confirmed
+    correctly implementing `strtof_l`/`strtod_l`/the full `_l`-suffixed
+    locale family as thin wrappers in `libc/src/locale_l.c`, which
+    `libc/CMakeLists.txt` does compile into `libc.a`) to satisfy. But
+    because `crtgfx_skia_example`'s own `DT_NEEDED` order lists
+    `libvulkan.so.1`/`libwayland-client.so.0` (which transitively pull in
+    real glibc's `libc.so.6`) *before* `libc++.so.1` (whose own transitive
+    need is this project's `libc.so`), and because both `libc.so.6` and this
+    project's own `libc.so` export an *unversioned* `strtof_l` (confirmed via
+    `readelf -V` that this project's `libc.so` carries no symbol version
+    information at all), the ELF dynamic linker's breadth-first,
+    first-appearance global-scope symbol search resolves the lookup to real
+    glibc's `libc.so.6` instead -- and real glibc's own `strtof_l`
+    dereferences glibc-internal locale/TLS state that was never set up,
+    crashing. This only manifests in `crtgfx_skia_example`, not
+    `crtgfx_gpu_example`, because only the Skia/SkSL code path actually
+    calls into `libc++.so.1`'s locale-dependent numeric-parsing code at
+    runtime -- lazy PLT binding never triggers the reference otherwise.
+  - Attempted fix, found to regress a different, more critical feature, and
+    reverted: reordering `target_link_libraries()` in `examples/gfx-gpu/
+    CMakeLists.txt` and `examples/gfx-skia/CMakeLists.txt` so
+    `libunwind.so`/`libc++.so.1` link before the Vulkan/Wayland-client
+    `find_library()` calls does fix `strtof_l` (confirmed via `LD_DEBUG=
+    bindings`), but it directly reintroduces the already-fixed
+    `readdir`/`opendir` collision from the 2026-09-13 entry below --
+    `libvulkan.so.1`'s own `opendir`/`readdir` calls then bind to this
+    project's own (also unversioned) `libc.so` instead of real glibc,
+    breaking Vulkan device enumeration (`device_count=0`). This is a real,
+    unresolved architectural tension, not a one-line ordering fix: this
+    project's own `libc.so` unversioned-exports the *entire* POSIX symbol
+    surface as global-default, which is fundamentally incompatible with
+    directly linking any real host glibc-based library regardless of link
+    order -- some symbol family loses depending on which order is chosen.
+    `readdir`/`opendir`/`fdopendir` are not a safe symbol family to scope
+    away the way the `libunwind.so` `__register_frame` fix did, because
+    `libcrtmedia/src/arch/linux/audio_sink_linux.c` uses them and could be
+    built as a shared-mode `.so` legitimately needing them from `libc.so`'s
+    own export at runtime. A complete fix needs either real,
+    glibc-incompatible symbol versioning on `libc.so`'s own build (large,
+    requires relinking every consumer) or a narrower, per-symbol-family
+    visibility mechanism proven safe for `strtof_l`/the `_l`-suffixed locale
+    family specifically -- neither attempted yet. Remains open; see
+    `TODO.md`.
+
 ## 2026-09-13
 
 - **Completed Linux isolated-stage acceptance through the option-ON

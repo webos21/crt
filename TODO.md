@@ -59,10 +59,43 @@ newest entry first) rather than leaving it here.
 
 Active threads, not a flat list of one-off items. The cumulative binary-package
 chain through the current `05-js` skeleton and the physical `libcrtgfx`
-window/GPU/Skia split are complete. Predecessor-only isolated-stage acceptance
-is complete through the option-ON `03-gfx-simple -> 04-gfx-media` transition
-on Linux, Windows, and macOS, including path-with-spaces acceptance on all
-three hosts; the dated evidence belongs in [`HISTORY.md`](HISTORY.md).
+window/GPU/Skia split are complete. Predecessor-only isolated-stage build/
+package/verify acceptance is complete through the option-ON
+`03-gfx-simple -> 04-gfx-media` transition on Linux, Windows, and macOS,
+including path-with-spaces acceptance on all three hosts; the dated evidence
+belongs in [`HISTORY.md`](HISTORY.md). This does not include live Linux
+Skia/GPU presentation, which still crashes -- see the dedicated item below.
+
+- [ ] **Root-cause and fix the `SkSL::stod`/`strtof_l` crash blocking live
+  Linux `examples/gfx-skia` presentation.** 100% reproducible as of
+  2026-09-14 (re-confirmed across three independent isolated-stage rebuilds
+  this session; `crtgfx_gpu_example` is unaffected). Root cause is now fully
+  understood -- see `HISTORY.md`'s 2026-09-14 correction entry for the full
+  trace: real glibc's own `strtof_l` (not this project's own, correctly
+  implemented one in `libc/src/locale_l.c`) gets called with uninitialized
+  glibc-internal locale/TLS state and crashes, because
+  `crtgfx_skia_example`'s `DT_NEEDED` order lets real glibc's `libc.so.6`
+  (pulled in transitively by `libvulkan.so.1`/`libwayland-client.so.0`) win
+  the ELF dynamic linker's breadth-first global-scope search for the
+  unversioned `strtof_l` symbol, ahead of this project's own `libc.so`. A
+  naive fix (reordering `target_link_libraries()` so `libc++.so.1`/
+  `libunwind.so` link first) does fix this but was found to regress a
+  separate, already-fixed collision -- `readdir`/`opendir` then
+  incorrectly bind to this project's own `libc.so` instead of real glibc,
+  breaking Vulkan device enumeration (`device_count=0`) -- so it was
+  reverted. This is a genuine architectural tension: this project's own
+  `libc.so` unversioned-exports the entire POSIX symbol surface as
+  global-default, which cannot simultaneously satisfy both symbol families'
+  correct resolution via link order alone. A real fix needs either
+  glibc-incompatible symbol versioning on `libc.so`'s own build (large,
+  touches every consumer) or a narrow, per-symbol-family visibility
+  mechanism (mirroring the existing `libunwind.so`
+  `__register_frame`/`__deregister_frame` version-script fix) proven safe
+  specifically for `strtof_l`/the `_l`-suffixed locale family, i.e. that
+  does not affect `readdir`/`opendir`/`fdopendir`, which
+  `libcrtmedia/src/arch/linux/audio_sink_linux.c` legitimately needs from
+  `libc.so`'s own export in shared-mode builds. Neither approach has been
+  attempted yet.
 
 ### Distribution hardening
 
@@ -70,18 +103,7 @@ Harden the completed cross-host distribution baseline before adding another
 large upper-runtime dependency. Work in independently verifiable tranches and
 move each completed tranche into [`HISTORY.md`](HISTORY.md):
 
-1. **External prerequisite host acceptance.** The portable cumulative schema,
-   three-host/stage inventory, producer/isolated-upgrade integration, strict
-   verifier, Windows binary-import audit, and now the macOS binary-import
-   audit (a fresh `03-gfx-simple`/option-ON `04-gfx-media` regeneration, full
-   `otool -L` comparison against the declared `macos-*` components, and the
-   `CoreFoundation.framework` gap it found and closed) are complete in
-   [`HISTORY.md`](HISTORY.md). Only the matching real Linux ELF/runtime
-   comparison remains. Regenerate `03-gfx-simple` and option-ON `04-gfx-media`
-   on real Linux hardware, confirm the manifests contain the canonical
-   entries, and compare actual ELF dependencies and runtime availability with
-   those declarations. Record the result, then remove this item.
-2. **Binary dependency and absolute-path policy.** Scan installed binaries for
+1. **Binary dependency and absolute-path policy.** Scan installed binaries for
    undeclared non-system `.so`, `.dylib`, or `.dll` dependencies. Decide path
    remapping or release stripping before rejecting absolute source/build/debug
    paths, then enforce the selected policy in `verify_dist.py`. The same
@@ -96,11 +118,11 @@ move each completed tranche into [`HISTORY.md`](HISTORY.md):
    FreeType's own macOS dylib link recipe an explicit `-install_name
    @rpath/$@` patch (same shape as `porting/recipes/mbedtls.json`'s
    existing one) as part of deciding this item's policy.
-3. **External consumers and path regression.** Add explicit external
+2. **External consumers and path regression.** Add explicit external
    CMake/configure-make consumer checks where the stage contract requires them.
    Preserve the now-complete three-host space-containing-prefix run as a
    regression acceptance requirement.
-4. **Deferred `05-js` isolated stage.** Extend
+3. **Deferred `05-js` isolated stage.** Extend
    `04-gfx-media -> 05-js` only after the real QuickJS core and bindings exist.
    Apply the same pinned asset, predecessor-only build, test, external-consumer,
    verification, and atomic-publish contract as the earlier transitions.

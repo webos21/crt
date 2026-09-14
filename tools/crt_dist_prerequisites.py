@@ -40,6 +40,31 @@ _BASE = {
     },),
 }
 
+_CXX = {
+    "windows": (),
+    "macos": (),
+    "linux": ({
+        "id": "linux-libatomic-runtime",
+        "kind": "host-library",
+        "required_for": ["base-runtime"],
+        # libatomic.so.1 (2026-09-14, Linux ELF dependency acceptance): a
+        # real, confirmed DT_NEEDED entry of libc++.so/libc++.so.1 (`readelf
+        # -d` shows it directly, ahead of even libc++abi.so.1) from the
+        # earliest stage libc++ exists -- 02-cxx -- onward, so every later
+        # cumulative stage (03-gfx-simple, 04-gfx-media, ...) inherits it
+        # too. Clang's libc++ uses out-of-line atomic operations for wide
+        # (e.g. 16-byte) values on aarch64 and links libatomic.so.1 to
+        # provide them; unlike CoreFoundation.framework on macOS, this is
+        # not conditional on any of this project's own link flags -- it is
+        # baked into libc++'s own build. Found the same way as the macOS
+        # CoreFoundation.framework gap: regenerating a fresh SDK (02-cxx
+        # through 03-gfx-simple) and diffing its actual binaries' NEEDED
+        # entries against this file's own canonical list.
+        "components": ["libatomic.so.1"],
+        "bundled": False,
+    },),
+}
+
 _GFX_SIMPLE = {
     "windows": ({
         "id": "windows-desktop-graphics-runtime",
@@ -161,6 +186,8 @@ def external_prerequisites_for(target_os: str, stage: str) -> list[dict]:
     if stage not in STAGE_ORDER:
         raise ValueError(f"unsupported prerequisite stage: {stage}")
     prerequisites = list(_BASE[target_os])
+    if STAGE_ORDER[stage] >= STAGE_ORDER["02-cxx"]:
+        prerequisites.extend(_CXX[target_os])
     if STAGE_ORDER[stage] >= STAGE_ORDER["03-gfx-simple"]:
         prerequisites.extend(_GFX_SIMPLE[target_os])
     if STAGE_ORDER[stage] >= STAGE_ORDER["04-gfx-media"]:
