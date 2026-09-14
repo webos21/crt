@@ -10,6 +10,26 @@ substantive update.
 
 ## 2026-09-14
 
+- **Validated the already-landed private Linux libc ELF namespace
+  (`370c41d`'s `CRT_1.0` version script) on WSL2 x86_64, and fixed the
+  x86_64 static-C++ linker path exposed by that clean rebuild.** A fresh
+  WSL2 Ubuntu 26.04 build defines `strtof_l`, `opendir`, and `readdir` as
+  `@@CRT_1.0`; a clean imported libc++ rebuild records `strtof_l@CRT_1.0`
+  plus the expected `libatomic.so.1`/`libc.so` dependencies. The two
+  real-provider probes now pass together: host Vulkan's `opendir`/`readdir`
+  bind to glibc's `GLIBC_2.2.5` definitions while libc++'s `strtof_l` binds
+  to CRT's `CRT_1.0`, independent of their load order. The formal imported-
+  libc++ smoke then exposed a separate x86_64-only link failure: GNU BFD
+  emitted an empty `.rela.plt` entry of type `R_X86_64_NONE`, rejected by
+  glibc's loader as `unexpected PLT reloc type 0x00`; plain LLD instead
+  honored LLVM archive `.deplibs` and silently introduced a shared
+  `libdl.so` dependency. Linux static-C++ final links now use the project's
+  primary LLD with `--no-dependent-libraries`, since all CRT archives are
+  already listed in the wrapper's explicit group. The official static/
+  shared exception/RTTI and string-ABI smoke matrix passes in all four
+  cases. This is x86_64 implementation evidence, not a claim that the
+  native-Linux arm64 merge or full isolated 04 acceptance is complete.
+
 - **Reproduced both sides of the Linux CRT-libc/host-glibc namespace
   collision independently on WSL2 Ubuntu 26.04/x86_64 and corrected the
   completion ledger.** WSLg exposes `/dev/dxg`, a working Mesa Dozen Vulkan

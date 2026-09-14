@@ -989,7 +989,18 @@ if [ "$target_os" = linux ]; then
       -Wl,-e,_start -Wl,--gc-sections \
       "-Wl,-rpath,${CRT_SYSROOT}/lib" "$@"
   fi
+  # Use the project's primary ELF linker for a static C++ runtime and ignore
+  # LLVM archive .deplibs metadata: every required CRT archive is already in
+  # the explicit start-group above. Confirmed on WSL2 Ubuntu 26.04/x86_64
+  # with Clang 21: GNU ld.bfd retained an otherwise-empty .rela.plt containing
+  # R_X86_64_NONE, which glibc's loader rejected as "unexpected PLT reloc type
+  # 0x00" before _start. Plain LLD avoided that relocation but honored
+  # libc++.a's .deplibs and silently added a DT_NEEDED for libdl.so, defeating
+  # static-runtime linkage and requiring an rpath. LLD plus
+  # --no-dependent-libraries produces the intended dependency-free PIE and
+  # passes the imported libc++ exception/RTTI smoke.
   run_cxx -nostdlib -nostartfiles -nodefaultlibs \
+    -fuse-ld=lld -Wl,--no-dependent-libraries \
     -Wl,-e,_start -Wl,--gc-sections "$@"
 fi
 
