@@ -46,45 +46,44 @@ substantive update.
   accepting it as a tracked environment limitation) rather than further
   CRT/Skia-side chasing.
 
-## 2026-09-14
-
 - **Re-ran the real isolated Linux 04 Skia scenario against the fully
   corrected `CRT_ENABLE_DEBUG_MALLOC` allocator and proved the remaining
   crash is not a CRT bug, while separately confirming a distinct SDK-
   isolation gap in the imported libc++/libc++abi/libunwind libraries.**
-  Rebuilt and repackaged `dist/03-gfx-simple` with the corrected allocator
-  (`9b5619d`/`b62bf8d`, above), confirmed via `md5sum` that the packaged
-  `libc.so` matched the freshly built one, then ran the real
-  `tools/crt-stage-build.py` / `tools/build_stage_04_gfx_media.py` isolated
-  04-gfx-media pipeline from scratch (real FreeType/FFmpeg/Skia rebuild,
-  ~17 minutes) against it, using the local pinned source asset directly
-  (`--asset`) since the recipe's declared GitHub release URL 404s for a
-  commit not yet published there. The pipeline's own gfx-gpu example still
-  presents correctly; `crtgfx_skia_example` still aborts at the same point
-  it always has (right after "presenting the shared reference scene"), but
-  **the diagnostics that used to trap (owner/double-free/canary) stayed
-  completely silent this time, 3/3 deterministic reruns** -- the corrected
-  allocator does not falsely trigger, and it also does not localize this
-  remaining crash, because the crash is not happening in it. A GDB
-  backtrace at the abort shows glibc's own `malloc_printerr`/`_int_free`
-  (`free(): invalid next size (fast)`) firing inside Mesa's lavapipe/
-  llvmpipe Vulkan ICD (`libvulkan_lvp.so`), reached from Skia's own
-  unmodified upstream `GrVkCommandPool::reset()` (`src/gpu/ganesh/vk/
-  GrVkCommandPool.cpp`) calling `vkResetCommandPool()` through the Vulkan
-  loader. `VkCommandPool`/`VkCommandBuffer` objects are allocated and freed
+  (Committed `08:21` on `a256993`, the first step of the same-day
+  investigation the entry above resolves.) Rebuilt and repackaged
+  `dist/03-gfx-simple` with the corrected allocator (`9b5619d`/`b62bf8d`,
+  below), confirmed via `md5sum` that the packaged `libc.so` matched the
+  freshly built one, then ran the real `tools/crt-stage-build.py` /
+  `tools/build_stage_04_gfx_media.py` isolated 04-gfx-media pipeline from
+  scratch (real FreeType/FFmpeg/Skia rebuild, ~17 minutes) against it,
+  using the local pinned source asset directly (`--asset`) since the
+  recipe's declared GitHub release URL 404s for a commit not yet published
+  there. The pipeline's own gfx-gpu example still presents correctly;
+  `crtgfx_skia_example` still aborts at the same point it always has (right
+  after "presenting the shared reference scene"), but **the diagnostics
+  that used to trap (owner/double-free/canary) stayed completely silent
+  this time, 3/3 deterministic reruns** -- the corrected allocator does not
+  falsely trigger, and it also does not localize this remaining crash,
+  because the crash is not happening in it. A GDB backtrace at the abort
+  shows glibc's own `malloc_printerr`/`_int_free` (`free(): invalid next
+  size (fast)`) firing inside Mesa's lavapipe/llvmpipe Vulkan ICD
+  (`libvulkan_lvp.so`), reached from Skia's own unmodified upstream
+  `GrVkCommandPool::reset()` (`src/gpu/ganesh/vk/GrVkCommandPool.cpp`)
+  calling `vkResetCommandPool()` through the Vulkan loader.
+  `VkCommandPool`/`VkCommandBuffer` objects are allocated and freed
   entirely inside the host ICD's own (glibc) address space -- exactly the
   Host ABI firewall boundary `TODO.md`'s P0 item 3 already names -- so this
   corruption is structurally invisible to `CRT_ENABLE_DEBUG_MALLOC`, which
-  only instruments this project's own allocator instances. This is the
-  actual open target now (a genuine Skia Ganesh command-pool-lifecycle bug,
-  or a Mesa lavapipe bug, still undetermined -- reading `GrVkCommandPool.cpp`
-  confirms `reset()`/`checkCommandBuffers()` are stock, unmodified Skia; the
-  backtrace's 40+ identical `checkCommandBuffers()` frames below `reset()`
-  are a GDB stack-unwinding artifact on this optimized, AArch64-PAC-signed
-  build -- `checkCommandBuffers()` is a plain non-recursive loop, confirmed
-  by reading `GrVkResourceProvider.cpp` directly). No validation layer
-  (`VK_LAYER_KHRONOS_validation`) is installed on this host to get a more
-  actionable report; that is the next step, tracked in `TODO.md`.
+  only instruments this project's own allocator instances. (Frames deeper
+  than `GrVkCommandPool::reset()` in the raw backtrace show 40+ identical
+  `checkCommandBuffers()` entries; reading that function confirms it is a
+  plain non-recursive loop, so those frames are a GDB stack-unwinding
+  artifact on this optimized, AArch64-PAC-signed build, not real
+  recursion.) No validation layer was installed on this host yet at this
+  point -- installing one and reproducing under it is exactly what the
+  entry above did, the same day, to move from "likely Mesa" to "confirmed
+  Mesa, not Skia or CRT."
 
   Setting this run up separately surfaced a second, real, non-blocking
   finding: `readelf -d` on the freshly copied isolated SDK's `libc++.so.1`,
@@ -100,7 +99,11 @@ substantive update.
   identical, freshly rebuilt `libc.so` at the time. Recorded as an addition
   to the existing imported-libc++-relink item in `TODO.md` rather than fixed
   here, since it is a distribution-packaging correctness question
-  independent of the Skia investigation above.
+  independent of the Skia investigation above -- and now the next concrete
+  step before any further Vulkan-side diagnosis, so a symbol-binding audit
+  is not run against a partially-uncontained SDK again.
+
+## 2026-09-14
 
 - **Fixed the remaining debug-malloc false positive and a shared payload-
   alignment defect, with focused allocator regressions and native Windows /
@@ -137,9 +140,12 @@ substantive update.
   `malloc.c`, whose symbols override only the allocator object that would
   otherwise be selected from the normal libc archive. The rest of libc and
   the workflow remain shared. The resulting single-build suites passed
-  119/119 on native Windows x86_64 and 102/102 on WSL Linux x86_64; five-host
-  CI confirmation is tracked as the immediate next step in `TODO.md`. The
-  original isolated Linux arm64 Skia corruption remains open.
+  119/119 on native Windows x86_64 and 102/102 on WSL Linux x86_64.
+  Commit `b62bf8d` then confirmed all five CI legs green in GitHub Actions
+  run `34840565945` (`windows-arm64`/`macos-aarch64`/`linux-amd64`/
+  `linux-arm64`/`windows-x64`, all `success`) -- the five-host CI
+  confirmation this entry originally left as a next step. The original
+  isolated Linux arm64 Skia corruption remains open.
 
 - **Validated `CRT_ENABLE_DEBUG_MALLOC` against the real Skia scenario,
   fixed a false positive it produced, and used it to find a second,

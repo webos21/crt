@@ -73,90 +73,75 @@ blocking the same example, tracked below. The isolated stage-build tool's
 own pipeline still cannot reach `verify_dist.py`/atomic publish on Linux as
 a result.
 
-- [ ] **Confirmed external Mesa lavapipe/llvmpipe defect blocking live Linux
-  `examples/gfx-skia` presentation; decide how to proceed.** The earlier
-  `strtof_l` collision is fixed; `CRT_ENABLE_DEBUG_MALLOC`'s owner/double-
-  free/canary diagnostics (and the false positives they had produced) are
-  fully fixed and validated (see `HISTORY.md`'s 2026-09-14 entries).
-  Re-running the real isolated Linux 04 rebuild against the corrected
-  allocator stays completely silent on the CRT side -- confirming this
-  crash is not a CRT bug -- while the process still aborts with glibc's own
-  `free(): invalid next size (fast)` corruption detector, entirely inside
-  Mesa's lavapipe/llvmpipe Vulkan ICD (`libvulkan_lvp.so`), the only Vulkan
-  device this host enumerates (`device_count=1`, no hardware GPU present).
-  **Reproducing under `VK_LAYER_KHRONOS_validation` (installed 2026-09-15)
-  raised the confidence from "likely Mesa" to "confirmed Mesa, not Skia or
-  CRT"**: with the validation layer active on both instance and device, it
-  printed zero VUID errors or warnings before the abort -- no CPU-visible
-  Vulkan API misuse was detected -- yet the corruption still fired, this
-  time from a *different* call site (`GrInstallVkShaderModule()` ->
-  `vkCreateShaderModule()` instead of the earlier run's `GrVkCommandPool::
-  reset()` -> `vkResetCommandPool()`). Both call sites are stock, unmodified
-  upstream Skia (confirmed by reading `GrVkUtil.cpp`/`GrVkCommandPool.cpp`
-  directly: `GrInstallVkShaderModule()` computes `codeSize` in bytes
-  correctly per spec; `GrVkPrimaryCommandBuffer::finished()` uses the
-  standard `vkGetFenceStatus()` check before `reset()`). The crash site
-  *shifting* between two unrelated Vulkan entry points depending only on
-  whether an instrumenting layer is present is the signature of a timing-
-  sensitive corruption whose write happens earlier and is only *detected*
-  whenever the next `free()` inside the ICD happens to touch the damaged
-  chunk -- not a single deterministic misuse at one call site. Combined with
-  the validation layer's clean pass, this is now attributed to a genuine
-  defect inside Mesa's lavapipe/llvmpipe software Vulkan driver itself
-  (installed version `25.2.8-0ubuntu0.24.04.2`), not to Skia or CRT; no
-  matching public Mesa/Skia issue was found in a web search, so it may be
-  unreported, version-specific, or specific to this ICD combination.
-  (Frames deeper than the two named call sites show many identical-looking
-  `GrVkResourceProvider::checkCommandBuffers()`-style entries in the raw
-  backtrace; reading that function confirms it is a plain non-recursive
-  loop, so those are a GDB stack-unwinding artifact on this optimized,
-  AArch64-PAC-signed build, not evidence of real recursion.)
-  **This is now outside this project's own scope to fix directly** (a host
-  Vulkan ICD defect, not a CRT/PAL gap) -- decide with the project owner
-  whether to (a) try a different/newer Mesa build on this host, (b) test on
-  real GPU hardware if any becomes available (this host currently
-  enumerates only the software `llvmpipe` device), (c) file a Mesa bug
-  report with this evidence, or (d) accept it as a documented, tracked
-  external-environment limitation and unblock other Linux 04 work while
-  leaving `verify_dist.py`/atomic publication blocked specifically on this
-  upstream issue rather than continuing to treat it as this project's own
-  defect to chase.
-  A separate, non-blocking SDK-isolation gap was also confirmed while
-  setting up this investigation and is tracked in the imported-libc++ item
-  just below: it did not affect these results only by coincidence.
-- [ ] **Make imported libc++/libc++abi/libunwind relink when the predecessor
-  `libc.so` changes.** The nested build currently treats the sysroot library
-  as an untracked link input and can silently retain stale symbol references.
-  Add a real dependency edge or a predecessor-inventory fingerprint that
-  forces the affected nested build directories fresh; then prove an actual
-  `libc.so` change propagates without manual deletion. The discovery and
-  temporary clean-rebuild workaround are recorded in `HISTORY.md`.
-  **A second, distinct packaging gap in the same three files was confirmed
-  2026-09-14, setting up an isolated Linux 04 Skia rerun**: `libc++.so.1`,
-  `libc++abi.so.1`, and `libunwind.so.1` each carry a baked-in *absolute*
-  `RUNPATH` of `<this-checkout>/out/linux-host-ninja-debug/dist/01-c/lib`
-  (confirmed via `readelf -d` on all three, inside a freshly copied isolated
-  SDK) instead of `$ORIGIN` or anything inside the packaged SDK itself --
-  traced to `tools/crt-cc`/`tools/crt-c++` unconditionally baking
-  `-Wl,-rpath,${CRT_SYSROOT}/lib` into every shared link they produce
-  (needed so the imported-libc++ external build's own in-tree correctness
-  checks can run against `CRT_SYSROOT` at *that* build's configure time),
-  with no later relink/patch step when `create_dist.py`'s `--libcxx-install`
-  copies the raw built `.so` files into a packaged distribution stage. This
-  means an isolated stage's own `libc++.so.1` (and transitively anything
-  that resolves `libc.so`/`libm.so`/`libdl.so` through it, i.e. every C++
-  consumer) silently depends on this exact checkout's own `out/` tree still
-  existing and still holding a compatible `libc.so`, not on the packaged
-  SDK's own copy -- breaking the isolated-stage contract's own "self-
-  contained SDK" premise even when the relink-staleness bug above is fixed.
-  It did not change the 2026-09-14 Skia rerun's result only by coincidence:
-  that exact external directory happened to hold a byte-identical, freshly
-  rebuilt `libc.so` at the time (confirmed via `md5sum`). Fix by relinking
-  (or `patchelf --set-rpath`-ing) these three imported libraries to
-  `$ORIGIN` as a step in whichever install/dist path installs them, the
-  same portability fix already applied to every CRT-owned shared library
-  via `crt_configure_shared_runtime()`'s own `$ORIGIN` `BUILD_RPATH`/
-  `INSTALL_RPATH` (`CMakeLists.txt`).
+- [ ] **Root-cause the Linux Skia heap corruption blocking `examples/gfx-skia`
+  presentation -- CRT and Skia are cleared; a Mesa lavapipe/llvmpipe defect
+  is the leading suspect but not yet certain enough to file upstream or
+  set aside.** `strtof_l` is fixed; `CRT_ENABLE_DEBUG_MALLOC` is fully fixed
+  and validated, and a real isolated-04 rerun against it stays completely
+  silent while the process still aborts with glibc's own `free(): invalid
+  next size (fast)` inside Mesa's lavapipe ICD (`libvulkan_lvp.so`) -- not a
+  CRT bug. Reproducing under `VK_LAYER_KHRONOS_validation` printed zero VUID
+  errors/warnings before the abort, yet the crash site moved to a different,
+  equally stock/unmodified Skia call site -- consistent with, but not proof
+  of, a Mesa-internal defect. Full evidence: `HISTORY.md`'s 2026-09-15
+  entries. Next steps, in order (do not skip ahead -- each depends on the
+  one before it giving a clean result):
+  1. Fix the imported-libc++/libc++abi/libunwind absolute-RUNPATH gap (item
+     just below) first. Every further diagnosis here depends on the
+     isolated SDK actually being self-contained, and the 2026-09-15 finding
+     shows it currently is not.
+  2. With a genuinely self-contained SDK, audit host/CRT symbol binding on
+     the real arm64 example with `LD_DEBUG=bindings`: `malloc`/`calloc`/
+     `realloc`/`free`, `memcpy`/`memmove`/`pthread_*`, `opendir`/`readdir`,
+     and the Vulkan loader/ICD entry points. Any of these binding across
+     the CRT/glibc boundary unexpectedly (the same class of bug `370c41d`
+     already fixed once for `strtof_l`/`readdir`) must be fixed before
+     trusting any further Vulkan-level diagnosis.
+  3. Re-run under `VK_LAYER_KHRONOS_validation` with the lavapipe ICD
+     pinned explicitly (`VK_ICD_FILENAMES`), aiming to catch the *first*
+     VUID rather than the heap abort itself. A VUID hit means a Skia/Ganesh
+     or CRT Vulkan-lifecycle bug to fix directly; a clean pass with the
+     failure still lavapipe-only calls for a minimal standalone repro and a
+     Mesa version/ICD comparison; a clean pass that also fails elsewhere
+     calls for tracing command-pool/buffer create-alloc-reset-destroy calls
+     by handle.
+  4. Once root-caused, fix it in the right place (CRT, Skia, or a Mesa bug
+     report), then re-run the full real isolated Linux arm64 04 build from
+     fresh libc++/FreeType/FFmpeg/Skia and complete `verify_dist.py`/atomic
+     publication.
+- [ ] **Make imported libc++/libc++abi/libunwind self-contained in a
+  packaged SDK: fix their baked-in absolute RUNPATH, and relink them when
+  the predecessor `libc.so` changes.** Two distinct, confirmed gaps in the
+  same three files (full evidence in `HISTORY.md`'s 2026-09-14/2026-09-15
+  entries; this is step 1 of the Skia investigation's own next-steps
+  above -- do this first, before trusting any further diagnosis against an
+  isolated SDK):
+  1. **Absolute RUNPATH, not `$ORIGIN`.** `libc++.so.1`/`libc++abi.so.1`/
+     `libunwind.so.1` each carry `<this-checkout>/out/.../dist/01-c/lib` as
+     a baked-in `RUNPATH` (confirmed via `readelf -d` inside a freshly
+     copied isolated SDK), traced to `tools/crt-cc`/`tools/crt-c++` always
+     baking `-Wl,-rpath,${CRT_SYSROOT}/lib` into shared links, with no
+     relink/patch step when `create_dist.py`'s `--libcxx-install` copies
+     the built `.so` files into a packaged stage. This makes an isolated
+     stage's own C++ consumers silently depend on this exact checkout's
+     `out/` tree still existing, not on the packaged SDK's own copy --
+     breaking the isolated-stage contract's "self-contained SDK" premise.
+     Fix by relinking (or `patchelf --set-rpath`-ing) these three libraries
+     to `$ORIGIN` wherever they get installed, matching the same portability
+     fix already applied to every CRT-owned shared library via
+     `crt_configure_shared_runtime()`'s `$ORIGIN` `BUILD_RPATH`/
+     `INSTALL_RPATH` (`CMakeLists.txt`).
+  2. **No relink on `libc.so` change.** The nested build treats the sysroot
+     library as an untracked link input and can silently retain stale
+     symbol references. Add a real dependency edge or a predecessor-
+     inventory fingerprint that forces the affected nested build
+     directories fresh; prove an actual `libc.so` change propagates
+     without manual deletion.
+  Verify both together by copying the fixed SDK to a different path and
+  confirming: `readelf -d` shows no checkout-absolute path anywhere;
+  `LD_DEBUG=libs` shows every CRT runtime library loading from inside the
+  copied SDK; a C++ shared smoke test runs with the original `out/.../
+  dist/01-c/lib` renamed out of the way.
 
 ### Distribution hardening
 
