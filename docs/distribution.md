@@ -186,7 +186,7 @@ ad-hoc manifest edit.
 | Windows `03-gfx-simple` | USER32, D3D11, and DXGI desktop presentation runtime |
 | Windows `04-gfx-media` | D3D12/DXGI/shader compiler, COM, and a compatible display driver |
 | macOS `01-c` | libSystem |
-| macOS `03-gfx-simple` | Foundation, AppKit, QuartzCore, CoreGraphics, and Objective-C runtime |
+| macOS `03-gfx-simple` | Foundation, AppKit, QuartzCore, CoreGraphics, CoreFoundation, and Objective-C runtime |
 | macOS `04-gfx-media` | Metal, AudioToolbox, VideoToolbox, CoreVideo, and CoreMedia |
 | Linux `01-c` | Linux kernel syscall ABI |
 | Linux `03-gfx-simple` | reachable Wayland compositor with xdg-shell |

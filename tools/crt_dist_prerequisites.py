@@ -57,6 +57,19 @@ _GFX_SIMPLE = {
             "AppKit.framework",
             "QuartzCore.framework",
             "CoreGraphics.framework",
+            # CoreFoundation.framework (2026-09-14, macOS Mach-O dependency
+            # acceptance): not one of libcrtgfx's own explicit CRTGFX_MACOS_
+            # FRAMEWORKS link flags, but a real, confirmed LC_LOAD_DYLIB
+            # entry (not weak) in libcrtgfx.dylib, crtgfx_window_demo, and
+            # crtgfx_gpu_window_demo -- `otool -l` shows it as an ordinary
+            # required load command. Apple's own linker records it directly
+            # because Foundation.framework itself is built on top of
+            # CoreFoundation; this project's own window/GPU code never
+            # calls a CoreFoundation API directly. Found regenerating a
+            # fresh 03-gfx-simple SDK and comparing its actual binaries'
+            # dependencies against this file's own canonical list --
+            # exactly the gap the comparison was meant to catch.
+            "CoreFoundation.framework",
             "libobjc.A.dylib",
         ],
         "bundled": False,

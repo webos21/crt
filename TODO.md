@@ -72,16 +72,30 @@ move each completed tranche into [`HISTORY.md`](HISTORY.md):
 
 1. **External prerequisite host acceptance.** The portable cumulative schema,
    three-host/stage inventory, producer/isolated-upgrade integration, strict
-   verifier, and Windows binary-import audit are complete in
-   [`HISTORY.md`](HISTORY.md). On real Linux and macOS hosts, regenerate at
-   least `03-gfx-simple` and option-ON `04-gfx-media`, confirm their manifests
-   contain the canonical entries, and compare actual ELF/Mach-O dependencies
-   and runtime availability with those declarations. Record the two host
-   results, then remove this item.
+   verifier, Windows binary-import audit, and now the macOS binary-import
+   audit (a fresh `03-gfx-simple`/option-ON `04-gfx-media` regeneration, full
+   `otool -L` comparison against the declared `macos-*` components, and the
+   `CoreFoundation.framework` gap it found and closed) are complete in
+   [`HISTORY.md`](HISTORY.md). Only the matching real Linux ELF/runtime
+   comparison remains. Regenerate `03-gfx-simple` and option-ON `04-gfx-media`
+   on real Linux hardware, confirm the manifests contain the canonical
+   entries, and compare actual ELF dependencies and runtime availability with
+   those declarations. Record the result, then remove this item.
 2. **Binary dependency and absolute-path policy.** Scan installed binaries for
    undeclared non-system `.so`, `.dylib`, or `.dll` dependencies. Decide path
    remapping or release stripping before rejecting absolute source/build/debug
-   paths, then enforce the selected policy in `verify_dist.py`.
+   paths, then enforce the selected policy in `verify_dist.py`. The same
+   macOS binary-import audit above found a concrete instance of the absolute-
+   path question this item still has to decide: FreeType's own installed
+   `lib/libfreetype.6.dylib` (declared a `runtime_artifact`, but currently
+   unused -- Skia links `libfreetype.a` statically, and nothing else loads
+   it) carries an absolute build-time temp path as its own `LC_ID_DYLIB`
+   (GNU Libtool's Darwin install-name computation baking in `$(prefix)`
+   as given at build time), not a portable `@rpath/...` spelling. Harmless
+   today only because nothing dynamically links it; fix by giving
+   FreeType's own macOS dylib link recipe an explicit `-install_name
+   @rpath/$@` patch (same shape as `porting/recipes/mbedtls.json`'s
+   existing one) as part of deciding this item's policy.
 3. **External consumers and path regression.** Add explicit external
    CMake/configure-make consumer checks where the stage contract requires them.
    Preserve the now-complete three-host space-containing-prefix run as a

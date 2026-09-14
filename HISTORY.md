@@ -10,6 +10,52 @@ substantive update.
 
 ## 2026-09-14
 
+- **Completed the macOS half of the external-prerequisite host acceptance
+  item, closing the gap it found.** Regenerated `03-gfx-simple` (via
+  `crt-gfx-simple-dist`) and, from that extracted SDK, a fresh option-ON
+  `03-gfx-simple -> 04-gfx-media` isolated stage build -- real FreeType/
+  FFmpeg/Skia, the standalone CMake project's 8/8 ctest binaries, and
+  both packaged examples rebuilt and presenting (`presented=1`). Ran a
+  full `otool -L` sweep over every Mach-O file in the regenerated SDK
+  (executables, `.dylib`s, and the packaged toybox/mksh binaries),
+  filtered to dependencies outside the SDK's own `lib/` (i.e. genuinely
+  external, not CRT-owned or redistributed-port payload), and diffed the
+  result against `tools/crt_dist_prerequisites.py`'s declared
+  `macos-system-runtime`/`macos-cocoa-window-runtime`/`macos-metal-
+  runtime`/`macos-media-runtime` components. Found one real, confirmed
+  gap: `CoreFoundation.framework` is a genuine, non-weak `LC_LOAD_DYLIB`
+  of `libcrtgfx.dylib`, `crtgfx_window_demo`, and `crtgfx_gpu_window_demo`
+  (confirmed via `otool -l`) but was never declared -- not one of
+  `libcrtgfx/CMakeLists.txt`'s own explicit `CRTGFX_MACOS_FRAMEWORKS`
+  link flags, so ld64 must be recording it directly because
+  `Foundation.framework` itself is built on `CoreFoundation`. Fixed by
+  adding `CoreFoundation.framework` to `macos-cocoa-window-runtime`'s
+  component list (present from `03-gfx-simple` onward, matching where
+  `Foundation.framework` itself first appears) and the matching
+  `docs/distribution.md` table row. Re-regenerated both SDKs after the
+  fix and re-ran the same full sweep: every actual external dependency
+  now maps to a declared component and nothing declared goes unobserved.
+  `tools/test_verify_dist.py` (8/8) and `cmake --workflow --preset
+  macos-host-ninja-debug` (101/101) stay clean. Only the matching real
+  Linux ELF/runtime comparison remains open in `TODO.md`.
+
+  **A second, separate, non-blocking finding surfaced during the same
+  sweep and is tracked as its own follow-up rather than fixed here.**
+  `lib/libfreetype.6.dylib` (declared a `runtime_artifact` of the
+  `freetype` port) carries an absolute build-time temp path --
+  `/private/tmp/.../crt-stage-04-gfx-media-<id>/sdk/lib/libfreetype.6.
+  dylib` -- as its own `LC_ID_DYLIB`, confirmed via `otool -D`, instead
+  of a portable `@rpath/...` spelling: GNU Libtool's own Darwin install-
+  name computation bakes in `$(prefix)` exactly as given at build time,
+  the same class of gap `porting/recipes/mbedtls.json`'s existing
+  `-install_name @rpath/$@` patch already fixes for a different port.
+  Confirmed harmless today only because nothing in this distribution
+  actually loads it dynamically (Skia links FreeType's static
+  `libfreetype.a` instead, confirmed by `libcrtgfx_skia.dylib` carrying
+  no FreeType dependency at all) -- left as a concrete, evidenced
+  instance of `TODO.md`'s still-open binary dependency/absolute-path
+  policy item rather than patched ad hoc here.
+
 - **Defined and enforced the external runtime prerequisite contract up to the
   Linux/macOS host-acceptance boundary.** Added one shared cumulative inventory
   for all stages and Windows, macOS, and Linux, separating OS runtimes and
