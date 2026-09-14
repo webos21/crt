@@ -70,24 +70,22 @@ Harden the completed cross-host distribution baseline before adding another
 large upper-runtime dependency. Work in independently verifiable tranches and
 move each completed tranche into [`HISTORY.md`](HISTORY.md):
 
-1. **Distribution verifier.** Bring `verify_dist.py` up to the published
-   acceptance contract: keep generic validation of every declared
-   `redistributed_dependencies` inventory, split stage-required names/layout
-   from schema validation, scan binaries for undeclared non-system dynamic
-   dependencies, inventory external OS/framework/device-driver prerequisites,
-   and decide path remapping or release stripping before rejecting absolute
-   debug paths. This is the active tranche; packaging policy and the
-   `sysroot`/Skia dependency-graph repair are complete in
-   [`HISTORY.md`](HISTORY.md). Initial audit: the current verifier does check
-   every declared dependency payload and the existing Windows `01-c` and
-   isolated `04-gfx-media` SDKs pass, but manifest schema/target completeness,
-   dependency-path confinement, external prerequisite inventory, binary
-   dependency scanning, and absolute-path policy remain open.
-2. **External consumers and path regression.** Add explicit external
+1. **External prerequisite inventory.** Define one portable manifest schema
+   for OS/framework/device-driver prerequisites that intentionally remain
+   outside the archive, populate it for each host/stage, and make
+   `verify_dist.py` reject incomplete or contradictory declarations. This is
+   the active verifier tranche. Generic dependency payload validation,
+   manifest schema/target completeness, and dependency-path confinement are
+   complete in [`HISTORY.md`](HISTORY.md).
+2. **Binary dependency and absolute-path policy.** Scan installed binaries for
+   undeclared non-system `.so`, `.dylib`, or `.dll` dependencies. Decide path
+   remapping or release stripping before rejecting absolute source/build/debug
+   paths, then enforce the selected policy in `verify_dist.py`.
+3. **External consumers and path regression.** Add explicit external
    CMake/configure-make consumer checks where the stage contract requires them.
    Preserve the now-complete three-host space-containing-prefix run as a
    regression acceptance requirement.
-3. **Deferred `05-js` isolated stage.** Extend
+4. **Deferred `05-js` isolated stage.** Extend
    `04-gfx-media -> 05-js` only after the real QuickJS core and bindings exist.
    Apply the same pinned asset, predecessor-only build, test, external-consumer,
    verification, and atomic-publish contract as the earlier transitions.

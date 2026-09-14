@@ -4,7 +4,7 @@
 import argparse
 import json
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from create_dist import DIST_PORTING_TOOLS, DIST_PORTING_DIRS, DIST_WRAPPER_TOOLS
 from crt_stage_recipe import recipe_filename_for_stage, validate_recipe
@@ -14,6 +14,11 @@ BANNED_TOOLS = {
     "clang", "clang.exe", "clang++", "clang++.exe", "lld", "lld.exe",
     "ld.lld", "ld.lld.exe", "gcc", "gcc.exe", "g++", "g++.exe",
 }
+
+SUPPORTED_STAGES = (
+    "01-c", "02-cxx", "03-gfx-simple", "04-gfx-media", "05-js",
+)
+SUPPORTED_TARGET_OSES = {"linux", "macos", "windows"}
 
 
 def require(path: Path) -> None:
@@ -26,6 +31,73 @@ def require_any(directory: Path, patterns: tuple[str, ...], description: str) ->
         raise SystemExit(f"distribution is missing {description} under {directory}")
 
 
+def require_string(value: object, description: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise SystemExit(f"manifest {description} must be a non-empty string")
+    return value
+
+
+def require_string_list(value: object, description: str) -> list[str]:
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise SystemExit(f"manifest {description} must be a string list")
+    return value
+
+
+def validate_manifest_schema(manifest: object, expected_stage: str) -> dict:
+    """Validate host-independent manifest structure before stage policy."""
+    if not isinstance(manifest, dict):
+        raise SystemExit("manifest root must be an object")
+    if expected_stage not in SUPPORTED_STAGES:
+        raise SystemExit(f"unsupported distribution stage: {expected_stage}")
+    if manifest.get("format") != 1:
+        raise SystemExit("manifest format must be 1")
+    stage = require_string(manifest.get("stage"), "stage")
+    if stage not in SUPPORTED_STAGES or stage != expected_stage:
+        raise SystemExit("manifest stage does not match the requested stage")
+    if manifest.get("compiler_bundled") is not False:
+        raise SystemExit("manifest compiler_bundled must be false")
+
+    target = manifest.get("target")
+    if not isinstance(target, dict):
+        raise SystemExit("manifest target must be an object")
+    target_os = require_string(target.get("os"), "target.os")
+    if target_os not in SUPPORTED_TARGET_OSES:
+        raise SystemExit(f"manifest target.os is unsupported: {target_os}")
+    require_string(target.get("arch"), "target.arch")
+    require_string(manifest.get("target_triple"), "target_triple")
+    require_string(manifest.get("created_utc"), "created_utc")
+
+    tools = manifest.get("external_tools_used_to_build")
+    if not isinstance(tools, dict):
+        raise SystemExit("manifest external_tools_used_to_build must be an object")
+    for name in ("cc", "cxx", "ar", "ranlib"):
+        require_string(tools.get(name), f"external_tools_used_to_build.{name}")
+    require_string_list(manifest.get("default_compile_options"),
+                        "default_compile_options")
+    require_string_list(manifest.get("external_toolchain_environment"),
+                        "external_toolchain_environment")
+    return manifest
+
+
+def dependency_path(dist: Path, name: str, field: str, relative: str) -> Path:
+    """Resolve one portable manifest path and keep it inside the SDK root."""
+    posix = PurePosixPath(relative)
+    windows = PureWindowsPath(relative)
+    if (not relative or "\\" in relative or posix.is_absolute() or
+            windows.is_absolute() or windows.drive or
+            posix.as_posix() != relative or ".." in posix.parts):
+        raise SystemExit(
+            f"redistributed dependency {name}.{field} has an unsafe path: {relative!r}")
+    candidate = dist / Path(*posix.parts)
+    try:
+        candidate.resolve().relative_to(dist.resolve())
+    except ValueError as exc:
+        raise SystemExit(
+            f"redistributed dependency {name}.{field} escapes the distribution: "
+            f"{relative!r}") from exc
+    return candidate
+
+
 def validate_redistributed_dependencies(dist: Path, manifest: dict) -> dict[str, dict]:
     """Validate every declared dependency without hardcoding its file layout."""
     dependencies = manifest.get("redistributed_dependencies", [])
@@ -33,23 +105,20 @@ def validate_redistributed_dependencies(dist: Path, manifest: dict) -> dict[str,
         raise SystemExit("manifest redistributed_dependencies must be a list")
     by_name: dict[str, dict] = {}
     for item in dependencies:
-        if not isinstance(item, dict) or not isinstance(item.get("name"), str):
-            raise SystemExit("redistributed dependency entries require a string name")
-        name = item["name"]
+        if not isinstance(item, dict):
+            raise SystemExit("redistributed dependency entries must be objects")
+        name = require_string(item.get("name"), "redistributed dependency name")
         if name in by_name:
             raise SystemExit(f"redistributed dependency is declared twice: {name}")
-        if not isinstance(item.get("kind"), str):
-            raise SystemExit(f"redistributed dependency {name} has no kind")
+        require_string(item.get("kind"), f"redistributed dependency {name}.kind")
         for field in ("headers", "link_artifacts", "runtime_artifacts", "notices"):
-            paths = item.get(field)
-            if not isinstance(paths, list) or not all(isinstance(path, str) for path in paths):
-                raise SystemExit(f"redistributed dependency {name}.{field} must be a string list")
+            paths = require_string_list(item.get(field),
+                                        f"redistributed dependency {name}.{field}")
             for relative in paths:
-                require(dist / relative)
-        provenance = item.get("provenance")
-        if not isinstance(provenance, str):
-            raise SystemExit(f"redistributed dependency {name} has no provenance path")
-        require(dist / provenance)
+                require(dependency_path(dist, name, field, relative))
+        provenance = require_string(item.get("provenance"),
+                                    f"redistributed dependency {name}.provenance")
+        require(dependency_path(dist, name, "provenance", provenance))
         by_name[name] = item
     return by_name
 
@@ -65,9 +134,9 @@ def main() -> None:
         require(dist / relative)
     for name in DIST_WRAPPER_TOOLS:
         require(dist / "tools" / name)
-    manifest = json.loads((dist / "manifest.json").read_text(encoding="utf-8"))
-    if manifest.get("stage") != args.stage or manifest.get("compiler_bundled") is not False:
-        raise SystemExit("manifest stage/compiler_bundled contract is invalid")
+    manifest = validate_manifest_schema(
+        json.loads((dist / "manifest.json").read_text(encoding="utf-8")),
+        args.stage)
     redistributed = validate_redistributed_dependencies(dist, manifest)
     porting = manifest.get("optional_tools", {}).get("porting", {})
     if porting.get("included") is not True or porting.get("python", {}).get("required") is not True:

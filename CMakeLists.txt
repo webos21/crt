@@ -203,6 +203,12 @@ find_package(Python3 COMPONENTS Interpreter QUIET)
 enable_testing()
 
 if(Python3_Interpreter_FOUND)
+  add_test(NAME crt_verify_dist_unit_runs
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_verify_dist.py"
+  )
+  set_tests_properties(crt_verify_dist_unit_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  )
   set(CRT_DIST_TOOL_ARGS
     --cc "${CMAKE_C_COMPILER}"
     --cxx "${CMAKE_CXX_COMPILER}"

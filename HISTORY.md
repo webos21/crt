@@ -10,6 +10,18 @@ substantive update.
 
 ## 2026-09-14
 
+- **Hardened the distribution manifest schema and confined every declared
+  dependency path to the SDK root.** `verify_dist.py` now validates the common
+  format/stage/target/compiler/toolchain identity before applying stage layout
+  policy. Every `redistributed_dependencies` header, link artifact, runtime
+  artifact, notice, and provenance path must use a normalized portable
+  relative spelling and must still resolve inside the distribution, rejecting
+  POSIX/Windows absolute paths, drive-relative paths, backslashes, `..`, and
+  symlink escapes before checking existence. Added a host-independent Python
+  unit suite and registered it with CTest; all 6 focused cases and the CTest
+  entry pass on Windows. Existing Windows `01-c` and isolated option-ON
+  `04-gfx-media` SDKs also pass the strengthened verifier unchanged.
+
 - **Removed the obsolete manual libc++ staging/reconfigure requirement from
   Skia-enabled in-tree builds.** The old `crtgfx_skia_objects ->
   crt-libcxx-sysroot` edge really was cyclic when `sysroot` depended on the

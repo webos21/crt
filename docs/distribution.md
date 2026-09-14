@@ -165,6 +165,11 @@ that records, at minimum:
 - the required preceding binary stage and external tools;
 - configure/build/install/test entry points and expected installed artifacts.
 
+All paths recorded in `redistributed_dependencies` are normalized portable
+relative paths. Verification rejects absolute, drive-relative, parent-
+traversing, non-normalized, or symlink-escaping entries before checking that
+the declared header, link, runtime, notice, and provenance payload exists.
+
 The first supported transitions are `01-c -> 02-cxx`, then
 `02-cxx -> 03-gfx-simple -> 04-gfx-media`. Thus `01-c` can fetch the pinned
 libc++/libc++abi/libunwind source package and build `02-cxx`; `02-cxx` can
