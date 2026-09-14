@@ -39,4 +39,64 @@ is not complete merely because an in-tree target links.
 - The common GPU device/surface/frame/fence contract and live native
   presentation are implemented with Vulkan/Wayland, D3D12/Win32, and
   Metal/Cocoa.
-- Skia CPU raster/text and Ganesh GPU paths have/??
+- Skia CPU raster/text and Ganesh GPU paths build and run on Linux, Windows,
+  and macOS. Live presentation exists on all three hosts; the remaining
+  pixel-exact and resize combinations are evidence gaps, not a missing common
+  API.
+- The software media baseline includes FFmpeg-backed demux/decode, the common
+  frame/audio/player contracts, and native audio sinks. Hardware decode and
+  decoded-texture interop remain separate, explicitly reported capabilities.
+- The cumulative binary-package chain reaches the current `05-js` skeleton.
+  Predecessor-only isolated-stage acceptance is complete through the option-ON
+  `03-gfx-simple -> 04-gfx-media` transition on Linux, Windows, and macOS,
+  including paths containing spaces.
+- `libcrtjs` still contains skeleton libraries only. QuickJS, its event loop,
+  modules, and graphics/media bindings have not been implemented.
+
+Exact test counts, host evidence, and current limitations belong in
+[`../STATUS.md`](../STATUS.md) and [`../HISTORY.md`](../HISTORY.md). Open work
+belongs in [`../TODO.md`](../TODO.md); this document records dependency order
+and completion boundaries rather than duplicating those ledgers.
+
+## Execution Order
+
+1. Finish the remaining live GPU presentation evidence for the existing
+   Ganesh backends. Graphite is not part of this acceptance gate.
+2. Enable hardware video decode per host while retaining software decode as
+   the correctness fallback and reporting actual hardware use separately.
+3. Define and verify zero-copy decoded-texture ownership, device affinity, and
+   synchronization. Keep a measured CPU-download fallback where direct interop
+   is unavailable.
+4. Add capture, conversion, hardware/software encode, timestamp, and muxing on
+   top of the accepted frame and playback contracts.
+5. Add transport, buffering, back-pressure, reconnect, and streaming protocol
+   integration only after local media timing is stable.
+6. Use WebRTC as a consumer-driven integration milestone, then add the real
+   QuickJS core, event loop, modules, native bindings, and JavaScript-visible
+   graphics/media services. Only then extend isolated-stage acceptance from
+   `04-gfx-media` to `05-js`.
+
+Each step may expose a lower CRT/PAL gap. Fix that gap at the
+Bionic-compatible public surface or the controlled PAL boundary, rerun the
+consumer that exposed it, and preserve a portable fallback where an optional
+host facility is unavailable.
+
+## Completion Rules
+
+- A capability is complete only when its public ownership, lifetime, error,
+  and synchronization behavior is defined and exercised on the applicable
+  hosts.
+- Compile or link success alone is not runtime acceptance. GPU and media paths
+  must distinguish real presentation or hardware use from a supported
+  software/headless fallback.
+- A cumulative in-tree build does not replace predecessor-only stage
+  acceptance. Release stages follow [`distribution.md`](distribution.md).
+- Upstream source is not patched merely to hide a CRT/PAL deficiency. Porting
+  follows the Bionic-first discipline in [`../AGENTS.md`](../AGENTS.md).
+
+## Deferred Scope
+
+Graphite, V8, Chromium/Ozone, a full compositor/desktop environment, Android
+framework or APK compatibility, and unmodified glibc binary compatibility are
+not gates for the current Ganesh/FFmpeg/QuickJS sequence. They remain later
+consumers or benchmarks after the lower contracts have stable evidence.

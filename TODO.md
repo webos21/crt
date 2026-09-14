@@ -57,14 +57,40 @@ newest entry first) rather than leaving it here.
 
 ## In Progress
 
-Active threads, not a flat list of one-off items. Nothing is active right now:
-the cumulative binary-package chain through the current `05-js` skeleton and
-the physical `libcrtgfx` window/GPU/Skia split are complete. Predecessor-only
-isolated-stage acceptance is complete through the option-ON
-`03-gfx-simple -> 04-gfx-media` transition on Linux, Windows, and macOS,
-including path-with-spaces acceptance on all three hosts; the dated evidence
-belongs in [`HISTORY.md`](HISTORY.md). Distribution hardening and the real
-QuickJS-backed `04-gfx-media -> 05-js` transition are Planned below.
+Active threads, not a flat list of one-off items. The cumulative binary-package
+chain through the current `05-js` skeleton and the physical `libcrtgfx`
+window/GPU/Skia split are complete. Predecessor-only isolated-stage acceptance
+is complete through the option-ON `03-gfx-simple -> 04-gfx-media` transition
+on Linux, Windows, and macOS, including path-with-spaces acceptance on all
+three hosts; the dated evidence belongs in [`HISTORY.md`](HISTORY.md).
+
+### Distribution hardening
+
+Harden the completed cross-host distribution baseline before adding another
+large upper-runtime dependency. Work in independently verifiable tranches and
+move each completed tranche into [`HISTORY.md`](HISTORY.md):
+
+1. **Distribution verifier.** Bring `verify_dist.py` up to the published
+   acceptance contract: keep generic validation of every declared
+   `redistributed_dependencies` inventory, split stage-required names/layout
+   from schema validation, scan binaries for undeclared non-system dynamic
+   dependencies, inventory external OS/framework/device-driver prerequisites,
+   and decide path remapping or release stripping before rejecting absolute
+   debug paths. This is the active tranche; packaging policy and the
+   `sysroot`/Skia dependency-graph repair are complete in
+   [`HISTORY.md`](HISTORY.md). Initial audit: the current verifier does check
+   every declared dependency payload and the existing Windows `01-c` and
+   isolated `04-gfx-media` SDKs pass, but manifest schema/target completeness,
+   dependency-path confinement, external prerequisite inventory, binary
+   dependency scanning, and absolute-path policy remain open.
+2. **External consumers and path regression.** Add explicit external
+   CMake/configure-make consumer checks where the stage contract requires them.
+   Preserve the now-complete three-host space-containing-prefix run as a
+   regression acceptance requirement.
+3. **Deferred `05-js` isolated stage.** Extend
+   `04-gfx-media -> 05-js` only after the real QuickJS core and bindings exist.
+   Apply the same pinned asset, predecessor-only build, test, external-consumer,
+   verification, and atomic-publish contract as the earlier transitions.
 
 ## Planned
 
@@ -99,28 +125,6 @@ and acceptance host are available.
 The intended execution order is live GPU evidence, hardware decode, zero-copy
 interop, encode/capture, networking/streaming, WebRTC, and finally the complete
 JavaScript application-runtime layer.
-
-### Distribution hardening and deferred stage work
-
-- Decide whether default-OFF cumulative packaging plus option-ON isolated-stage
-  acceptance is the official policy, or add an explicit option-ON cumulative
-  preset/target that does not rebuild expensive dependencies unnecessarily.
-- Reconfirm the top-level `sysroot`/`crtgfx_skia_objects` dependency-cycle
-  comment now that `sysroot` has no `crtgfx*` dependency. Test the edge with a
-  fresh configure, generate, and build before changing the explanation.
-- Bring `verify_dist.py` up to the published acceptance contract: keep generic
-  validation of every declared `redistributed_dependencies` inventory, split
-  stage-required names/layout from schema validation, scan binaries for
-  undeclared non-system dynamic dependencies, inventory external OS/framework/
-  device-driver prerequisites, and decide path remapping or release stripping
-  before rejecting absolute debug paths.
-- Add an explicit external CMake/configure-make consumer check where the stage
-  contract requires it. Preserve the now-complete three-host
-  space-containing-prefix run as a regression acceptance requirement.
-- Extend `04-gfx-media -> 05-js` only after the real QuickJS core and bindings
-  exist. Apply the same pinned asset, predecessor-only build, test,
-  external-consumer, verification, and atomic-publish contract as the earlier
-  transitions.
 
 ### Windows process signals and Toybox `timeout`
 

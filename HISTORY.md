@@ -10,6 +10,36 @@ substantive update.
 
 ## 2026-09-14
 
+- **Removed the obsolete manual libc++ staging/reconfigure requirement from
+  Skia-enabled in-tree builds.** The old `crtgfx_skia_objects ->
+  crt-libcxx-sysroot` edge really was cyclic when `sysroot` depended on the
+  former monolithic `crtgfx` library, but `sysroot` now installs only the
+  `crt-c` component. Wired the imported runtime prerequisite directly into the
+  graph and removed the Windows configure-time header-existence failure that
+  forced users to build `crt-libcxx-sysroot` and configure again by hand. A
+  genuinely fresh Windows build tree configured and generated with
+  `CRTGFX_ENABLE_SKIA=ON` and `CRT_USE_IMPORTED_LIBCXX=ON` without a cycle;
+  building `crtgfx_skia_objects` then automatically built and staged the C and
+  C++ predecessor SDKs and compiled `skia_bridge.cc` successfully. The build
+  reused the previously fetched LLVM source/cache and a packaged Skia
+  archive/header tree while its outer CMake graph and output tree were fresh.
+  Reconfiguring the ordinary default-OFF Windows preset also remained clean,
+  and `crt-gfx-simple-test` rebuilt and passed both window/synthetic-event
+  tests (2/2), confirming the new optional edge does not widen the default
+  developer lane.
+
+- **Promoted distribution hardening and fixed its release-build policy before
+  starting the dependency-graph audit.** The default cumulative developer lane
+  remains lightweight and does not implicitly turn on Skia/FFmpeg; the already
+  accepted option-ON, predecessor-only `03-gfx-simple -> 04-gfx-media` entry
+  point is the release-grade advanced graphics/media lane. A second option-ON
+  cumulative target would repeat a weaker in-tree build, increase rebuild cost,
+  and still not replace isolated acceptance, so it is not part of the official
+  policy. Also reconstructed `docs/runtime_roadmap.md`, whose 2026-09-08 staged-
+  distribution rewrite had accidentally ended at the literal fragment
+  `have/??`, from the current cross-host evidence and documented dependency
+  order.
+
 - **Completed Linux path-with-spaces distribution acceptance on WSL2 Ubuntu
   26.04/x86_64 and fixed every packaging boundary it exposed.** A fresh clone
   at `/home/lee/crt path acceptance/source tree` built and verified the full

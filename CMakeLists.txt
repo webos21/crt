@@ -865,36 +865,15 @@ if(TARGET crtgfx-skia-build)
     add_dependencies(crtgfx-skia-build crt-libcxx-sysroot)
   endif()
 endif()
-# crtgfx_skia_objects/crtgfx_skia_raster_smoke (libcrtgfx/CMakeLists.txt,
-# CRTGFX_ENABLE_SKIA) need ${CRT_SYSROOT}/include/c++/v1 staged (this
-# project's own imported libc++ headers, see that file's own comment on
-# why) before they compile. Deliberately NOT wired as an add_dependencies()
-# edge onto crt-libcxx-sysroot/sysroot the way crtgfx-skia-build's own
-# identical-looking need just above is: crtgfx_skia_objects's compiled
-# output used to fold directly into the single monolithic `crtgfx`
-# STATIC_LIBRARY via $<TARGET_OBJECTS:...>, and `sysroot` (this file, just
-# above) itself used to DEPENDS on `crtgfx` -- so crtgfx_skia_objects ->
-# crt-libcxx-sysroot -> crt-libcxx-build -> crt-libcxx-configure -> (its
-# own pre-existing add_dependencies(crt-libcxx-configure sysroot) just
-# above) -> sysroot -> crtgfx -> crtgfx_skia_objects was a real dependency
-# cycle -- confirmed for real (2026-08-23): "CMake Generate step failed"
-# with exactly this strongly-connected component reported. crtgfx-skia-
-# build has no such loop back to itself, since nothing in `sysroot`
-# depends on it. libcrtgfx/CMakeLists.txt's own CRTGFX_ENABLE_SKIA guard
-# block instead FATAL_ERRORs at configure time if the imported libc++
-# artifacts are not already staged on disk -- the same "check the file
-# exists, tell the user which target to run first" pattern already used
-# there for Skia's own SkSurface.h/CRTGFX_SKIA_LIBRARIES, sidestepping the
-# ninja dependency graph entirely rather than trying to widen it correctly.
-# NOTE (2026-09-08, libcrtgfx's own physical window/GPU/Skia split):
-# `sysroot`'s real DEPENDS list above no longer mentions crtgfx at all --
-# it was scoped down to the crt-c component only as part of the
-# distribution-stages restructuring, so the literal cycle described above
-# may no longer exist. Left this guard (and its own reasoning) in place
-# rather than trying the add_dependencies() edge now, since that would be
-# an unverified change outside this pass's own scope -- a real future
-# reconfirmation (does crtgfx_skia_objects -> crt-libcxx-sysroot -> ... ->
-# crtgfx_skia now generate cleanly?) belongs in TODO.md, not assumed here.
+if(TARGET crtgfx_skia_objects AND TARGET crt-libcxx-sysroot AND
+   CRT_USE_IMPORTED_LIBCXX)
+  # The former monolithic `crtgfx` target made this edge cyclic because
+  # `sysroot` also depended on that same target. Since the staged-distribution
+  # split, `sysroot` installs only crt-c and has no crtgfx dependency. Keep the
+  # real imported-libc++ prerequisite in the graph so a Skia-enabled build no
+  # longer relies on a hand-staged include/c++/v1 directory.
+  add_dependencies(crtgfx_skia_objects crt-libcxx-sysroot)
+endif()
 
 if(Python3_Interpreter_FOUND)
   # CRT_ROOTFS itself is now set earlier, right after add_subdirectory(shell)

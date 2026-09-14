@@ -290,16 +290,12 @@ endif()
 if(CRTGFX_ENABLE_SKIA AND CRT_TARGET_OS STREQUAL "windows" AND NOT CRT_USE_IMPORTED_LIBCXX)
   message(FATAL_ERROR "CRTGFX_ENABLE_SKIA=ON on Windows requires CRT_USE_IMPORTED_LIBCXX=ON (and a built crt-libcxx-sysroot) -- Skia's own C++ code needs this project's real, project-owned libc++, never a host substitute.")
 endif()
-# Checked here (configure time, file-existence) rather than as a ninja
-# add_dependencies() edge -- see the top-level CMakeLists.txt's own comment
-# (right after its "sysroot"/crtgfx-skia-build wiring) for the real
-# dependency cycle that a direct edge onto crt-libcxx-sysroot/sysroot hits,
-# since crtgfx_skia_objects's own output is folded into the `crtgfx`
-# STATIC_LIBRARY that `sysroot` itself depends on.
-if(CRTGFX_ENABLE_SKIA AND CRT_TARGET_OS STREQUAL "windows" AND
-   NOT EXISTS "${CRT_LIBCXX_SYSROOT}/include/c++/v1")
-  message(FATAL_ERROR "CRTGFX_ENABLE_SKIA=ON on Windows but ${CRT_LIBCXX_SYSROOT}/include/c++/v1 was not found. Run the crt-libcxx-sysroot target first (with CRT_USE_IMPORTED_LIBCXX=ON), then reconfigure.")
-endif()
+# The top-level build wires crtgfx_skia_objects to crt-libcxx-sysroot when the
+# imported runtime is enabled. The old configure-time file-existence guard is
+# intentionally gone: it predated the physical crtgfx split and forced a
+# manual build/reconfigure dance even though `sysroot` no longer depends on
+# any crtgfx target. Isolated-stage callers do not define crt-libcxx-sysroot;
+# their predecessor SDK contract guarantees these headers instead.
 
 if(CRT_TARGET_OS STREQUAL "windows")
   list(APPEND CRTGFX_WINDOW_BACKEND_SOURCES ${CRTGFX_WINDOW_BACKEND_WINDOWS_SOURCES})

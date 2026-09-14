@@ -96,6 +96,24 @@ Advanced graphics packaging reflects the configured capabilities; enable and
 build the imported libc++, Skia, Vulkan/Metal/D3D12, and FFmpeg paths before
 claiming those optional entries in a release manifest.
 
+The official policy deliberately separates the fast cumulative developer lane
+from release-grade upper-stage acceptance:
+
+- ordinary presets and cumulative `*-dist` targets keep expensive optional
+  Skia and FFmpeg integration disabled unless the caller explicitly enables
+  it, so routine CRT/PAL work does not rebuild those dependencies;
+- release acceptance for `04-gfx-media` uses the option-ON, predecessor-only
+  `03-gfx-simple -> 04-gfx-media` stage entry point, which builds, tests, and
+  packages the real Skia/FreeType/FFmpeg payload from the extracted SDK; and
+- no second option-ON cumulative target is required. It would duplicate the
+  weaker in-tree build without replacing the isolated boundary, and would make
+  routine build behavior and caching harder to reason about.
+
+Changing this policy requires evidence that the isolated lane cannot exercise
+a release requirement. Build speed alone is handled by its warm dependency
+cache and explicit job controls, not by adding the heavyweight path to the
+default workflow.
+
 Outputs are placed under:
 
 ```text
