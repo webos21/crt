@@ -61,90 +61,64 @@ Active threads, not a flat list of one-off items. The cumulative binary-package
 chain through the current `05-js` skeleton and the physical `libcrtgfx`
 window/GPU/Skia split are complete. Predecessor-only isolated-stage
 build/package/verify acceptance through the option-ON
-`03-gfx-simple -> 04-gfx-media` transition is complete on Windows and macOS;
-the dated evidence belongs in [`HISTORY.md`](HISTORY.md). **On Linux it is
-not complete**: its prerequisite/ELF inventory, low-level Vulkan presentation,
-and independent path-with-spaces evidence pass, but the isolated stage-build
-tool runs both packaged examples *before* `verify_dist.py`/atomic publish and
-`crtgfx_skia_example` crashes there every time. The tool therefore has never
-reached `verify_dist.py` or produced a published `dist/04-gfx-media` on Linux
-at all. An earlier revision of this paragraph and commit `15fcb1e` overstated
-that result; see `HISTORY.md`'s 2026-09-14 corrections and the dedicated item
-below.
+`03-gfx-simple -> 04-gfx-media` transition, including path-with-spaces
+acceptance, is complete on Windows and macOS; the dated evidence belongs in
+[`HISTORY.md`](HISTORY.md). **On Linux it is still not complete**: the
+`readdir`/`opendir`-vs-`strtof_l` ELF symbol collision that used to crash
+`crtgfx_skia_example` immediately is now fixed (`libc.so`'s own `CRT_1.0`
+ELF symbol-version namespace, see `HISTORY.md`'s 2026-09-14 entries), but
+that fix uncovered a second, separate, pre-existing Skia memory-corruption
+bug blocking the same example -- see the dedicated item below. The isolated
+stage-build tool's own pipeline still cannot reach `verify_dist.py`/atomic
+publish on Linux as a result.
 
-- [ ] **Root-cause and fix the `SkSL::stod`/`strtof_l` crash blocking live
-  Linux `examples/gfx-skia` presentation.** 100% reproducible as of
-  2026-09-14 (re-confirmed across three independent isolated-stage rebuilds
-  this session; `crtgfx_gpu_example` is unaffected). Root cause is now fully
-  understood -- see `HISTORY.md`'s 2026-09-14 correction entry for the full
-  trace: real glibc's own `strtof_l` (not this project's own, correctly
-  implemented one in `libc/src/locale_l.c`) gets called with uninitialized
-  glibc-internal locale/TLS state and crashes, because
-  `crtgfx_skia_example`'s `DT_NEEDED` order lets real glibc's `libc.so.6`
-  (pulled in transitively by `libvulkan.so.1`/`libwayland-client.so.0`) win
-  the ELF dynamic linker's breadth-first global-scope search for the
-  unversioned `strtof_l` symbol, ahead of this project's own `libc.so`. A
-  naive fix (reordering `target_link_libraries()` so `libc++.so.1`/
-  `libunwind.so` link first) does fix this but was found to regress a
-  separate, already-fixed collision -- `readdir`/`opendir` then
-  incorrectly bind to this project's own `libc.so` instead of real glibc,
-  breaking Vulkan device enumeration (`device_count=0`) -- so it was
-  reverted. This is a genuine architectural tension: this project's own
-  `libc.so` unversioned-exports the entire POSIX symbol surface as
-  global-default, which cannot simultaneously satisfy both symbol families'
-  correct resolution via link order alone.
-  **Chosen direction: give `libc.so` its own private
-  ELF symbol-version namespace** (e.g. a single `CRT_1.0` node covering the
-  whole export surface via `-Wl,--version-script=`, reusing the same
-  mechanism the `libunwind.so` `__register_frame` fix already proved out).
-  Versioned symbol lookup filters breadth-first global-scope candidates by
-  version-string match rather than "first found wins", so once every
-  consumer that calls into `libc.so` (`libc++.so`/`libc++abi.so`/
-  `libunwind.so`/`libcrtgfx.so`/every executable) is rebuilt against the
-  newly-versioned `libc.so`, `strtof_l@CRT_1.0` and `readdir@CRT_1.0`
-  correctly skip real glibc's `@GLIBC_2.17` definitions (and vice versa) --
-  independent of link order, resolving the tension above without picking a
-  side. A single whole-surface version node is preferred over scoping only
-  the `_l`-suffixed locale family: it needs no per-symbol-family safety
-  judgment and mirrors how real glibc versions its own entire export
-  surface; fall back to narrow scoping only if whole-surface versioning is
-  found to break something real glibc-linked-library interop depends on.
-  Before touching the real `libc.so` build (which forces a full
-  `libc++`/`libc++abi`/`libunwind`/`libcrtgfx` rebuild plus the ~13-minute
-  isolated Skia stage rebuild per iteration), validate the version-filtered
-  resolution mechanism itself with a small, disposable two-`.so` repro
-  (`readelf --version-info`/`LD_DEBUG=bindings`) outside the real build.
-  **Done, 2026-09-14, confirmed:** a throwaway four-`.so` repro (two "base"
-  libs each exporting a same-named symbol returning a different value --
-  one under a `GLIBC_2.17`-style node standing in for real glibc, one under
-  a private `CRT_1.0` node standing in for a re-versioned `libc.so`; two
-  "consumer" libs, each linked against one base lib so its own `DT_VERNEED`
-  records that specific version) reproduced the real bug exactly when built
-  *without* versioning -- with the "glibc" base lib listed first in
-  `DT_NEEDED` order (mirroring `crtgfx_skia_example`'s real order), the
-  "CRT" consumer incorrectly bound to the "glibc" base lib's definition
-  (`LD_DEBUG=bindings` showed both consumers binding to the same, first-found
-  library). Rebuilding the identical layout *with* the version scripts fixed
-  it: each consumer correctly bound to its own base lib's definition
-  regardless of `DT_NEEDED` order (`LD_DEBUG=bindings` showed
-  `` `foo' [GLIBC_2.17]`` and `` `foo' [CRT_1.0]`` resolving to their
-  respective libraries). This confirmed the chosen direction mechanically
-  before paying the real rebuild cost. The whole-surface `CRT_1.0` map is now
-  implemented in the real Linux `libc.so` build and validated through a clean
-  libc++ rebuild on WSL2 Ubuntu 26.04/x86_64; `libc++.so.1` records
-  `strtof_l@CRT_1.0`. That host also carries two minimal,
-  real-provider reproductions (2026-09-14; full evidence in `HISTORY.md`): a
-  plain CRT C executable linked to host `libvulkan.so.1` fails physical-device
-  enumeration with `VK_ERROR_INCOMPATIBLE_DRIVER` when its CRT `opendir`/
-  `readdir` exports remain visible, while a shared-libc++ locale-stream probe
-  using `--exclude-libs,ALL` keeps Vulkan's directory calls on glibc but binds
-  libc++'s `strtof_l` to glibc and SIGSEGVs. With the new map, both probes
-  pass simultaneously and `LD_DEBUG=bindings` shows Vulkan directory calls
-  reaching `GLIBC_2.2.5` while libc++ locale parsing reaches `CRT_1.0`.
-  Proceed by merging the independently tested native-Linux arm64 work,
-  preserving these two cases as a permanent Linux-only regression, and then
-  completing the full isolated Linux 04 transition on native hardware. Do
-  not accept link-order changes as a fix.
+- [ ] **Root-cause and fix a Skia-internal heap corruption crashing live
+  Linux `examples/gfx-skia` presentation.** Found 2026-09-14 immediately
+  after the `strtof_l` fix above let execution reach this code path for the
+  first time; not caused by, or related to, that fix or the ELF-symbol-
+  collision family of bugs this investigation otherwise covers. Reliably
+  reproducible (3/3 direct re-runs, each within ~20s): `crtgfx_skia_example`
+  reaches real Ganesh Vulkan shader codegen, then aborts with glibc's
+  `munmap_chunk(): invalid pointer` freeing a `std::string`'s old internal
+  buffer (32 bytes, holding the legible, intact text
+  `"wangs_formula_max_fdiff_p2_ff2"` -- a builtin tessellation function's
+  mangled name, built by `SkSL::FunctionDeclaration::mangledName()`,
+  `skia-source/src/sksl/ir/SkSLFunctionDeclaration.cpp:517`, growing to
+  append `"f2"`). The buffer's own content is intact, so this reads as
+  heap-metadata corruption from an earlier, unrelated out-of-bounds write
+  elsewhere in Skia landing on this buffer's neighboring malloc chunk
+  header, not a bug in `mangledName()`'s own (ordinary, non-recursive)
+  logic. See `HISTORY.md`'s 2026-09-14 entry for the full trace, including
+  a red herring (an early `gdb` run appeared to show ~17,611 frames of
+  identical-PC recursion, and a later attempt to get a fuller backtrace ran
+  26+ minutes without finishing; both are artifacts of `gdb`'s overhead
+  interacting with the corruption non-deterministically, not genuine
+  recursion -- disassembly confirmed the repeated PC is a loop branch, not
+  a call). Skia's own compiled objects carry no variable/argument-level
+  DWARF debug info, which blocks straightforward `gdb` source-level
+  inspection of exactly which write is at fault. Recommended next step,
+  not yet attempted: enable AddressSanitizer for this project's Skia build
+  (check `tools/build_skia.py`'s GN args) to catch the actual out-of-bounds
+  write at the point it happens.
+- [ ] **`crt-libcxx-build` does not relink the imported libc++/libc++abi/
+  libunwind lane when `libc.so` changes.** Found 2026-09-14 applying the
+  `libc.so` symbol-versioning fix above: a full `ninja` rebuild, and even a
+  full `crt-gfx-simple-dist` rebuild, left `libc++.so.1`'s own `strtof_l`
+  reference unversioned, because `crt-libcxx-build`'s nested `cmake --build
+  .../external/llvm-runtimes/build/{libunwind,libcxxabi,libcxx}` sub-builds
+  only track their own source/configure-flag inputs for staleness, never
+  the actual bytes of `${CRT_SYSROOT}/lib/libc.so` -- confirmed via `ninja:
+  no work to do.` for both the `libunwind` and `libcxx` phases even after
+  `libc.so` genuinely changed. Worked around by hand this time (deleting
+  `out/.../external/llvm-runtimes/build/{libunwind,libcxxabi,libcxx}`
+  before rebuilding), but the gap itself is unfixed: any future
+  `libc.so`-ABI-affecting change will silently fail to propagate to this
+  lane the same way. Needs either a real `DEPENDS`/`BYPRODUCTS` edge from
+  `crt-libcxx-build` onto `c_shared`'s actual output, or a documented,
+  enforced convention (e.g. a fingerprint check inside `tools/crt-libcxx-
+  build.py` itself, matching `tools/build_stage_04_gfx_media.py`'s own
+  `inventory_fingerprint()`/`toolchain_identity()` pattern) that forces a
+  clean rebuild when the predecessor sysroot's content changes.
 
 ### Distribution hardening
 
