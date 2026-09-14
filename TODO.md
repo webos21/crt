@@ -82,19 +82,15 @@ a result.
   diagnostic's `malloc_usable_size()` and moved-`realloc()` false positives,
   its 48-byte-header payload-alignment error, and the corresponding focused
   regressions are now fixed; fresh native Windows and WSL Linux C-stage suites
-  pass with the option both OFF and ON (dated evidence in `HISTORY.md`). Keep
-  the remaining work in this order:
-  1. Push the focused tests through the existing single-build five-host GitHub
-     CI matrix (Linux x86_64/aarch64, Windows x86_64/aarch64, macOS arm64).
-     Do not duplicate every CI leg for this compile-time diagnostic: the
-     common allocator contract stays in the ordinary `malloc_test`, while the
-     diagnostic-only canary branch has explicit local Windows/WSL ON coverage.
-  2. After all five CI legs pass, re-run the real isolated Linux arm64 04
-     scenario with fresh imported libc++ artifacts. If the corrected cheap
-     diagnostics still do not localize the original corruption, proceed to
-     the separately planned dedicated/aligned canary and guard-malloc work;
-     otherwise fix the localized CRT/Skia defect and complete
-     `verify_dist.py`/atomic publication.
+  pass with the option both OFF and ON. The focused tests also passed the
+  existing single-build five-host GitHub CI matrix (Linux x86_64/aarch64,
+  Windows x86_64/aarch64, macOS arm64) without duplicating the workflow; dated
+  evidence is in `HISTORY.md`. Next, re-run the real isolated Linux arm64 04
+  scenario with fresh imported libc++ artifacts. If the corrected cheap
+  diagnostics still do not localize the original corruption, proceed to the
+  separately planned dedicated/aligned canary and guard-malloc work;
+  otherwise fix the localized CRT/Skia defect and complete
+  `verify_dist.py`/atomic publication.
   The completed allocator-diagnostic corrections are recorded in
   `HISTORY.md`'s 2026-09-14 entries.
 - [ ] **Make imported libc++/libc++abi/libunwind relink when the predecessor

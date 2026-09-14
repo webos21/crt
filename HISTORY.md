@@ -36,8 +36,10 @@ substantive update.
   existing single-build five-host GitHub workflow remains unchanged: its
   ordinary `malloc_test` receives the common regressions without doubling CI
   cost, while the diagnostic-only branch is covered by the explicit local ON
-  runs above. The original isolated Linux arm64 Skia corruption remains open
-  and will be re-run after this tranche passes that five-host CI matrix.
+  runs above. Commit `9b5619d` then passed all five ordinary CI legs -- Linux
+  x86_64/aarch64, Windows x86_64/aarch64, and macOS arm64 -- in GitHub Actions
+  run `34839721735`. The original isolated Linux arm64 Skia corruption remains
+  open; re-running that real stage-04 scenario is the next step.
 
 - **Validated `CRT_ENABLE_DEBUG_MALLOC` against the real Skia scenario,
   fixed a false positive it produced, and used it to find a second,
