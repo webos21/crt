@@ -10,6 +10,42 @@ substantive update.
 
 ## 2026-09-15
 
+- **Fixed the imported libc++/libc++abi/libunwind absolute-RUNPATH gap:
+  the isolated Linux SDK's C++ runtime no longer secretly depends on this
+  checkout's own `out/` tree.** `tools/crt-cc`/`tools/crt-c++`'s Linux
+  shared-link paths (the exact code that links the imported libc++
+  external build's own shared library targets) unconditionally baked
+  `-Wl,-rpath,${CRT_SYSROOT}/lib` -- an absolute, checkout-specific path
+  -- into every such link, with no separate `$ORIGIN` entry. Changed both
+  to emit `$ORIGIN` as the *first* `-rpath`, keeping the existing absolute
+  path as a second, fallback entry: the external build's own ephemeral
+  CMake `try_compile`/`try_run` configure-time probes run from throwaway
+  scratch directories with no `libc.so` co-located, so they still need the
+  absolute fallback, but the actual installed shared library (co-located
+  with `libc.so` in every layout this project produces, in-tree or
+  packaged) now resolves via `$ORIGIN` first. Strictly additive -- nothing
+  that worked before stops working, confirmed by the full in-tree `ctest`
+  suite staying 113/113 after the change.
+
+  Verified the fix directly rather than trusting the mechanism alone:
+  rebuilt the imported `libc++.so.1`/`libc++abi.so.1`/`libunwind.so.1`
+  (a manual `rm -rf .../external/llvm-runtimes/build/{libcxx,libcxxabi,
+  libunwind}` was still required first -- the separate, still-open "no
+  relink on `libc.so` change" gap tracked in `TODO.md` applies here too,
+  confirming it is real and independent of the RUNPATH fix). `readelf -d`
+  on the rebuilt libraries shows `RUNPATH: [$ORIGIN:/home/.../out/.../
+  dist/01-c/lib]` in that order. Rebuilt and repackaged `dist/03-gfx-
+  simple`, copied it to an unrelated scratch path, and used `/lib/ld-
+  linux-aarch64.so.1 --list libc++.so.1` (a direct, standalone dependency
+  resolution -- no full executable link needed) to confirm `libc.so`/
+  `libm.so`/`libdl.so` resolve from the *copied* SDK's own `lib/`. Then
+  renamed the original checkout's `out/linux-host-ninja-debug/dist/01-c`
+  away entirely and re-ran the same check: resolution still succeeds
+  identically, proving the copied SDK no longer depends on that path at
+  all (restored immediately afterward). `libatomic.so.1`/`libc.so.6`
+  correctly continue to resolve from the real host system paths, as
+  intended -- this fix only concerns CRT's own three imported libraries.
+
 - **Closed off the "another ELF symbol-interposition/host-ABI-mixing bug"
   explanation for the Skia/lavapipe heap corruption with a direct
   `LD_DEBUG=bindings,libs` audit.** Re-ran the preserved failing

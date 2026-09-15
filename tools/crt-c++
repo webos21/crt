@@ -966,8 +966,16 @@ if [ "$target_os" = linux ]; then
     set -- "$@" "${CRT_SYSROOT}/lib/libc.so" \
       "${CRT_SYSROOT}/lib/libm.so" "${CRT_SYSROOT}/lib/libdl.so" \
       "${CRT_SYSROOT}/lib/libclang_rt.builtins.a"
+    # $ORIGIN first, ${CRT_SYSROOT}/lib as a fallback: see tools/crt-cc's
+    # matching, identically-reasoned comment (same 2026-09-15 fix, same
+    # bug -- this is the exact code path that links the imported
+    # libc++.so.1/libc++abi.so.1/libunwind.so.1 shared runtimes
+    # themselves). Strictly additive: CMake's own external-build
+    # try_compile/try_run probes still resolve via the unchanged absolute
+    # fallback; the actual installed shared object gets a working
+    # $ORIGIN-relative RUNPATH wherever it is later copied to.
     run_cxx -nostdlib -nostartfiles -nodefaultlibs \
-      -Wl,--gc-sections "-Wl,-rpath,${CRT_SYSROOT}/lib" "$@"
+      -Wl,--gc-sections -Wl,-rpath,'$ORIGIN' "-Wl,-rpath,${CRT_SYSROOT}/lib" "$@"
   fi
 
   set -- "$@" "${CRT_SYSROOT}/lib/crt1.o" "-L${CRT_SYSROOT}/lib" \

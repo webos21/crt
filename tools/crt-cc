@@ -652,8 +652,29 @@ fi
 # internally-added SDK path when CRT_SYSROOT contained a space.
 if [ "$target_os" = linux ]; then
   if [ "$shared_mode" -eq 1 ]; then
+    # $ORIGIN goes first, ${CRT_SYSROOT}/lib stays as a second, fallback
+    # RUNPATH entry -- a real, confirmed bug (2026-09-15): this project's
+    # own external-consumer builds (the imported libc++/libc++abi/
+    # libunwind runtimes among them) always end up installed into the
+    # *same* lib/ directory as libc.so, in every layout this project
+    # produces (the in-tree predecessor SDK and every packaged
+    # distribution stage alike) -- so $ORIGIN is always correct for the
+    # shared object actually being linked here. The absolute
+    # ${CRT_SYSROOT}/lib fallback is kept, unchanged, because CMake's own
+    # ephemeral try_compile/try_run configure-time probes for an external
+    # build are *not* installed next to libc.so at all (they run from a
+    # throwaway build-scratch directory), so they still need it -- this
+    # is strictly additive: ld.so tries $ORIGIN first and only falls back
+    # to the absolute path if that lookup fails, so nothing that worked
+    # before stops working. Confirmed via `readelf -d` inside a freshly
+    # copied isolated 04-gfx-media SDK that libc++.so.1/libc++abi.so.1/
+    # libunwind.so.1 previously carried *only* the absolute
+    # out/.../dist/01-c/lib RUNPATH -- silently depending on this exact
+    # checkout's own build tree even inside an otherwise self-contained
+    # packaged SDK. See HISTORY.md's 2026-09-15 entries for the full
+    # isolated-04 investigation this was found during.
     run_cc -nostdlib -nostartfiles -nodefaultlibs \
-      -Wl,--gc-sections "-Wl,-rpath,${CRT_SYSROOT}/lib" \
+      -Wl,--gc-sections -Wl,-rpath,'$ORIGIN' "-Wl,-rpath,${CRT_SYSROOT}/lib" \
       "$@" "-L${CRT_SYSROOT}/lib" \
       "${CRT_SYSROOT}/lib/libc.so" "${CRT_SYSROOT}/lib/libm.so" \
       "${CRT_SYSROOT}/lib/libdl.so" \

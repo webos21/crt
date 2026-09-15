@@ -103,12 +103,12 @@ a result.
      between them in either direction. This rules out a second ELF-
      interposition-class bug. Full detail: `HISTORY.md`'s 2026-09-15
      entries.
-  2. **Active next step**: fix the imported-libc++/libc++abi/libunwind
-     absolute-RUNPATH gap (item just below). Do this before the Mesa A/B
-     comparison in step 3: an A/B test is only meaningful once the SDK
-     genuinely only depends on itself, not on this checkout's own `out/`
-     tree.
-  3. **Mesa A/B comparison**, only after step 2: install a different Mesa/
+  2. ~~Fix the imported-libc++/libc++abi/libunwind absolute-RUNPATH gap~~
+     -- **fixed 2026-09-15** (item just below); the SDK's C++ runtime is
+     now genuinely self-contained, verified with the original checkout's
+     `out/` tree renamed away entirely. The gap's second half (no relink
+     on `libc.so` change) is still open but does not block step 3 below.
+  3. **Active next step: Mesa A/B comparison.** Install a different Mesa/
      lavapipe build into a separate prefix (do not overwrite the system
      package) and select it via `VK_ICD_FILENAMES` against the same
      example. Outcomes: passes on a newer Mesa -> treat 25.2.8/aarch64
@@ -134,38 +134,34 @@ a result.
   option-OFF pass for it. Decide this with the project owner once step 3
   gives a real answer, not before.
 - [ ] **Make imported libc++/libc++abi/libunwind self-contained in a
-  packaged SDK: fix their baked-in absolute RUNPATH, and relink them when
-  the predecessor `libc.so` changes.** Two distinct, confirmed gaps in the
-  same three files (full evidence in `HISTORY.md`'s 2026-09-14/2026-09-15
-  entries; this is step 1 of the Skia investigation's own next-steps
-  above -- do this first, before trusting any further diagnosis against an
-  isolated SDK):
-  1. **Absolute RUNPATH, not `$ORIGIN`.** `libc++.so.1`/`libc++abi.so.1`/
-     `libunwind.so.1` each carry `<this-checkout>/out/.../dist/01-c/lib` as
-     a baked-in `RUNPATH` (confirmed via `readelf -d` inside a freshly
-     copied isolated SDK), traced to `tools/crt-cc`/`tools/crt-c++` always
-     baking `-Wl,-rpath,${CRT_SYSROOT}/lib` into shared links, with no
-     relink/patch step when `create_dist.py`'s `--libcxx-install` copies
-     the built `.so` files into a packaged stage. This makes an isolated
-     stage's own C++ consumers silently depend on this exact checkout's
-     `out/` tree still existing, not on the packaged SDK's own copy --
-     breaking the isolated-stage contract's "self-contained SDK" premise.
-     Fix by relinking (or `patchelf --set-rpath`-ing) these three libraries
-     to `$ORIGIN` wherever they get installed, matching the same portability
-     fix already applied to every CRT-owned shared library via
-     `crt_configure_shared_runtime()`'s `$ORIGIN` `BUILD_RPATH`/
-     `INSTALL_RPATH` (`CMakeLists.txt`).
-  2. **No relink on `libc.so` change.** The nested build treats the sysroot
-     library as an untracked link input and can silently retain stale
-     symbol references. Add a real dependency edge or a predecessor-
+  packaged SDK.** Two distinct, confirmed gaps in the same three files
+  (full evidence in `HISTORY.md`'s 2026-09-14/2026-09-15 entries).
+  1. ~~Absolute RUNPATH, not `$ORIGIN`~~ -- **fixed 2026-09-15**
+     (`tools/crt-cc`/`tools/crt-c++`). Both wrappers' Linux shared-link
+     paths now emit `$ORIGIN` as the *first* `-rpath` entry, keeping the
+     existing absolute `${CRT_SYSROOT}/lib` as a second, fallback entry
+     purely for the external build's own ephemeral CMake try_compile/
+     try_run configure-time probes (never installed, so `$ORIGIN` cannot
+     help them) -- strictly additive, nothing that worked before stops
+     working. Verified directly: rebuilt `libc++.so.1`/`libc++abi.so.1`/
+     `libunwind.so.1` and confirmed via `readelf -d` both RUNPATH entries
+     are present in that order; copied the rebuilt `03-gfx-simple` SDK to
+     an unrelated path and confirmed via `/lib/ld-linux-aarch64.so.1
+     --list libc++.so.1` that `libc.so`/`libm.so`/`libdl.so` resolve from
+     the *copied* SDK's own `lib/`, both with the original checkout's
+     `out/.../dist/01-c` present and with it renamed away entirely (the
+     real test: no checkout-absolute path is reachable at all once
+     renamed, and resolution still succeeds). Full in-tree `ctest` suite
+     stayed 113/113 after the change -- no regression.
+  2. **Still open: no relink on `libc.so` change.** The nested build
+     treats the sysroot library as an untracked link input and can
+     silently retain stale symbol references -- this fix's own
+     verification still needed a manual `rm -rf .../build/{libcxx,
+     libcxxabi,libunwind}` first, confirming this gap is real and
+     independent of item 1. Add a real dependency edge or a predecessor-
      inventory fingerprint that forces the affected nested build
      directories fresh; prove an actual `libc.so` change propagates
      without manual deletion.
-  Verify both together by copying the fixed SDK to a different path and
-  confirming: `readelf -d` shows no checkout-absolute path anywhere;
-  `LD_DEBUG=libs` shows every CRT runtime library loading from inside the
-  copied SDK; a C++ shared smoke test runs with the original `out/.../
-  dist/01-c/lib` renamed out of the way.
 
 ### Distribution hardening
 
