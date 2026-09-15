@@ -155,15 +155,55 @@ a result.
        actually matters** for this project's own acceptance bar, even
        though upstream narrowed the defect's exposure window sometime
        between 25.2.8 and 26.2.2 (likely a caching-path change that
-       incidentally shrinks the race, not necessarily a deliberate fix of
-       this exact bug). This is strong, precise, fully reproducible
-       evidence of a specific trigger (first/cold shader compilation) --
-       actionable enough to go straight to an ASan-instrumented Mesa
-       debug build targeting that path, rather than building Mesa `main`
-       next (unlikely to differ meaningfully from `26.2.2`, and the
-       cold/warm split already tells us more than a third version number
-       would). **Awaiting a decision on how to proceed** (see the outcome
-       list below) before committing to that heavier build.
+       incidentally shrinks the window, not necessarily a deliberate fix
+       of this exact bug).
+     - ~~S2.1~~ -- **done 2026-09-15: not a data race.** Two cheap
+       controlled reruns against the existing S2 build before committing
+       to an ASan rebuild: `MESA_SHADER_CACHE_DISABLE=true` with
+       validation OFF and the default thread count (3/3 fail -- this is
+       not really about *disk*-cache management specifically, but about
+       whichever code path runs whenever a shader isn't already cached,
+       disk cache or none), and the same plus `LP_NUM_THREADS=1` forcing
+       `llvmpipe` single-threaded (also 3/3 fail). Failing single-
+       threaded means this is **not a race condition** -- it is a
+       deterministic memory-safety defect (heap overflow, use-after-free,
+       or uninitialized read) in Mesa's compiler/JIT path itself, not a
+       timing-dependent one. Retract the earlier "cold-shader-cache race"
+       phrasing; "cold shader-compilation-path-dependent corruption" is
+       the accurate description going forward.
+     - **S3, active next step: ASan-instrumented Mesa 26.2.2 build**,
+       same minimal lavapipe/llvmpipe+Wayland options and LLVM 20.1.2, in
+       its own prefix, purely to localize the exact faulting write (a
+       Mesa source location and call stack), not just the point where
+       glibc later notices the damage. Build with ASan enabled, debug
+       symbols and frame pointers on, leak detection off (`ASAN_OPTIONS=
+       detect_leaks=0`) so it stops at the first invalid access instead
+       of a leak report; `LD_PRELOAD` the ASan runtime ahead of the
+       loader if it does not attach on its own. Run in this order, since
+       ASan itself perturbs timing: (1) cache disabled, validation OFF;
+       (2) fresh empty cache, validation OFF; (3) validation ON, only if
+       (1)/(2) do not reproduce; (4) compare default vs `LP_NUM_THREADS=1`
+       only if S2.1 had shown a threading-count-dependent difference (it
+       did not, so this is a lower-priority check here). Do not add
+       UBSan/TSan yet -- ASan first.
+       Branch on the result: **ASan reports a Mesa source location** ->
+       capture the call stack and Mesa commit, write a minimal standalone
+       Vulkan repro if practical, and file a Mesa upstream issue. **ASan
+       points into LLVM itself** -> examine the exact shader/JIT input
+       Mesa hands across that boundary before considering instrumenting
+       LLVM separately. **ASan reports nothing and the same glibc abort
+       still happens** -> the corrupting code is probably in an
+       uninstrumented library in the process (re-verify which Mesa/LLVM
+       paths actually loaded); consider a glibc-heap-configuration check
+       or a Valgrind-family tool next. **ASan does not reproduce at all**
+       -> widen the timing window first (validation ON plus cache
+       disabled) before concluding anything; if it still doesn't
+       reproduce, let the `LP_NUM_THREADS=1` vs default comparison (which
+       showed no difference under plain S2.1, but ASan's own overhead
+       could change that) decide whether TSan is worth adding next.
+       **Fails identically under ASan too** -> only then consider Mesa
+       `main`, and only as an upstream-facing "already fixed?" check
+       after filing, not as an earlier diagnostic step.
      Per-stage control protocol (keep identical across every stage):
      pin the example/SDK by SHA-256; same Wayland compositor/session; pick
      the ICD explicitly via `VK_DRIVER_FILES` (and matching
@@ -179,21 +219,29 @@ a result.
      Mesa candidate -- only the preserved `crtgfx_skia_example` binary is
      needed for A/B; re-run the full stage once, at the end, only against
      whichever ICD turns out known-good.
-     Outcomes: a lavapipe-version swap passes -> Mesa lavapipe (or the
-     Ubuntu package specifically, per the S1 split above) is the confirmed
-     external defect -- record a minimum supported Mesa version or known
-     limitation, and file upstream if S1 and S2 both failed (build Mesa as
-     an ASan debug build first to localize the exact faulting write before
-     filing, rather than filing on the glibc-abort signature alone);
-     real GPU hardware, if any becomes available, also passes -> software-
-     lavapipe-only limitation, stage itself is sound; every ICD tried
-     (lavapipe versions and any hardware one) fails identically -> re-open
-     the CRT/Skia Vulkan integration boundary as the suspect instead.
-  4. Once root-caused, fix it in the right place (CRT, Skia, or a Mesa bug
+     S3's own branch list above supersedes any generic pass/fail outcome
+     summary here; also note real GPU hardware, if any becomes available,
+     passing would mean a software-lavapipe-only limitation (stage itself
+     sound) -- not yet testable on this host.
+  4. **Explicit do-not-do list for this whole investigation** (per the
+     project owner's 2026-09-15 review): do not pre-warm a shader cache
+     to make acceptance pass, and never ship a warm cache inside the SDK;
+     do not patch Skia source at this stage; do not rebuild the full
+     isolated-04 stage for every diagnostic condition (only the preserved
+     example binary is needed until a known-good ICD is confirmed); do
+     not expand `CRT_ENABLE_GUARD_MALLOC` or other CRT allocator
+     diagnostics further right now -- CRT's own allocator is already
+     cleared.
+  5. Once root-caused, fix it in the right place (CRT, Skia, or a Mesa bug
      report -- do not start a Mesa upstream patch or a Skia source change
-     before step 3's A/B result), then re-run the full real isolated Linux
-     arm64 04 build from fresh libc++/FreeType/FFmpeg/Skia and complete
-     `verify_dist.py`/atomic publication.
+     before S3's result), then re-run the full real isolated Linux arm64
+     04 build from fresh libc++/FreeType/FFmpeg/Skia and complete
+     `verify_dist.py`/atomic publication. Independently of this Mesa
+     investigation, also close out before that final rebuild: the
+     imported-libc++/libc++abi/libunwind relink-on-`libc.so`-change gap
+     and the removal of their installed absolute-RUNPATH fallback (both
+     tracked in the item just below), and `verify_dist.py`'s own
+     absolute-path/dependency checks.
   **Separately, reconsider whether one known external software-ICD defect
   should keep blocking `verify_dist.py`/atomic publication entirely** (a
   policy question, not yet decided): a reasonable split is to keep

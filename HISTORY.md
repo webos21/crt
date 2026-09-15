@@ -10,6 +10,29 @@ substantive update.
 
 ## 2026-09-15
 
+- **S2.1: the cold-path Mesa 26.2.2 corruption reproduces single-threaded
+  -- not a data race, a deterministic defect in the shader compile/JIT
+  path itself.** Two cheap controlled reruns against the existing S2
+  build, before committing to an ASan rebuild: (a) `MESA_SHADER_CACHE_
+  DISABLE=true` with validation OFF and the default `llvmpipe` thread
+  count -- 3/3 fail, confirming this is not really about *disk*-cache
+  management specifically (the earlier "cold vs warm `MESA_SHADER_CACHE_
+  DIR`" framing) but about whichever compile/JIT code path runs whenever
+  a shader is not already cached, disk cache or none; (b) the same, plus
+  `LP_NUM_THREADS=1` (forces `llvmpipe`'s software rasterizer/JIT down to
+  a single thread) -- also 3/3 fail. Per this investigation's own stated
+  decision rule, failing single-threaded means this should *not* be
+  called a race condition: it reproduces with no concurrency involved at
+  all, so it is treated as an ordinary (deterministic) memory-safety
+  defect in Mesa's compiler/JIT code path -- a heap overflow, use-after-
+  free, or uninitialized-memory read, not a timing-dependent one.
+  Retracting the earlier "cold-shader-cache race" phrasing accordingly;
+  the accurate description is "cold shader-compilation-path-dependent
+  corruption," with cache warmth acting only as a way to *skip* that code
+  path entirely on a repeat run, not as evidence of a race by itself.
+  Proceeds to an ASan-instrumented Mesa 26.2.2 build (S3) to localize the
+  exact faulting write, per `TODO.md`'s plan, regardless of this result.
+
 - **Mesa lavapipe A/B comparison, stage S2: the latest stable Mesa
   (`26.2.2`) narrows the Skia heap corruption to a cold-shader-cache
   race, but still fails under the exact condition a real isolated-04
