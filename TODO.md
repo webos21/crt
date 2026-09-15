@@ -136,16 +136,34 @@ a result.
        defect: the corruption is in upstream Mesa 25.2.8 itself, or in a
        defect common to this whole configuration independent of Mesa's
        version. Proceeds to S2.
-     - **S2, active next step**: the current latest stable Mesa release
-       tag (`mesa-26.2.2` as of 2026-09-15), same build options/toolchain,
-       own prefix. S2 passes -> a since-fixed upstream defect between
-       25.2.8 and 26.2.2 (record a minimum supported Mesa version). S2
-       also fails -> either a still-open lavapipe defect or a narrower
-       CRT/Skia-lavapipe interop problem common to every Mesa version
-       tried so far.
-     - Mesa `main`, only if S2 also fails -- do not build it earlier, it
-       only adds an unnecessary extra axis before S1/S2 have narrowed
-       things down.
+     - ~~S2~~ -- **done 2026-09-15, narrowed but not fixed**: the current
+       latest stable Mesa tag `mesa-26.2.2`, same build options/toolchain,
+       own prefix, driver selection confirmed via `VK_LOADER_DEBUG=driver`.
+       Neither a clean pass nor a clean fail: **the failure is entirely
+       shader-cache-state-dependent**. With a *fresh, empty*
+       `MESA_SHADER_CACHE_DIR` (a cold cache -- first-ever compile of this
+       example's shaders), it fails with the identical corruption
+       **5/5**. With that same cache directory reused afterward (now
+       warm), it then passes **10/10**. S1 (`mesa-25.2.8`) shows no such
+       distinction -- it fails **16/16** regardless of cache state (its
+       own shader-cache directory *did* get populated after its first
+       run, then stayed warm for the following 15, all of which still
+       failed identically), confirmed by deliberately re-running S1
+       against its own already-warm cache. Since a real isolated-04
+       acceptance run always starts with an empty shader cache (a fresh
+       SDK, first execution), **S2 still fails under the condition that
+       actually matters** for this project's own acceptance bar, even
+       though upstream narrowed the defect's exposure window sometime
+       between 25.2.8 and 26.2.2 (likely a caching-path change that
+       incidentally shrinks the race, not necessarily a deliberate fix of
+       this exact bug). This is strong, precise, fully reproducible
+       evidence of a specific trigger (first/cold shader compilation) --
+       actionable enough to go straight to an ASan-instrumented Mesa
+       debug build targeting that path, rather than building Mesa `main`
+       next (unlikely to differ meaningfully from `26.2.2`, and the
+       cold/warm split already tells us more than a third version number
+       would). **Awaiting a decision on how to proceed** (see the outcome
+       list below) before committing to that heavier build.
      Per-stage control protocol (keep identical across every stage):
      pin the example/SDK by SHA-256; same Wayland compositor/session; pick
      the ICD explicitly via `VK_DRIVER_FILES` (and matching

@@ -10,6 +10,49 @@ substantive update.
 
 ## 2026-09-15
 
+- **Mesa lavapipe A/B comparison, stage S2: the latest stable Mesa
+  (`26.2.2`) narrows the Skia heap corruption to a cold-shader-cache
+  race, but still fails under the exact condition a real isolated-04
+  run always starts from.** Built upstream Mesa's `mesa-26.2.2` tag with
+  the identical options/toolchain as S1, into its own prefix, driver
+  selection confirmed via `VK_LOADER_DEBUG=driver`. The first 3
+  validation-OFF runs gave a mixed result (1 fail, 2 pass) against a
+  shader-cache directory that started empty and got populated by the
+  first run -- rather than accept that as noise, ran 10 more
+  validation-OFF reuses of that now-warm cache (10/10 pass), then 5
+  fresh runs each against a brand-new empty `MESA_SHADER_CACHE_DIR`
+  (5/5 fail, identical `free(): invalid next size (fast)` signature).
+  **The failure is deterministically tied to shader-cache state**: cold
+  cache fails every time, warm cache passes every time. All 3
+  validation-ON runs failed regardless (the validation layer's own
+  overhead plausibly reintroduces the same timing window even against a
+  warm cache -- consistent with the earlier 2026-09-15 finding that the
+  validation layer changed the crash's exact call site between two
+  otherwise-unrelated Vulkan entry points).
+
+  To rule out this being sample-size noise on S1 rather than a genuine
+  S1-vs-S2 behavioral difference, re-ran S1 (`mesa-25.2.8`) 10 more times
+  against its own already-warm shader-cache directory (populated with 12
+  files after its very first run): **10/10 still fail**, for a running
+  total of 16/16 failures on S1 regardless of cache state. S1 has no
+  cold/warm distinction at all; S2's failure is narrowly scoped to the
+  cold-cache path specifically.
+
+  A real isolated-04 acceptance run always starts from a fresh SDK with
+  no pre-existing shader cache, so S2 does not actually pass the
+  condition that matters for this project's own acceptance bar, even
+  though upstream Mesa evidently narrowed this defect's exposure window
+  sometime between 25.2.8 and 26.2.2 (plausibly an incidental effect of
+  a caching-path change, not necessarily a deliberate fix of this exact
+  bug -- not established either way). This is precise, 100%-reproducible
+  evidence of a specific trigger (first/cold shader compilation) and is
+  judged actionable enough to go straight to an ASan-instrumented Mesa
+  debug build targeting that path next, rather than also building Mesa
+  `main` (unlikely to differ meaningfully from a release two months old,
+  and the cold/warm split already carries more diagnostic signal than a
+  third version point would). Decision on how to proceed from here is
+  pending, tracked in `TODO.md`.
+
 - **Mesa lavapipe A/B comparison, stage S1: upstream `mesa-25.2.8` fails
   identically to the Ubuntu system package, ruling out a distro-specific
   packaging defect.** Built upstream Mesa's own `mesa-25.2.8` tag from
