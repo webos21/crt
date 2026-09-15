@@ -51,6 +51,72 @@ substantive update.
   the one native Linux/aarch64 acceptance host" question -- it does, and
   it found a real bug on its very first real run here.
 
+- **Completed the generic Mach-O dependency-inventory distribution-hardening
+  tranche on macOS, closing out the last host in this series.** Added a new
+  dependency-free Mach-O load-command parser (`tools/crt_macho.py`, matching
+  `crt_elf.py`/`crt_pe.py`'s own style and scope: this project only ever
+  ships native little-endian thin Mach-O, so byte-swapped/fat forms are
+  treated the same as a non-Mach-O file, not specially handled) exposing
+  `dependencies()` (every `LC_LOAD_DYLIB`/`LC_LOAD_WEAK_DYLIB`/
+  `LC_REEXPORT_DYLIB`/`LC_LOAD_UPWARD_DYLIB` install name), `dylib_id()`
+  (a dylib's own `LC_ID_DYLIB`, `None` for a non-dylib), and `rpaths()`
+  (`LC_RPATH` entries, for parity with `crt_elf.py`'s `runtime_paths()`).
+  `tools/crt_binary_dependencies.py` now validates macOS distributions too:
+  each dependency normalizes to a manifest-comparable component (an
+  `@rpath`/`@loader_path`/`@executable_path` reference or a plain
+  `/usr/lib/*.dylib` reduces to its basename; a real framework path reduces
+  to its own `Name.framework` bundle name) and must match either a bundled
+  SDK file or a declared `external_prerequisites` component; any other
+  absolute path -- one outside the recognized `/System/Library/`/`/usr/lib/`
+  system roots -- fails the same way an embedded ELF/PE path already does.
+  Every packaged dylib's own `LC_ID_DYLIB` must additionally be a portable
+  `@rpath/...` spelling, never an absolute path. `crt_macho.py` was added to
+  `DIST_PORTING_TOOLS`/`STAGE_VALIDATION_PROJECT_PATHS` alongside its ELF/PE
+  siblings so every 02/03/04 source asset and binary SDK carries the
+  complete validator import closure, matching the existing regression test
+  that catches a missing helper before it reaches an isolated successor's
+  own `verify_dist.py`.
+
+  Regenerating a fresh `03-gfx-simple` and a real option-ON isolated
+  `03-gfx-simple -> 04-gfx-media` stage build and running the new gate
+  against it (rather than just synthetic fixtures) reproduced the exact
+  install-name leak the earlier macOS binary-import audit had already found
+  by hand: FreeType's own `builds/unix/configure` (the real, ~20000-line
+  autotools/libtool-generated configure FreeType's top-level `./configure`
+  wrapper delegates to) hardcodes GNU Libtool's stock Darwin
+  `archive_cmds`/`archive_expsym_cmds`, which bake `-install_name
+  $rpath/$soname` -- `$rpath` being whatever `-rpath` argument the calling
+  Makefile passes to `libtool --mode=link` (here, `$(libdir)`, an absolute,
+  build-time-only path), confirmed via `otool -D lib/libfreetype.6.dylib`
+  showing exactly that temp path as its own `LC_ID_DYLIB` before the fix.
+  Unlike `porting/recipes/mbedtls.json`'s own `-install_name @rpath/$@`
+  patch (mbedtls builds its dylib via a raw, non-libtool `$(CC) -dynamiclib`
+  recipe that never passed `-install_name` at all), FreeType goes through
+  libtool, so the fix instead replaces libtool's own hardcoded `$rpath`
+  token with the literal string `@rpath` at its one real definition site in
+  `builds/unix/configure` (two new `patches` entries in
+  `porting/recipes/freetype.json`; the identical text in
+  `builds/unix/aclocal.m4` is autoreconf-only and never read by this
+  project, which only ever runs the tarball's already-generated
+  `configure`). Verified for real: `otool -D` on the freshly rebuilt
+  `libfreetype.6.dylib` now reads `@rpath/libfreetype.6.dylib`, and the new
+  gate -- exercised through the SAME full stage build (real FreeType/
+  FFmpeg/Skia, the standalone CMake project's 8/8 ctest binaries, both
+  packaged `gfx-gpu`/`gfx-skia` examples presenting a real window) -- passes
+  `verify_dist.py` cleanly on both the regenerated `03-gfx-simple` and the
+  complete `04-gfx-media` SDK, with every actual Mach-O dependency
+  (`Foundation`/`AppKit`/`QuartzCore`/`CoreGraphics`/`CoreFoundation`/
+  `Metal`/`AudioToolbox`/`VideoToolbox`/`CoreVideo`/`CoreMedia`.frameworks,
+  `libobjc.A.dylib`, `libSystem.B.dylib`) mapping to a declared component
+  and none declared going unobserved. Six new synthetic-fixture tests
+  (parser round-trip, bundled/external classification, an undeclared
+  dependency, a leaked absolute-path dependency even when a same-named file
+  happens to be bundled, and a leaked absolute `LC_ID_DYLIB`) join the
+  existing ELF/PE suite in `tools/test_binary_dependencies.py`; `cmake
+  --workflow --preset macos-host-ninja-debug` stays 100% (104/104)
+  throughout. This closes the three-host generic binary-dependency-
+  inventory series that began with the 2026-09-15 ELF/PE tranche below.
+
 - **Completed the generic ELF/PE dependency-inventory distribution-hardening
   tranche on Windows and WSL Linux.** Added dependency-free ELF `DT_NEEDED`
   inspection to `tools/crt_elf.py` and a new minimal PE parser

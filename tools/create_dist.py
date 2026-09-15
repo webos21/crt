@@ -25,7 +25,7 @@ from crt_elf import remove_absolute_runtime_paths
 DIST_PORTING_TOOLS = (
     "crt-port-build.py", "fetch_ports.py", "crt-native-tool", "crt-stage-build.py",
     "crt_stage_recipe.py", "crt_dist_prerequisites.py", "crt_elf.py",
-    "crt_pe.py", "crt_binary_dependencies.py",
+    "crt_pe.py", "crt_macho.py", "crt_binary_dependencies.py",
 )
 DIST_PORTING_DIRS = ("recipes", "tests", "shims")
 DIST_WRAPPER_TOOLS = ("crt-cc", "crt-c++", "crt-cc.cmd", "crt-c++.cmd")

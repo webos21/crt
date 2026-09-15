@@ -49,12 +49,14 @@ such exception must be explicit in `manifest.json`; source/version/license
 metadata must accompany every third-party artifact that CRT does redistribute.
 Package construction and acceptance must fail when a manifest-declared header,
 link artifact, runtime library, or notice is absent. `verify_dist.py` also
-parses every packaged Linux ELF `DT_NEEDED` entry and Windows PE normal/delay
-import without an external inspection tool. Each dependency leaf name must
-match a real target binary in the cumulative SDK or be exactly declared as an
-`external_prerequisites` component; embedded paths and undeclared host
-libraries fail acceptance. The equivalent Mach-O load-command gate remains
-the next hardening tranche.
+parses every packaged Linux ELF `DT_NEEDED` entry, Windows PE normal/delay
+import, and macOS Mach-O `LC_LOAD_DYLIB`-family dependency without an
+external inspection tool. Each dependency leaf name (a Mach-O dependency
+normalizes to its own basename, or to its `Name.framework` bundle name for a
+real framework) must match a real target binary in the cumulative SDK or be
+exactly declared as an `external_prerequisites` component; embedded paths,
+undeclared host libraries, and a packaged macOS dylib whose own `LC_ID_DYLIB`
+is not a portable `@rpath/...` spelling all fail acceptance.
 
 Simple Graphics intentionally excludes Skia CPU raster and text, Skia GPU,
 and the public `crtgfx/gpu.h` surface. Its drawing contract is the mapped

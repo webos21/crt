@@ -10,7 +10,9 @@
     "sha1": "62e26b89a057ad4f1e28af977945d5c1975a8e67",
     "md5": "5e78e6fdce5a61d3075e4c25e9852f84"
   },
-  "dependencies": ["make"],
+  "dependencies": [
+    "make"
+  ],
   "build": {
     "system": "configure",
     "configure_args": [
@@ -34,6 +36,18 @@
         "find": "\t$(LIBTOOL) --mode=install $(INSTALL)                             \\\n                                  $(PROJECT_LIBRARY) $(DESTDIR)$(libdir)",
         "replace": "\t$(LIBTOOL) --mode=install $(INSTALL)                             \\\n                                  $(PROJECT_LIBRARY) \"$(DESTDIR)$(libdir)\"",
         "reason": "A real, confirmed bug (2026-09-13), found running this project's own path-with-spaces acceptance for the first time on macOS, one step past the top-level configure/MAKE fixes above: `$(DESTDIR)$(libdir)` is completely unquoted in this recipe line, so `make install`'s own real `/bin/sh -c` execution of the fully-expanded command word-splits it -- confirmed directly: `libtool: error: '<truncated-fragment>/lib' must be an absolute directory name`, libtool itself rejecting the last, mangled word-split fragment as not starting with `/`. This is only the one line actually exercised so far (libtool's own install mode is the first one in this Makefile to *validate* its destination argument and so the first to fail loudly) -- builds/unix/install.mk has several more `$(DESTDIR)$(...)`-interpolating recipe lines (header/pkgconfig/aclocal installation) that are equally unquoted and may need the same fix once install actually reaches them; add narrowly, one real failure at a time, matching this whole recipe's own already-established practice, rather than preemptively patching lines never yet confirmed to break."
+      },
+      {
+        "file": "builds/unix/configure",
+        "find": "    archive_cmds=\"\\$CC -dynamiclib \\$allow_undefined_flag -o \\$lib \\$libobjs \\$deplibs \\$compiler_flags -install_name \\$rpath/\\$soname \\$verstring $_lt_dar_single_mod$_lt_dsymutil\"",
+        "replace": "    archive_cmds=\"\\$CC -dynamiclib \\$allow_undefined_flag -o \\$lib \\$libobjs \\$deplibs \\$compiler_flags -install_name @rpath/\\$soname \\$verstring $_lt_dar_single_mod$_lt_dsymutil\"",
+        "reason": "A real, confirmed bug (2026-09-15, this project's own macOS Mach-O dependency-inventory acceptance): FreeType's own builds/unix/configure (the real, ~20000-line autotools/libtool-generated configure this port's top-level ./configure wrapper delegates to, see this recipe's own notes) hardcodes GNU Libtool's stock Darwin archive_cmds/archive_expsym_cmds, which bake `-install_name $rpath/$soname` -- where $rpath is literally whatever `-rpath` argument the calling Makefile passes to `libtool --mode=link` (here, $(libdir), an absolute, build-time-only path under this project's own tempfile-based work root) and $soname expands to libfreetype.6.dylib at actual link time. Confirmed for real via `otool -D lib/libfreetype.6.dylib` on a freshly regenerated 04-gfx-media SDK: its own LC_ID_DYLIB was the literal build-time temp path, not a portable `@rpath/...` spelling -- harmless only because nothing in this distribution dynamically links it (Skia links the static libfreetype.a instead), but exactly the kind of gap the new Mach-O acceptance gate in tools/crt_binary_dependencies.py now rejects unconditionally for every dylib this project ships. Same root cause and same fix shape as porting/recipes/mbedtls.json's own `-install_name @rpath/$@` patch (mbedtls builds its own dylib via a raw, non-libtool `$(CC) -dynamiclib` recipe and just never passed -install_name at all); here the fix instead replaces libtool's own hardcoded `$rpath` reference with the literal string `@rpath` at its one and only definition site in builds/unix/configure (patching the separate, autoreconf-only builds/unix/aclocal.m4 copy of the same text would have no effect -- this project never runs autoreconf, only the already-generated configure shipped in the release tarball). $soname itself is left untouched (still substituted by libtool at real link time), so the resulting LC_ID_DYLIB becomes exactly `@rpath/libfreetype.6.dylib`."
+      },
+      {
+        "file": "builds/unix/configure",
+        "find": "    archive_expsym_cmds=\"$SED 's|^|_|' < \\$export_symbols > \\$output_objdir/\\$libname-symbols.expsym~\\$CC -dynamiclib \\$allow_undefined_flag -o \\$lib \\$libobjs \\$deplibs \\$compiler_flags -install_name \\$rpath/\\$soname \\$verstring $_lt_dar_single_mod$_lt_dar_export_syms$_lt_dsymutil\"",
+        "replace": "    archive_expsym_cmds=\"$SED 's|^|_|' < \\$export_symbols > \\$output_objdir/\\$libname-symbols.expsym~\\$CC -dynamiclib \\$allow_undefined_flag -o \\$lib \\$libobjs \\$deplibs \\$compiler_flags -install_name @rpath/\\$soname \\$verstring $_lt_dar_single_mod$_lt_dar_export_syms$_lt_dsymutil\"",
+        "reason": "Sibling of the archive_cmds patch just above: archive_expsym_cmds is libtool's alternate Darwin link recipe used when export-symbol filtering applies, carrying the identical hardcoded `-install_name $rpath/$soname` bug. Patched the same way so whichever recipe libtool actually selects at FreeType's own real build time produces a portable @rpath install name."
       }
     ],
     "env": {
@@ -55,7 +69,10 @@
         ],
         "configure_cwd": "builds/unix",
         "pre_configure_copy": [
-          {"src": "builds/unix/unix.mk", "dst": "config.mk"}
+          {
+            "src": "builds/unix/unix.mk",
+            "dst": "config.mk"
+          }
         ],
         "env": {
           "RC": ""

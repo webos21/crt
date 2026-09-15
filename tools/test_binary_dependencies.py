@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for ELF/PE dependency parsing and manifest classification."""
+"""Tests for ELF/PE/Mach-O dependency parsing and manifest classification."""
 
 import struct
 import sys
@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from crt_binary_dependencies import validate_binary_dependencies
 from crt_elf import needed_libraries
 from crt_pe import imported_libraries
+from crt_macho import dependencies as macho_dependencies, dylib_id as macho_dylib_id
 from create_stage_source import STAGES, STAGE_VALIDATION_PROJECT_PATHS
 
 
@@ -81,6 +82,36 @@ def write_pe(path: Path, imports: list[str], delay_imports: list[str] | None = N
     path.write_bytes(data)
 
 
+def _pack_macho_dylib_command(cmd: int, name: str) -> bytes:
+    fixed_size = 24  # cmd, cmdsize, name offset, timestamp, current/compat version
+    encoded = name.encode("utf-8") + b"\0"
+    padded = (fixed_size + len(encoded) + 7) // 8 * 8
+    payload = bytearray(padded)
+    struct.pack_into("<IIIIII", payload, 0, cmd, padded, fixed_size, 0, 0, 0)
+    payload[fixed_size:fixed_size + len(encoded)] = encoded
+    return bytes(payload)
+
+
+def write_macho(path: Path, load_dylibs: list[str], id_name: str | None = None) -> None:
+    """A minimal, real mach_header_64 (arm64, native little-endian) carrying
+    one LC_ID_DYLIB (if id_name is given) followed by one LC_LOAD_DYLIB per
+    load_dylibs entry -- matches crt_macho.py's own MH_MAGIC_64 detection
+    and the dylib_command layout its _lc_string() decodes."""
+    commands = bytearray()
+    ncmds = 0
+    if id_name is not None:
+        commands += _pack_macho_dylib_command(0xd, id_name)  # LC_ID_DYLIB
+        ncmds += 1
+    for name in load_dylibs:
+        commands += _pack_macho_dylib_command(0xc, name)  # LC_LOAD_DYLIB
+        ncmds += 1
+    filetype = 6 if id_name is not None else 2  # MH_DYLIB : MH_EXECUTE
+    header = bytearray(32)
+    struct.pack_into("<IIIIIIII", header, 0, 0xfeedfacf, 0x0100000c, 0,
+                      filetype, ncmds, len(commands), 0, 0)
+    path.write_bytes(bytes(header) + bytes(commands))
+
+
 def manifest(target_os: str, components: list[str]) -> dict:
     return {
         "target": {"os": target_os},
@@ -131,6 +162,62 @@ class BinaryDependencyTests(unittest.TestCase):
             (dist / "libbad.so").write_bytes(b"bundled name must not excuse path")
             with self.assertRaises(SystemExit):
                 validate_binary_dependencies(dist, manifest("linux", []))
+
+    def test_macho_dependency_parser_and_classification(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            dist = Path(temporary)
+            app = dist / "examples" / "bin" / "app"
+            app.parent.mkdir(parents=True)
+            write_macho(app, [
+                "@rpath/libcrtgfx.dylib",
+                "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation",
+                "/usr/lib/libobjc.A.dylib",
+            ])
+            (dist / "lib").mkdir()
+            write_macho(dist / "lib" / "libcrtgfx.dylib",
+                        ["/usr/lib/libSystem.B.dylib"],
+                        id_name="@rpath/libcrtgfx.dylib")
+            self.assertEqual(
+                [
+                    "@rpath/libcrtgfx.dylib",
+                    "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation",
+                    "/usr/lib/libobjc.A.dylib",
+                ],
+                macho_dependencies(app),
+            )
+            self.assertIsNone(macho_dylib_id(app))
+            self.assertEqual("@rpath/libcrtgfx.dylib", macho_dylib_id(dist / "lib" / "libcrtgfx.dylib"))
+            validate_binary_dependencies(
+                dist, manifest("macos", [
+                    "Foundation.framework", "libobjc.A.dylib", "libSystem.B.dylib",
+                ]))
+
+    def test_macho_undeclared_dependency_and_leaked_id_path_fail(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            dist = Path(temporary)
+            app = dist / "app"
+            write_macho(app, ["/System/Library/Frameworks/Metal.framework/Versions/A/Metal"])
+            with self.assertRaises(SystemExit):
+                validate_binary_dependencies(dist, manifest("macos", []))
+            write_macho(app, ["@rpath/libcrtgfx.dylib"])
+            (dist / "libcrtgfx.dylib").write_bytes(b"bundled name must not excuse a leaked path")
+            with self.assertRaises(SystemExit):
+                validate_binary_dependencies(dist, manifest("macos", []))
+            # A dependency naming a private, non-system absolute path (the
+            # real 2026-09-14 libfreetype.6.dylib finding's own shape) fails
+            # even when something with that basename happens to be bundled.
+            write_macho(app, ["/private/tmp/build/sdk/lib/libcrtgfx.dylib"])
+            (dist / "libcrtgfx.dylib").write_bytes(b"bundled name must not excuse a leaked path")
+            with self.assertRaises(SystemExit):
+                validate_binary_dependencies(dist, manifest("macos", []))
+            # An otherwise-clean dylib whose own LC_ID_DYLIB is an absolute
+            # build-time path (not @rpath/...) must fail even though nothing
+            # depends on it yet -- exactly the libfreetype.6.dylib bug.
+            write_macho(app, [])
+            write_macho(dist / "libfreetype.6.dylib", [],
+                        id_name="/private/tmp/build/sdk/lib/libfreetype.6.dylib")
+            with self.assertRaises(SystemExit):
+                validate_binary_dependencies(dist, manifest("macos", []))
 
 
 if __name__ == "__main__":

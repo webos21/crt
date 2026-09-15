@@ -286,35 +286,18 @@ Harden the completed cross-host distribution baseline before adding another
 large upper-runtime dependency. Work in independently verifiable tranches and
 move each completed tranche into [`HISTORY.md`](HISTORY.md):
 
-The imported-libc++ predecessor/RUNPATH and generic ELF/PE dependency-
-inventory tranches are complete (including the packaged GNU make leak the ELF
-gate exposed, and the `libwayland-client.so.0` manifest-stage gap the same
-gate exposed for the first time on a native Linux/aarch64 host; see
-`HISTORY.md`'s 2026-09-15 entries). Continue with item 1's Mach-O boundary
-rather than reopening the deferred single-host Skia investigation.
+The imported-libc++ predecessor/RUNPATH, generic ELF/PE dependency-inventory,
+and generic Mach-O dependency-inventory tranches are all complete on all
+three hosts (including the packaged GNU make leak and the
+`libwayland-client.so.0` manifest-stage gap the ELF gate exposed on native
+Linux/aarch64, and the FreeType install-name leak the Mach-O gate exposed on
+macOS; see `HISTORY.md`'s 2026-09-15 entries).
 
-1. **Next tranche: remaining absolute-path/dependency policy (macOS).** The
-   generic inventory now validates ELF `DT_NEEDED` plus PE normal/delay imports,
-   and the earlier ELF tranche rejects absolute RPATH/RUNPATH entries. Add the
-   corresponding dependency-free Mach-O load-command parser and acceptance
-   gate, including `LC_LOAD_DYLIB` dependency classification and absolute
-   `LC_ID_DYLIB`/load-path rejection or normalization. The earlier macOS
-   binary-import audit found the concrete install-name case:
-   FreeType's own installed
-   `lib/libfreetype.6.dylib` (declared a `runtime_artifact`, but currently
-   unused -- Skia links `libfreetype.a` statically, and nothing else loads
-   it) carries an absolute build-time temp path as its own `LC_ID_DYLIB`
-   (GNU Libtool's Darwin install-name computation baking in `$(prefix)`
-   as given at build time), not a portable `@rpath/...` spelling. Harmless
-   today only because nothing dynamically links it; fix by giving
-   FreeType's own macOS dylib link recipe an explicit `-install_name
-   @rpath/$@` patch (same shape as `porting/recipes/mbedtls.json`'s
-   existing one), then add the matching Mach-O acceptance gate.
-2. **External consumers and path regression.** Add explicit external
+1. **External consumers and path regression.** Add explicit external
    CMake/configure-make consumer checks where the stage contract requires them.
    Preserve the now-complete three-host space-containing-prefix run as a
    regression acceptance requirement.
-3. **Deferred `05-js` isolated stage.** Extend
+2. **Deferred `05-js` isolated stage.** Extend
    `04-gfx-media -> 05-js` only after the real QuickJS core and bindings exist.
    Apply the same pinned asset, predecessor-only build, test, external-consumer,
    verification, and atomic-publish contract as the earlier transitions.
