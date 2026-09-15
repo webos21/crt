@@ -15,6 +15,7 @@ from pathlib import Path
 
 MH_MAGIC = 0xfeedface
 MH_MAGIC_64 = 0xfeedfacf
+MH_EXECUTE = 0x2
 
 # LC_REQ_DYLD-flagged commands (dyld must understand them or refuse to load)
 # carry that bit set in their own numeric value, matching mach-o/loader.h.
@@ -126,3 +127,18 @@ def rpaths(path: Path) -> list[str]:
     return [_lc_string(data, offset, cmdsize)
             for cmd, cmdsize, offset in _load_commands(data)
             if cmd == LC_RPATH]
+
+
+def is_executable(path: Path) -> bool:
+    """True for a real MH_EXECUTE Mach-O file, False for a dylib/bundle/
+    object file or a non-Mach-O file. dyld only ever starts a process from
+    an MH_EXECUTE image; every other image it loads may rely on RPATH
+    entries accumulated from the whole load chain rather than carrying its
+    own (this project's own shared libraries deliberately do, see
+    CMakeLists.txt's own crt_configure_shared_runtime()), so only an
+    MH_EXECUTE's own RPATH is meaningful to check in isolation."""
+    data = _read_macho(path)
+    if data is None:
+        return False
+    filetype = struct.unpack_from("<I", data, 12)[0]
+    return filetype == MH_EXECUTE

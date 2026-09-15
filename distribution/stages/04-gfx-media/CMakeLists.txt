@@ -549,6 +549,45 @@ target_include_directories(crtgfx_skia_gpu_window_demo PRIVATE
   "${CRTGFX_ROOT}/tests" "${CRTGFX_SKIA_ROOT}")
 target_link_libraries(crtgfx_skia_gpu_window_demo PRIVATE crtgfx_skia_shared)
 
+if(CRT_TARGET_OS STREQUAL "macos")
+  # A real, confirmed bug (2026-09-15, macOS absolute-RPATH portability
+  # follow-up to the Mach-O dependency-inventory tranche): crt-toolchain.
+  # cmake's own generic CMAKE_BUILD_RPATH/CMAKE_INSTALL_RPATH default
+  # (create_dist.py's own template) is a single absolute
+  # ${CRT_DISTRIBUTION_ROOT}/lib path, self-relocating only at *this
+  # stage's own build/publish time* -- once this stage is packaged and an
+  # end user extracts or moves the resulting SDK to any other location
+  # afterward, that already-baked absolute path goes stale, and any
+  # executable relying on it to resolve an `@rpath/...` dependency fails
+  # outright. Confirmed for real: `mv`-ing a freshly published
+  # `04-gfx-media` SDK to a new path and re-running the installed
+  # `crtgfx_skia_gpu_window_demo` failed with `dyld: Library not loaded:
+  # @rpath/libcrtgfx_skia.dylib ... tried: '<stale-old-path>/lib/
+  # libcrtgfx_skia.dylib' (no such file)` -- tools/build_stage_04_gfx_
+  # media.py's own rewrite_stale_macho_rpaths() only ever rewrites *its
+  # own* temp-root-to---output move during publishing, never a later,
+  # independent move an end user makes afterward. Fixed the same way as
+  # the already-fixed Linux `$ORIGIN`-vs-absolute-RUNPATH gap (see
+  # CMakeLists.txt's own crt_configure_shared_runtime() comment): add a
+  # portable `@loader_path`-relative RPATH *ahead of* the existing
+  # absolute one, so dyld's own ordered RPATH search finds the real file
+  # via the portable entry no matter where this SDK ends up, and only
+  # ever falls back to the absolute entry (still needed for configure-
+  # time try_compile/try_run probes, which never get installed under
+  # examples/bin at all) if that fails. `../../lib` matches this file's
+  # own `install(TARGETS ... RUNTIME DESTINATION examples/bin)` layout
+  # below exactly -- both executables always land two directories above
+  # `lib/`. crtgfx_gpu_window_demo does not currently link any `@rpath`-
+  # dependent shared library (it links crtgfx_gpu, a static archive), but
+  # gets the identical portable entry anyway so a future dependency change
+  # does not silently reopen this exact gap. Verified for real: after this
+  # fix, the same `mv`-then-rerun reproduction succeeds unchanged.
+  set_target_properties(crtgfx_gpu_window_demo crtgfx_skia_gpu_window_demo PROPERTIES
+    BUILD_RPATH "@loader_path/../../lib;${CMAKE_BUILD_RPATH}"
+    INSTALL_RPATH "@loader_path/../../lib;${CMAKE_INSTALL_RPATH}"
+  )
+endif()
+
 if(CRT_TARGET_OS STREQUAL "windows")
   # Both direct Skia-header consumers (crtgfx_skia_raster_smoke.cc,
   # skia_gpu_window_demo.cc -- both #include real Skia public headers,

@@ -290,8 +290,12 @@ The imported-libc++ predecessor/RUNPATH, generic ELF/PE dependency-inventory,
 and generic Mach-O dependency-inventory tranches are all complete on all
 three hosts (including the packaged GNU make leak and the
 `libwayland-client.so.0` manifest-stage gap the ELF gate exposed on native
-Linux/aarch64, and the FreeType install-name leak the Mach-O gate exposed on
-macOS; see `HISTORY.md`'s 2026-09-15 entries).
+Linux/aarch64, the FreeType install-name leak the Mach-O gate exposed on
+macOS, and -- found by external review, then reproduced and fixed for real
+by actually `mv`-ing a published SDK to a new path -- the stale-absolute-
+RPATH-after-relocation gap in `crtgfx_skia_gpu_window_demo`, now closed with
+a portable `@loader_path`-first RPATH plus a matching acceptance-gate check;
+see `HISTORY.md`'s 2026-09-15 entries).
 
 1. **External consumers and path regression.** Add explicit external
    CMake/configure-make consumer checks where the stage contract requires them.

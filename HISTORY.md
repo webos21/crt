@@ -10,6 +10,64 @@ substantive update.
 
 ## 2026-09-15
 
+- **Closed a real gap in the just-completed macOS Mach-O dependency-inventory
+  tranche, found by external review rather than by this session's own
+  testing.** The review correctly pointed out that the new gate checked
+  `LC_LOAD_DYLIB` dependencies and `LC_ID_DYLIB` self-identify but never
+  `crt_macho.py`'s own already-implemented `rpaths()`, and that the existing
+  isolated-stage publisher only rewrites a *temp-root-to-its-own---output*
+  move, not a later, independent move an end user makes after extracting the
+  published SDK -- so "Mach-O dependency and FreeType install-name
+  validation complete" was accurate, but "macOS absolute-path policy fully
+  complete" was premature. Reproduced the exact concern for real rather than
+  reasoning about it in the abstract: published a fresh isolated
+  `04-gfx-media` SDK, `mv`-ed the whole tree to a brand-new path (not a
+  copy -- the old path no longer exists), and reran the installed
+  `crtgfx_skia_gpu_window_demo` from there. It failed outright: `dyld:
+  Library not loaded: @rpath/libcrtgfx_skia.dylib ... tried:
+  '<the-old,-now-deleted-path>/lib/libcrtgfx_skia.dylib' (no such file)`.
+  Root cause: `crt-toolchain.cmake`'s own generic `CMAKE_BUILD_RPATH`/
+  `CMAKE_INSTALL_RPATH` default (`create_dist.py`'s own template) is a
+  single absolute `${CRT_DISTRIBUTION_ROOT}/lib` path, correct only at
+  *this stage's own build/publish time* -- `crtgfx_gpu_window_demo` carries
+  the identical stale RPATH but never actually depends on anything via
+  `@rpath` (it links its CRT libraries statically), so it kept working by
+  accident; only `crtgfx_skia_gpu_window_demo` (linking `crtgfx_skia_shared`)
+  was ever actually exposed. Fixed with a per-target macOS `BUILD_RPATH`/
+  `INSTALL_RPATH` override on both executables in
+  `distribution/stages/04-gfx-media/CMakeLists.txt`, adding a portable
+  `@loader_path/../../lib` entry *ahead of* the existing absolute one
+  (`../../lib` matches this file's own `install(TARGETS ... RUNTIME
+  DESTINATION examples/bin)` layout exactly) -- the identical shape as the
+  already-fixed Linux `$ORIGIN`-first, absolute-fallback-second RPATH,
+  rather than removing the absolute entry (a configure-time try_compile/
+  try_run probe genuinely still needs it). Verified for real with the exact
+  same reproduction: rebuilt, published, `mv`-ed to a new path again, and
+  `crtgfx_skia_gpu_window_demo` now runs and presents correctly
+  unchanged.
+
+  Added the matching acceptance-gate check to `tools/crt_binary_
+  dependencies.py`: any packaged macOS **executable** (checked via a new
+  `crt_macho.py` `is_executable()`, reading `MH_EXECUTE` from the mach
+  header) carrying an `@rpath` dependency must also carry at least one
+  `@loader_path`/`@executable_path` RPATH entry. Deliberately scoped to
+  executables only, not every Mach-O file with an `@rpath` dependency as
+  first drafted: that first draft produced a real false positive against
+  `lib/libdl.dylib`/`lib/libm.dylib` (and would have against every other
+  `crt_configure_shared_runtime()`-configured shared library too) --
+  confirmed for real that dyld accumulates `LC_RPATH` entries across the
+  *whole* load chain, so a shared library resolving its own `@rpath`
+  dependency via whatever executable loads it (this project's own
+  `crt_configure_shared_runtime()` deliberately sets `INSTALL_RPATH ""` on
+  macOS for exactly this reason) is by design, not a gap, and rejecting it
+  would have broken every one of this project's own already-correct shared
+  libraries. Six existing/new synthetic-fixture tests in `tools/test_
+  binary_dependencies.py` cover the parser (`rpaths()`), the positive
+  portable-and-fallback case, the exclusively-absolute failure case, and
+  that a dependency-free executable needs no RPATH at all. `cmake
+  --workflow --preset macos-host-ninja-debug` stays 100% (104/104)
+  throughout.
+
 - **Validated the generic ELF/PE dependency-inventory distribution-hardening
   tranche for real on native Linux/aarch64 (this host) for the first time,
   and fixed a genuine manifest gap it found immediately.** The tranche had

@@ -8,6 +8,8 @@ from crt_pe import imported_libraries
 from crt_macho import MH_MAGIC, MH_MAGIC_64
 from crt_macho import dependencies as macho_dependencies
 from crt_macho import dylib_id as macho_dylib_id
+from crt_macho import rpaths as macho_rpaths
+from crt_macho import is_executable as macho_is_executable
 
 import struct
 
@@ -77,8 +79,22 @@ def _is_target_binary(path: Path, target_os: str) -> bool:
 
 def validate_binary_dependencies(dist: Path, manifest: dict) -> None:
     """Require every ELF/PE/Mach-O dependency to be bundled or declared
-    external, and every packaged macOS dylib's own self-identify to be a
-    portable @rpath/... spelling, never an absolute build-time path."""
+    external, every packaged macOS dylib's own self-identify to be a
+    portable @rpath/... spelling, never an absolute build-time path, and
+    every packaged macOS *executable* (MH_EXECUTE; a shared library is
+    deliberately exempt, see the comment at its own check below) carrying
+    an @rpath dependency to also carry at least one portable
+    @loader_path/@executable_path RPATH entry -- an exclusively-absolute
+    RPATH list resolves correctly only until the SDK is next moved (a
+    real, confirmed bug, 2026-09-15: `mv`-ing a freshly published
+    04-gfx-media SDK broke `crtgfx_skia_gpu_window_demo` outright, `dyld:
+    Library not loaded: @rpath/libcrtgfx_skia.dylib`, because its only
+    RPATH was the absolute path baked in at publish time). This mirrors
+    the already-established Linux policy (every shared-runtime target's
+    own $ORIGIN-first, absolute-fallback-second RPATH) rather than
+    rejecting the absolute fallback outright, since a configure-time
+    try_compile/try_run probe genuinely needs it and it is harmless once a
+    portable entry sorts ahead of it."""
     target_os = manifest.get("target", {}).get("os")
     if target_os not in ("linux", "windows", "macos"):
         return
@@ -121,5 +137,25 @@ def validate_binary_dependencies(dist: Path, manifest: dict) -> None:
                 raise SystemExit(f"cannot inspect dylib id in {path}: {exc}") from exc
             if dylib_name is not None and not dylib_name.startswith("@rpath/"):
                 failures.append(f"{path.relative_to(dist)} -> absolute dylib id {dylib_name}")
+            # Scoped to MH_EXECUTE only: dyld accumulates LC_RPATH entries
+            # across the whole load chain, so a shared library resolving
+            # its own @rpath dependency via whatever *executable* loads it
+            # is by design here, not a gap of its own -- confirmed for
+            # real, every one of this project's own shared libraries
+            # (crt_configure_shared_runtime()'s macOS branch sets
+            # INSTALL_RPATH "" deliberately) has always relied on exactly
+            # this and keeps working correctly, move or no move, as long
+            # as the loading executable's own RPATH is portable.
+            if macho_is_executable(path) and any(
+                    dependency.startswith("@rpath/") for dependency in dependencies):
+                try:
+                    entries = macho_rpaths(path)
+                except (OSError, UnicodeDecodeError, ValueError) as exc:
+                    raise SystemExit(f"cannot inspect rpaths in {path}: {exc}") from exc
+                if not any(entry.startswith(("@loader_path", "@executable_path"))
+                           for entry in entries):
+                    failures.append(
+                        f"{path.relative_to(dist)} -> @rpath dependency with no portable "
+                        "@loader_path/@executable_path RPATH (stale after any future move)")
     if failures:
         raise SystemExit("unresolved packaged binary dependencies:\n  " + "\n  ".join(failures))

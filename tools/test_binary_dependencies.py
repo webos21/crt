@@ -12,7 +12,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from crt_binary_dependencies import validate_binary_dependencies
 from crt_elf import needed_libraries
 from crt_pe import imported_libraries
-from crt_macho import dependencies as macho_dependencies, dylib_id as macho_dylib_id
+from crt_macho import (
+    dependencies as macho_dependencies,
+    dylib_id as macho_dylib_id,
+    rpaths as macho_rpaths,
+)
 from create_stage_source import STAGES, STAGE_VALIDATION_PROJECT_PATHS
 
 
@@ -92,15 +96,30 @@ def _pack_macho_dylib_command(cmd: int, name: str) -> bytes:
     return bytes(payload)
 
 
-def write_macho(path: Path, load_dylibs: list[str], id_name: str | None = None) -> None:
+def _pack_macho_rpath_command(path_str: str) -> bytes:
+    fixed_size = 12  # cmd, cmdsize, path offset
+    encoded = path_str.encode("utf-8") + b"\0"
+    padded = (fixed_size + len(encoded) + 7) // 8 * 8
+    payload = bytearray(padded)
+    struct.pack_into("<III", payload, 0, 0x8000001c, padded, fixed_size)  # LC_RPATH
+    payload[fixed_size:fixed_size + len(encoded)] = encoded
+    return bytes(payload)
+
+
+def write_macho(path: Path, load_dylibs: list[str], id_name: str | None = None,
+                 rpaths: list[str] | None = None) -> None:
     """A minimal, real mach_header_64 (arm64, native little-endian) carrying
-    one LC_ID_DYLIB (if id_name is given) followed by one LC_LOAD_DYLIB per
-    load_dylibs entry -- matches crt_macho.py's own MH_MAGIC_64 detection
-    and the dylib_command layout its _lc_string() decodes."""
+    one LC_ID_DYLIB (if id_name is given), one LC_RPATH per rpaths entry,
+    then one LC_LOAD_DYLIB per load_dylibs entry -- matches crt_macho.py's
+    own MH_MAGIC_64 detection and the dylib_command/rpath_command layouts
+    its _lc_string() decodes."""
     commands = bytearray()
     ncmds = 0
     if id_name is not None:
         commands += _pack_macho_dylib_command(0xd, id_name)  # LC_ID_DYLIB
+        ncmds += 1
+    for path_str in (rpaths or []):
+        commands += _pack_macho_rpath_command(path_str)
         ncmds += 1
     for name in load_dylibs:
         commands += _pack_macho_dylib_command(0xc, name)  # LC_LOAD_DYLIB
@@ -172,7 +191,7 @@ class BinaryDependencyTests(unittest.TestCase):
                 "@rpath/libcrtgfx.dylib",
                 "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation",
                 "/usr/lib/libobjc.A.dylib",
-            ])
+            ], rpaths=["@loader_path/../../lib", "/build/temp/lib"])
             (dist / "lib").mkdir()
             write_macho(dist / "lib" / "libcrtgfx.dylib",
                         ["/usr/lib/libSystem.B.dylib"],
@@ -185,6 +204,7 @@ class BinaryDependencyTests(unittest.TestCase):
                 ],
                 macho_dependencies(app),
             )
+            self.assertEqual(["@loader_path/../../lib", "/build/temp/lib"], macho_rpaths(app))
             self.assertIsNone(macho_dylib_id(app))
             self.assertEqual("@rpath/libcrtgfx.dylib", macho_dylib_id(dist / "lib" / "libcrtgfx.dylib"))
             validate_binary_dependencies(
@@ -218,6 +238,33 @@ class BinaryDependencyTests(unittest.TestCase):
                         id_name="/private/tmp/build/sdk/lib/libfreetype.6.dylib")
             with self.assertRaises(SystemExit):
                 validate_binary_dependencies(dist, manifest("macos", []))
+
+    def test_macho_rpath_dependency_needs_a_portable_entry(self) -> None:
+        # The real 2026-09-15 bug: crtgfx_skia_gpu_window_demo's only RPATH
+        # was the absolute path baked in at publish time, so `mv`-ing the
+        # published SDK anywhere else broke it outright even though the
+        # dependency itself was properly declared and bundled.
+        with tempfile.TemporaryDirectory() as temporary:
+            dist = Path(temporary)
+            app = dist / "examples" / "bin" / "app"
+            app.parent.mkdir(parents=True)
+            (dist / "lib").mkdir()
+            write_macho(dist / "lib" / "libcrtgfx.dylib", [], id_name="@rpath/libcrtgfx.dylib")
+            # Exclusively-absolute RPATH: fails, even though the dependency
+            # itself is properly bundled and declared.
+            write_macho(app, ["@rpath/libcrtgfx.dylib"], rpaths=["/build/temp/lib"])
+            with self.assertRaises(SystemExit):
+                validate_binary_dependencies(dist, manifest("macos", []))
+            # Adding a portable @loader_path entry alongside the same
+            # absolute fallback fixes it -- the absolute entry alone is not
+            # rejected outright (a configure-time try_compile/try_run probe
+            # genuinely needs it), only its exclusivity is.
+            write_macho(app, ["@rpath/libcrtgfx.dylib"],
+                        rpaths=["@loader_path/../../lib", "/build/temp/lib"])
+            validate_binary_dependencies(dist, manifest("macos", []))
+            # No @rpath dependency at all: no portable entry is required.
+            write_macho(app, ["/usr/lib/libSystem.B.dylib"], rpaths=["/build/temp/lib"])
+            validate_binary_dependencies(dist, manifest("macos", ["libSystem.B.dylib"]))
 
 
 if __name__ == "__main__":
