@@ -5,7 +5,7 @@ does not repeat the implementation diary in [`HISTORY.md`](HISTORY.md), the
 open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting_status.md`](docs/porting_status.md).
 
-Last synchronized with the source tree and git history: **2026-09-14**.
+Last synchronized with the source tree and git history: **2026-09-15**.
 Updated only on explicit request from here on, not as part of routine
 documentation passes -- see `TODO.md`'s Notice section. It may lag behind
 `HISTORY.md`/`TODO.md` between syncs; those two are the source of truth.
@@ -256,10 +256,10 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-1. Continue distribution hardening with a generic installed-binary dependency
-   inventory; predecessor relinking and packaged ELF RUNPATH cleanup are done.
-2. Close the remaining absolute-path and external-consumer validation gaps,
-   including the separately tracked macOS install-name policy.
+1. Continue distribution hardening with the remaining macOS Mach-O dependency
+   and install-name policy; predecessor relinking, packaged ELF RUNPATH cleanup,
+   and generic ELF/PE dependency inventory are done.
+2. Close the remaining external-consumer and path-regression validation gaps.
 3. Revisit the deferred Linux/aarch64 Skia presentation failure when another
    physical host or hardware ICD can distinguish a one-device limitation, a
    newer pinned Skia still reproduces it, or Linux release sign-off requires it.

@@ -8,6 +8,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 PT_LOAD = 1
 PT_DYNAMIC = 2
 DT_NULL = 0
+DT_NEEDED = 1
 DT_STRTAB = 5
 DT_STRSZ = 10
 DT_RPATH = 15
@@ -40,7 +41,7 @@ def _layout(data: bytes):
     return phoff, phentsize, phnum, ph_format, dynamic_format, elf_class
 
 
-def _runtime_path_slots(data: bytes) -> list[tuple[int, int, str]]:
+def _dynamic_string_slots(data: bytes, wanted_tags: tuple[int, ...]) -> list[tuple[int, int, str]]:
     layout = _layout(data)
     if layout is None:
         return []
@@ -87,27 +88,45 @@ def _runtime_path_slots(data: bytes) -> list[tuple[int, int, str]]:
 
     slots = []
     for tag, value in tags:
-        if tag not in (DT_RPATH, DT_RUNPATH):
+        if tag not in wanted_tags:
             continue
         start = strtab_offset + value
         limit = strtab_offset + strtab_size
         if start >= limit:
-            raise ValueError("ELF runtime path is outside the dynamic string table")
+            raise ValueError("ELF dynamic string is outside the string table")
         end = data.find(b"\0", start, limit)
         if end < 0:
-            raise ValueError("ELF runtime path is not NUL-terminated")
+            raise ValueError("ELF dynamic string is not NUL-terminated")
         slots.append((start, end - start, data[start:end].decode("utf-8")))
     return slots
 
 
-def runtime_paths(path: Path) -> list[str]:
-    """Return DT_RPATH/DT_RUNPATH strings, or an empty list for non-ELF files."""
+def _runtime_path_slots(data: bytes) -> list[tuple[int, int, str]]:
+    return _dynamic_string_slots(data, (DT_RPATH, DT_RUNPATH))
+
+
+def _read_elf(path: Path) -> bytes | None:
     with path.open("rb") as stream:
         magic = stream.read(4)
         if magic != b"\x7fELF":
-            return []
-        data = magic + stream.read()
+            return None
+        return magic + stream.read()
+
+
+def runtime_paths(path: Path) -> list[str]:
+    """Return DT_RPATH/DT_RUNPATH strings, or an empty list for non-ELF files."""
+    data = _read_elf(path)
+    if data is None:
+        return []
     return [value for _, _, value in _runtime_path_slots(data)]
+
+
+def needed_libraries(path: Path) -> list[str]:
+    """Return DT_NEEDED names, or an empty list for non-ELF files."""
+    data = _read_elf(path)
+    if data is None:
+        return []
+    return [value for _, _, value in _dynamic_string_slots(data, (DT_NEEDED,))]
 
 
 def is_absolute_runtime_entry(entry: str) -> bool:
@@ -117,11 +136,10 @@ def is_absolute_runtime_entry(entry: str) -> bool:
 
 def remove_absolute_runtime_paths(path: Path, require_origin: bool = False) -> bool:
     """Remove absolute ELF RPATH/RUNPATH entries without growing the file."""
-    with path.open("rb") as stream:
-        magic = stream.read(4)
-        if magic != b"\x7fELF":
-            return False
-        data = bytearray(magic + stream.read())
+    contents = _read_elf(path)
+    if contents is None:
+        return False
+    data = bytearray(contents)
     changed = False
     for start, size, value in _runtime_path_slots(data):
         entries = value.split(":")

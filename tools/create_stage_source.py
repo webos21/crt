@@ -14,6 +14,18 @@ from pathlib import Path, PurePosixPath
 from crt_stage_recipe import STAGE_SUCCESSORS
 
 
+STAGE_VALIDATION_PROJECT_PATHS = (
+    "tools/create_dist.py",
+    "tools/create_rootfs.py",
+    "tools/verify_dist.py",
+    "tools/crt_stage_recipe.py",
+    "tools/crt_dist_prerequisites.py",
+    "tools/crt_elf.py",
+    "tools/crt_pe.py",
+    "tools/crt_binary_dependencies.py",
+)
+
+
 STAGES = {
     "02-cxx": {
         "input_stage": "01-c",
@@ -38,11 +50,7 @@ STAGES = {
             # actually reading create_dist.py's own imports rather than
             # fixing this one file at a time and hitting the next
             # ModuleNotFoundError on the next run.
-            "tools/create_dist.py",
-            "tools/create_rootfs.py",
-            "tools/verify_dist.py",
-            "tools/crt_stage_recipe.py",
-            "tools/crt_dist_prerequisites.py",
+            *STAGE_VALIDATION_PROJECT_PATHS,
             "tools/crt-cc",
             "tools/crt-c++",
             "tools/crt-cc.cmd",
@@ -62,11 +70,7 @@ STAGES = {
             "distribution/stages/03-gfx-simple/CMakeLists.txt",
             "tools/build_stage_03_gfx_simple.py",
             "tools/build_xkbcommon.py",
-            "tools/create_dist.py",
-            "tools/create_rootfs.py",
-            "tools/verify_dist.py",
-            "tools/crt_stage_recipe.py",
-            "tools/crt_dist_prerequisites.py",
+            *STAGE_VALIDATION_PROJECT_PATHS,
             "tools/crt-cc",
             "tools/crt-c++",
             "tools/crt-cc.cmd",
@@ -114,11 +118,7 @@ STAGES = {
             "tools/build_skia.py",
             "tools/fetch_skia.py",
             "tools/fetch_mingw_w64_headers.py",
-            "tools/create_dist.py",
-            "tools/create_rootfs.py",
-            "tools/verify_dist.py",
-            "tools/crt_stage_recipe.py",
-            "tools/crt_dist_prerequisites.py",
+            *STAGE_VALIDATION_PROJECT_PATHS,
             # build_skia.py's GN arguments invoke these from --root. They
             # must come from the verified stage asset, not a full checkout.
             "tools/crt-cc",

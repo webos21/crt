@@ -10,6 +10,33 @@ substantive update.
 
 ## 2026-09-15
 
+- **Completed the generic ELF/PE dependency-inventory distribution-hardening
+  tranche on Windows and WSL Linux.** Added dependency-free ELF `DT_NEEDED`
+  inspection to `tools/crt_elf.py` and a new minimal PE parser
+  (`tools/crt_pe.py`) covering both normal and delay-load import tables.
+  `tools/crt_binary_dependencies.py` now checks every packaged Linux ELF or
+  Windows PE dependency: its leaf name must either match a real target binary
+  in the cumulative SDK or exactly match a canonical `external_prerequisites`
+  component from the manifest. A same-named text/metadata file cannot satisfy
+  the runtime contract. Embedded absolute/relative paths and undeclared host
+  libraries are fatal. Both helper modules are included in
+  `DIST_PORTING_TOOLS`, keeping the
+  stage toolset self-contained. `create_stage_source.py` also centralizes and
+  includes the complete validator import closure in every 02/03/04 source
+  asset; a regression test prevents a future helper from being present in the
+  SDK but absent when an isolated successor runs its asset's `verify_dist.py`.
+
+  Synthetic fixtures cover ELF64 dynamic strings, PE32+ normal and delay
+  imports, Windows case-insensitive matching, bundled-versus-external
+  classification, undeclared imports, and embedded paths. The focused Windows
+  validator/ELF/predecessor/dependency tests passed 4/4 and the existing full
+  Windows CTest lane passed 133/133. A real rebuilt Windows
+  `03-gfx-simple` distribution passed its packaged verifier with USER32,
+  D3D11, DXGI, kernel, and API-set imports resolved from the canonical
+  prerequisite contract. On WSL Ubuntu 26.04/x86_64, the same Python suites
+  passed and a freshly regenerated real `02-cxx` SDK passed the new
+  `DT_NEEDED` gate, including its declared external `libatomic.so.1`.
+
 - **Completed the imported-libc++ predecessor/RUNPATH distribution-hardening
   tranche on Windows and WSL Linux.** `tools/crt-libcxx-build.py` now hashes
   the actual predecessor `libc.*`/`libm.*`/`libdl.*` bytes and records an

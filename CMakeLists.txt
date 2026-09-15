@@ -212,10 +212,14 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME crt_libcxx_predecessor_unit_runs
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_libcxx_predecessor.py"
   )
+  add_test(NAME crt_binary_dependencies_unit_runs
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_binary_dependencies.py"
+  )
   set_tests_properties(
     crt_verify_dist_unit_runs
     crt_elf_unit_runs
     crt_libcxx_predecessor_unit_runs
+    crt_binary_dependencies_unit_runs
     PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
   )

@@ -48,8 +48,13 @@ drivers, remain target prerequisites rather than copied CRT payloads. Every
 such exception must be explicit in `manifest.json`; source/version/license
 metadata must accompany every third-party artifact that CRT does redistribute.
 Package construction and acceptance must fail when a manifest-declared header,
-link artifact, runtime library, or notice is absent, or when a binary dependency
-scan finds an undeclared non-system `.so`, `.dylib`, or `.dll` dependency.
+link artifact, runtime library, or notice is absent. `verify_dist.py` also
+parses every packaged Linux ELF `DT_NEEDED` entry and Windows PE normal/delay
+import without an external inspection tool. Each dependency leaf name must
+match a real target binary in the cumulative SDK or be exactly declared as an
+`external_prerequisites` component; embedded paths and undeclared host
+libraries fail acceptance. The equivalent Mach-O load-command gate remains
+the next hardening tranche.
 
 Simple Graphics intentionally excludes Skia CPU raster and text, Skia GPU,
 and the public `crtgfx/gpu.h` surface. Its drawing contract is the mapped
@@ -289,8 +294,9 @@ and build trees using the packaged directory. At minimum they must verify:
 9. no compiler or linker executable in the archive;
 10. every declared external dependency's headers, link artifacts, and runtime
     libraries are present, and its provenance/license metadata is recorded;
-11. a binary dependency scan finds no undeclared non-system `.so`, `.dylib`,
-    or `.dll` dependency;
+11. the built-in ELF/PE dependency inventory finds no embedded dependency path
+    or undeclared `.so`/`.dll` import (Mach-O coverage remains tracked in
+    `TODO.md`);
 12. OS-owned or device-driver prerequisites excluded from the archive are
     explicitly named in the manifest;
 13. the manifest's OS, architecture, stage, compiler inputs, and option set.
