@@ -56,7 +56,10 @@ normalizes to its own basename, or to its `Name.framework` bundle name for a
 real framework) must match a real target binary in the cumulative SDK or be
 exactly declared as an `external_prerequisites` component; embedded paths,
 undeclared host libraries, and a packaged macOS dylib whose own `LC_ID_DYLIB`
-is not a portable `@rpath/...` spelling all fail acceptance.
+is not a portable `@rpath/...` spelling all fail acceptance. Packaged Mach-O
+files must not retain an absolute `LC_RPATH`; an executable that loads an
+`@rpath/...` dependency must instead carry a portable `@loader_path`- or
+`@executable_path`-relative RPATH.
 
 Simple Graphics intentionally excludes Skia CPU raster and text, Skia GPU,
 and the public `crtgfx/gpu.h` surface. Its drawing contract is the mapped
@@ -304,8 +307,9 @@ and build trees using the packaged directory. At minimum they must verify:
     libraries are present, and its provenance/license metadata is recorded;
 11. the built-in ELF/PE/Mach-O dependency inventory finds no embedded
     dependency path or undeclared `.so`/`.dll`/`.dylib` import, no absolute
-    macOS `LC_ID_DYLIB`, and no macOS executable with an `@rpath` dependency
-    but no portable `@loader_path`/`@executable_path` RPATH entry;
+    macOS `LC_ID_DYLIB` or absolute `LC_RPATH`, and no macOS executable with
+    an `@rpath` dependency but no portable `@loader_path`/`@executable_path`
+    RPATH entry;
 12. OS-owned or device-driver prerequisites excluded from the archive are
     explicitly named in the manifest;
 13. the manifest's OS, architecture, stage, compiler inputs, and option set.

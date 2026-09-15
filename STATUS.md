@@ -139,6 +139,12 @@ target.
   Windows and macOS. Linux's external-prerequisite/ELF audit is complete and
   its low-level Vulkan example presents, but the packaged Skia example still
   crashes before final verification/atomic publication.
+- Distribution hardening is complete for the current 01-through-04 contract:
+  predecessor relinking, external-prerequisite manifests, ELF/PE/Mach-O
+  dependency inventory, ELF RUNPATH and Mach-O install-name/RPATH portability,
+  installed external CMake consumers, configure/make port consumers, and
+  space-containing paths are covered. The Linux/aarch64 Skia failure above is
+  a separately recorded upper-runtime defect, not an exception to those gates.
 - FFmpeg hardware decode/zero-copy and the QuickJS core proceed on top of the
   completed GPU rendering/presentation contract.
 - JavaScript media/gfx binding follows the stable native contracts, using a
@@ -256,21 +262,18 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-1. Close the remaining external-consumer and path-regression validation gaps;
-   predecessor relinking and the generic ELF/PE/Mach-O dependency-inventory
-   and install-name/RPATH-portability policy (including macOS) are done.
-2. Revisit the deferred Linux/aarch64 Skia presentation failure when another
+1. Revisit the deferred Linux/aarch64 Skia presentation failure when another
    physical host or hardware ICD can distinguish a one-device limitation, a
    newer pinned Skia still reproduces it, or Linux release sign-off requires it.
-3. Enable and verify real FFmpeg hardware decode per host while retaining the
+2. Enable and verify real FFmpeg hardware decode per host while retaining the
    software/CPU fallback as the correctness baseline.
-4. Connect hardware decoder textures to Skia without CPU copies, including
+3. Connect hardware decoder textures to Skia without CPU copies, including
    device/fence ownership and CPU-download recovery.
-5. Bring up QuickJS core/event-loop/timers/modules, then expose stable
+4. Bring up QuickJS core/event-loop/timers/modules, then expose stable
    media/gfx services with WebCodecs-like queue semantics.
-6. Add capture/encode and network/adaptive/realtime services only after the
+5. Add capture/encode and network/adaptive/realtime services only after the
    native playback and zero-copy contracts are stable.
-7. Continue closing the focused CRT/PAL limitations above when an upstream
+6. Continue closing the focused CRT/PAL limitations above when an upstream
    consumer exposes a concrete requirement, following the Bionic-first
    porting discipline in `AGENTS.md`.
 

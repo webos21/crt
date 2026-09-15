@@ -191,7 +191,7 @@ class BinaryDependencyTests(unittest.TestCase):
                 "@rpath/libcrtgfx.dylib",
                 "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation",
                 "/usr/lib/libobjc.A.dylib",
-            ], rpaths=["@loader_path/../../lib", "/build/temp/lib"])
+            ], rpaths=["@loader_path/../../lib"])
             (dist / "lib").mkdir()
             write_macho(dist / "lib" / "libcrtgfx.dylib",
                         ["/usr/lib/libSystem.B.dylib"],
@@ -204,7 +204,7 @@ class BinaryDependencyTests(unittest.TestCase):
                 ],
                 macho_dependencies(app),
             )
-            self.assertEqual(["@loader_path/../../lib", "/build/temp/lib"], macho_rpaths(app))
+            self.assertEqual(["@loader_path/../../lib"], macho_rpaths(app))
             self.assertIsNone(macho_dylib_id(app))
             self.assertEqual("@rpath/libcrtgfx.dylib", macho_dylib_id(dist / "lib" / "libcrtgfx.dylib"))
             validate_binary_dependencies(
@@ -255,15 +255,27 @@ class BinaryDependencyTests(unittest.TestCase):
             write_macho(app, ["@rpath/libcrtgfx.dylib"], rpaths=["/build/temp/lib"])
             with self.assertRaises(SystemExit):
                 validate_binary_dependencies(dist, manifest("macos", []))
-            # Adding a portable @loader_path entry alongside the same
-            # absolute fallback fixes it -- the absolute entry alone is not
-            # rejected outright (a configure-time try_compile/try_run probe
-            # genuinely needs it), only its exclusivity is.
+            # A portable entry is sufficient on its own. An absolute fallback
+            # is build-tree-only state and must not survive publication.
+            write_macho(app, ["@rpath/libcrtgfx.dylib"],
+                        rpaths=["@loader_path/../../lib"])
+            validate_binary_dependencies(dist, manifest("macos", []))
             write_macho(app, ["@rpath/libcrtgfx.dylib"],
                         rpaths=["@loader_path/../../lib", "/build/temp/lib"])
-            validate_binary_dependencies(dist, manifest("macos", []))
-            # No @rpath dependency at all: no portable entry is required.
+            with self.assertRaises(SystemExit):
+                validate_binary_dependencies(dist, manifest("macos", []))
+            # Prefix lookalikes are not dyld's portable path tokens.
+            write_macho(app, ["@rpath/libcrtgfx.dylib"],
+                        rpaths=["@loader_path_backup/lib"])
+            with self.assertRaises(SystemExit):
+                validate_binary_dependencies(dist, manifest("macos", []))
+            # No @rpath dependency at all: no portable entry is required, but
+            # an unrelated absolute LC_RPATH is still a published path leak.
             write_macho(app, ["/usr/lib/libSystem.B.dylib"], rpaths=["/build/temp/lib"])
+            with self.assertRaises(SystemExit):
+                validate_binary_dependencies(
+                    dist, manifest("macos", ["libSystem.B.dylib"]))
+            write_macho(app, ["/usr/lib/libSystem.B.dylib"])
             validate_binary_dependencies(dist, manifest("macos", ["libSystem.B.dylib"]))
 
 

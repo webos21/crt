@@ -125,7 +125,7 @@ _GFX_SIMPLE = {
             # declared twice.
             "id": "linux-wayland-client-runtime",
             "kind": "host-library",
-            "required_for": ["gpu-presentation"],
+            "required_for": ["window-system", "software-framebuffer-presentation"],
             "components": ["libwayland-client.so.0"],
             "bundled": False,
         },

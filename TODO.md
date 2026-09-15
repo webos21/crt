@@ -271,40 +271,15 @@ host-independent distribution structure is finished.
      isolated Linux arm64 04 build from fresh libc++/FreeType/FFmpeg/Skia
      and complete `verify_dist.py`/atomic publication. Independently of
      this investigation, the imported-libc++ stale-relink and packaged
-     absolute-RUNPATH gaps are already closed; the remaining generic binary
-     dependency inventory stays in Distribution hardening below.
+     absolute-RUNPATH gaps and the generic cross-host binary dependency
+     inventory are already closed; their completed evidence is in
+     `HISTORY.md`.
   **The "reconsider whether an external ICD defect should block
   `verify_dist.py`" policy question this item previously raised no longer
   applies** -- the defect is CRT/Skia's own, not an external Mesa/lavapipe
   limitation, so there is nothing external to carve out an acceptance
   exception for. `verify_dist.py`/atomic publication should simply stay
   blocked until the actual Skia-side bug is fixed.
-
-### Distribution hardening
-
-Harden the completed cross-host distribution baseline before adding another
-large upper-runtime dependency. Work in independently verifiable tranches and
-move each completed tranche into [`HISTORY.md`](HISTORY.md):
-
-The imported-libc++ predecessor/RUNPATH, generic ELF/PE dependency-inventory,
-and generic Mach-O dependency-inventory tranches are all complete on all
-three hosts (including the packaged GNU make leak and the
-`libwayland-client.so.0` manifest-stage gap the ELF gate exposed on native
-Linux/aarch64, the FreeType install-name leak the Mach-O gate exposed on
-macOS, and -- found by external review, then reproduced and fixed for real
-by actually `mv`-ing a published SDK to a new path -- the stale-absolute-
-RPATH-after-relocation gap in `crtgfx_skia_gpu_window_demo`, now closed with
-a portable `@loader_path`-first RPATH plus a matching acceptance-gate check;
-see `HISTORY.md`'s 2026-09-15 entries).
-
-1. **External consumers and path regression.** Add explicit external
-   CMake/configure-make consumer checks where the stage contract requires them.
-   Preserve the now-complete three-host space-containing-prefix run as a
-   regression acceptance requirement.
-2. **Deferred `05-js` isolated stage.** Extend
-   `04-gfx-media -> 05-js` only after the real QuickJS core and bindings exist.
-   Apply the same pinned asset, predecessor-only build, test, external-consumer,
-   verification, and atomic-publish contract as the earlier transitions.
 
 ## Planned
 

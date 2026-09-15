@@ -62,6 +62,11 @@ def _macho_component(name: str) -> str:
     return PurePosixPath(name).name
 
 
+def _macho_portable_rpath(name: str) -> bool:
+    return any(name == root or name.startswith(root + "/")
+               for root in ("@loader_path", "@executable_path"))
+
+
 _MACHO_MAGICS = frozenset(struct.pack("<I", magic) for magic in (MH_MAGIC, MH_MAGIC_64))
 
 
@@ -81,7 +86,8 @@ def validate_binary_dependencies(dist: Path, manifest: dict) -> None:
     """Require every ELF/PE/Mach-O dependency to be bundled or declared
     external, every packaged macOS dylib's own self-identify to be a
     portable @rpath/... spelling, never an absolute build-time path, and
-    every packaged macOS *executable* (MH_EXECUTE; a shared library is
+    no packaged Mach-O file carrying an absolute LC_RPATH, and every
+    packaged macOS *executable* (MH_EXECUTE; a shared library is
     deliberately exempt, see the comment at its own check below) carrying
     an @rpath dependency to also carry at least one portable
     @loader_path/@executable_path RPATH entry -- an exclusively-absolute
@@ -90,11 +96,10 @@ def validate_binary_dependencies(dist: Path, manifest: dict) -> None:
     04-gfx-media SDK broke `crtgfx_skia_gpu_window_demo` outright, `dyld:
     Library not loaded: @rpath/libcrtgfx_skia.dylib`, because its only
     RPATH was the absolute path baked in at publish time). This mirrors
-    the already-established Linux policy (every shared-runtime target's
-    own $ORIGIN-first, absolute-fallback-second RPATH) rather than
-    rejecting the absolute fallback outright, since a configure-time
-    try_compile/try_run probe genuinely needs it and it is harmless once a
-    portable entry sorts ahead of it."""
+    the installed-artifact side of the already-established Linux policy.
+    Build-tree binaries and configure-time try_compile/try_run probes may
+    still use absolute fallback paths, but they are not distribution files
+    and therefore never reach this validator."""
     target_os = manifest.get("target", {}).get("os")
     if target_os not in ("linux", "windows", "macos"):
         return
@@ -137,6 +142,14 @@ def validate_binary_dependencies(dist: Path, manifest: dict) -> None:
                 raise SystemExit(f"cannot inspect dylib id in {path}: {exc}") from exc
             if dylib_name is not None and not dylib_name.startswith("@rpath/"):
                 failures.append(f"{path.relative_to(dist)} -> absolute dylib id {dylib_name}")
+            try:
+                entries = macho_rpaths(path)
+            except (OSError, UnicodeDecodeError, ValueError) as exc:
+                raise SystemExit(f"cannot inspect rpaths in {path}: {exc}") from exc
+            for entry in entries:
+                if PurePosixPath(entry).is_absolute():
+                    failures.append(
+                        f"{path.relative_to(dist)} -> absolute rpath {entry}")
             # Scoped to MH_EXECUTE only: dyld accumulates LC_RPATH entries
             # across the whole load chain, so a shared library resolving
             # its own @rpath dependency via whatever *executable* loads it
@@ -148,12 +161,7 @@ def validate_binary_dependencies(dist: Path, manifest: dict) -> None:
             # as the loading executable's own RPATH is portable.
             if macho_is_executable(path) and any(
                     dependency.startswith("@rpath/") for dependency in dependencies):
-                try:
-                    entries = macho_rpaths(path)
-                except (OSError, UnicodeDecodeError, ValueError) as exc:
-                    raise SystemExit(f"cannot inspect rpaths in {path}: {exc}") from exc
-                if not any(entry.startswith(("@loader_path", "@executable_path"))
-                           for entry in entries):
+                if not any(_macho_portable_rpath(entry) for entry in entries):
                     failures.append(
                         f"{path.relative_to(dist)} -> @rpath dependency with no portable "
                         "@loader_path/@executable_path RPATH (stale after any future move)")

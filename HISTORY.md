@@ -10,6 +10,40 @@ substantive update.
 
 ## 2026-09-15
 
+- **Completed the current Distribution hardening workstream after the final
+  macOS relocation pass.** The native macOS acceptance run had already rebuilt
+  and published the option-ON `04-gfx-media` SDK, moved it to a different path,
+  confirmed both installed GPU examples still present, and confirmed that each
+  installed executable contains only `@loader_path/../../lib` (no absolute
+  `LC_RPATH`). Closed the remaining enforcement mismatch found while reviewing
+  that result: `tools/crt_binary_dependencies.py` previously accepted a
+  portable RPATH *plus* an absolute fallback, even though the publisher now
+  correctly strips that fallback. The packaged-binary gate now rejects every
+  absolute Mach-O `LC_RPATH`, while build-tree/configure probes remain free to
+  use their separate absolute `BUILD_RPATH`; the focused fixture covers the
+  portable-only pass, absolute-only failure, mixed portable-plus-absolute
+  failure, a false portable-token prefix, and an otherwise dependency-free
+  executable carrying a leaked absolute RPATH. Also corrected the Linux 03-stage
+  `linux-wayland-client-runtime` metadata's `required_for` description from
+  the stale `gpu-presentation` label to the actual window-system/software-
+  framebuffer contract.
+
+  The last open TODO line was a documentation-state mismatch rather than a
+  missing execution path. `build_stage_03_gfx_simple.py` and
+  `build_stage_04_gfx_media.py` already rebuild and run their installed SDK
+  examples as independent external CMake consumers before verification and
+  atomic publication; the packaged configure/make lane is exercised by the
+  real source-port builds and their static/shared consumer tests. The complete
+  space-containing SDK/source/work/install/consumer path was accepted on
+  Windows, WSL Linux/x86_64, and native macOS (with the detailed evidence in
+  the earlier entries below). Moved that completed item out of `TODO.md`; the
+  deferred `04-gfx-media -> 05-js` transition remains once, under the planned
+  Upper runtime roadmap, until real QuickJS and bindings exist. Updated
+  `STATUS.md` and `docs/distribution.md` to state the resulting contract.
+  Validation passes on Windows through the full CTest suite (121/121,
+  including both registered distribution tests) and directly under WSL Ubuntu
+  26.04 (binary dependency fixtures 7/7, distribution verifier fixtures 8/8).
+
 - **Closed a real gap in the just-completed macOS Mach-O dependency-inventory
   tranche, found by external review rather than by this session's own
   testing.** The review correctly pointed out that the new gate checked

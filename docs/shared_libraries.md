@@ -108,7 +108,8 @@ future `linker/` milestone documented in `docs/linker_loader.md`.
 
 Static/shared artifacts are part of the default build graph, Windows has a
 permanent export-hygiene regression, and port recipes exercise real shared
-load/run paths on all three hosts. Remaining distribution work is:
+load/run paths on all three hosts. The current distribution dependency/path
+hardening gates are complete; the broader shared-library and ABI roadmap is:
 
 1. Add equivalent exported-symbol allowlist/visibility checks on Linux and
    macOS, then tighten the current broad Windows exports.
