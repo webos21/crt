@@ -288,9 +288,10 @@ move each completed tranche into [`HISTORY.md`](HISTORY.md):
 
 The imported-libc++ predecessor/RUNPATH and generic ELF/PE dependency-
 inventory tranches are complete (including the packaged GNU make leak the ELF
-gate exposed; see `HISTORY.md`'s 2026-09-15 entries). Continue with item 1's
-Mach-O boundary rather than reopening the deferred single-host Skia
-investigation.
+gate exposed, and the `libwayland-client.so.0` manifest-stage gap the same
+gate exposed for the first time on a native Linux/aarch64 host; see
+`HISTORY.md`'s 2026-09-15 entries). Continue with item 1's Mach-O boundary
+rather than reopening the deferred single-host Skia investigation.
 
 1. **Next tranche: remaining absolute-path/dependency policy (macOS).** The
    generic inventory now validates ELF `DT_NEEDED` plus PE normal/delay imports,

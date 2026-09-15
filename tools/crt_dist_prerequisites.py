@@ -99,13 +99,37 @@ _GFX_SIMPLE = {
         ],
         "bundled": False,
     },),
-    "linux": ({
-        "id": "linux-wayland-compositor",
-        "kind": "runtime-service",
-        "required_for": ["window-system", "software-framebuffer-presentation"],
-        "components": ["Wayland compositor with xdg-shell support"],
-        "bundled": False,
-    },),
+    "linux": (
+        {
+            "id": "linux-wayland-compositor",
+            "kind": "runtime-service",
+            "required_for": ["window-system", "software-framebuffer-presentation"],
+            "components": ["Wayland compositor with xdg-shell support"],
+            "bundled": False,
+        },
+        {
+            # Moved here from _GFX_MEDIA (2026-09-15, real Linux/aarch64
+            # binary-dependency-gate acceptance): a real, confirmed gap the
+            # new cumulative `crt_binary_dependencies.py` gate caught the
+            # first time it actually ran a native Linux 03-gfx-simple
+            # package on this host -- `lib/libcrtgfx.so` and
+            # `examples/bin/crtgfx_window_demo` both carry a genuine
+            # DT_NEEDED on the real host `libwayland-client.so.0` already
+            # at this stage (this project's own hybrid window-management-
+            # via-real-Wayland design starts at 03-gfx-simple, not
+            # 04-gfx-media), but this component was declared only under
+            # _GFX_MEDIA below, one stage too late. `external_
+            # prerequisites_for()` builds the cumulative list by stage, so
+            # 04-gfx-media still inherits it correctly from here -- do not
+            # also list it under _GFX_MEDIA, or its `id` would be
+            # declared twice.
+            "id": "linux-wayland-client-runtime",
+            "kind": "host-library",
+            "required_for": ["gpu-presentation"],
+            "components": ["libwayland-client.so.0"],
+            "bundled": False,
+        },
+    ),
 }
 
 _GFX_MEDIA = {
@@ -154,13 +178,10 @@ _GFX_MEDIA = {
         },
     ),
     "linux": (
-        {
-            "id": "linux-wayland-client-runtime",
-            "kind": "host-library",
-            "required_for": ["gpu-presentation"],
-            "components": ["libwayland-client.so.0"],
-            "bundled": False,
-        },
+        # linux-wayland-client-runtime moved to _GFX_SIMPLE above
+        # (2026-09-15) -- already inherited here via the cumulative
+        # external_prerequisites_for() chain; see that entry's own
+        # comment for why.
         {
             "id": "linux-vulkan-loader",
             "kind": "host-library",

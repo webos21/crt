@@ -10,6 +10,47 @@ substantive update.
 
 ## 2026-09-15
 
+- **Validated the generic ELF/PE dependency-inventory distribution-hardening
+  tranche for real on native Linux/aarch64 (this host) for the first time,
+  and fixed a genuine manifest gap it found immediately.** The tranche had
+  only been exercised on Windows and WSL Ubuntu/x86_64 so far (see the
+  entry below). Ran the focused suites directly on this host --
+  `tools/test_crt_elf.py` (5/5), `tools/test_libcxx_predecessor.py` (3/3),
+  `tools/test_binary_dependencies.py` (4/4) -- then reconfigured (the new
+  `add_test()` registrations needed a fresh `cmake` run to appear) and
+  confirmed the same four tests plus the full in-tree suite pass via
+  `ctest` (116/116). Then ran the real thing: a from-scratch
+  `ninja crt-gfx-simple-dist` (`01-c` -> `02-cxx` -> `03-gfx-simple`, each
+  followed by its own real `verify_dist.py`).
+
+  `01-c` and `02-cxx` verified cleanly, but `03-gfx-simple` failed
+  immediately with `unresolved packaged binary dependencies: lib/
+  libcrtgfx.so -> undeclared libwayland-client.so.0` and the same for
+  `examples/bin/crtgfx_window_demo` -- a real, previously undetected
+  manifest gap, not a tool bug: `tools/crt_dist_prerequisites.py` declared
+  `libwayland-client.so.0` (`linux-wayland-client-runtime`) only under
+  `_GFX_MEDIA`, one stage too late. `libcrtgfx.so`/`crtgfx_window_demo`
+  already carry a genuine `DT_NEEDED` on the real host Wayland client
+  library starting at `03-gfx-simple` (this project's own hybrid
+  window-management-via-real-Wayland design), confirmed directly by the
+  new gate reading the actual packaged binaries on this host -- Windows
+  needs no Wayland at all and WSL's own prior validation run evidently
+  never exercised this exact Linux 03-gfx-simple Wayland-linked path
+  against the new gate. Fixed by moving the `linux-wayland-client-runtime`
+  entry from `_GFX_MEDIA`'s own Linux tuple to `_GFX_SIMPLE`'s (kept out of
+  `_GFX_MEDIA` to avoid a duplicate `id` -- `external_prerequisites_for()`
+  builds its list cumulatively by stage, so `04-gfx-media` still inherits
+  it correctly) and updated `docs/distribution.md`'s matching prerequisite
+  table row. Re-ran the full test suites (still 4/4, 8/8, 116/116) and the
+  real `ninja crt-gfx-simple-dist` end to end: `01-c`/`02-cxx`/
+  `03-gfx-simple` all now install and verify cleanly on this host, with the
+  packaged `libc++.so.1`/`libc++abi.so.1`/`libunwind.so.1` each showing
+  only `$ORIGIN` via `readelf -d` (the absolute-fallback-stripping half of
+  the imported-libc++ packaging tranche, confirmed working on this host
+  too, not just WSL). This closes the "does this tranche actually work on
+  the one native Linux/aarch64 acceptance host" question -- it does, and
+  it found a real bug on its very first real run here.
+
 - **Completed the generic ELF/PE dependency-inventory distribution-hardening
   tranche on Windows and WSL Linux.** Added dependency-free ELF `DT_NEEDED`
   inspection to `tools/crt_elf.py` and a new minimal PE parser
