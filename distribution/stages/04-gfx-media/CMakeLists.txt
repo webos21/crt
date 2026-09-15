@@ -571,20 +571,38 @@ if(CRT_TARGET_OS STREQUAL "macos")
   # CMakeLists.txt's own crt_configure_shared_runtime() comment): add a
   # portable `@loader_path`-relative RPATH *ahead of* the existing
   # absolute one, so dyld's own ordered RPATH search finds the real file
-  # via the portable entry no matter where this SDK ends up, and only
-  # ever falls back to the absolute entry (still needed for configure-
-  # time try_compile/try_run probes, which never get installed under
-  # examples/bin at all) if that fails. `../../lib` matches this file's
-  # own `install(TARGETS ... RUNTIME DESTINATION examples/bin)` layout
-  # below exactly -- both executables always land two directories above
-  # `lib/`. crtgfx_gpu_window_demo does not currently link any `@rpath`-
-  # dependent shared library (it links crtgfx_gpu, a static archive), but
-  # gets the identical portable entry anyway so a future dependency change
-  # does not silently reopen this exact gap. Verified for real: after this
-  # fix, the same `mv`-then-rerun reproduction succeeds unchanged.
+  # via the portable entry no matter where this SDK ends up. `../../lib`
+  # matches this file's own `install(TARGETS ... RUNTIME DESTINATION
+  # examples/bin)` layout below exactly -- both executables always land
+  # two directories above `lib/`. crtgfx_gpu_window_demo does not
+  # currently link any `@rpath`-dependent shared library (it links
+  # crtgfx_gpu, a static archive), but gets the identical portable entry
+  # anyway so a future dependency change does not silently reopen this
+  # exact gap.
+  #
+  # BUILD_RPATH and INSTALL_RPATH deliberately end up different here
+  # (2026-09-15, follow-up review): BUILD_RPATH keeps the absolute
+  # `${CMAKE_BUILD_RPATH}` fallback alongside the portable entry, since a
+  # CMake configure-time try_compile/try_run probe for some other target
+  # in this same build tree genuinely still needs it (it runs from a
+  # throwaway build-scratch directory that never sits at this fixed
+  # `../../lib` offset from anything). INSTALL_RPATH -- what actually gets
+  # baked into the *published, redistributed* binary under `examples/bin`
+  # -- keeps only the portable entry: the absolute fallback there was
+  # functionally harmless once the portable entry sorts first (dyld's own
+  # ordered search never even reaches it), but a real, confirmed-for-real
+  # (2026-09-15) review found it left this stage's own original build/
+  # publish-time path readable in `otool -l` on every shipped example
+  # binary regardless -- a real information leak (this stage's own CI/
+  # build-host directory layout) and needless clutter with zero remaining
+  # functional purpose in the installed artifact. Verified for real:
+  # `otool -l` on the freshly rebuilt, `mv`-ed-to-a-new-path
+  # `crtgfx_skia_gpu_window_demo` now shows exactly one `LC_RPATH`
+  # (`@loader_path/../../lib`), and it still runs and presents correctly
+  # from the new location.
   set_target_properties(crtgfx_gpu_window_demo crtgfx_skia_gpu_window_demo PROPERTIES
     BUILD_RPATH "@loader_path/../../lib;${CMAKE_BUILD_RPATH}"
-    INSTALL_RPATH "@loader_path/../../lib;${CMAKE_INSTALL_RPATH}"
+    INSTALL_RPATH "@loader_path/../../lib"
   )
 endif()
 

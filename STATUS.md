@@ -256,22 +256,21 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-1. Continue distribution hardening with the remaining macOS Mach-O dependency
-   and install-name policy; predecessor relinking, packaged ELF RUNPATH cleanup,
-   and generic ELF/PE dependency inventory are done.
-2. Close the remaining external-consumer and path-regression validation gaps.
-3. Revisit the deferred Linux/aarch64 Skia presentation failure when another
+1. Close the remaining external-consumer and path-regression validation gaps;
+   predecessor relinking and the generic ELF/PE/Mach-O dependency-inventory
+   and install-name/RPATH-portability policy (including macOS) are done.
+2. Revisit the deferred Linux/aarch64 Skia presentation failure when another
    physical host or hardware ICD can distinguish a one-device limitation, a
    newer pinned Skia still reproduces it, or Linux release sign-off requires it.
-4. Enable and verify real FFmpeg hardware decode per host while retaining the
+3. Enable and verify real FFmpeg hardware decode per host while retaining the
    software/CPU fallback as the correctness baseline.
-5. Connect hardware decoder textures to Skia without CPU copies, including
+4. Connect hardware decoder textures to Skia without CPU copies, including
    device/fence ownership and CPU-download recovery.
-6. Bring up QuickJS core/event-loop/timers/modules, then expose stable
+5. Bring up QuickJS core/event-loop/timers/modules, then expose stable
    media/gfx services with WebCodecs-like queue semantics.
-7. Add capture/encode and network/adaptive/realtime services only after the
+6. Add capture/encode and network/adaptive/realtime services only after the
    native playback and zero-copy contracts are stable.
-8. Continue closing the focused CRT/PAL limitations above when an upstream
+7. Continue closing the focused CRT/PAL limitations above when an upstream
    consumer exposes a concrete requirement, following the Bionic-first
    porting discipline in `AGENTS.md`.
 

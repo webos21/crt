@@ -61,12 +61,34 @@ substantive update.
   `crt_configure_shared_runtime()` deliberately sets `INSTALL_RPATH ""` on
   macOS for exactly this reason) is by design, not a gap, and rejecting it
   would have broken every one of this project's own already-correct shared
-  libraries. Six existing/new synthetic-fixture tests in `tools/test_
-  binary_dependencies.py` cover the parser (`rpaths()`), the positive
-  portable-and-fallback case, the exclusively-absolute failure case, and
-  that a dependency-free executable needs no RPATH at all. `cmake
-  --workflow --preset macos-host-ninja-debug` stays 100% (104/104)
-  throughout.
+  libraries. `tools/test_binary_dependencies.py` now runs 7/7 (one new
+  case covering the parser's own `rpaths()`, the positive portable-and-
+  fallback rpath, the exclusively-absolute failure, and that a
+  dependency-free executable needs no RPATH at all, plus the six existing
+  ELF/PE/Mach-O cases already covered). `cmake --workflow --preset
+  macos-host-ninja-debug` stays 100% (104/104) throughout.
+
+  **A second review pass the same day refined the fix further.** The
+  portable-first, absolute-fallback-second `INSTALL_RPATH` above made
+  relocation *work*, but the absolute fallback survived unchanged in the
+  *published, redistributed* binary itself -- `otool -l` on a shipped
+  `crtgfx_skia_gpu_window_demo` still read this stage's own original
+  build/publish-time path verbatim, a real information leak (this
+  project's own CI/build-host directory layout) with zero remaining
+  functional purpose once the portable entry already sorts first. Split
+  the two RPATH properties instead of keeping them identical: `BUILD_RPATH`
+  keeps the absolute `${CMAKE_BUILD_RPATH}` fallback (a configure-time
+  `try_compile`/`try_run` probe for some other target in the same build
+  tree genuinely still needs it -- it runs from a throwaway build-scratch
+  directory that never sits at the fixed `../../lib` offset), while
+  `INSTALL_RPATH` -- what CMake actually bakes into the installed artifact
+  under `examples/bin` -- now carries only the portable `@loader_path/
+  ../../lib` entry. Verified for real with the identical `mv`-to-a-new-
+  path reproduction: `otool -l` on the freshly published, then-relocated
+  `crtgfx_skia_gpu_window_demo`/`crtgfx_gpu_window_demo` now shows exactly
+  one `LC_RPATH` each (`@loader_path/../../lib`, no absolute entry at
+  all), and both still run and present correctly from the new location.
+  `cmake --workflow --preset macos-host-ninja-debug` stays 100% (104/104).
 
 - **Validated the generic ELF/PE dependency-inventory distribution-hardening
   tranche for real on native Linux/aarch64 (this host) for the first time,

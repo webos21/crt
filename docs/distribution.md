@@ -302,9 +302,10 @@ and build trees using the packaged directory. At minimum they must verify:
 9. no compiler or linker executable in the archive;
 10. every declared external dependency's headers, link artifacts, and runtime
     libraries are present, and its provenance/license metadata is recorded;
-11. the built-in ELF/PE dependency inventory finds no embedded dependency path
-    or undeclared `.so`/`.dll` import (Mach-O coverage remains tracked in
-    `TODO.md`);
+11. the built-in ELF/PE/Mach-O dependency inventory finds no embedded
+    dependency path or undeclared `.so`/`.dll`/`.dylib` import, no absolute
+    macOS `LC_ID_DYLIB`, and no macOS executable with an `@rpath` dependency
+    but no portable `@loader_path`/`@executable_path` RPATH entry;
 12. OS-owned or device-driver prerequisites excluded from the archive are
     explicitly named in the manifest;
 13. the manifest's OS, architecture, stage, compiler inputs, and option set.
