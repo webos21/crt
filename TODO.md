@@ -104,20 +104,65 @@ a result.
      interposition-class bug. Full detail: `HISTORY.md`'s 2026-09-15
      entries.
   2. ~~Fix the imported-libc++/libc++abi/libunwind absolute-RUNPATH gap~~
-     -- **fixed 2026-09-15** (item just below); the SDK's C++ runtime is
-     now genuinely self-contained, verified with the original checkout's
-     `out/` tree renamed away entirely. The gap's second half (no relink
-     on `libc.so` change) is still open but does not block step 3 below.
-  3. **Active next step: Mesa A/B comparison.** Install a different Mesa/
-     lavapipe build into a separate prefix (do not overwrite the system
-     package) and select it via `VK_ICD_FILENAMES` against the same
-     example. Outcomes: passes on a newer Mesa -> treat 25.2.8/aarch64
-     lavapipe as a confirmed, version-specific defect (record a minimum
-     supported Mesa version or known limitation); still fails on a newer
-     Mesa -> write a minimal standalone repro and file it upstream; passes
-     on real GPU hardware if any becomes available -> stage itself is
-     sound, software-ICD-only limitation; fails on another ICD too ->
-     re-open the CRT/Skia Vulkan integration boundary as the suspect.
+     -- **`$ORIGIN`-first self-containment fixed 2026-09-15** (item just
+     below); the SDK's C++ runtime finds its own copy of `libc.so` first
+     and runs correctly with the original checkout's `out/` tree renamed
+     away entirely. **Precisely**: the absolute checkout path is still
+     present as a *second*, fallback RUNPATH entry (intentionally, for the
+     external build's own temporary configure-time probes) -- do not
+     describe this as "no absolute path remains"; see that item's own
+     still-open follow-ups for removing it from installed copies
+     specifically. Sufficient for the A/B comparison in step 3 either way,
+     since `$ORIGIN` is what actually resolves once a library is
+     installed anywhere. The gap's other half (no relink on `libc.so`
+     change) is also still open and does not block step 3.
+  3. **Active next step: staged Mesa lavapipe A/B comparison**, building
+     each candidate into its own prefix (never overwriting the system
+     package) and keeping *everything else fixed* (same `crtgfx_skia_
+     example` binary and SDK, same Vulkan loader, same Wayland session).
+     Run in order, stopping as soon as a stage's result is conclusive
+     enough to classify the defect (do not build every stage regardless):
+     - **S0 (baseline, already done)**: system `mesa-vulkan-drivers`
+       `25.2.8-0ubuntu0.24.04.2` -- fails with validation both OFF and ON
+       (`HISTORY.md`'s 2026-09-15 entries).
+     - **S1**: upstream Mesa tag `mesa-25.2.8` (the *same* version, built
+       from plain upstream source/options, not the Ubuntu package) in its
+       own prefix. Distinguishes an Ubuntu-specific patch/build-option/
+       packaging defect (S1 passes) from a real upstream 25.2.8 defect or
+       a defect common to this whole configuration (S1 also fails).
+     - **S2**, only if S1 fails: the current latest stable Mesa release
+       tag, same build options/toolchain, own prefix. S1 fails + S2 passes
+       -> a since-fixed upstream defect (record a minimum supported Mesa
+       version). S1 and S2 both fail -> either a still-open lavapipe
+       defect or a narrower CRT/Skia-lavapipe interop problem.
+     - Mesa `main`, only if S2 also fails -- do not build it earlier, it
+       only adds an unnecessary extra axis before S1/S2 have narrowed
+       things down.
+     Per-stage control protocol (keep identical across every stage):
+     pin the example/SDK by SHA-256; same Wayland compositor/session; pick
+     the ICD explicitly via `VK_DRIVER_FILES` (and matching
+     `VK_ICD_FILENAMES` for older-loader compatibility) pointing at a
+     dedicated ICD JSON whose `library_path` is the new build's own
+     absolute `libvulkan_lvp.so` path -- not a wide-open `LD_LIBRARY_PATH`
+     over the whole prefix; confirm the actually-selected driver with
+     `VK_LOADER_DEBUG=driver`; use a fresh or disabled shader-cache
+     directory per stage so a stale cache from one build can't leak into
+     another's result; never delete or overwrite the system Mesa package;
+     run each stage 3x with validation OFF and 3x with it ON. Do not
+     rebuild the full isolated-04 stage (FreeType/FFmpeg/Skia) for every
+     Mesa candidate -- only the preserved `crtgfx_skia_example` binary is
+     needed for A/B; re-run the full stage once, at the end, only against
+     whichever ICD turns out known-good.
+     Outcomes: a lavapipe-version swap passes -> Mesa lavapipe (or the
+     Ubuntu package specifically, per the S1 split above) is the confirmed
+     external defect -- record a minimum supported Mesa version or known
+     limitation, and file upstream if S1 and S2 both failed (build Mesa as
+     an ASan debug build first to localize the exact faulting write before
+     filing, rather than filing on the glibc-abort signature alone);
+     real GPU hardware, if any becomes available, also passes -> software-
+     lavapipe-only limitation, stage itself is sound; every ICD tried
+     (lavapipe versions and any hardware one) fails identically -> re-open
+     the CRT/Skia Vulkan integration boundary as the suspect instead.
   4. Once root-caused, fix it in the right place (CRT, Skia, or a Mesa bug
      report -- do not start a Mesa upstream patch or a Skia source change
      before step 3's A/B result), then re-run the full real isolated Linux
@@ -162,6 +207,20 @@ a result.
      inventory fingerprint that forces the affected nested build
      directories fresh; prove an actual `libc.so` change propagates
      without manual deletion.
+  3. **Still open, before final release (not before the Mesa A/B
+     comparison above, which item 1's fix already unblocks):** the
+     absolute checkout-path RUNPATH entry item 1 left in place as a
+     fallback must not ship in an installed/packaged copy of these three
+     libraries -- only the external build's own temporary `try_compile`/
+     `try_run` probes need it, never an installed artifact. Strip it (e.g.
+     `patchelf --remove-rpath` plus a fresh `--set-rpath '$ORIGIN'`, or an
+     equivalent post-install rewrite) as an explicit step wherever
+     `create_dist.py`'s `--libcxx-install` copies these files into a
+     distribution stage, then extend `verify_dist.py` to reject any
+     installed binary whose `RUNPATH`/`RPATH` contains this checkout's own
+     absolute build path -- turning this specific class of leak into a
+     hard packaging-acceptance gate, not just something caught by hand
+     with `readelf` when someone happens to look.
 
 ### Distribution hardening
 
