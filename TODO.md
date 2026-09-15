@@ -74,25 +74,25 @@ own pipeline still cannot reach `verify_dist.py`/atomic publish on Linux as
 a result.
 
 - [ ] **Root-cause the Linux Skia heap corruption blocking `examples/gfx-skia`
-  presentation -- CRT's own allocator is cleared and the two observed Skia
-  call sites are stock/spec-correct; the failure is strongly isolated to
-  the Mesa lavapipe/llvmpipe 25.2.8 ICD path on this host, but not yet
-  confirmed as a Mesa defect** (`VK_LAYER_KHRONOS_validation` only checks
-  Vulkan-API-visible misuse -- it does not check ELF symbol interposition,
-  the CRT/host ABI boundary, a wrongly-loaded runtime, or a driver's own
-  internal memory safety, so it cannot by itself clear CRT/Skia or convict
-  Mesa). `strtof_l` is fixed; `CRT_ENABLE_DEBUG_MALLOC` is complete and
+  presentation -- now localized to CRT's own imported `libc++.so.1`,
+  called from `SkSL::FunctionDeclaration::mangledName()`; NOT Mesa or
+  LLVM (that attribution was made 2026-09-15 and retracted the same
+  day).** `strtof_l` is fixed; `CRT_ENABLE_DEBUG_MALLOC` is complete and
   validated (guard-malloc work stays deferred -- the owner/double-free/
   canary trio was sufficient to clear CRT's own allocator, so there is no
-  concrete need for it yet). A real isolated-04 rerun against the corrected
-  allocator stays completely silent while the process still aborts with
-  glibc's own `free(): invalid next size (fast)` inside Mesa's lavapipe ICD
-  (`libvulkan_lvp.so`); reproducing under the validation layer printed zero
-  VUID errors/warnings before the abort, yet the crash site moved to a
-  different, equally stock/unmodified Skia call site. Full evidence:
-  `HISTORY.md`'s 2026-09-15 entries. Next steps, in order (each is meant to
-  close off one remaining alternative explanation before spending real time
-  on a Mesa A/B comparison or any upstream patch):
+  concrete need for it yet); the glibc-side abort inside Mesa's lavapipe
+  ICD that motivated the whole Mesa A/B comparison (steps 3-3.1 below)
+  turned out to be a *downstream symptom*, not the root cause -- an
+  ASan-instrumented Mesa build (built only to get a precise stack for
+  what looked like a Mesa/LLVM defect) caught the real, upstream bad-free
+  first, and re-checking that ASan report's own module attribution under
+  GDB (`info sharedlibrary`) showed it was never Mesa or LLVM at all: see
+  step 3.1 below for the full correction. Full evidence: `HISTORY.md`'s
+  2026-09-15 entries. Steps 1-3.1 below are kept for the historical record
+  of how this was narrowed down (each closed off one alternative
+  explanation in turn); the **active next step is now reading Skia's own
+  `SkSL::FunctionDeclaration::mangledName()` and its object lifetime**,
+  not any further Mesa/LLVM work:
   1. ~~Cheap host-ABI-binding sanity check~~ -- **done 2026-09-15**: a
      direct `LD_DEBUG=bindings,libs` audit of the preserved failing example
      found zero exceptions -- every host/Mesa library (including
@@ -171,37 +171,53 @@ a result.
        timing-dependent one. Retract the earlier "cold-shader-cache race"
        phrasing; "cold shader-compilation-path-dependent corruption" is
        the accurate description going forward.
-     - ~~S3~~ -- **done 2026-09-15: ASan points cleanly into LLVM's own
-       internal `std::string` handling, 3/3 deterministic.** Built Mesa
-       `26.2.2` with `-Db_sanitize=address -Dbuildtype=debug` (same
-       minimal options otherwise), `LD_PRELOAD`-ing `libasan.so.8` ahead
-       of the Vulkan loader (needed since `crtgfx_skia_example` itself
-       isn't ASan-built -- running it without the preload crashed silently
-       before `main()`). Result, identical on 3/3 runs (cache disabled and
-       a fresh empty cache both tried): `AddressSanitizer: attempting free
-       on address which was not malloc()-ed` inside `std::__1::basic_
-       string::append()` -> `__grow_by_and_replace()` -> `deallocate()`,
-       on "a wild pointer inside of access range of size 0x1". `std::__1`
-       is libc++'s namespace, not GCC/libstdc++'s (Mesa itself was built
-       by plain `cc`/`c++`, i.e. GCC) -- this frame belongs to Ubuntu's
-       prebuilt `libLLVM.so.20.1`, reached from Mesa's C code calling into
-       LLVM's own C++ internals during llvmpipe's JIT shader compilation.
-       Matches the original bug report's oldest clue, "mangledName()".
-       Neither `fast_unwind_on_fatal=0` nor a larger `malloc_context_size`
-       produced a frame above `append()` -- the caller is most likely
-       JIT-generated or unwind-info-less LLVM code, not a symbolization
-       gap. Full detail: `HISTORY.md`'s 2026-09-15 entries.
-       **Decision needed, not yet made**: this is already precise and
-       deterministic enough to write up and file against Mesa/LLVM
-       upstream as-is (a `std::string` corruption inside LLVM's own
-       JIT-compilation-time internals, cold-path-only, reproducible,
-       single-threaded). Going further -- enabling Ubuntu's `ddebs`
-       repository for LLVM debug symbols (cheap, one more apt source), or
-       a full LLVM ASan/debug rebuild (substantially heavier than
-       anything done so far) -- would only buy a fuller stack above
-       `append()`, not a different conclusion. Recommend filing with the
-       current evidence rather than escalating further, but this is the
-       project owner's call.
+     - ~~S3~~ -- **done 2026-09-15, then corrected by S3.1 below: this is
+       CRT/Skia's own bug, not Mesa or LLVM.** Built Mesa `26.2.2` with
+       `-Db_sanitize=address -Dbuildtype=debug`, `LD_PRELOAD`-ing
+       `libasan.so.8` ahead of the Vulkan loader. ASan itself reported a
+       bad-free inside `std::__1::basic_string::append()`
+       (3/3 deterministic), which the original S3 pass wrongly attributed
+       to `libLLVM.so.20.1` on the strength of the `std::__1` namespace
+       alone -- **wrong**, per the project owner's own review: `std::__1`
+       is libc++'s ABI namespace in general, not proof of *which* libc++,
+       and Ubuntu's `libLLVM.so.20.1` was confirmed (via `readelf -d`) to
+       link `libstdc++.so.6`, not libc++ at all, so it could not have
+       produced that frame.
+     - ~~S3.1~~ -- **done 2026-09-15: re-ran the same crash under GDB with
+       `info sharedlibrary` to map every frame to its real module, instead
+       of trusting ASan's own report.** The `__libcpp_operator_delete`/
+       `deallocate`/`__grow_by_and_replace`/`append` chain resolves to
+       **this project's own imported `.../sdk/lib/libc++.so.1`**, called
+       from **`SkSL::FunctionDeclaration::mangledName() const`** -- Skia's
+       own code, exactly matching this whole investigation's oldest clue
+       (`mangledName()`/`wangs_formula`). The freed pointer's content is
+       even visible: `"wangs_formula_max_fdiff_p2_ff2"`. **This is a
+       CRT/Skia-side finding, not a Mesa or LLVM one.**
+       On the separate "is this an ASan-allocator-domain artifact"
+       concern the same review raised: `LD_DEBUG=bindings` shows `libc++.
+       so.1`'s own `operator new`/`operator delete`/`free` all
+       consistently bind to `libasan.so.8` once preloaded (one coherent
+       allocator domain, not an obvious CRT-vs-ASan split), and ASan's own
+       phrasing ("wild pointer *inside of access range* of size 0x1", not
+       "unknown-crash" against wholly untracked memory) leans toward a
+       genuine dangling/corrupted pointer. A planned standalone minimal
+       `std::string`-under-ASan repro (to settle this definitively) hit an
+       unrelated, unresolved environment issue instead (`AddressSanitizer
+       failed to allocate 0x0 (0) bytes of ReadFileToBuffer` at startup,
+       confirmed via `strace` to be an ASan-internal file-size probe
+       returning 0 then attempting `mmap(NULL, 0, ...)`) -- **this
+       verification is not yet complete**. Full detail:
+       `HISTORY.md`'s 2026-09-15 entries.
+       **Active next step, decision needed**: either (a) fix the minimal
+       repro's own ASan startup failure and complete the allocator-domain
+       verification before treating this as a confirmed Skia bug, or (b)
+       treat the GDB module evidence plus the "wild pointer inside a
+       known allocation" phrasing as sufficient already and move straight
+       to reading `SkSL::FunctionDeclaration::mangledName()` and its
+       caller(s) in the vendored Skia source to look for a genuine UAF/
+       object-lifetime bug (e.g. in SkSL's own arena/pool allocator for
+       AST nodes). Do not file anything against Mesa or LLVM -- that
+       attribution is retracted.
      Per-stage control protocol (keep identical across every stage):
      pin the example/SDK by SHA-256; same Wayland compositor/session; pick
      the ICD explicitly via `VK_DRIVER_FILES` (and matching
@@ -217,39 +233,40 @@ a result.
      Mesa candidate -- only the preserved `crtgfx_skia_example` binary is
      needed for A/B; re-run the full stage once, at the end, only against
      whichever ICD turns out known-good.
-     S3's own branch list above supersedes any generic pass/fail outcome
-     summary here; also note real GPU hardware, if any becomes available,
-     passing would mean a software-lavapipe-only limitation (stage itself
-     sound) -- not yet testable on this host.
+     **Superseded by S3.1's finding**: this whole Mesa A/B thread was a
+     necessary and correct way to get a clean, ASan-capable reproduction,
+     but the defect it eventually surfaced (via the ASan build) is in
+     CRT/Skia's own code, not in whichever Mesa/lavapipe build is
+     selected -- so no further Mesa version/ICD comparison is expected to
+     change the outcome. Real GPU hardware, were it available, would
+     still be worth trying once a fix exists, purely to confirm the fixed
+     example presents correctly end-to-end, not as a further diagnostic.
   4. **Explicit do-not-do list for this whole investigation** (per the
-     project owner's 2026-09-15 review): do not pre-warm a shader cache
-     to make acceptance pass, and never ship a warm cache inside the SDK;
-     do not patch Skia source at this stage; do not rebuild the full
-     isolated-04 stage for every diagnostic condition (only the preserved
-     example binary is needed until a known-good ICD is confirmed); do
-     not expand `CRT_ENABLE_GUARD_MALLOC` or other CRT allocator
-     diagnostics further right now -- CRT's own allocator is already
-     cleared.
-  5. Once root-caused, fix it in the right place (CRT, Skia, or a Mesa bug
-     report -- do not start a Mesa upstream patch or a Skia source change
-     before S3's result), then re-run the full real isolated Linux arm64
-     04 build from fresh libc++/FreeType/FFmpeg/Skia and complete
-     `verify_dist.py`/atomic publication. Independently of this Mesa
-     investigation, also close out before that final rebuild: the
+     project owner's 2026-09-15 review, still in force): do not pre-warm
+     a shader cache to make acceptance pass, and never ship a warm cache
+     inside the SDK; do not patch Skia source before S3.1's own decision
+     point above is resolved; do not rebuild the full isolated-04 stage
+     for every diagnostic condition (only the preserved example binary is
+     needed until a fix is ready to verify); do not expand
+     `CRT_ENABLE_GUARD_MALLOC` or other CRT allocator diagnostics further
+     right now -- CRT's own allocator is already cleared, and this defect
+     lives in Skia's own object lifetime, not the allocator.
+  5. Once S3.1's decision point is resolved and the actual bug in
+     `SkSL::FunctionDeclaration::mangledName()` (or whatever calls it) is
+     root-caused and fixed in Skia's own code, re-run the full real
+     isolated Linux arm64 04 build from fresh libc++/FreeType/FFmpeg/Skia
+     and complete `verify_dist.py`/atomic publication. Independently of
+     this investigation, also close out before that final rebuild: the
      imported-libc++/libc++abi/libunwind relink-on-`libc.so`-change gap
      and the removal of their installed absolute-RUNPATH fallback (both
      tracked in the item just below), and `verify_dist.py`'s own
      absolute-path/dependency checks.
-  **Separately, reconsider whether one known external software-ICD defect
-  should keep blocking `verify_dist.py`/atomic publication entirely** (a
-  policy question, not yet decided): a reasonable split is to keep
-  option-ON build/link/packaging, CPU and offscreen-GPU automated tests,
-  and `verify_dist.py`/dependency/RUNPATH checks as hard requirements,
-  while tracking real on-screen presentation as a separate host-acceptance
-  record and an isolated, single, already-known-defective software ICD as
-  an explicit external limitation -- without ever substituting an
-  option-OFF pass for it. Decide this with the project owner once step 3
-  gives a real answer, not before.
+  **The "reconsider whether an external ICD defect should block
+  `verify_dist.py`" policy question this item previously raised no longer
+  applies** -- the defect is CRT/Skia's own, not an external Mesa/lavapipe
+  limitation, so there is nothing external to carve out an acceptance
+  exception for. `verify_dist.py`/atomic publication should simply stay
+  blocked until the actual Skia-side bug is fixed.
 - [ ] **Make imported libc++/libc++abi/libunwind self-contained in a
   packaged SDK.** Two distinct, confirmed gaps in the same three files
   (full evidence in `HISTORY.md`'s 2026-09-14/2026-09-15 entries).

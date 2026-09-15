@@ -10,7 +10,66 @@ substantive update.
 
 ## 2026-09-15
 
-- **S3: ASan pinpoints the corruption to a bad-free inside a
+- **S3.1: retracted the "LLVM" attribution -- the crash is in CRT's own
+  imported `libc++.so.1`, called from `SkSL::FunctionDeclaration::
+  mangledName()`, not LLVM.** A project-owner review of the S3 entry
+  below correctly challenged it on three points: `std::__1` is libc++'s
+  ABI namespace, not proof of *which* libc++ (this project's own imported
+  one uses it too); the earlier plain-GDB backtrace had already named
+  `SkSL::FunctionDeclaration::mangledName()` as the caller, not LLVM; and
+  `LD_PRELOAD=libasan.so.8` globally interposes `operator new`/`delete`,
+  so a `bad-free` could in principle be an artifact of mixing CRT's own
+  allocator with ASan's rather than a genuine bug. Re-ran the same ASan
+  reproduction under GDB this time (`catch signal SIGABRT`, full
+  backtrace with `info sharedlibrary` to map every PC to its actual
+  module) instead of trusting ASan's own truncated report: frames #11-16
+  (the same `__libcpp_operator_delete`/`__libcpp_deallocate`/
+  `allocator::deallocate`/`__grow_by_and_replace`/`append` chain ASan
+  printed) resolve to addresses `0xfffff764f020-0xfffff77145e4`, which
+  `info sharedlibrary`'s own module ranges show is **this project's own
+  imported `.../sdk/lib/libc++.so.1`** -- confirmed separately that Mesa
+  itself was built by plain `cc`/`c++` (GCC) and that Ubuntu's
+  `libLLVM.so.20.1` links `libstdc++.so.6` (`readelf -d`/`ldd`), not
+  libc++ at all, so it could never have produced a `std::__1` frame in
+  the first place. Frame #17 (and the 20+ identically-addressed frames
+  below it, again a GDB stack-unwinding artifact on optimized code, not
+  real recursion) is `SkSL::FunctionDeclaration::mangledName() const`.
+  GDB also printed the actual string content being freed:
+  `__p=0xffffd89c5c70 "wangs_formula_max_fdiff_p2_ff2"` -- exactly
+  matching this whole investigation's oldest clue (`mangledName()`/
+  `wangs_formula`, from long before `CRT_ENABLE_DEBUG_MALLOC` existed).
+  **The earlier S3 entry's "reached from Mesa's C code calling into
+  LLVM's own C++ internals" and "this frame belongs to ... `libLLVM.so.
+  20.1`" claims are wrong and retracted**; the corruption is inside this
+  project's own Skia/SkSL code (via CRT's own imported libc++), not Mesa
+  or LLVM.
+
+  On the remaining "is this an ASan-allocator-domain artifact" question:
+  `LD_DEBUG=bindings` with the same `LD_PRELOAD` active shows `libc++.
+  so.1` binds its own `operator new`/`operator delete`/plain `free`
+  (`_Znwm`/`_ZdlPvm`/`free@CRT_1.0`) all to `libasan.so.8` -- a single,
+  internally consistent allocator domain for libc++'s own calls, not an
+  obvious CRT-vs-ASan split. ASan's own diagnosis ("wild pointer *inside
+  of access range* of size 0x1", not "unknown-crash" against wholly
+  untracked memory) is also more consistent with a genuine dangling/
+  corrupted pointer than with a foreign, ASan-untracked allocation. A
+  planned standalone minimal reproduction (repeatedly `append()`-ing a
+  `std::string` linked against this project's own shared libc++, run
+  under the identical `LD_PRELOAD`) hit an unrelated, unresolved
+  environment issue instead -- `AddressSanitizer failed to allocate 0x0
+  (0) bytes of ReadFileToBuffer` immediately at startup, before `main()`,
+  confirmed via `strace` to be an internal ASan file-size-probe returning
+  0 and then attempting `mmap(NULL, 0, ...)` (`EINVAL`) -- not something
+  the real, much larger `crtgfx_skia_example` hits, and not yet root-
+  caused. **This specific minimal-repro verification therefore remains
+  incomplete**; the CRT/Skia (not Mesa/LLVM) attribution is well-
+  supported by the corrected GDB evidence above, but the ASan-artifact
+  question is not fully closed pending either fixing that minimal
+  repro's own startup failure or another way to rule out the concern.
+
+- **S3 (superseded by the entry above -- kept for the record, do not cite
+  its "LLVM" conclusion): ASan pinpoints the corruption to a bad-free
+  inside a
   `std::string::append()` on a wild pointer, deep in LLVM's own internal
   code -- reproduces 3/3, deterministic, not a race.** Built Mesa
   `26.2.2` again into its own prefix with `-Dbuildtype=debug
