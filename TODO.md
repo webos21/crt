@@ -202,21 +202,34 @@ a result.
        "unknown-crash" against wholly untracked memory) leans toward a
        genuine dangling/corrupted pointer. A planned standalone minimal
        `std::string`-under-ASan repro (to settle this definitively) hit an
-       unrelated, unresolved environment issue instead (`AddressSanitizer
-       failed to allocate 0x0 (0) bytes of ReadFileToBuffer` at startup,
-       confirmed via `strace` to be an ASan-internal file-size probe
-       returning 0 then attempting `mmap(NULL, 0, ...)`) -- **this
-       verification is not yet complete**. Full detail:
-       `HISTORY.md`'s 2026-09-15 entries.
-       **Active next step, decision needed**: either (a) fix the minimal
-       repro's own ASan startup failure and complete the allocator-domain
-       verification before treating this as a confirmed Skia bug, or (b)
-       treat the GDB module evidence plus the "wild pointer inside a
-       known allocation" phrasing as sufficient already and move straight
-       to reading `SkSL::FunctionDeclaration::mangledName()` and its
-       caller(s) in the vendored Skia source to look for a genuine UAF/
-       object-lifetime bug (e.g. in SkSL's own arena/pool allocator for
-       AST nodes). Do not file anything against Mesa or LLVM -- that
+       unrelated environment issue instead: root-caused (not fixed) via a
+       GDB `catch syscall mmap` breakpoint to ASan's own lazy
+       `CacheBinaryName()` -> `ReadFileToBuffer("/proc/self/cmdline")`
+       path, triggered the *first* time anything calls `__cxa_atexit`
+       (here, `libc++.so.1`'s own global constructor, before this
+       project's `crt1.o` even runs) -- a known class of ASan-in-sandbox
+       issue (matches LLVM bug 57838); `-no-pie` and disabling ASLR
+       (`setarch -R`), the fixes reported for similar container/PIE ASan
+       issues elsewhere, did not resolve it here. **This verification
+       remains incomplete** -- not because of anything in CRT, Skia, or
+       Mesa, but because of this specific sandboxed host's own ASan
+       startup behavior. Full detail: `HISTORY.md`'s 2026-09-15 entries.
+       **Active next step, decision needed**: given the minimal-repro
+       route has now had real, substantial effort spent on an unrelated
+       environment blocker with no fix found, choose between (a)
+       continuing to chase that blocker (e.g. a custom `LD_PRELOAD` shim
+       that pre-populates ASan's binary-name cache before `libc++.so.1`'s
+       constructors run, or patching around `CacheBinaryName` some other
+       way) purely to close this verification gap, or (b) treating the
+       GDB module evidence plus the "wild pointer inside a known
+       allocation" phrasing plus the thousands of successful `std::
+       string` operations the real `crtgfx_skia_example` itself already
+       performs under the identical ASan setup (before its one specific,
+       always-identical failure) as sufficient, and moving straight to
+       reading `SkSL::FunctionDeclaration::mangledName()` and its
+       caller(s) in the vendored Skia source for a genuine UAF/object-
+       lifetime bug (e.g. in SkSL's own arena/pool allocator for AST
+       nodes). Do not file anything against Mesa or LLVM -- that
        attribution is retracted.
      Per-stage control protocol (keep identical across every stage):
      pin the example/SDK by SHA-256; same Wayland compositor/session; pick

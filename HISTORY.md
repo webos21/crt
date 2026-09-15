@@ -10,6 +10,42 @@ substantive update.
 
 ## 2026-09-15
 
+- **Root-caused (but did not fix) the minimal `std::string`-under-ASan
+  repro's own startup failure; it is a known class of ASan-in-sandbox
+  issue, unrelated to CRT/Skia.** Chasing the "is this an ASan-allocator-
+  domain artifact" question from the entry below, a minimal executable
+  (built against this project's own imported `libc++.so.1`, same as
+  `crtgfx_skia_example`) crashed immediately at startup under `LD_PRELOAD=
+  libasan.so.8` with `AddressSanitizer failed to allocate 0x0 (0) bytes of
+  ReadFileToBuffer (error code: 22)` / `ERROR: Failed to mmap` -- before
+  `main()` ever ran, and *not* something the real, much larger
+  `crtgfx_skia_example` hits under the identical preload. A GDB `catch
+  syscall mmap` breakpoint (conditioned on a zero-length request) caught
+  the exact call chain: `__sanitizer::ReadFileToBuffer("/proc/self/
+  cmdline", ...)` -> `ReadLongProcessName` -> `ReadProcessName` ->
+  `CacheBinaryName` -> `AsanInitInternal`, triggered by ASan's
+  interposed `__cxa_atexit` the *very first* time anything calls it --
+  which turns out to be `libc++.so.1`'s own global constructor for
+  `std::__1::pmr::(anonymous namespace)::ResourceInitHelper`, registering
+  its destructor via `atexit()` during `_dl_init`, before this project's
+  own `crt1.o`/`_start` even runs. `/proc/self/cmdline` reading a
+  zero-length result at that exact point matches a known, previously
+  reported class of AddressSanitizer issue in virtualized/containerized
+  environments (LLVM bug 57838; a related GitLab-CI-in-Docker report
+  attributes a similar class of ASan/PIE/container interaction, with
+  `-no-pie` as that report's own fix). Tried `-no-pie` (confirmed via
+  `file` that the executable really stopped being a PIE) and `setarch
+  -R` (disabling ASLR) here -- neither changed the result, so this
+  sandbox's own specific trigger is not simply PIE- or ASLR-related.
+  **Not resolved**; this is judged a genuine but tangential environment
+  limitation of this exact sandboxed host, not a finding about CRT, Skia,
+  or the actual bug under investigation. Decision on whether to keep
+  chasing this specific repro or rely on the already-collected indirect
+  evidence (thousands of successful `std::string` allocate/append/free
+  cycles inside the real `crtgfx_skia_example` under the identical ASan
+  setup, before its one specific, deterministic failure) is tracked in
+  `TODO.md`.
+
 - **S3.1: retracted the "LLVM" attribution -- the crash is in CRT's own
   imported `libc++.so.1`, called from `SkSL::FunctionDeclaration::
   mangledName()`, not LLVM.** A project-owner review of the S3 entry
