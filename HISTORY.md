@@ -10,6 +10,61 @@ substantive update.
 
 ## 2026-09-15
 
+- **S3: ASan pinpoints the corruption to a bad-free inside a
+  `std::string::append()` on a wild pointer, deep in LLVM's own internal
+  code -- reproduces 3/3, deterministic, not a race.** Built Mesa
+  `26.2.2` again into its own prefix with `-Dbuildtype=debug
+  -Db_sanitize=address -Db_lundef=false` (same minimal lavapipe/
+  llvmpipe+Wayland options and LLVM 20.1.2 as S1/S2). `libvulkan_lvp.so`
+  links `libasan.so.8` directly, but the main executable
+  (`crtgfx_skia_example`) is not itself ASan-built, so running it
+  directly crashed silently before `main()` (the classic "ASan runtime
+  does not come first" init-order failure) -- fixed by `LD_PRELOAD=/lib/
+  aarch64-linux-gnu/libasan.so.8` ahead of the Vulkan loader.
+
+  With `ASAN_OPTIONS=detect_leaks=0:abort_on_error=1` (leak detection off
+  as planned, so ASan stops at the first invalid access) and
+  `MESA_SHADER_CACHE_DISABLE=true`, ASan reports, identically on 3/3
+  runs (also reproduced once against a fresh empty `MESA_SHADER_CACHE_
+  DIR` instead of the disable flag, same result):
+  ```
+  AddressSanitizer: attempting free on address which was not malloc()-ed
+    #0 operator delete(void*, unsigned long)
+    #1 std::__1::__libcpp_operator_delete<char*, unsigned long>
+    #2 std::__1::__libcpp_deallocate<char>
+    #3 std::__1::allocator<char>::deallocate
+    #4 std::__1::allocator_traits<std::__1::allocator<char>>::deallocate
+    #5 std::__1::basic_string<...>::__grow_by_and_replace(...)
+    #6 std::__1::basic_string<...>::append(char const*, unsigned long)
+  Address ... is a wild pointer inside of access range of size 0x1.
+  ```
+  `std::__1` is LLVM libc++'s own ABI namespace -- Mesa itself was built
+  by plain `cc`/`c++` (GCC 13.3.0, which uses libstdc++'s `std::__cxx11`,
+  not this), so this frame belongs to Ubuntu's own prebuilt
+  `libLLVM.so.20.1` (built by the LLVM project itself, evidently against
+  libc++), reached from Mesa's C code calling into LLVM's C++-internal
+  machinery during llvmpipe's JIT shader compilation -- consistent with
+  the original bug report's own oldest clue, "mangledName()" (LLVM's own
+  C++ code does exactly this kind of `std::string` name-mangling/
+  formatting internally). Neither `fast_unwind_on_fatal=0` nor a larger
+  `malloc_context_size` produced any frame above `append()` -- the
+  unwinder's chain ends exactly at the LLVM boundary, most plausibly
+  because the actual caller is JIT-generated code or an optimized LLVM
+  frame with no usable unwind info, not a symbolization gap ASan options
+  alone can fix. No Ubuntu debug-symbol (`ddebs`) repository is
+  configured on this host, so no free path to a more precise LLVM source
+  location exists without either enabling that repository or building
+  LLVM itself with debug info/ASan (a substantially heavier undertaking
+  than anything so far in this investigation).
+
+  This is a clean, fully deterministic (3/3, `bad-free` on a wild pointer
+  of a fixed size-1 shape every time) memory-safety defect, entirely
+  consistent with S2.1's "not a race" conclusion and precise enough on
+  its own to support a Mesa/LLVM upstream report even without a deeper
+  LLVM-side backtrace. Deciding whether to pursue `ddebs`/an LLVM ASan
+  rebuild for a full stack, or write up and file this evidence as-is, is
+  tracked in `TODO.md`.
+
 - **S2.1: the cold-path Mesa 26.2.2 corruption reproduces single-threaded
   -- not a data race, a deterministic defect in the shader compile/JIT
   path itself.** Two cheap controlled reruns against the existing S2

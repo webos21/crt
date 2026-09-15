@@ -171,39 +171,37 @@ a result.
        timing-dependent one. Retract the earlier "cold-shader-cache race"
        phrasing; "cold shader-compilation-path-dependent corruption" is
        the accurate description going forward.
-     - **S3, active next step: ASan-instrumented Mesa 26.2.2 build**,
-       same minimal lavapipe/llvmpipe+Wayland options and LLVM 20.1.2, in
-       its own prefix, purely to localize the exact faulting write (a
-       Mesa source location and call stack), not just the point where
-       glibc later notices the damage. Build with ASan enabled, debug
-       symbols and frame pointers on, leak detection off (`ASAN_OPTIONS=
-       detect_leaks=0`) so it stops at the first invalid access instead
-       of a leak report; `LD_PRELOAD` the ASan runtime ahead of the
-       loader if it does not attach on its own. Run in this order, since
-       ASan itself perturbs timing: (1) cache disabled, validation OFF;
-       (2) fresh empty cache, validation OFF; (3) validation ON, only if
-       (1)/(2) do not reproduce; (4) compare default vs `LP_NUM_THREADS=1`
-       only if S2.1 had shown a threading-count-dependent difference (it
-       did not, so this is a lower-priority check here). Do not add
-       UBSan/TSan yet -- ASan first.
-       Branch on the result: **ASan reports a Mesa source location** ->
-       capture the call stack and Mesa commit, write a minimal standalone
-       Vulkan repro if practical, and file a Mesa upstream issue. **ASan
-       points into LLVM itself** -> examine the exact shader/JIT input
-       Mesa hands across that boundary before considering instrumenting
-       LLVM separately. **ASan reports nothing and the same glibc abort
-       still happens** -> the corrupting code is probably in an
-       uninstrumented library in the process (re-verify which Mesa/LLVM
-       paths actually loaded); consider a glibc-heap-configuration check
-       or a Valgrind-family tool next. **ASan does not reproduce at all**
-       -> widen the timing window first (validation ON plus cache
-       disabled) before concluding anything; if it still doesn't
-       reproduce, let the `LP_NUM_THREADS=1` vs default comparison (which
-       showed no difference under plain S2.1, but ASan's own overhead
-       could change that) decide whether TSan is worth adding next.
-       **Fails identically under ASan too** -> only then consider Mesa
-       `main`, and only as an upstream-facing "already fixed?" check
-       after filing, not as an earlier diagnostic step.
+     - ~~S3~~ -- **done 2026-09-15: ASan points cleanly into LLVM's own
+       internal `std::string` handling, 3/3 deterministic.** Built Mesa
+       `26.2.2` with `-Db_sanitize=address -Dbuildtype=debug` (same
+       minimal options otherwise), `LD_PRELOAD`-ing `libasan.so.8` ahead
+       of the Vulkan loader (needed since `crtgfx_skia_example` itself
+       isn't ASan-built -- running it without the preload crashed silently
+       before `main()`). Result, identical on 3/3 runs (cache disabled and
+       a fresh empty cache both tried): `AddressSanitizer: attempting free
+       on address which was not malloc()-ed` inside `std::__1::basic_
+       string::append()` -> `__grow_by_and_replace()` -> `deallocate()`,
+       on "a wild pointer inside of access range of size 0x1". `std::__1`
+       is libc++'s namespace, not GCC/libstdc++'s (Mesa itself was built
+       by plain `cc`/`c++`, i.e. GCC) -- this frame belongs to Ubuntu's
+       prebuilt `libLLVM.so.20.1`, reached from Mesa's C code calling into
+       LLVM's own C++ internals during llvmpipe's JIT shader compilation.
+       Matches the original bug report's oldest clue, "mangledName()".
+       Neither `fast_unwind_on_fatal=0` nor a larger `malloc_context_size`
+       produced a frame above `append()` -- the caller is most likely
+       JIT-generated or unwind-info-less LLVM code, not a symbolization
+       gap. Full detail: `HISTORY.md`'s 2026-09-15 entries.
+       **Decision needed, not yet made**: this is already precise and
+       deterministic enough to write up and file against Mesa/LLVM
+       upstream as-is (a `std::string` corruption inside LLVM's own
+       JIT-compilation-time internals, cold-path-only, reproducible,
+       single-threaded). Going further -- enabling Ubuntu's `ddebs`
+       repository for LLVM debug symbols (cheap, one more apt source), or
+       a full LLVM ASan/debug rebuild (substantially heavier than
+       anything done so far) -- would only buy a fuller stack above
+       `append()`, not a different conclusion. Recommend filing with the
+       current evidence rather than escalating further, but this is the
+       project owner's call.
      Per-stage control protocol (keep identical across every stage):
      pin the example/SDK by SHA-256; same Wayland compositor/session; pick
      the ICD explicitly via `VK_DRIVER_FILES` (and matching
