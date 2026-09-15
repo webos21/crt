@@ -8,6 +8,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from create_dist import DIST_PORTING_TOOLS, DIST_PORTING_DIRS, DIST_WRAPPER_TOOLS
 from crt_dist_prerequisites import external_prerequisites_for
+from crt_elf import is_absolute_runtime_entry, runtime_paths
 from crt_stage_recipe import recipe_filename_for_stage, validate_recipe
 
 
@@ -46,6 +47,25 @@ def require_string_list(value: object, description: str) -> list[str]:
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise SystemExit(f"manifest {description} must be a string list")
     return value
+
+
+def validate_elf_runtime_paths(dist: Path) -> None:
+    """Reject checkout/build paths embedded in packaged Linux ELF files."""
+    for path in dist.rglob("*"):
+        if not path.is_file():
+            continue
+        try:
+            paths = runtime_paths(path)
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            raise SystemExit(f"cannot inspect ELF runtime path in {path}: {exc}") from exc
+        for value in paths:
+            absolute = [entry for entry in value.split(":")
+                        if is_absolute_runtime_entry(entry)]
+            if absolute:
+                relative = path.relative_to(dist)
+                raise SystemExit(
+                    f"distribution ELF {relative} contains absolute RPATH/RUNPATH: "
+                    + ", ".join(absolute))
 
 
 def validate_manifest_schema(manifest: object, expected_stage: str) -> dict:
@@ -252,6 +272,8 @@ def main() -> None:
     bundled = sorted(path for path in dist.rglob("*") if path.is_file() and path.name.lower() in BANNED_TOOLS)
     if bundled:
         raise SystemExit("compiler/linker executable was bundled: " + ", ".join(map(str, bundled)))
+    if manifest.get("target", {}).get("os") == "linux":
+        validate_elf_runtime_paths(dist)
 
     require(dist / "include" / "stdio.h")
     require(dist / "system" / "bin")

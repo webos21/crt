@@ -11,6 +11,7 @@ from pathlib import Path
 
 from create_rootfs import TOYBOX_APPLETS
 from crt_dist_prerequisites import external_prerequisites_for
+from crt_elf import remove_absolute_runtime_paths
 
 
 # What "ships in every packaged distribution" is, on purpose, a single
@@ -23,7 +24,7 @@ from crt_dist_prerequisites import external_prerequisites_for
 # real one).
 DIST_PORTING_TOOLS = (
     "crt-port-build.py", "fetch_ports.py", "crt-native-tool", "crt-stage-build.py",
-    "crt_stage_recipe.py", "crt_dist_prerequisites.py",
+    "crt_stage_recipe.py", "crt_dist_prerequisites.py", "crt_elf.py",
 )
 DIST_PORTING_DIRS = ("recipes", "tests", "shims")
 DIST_WRAPPER_TOOLS = ("crt-cc", "crt-c++", "crt-cc.cmd", "crt-c++.cmd")
@@ -47,7 +48,7 @@ def install_component(cmake: str, build_dir: Path, destination: Path, component:
     )
 
 
-def copy_libcxx(install: Path, destination: Path) -> None:
+def copy_libcxx(install: Path, destination: Path, target_os: str) -> None:
     headers = install / "include" / "c++" / "v1"
     libraries = install / "lib"
     if not headers.is_dir() or not libraries.is_dir():
@@ -60,7 +61,10 @@ def copy_libcxx(install: Path, destination: Path) -> None:
     copied = 0
     for item in libraries.iterdir():
         if item.is_file() and item.name.startswith(("libc++", "libunwind", "unwind")):
-            shutil.copy2(item, destination / "lib" / item.name)
+            copied_item = destination / "lib" / item.name
+            shutil.copy2(item, copied_item)
+            if target_os == "linux":
+                remove_absolute_runtime_paths(copied_item, require_origin=True)
             copied += 1
     runtime_bin = install / "bin"
     if runtime_bin.is_dir():
@@ -525,7 +529,7 @@ def main() -> None:
     for component in args.component:
         install_component(args.cmake, build_dir, destination, component)
     if args.libcxx_install:
-        copy_libcxx(args.libcxx_install.resolve(), destination)
+        copy_libcxx(args.libcxx_install.resolve(), destination, args.target_os)
     copy_port_tools(args.port_prefix.resolve() if args.port_prefix else None, destination)
     redistributed_dependencies = list(inherited_dependencies)
     xkbcommon = copy_xkbcommon(
@@ -547,6 +551,15 @@ def main() -> None:
     copy_porting_sdk(root, destination)
     copy_stage_recipes([recipe.resolve() for recipe in args.stage_recipe], destination)
     install_wrapper_applets(destination, args.target_os)
+    if args.target_os == "linux":
+        # GNU make is a fully static port in this SDK (no DT_NEEDED entries),
+        # but its upstream CMake install still records the temporary port-test
+        # prefix as a RUNPATH.  It has no runtime purpose and must not survive
+        # in any of the three packaged shebang/PATH aliases.
+        for relative in ("system/bin/make", "bin/make", "usr/bin/make"):
+            packaged_make = destination / relative
+            if packaged_make.is_file():
+                remove_absolute_runtime_paths(packaged_make)
     write_sdk_files(
         root, destination, args.target_os, normalized_arch,
         args.target_triple or f"{normalized_arch}-{args.target_os}", args.stage,

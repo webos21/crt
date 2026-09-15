@@ -230,7 +230,12 @@ statuses, and exceptions are maintained in:
 - Image codecs, shaping, fallback fonts, ICU, and platform font discovery are
   not yet completion claims.
 - GPU decode-texture import and dmabuf-style zero-copy remain future work.
-  Linux packaged Skia live presentation also remains open as described above.
+  Linux packaged Skia live presentation also remains open: one physical
+  Linux/aarch64 lavapipe acceptance host reproducibly reaches a bad free in
+  the SDK's libc++ while SkSL `mangledName()` grows a string. That is the
+  detection site, not a proven first-corruption site; the former Mesa/LLVM
+  attribution is retracted. It is recorded for later cross-device/newer-Skia
+  confirmation rather than remaining the active distribution task.
 - WSLg can negotiate the Wayland protocol while still differing from a normal
   Linux compositor in visible presentation behavior. It is useful evidence,
   but is not a substitute for a real Linux desktop run.
@@ -251,12 +256,13 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-1. Localize and fix the Linux Skia heap corruption using the opt-in CRT malloc
-   diagnostics, then complete isolated 04 verification and atomic publication.
-2. Make the imported libc++/libc++abi/libunwind build automatically relink
-   when its predecessor `libc.so` changes.
-3. Close the remaining distribution hardening gaps: absolute
-   path leakage, external consumers, and generic dependency validation.
+1. Continue distribution hardening with a generic installed-binary dependency
+   inventory; predecessor relinking and packaged ELF RUNPATH cleanup are done.
+2. Close the remaining absolute-path and external-consumer validation gaps,
+   including the separately tracked macOS install-name policy.
+3. Revisit the deferred Linux/aarch64 Skia presentation failure when another
+   physical host or hardware ICD can distinguish a one-device limitation, a
+   newer pinned Skia still reproduces it, or Linux release sign-off requires it.
 4. Enable and verify real FFmpeg hardware decode per host while retaining the
    software/CPU fallback as the correctness baseline.
 5. Connect hardware decoder textures to Skia without CPU copies, including

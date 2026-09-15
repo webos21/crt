@@ -136,6 +136,7 @@ libcxx's).
 """
 
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -143,6 +144,62 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+
+
+PREDECESSOR_FINGERPRINT_FILE = ".crt-predecessor-fingerprint.json"
+
+
+def predecessor_fingerprint(sysroot: Path) -> dict:
+    """Fingerprint the C-runtime link inputs consumed by imported runtimes."""
+    library_dir = sysroot / "lib"
+    candidates = []
+    for pattern in ("libc.*", "libm.*", "libdl.*"):
+        candidates.extend(path for path in library_dir.glob(pattern) if path.is_file())
+    candidates = sorted(set(candidates), key=lambda path: path.name)
+    if not candidates:
+        raise SystemExit(f"predecessor sysroot contains no C runtime libraries: {library_dir}")
+
+    files = []
+    for path in candidates:
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        files.append({
+            "path": path.relative_to(sysroot).as_posix(),
+            "size": path.stat().st_size,
+            "sha256": digest.hexdigest(),
+        })
+    return {"schema_version": 1, "files": files}
+
+
+def invalidate_stale_builds(build_root: Path, order: list[dict], fingerprint: dict) -> None:
+    """Remove only imported-runtime build trees when predecessor bytes change."""
+    stamp = build_root / PREDECESSOR_FINGERPRINT_FILE
+    previous = None
+    if stamp.is_file():
+        try:
+            previous = json.loads(stamp.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            previous = None
+    if previous == fingerprint:
+        return
+
+    reason = "has no recorded predecessor" if previous is None else "uses a changed predecessor"
+    for recipe in order:
+        recipe_build = build_root / recipe["name"]
+        if recipe_build.is_dir():
+            progress(f"{recipe['name']}: removing stale build tree ({reason})")
+            shutil.rmtree(recipe_build)
+
+
+def write_predecessor_fingerprint(build_root: Path, fingerprint: dict) -> None:
+    """Atomically record the predecessor used by a successful configure/build."""
+    build_root.mkdir(parents=True, exist_ok=True)
+    stamp = build_root / PREDECESSOR_FINGERPRINT_FILE
+    temporary = stamp.with_suffix(stamp.suffix + ".tmp")
+    temporary.write_text(json.dumps(fingerprint, indent=2) + "\n", encoding="utf-8")
+    os.replace(temporary, stamp)
 
 
 def progress(message):
@@ -827,6 +884,17 @@ def main():
             fetch_recipe(recipe, source_root, rebuild=args.rebuild)
         return
 
+    # These imported projects link the predecessor SDK's libc/libm/libdl via
+    # wrapper-owned absolute paths.  Those files are not part of their CMake
+    # source tree, so an in-place predecessor rebuild used to leave Ninja
+    # believing the already-linked runtimes were current.  Invalidate only
+    # the three nested build directories when their actual bytes change; the
+    # fetched sources and shared install prefix remain intact.  The stamp is
+    # written only after a successful phase, so an interrupted configure can
+    # never bless a stale tree.
+    predecessor = predecessor_fingerprint(sysroot)
+    invalidate_stale_builds(build_root, order, predecessor)
+
     cmake = shutil.which("cmake") or "cmake"
     env = os.environ.copy()
     # CRT_HOST_CC/CRT_HOST_CXX: tools/crt-cc/tools/crt-c++ (the compiler
@@ -908,10 +976,12 @@ def main():
     if args.phase == "configure":
         for recipe in order:
             configure_recipe(cmake, recipe, source_root, build_root, install_prefix, common, args.target_os, env, root)
+        write_predecessor_fingerprint(build_root, predecessor)
         return
 
     for recipe in order:
         build_recipe(cmake, recipe, source_root, build_root, install_prefix, common, args.target_os, env, root)
+    write_predecessor_fingerprint(build_root, predecessor)
 
 
 if __name__ == "__main__":

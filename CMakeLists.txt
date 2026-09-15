@@ -206,7 +206,17 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME crt_verify_dist_unit_runs
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_verify_dist.py"
   )
-  set_tests_properties(crt_verify_dist_unit_runs PROPERTIES
+  add_test(NAME crt_elf_unit_runs
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_crt_elf.py"
+  )
+  add_test(NAME crt_libcxx_predecessor_unit_runs
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_libcxx_predecessor.py"
+  )
+  set_tests_properties(
+    crt_verify_dist_unit_runs
+    crt_elf_unit_runs
+    crt_libcxx_predecessor_unit_runs
+    PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
   )
   set(CRT_DIST_TOOL_ARGS

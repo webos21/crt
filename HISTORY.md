@@ -10,6 +10,44 @@ substantive update.
 
 ## 2026-09-15
 
+- **Completed the imported-libc++ predecessor/RUNPATH distribution-hardening
+  tranche on Windows and WSL Linux.** `tools/crt-libcxx-build.py` now hashes
+  the actual predecessor `libc.*`/`libm.*`/`libdl.*` bytes and records an
+  atomic build-root fingerprint. When those inputs change (or an old build
+  has no fingerprint), it removes only the three nested `libunwind`,
+  `libcxxabi`, and `libcxx` build directories before configure/build; fetched
+  sources, the install prefix, and unrelated build directories remain intact.
+  This closes the real stale-link gap where Ninja did not track wrapper-linked
+  absolute sysroot libraries and a changed `libc.so` previously required a
+  manual build-tree deletion.
+
+  Added a dependency-free ELF dynamic-table helper (`tools/crt_elf.py`) so
+  Linux packaging does not require `patchelf`: `create_dist.py` removes the
+  build-only absolute sysroot fallback while retaining `$ORIGIN` in copied
+  libc++/libc++abi/libunwind DSOs, and `verify_dist.py` now rejects every
+  packaged Linux ELF containing an absolute `DT_RPATH`/`DT_RUNPATH` entry.
+  The new gate immediately found one more real leak in the existing baseline:
+  the fully static ported GNU make carried its temporary port-test install
+  prefix as a useless RUNPATH in all three packaged aliases. Packaging now
+  clears that entry from `system/bin/make`, `bin/make`, and `usr/bin/make`.
+  The ELF helper itself is included in `DIST_PORTING_TOOLS`, so packaged
+  `verify_dist.py` remains self-contained. Both new focused test scripts are
+  registered in the existing CTest suite, so the normal multi-host CI matrix
+  exercises them without a second workflow/build.
+
+  Verified on Windows with Python compile checks plus 3/3 predecessor tests,
+  5/5 ELF rewrite/gate tests, and the existing 8/8 distribution-validator
+  tests; the reconfigured Windows preset's complete CTest suite passed
+  132/132. Verified for real on WSL Ubuntu 26.04/x86_64 in a separate ext4
+  checkout: built and installed all three LLVM runtimes, changed only the
+  validation sysroot's `libc.so` bytes, observed automatic invalidation of all
+  three nested build trees, and rebuilt through the actual shared-library link
+  steps without any manual deletion. A copied SDK's `libc++.so.1` then showed
+  only `$ORIGIN` via `readelf`; the real ELF loader resolved its
+  `libc++abi.so.1`, `libc.so`, `libm.so`, and `libdl.so` from the copied SDK's
+  own `lib/`. Finally, a real `create_dist.py` Linux `02-cxx` package followed
+  by `verify_dist.py --stage 02-cxx` passed end to end.
+
 - **Root-caused (but did not fix) the minimal `std::string`-under-ASan
   repro's own startup failure; it is a known class of ASan-in-sandbox
   issue, unrelated to CRT/Skia.** Chasing the "is this an ASan-allocator-

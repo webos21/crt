@@ -63,7 +63,8 @@ window/GPU/Skia split are complete. Predecessor-only isolated-stage
 build/package/verify acceptance through the option-ON
 `03-gfx-simple -> 04-gfx-media` transition, including path-with-spaces
 acceptance, is complete on Windows and macOS; the dated evidence belongs in
-[`HISTORY.md`](HISTORY.md). **On Linux it is still not complete**: the
+[`HISTORY.md`](HISTORY.md). **Linux/aarch64 final acceptance remains a recorded
+known limitation, not the active development thread**: the
 `readdir`/`opendir`-vs-`strtof_l` ELF symbol collision that used to crash
 `crtgfx_skia_example` immediately is fixed and validated on both
 Linux/aarch64 and WSL2 Ubuntu 26.04/x86_64 (`libc.so`'s own `CRT_1.0` ELF
@@ -71,13 +72,16 @@ symbol-version namespace; see `HISTORY.md`'s 2026-09-14 entries) -- but that
 fix uncovered a second, separate, pre-existing Skia heap-corruption bug
 blocking the same example, tracked below. The isolated stage-build tool's
 own pipeline still cannot reach `verify_dist.py`/atomic publish on Linux as
-a result.
+a result. That one-host investigation is deliberately paused below while the
+host-independent distribution structure is finished.
 
-- [ ] **Root-cause the Linux Skia heap corruption blocking `examples/gfx-skia`
-  presentation -- now localized to CRT's own imported `libc++.so.1`,
-  called from `SkSL::FunctionDeclaration::mangledName()`; NOT Mesa or
-  LLVM (that attribution was made 2026-09-15 and retracted the same
-  day).** `strtof_l` is fixed; `CRT_ENABLE_DEBUG_MALLOC` is complete and
+- [ ] **Deferred known limitation: Linux/aarch64 Skia heap corruption blocking
+  `examples/gfx-skia` presentation on the one physical acceptance host.** The
+  bad free is observed in CRT's own imported `libc++.so.1`, called from
+  `SkSL::FunctionDeclaration::mangledName()`; this identifies where the bad
+  pointer is detected, **not yet where it was first corrupted or which module
+  corrupted it**. The former Mesa/LLVM attribution was retracted on 2026-09-15.
+  `strtof_l` is fixed; `CRT_ENABLE_DEBUG_MALLOC` is complete and
   validated (guard-malloc work stays deferred -- the owner/double-free/
   canary trio was sufficient to clear CRT's own allocator, so there is no
   concrete need for it yet); the glibc-side abort inside Mesa's lavapipe
@@ -89,10 +93,12 @@ a result.
   GDB (`info sharedlibrary`) showed it was never Mesa or LLVM at all: see
   step 3.1 below for the full correction. Full evidence: `HISTORY.md`'s
   2026-09-15 entries. Steps 1-3.1 below are kept for the historical record
-  of how this was narrowed down (each closed off one alternative
-  explanation in turn); the **active next step is now reading Skia's own
-  `SkSL::FunctionDeclaration::mangledName()` and its object lifetime**,
-  not any further Mesa/LLVM work:
+  of how this was narrowed down (each closed off one alternative explanation
+  in turn). Do not spend more work on the sandbox-specific minimal-ASan startup
+  failure or another Mesa build now. Re-enter only when another Linux/aarch64
+  host or hardware ICD reproduces it, a newer pinned Skia revision still
+  reproduces it, or Linux release sign-off makes this presentation check the
+  active blocker:
   1. ~~Cheap host-ABI-binding sanity check~~ -- **done 2026-09-15**: a
      direct `LD_DEBUG=bindings,libs` audit of the preserved failing example
      found zero exceptions -- every host/Mesa library (including
@@ -104,19 +110,13 @@ a result.
      interposition-class bug. Full detail: `HISTORY.md`'s 2026-09-15
      entries.
   2. ~~Fix the imported-libc++/libc++abi/libunwind absolute-RUNPATH gap~~
-     -- **`$ORIGIN`-first self-containment fixed 2026-09-15** (item just
-     below); the SDK's C++ runtime finds its own copy of `libc.so` first
+     -- **completed 2026-09-15**; the build keeps `$ORIGIN` first plus an
+     absolute fallback for temporary configure probes, while packaging strips
+     that fallback and the SDK's C++ runtime finds its own copy of `libc.so`
      and runs correctly with the original checkout's `out/` tree renamed
-     away entirely. **Precisely**: the absolute checkout path is still
-     present as a *second*, fallback RUNPATH entry (intentionally, for the
-     external build's own temporary configure-time probes) -- do not
-     describe this as "no absolute path remains"; see that item's own
-     still-open follow-ups for removing it from installed copies
-     specifically. Sufficient for the A/B comparison in step 3 either way,
-     since `$ORIGIN` is what actually resolves once a library is
-     installed anywhere. The gap's other half (no relink on `libc.so`
-     change) is also still open and does not block step 3.
-  3. **Active next step: staged Mesa lavapipe A/B comparison**, building
+     away entirely. The predecessor fingerprint also closes the independent
+     stale-relink gap. Full final evidence is in `HISTORY.md`.
+  3. **Completed/superseded investigation: staged Mesa lavapipe A/B comparison**, building
      each candidate into its own prefix (never overwriting the system
      package) and keeping *everything else fixed* (same `crtgfx_skia_
      example` binary and SDK, same Vulkan loader, same Wayland session).
@@ -157,7 +157,8 @@ a result.
        between 25.2.8 and 26.2.2 (likely a caching-path change that
        incidentally shrinks the window, not necessarily a deliberate fix
        of this exact bug).
-     - ~~S2.1~~ -- **done 2026-09-15: not a data race.** Two cheap
+     - ~~S2.1~~ -- **done 2026-09-15: insensitive to reducing llvmpipe to
+       one worker, but not proof that every possible race is excluded.** Two cheap
        controlled reruns against the existing S2 build before committing
        to an ASan rebuild: `MESA_SHADER_CACHE_DISABLE=true` with
        validation OFF and the default thread count (3/3 fail -- this is
@@ -165,10 +166,10 @@ a result.
        whichever code path runs whenever a shader isn't already cached,
        disk cache or none), and the same plus `LP_NUM_THREADS=1` forcing
        `llvmpipe` single-threaded (also 3/3 fail). Failing single-
-       threaded means this is **not a race condition** -- it is a
-       deterministic memory-safety defect (heap overflow, use-after-free,
-       or uninitialized read) in Mesa's compiler/JIT path itself, not a
-       timing-dependent one. Retract the earlier "cold-shader-cache race"
+       threaded means the failure does not depend on llvmpipe's ordinary
+       multi-worker raster path; `LP_NUM_THREADS=0` (the documented complete
+       disable) and LLVM-internal concurrency were not tested, so the broader
+       "not a race" claim is retracted. Retract the earlier "cold-shader-cache race"
        phrasing; "cold shader-compilation-path-dependent corruption" is
        the accurate description going forward.
      - ~~S3~~ -- **done 2026-09-15, then corrected by S3.1 below: this is
@@ -257,78 +258,38 @@ a result.
   4. **Explicit do-not-do list for this whole investigation** (per the
      project owner's 2026-09-15 review, still in force): do not pre-warm
      a shader cache to make acceptance pass, and never ship a warm cache
-     inside the SDK; do not patch Skia source before S3.1's own decision
-     point above is resolved; do not rebuild the full isolated-04 stage
+     inside the SDK; do not patch Skia source while this limitation is
+     deferred; do not rebuild the full isolated-04 stage
      for every diagnostic condition (only the preserved example binary is
      needed until a fix is ready to verify); do not expand
      `CRT_ENABLE_GUARD_MALLOC` or other CRT allocator diagnostics further
-     right now -- CRT's own allocator is already cleared, and this defect
-     lives in Skia's own object lifetime, not the allocator.
+     right now -- CRT's own allocator is already cleared, and the current
+     detection site is Skia/SkSL using libc++, not the allocator itself.
   5. Once S3.1's decision point is resolved and the actual bug in
      `SkSL::FunctionDeclaration::mangledName()` (or whatever calls it) is
      root-caused and fixed in Skia's own code, re-run the full real
      isolated Linux arm64 04 build from fresh libc++/FreeType/FFmpeg/Skia
      and complete `verify_dist.py`/atomic publication. Independently of
-     this investigation, also close out before that final rebuild: the
-     imported-libc++/libc++abi/libunwind relink-on-`libc.so`-change gap
-     and the removal of their installed absolute-RUNPATH fallback (both
-     tracked in the item just below), and `verify_dist.py`'s own
-     absolute-path/dependency checks.
+     this investigation, the imported-libc++ stale-relink and packaged
+     absolute-RUNPATH gaps are already closed; the remaining generic binary
+     dependency inventory stays in Distribution hardening below.
   **The "reconsider whether an external ICD defect should block
   `verify_dist.py`" policy question this item previously raised no longer
   applies** -- the defect is CRT/Skia's own, not an external Mesa/lavapipe
   limitation, so there is nothing external to carve out an acceptance
   exception for. `verify_dist.py`/atomic publication should simply stay
   blocked until the actual Skia-side bug is fixed.
-- [ ] **Make imported libc++/libc++abi/libunwind self-contained in a
-  packaged SDK.** Two distinct, confirmed gaps in the same three files
-  (full evidence in `HISTORY.md`'s 2026-09-14/2026-09-15 entries).
-  1. ~~Absolute RUNPATH, not `$ORIGIN`~~ -- **fixed 2026-09-15**
-     (`tools/crt-cc`/`tools/crt-c++`). Both wrappers' Linux shared-link
-     paths now emit `$ORIGIN` as the *first* `-rpath` entry, keeping the
-     existing absolute `${CRT_SYSROOT}/lib` as a second, fallback entry
-     purely for the external build's own ephemeral CMake try_compile/
-     try_run configure-time probes (never installed, so `$ORIGIN` cannot
-     help them) -- strictly additive, nothing that worked before stops
-     working. Verified directly: rebuilt `libc++.so.1`/`libc++abi.so.1`/
-     `libunwind.so.1` and confirmed via `readelf -d` both RUNPATH entries
-     are present in that order; copied the rebuilt `03-gfx-simple` SDK to
-     an unrelated path and confirmed via `/lib/ld-linux-aarch64.so.1
-     --list libc++.so.1` that `libc.so`/`libm.so`/`libdl.so` resolve from
-     the *copied* SDK's own `lib/`, both with the original checkout's
-     `out/.../dist/01-c` present and with it renamed away entirely (the
-     real test: no checkout-absolute path is reachable at all once
-     renamed, and resolution still succeeds). Full in-tree `ctest` suite
-     stayed 113/113 after the change -- no regression.
-  2. **Still open: no relink on `libc.so` change.** The nested build
-     treats the sysroot library as an untracked link input and can
-     silently retain stale symbol references -- this fix's own
-     verification still needed a manual `rm -rf .../build/{libcxx,
-     libcxxabi,libunwind}` first, confirming this gap is real and
-     independent of item 1. Add a real dependency edge or a predecessor-
-     inventory fingerprint that forces the affected nested build
-     directories fresh; prove an actual `libc.so` change propagates
-     without manual deletion.
-  3. **Still open, before final release (not before the Mesa A/B
-     comparison above, which item 1's fix already unblocks):** the
-     absolute checkout-path RUNPATH entry item 1 left in place as a
-     fallback must not ship in an installed/packaged copy of these three
-     libraries -- only the external build's own temporary `try_compile`/
-     `try_run` probes need it, never an installed artifact. Strip it (e.g.
-     `patchelf --remove-rpath` plus a fresh `--set-rpath '$ORIGIN'`, or an
-     equivalent post-install rewrite) as an explicit step wherever
-     `create_dist.py`'s `--libcxx-install` copies these files into a
-     distribution stage, then extend `verify_dist.py` to reject any
-     installed binary whose `RUNPATH`/`RPATH` contains this checkout's own
-     absolute build path -- turning this specific class of leak into a
-     hard packaging-acceptance gate, not just something caught by hand
-     with `readelf` when someone happens to look.
 
 ### Distribution hardening
 
 Harden the completed cross-host distribution baseline before adding another
 large upper-runtime dependency. Work in independently verifiable tranches and
 move each completed tranche into [`HISTORY.md`](HISTORY.md):
+
+The imported-libc++ predecessor/RUNPATH tranche is complete (including the
+packaged GNU make leak the new ELF gate exposed; see `HISTORY.md`'s 2026-09-15
+entry). Continue with item 1's generic dependency inventory rather than
+reopening the deferred single-host Skia investigation.
 
 1. **Binary dependency and absolute-path policy.** Scan installed binaries for
    undeclared non-system `.so`, `.dylib`, or `.dll` dependencies. Decide path
