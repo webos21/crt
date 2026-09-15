@@ -125,16 +125,24 @@ a result.
      - **S0 (baseline, already done)**: system `mesa-vulkan-drivers`
        `25.2.8-0ubuntu0.24.04.2` -- fails with validation both OFF and ON
        (`HISTORY.md`'s 2026-09-15 entries).
-     - **S1**: upstream Mesa tag `mesa-25.2.8` (the *same* version, built
-       from plain upstream source/options, not the Ubuntu package) in its
-       own prefix. Distinguishes an Ubuntu-specific patch/build-option/
-       packaging defect (S1 passes) from a real upstream 25.2.8 defect or
-       a defect common to this whole configuration (S1 also fails).
-     - **S2**, only if S1 fails: the current latest stable Mesa release
-       tag, same build options/toolchain, own prefix. S1 fails + S2 passes
-       -> a since-fixed upstream defect (record a minimum supported Mesa
-       version). S1 and S2 both fail -> either a still-open lavapipe
-       defect or a narrower CRT/Skia-lavapipe interop problem.
+     - ~~S1~~ -- **done 2026-09-15, fails identically**: upstream Mesa tag
+       `mesa-25.2.8` (the *same* version, built from plain upstream
+       source with meson, LLVM 20.1.2 -- matching the system package's own
+       LLVM dependency exactly, confirmed via the earlier `LD_DEBUG`
+       audit -- into its own prefix, ICD selection confirmed via
+       `VK_LOADER_DEBUG=driver`) fails with the identical `free(): invalid
+       next size (fast)` signature, 6/6 runs (3x validation OFF, 3x ON).
+       This rules out an Ubuntu-specific patch/build-option/packaging
+       defect: the corruption is in upstream Mesa 25.2.8 itself, or in a
+       defect common to this whole configuration independent of Mesa's
+       version. Proceeds to S2.
+     - **S2, active next step**: the current latest stable Mesa release
+       tag (`mesa-26.2.2` as of 2026-09-15), same build options/toolchain,
+       own prefix. S2 passes -> a since-fixed upstream defect between
+       25.2.8 and 26.2.2 (record a minimum supported Mesa version). S2
+       also fails -> either a still-open lavapipe defect or a narrower
+       CRT/Skia-lavapipe interop problem common to every Mesa version
+       tried so far.
      - Mesa `main`, only if S2 also fails -- do not build it earlier, it
        only adds an unnecessary extra axis before S1/S2 have narrowed
        things down.

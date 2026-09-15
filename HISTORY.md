@@ -10,6 +10,31 @@ substantive update.
 
 ## 2026-09-15
 
+- **Mesa lavapipe A/B comparison, stage S1: upstream `mesa-25.2.8` fails
+  identically to the Ubuntu system package, ruling out a distro-specific
+  packaging defect.** Built upstream Mesa's own `mesa-25.2.8` tag from
+  plain source (meson 1.12.0 -- the Ubuntu-packaged 1.3.2 is below Mesa's
+  own required 1.4.0, installed via `pip install --user --break-system-
+  packages`; the Vulkan/lavapipe-relevant deps `llvm-20-dev` (LLVM
+  20.1.2, matching the system build's own dependency exactly, per the
+  earlier `LD_DEBUG` audit), `libdrm-dev`, `libexpat1-dev`, `bison`,
+  `flex`, `wayland-protocols`, `libzstd-dev`, and `glslang-tools`
+  installed via `apt`), scoped to `-Dvulkan-drivers=swrast
+  -Dgallium-drivers=llvmpipe -Dplatforms=wayland` with OpenGL/EGL/GLX/
+  GBM/VDPAU/VA all disabled, into its own prefix -- the system Mesa
+  package was never touched. Selected the new build via an ICD JSON
+  whose `library_path` is this build's own absolute `libvulkan_lvp.so`
+  path, passed through both `VK_DRIVER_FILES` and `VK_ICD_FILENAMES`,
+  and confirmed the actual driver selection with `VK_LOADER_DEBUG=driver`
+  before every run. The preserved `crtgfx_skia_example` (same binary and
+  SDK as the 2026-09-14/15 investigation, not rebuilt) failed with the
+  identical `free(): invalid next size (fast)` signature, 6/6 runs (3x
+  validation OFF, 3x ON, fresh `MESA_SHADER_CACHE_DIR` per run). This
+  rules out an Ubuntu-specific patch, build option, or packaging defect:
+  the corruption reproduces in plain upstream Mesa 25.2.8 itself.
+  Per `TODO.md`'s staged plan, proceeds to S2 (current latest stable
+  Mesa) rather than filing upstream yet or trying real GPU hardware.
+
 - **Fixed the imported libc++/libc++abi/libunwind absolute-RUNPATH gap:
   the isolated Linux SDK's C++ runtime no longer secretly depends on this
   checkout's own `out/` tree.** `tools/crt-cc`/`tools/crt-c++`'s Linux
