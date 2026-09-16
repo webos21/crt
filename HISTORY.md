@@ -10,6 +10,43 @@ substantive update.
 
 ## 2026-09-16
 
+- **Refreshed the macOS/arm64 allocator baseline with the current tranche-4
+  schema and closed the macOS-side fork/fault coverage gap.** Built the
+  focused allocator validation targets in `out/macos-host-ninja-debug`
+  (`malloc_baseline_test`, `malloc_contention_baseline_test`,
+  `malloc_fork_regions_test`, `malloc_fault_test`) and ran the focused
+  CTest selection for `malloc_baseline_test_runs`,
+  `malloc_contention_baseline_test_runs`, `malloc_fork_regions_test_runs`,
+  `malloc_fault_test_runs`, and `host_abi_firewall_fault_test_runs`: all
+  five passed on macOS/arm64.
+
+  The expected-fault tests exposed one real portability mismatch in the test
+  expectation, not in the allocator: Darwin reports Clang's
+  `__builtin_trap()` as `SIGTRAP`, while the Linux path reports `SIGILL`
+  and Windows maps the same trap through the controlled `128 + SIGILL`
+  safety-net exit convention. Updated both `malloc_fault_test.c` and
+  `host_abi_firewall_fault_test.c` to accept `SIGTRAP` on macOS while
+  preserving the existing Linux and Windows expectations.
+
+  Re-ran the allocator baseline runner with the current schema and a 20s
+  tier budget. Results are checked in at
+  `benchmark/allocator-baseline/macos/malloc_baseline-arm64-seed42-
+  20260916T100728Z.jsonl` (1K/10K/100K tiers; 1M skipped by the time budget).
+  This run now includes `usable_bytes`, `peak_usable_bytes`, and
+  `host_peak_rss_bytes`: peak requested bytes rose from 3.5MB to 10.9MB
+  between 10K and 100K operations, peak usable bytes tracked within normal
+  allocator rounding, and host peak RSS rose from 5.2MB to 30.4MB. Region
+  count stayed bounded (6 -> 7 -> 10), confirming reuse rather than
+  continually mapping fresh regions.
+
+  Re-ran the contention runner with the current schema as
+  `benchmark/allocator-contention/macos/malloc_contention_baseline-arm64-
+  seed42-20260916T100757Z.jsonl`. All private/shared cases from 1 to 32
+  threads passed. POSIX `RUSAGE_CHILDREN` reports cumulative max RSS, so
+  later shared cases that did not exceed the earlier private peak correctly
+  record `host_peak_rss_bytes: null`; this means "no new higher child RSS
+  peak was observable", not a test failure.
+
 - **Froze and mechanically enforced the Host ABI ownership/lifetime firewall
   before hardware decode (allocator-baseline tranche 7).** Added
   `docs/host_abi_firewall.md` as the boundary specification: its ownership

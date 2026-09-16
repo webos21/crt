@@ -7,11 +7,12 @@
  * compile time via CRT_MALLOC_FAULT_VICTIM_EXE, tests/CMakeLists.txt's
  * own target_compile_definitions() call) once per fault kind and checks
  * that CRT_DEBUG_MALLOC actually trapped it via __builtin_trap(), which
- * lowers to an illegal-instruction fault (SIGILL) on every supported
- * host.
+ * lowers to a native trap/illegal-instruction fault, depending on host
+ * compiler/ABI.
  *
- * On Linux/macOS, an unhandled SIGILL is real, native OS signal
- * termination: WIFSIGNALED(status) && WTERMSIG(status) == SIGILL.
+ * On Linux, an unhandled trap is real, native SIGILL termination. On
+ * macOS, Apple/Darwin reports the same __builtin_trap() as SIGTRAP
+ * instead; both are real host signal termination, not a clean exit.
  *
  * On Windows, confirmed empirically (not assumed) while building this
  * test: malloc_fault_victim.c is compiled the same DWARF-exceptions,
@@ -57,6 +58,10 @@ static int expect_trap(const char* fault_kind) {
 
 #if defined(CRT_TARGET_OS_WINDOWS)
   if (WIFEXITED(status) && WEXITSTATUS(status) == 128 + SIGILL) {
+    return 1;
+  }
+#elif defined(CRT_TARGET_OS_MACOS)
+  if (WIFSIGNALED(status) && WTERMSIG(status) == SIGTRAP) {
     return 1;
   }
 #else

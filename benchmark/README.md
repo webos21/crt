@@ -91,6 +91,11 @@ extension, so it intentionally lacks `usable_bytes`,
 `peak_usable_bytes`, and `host_peak_rss_bytes`. Treat it as the macOS
 correctness/timing record; regenerate a fresh macOS run before using it
 for RSS or fragmentation-envelope decisions.
+`macos/malloc_baseline-arm64-seed42-20260916T100728Z.jsonl` is that
+current-schema refresh (1K/10K/100K tiers, stopped before 10^6 by
+`--time-budget-seconds 20`). It supersedes the older macOS file for
+usable-byte and host-RSS comparison; the older file remains the original
+full-tier timing/correctness record.
 
 ## `allocator-contention/<os>/`
 
@@ -132,3 +137,10 @@ The current macOS contention file was also captured before the tranche-4
 schema extension, so it does not include `peak_usable_bytes` or
 `host_peak_rss_bytes`; rerun it for cross-host RSS/fragmentation
 comparison.
+`macos/malloc_contention_baseline-arm64-seed42-20260916T100757Z.jsonl`
+is the current-schema macOS contention refresh. It supersedes the older
+macOS contention file for usable-byte and host-RSS comparison. Some later
+shared cases have `host_peak_rss_bytes: null` on POSIX because
+`tools/host_rss.py` uses `RUSAGE_CHILDREN` deltas; if a later child does
+not exceed the already-observed cumulative child peak RSS, there is no new
+per-child peak value to report.

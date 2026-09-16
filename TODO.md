@@ -214,10 +214,10 @@ Execution plan:
    per-region copying (real OS copy-on-write), but the identical test
    there still confirms `__crt_malloc_after_fork_child()`'s heap_lock
    reset (`libc/src/process.c`) is correct under a genuinely fragmented,
-   multi-region heap. Not yet run on Windows/aarch64, Linux, or macOS this
-   session -- this session only had a Windows/x86_64 host available; run
-   the same ctest there before treating this tranche as cross-host
-   verified, not just implemented.
+   multi-region heap. macOS/arm64 was refreshed on 2026-09-16 and passed
+   the focused allocator CTest selection. Linux and Windows/aarch64 still
+   need the same focused run before treating this tranche as fully
+   cross-host verified, not just implemented.
 6. **Completed 2026-09-16: make diagnostics permanent and testable.**
    `CRT_ENABLE_DEBUG_MALLOC` (`CMakeLists.txt`) is now documented as a
    permanent, supported diagnostic mode, not temporary investigation
@@ -250,10 +250,12 @@ Execution plan:
    -- that mechanism turns out to generalize beyond the stack-overflow-
    during-unwind case it was originally built for. All three fault kinds
    passed repeatably (3 manual runs plus the routine ctest pass) on
-   Windows/x86_64; Linux/macOS use the more ordinary `WIFSIGNALED(status)
-   && WTERMSIG(status) == SIGILL` path (real OS signal termination, no
-   project-specific bridge needed there) -- not yet run on those hosts
-   this session.
+   Windows/x86_64; Linux uses the more ordinary `WIFSIGNALED(status) &&
+   WTERMSIG(status) == SIGILL` path. macOS/arm64 was refreshed on
+   2026-09-16 and uses Darwin's `SIGTRAP` result for Clang
+   `__builtin_trap()`; `malloc_fault_test_runs` and
+   `host_abi_firewall_fault_test_runs` both passed there. Linux and
+   Windows/aarch64 still need the same focused run.
 
    **`CRT_ENABLE_GUARD_MALLOC` go/no-go decision: no-go, deferred.** Not
    built. The debug-malloc expected-fault coverage just added already
@@ -290,13 +292,15 @@ Execution plan:
    directly, rather than staying only in one contributor's local build tree).
    Progress: raw results now checked in for Windows/x86_64 and macOS/arm64
    (`benchmark/allocator-baseline/`, `benchmark/allocator-contention/`; see
-   `HISTORY.md`'s 2026-09-16 entries). The Windows follow-up results carry
-   the current tranche-4 schema (`usable_bytes` and `host_peak_rss_bytes`);
-   the macOS results were captured just before that runner/schema extension
-   and are still useful for correctness/timing, but need a refreshed macOS
-   run for RSS/usable-byte comparison. Linux, refreshed macOS current-schema
-   data, and `docs/allocator_baseline.md` itself (the actual decision
-   record and envelope) remain before this tranche closes.
+   `HISTORY.md`'s 2026-09-16 entries). Both hosts now have current
+   tranche-4 schema results (`usable_bytes`, `peak_usable_bytes`, and
+   `host_peak_rss_bytes`) for bounded 1K/10K/100K baseline comparison and
+   the full 1/8/16/32-thread contention sweep. `docs/allocator_baseline.md`
+   now holds the provisional envelope and decision record: keep the current
+   allocator for the next upper-runtime work unless Linux/aarch64 or a real
+   upper-runtime workload exposes a blocker. Linux current-schema data is
+   the remaining cross-host input before this tranche can move to
+   `HISTORY.md`.
 
 Decision gate:
 

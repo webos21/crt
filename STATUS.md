@@ -39,11 +39,11 @@ documentation passes -- see `TODO.md`'s Notice section. It may lag behind
   Windows. The authoritative package-by-package state is
   [`docs/porting_status.md`](docs/porting_status.md).
 - The current project-owned allocator remains the bootstrap/reference
-  implementation. API, alignment, reuse, direct-linked debug, and basic
-  4-thread contention coverage exist; large-N, high-contention,
-  fragmentation/RSS, and fragmented-fork baseline validation is now the
-  active foundation gate before further Upper Runtime work. Scudo is a
-  conditional production candidate, not a selected replacement.
+  implementation. Windows/x86_64 and macOS/arm64 now have current-schema
+  baseline/contention data plus focused fork/fault validation; Linux/aarch64
+  current-schema data and the first real upper-runtime stress comparison are
+  the remaining allocator gate inputs. Scudo is a conditional production
+  candidate, not a selected replacement.
 
 ### libcrtgfx
 
@@ -161,10 +161,10 @@ target.
   space-containing paths are covered. The former Linux/aarch64 Skia blocker is
   resolved without an exception to those gates.
 - Allocator baseline validation and a documented Host ABI firewall are the
-  immediate foundation gate before FFmpeg hardware decode. If the measured
-  current allocator remains within the declared scaling and memory envelope,
-  Upper Runtime work proceeds without replacing it; Scudo is promoted only
-  if repeatable evidence demonstrates a blocker.
+  immediate foundation gate before FFmpeg hardware decode. The provisional
+  allocator decision record keeps the current allocator unless Linux/aarch64
+  current-schema data or the first real upper-runtime stress workload exposes
+  a blocker; Scudo remains conditional.
 - FFmpeg hardware decode/zero-copy and the QuickJS core then proceed on top of
   the completed GPU rendering/presentation contract.
 - JavaScript media/gfx binding follows the stable native contracts, using a
@@ -292,10 +292,11 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-1. Complete the cross-host allocator correctness/stress, contention,
-   fragmentation/RSS, and fork baseline; publish the decision record and
-   freeze the Host ABI firewall before hardware decode. Keep Scudo conditional
-   on measured failure of the current allocator.
+1. Complete the remaining allocator gate inputs: Linux/aarch64 current-schema
+   baseline/contention data, focused Linux/Windows-aarch64 fork/fault runs,
+   and the first real upper-runtime stress comparison against
+   `docs/allocator_baseline.md`. Keep Scudo conditional on measured failure
+   of the current allocator.
 2. Finish the remaining live GPU evidence: macOS/x86_64 execution,
    pixel-exact macOS checks, resize-plus-Ganesh on macOS, and pixel-exact
    resize on Windows.
