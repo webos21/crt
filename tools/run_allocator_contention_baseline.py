@@ -43,8 +43,8 @@ DEFAULT_SEED = 42
 # serializes on g_shared_mutex (see the test's own top comment), so wall
 # time grows with total ops regardless of thread count. Raise this
 # explicitly for a heavier run; do not raise the default itself without a
-# reason, given tranche 1's own not-yet-root-caused wall-clock-vs-
-# elapsed_ns anomaly at large op counts (HISTORY.md, 2026-09-16).
+# reason, since the shared pattern deliberately adds a second serialization
+# point around its common live-set table.
 DEFAULT_OPS_PER_THREAD = 5_000
 THREAD_COUNTS = (1, 8, 16, 32)
 PATTERNS = ("private", "shared")

@@ -10,6 +10,48 @@ substantive update.
 
 ## 2026-09-16
 
+- **Completed the Linux/aarch64 real-device allocator baseline, fixed two
+  validation assumptions it exposed, and retained the current allocator for
+  the next Upper Runtime tranche.** Incrementally reconfigured the existing
+  `out/linux-host-ninja-debug` tree, built only the allocator/fork/fault/
+  firewall targets, and ran the focused selection. The first pass was 7/9:
+  ordinary allocator, contention, deterministic baseline, fragmented-fork,
+  and positive firewall tests passed, while both expected-fault drivers
+  rejected raw wait status `0x85`. That status is an AArch64 `brk` delivered
+  as `SIGTRAP` with the core bit, not a missed diagnostic. Clang's
+  `__builtin_trap()` lowering is architecture-dependent: Linux/x86_64 uses an
+  illegal instruction/`SIGILL`, while AArch64 Linux and Darwin use
+  `brk`/`SIGTRAP`. Updated both drivers to accept either real POSIX trap signal
+  while still rejecting clean exits and unrelated faults. The expanded
+  focused selection then passed 10/10, including the qsort regression below.
+
+  The first Linux benchmark run also root-caused the cross-host wall-time gap
+  previously left open by Windows and macOS measurements. Both allocator
+  binaries call `qsort()` to calculate latency percentiles after their
+  internal `elapsed_ns` (and the single-thread binary's `process_ns`) is
+  captured. CRT's bootstrap `qsort()` was only insertion sort, so reporting
+  added `O(N^2)` work outside those measurements: the initial Linux 100K run
+  showed 2.317s internally versus 26.712s wall, and 32-thread contention
+  showed roughly 0.55s internally versus 70s wall. Replaced it with in-place,
+  allocation-free heapsort, preserving early-runtime usability while giving
+  worst-case `O(N log N)` comparisons, and added a 4096-element reverse/
+  duplicate-heavy regression. This explains the old Windows/macOS gap too;
+  it was benchmark reporting overhead, not allocator or process-exit cost.
+
+  Regenerated the Linux records with seed 42. `benchmark/allocator-baseline/
+  linux/malloc_baseline-aarch64-seed42-20260916T110130Z.jsonl` completed all
+  1K/10K/100K/1M tiers with zero correctness failures. At 1M it measured
+  21.081s internally versus 21.441s wall, 47.4K ops/s, 19 OS regions,
+  26,391,049 requested peak bytes versus 26,391,296 usable peak bytes, and
+  about 135MB host peak RSS. `benchmark/allocator-contention/linux/malloc_
+  contention_baseline-aarch64-seed42-20260916T110201Z.jsonl` completed every
+  1/8/16/32-thread private/shared case. Private throughput reached about 249K
+  ops/s at 32 threads; shared throughput settled around 63K ops/s at 8-32
+  threads, exposing the expected single-lock ceiling without deadlock,
+  corruption, or collapse. Linux therefore does not trigger Scudo promotion.
+  Windows/aarch64 focused validation and comparison with the first real
+  upper-runtime stress workload remain follow-ups.
+
 - **Refreshed the macOS/arm64 allocator baseline with the current tranche-4
   schema and closed the macOS-side fork/fault coverage gap.** Built the
   focused allocator validation targets in `out/macos-host-ninja-debug`

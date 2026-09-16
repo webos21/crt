@@ -58,11 +58,11 @@ is not complete merely because an in-tree target links.
 - `libcrtjs` still contains skeleton libraries only. QuickJS, its event loop,
   modules, and graphics/media bindings have not been implemented.
 - The bootstrap/reference allocator has API, debug-mode, contention,
-  fragmented-fork, and expected-fault coverage. Windows/x86_64 and
-  macOS/arm64 have current-schema baseline data; Linux/aarch64 and the first
-  real upper-runtime stress workload remain as gate inputs. Scudo remains a
-  conditional production candidate and is not a prerequisite unless those
-  measurements demonstrate a blocker.
+  fragmented-fork, and expected-fault coverage. Windows/x86_64, macOS/arm64,
+  and Linux/aarch64 have current-schema baseline data; Linux did not exceed
+  the replacement envelope. The first real upper-runtime stress workload
+  remains a regression comparison. Scudo stays conditional and is not a
+  prerequisite unless measurements demonstrate a blocker.
 
 Exact test counts, host evidence, and current limitations belong in
 [`../STATUS.md`](../STATUS.md) and [`../HISTORY.md`](../HISTORY.md). Open work
@@ -71,12 +71,11 @@ and completion boundaries rather than duplicating those ledgers.
 
 ## Execution Order
 
-1. Complete allocator baseline validation against
-   `allocator_baseline.md`'s provisional envelope and keep the Host ABI
-   firewall ownership rules frozen for Wayland/Vulkan and upcoming FFmpeg
-   hardware, VA-API, PipeWire, and EGL boundaries. Continue with the current
-   allocator when it meets the declared envelope; promote Scudo evaluation
-   only when repeatable evidence does not.
+1. Preserve `allocator_baseline.md`'s accepted baseline and Host ABI firewall
+   ownership rules for Wayland/Vulkan and upcoming FFmpeg hardware, VA-API,
+   PipeWire, and EGL boundaries. Compare the first real upper-runtime stress
+   workload with the baseline; promote Scudo evaluation only if repeatable
+   evidence exceeds it.
 2. Finish the remaining live GPU presentation evidence for the existing
    Ganesh backends. Graphite is not part of this acceptance gate.
 3. Enable hardware video decode per host while retaining software decode as

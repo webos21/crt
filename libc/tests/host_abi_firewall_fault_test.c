@@ -10,10 +10,10 @@
  * && WEXITSTATUS(status) == 128 + SIGILL on Windows (confirmed
  * empirically there: an unhandled __builtin_trap() in this DWARF-
  * compiled code lands in windows_dwarf_unwind_safety_net.c's own
- * existing vectored exception handler), WIFSIGNALED(status) &&
- * WTERMSIG(status) == SIGILL on Linux, and the same real signal-
- * termination shape with SIGTRAP on macOS where Darwin reports
- * __builtin_trap() that way. */
+ * existing vectored exception handler). POSIX hosts require real signal
+ * termination, accepting SIGILL or SIGTRAP because Clang's lowering is
+ * architecture-dependent (Linux/x86_64 illegal instruction versus AArch64
+ * BRK on both Linux and Darwin). */
 
 #include <signal.h>
 #include <spawn.h>
@@ -43,13 +43,9 @@ int main(void) {
     printf("host_abi_firewall_fault_test: ok\n");
     return 0;
   }
-#elif defined(CRT_TARGET_OS_MACOS)
-  if (WIFSIGNALED(status) && WTERMSIG(status) == SIGTRAP) {
-    printf("host_abi_firewall_fault_test: ok\n");
-    return 0;
-  }
 #else
-  if (WIFSIGNALED(status) && WTERMSIG(status) == SIGILL) {
+  if (WIFSIGNALED(status) &&
+      (WTERMSIG(status) == SIGILL || WTERMSIG(status) == SIGTRAP)) {
     printf("host_abi_firewall_fault_test: ok\n");
     return 0;
   }

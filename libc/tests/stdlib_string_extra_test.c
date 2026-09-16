@@ -15,6 +15,9 @@ static int compare_ints(const void* left, const void* right) {
   return (a > b) - (a < b);
 }
 
+#define QSORT_STRESS_COUNT 4096
+static int qsort_stress_values[QSORT_STRESS_COUNT];
+
 int main(void) {
   char text[] = "alpha,beta,,gamma";
   char* save = 0;
@@ -60,6 +63,18 @@ int main(void) {
   found = (int*)bsearch(&key, values, 5, sizeof(values[0]), compare_ints);
   if (found == 0 || *found != 4) {
     return fail("bsearch");
+  }
+
+  for (size_t i = 0; i < QSORT_STRESS_COUNT; ++i) {
+    /* Reverse order plus duplicates exercises the old insertion sort's
+     * quadratic path as well as equal-key handling. */
+    qsort_stress_values[i] = (int)((QSORT_STRESS_COUNT - i) % 257);
+  }
+  qsort(qsort_stress_values, QSORT_STRESS_COUNT, sizeof(qsort_stress_values[0]), compare_ints);
+  for (size_t i = 1; i < QSORT_STRESS_COUNT; ++i) {
+    if (qsort_stress_values[i - 1] > qsort_stress_values[i]) {
+      return fail("qsort stress");
+    }
   }
 
   if (setenv("CRT_TEST_ENV", "first", 1) != 0 ||

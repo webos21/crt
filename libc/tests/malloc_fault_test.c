@@ -10,9 +10,10 @@
  * lowers to a native trap/illegal-instruction fault, depending on host
  * compiler/ABI.
  *
- * On Linux, an unhandled trap is real, native SIGILL termination. On
- * macOS, Apple/Darwin reports the same __builtin_trap() as SIGTRAP
- * instead; both are real host signal termination, not a clean exit.
+ * On POSIX hosts the exact signal is compiler/architecture-dependent:
+ * Clang lowers __builtin_trap() to an illegal instruction on Linux/x86_64
+ * (SIGILL), but to a BRK instruction on AArch64 Linux and Darwin (SIGTRAP).
+ * Both are real native trap termination, not a clean exit.
  *
  * On Windows, confirmed empirically (not assumed) while building this
  * test: malloc_fault_victim.c is compiled the same DWARF-exceptions,
@@ -60,12 +61,9 @@ static int expect_trap(const char* fault_kind) {
   if (WIFEXITED(status) && WEXITSTATUS(status) == 128 + SIGILL) {
     return 1;
   }
-#elif defined(CRT_TARGET_OS_MACOS)
-  if (WIFSIGNALED(status) && WTERMSIG(status) == SIGTRAP) {
-    return 1;
-  }
 #else
-  if (WIFSIGNALED(status) && WTERMSIG(status) == SIGILL) {
+  if (WIFSIGNALED(status) &&
+      (WTERMSIG(status) == SIGILL || WTERMSIG(status) == SIGTRAP)) {
     return 1;
   }
 #endif

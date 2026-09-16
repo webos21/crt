@@ -76,23 +76,13 @@ Execution plan:
    test_runs`, a small bounded correctness variant) + `tools/run_allocator_
    baseline.py` (opt-in, tiered 10^3/10^4/10^5/10^6 runner with a wall-time
    budget gate). Zero correctness failures across all four tiers on a real
-   run. Found a real, reproducible, still-unattributed anomaly in the
-   process: at the 10^5/10^6 tiers, the binary's own in-process
-   `elapsed_ns`/`process_ns` (QueryPerformanceCounter-backed, correctly
-   bracketing the entire workload) stay proportionate to op count (2.8s /
-   25.9s), but the externally-observed wall time is 10-100x larger (27.6s /
-   2540s) -- confirmed real and NOT an artifact of: this session's MSYS/
-   Git-Bash shell (reproduces identically timed via a native PowerShell
-   `Stopwatch`), `add_crt_test()`'s always-on Windows fork-capable-relaunch
-   startup dance (reproduces identically with that object left out of the
-   link entirely), or the allocator's own `heap_os_region_count` (only 10
-   distinct `mmap()`/`VirtualAlloc()` regions at the 10^5 tier -- too few
-   for OS-level address-space teardown at exit to plausibly cost seconds).
-   Full detail and the ruled-out-causes list are in `HISTORY.md`'s matching
-   dated entry so a future investigator does not repeat this work. Treat
-   this session's own `elapsed_ns` numbers as the trustworthy figure for
-   tranches below until the gap is root-caused; do not trust bare wall-
-   clock timings from this host without cross-checking `elapsed_ns`.
+   run. The initially unexplained 10-100x external-wall versus in-process
+   timing gap is resolved: percentile reporting called CRT's insertion-sort
+   `qsort()` after `process_ns` was captured, adding `O(N^2)` work unrelated
+   to the allocator. Linux/aarch64 validation replaced it with allocation-
+   free heapsort and added a 4096-element stress regression. The refreshed
+   Linux run completed all four tiers; 100K measured 2.348s internally /
+   2.379s wall and 1M measured 21.081s / 21.441s.
 2. **Completed 2026-09-16: cover realistic allocation shapes.** Already
    satisfied by tranche 1's own `malloc_baseline_test.c`, built with this
    tranche's requirements in mind from the start (see that file's own top
@@ -141,16 +131,11 @@ Execution plan:
    to either private per-thread storage or the one real set of shared
    globals -- see the test file's own top comment.
 
-   The 10^5/10^6-tier wall-clock-vs-`elapsed_ns` anomaly this same day's
-   tranche 1 entry found (`HISTORY.md`) reproduced here too, in a
-   completely different (multithreaded) binary: `threads=16`/private, for
-   example, measured 192ms internally but 19.4s of external wall time (a
-   ~100x gap); `threads=32`/private measured 516ms internally against
-   78.2s externally (~150x). This rules out anything specific to
-   `malloc_baseline_test.c`'s own single-threaded workload as the cause,
-   and now also correlates with thread count, not just total op count --
-   new evidence for whoever picks up the still-open root-cause
-   investigation, not a new, separate anomaly.
+   Linux/aarch64 passed all eight combinations after the qsort reporting fix.
+   Private throughput rose from about 93K ops/s at one thread to about 249K
+   ops/s at 32 threads. Shared throughput settled around 63K ops/s at 8-32
+   threads, exposing the expected single-lock ceiling without deadlock,
+   corruption, or throughput collapse; internal and external times now agree.
 4. **Completed 2026-09-16: measure fragmentation and resident memory
    outside the CRT ABI.** Both baseline binaries now track and report
    `live.usable_bytes`/`live.peak_usable_bytes` (`malloc_usable_size(ptr)`
@@ -172,9 +157,8 @@ Execution plan:
    10x more regions) -- clear evidence freed blocks are actually being
    reused by later allocations, not forcing new mappings each time.
 
-   A second real, unexplained host-memory anomaly was found and
-   investigated (not fully root-caused, same treatment as tranche 1's
-   timing anomaly): host-observed peak RSS stayed flat (~4.04MB) across
+   A separate Windows host-memory anomaly remains unexplained:
+   host-observed peak RSS stayed flat (~4.04MB) across
    the 1K/10K/100K tiers despite `live.peak_bytes` growing 3x (3.5MB to
    10.9MB) between the 10K and 100K tiers, and `PeakPagefileUsage`
    (committed/pagefile-backed memory, which should track `VirtualAlloc(...,
@@ -185,9 +169,10 @@ Execution plan:
    allocating and touching 50MB correctly reported ~60MB peak working
    set), ruling out a bug in `tools/host_rss.py` or a broken/sandboxed
    `GetProcessMemoryInfo()` in this environment -- the flat reading is
-   specific to this allocator's own executable. Left open for whoever
-   picks up tranche 8's cross-host decision record; see `HISTORY.md`'s
-   2026-09-16 entry for the full writeup.
+   specific to this allocator's own executable. Linux/aarch64 reports a
+   plausible increase to about 135MB at the 1M tier, so the Windows reading
+   remains a host-specific measurement follow-up rather than evidence of
+   allocator RSS growth; see `HISTORY.md`'s 2026-09-16 entry.
 5. **Completed 2026-09-16: exercise fork interaction and allocator
    regions.** `libc/tests/malloc_fork_regions_test.c` (ctest:
    `malloc_fork_regions_test_runs`) -- the first fork test in this project
@@ -214,10 +199,10 @@ Execution plan:
    per-region copying (real OS copy-on-write), but the identical test
    there still confirms `__crt_malloc_after_fork_child()`'s heap_lock
    reset (`libc/src/process.c`) is correct under a genuinely fragmented,
-   multi-region heap. macOS/arm64 was refreshed on 2026-09-16 and passed
-   the focused allocator CTest selection. Linux and Windows/aarch64 still
-   need the same focused run before treating this tranche as fully
-   cross-host verified, not just implemented.
+   multi-region heap. macOS/arm64 and Linux/aarch64 passed the focused
+   allocator CTest selection on 2026-09-16. Windows/aarch64 still needs the
+   same focused run before treating this tranche as fully architecture-
+   complete, not just implemented.
 6. **Completed 2026-09-16: make diagnostics permanent and testable.**
    `CRT_ENABLE_DEBUG_MALLOC` (`CMakeLists.txt`) is now documented as a
    permanent, supported diagnostic mode, not temporary investigation
@@ -249,13 +234,11 @@ Execution plan:
    dwarf_unwind_safety_net_test.c` already checks for a different fault
    -- that mechanism turns out to generalize beyond the stack-overflow-
    during-unwind case it was originally built for. All three fault kinds
-   passed repeatably (3 manual runs plus the routine ctest pass) on
-   Windows/x86_64; Linux uses the more ordinary `WIFSIGNALED(status) &&
-   WTERMSIG(status) == SIGILL` path. macOS/arm64 was refreshed on
-   2026-09-16 and uses Darwin's `SIGTRAP` result for Clang
-   `__builtin_trap()`; `malloc_fault_test_runs` and
-   `host_abi_firewall_fault_test_runs` both passed there. Linux and
-   Windows/aarch64 still need the same focused run.
+   passed repeatably on Windows/x86_64, macOS/arm64, and Linux/aarch64.
+   The Linux run corrected one test assumption: Clang lowers
+   `__builtin_trap()` to AArch64 `brk`/`SIGTRAP`, while Linux/x86_64 uses
+   `SIGILL`; POSIX tests now accept either native trap signal and still reject
+   clean exits or unrelated faults. Windows/aarch64 remains to be run.
 
    **`CRT_ENABLE_GUARD_MALLOC` go/no-go decision: no-go, deferred.** Not
    built. The debug-malloc expected-fault coverage just added already
@@ -290,17 +273,17 @@ Execution plan:
    runner first and the project owner asked for results to accumulate
    per-host in the repo itself, where they can be compared and reproduced
    directly, rather than staying only in one contributor's local build tree).
-   Progress: raw results now checked in for Windows/x86_64 and macOS/arm64
+   Progress: raw results are checked in for Windows/x86_64, macOS/arm64,
+   and Linux/aarch64
    (`benchmark/allocator-baseline/`, `benchmark/allocator-contention/`; see
-   `HISTORY.md`'s 2026-09-16 entries). Both hosts now have current
+   `HISTORY.md`'s 2026-09-16 entries). All three hosts have current
    tranche-4 schema results (`usable_bytes`, `peak_usable_bytes`, and
-   `host_peak_rss_bytes`) for bounded 1K/10K/100K baseline comparison and
-   the full 1/8/16/32-thread contention sweep. `docs/allocator_baseline.md`
-   now holds the provisional envelope and decision record: keep the current
-   allocator for the next upper-runtime work unless Linux/aarch64 or a real
-   upper-runtime workload exposes a blocker. Linux current-schema data is
-   the remaining cross-host input before this tranche can move to
-   `HISTORY.md`.
+   `host_peak_rss_bytes`) and the full 1/8/16/32-thread contention sweep;
+   Linux additionally completed the 1M baseline tier. `docs/allocator_
+   baseline.md` records the decision to keep the current allocator for the
+   next upper-runtime work. Windows/aarch64 focused validation and comparison
+   with the first real upper-runtime stress workload remain follow-ups; Linux
+   did not trigger Scudo promotion.
 
 Decision gate:
 

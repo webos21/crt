@@ -51,21 +51,15 @@ own peak resident memory, sampled via `tools/host_rss.py` -- tranche 4's
 "measure ... outside the CRT ABI"; `None` if this host/run could not
 determine it), and host identification.
 
-**Known open issue, read before trusting `wall_seconds` at the 10^5/10^6
-tiers**: on this project's Windows host, `wall_seconds` diverges sharply
-from `elapsed_ns`/`process_ns` at those tiers (10-100x larger, growing
-with op count) for reasons not yet root-caused -- confirmed real (not an
-artifact of the shell, the fork-capable-relaunch startup mechanism, or
-OS-level address-space teardown at exit) but not yet localized to before
-`main()` or during process exit. **Confirmed cross-platform**, not
-Windows-specific: the macOS/arm64 run in `allocator-baseline/macos/`
-reproduces the same shape and a *larger* gap (~125x at the 1M-op tier vs.
-Windows' ~98x). See `HISTORY.md`'s 2026-09-16 entries (both the original
-Windows investigation and the macOS confirmation) for the full detail and
-ruled-out-causes list. Until root-caused, treat `elapsed_ns`/`process_ns`
-as the trustworthy per-run timing signal; treat a large `wall_seconds`/
-`elapsed_ns` gap on any host as this same open issue, not a new one,
-unless the evidence actually points elsewhere.
+**Resolved reporting-overhead note for older files:** the large gap between
+`wall_seconds` and `elapsed_ns`/`process_ns` in the checked-in Windows and
+macOS runs was not allocator or process-boundary time. Percentile reporting
+sorted every latency sample with CRT's original insertion-sort `qsort()`, an
+`O(N^2)` step executed after `process_ns` was captured. Linux/aarch64
+validation root-caused this and replaced `qsort()` with allocation-free
+heapsort. Current Linux files therefore have wall and in-process timing that
+closely agree; retain the older raw files as historical correctness data, but
+do not use their `wall_seconds` field for allocator comparisons.
 
 `windows/malloc_baseline-amd64-seed42-20260916T064313Z.jsonl` is the
 original run that surfaced the issue above; it predates the `process_ns`/
@@ -96,6 +90,9 @@ current-schema refresh (1K/10K/100K tiers, stopped before 10^6 by
 `--time-budget-seconds 20`). It supersedes the older macOS file for
 usable-byte and host-RSS comparison; the older file remains the original
 full-tier timing/correctness record.
+`linux/malloc_baseline-aarch64-seed42-20260916T110130Z.jsonl` is the first
+Linux/aarch64 current-schema run after the qsort reporting fix. It completes
+all four 1K/10K/100K/1M tiers; its wall and in-process times agree closely.
 
 ## `allocator-contention/<os>/`
 
@@ -124,15 +121,9 @@ one (threads, pattern) case's result, with the same `latency_ns`/`live`
 shape `allocator-baseline/` uses, plus `threads`, `ops_per_thread`, and
 `pattern`.
 
-The same open wall-clock-vs-`elapsed_ns` issue documented above reproduces
-here too, and now also correlates with thread count, not just total op
-count -- e.g. `threads=32`/private measured 516ms internally against 78.2s
-of external wall time on this host (Windows). The macOS/arm64 run in
-`allocator-contention/macos/` shows the same shape: `threads=32`/private
-measured 518ms internally against 59.8s wall (~115x); `threads=32`/shared
-measured 1.75s internally against 58.8s wall (~34x). Treat this as the
-same open issue tranche 1 found, not a second one; see `HISTORY.md`'s
-2026-09-16 tranche 3 entry and its matching macOS confirmation entry.
+The older Windows/macOS contention files also include the quadratic qsort
+reporting overhead described above. Their `elapsed_ns` workload measurements
+and correctness results remain useful; their `wall_seconds` values do not.
 The current macOS contention file was also captured before the tranche-4
 schema extension, so it does not include `peak_usable_bytes` or
 `host_peak_rss_bytes`; rerun it for cross-host RSS/fragmentation
@@ -144,3 +135,6 @@ shared cases have `host_peak_rss_bytes: null` on POSIX because
 `tools/host_rss.py` uses `RUSAGE_CHILDREN` deltas; if a later child does
 not exceed the already-observed cumulative child peak RSS, there is no new
 per-child peak value to report.
+`linux/malloc_contention_baseline-aarch64-seed42-20260916T110201Z.jsonl`
+is the Linux/aarch64 current-schema 1/8/16/32-thread private/shared sweep
+after the qsort fix.

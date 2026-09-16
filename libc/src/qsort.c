@@ -10,23 +10,54 @@ static void swap_bytes(unsigned char* a, unsigned char* b, size_t size) {
   }
 }
 
-static void insertion_sort(unsigned char* base, size_t nmemb, size_t size, int (*compar)(const void*, const void*)) {
-  size_t i;
+static void sift_down(
+    unsigned char* base,
+    size_t root,
+    size_t end,
+    size_t size,
+    int (*compar)(const void*, const void*)) {
+  while (root <= (end - 1) / 2) {
+    size_t child = root * 2 + 1;
+    size_t candidate = root;
 
-  for (i = 1; i < nmemb; ++i) {
-    size_t j = i;
-    while (j > 0 && compar(base + j * size, base + (j - 1) * size) < 0) {
-      swap_bytes(base + j * size, base + (j - 1) * size, size);
-      --j;
+    if (compar(base + candidate * size, base + child * size) < 0) {
+      candidate = child;
     }
+    if (child < end && compar(base + candidate * size, base + (child + 1) * size) < 0) {
+      candidate = child + 1;
+    }
+    if (candidate == root) {
+      return;
+    }
+    swap_bytes(base + root * size, base + candidate * size, size);
+    root = candidate;
   }
 }
 
 void qsort(void* base, size_t nmemb, size_t size, int (*compar)(const void*, const void*)) {
+  unsigned char* bytes = (unsigned char*)base;
+  size_t start;
+  size_t end;
+
   if (base == 0 || size == 0 || compar == 0 || nmemb < 2) {
     return;
   }
-  insertion_sort((unsigned char*)base, nmemb, size, compar);
+
+  /* In-place heapsort keeps qsort usable before malloc is initialized and
+   * guarantees O(N log N) comparisons even for sorted or hostile input. */
+  start = (nmemb - 2) / 2 + 1;
+  while (start != 0) {
+    --start;
+    sift_down(bytes, start, nmemb - 1, size, compar);
+  }
+  end = nmemb - 1;
+  while (end != 0) {
+    swap_bytes(bytes, bytes + end * size, size);
+    --end;
+    if (end != 0) {
+      sift_down(bytes, 0, end, size, compar);
+    }
+  }
 }
 
 void* bsearch(
