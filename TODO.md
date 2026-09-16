@@ -278,13 +278,6 @@ Execution plan:
    slow-test" expectation. Revisit if a future investigation needs to
    catch a use-after-free read specifically and the existing canary/owner
    checks do not.
-7. **Freeze the Host ABI firewall before hardware decode.** Document and audit
-   the ownership rule for Wayland/Vulkan and the upcoming FFmpeg hardware,
-   VA-API, PipeWire, and EGL boundaries: opaque host objects are created,
-   retained, synchronized, and destroyed only by the host library and
-   allocator domain that owns them. CRT adapters may transport opaque handles
-   but must not reinterpret private layouts or free host-owned storage. Add
-   boundary assertions/tests where ownership can be checked mechanically.
 8. **Publish one cross-host decision record.** Run the bounded correctness
    suite on the normal Linux, Windows, and macOS matrix and record the heavier
    baseline per host/architecture in `docs/allocator_baseline.md`. Declare the

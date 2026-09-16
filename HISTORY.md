@@ -10,6 +10,51 @@ substantive update.
 
 ## 2026-09-16
 
+- **Froze and mechanically enforced the Host ABI ownership/lifetime firewall
+  before hardware decode (allocator-baseline tranche 7).** Added
+  `docs/host_abi_firewall.md` as the boundary specification: its ownership
+  matrix names the creator, retain/reference API, synchronization owner, and
+  destroyer for the existing Wayland, xkbcommon, Vulkan, and FFmpeg objects,
+  and fixes the same contract in advance for the planned VA-API, EGL, and
+  PipeWire boundaries. CRT adapters may store and transport these opaque
+  handles, but may neither inspect private layouts nor pass host-owned storage
+  to the CRT allocator. The future-boundary checklist makes a real-host smoke
+  test and an explicit synchronization/lifetime account acceptance criteria;
+  this tranche deliberately did not pull hardware-decode or zero-copy
+  implementation forward merely to test the policy.
+
+  Audited the real cleanup paths in `libcrtgfx/src/arch/linux/window_wayland_
+  native.c`, `libcrtgfx/src/arch/linux/gpu_vulkan.c`, and `libcrtmedia/src/
+  codec.c`. Each host object is released by its owning API (`wl_*_destroy()`/
+  `xdg_*_destroy()`/`wl_display_disconnect()`, `xkb_*_unref()`,
+  `vkDestroy*()`, or `av_*_free()`/`av_buffer_unref()`/`swr_free()`) before
+  the surrounding CRT-owned wrapper is freed. Vulkan's `vk_images` is only a
+  CRT-owned array of opaque handle values; the swapchain owns the images.
+  No cross-domain `free()` defect was found or hidden by this audit.
+
+  Added a synthetic host allocator domain as the static
+  `host_abi_firewall_fake_host` test library. Its public header exposes only
+  an incomplete object type and create/retain/release operations; its private
+  implementation reuses tranche 6's separately-instantiated debug allocator.
+  `host_abi_firewall_test_runs` transports 1,000 opaque objects through the
+  adapter-shaped API and proves balanced create/destroy counts with zero live
+  objects. `host_abi_firewall_fault_test_runs` launches a victim that
+  deliberately passes a host-owned object to ordinary CRT `free()` and proves
+  the existing owner-mismatch diagnostic traps it. This is an architectural
+  positive test plus a real expected-fault negative test, not a generic stress
+  loop or a product-code ownership violation.
+
+  Validation: Windows/x86_64 full CTest passed 127/127; WSL Linux/x86_64 full
+  CTest passed 110/110 after building the test-bearing directory targets (an
+  earlier `Not Run` result was only an incomplete selective build, not a test
+  failure). Both new tests also passed three consecutive focused repetitions
+  on each host. `tools/test_build_stage_04_cache.py` passed 10/10, including
+  the positive/negative static-example shared-CRT dependency fixtures, and
+  the fresh Windows `dist/04-gfx-media` passed `tools/verify_dist.py`. Together
+  with the already-recorded real Linux/aarch64 packaged Vulkan/Skia
+  presentation and dependency audit, this closes tranche 7 without claiming
+  the separately planned general export-ABI allowlist work is complete.
+
 - **Ran the allocator baseline (tranche 1) and contention baseline (tranche
   3) benchmarks on macOS/arm64 for the first time, per TODO.md's tranche 8
   cross-host record -- zero correctness failures, and the open wall-clock-

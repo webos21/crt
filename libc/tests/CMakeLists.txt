@@ -548,6 +548,83 @@ set_tests_properties(malloc_fault_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "malloc_fault_test: ok"
 )
 
+# host_abi_firewall_test / host_abi_firewall_fault_test: TODO.md's
+# "Allocator baseline validation before Upper Runtime" tranche 7 ("freeze
+# the Host ABI firewall before hardware decode") -- see docs/host_abi_
+# firewall.md's own "Mechanical detection" section for the full design.
+# Reuses malloc_fault_instance_b.c as-is (tranche 6) to give the synthetic
+# fake host static library its own genuinely separate allocator domain. A
+# static archive is sufficient here because its allocator entry points are
+# renamed and its private heap state is compiled into distinct translation-
+# unit-local storage; the test does not need host dlopen support merely to
+# prove the ownership rule.
+add_library(host_abi_firewall_fake_host STATIC
+  host_abi_firewall_fake_host.c
+  malloc_fault_instance_b.c
+)
+target_compile_definitions(host_abi_firewall_fake_host PRIVATE CRT_DEBUG_MALLOC=1)
+target_link_libraries(host_abi_firewall_fake_host PRIVATE crt_build_flags)
+target_include_directories(host_abi_firewall_fake_host PRIVATE
+  "${CMAKE_SOURCE_DIR}/libc/include"
+)
+
+add_crt_test(host_abi_firewall_test host_abi_firewall_test.c)
+target_link_libraries(host_abi_firewall_test PRIVATE host_abi_firewall_fake_host)
+set_tests_properties(host_abi_firewall_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "host_abi_firewall_test: ok"
+)
+
+# host_abi_firewall_fault_victim: deliberately violates the firewall rule
+# (see its own top comment) -- NOT registered as its own ctest, matching
+# malloc_fault_victim's own reasoning exactly (it is meant to crash).
+add_executable(host_abi_firewall_fault_victim
+  ${CRT_STARTUP_OBJECTS}
+  host_abi_firewall_fault_victim.c
+  "${CMAKE_SOURCE_DIR}/libc/src/malloc.c"
+)
+target_compile_definitions(host_abi_firewall_fault_victim PRIVATE CRT_DEBUG_MALLOC=1)
+target_link_libraries(host_abi_firewall_fault_victim PRIVATE
+  crt_build_flags c host_abi_firewall_fake_host)
+target_include_directories(host_abi_firewall_fault_victim PRIVATE
+  "${CMAKE_SOURCE_DIR}/libc/include"
+)
+target_link_libraries(host_abi_firewall_fault_victim PRIVATE crt_compiler_rt_builtins)
+target_link_options(host_abi_firewall_fault_victim PRIVATE
+  -nostdlib
+  -nostartfiles
+  -nodefaultlibs
+)
+if(CRT_TARGET_OS STREQUAL "macos")
+  target_link_options(host_abi_firewall_fault_victim PRIVATE
+    -Wl,-e,_start
+    -Wl,-dead_strip
+  )
+  target_link_libraries(host_abi_firewall_fault_victim PRIVATE System)
+elseif(CRT_TARGET_OS STREQUAL "linux")
+  target_link_options(host_abi_firewall_fault_victim PRIVATE
+    -Wl,-e,_start
+    -Wl,--gc-sections
+  )
+elseif(CRT_TARGET_OS STREQUAL "windows")
+  target_link_options(host_abi_firewall_fault_victim PRIVATE
+    -Wl,/entry:mainCRTStartup
+    -Wl,/subsystem:console
+    -Wl,/OPT:REF
+  )
+  target_link_libraries(host_abi_firewall_fault_victim PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+endif()
+crt_link_startup_end_objects(host_abi_firewall_fault_victim)
+add_dependencies(host_abi_firewall_fault_victim c crt1)
+
+add_crt_test(host_abi_firewall_fault_test host_abi_firewall_fault_test.c)
+add_dependencies(host_abi_firewall_fault_test host_abi_firewall_fault_victim)
+target_compile_definitions(host_abi_firewall_fault_test PRIVATE
+  "CRT_HOST_ABI_FIREWALL_FAULT_VICTIM_EXE=\"$<TARGET_FILE:host_abi_firewall_fault_victim>\""
+)
+set_tests_properties(host_abi_firewall_fault_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "host_abi_firewall_fault_test: ok"
+)
+
 add_crt_test(windows_fd_snapshot_test windows_fd_snapshot_test.c)
 set_tests_properties(windows_fd_snapshot_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "windows_fd_snapshot_test: ok"
