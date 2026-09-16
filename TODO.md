@@ -218,16 +218,66 @@ Execution plan:
    session -- this session only had a Windows/x86_64 host available; run
    the same ctest there before treating this tranche as cross-host
    verified, not just implemented.
-6. **Make diagnostics permanent and testable.** Change
-   `CRT_ENABLE_DEBUG_MALLOC` from a temporary investigation switch into a
-   supported diagnostic mode, retaining its normal and direct-linked CTest
-   coverage. Add expected-fault tests for double free, cross-instance owner
-   mismatch, and canary damage. Evaluate and implement
-   `CRT_ENABLE_GUARD_MALLOC` only as a distinct opt-in guard-page diagnostic,
-   with explicit large-memory/slow-test labeling; it is not the production
-   allocator. Record a go/no-go decision, but do not hold the baseline gate
-   open solely to build it if debug-malloc expected-fault coverage already
-   provides the required diagnostics.
+6. **Completed 2026-09-16: make diagnostics permanent and testable.**
+   `CRT_ENABLE_DEBUG_MALLOC` (`CMakeLists.txt`) is now documented as a
+   permanent, supported diagnostic mode, not temporary investigation
+   scaffolding -- its own comment updated to match. Its existing normal
+   (`malloc_test`) and direct-linked (`malloc_debug_test`) CTest coverage
+   was already in place and needed no change.
+
+   Added real expected-fault coverage for all three checks: `libc/tests/
+   malloc_fault_victim.c` (a deliberately-crashing helper, NOT its own
+   ctest -- it is meant to crash) triggers double free, canary damage
+   (a genuine 1-byte heap-buffer-overflow into `align_size()`'s own
+   rounding slack), and cross-instance owner mismatch on request via
+   argv; `libc/tests/malloc_fault_test.c` (ctest: `malloc_fault_test_runs`)
+   spawns it once per fault kind and confirms `CRT_DEBUG_MALLOC` actually
+   trapped it. Owner mismatch needed a genuine second, independent
+   allocator instance in the same process -- solved without needing an
+   actual second shared library or `dlopen()`: `libc/tests/malloc_fault_
+   instance_b.c` `#include`s the real `libc/src/malloc.c` after
+   preprocessor-renaming its small public symbol surface, safe because
+   every one of that file's own internal helpers and file-scope state is
+   already `static` (no cross-TU collision risk at all) -- reproducing the
+   exact real-world scenario CRT_DEBUG_MALLOC's own owner check exists for
+   (a statically-linked copy plus a separately-instanced one) without new
+   shared-library build machinery. Confirmed empirically while building
+   this (not assumed): on Windows, `__builtin_trap()` firing inside this
+   DWARF-compiled, no-native-unwind-info code lands in `windows_dwarf_
+   unwind_safety_net.c`'s own existing vectored exception handler and
+   exits via the same `128 + SIGILL` controlled-exit convention `windows_
+   dwarf_unwind_safety_net_test.c` already checks for a different fault
+   -- that mechanism turns out to generalize beyond the stack-overflow-
+   during-unwind case it was originally built for. All three fault kinds
+   passed repeatably (3 manual runs plus the routine ctest pass) on
+   Windows/x86_64; Linux/macOS use the more ordinary `WIFSIGNALED(status)
+   && WTERMSIG(status) == SIGILL` path (real OS signal termination, no
+   project-specific bridge needed there) -- not yet run on those hosts
+   this session.
+
+   **`CRT_ENABLE_GUARD_MALLOC` go/no-go decision: no-go, deferred.** Not
+   built. The debug-malloc expected-fault coverage just added already
+   provides everything the baseline-validation decision gate needs
+   (double free, cross-instance owner mismatch, heap-buffer-overflow-into-
+   slack), so per this tranche's own explicit instruction, that alone is
+   sufficient to close this tranche without also building a guard-page
+   allocator. Guard pages would add real, distinct diagnostic value
+   `CRT_DEBUG_MALLOC`'s canary approach genuinely cannot provide --
+   canaries are only checked at `free()`/`realloc()` time, so a use-after-
+   free *read* (no write, nothing to corrupt for a canary to later
+   notice) is invisible to it, while a guard page would fault immediately,
+   precisely at the offending instruction. But that gap is not blocking
+   anything this baseline-validation effort currently needs, and the cost
+   is real and specific to this allocator's own design: `malloc.c` has no
+   per-allocation metadata region separate from the payload itself
+   (`block_header` sits directly before it in the same mapping), so a
+   genuine guard-page implementation would need each allocation promoted
+   to its own dedicated OS mapping with an adjacent unmapped/PROT_NONE
+   page -- large memory overhead and allocator-shape-changing, not a
+   small flag flip, exactly matching the TODO wording's own "large-memory/
+   slow-test" expectation. Revisit if a future investigation needs to
+   catch a use-after-free read specifically and the existing canary/owner
+   checks do not.
 7. **Freeze the Host ABI firewall before hardware decode.** Document and audit
    the ownership rule for Wayland/Vulkan and the upcoming FFmpeg hardware,
    VA-API, PipeWire, and EGL boundaries: opaque host objects are created,

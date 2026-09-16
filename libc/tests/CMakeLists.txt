@@ -488,6 +488,66 @@ set_tests_properties(malloc_fork_regions_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "malloc_fork_regions_test: ok"
 )
 
+# malloc_fault_victim: a deliberately-crashing helper for malloc_fault_
+# test's own tranche-6 ("make diagnostics permanent and testable")
+# expected-fault coverage -- see malloc_fault_victim.c's own top comment.
+# Built the same way malloc_debug_test is (libc/src/malloc.c compiled
+# directly, CRT_DEBUG_MALLOC=1, so this direct object's own malloc/free
+# win over the ordinary archive's), plus malloc_fault_instance_b.c for a
+# second, independent instance the owner-mismatch fault needs. NOT
+# registered as its own ctest -- add_crt_test() always calls add_test(),
+# which would misreport this executable's expected crash as a test
+# failure, so this is a plain add_executable() instead, matching how
+# windows_dwarf_unwind_safety_net_victim (this same file, above) is also
+# built without going through add_crt_test().
+add_executable(malloc_fault_victim
+  ${CRT_STARTUP_OBJECTS}
+  malloc_fault_victim.c
+  malloc_fault_instance_b.c
+  "${CMAKE_SOURCE_DIR}/libc/src/malloc.c"
+)
+target_compile_definitions(malloc_fault_victim PRIVATE CRT_DEBUG_MALLOC=1)
+target_link_libraries(malloc_fault_victim PRIVATE crt_build_flags c)
+target_include_directories(malloc_fault_victim PRIVATE
+  "${CMAKE_SOURCE_DIR}/libc/include"
+)
+target_link_libraries(malloc_fault_victim PRIVATE crt_compiler_rt_builtins)
+target_link_options(malloc_fault_victim PRIVATE
+  -nostdlib
+  -nostartfiles
+  -nodefaultlibs
+)
+if(CRT_TARGET_OS STREQUAL "macos")
+  target_link_options(malloc_fault_victim PRIVATE
+    -Wl,-e,_start
+    -Wl,-dead_strip
+  )
+  target_link_libraries(malloc_fault_victim PRIVATE System)
+elseif(CRT_TARGET_OS STREQUAL "linux")
+  target_link_options(malloc_fault_victim PRIVATE
+    -Wl,-e,_start
+    -Wl,--gc-sections
+  )
+elseif(CRT_TARGET_OS STREQUAL "windows")
+  target_link_options(malloc_fault_victim PRIVATE
+    -Wl,/entry:mainCRTStartup
+    -Wl,/subsystem:console
+    -Wl,/OPT:REF
+  )
+  target_link_libraries(malloc_fault_victim PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+endif()
+crt_link_startup_end_objects(malloc_fault_victim)
+add_dependencies(malloc_fault_victim c crt1)
+
+add_crt_test(malloc_fault_test malloc_fault_test.c)
+add_dependencies(malloc_fault_test malloc_fault_victim)
+target_compile_definitions(malloc_fault_test PRIVATE
+  "CRT_MALLOC_FAULT_VICTIM_EXE=\"$<TARGET_FILE:malloc_fault_victim>\""
+)
+set_tests_properties(malloc_fault_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "malloc_fault_test: ok"
+)
+
 add_crt_test(windows_fd_snapshot_test windows_fd_snapshot_test.c)
 set_tests_properties(windows_fd_snapshot_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "windows_fd_snapshot_test: ok"

@@ -263,13 +263,18 @@ elseif(CRT_TARGET_OS STREQUAL "windows")
   target_compile_definitions(crt_build_flags INTERFACE CRT_TARGET_OS_WINDOWS=1)
 endif()
 
-# CRT_ENABLE_DEBUG_MALLOC (2026-09-14, diagnosing the Skia/SkSL heap-
-# corruption bug in HISTORY.md's dated entry): a temporary diagnostic build
-# mode, not a permanent/shipped option (though TODO.md's own dated item
-# leans toward keeping it as one, given upcoming FFmpeg/QuickJS allocation-
-# heavy paths). Three independent, cheap checks in libc/src/malloc.c, each
-# guarded by this same macro (that file's own CRT_DEBUG_MALLOC comments have
-# the full mechanism for each):
+# CRT_ENABLE_DEBUG_MALLOC (introduced 2026-09-14 diagnosing the Skia/SkSL
+# heap-corruption bug in HISTORY.md's dated entry; made a permanent,
+# supported diagnostic build mode 2026-09-16 by TODO.md's "Allocator
+# baseline validation before Upper Runtime" tranche 6 -- not temporary
+# investigation-only scaffolding, given the upcoming FFmpeg/QuickJS
+# allocation-heavy paths tranche 6's own writeup calls out). Three
+# independent, cheap checks in libc/src/malloc.c, each guarded by this
+# same macro (that file's own CRT_DEBUG_MALLOC comments have the full
+# mechanism for each), each with real expected-fault regression coverage
+# (libc/tests/malloc_fault_test.c, added by the same tranche -- spawns a
+# deliberately-crashing victim per fault kind and confirms CRT_DEBUG_
+# MALLOC actually trapped it):
 #   - Cross-instance owner mismatch: this project's own hand-rolled
 #     allocator has no way today to tell "a real allocation from *this*
 #     compiled instance" apart from "a real allocation from a *different*

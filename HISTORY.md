@@ -10,6 +10,93 @@ substantive update.
 
 ## 2026-09-16
 
+- **Made `CRT_ENABLE_DEBUG_MALLOC` a permanent, supported diagnostic mode
+  with real expected-fault regression coverage (TODO.md's tranche 6,
+  "make diagnostics permanent and testable"), and recorded a no-go
+  decision on a guard-page allocator.** `CRT_ENABLE_DEBUG_MALLOC`
+  (`CMakeLists.txt`) already existed as a real top-level option since the
+  2026-09-14 Skia/SkSL heap-corruption investigation, but its own comment
+  still called it temporary; updated to reflect that this tranche keeps
+  it permanently, matching the upcoming FFmpeg/QuickJS allocation-heavy
+  paths this project's own roadmap anticipates. Its existing normal
+  (`malloc_test`) and direct-linked (`malloc_debug_test`) CTest coverage
+  needed no change.
+
+  What was actually missing, and is now built: real expected-fault tests
+  for all three checks `CRT_DEBUG_MALLOC` implements. `libc/tests/
+  malloc_fault_victim.c` is a deliberately-crashing helper (built like
+  `malloc_debug_test` -- `libc/src/malloc.c` compiled directly with
+  `CRT_DEBUG_MALLOC=1`, so this direct object's own `malloc()`/`free()`
+  win over the ordinary archive's -- but NOT registered as its own ctest,
+  since `add_crt_test()` always calls `add_test()`, which would
+  misreport an intentional crash as a failure; a plain `add_executable()`
+  is used instead, the same way `windows_dwarf_unwind_safety_net_victim`
+  already is) that triggers double free, canary damage (a real 1-byte
+  heap-buffer-overflow into the rounding slack `align_size()` already
+  guarantees after a 1-byte request), or cross-instance owner mismatch,
+  selected by argv. `libc/tests/malloc_fault_test.c` (ctest: `malloc_
+  fault_test_runs`) spawns it once per fault kind via `posix_spawn()`
+  (matching `windows_dwarf_unwind_safety_net_test.c`'s own "spawn a real
+  victim binary" pattern) and confirms the diagnostic actually trapped it.
+
+  Owner mismatch needed a genuine second, independent allocator instance
+  coexisting in the same process -- solved without an actual second
+  shared library or `dlopen()`/`dlsym()`: `libc/tests/malloc_fault_
+  instance_b.c` `#include`s the real `libc/src/malloc.c` after
+  preprocessor-renaming its small public symbol surface (`malloc`,
+  `free`, `calloc`, `realloc`, `posix_memalign`, `aligned_alloc`,
+  `malloc_usable_size`, the Windows-only `_aligned_malloc`/`_aligned_
+  free`, and the three `__crt_malloc_os_region_*`/`_after_fork_child`
+  accessors). Safe because every one of `malloc.c`'s own internal
+  helpers and file-scope state (`block_header`, `align_size()`,
+  `append_chunk()`, `heap_head`, `heap_lock`, ...) is already `static`,
+  with zero cross-translation-unit visibility to begin with -- only the
+  handful of genuinely exported symbols needed renaming at all. This
+  reproduces the exact real-world scenario `CRT_DEBUG_MALLOC`'s own owner
+  tag exists for (`malloc.c`'s own comment: "a statically-linked libc.a
+  copy inside an executable, plus a separate copy inside the shared
+  libc.so any dynamically-loaded consumer... resolves through") directly,
+  without inventing any new shared-library build machinery.
+
+  A genuinely useful thing was confirmed empirically while building this,
+  not assumed: on Windows, `__builtin_trap()` firing inside this DWARF-
+  compiled, no-native-unwind-info code lands in `windows_dwarf_unwind_
+  safety_net.c`'s own already-existing vectored exception handler and
+  exits via the exact same `128 + SIGILL` controlled-exit convention
+  `windows_dwarf_unwind_safety_net_test.c` already checks for a
+  completely different fault (a stack overflow during unwind) -- that
+  mechanism turns out to generalize to an ordinary `__builtin_trap()`
+  fault too, not just the specific scenario it was originally built for.
+  Confirmed directly: running the victim standalone shows its own real
+  `crt: fatal exception 0xc000001d (SIGILL) ... controlled, deterministic
+  exit` message before exiting with code 132 (128 + 4). `malloc_fault_
+  test.c` accordingly checks `WIFEXITED(status) && WEXITSTATUS(status)
+  == 128 + SIGILL` on Windows and the more ordinary `WIFSIGNALED(status)
+  && WTERMSIG(status) == SIGILL` (real OS signal termination) elsewhere.
+  All three fault kinds passed repeatably (3 manual runs plus the routine
+  ctest pass) on Windows/x86_64; not yet run on Linux, macOS, or
+  Windows/aarch64 this session.
+
+  **`CRT_ENABLE_GUARD_MALLOC` go/no-go decision: no-go, deferred, not
+  built.** The expected-fault coverage just landed already provides
+  everything the baseline-validation decision gate needs, so per this
+  tranche's own explicit instruction that alone is enough to close it.
+  Guard pages would add real, distinct value `CRT_DEBUG_MALLOC`'s canary
+  approach genuinely cannot provide -- canaries are only checked at
+  `free()`/`realloc()` time, so a use-after-free *read* (nothing gets
+  corrupted for a canary to later notice) is invisible to it, while a
+  guard page would fault immediately, at the exact offending
+  instruction -- but that gap blocks nothing this effort currently needs,
+  and the cost is real and specific to this allocator's own design:
+  `malloc.c` has no metadata region separate from the payload itself
+  (`block_header` sits directly before it in the same mapping), so a
+  genuine implementation would need each allocation promoted to its own
+  dedicated OS mapping with an adjacent unmapped/`PROT_NONE` guard page --
+  a real, allocator-shape-changing cost, not a small flag flip, matching
+  TODO.md's own "large-memory/slow-test" expectation for it. Revisit if a
+  future investigation specifically needs to catch a use-after-free read
+  and the existing canary/owner checks do not.
+
 - **Added the first fork test in this project that actually touches the
   allocator's own heap state (TODO.md's tranche 5, "exercise fork
   interaction and allocator regions"), specifically to give the from-
