@@ -10,6 +10,39 @@ substantive update.
 
 ## 2026-09-16
 
+- **Added the first fork test in this project that actually touches the
+  allocator's own heap state (TODO.md's tranche 5, "exercise fork
+  interaction and allocator regions"), specifically to give the from-
+  scratch Windows memory-copy fork implementation real multi-region
+  coverage it never had before.** Every existing fork test (`fork_test.c`,
+  `fork_runtime_reset_test.c`, `fork_signal_test.c`) forks with a trivial,
+  single-region heap -- none of them would have caught a bug in
+  `libc/src/arch/windows/{x86_64,aarch64}/fork_memcopy.c`'s own region-by-
+  region copy loop (it walks `malloc.c`'s `__crt_malloc_os_region_count()`/
+  `_base()`/`_size()` accessors, since Windows has no native copy-on-write
+  fork). `libc/tests/malloc_fork_regions_test.c` (ctest: `malloc_fork_
+  regions_test_runs`) closes that gap: allocates 12 blocks each sized well
+  past a single heap chunk, forcing each into its own fresh OS region
+  (confirmed via `__crt_malloc_os_region_count()` before forking, not
+  assumed), frees every third one to leave real holes in the free list,
+  then forks. The child verifies every surviving block's inherited
+  content, mutates all of them with a different pattern, and allocates a
+  new block of its own; the parent, after the child reports success and
+  exits cleanly, re-verifies its OWN blocks still show the original
+  pattern. This construction catches either failure mode by design: a
+  missed or corrupted region shows up as a child-side verification
+  failure, and a parent/child memory-aliasing bug (the copy landing on
+  shared pages instead of a true independent copy) shows up as the
+  parent's own post-child verification failing. Passed cleanly and
+  repeatably (5/5 manual runs plus the routine ctest pass) on
+  Windows/x86_64. Not yet run on Windows/aarch64, Linux, or macOS this
+  session (only a Windows/x86_64 host was available) -- doing so on those
+  hosts is what would actually confirm the native Linux/macOS `fork()`
+  path (which needs no per-region copying at all, just a correct
+  `__crt_malloc_after_fork_child()` heap_lock reset under a genuinely
+  fragmented heap) and the Windows/aarch64 memory-copy fork path this
+  tranche also calls for.
+
 - **Extended the allocator baseline to fragmentation/resident-memory
   measurement outside the CRT ABI (tranche 4), validated the measurement
   method against a known-good control, and found a second real,

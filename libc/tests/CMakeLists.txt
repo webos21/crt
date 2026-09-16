@@ -478,6 +478,16 @@ set_tests_properties(fork_runtime_reset_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "fork_runtime_reset_test: ok"
 )
 
+# malloc_fork_regions_test: TODO.md's "Allocator baseline validation
+# before Upper Runtime" tranche 5 ("exercise fork interaction and
+# allocator regions") -- a many-region, fragmented-heap fork regression.
+# See that test's own top comment for why no earlier fork test already
+# covered this (none of them touch the allocator's own heap state at all).
+add_crt_test(malloc_fork_regions_test malloc_fork_regions_test.c)
+set_tests_properties(malloc_fork_regions_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "malloc_fork_regions_test: ok"
+)
+
 add_crt_test(windows_fd_snapshot_test windows_fd_snapshot_test.c)
 set_tests_properties(windows_fd_snapshot_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "windows_fd_snapshot_test: ok"

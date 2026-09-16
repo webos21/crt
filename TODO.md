@@ -188,11 +188,36 @@ Execution plan:
    specific to this allocator's own executable. Left open for whoever
    picks up tranche 8's cross-host decision record; see `HISTORY.md`'s
    2026-09-16 entry for the full writeup.
-5. **Exercise fork interaction and allocator regions.** Add a many-region,
-   fragmented-heap fork regression. The child must verify inherited contents,
-   mutate and allocate independently, and exit cleanly while the parent proves
-   its allocations were unchanged. Run the native fork path on Linux/macOS
-   and the memory-copy fork path on both supported Windows architectures.
+5. **Completed 2026-09-16: exercise fork interaction and allocator
+   regions.** `libc/tests/malloc_fork_regions_test.c` (ctest:
+   `malloc_fork_regions_test_runs`) -- the first fork test in this project
+   that touches the allocator's own heap state at all (`fork_test.c`/
+   `fork_runtime_reset_test.c`/`fork_signal_test.c` all fork with a
+   trivial, single-region heap). Allocates 12 blocks each sized well past
+   a single heap chunk (forcing each into its own fresh OS region --
+   confirmed, not assumed, via `__crt_malloc_os_region_count()` before
+   forking), frees every third one to leave real holes in the free list,
+   then forks: the child verifies every surviving block's inherited
+   content, mutates all of them with a different pattern, and allocates a
+   new block of its own (proving the post-fork heap is independently
+   writable and functional, not just readable); the parent, after the
+   child reports success and exits cleanly, re-verifies its OWN blocks
+   still show the ORIGINAL pattern -- catching either a missed/corrupted
+   region (child verification fails) or a parent/child aliasing bug
+   (parent verification fails after the child's mutation). Passed cleanly
+   and repeatably (5/5 manual runs, plus the routine ctest pass) on
+   Windows/x86_64, the host whose from-scratch memory-copy fork
+   implementation (`libc/src/arch/windows/{x86_64,aarch64}/fork_memcopy.c`,
+   which this test's many-region scenario exercises directly via those
+   same `__crt_malloc_os_region_*` accessors) this tranche most wanted
+   real coverage for. Native Linux/macOS `fork()` needs no such
+   per-region copying (real OS copy-on-write), but the identical test
+   there still confirms `__crt_malloc_after_fork_child()`'s heap_lock
+   reset (`libc/src/process.c`) is correct under a genuinely fragmented,
+   multi-region heap. Not yet run on Windows/aarch64, Linux, or macOS this
+   session -- this session only had a Windows/x86_64 host available; run
+   the same ctest there before treating this tranche as cross-host
+   verified, not just implemented.
 6. **Make diagnostics permanent and testable.** Change
    `CRT_ENABLE_DEBUG_MALLOC` from a temporary investigation switch into a
    supported diagnostic mode, retaining its normal and direct-linked CTest
