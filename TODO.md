@@ -151,13 +151,43 @@ Execution plan:
    and now also correlates with thread count, not just total op count --
    new evidence for whoever picks up the still-open root-cause
    investigation, not a new, separate anomaly.
-4. **Measure fragmentation and resident memory outside the CRT ABI.** Record
-   requested live bytes, allocator-visible usable bytes, peak live bytes, and
-   post-free reuse. Because CRT's current `getrusage()` is a compatibility
-   stub, let the host-side runner sample process RSS with host facilities
-   rather than adding benchmark-only behavior to the Bionic-facing API.
-   Repeat large-allocation cycles to distinguish retained arenas from
-   continually growing resident memory.
+4. **Completed 2026-09-16: measure fragmentation and resident memory
+   outside the CRT ABI.** Both baseline binaries now track and report
+   `live.usable_bytes`/`live.peak_usable_bytes` (`malloc_usable_size(ptr)`
+   summed across the live set, alongside the existing requested-byte
+   counters -- the gap between the two is this allocator's own internal
+   fragmentation from `align_size()` rounding). `tools/host_rss.py` (new)
+   samples each child's own peak host-observed resident memory --
+   `PeakWorkingSetSize` via `GetProcessMemoryInfo()` on Windows,
+   `resource.getrusage(RUSAGE_CHILDREN).ru_maxrss` deltas on POSIX -- kept
+   entirely on the host-side runner as the TODO wording requires, not
+   added to the Bionic-facing binaries. Both `tools/run_allocator_
+   baseline.py`/`_contention_baseline.py` now report `host_peak_rss_bytes`
+   per run.
+
+   "Post-free reuse" vs. "continually growing resident memory" is already
+   answered by tranche 1's own `os_regions` field across the tier sweep:
+   6 regions at both the 1K and 10K tiers (zero new OS mappings for 10x
+   more operations), only 10 at 100K (10x more ops again, far short of
+   10x more regions) -- clear evidence freed blocks are actually being
+   reused by later allocations, not forcing new mappings each time.
+
+   A second real, unexplained host-memory anomaly was found and
+   investigated (not fully root-caused, same treatment as tranche 1's
+   timing anomaly): host-observed peak RSS stayed flat (~4.04MB) across
+   the 1K/10K/100K tiers despite `live.peak_bytes` growing 3x (3.5MB to
+   10.9MB) between the 10K and 100K tiers, and `PeakPagefileUsage`
+   (committed/pagefile-backed memory, which should track `VirtualAlloc(...,
+   MEM_RESERVE | MEM_COMMIT, ...)` directly -- confirmed that is genuinely
+   what `__crt_sys_mmap()` calls on Windows) barely moved either
+   (6.18MB to 6.19MB). The RSS-sampling method itself was validated
+   against a known-good control first (a plain Python subprocess
+   allocating and touching 50MB correctly reported ~60MB peak working
+   set), ruling out a bug in `tools/host_rss.py` or a broken/sandboxed
+   `GetProcessMemoryInfo()` in this environment -- the flat reading is
+   specific to this allocator's own executable. Left open for whoever
+   picks up tranche 8's cross-host decision record; see `HISTORY.md`'s
+   2026-09-16 entry for the full writeup.
 5. **Exercise fork interaction and allocator regions.** Add a many-region,
    fragmented-heap fork regression. The child must verify inherited contents,
    mutate and allocate independently, and exit cleanly while the parent proves

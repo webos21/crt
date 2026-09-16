@@ -77,7 +77,8 @@
 
 typedef struct {
   unsigned char* ptr;
-  size_t size;
+  size_t size;   /* the caller's own requested size */
+  size_t usable; /* malloc_usable_size(ptr) -- tranche 4's "allocator-visible usable bytes" */
   size_t alignment;
   unsigned char fill;
 } live_entry;
@@ -92,6 +93,8 @@ typedef struct {
   uint32_t live_capacity;
   uint64_t* live_bytes;
   uint64_t* peak_live_bytes;
+  uint64_t* usable_bytes;
+  uint64_t* peak_usable_bytes;
   uint32_t* peak_live_count;
   pthread_mutex_t* live_mutex; /* NULL for the private pattern */
 } pool_ref;
@@ -107,6 +110,8 @@ typedef struct {
   uint32_t private_live_count;
   uint64_t private_live_bytes;
   uint64_t private_peak_live_bytes;
+  uint64_t private_usable_bytes;
+  uint64_t private_peak_usable_bytes;
   uint32_t private_peak_live_count;
 
   uint32_t* latency_ns; /* NULL: do not record (used for the post-join shared drain pass) */
@@ -122,6 +127,8 @@ static live_entry g_shared_live[MCB_SHARED_MAX_LIVE];
 static uint32_t g_shared_live_count;
 static uint64_t g_shared_live_bytes;
 static uint64_t g_shared_peak_live_bytes;
+static uint64_t g_shared_usable_bytes;
+static uint64_t g_shared_peak_usable_bytes;
 static uint32_t g_shared_peak_live_count;
 static pthread_mutex_t g_shared_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -193,24 +200,33 @@ static int verify_fill(const unsigned char* ptr, size_t size, unsigned char fill
   return 1;
 }
 
-static void track_added(pool_ref* pool, size_t size) {
+static void track_added(pool_ref* pool, size_t size, size_t usable) {
   *pool->live_bytes += size;
+  *pool->usable_bytes += usable;
   if (*pool->live_bytes > *pool->peak_live_bytes) {
     *pool->peak_live_bytes = *pool->live_bytes;
+  }
+  if (*pool->usable_bytes > *pool->peak_usable_bytes) {
+    *pool->peak_usable_bytes = *pool->usable_bytes;
   }
   if (*pool->live_count > *pool->peak_live_count) {
     *pool->peak_live_count = *pool->live_count;
   }
 }
 
-static void track_removed(pool_ref* pool, size_t size) {
+static void track_removed(pool_ref* pool, size_t size, size_t usable) {
   *pool->live_bytes -= size;
+  *pool->usable_bytes -= usable;
 }
 
-static void track_resized(pool_ref* pool, size_t old_size, size_t new_size) {
+static void track_resized(pool_ref* pool, size_t old_size, size_t new_size, size_t old_usable, size_t new_usable) {
   *pool->live_bytes = *pool->live_bytes - old_size + new_size;
+  *pool->usable_bytes = *pool->usable_bytes - old_usable + new_usable;
   if (*pool->live_bytes > *pool->peak_live_bytes) {
     *pool->peak_live_bytes = *pool->live_bytes;
+  }
+  if (*pool->usable_bytes > *pool->peak_usable_bytes) {
+    *pool->peak_usable_bytes = *pool->usable_bytes;
   }
 }
 
@@ -280,10 +296,11 @@ static int do_allocate(thread_ctx* ctx) {
   memset(ptr, fill, size);
   pool->live[*pool->live_count].ptr = ptr;
   pool->live[*pool->live_count].size = size;
+  pool->live[*pool->live_count].usable = malloc_usable_size(ptr);
   pool->live[*pool->live_count].alignment = alignment;
   pool->live[*pool->live_count].fill = fill;
   (*pool->live_count)++;
-  track_added(pool, size);
+  track_added(pool, size, pool->live[*pool->live_count - 1].usable);
   return 1;
 }
 
@@ -301,7 +318,7 @@ static int do_free(thread_ctx* ctx, uint32_t index) {
   end_ns = monotonic_ns();
   record_latency(ctx, start_ns, end_ns);
   ctx->free_count++;
-  track_removed(pool, entry.size);
+  track_removed(pool, entry.size, entry.usable);
 
   pool->live[index] = pool->live[*pool->live_count - 1];
   (*pool->live_count)--;
@@ -312,6 +329,7 @@ static int do_realloc(thread_ctx* ctx, uint32_t index) {
   pool_ref* pool = &ctx->pool;
   live_entry* entry = &pool->live[index];
   size_t old_size = entry->size;
+  size_t old_usable = entry->usable;
   size_t new_size;
   size_t verify_size;
   unsigned char* new_ptr;
@@ -357,7 +375,8 @@ static int do_realloc(thread_ctx* ctx, uint32_t index) {
 
   new_fill = (unsigned char)(next_rand(&ctx->rng_state) & 0xFFu);
   memset(new_ptr, new_fill, new_size);
-  track_resized(pool, old_size, new_size);
+  entry->usable = malloc_usable_size(new_ptr);
+  track_resized(pool, old_size, new_size, old_usable, entry->usable);
   entry->ptr = new_ptr;
   entry->size = new_size;
   entry->fill = new_fill;
@@ -417,6 +436,8 @@ static void bind_private_pool(thread_ctx* ctx) {
   ctx->pool.live_capacity = MCB_PRIVATE_MAX_LIVE_PER_THREAD;
   ctx->pool.live_bytes = &ctx->private_live_bytes;
   ctx->pool.peak_live_bytes = &ctx->private_peak_live_bytes;
+  ctx->pool.usable_bytes = &ctx->private_usable_bytes;
+  ctx->pool.peak_usable_bytes = &ctx->private_peak_usable_bytes;
   ctx->pool.peak_live_count = &ctx->private_peak_live_count;
   ctx->pool.live_mutex = 0;
 }
@@ -427,6 +448,8 @@ static void bind_shared_pool(thread_ctx* ctx) {
   ctx->pool.live_capacity = MCB_SHARED_MAX_LIVE;
   ctx->pool.live_bytes = &g_shared_live_bytes;
   ctx->pool.peak_live_bytes = &g_shared_peak_live_bytes;
+  ctx->pool.usable_bytes = &g_shared_usable_bytes;
+  ctx->pool.peak_usable_bytes = &g_shared_peak_usable_bytes;
   ctx->pool.peak_live_count = &g_shared_peak_live_count;
   ctx->pool.live_mutex = &g_shared_mutex;
 }
@@ -442,6 +465,8 @@ static int run(uint32_t thread_count, uint32_t ops_per_thread, uint64_t seed, in
   g_shared_live_count = 0;
   g_shared_live_bytes = 0;
   g_shared_peak_live_bytes = 0;
+  g_shared_usable_bytes = 0;
+  g_shared_peak_usable_bytes = 0;
   g_shared_peak_live_count = 0;
 
   for (i = 0; i < thread_count; ++i) {
@@ -548,6 +573,7 @@ static void print_json_result(uint32_t thread_count, uint32_t ops_per_thread, ui
   uint64_t malloc_count = 0, calloc_count = 0, aligned_count = 0;
   uint64_t free_count = 0, realloc_grow_count = 0, realloc_shrink_count = 0;
   uint64_t peak_live_bytes = 0;
+  uint64_t peak_usable_bytes = 0;
   uint32_t peak_live_count = 0;
   uint64_t latency_sum = 0;
   double latency_avg = 0.0;
@@ -568,6 +594,9 @@ static void print_json_result(uint32_t thread_count, uint32_t ops_per_thread, ui
     realloc_shrink_count += ctx->realloc_shrink_count;
     if (*ctx->pool.peak_live_bytes > peak_live_bytes) {
       peak_live_bytes = *ctx->pool.peak_live_bytes;
+    }
+    if (*ctx->pool.peak_usable_bytes > peak_usable_bytes) {
+      peak_usable_bytes = *ctx->pool.peak_usable_bytes;
     }
     if (*ctx->pool.peak_live_count > peak_live_count) {
       peak_live_count = *ctx->pool.peak_live_count;
@@ -595,7 +624,7 @@ static void print_json_result(uint32_t thread_count, uint32_t ops_per_thread, ui
       "\"elapsed_ns\":%llu,"
       "\"throughput_ops_per_sec\":%.2f,"
       "\"latency_ns\":{\"min\":%u,\"p50\":%u,\"p99\":%u,\"max\":%u,\"avg\":%.2f,\"samples\":%u},"
-      "\"live\":{\"peak_count\":%u,\"peak_bytes\":%llu},"
+      "\"live\":{\"peak_count\":%u,\"peak_bytes\":%llu,\"peak_usable_bytes\":%llu},"
       "\"op_counts\":{\"malloc\":%llu,\"calloc\":%llu,\"aligned\":%llu,\"free\":%llu,"
       "\"realloc_grow\":%llu,\"realloc_shrink\":%llu},"
       "\"status\":\"ok\""
@@ -606,7 +635,8 @@ static void print_json_result(uint32_t thread_count, uint32_t ops_per_thread, ui
       merged_count != 0 ? g_merged_latency[(uint32_t)(((uint64_t)50 * (merged_count - 1)) / 100)] : 0u,
       merged_count != 0 ? g_merged_latency[(uint32_t)(((uint64_t)99 * (merged_count - 1)) / 100)] : 0u,
       merged_count != 0 ? g_merged_latency[merged_count - 1] : 0u, latency_avg, merged_count,
-      peak_live_count, (unsigned long long)peak_live_bytes, (unsigned long long)malloc_count,
+      peak_live_count, (unsigned long long)peak_live_bytes, (unsigned long long)peak_usable_bytes,
+      (unsigned long long)malloc_count,
       (unsigned long long)calloc_count, (unsigned long long)aligned_count, (unsigned long long)free_count,
       (unsigned long long)realloc_grow_count, (unsigned long long)realloc_shrink_count);
 }

@@ -10,6 +10,73 @@ substantive update.
 
 ## 2026-09-16
 
+- **Extended the allocator baseline to fragmentation/resident-memory
+  measurement outside the CRT ABI (tranche 4), validated the measurement
+  method against a known-good control, and found a second real,
+  unexplained host-memory anomaly alongside the still-open timing one.**
+  Both `libc/tests/malloc_baseline_test.c` and `malloc_contention_baseline_
+  test.c` now track `usable_bytes`/`peak_usable_bytes` (`malloc_usable_
+  size(ptr)` summed across the live set) alongside the existing requested-
+  byte counters, exposing this allocator's own internal fragmentation
+  (the gap between what a caller asked for and what `align_size()`
+  actually rounds up to) directly in the JSON schema.
+
+  `tools/host_rss.py` (new): a small shared module giving both runner
+  scripts a `run_with_peak_rss()` that behaves like `subprocess.run()` but
+  also returns the child's own peak host-observed resident memory --
+  `PeakWorkingSetSize` via `GetProcessMemoryInfo()` on Windows (using
+  `subprocess.Popen` rather than `subprocess.run()` specifically so the
+  process handle stays open long enough to query after the child exits;
+  no polling loop needed since Windows maintains this figure for the
+  life of the process), `resource.getrusage(RUSAGE_CHILDREN).ru_maxrss`
+  before/after deltas on POSIX. Deliberately kept on the host side, per
+  the TODO wording, rather than added as benchmark-only behavior to the
+  Bionic-facing binaries (CRT's own `getrusage()` stays an honest
+  compatibility stub). Both `tools/run_allocator_baseline.py` and
+  `_contention_baseline.py` now report `host_peak_rss_bytes` per run.
+
+  Tranche 4's "post-free reuse" question was already answered by tranche
+  1's own `os_regions` field, re-read with fresh eyes: 6 regions at both
+  the 1K and 10K tiers (zero new OS mappings for 10x more operations),
+  only 10 at 100K (10x more ops again, far short of 10x more regions) --
+  clear, already-collected evidence that freed blocks get reused by later
+  allocations rather than forcing new OS mappings each time.
+
+  A second real anomaly, found while building this and not yet root-
+  caused: host-observed peak RSS stayed essentially flat (~4.04MB) across
+  the 1K/10K/100K op-count tiers despite `live.peak_bytes` (the
+  allocator's own accounting) growing 3x (3.5MB to 10.9MB) between the
+  10K and 100K tiers. `PeakPagefileUsage` (Windows' own committed/
+  pagefile-backed-memory counter, which should track `VirtualAlloc(...,
+  MEM_RESERVE | MEM_COMMIT, ...)` directly) barely moved either (6.18MB
+  to 6.19MB) -- confirmed `__crt_sys_mmap()`'s own Windows implementation
+  (`libc/src/arch/windows/common/syscall.c`) genuinely calls
+  `VirtualAlloc` with exactly those flags for `MAP_ANONYMOUS`, so this is
+  not a case of memory being merely reserved-but-uncommitted. Before
+  trusting (or further chasing) this, the measurement method itself was
+  validated against a known-good, completely unrelated control: a plain
+  Python subprocess that allocates and touches a 50MB `bytearray`
+  correctly reported a ~60MB peak working set (50MB payload + a
+  reasonable ~10MB interpreter baseline) through the exact same
+  `host_rss.py` code path -- ruling out a bug in the sampling code, a
+  broken `GetProcessMemoryInfo()`, or a sandboxed/virtualized environment
+  that doesn't expose real memory accounting to child processes at all.
+  The flat reading is specific to this allocator's own executable and
+  workload. Left open, alongside the tranche 1 timing anomaly, for
+  whoever picks up tranche 8's cross-host decision record -- worth
+  investigating together, since both could plausibly share a root cause
+  in how this project's Windows PAL or this specific host/session
+  interacts with the OS's own process-accounting facilities, though that
+  connection is speculation, not confirmed.
+
+  Per the project owner's own direction, both benchmark tools' results
+  (now carrying the fuller schema) were re-run and the tracked
+  `benchmark/allocator-baseline/windows/` and `benchmark/allocator-
+  contention/windows/` files were refreshed; the original tranche-1
+  10^6-tier verification file from earlier the same day was left
+  untouched rather than re-run again (unaffected by this change, and
+  re-running it costs ~40 minutes for no new information).
+
 - **Extended the allocator baseline to contention scaling (TODO.md's
   tranche 3), confirmed tranche 2 was already satisfied by tranche 1's own
   design, moved both benchmark tools' raw results into a new tracked

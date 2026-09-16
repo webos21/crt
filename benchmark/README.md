@@ -39,10 +39,17 @@ later tiers are skipped (default: 60s). Each line of the resulting
 count, host arch/os), the binary's own in-process `elapsed_ns`/`process_ns`
 (`CLOCK_MONOTONIC`, bracketing the whole workload and the whole of
 `main()` respectively), throughput, an approximate latency distribution,
-live/peak allocation byte and count counters, per-operation-kind counts,
-`os_regions` (total distinct `mmap()`/`VirtualAlloc()` regions the
-allocator ever mapped), plus this script's own `wall_seconds` (the
-externally observed process wall time) and host identification.
+live/peak allocation byte and count counters (`bytes`/`peak_bytes`: the
+callers' own requested sizes; `usable_bytes`/`peak_usable_bytes`: the
+allocator's own `malloc_usable_size()` view, which can exceed the request
+via rounding -- tranche 4), per-operation-kind counts, `os_regions` (total
+distinct `mmap()`/`VirtualAlloc()` regions the allocator ever mapped, a
+proxy for "does freed memory get reused or does the region count keep
+growing" -- also tranche 4), plus this script's own `wall_seconds` (the
+externally observed process wall time), `host_peak_rss_bytes` (the child's
+own peak resident memory, sampled via `tools/host_rss.py` -- tranche 4's
+"measure ... outside the CRT ABI"; `None` if this host/run could not
+determine it), and host identification.
 
 **Known open issue, read before trusting `wall_seconds` at the 10^5/10^6
 tiers**: on this project's Windows host, `wall_seconds` diverges sharply
@@ -58,14 +65,22 @@ issue, not a new one, unless the evidence actually points elsewhere.
 
 `windows/malloc_baseline-amd64-seed42-20260916T064313Z.jsonl` is the
 original run that surfaced the issue above; it predates the `process_ns`/
-`os_regions` fields the investigation itself added to this schema (both
-added specifically to localize that gap -- see the same HISTORY.md entry),
-so those two keys are absent from its four lines. Left as the real,
-first-verification record rather than replaced by a partial re-run,
-per the project owner's own call (re-running the 10^6 tier costs
+`os_regions` fields the investigation itself added to this schema, and
+also predates `usable_bytes`/`peak_usable_bytes`/`host_peak_rss_bytes`
+(tranche 4), so none of those keys are present in its four lines. Left as
+the real, first-verification record rather than replaced by a partial
+re-run, per the project owner's own call (re-running the 10^6 tier costs
 ~40 minutes and reruns would not add anything the first run didn't
-already show). A future full run on this or another host will carry the
-complete schema.
+already show).
+`windows/malloc_baseline-amd64-seed42-20260916T081617Z.jsonl` is a
+tranche-4 follow-up run (1K/10K/100K tiers only, stopped before 10^6 by
+`--time-budget-seconds 20`) carrying the complete current schema,
+including a second real, unexplained host-memory anomaly: host-observed
+peak RSS stayed flat (~4.04MB) across all three tiers despite
+`live.peak_bytes` growing 3x between the 10K and 100K tiers -- see
+`HISTORY.md`'s matching 2026-09-16 tranche 4 entry for the full
+investigation, including the known-good control that ruled out a bug in
+the sampling method itself.
 
 ## `allocator-contention/<os>/`
 
@@ -89,9 +104,10 @@ python tools/run_allocator_contention_baseline.py --build-dir out/<preset>
 Add `--ops-per-thread <n>` to run a heavier sweep than the modest default
 (5000 -- kept low deliberately given the wall-clock anomaly below can make
 larger op counts take a very long time to actually finish). Each line is
-one (threads, pattern) case's result, with the same `latency_ns`/`live`/
-`op_counts` shape `allocator-baseline/` uses, plus `threads`,
-`ops_per_thread`, and `pattern`.
+one (threads, pattern) case's result, with the same `latency_ns`/`live`
+(including `peak_usable_bytes`, tranche 4)/`op_counts`/`host_peak_rss_bytes`
+shape `allocator-baseline/` uses, plus `threads`, `ops_per_thread`, and
+`pattern`.
 
 The same open wall-clock-vs-`elapsed_ns` issue documented above reproduces
 here too, and now also correlates with thread count, not just total op

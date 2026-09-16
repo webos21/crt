@@ -67,7 +67,8 @@ extern int __crt_malloc_os_region_count(void);
 
 typedef struct {
   unsigned char* ptr;
-  size_t size;
+  size_t size;      /* the caller's own requested size */
+  size_t usable;     /* malloc_usable_size(ptr) -- may exceed `size` via rounding */
   size_t alignment; /* 0 for plain malloc/calloc, else posix_memalign's own */
   unsigned char fill;
 } live_entry;
@@ -88,6 +89,20 @@ static uint64_t g_realloc_shrink_count;
 static uint64_t g_live_bytes;
 static uint64_t g_peak_live_bytes;
 static uint32_t g_peak_live_count;
+
+/* tranche 4 ("measure fragmentation and resident memory outside the CRT
+ * ABI"): g_live_bytes above is the sum of callers' own REQUESTED sizes;
+ * g_usable_bytes is the sum of malloc_usable_size(ptr) for the same live
+ * set -- the allocator's own view of how much of each block is genuinely
+ * usable, which can exceed the request via align_size()'s rounding. The
+ * gap between the two (usable - requested) is this allocator's own
+ * internal fragmentation; RSS/os_regions (already reported) are the
+ * OS-visible external view tranche 4 also asks for, sampled by the
+ * host-side runner rather than added to this Bionic-facing binary's own
+ * ABI (CRT's getrusage() is a compatibility stub -- see TODO.md's own
+ * tranche 4 wording for why that boundary is deliberate). */
+static uint64_t g_usable_bytes;
+static uint64_t g_peak_usable_bytes;
 
 static uint64_t g_rng_state;
 
@@ -125,24 +140,33 @@ static void record_latency(uint64_t start_ns, uint64_t end_ns) {
   }
 }
 
-static void track_live_added(size_t size) {
+static void track_live_added(size_t size, size_t usable) {
   g_live_bytes += size;
+  g_usable_bytes += usable;
   if (g_live_bytes > g_peak_live_bytes) {
     g_peak_live_bytes = g_live_bytes;
+  }
+  if (g_usable_bytes > g_peak_usable_bytes) {
+    g_peak_usable_bytes = g_usable_bytes;
   }
   if (g_live_count > g_peak_live_count) {
     g_peak_live_count = g_live_count;
   }
 }
 
-static void track_live_removed(size_t size) {
+static void track_live_removed(size_t size, size_t usable) {
   g_live_bytes -= size;
+  g_usable_bytes -= usable;
 }
 
-static void track_live_resized(size_t old_size, size_t new_size) {
+static void track_live_resized(size_t old_size, size_t new_size, size_t old_usable, size_t new_usable) {
   g_live_bytes = g_live_bytes - old_size + new_size;
+  g_usable_bytes = g_usable_bytes - old_usable + new_usable;
   if (g_live_bytes > g_peak_live_bytes) {
     g_peak_live_bytes = g_live_bytes;
+  }
+  if (g_usable_bytes > g_peak_usable_bytes) {
+    g_peak_usable_bytes = g_usable_bytes;
   }
 }
 
@@ -236,10 +260,11 @@ static int do_allocate(void) {
   memset(ptr, fill, size);
   g_live[g_live_count].ptr = ptr;
   g_live[g_live_count].size = size;
+  g_live[g_live_count].usable = malloc_usable_size(ptr);
   g_live[g_live_count].alignment = alignment;
   g_live[g_live_count].fill = fill;
   g_live_count++;
-  track_live_added(size);
+  track_live_added(size, g_live[g_live_count - 1].usable);
   return 1;
 }
 
@@ -255,7 +280,7 @@ static int do_free(uint32_t index) {
   end_ns = monotonic_ns();
   record_latency(start_ns, end_ns);
   g_free_count++;
-  track_live_removed(entry.size);
+  track_live_removed(entry.size, entry.usable);
 
   g_live[index] = g_live[g_live_count - 1];
   g_live_count--;
@@ -265,6 +290,7 @@ static int do_free(uint32_t index) {
 static int do_realloc(uint32_t index) {
   live_entry* entry = &g_live[index];
   size_t old_size = entry->size;
+  size_t old_usable = entry->usable;
   size_t new_size;
   size_t verify_size;
   unsigned char* new_ptr;
@@ -306,7 +332,8 @@ static int do_realloc(uint32_t index) {
 
   new_fill = (unsigned char)(next_rand() & 0xFFu);
   memset(new_ptr, new_fill, new_size);
-  track_live_resized(old_size, new_size);
+  entry->usable = malloc_usable_size(new_ptr);
+  track_live_resized(old_size, new_size, old_usable, entry->usable);
   entry->ptr = new_ptr;
   entry->size = new_size;
   entry->fill = new_fill;
@@ -323,6 +350,7 @@ static int run_workload(uint64_t seed, uint64_t ops, uint64_t* out_elapsed_ns) {
   g_malloc_count = g_calloc_count = g_aligned_count = 0;
   g_free_count = g_realloc_grow_count = g_realloc_shrink_count = 0;
   g_live_bytes = g_peak_live_bytes = 0;
+  g_usable_bytes = g_peak_usable_bytes = 0;
   g_peak_live_count = 0;
 
   start_ns = monotonic_ns();
@@ -429,7 +457,8 @@ static void print_json_result(uint64_t seed, uint64_t ops, uint64_t elapsed_ns, 
       "\"process_ns\":%llu,"
       "\"throughput_ops_per_sec\":%.2f,"
       "\"latency_ns\":{\"min\":%u,\"p50\":%u,\"p99\":%u,\"max\":%u,\"avg\":%.2f,\"samples\":%u},"
-      "\"live\":{\"count\":%u,\"peak_count\":%u,\"bytes\":%llu,\"peak_bytes\":%llu},"
+      "\"live\":{\"count\":%u,\"peak_count\":%u,\"bytes\":%llu,\"peak_bytes\":%llu,"
+      "\"usable_bytes\":%llu,\"peak_usable_bytes\":%llu},"
       "\"op_counts\":{\"malloc\":%llu,\"calloc\":%llu,\"aligned\":%llu,\"free\":%llu,"
       "\"realloc_grow\":%llu,\"realloc_shrink\":%llu},"
       /* os_regions: malloc.c's own heap_os_region_count -- the total
@@ -453,7 +482,8 @@ static void print_json_result(uint64_t seed, uint64_t ops, uint64_t elapsed_ns, 
        * the "live" object below reports the peak the workload actually
        * reached, not a snapshot at some arbitrary stopping point. */
       g_live_count, g_peak_live_count, (unsigned long long)g_live_bytes,
-      (unsigned long long)g_peak_live_bytes, (unsigned long long)g_malloc_count,
+      (unsigned long long)g_peak_live_bytes, (unsigned long long)g_usable_bytes,
+      (unsigned long long)g_peak_usable_bytes, (unsigned long long)g_malloc_count,
       (unsigned long long)g_calloc_count, (unsigned long long)g_aligned_count,
       (unsigned long long)g_free_count, (unsigned long long)g_realloc_grow_count,
       (unsigned long long)g_realloc_shrink_count, os_regions);

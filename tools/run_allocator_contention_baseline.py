@@ -11,12 +11,17 @@ different thread than allocated it) access patterns -- see that test's own
 top comment for why both patterns matter and what "shared" actually
 exercises given this allocator's single global heap_lock.
 
+This script also samples each case's own peak host-observed resident
+memory (tranche 4, "measure fragmentation and resident memory outside the
+CRT ABI") via tools/host_rss.py -- see that module's own top comment for
+why this lives here rather than in the Bionic-facing binary itself.
+
 Usage:
     python tools/run_allocator_contention_baseline.py --build-dir out/<preset>
 
 Each (threads, pattern) combination's result (the binary's own JSON line,
-plus this script's own wall_seconds field) is appended to a JSON-lines
-file under --out-dir. By default that is
+plus this script's own wall_seconds/host_peak_rss_bytes fields) is
+appended to a JSON-lines file under --out-dir. By default that is
 benchmark/allocator-contention/<os>/ at the repo root (windows/linux/
 macos), checked into git for the same reason
 tools/run_allocator_baseline.py's own matching default is -- see
@@ -26,11 +31,11 @@ benchmark/README.md.
 import argparse
 import json
 import platform
-import subprocess
 import sys
-import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+from host_rss import run_with_peak_rss
 
 DEFAULT_SEED = 42
 # Kept modest deliberately: at 32 threads this is already 160,000 total
@@ -70,30 +75,25 @@ def find_binary(build_dir: Path) -> Path:
 
 
 def run_case(binary: Path, threads: int, ops: int, seed: int, pattern: str) -> tuple[dict, float]:
-    start = time.monotonic()
-    result = subprocess.run(
-        [str(binary), "--threads", str(threads), "--ops", str(ops), "--seed", str(seed), "--pattern", pattern, "--json"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    wall_seconds = time.monotonic() - start
+    args = [str(binary), "--threads", str(threads), "--ops", str(ops), "--seed", str(seed), "--pattern", pattern, "--json"]
+    returncode, stdout, stderr, wall_seconds, peak_rss_bytes = run_with_peak_rss(args)
 
-    if result.returncode != 0:
+    if returncode != 0:
         raise RuntimeError(
             f"malloc_contention_baseline_test --threads {threads} --pattern {pattern} failed "
-            f"(exit {result.returncode}): {result.stderr.strip()}"
+            f"(exit {returncode}): {stderr.strip()}"
         )
 
-    line = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
+    line = stdout.strip().splitlines()[-1] if stdout.strip() else ""
     try:
         record = json.loads(line)
     except json.JSONDecodeError as exc:
         raise RuntimeError(
             f"malloc_contention_baseline_test --threads {threads} --pattern {pattern} did not print valid JSON: {exc}\n"
-            f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+            f"stdout: {stdout!r}\nstderr: {stderr!r}"
         ) from exc
 
+    record["host_peak_rss_bytes"] = peak_rss_bytes
     return record, wall_seconds
 
 
@@ -156,7 +156,9 @@ def main() -> int:
                     f"elapsed_ns={record['elapsed_ns']} wall_seconds={wall_seconds:.3f} "
                     f"throughput_ops_per_sec={record['throughput_ops_per_sec']:.1f} "
                     f"p50_ns={record['latency_ns']['p50']} p99_ns={record['latency_ns']['p99']} "
-                    f"peak_live_bytes={record['live']['peak_bytes']}"
+                    f"peak_live_bytes={record['live']['peak_bytes']} "
+                    f"peak_usable_bytes={record['live'].get('peak_usable_bytes')} "
+                    f"host_peak_rss_bytes={record.get('host_peak_rss_bytes')}"
                 )
 
     print(f"\nWrote {len(records)} case result(s) to {out_path}")

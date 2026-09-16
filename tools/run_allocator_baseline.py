@@ -13,10 +13,18 @@ measurement). Not wired into ctest: this is the long/opt-in half tranche 3
 calls for, kept separate from the bounded correctness variant CTest itself
 runs (malloc_baseline_test with no arguments).
 
-This script does not sample RSS or otherwise measure fragmentation/resident
-memory outside the CRT ABI -- that is tranche 4's own separate scope. It
-only drives the binary and records its own machine-readable JSON output
-plus the host-observed wall-clock time per tier.
+This script also samples each tier's own peak host-observed resident
+memory (tranche 4, "measure fragmentation and resident memory outside the
+CRT ABI") via tools/host_rss.py -- see that module's own top comment for
+why this lives here, on the host side, rather than in the Bionic-facing
+binary itself. The result's `live.bytes`/`live.usable_bytes` (both from
+the binary's own accounting) are the allocator's internal view of
+requested vs. allocator-visible-usable size; `host_peak_rss_bytes` is the
+OS's own outside view of the whole process, including but not limited to
+the heap -- comparing the two across tiers is what actually answers
+"retained arenas that get reused" vs. "continually growing resident
+memory" (this workload's `os_regions` field, from tranche 1, is the
+allocator-internal half of that same question).
 
 Usage:
     python tools/run_allocator_baseline.py --build-dir out/<preset>
@@ -35,11 +43,11 @@ runs never clobber each other.
 import argparse
 import json
 import platform
-import subprocess
 import sys
-import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+from host_rss import run_with_peak_rss
 
 DEFAULT_SEED = 42
 DEFAULT_TIME_BUDGET_SECONDS = 60.0
@@ -72,30 +80,22 @@ def find_binary(build_dir: Path) -> Path:
 
 
 def run_tier(binary: Path, ops: int, seed: int) -> tuple[dict, float]:
-    start = time.monotonic()
-    result = subprocess.run(
-        [str(binary), "--ops", str(ops), "--seed", str(seed), "--json"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    wall_seconds = time.monotonic() - start
+    args = [str(binary), "--ops", str(ops), "--seed", str(seed), "--json"]
+    returncode, stdout, stderr, wall_seconds, peak_rss_bytes = run_with_peak_rss(args)
 
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"malloc_baseline_test --ops {ops} --seed {seed} failed "
-            f"(exit {result.returncode}): {result.stderr.strip()}"
-        )
+    if returncode != 0:
+        raise RuntimeError(f"malloc_baseline_test --ops {ops} --seed {seed} failed (exit {returncode}): {stderr.strip()}")
 
-    line = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
+    line = stdout.strip().splitlines()[-1] if stdout.strip() else ""
     try:
         record = json.loads(line)
     except json.JSONDecodeError as exc:
         raise RuntimeError(
             f"malloc_baseline_test --ops {ops} --seed {seed} did not print valid JSON: {exc}\n"
-            f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+            f"stdout: {stdout!r}\nstderr: {stderr!r}"
         ) from exc
 
+    record["host_peak_rss_bytes"] = peak_rss_bytes
     return record, wall_seconds
 
 
@@ -157,7 +157,10 @@ def main() -> int:
                 f"wall_seconds={wall_seconds:.3f} "
                 f"throughput_ops_per_sec={record['throughput_ops_per_sec']:.1f} "
                 f"p50_ns={record['latency_ns']['p50']} p99_ns={record['latency_ns']['p99']} "
-                f"peak_live_bytes={record['live']['peak_bytes']} os_regions={record.get('os_regions')}"
+                f"peak_live_bytes={record['live']['peak_bytes']} "
+                f"peak_usable_bytes={record['live'].get('peak_usable_bytes')} "
+                f"os_regions={record.get('os_regions')} "
+                f"host_peak_rss_bytes={record.get('host_peak_rss_bytes')}"
             )
 
             if wall_seconds > args.time_budget_seconds:
