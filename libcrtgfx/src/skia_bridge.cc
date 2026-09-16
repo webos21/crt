@@ -317,6 +317,15 @@ sk_sp<SkSurface> crtgfx_skia_wrap_gpu_surface(GrDirectContext* context, crtgfx_g
   sk_sp<SkSurface> sk_surface = SkSurfaces::WrapBackendRenderTarget(
       context, backend_target, kTopLeft_GrSurfaceOrigin, kBGRA_8888_SkColorType, nullptr, nullptr);
   if (sk_surface != nullptr) {
+    // vkAcquireNextImageKHR signals this semaphore before the swapchain
+    // image may be used. The solid-clear path waits on it in vkQueueSubmit;
+    // Ganesh owns the submit in this path, so insert the same wait into its
+    // command stream before the caller records any drawing.
+    GrBackendSemaphore acquire_semaphore = GrBackendSemaphores::MakeVk(
+        reinterpret_cast<VkSemaphore>(surface->vk_image_available_semaphore));
+    if (!context->wait(1, &acquire_semaphore, false)) {
+      return nullptr;
+    }
     surface->ganesh_wrapped = 1;
   }
   return sk_surface;
