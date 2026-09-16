@@ -887,4 +887,70 @@ if(CRTMEDIA_ENABLE_FFMPEG)
     TIMEOUT 45
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_playback_pipeline_test_runs)
+
+  # crtmedia_player_demo: a real, on-screen playback demo -- proves
+  # crtmedia_extractor/crtmedia_codec/crtmedia_player/crtmedia_audio_sink
+  # actually compose with a real crtgfx window, the same real question
+  # crtmedia_playback_pipeline_test just above answers headlessly. Unlike
+  # that test, this target needs a real human/compositor to actually see
+  # anything, so -- exactly like crtgfx_window_demo/crtgfx_gpu_window_demo
+  # (libcrtgfx/CMakeLists.txt) -- it is deliberately NOT registered as a
+  # ctest, only built+installed. This is also, verbatim, the packaged
+  # examples/media-player example: an SDK consumer's own answer to "how do
+  # I build a video playback program" using nothing but the distributed
+  # public crtgfx/crtmedia headers, the same relationship crtgfx_window_
+  # demo has with examples/gfx-simple. Gated on CRTMEDIA_ENABLE_FFMPEG,
+  # like every other target in this file that actually calls crtmedia_
+  # extractor_create/crtmedia_codec_create_decoder -- those symbols are
+  # compiled out of libcrtmedia entirely when this option is OFF (confirmed
+  # via llvm-objdump -p on libcrtmedia.dll: 0 extractor/codec exports with
+  # it OFF), not just runtime-stubbed.
+  add_executable(crtmedia_player_demo
+    ${CRT_STARTUP_OBJECTS}
+    tools/media_player_demo.c
+  )
+  target_link_libraries(crtmedia_player_demo PRIVATE crt_build_flags crtmedia crtgfx_window)
+  target_include_directories(crtmedia_player_demo PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include"
+  )
+  target_compile_definitions(crtmedia_player_demo PRIVATE
+    CRT_MEDIA_PLAYER_DEMO_DEFAULT_PATH="${CMAKE_SOURCE_DIR}/libcrtmedia/assets/test_video.mp4"
+  )
+  target_link_libraries(crtmedia_player_demo PRIVATE crt_compiler_rt_builtins)
+  target_link_options(crtmedia_player_demo PRIVATE
+    -nostdlib
+    -nostartfiles
+    -nodefaultlibs
+  )
+  if(CRT_TARGET_OS STREQUAL "macos")
+    target_link_options(crtmedia_player_demo PRIVATE
+      -Wl,-e,_start
+      -Wl,-dead_strip
+    )
+    # See crtmedia_demux_test's own matching block above for the full
+    # pthread_once/-lSystem-ordering reasoning this mirrors.
+    target_link_libraries(crtmedia_player_demo PRIVATE c m dl cxx)
+    target_link_libraries(crtmedia_player_demo PRIVATE System)
+  elseif(CRT_TARGET_OS STREQUAL "linux")
+    target_link_options(crtmedia_player_demo PRIVATE
+      -Wl,-e,_start
+      -Wl,--gc-sections
+    )
+  elseif(CRT_TARGET_OS STREQUAL "windows")
+    target_link_options(crtmedia_player_demo PRIVATE
+      -Wl,/entry:mainCRTStartup
+      -Wl,/subsystem:console
+      -Wl,/OPT:REF
+    )
+    target_link_libraries(crtmedia_player_demo PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  endif()
+  crt_link_startup_end_objects(crtmedia_player_demo)
+  add_dependencies(crtmedia_player_demo c crt1 crtmedia crtgfx_window)
+
+  install(TARGETS crtmedia_player_demo RUNTIME DESTINATION examples/bin COMPONENT crt-media)
+  install(FILES tools/media_player_demo.c DESTINATION examples/media-player RENAME main.c COMPONENT crt-media)
+  install(FILES "${CMAKE_SOURCE_DIR}/examples/media-player/CMakeLists.txt"
+    DESTINATION examples/media-player COMPONENT crt-media)
+  install(FILES "${CMAKE_SOURCE_DIR}/libcrtmedia/assets/test_video.mp4"
+    DESTINATION examples/media-player COMPONENT crt-media)
 endif()

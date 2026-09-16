@@ -10,6 +10,51 @@ substantive update.
 
 ## 2026-09-16
 
+- **Packaged a real, working video/audio playback demo as `examples/media-player`,
+  the `crtmedia` distribution's first end-user example, built and verified
+  entirely from the public `crtgfx`/`crtmedia` SDK headers.** Prototyped first
+  as a fully standalone external-consumer project against a real packaged
+  `04-gfx-media` dist (demux+decode+A/V-sync+present+audio confirmed working
+  over a real running Win32 process), then generalized in-tree as
+  `libcrtmedia/tools/media_player_demo.c` + `examples/media-player/
+  CMakeLists.txt`, following the exact structural precedent `crtgfx_window_
+  demo`/`crtgfx_gpu_window_demo` already established for `gfx-simple`/
+  `gfx-gpu`: a real freestanding executable (`crt_link_startup_end_objects`,
+  per-OS link options, `add_dependencies` on `c`/`crt1`), installed to
+  `examples/bin/` plus its own rebuildable `examples/media-player/{main.c,
+  CMakeLists.txt}` source, deliberately NOT registered as a ctest (needs a
+  real human/compositor to watch it, same rationale as those two demos).
+
+  Gated behind `CRTMEDIA_ENABLE_FFMPEG` (default `OFF`) inside the same
+  `if()` block as the library's other FFmpeg-only targets (`crtmedia_demux_
+  test`, `crtmedia_playback_pipeline_test`, ...) -- `crtmedia_extractor_
+  create`/`crtmedia_codec_create_decoder` are compiled out of `libcrtmedia`
+  entirely when the flag is off, not just runtime-stubbed, so this example
+  could not exist there either. Also links `crtgfx_window` directly (a new
+  combination for this file: no prior `libcrtmedia/CMakeLists.txt` target
+  needed a real on-screen window), relying on CMake's own PRIVATE-link-
+  library propagation from that STATIC target to reach the redistributed
+  `libxkbcommon.a` dependency on Linux without needing to relist it by hand.
+  Bundles the library's own real `test_video.mp4` fixture (64x64 H.264 +
+  AAC, `libcrtmedia/assets/`) right next to the installed `main.c`, and the
+  demo falls back to that exact path (`CRT_MEDIA_PLAYER_DEMO_DEFAULT_PATH`,
+  overridden by the in-tree build to an absolute source path) when run with
+  no argument, so it is runnable immediately after either build with zero
+  setup.
+
+  Verified for real, not just "it configured": rebuilt `crt-gfx-media-dist`
+  on Windows with `CRTMEDIA_ENABLE_FFMPEG=ON` and confirmed `verify_dist.py`
+  still passes and the new files land under `dist/04-gfx-media/examples/
+  media-player/` and `examples/bin/crtmedia_player_demo.exe`; ran the
+  in-tree demo directly (both with an explicit path and via the default-
+  path fallback) and confirmed real playback; then rebuilt `examples/
+  media-player` a second time, completely standalone, using only the
+  packaged dist's own `crt-toolchain.cmake` (no in-tree source, no build
+  tree) -- link succeeded and the resulting binary played the same real
+  fixture too, proving the packaged example is genuinely consumer-buildable
+  from the SDK alone. Full in-tree `ctest` stayed green at 140/140
+  afterward, confirming no new test was accidentally registered.
+
 - **Found and fixed three real, previously-undiscovered absolute-macOS-RPATH
   leaks, exposed only by a genuine `rm -rf out/` clean build.** TODO.md's own
   Notice ("do not trust a long-lived `out/` directory") called this class of

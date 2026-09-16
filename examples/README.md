@@ -32,3 +32,15 @@ cmake --build <work>/gfx-simple-build
 Skia enabled. The finite frame-count argument is intended for bounded smoke
 runs; omit it (or pass zero) to keep a demo open until its window is closed.
 
+`media-player` also first appears in `04-gfx-media`, and is present only when
+that stage was configured with `CRTMEDIA_ENABLE_FFMPEG` enabled -- like
+`gfx-skia`, `crtmedia_extractor`/`crtmedia_codec` are compiled out of
+`libcrtmedia` entirely otherwise. It takes an optional path to a media file
+to play (video + audio, looping until the window is closed); with no
+argument it plays the bundled `test_video.mp4` fixture installed alongside
+`main.c`:
+
+```sh
+./examples/bin/crtmedia_player_demo examples/media-player/test_video.mp4
+```
+
