@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 
 from crt_dist_prerequisites import external_prerequisites_for
-from crt_elf import needed_libraries
+from crt_elf import needed_libraries, remove_absolute_runtime_paths
 
 
 DEFAULT_DEPENDENCY_JOBS = max(1, min(os.cpu_count() or 2, 4))
@@ -187,6 +187,14 @@ def rewrite_stale_macho_rpaths(root: Path, old_root: Path, new_root: Path) -> No
                     ["install_name_tool", "-rpath", value, new_value, str(path)],
                     check=True)
                 existing_rpaths.add(new_value)
+
+
+def remove_staged_absolute_elf_rpaths(root: Path) -> None:
+    """Keep packaged ELF runtime paths relocatable."""
+    for path in root.rglob("*"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        remove_absolute_runtime_paths(path, require_origin=True)
 
 
 def publish_tree(staged: Path, output: Path) -> None:
@@ -954,6 +962,13 @@ def main() -> None:
             # specific build, already correct.
             with timings.measure("portable-ize self-referential macOS rpaths"):
                 rewrite_stale_macho_rpaths(staged, staged, staged)
+        elif target_os == "linux":
+            # crt-cc keeps an absolute sysroot fallback for configure-time
+            # probes. In this installed tree every runtime dependency sits
+            # at a fixed $ORIGIN-relative location, so retain only that
+            # portable entry before the distribution acceptance gate runs.
+            with timings.measure("remove absolute Linux rpath fallbacks"):
+                remove_staged_absolute_elf_rpaths(staged)
 
         with timings.measure("write dependency provenance and manifest"):
             manifest["stage"] = "04-gfx-media"

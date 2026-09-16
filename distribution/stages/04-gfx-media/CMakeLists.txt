@@ -646,6 +646,11 @@ if(CRT_TARGET_OS STREQUAL "macos")
     BUILD_RPATH "@loader_path/../../lib;${CMAKE_BUILD_RPATH}"
     INSTALL_RPATH "@loader_path/../../lib"
   )
+elseif(CRT_TARGET_OS STREQUAL "linux")
+  set_target_properties(crtgfx_gpu_window_demo crtgfx_skia_gpu_window_demo PROPERTIES
+    BUILD_RPATH "$ORIGIN/../../lib;${CMAKE_BUILD_RPATH}"
+    INSTALL_RPATH "$ORIGIN/../../lib"
+  )
 endif()
 
 if(CRT_TARGET_OS STREQUAL "windows")
