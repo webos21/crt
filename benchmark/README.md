@@ -57,11 +57,15 @@ from `elapsed_ns`/`process_ns` at those tiers (10-100x larger, growing
 with op count) for reasons not yet root-caused -- confirmed real (not an
 artifact of the shell, the fork-capable-relaunch startup mechanism, or
 OS-level address-space teardown at exit) but not yet localized to before
-`main()` or during process exit. See `HISTORY.md`'s 2026-09-16 entry for
-the full investigation and the ruled-out-causes list. Until root-caused,
-treat `elapsed_ns`/`process_ns` as the trustworthy per-run timing signal;
-treat a large `wall_seconds`/`elapsed_ns` gap on any host as this same open
-issue, not a new one, unless the evidence actually points elsewhere.
+`main()` or during process exit. **Confirmed cross-platform**, not
+Windows-specific: the macOS/arm64 run in `allocator-baseline/macos/`
+reproduces the same shape and a *larger* gap (~125x at the 1M-op tier vs.
+Windows' ~98x). See `HISTORY.md`'s 2026-09-16 entries (both the original
+Windows investigation and the macOS confirmation) for the full detail and
+ruled-out-causes list. Until root-caused, treat `elapsed_ns`/`process_ns`
+as the trustworthy per-run timing signal; treat a large `wall_seconds`/
+`elapsed_ns` gap on any host as this same open issue, not a new one,
+unless the evidence actually points elsewhere.
 
 `windows/malloc_baseline-amd64-seed42-20260916T064313Z.jsonl` is the
 original run that surfaced the issue above; it predates the `process_ns`/
@@ -81,6 +85,12 @@ peak RSS stayed flat (~4.04MB) across all three tiers despite
 `HISTORY.md`'s matching 2026-09-16 tranche 4 entry for the full
 investigation, including the known-good control that ruled out a bug in
 the sampling method itself.
+`macos/malloc_baseline-arm64-seed42-20260916T080822Z.jsonl` was captured
+between the original Windows timing investigation and the tranche-4 schema
+extension, so it intentionally lacks `usable_bytes`,
+`peak_usable_bytes`, and `host_peak_rss_bytes`. Treat it as the macOS
+correctness/timing record; regenerate a fresh macOS run before using it
+for RSS or fragmentation-envelope decisions.
 
 ## `allocator-contention/<os>/`
 
@@ -112,6 +122,13 @@ shape `allocator-baseline/` uses, plus `threads`, `ops_per_thread`, and
 The same open wall-clock-vs-`elapsed_ns` issue documented above reproduces
 here too, and now also correlates with thread count, not just total op
 count -- e.g. `threads=32`/private measured 516ms internally against 78.2s
-of external wall time on this host. Treat this as the same open issue
-tranche 1 found, not a second one; see `HISTORY.md`'s 2026-09-16 tranche 3
-entry.
+of external wall time on this host (Windows). The macOS/arm64 run in
+`allocator-contention/macos/` shows the same shape: `threads=32`/private
+measured 518ms internally against 59.8s wall (~115x); `threads=32`/shared
+measured 1.75s internally against 58.8s wall (~34x). Treat this as the
+same open issue tranche 1 found, not a second one; see `HISTORY.md`'s
+2026-09-16 tranche 3 entry and its matching macOS confirmation entry.
+The current macOS contention file was also captured before the tranche-4
+schema extension, so it does not include `peak_usable_bytes` or
+`host_peak_rss_bytes`; rerun it for cross-host RSS/fragmentation
+comparison.

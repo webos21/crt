@@ -10,6 +10,43 @@ substantive update.
 
 ## 2026-09-16
 
+- **Ran the allocator baseline (tranche 1) and contention baseline (tranche
+  3) benchmarks on macOS/arm64 for the first time, per TODO.md's tranche 8
+  cross-host record -- zero correctness failures, and the open wall-clock-
+  vs-`elapsed_ns` anomaly reproduces here too, worse than on Windows.**
+  Built `malloc_baseline_test`/`malloc_contention_baseline_test` in
+  `out/macos-host-ninja-debug` and ran both existing runners unmodified
+  (`tools/run_allocator_baseline.py`, `tools/run_allocator_contention_
+  baseline.py`, both default seed 42, matching the existing Windows runs
+  for direct comparison). Results checked in at `benchmark/allocator-
+  baseline/macos/malloc_baseline-arm64-seed42-20260916T080822Z.jsonl` and
+  `benchmark/allocator-contention/macos/malloc_contention_baseline-arm64-
+  seed42-20260916T084529Z.jsonl`.
+
+  Correctness: all four baseline tiers (1K/10K/100K/1M ops) and all eight
+  contention cases (1/8/16/32 threads x private/shared, 5000 ops/thread)
+  passed with zero content, alignment, or allocation failures.
+
+  Timing: the same open anomaly this project's Windows runs already
+  documented (`elapsed_ns` internal timing staying roughly proportionate to
+  work done, while externally observed wall time diverges sharply and
+  grows with both op count and thread count) reproduces on macOS/arm64 too
+  -- and by a larger margin than Windows saw. Baseline 1M-op tier:
+  17.3s internal (`elapsed_ns`) vs. 2165s (~36 minutes) external wall time,
+  a ~125x gap (Windows: ~98x at the same tier). Contention, private
+  pattern: `threads=32` measured 518ms internally against 59.8s wall
+  (~115x); `threads=16` measured 228ms internally against 14.9s wall
+  (~65x). The shared pattern shows the same shape (`threads=32`: 1.75s
+  internal vs. 58.8s wall, ~34x). This is real, cross-platform evidence for
+  the still-open root-cause investigation the Windows tranche 1/3 entries
+  below describe, not a new, separate anomaly -- it rules out anything
+  specific to Windows' own process-startup/teardown path as the sole
+  cause, since the same growth-with-op-count and growth-with-thread-count
+  shape now shows up on a completely different OS/PAL/architecture. Not
+  root-caused here either; treat `elapsed_ns`/`process_ns` as the
+  trustworthy per-run timing signal on this host too, per `benchmark/
+  README.md`'s existing guidance.
+
 - **Made `CRT_ENABLE_DEBUG_MALLOC` a permanent, supported diagnostic mode
   with real expected-fault regression coverage (TODO.md's tranche 6,
   "make diagnostics permanent and testable"), and recorded a no-go
@@ -196,7 +233,6 @@ substantive update.
   10^6-tier verification file from earlier the same day was left
   untouched rather than re-run again (unaffected by this change, and
   re-running it costs ~40 minutes for no new information).
-
 - **Extended the allocator baseline to contention scaling (TODO.md's
   tranche 3), confirmed tranche 2 was already satisfied by tranche 1's own
   design, moved both benchmark tools' raw results into a new tracked

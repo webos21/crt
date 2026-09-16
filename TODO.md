@@ -295,6 +295,15 @@ Execution plan:
    runner first and the project owner asked for results to accumulate
    per-host in the repo itself, where they can be compared and reproduced
    directly, rather than staying only in one contributor's local build tree).
+   Progress: raw results now checked in for Windows/x86_64 and macOS/arm64
+   (`benchmark/allocator-baseline/`, `benchmark/allocator-contention/`; see
+   `HISTORY.md`'s 2026-09-16 entries). The Windows follow-up results carry
+   the current tranche-4 schema (`usable_bytes` and `host_peak_rss_bytes`);
+   the macOS results were captured just before that runner/schema extension
+   and are still useful for correctness/timing, but need a refreshed macOS
+   run for RSS/usable-byte comparison. Linux, refreshed macOS current-schema
+   data, and `docs/allocator_baseline.md` itself (the actual decision
+   record and envelope) remain before this tranche closes.
 
 Decision gate:
 
