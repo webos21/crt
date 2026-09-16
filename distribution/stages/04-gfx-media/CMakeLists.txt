@@ -468,6 +468,15 @@ if(CRT_TARGET_OS STREQUAL "macos")
     BUILD_WITH_INSTALL_RPATH TRUE
     INSTALL_RPATH ""
   )
+elseif(CRT_TARGET_OS STREQUAL "linux")
+  # The standalone stage does not define the top-level
+  # crt_configure_shared_runtime() helper, so mirror its Linux RPATH
+  # policy here as well. Otherwise these targets inherit the generated
+  # toolchain's absolute SDK path and fail the relocatable-dist gate.
+  set_target_properties(crtgfx_gpu_shared crtgfx_skia_shared crtmedia_shared PROPERTIES
+    BUILD_RPATH "$ORIGIN"
+    INSTALL_RPATH "$ORIGIN"
+  )
 endif()
 
 enable_testing()
