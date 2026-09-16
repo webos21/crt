@@ -161,11 +161,10 @@ target.
   space-containing paths are covered. The former Linux/aarch64 Skia blocker is
   resolved without an exception to those gates.
 - Allocator baseline validation and a documented Host ABI firewall are the
-  foundation gate before FFmpeg hardware decode. Linux/aarch64 current-schema
-  validation passed, so the decision record keeps the current allocator for
-  the next Upper Runtime tranche. The first real upper-runtime stress workload
-  remains a regression comparison; Scudo remains conditional on a preserved,
-  repeatable blocker.
+  accepted foundation for FFmpeg hardware decode. The validation tranche is
+  closed with the current allocator retained. Real upper-runtime workloads
+  continue to compare against that baseline; Scudo remains conditional on a
+  preserved, repeatable blocker.
 - FFmpeg hardware decode/zero-copy and the QuickJS core then proceed on top of
   the completed GPU rendering/presentation contract.
 - JavaScript media/gfx binding follows the stable native contracts, using a
@@ -293,25 +292,23 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-1. Compare the first real upper-runtime stress workload against
-   `docs/allocator_baseline.md` and run focused Windows/aarch64 allocator
-   validation when that host is available. Keep Scudo conditional on measured
-   failure of the current allocator.
-2. Finish the remaining live GPU evidence: macOS/x86_64 execution,
+1. Finish the remaining live GPU evidence: macOS/x86_64 execution,
    pixel-exact macOS checks, resize-plus-Ganesh on macOS, and pixel-exact
    resize on Windows.
-3. Enable and verify real FFmpeg hardware decode per host while retaining the
+2. Enable and verify real FFmpeg hardware decode per host while retaining the
    software/CPU fallback as the correctness baseline.
-4. Connect hardware decoder textures to Skia without CPU copies, including
+3. Connect hardware decoder textures to Skia without CPU copies, including
    device/fence ownership and CPU-download recovery.
-5. Add capture/encode, then transport, buffering, reconnect, and streaming
+4. Add capture/encode, then transport, buffering, reconnect, and streaming
    services after the native playback and zero-copy contracts are stable.
-6. Use WebRTC as a consumer milestone, then bring up QuickJS core/event-loop/
+5. Use WebRTC as a consumer milestone, then bring up QuickJS core/event-loop/
    timers/modules and expose stable media/gfx services with WebCodecs-like
    queue semantics.
-7. Continue closing the focused CRT/PAL limitations above when an upstream
+6. Continue closing the focused CRT/PAL limitations above when an upstream
    consumer exposes a concrete requirement, following the Bionic-first
-   porting discipline in `AGENTS.md`.
+   porting discipline in `AGENTS.md`. This includes non-blocking
+   Windows/aarch64 allocator validation and comparison of real upper-runtime
+   workloads against `docs/allocator_baseline.md`.
 
 Detailed actionable work belongs in [`TODO.md`](TODO.md); completed changes
 belong in [`HISTORY.md`](HISTORY.md).

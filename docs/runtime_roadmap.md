@@ -60,9 +60,10 @@ is not complete merely because an in-tree target links.
 - The bootstrap/reference allocator has API, debug-mode, contention,
   fragmented-fork, and expected-fault coverage. Windows/x86_64, macOS/arm64,
   and Linux/aarch64 have current-schema baseline data; Linux did not exceed
-  the replacement envelope. The first real upper-runtime stress workload
-  remains a regression comparison. Scudo stays conditional and is not a
-  prerequisite unless measurements demonstrate a blocker.
+  the replacement envelope. The validation tranche is accepted and closed.
+  Real upper-runtime workloads remain regression comparisons; Scudo stays
+  conditional and is not a prerequisite unless measurements demonstrate a
+  blocker.
 
 Exact test counts, host evidence, and current limitations belong in
 [`../STATUS.md`](../STATUS.md) and [`../HISTORY.md`](../HISTORY.md). Open work
@@ -71,23 +72,22 @@ and completion boundaries rather than duplicating those ledgers.
 
 ## Execution Order
 
-1. Preserve `allocator_baseline.md`'s accepted baseline and Host ABI firewall
-   ownership rules for Wayland/Vulkan and upcoming FFmpeg hardware, VA-API,
-   PipeWire, and EGL boundaries. Compare the first real upper-runtime stress
-   workload with the baseline; promote Scudo evaluation only if repeatable
-   evidence exceeds it.
-2. Finish the remaining live GPU presentation evidence for the existing
+Preserve `allocator_baseline.md`'s accepted baseline and Host ABI firewall
+ownership rules throughout the sequence below. Real workloads are regression
+comparisons; promote Scudo only if repeatable evidence exceeds the baseline.
+
+1. Finish the remaining live GPU presentation evidence for the existing
    Ganesh backends. Graphite is not part of this acceptance gate.
-3. Enable hardware video decode per host while retaining software decode as
+2. Enable hardware video decode per host while retaining software decode as
    the correctness fallback and reporting actual hardware use separately.
-4. Define and verify zero-copy decoded-texture ownership, device affinity, and
+3. Define and verify zero-copy decoded-texture ownership, device affinity, and
    synchronization. Keep a measured CPU-download fallback where direct interop
    is unavailable.
-5. Add capture, conversion, hardware/software encode, timestamp, and muxing on
+4. Add capture, conversion, hardware/software encode, timestamp, and muxing on
    top of the accepted frame and playback contracts.
-6. Add transport, buffering, back-pressure, reconnect, and streaming protocol
+5. Add transport, buffering, back-pressure, reconnect, and streaming protocol
    integration only after local media timing is stable.
-7. Use WebRTC as a consumer-driven integration milestone, then add the real
+6. Use WebRTC as a consumer-driven integration milestone, then add the real
    QuickJS core, event loop, modules, native bindings, and JavaScript-visible
    graphics/media services. Only then extend isolated-stage acceptance from
    `04-gfx-media` to `05-js`.

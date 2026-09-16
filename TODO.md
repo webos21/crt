@@ -57,245 +57,45 @@ newest entry first) rather than leaving it here.
 
 ## In Progress
 
-### Allocator baseline validation before Upper Runtime
+### Harden `libcrtgfx` backend object boundaries before Upper Runtime
 
-The Linux/aarch64 `03-gfx-simple -> 04-gfx-media` release sign-off and the
-separate packaged Vulkan/Skia demo fix are complete. Before adding hardware
-decode, zero-copy surfaces, WebRTC, or QuickJS allocation pressure, validate
-the current allocator as a short foundation tranche. This is a measurement
-and hardening pass, not an allocator replacement: the current allocator stays
-in place unless the evidence below demonstrates a blocker. Extend, rather than
-replace, the existing API/alignment/reuse coverage in `malloc_test`, the
-direct-linked `malloc_debug_test`, and the 4-thread/200-iteration
-`malloc_contention_test`.
+Do this before hardware decode and zero-copy interop add more backend-owned
+state. `struct crtgfx_gpu_device` and `struct crtgfx_gpu_surface` currently
+change layout under `CRTGFX_HAVE_VULKAN`/`CRTGFX_HAVE_D3D12`/
+`CRTGFX_HAVE_METAL`; the directory-wide definitions keep today's translation
+units consistent, but a target-wiring mistake can still turn into cross-TU
+memory corruption. Remove that failure class rather than carrying the build
+invariant into the next runtime stages.
 
-Execution plan:
+1. **Inventory ownership and freeze the common contract.** Identify every
+   direct access to device/surface fields, including the Skia bridges and
+   resize/presentation paths. Define a fixed common representation containing
+   only a backend tag, an operations table, and opaque backend-owned state;
+   preserve current public handles, return values, and lifetime semantics.
+2. **Move concrete state behind each backend.** Give Vulkan, D3D12, and Metal
+   private device/surface structures in their own implementation units. Make
+   create/destroy/acquire/clear/present/resize and native-handle interop go
+   through the fixed dispatcher contract, with partially-created objects
+   remaining safely destructible.
+3. **Make feature macros select code, never object layout.** Remove
+   backend-specific fields from the shared header and narrow
+   `CRTGFX_HAVE_*` use to declarations and source inclusion. Add compile-time
+   layout assertions or focused tests where they can prevent a recurrence.
+4. **Verify the boundary before advancing the roadmap.** Build and run the
+   existing GPU, window, resize, and Skia smoke coverage on Linux/aarch64 and
+   the supported Windows/macOS configurations, including a backend-disabled
+   configuration. Recheck static/shared CRT ownership and distribution import
+   audits so the opaque-state allocation/free domain remains explicit.
+5. **Make the accepted boundary routine CI evidence.** Add a per-PR `02-cxx`
+   smoke plus a bounded headless `libcrtgfx` smoke from a fresh build tree.
+   Keep full Skia/FFmpeg, predecessor-only distribution, and binary-import
+   audits in a scheduled job if their runtime is too high for every PR.
 
-1. **Completed 2026-09-16: build a deterministic workload and result
-   format.** `libc/tests/malloc_baseline_test.c` (ctest: `malloc_baseline_
-   test_runs`, a small bounded correctness variant) + `tools/run_allocator_
-   baseline.py` (opt-in, tiered 10^3/10^4/10^5/10^6 runner with a wall-time
-   budget gate). Zero correctness failures across all four tiers on a real
-   run. The initially unexplained 10-100x external-wall versus in-process
-   timing gap is resolved: percentile reporting called CRT's insertion-sort
-   `qsort()` after `process_ns` was captured, adding `O(N^2)` work unrelated
-   to the allocator. Linux/aarch64 validation replaced it with allocation-
-   free heapsort and added a 4096-element stress regression. The refreshed
-   Linux run completed all four tiers; 100K measured 2.348s internally /
-   2.379s wall and 1M measured 21.081s / 21.441s.
-2. **Completed 2026-09-16: cover realistic allocation shapes.** Already
-   satisfied by tranche 1's own `malloc_baseline_test.c`, built with this
-   tranche's requirements in mind from the start (see that file's own top
-   comment): `do_allocate()` mixes `malloc`(80%)/`calloc`(10%, its own
-   zero-fill contract verified before reuse)/`posix_memalign`(10%,
-   alignment verified) across `pick_size()`'s weighted small(16-128B,60%)/
-   medium(129B-4KiB,30%)/large(4KiB-64KiB,9.8%)/mapping-sized(1-4MiB,0.2%,
-   "occasional"+"repeated large allocate/touch/free" both satisfied by this
-   one rare-but-recurring tier) classes; `do_realloc()` covers grow/shrink;
-   the bounded 4096-entry live set forces random churn once full (confirmed
-   for real: only 10 distinct `mmap()`/`VirtualAlloc()` regions after
-   100,000 operations -- heavy reuse/fragmentation is genuinely happening,
-   not merely nominally exercised); every entry's content (and, for
-   `posix_memalign`'d entries, alignment) is reverified before any
-   operation that reads, moves, or releases it. No new code needed; this
-   entry exists so the execution plan reflects that tranche 2 is not a
-   separate future task.
-3. **Completed 2026-09-16: scale contention deliberately.**
-   `libc/tests/malloc_contention_baseline_test.c` (ctest: `malloc_
-   contention_baseline_test_runs`, a small fixed-4-thread correctness pass
-   through both patterns) + `tools/run_allocator_contention_baseline.py`
-   (opt-in 1/8/16/32-thread x private/shared sweep). "private": each
-   thread only ever allocates/reallocs/frees its own pointers (malloc_
-   contention_test.c's own existing shape, generalized to tranche 1's
-   fuller size-class mix). "shared": all threads draw from and return to
-   one shared, mutex-guarded live-set table, so a pointer routinely gets
-   freed or reallocated by a *different* thread than allocated it -- a
-   real remote-free/remote-realloc workload this project had never
-   actually exercised before, chosen (project owner's own call, 2026-09-16)
-   as the concrete meaning of "shared pool" given `malloc.c` has no
-   per-thread arena of its own to make a literal separate pool out of;
-   both patterns still fully serialize on the allocator's own single
-   `heap_lock` regardless. Zero correctness failures across all 8
-   (threads x pattern) combinations on Windows/x86_64.
-
-   A real design bug was caught and fixed before this could be trusted:
-   an early draft gave each thread its own `live_count` field even under
-   the shared pattern, which is not just an inaccurate stat but a genuine
-   corruption risk -- two threads could independently compute the same
-   "next free slot" index into the one shared array and each write a live
-   pointer into it, silently clobbering the other's entry, despite every
-   individual step already being mutex-protected (the mutex serializes
-   *execution* of a step; it does nothing to make an ordinary per-thread
-   struct field into shared state). Fixed by routing all live-set/byte/
-   count bookkeeping through a `pool_ref` of pointers, bound once per run
-   to either private per-thread storage or the one real set of shared
-   globals -- see the test file's own top comment.
-
-   Linux/aarch64 passed all eight combinations after the qsort reporting fix.
-   Private throughput rose from about 93K ops/s at one thread to about 249K
-   ops/s at 32 threads. Shared throughput settled around 63K ops/s at 8-32
-   threads, exposing the expected single-lock ceiling without deadlock,
-   corruption, or throughput collapse; internal and external times now agree.
-4. **Completed 2026-09-16: measure fragmentation and resident memory
-   outside the CRT ABI.** Both baseline binaries now track and report
-   `live.usable_bytes`/`live.peak_usable_bytes` (`malloc_usable_size(ptr)`
-   summed across the live set, alongside the existing requested-byte
-   counters -- the gap between the two is this allocator's own internal
-   fragmentation from `align_size()` rounding). `tools/host_rss.py` (new)
-   samples each child's own peak host-observed resident memory --
-   `PeakWorkingSetSize` via `GetProcessMemoryInfo()` on Windows,
-   `resource.getrusage(RUSAGE_CHILDREN).ru_maxrss` deltas on POSIX -- kept
-   entirely on the host-side runner as the TODO wording requires, not
-   added to the Bionic-facing binaries. Both `tools/run_allocator_
-   baseline.py`/`_contention_baseline.py` now report `host_peak_rss_bytes`
-   per run.
-
-   "Post-free reuse" vs. "continually growing resident memory" is already
-   answered by tranche 1's own `os_regions` field across the tier sweep:
-   6 regions at both the 1K and 10K tiers (zero new OS mappings for 10x
-   more operations), only 10 at 100K (10x more ops again, far short of
-   10x more regions) -- clear evidence freed blocks are actually being
-   reused by later allocations, not forcing new mappings each time.
-
-   A separate Windows host-memory anomaly remains unexplained:
-   host-observed peak RSS stayed flat (~4.04MB) across
-   the 1K/10K/100K tiers despite `live.peak_bytes` growing 3x (3.5MB to
-   10.9MB) between the 10K and 100K tiers, and `PeakPagefileUsage`
-   (committed/pagefile-backed memory, which should track `VirtualAlloc(...,
-   MEM_RESERVE | MEM_COMMIT, ...)` directly -- confirmed that is genuinely
-   what `__crt_sys_mmap()` calls on Windows) barely moved either
-   (6.18MB to 6.19MB). The RSS-sampling method itself was validated
-   against a known-good control first (a plain Python subprocess
-   allocating and touching 50MB correctly reported ~60MB peak working
-   set), ruling out a bug in `tools/host_rss.py` or a broken/sandboxed
-   `GetProcessMemoryInfo()` in this environment -- the flat reading is
-   specific to this allocator's own executable. Linux/aarch64 reports a
-   plausible increase to about 135MB at the 1M tier, so the Windows reading
-   remains a host-specific measurement follow-up rather than evidence of
-   allocator RSS growth; see `HISTORY.md`'s 2026-09-16 entry.
-5. **Completed 2026-09-16: exercise fork interaction and allocator
-   regions.** `libc/tests/malloc_fork_regions_test.c` (ctest:
-   `malloc_fork_regions_test_runs`) -- the first fork test in this project
-   that touches the allocator's own heap state at all (`fork_test.c`/
-   `fork_runtime_reset_test.c`/`fork_signal_test.c` all fork with a
-   trivial, single-region heap). Allocates 12 blocks each sized well past
-   a single heap chunk (forcing each into its own fresh OS region --
-   confirmed, not assumed, via `__crt_malloc_os_region_count()` before
-   forking), frees every third one to leave real holes in the free list,
-   then forks: the child verifies every surviving block's inherited
-   content, mutates all of them with a different pattern, and allocates a
-   new block of its own (proving the post-fork heap is independently
-   writable and functional, not just readable); the parent, after the
-   child reports success and exits cleanly, re-verifies its OWN blocks
-   still show the ORIGINAL pattern -- catching either a missed/corrupted
-   region (child verification fails) or a parent/child aliasing bug
-   (parent verification fails after the child's mutation). Passed cleanly
-   and repeatably (5/5 manual runs, plus the routine ctest pass) on
-   Windows/x86_64, the host whose from-scratch memory-copy fork
-   implementation (`libc/src/arch/windows/{x86_64,aarch64}/fork_memcopy.c`,
-   which this test's many-region scenario exercises directly via those
-   same `__crt_malloc_os_region_*` accessors) this tranche most wanted
-   real coverage for. Native Linux/macOS `fork()` needs no such
-   per-region copying (real OS copy-on-write), but the identical test
-   there still confirms `__crt_malloc_after_fork_child()`'s heap_lock
-   reset (`libc/src/process.c`) is correct under a genuinely fragmented,
-   multi-region heap. macOS/arm64 and Linux/aarch64 passed the focused
-   allocator CTest selection on 2026-09-16. Windows/aarch64 still needs the
-   same focused run before treating this tranche as fully architecture-
-   complete, not just implemented.
-6. **Completed 2026-09-16: make diagnostics permanent and testable.**
-   `CRT_ENABLE_DEBUG_MALLOC` (`CMakeLists.txt`) is now documented as a
-   permanent, supported diagnostic mode, not temporary investigation
-   scaffolding -- its own comment updated to match. Its existing normal
-   (`malloc_test`) and direct-linked (`malloc_debug_test`) CTest coverage
-   was already in place and needed no change.
-
-   Added real expected-fault coverage for all three checks: `libc/tests/
-   malloc_fault_victim.c` (a deliberately-crashing helper, NOT its own
-   ctest -- it is meant to crash) triggers double free, canary damage
-   (a genuine 1-byte heap-buffer-overflow into `align_size()`'s own
-   rounding slack), and cross-instance owner mismatch on request via
-   argv; `libc/tests/malloc_fault_test.c` (ctest: `malloc_fault_test_runs`)
-   spawns it once per fault kind and confirms `CRT_DEBUG_MALLOC` actually
-   trapped it. Owner mismatch needed a genuine second, independent
-   allocator instance in the same process -- solved without needing an
-   actual second shared library or `dlopen()`: `libc/tests/malloc_fault_
-   instance_b.c` `#include`s the real `libc/src/malloc.c` after
-   preprocessor-renaming its small public symbol surface, safe because
-   every one of that file's own internal helpers and file-scope state is
-   already `static` (no cross-TU collision risk at all) -- reproducing the
-   exact real-world scenario CRT_DEBUG_MALLOC's own owner check exists for
-   (a statically-linked copy plus a separately-instanced one) without new
-   shared-library build machinery. Confirmed empirically while building
-   this (not assumed): on Windows, `__builtin_trap()` firing inside this
-   DWARF-compiled, no-native-unwind-info code lands in `windows_dwarf_
-   unwind_safety_net.c`'s own existing vectored exception handler and
-   exits via the same `128 + SIGILL` controlled-exit convention `windows_
-   dwarf_unwind_safety_net_test.c` already checks for a different fault
-   -- that mechanism turns out to generalize beyond the stack-overflow-
-   during-unwind case it was originally built for. All three fault kinds
-   passed repeatably on Windows/x86_64, macOS/arm64, and Linux/aarch64.
-   The Linux run corrected one test assumption: Clang lowers
-   `__builtin_trap()` to AArch64 `brk`/`SIGTRAP`, while Linux/x86_64 uses
-   `SIGILL`; POSIX tests now accept either native trap signal and still reject
-   clean exits or unrelated faults. Windows/aarch64 remains to be run.
-
-   **`CRT_ENABLE_GUARD_MALLOC` go/no-go decision: no-go, deferred.** Not
-   built. The debug-malloc expected-fault coverage just added already
-   provides everything the baseline-validation decision gate needs
-   (double free, cross-instance owner mismatch, heap-buffer-overflow-into-
-   slack), so per this tranche's own explicit instruction, that alone is
-   sufficient to close this tranche without also building a guard-page
-   allocator. Guard pages would add real, distinct diagnostic value
-   `CRT_DEBUG_MALLOC`'s canary approach genuinely cannot provide --
-   canaries are only checked at `free()`/`realloc()` time, so a use-after-
-   free *read* (no write, nothing to corrupt for a canary to later
-   notice) is invisible to it, while a guard page would fault immediately,
-   precisely at the offending instruction. But that gap is not blocking
-   anything this baseline-validation effort currently needs, and the cost
-   is real and specific to this allocator's own design: `malloc.c` has no
-   per-allocation metadata region separate from the payload itself
-   (`block_header` sits directly before it in the same mapping), so a
-   genuine guard-page implementation would need each allocation promoted
-   to its own dedicated OS mapping with an adjacent unmapped/PROT_NONE
-   page -- large memory overhead and allocator-shape-changing, not a
-   small flag flip, exactly matching the TODO wording's own "large-memory/
-   slow-test" expectation. Revisit if a future investigation needs to
-   catch a use-after-free read specifically and the existing canary/owner
-   checks do not.
-8. **Publish one cross-host decision record.** Run the bounded correctness
-   suite on the normal Linux, Windows, and macOS matrix and record the heavier
-   baseline per host/architecture in `docs/allocator_baseline.md`. Declare the
-   workload/time/RSS regression envelope before using results to choose an
-   allocator. Record raw results under `benchmark/allocator-baseline/<os>/`
-   (checked into git -- see `benchmark/README.md` -- superseding this
-   tranche's earlier "not in git, under `out/`" plan: tranche 1 landed the
-   runner first and the project owner asked for results to accumulate
-   per-host in the repo itself, where they can be compared and reproduced
-   directly, rather than staying only in one contributor's local build tree).
-   Progress: raw results are checked in for Windows/x86_64, macOS/arm64,
-   and Linux/aarch64
-   (`benchmark/allocator-baseline/`, `benchmark/allocator-contention/`; see
-   `HISTORY.md`'s 2026-09-16 entries). All three hosts have current
-   tranche-4 schema results (`usable_bytes`, `peak_usable_bytes`, and
-   `host_peak_rss_bytes`) and the full 1/8/16/32-thread contention sweep;
-   Linux additionally completed the 1M baseline tier. `docs/allocator_
-   baseline.md` records the decision to keep the current allocator for the
-   next upper-runtime work. Windows/aarch64 focused validation and comparison
-   with the first real upper-runtime stress workload remain follow-ups; Linux
-   did not trigger Scudo promotion.
-
-Decision gate:
-
-- If correctness, fork, and diagnostic tests pass and representative upper-
-  runtime workloads stay inside the declared scaling and memory envelope,
-  retain the current allocator, move this tranche to `HISTORY.md`, and proceed
-  with the Upper Runtime Roadmap.
-- If repeatable nonlinear cost, lock-contention collapse, unbounded RSS growth,
-  or a correctness limitation exceeds that envelope, first preserve the
-  reproducer, then promote the conditional Scudo tranche below into In
-  Progress. Do not start Scudo merely because the current implementation is
-  theoretically `O(N)`.
+Acceptance requires identical common device/surface layouts in every
+translation unit, no backend field access outside its owner, clean
+backend-enabled and backend-disabled builds, and passing focused runtime and
+ownership checks on the available host matrix. This tranche hardens an
+internal boundary; it must not change the public `crtgfx` ABI.
 
 ## Planned
 
@@ -338,8 +138,9 @@ be replaced.
 ### Runtime architecture hardening backlog
 
 These remain independent follow-ups. Promote one at a time when a concrete
-consumer or failure justifies its cost; they do not block allocator baseline
-validation unless that validation exposes the same boundary.
+consumer or failure justifies their cost. The backend object-boundary and
+upper-stage smoke work that must precede further Upper Runtime expansion is
+active above; the items here are not part of that acceptance gate.
 
 1. **Remove the "build once, then reconfigure" CMake pattern.** The native
    Wayland Vulkan WSI backend's own `CRTGFX_HAVE_NATIVE_WAYLAND` gate
@@ -355,21 +156,7 @@ validation unless that validation exposes the same boundary.
    dependency. Budget real effort here given `05-js`'s QuickJS/V8 work will
    add at least one more such external dependency.
 
-2. **Stop letting a compile macro change a shared struct's own layout.**
-   `libcrtgfx/CMakeLists.txt` already carries a load-bearing comment
-   explaining why `CRTGFX_HAVE_VULKAN` must be a directory-wide
-   `add_compile_definitions()`, not a per-target one: `src/gpu.c` and
-   `gpu_vulkan.c` both see the same `struct crtgfx_gpu_device`, and a
-   mismatched definition between translation units changes that struct's
-   own size, corrupting memory. The current fix (matching the definition
-   everywhere) is correct, but the underlying shape -- one macro flip away
-   from real memory corruption -- is itself worth removing as a class of
-   bug: give `crtgfx_gpu_device` a fixed `{backend tag, ops vtable, opaque
-   backend pointer}` layout and hide `CRTGFX_HAVE_VULKAN`/`_D3D12`/`_METAL`
-   backend-specific fields entirely inside each backend's own translation
-   unit, so the macro only ever changes which code exists, never the
-   common struct's own layout.
-3. **Move `tools/crt_dist_prerequisites.py`-style manifest thinking to
+2. **Move `tools/crt_dist_prerequisites.py`-style manifest thinking to
    `libc.so`'s own ELF export surface.** The current `CRT_1.0 { global: *;
    };` whole-surface version script (`libc/CMakeLists.txt`) is the right
    *shape* of fix for the collision recorded in the 2026-09-16 history entry,
@@ -378,28 +165,7 @@ validation unless that validation exposes the same boundary.
    manifest -> generated `.map` file) would prevent accidental exports and
    give a real basis for `CRT_1.0`/`CRT_1.1`/`CRT_2.0`-style ABI evolution,
    rather than hand-maintaining `global: *;` indefinitely.
-4. **Add an upper-stage smoke gate to routine CI**, not just the C stage.
-   Every recent Linux ELF-collision-family bug (`libc` vs host glibc,
-   `libc` vs `libc++`, `libc++` vs Skia, Wayland vs Vulkan, Skia vs Vulkan)
-   showed up specifically at a *stage boundary*, not within `01-c` alone.
-   Full Skia/FFmpeg builds are too slow for every PR, but a per-PR
-   `02-cxx` smoke plus a headless `libcrtgfx` smoke, with a nightly full-
-   Skia/FFmpeg/predecessor-only-dist/binary-import-audit pass from a
-   genuinely empty build directory and cache (this project's own CMake
-   state has already been shown to interact with external-build artifact
-   presence -- see item 1), would have caught several of the bugs in
-   `HISTORY.md`'s dated entries closer to when they were introduced.
-5. **Split the Linux Wayland backend into two independent implementations**
-    instead of one code path that changes object universes depending on
-    whether Vulkan is enabled. `STATUS.md` already records a real, current
-    limitation in the hand-rolled path (the software-window adapter does
-    not recycle Wayland object IDs); the GPU path already uses the real
-    host `libwayland-client.so.0` entirely separately. Making that an
-    explicit `crtgfx` Wayland abstraction with two backends (CRT wire
-    protocol vs. host-native) rather than one file family that
-    conditionally reinterprets its own objects would be easier to maintain
-    as both paths keep evolving.
-6. **Make binary/package/ABI lint an explicit acceptance gate.** Extend the
+3. **Make binary/package/ABI lint an explicit acceptance gate.** Extend the
     distribution dependency and absolute-path checks with a separately
     runnable ABI audit: compare public exports and unresolved imports against
     the stage's declared symbol/dependency manifests, reject accidental host
@@ -411,9 +177,9 @@ validation unless that validation exposes the same boundary.
 The completed cross-host baseline and its exact validation evidence stay in
 [`STATUS.md`](STATUS.md) and [`HISTORY.md`](HISTORY.md); the product boundary
 and dependency order stay in [`docs/runtime_roadmap.md`](docs/runtime_roadmap.md).
-This roadmap remains Planned until the allocator baseline decision gate above
-closes. After that, promote one tranche at a time into In Progress when its
-prerequisite evidence and acceptance host are available.
+The allocator baseline decision gate is closed: keep the current allocator and
+leave Scudo conditional. Promote one tranche at a time into In Progress when
+its prerequisite evidence and acceptance host are available.
 
 1. **Finish live GPU presentation evidence.** Close the remaining macOS/x86_64
    live path, pixel-exact macOS checks, resize-plus-Ganesh coverage on macOS,

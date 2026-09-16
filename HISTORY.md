@@ -10,6 +10,21 @@ substantive update.
 
 ## 2026-09-16
 
+- **Finalized and closed "Allocator baseline validation before Upper
+  Runtime" with the current allocator retained.** The complete Windows/
+  x86_64, macOS/arm64, and Linux/aarch64 current-schema records, focused
+  correctness/fork/fault coverage, Host ABI firewall, RSS/fragmentation
+  evidence, contention results, and the resolved qsort reporting-overhead
+  diagnosis satisfy the declared decision envelope. No tested host produced
+  a correctness failure, unbounded region growth, uncontrolled internal
+  fragmentation, deadlock, or repeatable performance blocker that justifies
+  replacing the allocator. Scudo therefore remains conditional in `TODO.md`,
+  and the Upper Runtime Roadmap may proceed. The former detailed In Progress
+  execution record was removed from `TODO.md`; the dated entries below and
+  `docs/allocator_baseline.md` are its permanent evidence. Windows/aarch64
+  validation and comparison with real upper-runtime workloads remain non-
+  blocking regression checks, not conditions that keep this tranche open.
+
 - **Completed the Linux/aarch64 real-device allocator baseline, fixed two
   validation assumptions it exposed, and retained the current allocator for
   the next Upper Runtime tranche.** Incrementally reconfigured the existing

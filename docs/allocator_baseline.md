@@ -77,10 +77,11 @@ of the following remain true:
   in Windows/macOS files retain the pre-fix reporting overhead and must not use
   wall time for allocator comparison.
 
-## Provisional Decision
+## Final Decision
 
 Keep the current allocator as the bootstrap/reference allocator for the next
-upper-runtime work. Do not promote Scudo yet.
+upper-runtime work. The pre-Upper-Runtime validation tranche is accepted and
+closed; do not promote Scudo.
 
 Rationale:
 
@@ -100,7 +101,7 @@ Rationale:
 - The qsort reporting fix explains the cross-host timing anomaly; no allocator
   replacement trigger was found on Linux/aarch64.
 
-## Remaining Before Closing The TODO Tranche
+## Non-Blocking Follow-Up
 
 - Run the focused allocator CTest selection on Windows/aarch64 when that host
   is available.
