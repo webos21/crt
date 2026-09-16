@@ -97,6 +97,32 @@ set_tests_properties(malloc_contention_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "malloc_contention_test: ok"
 )
 
+# malloc_baseline_test: TODO.md's "Allocator baseline validation before
+# Upper Runtime" tranche 1 (deterministic workload + machine-readable
+# result format). Run with no arguments -- the shape CTest uses -- this is
+# a small, bounded, fast correctness regression ("malloc_baseline_test:
+# ok"), matching tranche 3's "keep a bounded correctness variant in
+# routine CTest". The same binary also accepts --ops/--seed/--json for
+# tools/run_allocator_baseline.py's own opt-in, larger, timed runs at the
+# 10^3..10^6 tiers -- see that script and this test's own top comment.
+add_crt_test(malloc_baseline_test malloc_baseline_test.c)
+set_tests_properties(malloc_baseline_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "malloc_baseline_test: ok"
+)
+
+# malloc_contention_baseline_test: tranche 3 ("Scale contention
+# deliberately") of the same TODO.md item. Run with no arguments -- the
+# shape CTest uses -- this is a small, fixed 4-thread, bounded-op
+# correctness pass through both the "private" and "shared" access
+# patterns (see this test's own top comment). The same binary also
+# accepts --threads/--ops/--pattern/--seed/--json for
+# tools/run_allocator_contention_baseline.py's own opt-in, larger, timed
+# 1/8/16/32-thread sweep.
+add_crt_test(malloc_contention_baseline_test malloc_contention_baseline_test.c)
+set_tests_properties(malloc_contention_baseline_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "malloc_contention_baseline_test: ok"
+)
+
 add_crt_test(stdio_test stdio_test.c)
 set_tests_properties(stdio_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "stdio_test: ok"

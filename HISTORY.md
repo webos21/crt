@@ -10,6 +10,174 @@ substantive update.
 
 ## 2026-09-16
 
+- **Extended the allocator baseline to contention scaling (TODO.md's
+  tranche 3), confirmed tranche 2 was already satisfied by tranche 1's own
+  design, moved both benchmark tools' raw results into a new tracked
+  `benchmark/` tree per the project owner's own direction, and gathered
+  more evidence toward the still-open wall-clock timing anomaly.**
+  `libc/tests/malloc_contention_baseline_test.c` (ctest: `malloc_
+  contention_baseline_test_runs`) runs the same deterministic-workload
+  discipline tranche 1 established across 1/8/16/32 threads and two access
+  patterns: "private" (each thread only ever touches its own allocations,
+  generalizing `malloc_contention_test.c`'s existing shape to tranche 1's
+  fuller size-class mix) and "shared" (all threads draw from and return to
+  one mutex-guarded live-set table, so a pointer is routinely freed or
+  reallocated by a thread other than the one that allocated it -- a real
+  remote-free/remote-realloc workload this project had not exercised
+  before). Both patterns still fully serialize on `malloc.c`'s own single
+  global `heap_lock` regardless of pattern -- this allocator has no
+  per-thread arena to make "private" mean anything at the allocator level
+  (see the TODO.md Scudo-tranche writeup) -- so "private" vs "shared" here
+  is deliberately an access-pattern distinction, not a separate-pool one;
+  confirmed with the project owner directly before implementing, since the
+  literal reading of "private and shared allocation pools" does not match
+  anything the current allocator can do. `tools/run_allocator_contention_
+  baseline.py` drives the opt-in 1/8/16/32 x private/shared sweep.
+
+  A real design bug was caught and fixed during implementation, before
+  trusting any of this: an early draft gave each thread its own
+  `live_count` field even under the shared pattern. That is not merely an
+  inaccurate stat -- two threads could independently compute the same
+  "next free slot" index into the one shared array and each write a live
+  pointer into it, silently clobbering the other's entry, despite every
+  individual step already being mutex-protected (the mutex serializes
+  *execution* of a step; it does nothing to make an ordinary per-thread
+  struct field into shared state across threads). Fixed by routing every
+  piece of live-set/byte/count bookkeeping through a `pool_ref` of
+  pointers, bound once per run to either private per-thread storage or one
+  real set of shared globals, so private and shared runs share the exact
+  same `do_allocate()`/`do_free()`/`do_realloc()` bodies safely. Zero
+  correctness failures across all 8 (threads x pattern) combinations on
+  Windows/x86_64 once fixed.
+
+  Tranche 2 ("cover realistic allocation shapes") needed no new work:
+  tranche 1's own `malloc_baseline_test.c` was already built against that
+  tranche's exact requirements (mixed malloc/calloc/posix_memalign/
+  realloc/free across small/medium/large/occasional-mapping-sized objects,
+  bounded-live-set churn, grow/shrink reallocations, content+alignment
+  verification) -- confirmed for real via `os_regions` staying at 10 after
+  100,000 operations, i.e. fragmentation/reuse is genuinely happening, not
+  merely nominally exercised.
+
+  The wall-clock-vs-`elapsed_ns` anomaly tranche 1 found reproduced here
+  too, in a completely different (multithreaded) binary, now also
+  correlating with thread count: `threads=16`/private measured 192ms
+  internally against 19.4s of external wall time (~100x); `threads=32`/
+  private measured 516ms internally against 78.2s externally (~150x).
+  This rules out anything specific to `malloc_baseline_test.c`'s own
+  single-threaded workload as the cause. Still not root-caused; treat this
+  as more evidence for the same open issue, not a second one.
+
+  Per the project owner's own direction (2026-09-16), both tools' raw
+  results now live under `benchmark/<tool>/<os>/` and are checked into
+  git -- superseding tranche 1's original "record under `out/<preset>/`,
+  not in git" plan (`TODO.md`'s tranche 8 entry updated to match) -- so
+  results from every host this project supports accumulate in one place
+  for direct comparison rather than staying only in a contributor's local
+  build tree. See `benchmark/README.md`. The checked-in `benchmark/
+  allocator-baseline/windows/malloc_baseline-amd64-seed42-
+  20260916T064313Z.jsonl` is the original tranche-1 verification run,
+  kept as-is (not replaced by a schema-complete re-run) since the 10^6
+  tier alone costs roughly 40 minutes of wall time on this host and a
+  re-run would not show anything the first run didn't already -- the
+  project owner's own explicit call when this was raised.
+
+- **Built the allocator baseline's deterministic workload and machine-
+  readable result format (TODO.md's "Allocator baseline validation before
+  Upper Runtime", tranche 1), and found a real, reproducible, still-
+  unattributed timing anomaly while verifying it.** `libc/tests/
+  malloc_baseline_test.c`: a seeded (xorshift64*), fully deterministic
+  allocator stress workload -- a bounded live set (up to 4096 entries,
+  static storage, not heap-allocated, so the harness never competes with
+  the very heap it measures) undergoing random churn across malloc/calloc/
+  posix_memalign/realloc-grow/realloc-shrink/free, weighted across small
+  (16-128B)/medium(129B-4KiB)/large(4KiB-64KiB)/rare mapping-sized(1-4MiB)
+  requests. Every live entry is filled with a known byte pattern and
+  reverified before any operation that reads, moves, or releases it,
+  matching `malloc_test.c`'s own "fill, then verify" discipline applied
+  continuously across a long random walk instead of a handful of fixed
+  cases; a corrupted or unexpectedly-failing allocation fails the run
+  explicitly rather than trapping (this harness must also work in
+  ordinary, non-`CRT_DEBUG_MALLOC` builds). Run with no arguments -- the
+  shape CTest uses -- it is a small, fast, bounded correctness regression
+  (`malloc_baseline_test_runs`); run with `--ops/--seed/--json` the same
+  binary prints one machine-readable JSON line instead (seed, ops, arch/
+  os, elapsed time, throughput, an approximate latency distribution via a
+  fixed 2^20-sample buffer sorted with `qsort()`, live/peak byte and count
+  counters, per-op-kind counts) so a failure or regression can be replayed
+  exactly. `tools/run_allocator_baseline.py` drives the same binary at the
+  10^3/10^4/10^5/10^6 tiers tranche 1 calls for, stopping before a tier
+  that would exceed a declared wall-time budget, and records results as
+  JSON-lines under `out/<preset>/allocator-baseline/` (tranche 8's own
+  "not in git" convention, applied early since the format already existed).
+
+  Correctness was clean throughout: zero content-verification, alignment,
+  or allocation failures across all four tiers (1K/10K/100K/1M operations,
+  seed 42) on Windows/x86_64 -- 111,000+ real operations at the 100K tier
+  alone with no corruption.
+
+  Timing was not clean, and the anomaly found is itself the more
+  significant result of this tranche. The binary's own in-process
+  `elapsed_ns` (bracketing the entire workload with a single `clock_
+  gettime(CLOCK_MONOTONIC)` pair, backed by `QueryPerformanceCounter` on
+  this PAL -- a real hardware counter, confirmed via `libc/src/arch/
+  windows/common/syscall.c`, not something that pauses under scheduling
+  preemption) stayed roughly proportionate to op count through the 10K
+  tier (20.8ms / 159.6ms), then grew worse-than-linearly at 100K (2.76s --
+  a 17x increase for 10x more ops) and 1M (25.9s). Separately, the
+  *externally observed* wall time (this session's own `time`/`Measure-
+  Command` around the whole process) was close to `elapsed_ns` at the 1K/
+  10K tiers but diverged sharply at 100K (27.6s external vs. 2.76s
+  internal, ~10x) and explosively at 1M (2540s / ~42 minutes external vs.
+  25.9s internal, ~98x) -- a real, large, and *growing* gap that cannot be
+  explained by anything happening inside the timed workload itself, since
+  `QueryPerformanceCounter` correctly accounts for real elapsed time
+  (including any scheduling suspension) between its own two bracketing
+  calls regardless of what causes a delay in between.
+
+  Ruled out, with direct evidence, before this was left as an open
+  finding rather than a guess:
+  - **Not an MSYS/Git-Bash artifact.** The same 100K-tier run, launched
+    instead via a native PowerShell `[System.Diagnostics.Stopwatch]` around
+    a plain `& $exe`, reproduced the identical ~27.7s external time.
+  - **Not `add_crt_test()`'s always-on Windows fork-capable-relaunch
+    startup dance** (`libc/src/arch/windows/common/fork_capable_relaunch.c`,
+    linked into every Windows/AMD64 test binary so the ctest suite's own
+    `fork()` tests get deterministic mitigated-ASLR addresses). A one-off
+    manual `add_executable()` target built the exact same source without
+    that object linked at all (the weak-symbol reference resolves to null
+    and crt1 skips the relaunch outright) and reproduced the identical
+    ~27.7-27.9s gap at the 100K tier.
+  - **Not the allocator's own OS-region count.** `malloc.c`'s already-
+    exported `__crt_malloc_os_region_count()` (added to the harness's own
+    JSON output as `os_regions`, alongside a `process_ns` field bracketing
+    the whole of `main()` for exactly this triage) read only 10 at the
+    100K tier -- `process_ns` also matched `elapsed_ns` almost exactly,
+    ruling out `qsort()`/`printf()`/anything else inside `main()` after
+    the workload loop too. Ten `VirtualAlloc()`-backed regions is far too
+    few for Windows address-space teardown at process exit to plausibly
+    cost seconds, let alone tens of minutes.
+
+  What remains genuinely unknown: whether the missing time sits before
+  `main()` even starts (ordinary crt1/loader startup -- though a roughly
+  *constant*, ops-independent cost there is hard to reconcile with a gap
+  that itself grows with op count) or strictly after `main()` returns
+  (`exit()`'s `fflush()`/`__crt_run_fini_array()`/`__crt_sys_exit()` path,
+  or Windows' own process-termination bookkeeping) -- diagnosing which
+  needs a tool that can see across that boundary from outside the process
+  (ETW tracing or Process Monitor), which this session did not attempt.
+  Until root-caused, treat this session's own `elapsed_ns`/`process_ns`
+  figures as the trustworthy signal for allocator behavior, and do not
+  feed bare host wall-clock timings from this Windows host into the
+  eventual cross-host decision record (tranche 8) without first
+  cross-checking them against `elapsed_ns` the way this entry did.
+
+  The raw four-tier result is checked in at `benchmark/allocator-baseline/
+  windows/malloc_baseline-amd64-seed42-20260916T064313Z.jsonl` (tranche 8's
+  "not in git" plan was superseded the same day -- see that tranche's own
+  updated entry in `TODO.md` -- so results accumulate per-host in the repo
+  itself; see `benchmark/README.md`).
+
 - **Made the packaged Linux Vulkan/Skia demo directly runnable: fixed a
   second, separate `libdl.so` ELF symbol-version gap and added a direct
   packaged-binary smoke.** The prebuilt shared-runtime `examples/bin/
