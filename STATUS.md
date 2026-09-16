@@ -85,7 +85,10 @@ The software/CPU graphics baseline is complete on all three hosts:
   shared CRT C++ runtime link from the standalone example; Windows and macOS
   also pass the packaged live path. The earlier CRT-libc/glibc symbol
   collision remains fixed with CRT's private `CRT_1.0` ELF namespace on both
-  aarch64 and x86_64.
+  aarch64 and x86_64. The final fresh Linux/aarch64 run selected lavapipe and
+  passed the live Skia presentation three times with Vulkan validation off and
+  three times with validation on; the acquired-image semaphore is explicitly
+  consumed by Ganesh before rendering.
 
 Decoder-texture zero-copy, full font shaping/fallback/ICU, a full Wayland
 compositor, and a Chromium Ozone backend are not completion claims.
@@ -227,7 +230,10 @@ statuses, and exceptions are maintained in:
   recipe-specific retention policy because PE/COFF archive extraction does
   not behave like a GNU ELF linker script.
 - Linux `libdl` remains a documented boundary rather than a CRT-owned general
-  ELF loader. A full Android-style linker is a separate long-term tranche.
+  ELF loader. Consequently, the prebuilt shared-runtime Linux Vulkan/Skia demo
+  cannot yet load a host Vulkan ICD directly; the accepted 04-stage path
+  rebuilds the installed-source examples against the packaged static CRT
+  closure. A full Android-style linker remains a separate long-term tranche.
 
 ### libcrtgfx
 
@@ -261,11 +267,13 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-1. Enable and verify real FFmpeg hardware decode per host while retaining the
+1. Resolve the packaged Linux Vulkan/Skia demo's `libdl` boundary and add a
+   direct packaged-binary smoke without weakening CRT ABI isolation.
+2. Enable and verify real FFmpeg hardware decode per host while retaining the
    software/CPU fallback as the correctness baseline.
-2. Connect hardware decoder textures to Skia without CPU copies, including
+3. Connect hardware decoder textures to Skia without CPU copies, including
    device/fence ownership and CPU-download recovery.
-3. Bring up QuickJS core/event-loop/timers/modules, then expose stable
+4. Bring up QuickJS core/event-loop/timers/modules, then expose stable
    media/gfx services with WebCodecs-like queue semantics.
 5. Add capture/encode and network/adaptive/realtime services only after the
    native playback and zero-copy contracts are stable.

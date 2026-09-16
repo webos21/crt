@@ -57,302 +57,28 @@ newest entry first) rather than leaving it here.
 
 ## In Progress
 
-Active threads, not a flat list of one-off items. The cumulative binary-package
-chain through the current `05-js` skeleton and the physical `libcrtgfx`
-window/GPU/Skia split are complete. Predecessor-only isolated-stage
-build/package/verify acceptance through the option-ON
-`03-gfx-simple -> 04-gfx-media` transition, including path-with-spaces
-acceptance, is complete on Windows and macOS; the dated evidence belongs in
-[`HISTORY.md`](HISTORY.md). The Linux/aarch64 Skia heap-corruption blocker was
-root-caused and fixed on 2026-09-16: the standalone example mixed static and
-shared CRT C++ runtimes, so `libc++.so.1` allocated a string buffer that the
-executable's static `operator delete` handed to a different allocator
-instance. The fixed installed example presents successfully with a cold/
-disabled shader cache. Fresh Linux/aarch64 release sign-off completed on
-2026-09-16; the full evidence is recorded in `HISTORY.md`.
-
-- [x] **Final Linux/aarch64 `03-gfx-simple -> 04-gfx-media` release sign-off
-  after resolving the Skia heap blocker.** The former Mesa/LLVM/SkSL
-  attribution was retracted: the bad free was a project-owned link-policy bug,
-  now fixed by keeping the standalone Linux examples on the static CRT runtime
-  closure supplied by `crt-cc`/`crt-c++` and rejecting a direct shared CRT
-  `DT_NEEDED` entry in the stage builder.
-  The fresh-chain presentation matrix, installed examples, `verify_dist.py`,
-  and atomic publication all passed. The completed investigation below is
-  retained only as context; detailed evidence belongs in `HISTORY.md`.
-
-  **Linux/aarch64 completed execution record:**
-
-  A. **Completed 2026-09-16: freeze and reproduce the exact failing input.**
-     The failing executable SHA-256 was
-     `a85d4e633a0caebfaa0135a8ae2037aa49eb7dfdcd6302de8ff2cfaae873cc03`;
-     it failed 3/3 with `SIGTRAP` using the pinned lavapipe ICD and disabled
-     shader cache.
-     **Original procedure:** Freeze and reproduce the exact failing input
-     without rebuilding the world. Start from synchronized `main` at or after
-     `763a2d5`; require a
-     clean worktree. Record the failing SDK/example SHA-256, stage source and
-     recipe digest, pinned Skia revision, CPU/kernel, compiler, Mesa/Vulkan ICD,
-     Wayland compositor/session, and the exact environment/command. Preserve
-     the existing stage work/cache. With a fresh or disabled shader cache and
-     an explicitly selected ICD JSON, reproduce the existing binary three
-     times. If it no longer reproduces, stop and record the environmental delta
-     rather than changing code speculatively.
-  B. **Completed 2026-09-16: inspect the cached source-visible failure.** Keep
-     FreeType/FFmpeg and the predecessor SDK unchanged. Rebuild the pinned Skia
-     objects and example with usable source DWARF, `-O1` or `-Og`, and
-     `-fno-omit-frame-pointer`; do not perform a fresh full isolated-04 build.
-     Obtain a trustworthy stack above `SkSL::FunctionDeclaration::mangledName()`
-     and inspect the live `FunctionDeclaration`, parameter span/vector, and the
-     result string's storage before growth. This replaces the optimized
-     backtrace whose repeated frames were an unwinding artifact.
-  C. **Completed 2026-09-16: find the first invalid operation.** The owner
-     diagnostic trapped before metadata corruption: allocation owner
-     `0xfffff7a41d50` was the shared `libc.so` allocator, while the freeing
-     instance was the executable's static allocator at `0xaaaaab045eb0`.
-     **Original fallback:** Instrument
-     Skia/SkSL, the CRT bridge, and the example with ASan (and narrowly useful
-     UBSan checks), rather than rebuilding/instrumenting Mesa again. Re-run the
-     same cold shader-compilation path. If sanitizer integration still reports
-     only the later free, set an AArch64 GDB hardware watchpoint on the old
-     `std::string` buffer/header as soon as it is allocated and capture the
-     first instruction/call stack that changes it. In parallel only if cheap,
-     extract the exact `wangs_formula_*` SkSL compile into a CPU-only/offline
-     reproducer to separate SkSL object lifetime from Ganesh/Vulkan inputs.
-     Choose this source/lifetime investigation over chasing the unrelated
-     standalone-ASan `/proc/self/cmdline` startup failure.
-  D. **Superseded by the deterministic link diagnosis.** Once a
-     focused reproducer or exact first-write site exists, run the same case on
-     WSL Linux/x86_64. Arm64-only failure directs the investigation to AArch64
-     ABI/alignment/code generation or libc++ layout; a cross-architecture
-     failure directs it to common SkSL lifetime/build configuration; a
-     CPU-only pass with a Vulkan-only failure directs it to the Ganesh/Vulkan
-     ownership/caching boundary. Do not restart Mesa-version, worker-count, or
-     shader-cache A/B work: those questions are already closed below.
-  E. **Completed 2026-09-16: fix at the owned boundary and add a focused
-     regression.** The Linux examples no longer link shared `libc++`/
-     `libc++abi`/`libunwind`; the stage builder inspects `DT_NEEDED` and fails
-     if a static Linux example reintroduces one. The fixed Skia example
-     (`1f3350fd7a217e08251fcd50cb745034c612c5be0093540ecd4f542ec7dba145`)
-     presented 3/3 with only host Vulkan and Wayland shared dependencies.
-     **Original disposition:** If the cause
-     is CRT/Skia build configuration, ABI, or bridge ownership, fix the
-     project-owned build/module/code boundary. If it is a pinned upstream Skia
-     defect, identify the upstream fix and prefer a reviewed pin update; do not
-     carry an arbitrary source patch merely to make this device pass. Add the
-     smallest deterministic regression possible, preferably the CPU-only SkSL
-     case, and run the ordinary Linux plus Windows/macOS regression lanes
-     appropriate to the touched boundary.
-  F. **Completed 2026-09-16: run the expensive release acceptance once from a fresh
-     cumulative predecessor chain.** From fresh
-     libc++/FreeType/FFmpeg/Skia inputs, run the full predecessor-only isolated
-     `03-gfx-simple -> 04-gfx-media` build on native Linux/aarch64. Use a cold
-     shader cache and run presentation three times with Vulkan validation OFF
-     and three times ON; then rebuild/run installed examples, run
-     `verify_dist.py`, and require atomic publication. Cross-check the focused
-     reproducer on WSL x86_64 and let the GitHub matrix cover the remaining
-     architectures/hosts. Move each completed tranche from this section into
-     `HISTORY.md` with commands, results, and commit IDs before starting the
-     next tranche; commit/push at stable tranche boundaries so another host can
-     continue without reconstructing state. The native aarch64 run completed
-     the fresh chain, passed 8/8 CTest, rebuilt both installed examples,
-     passed validation OFF and ON 3/3 each, passed `verify_dist.py`, and
-     published 04 atomically.
-
-  **Exit policy satisfied:** Linux 04 release acceptance is complete because
-  tranche F passed. Hardware-decode
-  API/backend work on other hosts may proceed independently. Do not weaken
-  `verify_dist.py` or add a Mesa/Skia exception for the resolved link-policy
-  defect.
-
-  **Established evidence and closed alternatives (retained for the native
-  handoff; detailed command output is in `HISTORY.md`):**
-
-  1. ~~Cheap host-ABI-binding sanity check~~ -- **done 2026-09-15**: a
-     direct `LD_DEBUG=bindings,libs` audit of the preserved failing example
-     found zero exceptions -- every host/Mesa library (including
-     `libvulkan_lvp.so` and its own `libLLVM.so.20.1` JIT dependency) binds
-     `malloc`/`calloc`/`realloc`/`free`, `memcpy`/`memmove`, `pthread_*`,
-     and `opendir`/`readdir` to real glibc; every CRT-owned object binds
-     the same symbols to CRT's own versioned `libc.so`; no binding crosses
-     between them in either direction. This rules out a second ELF-
-     interposition-class bug. Full detail: `HISTORY.md`'s 2026-09-15
-     entries.
-  2. ~~Fix the imported-libc++/libc++abi/libunwind absolute-RUNPATH gap~~
-     -- **completed 2026-09-15**; the build keeps `$ORIGIN` first plus an
-     absolute fallback for temporary configure probes, while packaging strips
-     that fallback and the SDK's C++ runtime finds its own copy of `libc.so`
-     and runs correctly with the original checkout's `out/` tree renamed
-     away entirely. The predecessor fingerprint also closes the independent
-     stale-relink gap. Full final evidence is in `HISTORY.md`.
-  3. **Completed/superseded investigation: staged Mesa lavapipe A/B comparison**, building
-     each candidate into its own prefix (never overwriting the system
-     package) and keeping *everything else fixed* (same `crtgfx_skia_
-     example` binary and SDK, same Vulkan loader, same Wayland session).
-     Run in order, stopping as soon as a stage's result is conclusive
-     enough to classify the defect (do not build every stage regardless):
-     - **S0 (baseline, already done)**: system `mesa-vulkan-drivers`
-       `25.2.8-0ubuntu0.24.04.2` -- fails with validation both OFF and ON
-       (`HISTORY.md`'s 2026-09-15 entries).
-     - ~~S1~~ -- **done 2026-09-15, fails identically**: upstream Mesa tag
-       `mesa-25.2.8` (the *same* version, built from plain upstream
-       source with meson, LLVM 20.1.2 -- matching the system package's own
-       LLVM dependency exactly, confirmed via the earlier `LD_DEBUG`
-       audit -- into its own prefix, ICD selection confirmed via
-       `VK_LOADER_DEBUG=driver`) fails with the identical `free(): invalid
-       next size (fast)` signature, 6/6 runs (3x validation OFF, 3x ON).
-       This rules out an Ubuntu-specific patch/build-option/packaging
-       defect: the corruption is in upstream Mesa 25.2.8 itself, or in a
-       defect common to this whole configuration independent of Mesa's
-       version. Proceeds to S2.
-     - ~~S2~~ -- **done 2026-09-15, narrowed but not fixed**: the current
-       latest stable Mesa tag `mesa-26.2.2`, same build options/toolchain,
-       own prefix, driver selection confirmed via `VK_LOADER_DEBUG=driver`.
-       Neither a clean pass nor a clean fail: **the failure is entirely
-       shader-cache-state-dependent**. With a *fresh, empty*
-       `MESA_SHADER_CACHE_DIR` (a cold cache -- first-ever compile of this
-       example's shaders), it fails with the identical corruption
-       **5/5**. With that same cache directory reused afterward (now
-       warm), it then passes **10/10**. S1 (`mesa-25.2.8`) shows no such
-       distinction -- it fails **16/16** regardless of cache state (its
-       own shader-cache directory *did* get populated after its first
-       run, then stayed warm for the following 15, all of which still
-       failed identically), confirmed by deliberately re-running S1
-       against its own already-warm cache. Since a real isolated-04
-       acceptance run always starts with an empty shader cache (a fresh
-       SDK, first execution), **S2 still fails under the condition that
-       actually matters** for this project's own acceptance bar, even
-       though upstream narrowed the defect's exposure window sometime
-       between 25.2.8 and 26.2.2 (likely a caching-path change that
-       incidentally shrinks the window, not necessarily a deliberate fix
-       of this exact bug).
-     - ~~S2.1~~ -- **done 2026-09-15: insensitive to reducing llvmpipe to
-       one worker, but not proof that every possible race is excluded.** Two cheap
-       controlled reruns against the existing S2 build before committing
-       to an ASan rebuild: `MESA_SHADER_CACHE_DISABLE=true` with
-       validation OFF and the default thread count (3/3 fail -- this is
-       not really about *disk*-cache management specifically, but about
-       whichever code path runs whenever a shader isn't already cached,
-       disk cache or none), and the same plus `LP_NUM_THREADS=1` forcing
-       `llvmpipe` single-threaded (also 3/3 fail). Failing single-
-       threaded means the failure does not depend on llvmpipe's ordinary
-       multi-worker raster path; `LP_NUM_THREADS=0` (the documented complete
-       disable) and LLVM-internal concurrency were not tested, so the broader
-       "not a race" claim is retracted. Retract the earlier "cold-shader-cache race"
-       phrasing; "cold shader-compilation-path-dependent corruption" is
-       the accurate description going forward.
-     - ~~S3~~ -- **done 2026-09-15, then corrected by S3.1 below: this is
-       CRT/Skia's own bug, not Mesa or LLVM.** Built Mesa `26.2.2` with
-       `-Db_sanitize=address -Dbuildtype=debug`, `LD_PRELOAD`-ing
-       `libasan.so.8` ahead of the Vulkan loader. ASan itself reported a
-       bad-free inside `std::__1::basic_string::append()`
-       (3/3 deterministic), which the original S3 pass wrongly attributed
-       to `libLLVM.so.20.1` on the strength of the `std::__1` namespace
-       alone -- **wrong**, per the project owner's own review: `std::__1`
-       is libc++'s ABI namespace in general, not proof of *which* libc++,
-       and Ubuntu's `libLLVM.so.20.1` was confirmed (via `readelf -d`) to
-       link `libstdc++.so.6`, not libc++ at all, so it could not have
-       produced that frame.
-     - ~~S3.1~~ -- **done 2026-09-15: re-ran the same crash under GDB with
-       `info sharedlibrary` to map every frame to its real module, instead
-       of trusting ASan's own report.** The `__libcpp_operator_delete`/
-       `deallocate`/`__grow_by_and_replace`/`append` chain resolves to
-       **this project's own imported `.../sdk/lib/libc++.so.1`**, called
-       from **`SkSL::FunctionDeclaration::mangledName() const`** -- Skia's
-       own code, exactly matching this whole investigation's oldest clue
-       (`mangledName()`/`wangs_formula`). The freed pointer's content is
-       even visible: `"wangs_formula_max_fdiff_p2_ff2"`. **This is a
-       CRT/Skia-side finding, not a Mesa or LLVM one.**
-       On the separate "is this an ASan-allocator-domain artifact"
-       concern the same review raised: `LD_DEBUG=bindings` shows `libc++.
-       so.1`'s own `operator new`/`operator delete`/`free` all
-       consistently bind to `libasan.so.8` once preloaded (one coherent
-       allocator domain, not an obvious CRT-vs-ASan split), and ASan's own
-       phrasing ("wild pointer *inside of access range* of size 0x1", not
-       "unknown-crash" against wholly untracked memory) leans toward a
-       genuine dangling/corrupted pointer. A planned standalone minimal
-       `std::string`-under-ASan repro (to settle this definitively) hit an
-       unrelated environment issue instead: root-caused (not fixed) via a
-       GDB `catch syscall mmap` breakpoint to ASan's own lazy
-       `CacheBinaryName()` -> `ReadFileToBuffer("/proc/self/cmdline")`
-       path, triggered the *first* time anything calls `__cxa_atexit`
-       (here, `libc++.so.1`'s own global constructor, before this
-       project's `crt1.o` even runs) -- a known class of ASan-in-sandbox
-       issue (matches LLVM bug 57838); `-no-pie` and disabling ASLR
-       (`setarch -R`), the fixes reported for similar container/PIE ASan
-       issues elsewhere, did not resolve it here. **This verification
-       remains incomplete** -- not because of anything in CRT, Skia, or
-       Mesa, but because of this specific sandboxed host's own ASan
-       startup behavior. Full detail: `HISTORY.md`'s 2026-09-15 entries.
-       **Decision resolved for the native handoff:** do not chase the
-       standalone-ASan startup blocker or add a preload shim merely to make
-       that synthetic program start. Treat the real example's corrected GDB
-       module evidence as sufficient to proceed with execution-plan tranches
-       B-C: build source-visible Skia/SkSL, inspect `mangledName()` and its
-       callers/object lifetime, then instrument that actual path or use an
-       AArch64 hardware watchpoint to find the first invalid write. Do not file
-       anything against Mesa or LLVM -- that attribution is retracted.
-     Per-stage control protocol (keep identical across every stage):
-     pin the example/SDK by SHA-256; same Wayland compositor/session; pick
-     the ICD explicitly via `VK_DRIVER_FILES` (and matching
-     `VK_ICD_FILENAMES` for older-loader compatibility) pointing at a
-     dedicated ICD JSON whose `library_path` is the new build's own
-     absolute `libvulkan_lvp.so` path -- not a wide-open `LD_LIBRARY_PATH`
-     over the whole prefix; confirm the actually-selected driver with
-     `VK_LOADER_DEBUG=driver`; use a fresh or disabled shader-cache
-     directory per stage so a stale cache from one build can't leak into
-     another's result; never delete or overwrite the system Mesa package;
-     run each stage 3x with validation OFF and 3x with it ON. Do not
-     rebuild the full isolated-04 stage (FreeType/FFmpeg/Skia) for every
-     Mesa candidate -- only the preserved `crtgfx_skia_example` binary is
-     needed for A/B; re-run the full stage once, at the end, only against
-     whichever ICD turns out known-good.
-     **Superseded by the allocator-owner diagnosis**: this whole Mesa A/B thread was a
-     necessary and correct way to get a clean, ASan-capable reproduction,
-     but the defect it eventually surfaced is in the standalone example's
-     CRT runtime linkage, not in CRT, Skia, or whichever Mesa/lavapipe build is
-     selected -- so no further Mesa version/ICD comparison is expected to
-     change the outcome. Real GPU hardware, were it available, would
-     still be worth trying once a fix exists, purely to confirm the fixed
-     example presents correctly end-to-end, not as a further diagnostic.
-  4. **Explicit do-not-do list for this whole investigation** (per the
-     project owner's 2026-09-15 review, still in force): do not pre-warm
-     a shader cache to make acceptance pass, and never ship a warm cache
-     inside the SDK; do not carry an arbitrary Skia source patch without an
-     identified cause/upstream disposition; do not rebuild the full
-     isolated-04 stage
-     for every diagnostic condition (only the preserved example binary is
-     needed until a fix is ready to verify); do not expand
-     `CRT_ENABLE_GUARD_MALLOC` or other CRT allocator diagnostics further
-     right now -- the existing owner diagnostic identified the cross-instance
-     allocator boundary precisely and no broader allocator instrumentation is
-     needed for this issue.
-  5. The project-owned mixed-runtime link bug is fixed. Re-run the full real
-     isolated Linux arm64 04 build from fresh libc++/FreeType/FFmpeg/Skia
-     and complete `verify_dist.py`/atomic publication. Independently of
-     this investigation, the imported-libc++ stale-relink and packaged
-     absolute-RUNPATH gaps and the generic cross-host binary dependency
-     inventory are already closed; their completed evidence is in
-     `HISTORY.md`.
-  **The "reconsider whether an external ICD defect should block
-  `verify_dist.py`" policy question this item previously raised no longer
-  applies.** The defect was the standalone example's CRT runtime linkage and
-  is fixed without a Mesa or Skia source patch. Keep the ordinary gate intact;
-  only the fresh-chain sign-off above remains.
+- [ ] **Make the packaged Linux Vulkan/Skia demo directly runnable.** Fresh
+  Linux/aarch64 04-stage acceptance passes the installed-source examples rebuilt
+  against the packaged static CRT closure, but the prebuilt shared-runtime
+  `examples/bin/crtgfx_skia_gpu_window_demo` cannot load a host Vulkan ICD while
+  Linux `libdl` remains a stub. Choose a package/link boundary that preserves CRT
+  ABI isolation, then add a direct packaged-binary smoke. This is separate from
+  the resolved Skia heap-corruption blocker and does not invalidate the completed
+  04-stage release gate.
 
 ## Planned
 
 ### CRT allocator and runtime architecture hardening
 
-An external architecture review (2026-09-14, prompted by the Skia heap-
-corruption investigation above) looked at `libc/src/malloc.c`,
+An external architecture review (2026-09-14, prompted by the now-resolved
+Linux/aarch64 Skia heap-corruption investigation) looked at `libc/src/malloc.c`,
 `libc/CMakeLists.txt`, `libcrtgfx/CMakeLists.txt`, the malloc test suite, and
 the Linux Skia/Wayland/Vulkan boundary, and proposed a P0/P1/P2-ranked set of
-structural improvements. The cheap `CRT_ENABLE_DEBUG_MALLOC` diagnostic used
-by the active Skia investigation is implemented; the broader architecture
-changes below remain unstarted and do not block that investigation. Promote
-them into "In Progress" individually once a concrete need or consumer
-justifies the cost, per this file's usual promotion discipline.
+structural improvements. The `CRT_ENABLE_DEBUG_MALLOC` diagnostic used during
+that investigation is implemented; the broader architecture changes below
+remain unstarted. Promote them into "In Progress" individually once a concrete
+need or consumer justifies the cost, per this file's usual promotion
+discipline.
 
 P0:
 
@@ -372,9 +98,9 @@ P0:
    compatibility framing, since Scudo has been Android's own default
    allocator since Android 11.
 2. **Keep `CRT_ENABLE_DEBUG_MALLOC`/`CRT_ENABLE_GUARD_MALLOC` as permanent
-   diagnostic build modes**, not one-off throwaway debugging code, once the
-   Skia bug above is closed with them -- see that item's own numbered plan
-   for the current state of each.
+   diagnostic build modes**, not one-off debugging code. The completed
+   Linux/aarch64 investigation established their immediate value; retain and
+   test them as supported diagnostics.
 3. **Draw an explicit "Host ABI firewall" boundary in the Linux graphics/
    media code.** The Vulkan GPU path already documents the specific reason
    it must use the *real host* `libwayland-client.so.0` rather than this
@@ -431,7 +157,7 @@ P1:
 7. **Move `tools/crt_dist_prerequisites.py`-style manifest thinking to
    `libc.so`'s own ELF export surface.** The current `CRT_1.0 { global: *;
    };` whole-surface version script (`libc/CMakeLists.txt`) is the right
-   *shape* of fix for the collision it solves (see the Skia item above),
+   *shape* of fix for the collision recorded in the 2026-09-16 history entry,
    but long-term, generating the version-script/export list from an
    explicit Bionic-compatibility symbol manifest (public headers ->
    manifest -> generated `.map` file) would prevent accidental exports and
