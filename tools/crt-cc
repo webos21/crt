@@ -615,7 +615,29 @@ esac
 # exec boundary. CRT_WINDOWS_SYSTEM_LIBS remains a switch-only expert override
 # and is intentionally word-split like the historical implementation.
 if [ -n "${CRT_PORT_RPATH_DIR:-}" ]; then
-  set -- "$@" "-Wl,-rpath,${CRT_PORT_RPATH_DIR}"
+  if [ "$target_os" = macos ]; then
+    # @loader_path, not the real ${CRT_PORT_RPATH_DIR} value -- a real,
+    # confirmed bug (2026-09-16, found on a genuine clean `out/`-deleted
+    # build): this project's own macOS Mach-O acceptance gate rejects
+    # *any* absolute LC_RPATH on a packaged file outright (see tools/
+    # crt_binary_dependencies.py's own comment), and every one of this
+    # variable's own consumers -- a port's own shared library depending on
+    # a sibling port's shared library, both always installed directly into
+    # this exact same $CRT_PORT_RPATH_DIR itself -- lives in that identical
+    # directory, so a bare, portable `@loader_path` (no offset) is not just
+    # gate-compliant but the *correct* spelling: "look next to me," exactly
+    # matching CRT_PORT_RPATH_DIR's own stated purpose (see its own
+    # tools/crt-port-build.py comment). Confirmed for real: `libfreetype.
+    # dylib`/`libfreetype.6.dylib` (which need no other port's shared
+    # library at all) carried this absolute path as pure dead weight,
+    # unconditionally added regardless of whether anything actually needed
+    # it. Scoped to macOS only -- Linux's own equivalent has no such gate
+    # yet and is left unchanged rather than risking an unverified change
+    # with no Linux hardware in this session.
+    set -- "$@" "-Wl,-rpath,@loader_path"
+  else
+    set -- "$@" "-Wl,-rpath,${CRT_PORT_RPATH_DIR}"
+  fi
 fi
 if [ "$target_os" = windows ]; then
   windows_system_libs="${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"
@@ -695,6 +717,18 @@ if [ "$target_os" = macos ]; then
       "${CRT_SYSROOT}/lib/libc.dylib" "${CRT_SYSROOT}/lib/libm.dylib" \
       "${CRT_SYSROOT}/lib/libdl.dylib" \
       "${CRT_SYSROOT}/lib/libclang_rt.builtins.a" -lSystem
+    # ${CRT_SYSROOT}/lib is absolute here on purpose: CRT_SYSROOT and a
+    # port's own install prefix are the SAME directory only in the
+    # isolated stage build (crt-port-build.py invoked with
+    # --sdk-root == --install-prefix); in the ordinary in-tree
+    # `port-build-<name>` CMake targets, the port installs into
+    # ${CMAKE_BINARY_DIR}/port-tests/install, a different directory from
+    # CRT_SYSROOT, so substituting `@loader_path` here would point at
+    # the wrong place and break that build mode. The isolated-stage
+    # publish step (tools/build_stage_04_gfx_media.py's
+    # rewrite_stale_macho_rpaths()) is instead responsible for
+    # opportunistically converting this absolute rpath to `@loader_path`
+    # when it can confirm the two directories are actually the same.
     if [ "$want_real_apple_sdk" -eq 1 ]; then
       run_cc -nostdlib -nostartfiles -nodefaultlibs \
         "-Wl,-rpath,${CRT_SYSROOT}/lib" "$@"

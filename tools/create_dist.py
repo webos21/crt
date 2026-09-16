@@ -12,6 +12,7 @@ from pathlib import Path
 from create_rootfs import TOYBOX_APPLETS
 from crt_dist_prerequisites import external_prerequisites_for
 from crt_elf import remove_absolute_runtime_paths
+from crt_macho import rpaths as macho_rpaths
 
 
 # What "ships in every packaged distribution" is, on purpose, a single
@@ -320,6 +321,39 @@ def install_wrapper_applets(destination: Path, target_os: str) -> None:
                     shutil.copy2(source, alias_dir / candidate_name)
 
 
+def remove_absolute_macho_rpaths(path: Path) -> None:
+    """install_name_tool -delete_rpath's every absolute LC_RPATH entry out
+    of a macOS Mach-O file.
+
+    The Mach-O sibling of crt_elf.py's remove_absolute_runtime_paths(),
+    needed for the exact same reason (see this function's own call site
+    below): a real, confirmed bug (2026-09-16, found on a genuine clean
+    `out/`-deleted macOS build -- this project's own TODO.md Notice
+    explicitly warns a long-lived `out/` can hide exactly this class of
+    bug) -- `bin/make`/`system/bin/make`/`usr/bin/make` all carried an
+    absolute `LC_RPATH` pointing at this checkout's own temporary
+    `port-tests/install/lib` (tools/crt-port-build.py's own
+    CRT_PORT_RPATH_DIR, unconditionally absolute on every host, appended
+    by tools/crt-cc/tools/crt-c++'s own `-Wl,-rpath,${CRT_PORT_RPATH_DIR}`
+    to every port link so an actual port-to-port shared-library dependency,
+    e.g. libpng.so needing libz.so, can find it at runtime). GNU make
+    itself needs no such thing -- confirmed via `otool -L`: its only
+    dependency is the real `/usr/lib/libSystem.B.dylib` -- so the RPATH is
+    pure dead weight with zero runtime purpose, exactly like the already-
+    fixed Linux case below, just never given the macOS half of the same
+    fix. Unlike ELF's `DT_RPATH` (rewritable in place within the same
+    string-table slot, see crt_elf.py's own function), a Mach-O `LC_RPATH`
+    is a fixed-size load command that can only be removed by an actual
+    relink-shaped tool -- matches this project's own established
+    precedent in tools/build_stage_04_gfx_media.py's own
+    rewrite_stale_macho_rpaths(), which shells out to the same tool for
+    the same structural reason."""
+    for entry in macho_rpaths(path):
+        if entry.startswith("/"):
+            subprocess.run(["install_name_tool", "-delete_rpath", entry, str(path)],
+                            check=True)
+
+
 def write_sdk_files(root: Path, destination: Path, target_os: str, target_arch: str,
                     target_triple: str, stage: str, tools: dict[str, str],
                     redistributed_dependencies: list[dict]) -> None:
@@ -552,15 +586,24 @@ def main() -> None:
     copy_porting_sdk(root, destination)
     copy_stage_recipes([recipe.resolve() for recipe in args.stage_recipe], destination)
     install_wrapper_applets(destination, args.target_os)
-    if args.target_os == "linux":
-        # GNU make is a fully static port in this SDK (no DT_NEEDED entries),
-        # but its upstream CMake install still records the temporary port-test
-        # prefix as a RUNPATH.  It has no runtime purpose and must not survive
-        # in any of the three packaged shebang/PATH aliases.
+    if args.target_os in ("linux", "macos"):
+        # GNU make is a fully static port in this SDK (no DT_NEEDED entries
+        # on Linux; on macOS, confirmed via `otool -L`, only the real
+        # /usr/lib/libSystem.B.dylib), but its upstream CMake install still
+        # records the temporary port-test prefix as an absolute RUNPATH/
+        # RPATH regardless. It has no runtime purpose and must not survive
+        # in any of the three packaged shebang/PATH aliases. Linux-only
+        # until a real macOS clean-build attempt (2026-09-16) hit the
+        # identical gap via the Mach-O absolute-RPATH acceptance gate --
+        # see remove_absolute_macho_rpaths()'s own comment for the full
+        # story of that half.
         for relative in ("system/bin/make", "bin/make", "usr/bin/make"):
             packaged_make = destination / relative
             if packaged_make.is_file():
-                remove_absolute_runtime_paths(packaged_make)
+                if args.target_os == "linux":
+                    remove_absolute_runtime_paths(packaged_make)
+                else:
+                    remove_absolute_macho_rpaths(packaged_make)
     write_sdk_files(
         root, destination, args.target_os, normalized_arch,
         args.target_triple or f"{normalized_arch}-{args.target_os}", args.stage,

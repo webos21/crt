@@ -904,7 +904,21 @@ esac
 # preserves the position-sensitive ctor sentinels while allowing the CRT SDK,
 # compiler resource directory, and Windows SDK to contain spaces.
 if [ -n "${CRT_PORT_RPATH_DIR:-}" ]; then
-  set -- "$@" "-Wl,-rpath,${CRT_PORT_RPATH_DIR}"
+  if [ "$target_os" = macos ]; then
+    # @loader_path, not the real ${CRT_PORT_RPATH_DIR} value -- see the
+    # matching comment in tools/crt-cc for the full story: this project's
+    # own macOS Mach-O acceptance gate rejects any absolute LC_RPATH on a
+    # packaged file outright, and every consumer of this variable (a
+    # port's shared library depending on a sibling port's shared library)
+    # lives in this exact same directory, so a bare `@loader_path` is both
+    # gate-compliant and the semantically correct spelling. Confirmed for
+    # real: FreeType's own libfreetype.dylib/libfreetype.6.dylib (which
+    # need no other port's shared library) carried the absolute path as
+    # pure dead weight. Scoped to macOS only; Linux is left unchanged.
+    set -- "$@" "-Wl,-rpath,@loader_path"
+  else
+    set -- "$@" "-Wl,-rpath,${CRT_PORT_RPATH_DIR}"
+  fi
 fi
 if [ "$target_os" = windows ]; then
   windows_system_libs="${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"

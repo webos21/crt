@@ -437,6 +437,39 @@ if(TARGET crtmedia_backend_objects AND NOT CRT_TARGET_OS STREQUAL "windows")
   target_compile_options(crtmedia_backend_objects PRIVATE ${stage_c_options})
 endif()
 
+if(CRT_TARGET_OS STREQUAL "macos")
+  # A real, confirmed bug (2026-09-16, found on a genuine clean
+  # `out/`-deleted build): each of `crt_add_crtgfx_gpu_shared_target()`/
+  # `crt_add_crtgfx_skia_shared_target()`/`crt_add_crtmedia_targets()`
+  # above calls `crt_configure_shared_runtime(<target>)` for its own
+  # shared-library target, guarded by `if(COMMAND crt_configure_shared_
+  # runtime)` -- but that function is defined only in the *top-level,
+  # in-tree* `CMakeLists.txt` (this project's own repository build),
+  # which this standalone, predecessor-only stage project never includes
+  # at all. The guard silently no-ops here instead of erroring, so these
+  # three targets never got the macOS `INSTALL_RPATH ""` treatment
+  # `crt_configure_shared_runtime()` would have given them -- they fell
+  # through to crt-toolchain.cmake's own generic `CMAKE_INSTALL_RPATH`
+  # default (`create_dist.py`'s own template), a single absolute
+  # `${CRT_DISTRIBUTION_ROOT}/lib` path, exactly the class of leak the
+  # Mach-O acceptance gate now rejects unconditionally. Re-applying the
+  # identical fix directly here (rather than trying to share the function
+  # itself across two independent CMake projects) mirrors the in-tree
+  # behavior exactly: `@rpath/...` resolution for each of these
+  # libraries' own dependencies is satisfied by whatever *executable*
+  # loads them (dyld accumulates LC_RPATH across the whole load chain),
+  # which already carries its own portable `@loader_path/../../lib` entry
+  # (see this file's own executable-target fix further below) -- these
+  # libraries genuinely need no RPATH of their own, exactly like their
+  # in-tree counterparts. Placed here, after all three
+  # crt_add_..._target()/crt_add_crtmedia_targets() calls above, since
+  # `set_target_properties()` needs each target to already exist.
+  set_target_properties(crtgfx_gpu_shared crtgfx_skia_shared crtmedia_shared PROPERTIES
+    BUILD_WITH_INSTALL_RPATH TRUE
+    INSTALL_RPATH ""
+  )
+endif()
+
 enable_testing()
 function(crt_stage_register_test name target expected)
   set(predecessor_runtime "")

@@ -10,6 +10,127 @@ substantive update.
 
 ## 2026-09-16
 
+- **Found and fixed three real, previously-undiscovered absolute-macOS-RPATH
+  leaks, exposed only by a genuine `rm -rf out/` clean build.** TODO.md's own
+  Notice ("do not trust a long-lived `out/` directory") called this class of
+  bug exactly: every prior verification this session re-used an already-built
+  `out/` tree, so `crt-gfx-simple-dist`'s own `crt-c-dist` step had never
+  actually re-run `create_dist.py` against a genuinely fresh `01-c` build
+  since the Mach-O absolute-RPATH acceptance gate landed. A real clean build
+  failed immediately: `bin/make`/`system/bin/make`/`usr/bin/make` all carried
+  an absolute `LC_RPATH` pointing at this checkout's own temporary
+  `port-tests/install/lib`.
+
+  Root cause: `create_dist.py`'s own `remove_absolute_runtime_paths(packaged_
+  make)` fix (present since the original "packaged GNU make leak" ELF
+  finding) was gated `if args.target_os == "linux":` only -- the identical
+  gap existed on macOS the whole time, just never enforced until the new
+  Mach-O gate started checking absolute RPATH unconditionally. `otool -L`
+  confirms GNU make needs no `@rpath` dependency at all (only the real
+  `/usr/lib/libSystem.B.dylib`), so the RPATH was pure dead weight. Fixed by
+  extending the same removal to macOS via a new `remove_absolute_macho_
+  rpaths()` (shells out to `install_name_tool -delete_rpath`, the Mach-O
+  analog of `crt_elf.py`'s in-place `DT_RPATH` rewrite, since a Mach-O
+  `LC_RPATH` is a fixed-size load command that cannot be truncated in place).
+
+  Continuing the same clean-build chain into the isolated
+  `03-gfx-simple -> 04-gfx-media` stage surfaced two more instances of the
+  identical root cause, both stemming from `tools/crt-cc`'s/`tools/crt-c++`'s
+  own unconditional, always-absolute macOS shared-library RPATH additions
+  (never audited against the new gate before, since nothing had run a
+  genuinely fresh clean build against it since the gate landed):
+
+  1. **`tools/crt-port-build.py`'s own `CRT_PORT_RPATH_DIR`** (`-Wl,-rpath,
+     ${CRT_PORT_RPATH_DIR}`, meant to let one port's shared library find a
+     sibling port's, e.g. libpng needing libz, both always installed
+     directly into the same `PORT_PREFIX/lib`) -- confirmed via `otool -L`
+     that FreeType's own `libfreetype.dylib`/`libfreetype.6.dylib` need no
+     other port's shared library at all, so this was equally pure dead
+     weight there. Fixed in both `tools/crt-cc` and `tools/crt-c++`: on
+     macOS only (Linux unchanged, no hardware available this session to
+     verify a Linux-side change), emit a bare, portable `@loader_path`
+     instead of the real absolute value -- semantically correct as well as
+     gate-compliant, since every real consumer of this variable lives in
+     that exact same directory.
+  2. **`tools/crt-cc`'s own macOS `shared_mode` branch's `-Wl,-rpath,
+     ${CRT_SYSROOT}/lib`** (added unconditionally to resolve `@rpath/libc.
+     dylib`/`libm.dylib`/`libdl.dylib` for any dylib built through the C
+     wrapper, including the CMake-built `crtgfx_gpu_shared`/`crtmedia_
+     shared` targets below -- CMake's own `INSTALL_RPATH ""` only
+     suppresses the RPATH *CMake itself* would add; it does nothing about
+     one already baked into the compiler wrapper's own link flags).
+     **First attempt (retracted): swap in a bare `@loader_path` directly
+     inside `crt-cc`.** That was only correct for the isolated stage build
+     (`crt-port-build.py` invoked with `--sdk-root` == `--install-prefix`,
+     so `CRT_SYSROOT` and a port's own install prefix are the same
+     directory there). Re-examined after an explicit request to check for
+     cross-build-mode regressions, and confirmed via the same `CRT_PORT_
+     RPATH_DIR` evidence from fix 1: the ordinary in-tree `port-build-
+     <name>` CMake targets install into `${CMAKE_BINARY_DIR}/port-tests/
+     install`, a *different* directory from `CRT_SYSROOT` -- `@loader_path`
+     there would point at the wrong place. **Actual fix:** left `crt-cc`
+     emitting the real absolute `${CRT_SYSROOT}/lib` value (correct and
+     safe for every build mode), and instead taught `tools/build_stage_04_
+     gfx_media.py` to canonicalize it: right after `cmake --install`, and
+     before this stage's own internal `verify_dist.py` self-check runs
+     (which -- confirmed by re-running this exact scenario -- rejects the
+     absolute value outright even though it is, at that exact point,
+     already self-referential), it now calls the same Mach-O RPATH
+     rewriter used by the final publish step (`rewrite_stale_macho_
+     rpaths()`) with `old_root == new_root == staged`, which swaps any
+     RPATH that resolves to a file's own containing directory for
+     `@loader_path`. This confines the portability conversion to the one
+     build mode where the co-location assumption actually holds, instead
+     of baking a mode-specific assumption into the general-purpose
+     compiler wrapper every build mode shares. `tools/crt-c++`'s
+     structurally identical addition is gated behind `runtime_linkage =
+     shared` (default `static`, so unexercised by any current C++ port) and
+     was deliberately left unchanged rather than editing untested code.
+
+  Separately, `distribution/stages/04-gfx-media/CMakeLists.txt`'s own three
+  shared-library targets (`crtgfx_gpu_shared`/`crtgfx_skia_shared`/
+  `crtmedia_shared`) each call `crt_configure_shared_runtime(<target>)` --
+  guarded by `if(COMMAND crt_configure_shared_runtime)` -- but that function
+  is defined only in the *top-level, in-tree* `CMakeLists.txt`, which this
+  standalone, predecessor-only stage project never includes; the guard
+  silently no-ops instead of erroring, so these targets never received the
+  macOS `INSTALL_RPATH ""` treatment the in-tree build gives their
+  identically-named counterparts. Reapplied the same two properties
+  (`BUILD_WITH_INSTALL_RPATH TRUE`, `INSTALL_RPATH ""`) directly in this
+  file, placed after all three `crt_add_..._target()`/`crt_add_crtmedia_
+  targets()` calls (a `set_target_properties()` before the target exists
+  fails configure outright -- caught and corrected via the same real
+  rebuild, not guessed). In the actually-rebuilt SDK this ends up mostly
+  redundant with fix 2 above for the two C targets (`build_stage_04_gfx_
+  media.py`'s own post-install canonicalization pass already satisfies the
+  gate for them) but is the active, sole fix for the C++ target
+  `crtgfx_skia_shared` (whose `crt-c++` build path adds no RPATH of its own
+  at all under the default static runtime linkage) -- kept for both
+  regardless, as a correct defense-in-depth match for the in-tree behavior
+  it was always supposed to have.
+
+  Verified for real, end to end, from a genuinely fresh `out/`: `crt-c-dist`
+  through `crt-gfx-simple-dist` all pass; a full isolated `03-gfx-simple ->
+  04-gfx-media` stage build (real FreeType/FFmpeg/Skia, the standalone CMake
+  project's 8/8 ctest binaries, both packaged examples presenting a real
+  window) completes and `verify_dist.py` passes cleanly; `otool -l` on every
+  previously-offending file now shows either no `LC_RPATH` at all or exactly
+  one portable `@loader_path`/`@loader_path/../../lib` entry; and the same
+  `mv`-to-a-new-path reproduction from the earlier RPATH-portability fix
+  still presents correctly for both packaged examples. `cmake --workflow
+  --preset macos-host-ninja-debug` stays 100% (104/104).
+
+  A follow-up safety review (prompted by an explicit question: does this
+  change risk other OS builds?) re-examined fix 2 above and found it had
+  quietly assumed `CRT_SYSROOT` and a port's own install prefix are always
+  the same directory -- true only for this isolated stage build, false for
+  the ordinary in-tree `port-build-<name>` CMake targets. Retracted the
+  `crt-cc`-level `@loader_path` substitution and replaced it with the
+  narrower, isolated-stage-only canonicalization described above; re-ran
+  the full verification (isolated stage build, `otool -l`, `mv`
+  relocation, `cmake --workflow`) against the corrected fix with the same
+  results.
+
 - **Root-caused and fixed the Linux/aarch64 packaged Skia heap-corruption
   blocker.** A fresh pinned m148/lavapipe reproduction failed 3/3 with
   `SIGTRAP`. GDB stopped in `crt_malloc_check_owner()` before the later glibc

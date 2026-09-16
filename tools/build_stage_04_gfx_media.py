@@ -149,6 +149,23 @@ def rewrite_stale_macho_rpaths(root: Path, old_root: Path, new_root: Path) -> No
             if matched_old is None:
                 continue
             new_value = new_str + value[len(matched_old):]
+            final_parent = str(Path(new_str) / path.relative_to(root).parent)
+            if new_value == final_parent:
+                # This rpath would end up pointing at the exact directory
+                # this file itself will be published into (e.g. tools/
+                # crt-cc's own `-Wl,-rpath,${CRT_SYSROOT}/lib` for a port's
+                # shared library that also installs into .../lib) -- i.e.
+                # co-located, by construction, only for this isolated
+                # stage build (CRT_SYSROOT == the port's own install
+                # prefix here). Prefer the portable `@loader_path` in that
+                # case instead of baking in this specific --output path,
+                # so the published tree still passes the Mach-O absolute-
+                # RPATH gate after a later `mv`/re-publish. Do NOT make
+                # tools/crt-cc itself emit `@loader_path` for this: the
+                # ordinary in-tree `port-build-<name>` CMake targets do
+                # NOT co-locate CRT_SYSROOT with a port's own install
+                # prefix, so that substitution would be wrong there.
+                new_value = "@loader_path"
             if new_value in existing_rpaths:
                 # A second, differently-spelled RPATH entry for the exact
                 # same real directory already exists in this file (e.g.
@@ -917,6 +934,26 @@ def main() -> None:
                  "--output-on-failure"], env)
         with timings.measure("install 04-gfx-media"):
             run(["cmake", "--install", str(build_dir)], env)
+
+        if sys.platform == "darwin":
+            # tools/crt-cc deliberately embeds an ABSOLUTE
+            # `${CRT_SYSROOT}/lib` RPATH in every macOS shared library it
+            # links in shared_mode (see its own comment) -- correct for
+            # every build mode, since CRT_SYSROOT is not always the same
+            # directory as a port's own install prefix, but stale/non-
+            # portable for the ordinary in-tree `port-build-<name>` case.
+            # Here, though, CRT_SYSROOT == staged by construction (this
+            # isolated stage build always configures both to the same
+            # SDK-in-progress), so the freshly-installed shared libraries'
+            # own RPATH already resolves to their own containing
+            # directory. Canonicalize that to the portable `@loader_path`
+            # now, before `verify 04-gfx-media distribution` below runs
+            # this project's own Mach-O acceptance gate against `staged`
+            # -- that gate rejects any absolute LC_RPATH outright, and
+            # would otherwise fail here even though the path is, for this
+            # specific build, already correct.
+            with timings.measure("portable-ize self-referential macOS rpaths"):
+                rewrite_stale_macho_rpaths(staged, staged, staged)
 
         with timings.measure("write dependency provenance and manifest"):
             manifest["stage"] = "04-gfx-media"
