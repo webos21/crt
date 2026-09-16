@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 from crt_dist_prerequisites import external_prerequisites_for
+from crt_elf import needed_libraries
 
 
 DEFAULT_DEPENDENCY_JOBS = max(1, min(os.cpu_count() or 2, 4))
@@ -676,7 +677,23 @@ def build_example(staged: Path, temp_root: Path, name: str,
     ], env)
     run(["cmake", "--build", str(build_dir)], env)
     suffix = ".exe" if env["CRT_TARGET_OS"] == "windows" else ""
-    run([str(build_dir / f"{executable_name}{suffix}"), "1"], env)
+    executable = build_dir / f"{executable_name}{suffix}"
+    validate_example_runtime_dependencies(executable, env["CRT_TARGET_OS"])
+    run([str(executable), "1"], env)
+
+
+def validate_example_runtime_dependencies(executable: Path, target_os: str) -> None:
+    if target_os != "linux":
+        return
+    forbidden = {
+        "libc.so", "libm.so", "libdl.so", "libc++.so", "libc++.so.1",
+        "libc++abi.so", "libc++abi.so.1", "libunwind.so", "libunwind.so.1",
+    }
+    mixed = sorted(forbidden.intersection(needed_libraries(executable)))
+    if mixed:
+        raise SystemExit(
+            f"{executable}: static Linux example directly needs shared CRT "
+            f"runtime libraries: {', '.join(mixed)}")
 
 
 def main() -> None:

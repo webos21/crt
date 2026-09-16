@@ -8,6 +8,39 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-16
+
+- **Root-caused and fixed the Linux/aarch64 packaged Skia heap-corruption
+  blocker.** A fresh pinned m148/lavapipe reproduction failed 3/3 with
+  `SIGTRAP`. GDB stopped in `crt_malloc_check_owner()` before the later glibc
+  heap abort: the 48-byte string allocation belonged to the shared `libc.so`
+  allocator (`owner=0xfffff7a41d50`), but `SkSL::Analysis::IsAssignable()`
+  reached the executable's statically linked `operator delete`/`free`
+  (`&heap_head=0xaaaaab045eb0`). The readable payload (`"cannot modify ..."`)
+  and intact block magic showed this was a real cross-instance free, not an
+  earlier SkSL overwrite. The earlier `mangledName()`/Mesa/LLVM attributions
+  were downstream detection sites.
+
+  Root cause was the standalone Linux examples' stale shared-library
+  workaround. They deliberately select `libcrtgfx*.a`, and the wrappers
+  already provide the complete static CRT closure, but their CMake files also
+  explicitly linked `libc++.so.1` and `libunwind.so`. Out-of-line libc++ code
+  could therefore allocate through shared `libc.so`, while inline/static ABI
+  code freed through the executable's separate allocator. Removed those
+  shared CRT links from both installed GPU examples. Added a stage-time ELF
+  gate that rejects direct `DT_NEEDED` entries for shared CRT runtimes in
+  Linux static examples, plus focused unit coverage.
+
+  The fixed Skia executable directly needs only host `libvulkan.so.1` and
+  `libwayland-client.so.0`; with lavapipe explicitly selected and the shader
+  cache disabled it presented successfully 3/3 (`presented=1`, exit 0). A
+  current-source stage rerun passed configure, build, 8/8 CTest, install, the
+  new dependency gate, and both installed GPU example runs. Its final
+  `verify_dist.py` step exposed an unrelated stale-input mismatch: the reused
+  older 03-stage predecessor lacks the newer packaged `tools/crt_macho.py`
+  required by the current validator. Fresh-chain publication remains in
+  `TODO.md`; it is no longer blocked by Skia presentation.
+
 ## 2026-09-15
 
 - **Completed the current Distribution hardening workstream after the final

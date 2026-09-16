@@ -63,47 +63,38 @@ window/GPU/Skia split are complete. Predecessor-only isolated-stage
 build/package/verify acceptance through the option-ON
 `03-gfx-simple -> 04-gfx-media` transition, including path-with-spaces
 acceptance, is complete on Windows and macOS; the dated evidence belongs in
-[`HISTORY.md`](HISTORY.md). **Linux/aarch64 final acceptance is now the active
-native-device handoff**: the
-`readdir`/`opendir`-vs-`strtof_l` ELF symbol collision that used to crash
-`crtgfx_skia_example` immediately is fixed and validated on both
-Linux/aarch64 and WSL2 Ubuntu 26.04/x86_64 (`libc.so`'s own `CRT_1.0` ELF
-symbol-version namespace; see `HISTORY.md`'s 2026-09-14 entries) -- but that
-fix uncovered a second, separate, pre-existing Skia heap-corruption bug
-blocking the same example, tracked below. The isolated stage-build tool's
-own pipeline still cannot reach `verify_dist.py`/atomic publish on Linux as
-a result. Distribution hardening is complete, so the native Linux/aarch64
-session should now resume this one blocker using the ordered execution plan
-below.
+[`HISTORY.md`](HISTORY.md). The Linux/aarch64 Skia heap-corruption blocker was
+root-caused and fixed on 2026-09-16: the standalone example mixed static and
+shared CRT C++ runtimes, so `libc++.so.1` allocated a string buffer that the
+executable's static `operator delete` handed to a different allocator
+instance. The fixed installed example presents successfully with a cold/
+disabled shader cache. Linux release sign-off still needs one fresh cumulative
+chain through `verify_dist.py` and atomic publication; the diagnostic rerun
+used an older 03-stage predecessor whose packaged tool set predates the latest
+validator.
 
-- [ ] **Active native-device handoff: Linux/aarch64 Skia heap corruption blocking
-  `examples/gfx-skia` presentation on the one physical acceptance host.** The
-  bad free is observed in CRT's own imported `libc++.so.1`, called from
-  `SkSL::FunctionDeclaration::mangledName()`; this identifies where the bad
-  pointer is detected, **not yet where it was first corrupted or which module
-  corrupted it**. The former Mesa/LLVM attribution was retracted on 2026-09-15.
-  `strtof_l` is fixed; `CRT_ENABLE_DEBUG_MALLOC` is complete and
-  validated (guard-malloc work stays deferred -- the owner/double-free/
-  canary trio was sufficient to clear CRT's own allocator, so there is no
-  concrete need for it yet); the glibc-side abort inside Mesa's lavapipe
-  ICD that motivated the whole Mesa A/B comparison (steps 3-3.1 below)
-  turned out to be a *downstream symptom*, not the root cause -- an
-  ASan-instrumented Mesa build (built only to get a precise stack for
-  what looked like a Mesa/LLVM defect) caught the real bad-free
-  first, and re-checking that ASan report's own module attribution under
-  GDB (`info sharedlibrary`) showed it was never Mesa or LLVM at all: see
-  step 3.1 below for the full correction. Full evidence: `HISTORY.md`'s
-  2026-09-15 entries. Steps 1-3.1 below are kept for the historical record
-  of how this was narrowed down (each closed off one alternative explanation
-  in turn). Do not spend more work on the sandbox-specific minimal-ASan startup
-  failure or another Mesa build now. Linux release sign-off now makes this the
-  active blocker.
+- [ ] **Final Linux/aarch64 `03-gfx-simple -> 04-gfx-media` release sign-off
+  after resolving the Skia heap blocker.** The former Mesa/LLVM/SkSL
+  attribution was retracted: the bad free was a project-owned link-policy bug,
+  now fixed by keeping the standalone Linux examples on the static CRT runtime
+  closure supplied by `crt-cc`/`crt-c++` and rejecting a direct shared CRT
+  `DT_NEEDED` entry in the stage builder.
+  The remaining work is deliberately narrow: build from a fresh current
+  03-stage predecessor and fresh libc++/FreeType/FFmpeg/Skia inputs; run the
+  cold-cache presentation matrix, installed examples, `verify_dist.py`, and
+  atomic publication. The completed investigation below is retained only as
+  context; detailed evidence belongs in `HISTORY.md`.
 
-  **Linux/aarch64 execution plan (carry this section into the native Codex
-  session and complete/document one tranche at a time):**
+  **Linux/aarch64 execution record and remaining sign-off:**
 
-  A. **Freeze and reproduce the exact failing input without rebuilding the
-     world.** Start from synchronized `main` at or after `763a2d5`; require a
+  A. **Completed 2026-09-16: freeze and reproduce the exact failing input.**
+     The failing executable SHA-256 was
+     `a85d4e633a0caebfaa0135a8ae2037aa49eb7dfdcd6302de8ff2cfaae873cc03`;
+     it failed 3/3 with `SIGTRAP` using the pinned lavapipe ICD and disabled
+     shader cache.
+     **Original procedure:** Freeze and reproduce the exact failing input
+     without rebuilding the world. Start from synchronized `main` at or after
+     `763a2d5`; require a
      clean worktree. Record the failing SDK/example SHA-256, stage source and
      recipe digest, pinned Skia revision, CPU/kernel, compiler, Mesa/Vulkan ICD,
      Wayland compositor/session, and the exact environment/command. Preserve
@@ -111,7 +102,7 @@ below.
      an explicitly selected ICD JSON, reproduce the existing binary three
      times. If it no longer reproduces, stop and record the environmental delta
      rather than changing code speculatively.
-  B. **Rebuild only the cached pinned Skia/debug-facing layer.** Keep
+  B. **Completed 2026-09-16: inspect the cached source-visible failure.** Keep
      FreeType/FFmpeg and the predecessor SDK unchanged. Rebuild the pinned Skia
      objects and example with usable source DWARF, `-O1` or `-Og`, and
      `-fno-omit-frame-pointer`; do not perform a fresh full isolated-04 build.
@@ -119,7 +110,11 @@ below.
      and inspect the live `FunctionDeclaration`, parameter span/vector, and the
      result string's storage before growth. This replaces the optimized
      backtrace whose repeated frames were an unwinding artifact.
-  C. **Find the first invalid write/UAF, not the later bad-free.** Instrument
+  C. **Completed 2026-09-16: find the first invalid operation.** The owner
+     diagnostic trapped before metadata corruption: allocation owner
+     `0xfffff7a41d50` was the shared `libc.so` allocator, while the freeing
+     instance was the executable's static allocator at `0xaaaaab045eb0`.
+     **Original fallback:** Instrument
      Skia/SkSL, the CRT bridge, and the example with ASan (and narrowly useful
      UBSan checks), rather than rebuilding/instrumenting Mesa again. Re-run the
      same cold shader-compilation path. If sanitizer integration still reports
@@ -130,7 +125,7 @@ below.
      reproducer to separate SkSL object lifetime from Ganesh/Vulkan inputs.
      Choose this source/lifetime investigation over chasing the unrelated
      standalone-ASan `/proc/self/cmdline` startup failure.
-  D. **Classify with one controlled cross-architecture comparison.** Once a
+  D. **Superseded by the deterministic link diagnosis.** Once a
      focused reproducer or exact first-write site exists, run the same case on
      WSL Linux/x86_64. Arm64-only failure directs the investigation to AArch64
      ABI/alignment/code generation or libc++ layout; a cross-architecture
@@ -138,7 +133,13 @@ below.
      CPU-only pass with a Vulkan-only failure directs it to the Ganesh/Vulkan
      ownership/caching boundary. Do not restart Mesa-version, worker-count, or
      shader-cache A/B work: those questions are already closed below.
-  E. **Fix at the owned boundary and add a focused regression.** If the cause
+  E. **Completed 2026-09-16: fix at the owned boundary and add a focused
+     regression.** The Linux examples no longer link shared `libc++`/
+     `libc++abi`/`libunwind`; the stage builder inspects `DT_NEEDED` and fails
+     if a static Linux example reintroduces one. The fixed Skia example
+     (`1f3350fd7a217e08251fcd50cb745034c612c5be0093540ecd4f542ec7dba145`)
+     presented 3/3 with only host Vulkan and Wayland shared dependencies.
+     **Original disposition:** If the cause
      is CRT/Skia build configuration, ABI, or bridge ownership, fix the
      project-owned build/module/code boundary. If it is a pinned upstream Skia
      defect, identify the upstream fix and prefer a reviewed pin update; do not
@@ -146,7 +147,8 @@ below.
      smallest deterministic regression possible, preferably the CPU-only SkSL
      case, and run the ordinary Linux plus Windows/macOS regression lanes
      appropriate to the touched boundary.
-  F. **Run the expensive acceptance exactly once after the fix.** From fresh
+  F. **Remaining: run the expensive release acceptance once from a fresh
+     cumulative predecessor chain.** From fresh
      libc++/FreeType/FFmpeg/Skia inputs, run the full predecessor-only isolated
      `03-gfx-simple -> 04-gfx-media` build on native Linux/aarch64. Use a cold
      shader cache and run presentation three times with Vulkan validation OFF
@@ -160,13 +162,9 @@ below.
 
   **Exit policy:** do not declare Linux 04 release acceptance or the Linux
   `04 -> 05-js` isolated chain complete until tranche F passes. Hardware-decode
-  API/backend work on other hosts may proceed independently, but Linux
-  Skia/Vulkan zero-copy integration should wait so this corruption is not mixed
-  with a second ownership problem. If tranches A-C still cannot identify a
-  first-write site after a bounded native-device investigation, preserve the
-  reproducible debug package and exact evidence, move the item back to a known
-  limitation, and continue unrelated upper-runtime work without weakening
-  `verify_dist.py`.
+  API/backend work on other hosts may proceed independently. Do not weaken
+  `verify_dist.py` or add a Mesa/Skia exception for the resolved link-policy
+  defect.
 
   **Established evidence and closed alternatives (retained for the native
   handoff; detailed command output is in `HISTORY.md`):**
@@ -310,10 +308,10 @@ below.
      Mesa candidate -- only the preserved `crtgfx_skia_example` binary is
      needed for A/B; re-run the full stage once, at the end, only against
      whichever ICD turns out known-good.
-     **Superseded by S3.1's finding**: this whole Mesa A/B thread was a
+     **Superseded by the allocator-owner diagnosis**: this whole Mesa A/B thread was a
      necessary and correct way to get a clean, ASan-capable reproduction,
-     but the defect it eventually surfaced (via the ASan build) is in
-     CRT/Skia's own code, not in whichever Mesa/lavapipe build is
+     but the defect it eventually surfaced is in the standalone example's
+     CRT runtime linkage, not in CRT, Skia, or whichever Mesa/lavapipe build is
      selected -- so no further Mesa version/ICD comparison is expected to
      change the outcome. Real GPU hardware, were it available, would
      still be worth trying once a fix exists, purely to confirm the fixed
@@ -327,11 +325,10 @@ below.
      for every diagnostic condition (only the preserved example binary is
      needed until a fix is ready to verify); do not expand
      `CRT_ENABLE_GUARD_MALLOC` or other CRT allocator diagnostics further
-     right now -- CRT's own allocator is already cleared, and the current
-     detection site is Skia/SkSL using libc++, not the allocator itself.
-  5. Once S3.1's decision point is resolved and the actual bug in
-     `SkSL::FunctionDeclaration::mangledName()` (or whatever calls it) is
-     root-caused and fixed in Skia's own code, re-run the full real
+     right now -- the existing owner diagnostic identified the cross-instance
+     allocator boundary precisely and no broader allocator instrumentation is
+     needed for this issue.
+  5. The project-owned mixed-runtime link bug is fixed. Re-run the full real
      isolated Linux arm64 04 build from fresh libc++/FreeType/FFmpeg/Skia
      and complete `verify_dist.py`/atomic publication. Independently of
      this investigation, the imported-libc++ stale-relink and packaged
@@ -340,10 +337,9 @@ below.
      `HISTORY.md`.
   **The "reconsider whether an external ICD defect should block
   `verify_dist.py`" policy question this item previously raised no longer
-  applies** -- the defect is CRT/Skia's own, not an external Mesa/lavapipe
-  limitation, so there is nothing external to carve out an acceptance
-  exception for. `verify_dist.py`/atomic publication should simply stay
-  blocked until the actual Skia-side bug is fixed.
+  applies.** The defect was the standalone example's CRT runtime linkage and
+  is fixed without a Mesa or Skia source patch. Keep the ordinary gate intact;
+  only the fresh-chain sign-off above remains.
 
 ## Planned
 

@@ -72,38 +72,10 @@ target_include_directories(crtgfx_gpu_example PRIVATE "${CRTGFX_INCLUDE_DIR}")
 target_link_libraries(crtgfx_gpu_example PRIVATE
   "${CRTGFX_GPU_LIBRARY}" "${CRTGFX_WINDOW_LIBRARY}")
 if(NOT WIN32 AND NOT APPLE)
-  # A third real, confirmed bug (2026-09-11), found right after the two
-  # above: this executable's own freestanding link (crt-toolchain.cmake's
-  # --sysroot=/-nostdinc/no default -lc) makes GNU ld default to
-  # --no-allow-shlib-undefined (unlike a `-shared` library, which
-  # defaults the other way) -- it insists on verifying every symbol each
-  # linked .so's own transitive NEEDED entries would provide, and can
-  # only do that by actually locating those files or (for a symbol with
-  # no NEEDED entry pointing anywhere at all) by that symbol's provider
-  # being explicitly present on this same link line. CRTGFX_GPU_LIBRARY
-  # (libcrtgfx_gpu.so) itself needs the real host libvulkan.so --
-  # `-rpath-link` (below) is the standard, sufficient fix for that, since
-  # ld only needs to *locate* a real NEEDED entry it already knows about.
-  # CRTGFX_WINDOW_LIBRARY (libcrtgfx.so) additionally needs libc++.so ->
-  # libc++abi.so.1's own `_Unwind_*` symbols -- and `-rpath-link` alone
-  # does NOT fix this half: `libstdc++/third_party/libcxxabi/recipe.json`
-  # deliberately builds libc++abi against the portable Itanium `_Unwind_*`
-  # ABI surface without linking a concrete unwinder itself
-  # (LIBCXXABI_USE_LLVM_UNWINDER=OFF, see that recipe's own notes) --
-  # confirmed directly via `readelf -d`: libc++abi.so.1 carries no NEEDED
-  # entry for libunwind.so at all, so there is nothing for `-rpath-link`
-  # to even locate on this symbol's behalf. Upstream's usual answer is
-  # libc++'s own ABI linker script (`INPUT(libc++.so.1 -lc++abi
-  # -lunwind)`) auto-adding `-lunwind` for any `-lc++`/libc++.so
-  # consumer at link time -- but this project's own imported libcxx
-  # recipe now builds with `LIBCXX_ENABLE_ABI_LINKER_SCRIPT=OFF` (see
-  # that recipe's own notes: the script itself is not a real, loadable
-  # ELF, which broke *runtime* loading for anything with libc++.so as a
-  # literal NEEDED entry) -- trading that auto-add away as a direct
-  # consequence. Fixed the same way any consumer of a libc++abi built
-  # this way normally must: link libunwind.so directly and explicitly,
-  # matching CRTGFX_GPU_LIBRARY/CRTGFX_WINDOW_LIBRARY's own already-
-  # established explicit-.so-path convention in this same file.
+  # Linux selects the static crtgfx archives above, and tools/crt-cc adds
+  # the static CRT closure. Keep this executable free of direct shared CRT
+  # dependencies; only the host Vulkan and Wayland boundaries below should
+  # survive in DT_NEEDED.
   find_library(CRTGFX_EXAMPLE_VULKAN_LIB NAMES vulkan vulkan.so.1
     NO_CMAKE_FIND_ROOT_PATH)
   if(NOT CRTGFX_EXAMPLE_VULKAN_LIB)
@@ -214,34 +186,6 @@ if(NOT WIN32 AND NOT APPLE)
   target_link_libraries(crtgfx_gpu_example PRIVATE
     "${CRTGFX_EXAMPLE_VULKAN_LIB}" "${CMAKE_SYSROOT}/lib/libxkbcommon.a"
     "${CMAKE_SYSROOT}/lib/libxdg-shell-protocol.a" "${CRTGFX_EXAMPLE_WAYLAND_CLIENT_LIB}")
-  target_link_libraries(crtgfx_gpu_example PRIVATE "${CMAKE_SYSROOT}/lib/libunwind.so")
-  # A fourth real, confirmed bug (2026-09-13), found right after fixing
-  # the libunwind.so gap above: even with that fix, the rebuilt example
-  # still failed at *runtime*, this time against a real, correctly-
-  # installed `${CMAKE_SYSROOT}/lib/libc++.so` -- `error while loading
-  # shared libraries: /lib/aarch64-linux-gnu/libc++.so: file too short`,
-  # the *host's own* real llvm-18 package's identical-by-name ABI linker
-  # script (confirmed via `file`/`cat`: same 37-byte `INPUT(...)` shape
-  # this project's own now-disabled one used to be). Root cause: this
-  # executable's own `readelf -d` RUNPATH correctly lists
-  # `${CMAKE_SYSROOT}/lib` first -- but DT_RUNPATH (unlike the older,
-  # deprecated DT_RPATH) is *not* transitive: it only ever governs
-  # resolving the object that carries it own *direct* NEEDED entries,
-  # never a dependency's dependency. `libcrtgfx.so` itself needs
-  # `libc++.so` (confirmed via its own `readelf -d`: a real NEEDED entry,
-  # but no RPATH/RUNPATH of its own at all), so the dynamic loader falls
-  # through to the ordinary system search *for that one transitive need
-  # specifically*, landing on the host's own broken same-named file --
-  # this executable's own correct RUNPATH is consulted only for its own
-  # direct links (`libcrtgfx_gpu.so`/`libcrtgfx.so`/`libunwind.so.1`,
-  # which is why those already resolved fine). Fixed by linking the
-  # SDK's own real `libc++.so.1` directly and explicitly here too: once
-  # this executable has its *own* direct NEEDED entry for it, satisfied
-  # via its own already-correct RUNPATH, the loader resolves and loads
-  # the SDK's real copy *before* processing `libcrtgfx.so`'s own
-  # transitive need for the same SONAME -- an already-loaded dependency
-  # is never re-resolved via a different (here, absent) RPATH.
-  target_link_libraries(crtgfx_gpu_example PRIVATE "${CMAKE_SYSROOT}/lib/libc++.so.1")
   # A fifth real bug (2026-09-13) -- turned out to be the SAME one
   # libcrtgfx/cmake/crtgfx_gpu_targets.cmake's own `crtgfx_gpu` INTERFACE
   # target already found and fixed on 2026-09-03, just never reachable
@@ -278,4 +222,3 @@ if(NOT WIN32 AND NOT APPLE)
   # wrinkle this flag cannot reach by itself.
   target_link_options(crtgfx_gpu_example PRIVATE -Wl,--exclude-libs,ALL)
 endif()
-

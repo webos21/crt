@@ -5,7 +5,7 @@ does not repeat the implementation diary in [`HISTORY.md`](HISTORY.md), the
 open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting_status.md`](docs/porting_status.md).
 
-Last synchronized with the source tree and git history: **2026-09-15**.
+Last synchronized with the source tree and git history: **2026-09-16**.
 Updated only on explicit request from here on, not as part of routine
 documentation passes -- see `TODO.md`'s Notice section. It may lag behind
 `HISTORY.md`/`TODO.md` between syncs; those two are the source of truth.
@@ -81,10 +81,11 @@ The software/CPU graphics baseline is complete on all three hosts:
   Ganesh renders through Vulkan on Linux, D3D12 on Windows, and Metal on
   macOS. The low-level GPU presentation path and resize/swapchain recreation
   have been verified on all three hosts. Packaged Skia/Ganesh live
-  presentation remains blocked on Linux by a separate Skia heap corruption;
-  the earlier CRT-libc/glibc symbol collision is fixed with CRT's private
-  `CRT_1.0` ELF namespace on both aarch64 and x86_64. Windows and macOS pass
-  the packaged live path.
+  presentation now passes on Linux/aarch64 after removing a mixed static/
+  shared CRT C++ runtime link from the standalone example; Windows and macOS
+  also pass the packaged live path. The earlier CRT-libc/glibc symbol
+  collision remains fixed with CRT's private `CRT_1.0` ELF namespace on both
+  aarch64 and x86_64.
 
 Decoder-texture zero-copy, full font shaping/fallback/ICU, a full Wayland
 compositor, and a Chromium Ozone backend are not completion claims.
@@ -137,8 +138,8 @@ target.
   `03-gfx-simple -> 04-gfx-media`, with Skia and FFmpeg genuinely enabled
   (not the in-repo cumulative pass's default-OFF state), is complete on
   Windows and macOS. Linux's external-prerequisite/ELF audit is complete and
-  its low-level Vulkan example presents, but the packaged Skia example still
-  crashes before final verification/atomic publication.
+  both installed Vulkan examples present. A fresh cumulative Linux chain is
+  still required for final `verify_dist.py`/atomic-publication sign-off.
 - Distribution hardening is complete for the current 01-through-04 contract:
   predecessor relinking, external-prerequisite manifests, ELF/PE/Mach-O
   dependency inventory, ELF RUNPATH and Mach-O install-name/RPATH portability,
@@ -236,12 +237,10 @@ statuses, and exceptions are maintained in:
 - Image codecs, shaping, fallback fonts, ICU, and platform font discovery are
   not yet completion claims.
 - GPU decode-texture import and dmabuf-style zero-copy remain future work.
-  Linux packaged Skia live presentation also remains open: one physical
-  Linux/aarch64 lavapipe acceptance host reproducibly reaches a bad free in
-  the SDK's libc++ while SkSL `mangledName()` grows a string. That is the
-  detection site, not a proven first-corruption site; the former Mesa/LLVM
-  attribution is retracted. It is recorded for later cross-device/newer-Skia
-  confirmation rather than remaining the active distribution task.
+  Linux packaged Skia live presentation passes on the physical aarch64
+  lavapipe host. The former `mangledName()`/Mesa/LLVM attribution was a
+  downstream symptom of mixing static and shared CRT allocator instances in
+  the standalone example's link; no Skia or Mesa source patch is carried.
 - WSLg can negotiate the Wayland protocol while still differing from a normal
   Linux compositor in visible presentation behavior. It is useful evidence,
   but is not a substitute for a real Linux desktop run.

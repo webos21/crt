@@ -99,6 +99,27 @@ class Stage04CacheTest(unittest.TestCase):
         jobs_index = command.index("--jobs")
         self.assertEqual(command[jobs_index + 1], "7")
 
+    def test_linux_example_rejects_mixed_shared_crt_runtime(self) -> None:
+        executable = self.temp_root / "example"
+        with mock.patch.object(
+                stage04, "needed_libraries",
+                return_value=["libvulkan.so.1", "libc++.so.1", "libunwind.so.1"]):
+            with self.assertRaisesRegex(SystemExit, "libc\\+\\+\\.so\\.1"):
+                stage04.validate_example_runtime_dependencies(executable, "linux")
+
+    def test_linux_example_accepts_only_host_shared_boundaries(self) -> None:
+        executable = self.temp_root / "example"
+        with mock.patch.object(
+                stage04, "needed_libraries",
+                return_value=["libvulkan.so.1", "libwayland-client.so.0"]):
+            stage04.validate_example_runtime_dependencies(executable, "linux")
+
+    def test_non_linux_example_skips_elf_dependency_check(self) -> None:
+        with mock.patch.object(stage04, "needed_libraries") as needed_mock:
+            stage04.validate_example_runtime_dependencies(
+                self.temp_root / "example", "macos")
+        needed_mock.assert_not_called()
+
     def test_layer_parent_traversal_is_rejected(self) -> None:
         with self.assertRaises(SystemExit):
             stage04.safe_layer_path(self.temp_root, "../outside")

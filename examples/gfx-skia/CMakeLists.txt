@@ -131,17 +131,16 @@ target_link_libraries(crtgfx_skia_example PRIVATE
   "${CRTGFX_SKIA_LIBRARY}" "${CRTGFX_GPU_LIBRARY}" "${CRTGFX_WINDOW_LIBRARY}"
   "${CRTGFX_SKIA_STATIC_LIBRARY}" "${CRTGFX_FREETYPE_LIBRARY}")
 if(NOT WIN32 AND NOT APPLE)
-  # Same real, confirmed bug as examples/gfx-gpu/CMakeLists.txt's own
-  # matching fix (see that file's fuller comment for the full story):
-  # this freestanding executable link defaults to --no-allow-shlib-
-  # undefined, so the real host libvulkan.so must be locatable via
-  # -rpath-link at link time, and libc++abi.so.1's own `_Unwind_*`
-  # symbols need libunwind.so linked directly and explicitly (it carries
-  # no NEEDED entry for it at all -- LIBCXXABI_USE_LLVM_UNWINDER=OFF, and
-  # this project's own imported libcxx now builds with
-  # LIBCXX_ENABLE_ABI_LINKER_SCRIPT=OFF, trading away the upstream ABI
-  # linker script that used to auto-add `-lunwind` for any libc++.so
-  # consumer -- see that recipe's own notes).
+  # The Linux standalone example deliberately selects only static CRT/Skia
+  # archives above. tools/crt-c++ completes that link with libc++.a,
+  # libc++abi.a, libunwind.a, libc.a, libm.a and libdl.a as one linker
+  # group. Do not add any of their shared counterparts here: doing so creates
+  # two allocator instances, and an out-of-line libc++.so string allocation
+  # can then be released by the executable's static operator delete.
+  #
+  # The real host libvulkan.so and libwayland-client.so remain intentional
+  # shared boundaries. Locate their dependencies at link time via
+  # -rpath-link and list the libraries needed by the static crtgfx archives.
   find_library(CRTGFX_EXAMPLE_VULKAN_LIB NAMES vulkan vulkan.so.1
     NO_CMAKE_FIND_ROOT_PATH)
   if(NOT CRTGFX_EXAMPLE_VULKAN_LIB)
@@ -223,16 +222,6 @@ if(NOT WIN32 AND NOT APPLE)
   target_link_libraries(crtgfx_skia_example PRIVATE
     "${CRTGFX_EXAMPLE_VULKAN_LIB}" "${CMAKE_SYSROOT}/lib/libxkbcommon.a"
     "${CMAKE_SYSROOT}/lib/libxdg-shell-protocol.a" "${CRTGFX_EXAMPLE_WAYLAND_CLIENT_LIB}")
-  target_link_libraries(crtgfx_skia_example PRIVATE "${CMAKE_SYSROOT}/lib/libunwind.so")
-  # Same real, confirmed bug as examples/gfx-gpu/CMakeLists.txt's own
-  # matching fix (see that file's fuller comment): DT_RUNPATH is not
-  # transitive, and libcrtgfx.so's own NEEDED libc++.so has no RPATH of
-  # its own, so it falls through to the host's own real (also ABI-
-  # linker-script-shaped) llvm-18 libc++.so instead. Linking the SDK's
-  # own real libc++.so.1 directly here too gives this executable a
-  # direct NEEDED entry for it, resolved via its own already-correct
-  # RUNPATH before libcrtgfx.so's transitive need is ever processed.
-  target_link_libraries(crtgfx_skia_example PRIVATE "${CMAKE_SYSROOT}/lib/libc++.so.1")
   # Same real bug as examples/gfx-gpu/CMakeLists.txt's own matching fix
   # (see that file's fuller comment for the full standalone repro and
   # evidence): this example resolves CRTGFX_GPU_LIBRARY via a plain
