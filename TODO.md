@@ -57,28 +57,97 @@ newest entry first) rather than leaving it here.
 
 ## In Progress
 
-Nothing active right now -- the packaged Linux Vulkan/Skia demo gap (a
-second, separate `libdl.so` ELF symbol-version collision, unrelated to the
-already-resolved Skia heap-corruption blocker) was root-caused and fixed
-2026-09-16; see `HISTORY.md`. Promote the next item from Planned when ready.
+### Allocator baseline validation before Upper Runtime
+
+The Linux/aarch64 `03-gfx-simple -> 04-gfx-media` release sign-off and the
+separate packaged Vulkan/Skia demo fix are complete. Before adding hardware
+decode, zero-copy surfaces, WebRTC, or QuickJS allocation pressure, validate
+the current allocator as a short foundation tranche. This is a measurement
+and hardening pass, not an allocator replacement: the current allocator stays
+in place unless the evidence below demonstrates a blocker. Extend, rather than
+replace, the existing API/alignment/reuse coverage in `malloc_test`, the
+direct-linked `malloc_debug_test`, and the 4-thread/200-iteration
+`malloc_contention_test`.
+
+Execution plan:
+
+1. **Build a deterministic workload and result format.** Add a dedicated
+   allocator stress executable with reproducible seeds and integrity checks,
+   plus an opt-in host-side baseline runner. Exercise operation counts of
+   `10^3`, `10^4`, `10^5`, and, where the lower tiers finish within the
+   declared time budget, `10^6`. Emit machine-readable workload, seed,
+   architecture, elapsed-time, throughput, latency, and live/peak-allocation
+   counters so a failure or regression can be replayed exactly.
+2. **Cover realistic allocation shapes.** Mix `malloc`, `calloc`, `realloc`,
+   aligned allocation, and free across small, medium, large, and occasional
+   mapping-sized objects. Include bounded-live-set random churn, grow/shrink
+   reallocations, fragmentation/reuse patterns, and repeated large allocate/
+   touch/free cycles. Verify contents and alignment after every operation that
+   can move an allocation.
+3. **Scale contention deliberately.** Run equivalent deterministic workloads
+   at 1, 8, 16, and 32 threads, with both private and shared allocation pools.
+   Keep a bounded correctness variant in routine CTest; keep long runs and
+   p50/p99 timing in the opt-in baseline target so host load does not create a
+   flaky pass/fail test.
+4. **Measure fragmentation and resident memory outside the CRT ABI.** Record
+   requested live bytes, allocator-visible usable bytes, peak live bytes, and
+   post-free reuse. Because CRT's current `getrusage()` is a compatibility
+   stub, let the host-side runner sample process RSS with host facilities
+   rather than adding benchmark-only behavior to the Bionic-facing API.
+   Repeat large-allocation cycles to distinguish retained arenas from
+   continually growing resident memory.
+5. **Exercise fork interaction and allocator regions.** Add a many-region,
+   fragmented-heap fork regression. The child must verify inherited contents,
+   mutate and allocate independently, and exit cleanly while the parent proves
+   its allocations were unchanged. Run the native fork path on Linux/macOS
+   and the memory-copy fork path on both supported Windows architectures.
+6. **Make diagnostics permanent and testable.** Change
+   `CRT_ENABLE_DEBUG_MALLOC` from a temporary investigation switch into a
+   supported diagnostic mode, retaining its normal and direct-linked CTest
+   coverage. Add expected-fault tests for double free, cross-instance owner
+   mismatch, and canary damage. Evaluate and implement
+   `CRT_ENABLE_GUARD_MALLOC` only as a distinct opt-in guard-page diagnostic,
+   with explicit large-memory/slow-test labeling; it is not the production
+   allocator. Record a go/no-go decision, but do not hold the baseline gate
+   open solely to build it if debug-malloc expected-fault coverage already
+   provides the required diagnostics.
+7. **Freeze the Host ABI firewall before hardware decode.** Document and audit
+   the ownership rule for Wayland/Vulkan and the upcoming FFmpeg hardware,
+   VA-API, PipeWire, and EGL boundaries: opaque host objects are created,
+   retained, synchronized, and destroyed only by the host library and
+   allocator domain that owns them. CRT adapters may transport opaque handles
+   but must not reinterpret private layouts or free host-owned storage. Add
+   boundary assertions/tests where ownership can be checked mechanically.
+8. **Publish one cross-host decision record.** Run the bounded correctness
+   suite on the normal Linux, Windows, and macOS matrix and record the heavier
+   baseline per host/architecture in `docs/allocator_baseline.md`. Declare the
+   workload/time/RSS regression envelope before using results to choose an
+   allocator. Record raw results under `out/<preset>/allocator-baseline/`, not
+   in git.
+
+Decision gate:
+
+- If correctness, fork, and diagnostic tests pass and representative upper-
+  runtime workloads stay inside the declared scaling and memory envelope,
+  retain the current allocator, move this tranche to `HISTORY.md`, and proceed
+  with the Upper Runtime Roadmap.
+- If repeatable nonlinear cost, lock-contention collapse, unbounded RSS growth,
+  or a correctness limitation exceeds that envelope, first preserve the
+  reproducer, then promote the conditional Scudo tranche below into In
+  Progress. Do not start Scudo merely because the current implementation is
+  theoretically `O(N)`.
 
 ## Planned
 
-### CRT allocator and runtime architecture hardening
+### Conditional Scudo production allocator
 
-An external architecture review (2026-09-14, prompted by the now-resolved
-Linux/aarch64 Skia heap-corruption investigation) looked at `libc/src/malloc.c`,
-`libc/CMakeLists.txt`, `libcrtgfx/CMakeLists.txt`, the malloc test suite, and
-the Linux Skia/Wayland/Vulkan boundary, and proposed a P0/P1/P2-ranked set of
-structural improvements. The `CRT_ENABLE_DEBUG_MALLOC` diagnostic used during
-that investigation is implemented; the broader architecture changes below
-remain unstarted. Promote them into "In Progress" individually once a concrete
-need or consumer justifies the cost, per this file's usual promotion
-discipline.
+Do not promote this tranche until the baseline-validation decision gate records
+a repeatable current-allocator limitation. The completed Skia incident was an
+allocator-domain linkage error, not evidence that the allocator algorithm must
+be replaced.
 
-P0:
-
-1. **Separate the bootstrap allocator from a production allocator.**
+1. **Separate the bootstrap allocator from a production allocator only when
+   measurements justify it.**
    `libc/src/malloc.c` is a clear, easy-to-audit design for CRT bring-up,
    but its `malloc()`/`free()`/new-chunk paths are all linear scans
    (`append_chunk()` walks the whole chunk list to find its tail;
@@ -93,25 +162,26 @@ P0:
    production allocator -- a natural fit given this project's own Bionic-
    compatibility framing, since Scudo has been Android's own default
    allocator since Android 11.
-2. **Keep `CRT_ENABLE_DEBUG_MALLOC`/`CRT_ENABLE_GUARD_MALLOC` as permanent
-   diagnostic build modes**, not one-off debugging code. The completed
-   Linux/aarch64 investigation established their immediate value; retain and
-   test them as supported diagnostics.
-3. **Draw an explicit "Host ABI firewall" boundary in the Linux graphics/
-   media code.** The Vulkan GPU path already documents the specific reason
-   it must use the *real host* `libwayland-client.so.0` rather than this
-   project's own hand-rolled Wayland wire client: the host Vulkan WSI
-   driver expects `libwayland-client`'s own private `wl_display` object
-   layout, which differs from what this project's own Bionic-compatible
-   `pthread_mutex_t` would produce if this project built that library
-   itself. The same class of boundary will keep recurring as FFmpeg
-   hardware acceleration, VA-API, PipeWire, and EGL are added. Write down
-   the rule explicitly as project policy rather than re-deriving it per
-   integration: a host library's own opaque objects (`wl_display*`,
-   `VkInstance`, `VkDevice`, `AVHWDeviceContext`, ...) are only ever
-   created and destroyed by that same host library -- never reinterpreted
-   through, or allocated via, this project's own memory/object structures.
-4. **Remove the "build once, then reconfigure" CMake pattern.** The native
+2. **Decouple allocator regions from Windows fork emulation before any swap.**
+   Replace `__crt_malloc_os_region_count()`/`_base()`/`_size()` with a small,
+   allocator-agnostic heap-region snapshot interface consumed by both Windows
+   fork implementations. Prove the interface first with the current allocator
+   and the many-region fork workload; Scudo cannot be selected until the same
+   contract can enumerate or otherwise preserve every child-visible region.
+3. **Integrate Scudo behind an explicit allocator selection.** Import it with
+   provenance, preserve Bionic-compatible public allocation behavior, keep the
+   bootstrap allocator selectable for bring-up/diagnostics, and run the exact
+   same correctness, fork, performance, RSS, distribution, and upper-runtime
+   workloads against both implementations. Adoption requires measured benefit
+   on the failing baseline without regressing supported hosts.
+
+### Runtime architecture hardening backlog
+
+These remain independent follow-ups. Promote one at a time when a concrete
+consumer or failure justifies its cost; they do not block allocator baseline
+validation unless that validation exposes the same boundary.
+
+1. **Remove the "build once, then reconfigure" CMake pattern.** The native
    Wayland Vulkan WSI backend's own `CRTGFX_HAVE_NATIVE_WAYLAND` gate
    checks `EXISTS` on a generated `libxdg-shell-protocol.a` at *configure*
    time, so a genuinely clean tree needs `configure -> build
@@ -125,18 +195,7 @@ P0:
    dependency. Budget real effort here given `05-js`'s QuickJS/V8 work will
    add at least one more such external dependency.
 
-P1:
-
-5. **Decouple `libc/src/malloc.c` from Windows fork emulation.**
-   `heap_os_region_base[]`/`heap_os_region_size[]`/
-   `__crt_malloc_os_region_count()`/`_base()`/`_size()` are this
-   allocator's own OS-region bookkeeping, consumed directly by
-   `arch/windows/*/fork_memcopy.c`. A future allocator swap (Scudo or
-   otherwise) cannot honor this interface as-is. Extract a small, allocator-
-   agnostic `crt_heap_region_count()`/`crt_heap_region_get()`-shaped
-   interface between "whatever malloc implementation is active" and "the
-   Windows fork snapshot walker" before attempting an allocator swap.
-6. **Stop letting a compile macro change a shared struct's own layout.**
+2. **Stop letting a compile macro change a shared struct's own layout.**
    `libcrtgfx/CMakeLists.txt` already carries a load-bearing comment
    explaining why `CRTGFX_HAVE_VULKAN` must be a directory-wide
    `add_compile_definitions()`, not a per-target one: `src/gpu.c` and
@@ -150,7 +209,7 @@ P1:
    backend-specific fields entirely inside each backend's own translation
    unit, so the macro only ever changes which code exists, never the
    common struct's own layout.
-7. **Move `tools/crt_dist_prerequisites.py`-style manifest thinking to
+3. **Move `tools/crt_dist_prerequisites.py`-style manifest thinking to
    `libc.so`'s own ELF export surface.** The current `CRT_1.0 { global: *;
    };` whole-surface version script (`libc/CMakeLists.txt`) is the right
    *shape* of fix for the collision recorded in the 2026-09-16 history entry,
@@ -159,7 +218,7 @@ P1:
    manifest -> generated `.map` file) would prevent accidental exports and
    give a real basis for `CRT_1.0`/`CRT_1.1`/`CRT_2.0`-style ABI evolution,
    rather than hand-maintaining `global: *;` indefinitely.
-8. **Add an upper-stage smoke gate to routine CI**, not just the C stage.
+4. **Add an upper-stage smoke gate to routine CI**, not just the C stage.
    Every recent Linux ELF-collision-family bug (`libc` vs host glibc,
    `libc` vs `libc++`, `libc++` vs Skia, Wayland vs Vulkan, Skia vs Vulkan)
    showed up specifically at a *stage boundary*, not within `01-c` alone.
@@ -168,24 +227,9 @@ P1:
    Skia/FFmpeg/predecessor-only-dist/binary-import-audit pass from a
    genuinely empty build directory and cache (this project's own CMake
    state has already been shown to interact with external-build artifact
-   presence -- see item 4), would have caught several of the bugs in
+   presence -- see item 1), would have caught several of the bugs in
    `HISTORY.md`'s dated entries closer to when they were introduced.
-9. **Grow the allocator test suite past API-correctness coverage.** The
-   existing `libc/tests/malloc_test.c`-family coverage (malloc/calloc/
-   realloc/large-allocation/alignment correctness, a 4-thread/200-iteration
-   contention test) is solid for what it checks, but does not yet cover
-   the shapes this investigation actually needed: large-N random alloc/
-   free/realloc stress, higher thread counts, size-distribution/
-   fragmentation workloads, RSS recovery after large free, fork under
-   fragmentation/many-region conditions, and (once built) expected-fault
-   tests for `CRT_ENABLE_GUARD_MALLOC`/double-free/cross-instance-owner
-   detection. Track ops/sec, p50/p99 allocation latency, peak RSS, and a
-   fragmentation ratio so a future bootstrap-to-Scudo decision (item 1) has
-   numbers behind it, not just impression.
-
-P2:
-
-10. **Split the Linux Wayland backend into two independent implementations**
+5. **Split the Linux Wayland backend into two independent implementations**
     instead of one code path that changes object universes depending on
     whether Vulkan is enabled. `STATUS.md` already records a real, current
     limitation in the hand-rolled path (the software-window adapter does
@@ -195,7 +239,7 @@ P2:
     protocol vs. host-native) rather than one file family that
     conditionally reinterprets its own objects would be easier to maintain
     as both paths keep evolving.
-11. **Make binary/package/ABI lint an explicit acceptance gate.** Extend the
+6. **Make binary/package/ABI lint an explicit acceptance gate.** Extend the
     distribution dependency and absolute-path checks with a separately
     runnable ABI audit: compare public exports and unresolved imports against
     the stage's declared symbol/dependency manifests, reject accidental host
