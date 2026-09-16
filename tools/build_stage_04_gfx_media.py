@@ -721,6 +721,45 @@ def validate_example_runtime_dependencies(executable: Path, target_os: str) -> N
             f"runtime libraries: {', '.join(mixed)}")
 
 
+def run_packaged_binary_smoke(staged: Path, relative_path: str,
+                              success_marker: str, env: dict[str, str]) -> None:
+    # Direct packaged-binary smoke (2026-09-16, TODO.md's "Make the
+    # packaged Linux Vulkan/Skia demo directly runnable"): every other
+    # acceptance step in this script only ever exercises the *standalone*
+    # examples/<name> sources rebuilt fresh against the packaged SDK
+    # (build_example(), above) -- the prebuilt binaries this stage's own
+    # `install(TARGETS ...)` calls already placed under `examples/bin/`
+    # (crtgfx_skia_gpu_window_demo among them) were never actually run at
+    # all. That gap hid a real, confirmed bug: on Linux, this prebuilt
+    # binary's own shared-runtime `libdl.so` DT_NEEDED carried no ELF
+    # symbol-version information (unlike libc.so's own CRT_1.0 namespace),
+    # so the real host Vulkan loader's own internal, `GLIBC_2.34`-
+    # versioned `dlopen()` call could be satisfied by this library's
+    # unversioned same-named export instead of real glibc's -- the same
+    # "no version info can satisfy any version request" mechanism already
+    # fixed once for libc.so's strtof_l/readdir (370c41d), just never
+    # applied to this separate DSO (libdl/CMakeLists.txt). The practical
+    # effect: the host loader's dlopen() calls silently no-op, so this
+    # packaged binary could never load any Vulkan ICD -- it printed "no
+    # usable GPU backend" and exited 1 (confirmed directly; not a crash).
+    # A plain exit-code check would already catch *this* specific failure,
+    # but checking stdout for the real success marker is the more robust
+    # contract either way: it also catches a future variant that reports
+    # the wrong outcome while still exiting 0.
+    executable = staged / relative_path
+    if env["CRT_TARGET_OS"] == "windows":
+        executable = executable.with_name(executable.name + ".exe")
+    print(f"+ {executable} 1", flush=True)
+    result = subprocess.run(
+        [str(executable), "1"], env=env, check=True,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    print(result.stdout, end="", flush=True)
+    if success_marker not in result.stdout:
+        raise SystemExit(
+            f"{executable}: packaged-binary smoke did not report success "
+            f"(expected {success_marker!r} in its output)")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sdk-root", required=True, type=Path)
@@ -990,6 +1029,11 @@ def main() -> None:
         with timings.measure("rebuild and run installed gfx-skia example"):
             build_example(
                 staged, temp_root, "gfx-skia", "crtgfx_skia_example", env)
+        if target_os == "linux":
+            with timings.measure("run packaged gfx-skia GPU window demo directly"):
+                run_packaged_binary_smoke(
+                    staged, "examples/bin/crtgfx_skia_gpu_window_demo",
+                    "presented=1", env)
         with timings.measure("verify 04-gfx-media distribution"):
             run([sys.executable, str(build_asset / "tools" / "verify_dist.py"),
                  "--dist", str(staged), "--stage", "04-gfx-media"], env)

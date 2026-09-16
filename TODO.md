@@ -57,14 +57,10 @@ newest entry first) rather than leaving it here.
 
 ## In Progress
 
-- [ ] **Make the packaged Linux Vulkan/Skia demo directly runnable.** Fresh
-  Linux/aarch64 04-stage acceptance passes the installed-source examples rebuilt
-  against the packaged static CRT closure, but the prebuilt shared-runtime
-  `examples/bin/crtgfx_skia_gpu_window_demo` cannot load a host Vulkan ICD while
-  Linux `libdl` remains a stub. Choose a package/link boundary that preserves CRT
-  ABI isolation, then add a direct packaged-binary smoke. This is separate from
-  the resolved Skia heap-corruption blocker and does not invalidate the completed
-  04-stage release gate.
+Nothing active right now -- the packaged Linux Vulkan/Skia demo gap (a
+second, separate `libdl.so` ELF symbol-version collision, unrelated to the
+already-resolved Skia heap-corruption blocker) was root-caused and fixed
+2026-09-16; see `HISTORY.md`. Promote the next item from Planned when ready.
 
 ## Planned
 

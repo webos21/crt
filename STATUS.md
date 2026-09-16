@@ -88,7 +88,12 @@ The software/CPU graphics baseline is complete on all three hosts:
   aarch64 and x86_64. The final fresh Linux/aarch64 run selected lavapipe and
   passed the live Skia presentation three times with Vulkan validation off and
   three times with validation on; the acquired-image semaphore is explicitly
-  consumed by Ganesh before rendering.
+  consumed by Ganesh before rendering. The prebuilt shared-runtime packaged
+  binary (`examples/bin/crtgfx_skia_gpu_window_demo`, distinct from the
+  standalone example rebuilt from source above) also presents live on
+  Linux/aarch64 now, after giving `libdl.so` the same `CRT_1.0` ELF
+  symbol-version namespace as `libc.so`; a direct packaged-binary smoke
+  covers it in the isolated 04-stage acceptance run.
 
 Decoder-texture zero-copy, full font shaping/fallback/ICU, a full Wayland
 compositor, and a Chromium Ozone backend are not completion claims.
@@ -230,10 +235,16 @@ statuses, and exceptions are maintained in:
   recipe-specific retention policy because PE/COFF archive extraction does
   not behave like a GNU ELF linker script.
 - Linux `libdl` remains a documented boundary rather than a CRT-owned general
-  ELF loader. Consequently, the prebuilt shared-runtime Linux Vulkan/Skia demo
-  cannot yet load a host Vulkan ICD directly; the accepted 04-stage path
-  rebuilds the installed-source examples against the packaged static CRT
-  closure. A full Android-style linker remains a separate long-term tranche.
+  ELF loader: its `dlopen`/`dlsym`/`dlclose` honestly report "not supported"
+  rather than delegating to a real loader, since this project links every
+  Linux binary against the real system dynamic linker directly and defers a
+  CRT-owned ELF loader to a later phase. Those unimplemented exports now
+  carry the same `CRT_1.0` ELF symbol-version namespace as `libc.so`'s, so a
+  real host consumer's own versioned `dlopen` reference (e.g. the Vulkan
+  loader's internal ICD loading) can no longer resolve to this library's
+  stub by mistake; the prebuilt shared-runtime `crtgfx_skia_gpu_window_demo`
+  now loads a real host Vulkan ICD directly. A full Android-style linker
+  remains a separate long-term tranche.
 
 ### libcrtgfx
 
@@ -267,17 +278,15 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-1. Resolve the packaged Linux Vulkan/Skia demo's `libdl` boundary and add a
-   direct packaged-binary smoke without weakening CRT ABI isolation.
-2. Enable and verify real FFmpeg hardware decode per host while retaining the
+1. Enable and verify real FFmpeg hardware decode per host while retaining the
    software/CPU fallback as the correctness baseline.
-3. Connect hardware decoder textures to Skia without CPU copies, including
+2. Connect hardware decoder textures to Skia without CPU copies, including
    device/fence ownership and CPU-download recovery.
-4. Bring up QuickJS core/event-loop/timers/modules, then expose stable
+3. Bring up QuickJS core/event-loop/timers/modules, then expose stable
    media/gfx services with WebCodecs-like queue semantics.
-5. Add capture/encode and network/adaptive/realtime services only after the
+4. Add capture/encode and network/adaptive/realtime services only after the
    native playback and zero-copy contracts are stable.
-6. Continue closing the focused CRT/PAL limitations above when an upstream
+5. Continue closing the focused CRT/PAL limitations above when an upstream
    consumer exposes a concrete requirement, following the Bionic-first
    porting discipline in `AGENTS.md`.
 

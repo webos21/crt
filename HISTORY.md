@@ -10,6 +10,61 @@ substantive update.
 
 ## 2026-09-16
 
+- **Made the packaged Linux Vulkan/Skia demo directly runnable: fixed a
+  second, separate `libdl.so` ELF symbol-version gap and added a direct
+  packaged-binary smoke.** The prebuilt shared-runtime `examples/bin/
+  crtgfx_skia_gpu_window_demo` reported `device_count=0` ("no usable GPU
+  backend") and exited 1, even on a host with a real, working Vulkan ICD.
+  `LD_DEBUG=bindings` traced it precisely: the host Vulkan loader's own
+  internal, `GLIBC_2.34`-versioned `dlopen()` call was resolving to this
+  project's own `libdl.so` instead of real glibc (`binding file libvulkan.
+  so.1 ... to .../lib/libdl.so: normal symbol 'dlopen' [GLIBC_2.34]`).
+  `readelf --version-info`/`nm -D` confirmed the root cause: `libdl.so`'s
+  own `dlopen`/`dlsym`/`dlclose` exports carried no ELF version information
+  at all (plain `T dlopen`, no `@` suffix) -- the exact same "an object
+  with no version info can satisfy any versioned lookup" mechanism already
+  fixed once for `libc.so`'s own `strtof_l`/`readdir` collision (`370c41d`,
+  2026-09-14), just never applied to this separate DSO
+  (`libdl/CMakeLists.txt` had no equivalent to `libc/CMakeLists.txt`'s own
+  `CRT_1.0` version-script block). Fixed by giving `dl_shared` the
+  identical treatment: a private, SONAME-scoped `CRT_1.0 { global: *; };`
+  version script, gated to Linux only.
+
+  Verified directly before touching the real pipeline: rebuilt `dl_shared`,
+  confirmed via `nm -D`/`readelf --version-info` that `dlopen`/`dlsym`/
+  `dlclose` now carry `@@CRT_1.0`, then swapped the fixed `libdl.so` into a
+  preserved, already-packaged 04-gfx-media SDK from an earlier real run
+  (no other rebuild needed -- the fix is entirely self-contained in the
+  exporting library, confirmed by `LD_DEBUG=bindings` now showing
+  `libvulkan.so.1` correctly binding `dlopen`/`dlsym`/`dlclose` to real
+  `libc.so.6`) and confirmed the packaged demo now reports
+  `device_count=1` and `presented=1`. Reverted to the original unversioned
+  `libdl.so` (via a scoped `git stash` of just that one file) and
+  re-confirmed the failure reproduces identically, then restored the fix --
+  both directions verified, not just the fix side.
+
+  Also added the "direct packaged-binary smoke" the gap itself called for:
+  every other acceptance step in `tools/build_stage_04_gfx_media.py` only
+  ever exercised the *standalone* `examples/<name>` sources freshly
+  rebuilt against the packaged SDK, never the prebuilt binaries this
+  stage's own `install(TARGETS ...)` calls already placed under
+  `examples/bin/` -- exactly the gap that hid this bug. `run_packaged_
+  binary_smoke()` now runs `examples/bin/crtgfx_skia_gpu_window_demo`
+  directly and asserts a real success marker (`presented=1`) in its
+  output, deliberately not just a zero exit code, since this project's
+  own established convention (crash vs. silent wrong-answer) means a
+  future variant of this class of bug could plausibly exit 0 while still
+  reporting failure. Confirmed the new smoke actually catches the
+  regression (reran it against the reverted, unversioned `libdl.so` --
+  fails as designed) and passes with the fix, both as a standalone
+  function call and wired into a full, fresh, from-scratch isolated
+  Linux/aarch64 `03-gfx-simple -> 04-gfx-media` run (real FreeType/FFmpeg/
+  Skia rebuild): the new "run packaged gfx-skia GPU window demo directly"
+  phase passed alongside every existing phase, `verify_dist.py` passed,
+  and the stage published atomically. Full in-tree `ctest` stayed
+  116/116 (including `dl_test_runs`, confirming CRT's own internal
+  `dlopen()` consumers are unaffected by the added version script).
+
 - **Completed native Linux/aarch64 fresh-chain acceptance for the resolved
   packaged Skia heap-corruption blocker.** Starting from a deleted `out/`,
   rebuilt the cumulative 01/02/03 predecessor chain, bootstrapped Wayland/XDG
