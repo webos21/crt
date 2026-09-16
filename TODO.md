@@ -67,35 +67,57 @@ units consistent, but a target-wiring mistake can still turn into cross-TU
 memory corruption. Remove that failure class rather than carrying the build
 invariant into the next runtime stages.
 
-1. **Inventory ownership and freeze the common contract.** Identify every
-   direct access to device/surface fields, including the Skia bridges and
-   resize/presentation paths. Define a fixed common representation containing
-   only a backend tag, an operations table, and opaque backend-owned state;
-   preserve current public handles, return values, and lifetime semantics.
-2. **Move concrete state behind each backend.** Give Vulkan, D3D12, and Metal
-   private device/surface structures in their own implementation units. Make
-   create/destroy/acquire/clear/present/resize and native-handle interop go
-   through the fixed dispatcher contract, with partially-created objects
-   remaining safely destructible.
-3. **Make feature macros select code, never object layout.** Remove
-   backend-specific fields from the shared header and narrow
-   `CRTGFX_HAVE_*` use to declarations and source inclusion. Add compile-time
-   layout assertions or focused tests where they can prevent a recurrence.
-4. **Verify the boundary before advancing the roadmap.** Build and run the
-   existing GPU, window, resize, and Skia smoke coverage on Linux/aarch64 and
-   the supported Windows/macOS configurations, including a backend-disabled
-   configuration. Recheck static/shared CRT ownership and distribution import
-   audits so the opaque-state allocation/free domain remains explicit.
-5. **Make the accepted boundary routine CI evidence.** Add a per-PR `02-cxx`
-   smoke plus a bounded headless `libcrtgfx` smoke from a fresh build tree.
-   Keep full Skia/FFmpeg, predecessor-only distribution, and binary-import
-   audits in a scheduled job if their runtime is too high for every PR.
+The contract and current direct-access inventory are frozen in
+`docs/libcrtgfx_gpu_backend_boundary.md`. The device's common atomic refcount
+must remain in the fixed wrapper; surfaces remain single-owner and do not begin
+retaining their window or device. Skia may know native API types through narrow
+borrowed descriptors, but native ownership and every acquire/submit/fence/
+present transition stay in the backend owner.
+
+- [x] **Tranche 0 — inventory ownership and freeze the contract.** Completed
+  2026-09-17 and recorded in `HISTORY.md`. The contract, direct-access
+  inventory, and CTest guard are in place; the guard's allowlists must only
+  shrink while the implementation proceeds.
+- [ ] **Tranche 1 — introduce the fixed wrapper and operations contract with
+  Vulkan first.** **Current.**
+   Move Vulkan device/surface state into `gpu_vulkan.c`; make `gpu.c` own only
+   validation, wrapper allocation/refcount, dispatch, and wrapper free. Move
+   native Wayland extraction into the Vulkan surface-create operation. Add a
+   layout/macro-mismatch regression and partial-create failure coverage.
+- [ ] **Tranche 2 — move Vulkan Skia interop behind borrowed views and
+  transitions.** Remove
+   every Vulkan concrete-field access from `skia_bridge.cc`; keep acquire/
+   Ganesh-wrap/semaphore/layout/present state Vulkan-owned. Re-run headless
+   Ganesh plus native Wayland presentation/resize on WSL and Linux/aarch64.
+- [ ] **Tranche 3 — migrate D3D12 and recover its state machine from Skia.** Give
+   `gpu_win32.c` private state, move HWND extraction into it, and replace
+   Skia's direct command-list/fence/per-buffer/submitted mutations with a
+   backend transition. Verify WARP/hardware, window presentation, resize, and
+   Ganesh on Windows.
+- [ ] **Tranche 4 — migrate Metal with the same contract.** Give
+   `gpu_metal.c` private state,
+   move CAMetalLayer extraction into it, and expose only borrowed Metal views
+   plus the existing backend-owned present preparation. Verify device,
+   presentation, resize, and Ganesh on macOS.
+- [ ] **Tranche 5 — remove generic-test privilege and close macro/layout escape
+  paths.**
+   Replace `skia_gpu_offscreen_smoke.cc`'s `gpu_internal.h` access with a
+   backend-neutral test-only device-loss hook. Audit `src/`, `tests/`, `tools/`,
+   and `examples/` for remaining concrete access; narrow `CRTGFX_HAVE_*` to
+   implementation selection and prove backend-disabled static/shared builds.
+- [ ] **Tranche 6 — run cross-host/distribution acceptance, then make it
+  routine CI evidence.**
+   Recheck public ABI, allocator-domain ownership, binary imports, and focused
+   GPU/window/resize/Skia coverage on Linux/aarch64, Windows, and macOS. Add a
+   per-PR fresh `02-cxx` plus bounded headless `libcrtgfx` smoke; leave full
+   Skia/FFmpeg and predecessor-only distribution audits scheduled if needed.
 
 Acceptance requires identical common device/surface layouts in every
-translation unit, no backend field access outside its owner, clean
-backend-enabled and backend-disabled builds, and passing focused runtime and
-ownership checks on the available host matrix. This tranche hardens an
-internal boundary; it must not change the public `crtgfx` ABI.
+translation unit, no backend field access outside its owner (including Skia
+and generic tests), backend-owned partial-failure cleanup, clean backend-enabled
+and backend-disabled builds, and passing focused runtime and ownership checks
+on the available host matrix. This tranche hardens an internal boundary; it
+must not change the public `crtgfx` ABI or the existing lifetime contract.
 
 ## Planned
 

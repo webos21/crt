@@ -8,6 +8,29 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-17
+
+- **Inventoried and froze the `libcrtgfx` GPU backend-object contract before
+  beginning its layout migration.** `docs/libcrtgfx_gpu_backend_boundary.md`
+  records the actual failure class (feature macros currently change the same
+  type's allocation layout), every current concrete-field caller, and the
+  target fixed wrappers. Corrected the initial plan so the device's atomic
+  refcount explicitly remains common state while surfaces keep their existing
+  non-retaining, single-owner lifetime contract. The contract also rejects
+  generic native-handle getters: Skia receives narrow borrowed descriptors,
+  while acquire/wrap/submit/fence/present mutations remain backend-owned.
+  Generic device-loss tests must use a backend-neutral test hook instead of
+  including `gpu_internal.h`, and injected partial-construction failures are a
+  required acceptance test. `TODO.md` now splits implementation and validation
+  into Vulkan, Vulkan/Skia, D3D12, Metal, test/macro cleanup, and cross-host/CI
+  tranches so each can land and be verified independently.
+  Added `tools/test_crtgfx_gpu_backend_boundary.py` to routine CTest as a
+  migration guard: it asserts the exact audited set of private-header users
+  and the exact two non-owner concrete-field users (Skia bridge and its generic
+  offscreen smoke). The allowlists must shrink as those callers move to
+  borrowed views/test hooks, and prevent any new boundary exception from being
+  introduced meanwhile.
+
 ## 2026-09-16
 
 - **Finalized and closed "Allocator baseline validation before Upper
