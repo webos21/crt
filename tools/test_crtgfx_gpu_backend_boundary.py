@@ -54,6 +54,12 @@ BACKEND_FIELD_RE = re.compile(
     r"->device->(?:vk_|d3d12_|dxgi_|mtl_)"
 )
 
+COMMON_LAYOUT_RE = re.compile(
+    r"struct crtgfx_gpu_(?:device|surface)\s*\{(?P<body>.*?)\n\};",
+    re.DOTALL,
+)
+CONDITIONAL_RE = re.compile(r"^\s*#\s*(?:if|ifdef|ifndef|elif|else|endif)\b", re.MULTILINE)
+
 
 def source_files() -> list[Path]:
     files: list[Path] = []
@@ -75,6 +81,13 @@ def relative(path: Path) -> str:
 
 
 class CrtgfxGpuBackendBoundaryTest(unittest.TestCase):
+    def test_common_object_layouts_do_not_contain_feature_conditionals(self) -> None:
+        header = (ROOT / "libcrtgfx" / "src" / "gpu_internal.h").read_text(encoding="utf-8")
+        layouts = list(COMMON_LAYOUT_RE.finditer(header))
+        self.assertEqual(len(layouts), 2)
+        for layout in layouts:
+            self.assertIsNone(CONDITIONAL_RE.search(layout.group("body")))
+
     def test_private_header_users_match_the_audited_migration_set(self) -> None:
         actual = {
             relative(path)

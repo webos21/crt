@@ -11,11 +11,11 @@
  * comment and libcrtgfx/README.md) needs to both fill them in at real
  * device-creation time and read them back at release time to tear the real
  * device down. gpu.c owns the struct's own lifetime (calloc/atomic
- * refcount/free); a backend only owns what is inside it once its own
- * CRTGFX_HAVE_* compile-time gate is actually defined (CMakeLists.txt only
- * defines CRTGFX_HAVE_VULKAN when a real libvulkan was actually found to
- * link against -- absent that, this struct carries no Linux-specific
- * fields at all and gpu.c's own dispatch never calls into this backend). */
+ * refcount/free). During the opaque-state migration all three legacy backend
+ * field groups are deliberately present unconditionally: a CRTGFX_HAVE_*
+ * mismatch can no longer change sizeof/offsets and cause cross-TU overwrite.
+ * Each group is removed as its backend moves behind backend_state/ops; feature
+ * macros select code, never this common allocation layout. */
 
 #include "crtgfx/gpu.h"
 
@@ -24,7 +24,7 @@
 
 struct crtgfx_gpu_device {
   atomic_int refcount;
-#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
+  /* Temporary unconditional legacy fields. See the header comment above. */
   /* Real Vulkan handles. VkInstance/VkPhysicalDevice/VkDevice/VkQueue are
    * all opaque, pointer-sized "dispatchable handle" types per the Vulkan
    * spec's own VK_DEFINE_HANDLE macro -- void* here avoids naming any real
@@ -38,7 +38,6 @@ struct crtgfx_gpu_device {
   void* vk_device;
   void* vk_queue;
   uint32_t vk_queue_family_index;
-#elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
   /* Real D3D12/DXGI handles (2026-09-03, the Windows/D3D12 offscreen
    * vertical slice -- the Linux/Vulkan slice's own sibling). The real
    * ID3D12Device, ID3D12CommandQueue, and IDXGIAdapter1 COM interfaces
@@ -55,7 +54,6 @@ struct crtgfx_gpu_device {
   void* d3d12_device;
   void* d3d12_command_queue;
   void* dxgi_adapter;
-#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
   /* Real Metal handles (2026-09-04, the Windows/D3D12 and Linux/Vulkan
    * offscreen vertical slices' own macOS sibling). `id<MTLDevice>`/
    * `id<MTLCommandQueue>` are real, opaque Objective-C object pointers --
@@ -71,25 +69,22 @@ struct crtgfx_gpu_device {
    * not here. */
   void* mtl_device;
   void* mtl_command_queue;
-#endif
 };
 
 /* A real GPU-backed presentation target -- gpu.c owns the allocation/
- * free the same way it owns crtgfx_gpu_device's, a real backend (today:
- * src/arch/linux/gpu_vulkan.c, 2026-09-07) only fills in and tears down
- * its own host-specific fields. Unlike crtgfx_gpu_device, there is no
- * host-independent field at all here (no refcount -- crtgfx_gpu_surface
- * is single-owner, see crtgfx/gpu.h's own comment on crtgfx_gpu_surface_
- * create()) -- every field is behind the same real per-host #if/#elif
- * chain crtgfx_gpu_device's own Vulkan/D3D12/Metal fields already use. */
+ * free the same way it owns crtgfx_gpu_device's, while a real backend fills
+ * in and tears down its host-specific fields. Unlike crtgfx_gpu_device there
+ * is no refcount: the public surface remains single-owner. During migration
+ * all legacy backend groups are unconditional for the same fixed-layout
+ * reason as the device groups above. */
 struct crtgfx_gpu_surface {
-#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
-  /* Not retained -- a surface's own lifetime is documented (crtgfx/gpu.h)
-   * to never outlive the device it was created against; this is a plain
-   * back-reference for crtgfx_gpu_vulkan_surface_*() to reach the real
-   * VkInstance/VkPhysicalDevice/VkDevice/VkQueue it needs, not a second
-   * ownership relationship. */
+  /* Temporary unconditional legacy fields. See the header comment above. */
+  /* Shared legacy fields with identical semantics on every backend. `device`
+   * is not retained: the public contract requires it to outlive the surface. */
   crtgfx_gpu_device* device;
+  uint32_t width;
+  uint32_t height;
+  int ganesh_wrapped;
   /* Real VkSurfaceKHR/VkSwapchainKHR -- non-dispatchable handles, void*
    * for the same reason crtgfx_gpu_device's own Vulkan fields above are:
    * pointer-sized and ABI-identical regardless of which header declared
@@ -115,8 +110,6 @@ struct crtgfx_gpu_surface {
    * always describes this image's own *real*, current usage flags exactly,
    * with no possibility of the two ever drifting out of sync again. */
   uint32_t vk_image_usage_flags;
-  uint32_t width;
-  uint32_t height;
   /* Real per-frame synchronization: one semaphore each side of a real
    * vkCmdClearColorImage() submission (signaled by acquire, waited-on by
    * the submit; signaled by the submit, waited-on by present), and one
@@ -148,8 +141,6 @@ struct crtgfx_gpu_surface {
    * guard in this struct. Reset to 0 by _surface_acquire(); cleared by
    * crtgfx_skia_gpu_surface_present() itself just before it defers to the
    * plain crtgfx_gpu_surface_present() at its own last step. */
-  int ganesh_wrapped;
-#elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
   /* Real D3D12/DXGI swap-chain presentation (2026-09-07, the Windows leg
    * of "Finish live GPU presentation everywhere", following the Linux
    * native-Wayland-backend vertical slice) -- same real per-field shape
@@ -157,9 +148,7 @@ struct crtgfx_gpu_surface {
    * (an explicit RTV descriptor heap instead of Vulkan's plain VkImage
    * array; per-back-buffer fence *values* against one shared ID3D12Fence,
    * D3D12's own real synchronization primitive, rather than Vulkan's
-   * separate per-frame VkFence objects). Not retained, same reasoning as
-   * the Vulkan branch's own `device` field. */
-  crtgfx_gpu_device* device;
+   * separate per-frame VkFence objects). */
   /* Real IDXGISwapChain3* -- void* for the same "no host SDK type in a
    * shared header" reason every other Windows/Vulkan handle in this file
    * already uses. */
@@ -174,8 +163,6 @@ struct crtgfx_gpu_surface {
   void* d3d12_rtv_heap;
   size_t d3d12_rtv_descriptor_size;
   uint32_t d3d12_buffer_count;
-  uint32_t width;
-  uint32_t height;
   /* One command allocator + one command list, reset and re-recorded each
    * frame (D3D12's own real, standard single-buffered command-recording
    * shape -- matches the Vulkan branch's own single vk_command_buffer). */
@@ -193,10 +180,6 @@ struct crtgfx_gpu_surface {
    * vk_image_acquired. */
   int d3d12_image_acquired;
   int d3d12_frame_submitted;
-  /* Same real Ganesh-wrap-in-progress guard as the Vulkan branch's own
-   * ganesh_wrapped field above -- see that field's own comment. */
-  int ganesh_wrapped;
-#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
   /* Real CAMetalLayer drawable presentation (2026-09-07, the macOS leg of
    * "Finish live GPU presentation everywhere"). Simpler than the Vulkan/
    * D3D12 branches above -- Metal's own `-presentDrawable:`/command-buffer
@@ -209,11 +192,8 @@ struct crtgfx_gpu_surface {
    * reasoning as crtgfx_gpu_device's own mtl_device/mtl_command_queue
    * fields. Not retained beyond this surface's own real Cocoa retain/
    * release discipline (crtgfx_gpu_metal_surface_create()'s own comment). */
-  crtgfx_gpu_device* device;
   /* CAMetalLayer retained by this surface and the window's content view. */
   void* mtl_layer;
-  uint32_t width;
-  uint32_t height;
   /* Held between a successful crtgfx_gpu_metal_surface_acquire() and the
    * matching crtgfx_gpu_metal_surface_present() -- id<CAMetalDrawable>,
    * id<MTLTexture>, and the id<MTLCommandBuffer> _clear() records into
@@ -225,12 +205,6 @@ struct crtgfx_gpu_surface {
   /* Same real out-of-order-call guard as the Vulkan/D3D12 branches' own
    * acquired flags. */
   int mtl_drawable_acquired;
-  /* Same real Ganesh-wrap-in-progress guard as the Vulkan branch's own
-   * ganesh_wrapped field above -- see that field's own comment. */
-  int ganesh_wrapped;
-#else
-  int reserved;
-#endif
 };
 
 /* Every hook below is defined in a plain .c backend file (real C linkage),

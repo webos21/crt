@@ -80,37 +80,40 @@ present transition stay in the backend owner.
   shrink while the implementation proceeds.
 - [ ] **Tranche 1 — introduce the fixed wrapper and operations contract with
   Vulkan first.** **Current.**
-   Move Vulkan device/surface state into `gpu_vulkan.c`; make `gpu.c` own only
-   validation, wrapper allocation/refcount, dispatch, and wrapper free. Move
-   native Wayland extraction into the Vulkan surface-create operation. Add a
-   layout/macro-mismatch regression and partial-create failure coverage.
+  Move Vulkan device/surface state into `gpu_vulkan.c`; make `gpu.c` own only
+  validation, wrapper allocation/refcount, dispatch, and wrapper free. Move
+  native Wayland extraction into the Vulkan surface-create operation. Add a
+  layout/macro-mismatch regression and partial-create failure coverage.
+  Progress: backend field groups are now unconditional, so feature-macro
+  mismatch cannot change common object size/offsets; the CTest guard enforces
+  that invariant. Opaque state/ops and Vulkan extraction remain unchecked.
 - [ ] **Tranche 2 — move Vulkan Skia interop behind borrowed views and
   transitions.** Remove
-   every Vulkan concrete-field access from `skia_bridge.cc`; keep acquire/
-   Ganesh-wrap/semaphore/layout/present state Vulkan-owned. Re-run headless
-   Ganesh plus native Wayland presentation/resize on WSL and Linux/aarch64.
+  every Vulkan concrete-field access from `skia_bridge.cc`; keep acquire/
+  Ganesh-wrap/semaphore/layout/present state Vulkan-owned. Re-run headless
+  Ganesh plus native Wayland presentation/resize on WSL and Linux/aarch64.
 - [ ] **Tranche 3 — migrate D3D12 and recover its state machine from Skia.** Give
-   `gpu_win32.c` private state, move HWND extraction into it, and replace
-   Skia's direct command-list/fence/per-buffer/submitted mutations with a
-   backend transition. Verify WARP/hardware, window presentation, resize, and
-   Ganesh on Windows.
+  `gpu_win32.c` private state, move HWND extraction into it, and replace
+  Skia's direct command-list/fence/per-buffer/submitted mutations with a
+  backend transition. Verify WARP/hardware, window presentation, resize, and
+  Ganesh on Windows.
 - [ ] **Tranche 4 — migrate Metal with the same contract.** Give
-   `gpu_metal.c` private state,
-   move CAMetalLayer extraction into it, and expose only borrowed Metal views
-   plus the existing backend-owned present preparation. Verify device,
-   presentation, resize, and Ganesh on macOS.
+  `gpu_metal.c` private state,
+  move CAMetalLayer extraction into it, and expose only borrowed Metal views
+  plus the existing backend-owned present preparation. Verify device,
+  presentation, resize, and Ganesh on macOS.
 - [ ] **Tranche 5 — remove generic-test privilege and close macro/layout escape
   paths.**
-   Replace `skia_gpu_offscreen_smoke.cc`'s `gpu_internal.h` access with a
-   backend-neutral test-only device-loss hook. Audit `src/`, `tests/`, `tools/`,
-   and `examples/` for remaining concrete access; narrow `CRTGFX_HAVE_*` to
-   implementation selection and prove backend-disabled static/shared builds.
+  Replace `skia_gpu_offscreen_smoke.cc`'s `gpu_internal.h` access with a
+  backend-neutral test-only device-loss hook. Audit `src/`, `tests/`, `tools/`,
+  and `examples/` for remaining concrete access; narrow `CRTGFX_HAVE_*` to
+  implementation selection and prove backend-disabled static/shared builds.
 - [ ] **Tranche 6 — run cross-host/distribution acceptance, then make it
   routine CI evidence.**
-   Recheck public ABI, allocator-domain ownership, binary imports, and focused
-   GPU/window/resize/Skia coverage on Linux/aarch64, Windows, and macOS. Add a
-   per-PR fresh `02-cxx` plus bounded headless `libcrtgfx` smoke; leave full
-   Skia/FFmpeg and predecessor-only distribution audits scheduled if needed.
+  Recheck public ABI, allocator-domain ownership, binary imports, and focused
+  GPU/window/resize/Skia coverage on Linux/aarch64, Windows, and macOS. Add a
+  per-PR fresh `02-cxx` plus bounded headless `libcrtgfx` smoke; leave full
+  Skia/FFmpeg and predecessor-only distribution audits scheduled if needed.
 
 Acceptance requires identical common device/surface layouts in every
 translation unit, no backend field access outside its owner (including Skia

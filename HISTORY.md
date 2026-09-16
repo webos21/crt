@@ -10,6 +10,20 @@ substantive update.
 
 ## 2026-09-17
 
+- **Removed the immediate `CRTGFX_HAVE_*`-dependent GPU object-size hazard as
+  the first implementation slice of backend-boundary Tranche 1.** The legacy
+  Vulkan, D3D12, and Metal field groups in `gpu_internal.h` are temporarily
+  present unconditionally while they move one by one into opaque backend
+  state. Shared surface fields (`device`, extent, and Ganesh-wrap phase) were
+  consolidated once rather than duplicated per backend. This is intentionally
+  an intermediate representation, not the final opaque wrapper, but a feature-
+  macro mismatch can no longer change either common allocation's size or field
+  offsets. The boundary CTest now parses both struct bodies and rejects any
+  preprocessor conditional inside them. Rebuilt and ran the focused boundary/
+  GPU tests on Windows/x86_64 and WSL Linux/x86_64: 2/2 passed on each after
+  real recompilation. Vulkan opaque state/ops, failure injection, and the Skia
+  borrowed view remain open, so Tranche 1 stays unchecked in `TODO.md`.
+
 - **Inventoried and froze the `libcrtgfx` GPU backend-object contract before
   beginning its layout migration.** `docs/libcrtgfx_gpu_backend_boundary.md`
   records the actual failure class (feature macros currently change the same

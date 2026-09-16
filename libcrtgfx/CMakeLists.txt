@@ -315,12 +315,9 @@ if(CRT_TARGET_OS STREQUAL "windows")
   # (CRT_TARGET_OS_WINDOWS=1 is applied to crtgfx_gpu_objects itself
   # further down, right after that target is actually created -- see that
   # call's own, fuller comment for a real, narrow gap this exposed.)
-  # Directory-scoped (not per-target), matching CRTGFX_HAVE_VULKAN's own
-  # precedent just above: src/gpu.c and src/arch/windows/gpu_win32.c
-  # (both now crtgfx_gpu_objects, since the window/GPU physical split)
-  # share struct crtgfx_gpu_device's own real field layout via
-  # src/gpu_internal.h, and both compilation units must see this define
-  # identically.
+  # Directory-scoped during the backend-object migration, matching Vulkan's
+  # current code-selection convention. It no longer affects common object
+  # layout; a later tranche narrows it after D3D12 state becomes private.
   add_compile_definitions(CRTGFX_HAVE_D3D12=1)
 elseif(CRT_TARGET_OS STREQUAL "macos")
   list(APPEND CRTGFX_WINDOW_BACKEND_SOURCES ${CRTGFX_WINDOW_BACKEND_MACOS_SOURCES})
@@ -332,12 +329,9 @@ elseif(CRT_TARGET_OS STREQUAL "macos")
   # every real Windows 10+ SDK -- gpu_metal.c is compiled unconditionally
   # here, and CRTGFX_HAVE_METAL defined unconditionally, matching that
   # same D3D12 precedent (no "maybe absent" case to guard against, unlike
-  # Linux's own find_library()-gated libvulkan). Directory-scoped (not
-  # per-target), matching CRTGFX_HAVE_VULKAN/CRTGFX_HAVE_D3D12's own
-  # precedent: src/gpu.c and src/arch/macos/gpu_metal.c (both now
-  # crtgfx_gpu_objects, since the window/GPU physical split) share struct
-  # crtgfx_gpu_device's own real field layout via src/gpu_internal.h, and
-  # both compilation units must see this define identically.
+  # Linux's own find_library()-gated libvulkan). Directory-scoped during the
+  # backend-object migration for code selection only; common object layout no
+  # longer depends on it, and a later tranche narrows it with private state.
   add_compile_definitions(CRTGFX_HAVE_METAL=1)
   # window_cocoa.c/gpu_metal.c both drive the Objective-C runtime from
   # plain C by casting objc_msgSend (a real, variadic `id (*)(id, SEL,
@@ -468,18 +462,12 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
     else()
       message(STATUS "libcrtgfx: native Wayland Vulkan WSI needs host libwayland-client.so.0 plus ${CRTGFX_WAYLAND_XDG_SHELL_LIBRARY}; run 'cmake --build . --target crtgfx-wayland-build' then reconfigure after installing the host Wayland runtime to enable it")
     endif()
-    # Directory-scoped, not per-target: src/gpu.c and
-    # src/arch/linux/gpu_vulkan.c (both now crtgfx_gpu_objects, since
-    # the window/GPU physical split) share struct crtgfx_gpu_device's own
-    # real field layout via src/gpu_internal.h -- both compilation units
-    # MUST see CRTGFX_HAVE_VULKAN identically, or the Vulkan-only fields
-    # silently disagree on the struct's own real size between the two
-    # object libraries (a real, silent memory-corruption risk, not just a
-    # build inconsistency). add_compile_definitions() here applies to
-    # every target this CMakeLists.txt still goes on to create in this
-    # directory (both crtgfx_window_objects and crtgfx_gpu_objects,
-    # further down) -- two separate target_compile_definitions() calls
-    # could drift out of sync in a way this single call cannot.
+    # Directory-scoped while the backend-object migration is in progress so
+    # every consumer selects the same Vulkan code. gpu_internal.h no longer
+    # changes common object size/offsets under this definition (the former
+    # cross-TU overwrite failure class is removed); later tranches narrow the
+    # macro to implementation/source selection after Vulkan state becomes
+    # fully private.
     add_compile_definitions(CRTGFX_HAVE_VULKAN=1)
     # See the real -Wl,--exclude-libs,ALL fix and its own full "why"
     # comment further down, right after add_library(crtgfx_gpu STATIC
@@ -1078,7 +1066,7 @@ endif()
 # Physical window/GPU split (TODO.md's decided item): the pre-existing
 # "common" (always crt_build_flags) vs "backend" (Linux-only crt_build_
 # flags; Windows/macOS get nothing extra, or -- gpu_*.c specifically --
-# only the narrow CRT_TARGET_OS_* struct-layout-sync define below) split
+# only the narrow CRT_TARGET_OS_* code-selection define below) split
 # is kept exactly as it was, just partitioned twice now: once by that
 # existing common/backend axis, and once more by window-vs-GPU. This is
 # the minimal-risk transformation -- every compile-flag *decision* below
@@ -1120,7 +1108,7 @@ set_target_properties(crtgfx_window_common_objects PROPERTIES
 # never touch struct crtgfx_gpu_device (window ⟂ gpu -- window code has
 # zero GPU/Skia references, confirmed directly), so unlike the GPU
 # backend target below, this one needs no CRT_TARGET_OS_* define at all
-# on Windows/macOS -- there is no shared struct layout to keep in sync.
+# on Windows/macOS because it contains no per-host GPU code to select.
 add_library(crtgfx_window_backend_objects OBJECT ${CRTGFX_WINDOW_BACKEND_SOURCES})
 if(CRT_TARGET_OS STREQUAL "linux")
   target_link_libraries(crtgfx_window_backend_objects PRIVATE crt_build_flags)
