@@ -10,6 +10,26 @@ substantive update.
 
 ## 2026-09-16
 
+- **Completed native Linux/aarch64 fresh-chain acceptance for the resolved
+  packaged Skia heap-corruption blocker.** Starting from a deleted `out/`,
+  rebuilt the cumulative 01/02/03 predecessor chain, bootstrapped Wayland/XDG
+  shell, then built fresh FreeType 2.14.3, FFmpeg 8.1.2, and pinned Skia m148.
+  The final isolated 04 run passed configure/build, 8/8 CTest, both installed
+  external example rebuilds and real one-frame presentation, distribution
+  verification, and atomic publication. The final source asset SHA-256 is
+  `54575cabe4fc37fbdce7e48429ae23a9278690aff1c7e50734984d0479857592`
+  from commit `1dc236d`.
+
+  The fresh run also found and fixed two independent acceptance defects rather
+  than weakening the gates: standalone 04 shared libraries inherited an
+  absolute Linux RUNPATH because the top-level shared-runtime helper is absent
+  in that project, and the Ganesh path did not wait on the semaphore signaled
+  by `vkAcquireNextImageKHR`. Packaged ELF files now retain only portable
+  `$ORIGIN` paths, and `GrDirectContext::wait()` inserts the acquire semaphore
+  before Ganesh records work. The installed-source Skia example presented
+  3/3 with validation disabled and 3/3 with
+  `VK_LAYER_KHRONOS_validation`; no VUID or validation error remained.
+
 - **Packaged a real, working video/audio playback demo as `examples/media-player`,
   the `crtmedia` distribution's first end-user example, built and verified
   entirely from the public `crtgfx`/`crtmedia` SDK headers.** Prototyped first

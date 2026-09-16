@@ -59,12 +59,10 @@ the preceding installed `dist` tree. The stronger source-stage boundary is
 also implemented: a packaged predecessor SDK fetches a SHA-256-pinned CRT
 GitHub Release source asset and builds/tests the next stage without using the
 repository build tree. The complete predecessor-only chain through the
-option-ON `03-gfx-simple -> 04-gfx-media` transition is verified on Windows
-and macOS. On Linux, the dependency inventory and low-level Vulkan
-presentation pass, and the former libc/glibc symbol collision is fixed on
-both aarch64 and x86_64, but a separate Skia heap-corruption bug still crashes
-the packaged example before verification and atomic publication. The active
-investigation is tracked in `TODO.md`. `04-gfx-media -> 05-js`
+option-ON `03-gfx-simple -> 04-gfx-media` transition is verified on Windows,
+macOS, and native Linux/aarch64. Linux passes the cold-cache Skia presentation
+matrix with Vulkan validation both disabled and enabled, distribution
+verification, and atomic publication. `04-gfx-media -> 05-js`
 has not yet been added. Full details, artifact layout, package naming, and
 acceptance rules are in
 [`docs/distribution.md`](docs/distribution.md).

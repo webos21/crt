@@ -41,20 +41,18 @@ is not complete merely because an in-tree target links.
   Metal/Cocoa.
 - Skia CPU raster/text and Ganesh GPU paths build and run on Linux, Windows,
   and macOS. Low-level live GPU presentation exists on all three hosts. The
-  packaged Skia/Ganesh path is accepted on Windows and macOS; on Linux its
-  low-level GPU example presents and the former libc/glibc symbol collision
-  is fixed on aarch64 and x86_64, but a separate Skia heap corruption still
-  crashes the packaged example. The remaining pixel-exact and resize
+  packaged Skia/Ganesh path is accepted on Windows, macOS, and native
+  Linux/aarch64. Linux passes repeated cold-cache presentation with Vulkan
+  validation both disabled and enabled. The remaining pixel-exact and resize
   combinations are separate evidence gaps, not a missing common API.
 - The software media baseline includes FFmpeg-backed demux/decode, the common
   frame/audio/player contracts, and native audio sinks. Hardware decode and
   decoded-texture interop remain separate, explicitly reported capabilities.
 - The cumulative binary-package chain reaches the current `05-js` skeleton.
   Predecessor-only isolated-stage acceptance through the option-ON
-  `03-gfx-simple -> 04-gfx-media` transition is complete on Windows and
-  macOS. Linux's dependency inventory, low-level Vulkan path, and independent
-  path-with-spaces evidence pass, but its packaged Skia example still prevents
-  final verification/atomic publication.
+  `03-gfx-simple -> 04-gfx-media` transition is complete on Windows, macOS,
+  and native Linux/aarch64, including final distribution verification and
+  atomic publication.
 - `libcrtjs` still contains skeleton libraries only. QuickJS, its event loop,
   modules, and graphics/media bindings have not been implemented.
 

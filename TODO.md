@@ -68,24 +68,20 @@ root-caused and fixed on 2026-09-16: the standalone example mixed static and
 shared CRT C++ runtimes, so `libc++.so.1` allocated a string buffer that the
 executable's static `operator delete` handed to a different allocator
 instance. The fixed installed example presents successfully with a cold/
-disabled shader cache. Linux release sign-off still needs one fresh cumulative
-chain through `verify_dist.py` and atomic publication; the diagnostic rerun
-used an older 03-stage predecessor whose packaged tool set predates the latest
-validator.
+disabled shader cache. Fresh Linux/aarch64 release sign-off completed on
+2026-09-16; the full evidence is recorded in `HISTORY.md`.
 
-- [ ] **Final Linux/aarch64 `03-gfx-simple -> 04-gfx-media` release sign-off
+- [x] **Final Linux/aarch64 `03-gfx-simple -> 04-gfx-media` release sign-off
   after resolving the Skia heap blocker.** The former Mesa/LLVM/SkSL
   attribution was retracted: the bad free was a project-owned link-policy bug,
   now fixed by keeping the standalone Linux examples on the static CRT runtime
   closure supplied by `crt-cc`/`crt-c++` and rejecting a direct shared CRT
   `DT_NEEDED` entry in the stage builder.
-  The remaining work is deliberately narrow: build from a fresh current
-  03-stage predecessor and fresh libc++/FreeType/FFmpeg/Skia inputs; run the
-  cold-cache presentation matrix, installed examples, `verify_dist.py`, and
-  atomic publication. The completed investigation below is retained only as
-  context; detailed evidence belongs in `HISTORY.md`.
+  The fresh-chain presentation matrix, installed examples, `verify_dist.py`,
+  and atomic publication all passed. The completed investigation below is
+  retained only as context; detailed evidence belongs in `HISTORY.md`.
 
-  **Linux/aarch64 execution record and remaining sign-off:**
+  **Linux/aarch64 completed execution record:**
 
   A. **Completed 2026-09-16: freeze and reproduce the exact failing input.**
      The failing executable SHA-256 was
@@ -147,7 +143,7 @@ validator.
      smallest deterministic regression possible, preferably the CPU-only SkSL
      case, and run the ordinary Linux plus Windows/macOS regression lanes
      appropriate to the touched boundary.
-  F. **Remaining: run the expensive release acceptance once from a fresh
+  F. **Completed 2026-09-16: run the expensive release acceptance once from a fresh
      cumulative predecessor chain.** From fresh
      libc++/FreeType/FFmpeg/Skia inputs, run the full predecessor-only isolated
      `03-gfx-simple -> 04-gfx-media` build on native Linux/aarch64. Use a cold
@@ -158,10 +154,13 @@ validator.
      architectures/hosts. Move each completed tranche from this section into
      `HISTORY.md` with commands, results, and commit IDs before starting the
      next tranche; commit/push at stable tranche boundaries so another host can
-     continue without reconstructing state.
+     continue without reconstructing state. The native aarch64 run completed
+     the fresh chain, passed 8/8 CTest, rebuilt both installed examples,
+     passed validation OFF and ON 3/3 each, passed `verify_dist.py`, and
+     published 04 atomically.
 
-  **Exit policy:** do not declare Linux 04 release acceptance or the Linux
-  `04 -> 05-js` isolated chain complete until tranche F passes. Hardware-decode
+  **Exit policy satisfied:** Linux 04 release acceptance is complete because
+  tranche F passed. Hardware-decode
   API/backend work on other hosts may proceed independently. Do not weaken
   `verify_dist.py` or add a Mesa/Skia exception for the resolved link-policy
   defect.

@@ -137,15 +137,15 @@ target.
   in-repo build tree. The complete predecessor-only chain through
   `03-gfx-simple -> 04-gfx-media`, with Skia and FFmpeg genuinely enabled
   (not the in-repo cumulative pass's default-OFF state), is complete on
-  Windows and macOS. Linux's external-prerequisite/ELF audit is complete and
-  both installed Vulkan examples present. A fresh cumulative Linux chain is
-  still required for final `verify_dist.py`/atomic-publication sign-off.
+  Windows, macOS, and native Linux/aarch64. Linux's fresh cumulative run also
+  passes both installed-source Vulkan examples, `verify_dist.py`, and atomic
+  publication.
 - Distribution hardening is complete for the current 01-through-04 contract:
   predecessor relinking, external-prerequisite manifests, ELF/PE/Mach-O
   dependency inventory, ELF RUNPATH and Mach-O install-name/RPATH portability,
   installed external CMake consumers, configure/make port consumers, and
-  space-containing paths are covered. The Linux/aarch64 Skia failure above is
-  a separately recorded upper-runtime defect, not an exception to those gates.
+  space-containing paths are covered. The former Linux/aarch64 Skia blocker is
+  resolved without an exception to those gates.
 - FFmpeg hardware decode/zero-copy and the QuickJS core proceed on top of the
   completed GPU rendering/presentation contract.
 - JavaScript media/gfx binding follows the stable native contracts, using a
@@ -261,14 +261,11 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-1. Revisit the deferred Linux/aarch64 Skia presentation failure when another
-   physical host or hardware ICD can distinguish a one-device limitation, a
-   newer pinned Skia still reproduces it, or Linux release sign-off requires it.
-2. Enable and verify real FFmpeg hardware decode per host while retaining the
+1. Enable and verify real FFmpeg hardware decode per host while retaining the
    software/CPU fallback as the correctness baseline.
-3. Connect hardware decoder textures to Skia without CPU copies, including
+2. Connect hardware decoder textures to Skia without CPU copies, including
    device/fence ownership and CPU-download recovery.
-4. Bring up QuickJS core/event-loop/timers/modules, then expose stable
+3. Bring up QuickJS core/event-loop/timers/modules, then expose stable
    media/gfx services with WebCodecs-like queue semantics.
 5. Add capture/encode and network/adaptive/realtime services only after the
    native playback and zero-copy contracts are stable.
