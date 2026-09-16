@@ -251,8 +251,9 @@ validation unless that validation exposes the same boundary.
 The completed cross-host baseline and its exact validation evidence stay in
 [`STATUS.md`](STATUS.md) and [`HISTORY.md`](HISTORY.md); the product boundary
 and dependency order stay in [`docs/runtime_roadmap.md`](docs/runtime_roadmap.md).
-Promote one tranche at a time into In Progress when its prerequisite evidence
-and acceptance host are available.
+This roadmap remains Planned until the allocator baseline decision gate above
+closes. After that, promote one tranche at a time into In Progress when its
+prerequisite evidence and acceptance host are available.
 
 1. **Finish live GPU presentation evidence.** Close the remaining macOS/x86_64
    live path, pixel-exact macOS checks, resize-plus-Ganesh coverage on macOS,

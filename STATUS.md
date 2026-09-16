@@ -38,6 +38,12 @@ documentation passes -- see `TODO.md`'s Notice section. It may lag behind
   and FFmpeg ports, has static and shared coverage on Linux, macOS, and
   Windows. The authoritative package-by-package state is
   [`docs/porting_status.md`](docs/porting_status.md).
+- The current project-owned allocator remains the bootstrap/reference
+  implementation. API, alignment, reuse, direct-linked debug, and basic
+  4-thread contention coverage exist; large-N, high-contention,
+  fragmentation/RSS, and fragmented-fork baseline validation is now the
+  active foundation gate before further Upper Runtime work. Scudo is a
+  conditional production candidate, not a selected replacement.
 
 ### libcrtgfx
 
@@ -154,8 +160,13 @@ target.
   installed external CMake consumers, configure/make port consumers, and
   space-containing paths are covered. The former Linux/aarch64 Skia blocker is
   resolved without an exception to those gates.
-- FFmpeg hardware decode/zero-copy and the QuickJS core proceed on top of the
-  completed GPU rendering/presentation contract.
+- Allocator baseline validation and a documented Host ABI firewall are the
+  immediate foundation gate before FFmpeg hardware decode. If the measured
+  current allocator remains within the declared scaling and memory envelope,
+  Upper Runtime work proceeds without replacing it; Scudo is promoted only
+  if repeatable evidence demonstrates a blocker.
+- FFmpeg hardware decode/zero-copy and the QuickJS core then proceed on top of
+  the completed GPU rendering/presentation contract.
 - JavaScript media/gfx binding follows the stable native contracts, using a
   WebCodecs-like asynchronous shape; WebRTC-style realtime services, V8, and a
   Chromium/Ozone probe remain later layers.
@@ -234,6 +245,9 @@ statuses, and exceptions are maintained in:
 - Windows static archives containing constructor sections can still require a
   recipe-specific retention policy because PE/COFF archive extraction does
   not behave like a GNU ELF linker script.
+- `getrusage()` currently preserves the public API shape but returns
+  zero-filled usage counters. Allocator baseline tooling therefore measures
+  RSS with a host-side runner rather than treating `ru_maxrss` as real data.
 - Linux `libdl` remains a documented boundary rather than a CRT-owned general
   ELF loader: its `dlopen`/`dlsym`/`dlclose` honestly report "not supported"
   rather than delegating to a real loader, since this project links every
@@ -278,15 +292,23 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-1. Enable and verify real FFmpeg hardware decode per host while retaining the
+1. Complete the cross-host allocator correctness/stress, contention,
+   fragmentation/RSS, and fork baseline; publish the decision record and
+   freeze the Host ABI firewall before hardware decode. Keep Scudo conditional
+   on measured failure of the current allocator.
+2. Finish the remaining live GPU evidence: macOS/x86_64 execution,
+   pixel-exact macOS checks, resize-plus-Ganesh on macOS, and pixel-exact
+   resize on Windows.
+3. Enable and verify real FFmpeg hardware decode per host while retaining the
    software/CPU fallback as the correctness baseline.
-2. Connect hardware decoder textures to Skia without CPU copies, including
+4. Connect hardware decoder textures to Skia without CPU copies, including
    device/fence ownership and CPU-download recovery.
-3. Bring up QuickJS core/event-loop/timers/modules, then expose stable
-   media/gfx services with WebCodecs-like queue semantics.
-4. Add capture/encode and network/adaptive/realtime services only after the
-   native playback and zero-copy contracts are stable.
-5. Continue closing the focused CRT/PAL limitations above when an upstream
+5. Add capture/encode, then transport, buffering, reconnect, and streaming
+   services after the native playback and zero-copy contracts are stable.
+6. Use WebRTC as a consumer milestone, then bring up QuickJS core/event-loop/
+   timers/modules and expose stable media/gfx services with WebCodecs-like
+   queue semantics.
+7. Continue closing the focused CRT/PAL limitations above when an upstream
    consumer exposes a concrete requirement, following the Bionic-first
    porting discipline in `AGENTS.md`.
 

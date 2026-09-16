@@ -43,8 +43,10 @@ is not complete merely because an in-tree target links.
   and macOS. Low-level live GPU presentation exists on all three hosts. The
   packaged Skia/Ganesh path is accepted on Windows, macOS, and native
   Linux/aarch64. Linux passes repeated cold-cache presentation with Vulkan
-  validation both disabled and enabled. The remaining pixel-exact and resize
-  combinations are separate evidence gaps, not a missing common API.
+  validation both disabled and enabled, and directly runs the packaged
+  shared-runtime Vulkan/Skia binary as an isolated-stage smoke. The remaining
+  pixel-exact and resize combinations are separate evidence gaps, not a
+  missing common API.
 - The software media baseline includes FFmpeg-backed demux/decode, the common
   frame/audio/player contracts, and native audio sinks. Hardware decode and
   decoded-texture interop remain separate, explicitly reported capabilities.
@@ -55,6 +57,11 @@ is not complete merely because an in-tree target links.
   atomic publication.
 - `libcrtjs` still contains skeleton libraries only. QuickJS, its event loop,
   modules, and graphics/media bindings have not been implemented.
+- The bootstrap/reference allocator has API, debug-mode, and basic contention
+  coverage. Cross-host large-N, high-contention, fragmentation/RSS, and
+  fragmented-fork validation is the active foundation gate. Scudo remains a
+  conditional production candidate and is not a prerequisite unless those
+  measurements demonstrate a blocker.
 
 Exact test counts, host evidence, and current limitations belong in
 [`../STATUS.md`](../STATUS.md) and [`../HISTORY.md`](../HISTORY.md). Open work
@@ -63,18 +70,23 @@ and completion boundaries rather than duplicating those ledgers.
 
 ## Execution Order
 
-1. Finish the remaining live GPU presentation evidence for the existing
+1. Complete allocator baseline validation and publish its cross-host decision
+   record. Freeze the Host ABI firewall ownership rules for Wayland/Vulkan and
+   upcoming FFmpeg hardware, VA-API, PipeWire, and EGL boundaries. Continue
+   with the current allocator when it meets the declared envelope; promote
+   Scudo evaluation only when repeatable evidence does not.
+2. Finish the remaining live GPU presentation evidence for the existing
    Ganesh backends. Graphite is not part of this acceptance gate.
-2. Enable hardware video decode per host while retaining software decode as
+3. Enable hardware video decode per host while retaining software decode as
    the correctness fallback and reporting actual hardware use separately.
-3. Define and verify zero-copy decoded-texture ownership, device affinity, and
+4. Define and verify zero-copy decoded-texture ownership, device affinity, and
    synchronization. Keep a measured CPU-download fallback where direct interop
    is unavailable.
-4. Add capture, conversion, hardware/software encode, timestamp, and muxing on
+5. Add capture, conversion, hardware/software encode, timestamp, and muxing on
    top of the accepted frame and playback contracts.
-5. Add transport, buffering, back-pressure, reconnect, and streaming protocol
+6. Add transport, buffering, back-pressure, reconnect, and streaming protocol
    integration only after local media timing is stable.
-6. Use WebRTC as a consumer-driven integration milestone, then add the real
+7. Use WebRTC as a consumer-driven integration milestone, then add the real
    QuickJS core, event loop, modules, native bindings, and JavaScript-visible
    graphics/media services. Only then extend isolated-stage acceptance from
    `04-gfx-media` to `05-js`.
@@ -94,6 +106,11 @@ host facility is unavailable.
   software/headless fallback.
 - A cumulative in-tree build does not replace predecessor-only stage
   acceptance. Release stages follow [`distribution.md`](distribution.md).
+- Allocator replacement requires a preserved reproducer and cross-host
+  measurements; asymptotic concern alone is not an acceptance failure.
+- Host-library opaque objects must be created, synchronized, and destroyed by
+  their owning host library/allocator domain. CRT adapters may transport
+  handles but must not reinterpret private layouts or free host-owned storage.
 - Upstream source is not patched merely to hide a CRT/PAL deficiency. Porting
   follows the Bionic-first discipline in [`../AGENTS.md`](../AGENTS.md).
 
