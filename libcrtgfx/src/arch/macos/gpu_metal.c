@@ -501,13 +501,16 @@ void crtgfx_gpu_metal_end_ganesh(struct crtgfx_gpu_surface* surface) {
   if (state != NULL) state->ganesh_wrapped = 0;
 }
 
-void crtgfx_gpu_metal_test_force_device_loss(struct crtgfx_gpu_device* device) {
+crtgfx_result crtgfx_gpu_metal_test_force_device_loss(struct crtgfx_gpu_device* device) {
   struct crtgfx_gpu_metal_device_state* state;
-  if (device == NULL || device->backend != CRTGFX_GPU_BACKEND_METAL) return;
+  if (device == NULL || device->backend != CRTGFX_GPU_BACKEND_METAL) {
+    return CRTGFX_ERROR_INVALID_ARGUMENT;
+  }
   state = (struct crtgfx_gpu_metal_device_state*)device->backend_state;
-  if (state == NULL) return;
+  if (state == NULL || state->device == NULL) return CRTGFX_ERROR_HOST;
   metal_msg_id(state->command_queue, "release");
   metal_msg_id(state->device, "release");
   state->command_queue = NULL;
   state->device = NULL;
+  return CRTGFX_OK;
 }

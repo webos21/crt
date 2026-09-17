@@ -134,13 +134,17 @@ present transition stay in the backend owner.
   demo) all pass on macOS/arm64. Also fixed a real generic-demo bug found
   while verifying this: the scripted-resize check wrongly assumed a 1:1
   point-to-pixel ratio, which a Retina display breaks.
-- [ ] **Next: Tranche 5 — remove generic-test privilege and close macro/layout escape
-  paths.**
-  Replace `skia_gpu_offscreen_smoke.cc`'s `gpu_internal.h` access with a
-  backend-neutral test-only device-loss hook. Audit `src/`, `tests/`, `tools/`,
-  and `examples/` for remaining concrete access; narrow `CRTGFX_HAVE_*` to
-  implementation selection and prove backend-disabled static/shared builds.
-- [ ] **Tranche 6 — run cross-host/distribution acceptance, then make it
+- [x] **Tranche 5 — remove generic-test privilege and close macro/layout escape
+  paths.** Completed 2026-09-17 and recorded in `HISTORY.md`. The generic Skia
+  smoke now uses a private backend-neutral device-loss control instead of
+  `gpu_internal.h`; the three owners perform their own loss/cleanup operation.
+  The source audit is enforced by a seven-case regression guard, and
+  `CRTGFX_HAVE_*`/OS selection definitions are target-private rather than
+  directory-wide. On Windows, both backend-enabled static/shared libraries and
+  the real hardware/WARP Ganesh loss/recovery smoke pass; a separate
+  `CRTGFX_ENABLE_GPU_BACKEND=OFF` tree builds and runs the static/shared common
+  wrappers without creating a backend object target.
+- [ ] **Next: Tranche 6 — run cross-host/distribution acceptance, then make it
   routine CI evidence.**
   Recheck public ABI, allocator-domain ownership, binary imports, and focused
   GPU/window/resize/Skia coverage on Linux/aarch64, Windows, and macOS. Add a

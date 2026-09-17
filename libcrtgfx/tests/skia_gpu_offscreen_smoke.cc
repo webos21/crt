@@ -8,10 +8,9 @@
 // context()/crtgfx_skia_make_gpu_offscreen_surface() (crtgfx/skia.h),
 // which have real per-OS implementations behind the same names on Linux
 // (src/arch/linux/gpu_vulkan.c), Windows (src/arch/windows/gpu_win32.c),
-// and macOS (src/arch/macos/gpu_metal.c) -- only the device-loss test's
-// own low-level handle-teardown step (test_device_loss_and_recreation(),
-// below) branches by OS internally, via #if defined(CRTGFX_HAVE_VULKAN)/
-// #elif defined(CRTGFX_HAVE_D3D12)/#elif defined(CRTGFX_HAVE_METAL).
+// and macOS (src/arch/macos/gpu_metal.c). Device-loss injection also goes
+// through one backend-neutral, test-only control; this generic test has no
+// access to gpu_internal.h, a native handle, or backend state.
 //
 // Unlike crtgfx_skia_raster_smoke/crtgfx_skia_cpu_coverage (CPU raster,
 // crtgfx_skia_make_raster_surface()), this drives a real GPU device end to
@@ -54,7 +53,7 @@
 
 #include "skia_reference_scene.h"
 
-#include "gpu_internal.h"
+#include "gpu_test_control.h"
 
 #if defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
 #include "arch/windows/gpu_win32_test.h"
@@ -65,71 +64,6 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-
-#if defined(CRTGFX_HAVE_VULKAN)
-// Hand-declared, minimal real Vulkan subset -- matching src/arch/linux/
-// gpu_vulkan.c's own top comment: this project's own dlopen() has no real
-// ELF dynamic loading yet, so this links libvulkan directly (this whole
-// target already does, transitively via crtgfx -- see CMakeLists.txt),
-// resolved at link time, not looked up at runtime. Real, external linkage
-// (not inside the anonymous namespace below, unlike everything else in
-// this file) -- it names a real symbol libvulkan.so itself defines.
-typedef struct VkDevice_T* VkDevice;
-extern "C" void vkDestroyDevice(VkDevice device, const void* allocator);
-#elif defined(CRTGFX_HAVE_D3D12)
-// Real <d3d12.h> (2026-09-04, real, confirmed necessary -- an earlier
-// version of this file's own comment here claimed this arrived
-// transitively via crtgfx/skia.h -> Skia's own GrD3DTypes.h, which is
-// wrong: crtgfx/skia.h only ever includes the backend-agnostic
-// include/gpu/ganesh/GrDirectContext.h, never GrD3DTypes.h itself, so
-// this file's own direct use of GUID/HRESULT/ID3D12Device/ID3D12Device5
-// below needs its own real include -- confirmed for real: "unknown type
-// name 'GUID'"/"'ID3D12Device'"/"'HRESULT'" without it). Resolves to
-// mingw-w64's own real, complete header (see libcrtgfx/CMakeLists.txt's
-// own -I<win32_shim>/-I<mingw-w64-headers include root> comment on this
-// same target, and tools/fetch_mingw_w64_headers.py's own top comment
-// for why mingw-w64's header set specifically, not the raw Microsoft
-// Windows SDK's -- a real, confirmed dead end under this project's
-// mingw-target clang).
-//
-// #pragma, not just this target's own CMakeLists.txt -Wno-unused-value/
-// -Wno-ignored-attributes (2026-09-04, real, confirmed necessary):
-// those command-line flags land in <FLAGS> *before* crt_cxx_build_flags'
-// own inherited -Wall -Wextra -Werror (this project's own established
-// per-target-then-inherited ordering, see CMakeLists.txt's own comments
-// on this same target) -- and -Wextra itself re-enables -Wunused-value,
-// so a plain -Wno-unused-value earlier on the same command line is
-// silently undone by the time -Werror promotes it back to a hard error.
-// A #pragma always wins regardless of command-line position (it takes
-// effect exactly at this point in the token stream), so it is used here
-// instead, scoped tightly around just the one real #include that needs
-// it -- mingw-w64's own real combaseapi.h (reached transitively) has a
-// deliberate no-op `static_cast<IUnknown *>(*pp);` (part of its own
-// IID_PPV_ARGS-equivalent macro machinery) and two intentionally-
-// redeclared-inline dllimport functions (CoCreateInstance/
-// CoCreateInstanceEx) -- both real, harmless, expected mingw-w64
-// patterns; see CMakeLists.txt's own matching comment for the exact
-// confirmed diagnostics.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunused-value"
-#pragma clang diagnostic ignored "-Wignored-attributes"
-#include <d3d12.h>
-#pragma clang diagnostic pop
-
-// Real GUID for ID3D12Device5 (needed for the real, clean RemoveDevice()
-// device-loss test below), hand-declared -- IID_PPV_ARGS()/__uuidof() are
-// real MSVC-only extensions this project's own mingw-target clang
-// invocation does not support (matching skia_bridge.cc's own kIID_
-// ID3D12Resource precedent, same file), and dxguid.lib -- which would
-// otherwise supply the real SDK's own extern IID_ID3D12Device5 symbol --
-// is deliberately not linked (matching window_win32.c's own established
-// precedent). The real ID3D12Device/ID3D12Device5 C++ interfaces
-// themselves (from the real <d3d12.h> just above) are used directly
-// below, no hand-declared vtable needed the way gpu_win32.c's own real
-// device/queue creation code needs one.
-static const GUID kIID_ID3D12Device5 = {
-    0x8b4f173b, 0x2fea, 0x4b80, {0x8f, 0x58, 0x43, 0x07, 0x19, 0x1a, 0xb9, 0x5d}};
-#endif
 
 namespace {
 
@@ -204,36 +138,12 @@ void test_draw_and_resize(crtgfx_gpu_device* device) {
       "draw/resize: resized (2x)");
 }
 
-// Device-loss + context-recreation, using the closest real, safe,
-// portable approximation Vulkan actually offers. Confirmed directly
-// (2026-09-03, this vertical slice's own research): there is no portable,
-// standard Vulkan API to *force* VK_ERROR_DEVICE_LOST the way D3D12's own
-// ID3D12Device::RemoveDevice() cleanly does for exactly this kind of test
-// (Skia's own device-lost handling, GrVkGpu::checkVkResult, only reacts to
-// a real driver-returned VK_ERROR_DEVICE_LOST, never synthesizes one) --
-// Windows/D3D12's own later roadmap step gets that cleaner, driver-forced
-// test; this is Linux's honest equivalent given Vulkan's own real limits.
-//
-// This test also does NOT attempt a genuine live Ganesh call against a
-// dangling VkDevice handle -- confirmed for real, the hard way, that this
-// is not survivable: an earlier version of this test destroyed the real
-// VkDevice once directly, then let crtgfx_gpu_device_release()'s own real
-// teardown (src/arch/linux/gpu_vulkan.c) call vkDestroyDevice() on it a
-// *second* time, and the real Vulkan Loader's own parameter validation
-// aborted the whole process ("ERROR: vkDestroyDevice: Invalid device
-// [VUID-vkDestroyDevice-device-parameter]") rather than failing gracefully
-// -- using an already-destroyed Vulkan object is genuinely undefined
-// behavior per the spec, not a bug in this project's own teardown code,
-// and *is* exactly why no portable "please simulate this safely" API
-// exists in the first place. The safe, real, and still-meaningful
-// boundary this test actually exercises instead: destroy the real
-// VkDevice exactly once, then immediately null out this crtgfx_gpu_
-// device's own handle fields so the *later* real release() only ever
-// tears down what is actually still real -- proving (1) crtgfx_skia_make_
-// gpu_context() rejects an already-torn-down device cleanly (no crash/
-// hang), matching its own documented null-handle validation, and (2) a
-// fresh crtgfx_gpu_device_create() afterward genuinely recovers with a
-// brand-new, independently working device.
+// Device-loss + context-recreation through one backend-neutral test control.
+// The owner chooses the safe native operation: D3D12 uses RemoveDevice(),
+// while Vulkan and Metal destroy/release their owned device/queue state and
+// clear it before ordinary wrapper teardown. This generic smoke never sees a
+// native handle or private layout; it verifies that owner-side loss succeeds
+// and that a fresh public device can still create a working Ganesh context.
 void test_device_loss_and_recreation(uint32_t device_index) {
   crtgfx_gpu_device* device = nullptr;
   if (!report(
@@ -243,74 +153,9 @@ void test_device_loss_and_recreation(uint32_t device_index) {
     return;
   }
 
-#if defined(CRTGFX_HAVE_VULKAN)
-  // Real, single, deliberate teardown -- then null out this object's own
-  // handle fields so crtgfx_gpu_device_release() below performs no second
-  // real vkDestroyDevice() call on the same, now-invalid handle (see this
-  // function's own top comment for why a real double-destroy is not
-  // survivable here).
-  crtgfx_gpu_vulkan_test_force_device_loss(device);
-
-  // crtgfx_skia_make_gpu_context() must reject the now torn-down device
-  // cleanly (its own documented "device == nullptr / vk_device == nullptr"
-  // validation applies exactly here) -- the real, safe boundary this
-  // vertical slice's own contract actually needs to hold.
   report(
-      "device-loss: a real Ganesh call against the torn-down device fails cleanly (no crash/hang)",
-      crtgfx_skia_make_gpu_context(device) == nullptr);
-#elif defined(CRTGFX_HAVE_D3D12)
-  // Real, clean device-loss: ID3D12Device::RemoveDevice() (via
-  // ID3D12Device5, the interface it was introduced on -- see this file's
-  // own top comment) is D3D12's own real, intentionally-provided API for
-  // exactly this kind of test. Unlike Vulkan's own vkDestroyDevice(),
-  // RemoveDevice() does NOT free the underlying COM object or invalidate
-  // the pointer -- it only marks the device "removed" (subsequent real
-  // D3D12 calls against it start failing with DXGI_ERROR_DEVICE_REMOVED),
-  // so there is no double-destroy hazard to route around here the way the
-  // Vulkan branch above needs to: the real ID3D12Device pointer stays
-  // genuinely valid, and crtgfx_gpu_device_release() below can safely
-  // Release() it normally, real COM refcounting handling the rest.
-  {
-    crtgfx_gpu_win32_device_view view = {};
-    if (!report(
-            "device-loss: backend lends a D3D12 device view",
-            crtgfx_gpu_win32_borrow_device(device, &view) != 0)) {
-      crtgfx_gpu_device_release(device);
-      return;
-    }
-    ID3D12Device* d3d_device = reinterpret_cast<ID3D12Device*>(view.device);
-    ID3D12Device5* d3d_device5 = nullptr;
-    HRESULT hr = d3d_device->QueryInterface(
-        kIID_ID3D12Device5, reinterpret_cast<void**>(&d3d_device5));
-    if (report("device-loss: QueryInterface(ID3D12Device5) succeeds", SUCCEEDED(hr) && d3d_device5 != nullptr)) {
-      d3d_device5->RemoveDevice();
-      d3d_device5->Release();
-    }
-    report(
-        "device-loss: GetDeviceRemovedReason() reports a real removal after RemoveDevice()",
-        FAILED(d3d_device->GetDeviceRemovedReason()));
-  }
-#elif defined(CRTGFX_HAVE_METAL)
-  // Metal has no real, public "simulate device loss" trigger analogous to
-  // D3D12's RemoveDevice() (the closest real thing, MTLDevice's
-  // registerNotificationHandler for a removal notification, only ever
-  // fires for a real, physical external/eGPU being unplugged -- nothing
-  // this test could trigger on demand) -- so, matching the Vulkan
-  // branch's own "closest real, safe approximation" above (same file,
-  // same reasoning): ask the backend owner to perform a single, deliberate
-  // release of its real Objective-C device/queue objects. The generic test
-  // never reaches into Metal's concrete state, and final device release
-  // remains safe because the owner leaves the released handles null.
-  crtgfx_gpu_metal_test_force_device_loss(device);
-
-  // crtgfx_skia_make_gpu_context() must reject the now torn-down device
-  // cleanly (its owner-provided borrowed view is now unavailable) --
-  // the real, safe boundary this vertical slice's own contract actually
-  // needs to hold.
-  report(
-      "device-loss: a real Ganesh call against the torn-down device fails cleanly (no crash/hang)",
-      crtgfx_skia_make_gpu_context(device) == nullptr);
-#endif
+      "device-loss: backend-owned injection succeeds",
+      crtgfx_gpu_test_force_device_loss(device) == CRTGFX_OK);
 
   crtgfx_gpu_device_release(device); // a single, real, safe teardown on every real backend
 
@@ -396,7 +241,7 @@ extern "C" int main() {
 
   test_device_loss_and_recreation(0);
 
-#if defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
+#if defined(CRT_TARGET_OS_WINDOWS)
   /* Exercise the real DXGI WARP fallback through the same public device and
    * Ganesh entry points without changing production adapter ordering. */
   {

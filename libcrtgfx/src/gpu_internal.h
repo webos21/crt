@@ -29,6 +29,7 @@ struct crtgfx_gpu_backend_ops {
       struct crtgfx_gpu_surface* surface, float r, float g, float b, float a);
   crtgfx_result (*surface_resize)(struct crtgfx_gpu_surface* surface, uint32_t width, uint32_t height);
   crtgfx_result (*surface_present)(struct crtgfx_gpu_surface* surface);
+  crtgfx_result (*test_force_device_loss)(struct crtgfx_gpu_device* device);
 };
 
 struct crtgfx_gpu_device {
@@ -117,7 +118,7 @@ int crtgfx_gpu_vulkan_begin_ganesh(
 int crtgfx_gpu_vulkan_get_ganesh_present_view(
     struct crtgfx_gpu_surface* surface, struct crtgfx_gpu_vulkan_surface_view* out_view);
 void crtgfx_gpu_vulkan_end_ganesh(struct crtgfx_gpu_surface* surface);
-void crtgfx_gpu_vulkan_test_force_device_loss(struct crtgfx_gpu_device* device);
+crtgfx_result crtgfx_gpu_vulkan_test_force_device_loss(struct crtgfx_gpu_device* device);
 #elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
 struct crtgfx_gpu_win32_device_view {
   void* adapter;
@@ -159,6 +160,7 @@ int crtgfx_gpu_win32_is_ganesh_wrapped(const struct crtgfx_gpu_surface* surface)
 void crtgfx_gpu_win32_end_ganesh(struct crtgfx_gpu_surface* surface);
 crtgfx_result crtgfx_gpu_win32_submit_ganesh(
     struct crtgfx_gpu_surface* surface, void* resource, uint32_t resource_state_before);
+crtgfx_result crtgfx_gpu_win32_test_force_device_loss(struct crtgfx_gpu_device* device);
 #elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
 struct crtgfx_gpu_metal_device_view {
   void* device;
@@ -217,7 +219,7 @@ int crtgfx_gpu_metal_begin_ganesh(
 int crtgfx_gpu_metal_is_ganesh_wrapped(const struct crtgfx_gpu_surface* surface);
 void crtgfx_gpu_metal_end_ganesh(struct crtgfx_gpu_surface* surface);
 crtgfx_result crtgfx_gpu_metal_surface_prepare_ganesh_present(struct crtgfx_gpu_surface* surface);
-void crtgfx_gpu_metal_test_force_device_loss(struct crtgfx_gpu_device* device);
+crtgfx_result crtgfx_gpu_metal_test_force_device_loss(struct crtgfx_gpu_device* device);
 #endif
 
 #ifdef __cplusplus

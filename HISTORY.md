@@ -10,6 +10,50 @@ substantive update.
 
 ## 2026-09-17
 
+- **Completed backend-boundary Tranche 5: generic tests no longer receive
+  private-layout privilege, GPU feature macros are target-local implementation
+  selectors, and a real backend-disabled build now exists and passes.**
+  Added the private, non-installed `src/gpu_test_control.h` and one
+  `crtgfx_gpu_test_force_device_loss()` dispatcher. The generic
+  `tests/skia_gpu_offscreen_smoke.cc` no longer includes `gpu_internal.h`,
+  declares Vulkan entry points, includes D3D12 SDK interfaces, borrows native
+  devices, or releases Metal handles. It requests loss through the one neutral
+  operation; Vulkan and Metal tear down and clear their owner-local device/
+  queue state, while the Windows owner obtains `ID3D12Device5`, calls the real
+  `RemoveDevice()`, and confirms `GetDeviceRemovedReason()` reports removal.
+  Fresh public device/context/draw recovery remains the generic assertion.
+
+  The first Windows run caught a real migration bug instead of accepting a
+  compile-only result: the new hand-declared `ID3D12Device5` vtable placed
+  `RemoveDevice()` at slot 62. The actual inherited interface ends
+  `ID3D12Device` at slot 43, then adds Device1 slots 44-46, Device2 slot 47,
+  Device3 slots 48-50, Device4 slots 51-56, and `CreateLifetimeTracker` at 57,
+  so `RemoveDevice()` is slot 58. Calling the wrong slot fast-failed with
+  `0xC0000409`; correcting the owner declaration to reserve slots 3-57 made
+  real hardware device loss and recovery pass. The smoke's buffered output had
+  initially made the stop appear to be in its preceding resize case; temporary
+  immediate log flushing isolated the true call, and was removed after the
+  owner fix.
+
+  Added `CRTGFX_ENABLE_GPU_BACKEND` and replaced directory-scoped
+  `CRTGFX_HAVE_VULKAN`/`_D3D12`/`_METAL`/`_NATIVE_WAYLAND` definitions with
+  target-private definition lists applied only to common dispatch, the selected
+  owner, direct Skia consumers, and the native Wayland window object where
+  needed. The shared in-tree/stage target constructor now handles an empty
+  backend source list while still producing fixed static/shared common-wrapper
+  libraries. Extended `tools/test_crtgfx_gpu_backend_boundary.py` to seven
+  checks, including the neutral smoke contract and a guard against restoring
+  directory-scoped GPU feature definitions.
+
+  Verified on Windows/x86_64: the boundary guard passes 7/7; the enabled tree
+  builds `crtgfx_gpu`, `crtgfx_gpu_shared`, and `crtgfx_gpu_test`, and its
+  focused GPU tests plus the real hardware/forced-WARP Ganesh smoke pass
+  through draw, resize, owner-controlled loss, recreation, and readback. A
+  separate `CRTGFX_ENABLE_GPU_BACKEND=OFF`/Skia-off build creates no backend
+  object target, builds both static and shared GPU wrappers plus the generic
+  GPU test, and passes its focused CTest pair. Cross-host and isolated-stage
+  acceptance remain explicitly in Tranche 6.
+
 - **Completed backend-boundary Tranche 4 by moving Metal's device/surface
   state, CAMetalLayer extraction, and Ganesh interop into the macOS owner,
   matching Vulkan (Tranche 1) and D3D12 (Tranche 3).**
@@ -48,10 +92,10 @@ substantive update.
   smoke test) is now empty -- the last two audited exceptions closed with
   this tranche, not just shrunk. Updated `docs/libcrtgfx_gpu_backend_
   boundary.md`'s status and direct-access inventory to reflect the completed
-  migration -- only
-  Tranche 5's own remaining `gpu_internal.h` include in the generic smoke
-  test (for the backend-neutral test-control call itself, not a concrete-
-  field read) is left in that inventory.
+  migration. At Tranche 4 completion the generic smoke still included
+  `gpu_internal.h` solely for its backend-neutral test-control call; Tranche 5
+  (recorded above) subsequently replaced that last include with the dedicated
+  non-installed `gpu_test_control.h`.
 
   A real bug in the generic GPU window demo was found and fixed while
   verifying this on real macOS/arm64 Retina hardware, not guessed:

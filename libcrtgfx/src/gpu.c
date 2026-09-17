@@ -9,6 +9,7 @@
 #include "crtgfx/gpu.h"
 
 #include "gpu_internal.h"
+#include "gpu_test_control.h"
 
 #include <errno.h>
 #include <pthread.h>
@@ -41,6 +42,7 @@ static const struct crtgfx_gpu_backend_ops crtgfx_gpu_active_ops = {
     crtgfx_gpu_vulkan_surface_clear,
     crtgfx_gpu_vulkan_surface_resize,
     crtgfx_gpu_vulkan_surface_present,
+    crtgfx_gpu_vulkan_test_force_device_loss,
 };
 #elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
 static const struct crtgfx_gpu_backend_ops crtgfx_gpu_active_ops = {
@@ -55,6 +57,7 @@ static const struct crtgfx_gpu_backend_ops crtgfx_gpu_active_ops = {
     crtgfx_gpu_win32_surface_clear,
     crtgfx_gpu_win32_surface_resize,
     crtgfx_gpu_win32_surface_present,
+    crtgfx_gpu_win32_test_force_device_loss,
 };
 #elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
 static const struct crtgfx_gpu_backend_ops crtgfx_gpu_active_ops = {
@@ -69,6 +72,7 @@ static const struct crtgfx_gpu_backend_ops crtgfx_gpu_active_ops = {
     crtgfx_gpu_metal_surface_clear,
     crtgfx_gpu_metal_surface_resize,
     crtgfx_gpu_metal_surface_present,
+    crtgfx_gpu_metal_test_force_device_loss,
 };
 #endif
 
@@ -203,6 +207,16 @@ crtgfx_result crtgfx_gpu_surface_present(crtgfx_gpu_surface* surface) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
   return surface->ops->surface_present(surface);
+}
+
+crtgfx_result crtgfx_gpu_test_force_device_loss(crtgfx_gpu_device* device) {
+  if (device == NULL) {
+    return CRTGFX_ERROR_INVALID_ARGUMENT;
+  }
+  if (device->ops == NULL || device->ops->test_force_device_loss == NULL) {
+    return CRTGFX_ERROR_UNSUPPORTED;
+  }
+  return device->ops->test_force_device_loss(device);
 }
 
 crtgfx_result crtgfx_gpu_fence_create(crtgfx_gpu_device* device, crtgfx_gpu_fence** out_fence) {

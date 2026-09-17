@@ -26,6 +26,10 @@ set(CRTGFX_LIBCXX_UNEXPORTED "${CMAKE_SOURCE_DIR}/libstdc++/third_party/libcxx/l
 set(CRTGFX_EMUTLS_STUB_SOURCE "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/common/emutls_link_stubs.c")
 set(CRTGFX_WINDOW_SOURCES ${CRTGFX_WINDOW_COMMON_SOURCES})
 set(CRTGFX_GPU_SOURCES ${CRTGFX_GPU_COMMON_SOURCES})
+option(CRTGFX_ENABLE_GPU_BACKEND "Compile the host GPU backend into crtgfx_gpu" ON)
+set(CRTGFX_GPU_BACKEND_ENABLED OFF)
+set(CRTGFX_GPU_BACKEND_DEFINITIONS)
+set(CRTGFX_NATIVE_WAYLAND_ENABLED OFF)
 # Per-OS backend files (window_win32.c/gpu_win32.c, window_cocoa.c/
 # gpu_metal.c, window_wayland.c+window_wayland_native.c/gpu_vulkan.c)
 # populate these two below -- kept separate from CRTGFX_WINDOW_SOURCES/
@@ -299,40 +303,43 @@ endif()
 
 if(CRT_TARGET_OS STREQUAL "windows")
   list(APPEND CRTGFX_WINDOW_BACKEND_SOURCES ${CRTGFX_WINDOW_BACKEND_WINDOWS_SOURCES})
-  list(APPEND CRTGFX_GPU_BACKEND_SOURCES ${CRTGFX_GPU_BACKEND_WINDOWS_SOURCES})
+  if(CRTGFX_ENABLE_GPU_BACKEND)
+    list(APPEND CRTGFX_GPU_BACKEND_SOURCES ${CRTGFX_GPU_BACKEND_WINDOWS_SOURCES})
+    set(CRTGFX_GPU_BACKEND_ENABLED ON)
+    set(CRTGFX_GPU_BACKEND_DEFINITIONS
+      CRT_TARGET_OS_WINDOWS=1 CRTGFX_HAVE_D3D12=1)
+  endif()
   # Windows/D3D12 offscreen vertical slice (2026-09-03, TODO.md's "Enable
   # Skia GPU rendering" step -- the Linux/Vulkan slice's own sibling; see
   # crtgfx/gpu.h's own top comment). Unlike Linux's libvulkan-dev (a real
   # host package that is sometimes genuinely absent, hence that slice's
   # own find_library()-gated, if()-guarded design), d3d12.lib ships in
   # every real Windows 10+ SDK exactly like d3d11.lib/dxgi.lib already do
-  # below -- so gpu_win32.c is compiled unconditionally here, and
-  # CRTGFX_HAVE_D3D12 defined unconditionally, matching this project's own
-  # existing treatment of D3D11 as always-available on this host rather
+  # below -- so, when CRTGFX_ENABLE_GPU_BACKEND is enabled, gpu_win32.c and
+  # its target-private CRTGFX_HAVE_D3D12 definition are selected together,
+  # matching this project's own treatment of D3D11 as host-available rather
   # than reintroducing the whole "guard every ${VAR} link-line expansion"
   # discipline the Linux CRTGFX_LINUX_VULKAN_LIB break just taught this
   # session -- there is no real "maybe absent" case to guard against here.
   # (CRT_TARGET_OS_WINDOWS=1 is applied to crtgfx_gpu_objects itself
   # further down, right after that target is actually created -- see that
   # call's own, fuller comment for a real, narrow gap this exposed.)
-  # Directory-scoped during the backend-object migration, matching Vulkan's
-  # current code-selection convention. It no longer affects common object
-  # layout; a later tranche narrows it after D3D12 state becomes private.
-  add_compile_definitions(CRTGFX_HAVE_D3D12=1)
 elseif(CRT_TARGET_OS STREQUAL "macos")
   list(APPEND CRTGFX_WINDOW_BACKEND_SOURCES ${CRTGFX_WINDOW_BACKEND_MACOS_SOURCES})
-  list(APPEND CRTGFX_GPU_BACKEND_SOURCES ${CRTGFX_GPU_BACKEND_MACOS_SOURCES})
+  if(CRTGFX_ENABLE_GPU_BACKEND)
+    list(APPEND CRTGFX_GPU_BACKEND_SOURCES ${CRTGFX_GPU_BACKEND_MACOS_SOURCES})
+    set(CRTGFX_GPU_BACKEND_ENABLED ON)
+    set(CRTGFX_GPU_BACKEND_DEFINITIONS
+      CRT_TARGET_OS_MACOS=1 CRTGFX_HAVE_METAL=1)
+  endif()
   # macOS/Metal offscreen vertical slice (2026-09-04, TODO.md's "Enable
   # Skia GPU rendering" step -- the Linux/Vulkan and Windows/D3D12
   # slices' own sibling; see crtgfx/gpu.h's own top comment). Metal.
   # framework ships on every real macOS host exactly like d3d12.lib on
-  # every real Windows 10+ SDK -- gpu_metal.c is compiled unconditionally
-  # here, and CRTGFX_HAVE_METAL defined unconditionally, matching that
-  # same D3D12 precedent (no "maybe absent" case to guard against, unlike
-  # Linux's own find_library()-gated libvulkan). Directory-scoped during the
-  # backend-object migration for code selection only; common object layout no
-  # longer depends on it, and a later tranche narrows it with private state.
-  add_compile_definitions(CRTGFX_HAVE_METAL=1)
+  # every real macOS host -- when CRTGFX_ENABLE_GPU_BACKEND is enabled,
+  # gpu_metal.c and its target-private CRTGFX_HAVE_METAL definition are
+  # selected together, matching that same D3D12 precedent (no "maybe absent"
+  # case to guard against, unlike Linux's find_library()-gated libvulkan).
   # window_cocoa.c/gpu_metal.c both drive the Objective-C runtime from
   # plain C by casting objc_msgSend (a real, variadic `id (*)(id, SEL,
   # ...)` extern) to each call site's own exact, non-variadic signature
@@ -409,8 +416,11 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
       PATH_SUFFIXES "${CMAKE_LIBRARY_ARCHITECTURE}"
     )
   endif()
-  if(CRTGFX_LINUX_VULKAN_LIB)
+  if(CRTGFX_ENABLE_GPU_BACKEND AND CRTGFX_LINUX_VULKAN_LIB)
     list(APPEND CRTGFX_GPU_BACKEND_SOURCES ${CRTGFX_GPU_BACKEND_LINUX_SOURCES})
+    set(CRTGFX_GPU_BACKEND_ENABLED ON)
+    set(CRTGFX_GPU_BACKEND_DEFINITIONS
+      CRT_TARGET_OS_LINUX=1 CRTGFX_HAVE_VULKAN=1)
     # Native Wayland backend (2026-09-07, "Finish live GPU presentation
     # everywhere") -- real libwayland-client, gated on the exact same
     # CRTGFX_LINUX_VULKAN_LIB condition as gpu_vulkan.c itself: this
@@ -457,18 +467,12 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
     # accepted limitation.
     if(CRTGFX_LINUX_WAYLAND_CLIENT_LIB AND EXISTS "${CRTGFX_WAYLAND_XDG_SHELL_LIBRARY}")
       list(APPEND CRTGFX_WINDOW_BACKEND_SOURCES ${CRTGFX_WINDOW_NATIVE_WAYLAND_SOURCES})
-      add_compile_definitions(CRTGFX_HAVE_NATIVE_WAYLAND=1)
+      set(CRTGFX_NATIVE_WAYLAND_ENABLED ON)
+      list(APPEND CRTGFX_GPU_BACKEND_DEFINITIONS CRTGFX_HAVE_NATIVE_WAYLAND=1)
       set(CRTGFX_WAYLAND_CLIENT_LIBRARIES "${CRTGFX_WAYLAND_XDG_SHELL_LIBRARY};${CRTGFX_LINUX_WAYLAND_CLIENT_LIB}" CACHE STRING "Libraries needed to link real libwayland-client into the Linux native Wayland backend" FORCE)
     else()
       message(STATUS "libcrtgfx: native Wayland Vulkan WSI needs host libwayland-client.so.0 plus ${CRTGFX_WAYLAND_XDG_SHELL_LIBRARY}; run 'cmake --build . --target crtgfx-wayland-build' then reconfigure after installing the host Wayland runtime to enable it")
     endif()
-    # Directory-scoped while the backend-object migration is in progress so
-    # every consumer selects the same Vulkan code. gpu_internal.h no longer
-    # changes common object size/offsets under this definition (the former
-    # cross-TU overwrite failure class is removed); later tranches narrow the
-    # macro to implementation/source selection after Vulkan state becomes
-    # fully private.
-    add_compile_definitions(CRTGFX_HAVE_VULKAN=1)
     # See the real -Wl,--exclude-libs,ALL fix and its own full "why"
     # comment further down, right after add_library(crtgfx_gpu STATIC
     # ...) -- deferred to there because target_link_options() needs the
@@ -477,8 +481,10 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
     # file. CRTGFX_LINUX_VULKAN_LIB (this if-branch's own
     # condition) stays true for the rest of this configure run, so that
     # later block's own identical condition re-evaluates the same way.
-  else()
+  elseif(CRTGFX_ENABLE_GPU_BACKEND)
     message(STATUS "libcrtgfx: libvulkan not found (install libvulkan-dev to enable it) -- crtgfx_gpu_device_create() stays CRTGFX_ERROR_UNSUPPORTED on Linux, same as Windows/macOS today")
+  else()
+    message(STATUS "libcrtgfx: host GPU backend disabled by CRTGFX_ENABLE_GPU_BACKEND=OFF")
   endif()
 endif()
 
@@ -659,8 +665,7 @@ if(Python3_Interpreter_FOUND)
     crtgfx_skia_cpu_coverage
     crtmedia_frame_skia_smoke
   )
-  if((CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB) OR
-     CRT_TARGET_OS STREQUAL "windows" OR CRT_TARGET_OS STREQUAL "macos")
+  if(CRTGFX_GPU_BACKEND_ENABLED)
     # crtgfx_skia_gpu_offscreen_smoke (2026-09-03, extended to Windows/
     # D3D12 the same day, and Metal on 2026-09-04) -- defined on Linux
     # with a real libvulkan, or unconditionally on Windows/macOS where
@@ -1110,6 +1115,10 @@ set_target_properties(crtgfx_window_common_objects PROPERTIES
 # backend target below, this one needs no CRT_TARGET_OS_* define at all
 # on Windows/macOS because it contains no per-host GPU code to select.
 add_library(crtgfx_window_backend_objects OBJECT ${CRTGFX_WINDOW_BACKEND_SOURCES})
+if(CRTGFX_NATIVE_WAYLAND_ENABLED)
+  target_compile_definitions(crtgfx_window_backend_objects PRIVATE
+    CRTGFX_HAVE_NATIVE_WAYLAND=1)
+endif()
 if(CRT_TARGET_OS STREQUAL "linux")
   target_link_libraries(crtgfx_window_backend_objects PRIVATE crt_build_flags)
 endif()
@@ -1664,6 +1673,10 @@ set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_gpu_test_runs)
 # comment for the full story); nothing here is guessed for the second
 # caller.
 function(crt_wire_skia_executable target_name)
+  if(CRTGFX_GPU_BACKEND_DEFINITIONS)
+    target_compile_definitions(${target_name} PRIVATE
+      ${CRTGFX_GPU_BACKEND_DEFINITIONS})
+  endif()
   # Optional second argument: SKIP_MACOS_DEAD_STRIP (2026-09-04, the macOS/
   # Metal offscreen vertical slice). Real, confirmed necessary for exactly
   # one caller so far, crtgfx_skia_gpu_offscreen_smoke -- see the -Wl,
@@ -2032,16 +2045,15 @@ if(CRTGFX_ENABLE_SKIA)
   # SOURCES's own Windows/macOS branches further up). Same headless shape
   # as crtgfx_skia_cpu_coverage just above (no crtgfx_window/host display
   # connection needed at all).
-  if((CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB) OR
-     CRT_TARGET_OS STREQUAL "windows" OR CRT_TARGET_OS STREQUAL "macos")
+  if(CRTGFX_GPU_BACKEND_ENABLED)
     add_executable(crtgfx_skia_gpu_offscreen_smoke
       ${CRT_STARTUP_OBJECTS}
       tests/skia_gpu_offscreen_smoke.cc
     )
     target_link_libraries(crtgfx_skia_gpu_offscreen_smoke PRIVATE crt_cxx_build_flags crtgfx_skia)
-    # gpu_internal.h (src/gpu_internal.h, not installed/public) -- this
-    # test uses backend-owned test/borrow hooks declared in gpu_internal.h;
-    # concrete per-OS handles remain private to their backend owners.
+    # gpu_test_control.h is private and non-installed, but backend-neutral:
+    # the test can request owner-controlled device loss without seeing the
+    # internal wrapper layout or a native handle.
     target_include_directories(crtgfx_skia_gpu_offscreen_smoke PRIVATE
       "${CMAKE_CURRENT_SOURCE_DIR}/src"
     )
@@ -2077,8 +2089,7 @@ if(CRTGFX_ENABLE_SKIA)
   # tools/gpu_window_demo.c's own plain (non-Ganesh) sibling, so it is
   # never add_test()-registered/run automatically the way crtgfx_skia_
   # gpu_offscreen_smoke is.
-  if((CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB) OR
-     CRT_TARGET_OS STREQUAL "windows" OR CRT_TARGET_OS STREQUAL "macos")
+  if(CRTGFX_GPU_BACKEND_ENABLED)
     add_executable(crtgfx_skia_gpu_window_demo
       ${CRT_STARTUP_OBJECTS}
       tools/skia_gpu_window_demo.cc

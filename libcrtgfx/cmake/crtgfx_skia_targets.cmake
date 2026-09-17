@@ -12,6 +12,10 @@ function(crt_add_crtgfx_skia_object_target)
     if(TARGET crt_cxx_build_flags)
       target_link_libraries(crtgfx_skia_objects PRIVATE crt_cxx_build_flags)
     endif()
+    if(CRTGFX_GPU_BACKEND_DEFINITIONS)
+      target_compile_definitions(crtgfx_skia_objects PRIVATE
+        ${CRTGFX_GPU_BACKEND_DEFINITIONS})
+    endif()
     if(CRT_TARGET_OS STREQUAL "windows")
       # SK_BUILD_FOR_UNIX: matches tools/build_skia.py's own -DSK_BUILD_FOR_
       # UNIX for Skia's own GN-driven compile (see that file's own fuller
@@ -242,8 +246,8 @@ endfunction()
 function(crt_add_crtgfx_skia_static_target)
   # --- crtgfx_skia (STATIC): the Skia CPU/GPU bridge (crtgfx/skia.h).
   # Links crtgfx_gpu PUBLIC (transitively pulls crtgfx_window too) --
-  # skia_bridge.cc needs gpu_internal.h's struct layout and (on macOS)
-  # calls a real function gpu_metal.c defines
+  # skia_bridge.cc needs the owner-facing borrowed-view/transition declarations
+  # in gpu_internal.h and (on macOS) calls a real function gpu_metal.c defines
   # (crtgfx_gpu_metal_surface_prepare_ganesh_present()).
   if(CRTGFX_ENABLE_SKIA)
     add_library(crtgfx_skia STATIC $<TARGET_OBJECTS:crtgfx_skia_objects>)

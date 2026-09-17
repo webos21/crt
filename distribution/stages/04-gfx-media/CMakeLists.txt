@@ -344,26 +344,21 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
   add_link_options("-Wl,-Bsymbolic")
   set(CRTGFX_GPU_BACKEND_SOURCES ${CRTGFX_GPU_BACKEND_LINUX_SOURCES})
 endif()
-# libcrtgfx/src/gpu_internal.h's own struct crtgfx_gpu_device/crtgfx_gpu_
-# surface field sets (and gpu_metal.c/gpu_vulkan.c/gpu_win32.c's own real
-# field accesses into them) are all behind a per-backend #if defined(CRT_
-# TARGET_OS_<os>) && defined(CRTGFX_HAVE_<backend>) guard -- the in-tree
-# libcrtgfx/CMakeLists.txt defines CRTGFX_HAVE_METAL/_D3D12 unconditionally
-# per host and CRTGFX_HAVE_VULKAN once a real libvulkan is found, but this
-# standalone stage project never included that file, only the shared
-# crtgfx_gpu_*.cmake *source list* modules -- a real, confirmed bug
-# (2026-09-11): without this, gpu_internal.h's own structs fell through to
-# their bodyless "#else int reserved;" branch while gpu_metal.c's real
-# field accesses (device->mtl_device, surface->height, ...) were compiled
-# unconditionally, failing outright with "no member named 'height' in
-# 'struct crtgfx_gpu_surface'" the first time this stage's own macOS build
-# actually reached that file.
+# The standalone stage selects exactly one concrete backend. Keep its OS/
+# feature definitions target-private and pass them through the shared target
+# constructors to common dispatch, the backend owner, and direct Skia
+# consumers. They select implementations and declarations only; common
+# device/surface allocation layout no longer depends on these macros.
+set(CRTGFX_GPU_BACKEND_ENABLED ON)
 if(CRT_TARGET_OS STREQUAL "windows")
-  add_compile_definitions(CRTGFX_HAVE_D3D12=1)
+  set(CRTGFX_GPU_BACKEND_DEFINITIONS
+    CRT_TARGET_OS_WINDOWS=1 CRTGFX_HAVE_D3D12=1)
 elseif(CRT_TARGET_OS STREQUAL "macos")
-  add_compile_definitions(CRTGFX_HAVE_METAL=1)
+  set(CRTGFX_GPU_BACKEND_DEFINITIONS
+    CRT_TARGET_OS_MACOS=1 CRTGFX_HAVE_METAL=1)
 elseif(CRT_TARGET_OS STREQUAL "linux")
-  add_compile_definitions(CRTGFX_HAVE_VULKAN=1)
+  set(CRTGFX_GPU_BACKEND_DEFINITIONS
+    CRT_TARGET_OS_LINUX=1 CRTGFX_HAVE_VULKAN=1 CRTGFX_HAVE_NATIVE_WAYLAND=1)
   # A ninth real, confirmed bug in this same "standalone stage project
   # never included the in-tree libcrtgfx/CMakeLists.txt" family
   # (2026-09-13, found immediately after fixing the eighth --
@@ -373,12 +368,8 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
   # defined(CRTGFX_HAVE_NATIVE_WAYLAND)` for its real native-Wayland-
   # backed Vulkan surface path, falling through to an unconditional
   # `return CRTGFX_ERROR_UNSUPPORTED;` `#elif` branch whenever
-  # CRTGFX_HAVE_NATIVE_WAYLAND alone is missing -- exactly the in-tree
-  # libcrtgfx/CMakeLists.txt's own add_compile_definitions(CRTGFX_HAVE_
-  # NATIVE_WAYLAND=1) this standalone stage project's own gpu.c compile
-  # never received, since (like CRTGFX_HAVE_VULKAN above) this project
-  # never included that file, only the shared crtgfx_gpu_*.cmake source
-  # list modules. Confirmed for real: with only CRTGFX_HAVE_VULKAN
+  # CRTGFX_HAVE_NATIVE_WAYLAND alone is missing. Confirmed for real: with
+  # only CRTGFX_HAVE_VULKAN
   # defined, `crtgfx_window_create()` correctly created a real, live
   # native-backend window (this file's own crtgfx_window INTERFACE_LINK_
   # LIBRARIES fix, above, already covers that link), but the very next
@@ -396,7 +387,6 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
   # real CRTGFX_LINUX_WAYLAND_CLIENT_LIB, so by the time this line runs
   # the native Wayland backend is already a hard requirement for this
   # stage on Linux, not an optional one.
-  add_compile_definitions(CRTGFX_HAVE_NATIVE_WAYLAND=1)
 endif()
 list(TRANSFORM CRTGFX_GPU_SOURCES PREPEND "${CRTGFX_ROOT}/")
 list(TRANSFORM CRTGFX_GPU_BACKEND_SOURCES PREPEND "${CRTGFX_ROOT}/")

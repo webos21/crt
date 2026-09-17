@@ -69,7 +69,10 @@ hook; `skia_bridge.cc` and `tests/skia_gpu_offscreen_smoke.cc` use only
 borrowed device/surface views. Real device creation, 5-frame window
 presentation, a scripted Retina resize (900x520 points correctly reporting a
 1800x1040-pixel surface), and Metal Ganesh (offscreen smoke plus the windowed
-demo) all pass on macOS/arm64 hardware.
+demo) all pass on macOS/arm64 hardware. Tranche 5 is also complete: generic
+tests no longer include this private layout, feature/OS macros are
+target-private implementation selectors, and an explicit backend-disabled
+configuration builds the fixed common wrappers without a backend object.
 
 ## Operations and ownership
 
@@ -165,19 +168,15 @@ back.
 | `src/arch/windows/gpu_win32.c` | private D3D12 device/surface state, owner-local HWND extraction, borrowed views, submit transition, and private WARP test selection | completed owner |
 | `src/arch/macos/gpu_metal.c` | private Metal device/surface state, owner-local CAMetalLayer extraction, and a private device-loss test hook | completed owner |
 | `src/skia_bridge.cc` | Vulkan, D3D12, and Metal borrowed views/transitions only | borrowed descriptors plus backend transition operations (done) |
-| `tests/skia_gpu_offscreen_smoke.cc` | Vulkan, D3D12, and Metal owner hooks/borrowed views only | backend-neutral test-control operation (done) |
+| `tests/skia_gpu_offscreen_smoke.cc` | public GPU/Skia APIs plus private backend-neutral test control; Windows-only WARP adapter selection remains a narrow owner test header | no layout or native-handle access (done) |
 
 No other current test, tool, or example directly accesses these concrete
-fields. This inventory is a migration checklist, not permission to add another
-caller while the work is in progress. `tools/test_crtgfx_gpu_backend_boundary.py`
-turns that inventory into a CTest guard: the known Skia/generic-test exceptions
-are an exact allowlist that each migration tranche must shrink, while
-additional backend-specific assertions permit no D3D12/DXGI or Metal field
-access outside their respective owners. A new privileged caller therefore
-cannot quietly appear during the refactor. Only Tranche 5's own remaining
-`gpu_internal.h` access from `tests/skia_gpu_offscreen_smoke.cc` (a
-backend-neutral device-loss hook call, not a concrete-field read) is left in
-this inventory.
+fields. `tools/test_crtgfx_gpu_backend_boundary.py` turns that inventory into a
+seven-case CTest guard: no generic smoke may include `gpu_internal.h`, the
+backend-neutral device-loss control must remain the only generic loss path,
+backend fields stay owner-local, and no directory-scoped `CRTGFX_HAVE_*`
+definition may reopen cross-target coupling. A new privileged caller therefore
+cannot quietly appear after the migration.
 
 ## Acceptance
 
@@ -196,3 +195,13 @@ this inventory.
 - Backend-enabled and backend-disabled builds pass, followed by Vulkan,
   D3D12, Metal, resize, Skia, static/shared ownership, and distribution-import
   validation on their available hosts.
+
+Tranche 5 Windows evidence (2026-09-17): the seven boundary regressions pass;
+the normal configuration builds `crtgfx_gpu`, `crtgfx_gpu_shared`, and
+`crtgfx_gpu_test`; its focused GPU tests and real hardware plus forced-WARP
+Ganesh smoke pass, including backend-owned D3D12 `RemoveDevice()` and fresh
+device/context/draw recovery. A separate configuration with
+`CRTGFX_ENABLE_GPU_BACKEND=OFF` creates no backend object target, still builds
+both static and shared GPU wrappers plus `crtgfx_gpu_test`, and passes its
+focused tests. Linux/aarch64, macOS/arm64, and isolated distribution acceptance
+remain Tranche 6 work rather than being implied by this Windows proof.

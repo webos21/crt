@@ -220,19 +220,17 @@ struct crtgfx_d3d12_device {
 /* ID3D12Device5 -- only reachable via QueryInterface on a real ID3D12Device
  * (RemoveDevice() was added in this later, versioned interface, not the
  * base ID3D12Device -- confirmed directly, the same real way as every
- * other slot in this file). RemoveDevice at real slot 62 (slots 3-61
- * reserved -- 59 slots; CreateLifetimeTracker, ID3D12Device5's own first
- * real method, sits at slot 61 immediately before it). Used only by
- * tests/skia_gpu_offscreen_smoke.cc's own device-loss test, not by this
- * file's own real device/queue creation path -- declared here anyway so
- * that test doesn't need its own second, independent hand-declaration of
- * the same real interface. */
+ * other slot in this file). RemoveDevice is slot 58: ID3D12Device ends at
+ * slot 43, Device1 adds 44-46, Device2 adds 47, Device3 adds 48-50,
+ * Device4 adds 51-56, and CreateLifetimeTracker is slot 57. Used only by this
+ * owner's private device-loss test operation, not by the normal device/
+ * queue creation path; the generic smoke never sees this interface. */
 typedef struct crtgfx_d3d12_device5 crtgfx_d3d12_device5;
 typedef struct crtgfx_d3d12_device5_vtbl {
   HRESULT(CRTGFX_WINAPI* QueryInterface)(crtgfx_d3d12_device5* self, REFIID riid, void** out);
   ULONG(CRTGFX_WINAPI* AddRef)(crtgfx_d3d12_device5* self);
   ULONG(CRTGFX_WINAPI* Release)(crtgfx_d3d12_device5* self);
-  void* reserved_3_to_61[59];
+  void* reserved_3_to_57[55];
   void(CRTGFX_WINAPI* RemoveDevice)(crtgfx_d3d12_device5* self);
 } crtgfx_d3d12_device5_vtbl;
 struct crtgfx_d3d12_device5 {
@@ -1541,4 +1539,26 @@ crtgfx_result crtgfx_gpu_win32_submit_ganesh(
   state->d3d12_frame_submitted = 1;
   state->ganesh_wrapped = 0;
   return CRTGFX_OK;
+}
+
+crtgfx_result crtgfx_gpu_win32_test_force_device_loss(struct crtgfx_gpu_device* device) {
+  struct crtgfx_gpu_win32_device_state* state;
+  crtgfx_d3d12_device* d3d_device;
+  crtgfx_d3d12_device5* d3d_device5 = NULL;
+  HRESULT hr;
+
+  if (device == NULL || device->backend != CRTGFX_GPU_BACKEND_D3D12) {
+    return CRTGFX_ERROR_INVALID_ARGUMENT;
+  }
+  state = (struct crtgfx_gpu_win32_device_state*)device->backend_state;
+  if (state == NULL || state->d3d12_device == NULL) return CRTGFX_ERROR_HOST;
+  d3d_device = (crtgfx_d3d12_device*)state->d3d12_device;
+  hr = d3d_device->lpVtbl->QueryInterface(
+      d3d_device, &crtgfx_iid_id3d12_device5, (void**)&d3d_device5);
+  if (FAILED(hr) || d3d_device5 == NULL) return CRTGFX_ERROR_UNSUPPORTED;
+  d3d_device5->lpVtbl->RemoveDevice(d3d_device5);
+  d3d_device5->lpVtbl->Release(d3d_device5);
+  return FAILED(d3d_device->lpVtbl->GetDeviceRemovedReason(d3d_device))
+      ? CRTGFX_OK
+      : CRTGFX_ERROR_HOST;
 }

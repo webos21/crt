@@ -1906,12 +1906,15 @@ void crtgfx_gpu_vulkan_end_ganesh(struct crtgfx_gpu_surface* surface) {
   vkQueueSubmit((VkQueue)state->device->vk_queue, 1, &submit_info, (VkFence)state->vk_frame_fence);
 }
 
-void crtgfx_gpu_vulkan_test_force_device_loss(struct crtgfx_gpu_device* device) {
+crtgfx_result crtgfx_gpu_vulkan_test_force_device_loss(struct crtgfx_gpu_device* device) {
   struct crtgfx_gpu_vulkan_device_state* state;
-  if (device == NULL || device->backend != CRTGFX_GPU_BACKEND_VULKAN) return;
+  if (device == NULL || device->backend != CRTGFX_GPU_BACKEND_VULKAN) {
+    return CRTGFX_ERROR_INVALID_ARGUMENT;
+  }
   state = (struct crtgfx_gpu_vulkan_device_state*)device->backend_state;
-  if (state == NULL || state->vk_device == NULL) return;
+  if (state == NULL || state->vk_device == NULL) return CRTGFX_ERROR_HOST;
   vkDestroyDevice((VkDevice)state->vk_device, NULL);
   state->vk_device = NULL;
   state->vk_queue = NULL;
+  return CRTGFX_OK;
 }
