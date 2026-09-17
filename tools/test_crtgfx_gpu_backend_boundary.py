@@ -54,6 +54,10 @@ BACKEND_FIELD_RE = re.compile(
     r"->device->(?:vk_|d3d12_|dxgi_|mtl_)"
 )
 
+# Backend-specific guards let each completed tranche close its own boundary
+# even while later backends still have audited migration exceptions.
+D3D12_FIELD_RE = re.compile(r"->(?:d3d12_|dxgi_)|->device->(?:d3d12_|dxgi_)")
+
 COMMON_LAYOUT_RE = re.compile(
     r"struct crtgfx_gpu_(?:device|surface)\s*\{(?P<body>.*?)\n\};",
     re.DOTALL,
@@ -105,6 +109,16 @@ class CrtgfxGpuBackendBoundaryTest(unittest.TestCase):
             and relative(path) != LAYOUT_DEFINITION
         }
         self.assertEqual(actual, NON_OWNER_FIELD_USERS)
+
+    def test_d3d12_concrete_fields_stay_in_the_windows_owner(self) -> None:
+        actual = {
+            relative(path)
+            for path in source_files()
+            if D3D12_FIELD_RE.search(path.read_text(encoding="utf-8"))
+            and relative(path) not in BACKEND_OWNERS
+            and relative(path) != LAYOUT_DEFINITION
+        }
+        self.assertEqual(actual, set())
 
 
 if __name__ == "__main__":

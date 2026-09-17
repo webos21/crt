@@ -485,7 +485,8 @@ class DumbD3DMemoryAllocator : public GrD3DMemoryAllocator {
 }  // namespace
 
 sk_sp<GrDirectContext> crtgfx_skia_make_gpu_context(const crtgfx_gpu_device* device) {
-  if (device == nullptr || device->d3d12_device == nullptr) {
+  crtgfx_gpu_win32_device_view view = {};
+  if (!crtgfx_gpu_win32_borrow_device(device, &view)) {
     return nullptr;
   }
 
@@ -506,9 +507,9 @@ sk_sp<GrDirectContext> crtgfx_skia_make_gpu_context(const crtgfx_gpu_device* dev
   // double-releasing the same COM object once backend_context's own
   // destructor ran first).
   GrD3DBackendContext backend_context;
-  backend_context.fAdapter.retain(reinterpret_cast<IDXGIAdapter1*>(device->dxgi_adapter));
-  backend_context.fDevice.retain(reinterpret_cast<ID3D12Device*>(device->d3d12_device));
-  backend_context.fQueue.retain(reinterpret_cast<ID3D12CommandQueue*>(device->d3d12_command_queue));
+  backend_context.fAdapter.retain(reinterpret_cast<IDXGIAdapter1*>(view.adapter));
+  backend_context.fDevice.retain(reinterpret_cast<ID3D12Device*>(view.device));
+  backend_context.fQueue.retain(reinterpret_cast<ID3D12CommandQueue*>(view.command_queue));
   // A real, if deliberately minimal, memory allocator -- NOT left null.
   // Confirmed for real (2026-09-03) this project's own Skia build cannot
   // rely on GrD3DGpu::Make()'s usual "construct a real GrD3DAMDMemoryAllocator
@@ -541,30 +542,20 @@ sk_sp<SkSurface> crtgfx_skia_make_gpu_offscreen_surface(
 // D3D12 has no flush-time "transition for me" mechanism (confirmed: no
 // include/gpu/d3d/...MutableTextureState.h exists in this checkout at
 // all) -- crtgfx_skia_gpu_surface_present() below does real, manual work
-// instead: reads back whatever real resource state Ganesh's own flush
-// left the wrapped resource in, then records one small extra resource-
-// barrier command list (reusing this surface's own already-open, real
-// ID3D12GraphicsCommandList/ID3D12CommandAllocator -- Reset() by crtgfx_
-// gpu_win32_surface_acquire(), otherwise unused this frame since crtgfx_
-// gpu_win32_surface_clear() was not called) on the *same* shared
-// ID3D12CommandQueue Ganesh's own context was built against. Uses the
-// real <d3d12.h> COM interfaces already force-included in this branch
-// (GrD3DTypes.h) directly -- reinterpret_cast-ing this surface's own
-// void* fields straight to their real ID3D12GraphicsCommandList/
-// ID3D12CommandAllocator/ID3D12Fence/ID3D12CommandQueue types (ABI-
-// identical regardless of which translation unit's type system names
-// them -- gpu_win32.c's own hand-declared vtable structs are a different,
-// but ABI-compatible, representation of these same real COM objects; the
-// same reasoning tests/skia_gpu_offscreen_smoke.cc's own device-loss test
-// already relies on for these exact same void* fields).
+// instead: reads back whatever real resource state Ganesh's own flush left
+// the wrapped resource in, then asks gpu_win32.c to record the PRESENT
+// transition, close/execute its command list, and update its monotonic fence
+// bookkeeping. Skia sees only the borrowed current back buffer and the resource
+// state it must report back; the command allocator/list/queue/fence state
+// machine remains entirely inside its D3D12 owner.
 sk_sp<SkSurface> crtgfx_skia_wrap_gpu_surface(GrDirectContext* context, crtgfx_gpu_surface* surface) {
-  if (context == nullptr || surface == nullptr || !surface->d3d12_image_acquired || surface->ganesh_wrapped) {
+  crtgfx_gpu_win32_surface_view view = {};
+  if (context == nullptr || !crtgfx_gpu_win32_begin_ganesh(surface, &view)) {
     return nullptr;
   }
 
   GrD3DTextureResourceInfo info;
-  info.fResource.retain(reinterpret_cast<ID3D12Resource*>(
-      surface->d3d12_back_buffers[surface->d3d12_current_buffer_index]));
+  info.fResource.retain(reinterpret_cast<ID3D12Resource*>(view.back_buffer));
   // A freshly-acquired back buffer's own real state, matching crtgfx_gpu_
   // win32_surface_clear()'s own first barrier's own identical state_before
   // assumption (gpu_win32.c), the real, same-shaped stand-in this
@@ -575,11 +566,11 @@ sk_sp<SkSurface> crtgfx_skia_wrap_gpu_surface(GrDirectContext* context, crtgfx_g
   info.fLevelCount = 1;
 
   GrBackendRenderTarget backend_target = GrBackendRenderTargets::MakeD3D(
-      static_cast<int>(surface->width), static_cast<int>(surface->height), info);
+      static_cast<int>(view.width), static_cast<int>(view.height), info);
   sk_sp<SkSurface> sk_surface = SkSurfaces::WrapBackendRenderTarget(
       context, backend_target, kTopLeft_GrSurfaceOrigin, kBGRA_8888_SkColorType, nullptr, nullptr);
-  if (sk_surface != nullptr) {
-    surface->ganesh_wrapped = 1;
+  if (sk_surface == nullptr) {
+    crtgfx_gpu_win32_end_ganesh(surface);
   }
   return sk_surface;
 }
@@ -589,7 +580,7 @@ crtgfx_result crtgfx_skia_gpu_surface_present(
   if (context == nullptr || surface == nullptr || gpu_surface == nullptr) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
-  if (!gpu_surface->ganesh_wrapped) {
+  if (!crtgfx_gpu_win32_is_ganesh_wrapped(gpu_surface)) {
     return CRTGFX_ERROR_HOST;
   }
 
@@ -610,39 +601,15 @@ crtgfx_result crtgfx_skia_gpu_surface_present(
 
   GrD3DTextureResourceInfo info = GrBackendRenderTargets::GetD3DTextureResourceInfo(backend_target);
   if (!info.fResource) {
+    crtgfx_gpu_win32_end_ganesh(gpu_surface);
     return CRTGFX_ERROR_HOST;
   }
 
-  ID3D12GraphicsCommandList* command_list =
-      reinterpret_cast<ID3D12GraphicsCommandList*>(gpu_surface->d3d12_command_list);
-  ID3D12CommandQueue* command_queue =
-      reinterpret_cast<ID3D12CommandQueue*>(gpu_surface->device->d3d12_command_queue);
-  ID3D12Fence* fence = reinterpret_cast<ID3D12Fence*>(gpu_surface->d3d12_fence);
-
-  D3D12_RESOURCE_BARRIER barrier = {};
-  barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-  barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-  barrier.Transition.pResource = info.fResource.get();
-  barrier.Transition.Subresource = 0;
-  barrier.Transition.StateBefore = info.fResourceState;
-  barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
-  command_list->ResourceBarrier(1, &barrier);
-  if (FAILED(command_list->Close())) {
+  if (crtgfx_gpu_win32_submit_ganesh(
+          gpu_surface, info.fResource.get(), static_cast<uint32_t>(info.fResourceState)) != CRTGFX_OK) {
+    crtgfx_gpu_win32_end_ganesh(gpu_surface);
     return CRTGFX_ERROR_HOST;
   }
-  ID3D12CommandList* lists[] = {command_list};
-  command_queue->ExecuteCommandLists(1, lists);
-
-  // Same real monotonic-fence-value bookkeeping crtgfx_gpu_win32_surface_
-  // clear() already uses (gpu_win32.c) -- keeps this Ganesh-drawn frame
-  // indistinguishable, from crtgfx_gpu_win32_surface_acquire()'s own next
-  // real wait, from one _clear() itself produced.
-  uint64_t signal_value = gpu_surface->d3d12_fence_next_value++;
-  if (FAILED(command_queue->Signal(fence, signal_value))) {
-    return CRTGFX_ERROR_HOST;
-  }
-  gpu_surface->d3d12_fence_values[gpu_surface->d3d12_current_buffer_index] = signal_value;
-  gpu_surface->d3d12_frame_submitted = 1;
 
   // Real, correct bookkeeping for Ganesh's own shared, refcounted
   // GrD3DResourceState (GrD3DTypesMinimal.h's own comment) -- not load-
@@ -651,7 +618,6 @@ crtgfx_result crtgfx_skia_gpu_surface_present(
   // surface() calls), but real, correct hygiene regardless.
   GrBackendRenderTargets::SetD3DResourceState(&backend_target, D3D12_RESOURCE_STATE_PRESENT);
 
-  gpu_surface->ganesh_wrapped = 0;
   return crtgfx_gpu_surface_present(gpu_surface);
 }
 

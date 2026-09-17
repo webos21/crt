@@ -28,6 +28,8 @@
  * handle returns require the SDK C interface's explicit result pointer. */
 
 #include "gpu_internal.h"
+#include "gpu_win32_test.h"
+#include "window_win32_gpu.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -609,11 +611,47 @@ static void crtgfx_win32_free(void* mem) {
   }
 }
 
+struct crtgfx_gpu_win32_device_state {
+  void* d3d12_device;
+  void* d3d12_command_queue;
+  void* dxgi_adapter;
+};
+
+struct crtgfx_gpu_win32_surface_state {
+  struct crtgfx_gpu_win32_device_state* device;
+  void* dxgi_swapchain;
+  void** d3d12_back_buffers;
+  void* d3d12_rtv_heap;
+  size_t d3d12_rtv_descriptor_size;
+  uint32_t d3d12_buffer_count;
+  uint32_t width;
+  uint32_t height;
+  void* d3d12_command_allocator;
+  void* d3d12_command_list;
+  void* d3d12_fence;
+  uint64_t* d3d12_fence_values;
+  uint64_t d3d12_fence_next_value;
+  void* d3d12_fence_event;
+  uint32_t d3d12_current_buffer_index;
+  int d3d12_image_acquired;
+  int d3d12_frame_submitted;
+  int ganesh_wrapped;
+};
+
 /* Real, fixed cap on enumerated adapters -- matching gpu_vulkan.c's own
  * CRTGFX_GPU_VULKAN_MAX_PHYSICAL_DEVICES precedent (generous for any real
  * host; avoids a dynamic allocation for what is, on every real host this
  * project targets, a small, bounded list). */
 #define CRTGFX_GPU_WIN32_MAX_ADAPTERS 16u
+
+/* Process-local, test-only selection override; see gpu_win32_test.h. Tests set
+ * this only while no enumeration call is running, so it intentionally needs no
+ * production synchronization or public ABI surface. */
+static int crtgfx_gpu_win32_test_warp_only;
+
+void crtgfx_gpu_win32_test_force_warp(int enabled) {
+  crtgfx_gpu_win32_test_warp_only = enabled != 0;
+}
 
 /* Enumerates every real adapter and reorders them so hardware-backed
  * adapters (no DXGI_ADAPTER_FLAG_SOFTWARE) come first, falling back to a
@@ -637,13 +675,15 @@ static crtgfx_result crtgfx_gpu_win32_enumerate_ordered(
     return CRTGFX_ERROR_UNSUPPORTED;
   }
 
-  for (i = 0; i < CRTGFX_GPU_WIN32_MAX_ADAPTERS; ++i) {
-    crtgfx_dxgi_adapter1* adapter = NULL;
-    hr = factory->lpVtbl->EnumAdapters1(factory, i, &adapter);
-    if (FAILED(hr) || adapter == NULL) {
-      break;
+  if (!crtgfx_gpu_win32_test_warp_only) {
+    for (i = 0; i < CRTGFX_GPU_WIN32_MAX_ADAPTERS; ++i) {
+      crtgfx_dxgi_adapter1* adapter = NULL;
+      hr = factory->lpVtbl->EnumAdapters1(factory, i, &adapter);
+      if (FAILED(hr) || adapter == NULL) {
+        break;
+      }
+      raw[raw_count++] = adapter;
     }
-    raw[raw_count++] = adapter;
   }
 
   /* Pass 1: real hardware adapters first. Pass 2: everything else (a
@@ -666,8 +706,9 @@ static crtgfx_result crtgfx_gpu_win32_enumerate_ordered(
   }
   *out_count = ordered;
 
-  /* Real WARP fallback, only when adapter enumeration itself found nothing
-   * real to offer at all (raw_count == 0, so ordered == 0 too here). */
+  /* Real WARP fallback, only when production adapter enumeration found nothing
+   * real to offer at all, or when the private acceptance hook deliberately
+   * requests WARP-only enumeration. */
   if (*out_count == 0) {
     crtgfx_dxgi_factory4* factory4 = NULL;
     hr = factory->lpVtbl->QueryInterface(factory, &crtgfx_iid_idxgi_factory4, (void**)&factory4);
@@ -708,7 +749,8 @@ crtgfx_result crtgfx_gpu_win32_query_capabilities(crtgfx_gpu_capabilities* out_c
   return CRTGFX_OK;
 }
 
-crtgfx_result crtgfx_gpu_win32_device_create(uint32_t device_index, struct crtgfx_gpu_device* device) {
+static crtgfx_result crtgfx_gpu_win32_device_state_create(
+    uint32_t device_index, struct crtgfx_gpu_win32_device_state* device) {
   crtgfx_dxgi_adapter1* adapters[CRTGFX_GPU_WIN32_MAX_ADAPTERS];
   uint32_t count = 0;
   crtgfx_result enum_result;
@@ -773,7 +815,7 @@ crtgfx_result crtgfx_gpu_win32_device_create(uint32_t device_index, struct crtgf
   return CRTGFX_OK;
 }
 
-void crtgfx_gpu_win32_device_destroy(struct crtgfx_gpu_device* device) {
+static void crtgfx_gpu_win32_device_state_destroy(struct crtgfx_gpu_win32_device_state* device) {
   if (device->d3d12_command_queue != NULL) {
     ((crtgfx_dxgi_unknown*)device->d3d12_command_queue)
         ->lpVtbl->Release((crtgfx_dxgi_unknown*)device->d3d12_command_queue);
@@ -787,11 +829,9 @@ void crtgfx_gpu_win32_device_destroy(struct crtgfx_gpu_device* device) {
   }
 }
 
-/* Real swap-chain/surface vertical slice (2026-09-07) -- see gpu_internal.h's
- * own comment on struct crtgfx_gpu_surface's Windows fields for the overall
- * shape. `hwnd_handle` is an already-resolved, real, live HWND (gpu.c's own
- * crtgfx_gpu_surface_create() calls crtgfx_win32_get_hwnd() before ever
- * reaching here) -- this function's only job is the real D3D12/DXGI side:
+/* Real swap-chain/surface vertical slice (2026-09-07). `hwnd_handle` is an
+ * already-resolved, real, live HWND from this backend's public-window adapter
+ * below. This function's job is the real D3D12/DXGI side:
  * a swap chain sized to the window's own requested extent, its real back
  * buffers, an RTV descriptor heap so crtgfx_gpu_win32_surface_clear() can
  * target each one, and the per-frame command allocator/list/fence state
@@ -800,9 +840,9 @@ void crtgfx_gpu_win32_device_destroy(struct crtgfx_gpu_device* device) {
  * crtgfx_gpu_vulkan_surface_create() -- every handle is zero-initialized
  * up front so the fail: block can safely release exactly what was
  * actually created, in reverse order, regardless of which step failed. */
-crtgfx_result crtgfx_gpu_win32_surface_create(
-    struct crtgfx_gpu_device* device, void* hwnd_handle, uint32_t width, uint32_t height,
-    struct crtgfx_gpu_surface* surface) {
+static crtgfx_result crtgfx_gpu_win32_surface_state_create(
+    struct crtgfx_gpu_win32_device_state* device, void* hwnd_handle, uint32_t width,
+    uint32_t height, struct crtgfx_gpu_win32_surface_state* surface) {
   crtgfx_d3d12_device* d3d_device = (crtgfx_d3d12_device*)device->d3d12_device;
   crtgfx_d3d12_command_queue* command_queue = (crtgfx_d3d12_command_queue*)device->d3d12_command_queue;
   HWND hwnd = (HWND)hwnd_handle;
@@ -989,7 +1029,7 @@ fail:
   return CRTGFX_ERROR_UNSUPPORTED;
 }
 
-void crtgfx_gpu_win32_surface_destroy(struct crtgfx_gpu_surface* surface) {
+static void crtgfx_gpu_win32_surface_state_destroy(struct crtgfx_gpu_win32_surface_state* surface) {
   uint32_t i;
 
   if (surface->device == NULL) {
@@ -1050,7 +1090,8 @@ void crtgfx_gpu_win32_surface_destroy(struct crtgfx_gpu_surface* surface) {
   }
 }
 
-crtgfx_result crtgfx_gpu_win32_surface_acquire(struct crtgfx_gpu_surface* surface, uint64_t timeout_us) {
+static crtgfx_result crtgfx_gpu_win32_surface_state_acquire(
+    struct crtgfx_gpu_win32_surface_state* surface, uint64_t timeout_us) {
   crtgfx_dxgi_swapchain3* swap_chain = (crtgfx_dxgi_swapchain3*)surface->dxgi_swapchain;
   crtgfx_d3d12_fence* fence = (crtgfx_d3d12_fence*)surface->d3d12_fence;
   crtgfx_d3d12_command_allocator* allocator = (crtgfx_d3d12_command_allocator*)surface->d3d12_command_allocator;
@@ -1124,7 +1165,8 @@ crtgfx_result crtgfx_gpu_win32_surface_acquire(struct crtgfx_gpu_surface* surfac
   return CRTGFX_OK;
 }
 
-crtgfx_result crtgfx_gpu_win32_surface_clear(struct crtgfx_gpu_surface* surface, float r, float g, float b, float a) {
+static crtgfx_result crtgfx_gpu_win32_surface_state_clear(
+    struct crtgfx_gpu_win32_surface_state* surface, float r, float g, float b, float a) {
   crtgfx_d3d12_graphics_command_list* command_list =
       (crtgfx_d3d12_graphics_command_list*)surface->d3d12_command_list;
   crtgfx_d3d12_command_queue* queue = (crtgfx_d3d12_command_queue*)surface->device->d3d12_command_queue;
@@ -1214,7 +1256,8 @@ crtgfx_result crtgfx_gpu_win32_surface_clear(struct crtgfx_gpu_surface* surface,
  * crtgfx_gpu_win32_surface_destroy() already uses above (D3D12 has no
  * single wait-idle call) -- every real back-buffer resource must not be
  * released while the GPU may still be using it. */
-crtgfx_result crtgfx_gpu_win32_surface_resize(struct crtgfx_gpu_surface* surface, uint32_t width, uint32_t height) {
+static crtgfx_result crtgfx_gpu_win32_surface_state_resize(
+    struct crtgfx_gpu_win32_surface_state* surface, uint32_t width, uint32_t height) {
   crtgfx_dxgi_swapchain3* swap_chain = (crtgfx_dxgi_swapchain3*)surface->dxgi_swapchain;
   crtgfx_d3d12_device* d3d_device = (crtgfx_d3d12_device*)surface->device->d3d12_device;
   crtgfx_d3d12_fence* fence = (crtgfx_d3d12_fence*)surface->d3d12_fence;
@@ -1302,7 +1345,8 @@ crtgfx_result crtgfx_gpu_win32_surface_resize(struct crtgfx_gpu_surface* surface
   return CRTGFX_OK;
 }
 
-crtgfx_result crtgfx_gpu_win32_surface_present(struct crtgfx_gpu_surface* surface) {
+static crtgfx_result crtgfx_gpu_win32_surface_state_present(
+    struct crtgfx_gpu_win32_surface_state* surface) {
   crtgfx_dxgi_swapchain3* swap_chain = (crtgfx_dxgi_swapchain3*)surface->dxgi_swapchain;
   HRESULT hr;
 
@@ -1327,5 +1371,174 @@ crtgfx_result crtgfx_gpu_win32_surface_present(struct crtgfx_gpu_surface* surfac
   if (FAILED(hr)) {
     return CRTGFX_ERROR_HOST;
   }
+  return CRTGFX_OK;
+}
+
+crtgfx_result crtgfx_gpu_win32_device_create(
+    uint32_t device_index, struct crtgfx_gpu_device* device) {
+  struct crtgfx_gpu_win32_device_state* state =
+      (struct crtgfx_gpu_win32_device_state*)crtgfx_win32_calloc(1, sizeof(*state));
+  crtgfx_result result;
+  if (state == NULL) return CRTGFX_ERROR_UNSUPPORTED;
+  result = crtgfx_gpu_win32_device_state_create(device_index, state);
+  if (result != CRTGFX_OK) {
+    crtgfx_win32_free(state);
+    return result;
+  }
+  device->backend_state = state;
+  return CRTGFX_OK;
+}
+
+void crtgfx_gpu_win32_device_destroy(struct crtgfx_gpu_device* device) {
+  struct crtgfx_gpu_win32_device_state* state =
+      (struct crtgfx_gpu_win32_device_state*)device->backend_state;
+  if (state == NULL) return;
+  crtgfx_gpu_win32_device_state_destroy(state);
+  crtgfx_win32_free(state);
+  device->backend_state = NULL;
+}
+
+crtgfx_result crtgfx_gpu_win32_surface_create(
+    struct crtgfx_gpu_device* device, crtgfx_window* window,
+    struct crtgfx_gpu_surface* surface) {
+  struct crtgfx_gpu_win32_surface_state* state;
+  void* hwnd = NULL;
+  crtgfx_result result;
+  if (crtgfx_win32_get_hwnd(&window->toplevel, &hwnd) == 0) {
+    return CRTGFX_ERROR_UNSUPPORTED;
+  }
+  state = (struct crtgfx_gpu_win32_surface_state*)crtgfx_win32_calloc(1, sizeof(*state));
+  if (state == NULL) return CRTGFX_ERROR_UNSUPPORTED;
+  result = crtgfx_gpu_win32_surface_state_create(
+      (struct crtgfx_gpu_win32_device_state*)device->backend_state, hwnd,
+      window->toplevel.width, window->toplevel.height, state);
+  if (result != CRTGFX_OK) {
+    crtgfx_win32_free(state);
+    return result;
+  }
+  surface->backend_state = state;
+  return CRTGFX_OK;
+}
+
+void crtgfx_gpu_win32_surface_destroy(struct crtgfx_gpu_surface* surface) {
+  struct crtgfx_gpu_win32_surface_state* state =
+      (struct crtgfx_gpu_win32_surface_state*)surface->backend_state;
+  if (state == NULL) return;
+  crtgfx_gpu_win32_surface_state_destroy(state);
+  crtgfx_win32_free(state);
+  surface->backend_state = NULL;
+}
+
+crtgfx_result crtgfx_gpu_win32_surface_get_size(
+    struct crtgfx_gpu_surface* surface, uint32_t* out_width, uint32_t* out_height) {
+  struct crtgfx_gpu_win32_surface_state* state =
+      (struct crtgfx_gpu_win32_surface_state*)surface->backend_state;
+  if (state == NULL) return CRTGFX_ERROR_HOST;
+  *out_width = state->width;
+  *out_height = state->height;
+  return CRTGFX_OK;
+}
+
+crtgfx_result crtgfx_gpu_win32_surface_acquire(
+    struct crtgfx_gpu_surface* surface, uint64_t timeout_us) {
+  return crtgfx_gpu_win32_surface_state_acquire(
+      (struct crtgfx_gpu_win32_surface_state*)surface->backend_state, timeout_us);
+}
+
+crtgfx_result crtgfx_gpu_win32_surface_clear(
+    struct crtgfx_gpu_surface* surface, float r, float g, float b, float a) {
+  return crtgfx_gpu_win32_surface_state_clear(
+      (struct crtgfx_gpu_win32_surface_state*)surface->backend_state, r, g, b, a);
+}
+
+crtgfx_result crtgfx_gpu_win32_surface_resize(
+    struct crtgfx_gpu_surface* surface, uint32_t width, uint32_t height) {
+  return crtgfx_gpu_win32_surface_state_resize(
+      (struct crtgfx_gpu_win32_surface_state*)surface->backend_state, width, height);
+}
+
+crtgfx_result crtgfx_gpu_win32_surface_present(struct crtgfx_gpu_surface* surface) {
+  return crtgfx_gpu_win32_surface_state_present(
+      (struct crtgfx_gpu_win32_surface_state*)surface->backend_state);
+}
+
+int crtgfx_gpu_win32_borrow_device(
+    const struct crtgfx_gpu_device* device, struct crtgfx_gpu_win32_device_view* out_view) {
+  const struct crtgfx_gpu_win32_device_state* state;
+  if (device == NULL || out_view == NULL || device->backend != CRTGFX_GPU_BACKEND_D3D12) return 0;
+  state = (const struct crtgfx_gpu_win32_device_state*)device->backend_state;
+  if (state == NULL || state->d3d12_device == NULL || state->d3d12_command_queue == NULL) return 0;
+  out_view->adapter = state->dxgi_adapter;
+  out_view->device = state->d3d12_device;
+  out_view->command_queue = state->d3d12_command_queue;
+  return 1;
+}
+
+int crtgfx_gpu_win32_begin_ganesh(
+    struct crtgfx_gpu_surface* surface, struct crtgfx_gpu_win32_surface_view* out_view) {
+  struct crtgfx_gpu_win32_surface_state* state;
+  if (surface == NULL || out_view == NULL || surface->backend != CRTGFX_GPU_BACKEND_D3D12) return 0;
+  state = (struct crtgfx_gpu_win32_surface_state*)surface->backend_state;
+  if (state == NULL || !state->d3d12_image_acquired || state->ganesh_wrapped) return 0;
+  out_view->back_buffer = state->d3d12_back_buffers[state->d3d12_current_buffer_index];
+  out_view->width = state->width;
+  out_view->height = state->height;
+  state->ganesh_wrapped = 1;
+  return 1;
+}
+
+int crtgfx_gpu_win32_is_ganesh_wrapped(const struct crtgfx_gpu_surface* surface) {
+  const struct crtgfx_gpu_win32_surface_state* state;
+  if (surface == NULL || surface->backend != CRTGFX_GPU_BACKEND_D3D12) return 0;
+  state = (const struct crtgfx_gpu_win32_surface_state*)surface->backend_state;
+  return state != NULL && state->ganesh_wrapped;
+}
+
+void crtgfx_gpu_win32_end_ganesh(struct crtgfx_gpu_surface* surface) {
+  struct crtgfx_gpu_win32_surface_state* state;
+  if (surface == NULL || surface->backend != CRTGFX_GPU_BACKEND_D3D12) return;
+  state = (struct crtgfx_gpu_win32_surface_state*)surface->backend_state;
+  if (state != NULL) state->ganesh_wrapped = 0;
+}
+
+crtgfx_result crtgfx_gpu_win32_submit_ganesh(
+    struct crtgfx_gpu_surface* surface, void* resource, uint32_t resource_state_before) {
+  struct crtgfx_gpu_win32_surface_state* state;
+  crtgfx_d3d12_graphics_command_list* command_list;
+  crtgfx_d3d12_command_queue* command_queue;
+  crtgfx_d3d12_fence* fence;
+  crtgfx_d3d12_resource_barrier barrier;
+  uint64_t signal_value;
+  HRESULT hr;
+
+  if (surface == NULL || resource == NULL || surface->backend != CRTGFX_GPU_BACKEND_D3D12) {
+    return CRTGFX_ERROR_INVALID_ARGUMENT;
+  }
+  state = (struct crtgfx_gpu_win32_surface_state*)surface->backend_state;
+  if (state == NULL || !state->ganesh_wrapped || !state->d3d12_image_acquired ||
+      state->d3d12_frame_submitted) {
+    return CRTGFX_ERROR_HOST;
+  }
+  command_list = (crtgfx_d3d12_graphics_command_list*)state->d3d12_command_list;
+  command_queue = (crtgfx_d3d12_command_queue*)state->device->d3d12_command_queue;
+  fence = (crtgfx_d3d12_fence*)state->d3d12_fence;
+
+  barrier.type = CRTGFX_D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+  barrier.flags = CRTGFX_D3D12_RESOURCE_BARRIER_FLAG_NONE;
+  barrier.transition.resource = (crtgfx_d3d12_resource*)resource;
+  barrier.transition.subresource = 0;
+  barrier.transition.state_before = resource_state_before;
+  barrier.transition.state_after = CRTGFX_D3D12_RESOURCE_STATE_PRESENT;
+  command_list->lpVtbl->ResourceBarrier(command_list, 1, &barrier);
+  hr = command_list->lpVtbl->Close(command_list);
+  if (FAILED(hr)) return CRTGFX_ERROR_HOST;
+  command_queue->lpVtbl->ExecuteCommandLists(command_queue, 1, (void* const*)&command_list);
+
+  signal_value = state->d3d12_fence_next_value++;
+  hr = command_queue->lpVtbl->Signal(command_queue, fence, signal_value);
+  if (FAILED(hr)) return CRTGFX_ERROR_HOST;
+  state->d3d12_fence_values[state->d3d12_current_buffer_index] = signal_value;
+  state->d3d12_frame_submitted = 1;
+  state->ganesh_wrapped = 0;
   return CRTGFX_OK;
 }

@@ -10,6 +10,30 @@ substantive update.
 
 ## 2026-09-17
 
+- **Completed backend-boundary Tranche 3 by moving the full D3D12 object and
+  Ganesh submission state machine into the Windows owner.**
+  `src/arch/windows/gpu_win32.c` now owns private device/surface state behind
+  the fixed wrappers, resolves the HWND itself, lends only narrow borrowed
+  adapter/device/queue and current-back-buffer views, and performs the
+  PRESENT barrier, command-list close/execute, monotonic fence update,
+  per-buffer fence update, and submitted/wrapped transitions itself.
+  `gpu.c` no longer includes the Win32 window adapter, and
+  `skia_bridge.cc` no longer reads or mutates any D3D12/DXGI concrete field.
+  Added a backend-specific regression assertion so later Metal work cannot
+  accidentally reopen the already-closed D3D12 boundary.
+
+  Added deterministic resize arguments to the plain GPU window demo and a
+  private, non-installed WARP-only adapter-selection hook used by the shared
+  Ganesh smoke; production enumeration remains hardware-preferred with WARP
+  only as its existing fallback. Windows verification passed the boundary
+  guard, `crtgfx_gpu_test`, a plain hardware 30-frame presentation run, a
+  plain 5-frame run with scripted `900x520` resize, a fresh Skia build and
+  full hardware Ganesh offscreen/reference-scene/device-loss/recreation smoke,
+  a hardware Ganesh 30-frame window run, a hardware Ganesh 5-frame window run
+  with scripted `900x520` resize, and a forced real WARP Ganesh context/draw/
+  pixel-readback run. The public `crtgfx` ABI and production device-ordering
+  policy are unchanged.
+
 - **Completed backend-boundary Tranche 2 (Vulkan/Skia interop behind
   borrowed views) after finding and fixing a real, previously-hidden
   multi-frame Ganesh/Vulkan deadlock on Linux/aarch64.** The source

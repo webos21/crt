@@ -4,9 +4,9 @@
  * today, and why the fence gets a real, working implementation now).
  *
  * The common public wrapper/lifetime/dispatch implementation. It contains no
- * host GPU API calls or concrete GPU state. Temporary D3D12/Metal adapters
- * still resolve their platform window handles here until their own migration
- * tranches; Vulkan window extraction already lives in gpu_vulkan.c. */
+ * host GPU API calls or concrete GPU state. The temporary Metal adapter still
+ * resolves its platform window handle here until its migration tranche;
+ * Vulkan and D3D12 extraction live in their backend owners. */
 
 #include "crtgfx/gpu.h"
 
@@ -18,14 +18,7 @@
 #include <stdlib.h>
 #include <time.h>
 
-#if defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
-/* Only for crtgfx_gpu_surface_create()'s own real Windows/D3D12 branch
- * below -- resolving a crtgfx_window's real live HWND (window_win32.c,
- * via crtgfx_win32_get_hwnd()) and the shared toplevel struct's own real
- * width/height. Same reasoning as the Linux branch above. */
-#include "arch/windows/window_win32_gpu.h"
-#include "wayland_weston_internal.h"
-#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
+#if defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
 /* Only for crtgfx_gpu_surface_create()'s own real macOS/Metal branch
  * below -- resolving a crtgfx_window's real live CAMetalLayer `id`
  * (window_cocoa.c, via crtgfx_cocoa_get_metal_layer()) and the shared
@@ -47,8 +40,7 @@ struct crtgfx_gpu_fence {
   int signaled;
 };
 
-#if (defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)) || \
-    (defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL))
+#if defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
 static crtgfx_result crtgfx_gpu_legacy_surface_get_size(
     crtgfx_gpu_surface* surface, uint32_t* out_width, uint32_t* out_height) {
   *out_width = surface->width;
@@ -72,24 +64,14 @@ static const struct crtgfx_gpu_backend_ops crtgfx_gpu_active_ops = {
     crtgfx_gpu_vulkan_surface_present,
 };
 #elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
-static crtgfx_result crtgfx_gpu_win32_surface_create_dispatch(
-    crtgfx_gpu_device* device, crtgfx_window* window, crtgfx_gpu_surface* surface) {
-  void* hwnd_handle = NULL;
-  if (crtgfx_win32_get_hwnd(&window->toplevel, &hwnd_handle) == 0) {
-    return CRTGFX_ERROR_UNSUPPORTED;
-  }
-  return crtgfx_gpu_win32_surface_create(
-      device, hwnd_handle, window->toplevel.width, window->toplevel.height, surface);
-}
-
 static const struct crtgfx_gpu_backend_ops crtgfx_gpu_active_ops = {
     CRTGFX_GPU_BACKEND_D3D12,
     crtgfx_gpu_win32_query_capabilities,
     crtgfx_gpu_win32_device_create,
     crtgfx_gpu_win32_device_destroy,
-    crtgfx_gpu_win32_surface_create_dispatch,
+    crtgfx_gpu_win32_surface_create,
     crtgfx_gpu_win32_surface_destroy,
-    crtgfx_gpu_legacy_surface_get_size,
+    crtgfx_gpu_win32_surface_get_size,
     crtgfx_gpu_win32_surface_acquire,
     crtgfx_gpu_win32_surface_clear,
     crtgfx_gpu_win32_surface_resize,

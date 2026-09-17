@@ -120,12 +120,13 @@ present transition stay in the backend owner.
   session -- Tranche 1's own WSL Windows/x86_64 boundary/GPU coverage
   still stands, but WSL Skia/native-Wayland re-verification is left for a
   host that has both available together.
-- [ ] **Tranche 3 — migrate D3D12 and recover its state machine from Skia.** **Next.** Give
-  `gpu_win32.c` private state, move HWND extraction into it, and replace
-  Skia's direct command-list/fence/per-buffer/submitted mutations with a
-  backend transition. Verify WARP/hardware, window presentation, resize, and
-  Ganesh on Windows.
-- [ ] **Tranche 4 — migrate Metal with the same contract.** Give
+- [x] **Tranche 3 — migrate D3D12 and recover its state machine from Skia.**
+  Completed 2026-09-17 and recorded in `HISTORY.md`. D3D12 device/surface
+  state, HWND extraction, and command-list/fence/submission transitions are
+  now owner-local. Hardware and forced-WARP Ganesh, device-loss/recreation,
+  30-frame window presentation, scripted resize, and the backend-specific
+  boundary guard all pass on Windows.
+- [ ] **Next: Tranche 4 — migrate Metal with the same contract.** Give
   `gpu_metal.c` private state,
   move CAMetalLayer extraction into it, and expose only borrowed Metal views
   plus the existing backend-owned present preparation. Verify device,

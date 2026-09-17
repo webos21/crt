@@ -56,6 +56,10 @@
 
 #include "gpu_internal.h"
 
+#if defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
+#include "arch/windows/gpu_win32_test.h"
+#endif
+
 #include "include/core/SkImageInfo.h"
 #include "include/core/SkSurface.h"
 
@@ -282,7 +286,14 @@ void test_device_loss_and_recreation(uint32_t device_index) {
   // genuinely valid, and crtgfx_gpu_device_release() below can safely
   // Release() it normally, real COM refcounting handling the rest.
   {
-    ID3D12Device* d3d_device = reinterpret_cast<ID3D12Device*>(device->d3d12_device);
+    crtgfx_gpu_win32_device_view view = {};
+    if (!report(
+            "device-loss: backend lends a D3D12 device view",
+            crtgfx_gpu_win32_borrow_device(device, &view) != 0)) {
+      crtgfx_gpu_device_release(device);
+      return;
+    }
+    ID3D12Device* d3d_device = reinterpret_cast<ID3D12Device*>(view.device);
     ID3D12Device5* d3d_device5 = nullptr;
     HRESULT hr = d3d_device->QueryInterface(
         kIID_ID3D12Device5, reinterpret_cast<void**>(&d3d_device5));
@@ -290,10 +301,10 @@ void test_device_loss_and_recreation(uint32_t device_index) {
       d3d_device5->RemoveDevice();
       d3d_device5->Release();
     }
+    report(
+        "device-loss: GetDeviceRemovedReason() reports a real removal after RemoveDevice()",
+        FAILED(d3d_device->GetDeviceRemovedReason()));
   }
-  report(
-      "device-loss: GetDeviceRemovedReason() reports a real removal after RemoveDevice()",
-      FAILED(reinterpret_cast<ID3D12Device*>(device->d3d12_device)->GetDeviceRemovedReason()));
 #elif defined(CRTGFX_HAVE_METAL)
   // Metal has no real, public "simulate device loss" trigger analogous to
   // D3D12's RemoveDevice() (the closest real thing, MTLDevice's
@@ -425,6 +436,35 @@ extern "C" int main() {
   }
 
   test_device_loss_and_recreation(0);
+
+#if defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
+  /* Exercise the real DXGI WARP fallback through the same public device and
+   * Ganesh entry points without changing production adapter ordering. */
+  {
+    crtgfx_gpu_device* warp_device = nullptr;
+    crtgfx_gpu_capabilities warp_caps = {};
+    crtgfx_gpu_win32_test_force_warp(1);
+    bool warp_query_ok = report(
+        "WARP: forced capability query reports one D3D12 device",
+        crtgfx_gpu_query_capabilities(&warp_caps) == CRTGFX_OK &&
+            warp_caps.backend == CRTGFX_GPU_BACKEND_D3D12 && warp_caps.device_count == 1);
+    if (warp_query_ok &&
+        report(
+            "WARP: device_create() succeeds",
+            crtgfx_gpu_device_create(0, &warp_device) == CRTGFX_OK) &&
+        warp_device != nullptr) {
+      sk_sp<GrDirectContext> warp_context = crtgfx_skia_make_gpu_context(warp_device);
+      if (report("WARP: real Ganesh context created", warp_context != nullptr)) {
+        draw_and_check(
+            warp_context.get(), crtgfx_test::kReferenceSceneWidth,
+            crtgfx_test::kReferenceSceneHeight, "WARP: draw");
+      }
+      warp_context.reset();
+      crtgfx_gpu_device_release(warp_device);
+    }
+    crtgfx_gpu_win32_test_force_warp(0);
+  }
+#endif
 
   if (g_failures == 0) {
     puts("crtgfx_skia_gpu_offscreen_smoke: ok");

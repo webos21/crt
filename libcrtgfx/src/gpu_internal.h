@@ -7,8 +7,8 @@
  *
  * gpu.c owns each common wrapper's lifetime (calloc/atomic refcount/free),
  * while the selected backend owns the object behind backend_state. Vulkan
- * already follows that contract; during the migration the remaining D3D12
- * and Metal legacy field groups are deliberately present unconditionally: a
+ * already follows that contract; during the migration the remaining Metal
+ * legacy field group is deliberately present unconditionally: a
  * CRTGFX_HAVE_* mismatch can no longer change sizeof/offsets and cause cross-
  * TU overwrite. Vulkan state has already moved behind backend_state/ops. Each
  * remaining group is removed the same way; feature macros select code, never
@@ -42,27 +42,10 @@ struct crtgfx_gpu_device {
   const struct crtgfx_gpu_backend_ops* ops;
   void* backend_state;
   /* Temporary unconditional legacy fields. See the header comment above. */
-  /* Real D3D12/DXGI handles (2026-09-03, the Windows/D3D12 offscreen
-   * vertical slice -- the Linux/Vulkan slice's own sibling). The real
-   * ID3D12Device, ID3D12CommandQueue, and IDXGIAdapter1 COM interfaces
-   * are all real, pointer-sized COM object pointers -- void* here for
-   * the same no-host-SDK-type reason used by the backend boundary:
-   * real COM pointers are ABI-identical regardless of which header
-   * declared the type name (this header never includes the real
-   * <d3d12.h>/<dxgi1_4.h> Skia's own consumer code, skia_bridge.cc,
-   * separately does -- gpu_win32.c itself stays real-host-header-free,
-   * hand-declaring only what it needs, matching window_win32.c's own
-   * established D3D11 convention). Real ownership (fill-in at create,
-   * teardown at release) lives in src/arch/windows/gpu_win32.c, not here.
-   */
-  void* d3d12_device;
-  void* d3d12_command_queue;
-  void* dxgi_adapter;
   /* Real Metal handles (2026-09-04, the Windows/D3D12 and Linux/Vulkan
    * offscreen vertical slices' own macOS sibling). `id<MTLDevice>`/
    * `id<MTLCommandQueue>` are real, opaque Objective-C object pointers --
-   * void* here for the identical reason the D3D12 fields above
-   * use it: an Objective-C `id` is ABI-identical regardless of which
+   * void* here because an Objective-C `id` is ABI-identical regardless of which
    * header (or no header at all) declared the type name. This header
    * never includes the real <Metal/Metal.h> Skia's own consumer code,
    * skia_bridge.cc, separately does (via GrMtlBackendContext.h) --
@@ -92,45 +75,6 @@ struct crtgfx_gpu_surface {
   uint32_t width;
   uint32_t height;
   int ganesh_wrapped;
-  /* Real D3D12/DXGI swap-chain presentation (2026-09-07, the Windows leg
-   * of "Finish live GPU presentation everywhere", following the Linux
-   * native-Wayland-backend vertical slice) -- same real per-field shape
-   * as the Vulkan backend, adapted to D3D12's own real conventions
-   * (an explicit RTV descriptor heap instead of Vulkan's plain VkImage
-   * array; per-back-buffer fence *values* against one shared ID3D12Fence,
-   * D3D12's own real synchronization primitive, rather than Vulkan's
-   * separate per-frame VkFence objects). */
-  /* Real IDXGISwapChain3* -- void* for the same "no host SDK type in a
-   * shared header" reason every other Windows/Vulkan handle in this file
-   * already uses. */
-  void* dxgi_swapchain;
-  /* malloc'd array of `d3d12_buffer_count` real ID3D12Resource* back
-   * buffers (GetBuffer adds references, individually released during
-   * surface teardown) and one RTV descriptor heap (a single, small,
-   * CPU-visible heap sized to the same buffer count) so crtgfx_gpu_
-   * win32_surface_clear() can create/reuse each buffer's own render
-   * target view without a new heap per frame. */
-  void** d3d12_back_buffers;
-  void* d3d12_rtv_heap;
-  size_t d3d12_rtv_descriptor_size;
-  uint32_t d3d12_buffer_count;
-  /* One command allocator + one command list, reset and re-recorded each
-   * frame (D3D12's own real, standard single-buffered command-recording
-   * shape -- matches the Vulkan branch's own single vk_command_buffer). */
-  void* d3d12_command_allocator;
-  void* d3d12_command_list;
-  /* Monotonic submit fence. Per-image values record submissions, but
-   * acquire waits for the latest value because all images share the
-   * same command allocator/list. */
-  void* d3d12_fence;
-  uint64_t* d3d12_fence_values;
-  uint64_t d3d12_fence_next_value;
-  void* d3d12_fence_event;
-  uint32_t d3d12_current_buffer_index;
-  /* Same real out-of-order-call guard as the Vulkan backend's acquired
-   * phase. */
-  int d3d12_image_acquired;
-  int d3d12_frame_submitted;
   /* Real CAMetalLayer drawable presentation (2026-09-07, the macOS leg of
    * "Finish live GPU presentation everywhere"). Simpler than the Vulkan/
    * D3D12 branches above -- Metal's own `-presentDrawable:`/command-buffer
@@ -163,8 +107,7 @@ struct crtgfx_gpu_surface {
  * TU) -- confirmed load-bearing for real, not just tidiness: crtgfx_gpu_
  * metal_surface_prepare_ganesh_present() is the first of these hooks
  * skia_bridge.cc actually *calls* rather than only accessing struct
- * fields of (the Vulkan branch now uses borrowed views; D3D12 still touches
- * fields during its pending migration), and
+ * fields of (Vulkan and D3D12 now use borrowed views), and
  * without this guard a C++ compile mangles this declaration while gpu_
  * metal.c's own C definition stays unmangled, so real macOS hardware
  * linking skia_bridge.cc against gpu_metal.c failed with a genuine
@@ -228,6 +171,18 @@ int crtgfx_gpu_vulkan_get_ganesh_present_view(
 void crtgfx_gpu_vulkan_end_ganesh(struct crtgfx_gpu_surface* surface);
 void crtgfx_gpu_vulkan_test_force_device_loss(struct crtgfx_gpu_device* device);
 #elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
+struct crtgfx_gpu_win32_device_view {
+  void* adapter;
+  void* device;
+  void* command_queue;
+};
+
+struct crtgfx_gpu_win32_surface_view {
+  void* back_buffer;
+  uint32_t width;
+  uint32_t height;
+};
+
 /* Real backend hooks -- src/arch/windows/gpu_win32.c. Same real shape as
  * the Vulkan hooks above (gpu.c still owns all argument validation and
  * the crtgfx_gpu_device allocation/refcount/free; these only fill in or
@@ -235,21 +190,27 @@ void crtgfx_gpu_vulkan_test_force_device_loss(struct crtgfx_gpu_device* device);
 crtgfx_result crtgfx_gpu_win32_query_capabilities(crtgfx_gpu_capabilities* out_caps);
 crtgfx_result crtgfx_gpu_win32_device_create(uint32_t device_index, struct crtgfx_gpu_device* device);
 void crtgfx_gpu_win32_device_destroy(struct crtgfx_gpu_device* device);
-/* Real surface/swap-chain hooks (2026-09-07) -- same real shape as the
- * Vulkan surface hooks above. `hwnd` is a real, live HWND from window_
- * win32.c (via crtgfx_win32_get_hwnd() -- window_win32_gpu.h); gpu.c's
- * own caller resolves this, not this header, matching the Vulkan branch's
- * own wl_display/wl_surface resolution split. */
+/* Real surface/swap-chain hooks. The Windows owner resolves the opaque public
+ * window to its HWND and owns the private D3D12 surface state. */
 crtgfx_result crtgfx_gpu_win32_surface_create(
-    struct crtgfx_gpu_device* device, void* hwnd, uint32_t width, uint32_t height,
-    struct crtgfx_gpu_surface* surface);
+    struct crtgfx_gpu_device* device, crtgfx_window* window, struct crtgfx_gpu_surface* surface);
 void crtgfx_gpu_win32_surface_destroy(struct crtgfx_gpu_surface* surface);
+crtgfx_result crtgfx_gpu_win32_surface_get_size(
+    struct crtgfx_gpu_surface* surface, uint32_t* out_width, uint32_t* out_height);
 crtgfx_result crtgfx_gpu_win32_surface_acquire(struct crtgfx_gpu_surface* surface, uint64_t timeout_us);
 crtgfx_result crtgfx_gpu_win32_surface_clear(struct crtgfx_gpu_surface* surface, float r, float g, float b, float a);
 crtgfx_result crtgfx_gpu_win32_surface_present(struct crtgfx_gpu_surface* surface);
 /* Real swap-chain recreation (2026-09-07) -- see crtgfx/gpu.h's own
  * crtgfx_gpu_surface_resize() comment for the full contract. */
 crtgfx_result crtgfx_gpu_win32_surface_resize(struct crtgfx_gpu_surface* surface, uint32_t width, uint32_t height);
+int crtgfx_gpu_win32_borrow_device(
+    const struct crtgfx_gpu_device* device, struct crtgfx_gpu_win32_device_view* out_view);
+int crtgfx_gpu_win32_begin_ganesh(
+    struct crtgfx_gpu_surface* surface, struct crtgfx_gpu_win32_surface_view* out_view);
+int crtgfx_gpu_win32_is_ganesh_wrapped(const struct crtgfx_gpu_surface* surface);
+void crtgfx_gpu_win32_end_ganesh(struct crtgfx_gpu_surface* surface);
+crtgfx_result crtgfx_gpu_win32_submit_ganesh(
+    struct crtgfx_gpu_surface* surface, void* resource, uint32_t resource_state_before);
 #elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
 /* Real backend hooks -- src/arch/macos/gpu_metal.c. Same real shape as
  * the Vulkan/D3D12 hooks above (gpu.c still owns all argument validation
