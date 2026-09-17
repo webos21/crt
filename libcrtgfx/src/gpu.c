@@ -3,12 +3,10 @@
  * (why device/surface always, honestly report CRTGFX_ERROR_UNSUPPORTED
  * today, and why the fence gets a real, working implementation now).
  *
- * A plain, host-independent source file -- unlike libcrtgfx's own
- * per-host window backends (src/arch/windows/window_win32.c and
- * friends), this compiles identically on every host via CRTGFX_COMMON_
- * SOURCES (libcrtgfx/CMakeLists.txt), using this project's own libc
- * headers normally (no host-SDK-avoidance concern here at all -- there
- * is no host GPU API call anywhere in this file yet). */
+ * The common public wrapper/lifetime/dispatch implementation. It contains no
+ * host GPU API calls or concrete GPU state. Temporary D3D12/Metal adapters
+ * still resolve their platform window handles here until their own migration
+ * tranches; Vulkan window extraction already lives in gpu_vulkan.c. */
 
 #include "crtgfx/gpu.h"
 
@@ -20,17 +18,7 @@
 #include <stdlib.h>
 #include <time.h>
 
-#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN) && defined(CRTGFX_HAVE_NATIVE_WAYLAND)
-/* Only for crtgfx_gpu_surface_create()'s own real Linux/Vulkan branch
- * below -- resolving a native-backend crtgfx_window's real live wl_
- * display/wl_surface pair (window_wayland_native.c) and the shared
- * toplevel struct's own real width/height (wayland_weston_internal.h) it
- * needs to pass into crtgfx_gpu_vulkan_surface_create(). Guarded the same
- * way gpu_internal.h's own Vulkan-only struct fields are -- every other
- * host/config never sees these Linux-only includes at all. */
-#include "arch/linux/window_wayland_native.h"
-#include "wayland_weston_internal.h"
-#elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
+#if defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
 /* Only for crtgfx_gpu_surface_create()'s own real Windows/D3D12 branch
  * below -- resolving a crtgfx_window's real live HWND (window_win32.c,
  * via crtgfx_win32_get_hwnd()) and the shared toplevel struct's own real
@@ -59,112 +47,125 @@ struct crtgfx_gpu_fence {
   int signaled;
 };
 
-crtgfx_result crtgfx_gpu_query_capabilities(crtgfx_gpu_capabilities* out_caps) {
-  if (out_caps == NULL) {
-    return CRTGFX_ERROR_INVALID_ARGUMENT;
-  }
-#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
-  /* Real backend, Linux only (src/arch/linux/gpu_vulkan.c) -- see that
-   * file's own top comment. Windows/macOS fall through to the honest
-   * NONE/0 report below, same as Linux did before this landed.
-   *
-   * Deliberately NOT also gated on CRTGFX_HAVE_NATIVE_WAYLAND (unlike
-   * crtgfx_gpu_surface_create()'s own guard just below in this file):
-   * crtgfx_gpu_vulkan_query_capabilities()/crtgfx_gpu_device_create()
-   * (right below) only ever enumerate/create a plain Vulkan device --
-   * genuinely no Wayland connection or window involved at all, matching
-   * crtgfx_skia_gpu_offscreen_smoke's own real, working offscreen-only
-   * usage. This guard used to require CRTGFX_HAVE_NATIVE_WAYLAND too,
-   * which made this function report device_count=0/BACKEND_NONE on any
-   * build with a real libvulkan found but crtgfx-wayland-build never run
-   * (a fresh out/ directory's own first CMake workflow pass, exactly
-   * CI's own always-fresh runner) -- while crtgfx_gpu_device_create()
-   * right below (correctly never gated on native Wayland) still found
-   * and created a real device anyway. That mismatch is exactly what
-   * crtgfx_gpu_test caught: query_capabilities() reporting 0 devices,
-   * then device_create(0, ...) succeeding regardless, contradicting its
-   * own device_count == 0 report. */
-  return crtgfx_gpu_vulkan_query_capabilities(out_caps);
-#elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
-  /* Real backend, Windows only (src/arch/windows/gpu_win32.c) -- see that
-   * file's own top comment. */
-  return crtgfx_gpu_win32_query_capabilities(out_caps);
-#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
-  /* Real backend, macOS only (src/arch/macos/gpu_metal.c) -- see that
-   * file's own top comment. */
-  return crtgfx_gpu_metal_query_capabilities(out_caps);
-#else
-  /* Real, honest report -- see this file's own top comment and gpu.h's
-   * own top comment for why this is CRTGFX_GPU_BACKEND_NONE/0 on every
-   * real code path on this host today, not a placeholder. */
-  out_caps->backend = CRTGFX_GPU_BACKEND_NONE;
-  out_caps->device_count = 0;
+#if (defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)) || \
+    (defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL))
+static crtgfx_result crtgfx_gpu_legacy_surface_get_size(
+    crtgfx_gpu_surface* surface, uint32_t* out_width, uint32_t* out_height) {
+  *out_width = surface->width;
+  *out_height = surface->height;
   return CRTGFX_OK;
+}
+#endif
+
+#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
+static const struct crtgfx_gpu_backend_ops crtgfx_gpu_active_ops = {
+    CRTGFX_GPU_BACKEND_VULKAN,
+    crtgfx_gpu_vulkan_query_capabilities,
+    crtgfx_gpu_vulkan_device_create,
+    crtgfx_gpu_vulkan_device_destroy,
+    crtgfx_gpu_vulkan_surface_create,
+    crtgfx_gpu_vulkan_surface_destroy,
+    crtgfx_gpu_vulkan_surface_get_size,
+    crtgfx_gpu_vulkan_surface_acquire,
+    crtgfx_gpu_vulkan_surface_clear,
+    crtgfx_gpu_vulkan_surface_resize,
+    crtgfx_gpu_vulkan_surface_present,
+};
+#elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
+static crtgfx_result crtgfx_gpu_win32_surface_create_dispatch(
+    crtgfx_gpu_device* device, crtgfx_window* window, crtgfx_gpu_surface* surface) {
+  void* hwnd_handle = NULL;
+  if (crtgfx_win32_get_hwnd(&window->toplevel, &hwnd_handle) == 0) {
+    return CRTGFX_ERROR_UNSUPPORTED;
+  }
+  return crtgfx_gpu_win32_surface_create(
+      device, hwnd_handle, window->toplevel.width, window->toplevel.height, surface);
+}
+
+static const struct crtgfx_gpu_backend_ops crtgfx_gpu_active_ops = {
+    CRTGFX_GPU_BACKEND_D3D12,
+    crtgfx_gpu_win32_query_capabilities,
+    crtgfx_gpu_win32_device_create,
+    crtgfx_gpu_win32_device_destroy,
+    crtgfx_gpu_win32_surface_create_dispatch,
+    crtgfx_gpu_win32_surface_destroy,
+    crtgfx_gpu_legacy_surface_get_size,
+    crtgfx_gpu_win32_surface_acquire,
+    crtgfx_gpu_win32_surface_clear,
+    crtgfx_gpu_win32_surface_resize,
+    crtgfx_gpu_win32_surface_present,
+};
+#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
+static crtgfx_result crtgfx_gpu_metal_surface_create_dispatch(
+    crtgfx_gpu_device* device, crtgfx_window* window, crtgfx_gpu_surface* surface) {
+  void* metal_layer_handle = NULL;
+  if (crtgfx_cocoa_get_metal_layer(&window->toplevel, &metal_layer_handle) == 0) {
+    return CRTGFX_ERROR_UNSUPPORTED;
+  }
+  return crtgfx_gpu_metal_surface_create(
+      device, metal_layer_handle, window->toplevel.width, window->toplevel.height, surface);
+}
+
+static const struct crtgfx_gpu_backend_ops crtgfx_gpu_active_ops = {
+    CRTGFX_GPU_BACKEND_METAL,
+    crtgfx_gpu_metal_query_capabilities,
+    crtgfx_gpu_metal_device_create,
+    crtgfx_gpu_metal_device_destroy,
+    crtgfx_gpu_metal_surface_create_dispatch,
+    crtgfx_gpu_metal_surface_destroy,
+    crtgfx_gpu_legacy_surface_get_size,
+    crtgfx_gpu_metal_surface_acquire,
+    crtgfx_gpu_metal_surface_clear,
+    crtgfx_gpu_metal_surface_resize,
+    crtgfx_gpu_metal_surface_present,
+};
+#endif
+
+static const struct crtgfx_gpu_backend_ops* crtgfx_gpu_get_active_ops(void) {
+#if (defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)) || \
+    (defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)) || \
+    (defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL))
+  return &crtgfx_gpu_active_ops;
+#else
+  return NULL;
 #endif
 }
 
+crtgfx_result crtgfx_gpu_query_capabilities(crtgfx_gpu_capabilities* out_caps) {
+  const struct crtgfx_gpu_backend_ops* ops;
+  if (out_caps == NULL) {
+    return CRTGFX_ERROR_INVALID_ARGUMENT;
+  }
+  ops = crtgfx_gpu_get_active_ops();
+  if (ops != NULL) {
+    return ops->query_capabilities(out_caps);
+  }
+  out_caps->backend = CRTGFX_GPU_BACKEND_NONE;
+  out_caps->device_count = 0;
+  return CRTGFX_OK;
+}
+
 crtgfx_result crtgfx_gpu_device_create(uint32_t device_index, crtgfx_gpu_device** out_device) {
+  const struct crtgfx_gpu_backend_ops* ops;
+  crtgfx_gpu_device* device;
+  crtgfx_result result;
   if (out_device == NULL) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
-#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
-  {
-    crtgfx_gpu_device* device = (crtgfx_gpu_device*)calloc(1, sizeof(crtgfx_gpu_device));
-    crtgfx_result result;
-    if (device == NULL) {
-      return CRTGFX_ERROR_UNSUPPORTED;
-    }
-    result = crtgfx_gpu_vulkan_device_create(device_index, device);
-    if (result != CRTGFX_OK) {
-      free(device);
-      return result;
-    }
-    atomic_init(&device->refcount, 1);
-    *out_device = device;
-    return CRTGFX_OK;
+  ops = crtgfx_gpu_get_active_ops();
+  if (ops == NULL) return CRTGFX_ERROR_UNSUPPORTED;
+  device = (crtgfx_gpu_device*)calloc(1, sizeof(crtgfx_gpu_device));
+  if (device == NULL) return CRTGFX_ERROR_UNSUPPORTED;
+  device->backend = ops->backend;
+  device->ops = ops;
+  result = ops->device_create(device_index, device);
+  if (result != CRTGFX_OK) {
+    free(device);
+    return result;
   }
-#elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
-  {
-    crtgfx_gpu_device* device = (crtgfx_gpu_device*)calloc(1, sizeof(crtgfx_gpu_device));
-    crtgfx_result result;
-    if (device == NULL) {
-      return CRTGFX_ERROR_UNSUPPORTED;
-    }
-    result = crtgfx_gpu_win32_device_create(device_index, device);
-    if (result != CRTGFX_OK) {
-      free(device);
-      return result;
-    }
-    atomic_init(&device->refcount, 1);
-    *out_device = device;
-    return CRTGFX_OK;
-  }
-#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
-  {
-    crtgfx_gpu_device* device = (crtgfx_gpu_device*)calloc(1, sizeof(crtgfx_gpu_device));
-    crtgfx_result result;
-    if (device == NULL) {
-      return CRTGFX_ERROR_UNSUPPORTED;
-    }
-    result = crtgfx_gpu_metal_device_create(device_index, device);
-    if (result != CRTGFX_OK) {
-      free(device);
-      return result;
-    }
-    atomic_init(&device->refcount, 1);
-    *out_device = device;
-    return CRTGFX_OK;
-  }
-#else
-  (void)device_index;
-  /* crtgfx_gpu_query_capabilities() reports 0 real devices on this host
-   * today (no real backend exists here yet -- see this file's own top
-   * comment), so `device_index` is never in a real valid range and there
-   * is nothing real to construct -- matching crtgfx_window_create()'s
-   * own established "no usable host backend right now" contract, not a
-   * crash/hang. */
-  return CRTGFX_ERROR_UNSUPPORTED;
-#endif
+  atomic_init(&device->refcount, 1);
+  *out_device = device;
+  return CRTGFX_OK;
 }
 
 crtgfx_result crtgfx_gpu_device_retain(crtgfx_gpu_device* device) {
@@ -182,158 +183,36 @@ void crtgfx_gpu_device_release(crtgfx_gpu_device* device) {
   /* atomic_fetch_sub_explicit() returns the value *before* the
    * subtraction -- 1 means this was the last real reference. */
   if (atomic_fetch_sub_explicit(&device->refcount, 1, memory_order_acq_rel) == 1) {
-#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
-    crtgfx_gpu_vulkan_device_destroy(device);
-#elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
-    crtgfx_gpu_win32_device_destroy(device);
-#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
-    crtgfx_gpu_metal_device_destroy(device);
-#endif
+    device->ops->device_destroy(device);
     free(device);
   }
 }
 
 crtgfx_result crtgfx_gpu_surface_create(
     crtgfx_gpu_device* device, crtgfx_window* window, crtgfx_gpu_surface** out_surface) {
+  crtgfx_gpu_surface* surface;
+  crtgfx_result result;
   if (device == NULL || window == NULL || out_surface == NULL) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
-  /* CRTGFX_HAVE_NATIVE_WAYLAND, not just CRTGFX_HAVE_VULKAN, matching the
-   * #include guard at the top of this file: crtgfx_native_wl_get_surface_
-   * handles() (window_wayland_native.h) and struct crtgfx_window's own
-   * full definition (wayland_weston_internal.h) are only actually visible
-   * to this translation unit when the native Wayland backend was built
-   * (libwayland-client.a exists, libcrtgfx/CMakeLists.txt's own EXISTS
-   * check). A build with a real libvulkan found but crtgfx-wayland-build
-   * never run (CRTGFX_HAVE_VULKAN=1 alone -- exactly a fresh `out/`
-   * wipe's own CMake workflow, before the Wayland one-time bootstrap
-   * step has ever run) has no business calling into a function this
-   * translation unit never declared: `error: call to undeclared
-   * function 'crtgfx_native_wl_get_surface_handles'` plus `incomplete
-   * definition of type 'struct crtgfx_window'` (both real, reproduced on
-   * a genuinely fresh out/ directory, matching GitHub CI's own always-
-   * fresh runner). The already-correct honest-CRTGFX_ERROR_UNSUPPORTED
-   * fallback right below was already written for exactly this case but
-   * was unreachable: an `#elif` with the identical condition as this
-   * `#if` can never be taken. */
-#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN) && defined(CRTGFX_HAVE_NATIVE_WAYLAND)
-  {
-    void* wl_display_handle = NULL;
-    void* wl_surface_handle = NULL;
-    crtgfx_gpu_surface* surface;
-    crtgfx_result result;
-
-    /* `window` is only ever a real, live target here if it was created
-     * with CRTGFX_WINDOW_GPU_PRESENTATION (crtgfx/window.h) -- the native
-     * Wayland backend's own crtgfx_native_wl_get_surface_handles() is the
-     * single real source of truth for that (checks the backend tag
-     * itself, see window_wayland_native.h's own comment), so this
-     * function never needs to duplicate that check. A legacy (software)
-     * window, or any other real reason a live connection is not
-     * available, both correctly fail here with the same honest CRTGFX_
-     * ERROR_UNSUPPORTED this function already returned for every window
-     * before today. */
-    if (crtgfx_native_wl_get_surface_handles(&window->toplevel, &wl_display_handle, &wl_surface_handle) == 0) {
-      return CRTGFX_ERROR_UNSUPPORTED;
-    }
-
-    surface = (crtgfx_gpu_surface*)calloc(1, sizeof(crtgfx_gpu_surface));
-    if (surface == NULL) {
-      return CRTGFX_ERROR_UNSUPPORTED;
-    }
-    result = crtgfx_gpu_vulkan_surface_create(
-        device, wl_display_handle, wl_surface_handle, window->toplevel.width, window->toplevel.height, surface);
-    if (result != CRTGFX_OK) {
-      free(surface);
-      return result;
-    }
-    *out_surface = surface;
-    return CRTGFX_OK;
+  surface = (crtgfx_gpu_surface*)calloc(1, sizeof(crtgfx_gpu_surface));
+  if (surface == NULL) return CRTGFX_ERROR_UNSUPPORTED;
+  surface->backend = device->backend;
+  surface->ops = device->ops;
+  result = surface->ops->surface_create(device, window, surface);
+  if (result != CRTGFX_OK) {
+    free(surface);
+    return result;
   }
-#elif defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
-  (void)device;
-  (void)window;
-  (void)out_surface;
-  return CRTGFX_ERROR_UNSUPPORTED;
-#elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
-  {
-    void* hwnd_handle = NULL;
-    crtgfx_gpu_surface* surface;
-    crtgfx_result result;
-
-    /* Only GPU windows expose their HWND here: software windows already
-     * own a D3D11 swapchain and cannot accept another flip swapchain. */
-    if (crtgfx_win32_get_hwnd(&window->toplevel, &hwnd_handle) == 0) {
-      return CRTGFX_ERROR_UNSUPPORTED;
-    }
-
-    surface = (crtgfx_gpu_surface*)calloc(1, sizeof(crtgfx_gpu_surface));
-    if (surface == NULL) {
-      return CRTGFX_ERROR_UNSUPPORTED;
-    }
-    result = crtgfx_gpu_win32_surface_create(
-        device, hwnd_handle, window->toplevel.width, window->toplevel.height, surface);
-    if (result != CRTGFX_OK) {
-      free(surface);
-      return result;
-    }
-    *out_surface = surface;
-    return CRTGFX_OK;
-  }
-#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
-  {
-    void* metal_layer_handle = NULL;
-    crtgfx_gpu_surface* surface;
-    crtgfx_result result;
-
-    /* window_cocoa.c only gives a window a real CAMetalLayer-backed
-     * content view when it was created with CRTGFX_WINDOW_GPU_PRESENTATION
-     * (crtgfx/window.h) -- crtgfx_cocoa_get_metal_layer() is the single
-     * real source of truth for that, so this function never needs to
-     * duplicate the check. A software-presented window (the ordinary
-     * plain-CALayer content view) correctly fails here with the same
-     * honest CRTGFX_ERROR_UNSUPPORTED this function already returned for
-     * every window before today. */
-    if (crtgfx_cocoa_get_metal_layer(&window->toplevel, &metal_layer_handle) == 0) {
-      return CRTGFX_ERROR_UNSUPPORTED;
-    }
-
-    surface = (crtgfx_gpu_surface*)calloc(1, sizeof(crtgfx_gpu_surface));
-    if (surface == NULL) {
-      return CRTGFX_ERROR_UNSUPPORTED;
-    }
-    result = crtgfx_gpu_metal_surface_create(
-        device, metal_layer_handle, window->toplevel.width, window->toplevel.height, surface);
-    if (result != CRTGFX_OK) {
-      free(surface);
-      return result;
-    }
-    *out_surface = surface;
-    return CRTGFX_OK;
-  }
-#else
-  (void)device;
-  (void)window;
-  /* Real, structurally unreachable today on this host: crtgfx_gpu_device_
-   * create() never succeeds here, so no real caller can ever obtain a
-   * real `device` to pass at all (see gpu.h's own top comment) -- this
-   * argument validation is the only part of this function any real
-   * caller can exercise until a future backend lands. */
-  return CRTGFX_ERROR_UNSUPPORTED;
-#endif
+  *out_surface = surface;
+  return CRTGFX_OK;
 }
 
 void crtgfx_gpu_surface_release(crtgfx_gpu_surface* surface) {
   if (surface == NULL) {
     return;
   }
-#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
-  crtgfx_gpu_vulkan_surface_destroy(surface);
-#elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
-  crtgfx_gpu_win32_surface_destroy(surface);
-#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
-  crtgfx_gpu_metal_surface_destroy(surface);
-#endif
+  surface->ops->surface_destroy(surface);
   free(surface);
 }
 
@@ -341,53 +220,21 @@ crtgfx_result crtgfx_gpu_surface_get_size(crtgfx_gpu_surface* surface, uint32_t*
   if (surface == NULL || out_width == NULL || out_height == NULL) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
-#if (defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)) || \
-    (defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)) || \
-    (defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL))
-  /* width/height are named identically across all three real per-host
-   * branches of struct crtgfx_gpu_surface (gpu_internal.h) -- one shared
-   * read, no per-host dispatch needed. */
-  *out_width = surface->width;
-  *out_height = surface->height;
-  return CRTGFX_OK;
-#else
-  return CRTGFX_ERROR_UNSUPPORTED;
-#endif
+  return surface->ops->surface_get_size(surface, out_width, out_height);
 }
 
 crtgfx_result crtgfx_gpu_surface_acquire(crtgfx_gpu_surface* surface, uint64_t timeout_us) {
   if (surface == NULL) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
-#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
-  return crtgfx_gpu_vulkan_surface_acquire(surface, timeout_us);
-#elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
-  return crtgfx_gpu_win32_surface_acquire(surface, timeout_us);
-#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
-  return crtgfx_gpu_metal_surface_acquire(surface, timeout_us);
-#else
-  (void)timeout_us;
-  return CRTGFX_ERROR_UNSUPPORTED;
-#endif
+  return surface->ops->surface_acquire(surface, timeout_us);
 }
 
 crtgfx_result crtgfx_gpu_surface_clear(crtgfx_gpu_surface* surface, float r, float g, float b, float a) {
   if (surface == NULL) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
-#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
-  return crtgfx_gpu_vulkan_surface_clear(surface, r, g, b, a);
-#elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
-  return crtgfx_gpu_win32_surface_clear(surface, r, g, b, a);
-#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
-  return crtgfx_gpu_metal_surface_clear(surface, r, g, b, a);
-#else
-  (void)r;
-  (void)g;
-  (void)b;
-  (void)a;
-  return CRTGFX_ERROR_UNSUPPORTED;
-#endif
+  return surface->ops->surface_clear(surface, r, g, b, a);
 }
 
 crtgfx_result crtgfx_gpu_surface_resize(crtgfx_gpu_surface* surface, uint32_t width, uint32_t height) {
@@ -397,30 +244,14 @@ crtgfx_result crtgfx_gpu_surface_resize(crtgfx_gpu_surface* surface, uint32_t wi
   if (width == 0u || height == 0u) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
-#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
-  return crtgfx_gpu_vulkan_surface_resize(surface, width, height);
-#elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
-  return crtgfx_gpu_win32_surface_resize(surface, width, height);
-#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
-  return crtgfx_gpu_metal_surface_resize(surface, width, height);
-#else
-  return CRTGFX_ERROR_UNSUPPORTED;
-#endif
+  return surface->ops->surface_resize(surface, width, height);
 }
 
 crtgfx_result crtgfx_gpu_surface_present(crtgfx_gpu_surface* surface) {
   if (surface == NULL) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
-#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
-  return crtgfx_gpu_vulkan_surface_present(surface);
-#elif defined(CRT_TARGET_OS_WINDOWS) && defined(CRTGFX_HAVE_D3D12)
-  return crtgfx_gpu_win32_surface_present(surface);
-#elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
-  return crtgfx_gpu_metal_surface_present(surface);
-#else
-  return CRTGFX_ERROR_UNSUPPORTED;
-#endif
+  return surface->ops->surface_present(surface);
 }
 
 crtgfx_result crtgfx_gpu_fence_create(crtgfx_gpu_device* device, crtgfx_gpu_fence** out_fence) {

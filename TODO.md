@@ -78,20 +78,36 @@ present transition stay in the backend owner.
   2026-09-17 and recorded in `HISTORY.md`. The contract, direct-access
   inventory, and CTest guard are in place; the guard's allowlists must only
   shrink while the implementation proceeds.
-- [ ] **Tranche 1 — introduce the fixed wrapper and operations contract with
-  Vulkan first.** **Current.**
+- [x] **Tranche 1 — introduce the fixed wrapper and operations contract with
+  Vulkan first.** Completed 2026-09-17 and recorded in `HISTORY.md`.
   Move Vulkan device/surface state into `gpu_vulkan.c`; make `gpu.c` own only
   validation, wrapper allocation/refcount, dispatch, and wrapper free. Move
   native Wayland extraction into the Vulkan surface-create operation. Add a
   layout/macro-mismatch regression and partial-create failure coverage.
   Progress: backend field groups are now unconditional, so feature-macro
   mismatch cannot change common object size/offsets; the CTest guard enforces
-  that invariant. Opaque state/ops and Vulkan extraction remain unchecked.
+  that invariant. The fixed wrappers now carry backend tag, operations pointer,
+  and opaque state slot, and all public device/surface calls dispatch through
+  the operations table. Vulkan concrete device/surface state now lives only in
+  `gpu_vulkan.c`; Skia consumes narrow borrowed Vulkan views/transitions and the
+  Vulkan device-loss smoke uses an owner hook. Native Wayland handle/extent
+  extraction has also moved from `gpu.c` into the Vulkan surface-create owner.
+  Focused Windows and WSL boundary/GPU tests pass. Vulkan device creation now
+  injects one-shot failures after instance and device/queue creation; the test
+  proves exact native cleanup, no published wrapper, and immediate successful
+  recreation. The native-Wayland branch also compiles cleanly in isolation
+  with the configured Clang flags. Full Skia/native-Wayland link-and-run
+  evidence belongs to Tranche 2; the dependency bootstrap attempt here stalled
+  while fetching `expat` and is not misreported as runtime acceptance.
 - [ ] **Tranche 2 — move Vulkan Skia interop behind borrowed views and
-  transitions.** Remove
+  transitions.** **Next.** Remove
   every Vulkan concrete-field access from `skia_bridge.cc`; keep acquire/
   Ganesh-wrap/semaphore/layout/present state Vulkan-owned. Re-run headless
   Ganesh plus native Wayland presentation/resize on WSL and Linux/aarch64.
+  Progress: the source migration is complete and the boundary scan finds
+  Vulkan concrete access only in `gpu_vulkan.c`. This remains unchecked until
+  a Skia-enabled configuration compiles the changed C++ bridge and headless plus
+  native-Wayland runtime acceptance is rerun.
 - [ ] **Tranche 3 — migrate D3D12 and recover its state machine from Skia.** Give
   `gpu_win32.c` private state, move HWND extraction into it, and replace
   Skia's direct command-list/fence/per-buffer/submitted mutations with a

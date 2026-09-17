@@ -34,12 +34,33 @@
  * needed the way D3D11 required, since Vulkan's C ABI is flat. */
 
 #include "gpu_internal.h"
+#include "gpu_vulkan_test.h"
 #include "window_wayland_native.h"
 
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+static atomic_uint crtgfx_gpu_vulkan_test_device_failure_step;
+static atomic_uint crtgfx_gpu_vulkan_test_device_cleanup_mask;
+
+static int crtgfx_gpu_vulkan_test_should_fail_device_create(uint32_t step) {
+  uint32_t expected = step;
+  return atomic_compare_exchange_strong_explicit(
+      &crtgfx_gpu_vulkan_test_device_failure_step, &expected, 0u,
+      memory_order_acq_rel, memory_order_acquire);
+}
+
+void crtgfx_gpu_vulkan_test_inject_device_create_failure(uint32_t step) {
+  atomic_store_explicit(&crtgfx_gpu_vulkan_test_device_cleanup_mask, 0u, memory_order_release);
+  atomic_store_explicit(&crtgfx_gpu_vulkan_test_device_failure_step, step, memory_order_release);
+}
+
+uint32_t crtgfx_gpu_vulkan_test_take_device_cleanup_mask(void) {
+  return atomic_exchange_explicit(
+      &crtgfx_gpu_vulkan_test_device_cleanup_mask, 0u, memory_order_acq_rel);
+}
 
 typedef struct VkInstance_T* VkInstance;
 typedef struct VkPhysicalDevice_T* VkPhysicalDevice;
@@ -838,7 +859,36 @@ crtgfx_result crtgfx_gpu_vulkan_query_capabilities(crtgfx_gpu_capabilities* out_
   return CRTGFX_OK;
 }
 
-crtgfx_result crtgfx_gpu_vulkan_device_create(uint32_t device_index, struct crtgfx_gpu_device* device) {
+struct crtgfx_gpu_vulkan_device_state {
+  void* vk_instance;
+  void* vk_physical_device;
+  void* vk_device;
+  void* vk_queue;
+  uint32_t vk_queue_family_index;
+};
+
+struct crtgfx_gpu_vulkan_surface_state {
+  struct crtgfx_gpu_vulkan_device_state* device;
+  void* vk_surface;
+  void* vk_swapchain;
+  void** vk_images;
+  uint32_t vk_image_count;
+  uint32_t vk_format;
+  uint32_t vk_image_usage_flags;
+  uint32_t width;
+  uint32_t height;
+  void* vk_image_available_semaphore;
+  void* vk_render_finished_semaphore;
+  void* vk_command_pool;
+  void* vk_command_buffer;
+  void* vk_frame_fence;
+  uint32_t vk_current_image_index;
+  int vk_image_acquired;
+  int ganesh_wrapped;
+};
+
+static crtgfx_result crtgfx_gpu_vulkan_device_state_create(
+    uint32_t device_index, struct crtgfx_gpu_vulkan_device_state* device) {
   VkInstance instance;
   VkPhysicalDevice devices[CRTGFX_GPU_VULKAN_MAX_PHYSICAL_DEVICES];
   uint32_t count = 0;
@@ -853,6 +903,14 @@ crtgfx_result crtgfx_gpu_vulkan_device_create(uint32_t device_index, struct crtg
 
   if (crtgfx_gpu_vulkan_create_instance(&instance) != CRTGFX_OK) {
     return CRTGFX_ERROR_UNSUPPORTED;
+  }
+  if (crtgfx_gpu_vulkan_test_should_fail_device_create(
+          CRTGFX_GPU_VULKAN_TEST_FAIL_AFTER_INSTANCE)) {
+    vkDestroyInstance(instance, NULL);
+    atomic_fetch_or_explicit(
+        &crtgfx_gpu_vulkan_test_device_cleanup_mask,
+        CRTGFX_GPU_VULKAN_TEST_CLEANED_INSTANCE, memory_order_release);
+    return CRTGFX_ERROR_HOST;
   }
   crtgfx_gpu_vulkan_enumerate_ordered(instance, devices, &count);
   if (device_index >= count) {
@@ -925,6 +983,18 @@ crtgfx_result crtgfx_gpu_vulkan_device_create(uint32_t device_index, struct crtg
     return CRTGFX_ERROR_UNSUPPORTED;
   }
   vkGetDeviceQueue(vk_device, queue_family_index, 0, &vk_queue);
+  if (crtgfx_gpu_vulkan_test_should_fail_device_create(
+          CRTGFX_GPU_VULKAN_TEST_FAIL_AFTER_DEVICE)) {
+    vkDestroyDevice(vk_device, NULL);
+    atomic_fetch_or_explicit(
+        &crtgfx_gpu_vulkan_test_device_cleanup_mask,
+        CRTGFX_GPU_VULKAN_TEST_CLEANED_DEVICE, memory_order_release);
+    vkDestroyInstance(instance, NULL);
+    atomic_fetch_or_explicit(
+        &crtgfx_gpu_vulkan_test_device_cleanup_mask,
+        CRTGFX_GPU_VULKAN_TEST_CLEANED_INSTANCE, memory_order_release);
+    return CRTGFX_ERROR_HOST;
+  }
 
   device->vk_instance = (void*)instance;
   device->vk_physical_device = (void*)devices[device_index];
@@ -934,7 +1004,7 @@ crtgfx_result crtgfx_gpu_vulkan_device_create(uint32_t device_index, struct crtg
   return CRTGFX_OK;
 }
 
-void crtgfx_gpu_vulkan_device_destroy(struct crtgfx_gpu_device* device) {
+static void crtgfx_gpu_vulkan_device_state_destroy(struct crtgfx_gpu_vulkan_device_state* device) {
   if (device->vk_device != NULL) {
     vkDestroyDevice((VkDevice)device->vk_device, NULL);
   }
@@ -952,12 +1022,11 @@ void crtgfx_gpu_vulkan_device_destroy(struct crtgfx_gpu_device* device) {
  * clamped down to this cap below rather than overflowing a fixed array. */
 #define CRTGFX_GPU_VULKAN_MAX_SWAPCHAIN_IMAGES 8u
 
-/* Real swapchain/surface vertical slice (2026-09-07) -- see gpu_internal.h's
- * own comment on struct crtgfx_gpu_surface's Vulkan fields for the overall
- * shape. `wl_display`/`wl_surface` are already-resolved, real, live handles
- * (gpu.c's own crtgfx_gpu_surface_create() calls crtgfx_native_wl_get_
- * surface_handles() before ever reaching here) -- this function's only job
- * is the real Vulkan side: VkSurfaceKHR, a real presentation-queue-support
+#if defined(CRTGFX_HAVE_NATIVE_WAYLAND)
+/* Real swapchain/surface vertical slice (2026-09-07). `wl_display`/
+ * `wl_surface` are already-resolved, real, live handles from this backend's
+ * public-window adapter below. This function's job is the real Vulkan side:
+ * VkSurfaceKHR, a real presentation-queue-support
  * check, a real VkSwapchainKHR sized to the surface's own current extent,
  * its real images, and the per-frame sync objects/command buffer crtgfx_
  * gpu_vulkan_surface_acquire()/_clear()/_present() (below) drive. Single,
@@ -967,9 +1036,9 @@ void crtgfx_gpu_vulkan_device_destroy(struct crtgfx_gpu_device* device) {
  * zero-initialized up front so the fail: block can safely destroy exactly
  * what was actually created, in reverse order, regardless of which step
  * failed. */
-crtgfx_result crtgfx_gpu_vulkan_surface_create(
-    struct crtgfx_gpu_device* device, void* wl_display, void* wl_surface, uint32_t width, uint32_t height,
-    struct crtgfx_gpu_surface* surface) {
+static crtgfx_result crtgfx_gpu_vulkan_surface_state_create(
+    struct crtgfx_gpu_vulkan_device_state* device, void* wl_display, void* wl_surface,
+    uint32_t width, uint32_t height, struct crtgfx_gpu_vulkan_surface_state* surface) {
   VkInstance instance = (VkInstance)device->vk_instance;
   VkPhysicalDevice physical_device = (VkPhysicalDevice)device->vk_physical_device;
   VkDevice vk_device = (VkDevice)device->vk_device;
@@ -1235,8 +1304,9 @@ fail:
   }
   return CRTGFX_ERROR_UNSUPPORTED;
 }
+#endif
 
-void crtgfx_gpu_vulkan_surface_destroy(struct crtgfx_gpu_surface* surface) {
+static void crtgfx_gpu_vulkan_surface_state_destroy(struct crtgfx_gpu_vulkan_surface_state* surface) {
   VkDevice vk_device;
 
   if (surface->device == NULL) {
@@ -1271,7 +1341,8 @@ void crtgfx_gpu_vulkan_surface_destroy(struct crtgfx_gpu_surface* surface) {
   free(surface->vk_images);
 }
 
-crtgfx_result crtgfx_gpu_vulkan_surface_acquire(struct crtgfx_gpu_surface* surface, uint64_t timeout_us) {
+static crtgfx_result crtgfx_gpu_vulkan_surface_state_acquire(
+    struct crtgfx_gpu_vulkan_surface_state* surface, uint64_t timeout_us) {
   VkDevice vk_device = (VkDevice)surface->device->vk_device;
   VkFence frame_fence = (VkFence)surface->vk_frame_fence;
   uint64_t timeout_ns;
@@ -1325,7 +1396,8 @@ crtgfx_result crtgfx_gpu_vulkan_surface_acquire(struct crtgfx_gpu_surface* surfa
   return CRTGFX_OK;
 }
 
-crtgfx_result crtgfx_gpu_vulkan_surface_clear(struct crtgfx_gpu_surface* surface, float r, float g, float b, float a) {
+static crtgfx_result crtgfx_gpu_vulkan_surface_state_clear(
+    struct crtgfx_gpu_vulkan_surface_state* surface, float r, float g, float b, float a) {
   VkCommandBuffer cmd = (VkCommandBuffer)surface->vk_command_buffer;
   VkImage image = (VkImage)surface->vk_images[surface->vk_current_image_index];
   VkCommandBufferBeginInfo begin_info;
@@ -1435,7 +1507,8 @@ crtgfx_result crtgfx_gpu_vulkan_surface_clear(struct crtgfx_gpu_surface* surface
  * frame fence, command pool/buffer) are not recreated -- they are not
  * swapchain-size-dependent, same reasoning as crtgfx_gpu_win32_surface_
  * resize()'s own choice to reuse its RTV heap rather than rebuild it. */
-crtgfx_result crtgfx_gpu_vulkan_surface_resize(struct crtgfx_gpu_surface* surface, uint32_t width, uint32_t height) {
+static crtgfx_result crtgfx_gpu_vulkan_surface_state_resize(
+    struct crtgfx_gpu_vulkan_surface_state* surface, uint32_t width, uint32_t height) {
   VkDevice vk_device = (VkDevice)surface->device->vk_device;
   VkPhysicalDevice physical_device = (VkPhysicalDevice)surface->device->vk_physical_device;
   VkSurfaceKHR vk_surface = (VkSurfaceKHR)surface->vk_surface;
@@ -1601,7 +1674,8 @@ crtgfx_result crtgfx_gpu_vulkan_surface_resize(struct crtgfx_gpu_surface* surfac
   return CRTGFX_OK;
 }
 
-crtgfx_result crtgfx_gpu_vulkan_surface_present(struct crtgfx_gpu_surface* surface) {
+static crtgfx_result crtgfx_gpu_vulkan_surface_state_present(
+    struct crtgfx_gpu_vulkan_surface_state* surface) {
   VkSwapchainKHR swapchain = (VkSwapchainKHR)surface->vk_swapchain;
   VkSemaphore wait_sem = (VkSemaphore)surface->vk_render_finished_semaphore;
   VkPresentInfoKHR present_info;
@@ -1637,4 +1711,165 @@ crtgfx_result crtgfx_gpu_vulkan_surface_present(struct crtgfx_gpu_surface* surfa
     return CRTGFX_ERROR_HOST;
   }
   return CRTGFX_OK;
+}
+
+crtgfx_result crtgfx_gpu_vulkan_device_create(
+    uint32_t device_index, struct crtgfx_gpu_device* device) {
+  struct crtgfx_gpu_vulkan_device_state* state =
+      (struct crtgfx_gpu_vulkan_device_state*)calloc(1, sizeof(*state));
+  crtgfx_result result;
+  if (state == NULL) return CRTGFX_ERROR_UNSUPPORTED;
+  result = crtgfx_gpu_vulkan_device_state_create(device_index, state);
+  if (result != CRTGFX_OK) {
+    free(state);
+    return result;
+  }
+  device->backend_state = state;
+  return CRTGFX_OK;
+}
+
+void crtgfx_gpu_vulkan_device_destroy(struct crtgfx_gpu_device* device) {
+  struct crtgfx_gpu_vulkan_device_state* state =
+      (struct crtgfx_gpu_vulkan_device_state*)device->backend_state;
+  if (state == NULL) return;
+  crtgfx_gpu_vulkan_device_state_destroy(state);
+  free(state);
+  device->backend_state = NULL;
+}
+
+crtgfx_result crtgfx_gpu_vulkan_surface_create(
+    struct crtgfx_gpu_device* device, crtgfx_window* window, struct crtgfx_gpu_surface* surface) {
+#if defined(CRTGFX_HAVE_NATIVE_WAYLAND)
+  struct crtgfx_gpu_vulkan_surface_state* state;
+  void* wl_display = NULL;
+  void* wl_surface = NULL;
+  crtgfx_result result;
+  if (crtgfx_native_wl_get_surface_handles(
+          &window->toplevel, &wl_display, &wl_surface) == 0) {
+    return CRTGFX_ERROR_UNSUPPORTED;
+  }
+  state = (struct crtgfx_gpu_vulkan_surface_state*)calloc(1, sizeof(*state));
+  if (state == NULL) return CRTGFX_ERROR_UNSUPPORTED;
+  result = crtgfx_gpu_vulkan_surface_state_create(
+      (struct crtgfx_gpu_vulkan_device_state*)device->backend_state,
+      wl_display, wl_surface, window->toplevel.width, window->toplevel.height, state);
+  if (result != CRTGFX_OK) {
+    free(state);
+    return result;
+  }
+  surface->backend_state = state;
+  return CRTGFX_OK;
+#else
+  (void)device;
+  (void)window;
+  (void)surface;
+  return CRTGFX_ERROR_UNSUPPORTED;
+#endif
+}
+
+void crtgfx_gpu_vulkan_surface_destroy(struct crtgfx_gpu_surface* surface) {
+  struct crtgfx_gpu_vulkan_surface_state* state =
+      (struct crtgfx_gpu_vulkan_surface_state*)surface->backend_state;
+  if (state == NULL) return;
+  crtgfx_gpu_vulkan_surface_state_destroy(state);
+  free(state);
+  surface->backend_state = NULL;
+}
+
+crtgfx_result crtgfx_gpu_vulkan_surface_get_size(
+    struct crtgfx_gpu_surface* surface, uint32_t* out_width, uint32_t* out_height) {
+  struct crtgfx_gpu_vulkan_surface_state* state =
+      (struct crtgfx_gpu_vulkan_surface_state*)surface->backend_state;
+  if (state == NULL) return CRTGFX_ERROR_HOST;
+  *out_width = state->width;
+  *out_height = state->height;
+  return CRTGFX_OK;
+}
+
+crtgfx_result crtgfx_gpu_vulkan_surface_acquire(
+    struct crtgfx_gpu_surface* surface, uint64_t timeout_us) {
+  return crtgfx_gpu_vulkan_surface_state_acquire(
+      (struct crtgfx_gpu_vulkan_surface_state*)surface->backend_state, timeout_us);
+}
+
+crtgfx_result crtgfx_gpu_vulkan_surface_clear(
+    struct crtgfx_gpu_surface* surface, float r, float g, float b, float a) {
+  return crtgfx_gpu_vulkan_surface_state_clear(
+      (struct crtgfx_gpu_vulkan_surface_state*)surface->backend_state, r, g, b, a);
+}
+
+crtgfx_result crtgfx_gpu_vulkan_surface_resize(
+    struct crtgfx_gpu_surface* surface, uint32_t width, uint32_t height) {
+  return crtgfx_gpu_vulkan_surface_state_resize(
+      (struct crtgfx_gpu_vulkan_surface_state*)surface->backend_state, width, height);
+}
+
+crtgfx_result crtgfx_gpu_vulkan_surface_present(struct crtgfx_gpu_surface* surface) {
+  return crtgfx_gpu_vulkan_surface_state_present(
+      (struct crtgfx_gpu_vulkan_surface_state*)surface->backend_state);
+}
+
+int crtgfx_gpu_vulkan_borrow_device(
+    const struct crtgfx_gpu_device* device, struct crtgfx_gpu_vulkan_device_view* out_view) {
+  const struct crtgfx_gpu_vulkan_device_state* state;
+  if (device == NULL || out_view == NULL || device->backend != CRTGFX_GPU_BACKEND_VULKAN) return 0;
+  state = (const struct crtgfx_gpu_vulkan_device_state*)device->backend_state;
+  if (state == NULL || state->vk_instance == NULL || state->vk_device == NULL) return 0;
+  out_view->instance = state->vk_instance;
+  out_view->physical_device = state->vk_physical_device;
+  out_view->device = state->vk_device;
+  out_view->queue = state->vk_queue;
+  out_view->queue_family_index = state->vk_queue_family_index;
+  return 1;
+}
+
+static void crtgfx_gpu_vulkan_fill_surface_view(
+    struct crtgfx_gpu_vulkan_surface_state* state,
+    struct crtgfx_gpu_vulkan_surface_view* out_view) {
+  out_view->image = state->vk_images[state->vk_current_image_index];
+  out_view->format = state->vk_format;
+  out_view->image_usage_flags = state->vk_image_usage_flags;
+  out_view->image_available_semaphore = state->vk_image_available_semaphore;
+  out_view->render_finished_semaphore = state->vk_render_finished_semaphore;
+  out_view->queue_family_index = state->device->vk_queue_family_index;
+  out_view->width = state->width;
+  out_view->height = state->height;
+}
+
+int crtgfx_gpu_vulkan_begin_ganesh(
+    struct crtgfx_gpu_surface* surface, struct crtgfx_gpu_vulkan_surface_view* out_view) {
+  struct crtgfx_gpu_vulkan_surface_state* state;
+  if (surface == NULL || out_view == NULL || surface->backend != CRTGFX_GPU_BACKEND_VULKAN) return 0;
+  state = (struct crtgfx_gpu_vulkan_surface_state*)surface->backend_state;
+  if (state == NULL || !state->vk_image_acquired || state->ganesh_wrapped) return 0;
+  crtgfx_gpu_vulkan_fill_surface_view(state, out_view);
+  state->ganesh_wrapped = 1;
+  return 1;
+}
+
+int crtgfx_gpu_vulkan_get_ganesh_present_view(
+    struct crtgfx_gpu_surface* surface, struct crtgfx_gpu_vulkan_surface_view* out_view) {
+  struct crtgfx_gpu_vulkan_surface_state* state;
+  if (surface == NULL || out_view == NULL || surface->backend != CRTGFX_GPU_BACKEND_VULKAN) return 0;
+  state = (struct crtgfx_gpu_vulkan_surface_state*)surface->backend_state;
+  if (state == NULL || !state->ganesh_wrapped) return 0;
+  crtgfx_gpu_vulkan_fill_surface_view(state, out_view);
+  return 1;
+}
+
+void crtgfx_gpu_vulkan_end_ganesh(struct crtgfx_gpu_surface* surface) {
+  struct crtgfx_gpu_vulkan_surface_state* state;
+  if (surface == NULL || surface->backend != CRTGFX_GPU_BACKEND_VULKAN) return;
+  state = (struct crtgfx_gpu_vulkan_surface_state*)surface->backend_state;
+  if (state != NULL) state->ganesh_wrapped = 0;
+}
+
+void crtgfx_gpu_vulkan_test_force_device_loss(struct crtgfx_gpu_device* device) {
+  struct crtgfx_gpu_vulkan_device_state* state;
+  if (device == NULL || device->backend != CRTGFX_GPU_BACKEND_VULKAN) return;
+  state = (struct crtgfx_gpu_vulkan_device_state*)device->backend_state;
+  if (state == NULL || state->vk_device == NULL) return;
+  vkDestroyDevice((VkDevice)state->vk_device, NULL);
+  state->vk_device = NULL;
+  state->vk_queue = NULL;
 }

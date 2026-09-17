@@ -10,6 +10,45 @@ substantive update.
 
 ## 2026-09-17
 
+- **Completed backend-boundary Tranche 1 with fixed operations wrappers,
+  private Linux/Vulkan state, owner-local Wayland extraction, and real
+  partial-create fault coverage.** Vulkan device and
+  surface handles, swapchain images, synchronization objects, extent, and frame
+  phase now live only in `gpu_vulkan.c`; the common wrappers publish just their
+  operations pointer and opaque state. `skia_bridge.cc` borrows explicit
+  device/current-frame descriptors and asks the Vulkan owner to begin/end the
+  Ganesh phase instead of reading or mutating the backend layout. The Vulkan
+  loss smoke now calls an owner hook rather than destroying a native handle
+  itself. Native Wayland handle and extent extraction also moved out of `gpu.c`
+  and into the Vulkan surface-create owner. Rebuilt and ran the boundary guard
+  plus focused GPU runtime test on Windows/x86_64 and WSL Linux/x86_64: both
+  passed on each host. The configured local targets do not include Skia, and
+  the initial WSL tree lacked native-Wayland Vulkan WSI, so this is not recorded
+  as full Skia/live-presentation acceptance. The moved native-Wayland branch
+  itself compiled cleanly in isolation under the configured WSL Clang flags;
+  the full Wayland bootstrap stopped at an unrelated long-running `expat`
+  fetch. Added one-shot Vulkan faults after VkInstance and VkDevice/queue
+  creation: the focused WSL test verifies the exact destroy mask, that no
+  common wrapper is published, and that immediate recreation succeeds after
+  each fault. The initial pre-queue device fault exposed a WSL dzn wait in
+  `dxgkio_wait_sync_object_cpu`; moving the injection after the backend's real
+  `vkGetDeviceQueue` initialization preserves the intended partial-create
+  boundary and completes reliably. Tranche 1 is therefore closed; headless
+  Skia and live native-Wayland presentation/resize evidence remain Tranche 2.
+
+- **Introduced the fixed GPU backend operations dispatch without changing the
+  public `crtgfx` ABI.** `crtgfx_gpu_device` and `crtgfx_gpu_surface` now carry
+  their backend tag, a shared operations-table pointer, and the opaque state
+  slot that each backend migration will populate. Capability query, device
+  create/destroy, and surface create/destroy/get-size/acquire/clear/resize/
+  present now pass through that table instead of repeating compile-time host
+  branches in every public function. Backend-specific window extraction is
+  isolated in temporary dispatch adapters, ready to move into each owner.
+  Legacy concrete fields remain temporarily unconditional, so this completes
+  the dispatch scaffold but not Vulkan state extraction or Tranche 1. Rebuilt
+  and ran the focused boundary/GPU tests after the change: Windows/x86_64 2/2
+  and WSL Linux/x86_64 2/2 passed.
+
 - **Removed the immediate `CRTGFX_HAVE_*`-dependent GPU object-size hazard as
   the first implementation slice of backend-boundary Tranche 1.** The legacy
   Vulkan, D3D12, and Metal field groups in `gpu_internal.h` are temporarily

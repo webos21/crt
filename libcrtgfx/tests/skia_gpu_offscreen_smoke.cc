@@ -260,9 +260,7 @@ void test_device_loss_and_recreation(uint32_t device_index) {
   // real vkDestroyDevice() call on the same, now-invalid handle (see this
   // function's own top comment for why a real double-destroy is not
   // survivable here).
-  vkDestroyDevice(reinterpret_cast<VkDevice>(device->vk_device), nullptr);
-  device->vk_device = nullptr;
-  device->vk_queue = nullptr;
+  crtgfx_gpu_vulkan_test_force_device_loss(device);
 
   // crtgfx_skia_make_gpu_context() must reject the now torn-down device
   // cleanly (its own documented "device == nullptr / vk_device == nullptr"

@@ -35,6 +35,10 @@
 
 #include "crtgfx/gpu.h"
 
+#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
+#include "arch/linux/gpu_vulkan_test.h"
+#endif
+
 #include <pthread.h>
 #include <stdio.h>
 #include <time.h>
@@ -106,6 +110,42 @@ int main(void) {
     CHECK(device_result == CRTGFX_ERROR_UNSUPPORTED, "device_create() reports CRTGFX_ERROR_UNSUPPORTED today");
     CHECK(device == NULL, "device_create() leaves *out_device untouched on failure");
   } else {
+#if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
+    static const struct {
+      uint32_t step;
+      uint32_t expected_cleanup;
+      const char* name;
+    } create_failures[] = {
+        {CRTGFX_GPU_VULKAN_TEST_FAIL_AFTER_INSTANCE,
+         CRTGFX_GPU_VULKAN_TEST_CLEANED_INSTANCE,
+         "failure after VkInstance creation"},
+        {CRTGFX_GPU_VULKAN_TEST_FAIL_AFTER_DEVICE,
+         CRTGFX_GPU_VULKAN_TEST_CLEANED_INSTANCE | CRTGFX_GPU_VULKAN_TEST_CLEANED_DEVICE,
+         "failure after VkDevice creation"},
+    };
+    size_t failure_index;
+
+    for (failure_index = 0;
+         failure_index < sizeof(create_failures) / sizeof(create_failures[0]);
+         ++failure_index) {
+      crtgfx_gpu_device* failed_device = NULL;
+      crtgfx_gpu_vulkan_test_inject_device_create_failure(create_failures[failure_index].step);
+      CHECK(
+          crtgfx_gpu_device_create(0, &failed_device) == CRTGFX_ERROR_HOST,
+          create_failures[failure_index].name);
+      CHECK(failed_device == NULL, "partial Vulkan creation never publishes a common wrapper");
+      CHECK(
+          crtgfx_gpu_vulkan_test_take_device_cleanup_mask() ==
+              create_failures[failure_index].expected_cleanup,
+          "partial Vulkan creation destroys every native object created before the fault");
+
+      CHECK(
+          crtgfx_gpu_device_create(0, &failed_device) == CRTGFX_OK,
+          "one-shot Vulkan creation fault leaves immediate recreation usable");
+      crtgfx_gpu_device_release(failed_device);
+    }
+#endif
+
     // A real, reachable device on this host -- device_index == device_count
     // (one past the real, valid [0, device_count) range) must still fail
     // cleanly; device_index 0 is this host's own real, preferred device

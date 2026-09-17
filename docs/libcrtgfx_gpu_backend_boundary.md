@@ -7,15 +7,15 @@ in `docs/host_abi_firewall.md` for the `libcrtgfx` GPU implementation.
 
 ## Problem being removed
 
-`src/gpu_internal.h` currently gives the same C type a different layout under
+`src/gpu_internal.h` originally gave the same C type a different layout under
 `CRTGFX_HAVE_VULKAN`, `CRTGFX_HAVE_D3D12`, and `CRTGFX_HAVE_METAL`. The build
 therefore relies on every translation unit seeing identical feature macros.
 If `gpu.c` allocates the smaller layout while a backend was compiled for the
 larger layout, the backend writes beyond the allocation. Directory-wide CMake
 definitions reduce that risk but do not make the representation safe.
 
-The backend layout also leaks into `src/skia_bridge.cc`, which reads every
-native device view and presentation image directly. Its D3D12 branch goes
+The backend layout also leaked into `src/skia_bridge.cc`, which read every
+native device view and presentation image directly. Its D3D12 branch still goes
 further and mutates command-list, fence-value, per-buffer, submission, and
 Ganesh-wrap state. `tests/skia_gpu_offscreen_smoke.cc` likewise includes the
 private layout and tears native device objects down itself for device-loss
@@ -50,6 +50,15 @@ unchanged.
 No `CRTGFX_HAVE_*` conditional may appear inside either common structure.
 Feature macros select an implementation and its declarations; they never
 select the allocation size or field offsets of a common object.
+
+Implementation status (2026-09-17): both wrappers now carry the backend tag,
+operations pointer, and opaque state slot, and public device/surface entry
+points dispatch through that table. Vulkan device/surface state now lives only
+in `gpu_vulkan.c`, while D3D12 and Metal concrete fields remain temporarily
+unconditional behind the same fixed layout. The wrappers are therefore still
+an intermediate representation, not the accepted final one. Vulkan's wrapper/
+state part of the migration (Tranche 1) is complete, including owner-local
+Wayland extraction and injected cleanup after partial device construction.
 
 ## Operations and ownership
 
@@ -122,16 +131,22 @@ creation steps. Every case must return an error without publishing a wrapper,
 leak no backend state, and leave no object for common code to destroy. These
 hooks are test-only and are not added to the public `crtgfx` ABI.
 
+The Vulkan implementation now injects one-shot failures after VkInstance and
+after VkDevice/queue creation. Its focused WSL test checks the exact native
+destroy mask, the untouched output pointer, and immediate successful device
+recreation. The controls live in a private, non-installed header and have
+hidden ELF visibility; no native handle or state layout is exposed.
+
 ## Current direct-access inventory (2026-09-17)
 
 | Owner/caller | Current access | Required destination |
 | --- | --- | --- |
-| `src/gpu.c` | conditional layouts, platform window internals, all backend entry points | fixed wrappers and operations dispatch only |
-| `src/arch/linux/gpu_vulkan.c` | Vulkan device/surface fields | private Vulkan device/surface state |
+| `src/gpu.c` | fixed wrappers/operations dispatch; temporary D3D12/Metal window extraction adapters remain | fixed wrappers and operations dispatch only |
+| `src/arch/linux/gpu_vulkan.c` | private Vulkan device/surface state and owner-local Wayland extraction | completed owner; add partial-create failure injection |
 | `src/arch/windows/gpu_win32.c` | D3D12/DXGI device/surface fields | private D3D12 device/surface state |
 | `src/arch/macos/gpu_metal.c` | Metal device/surface fields | private Metal device/surface state |
-| `src/skia_bridge.cc` | native handles, frame flags, Vulkan semaphores, D3D12 fence/state machine, Metal texture | borrowed descriptors plus backend transition operations |
-| `tests/skia_gpu_offscreen_smoke.cc` | direct Vulkan/D3D12/Metal loss and handle mutation | backend-neutral test-control operation |
+| `src/skia_bridge.cc` | Vulkan borrowed views; direct D3D12 fence/state machine and Metal handles remain | borrowed descriptors plus backend transition operations |
+| `tests/skia_gpu_offscreen_smoke.cc` | Vulkan owner hook; direct D3D12/Metal loss and handle mutation remain | backend-neutral test-control operation |
 
 No other current test, tool, or example directly accesses these concrete
 fields. This inventory is a migration checklist, not permission to add another

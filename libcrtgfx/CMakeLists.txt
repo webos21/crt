@@ -1610,6 +1610,7 @@ add_executable(crtgfx_gpu_test
 target_link_libraries(crtgfx_gpu_test PRIVATE crt_build_flags c crtgfx_gpu)
 target_include_directories(crtgfx_gpu_test PRIVATE
   "${CMAKE_SOURCE_DIR}/libc/include"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 target_link_libraries(crtgfx_gpu_test PRIVATE crt_compiler_rt_builtins)
 target_link_options(crtgfx_gpu_test PRIVATE

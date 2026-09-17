@@ -197,16 +197,17 @@ class DumbVulkanMemoryAllocator : public skgpu::VulkanMemoryAllocator {
 }  // namespace
 
 sk_sp<GrDirectContext> crtgfx_skia_make_gpu_context(const crtgfx_gpu_device* device) {
-  if (device == nullptr || device->vk_instance == nullptr || device->vk_device == nullptr) {
+  crtgfx_gpu_vulkan_device_view view = {};
+  if (!crtgfx_gpu_vulkan_borrow_device(device, &view)) {
     return nullptr;
   }
 
   skgpu::VulkanBackendContext backend_context;
-  backend_context.fInstance = reinterpret_cast<VkInstance>(device->vk_instance);
-  backend_context.fPhysicalDevice = reinterpret_cast<VkPhysicalDevice>(device->vk_physical_device);
-  backend_context.fDevice = reinterpret_cast<VkDevice>(device->vk_device);
-  backend_context.fQueue = reinterpret_cast<VkQueue>(device->vk_queue);
-  backend_context.fGraphicsQueueIndex = device->vk_queue_family_index;
+  backend_context.fInstance = reinterpret_cast<VkInstance>(view.instance);
+  backend_context.fPhysicalDevice = reinterpret_cast<VkPhysicalDevice>(view.physical_device);
+  backend_context.fDevice = reinterpret_cast<VkDevice>(view.device);
+  backend_context.fQueue = reinterpret_cast<VkQueue>(view.queue);
+  backend_context.fGraphicsQueueIndex = view.queue_family_index;
   // Must match (or exceed) src/arch/linux/gpu_vulkan.c's own real
   // VkApplicationInfo::apiVersion -- Skia's own Ganesh Vulkan backend
   // refuses anything below Vulkan 1.1 (see that file's own comment on the
@@ -266,12 +267,13 @@ sk_sp<SkSurface> crtgfx_skia_make_gpu_offscreen_surface(
 // VULKAN_HEADERS) is already transitively available in this translation
 // unit via VulkanTypes.h/VulkanBackendContext.h.
 sk_sp<SkSurface> crtgfx_skia_wrap_gpu_surface(GrDirectContext* context, crtgfx_gpu_surface* surface) {
-  if (context == nullptr || surface == nullptr || !surface->vk_image_acquired || surface->ganesh_wrapped) {
+  crtgfx_gpu_vulkan_surface_view view = {};
+  if (context == nullptr || !crtgfx_gpu_vulkan_begin_ganesh(surface, &view)) {
     return nullptr;
   }
 
   GrVkImageInfo image_info;
-  image_info.fImage = reinterpret_cast<VkImage>(surface->vk_images[surface->vk_current_image_index]);
+  image_info.fImage = reinterpret_cast<VkImage>(view.image);
   // fAlloc left default-constructed (fMemory=VK_NULL_HANDLE): a real,
   // spec-documented, legal "borrowed" render-target shape (VulkanTypes.h's
   // own comment on VulkanAlloc::fMemory) -- this project's own real
@@ -284,7 +286,7 @@ sk_sp<SkSurface> crtgfx_skia_wrap_gpu_surface(GrDirectContext* context, crtgfx_g
   // assumption (gpu_vulkan.c), the real, same-shaped stand-in this
   // function replaces for a caller that chooses the Ganesh path instead.
   image_info.fImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  image_info.fFormat = static_cast<VkFormat>(surface->vk_format);
+  image_info.fFormat = static_cast<VkFormat>(view.format);
   // A real, confirmed bug (2026-09-13): this used to hardcode
   // VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
   // which *used* to match gpu_vulkan.c's own swapchain creation exactly --
@@ -305,15 +307,15 @@ sk_sp<SkSurface> crtgfx_skia_wrap_gpu_surface(GrDirectContext* context, crtgfx_g
   // actually created with guarantees this can never silently disagree
   // with it again, on this host or a future one whose surface does not
   // support TRANSFER_SRC_BIT at all.
-  image_info.fImageUsageFlags = surface->vk_image_usage_flags;
+  image_info.fImageUsageFlags = view.image_usage_flags;
   image_info.fSampleCount = 1;
   image_info.fLevelCount = 1;
-  image_info.fCurrentQueueFamily = surface->device->vk_queue_family_index;
+  image_info.fCurrentQueueFamily = view.queue_family_index;
   image_info.fProtected = skgpu::Protected::kNo;
   image_info.fSharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
   GrBackendRenderTarget backend_target = GrBackendRenderTargets::MakeVk(
-      static_cast<int>(surface->width), static_cast<int>(surface->height), image_info);
+      static_cast<int>(view.width), static_cast<int>(view.height), image_info);
   sk_sp<SkSurface> sk_surface = SkSurfaces::WrapBackendRenderTarget(
       context, backend_target, kTopLeft_GrSurfaceOrigin, kBGRA_8888_SkColorType, nullptr, nullptr);
   if (sk_surface != nullptr) {
@@ -322,11 +324,13 @@ sk_sp<SkSurface> crtgfx_skia_wrap_gpu_surface(GrDirectContext* context, crtgfx_g
     // Ganesh owns the submit in this path, so insert the same wait into its
     // command stream before the caller records any drawing.
     GrBackendSemaphore acquire_semaphore = GrBackendSemaphores::MakeVk(
-        reinterpret_cast<VkSemaphore>(surface->vk_image_available_semaphore));
+        reinterpret_cast<VkSemaphore>(view.image_available_semaphore));
     if (!context->wait(1, &acquire_semaphore, false)) {
+      crtgfx_gpu_vulkan_end_ganesh(surface);
       return nullptr;
     }
-    surface->ganesh_wrapped = 1;
+  } else {
+    crtgfx_gpu_vulkan_end_ganesh(surface);
   }
   return sk_surface;
 }
@@ -336,7 +340,8 @@ crtgfx_result crtgfx_skia_gpu_surface_present(
   if (context == nullptr || surface == nullptr || gpu_surface == nullptr) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
-  if (!gpu_surface->ganesh_wrapped) {
+  crtgfx_gpu_vulkan_surface_view view = {};
+  if (!crtgfx_gpu_vulkan_get_ganesh_present_view(gpu_surface, &view)) {
     return CRTGFX_ERROR_HOST;
   }
 
@@ -348,7 +353,7 @@ crtgfx_result crtgfx_skia_gpu_surface_present(
   // command buffer needed on this project's own side at all, unlike the
   // D3D12 branch below (which has no equivalent flush-time mechanism).
   GrBackendSemaphore signal_semaphore = GrBackendSemaphores::MakeVk(
-      reinterpret_cast<VkSemaphore>(gpu_surface->vk_render_finished_semaphore));
+      reinterpret_cast<VkSemaphore>(view.render_finished_semaphore));
   GrFlushInfo flush_info;
   flush_info.fNumSemaphores = 1;
   flush_info.fSignalSemaphores = &signal_semaphore;
@@ -374,7 +379,7 @@ crtgfx_result crtgfx_skia_gpu_surface_present(
   // otherwise-real one-frame-of-latency win an async submit would give.
   context->submit(GrSyncCpu::kYes);
 
-  gpu_surface->ganesh_wrapped = 0;
+  crtgfx_gpu_vulkan_end_ganesh(gpu_surface);
   return crtgfx_gpu_surface_present(gpu_surface);
 }
 
