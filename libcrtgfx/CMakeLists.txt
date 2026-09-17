@@ -660,13 +660,13 @@ if(Python3_Interpreter_FOUND)
     crtmedia_frame_skia_smoke
   )
   if((CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB) OR
-     CRT_TARGET_OS STREQUAL "windows")
+     CRT_TARGET_OS STREQUAL "windows" OR CRT_TARGET_OS STREQUAL "macos")
     # crtgfx_skia_gpu_offscreen_smoke (2026-09-03, extended to Windows/
-    # D3D12 the same day) -- only ever defined on Linux with a real
-    # libvulkan found, or on Windows (D3D12 always available there, no
-    # gate needed -- see CRTGFX_GPU_BACKEND_SOURCES's own Windows branch,
-    # further up); same condition its own add_executable() below is gated
-    # on. The nested build directory this custom target drives re-
+    # D3D12 the same day, and Metal on 2026-09-04) -- defined on Linux
+    # with a real libvulkan, or unconditionally on Windows/macOS where
+    # D3D12/Metal are part of the platform backend source set. Same
+    # condition its own add_executable() below is gated on. The nested
+    # build directory this custom target drives re-
     # evaluates that same real condition itself, on the same host, so it
     # stays consistent.
     list(APPEND CRTGFX_SKIA_SMOKE_TARGETS crtgfx_skia_gpu_offscreen_smoke)
@@ -2040,9 +2040,8 @@ if(CRTGFX_ENABLE_SKIA)
     )
     target_link_libraries(crtgfx_skia_gpu_offscreen_smoke PRIVATE crt_cxx_build_flags crtgfx_skia)
     # gpu_internal.h (src/gpu_internal.h, not installed/public) -- this
-    # test reaches into crtgfx_gpu_device's own real per-OS handles
-    # directly (crtgfx_skia_make_gpu_context()'s own real caller shape,
-    # and the device-loss test's own deliberate low-level teardown call).
+    # test uses backend-owned test/borrow hooks declared in gpu_internal.h;
+    # concrete per-OS handles remain private to their backend owners.
     target_include_directories(crtgfx_skia_gpu_offscreen_smoke PRIVATE
       "${CMAKE_CURRENT_SOURCE_DIR}/src"
     )

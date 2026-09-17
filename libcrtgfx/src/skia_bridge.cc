@@ -654,7 +654,8 @@ crtgfx_result crtgfx_skia_gpu_surface_present(
 #include "include/gpu/ganesh/mtl/GrMtlTypes.h"
 
 sk_sp<GrDirectContext> crtgfx_skia_make_gpu_context(const crtgfx_gpu_device* device) {
-  if (device == nullptr || device->mtl_device == nullptr || device->mtl_command_queue == nullptr) {
+  crtgfx_gpu_metal_device_view view = {};
+  if (!crtgfx_gpu_metal_borrow_device(device, &view)) {
     return nullptr;
   }
 
@@ -670,8 +671,8 @@ sk_sp<GrDirectContext> crtgfx_skia_make_gpu_context(const crtgfx_gpu_device* dev
   // sends), so this must take its own, independent reference rather than
   // adopt the existing one outright.
   GrMtlBackendContext backend_context;
-  backend_context.fDevice.retain(device->mtl_device);
-  backend_context.fQueue.retain(device->mtl_command_queue);
+  backend_context.fDevice.retain(view.device);
+  backend_context.fQueue.retain(view.command_queue);
 
   // No memory-allocator field to supply at all here -- unlike the Vulkan/
   // D3D12 branches above, GrMtlBackendContext declares only fDevice/
@@ -710,20 +711,19 @@ sk_sp<SkSurface> crtgfx_skia_make_gpu_offscreen_surface(
 // declaration in gpu_internal.h for why this one piece lives there rather
 // than here, unlike the Vulkan/D3D12 siblings).
 sk_sp<SkSurface> crtgfx_skia_wrap_gpu_surface(GrDirectContext* context, crtgfx_gpu_surface* surface) {
-  if (context == nullptr || surface == nullptr || !surface->mtl_drawable_acquired || surface->ganesh_wrapped) {
+  crtgfx_gpu_metal_surface_view view = {};
+  if (context == nullptr || !crtgfx_gpu_metal_begin_ganesh(surface, &view)) {
     return nullptr;
   }
 
   GrMtlTextureInfo texture_info;
-  texture_info.fTexture.retain(surface->mtl_drawable_texture);
+  texture_info.fTexture.retain(view.texture);
 
   GrBackendRenderTarget backend_target = GrBackendRenderTargets::MakeMtl(
-      static_cast<int>(surface->width), static_cast<int>(surface->height), texture_info);
+      static_cast<int>(view.width), static_cast<int>(view.height), texture_info);
   sk_sp<SkSurface> sk_surface = SkSurfaces::WrapBackendRenderTarget(
       context, backend_target, kTopLeft_GrSurfaceOrigin, kBGRA_8888_SkColorType, nullptr, nullptr);
-  if (sk_surface != nullptr) {
-    surface->ganesh_wrapped = 1;
-  }
+  if (sk_surface == nullptr) crtgfx_gpu_metal_end_ganesh(surface);
   return sk_surface;
 }
 
@@ -732,7 +732,7 @@ crtgfx_result crtgfx_skia_gpu_surface_present(
   if (context == nullptr || surface == nullptr || gpu_surface == nullptr) {
     return CRTGFX_ERROR_INVALID_ARGUMENT;
   }
-  if (!gpu_surface->ganesh_wrapped) {
+  if (!crtgfx_gpu_metal_is_ganesh_wrapped(gpu_surface)) {
     return CRTGFX_ERROR_HOST;
   }
 
@@ -752,7 +752,6 @@ crtgfx_result crtgfx_skia_gpu_surface_present(
     return CRTGFX_ERROR_HOST;
   }
 
-  gpu_surface->ganesh_wrapped = 0;
   return crtgfx_gpu_surface_present(gpu_surface);
 }
 

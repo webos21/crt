@@ -40,12 +40,10 @@ BACKEND_OWNERS = {
 
 LAYOUT_DEFINITION = "libcrtgfx/src/gpu_internal.h"
 
-# Known violations being removed by the backend-specific tranches.  This is
-# an allowlist that must shrink, never a general permission for these files.
-NON_OWNER_FIELD_USERS = {
-    "libcrtgfx/src/skia_bridge.cc",
-    "libcrtgfx/tests/skia_gpu_offscreen_smoke.cc",
-}
+# All three concrete backend layouts are now owner-local.  Skia and the generic
+# smoke still include the private declarations until Tranche 5, but may not
+# access concrete state fields.
+NON_OWNER_FIELD_USERS: set[str] = set()
 
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hpp", ".m", ".mm"}
 INTERNAL_INCLUDE_RE = re.compile(r'^\s*#\s*include\s+["<]gpu_internal\.h[">]', re.MULTILINE)
@@ -57,6 +55,7 @@ BACKEND_FIELD_RE = re.compile(
 # Backend-specific guards let each completed tranche close its own boundary
 # even while later backends still have audited migration exceptions.
 D3D12_FIELD_RE = re.compile(r"->(?:d3d12_|dxgi_)|->device->(?:d3d12_|dxgi_)")
+METAL_FIELD_RE = re.compile(r"->mtl_|->device->mtl_")
 
 COMMON_LAYOUT_RE = re.compile(
     r"struct crtgfx_gpu_(?:device|surface)\s*\{(?P<body>.*?)\n\};",
@@ -115,6 +114,16 @@ class CrtgfxGpuBackendBoundaryTest(unittest.TestCase):
             relative(path)
             for path in source_files()
             if D3D12_FIELD_RE.search(path.read_text(encoding="utf-8"))
+            and relative(path) not in BACKEND_OWNERS
+            and relative(path) != LAYOUT_DEFINITION
+        }
+        self.assertEqual(actual, set())
+
+    def test_metal_concrete_fields_stay_in_the_macos_owner(self) -> None:
+        actual = {
+            relative(path)
+            for path in source_files()
+            if METAL_FIELD_RE.search(path.read_text(encoding="utf-8"))
             and relative(path) not in BACKEND_OWNERS
             and relative(path) != LAYOUT_DEFINITION
         }

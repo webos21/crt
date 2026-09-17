@@ -52,6 +52,8 @@
  * substitute the way Vulkan's/D3D12's own vertical slices both did). */
 
 #include "gpu_internal.h"
+#include "arch/macos/window_cocoa_gpu.h"
+#include "wayland_weston_internal.h"
 
 #include <stdlib.h>
 
@@ -69,6 +71,24 @@ extern id objc_getClass(const char* name);
  * MTLCopyAllDevices() exclusively, for the real multi-device enumeration
  * this contract's own device_index argument needs. */
 extern id MTLCopyAllDevices(void);
+
+struct crtgfx_gpu_metal_device_state {
+  id device;
+  id command_queue;
+};
+
+struct crtgfx_gpu_metal_surface_state {
+  struct crtgfx_gpu_metal_device_state* device;
+  id layer;
+  id drawable;
+  id drawable_texture;
+  id command_buffer;
+  id last_submission;
+  uint32_t width;
+  uint32_t height;
+  int drawable_acquired;
+  int ganesh_wrapped;
+};
 
 static id metal_msg_id(id self, const char* selector_name) {
   SEL sel = sel_registerName(selector_name);
@@ -125,11 +145,15 @@ crtgfx_result crtgfx_gpu_metal_query_capabilities(crtgfx_gpu_capabilities* out_c
 }
 
 crtgfx_result crtgfx_gpu_metal_device_create(uint32_t device_index, struct crtgfx_gpu_device* device) {
+  struct crtgfx_gpu_metal_device_state* state;
   id devices = 0;
   NSUInteger count = metal_enumerate(&devices);
   id mtl_device;
   id command_queue;
 
+  if (count == 0) {
+    return CRTGFX_ERROR_UNSUPPORTED;
+  }
   if (device_index >= count) {
     if (devices != 0) {
       metal_msg_id(devices, "release");
@@ -155,18 +179,26 @@ crtgfx_result crtgfx_gpu_metal_device_create(uint32_t device_index, struct crtgf
     return CRTGFX_ERROR_UNSUPPORTED;
   }
 
-  device->mtl_device = mtl_device;
-  device->mtl_command_queue = command_queue;
+  state = (struct crtgfx_gpu_metal_device_state*)calloc(1, sizeof(*state));
+  if (state == NULL) {
+    metal_msg_id(command_queue, "release");
+    metal_msg_id(mtl_device, "release");
+    return CRTGFX_ERROR_UNSUPPORTED;
+  }
+  state->device = mtl_device;
+  state->command_queue = command_queue;
+  device->backend_state = state;
   return CRTGFX_OK;
 }
 
 void crtgfx_gpu_metal_device_destroy(struct crtgfx_gpu_device* device) {
-  if (device->mtl_command_queue != 0) {
-    metal_msg_id((id)device->mtl_command_queue, "release");
-  }
-  if (device->mtl_device != 0) {
-    metal_msg_id((id)device->mtl_device, "release");
-  }
+  struct crtgfx_gpu_metal_device_state* state =
+      (struct crtgfx_gpu_metal_device_state*)device->backend_state;
+  if (state == NULL) return;
+  metal_msg_id(state->command_queue, "release");
+  metal_msg_id(state->device, "release");
+  free(state);
+  device->backend_state = NULL;
 }
 
 /* Objective-C ABI subset from Apple's CAMetalLayer and Metal render-pass
@@ -184,58 +216,86 @@ static void metal_set_uint(id object, const char* selector, NSUInteger value) {
   ((void (*)(id, SEL, NSUInteger))objc_msgSend)(object, sel_registerName(selector), value);
 }
 
-static void metal_drop_frame(struct crtgfx_gpu_surface* surface) {
-  metal_msg_id(surface->mtl_command_buffer, "release");
-  metal_msg_id(surface->mtl_drawable, "release");
-  surface->mtl_command_buffer = NULL;
-  surface->mtl_drawable = NULL;
-  surface->mtl_drawable_texture = NULL;
-  surface->mtl_drawable_acquired = 0;
+static void metal_drop_frame(struct crtgfx_gpu_metal_surface_state* surface) {
+  metal_msg_id(surface->command_buffer, "release");
+  metal_msg_id(surface->drawable, "release");
+  surface->command_buffer = NULL;
+  surface->drawable = NULL;
+  surface->drawable_texture = NULL;
+  surface->drawable_acquired = 0;
 }
 
 crtgfx_result crtgfx_gpu_metal_surface_create(
-    struct crtgfx_gpu_device* device, void* layer, uint32_t width, uint32_t height,
-    struct crtgfx_gpu_surface* surface) {
+    struct crtgfx_gpu_device* device, crtgfx_window* window, struct crtgfx_gpu_surface* surface) {
+  struct crtgfx_gpu_metal_device_state* device_state =
+      (struct crtgfx_gpu_metal_device_state*)device->backend_state;
+  struct crtgfx_gpu_metal_surface_state* state;
+  void* layer_handle = NULL;
+  id layer;
   crtgfx_mtl_size size;
-  if (layer == NULL || width == 0 || height == 0) return CRTGFX_ERROR_INVALID_ARGUMENT;
+  if (device_state == NULL || crtgfx_cocoa_get_metal_layer(&window->toplevel, &layer_handle) == 0) {
+    return CRTGFX_ERROR_UNSUPPORTED;
+  }
+  layer = (id)layer_handle;
   size = ((crtgfx_mtl_size (*)(id, SEL))objc_msgSend)(layer, sel_registerName("drawableSize"));
-  surface->device = device;
-  surface->mtl_layer = metal_msg_id(layer, "retain");
-  surface->width = (uint32_t)size.width;
-  surface->height = (uint32_t)size.height;
-  metal_set_id(layer, "setDevice:", device->mtl_device);
+  if (size.width <= 0.0 || size.height <= 0.0) return CRTGFX_ERROR_INVALID_ARGUMENT;
+  state = (struct crtgfx_gpu_metal_surface_state*)calloc(1, sizeof(*state));
+  if (state == NULL) return CRTGFX_ERROR_UNSUPPORTED;
+  state->device = device_state;
+  state->layer = metal_msg_id(layer, "retain");
+  state->width = (uint32_t)size.width;
+  state->height = (uint32_t)size.height;
+  metal_set_id(layer, "setDevice:", device_state->device);
   metal_set_uint(layer, "setPixelFormat:", 80u); /* MTLPixelFormatBGRA8Unorm */
   ((void (*)(id, SEL, unsigned char))objc_msgSend)(layer, sel_registerName("setFramebufferOnly:"), 1);
   ((void (*)(id, SEL, unsigned char))objc_msgSend)(layer, sel_registerName("setAllowsNextDrawableTimeout:"), 1);
+  surface->backend_state = state;
   return CRTGFX_OK;
 }
 
 void crtgfx_gpu_metal_surface_destroy(struct crtgfx_gpu_surface* surface) {
-  metal_drop_frame(surface);
-  if (surface->mtl_last_submission != NULL) {
-    metal_msg_id(surface->mtl_last_submission, "waitUntilCompleted");
-    metal_msg_id(surface->mtl_last_submission, "release");
+  struct crtgfx_gpu_metal_surface_state* state =
+      (struct crtgfx_gpu_metal_surface_state*)surface->backend_state;
+  if (state == NULL) return;
+  metal_drop_frame(state);
+  if (state->last_submission != NULL) {
+    metal_msg_id(state->last_submission, "waitUntilCompleted");
+    metal_msg_id(state->last_submission, "release");
   }
-  metal_msg_id(surface->mtl_layer, "release");
+  metal_msg_id(state->layer, "release");
+  free(state);
+  surface->backend_state = NULL;
+}
+
+crtgfx_result crtgfx_gpu_metal_surface_get_size(
+    struct crtgfx_gpu_surface* surface, uint32_t* out_width, uint32_t* out_height) {
+  struct crtgfx_gpu_metal_surface_state* state =
+      (struct crtgfx_gpu_metal_surface_state*)surface->backend_state;
+  if (state == NULL) return CRTGFX_ERROR_HOST;
+  *out_width = state->width;
+  *out_height = state->height;
+  return CRTGFX_OK;
 }
 
 crtgfx_result crtgfx_gpu_metal_surface_acquire(struct crtgfx_gpu_surface* surface, uint64_t timeout_us) {
+  struct crtgfx_gpu_metal_surface_state* state =
+      (struct crtgfx_gpu_metal_surface_state*)surface->backend_state;
   id pool, drawable;
-  if (surface->mtl_drawable_acquired) return CRTGFX_ERROR_HOST;
+  if (state == NULL || state->drawable_acquired) return CRTGFX_ERROR_HOST;
   /* CAMetalLayer has a fixed ~1s timeout, not a caller-supplied deadline.
    * Refuse shorter budgets rather than silently block past them. */
   if (timeout_us < 1000000u) return CRTGFX_ERROR_UNSUPPORTED;
-  if (surface->mtl_last_submission != NULL &&
-      metal_msg_uint(surface->mtl_last_submission, "status") == 5u) return CRTGFX_ERROR_HOST;
+  if (state->last_submission != NULL &&
+      metal_msg_uint(state->last_submission, "status") == 5u) return CRTGFX_ERROR_HOST;
   pool = metal_msg_id(metal_msg_id(objc_getClass("NSAutoreleasePool"), "alloc"), "init");
-  drawable = metal_msg_id(surface->mtl_layer, "nextDrawable");
+  drawable = metal_msg_id(state->layer, "nextDrawable");
   if (drawable != NULL) {
-    surface->mtl_drawable = metal_msg_id(drawable, "retain");
-    surface->mtl_drawable_texture = metal_msg_id(drawable, "texture");
-    surface->width = (uint32_t)metal_msg_uint(surface->mtl_drawable_texture, "width");
-    surface->height = (uint32_t)metal_msg_uint(surface->mtl_drawable_texture, "height");
-    surface->mtl_drawable_acquired = 1;
-    surface->ganesh_wrapped = 0;
+    state->drawable = metal_msg_id(drawable, "retain");
+    state->drawable_texture = metal_msg_id(drawable, "texture");
+    state->width = (uint32_t)metal_msg_uint(state->drawable_texture, "width");
+    state->height = (uint32_t)metal_msg_uint(state->drawable_texture, "height");
+    state->drawable_acquired = 1;
+    state->ganesh_wrapped = 0;
   }
   metal_msg_id(pool, "drain");
   return drawable != NULL ? CRTGFX_OK : CRTGFX_ERROR_TIMEOUT;
@@ -243,10 +303,12 @@ crtgfx_result crtgfx_gpu_metal_surface_acquire(struct crtgfx_gpu_surface* surfac
 
 crtgfx_result crtgfx_gpu_metal_surface_clear(
     struct crtgfx_gpu_surface* surface, float r, float g, float b, float a) {
+  struct crtgfx_gpu_metal_surface_state* state =
+      (struct crtgfx_gpu_metal_surface_state*)surface->backend_state;
   id pool, pass, attachments, attachment, command, encoder;
   crtgfx_mtl_clear_color color = {r, g, b, a};
-  if (!surface->mtl_drawable_acquired || surface->mtl_command_buffer != NULL) return CRTGFX_ERROR_HOST;
-  if (surface->ganesh_wrapped) {
+  if (state == NULL || !state->drawable_acquired || state->command_buffer != NULL) return CRTGFX_ERROR_HOST;
+  if (state->ganesh_wrapped) {
     /* Real, honest misuse guard (2026-09-07, the Ganesh-wrap vertical
      * slice): this frame's drawable was handed to crtgfx_skia_wrap_gpu_
      * surface() instead -- mixing the solid-color stand-in with a real
@@ -255,11 +317,11 @@ crtgfx_result crtgfx_gpu_metal_surface_clear(
     return CRTGFX_ERROR_HOST;
   }
   pool = metal_msg_id(metal_msg_id(objc_getClass("NSAutoreleasePool"), "alloc"), "init");
-  command = metal_msg_id(surface->device->mtl_command_queue, "commandBuffer");
+  command = metal_msg_id(state->device->command_queue, "commandBuffer");
   pass = metal_msg_id(objc_getClass("MTLRenderPassDescriptor"), "renderPassDescriptor");
   attachments = metal_msg_id(pass, "colorAttachments");
   attachment = metal_msg_id_at_index(attachments, "objectAtIndexedSubscript:", 0);
-  metal_set_id(attachment, "setTexture:", surface->mtl_drawable_texture);
+  metal_set_id(attachment, "setTexture:", state->drawable_texture);
   metal_set_uint(attachment, "setLoadAction:", 2u); /* Clear */
   metal_set_uint(attachment, "setStoreAction:", 1u); /* Store */
   ((void (*)(id, SEL, crtgfx_mtl_clear_color))objc_msgSend)(attachment, sel_registerName("setClearColor:"), color);
@@ -269,8 +331,8 @@ crtgfx_result crtgfx_gpu_metal_surface_clear(
     return CRTGFX_ERROR_HOST;
   }
   metal_msg_id(encoder, "endEncoding");
-  metal_msg_id(surface->mtl_command_buffer, "release");
-  surface->mtl_command_buffer = metal_msg_id(command, "retain");
+  metal_msg_id(state->command_buffer, "release");
+  state->command_buffer = metal_msg_id(command, "retain");
   metal_msg_id(pool, "drain");
   return CRTGFX_OK;
 }
@@ -312,22 +374,24 @@ crtgfx_result crtgfx_gpu_metal_surface_clear(
  * macOS hardware -- matches every other macOS-only addition's own
  * discipline, see docs/libcrtgfx_wayland_plan.md). */
 crtgfx_result crtgfx_gpu_metal_surface_resize(struct crtgfx_gpu_surface* surface, uint32_t width, uint32_t height) {
+  struct crtgfx_gpu_metal_surface_state* state =
+      (struct crtgfx_gpu_metal_surface_state*)surface->backend_state;
   crtgfx_mtl_size size;
   double scale;
   uint32_t pixel_width;
   uint32_t pixel_height;
 
-  if (surface->mtl_drawable_acquired) {
+  if (state == NULL || state->drawable_acquired) {
     /* Same real, honest misuse guard as every other out-of-order call this
      * contract already rejects. */
     return CRTGFX_ERROR_HOST;
   }
 
-  scale = ((double (*)(id, SEL))objc_msgSend)(surface->mtl_layer, sel_registerName("contentsScale"));
+  scale = ((double (*)(id, SEL))objc_msgSend)(state->layer, sel_registerName("contentsScale"));
   if (scale <= 0.0) scale = 1.0;
   pixel_width = (uint32_t)((double)width * scale);
   pixel_height = (uint32_t)((double)height * scale);
-  if (pixel_width == surface->width && pixel_height == surface->height) {
+  if (pixel_width == state->width && pixel_height == state->height) {
     /* Real, cheap no-op -- see crtgfx/gpu.h's own comment on this
      * function. */
     return CRTGFX_OK;
@@ -336,16 +400,18 @@ crtgfx_result crtgfx_gpu_metal_surface_resize(struct crtgfx_gpu_surface* surface
   size.width = (double)pixel_width;
   size.height = (double)pixel_height;
   ((void (*)(id, SEL, crtgfx_mtl_size))objc_msgSend)(
-      surface->mtl_layer, sel_registerName("setDrawableSize:"), size);
-  surface->width = pixel_width;
-  surface->height = pixel_height;
+      state->layer, sel_registerName("setDrawableSize:"), size);
+  state->width = pixel_width;
+  state->height = pixel_height;
   return CRTGFX_OK;
 }
 
 crtgfx_result crtgfx_gpu_metal_surface_present(struct crtgfx_gpu_surface* surface) {
+  struct crtgfx_gpu_metal_surface_state* state =
+      (struct crtgfx_gpu_metal_surface_state*)surface->backend_state;
   id command;
-  if (!surface->mtl_drawable_acquired) return CRTGFX_ERROR_HOST;
-  if (surface->ganesh_wrapped) {
+  if (state == NULL || !state->drawable_acquired) return CRTGFX_ERROR_HOST;
+  if (state->ganesh_wrapped) {
     /* Real, honest misuse guard (2026-09-07, the Ganesh-wrap vertical
      * slice): this frame's drawable was handed to crtgfx_skia_wrap_gpu_
      * surface() -- a caller must present it via crtgfx_skia_gpu_surface_
@@ -354,13 +420,13 @@ crtgfx_result crtgfx_gpu_metal_surface_present(struct crtgfx_gpu_surface* surfac
      * exact function), not this function directly. */
     return CRTGFX_ERROR_HOST;
   }
-  if (surface->mtl_command_buffer == NULL) return CRTGFX_ERROR_HOST;
-  command = surface->mtl_command_buffer;
-  metal_set_id(command, "presentDrawable:", surface->mtl_drawable);
+  if (state->command_buffer == NULL) return CRTGFX_ERROR_HOST;
+  command = state->command_buffer;
+  metal_set_id(command, "presentDrawable:", state->drawable);
   metal_msg_id(command, "commit");
-  metal_msg_id(surface->mtl_last_submission, "release");
-  surface->mtl_last_submission = metal_msg_id(command, "retain");
-  metal_drop_frame(surface);
+  metal_msg_id(state->last_submission, "release");
+  state->last_submission = metal_msg_id(command, "retain");
+  metal_drop_frame(state);
   return metal_msg_uint(command, "status") == 5u ? CRTGFX_ERROR_HOST : CRTGFX_OK;
 }
 
@@ -379,15 +445,69 @@ crtgfx_result crtgfx_gpu_metal_surface_present(struct crtgfx_gpu_surface* surfac
  * queue, with no image-layout/resource-state transition needed at all
  * (MTLTexture has no such concept, unlike VkImage/ID3D12Resource). */
 crtgfx_result crtgfx_gpu_metal_surface_prepare_ganesh_present(struct crtgfx_gpu_surface* surface) {
+  struct crtgfx_gpu_metal_surface_state* state =
+      (struct crtgfx_gpu_metal_surface_state*)surface->backend_state;
   id pool, command;
-  if (!surface->mtl_drawable_acquired || surface->mtl_command_buffer != NULL) return CRTGFX_ERROR_HOST;
+  if (state == NULL || !state->drawable_acquired || !state->ganesh_wrapped ||
+      state->command_buffer != NULL) return CRTGFX_ERROR_HOST;
   pool = metal_msg_id(metal_msg_id(objc_getClass("NSAutoreleasePool"), "alloc"), "init");
-  command = metal_msg_id(surface->device->mtl_command_queue, "commandBuffer");
+  command = metal_msg_id(state->device->command_queue, "commandBuffer");
   if (command == NULL) {
     metal_msg_id(pool, "drain");
     return CRTGFX_ERROR_HOST;
   }
-  surface->mtl_command_buffer = metal_msg_id(command, "retain");
+  state->command_buffer = metal_msg_id(command, "retain");
+  state->ganesh_wrapped = 0;
   metal_msg_id(pool, "drain");
   return CRTGFX_OK;
+}
+
+int crtgfx_gpu_metal_borrow_device(
+    const struct crtgfx_gpu_device* device, struct crtgfx_gpu_metal_device_view* out_view) {
+  const struct crtgfx_gpu_metal_device_state* state;
+  if (device == NULL || out_view == NULL || device->backend != CRTGFX_GPU_BACKEND_METAL) return 0;
+  state = (const struct crtgfx_gpu_metal_device_state*)device->backend_state;
+  if (state == NULL || state->device == NULL || state->command_queue == NULL) return 0;
+  out_view->device = state->device;
+  out_view->command_queue = state->command_queue;
+  return 1;
+}
+
+int crtgfx_gpu_metal_begin_ganesh(
+    struct crtgfx_gpu_surface* surface, struct crtgfx_gpu_metal_surface_view* out_view) {
+  struct crtgfx_gpu_metal_surface_state* state;
+  if (surface == NULL || out_view == NULL || surface->backend != CRTGFX_GPU_BACKEND_METAL) return 0;
+  state = (struct crtgfx_gpu_metal_surface_state*)surface->backend_state;
+  if (state == NULL || !state->drawable_acquired || state->ganesh_wrapped ||
+      state->drawable_texture == NULL) return 0;
+  out_view->texture = state->drawable_texture;
+  out_view->width = state->width;
+  out_view->height = state->height;
+  state->ganesh_wrapped = 1;
+  return 1;
+}
+
+int crtgfx_gpu_metal_is_ganesh_wrapped(const struct crtgfx_gpu_surface* surface) {
+  const struct crtgfx_gpu_metal_surface_state* state;
+  if (surface == NULL || surface->backend != CRTGFX_GPU_BACKEND_METAL) return 0;
+  state = (const struct crtgfx_gpu_metal_surface_state*)surface->backend_state;
+  return state != NULL && state->ganesh_wrapped;
+}
+
+void crtgfx_gpu_metal_end_ganesh(struct crtgfx_gpu_surface* surface) {
+  struct crtgfx_gpu_metal_surface_state* state;
+  if (surface == NULL || surface->backend != CRTGFX_GPU_BACKEND_METAL) return;
+  state = (struct crtgfx_gpu_metal_surface_state*)surface->backend_state;
+  if (state != NULL) state->ganesh_wrapped = 0;
+}
+
+void crtgfx_gpu_metal_test_force_device_loss(struct crtgfx_gpu_device* device) {
+  struct crtgfx_gpu_metal_device_state* state;
+  if (device == NULL || device->backend != CRTGFX_GPU_BACKEND_METAL) return;
+  state = (struct crtgfx_gpu_metal_device_state*)device->backend_state;
+  if (state == NULL) return;
+  metal_msg_id(state->command_queue, "release");
+  metal_msg_id(state->device, "release");
+  state->command_queue = NULL;
+  state->device = NULL;
 }

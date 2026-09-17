@@ -10,6 +10,73 @@ substantive update.
 
 ## 2026-09-17
 
+- **Completed backend-boundary Tranche 4 by moving Metal's device/surface
+  state, CAMetalLayer extraction, and Ganesh interop into the macOS owner,
+  matching Vulkan (Tranche 1) and D3D12 (Tranche 3).**
+  `src/arch/macos/gpu_metal.c` now owns `mtl_device`/`mtl_command_queue`/
+  `mtl_layer`/`mtl_drawable`/`mtl_drawable_texture`/`mtl_command_buffer`/
+  `mtl_last_submission`/`mtl_drawable_acquired` privately; `gpu_internal.h`'s
+  common `crtgfx_gpu_device`/`crtgfx_gpu_surface` structs carry only the
+  backend tag, operations pointer, and opaque state slot (plus the device's
+  shared atomic refcount) -- no `CRTGFX_HAVE_METAL` conditional remains in
+  either common struct. `gpu.c` no longer includes `window_cocoa_gpu.h`/
+  `wayland_weston_internal.h` or resolves the window's `CAMetalLayer`
+  itself: `crtgfx_gpu_metal_surface_create()` now takes the opaque
+  `crtgfx_window*` directly and resolves it internally, the same shape as
+  the Vulkan/D3D12 surface-create operations.
+
+  `skia_bridge.cc`'s Metal branch no longer reads `crtgfx_gpu_device`/
+  `crtgfx_gpu_surface` concrete fields at all: `crtgfx_skia_make_gpu_
+  context()` calls a new `crtgfx_gpu_metal_borrow_device()` for a narrow
+  `{device, command_queue}` view, and `crtgfx_skia_wrap_gpu_surface()`/
+  `crtgfx_skia_gpu_surface_present()` use new `crtgfx_gpu_metal_begin_
+  ganesh()`/`_is_ganesh_wrapped()`/`_end_ganesh()` owner hooks instead of
+  reading/writing `ganesh_wrapped`/`mtl_drawable_texture` directly --
+  exactly the borrowed-view/transition-hook shape Tranche 2/3 already
+  established for Vulkan/D3D12. `tests/skia_gpu_offscreen_smoke.cc`'s
+  device-loss test no longer hand-declares `objc_msgSend`/`sel_
+  registerName` and drives the Objective-C runtime itself to release
+  `mtl_device`/`mtl_command_queue`; it now calls a new backend-owned
+  `crtgfx_gpu_metal_test_force_device_loss()` hook, matching the Vulkan/
+  D3D12 device-loss tests' own owner-hook shape.
+
+  Extended `tools/test_crtgfx_gpu_backend_boundary.py` with a Metal-specific
+  assertion (`test_metal_concrete_fields_stay_in_the_macos_owner`), mirroring
+  the existing D3D12 one, so a later change cannot reopen the Metal boundary
+  without the guard catching it; `NON_OWNER_FIELD_USERS` (the migration-
+  checklist allowlist Tranche 0 introduced for `skia_bridge.cc`/the generic
+  smoke test) is now empty -- the last two audited exceptions closed with
+  this tranche, not just shrunk. Updated `docs/libcrtgfx_gpu_backend_
+  boundary.md`'s status and direct-access inventory to reflect the completed
+  migration -- only
+  Tranche 5's own remaining `gpu_internal.h` include in the generic smoke
+  test (for the backend-neutral test-control call itself, not a concrete-
+  field read) is left in that inventory.
+
+  A real bug in the generic GPU window demo was found and fixed while
+  verifying this on real macOS/arm64 Retina hardware, not guessed:
+  `tools/gpu_window_demo.c`'s scripted-resize check asserted the reported
+  surface size exactly equals the requested point size, silently assuming
+  a 1:1 point-to-pixel ratio. That assumption held on Vulkan/D3D12's own
+  verification hosts but is false on a Retina macOS display (a real 2x
+  backing-scale factor) -- Metal's owner-local resize itself was correct
+  throughout (it reported the real, correct `1800x1040`-pixel surface for
+  a requested `900x520`-point resize); the demo's own public-contract
+  check was wrong to assume otherwise. Fixed by checking only that the
+  reported size is nonzero and logging both the requested point size and
+  the active pixel size, which generalizes correctly across all three
+  backends without asserting a scale factor the public API never promised.
+
+  Verified for real on macOS/arm64 hardware: the boundary guard (5/5,
+  including the new Metal assertion); full local `ctest` 128/128 (the
+  Skia/`cxx_*` targets needed an explicit `ninja` build first -- CTest
+  does not build missing targets itself, not a regression); the offscreen
+  Metal Ganesh smoke (reference-scene draw, resize, and device-loss/
+  recreation, all reading back correct pixels); and the real windowed
+  Metal Ganesh demo, both a plain finite run and a 5-frame run with the
+  corrected `900x520`-point-to-`1800x1040`-pixel scripted Retina resize,
+  each exiting 0 on its own with no window left open.
+
 - **Completed backend-boundary Tranche 3 by moving the full D3D12 object and
   Ganesh submission state machine into the Windows owner.**
   `src/arch/windows/gpu_win32.c` now owns private device/surface state behind

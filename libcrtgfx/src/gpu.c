@@ -4,9 +4,7 @@
  * today, and why the fence gets a real, working implementation now).
  *
  * The common public wrapper/lifetime/dispatch implementation. It contains no
- * host GPU API calls or concrete GPU state. The temporary Metal adapter still
- * resolves its platform window handle here until its migration tranche;
- * Vulkan and D3D12 extraction live in their backend owners. */
+ * host GPU API calls, platform window extraction, or concrete GPU state. */
 
 #include "crtgfx/gpu.h"
 
@@ -17,16 +15,6 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <time.h>
-
-#if defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
-/* Only for crtgfx_gpu_surface_create()'s own real macOS/Metal branch
- * below -- resolving a crtgfx_window's real live CAMetalLayer `id`
- * (window_cocoa.c, via crtgfx_cocoa_get_metal_layer()) and the shared
- * toplevel struct's own real width/height. Same reasoning as the Linux
- * branch above. */
-#include "arch/macos/window_cocoa_gpu.h"
-#include "wayland_weston_internal.h"
-#endif
 
 /* struct crtgfx_gpu_device/crtgfx_gpu_surface themselves now live in
  * gpu_internal.h, shared with src/arch/linux/gpu_vulkan.c (the real
@@ -39,15 +27,6 @@ struct crtgfx_gpu_fence {
   pthread_cond_t cond;
   int signaled;
 };
-
-#if defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
-static crtgfx_result crtgfx_gpu_legacy_surface_get_size(
-    crtgfx_gpu_surface* surface, uint32_t* out_width, uint32_t* out_height) {
-  *out_width = surface->width;
-  *out_height = surface->height;
-  return CRTGFX_OK;
-}
-#endif
 
 #if defined(CRT_TARGET_OS_LINUX) && defined(CRTGFX_HAVE_VULKAN)
 static const struct crtgfx_gpu_backend_ops crtgfx_gpu_active_ops = {
@@ -78,24 +57,14 @@ static const struct crtgfx_gpu_backend_ops crtgfx_gpu_active_ops = {
     crtgfx_gpu_win32_surface_present,
 };
 #elif defined(CRT_TARGET_OS_MACOS) && defined(CRTGFX_HAVE_METAL)
-static crtgfx_result crtgfx_gpu_metal_surface_create_dispatch(
-    crtgfx_gpu_device* device, crtgfx_window* window, crtgfx_gpu_surface* surface) {
-  void* metal_layer_handle = NULL;
-  if (crtgfx_cocoa_get_metal_layer(&window->toplevel, &metal_layer_handle) == 0) {
-    return CRTGFX_ERROR_UNSUPPORTED;
-  }
-  return crtgfx_gpu_metal_surface_create(
-      device, metal_layer_handle, window->toplevel.width, window->toplevel.height, surface);
-}
-
 static const struct crtgfx_gpu_backend_ops crtgfx_gpu_active_ops = {
     CRTGFX_GPU_BACKEND_METAL,
     crtgfx_gpu_metal_query_capabilities,
     crtgfx_gpu_metal_device_create,
     crtgfx_gpu_metal_device_destroy,
-    crtgfx_gpu_metal_surface_create_dispatch,
+    crtgfx_gpu_metal_surface_create,
     crtgfx_gpu_metal_surface_destroy,
-    crtgfx_gpu_legacy_surface_get_size,
+    crtgfx_gpu_metal_surface_get_size,
     crtgfx_gpu_metal_surface_acquire,
     crtgfx_gpu_metal_surface_clear,
     crtgfx_gpu_metal_surface_resize,

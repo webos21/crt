@@ -126,12 +126,15 @@ present transition stay in the backend owner.
   now owner-local. Hardware and forced-WARP Ganesh, device-loss/recreation,
   30-frame window presentation, scripted resize, and the backend-specific
   boundary guard all pass on Windows.
-- [ ] **Next: Tranche 4 — migrate Metal with the same contract.** Give
-  `gpu_metal.c` private state,
-  move CAMetalLayer extraction into it, and expose only borrowed Metal views
-  plus the existing backend-owned present preparation. Verify device,
-  presentation, resize, and Ganesh on macOS.
-- [ ] **Tranche 5 — remove generic-test privilege and close macro/layout escape
+- [x] **Tranche 4 — migrate Metal with the same contract.** Completed
+  2026-09-17 and recorded in `HISTORY.md`. Metal device/surface state,
+  CAMetalLayer extraction, and Ganesh borrowed-view/transition hooks are now
+  owner-local in `gpu_metal.c`. Device creation, 5-frame window presentation,
+  a scripted Retina resize, and Metal Ganesh (offscreen smoke and windowed
+  demo) all pass on macOS/arm64. Also fixed a real generic-demo bug found
+  while verifying this: the scripted-resize check wrongly assumed a 1:1
+  point-to-pixel ratio, which a Retina display breaks.
+- [ ] **Next: Tranche 5 — remove generic-test privilege and close macro/layout escape
   paths.**
   Replace `skia_gpu_offscreen_smoke.cc`'s `gpu_internal.h` access with a
   backend-neutral test-only device-loss hook. Audit `src/`, `tests/`, `tools/`,

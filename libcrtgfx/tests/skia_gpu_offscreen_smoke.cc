@@ -129,21 +129,6 @@ extern "C" void vkDestroyDevice(VkDevice device, const void* allocator);
 // device/queue creation code needs one.
 static const GUID kIID_ID3D12Device5 = {
     0x8b4f173b, 0x2fea, 0x4b80, {0x8f, 0x58, 0x43, 0x07, 0x19, 0x1a, 0xb9, 0x5d}};
-#elif defined(CRTGFX_HAVE_METAL)
-// Hand-declared objc_msgSend/sel_registerName, matching src/arch/macos/
-// gpu_metal.c's and window_cocoa.c's own established "drive the
-// Objective-C runtime directly, no real header" convention (this
-// project's own per-translation-unit habit -- this file already hand-
-// declares VkDevice/ID3D12Device5 above for the identical reason). Named
-// with a trailing "_t" here specifically to avoid colliding with any
-// real `id`/`SEL` typedef, in case a future change to this file ever
-// needs -fcrt-real-apple-sdk (this file itself does not today -- see
-// this test's own CMakeLists.txt target, which only adds that flag at
-// this executable's own link step, not its compile step).
-typedef void* objc_id_t;
-typedef void* objc_sel_t;
-extern "C" objc_id_t objc_msgSend(objc_id_t self, objc_sel_t op, ...);
-extern "C" objc_sel_t sel_registerName(const char* name);
 #endif
 
 namespace {
@@ -312,40 +297,14 @@ void test_device_loss_and_recreation(uint32_t device_index) {
   // fires for a real, physical external/eGPU being unplugged -- nothing
   // this test could trigger on demand) -- so, matching the Vulkan
   // branch's own "closest real, safe approximation" above (same file,
-  // same reasoning): a single, real, deliberate release() of the real
-  // Objective-C id<MTLDevice>/id<MTLCommandQueue> objects gpu_metal.c
-  // itself retained at device_create() time, then null out this object's
-  // own handle fields so crtgfx_gpu_device_release() below performs no
-  // second real release() call on the same, now-invalid object (an
-  // Objective-C over-release is exactly as unsurvivable here as Vulkan's
-  // double-destroy would be).
-  // -Wcast-function-type-mismatch (2026-09-04, real, confirmed necessary):
-  // objc_msgSend's own hand-declared signature is deliberately variadic
-  // (`id objc_msgSend(id, SEL, ...)`, matching the real libobjc symbol,
-  // whose actual argument shape varies per real Objective-C selector), so
-  // casting it to this one call's own concrete, non-variadic signature
-  // before invoking it -- the well-established, standard way to call
-  // objc_msgSend from plain C/C++ (see gpu_metal.c's/window_cocoa.c's own
-  // identical convention, same reasoning) -- is flagged by this project's
-  // own -Wall -Wextra -Werror. gpu_metal.c/window_cocoa.c get this
-  // warning suppressed file-wide (CMakeLists.txt's own CRTGFX_BACKEND_
-  // SOURCES set_source_files_properties() call); this test file is not
-  // part of that source set, so it is suppressed narrowly here instead,
-  // scoped tightly around just these two real calls.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunknown-warning-option"
-#pragma clang diagnostic ignored "-Wcast-function-type-mismatch"
-  ((void (*)(objc_id_t, objc_sel_t))objc_msgSend)(
-      static_cast<objc_id_t>(device->mtl_command_queue), sel_registerName("release"));
-  ((void (*)(objc_id_t, objc_sel_t))objc_msgSend)(
-      static_cast<objc_id_t>(device->mtl_device), sel_registerName("release"));
-#pragma clang diagnostic pop
-  device->mtl_command_queue = nullptr;
-  device->mtl_device = nullptr;
+  // same reasoning): ask the backend owner to perform a single, deliberate
+  // release of its real Objective-C device/queue objects. The generic test
+  // never reaches into Metal's concrete state, and final device release
+  // remains safe because the owner leaves the released handles null.
+  crtgfx_gpu_metal_test_force_device_loss(device);
 
   // crtgfx_skia_make_gpu_context() must reject the now torn-down device
-  // cleanly (its own documented "device == nullptr / mtl_device == nullptr
-  // / mtl_command_queue == nullptr" validation applies exactly here) --
+  // cleanly (its owner-provided borrowed view is now unavailable) --
   // the real, safe boundary this vertical slice's own contract actually
   // needs to hold.
   report(

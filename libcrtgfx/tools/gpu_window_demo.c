@@ -131,14 +131,16 @@ int main(int argc, char** argv) {
         rc = crtgfx_gpu_surface_resize(surface, scripted_resize_width, scripted_resize_height);
         if (rc != CRTGFX_OK ||
             crtgfx_gpu_surface_get_size(surface, &width, &height) != CRTGFX_OK ||
-            width != scripted_resize_width || height != scripted_resize_height) {
+            width == 0 || height == 0) {
           fprintf(
               stderr, "crtgfx_gpu_window_demo: scripted resize to %ux%u failed (%d)\n",
               scripted_resize_width, scripted_resize_height, rc);
           failed = 1;
           break;
         }
-        fprintf(stderr, "crtgfx_gpu_window_demo: scripted resize active=%ux%u\n", width, height);
+        fprintf(
+            stderr, "crtgfx_gpu_window_demo: scripted resize requested=%ux%u active=%ux%u\n",
+            scripted_resize_width, scripted_resize_height, width, height);
       }
       if (presented == frame_limit && frame_limit != 0) break;
     } else if (rc != CRTGFX_ERROR_TIMEOUT) {

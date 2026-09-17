@@ -17,10 +17,12 @@ definitions reduce that risk but do not make the representation safe.
 The backend layout also leaked into `src/skia_bridge.cc`, which read every
 native device view and presentation image directly. Before Tranche 3, its
 D3D12 branch went further and mutated command-list, fence-value, per-buffer,
-submission, and Ganesh-wrap state. `tests/skia_gpu_offscreen_smoke.cc` likewise
-includes the private layout and still has a Metal-native device-loss path.
-Those callers bypass the object owner even when their current code is otherwise
-correct.
+submission, and Ganesh-wrap state; before Tranche 4, its Metal branch read
+`crtgfx_gpu_device`/`crtgfx_gpu_surface` concrete fields directly the same
+way. `tests/skia_gpu_offscreen_smoke.cc` likewise included the private layout
+and had a direct Metal-native device-loss/handle-mutation path before
+Tranche 4 moved it behind an owner hook. Those callers bypass the object
+owner even when their current code is otherwise correct.
 
 ## Fixed common representation
 
@@ -51,16 +53,23 @@ No `CRTGFX_HAVE_*` conditional may appear inside either common structure.
 Feature macros select an implementation and its declarations; they never
 select the allocation size or field offsets of a common object.
 
-Implementation status (2026-09-17): both wrappers now carry the backend tag,
-operations pointer, and opaque state slot, and public device/surface entry
-points dispatch through that table. Vulkan device/surface state now lives only
-in `gpu_vulkan.c`, and D3D12 device/surface state lives only in
-`gpu_win32.c`; only Metal concrete fields remain temporarily unconditional
-behind the same fixed layout. The wrappers are therefore still an intermediate
-representation, not the accepted final one. Vulkan's wrapper/state part of the
-migration (Tranche 1) is complete, including owner-local Wayland extraction and
-injected cleanup after partial device construction. D3D12's owner migration and
-Windows hardware/WARP acceptance are complete in Tranche 3.
+Implementation status (2026-09-17): both wrappers now carry only the backend
+tag, operations pointer, and opaque state slot (plus the device's common
+atomic refcount), and public device/surface entry points dispatch through
+that table. Vulkan device/surface state lives only in `gpu_vulkan.c`, D3D12
+device/surface state lives only in `gpu_win32.c`, and Metal device/surface
+state lives only in `gpu_metal.c` -- no backend concrete fields remain in the
+common structures. Vulkan's wrapper/state part of the migration (Tranche 1)
+is complete, including owner-local Wayland extraction and injected cleanup
+after partial device construction. D3D12's owner migration and Windows
+hardware/WARP acceptance are complete in Tranche 3. Metal's owner migration
+(Tranche 4) is complete: `gpu_metal.c` owns CAMetalLayer extraction from the
+opaque `crtgfx_window*`, all Metal object lifetimes, and the device-loss test
+hook; `skia_bridge.cc` and `tests/skia_gpu_offscreen_smoke.cc` use only
+borrowed device/surface views. Real device creation, 5-frame window
+presentation, a scripted Retina resize (900x520 points correctly reporting a
+1800x1040-pixel surface), and Metal Ganesh (offscreen smoke plus the windowed
+demo) all pass on macOS/arm64 hardware.
 
 ## Operations and ownership
 
@@ -151,21 +160,24 @@ back.
 
 | Owner/caller | Current access | Required destination |
 | --- | --- | --- |
-| `src/gpu.c` | fixed wrappers/operations dispatch; temporary Metal window extraction adapter remains | fixed wrappers and operations dispatch only |
+| `src/gpu.c` | fixed wrappers and operations dispatch only | fixed wrappers and operations dispatch only (done) |
 | `src/arch/linux/gpu_vulkan.c` | private Vulkan device/surface state, owner-local Wayland extraction, and partial-create fault injection | completed owner |
 | `src/arch/windows/gpu_win32.c` | private D3D12 device/surface state, owner-local HWND extraction, borrowed views, submit transition, and private WARP test selection | completed owner |
-| `src/arch/macos/gpu_metal.c` | Metal device/surface fields | private Metal device/surface state |
-| `src/skia_bridge.cc` | Vulkan and D3D12 borrowed views/transitions; direct Metal handles remain | borrowed descriptors plus backend transition operations |
-| `tests/skia_gpu_offscreen_smoke.cc` | Vulkan owner hook, D3D12 borrowed device view, and direct Metal loss/handle mutation remain | backend-neutral test-control operation |
+| `src/arch/macos/gpu_metal.c` | private Metal device/surface state, owner-local CAMetalLayer extraction, and a private device-loss test hook | completed owner |
+| `src/skia_bridge.cc` | Vulkan, D3D12, and Metal borrowed views/transitions only | borrowed descriptors plus backend transition operations (done) |
+| `tests/skia_gpu_offscreen_smoke.cc` | Vulkan, D3D12, and Metal owner hooks/borrowed views only | backend-neutral test-control operation (done) |
 
 No other current test, tool, or example directly accesses these concrete
 fields. This inventory is a migration checklist, not permission to add another
 caller while the work is in progress. `tools/test_crtgfx_gpu_backend_boundary.py`
 turns that inventory into a CTest guard: the known Skia/generic-test exceptions
-are an exact allowlist that each migration tranche must shrink, while an
-additional backend-specific assertion already permits no D3D12/DXGI field
-access outside the Windows owner. A new privileged caller therefore cannot
-quietly appear during the refactor.
+are an exact allowlist that each migration tranche must shrink, while
+additional backend-specific assertions permit no D3D12/DXGI or Metal field
+access outside their respective owners. A new privileged caller therefore
+cannot quietly appear during the refactor. Only Tranche 5's own remaining
+`gpu_internal.h` access from `tests/skia_gpu_offscreen_smoke.cc` (a
+backend-neutral device-loss hook call, not a concrete-field read) is left in
+this inventory.
 
 ## Acceptance
 
