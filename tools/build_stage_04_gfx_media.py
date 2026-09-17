@@ -691,7 +691,8 @@ def add_redistributed_dependencies(asset: Path, staged: Path,
 
 
 def build_example(staged: Path, temp_root: Path, name: str,
-                  executable_name: str, env: dict[str, str]) -> None:
+                  executable_name: str, env: dict[str, str],
+                  run_args: list[str] | None = None) -> None:
     build_dir = temp_root / f"example-{name}"
     if build_dir.exists():
         remove_tree(build_dir)
@@ -704,7 +705,19 @@ def build_example(staged: Path, temp_root: Path, name: str,
     suffix = ".exe" if env["CRT_TARGET_OS"] == "windows" else ""
     executable = build_dir / f"{executable_name}{suffix}"
     validate_example_runtime_dependencies(executable, env["CRT_TARGET_OS"])
-    run([str(executable), "1"], env)
+    command = [str(executable), *(run_args if run_args is not None else ["1"])]
+    print("+", " ".join(command), flush=True)
+    # A bounded timeout, not none (2026-09-17, Tranche 2's own re-run of
+    # headless Ganesh plus native-Wayland presentation/resize -- TODO.md):
+    # the gfx-skia call below now drives several frames plus a live resize
+    # through the exact Vulkan Ganesh-present path that used to leave its
+    # own single-frame-in-flight fence unsignaled after every Ganesh frame
+    # (see gpu_vulkan.c's own crtgfx_gpu_vulkan_end_ganesh() comment for
+    # the full story) -- a real regression of that bug is a genuine GPU-
+    # side deadlock, not a slow pass, and left unbounded would hang this
+    # whole build script (and any CI running it) forever instead of
+    # failing fast and legibly.
+    subprocess.run(command, check=True, env=env, timeout=60)
 
 
 def validate_example_runtime_dependencies(executable: Path, target_os: str) -> None:
@@ -722,7 +735,8 @@ def validate_example_runtime_dependencies(executable: Path, target_os: str) -> N
 
 
 def run_packaged_binary_smoke(staged: Path, relative_path: str,
-                              success_marker: str, env: dict[str, str]) -> None:
+                              success_marker: str, env: dict[str, str],
+                              run_args: list[str] | None = None) -> None:
     # Direct packaged-binary smoke (2026-09-16, TODO.md's "Make the
     # packaged Linux Vulkan/Skia demo directly runnable"): every other
     # acceptance step in this script only ever exercises the *standalone*
@@ -746,12 +760,30 @@ def run_packaged_binary_smoke(staged: Path, relative_path: str,
     # but checking stdout for the real success marker is the more robust
     # contract either way: it also catches a future variant that reports
     # the wrong outcome while still exiting 0.
+    #
+    # Real frame count/resize args, not a bare "1" (2026-09-17): a single
+    # frame never drives a second crtgfx_gpu_surface_acquire() call, which
+    # is exactly what hid a second, separate, real Vulkan/Ganesh bug from
+    # every past run of this same smoke -- the single-frame-in-flight
+    # fence crtgfx_gpu_vulkan_surface_state_acquire() waits on was reset
+    # every acquire() but only ever re-signaled by the plain, non-Ganesh
+    # present path, never by crtgfx_skia_gpu_surface_present()'s own real
+    # Ganesh submission -- so the *first* frame always displayed
+    # correctly (matching every past "it works" observation on this
+    # host), but any second acquire() deadlocked forever waiting on a
+    # fence nothing would ever signal again. Fixed at the real source
+    # (gpu_vulkan.c's own crtgfx_gpu_vulkan_end_ganesh(), see its comment
+    # for the full story); a bounded timeout below turns a real
+    # regression of it back into a fast, legible failure instead of an
+    # indefinite CI hang.
+    args = run_args if run_args is not None else ["1"]
     executable = staged / relative_path
     if env["CRT_TARGET_OS"] == "windows":
         executable = executable.with_name(executable.name + ".exe")
-    print(f"+ {executable} 1", flush=True)
+    command = [str(executable), *args]
+    print("+", " ".join(command), flush=True)
     result = subprocess.run(
-        [str(executable), "1"], env=env, check=True,
+        command, env=env, check=True, timeout=60,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     print(result.stdout, end="", flush=True)
     if success_marker not in result.stdout:
@@ -1027,13 +1059,17 @@ def main() -> None:
             build_example(
                 staged, temp_root, "gfx-gpu", "crtgfx_gpu_example", env)
         with timings.measure("rebuild and run installed gfx-skia example"):
+            # 5 frames plus a mid-stream resize, not just "1" (2026-09-17):
+            # see build_example()'s own comment on the exact multi-frame
+            # Ganesh/Vulkan deadlock this now exercises and gates on.
             build_example(
-                staged, temp_root, "gfx-skia", "crtgfx_skia_example", env)
+                staged, temp_root, "gfx-skia", "crtgfx_skia_example", env,
+                run_args=["5", "900", "520"])
         if target_os == "linux":
             with timings.measure("run packaged gfx-skia GPU window demo directly"):
                 run_packaged_binary_smoke(
                     staged, "examples/bin/crtgfx_skia_gpu_window_demo",
-                    "presented=1", env)
+                    "presented=5", env, run_args=["5", "900", "520"])
         with timings.measure("verify 04-gfx-media distribution"):
             run([sys.executable, str(build_asset / "tools" / "verify_dist.py"),
                  "--dist", str(staged), "--stage", "04-gfx-media"], env)

@@ -1859,9 +1859,51 @@ int crtgfx_gpu_vulkan_get_ganesh_present_view(
 
 void crtgfx_gpu_vulkan_end_ganesh(struct crtgfx_gpu_surface* surface) {
   struct crtgfx_gpu_vulkan_surface_state* state;
+  VkSubmitInfo submit_info;
   if (surface == NULL || surface->backend != CRTGFX_GPU_BACKEND_VULKAN) return;
   state = (struct crtgfx_gpu_vulkan_surface_state*)surface->backend_state;
-  if (state != NULL) state->ganesh_wrapped = 0;
+  if (state == NULL) return;
+  state->ganesh_wrapped = 0;
+  /* Real, confirmed bug (2026-09-17, found chasing Tranche 2's own "re-run
+   * headless Ganesh plus native Wayland presentation/resize" acceptance --
+   * TODO.md): crtgfx_gpu_vulkan_surface_state_acquire()'s own single-
+   * frame-in-flight gate (above) unconditionally vkWaitForFences()s on
+   * vk_frame_fence and then resets it, but only crtgfx_gpu_vulkan_surface_
+   * state_clear()'s own plain, non-Ganesh path ever signals that fence
+   * again (its own vkQueueSubmit(..., frame_fence) call) -- the Ganesh path
+   * (this function's own caller, skia_bridge.cc's crtgfx_skia_gpu_surface_
+   * present()) never submits anything against it at all, since Ganesh
+   * itself owns the real submission via context->submit(). The result: a
+   * live Wayland window running the Ganesh demo appeared to work (a
+   * single static frame really did reach the screen, matching every past
+   * "it displayed" observation on this host), but the *second* real
+   * acquire() -- confirmed directly via GDB, blocked inside vkWaitForFences
+   * at this exact call site, `crtgfx_gpu_vulkan_surface_state_acquire()` --
+   * deadlocked forever waiting on a fence nothing would ever signal again;
+   * a plain, no-resize 2-frame run reproduces it exactly like the resize
+   * case does, so this was never resize-specific. By the time this
+   * function runs, crtgfx_skia_gpu_surface_present()'s own context->
+   * submit(GrSyncCpu::kYes) call has already synchronously blocked until
+   * the GPU finished this frame's real work, so an empty vkQueueSubmit()
+   * that only signals vk_frame_fence (zero real submitCount, a real,
+   * spec-documented way to signal a fence with no queued work) is not a
+   * lie -- it completes immediately and correctly represents "nothing
+   * outstanding on this Vulkan frame slot" for the next acquire()'s own
+   * wait, exactly like the plain path's real submission already does for
+   * itself. Runs unconditionally (also covers the crtgfx_skia_wrap_gpu_
+   * surface() failure path that also reaches this function) since the
+   * fence is always left reset-but-never-resignaled by acquire() either
+   * way. */
+  submit_info.sType = CRTGFX_VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submit_info.pNext = NULL;
+  submit_info.waitSemaphoreCount = 0;
+  submit_info.pWaitSemaphores = NULL;
+  submit_info.pWaitDstStageMask = NULL;
+  submit_info.commandBufferCount = 0;
+  submit_info.pCommandBuffers = NULL;
+  submit_info.signalSemaphoreCount = 0;
+  submit_info.pSignalSemaphores = NULL;
+  vkQueueSubmit((VkQueue)state->device->vk_queue, 1, &submit_info, (VkFence)state->vk_frame_fence);
 }
 
 void crtgfx_gpu_vulkan_test_force_device_loss(struct crtgfx_gpu_device* device) {

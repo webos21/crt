@@ -11,8 +11,13 @@
 // with headless CTest, matching tools/gpu_window_demo.c's own precedent
 // (this file's own C++/Skia sibling -- that one still covers the
 // separate, non-Ganesh solid-color acquire/clear/present path unchanged).
-// Usage: crtgfx_skia_gpu_window_demo [frame-count]; omitted/zero runs
-// until the window is closed. Also drains CRTGFX_EVENT_RESIZE and calls
+// Usage: crtgfx_skia_gpu_window_demo [frame-count [resize-width
+// resize-height]]; omitted/zero frame-count runs until the window is closed.
+// When both resize dimensions are present, the demo requests that GPU-surface
+// size after the first presented frame, then presents through the replacement
+// swapchain. This gives automated acceptance runs a deterministic resize path
+// even when the compositor does not expose remote window-management controls.
+// The demo also drains CRTGFX_EVENT_RESIZE and calls
 // crtgfx_gpu_surface_resize() every frame before drawing, exactly like
 // tools/gpu_window_demo.c -- proving the resize and Ganesh-wrap features
 // compose correctly, not just each in isolation.
@@ -37,7 +42,14 @@ extern "C" int main(int argc, char** argv) {
   unsigned long presented = 0;
   int failed = 0;
   unsigned int timeouts = 0;
+  uint32_t scripted_resize_width = argc > 2 ? (uint32_t)strtoul(argv[2], NULL, 10) : 0;
+  uint32_t scripted_resize_height = argc > 3 ? (uint32_t)strtoul(argv[3], NULL, 10) : 0;
   uint32_t width, height;
+
+  if ((scripted_resize_width == 0) != (scripted_resize_height == 0)) {
+    fprintf(stderr, "crtgfx_skia_gpu_window_demo: resize requires nonzero width and height\n");
+    return 1;
+  }
 
   rc = crtgfx_gpu_query_capabilities(&caps);
   if (rc != CRTGFX_OK || caps.device_count == 0u) {
@@ -138,7 +150,22 @@ extern "C" int main(int argc, char** argv) {
         failed = 1;
         break;
       }
-      if (++presented == frame_limit && frame_limit != 0) break;
+      ++presented;
+      if (presented == 1 && scripted_resize_width != 0) {
+        rc = crtgfx_gpu_surface_resize(surface, scripted_resize_width, scripted_resize_height);
+        if (rc != CRTGFX_OK ||
+            crtgfx_gpu_surface_get_size(surface, &width, &height) != CRTGFX_OK) {
+          fprintf(
+              stderr, "crtgfx_skia_gpu_window_demo: scripted resize to %ux%u failed (%d)\n",
+              scripted_resize_width, scripted_resize_height, rc);
+          failed = 1;
+          break;
+        }
+        fprintf(
+            stderr, "crtgfx_skia_gpu_window_demo: scripted resize requested=%ux%u active=%ux%u\n",
+            scripted_resize_width, scripted_resize_height, width, height);
+      }
+      if (presented == frame_limit && frame_limit != 0) break;
     } else if (rc != CRTGFX_ERROR_TIMEOUT) {
       fprintf(stderr, "crtgfx_skia_gpu_window_demo: acquire failed (%d), stopping\n", rc);
       failed = 1;

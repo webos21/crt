@@ -99,16 +99,28 @@ present transition stay in the backend owner.
   with the configured Clang flags. Full Skia/native-Wayland link-and-run
   evidence belongs to Tranche 2; the dependency bootstrap attempt here stalled
   while fetching `expat` and is not misreported as runtime acceptance.
-- [ ] **Tranche 2 — move Vulkan Skia interop behind borrowed views and
-  transitions.** **Next.** Remove
-  every Vulkan concrete-field access from `skia_bridge.cc`; keep acquire/
-  Ganesh-wrap/semaphore/layout/present state Vulkan-owned. Re-run headless
-  Ganesh plus native Wayland presentation/resize on WSL and Linux/aarch64.
-  Progress: the source migration is complete and the boundary scan finds
-  Vulkan concrete access only in `gpu_vulkan.c`. This remains unchecked until
-  a Skia-enabled configuration compiles the changed C++ bridge and headless plus
-  native-Wayland runtime acceptance is rerun.
-- [ ] **Tranche 3 — migrate D3D12 and recover its state machine from Skia.** Give
+- [x] **Tranche 2 — move Vulkan Skia interop behind borrowed views and
+  transitions.** Completed 2026-09-17 and recorded in `HISTORY.md`. The
+  source migration (removing every Vulkan concrete-field access from
+  `skia_bridge.cc`) was already in place; this session actually re-ran
+  headless Ganesh plus native Wayland presentation/resize on Linux/
+  aarch64 for the first time and found a real, previously-hidden bug: any
+  second Ganesh frame deadlocked forever (a single-frame-in-flight Vulkan
+  fence only the plain, non-Ganesh present path ever re-signaled). Fixed
+  in `crtgfx_gpu_vulkan_end_ganesh()` (`gpu_vulkan.c`) without touching
+  `skia_bridge.cc`, preserving the borrowed-view boundary. Verified both
+  directions (reproduces without the fix, resolves with it): a 5-frame
+  run with a mid-stream resize and a plain 30-frame run both now exit 0;
+  full local `ctest` 128/128. Also hardened
+  `tools/build_stage_04_gfx_media.py`'s own packaged-binary and
+  standalone-example smokes to actually drive multiple frames plus a
+  resize (they used to run only one frame, which is exactly what hid this
+  bug), each now under an explicit timeout so a future regression fails
+  fast instead of hanging CI. WSL was not available on this host this
+  session -- Tranche 1's own WSL Windows/x86_64 boundary/GPU coverage
+  still stands, but WSL Skia/native-Wayland re-verification is left for a
+  host that has both available together.
+- [ ] **Tranche 3 — migrate D3D12 and recover its state machine from Skia.** **Next.** Give
   `gpu_win32.c` private state, move HWND extraction into it, and replace
   Skia's direct command-list/fence/per-buffer/submitted mutations with a
   backend transition. Verify WARP/hardware, window presentation, resize, and

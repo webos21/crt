@@ -10,6 +10,117 @@ substantive update.
 
 ## 2026-09-17
 
+- **Completed backend-boundary Tranche 2 (Vulkan/Skia interop behind
+  borrowed views) after finding and fixing a real, previously-hidden
+  multi-frame Ganesh/Vulkan deadlock on Linux/aarch64.** The source
+  migration itself (removing every Vulkan concrete-field access from
+  `skia_bridge.cc`) was already complete going into this session; what
+  remained was the actual headless-plus-native-Wayland presentation/
+  resize re-run TODO.md's own Tranche 2 entry required, which had never
+  been driven for real on this host. Reconfigured the local
+  `out/linux-host-ninja-debug` tree with Skia and native-Wayland enabled
+  (already-fetched artifacts reused, no fresh external dependency
+  bootstrap needed) and rebuilt `crtgfx_skia_gpu_window_demo`/
+  `crtgfx_skia_gpu_offscreen_smoke`. Headless Ganesh passed immediately.
+  A live desktop-session run of the window demo first failed with
+  `CRTGFX_ERROR_UNSUPPORTED` (-2) purely from this sandbox's own socket
+  isolation from the real `wayland-0`/Vulkan-ICD desktop session (not a
+  real bug); running with host process permissions let the same binary
+  connect and present a real Ganesh-drawn frame.
+
+  Added an optional scripted `resize-width resize-height` pair to
+  `tools/skia_gpu_window_demo.cc` (`libcrtgfx/tools/skia_gpu_window_demo.cc`)
+  so an automated run can drive a real `crtgfx_gpu_surface_resize()` mid-
+  stream without needing compositor-level window-management automation
+  (GNOME's D-Bus Eval was disabled and XTest-synthesized Alt+F8 resize
+  never reached the Wayland-secured compositor; an LLDB-injected resize
+  also proved impractical -- this session's AArch64 dynamic-loader
+  tracepoint kept re-stopping before the inferior reached `main`).
+  Running the rebuilt demo for more than one frame (`crtgfx_skia_gpu_
+  window_demo 2`, with or without a resize) hung indefinitely after the
+  first presented frame. GDB (launched as the direct parent, since this
+  host's `ptrace_scope=1` blocks attaching to an already-running PID)
+  caught the main thread mid-hang, `catch`-free this time via a plain
+  `run`/`SIGINT`/`thread apply all bt` sequence: blocked inside
+  `crtgfx_gpu_vulkan_surface_state_acquire()`
+  (`libcrtgfx/src/arch/linux/gpu_vulkan.c:1363`)'s own `vkWaitForFences()`
+  call on `vk_frame_fence`.
+
+  Root cause: that fence is `crtgfx_gpu_vulkan_surface_state_acquire()`'s
+  own single-frame-in-flight gate -- created already-signaled, then reset
+  every acquire so the *next* acquire must wait for it to be signaled
+  again. Only the plain, non-Ganesh present path
+  (`crtgfx_gpu_vulkan_surface_state_clear()`'s own `vkQueueSubmit(...,
+  frame_fence)`) ever re-signals it; the Ganesh path
+  (`crtgfx_skia_gpu_surface_present()`, `libcrtgfx/src/skia_bridge.cc`)
+  lets Ganesh itself own the real submission via
+  `context->submit(GrSyncCpu::kYes)` and never touches `frame_fence` at
+  all. So frame 1's acquire (fence starts signaled) always succeeded and
+  always displayed correctly -- matching every past "it works" visual
+  observation on every host, including this session's own initial
+  Wayland-connect success -- but frame 2's acquire deadlocked forever
+  waiting on a fence nothing would ever signal again. A plain, no-resize
+  2-frame run reproduces it identically to the resize case, so this was
+  never resize-specific; it was simply never exercised because every
+  existing acceptance path (the packaged-binary smoke added for the
+  previous TODO item, the standalone `examples/gfx-skia` rebuild-and-run
+  step, and every manual/interactive demo run on record) only ever ran
+  this demo for exactly one frame or left a human watching a visually-
+  identical "still displaying" deadlock.
+
+  Fixed in `crtgfx_gpu_vulkan_end_ganesh()`
+  (`libcrtgfx/src/arch/linux/gpu_vulkan.c`), the real, existing choke
+  point where Ganesh's ownership of a frame already ends and backend
+  ownership resumes: it now also issues an empty `vkQueueSubmit(queue, 1,
+  &empty_submit_info, frame_fence)` (a real, spec-documented way to
+  signal a fence with no queued work) after clearing `ganesh_wrapped`.
+  By the time this runs, Ganesh's own `GrSyncCpu::kYes` submit has
+  already synchronously blocked until the GPU finished, so the empty
+  submit's fence signal is not a lie -- it completes immediately and
+  correctly represents "nothing outstanding on this Vulkan frame slot"
+  for the next acquire's own wait, exactly like the plain path's real
+  submission already does for itself. Runs unconditionally, covering both
+  the successful-present call site and `crtgfx_skia_wrap_gpu_surface()`'s
+  own wrap-failure call site, since the fence is left reset-but-never-
+  resignaled by acquire() either way. `skia_bridge.cc` itself needed no
+  change -- the fix stays entirely inside the Vulkan owner, preserving
+  Tranche 2's own "no Vulkan concrete access outside `gpu_vulkan.c`"
+  boundary (`rg` confirms only a comment reference to `vkQueueSubmit`
+  remains in `skia_bridge.cc`).
+
+  Verification, both directions: reverted the fix locally and reconfirmed
+  the exact same 2-frame hang before reapplying it. With the fix, a
+  direct run of the rebuilt demo presented 5 frames with a mid-stream
+  `crtgfx_gpu_surface_resize(900, 520)` cleanly (`presented=5`, exit 0), a
+  plain 30-frame run with no resize also exited 0 (`presented=30`), and
+  the original 1-frame packaged-smoke shape still exits 0 unchanged.
+  `crtgfx_skia_gpu_offscreen_smoke` still passes (no headless regression).
+  Full local `ctest`: 128/128 (rebuilt the four Skia-dependent targets
+  that a partial incremental build had left stale -- `crtgfx_skia_raster_
+  smoke`, `crtgfx_skia_cpu_coverage`, `crtgfx_skia_sksl_test`,
+  `crtmedia_frame_skia_smoke` -- to get a real, complete pass rather than
+  four pre-existing "Not Run" gaps).
+
+  Closed the exact acceptance gap that hid this bug for good, not just
+  the bug itself: `tools/build_stage_04_gfx_media.py`'s
+  `run_packaged_binary_smoke()` and the `gfx-skia` call inside
+  `build_example()` now both drive 5 frames plus a real mid-stream resize
+  (`["5", "900", "520"]`) instead of a bare `"1"`, and both now run under
+  an explicit 60s `subprocess` timeout instead of the unbounded
+  `run()`/`subprocess.run()` calls they used before -- a real regression
+  of this exact bug is a genuine GPU-side deadlock, not a slow pass, and
+  an unbounded wait would hang the whole build script (and any CI running
+  it) forever instead of failing fast and legibly. Verified the updated
+  `run_packaged_binary_smoke()` function directly against the real fixed
+  binary (`presented=5` success marker matched, exited cleanly under the
+  new timeout).
+
+  Not available on this host this session: WSL. Tranche 1's own WSL
+  Windows/x86_64 boundary/GPU coverage still stands; this entry closes
+  out the Linux/aarch64 half of Tranche 2's own "WSL and Linux/aarch64"
+  acceptance line, with WSL Skia/native-Wayland re-verification left for
+  whichever host next has both available together.
+
 - **Completed backend-boundary Tranche 1 with fixed operations wrappers,
   private Linux/Vulkan state, owner-local Wayland extraction, and real
   partial-create fault coverage.** Vulkan device and
