@@ -57,47 +57,112 @@ newest entry first) rather than leaving it here.
 
 ## In Progress
 
-Nothing active right now -- see "Upper runtime roadmap" under Planned for
-the natural next step (promote one tranche at a time once its prerequisite
-evidence and acceptance host are available).
+### Finish live GPU presentation evidence before hardware decode
+
+Close the remaining evidence gaps in the existing Ganesh presentation path before starting hardware video decode. This tranche does not add a new graphics backend, change the public `crtgfx` ABI, or promote Graphite. Preserve the accepted backend-object boundary and Host ABI firewall while strengthening the live presentation evidence.
+
+* [ ] **1. Freeze the acceptance scope and deterministic test shape.**
+
+  * Keep Ganesh as the only GPU drawing backend required by this tranche; Graphite remains deferred.
+  * Reuse the existing deterministic Skia reference scene rather than adding a new rendering workload.
+  * Require bounded finite-frame runs with explicit failure/timeout behavior; no interactive-only or visually observed pass is sufficient.
+  * Keep all backend-native state and readback/capture operations inside the owning backend or a narrow non-installed test-control boundary.
+  * Do not change the public `crtgfx` device/surface/window lifetime or ownership contract.
+
+* [ ] **2. Close the macOS/arm64 pixel-exact and resize-plus-Ganesh gaps.**
+
+  * Run the real Metal/CAMetalLayer Ganesh path on macOS/arm64 hardware.
+  * Add deterministic pixel-content verification for the live Ganesh reference scene; replace the existing “looks correct by eye” evidence with machine-checkable expected pixels or bounded channel tolerances.
+  * Exercise Ganesh rendering across a scripted live resize, using the existing `900x520` point request as a deterministic case.
+  * Treat the surface-reported backing-store size as authoritative; do not assume a 1:1 point-to-pixel ratio on Retina displays.
+  * Verify that a frame rendered after resize has the expected content at the new backing extent and presents successfully.
+  * Retain a bounded multi-frame run after the resize to catch drawable/lifetime/synchronization regressions.
+
+* [ ] **3. Close the macOS/x86_64 native live-execution gap.**
+
+  * Configure and build the current tree for native macOS/x86_64, not merely cross-compile it.
+  * Run the focused GPU test and Ganesh offscreen/reference-scene smoke on a real x86_64 macOS host.
+  * Run the real Metal/CAMetalLayer Ganesh window demo for multiple frames and require a clean finite exit.
+  * Exercise a scripted resize while the Ganesh-wrapped live surface is active.
+  * Run the same pixel-exact/reference-scene check used for macOS/arm64 where the host capture/readback mechanism is available.
+  * Record the actual host architecture and Metal device used. Compile-only or Rosetta-only evidence does not close the native x86_64 item.
+
+* [ ] **4. Close the Windows/x64 pixel-exact resize gap.**
+
+  * Use the real D3D12 hardware path as the primary acceptance path; retain WARP as a regression/fallback check rather than replacing hardware evidence.
+  * Render the deterministic Ganesh reference scene to the live swapchain surface.
+  * Perform a scripted mid-stream resize, using `900x520` as the deterministic resize case.
+  * Verify exact or tolerance-bounded pixel content from the post-resize rendered frame before/through presentation.
+  * Prefer a backend-owned GPU readback/test-control path over `PrintWindow`/GDI desktop capture if desktop capture is unreliable.
+  * If a new test-only readback hook is required, keep it private, backend-owned, and opaque to the generic test; do not reopen D3D12 object-layout access.
+  * Require continued multi-frame presentation and a clean exit after the verified resized frame.
+
+* [ ] **5. Preserve Linux/aarch64 as the accepted regression control.**
+
+  * Re-run the existing native Wayland/Vulkan/Ganesh live path if common Ganesh, reference-scene, resize, or test-control code changes during this tranche.
+  * Require the existing 5-frame run with mid-stream `900x520` resize to reach `presented=5` and exit cleanly.
+  * Retain the existing longer no-resize multi-frame run as a fence/submission regression check.
+  * Do not add Linux-only work merely to make the host matrix symmetrical; its existing live presentation evidence is already accepted.
+
+* [ ] **6. Re-run the bounded backend-boundary regression after any test-control changes.**
+
+  * Run `crtgfx-boundary-acceptance` on every host whose backend or private test-control path changed.
+  * Confirm that no pixel-readback or resize verification work reintroduces direct backend-field access into generic tests.
+  * Keep backend-enabled and backend-disabled common-wrapper builds green.
+  * Recheck device-loss/recreation smokes where the same private test-control surface was modified.
+
+* [ ] **7. Record reproducible evidence and close the tranche.**
+
+  * Record the exact host/architecture, GPU/backend, build preset, commands, frame count, resize dimensions, and pixel-verification result for each acceptance run.
+  * Move detailed completed results to `HISTORY.md`; keep `TODO.md` limited to any genuinely open gap.
+  * Do not update `STATUS.md` as part of routine closure unless explicitly requested.
+  * Once all required evidence is green, remove this tranche from `In Progress` and promote **Upper Runtime #2 — Hardware video decode**.
+
+#### Acceptance gate
+
+This tranche is complete when all of the following are true:
+
+* [ ] macOS/arm64 has machine-checkable pixel evidence for the live Ganesh path and a successful Ganesh + live-resize run.
+* [ ] macOS/x86_64 has real native Metal/Ganesh execution evidence, including bounded live presentation and resize.
+* [ ] Windows/x64 has machine-checkable post-resize Ganesh pixel evidence on the real D3D12 path and continues presenting afterward.
+* [ ] Linux/aarch64's already-accepted Vulkan/Wayland multi-frame + resize path remains green after shared test/harness changes.
+* [ ] Generic tests do not regain access to Vulkan, D3D12, or Metal private object layouts.
+* [ ] The public `crtgfx` ABI and existing ownership/lifetime contract are unchanged.
+* [ ] Graphite, hardware decode, zero-copy decoded textures, and build-system superbuild hardening remain outside this tranche.
+
+**Decision:** when this gate is green, treat the existing Ganesh GPU presentation layer as closed foundation evidence and promote **Hardware video decode** into `In Progress`.
 
 ## Planned
 
-### Conditional Scudo production allocator
+### Upper runtime roadmap
 
-Do not promote this tranche until the baseline-validation decision gate records
-a repeatable current-allocator limitation. The completed Skia incident was an
-allocator-domain linkage error, not evidence that the allocator algorithm must
-be replaced.
+The completed cross-host baseline and its exact validation evidence stay in
+[`STATUS.md`](STATUS.md) and [`HISTORY.md`](HISTORY.md); the product boundary
+and dependency order stay in [`docs/runtime_roadmap.md`](docs/runtime_roadmap.md).
+The allocator baseline decision gate is closed: keep the current allocator and
+leave Scudo conditional. Promote one tranche at a time into In Progress when
+its prerequisite evidence and acceptance host are available.
 
-1. **Separate the bootstrap allocator from a production allocator only when
-   measurements justify it.**
-   `libc/src/malloc.c` is a clear, easy-to-audit design for CRT bring-up,
-   but its `malloc()`/`free()`/new-chunk paths are all linear scans
-   (`append_chunk()` walks the whole chunk list to find its tail;
-   `malloc_unlocked()` first-fits linearly; `coalesce_free_blocks()`
-   rescans the whole free list on every `free()`), all under one global
-   `heap_lock` spinlock -- `O(N)` per operation as allocation count `N`
-   grows, a real risk once Skia/FFmpeg/QuickJS/libc++ are all allocating
-   heavily through it. Keep this implementation as the bootstrap/reference/
-   diagnostic allocator; evaluate LLVM's Scudo Hardened Allocator (size-
-   class allocators, per-thread caches, mmap-backed large allocations,
-   built-in quarantine, official standalone build support) as the long-term
-   production allocator -- a natural fit given this project's own Bionic-
-   compatibility framing, since Scudo has been Android's own default
-   allocator since Android 11.
-2. **Decouple allocator regions from Windows fork emulation before any swap.**
-   Replace `__crt_malloc_os_region_count()`/`_base()`/`_size()` with a small,
-   allocator-agnostic heap-region snapshot interface consumed by both Windows
-   fork implementations. Prove the interface first with the current allocator
-   and the many-region fork workload; Scudo cannot be selected until the same
-   contract can enumerate or otherwise preserve every child-visible region.
-3. **Integrate Scudo behind an explicit allocator selection.** Import it with
-   provenance, preserve Bionic-compatible public allocation behavior, keep the
-   bootstrap allocator selectable for bring-up/diagnostics, and run the exact
-   same correctness, fork, performance, RSS, distribution, and upper-runtime
-   workloads against both implementations. Adoption requires measured benefit
-   on the failing baseline without regressing supported hosts.
+1. **Hardware video decode.** Complete Phase A backend bring-up and tests.
+   The current blockers are the Windows D3D11VA configure path, a WSL-hosted
+   binutils 2.46 `ar`/`nm` crash, and an unattempted macOS pass. Preserve a
+   software fallback and report hardware use separately from decode success.
+2. **Zero-copy decoded textures.** Add explicit ownership and synchronization
+   for D3D surfaces, `CVPixelBuffer`/Metal textures, and VAAPI/Vulkan or native
+   Linux surfaces; retain a measured copy fallback where interop is absent.
+3. **Encode and capture.** Build capture, conversion, hardware/software encode,
+   timestamp, and muxing paths on top of the accepted media frame contract.
+4. **Networking and streaming.** Add transport, buffering, back-pressure,
+   reconnect, and protocol integration only after local media timing is stable.
+5. **WebRTC, then JavaScript.** Treat WebRTC as a consumer-driven integration
+   milestone. Build the real QuickJS core and CRT bindings before extending
+   isolated distribution acceptance from `04-gfx-media` to `05-js`; a stage
+   skeleton alone is not completion.
+
+The intended execution order is hardware decode, zero-copy
+interop, encode/capture, networking/streaming, WebRTC, and finally the complete
+JavaScript application-runtime layer.
+
 
 ### Runtime architecture hardening backlog
 
@@ -136,38 +201,41 @@ that had to precede further Upper Runtime expansion is complete (`HISTORY.md`,
     ABI leakage, and retain a baseline suitable for detecting incompatible
     changes between released CRT ABI versions.
 
-### Upper runtime roadmap
+### Conditional Scudo production allocator
 
-The completed cross-host baseline and its exact validation evidence stay in
-[`STATUS.md`](STATUS.md) and [`HISTORY.md`](HISTORY.md); the product boundary
-and dependency order stay in [`docs/runtime_roadmap.md`](docs/runtime_roadmap.md).
-The allocator baseline decision gate is closed: keep the current allocator and
-leave Scudo conditional. Promote one tranche at a time into In Progress when
-its prerequisite evidence and acceptance host are available.
+Do not promote this tranche until the baseline-validation decision gate records
+a repeatable current-allocator limitation. The completed Skia incident was an
+allocator-domain linkage error, not evidence that the allocator algorithm must
+be replaced.
 
-1. **Finish live GPU presentation evidence.** Close the remaining macOS/x86_64
-   live path, pixel-exact macOS checks, resize-plus-Ganesh coverage on macOS,
-   and pixel-exact resize coverage on Windows. Keep Graphite as a later backend
-   rather than part of the current Ganesh acceptance bar.
-2. **Hardware video decode.** Complete Phase A backend bring-up and tests.
-   The current blockers are the Windows D3D11VA configure path, a WSL-hosted
-   binutils 2.46 `ar`/`nm` crash, and an unattempted macOS pass. Preserve a
-   software fallback and report hardware use separately from decode success.
-3. **Zero-copy decoded textures.** Add explicit ownership and synchronization
-   for D3D surfaces, `CVPixelBuffer`/Metal textures, and VAAPI/Vulkan or native
-   Linux surfaces; retain a measured copy fallback where interop is absent.
-4. **Encode and capture.** Build capture, conversion, hardware/software encode,
-   timestamp, and muxing paths on top of the accepted media frame contract.
-5. **Networking and streaming.** Add transport, buffering, back-pressure,
-   reconnect, and protocol integration only after local media timing is stable.
-6. **WebRTC, then JavaScript.** Treat WebRTC as a consumer-driven integration
-   milestone. Build the real QuickJS core and CRT bindings before extending
-   isolated distribution acceptance from `04-gfx-media` to `05-js`; a stage
-   skeleton alone is not completion.
-
-The intended execution order is live GPU evidence, hardware decode, zero-copy
-interop, encode/capture, networking/streaming, WebRTC, and finally the complete
-JavaScript application-runtime layer.
+1. **Separate the bootstrap allocator from a production allocator only when
+   measurements justify it.**
+   `libc/src/malloc.c` is a clear, easy-to-audit design for CRT bring-up,
+   but its `malloc()`/`free()`/new-chunk paths are all linear scans
+   (`append_chunk()` walks the whole chunk list to find its tail;
+   `malloc_unlocked()` first-fits linearly; `coalesce_free_blocks()`
+   rescans the whole free list on every `free()`), all under one global
+   `heap_lock` spinlock -- `O(N)` per operation as allocation count `N`
+   grows, a real risk once Skia/FFmpeg/QuickJS/libc++ are all allocating
+   heavily through it. Keep this implementation as the bootstrap/reference/
+   diagnostic allocator; evaluate LLVM's Scudo Hardened Allocator (size-
+   class allocators, per-thread caches, mmap-backed large allocations,
+   built-in quarantine, official standalone build support) as the long-term
+   production allocator -- a natural fit given this project's own Bionic-
+   compatibility framing, since Scudo has been Android's own default
+   allocator since Android 11.
+2. **Decouple allocator regions from Windows fork emulation before any swap.**
+   Replace `__crt_malloc_os_region_count()`/`_base()`/`_size()` with a small,
+   allocator-agnostic heap-region snapshot interface consumed by both Windows
+   fork implementations. Prove the interface first with the current allocator
+   and the many-region fork workload; Scudo cannot be selected until the same
+   contract can enumerate or otherwise preserve every child-visible region.
+3. **Integrate Scudo behind an explicit allocator selection.** Import it with
+   provenance, preserve Bionic-compatible public allocation behavior, keep the
+   bootstrap allocator selectable for bring-up/diagnostics, and run the exact
+   same correctness, fork, performance, RSS, distribution, and upper-runtime
+   workloads against both implementations. Adoption requires measured benefit
+   on the failing baseline without regressing supported hosts.
 
 ### Windows process signals and Toybox `timeout`
 
