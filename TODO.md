@@ -57,94 +57,22 @@ newest entry first) rather than leaving it here.
 
 ## In Progress
 
-### Finish live GPU presentation evidence before hardware decode
+### Hardware video decode
 
-Close the remaining evidence gaps in the existing Ganesh presentation path before starting hardware video decode. This tranche does not add a new graphics backend, change the public `crtgfx` ABI, or promote Graphite. Preserve the accepted backend-object boundary and Host ABI firewall while strengthening the live presentation evidence.
+Promoted 2026-09-18 per "Finish live GPU presentation evidence before
+hardware decode"'s own pre-agreed decision, now closed (`HISTORY.md`):
+Windows/x64, macOS/arm64, and Linux/aarch64 all have machine-checkable
+live Ganesh presentation + resize pixel evidence, closing the acceptance
+gate that item existed to satisfy.
 
-* [x] **1. Freeze the acceptance scope and deterministic test shape.**
-  Completed 2026-09-18 and recorded in `HISTORY.md`; the frozen contract
-  itself lives in `docs/libcrtgfx_live_presentation_acceptance.md`.
-  `libcrtgfx/tools/skia_gpu_window_demo.cc` (one source, unchanged per
-  backend) now performs a real `SkSurface::readPixels()` pixel check against
-  the shared reference scene on a deterministic canonical frame (the first
-  post-resize frame when a resize is exercised, otherwise the first frame),
-  and prints one machine-readable `RESULT backend=... requested_size=...
-  backing_size=... frames_requested=... frames_presented=... resize_frame=...
-  pixel_check=... post_resize_present=... clean_exit=...` line every run.
-  Validated on Linux/aarch64 (this tranche's reference host, not a new gap):
-  both the 5-frame `900x520` resize case and the plain 5-frame case report
-  `pixel_check=pass`/`clean_exit=pass`; re-ran the existing 30-frame no-
-  resize fence/submission check and `crtgfx-boundary-acceptance` (7/7 + 2/2)
-  per Steps 5/6, both still pass. No public ABI or object-boundary change.
-
-* [x] **2. Close the macOS/arm64 pixel-exact and resize-plus-Ganesh gaps.**
-  Completed 2026-09-18 and recorded in `HISTORY.md`, on the real
-  `docs/libcrtgfx_live_presentation_acceptance.md` contract Step 1 froze
-  (no new design, no new readback hook). Three real Metal/CAMetalLayer runs
-  on macOS/arm64 hardware, all `pixel_check=pass`/`clean_exit=pass`:
-  * **M2 (baseline, no resize):** `crtgfx_skia_gpu_window_demo 5` --
-    `requested_size=800x480 backing_size=1600x960 frames_presented=5
-    resize_frame=n/a`.
-  * **M3 (the tranche's core acceptance case):** `crtgfx_skia_gpu_window_demo
-    5 900 520` -- `requested_size=900x520 backing_size=1800x1040
-    resize_frame=2 post_resize_present=pass`. Confirms the frozen contract's
-    own "backing size is authoritative, never assume 1:1 point-to-pixel"
-    rule against real Retina hardware.
-  * **M4 (regression closure, not new evidence):** 30-frame no-resize
-    stability run (`frames_presented=30`, same pass fields); the existing
-    offscreen Ganesh smoke (reference scene, resize, device-loss/
-    recreation, pixel readback, all `ok`); and `crtgfx-boundary-acceptance`
-    (7/7 enabled + 2/2 backend-disabled, zero failures).
-
-* ~~**3. Close the macOS/x86_64 native live-execution gap.**~~ **Retired
-  2026-09-18, not completed as originally scoped -- see `HISTORY.md`.**
-  macOS acceptance for this tranche is Apple-Silicon-only (macOS 27+/arm64);
-  native x86_64 live-execution evidence is out of scope rather than an
-  unverified pass.
-
-* [ ] **4. Close the Windows/x64 pixel-exact resize gap.**
-
-  * Use the real D3D12 hardware path as the primary acceptance path; retain WARP as a regression/fallback check rather than replacing hardware evidence.
-  * Render the deterministic Ganesh reference scene to the live swapchain surface.
-  * Perform a scripted mid-stream resize, using `900x520` as the deterministic resize case.
-  * Verify exact or tolerance-bounded pixel content from the post-resize rendered frame before/through presentation.
-  * Prefer a backend-owned GPU readback/test-control path over `PrintWindow`/GDI desktop capture if desktop capture is unreliable.
-  * If a new test-only readback hook is required, keep it private, backend-owned, and opaque to the generic test; do not reopen D3D12 object-layout access.
-  * Require continued multi-frame presentation and a clean exit after the verified resized frame.
-
-* [ ] **5. Preserve Linux/aarch64 as the accepted regression control.**
-
-  * Re-run the existing native Wayland/Vulkan/Ganesh live path if common Ganesh, reference-scene, resize, or test-control code changes during this tranche.
-  * Require the existing 5-frame run with mid-stream `900x520` resize to reach `presented=5` and exit cleanly.
-  * Retain the existing longer no-resize multi-frame run as a fence/submission regression check.
-  * Do not add Linux-only work merely to make the host matrix symmetrical; its existing live presentation evidence is already accepted.
-
-* [ ] **6. Re-run the bounded backend-boundary regression after any test-control changes.**
-
-  * Run `crtgfx-boundary-acceptance` on every host whose backend or private test-control path changed.
-  * Confirm that no pixel-readback or resize verification work reintroduces direct backend-field access into generic tests.
-  * Keep backend-enabled and backend-disabled common-wrapper builds green.
-  * Recheck device-loss/recreation smokes where the same private test-control surface was modified.
-
-* [ ] **7. Record reproducible evidence and close the tranche.**
-
-  * Record the exact host/architecture, GPU/backend, build preset, commands, frame count, resize dimensions, and pixel-verification result for each acceptance run.
-  * Move detailed completed results to `HISTORY.md`; keep `TODO.md` limited to any genuinely open gap.
-  * Do not update `STATUS.md` as part of routine closure unless explicitly requested.
-  * Once all required evidence is green, remove this tranche from `In Progress` and promote **Upper Runtime #2 — Hardware video decode**.
-
-#### Acceptance gate
-
-This tranche is complete when all of the following are true:
-
-* [x] macOS/arm64 has machine-checkable pixel evidence for the live Ganesh path and a successful Ganesh + live-resize run. Completed 2026-09-18 (Step 2, M2/M3/M4).
-* [ ] Windows/x64 has machine-checkable post-resize Ganesh pixel evidence on the real D3D12 path and continues presenting afterward.
-* [ ] Linux/aarch64's already-accepted Vulkan/Wayland multi-frame + resize path remains green after shared test/harness changes.
-* [ ] Generic tests do not regain access to Vulkan, D3D12, or Metal private object layouts.
-* [ ] The public `crtgfx` ABI and existing ownership/lifetime contract are unchanged.
-* [ ] Graphite, hardware decode, zero-copy decoded textures, and build-system superbuild hardening remain outside this tranche.
-
-**Decision:** when this gate is green, treat the existing Ganesh GPU presentation layer as closed foundation evidence and promote **Hardware video decode** into `In Progress`.
+Complete Phase A backend bring-up and tests. The current blockers are the
+Windows D3D11VA configure path, a WSL-hosted binutils 2.46 `ar`/`nm`
+crash, and an unattempted macOS pass. Preserve a software fallback and
+report hardware use separately from decode success. Not yet planned in
+detail -- do that before writing code, matching how the two prior
+tranches (backend-object boundary, live GPU presentation evidence) each
+started with an explicit scope/acceptance-contract step before
+implementation.
 
 ## Planned
 
@@ -154,28 +82,26 @@ The completed cross-host baseline and its exact validation evidence stay in
 [`STATUS.md`](STATUS.md) and [`HISTORY.md`](HISTORY.md); the product boundary
 and dependency order stay in [`docs/runtime_roadmap.md`](docs/runtime_roadmap.md).
 The allocator baseline decision gate is closed: keep the current allocator and
-leave Scudo conditional. Promote one tranche at a time into In Progress when
-its prerequisite evidence and acceptance host are available.
+leave Scudo conditional. Hardware video decode (the roadmap's first tranche)
+is now active above; promote the remaining tranches one at a time into
+In Progress when their own prerequisite evidence and acceptance host are
+available.
 
-1. **Hardware video decode.** Complete Phase A backend bring-up and tests.
-   The current blockers are the Windows D3D11VA configure path, a WSL-hosted
-   binutils 2.46 `ar`/`nm` crash, and an unattempted macOS pass. Preserve a
-   software fallback and report hardware use separately from decode success.
-2. **Zero-copy decoded textures.** Add explicit ownership and synchronization
+1. **Zero-copy decoded textures.** Add explicit ownership and synchronization
    for D3D surfaces, `CVPixelBuffer`/Metal textures, and VAAPI/Vulkan or native
    Linux surfaces; retain a measured copy fallback where interop is absent.
-3. **Encode and capture.** Build capture, conversion, hardware/software encode,
+2. **Encode and capture.** Build capture, conversion, hardware/software encode,
    timestamp, and muxing paths on top of the accepted media frame contract.
-4. **Networking and streaming.** Add transport, buffering, back-pressure,
+3. **Networking and streaming.** Add transport, buffering, back-pressure,
    reconnect, and protocol integration only after local media timing is stable.
-5. **WebRTC, then JavaScript.** Treat WebRTC as a consumer-driven integration
+4. **WebRTC, then JavaScript.** Treat WebRTC as a consumer-driven integration
    milestone. Build the real QuickJS core and CRT bindings before extending
    isolated distribution acceptance from `04-gfx-media` to `05-js`; a stage
    skeleton alone is not completion.
 
-The intended execution order is hardware decode, zero-copy
+The intended execution order is zero-copy
 interop, encode/capture, networking/streaming, WebRTC, and finally the complete
-JavaScript application-runtime layer.
+JavaScript application-runtime layer, continuing on from hardware decode above.
 
 
 ### Runtime architecture hardening backlog

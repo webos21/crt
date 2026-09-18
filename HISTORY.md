@@ -10,6 +10,72 @@ substantive update.
 
 ## 2026-09-18
 
+- **Closed the Windows/x64 pixel-exact resize gap (Step 4) with zero code
+  changes, closing "Finish live GPU presentation evidence before hardware
+  decode" entirely -- macOS/arm64, Linux/aarch64, and Windows/x64 all now
+  have machine-checkable live-presentation pixel evidence.** Followed the
+  same bounded-then-live order the macOS/Linux passes already established,
+  against the same frozen `docs/libcrtgfx_live_presentation_acceptance.md`
+  contract (no new design, no new readback hook, no `PrintWindow`/GDI
+  desktop-capture fallback needed -- the real `SkSurface::readPixels()`
+  against the live D3D12 swapchain-backed Ganesh surface was already
+  sufficient, matching every other backend).
+
+  `cmake --fresh --preset windows-host-ninja-debug`, then re-confirmed the
+  D3D12/Ganesh foundation had not regressed: `cmake --build --target
+  crtgfx-skia-smoke` (its dedicated Skia tree already existed from the
+  backend-boundary tranche, so this was incremental) ran `crtgfx_skia_gpu_
+  offscreen_smoke` clean -- hardware draw/readback, a 2x offscreen resize,
+  real device-loss/recovery via `ID3D12Device5::RemoveDevice()` (the exact
+  vtable-slot bug Tranche 5 fixed, re-confirmed not regressed), and forced-
+  WARP draw/readback, all `ok`.
+
+  Built `crtgfx_skia_gpu_window_demo` in that same dedicated tree and ran
+  the three scripted cases directly (`Start-Process` with the tree's own
+  `bin/` on `PATH`, this session's established pattern for a Win32 window-
+  creating executable):
+  - **Baseline, no resize:** `crtgfx_skia_gpu_window_demo 5` --
+    `RESULT backend=d3d12 requested_size=800x480 backing_size=800x480
+    frames_requested=5 frames_presented=5 resize_frame=n/a pixel_check=pass
+    post_resize_present=n/a clean_exit=pass`.
+  - **The tranche's core acceptance case:** `crtgfx_skia_gpu_window_demo 5
+    900 520` -- `RESULT backend=d3d12 requested_size=900x520
+    backing_size=900x520 frames_requested=5 frames_presented=5
+    resize_frame=2 pixel_check=pass post_resize_present=pass
+    clean_exit=pass`. Unlike Retina macOS, Windows' own `backing_size`
+    matches `requested_size` exactly here (no DPI scaling active on this
+    session's display) -- consistent with the frozen contract's own rule
+    that backing size, not a fixed point-to-pixel assumption, is
+    authoritative; it simply happens to be 1:1 on this host.
+  - **Stability regression, no resize:** `crtgfx_skia_gpu_window_demo 30`
+    -- `frames_requested=30 frames_presented=30 pixel_check=pass
+    clean_exit=pass`.
+
+  Closed with `crtgfx-boundary-acceptance`: fresh `02-cxx` distribution
+  generated and `verify_dist.py`-audited, enabled tree 7/7
+  (`crt_binary_dependencies_unit_runs`, `crtgfx_gpu_backend_boundary_unit_
+  runs`, `header_abi_test_runs`, `host_abi_firewall_test_runs`, `host_abi_
+  firewall_fault_test_runs`, `crtgfx_gpu_test_runs`, `crtgfx_synthetic_
+  event_runs`), backend-disabled tree 2/2 -- `crtgfx boundary acceptance:
+  ok`. Both individually re-confirmed via a direct `ctest -R` against the
+  already-built enabled tree.
+
+  Steps 5-6's own preconditions ("if common Ganesh/reference-scene/resize/
+  test-control code changes during this tranche") were never triggered:
+  Windows closed via pure verification against the already-frozen
+  contract, with no shared code or private test-control surface touched
+  -- so Linux/aarch64's own already-accepted evidence needed no re-run,
+  and the `crtgfx-boundary-acceptance` re-run above (done anyway, as part
+  of this same closure) already stands in for Step 6's own regression
+  check. Every acceptance-gate condition is now green: Windows/x64 has
+  machine-checkable post-resize pixel evidence; Linux/aarch64's path is
+  unaffected; generic tests never gained backend-private access
+  (`crtgfx_gpu_backend_boundary_unit_runs` passing is exactly that check);
+  the public `crtgfx` ABI is unchanged (`header_abi_test_runs` passing);
+  Graphite/hardware-decode/zero-copy/superbuild hardening stayed out of
+  scope. Per the tranche's own pre-agreed decision, promoted "Hardware
+  video decode" into `TODO.md`'s `In Progress`.
+
 - **Closed the macOS/arm64 pixel-exact and resize-plus-Ganesh gap (Step 2 of
   "Finish live GPU presentation evidence before hardware decode") on real
   Metal hardware, and retired the macOS/x86_64 native live-execution item
