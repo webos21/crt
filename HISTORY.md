@@ -8,6 +8,65 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-18
+
+- **Established the first green Linux/aarch64 `crtgfx-boundary-acceptance`
+  (Tranche 6) evidence, plus a full live Vulkan/Wayland/Ganesh re-run.**
+  Followed the same bounded-then-live order Tranche 6's own local macOS pass
+  used: `cmake --fresh --preset linux-host-ninja-debug` (a CMake-wiring
+  change earlier landed in this tranche, so a stale cache was not trusted),
+  then `cmake --build --preset linux-host-ninja-debug --target crtgfx-
+  boundary-acceptance`. Result: fresh `02-cxx` distribution generated and
+  `verify_dist.py`-audited, all 7 enabled checks passed
+  (`crt_binary_dependencies_unit_runs`, `crtgfx_gpu_backend_boundary_unit_
+  runs`, `header_abi_test_runs`, `host_abi_firewall_test_runs`,
+  `host_abi_firewall_fault_test_runs`, `crtgfx_gpu_test_runs`,
+  `crtgfx_synthetic_event_runs`), then a genuinely clean, freshly configured
+  `CRTGFX_ENABLE_GPU_BACKEND=OFF`/`CRTGFX_ENABLE_SKIA=OFF`/`CRT_USE_IMPORTED_
+  LIBCXX=OFF` tree built both static and shared common GPU wrappers and
+  passed both backend-disabled checks -- `crtgfx boundary acceptance: ok`.
+  This is the Linux/aarch64 half of the "first green Linux/aarch64 and
+  Windows/x64 matrix evidence" TODO.md's own Tranche 6 entry required;
+  Windows/x64 remains open for whichever host next runs it.
+
+  Beyond that formal minimum, also ran the two further checks Tranche 2's
+  own multi-frame Ganesh/Vulkan deadlock fix (2026-09-17) made worth
+  re-proving specifically on Linux, since a single-frame acceptance is
+  exactly what hid that bug before: headless and live. `cmake --build
+  --target crtgfx-skia-smoke` built a real Skia checkout from scratch in
+  its own dedicated, cache-isolated directory and ran `crtgfx_skia_gpu_
+  offscreen_smoke` there -- passed, confirming the fixed-wrapper ->
+  borrowed-Vulkan-view -> Ganesh -> draw/readback chain still holds after
+  Tranches 5/6. For the live desktop path, reconfigured the main
+  `out/linux-host-ninja-debug` tree with `-DCRTGFX_ENABLE_SKIA=ON
+  -DCRT_USE_IMPORTED_LIBCXX=ON`, pointing `CRTGFX_SKIA_ROOT`/`CRTGFX_SKIA_
+  INSTALL_PREFIX` at the `crtgfx-skia-smoke` tree's own already-fetched-and-
+  built Skia checkout to avoid a second full from-scratch Skia rebuild.
+  Native Wayland's own generated `libxdg-shell-protocol.a` had survived
+  from the previous session's own external/ fetch (untouched by `--fresh`,
+  which only resets the CMake cache, not fetched/built external trees), so
+  the documented "configure -> build crtgfx-wayland-build -> reconfigure"
+  bootstrap dance was not needed this time -- `CRTGFX_HAVE_NATIVE_WAYLAND=1`
+  was already active on the very next configure. Ran the rebuilt
+  `crtgfx_skia_gpu_window_demo 5 900 520` directly on the live desktop
+  session: real Vulkan device creation, real Wayland surface creation, real
+  Ganesh wrap/draw, a mid-stream resize to 900x520, and `presented=5`, exit
+  0 -- the full Vulkan device -> Skia Ganesh -> VkImage -> VkSwapchain ->
+  Wayland surface -> real compositor boundary is alive end to end on this
+  host, not just multi-frame-safe in isolation.
+
+  Closed with a full-workflow regression check: `cmake --workflow --preset
+  linux-host-ninja-debug` (configure -> build -> test, the sticky Skia/
+  imported-libc++ cache values surviving since the preset's own
+  `cacheVariables` do not override them) -- 110/110 tests passed. This
+  workflow's own test preset deliberately excludes `crtgfx_`/`crtmedia_`/
+  `crtjs_`/`*cxx` tests, so it is a baseline PAL/libc regression signal on
+  top of the above, not a substitute for the boundary-acceptance run itself.
+
+  Deliberately left for scheduled/release acceptance rather than this
+  tranche, per Tranche 6's own stated scope: a full FFmpeg rebuild and a
+  predecessor-only isolated `04-gfx-media` distribution run.
+
 ## 2026-09-17
 
 - **Implemented the Tranche 6 cross-host acceptance lane and established its
