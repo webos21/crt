@@ -24,12 +24,29 @@
 // pixel-format plumbing (crtmedia/frame.h, src/frame_convert.c) actually
 // works end to end, not just that it compiles.
 //
+// Tranche 2 (2026-09-18, docs/crtmedia_hardware_decode_acceptance.md)
+// additions, now that macOS/arm64 has a real VideoToolbox green: this
+// test also asserts the *state transitions* of crtmedia_codec_is_
+// hardware_accelerated() itself, not just its final value -- false
+// immediately after decoder creation, true only once the first real
+// hardware frame has actually been transferred to CPU memory, and still
+// true after EOS (closing Tranche 0's own gap 2: the flag used to latch
+// true at device-creation time). The RESULT line's own hw_device_
+// created/hw_pixfmt_offered/hw_frame_observed fields now come from
+// codec_test_control.h's own private crtmedia_codec_test_get_hw_
+// diagnostics() rather than reusing the public boolean as a stand-in for
+// all three -- correcting that boolean's own meaning would otherwise make
+// those two fields collapse to "no" alongside it and silently break the
+// RESULT line's own separately-meaningful reporting.
+//
 // CRTMEDIA_TEST_VIDEO_PATH is a compile-time -D define (libcrtmedia/
 // CMakeLists.txt), matching every other demux_decode_*_test.c's own
 // convention.
 
 #include "crtmedia/codec.h"
 #include "crtmedia/extractor.h"
+
+#include "codec_test_control.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -165,12 +182,15 @@ int main(void) {
     return 1;
   }
 
-  int is_hardware = 0;
+  // Tranche 2's own first required transition: false immediately after
+  // creation, regardless of whether a real hardware device now exists --
+  // device creation and codec open alone must never be enough (Tranche 0's
+  // gap 2). Real device-creation state is still observable separately, via
+  // crtmedia_codec_test_get_hw_diagnostics()'s own hw_device_created below.
+  int is_hardware = 1;
   CHECK(crtmedia_codec_is_hardware_accelerated(video_codec, &is_hardware) == CRTMEDIA_OK,
         "crtmedia_codec_is_hardware_accelerated succeeds");
-  fprintf(
-      stderr, "crtmedia_hw_decode_test: real hardware decode %s on this host\n",
-      is_hardware ? "IS active" : "is NOT active (graceful software fallback)");
+  CHECK(!is_hardware, "hardware_accelerated is false immediately after decoder creation, before any frame is decoded");
 
   uint32_t video_frame_count = 0;
   int64_t last_pts = -1;
@@ -238,6 +258,13 @@ int main(void) {
       if (frame.format == CRTMEDIA_PIXEL_FORMAT_NV12 && !checked_nv12_convert) {
         cpu_transfer_ok = check_nv12_convert(&frame);
         checked_nv12_convert = 1;
+        // Tranche 2's own second required transition: exactly the point
+        // where a real hardware frame has been observed AND successfully
+        // transferred to CPU memory is where hardware_accelerated must
+        // become true -- not one call earlier (device creation) or later.
+        CHECK(crtmedia_codec_is_hardware_accelerated(video_codec, &is_hardware) == CRTMEDIA_OK,
+              "crtmedia_codec_is_hardware_accelerated succeeds after the first hardware frame");
+        CHECK(is_hardware, "hardware_accelerated becomes true right after the first real hardware frame transfers");
       }
       ++video_frame_count;
       crtmedia_frame_release(&frame);
@@ -251,35 +278,48 @@ int main(void) {
     CHECK(checked_nv12_convert, "a real NV12 frame was decoded and convert-checked when hardware decode is active");
   }
 
+  // Tranche 2's own third required transition: still true after EOS --
+  // the flag is sticky for this decoder instance's whole lifetime, not
+  // "was the most recent frame hardware."
+  if (checked_nv12_convert) {
+    int is_hardware_after_eos = 0;
+    CHECK(crtmedia_codec_is_hardware_accelerated(video_codec, &is_hardware_after_eos) == CRTMEDIA_OK,
+          "crtmedia_codec_is_hardware_accelerated succeeds after EOS");
+    CHECK(is_hardware_after_eos, "hardware_accelerated remains true after EOS");
+    is_hardware = is_hardware_after_eos;
+  }
+
+  crtmedia_codec_hw_diagnostics diagnostics;
+  memset(&diagnostics, 0, sizeof(diagnostics));
+  CHECK(crtmedia_codec_test_get_hw_diagnostics(video_codec, &diagnostics) == CRTMEDIA_OK,
+        "crtmedia_codec_test_get_hw_diagnostics succeeds");
+  CHECK(diagnostics.hw_frame_transferred == is_hardware,
+        "private hw_frame_transferred diagnostic agrees with the public hardware_accelerated value");
+
   crtmedia_codec_release(video_codec);
   crtmedia_extractor_release(extractor);
 
   // docs/crtmedia_hardware_decode_acceptance.md's own frozen RESULT line.
-  // `hw_device_created`/`hw_pixfmt_offered` both currently read from
-  // `is_hardware` (crtmedia_codec_is_hardware_accelerated()) -- today's
-  // real semantics of that API (set once av_hwdevice_ctx_create()+
-  // avcodec_open2() succeed, see that doc's own "gap 2") happen to match
-  // exactly what those two fields mean, and `codec.c`'s own get_format()
-  // callback offers hw_pix_fmt unconditionally whenever device creation
-  // succeeded, so the two fields are identical under the current
-  // implementation. `hw_frame_observed` is independent of that API and
-  // of gap 2 entirely: it is derived directly from whether any dequeued
-  // frame's own format was ever CRTMEDIA_PIXEL_FORMAT_NV12 (checked_
-  // nv12_convert), a real, already-public, unambiguous signal that a
-  // frame was actually hardware-resident before download -- once Tranche
-  // 2 fixes gap 2, `is_hardware` and `hw_frame_observed` should always
-  // agree; until then, a run with `hw_device_created=yes` but `hw_frame_
-  // observed=no` is gap 2's own signature made directly visible in real
-  // acceptance evidence, not a bug in this line.
+  // Every hw_* field now comes from the private diagnostics snapshot taken
+  // above, each independently tracked at its own real event (device
+  // creation, pixel-format negotiation, frame observation) rather than
+  // reusing the public hardware_accelerated boolean as a stand-in for all
+  // of them -- Tranche 0's own gap 2 is closed (that boolean now means
+  // exactly "a real hardware frame was transferred", matching diagnostics.
+  // hw_frame_transferred/`is_hardware` exactly), so continuing to alias
+  // hw_device_created/hw_pixfmt_offered to it would have made this line
+  // wrongly report "no" for both the moment gap 2 was fixed.
+  CHECK(diagnostics.hw_frame_observed == (checked_nv12_convert != 0),
+        "private hw_frame_observed diagnostic agrees with the NV12-format-observed signal");
   fprintf(
       stderr,
       "crtmedia_hw_decode_test: RESULT backend=%s hw_requested=%s hw_device_created=%s hw_pixfmt_offered=%s "
       "hw_frame_observed=%s cpu_transfer=%s frame_count=%u fallback=%s eos=%s clean_exit=%s\n",
-      CRTMEDIA_HW_BACKEND_NAME, prefer_hw != 0 ? "yes" : "no", is_hardware ? "yes" : "no",
-      is_hardware ? "yes" : "no", checked_nv12_convert ? "yes" : "no",
+      CRTMEDIA_HW_BACKEND_NAME, diagnostics.hw_requested ? "yes" : "no", diagnostics.hw_device_created ? "yes" : "no",
+      diagnostics.hw_pixfmt_offered ? "yes" : "no", diagnostics.hw_frame_observed ? "yes" : "no",
       cpu_transfer_ok < 0 ? "n/a" : (cpu_transfer_ok ? "pass" : "fail"), video_frame_count,
-      (prefer_hw != 0 && !checked_nv12_convert) ? "yes" : "no", (extractor_eof && video_eof) ? "pass" : "fail",
-      failures == 0 ? "pass" : "fail");
+      (diagnostics.hw_requested && !diagnostics.hw_frame_transferred) ? "yes" : "no",
+      (extractor_eof && video_eof) ? "pass" : "fail", failures == 0 ? "pass" : "fail");
 
   if (failures != 0) {
     fprintf(stderr, "crtmedia_hw_decode_test: %d failure(s)\n", failures);

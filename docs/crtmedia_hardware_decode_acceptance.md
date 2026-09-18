@@ -104,30 +104,32 @@ honestly.
    `./configure`'s own summary output) is explicitly Tranche 1/3/4's own
    job, not this freeze step's.
 
-2. **`crtmedia_codec_is_hardware_accelerated()` does not keep its own
-   documented promise.** Its header comment
-   (`crtmedia/codec.h`) reads: "never a caller-side guess, this reflects
-   what really happened." The implementation does not: `libcrtmedia/src/
-   codec.c` sets `codec->hardware_accelerated = 1` immediately once
-   `avcodec_open2()` succeeds with a non-null `hw_device_ctx` --
-   *before* a single frame has been decoded, and the value is never
-   revisited afterward. A real decoder can legitimately open successfully
-   with a hardware device attached and still never actually decode a
-   single frame into that hardware format (the same file's own comment on
-   `crtmedia_codec_get_format()` already acknowledges this exact
-   possibility: "a real decoder can legitimately decide not to offer the
-   requested hw format at all"). In that case this API would report
-   `hardware_active=1` even though every real decoded frame took the
-   software path -- precisely the failure mode this tranche's own Step 0
-   scope explicitly rules out ("Do not report hardware decode as active
-   merely because `AVHWDeviceContext` creation succeeded"). Fixing this
-   (moving the flag's own true/false decision to the point in
-   `crtmedia_codec_dequeue_output()` where a frame's format is confirmed
-   equal to `hw_pix_fmt` and a hardware-resident frame was actually
-   downloaded) is Tranche 2's own explicit job ("Make hardware-status
-   reporting reflect actual decode activity rather than device
-   availability"), not this freeze step's -- recorded here so it is a
-   known, targeted fix going in, not a surprise found mid-tranche.
+2. **`crtmedia_codec_is_hardware_accelerated()` did not keep its own
+   documented promise. Closed 2026-09-18 (Tranche 2).** Its header
+   comment (`crtmedia/codec.h`) reads: "never a caller-side guess, this
+   reflects what really happened." The implementation did not:
+   `libcrtmedia/src/codec.c` set `codec->hardware_accelerated = 1`
+   immediately once `avcodec_open2()` succeeded with a non-null
+   `hw_device_ctx` -- *before* a single frame had been decoded, and the
+   value was never revisited afterward. A real decoder can legitimately
+   open successfully with a hardware device attached and still never
+   actually decode a single frame into that hardware format (the same
+   file's own comment on `crtmedia_codec_get_format()` already
+   acknowledges this exact possibility: "a real decoder can legitimately
+   decide not to offer the requested hw format at all"). In that case
+   this API would have reported `hardware_active=1` even though every
+   real decoded frame took the software path -- precisely the failure
+   mode this tranche's own Step 0 scope explicitly ruled out ("Do not
+   report hardware decode as active merely because `AVHWDeviceContext`
+   creation succeeded"). Fixed by moving the flag's own true/false
+   decision into `crtmedia_codec_dequeue_output()`, set only once a
+   frame's format is confirmed equal to `hw_pix_fmt` *and* its
+   `av_hwframe_transfer_data()` CPU download has actually succeeded.
+   `crtmedia_codec_flush()` deliberately does not reset it -- the API
+   answers whether this instance has ever used hardware, not whether the
+   immediately previous frame did. Verified for real on macOS/arm64: see
+   `HISTORY.md`'s 2026-09-18 Tranche 2 entry for the exact `RESULT` line
+   and state-transition evidence.
 
 ## State model
 
@@ -139,34 +141,43 @@ paths above:
 | hardware decode requested | `CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE` set on the input `crtmedia_format` |
 | hardware device created | `av_hwdevice_ctx_create()`'s return value inside `crtmedia_codec_create_decoder()` |
 | hardware pixel format selected | `codec->hw_pix_fmt` assigned from `hw_type_for_platform()`'s mapping, offered via `crtmedia_codec_get_format()` |
-| real hardware frame observed | `codec->decode_frame->format == codec->hw_pix_fmt` inside `crtmedia_codec_dequeue_output()` (not yet reflected in `hardware_accelerated` -- gap 2 above) |
-| hardware frame downloaded to CPU | `av_hwframe_transfer_data()` succeeding in that same function |
+| real hardware frame observed | `codec->decode_frame->format == codec->hw_pix_fmt` inside `crtmedia_codec_dequeue_output()`, latched in the private `hw_frame_observed` diagnostic (`codec_test_control.h`) |
+| hardware frame downloaded to CPU | `av_hwframe_transfer_data()` succeeding in that same function -- this is what now actually sets the public `hardware_accelerated` flag |
 | software fallback used | any of the above failing, or the opt-in key unset -- `codec->hw_pix_fmt` stays `AV_PIX_FMT_NONE` |
 
 `hardware_active` (the public `crtmedia_codec_is_hardware_accelerated()`
-value) must mean "a real hardware-backed frame was actually observed and
-downloaded" once Tranche 2 lands -- state four and five above, not state
-two.
+value) means "a real hardware-backed frame was actually observed and
+downloaded" as of Tranche 2 (2026-09-18) -- state four and five above,
+not state two. States one through four are also independently observable
+through the private `crtmedia_codec_hw_diagnostics` struct
+(`libcrtmedia/src/codec_test_control.h`, non-installed, test-only) for a
+caller that needs the full breakdown rather than the one collapsed public
+boolean.
 
 ## ABI decision
 
-The public `crtmedia` ABI stays unchanged for this entire tranche,
-including Tranche 2's own reporting fix: the existing single-bit
-`crtmedia_codec_is_hardware_accelerated()` already answers the one
-question a real caller needs ("did this decoder instance actually use
-hardware"), and fixing *when* its backing field is set is a correctness
-fix, not an API addition. The finer-grained per-run diagnostic breakdown
-Tranche 2 also wants (requested backend, selected backend, frame
-observed, CPU transfer performed, fallback occurred) is test/diagnostic
-reporting, not public API -- it belongs in `hw_decode_test.c`'s own
-stderr output, the same way `libcrtgfx/tools/skia_gpu_window_demo.cc`'s
-`RESULT ...` line reported live-presentation acceptance state without
-adding anything to `crtgfx`'s public headers.
+The public `crtmedia` ABI stayed unchanged through Tranche 2's own
+reporting fix, exactly as planned: `crtmedia_codec_is_hardware_
+accelerated()` kept its existing signature, and fixing *when* its
+backing field is set was a correctness fix, not an API addition. The
+finer-grained per-run diagnostic breakdown Tranche 2 also wanted
+(requested backend, device created, pixel format offered, frame
+observed, CPU transfer performed) landed as `crtmedia_codec_test_get_hw_
+diagnostics()` in a new, private, non-installed header
+(`libcrtmedia/src/codec_test_control.h`) -- test/diagnostic reporting,
+never a new public `crtmedia` header, mirroring `libcrtgfx/src/
+gpu_test_control.h`'s own established role for GPU backend-boundary
+tests. Formalizing this as a real (if private) query function rather
+than deriving every field ad hoc inside the test itself turned out to
+matter concretely: once the public boolean's own meaning changed to
+"frame transferred", `hw_device_created` and `hw_pixfmt_offered` needed
+their own independently-tracked source of truth to keep reporting
+correctly instead of collapsing to "no" alongside it.
 
 ## Result record
 
-Once Tranche 1 lands, `crtmedia_hw_decode_test` prints one additional
-final machine-readable line to stdout, alongside its existing
+Since Tranche 1, `crtmedia_hw_decode_test` prints one additional final
+machine-readable line to stdout, alongside its existing
 `crtmedia_hw_decode_test: ok`/`FAIL ...` output:
 
 ```text
@@ -180,14 +191,20 @@ Field meanings:
 - `hw_requested`: whether `CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE`
   was set to a nonzero value for this run.
 - `hw_device_created`: whether `av_hwdevice_ctx_create()` succeeded;
-  `n/a` when `hw_requested=no`.
+  `n/a` when `hw_requested=no`. Since Tranche 2, tracked independently in
+  `codec->hw_device_created` -- no longer read from the public
+  `hardware_accelerated` value.
 - `hw_pixfmt_offered`: whether the decoder's own format negotiation ever
   offered `hw_pix_fmt` back through `crtmedia_codec_get_format()`; `n/a`
-  when `hw_requested=no`.
+  when `hw_requested=no`. Tracked independently in `codec->hw_pixfmt_
+  offered`, set inside that callback itself.
 - `hw_frame_observed`: whether at least one real decoded frame's format
   equaled `hw_pix_fmt` before download -- the one field distinguishing a
   genuine hardware decode from a device that opened but never decoded
-  through hardware (gap 2 above).
+  through hardware. Tracked independently in `codec->hw_frame_observed`;
+  distinguishing this from `hw_device_created`/`hw_pixfmt_offered` is
+  exactly what let Tranche 0's gap 2 be observed directly in real
+  acceptance evidence before it was fixed.
 - `cpu_transfer`: `pass`/`fail` from `av_hwframe_transfer_data()` on the
   canonical observed hardware frame; `n/a` when no hardware frame was
   ever observed.

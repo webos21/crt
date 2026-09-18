@@ -158,6 +158,18 @@ int main(void) {
   crtmedia_format_release(video_format);
   crtmedia_format_release(audio_format);
 
+  // "Hardware video decode" Tranche 2 acceptance requirement: a decoder
+  // that never set CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE (every real
+  // codec in this file) must report hardware_accelerated=false for its
+  // entire lifetime, never merely "not yet observed". Checked again after
+  // decode below.
+  int video_is_hardware = 1;
+  if (video_codec != NULL) {
+    CHECK(crtmedia_codec_is_hardware_accelerated(video_codec, &video_is_hardware) == CRTMEDIA_OK,
+          "crtmedia_codec_is_hardware_accelerated succeeds for a software-only decoder");
+    CHECK(!video_is_hardware, "software-only video decoder reports hardware_accelerated=false before decode");
+  }
+
   uint32_t video_frame_count = 0;
   uint32_t total_audio_samples = 0;
   int64_t last_video_pts = -1;
@@ -212,6 +224,11 @@ int main(void) {
   CHECK(video_frame_count == 25, "decoded video frame count matches the fixture's real encoded frame count (25)");
   CHECK(total_audio_samples > 30000 && total_audio_samples < 60000,
         "total decoded audio samples are in the real ~1-second range for a 44100 Hz stream");
+  if (video_codec != NULL) {
+    CHECK(crtmedia_codec_is_hardware_accelerated(video_codec, &video_is_hardware) == CRTMEDIA_OK,
+          "crtmedia_codec_is_hardware_accelerated succeeds after decode");
+    CHECK(!video_is_hardware, "software-only video decoder still reports hardware_accelerated=false after decode");
+  }
 
   crtmedia_codec_release(video_codec);
   crtmedia_codec_release(audio_codec);

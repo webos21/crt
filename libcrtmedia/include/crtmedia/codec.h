@@ -102,14 +102,24 @@ crtmedia_result crtmedia_codec_dequeue_output(
  * queued/pending output is now stale). A NULL codec is a no-op. */
 crtmedia_result crtmedia_codec_flush(crtmedia_codec* codec);
 
-/* Real, honest report (2026-09-08, "hardware decode, phase A") of whether
- * `codec` actually ended up using a real hardware decoder on this host --
- * only ever true for a video codec created with CRTMEDIA_FORMAT_KEY_
- * PREFER_HARDWARE_DECODE set (crtmedia/format.h), and only once that
- * request actually succeeded (crtmedia_codec_create_decoder() always
- * falls back to software silently otherwise, matching this project's own
- * "software fallback must remain a first-class path" precedent) -- never
- * a caller-side guess, this reflects what really happened. Returns
+/* Real, honest report (2026-09-08, "hardware decode, phase A"; semantics
+ * corrected 2026-09-18, Tranche 2) of whether `codec` has actually
+ * decoded at least one real hardware-backed frame and transferred it to
+ * CPU memory on this host -- only ever true for a video codec created
+ * with CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE set (crtmedia/
+ * format.h). Becomes true only once a real hardware-resident `AVFrame`
+ * has actually been observed and its `av_hwframe_transfer_data()` CPU
+ * download has actually succeeded -- creating the hardware device and
+ * opening the codec successfully are both deliberately *not* enough on
+ * their own (a decoder can open cleanly with hardware attached and still
+ * never decode a single frame through it), and crtmedia_codec_create_
+ * decoder() always falls back to software silently when hardware isn't
+ * usable at all, matching this project's own "software fallback must
+ * remain a first-class path" precedent. Once true, stays true for the
+ * rest of this decoder instance's lifetime, including across
+ * crtmedia_codec_flush() -- this answers whether the instance has ever
+ * used hardware, not whether the immediately previous frame did. Never a
+ * caller-side guess, this reflects what really happened. Returns
  * CRTMEDIA_ERROR_INVALID_ARGUMENT for a null codec/out_is_hardware,
  * CRTMEDIA_OK with `*out_is_hardware` set to 0 or 1 otherwise. */
 crtmedia_result crtmedia_codec_is_hardware_accelerated(const crtmedia_codec* codec, int* out_is_hardware);

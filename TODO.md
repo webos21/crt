@@ -125,22 +125,26 @@ Use macOS/arm64 as the first-green reference host, then apply the same Phase-A c
 
 ---
 
-* [ ] **2. Harden common Phase-A reporting and lifetime behavior after the macOS first-green.**
-
-  * Make hardware-status reporting reflect actual decode activity rather than device availability.
-  * Emit or expose enough diagnostic state to distinguish:
-
-    * requested backend
-    * selected backend
-    * hardware frame observed
-    * CPU transfer performed
-    * fallback occurred
-  * Keep result reporting machine-readable where practical.
-  * Repeat create/decode/EOS/release cycles to catch stale `AVBufferRef`, `AVFrame`, or platform-object ownership.
-  * Exercise decoder flush/reuse if the existing `crtmedia` API supports it.
-  * Confirm all FFmpeg/VideoToolbox/CoreVideo-owned objects are released through their owning APIs.
-  * Do not free or reinterpret host-owned storage from CRT allocator domains.
-  * Re-run ordinary software decode tests after any common-code change.
+* [x] **2. Harden common Phase-A reporting and lifetime behavior after the macOS first-green.**
+  Completed 2026-09-18 and recorded in `HISTORY.md`. `crtmedia_codec_is_
+  hardware_accelerated()` now becomes true only in `crtmedia_codec_
+  dequeue_output()`, once a real hardware-backed frame has actually been
+  transferred to CPU memory -- closing Tranche 0's own gap 2 (it used to
+  latch true at device-creation time). Verified for real, false
+  immediately after decoder creation and true after the first hardware
+  frame, remaining true through EOS and `crtmedia_codec_flush()`/reuse.
+  The finer-grained six-state diagnostic breakdown moved to a new private,
+  non-installed `libcrtmedia/src/codec_test_control.h`
+  (`crtmedia_codec_test_get_hw_diagnostics()`, mirroring `libcrtgfx/src/
+  gpu_test_control.h`'s own role) rather than staying aliased to the
+  public boolean, so `hw_device_created`/`hw_pixfmt_offered` keep
+  reporting correctly now that the boolean's own meaning changed. New
+  `crtmedia_hw_decode_flush_test`/`crtmedia_hw_decode_lifecycle_test`
+  (flush/seek/reuse; 15 bounded repeated create/decode/release cycles,
+  all real hardware, no hangs) plus two new checks in the existing
+  software-only `crtmedia_extractor_codec_test` (hardware_accelerated
+  stays false before and after decode). Full local `ctest` 132/132. No
+  public `crtmedia` ABI change.
 
 ---
 

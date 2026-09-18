@@ -19,6 +19,8 @@
 
 #include "crtmedia/codec.h"
 
+#include "codec_test_control.h"
+
 #include <libavcodec/avcodec.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/frame.h>
@@ -44,7 +46,26 @@ struct crtmedia_codec {
    * that function's own real fallback-to-software path otherwise). hw_
    * device_ctx/hw_pix_fmt stay NULL/AV_PIX_FMT_NONE on every other real
    * codec instance, matching this project's own "additive, zero risk to
-   * existing behavior" discipline. */
+   * existing behavior" discipline.
+   *
+   * Six-state diagnostic model (2026-09-18, "Hardware video decode"
+   * Tranche 2, docs/crtmedia_hardware_decode_acceptance.md): hw_requested/
+   * hw_device_created/hw_pixfmt_offered/hw_frame_observed are private,
+   * fine-grained state, each latched true the first time its own real
+   * event happens and never reset (matching hardware_accelerated's own
+   * existing "sticks true for the lifetime of this instance" contract) --
+   * exposed only through codec_test_control.h's own private, test-only
+   * crtmedia_codec_test_get_hw_diagnostics(), never through public API.
+   * hardware_accelerated itself is the public crtmedia_codec_is_hardware_
+   * accelerated() value: true only once a real hardware-backed frame has
+   * actually been transferred to CPU memory (crtmedia_codec_dequeue_
+   * output()'s own hw-frame branch) -- device creation and pixel-format
+   * negotiation alone are deliberately NOT enough to set it (Tranche 0's
+   * own gap 2, closed here). */
+  int hw_requested;
+  int hw_device_created;
+  int hw_pixfmt_offered;
+  int hw_frame_observed;
   AVBufferRef* hw_device_ctx;
   enum AVPixelFormat hw_pix_fmt;
   int hardware_accelerated;
@@ -106,6 +127,12 @@ static enum AVPixelFormat crtmedia_codec_get_format(
   const enum AVPixelFormat* p;
   for (p = formats; *p != AV_PIX_FMT_NONE; ++p) {
     if (*p == codec->hw_pix_fmt) {
+      /* hw_pixfmt_offered (Tranche 2): the decoder itself actually
+       * selected the hardware format here, not merely "a device exists" --
+       * distinct from hw_device_created, which only means av_hwdevice_ctx_
+       * create()/avcodec_open2() succeeded. A decoder can legitimately
+       * never reach this line at all (this function's own top comment). */
+      codec->hw_pixfmt_offered = 1;
       return *p;
     }
   }
@@ -163,6 +190,7 @@ crtmedia_result crtmedia_codec_create_decoder(const crtmedia_format* format, crt
     codec->codec_ctx->thread_count = 2;
     codec->codec_ctx->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
     crtmedia_format_get_int32(format, CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE, &prefer_hardware_decode);
+    codec->hw_requested = prefer_hardware_decode != 0;
   } else {
     int32_t sample_rate = 0;
     int32_t channel_count = 0;
@@ -265,7 +293,15 @@ crtmedia_result crtmedia_codec_create_decoder(const crtmedia_format* format, crt
       return CRTMEDIA_ERROR_UNSUPPORTED;
     }
   } else if (codec->hw_device_ctx != NULL) {
-    codec->hardware_accelerated = 1;
+    /* hw_device_created (Tranche 2): device creation and codec open both
+     * succeeded -- this is NOT hardware-decode success and must never set
+     * the public hardware_accelerated flag (Tranche 0's own gap 2). A
+     * decoder can open cleanly with a hardware device attached and still
+     * never actually decode a single frame through it (crtmedia_codec_
+     * get_format()'s own comment); hardware_accelerated only becomes true
+     * in crtmedia_codec_dequeue_output(), once a real hardware-backed
+     * frame has actually been transferred to CPU memory. */
+    codec->hw_device_created = 1;
   }
 
   if (!is_video) {
@@ -476,9 +512,24 @@ crtmedia_result crtmedia_codec_dequeue_output(
        * this frame). av_hwframe_transfer_data() downloads to real CPU
        * memory (this pass's own explicit scope -- zero-copy interop is
        * phase B); av_frame_copy_props() carries pts/color metadata across
-       * since the fresh sw frame starts with none of its own. */
+       * since the fresh sw frame starts with none of its own.
+       *
+       * Tranche 2 (2026-09-18): this is the one real point where the
+       * public hardware_accelerated flag is allowed to become true --
+       * closing Tranche 0's own gap 2 (it used to latch true as soon as
+       * device creation succeeded, before any frame was ever observed).
+       * hw_frame_observed latches the instant a hardware-resident frame is
+       * actually seen, independent of whether the subsequent CPU transfer
+       * below succeeds; hardware_accelerated latches only after that
+       * transfer actually succeeds, matching crtmedia_codec_is_hardware_
+       * accelerated()'s own public promise ("a real hardware-backed frame
+       * was actually observed and downloaded", not merely offered). A
+       * failed transfer returns the existing decode error without setting
+       * either flag's own already-true value back to false -- both are
+       * sticky for this decoder instance's whole lifetime once set. */
       if (codec->hw_pix_fmt != AV_PIX_FMT_NONE && codec->decode_frame->format == codec->hw_pix_fmt) {
         AVFrame* sw_frame = av_frame_alloc();
+        codec->hw_frame_observed = 1;
         if (sw_frame == NULL || av_hwframe_transfer_data(sw_frame, codec->decode_frame, 0) < 0) {
           if (sw_frame != NULL) {
             av_frame_free(&sw_frame);
@@ -486,6 +537,7 @@ crtmedia_result crtmedia_codec_dequeue_output(
           av_frame_unref(codec->decode_frame);
           return CRTMEDIA_ERROR_UNSUPPORTED;
         }
+        codec->hardware_accelerated = 1;
         av_frame_copy_props(sw_frame, codec->decode_frame);
         fill_video_frame(sw_frame, out_video_frame);
       } else {
@@ -513,6 +565,12 @@ crtmedia_result crtmedia_codec_flush(crtmedia_codec* codec) {
   avcodec_flush_buffers(codec->codec_ctx);
   codec->eof_signaled = 0;
   codec->eof_drained = 0;
+  /* Deliberately does not touch hardware_accelerated or any of the private
+   * hw_* diagnostic fields above (Tranche 2): crtmedia_codec_is_hardware_
+   * accelerated() answers whether this decoder instance has ever actually
+   * used hardware, not whether the immediately-previous frame did -- a
+   * seek-then-flush-then-resume within the same instance must not make an
+   * already-true flag lie back to false. */
   return CRTMEDIA_OK;
 }
 
@@ -521,5 +579,18 @@ crtmedia_result crtmedia_codec_is_hardware_accelerated(const crtmedia_codec* cod
     return CRTMEDIA_ERROR_INVALID_ARGUMENT;
   }
   *out_is_hardware = codec->hardware_accelerated;
+  return CRTMEDIA_OK;
+}
+
+crtmedia_result crtmedia_codec_test_get_hw_diagnostics(
+    const crtmedia_codec* codec, crtmedia_codec_hw_diagnostics* out_diagnostics) {
+  if (codec == NULL || out_diagnostics == NULL) {
+    return CRTMEDIA_ERROR_INVALID_ARGUMENT;
+  }
+  out_diagnostics->hw_requested = codec->hw_requested;
+  out_diagnostics->hw_device_created = codec->hw_device_created;
+  out_diagnostics->hw_pixfmt_offered = codec->hw_pixfmt_offered;
+  out_diagnostics->hw_frame_observed = codec->hw_frame_observed;
+  out_diagnostics->hw_frame_transferred = codec->hardware_accelerated;
   return CRTMEDIA_OK;
 }

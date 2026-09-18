@@ -10,6 +10,93 @@ substantive update.
 
 ## 2026-09-18
 
+- **Closed Tranche 0's own gap 2: `crtmedia_codec_is_hardware_
+  accelerated()` now truthfully reports "a real hardware frame was
+  transferred," not "a hardware device was created" ("Hardware video
+  decode" Tranche 2).** With macOS/arm64's first real VideoToolbox green
+  established (Tranche 1), this tranche corrected the one known-but-
+  deferred reporting defect that green run's own evidence had already
+  made directly visible: `libcrtmedia/src/codec.c` used to set `codec->
+  hardware_accelerated = 1` immediately once `avcodec_open2()` succeeded
+  with a hardware device attached -- before a single frame had ever been
+  decoded -- contradicting the API's own documented promise ("never a
+  caller-side guess, this reflects what really happened") and this
+  tranche's own explicit Step 0 scope rule.
+
+  Fixed by moving the flag's own true/false decision into `crtmedia_
+  codec_dequeue_output()`: it now becomes true only once a decoded
+  frame's format is confirmed hardware-resident (`== hw_pix_fmt`) *and*
+  `av_hwframe_transfer_data()`'s own CPU download has actually succeeded.
+  `crtmedia_codec_flush()` deliberately does not reset it -- the API
+  answers whether an instance has ever used hardware, not whether the
+  immediately previous frame did. The public `crtmedia` ABI is
+  unchanged; only the header comment was sharpened to describe the
+  corrected trigger point precisely.
+
+  A real, non-obvious implementation consequence the reviewing pass
+  caught before it shipped: `crtmedia_hw_decode_test`'s own `RESULT`
+  line had been deriving `hw_device_created`/`hw_pixfmt_offered` from the
+  *old* `hardware_accelerated` value as a stand-in, since under the old
+  (buggy) semantics all three happened to be set at the same instant.
+  Fixing the boolean's own meaning without also separating those two
+  fields would have silently collapsed them to `no` alongside it,
+  breaking the RESULT line's own separately-meaningful reporting the
+  moment the real bug was fixed. Addressed by adding a new private,
+  non-installed `libcrtmedia/src/codec_test_control.h`
+  (`crtmedia_codec_hw_diagnostics`/`crtmedia_codec_test_get_hw_
+  diagnostics()`), mirroring `libcrtgfx/src/gpu_test_control.h`'s own
+  established role for GPU backend-boundary tests: `hw_requested`/`hw_
+  device_created`/`hw_pixfmt_offered`/`hw_frame_observed` are each now
+  tracked as their own private field on `struct crtmedia_codec`, latched
+  at their own real event (format-key read, `av_hwdevice_ctx_create()`
+  success, `crtmedia_codec_get_format()` actually selecting the hardware
+  format, and the frame-format check respectively) and exposed only
+  through this test-only header -- never through public `crtmedia` API,
+  never seeing an FFmpeg type.
+
+  New real-hardware test coverage, all verified on macOS/arm64:
+
+  - `crtmedia_hw_decode_test` (extended): asserts the state
+    *transitions*, not just the final value -- `hardware_accelerated`
+    false immediately after decoder creation, true right after the first
+    real hardware frame transfers, still true after EOS. Final `RESULT`
+    line, exactly matching the value predicted before implementation:
+    `RESULT backend=videotoolbox hw_requested=yes hw_device_created=yes
+    hw_pixfmt_offered=yes hw_frame_observed=yes cpu_transfer=pass
+    frame_count=25 fallback=no eos=pass clean_exit=pass`.
+  - `crtmedia_hw_decode_flush_test` (new): the first real exercise of
+    `crtmedia_extractor_seek_to()` in this project's own test suite --
+    decodes the fixture once (25 frames, real hardware), seeks the
+    extractor back to the beginning, flushes the same codec instance,
+    and decodes it again through that same instance (25 fresh frames,
+    fresh timestamps, real hardware frames observed again, `hardware_
+    accelerated` unchanged throughout). Confirmed for real: both passes
+    25/25 frames, `flush_preserved_flag=yes`.
+  - `crtmedia_hw_decode_lifecycle_test` (new): 15 bounded create-extractor
+    -> create-decoder -> decode-to-EOS -> release-everything cycles,
+    requiring every iteration to agree with the first on whether hardware
+    was active (a flip would mean a stale hardware context leaking
+    across instances). Specifically exists to catch a recurrence of
+    Tranche 1's own real `pthread_once` ABI-mismatch deadlock, which
+    would have shown up as exactly this shape (an early iteration
+    hanging, or hardware availability flickering across iterations).
+    Confirmed for real: `iterations=15 hardware_iterations=15`, no hangs,
+    matching this tranche's own explicit "keep longer endurance/leak
+    investigation outside routine CTest unless a real failure shows it
+    is needed" scope limit -- none did.
+  - `crtmedia_extractor_codec_test` (2 new checks): a decoder that never
+    sets `CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE` now explicitly
+    asserts `hardware_accelerated=false` both before and after decode,
+    not just implicitly by never exercising the hardware path.
+
+  Verified for real end to end on macOS/arm64: no FFmpeg rebuild was
+  needed (this tranche changed only `libcrtmedia`, matching its own
+  explicit scope limit); full local `ctest` 132/132, including all three
+  hardware-decode tests and the software-only regression. No `CVPixelBuffer`
+  exposure, Metal texture interop, zero-copy, new codecs, hardware encode,
+  or Windows/Linux work was introduced, matching this tranche's own
+  explicit exclusions.
+
 - **Established the first real hardware-decode green on macOS/arm64 with
   VideoToolbox ("Hardware video decode" Tranche 1), after finding and
   fixing a genuine, previously-unseen `pthread_once` ABI-mismatch

@@ -783,6 +783,12 @@ if(CRTMEDIA_ENABLE_FFMPEG)
   target_link_libraries(crtmedia_hw_decode_test PRIVATE crt_build_flags crtmedia)
   target_include_directories(crtmedia_hw_decode_test PRIVATE
     "${CMAKE_SOURCE_DIR}/libc/include"
+    # codec_test_control.h is private and non-installed, but backend-
+    # neutral (2026-09-18, "Hardware video decode" Tranche 2): the test
+    # can query the fine-grained hardware-decode diagnostic state without
+    # seeing any FFmpeg type or the concrete crtmedia_codec layout --
+    # mirrors libcrtgfx/src/gpu_test_control.h's own established role.
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
   )
   target_compile_definitions(crtmedia_hw_decode_test PRIVATE
     CRTMEDIA_TEST_VIDEO_PATH="${CMAKE_SOURCE_DIR}/libcrtmedia/assets/test_video.mp4"
@@ -824,6 +830,65 @@ if(CRTMEDIA_ENABLE_FFMPEG)
     PASS_REGULAR_EXPRESSION "crtmedia_hw_decode_test: ok"
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_hw_decode_test_runs)
+
+  # crtmedia_hw_decode_flush_test / crtmedia_hw_decode_lifecycle_test:
+  # "Hardware video decode" Tranche 2, items 6/7 (2026-09-18) -- see each
+  # test source's own top comment. Identical build/link shape to
+  # crtmedia_hw_decode_test just above (same core API, same real MP4
+  # fixture, same private codec_test_control.h access), deliberately kept
+  # as their own separate executables/CTest entries rather than growing
+  # that test's own main() further, matching demux_decode_test.c's own
+  # sibling-file-per-scenario convention in this same directory.
+  foreach(CRTMEDIA_HW_EXTRA_TEST crtmedia_hw_decode_flush_test crtmedia_hw_decode_lifecycle_test)
+    string(REPLACE "crtmedia_hw_decode_" "" CRTMEDIA_HW_EXTRA_TEST_SUFFIX "${CRTMEDIA_HW_EXTRA_TEST}")
+    add_executable(${CRTMEDIA_HW_EXTRA_TEST}
+      ${CRT_STARTUP_OBJECTS}
+      tests/hw_decode_${CRTMEDIA_HW_EXTRA_TEST_SUFFIX}.c
+    )
+    target_link_libraries(${CRTMEDIA_HW_EXTRA_TEST} PRIVATE crt_build_flags crtmedia)
+    target_include_directories(${CRTMEDIA_HW_EXTRA_TEST} PRIVATE
+      "${CMAKE_SOURCE_DIR}/libc/include"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_compile_definitions(${CRTMEDIA_HW_EXTRA_TEST} PRIVATE
+      CRTMEDIA_TEST_VIDEO_PATH="${CMAKE_SOURCE_DIR}/libcrtmedia/assets/test_video.mp4"
+    )
+    target_link_libraries(${CRTMEDIA_HW_EXTRA_TEST} PRIVATE crt_compiler_rt_builtins)
+    target_link_options(${CRTMEDIA_HW_EXTRA_TEST} PRIVATE
+      -nostdlib
+      -nostartfiles
+      -nodefaultlibs
+    )
+    if(CRT_TARGET_OS STREQUAL "macos")
+      target_link_options(${CRTMEDIA_HW_EXTRA_TEST} PRIVATE
+        -Wl,-e,_start
+        -Wl,-dead_strip
+      )
+      target_link_libraries(${CRTMEDIA_HW_EXTRA_TEST} PRIVATE c m dl cxx)
+      target_link_libraries(${CRTMEDIA_HW_EXTRA_TEST} PRIVATE System)
+    elseif(CRT_TARGET_OS STREQUAL "linux")
+      target_link_options(${CRTMEDIA_HW_EXTRA_TEST} PRIVATE
+        -Wl,-e,_start
+        -Wl,--gc-sections
+      )
+    elseif(CRT_TARGET_OS STREQUAL "windows")
+      target_link_options(${CRTMEDIA_HW_EXTRA_TEST} PRIVATE
+        -Wl,/entry:mainCRTStartup
+        -Wl,/subsystem:console
+        -Wl,/OPT:REF
+      )
+      target_link_libraries(${CRTMEDIA_HW_EXTRA_TEST} PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+    endif()
+    crt_link_startup_end_objects(${CRTMEDIA_HW_EXTRA_TEST})
+    add_dependencies(${CRTMEDIA_HW_EXTRA_TEST} c crt1 crtmedia)
+
+    add_test(NAME ${CRTMEDIA_HW_EXTRA_TEST}_runs COMMAND ${CRTMEDIA_HW_EXTRA_TEST})
+    set_tests_properties(${CRTMEDIA_HW_EXTRA_TEST}_runs PROPERTIES
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+      PASS_REGULAR_EXPRESSION "${CRTMEDIA_HW_EXTRA_TEST}: ok"
+    )
+    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS ${CRTMEDIA_HW_EXTRA_TEST}_runs)
+  endforeach()
 
   # crtmedia_playback_pipeline_test: TODO.md's upper-runtime roadmap
   # "Finish the software player" step's own last remaining piece -- a
