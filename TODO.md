@@ -95,134 +95,33 @@ Use macOS/arm64 as the first-green reference host, then apply the same Phase-A c
 
 ---
 
-* [ ] **1. Establish the first real hardware-decode green on macOS/arm64 with VideoToolbox.**
-  **IN PROGRESS, paused 2026-09-18 mid-session -- blocked on a real, reproducible
-  deadlock, not yet root-caused.** Uncommitted working-tree changes so far
-  (all still believed correct/needed, none reverted):
-  - `porting/recipes/ffmpeg.json` (macOS `target_overrides`): added
-    `--enable-videotoolbox`, `--enable-hwaccel=h264_videotoolbox`, and
-    `--extra-cflags=-fcrt-real-apple-sdk` (the last one needed because
-    `check_apple_framework`'s own configure-time probe for CoreFoundation/
-    CoreMedia/CoreVideo/VideoToolbox needs real Apple SDK headers, which
-    `tools/crt-cc`'s ordinary `-nostdinc` sysroot mode does not expose --
-    confirmed via a real `ERROR: videotoolbox requested, but not all
-    dependencies are satisfied` configure failure without it). Verified for
-    real: a from-scratch `port-rebuild-ffmpeg` (after manually deleting the
-    stale previously-installed `libav*`/`libsw*` headers and `.a` files
-    under `out/macos-host-ninja-debug/port-tests/install` -- see the
-    separate infra-gap note below for why that manual cleanup was needed)
-    configures and builds cleanly, with `./configure`'s own summary
-    confirming `Enabled hwaccels: h264_videotoolbox`.
-  - `libcrtmedia/CMakeLists.txt`: added `-framework CoreFoundation` to
-    `CRTMEDIA_MACOS_FRAMEWORKS` (was missing; `VideoToolbox`/`CoreVideo`/
-    `CoreMedia` were already there from the original 2026-09-08 landing).
-    Confirmed necessary via a real link failure (`_kCFAllocatorDefault`,
-    `_kCFTypeDictionaryKeyCallBacks`, `___CFConstantStringClassReference`,
-    ... undefined, referenced from `libavcodec.a[videotoolbox.o]`/
-    `libavutil.a[hwcontext_videotoolbox.o]`) before adding it; link
-    succeeds cleanly after.
-  - `libcrtmedia/tests/hw_decode_test.c`: implemented the frozen `RESULT
-    ...` line from `docs/crtmedia_hardware_decode_acceptance.md` (backend
-    name, `hw_requested`/`hw_device_created`/`hw_pixfmt_offered` from
-    `crtmedia_codec_is_hardware_accelerated()`, `hw_frame_observed`/
-    `cpu_transfer` derived independently from whether any decoded frame's
-    own format was `CRTMEDIA_PIXEL_FORMAT_NV12` -- see that doc's own
-    "Result record" section for the exact field semantics and why `hw_
-    frame_observed` deliberately does not depend on gap 2's still-open
-    bug). Verified for real against the *original*, pre-hwaccel FFmpeg
-    build (before the recipe change): printed `RESULT backend=videotoolbox
-    hw_requested=yes hw_device_created=no hw_pixfmt_offered=no hw_frame_
-    observed=no cpu_transfer=n/a frame_count=25 fallback=yes eos=pass
-    clean_exit=pass` -- real, direct confirmation of Tranche 0's own gap 1
-    finding (`av_hwdevice_ctx_create()` itself fails outright with no
-    hwaccel compiled in, not just "decode silently stays software").
-
-  **Blocking bug, found but not yet root-caused**: once FFmpeg is rebuilt
-  with the hwaccel enabled and `crtmedia_hw_decode_test` is relinked against
-  it, running the test hangs indefinitely (confirmed via `sample`: 889/889
-  stack samples pinned in `main -> avcodec_find_decoder_by_name ->
-  pthread_once -> crt_once_begin -> sched_yield/__crt_wait32`, i.e. this
-  project's own spin-then-futex-wait `pthread_once` implementation,
-  `libc/include/private/crt_atomic.h`'s `crt_once_begin()`/`crt_once_
-  complete()`). The process is single-threaded at the time of the hang (the
-  `sample` call graph shows only one live thread), which rules out an
-  ordinary cross-thread wait for a slow initializer -- the only way this
-  specific implementation (CAS 0->1 succeeds and runs the callback, or CAS
-  fails and spins/waits for state to reach 2) can hang forever on one thread
-  is if that same thread calls `pthread_once()` reentrantly on the *same*
-  `once_control` from inside its own not-yet-complete callback: the
-  reentrant call's CAS fails (state is already 1, set by this same thread),
-  so it waits for state 2, which only the outer, still-blocked call would
-  ever set. This is textbook reentrant-`pthread_once`-is-UB territory, so it
-  may well be a genuine FFmpeg-internal pattern (e.g. hwaccel registration
-  looking up its paired decoder by name, `h264_videotoolbox_hwaccel_
-  select="h264_decoder"` from `configure`, from *within* the same lazy
-  codec-registration `pthread_once` callback `avcodec_find_decoder()`/`_by_
-  name()` share) that would deadlock on a real glibc/musl too, not
-  necessarily a bug in this project's own libc -- **not yet confirmed
-  either way**. An `lldb` session (breakpoint on `pthread_once`, batch
-  script at the point of pausing) had matched two distinct locations (real
-  Apple's dynamic `libsystem_pthread.dylib` one -- hit several times
-  harmlessly during ordinary `dyld`/`libxpc` process-startup initializers,
-  now reachable at all only because linking real `-framework
-  CoreFoundation` pulls in real `libxpc` transitively -- and this project's
-  own static one, not yet isolated) when the session was paused; next step
-  is to isolate a breakpoint on *only* this project's own `pthread_once`
-  symbol (delete/disable the dynamic-library location, or set an
-  address-based breakpoint) and continue until the real hang, to get the
-  exact FFmpeg call site making the reentrant call. `lldb`/debuggee
-  processes from that session were killed before pausing; nothing left
-  running.
-
-  **Separate, real, confirmed infra gap found and worked around manually
-  (not yet fixed generally, and not this tranche's own job to fix)**:
-  `tools/crt-port-build.py --rebuild` only deletes a port's own install
-  *stamp*, not its previously-installed files, while `tools/crt-cc`
-  unconditionally prepends `-I${CRT_PORT_INCLUDE_DIR}` (the shared
-  `port_prefix/include`) ahead of every other search path on every compile.
-  For an ordinary single-library port this is harmless (nothing stale to
-  find), but FFmpeg's own internal cross-library quote-includes (e.g.
-  `libavformat/avformat.c` including `libavutil/frame.h`) can resolve to a
-  *stale, previously-installed, public-headers-only* copy at
-  `port_prefix/include/libavutil/...` instead of the fresh, complete
-  source-tree copy on a **rebuild** specifically (confirmed for real: `make`
-  failed with `fatal error: 'intmath.h' file not found` /
-  `'aarch64/intreadwrite.h' file not found`, both genuine private/internal
-  FFmpeg headers that only exist in the source tree, never installed).
-  Worked around this session by manually `rm -rf`-ing the stale
-  `port_prefix/include/libav*`, `include/libsw*`, `lib/libav*.a`,
-  `lib/libsw*.a`, and their `lib/pkgconfig/*.pc` files before each
-  `port-rebuild-ffmpeg`. A general fix (e.g. `--rebuild` also clearing a
-  port's own previous install output, or excluding a port's own
-  destination from its own `CRT_PORT_INCLUDE_DIR` while building itself) is
-  real follow-up work but out of scope for this tranche -- flag separately
-  if picking this up.
-
-  **To resume**: `out/macos-host-ninja-debug`'s FFmpeg (`port-tests/
-  install`) already has the hwaccel-enabled build installed from this
-  session; `crtmedia_hw_decode_test` is already built and linked against
-  it. Re-running it will reproduce the hang directly (no rebuild needed) --
-  start there with the `lldb` isolation step above.
-
-  * Update the macOS FFmpeg recipe/configuration only as much as required to enable H.264 VideoToolbox hardware acceleration.
-  * Because FFmpeg is built with a narrow `--disable-everything` policy, verify from the configure result that the required VideoToolbox H.264 hwaccel is actually enabled.
-  * Perform a fresh FFmpeg build rather than relying on an existing software-only artifact.
-  * Build `libcrtmedia` against the resulting FFmpeg package.
-  * Run the existing hardware-decode test on a real Apple Silicon Mac.
-  * Require:
-
-    * hardware decode requested
-    * VideoToolbox device/context successfully initialized
-    * VideoToolbox hardware pixel format actually selected
-    * at least one real hardware-backed frame observed
-    * hardware frame successfully transferred to CPU memory
-    * expected decoded frame count reached
-    * timestamps remain valid/monotonic
-    * downloaded NV12/YUV data passes the existing image-content validation
-    * clean EOS
-    * clean destruction with no ownership/lifetime fault
-  * Run the same fixture with hardware preference disabled and confirm that the existing software-decode path remains green.
-  * Run the fixture with hardware preferred but unavailable/disabled and confirm clean software fallback rather than decode failure.
+* [x] **1. Establish the first real hardware-decode green on macOS/arm64 with VideoToolbox.**
+  Completed 2026-09-18 and recorded in `HISTORY.md`. Real hardware decode
+  confirmed active on this host:
+  ```
+  crtmedia_hw_decode_test: RESULT backend=videotoolbox hw_requested=yes hw_device_created=yes hw_pixfmt_offered=yes hw_frame_observed=yes cpu_transfer=pass frame_count=25 fallback=no eos=pass clean_exit=pass
+  ```
+  `porting/recipes/ffmpeg.json` (macOS): enabled `--enable-videotoolbox`/
+  `--enable-hwaccel=h264_videotoolbox`; `libcrtmedia/CMakeLists.txt`: added
+  the missing `-framework CoreFoundation`; `libcrtmedia/tests/hw_decode_
+  test.c`: implemented the frozen `RESULT` line. Along the way, hit and
+  fixed a real deadlock (an FFmpeg-internal `pthread_once`-guarded codec-
+  registration static, laid out per real Apple's `pthread_once_t` while
+  this project's own `pthread_once()` interpreted the same memory with its
+  own different layout, once real Apple headers leaked into the *whole*
+  FFmpeg build via a too-broadly-applied `-fcrt-real-apple-sdk`) by scoping
+  that flag to only the two files that actually need real framework
+  headers, plus two further narrow `config.h` fixes (`HAVE_MACH_ABSOLUTE_
+  TIME`, `HAVE_ARC4RANDOM_BUF`) for the same root cause. Full local `ctest`
+  130/130; the plain software-decode path (`crtmedia_extractor_codec_test`)
+  and the pre-fix "hardware requested but unavailable" fallback (`hw_
+  device_created=no fallback=yes`, captured before the recipe change) are
+  both separately confirmed green. Also found, not fixed (out of this
+  tranche's scope, flagged for follow-up): `tools/crt-port-build.py
+  --rebuild` only clears a port's install stamp, not its previously-
+  installed files, which can cause a multi-library port like FFmpeg to
+  self-collide with its own stale headers via `tools/crt-cc`'s always-
+  prepended `-I${CRT_PORT_INCLUDE_DIR}`.
 
 ---
 

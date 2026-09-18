@@ -10,6 +10,144 @@ substantive update.
 
 ## 2026-09-18
 
+- **Established the first real hardware-decode green on macOS/arm64 with
+  VideoToolbox ("Hardware video decode" Tranche 1), after finding and
+  fixing a genuine, previously-unseen `pthread_once` ABI-mismatch
+  deadlock along the way.** Real hardware decode is now confirmed active
+  on this host:
+  ```
+  crtmedia_hw_decode_test: RESULT backend=videotoolbox hw_requested=yes hw_device_created=yes hw_pixfmt_offered=yes hw_frame_observed=yes cpu_transfer=pass frame_count=25 fallback=no eos=pass clean_exit=pass
+  ```
+
+  Three real changes landed:
+
+  1. `porting/recipes/ffmpeg.json` (macOS `target_overrides`): added
+     `--enable-videotoolbox` and `--enable-hwaccel=h264_videotoolbox`.
+     Tranche 0's own gap 1 finding (no hwaccel was ever enabled, on any
+     host, confirmed from the recipe's own historical configure-summary
+     notes) is now closed for macOS.
+  2. `libcrtmedia/CMakeLists.txt`: added the missing `-framework
+     CoreFoundation` to `CRTMEDIA_MACOS_FRAMEWORKS` -- `VideoToolbox`/
+     `CoreVideo`/`CoreMedia` were already there from the original
+     2026-09-08 landing, but `videotoolbox.c`'s/`hwcontext_videotoolbox.c`'s
+     own real `CFDictionary`/`CFAllocator`/`CFString` usage
+     (`kCFAllocatorDefault`, `kCFTypeDictionaryKeyCallBacks`,
+     `__CFConstantStringClassReference`, ...) needs CoreFoundation
+     directly, confirmed via a real undefined-symbol link failure before
+     adding it.
+  3. `libcrtmedia/tests/hw_decode_test.c`: implemented the `RESULT ...`
+     line Tranche 0 froze (`docs/crtmedia_hardware_decode_acceptance.md`).
+     `hw_device_created`/`hw_pixfmt_offered` read from `crtmedia_codec_
+     is_hardware_accelerated()`; `hw_frame_observed`/`cpu_transfer` are
+     derived independently, from whether any decoded frame's own format
+     was ever `CRTMEDIA_PIXEL_FORMAT_NV12` and from a new return value on
+     the existing `check_nv12_convert()` helper -- deliberately decoupled
+     from the first API, since Tranche 0's own gap 2 (that API's flag is
+     set at device-creation time, not at first-real-frame time) is still
+     open and would otherwise make this line dishonest. Verified for real
+     against the *original*, pre-hwaccel FFmpeg build before any of the
+     fixes below: `hw_device_created=no hw_frame_observed=no fallback=yes`
+     -- direct, real confirmation of gap 1, and separately satisfies this
+     tranche's own "hardware preferred but unavailable falls back cleanly"
+     requirement without needing to synthesize that case artificially.
+
+  Getting from "FFmpeg's own `./configure` accepts the hwaccel flags" to
+  "the test actually runs" took four more real, iteratively-diagnosed
+  fixes, the first of which is the significant one:
+
+  - **A genuine `pthread_once` ABI-mismatch deadlock, not a Tranche-0-
+    predicted issue.** `check_apple_framework`'s own configure-time probe
+    for CoreFoundation/CoreMedia/CoreVideo/VideoToolbox needs real Apple
+    SDK headers, which `tools/crt-cc`'s ordinary `-nostdinc` sysroot mode
+    does not expose (confirmed via a real `ERROR: videotoolbox requested,
+    but not all dependencies are satisfied` configure failure without
+    it). The first fix tried, `--extra-cflags=-fcrt-real-apple-sdk`
+    (`tools/crt-cc`'s own existing sentinel, added 2026-09-09 for
+    `gpu_metal.c`), made `./configure` pass -- but running the resulting
+    `crtmedia_hw_decode_test` then hung indefinitely. `sample` showed
+    889/889 stack samples pinned in a single-threaded process inside
+    `avcodec_find_decoder_by_name -> pthread_once -> crt_once_begin ->
+    sched_yield` (`libc/include/private/crt_atomic.h`'s own spin-then-
+    futex-wait implementation); an `lldb` session isolated the exact call
+    (`avcodec_find_decoder_by_name <- avformat_find_stream_info <-
+    crtmedia_extractor_create <- main`, `once_control=0x100278490`,
+    `init_routine=av_codec_init_static`) and, via a process-level `SIGINT`
+    while it was mid-spin, confirmed it was stuck in the `sched_yield()`
+    branch specifically -- only reachable when the observed state is
+    neither 1 nor 2, i.e. effectively 0, which is inconsistent with a
+    normal reentrant-`pthread_once` explanation (that would show state 1
+    and the `__crt_wait32` branch instead). Root cause: `--extra-cflags`
+    lands in FFmpeg's own *global* `CFLAGS` for the whole build, not just
+    the files that need it, so every FFmpeg translation unit -- including
+    the one defining its internal `pthread_once_t`-typed codec-
+    registration guard -- compiled against *real* Apple headers instead
+    of this project's own, giving that static variable a different
+    layout than the one this project's own `pthread_once()`
+    (`libc/src/pthread.c`) assumes when it reads/writes the same memory --
+    an ABI mismatch, the same class of bug this recipe's own 2026-09-01
+    history entry already found once for a *different* pthread_once call
+    site, now reintroduced project-wide by a too-broad fix. Corrected by
+    scoping the flag narrowly: `porting/recipes/ffmpeg.json` gained a new
+    top-level `"patches"` array (pre-configure, unconditional across
+    hosts -- harmless on Linux/Windows since `CONFIG_VIDEOTOOLBOX` stays
+    off there) adding `$(SUBDIR)hwcontext_videotoolbox.o: CFLAGS +=
+    -fcrt-real-apple-sdk` / `$(SUBDIR)videotoolbox.o: CFLAGS += ...` to
+    `libavutil/Makefile`/`libavcodec/Makefile` (the `$(SUBDIR)` prefix
+    matters: a first attempt with the bare object name silently never
+    matched FFmpeg's own real make targets, confirmed by the identical
+    header-not-found failure recurring unchanged), plus a new macOS
+    `post_configure_patch` stripping `-fcrt-real-apple-sdk` back out of
+    the generated `ffbuild/config.mak`'s own global `CFLAGS` line (the
+    flag is still needed, and kept, in `--extra-cflags` for `./configure`'s
+    own probes -- only the subsequent `make` step's global CFLAGS is
+    stripped).
+  - Stripping the flag from the global build CFLAGS exposed two further,
+    smaller instances of the identical class of gap, both already
+    correctly *detected* during `./configure` (with real headers still
+    present then) but unreachable during the now-narrowly-scoped `make`:
+    `HAVE_MACH_ABSOLUTE_TIME` (`libavutil/timer.h`'s `<mach/mach_time.h>`
+    include, real `fatal error: 'mach/mach_time.h' file not found`) and
+    `HAVE_ARC4RANDOM_BUF` (`libavutil/random_seed.c`, real `error: call to
+    undeclared function 'arc4random_buf'`). Both fixed the same way the
+    pre-existing `HAVE_SYSCTL` patch already does: flip the macro to 0 in
+    `config.h`, routing to the portable fallback FFmpeg's own source
+    already provides (`clock_gettime()`, already `HAVE_CLOCK_GETTIME=1`;
+    `read_random(..., "/dev/urandom")`) instead of adding a fourth
+    scattered real-header carve-out.
+
+  Verified for real, end to end, after all four fixes: a genuinely clean
+  `port-rebuild-ffmpeg` (source tree always re-copied fresh; the *install*
+  destination needed a manual one-time `rm -rf` of stale `libav*`/`libsw*`
+  headers/archives first -- see the separate, unrelated infra-gap note
+  below) configures with `Enabled hwaccels: h264_videotoolbox` and builds
+  with zero errors; `crtmedia_hw_decode_test` links and runs to the
+  `RESULT` line quoted above; full local `ctest` 130/130 (the newly-built
+  FFmpeg-gated targets needed an explicit `ninja` build first -- CTest
+  does not build missing targets itself, not a regression), including
+  `crtmedia_extractor_codec_test_runs` (the same fixture's plain software
+  path, confirming "hardware preference disabled" stays green) and
+  `crtmedia_hw_decode_test_runs` itself. No public `crtmedia` ABI change;
+  `crtmedia_codec_is_hardware_accelerated()`'s own still-open Tranche-0
+  gap 2 (set at device-creation time, not first-real-frame time) is
+  unchanged by this tranche -- Tranche 2's own explicit job.
+
+  Separate, real, confirmed infra gap found and worked around manually,
+  not fixed (out of this tranche's own scope): `tools/crt-port-build.py
+  --rebuild` only deletes a port's own install *stamp*, not its
+  previously-installed files, while `tools/crt-cc` unconditionally
+  prepends `-I${CRT_PORT_INCLUDE_DIR}` (the shared `port_prefix/include`)
+  ahead of every other search path on every compile. Harmless for an
+  ordinary single-library port, but FFmpeg's own internal cross-library
+  quote-includes (e.g. `libavformat/avformat.c` including `libavutil/
+  frame.h`) can resolve to a stale, previously-installed, public-headers-
+  only copy instead of the fresh, complete source-tree copy on a
+  **rebuild** specifically -- confirmed for real via a genuine `fatal
+  error: 'intmath.h' file not found` (a private FFmpeg header that only
+  ever exists in the source tree). Worked around this session by manually
+  clearing the stale install output before each `port-rebuild-ffmpeg`; a
+  general fix (e.g. `--rebuild` also clearing a port's own previous
+  install output) is real follow-up work.
+
 - **Froze the Phase-A hardware-decode acceptance contract ("Hardware video
   decode" Tranche 0), and found two real, previously-unverified gaps in
   the existing 2026-09-08 groundwork while auditing it rather than

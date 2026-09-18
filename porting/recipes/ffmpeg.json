@@ -37,6 +37,20 @@
       "--disable-zlib"
     ],
     "make_args": [],
+    "patches": [
+      {
+        "file": "libavutil/Makefile",
+        "find": "OBJS-$(CONFIG_VIDEOTOOLBOX)             += hwcontext_videotoolbox.o",
+        "replace": "OBJS-$(CONFIG_VIDEOTOOLBOX)             += hwcontext_videotoolbox.o\n$(SUBDIR)hwcontext_videotoolbox.o: CFLAGS += -fcrt-real-apple-sdk",
+        "reason": "macOS VideoToolbox hwaccel (2026-09-18, \"Hardware video decode\" Tranche 1): this is the one libavutil file needing real CoreFoundation/CoreVideo/CoreMedia/VideoToolbox framework headers (#include <VideoToolbox/VideoToolbox.h>). -fcrt-real-apple-sdk (tools/crt-cc's own sentinel) must stay scoped to only this object, not the whole build's CFLAGS -- confirmed for real (2026-09-18) that adding it to the global --extra-cflags instead causes a genuine ABI-layout mismatch deadlock: FFmpeg's own internal pthread_once_t-typed codec-registration guard gets laid out per real Apple's (larger) struct when every file sees real headers, while this project's own pthread_once() implementation (libc/src/pthread.c) interprets that same memory using its own, different crt_once layout -- an infinite, single-thread spin in crt_once_begin()'s own wait loop, confirmed via a real hang plus lldb/sample stack traces (see the macos target_overrides' own post_configure_patch below, which strips -fcrt-real-apple-sdk back out of the *global* CFLAGS after configure so only this per-object override below still applies it). Harmless on Linux/Windows: this patch only ever adds an unused per-object flag override to a Makefile line neither host's own recipe ever enables (CONFIG_VIDEOTOOLBOX stays off), and top-level build.patches has no per-OS scoping to apply it selectively anyway."
+      },
+      {
+        "file": "libavcodec/Makefile",
+        "find": "OBJS-$(CONFIG_VIDEOTOOLBOX)               += videotoolbox.o",
+        "replace": "OBJS-$(CONFIG_VIDEOTOOLBOX)               += videotoolbox.o\n$(SUBDIR)videotoolbox.o: CFLAGS += -fcrt-real-apple-sdk",
+        "reason": "The libavcodec-side twin of the libavutil/Makefile patch above -- see that patch's own reason for the full explanation. videotoolbox.c needs the same real Apple framework headers (CFDictionary/CFAllocator/CFString APIs, confirmed via the real undefined-symbol link failure this session found: kCFAllocatorDefault, kCFTypeDictionaryKeyCallBacks, __CFConstantStringClassReference, ...) and must stay equally narrowly scoped."
+      }
+    ],
     "target_overrides": {
       "windows": {
         "configure_args": [
@@ -108,6 +122,24 @@
             "file": "config.h",
             "find": "#define HAVE_SYSCTL 1",
             "replace": "#define HAVE_SYSCTL 0"
+          },
+          {
+            "file": "config.h",
+            "find": "#define HAVE_MACH_ABSOLUTE_TIME 1",
+            "replace": "#define HAVE_MACH_ABSOLUTE_TIME 0",
+            "reason": "Same class of gap as HAVE_SYSCTL just above (2026-09-18, \"Hardware video decode\" Tranche 1): libavutil/timer.h's own #if HAVE_MACH_ABSOLUTE_TIME branch includes <mach/mach_time.h>, a real macOS-only header tools/crt-cc's ordinary -nostdinc sysroot mode does not expose. The ./configure probe for this macro ran with --extra-cflags=-fcrt-real-apple-sdk still present (see this recipe's own reason for why that flag must not stay in the real build's global CFLAGS), so it detected real Mach headers as reachable, but the actual `make` compile of libavutil/random_seed.c (and any other file including timer.h) does not see them once that flag is stripped back out by the patch below -- confirmed via a real `fatal error: 'mach/mach_time.h' file not found`. This project's own libc already provides a portable clock_gettime() (HAVE_CLOCK_GETTIME, already 1 in the same generated config.h), which timer.h's own next #elif branch already falls back to -- exactly the same \"route a host-SDK-only path to the portable one already available\" policy the HAVE_SYSCTL fix above documents, not a new one. FFmpeg's own internal micro-timing instrumentation (this is not used for anything user-visible or correctness-relevant, only optional FFTIME/AV_TIMER profiling output) works identically either way."
+          },
+          {
+            "file": "config.h",
+            "find": "#define HAVE_ARC4RANDOM_BUF 1",
+            "replace": "#define HAVE_ARC4RANDOM_BUF 0",
+            "reason": "The same real-Apple-SDK-probe-vs-real-build gap a third time (2026-09-18, \"Hardware video decode\" Tranche 1): arc4random_buf() is a BSD/Darwin libc extension this project's own <stdlib.h> does not declare, but ./configure's real-Apple-SDK-augmented probe (see the two patches above) detected it as available. Confirmed via a real `error: call to undeclared function 'arc4random_buf'` compiling libavutil/random_seed.c. That same file's own next fallback, read_random(buf, len, \"/dev/urandom\") -- a plain open()/read() against a device path -- needs no host-SDK-only declaration at all, so this is the same \"route to the portable path already available\" fix as HAVE_SYSCTL/HAVE_MACH_ABSOLUTE_TIME, not a new pattern. Purely a seed-entropy source for FFmpeg's own internal PRNG (e.g. temporary filenames, no cryptographic use in this project's narrow decode-only build); /dev/urandom is an equally real entropy source."
+          },
+          {
+            "file": "ffbuild/config.mak",
+            "find": "CFLAGS=-O2  -fcrt-real-apple-sdk -std=c17",
+            "replace": "CFLAGS=-O2  -std=c17",
+            "reason": "--extra-cflags=-fcrt-real-apple-sdk above exists only so ./configure's own check_apple_framework probes (CoreFoundation/CoreMedia/CoreVideo/VideoToolbox) see real Apple SDK headers -- those probes already ran and captured their results by the time this patch runs. Stripping it back out of the generated global CFLAGS here (rather than leaving it for every one of ~150 real `make` compiles) is required, not cosmetic: the libavutil/Makefile and libavcodec/Makefile patches above already add it back narrowly, per-object, for only the two files that actually need it. Leaving it in the global CFLAGS caused a real, confirmed hang (2026-09-18) -- see those patches' own reason field for the full ABI-mismatch explanation."
           }
         ]
       },
