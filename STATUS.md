@@ -5,7 +5,7 @@ does not repeat the implementation diary in [`HISTORY.md`](HISTORY.md), the
 open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting_status.md`](docs/porting_status.md).
 
-Last synchronized with the source tree and git history: **2026-09-16**.
+Last synchronized with the source tree and git history: **2026-09-18**.
 Updated only on explicit request from here on, not as part of routine
 documentation passes -- see `TODO.md`'s Notice section. It may lag behind
 `HISTORY.md`/`TODO.md` between syncs; those two are the source of truth.
@@ -100,6 +100,34 @@ The software/CPU graphics baseline is complete on all three hosts:
   Linux/aarch64 now, after giving `libdl.so` the same `CRT_1.0` ELF
   symbol-version namespace as `libc.so`; a direct packaged-binary smoke
   covers it in the isolated 04-stage acceptance run.
+- The `crtgfx_gpu_device`/`crtgfx_gpu_surface` backend-object boundary is
+  hardened and closed (2026-09-17..18, `HISTORY.md`): both are now a fixed
+  common representation (refcount/backend tag/ops table/opaque backend-state
+  pointer) with no `CRTGFX_HAVE_*`-conditional layout, dispatched through a
+  per-backend operations table; Vulkan/D3D12/Metal concrete device/surface
+  state lives only inside its own owner. Skia and every generic test reach
+  native state only through narrow borrowed views/transitions or a private,
+  backend-neutral test-control surface -- never a native handle or private
+  struct layout directly. Verified with a source-boundary regression guard
+  plus a bounded `crtgfx-boundary-acceptance` gate (fresh cumulative `02-cxx`
+  dist + binary-import/public-ABI/Host-ABI-firewall/backend-boundary/GPU/
+  synthetic-event checks in an enabled tree, then static+shared common
+  wrappers with no concrete backend object in a clean
+  `CRTGFX_ENABLE_GPU_BACKEND=OFF` tree) green on macOS/arm64, Linux/aarch64,
+  and Windows/x64.
+- Machine-checkable live-presentation pixel evidence is closed on every
+  required host against one frozen, backend-neutral acceptance contract
+  (`docs/libcrtgfx_live_presentation_acceptance.md`, 2026-09-18): a real
+  `SkSurface::readPixels()` check against the shared reference scene on the
+  live swapchain/layer-backed Ganesh surface, for both a plain 5-frame run
+  and a 5-frame run with a scripted mid-stream `900x520` resize (the second
+  presented frame is always the first to reflect the new extent). Passing on
+  Linux/aarch64 (Vulkan, reference host), macOS/arm64 (Metal, confirming the
+  `backing_size`-authoritative rule against real Retina `900x520 ->
+  1800x1040` scaling), and Windows/x64 (D3D12, `backing_size` matching
+  `requested_size` 1:1 on this session's non-scaled display). macOS/x86_64
+  native live execution was retired from the acceptance matrix (Apple
+  Silicon/macOS 27+ only) rather than left as an unverified gap.
 
 Decoder-texture zero-copy, full font shaping/fallback/ICU, a full Wayland
 compositor, and a Chromium Ozone backend are not completion claims.
@@ -165,6 +193,11 @@ target.
   closed with the current allocator retained. Real upper-runtime workloads
   continue to compare against that baseline; Scudo remains conditional on a
   preserved, repeatable blocker.
+- The `libcrtgfx` GPU backend-object boundary hardening and the live GPU
+  presentation pixel-exact/resize evidence tranches are both closed
+  (2026-09-17..18) on every required host. Hardware video decode is the
+  active tranche now building on that closed foundation (`TODO.md`'s In
+  Progress); it is promoted but not yet scoped in implementation detail.
 - FFmpeg hardware decode/zero-copy and the QuickJS core then proceed on top of
   the completed GPU rendering/presentation contract.
 - JavaScript media/gfx binding follows the stable native contracts, using a
@@ -292,19 +325,18 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-1. Finish the remaining live GPU evidence: macOS/x86_64 execution,
-   pixel-exact macOS checks, resize-plus-Ganesh on macOS, and pixel-exact
-   resize on Windows.
-2. Enable and verify real FFmpeg hardware decode per host while retaining the
-   software/CPU fallback as the correctness baseline.
-3. Connect hardware decoder textures to Skia without CPU copies, including
+1. Enable and verify real FFmpeg hardware decode per host while retaining the
+   software/CPU fallback as the correctness baseline. Active in `TODO.md`'s
+   In Progress, promoted 2026-09-18 once live GPU presentation evidence
+   closed on every required host; not yet scoped in implementation detail.
+2. Connect hardware decoder textures to Skia without CPU copies, including
    device/fence ownership and CPU-download recovery.
-4. Add capture/encode, then transport, buffering, reconnect, and streaming
+3. Add capture/encode, then transport, buffering, reconnect, and streaming
    services after the native playback and zero-copy contracts are stable.
-5. Use WebRTC as a consumer milestone, then bring up QuickJS core/event-loop/
+4. Use WebRTC as a consumer milestone, then bring up QuickJS core/event-loop/
    timers/modules and expose stable media/gfx services with WebCodecs-like
    queue semantics.
-6. Continue closing the focused CRT/PAL limitations above when an upstream
+5. Continue closing the focused CRT/PAL limitations above when an upstream
    consumer exposes a concrete requirement, following the Bionic-first
    porting discipline in `AGENTS.md`. This includes non-blocking
    Windows/aarch64 allocator validation and comparison of real upper-runtime

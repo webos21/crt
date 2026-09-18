@@ -1,7 +1,10 @@
 // Manual, real on-screen demo for the Ganesh-on-swapchain vertical slice
 // (2026-09-07 -- crtgfx_skia_wrap_gpu_surface()/crtgfx_skia_gpu_surface_
-// present(), crtgfx/skia.h; TODO.md's "Finish live GPU presentation
-// everywhere" step, its own last remaining piece). Draws the same shared
+// present(), crtgfx/skia.h). Later became the one shared reference
+// implementation of the frozen, backend-neutral live-presentation
+// acceptance contract closed on every required host 2026-09-18 -- see
+// this file's own "Backend-neutral acceptance contract" comment below
+// and docs/libcrtgfx_live_presentation_acceptance.md. Draws the same shared
 // reference scene (tests/skia_reference_scene.h) crtgfx_skia_gpu_
 // offscreen_smoke already proves pixel-correct offscreen, but through a
 // real, live swapchain/layer image every frame instead of an offscreen

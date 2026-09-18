@@ -44,9 +44,12 @@ is not complete merely because an in-tree target links.
   packaged Skia/Ganesh path is accepted on Windows, macOS, and native
   Linux/aarch64. Linux passes repeated cold-cache presentation with Vulkan
   validation both disabled and enabled, and directly runs the packaged
-  shared-runtime Vulkan/Skia binary as an isolated-stage smoke. The remaining
-  pixel-exact and resize combinations are separate evidence gaps, not a
-  missing common API.
+  shared-runtime Vulkan/Skia binary as an isolated-stage smoke. Machine-
+  checkable pixel-exact and resize-plus-Ganesh evidence is now closed on
+  every required host (Linux/aarch64 Vulkan, macOS/arm64 Metal, Windows/x64
+  D3D12) against one shared, backend-neutral acceptance contract
+  (`../docs/libcrtgfx_live_presentation_acceptance.md`); this was the last
+  gap before hardware decode, not a missing common API.
 - The software media baseline includes FFmpeg-backed demux/decode, the common
   frame/audio/player contracts, and native audio sinks. Hardware decode and
   decoded-texture interop remain separate, explicitly reported capabilities.
@@ -76,10 +79,14 @@ Preserve `allocator_baseline.md`'s accepted baseline and Host ABI firewall
 ownership rules throughout the sequence below. Real workloads are regression
 comparisons; promote Scudo only if repeatable evidence exceeds the baseline.
 
-1. Finish the remaining live GPU presentation evidence for the existing
-   Ganesh backends. Graphite is not part of this acceptance gate.
+1. ~~Finish the remaining live GPU presentation evidence for the existing
+   Ganesh backends.~~ **Complete 2026-09-18** (`HISTORY.md`): machine-
+   checkable pixel-exact/resize evidence closed on Linux/aarch64,
+   macOS/arm64, and Windows/x64. Graphite was not part of this acceptance
+   gate and remains out of scope.
 2. Enable hardware video decode per host while retaining software decode as
    the correctness fallback and reporting actual hardware use separately.
+   **Now active** (`TODO.md`'s In Progress) -- not yet planned in detail.
 3. Define and verify zero-copy decoded-texture ownership, device affinity, and
    synchronization. Keep a measured CPU-download fallback where direct interop
    is unavailable.

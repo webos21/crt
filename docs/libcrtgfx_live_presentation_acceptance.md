@@ -1,13 +1,15 @@
 # libcrtgfx Live GPU Presentation Acceptance Contract
 
 This document freezes the backend-neutral test shape TODO.md's "Finish live
-GPU presentation evidence before hardware decode" tranche uses on every host
-(Linux/Vulkan, macOS/Metal, Windows/D3D12). Step 1 of that tranche exists so
-the remaining per-platform steps (macOS/arm64, macOS/x86_64, Windows/x64) add
-evidence against one already-agreed shape instead of each inventing its own
-frame count, resize target, or pass/fail definition. It refines
-`docs/libcrtgfx_gpu_backend_boundary.md`'s own object-boundary contract:
-nothing here may reopen backend-field access from a generic test.
+GPU presentation evidence before hardware decode" tranche used on every host
+(Linux/Vulkan, macOS/Metal, Windows/D3D12). Step 1 of that tranche existed so
+the per-platform steps (macOS/arm64, Windows/x64) could add evidence against
+one already-agreed shape instead of each inventing its own frame count,
+resize target, or pass/fail definition -- all now closed, see "Reference
+implementation and evidence" below (macOS/x86_64 was retired from the
+acceptance matrix rather than closed; see `HISTORY.md`'s 2026-09-18 entry).
+It refines `docs/libcrtgfx_gpu_backend_boundary.md`'s own object-boundary
+contract: nothing here may reopen backend-field access from a generic test.
 
 ## Why one shared shape
 
@@ -146,6 +148,26 @@ reports as a real `1800x1040`-pixel backing extent, and the pixel check
 still passes because it is written against the reported backing size, never
 an assumed 1:1 ratio. The originally planned macOS/x86_64 native-execution
 gap is retired rather than closed (see `HISTORY.md`'s 2026-09-18 entry) --
-this project's macOS acceptance target is now Apple Silicon/macOS 27+. The
-one remaining real gap this contract's own values must still close is
-Windows/x64 pixel-exact resize (`TODO.md` Step 4).
+this project's macOS acceptance target is now Apple Silicon/macOS 27+.
+
+Windows/x64 closed this contract's gap 2026-09-18 on real D3D12 hardware,
+also with no changes to this file's own implementation -- confirming the
+contract needed no per-backend special-casing at all, not even for the
+backend most likely to (D3D12's `IDXGISwapChain::ResizeBuffers()` real
+COM-reference-lifetime constraint):
+
+```text
+crtgfx_skia_gpu_window_demo: RESULT backend=d3d12 requested_size=900x520 backing_size=900x520 frames_requested=5 frames_presented=5 resize_frame=2 pixel_check=pass post_resize_present=pass clean_exit=pass
+crtgfx_skia_gpu_window_demo: RESULT backend=d3d12 requested_size=800x480 backing_size=800x480 frames_requested=5 frames_presented=5 resize_frame=n/a pixel_check=pass post_resize_present=n/a clean_exit=pass
+```
+
+Unlike Retina macOS, this session's Windows display had no DPI scaling
+active, so `backing_size` matched `requested_size` exactly here -- still
+consistent with the contract's own rule (backing size is authoritative,
+never assumed), it simply happened to be 1:1 on this host.
+
+With Linux/aarch64 (reference host), macOS/arm64, and Windows/x64 all
+closed, every host this contract's own acceptance matrix requires (see
+`TODO.md`'s Step 4/5 and Acceptance gate, now moved to `HISTORY.md`) has
+real, machine-checkable evidence. No gap remains open against this
+contract.
