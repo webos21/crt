@@ -10,6 +10,62 @@ substantive update.
 
 ## 2026-09-18
 
+- **Froze the backend-neutral live-presentation acceptance contract (Step 1
+  of "Finish live GPU presentation evidence before hardware decode") and
+  validated it on Linux/aarch64.** With backend object-boundary hardening
+  now closed (see the Windows/x64 entry below and Linux/aarch64's own
+  earlier entry), this tranche's first task was defining one test shape
+  every later platform-specific step (macOS/arm64, macOS/x86_64, Windows/
+  x64) fills in rather than each inventing its own frame count, resize
+  target, or pass/fail rule. The full frozen contract is
+  `docs/libcrtgfx_live_presentation_acceptance.md`; the short version: reuse
+  the existing `tests/skia_reference_scene.h` scene unchanged, a fixed
+  5-frame acceptance run with an optional `900x520` scripted resize
+  requested right after frame 1 (so frame 2 is always the first post-resize
+  frame), a single deterministic canonical-frame pixel check via a plain
+  `SkSurface::readPixels()` against the live Ganesh-wrapped surface (the
+  same real API `tests/skia_gpu_offscreen_smoke.cc` already uses offscreen
+  -- no new backend-specific readback hook needed, since the swapchain
+  image usage flags Ganesh-wrapping already requires make this a real,
+  supported operation), and one final machine-readable stdout line:
+  `RESULT backend=<name> requested_size=<W>x<H> backing_size=<W>x<H>
+  frames_requested=<N> frames_presented=<N> resize_frame=<n|n/a>
+  pixel_check=<pass|fail|skip> post_resize_present=<pass|fail|n/a>
+  clean_exit=<pass|fail>`. `requested_size` (logical/point units) and
+  `backing_size` (the real reported backing extent) are kept separate on
+  purpose so a Retina macOS `backing_size=1800x1040` against a
+  `requested_size=900x520` fits the same contract without a special case.
+
+  Implemented entirely in `libcrtgfx/tools/skia_gpu_window_demo.cc` -- the
+  one C++ source already shared, unchanged, across Vulkan/Metal/D3D12 --
+  with no new backend-owned test-control hook and no `gpu_internal.h`
+  access: the pixel check reads back the same public `SkSurface` the
+  existing draw call already used, immediately after `draw_reference_
+  scene()` and before `crtgfx_skia_gpu_surface_present()` (present may
+  transition/invalidate the image for host readback on some backends).
+  Preserves every existing behavior and stdout/stderr line (including the
+  `presented=<N>` line `tools/build_stage_04_gfx_media.py`'s own packaged-
+  binary smoke already greps for) -- the new RESULT line is additive.
+
+  Verified on Linux/aarch64 (this tranche's reference host, not a new gap
+  -- see Step 5's own "do not add Linux-only work merely to make the host
+  matrix symmetrical" rule): the 5-frame `900x520` resize case reports
+  `RESULT backend=vulkan requested_size=900x520 backing_size=900x520
+  frames_requested=5 frames_presented=5 resize_frame=2 pixel_check=pass
+  post_resize_present=pass clean_exit=pass`; the plain 5-frame case reports
+  the same shape with `resize_frame=n/a`/`post_resize_present=n/a` and
+  `requested_size=backing_size=800x480`. Re-ran the existing 30-frame no-
+  resize run as Step 5's own fence/submission regression check (still
+  `presented=30`, exit 0) and `crtgfx-boundary-acceptance` as Step 6's own
+  regression gate (still 7/7 enabled, 2/2 backend-disabled, `crtgfx
+  boundary acceptance: ok`) since this change touches the shared generic-
+  test layer. `crtgfx_skia_gpu_offscreen_smoke` unaffected, still passes.
+
+  Steps 2-4 (macOS/arm64 pixel-exact-plus-resize, macOS/x86_64 native
+  execution, Windows/x64 pixel-exact resize) remain open for whichever host
+  next runs them, now against this one frozen contract instead of each
+  needing to also decide the test shape itself.
+
 - **Established the first green Windows/x64 `crtgfx-boundary-acceptance`
   (Tranche 6) evidence, closing the backend-boundary hardening tranche.**
   This was the last open cell of the "first green Linux/aarch64 and

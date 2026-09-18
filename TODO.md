@@ -61,13 +61,21 @@ newest entry first) rather than leaving it here.
 
 Close the remaining evidence gaps in the existing Ganesh presentation path before starting hardware video decode. This tranche does not add a new graphics backend, change the public `crtgfx` ABI, or promote Graphite. Preserve the accepted backend-object boundary and Host ABI firewall while strengthening the live presentation evidence.
 
-* [ ] **1. Freeze the acceptance scope and deterministic test shape.**
-
-  * Keep Ganesh as the only GPU drawing backend required by this tranche; Graphite remains deferred.
-  * Reuse the existing deterministic Skia reference scene rather than adding a new rendering workload.
-  * Require bounded finite-frame runs with explicit failure/timeout behavior; no interactive-only or visually observed pass is sufficient.
-  * Keep all backend-native state and readback/capture operations inside the owning backend or a narrow non-installed test-control boundary.
-  * Do not change the public `crtgfx` device/surface/window lifetime or ownership contract.
+* [x] **1. Freeze the acceptance scope and deterministic test shape.**
+  Completed 2026-09-18 and recorded in `HISTORY.md`; the frozen contract
+  itself lives in `docs/libcrtgfx_live_presentation_acceptance.md`.
+  `libcrtgfx/tools/skia_gpu_window_demo.cc` (one source, unchanged per
+  backend) now performs a real `SkSurface::readPixels()` pixel check against
+  the shared reference scene on a deterministic canonical frame (the first
+  post-resize frame when a resize is exercised, otherwise the first frame),
+  and prints one machine-readable `RESULT backend=... requested_size=...
+  backing_size=... frames_requested=... frames_presented=... resize_frame=...
+  pixel_check=... post_resize_present=... clean_exit=...` line every run.
+  Validated on Linux/aarch64 (this tranche's reference host, not a new gap):
+  both the 5-frame `900x520` resize case and the plain 5-frame case report
+  `pixel_check=pass`/`clean_exit=pass`; re-ran the existing 30-frame no-
+  resize fence/submission check and `crtgfx-boundary-acceptance` (7/7 + 2/2)
+  per Steps 5/6, both still pass. No public ABI or object-boundary change.
 
 * [ ] **2. Close the macOS/arm64 pixel-exact and resize-plus-Ganesh gaps.**
 
