@@ -57,113 +57,9 @@ newest entry first) rather than leaving it here.
 
 ## In Progress
 
-### Harden `libcrtgfx` backend object boundaries before Upper Runtime
-
-Do this before hardware decode and zero-copy interop add more backend-owned
-state. `struct crtgfx_gpu_device` and `struct crtgfx_gpu_surface` currently
-change layout under `CRTGFX_HAVE_VULKAN`/`CRTGFX_HAVE_D3D12`/
-`CRTGFX_HAVE_METAL`; the directory-wide definitions keep today's translation
-units consistent, but a target-wiring mistake can still turn into cross-TU
-memory corruption. Remove that failure class rather than carrying the build
-invariant into the next runtime stages.
-
-The contract and current direct-access inventory are frozen in
-`docs/libcrtgfx_gpu_backend_boundary.md`. The device's common atomic refcount
-must remain in the fixed wrapper; surfaces remain single-owner and do not begin
-retaining their window or device. Skia may know native API types through narrow
-borrowed descriptors, but native ownership and every acquire/submit/fence/
-present transition stay in the backend owner.
-
-- [x] **Tranche 0 — inventory ownership and freeze the contract.** Completed
-  2026-09-17 and recorded in `HISTORY.md`. The contract, direct-access
-  inventory, and CTest guard are in place; the guard's allowlists must only
-  shrink while the implementation proceeds.
-- [x] **Tranche 1 — introduce the fixed wrapper and operations contract with
-  Vulkan first.** Completed 2026-09-17 and recorded in `HISTORY.md`.
-  Move Vulkan device/surface state into `gpu_vulkan.c`; make `gpu.c` own only
-  validation, wrapper allocation/refcount, dispatch, and wrapper free. Move
-  native Wayland extraction into the Vulkan surface-create operation. Add a
-  layout/macro-mismatch regression and partial-create failure coverage.
-  Progress: backend field groups are now unconditional, so feature-macro
-  mismatch cannot change common object size/offsets; the CTest guard enforces
-  that invariant. The fixed wrappers now carry backend tag, operations pointer,
-  and opaque state slot, and all public device/surface calls dispatch through
-  the operations table. Vulkan concrete device/surface state now lives only in
-  `gpu_vulkan.c`; Skia consumes narrow borrowed Vulkan views/transitions and the
-  Vulkan device-loss smoke uses an owner hook. Native Wayland handle/extent
-  extraction has also moved from `gpu.c` into the Vulkan surface-create owner.
-  Focused Windows and WSL boundary/GPU tests pass. Vulkan device creation now
-  injects one-shot failures after instance and device/queue creation; the test
-  proves exact native cleanup, no published wrapper, and immediate successful
-  recreation. The native-Wayland branch also compiles cleanly in isolation
-  with the configured Clang flags. Full Skia/native-Wayland link-and-run
-  evidence belongs to Tranche 2; the dependency bootstrap attempt here stalled
-  while fetching `expat` and is not misreported as runtime acceptance.
-- [x] **Tranche 2 — move Vulkan Skia interop behind borrowed views and
-  transitions.** Completed 2026-09-17 and recorded in `HISTORY.md`. The
-  source migration (removing every Vulkan concrete-field access from
-  `skia_bridge.cc`) was already in place; this session actually re-ran
-  headless Ganesh plus native Wayland presentation/resize on Linux/
-  aarch64 for the first time and found a real, previously-hidden bug: any
-  second Ganesh frame deadlocked forever (a single-frame-in-flight Vulkan
-  fence only the plain, non-Ganesh present path ever re-signaled). Fixed
-  in `crtgfx_gpu_vulkan_end_ganesh()` (`gpu_vulkan.c`) without touching
-  `skia_bridge.cc`, preserving the borrowed-view boundary. Verified both
-  directions (reproduces without the fix, resolves with it): a 5-frame
-  run with a mid-stream resize and a plain 30-frame run both now exit 0;
-  full local `ctest` 128/128. Also hardened
-  `tools/build_stage_04_gfx_media.py`'s own packaged-binary and
-  standalone-example smokes to actually drive multiple frames plus a
-  resize (they used to run only one frame, which is exactly what hid this
-  bug), each now under an explicit timeout so a future regression fails
-  fast instead of hanging CI. WSL was not available on this host this
-  session -- Tranche 1's own WSL Windows/x86_64 boundary/GPU coverage
-  still stands, but WSL Skia/native-Wayland re-verification is left for a
-  host that has both available together.
-- [x] **Tranche 3 — migrate D3D12 and recover its state machine from Skia.**
-  Completed 2026-09-17 and recorded in `HISTORY.md`. D3D12 device/surface
-  state, HWND extraction, and command-list/fence/submission transitions are
-  now owner-local. Hardware and forced-WARP Ganesh, device-loss/recreation,
-  30-frame window presentation, scripted resize, and the backend-specific
-  boundary guard all pass on Windows.
-- [x] **Tranche 4 — migrate Metal with the same contract.** Completed
-  2026-09-17 and recorded in `HISTORY.md`. Metal device/surface state,
-  CAMetalLayer extraction, and Ganesh borrowed-view/transition hooks are now
-  owner-local in `gpu_metal.c`. Device creation, 5-frame window presentation,
-  a scripted Retina resize, and Metal Ganesh (offscreen smoke and windowed
-  demo) all pass on macOS/arm64. Also fixed a real generic-demo bug found
-  while verifying this: the scripted-resize check wrongly assumed a 1:1
-  point-to-pixel ratio, which a Retina display breaks.
-- [x] **Tranche 5 — remove generic-test privilege and close macro/layout escape
-  paths.** Completed 2026-09-17 and recorded in `HISTORY.md`. The generic Skia
-  smoke now uses a private backend-neutral device-loss control instead of
-  `gpu_internal.h`; the three owners perform their own loss/cleanup operation.
-  The source audit is enforced by a seven-case regression guard, and
-  `CRTGFX_HAVE_*`/OS selection definitions are target-private rather than
-  directory-wide. On Windows, both backend-enabled static/shared libraries and
-  the real hardware/WARP Ganesh loss/recovery smoke pass; a separate
-  `CRTGFX_ENABLE_GPU_BACKEND=OFF` tree builds and runs the static/shared common
-  wrappers without creating a backend object target.
-- [ ] **Next: Tranche 6 — run cross-host/distribution acceptance, then make it
-  routine CI evidence.**
-  Recheck public ABI, allocator-domain ownership, binary imports, and focused
-  GPU/window/resize/Skia coverage on Linux/aarch64, Windows, and macOS. Add a
-  per-PR fresh `02-cxx` plus bounded headless `libcrtgfx` smoke; leave full
-  Skia/FFmpeg and predecessor-only distribution audits scheduled if needed.
-  The `crtgfx-boundary-acceptance` target and representative pull-request
-  matrix are now implemented. macOS/arm64 and Linux/aarch64 have both passed
-  the fresh `02-cxx`, enabled-boundary (7/7), and clean backend-disabled (2/2)
-  acceptance locally -- recorded 2026-09-18 for Linux/aarch64 in `HISTORY.md`,
-  including a live Vulkan/Wayland/Ganesh re-run (5-frame window demo with a
-  mid-stream resize) and a full `cmake --workflow` regression pass (110/110).
-  Close this item after the first green Windows/x64 matrix evidence.
-
-Acceptance requires identical common device/surface layouts in every
-translation unit, no backend field access outside its owner (including Skia
-and generic tests), backend-owned partial-failure cleanup, clean backend-enabled
-and backend-disabled builds, and passing focused runtime and ownership checks
-on the available host matrix. This tranche hardens an internal boundary; it
-must not change the public `crtgfx` ABI or the existing lifetime contract.
+Nothing active right now -- see "Upper runtime roadmap" under Planned for
+the natural next step (promote one tranche at a time once its prerequisite
+evidence and acceptance host are available).
 
 ## Planned
 
@@ -206,9 +102,9 @@ be replaced.
 ### Runtime architecture hardening backlog
 
 These remain independent follow-ups. Promote one at a time when a concrete
-consumer or failure justifies their cost. The backend object-boundary and
-upper-stage smoke work that must precede further Upper Runtime expansion is
-active above; the items here are not part of that acceptance gate.
+consumer or failure justifies their cost. The backend object-boundary work
+that had to precede further Upper Runtime expansion is complete (`HISTORY.md`,
+2026-09-17..18); the items here were never part of that acceptance gate.
 
 1. **Remove the "build once, then reconfigure" CMake pattern.** The native
    Wayland Vulkan WSI backend's own `CRTGFX_HAVE_NATIVE_WAYLAND` gate

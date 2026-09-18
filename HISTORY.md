@@ -10,6 +10,75 @@ substantive update.
 
 ## 2026-09-18
 
+- **Established the first green Windows/x64 `crtgfx-boundary-acceptance`
+  (Tranche 6) evidence, closing the backend-boundary hardening tranche.**
+  This was the last open cell of the "first green Linux/aarch64 and
+  Windows/x64 matrix evidence" TODO.md's own Tranche 6 entry required
+  (macOS/arm64 and Linux/aarch64 had already passed, both recorded above/
+  below). `cmake --fresh --preset windows-host-ninja-debug`, then
+  `cmake --build --preset windows-host-ninja-debug --target crtgfx-
+  boundary-acceptance`. Result: fresh `02-cxx` distribution generated and
+  `verify_dist.py`-audited, all 7 enabled checks passed
+  (`crt_binary_dependencies_unit_runs`, `crtgfx_gpu_backend_boundary_unit_
+  runs`, `header_abi_test_runs`, `host_abi_firewall_test_runs`,
+  `host_abi_firewall_fault_test_runs`, `crtgfx_gpu_test_runs`,
+  `crtgfx_synthetic_event_runs`), re-confirmed individually afterward
+  (`ctest -R` against the already-built enabled tree: 7/7). A genuinely
+  clean, freshly configured `CRTGFX_ENABLE_GPU_BACKEND=OFF`/`CRTGFX_ENABLE_
+  SKIA=OFF`/`CRT_USE_IMPORTED_LIBCXX=OFF` tree (Windows additionally forces
+  `CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY` and clears the MSVC
+  runtime/standard-library cache variables for a genuinely freestanding
+  try-compile) then built both static and shared common GPU wrappers and
+  passed both backend-disabled checks (`crtgfx_gpu_backend_boundary_unit_
+  runs`, `crtgfx_gpu_test_runs`) -- `crtgfx boundary acceptance: ok`.
+
+  Beyond the formal bounded gate, also re-ran `crtgfx-skia-smoke` (its
+  dedicated Skia tree already existed from Tranche 3/5's own earlier
+  Windows work, so this was an incremental, not from-scratch, Skia
+  rebuild) to re-confirm the real D3D12/Ganesh path -- specifically the
+  two sequences most sensitive to this migration and least exercised by
+  the bounded gate above, which does not force Skia on at all. `crtgfx_
+  skia_gpu_offscreen_smoke` passed every sub-check: real hardware device
+  creation -> Ganesh context -> draw -> exact-pixel readback against the
+  shared reference scene; a 2x offscreen resize with a full redraw/
+  readback repeat; **device-loss and recovery** (a dedicated device,
+  `crtgfx_gpu_test_force_device_loss()` -- the backend-neutral control
+  surface `docs/host_abi_firewall.md`'s own dispatcher contract requires,
+  which only ever calls into the Windows owner's real `ID3D12Device5::
+  RemoveDevice()`, never touching a native handle from generic test code
+  -- then a fresh `device_create()`, a fresh Ganesh context, and a correct
+  redraw/readback on the recovered device); and **forced WARP** (capability
+  query, `device_create()`, a real Ganesh context, draw, and readback, all
+  against the software WARP adapter specifically, proving the D3D12
+  abstraction does not accidentally depend on a particular hardware
+  adapter implementation). This is exactly the pair of paths Tranche 5's
+  own first Windows verification (2026-09-17) fixed a real bug in --
+  `ID3D12Device5::RemoveDevice()`'s own COM vtable slot was misdeclared,
+  producing an `0xC0000409` fast-fail -- so re-confirming both still pass
+  on this tranche's own final tree is real regression evidence, not a new
+  feature test.
+
+  Closing per this tranche's own explicit criterion: the bounded
+  `crtgfx-boundary-acceptance` gate is the formal requirement, and it is
+  green; the additional `crtgfx-skia-smoke` re-run shows the Windows
+  D3D12 boundary (including its own previously-fixed device-loss bug) has
+  not regressed on the tranche's final tree. A full interactive Win32
+  window + D3D12/Ganesh live-presentation pass and a full `cmake
+  --workflow` regression run were deliberately left undone this session
+  (effort-bounded) -- neither is a blocker for this tranche specifically:
+  live-presentation pixel-exact resize coverage already has its own
+  tracked entry under the Upper Runtime roadmap's "finish live GPU
+  presentation evidence" item, and `crtgfx-boundary-acceptance` (not the
+  general workflow test preset, which deliberately excludes `crtgfx_`/
+  `crtmedia_`/`crtjs_`/most C++ tests) is this project's own designated
+  acceptance signal for this specific boundary.
+
+  With macOS/arm64, Linux/aarch64, and Windows/x64 all green, "Harden
+  `libcrtgfx` backend object boundaries before Upper Runtime" (Tranches
+  0-6) is complete; its full writeup and the "Next" work it unblocks
+  (Upper Runtime roadmap's "finish live GPU presentation evidence", then
+  hardware video decode) are in `TODO.md`.
+
 - **Established the first green Linux/aarch64 `crtgfx-boundary-acceptance`
   (Tranche 6) evidence, plus a full live Vulkan/Wayland/Ganesh re-run.**
   Followed the same bounded-then-live order Tranche 6's own local macOS pass
