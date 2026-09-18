@@ -10,6 +10,75 @@ substantive update.
 
 ## 2026-09-18
 
+- **Froze the Phase-A hardware-decode acceptance contract ("Hardware video
+  decode" Tranche 0), and found two real, previously-unverified gaps in
+  the existing 2026-09-08 groundwork while auditing it rather than
+  assuming it already worked end to end.** With "Finish live GPU
+  presentation evidence before hardware decode" fully closed (see the
+  entry immediately below) and "Hardware video decode" promoted into `In
+  Progress`, this tranche's own first step -- matching the backend-
+  boundary and live-presentation tranches' identical Tranche/Step 0
+  precedent -- was reading the real current `libcrtmedia`/FFmpeg state
+  before writing any new plan against it.
+
+  Found already in place, unchanged since 2026-09-08 and reused as-is:
+  `CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE` (`crtmedia/format.h`),
+  `crtmedia_codec_is_hardware_accelerated()` (`crtmedia/codec.h`), a
+  generic (all three hosts, one code path) `hw_type_for_platform()`
+  mapping in `libcrtmedia/src/codec.c` (VideoToolbox/D3D11VA/VAAPI),
+  real device-creation/decode/`av_hwframe_transfer_data()`-download logic
+  in the same file, and `libcrtmedia/tests/hw_decode_test.c` already
+  exercising all of it against the existing `libcrtmedia/assets/
+  test_video.mp4` fixture (64x64, 25 real H.264 frames). No new public
+  API, fixture, or generic test file needed for this tranche.
+
+  Two real, confirmed gaps found reading the actual code and recipe,
+  not assumed from the plan's own wording:
+
+  1. `porting/recipes/ffmpeg.json` never enables any hwaccel on any host.
+     Its `configure_args` use `--disable-everything` plus explicit
+     decoder/demuxer/parser/protocol allowlists only -- no `--enable-
+     hwaccel=h264_videotoolbox`/`h264_d3d11va`/`h264_vaapi` anywhere, on
+     any `target_overrides` block. This is not new information this
+     session had to derive: the recipe's own first verification note
+     (2026-08-31) already records `./configure`'s own summary reading "no
+     encoders/**hwaccels**/muxers/filters/bsfs/indevs/outdevs" verbatim,
+     unchanged through every later dated note in that file through
+     2026-09-13. Consequence: `crtmedia_hw_decode_test` has, in all
+     likelihood, silently taken the software-fallback path on every host
+     it has ever run on -- "passing" without the hardware path having
+     been exercised for real even once. Fixing this (per-host `--enable-
+     hwaccel=...`, verified from `./configure`'s own summary output) is
+     Tranche 1/3/4's own job.
+  2. `crtmedia_codec_is_hardware_accelerated()` does not keep its own
+     documented promise. Its header comment reads "never a caller-side
+     guess, this reflects what really happened," but `codec.c` sets
+     `codec->hardware_accelerated = 1` immediately once `avcodec_open2()`
+     succeeds with a non-null `hw_device_ctx` -- before any frame has
+     actually been decoded -- and never revisits it. A decoder can
+     legitimately open successfully with a hardware device attached and
+     still never decode a single frame through that hardware format (the
+     same file's own comment on `crtmedia_codec_get_format()` already
+     acknowledges exactly this possibility), in which case this API would
+     wrongly report `hardware_active=1`. This is precisely the failure
+     mode this tranche's own Step 0 scope rules out ("do not report
+     hardware decode as active merely because `AVHWDeviceContext`
+     creation succeeded"). Fixing this is Tranche 2's own explicit job.
+
+  Neither gap was fixed in this pass -- freezing the contract and
+  recording real, targeted findings for the tranches whose job they
+  already are, not silently discovering them mid-implementation later.
+  Also froze the six-state model (requested / device created / pixel
+  format selected / real frame observed / CPU-downloaded / fallback used)
+  and a new `hw_decode_test` `RESULT ...` machine-readable stdout line
+  (backend, hw_requested, hw_device_created, hw_pixfmt_offered,
+  hw_frame_observed, cpu_transfer, frame_count, fallback, eos,
+  clean_exit) for Tranche 1 to implement, matching the live-presentation
+  tranche's own `RESULT` line convention -- kept as test/diagnostic
+  reporting, not new public `crtmedia` ABI, per this tranche's own ABI-
+  unchanged constraint. Full contract: `docs/crtmedia_hardware_decode_
+  acceptance.md`.
+
 - **Closed the Windows/x64 pixel-exact resize gap (Step 4) with zero code
   changes, closing "Finish live GPU presentation evidence before hardware
   decode" entirely -- macOS/arm64, Linux/aarch64, and Windows/x64 all now

@@ -59,20 +59,231 @@ newest entry first) rather than leaving it here.
 
 ### Hardware video decode
 
-Promoted 2026-09-18 per "Finish live GPU presentation evidence before
-hardware decode"'s own pre-agreed decision, now closed (`HISTORY.md`):
-Windows/x64, macOS/arm64, and Linux/aarch64 all have machine-checkable
-live Ganesh presentation + resize pixel evidence, closing the acceptance
-gate that item existed to satisfy.
+Add real hardware-accelerated H.264 decode while preserving the existing `crtmedia` software-decode contract and Host ABI ownership rules. This tranche ends at a validated CPU-resident decoded frame obtained from a hardware decoder. Native decoded-surface sharing with Vulkan, Metal, or D3D remains explicitly deferred to **Zero-copy decoded textures**.
 
-Complete Phase A backend bring-up and tests. The current blockers are the
-Windows D3D11VA configure path, a WSL-hosted binutils 2.46 `ar`/`nm`
-crash, and an unattempted macOS pass. Preserve a software fallback and
-report hardware use separately from decode success. Not yet planned in
-detail -- do that before writing code, matching how the two prior
-tranches (backend-object boundary, live GPU presentation evidence) each
-started with an explicit scope/acceptance-contract step before
-implementation.
+Recommended host order:
+
+`macOS/arm64 → Windows/x64 → Linux`
+
+Use macOS/arm64 as the first-green reference host, then apply the same Phase-A contract to Windows/D3D11VA and Linux/VA-API.
+
+---
+
+* [x] **0. Freeze the Phase-A hardware-decode acceptance contract.**
+  Completed 2026-09-18 and recorded in `HISTORY.md`; the frozen contract
+  lives in `docs/crtmedia_hardware_decode_acceptance.md`. Audited the
+  existing 2026-09-08 Phase-A groundwork (format opt-in key, `crtmedia_
+  codec_is_hardware_accelerated()`, per-host `hw_type_for_platform()`
+  mapping, `hw_decode_test.c`, the existing `test_video.mp4` fixture) --
+  all reused unchanged, no new public API or fixture needed. Found two
+  real, confirmed gaps while auditing rather than assuming Phase A already
+  worked end to end: (1) `porting/recipes/ffmpeg.json` never enables any
+  hwaccel on any host (`--disable-everything` plus explicit decoder/
+  demuxer/parser/protocol allowlists only; the recipe's own 2026-08-31
+  verification note already says so directly: "no encoders/hwaccels/
+  muxers/..."), so `crtmedia_hw_decode_test` has likely always taken the
+  software-fallback path silently on every host to date; (2) `crtmedia_
+  codec_is_hardware_accelerated()`'s backing flag is set at successful
+  `avcodec_open2()` time, not after an actual hardware-resident frame is
+  observed, contradicting both this tranche's own scope rule and the
+  function's own existing doc comment ("never a caller-side guess"). Both
+  are real bugs for later tranches to fix (1 in Tranche 1/3/4, 2 in
+  Tranche 2), not fixed in this freeze step. Also froze the six-state
+  model and a new `RESULT ...` machine-readable line for `hw_decode_test`
+  to print once Tranche 1 lands, matching the live-presentation tranche's
+  own `RESULT` convention.
+
+---
+
+* [ ] **1. Establish the first real hardware-decode green on macOS/arm64 with VideoToolbox.**
+
+  * Update the macOS FFmpeg recipe/configuration only as much as required to enable H.264 VideoToolbox hardware acceleration.
+  * Because FFmpeg is built with a narrow `--disable-everything` policy, verify from the configure result that the required VideoToolbox H.264 hwaccel is actually enabled.
+  * Perform a fresh FFmpeg build rather than relying on an existing software-only artifact.
+  * Build `libcrtmedia` against the resulting FFmpeg package.
+  * Run the existing hardware-decode test on a real Apple Silicon Mac.
+  * Require:
+
+    * hardware decode requested
+    * VideoToolbox device/context successfully initialized
+    * VideoToolbox hardware pixel format actually selected
+    * at least one real hardware-backed frame observed
+    * hardware frame successfully transferred to CPU memory
+    * expected decoded frame count reached
+    * timestamps remain valid/monotonic
+    * downloaded NV12/YUV data passes the existing image-content validation
+    * clean EOS
+    * clean destruction with no ownership/lifetime fault
+  * Run the same fixture with hardware preference disabled and confirm that the existing software-decode path remains green.
+  * Run the fixture with hardware preferred but unavailable/disabled and confirm clean software fallback rather than decode failure.
+
+---
+
+* [ ] **2. Harden common Phase-A reporting and lifetime behavior after the macOS first-green.**
+
+  * Make hardware-status reporting reflect actual decode activity rather than device availability.
+  * Emit or expose enough diagnostic state to distinguish:
+
+    * requested backend
+    * selected backend
+    * hardware frame observed
+    * CPU transfer performed
+    * fallback occurred
+  * Keep result reporting machine-readable where practical.
+  * Repeat create/decode/EOS/release cycles to catch stale `AVBufferRef`, `AVFrame`, or platform-object ownership.
+  * Exercise decoder flush/reuse if the existing `crtmedia` API supports it.
+  * Confirm all FFmpeg/VideoToolbox/CoreVideo-owned objects are released through their owning APIs.
+  * Do not free or reinterpret host-owned storage from CRT allocator domains.
+  * Re-run ordinary software decode tests after any common-code change.
+
+---
+
+* [ ] **3. Enable and validate Windows/x64 D3D11VA hardware decode.**
+
+  * Reproduce the current FFmpeg D3D11VA configure failure independently before changing the recipe.
+  * Isolate whether the existing Windows macro policy, especially `_WIN32` undefinition, prevents the required D3D11 video declarations from being visible during FFmpeg configure checks.
+  * Avoid globally restoring `_WIN32` across the FFmpeg build unless absolutely necessary.
+  * Prefer the narrowest recipe/configure/header boundary fix that enables D3D11VA without weakening the existing CRT portability model.
+  * Verify from FFmpeg configure output that the required H.264 D3D11VA hwaccel is enabled.
+  * Perform a fresh FFmpeg build and rebuild `libcrtmedia`.
+  * Run the same hardware-decode fixture on real Windows/x64 hardware.
+  * Require:
+
+    * D3D11VA requested
+    * real D3D11 hardware frame observed
+    * successful `av_hwframe_transfer_data()` or equivalent CPU transfer
+    * expected frame count
+    * valid timestamps
+    * valid decoded image contents
+    * clean EOS
+    * clean destruction
+  * Re-run the fixture with hardware preference disabled and verify software decode remains unchanged.
+  * Verify unsupported/unavailable hardware falls back cleanly instead of failing decode.
+  * Keep D3D11 texture sharing and D3D11↔D3D12 interop outside this tranche.
+
+---
+
+* [ ] **4. Enable and validate Linux VA-API hardware decode.**
+
+  * First establish a clean Linux environment where the existing software-only FFmpeg recipe rebuilds successfully.
+  * Treat any host-toolchain failure such as `ar`/`nm` crashes as a build-environment blocker, not a VA-API defect.
+  * Use a native Linux machine with:
+
+    * a real VA-API-capable GPU
+    * working `/dev/dri/renderD*`
+    * an appropriate VA driver
+  * Enable only the FFmpeg VA-API/H.264 pieces required by the existing narrow recipe.
+  * Verify from configure output that H.264 VA-API hardware acceleration is actually enabled.
+  * Perform a fresh FFmpeg build and rebuild `libcrtmedia`.
+  * Run the same hardware-decode fixture.
+  * Require:
+
+    * VA-API requested
+    * real VA-API hardware frame observed
+    * successful CPU transfer from the hardware frame
+    * expected frame count
+    * valid timestamps
+    * valid decoded image contents
+    * clean EOS
+    * clean destruction
+  * Run software-only mode and verify the baseline remains green.
+  * Verify hardware-unavailable mode falls back cleanly.
+  * Do not count software fallback on a non-VA-API machine as Linux hardware-decode acceptance.
+  * Keep VA surface → Vulkan zero-copy interop outside this tranche.
+
+---
+
+* [ ] **5. Normalize the same acceptance matrix across all supported hosts.**
+
+  * Use the same H.264 fixture and the same `crtmedia_hw_decode_test` semantics on:
+
+    * macOS/arm64 — VideoToolbox
+    * Windows/x64 — D3D11VA
+    * Linux — VA-API
+  * For each host, record:
+
+    * requested hardware backend
+    * actual hardware backend selected
+    * whether a real hardware frame was observed
+    * decoded frame count
+    * first/last timestamp or monotonicity result
+    * CPU-transfer result
+    * pixel/image-content result
+    * fallback status
+    * EOS result
+    * clean-exit result
+  * Treat the following as distinct outcomes:
+
+    * `decode=pass, hardware=active` → hardware-decode PASS
+    * `decode=pass, hardware=inactive, fallback=yes` → fallback PASS, not hardware-decode PASS
+    * `decode=fail` → FAIL
+  * Keep host-specific implementation details behind FFmpeg/platform ownership boundaries.
+  * Do not add platform-native texture handles to the public `crtmedia` API during this tranche.
+
+---
+
+* [ ] **6. Run ownership, regression, and repeated-lifecycle validation.**
+
+  * Repeat hardware decode multiple times in one process where supported.
+  * Exercise create → decode → EOS → destroy cycles repeatedly.
+  * Verify no stale hardware context survives decoder destruction.
+  * Confirm hardware-frame download does not leak or retain platform-native surfaces indefinitely.
+  * Re-run allocator/Host ABI diagnostics if any new cross-domain ownership path is introduced.
+  * Verify that generic media tests do not directly interpret:
+
+    * `CVPixelBuffer`
+    * `ID3D11Texture2D`
+    * VA-API private surface structures
+  * Ensure platform resources remain opaque and are destroyed by the APIs that own them.
+  * Re-run existing software decode/media regression tests on every host after common code changes.
+
+---
+
+* [ ] **7. Close distribution and package acceptance.**
+
+  * Rebuild FFmpeg and `libcrtmedia` from a fresh state on each acceptance host.
+  * Rebuild the normal `04-gfx-media` cumulative stage.
+  * Run packaged media consumers, not only build-tree tests.
+  * Audit binary/runtime dependencies:
+
+    * macOS: VideoToolbox/CoreVideo/CoreMedia-related frameworks
+    * Windows: D3D11/DXGI-related imports
+    * Linux: expected VA-API/runtime library dependencies
+  * Confirm no unexpected host ABI or allocator-domain dependency is introduced.
+  * Confirm existing public `crtmedia` ABI and software-only callers remain compatible.
+  * Record exact host/architecture, GPU, decoder backend, FFmpeg configuration, test command, and result in `HISTORY.md`.
+  * Keep raw logs/results outside git unless they are small, stable project fixtures.
+
+---
+
+### Acceptance gate
+
+This tranche is complete when all of the following are true:
+
+* [ ] macOS/arm64 decodes the project H.264 fixture through real VideoToolbox hardware frames.
+* [ ] Windows/x64 decodes the same fixture through real D3D11VA hardware frames.
+* [ ] Linux decodes the same fixture through real VA-API hardware frames on a capable native host.
+* [ ] Every hardware path successfully transfers at least one decoded hardware frame into the existing CPU-resident `crtmedia` frame contract.
+* [ ] The expected decoded frame count, timestamp behavior, image-content validation, EOS, and cleanup checks pass on every host.
+* [ ] `hardware_active` or its equivalent means “a real hardware frame was actually observed,” not merely “a hardware device was created.”
+* [ ] Software-only decode remains green on every host.
+* [ ] Hardware-unavailable or unsupported configurations fall back cleanly to software without breaking the decode contract.
+* [ ] No public API exposes platform-native decoded textures or surfaces yet.
+* [ ] Host/platform resources remain owned and released by FFmpeg/platform APIs, not by unrelated CRT allocator domains.
+* [ ] Fresh packaged `04-gfx-media` builds and binary/import audits remain green on the supported matrix.
+
+**Decision:** when this gate is green, move **Hardware video decode** to `HISTORY.md` and promote **Zero-copy decoded textures** into `In Progress`.
+
+### Recommended execution order
+
+* [ ] macOS/arm64 — establish the first real VideoToolbox green.
+* [ ] Harden common reporting/lifetime semantics using the macOS evidence.
+* [ ] Windows/x64 — solve D3D11VA FFmpeg enablement and obtain real hardware evidence.
+* [ ] Linux — first remove any toolchain/build-environment blocker, then obtain real VA-API evidence.
+* [ ] Re-run the normalized cross-host acceptance matrix.
+* [ ] Close packaged `04-gfx-media` and distribution/import acceptance.
+* [ ] Promote **Zero-copy decoded textures**.
+
 
 ## Planned
 
