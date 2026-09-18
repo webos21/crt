@@ -30,22 +30,27 @@ jobs:
           - name: macos-aarch64
             runner: macos-latest
             preset: macos-host-ninja-debug
+            boundary_acceptance: true
           - name: linux-amd64
             runner: ubuntu-latest
             preset: linux-host-ninja-debug
+            boundary_acceptance: false
           - name: linux-arm64
             runner: ubuntu-24.04-arm
             preset: linux-host-ninja-debug
+            boundary_acceptance: true
           - name: windows-x64
             runner: windows-latest
             preset: windows-host-ninja-debug
             msvc_arch: x64
             llvm_asset: win64
+            boundary_acceptance: true
           - name: windows-arm64
             runner: windows-11-arm
             preset: windows-host-ninja-debug
             msvc_arch: arm64
             llvm_asset: woa64
+            boundary_acceptance: false
 
     steps:
       - name: Checkout
@@ -213,3 +218,13 @@ jobs:
 
       - name: Configure, build, and test
         run: cmake --workflow --preset ${{ matrix.preset }}
+
+      # Tranche 6 acceptance is deliberately representative-host rather than
+      # architecture-cartesian: Linux/aarch64, Windows/x64, and macOS/arm64
+      # cover all three PALs while keeping the per-PR lane bounded. The target
+      # produces/verifies a fresh 02-cxx SDK and runs enabled plus clean
+      # backend-disabled libcrtgfx checks. Full Skia/FFmpeg predecessor-only
+      # audits remain in their explicit distribution/release jobs.
+      - name: Fresh 02-cxx and bounded libcrtgfx acceptance
+        if: github.event_name == 'pull_request' && matrix.boundary_acceptance == true
+        run: cmake --build --preset ${{ matrix.preset }} --target crtgfx-boundary-acceptance

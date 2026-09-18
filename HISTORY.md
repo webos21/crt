@@ -10,6 +10,26 @@ substantive update.
 
 ## 2026-09-17
 
+- **Implemented the Tranche 6 cross-host acceptance lane and established its
+  first real macOS/arm64 result.** Added one
+  `crtgfx-boundary-acceptance` CMake entry point. It regenerates and verifies
+  the cumulative `02-cxx` distribution, runs the binary-import, public-header
+  ABI, Host ABI firewall/fault, backend source-boundary, GPU, and synthetic
+  window/event checks in the enabled tree, then deletes and recreates a clean
+  Skia-off/`CRTGFX_ENABLE_GPU_BACKEND=OFF` Ninja tree. That second tree builds
+  both static and shared common GPU wrappers without a concrete backend and
+  runs the boundary plus public GPU smoke.
+
+  Pull requests now run this bounded lane on the representative macOS/arm64,
+  Linux/aarch64, and Windows/x64 jobs; the architecture-cartesian jobs keep the
+  ordinary workflow, while full Skia/FFmpeg and predecessor-only distribution
+  audits remain explicit release/scheduled work. The first local macOS run
+  passed: the fresh `02-cxx` distribution verified, all 7 enabled checks
+  passed, and both clean backend-disabled checks passed. Linux/aarch64 and
+  Windows/x64 remain open only for their first green CI evidence, so the live
+  Tranche 6 checkbox correctly remains in `TODO.md` rather than being reported
+  as cross-host complete.
+
 - **Completed backend-boundary Tranche 5: generic tests no longer receive
   private-layout privilege, GPU feature macros are target-local implementation
   selectors, and a real backend-disabled build now exists and passes.**

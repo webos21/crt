@@ -150,6 +150,10 @@ present transition stay in the backend owner.
   GPU/window/resize/Skia coverage on Linux/aarch64, Windows, and macOS. Add a
   per-PR fresh `02-cxx` plus bounded headless `libcrtgfx` smoke; leave full
   Skia/FFmpeg and predecessor-only distribution audits scheduled if needed.
+  The `crtgfx-boundary-acceptance` target and representative pull-request
+  matrix are now implemented. macOS/arm64 has passed the fresh `02-cxx`,
+  enabled-boundary, and clean backend-disabled acceptance locally; close this
+  item after the first green Linux/aarch64 and Windows/x64 matrix evidence.
 
 Acceptance requires identical common device/surface layouts in every
 translation unit, no backend field access outside its owner (including Skia

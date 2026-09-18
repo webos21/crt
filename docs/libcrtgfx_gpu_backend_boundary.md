@@ -203,5 +203,21 @@ Ganesh smoke pass, including backend-owned D3D12 `RemoveDevice()` and fresh
 device/context/draw recovery. A separate configuration with
 `CRTGFX_ENABLE_GPU_BACKEND=OFF` creates no backend object target, still builds
 both static and shared GPU wrappers plus `crtgfx_gpu_test`, and passes its
-focused tests. Linux/aarch64, macOS/arm64, and isolated distribution acceptance
-remain Tranche 6 work rather than being implied by this Windows proof.
+focused tests.
+
+Tranche 6 automation (2026-09-17) is now available as
+`crtgfx-boundary-acceptance`. It first regenerates and verifies a fresh
+`02-cxx` distribution, including its binary-import audit, then runs the
+enabled-tree ABI/firewall/source-boundary/GPU/window-event checks. It also
+deletes and recreates a dedicated backend-disabled tree, builds both static
+and shared common GPU wrappers there, and runs the boundary and public GPU
+smokes. Pull-request CI invokes this target on the representative macOS/arm64,
+Linux/aarch64, and Windows/x64 jobs. Full Skia/FFmpeg and predecessor-only
+distribution audits remain explicit scheduled/release evidence rather than
+making every pull request rebuild the complete upper-runtime stack.
+
+The first real target run passed on macOS/arm64: fresh `02-cxx` verification,
+all 7 enabled checks, and both clean backend-disabled checks succeeded.
+Tranche 6 remains open until the new Linux/aarch64 and Windows/x64 CI lanes
+produce their first green evidence; that pending evidence is not inferred from
+the earlier host-specific backend runs.

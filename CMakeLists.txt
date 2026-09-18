@@ -1352,6 +1352,39 @@ if(Python3_Interpreter_FOUND)
       DEPENDS ${CRT_LIBCXX_DIST_DEPENDS} crt-stage-03-source
       USES_TERMINAL
     )
+
+    # Backend-boundary Tranche 6: one bounded, cross-host acceptance entry
+    # point for PR CI and local release checks. crt-libcxx-dist supplies a
+    # freshly generated and verify_dist.py-audited 02-cxx SDK (including
+    # binary dependency/import validation); the runner executes the focused
+    # ABI/allocator/GPU checks and creates its own clean backend-disabled tree.
+    add_custom_target(crtgfx-boundary-acceptance
+      COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
+        "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_crtgfx_boundary_acceptance.py"
+        --root "${CMAKE_SOURCE_DIR}"
+        --build-dir "${CMAKE_BINARY_DIR}"
+        --disabled-build-dir "${CMAKE_BINARY_DIR}/crtgfx-backend-disabled"
+        --target-os "${CRT_TARGET_OS}"
+        --target-arch "${CRT_TARGET_ARCH}"
+        --cmake "${CMAKE_COMMAND}"
+        --ctest "${CMAKE_CTEST_COMMAND}"
+        --c-compiler "${CMAKE_C_COMPILER}"
+        --cxx-compiler "${CMAKE_CXX_COMPILER}"
+      DEPENDS
+        crt-libcxx-dist
+        header_abi_test
+        host_abi_firewall_test
+        host_abi_firewall_fault_test
+        crtgfx_window
+        crtgfx_window_shared
+        crtgfx_gpu
+        crtgfx_gpu_shared
+        crtgfx_gpu_test
+        crtgfx_synthetic_event
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+      COMMENT "Running bounded libcrtgfx backend-boundary acceptance"
+      USES_TERMINAL
+    )
   endif()
 
   # crtgfx_window/crtgfx_window_shared (not the old monolithic crtgfx/
