@@ -98,6 +98,11 @@
         ]
       },
       "macos": {
+        "configure_args": [
+          "--enable-videotoolbox",
+          "--enable-hwaccel=h264_videotoolbox",
+          "--extra-cflags=-fcrt-real-apple-sdk"
+        ],
         "post_configure_patch": [
           {
             "file": "config.h",

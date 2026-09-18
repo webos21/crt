@@ -39,6 +39,23 @@
 #error "CRTMEDIA_TEST_VIDEO_PATH must be defined (see libcrtmedia/CMakeLists.txt)"
 #endif
 
+// docs/crtmedia_hardware_decode_acceptance.md's own per-host backend name,
+// matching src/codec.c's hw_type_for_platform() mapping exactly -- kept
+// here as a plain compile-time string, not a new crtmedia API, since the
+// RESULT line below is test/diagnostic reporting (this tranche's own ABI-
+// unchanged decision), the same way libcrtgfx/tools/skia_gpu_window_demo.cc
+// reports backend=vulkan/d3d12/metal without any new crtgfx public entry
+// point.
+#if defined(CRT_TARGET_OS_MACOS)
+#define CRTMEDIA_HW_BACKEND_NAME "videotoolbox"
+#elif defined(CRT_TARGET_OS_WINDOWS)
+#define CRTMEDIA_HW_BACKEND_NAME "d3d11va"
+#elif defined(CRT_TARGET_OS_LINUX)
+#define CRTMEDIA_HW_BACKEND_NAME "vaapi"
+#else
+#define CRTMEDIA_HW_BACKEND_NAME "none"
+#endif
+
 static int failures = 0;
 
 #define CHECK(cond, msg)                                                     \
@@ -55,13 +72,17 @@ static int failures = 0;
 // values for test_video.mp4's own real visual content the way tests/
 // skia_reference_scene.h does for its own synthetic scene), but enough to
 // prove real chroma/luma data actually flowed through the new NV12 convert
-// path rather than silently producing all-zero/uniform garbage.
-static void check_nv12_convert(const crtmedia_frame* frame) {
+// path rather than silently producing all-zero/uniform garbage. Returns 1
+// iff every check here passed, for the RESULT line's own cpu_transfer field
+// -- tracked by return value rather than the shared `failures` counter
+// alone so a caller can report this one specific outcome independently.
+static int check_nv12_convert(const crtmedia_frame* frame) {
+  int before = failures;
   size_t stride = (size_t)frame->width * 4u;
   uint8_t* rgba = (uint8_t*)malloc(stride * frame->height);
   CHECK(rgba != NULL, "rgba scratch buffer allocated");
   if (rgba == NULL) {
-    return;
+    return 0;
   }
   crtmedia_frame dst;
   memset(&dst, 0, sizeof(dst));
@@ -91,6 +112,7 @@ static void check_nv12_convert(const crtmedia_frame* frame) {
     CHECK(saw_varying_pixel, "converted RGBA frame has real, non-uniform image content");
   }
   free(rgba);
+  return failures == before;
 }
 
 int main(void) {
@@ -155,6 +177,7 @@ int main(void) {
   int extractor_eof = 0;
   int video_eof = 0;
   int checked_nv12_convert = 0;
+  int cpu_transfer_ok = -1; /* -1 = n/a (no hardware frame was ever observed) */
 
   for (int iterations = 0; iterations < 20000 && !(extractor_eof && video_eof); ++iterations) {
     if (!extractor_eof) {
@@ -213,7 +236,7 @@ int main(void) {
         last_pts = frame.timestamp_us;
       }
       if (frame.format == CRTMEDIA_PIXEL_FORMAT_NV12 && !checked_nv12_convert) {
-        check_nv12_convert(&frame);
+        cpu_transfer_ok = check_nv12_convert(&frame);
         checked_nv12_convert = 1;
       }
       ++video_frame_count;
@@ -230,6 +253,33 @@ int main(void) {
 
   crtmedia_codec_release(video_codec);
   crtmedia_extractor_release(extractor);
+
+  // docs/crtmedia_hardware_decode_acceptance.md's own frozen RESULT line.
+  // `hw_device_created`/`hw_pixfmt_offered` both currently read from
+  // `is_hardware` (crtmedia_codec_is_hardware_accelerated()) -- today's
+  // real semantics of that API (set once av_hwdevice_ctx_create()+
+  // avcodec_open2() succeed, see that doc's own "gap 2") happen to match
+  // exactly what those two fields mean, and `codec.c`'s own get_format()
+  // callback offers hw_pix_fmt unconditionally whenever device creation
+  // succeeded, so the two fields are identical under the current
+  // implementation. `hw_frame_observed` is independent of that API and
+  // of gap 2 entirely: it is derived directly from whether any dequeued
+  // frame's own format was ever CRTMEDIA_PIXEL_FORMAT_NV12 (checked_
+  // nv12_convert), a real, already-public, unambiguous signal that a
+  // frame was actually hardware-resident before download -- once Tranche
+  // 2 fixes gap 2, `is_hardware` and `hw_frame_observed` should always
+  // agree; until then, a run with `hw_device_created=yes` but `hw_frame_
+  // observed=no` is gap 2's own signature made directly visible in real
+  // acceptance evidence, not a bug in this line.
+  fprintf(
+      stderr,
+      "crtmedia_hw_decode_test: RESULT backend=%s hw_requested=%s hw_device_created=%s hw_pixfmt_offered=%s "
+      "hw_frame_observed=%s cpu_transfer=%s frame_count=%u fallback=%s eos=%s clean_exit=%s\n",
+      CRTMEDIA_HW_BACKEND_NAME, prefer_hw != 0 ? "yes" : "no", is_hardware ? "yes" : "no",
+      is_hardware ? "yes" : "no", checked_nv12_convert ? "yes" : "no",
+      cpu_transfer_ok < 0 ? "n/a" : (cpu_transfer_ok ? "pass" : "fail"), video_frame_count,
+      (prefer_hw != 0 && !checked_nv12_convert) ? "yes" : "no", (extractor_eof && video_eof) ? "pass" : "fail",
+      failures == 0 ? "pass" : "fail");
 
   if (failures != 0) {
     fprintf(stderr, "crtmedia_hw_decode_test: %d failure(s)\n", failures);

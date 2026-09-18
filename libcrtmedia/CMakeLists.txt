@@ -145,8 +145,18 @@ if(CRT_TARGET_OS STREQUAL "macos")
   # CMSampleBuffer objects (CoreVideo/CoreMedia) internally -- all three
   # frameworks, same real "a static archive member with undefined symbols
   # only resolves once something links this framework in" reasoning
-  # AudioToolbox's own comment just above already documents.
-  set(CRTMEDIA_MACOS_FRAMEWORKS "-framework AudioToolbox" "-framework VideoToolbox" "-framework CoreVideo" "-framework CoreMedia")
+  # AudioToolbox's own comment just above already documents. CoreFoundation
+  # added 2026-09-18 ("Hardware video decode" Tranche 1, the first real
+  # attempt to actually enable and link the VideoToolbox hwaccel path
+  # rather than just the always-present device/pixel-format plumbing
+  # above): confirmed for real via a genuine link failure once FFmpeg's
+  # own ffmpeg.json recipe started enabling `--enable-hwaccel=
+  # h264_videotoolbox` -- `videotoolbox.c`'s/`hwcontext_videotoolbox.c`'s
+  # own real CFDictionary/CFAllocator/CFString usage (`kCFAllocatorDefault`,
+  # `kCFTypeDictionaryKeyCallBacks`, `__CFConstantStringClassReference`, ...)
+  # needs CoreFoundation directly, independent of the three frameworks
+  # above.
+  set(CRTMEDIA_MACOS_FRAMEWORKS "-framework AudioToolbox" "-framework VideoToolbox" "-framework CoreVideo" "-framework CoreMedia" "-framework CoreFoundation")
 endif()
 
 # crtmedia/crtmedia_shared are defined in one shared module so the in-tree
