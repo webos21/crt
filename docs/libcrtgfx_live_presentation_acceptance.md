@@ -130,6 +130,22 @@ crtgfx_skia_gpu_window_demo: RESULT backend=vulkan requested_size=800x480 backin
 Linux/aarch64 is not a new acceptance gap this tranche needs to close (see
 `TODO.md`'s own Step 5) -- its role here is a regression control confirming
 the shared contract is sound, not a platform this tranche is hardening
-further. The remaining, real gaps this contract's own values must still
-close are macOS/arm64 pixel-exact-plus-resize, macOS/x86_64 native
-execution, and Windows/x64 pixel-exact resize (`TODO.md` Steps 2-4).
+further.
+
+macOS/arm64 closed this contract's gap 2026-09-18 on real Metal hardware
+with no changes to this file's own implementation:
+
+```
+crtgfx_skia_gpu_window_demo: RESULT backend=metal requested_size=900x520 backing_size=1800x1040 frames_requested=5 frames_presented=5 resize_frame=2 pixel_check=pass post_resize_present=pass clean_exit=pass
+crtgfx_skia_gpu_window_demo: RESULT backend=metal requested_size=800x480 backing_size=1600x960 frames_requested=5 frames_presented=5 resize_frame=n/a pixel_check=pass post_resize_present=n/a clean_exit=pass
+```
+
+Confirms the contract's `backing_size`/`requested_size` split works exactly
+as designed against a real Retina display: a `900x520`-point resize request
+reports as a real `1800x1040`-pixel backing extent, and the pixel check
+still passes because it is written against the reported backing size, never
+an assumed 1:1 ratio. The originally planned macOS/x86_64 native-execution
+gap is retired rather than closed (see `HISTORY.md`'s 2026-09-18 entry) --
+this project's macOS acceptance target is now Apple Silicon/macOS 27+. The
+one remaining real gap this contract's own values must still close is
+Windows/x64 pixel-exact resize (`TODO.md` Step 4).

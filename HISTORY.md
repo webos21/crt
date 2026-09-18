@@ -10,6 +10,72 @@ substantive update.
 
 ## 2026-09-18
 
+- **Closed the macOS/arm64 pixel-exact and resize-plus-Ganesh gap (Step 2 of
+  "Finish live GPU presentation evidence before hardware decode") on real
+  Metal hardware, and retired the macOS/x86_64 native live-execution item
+  (Step 3) as a support-policy decision rather than an unverified pass.**
+  Ran Step 1's already-frozen contract (`docs/libcrtgfx_live_presentation_
+  acceptance.md`) against real macOS/arm64 hardware with no new design, no
+  new backend-specific readback hook, and no change to
+  `libcrtgfx/tools/skia_gpu_window_demo.cc` beyond what Step 1 already
+  landed -- exactly the point of freezing the contract first.
+
+  **M2 (baseline, no resize)** -- `crtgfx_skia_gpu_window_demo 5`:
+  ```
+  RESULT backend=metal requested_size=800x480 backing_size=1600x960 frames_requested=5 frames_presented=5 resize_frame=n/a pixel_check=pass post_resize_present=n/a clean_exit=pass
+  ```
+  Confirms the contract's pixel-check/RESULT-line machinery works unmodified
+  against Metal/CAMetalLayer, not just Vulkan -- this run's own purpose, not
+  a re-verification of the Metal backend itself (already accepted in the
+  backend-boundary tranche).
+
+  **M3 (the tranche's actual acceptance case)** -- `crtgfx_skia_gpu_window_
+  demo 5 900 520`:
+  ```
+  RESULT backend=metal requested_size=900x520 backing_size=1800x1040 frames_requested=5 frames_presented=5 resize_frame=2 pixel_check=pass post_resize_present=pass clean_exit=pass
+  ```
+  This is the real test: a `900x520`-point resize request lands as a real
+  `1800x1040`-pixel Retina backing extent (confirmed via `crtgfx_gpu_
+  surface_get_size()`, not assumed), and the first frame drawn at that new
+  extent reads back pixel-correct through Ganesh and presents successfully.
+  This is precisely the class of bug the backend-boundary Tranche 4 session
+  found and fixed in the generic demo (`tools/gpu_window_demo.c`'s own
+  resize check wrongly assumed a 1:1 point-to-pixel ratio) -- promoted here
+  from an incidental fix to a permanent, contract-driven acceptance case.
+
+  **M4 (regression closure, deliberately not new rendering evidence)** --
+  a 30-frame no-resize stability run (`frames_presented=30`, same
+  `pixel_check=pass`/`clean_exit=pass` shape, checking drawable
+  acquisition/command-buffer lifetime/Ganesh wrapping/Metal submission/
+  CAMetalLayer presentation hold up over more iterations, not more pixel
+  coverage); the existing offscreen Ganesh smoke re-run clean (reference
+  scene, resize, device-loss/recreation, pixel readback, all `ok`); and
+  `crtgfx-boundary-acceptance` re-run from its own genuinely fresh `cmake
+  --fresh --preset macos-host-ninja-debug` tree, 7/7 enabled-tree checks
+  plus 2/2 backend-disabled checks, zero failures -- confirming this
+  evidence-gathering pass reopened no backend-field access and left the
+  Tranche 0-6 boundary work untouched.
+
+  **macOS/x86_64 retirement.** The originally planned Step 3 (native
+  x86_64 live-execution evidence) is retired rather than completed: macOS
+  acceptance for this project is now Apple-Silicon-only, targeting macOS 27
+  and later. Verified directly (not taken on faith from the suggestion that
+  prompted this decision): Apple's own macOS 27 compatibility page
+  (support.apple.com/en-us/127255, fetched 2026-09-18) lists only Apple
+  Silicon Macs (M1-and-later MacBook Pro/Air, iMac, Mac mini, Mac Studio,
+  Mac Pro) as supported upgrade targets, with no Intel model listed --
+  distinct from macOS 26, which still supports some Intel Macs, so the
+  correct framing is "current acceptance target is Apple Silicon/macOS 27+"
+  rather than a blanket "Intel support ended" claim. `TODO.md`'s Step 3 and
+  the tranche's acceptance-gate bullet for macOS/x86_64 are removed rather
+  than left as an open, indefinitely-deferred checkbox, so a future reader
+  sees a recorded decision instead of an apparently-abandoned requirement.
+
+  No public `crtgfx` ABI or object-boundary change; no new test-control
+  hook; Graphite, `CVPixelBuffer`/Metal-texture interop, VideoToolbox,
+  hardware decode, and zero-copy stayed out of scope, per the tranche's own
+  stated boundaries.
+
 - **Froze the backend-neutral live-presentation acceptance contract (Step 1
   of "Finish live GPU presentation evidence before hardware decode") and
   validated it on Linux/aarch64.** With backend object-boundary hardening

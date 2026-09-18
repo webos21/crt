@@ -77,23 +77,30 @@ Close the remaining evidence gaps in the existing Ganesh presentation path befor
   resize fence/submission check and `crtgfx-boundary-acceptance` (7/7 + 2/2)
   per Steps 5/6, both still pass. No public ABI or object-boundary change.
 
-* [ ] **2. Close the macOS/arm64 pixel-exact and resize-plus-Ganesh gaps.**
+* [x] **2. Close the macOS/arm64 pixel-exact and resize-plus-Ganesh gaps.**
+  Completed 2026-09-18 and recorded in `HISTORY.md`, on the real
+  `docs/libcrtgfx_live_presentation_acceptance.md` contract Step 1 froze
+  (no new design, no new readback hook). Three real Metal/CAMetalLayer runs
+  on macOS/arm64 hardware, all `pixel_check=pass`/`clean_exit=pass`:
+  * **M2 (baseline, no resize):** `crtgfx_skia_gpu_window_demo 5` --
+    `requested_size=800x480 backing_size=1600x960 frames_presented=5
+    resize_frame=n/a`.
+  * **M3 (the tranche's core acceptance case):** `crtgfx_skia_gpu_window_demo
+    5 900 520` -- `requested_size=900x520 backing_size=1800x1040
+    resize_frame=2 post_resize_present=pass`. Confirms the frozen contract's
+    own "backing size is authoritative, never assume 1:1 point-to-pixel"
+    rule against real Retina hardware.
+  * **M4 (regression closure, not new evidence):** 30-frame no-resize
+    stability run (`frames_presented=30`, same pass fields); the existing
+    offscreen Ganesh smoke (reference scene, resize, device-loss/
+    recreation, pixel readback, all `ok`); and `crtgfx-boundary-acceptance`
+    (7/7 enabled + 2/2 backend-disabled, zero failures).
 
-  * Run the real Metal/CAMetalLayer Ganesh path on macOS/arm64 hardware.
-  * Add deterministic pixel-content verification for the live Ganesh reference scene; replace the existing “looks correct by eye” evidence with machine-checkable expected pixels or bounded channel tolerances.
-  * Exercise Ganesh rendering across a scripted live resize, using the existing `900x520` point request as a deterministic case.
-  * Treat the surface-reported backing-store size as authoritative; do not assume a 1:1 point-to-pixel ratio on Retina displays.
-  * Verify that a frame rendered after resize has the expected content at the new backing extent and presents successfully.
-  * Retain a bounded multi-frame run after the resize to catch drawable/lifetime/synchronization regressions.
-
-* [ ] **3. Close the macOS/x86_64 native live-execution gap.**
-
-  * Configure and build the current tree for native macOS/x86_64, not merely cross-compile it.
-  * Run the focused GPU test and Ganesh offscreen/reference-scene smoke on a real x86_64 macOS host.
-  * Run the real Metal/CAMetalLayer Ganesh window demo for multiple frames and require a clean finite exit.
-  * Exercise a scripted resize while the Ganesh-wrapped live surface is active.
-  * Run the same pixel-exact/reference-scene check used for macOS/arm64 where the host capture/readback mechanism is available.
-  * Record the actual host architecture and Metal device used. Compile-only or Rosetta-only evidence does not close the native x86_64 item.
+* ~~**3. Close the macOS/x86_64 native live-execution gap.**~~ **Retired
+  2026-09-18, not completed as originally scoped -- see `HISTORY.md`.**
+  macOS acceptance for this tranche is Apple-Silicon-only (macOS 27+/arm64);
+  native x86_64 live-execution evidence is out of scope rather than an
+  unverified pass.
 
 * [ ] **4. Close the Windows/x64 pixel-exact resize gap.**
 
@@ -130,8 +137,7 @@ Close the remaining evidence gaps in the existing Ganesh presentation path befor
 
 This tranche is complete when all of the following are true:
 
-* [ ] macOS/arm64 has machine-checkable pixel evidence for the live Ganesh path and a successful Ganesh + live-resize run.
-* [ ] macOS/x86_64 has real native Metal/Ganesh execution evidence, including bounded live presentation and resize.
+* [x] macOS/arm64 has machine-checkable pixel evidence for the live Ganesh path and a successful Ganesh + live-resize run. Completed 2026-09-18 (Step 2, M2/M3/M4).
 * [ ] Windows/x64 has machine-checkable post-resize Ganesh pixel evidence on the real D3D12 path and continues presenting afterward.
 * [ ] Linux/aarch64's already-accepted Vulkan/Wayland multi-frame + resize path remains green after shared test/harness changes.
 * [ ] Generic tests do not regain access to Vulkan, D3D12, or Metal private object layouts.
