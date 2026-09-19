@@ -70,106 +70,90 @@ Use macOS/arm64 as the first-green reference host, then apply the same Phase-A c
 ---
 
 * [x] **0. Freeze the Phase-A hardware-decode acceptance contract.**
-  Completed 2026-09-18 and recorded in `HISTORY.md`; the frozen contract
-  lives in `docs/crtmedia_hardware_decode_acceptance.md`. Audited the
-  existing 2026-09-08 Phase-A groundwork (format opt-in key, `crtmedia_
-  codec_is_hardware_accelerated()`, per-host `hw_type_for_platform()`
-  mapping, `hw_decode_test.c`, the existing `test_video.mp4` fixture) --
-  all reused unchanged, no new public API or fixture needed. Found two
-  real, confirmed gaps while auditing rather than assuming Phase A already
-  worked end to end: (1) `porting/recipes/ffmpeg.json` never enables any
-  hwaccel on any host (`--disable-everything` plus explicit decoder/
-  demuxer/parser/protocol allowlists only; the recipe's own 2026-08-31
-  verification note already says so directly: "no encoders/hwaccels/
-  muxers/..."), so `crtmedia_hw_decode_test` has likely always taken the
-  software-fallback path silently on every host to date; (2) `crtmedia_
-  codec_is_hardware_accelerated()`'s backing flag is set at successful
-  `avcodec_open2()` time, not after an actual hardware-resident frame is
-  observed, contradicting both this tranche's own scope rule and the
-  function's own existing doc comment ("never a caller-side guess"). Both
-  are real bugs for later tranches to fix (1 in Tranche 1/3/4, 2 in
-  Tranche 2), not fixed in this freeze step. Also froze the six-state
-  model and a new `RESULT ...` machine-readable line for `hw_decode_test`
-  to print once Tranche 1 lands, matching the live-presentation tranche's
-  own `RESULT` convention.
-
----
-
-* [x] **1. Establish the first real hardware-decode green on macOS/arm64 with VideoToolbox.**
-  Completed 2026-09-18 and recorded in `HISTORY.md`. Real hardware decode
-  confirmed active on this host:
-  ```
-  crtmedia_hw_decode_test: RESULT backend=videotoolbox hw_requested=yes hw_device_created=yes hw_pixfmt_offered=yes hw_frame_observed=yes cpu_transfer=pass frame_count=25 fallback=no eos=pass clean_exit=pass
-  ```
-  `porting/recipes/ffmpeg.json` (macOS): enabled `--enable-videotoolbox`/
-  `--enable-hwaccel=h264_videotoolbox`; `libcrtmedia/CMakeLists.txt`: added
-  the missing `-framework CoreFoundation`; `libcrtmedia/tests/hw_decode_
-  test.c`: implemented the frozen `RESULT` line. Along the way, hit and
-  fixed a real deadlock (an FFmpeg-internal `pthread_once`-guarded codec-
-  registration static, laid out per real Apple's `pthread_once_t` while
-  this project's own `pthread_once()` interpreted the same memory with its
-  own different layout, once real Apple headers leaked into the *whole*
-  FFmpeg build via a too-broadly-applied `-fcrt-real-apple-sdk`) by scoping
-  that flag to only the two files that actually need real framework
-  headers, plus two further narrow `config.h` fixes (`HAVE_MACH_ABSOLUTE_
-  TIME`, `HAVE_ARC4RANDOM_BUF`) for the same root cause. Full local `ctest`
-  130/130; the plain software-decode path (`crtmedia_extractor_codec_test`)
-  and the pre-fix "hardware requested but unavailable" fallback (`hw_
-  device_created=no fallback=yes`, captured before the recipe change) are
-  both separately confirmed green. Also found, not fixed (out of this
-  tranche's scope, flagged for follow-up): `tools/crt-port-build.py
-  --rebuild` only clears a port's install stamp, not its previously-
-  installed files, which can cause a multi-library port like FFmpeg to
-  self-collide with its own stale headers via `tools/crt-cc`'s always-
-  prepended `-I${CRT_PORT_INCLUDE_DIR}`.
-
----
-
-* [x] **2. Harden common Phase-A reporting and lifetime behavior after the macOS first-green.**
-  Completed 2026-09-18 and recorded in `HISTORY.md`. `crtmedia_codec_is_
-  hardware_accelerated()` now becomes true only in `crtmedia_codec_
-  dequeue_output()`, once a real hardware-backed frame has actually been
-  transferred to CPU memory -- closing Tranche 0's own gap 2 (it used to
-  latch true at device-creation time). Verified for real, false
-  immediately after decoder creation and true after the first hardware
-  frame, remaining true through EOS and `crtmedia_codec_flush()`/reuse.
-  The finer-grained six-state diagnostic breakdown moved to a new private,
-  non-installed `libcrtmedia/src/codec_test_control.h`
-  (`crtmedia_codec_test_get_hw_diagnostics()`, mirroring `libcrtgfx/src/
-  gpu_test_control.h`'s own role) rather than staying aliased to the
-  public boolean, so `hw_device_created`/`hw_pixfmt_offered` keep
-  reporting correctly now that the boolean's own meaning changed. New
-  `crtmedia_hw_decode_flush_test`/`crtmedia_hw_decode_lifecycle_test`
-  (flush/seek/reuse; 15 bounded repeated create/decode/release cycles,
-  all real hardware, no hangs) plus two new checks in the existing
-  software-only `crtmedia_extractor_codec_test` (hardware_accelerated
-  stays false before and after decode). Full local `ctest` 132/132. No
-  public `crtmedia` ABI change.
+  Completed 2026-09-18, recorded in `HISTORY.md`; contract in
+  `docs/crtmedia_hardware_decode_acceptance.md`.
+* [x] **1. First real hardware-decode green on macOS/arm64 (VideoToolbox).**
+  Completed 2026-09-18, recorded in `HISTORY.md`: `RESULT backend=videotoolbox
+  ... frame_count=25 fallback=no eos=pass clean_exit=pass`.
+* [x] **2. Harden common Phase-A reporting and lifetime behavior.**
+  Completed 2026-09-18, recorded in `HISTORY.md`:
+  `crtmedia_codec_is_hardware_accelerated()` is true only after a real
+  hardware frame is downloaded; flush/reuse and 15-cycle lifecycle tests added.
 
 ---
 
 * [ ] **3. Enable and validate Windows/x64 D3D11VA hardware decode.**
 
-  * Reproduce the current FFmpeg D3D11VA configure failure independently before changing the recipe.
-  * Isolate whether the existing Windows macro policy, especially `_WIN32` undefinition, prevents the required D3D11 video declarations from being visible during FFmpeg configure checks.
-  * Avoid globally restoring `_WIN32` across the FFmpeg build unless absolutely necessary.
-  * Prefer the narrowest recipe/configure/header boundary fix that enables D3D11VA without weakening the existing CRT portability model.
-  * Verify from FFmpeg configure output that the required H.264 D3D11VA hwaccel is enabled.
-  * Perform a fresh FFmpeg build and rebuild `libcrtmedia`.
-  * Run the same hardware-decode fixture on real Windows/x64 hardware.
-  * Require:
+  Apply the frozen Phase-A contract to Windows/x64 via FFmpeg D3D11VA; the
+  macOS/arm64 Tranche 1-2 implementation is the reference behavior. Do not
+  redesign the common `crtmedia` state machine. Ends at a real D3D11VA-backed
+  H.264 frame downloaded into the existing CPU `crtmedia_frame` contract;
+  D3D11 texture exposure, D3D11<->D3D12 interop, and zero-copy stay deferred.
+  Core insight: FFmpeg 8.1.2's `d3d11va` needs `dxva.h` + `ID3D11VideoDecoder` +
+  `ID3D11VideoContext`, and its configure probes those via `windows.h`+`d3d11.h`,
+  while the CRT recipe `-U_WIN32`/`-UWIN32`/`-U__MINGW32__`s the whole Windows
+  FFmpeg build -- resolve that conflict narrowly (probes + D3D/DXVA objects only).
+  `codec.c` already selects `AV_HWDEVICE_TYPE_D3D11VA` and `libcrtmedia/
+  CMakeLists.txt` already wires `d3d11.lib`/`dxgi.lib`.
 
-    * D3D11VA requested
-    * real D3D11 hardware frame observed
-    * successful `av_hwframe_transfer_data()` or equivalent CPU transfer
-    * expected frame count
-    * valid timestamps
-    * valid decoded image contents
-    * clean EOS
-    * clean destruction
-  * Re-run the fixture with hardware preference disabled and verify software decode remains unchanged.
-  * Verify unsupported/unavailable hardware falls back cleanly instead of failing decode.
-  * Keep D3D11 texture sharing and D3D11↔D3D12 interop outside this tranche.
+  * [ ] **3.1 Baseline before changing FFmpeg.** Fresh Windows/x64 configure/
+    build; software 25-frame/EOS contract green; `crtmedia_hw_decode_test`
+    (hardware preferred) against the current no-D3D11VA FFmpeg build -- save its
+    `RESULT` line (expect `hw_requested=yes`, no hardware frame,
+    `hardware_accelerated=false`, 25 software frames, `fallback=yes`, EOS/clean
+    exit pass) and the FFmpeg configure summary showing H.264 D3D11VA absent.
+  * [ ] **3.2 Reproduce the configure blocker in isolation.** Only add
+    `--enable-d3d11va`, `--enable-hwaccel=h264_d3d11va` (+ known MinGW-w64 SDK
+    include path if required); capture `ffbuild/config.log` probes for `dxva.h`,
+    `ID3D11VideoDecoder`, `ID3D11VideoContext`; confirm `d3d11va requested, but
+    not all dependencies are satisfied`. Do not blindly enable more subsystems.
+  * [ ] **3.3 Prove the macro conflict with minimal probes.** Compile a tiny
+    probe through `tools/crt-cc` (`windows.h`, `dxva.h`, `d3d11.h`, use both
+    video interfaces); reproduce failure under the current `-U_WIN32
+    -U_WIN32_WCE -U__WIN32__ -UWIN32 -U__MINGW32__` policy; restore candidates
+    minimally to find the exact declaration gate; confirm it is declaration
+    visibility, not missing headers/libs/search paths. Do not globally restore
+    Windows macros yet.
+  * [ ] **3.4 Choose the narrowest fix.** Keep the portable global policy for
+    ordinary translation units; scope native-Windows declarations to configure
+    probes and the FFmpeg objects that really consume D3D11/DXVA
+    (`libavutil/hwcontext_d3d11va.c`, `CONFIG_D3D11VA` objects, H.264 D3D11VA
+    hwaccel) -- analogous to the macOS VideoToolbox `-fcrt-real-apple-sdk`
+    scoping. Inspect the exact objects before adding overrides.
+  * [ ] **3.5 Make configure truthfully report D3D11VA.** Apply recipe change;
+    genuinely clean FFmpeg rebuild (clear stale FFmpeg install output -- the
+    known `--rebuild` install-prefix issue); require H.264 D3D11VA in the
+    enabled-hwaccel summary, `CONFIG_D3D11VA`, and `hwcontext_d3d11va` actually
+    compiled. "Configure completed" alone is not evidence.
+  * [ ] **3.6 Build `libcrtmedia` without reopening the Windows ABI boundary.**
+    Reuse the existing `AV_HWDEVICE_TYPE_D3D11VA` path and `d3d11.lib`/
+    `dxgi.lib`; add import libs only for a proven unresolved symbol; no
+    `ID3D11*`/DXGI types in public `crtmedia`.
+  * [ ] **3.7 First real Windows/x64 D3D11VA green.** On a physical machine with
+    a real GPU/driver (not Remote Desktop): `RESULT backend=d3d11va
+    hw_requested=yes hw_device_created=yes hw_pixfmt_offered=yes
+    hw_frame_observed=yes cpu_transfer=pass frame_count=25 fallback=no eos=pass
+    clean_exit=pass`; `crtmedia_codec_is_hardware_accelerated()` false after
+    creation, true only after the first real download, true after EOS;
+    NV12/image-content checks non-degenerate.
+  * [ ] **3.8 Tranche 2 lifecycle contract on Windows.**
+    `crtmedia_hw_decode_flush_test` (25 hardware frames, seek-to-start, same
+    decoder flushed/reused, second 25 fresh hardware frames, sticky true) and
+    `crtmedia_hw_decode_lifecycle_test` (15 bounded create/decode/EOS/release
+    cycles, all hardware, hang-free).
+  * [ ] **3.9 Software and fallback regression.** `crtmedia_extractor_codec_test`
+    (software reports false before/after, 25 frames); keep the 3.1 baseline as
+    the real "hardware requested but unavailable" fallback evidence; no
+    synthetic D3D failure hook; hardware preference stays optional.
+  * [ ] **3.10 Windows regression and binary/import audit.** Full relevant
+    Windows CTest; recheck FFmpeg/`libcrtmedia` imports (only intended Windows
+    dependencies); static/shared `crtmedia` valid; no host-owned D3D object
+    freed through a CRT allocator domain; no D3D11 sharing/D3D11<->D3D12 interop
+    code entered.
+  * [ ] **3.11 Record and close.** `HISTORY.md`: original configure failure,
+    proven macro/header root cause, narrow fix, enabled-hwaccel summary,
+    Windows/GPU info, final `RESULT`, flush/reuse, lifecycle, software/fallback
+    results. Tick the acceptance-gate Windows line; then move to item 4.
 
 ---
 
@@ -270,12 +254,12 @@ Use macOS/arm64 as the first-green reference host, then apply the same Phase-A c
 
 This tranche is complete when all of the following are true:
 
-* [ ] macOS/arm64 decodes the project H.264 fixture through real VideoToolbox hardware frames.
+* [x] macOS/arm64 decodes the project H.264 fixture through real VideoToolbox hardware frames. (Tranche 1)
 * [ ] Windows/x64 decodes the same fixture through real D3D11VA hardware frames.
 * [ ] Linux decodes the same fixture through real VA-API hardware frames on a capable native host.
 * [ ] Every hardware path successfully transfers at least one decoded hardware frame into the existing CPU-resident `crtmedia` frame contract.
 * [ ] The expected decoded frame count, timestamp behavior, image-content validation, EOS, and cleanup checks pass on every host.
-* [ ] `hardware_active` or its equivalent means “a real hardware frame was actually observed,” not merely “a hardware device was created.”
+* [x] `hardware_active` or its equivalent means “a real hardware frame was actually observed,” not merely “a hardware device was created.”
 * [ ] Software-only decode remains green on every host.
 * [ ] Hardware-unavailable or unsupported configurations fall back cleanly to software without breaking the decode contract.
 * [ ] No public API exposes platform-native decoded textures or surfaces yet.
@@ -286,8 +270,8 @@ This tranche is complete when all of the following are true:
 
 ### Recommended execution order
 
-* [ ] macOS/arm64 — establish the first real VideoToolbox green.
-* [ ] Harden common reporting/lifetime semantics using the macOS evidence.
+* [x] macOS/arm64 — establish the first real VideoToolbox green.
+* [x] Harden common reporting/lifetime semantics using the macOS evidence.
 * [ ] Windows/x64 — solve D3D11VA FFmpeg enablement and obtain real hardware evidence.
 * [ ] Linux — first remove any toolchain/build-environment blocker, then obtain real VA-API evidence.
 * [ ] Re-run the normalized cross-host acceptance matrix.
