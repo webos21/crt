@@ -96,6 +96,16 @@ Use macOS/arm64 as the first-green reference host, then apply the same Phase-A c
 
 * [ ] **4. Enable and validate Linux VA-API hardware decode.**
 
+  * **Host blocker (2026-09-20):** the Linux/aarch64 host used for Tranches 2/6
+    is a QEMU guest (Ubuntu 24.04, kernel 6.8, `virtio-gpu` behind an Apple M1
+    Pro/Metal host, `/dev/dri/renderD128` openable by the `render` group). Mesa's
+    `virtio_gpu_drv_video.so` loads and `vaInitialize` succeeds (VA-API 1.20,
+    libva/libva-drm 1.20.0 dev metadata present), but the driver advertises only
+    `VAProfileNone`/`VAEntrypointVideoProc` -- no H.264 decode `VLD` entrypoint. It
+    cannot count as Linux VA-API hardware-decode acceptance; a separate native
+    Linux VA-API-capable host (or an explicit backend decision) is required
+    before real-decode steps can close. Build-side work (recipe/configure/link)
+    does not depend on this.
   * First establish a clean Linux environment where the existing software-only FFmpeg recipe rebuilds successfully.
   * Treat any host-toolchain failure such as `ar`/`nm` crashes as a build-environment blocker, not a VA-API defect.
   * Use a native Linux machine with:
