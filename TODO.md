@@ -57,6 +57,261 @@ newest entry first) rather than leaving it here.
 
 ## In Progress
 
+### Public Preview / Promotion Preparation
+
+Goal: turn the completed `04-gfx-media` milestone into the first externally consumable CRT developer preview, while keeping hardware decode, zero-copy, and QuickJS as follow-up publicity milestones rather than blockers for the initial launch.
+
+#### In Progress — First Public Developer Preview
+
+* [ ] **Synchronize public-facing project status**
+
+  * [ ] Reconcile `STATUS.md`, `TODO.md`, `HISTORY.md`, and `docs/runtime_roadmap.md`.
+  * [ ] Remove or clearly mark stale blockers that have already been resolved.
+  * [ ] Confirm that the documented `03-gfx-simple -> 04-gfx-media` predecessor-only acceptance status matches the latest verified Linux, Windows, and macOS results.
+  * [ ] Make the distinction between completed work, current work, and planned work unambiguous.
+  * [ ] Keep Linux hardware decode limitations documented separately from the already accepted software graphics/media runtime.
+
+* [ ] **Prepare the first public CRT release**
+
+  * [ ] Create the first GitHub release, tentatively:
+
+    * `v0.4.0-preview.1`
+  * [ ] Position it as:
+
+    * `First public developer preview of the CRT Graphics/Media SDK stage`
+  * [ ] Treat `04-gfx-media` as the current public SDK milestone.
+  * [ ] Do not block the release on Linux VA-API hardware decode.
+  * [ ] Clearly mark `05-js` as roadmap/skeleton work rather than part of the current supported preview.
+  * [ ] Include a concise verified-platform summary:
+
+    | Platform | Native Window | GPU    | Skia | FFmpeg | HW H.264 Decode                     |
+    | -------- | ------------- | ------ | ---- | ------ | ----------------------------------- |
+    | Linux    | Wayland       | Vulkan | Yes  | Yes    | In progress / environment-dependent |
+    | Windows  | Win32         | D3D12  | Yes  | Yes    | D3D11VA verified                    |
+    | macOS    | Cocoa         | Metal  | Yes  | Yes    | VideoToolbox verified               |
+
+* [ ] **Prepare downloadable / directly testable release artifacts**
+
+  * [ ] Provide release artifacts that allow an external developer to try CRT without reconstructing the entire development environment from repository history.
+  * [ ] Include or document the staged SDK layout:
+
+    * `01-c`
+    * `02-cxx`
+    * `03-gfx-simple`
+    * `04-gfx-media`
+  * [ ] Provide at least one minimal build-and-run example.
+  * [ ] Verify the release artifact from a clean environment where practical.
+  * [ ] Document the supported host/compiler requirements for each platform.
+
+* [ ] **Turn the README into a public landing page**
+
+  * [ ] Replace the current engineering-first opening with a concise project message.
+  * [ ] Candidate headline:
+
+    * `Linux-style C/C++ software. Native on Linux, Windows and macOS.`
+  * [ ] Candidate supporting message:
+
+    * `Same source model. Native executables. Native GPUs. No VM or container.`
+  * [ ] Keep the precise Bionic/PAL definition immediately below the high-level message.
+  * [ ] Move detailed toolchain and implementation policy farther down the README or link to dedicated documentation.
+  * [ ] Add a short architecture overview showing:
+
+    ```text
+    Application
+        |
+        v
+    Skia / FFmpeg
+        |
+        v
+    CRT C++ Runtime
+        |
+        v
+    Bionic-compatible CRT / PAL
+        |
+        +-----------+-----------+
+        |           |           |
+      Linux       Windows      macOS
+     Wayland       Win32       Cocoa
+     Vulkan        D3D12       Metal
+    ```
+
+* [ ] **Add a visible "What already works" matrix**
+
+  * [ ] Show verified functionality instead of relying only on descriptive claims.
+  * [ ] Cover at least:
+
+    * libc / libm / libdl
+    * libc++ / libc++abi / libunwind
+    * pthread
+    * sockets
+    * mmap
+    * TLS
+    * native window/input
+    * Skia CPU
+    * Skia GPU
+    * FFmpeg
+    * native audio
+    * hardware decode status
+  * [ ] Clearly distinguish:
+
+    * verified
+    * partially verified
+    * in progress
+    * planned
+
+* [ ] **Add a "Portability Proof" section**
+
+  * [ ] Show real upstream software that has been built and exercised through the CRT sysroot/runtime.
+  * [ ] Include representative ports such as:
+
+    * zlib
+    * libpng
+    * SQLite
+    * bzip2
+    * xz
+    * PCRE2
+    * mbedTLS
+    * curl
+    * FreeType
+    * Skia
+    * FFmpeg
+  * [ ] Highlight real runtime evidence where available, especially:
+
+    * curl HTTP/HTTPS round trips
+    * Skia live native presentation
+    * FFmpeg decode/playback
+  * [ ] Prefer evidence-based wording over broad compatibility claims.
+
+* [ ] **Create a three-platform visual demo**
+
+  * [ ] Record the same CRT application running on:
+
+    * Linux / Wayland / Vulkan
+    * Windows / Win32 / D3D12
+    * macOS / Cocoa / Metal
+  * [ ] Include visible evidence of:
+
+    * native window creation
+    * Skia rendering
+    * text rendering
+    * keyboard/mouse input
+    * resize behavior
+    * GPU presentation
+    * FFmpeg video decode/playback where practical
+  * [ ] Produce a short 20–30 second version suitable for the README and social posts.
+  * [ ] Keep the source application and runtime path as equivalent across the three platforms as practical.
+  * [ ] Add the demo near the top of the README.
+
+* [ ] **Document current hardware decode status transparently**
+
+  * [ ] macOS:
+
+    * VideoToolbox hardware-backed H.264 decode verified.
+    * CPU transfer and clean EOS verified.
+  * [ ] Windows:
+
+    * D3D11VA hardware-backed H.264 decode verified.
+    * Repeated lifecycle testing verified.
+  * [ ] Linux:
+
+    * VA-API work remains in progress.
+    * Keep WSL / virtualized-driver limitations distinct from CRT runtime defects.
+  * [ ] Avoid describing hardware decode as fully cross-platform until native Linux evidence is complete.
+
+* [ ] **Prepare public messaging / FAQ**
+
+  * [ ] Add a concise `Why CRT?` section.
+  * [ ] Explain why CRT uses a Bionic-shaped interface.
+  * [ ] Explain rebuild-based source portability:
+
+    * not binary compatibility
+    * not a VM
+    * not a container
+  * [ ] Prepare concise comparisons for common questions:
+
+    * musl
+    * SDL
+    * Qt
+    * WSL
+    * Wine
+    * Cosmopolitan
+    * Android/Bionic
+  * [ ] Clearly state non-goals:
+
+    * not Android APK compatibility
+    * not an Electron clone
+    * not full POSIX compatibility
+    * not production-ready `1.0`
+
+* [ ] **Soft-launch before the main announcement**
+
+  * [ ] Share the preview with a small number of relevant technical communities first.
+  * [ ] Target:
+
+    * C / C++ systems developers
+    * embedded Linux developers
+    * HMI / IVI developers
+    * graphics/runtime developers
+  * [ ] Collect recurring questions and misunderstandings.
+  * [ ] Update README/FAQ based on that feedback before a broader launch.
+
+* [ ] **Prepare the main public launch**
+
+  * [ ] Prepare a Show HN submission after:
+
+    * first GitHub release exists
+    * README landing page is updated
+    * 3-platform demo is available
+    * quick-start path is verified
+  * [ ] Candidate title:
+
+    * `Show HN: CRT – Linux-oriented C/C++ software, rebuilt natively for Linux, Windows and macOS`
+  * [ ] Structure the announcement around:
+
+    1. the portability problem
+    2. CRT's architectural approach
+    3. concrete proof
+    4. current limitations
+    5. roadmap
+  * [ ] Avoid feature-list-only promotion.
+
+#### Follow-up Promotion Milestones
+
+* [ ] **Milestone 2 — Three-platform hardware video decode**
+
+  * [ ] Complete native Linux VA-API H.264 hardware decode evidence.
+  * [ ] Publish the completed platform mapping:
+
+    * Linux -> VA-API
+    * Windows -> D3D11VA
+    * macOS -> VideoToolbox
+  * [ ] Use this as a separate technical/public announcement.
+
+* [ ] **Milestone 3 — Hardware decode to native GPU zero-copy**
+
+  * [ ] Connect decoded hardware surfaces to the native graphics path without mandatory CPU readback where supported.
+  * [ ] Target:
+
+    * VA-API -> Vulkan
+    * D3D11VA -> D3D12
+    * VideoToolbox -> Metal
+  * [ ] Demonstrate decode -> GPU texture -> Skia presentation.
+  * [ ] Treat this as a major graphics/media runtime milestone and separate publicity event.
+
+* [ ] **Milestone 4 — QuickJS application runtime**
+
+  * [ ] Promote QuickJS only after the runtime includes meaningful execution, event-loop, module, and native graphics/media bindings.
+  * [ ] At that point, reposition CRT from a native runtime/SDK toward a broader embedded application runtime where justified.
+
+#### Promotion Principles
+
+* [ ] Lead with **working evidence**, not architectural ambition.
+* [ ] Prefer `this runs today` over `we plan to support`.
+* [ ] Keep unsupported or environment-limited paths explicit.
+* [ ] Treat each major engineering milestone as a separate communication opportunity.
+* [ ] Avoid waiting for every roadmap item before making the first public release.
+* [ ] Keep the first public message centered on the already completed `04-gfx-media` runtime.
+
 ### Hardware video decode
 
 Add real hardware-accelerated H.264 decode while preserving the existing `crtmedia` software-decode contract and Host ABI ownership rules. This tranche ends at a validated CPU-resident decoded frame obtained from a hardware decoder. Native decoded-surface sharing with Vulkan, Metal, or D3D remains explicitly deferred to **Zero-copy decoded textures**.
