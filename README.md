@@ -1,5 +1,9 @@
 # CRT
 
+**Linux-style C/C++ software. Native on Linux, Windows and macOS.**
+
+Same source model. Native executables. Native GPUs. No VM or container.
+
 CRT is a Bionic-compatible cross-platform C runtime and Platform Adaptation
 Layer (PAL). It lets Linux/BSD/Android-style native libraries and applications
 be rebuilt from the same source as native Linux, Windows, and macOS
@@ -9,6 +13,64 @@ The primary target is a Linux-kernel embedded device: set-top boxes,
 Raspberry-Pi-class consoles, industrial HMIs, and automotive IVI systems.
 Native desktop builds provide a fast development and debugging loop and can
 also be shipped as desktop applications.
+
+CRT is pre-1.0 developer software under active development. The current
+milestone is the `04-gfx-media` stage (see [Where It Stands](#where-it-stands));
+interfaces may still change, and it is not a production-ready `1.0`.
+
+## Architecture
+
+```text
+Application
+    |
+    v
+Skia / FFmpeg
+    |
+    v
+CRT C++ Runtime
+    |
+    v
+Bionic-compatible CRT / PAL
+    |
+    +-----------+-----------+
+    |           |           |
+  Linux       Windows      macOS
+ Wayland       Win32       Cocoa
+ Vulkan        D3D12       Metal
+```
+
+An application is rebuilt from the same source against CRT's Bionic-shaped
+headers and libraries. Each host's PAL adapter reaches the native window
+system, GPU API, and audio/video services directly, so the result is an
+ordinary native executable rather than something running inside a VM,
+container, or translation layer.
+
+## Where It Stands
+
+- **Current milestone: `04-gfx-media`.** libc/libm/libdl, the imported
+  libc++/libc++abi/libunwind runtime, native window and input, Skia CPU and
+  GPU rendering over Vulkan, D3D12, and Metal, FFmpeg software media, and native
+  audio sinks are implemented, and the predecessor-only
+  `03-gfx-simple -> 04-gfx-media` stage build is verified on Windows, macOS,
+  and Linux/aarch64. The Linux/aarch64 acceptance host is a VM whose Vulkan
+  device is virtio-gpu/lavapipe rather than a physical GPU; host details and
+  limits are in [`STATUS.md`](STATUS.md).
+- **Hardware H.264 decode is verified on macOS and Windows only.** VideoToolbox
+  (macOS/arm64) and D3D11VA (Windows/x64) decode real hardware frames into the
+  CPU-resident `crtmedia_frame`, with software decode as the default and the
+  fallback. Linux VA-API is not yet verified because the hosts available so
+  far have no working VA-API H.264 decoder; this is an environment limit, not a
+  limit of the software graphics/media runtime. Hardware decode is therefore
+  not claimed as cross-platform yet.
+- **`05-js` is roadmap, not a supported feature.** It currently packages a
+  `libcrtjs` skeleton; QuickJS, the event loop, modules, and JavaScript-visible
+  graphics/media bindings are planned.
+
+The exact evidence, per-port results, and open work are in
+[`STATUS.md`](STATUS.md), [`docs/porting_status.md`](docs/porting_status.md),
+and [`TODO.md`](TODO.md). To try it from source, see
+[Prerequisites](#prerequisites), [Build](#build), and
+[Using A Distribution](#using-a-distribution).
 
 ## Scope
 
@@ -25,19 +87,6 @@ Enlightenment, Chromium, or Electron.
 
 The `linker/` directory is retained for a possible future CRT-owned loader,
 but linker implementation is outside the current roadmap.
-
-## Toolchain Policy
-
-Clang/LLVM, LLD, and compiler-rt are the primary development toolchain, but
-CRT distributions **never bundle a compiler or linker**. Embedded devices use
-their vendor/dedicated toolchain. A distribution contains the CRT sysroot,
-startup objects, runtime libraries, wrappers, CMake configuration, and a
-manifest that records the external toolchain contract.
-
-The Windows C++ lane uses the Bionic/Itanium ABI and project-built libunwind.
-Windows C++ exceptions are compiled as DWARF CFI (`-fdwarf-exceptions`) rather
-than depending on the OS-owned SEH unwind engine. See
-[`docs/cxx_runtime.md`](docs/cxx_runtime.md).
 
 ## Staged Runtime
 
@@ -73,24 +122,6 @@ bindings remain planned work rather than a current completion claim. Likewise,
 the ordinary developer preset keeps Skia and FFmpeg disabled by default;
 release-grade `04-gfx-media` acceptance uses the separate option-ON isolated
 stage path.
-
-Release engineering creates an OS-qualified upper-stage source asset and its
-recipe only after the component sources have been fetched at their pinned
-revisions. For example:
-
-```sh
-python3 tools/create_stage_source.py --root . --stage 02-cxx \
-  --target-os <linux|macos|windows> \
-  --source-root out/<preset>/external/llvm-runtimes \
-  --output-dir out/<preset>/stage-sources --release-tag <tag>
-```
-
-The command emits a deterministic source archive plus a recipe containing its
-target OS, exact byte size, CRT commit, and SHA-256. Asset names include the
-target OS because source payloads differ by backend. After the asset and recipe
-are published, an extracted predecessor SDK consumes them with its packaged
-`tools/crt-stage-build.py`; a local `--asset` override is available for
-pre-publication acceptance without weakening digest verification.
 
 ## Prerequisites
 
@@ -178,9 +209,11 @@ cmake --build --preset <preset> --target crt-js-dist
 The outputs are cumulative directories and archives under
 `out/<preset>/dist/`. A later `*-dist` target builds preceding stages as
 dependencies. This dependency establishes cumulative package contents; the
-source-stage bootstrap commands described above will separately verify that a
-freshly extracted predecessor SDK can produce the next stage without reading
-repository headers, libraries, or build outputs.
+source-stage bootstrap commands described under
+[Release Engineering And Source Stages](#release-engineering-and-source-stages)
+will separately verify that a freshly extracted predecessor SDK can produce
+the next stage without reading repository headers, libraries, or build
+outputs.
 
 A stage is a self-contained sysroot for its advertised surface. Its
 `include/`, `lib/`, and Windows `bin/` directories therefore include the
@@ -223,6 +256,39 @@ packaged CRT mksh and Toybox tools; MSYS and Git Bash are not distribution
 prerequisites. Upstream sources are not patched merely to hide a missing CRT
 surface; the missing Bionic API/type/symbol/behavior is implemented in CRT
 first.
+
+## Toolchain Policy
+
+Clang/LLVM, LLD, and compiler-rt are the primary development toolchain, but
+CRT distributions **never bundle a compiler or linker**. Embedded devices use
+their vendor/dedicated toolchain. A distribution contains the CRT sysroot,
+startup objects, runtime libraries, wrappers, CMake configuration, and a
+manifest that records the external toolchain contract.
+
+The Windows C++ lane uses the Bionic/Itanium ABI and project-built libunwind.
+Windows C++ exceptions are compiled as DWARF CFI (`-fdwarf-exceptions`) rather
+than depending on the OS-owned SEH unwind engine. See
+[`docs/cxx_runtime.md`](docs/cxx_runtime.md).
+
+## Release Engineering And Source Stages
+
+Release engineering creates an OS-qualified upper-stage source asset and its
+recipe only after the component sources have been fetched at their pinned
+revisions. For example:
+
+```sh
+python3 tools/create_stage_source.py --root . --stage 02-cxx \
+  --target-os <linux|macos|windows> \
+  --source-root out/<preset>/external/llvm-runtimes \
+  --output-dir out/<preset>/stage-sources --release-tag <tag>
+```
+
+The command emits a deterministic source archive plus a recipe containing its
+target OS, exact byte size, CRT commit, and SHA-256. Asset names include the
+target OS because source payloads differ by backend. After the asset and recipe
+are published, an extracted predecessor SDK consumes them with its packaged
+`tools/crt-stage-build.py`; a local `--asset` override is available for
+pre-publication acceptance without weakening digest verification.
 
 ## Repository Layout
 

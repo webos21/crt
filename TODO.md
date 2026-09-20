@@ -103,18 +103,23 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
   * [ ] Verify the release artifact from a clean environment where practical.
   * [ ] Document the supported host/compiler requirements for each platform.
 
-* [ ] **Turn the README into a public landing page**
+* [x] **Turn the README into a public landing page**
+  Done 2026-09-21 (`README.md`): headline/supporting message, the unchanged
+  Bionic/PAL definition directly below, an architecture overview and a
+  "Where It Stands" section; toolchain policy and release-engineering detail
+  moved down. The demo, "What already works" matrix, portability proof and FAQ
+  are separate items below.
 
-  * [ ] Replace the current engineering-first opening with a concise project message.
-  * [ ] Candidate headline:
+  * [x] Replace the current engineering-first opening with a concise project message.
+  * [x] Candidate headline:
 
     * `Linux-style C/C++ software. Native on Linux, Windows and macOS.`
-  * [ ] Candidate supporting message:
+  * [x] Candidate supporting message:
 
     * `Same source model. Native executables. Native GPUs. No VM or container.`
-  * [ ] Keep the precise Bionic/PAL definition immediately below the high-level message.
-  * [ ] Move detailed toolchain and implementation policy farther down the README or link to dedicated documentation.
-  * [ ] Add a short architecture overview showing:
+  * [x] Keep the precise Bionic/PAL definition immediately below the high-level message.
+  * [x] Move detailed toolchain and implementation policy farther down the README or link to dedicated documentation.
+  * [x] Add a short architecture overview showing:
 
     ```text
     Application
