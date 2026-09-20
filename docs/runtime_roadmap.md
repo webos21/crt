@@ -51,7 +51,9 @@ is not complete merely because an in-tree target links.
   (`../docs/libcrtgfx_live_presentation_acceptance.md`); this was the last
   gap before hardware decode, not a missing common API.
 - The software media baseline includes FFmpeg-backed demux/decode, the common
-  frame/audio/player contracts, and native audio sinks. Hardware decode and
+  frame/audio/player contracts, and native audio sinks. Hardware H.264 decode
+  into a CPU-resident frame is verified on macOS/arm64 (VideoToolbox) and
+  Windows/x64 (D3D11VA); Linux VA-API is still open. Hardware decode and
   decoded-texture interop remain separate, explicitly reported capabilities.
 - The cumulative binary-package chain reaches the current `05-js` skeleton.
   Predecessor-only isolated-stage acceptance through the option-ON
@@ -86,7 +88,8 @@ comparisons; promote Scudo only if repeatable evidence exceeds the baseline.
    gate and remains out of scope.
 2. Enable hardware video decode per host while retaining software decode as
    the correctness fallback and reporting actual hardware use separately.
-   **Now active** (`TODO.md`'s In Progress) -- not yet planned in detail.
+   **Active** (`TODO.md`'s In Progress): macOS/arm64 and Windows/x64 are done;
+   Linux VA-API is open and needs a host with a working VA-API H.264 decoder.
 3. Define and verify zero-copy decoded-texture ownership, device affinity, and
    synchronization. Keep a measured CPU-download fallback where direct interop
    is unavailable.

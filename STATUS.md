@@ -5,7 +5,7 @@ does not repeat the implementation diary in [`HISTORY.md`](HISTORY.md), the
 open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting_status.md`](docs/porting_status.md).
 
-Last synchronized with the source tree and git history: **2026-09-18**.
+Last synchronized with the source tree and git history: **2026-09-20**.
 Updated only on explicit request from here on, not as part of routine
 documentation passes -- see `TODO.md`'s Notice section. It may lag behind
 `HISTORY.md`/`TODO.md` between syncs; those two are the source of truth.
@@ -158,10 +158,21 @@ hosts:
   seek/reset behavior, bounded render planning, and CPU-frame delivery.
 - Host audio sinks are implemented and exercised through WASAPI on Windows,
   raw ALSA or PulseAudio-compatible output on Linux, and CoreAudio on macOS.
+- Opt-in hardware H.264 decode (`CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE`)
+  delivers each decoded frame into the same CPU-resident `crtmedia_frame`
+  through FFmpeg hwaccels, with software decode remaining the default and the
+  fallback. It has real-hardware evidence on **macOS/arm64 (VideoToolbox)** and
+  **Windows/x64 (D3D11VA, Intel UHD 630)**: the frozen `crtmedia_hw_decode_test`
+  `RESULT` line (`hw_frame_observed=yes cpu_transfer=pass frame_count=25
+  fallback=no eos=pass clean_exit=pass`), decoder flush/reuse, and a 15-cycle
+  create/decode/EOS/release lifecycle. `crtmedia_codec_is_hardware_accelerated()`
+  is true only after a real hardware frame has been downloaded, never merely
+  because a hardware device was created. Linux is **not** verified; see Known
+  Limitations. No platform-native decoded surface is part of the public ABI.
 
 This evidence does not yet prove production-complete seeking/track selection,
-network streaming, encoding/capture, hardware decode enabled in each host
-FFmpeg build, decoder-texture zero-copy, or GPU-frame handoff.
+network streaming, encoding/capture, hardware decode on Linux, decoder-texture
+zero-copy, or GPU-frame handoff.
 
 ### libcrtjs
 
@@ -195,9 +206,13 @@ target.
   preserved, repeatable blocker.
 - The `libcrtgfx` GPU backend-object boundary hardening and the live GPU
   presentation pixel-exact/resize evidence tranches are both closed
-  (2026-09-17..18) on every required host. Hardware video decode is the
-  active tranche now building on that closed foundation (`TODO.md`'s In
-  Progress); it is promoted but not yet scoped in implementation detail.
+  (2026-09-17..18) on every required host. Hardware video decode built on
+  that foundation: macOS/arm64 (VideoToolbox, 2026-09-18) and Windows/x64
+  (D3D11VA, 2026-09-19) are closed with real-hardware evidence; Linux VA-API
+  remains open and blocked on a host with a working VA-API H.264 decoder
+  (`TODO.md`'s In Progress). The first public developer preview of the
+  completed `04-gfx-media` stage is also being prepared there; it does not wait
+  for Linux hardware decode.
 - FFmpeg hardware decode/zero-copy and the QuickJS core then proceed on top of
   the completed GPU rendering/presentation contract.
 - JavaScript media/gfx binding follows the stable native contracts, using a
@@ -301,10 +316,13 @@ statuses, and exceptions are maintained in:
 - Image codecs, shaping, fallback fonts, ICU, and platform font discovery are
   not yet completion claims.
 - GPU decode-texture import and dmabuf-style zero-copy remain future work.
-  Linux packaged Skia live presentation passes on the physical aarch64
-  lavapipe host. The former `mangledName()`/Mesa/LLVM attribution was a
-  downstream symptom of mixing static and shared CRT allocator instances in
-  the standalone example's link; no Skia or Mesa source patch is carried.
+  Linux packaged Skia live presentation passes on the Linux/aarch64
+  acceptance host, which is a VM whose Vulkan device is virtio-gpu/lavapipe
+  (a paravirtualized or software device, not a physical GPU; no physical-GPU
+  Linux/Vulkan run is recorded yet). The former `mangledName()`/Mesa/LLVM
+  attribution was a downstream symptom of mixing static and shared CRT
+  allocator instances in the standalone example's link; no Skia or Mesa source
+  patch is carried.
 - WSLg can negotiate the Wayland protocol while still differing from a normal
   Linux compositor in visible presentation behavior. It is useful evidence,
   but is not a substitute for a real Linux desktop run.
@@ -314,10 +332,16 @@ statuses, and exceptions are maintained in:
 - The software extractor/codec/player and all three host audio sinks exist,
   but seeking/track-selection breadth, long-running queue/backpressure
   behavior, and richer compressed-media fixtures still need expansion.
-- Hardware-decode negotiation and CPU fallback are defined at the API level,
-  but host FFmpeg hwaccels are not yet enabled successfully. Decoder surfaces,
-  device affinity, fences, CPU-download fallback, and zero-copy Skia import
-  are not complete.
+- Hardware H.264 decode reaches a CPU-resident frame on macOS (VideoToolbox)
+  and Windows (D3D11VA) only. **Linux VA-API is unverified:** the Linux/aarch64
+  acceptance VM's Mesa `virtio_gpu` driver advertises no H.264 decode entrypoint,
+  and on WSL2 (Mesa D3D12 VA-API on Intel UHD 630, Windows driver 31.0.101.2140)
+  a real decode hangs in a self-deadlock inside Intel's WSL video driver, not in
+  CRT, FFmpeg or Mesa. Both are environment limits, distinct from the accepted
+  software graphics/media runtime; a native Linux host with a working VA-API
+  decoder is still needed, and the FFmpeg recipe has no VA-API enablement yet.
+  Decoder surfaces shared with the graphics path, device affinity, fences, and
+  zero-copy Skia import are not implemented.
 - No network protocol layer, mux/encode, capture, adaptive streaming, or
   realtime/WebRTC service exists.
 - QuickJS has not been imported. Event-loop/timer/module/native-binding work
@@ -325,10 +349,12 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-1. Enable and verify real FFmpeg hardware decode per host while retaining the
-   software/CPU fallback as the correctness baseline. Active in `TODO.md`'s
-   In Progress, promoted 2026-09-18 once live GPU presentation evidence
-   closed on every required host; not yet scoped in implementation detail.
+1. Finish real FFmpeg hardware decode on Linux (VA-API) -- macOS and Windows
+   are done -- on a host with a working VA-API H.264 decoder, then re-run the
+   normalized cross-host acceptance matrix and packaged-stage audit, keeping
+   the software/CPU fallback as the correctness baseline (`TODO.md`'s In
+   Progress). In parallel, prepare the first public developer preview of the
+   `04-gfx-media` stage (same place).
 2. Connect hardware decoder textures to Skia without CPU copies, including
    device/fence ownership and CPU-download recovery.
 3. Add capture/encode, then transport, buffering, reconnect, and streaming
