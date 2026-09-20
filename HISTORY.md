@@ -8,6 +8,74 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-20
+
+- **Linux VA-API (Tranche 4) on WSL2: W0/W2 pass, W1 blocked by a self-
+  deadlock inside Intel's WSL video driver -- not a CRT/FFmpeg/Mesa defect.**
+  Investigation only; no recipe or `libcrtmedia` change was made, by design:
+  the gate order was W0 `vainfo` H.264 VLD -> W1 a CRT-free host FFmpeg VAAPI
+  decode -> W2 plain CRT FFmpeg baseline -> W3+ the VAAPI recipe work, and W3+
+  must not start until W1 passes. Host: the Windows/x64 dev box (Intel UHD 630,
+  Windows driver 31.0.101.2140 dated 2025-11-05), WSL2 kernel 6.18.33.2, Ubuntu
+  26.04, kisak Mesa 26.2.2, libva 2.23. WSL2 is acceptable for Phase-A (VA-API
+  frame -> CPU `crtmedia_frame`) only if recorded separately from native-Linux
+  driver evidence; native Linux stays required before VA-surface -> Vulkan
+  zero-copy.
+
+  **W0 (pass).** Needed three host-side steps, all session/WSL-local: `modprobe
+  vgem` (the WSL kernel has `CONFIG_DRM_VGEM=m` and nothing loads it, so
+  `/dev/dri` did not exist), access to `/dev/dri/*` (first `chmod 666` as root,
+  later `usermod -aG render,video`; the nodes are recreated and lose a chmod),
+  and `LIBVA_DRIVER_NAME=d3d12 GALLIUM_DRIVER=d3d12` (with only
+  `MESA_LOADER_DRIVER_OVERRIDE`/no `GALLIUM_DRIVER`, `vaInitialize` fails with
+  "resource allocation failed" because the vgem fd is never mapped to d3d12).
+  `vainfo` (fetched with `apt-get download` + `dpkg -x`, no sudo) then lists H.264
+  CBP/Main/High, HEVC Main/Main10 and VP9 `VAEntrypointVLD` on the Intel GPU.
+  After a WSL restart the same command failed for the user only because their
+  `~/.bashrc` (interactive shells) exports `MESA_LOADER_DRIVER_OVERRIDE=dzn`;
+  reproduced by variable (dzn alone or with `MESA_D3D12_DEFAULT_ADAPTER_NAME`
+  fails, adapter name alone passes) and fixed by removing it.
+
+  **W2 (pass).** Plain (no VAAPI) CRT FFmpeg rebuilt on Linux through
+  `port-build-ffmpeg` (21.6 min, almost all of it the 9p copy of the source tree
+  under `/mnt/c`): five libraries installed, `CONFIG_VAAPI 0`, and the earlier
+  recorded GNU binutils 2.46 `ar`/`nm` IFUNC segfault did **not** reproduce
+  (0 matches in the build log).
+
+  **W1 (fail).** No distro `ffmpeg` and no sudo, so pristine FFmpeg 8.1.2 was
+  built host-native (glibc, `--enable-vaapi --disable-autodetect`, WSL ext4,
+  4.5 min) and used to decode `libcrtmedia/assets/test_video.mp4`. Device
+  creation, driver init and the first submit all succeed (log reaches "Decode to
+  surface 0x1"), then the process never completes. Unchanged by: a 1302x780 H.264
+  Main stream instead of the 64x64 fixture, `-threads 1`, distro Mesa 26.0.8
+  (unpacked and used via `LIBVA_DRIVERS_PATH`) instead of kisak 26.2.2,
+  `D3D12_DEBUG=singlethread|verbose|experimental`, `GALLIUM_THREAD=0`, and a
+  full WSL restart. Companion observations: `scale_vaapi` (VPP) segfaults,
+  `h264_vaapi` encode returns `-22`, a `hwupload,hwdownload` round trip works,
+  D3D12 Vulkan (dozen) enumerates `Microsoft Direct3D12 (Intel(R) UHD Graphics
+  630)`, and the Windows System log has no TDR/display events. `SIGTERM` does not
+  stop the hung process (use `timeout -s KILL`).
+
+  **Root cause.** With `elfutils` unpacked without sudo and run as root
+  (`wsl -u root`), the decoder thread's user-space stack is `ffmpeg -> vaEndPicture
+  -> libgallium (Mesa d3d12) -> libd3d12core.so -> libigd12dxva64.so ->
+  pthread_mutex_lock`; `libigd12dxva64.so` is the Windows Intel driver package's
+  WSL video user-mode driver (`/usr/lib/wsl/drivers/iigd_dch.inf_*`). Reading the
+  blocked mutex through `/proc/PID/mem` gives `__lock=2 __count=0 __owner=<the
+  waiting tid> __kind=0` -- a non-recursive mutex re-locked by the thread that
+  already holds it, i.e. a self-deadlock inside the Intel driver. Every other
+  thread is idle (FFmpeg workers and Mesa/`libd3d12core` workers in
+  `pthread_cond_wait`). Not verified: whether a newer Intel driver fixes it.
+  (A `dxgkrnl` `memcpy field-spanning write` kernel WARNING in
+  `dxgvmb_send_wait_sync_object_gpu` also appears on ordinary D3D12 init/sync; it
+  was suspected first but is not the cause.)
+
+  Consequence: Tranche 4 stays open. Next moves are a newer Intel Windows driver
+  (then `wsl --shutdown` and re-run W1), another GPU, or a native Linux VA-API
+  host; a build-only W3-W6 pass (VAAPI enabled in the recipe, configure verified,
+  `libcrtmedia` built) is possible but would leave the hardware result unverified
+  and needs a test-timeout guard because the decode hangs.
+
 ## 2026-09-19
 
 - **First real Windows/x64 D3D11VA hardware-decode green ("Hardware video

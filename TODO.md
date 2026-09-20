@@ -106,6 +106,16 @@ Use macOS/arm64 as the first-green reference host, then apply the same Phase-A c
     Linux VA-API-capable host (or an explicit backend decision) is required
     before real-decode steps can close. Build-side work (recipe/configure/link)
     does not depend on this.
+  * **WSL2/WSLg candidate host (2026-09-20) -- blocked at its own W1 gate.**
+    Acceptable for Phase-A (VA-API frame -> CPU `crtmedia_frame`) if recorded
+    separately from native-Linux evidence; native Linux stays required before VA
+    surface -> Vulkan zero-copy. Gate order: W0 `vainfo` H.264 VLD -> W1 CRT-free
+    host FFmpeg VAAPI decode -> W2 plain CRT FFmpeg baseline -> W3+ VAAPI
+    recipe/`libcrtmedia` (do not start until W1 passes). W0 and W2 pass; **W1
+    fails**: decode hangs on the first frame, root-caused to a self-deadlock in
+    Intel's WSL video driver (`libigd12dxva64.so`, Windows driver 31.0.101.2140),
+    not CRT/FFmpeg/Mesa. Details in `HISTORY.md` (2026-09-20). Next: newer Intel
+    driver + re-run W1, another GPU, or native Linux.
   * First establish a clean Linux environment where the existing software-only FFmpeg recipe rebuilds successfully.
   * Treat any host-toolchain failure such as `ar`/`nm` crashes as a build-environment blocker, not a VA-API defect.
   * Use a native Linux machine with:
