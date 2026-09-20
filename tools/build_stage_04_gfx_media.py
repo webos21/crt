@@ -548,7 +548,8 @@ def fetch_port_sources(asset: Path, staged: Path, temp_root: Path,
 
 
 def build_ports(asset: Path, source_root: Path, staged: Path, temp_root: Path,
-                manifest: dict, env: dict[str, str], jobs: int) -> None:
+                manifest: dict, env: dict[str, str], jobs: int,
+                mingw_checkout: Path | None = None) -> None:
     driver = staged / "tools" / "crt-port-build.py"
     command = [
         sys.executable, str(driver),
@@ -579,6 +580,20 @@ def build_ports(asset: Path, source_root: Path, staged: Path, temp_root: Path,
         "--port", "freetype",
         "--port", "ffmpeg",
     ]
+    if mingw_checkout is not None:
+        # Windows only. porting/recipes/ffmpeg.json's Windows D3D11VA
+        # hardware-decode support (Hardware video decode Tranche 3) routes a
+        # few configure probes and FFmpeg objects through tools/crt-cc's
+        # -fcrt-real-windows-sdk sentinel, which needs mingw-w64's Win32
+        # headers plus this project's own win32_shim/mingw_w64_compat.h --
+        # neither lives in an installed SDK, and crt-port-build.py's
+        # packaged-SDK mode has no repository checkout to default to.
+        command += [
+            "--mingw-w64-headers-root",
+            str(mingw_checkout / "mingw-w64-headers" / "include"),
+            "--win32-shim-dir",
+            str(asset / "libstdc++" / "third_party" / "win32_shim"),
+        ]
     run(command, env, asset)
 
 
@@ -927,6 +942,14 @@ def main() -> None:
         with timings.measure("fetch and verify FreeType/FFmpeg sources"):
             port_sources = fetch_port_sources(
                 build_asset, staged, temp_root, env)
+        # Fetched before the FreeType/FFmpeg build (not just before Skia, as
+        # it used to be): FFmpeg's Windows D3D11VA path needs the same header
+        # set -- see build_ports().
+        mingw_checkout = None
+        if target_os == "windows":
+            with timings.measure("fetch and verify MinGW-w64 headers"):
+                mingw_checkout = fetch_mingw_w64_headers(
+                    build_asset, temp_root, env)
         if ports_cached:
             with timings.measure("reuse cached FreeType/FFmpeg install"):
                 apply_install_layer(ports_layer, staged)
@@ -940,7 +963,8 @@ def main() -> None:
             with timings.measure(
                     f"build and install FreeType/FFmpeg (-j{args.dependency_jobs})"):
                 build_ports(build_asset, port_sources, staged, temp_root,
-                            manifest, env, args.dependency_jobs)
+                            manifest, env, args.dependency_jobs,
+                            mingw_checkout)
             if args.reuse_work_root:
                 with timings.measure("capture FreeType/FFmpeg install layer"):
                     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -956,11 +980,6 @@ def main() -> None:
 
         with timings.measure("fetch and verify Skia source"):
             skia_source = fetch_skia_source(build_asset, temp_root, env)
-        mingw_checkout = None
-        if target_os == "windows":
-            with timings.measure("fetch and verify MinGW-w64 headers"):
-                mingw_checkout = fetch_mingw_w64_headers(
-                    build_asset, temp_root, env)
         skia_cached = (
             args.reuse_work_root and skia_layer.is_dir() and
             (skia_layer / ".layer.json").is_file() and

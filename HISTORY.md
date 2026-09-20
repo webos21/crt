@@ -8,6 +8,155 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-19
+
+- **First real Windows/x64 D3D11VA hardware-decode green ("Hardware video
+  decode" Tranche 3).** `crtmedia_hw_decode_test` now decodes the 25-frame
+  H.264 fixture through FFmpeg's `d3d11va` hwaccel on a physical GPU and
+  downloads every frame into the existing CPU `crtmedia_frame` contract:
+
+  ```
+  crtmedia_hw_decode_test: RESULT backend=d3d11va hw_requested=yes hw_device_created=yes hw_pixfmt_offered=yes hw_frame_observed=yes cpu_transfer=pass frame_count=25 fallback=no eos=pass clean_exit=pass
+  ```
+
+  Host: Windows 11 Pro 26100 on a physical console-attached machine (no RDP
+  session present), Intel UHD Graphics 630, driver 31.0.101.2140. The
+  Tranche 2 state machine was reused unchanged (`hardware_accelerated`
+  false after create, true after the first real download, true after EOS --
+  asserted by the test itself). No public `crtmedia` ABI change, no D3D types
+  outside FFmpeg, no zero-copy/D3D11 texture exposure, no synthetic failure
+  hook.
+
+  **Baseline (3.1), before touching FFmpeg.** The existing recipe's Windows
+  build had `CONFIG_D3D11VA 0`/`HAVE_DXVA_H 0`, and the hardware-preferred
+  run was a *real* software fallback, not a hidden pass:
+  `RESULT backend=d3d11va hw_requested=yes hw_device_created=no
+  hw_pixfmt_offered=no hw_frame_observed=no cpu_transfer=n/a frame_count=25
+  fallback=yes eos=pass clean_exit=pass`; flush test `pass1_hw=no pass2_hw=no`;
+  lifecycle `hardware_iterations=0`.
+
+  **Blocker reproduced in isolation (3.2).** Scratch copy of the recipe
+  (scratch work/install roots; the real tree untouched) with only
+  `--enable-d3d11va --enable-hwaccel=h264_d3d11va` added: `ERROR: d3d11va
+  requested, but not all dependencies are satisfied: dxva_h
+  ID3D11VideoDecoder ID3D11VideoContext` -- exactly the three probes FFmpeg
+  8.1.2 runs (`check_headers dxva.h`, `check_type "windows.h d3d11.h"
+  ID3D11VideoDecoder/ID3D11VideoContext`).
+
+  **Root cause proven with minimal `tools/crt-cc` compile probes (3.3).**
+  One TU that includes `windows.h`/`dxva.h`/`d3d11.h` and uses both video
+  interfaces: (A) plain CRT sysroot -> `'windows.h' file not found`; (B/C)
+  mingw-w64 headers alone -> `'excpt.h' file not found` (the shim's
+  `excpt/io/direct.h` are needed); (D) `win32_shim` + mingw-w64 headers +
+  `mingw_w64_compat.h` -> compiles (exit 0, warnings only); (E) D plus the
+  recipe's `-U_WIN32 -U_WIN32_WCE -U__WIN32__ -UWIN32 -U__MINGW32__` ->
+  `_mingw.h:295: error: Only Win32 target is supported!`; (F) E plus only
+  `-D_WIN32=1` -> exit 0; (G) F plus `-D__MINGW32__=1` -> exit 0 (not
+  needed). So the failure is declaration visibility of `_WIN32`, not missing
+  headers/libs/search paths; `-D_WIN32=1` is the exact, minimal gate.
+  Order matters (sentinel test S2: `-D_WIN32=1` *before* the `-U` set fails
+  again).
+
+  **Why the obvious fix was rejected (3.4).** Adding the header path +
+  `-D_WIN32=1` to the global `--extra-cflags` (measured with a full scratch
+  configure, 30 min) makes `d3d11va` configure but silently changes the whole
+  build: ~20 unrelated `HAVE_*` flips (`HAVE_WINDOWS_H`, `HAVE_SLEEP`,
+  `HAVE_VIRTUALALLOC`, `HAVE_GETPROCESSAFFINITYMASK`, `HAVE_MEMORYBARRIER`,
+  `HAVE_DIRECT_H`, `HAVE_IO_H`, ...), `-D__USE_MINGW_ANSI_STDIO=1
+  -D_POSIX_C_SOURCE=200112 -D_XOPEN_SOURCE=600 -U__STRICT_ANSI__` added to
+  the global flags, and `compat/strtod.o` dropped from `COMPAT_OBJS`. The
+  macOS "global during configure, strip afterwards" pattern therefore does
+  not transfer. Code inspection showed real Windows headers are needed by
+  only four objects: `libavutil/hwcontext_d3d11va.c` and
+  `libavcodec/{dxva2,dxva2_h264,d3d11va}.c`.
+
+  **The narrow fix.**
+  - `tools/crt-cc`: new `-fcrt-real-windows-sdk` sentinel (Windows twin of
+    `-fcrt-real-apple-sdk`), expanded *in place* so its `-D_WIN32=1` lands
+    after the caller's `-U_WIN32`: `-I<win32_shim> -I<mingw-w64 include>
+    -include mingw_w64_compat.h -include wchar.h -D_WIN32=1`. `-include
+    wchar.h` is required (found by the first object compile:
+    `wcslen/wcscpy/wcscat` undeclared in `libavutil/wchar_filename.h`, which
+    real `windows.h` normally reaches via mingw-w64-crt headers this project
+    deliberately never vendors); it is added in the sentinel, not in
+    `mingw_w64_compat.h`, so the validated Skia/D3D12 builds are untouched.
+    Errors out clearly if its two env vars are missing.
+  - `porting/recipes/ffmpeg.json` (Windows override): `--enable-d3d11va
+    --enable-hwaccel=h264_d3d11va,h264_d3d11va2` and four source patches --
+    the three configure probe lines get the sentinel, and per-object
+    `CFLAGS += -fcrt-real-windows-sdk` for the four objects above (the
+    libavcodec ones under `ifdef CONFIG_D3D11VA`). **`h264_d3d11va2` is
+    required, not optional:** `codec.c` selects `AV_PIX_FMT_D3D11`, which
+    only the `d3d11va2` hwaccel offers (`HWACCEL_D3D11VA2`, `hw_device_ctx`
+    method); plain `h264_d3d11va` is the legacy `D3D11VA_VLD` path with no
+    device context.
+  - `tools/crt-port-build.py`: `target_overrides.<os>.patches` (per-OS source
+    patches; the base `patches` list has no OS scoping), `--mingw-w64-headers-root`
+    / `--win32-shim-dir`, and `export_windows_sdk_header_env()` which publishes
+    `CRT_MINGW_W64_HEADERS_ROOT`/`CRT_WIN32_SHIM_DIR` for recipes that name
+    the sentinel, fetching the pinned mingw-w64 headers
+    (`tools/fetch_mingw_w64_headers.py`, verified commit) into
+    `<build>/mingw-w64-headers` on first use in repository mode and failing
+    loudly with instructions in packaged-SDK mode (FFmpeg's configure hides
+    probe stderr, so a missing header set would otherwise only appear as the
+    unexplained dependency error above).
+  - `tools/build_stage_04_gfx_media.py`: the Windows MinGW-w64 header fetch
+    now happens *before* the FreeType/FFmpeg port build and both locations
+    are passed to it (it used to fetch only before Skia). **Not run end to
+    end** -- the isolated `04-gfx-media` stage (Skia build, hours) was not
+    re-run; the packaged-mode header resolution and the shell syntax of
+    `crt-cc` (`sh -n`/`dash -n` under WSL) were checked in isolation. The
+    Linux/macOS recipe paths are unchanged (`recipe_uses_real_windows_sdk`
+    is false; 0 per-OS patches).
+
+  **Configure is truthful *and* narrow (3.5).** After moving the stale
+  FFmpeg install/work/stamp output aside and a clean rebuild (configure
+  1696 s): `CONFIG_D3D11VA 1`, `HAVE_DXVA_H 1`, `CONFIG_H264_D3D11VA_HWACCEL
+  1`, `CONFIG_H264_D3D11VA2_HWACCEL 1`, `CONFIG_HWACCELS 1`. Against the 3.1
+  baseline the complete `config.h` diff is exactly `HAVE_DXVA_H`,
+  `CONFIG_D3D11VA`, `CONFIG_HWACCELS` (+ the two hwaccels in
+  `config_components.h`); `CPPFLAGS`/`CFLAGS`/`ASFLAGS`/`COMPAT_OBJS`/
+  `LDFLAGS` are byte-identical to baseline. Archives contain
+  `hwcontext_d3d11va.o`, `d3d11va.o`, `dxva2.o`, `dxva2_h264.o` with
+  `ff_hwcontext_type_d3d11va`, `ff_h264_d3d11va_hwaccel`,
+  `ff_h264_d3d11va2_hwaccel`; only `libavutil` gained undefined Win32 imports
+  (`LoadLibraryA/ExA/ExW`, `GetProcAddress`, `CreateMutexA`,
+  `MultiByteToWideChar`, ...); libavformat/swscale/swresample grew by 62
+  bytes (path strings). FFmpeg loads `d3d11.dll`/`dxgi.dll` at run time
+  (desktop mode), so no `d3d11.lib`/`dxgi.lib` symbol is referenced.
+
+  **libcrtmedia (3.6) and import audit (3.10).** Rebuilt with no source
+  change. `crtmedia_hw_decode_test.exe` statically imports only `KERNEL32.dll`
+  and `api-ms-win-core-synch-l1-2-0.dll`; `libcrtmedia.dll` imports
+  `KERNEL32`, `libc`, `libm`, `ole32` (the pre-existing WASAPI sink) -- no
+  `d3d11`/`dxgi`/`dxva` import. The previously wired
+  `CRTMEDIA_WINDOWS_D3D11_LIB`/`_DXGI_LIB` link entries
+  (`libcrtmedia/cmake/crtmedia_targets.cmake`) therefore remain on the link
+  line but resolve nothing; left in place (harmless, and shared with the
+  stage-04 CMake) -- candidate for a later cleanup. All D3D objects are
+  created/released by FFmpeg through the COM vtables of the owning host DLLs;
+  nothing host-owned is freed through the CRT allocator, and no D3D11
+  sharing/D3D11<->D3D12 code was added.
+
+  **Hardware really was used (independent of the RESULT line).** The GPU
+  Engine performance counter `\GPU Engine(*engtype_VideoDecode)\Utilization
+  Percentage` read 0.000 idle and 0.031-0.239 % (35 samples) while
+  looping the lifecycle test -- the Intel video-decode engine did the work.
+
+  **Lifecycle and regression (3.8/3.9/3.10).**
+  `crtmedia_hw_decode_flush_test`: `pass1_frames=25 pass1_hw=yes
+  pass2_frames=25 pass2_hw=yes flush_preserved_flag=yes`;
+  `crtmedia_hw_decode_lifecycle_test`: `iterations=15
+  hardware_iterations=15` (2.3 s, hang-free); primary test 6/6 green across
+  repeats. Full Windows CTest: **149/149 passed** (7.4 s), including
+  `crtmedia_extractor_codec_test` (software, false before/after, 25 frames),
+  demux/player/playback-pipeline tests, and the three hardware tests. The
+  software/fallback evidence is the 3.1 baseline above (a real
+  hardware-requested-but-unavailable run); hardware preference stays opt-in.
+
+  Deliberately not done: Linux VA-API (Tranche 4), zero-copy, a synthetic
+  D3D11 failure hook, restoring the Windows macros globally.
+
 ## 2026-09-18
 
 - **Closed Tranche 0's own gap 2: `crtmedia_codec_is_hardware_

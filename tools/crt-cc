@@ -111,6 +111,84 @@ if [ "$target_os" = windows ]; then
   done
 fi
 
+# -fcrt-real-windows-sdk: a sentinel, not a real clang flag -- the Windows
+# counterpart of -fcrt-real-apple-sdk below, added 2026-09-19 (Hardware video
+# decode Tranche 3, FFmpeg D3D11VA). A translation unit that itself needs
+# real Win32/COM declarations (windows.h, d3d11.h, dxva.h) cannot get them
+# from this project's freestanding sysroot, and the recipe-level
+# `-U_WIN32 -U_WIN32_WCE -U__WIN32__ -UWIN32 -U__MINGW32__` FFmpeg's own
+# Windows build deliberately keeps (so none of its `#ifdef _WIN32` code
+# reaches for a host CRT/SDK this project does not provide) makes
+# mingw-w64's own _mingw.h stop with "Only Win32 target is supported!" --
+# confirmed with a minimal compile probe: the same TU builds clean without
+# the -U set and with it restored to just -D_WIN32=1.
+#
+# The token expands in place (a shift-and-requeue rotation, like the apple
+# sentinel below, so a path with spaces stays one argument) rather than
+# into common_flags: the -D_WIN32=1 has to land *after* the caller's own
+# -U_WIN32 to win, and only the caller's position of the sentinel says
+# where that is. Keep it per translation unit (a per-object CFLAGS override
+# or a single configure probe's own flags), never in a build-wide CFLAGS:
+# scoping it globally was measured and flips ~20 unrelated FFmpeg HAVE_*
+# results, adds -D__USE_MINGW_ANSI_STDIO/-D_POSIX_C_SOURCE to CPPFLAGS and
+# drops compat/strtod.o -- i.e. it silently changes the whole build.
+#
+# CRT_MINGW_W64_HEADERS_ROOT (tools/fetch_mingw_w64_headers.py's
+# mingw-w64-headers/include) and CRT_WIN32_SHIM_DIR
+# (libstdc++/third_party/win32_shim, which also carries the force-included
+# mingw_w64_compat.h) are supplied by the driver -- tools/crt-port-build.py
+# for ports -- because neither lives inside an installed SDK.
+if [ "$target_os" = windows ]; then
+  want_real_windows_sdk=0
+  for arg in "$@"; do
+    if [ "$arg" = "-fcrt-real-windows-sdk" ]; then
+      want_real_windows_sdk=1
+      break
+    fi
+  done
+  if [ "$want_real_windows_sdk" -eq 1 ]; then
+    real_windows_sdk_shim="${CRT_WIN32_SHIM_DIR:-}"
+    real_windows_sdk_headers="${CRT_MINGW_W64_HEADERS_ROOT:-}"
+    if [ -z "$real_windows_sdk_shim" ] || [ -z "$real_windows_sdk_headers" ]; then
+      echo "crt-cc: -fcrt-real-windows-sdk requires CRT_WIN32_SHIM_DIR and CRT_MINGW_W64_HEADERS_ROOT (fetch mingw-w64's headers with tools/fetch_mingw_w64_headers.py)" >&2
+      exit 1
+    fi
+    if [ ! -f "$real_windows_sdk_headers/windows.h" ]; then
+      echo "crt-cc: -fcrt-real-windows-sdk: no windows.h under CRT_MINGW_W64_HEADERS_ROOT=$real_windows_sdk_headers" >&2
+      exit 1
+    fi
+    original_argc=$#
+    i=0
+    while [ "$i" -lt "$original_argc" ]; do
+      arg=$1
+      shift
+      case "$arg" in
+        -fcrt-real-windows-sdk)
+          # win32_shim first, then the real header set (its own windows.h
+          # #include_next-forwards there; io.h/direct.h/excpt.h exist only
+          # in the shim) -- the order tools/build_skia.py already proved.
+          #
+          # -include wchar.h: real mingw-w64 windows.h reaches <wchar.h>/
+          # <string.h> transitively through mingw-w64-crt's own headers,
+          # which this project deliberately never vendors (see
+          # win32_shim/malloc.h's own top comment), so plain-C consumers
+          # such as FFmpeg's libavutil/wchar_filename.h saw wcslen/wcscpy/
+          # wcscat undeclared (confirmed: -Werror=implicit-function-
+          # declaration in hwcontext_d3d11va.c). This project's own libc
+          # wchar.h declares them. Added here rather than to
+          # mingw_w64_compat.h, which the already-validated Skia/D3D12
+          # C++ builds share.
+          set -- "$@" "-I$real_windows_sdk_shim" "-I$real_windows_sdk_headers" \
+            -include "$real_windows_sdk_shim/mingw_w64_compat.h" \
+            -include wchar.h -D_WIN32=1
+          ;;
+        *) set -- "$@" "$arg" ;;
+      esac
+      i=$((i + 1))
+    done
+  fi
+fi
+
 compile_only=0
 shared_mode=0
 relocatable_mode=0

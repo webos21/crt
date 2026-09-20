@@ -97,10 +97,15 @@ if(CRT_TARGET_OS STREQUAL "windows")
     set(CRTMEDIA_WINDOWS_OLE32_LIB ole32.lib CACHE FILEPATH "Windows ole32 import library")
   endif()
 
-  # d3d11.lib/dxgi.lib (2026-09-08, "hardware decode, phase A") -- FFmpeg's
-  # own hwcontext_d3d11va.c (compiled into libavutil.a once porting/
-  # recipes/ffmpeg.json's --enable-d3d11va sticks) calls real D3D11/DXGI
-  # device-creation APIs directly; ole32.lib above (already linked, for
+  # d3d11.lib/dxgi.lib (2026-09-08, "hardware decode, phase A") -- planned
+  # for FFmpeg's own hwcontext_d3d11va.c (compiled into libavutil.a since
+  # porting/recipes/ffmpeg.json's --enable-d3d11va, Tranche 3, 2026-09-19).
+  # Measured then: that file loads d3d11.dll/dxgi.dll at run time through
+  # LoadLibraryExW/GetProcAddress (desktop mode), so neither import library
+  # resolves a symbol and no d3d11/dxgi entry reaches any binary's import
+  # table (llvm-objdump -p); the entries below are kept as harmless,
+  # currently-unreferenced link inputs (the stage-04 CMake mirrors them).
+  # ole32.lib above (already linked, for
   # src/arch/windows/audio_sink_wasapi.c's own COM bootstrapping) already
   # covers its CoCreateInstance/CoInitializeEx calls. Own, independent
   # find_file() calls rather than reusing libcrtgfx's own identically-

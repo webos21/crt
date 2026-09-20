@@ -722,9 +722,71 @@ def make_command_for_shell(make_args, target_os, use_crt_shell):
     return shlex.join([str(arg) for arg in make_args])
 
 
-def apply_source_patches(work, recipe):
+#: Command-line overrides for the real-Windows-SDK-header locations (see
+#: export_windows_sdk_header_env()); filled in by main().
+WINDOWS_SDK_HEADER_OPTIONS = {"headers_root": None, "shim_dir": None}
+
+
+def recipe_uses_real_windows_sdk(recipe, target_os):
+    """True when this recipe, for this target OS, routes any translation unit
+    through tools/crt-cc's -fcrt-real-windows-sdk sentinel (a source patch
+    or a configure/make argument that names it)."""
+    if target_os != "windows":
+        return False
+    build = recipe["build"]
+    overrides = build.get("target_overrides", {}).get(target_os, {})
+    texts = [json.dumps(build.get("patches", [])), json.dumps(overrides)]
+    return any("-fcrt-real-windows-sdk" in text for text in texts)
+
+
+def export_windows_sdk_header_env(root, preset_build_dir):
+    """Publishes CRT_MINGW_W64_HEADERS_ROOT / CRT_WIN32_SHIM_DIR -- the two
+    locations tools/crt-cc's -fcrt-real-windows-sdk needs and no installed SDK
+    contains -- through os.environ, which make_env() copies. Fetches the
+    pinned mingw-w64 header set into <build dir>/mingw-w64-headers when the
+    repository build has none yet (tools/fetch_mingw_w64_headers.py is
+    idempotent and verifies the pinned commit); a packaged-SDK build has no
+    such default and must pass --mingw-w64-headers-root/--win32-shim-dir.
+    Failing here, with the fix spelled out, matters: FFmpeg's configure
+    swallows a probe compiler's stderr, so a missing header set would only
+    surface as an unexplained "d3d11va requested, but not all dependencies
+    are satisfied"."""
+    packaged = (root / "manifest.json").is_file()
+    headers_arg = WINDOWS_SDK_HEADER_OPTIONS["headers_root"]
+    shim_arg = WINDOWS_SDK_HEADER_OPTIONS["shim_dir"]
+    if headers_arg:
+        headers_root = Path(headers_arg).resolve()
+    elif packaged:
+        raise SystemExit(
+            "this recipe needs mingw-w64's Win32 headers (-fcrt-real-windows-sdk); pass "
+            "--mingw-w64-headers-root <dir containing windows.h> "
+            "(tools/fetch_mingw_w64_headers.py fetches it)")
+    else:
+        checkout = preset_build_dir / "mingw-w64-headers"
+        headers_root = checkout / "mingw-w64-headers" / "include"
+        if not (headers_root / "windows.h").is_file():
+            progress(f"fetching mingw-w64 Win32 headers into {checkout}")
+            run([sys.executable, str(root / "tools" / "fetch_mingw_w64_headers.py"),
+                 "--dest", str(checkout)], root, os.environ.copy(), "mingw-w64 headers")
+    shim_dir = (Path(shim_arg).resolve() if shim_arg
+                else root / "libstdc++" / "third_party" / "win32_shim")
+    if not (headers_root / "windows.h").is_file():
+        raise SystemExit(f"no windows.h under --mingw-w64-headers-root {headers_root}")
+    if not (shim_dir / "mingw_w64_compat.h").is_file():
+        raise SystemExit(
+            f"no mingw_w64_compat.h under {shim_dir}; pass --win32-shim-dir "
+            "(libstdc++/third_party/win32_shim)")
+    os.environ["CRT_MINGW_W64_HEADERS_ROOT"] = path_for_crt_shell(windows_short_path(headers_root))
+    os.environ["CRT_WIN32_SHIM_DIR"] = path_for_crt_shell(windows_short_path(shim_dir))
+
+
+def apply_source_patches(work, recipe, target_os=None):
     """Applies recipe["build"]["patches"] -- a list of {"file", "find",
-    "replace"} objects -- as plain, exact-text substring replacements
+    "replace"} objects -- followed by recipe["build"]["target_overrides"]
+    [<target_os>]["patches"] (same shape; added 2026-09-19 so a
+    Windows-only edit, e.g. FFmpeg's D3D11VA configure probes, need not be
+    applied -- and need not stay harmless -- on Linux/macOS, where the
+    base list has always had to be) as plain, exact-text substring replacements
     against the freshly copy_source()'d work tree. Deliberately a simple
     find/replace, not a unified-diff engine: this project's stated policy
     (docs/porting_status.md) is to keep upstream source unchanged wherever
@@ -738,7 +800,10 @@ def apply_source_patches(work, recipe):
     (e.g. after an upstream version bump) would be worse than a build
     failure that points straight at why."""
     port_name = recipe["name"]
-    for patch in recipe["build"].get("patches", []):
+    build = recipe["build"]
+    patches = list(build.get("patches", []))
+    patches += build.get("target_overrides", {}).get(target_os, {}).get("patches", [])
+    for patch in patches:
         target = work / patch["file"]
         text = target.read_text()
         find = patch["find"]
@@ -1676,7 +1741,9 @@ def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, por
     work = work_build_dir / "work" / port
     progress(f"{port}: prepare source {src} -> {work}")
     copy_source(src, work)
-    apply_source_patches(work, recipe)
+    apply_source_patches(work, recipe, target_os)
+    if recipe_uses_real_windows_sdk(recipe, target_os):
+        export_windows_sdk_header_env(root, preset_build_dir)
 
     progress(f"{port}: build system {build['system']}")
     env = make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os, mingw_triple, use_crt_shell)
@@ -1716,8 +1783,12 @@ def main():
     parser.add_argument("--use-crt-shell", action="store_true", help="run configure recipes with the CRT rootfs mksh")
     parser.add_argument("--configure-only", action="store_true", help="stop configure recipes after ./configure")
     parser.add_argument("--test", action="store_true", help="run recipe-declared port tests after the port is installed")
+    parser.add_argument("--mingw-w64-headers-root", default=None, help="directory containing mingw-w64's windows.h (Windows recipes using -fcrt-real-windows-sdk); default: <build dir>/mingw-w64-headers, fetched on demand in repository mode")
+    parser.add_argument("--win32-shim-dir", default=None, help="libstdc++/third_party/win32_shim directory (default: the repository's own; required with --sdk-root when a recipe uses -fcrt-real-windows-sdk)")
     parser.add_argument("--jobs", type=int, default=None, help="override make -jN (default: CPU count on every OS); useful for bounded acceptance or performance measurements")
     args = parser.parse_args()
+    WINDOWS_SDK_HEADER_OPTIONS["headers_root"] = args.mingw_w64_headers_root
+    WINDOWS_SDK_HEADER_OPTIONS["shim_dir"] = args.win32_shim_dir
 
     if bool(args.preset) == bool(args.sdk_root):
         raise SystemExit(
