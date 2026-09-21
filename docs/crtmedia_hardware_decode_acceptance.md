@@ -227,6 +227,62 @@ names: `hw_frame_observed=yes` (hardware-decode PASS), `hw_requested=yes,
 hw_frame_observed=no, fallback=yes` (fallback PASS, not hardware-decode
 PASS), and any `CHECK()` failure (FAIL).
 
+## Current per-host status (2026-09-21)
+
+The contract above is the yardstick; this section records where each host
+stands against it. Hardware decode is **not** claimed as cross-platform until a
+native Linux host reports `hw_frame_observed=yes`.
+
+| Host | Backend | State | Evidence |
+| --- | --- | --- | --- |
+| macOS/arm64 | VideoToolbox (`h264_videotoolbox`) | Verified, 2026-09-18 | `RESULT backend=videotoolbox ... hw_frame_observed=yes cpu_transfer=pass frame_count=25 fallback=no eos=pass clean_exit=pass`; flush/reuse 25 + 25 hardware frames; lifecycle `iterations=15 hardware_iterations=15`; full `ctest` 132/132. |
+| Windows/x64 | D3D11VA (`h264_d3d11va`, `h264_d3d11va2`) | Verified, 2026-09-19 | Physical Intel UHD Graphics 630. `RESULT backend=d3d11va ... hw_frame_observed=yes cpu_transfer=pass frame_count=25 fallback=no eos=pass clean_exit=pass`; flush/reuse 25 + 25 hardware frames; lifecycle `iterations=15 hardware_iterations=15`; full `ctest` 149/149. |
+| Linux | VA-API | **Not verified** | The FFmpeg recipe has no VA-API hwaccel yet, so Linux decodes in software. No host with a working VA-API H.264 decoder has been available (below). |
+
+**macOS.** A real hardware frame is observed and downloaded to a CPU
+`crtmedia_frame`; `crtmedia_codec_is_hardware_accelerated()` is false right
+after decoder creation, true after the first downloaded hardware frame, and
+still true after EOS. Acceptance is Apple Silicon (macOS 27+).
+
+**Windows.** Same contract and the same `RESULT` shape. The Intel GPU's
+`VideoDecode` engine counter read 0.000% idle and 0.03-0.24% while the
+lifecycle test looped, independent evidence that the GPU decoded the frames.
+FFmpeg loads `d3d11.dll` and `dxgi.dll` at run time, so `libcrtmedia` imports
+neither.
+
+**Linux, what is known.** Software decode is the default and the fallback.
+Requesting hardware on Linux today runs the frozen fixture entirely in
+software and reports it as such (Linux x86_64 under WSL2, FFmpeg build without
+VA-API, 2026-09-21):
+
+```text
+crtmedia_hw_decode_test: RESULT backend=vaapi hw_requested=yes hw_device_created=no hw_pixfmt_offered=no hw_frame_observed=no cpu_transfer=n/a frame_count=25 fallback=yes eos=pass clean_exit=pass
+```
+
+Its flush test reports `pass1_hw=no pass2_hw=no` and its lifecycle test
+`iterations=15 hardware_iterations=0`, and all 14 `crtmedia_*` tests pass.
+Per the contract this is a fallback PASS, never a hardware-decode PASS.
+
+**Linux, why it is not verified.** Both hosts tried have an *environment*
+limit, not a CRT defect:
+
+- *Linux/aarch64 VM (the acceptance host).* Mesa's `virtio_gpu` VA-API driver
+  loads and `vaInitialize` succeeds, but it advertises only
+  `VAProfileNone`/`VAEntrypointVideoProc`: no H.264 decode entrypoint.
+- *WSL2 on Intel UHD 630 (Mesa D3D12 VA-API).* `vainfo` lists H.264 decode, but
+  a real VA-API decode hangs on the first frame even with a plain, CRT-free
+  host FFmpeg. The decoder thread is blocked in `pthread_mutex_lock` inside
+  Intel's WSL video driver (`libigd12dxva64.so`) on a non-recursive mutex it
+  already owns, so it deadlocks with itself. Mesa versions 26.2.2 and 26.0.8,
+  single-threaded decode, and a WSL restart make no difference. Not verified:
+  whether a newer Intel driver fixes it.
+
+Closing Linux needs a native host with a working VA-API H.264 decoder, then the
+VA-API hwaccel in the FFmpeg recipe and the same `RESULT` line with
+`hw_frame_observed=yes`. WSL2 is acceptable evidence for this contract only if
+recorded separately from native-Linux driver evidence; VA-surface to Vulkan
+zero-copy would still require native Linux.
+
 ## What Tranche 0 deliberately does not do
 
 No source file changes in this pass: `porting/recipes/ffmpeg.json`'s

@@ -214,21 +214,25 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
   * [ ] Keep the source application and runtime path as equivalent across the three platforms as practical.
   * [ ] Add the demo near the top of the README.
 
-* [ ] **Document current hardware decode status transparently**
+* [x] **Document current hardware decode status transparently**
+  Done 2026-09-21: `README.md` "Hardware Decode Status" and the per-host
+  section of `docs/crtmedia_hardware_decode_acceptance.md`. Also captured the
+  first real Linux fallback evidence (`fallback=yes`, 14/14 `crtmedia_*` tests,
+  Linux x86_64/WSL2, FFmpeg without VA-API).
 
-  * [ ] macOS:
+  * [x] macOS:
 
     * VideoToolbox hardware-backed H.264 decode verified.
     * CPU transfer and clean EOS verified.
-  * [ ] Windows:
+  * [x] Windows:
 
     * D3D11VA hardware-backed H.264 decode verified.
     * Repeated lifecycle testing verified.
-  * [ ] Linux:
+  * [x] Linux:
 
     * VA-API work remains in progress.
     * Keep WSL / virtualized-driver limitations distinct from CRT runtime defects.
-  * [ ] Avoid describing hardware decode as fully cross-platform until native Linux evidence is complete.
+  * [x] Avoid describing hardware decode as fully cross-platform until native Linux evidence is complete.
 
 * [x] **Prepare public messaging / FAQ**
   Done 2026-09-21: `docs/faq.md` (Why CRT, why Bionic-shaped, rebuild-based

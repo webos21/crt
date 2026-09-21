@@ -115,6 +115,30 @@ Linux/aarch64 results come from its recorded acceptance runs there. Details and
 per-host limits stay in [`STATUS.md`](STATUS.md), which is authoritative if it
 and this table ever disagree.
 
+## Hardware Decode Status
+
+CRT can decode H.264 on the platform's hardware decoder and hand each frame to
+your code as a CPU-resident `crtmedia_frame`. It is opt-in, and software decode
+is always the default and the fallback. Zero-copy sharing of decoded surfaces
+with the GPU is not implemented yet.
+
+| Host | Backend | Status |
+| --- | --- | --- |
+| macOS/arm64 | VideoToolbox | **Verified.** Real hardware frames, CPU transfer, clean end of stream, decoder flush/reuse, and 15 repeated create/decode/release cycles, all on hardware. |
+| Windows/x64 | D3D11VA | **Verified** on a physical Intel GPU: the same checks, plus a GPU video-decode engine counter that reads zero when idle and non-zero while decoding. |
+| Linux | VA-API | **Not verified yet.** Decoding works in software; requesting hardware falls back cleanly and reports `fallback=yes`. |
+
+Linux VA-API is blocked by the hosts available so far, not by the software
+graphics/media runtime. The aarch64 VM's Mesa driver exposes no H.264 decode
+entrypoint. Under WSL2 on an Intel GPU, a real decode deadlocks inside Intel's
+own WSL video driver even with a plain FFmpeg that does not involve CRT. Neither
+counts as Linux hardware-decode evidence; a native Linux host with a working
+VA-API H.264 decoder is still needed.
+
+Hardware decode is therefore not claimed as cross-platform yet. Per-host
+evidence and the exact result format are in
+[`docs/crtmedia_hardware_decode_acceptance.md`](docs/crtmedia_hardware_decode_acceptance.md).
+
 ## Portability Proof
 
 The portability claim is tested by rebuilding real upstream software through the
