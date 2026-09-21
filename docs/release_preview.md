@@ -1,13 +1,14 @@
 # Developer Preview Release
 
 This document defines what a CRT developer-preview release contains, how it is
-verified, and how a maintainer produces it. **No release has been published
-yet**: `README.md` links here only for the contract, and nothing below claims
-that a download exists. For what works today, see the README and
-[`STATUS.md`](../STATUS.md).
+verified, and how a maintainer produces it. The first preview,
+[`v0.4.0-preview.1`](https://github.com/webos21/crt/releases/tag/v0.4.0-preview.1), was published
+on 2026-09-21 as a GitHub pre-release with **Windows/x64 assets only**; Linux
+and macOS archives are not part of it yet. For what works today, see the README
+and [`STATUS.md`](../STATUS.md).
 
-The first preview is tentatively `v0.4.0-preview.1`, positioned as the first
-public developer preview of the CRT Graphics/Media SDK stage (`04-gfx-media`).
+That preview is positioned as the first public developer preview of the CRT
+Graphics/Media SDK stage (`04-gfx-media`).
 The JavaScript stage (`05-js`) is a `libcrtjs` skeleton and is not part of the
 preview.
 
@@ -210,19 +211,30 @@ Verified on Windows/x64 (2026-09-21):
   and only its packaging re-ran -- and the assets record commit `fd01d7c`, so
   the release tag must point at that commit, or the set must be rebuilt from the
   tagged commit (the recipes embed the source commit).
+- The published GitHub release, checked through the public API (nothing was
+  downloaded except two small files and a 1 KB range): it is not a draft, it is
+  marked as a pre-release, its tag is `v0.4.0-preview.1`, its body equals
+  [`release_notes_v0.4.0-preview.1.md`](release_notes_v0.4.0-preview.1.md), and
+  all nine files are attached -- the seven archives and stage-source assets
+  (size and SHA-256 equal to `SHA256SUMS-windows-x86_64`), that checksum file, and
+  the release manifest (both byte-identical to the local copies). The
+  `download` URL a packaged recipe uses now resolves. The asset contents were not
+  re-downloaded and re-verified from GitHub.
 - 23 unit tests for the tooling, and the existing distribution tests.
 
 Not yet done, and required before a release can be published:
 
-- A fresh-clone build of the Windows set from the commit that will actually be
-  tagged (see the limits above).
+- A fresh-clone rebuild of the Windows set. It is not needed for consistency:
+  the tag `v0.4.0-preview.1` points at `fd01d7c`, the commit the assets record.
+  It would only remove the "existing build directory was reused" limit above.
 - Any Linux or macOS assets (a release-tagged build there, including the first
   Linux/macOS link of the `media-player` example), and any release-archive test
   on those hosts.
 - A test on a machine that has never had CRT's build environment. The Windows
   check above was a clean extraction path on a development machine, not a clean
   machine.
-- Creating and publishing the GitHub release, which needs an explicit decision.
+- Publishing the Linux and macOS assets, which needs the steps above on those
+  hosts and adding them to the release.
 
 ## Release notes template
 

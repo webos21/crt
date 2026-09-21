@@ -72,17 +72,21 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
   * [ ] Keep Linux hardware decode limitations documented separately from the already accepted software graphics/media runtime.
 
 * [ ] **Prepare the first public CRT release**
+  2026-09-21: `v0.4.0-preview.1` is published as a GitHub pre-release
+  (`https://github.com/webos21/crt/releases/tag/v0.4.0-preview.1`) with the
+  Windows/x64 assets only; Linux and macOS assets are still to come, which is why
+  this item stays open.
 
-  * [ ] Create the first GitHub release, tentatively:
+  * [x] Create the first GitHub release, tentatively:
 
     * `v0.4.0-preview.1`
-  * [ ] Position it as:
+  * [x] Position it as:
 
     * `First public developer preview of the CRT Graphics/Media SDK stage`
-  * [ ] Treat `04-gfx-media` as the current public SDK milestone.
-  * [ ] Do not block the release on Linux VA-API hardware decode.
-  * [ ] Clearly mark `05-js` as roadmap/skeleton work rather than part of the current supported preview.
-  * [ ] Include a concise verified-platform summary:
+  * [x] Treat `04-gfx-media` as the current public SDK milestone.
+  * [x] Do not block the release on Linux VA-API hardware decode.
+  * [x] Clearly mark `05-js` as roadmap/skeleton work rather than part of the current supported preview.
+  * [x] Include a concise verified-platform summary:
 
     | Platform | Native Window | GPU    | Skia | FFmpeg | HW H.264 Decode                     |
     | -------- | ------------- | ------ | ---- | ------ | ----------------------------------- |
@@ -97,10 +101,10 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
   Windows. A complete Windows/x64 asset set with the release tag
   `v0.4.0-preview.1` (commit `fd01d7c`, option-ON `04-gfx-media` with the
   `media-player` example, checksums, manifest) is built and accepted by
-  `prepare_release_assets.py` in about 50 minutes; the tag `v0.4.0-preview.1` is
-  pushed (on `fd01d7c`) and the release notes are drafted in
+  `prepare_release_assets.py` in about 50 minutes and published with the tag
+  `v0.4.0-preview.1` (on `fd01d7c`); the notes are in
   `docs/release_notes_v0.4.0-preview.1.md`. **Still open:** a fresh-clone
-  build of that set from the commit that will be tagged, Linux/macOS assets
+  rebuild of that set, Linux/macOS assets
   (including the first Linux/macOS `media-player` link), a test on a machine
   that never had CRT's build environment, and publishing (needs an explicit
   decision).

@@ -10,6 +10,23 @@ substantive update.
 
 ## 2026-09-21
 
+- **Published GitHub pre-release `v0.4.0-preview.1` (Windows/x64 assets).** The
+  release was created in the GitHub UI on the pushed tag (`fd01d7c`) with the
+  release notes as its body. Checked afterwards through the public API. First
+  pass found two problems, both fixed in the UI: the release title had a leading
+  space, and `SHA256SUMS-windows-x86_64` and
+  `release-manifest-windows-x86_64.json` were not attached although the notes
+  point at them. Second pass: title `CRT v0.4.0-preview.1`, not a draft, marked
+  pre-release, body identical to `docs/release_notes_v0.4.0-preview.1.md`, nine
+  assets with the sizes and GitHub-computed SHA-256 equal to the local
+  `SHA256SUMS`, the two small files byte-identical to the local copies, and the
+  recipe download URL for the `04-gfx-media` stage-source asset now answers
+  (before publication it was a 404). Not done: downloading the archives again
+  from GitHub and re-verifying them, Linux and macOS assets, and a clean-machine
+  test. `docs/release_preview.md` no longer says that no release exists, and the
+  release checklist in `TODO.md` is ticked except for the parent item, which
+  stays open for the Linux and macOS assets.
+
 - **Pushed the `v0.4.0-preview.1` tag and drafted its release notes.** The
   annotated tag points at `fd01d7c`, the commit the Windows asset set was built
   from and that its recipes and manifest record (`main` is one documentation
