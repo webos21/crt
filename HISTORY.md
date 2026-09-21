@@ -10,6 +10,55 @@ substantive update.
 
 ## 2026-09-21
 
+- **Built the macOS/arm64 asset set for `v0.4.0-preview.1` from a fresh clone,
+  and found two bugs the published tag has on macOS.** Before starting, the
+  current `main` was checked on this Mac (macOS 26.6.2, Apple clang 21.0.0):
+  rebuild, `ctest` 132/132, 70 tooling unit tests, and the VideoToolbox decode,
+  flush and lifecycle tests. That is an incremental in-tree build, so the real
+  test was a fresh clone of the tag configured with `-DCRT_RELEASE_TAG`.
+  1. **`libcrtmedia.dylib` did not link in the isolated `04-gfx-media` stage.**
+     The stage project has its own `CRTMEDIA_MACOS_FRAMEWORKS`, and Tranche 1
+     added `CoreFoundation` only to `libcrtmedia/CMakeLists.txt`; FFmpeg's
+     `videotoolbox.o`/`hwcontext_videotoolbox.o` then left CFData/CFDictionary/
+     CFNumber undefined. Fixed in `32ab384`, plus a test in
+     `tools/test_stage_source_closure.py` that fails when the stage's list lacks
+     a framework the in-tree list has (checked to fail without the fix).
+  2. **The stage's `gfx-skia` example hung after its scripted resize** and hit
+     the stage's 60 s timeout, deterministically, on the rebuilt example and on
+     the packaged prebuilt demo, while the in-tree demo passed at the same
+     moment. `sample` and `lldb` showed the main thread inside
+     `nextEventMatchingMask:untilDate:` with an `until_date` of 2026-10-16,
+     about 2^31 ms ahead. `libcrtgfx.dylib` does not link `libc.dylib`; `nm -m`
+     shows its `_clock_gettime`, `_malloc`, `_free` and `_memcpy` "from
+     libSystem". `crtgfx_now_ms()` passed this project's `CLOCK_MONOTONIC` id
+     (1), which real Darwin rejects with `EINVAL` (checked with a bare C
+     program: ids 0, 4, 5, 6, 8 and 9 work, 1, 2, 3 and 7 do not) and leaves the
+     output untouched. It is the mirror image of the older `crtgfx_window_demo`
+     freeze, which used Darwin's id under the static libc. The in-tree binaries
+     link the static libc, so `ctest` could not see it. Fixed in `972d913`:
+     `crtgfx_now_ms()` tries the project id and then Darwin's, checking each
+     return value, and the dispatch loop never waits longer than `timeout_ms`.
+     The other shared libraries bind `clock_gettime` to `libc.dylib`, so only
+     `libcrtgfx.dylib` was affected.
+  The set built from `972d913` (clean tree): `01-c` to `03-gfx-simple` in about
+  3 minutes, the isolated `04-gfx-media` in 7.5 minutes (FreeType and FFmpeg 5.7
+  minutes, Skia 59 seconds; Windows needed 50), 8 stage tests, the rebuilt
+  `gfx-gpu`, `gfx-skia` (Metal, 5 frames, resize, pixel check) and
+  `media-player` examples, `verify_dist.py`, and `prepare_release_assets.py`:
+  four `.tar.xz` SDKs (1.8, 4.9, 4.9 and 14 MB), three stage-source assets,
+  `SHA256SUMS-macos-aarch64` and `release-manifest-macos-aarch64.json`
+  (`shasum -c` passes for all seven). The extracted `04-gfx-media`, in a path with
+  a space, runs its prebuilt `crtmedia_player_demo` (30 frames) and
+  `crtgfx_skia_gpu_window_demo`, and the quick start rebuilds `gfx-simple` (60
+  frames) and `media-player` (30); this is the first macOS link of
+  `media-player`. Afterwards the main tree was rebuilt with both fixes:
+  `ctest` 132/132 and 71 unit tests. Limits: the macOS assets record `972d913`
+  and not the tag commit `fd01d7c`; they were not run on a clean machine, are
+  not signed or notarized, and nothing was uploaded. The first two failed
+  attempts each cost one 9-minute stage run; `--reuse-work-root` keeps the
+  work tree for post-mortem, which is what made the second one debuggable.
+  The files are in `out/release/v0.4.0-preview.1-macos-aarch64/`.
+
 - **Published GitHub pre-release `v0.4.0-preview.1` (Windows/x64 assets).** The
   release was created in the GitHub UI on the pushed tag (`fd01d7c`) with the
   release notes as its body. Checked afterwards through the public API. First

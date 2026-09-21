@@ -103,11 +103,17 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
   `media-player` example, checksums, manifest) is built and accepted by
   `prepare_release_assets.py` in about 50 minutes and published with the tag
   `v0.4.0-preview.1` (on `fd01d7c`); the notes are in
-  `docs/release_notes_v0.4.0-preview.1.md`. **Still open:** a fresh-clone
-  rebuild of that set, Linux/macOS assets
-  (including the first Linux/macOS `media-player` link), a test on a machine
-  that never had CRT's build environment, and publishing (needs an explicit
-  decision).
+  `docs/release_notes_v0.4.0-preview.1.md`. A complete macOS/arm64 set is now
+  built from a fresh clone and accepted by `prepare_release_assets.py` (7 files
+  plus checksums and manifest, in 3 + 7.5 minutes), in
+  `out/release/v0.4.0-preview.1-macos-aarch64/` (not committed, not uploaded). It
+  records commit `972d913`, **not** the tag commit `fd01d7c`: the tag could not
+  build a macOS `04-gfx-media` (two bugs the in-tree build hides, fixed in
+  `32ab384` and `972d913`; see `docs/release_preview.md`). **Still open:**
+  attaching the macOS set to the release (and updating its notes, which the
+  commit difference makes necessary), Linux assets (including the first Linux
+  `media-player` link), a fresh-clone rebuild of the Windows set, a test on a
+  machine that never had CRT's build environment, and the upload decision.
 
   * [ ] Provide release artifacts that allow an external developer to try CRT without reconstructing the entire development environment from repository history.
   * [x] Include or document the staged SDK layout:

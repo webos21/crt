@@ -222,19 +222,63 @@ Verified on Windows/x64 (2026-09-21):
   re-downloaded and re-verified from GitHub.
 - 23 unit tests for the tooling, and the existing distribution tests.
 
+Verified on macOS/arm64 (2026-09-21, macOS 26.6.2 on Apple Silicon, Apple clang
+21.0.0, CMake 4.4.3, Ninja 1.13.2), built from a **fresh clone**, empty work and
+download directories, with the release tag `v0.4.0-preview.1`:
+
+- The published tag itself does **not** build a macOS `04-gfx-media`. The first
+  fresh-clone attempt from `fd01d7c` failed to link `libcrtmedia.dylib`
+  (undefined CoreFoundation symbols from FFmpeg's VideoToolbox objects): the
+  isolated stage project keeps its own copy of the macOS framework list, and
+  `CoreFoundation` had been added only to `libcrtmedia/CMakeLists.txt`. The
+  second attempt got past that and then hung its `gfx-skia` example after the
+  scripted resize: the shared `libcrtgfx.dylib` binds `clock_gettime` to real
+  libSystem, where this project's clock id is invalid, so the event pump waited
+  on a ~25-day deadline. The in-tree build passed both, because it links the
+  static libc, which is why the in-tree `ctest` never showed either. Both are
+  fixed (`32ab384`, `972d913`); the first now has a test that fails when the two
+  framework lists drift, and the second is gated by the isolated stage's own
+  `gfx-skia` run (5 frames, resize, pixel check, 60 s timeout).
+- The macOS assets therefore record commit `972d913`, **not** the tag commit
+  `fd01d7c`; the two differ by those two fixes and by documentation. Anyone
+  reading the macOS manifest against the tag must know that.
+- Clone of `972d913` (`working_tree_dirty: false`): `01-c` to `03-gfx-simple`
+  in about 3 minutes, then the isolated option-ON `04-gfx-media` from the
+  extracted release-tagged `03-gfx-simple` archive in 7.5 minutes (FreeType and
+  FFmpeg 5.7 minutes at `-j4`, Skia 59 seconds, everything else about 20
+  seconds; Windows needed 50). Its 8 stage tests, the rebuilt `gfx-gpu`,
+  `gfx-skia` and `media-player` examples, `verify_dist.py`, and atomic
+  publication pass, and `prepare_release_assets.py` accepted the set: four
+  `.tar.xz` SDK archives (1.8, 4.9, 4.9 and 14 MB), three stage-source assets,
+  `SHA256SUMS-macos-aarch64` (`shasum -c` passes for all seven) and
+  `release-manifest-macos-aarch64.json`.
+- The extracted `04-gfx-media` archive, in a path containing a space, is
+  `v0.4.0-preview.1`, declares FreeType, FFmpeg and Skia, and its prebuilt
+  programs run: `crtmedia_player_demo` presents 30 frames and
+  `crtgfx_skia_gpu_window_demo` presents 5 on Metal with the resize and pixel
+  checks passing. From the same extraction, following the quick start,
+  `gfx-simple` rebuilds and presents 60 frames and `media-player` rebuilds and
+  presents 30. This is the first macOS link of the `media-player` example.
+- Nothing was uploaded.
+  Limits: the `.tar.xz` files were run from the extraction location on the
+  development machine (not a machine that never had CRT's environment), the
+  binaries are not signed or notarized, and only the local checksums were
+  checked, not a download.
+
 Not yet done, and required before a release can be published:
 
 - A fresh-clone rebuild of the Windows set. It is not needed for consistency:
   the tag `v0.4.0-preview.1` points at `fd01d7c`, the commit the assets record.
   It would only remove the "existing build directory was reused" limit above.
-- Any Linux or macOS assets (a release-tagged build there, including the first
-  Linux/macOS link of the `media-player` example), and any release-archive test
-  on those hosts.
+- Linux assets (a release-tagged build there, including the first Linux link of
+  the `media-player` example), and any release-archive test there.
+- Attaching the macOS set to the release: the notes and the "Downloads" table
+  still say Windows only, and the macOS manifest's commit differs from the tag.
 - A test on a machine that has never had CRT's build environment. The Windows
   check above was a clean extraction path on a development machine, not a clean
   machine.
-- Publishing the Linux and macOS assets, which needs the steps above on those
-  hosts and adding them to the release.
+- Publishing the Linux assets, which needs the steps above on that host and
+  adding them to the release.
 
 ## Release notes template
 
