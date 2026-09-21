@@ -990,6 +990,31 @@ if(CRTMEDIA_ENABLE_FFMPEG)
     tools/media_player_demo.c
   )
   target_link_libraries(crtmedia_player_demo PRIVATE crt_build_flags crtmedia crtgfx_window)
+  if(CRT_TARGET_OS STREQUAL "linux")
+    # A real, confirmed link failure (2026-09-21, CRTMEDIA_ENABLE_FFMPEG=ON):
+    # `libxkbcommon.a(src_atom.c.o): undefined reference to 'strndup'`.
+    # crtmedia's own PRIVATE rescan group (crtmedia_targets.cmake: c m dl
+    # cxx + FFmpeg) and crtgfx_window's PRIVATE `libxkbcommon.a c m dl cxx`
+    # both propagate onto this executable, and CMake collapses the
+    # duplicated c/m/dl/cxx entries into one, dropping the group semantics:
+    # listing crtmedia first left libxkbcommon.a *after* libc.a (nothing
+    # revisits libc.a for strndup), and listing crtgfx_window first instead
+    # left the FFmpeg archives after libc.a/libm.a (undefined cos/sin/...).
+    # Neither order can satisfy both, so state the one real cycle
+    # explicitly -- crtmedia, crtgfx_window, xkbcommon, FFmpeg and the CRT
+    # runtime in a single --start-group/--end-group -- the same shape
+    # tools/crt-cc gives every SDK consumer, and the reason libxkbcommon.a
+    # and libav*.a are listed before the C runtime in examples/media-player.
+    # The plain crtmedia/crtgfx_window entries above stay for their include
+    # directories and other usage requirements.
+    string(JOIN "," CRTMEDIA_PLAYER_DEMO_RESCAN_LIBS
+      crtmedia crtgfx_window
+      ${CRTGFX_XKBCOMMON_LIBRARIES}
+      ${CRTMEDIA_FFMPEG_LIBRARIES}
+      ${CRTMEDIA_CRT_STATIC_LIBS})
+    target_link_libraries(crtmedia_player_demo PRIVATE
+      "$<LINK_GROUP:RESCAN,${CRTMEDIA_PLAYER_DEMO_RESCAN_LIBS}>")
+  endif()
   target_include_directories(crtmedia_player_demo PRIVATE
     "${CMAKE_SOURCE_DIR}/libc/include"
   )

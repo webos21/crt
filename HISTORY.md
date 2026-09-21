@@ -8,6 +8,34 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-21
+
+- **Fixed the Linux x86_64 `crtmedia_player_demo` link failure found while
+  collecting Linux hardware-decode evidence.** Building everything with
+  `CRTMEDIA_ENABLE_FFMPEG=ON` failed to link the demo with
+  `libxkbcommon.a(src_atom.c.o): undefined reference to 'strndup'`, although
+  CRT's libc defines `strndup`. The libraries the demo inherits from `crtmedia`
+  (`c m dl cxx` plus the FFmpeg archives) and from `crtgfx_window`
+  (`libxkbcommon.a c m dl cxx`) were collapsed by CMake into one list with the
+  duplicated C runtime entries merged, which drops the rescan-group semantics.
+  Either order then left one archive behind the C runtime: `libxkbcommon.a`
+  after `libc.a` (nothing revisits `libc.a` for `strndup`), or the FFmpeg
+  archives after `libm.a` (undefined `cos`/`sin`). The fix states the one real
+  cycle explicitly: on Linux, `libcrtmedia/CMakeLists.txt` links the demo with a
+  single `LINK_GROUP:RESCAN` group holding `crtmedia`, `crtgfx_window`,
+  libxkbcommon, the FFmpeg archives, and the CRT runtime. The packaged
+  `examples/media-player/CMakeLists.txt` gets the matching ordering (the FFmpeg
+  archives and `libxkbcommon.a` listed before the C runtime that `crt-cc`
+  appends). Both changes are Linux-only.
+
+  Made in a separate session and re-verified here (2026-09-21): the full Linux
+  x86_64 (WSL2) build with FFmpeg ON now succeeds (it failed before); after
+  deleting the binary a forced relink succeeds and the demo starts and begins
+  playback under WSLg; all 14 `crtmedia_*` tests pass on Linux; on Windows the
+  full build succeeds and all 14 `crtmedia_*` tests pass. Not verified: the
+  packaged Linux example from a real Linux `04-gfx-media` distribution (none
+  with FFmpeg was available on this machine) and Linux/aarch64.
+
 ## 2026-09-20
 
 - **Linux VA-API (Tranche 4) on WSL2: W0/W2 pass, W1 blocked by a self-

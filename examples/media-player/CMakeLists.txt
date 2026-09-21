@@ -41,7 +41,22 @@ if(NOT WIN32 AND NOT APPLE)
   # installed window target's own link interface explicitly, same as
   # examples/gfx-simple/CMakeLists.txt (this example links no GPU/Skia
   # backend, so xkbcommon is its only unresolved window dependency).
+  #
+  # libcrtmedia.a likewise records no dependency on the FFmpeg archives the
+  # SDK ships beside it (its extractor/codec objects leave every av*
+  # symbol undefined), so they are listed here in the same order the
+  # in-tree crtmedia target uses (avformat -> avcodec -> swresample ->
+  # avutil). Both this group and libxkbcommon.a must stay *before* the
+  # C runtime: crt-cc appends libc/libm/libdl/libc++ in a rescan group after
+  # every user input, and libxkbcommon.a's strndup()/asprintf() and
+  # FFmpeg's libm/libc calls are only satisfied by archives scanned after
+  # them (an earlier libc.a is never revisited for a newly outstanding
+  # symbol -- the original "undefined reference to strndup" link failure).
   target_link_libraries(crtmedia_player_example PRIVATE
+    "${CMAKE_SYSROOT}/lib/libavformat.a"
+    "${CMAKE_SYSROOT}/lib/libavcodec.a"
+    "${CMAKE_SYSROOT}/lib/libswresample.a"
+    "${CMAKE_SYSROOT}/lib/libavutil.a"
     "${CMAKE_SYSROOT}/lib/libxkbcommon.a")
   target_link_options(crtmedia_player_example PRIVATE -Wl,--exclude-libs,ALL)
 endif()
