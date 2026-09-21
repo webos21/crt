@@ -707,7 +707,8 @@ def add_redistributed_dependencies(asset: Path, staged: Path,
 
 def build_example(staged: Path, temp_root: Path, name: str,
                   executable_name: str, env: dict[str, str],
-                  run_args: list[str] | None = None) -> None:
+                  run_args: list[str] | None = None,
+                  success_marker: str | None = None) -> None:
     build_dir = temp_root / f"example-{name}"
     if build_dir.exists():
         remove_tree(build_dir)
@@ -732,7 +733,24 @@ def build_example(staged: Path, temp_root: Path, name: str,
     # side deadlock, not a slow pass, and left unbounded would hang this
     # whole build script (and any CI running it) forever instead of
     # failing fast and legibly.
-    subprocess.run(command, check=True, env=env, timeout=60)
+    if success_marker is None:
+        subprocess.run(command, check=True, env=env, timeout=60)
+        return
+    # With a marker, also require the program's own report of what it did, not
+    # just exit 0 (the media-player demo, for one, exits 0 after playing zero
+    # frames if it cannot open its clip). stderr is merged: that demo prints
+    # its "presented=<n>" line there. subprocess.run() kills the child when the
+    # timeout expires, so a demo that ignored its frame limit and kept playing
+    # until a window close that never comes fails here instead of leaving a
+    # process behind.
+    result = subprocess.run(
+        command, check=True, env=env, timeout=60,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    print(result.stdout, end="", flush=True)
+    if success_marker not in result.stdout:
+        raise SystemExit(
+            f"{executable}: example did not report success "
+            f"(expected {success_marker!r} in its output)")
 
 
 def validate_example_runtime_dependencies(executable: Path, target_os: str) -> None:
@@ -1084,6 +1102,18 @@ def main() -> None:
             build_example(
                 staged, temp_root, "gfx-skia", "crtgfx_skia_example", env,
                 run_args=["5", "900", "520"])
+        with timings.measure("rebuild and run installed media-player example"):
+            # examples/media-player plays until its window is closed, so bound
+            # it: an explicit clip (the installed one -- the binary's own
+            # no-argument default is a stage-source path that is gone by now)
+            # and a 30-frame limit, after which it prints "presented=30" and
+            # exits. build_example() also enforces its 60 s timeout.
+            build_example(
+                staged, temp_root, "media-player", "crtmedia_player_example",
+                env,
+                run_args=[str(staged / "examples" / "media-player" / "test_video.mp4"),
+                          "30"],
+                success_marker="crtmedia_player_demo: presented=30")
         if target_os == "linux":
             with timings.measure("run packaged gfx-skia GPU window demo directly"):
                 run_packaged_binary_smoke(

@@ -17,8 +17,12 @@
  * "how would an SDK consumer actually build a video playback program"
  * using nothing but the distributed public headers.
  *
- * Usage: crtmedia_player_demo [path-to-media-file]
- * With no argument, plays the bundled libcrtmedia/assets/test_video.mp4
+ * Usage: crtmedia_player_demo [path-to-media-file [frame-limit]]
+ * The optional frame limit makes a bounded, unattended run: the demo exits
+ * cleanly, printing "crtmedia_player_demo: presented=<n>", once it has shown
+ * that many video frames (the fixture loops, so any limit is reachable).
+ * Without it the demo plays until its window is closed. With no path
+ * argument, plays the bundled libcrtmedia/assets/test_video.mp4
  * fixture (CRT_MEDIA_PLAYER_DEMO_DEFAULT_PATH, an absolute in-tree path
  * for the manual in-tree demo target; the packaged example instead
  * installs that same fixture right next to main.c, so the relative
@@ -57,6 +61,11 @@
 
 #define WINDOW_WIDTH 640u
 #define WINDOW_HEIGHT 480u
+
+/* Video frames actually shown so far, and the optional frame-limit argument
+ * (0 = none) that ends the run once that many have been shown. */
+static unsigned long frames_presented;
+static unsigned long frame_limit;
 
 /* How many samples to pull from the extractor per main-loop iteration
  * before going back to draining decoder output / pumping window events --
@@ -236,9 +245,13 @@ static void drain_video(crtmedia_player* player, crtgfx_window* window, track* v
           blit_rgba_to_framebuffer(rgba_scratch, &fb);
         }
         crtgfx_window_end_frame(window);
+        frames_presented++;
       }
     }
     crtmedia_frame_release(&decoded);
+    if (frame_limit != 0 && frames_presented >= frame_limit) {
+      return; /* stop here so the count is exactly the limit, not a drain more */
+    }
   }
 }
 
@@ -313,6 +326,7 @@ int main(int argc, char** argv) {
   int32_t video_width = 0, video_height = 0;
   int exit_code = 0;
 
+  frame_limit = argc > 2 ? strtoul(argv[2], NULL, 10) : 0;
   memset(&video, 0, sizeof(video));
   memset(&audio, 0, sizeof(audio));
   memset(&rgba_scratch, 0, sizeof(rgba_scratch));
@@ -398,6 +412,10 @@ int main(int argc, char** argv) {
     crtgfx_event event;
     int extractor_eof;
 
+    if (frame_limit != 0 && frames_presented >= frame_limit) {
+      goto done;
+    }
+
     crtgfx_window_pump_events(0);
     while (crtgfx_window_poll_event(window, &event) == CRTGFX_OK && event.type != CRTGFX_EVENT_NONE) {
       if (event.type == CRTGFX_EVENT_CLOSE_REQUESTED) {
@@ -430,7 +448,8 @@ int main(int argc, char** argv) {
   }
 
 done:
-  fprintf(stderr, "crtmedia_player_demo: window closed, exiting\n");
+  fprintf(stderr, "crtmedia_player_demo: presented=%lu\n", frames_presented);
+  fprintf(stderr, "crtmedia_player_demo: exiting\n");
 
 cleanup:
   if (player != NULL) {

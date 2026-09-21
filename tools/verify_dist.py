@@ -363,6 +363,13 @@ def main() -> None:
                     "lib/libskia.a",
                     "include/crtgfx/skia.h"):
                 require(dist / relative)
+            # FFmpeg is present here, so the playback example that needs it
+            # must ship too (source, clip, standalone project, prebuilt
+            # binary). The default-OFF cumulative 04-gfx-media has no FFmpeg
+            # and no media-player, so this is confined to the isolated stage.
+            for relative in ("CMakeLists.txt", "main.c", "test_video.mp4"):
+                require(dist / "examples" / "media-player" / relative)
+            require(dist / "examples" / "bin" / f"crtmedia_player_demo{suffix}")
             require_any(dist / "lib", ("libcrtgfx_gpu.a",), "static crtgfx_gpu")
             require_any(dist / "lib", ("libcrtgfx_skia.a",), "static crtgfx_skia")
             require_any(dist / "lib", ("libcrtmedia.a",), "static crtmedia")

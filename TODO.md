@@ -94,9 +94,12 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
   2026-09-21: contract and runbook in `docs/release_preview.md`;
   `CRT_RELEASE_TAG` and `tools/prepare_release_assets.py` (collect, verify,
   checksum; blocks the default-OFF `04-gfx-media`) done and exercised on
-  Windows. **Still open:** build a release-grade option-ON `04-gfx-media`
-  (multi-hour, per host) and the Linux/macOS assets, test on a machine that
-  never had CRT's build environment, and publish (needs an explicit decision).
+  Windows. An option-ON `04-gfx-media` (development tag) now builds and passes
+  on Windows in about 50 minutes and ships the `media-player` example (rebuilt
+  and run bounded by the stage driver; Windows only so far). **Still open:** the
+  release-tagged builds and Linux/macOS assets (including re-linking
+  `media-player` there), a test on a machine that never had CRT's build
+  environment, and publishing (needs an explicit decision).
 
   * [ ] Provide release artifacts that allow an external developer to try CRT without reconstructing the entire development environment from repository history.
   * [x] Include or document the staged SDK layout:

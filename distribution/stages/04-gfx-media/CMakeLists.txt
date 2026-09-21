@@ -559,9 +559,18 @@ crt_stage_add_c_test(crtmedia_demux_test "${CRTMEDIA_ROOT}/tests/demux_decode_te
 target_compile_definitions(crtmedia_demux_test PRIVATE
   "CRTMEDIA_TEST_WAV_PATH=\"${CRTMEDIA_ROOT}/assets/test_tone.wav\"")
 
+# Direct Skia consumers need the per-OS backend definitions themselves:
+# crtgfx/skia.h declares crtgfx_skia_make_gpu_context()/_wrap_gpu_surface()/
+# _gpu_surface_present() only under CRTGFX_HAVE_VULKAN/_D3D12/_METAL, and since
+# the backend-boundary tranche (2026-09-17) those macros are target-private
+# (CRTGFX_GPU_BACKEND_DEFINITIONS) instead of global. The in-tree build passes
+# them to every such executable through crt_wire_skia_executable(); this stage
+# project did not, so the first isolated run after that tranche failed with
+# "use of undeclared identifier 'crtgfx_skia_make_gpu_context'" (2026-09-21).
 add_executable(crtgfx_skia_raster_smoke "${CRTGFX_ROOT}/tests/skia_raster_smoke.cc")
 target_compile_options(crtgfx_skia_raster_smoke PRIVATE ${stage_cxx_options})
 target_compile_definitions(crtgfx_skia_raster_smoke PRIVATE
+  ${CRTGFX_GPU_BACKEND_DEFINITIONS}
   "CRT_SKIA_FONTS_DIR=\"${CRTGFX_ROOT}/assets/fonts\"")
 target_include_directories(crtgfx_skia_raster_smoke PRIVATE
   "${CRTGFX_ROOT}/include" "${CRTGFX_SKIA_ROOT}")
@@ -576,10 +585,38 @@ add_executable(crtgfx_skia_gpu_window_demo
   "${CRTGFX_ROOT}/tools/skia_gpu_window_demo.cc")
 target_compile_options(crtgfx_skia_gpu_window_demo PRIVATE ${stage_cxx_options})
 target_compile_definitions(crtgfx_skia_gpu_window_demo PRIVATE
+  ${CRTGFX_GPU_BACKEND_DEFINITIONS}
   "CRT_SKIA_FONTS_DIR=\"${CRTGFX_ROOT}/assets/fonts\"")
 target_include_directories(crtgfx_skia_gpu_window_demo PRIVATE
   "${CRTGFX_ROOT}/tests" "${CRTGFX_SKIA_ROOT}")
 target_link_libraries(crtgfx_skia_gpu_window_demo PRIVATE crtgfx_skia_shared)
+
+# examples/media-player: the on-screen playback demo (libcrtmedia/tools/
+# media_player_demo.c, installed below as its main.c) and the one place a
+# release proves crtmedia (FFmpeg demux/decode) composing with a real
+# crtgfx_window. Like the other demos it is not a ctest -- it needs a
+# compositor -- so tools/build_stage_04_gfx_media.py rebuilds the installed
+# example externally and runs it for a bounded number of frames instead.
+# Unlike the in-tree target (libcrtmedia/CMakeLists.txt) there is no explicit
+# LINK_GROUP:RESCAN of crtmedia/crtgfx_window/xkbcommon/FFmpeg/the CRT runtime
+# here: this stage's own CRTMEDIA_CRT_STATIC_LIBS is empty and tools/crt-cc
+# appends libc/libm/libdl/libc++ in its own trailing --start-group, so
+# libxkbcommon.a and libav*.a always precede the runtime archives that satisfy
+# their strndup()/cos()/... references. (The in-tree rescan group exists
+# because the raw-flags link there lists libc.a in the middle of the line --
+# the 2026-09-21 `strndup` failure fixed in c73623f.) Linux has not been
+# re-linked here; see HISTORY.md.
+add_executable(crtmedia_player_demo "${CRTMEDIA_ROOT}/tools/media_player_demo.c")
+target_compile_options(crtmedia_player_demo PRIVATE ${stage_c_options})
+target_include_directories(crtmedia_player_demo PRIVATE
+  "${CRTGFX_ROOT}/include" "${CRTMEDIA_ROOT}/include")
+# The no-argument default clip is an absolute path into this stage's source
+# tree, exactly like the in-tree target's; it does not follow the installed
+# SDK, so anything running the installed binary must pass the clip
+# (examples/media-player/test_video.mp4) explicitly, as the stage driver does.
+target_compile_definitions(crtmedia_player_demo PRIVATE
+  "CRT_MEDIA_PLAYER_DEMO_DEFAULT_PATH=\"${CRTMEDIA_ROOT}/assets/test_video.mp4\"")
+target_link_libraries(crtmedia_player_demo PRIVATE crtmedia crtgfx_window)
 
 if(CRT_TARGET_OS STREQUAL "macos")
   # A real, confirmed bug (2026-09-15, macOS absolute-RPATH portability
@@ -632,12 +669,14 @@ if(CRT_TARGET_OS STREQUAL "macos")
   # `crtgfx_skia_gpu_window_demo` now shows exactly one `LC_RPATH`
   # (`@loader_path/../../lib`), and it still runs and presents correctly
   # from the new location.
-  set_target_properties(crtgfx_gpu_window_demo crtgfx_skia_gpu_window_demo PROPERTIES
+  set_target_properties(crtgfx_gpu_window_demo crtgfx_skia_gpu_window_demo
+      crtmedia_player_demo PROPERTIES
     BUILD_RPATH "@loader_path/../../lib;${CMAKE_BUILD_RPATH}"
     INSTALL_RPATH "@loader_path/../../lib"
   )
 elseif(CRT_TARGET_OS STREQUAL "linux")
-  set_target_properties(crtgfx_gpu_window_demo crtgfx_skia_gpu_window_demo PROPERTIES
+  set_target_properties(crtgfx_gpu_window_demo crtgfx_skia_gpu_window_demo
+      crtmedia_player_demo PROPERTIES
     BUILD_RPATH "$ORIGIN/../../lib;${CMAKE_BUILD_RPATH}"
     INSTALL_RPATH "$ORIGIN/../../lib"
   )
@@ -733,6 +772,7 @@ install(DIRECTORY "${CRTGFX_ROOT}/include/" DESTINATION include)
 install(DIRECTORY "${CRTMEDIA_ROOT}/include/" DESTINATION include)
 install(DIRECTORY "${CRTGFX_SKIA_ROOT}/include" DESTINATION include)
 install(TARGETS crtgfx_gpu_window_demo crtgfx_skia_gpu_window_demo
+                crtmedia_player_demo
   RUNTIME DESTINATION examples/bin)
 install(FILES "${CRTGFX_ROOT}/tools/gpu_window_demo.c"
   DESTINATION examples/gfx-gpu RENAME main.c)
@@ -744,3 +784,9 @@ install(FILES "${CRT_STAGE_SOURCE_ROOT}/examples/gfx-gpu/CMakeLists.txt"
   DESTINATION examples/gfx-gpu)
 install(FILES "${CRT_STAGE_SOURCE_ROOT}/examples/gfx-skia/CMakeLists.txt"
   DESTINATION examples/gfx-skia)
+install(FILES "${CRTMEDIA_ROOT}/tools/media_player_demo.c"
+  DESTINATION examples/media-player RENAME main.c)
+install(FILES "${CRTMEDIA_ROOT}/assets/test_video.mp4"
+  DESTINATION examples/media-player)
+install(FILES "${CRT_STAGE_SOURCE_ROOT}/examples/media-player/CMakeLists.txt"
+  DESTINATION examples/media-player)

@@ -135,6 +135,11 @@ STAGES = {
             "libcrtgfx/include",
             "libcrtgfx/src/gpu.c",
             "libcrtgfx/src/gpu_internal.h",
+            # Private test-control surface gpu.c #includes (2026-09-17, the
+            # backend-boundary tranche). The 04 stage entry was last updated
+            # before it existed, so the first isolated run since then failed
+            # with "'gpu_test_control.h' file not found" (2026-09-21).
+            "libcrtgfx/src/gpu_test_control.h",
             # All three per-OS window_*_gpu.h/window_wayland_native.h headers
             # below #include this shared internal header (despite its name,
             # it is not Linux/Wayland-specific -- see the matching
@@ -160,6 +165,9 @@ STAGES = {
             "libcrtmedia/src/demux.c",
             "libcrtmedia/src/extractor.c",
             "libcrtmedia/src/codec.c",
+            # codec.c's private, non-installed hardware-decode diagnostics
+            # header (2026-09-18, hardware-decode Tranche 2).
+            "libcrtmedia/src/codec_test_control.h",
             "libcrtmedia/tests/frame_test.c",
             "libcrtmedia/tests/gpu_frame_test.c",
             "libcrtmedia/tests/format_test.c",
@@ -167,11 +175,16 @@ STAGES = {
             "libcrtmedia/tests/audio_sink_test.c",
             "libcrtmedia/tests/demux_decode_test.c",
             "libcrtmedia/assets/test_tone.wav",
+            # examples/media-player: the playback demo (installed as its
+            # main.c), its clip, and the standalone example project.
+            "libcrtmedia/tools/media_player_demo.c",
+            "libcrtmedia/assets/test_video.mp4",
             "porting/recipes/freetype.json",
             "porting/recipes/ffmpeg.json",
             "examples/README.md",
             "examples/gfx-gpu/CMakeLists.txt",
             "examples/gfx-skia/CMakeLists.txt",
+            "examples/media-player/CMakeLists.txt",
         ),
         "project_paths_by_os": {
             "windows": (
@@ -181,6 +194,8 @@ STAGES = {
                 # (2026-09-11) -- see the matching "03-gfx-simple" entry,
                 # which already got this right.
                 "libcrtgfx/src/arch/windows/window_win32_gpu.h",
+                # gpu_win32.c's private test hooks (see gpu_test_control.h).
+                "libcrtgfx/src/arch/windows/gpu_win32_test.h",
                 "libcrtmedia/src/arch/windows/audio_sink_wasapi.c",
                 "libc/src/arch/windows/common/emutls_link_stubs.c",
                 # The whole shim is required: Skia's D3D include chain uses
@@ -204,6 +219,8 @@ STAGES = {
                 # (2026-09-11) -- see the matching "03-gfx-simple" entry,
                 # which already got this right.
                 "libcrtgfx/src/arch/linux/window_wayland_native.h",
+                # gpu_vulkan.c and tests/gpu_test.c include this (Linux only).
+                "libcrtgfx/src/arch/linux/gpu_vulkan_test.h",
                 "libcrtmedia/src/arch/linux/audio_sink_linux.c",
             ),
         },

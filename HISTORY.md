@@ -10,6 +10,74 @@ substantive update.
 
 ## 2026-09-21
 
+- **First isolated option-ON `04-gfx-media` build since the backend-boundary and
+  hardware-decode work (Windows/x64), and the two stale-packaging defects it
+  exposed.** Built with `tools/crt-stage-build.py` from a freshly extracted
+  `03-gfx-simple` archive at a short scratch path, `development` tag, with
+  `--reuse-work-root`. FreeType and FFmpeg took 2732 s at `-j4` (FFmpeg's
+  configure about 30 min, D3D11VA enabled in packaged-SDK mode through the new
+  `--mingw-w64-headers-root`, global flags unchanged) and Skia 198 s, then the
+  stage's own CMake build failed twice, each on packaging that had not kept up:
+  (1) `tools/create_stage_source.py`'s `04-gfx-media` file list lacked three
+  private headers added since the last isolated run -- `gpu_test_control.h` and
+  `gpu_win32_test.h` (backend-boundary tranche, 2026-09-17) and
+  `codec_test_control.h` (hardware-decode Tranche 2, 2026-09-18) -- giving
+  "'gpu_test_control.h' file not found"; a static include-closure analysis over
+  all three OSes found exactly these (plus the Linux-only `gpu_vulkan_test.h`,
+  now bundled for Linux). (2) `skia_gpu_window_demo.cc` failed with "undeclared
+  identifier 'crtgfx_skia_make_gpu_context'": `crtgfx/skia.h` declares the GPU
+  bridge only under `CRTGFX_HAVE_D3D12`/`_VULKAN`/`_METAL`, those macros became
+  target-private in the same tranche, the in-tree build passes them to every
+  direct Skia executable through `crt_wire_skia_executable()`, and the stage
+  CMake did not; it now passes `CRTGFX_GPU_BACKEND_DEFINITIONS` to
+  `crtgfx_skia_raster_smoke` and `crtgfx_skia_gpu_window_demo`. Each rerun reused
+  the cached dependency layers and took 1-2 minutes.
+
+  Result: every phase passes -- 8 stage tests, the installed `gfx-gpu` and
+  `gfx-skia` examples rebuilt and run, `verify_dist.py`, atomic publication. The
+  SDK is 523 MB (about 159 MB as a zip), declares FreeType, FFmpeg, and Skia, and
+  its `libavutil.a`/`libavcodec.a` contain `ff_hwcontext_type_d3d11va` and
+  `ff_h264_d3d11va{,2}_hwaccel`. This is the first end-to-end proof of the
+  stage-04 Windows path after the MinGW-headers-before-ports change.
+  `prepare_release_assets.py` rejects it only for its `development` tag.
+  Regression guard: `tools/test_stage_source_closure.py` statically checks every
+  stage and OS for private headers a bundled source includes but the asset does
+  not bundle (one allowlisted Linux-only conditional include; mutation-checked --
+  it fails when the three entries are removed). Not verified: Linux and macOS
+  isolated stage builds (their lists are covered only by that static check) and
+  a release-tagged build.
+
+- **Added the `media-player` example to the isolated option-ON `04-gfx-media`
+  (2026-09-21).** The stage previously shipped `gfx-simple`/`gfx-gpu`/`gfx-skia`
+  but not the FFmpeg playback demo the in-repository distribution has, so the
+  one example that proves `crtmedia` composing with a window was missing from
+  what a release would ship. Changes: the stage `CMakeLists.txt` builds
+  `crtmedia_player_demo` (`crtmedia` + `crtgfx_window`, the same macOS/Linux
+  portable RPATH as the other demos) and installs it to `examples/bin` plus
+  `examples/media-player/{main.c,CMakeLists.txt,test_video.mp4}`;
+  `tools/create_stage_source.py` bundles the demo source, clip, and example
+  project; `tools/verify_dist.py` requires all four files (and the prebuilt
+  binary) in the isolated stage only, so the default-OFF cumulative
+  `04-gfx-media` is unaffected (re-verified). The demo had no way to stop, so it
+  gained an optional second argument, a video-frame limit that ends the run and
+  prints `crtmedia_player_demo: presented=<n>`; the stage driver rebuilds the
+  installed example against the SDK, runs it with the installed clip and a limit
+  of 30 under its 60 s timeout (a demo that ignored the limit is killed, not
+  left running), and requires `presented=30` in the output. The first attempt
+  printed `presented=31`: the video drain loop can show several frames per
+  pass, so the limit is now also checked inside it and the count is exact.
+  Result on Windows/x64 with warm caches (`C:\crt-s04`, 75 s): every phase
+  passes, including the new one (3.6 s); the published SDK's own
+  `examples\bin\crtmedia_player_demo.exe` also runs bounded (`presented=20`),
+  and `verify_dist.py` fails with "distribution is missing" for each of the
+  four files when removed in turn. The stage build does not use the in-tree
+  Linux `LINK_GROUP:RESCAN` from c73623f: `tools/crt-cc` puts the C runtime in
+  its own trailing group, after `libxkbcommon.a` and `libav*.a`. **Not
+  verified:** that link on Linux and macOS (no such host in this session; the
+  argument follows crt-cc's ordering, not a run), and a release-tagged build.
+  `docs/release_preview.md` and `examples/README.md` updated; the latter also no
+  longer claims the no-argument default follows a relocated SDK.
+
 - **Release-asset tooling and a first clean-extraction check of a packaged SDK
   (developer-preview preparation).** No release exists yet; this made the
   process reproducible and safe. `CRT_RELEASE_TAG` (default `development`) is a
@@ -53,10 +121,9 @@ substantive update.
   pass, and that test fails when the fix is removed. `activate.sh` is unchanged:
   Linux and macOS consumers find shared libraries through the
   `CMAKE_BUILD_RPATH`/`CMAKE_INSTALL_RPATH` that `crt-toolchain.cmake` sets. Not
-  verified: a release-grade option-ON `04-gfx-media` on any host (a
-  multi-hour build, and it would also be the first end-to-end run of the stage-04
-  path after the Windows D3D11VA change), any Linux or macOS asset, a machine
-  that never had CRT's build environment, and publishing.
+  verified: a release-grade option-ON `04-gfx-media` on any host (the Windows
+  run came later the same day; see the entries above), any Linux or macOS
+  asset, a machine that never had CRT's build environment, and publishing.
 
 - **Fixed the Linux x86_64 `crtmedia_player_demo` link failure found while
   collecting Linux hardware-decode evidence.** Building everything with

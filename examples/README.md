@@ -44,11 +44,18 @@ runs; omit it (or pass zero) to keep a demo open until its window is closed.
 that stage was configured with `CRTMEDIA_ENABLE_FFMPEG` enabled -- like
 `gfx-skia`, `crtmedia_extractor`/`crtmedia_codec` are compiled out of
 `libcrtmedia` entirely otherwise. It takes an optional path to a media file
-to play (video + audio, looping until the window is closed); with no
-argument it plays the bundled `test_video.mp4` fixture installed alongside
-`main.c`:
+to play (video + audio, looping until the window is closed). With no
+argument, an example you rebuild looks for `test_video.mp4` in the current
+directory, while the prebuilt `examples/bin` binary uses an absolute path fixed
+when it was built (which does not follow a relocated SDK); pass the fixture
+installed alongside `main.c` explicitly to avoid both. An optional second
+argument is a video-frame limit for bounded, unattended runs: the demo exits
+after showing that many frames and prints `crtmedia_player_demo: presented=<n>`.
 
 ```sh
 ./examples/bin/crtmedia_player_demo examples/media-player/test_video.mp4
+./examples/bin/crtmedia_player_demo examples/media-player/test_video.mp4 30
 ```
 
+The isolated option-ON `04-gfx-media` that a release ships includes this
+example (source, clip, standalone project, and prebuilt binary).

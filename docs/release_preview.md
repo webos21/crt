@@ -102,9 +102,13 @@ On Linux and macOS the same flow uses `. ./activate.sh` after exporting
 [`examples/README.md`](../examples/README.md). That path has not yet been run
 from a downloaded release archive.
 
-The packaged examples are `gfx-simple` (from `03-gfx-simple`), `gfx-gpu`, and,
-when the SDK was built with them enabled, `gfx-skia` and `media-player`
-(`04-gfx-media`). `gfx-simple` is the smallest build-and-run example.
+The packaged examples are `gfx-simple` (from `03-gfx-simple`) plus `gfx-gpu`,
+`gfx-skia`, and `media-player` (`04-gfx-media`). `gfx-simple` is the smallest
+build-and-run example. `media-player` plays a bundled clip through FFmpeg into a
+native window and, like the others, is present only in the option-ON
+`04-gfx-media` a release ships. Give it a frame limit for a bounded run, for
+example `examples\bin\crtmedia_player_demo.exe examples\media-player\test_video.mp4 30`
+(prints `crtmedia_player_demo: presented=30`).
 
 ## Producing the assets (maintainers)
 
@@ -130,8 +134,9 @@ names, and the download URLs inside the packaged stage recipes all agree.
    target keeps Skia and FFmpeg OFF and is **not** releasable. Use the isolated
    option-ON stage build from the packaged `03-gfx-simple` SDK, with the local
    `--asset` override because the release is not published yet (the asset is
-   still checked against the recipe). Expect a multi-hour build that needs
-   network access:
+   still checked against the recipe). It needs network access and took about
+   50 minutes on Windows/x64 with 12 logical CPUs (FreeType and FFmpeg about 46
+   minutes at `-j4`, Skia about 3 minutes, everything else under a minute):
 
    ```sh
    python out/<preset>/dist/03-gfx-simple/tools/crt-stage-build.py \
@@ -171,14 +176,24 @@ Verified on Windows/x64 (2026-09-21):
   plus a release-tagged `02-cxx` stage-source asset are collected, verified, and
   checksummed (`sha256sum -c` passes); a recipe or asset that does not match the
   tag is rejected; the ordinary default-OFF `04-gfx-media` is rejected.
+- The isolated option-ON `04-gfx-media` (built with the `development` tag from
+  the packaged `03-gfx-simple` SDK) passes every phase: 8 stage tests, rebuilding
+  and running the installed `gfx-gpu`, `gfx-skia`, and `media-player` examples,
+  `verify_dist.py` (which now requires the `media-player` source, clip, project,
+  and prebuilt binary), and atomic publication. It is a 523 MB SDK (about
+  159 MB as a zip) that declares FreeType, FFmpeg, and Skia, and the FFmpeg it
+  ships contains the D3D11VA hwaccels. `prepare_release_assets.py` rejects it only because its
+  `VERSION` and recipe URLs use the `development` tag. That run first failed
+  twice on stale packaging (three private headers missing from the stage-source
+  list, and the per-OS backend definitions not passed to two direct Skia
+  consumers); both are fixed and `tools/test_stage_source_closure.py` now fails
+  if a stage-source list misses a private header its sources include.
 - 23 unit tests for the tooling, and the existing distribution tests.
 
 Not yet done, and required before a release can be published:
 
-- A release-grade option-ON `04-gfx-media` on **any** host. It is a multi-hour
-  build and has not been run since the stage-04 Windows change that fetches the
-  MinGW-w64 headers before the FFmpeg build, so that change is still only
-  checked in isolation.
+- An option-ON `04-gfx-media` built with the **release tag** on any host (the
+  Windows run above used the `development` tag).
 - Any Linux or macOS assets, and any release-archive test on those hosts.
 - A test on a machine that has never had CRT's build environment. The Windows
   check above was a clean extraction path on a development machine, not a clean
