@@ -168,6 +168,28 @@ cmake --build --preset <preset> --target port-test-<name>
 cmake --build --preset <preset> --target port-test-recipes
 ```
 
+## Why CRT?
+
+Native Linux, BSD, and Android-style code is only as portable as the porting work
+behind it: files, sockets, threads, thread-local storage, memory mapping, dynamic
+loading, and startup differ on every host, and each project repeats that work.
+CRT does it once, in a Bionic-shaped libc and C++ runtime over a small per-host
+PAL, so the same source rebuilds as a native Linux, Windows, or macOS
+executable.
+
+- **Why Bionic-shaped?** Bionic is Android's real libc stack, permissively
+  licensed, and already defines the API/ABI surface, syscall wrappers, and
+  kernel-header flow that Linux/Android-style code expects. CRT aims for
+  Bionic-compatible source portability, not generic POSIX conformance.
+- **Rebuild, not translate.** You compile your source with your own Clang/LLD
+  toolchain against a CRT sysroot. That is not binary compatibility, not a VM,
+  and not a container; a CRT distribution never bundles a compiler.
+- **What CRT is not.** Not Android APK compatibility, not an Electron clone, not
+  full POSIX or glibc compatibility, and not a production-ready `1.0`.
+
+For comparisons with musl, SDL, Qt, WSL, Wine, Cosmopolitan, and Android/Bionic,
+see the [FAQ](docs/faq.md).
+
 ## Scope
 
 CRT owns the low-level portability boundary: files, sockets, threads, TLS,
@@ -409,6 +431,7 @@ docs/             design, policy, roadmap, and verification documents
 
 ## Core Documents
 
+- [FAQ](docs/faq.md)
 - [Project meaning](docs/project_meanings.md)
 - [Stack and toolchain policy](docs/project_stacks.md)
 - [Distribution stages](docs/distribution.md)

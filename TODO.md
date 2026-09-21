@@ -230,16 +230,20 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
     * Keep WSL / virtualized-driver limitations distinct from CRT runtime defects.
   * [ ] Avoid describing hardware decode as fully cross-platform until native Linux evidence is complete.
 
-* [ ] **Prepare public messaging / FAQ**
+* [x] **Prepare public messaging / FAQ**
+  Done 2026-09-21: `docs/faq.md` (Why CRT, why Bionic-shaped, rebuild-based
+  model, seven comparisons, non-goals, readiness) plus a short "Why CRT?" in
+  `README.md`. Comparison wording follows `docs/project_stacks.md` and
+  `docs/project_meanings.md`, not the aspirational `docs/marketing/` notes.
 
-  * [ ] Add a concise `Why CRT?` section.
-  * [ ] Explain why CRT uses a Bionic-shaped interface.
-  * [ ] Explain rebuild-based source portability:
+  * [x] Add a concise `Why CRT?` section.
+  * [x] Explain why CRT uses a Bionic-shaped interface.
+  * [x] Explain rebuild-based source portability:
 
     * not binary compatibility
     * not a VM
     * not a container
-  * [ ] Prepare concise comparisons for common questions:
+  * [x] Prepare concise comparisons for common questions:
 
     * musl
     * SDL
@@ -248,7 +252,7 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
     * Wine
     * Cosmopolitan
     * Android/Bionic
-  * [ ] Clearly state non-goals:
+  * [x] Clearly state non-goals:
 
     * not Android APK compatibility
     * not an Electron clone
