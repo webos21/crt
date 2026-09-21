@@ -272,8 +272,12 @@ Not yet done, and required before a release can be published:
   It would only remove the "existing build directory was reused" limit above.
 - Linux assets (a release-tagged build there, including the first Linux link of
   the `media-player` example), and any release-archive test there.
-- Attaching the macOS set to the release: the notes and the "Downloads" table
-  still say Windows only, and the macOS manifest's commit differs from the tag.
+- Attaching the macOS set to the release. The maintainer uploads the nine files
+  from `out/release/v0.4.0-preview.1-macos-aarch64/`; the tag stays on `fd01d7c`.
+  [`release_notes_v0.4.0-preview.1.md`](release_notes_v0.4.0-preview.1.md) now
+  lists them, explains why their manifest records `972d913`, and has a macOS
+  quick start, but the GitHub release body still holds the Windows-only text
+  until someone pastes the updated notes into it.
 - A test on a machine that has never had CRT's build environment. The Windows
   check above was a clean extraction path on a development machine, not a clean
   machine.

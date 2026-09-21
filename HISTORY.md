@@ -10,6 +10,21 @@ substantive update.
 
 ## 2026-09-21
 
+- **Updated the `v0.4.0-preview.1` release notes for the macOS/arm64 assets.**
+  `docs/release_notes_v0.4.0-preview.1.md` now describes both hosts: a macOS
+  paragraph in the verification section, a macOS download table (all seven rows
+  checked against `release-manifest-macos-aarch64.json` for name, size and
+  SHA-256), a statement that the macOS assets record `972d913` and not the tag
+  commit `fd01d7c` and why, a macOS quick start (the `shasum`, `tar`,
+  `activate.sh` and `gfx-simple` rebuild sequence was run against the extracted
+  archive, and `shasum -a 256 -c --ignore-missing` was tried on a single
+  archive), macOS requirements, and updated known limitations. The tag was not
+  moved. Two claims are deliberately hedged in the notes: the archives are
+  unsigned, and a download carrying the macOS quarantine flag has not been
+  tried, so the `xattr` remedy is offered but not verified. The maintainer
+  uploads the macOS files; the GitHub release body has not been changed and
+  still holds the Windows-only text until the updated notes are pasted in.
+
 - **Built the macOS/arm64 asset set for `v0.4.0-preview.1` from a fresh clone,
   and found two bugs the published tag has on macOS.** Before starting, the
   current `main` was checked on this Mac (macOS 26.6.2, Apple clang 21.0.0):

@@ -70,9 +70,24 @@ examples, and `verify_dist.py`. The published archive was then extracted into a
 path containing a space, its prebuilt demos ran, and the quick start below was
 run from it.
 
+For the macOS/arm64 assets, which were added after the release was first
+published: they are built from commit **`972d913`**, not from the tag commit
+`fd01d7c` (see the note under Downloads for why). The SDKs were built with
+`CRT_RELEASE_TAG=v0.4.0-preview.1` from a fresh clone on macOS 26.6.2 with
+Apple clang 21.0.0. The `04-gfx-media` SDK was built from the extracted
+`03-gfx-simple` archive with empty caches in about 7.5 minutes, and passed its 8
+stage tests, rebuilding and running the installed `gfx-gpu`, `gfx-skia` (Metal,
+with resize and pixel checks), and `media-player` examples, and
+`verify_dist.py`. The archive was then extracted into a path containing a space,
+its prebuilt `media-player` and Metal demos ran, and the macOS quick start below
+was run from it.
+
 ## Downloads
 
-This release attaches **Windows/x64 assets only**.
+This release attaches **Windows/x64 assets and macOS/arm64 assets**. Linux has
+no prebuilt archives.
+
+### Windows/x64
 
 | Asset | Size | SHA-256 |
 | --- | --- | --- |
@@ -92,8 +107,37 @@ files are the stage-source assets that the packaged stage recipes download
 `release-manifest-windows-x86_64.json` records the version, source commit, and
 per-asset size and SHA-256.
 
-**Linux and macOS:** no prebuilt archives are attached to this release. Build
-them from this tag with the instructions in the
+### macOS/arm64 (Apple Silicon)
+
+| Asset | Size | SHA-256 |
+| --- | --- | --- |
+| `crt-v0.4.0-preview.1-macos-aarch64-04-gfx-media.tar.xz` | 14.1 MB | `802422edfbb3b6798b6d10ec85089b4e9b173e3da9042f52942bdfdf274b14bd` |
+| `crt-v0.4.0-preview.1-macos-aarch64-03-gfx-simple.tar.xz` | 4.9 MB | `f1ec8058a5c93f838186a27d95eea863d8c372e0a8edb621112da894070d313b` |
+| `crt-v0.4.0-preview.1-macos-aarch64-02-cxx.tar.xz` | 4.9 MB | `09c2dab341d6ae9a7ca0e1fe3e895d22479dc2157ad2a1e4a223d5127ce5ea1c` |
+| `crt-v0.4.0-preview.1-macos-aarch64-01-c.tar.xz` | 1.8 MB | `83876183f0aa24fec1e451144b0b53510741d5f6c42188ea41f71aee64a06c2e` |
+| `crt-v0.4.0-preview.1-macos-04-gfx-media-source.tar.xz` | 18.2 MB | `4bf38b0d864358cce6a8e7d6d0551fe8ce7546dfd4e34faf37aa0188a966fb41` |
+| `crt-v0.4.0-preview.1-macos-03-gfx-simple-source.tar.xz` | 0.1 MB | `1cc81949ef052fabcd4a44c5a6fdf8c2b949bd47d093faa9745aefff897ec9aa` |
+| `crt-v0.4.0-preview.1-macos-02-cxx-source.tar.xz` | 8.0 MB | `1ebb577af42a60c6408eeaacae6b3dba93244bd254441c5e4d82a86bc0d2ec59` |
+
+The same guidance applies: most people need only the `04-gfx-media` archive, and
+the `*-source.tar.xz` files are the stage-source assets the packaged recipes
+download. `SHA256SUMS-macos-aarch64` lists every checksum above, and
+`release-manifest-macos-aarch64.json` records the version, source commit, and
+per-asset size and SHA-256.
+
+**The macOS assets were built from a later commit than the tag.** The tag
+`v0.4.0-preview.1` points at `fd01d7c`, which is what the Windows assets record.
+The macOS manifest records `972d913`, which is later than the tag (the two fixes
+below plus documentation commits), and the tag was not moved. Building the isolated `04-gfx-media` stage on macOS from `fd01d7c` itself
+fails: the stage project did not link `CoreFoundation` (so `libcrtmedia.dylib`
+would not link), and, once that was fixed, the shared `libcrtgfx.dylib` passed a
+clock id that real macOS rejects, which made the `gfx-skia` example hang after a
+window resize. Both are fixed in `972d913`, and both fixes touch macOS-specific code only, so
+the Windows assets are unaffected. If you build macOS from source, use `972d913` or later
+(`main`), not the tag.
+
+**Linux:** no prebuilt archives are attached to this release. Build them from
+this tag with the instructions in the
 [README](https://github.com/webos21/crt/blob/v0.4.0-preview.1/README.md#build).
 
 ## Quick start (Windows)
@@ -137,6 +181,47 @@ Activation puts the SDK's `bin\` directory on `PATH`. Windows has no RPATH, so a
 rebuilt program that imports the SDK's DLLs needs that; without it the program
 fails to start with `STATUS_DLL_NOT_FOUND` (`0xC0000135`).
 
+## Quick start (macOS)
+
+Check the download, then extract it (a path containing a space works):
+
+```sh
+shasum -a 256 -c --ignore-missing SHA256SUMS-macos-aarch64
+tar -xJf crt-v0.4.0-preview.1-macos-aarch64-04-gfx-media.tar.xz
+```
+
+Then run a ready-made program:
+
+```sh
+04-gfx-media/examples/bin/crtmedia_player_demo 04-gfx-media/examples/media-player/test_video.mp4 30
+```
+
+It plays the bundled clip in a native window and prints
+`crtmedia_player_demo: presented=30`. Without a frame limit the demo plays until
+you close its window.
+
+To rebuild a packaged example against the SDK, point CRT at your own compiler
+first. This sequence was run against the extracted `04-gfx-media` archive (it
+builds in a few seconds and presents 60 frames); the other example folders have
+their own `CMakeLists.txt`:
+
+```sh
+export CRT_CC=/usr/bin/clang CRT_CXX=/usr/bin/clang++
+export CRT_AR="$(xcrun -f ar)" CRT_RANLIB="$(xcrun -f ranlib)"
+. ./04-gfx-media/activate.sh
+cmake -S 04-gfx-media/examples/gfx-simple -B build -G Ninja \
+  "-DCMAKE_TOOLCHAIN_FILE=$PWD/04-gfx-media/crt-toolchain.cmake"
+cmake --build build
+./build/crtgfx_window_example 60
+```
+
+A rebuilt program finds the SDK's shared libraries through the RPATH that
+`crt-toolchain.cmake` sets. The prebuilt programs and the archive are **not
+signed or notarized**. They ran from the extraction directory on the development
+machine; a download that carries the macOS quarantine flag has not been tried,
+and if macOS refuses to run a program you can clear the flag with
+`xattr -dr com.apple.quarantine 04-gfx-media`.
+
 ## Requirements
 
 CRT does not bundle a toolchain. Build machines need Git, CMake 3.25 or newer,
@@ -144,7 +229,9 @@ Ninja, Python 3, Clang, and LLD. Verified on Windows 11 Pro with LLVM/Clang
 22.1.8, CMake 4.4.3, Ninja 1.13.2, Python 3.11.9, and Windows SDK 10.0.28000.0
 import libraries. Developer Mode must be enabled for building and porting (CRT
 uses real symbolic links), and `04-gfx-media` needs a D3D12-capable display
-driver. Package lists for Linux and macOS are in the
+driver. On macOS the assets were built and run on Apple Silicon with macOS
+26.6.2, Xcode's Apple clang 21.0.0, CMake 4.4.3, Ninja 1.13.2, and Python 3.14;
+`04-gfx-media` needs Metal. Package lists for Linux and macOS are in the
 [README](https://github.com/webos21/crt/blob/v0.4.0-preview.1/README.md#prerequisites).
 
 ## Known limitations
@@ -159,11 +246,14 @@ driver. Package lists for Linux and macOS are in the
 - **Linux graphics evidence comes from a VM.** The Linux/aarch64 acceptance host
   uses a virtio-gpu/lavapipe Vulkan device; Vulkan on a physical GPU has not been
   run. Linux needs a reachable Wayland compositor with `xdg-shell`.
-- **No prebuilt Linux or macOS archives** in this release, and the
-  `media-player` example has been linked in the isolated stage only on Windows.
-- **Not tested on a clean machine.** The Windows archive was extracted and run
-  from a fresh path on the development machine, not on a machine that never had
-  CRT's build environment.
+- **No prebuilt Linux archives** in this release, and the `media-player` example
+  has been linked in the isolated stage only on Windows and macOS.
+- **The macOS assets come from a later commit than the tag** (`972d913`, not
+  `fd01d7c`) and are unsigned; see Downloads. Building macOS from the tag itself
+  does not work.
+- **Not tested on a clean machine.** The Windows and macOS archives were
+  extracted and run from a fresh path on the development machines, not on a
+  machine that never had CRT's build environment.
 - **No encode, capture, or streaming layer.** The FFmpeg build is decode and demux
   only.
 - **`05-js` is not part of this preview.** It is a `libcrtjs` skeleton; QuickJS,
@@ -174,7 +264,8 @@ driver. Package lists for Linux and macOS are in the
 
 ## Next
 
-Linux and macOS release archives, verification on a clean machine, Linux VA-API
+Linux release archives, macOS signing and notarization, verification on a clean
+machine, Linux VA-API
 evidence on a native host, zero-copy hardware decode to GPU textures, and the
 `05-js` JavaScript stage. Open work is tracked in
 [`TODO.md`](https://github.com/webos21/crt/blob/main/TODO.md).

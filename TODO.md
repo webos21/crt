@@ -109,9 +109,11 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
   `out/release/v0.4.0-preview.1-macos-aarch64/` (not committed, not uploaded). It
   records commit `972d913`, **not** the tag commit `fd01d7c`: the tag could not
   build a macOS `04-gfx-media` (two bugs the in-tree build hides, fixed in
-  `32ab384` and `972d913`; see `docs/release_preview.md`). **Still open:**
-  attaching the macOS set to the release (and updating its notes, which the
-  commit difference makes necessary), Linux assets (including the first Linux
+  `32ab384` and `972d913`; see `docs/release_preview.md`). The repo copy of the
+  release notes is updated for it (tag unchanged, commit difference explained,
+  macOS quick start). **Still open:** the maintainer uploading the macOS files
+  and pasting the updated notes into the GitHub release body (which still says
+  Windows only), Linux assets (including the first Linux
   `media-player` link), a fresh-clone rebuild of the Windows set, a test on a
   machine that never had CRT's build environment, and the upload decision.
 
