@@ -10,6 +10,25 @@ substantive update.
 
 ## 2026-09-21
 
+- **Registered the first demo recording, Windows `media-player`.** H.264 + AAC
+  MP4, 1280x720, 19.5 s, 9.4 MB. It is not stored in the repository (a 9.4 MB
+  binary would stay in git history, and a later three-platform recording would
+  add another): it was uploaded through GitHub's attachment upload, and the
+  README's new "Demo" section embeds that
+  `github.com/user-attachments/assets/...` URL on a line of its own. The URL
+  was fetched without credentials and returned `video/mp4` with a valid `ftyp`
+  header; that it renders as an inline player in the rendered README was not
+  checked. The recording itself was checked by playing it in the built-in
+  browser and sampling frames at 0, 3, 8, 12, 16 and 19 s: Explorer at
+  `C:\crt-s04\out\04-gfx-media` opening `examples\bin`,
+  `crtmedia_player_demo.exe` launched, a native window playing the bundled test
+  clip's colour bars, the window closed, Explorer again. The audio track was not
+  checked. The README states what it does and does not show: this demo blits
+  decoded frames into the window's CPU framebuffer, so it shows native window
+  creation and FFmpeg decode/playback only, and it is Windows only. The
+  three-platform demo TODO stays open, with a dated note; none of its items are
+  ticked.
+
 - **First isolated option-ON `04-gfx-media` build since the backend-boundary and
   hardware-decode work (Windows/x64), and the two stale-packaging defects it
   exposed.** Built with `tools/crt-stage-build.py` from a freshly extracted

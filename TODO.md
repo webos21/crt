@@ -204,6 +204,12 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
   * [x] Prefer evidence-based wording over broad compatibility claims.
 
 * [ ] **Create a three-platform visual demo**
+  2026-09-21: only a first Windows clip exists -- the `media-player` example
+  (native window plus FFmpeg decode/playback, CPU framebuffer), uploaded to
+  GitHub and embedded in the README "Demo" section; the file is not stored in the
+  repository. It covers none of the Skia, GPU, text, input, or resize items
+  below and is not the same application on three platforms. Nothing has been
+  recorded for Linux or macOS.
 
   * [ ] Record the same CRT application running on:
 

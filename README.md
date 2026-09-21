@@ -73,6 +73,21 @@ and [`TODO.md`](TODO.md). To try it from source, see
 [Prerequisites](#prerequisites), [Build](#build), and
 [Using A Distribution](#using-a-distribution).
 
+## Demo
+
+Windows: the `media-player` example (1280x720, about 20 seconds).
+
+https://github.com/user-attachments/assets/a60ff1ae-c260-4aaa-a140-8095ac95f7c0
+
+Recorded on Windows 11/x64. `crtmedia_player_demo.exe` is launched from
+Explorer, in the `examples\bin` folder of an isolated option-ON `04-gfx-media`
+SDK; it decodes the bundled test clip with FFmpeg and shows it (colour bars) in
+a native Win32 window, which is then closed. This demo draws through the
+window's CPU framebuffer, so it shows native window creation and FFmpeg
+decode/playback only -- not Skia, GPU presentation, text rendering, input, or
+resize. It is one host: the same application recorded on Linux and macOS is
+still to do (see [`TODO.md`](TODO.md)).
+
 ## What Already Works
 
 This is the evidence-based snapshot behind the claims above. Each cell is the
