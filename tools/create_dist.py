@@ -356,7 +356,8 @@ def remove_absolute_macho_rpaths(path: Path) -> None:
 
 def write_sdk_files(root: Path, destination: Path, target_os: str, target_arch: str,
                     target_triple: str, stage: str, tools: dict[str, str],
-                    redistributed_dependencies: list[dict]) -> None:
+                    redistributed_dependencies: list[dict],
+                    release_version: str = "development") -> None:
     tools_dest = destination / "tools"
     tools_dest.mkdir(parents=True, exist_ok=True)
     for name in DIST_WRAPPER_TOOLS:
@@ -509,7 +510,7 @@ set(CMAKE_INSTALL_RPATH "${CRT_DISTRIBUTION_ROOT}/lib")
         }),
     }
     (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    (destination / "VERSION").write_text("development\n", encoding="utf-8")
+    (destination / "VERSION").write_text(release_version + "\n", encoding="utf-8")
 
 
 def main() -> None:
@@ -536,6 +537,10 @@ def main() -> None:
     parser.add_argument("--ar", default="")
     parser.add_argument("--ranlib", default="")
     parser.add_argument("--archive", action="store_true")
+    parser.add_argument(
+        "--release-version", default="development",
+        help="version token written to VERSION and into the archive name "
+             "(crt-<version>-<os>-<arch>-<stage>); 'development' for local builds")
     args = parser.parse_args()
 
     normalized_arch = {
@@ -608,12 +613,12 @@ def main() -> None:
         root, destination, args.target_os, normalized_arch,
         args.target_triple or f"{normalized_arch}-{args.target_os}", args.stage,
         {"cc": args.cc, "cxx": args.cxx, "ar": args.ar, "ranlib": args.ranlib},
-        redistributed_dependencies,
+        redistributed_dependencies, args.release_version,
     )
     if args.archive:
         archive_format = "zip" if args.target_os == "windows" else "xztar"
         archive_name = destination.parent / (
-            f"crt-development-{args.target_os}-{normalized_arch}-{args.stage}"
+            f"crt-{args.release_version}-{args.target_os}-{normalized_arch}-{args.stage}"
         )
         shutil.make_archive(str(archive_name), archive_format,
                             root_dir=destination.parent, base_dir=destination.name)

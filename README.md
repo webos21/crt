@@ -458,7 +458,8 @@ docs/             design, policy, roadmap, and verification documents
 - [FAQ](docs/faq.md)
 - [Project meaning](docs/project_meanings.md)
 - [Stack and toolchain policy](docs/project_stacks.md)
-- [Distribution stages](docs/distribution.md)
+- [Distribution stages](docs/distribution.md) and the
+  [developer-preview release contract](docs/release_preview.md)
 - [Runtime roadmap](docs/runtime_roadmap.md)
 - [C++ runtime](docs/cxx_runtime.md)
 - [Graphics API policy](docs/libcrtgfx_api_policy.md)

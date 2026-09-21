@@ -4,6 +4,17 @@ set(CRT_TARGET_OS "macos" CACHE STRING "Target OS personality")
 set(CRT_TARGET_ARCH "host" CACHE STRING "Target architecture")
 set(CRT_DIST_ROOT "${CMAKE_BINARY_DIR}/dist" CACHE PATH "Cumulative staged CRT distributions")
 set(CRT_STAGE_SOURCE_ROOT "${CMAKE_BINARY_DIR}/stage-sources" CACHE PATH "Generated source-stage assets and recipes")
+# CRT_RELEASE_TAG: the one token baked into the stage-source recipes' download
+# URLs and asset names, every SDK's VERSION file, and the archive names
+# (crt-<tag>-<os>-<arch>-<stage>). "development" is the local-build default; a
+# release build passes the real tag (e.g. v0.4.0-preview.1) and must come from
+# a clean git tree -- --allow-dirty is only ever added for "development".
+set(CRT_RELEASE_TAG "development" CACHE STRING "Release tag for stage-source recipes, SDK VERSION files and archive names")
+if(CRT_RELEASE_TAG STREQUAL "development")
+  set(CRT_STAGE_SOURCE_DIRTY_ARGS --allow-dirty)
+else()
+  set(CRT_STAGE_SOURCE_DIRTY_ARGS)
+endif()
 set(CRT_SYSROOT "${CRT_DIST_ROOT}/01-c" CACHE PATH "C-stage sysroot used by wrappers and porting tests")
 set(CRT_LIBCXX_SYSROOT "${CRT_DIST_ROOT}/02-cxx" CACHE PATH "C++-stage cumulative sysroot")
 
@@ -236,6 +247,7 @@ if(Python3_Interpreter_FOUND)
   if(CMAKE_C_COMPILER_TARGET)
     list(APPEND CRT_DIST_TOOL_ARGS --target-triple "${CMAKE_C_COMPILER_TARGET}")
   endif()
+  list(APPEND CRT_DIST_TOOL_ARGS --release-version "${CRT_RELEASE_TAG}")
   add_custom_target(check-import-manifest
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/check_import_manifest.py"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
@@ -1277,7 +1289,7 @@ if(Python3_Interpreter_FOUND)
       --source-root "${CRT_LIBCXX_FETCH_ROOT}"
       --output-dir "${CRT_STAGE_SOURCE_ROOT}"
       --successor-recipe "${CRT_STAGE_SOURCE_ROOT}/03-gfx-simple.json"
-      --release-tag development --allow-dirty
+      --release-tag "${CRT_RELEASE_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS}
     DEPENDS crt-libcxx-fetch crt-stage-03-source
     COMMENT "Creating the pinned 01-c -> 02-cxx source asset and recipe"
     USES_TERMINAL
@@ -1292,7 +1304,7 @@ if(Python3_Interpreter_FOUND)
       --target-os "${CRT_TARGET_OS}"
       --source-root "${CMAKE_BINARY_DIR}/external"
       --output-dir "${CRT_STAGE_SOURCE_ROOT}"
-      --release-tag development --allow-dirty
+      --release-tag "${CRT_RELEASE_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS}
     DEPENDS ${CRT_STAGE_03_SOURCE_DEPENDS}
     COMMENT "Creating the pinned 02-cxx -> 03-gfx-simple source asset and recipe"
     USES_TERMINAL
@@ -1303,7 +1315,7 @@ if(Python3_Interpreter_FOUND)
       --target-os "${CRT_TARGET_OS}"
       --source-root "${CMAKE_BINARY_DIR}/external"
       --output-dir "${CRT_STAGE_SOURCE_ROOT}"
-      --release-tag development --allow-dirty
+      --release-tag "${CRT_RELEASE_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS}
     COMMENT "Creating the pinned 03-gfx-simple -> 04-gfx-media source asset and recipe"
     USES_TERMINAL
   )

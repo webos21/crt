@@ -91,17 +91,24 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
     | macOS    | Cocoa         | Metal  | Yes  | Yes    | VideoToolbox verified               |
 
 * [ ] **Prepare downloadable / directly testable release artifacts**
+  2026-09-21: contract and runbook in `docs/release_preview.md`;
+  `CRT_RELEASE_TAG` and `tools/prepare_release_assets.py` (collect, verify,
+  checksum; blocks the default-OFF `04-gfx-media`) done and exercised on
+  Windows. **Still open:** build a release-grade option-ON `04-gfx-media`
+  (multi-hour, per host) and the Linux/macOS assets, test on a machine that
+  never had CRT's build environment, and publish (needs an explicit decision).
+  Related fix pending: `activate.cmd` does not put the SDK `bin` on `PATH`.
 
   * [ ] Provide release artifacts that allow an external developer to try CRT without reconstructing the entire development environment from repository history.
-  * [ ] Include or document the staged SDK layout:
+  * [x] Include or document the staged SDK layout:
 
     * `01-c`
     * `02-cxx`
     * `03-gfx-simple`
     * `04-gfx-media`
-  * [ ] Provide at least one minimal build-and-run example.
+  * [x] Provide at least one minimal build-and-run example.
   * [ ] Verify the release artifact from a clean environment where practical.
-  * [ ] Document the supported host/compiler requirements for each platform.
+  * [x] Document the supported host/compiler requirements for each platform.
 
 * [x] **Turn the README into a public landing page**
   Done 2026-09-21 (`README.md`): headline/supporting message, the unchanged

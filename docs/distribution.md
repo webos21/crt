@@ -157,7 +157,11 @@ the packaged CRT mksh. MSYS and Git Bash are not distribution prerequisites.
 Archive names carry version, OS, architecture, and stage, for example
 `crt-development-windows-x86_64-01-c.zip` and
 `crt-development-linux-aarch64-04-gfx-media.tar.xz`. A release replaces the
-`development` token with the project release version.
+`development` token with the project release tag: configuring with
+`-DCRT_RELEASE_TAG=<tag>` sets the SDK `VERSION` files, the archive names, and
+the download URLs in the packaged stage recipes together, and
+`tools/prepare_release_assets.py` then collects and checks the result. See
+[`release_preview.md`](release_preview.md).
 
 ## Source-stage bootstrap chain
 

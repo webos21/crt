@@ -10,6 +10,42 @@ substantive update.
 
 ## 2026-09-21
 
+- **Release-asset tooling and a first clean-extraction check of a packaged SDK
+  (developer-preview preparation).** No release exists yet; this made the
+  process reproducible and safe. `CRT_RELEASE_TAG` (default `development`) is a
+  new CMake cache variable that now sets, from one value, the stage-source
+  recipes' download URLs and asset names, every SDK's `VERSION` file, and the
+  archive names (`create_dist.py --release-version`); `--allow-dirty` is only
+  ever added for `development`. `tools/prepare_release_assets.py` collects the
+  built archives (or, for the isolated option-ON `04-gfx-media`, which emits a
+  directory, a `--sdk 04-gfx-media=<dir>`), copies bytes unchanged, and blocks
+  the release unless the tree is clean, each `VERSION` equals the tag,
+  `verify_dist.py` passes on the *extracted archive*, every packaged recipe
+  points at the tag and at a stage-source asset with its recorded size and
+  SHA-256, and `04-gfx-media` really carries Skia, FreeType, and FFmpeg. It writes
+  per-host `SHA256SUMS-<os>-<arch>` and `release-manifest-<os>-<arch>.json`. A
+  finding that motivated the last check: the ordinary cumulative
+  `dist/04-gfx-media` (2026-09-16) has no Skia or FFmpeg at all, because the
+  default preset keeps both OFF, so it must never be shipped as the preview
+  SDK. Contract and runbook: `docs/release_preview.md`.
+
+  Verified on Windows/x64 (2026-09-21): an existing `03-gfx-simple` archive
+  extracted into a path with a space passes `verify_dist.py`, its `gfx-simple`
+  example rebuilds from the packaged `crt-toolchain.cmake` in about five seconds,
+  and both the ready-made and the rebuilt programs present 60 frames; the tooling
+  ran end to end on real release-tagged `01-c` and `02-cxx` stage-source output
+  (`sha256sum -c` passes, a mismatched recipe or asset and the default-OFF `04`
+  are rejected); the default (`development`) build path is unchanged (the
+  `crt-development-...-01-c.zip` and `VERSION` are as before); 23 new unit tests
+  and the existing distribution tests pass. A finding: a rebuilt example imports
+  `libcrtgfx.dll` and fails silently unless the SDK's `bin\` is on `PATH`, which
+  `activate.cmd` does not do (the ready-made `examples\bin` programs run without
+  it). Not
+  verified: a release-grade option-ON `04-gfx-media` on any host (a
+  multi-hour build, and it would also be the first end-to-end run of the stage-04
+  path after the Windows D3D11VA change), any Linux or macOS asset, a machine
+  that never had CRT's build environment, and publishing.
+
 - **Fixed the Linux x86_64 `crtmedia_player_demo` link failure found while
   collecting Linux hardware-decode evidence.** Building everything with
   `CRTMEDIA_ENABLE_FFMPEG=ON` failed to link the demo with
