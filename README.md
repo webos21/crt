@@ -115,6 +115,59 @@ Linux/aarch64 results come from its recorded acceptance runs there. Details and
 per-host limits stay in [`STATUS.md`](STATUS.md), which is authoritative if it
 and this table ever disagree.
 
+## Portability Proof
+
+The portability claim is tested by rebuilding real upstream software through the
+CRT sysroot with its own `configure`/`make` (or GN) flow and then running it.
+Each port is a pinned, SHA-256-checked recipe under
+[`porting/recipes/`](porting/recipes/), with a recorded result per host.
+
+| Upstream | Version | Linux / Windows / macOS | What runs |
+| --- | --- | --- | --- |
+| zlib | 1.3.1 | static + shared pass on all three | Real compress/decompress round trip against both builds. |
+| libpng | 1.6.57 | static + shared pass on all three | libpng create/write/destroy paths against both builds. |
+| SQLite | 3.53.4 | amalgamation build pass on all three | Amalgamation builds without upstream source patching; recipe-level smoke and link checks only. |
+| bzip2 | 1.0.8 | static + shared pass on all three | Compress/decompress round trip against both builds. |
+| xz / liblzma | 5.8.3 | static + shared pass on all three | Compress/decompress round trip at the maximum preset (9, extreme) with CRC64 against both builds. |
+| PCRE2 | 10.47 | static + shared pass on all three | 8-bit regular-expression matching against both builds. |
+| mbedTLS | 3.6.7 | static + shared pass on all three | SHA-256 known-answer check and AES-128-CBC encrypt/decrypt round trip. |
+| curl (libcurl) | 8.21.0 | static + shared pass on all three | Real HTTP and HTTPS requests through libcurl, zlib, mbedTLS, DNS, and sockets. |
+| FreeType | 2.14.3 | static + shared pass on all three | Glyph rasterization from a bundled font; also feeds Skia text. |
+| FFmpeg | 8.1.2 | configure/make port, pass on all three | Narrow LGPL build; `libcrtmedia` demux, software decode, and playback tests, plus hardware H.264 decode on macOS and Windows. |
+| Skia | m148 | GN build against the CRT sysroot and imported libc++, pass on all three | CPU raster and text; Ganesh GPU presentation over Vulkan, D3D12, and Metal (see the Linux caveat above). |
+
+libffi and expat also pass on all three hosts, and the toolchain `make` builds
+from the same sysroot (a manual pass); per-port detail is in
+[`docs/porting_status.md`](docs/porting_status.md).
+
+Runtime evidence, beyond "it compiles":
+
+- **curl**: real HTTP and HTTPS round trips to a public server (`example.com`),
+  not a loopback test, over CRT's sockets, resolver, and non-blocking file
+  descriptors, for both static and shared libcurl. These tests need network
+  access.
+- **Skia**: live native presentation with a machine-checkable pixel comparison
+  (`SkSurface::readPixels()` against a shared reference scene), including a
+  scripted mid-stream resize, on the Vulkan, D3D12, and Metal backends.
+- **FFmpeg**: a real H.264 MP4 fixture demuxed and decoded frame by frame, and a
+  WAV fixture decoded to an exact known sample count.
+
+Upstream source is not patched to hide a missing CRT surface; the missing
+Bionic-compatible behavior is implemented in CRT instead. Most recipes carry no
+source patch. The exceptions are recorded with their reasons in each recipe: a
+header guard for Windows constructor sections in xz, mbedTLS configuration and
+Makefile edits, FreeType build-script fixes (paths with spaces, Mach-O
+archives), and FFmpeg build-script edits for the Windows D3D11VA probes and macOS
+VideoToolbox. Skia carries no source patch, only a build-time GN interpreter
+pin.
+
+To reproduce a result on your host:
+
+```sh
+cmake --build --preset <preset> --target port-test-<name>
+cmake --build --preset <preset> --target port-test-recipes
+```
+
 ## Scope
 
 CRT owns the low-level portability boundary: files, sockets, threads, TLS,

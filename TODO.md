@@ -168,10 +168,13 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
     * in progress
     * planned
 
-* [ ] **Add a "Portability Proof" section**
+* [x] **Add a "Portability Proof" section**
+  Done 2026-09-21 (`README.md`, "Portability Proof"): 11 upstream projects with
+  versions, recorded per-host results and what each test runs, curl/Skia/FFmpeg
+  runtime evidence, the exact patch exceptions, and the `port-test-*` commands.
 
-  * [ ] Show real upstream software that has been built and exercised through the CRT sysroot/runtime.
-  * [ ] Include representative ports such as:
+  * [x] Show real upstream software that has been built and exercised through the CRT sysroot/runtime.
+  * [x] Include representative ports such as:
 
     * zlib
     * libpng
@@ -184,12 +187,12 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
     * FreeType
     * Skia
     * FFmpeg
-  * [ ] Highlight real runtime evidence where available, especially:
+  * [x] Highlight real runtime evidence where available, especially:
 
     * curl HTTP/HTTPS round trips
     * Skia live native presentation
     * FFmpeg decode/playback
-  * [ ] Prefer evidence-based wording over broad compatibility claims.
+  * [x] Prefer evidence-based wording over broad compatibility claims.
 
 * [ ] **Create a three-platform visual demo**
 
