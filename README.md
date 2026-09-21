@@ -66,11 +66,54 @@ container, or translation layer.
   `libcrtjs` skeleton; QuickJS, the event loop, modules, and JavaScript-visible
   graphics/media bindings are planned.
 
+The per-capability matrix is under [What Already Works](#what-already-works).
 The exact evidence, per-port results, and open work are in
 [`STATUS.md`](STATUS.md), [`docs/porting_status.md`](docs/porting_status.md),
 and [`TODO.md`](TODO.md). To try it from source, see
 [Prerequisites](#prerequisites), [Build](#build), and
 [Using A Distribution](#using-a-distribution).
+
+## What Already Works
+
+This is the evidence-based snapshot behind the claims above. Each cell is the
+state on that host, not a promise.
+
+- **Verified**: implemented, and an automated test or recorded acceptance run
+  passed on that host.
+- **Partial**: implemented and exercised, with a gap on that host stated in the
+  last column.
+- **In progress**: work under way, not accepted yet.
+- **Planned**: not started, or skeleton only.
+
+| Capability | Linux | Windows | macOS | Evidence and limits |
+| --- | --- | --- | --- | --- |
+| libc / libm (startup, stdio, files, processes, signals) | Verified | Verified | Verified | Bionic-shaped headers and ABI; full in-tree `ctest` suite. |
+| libdl | Partial | Verified | Verified | `dlopen`/`dlsym` use `LoadLibrary` on Windows and dyld on macOS. Linux supports `dlopen(NULL)`, `dladdr`, `dl_iterate_phdr` and reports loading real libraries as unsupported (a CRT-owned loader is deferred). |
+| libc++ / libc++abi / libunwind | Verified | Verified | Verified | Imported runtime; static and shared smoke tests including RTTI and exceptions. libunwind is project-built on Linux and Windows; macOS uses libSystem's unwinder. |
+| pthread | Verified | Verified | Verified | `pthread_*` tests: mutexes, condition variables, barriers, attributes, thread-specific data, process-shared. |
+| Sockets and DNS | Verified | Verified | Verified | `socket_network_test`, `dns_*`; libcurl + mbedTLS HTTP and HTTPS round trips to a real server on all three hosts. IPv4/UDP A-record resolver only (no IPv6, TCP fallback, or caching). |
+| mmap | Verified | Verified | Verified | `mman_test`. |
+| Thread-local storage | Verified | Verified | Verified | `pthread_tls_test`. (TLS as in HTTPS is covered by the sockets row.) |
+| Native window and input | Verified | Verified | Verified | Wayland (`xdg-shell`), Win32, Cocoa; keyboard, pointer, resize, close, DPI. Linux needs a reachable compositor; WSLg is useful evidence but differs from a desktop compositor. |
+| Skia CPU raster and text | Verified | Verified | Verified | Skia m148 plus FreeType text through the software frame. |
+| Skia GPU (Ganesh) | Partial | Verified | Verified | Vulkan / D3D12 / Metal live presentation with pixel-exact and mid-stream resize checks. Linux evidence is from a VM with a virtio-gpu/lavapipe Vulkan device; no physical-GPU Linux run is recorded yet. |
+| FFmpeg software media | Verified | Verified | Verified | Opt-in, narrow LGPL build: MOV/MP4/M4A, WAV, MP3 demux; H.264, AAC, MP3, PCM software decode; player and playback-pipeline tests. |
+| Native audio output | Partial | Verified | Verified | WASAPI, CoreAudio, and ALSA or PulseAudio. Linux real-device behavior is environment dependent; WSLg's PulseAudio bridge is recorded as stopping to respond after about a second of continuous audio. |
+| Hardware H.264 decode (frames delivered to CPU) | In progress | Verified | Verified | D3D11VA on Windows and VideoToolbox on macOS with real hardware frames; software decode stays the default and the fallback. Linux VA-API is blocked on a host with a working VA-API H.264 decoder. |
+| Hardware decode to GPU texture (zero-copy) | Planned | Planned | Planned | Decoded surfaces are not shared with the graphics path yet. |
+| Encode, capture, streaming | Planned | Planned | Planned | No mux/encode, capture, or network streaming layer exists. |
+| JavaScript runtime (QuickJS) | Planned | Planned | Planned | `05-js` packages a `libcrtjs` skeleton only. |
+
+Hosts: Linux is an aarch64 VM (the acceptance host) plus x86_64 under WSL2;
+Windows is x86_64; macOS is arm64 (Apple Silicon).
+
+Evidence dates: the full `ctest` suite last ran 149/149 on Windows/x64
+(2026-09-19), 121/121 on Linux/x86_64 under WSL2 (2026-09-21; two TTY-dependent
+termios tests excluded from that non-interactive run), and 132/132 on
+macOS/arm64 (2026-09-18, as recorded in [`HISTORY.md`](HISTORY.md)). The
+Linux/aarch64 results come from its recorded acceptance runs there. Details and
+per-host limits stay in [`STATUS.md`](STATUS.md), which is authoritative if it
+and this table ever disagree.
 
 ## Scope
 

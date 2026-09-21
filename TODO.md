@@ -140,10 +140,14 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
      Vulkan        D3D12       Metal
     ```
 
-* [ ] **Add a visible "What already works" matrix**
+* [x] **Add a visible "What already works" matrix**
+  Done 2026-09-21 (`README.md`, "What Already Works"): 16 capabilities x 3
+  hosts with Verified / Partial / In progress / Planned, evidence dates, and
+  per-host limits (Linux libdl, Linux Skia GPU on a VM, Linux audio, Linux
+  hardware decode). Fresh Linux/x86_64 (WSL2) `ctest` 121/121 run for it.
 
-  * [ ] Show verified functionality instead of relying only on descriptive claims.
-  * [ ] Cover at least:
+  * [x] Show verified functionality instead of relying only on descriptive claims.
+  * [x] Cover at least:
 
     * libc / libm / libdl
     * libc++ / libc++abi / libunwind
@@ -157,7 +161,7 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
     * FFmpeg
     * native audio
     * hardware decode status
-  * [ ] Clearly distinguish:
+  * [x] Clearly distinguish:
 
     * verified
     * partially verified
