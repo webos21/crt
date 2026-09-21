@@ -125,6 +125,23 @@ class StageSourceClosure(unittest.TestCase):
         linux = expand(stage_source.STAGES["04-gfx-media"]["project_paths_by_os"]["linux"])
         self.assertIn((ROOT / "libcrtgfx/src/arch/linux/gpu_vulkan_test.h").resolve(), linux)
 
+    def test_the_stage_links_every_macos_framework_the_in_tree_build_does(self):
+        # The isolated 04-gfx-media project keeps its own copy of the macOS
+        # framework list.  CoreFoundation was added only to libcrtmedia's copy,
+        # so the release tag could not link libcrtmedia.dylib on macOS.
+        def frameworks(relative_path: str) -> set:
+            text = (ROOT / relative_path).read_text(encoding="utf-8")
+            block = re.search(r"set\(CRTMEDIA_MACOS_FRAMEWORKS\b(.*?)\)", text, re.S)
+            self.assertIsNotNone(block, relative_path)
+            return set(re.findall(r'"-framework (\w+)"', block.group(1)))
+
+        in_tree = frameworks("libcrtmedia/CMakeLists.txt")
+        stage = frameworks("distribution/stages/04-gfx-media/CMakeLists.txt")
+        self.assertIn("CoreFoundation", in_tree)
+        self.assertEqual(in_tree - stage, set(),
+                         "distribution/stages/04-gfx-media/CMakeLists.txt is missing "
+                         "macOS frameworks that libcrtmedia/CMakeLists.txt links")
+
     def test_the_allowlist_only_names_headers_that_really_are_unbundled(self):
         # A stale allowlist entry would hide a future genuine miss.
         for (stage, target_os), allowed in CONDITIONAL_ON_OTHER_OSES.items():

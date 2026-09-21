@@ -414,9 +414,14 @@ if(CRT_TARGET_OS STREQUAL "windows")
   set(CRTMEDIA_WINDOWS_DXGI_LIB -Wl,dxgi.lib)
 elseif(CRT_TARGET_OS STREQUAL "macos")
   set(CRTMEDIA_BACKEND_SOURCES src/arch/macos/audio_sink_coreaudio.c)
+  # Keep in step with CRTMEDIA_MACOS_FRAMEWORKS in libcrtmedia/CMakeLists.txt
+  # (that file explains each framework); tools/test_stage_source_closure.py
+  # fails when this list lacks one. CoreFoundation is what FFmpeg's
+  # videotoolbox.o/hwcontext_videotoolbox.o need for CFDictionary/CFData/
+  # CFNumber; without it this isolated stage cannot link libcrtmedia.dylib.
   set(CRTMEDIA_MACOS_FRAMEWORKS
     "-framework AudioToolbox" "-framework VideoToolbox"
-    "-framework CoreVideo" "-framework CoreMedia")
+    "-framework CoreVideo" "-framework CoreMedia" "-framework CoreFoundation")
 else()
   set(CRTMEDIA_BACKEND_SOURCES src/arch/linux/audio_sink_linux.c)
 endif()
