@@ -226,6 +226,11 @@ Not yet done, and required before a release can be published:
 
 ## Release notes template
 
+The notes drafted for `v0.4.0-preview.1` are in
+[`release_notes_v0.4.0-preview.1.md`](release_notes_v0.4.0-preview.1.md); it is
+written to be pasted as the GitHub release body. The short template for later
+previews:
+
 ```text
 CRT v0.4.0-preview.1: first public developer preview of the CRT Graphics/Media
 SDK stage (04-gfx-media). Pre-1.0; interfaces may change. 05-js is roadmap work

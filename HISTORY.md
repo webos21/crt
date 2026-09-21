@@ -10,6 +10,24 @@ substantive update.
 
 ## 2026-09-21
 
+- **Pushed the `v0.4.0-preview.1` tag and drafted its release notes.** The
+  annotated tag points at `fd01d7c`, the commit the Windows asset set was built
+  from and that its recipes and manifest record (`main` is one documentation
+  commit ahead, `806bb2b`); the name is the one baked into every asset's
+  `VERSION` and recipe URL. No GitHub release exists yet and nothing was
+  uploaded. `docs/release_notes_v0.4.0-preview.1.md` is written to be pasted as
+  the release body: positioning, contents per stage, the per-host verification
+  table from the README matrix, the seven Windows assets with sizes and SHA-256,
+  a quick start, requirements, and known limitations. Every number in it was
+  taken from a recorded run, and the quick start was executed against the
+  extracted release `04-gfx-media` archive (in a path with a space): the
+  prebuilt `crtmedia_player_demo.exe` printed `presented=30` and the rebuilt
+  `gfx-simple` example presented 60 frames. The notes say plainly that only
+  Windows/x64 assets are attached, that Linux and macOS have no archives, that
+  hardware decode is Windows and macOS only, that Linux graphics evidence comes
+  from a VM, and that no clean-machine test has been done. If Linux or macOS
+  assets are added before publishing, the "Downloads" section must be edited.
+
 - **First release-tagged Windows/x64 asset set (`v0.4.0-preview.1`, commit
   `fd01d7c`), accepted by `prepare_release_assets.py`.** Followed the runbook in
   `docs/release_preview.md`. (1) Reconfigured the development build directory

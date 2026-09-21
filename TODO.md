@@ -97,7 +97,9 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
   Windows. A complete Windows/x64 asset set with the release tag
   `v0.4.0-preview.1` (commit `fd01d7c`, option-ON `04-gfx-media` with the
   `media-player` example, checksums, manifest) is built and accepted by
-  `prepare_release_assets.py` in about 50 minutes. **Still open:** a fresh-clone
+  `prepare_release_assets.py` in about 50 minutes; the tag `v0.4.0-preview.1` is
+  pushed (on `fd01d7c`) and the release notes are drafted in
+  `docs/release_notes_v0.4.0-preview.1.md`. **Still open:** a fresh-clone
   build of that set from the commit that will be tagged, Linux/macOS assets
   (including the first Linux/macOS `media-player` link), a test on a machine
   that never had CRT's build environment, and publishing (needs an explicit
