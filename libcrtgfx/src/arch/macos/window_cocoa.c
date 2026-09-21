@@ -296,13 +296,27 @@ extern void CGImageRelease(CGImageRef image);
  * deadline check never correctly fired to cut it off -- reported
  * directly by the user watching the real window ("여전히 화면이
  * 멈춰 있다"), confirmed by two side-by-side screenshots a second apart
- * being byte-identical. See HISTORY.md. */
+ * being byte-identical. See HISTORY.md.
+ *
+ * The same failure returned in the opposite direction (2026-09-21, first
+ * isolated option-ON 04-gfx-media build on macOS): the shared
+ * libcrtgfx.dylib does NOT link this project's libc.dylib -- `nm -m` shows
+ * its _clock_gettime, _malloc, _free and _memcpy all "(from libSystem)" --
+ * so there clock_gettime() is real Darwin's, for which id 1 is invalid
+ * (EINVAL, output untouched, verified with a bare C program). The stale
+ * "now" again became a ~25-day NSDate, and crtgfx_skia_gpu_window_demo hung
+ * forever after its scripted resize. The in-tree binaries passed only
+ * because they link the static libc. Which implementation a given link picks
+ * is not something this file controls, so crtgfx_now_ms() below tries both
+ * ids and checks the return value. */
 struct crtgfx_cocoa_timespec {
   long tv_sec;
   long tv_nsec;
 };
 extern int clock_gettime(int clock_id, struct crtgfx_cocoa_timespec* tp);
 #define CRTGFX_CLOCK_MONOTONIC 1
+/* Real Darwin's CLOCK_MONOTONIC (sys/_types/_clock_id_t.h). */
+#define CRTGFX_DARWIN_CLOCK_MONOTONIC 6
 
 /* Real libSystem allocator/memcpy -- declared locally for the same
  * self-contained-file reason as clock_gettime() above, rather than
@@ -1220,8 +1234,17 @@ static void crtgfx_cocoa_handle_event(struct crtgfx_host_window* host, id event)
 }
 
 static long crtgfx_now_ms(void) {
-  struct crtgfx_cocoa_timespec ts;
-  clock_gettime(CRTGFX_CLOCK_MONOTONIC, &ts);
+  struct crtgfx_cocoa_timespec ts = {0, 0};
+  /* This project's libc accepts id 1 and rejects 6; real libSystem is the
+   * reverse. Whichever clock_gettime() this link resolved to, one id is
+   * valid and the other fails cleanly, so try both and trust neither
+   * blindly. If both fail ts stays 0 and the interval below is still
+   * bounded by the caller's timeout. */
+  if (clock_gettime(CRTGFX_CLOCK_MONOTONIC, &ts) != 0 &&
+      clock_gettime(CRTGFX_DARWIN_CLOCK_MONOTONIC, &ts) != 0) {
+    ts.tv_sec = 0;
+    ts.tv_nsec = 0;
+  }
   return (long)ts.tv_sec * 1000L + ts.tv_nsec / 1000000L;
 }
 
@@ -1246,7 +1269,14 @@ int crtgfx_host_window_dispatch(uint32_t timeout_ms) {
     if (now >= deadline) {
       until_date = crtgfx_msgsend_class_op(objc_getClass("NSDate"), sel_registerName("distantPast"));
     } else {
-      double interval_seconds = (double)(deadline - now) / 1000.0;
+      long remaining_ms = deadline - now;
+      double interval_seconds;
+      /* Never wait longer than the caller asked for, whatever the clock
+       * returned: a bad "now" must cost accuracy, not hang the event pump. */
+      if (remaining_ms > (long)timeout_ms) {
+        remaining_ms = (long)timeout_ms;
+      }
+      interval_seconds = (double)remaining_ms / 1000.0;
       until_date = crtgfx_msgsend_date_with_interval(objc_getClass("NSDate"), interval_seconds);
     }
     event = crtgfx_msgsend_next_event(
