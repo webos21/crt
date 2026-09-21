@@ -182,19 +182,43 @@ Verified on Windows/x64 (2026-09-21):
   `verify_dist.py` (which now requires the `media-player` source, clip, project,
   and prebuilt binary), and atomic publication. It is a 523 MB SDK (about
   159 MB as a zip) that declares FreeType, FFmpeg, and Skia, and the FFmpeg it
-  ships contains the D3D11VA hwaccels. `prepare_release_assets.py` rejects it only because its
-  `VERSION` and recipe URLs use the `development` tag. That run first failed
-  twice on stale packaging (three private headers missing from the stage-source
-  list, and the per-OS backend definitions not passed to two direct Skia
-  consumers); both are fixed and `tools/test_stage_source_closure.py` now fails
-  if a stage-source list misses a private header its sources include.
+  ships contains the D3D11VA hwaccels. `prepare_release_assets.py` rejects it
+  only because its `VERSION` and recipe URLs use the `development` tag. That
+  run first failed twice on stale packaging (three private headers missing from
+  the stage-source list, and the per-OS backend definitions not passed to two
+  direct Skia consumers); both are fixed and
+  `tools/test_stage_source_closure.py` now fails if a stage-source list misses a
+  private header its sources include.
+- A complete Windows/x64 asset set built with the **release tag**
+  `v0.4.0-preview.1` from source commit `fd01d7c`, and accepted by
+  `prepare_release_assets.py` (dry run and real run): the `01-c`, `02-cxx`, and
+  `03-gfx-simple` archives, the isolated option-ON `04-gfx-media` archive (about
+  161 MB), the three stage-source assets, `SHA256SUMS-windows-x86_64` (`sha256sum -c`
+  passes for all seven files), and `release-manifest-windows-x86_64.json`
+  (`working_tree_dirty: false`). The `04-gfx-media` build started from the
+  extracted release-tagged `03-gfx-simple` archive, with empty work and download
+  directories, and took 50.4 minutes: FreeType and FFmpeg 44.7 minutes at `-j4`,
+  Skia 3.3 minutes, everything else under 40 seconds; its 8 stage tests, the
+  rebuilt `gfx-gpu`, `gfx-skia`, and `media-player` examples, `verify_dist.py`,
+  and atomic publication all pass. The published 04 archive was then extracted
+  into a path containing a space and run: `VERSION` is the tag, the prebuilt
+  `crtmedia_player_demo.exe` presents 20 frames, and the prebuilt
+  `crtgfx_skia_gpu_window_demo.exe` presents 5 frames on D3D12 with the resize
+  and pixel checks passing.
+  Limits: the `01-c` to `03-gfx-simple` runtime was **not** rebuilt from a fresh
+  clone -- the existing development build directory was reconfigured with the tag
+  and only its packaging re-ran -- and the assets record commit `fd01d7c`, so
+  the release tag must point at that commit, or the set must be rebuilt from the
+  tagged commit (the recipes embed the source commit).
 - 23 unit tests for the tooling, and the existing distribution tests.
 
 Not yet done, and required before a release can be published:
 
-- An option-ON `04-gfx-media` built with the **release tag** on any host (the
-  Windows run above used the `development` tag).
-- Any Linux or macOS assets, and any release-archive test on those hosts.
+- A fresh-clone build of the Windows set from the commit that will actually be
+  tagged (see the limits above).
+- Any Linux or macOS assets (a release-tagged build there, including the first
+  Linux/macOS link of the `media-player` example), and any release-archive test
+  on those hosts.
 - A test on a machine that has never had CRT's build environment. The Windows
   check above was a clean extraction path on a development machine, not a clean
   machine.

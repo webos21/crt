@@ -10,6 +10,41 @@ substantive update.
 
 ## 2026-09-21
 
+- **First release-tagged Windows/x64 asset set (`v0.4.0-preview.1`, commit
+  `fd01d7c`), accepted by `prepare_release_assets.py`.** Followed the runbook in
+  `docs/release_preview.md`. (1) Reconfigured the development build directory
+  with `-DCRT_RELEASE_TAG=v0.4.0-preview.1` (in PowerShell the argument needs
+  quotes: unquoted, the `.` splits it and cmake reports an unreadable preset
+  path) and built `crt-gfx-simple-dist`: 2 minutes, only the packaging re-ran.
+  `01-c`, `02-cxx`, and `03-gfx-simple` got `VERSION` `v0.4.0-preview.1`,
+  `crt-v0.4.0-preview.1-windows-x86_64-*.zip` archives, and stage-source assets
+  and recipes whose URLs use the tag. (2) Extracted the release `03-gfx-simple`
+  archive to a short path and ran `crt-stage-build.py` with the packaged 04
+  recipe and the local `--asset`, empty work and download directories: 3024.8 s
+  (FreeType and FFmpeg 2682 s at `-j4`, Skia 196 s, the rest under 40 s); 8
+  tests, the rebuilt `gfx-gpu`, `gfx-skia` (D3D12, resize and pixel checks), and
+  `media-player` (`presented=30`) examples, `verify_dist.py`, and atomic
+  publication all pass. (3) `prepare_release_assets.py --dry-run`, then for real:
+  seven assets (`01-c` 113.7 MB, `02-cxx` 122.6 MB, `03-gfx-simple` 122.9 MB,
+  `04-gfx-media` 160.8 MB, plus the three stage-source assets),
+  `SHA256SUMS-windows-x86_64` (`sha256sum -c`: all OK) and
+  `release-manifest-windows-x86_64.json` (commit `fd01d7c`,
+  `working_tree_dirty: false`). (4) Extracted the published 04 archive into a
+  path with a space: `VERSION` is the tag, the manifest declares FreeType,
+  FFmpeg, and Skia, `verify_dist.py` passes, and the prebuilt
+  `crtmedia_player_demo.exe` (`presented=20`) and
+  `crtgfx_skia_gpu_window_demo.exe` (backend d3d12, 5 frames) run. The
+  development build directory's tag was then set back to `development` so
+  ordinary builds do not refuse a dirty tree.
+
+  Limits, recorded on purpose: this was **not** a fresh-clone build -- the
+  existing build directory was reused, so the runtime under `01-c` to
+  `03-gfx-simple` was not rebuilt (only re-packaged); the recipes embed source
+  commit `fd01d7c`, so the tag must be placed on that commit or the set rebuilt
+  from the tagged commit; nothing was uploaded or published; Linux and macOS
+  assets and a test on a machine that never had CRT's environment remain open.
+  The assets are kept in `C:\crt-rel\release` (outside the repository).
+
 - **Registered the first demo recording, Windows `media-player`.** H.264 + AAC
   MP4, 1280x720, 19.5 s, 9.4 MB. It is not stored in the repository (a 9.4 MB
   binary would stay in git history, and a later three-platform recording would
