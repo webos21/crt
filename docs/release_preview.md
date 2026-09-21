@@ -86,15 +86,16 @@ set "CRT_WINDOWS_SDK_LIBPATH=C:\Program Files (x86)\Windows Kits\10\Lib\<sdk-ver
 call 03-gfx-simple\activate.cmd
 cmake -S 03-gfx-simple\examples\gfx-simple -B build -G Ninja "-DCMAKE_TOOLCHAIN_FILE=%CD%\03-gfx-simple\crt-toolchain.cmake"
 cmake --build build
-set "PATH=%CD%\03-gfx-simple\bin;%PATH%"
 build\crtgfx_window_example.exe 60
 ```
 
 The last program opens a native window, presents 60 frames, and prints
-`crtgfx_window_demo: presented=60`. Putting the SDK's `bin\` directory on
-`PATH` is required for a rebuilt program (it imports `libcrtgfx.dll`);
-`activate.cmd` does not do that yet, although the ready-made programs under
-`examples\bin\` run without it.
+`crtgfx_window_demo: presented=60`. Run it from the shell where you called
+`activate.cmd`: activation puts the SDK's `bin\` directory on `PATH`, and a
+rebuilt program imports its runtime DLLs (such as `libcrtgfx.dll`) from there,
+because Windows has no RPATH. Without activation the program fails to start
+with `STATUS_DLL_NOT_FOUND` (`0xC0000135`); the ready-made programs under
+`examples\bin\` link the CRT statically and run either way.
 
 On Linux and macOS the same flow uses `. ./activate.sh` after exporting
 `CRT_CC`, `CRT_CXX`, `CRT_AR`, and `CRT_RANLIB`, as shown in

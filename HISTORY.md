@@ -37,10 +37,22 @@ substantive update.
   (`sha256sum -c` passes, a mismatched recipe or asset and the default-OFF `04`
   are rejected); the default (`development`) build path is unchanged (the
   `crt-development-...-01-c.zip` and `VERSION` are as before); 23 new unit tests
-  and the existing distribution tests pass. A finding: a rebuilt example imports
-  `libcrtgfx.dll` and fails silently unless the SDK's `bin\` is on `PATH`, which
-  `activate.cmd` does not do (the ready-made `examples\bin` programs run without
-  it). Not
+  and the existing distribution tests pass. A finding, fixed in the same pass:
+  a rebuilt example imports `libcrtgfx.dll` and failed to start (exit
+  `0xC0000135`, `STATUS_DLL_NOT_FOUND`, which looked silent) because `activate.cmd`
+  never put the SDK's `bin\` on `PATH`, contradicting `examples/README.md`; the
+  ready-made `examples\bin` programs link the CRT statically and were unaffected.
+  Windows has no RPATH, so `activate.cmd` now uses
+  `PATH=tools;system\bin;bin;<host PATH>` (`bin` before the host PATH so another
+  toolchain's same-named `libc++.dll`/`libunwind.dll` cannot shadow CRT's; the
+  `awk`/`make`/`mksh`/`sh` it also holds are byte-identical to the `system\bin`
+  copies, so nothing is shadowed). Verified from a freshly extracted
+  `03-gfx-simple` archive in a path with a space: after `activate.cmd` the rebuilt
+  example exits 0 and prints `presented=60`; the same binary without activation
+  exits `0xC0000135`; `verify_dist.py` and the new `tools/test_create_dist.py`
+  pass, and that test fails when the fix is removed. `activate.sh` is unchanged:
+  Linux and macOS consumers find shared libraries through the
+  `CMAKE_BUILD_RPATH`/`CMAKE_INSTALL_RPATH` that `crt-toolchain.cmake` sets. Not
   verified: a release-grade option-ON `04-gfx-media` on any host (a
   multi-hour build, and it would also be the first end-to-end run of the stage-04
   path after the Windows D3D11VA change), any Linux or macOS asset, a machine

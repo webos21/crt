@@ -97,7 +97,6 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
   Windows. **Still open:** build a release-grade option-ON `04-gfx-media`
   (multi-hour, per host) and the Linux/macOS assets, test on a machine that
   never had CRT's build environment, and publish (needs an explicit decision).
-  Related fix pending: `activate.cmd` does not put the SDK `bin` on `PATH`.
 
   * [ ] Provide release artifacts that allow an external developer to try CRT without reconstructing the entire development environment from repository history.
   * [x] Include or document the staged SDK layout:

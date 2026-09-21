@@ -412,7 +412,12 @@ if defined CRT_RANLIB set "RANLIB=%CRT_RANLIB%"
 set "CRT_MKSH_EXE=%CRT_SYSROOT%system\\bin\\mksh.exe"
 set "CC=%CRT_SYSROOT%tools\\crt-cc.cmd"
 set "CXX=%CRT_SYSROOT%tools\\crt-c++.cmd"
-set "PATH=%CRT_SYSROOT%tools;%CRT_SYSROOT%system\\bin;%PATH%"
+rem %CRT_SYSROOT%bin holds the runtime DLLs (libc.dll, libcrtgfx.dll, ...) that a
+rem program rebuilt with this SDK imports; Windows has no RPATH, so PATH is how it
+rem finds them. It comes before the host PATH so another toolchain's same-named
+rem libc++.dll/libunwind.dll cannot shadow CRT's. Its tools (awk/make/mksh/sh) are
+rem byte-identical to the ones in system\\bin, so the order among the two is moot.
+set "PATH=%CRT_SYSROOT%tools;%CRT_SYSROOT%system\\bin;%CRT_SYSROOT%bin;%PATH%"
 """.replace("__TARGET_OS__", target_os).replace("__TARGET_ARCH__", target_arch).replace(
             "__WINDOWS_SDK_ARCH__", "x64" if target_arch == "x86_64" else "arm64"),
         encoding="utf-8",

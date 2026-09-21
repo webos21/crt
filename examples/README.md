@@ -19,6 +19,14 @@ call activate.cmd
 examples\bin\crtgfx_window_demo.exe 120
 ```
 
+On Windows, `activate.cmd` also puts the SDK's `bin\` directory on `PATH`. A
+program you rebuild imports the runtime DLLs there (for example
+`libcrtgfx.dll`), and Windows has no RPATH, so without activation it fails to
+start with `STATUS_DLL_NOT_FOUND` (exit code `0xC0000135`). The ready-made
+programs in `examples\bin` link the CRT statically and run either way. On Linux
+and macOS a rebuilt program finds the SDK's shared libraries through the RPATH
+that `crt-toolchain.cmake` sets.
+
 To rebuild an example outside the SDK directory:
 
 ```sh
