@@ -130,8 +130,12 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
   extracted binary was run for real: `03-gfx-simple`'s ready-made and
   freshly-rebuilt `crtgfx_window_demo`/`crtgfx_window_example` both present
   60 frames; `04-gfx-media`'s `crtmedia_player_demo` presents 25 frames
-  (real VA-API hardware decode active) and `crtgfx_skia_gpu_window_demo`
-  presents 5 real-Vulkan frames with `pixel_check=pass`. The repo copy of the
+  (software decode -- this demo never opts into
+  `CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE`, so it always decodes in
+  software on every host; corrected 2026-09-22, `HISTORY.md`, after an
+  earlier version of this line claimed hardware decode was active here) and
+  `crtgfx_skia_gpu_window_demo` presents 5 real-Vulkan frames with
+  `pixel_check=pass`. The repo copy of the
   release notes is updated for it (tag unchanged, both commit differences
   explained, a Linux quick start, and the real `llvm-ar`/`llvm-ranlib`
   IFUNC-segfault workaround). **Still open:** the
@@ -589,6 +593,36 @@ Use macOS/arm64 as the first-green reference host, then apply the same Phase-A c
   * Confirm existing public `crtmedia` ABI and software-only callers remain compatible. (done: macOS, Linux, Windows -- software-only path stays `hardware_accelerated=false`/decodes in software on all three)
   * Record exact host/architecture, GPU, decoder backend, FFmpeg configuration, test command, and result in `HISTORY.md`.
   * Keep raw logs/results outside git unless they are small, stable project fixtures.
+
+**Follow-up, 2026-09-22 (after item 7 closed, recorded in `HISTORY.md`):** the
+packaged `crtmedia_player_demo`/`examples/media-player` now requests hardware
+decode by default (`CRTMEDIA_PLAYER_DEMO_SOFTWARE_ONLY=1` forces the old
+software-only behavior, for a host/driver combination where even attempting
+hardware decode is known to misbehave -- see the note below). `tools/
+build_stage_04_gfx_media.py`'s own packaged-example acceptance step now
+requires `hardware_decode=yes` in the demo's own output (not just
+`presented=30`), the first time this project has proven hardware decode works
+through the actual packaged, distributed binary rather than only the in-tree
+`crtmedia_hw_decode_test`. Confirmed real end to end on Windows/D3D11VA:
+`crt-stage-build.py` rebuilt the isolated `04-gfx-media` stage (85.1 s, warm
+FreeType/FFmpeg/Skia caches) and its own media-player acceptance step passed
+with `hardware_decode=yes` in 4.3 s; the published archive's own prebuilt
+`crtmedia_player_demo.exe` was then also run directly and confirmed both
+paths -- default -> `hardware_decode=yes`, `CRTMEDIA_PLAYER_DEMO_SOFTWARE_
+ONLY=1` -> `hardware_decode=no` -- with `presented=20`/`=30` unchanged either
+way. The escape hatch itself is not hypothetical: Intel's own WSL2 VA-API
+driver deadlocks on a real hardware decode even with a plain, CRT-free FFmpeg
+(`docs/crtmedia_hardware_decode_acceptance.md`); the 60 s timeout already on
+this acceptance step turns a real regression of that into a loud, diagnosable
+failure rather than a silent hang, matching this project's own established
+handling of the identical class of risk (the gfx-skia Ganesh/Vulkan deadlock
+this same function already guards). **Not yet done:** re-running this on
+Linux/macOS to confirm the same acceptance step passes with real hardware
+there too (this session is Windows-only); and the already-published
+`v0.4.0-preview.1` release assets (all three hosts) predate this change and
+still only ever decode in software -- this is not a release-asset rebuild,
+and the release notes correctly still describe the old behavior for that
+specific, already-built set.
 
 ---
 

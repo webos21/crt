@@ -307,7 +307,11 @@ directories, with the release tag `v0.4.0-preview.1`:
 - The extracted `04-gfx-media` archive, in a path containing a space, is
   `v0.4.0-preview.1`, declares FreeType, FFmpeg (with VA-API hwaccels) and
   Skia, and its prebuilt programs run: `crtmedia_player_demo` presents 25
-  frames with real VA-API hardware decode active, and
+  frames -- in software, like every host: this demo never opts into
+  `CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE`, so it always decodes in
+  software regardless of what the SDK's FFmpeg build supports (corrected
+  2026-09-22, `HISTORY.md`; the real VA-API hardware-decode evidence is
+  `crtmedia_hw_decode_test`'s own `RESULT` line, recorded separately) -- and
   `crtgfx_skia_gpu_window_demo` presents 5 frames on Vulkan (physical GPU)
   with the resize and pixel checks passing. From the same extraction and the
   extracted `03-gfx-simple` archive, following the quick start, both the

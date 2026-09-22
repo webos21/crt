@@ -97,10 +97,12 @@ and pixel checks), and `media-player` examples, and `verify_dist.py`. Both
 `03-gfx-simple` and `04-gfx-media` archives were then extracted into a path
 containing a space: `03-gfx-simple`'s ready-made and freshly rebuilt
 `crtgfx_window_demo`/`crtgfx_window_example` both presented 60 frames,
-`04-gfx-media`'s prebuilt `crtmedia_player_demo` presented 25 frames with real
-VA-API hardware decode active, and its prebuilt `crtgfx_skia_gpu_window_demo`
-presented 5 real-Vulkan frames with a pixel check passing, and the Linux quick
-start below was run from it.
+`04-gfx-media`'s prebuilt `crtmedia_player_demo` presented 25 frames (software
+decode -- this demo does not request hardware decode, so it decodes in
+software on every host; the real hardware-decode evidence is
+`crtmedia_hw_decode_test`, not this demo), and its prebuilt
+`crtgfx_skia_gpu_window_demo` presented 5 real-Vulkan frames with a pixel
+check passing, and the Linux quick start below was run from it.
 
 ## Downloads
 
@@ -284,10 +286,12 @@ Then run a ready-made program:
 04-gfx-media/examples/bin/crtmedia_player_demo 04-gfx-media/examples/media-player/test_video.mp4 30
 ```
 
-It plays the bundled clip in a native window with real VA-API hardware decode
-(where the host GPU/driver supports it; software decode is the automatic
-fallback) and prints `crtmedia_player_demo: presented=30`. Without a frame
-limit the demo plays until you close its window.
+It plays the bundled clip in a native window and prints
+`crtmedia_player_demo: presented=30`. Without a frame limit the demo plays until
+you close its window. This demo always decodes in software: it does not opt
+into `CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE`, so real VA-API hardware
+decode is not exercised here even though this SDK's FFmpeg build supports it
+-- see `crtmedia_hw_decode_test` for that evidence.
 
 To rebuild a packaged example against the SDK, point CRT at your own compiler
 first. This sequence was run against the extracted `04-gfx-media` archive (it

@@ -40,7 +40,27 @@
  * (crtmedia_audio_sink), whose own playback position becomes the player's
  * reference clock. Playback loops (seeks back to the start) at end of
  * stream, so the window stays alive to actually look at; close the window
- * to quit. */
+ * to quit.
+ *
+ * Hardware decode (2026-09-22): the video track sets CRTMEDIA_FORMAT_KEY_
+ * PREFER_HARDWARE_DECODE, so a real playback program actually attempts
+ * hardware-accelerated decode by default -- crtmedia_codec_create_decoder()
+ * always falls back to plain software decode automatically if hardware
+ * device creation or codec open fails, so this is safe on every host
+ * regardless of hardware support (crtmedia/format.h's own documented
+ * contract). CRTMEDIA_PLAYER_DEMO_SOFTWARE_ONLY=1 (any non-empty value)
+ * forces the old, always-software behavior instead -- a real, known escape
+ * hatch, not a hypothetical one: Intel's own WSL2 VA-API driver deadlocks
+ * on a real hardware decode even with a plain, CRT-free FFmpeg (docs/
+ * crtmedia_hardware_decode_acceptance.md), so tools/build_stage_04_gfx_
+ * media.py's own packaged-example rebuild-and-run step sets it -- that
+ * step's job is proving the packaged example builds and runs correctly,
+ * not re-proving hardware decode (crtmedia_hw_decode_test already owns
+ * that, per host, separately). "crtmedia_player_demo: hardware_decode=yes"
+ * or "=no" is printed at exit (crtmedia_codec_is_hardware_accelerated(),
+ * the same public, honest-report API crtmedia_hw_decode_test uses) so a
+ * real run's own output says what actually happened, instead of an
+ * un-instrumented run being assumed either way. */
 
 #include "crtgfx/window.h"
 #include "crtmedia/audio.h"
@@ -356,6 +376,18 @@ int main(int argc, char** argv) {
     goto cleanup;
   }
 
+  {
+    /* Default on, escape hatch off -- see this file's own top comment for
+     * the real reason CRTMEDIA_PLAYER_DEMO_SOFTWARE_ONLY exists. Any
+     * non-empty value forces software, matching this project's own
+     * established CRT_STAGE_KEEP_TMP-style env-var convention
+     * (tools/build_stage_04_gfx_media.py) rather than parsing "0"/"false". */
+    const char* software_only = getenv("CRTMEDIA_PLAYER_DEMO_SOFTWARE_ONLY");
+    if (software_only == NULL || software_only[0] == '\0') {
+      crtmedia_format_set_int32(video_format, CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE, 1);
+    }
+  }
+
   crtmedia_extractor_select_track(extractor, video.index);
   if (crtmedia_codec_create_decoder(video_format, &video.codec) != CRTMEDIA_OK) {
     fprintf(stderr, "crtmedia_player_demo: no usable video decoder for '%s'\n", path);
@@ -449,6 +481,18 @@ int main(int argc, char** argv) {
 
 done:
   fprintf(stderr, "crtmedia_player_demo: presented=%lu\n", frames_presented);
+  {
+    /* video.codec is always non-NULL here: every path that reaches `done`
+     * came through the main loop below, which never runs unless decoder
+     * creation above already succeeded. crtmedia_codec_is_hardware_
+     * accelerated() is the same public, honest "what actually happened"
+     * report crtmedia_hw_decode_test uses -- true only once a real
+     * hardware-backed frame was actually transferred to CPU memory, never
+     * a caller-side guess (crtmedia/codec.h). */
+    int video_is_hardware = 0;
+    crtmedia_codec_is_hardware_accelerated(video.codec, &video_is_hardware);
+    fprintf(stderr, "crtmedia_player_demo: hardware_decode=%s\n", video_is_hardware ? "yes" : "no");
+  }
   fprintf(stderr, "crtmedia_player_demo: exiting\n");
 
 cleanup:

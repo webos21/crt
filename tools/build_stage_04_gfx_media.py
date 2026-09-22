@@ -708,7 +708,7 @@ def add_redistributed_dependencies(asset: Path, staged: Path,
 def build_example(staged: Path, temp_root: Path, name: str,
                   executable_name: str, env: dict[str, str],
                   run_args: list[str] | None = None,
-                  success_marker: str | None = None) -> None:
+                  success_marker: str | tuple[str, ...] | None = None) -> None:
     build_dir = temp_root / f"example-{name}"
     if build_dir.exists():
         remove_tree(build_dir)
@@ -747,10 +747,12 @@ def build_example(staged: Path, temp_root: Path, name: str,
         command, check=True, env=env, timeout=60,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     print(result.stdout, end="", flush=True)
-    if success_marker not in result.stdout:
+    markers = (success_marker,) if isinstance(success_marker, str) else success_marker
+    missing = [marker for marker in markers if marker not in result.stdout]
+    if missing:
         raise SystemExit(
             f"{executable}: example did not report success "
-            f"(expected {success_marker!r} in its output)")
+            f"(expected {missing!r} in its output)")
 
 
 def validate_example_runtime_dependencies(executable: Path, target_os: str) -> None:
@@ -1108,12 +1110,38 @@ def main() -> None:
             # no-argument default is a stage-source path that is gone by now)
             # and a 30-frame limit, after which it prints "presented=30" and
             # exits. build_example() also enforces its 60 s timeout.
+            #
+            # Requires hardware_decode=yes too (2026-09-22), not just
+            # presented=30: the demo now requests hardware decode by default
+            # (media_player_demo.c's own top comment), and this is the first
+            # place that ever proves hardware decode really works end to end
+            # through the *packaged, distributed* binary -- crtmedia_hw_
+            # decode_test (per host, in-tree only) already covers the
+            # decoder itself, but never through a stage-built, packaged
+            # example before. A real hardware-decode *request* is a known
+            # hang risk on one specific, already-documented host/driver
+            # combination this pipeline has actually run on before (Intel's
+            # own WSL2 VA-API driver deadlocks on a real decode even outside
+            # CRT, docs/crtmedia_hardware_decode_acceptance.md) -- the 60 s
+            # timeout below turns that into a loud, diagnosable failure
+            # instead of a silent hang, matching this project's own
+            # established handling of the identical class of risk elsewhere
+            # in this function (see the gfx-skia comment above). If this step
+            # ever needs to run on a host/driver known to have that problem,
+            # set CRTMEDIA_PLAYER_DEMO_SOFTWARE_ONLY=1 in this process's own
+            # environment before invoking this script -- env (runtime_env(),
+            # above) starts from os.environ.copy(), so it already carries
+            # that through to the demo, and the expected marker below
+            # follows it rather than unconditionally demanding hardware.
+            expect_hardware = not env.get("CRTMEDIA_PLAYER_DEMO_SOFTWARE_ONLY")
             build_example(
                 staged, temp_root, "media-player", "crtmedia_player_example",
                 env,
                 run_args=[str(staged / "examples" / "media-player" / "test_video.mp4"),
                           "30"],
-                success_marker="crtmedia_player_demo: presented=30")
+                success_marker=("crtmedia_player_demo: presented=30",
+                                 "crtmedia_player_demo: hardware_decode=" +
+                                 ("yes" if expect_hardware else "no")))
         if target_os == "linux":
             with timings.measure("run packaged gfx-skia GPU window demo directly"):
                 run_packaged_binary_smoke(
