@@ -5,7 +5,8 @@
 # The caller provides CRTMEDIA_ROOT, CRTMEDIA_BACKEND_SOURCES,
 # CRTMEDIA_ENABLE_FFMPEG, CRTMEDIA_FFMPEG_PORT_PREFIX,
 # CRTMEDIA_FFMPEG_LIBRARIES, CRTMEDIA_CRT_STATIC_LIBS,
-# CRTMEDIA_CRT_SHARED_LIBS, and the platform library variables used below.
+# CRTMEDIA_CRT_SHARED_LIBS, CRTMEDIA_LINUX_VAAPI_LIBS, and the platform
+# library variables used below.
 function(crt_add_crtmedia_targets)
   set(CRTMEDIA_BACKEND_OBJECTS)
   if(CRTMEDIA_BACKEND_SOURCES)
@@ -58,6 +59,11 @@ function(crt_add_crtmedia_targets)
     target_link_libraries(crtmedia PRIVATE ${CRTMEDIA_CRT_STATIC_LIBS})
     target_link_libraries(crtmedia PRIVATE ${CRTMEDIA_FFMPEG_LIBRARIES})
     target_link_libraries(crtmedia PRIVATE -Wl,--end-group)
+    # Real host .so's, not static archives -- no archive-member-selection
+    # ordering concern the --start-group/--end-group rescan above exists
+    # for, so linked plainly afterward (see CRTMEDIA_LINUX_VAAPI_LIBS's own
+    # top comment, libcrtmedia/CMakeLists.txt).
+    target_link_libraries(crtmedia PUBLIC ${CRTMEDIA_LINUX_VAAPI_LIBS})
   else()
     target_link_libraries(crtmedia PRIVATE ${CRTMEDIA_CRT_STATIC_LIBS})
     if(CRTMEDIA_ENABLE_FFMPEG)
@@ -116,6 +122,7 @@ function(crt_add_crtmedia_targets)
       "${CRTMEDIA_FFMPEG_PORT_PREFIX}/include"
     )
     target_link_libraries(crtmedia_shared PRIVATE ${CRTMEDIA_FFMPEG_LIBRARIES})
+    target_link_libraries(crtmedia_shared PRIVATE ${CRTMEDIA_LINUX_VAAPI_LIBS})
   endif()
 
   if(COMMAND crt_configure_shared_runtime)

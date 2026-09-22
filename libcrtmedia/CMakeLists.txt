@@ -164,6 +164,36 @@ if(CRT_TARGET_OS STREQUAL "macos")
   set(CRTMEDIA_MACOS_FRAMEWORKS "-framework AudioToolbox" "-framework VideoToolbox" "-framework CoreVideo" "-framework CoreMedia" "-framework CoreFoundation")
 endif()
 
+set(CRTMEDIA_LINUX_VAAPI_LIBS "")
+if(CRT_TARGET_OS STREQUAL "linux" AND CRTMEDIA_ENABLE_FFMPEG)
+  # libva/libva-drm (2026-09-22, "Hardware video decode" Tranche 4): real,
+  # host-provided GPU driver libraries, the same "a static archive member
+  # with undefined symbols only resolves once something links this in"
+  # reasoning as CRTMEDIA_MACOS_FRAMEWORKS above -- FFmpeg's own
+  # hwcontext_vaapi.c/vaapi_decode.c/vaapi_h264.c (compiled into libavutil.a/
+  # libavcodec.a since porting/recipes/ffmpeg.json's own --enable-vaapi,
+  # unconditional on Linux since this tranche) call real vaInitialize/
+  # vaGetDisplayDRM/... entry points. Direct linking (find_library(), like
+  # libcrtgfx's own CRTGFX_LINUX_VULKAN_LIB/CRTGFX_LINUX_WAYLAND_CLIENT_LIB),
+  # not dlopen(), matching this project's established Linux precedent for a
+  # real host-provided .so this project never builds itself (this project's
+  # own dlopen() does not implement real ELF dynamic loading yet, per
+  # gpu_vulkan.c's own top comment). libva-drm specifically is needed for
+  # vaGetDisplayDRM() (hwcontext_vaapi.c's own real DRM render-node display
+  # path, matching hw_type_for_platform()'s AV_HWDEVICE_TYPE_VAAPI choice) --
+  # libva alone leaves it, and every other real vaXxx entry point,
+  # undefined. Confirmed for real: without this, linking any crtmedia
+  # consumer with CRTMEDIA_ENABLE_FFMPEG=ON fails with undefined references
+  # to vaInitialize/vaGetDisplayDRM/vaCreateContext/... .
+  find_library(CRTMEDIA_LINUX_VAAPI_LIB va)
+  find_library(CRTMEDIA_LINUX_VAAPI_DRM_LIB va-drm)
+  if(CRTMEDIA_LINUX_VAAPI_LIB AND CRTMEDIA_LINUX_VAAPI_DRM_LIB)
+    set(CRTMEDIA_LINUX_VAAPI_LIBS "${CRTMEDIA_LINUX_VAAPI_LIB}" "${CRTMEDIA_LINUX_VAAPI_DRM_LIB}")
+  else()
+    message(FATAL_ERROR "CRTMEDIA_ENABLE_FFMPEG=ON on Linux requires libva/libva-drm (install libva-dev). Run 'find_library' failed: va=${CRTMEDIA_LINUX_VAAPI_LIB} va-drm=${CRTMEDIA_LINUX_VAAPI_DRM_LIB}")
+  endif()
+endif()
+
 # crtmedia/crtmedia_shared are defined in one shared module so the in-tree
 # build and the isolated 04-gfx-media stage cannot drift in source selection,
 # FFmpeg archive ordering, or per-host shared-runtime linkage.

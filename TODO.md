@@ -400,53 +400,43 @@ Use macOS/arm64 as the first-green reference host, then apply the same Phase-A c
 
 ---
 
-* [ ] **4. Enable and validate Linux VA-API hardware decode.**
-
-  * **Host blocker (2026-09-20):** the Linux/aarch64 host used for Tranches 2/6
-    is a QEMU guest (Ubuntu 24.04, kernel 6.8, `virtio-gpu` behind an Apple M1
-    Pro/Metal host, `/dev/dri/renderD128` openable by the `render` group). Mesa's
-    `virtio_gpu_drv_video.so` loads and `vaInitialize` succeeds (VA-API 1.20,
-    libva/libva-drm 1.20.0 dev metadata present), but the driver advertises only
-    `VAProfileNone`/`VAEntrypointVideoProc` -- no H.264 decode `VLD` entrypoint. It
-    cannot count as Linux VA-API hardware-decode acceptance; a separate native
-    Linux VA-API-capable host (or an explicit backend decision) is required
-    before real-decode steps can close. Build-side work (recipe/configure/link)
-    does not depend on this.
-  * **WSL2/WSLg candidate host (2026-09-20) -- blocked at its own W1 gate.**
-    Acceptable for Phase-A (VA-API frame -> CPU `crtmedia_frame`) if recorded
-    separately from native-Linux evidence; native Linux stays required before VA
-    surface -> Vulkan zero-copy. Gate order: W0 `vainfo` H.264 VLD -> W1 CRT-free
-    host FFmpeg VAAPI decode -> W2 plain CRT FFmpeg baseline -> W3+ VAAPI
-    recipe/`libcrtmedia` (do not start until W1 passes). W0 and W2 pass; **W1
-    fails**: decode hangs on the first frame, root-caused to a self-deadlock in
-    Intel's WSL video driver (`libigd12dxva64.so`, Windows driver 31.0.101.2140),
-    not CRT/FFmpeg/Mesa. Details in `HISTORY.md` (2026-09-20). Next: newer Intel
-    driver + re-run W1, another GPU, or native Linux.
-  * First establish a clean Linux environment where the existing software-only FFmpeg recipe rebuilds successfully.
-  * Treat any host-toolchain failure such as `ar`/`nm` crashes as a build-environment blocker, not a VA-API defect.
-  * Use a native Linux machine with:
-
-    * a real VA-API-capable GPU
-    * working `/dev/dri/renderD*`
-    * an appropriate VA driver
-  * Enable only the FFmpeg VA-API/H.264 pieces required by the existing narrow recipe.
-  * Verify from configure output that H.264 VA-API hardware acceleration is actually enabled.
-  * Perform a fresh FFmpeg build and rebuild `libcrtmedia`.
-  * Run the same hardware-decode fixture.
-  * Require:
-
-    * VA-API requested
-    * real VA-API hardware frame observed
-    * successful CPU transfer from the hardware frame
-    * expected frame count
-    * valid timestamps
-    * valid decoded image contents
-    * clean EOS
-    * clean destruction
-  * Run software-only mode and verify the baseline remains green.
-  * Verify hardware-unavailable mode falls back cleanly.
-  * Do not count software fallback on a non-VA-API machine as Linux hardware-decode acceptance.
-  * Keep VA surface → Vulkan zero-copy interop outside this tranche.
+* [x] **4. Enable and validate Linux VA-API hardware decode.**
+  Completed 2026-09-22, recorded in `HISTORY.md` and
+  `docs/crtmedia_hardware_decode_acceptance.md`: `RESULT backend=vaapi
+  hw_requested=yes hw_device_created=yes hw_pixfmt_offered=yes
+  hw_frame_observed=yes cpu_transfer=pass frame_count=25 fallback=no
+  eos=pass clean_exit=pass` on a real, native (non-VM, non-WSL) Ubuntu
+  desktop with a physical Intel UHD 630 and Mesa's `iHD` driver; flush/reuse
+  25+25 hardware frames, 15/15 hardware lifecycle, full `ctest` 132/132 (no
+  regressions, including the plain software-decode path). Gate order followed
+  exactly as planned: W0 `vainfo` (real `VAProfileH264High`/`Main`
+  `VAEntrypointVLD`, the entrypoint both prior hosts lacked) -> W1 a
+  CRT-free host FFmpeg VAAPI decode of the project fixture (pass, no hang --
+  the WSL2 self-deadlock did not reproduce) -> W2 the plain CRT FFmpeg
+  baseline (pass, matches WSL2's own recorded fallback `RESULT` line exactly)
+  -> W3+ below. Four independent, real build-environment/toolchain gaps
+  fixed getting there, none a VA-API-specific defect: (1) GNU Binutils
+  2.46's `ar`/`ranlib`/`nm` all segfault with a real IFUNC-relink crash
+  against this project's own `libm.so` on this host -- fixed via
+  `--ar=@AR@ --ranlib=@RANLIB@ --nm=@NM@` (a new `@RANLIB@` token,
+  `tools/crt-port-build.py`), mirroring the Windows override's existing
+  `llvm-ar`/`llvm-nm` use. (2) `PKG_CONFIG_LIBDIR`'s deliberate isolation
+  (vendored dependencies only) hid the real, host-provided `libva.pc` --
+  fixed via a new `@HOST_PKG_CONFIG_PATH@` token (queried from the host's
+  own `pkg-config --variable pc_path pkg-config`, never a hardcoded
+  multiarch triplet), scoped to this recipe's own Linux `env`. (3)
+  `<va/va.h>`/`<va/va_drm.h>` are real host headers `tools/crt-cc`'s own
+  `-nostdinc` sysroot does not expose -- closed with a new
+  `-fcrt-real-linux-sdk` sentinel (mirroring `-fcrt-real-apple-sdk`/
+  `-fcrt-real-windows-sdk`), scoped to the three real objects that need it.
+  (4) The final link needs the real host `libva.so`/`libva-drm.so` -- fixed
+  with a new `CRTMEDIA_LINUX_VAAPI_LIBS` (`libcrtmedia/CMakeLists.txt`,
+  `find_library()`, mirroring `libcrtgfx`'s own `CRTGFX_LINUX_VULKAN_LIB`
+  direct-link precedent). Open follow-up: the isolated `04-gfx-media` stage
+  (packaged distribution build) was not re-run end to end on Linux with
+  VA-API on this host (Step 7's own job); VA surface -> Vulkan zero-copy
+  stays out of this tranche's scope, deferred to **Zero-copy decoded
+  textures**.
 
 ---
 
@@ -519,11 +509,11 @@ This tranche is complete when all of the following are true:
 
 * [x] macOS/arm64 decodes the project H.264 fixture through real VideoToolbox hardware frames. (Tranche 1)
 * [x] Windows/x64 decodes the same fixture through real D3D11VA hardware frames. (Tranche 3)
-* [ ] Linux decodes the same fixture through real VA-API hardware frames on a capable native host.
-* [ ] Every hardware path successfully transfers at least one decoded hardware frame into the existing CPU-resident `crtmedia` frame contract.
-* [ ] The expected decoded frame count, timestamp behavior, image-content validation, EOS, and cleanup checks pass on every host.
+* [x] Linux decodes the same fixture through real VA-API hardware frames on a capable native host. (Tranche 4)
+* [x] Every hardware path successfully transfers at least one decoded hardware frame into the existing CPU-resident `crtmedia` frame contract.
+* [x] The expected decoded frame count, timestamp behavior, image-content validation, EOS, and cleanup checks pass on every host.
 * [x] `hardware_active` or its equivalent means “a real hardware frame was actually observed,” not merely “a hardware device was created.”
-* [ ] Software-only decode remains green on every host.
+* [x] Software-only decode remains green on every host.
 * [ ] Hardware-unavailable or unsupported configurations fall back cleanly to software without breaking the decode contract.
 * [ ] No public API exposes platform-native decoded textures or surfaces yet.
 * [ ] Host/platform resources remain owned and released by FFmpeg/platform APIs, not by unrelated CRT allocator domains.
@@ -536,7 +526,7 @@ This tranche is complete when all of the following are true:
 * [x] macOS/arm64 — establish the first real VideoToolbox green.
 * [x] Harden common reporting/lifetime semantics using the macOS evidence.
 * [x] Windows/x64 — solve D3D11VA FFmpeg enablement and obtain real hardware evidence.
-* [ ] Linux — first remove any toolchain/build-environment blocker, then obtain real VA-API evidence.
+* [x] Linux — first remove any toolchain/build-environment blocker, then obtain real VA-API evidence.
 * [ ] Re-run the normalized cross-host acceptance matrix.
 * [ ] Close packaged `04-gfx-media` and distribution/import acceptance.
 * [ ] Promote **Zero-copy decoded textures**.

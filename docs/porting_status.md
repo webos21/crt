@@ -615,3 +615,24 @@ confirms the demux/decode path is unaffected by that day's fixes, not
 that FFmpeg's threaded decode path specifically now works where it
 didn't before -- no regression was introduced, and no prior failure was
 observed to have been silently caused by the `pthread_create` bug either.
+
+**Linux VA-API hardware decode added 2026-09-22** ("Hardware video decode"
+Tranche 4, `HISTORY.md`'s dated entry has the full trail): the Linux
+`target_overrides` now unconditionally add `--enable-vaapi
+--enable-hwaccel=h264_vaapi` (H.264 decode only, matching this recipe's own
+narrow-scope convention) plus `--ar=@AR@ --ranlib=@RANLIB@ --nm=@NM@` (a
+real GNU Binutils 2.46 `ar`/`ranlib`/`nm` IFUNC-relink segfault, the same
+failure class `tools/crt-port-build.py`'s own `find_llvm_tool()` docstring
+already documented for `ranlib` alone) and a `PKG_CONFIG_PATH` override (a
+new `@HOST_PKG_CONFIG_PATH@` token, needed because the shared
+`PKG_CONFIG_LIBDIR` isolation that keeps this recipe's own `--disable-zlib`
+fix working correctly also hides the real, host-provided `libva.pc`).
+`tools/crt-cc` gained a new `-fcrt-real-linux-sdk` sentinel (mirroring
+`-fcrt-real-apple-sdk`/`-fcrt-real-windows-sdk`) so FFmpeg's own
+`hwcontext_vaapi.c`/`vaapi_decode.c`/`vaapi_h264.c` can see the real host
+`<va/va.h>`/`<va/va_drm.h>`. `libcrtmedia/CMakeLists.txt` gained
+`CRTMEDIA_LINUX_VAAPI_LIBS` (`find_library(va)`/`find_library(va-drm)`) for
+the final link. Verified for real on a physical Intel UHD Graphics 630
+native Linux desktop: `crtmedia_hw_decode_test` reports
+`hw_frame_observed=yes cpu_transfer=pass fallback=no`; flush/reuse and
+15/15 hardware lifecycle pass; full `ctest` 132/132.

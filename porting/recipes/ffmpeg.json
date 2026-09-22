@@ -173,7 +173,44 @@
       },
       "linux": {
         "configure_args": [
-          "--enable-pic"
+          "--enable-pic",
+          "--ar=@AR@",
+          "--ranlib=@RANLIB@",
+          "--nm=@NM@",
+          "--enable-vaapi",
+          "--enable-hwaccel=h264_vaapi",
+          "--extra-cflags=-fcrt-real-linux-sdk"
+        ],
+        "env": {
+          "PKG_CONFIG_PATH": "@HOST_PKG_CONFIG_PATH@"
+        },
+        "patches": [
+          {
+            "file": "libavutil/Makefile",
+            "find": "OBJS-$(CONFIG_VAAPI)                    += hwcontext_vaapi.o",
+            "replace": "OBJS-$(CONFIG_VAAPI)                    += hwcontext_vaapi.o\n$(SUBDIR)hwcontext_vaapi.o: CFLAGS += -fcrt-real-linux-sdk",
+            "reason": "Linux VA-API hardware decode (2026-09-22, \"Hardware video decode\" Tranche 4). hwcontext_vaapi.c is the one libavutil file needing the real host <va/va.h> (tools/crt-cc's own -nostdinc sysroot mode does not expose it) -- see tools/crt-cc's own -fcrt-real-linux-sdk top comment for the full explanation, mirroring this same recipe's own -fcrt-real-apple-sdk/-fcrt-real-windows-sdk per-object overrides exactly."
+          },
+          {
+            "file": "libavcodec/Makefile",
+            "find": "OBJS-$(CONFIG_VAAPI)                      += vaapi_decode.o",
+            "replace": "OBJS-$(CONFIG_VAAPI)                      += vaapi_decode.o\n$(SUBDIR)vaapi_decode.o: CFLAGS += -fcrt-real-linux-sdk",
+            "reason": "The libavcodec-side twin of the libavutil/Makefile patch above -- vaapi_decode.h (included by vaapi_decode.c) also #includes <va/va.h> directly, so vaapi_decode.o needs the identical real-header exposure."
+          },
+          {
+            "file": "libavcodec/Makefile",
+            "find": "OBJS-$(CONFIG_H264_VAAPI_HWACCEL)         += vaapi_h264.o",
+            "replace": "OBJS-$(CONFIG_H264_VAAPI_HWACCEL)         += vaapi_h264.o\n$(SUBDIR)vaapi_h264.o: CFLAGS += -fcrt-real-linux-sdk",
+            "reason": "The H.264-specific VA-API hwaccel object -- vaapi_h264.c includes vaapi_decode.h (see above), transitively needing <va/va.h> too. This is the one object this recipe's own narrow --enable-hwaccel=h264_vaapi (H.264 decode only, no encode, no other codec) actually pulls in beyond hwcontext_vaapi.o/vaapi_decode.o themselves."
+          }
+        ],
+        "post_configure_patch": [
+          {
+            "file": "ffbuild/config.mak",
+            "find": "CFLAGS=-O2  -fcrt-real-linux-sdk -std=c17",
+            "replace": "CFLAGS=-O2  -std=c17",
+            "reason": "--extra-cflags=-fcrt-real-linux-sdk above exists only so ./configure's own check_pkg_config/check_func_headers vaapi probes (va/va.h, vaInitialize) see the real host /usr/include -- that probe already ran and captured its result (CONFIG_VAAPI=yes) by the time this patch runs. Stripping it back out of the generated global CFLAGS here, exactly like this same recipe's own macOS -fcrt-real-apple-sdk post_configure_patch just above, is required, not cosmetic: the libavutil/Makefile and libavcodec/Makefile patches above already add it back narrowly, per-object, for only the three files that actually need it (hwcontext_vaapi.o, vaapi_decode.o, vaapi_h264.o). Confirmed for real (2026-09-22) that leaving it in the global CFLAGS breaks the rest of the build: with -fcrt-real-linux-sdk's own extra -isystem /usr/include applied to every one of this build's ~150 objects rather than just those three, a stale previously-installed copy of this same recipe's own headers under the shared port-tests install prefix (e.g. libavutil/intreadwrite.h) started shadowing the build tree's own fresh copy for any quoted #include of a subdirectory-qualified path (\"libavutil/intreadwrite.h\"), which itself then failed to find its own sibling x86/bswap.h -- not a -fcrt-real-linux-sdk defect itself, but real evidence the sentinel must stay narrowly scoped exactly as documented, not applied globally."
+          }
         ]
       }
     }

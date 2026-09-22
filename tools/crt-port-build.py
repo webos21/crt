@@ -2,6 +2,7 @@
 import argparse
 import atexit
 import ctypes
+import functools
 import json
 import os
 import platform
@@ -642,6 +643,22 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
     env["AR"] = env.get("AR") or find_llvm_tool("llvm-ar") or shutil.which("ar") or "ar"
     env["RANLIB"] = env.get("RANLIB") or find_llvm_tool("llvm-ranlib") or shutil.which("ranlib") or "ranlib"
     env["STRIP"] = env.get("STRIP") or find_llvm_tool("llvm-strip") or shutil.which("strip") or "strip"
+    # Same class of gap as AR/RANLIB just above (2026-09-22, ffmpeg.json's
+    # own --enable-vaapi need on a real native Linux host): non-Windows
+    # env["NM"] was previously left unset entirely (only the Windows
+    # cross-toolchain branch above ever populates it), so @NM@ substitution
+    # for configure_args was gated `if target_os == "windows"` below. On
+    # Linux, FFmpeg's own --enable-vaapi probe shells out to nm to inspect
+    # a compiled probe object, and the host's plain GNU nm 2.46 hit the
+    # identical IFUNC-relink segfault find_llvm_tool()'s own docstring
+    # documents for ar/ranlib (`nm: Relink '.../libm.so' ... for IFUNC
+    # symbol 'floor'` then `Segmentation fault`), confirmed for real
+    # immediately after fixing the ar/ranlib pair let ffmpeg's own plain
+    # (non-vaapi) build proceed. Resolved the same way: find_llvm_tool()
+    # first (LLVM's own llvm-nm has no such IFUNC-relink behavior), a
+    # plain "nm" fallback otherwise so a host with no LLVM install at all
+    # keeps working exactly as before this fix.
+    env["NM"] = env.get("NM") or find_llvm_tool("llvm-nm") or shutil.which("nm") or "nm"
     if target_os == "windows" and use_crt_shell:
         for tool_var in ("AR", "RANLIB", "STRIP", "LD", "DLLTOOL", "OBJDUMP", "NM", "RC"):
             if not env.get(tool_var):
@@ -919,6 +936,44 @@ def apply_recipe_env(env, recipe, target_os, root, preset_build_dir=None, work_b
         env["CFLAGS"] = f"{flags} {env['CFLAGS']}" if env.get("CFLAGS") else flags
 
 
+@functools.lru_cache(maxsize=1)
+def host_pkg_config_search_path():
+    """The real host pkg-config's own compiled-in default search path
+    (e.g. /usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig on one
+    Debian/Ubuntu host, a different multiarch triplet on another) --
+    deliberately queried from pkg-config itself via its own `--variable
+    pc_path pkg-config`, never hardcoded to one distro/arch's layout.
+    Real, confirmed need (2026-09-22, ffmpeg.json's own --enable-vaapi on
+    a real native Linux host, "Hardware video decode" Tranche 4):
+    make_env()'s own PKG_CONFIG_LIBDIR is deliberately restricted to just
+    this project's own port-tests install prefix (see that assignment),
+    which is the right default for every dependency this porting system
+    vendors and builds itself (the same isolation this recipe's own
+    --disable-zlib note documents needing, to avoid silently linking a
+    host-provided library nobody asked for) -- but wrong for a real
+    host-provided GPU driver library like libva, which this project's own
+    README already documents as a target/build prerequisite the host
+    supplies, not something a recipe vendors. Confirmed for real: FFmpeg's
+    own --enable-vaapi check_pkg_config probe failed ("Package libva was
+    not found in the pkg-config search path") inside this restricted
+    environment even though a real, working libva.pc is installed and a
+    plain `pkg-config --exists libva` outside it succeeds. Returns "" if
+    no host pkg-config exists at all, so a recipe that never references
+    @HOST_PKG_CONFIG_PATH@ pays nothing for this and a host with no
+    pkg-config keeps failing the same way it always would have."""
+    pkg_config = shutil.which("pkg-config")
+    if not pkg_config:
+        return ""
+    try:
+        result = subprocess.run(
+            [pkg_config, "--variable", "pc_path", "pkg-config"],
+            capture_output=True, text=True, check=True,
+        )
+    except (subprocess.CalledProcessError, OSError):
+        return ""
+    return result.stdout.strip()
+
+
 def substitute_recipe_value(value, root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os):
     path_replacements = {
         "@ROOT@": root,
@@ -940,6 +995,7 @@ def substitute_recipe_value(value, root, preset_build_dir, work_build_dir, sysro
         "@PORT_PREFIX_MAKE@", prefix_for_posix_shell.replace(" ", "\\ "))
     result = result.replace(
         "@PORT_PREFIX_PKGCONFIG@", prefix_for_posix_shell.replace(" ", "\\ "))
+    result = result.replace("@HOST_PKG_CONFIG_PATH@", host_pkg_config_search_path())
     return result
 
 
@@ -1101,6 +1157,27 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
         # generated config.mak).
         ar_for_configure = path_for_crt_shell(env["AR"]) if target_os == "windows" else env["AR"]
         configure = [arg.replace("@AR@", ar_for_configure) for arg in configure]
+        # @RANLIB@ (2026-09-22, ffmpeg.json's own Linux VA-API hardware-decode
+        # verification tranche): same class of gap as @AR@ just above, found
+        # immediately after fixing it on a real native Linux host -- FFmpeg's
+        # own ranlib_default="ranlib" (configure, no $RANLIB environment
+        # fallback, the identical class of gap already found for $CC/$AR)
+        # resolves to plain "ranlib", which on this host is GNU Binutils
+        # 2.46's own ranlib -- confirmed for real to reproduce the identical
+        # IFUNC-relink segfault find_llvm_tool()'s own docstring already
+        # documents for GNU ranlib (`ranlib: Relink '.../libm.so' with
+        # '.../libm.so.6' for IFUNC symbol 'floor'` immediately followed by
+        # `Segmentation fault`), this time relinking libavformat.a/
+        # libswresample.a/libavutil.a rather than libffi.a. Passing --ar=@AR@
+        # alone (llvm-ar) was not enough: FFmpeg's own library.mak runs `$(AR)
+        # rcs` to create the archive and a separate `$(RANLIB)` afterward, and
+        # only the former had a working @AR@ substitution already wired here.
+        # env["RANLIB"] already resolves the real tool correctly (make_env()'s
+        # own find_llvm_tool() fallback chain, set unconditionally on every
+        # target_os), reused via the same @TOKEN@ substitution mechanism and
+        # the same path_for_crt_shell() treatment @AR@ needed.
+        ranlib_for_configure = path_for_crt_shell(env["RANLIB"]) if target_os == "windows" else env["RANLIB"]
+        configure = [arg.replace("@RANLIB@", ranlib_for_configure) for arg in configure]
         # @CC@/@CXX@ (2026-09-14, macOS path-with-spaces acceptance): same
         # class of gap as @AR@ above, for a different reason -- FFmpeg's own
         # hand-rolled configure never reads $CC/$CXX at all (confirmed via
@@ -1130,25 +1207,22 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
         # started" with the underlying `./configure` process still alive
         # and the build log never advancing, confirmed by directly
         # inspecting the running process list, not just a slow build).
-        # env["NM"] already resolves the real tool correctly (this
-        # function's own find_windows_host_tool(("llvm-nm.exe", ...))
-        # fallback, set unconditionally for every Windows recipe, not just
-        # autoconf/libtool ones) -- reused here via the same @TOKEN@
-        # substitution mechanism and the same path_for_crt_shell()
-        # treatment @AR@ needed (this value also lands in FFmpeg's own
-        # generated config.mak, re-parsed by mksh, which eats raw
-        # backslashes the identical way @ROOT@'s own comment documents).
-        # Unlike @AR@ above (env["AR"] is set unconditionally, every
-        # target_os), env["NM"] is only ever populated inside make_env()'s
-        # own `if target_os == "windows":` block -- @NM@ itself likewise
-        # only ever appears in ffmpeg.json's own windows-only configure_
-        # args, so this substitution is windows-only too (unlike @AR@'s
-        # own unconditional replace() call, doing this unconditionally
-        # would raise KeyError on Linux/macOS, confirmed for real building
-        # this same recipe's own new --enable-vaapi addition there).
-        if target_os == "windows":
-            nm_for_configure = path_for_crt_shell(env["NM"])
-            configure = [arg.replace("@NM@", nm_for_configure) for arg in configure]
+        # env["NM"] already resolves the real tool correctly (on Windows,
+        # this function's own find_windows_host_tool(("llvm-nm.exe", ...))
+        # fallback; on Linux/macOS, the same find_llvm_tool()-first chain
+        # AR/RANLIB use, added 2026-09-22 alongside this substitution
+        # becoming unconditional -- see that env["NM"] assignment's own
+        # comment for the real Linux nm IFUNC-relink segfault this closed)
+        # -- reused here via the same @TOKEN@ substitution mechanism and
+        # the same path_for_crt_shell() treatment @AR@ needed (this value
+        # also lands in FFmpeg's own generated config.mak, re-parsed by
+        # mksh, which eats raw backslashes the identical way @ROOT@'s own
+        # comment documents). env["NM"] is now set unconditionally on every
+        # target_os (matching @AR@/@RANLIB@ above), so this substitution no
+        # longer needs the `if target_os == "windows":` gate a Linux-only
+        # env["NM"] previously required.
+        nm_for_configure = path_for_crt_shell(env["NM"]) if target_os == "windows" else env["NM"]
+        configure = [arg.replace("@NM@", nm_for_configure) for arg in configure]
         # @BUILD_DIR@ (2026-09-08, ffmpeg.json's own --enable-d3d11va need):
         # same class of gap as @ROOT@/@AR@/@NM@ above -- FFmpeg's own
         # hwcontext_d3d11va.c needs real <d3d11.h>/<dxva.h> (mingw-w64's

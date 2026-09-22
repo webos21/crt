@@ -8,6 +8,148 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-22
+
+- **Linux VA-API hardware decode (Tranche 4): first real green, on the
+  project's first native (non-VM, non-WSL) Linux host.** `docs/
+  crtmedia_hardware_decode_acceptance.md` and `TODO.md` updated. Host: a
+  physical Intel UHD Graphics 630 desktop, Ubuntu (`systemd-detect-virt`
+  reports `none`), real Wayland (mutter) session, working Vulkan ICD --
+  `/dev/dri/renderD128` openable without group changes. `vainfo` (after
+  installing `intel-media-va-driver-non-free`) reports
+  `VAProfileH264High`/`VAProfileH264Main` `VAEntrypointVLD`, the real decode
+  entrypoint both prior Linux hosts lacked (the acceptance VM's `virtio_gpu`
+  driver advertises only `VAProfileNone`; WSL2 lists it but hangs -- see
+  2026-09-20 below). Followed the frozen W0-W3 gate order exactly:
+
+  - **W0 (pass).** `vainfo` as above.
+  - **W1 (pass).** A plain, CRT-free system `ffmpeg` (distro package) decoded
+    `libcrtmedia/assets/test_video.mp4` through `-hwaccel vaapi` end to end,
+    25 frames at 95x realtime, exit 0 -- no hang, unlike WSL2's self-deadlock
+    inside Intel's WSL driver.
+  - **W2 (pass).** The existing, unmodified-for-VA-API FFmpeg recipe rebuilt
+    cleanly (after the toolchain fixes below) and `crtmedia_hw_decode_test`
+    reported the exact same fallback `RESULT` line WSL2 recorded on
+    2026-09-21: `backend=vaapi hw_requested=yes hw_device_created=no
+    hw_pixfmt_offered=no hw_frame_observed=no cpu_transfer=n/a
+    frame_count=25 fallback=yes eos=pass clean_exit=pass`.
+  - **W3+ (pass).** With `--enable-vaapi --enable-hwaccel=h264_vaapi` added to
+    `porting/recipes/ffmpeg.json`'s Linux `target_overrides` and the four
+    fixes below: `crtmedia_hw_decode_test: RESULT backend=vaapi
+    hw_requested=yes hw_device_created=yes hw_pixfmt_offered=yes
+    hw_frame_observed=yes cpu_transfer=pass frame_count=25 fallback=no
+    eos=pass clean_exit=pass`. Flush/reuse: `pass1_frames=25 pass1_hw=yes
+    pass2_frames=25 pass2_hw=yes flush_preserved_flag=yes`. Lifecycle:
+    `iterations=15 hardware_iterations=15`. Full `ctest`: 132/132, no
+    regressions (including the plain software-decode path and every other
+    `crtmedia_*` test).
+
+  Four independent, real build-environment/toolchain gaps, none a VA-API
+  logic defect, found and fixed getting there (in the order hit):
+
+  1. **GNU Binutils 2.46's `ar`, `ranlib`, and `nm` all segfault with a real
+     IFUNC-relink crash against this project's own `libm.so` on this host.**
+     `find_llvm_tool()`'s own docstring (`tools/crt-port-build.py`) already
+     documented this exact failure class for `ranlib` (`ranlib: Relink
+     '.../libm.so' with '.../libm.so.6' for IFUNC symbol 'ceil'` then
+     `Segmentation fault`, found 2026-08-24 building libffi) -- this host
+     reproduces it for real for all three tools, relinking
+     `libavformat.a`/`libswresample.a`/`libavutil.a` (`ar`), the same three
+     archives again (`ranlib`), and the `--enable-vaapi` configure probe
+     (`nm`). `porting/recipes/ffmpeg.json`'s Linux `target_overrides` had no
+     `--ar=`/`--ranlib=`/`--nm=` at all (only the Windows override passes
+     `--ar=@AR@ --nm=@NM@`, since FFmpeg's own configure has no `$AR`/`$NM`
+     environment fallback -- `ar_default="ar"`/`nm_default="nm"`
+     unconditionally). Fixed with `--ar=@AR@ --ranlib=@RANLIB@ --nm=@NM@`
+     added to the Linux override, which needed three changes in
+     `tools/crt-port-build.py`: `env["RANLIB"]`/`env["NM"]` resolved via the
+     same `find_llvm_tool()`-first fallback chain `env["AR"]` already used,
+     unconditionally on every `target_os` (previously `env["NM"]` was
+     Windows-only); a new `@RANLIB@` substitution token (mirroring `@AR@`
+     exactly); and the existing `@NM@` substitution's own `if target_os ==
+     "windows":` gate removed, since `env["NM"]` is now always set.
+  2. **`PKG_CONFIG_LIBDIR`'s deliberate isolation to this project's own
+     port-tests install prefix hid the real, host-provided `libva.pc`.**
+     `make_env()` sets `PKG_CONFIG_LIBDIR`/`PKG_CONFIG_PATH` to just that one
+     prefix -- correct for every dependency this porting system vendors and
+     builds itself (the same isolation this recipe's own `--disable-zlib`
+     note already documents needing, after a real silent host-zlib-link
+     incident), but wrong for a real host-provided GPU driver library like
+     `libva`, which `README.md` already documents as a target/build
+     prerequisite the host supplies. `--enable-vaapi`'s own
+     `check_pkg_config` failed (`Package libva was not found in the
+     pkg-config search path`) even though a real, working `libva.pc` is
+     installed and a plain `pkg-config --exists libva` outside this
+     restricted environment succeeds. Fixed with a new
+     `host_pkg_config_search_path()` helper (`tools/crt-port-build.py`,
+     `functools.lru_cache`d, queries the host's own `pkg-config --variable
+     pc_path pkg-config` once, returns `""` if no host pkg-config exists) and
+     a new `@HOST_PKG_CONFIG_PATH@` substitution token, deliberately never a
+     hardcoded multiarch triplet (this project's own prior Linux hosts have
+     been both x86_64 and aarch64). Scoped to `ffmpeg.json`'s own Linux
+     `env.PKG_CONFIG_PATH`, not the shared default -- every other recipe's
+     isolation is unaffected.
+  3. **`<va/va.h>`/`<va/va_drm.h>` are real host headers `tools/crt-cc`'s own
+     `-nostdinc` sysroot does not expose.** The identical class of gap
+     `-fcrt-real-apple-sdk`/`-fcrt-real-windows-sdk` already close for
+     FFmpeg's own `videotoolbox.c`/`d3d11va`-family upstream source directly
+     including real SDK headers. Closed with a new, analogous
+     `-fcrt-real-linux-sdk` sentinel (`tools/crt-cc`): simpler than its Apple
+     counterpart (no predefined-macro dance, no `--sysroot=` stripping, no
+     per-object framework search path) -- just one extra, lowest-priority
+     `-isystem /usr/include`, searched only after this project's own sysroot
+     and `resource_dir`, so a real name collision (e.g. `<stdint.h>`) still
+     resolves to this project's own copy on every compile that uses it; only
+     a header this project's own sysroot genuinely lacks falls through.
+     Exposed to `./configure`'s own global probe via
+     `--extra-cflags=-fcrt-real-linux-sdk`, then stripped back out of the
+     generated `ffbuild/config.mak`'s global `CFLAGS` by a
+     `post_configure_patch` (mirroring the macOS override's own
+     `-fcrt-real-apple-sdk` strip-back-out exactly) and re-added narrowly,
+     per-object, via three `Makefile` `CFLAGS +=` patches for the only three
+     objects this narrow `--enable-hwaccel=h264_vaapi` (H.264 decode only)
+     build actually compiles that need it: `hwcontext_vaapi.o`
+     (`libavutil/Makefile`), `vaapi_decode.o` and `vaapi_h264.o`
+     (`libavcodec/Makefile`, the latter via `vaapi_decode.h`'s own transitive
+     `<va/va.h>`). Confirmed for real that leaving the sentinel in the
+     *global* CFLAGS breaks the rest of the build (not an ABI mismatch the
+     way macOS's own analogous mistake was, but a stale-header-shadowing
+     one): with the sentinel applied to all ~150 objects, a previously
+     installed copy of this same recipe's own headers under the shared
+     port-tests prefix started shadowing the fresh build tree's own copy for
+     any quoted `#include` of a subdirectory-qualified path
+     (`"libavutil/intreadwrite.h"`), which then failed to find its own
+     sibling `x86/bswap.h` -- fixed by removing the stale previously
+     installed FFmpeg headers/archives from the shared prefix before
+     rebuilding, not a `tools/crt-cc`/recipe change.
+  4. **The final executable link needs the real host `libva.so`/
+     `libva-drm.so`.** `vaInitialize`/`vaGetDisplayDRM`/... are real,
+     host-provided GPU driver entry points this project never builds itself
+     -- the same "a static archive member with undefined symbols only
+     resolves once something links this in" shape
+     `CRTMEDIA_MACOS_FRAMEWORKS` already documents. Fixed with a new
+     `CRTMEDIA_LINUX_VAAPI_LIBS` (`libcrtmedia/CMakeLists.txt`,
+     `find_library(va)`/`find_library(va-drm)`, `FATAL_ERROR` if either is
+     missing), mirroring `libcrtgfx`'s own `CRTGFX_LINUX_VULKAN_LIB` direct-
+     link precedent (not `dlopen()`: this project's own `dlopen()` does not
+     implement real ELF dynamic loading yet). Linked into both
+     `crtmedia`/`crtmedia_shared` (`libcrtmedia/cmake/crtmedia_targets.cmake`)
+     after the existing Linux `--start-group`/`--end-group` FFmpeg rescan --
+     a real host `.so` has no archive-member-selection ordering concern, so
+     it does not need to join that group.
+
+  Also installed on this host as real, ordinary build/runtime prerequisites
+  (not project changes): `libc++-dev`/`libc++abi-dev` (the host toolchain
+  configure step itself needs `-lc++`), `pkg-config` (was entirely absent),
+  `libva-dev`/`libva2`/`libva-drm2`/`intel-media-va-driver-non-free`/
+  `vainfo`, and a distro `ffmpeg` package (for the CRT-free W1 probe only).
+
+  Not done in this pass: the isolated `04-gfx-media` distribution stage
+  (packaged SDK build) was not re-run end to end on Linux with VA-API --
+  only the in-tree build/`ctest` was exercised (Step 7's own job, separate
+  from this tranche's acceptance gate). VA surface -> Vulkan zero-copy stays
+  explicitly out of scope, deferred to **Zero-copy decoded textures**.
+
 ## 2026-09-21
 
 - **Updated the `v0.4.0-preview.1` release notes for the macOS/arm64 assets.**

@@ -282,6 +282,58 @@ if [ "$want_real_apple_sdk" -eq 1 ] || [ "$target_os" = macos ]; then
   done
 fi
 
+# -fcrt-real-linux-sdk: a sentinel, not a real clang flag -- the Linux
+# counterpart of -fcrt-real-apple-sdk/-fcrt-real-windows-sdk above, added
+# 2026-09-22 (Hardware video decode Tranche 4, Linux VA-API) for the
+# identical reason: a translation unit that itself needs a real host
+# system/driver header this project's own no-host-SDK-header policy
+# cannot otherwise cover. First real consumer: FFmpeg's own upstream
+# libavutil/hwcontext_vaapi.c and libavcodec/vaapi*.c, which #include
+# <va/va.h>/<va/va_drm.h> directly -- real, unpatchable upstream source,
+# the same class of "not this project's own code, so hand-declaring the
+# ABI like window_wayland_native.c/gpu_vulkan.c isn't an option" situation
+# -fcrt-real-apple-sdk's own top comment already describes for FFmpeg's
+# videotoolbox.c/hwcontext_videotoolbox.c. Confirmed for real (2026-09-22):
+# without this, `#include <va/va.h>` fails outright ("fatal error: 'va/
+# va.h' file not found") under this wrapper's own -nostdinc.
+#
+# Much simpler than -fcrt-real-apple-sdk: no __APPLE__-style predefined-
+# macro dance (Linux has no equivalent), no --sysroot= stripping (that was
+# a macOS/crt-toolchain.cmake-specific CMAKE_SYSROOT interaction), and no
+# per-object framework-search-path assembly -- just one extra, lowest-
+# priority -isystem for the real host's own /usr/include, added in run_cc()
+# below, deliberately searched *after* ${CRT_SYSROOT}/include and
+# $resource_dir/include so this project's own sysroot headers still win
+# any real name collision (e.g. <stdint.h>) on every compile that uses
+# this sentinel; only a header this project's own sysroot genuinely lacks
+# (va/va.h itself) actually falls through to it. No ABI-mismatch risk of
+# the kind -fcrt-real-apple-sdk's own top comment documents for real Apple
+# frameworks (a real, distinctly-sized opaque pthread_once_t clashing with
+# this project's own smaller one): va/va.h's own public API is a flat C
+# ABI over plain integer types and opaque `void *`-shaped handles
+# (VADisplay, VAContextID, ...), nothing that depends on this project's
+# own libc/libpthread struct layouts at all.
+want_real_linux_sdk=0
+for arg in "$@"; do
+  if [ "$arg" = "-fcrt-real-linux-sdk" ]; then
+    want_real_linux_sdk=1
+    break
+  fi
+done
+if [ "$want_real_linux_sdk" -eq 1 ]; then
+  original_argc=$#
+  i=0
+  while [ "$i" -lt "$original_argc" ]; do
+    arg=$1
+    shift
+    case "$arg" in
+      -fcrt-real-linux-sdk) ;;
+      *) set -- "$@" "$arg" ;;
+    esac
+    i=$((i + 1))
+  done
+fi
+
 # Assembly source (a bare *.S/*.s positional argument, or an explicit
 # -x assembler/-x assembler-with-cpp) needs __APPLE__ left alone on macOS,
 # unlike every C/C++ translation unit -- see the -U__APPLE__ case branch
@@ -325,6 +377,26 @@ if [ "$target_os" = macos ] && [ "$want_real_apple_sdk" -eq 1 ]; then
   apple_sdk_path="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
   if [ -z "$apple_sdk_path" ]; then
     echo "crt-cc: -fcrt-real-apple-sdk requested but 'xcrun --sdk macosx --show-sdk-path' failed" >&2
+    exit 1
+  fi
+fi
+
+# linux_sdk_include: the -fcrt-real-linux-sdk counterpart of apple_sdk_path
+# just above -- only ever non-empty when that sentinel was actually present
+# on this compile's own command line (see its own top comment). Plain
+# /usr/include, not a distro/arch-specific multiarch subdirectory: real
+# headers this sentinel exists for (va/va.h, va/va_drm.h) install directly
+# there, confirmed for real on this exact host (`find /usr/include -iname
+# va.h` -> /usr/include/va/va.h) -- the multiarch subdirectories
+# (/usr/include/<triplet>/...) hold arch-specific *library* ABI headers
+# (e.g. bits/), never needed here since run_cc() below adds this as the
+# lowest-priority fallback, searched only after this project's own sysroot
+# has already had a chance to satisfy any given #include.
+linux_sdk_include=""
+if [ "$target_os" = linux ] && [ "$want_real_linux_sdk" -eq 1 ]; then
+  linux_sdk_include="/usr/include"
+  if [ ! -d "$linux_sdk_include" ]; then
+    echo "crt-cc: -fcrt-real-linux-sdk requested but $linux_sdk_include does not exist" >&2
     exit 1
   fi
 fi
@@ -456,10 +528,25 @@ run_cc() {
       "-isystem${CRT_SYSROOT}/include" \
       -isystem "$resource_dir/include" "$@"
   fi
+  # linux_sdk_include: appended last (lowest priority), unlike apple_sdk_path
+  # above -- see that variable's own top comment for why this project's own
+  # sysroot must keep winning any real name collision here, with the real
+  # host's /usr/include only ever a fallback for a header this project's own
+  # sysroot genuinely does not provide.
+  if [ -n "$resource_dir" ] && [ -n "$linux_sdk_include" ]; then
+    # shellcheck disable=SC2086
+    exec "$cc" $common_flags "-isystem${CRT_SYSROOT}/include" \
+      -isystem "$resource_dir/include" -isystem "$linux_sdk_include" "$@"
+  fi
   if [ -n "$resource_dir" ]; then
     # shellcheck disable=SC2086
     exec "$cc" $common_flags "-isystem${CRT_SYSROOT}/include" \
       -isystem "$resource_dir/include" "$@"
+  fi
+  if [ -n "$linux_sdk_include" ]; then
+    # shellcheck disable=SC2086
+    exec "$cc" $common_flags "-isystem${CRT_SYSROOT}/include" \
+      -isystem "$linux_sdk_include" "$@"
   fi
   # shellcheck disable=SC2086
   exec "$cc" $common_flags "-isystem${CRT_SYSROOT}/include" "$@"
