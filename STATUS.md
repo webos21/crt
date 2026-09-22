@@ -382,27 +382,33 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-1. Close the remaining Hardware video decode housekeeping now that all three
-   hosts have real-hardware evidence: write up the normalized cross-host
-   acceptance matrix, and re-run the packaged `04-gfx-media` stage audit on
-   Windows and macOS to match the one Linux's own isolated stage rebuild
-   already passed (`TODO.md`'s In Progress). Then move that tranche to
-   `HISTORY.md` and promote **Zero-copy decoded textures** into In Progress.
-   In parallel, finish the first public developer preview: upload the built
-   and checksummed macOS/Linux release asset sets and sync the release notes
-   to a three-platform state (`TODO.md`, same place).
-2. Connect hardware decoder textures to Skia without CPU copies, including
-   device/fence ownership and CPU-download recovery.
-3. Add capture/encode, then transport, buffering, reconnect, and streaming
+1. Define and implement zero-copy decoded-texture interop: D3D11VA -> D3D12,
+   VideoToolbox -> Metal, VA-API -> Vulkan, including ownership, device
+   affinity, synchronization, and CPU-download fallback (`TODO.md`'s
+   "Zero-copy decoded textures", promoted into In Progress; currently a
+   stub, no phased plan written yet).
+2. Complete next-release hardening: re-verify the hardware-decode-by-default
+   packaged `crtmedia_player_demo`/`examples/media-player` on macOS and
+   Linux (already done and verified on Windows), and build the next release
+   from one frozen tag/commit on all hosts (`v0.4.0-preview.1`'s three asset
+   sets each record a different commit than the tag; avoiding a repeat is a
+   process fix) (`TODO.md`'s "Next release hardening").
+3. Continue the public-preview rollout: the three-platform visual demo
+   (only a Windows clip exists so far), a soft launch to targeted technical
+   communities, feedback-driven README/FAQ updates, and the main technical
+   announcement (`TODO.md`'s "Public Preview / Promotion Preparation").
+4. Add capture/encode, then transport, buffering, reconnect, and streaming
    services after the native playback and zero-copy contracts are stable.
-4. Use WebRTC as a consumer milestone, then bring up QuickJS core/event-loop/
+5. Use WebRTC as a consumer milestone, then bring up QuickJS core/event-loop/
    timers/modules and expose stable media/gfx services with WebCodecs-like
    queue semantics.
-5. Continue closing the focused CRT/PAL limitations above when an upstream
-   consumer exposes a concrete requirement, following the Bionic-first
-   porting discipline in `AGENTS.md`. This includes non-blocking
-   Windows/aarch64 allocator validation and comparison of real upper-runtime
-   workloads against `docs/allocator_baseline.md`.
+
+Also ongoing, opportunistically rather than sequenced: closing the focused
+CRT/PAL limitations above when an upstream consumer exposes a concrete
+requirement, following the Bionic-first porting discipline in `AGENTS.md`
+(`TODO.md`'s "Focused CRT/PAL follow-ups"), including non-blocking
+Windows/aarch64 allocator validation and comparison of real upper-runtime
+workloads against `docs/allocator_baseline.md`.
 
 Detailed actionable work belongs in [`TODO.md`](TODO.md); completed changes
 belong in [`HISTORY.md`](HISTORY.md).
