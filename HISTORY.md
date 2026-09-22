@@ -51,8 +51,84 @@ substantive update.
      binds "from libSystem" here too, so the shared-library clock-id fix
      (`972d913`) remains load-bearing, not a one-off. Nothing was uploaded;
      this is a package-acceptance re-run, not a new release-asset build.
-  Only Windows still needs this same audit re-run (its own isolated-stage
-  acceptance predates the Linux and macOS work). `TODO.md` updated.
+  Only Windows still needed this same audit re-run (its own isolated-stage
+  acceptance predated the Linux and macOS work); see the entry directly
+  below, closed the same day. `TODO.md` updated.
+
+- **Closed Windows package acceptance for hardware video decode (Step 7),
+  matching Linux's precedent.** The isolated option-ON `04-gfx-media` stage
+  was rebuilt end to end on Windows/x64 from the current commit (`f933ece`),
+  not reused from the earlier `v0.4.0-preview.1` release build (`fd01d7c`):
+  a diff of every file touched between those two commits confirmed nothing
+  Windows-affecting had changed (the Linux VA-API work and the macOS
+  CoreFoundation fix are both gated to their own `CRT_TARGET_OS`, and
+  `CRTMEDIA_LINUX_VAAPI_LIBS` is defined empty and unconditionally on every
+  host), so this run is a genuine current-source re-verification, not a
+  formality. `tools/crt-cc` itself had changed (new
+  `-fcrt-real-linux-sdk` sentinel, Linux-only code but a different file
+  hash), which invalidated the FreeType/FFmpeg build-cache fingerprint and
+  forced a real, full FreeType/FFmpeg rebuild (2639.7 s of the run's
+  2907.4 s total) rather than a cache hit -- stronger evidence than a
+  cache-reuse run would have been.
+
+  Host: the same physical Intel UHD Graphics 630 (driver 31.0.101.2140,
+  Windows 11 Pro 26100) item 3's original D3D11VA green run used. Command:
+  `crt-stage-build.py --sdk-root <extracted 03-gfx-simple> --recipe
+  04-gfx-media.json --asset <freshly regenerated stage-source tarball>
+  --work-root <scratch> --output <scratch> --cache <scratch>
+  --reuse-work-root` (the predecessor `03-gfx-simple` SDK and the
+  FreeType/FFmpeg/Skia work-root cache were reused across the run -- reused,
+  not stale, since nothing they build from had changed; only the
+  invalidated FreeType/FFmpeg layer above rebuilt for real). Result: all 8
+  stage tests, the rebuilt `gfx-gpu`/`gfx-skia`/`media-player` examples run
+  directly, `verify_dist.py`, and atomic publication all passed;
+  `crtgfx_skia_gpu_window_demo` reports `backend=d3d12 ... pixel_check=pass
+  post_resize_present=pass`, and the packaged `crtmedia_player_demo`
+  presents its bounded 30-frame run cleanly.
+
+  Import/dependency audit (`llvm-objdump -p` on the published SDK, not the
+  in-tree build item 3.10 already checked): the packaged
+  `crtmedia_player_demo.exe` imports `KERNEL32.dll`, `ole32.dll`,
+  `USER32.dll`, `d3d11.dll`, `dxgi.dll`, and
+  `api-ms-win-core-synch-l1-2-0.dll`. Isolating which of those hardware
+  decode actually added: `libcrtmedia.dll`'s own import table is
+  `KERNEL32`/`ole32`/the synch thunk only -- no `d3d11`/`dxgi` -- identical
+  to item 3.10's in-tree finding; and `crtgfx_window_demo.exe` (the
+  `03-gfx-simple` window demo, no `crtmedia` linked at all) carries the
+  exact same `d3d11.dll`/`dxgi.dll` import pair. So every D3D11/DXGI import
+  in the packaged media-player binary comes from `crtgfx_window`'s
+  pre-existing Win32 flip-model swap-chain presenter (`window_win32.c`,
+  predates this tranche entirely), not from FFmpeg's D3D11VA hwaccel, which
+  resolves `d3d11.dll`/`dxgi.dll` at runtime via `LoadLibrary`/
+  `GetProcAddress` rather than a static import -- confirmed again here at
+  the packaging level, not just in-tree. No unexpected host ABI or
+  allocator-domain dependency was introduced into `crtmedia` by hardware
+  decode, and the existing public `crtmedia` ABI and software-only callers
+  (the packaged `crtmedia_player_demo` itself never requests hardware --
+  see the note below) are unaffected.
+
+  Separate, non-blocking observation, recorded but explicitly **not** a
+  hardware-decode regression: `libcrtmedia.dll`'s *export* table has grown
+  to 3134 entries, of which only 52 are the public `crtmedia_*` API: the
+  mingw-target linker exports every global symbol by default when nothing
+  restricts it, and FFmpeg's newly-compiled D3D11VA objects contribute
+  roughly 1300 DXVA-mode-table and `IID_ID3D11*`/`IID_IDXGI*` constant
+  exports to that. This is the same pre-existing, project-wide pattern, not
+  something this tranche introduced: `libc.dll` already exports 1039
+  symbols (including internal `__crt_atfork_*`/`___chkstk_ms` names) and
+  `libcrtgfx_gpu.dll` already exports 756, neither scoped by an export list
+  either. Worth a dedicated Windows DLL-export-scoping pass later, out of
+  scope here.
+
+  Also confirmed while reading `libcrtmedia/tools/media_player_demo.c`
+  directly: it never sets `CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE`, so
+  the packaged `crtmedia_player_demo` -- on every host, not just Windows --
+  always decodes in software regardless of what the SDK's FFmpeg build
+  supports; only `crtmedia_hw_decode_test`/`_flush_test`/`_lifecycle_test`
+  opt in. The real hardware-decode evidence for Windows stays item 3's
+  in-tree `crtmedia_hw_decode_test` result; this entry's own frame counts
+  (`presented=30`/`presented=20` elsewhere) are software-path evidence, not
+  hardware-path evidence. Item 7 is now closed on all three hosts.
 
 - **Linux VA-API hardware decode (Tranche 4): first real green, on the
   project's first native (non-VM, non-WSL) Linux host.** `docs/

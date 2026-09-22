@@ -420,9 +420,11 @@ Use macOS/arm64 as the first-green reference host, then apply the same Phase-A c
   eos=pass clean_exit=pass` on a physical Intel UHD 630; flush/reuse,
   15/15 hardware lifecycle, full Windows CTest 149/149. Narrow fix: the
   `-fcrt-real-windows-sdk` sentinel scopes real Windows headers to three
-  configure probes and four FFmpeg objects. Open follow-up: the isolated
-  `04-gfx-media` stage was adapted (mingw headers fetched before the FFmpeg
-  build) but not re-run end to end on Windows.
+  configure probes and four FFmpeg objects. The isolated `04-gfx-media`
+  stage (adapted here: mingw headers fetched before the FFmpeg build) has
+  since been re-run end to end on Windows multiple times (adding the
+  `media-player` example, a release-tagged build, and item 7's own package
+  audit below); see that item for the package-level result.
 
 ---
 
@@ -525,7 +527,7 @@ Use macOS/arm64 as the first-green reference host, then apply the same Phase-A c
 
 ---
 
-* [ ] **7. Close distribution and package acceptance.**
+* [x] **7. Close distribution and package acceptance.**
   Linux done 2026-09-22 (see item 4's own writeup for the two extra
   parallel-copy link fixes and the new `linux-vaapi-runtime`/
   `linux-vaapi-driver` prerequisite declaration this needed): the isolated
@@ -534,6 +536,7 @@ Use macOS/arm64 as the first-green reference host, then apply the same Phase-A c
   `media-player` example rebuilds, `verify_dist.py`'s binary-dependency
   audit, and atomic publication all passed, and the published archive's own
   `crtmedia_player_demo` presents all 25 frames running directly.
+
   macOS done 2026-09-22, recorded in `HISTORY.md`: a fresh clone re-ran both
   halves this bullet lists. In-tree (FFmpeg port rebuilt from a fresh state,
   `CRTMEDIA_ENABLE_FFMPEG=ON`): full `ctest` 132/132, `crtmedia_hw_decode_test`/
@@ -545,19 +548,45 @@ Use macOS/arm64 as the first-green reference host, then apply the same Phase-A c
   `verify_dist.py`'s binary-dependency audit all passed, plus a manual
   `otool -L` cross-check of every packaged binary and `lib/*.dylib` against
   `tools/crt_dist_prerequisites.py`'s macOS declarations (no undeclared
-  framework). Windows still needs this same audit re-run (its own
-  isolated-stage acceptance predates this tranche's Linux/macOS work).
+  framework).
 
-  * Rebuild FFmpeg and `libcrtmedia` from a fresh state on each acceptance host. (done: macOS, Linux)
-  * Rebuild the normal `04-gfx-media` cumulative stage. (done: macOS, Linux)
-  * Run packaged media consumers, not only build-tree tests. (done: macOS, Linux)
+  Windows done 2026-09-22: the isolated `04-gfx-media` stage rebuilt end to
+  end from the current commit (`tools/crt-cc` had changed since the last
+  Windows run -- for Linux's `-fcrt-real-linux-sdk` sentinel, a no-op on
+  Windows -- which invalidated the FreeType/FFmpeg build cache and forced a
+  genuine full rebuild, 2907.4 s total). All 8 stage tests, the rebuilt
+  `gfx-gpu`/`gfx-skia`/`media-player` examples, `verify_dist.py`, and atomic
+  publication passed, on the same physical Intel UHD 630 (driver
+  31.0.101.2140) item 3 used. Import audit (`llvm-objdump -p`): the
+  packaged `crtmedia_player_demo.exe` imports `KERNEL32`, `ole32`, `USER32`,
+  `d3d11`, `dxgi`, and the synch API set thunk; `libcrtmedia.dll`'s own
+  import table is unchanged by hardware decode (`ole32`/`KERNEL32`/synch
+  only, no `d3d11`/`dxgi`) -- the D3D11/DXGI imports come entirely from
+  `crtgfx_window`'s pre-existing Win32 swap-chain presenter, confirmed by
+  diffing against `crtgfx_window_demo.exe` (no `crtmedia` linked at all),
+  which carries the identical `d3d11`/`dxgi` import set. FFmpeg's D3D11VA
+  hwaccel resolves `d3d11.dll`/`dxgi.dll` at runtime (`LoadLibrary`), not by
+  static import, matching item 3's own in-tree finding. No unexpected host
+  ABI or allocator-domain dependency was introduced into `crtmedia` by
+  hardware decode. Separate, non-blocking observation (not a hardware-decode
+  regression): `libcrtmedia.dll`'s export table has 3134 entries, only 52 of
+  them `crtmedia_*` -- the mingw-target linker exports every global symbol
+  by default absent an explicit export list, and FFmpeg's D3D11VA objects
+  newly contribute roughly 1300 DXVA-mode/D3D11-IID constant-table symbols
+  to that; `libc.dll` (1039 exports) and `libcrtgfx_gpu.dll` (756) already
+  show the identical pre-existing pattern, so this is not new. Full result
+  in `HISTORY.md`. Item 7 is now closed on all three hosts.
+
+  * Rebuild FFmpeg and `libcrtmedia` from a fresh state on each acceptance host. (done: macOS, Linux, Windows)
+  * Rebuild the normal `04-gfx-media` cumulative stage. (done: macOS, Linux, Windows)
+  * Run packaged media consumers, not only build-tree tests. (done: macOS, Linux, Windows)
   * Audit binary/runtime dependencies:
 
     * macOS: VideoToolbox/CoreVideo/CoreMedia-related frameworks (done -- confirmed via `otool -L` against `tools/crt_dist_prerequisites.py`)
-    * Windows: D3D11/DXGI-related imports
+    * Windows: D3D11/DXGI-related imports (done -- clean; see item 7's own note)
     * Linux: expected VA-API/runtime library dependencies (done -- `libva.so.2`/`libva-drm.so.2`, declared in `tools/crt_dist_prerequisites.py`)
-  * Confirm no unexpected host ABI or allocator-domain dependency is introduced. (done: macOS, Linux)
-  * Confirm existing public `crtmedia` ABI and software-only callers remain compatible. (done: macOS, Linux -- software-only path stays `hardware_accelerated=false` on both)
+  * Confirm no unexpected host ABI or allocator-domain dependency is introduced. (done: macOS, Linux, Windows)
+  * Confirm existing public `crtmedia` ABI and software-only callers remain compatible. (done: macOS, Linux, Windows -- software-only path stays `hardware_accelerated=false`/decodes in software on all three)
   * Record exact host/architecture, GPU, decoder backend, FFmpeg configuration, test command, and result in `HISTORY.md`.
   * Keep raw logs/results outside git unless they are small, stable project fixtures.
 
