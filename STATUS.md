@@ -5,7 +5,7 @@ does not repeat the implementation diary in [`HISTORY.md`](HISTORY.md), the
 open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting_status.md`](docs/porting_status.md).
 
-Last synchronized with the source tree and git history: **2026-09-20**.
+Last synchronized with the source tree and git history: **2026-09-22**.
 Updated only on explicit request from here on, not as part of routine
 documentation passes -- see `TODO.md`'s Notice section. It may lag behind
 `HISTORY.md`/`TODO.md` between syncs; those two are the source of truth.
@@ -99,7 +99,13 @@ The software/CPU graphics baseline is complete on all three hosts:
   standalone example rebuilt from source above) also presents live on
   Linux/aarch64 now, after giving `libdl.so` the same `CRT_1.0` ELF
   symbol-version namespace as `libc.so`; a direct packaged-binary smoke
-  covers it in the isolated 04-stage acceptance run.
+  covers it in the isolated 04-stage acceptance run. Live Ganesh/Vulkan
+  presentation is now also verified on a **physical** Linux GPU (Intel UHD
+  630, native x86_64 Ubuntu desktop, 2026-09-22), passing the same
+  pixel-exact/mid-stream-resize contract (`resize_frame=2 pixel_check=pass
+  post_resize_present=pass`) as the isolated `04-gfx-media` stage's own
+  acceptance run; the Linux/aarch64 VM (lavapipe) remains the recorded
+  cross-host stage-build baseline.
 - The `crtgfx_gpu_device`/`crtgfx_gpu_surface` backend-object boundary is
   hardened and closed (2026-09-17..18, `HISTORY.md`): both are now a fixed
   common representation (refcount/backend tag/ops table/opaque backend-state
@@ -161,18 +167,26 @@ hosts:
 - Opt-in hardware H.264 decode (`CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE`)
   delivers each decoded frame into the same CPU-resident `crtmedia_frame`
   through FFmpeg hwaccels, with software decode remaining the default and the
-  fallback. It has real-hardware evidence on **macOS/arm64 (VideoToolbox)** and
-  **Windows/x64 (D3D11VA, Intel UHD 630)**: the frozen `crtmedia_hw_decode_test`
-  `RESULT` line (`hw_frame_observed=yes cpu_transfer=pass frame_count=25
-  fallback=no eos=pass clean_exit=pass`), decoder flush/reuse, and a 15-cycle
-  create/decode/EOS/release lifecycle. `crtmedia_codec_is_hardware_accelerated()`
-  is true only after a real hardware frame has been downloaded, never merely
-  because a hardware device was created. Linux is **not** verified; see Known
-  Limitations. No platform-native decoded surface is part of the public ABI.
+  fallback. It now has real-hardware evidence on **all three hosts**:
+  **macOS/arm64 (VideoToolbox)**, **Windows/x64 (D3D11VA, Intel UHD 630)**, and
+  **Linux/x86_64 (VA-API, physical Intel UHD 630, native Ubuntu desktop,
+  2026-09-22)** all report the frozen `crtmedia_hw_decode_test` `RESULT` line
+  (`hw_frame_observed=yes cpu_transfer=pass frame_count=25 fallback=no
+  eos=pass clean_exit=pass`), decoder flush/reuse, and a 15-cycle
+  create/decode/EOS/release lifecycle; full `ctest` was 132/132 on the Linux
+  run. `crtmedia_codec_is_hardware_accelerated()` is true only after a real
+  hardware frame has been downloaded, never merely because a hardware device
+  was created. Closing Linux needed four real, non-VA-API-specific
+  build-environment/toolchain fixes (a GNU Binutils `ar`/`ranlib`/`nm`
+  IFUNC-relink segfault, a `PKG_CONFIG_PATH` gap hiding the host's own
+  `libva.pc`, a new `-fcrt-real-linux-sdk` `crt-cc` sentinel for `<va/va.h>`,
+  and linking the real host `libva.so`/`libva-drm.so`); see
+  `docs/crtmedia_hardware_decode_acceptance.md` and `HISTORY.md`'s 2026-09-22
+  entry. No platform-native decoded surface is part of the public ABI.
 
 This evidence does not yet prove production-complete seeking/track selection,
-network streaming, encoding/capture, hardware decode on Linux, decoder-texture
-zero-copy, or GPU-frame handoff.
+network streaming, encoding/capture, decoder-texture zero-copy, or GPU-frame
+handoff.
 
 ### libcrtjs
 
@@ -207,14 +221,21 @@ target.
 - The `libcrtgfx` GPU backend-object boundary hardening and the live GPU
   presentation pixel-exact/resize evidence tranches are both closed
   (2026-09-17..18) on every required host. Hardware video decode built on
-  that foundation: macOS/arm64 (VideoToolbox, 2026-09-18) and Windows/x64
-  (D3D11VA, 2026-09-19) are closed with real-hardware evidence; Linux VA-API
-  remains open and blocked on a host with a working VA-API H.264 decoder
-  (`TODO.md`'s In Progress). The first public developer preview of the
-  completed `04-gfx-media` stage is also being prepared there; it does not wait
-  for Linux hardware decode.
-- FFmpeg hardware decode/zero-copy and the QuickJS core then proceed on top of
-  the completed GPU rendering/presentation contract.
+  that foundation and is now closed on all three hosts: macOS/arm64
+  (VideoToolbox, 2026-09-18), Windows/x64 (D3D11VA, 2026-09-19), and
+  Linux/x86_64 (VA-API, physical Intel GPU, 2026-09-22) all report a real
+  hardware frame observed and downloaded (`TODO.md`'s Hardware video decode
+  tranche). Remaining before that tranche moves to `HISTORY.md`: the
+  normalized cross-host acceptance matrix write-up and a Windows/macOS
+  package-acceptance re-audit matching the one Linux's own isolated
+  `04-gfx-media` stage rebuild already passed. The first public developer
+  preview of the completed `04-gfx-media` stage is also being prepared there;
+  Windows assets are published, and macOS/Linux asset sets are built and
+  checksummed, awaiting the maintainer's upload decision.
+- Zero-copy decoded-texture interop (hardware decoder surface -> Skia, no CPU
+  copy) is the next roadmap tranche once the hardware-decode acceptance gate's
+  remaining housekeeping above closes; it then proceeds alongside the
+  QuickJS core on top of the completed GPU rendering/presentation contract.
 - JavaScript media/gfx binding follows the stable native contracts, using a
   WebCodecs-like asynchronous shape; WebRTC-style realtime services, V8, and a
   Chromium/Ozone probe remain later layers.
@@ -318,8 +339,10 @@ statuses, and exceptions are maintained in:
 - GPU decode-texture import and dmabuf-style zero-copy remain future work.
   Linux packaged Skia live presentation passes on the Linux/aarch64
   acceptance host, which is a VM whose Vulkan device is virtio-gpu/lavapipe
-  (a paravirtualized or software device, not a physical GPU; no physical-GPU
-  Linux/Vulkan run is recorded yet). The former `mangledName()`/Mesa/LLVM
+  (a paravirtualized or software device, not a physical GPU); a physical-GPU
+  Linux/Vulkan run is now also recorded separately (Intel UHD 630, native
+  x86_64 desktop, 2026-09-22), but has not replaced the VM as the recorded
+  cross-host stage-build baseline. The former `mangledName()`/Mesa/LLVM
   attribution was a downstream symptom of mixing static and shared CRT
   allocator instances in the standalone example's link; no Skia or Mesa source
   patch is carried.
@@ -332,16 +355,15 @@ statuses, and exceptions are maintained in:
 - The software extractor/codec/player and all three host audio sinks exist,
   but seeking/track-selection breadth, long-running queue/backpressure
   behavior, and richer compressed-media fixtures still need expansion.
-- Hardware H.264 decode reaches a CPU-resident frame on macOS (VideoToolbox)
-  and Windows (D3D11VA) only. **Linux VA-API is unverified:** the Linux/aarch64
-  acceptance VM's Mesa `virtio_gpu` driver advertises no H.264 decode entrypoint,
-  and on WSL2 (Mesa D3D12 VA-API on Intel UHD 630, Windows driver 31.0.101.2140)
-  a real decode hangs in a self-deadlock inside Intel's WSL video driver, not in
-  CRT, FFmpeg or Mesa. Both are environment limits, distinct from the accepted
-  software graphics/media runtime; a native Linux host with a working VA-API
-  decoder is still needed, and the FFmpeg recipe has no VA-API enablement yet.
-  Decoder surfaces shared with the graphics path, device affinity, fences, and
-  zero-copy Skia import are not implemented.
+- Hardware H.264 decode reaches a CPU-resident frame on all three hosts now:
+  macOS (VideoToolbox), Windows (D3D11VA), and Linux (VA-API, physical Intel
+  GPU, 2026-09-22). Two earlier Linux hosts hit environment limits, not a CRT
+  defect, kept here for the record: the Linux/aarch64 acceptance VM's Mesa
+  `virtio_gpu` driver advertises no H.264 decode entrypoint, and on WSL2 (Mesa
+  D3D12 VA-API on Intel UHD 630, Windows driver 31.0.101.2140) a real decode
+  hangs in a self-deadlock inside Intel's WSL video driver, not in CRT, FFmpeg
+  or Mesa. Decoder surfaces shared with the graphics path, device affinity,
+  fences, and zero-copy Skia import are not implemented on any host yet.
 - No network protocol layer, mux/encode, capture, adaptive streaming, or
   realtime/WebRTC service exists.
 - QuickJS has not been imported. Event-loop/timer/module/native-binding work
@@ -349,12 +371,15 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-1. Finish real FFmpeg hardware decode on Linux (VA-API) -- macOS and Windows
-   are done -- on a host with a working VA-API H.264 decoder, then re-run the
-   normalized cross-host acceptance matrix and packaged-stage audit, keeping
-   the software/CPU fallback as the correctness baseline (`TODO.md`'s In
-   Progress). In parallel, prepare the first public developer preview of the
-   `04-gfx-media` stage (same place).
+1. Close the remaining Hardware video decode housekeeping now that all three
+   hosts have real-hardware evidence: write up the normalized cross-host
+   acceptance matrix, and re-run the packaged `04-gfx-media` stage audit on
+   Windows and macOS to match the one Linux's own isolated stage rebuild
+   already passed (`TODO.md`'s In Progress). Then move that tranche to
+   `HISTORY.md` and promote **Zero-copy decoded textures** into In Progress.
+   In parallel, finish the first public developer preview: upload the built
+   and checksummed macOS/Linux release asset sets and sync the release notes
+   to a three-platform state (`TODO.md`, same place).
 2. Connect hardware decoder textures to Skia without CPU copies, including
    device/fence ownership and CPU-download recovery.
 3. Add capture/encode, then transport, buffering, reconnect, and streaming

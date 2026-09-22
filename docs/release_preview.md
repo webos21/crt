@@ -3,9 +3,11 @@
 This document defines what a CRT developer-preview release contains, how it is
 verified, and how a maintainer produces it. The first preview,
 [`v0.4.0-preview.1`](https://github.com/webos21/crt/releases/tag/v0.4.0-preview.1), was published
-on 2026-09-21 as a GitHub pre-release with **Windows/x64 assets only**; Linux
-and macOS archives are not part of it yet. For what works today, see the README
-and [`STATUS.md`](../STATUS.md).
+on 2026-09-21 as a GitHub pre-release with **Windows/x64 assets only**; macOS
+and Linux archives are built and checksummed (2026-09-21 and 2026-09-22
+respectively) but not yet attached to the release -- see "What has been
+verified so far" and the maintainer upload decision below. For what works
+today, see the README and [`STATUS.md`](../STATUS.md).
 
 That preview is positioned as the first public developer preview of the CRT
 Graphics/Media SDK stage (`04-gfx-media`).
@@ -46,9 +48,9 @@ Ninja, Python 3, Clang, and LLD. What has actually been exercised:
 
 | | Windows 11 x64 | Linux | macOS |
 | --- | --- | --- | --- |
-| Verified with | Windows 11 Pro 26100; LLVM/Clang 22.1.8 (the CI pin); CMake 4.4.3; Ninja 1.13.2; Python 3.11.9; Windows SDK 10.0.28000.0 import libraries | Ubuntu 24.04 aarch64 (the acceptance VM, kernel 6.8); Ubuntu 26.04 x86_64 under WSL2 with Clang 21.1.8 and CMake 4.2.3 | Apple Silicon; macOS 27 or newer is the acceptance target |
-| Also needed | Developer Mode enabled for building and porting (CRT uses real symbolic links) | For `03-gfx-simple` and up: a reachable Wayland compositor with `xdg-shell` and `libwayland-client.so.0`; for `04-gfx-media`: the Vulkan loader and a Vulkan ICD; on aarch64, `libatomic.so.1` for `02-cxx` and up | Xcode Command Line Tools; the system frameworks (AppKit, Metal, VideoToolbox, ...) |
-| GPU | A D3D12-capable display driver for `04-gfx-media` | Physical-GPU Linux/Vulkan has not been run; the acceptance host uses a virtio-gpu/lavapipe device | Metal |
+| Verified with | Windows 11 Pro 26100; LLVM/Clang 22.1.8 (the CI pin); CMake 4.4.3; Ninja 1.13.2; Python 3.11.9; Windows SDK 10.0.28000.0 import libraries | Ubuntu 24.04 aarch64 (the acceptance VM, kernel 6.8); Ubuntu 26.04 x86_64 under WSL2 with Clang 21.1.8 and CMake 4.2.3; a native (non-VM, non-WSL) Ubuntu x86_64 desktop with Clang 21.1.8 and CMake 4.2.3, used for the release assets and VA-API evidence below | Apple Silicon; macOS 27 or newer is the acceptance target |
+| Also needed | Developer Mode enabled for building and porting (CRT uses real symbolic links) | For `03-gfx-simple` and up: a reachable Wayland compositor with `xdg-shell` and `libwayland-client.so.0`; for `04-gfx-media`: the Vulkan loader, a Vulkan ICD, `pkg-config`, and (for VA-API hardware decode) `libva-dev`/`libva2`/`libva-drm2` plus a VA driver; on aarch64, `libatomic.so.1` for `02-cxx` and up | Xcode Command Line Tools; the system frameworks (AppKit, Metal, VideoToolbox, ...) |
+| GPU | A D3D12-capable display driver for `04-gfx-media` | The aarch64 acceptance VM uses a virtio-gpu/lavapipe device; a physical Intel UHD 630 (Mesa Vulkan ICD, `iHD` VA-API driver) is now also verified separately (release assets and VA-API hardware decode, 2026-09-22) | Metal |
 
 Package lists for each host are in the README's
 [Prerequisites](../README.md#prerequisites). Device-specific GPU and video
@@ -265,24 +267,79 @@ download directories, with the release tag `v0.4.0-preview.1`:
   binaries are not signed or notarized, and only the local checksums were
   checked, not a download.
 
+Verified on Linux/x86_64 (2026-09-22, a native -- non-VM, non-WSL -- Ubuntu
+desktop with a physical Intel UHD Graphics 630, Clang 21.1.8, CMake 4.2.3,
+Ninja 1.13.2), built from a **fresh clone**, empty work and download
+directories, with the release tag `v0.4.0-preview.1`:
+
+- The published tag itself does **not** build a release-ready Linux
+  `04-gfx-media`: it predates the same day's Linux VA-API hardware-decode
+  tranche entirely, and a fresh-clone rebuild from it hits a real,
+  previously-latent bug this exact release run found: `examples/gfx-simple/
+  CMakeLists.txt` never linked a real host `libwayland-client`, because its
+  own comment incorrectly claimed native Wayland support only starts at
+  `04-gfx-media` -- `libcrtgfx/CMakeLists.txt`'s real gate compiles
+  `window_wayland_native.c` whenever a Vulkan loader is found at configure
+  time (a host capability, not a stage choice), which any normal
+  Advanced-Graphics-capable Linux host already has. Rebuilding the packaged
+  `03-gfx-simple` `gfx-simple` example from a genuinely extracted archive --
+  this exact quick start had never actually been run from a downloaded Linux
+  archive before -- surfaced it immediately. Fixed in `a90bf10` with the same
+  `NO_CMAKE_FIND_ROOT_PATH` + `dpkg-architecture` multiarch `find_file()`
+  fallback `examples/gfx-gpu/CMakeLists.txt` already established for its own
+  Vulkan/Wayland needs.
+- The Linux assets therefore record commit `a90bf10`, **not** the tag commit
+  `fd01d7c`; the two differ by the whole VA-API tranche plus this fix and
+  documentation. Anyone reading the Linux manifest against the tag must know
+  that.
+- Clone of `a90bf10` (`working_tree_dirty: false`): `01-c` to `03-gfx-simple`
+  in about 3 minutes (including the one-time libc++/native-Wayland
+  bootstrap), then the isolated option-ON `04-gfx-media` from the extracted
+  release-tagged `03-gfx-simple` archive in about 14.5 minutes (FreeType and
+  FFmpeg about 11 minutes at `-j12`, Skia about 3 minutes, everything else
+  under a minute). Its 8 stage tests, the rebuilt `gfx-gpu`, `gfx-skia`
+  (Vulkan, `resize_frame=2 pixel_check=pass post_resize_present=pass`), and
+  `media-player` examples, `verify_dist.py`, and atomic publication all pass,
+  and `prepare_release_assets.py` accepted the set: four `.tar.xz` SDK
+  archives (4.2, 8.4, 8.9, and 21.1 MB), three stage-source assets,
+  `SHA256SUMS-linux-x86_64` (`sha256sum -c` passes for all seven) and
+  `release-manifest-linux-x86_64.json`.
+- The extracted `04-gfx-media` archive, in a path containing a space, is
+  `v0.4.0-preview.1`, declares FreeType, FFmpeg (with VA-API hwaccels) and
+  Skia, and its prebuilt programs run: `crtmedia_player_demo` presents 25
+  frames with real VA-API hardware decode active, and
+  `crtgfx_skia_gpu_window_demo` presents 5 frames on Vulkan (physical GPU)
+  with the resize and pixel checks passing. From the same extraction and the
+  extracted `03-gfx-simple` archive, following the quick start, both the
+  ready-made and freshly rebuilt `crtgfx_window_demo`/`crtgfx_window_example`
+  present 60 frames, and `media-player` rebuilds and presents 25. This is the
+  first native (non-VM, non-WSL) Linux hardware-decode and physical-GPU
+  Vulkan/Skia evidence recorded for a release build.
+- Nothing was uploaded.
+  Limits: the `.tar.xz` files were run from the extraction location on the
+  development machine (not a machine that never had CRT's environment), and
+  only the local checksums were checked, not a download.
+
 Not yet done, and required before a release can be published:
 
 - A fresh-clone rebuild of the Windows set. It is not needed for consistency:
   the tag `v0.4.0-preview.1` points at `fd01d7c`, the commit the assets record.
   It would only remove the "existing build directory was reused" limit above.
-- Linux assets (a release-tagged build there, including the first Linux link of
-  the `media-player` example), and any release-archive test there.
 - Attaching the macOS set to the release. The maintainer uploads the nine files
   from `out/release/v0.4.0-preview.1-macos-aarch64/`; the tag stays on `fd01d7c`.
   [`release_notes_v0.4.0-preview.1.md`](release_notes_v0.4.0-preview.1.md) now
   lists them, explains why their manifest records `972d913`, and has a macOS
   quick start, but the GitHub release body still holds the Windows-only text
   until someone pastes the updated notes into it.
+- Attaching the Linux set to the release. The maintainer uploads the seven
+  files from `out/release/v0.4.0-preview.1-linux-x86_64/`; the tag stays on
+  `fd01d7c`. `release_notes_v0.4.0-preview.1.md` now lists them, explains why
+  their manifest records `a90bf10`, and has a Linux quick start, but the
+  GitHub release body still holds the Windows-only text until someone pastes
+  the fully updated (three-platform) notes into it.
 - A test on a machine that has never had CRT's build environment. The Windows
   check above was a clean extraction path on a development machine, not a clean
-  machine.
-- Publishing the Linux assets, which needs the steps above on that host and
-  adding them to the release.
+  machine; the same is true of the macOS and Linux checks.
 
 ## Release notes template
 
@@ -297,7 +354,7 @@ SDK stage (04-gfx-media). Pre-1.0; interfaces may change. 05-js is roadmap work
 and is not part of this preview.
 
 Verified: <per-host table from README "What Already Works">
-Hardware H.264 decode: verified on macOS (VideoToolbox) and Windows (D3D11VA);
-Linux VA-API is not yet verified.
+Hardware H.264 decode: verified on all three hosts -- macOS (VideoToolbox),
+Windows (D3D11VA), and Linux (VA-API, physical GPU).
 Checksums: SHA256SUMS-<os>-<arch>.
 ```

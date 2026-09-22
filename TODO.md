@@ -284,9 +284,9 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
     * Repeated lifecycle testing verified.
   * [x] Linux:
 
-    * VA-API work remains in progress.
-    * Keep WSL / virtualized-driver limitations distinct from CRT runtime defects.
-  * [x] Avoid describing hardware decode as fully cross-platform until native Linux evidence is complete.
+    * VA-API hardware-backed H.264 decode verified 2026-09-22 (physical Intel UHD 630, native Ubuntu desktop).
+    * WSL / virtualized-driver limitations are kept distinct from CRT runtime defects (see `docs/crtmedia_hardware_decode_acceptance.md`'s own historical record).
+  * [x] Hardware decode is now verified on all three hosts (2026-09-22); no longer withheld from cross-platform claims.
 
 * [x] **Prepare public messaging / FAQ**
   Done 2026-09-21: `docs/faq.md` (Why CRT, why Bionic-shaped, rebuild-based

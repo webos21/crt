@@ -133,10 +133,10 @@ CRT host.
 
 It is a developer preview in preparation. The graphics/media stage
 (`04-gfx-media`) is the current milestone, verified on Linux, Windows, and
-macOS with the per-host limits listed in the README's capability matrix. Hardware
-H.264 decode is verified on macOS and Windows only; Linux VA-API is not yet
-verified. The JavaScript stage (`05-js`) is roadmap work, not a supported
-feature.
+macOS with the per-host limits listed in the README's capability matrix.
+Hardware H.264 decode is verified on all three hosts (VideoToolbox on macOS,
+D3D11VA on Windows, VA-API on Linux). The JavaScript stage (`05-js`) is
+roadmap work, not a supported feature.
 
 ## What do I need to build with it?
 

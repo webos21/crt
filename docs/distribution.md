@@ -343,12 +343,17 @@ separate device driver package. Mesa is one implementation, not an ABI
 requirement. An embedded product should use the board vendor's loader/ICD and
 Wayland WSI, or a future CRT DRM/KMS backend when that backend exists.
 
-The current FFmpeg recipe does not enable Linux VA-API, so libva is not yet a
-hard dependency. When the VA-API hardware-decode path is enabled, a typical
-Debian/Ubuntu split is `libva-dev` for builds, `libva2` and `libva-drm2` at
-runtime, `vainfo` for diagnostics, and a GPU-specific VA driver. Fedora uses
-`libva-devel`; Arch uses `libva` and `libva-utils`. A successful `vainfo` is a
-device-image acceptance check, not evidence that CRT should bundle the driver.
+The Linux FFmpeg recipe enables VA-API hardware H.264 decode unconditionally
+(verified 2026-09-22, `HISTORY.md`), so `libva`/`libva-drm` are a real,
+declared `external_prerequisites` dependency (`linux-vaapi-runtime`/
+`linux-vaapi-driver`, `tools/crt_dist_prerequisites.py`) of `04-gfx-media`, not
+a hypothetical future one. A typical Debian/Ubuntu split is `libva-dev` and
+`pkg-config` for builds, `libva2` and `libva-drm2` at runtime, `vainfo` for
+diagnostics, and a GPU-specific VA driver (e.g. `intel-media-va-driver-non-free`
+on Intel). Fedora uses `libva-devel`; Arch uses `libva` and `libva-utils`. A
+successful `vainfo` is a device-image acceptance check, not evidence that CRT
+should bundle the driver -- the driver stays a manifest-declared host
+prerequisite, never copied into the SDK.
 
 ## Linker Scope
 

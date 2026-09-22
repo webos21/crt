@@ -21,8 +21,9 @@ Development and release follow the cumulative stages defined in
 3. **Simple Graphics (`03-gfx-simple`)** — one window, keyboard/mouse, and a
    CPU-writable framebuffer. Skia raster/text is explicitly outside this gate.
 4. **Graphics/Media (`04-gfx-media`)** — Skia CPU and GPU, native
-   Vulkan/D3D12/Metal presentation, FFmpeg, audio, playback, and later hardware
-   decode/zero-copy.
+   Vulkan/D3D12/Metal presentation, FFmpeg, audio, playback, and opt-in
+   hardware H.264 decode (verified on all three hosts). Zero-copy
+   decoded-texture interop remains later roadmap work.
 5. **JavaScript (`05-js`)** — QuickJS and bindings over the stable lower
    graphics/media contracts.
 
@@ -52,9 +53,11 @@ is not complete merely because an in-tree target links.
   gap before hardware decode, not a missing common API.
 - The software media baseline includes FFmpeg-backed demux/decode, the common
   frame/audio/player contracts, and native audio sinks. Hardware H.264 decode
-  into a CPU-resident frame is verified on macOS/arm64 (VideoToolbox) and
-  Windows/x64 (D3D11VA); Linux VA-API is still open. Hardware decode and
-  decoded-texture interop remain separate, explicitly reported capabilities.
+  into a CPU-resident frame is now verified on all three hosts: macOS/arm64
+  (VideoToolbox), Windows/x64 (D3D11VA), and Linux/x86_64 (VA-API, physical
+  Intel GPU, 2026-09-22). Hardware decode and decoded-texture interop remain
+  separate, explicitly reported capabilities -- zero-copy interop is not
+  implemented on any host yet.
 - The cumulative binary-package chain reaches the current `05-js` skeleton.
   Predecessor-only isolated-stage acceptance through the option-ON
   `03-gfx-simple -> 04-gfx-media` transition is complete on Windows, macOS,
@@ -86,13 +89,17 @@ comparisons; promote Scudo only if repeatable evidence exceeds the baseline.
    checkable pixel-exact/resize evidence closed on Linux/aarch64,
    macOS/arm64, and Windows/x64. Graphite was not part of this acceptance
    gate and remains out of scope.
-2. Enable hardware video decode per host while retaining software decode as
-   the correctness fallback and reporting actual hardware use separately.
-   **Active** (`TODO.md`'s In Progress): macOS/arm64 and Windows/x64 are done;
-   Linux VA-API is open and needs a host with a working VA-API H.264 decoder.
+2. ~~Enable hardware video decode per host while retaining software decode as
+   the correctness fallback and reporting actual hardware use separately.~~
+   **Complete 2026-09-22** (`HISTORY.md`): macOS/arm64 (VideoToolbox),
+   Windows/x64 (D3D11VA), and Linux/x86_64 (VA-API, physical Intel GPU) all
+   report a real hardware frame observed and downloaded. Remaining
+   housekeeping (the normalized cross-host matrix write-up and a
+   Windows/macOS packaged-stage audit re-run) is tracked in `TODO.md`'s In
+   Progress before the tranche moves to `HISTORY.md`.
 3. Define and verify zero-copy decoded-texture ownership, device affinity, and
    synchronization. Keep a measured CPU-download fallback where direct interop
-   is unavailable.
+   is unavailable. **Next** once step 2's remaining housekeeping above closes.
 4. Add capture, conversion, hardware/software encode, timestamp, and muxing on
    top of the accepted frame and playback contracts.
 5. Add transport, buffering, back-pressure, reconnect, and streaming protocol

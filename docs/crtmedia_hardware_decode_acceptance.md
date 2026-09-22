@@ -103,11 +103,11 @@ honestly.
    hardware. Fixing this (per-host `--enable-hwaccel=...`, verified from
    `./configure`'s own summary output) is explicitly Tranche 1/3/4's own
    job, not this freeze step's. **Closed for macOS (Tranche 1,
-   `--enable-hwaccel=h264_videotoolbox`) and Windows (Tranche 3,
+   `--enable-hwaccel=h264_videotoolbox`), Windows (Tranche 3,
    2026-09-19: `--enable-d3d11va --enable-hwaccel=h264_d3d11va,
    h264_d3d11va2`, `h264_d3d11va2` being the variant that offers
-   `AV_PIX_FMT_D3D11` through a device context); Linux/VA-API remains
-   open (Tranche 4).**
+   `AV_PIX_FMT_D3D11` through a device context), and Linux (Tranche 4,
+   2026-09-22: `--enable-vaapi --enable-hwaccel=h264_vaapi`).**
 
 2. **`crtmedia_codec_is_hardware_accelerated()` did not keep its own
    documented promise. Closed 2026-09-18 (Tranche 2).** Its header
