@@ -63,19 +63,40 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
 
 #### In Progress — First Public Developer Preview
 
-* [ ] **Synchronize public-facing project status**
+* [x] **Synchronize public-facing project status**
+  Done 2026-09-22 (`HISTORY.md`): re-checked `README.md`, `STATUS.md`,
+  `TODO.md`, `docs/runtime_roadmap.md`, `docs/distribution.md`, `docs/
+  crtmedia_hardware_decode_acceptance.md`, `docs/release_preview.md`, and
+  `docs/release_notes_v0.4.0-preview.1.md` (the live GitHub release body)
+  against the actual repo/release state rather than assuming any of them
+  were current. Found and fixed real staleness in `README.md` (one line:
+  the Portability Proof FFmpeg row still said "hardware H.264 decode on
+  macOS and Windows"), `STATUS.md` (said the hardware-decode tranche and
+  Windows/macOS package audit were still open, and only Windows release
+  assets were published), `TODO.md` (this whole section, the "Hardware
+  video decode" tranche closure, and the release-artifacts writeup), and
+  `docs/release_preview.md`/`docs/release_notes_v0.4.0-preview.1.md` (both
+  still said Windows-only assets and an unresolved upload decision, even
+  though the release API already showed all three hosts live). `docs/
+  runtime_roadmap.md`, `docs/distribution.md`, and `docs/
+  crtmedia_hardware_decode_acceptance.md` were already accurate -- confirmed
+  by reading them, not assumed from a stale prior check.
 
-  * [ ] Reconcile `STATUS.md`, `TODO.md`, `HISTORY.md`, and `docs/runtime_roadmap.md`.
-  * [ ] Remove or clearly mark stale blockers that have already been resolved.
-  * [ ] Confirm that the documented `03-gfx-simple -> 04-gfx-media` predecessor-only acceptance status matches the latest verified Linux, Windows, and macOS results.
-  * [ ] Make the distinction between completed work, current work, and planned work unambiguous.
-  * [ ] Keep Linux hardware decode limitations documented separately from the already accepted software graphics/media runtime.
+  * [x] Reconcile `STATUS.md`, `TODO.md`, `HISTORY.md`, and `docs/runtime_roadmap.md`.
+  * [x] Remove or clearly mark stale blockers that have already been resolved.
+  * [x] Confirm that the documented `03-gfx-simple -> 04-gfx-media` predecessor-only acceptance status matches the latest verified Linux, Windows, and macOS results.
+  * [x] Make the distinction between completed work, current work, and planned work unambiguous.
+  * [x] Keep Linux hardware decode limitations documented separately from the already accepted software graphics/media runtime.
 
-* [ ] **Prepare the first public CRT release**
-  2026-09-21: `v0.4.0-preview.1` is published as a GitHub pre-release
-  (`https://github.com/webos21/crt/releases/tag/v0.4.0-preview.1`) with the
-  Windows/x64 assets only; Linux and macOS assets are still to come, which is why
-  this item stays open.
+* [x] **Prepare the first public CRT release**
+  Published 2026-09-21 as a GitHub pre-release
+  (`https://github.com/webos21/crt/releases/tag/v0.4.0-preview.1`); confirmed
+  2026-09-22 via the public API that Windows/x64, macOS/arm64, and
+  Linux/x86_64 asset sets are all attached (27 files total: 3 hosts x
+  [4 SDK archives + 3 stage-source assets + `SHA256SUMS` + manifest],
+  re-counted directly from the release API, not assumed), matching the
+  table below. Full per-host build
+  detail is in `HISTORY.md`, not restated here.
 
   * [x] Create the first GitHub release, tentatively:
 
@@ -95,56 +116,19 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
     | macOS    | Cocoa         | Metal  | Yes  | Yes    | VideoToolbox verified  |
 
 * [ ] **Prepare downloadable / directly testable release artifacts**
-  2026-09-21: contract and runbook in `docs/release_preview.md`;
-  `CRT_RELEASE_TAG` and `tools/prepare_release_assets.py` (collect, verify,
-  checksum; blocks the default-OFF `04-gfx-media`) done and exercised on
-  Windows. A complete Windows/x64 asset set with the release tag
-  `v0.4.0-preview.1` (commit `fd01d7c`, option-ON `04-gfx-media` with the
-  `media-player` example, checksums, manifest) is built and accepted by
-  `prepare_release_assets.py` in about 50 minutes and published with the tag
-  `v0.4.0-preview.1` (on `fd01d7c`); the notes are in
-  `docs/release_notes_v0.4.0-preview.1.md`. A complete macOS/arm64 set is now
-  built from a fresh clone and accepted by `prepare_release_assets.py` (7 files
-  plus checksums and manifest, in 3 + 7.5 minutes), in
-  `out/release/v0.4.0-preview.1-macos-aarch64/` (not committed, not uploaded). It
-  records commit `972d913`, **not** the tag commit `fd01d7c`: the tag could not
-  build a macOS `04-gfx-media` (two bugs the in-tree build hides, fixed in
-  `32ab384` and `972d913`; see `docs/release_preview.md`). The repo copy of the
-  release notes is updated for it (tag unchanged, commit difference explained,
-  macOS quick start).
+  Contract and runbook in `docs/release_preview.md`; `CRT_RELEASE_TAG` and
+  `tools/prepare_release_assets.py` done. All three asset sets (Windows/x64
+  commit `fd01d7c`, macOS/arm64 commit `972d913`, Linux/x86_64 commit
+  `a90bf10` -- each a real, documented reason the tag itself does not build
+  that host's stage, not an oversight; see `docs/release_preview.md`) are
+  built, checksummed, uploaded, and confirmed live on the GitHub release
+  (2026-09-22, re-checked via the public API: 27 assets, 3 hosts). The
+  release body is confirmed byte-identical to the repo's own
+  `docs/release_notes_v0.4.0-preview.1.md` right now -- re-verify this after
+  any future edit to that file, since nothing keeps them in sync
+  automatically. Full per-host build detail is in `HISTORY.md`.
 
-  2026-09-22: a complete Linux/x86_64 set is now also built from a **fresh
-  clone** and accepted by `prepare_release_assets.py` (7 files plus checksums
-  and manifest, ~11 min for FreeType/FFmpeg, ~3 min for Skia), in
-  `out/release/v0.4.0-preview.1-linux-x86_64/` (not committed, not uploaded).
-  It records commit `a90bf10`, **not** the tag commit `fd01d7c`, the same
-  "the tag itself does not build this stage" situation macOS hit: the tag
-  predates this same day's Linux VA-API tranche (`5c64ee5`, `e52eb1b`) and a
-  real, previously-latent bug this exact release run found and fixed
-  (`a90bf10`) -- `examples/gfx-simple/CMakeLists.txt` never linked a real
-  host `libwayland-client`, which its own stale comment claimed only started
-  mattering at `04-gfx-media`; rebuilding the packaged `gfx-simple` example
-  from a genuinely extracted `03-gfx-simple` archive (this exact quick start
-  had never actually been run from a downloaded Linux archive before, per
-  `docs/release_preview.md`'s own note) surfaced it immediately. Every
-  extracted binary was run for real: `03-gfx-simple`'s ready-made and
-  freshly-rebuilt `crtgfx_window_demo`/`crtgfx_window_example` both present
-  60 frames; `04-gfx-media`'s `crtmedia_player_demo` presents 25 frames
-  (software decode -- this demo never opts into
-  `CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE`, so it always decodes in
-  software on every host; corrected 2026-09-22, `HISTORY.md`, after an
-  earlier version of this line claimed hardware decode was active here) and
-  `crtgfx_skia_gpu_window_demo` presents 5 real-Vulkan frames with
-  `pixel_check=pass`. The repo copy of the
-  release notes is updated for it (tag unchanged, both commit differences
-  explained, a Linux quick start, and the real `llvm-ar`/`llvm-ranlib`
-  IFUNC-segfault workaround). **Still open:** the
-  maintainer uploading the macOS and Linux files and pasting updated notes
-  into the GitHub release body (which still says Windows only), a
-  fresh-clone rebuild of the Windows set, a test on a machine that never had
-  CRT's build environment, and the upload decision.
-
-  * [ ] Provide release artifacts that allow an external developer to try CRT without reconstructing the entire development environment from repository history.
+  * [x] Provide release artifacts that allow an external developer to try CRT without reconstructing the entire development environment from repository history.
   * [x] Include or document the staged SDK layout:
 
     * `01-c`
@@ -154,6 +138,10 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
   * [x] Provide at least one minimal build-and-run example.
   * [ ] Verify the release artifact from a clean environment where practical.
   * [x] Document the supported host/compiler requirements for each platform.
+  * [ ] A fresh-clone rebuild of the Windows set specifically (the one host
+    whose published asset set was built by reconfiguring an existing build
+    directory rather than a fresh clone, unlike macOS and Linux) -- optional
+    hardening, not required to keep this release as it is.
 
 * [x] **Turn the README into a public landing page**
   Done 2026-09-21 (`README.md`): headline/supporting message, the unchanged
@@ -356,16 +344,19 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
 #### Follow-up Promotion Milestones
 
 * [ ] **Milestone 2 — Three-platform hardware video decode**
-  Engineering evidence for all three hosts is complete (see "Hardware video
-  decode" above); what remains here is the separate public-announcement
-  decision below, not further engineering.
+  Engineering evidence for all three hosts is complete (`HISTORY.md`'s
+  "Hardware video decode" tranche closure); what remains here is the
+  separate public-announcement decision below, not further engineering.
 
   * [x] Complete native Linux VA-API H.264 hardware decode evidence.
-  * [ ] Publish the completed platform mapping:
+  * [x] Publish the completed platform mapping:
 
     * Linux -> VA-API
     * Windows -> D3D11VA
     * macOS -> VideoToolbox
+
+    Live in `README.md`'s "Hardware Decode Status", the GitHub release's own
+    capability table, and `docs/crtmedia_hardware_decode_acceptance.md`.
   * [ ] Use this as a separate technical/public announcement.
 
 * [ ] **Milestone 3 — Hardware decode to native GPU zero-copy**
@@ -393,266 +384,55 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
 * [ ] Avoid waiting for every roadmap item before making the first public release.
 * [ ] Keep the first public message centered on the already completed `04-gfx-media` runtime.
 
-### Hardware video decode
+### Zero-copy decoded textures
 
-Add real hardware-accelerated H.264 decode while preserving the existing `crtmedia` software-decode contract and Host ABI ownership rules. This tranche ends at a validated CPU-resident decoded frame obtained from a hardware decoder. Native decoded-surface sharing with Vulkan, Metal, or D3D remains explicitly deferred to **Zero-copy decoded textures**.
+Promoted 2026-09-22 from `Planned` (`HISTORY.md`'s own "Hardware video
+decode" closure entry, which itself replaces the old section that used to be
+here -- full per-step evidence for macOS/Windows/Linux hardware decode lives
+there now, not in this file). This is a stub, not a phased plan: connect
+decoded hardware surfaces (D3D11 texture, `CVPixelBuffer`/Metal texture,
+VA-API surface) to the native graphics path without a mandatory CPU
+readback, where the host supports it, with a measured copy fallback where it
+does not.
 
-Recommended host order:
+* [ ] Design explicit ownership and synchronization for each hardware
+  surface type (D3D11VA -> D3D12, VideoToolbox -> Metal, VA-API -> Vulkan).
+* [ ] Decide the acceptance host order and per-host acceptance contract
+  (mirroring `docs/crtmedia_hardware_decode_acceptance.md`'s own shape for
+  the decode tranche this follows).
+* [ ] Demonstrate decode -> GPU texture -> Skia presentation on at least one
+  host before claiming general zero-copy support.
+* [ ] Keep the existing CPU-resident `crtmedia_frame` contract and
+  `CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE` opt-in unchanged; this is
+  additive, not a replacement.
 
-`macOS/arm64 → Windows/x64 → Linux`
+### Next release hardening
 
-Use macOS/arm64 as the first-green reference host, then apply the same Phase-A contract to Windows/D3D11VA and Linux/VA-API.
+Real follow-up from closing "Hardware video decode" and fixing the packaged
+demo's own opt-in (`HISTORY.md`, 2026-09-22): none of this blocks
+`v0.4.0-preview.1`, which is already published and stays as it is (its
+`crtmedia_player_demo` decodes in software on every host, documented in its
+own release notes) -- this is scoped to whatever CRT publishes next.
 
----
+* [x] Make the packaged `crtmedia_player_demo`/`examples/media-player`
+  request hardware decode by default, with a documented software-only
+  escape hatch (`CRTMEDIA_PLAYER_DEMO_SOFTWARE_ONLY=1`) and the isolated
+  stage's own packaged-example acceptance step requiring
+  `hardware_decode=yes`. Verified on Windows/D3D11VA (`HISTORY.md`,
+  2026-09-22).
+* [ ] Re-run that same packaged-example acceptance step on macOS and Linux
+  to confirm `hardware_decode=yes` there too (this session was Windows-only;
+  no such host was available).
+* [ ] Produce the next release (whatever version) from one clean, frozen
+  commit/tag on every host, so its recipes' own embedded source commit
+  matches the tag exactly -- `v0.4.0-preview.1`'s three asset sets each
+  record a different commit than the tag for real, documented reasons
+  (`docs/release_preview.md`); avoiding a repeat is a process fix, not new
+  engineering. (The current `v0.4.0-preview.1`'s own remaining hardening --
+  a fresh-clone Windows rebuild and a clean-machine test -- is tracked under
+  "Prepare downloadable / directly testable release artifacts" above, not
+  duplicated here.)
 
-* [x] **0. Freeze the Phase-A hardware-decode acceptance contract.**
-  Completed 2026-09-18, recorded in `HISTORY.md`; contract in
-  `docs/crtmedia_hardware_decode_acceptance.md`.
-* [x] **1. First real hardware-decode green on macOS/arm64 (VideoToolbox).**
-  Completed 2026-09-18, recorded in `HISTORY.md`: `RESULT backend=videotoolbox
-  ... frame_count=25 fallback=no eos=pass clean_exit=pass`.
-* [x] **2. Harden common Phase-A reporting and lifetime behavior.**
-  Completed 2026-09-18, recorded in `HISTORY.md`:
-  `crtmedia_codec_is_hardware_accelerated()` is true only after a real
-  hardware frame is downloaded; flush/reuse and 15-cycle lifecycle tests added.
-
----
-
-* [x] **3. Enable and validate Windows/x64 D3D11VA hardware decode.**
-  Completed 2026-09-19, recorded in `HISTORY.md`: `RESULT backend=d3d11va
-  ... hw_frame_observed=yes cpu_transfer=pass frame_count=25 fallback=no
-  eos=pass clean_exit=pass` on a physical Intel UHD 630; flush/reuse,
-  15/15 hardware lifecycle, full Windows CTest 149/149. Narrow fix: the
-  `-fcrt-real-windows-sdk` sentinel scopes real Windows headers to three
-  configure probes and four FFmpeg objects. The isolated `04-gfx-media`
-  stage (adapted here: mingw headers fetched before the FFmpeg build) has
-  since been re-run end to end on Windows multiple times (adding the
-  `media-player` example, a release-tagged build, and item 7's own package
-  audit below); see that item for the package-level result.
-
----
-
-* [x] **4. Enable and validate Linux VA-API hardware decode.**
-  Completed 2026-09-22, recorded in `HISTORY.md` and
-  `docs/crtmedia_hardware_decode_acceptance.md`: `RESULT backend=vaapi
-  hw_requested=yes hw_device_created=yes hw_pixfmt_offered=yes
-  hw_frame_observed=yes cpu_transfer=pass frame_count=25 fallback=no
-  eos=pass clean_exit=pass` on a real, native (non-VM, non-WSL) Ubuntu
-  desktop with a physical Intel UHD 630 and Mesa's `iHD` driver; flush/reuse
-  25+25 hardware frames, 15/15 hardware lifecycle, full `ctest` 132/132 (no
-  regressions, including the plain software-decode path). Gate order followed
-  exactly as planned: W0 `vainfo` (real `VAProfileH264High`/`Main`
-  `VAEntrypointVLD`, the entrypoint both prior hosts lacked) -> W1 a
-  CRT-free host FFmpeg VAAPI decode of the project fixture (pass, no hang --
-  the WSL2 self-deadlock did not reproduce) -> W2 the plain CRT FFmpeg
-  baseline (pass, matches WSL2's own recorded fallback `RESULT` line exactly)
-  -> W3+ below. Four independent, real build-environment/toolchain gaps
-  fixed getting there, none a VA-API-specific defect: (1) GNU Binutils
-  2.46's `ar`/`ranlib`/`nm` all segfault with a real IFUNC-relink crash
-  against this project's own `libm.so` on this host -- fixed via
-  `--ar=@AR@ --ranlib=@RANLIB@ --nm=@NM@` (a new `@RANLIB@` token,
-  `tools/crt-port-build.py`), mirroring the Windows override's existing
-  `llvm-ar`/`llvm-nm` use. (2) `PKG_CONFIG_LIBDIR`'s deliberate isolation
-  (vendored dependencies only) hid the real, host-provided `libva.pc` --
-  fixed via a new `@HOST_PKG_CONFIG_PATH@` token (queried from the host's
-  own `pkg-config --variable pc_path pkg-config`, never a hardcoded
-  multiarch triplet), scoped to this recipe's own Linux `env`. (3)
-  `<va/va.h>`/`<va/va_drm.h>` are real host headers `tools/crt-cc`'s own
-  `-nostdinc` sysroot does not expose -- closed with a new
-  `-fcrt-real-linux-sdk` sentinel (mirroring `-fcrt-real-apple-sdk`/
-  `-fcrt-real-windows-sdk`), scoped to the three real objects that need it.
-  (4) The final link needs the real host `libva.so`/`libva-drm.so` -- fixed
-  with a new `CRTMEDIA_LINUX_VAAPI_LIBS` (`libcrtmedia/CMakeLists.txt`,
-  `find_library()`, mirroring `libcrtgfx`'s own `CRTGFX_LINUX_VULKAN_LIB`
-  direct-link precedent). The isolated `04-gfx-media` stage (packaged
-  distribution build) was then also re-run end to end on this same host,
-  closing Step 7 for Linux too (see that step's own note): it kept two more
-  independent copies of the same real-host-library link logic
-  (`distribution/stages/04-gfx-media/CMakeLists.txt`,
-  `examples/media-player/CMakeLists.txt`), neither of which had ever linked
-  a real Linux `libwayland-client`/`libva`/`libva-drm` before, plus a new
-  `linux-vaapi-runtime`/`linux-vaapi-driver` `external_prerequisites`
-  declaration (`tools/crt_dist_prerequisites.py`) once `verify_dist.py`'s own
-  binary-dependency audit flagged both as undeclared. A new regression test
-  (`tools/test_stage_source_closure.py`) now fails if the isolated stage's
-  own VA-API libs ever drift from libcrtmedia's, mirroring the existing
-  macOS-framework test for the identical class of drift. All 8 stage tests,
-  the rebuilt `gfx-gpu`/`gfx-skia`/`media-player` examples, `verify_dist.py`,
-  and atomic publication passed; the published archive's own
-  `crtmedia_player_demo` presents all 25 frames running directly. VA surface
-  -> Vulkan zero-copy stays out of this tranche's scope, deferred to
-  **Zero-copy decoded textures**.
-
----
-
-* [ ] **5. Normalize the same acceptance matrix across all supported hosts.**
-
-  * Use the same H.264 fixture and the same `crtmedia_hw_decode_test` semantics on:
-
-    * macOS/arm64 — VideoToolbox
-    * Windows/x64 — D3D11VA
-    * Linux — VA-API
-  * For each host, record:
-
-    * requested hardware backend
-    * actual hardware backend selected
-    * whether a real hardware frame was observed
-    * decoded frame count
-    * first/last timestamp or monotonicity result
-    * CPU-transfer result
-    * pixel/image-content result
-    * fallback status
-    * EOS result
-    * clean-exit result
-  * Treat the following as distinct outcomes:
-
-    * `decode=pass, hardware=active` → hardware-decode PASS
-    * `decode=pass, hardware=inactive, fallback=yes` → fallback PASS, not hardware-decode PASS
-    * `decode=fail` → FAIL
-  * Keep host-specific implementation details behind FFmpeg/platform ownership boundaries.
-  * Do not add platform-native texture handles to the public `crtmedia` API during this tranche.
-
----
-
-* [ ] **6. Run ownership, regression, and repeated-lifecycle validation.**
-
-  * Repeat hardware decode multiple times in one process where supported.
-  * Exercise create → decode → EOS → destroy cycles repeatedly.
-  * Verify no stale hardware context survives decoder destruction.
-  * Confirm hardware-frame download does not leak or retain platform-native surfaces indefinitely.
-  * Re-run allocator/Host ABI diagnostics if any new cross-domain ownership path is introduced.
-  * Verify that generic media tests do not directly interpret:
-
-    * `CVPixelBuffer`
-    * `ID3D11Texture2D`
-    * VA-API private surface structures
-  * Ensure platform resources remain opaque and are destroyed by the APIs that own them.
-  * Re-run existing software decode/media regression tests on every host after common code changes.
-
----
-
-* [x] **7. Close distribution and package acceptance.**
-  Linux done 2026-09-22 (see item 4's own writeup for the two extra
-  parallel-copy link fixes and the new `linux-vaapi-runtime`/
-  `linux-vaapi-driver` prerequisite declaration this needed): the isolated
-  `04-gfx-media` stage rebuilt from a fresh FreeType/FFmpeg/Skia state on
-  this same native Linux host, its 8 stage tests, `gfx-gpu`/`gfx-skia`/
-  `media-player` example rebuilds, `verify_dist.py`'s binary-dependency
-  audit, and atomic publication all passed, and the published archive's own
-  `crtmedia_player_demo` presents all 25 frames running directly.
-
-  macOS done 2026-09-22, recorded in `HISTORY.md`: a fresh clone re-ran both
-  halves this bullet lists. In-tree (FFmpeg port rebuilt from a fresh state,
-  `CRTMEDIA_ENABLE_FFMPEG=ON`): full `ctest` 132/132, `crtmedia_hw_decode_test`/
-  `_flush_test`/`_lifecycle_test` byte-identical to Tranche 2's `RESULT` lines.
-  Isolated `04-gfx-media` stage (fresh FreeType/FFmpeg/Skia, no reused
-  install): 8 stage tests, the rebuilt `gfx-gpu`/`gfx-skia`/`media-player`
-  examples (`gfx-skia`'s scripted resize passed in 3.2 s -- the exact case
-  that hung before the two release-hardening fixes now on `main`), and
-  `verify_dist.py`'s binary-dependency audit all passed, plus a manual
-  `otool -L` cross-check of every packaged binary and `lib/*.dylib` against
-  `tools/crt_dist_prerequisites.py`'s macOS declarations (no undeclared
-  framework).
-
-  Windows done 2026-09-22: the isolated `04-gfx-media` stage rebuilt end to
-  end from the current commit (`tools/crt-cc` had changed since the last
-  Windows run -- for Linux's `-fcrt-real-linux-sdk` sentinel, a no-op on
-  Windows -- which invalidated the FreeType/FFmpeg build cache and forced a
-  genuine full rebuild, 2907.4 s total). All 8 stage tests, the rebuilt
-  `gfx-gpu`/`gfx-skia`/`media-player` examples, `verify_dist.py`, and atomic
-  publication passed, on the same physical Intel UHD 630 (driver
-  31.0.101.2140) item 3 used. Import audit (`llvm-objdump -p`): the
-  packaged `crtmedia_player_demo.exe` imports `KERNEL32`, `ole32`, `USER32`,
-  `d3d11`, `dxgi`, and the synch API set thunk; `libcrtmedia.dll`'s own
-  import table is unchanged by hardware decode (`ole32`/`KERNEL32`/synch
-  only, no `d3d11`/`dxgi`) -- the D3D11/DXGI imports come entirely from
-  `crtgfx_window`'s pre-existing Win32 swap-chain presenter, confirmed by
-  diffing against `crtgfx_window_demo.exe` (no `crtmedia` linked at all),
-  which carries the identical `d3d11`/`dxgi` import set. FFmpeg's D3D11VA
-  hwaccel resolves `d3d11.dll`/`dxgi.dll` at runtime (`LoadLibrary`), not by
-  static import, matching item 3's own in-tree finding. No unexpected host
-  ABI or allocator-domain dependency was introduced into `crtmedia` by
-  hardware decode. Separate, non-blocking observation (not a hardware-decode
-  regression): `libcrtmedia.dll`'s export table has 3134 entries, only 52 of
-  them `crtmedia_*` -- the mingw-target linker exports every global symbol
-  by default absent an explicit export list, and FFmpeg's D3D11VA objects
-  newly contribute roughly 1300 DXVA-mode/D3D11-IID constant-table symbols
-  to that; `libc.dll` (1039 exports) and `libcrtgfx_gpu.dll` (756) already
-  show the identical pre-existing pattern, so this is not new. Full result
-  in `HISTORY.md`. Item 7 is now closed on all three hosts.
-
-  * Rebuild FFmpeg and `libcrtmedia` from a fresh state on each acceptance host. (done: macOS, Linux, Windows)
-  * Rebuild the normal `04-gfx-media` cumulative stage. (done: macOS, Linux, Windows)
-  * Run packaged media consumers, not only build-tree tests. (done: macOS, Linux, Windows)
-  * Audit binary/runtime dependencies:
-
-    * macOS: VideoToolbox/CoreVideo/CoreMedia-related frameworks (done -- confirmed via `otool -L` against `tools/crt_dist_prerequisites.py`)
-    * Windows: D3D11/DXGI-related imports (done -- clean; see item 7's own note)
-    * Linux: expected VA-API/runtime library dependencies (done -- `libva.so.2`/`libva-drm.so.2`, declared in `tools/crt_dist_prerequisites.py`)
-  * Confirm no unexpected host ABI or allocator-domain dependency is introduced. (done: macOS, Linux, Windows)
-  * Confirm existing public `crtmedia` ABI and software-only callers remain compatible. (done: macOS, Linux, Windows -- software-only path stays `hardware_accelerated=false`/decodes in software on all three)
-  * Record exact host/architecture, GPU, decoder backend, FFmpeg configuration, test command, and result in `HISTORY.md`.
-  * Keep raw logs/results outside git unless they are small, stable project fixtures.
-
-**Follow-up, 2026-09-22 (after item 7 closed, recorded in `HISTORY.md`):** the
-packaged `crtmedia_player_demo`/`examples/media-player` now requests hardware
-decode by default (`CRTMEDIA_PLAYER_DEMO_SOFTWARE_ONLY=1` forces the old
-software-only behavior, for a host/driver combination where even attempting
-hardware decode is known to misbehave -- see the note below). `tools/
-build_stage_04_gfx_media.py`'s own packaged-example acceptance step now
-requires `hardware_decode=yes` in the demo's own output (not just
-`presented=30`), the first time this project has proven hardware decode works
-through the actual packaged, distributed binary rather than only the in-tree
-`crtmedia_hw_decode_test`. Confirmed real end to end on Windows/D3D11VA:
-`crt-stage-build.py` rebuilt the isolated `04-gfx-media` stage (85.1 s, warm
-FreeType/FFmpeg/Skia caches) and its own media-player acceptance step passed
-with `hardware_decode=yes` in 4.3 s; the published archive's own prebuilt
-`crtmedia_player_demo.exe` was then also run directly and confirmed both
-paths -- default -> `hardware_decode=yes`, `CRTMEDIA_PLAYER_DEMO_SOFTWARE_
-ONLY=1` -> `hardware_decode=no` -- with `presented=20`/`=30` unchanged either
-way. The escape hatch itself is not hypothetical: Intel's own WSL2 VA-API
-driver deadlocks on a real hardware decode even with a plain, CRT-free FFmpeg
-(`docs/crtmedia_hardware_decode_acceptance.md`); the 60 s timeout already on
-this acceptance step turns a real regression of that into a loud, diagnosable
-failure rather than a silent hang, matching this project's own established
-handling of the identical class of risk (the gfx-skia Ganesh/Vulkan deadlock
-this same function already guards). **Not yet done:** re-running this on
-Linux/macOS to confirm the same acceptance step passes with real hardware
-there too (this session is Windows-only); and the already-published
-`v0.4.0-preview.1` release assets (all three hosts) predate this change and
-still only ever decode in software -- this is not a release-asset rebuild,
-and the release notes correctly still describe the old behavior for that
-specific, already-built set.
-
----
-
-### Acceptance gate
-
-This tranche is complete when all of the following are true:
-
-* [x] macOS/arm64 decodes the project H.264 fixture through real VideoToolbox hardware frames. (Tranche 1)
-* [x] Windows/x64 decodes the same fixture through real D3D11VA hardware frames. (Tranche 3)
-* [x] Linux decodes the same fixture through real VA-API hardware frames on a capable native host. (Tranche 4)
-* [x] Every hardware path successfully transfers at least one decoded hardware frame into the existing CPU-resident `crtmedia` frame contract.
-* [x] The expected decoded frame count, timestamp behavior, image-content validation, EOS, and cleanup checks pass on every host.
-* [x] `hardware_active` or its equivalent means “a real hardware frame was actually observed,” not merely “a hardware device was created.”
-* [x] Software-only decode remains green on every host.
-* [ ] Hardware-unavailable or unsupported configurations fall back cleanly to software without breaking the decode contract.
-* [ ] No public API exposes platform-native decoded textures or surfaces yet.
-* [ ] Host/platform resources remain owned and released by FFmpeg/platform APIs, not by unrelated CRT allocator domains.
-* [ ] Fresh packaged `04-gfx-media` builds and binary/import audits remain green on the supported matrix.
-
-**Decision:** when this gate is green, move **Hardware video decode** to `HISTORY.md` and promote **Zero-copy decoded textures** into `In Progress`.
-
-### Recommended execution order
-
-* [x] macOS/arm64 — establish the first real VideoToolbox green.
-* [x] Harden common reporting/lifetime semantics using the macOS evidence.
-* [x] Windows/x64 — solve D3D11VA FFmpeg enablement and obtain real hardware evidence.
-* [x] Linux — first remove any toolchain/build-environment blocker, then obtain real VA-API evidence.
-* [ ] Re-run the normalized cross-host acceptance matrix.
-* [ ] Close packaged `04-gfx-media` and distribution/import acceptance.
-* [ ] Promote **Zero-copy decoded textures**.
 
 
 ## Planned
@@ -664,25 +444,23 @@ The completed cross-host baseline and its exact validation evidence stay in
 and dependency order stay in [`docs/runtime_roadmap.md`](docs/runtime_roadmap.md).
 The allocator baseline decision gate is closed: keep the current allocator and
 leave Scudo conditional. Hardware video decode (the roadmap's first tranche)
-is now active above; promote the remaining tranches one at a time into
-In Progress when their own prerequisite evidence and acceptance host are
-available.
+is closed (`HISTORY.md`, 2026-09-22); **Zero-copy decoded textures**, the
+next tranche, is promoted into `In Progress` above. Promote the remaining
+tranches below one at a time when their own prerequisite evidence and
+acceptance host are available.
 
-1. **Zero-copy decoded textures.** Add explicit ownership and synchronization
-   for D3D surfaces, `CVPixelBuffer`/Metal textures, and VAAPI/Vulkan or native
-   Linux surfaces; retain a measured copy fallback where interop is absent.
-2. **Encode and capture.** Build capture, conversion, hardware/software encode,
+1. **Encode and capture.** Build capture, conversion, hardware/software encode,
    timestamp, and muxing paths on top of the accepted media frame contract.
-3. **Networking and streaming.** Add transport, buffering, back-pressure,
+2. **Networking and streaming.** Add transport, buffering, back-pressure,
    reconnect, and protocol integration only after local media timing is stable.
-4. **WebRTC, then JavaScript.** Treat WebRTC as a consumer-driven integration
+3. **WebRTC, then JavaScript.** Treat WebRTC as a consumer-driven integration
    milestone. Build the real QuickJS core and CRT bindings before extending
    isolated distribution acceptance from `04-gfx-media` to `05-js`; a stage
    skeleton alone is not completion.
 
-The intended execution order is zero-copy
-interop, encode/capture, networking/streaming, WebRTC, and finally the complete
-JavaScript application-runtime layer, continuing on from hardware decode above.
+The intended execution order is encode/capture, networking/streaming, WebRTC,
+and finally the complete JavaScript application-runtime layer, continuing on
+from zero-copy interop above.
 
 
 ### Runtime architecture hardening backlog

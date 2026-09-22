@@ -3,11 +3,13 @@
 This document defines what a CRT developer-preview release contains, how it is
 verified, and how a maintainer produces it. The first preview,
 [`v0.4.0-preview.1`](https://github.com/webos21/crt/releases/tag/v0.4.0-preview.1), was published
-on 2026-09-21 as a GitHub pre-release with **Windows/x64 assets only**; macOS
-and Linux archives are built and checksummed (2026-09-21 and 2026-09-22
-respectively) but not yet attached to the release -- see "What has been
-verified so far" and the maintainer upload decision below. For what works
-today, see the README and [`STATUS.md`](../STATUS.md).
+on 2026-09-21 as a GitHub pre-release, and now carries **Windows/x64,
+macOS/arm64, and Linux/x86_64 assets** (all three built and checksummed
+2026-09-21/22, uploaded since; re-confirmed 2026-09-22 via the release API --
+27 files, release body byte-identical to
+[`release_notes_v0.4.0-preview.1.md`](release_notes_v0.4.0-preview.1.md)) --
+see "What has been verified so far" below for each host's own build. For what
+works today, see the README and [`STATUS.md`](../STATUS.md).
 
 That preview is positioned as the first public developer preview of the CRT
 Graphics/Media SDK stage (`04-gfx-media`).
@@ -169,6 +171,18 @@ names, and the download URLs inside the packaged stage recipes all agree.
 
 ## What has been verified so far
 
+Note that applies to every host below: `v0.4.0-preview.1`'s packaged
+`crtmedia_player_demo`/`examples/media-player` does not request hardware
+decode -- it always decodes in software, on Windows, macOS, and Linux alike,
+regardless of what that host's FFmpeg build supports. The "presents N frames"
+results quoted per host below are software-decode evidence, not
+hardware-decode evidence; the real hardware-decode evidence is each host's
+own `crtmedia_hw_decode_test` `RESULT` line (`docs/
+crtmedia_hardware_decode_acceptance.md`). This demo requests hardware decode
+by default starting after this release (`HISTORY.md`, 2026-09-22); see
+`TODO.md`'s "Next release hardening" for re-verifying that on macOS and
+Linux.
+
 Verified on Windows/x64 (2026-09-21):
 
 - An existing `03-gfx-simple` archive extracted into a path with a space passes
@@ -261,7 +275,8 @@ download directories, with the release tag `v0.4.0-preview.1`:
   checks passing. From the same extraction, following the quick start,
   `gfx-simple` rebuilds and presents 60 frames and `media-player` rebuilds and
   presents 30. This is the first macOS link of the `media-player` example.
-- Nothing was uploaded.
+- Nothing was uploaded at the time of this build; the set was attached to the
+  release afterward (see "Not yet done" below).
   Limits: the `.tar.xz` files were run from the extraction location on the
   development machine (not a machine that never had CRT's environment), the
   binaries are not signed or notarized, and only the local checksums were
@@ -319,31 +334,32 @@ directories, with the release tag `v0.4.0-preview.1`:
   present 60 frames, and `media-player` rebuilds and presents 25. This is the
   first native (non-VM, non-WSL) Linux hardware-decode and physical-GPU
   Vulkan/Skia evidence recorded for a release build.
-- Nothing was uploaded.
+- Nothing was uploaded at the time of this build; the set was attached to the
+  release afterward (see "Not yet done" below).
   Limits: the `.tar.xz` files were run from the extraction location on the
   development machine (not a machine that never had CRT's environment), and
   only the local checksums were checked, not a download.
 
-Not yet done, and required before a release can be published:
+Done since the builds above: both the macOS (nine files) and Linux (seven
+files) sets were uploaded to the release, and the updated, three-platform
+`release_notes_v0.4.0-preview.1.md` was pasted into the GitHub release body --
+2026-09-22 re-confirmed both via the release API (27 assets across all three
+hosts; the live body is byte-identical to the file in this repo).
+
+Not yet done:
 
 - A fresh-clone rebuild of the Windows set. It is not needed for consistency:
   the tag `v0.4.0-preview.1` points at `fd01d7c`, the commit the assets record.
   It would only remove the "existing build directory was reused" limit above.
-- Attaching the macOS set to the release. The maintainer uploads the nine files
-  from `out/release/v0.4.0-preview.1-macos-aarch64/`; the tag stays on `fd01d7c`.
-  [`release_notes_v0.4.0-preview.1.md`](release_notes_v0.4.0-preview.1.md) now
-  lists them, explains why their manifest records `972d913`, and has a macOS
-  quick start, but the GitHub release body still holds the Windows-only text
-  until someone pastes the updated notes into it.
-- Attaching the Linux set to the release. The maintainer uploads the seven
-  files from `out/release/v0.4.0-preview.1-linux-x86_64/`; the tag stays on
-  `fd01d7c`. `release_notes_v0.4.0-preview.1.md` now lists them, explains why
-  their manifest records `a90bf10`, and has a Linux quick start, but the
-  GitHub release body still holds the Windows-only text until someone pastes
-  the fully updated (three-platform) notes into it.
 - A test on a machine that has never had CRT's build environment. The Windows
   check above was a clean extraction path on a development machine, not a clean
   machine; the same is true of the macOS and Linux checks.
+- Re-running the hardware-decode-by-default packaged `crtmedia_player_demo`
+  (`HISTORY.md`, 2026-09-22) on macOS and Linux -- this release's own
+  `crtmedia_player_demo` predates that change and still only decodes in
+  software on every host, which the release notes already say; the change
+  itself is scoped to whatever CRT publishes next (`TODO.md`'s "Next release
+  hardening").
 
 ## Release notes template
 

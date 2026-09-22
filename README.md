@@ -173,7 +173,7 @@ Each port is a pinned, SHA-256-checked recipe under
 | mbedTLS | 3.6.7 | static + shared pass on all three | SHA-256 known-answer check and AES-128-CBC encrypt/decrypt round trip. |
 | curl (libcurl) | 8.21.0 | static + shared pass on all three | Real HTTP and HTTPS requests through libcurl, zlib, mbedTLS, DNS, and sockets. |
 | FreeType | 2.14.3 | static + shared pass on all three | Glyph rasterization from a bundled font; also feeds Skia text. |
-| FFmpeg | 8.1.2 | configure/make port, pass on all three | Narrow LGPL build; `libcrtmedia` demux, software decode, and playback tests, plus hardware H.264 decode on macOS and Windows. |
+| FFmpeg | 8.1.2 | configure/make port, pass on all three | Narrow LGPL build; `libcrtmedia` demux, software decode, and playback tests, plus hardware H.264 decode on Linux, Windows, and macOS. |
 | Skia | m148 | GN build against the CRT sysroot and imported libc++, pass on all three | CPU raster and text; Ganesh GPU presentation over Vulkan, D3D12, and Metal (see the Linux caveat above). |
 
 libffi and expat also pass on all three hosts, and the toolchain `make` builds

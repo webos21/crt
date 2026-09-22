@@ -14,6 +14,15 @@ native window):
 
 https://github.com/user-attachments/assets/a60ff1ae-c260-4aaa-a140-8095ac95f7c0
 
+**In this preview, `media-player` decodes in software on every platform.**
+The packaged `crtmedia_player_demo` does not request hardware decode, so it
+always uses the software path -- on Windows, macOS, and Linux alike --
+regardless of what that host's FFmpeg build supports. Hardware H.264 decode
+itself is real and verified on all three platforms (see the table below);
+its evidence is each platform's own `crtmedia_hw_decode_test`, not this demo.
+The demo will request hardware decode by default starting with the next
+preview.
+
 ## What is in this preview
 
 `04-gfx-media` is the current public SDK milestone. The SDK stages are
@@ -207,7 +216,8 @@ call 04-gfx-media\activate.cmd
 
 It plays the bundled clip in a native window and prints
 `crtmedia_player_demo: presented=30`. Without a frame limit the demo plays until
-you close its window.
+you close its window. Software decode, like every platform in this preview --
+see the note near the top of this page.
 
 To rebuild a packaged example against the SDK, point CRT at your own compiler
 first. This exact sequence was run against the extracted `04-gfx-media` archive
@@ -247,7 +257,8 @@ Then run a ready-made program:
 
 It plays the bundled clip in a native window and prints
 `crtmedia_player_demo: presented=30`. Without a frame limit the demo plays until
-you close its window.
+you close its window. Software decode, like every platform in this preview --
+see the note near the top of this page.
 
 To rebuild a packaged example against the SDK, point CRT at your own compiler
 first. This sequence was run against the extracted `04-gfx-media` archive (it
@@ -288,10 +299,8 @@ Then run a ready-made program:
 
 It plays the bundled clip in a native window and prints
 `crtmedia_player_demo: presented=30`. Without a frame limit the demo plays until
-you close its window. This demo always decodes in software: it does not opt
-into `CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE`, so real VA-API hardware
-decode is not exercised here even though this SDK's FFmpeg build supports it
--- see `crtmedia_hw_decode_test` for that evidence.
+you close its window. Software decode, like every platform in this preview --
+see the note near the top of this page.
 
 To rebuild a packaged example against the SDK, point CRT at your own compiler
 first. This sequence was run against the extracted `04-gfx-media` archive (it
@@ -368,10 +377,12 @@ macOS are in the
 
 ## Next
 
-Uploading the macOS and Linux assets and pasting these updated notes into the
-GitHub release body, macOS signing and notarization, verification on a clean
-machine, a fresh-clone rebuild of the Windows set, zero-copy hardware decode
-to GPU textures, and the `05-js` JavaScript stage. Open work is tracked in
+Verification on a clean machine that never had CRT's build environment,
+macOS signing and notarization, an optional fresh-clone rebuild of the
+Windows set, making the next preview's `media-player` demo request hardware
+decode by default (already done on `main` for the demo itself; not yet part
+of a published release), zero-copy hardware decode to GPU textures, and the
+`05-js` JavaScript stage. Open work is tracked in
 [`TODO.md`](https://github.com/webos21/crt/blob/main/TODO.md).
 
 Full documentation: [README](https://github.com/webos21/crt/blob/v0.4.0-preview.1/README.md),

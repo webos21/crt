@@ -221,21 +221,32 @@ target.
 - The `libcrtgfx` GPU backend-object boundary hardening and the live GPU
   presentation pixel-exact/resize evidence tranches are both closed
   (2026-09-17..18) on every required host. Hardware video decode built on
-  that foundation and is now closed on all three hosts: macOS/arm64
-  (VideoToolbox, 2026-09-18), Windows/x64 (D3D11VA, 2026-09-19), and
-  Linux/x86_64 (VA-API, physical Intel GPU, 2026-09-22) all report a real
-  hardware frame observed and downloaded (`TODO.md`'s Hardware video decode
-  tranche). Remaining before that tranche moves to `HISTORY.md`: the
-  normalized cross-host acceptance matrix write-up and a Windows/macOS
-  package-acceptance re-audit matching the one Linux's own isolated
-  `04-gfx-media` stage rebuild already passed. The first public developer
-  preview of the completed `04-gfx-media` stage is also being prepared there;
-  Windows assets are published, and macOS/Linux asset sets are built and
-  checksummed, awaiting the maintainer's upload decision.
+  that foundation and is closed on all three hosts (`HISTORY.md`,
+  2026-09-22): macOS/arm64 (VideoToolbox, 2026-09-18), Windows/x64 (D3D11VA,
+  2026-09-19), and Linux/x86_64 (VA-API, physical Intel GPU, 2026-09-22) all
+  report a real hardware frame observed and downloaded, the normalized
+  cross-host acceptance matrix is recorded in
+  `docs/crtmedia_hardware_decode_acceptance.md`, and the package-acceptance
+  re-audit (fresh isolated `04-gfx-media` rebuild, binary/import dependency
+  audit) passed on all three hosts. A real, separate gap this closure found:
+  the packaged `crtmedia_player_demo` never actually requested hardware
+  decode, so it always decoded in software regardless of host; fixed the
+  same day (`HISTORY.md`) -- it now requests hardware by default, with a
+  documented software-only escape hatch, verified on Windows so far.
+  The first public developer preview of the completed `04-gfx-media` stage
+  is published: `v0.4.0-preview.1` on GitHub
+  (`https://github.com/webos21/crt/releases/tag/v0.4.0-preview.1`) with
+  Windows/x64, macOS/arm64, and Linux/x86_64 asset sets, checksums, and
+  manifests. Its packaged `crtmedia_player_demo` predates the hardware-decode
+  default above and still only decodes in software on every host; the
+  release notes document that. Not yet done: a clean-machine test of the
+  published archives, and re-running the hardware-decode-default packaged
+  demo on macOS and Linux for the *next* release.
 - Zero-copy decoded-texture interop (hardware decoder surface -> Skia, no CPU
-  copy) is the next roadmap tranche once the hardware-decode acceptance gate's
-  remaining housekeeping above closes; it then proceeds alongside the
-  QuickJS core on top of the completed GPU rendering/presentation contract.
+  copy) is the next roadmap tranche, promoted into `TODO.md`'s `In Progress`
+  as a stub (its own phased plan is not written yet); it then proceeds
+  alongside the QuickJS core on top of the completed GPU
+  rendering/presentation contract.
 - JavaScript media/gfx binding follows the stable native contracts, using a
   WebCodecs-like asynchronous shape; WebRTC-style realtime services, V8, and a
   Chromium/Ozone probe remain later layers.

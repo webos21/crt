@@ -10,6 +10,66 @@ substantive update.
 
 ## 2026-09-22
 
+- **Closed the "Hardware video decode" tranche (`TODO.md` -> here, per that
+  section's own pre-declared "when this gate is green" decision).** Every
+  step (0-7) already has its own dated entry above and in earlier sections
+  of this file; this entry closes the tranche's remaining acceptance-gate
+  checkboxes and items 5/6, which were still unchecked in `TODO.md` despite
+  already having real evidence scattered across those entries, and records
+  independently re-verifying each one against the actual source rather than
+  assuming the checklist wording alone justified checking it:
+  - **Item 5 (normalized cross-host acceptance matrix).** `libcrtmedia/
+    tests/hw_decode_test.c` -- unmodified, the same file on every host --
+    already asserts every field the checklist asked for: requested/actual
+    backend (the `RESULT` line's own `backend=`), a real hardware frame
+    observed (`hw_frame_observed`/`crtmedia_codec_is_hardware_accelerated()`
+    transitions), decoded frame count (`frame_count=25`), timestamp
+    monotonicity (`CHECK(frame.timestamp_us >= last_pts, ...)`), CPU-transfer
+    and pixel/image-content (`crtmedia_frame_convert_to_rgba()` on a real
+    hardware NV12 frame, checked non-degenerate), fallback status
+    (`fallback=`), EOS, and clean exit. `docs/crtmedia_hardware_decode_
+    acceptance.md`'s "Current per-host status" table already records the
+    `RESULT` line for all three hosts. The `decode=pass,hardware=active` vs
+    `fallback PASS` distinction is exactly what each host's own pre-hardware
+    baseline run already demonstrated (Windows 3.1, Linux W2) before its real
+    hardware pass.
+  - **Item 6 (ownership/regression/lifecycle).** `hw_decode_lifecycle_test.c`
+    (15 iterations, all three hosts, `iterations=15 hardware_iterations=15`)
+    explicitly asserts every iteration agrees with the first on whether
+    hardware was active -- its own top comment states this catches exactly
+    "a stale hardware context surviving decoder destruction." `hw_decode_
+    flush_test.c` covers the create/decode/flush/reuse repeat case. No
+    `CVPixelBuffer`/`ID3D11Texture2D`/VA-API surface type appears in any
+    public `crtmedia` header (`codec.h`/`frame.h`) -- confirmed by reading
+    them, not assumed. `codec.c` releases every hardware object through the
+    FFmpeg API that created it (`av_buffer_unref`,
+    `avcodec_free_context`); nothing hardware-related crosses into the CRT
+    allocator. Every host's full `ctest` (149/149 Windows, 132/132 macOS,
+    132/132 Linux) re-ran the complete existing software-decode suite
+    alongside these. **Disclosed gap, not silently closed:** none of this is
+    a dedicated, instrumented leak-detector run (ASan/valgrind) specifically
+    for repeated hardware-surface churn; 15 clean iterations is the evidence
+    that exists, not a stronger claim than that.
+  - **Acceptance gate's four remaining boxes:** "falls back cleanly" is the
+    3.1/W2 baseline runs, already recorded; "no public API exposes
+    platform-native textures" and "host resources remain owned by
+    FFmpeg/platform APIs" are the same header-review and `codec.c` ownership
+    facts above; "fresh packaged builds and binary/import audits remain
+    green on the supported matrix" is item 7, closed today on all three
+    hosts (see the Windows/macOS/Linux Step-7 entries above and earlier this
+    date).
+  All acceptance-gate boxes and items 5-7 are now checked in `TODO.md`'s
+  history (before this section is removed from that file, per its own
+  decision line) and this tranche moves here in full. **Zero-copy decoded
+  textures** is promoted to `In Progress` in `TODO.md`, as a stub pointing at
+  its existing `Planned` description -- its own phased plan has not been
+  written yet, and promoting it is not a claim that design work is done.
+  A real, separate gap found *because* this tranche closed, already fixed
+  the same day (see the two entries directly below): the packaged
+  `crtmedia_player_demo` never actually requested hardware decode, so every
+  "hardware decode" claim made about that specific demo's own output was
+  false until today's separate fix.
+
 - **The packaged `crtmedia_player_demo`/`examples/media-player` now requests
   hardware decode by default, and the isolated `04-gfx-media` stage's own
   packaged-example acceptance step now requires it worked, closing the gap
