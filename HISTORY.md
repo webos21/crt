@@ -10,6 +10,32 @@ substantive update.
 
 ## 2026-09-22
 
+- **Synchronized every public-facing status document against the actual repo
+  and release state, instead of assuming a prior read was still current.**
+  Re-checked `README.md`, `STATUS.md`, `TODO.md`, `docs/runtime_roadmap.md`,
+  `docs/distribution.md`, `docs/crtmedia_hardware_decode_acceptance.md`,
+  `docs/release_preview.md`, and `docs/release_notes_v0.4.0-preview.1.md`
+  (the live GitHub release body, fetched via the API and compared
+  byte-for-byte). Found and fixed real staleness: `README.md`'s Portability
+  Proof table still said "hardware H.264 decode on macOS and Windows" (one
+  line); `STATUS.md` said the hardware-decode tranche and a Windows/macOS
+  package audit were still open and only Windows release assets were
+  published; `TODO.md` carried the same stale release status plus the
+  now-closed "Hardware video decode" tranche still sitting in `In Progress`;
+  `docs/release_preview.md`/`docs/release_notes_v0.4.0-preview.1.md` both
+  still said Windows-only assets and an unresolved upload decision, even
+  though the release API already showed all three hosts live (27 assets) --
+  someone had already uploaded them and pasted an earlier version of the
+  notes into the release body without updating either source doc to say so.
+  `docs/runtime_roadmap.md`, `docs/distribution.md`, and `docs/
+  crtmedia_hardware_decode_acceptance.md` were already accurate, confirmed by
+  reading them, not assumed. Also published the completed hardware-decode
+  platform mapping (Linux -> VA-API, Windows -> D3D11VA, macOS ->
+  VideoToolbox) as a checked `TODO.md` item, since it already lives in
+  `README.md`, the GitHub release's own capability table, and `docs/
+  crtmedia_hardware_decode_acceptance.md` -- nothing new to write, just
+  recognizing it was already done.
+
 - **Closed the "Hardware video decode" tranche (`TODO.md` -> here, per that
   section's own pre-declared "when this gate is green" decision).** Every
   step (0-7) already has its own dated entry above and in earlier sections
@@ -562,6 +588,58 @@ substantive update.
   fresh-clone rebuild of the Windows set.
 
 ## 2026-09-21
+
+- **Turned `README.md` into a public landing page and published the first
+  developer preview.** Backfilled here from `TODO.md`'s own "Public Preview /
+  Promotion Preparation" writeup, which stayed in `TODO.md` past this
+  project's own "move completed detail to `HISTORY.md`" policy until
+  2026-09-22's doc cleanup caught it.
+  - **Landing page.** Replaced the engineering-first opening with a concise
+    headline/supporting message (`Linux-style C/C++ software. Native on
+    Linux, Windows and macOS.` / `Same source model. Native executables.
+    Native GPUs. No VM or container.`), kept the precise Bionic/PAL
+    definition immediately below it, moved detailed toolchain/release-
+    engineering policy farther down, and added a short architecture
+    overview (`Application -> Skia/FFmpeg -> CRT C++ Runtime ->
+    Bionic-compatible CRT/PAL -> {Linux/Wayland/Vulkan, Windows/Win32/D3D12,
+    macOS/Cocoa/Metal}`) plus a "Where It Stands" section.
+  - **"What Already Works" matrix.** 16 capabilities x 3 hosts (libc/libm/
+    libdl, libc++ runtime, pthread, sockets, mmap, TLS, native window/input,
+    Skia CPU, Skia GPU, FFmpeg, native audio, hardware decode, and more) with
+    Verified/Partial/In progress/Planned states, evidence dates, and
+    per-host limits (Linux `libdl`, Linux Skia GPU on a VM at the time,
+    Linux audio, Linux hardware decode at the time). A fresh Linux/x86_64
+    (WSL2) `ctest` ran 121/121 for it.
+  - **"Portability Proof" section.** 11 upstream projects with versions,
+    recorded per-host results, and what each test actually runs (zlib,
+    libpng, SQLite, bzip2, xz, PCRE2, mbedTLS, curl, FreeType, Skia,
+    FFmpeg), highlighting curl HTTP/HTTPS round trips, Skia live native
+    presentation, and FFmpeg decode/playback as real runtime evidence (not
+    just "it compiles"), the exact upstream patch exceptions, and the
+    `port-test-*` commands to reproduce each result.
+  - **Hardware decode status, documented transparently.** README's own
+    "Hardware Decode Status" section plus the per-host section of `docs/
+    crtmedia_hardware_decode_acceptance.md`; also captured the first real
+    Linux fallback evidence at the time (`fallback=yes`, 14/14 `crtmedia_*`
+    tests, Linux x86_64/WSL2, FFmpeg without VA-API) -- superseded once VA-API
+    itself was verified there (2026-09-22, elsewhere in this file).
+  - **Public messaging / FAQ.** `docs/faq.md` (why CRT, why Bionic-shaped,
+    the rebuild-based portability model, seven comparisons against musl,
+    SDL, Qt, WSL, Wine, Cosmopolitan, and Android/Bionic, explicit
+    non-goals, and current readiness) plus a short "Why CRT?" section in
+    `README.md`. Comparison wording follows `docs/project_stacks.md` and
+    `docs/project_meanings.md`, not the aspirational `docs/marketing/`
+    notes.
+  - **First public release.** Published `v0.4.0-preview.1` as a GitHub
+    pre-release (`https://github.com/webos21/crt/releases/tag/v0.4.0-preview.1`),
+    positioned as the first public developer preview of the CRT
+    Graphics/Media SDK stage, with `04-gfx-media` as the current public SDK
+    milestone, `05-js` explicitly marked roadmap/skeleton, and not blocked on
+    Linux VA-API hardware decode (verified later, 2026-09-22, without
+    republishing). Confirmed 2026-09-22 via the release API that all three
+    host asset sets (Windows/x64, macOS/arm64, Linux/x86_64 -- built on
+    different days, see their own entries in this file) ended up attached:
+    27 files total, checksums and manifests included.
 
 - **Updated the `v0.4.0-preview.1` release notes for the macOS/arm64 assets.**
   `docs/release_notes_v0.4.0-preview.1.md` now describes both hosts: a macOS
