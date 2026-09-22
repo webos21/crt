@@ -10,6 +10,50 @@ substantive update.
 
 ## 2026-09-22
 
+- **Closed the macOS half (Step 7) of the Hardware video decode packaging
+  acceptance, from a fresh clone of `main` (`f933ece`).** Mirrors the Linux
+  writeup below, on this Mac (macOS 26.6.2, Apple Silicon, Apple clang
+  21.0.0). Two halves, both from `git clone` with an empty `out/`:
+  1. **In-tree, `CRTMEDIA_ENABLE_FFMPEG=ON`.** `port-build-ffmpeg` from a
+     fresh state, reconfigure, rebuild: full `ctest` **132/132**, and the
+     three hardware-decode tests unchanged from Tranche 2's own acceptance --
+     `crtmedia_hw_decode_test: RESULT backend=videotoolbox hw_requested=yes
+     hw_device_created=yes hw_pixfmt_offered=yes hw_frame_observed=yes
+     cpu_transfer=pass frame_count=25 fallback=no eos=pass clean_exit=pass`,
+     `crtmedia_hw_decode_flush_test: RESULT ... pass1_frames=25 pass1_hw=yes
+     pass2_frames=25 pass2_hw=yes flush_preserved_flag=yes`,
+     `crtmedia_hw_decode_lifecycle_test: RESULT iterations=15
+     hardware_iterations=15`. (`ctest` first reported 9 "Not Run" -- unbuilt
+     targets, not failures, the same known gap noted before: `cmake --build`
+     with no explicit target does not build every FFmpeg-gated test binary;
+     building them directly with `ninja` and re-running `ctest` got 132/132.)
+  2. **The isolated option-ON `04-gfx-media` stage**, via
+     `tools/crt-stage-build.py` against the freshly built, release-tagged-
+     equivalent (`development` tag) `03-gfx-simple`, fresh FreeType/FFmpeg/
+     Skia (no reused install, no `--asset` cache hit): 462 seconds (7.7
+     minutes) total, FreeType+FFmpeg 352 s and Skia 59 s of that. All 8
+     stage tests, and the rebuilt
+     `gfx-gpu`, `gfx-skia`, and `media-player` examples -- `gfx-skia`'s
+     scripted resize (the exact case Sep-21's clock-id bug hung) passed in
+     3.2 s, confirming that fix and the CoreFoundation link fix both still
+     hold on `main` after the intervening Linux VA-API work touched
+     `libcrtmedia/CMakeLists.txt` and `porting/recipes/ffmpeg.json`.
+     `verify_dist.py`'s binary-dependency audit passed, and atomic
+     publication succeeded. A manual `otool -L` cross-check of every
+     packaged binary (`crtgfx_gpu_window_demo`, `crtgfx_skia_gpu_window_demo`,
+     `crtgfx_window_demo`, `crtmedia_player_demo`) and shared library
+     (`lib/libcrtgfx.dylib`, `lib/libcrtmedia.dylib`) against
+     `tools/crt_dist_prerequisites.py`'s cumulative macOS declarations found
+     no undeclared framework: every `LC_LOAD_DYLIB` (Foundation, AppKit,
+     QuartzCore, CoreGraphics, libobjc, CoreFoundation, Metal, AudioToolbox,
+     VideoToolbox, CoreVideo, CoreMedia, libSystem) is accounted for. `nm -mu`
+     on the fresh `lib/libcrtgfx.dylib` reconfirmed `_clock_gettime` still
+     binds "from libSystem" here too, so the shared-library clock-id fix
+     (`972d913`) remains load-bearing, not a one-off. Nothing was uploaded;
+     this is a package-acceptance re-run, not a new release-asset build.
+  Only Windows still needs this same audit re-run (its own isolated-stage
+  acceptance predates the Linux and macOS work). `TODO.md` updated.
+
 - **Linux VA-API hardware decode (Tranche 4): first real green, on the
   project's first native (non-VM, non-WSL) Linux host.** `docs/
   crtmedia_hardware_decode_acceptance.md` and `TODO.md` updated. Host: a

@@ -533,20 +533,31 @@ Use macOS/arm64 as the first-green reference host, then apply the same Phase-A c
   this same native Linux host, its 8 stage tests, `gfx-gpu`/`gfx-skia`/
   `media-player` example rebuilds, `verify_dist.py`'s binary-dependency
   audit, and atomic publication all passed, and the published archive's own
-  `crtmedia_player_demo` presents all 25 frames running directly. macOS and
-  Windows still need this same VA-API-adjacent audit re-run (their own
-  isolated-stage acceptance predates this tranche's Linux work).
+  `crtmedia_player_demo` presents all 25 frames running directly.
+  macOS done 2026-09-22, recorded in `HISTORY.md`: a fresh clone re-ran both
+  halves this bullet lists. In-tree (FFmpeg port rebuilt from a fresh state,
+  `CRTMEDIA_ENABLE_FFMPEG=ON`): full `ctest` 132/132, `crtmedia_hw_decode_test`/
+  `_flush_test`/`_lifecycle_test` byte-identical to Tranche 2's `RESULT` lines.
+  Isolated `04-gfx-media` stage (fresh FreeType/FFmpeg/Skia, no reused
+  install): 8 stage tests, the rebuilt `gfx-gpu`/`gfx-skia`/`media-player`
+  examples (`gfx-skia`'s scripted resize passed in 3.2 s -- the exact case
+  that hung before the two release-hardening fixes now on `main`), and
+  `verify_dist.py`'s binary-dependency audit all passed, plus a manual
+  `otool -L` cross-check of every packaged binary and `lib/*.dylib` against
+  `tools/crt_dist_prerequisites.py`'s macOS declarations (no undeclared
+  framework). Windows still needs this same audit re-run (its own
+  isolated-stage acceptance predates this tranche's Linux/macOS work).
 
-  * Rebuild FFmpeg and `libcrtmedia` from a fresh state on each acceptance host.
-  * Rebuild the normal `04-gfx-media` cumulative stage.
-  * Run packaged media consumers, not only build-tree tests.
+  * Rebuild FFmpeg and `libcrtmedia` from a fresh state on each acceptance host. (done: macOS, Linux)
+  * Rebuild the normal `04-gfx-media` cumulative stage. (done: macOS, Linux)
+  * Run packaged media consumers, not only build-tree tests. (done: macOS, Linux)
   * Audit binary/runtime dependencies:
 
-    * macOS: VideoToolbox/CoreVideo/CoreMedia-related frameworks
+    * macOS: VideoToolbox/CoreVideo/CoreMedia-related frameworks (done -- confirmed via `otool -L` against `tools/crt_dist_prerequisites.py`)
     * Windows: D3D11/DXGI-related imports
     * Linux: expected VA-API/runtime library dependencies (done -- `libva.so.2`/`libva-drm.so.2`, declared in `tools/crt_dist_prerequisites.py`)
-  * Confirm no unexpected host ABI or allocator-domain dependency is introduced.
-  * Confirm existing public `crtmedia` ABI and software-only callers remain compatible.
+  * Confirm no unexpected host ABI or allocator-domain dependency is introduced. (done: macOS, Linux)
+  * Confirm existing public `crtmedia` ABI and software-only callers remain compatible. (done: macOS, Linux -- software-only path stays `hardware_accelerated=false` on both)
   * Record exact host/architecture, GPU, decoder backend, FFmpeg configuration, test command, and result in `HISTORY.md`.
   * Keep raw logs/results outside git unless they are small, stable project fixtures.
 
