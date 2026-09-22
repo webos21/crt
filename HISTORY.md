@@ -150,6 +150,70 @@ substantive update.
   from this tranche's acceptance gate). VA surface -> Vulkan zero-copy stays
   explicitly out of scope, deferred to **Zero-copy decoded textures**.
 
+- **Closed the Linux packaging half (Step 7) of the same VA-API tranche:
+  the isolated `04-gfx-media` stage keeps two more independent copies of
+  the same real-host-library link logic, neither ever wired for Linux
+  VA-API.** Running `tools/crt-stage-build.py` on the same native host
+  (fresh FreeType/FFmpeg/Skia, `--dependency-jobs 12`) surfaced three more
+  real, real-host-only gaps beyond the four already fixed for the in-tree
+  build, each the identical "the isolated stage keeps its own copy" class
+  already documented for macOS `CoreFoundation` (2026-09-21) -- confirmed
+  each one for real, not guessed, by running the actual stage build and
+  reading its own failure:
+  1. `distribution/stages/04-gfx-media/CMakeLists.txt`'s own Linux branch
+     never declared `CRTMEDIA_LINUX_VAAPI_LIBS` at all (only
+     `libcrtmedia/CMakeLists.txt` had it), so its own `crtmedia_player_demo`
+     failed to link with the identical undefined `vaInitialize`/
+     `vaCreateContext`/... references the in-tree build hit first. Fixed by
+     adding the same `find_library(va)`/`find_library(va-drm)` pair here
+     too -- but a plain `find_library()` came up empty in this file
+     specifically (unlike the in-tree copy): this stage's own
+     `crt-toolchain.cmake` sets `CMAKE_SYSROOT`, which skips CMake's own
+     executable-link ABI probe and leaves `CMAKE_LIBRARY_ARCHITECTURE`
+     unpopulated, the exact same real bug this same file's own
+     `CRTGFX_LINUX_VULKAN_LIB` comment already documents finding on
+     2026-09-11. Fixed the identical way: `NO_CMAKE_FIND_ROOT_PATH` plus a
+     `dpkg-architecture`-derived multiarch `find_file()` fallback. A new
+     regression test, `tools/test_stage_source_closure.py`'s
+     `test_the_stage_links_every_linux_vaapi_lib_the_in_tree_build_does`,
+     mirrors the existing macOS-framework drift test so this specific class
+     of miss fails fast next time instead of costing another isolated
+     stage build to discover.
+  2. `examples/media-player/CMakeLists.txt` -- a *third* independent copy,
+     one this tranche had never touched at all -- never linked real host
+     `libwayland-client`/`libva`/`libva-drm` in the first place (it only
+     ever linked the SDK's own bundled static archives), because this
+     example's own window/media backend never needed a real host library
+     until 04-gfx-media's own native Wayland window backend and this
+     tranche's own VA-API decode path both started requiring one for every
+     consumer, this one included. Fixed by adding both real-host-library
+     lookups here too (the identical `NO_CMAKE_FIND_ROOT_PATH` +
+     `dpkg-architecture` fallback `examples/gfx-gpu/CMakeLists.txt` already
+     established for its own Vulkan/Wayland needs), linked alongside the
+     existing FFmpeg archive group.
+  3. `verify_dist.py`'s own binary-dependency audit correctly flagged
+     `lib/libcrtmedia.so` and `examples/bin/crtmedia_player_demo` as
+     carrying an undeclared `libva.so.2`/`libva-drm.so.2` `DT_NEEDED` once
+     the two fixes above let them link -- this is the audit working as
+     designed, not a bug: `tools/crt_dist_prerequisites.py` had no
+     `external_prerequisites` entry for VA-API at all yet. Fixed with a new
+     `linux-vaapi-runtime`/`linux-vaapi-driver` pair, mirroring
+     `linux-vulkan-loader`/`linux-vulkan-driver` exactly, and reflected in
+     the published `manifest.json`.
+
+  Verified for real end to end afterward: all 8 stage tests, the rebuilt
+  `gfx-gpu`/`gfx-skia`/`media-player` examples, `verify_dist.py`, and atomic
+  publication pass; the published archive's own `crtmedia_player_demo`
+  (run directly, not just rebuilt) presents all 25 frames of the project's
+  test clip; the published `manifest.json` correctly lists
+  `linux-vaapi-runtime`/`linux-vaapi-driver` alongside the existing
+  `linux-vulkan-loader`/`linux-vulkan-driver`/`linux-wayland-client-runtime`
+  entries. Full existing tooling test suite (`python3 -m unittest discover
+  -s tools`) re-run afterward: 72/72 passing, no regressions. This closes
+  Step 7 for Linux; macOS and Windows still need their own VA-API-adjacent
+  packaging re-verification (their isolated-stage acceptance predates this
+  tranche).
+
 ## 2026-09-21
 
 - **Updated the `v0.4.0-preview.1` release notes for the macOS/arm64 assets.**

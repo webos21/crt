@@ -432,11 +432,24 @@ Use macOS/arm64 as the first-green reference host, then apply the same Phase-A c
   (4) The final link needs the real host `libva.so`/`libva-drm.so` -- fixed
   with a new `CRTMEDIA_LINUX_VAAPI_LIBS` (`libcrtmedia/CMakeLists.txt`,
   `find_library()`, mirroring `libcrtgfx`'s own `CRTGFX_LINUX_VULKAN_LIB`
-  direct-link precedent). Open follow-up: the isolated `04-gfx-media` stage
-  (packaged distribution build) was not re-run end to end on Linux with
-  VA-API on this host (Step 7's own job); VA surface -> Vulkan zero-copy
-  stays out of this tranche's scope, deferred to **Zero-copy decoded
-  textures**.
+  direct-link precedent). The isolated `04-gfx-media` stage (packaged
+  distribution build) was then also re-run end to end on this same host,
+  closing Step 7 for Linux too (see that step's own note): it kept two more
+  independent copies of the same real-host-library link logic
+  (`distribution/stages/04-gfx-media/CMakeLists.txt`,
+  `examples/media-player/CMakeLists.txt`), neither of which had ever linked
+  a real Linux `libwayland-client`/`libva`/`libva-drm` before, plus a new
+  `linux-vaapi-runtime`/`linux-vaapi-driver` `external_prerequisites`
+  declaration (`tools/crt_dist_prerequisites.py`) once `verify_dist.py`'s own
+  binary-dependency audit flagged both as undeclared. A new regression test
+  (`tools/test_stage_source_closure.py`) now fails if the isolated stage's
+  own VA-API libs ever drift from libcrtmedia's, mirroring the existing
+  macOS-framework test for the identical class of drift. All 8 stage tests,
+  the rebuilt `gfx-gpu`/`gfx-skia`/`media-player` examples, `verify_dist.py`,
+  and atomic publication passed; the published archive's own
+  `crtmedia_player_demo` presents all 25 frames running directly. VA surface
+  -> Vulkan zero-copy stays out of this tranche's scope, deferred to
+  **Zero-copy decoded textures**.
 
 ---
 
@@ -487,6 +500,16 @@ Use macOS/arm64 as the first-green reference host, then apply the same Phase-A c
 ---
 
 * [ ] **7. Close distribution and package acceptance.**
+  Linux done 2026-09-22 (see item 4's own writeup for the two extra
+  parallel-copy link fixes and the new `linux-vaapi-runtime`/
+  `linux-vaapi-driver` prerequisite declaration this needed): the isolated
+  `04-gfx-media` stage rebuilt from a fresh FreeType/FFmpeg/Skia state on
+  this same native Linux host, its 8 stage tests, `gfx-gpu`/`gfx-skia`/
+  `media-player` example rebuilds, `verify_dist.py`'s binary-dependency
+  audit, and atomic publication all passed, and the published archive's own
+  `crtmedia_player_demo` presents all 25 frames running directly. macOS and
+  Windows still need this same VA-API-adjacent audit re-run (their own
+  isolated-stage acceptance predates this tranche's Linux work).
 
   * Rebuild FFmpeg and `libcrtmedia` from a fresh state on each acceptance host.
   * Rebuild the normal `04-gfx-media` cumulative stage.
@@ -495,7 +518,7 @@ Use macOS/arm64 as the first-green reference host, then apply the same Phase-A c
 
     * macOS: VideoToolbox/CoreVideo/CoreMedia-related frameworks
     * Windows: D3D11/DXGI-related imports
-    * Linux: expected VA-API/runtime library dependencies
+    * Linux: expected VA-API/runtime library dependencies (done -- `libva.so.2`/`libva-drm.so.2`, declared in `tools/crt_dist_prerequisites.py`)
   * Confirm no unexpected host ABI or allocator-domain dependency is introduced.
   * Confirm existing public `crtmedia` ABI and software-only callers remain compatible.
   * Record exact host/architecture, GPU, decoder backend, FFmpeg configuration, test command, and result in `HISTORY.md`.

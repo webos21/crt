@@ -196,6 +196,32 @@ _GFX_MEDIA = {
             "components": ["Vulkan ICD for the target GPU"],
             "bundled": False,
         },
+        {
+            # Added 2026-09-22 ("Hardware video decode" Tranche 4): the same
+            # real-host-library-not-bundled shape as linux-vulkan-loader
+            # above -- FFmpeg's own hwcontext_vaapi.o/vaapi_decode.o/
+            # vaapi_h264.o (libavutil.a/libavcodec.a, unconditionally
+            # enabled on Linux since porting/recipes/ffmpeg.json's own
+            # --enable-vaapi) call real vaInitialize/vaGetDisplayDRM/...
+            # entry points, so lib/libcrtmedia.so and examples/bin/
+            # crtmedia_player_demo both carry a genuine DT_NEEDED on the
+            # real host libva.so.2/libva-drm.so.2 -- confirmed for real via
+            # this exact tool's own "unresolved packaged binary
+            # dependencies" failure the first time this stage actually
+            # packaged a native Linux 04-gfx-media with VA-API on this host.
+            "id": "linux-vaapi-runtime",
+            "kind": "host-library",
+            "required_for": ["hardware-video-decode"],
+            "components": ["libva.so.2", "libva-drm.so.2"],
+            "bundled": False,
+        },
+        {
+            "id": "linux-vaapi-driver",
+            "kind": "device-driver",
+            "required_for": ["hardware-video-decode"],
+            "components": ["VA-API driver for the target GPU"],
+            "bundled": False,
+        },
     ),
 }
 

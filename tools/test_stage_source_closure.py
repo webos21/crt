@@ -142,6 +142,25 @@ class StageSourceClosure(unittest.TestCase):
                          "distribution/stages/04-gfx-media/CMakeLists.txt is missing "
                          "macOS frameworks that libcrtmedia/CMakeLists.txt links")
 
+    def test_the_stage_links_every_linux_vaapi_lib_the_in_tree_build_does(self):
+        # The identical "stage project keeps its own copy" gap as the macOS
+        # framework test above, found the same way (2026-09-22): the isolated
+        # 04-gfx-media project's own crtmedia_player_demo failed to link with
+        # undefined vaInitialize/vaCreateContext/... once porting/recipes/
+        # ffmpeg.json started enabling --enable-vaapi unconditionally on
+        # Linux, because libva/libva-drm were only wired into libcrtmedia's
+        # own CMakeLists.txt, not this stage's own copy.
+        def vaapi_libs(relative_path: str) -> set:
+            text = (ROOT / relative_path).read_text(encoding="utf-8")
+            return set(re.findall(r"find_library\(CRTMEDIA_LINUX_VAAPI(?:_DRM)?_LIB\s+([\w-]+)", text))
+
+        in_tree = vaapi_libs("libcrtmedia/CMakeLists.txt")
+        stage = vaapi_libs("distribution/stages/04-gfx-media/CMakeLists.txt")
+        self.assertEqual(in_tree, {"va", "va-drm"})
+        self.assertEqual(in_tree - stage, set(),
+                         "distribution/stages/04-gfx-media/CMakeLists.txt is missing "
+                         "Linux VA-API libraries that libcrtmedia/CMakeLists.txt links")
+
     def test_the_allowlist_only_names_headers_that_really_are_unbundled(self):
         # A stale allowlist entry would hide a future genuine miss.
         for (stage, target_os), allowed in CONDITIONAL_ON_OTHER_OSES.items():

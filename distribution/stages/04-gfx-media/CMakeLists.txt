@@ -424,6 +424,56 @@ elseif(CRT_TARGET_OS STREQUAL "macos")
     "-framework CoreVideo" "-framework CoreMedia" "-framework CoreFoundation")
 else()
   set(CRTMEDIA_BACKEND_SOURCES src/arch/linux/audio_sink_linux.c)
+  # Keep in step with CRTMEDIA_LINUX_VAAPI_LIBS in libcrtmedia/CMakeLists.txt
+  # (that file explains the real vaInitialize/vaGetDisplayDRM/... link need in
+  # full) -- the identical "stage project keeps its own copy" gap
+  # CRTMEDIA_MACOS_FRAMEWORKS's own comment above already documents for
+  # macOS/CoreFoundation, found the same way (2026-09-22, this isolated
+  # stage's own crtmedia_player_demo failing to link with undefined
+  # vaInitialize/vaCreateContext/... once porting/recipes/ffmpeg.json started
+  # enabling --enable-vaapi unconditionally on Linux). Plain find_library()
+  # also hits the identical CMAKE_LIBRARY_ARCHITECTURE gap
+  # CRTGFX_LINUX_VULKAN_LIB's own comment above already documents (this
+  # stage's own crt-toolchain.cmake skips the ABI link probe that would
+  # normally populate it) -- confirmed for real on this same host -- so this
+  # uses the identical NO_CMAKE_FIND_ROOT_PATH + dpkg-architecture multiarch
+  # find_file() fallback.
+  find_library(CRTMEDIA_LINUX_VAAPI_LIB va NO_CMAKE_FIND_ROOT_PATH)
+  find_library(CRTMEDIA_LINUX_VAAPI_DRM_LIB va-drm NO_CMAKE_FIND_ROOT_PATH)
+  if((NOT CRTMEDIA_LINUX_VAAPI_LIB) OR (NOT CRTMEDIA_LINUX_VAAPI_DRM_LIB))
+    find_program(CRT_DPKG_ARCHITECTURE_EXECUTABLE dpkg-architecture)
+    if(CRT_DPKG_ARCHITECTURE_EXECUTABLE)
+      execute_process(
+        COMMAND "${CRT_DPKG_ARCHITECTURE_EXECUTABLE}" -qDEB_HOST_MULTIARCH
+        OUTPUT_VARIABLE CRT_HOST_MULTIARCH_TRIPLET
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+      )
+    endif()
+    if(CRT_HOST_MULTIARCH_TRIPLET)
+      if(NOT CRTMEDIA_LINUX_VAAPI_LIB)
+        unset(CRTMEDIA_LINUX_VAAPI_LIB CACHE)
+        find_file(CRTMEDIA_LINUX_VAAPI_LIB
+          NAMES libva.so libva.so.2
+          PATHS /lib /usr/lib /usr/local/lib
+          PATH_SUFFIXES "${CRT_HOST_MULTIARCH_TRIPLET}"
+        )
+      endif()
+      if(NOT CRTMEDIA_LINUX_VAAPI_DRM_LIB)
+        unset(CRTMEDIA_LINUX_VAAPI_DRM_LIB CACHE)
+        find_file(CRTMEDIA_LINUX_VAAPI_DRM_LIB
+          NAMES libva-drm.so libva-drm.so.2
+          PATHS /lib /usr/lib /usr/local/lib
+          PATH_SUFFIXES "${CRT_HOST_MULTIARCH_TRIPLET}"
+        )
+      endif()
+    endif()
+  endif()
+  if(CRTMEDIA_LINUX_VAAPI_LIB AND CRTMEDIA_LINUX_VAAPI_DRM_LIB)
+    set(CRTMEDIA_LINUX_VAAPI_LIBS "${CRTMEDIA_LINUX_VAAPI_LIB}" "${CRTMEDIA_LINUX_VAAPI_DRM_LIB}")
+  else()
+    message(FATAL_ERROR "This isolated 04-gfx-media stage requires libva/libva-drm on Linux (install libva-dev). find_library failed: va=${CRTMEDIA_LINUX_VAAPI_LIB} va-drm=${CRTMEDIA_LINUX_VAAPI_DRM_LIB}")
+  endif()
 endif()
 crt_add_crtmedia_targets()
 target_compile_options(crtmedia PRIVATE ${stage_c_options})
