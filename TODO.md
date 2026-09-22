@@ -88,11 +88,11 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
   * [x] Clearly mark `05-js` as roadmap/skeleton work rather than part of the current supported preview.
   * [x] Include a concise verified-platform summary:
 
-    | Platform | Native Window | GPU    | Skia | FFmpeg | HW H.264 Decode                     |
-    | -------- | ------------- | ------ | ---- | ------ | ----------------------------------- |
-    | Linux    | Wayland       | Vulkan | Yes  | Yes    | In progress / environment-dependent |
-    | Windows  | Win32         | D3D12  | Yes  | Yes    | D3D11VA verified                    |
-    | macOS    | Cocoa         | Metal  | Yes  | Yes    | VideoToolbox verified               |
+    | Platform | Native Window | GPU    | Skia | FFmpeg | HW H.264 Decode        |
+    | -------- | ------------- | ------ | ---- | ------ | ---------------------- |
+    | Linux    | Wayland       | Vulkan | Yes  | Yes    | VA-API verified        |
+    | Windows  | Win32         | D3D12  | Yes  | Yes    | D3D11VA verified       |
+    | macOS    | Cocoa         | Metal  | Yes  | Yes    | VideoToolbox verified  |
 
 * [ ] **Prepare downloadable / directly testable release artifacts**
   2026-09-21: contract and runbook in `docs/release_preview.md`;
@@ -111,11 +111,34 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
   build a macOS `04-gfx-media` (two bugs the in-tree build hides, fixed in
   `32ab384` and `972d913`; see `docs/release_preview.md`). The repo copy of the
   release notes is updated for it (tag unchanged, commit difference explained,
-  macOS quick start). **Still open:** the maintainer uploading the macOS files
-  and pasting the updated notes into the GitHub release body (which still says
-  Windows only), Linux assets (including the first Linux
-  `media-player` link), a fresh-clone rebuild of the Windows set, a test on a
-  machine that never had CRT's build environment, and the upload decision.
+  macOS quick start).
+
+  2026-09-22: a complete Linux/x86_64 set is now also built from a **fresh
+  clone** and accepted by `prepare_release_assets.py` (7 files plus checksums
+  and manifest, ~11 min for FreeType/FFmpeg, ~3 min for Skia), in
+  `out/release/v0.4.0-preview.1-linux-x86_64/` (not committed, not uploaded).
+  It records commit `a90bf10`, **not** the tag commit `fd01d7c`, the same
+  "the tag itself does not build this stage" situation macOS hit: the tag
+  predates this same day's Linux VA-API tranche (`5c64ee5`, `e52eb1b`) and a
+  real, previously-latent bug this exact release run found and fixed
+  (`a90bf10`) -- `examples/gfx-simple/CMakeLists.txt` never linked a real
+  host `libwayland-client`, which its own stale comment claimed only started
+  mattering at `04-gfx-media`; rebuilding the packaged `gfx-simple` example
+  from a genuinely extracted `03-gfx-simple` archive (this exact quick start
+  had never actually been run from a downloaded Linux archive before, per
+  `docs/release_preview.md`'s own note) surfaced it immediately. Every
+  extracted binary was run for real: `03-gfx-simple`'s ready-made and
+  freshly-rebuilt `crtgfx_window_demo`/`crtgfx_window_example` both present
+  60 frames; `04-gfx-media`'s `crtmedia_player_demo` presents 25 frames
+  (real VA-API hardware decode active) and `crtgfx_skia_gpu_window_demo`
+  presents 5 real-Vulkan frames with `pixel_check=pass`. The repo copy of the
+  release notes is updated for it (tag unchanged, both commit differences
+  explained, a Linux quick start, and the real `llvm-ar`/`llvm-ranlib`
+  IFUNC-segfault workaround). **Still open:** the
+  maintainer uploading the macOS and Linux files and pasting updated notes
+  into the GitHub release body (which still says Windows only), a
+  fresh-clone rebuild of the Windows set, a test on a machine that never had
+  CRT's build environment, and the upload decision.
 
   * [ ] Provide release artifacts that allow an external developer to try CRT without reconstructing the entire development environment from repository history.
   * [x] Include or document the staged SDK layout:
@@ -329,8 +352,11 @@ Goal: turn the completed `04-gfx-media` milestone into the first externally cons
 #### Follow-up Promotion Milestones
 
 * [ ] **Milestone 2 — Three-platform hardware video decode**
+  Engineering evidence for all three hosts is complete (see "Hardware video
+  decode" above); what remains here is the separate public-announcement
+  decision below, not further engineering.
 
-  * [ ] Complete native Linux VA-API H.264 hardware decode evidence.
+  * [x] Complete native Linux VA-API H.264 hardware decode evidence.
   * [ ] Publish the completed platform mapping:
 
     * Linux -> VA-API

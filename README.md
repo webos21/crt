@@ -55,13 +55,10 @@ container, or translation layer.
   and Linux/aarch64. The Linux/aarch64 acceptance host is a VM whose Vulkan
   device is virtio-gpu/lavapipe rather than a physical GPU; host details and
   limits are in [`STATUS.md`](STATUS.md).
-- **Hardware H.264 decode is verified on macOS and Windows only.** VideoToolbox
-  (macOS/arm64) and D3D11VA (Windows/x64) decode real hardware frames into the
-  CPU-resident `crtmedia_frame`, with software decode as the default and the
-  fallback. Linux VA-API is not yet verified because the hosts available so
-  far have no working VA-API H.264 decoder; this is an environment limit, not a
-  limit of the software graphics/media runtime. Hardware decode is therefore
-  not claimed as cross-platform yet.
+- **Hardware H.264 decode is verified on all three platforms.** VideoToolbox
+  (macOS/arm64), D3D11VA (Windows/x64), and VA-API (Linux/x86_64, a physical
+  Intel GPU) all decode real hardware frames into the CPU-resident
+  `crtmedia_frame`, with software decode as the default and the fallback.
 - **`05-js` is roadmap, not a supported feature.** It currently packages a
   `libcrtjs` skeleton; QuickJS, the event loop, modules, and JavaScript-visible
   graphics/media bindings are planned.
@@ -111,21 +108,25 @@ state on that host, not a promise.
 | Thread-local storage | Verified | Verified | Verified | `pthread_tls_test`. (TLS as in HTTPS is covered by the sockets row.) |
 | Native window and input | Verified | Verified | Verified | Wayland (`xdg-shell`), Win32, Cocoa; keyboard, pointer, resize, close, DPI. Linux needs a reachable compositor; WSLg is useful evidence but differs from a desktop compositor. |
 | Skia CPU raster and text | Verified | Verified | Verified | Skia m148 plus FreeType text through the software frame. |
-| Skia GPU (Ganesh) | Partial | Verified | Verified | Vulkan / D3D12 / Metal live presentation with pixel-exact and mid-stream resize checks. Linux evidence is from a VM with a virtio-gpu/lavapipe Vulkan device; no physical-GPU Linux run is recorded yet. |
+| Skia GPU (Ganesh) | Verified | Verified | Verified | Vulkan / D3D12 / Metal live presentation with pixel-exact and mid-stream resize checks. Linux is now also verified on a physical GPU (Intel UHD 630, native Ubuntu desktop, 2026-09-22): `resize_frame=2 pixel_check=pass post_resize_present=pass clean_exit=pass`. Earlier VM evidence (virtio-gpu/lavapipe) remains valid for the aarch64 acceptance host. |
 | FFmpeg software media | Verified | Verified | Verified | Opt-in, narrow LGPL build: MOV/MP4/M4A, WAV, MP3 demux; H.264, AAC, MP3, PCM software decode; player and playback-pipeline tests. |
 | Native audio output | Partial | Verified | Verified | WASAPI, CoreAudio, and ALSA or PulseAudio. Linux real-device behavior is environment dependent; WSLg's PulseAudio bridge is recorded as stopping to respond after about a second of continuous audio. |
-| Hardware H.264 decode (frames delivered to CPU) | In progress | Verified | Verified | D3D11VA on Windows and VideoToolbox on macOS with real hardware frames; software decode stays the default and the fallback. Linux VA-API is blocked on a host with a working VA-API H.264 decoder. |
+| Hardware H.264 decode (frames delivered to CPU) | Verified | Verified | Verified | D3D11VA on Windows, VideoToolbox on macOS, and VA-API on Linux (physical Intel GPU, native Ubuntu desktop) all deliver real hardware frames; software decode stays the default and the fallback. |
 | Hardware decode to GPU texture (zero-copy) | Planned | Planned | Planned | Decoded surfaces are not shared with the graphics path yet. |
 | Encode, capture, streaming | Planned | Planned | Planned | No mux/encode, capture, or network streaming layer exists. |
 | JavaScript runtime (QuickJS) | Planned | Planned | Planned | `05-js` packages a `libcrtjs` skeleton only. |
 
-Hosts: Linux is an aarch64 VM (the acceptance host) plus x86_64 under WSL2;
+Hosts: Linux is an aarch64 VM (the acceptance host) plus x86_64 under WSL2,
+plus a native (non-VM, non-WSL) x86_64 desktop with a physical Intel GPU used
+for the hardware-decode and physical-GPU Skia evidence above (2026-09-22);
 Windows is x86_64; macOS is arm64 (Apple Silicon).
 
 Evidence dates: the full `ctest` suite last ran 149/149 on Windows/x64
 (2026-09-19), 121/121 on Linux/x86_64 under WSL2 (2026-09-21; two TTY-dependent
-termios tests excluded from that non-interactive run), and 132/132 on
-macOS/arm64 (2026-09-18, as recorded in [`HISTORY.md`](HISTORY.md)). The
+termios tests excluded from that non-interactive run), 132/132 on the native
+Linux/x86_64 desktop (2026-09-22, with `CRTMEDIA_ENABLE_FFMPEG=ON` and VA-API
+enabled), and 132/132 on macOS/arm64 (2026-09-18, as recorded in
+[`HISTORY.md`](HISTORY.md)). The
 Linux/aarch64 results come from its recorded acceptance runs there. Details and
 per-host limits stay in [`STATUS.md`](STATUS.md), which is authoritative if it
 and this table ever disagree.
@@ -141,17 +142,17 @@ with the GPU is not implemented yet.
 | --- | --- | --- |
 | macOS/arm64 | VideoToolbox | **Verified.** Real hardware frames, CPU transfer, clean end of stream, decoder flush/reuse, and 15 repeated create/decode/release cycles, all on hardware. |
 | Windows/x64 | D3D11VA | **Verified** on a physical Intel GPU: the same checks, plus a GPU video-decode engine counter that reads zero when idle and non-zero while decoding. |
-| Linux | VA-API | **Not verified yet.** Decoding works in software; requesting hardware falls back cleanly and reports `fallback=yes`. |
+| Linux/x86_64 | VA-API | **Verified** on a physical Intel GPU (native Ubuntu desktop, not a VM or WSL2, 2026-09-22): the same checks -- real hardware frames, CPU transfer, clean EOS, flush/reuse, and 15 repeated create/decode/release cycles, all on hardware. |
 
-Linux VA-API is blocked by the hosts available so far, not by the software
-graphics/media runtime. The aarch64 VM's Mesa driver exposes no H.264 decode
-entrypoint. Under WSL2 on an Intel GPU, a real decode deadlocks inside Intel's
-own WSL video driver even with a plain FFmpeg that does not involve CRT. Neither
-counts as Linux hardware-decode evidence; a native Linux host with a working
-VA-API H.264 decoder is still needed.
+Earlier Linux attempts hit environment limits, not a software graphics/media
+runtime defect: the aarch64 VM's Mesa driver exposes no H.264 decode
+entrypoint, and under WSL2 on an Intel GPU a real decode deadlocks inside
+Intel's own WSL video driver even with a plain FFmpeg that does not involve
+CRT. Neither counted as Linux hardware-decode evidence; closing it needed a
+native Linux host with a working VA-API H.264 decoder, which is now recorded.
 
-Hardware decode is therefore not claimed as cross-platform yet. Per-host
-evidence and the exact result format are in
+All three hosts now verify the same H.264 fixture through a real hardware
+decoder. Per-host evidence and the exact result format are in
 [`docs/crtmedia_hardware_decode_acceptance.md`](docs/crtmedia_hardware_decode_acceptance.md).
 
 ## Portability Proof
@@ -302,11 +303,13 @@ sudo apt install libvulkan-dev libwayland-dev mesa-vulkan-drivers vulkan-tools
 ```
 
 `mesa-vulkan-drivers` may be replaced with the GPU vendor's Vulkan ICD. The
-current Linux FFmpeg recipe does not enable VA-API. When that path is enabled,
-the usual development/runtime set is `libva-dev`, `libva2`, `libva-drm2`, a
-vendor VA driver, and optional `vainfo`. Embedded images should satisfy the
-same capabilities with board-vendor packages rather than copying desktop
-package lists.
+Linux FFmpeg recipe enables VA-API hardware H.264 decode unconditionally;
+building `libcrtmedia` with `CRTMEDIA_ENABLE_FFMPEG=ON` needs `libva-dev`,
+`libva2`, `libva-drm2`, `pkg-config`, and a vendor VA driver (e.g.
+`intel-media-va-driver-non-free` on Intel), plus `dpkg-dev` and optional
+`vainfo` for the isolated `04-gfx-media` distribution build's own real-host-
+library lookups. Embedded images should satisfy the same capabilities with
+board-vendor packages rather than copying desktop package lists.
 
 ### Windows 11
 

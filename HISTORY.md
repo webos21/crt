@@ -214,6 +214,76 @@ substantive update.
   packaging re-verification (their isolated-stage acceptance predates this
   tranche).
 
+- **Built the first Linux/x86_64 release asset set for `v0.4.0-preview.1`
+  from a fresh clone, and found and fixed one more real, previously-latent
+  bug getting there.** Same "Public Preview / Promotion Preparation" item
+  the Windows (2026-09-21) and macOS (2026-09-21) asset sets already closed;
+  Linux was still open. Followed the identical runbook
+  (`docs/release_preview.md`) on the same native Intel UHD 630 desktop used
+  for the VA-API work above: fresh clone of `e52eb1b`,
+  `cmake --preset linux-host-ninja-debug -DCRT_RELEASE_TAG=v0.4.0-preview.1`,
+  `crt-gfx-simple-dist`, then the isolated `04-gfx-media` stage build from the
+  pinned release-tagged source asset.
+
+  **Found immediately: `examples/gfx-simple/CMakeLists.txt` never linked a
+  real host `libwayland-client`.** Rebuilding the packaged `03-gfx-simple`
+  `gfx-simple` example from a genuinely extracted archive -- `docs/
+  release_preview.md` itself notes this exact quick start "has not yet been
+  run from a downloaded release archive" on Linux or macOS -- failed with
+  undefined `wl_proxy_*`/`wl_display_*` references. The comment this
+  replaced claimed native Wayland protocol glue "first appears in the later
+  media/GPU stage", which does not match `libcrtgfx/CMakeLists.txt`'s real
+  gate: `src/arch/linux/window_wayland_native.c` compiles into
+  `crtgfx_window_backend_objects` whenever a Vulkan loader
+  (`CRTGFX_LINUX_VULKAN_LIB`) is found at configure time -- a host
+  capability, not a stage choice -- and any normal Advanced-Graphics-capable
+  Linux dev host already has one, so `03-gfx-simple`'s own packaged
+  `libcrtgfx.a` already carried the real undefined references. This had
+  simply never been caught before because nobody had rebuilt the packaged
+  `gfx-simple` example from a real, downloaded Linux archive. Fixed
+  (`a90bf10`) with the same `NO_CMAKE_FIND_ROOT_PATH` + `dpkg-architecture`
+  multiarch `find_file()` fallback `examples/gfx-gpu/CMakeLists.txt` already
+  established for its own Vulkan/Wayland needs (this project's own
+  `crt-toolchain.cmake` sets `CMAKE_SYSROOT`, which skips the executable-link
+  ABI probe that would otherwise populate `CMAKE_LIBRARY_ARCHITECTURE`).
+  Verified for real before committing: both the freshly rebuilt and the
+  ready-made `crtgfx_window_demo`/`crtgfx_window_example` present 60 frames
+  from the extracted archive; full in-tree `ctest` (132/132) and tooling
+  test suite (72/72) unaffected.
+
+  With that fix, the release build succeeded end to end: `01-c` through
+  `03-gfx-simple` from `a90bf10` (~3 minutes including the libc++/Wayland
+  bootstrap), then the isolated `04-gfx-media` stage from the release-tagged
+  source asset (~14.5 minutes: FreeType/FFmpeg ~11, Skia ~3), passing its 8
+  stage tests, rebuilding and running the installed `gfx-gpu`, `gfx-skia`
+  (Vulkan, `resize_frame=2 pixel_check=pass post_resize_present=pass`), and
+  `media-player` examples, `verify_dist.py`, and atomic publication.
+  `tools/prepare_release_assets.py` then collected, verified, and checksummed
+  the complete 7-file set (four SDK archives plus three stage-source assets)
+  into `out/release/v0.4.0-preview.1-linux-x86_64/` (not committed, not
+  uploaded); `sha256sum -c` passes for all seven, and
+  `release-manifest-linux-x86_64.json` records `working_tree_dirty: false`
+  and commit `a90bf10` (not the tag commit `fd01d7c`, the same
+  tag-predates-the-real-build situation the macOS entry already documents --
+  here because the tag predates both this same day's whole VA-API tranche
+  and the `gfx-simple` fix). Every extracted binary was then run for real
+  from the final asset set: `03-gfx-simple`'s ready-made and freshly
+  rebuilt `crtgfx_window_demo`/`crtgfx_window_example` both present 60
+  frames; `04-gfx-media`'s prebuilt `crtmedia_player_demo` presents 25
+  frames with real VA-API hardware decode active, and its prebuilt
+  `crtgfx_skia_gpu_window_demo` presents 5 real-Vulkan frames with
+  `pixel_check=pass`. `docs/release_notes_v0.4.0-preview.1.md` gained a full
+  Linux section mirroring the existing Windows/macOS ones (downloads table,
+  quick start, the commit-vs-tag explanation, and a documented `llvm-ar`/
+  `llvm-ranlib`-over-plain-`ar`/`ranlib` recommendation for Debian/Ubuntu
+  users, given this same day's own confirmed Binutils 2.46 IFUNC-relink
+  segfault); `README.md`'s "What Already Works" matrix, "Hardware Decode
+  Status" section, and verified-platform summary in `TODO.md` were all
+  updated from "In progress"/"Partial" to "Verified" for Linux hardware
+  decode and physical-GPU Skia GPU presentation. Not done in this pass:
+  uploading the Linux (or macOS) assets to the actual GitHub release, or a
+  fresh-clone rebuild of the Windows set.
+
 ## 2026-09-21
 
 - **Updated the `v0.4.0-preview.1` release notes for the macOS/arm64 assets.**

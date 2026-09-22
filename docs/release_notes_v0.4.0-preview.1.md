@@ -50,15 +50,17 @@ State on each host, not a promise. "Partial" means a gap stated below.
 | libc / libm / libdl, libc++ runtime, pthread, sockets, mmap, TLS | Verified (libdl: partial) | Verified | Verified |
 | Native window and input | Verified (Wayland) | Verified (Win32) | Verified (Cocoa) |
 | Skia CPU raster and text | Verified | Verified | Verified |
-| Skia GPU (Ganesh) presentation | Partial (Vulkan) | Verified (D3D12) | Verified (Metal) |
+| Skia GPU (Ganesh) presentation | Verified (Vulkan, physical GPU) | Verified (D3D12) | Verified (Metal) |
 | FFmpeg software media | Verified | Verified | Verified |
 | Native audio output | Partial | Verified (WASAPI) | Verified (CoreAudio) |
-| Hardware H.264 decode, frames delivered to the CPU | Not verified | Verified (D3D11VA) | Verified (VideoToolbox) |
+| Hardware H.264 decode, frames delivered to the CPU | Verified (VA-API, physical GPU) | Verified (D3D11VA) | Verified (VideoToolbox) |
 
 The last full `ctest` runs were 149/149 on Windows/x64, 121/121 on
 Linux/x86_64 under WSL2 (two TTY-dependent termios tests excluded from that
-non-interactive run), and 132/132 on macOS/arm64. The Linux/aarch64 results come
-from its recorded acceptance runs. Per-host details and dates are in
+non-interactive run), 132/132 on a native Linux/x86_64 desktop with
+`CRTMEDIA_ENABLE_FFMPEG=ON` and VA-API enabled, and 132/132 on macOS/arm64. The
+Linux/aarch64 results come from its recorded acceptance runs. Per-host details
+and dates are in
 [`STATUS.md`](https://github.com/webos21/crt/blob/v0.4.0-preview.1/STATUS.md).
 
 For this release specifically (Windows/x64): the SDKs were built with
@@ -82,10 +84,27 @@ with resize and pixel checks), and `media-player` examples, and
 its prebuilt `media-player` and Metal demos ran, and the macOS quick start below
 was run from it.
 
+For the Linux/x86_64 assets, added the same day as the Linux VA-API hardware-
+decode tranche closed: they are built from commit **`a90bf10`**, not from the
+tag commit `fd01d7c` (see the note under Downloads for why). The SDKs were
+built with `CRT_RELEASE_TAG=v0.4.0-preview.1` from a fresh clone on a native
+(non-VM, non-WSL) Ubuntu desktop with a physical Intel GPU, Clang 21.1.8, and
+CMake 4.2.3. The `04-gfx-media` SDK was built from the extracted
+`03-gfx-simple` archive with empty caches in about 14 minutes (FreeType and
+FFmpeg about 11 minutes, Skia about 3), and passed its 8 stage tests,
+rebuilding and running the installed `gfx-gpu`, `gfx-skia` (Vulkan, with resize
+and pixel checks), and `media-player` examples, and `verify_dist.py`. Both
+`03-gfx-simple` and `04-gfx-media` archives were then extracted into a path
+containing a space: `03-gfx-simple`'s ready-made and freshly rebuilt
+`crtgfx_window_demo`/`crtgfx_window_example` both presented 60 frames,
+`04-gfx-media`'s prebuilt `crtmedia_player_demo` presented 25 frames with real
+VA-API hardware decode active, and its prebuilt `crtgfx_skia_gpu_window_demo`
+presented 5 real-Vulkan frames with a pixel check passing, and the Linux quick
+start below was run from it.
+
 ## Downloads
 
-This release attaches **Windows/x64 assets and macOS/arm64 assets**. Linux has
-no prebuilt archives.
+This release attaches **Windows/x64, macOS/arm64, and Linux/x86_64 assets**.
 
 ### Windows/x64
 
@@ -136,9 +155,37 @@ window resize. Both are fixed in `972d913`, and both fixes touch macOS-specific 
 the Windows assets are unaffected. If you build macOS from source, use `972d913` or later
 (`main`), not the tag.
 
-**Linux:** no prebuilt archives are attached to this release. Build them from
-this tag with the instructions in the
-[README](https://github.com/webos21/crt/blob/v0.4.0-preview.1/README.md#build).
+### Linux/x86_64
+
+| Asset | Size | SHA-256 |
+| --- | --- | --- |
+| `crt-v0.4.0-preview.1-linux-x86_64-04-gfx-media.tar.xz` | 21.1 MB | `d3996b48172f837d7d605f27fe5763d605f1b1de75ef3103ea0facf7e523278c` |
+| `crt-v0.4.0-preview.1-linux-x86_64-03-gfx-simple.tar.xz` | 8.9 MB | `0c40a35f7420720b523643ba658a49582b8cb7d271f4ef05338ddb924a4fed19` |
+| `crt-v0.4.0-preview.1-linux-x86_64-02-cxx.tar.xz` | 8.4 MB | `41da2f4414e4028a43396e17bd55b192c2e13fce63aff6fdec48eed72aee8ca5` |
+| `crt-v0.4.0-preview.1-linux-x86_64-01-c.tar.xz` | 4.2 MB | `be63d528078b11fd59a9de17bfc52bb21f37a07a2c0c9a992b9dce5d5be46e6f` |
+| `crt-v0.4.0-preview.1-linux-04-gfx-media-source.tar.xz` | 19.1 MB | `d2975ede38e0d59554107c880d4df266fb24200a09abc9448c1273b3297adcba` |
+| `crt-v0.4.0-preview.1-linux-03-gfx-simple-source.tar.xz` | 0.8 MB | `d784ccf2c4dd170ff35818d434c1ed2522581754dd1bd0b1bd9e4fcbfdf3cd14` |
+| `crt-v0.4.0-preview.1-linux-02-cxx-source.tar.xz` | 8.5 MB | `8d7320f4be79bd131e7e8b71bcb579174e7e9952b4d142eba5ea5470d24ac4ff` |
+
+The same guidance applies: most people need only the `04-gfx-media` archive, and
+the `*-source.tar.xz` files are the stage-source assets the packaged recipes
+download. `SHA256SUMS-linux-x86_64` lists every checksum above, and
+`release-manifest-linux-x86_64.json` records the version, source commit, and
+per-asset size and SHA-256.
+
+**The Linux assets were built from a later commit than the tag.** The tag
+`v0.4.0-preview.1` points at `fd01d7c`, well before the Linux VA-API hardware-
+decode tranche. The Linux manifest records `a90bf10`. Building the isolated
+`04-gfx-media` stage from `fd01d7c` itself would not exercise VA-API at all
+(the recipe change lands later) and hits a real, previously-latent bug this
+exact release run found and fixed the same day: `examples/gfx-simple/
+CMakeLists.txt` never linked a real host `libwayland-client`, because its own
+comment incorrectly claimed native Wayland support only starts at
+`04-gfx-media`. Rebuilding the packaged `gfx-simple` example from a genuinely
+extracted `03-gfx-simple` archive -- this quick start had never actually been
+run from a downloaded Linux archive before -- surfaced it immediately. Fixed
+in `a90bf10`, Linux-only, so the Windows and macOS assets are unaffected. If
+you build Linux from source, use `a90bf10` or later (`main`), not the tag.
 
 ## Quick start (Windows)
 
@@ -222,6 +269,52 @@ machine; a download that carries the macOS quarantine flag has not been tried,
 and if macOS refuses to run a program you can clear the flag with
 `xattr -dr com.apple.quarantine 04-gfx-media`.
 
+## Quick start (Linux)
+
+Check the download, then extract it (a path containing a space works):
+
+```sh
+sha256sum -c --ignore-missing SHA256SUMS-linux-x86_64
+tar -xJf crt-v0.4.0-preview.1-linux-x86_64-04-gfx-media.tar.xz
+```
+
+Then run a ready-made program:
+
+```sh
+04-gfx-media/examples/bin/crtmedia_player_demo 04-gfx-media/examples/media-player/test_video.mp4 30
+```
+
+It plays the bundled clip in a native window with real VA-API hardware decode
+(where the host GPU/driver supports it; software decode is the automatic
+fallback) and prints `crtmedia_player_demo: presented=30`. Without a frame
+limit the demo plays until you close its window.
+
+To rebuild a packaged example against the SDK, point CRT at your own compiler
+first. This sequence was run against the extracted `04-gfx-media` archive (it
+builds in a few seconds and presents 60 frames); the other example folders
+have their own `CMakeLists.txt`:
+
+```sh
+export CRT_CC=/usr/bin/clang CRT_CXX=/usr/bin/clang++
+export CRT_AR="$(dirname "$(readlink -f "$(command -v clang)")")/llvm-ar"
+export CRT_RANLIB="$(dirname "$(readlink -f "$(command -v clang)")")/llvm-ranlib"
+. ./04-gfx-media/activate.sh
+cmake -S 04-gfx-media/examples/gfx-simple -B build -G Ninja \
+  "-DCMAKE_TOOLCHAIN_FILE=$PWD/04-gfx-media/crt-toolchain.cmake"
+cmake --build build
+./build/crtgfx_window_example 60
+```
+
+Use `llvm-ar`/`llvm-ranlib`, not the plain `ar`/`ranlib` a Debian/Ubuntu host's
+`binutils` package installs: a real, confirmed IFUNC-relink segfault in
+Binutils 2.46 crashes `ar`/`ranlib`/`nm` on this project's own `libm.so` (see
+[`HISTORY.md`](https://github.com/webos21/crt/blob/main/HISTORY.md)'s
+2026-09-22 entry) -- LLVM's own tools have no such relink behavior. A rebuilt
+program finds the SDK's shared libraries, including the real host
+`libwayland-client.so`/`libva.so`/`libva-drm.so` this stage links against,
+through the RPATH/`-rpath-link` that `crt-toolchain.cmake` and the packaged
+example's own `CMakeLists.txt` set.
+
 ## Requirements
 
 CRT does not bundle a toolchain. Build machines need Git, CMake 3.25 or newer,
@@ -231,29 +324,36 @@ import libraries. Developer Mode must be enabled for building and porting (CRT
 uses real symbolic links), and `04-gfx-media` needs a D3D12-capable display
 driver. On macOS the assets were built and run on Apple Silicon with macOS
 26.6.2, Xcode's Apple clang 21.0.0, CMake 4.4.3, Ninja 1.13.2, and Python 3.14;
-`04-gfx-media` needs Metal. Package lists for Linux and macOS are in the
+`04-gfx-media` needs Metal. On Linux the assets were built and run on a native
+Ubuntu desktop with Clang 21.1.8, CMake 4.2.3, Ninja 1.13.2, and Python 3.14,
+with a physical Intel UHD Graphics 630 GPU (Mesa's Vulkan ICD and `iHD` VA-API
+driver); `04-gfx-media` needs a Vulkan-capable GPU and, for hardware decode, a
+VA-API driver (falls back to software otherwise). Package lists for Linux and
+macOS are in the
 [README](https://github.com/webos21/crt/blob/v0.4.0-preview.1/README.md#prerequisites).
 
 ## Known limitations
 
-- **Hardware decode is not cross-platform yet.** It is verified on Windows
-  (D3D11VA, on a physical Intel GPU) and macOS (VideoToolbox). Linux VA-API is
-  not verified: the aarch64 VM's Mesa driver exposes no H.264 decode entrypoint,
-  and under WSL2 on an Intel GPU a real decode deadlocks inside Intel's own WSL
-  video driver even with a plain FFmpeg. Software decode is always the default
-  and the fallback, and on Linux a hardware request falls back cleanly.
-  Decoded surfaces are not shared with the GPU (no zero-copy) yet.
-- **Linux graphics evidence comes from a VM.** The Linux/aarch64 acceptance host
-  uses a virtio-gpu/lavapipe Vulkan device; Vulkan on a physical GPU has not been
-  run. Linux needs a reachable Wayland compositor with `xdg-shell`.
-- **No prebuilt Linux archives** in this release, and the `media-player` example
-  has been linked in the isolated stage only on Windows and macOS.
-- **The macOS assets come from a later commit than the tag** (`972d913`, not
-  `fd01d7c`) and are unsigned; see Downloads. Building macOS from the tag itself
-  does not work.
-- **Not tested on a clean machine.** The Windows and macOS archives were
-  extracted and run from a fresh path on the development machines, not on a
-  machine that never had CRT's build environment.
+- **Hardware decode is verified on all three platforms, but only zero-copy is
+  still missing.** Windows (D3D11VA), macOS (VideoToolbox), and Linux (VA-API,
+  a physical Intel GPU) all deliver real hardware frames. Software decode is
+  always the default and the fallback, and a hardware request falls back
+  cleanly wherever hardware is unavailable. Decoded surfaces are not shared
+  with the GPU (no zero-copy) yet on any platform.
+- **The main Linux graphics acceptance host is still a VM.** The Linux/aarch64
+  acceptance host (used for the cross-host `03-gfx-simple -> 04-gfx-media`
+  stage-build baseline) uses a virtio-gpu/lavapipe Vulkan device. Real
+  physical-GPU Linux evidence now exists separately (the x86_64 desktop used
+  for VA-API and for these release assets), but is not yet the recorded
+  baseline for that broader stage-build acceptance. Linux needs a reachable
+  Wayland compositor with `xdg-shell`.
+- **The macOS and Linux assets come from a later commit than the tag**
+  (`972d913` and `a90bf10`, not `fd01d7c`) and the macOS ones are unsigned; see
+  Downloads. Building macOS or Linux from the tag itself does not work as well
+  as building from `main`.
+- **Not tested on a clean machine.** The Windows, macOS, and Linux archives
+  were extracted and run from a fresh path on the development machines, not on
+  a machine that never had CRT's build environment.
 - **No encode, capture, or streaming layer.** The FFmpeg build is decode and demux
   only.
 - **`05-js` is not part of this preview.** It is a `libcrtjs` skeleton; QuickJS,
@@ -264,10 +364,10 @@ driver. On macOS the assets were built and run on Apple Silicon with macOS
 
 ## Next
 
-Linux release archives, macOS signing and notarization, verification on a clean
-machine, Linux VA-API
-evidence on a native host, zero-copy hardware decode to GPU textures, and the
-`05-js` JavaScript stage. Open work is tracked in
+Uploading the macOS and Linux assets and pasting these updated notes into the
+GitHub release body, macOS signing and notarization, verification on a clean
+machine, a fresh-clone rebuild of the Windows set, zero-copy hardware decode
+to GPU textures, and the `05-js` JavaScript stage. Open work is tracked in
 [`TODO.md`](https://github.com/webos21/crt/blob/main/TODO.md).
 
 Full documentation: [README](https://github.com/webos21/crt/blob/v0.4.0-preview.1/README.md),
