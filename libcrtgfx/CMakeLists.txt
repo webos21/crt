@@ -20,6 +20,9 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/crtgfx_gpu_sources.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/crtgfx_gpu_targets.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/crtgfx_skia_targets.cmake")
 set(CRTGFX_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
+# Zero-copy decoded textures Tranche 1 (2026-09-23) -- see crtgfx_skia_
+# targets.cmake's own top comment for why crtgfx_skia_objects needs this.
+set(CRTMEDIA_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/libcrtmedia/include")
 set(CRTGFX_WIN32_SHIM_ROOT "${CMAKE_SOURCE_DIR}/libstdc++/third_party/win32_shim")
 set(CRTGFX_LIBC_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/libc/include")
 set(CRTGFX_LIBCXX_UNEXPORTED "${CMAKE_SOURCE_DIR}/libstdc++/third_party/libcxx/libc++.unexported.exp")
@@ -2119,6 +2122,47 @@ if(CRTGFX_ENABLE_SKIA)
     install(FILES "${CMAKE_SOURCE_DIR}/examples/gfx-skia/CMakeLists.txt"
       DESTINATION examples/gfx-skia COMPONENT crt-gfx
     )
+  endif()
+
+  # crtgfx_skia_media_window_demo: manual, real on-screen acceptance demo
+  # for the zero-copy decoded-texture bridge (2026-09-23, "Zero-copy
+  # decoded textures" Tranche 1 -- crtgfx/skia_media.h, docs/crtmedia_
+  # zero_copy_decode_acceptance.md) -- see tools/skia_media_window_demo.cc's
+  # own top comment for the full "why". Only ever real on macOS today
+  # (crtgfx_skia_import_media_frame() is declared only under
+  # CRTGFX_HAVE_METAL, crtgfx/skia_media.h's own comment), so gated on
+  # CRT_TARGET_OS macos directly rather than the more general CRTGFX_GPU_
+  # BACKEND_ENABLED condition crtgfx_skia_gpu_window_demo just above uses;
+  # also needs the real crtmedia_codec_dequeue_gpu_frame() this whole
+  # bridge exists to feed, so gated on CRTMEDIA_ENABLE_FFMPEG too (crtmedia_
+  # codec.c, and therefore that function, is compiled out of libcrtmedia
+  # entirely otherwise -- examples/README.md's own "compiled out ... unless
+  # CRTMEDIA_ENABLE_FFMPEG" note). Same "needs a real desktop session,
+  # never add_test()-registered" precedent as that sibling.
+  if(CRTGFX_GPU_BACKEND_ENABLED AND CRT_TARGET_OS STREQUAL "macos" AND CRTMEDIA_ENABLE_FFMPEG)
+    add_executable(crtgfx_skia_media_window_demo
+      ${CRT_STARTUP_OBJECTS}
+      tools/skia_media_window_demo.cc
+    )
+    # crtmedia linked directly here, not through crtgfx_skia's own PUBLIC
+    # interface -- see crtgfx_skia_targets.cmake's own crt_add_crtgfx_
+    # skia_static_target() comment for the real macOS archive-scan-
+    # ordering regression that would otherwise cause.
+    target_link_libraries(crtgfx_skia_media_window_demo PRIVATE crt_cxx_build_flags crtgfx_skia crtmedia)
+    target_include_directories(crtgfx_skia_media_window_demo PRIVATE
+      # codec_test_control.h is private and non-installed (this demo's own
+      # zero_copy diagnostic RESULT field needs it, same as libcrtmedia/
+      # tests/zero_copy_test.c) -- crtmedia's own public include/ already
+      # arrives transitively via crtgfx_skia's PUBLIC crtmedia link
+      # (libcrtgfx/cmake/crtgfx_skia_targets.cmake).
+      "${CMAKE_SOURCE_DIR}/libcrtmedia/src"
+    )
+    target_compile_definitions(crtgfx_skia_media_window_demo PRIVATE
+      CRTMEDIA_TEST_VIDEO_PATH="${CMAKE_SOURCE_DIR}/libcrtmedia/assets/test_video.mp4"
+    )
+    crt_wire_skia_executable(crtgfx_skia_media_window_demo SKIP_MACOS_DEAD_STRIP)
+    crt_link_startup_end_objects(crtgfx_skia_media_window_demo)
+    add_dependencies(crtgfx_skia_media_window_demo cxx c crt1 crtgfx_skia crtmedia)
   endif()
 
   # crtmedia_frame_skia_smoke: the real-Skia half of libcrtmedia's CPU

@@ -10,6 +10,118 @@ substantive update.
 
 ## 2026-09-23
 
+- **Zero-copy decoded textures, Tranche 0 (frozen contract) and Tranche 1
+  (macOS/arm64 first green, VideoToolbox -> Metal).**
+  `docs/crtmedia_zero_copy_decode_acceptance.md` (new) freezes the tranche
+  this promotes from `Planned`: `crtmedia_gpu_frame`'s public layout stays
+  unchanged; `native_handle`'s real per-host identity when `memory_kind ==
+  GPU` is now documented (macOS: a `CVPixelBufferRef` borrowed from the
+  retained `AVFrame` in `release_context`); `libcrtmedia` gains no build
+  dependency on `libcrtgfx`; `crtmedia_codec_is_hardware_accelerated()`'s
+  promise is broadened, not redefined, to also cover a successful zero-copy
+  delivery.
+
+  **crtmedia side** (`libcrtmedia/src/codec.c`, `include/crtmedia/codec.h`):
+  new `crtmedia_codec_dequeue_gpu_frame()`, additive next to the existing
+  `crtmedia_codec_dequeue_output()` (freely interchangeable frame-by-frame
+  on the same codec instance -- both just read the next `avcodec_receive_
+  frame()` result). Real zero-copy branch when `codec->hw_pix_fmt ==
+  AV_PIX_FMT_VIDEOTOOLBOX`: `av_frame_ref()`s the still-hardware-resident
+  frame (no `av_hwframe_transfer_data()` call in that branch at all -- the
+  structural zero-copy guarantee), fills `crtmedia_gpu_frame` with
+  `memory_kind = CRTMEDIA_GPU_MEMORY_GPU`, `native_handle =
+  avframe->data[3]` (the real `CVPixelBufferRef` FFmpeg's own `hwcontext_
+  videotoolbox.c` already places there), `plane_count = 0`. Every other
+  hardware pixel format (D3D11/VAAPI, not yet given a real zero-copy
+  branch) falls back to the same `av_hwframe_transfer_data()` download
+  `dequeue_output()` already uses, packaged as a CPU-memory `crtmedia_gpu_
+  frame` instead -- so the new API is already fully usable, just not yet
+  zero-copy, on Windows/Linux. New private diagnostic `hw_zero_copy_
+  delivered` (`codec_test_control.h`) tracks the zero-copy path
+  specifically, alongside the existing six-state model.
+  `libcrtmedia/tests/zero_copy_test.c` (new): decodes the real 64x64/25-
+  frame MP4 fixture through the new API with `PREFER_HARDWARE_DECODE` set;
+  real result on this host --
+  `RESULT backend=videotoolbox hw_requested=yes hardware_accelerated=yes
+  zero_copy_expected=yes zero_copy_delivered=yes saw_gpu_frame=yes
+  saw_cpu_frame=no frame_count=25` (every one of the 25 real frames
+  delivered zero-copy). A second run with no hardware preference confirms
+  a software-only decoder never reports a zero-copy frame. Full `ctest`:
+  133/133 (up from 132, the one new test).
+
+  **crtgfx side** (`libcrtgfx/include/crtgfx/skia_media.h`, new;
+  `skia_bridge.cc`'s existing Metal branch, extended): `crtgfx_skia_
+  import_media_frame()` -- `CVPixelBufferRef` -> two real `MTLTexture`s
+  (Y: `R8Unorm`, UV: `RG8Unorm`) via `CVMetalTextureCache` -> `GrYUVA
+  BackendTextures` -> `SkImages::TextureFromYUVATextures()`, sampled
+  directly as YUV (no RGBA intermediate conversion texture, matching the
+  contract's own explicit decision). Every CoreVideo/CoreFoundation
+  function and the two Metal pixel-format integer constants are hand-
+  declared `extern "C"`, matching `gpu_metal.c`'s own no-real-Apple-header
+  policy for this project's own authored code (this translation unit
+  already requires real Apple SDK headers for Skia's own `GrMtlBackend
+  Context.h`, per that branch's pre-existing top comment -- not license to
+  import more). Two real signatures/behaviors were confirmed via
+  standalone Objective-C programs compiled with the system's own real
+  clang, outside this project's toolchain, before writing any of this: (1)
+  the exact `CVMetalTextureCacheCreate`/`CVMetalTextureCacheCreateTexture
+  FromImage`/`CVMetalTextureGetTexture` call sequence produces real,
+  correctly-sized Y/UV textures from a real `CVPixelBuffer`, and Apple's
+  real `MTLPixelFormatR8Unorm`/`RG8Unorm` values are 10/30; (2) releasing
+  the `CVMetalTextureRef` and the `CVMetalTextureCache` itself immediately
+  after independently retaining the `MTLTexture` (matching `GrMtlTexture
+  Info::fTexture.retain()`'s own semantics) leaves that texture still
+  valid and still sampling the pixel buffer's live memory -- confirmed by
+  writing a fresh byte pattern into the buffer *after* releasing both and
+  reading it back through the still-held texture. This is what let the
+  release context hold only the retained `crtmedia_gpu_frame` (whose own
+  `AVFrame` is what actually keeps the real `CVPixelBuffer` alive), not
+  the `CVMetalTextureRef`/cache. Ownership: on success `crtgfx_skia_
+  import_media_frame()` moves `*frame` into the returned `SkImage`'s
+  release context, `crtmedia_gpu_frame_release()`d only once Ganesh
+  actually destroys the imported textures; on failure the caller still
+  owns `frame`.
+
+  New demo `crtgfx_skia_media_window_demo` (`libcrtgfx/tools/skia_media_
+  window_demo.cc`) decodes the same real fixture and presents each
+  zero-copy frame through the existing, unchanged Ganesh/`crtgfx_gpu_
+  surface` path in a real on-screen window, with the same resize-and-
+  pixel-check discipline `docs/libcrtgfx_live_presentation_acceptance.md`
+  established for the synthetic-scene demo it mirrors -- except the pixel
+  check here asserts real, non-degenerate decoded content (no ground-truth
+  values exist for real video, unlike the synthetic reference scene) and
+  that the checked frame was actually delivered zero-copy. Two real runs
+  on this host: `RESULT backend=metal frames_presented=25 resize_frame=1
+  pixel_check=pass zero_copy=yes post_resize_present=n/a clean_exit=pass`
+  and, with a scripted mid-stream resize, `RESULT backend=metal
+  frames_presented=20 resize_frame=2 pixel_check=pass zero_copy=yes
+  post_resize_present=pass clean_exit=pass`.
+
+  New CMake plumbing (`libcrtgfx/cmake/crtgfx_skia_targets.cmake`,
+  `libcrtgfx/CMakeLists.txt`, `distribution/stages/04-gfx-media/
+  CMakeLists.txt`): `CRTMEDIA_INCLUDE_DIR` gives `crtgfx_skia_objects`
+  (macOS only) crtmedia's public headers; `crtgfx_skia`/`crtgfx_skia_
+  shared` deliberately do **not** link `crtmedia` themselves -- each real
+  consumer of `crtgfx_skia_import_media_frame()` links it directly (matches
+  the contract's own "third bridge component" framing more literally, and
+  sidesteps a real, confirmed-innocent-but-alarming detour: an initial
+  attempt to add the link inside `crtgfx_skia` itself produced dozens of
+  undefined `std::__1::...` symbols building the new demo, which looked
+  exactly like this project's own documented "libc++ linked before
+  libskia.a" archive-order failure class -- but the exact same failure
+  reproduced on the pre-existing, unrelated `crtgfx_skia_gpu_window_demo`
+  too, and disappeared once `CRT_USE_IMPORTED_LIBCXX=ON` was actually set
+  (this session's own dev build tree still had it off; `CRTGFX_ENABLE_SKIA`
+  has no equivalent macOS require-imported-libc++ guard the way the
+  Windows branch already does). Link order was never the real cause.
+
+  Not yet done: the isolated `04-gfx-media` distribution stage has not
+  been rebuilt with this bridge (deferred to a later "close distribution
+  and package acceptance" step, mirroring "Hardware video decode" Step
+  7's own precedent); Windows (Tranche 2, device-affinity question first)
+  and Linux (Tranche 3, VA-API/Vulkan interop question first) are not
+  started.
+
 - **Posted the main public launch (Show HN or equivalent) for CRT.** The
   submission has been made/requested by the maintainer, closing `TODO.md`'s
   "Public Preview / Promotion" item for it. Whatever response it draws

@@ -61,22 +61,64 @@ newest entry first) rather than leaving it here.
 
 Promoted 2026-09-22 from `Planned` (`HISTORY.md`'s own "Hardware video
 decode" closure entry -- full per-step evidence for macOS/Windows/Linux
-hardware decode lives there now, not in this file). This is a stub, not a
-phased plan: connect decoded hardware surfaces (D3D11 texture,
-`CVPixelBuffer`/Metal texture, VA-API surface) to the native graphics path
-without a mandatory CPU readback, where the host supports it, with a
-measured copy fallback where it does not.
+hardware decode lives there now, not in this file). Connect decoded
+hardware surfaces (D3D11 texture, `CVPixelBuffer`/Metal texture, VA-API
+surface) to the native graphics path without a mandatory CPU readback,
+where the host supports it, with a measured copy fallback where it does
+not. Recommended host order and full frozen contract:
+`docs/crtmedia_zero_copy_decode_acceptance.md` (Tranche 0, closed
+2026-09-23 -- ownership/lifetime model, `native_handle` per-host identity,
+the new `crtmedia_codec_dequeue_gpu_frame()` API shape, the
+`crtgfx_skia_media` bridge boundary, and the acceptance gate every host
+tranche below closes against).
 
-* [ ] Design explicit ownership and synchronization for each hardware
-  surface type (D3D11VA -> D3D12, VideoToolbox -> Metal, VA-API -> Vulkan).
-* [ ] Decide the acceptance host order and per-host acceptance contract
-  (mirroring `docs/crtmedia_hardware_decode_acceptance.md`'s own shape for
-  the decode tranche this follows).
-* [ ] Demonstrate decode -> GPU texture -> Skia presentation on at least one
-  host before claiming general zero-copy support.
-* [ ] Keep the existing CPU-resident `crtmedia_frame` contract and
-  `CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE` opt-in unchanged; this is
-  additive, not a replacement.
+* [x] **0. Freeze the zero-copy acceptance contract.**
+  `docs/crtmedia_zero_copy_decode_acceptance.md`. No public ABI changed;
+  `crtmedia_gpu_frame`'s layout stays frozen, `native_handle`'s real
+  per-host identity and lifetime are now documented, and `libcrtmedia` gets
+  no build dependency on `libcrtgfx` (a third bridge component depends on
+  both, mirroring `crtgfx_skia*`'s existing shared-target split).
+* [x] **1. macOS/arm64 first green (VideoToolbox -> Metal).**
+  Closed 2026-09-23, recorded in `HISTORY.md`. `crtmedia_codec_dequeue_
+  gpu_frame()` (`libcrtmedia/src/codec.c`): additive next to `dequeue_
+  output()`, real zero-copy branch when `hw_pix_fmt ==
+  AV_PIX_FMT_VIDEOTOOLBOX` (`native_handle` = the retained `AVFrame`'s own
+  `CVPixelBufferRef`, `plane_count = 0`), CPU-transfer fallback on every
+  other host so the API is already usable everywhere; `crtmedia_codec_is_
+  hardware_accelerated()` broadened (not redefined), existing `dequeue_
+  output()` callers see byte-identical behavior. `crtgfx_skia_import_
+  media_frame()` (`crtgfx/skia_media.h`, `skia_bridge.cc`'s Metal branch):
+  real `CVPixelBuffer` -> `CVMetalTextureCache` Y/UV textures ->
+  `GrYUVABackendTextures` -> `SkImage`, no RGBA intermediate, verified via
+  two standalone real-clang probes on this host before landing. New demo
+  `crtgfx_skia_media_window_demo` presents 20-25 real decoded frames
+  end to end with a real pixel check and a scripted resize, both passing,
+  `zero_copy=yes`. Full regression green (138/138 `ctest` with
+  `CRTGFX_ENABLE_SKIA=ON`/`CRT_USE_IMPORTED_LIBCXX=ON`). **Still open:**
+  the isolated `04-gfx-media` distribution stage has not yet built this
+  bridge (deferred to Step 6 below, mirroring "Hardware video decode"'s
+  own Step 7 precedent), and device affinity (Tranche 2's own concern) is
+  moot on this host's effectively-single-GPU topology, not yet proven
+  handled in general.
+* [ ] **2. Windows/x64 (D3D11VA -> D3D12).** Resolve device affinity
+  between FFmpeg's own hardware-device choice and `crtgfx_gpu_device`'s
+  choice (real multi-GPU risk, deferred from Tranche 1 on purpose) before
+  attempting shared-resource interop; measure and clearly report a
+  GPU-copy fallback wherever true zero-copy is not available.
+* [ ] **3. Linux (VA-API -> Vulkan).** Decide whether to use FFmpeg's own
+  Vulkan frame mapping or a direct DRM PRIME/dma-buf import, verified
+  against this project's pinned FFmpeg version and its Vulkan 1.1
+  requirement (`libcrtgfx`'s own Vulkan instance request) before writing
+  any surface-import code.
+* [ ] **4. Normalize the acceptance matrix across all three hosts,** mirroring
+  `docs/crtmedia_hardware_decode_acceptance.md`'s own per-host results table.
+* [ ] **5. Ownership and regression validation:** repeated create/decode/
+  destroy cycles leak no platform-native surface, existing CPU-resident and
+  software-only paths stay green on every host after this tranche's changes.
+* [ ] **6. Close distribution and package acceptance** for the new bridge
+  component the same way "Hardware video decode" Step 7 did (fresh-clone
+  isolated `04-gfx-media` stage build, binary-dependency audit) once every
+  host above is green.
 
 
 ### Next Release

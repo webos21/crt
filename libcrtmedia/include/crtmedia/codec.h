@@ -5,6 +5,7 @@
 #include "crtmedia/audio.h"
 #include "crtmedia/format.h"
 #include "crtmedia/frame.h"
+#include "crtmedia/gpu_frame.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -96,6 +97,39 @@ crtmedia_result crtmedia_codec_queue_input(crtmedia_codec* codec, const void* da
 crtmedia_result crtmedia_codec_dequeue_output(
     crtmedia_codec* codec, crtmedia_frame* out_video_frame, crtmedia_audio_buffer* out_audio_buffer, int* out_eof);
 
+/* Zero-copy sibling of crtmedia_codec_dequeue_output() above (2026-09-23,
+ * "Zero-copy decoded textures" Tranche 0/1 --
+ * docs/crtmedia_zero_copy_decode_acceptance.md has the full frozen
+ * contract). Same calling convention, same CRTMEDIA_WOULD_BLOCK/EOF
+ * behavior, and freely interchangeable with dequeue_output() frame-by-
+ * frame on the same codec instance -- this only changes how the *next*
+ * already-decoded frame is packaged, not which frame comes next.
+ *
+ * Fills `*out_video_frame` (crtmedia/gpu_frame.h) as one of:
+ *   - memory_kind == CRTMEDIA_GPU_MEMORY_GPU, native_handle a real
+ *     per-host native surface handle, plane_count == 0 -- only when a
+ *     real hardware-resident frame was observed AND this host has a real
+ *     zero-copy path implemented (currently: macOS/VideoToolbox only,
+ *     native_handle == a CVPixelBufferRef borrowed from the retained
+ *     AVFrame `crtmedia_gpu_frame.release`/`release_context` keeps
+ *     alive).
+ *   - memory_kind == CRTMEDIA_GPU_MEMORY_CPU, native_handle == NULL, real
+ *     pixel planes otherwise -- a hardware-resident frame was observed
+ *     but this host has no zero-copy path yet (falls back to the same
+ *     av_hwframe_transfer_data() download dequeue_output() itself uses),
+ *     or the frame was decoded in software to begin with.
+ * A caller must check memory_kind before touching native_handle, exactly
+ * like crtmedia_gpu_frame's own existing contract already requires.
+ *
+ * Broadens (does not redefine) crtmedia_codec_is_hardware_accelerated():
+ * it becomes true from either this function's zero-copy delivery or
+ * dequeue_output()'s CPU-transfer delivery -- a caller using only
+ * dequeue_output() observes byte-identical behavior to before this
+ * function existed. */
+crtmedia_result crtmedia_codec_dequeue_gpu_frame(
+    crtmedia_codec* codec, crtmedia_gpu_frame* out_video_frame, crtmedia_audio_buffer* out_audio_buffer,
+    int* out_eof);
+
 /* Discards every buffered input/output and resets end-of-stream state --
  * matching AMediaCodec_flush()'s own real use case (a real seek: the
  * caller is about to queue input from a new position and any already-
@@ -103,25 +137,31 @@ crtmedia_result crtmedia_codec_dequeue_output(
 crtmedia_result crtmedia_codec_flush(crtmedia_codec* codec);
 
 /* Real, honest report (2026-09-08, "hardware decode, phase A"; semantics
- * corrected 2026-09-18, Tranche 2) of whether `codec` has actually
- * decoded at least one real hardware-backed frame and transferred it to
- * CPU memory on this host -- only ever true for a video codec created
- * with CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE set (crtmedia/
- * format.h). Becomes true only once a real hardware-resident `AVFrame`
- * has actually been observed and its `av_hwframe_transfer_data()` CPU
- * download has actually succeeded -- creating the hardware device and
- * opening the codec successfully are both deliberately *not* enough on
- * their own (a decoder can open cleanly with hardware attached and still
- * never decode a single frame through it), and crtmedia_codec_create_
- * decoder() always falls back to software silently when hardware isn't
- * usable at all, matching this project's own "software fallback must
- * remain a first-class path" precedent. Once true, stays true for the
- * rest of this decoder instance's lifetime, including across
- * crtmedia_codec_flush() -- this answers whether the instance has ever
- * used hardware, not whether the immediately previous frame did. Never a
- * caller-side guess, this reflects what really happened. Returns
- * CRTMEDIA_ERROR_INVALID_ARGUMENT for a null codec/out_is_hardware,
- * CRTMEDIA_OK with `*out_is_hardware` set to 0 or 1 otherwise. */
+ * corrected 2026-09-18, Tranche 2; broadened, not redefined, 2026-09-23,
+ * "Zero-copy decoded textures" -- docs/crtmedia_zero_copy_decode_
+ * acceptance.md) of whether `codec` has actually decoded at least one
+ * real hardware-backed frame and successfully delivered it to the caller
+ * on this host -- only ever true for a video codec created with
+ * CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE set (crtmedia/format.h).
+ * Becomes true once a real hardware-resident `AVFrame` has actually been
+ * observed and either (a) crtmedia_codec_dequeue_output()'s CPU download
+ * (`av_hwframe_transfer_data()`) has actually succeeded, or (b)
+ * crtmedia_codec_dequeue_gpu_frame()'s zero-copy handoff has actually
+ * succeeded -- creating the hardware device and opening the codec
+ * successfully are both deliberately *not* enough on their own (a
+ * decoder can open cleanly with hardware attached and still never decode
+ * a single frame through it), and crtmedia_codec_create_decoder() always
+ * falls back to software silently when hardware isn't usable at all,
+ * matching this project's own "software fallback must remain a
+ * first-class path" precedent. A caller using only dequeue_output()
+ * observes byte-identical behavior to before path (b) existed. Once
+ * true, stays true for the rest of this decoder instance's lifetime,
+ * including across crtmedia_codec_flush() -- this answers whether the
+ * instance has ever used hardware, not whether the immediately previous
+ * frame did. Never a caller-side guess, this reflects what really
+ * happened. Returns CRTMEDIA_ERROR_INVALID_ARGUMENT for a null codec/
+ * out_is_hardware, CRTMEDIA_OK with `*out_is_hardware` set to 0 or 1
+ * otherwise. */
 crtmedia_result crtmedia_codec_is_hardware_accelerated(const crtmedia_codec* codec, int* out_is_hardware);
 
 #ifdef __cplusplus

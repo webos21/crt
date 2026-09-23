@@ -925,6 +925,62 @@ if(CRTMEDIA_ENABLE_FFMPEG)
     set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS ${CRTMEDIA_HW_EXTRA_TEST}_runs)
   endforeach()
 
+  # crtmedia_zero_copy_test: "Zero-copy decoded textures" Tranche 0/1
+  # (2026-09-23, docs/crtmedia_zero_copy_decode_acceptance.md) -- see that
+  # test source's own top comment. Identical build/link shape to
+  # crtmedia_hw_decode_test above (same core API, same real MP4 fixture,
+  # same private codec_test_control.h access); kept as its own executable
+  # rather than folded into that one, matching this project's own
+  # sibling-file-per-scenario convention (crtmedia_hw_decode_flush_test/
+  # _lifecycle_test just above).
+  add_executable(crtmedia_zero_copy_test
+    ${CRT_STARTUP_OBJECTS}
+    tests/zero_copy_test.c
+  )
+  target_link_libraries(crtmedia_zero_copy_test PRIVATE crt_build_flags crtmedia)
+  target_include_directories(crtmedia_zero_copy_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+  )
+  target_compile_definitions(crtmedia_zero_copy_test PRIVATE
+    CRTMEDIA_TEST_VIDEO_PATH="${CMAKE_SOURCE_DIR}/libcrtmedia/assets/test_video.mp4"
+  )
+  target_link_libraries(crtmedia_zero_copy_test PRIVATE crt_compiler_rt_builtins)
+  target_link_options(crtmedia_zero_copy_test PRIVATE
+    -nostdlib
+    -nostartfiles
+    -nodefaultlibs
+  )
+  if(CRT_TARGET_OS STREQUAL "macos")
+    target_link_options(crtmedia_zero_copy_test PRIVATE
+      -Wl,-e,_start
+      -Wl,-dead_strip
+    )
+    target_link_libraries(crtmedia_zero_copy_test PRIVATE c m dl cxx)
+    target_link_libraries(crtmedia_zero_copy_test PRIVATE System)
+  elseif(CRT_TARGET_OS STREQUAL "linux")
+    target_link_options(crtmedia_zero_copy_test PRIVATE
+      -Wl,-e,_start
+      -Wl,--gc-sections
+    )
+  elseif(CRT_TARGET_OS STREQUAL "windows")
+    target_link_options(crtmedia_zero_copy_test PRIVATE
+      -Wl,/entry:mainCRTStartup
+      -Wl,/subsystem:console
+      -Wl,/OPT:REF
+    )
+    target_link_libraries(crtmedia_zero_copy_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  endif()
+  crt_link_startup_end_objects(crtmedia_zero_copy_test)
+  add_dependencies(crtmedia_zero_copy_test c crt1 crtmedia)
+
+  add_test(NAME crtmedia_zero_copy_test_runs COMMAND crtmedia_zero_copy_test)
+  set_tests_properties(crtmedia_zero_copy_test_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    PASS_REGULAR_EXPRESSION "crtmedia_zero_copy_test: ok"
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_zero_copy_test_runs)
+
   # crtmedia_playback_pipeline_test: TODO.md's upper-runtime roadmap
   # "Finish the software player" step's own last remaining piece -- a
   # real, working demux+decode+sink+clock render loop, proving crtmedia_

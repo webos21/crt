@@ -4,7 +4,16 @@
 #
 # The caller supplies CRTGFX_ROOT plus the Skia, CRT runtime, platform-library,
 # imported-libc++, Win32 shim, emutls, and SDK-header variables referenced by
-# the original in-tree logic below.
+# the original in-tree logic below. CRTMEDIA_INCLUDE_DIR (2026-09-23, "Zero-
+# copy decoded textures" Tranche 1) is the one new one: libcrtmedia's own
+# public include/ root, needed only on macOS, only so skia_bridge.cc's own
+# Metal-branch bridge function (crtgfx/skia_media.h) can see crtmedia_gpu_
+# frame's real layout -- this does not make libcrtgfx depend on libcrtmedia
+# in general (docs/crtmedia_zero_copy_decode_acceptance.md's own "Library
+# boundary" section); only this one already-real-Apple-SDK-header
+# translation unit gains the include path, and only crtgfx_skia/crtgfx_
+# skia_shared (never plain crtgfx/crtgfx_gpu) gain the matching link
+# dependency below.
 function(crt_add_crtgfx_skia_object_target)
   set(CRTGFX_SKIA_OBJECTS)
   if(CRTGFX_ENABLE_SKIA)
@@ -236,6 +245,9 @@ function(crt_add_crtgfx_skia_object_target)
       "${CRTGFX_ROOT}/src"
       "${CRTGFX_LIBC_INCLUDE_DIR}"
     )
+    if(CRT_TARGET_OS STREQUAL "macos" AND CRTMEDIA_INCLUDE_DIR)
+      target_include_directories(crtgfx_skia_objects SYSTEM BEFORE PRIVATE "${CRTMEDIA_INCLUDE_DIR}")
+    endif()
     set_target_properties(crtgfx_skia_objects PROPERTIES
       POSITION_INDEPENDENT_CODE ON
     )
@@ -325,6 +337,27 @@ function(crt_add_crtgfx_skia_static_target)
       # `ld.lld: error: undefined symbol: D3DCompile`.
       target_link_libraries(crtgfx_skia PUBLIC "${CRTGFX_WINDOWS_D3DCOMPILER_LIB}")
     endif()
+    # Zero-copy decoded textures Tranche 1 (2026-09-23): crtgfx_skia does
+    # NOT link crtmedia itself, deliberately, even though crtgfx_skia_
+    # import_media_frame() (skia_bridge.cc's own Metal branch) calls
+    # crtmedia_gpu_frame_release(). (An initial attempt to add it here, to
+    # crtgfx_skia's own PUBLIC interface, hit a real link failure building
+    # crtgfx_skia_media_window_demo -- but the actual, confirmed cause was
+    # unrelated: this build tree had CRT_USE_IMPORTED_LIBCXX still OFF, so
+    # CRTGFX_CRT_STATIC_LIBS resolved to this project's own small bootstrap
+    # libstdc++ shim rather than the real, full imported libc++ Skia's own
+    # SkSL/iostream/thread/locale use requires -- confirmed by the exact
+    # same failure reproducing on the pre-existing, unrelated crtgfx_skia_
+    # gpu_window_demo target too, and disappearing once CRT_USE_IMPORTED_
+    # LIBCXX=ON was actually set. Link order was never the problem.) Kept
+    # out of crtgfx_skia's own interface anyway, on purpose: each real
+    # consumer of crtgfx_skia_import_media_frame() links crtmedia directly,
+    # alongside crtgfx_skia (see crtgfx_skia_media_window_demo's own target
+    # definition, libcrtgfx/CMakeLists.txt) -- matching docs/crtmedia_
+    # zero_copy_decode_acceptance.md's own "Library boundary" framing more
+    # literally: a consumer of the bridge opts into both dependencies
+    # itself, rather than crtgfx_skia forcing crtmedia on every macOS
+    # consumer whether or not it ever calls that one function.
     set_target_properties(crtgfx_skia PROPERTIES
       OUTPUT_NAME crtgfx_skia
       ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
@@ -596,6 +629,21 @@ function(crt_add_crtgfx_skia_shared_target)
         "-framework Foundation"
         "-framework Metal"
       )
+    endif()
+    if(CRT_TARGET_OS STREQUAL "macos")
+      # Zero-copy decoded textures Tranche 1 (2026-09-23): crtgfx_skia_
+      # import_media_frame() (skia_bridge.cc's own Metal branch) calls
+      # crtmedia_gpu_frame_release(). Unlike the plain `crtgfx_skia`
+      # STATIC target (see that function's own matching comment for the
+      # real archive-scan-ordering regression this exact dependency caused
+      # there), crtgfx_skia_shared performs a real dylib-to-dylib link step
+      # right here -- ordinary dynamic linking, no single-pass static-
+      # archive-scan-order hazard at all -- so linking crtmedia_shared
+      # directly on this target is safe. PUBLIC for the identical "a
+      # direct-Skia-consumer-style caller of crtgfx_skia_import_media_
+      # frame() needs this symbol too" reason crtgfx_skia_shared's own
+      # top-of-function comment already documents for CRTGFX_SKIA_LIBRARIES.
+      target_link_libraries(crtgfx_skia_shared PUBLIC crtmedia_shared)
     endif()
     if(COMMAND crt_configure_shared_runtime)
       crt_configure_shared_runtime(crtgfx_skia_shared)

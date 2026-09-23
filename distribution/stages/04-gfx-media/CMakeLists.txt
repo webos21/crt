@@ -22,6 +22,9 @@ set(CRT_USE_IMPORTED_LIBCXX ON)
 set(CRT_LIBCXX_SYSROOT "${CMAKE_SYSROOT}")
 set(CRTGFX_ROOT "${CRT_STAGE_SOURCE_ROOT}/libcrtgfx")
 set(CRTMEDIA_ROOT "${CRT_STAGE_SOURCE_ROOT}/libcrtmedia")
+# Zero-copy decoded textures Tranche 1 (2026-09-23) -- see crtgfx_skia_
+# targets.cmake's own top comment for why crtgfx_skia_objects needs this.
+set(CRTMEDIA_INCLUDE_DIR "${CRTMEDIA_ROOT}/include")
 set(CRTGFX_SKIA_ROOT "${CRT_STAGE_SKIA_PREFIX}/include")
 set(CRTGFX_SKIA_LIBRARIES
   "${CRT_STAGE_SKIA_PREFIX}/lib/libskia.a"

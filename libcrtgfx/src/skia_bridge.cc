@@ -3,6 +3,8 @@
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkImageInfo.h"
 
+#include <cstring>
+
 sk_sp<SkSurface> crtgfx_skia_make_raster_surface(const crtgfx_framebuffer* framebuffer) {
   if (framebuffer == nullptr || framebuffer->pixels == nullptr || framebuffer->width == 0 ||
       framebuffer->height == 0 || framebuffer->stride < framebuffer->width * 4u ||
@@ -754,5 +756,169 @@ crtgfx_result crtgfx_skia_gpu_surface_present(
 
   return crtgfx_gpu_surface_present(gpu_surface);
 }
+
+// Zero-copy decoded-texture bridge (2026-09-23, "Zero-copy decoded
+// textures" Tranche 1 -- see crtgfx/skia_media.h's own comment for the
+// full frozen contract and ownership rule). CVPixelBuffer -> Metal Y/UV
+// textures -> GrYUVABackendTextures -> SkImage, no CPU readback and no
+// RGBA intermediate: Ganesh samples the real NV12 planes directly as YUV.
+#include "crtgfx/skia_media.h"
+
+#if CRTGFX_HAS_SKIA_HEADERS && defined(CRTGFX_HAVE_METAL)
+
+#include "include/core/SkYUVAInfo.h"
+#include "include/gpu/ganesh/GrYUVABackendTextures.h"
+#include "include/gpu/ganesh/SkImageGanesh.h"
+
+namespace {
+
+extern "C" {
+// Real, stable, exported CoreVideo/CoreFoundation C entry points -- hand-
+// declared rather than #import<CoreVideo/CoreVideo.h>/<CoreFoundation/
+// CoreFoundation.h>, matching this project's own established no-real-
+// Apple-header policy for its own authored code (gpu_metal.c's own top
+// comment; the real Apple-SDK headers this translation unit already
+// requires, per this file's own top-of-Metal-branch comment, are Skia's
+// own forced exception, not license to import more of our own). Every
+// signature and the whole retain/release lifetime below is confirmed for
+// real (2026-09-23) via two standalone probes on this exact real macOS
+// host, outside this project's own toolchain (plain Objective-C compiled
+// with the system's real clang): (1) this exact call sequence produces
+// real, correctly-sized Y (R8Unorm) and UV (RG8Unorm) MTLTexture objects
+// from a real CVPixelBuffer; (2) releasing the CVMetalTextureRef and the
+// CVMetalTextureCache itself immediately after independently retaining
+// the MTLTexture object (matching GrMtlTextureInfo::fTexture.retain()'s
+// own semantics, below) leaves that MTLTexture still valid and still
+// sampling the pixel buffer's real, live, current memory -- confirmed by
+// writing a fresh byte pattern into the pixel buffer *after* releasing
+// both and reading it back through the still-held texture. This is what
+// makes keeping only the retained AVFrame (crtmedia_gpu_frame's own
+// release_context) alive, and not the CVMetalTextureRef/cache, both
+// correct and sufficient below.
+int CVMetalTextureCacheCreate(
+    const void* allocator, const void* cache_attributes, void* metal_device, const void* texture_attributes,
+    void** cache_out);
+int CVMetalTextureCacheCreateTextureFromImage(
+    const void* allocator, void* texture_cache, void* source_image, const void* texture_attributes,
+    unsigned pixel_format, size_t width, size_t height, size_t plane_index, void** texture_out);
+void* CVMetalTextureGetTexture(void* image);
+size_t CVPixelBufferGetWidthOfPlane(void* pixel_buffer, size_t plane_index);
+size_t CVPixelBufferGetHeightOfPlane(void* pixel_buffer, size_t plane_index);
+void CFRelease(const void* cf);
+}
+
+// Real, stable, public Metal.framework pixel-format values -- confirmed via
+// the same standalone probe above, not guessed: MTLPixelFormatR8Unorm/
+// RG8Unorm have been part of Metal's public ABI since its 2014 introduction
+// and cannot change without breaking every existing real Metal application,
+// matching this project's own established "confirmed for real" standard
+// for hand-declared host constants elsewhere (gpu_metal.c, gpu_win32.c).
+constexpr unsigned kMTLPixelFormatR8Unorm = 10;
+constexpr unsigned kMTLPixelFormatRG8Unorm = 30;
+
+// The one real thing that must outlive the returned SkImage's use of the
+// imported textures: the retained AVFrame crtmedia_gpu_frame.release_
+// context already owns, which is what actually keeps the real
+// CVPixelBuffer (frame.native_handle) alive -- not the CVMetalTextureRef/
+// CVMetalTextureCache, both released immediately after use above (see
+// this file's own confirmed-for-real comment on the hand-declared
+// CoreVideo functions).
+struct MediaFrameReleaseContext {
+  crtmedia_gpu_frame frame;
+};
+
+void ReleaseMediaFrame(SkImages::ReleaseContext release_context) {
+  auto* ctx = static_cast<MediaFrameReleaseContext*>(release_context);
+  crtmedia_gpu_frame_release(&ctx->frame);
+  delete ctx;
+}
+
+}  // namespace
+
+sk_sp<SkImage> crtgfx_skia_import_media_frame(
+    GrDirectContext* context, const crtgfx_gpu_device* device, crtmedia_gpu_frame* frame) {
+  if (context == nullptr || device == nullptr || frame == nullptr ||
+      frame->memory_kind != CRTMEDIA_GPU_MEMORY_GPU || frame->native_handle == nullptr ||
+      frame->format != CRTMEDIA_PIXEL_FORMAT_NV12) {
+    return nullptr;
+  }
+
+  crtgfx_gpu_metal_device_view device_view = {};
+  if (!crtgfx_gpu_metal_borrow_device(device, &device_view)) {
+    return nullptr;
+  }
+
+  void* pixel_buffer = frame->native_handle;
+  void* texture_cache = nullptr;
+  if (CVMetalTextureCacheCreate(nullptr, nullptr, device_view.device, nullptr, &texture_cache) != 0 ||
+      texture_cache == nullptr) {
+    return nullptr;
+  }
+
+  size_t y_width = CVPixelBufferGetWidthOfPlane(pixel_buffer, 0);
+  size_t y_height = CVPixelBufferGetHeightOfPlane(pixel_buffer, 0);
+  size_t uv_width = CVPixelBufferGetWidthOfPlane(pixel_buffer, 1);
+  size_t uv_height = CVPixelBufferGetHeightOfPlane(pixel_buffer, 1);
+
+  void* y_texture_ref = nullptr;
+  int y_result = CVMetalTextureCacheCreateTextureFromImage(
+      nullptr, texture_cache, pixel_buffer, nullptr, kMTLPixelFormatR8Unorm, y_width, y_height, 0, &y_texture_ref);
+  void* uv_texture_ref = nullptr;
+  int uv_result = (y_result != 0) ? -1
+                                   : CVMetalTextureCacheCreateTextureFromImage(
+                                         nullptr, texture_cache, pixel_buffer, nullptr, kMTLPixelFormatRG8Unorm,
+                                         uv_width, uv_height, 1, &uv_texture_ref);
+
+  GrMtlTextureInfo y_info;
+  GrMtlTextureInfo uv_info;
+  if (y_result == 0 && y_texture_ref != nullptr) {
+    y_info.fTexture.retain(CVMetalTextureGetTexture(y_texture_ref));
+    CFRelease(y_texture_ref);
+  }
+  if (uv_result == 0 && uv_texture_ref != nullptr) {
+    uv_info.fTexture.retain(CVMetalTextureGetTexture(uv_texture_ref));
+    CFRelease(uv_texture_ref);
+  }
+  CFRelease(texture_cache);
+  if (y_result != 0 || uv_result != 0) {
+    return nullptr;
+  }
+
+  GrBackendTexture textures[SkYUVAInfo::kMaxPlanes] = {
+      GrBackendTextures::MakeMtl(
+          static_cast<int>(y_width), static_cast<int>(y_height), skgpu::Mipmapped::kNo, y_info),
+      GrBackendTextures::MakeMtl(
+          static_cast<int>(uv_width), static_cast<int>(uv_height), skgpu::Mipmapped::kNo, uv_info),
+      {}, {}};
+
+  // BT.709 limited range: crtmedia_gpu_frame carries no color metadata yet
+  // (docs/crtmedia_zero_copy_decode_acceptance.md's own Scope section --
+  // matches CRTMEDIA_COLOR_SPACE_UNSPECIFIED's own default for the CPU
+  // path, src/frame_convert.c).
+  SkYUVAInfo yuva_info(
+      SkISize::Make(static_cast<int>(frame->width), static_cast<int>(frame->height)), SkYUVAInfo::PlaneConfig::kY_UV,
+      SkYUVAInfo::Subsampling::k420, kRec709_Limited_SkYUVColorSpace);
+  GrYUVABackendTextures yuva_textures(yuva_info, textures, kTopLeft_GrSurfaceOrigin);
+  if (!yuva_textures.isValid()) {
+    return nullptr;
+  }
+
+  // Ownership transfer point (crtgfx/skia_media.h's own frozen contract):
+  // release_ctx->frame takes over frame's own real backing (the retained
+  // AVFrame in release_context) via this copy; the caller's own *frame is
+  // zeroed below so a caller that still calls crtmedia_gpu_frame_release()
+  // on it finds release == NULL rather than double-releasing that AVFrame.
+  auto* release_ctx = new MediaFrameReleaseContext{*frame};
+  sk_sp<SkImage> image =
+      SkImages::TextureFromYUVATextures(context, yuva_textures, nullptr, ReleaseMediaFrame, release_ctx);
+  if (image == nullptr) {
+    delete release_ctx;
+    return nullptr;
+  }
+  memset(frame, 0, sizeof(*frame));
+  return image;
+}
+
+#endif  // CRTGFX_HAS_SKIA_HEADERS && CRTGFX_HAVE_METAL
 
 #endif  // CRTGFX_HAVE_VULKAN / CRTGFX_HAVE_D3D12 / CRTGFX_HAVE_METAL

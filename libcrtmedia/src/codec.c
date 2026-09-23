@@ -69,6 +69,15 @@ struct crtmedia_codec {
   AVBufferRef* hw_device_ctx;
   enum AVPixelFormat hw_pix_fmt;
   int hardware_accelerated;
+  /* Zero-copy decoded textures (2026-09-23, Tranche 0/1 --
+   * docs/crtmedia_zero_copy_decode_acceptance.md): true only once a real
+   * hardware frame was delivered through crtmedia_codec_dequeue_gpu_
+   * frame()'s zero-copy path specifically (memory_kind ==
+   * CRTMEDIA_GPU_MEMORY_GPU), never reset, exposed only through
+   * codec_test_control.h. hardware_accelerated above is now also set
+   * from this path (broadened, not redefined -- see crtmedia_codec_is_
+   * hardware_accelerated()'s own updated comment). */
+  int hw_zero_copy_delivered;
 };
 
 static enum AVCodecID codec_id_for_mime(const char* mime) {
@@ -441,6 +450,84 @@ static void fill_video_frame(AVFrame* avframe, crtmedia_frame* out_frame) {
   out_frame->release_context = avframe;
 }
 
+static void release_gpu_video_frame_owned_avframe(crtmedia_gpu_frame* frame, void* release_context) {
+  (void)frame;
+  AVFrame* avframe = (AVFrame*)release_context;
+  av_frame_free(&avframe);
+}
+
+/* CPU branch of crtmedia_codec_dequeue_gpu_frame() -- a real, honest
+ * crtmedia_gpu_frame(memory_kind == CRTMEDIA_GPU_MEMORY_CPU) built from
+ * `avframe`'s own real pixel planes, the same real layout fill_video_
+ * frame() above already produces for crtmedia_frame. Deliberately does
+ * not carry color_range/color_space: crtmedia_gpu_frame has no such
+ * fields today (docs/crtmedia_zero_copy_decode_acceptance.md's own Scope
+ * section -- no real external consumer needs them yet). Takes ownership
+ * of `avframe` (release frees it), matching fill_video_frame()'s own
+ * ownership contract. */
+static void fill_gpu_video_frame_cpu(AVFrame* avframe, crtmedia_gpu_frame* out_frame) {
+  memset(out_frame, 0, sizeof(*out_frame));
+  out_frame->format =
+      avframe->format == AV_PIX_FMT_NV12 ? CRTMEDIA_PIXEL_FORMAT_NV12 : CRTMEDIA_PIXEL_FORMAT_YUV420P;
+  out_frame->width = (uint32_t)avframe->width;
+  out_frame->height = (uint32_t)avframe->height;
+  out_frame->memory_kind = CRTMEDIA_GPU_MEMORY_CPU;
+  out_frame->timestamp_us = avframe->pts != AV_NOPTS_VALUE ? avframe->pts : CRTMEDIA_FRAME_TIMESTAMP_NONE;
+  out_frame->device_id = 0;
+  out_frame->native_handle = NULL;
+  uint32_t chroma_width = (out_frame->width + 1u) / 2u;
+  uint32_t chroma_height = (out_frame->height + 1u) / 2u;
+  out_frame->planes[0] =
+      (crtmedia_frame_plane){avframe->data[0], (uint32_t)avframe->linesize[0], out_frame->width, out_frame->height};
+  if (out_frame->format == CRTMEDIA_PIXEL_FORMAT_NV12) {
+    out_frame->plane_count = 2;
+    out_frame->planes[1] =
+        (crtmedia_frame_plane){avframe->data[1], (uint32_t)avframe->linesize[1], chroma_width, chroma_height};
+  } else {
+    out_frame->plane_count = 3;
+    out_frame->planes[1] =
+        (crtmedia_frame_plane){avframe->data[1], (uint32_t)avframe->linesize[1], chroma_width, chroma_height};
+    out_frame->planes[2] =
+        (crtmedia_frame_plane){avframe->data[2], (uint32_t)avframe->linesize[2], chroma_width, chroma_height};
+  }
+  out_frame->release = release_gpu_video_frame_owned_avframe;
+  out_frame->release_context = avframe;
+}
+
+/* Real zero-copy branch (macOS/VideoToolbox only today --
+ * docs/crtmedia_zero_copy_decode_acceptance.md's own native_handle
+ * table): `avframe` here is still genuinely hardware-resident (its own
+ * format equals AV_PIX_FMT_VIDEOTOOLBOX), never downloaded.
+ * FFmpeg's own hwcontext_videotoolbox.c places the real CVPixelBufferRef
+ * at avframe->data[3] and that AVFrame's own reference is exactly what
+ * keeps the pixel buffer alive -- confirmed by reading that file
+ * directly, not assumed -- so native_handle is a real, live
+ * CVPixelBufferRef for as long as `avframe` (kept alive in
+ * release_context) is not freed. No CVPixelBufferRetain()/Release() is
+ * used or needed: this project does not link against real CoreVideo
+ * headers anywhere (matching gpu_metal.c's own no-host-SDK-header
+ * policy), and none is required since ownership rides entirely on the
+ * AVFrame reference already held. crtgfx_skia_media (the real GPU-
+ * texture-import bridge, still open) is the one real consumer that
+ * interprets this pointer; this function itself never touches CoreVideo/
+ * Metal. Video is always reported as NV12 here (this project's own
+ * established "every real hardware H.264 decoder produces NV12" fact,
+ * crtmedia/frame.h's own comment) since there is no downloaded sw_frame
+ * to inspect an actual pixel format on. */
+static void fill_gpu_video_frame_videotoolbox(AVFrame* avframe, crtmedia_gpu_frame* out_frame) {
+  memset(out_frame, 0, sizeof(*out_frame));
+  out_frame->format = CRTMEDIA_PIXEL_FORMAT_NV12;
+  out_frame->width = (uint32_t)avframe->width;
+  out_frame->height = (uint32_t)avframe->height;
+  out_frame->memory_kind = CRTMEDIA_GPU_MEMORY_GPU;
+  out_frame->timestamp_us = avframe->pts != AV_NOPTS_VALUE ? avframe->pts : CRTMEDIA_FRAME_TIMESTAMP_NONE;
+  out_frame->device_id = 0;
+  out_frame->native_handle = avframe->data[3];
+  out_frame->plane_count = 0;
+  out_frame->release = release_gpu_video_frame_owned_avframe;
+  out_frame->release_context = avframe;
+}
+
 static void release_audio_buffer(crtmedia_audio_buffer* buffer, void* release_context) {
   (void)buffer;
   free(release_context);
@@ -558,6 +645,93 @@ crtmedia_result crtmedia_codec_dequeue_output(
   return CRTMEDIA_OK;
 }
 
+/* crtmedia/codec.h's own top comment has the full frozen contract
+ * (docs/crtmedia_zero_copy_decode_acceptance.md). Shares avcodec_
+ * receive_frame()'s single decode-order source of truth with dequeue_
+ * output() above -- the two are freely interchangeable frame-by-frame on
+ * the same codec instance. */
+crtmedia_result crtmedia_codec_dequeue_gpu_frame(
+    crtmedia_codec* codec, crtmedia_gpu_frame* out_video_frame, crtmedia_audio_buffer* out_audio_buffer,
+    int* out_eof) {
+  if (codec == NULL || out_eof == NULL) {
+    return CRTMEDIA_ERROR_INVALID_ARGUMENT;
+  }
+  *out_eof = 0;
+  if (codec->eof_drained) {
+    *out_eof = 1;
+    return CRTMEDIA_OK;
+  }
+
+  int ret = avcodec_receive_frame(codec->codec_ctx, codec->decode_frame);
+  if (ret == AVERROR(EAGAIN)) {
+    return CRTMEDIA_WOULD_BLOCK;
+  }
+  if (ret == AVERROR_EOF) {
+    codec->eof_drained = 1;
+    *out_eof = 1;
+    return CRTMEDIA_OK;
+  }
+  if (ret < 0) {
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+
+  if (codec->is_video) {
+    if (out_video_frame != NULL) {
+      if (codec->hw_pix_fmt != AV_PIX_FMT_NONE && codec->decode_frame->format == codec->hw_pix_fmt) {
+        codec->hw_frame_observed = 1;
+        if (codec->hw_pix_fmt == AV_PIX_FMT_VIDEOTOOLBOX) {
+          /* Real zero-copy path (macOS today -- see fill_gpu_video_frame_
+           * videotoolbox()'s own comment). av_frame_alloc()/av_frame_ref()
+           * failure is real, checked recovery, not the existing dequeue_
+           * output()'s own unchecked style: a failed ref here must never
+           * leave a dangling native_handle observable by a caller. */
+          AVFrame* owned = av_frame_alloc();
+          if (owned == NULL || av_frame_ref(owned, codec->decode_frame) < 0) {
+            if (owned != NULL) {
+              av_frame_free(&owned);
+            }
+            av_frame_unref(codec->decode_frame);
+            return CRTMEDIA_ERROR_UNSUPPORTED;
+          }
+          fill_gpu_video_frame_videotoolbox(owned, out_video_frame);
+          codec->hardware_accelerated = 1;
+          codec->hw_zero_copy_delivered = 1;
+        } else {
+          /* No real zero-copy path implemented for this host's hw_pix_fmt
+           * yet (D3D11/VAAPI -- docs/crtmedia_zero_copy_decode_
+           * acceptance.md Tranches 2/3) -- same real CPU download dequeue_
+           * output()'s own hw branch already uses, so this API stays fully
+           * usable everywhere before those tranches land. */
+          AVFrame* sw_frame = av_frame_alloc();
+          if (sw_frame == NULL || av_hwframe_transfer_data(sw_frame, codec->decode_frame, 0) < 0) {
+            if (sw_frame != NULL) {
+              av_frame_free(&sw_frame);
+            }
+            av_frame_unref(codec->decode_frame);
+            return CRTMEDIA_ERROR_UNSUPPORTED;
+          }
+          codec->hardware_accelerated = 1;
+          av_frame_copy_props(sw_frame, codec->decode_frame);
+          fill_gpu_video_frame_cpu(sw_frame, out_video_frame);
+        }
+      } else {
+        AVFrame* owned = av_frame_alloc();
+        av_frame_ref(owned, codec->decode_frame);
+        fill_gpu_video_frame_cpu(owned, out_video_frame);
+      }
+    }
+  } else {
+    if (out_audio_buffer != NULL) {
+      if (fill_audio_buffer(codec, codec->decode_frame, out_audio_buffer) != CRTMEDIA_OK) {
+        av_frame_unref(codec->decode_frame);
+        return CRTMEDIA_ERROR_UNSUPPORTED;
+      }
+    }
+  }
+  av_frame_unref(codec->decode_frame);
+  return CRTMEDIA_OK;
+}
+
 crtmedia_result crtmedia_codec_flush(crtmedia_codec* codec) {
   if (codec == NULL) {
     return CRTMEDIA_OK;
@@ -592,5 +766,6 @@ crtmedia_result crtmedia_codec_test_get_hw_diagnostics(
   out_diagnostics->hw_pixfmt_offered = codec->hw_pixfmt_offered;
   out_diagnostics->hw_frame_observed = codec->hw_frame_observed;
   out_diagnostics->hw_frame_transferred = codec->hardware_accelerated;
+  out_diagnostics->hw_zero_copy_delivered = codec->hw_zero_copy_delivered;
   return CRTMEDIA_OK;
 }
