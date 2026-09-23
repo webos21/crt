@@ -8,6 +8,30 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-23
+
+- **Posted the main public launch (Show HN or equivalent) for CRT.** The
+  submission has been made/requested by the maintainer, closing `TODO.md`'s
+  "Public Preview / Promotion" item for it. Whatever response it draws
+  (questions, issues, corrections) is now real external feedback, not
+  something to plan for in the abstract -- the still-open "soft-launch"
+  and "update README/FAQ from real feedback" items in `TODO.md` are where
+  that gets acted on as it arrives.
+
+- **Decided not to pursue clean-machine verification of the
+  `v0.4.0-preview.1` release artifacts by acquiring a dedicated clean
+  device.** That was `TODO.md`'s "Verify the published release artifacts
+  from a machine that has never had CRT's build environment" item. Real
+  clean-machine coverage now comes from whoever actually downloads the
+  release after the public launch above -- their own machine is a more
+  representative clean environment than anything set up on purpose for this
+  project, and it needs no dedicated hardware/VM budget here. The
+  maintainer will do this themselves where relevant; this project waits for
+  and acts on real user issue reports against the published archives
+  instead of pre-emptively simulating one. Removed the corresponding
+  `TODO.md` checklist item; nothing else in the release-artifact acceptance
+  work changes.
+
 ## 2026-09-22
 
 - **Synchronized every public-facing status document against the actual repo

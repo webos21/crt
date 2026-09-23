@@ -351,9 +351,12 @@ Not yet done:
 - A fresh-clone rebuild of the Windows set. It is not needed for consistency:
   the tag `v0.4.0-preview.1` points at `fd01d7c`, the commit the assets record.
   It would only remove the "existing build directory was reused" limit above.
-- A test on a machine that has never had CRT's build environment. The Windows
-  check above was a clean extraction path on a development machine, not a clean
-  machine; the same is true of the macOS and Linux checks.
+- A dedicated clean-machine test is not planned here (`HISTORY.md`,
+  2026-09-23): the checks above ran from a clean extraction path on a
+  development machine, not a genuinely clean one, on all three hosts, but
+  this project is not acquiring a dedicated clean device to close that gap.
+  Real coverage now comes from whoever downloads the release after the
+  public launch; watch for and act on their issue reports instead.
 - Re-running the hardware-decode-by-default packaged `crtmedia_player_demo`
   (`HISTORY.md`, 2026-09-22) on macOS and Linux -- this release's own
   `crtmedia_player_demo` predates that change and still only decodes in

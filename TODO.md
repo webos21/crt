@@ -57,39 +57,6 @@ newest entry first) rather than leaving it here.
 
 ## In Progress
 
-### Public Preview / Promotion
-
-Completed work (README landing page, "What Already Works" matrix,
-Portability Proof, hardware-decode-status docs, FAQ, first release publish,
-public-facing doc sync) moved to `HISTORY.md` (2026-09-21/22 entries) --
-this section only tracks what is not done yet.
-
-* [ ] Finish the three-platform visual demo: only a Windows clip exists so
-  far (`README.md`'s "Demo" section); record the same application on Linux
-  and macOS too, with the same evidence (native window, Skia, text, input,
-  resize, GPU presentation, FFmpeg playback where practical).
-* [ ] Verify the published `v0.4.0-preview.1` release artifacts from a
-  machine that has never had CRT's build environment.
-* [ ] Soft-launch to a few targeted technical communities (C/C++ systems,
-  embedded Linux, HMI/IVI, graphics/runtime developers) and update
-  README/FAQ from real feedback before the main announcement.
-* [ ] Prepare and post the main public launch (Show HN or equivalent),
-  centered on working evidence over architectural ambition.
-* [ ] Publish a separate technical/public announcement for the completed
-  three-platform hardware video decode (Linux VA-API, Windows D3D11VA,
-  macOS VideoToolbox), distinct from the main launch above.
-
-### Next Release
-
-* [ ] Re-verify the hardware-decode-by-default packaged
-  `crtmedia_player_demo`/`examples/media-player` (`HISTORY.md`, 2026-09-22)
-  on macOS -- already done and verified on Windows.
-* [ ] Re-verify it on Linux too.
-* [ ] Produce the next release from one frozen tag/commit on every host:
-  `v0.4.0-preview.1`'s three asset sets each record a different commit than
-  the tag, for real, documented reasons (`docs/release_preview.md`);
-  avoiding a repeat is a process fix, not new engineering.
-
 ### Zero-copy decoded textures
 
 Promoted 2026-09-22 from `Planned` (`HISTORY.md`'s own "Hardware video
@@ -111,6 +78,25 @@ measured copy fallback where it does not.
   `CRTMEDIA_FORMAT_KEY_PREFER_HARDWARE_DECODE` opt-in unchanged; this is
   additive, not a replacement.
 
+
+### Next Release
+
+* [ ] Re-verify the hardware-decode-by-default packaged
+  `crtmedia_player_demo`/`examples/media-player` (`HISTORY.md`, 2026-09-22)
+  on macOS -- already done and verified on Windows.
+* [ ] Re-verify it on Linux too.
+* [ ] Produce the next release from one frozen tag/commit on every host:
+  `v0.4.0-preview.1`'s three asset sets each record a different commit than
+  the tag, for real, documented reasons (`docs/release_preview.md`);
+  avoiding a repeat is a process fix, not new engineering.
+* [ ] Finish the three-platform visual demo: only a Windows clip exists so
+  far (`README.md`'s "Demo" section); record the same application on Linux
+  and macOS too, with the same evidence (native window, Skia, text, input,
+  resize, GPU presentation, FFmpeg playback where practical).
+* [ ] Watch for and act on real issue reports from the public launch
+  (`HISTORY.md`, 2026-09-23), including any clean-machine problems with the
+  `v0.4.0-preview.1` release artifacts -- this is now how that gets
+  verified, not a dedicated device acquired for it.
 
 
 

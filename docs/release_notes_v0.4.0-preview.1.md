@@ -377,12 +377,13 @@ macOS are in the
 
 ## Next
 
-Verification on a clean machine that never had CRT's build environment,
 macOS signing and notarization, an optional fresh-clone rebuild of the
 Windows set, making the next preview's `media-player` demo request hardware
 decode by default (already done on `main` for the demo itself; not yet part
 of a published release), zero-copy hardware decode to GPU textures, and the
-`05-js` JavaScript stage. Open work is tracked in
+`05-js` JavaScript stage. Clean-machine verification of these archives is not
+a planned task here; it comes from real downloads after this launch, and
+issues found that way are welcome. Open work is tracked in
 [`TODO.md`](https://github.com/webos21/crt/blob/main/TODO.md).
 
 Full documentation: [README](https://github.com/webos21/crt/blob/v0.4.0-preview.1/README.md),
