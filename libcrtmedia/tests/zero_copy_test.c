@@ -1,4 +1,4 @@
-// Real coverage for "Zero-copy decoded textures" Tranche 0/1
+// Real coverage for "Zero-copy decoded textures" Tranches 0-3
 // (2026-09-23, docs/crtmedia_zero_copy_decode_acceptance.md): exercises
 // crtmedia_codec_dequeue_gpu_frame() against the same real H.264 MP4
 // fixture tests/hw_decode_test.c already proves correct through
@@ -9,19 +9,17 @@
 // zero-copy path: crtmedia_gpu_frame(memory_kind == GPU)'s whole point is
 // that no CPU-addressable pixel data exists to inspect (plane_count == 0)
 // -- that is exactly what makes it zero-copy. Real pixel-content proof for
-// that path is crtgfx_skia_media's own job (still open,
-// docs/crtmedia_zero_copy_decode_acceptance.md's own per-host acceptance
-// gate), once it imports native_handle into a real GPU texture and
-// presents it. What this test *can* and does prove, honestly, for every
-// host:
+// that path is crtgfx_skia_media's own job (the per-host window demo in
+// libcrtgfx/tools/skia_media_window_demo.cc), which imports native_handle
+// into a real GPU texture and presents it. What this test *can* and does
+// prove, honestly, for every host:
 //   - the CPU-fallback shape (memory_kind == CPU, native_handle == NULL,
 //     real pixel planes -- run through crtmedia_frame_convert_to_rgba()
 //     for the same non-degenerate-content check hw_decode_test.c already
 //     established) works identically to dequeue_output(), whether that is
-//     software decode or the not-yet-zero-copy hardware fallback
-//     (D3D11VA/VAAPI today);
-//   - on a host with a real zero-copy path implemented (macOS/
-//     VideoToolbox today), the real hardware branch instead produces
+//     software decode or a hardware-export failure fallback;
+//   - on a host with a real zero-copy path implemented, the real hardware
+//     branch instead produces
 //     memory_kind == GPU, native_handle != NULL, plane_count == 0, and
 //     crtmedia_codec_is_hardware_accelerated()/hw_zero_copy_delivered
 //     transition exactly where docs/crtmedia_zero_copy_decode_
@@ -65,7 +63,12 @@
 #define CRTMEDIA_ZERO_COPY_EXPECTED 1
 #elif defined(CRT_TARGET_OS_LINUX)
 #define CRTMEDIA_HW_BACKEND_NAME "vaapi"
-#define CRTMEDIA_ZERO_COPY_EXPECTED 0
+// 1, not 0 (2026-09-24, Linux Zero-copy decoded textures Tranche 3): codec.c's
+// AV_PIX_FMT_VAAPI branch (fill_gpu_video_frame_vaapi()) exports the decoded
+// surface as DRM PRIME dma-bufs (vaExportSurfaceHandle) and hands that
+// descriptor off as native_handle with no av_hwframe_transfer_data()/CPU
+// copy. The Vulkan import happens one layer up in crtgfx_skia_media.
+#define CRTMEDIA_ZERO_COPY_EXPECTED 1
 #else
 #define CRTMEDIA_HW_BACKEND_NAME "none"
 #define CRTMEDIA_ZERO_COPY_EXPECTED 0

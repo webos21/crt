@@ -75,6 +75,16 @@ struct crtgfx_gpu_vulkan_device_view {
   void* device;
   void* queue;
   uint32_t queue_family_index;
+  /* Extensions actually enabled on the instance/device (borrowed string
+   * literals, valid for the device's lifetime) -- crtgfx_skia_make_gpu_
+   * context() hands them to skgpu::VulkanExtensions. dmabuf_import != 0 when
+   * the dma-buf/DRM-modifier import extension set is enabled (Linux
+   * zero-copy decoded textures, Tranche 3). */
+  const char* const* instance_extension_names;
+  uint32_t instance_extension_count;
+  const char* const* device_extension_names;
+  uint32_t device_extension_count;
+  int dmabuf_import;
 };
 
 struct crtgfx_gpu_vulkan_surface_view {

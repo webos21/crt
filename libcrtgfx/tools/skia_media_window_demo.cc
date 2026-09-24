@@ -268,6 +268,11 @@ extern "C" int main(int argc, char** argv) {
       failed = 1;
       break;
     }
+    if (!image->isTextureBacked()) {
+      fprintf(stderr, "crtgfx_skia_media_window_demo: imported image is not GPU texture-backed\n");
+      failed = 1;
+      break;
+    }
 
     rc = crtgfx_gpu_surface_acquire(surface, 1000000u);
     if (rc != CRTGFX_OK) {

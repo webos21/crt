@@ -40,6 +40,7 @@ sk_sp<SkSurface> crtgfx_skia_make_raster_surface(const crtgfx_framebuffer* frame
 #include "include/gpu/ganesh/vk/GrVkDirectContext.h"
 #include "include/gpu/ganesh/vk/GrVkTypes.h"
 #include "include/gpu/vk/VulkanBackendContext.h"
+#include "include/gpu/vk/VulkanExtensions.h"
 #include "include/gpu/vk/VulkanMemoryAllocator.h"
 #include "include/gpu/vk/VulkanMutableTextureState.h"
 #include "include/gpu/vk/VulkanTypes.h"
@@ -241,6 +242,17 @@ sk_sp<GrDirectContext> crtgfx_skia_make_gpu_context(const crtgfx_gpu_device* dev
   backend_context.fMemoryAllocator = sk_make_sp<DumbVulkanMemoryAllocator>(
       backend_context.fDevice, backend_context.fPhysicalDevice);
 
+  // Tell Skia which extensions are actually enabled so its caps (notably
+  // VK_EXT_image_drm_format_modifier -> DRM-modifier textures, used by the
+  // zero-copy media bridge below) match the device. The lists borrowed from
+  // the device view outlive MakeVulkan(); Skia copies what it needs.
+  skgpu::VulkanExtensions extensions;
+  extensions.init(
+      backend_context.fGetProc, backend_context.fInstance, backend_context.fPhysicalDevice,
+      view.instance_extension_count, view.instance_extension_names, view.device_extension_count,
+      view.device_extension_names);
+  backend_context.fVkExtensions = &extensions;
+
   return GrDirectContexts::MakeVulkan(backend_context);
 }
 
@@ -384,6 +396,301 @@ crtgfx_result crtgfx_skia_gpu_surface_present(
   crtgfx_gpu_vulkan_end_ganesh(gpu_surface);
   return crtgfx_gpu_surface_present(gpu_surface);
 }
+
+#if CRTGFX_HAS_SKIA_HEADERS
+// Zero-copy decoded textures, Tranche 3 (Linux, 2026-09-24) -- the Vulkan
+// branch of crtgfx_skia_import_media_frame() (crtgfx/skia_media.h has the
+// frozen contract; docs/crtmedia_zero_copy_decode_acceptance.md records the
+// "direct DRM PRIME import, not FFmpeg's Vulkan hwcontext" decision).
+// `frame->native_handle` is a crtmedia_vaapi_gpu_frame_handle* (VA-API
+// surface already synchronised and exported as dma-bufs by libcrtmedia, so
+// this file never touches libva). Each NV12 plane (R8 Y, GR88 UV) is imported
+// as its own single-plane VkImage over the same dma-buf object with an
+// explicit DRM-format-modifier plane layout, then both go to
+// GrYUVABackendTextures -> SkImages::TextureFromYUVATextures -- no RGBA
+// intermediate and no CPU readback.
+#include "crtgfx/skia_media.h"
+#include "gpu_frame_vaapi.h"
+
+#include "include/core/SkYUVAInfo.h"
+#include "include/gpu/ganesh/GrYUVABackendTextures.h"
+#include "include/gpu/ganesh/SkImageGanesh.h"
+
+#include <atomic>
+#include <unistd.h>
+
+namespace {
+
+constexpr uint32_t kDrmFormatR8 = 0x20203852u;    // fourcc 'R8  '
+constexpr uint32_t kDrmFormatGR88 = 0x38385247u;  // fourcc 'GR88'
+constexpr uint64_t kDrmFormatModInvalid = 0x00ffffffffffffffull;
+
+struct VulkanPlaneImport {
+  VkImage image = VK_NULL_HANDLE;
+  VkDeviceMemory memory = VK_NULL_HANDLE;
+  VkFormat format = VK_FORMAT_UNDEFINED;
+  VkDeviceSize allocation_size = 0;
+  uint32_t memory_type_index = 0;
+  uint32_t width = 0;
+  uint32_t height = 0;
+};
+
+// Shared by Skia's release callback and the failure path. The retained
+// crtmedia frame is released by the callback only once `frame_moved` says the
+// import succeeded (on failure the caller keeps ownership of the frame).
+struct MediaFrameReleaseContext {
+  crtmedia_gpu_frame frame;
+  bool frame_moved = false;
+  std::atomic<bool> callback_fired{false};
+  VkDevice device = VK_NULL_HANDLE;
+  VulkanPlaneImport planes[2];
+  std::atomic<int> refs{2};  // Skia's callback + the importing function
+};
+
+void DestroyPlanes(MediaFrameReleaseContext* ctx) {
+  for (VulkanPlaneImport& plane : ctx->planes) {
+    if (plane.image != VK_NULL_HANDLE) {
+      vkDestroyImage(ctx->device, plane.image, nullptr);
+      plane.image = VK_NULL_HANDLE;
+    }
+    if (plane.memory != VK_NULL_HANDLE) {
+      vkFreeMemory(ctx->device, plane.memory, nullptr);
+      plane.memory = VK_NULL_HANDLE;
+    }
+  }
+}
+
+void DropMediaFrameRef(MediaFrameReleaseContext* ctx) {
+  if (ctx->refs.fetch_sub(1) == 1) {
+    delete ctx;
+  }
+}
+
+void ReleaseMediaFrame(SkImages::ReleaseContext release_context) {
+  auto* ctx = static_cast<MediaFrameReleaseContext*>(release_context);
+  ctx->callback_fired = true;
+  DestroyPlanes(ctx);
+  if (ctx->frame_moved) {
+    crtmedia_gpu_frame_release(&ctx->frame);
+  }
+  DropMediaFrameRef(ctx);
+}
+
+bool ImportPlane(
+    VkDevice device, VkPhysicalDevice physical_device, PFN_vkGetMemoryFdPropertiesKHR get_fd_properties,
+    const crtmedia_vaapi_gpu_frame_handle& handle, const crtmedia_vaapi_gpu_frame_layer& layer,
+    VkFormat format, uint32_t width, uint32_t height, VulkanPlaneImport* out) {
+  if (layer.num_planes != 1 || layer.object_index[0] >= handle.num_objects) {
+    return false;
+  }
+  const crtmedia_vaapi_gpu_frame_object& object = handle.objects[layer.object_index[0]];
+  if (object.fd < 0 || object.drm_format_modifier == kDrmFormatModInvalid) {
+    return false;
+  }
+
+  VkSubresourceLayout plane_layout = {};
+  plane_layout.offset = layer.offset[0];
+  plane_layout.rowPitch = layer.pitch[0];
+
+  VkImageDrmFormatModifierExplicitCreateInfoEXT modifier_info = {};
+  modifier_info.sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_EXPLICIT_CREATE_INFO_EXT;
+  modifier_info.drmFormatModifier = object.drm_format_modifier;
+  modifier_info.drmFormatModifierPlaneCount = 1;
+  modifier_info.pPlaneLayouts = &plane_layout;
+
+  VkExternalMemoryImageCreateInfo external_info = {};
+  external_info.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
+  external_info.pNext = &modifier_info;
+  external_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+
+  VkImageCreateInfo image_info = {};
+  image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  image_info.pNext = &external_info;
+  image_info.imageType = VK_IMAGE_TYPE_2D;
+  image_info.format = format;
+  image_info.extent = {width, height, 1};
+  image_info.mipLevels = 1;
+  image_info.arrayLayers = 1;
+  image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+  image_info.tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT;
+  // Skia's wrapped-texture validation wants transfer usage alongside
+  // sampled (GrVkGpu.cpp check_image_info()).
+  image_info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  if (vkCreateImage(device, &image_info, nullptr, &out->image) != VK_SUCCESS) {
+    out->image = VK_NULL_HANDLE;
+    return false;
+  }
+
+  VkMemoryFdPropertiesKHR fd_props = {};
+  fd_props.sType = VK_STRUCTURE_TYPE_MEMORY_FD_PROPERTIES_KHR;
+  if (get_fd_properties(device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT, object.fd, &fd_props) != VK_SUCCESS) {
+    return false;
+  }
+
+  VkMemoryDedicatedRequirements dedicated_reqs = {};
+  dedicated_reqs.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS;
+  VkMemoryRequirements2 reqs = {};
+  reqs.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2;
+  reqs.pNext = &dedicated_reqs;
+  VkImageMemoryRequirementsInfo2 reqs_info = {};
+  reqs_info.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2;
+  reqs_info.image = out->image;
+  vkGetImageMemoryRequirements2(device, &reqs_info, &reqs);
+
+  uint32_t type_bits = reqs.memoryRequirements.memoryTypeBits & fd_props.memoryTypeBits;
+  if (type_bits == 0) {
+    return false;
+  }
+  uint32_t memory_type_index = 0;
+  while (((type_bits >> memory_type_index) & 1u) == 0) {
+    ++memory_type_index;
+  }
+
+  // vkAllocateMemory takes ownership of the imported fd on success, so hand
+  // it a dup and leave the handle's own fd for the frame's release().
+  int fd = dup(object.fd);
+  if (fd < 0) {
+    return false;
+  }
+  VkImportMemoryFdInfoKHR import_info = {};
+  import_info.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR;
+  import_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+  import_info.fd = fd;
+  VkMemoryDedicatedAllocateInfo dedicated_info = {};
+  dedicated_info.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
+  dedicated_info.pNext = &import_info;
+  dedicated_info.image = out->image;
+  VkMemoryAllocateInfo alloc_info = {};
+  alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  alloc_info.pNext = &dedicated_info;
+  alloc_info.allocationSize =
+      reqs.memoryRequirements.size > object.size ? reqs.memoryRequirements.size : object.size;
+  alloc_info.memoryTypeIndex = memory_type_index;
+  if (vkAllocateMemory(device, &alloc_info, nullptr, &out->memory) != VK_SUCCESS) {
+    out->memory = VK_NULL_HANDLE;
+    close(fd);
+    return false;
+  }
+
+  VkBindImageMemoryInfo bind_info = {};
+  bind_info.sType = VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_INFO;
+  bind_info.image = out->image;
+  bind_info.memory = out->memory;
+  bind_info.memoryOffset = 0;
+  if (vkBindImageMemory2(device, 1, &bind_info) != VK_SUCCESS) {
+    return false;
+  }
+  (void)physical_device;
+  out->format = format;
+  out->allocation_size = alloc_info.allocationSize;
+  out->memory_type_index = memory_type_index;
+  out->width = width;
+  out->height = height;
+  return true;
+}
+
+GrBackendTexture MakePlaneTexture(const VulkanPlaneImport& plane) {
+  GrVkImageInfo info;
+  info.fImage = plane.image;
+  info.fAlloc = skgpu::VulkanAlloc();
+  info.fAlloc.fMemory = plane.memory;
+  info.fAlloc.fOffset = 0;
+  info.fAlloc.fSize = plane.allocation_size;
+  info.fAlloc.fFlags = 0;
+  info.fImageTiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT;
+  info.fImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  info.fFormat = plane.format;
+  info.fImageUsageFlags =
+      VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  info.fSampleCount = 1;
+  info.fLevelCount = 1;
+  // Acquire from the external producer (VA-API) on first use.
+  info.fCurrentQueueFamily = VK_QUEUE_FAMILY_FOREIGN_EXT;
+  info.fSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  return GrBackendTextures::MakeVk(static_cast<int>(plane.width), static_cast<int>(plane.height), info);
+}
+
+}  // namespace
+
+sk_sp<SkImage> crtgfx_skia_import_media_frame(
+    GrDirectContext* context, const crtgfx_gpu_device* device, crtmedia_gpu_frame* frame) {
+  if (context == nullptr || device == nullptr || frame == nullptr ||
+      frame->memory_kind != CRTMEDIA_GPU_MEMORY_GPU || frame->native_handle == nullptr ||
+      frame->format != CRTMEDIA_PIXEL_FORMAT_NV12) {
+    return nullptr;
+  }
+
+  crtgfx_gpu_vulkan_device_view view = {};
+  if (!crtgfx_gpu_vulkan_borrow_device(device, &view) || !view.dmabuf_import) {
+    return nullptr;
+  }
+  const auto* handle = static_cast<const crtmedia_vaapi_gpu_frame_handle*>(frame->native_handle);
+  if (handle->num_layers != 2 || handle->layers[0].drm_format != kDrmFormatR8 ||
+      handle->layers[1].drm_format != kDrmFormatGR88 || handle->width != frame->width ||
+      handle->height != frame->height) {
+    return nullptr;
+  }
+
+  VkDevice vk_device = reinterpret_cast<VkDevice>(view.device);
+  auto get_fd_properties = reinterpret_cast<PFN_vkGetMemoryFdPropertiesKHR>(
+      vkGetDeviceProcAddr(vk_device, "vkGetMemoryFdPropertiesKHR"));
+  if (get_fd_properties == nullptr) {
+    return nullptr;
+  }
+
+  auto* ctx = new MediaFrameReleaseContext();
+  ctx->frame = *frame;
+  ctx->device = vk_device;
+  VkPhysicalDevice physical_device = reinterpret_cast<VkPhysicalDevice>(view.physical_device);
+  uint32_t uv_width = (frame->width + 1) / 2;
+  uint32_t uv_height = (frame->height + 1) / 2;
+  bool ok = ImportPlane(vk_device, physical_device, get_fd_properties, *handle, handle->layers[0], VK_FORMAT_R8_UNORM,
+                        frame->width, frame->height, &ctx->planes[0]) &&
+            ImportPlane(vk_device, physical_device, get_fd_properties, *handle, handle->layers[1],
+                        VK_FORMAT_R8G8_UNORM, uv_width, uv_height, &ctx->planes[1]);
+  if (!ok) {
+    DestroyPlanes(ctx);
+    delete ctx;
+    return nullptr;
+  }
+
+  GrBackendTexture textures[SkYUVAInfo::kMaxPlanes] = {
+      MakePlaneTexture(ctx->planes[0]), MakePlaneTexture(ctx->planes[1]), {}, {}};
+  // BT.709 limited range, same as the Metal/D3D12 branches (no color
+  // metadata in crtmedia_gpu_frame yet).
+  SkYUVAInfo yuva_info(
+      SkISize::Make(static_cast<int>(frame->width), static_cast<int>(frame->height)), SkYUVAInfo::PlaneConfig::kY_UV,
+      SkYUVAInfo::Subsampling::k420, kRec709_Limited_SkYUVColorSpace);
+  GrYUVABackendTextures yuva_textures(yuva_info, textures, kTopLeft_GrSurfaceOrigin);
+  if (!yuva_textures.isValid()) {
+    DestroyPlanes(ctx);
+    delete ctx;
+    return nullptr;
+  }
+
+  sk_sp<SkImage> image =
+      SkImages::TextureFromYUVATextures(context, yuva_textures, nullptr, ReleaseMediaFrame, ctx);
+  if (image == nullptr) {
+    // Skia may already have invoked ReleaseMediaFrame on failure (it saw
+    // frame_moved == false, so it did not touch the caller's frame). Either
+    // way the Vulkan objects must be gone and the caller keeps the frame.
+    DestroyPlanes(ctx);
+    if (!ctx->callback_fired) {
+      DropMediaFrameRef(ctx);  // the reference Skia's callback would have dropped
+    }
+    DropMediaFrameRef(ctx);
+    return nullptr;
+  }
+  // Ownership transfer point (crtgfx/skia_media.h): the copy in ctx now owns
+  // the frame's backing; zero the caller's so it cannot double-release.
+  ctx->frame_moved = true;
+  memset(frame, 0, sizeof(*frame));
+  DropMediaFrameRef(ctx);
+  return image;
+}
+#endif  // CRTGFX_HAS_SKIA_HEADERS
 
 #elif defined(CRTGFX_HAVE_D3D12)
 

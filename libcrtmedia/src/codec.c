@@ -22,6 +22,8 @@
 #include "codec_test_control.h"
 #if defined(CRT_TARGET_OS_WINDOWS)
 #include "gpu_frame_d3d11.h"
+#elif defined(CRT_TARGET_OS_LINUX)
+#include "gpu_frame_vaapi.h"
 #endif
 
 #include <libavcodec/avcodec.h>
@@ -520,9 +522,9 @@ static void fill_gpu_video_frame_cpu(AVFrame* avframe, crtmedia_gpu_frame* out_f
   out_frame->release_context = avframe;
 }
 
-/* Real zero-copy branch (macOS/VideoToolbox only today --
- * docs/crtmedia_zero_copy_decode_acceptance.md's own native_handle
- * table): `avframe` here is still genuinely hardware-resident (its own
+/* Real zero-copy branch for macOS/VideoToolbox (Tranche 1 -- docs/crtmedia_
+ * zero_copy_decode_acceptance.md's own native_handle table): `avframe` here
+ * is still genuinely hardware-resident (its own
  * format equals AV_PIX_FMT_VIDEOTOOLBOX), never downloaded.
  * FFmpeg's own hwcontext_videotoolbox.c places the real CVPixelBufferRef
  * at avframe->data[3] and that AVFrame's own reference is exactly what
@@ -534,7 +536,7 @@ static void fill_gpu_video_frame_cpu(AVFrame* avframe, crtmedia_gpu_frame* out_f
  * headers anywhere (matching gpu_metal.c's own no-host-SDK-header
  * policy), and none is required since ownership rides entirely on the
  * AVFrame reference already held. crtgfx_skia_media (the real GPU-
- * texture-import bridge, still open) is the one real consumer that
+ * texture-import bridge) is the one real consumer that
  * interprets this pointer; this function itself never touches CoreVideo/
  * Metal. Video is always reported as NV12 here (this project's own
  * established "every real hardware H.264 decoder produces NV12" fact,
@@ -607,6 +609,56 @@ static crtmedia_result fill_gpu_video_frame_d3d11(AVFrame* avframe, crtmedia_gpu
   out_frame->native_handle = &backing->handle;
   out_frame->plane_count = 0;
   out_frame->release = release_gpu_video_frame_d3d11;
+  out_frame->release_context = backing;
+  return CRTMEDIA_OK;
+}
+#endif
+
+#if defined(CRT_TARGET_OS_LINUX)
+/* Backing for the Linux zero-copy branch (Tranche 3, 2026-09-24) -- see
+ * gpu_frame_vaapi.h's own top comment. Retains the VAAPI AVFrame (keeps the
+ * VASurface/pool slot alive) together with the exported dma-buf descriptor
+ * so one release() call closes the fds and frees both. */
+typedef struct crtmedia_gpu_frame_vaapi_backing {
+  AVFrame* avframe;
+  crtmedia_vaapi_gpu_frame_handle handle;
+} crtmedia_gpu_frame_vaapi_backing;
+
+static void release_gpu_video_frame_vaapi(crtmedia_gpu_frame* frame, void* release_context) {
+  (void)frame;
+  crtmedia_gpu_frame_vaapi_backing* backing = (crtmedia_gpu_frame_vaapi_backing*)release_context;
+  crtmedia_vaapi_gpu_frame_handle_close(&backing->handle);
+  av_frame_free(&backing->avframe);
+  free(backing);
+}
+
+/* Takes ownership of `avframe` only on CRTMEDIA_OK. Returns
+ * CRTMEDIA_ERROR_UNSUPPORTED when the surface cannot be exported as DRM PRIME
+ * (allocation failure, driver without DRM_PRIME_2 export, unexpected
+ * layout); the caller then falls back to the honest CPU download. Video is
+ * NV12 -- the only layout the consumer imports (two-layer R8 + GR88). */
+static crtmedia_result fill_gpu_video_frame_vaapi(AVFrame* avframe, crtmedia_gpu_frame* out_frame) {
+  crtmedia_gpu_frame_vaapi_backing* backing =
+      (crtmedia_gpu_frame_vaapi_backing*)calloc(1, sizeof(*backing));
+  if (backing == NULL) {
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+  if (crtmedia_vaapi_export_frame(avframe, &backing->handle) != 0) {
+    free(backing);
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+  backing->avframe = avframe;
+
+  memset(out_frame, 0, sizeof(*out_frame));
+  out_frame->format = CRTMEDIA_PIXEL_FORMAT_NV12;
+  out_frame->width = (uint32_t)avframe->width;
+  out_frame->height = (uint32_t)avframe->height;
+  out_frame->memory_kind = CRTMEDIA_GPU_MEMORY_GPU;
+  out_frame->timestamp_us = avframe->pts != AV_NOPTS_VALUE ? avframe->pts : CRTMEDIA_FRAME_TIMESTAMP_NONE;
+  out_frame->device_id = 0;
+  out_frame->native_handle = &backing->handle;
+  out_frame->plane_count = 0;
+  out_frame->release = release_gpu_video_frame_vaapi;
   out_frame->release_context = backing;
   return CRTMEDIA_OK;
 }
@@ -802,11 +854,28 @@ crtmedia_result crtmedia_codec_dequeue_gpu_frame(
           codec->hw_zero_copy_delivered = 1;
 #endif
         } else {
-          /* No real zero-copy path implemented for this host's hw_pix_fmt
-           * yet (VAAPI -- docs/crtmedia_zero_copy_decode_acceptance.md
-           * Tranche 3) -- same real CPU download dequeue_output()'s own hw
-           * branch already uses, so this API stays fully usable everywhere
-           * before that tranche lands. */
+#if defined(CRT_TARGET_OS_LINUX)
+          if (codec->hw_pix_fmt == AV_PIX_FMT_VAAPI) {
+            /* Real zero-copy path (Linux -- see fill_gpu_video_frame_vaapi()).
+             * On any export failure fall through to the honest CPU download
+             * below; hw_zero_copy_delivered stays 0 for that frame. */
+            AVFrame* owned = av_frame_alloc();
+            if (owned != NULL && av_frame_ref(owned, codec->decode_frame) == 0) {
+              if (fill_gpu_video_frame_vaapi(owned, out_video_frame) == CRTMEDIA_OK) {
+                codec->hardware_accelerated = 1;
+                codec->hw_zero_copy_delivered = 1;
+                av_frame_unref(codec->decode_frame);
+                return CRTMEDIA_OK;
+              }
+            }
+            if (owned != NULL) {
+              av_frame_free(&owned);
+            }
+          }
+#endif
+          /* No zero-copy path for this frame -- same real CPU download
+           * dequeue_output()'s own hw branch already uses, so this API stays
+           * fully usable everywhere. */
           AVFrame* sw_frame = av_frame_alloc();
           if (sw_frame == NULL || av_hwframe_transfer_data(sw_frame, codec->decode_frame, 0) < 0) {
             if (sw_frame != NULL) {

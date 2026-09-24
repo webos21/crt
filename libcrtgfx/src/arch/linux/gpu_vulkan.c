@@ -681,6 +681,32 @@ extern VkResult vkDeviceWaitIdle(VkDevice device);
 
 #define CRTGFX_GPU_VULKAN_MAX_EXTENSION_PROPERTIES 512u
 
+/* The instance extensions crtgfx_gpu_vulkan_create_instance() actually
+ * enabled, kept in file-static storage (string literals) so
+ * crtgfx_gpu_vulkan_borrow_device() can hand the same list to Skia's
+ * skgpu::VulkanExtensions (Skia gates DRM-format-modifier textures on it --
+ * "Zero-copy decoded textures" Tranche 3). Every instance this file creates
+ * enables the same set, so one shared copy is correct. */
+static const char* crtgfx_gpu_vulkan_instance_extension_names[2];
+static uint32_t crtgfx_gpu_vulkan_instance_extension_count = 0;
+
+/* Device extensions for importing a VA-API-exported dma-buf as a VkImage
+ * (docs/crtmedia_zero_copy_decode_acceptance.md, Linux row). Enabled
+ * all-or-nothing, only when the physical device supports every one -- a
+ * device without them creates exactly the device it always did and
+ * borrow_device() reports dmabuf_import = 0 (the bridge then declines and the
+ * caller keeps the honest CPU path). */
+#define CRTGFX_GPU_VULKAN_MAX_DEVICE_EXTENSIONS 8u
+static const char* const crtgfx_gpu_vulkan_dmabuf_extension_names[] = {
+    "VK_KHR_external_memory_fd",
+    "VK_EXT_external_memory_dma_buf",
+    "VK_EXT_image_drm_format_modifier",
+    "VK_KHR_image_format_list",
+    "VK_EXT_queue_family_foreign",
+};
+#define CRTGFX_GPU_VULKAN_DMABUF_EXTENSION_COUNT \
+  (sizeof(crtgfx_gpu_vulkan_dmabuf_extension_names) / sizeof(crtgfx_gpu_vulkan_dmabuf_extension_names[0]))
+
 static int crtgfx_gpu_vulkan_instance_has_extension(const char* name) {
   static VkExtensionProperties props[CRTGFX_GPU_VULKAN_MAX_EXTENSION_PROPERTIES];
   uint32_t count = CRTGFX_GPU_VULKAN_MAX_EXTENSION_PROPERTIES;
@@ -767,15 +793,16 @@ static crtgfx_result crtgfx_gpu_vulkan_create_instance(VkInstance* out_instance)
    * offscreen Ganesh vertical slice (crtgfx_skia_gpu_offscreen_smoke)
    * keeps working completely unchanged there. */
   {
-    static const char* wsi_extension_names[2];
     uint32_t wsi_extension_count = 0;
     if (crtgfx_gpu_vulkan_instance_has_extension("VK_KHR_surface") &&
         crtgfx_gpu_vulkan_instance_has_extension("VK_KHR_wayland_surface")) {
-      wsi_extension_names[wsi_extension_count++] = "VK_KHR_surface";
-      wsi_extension_names[wsi_extension_count++] = "VK_KHR_wayland_surface";
+      crtgfx_gpu_vulkan_instance_extension_names[wsi_extension_count++] = "VK_KHR_surface";
+      crtgfx_gpu_vulkan_instance_extension_names[wsi_extension_count++] = "VK_KHR_wayland_surface";
     }
+    crtgfx_gpu_vulkan_instance_extension_count = wsi_extension_count;
     create_info.enabledExtensionCount = wsi_extension_count;
-    create_info.ppEnabledExtensionNames = (wsi_extension_count > 0) ? wsi_extension_names : NULL;
+    create_info.ppEnabledExtensionNames =
+        (wsi_extension_count > 0) ? crtgfx_gpu_vulkan_instance_extension_names : NULL;
   }
 
   result = vkCreateInstance(&create_info, NULL, out_instance);
@@ -865,6 +892,11 @@ struct crtgfx_gpu_vulkan_device_state {
   void* vk_device;
   void* vk_queue;
   uint32_t vk_queue_family_index;
+  /* Enabled device extensions (string literals) and whether the dma-buf
+   * import set was among them -- see CRTGFX_GPU_VULKAN_MAX_DEVICE_EXTENSIONS. */
+  const char* vk_device_extension_names[CRTGFX_GPU_VULKAN_MAX_DEVICE_EXTENSIONS];
+  uint32_t vk_device_extension_count;
+  int vk_dmabuf_import_enabled;
 };
 
 struct crtgfx_gpu_vulkan_surface_state {
@@ -896,6 +928,9 @@ static crtgfx_result crtgfx_gpu_vulkan_device_state_create(
   static const float queue_priority = 1.0f;
   VkDeviceQueueCreateInfo queue_create_info;
   VkPhysicalDeviceFeatures supported_features;
+  const char* dev_ext_names[CRTGFX_GPU_VULKAN_MAX_DEVICE_EXTENSIONS] = {0};
+  uint32_t dev_ext_count = 0;
+  int dmabuf_import = 0;
   VkDeviceCreateInfo device_create_info;
   VkDevice vk_device;
   VkQueue vk_queue;
@@ -966,14 +1001,26 @@ static crtgfx_result crtgfx_gpu_vulkan_device_state_create(
    * real, honest error (mapped to CRTGFX_ERROR_UNSUPPORTED) -- no separate
    * "is this device presentation-capable" flag needs tracking here. */
   {
-    static const char* swapchain_extension_name = "VK_KHR_swapchain";
+    uint32_t i;
+    dev_ext_count = 0;
     if (crtgfx_gpu_vulkan_device_has_extension(devices[device_index], "VK_KHR_swapchain")) {
-      device_create_info.enabledExtensionCount = 1;
-      device_create_info.ppEnabledExtensionNames = &swapchain_extension_name;
-    } else {
-      device_create_info.enabledExtensionCount = 0;
-      device_create_info.ppEnabledExtensionNames = NULL;
+      dev_ext_names[dev_ext_count++] = "VK_KHR_swapchain";
     }
+    dmabuf_import = 1;
+    for (i = 0; i < CRTGFX_GPU_VULKAN_DMABUF_EXTENSION_COUNT; ++i) {
+      if (!crtgfx_gpu_vulkan_device_has_extension(
+              devices[device_index], crtgfx_gpu_vulkan_dmabuf_extension_names[i])) {
+        dmabuf_import = 0;
+        break;
+      }
+    }
+    if (dmabuf_import) {
+      for (i = 0; i < CRTGFX_GPU_VULKAN_DMABUF_EXTENSION_COUNT; ++i) {
+        dev_ext_names[dev_ext_count++] = crtgfx_gpu_vulkan_dmabuf_extension_names[i];
+      }
+    }
+    device_create_info.enabledExtensionCount = dev_ext_count;
+    device_create_info.ppEnabledExtensionNames = (dev_ext_count > 0) ? dev_ext_names : NULL;
   }
   device_create_info.pEnabledFeatures = &supported_features;
 
@@ -1001,6 +1048,9 @@ static crtgfx_result crtgfx_gpu_vulkan_device_state_create(
   device->vk_device = (void*)vk_device;
   device->vk_queue = (void*)vk_queue;
   device->vk_queue_family_index = queue_family_index;
+  memcpy(device->vk_device_extension_names, dev_ext_names, sizeof(dev_ext_names));
+  device->vk_device_extension_count = dev_ext_count;
+  device->vk_dmabuf_import_enabled = dmabuf_import;
   return CRTGFX_OK;
 }
 
@@ -1820,6 +1870,11 @@ int crtgfx_gpu_vulkan_borrow_device(
   out_view->device = state->vk_device;
   out_view->queue = state->vk_queue;
   out_view->queue_family_index = state->vk_queue_family_index;
+  out_view->instance_extension_names = crtgfx_gpu_vulkan_instance_extension_names;
+  out_view->instance_extension_count = crtgfx_gpu_vulkan_instance_extension_count;
+  out_view->device_extension_names = state->vk_device_extension_names;
+  out_view->device_extension_count = state->vk_device_extension_count;
+  out_view->dmabuf_import = state->vk_dmabuf_import_enabled;
   return 1;
 }
 

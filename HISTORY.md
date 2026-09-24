@@ -8,6 +8,48 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-24
+
+- **Zero-copy decoded textures, Tranche 3 (Linux/x64, VA-API -> Vulkan).**
+  Closes `TODO.md`'s Linux host tranche with a direct DRM PRIME/dma-buf
+  import, selected after checking the pinned FFmpeg 8.1.2 build rather than
+  assuming its Vulkan mapper was available. This project's narrow FFmpeg
+  recipe enables VA-API H.264 decode but not FFmpeg's DRM/Vulkan hwcontexts;
+  the latter would also bring its own runtime `dlopen("libvulkan")` device
+  ownership into `libcrtmedia`. The chosen split preserves the existing
+  boundary: VA-API/export stays in `libcrtmedia`, while the optional bridge
+  imports into the Vulkan device already owned by `libcrtgfx`.
+
+  **crtmedia side** (`libcrtmedia/src/gpu_frame_vaapi.{c,h}`, `codec.c`):
+  a real `AV_PIX_FMT_VAAPI` frame is retained, its `VASurfaceID` is completed
+  with `vaSyncSurface()` (a CPU wait, not a pixel copy), then exported with
+  `vaExportSurfaceHandle(... DRM_PRIME_2, READ_ONLY | SEPARATE_LAYERS ...)`.
+  The private/non-installed `native_handle` copies the resulting dma-buf
+  objects, DRM modifiers, and separate R8/GR88 NV12 layer layouts; its frame
+  release closes the owned fds and frees the retained `AVFrame`. Export or
+  layout failure stays honest by falling through to the existing
+  `av_hwframe_transfer_data()` CPU path instead of claiming zero-copy.
+
+  **crtgfx side** (`gpu_vulkan.c`, `gpu_internal.h`, `skia_bridge.cc`): the
+  Vulkan device conditionally enables the complete external-memory/import
+  extension set and now reports the extension lists it actually enabled to
+  `skgpu::VulkanExtensions`, so Ganesh recognizes DRM-modifier textures.
+  The bridge duplicates the exported fds, imports two explicit-modifier
+  `VkImage`s (`VK_FORMAT_R8_UNORM` and `VK_FORMAT_R8G8_UNORM`), acquires them
+  from `VK_QUEUE_FAMILY_FOREIGN_EXT`, and passes them straight through
+  `GrYUVABackendTextures` to a texture-backed `SkImage`. There is no RGBA
+  intermediate and no CPU pixel readback in the delivery path. Skia's final
+  release callback destroys the Vulkan images/memory before releasing the
+  retained media frame; a failed import leaves the caller's frame ownership
+  unchanged.
+
+  Real physical-host evidence: Intel iHD VA-API 1.23 on Intel UHD 630 plus
+  Mesa Vulkan presented the complete 25-frame H.264 fixture through Wayland
+  three consecutive times, each with a scripted `900x520` resize and result
+  `pixel_check=pass zero_copy=yes post_resize_present=pass clean_exit=pass`.
+  The lower-level `crtmedia_zero_copy_test` also passed, delivering all 25
+  hardware frames as GPU frames and keeping the software-only CPU path green.
+
 ## 2026-09-23
 
 - **Zero-copy decoded textures, Tranche 0 (frozen contract) and Tranche 1

@@ -5,15 +5,15 @@
 # The caller supplies CRTGFX_ROOT plus the Skia, CRT runtime, platform-library,
 # imported-libc++, Win32 shim, emutls, and SDK-header variables referenced by
 # the original in-tree logic below. CRTMEDIA_INCLUDE_DIR/CRTMEDIA_SRC_DIR
-# (2026-09-23, "Zero-copy decoded textures" Tranche 1/2) are the new ones:
-# libcrtmedia's own public include/ root (macOS and Windows) and private
-# src/ root (Windows only, for the D3D11 interop struct gpu_frame_d3d11.h
-# -- see libcrtgfx/CMakeLists.txt's own comment), needed only so skia_
-# bridge.cc's own Metal/D3D12-branch bridge functions (crtgfx/skia_media.h)
+# (2026-09-23..24, "Zero-copy decoded textures" Tranches 1-3) are the new
+# ones: libcrtmedia's own public include/ root (all three hosts) and private
+# src/ root (Windows/Linux, for gpu_frame_d3d11.h/gpu_frame_vaapi.h -- see
+# libcrtgfx/CMakeLists.txt's own comment), needed only so skia_bridge.cc's
+# Metal/D3D12/Vulkan bridge functions (crtgfx/skia_media.h)
 # can see crtmedia_gpu_frame's real layout -- this does not make libcrtgfx
 # depend on libcrtmedia in general (docs/crtmedia_zero_copy_decode_
 # acceptance.md's own "Library boundary" section); only this one already-
-# real-Apple/Windows-SDK-header translation unit gains the include paths,
+# real-host-SDK-header translation unit gains the include paths,
 # and only crtgfx_skia/crtgfx_skia_shared (never plain crtgfx/crtgfx_gpu)
 # gain the matching link dependency below.
 function(crt_add_crtgfx_skia_object_target)
@@ -286,12 +286,13 @@ function(crt_add_crtgfx_skia_object_target)
       "${CRTGFX_ROOT}/src"
       "${CRTGFX_LIBC_INCLUDE_DIR}"
     )
-    if((CRT_TARGET_OS STREQUAL "macos" OR CRT_TARGET_OS STREQUAL "windows") AND CRTMEDIA_INCLUDE_DIR)
+    if((CRT_TARGET_OS STREQUAL "macos" OR CRT_TARGET_OS STREQUAL "windows" OR CRT_TARGET_OS STREQUAL "linux") AND CRTMEDIA_INCLUDE_DIR)
       target_include_directories(crtgfx_skia_objects SYSTEM BEFORE PRIVATE "${CRTMEDIA_INCLUDE_DIR}")
     endif()
-    if(CRT_TARGET_OS STREQUAL "windows" AND CRTMEDIA_SRC_DIR)
-      # gpu_frame_d3d11.h -- see libcrtgfx/CMakeLists.txt's own comment on
-      # CRTMEDIA_SRC_DIR for why this is a private, not a public, include.
+    if((CRT_TARGET_OS STREQUAL "windows" OR CRT_TARGET_OS STREQUAL "linux") AND CRTMEDIA_SRC_DIR)
+      # gpu_frame_d3d11.h / gpu_frame_vaapi.h (Linux) -- see libcrtgfx/
+      # CMakeLists.txt's own comment on CRTMEDIA_SRC_DIR for why this is a
+      # private, not a public, include.
       target_include_directories(crtgfx_skia_objects SYSTEM BEFORE PRIVATE "${CRTMEDIA_SRC_DIR}")
     endif()
     set_target_properties(crtgfx_skia_objects PROPERTIES

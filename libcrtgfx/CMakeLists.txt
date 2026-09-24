@@ -2179,18 +2179,18 @@ if(CRTGFX_ENABLE_SKIA)
   # own top comment for the full "why". Real on macOS and (2026-09-23)
   # Windows -- crtgfx_skia_import_media_frame() is declared under either
   # CRTGFX_HAVE_METAL or CRTGFX_HAVE_D3D12 (crtgfx/skia_media.h's own
-  # comment) -- so gated on CRT_TARGET_OS being one of those two directly
+  # comment) -- so gated on the three hosts with a real bridge directly,
   # rather than the more general CRTGFX_GPU_BACKEND_ENABLED condition
-  # crtgfx_skia_gpu_window_demo just above uses (Linux has no real bridge
-  # implementation yet, docs/crtmedia_zero_copy_decode_acceptance.md's own
-  # "Not started" row); also needs the real crtmedia_codec_dequeue_gpu_
-  # frame() this whole bridge exists to feed, so gated on CRTMEDIA_ENABLE_
+  # crtgfx_skia_gpu_window_demo just above uses; also needs the real
+  # crtmedia_codec_dequeue_gpu_frame() this whole bridge exists to feed, so
+  # gated on CRTMEDIA_ENABLE_
   # FFMPEG too (crtmedia_codec.c, and therefore that function, is compiled
   # out of libcrtmedia entirely otherwise -- examples/README.md's own
   # "compiled out ... unless CRTMEDIA_ENABLE_FFMPEG" note). Same "needs a
   # real desktop session, never add_test()-registered" precedent as that
   # sibling, on both hosts.
-  if(CRTGFX_GPU_BACKEND_ENABLED AND (CRT_TARGET_OS STREQUAL "macos" OR CRT_TARGET_OS STREQUAL "windows") AND CRTMEDIA_ENABLE_FFMPEG)
+  # Linux joined 2026-09-24 (Tranche 3, VA-API -> Vulkan dma-buf import).
+  if(CRTGFX_GPU_BACKEND_ENABLED AND (CRT_TARGET_OS STREQUAL "macos" OR CRT_TARGET_OS STREQUAL "windows" OR CRT_TARGET_OS STREQUAL "linux") AND CRTMEDIA_ENABLE_FFMPEG)
     add_executable(crtgfx_skia_media_window_demo
       ${CRT_STARTUP_OBJECTS}
       tools/skia_media_window_demo.cc

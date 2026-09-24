@@ -105,10 +105,25 @@ function(crt_add_crtmedia_targets)
   target_include_directories(crtmedia_shared PUBLIC "${CRTMEDIA_ROOT}/include")
 
   if(CRTMEDIA_ENABLE_FFMPEG)
+    # Linux zero-copy (Tranche 3): the libva-header-using export source is
+    # separate so -fcrt-real-linux-sdk (host /usr/include, lowest priority)
+    # applies to this one file only.
+    set(CRTMEDIA_LINUX_VAAPI_EXPORT_SOURCES)
+    if(CRT_TARGET_OS STREQUAL "linux")
+      set(CRTMEDIA_LINUX_VAAPI_EXPORT_SOURCES "${CRTMEDIA_ROOT}/src/gpu_frame_vaapi.c")
+      # Only the isolated stages compile through tools/crt-cc (-nostdinc,
+      # which understands the sentinel); the in-tree build uses plain clang,
+      # which already sees /usr/include.
+      if(CMAKE_C_COMPILER MATCHES "crt-cc")
+        set_source_files_properties(${CRTMEDIA_LINUX_VAAPI_EXPORT_SOURCES}
+          PROPERTIES COMPILE_OPTIONS "-fcrt-real-linux-sdk")
+      endif()
+    endif()
     target_sources(crtmedia PRIVATE
       "${CRTMEDIA_ROOT}/src/demux.c"
       "${CRTMEDIA_ROOT}/src/extractor.c"
       "${CRTMEDIA_ROOT}/src/codec.c"
+      ${CRTMEDIA_LINUX_VAAPI_EXPORT_SOURCES}
     )
     target_include_directories(crtmedia PRIVATE
       "${CRTMEDIA_FFMPEG_PORT_PREFIX}/include"
@@ -117,6 +132,7 @@ function(crt_add_crtmedia_targets)
       "${CRTMEDIA_ROOT}/src/demux.c"
       "${CRTMEDIA_ROOT}/src/extractor.c"
       "${CRTMEDIA_ROOT}/src/codec.c"
+      ${CRTMEDIA_LINUX_VAAPI_EXPORT_SOURCES}
     )
     target_include_directories(crtmedia_shared PRIVATE
       "${CRTMEDIA_FFMPEG_PORT_PREFIX}/include"

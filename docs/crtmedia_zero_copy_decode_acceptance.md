@@ -104,12 +104,13 @@ document -- a generic caller must still treat it as opaque):
 | --- | --- | --- |
 | macOS | `CVPixelBufferRef` (`avframe->data[3]` on the retained hardware `AVFrame`) | Exactly `frame`'s own lifetime -- not independently retained; the retained `AVFrame` in `release_context` is what actually keeps it alive. |
 | Windows | `crtmedia_d3d11_gpu_frame_handle*` (`libcrtmedia/src/gpu_frame_d3d11.h`, private/non-installed) -- a small crtmedia-owned indirection, not a bare `ID3D11Texture2D*` (confirmed necessary while implementing this tranche: `hwcontext_d3d11va.c`'s own real decode output is one array-slice of a shared decode-pool array texture, `frame->data[0]` the `ID3D11Texture2D*` and `frame->data[1]` the array index -- a single pointer cannot carry both). Fields: `void* texture` (the `ID3D11Texture2D*`), `int64_t array_index`. | Exactly `frame`'s own lifetime, same shape as macOS -- the retained `AVFrame` in `release_context` keeps the underlying decode-pool slice alive; the indirection struct itself is heap-allocated alongside that `AVFrame` and freed by the same release function. |
-| Linux | A VA-API surface reference (Tranche 3 of this file; `VASurfaceID` is a scalar, not a pointer, so this will need a small crtmedia-owned indirection, decided when that tranche starts) | Same shape, once implemented. |
+| Linux | `crtmedia_vaapi_gpu_frame_handle*` (`libcrtmedia/src/gpu_frame_vaapi.h`, private/non-installed) -- a crtmedia-owned copy of the real `VADRMPRIMESurfaceDescriptor` returned by `vaExportSurfaceHandle(..., DRM_PRIME_2, READ_ONLY | SEPARATE_LAYERS, ...)`, including the dma-buf objects, DRM modifiers, and the R8/GR88 layer layouts needed to represent NV12. | Exactly `frame`'s own lifetime. The retained `AVFrame` keeps the VA surface/pool slot alive; the indirection owns the exported dma-buf fds, and the same release callback closes those fds before freeing the retained frame. A Vulkan importer duplicates each fd because successful `vkAllocateMemory()` consumes the duplicate. |
 
 On every host, the true owner of the underlying decoder resource is the
-retained FFmpeg `AVFrame` kept alive in `frame->release_context`;
-`frame->release` is exactly `av_frame_free(&avframe)`. This makes the full
-chain, on every host, the same shape (Section-6-style lifetime diagram):
+retained FFmpeg `AVFrame` kept alive in `frame->release_context`.
+`frame->release` frees that frame and any small host indirection/exported
+handles owned alongside it. This makes the full chain, on every host, the
+same shape (Section-6-style lifetime diagram):
 
 ```
 decoder hardware surface
@@ -212,4 +213,27 @@ Each host tranche is accepted when:
 | --- | --- | --- | --- |
 | macOS/arm64 | VideoToolbox `CVPixelBuffer` → `CVMetalTextureCache` → Metal Y/UV textures → `GrYUVABackendTextures` → `SkImage` | See `HISTORY.md` | |
 | Windows/x64 | D3D11VA `ID3D11Texture2D` → plane-sliced `ID3D11ShaderResourceView1` → compute-shader copy → NT-handle-shared D3D12 resource → `GrYUVABackendTextures` → `SkImage` (measured GPU-copy fallback, not literal zero-copy -- D3D12/Skia has no multi-plane concept) | See `HISTORY.md` | |
-| Linux | VA-API surface → DRM PRIME/dma-buf → Vulkan `VkImage` | Not started | |
+| Linux/x64 | VA-API `VASurfaceID` → `vaSyncSurface()` → `VADRMPRIMESurfaceDescriptor` (`DRM_PRIME_2`, separate R8/GR88 layers) → two directly imported DRM-modifier Vulkan `VkImage`s → `GrYUVABackendTextures` → `SkImage` | Closed 2026-09-24 | Intel iHD VA-API driver + Intel UHD 630/Mesa Vulkan: all 25 real fixture frames presented repeatedly through Wayland with `pixel_check=pass`, `zero_copy=yes`, and the scripted resize passing. See `HISTORY.md`. |
+
+### Linux mapping decision
+
+Linux uses direct DRM PRIME/dma-buf import rather than FFmpeg's Vulkan frame
+mapping. The pinned FFmpeg 8.1.2 recipe enables only the narrow VA-API H.264
+decode path; its DRM and Vulkan hwcontexts are deliberately not part of the
+produced archives. Enabling them only to transport an already-decoded frame
+would add libdrm/Vulkan ownership and FFmpeg's runtime `dlopen("libvulkan")`
+path to `libcrtmedia`, while this project deliberately keeps graphics-device
+ownership in `libcrtgfx` and does not yet provide a general ELF `dlopen()`
+backend. Direct export keeps the boundary narrow: `libcrtmedia` owns VA-API
+and the exported descriptor, while the optional bridge imports that descriptor
+into the already-selected `crtgfx_gpu_device`.
+
+The Vulkan device enables the dma-buf import extension set only when all of
+`VK_KHR_external_memory_fd`, `VK_EXT_external_memory_dma_buf`,
+`VK_EXT_image_drm_format_modifier`, `VK_KHR_image_format_list`, and
+`VK_EXT_queue_family_foreign` are supported. Otherwise the bridge declines the
+import. `vaSyncSurface()` is a CPU wait but not a pixel copy; after it returns,
+the two images sample the decoder-owned memory directly. The first Vulkan use
+acquires ownership from `VK_QUEUE_FAMILY_FOREIGN_EXT`, and Skia's release
+callback destroys both imported images/memory allocations before releasing
+the retained media frame.

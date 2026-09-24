@@ -168,6 +168,12 @@ STAGES = {
             # codec.c's private, non-installed hardware-decode diagnostics
             # header (2026-09-18, hardware-decode Tranche 2).
             "libcrtmedia/src/codec_test_control.h",
+            # Windows zero-copy D3D11 texture/array-slice indirection used
+            # privately by codec.c and skia_bridge.cc (Tranche 2).
+            "libcrtmedia/src/gpu_frame_d3d11.h",
+            # Linux zero-copy VA-API export (Tranche 3, 2026-09-24).
+            "libcrtmedia/src/gpu_frame_vaapi.c",
+            "libcrtmedia/src/gpu_frame_vaapi.h",
             "libcrtmedia/tests/frame_test.c",
             "libcrtmedia/tests/gpu_frame_test.c",
             "libcrtmedia/tests/format_test.c",

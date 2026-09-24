@@ -142,11 +142,22 @@ tranche below closes against).
   shader every frame) rather than recreated from scratch every frame.
   **Still open:** the isolated `04-gfx-media` distribution stage has not
   yet built this bridge (same deferral as macOS Tranche 1, above).
-* [ ] **3. Linux (VA-API -> Vulkan).** Decide whether to use FFmpeg's own
-  Vulkan frame mapping or a direct DRM PRIME/dma-buf import, verified
-  against this project's pinned FFmpeg version and its Vulkan 1.1
-  requirement (`libcrtgfx`'s own Vulkan instance request) before writing
-  any surface-import code.
+* [x] **3. Linux/x64 (VA-API -> Vulkan).** Closed 2026-09-24, recorded in
+  `HISTORY.md`. The pinned FFmpeg 8.1.2 recipe does not build its DRM/Vulkan
+  hwcontexts (and its Vulkan device path uses runtime `dlopen()`, which this
+  CRT intentionally does not expose as a general ELF-loader dependency), so
+  this tranche chose direct DRM PRIME/dma-buf import. `libcrtmedia` retains
+  the VAAPI `AVFrame`, synchronizes its `VASurfaceID`, and exports a private
+  `VADRMPRIMESurfaceDescriptor`-shaped handle with separate R8/GR88 NV12
+  layers; the Vulkan bridge imports both layers with explicit DRM modifiers
+  and feeds them directly to `GrYUVABackendTextures` with no CPU readback or
+  RGBA intermediate. The required Vulkan dma-buf extension set is enabled
+  only as one all-supported unit, and the actual enabled extension lists are
+  now passed to Skia's capability probe. On this physical Intel UHD 630 host
+  (Intel iHD VA-API + Mesa Vulkan), the 25-frame real window demo passed three
+  consecutive runs with a scripted `900x520` resize, real pixel readback,
+  `SkImage::isTextureBacked()`, and `zero_copy=yes`; the crtmedia zero-copy
+  test also passes all 25 hardware frames with no CPU fallback.
 * [ ] **4. Normalize the acceptance matrix across all three hosts,** mirroring
   `docs/crtmedia_hardware_decode_acceptance.md`'s own per-host results table.
 * [ ] **5. Ownership and regression validation:** repeated create/decode/

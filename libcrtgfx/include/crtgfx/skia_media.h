@@ -4,24 +4,20 @@
 
 #ifdef __cplusplus
 
-#if CRTGFX_HAS_SKIA_HEADERS && (defined(CRTGFX_HAVE_METAL) || defined(CRTGFX_HAVE_D3D12))
+#if CRTGFX_HAS_SKIA_HEADERS && (defined(CRTGFX_HAVE_METAL) || defined(CRTGFX_HAVE_D3D12) || defined(CRTGFX_HAVE_VULKAN))
 // Zero-copy decoded-texture bridge (2026-09-23, "Zero-copy decoded
-// textures" Tranche 1/2 -- docs/crtmedia_zero_copy_decode_acceptance.md has
+// textures" Tranches 1-3 -- docs/crtmedia_zero_copy_decode_acceptance.md has
 // the full frozen contract). The one real, deliberately small, optional
 // third component that document promises: depends on both libcrtmedia's
 // public headers (crtmedia_gpu_frame) and libcrtgfx/Skia, so neither of
 // those two libraries gains a build dependency on the other -- this
-// header/skia_bridge.cc's own Metal/D3D12 branches are the only places
+// header/skia_bridge.cc's Metal/D3D12/Vulkan branches are the only places
 // that include both.
 //
-// Declared only when a real zero-copy import path actually exists for
-// this host (today: macOS/Metal and Windows/D3D12, matching crtgfx/
-// skia.h's own per-backend GPU-function precedent -- crtgfx_skia_make_
-// gpu_context() et al. are declared the same conditional way). Linux gains
-// its own real body, and this guard widens to include it, only once that
-// host's own tranche (docs/crtmedia_zero_copy_decode_acceptance.md) lands
-// a real implementation -- no speculative stub exists for a host that
-// cannot back it yet.
+// Declared only when a real zero-copy import path exists for this host
+// (macOS/Metal, Windows/D3D12, Linux/Vulkan, matching crtgfx/skia.h's own
+// per-backend GPU-function precedent -- crtgfx_skia_make_gpu_context() et
+// al. are declared the same conditional way).
 #include "crtmedia/gpu_frame.h"
 #include "include/core/SkImage.h"
 #include "include/gpu/ganesh/GrDirectContext.h"
@@ -32,7 +28,12 @@
 // macOS this wraps `frame->native_handle`'s own real CVPixelBufferRef
 // directly via CVMetalTextureCache (Y and UV planes each become their own
 // real MTLTexture sampling the same underlying IOSurface-backed storage
-// the hardware decoder already wrote into); on Windows, FFmpeg's own
+// the hardware decoder already wrote into); on Linux, `frame->native_handle`
+// is a crtmedia-owned VA-API DRM PRIME descriptor (libcrtmedia/src/gpu_frame_
+// vaapi.h): the decoded surface's dma-buf is imported directly into two
+// single-plane VkImages (R8 Y, R8G8 UV) with VK_EXT_image_drm_format_modifier
+// and sampled as YUV -- declined (null) when the crtgfx_gpu_device did not
+// enable the dma-buf import extensions; on Windows, FFmpeg's own
 // shared D3D11VA decode-pool texture (`frame->native_handle`'s real
 // ID3D11Texture2D*/array-index pair, docs/crtmedia_zero_copy_decode_
 // acceptance.md's own native_handle table) is not itself shareable with
