@@ -4,16 +4,18 @@
 #
 # The caller supplies CRTGFX_ROOT plus the Skia, CRT runtime, platform-library,
 # imported-libc++, Win32 shim, emutls, and SDK-header variables referenced by
-# the original in-tree logic below. CRTMEDIA_INCLUDE_DIR (2026-09-23, "Zero-
-# copy decoded textures" Tranche 1) is the one new one: libcrtmedia's own
-# public include/ root, needed only on macOS, only so skia_bridge.cc's own
-# Metal-branch bridge function (crtgfx/skia_media.h) can see crtmedia_gpu_
-# frame's real layout -- this does not make libcrtgfx depend on libcrtmedia
-# in general (docs/crtmedia_zero_copy_decode_acceptance.md's own "Library
-# boundary" section); only this one already-real-Apple-SDK-header
-# translation unit gains the include path, and only crtgfx_skia/crtgfx_
-# skia_shared (never plain crtgfx/crtgfx_gpu) gain the matching link
-# dependency below.
+# the original in-tree logic below. CRTMEDIA_INCLUDE_DIR/CRTMEDIA_SRC_DIR
+# (2026-09-23, "Zero-copy decoded textures" Tranche 1/2) are the new ones:
+# libcrtmedia's own public include/ root (macOS and Windows) and private
+# src/ root (Windows only, for the D3D11 interop struct gpu_frame_d3d11.h
+# -- see libcrtgfx/CMakeLists.txt's own comment), needed only so skia_
+# bridge.cc's own Metal/D3D12-branch bridge functions (crtgfx/skia_media.h)
+# can see crtmedia_gpu_frame's real layout -- this does not make libcrtgfx
+# depend on libcrtmedia in general (docs/crtmedia_zero_copy_decode_
+# acceptance.md's own "Library boundary" section); only this one already-
+# real-Apple/Windows-SDK-header translation unit gains the include paths,
+# and only crtgfx_skia/crtgfx_skia_shared (never plain crtgfx/crtgfx_gpu)
+# gain the matching link dependency below.
 function(crt_add_crtgfx_skia_object_target)
   set(CRTGFX_SKIA_OBJECTS)
   if(CRTGFX_ENABLE_SKIA)
@@ -135,6 +137,45 @@ function(crt_add_crtgfx_skia_object_target)
         # [-Werror,-Wignored-attributes]`.
         "-Wno-unused-value"
         "-Wno-ignored-attributes"
+        # -Wno-extern-c-compat/-Wno-class-conversion (2026-09-23, real,
+        # confirmed necessary, same real cause as the two pairs just
+        # above): skia_bridge.cc's own new D3D12 zero-copy bridge branch
+        # (crtgfx/skia_media.h) is the first real code in this project to
+        # #include <d3d11.h>/<d3d11_3.h> directly (needed for the plane-
+        # sliced ID3D11ShaderResourceView1 extraction from FFmpeg's own
+        # D3D11VA decode-pool texture -- see skia_bridge.cc's own top-of-
+        # D3D12-branch comment). mingw-w64's own real d3d11.h has an empty
+        # `struct CD3D11_DEFAULT {};` (a real, deliberate C-ABI-compatible
+        # tag type, harmless in C++ despite differing from C's own
+        # sizeof(struct){}==0 -- confirmed via `error: empty struct has
+        # size 0 in C, size 1 in C++ [-Werror,-Wextern-c-compat]`) and real
+        # d3d11.h/d3d10.h CD3D11_*_DESC/CD3D10_*_DESC convenience helper
+        # structs each with a real, intentionally-unused-by-us implicit
+        # conversion operator back to their own plain D3D11_*_DESC/
+        # D3D10_*_DESC base (`error: conversion function converting '...'
+        # to its base class '...' will never be used
+        # [-Werror,-Wclass-conversion]`) -- neither is this project's own
+        # code, both are real, harmless, upstream mingw-w64 patterns this
+        # project's own -Wall -Wextra -Werror only now reaches for the
+        # first time.
+        # -Wno-error=, not -Wno- (unlike the two pairs above): this
+        # target's own PRIVATE compile options are emitted *before*
+        # crt_build_flags's own -Wall -Wextra -Werror on the actual
+        # generated command line (confirmed for real -- crt_build_flags is
+        # a linked INTERFACE library, and CMake always places a target's
+        # own directly-set COMPILE_OPTIONS ahead of options propagated
+        # from a linked interface, regardless of call order in this file).
+        # Clang's own -Wall re-enables -Wextern-c-compat even after an
+        # earlier plain -Wno-extern-c-compat (confirmed for real: it
+        # survived with -Wno-extern-c-compat present, while the sibling
+        # -Wno-class-conversion above -- not part of -Wall's own default
+        # set -- correctly stayed suppressed) -- but -Wno-error=<name>
+        # specifically cancels -Werror's promotion for that one diagnostic
+        # group and is not itself subject to the same later-flag-wins
+        # re-enable/disable ordering, so it survives -Werror appearing
+        # after it on the same command line.
+        "-Wno-error=extern-c-compat"
+        "-Wno-class-conversion"
       )
       if(TARGET crtgfx-mingw-w64-headers-fetch)
         add_dependencies(crtgfx_skia_objects crtgfx-mingw-w64-headers-fetch)
@@ -245,8 +286,13 @@ function(crt_add_crtgfx_skia_object_target)
       "${CRTGFX_ROOT}/src"
       "${CRTGFX_LIBC_INCLUDE_DIR}"
     )
-    if(CRT_TARGET_OS STREQUAL "macos" AND CRTMEDIA_INCLUDE_DIR)
+    if((CRT_TARGET_OS STREQUAL "macos" OR CRT_TARGET_OS STREQUAL "windows") AND CRTMEDIA_INCLUDE_DIR)
       target_include_directories(crtgfx_skia_objects SYSTEM BEFORE PRIVATE "${CRTMEDIA_INCLUDE_DIR}")
+    endif()
+    if(CRT_TARGET_OS STREQUAL "windows" AND CRTMEDIA_SRC_DIR)
+      # gpu_frame_d3d11.h -- see libcrtgfx/CMakeLists.txt's own comment on
+      # CRTMEDIA_SRC_DIR for why this is a private, not a public, include.
+      target_include_directories(crtgfx_skia_objects SYSTEM BEFORE PRIVATE "${CRTMEDIA_SRC_DIR}")
     endif()
     set_target_properties(crtgfx_skia_objects PROPERTIES
       POSITION_INDEPENDENT_CODE ON
@@ -547,6 +593,19 @@ function(crt_add_crtgfx_skia_shared_target)
       # actually pulled in libskia.a's Ganesh D3D12 object code (right
       # after the CRTGFX_SKIA_LIBRARIES fix above).
       target_link_libraries(crtgfx_skia_shared PRIVATE "${CRTGFX_WINDOWS_D3D12_LIB}")
+      # dxgi.lib -- same real, own-explicit-link reasoning as d3d12.lib
+      # just above (crtgfx_gpu_shared's own dxgi.lib link is PRIVATE, so it
+      # does not propagate here either). Found for real 2026-09-23, the
+      # first time this DLL's own link was driven far enough (a real,
+      # from-scratch full build of this dedicated directory) to reach
+      # Skia's own vendored D3D12 backend debug-layer initialization code:
+      # `undefined symbol: DXGIGetDebugInterface1`, referenced from
+      # skia_bridge.cc.obj by way of libskia.a, unrelated to this same
+      # session's own Zero-copy decoded textures Tranche 2 work landing
+      # alongside it (crtmedia_gpu_frame_release() is a separate, already-
+      # diagnosed symbol -- this one predates it and was simply never
+      # exercised before).
+      target_link_libraries(crtgfx_skia_shared PRIVATE "${CRTGFX_WINDOWS_DXGI_LIB}")
       if(TARGET crt_compiler_rt_builtins)
         target_link_libraries(crtgfx_skia_shared PRIVATE crt_compiler_rt_builtins)
       endif()
@@ -643,6 +702,17 @@ function(crt_add_crtgfx_skia_shared_target)
       # direct-Skia-consumer-style caller of crtgfx_skia_import_media_
       # frame() needs this symbol too" reason crtgfx_skia_shared's own
       # top-of-function comment already documents for CRTGFX_SKIA_LIBRARIES.
+      target_link_libraries(crtgfx_skia_shared PUBLIC crtmedia_shared)
+    endif()
+    if(CRT_TARGET_OS STREQUAL "windows")
+      # Zero-copy decoded textures Tranche 2 (2026-09-23): the identical
+      # real need and the identical "safe here, not on the plain static
+      # crtgfx_skia target" reasoning as the macOS branch's own comment
+      # just above -- crtgfx_skia_import_media_frame()'s own D3D12 branch
+      # (skia_bridge.cc) also calls crtmedia_gpu_frame_release(), and a
+      # Windows DLL-to-DLL import-library link has the same "no single-pass
+      # static-archive-scan-order hazard" property dylib-to-dylib linking
+      # does.
       target_link_libraries(crtgfx_skia_shared PUBLIC crtmedia_shared)
     endif()
     if(COMMAND crt_configure_shared_runtime)

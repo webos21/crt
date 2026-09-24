@@ -100,11 +100,48 @@ tranche below closes against).
   own Step 7 precedent), and device affinity (Tranche 2's own concern) is
   moot on this host's effectively-single-GPU topology, not yet proven
   handled in general.
-* [ ] **2. Windows/x64 (D3D11VA -> D3D12).** Resolve device affinity
-  between FFmpeg's own hardware-device choice and `crtgfx_gpu_device`'s
-  choice (real multi-GPU risk, deferred from Tranche 1 on purpose) before
-  attempting shared-resource interop; measure and clearly report a
-  GPU-copy fallback wherever true zero-copy is not available.
+* [x] **2. Windows/x64 (D3D11VA -> D3D12).** Closed 2026-09-23, recorded
+  in `HISTORY.md`. `crtmedia_codec_dequeue_gpu_frame()`'s new
+  `AV_PIX_FMT_D3D11` branch (`libcrtmedia/src/codec.c`,
+  `gpu_frame_d3d11.h`): `native_handle` is a small crtmedia-owned
+  `ID3D11Texture2D*`/array-index indirection (FFmpeg's own decode output
+  is one slice of a shared decode-pool array texture, a single pointer
+  cannot carry both), no CPU readback in `codec.c` itself. Real device
+  affinity resolved by comparing DXGI adapter LUIDs (bails out to the
+  existing CPU-transfer fallback on a genuine mismatch); this host's own
+  measured, honestly-reported outcome is a **GPU-copy fallback**, not
+  literal zero-copy (Skia's D3D12 backend has no multi-plane concept at
+  all, confirmed by reading `GrD3DTypes.h` directly, so `crtgfx_skia_
+  import_media_frame()`'s D3D12 branch extracts Y/UV via a plane-sliced
+  `ID3D11ShaderResourceView1` and a small compute shader into two fresh
+  NT-handle-shareable textures, opened into D3D12 -- still a real, no-CPU-
+  readback GPU-to-GPU copy, matching this tranche's own acceptance gate).
+  `crtgfx_skia_media_window_demo` presents all 25 real decoded frames end
+  to end with a real pixel check and a scripted resize, both passing,
+  `zero_copy=yes`, verified reproducible across repeated runs. Two real,
+  non-obvious bugs found and fixed only by actually running this on real
+  multi-adapter hardware, not by inspection: (1) FFmpeg's own D3D11VA
+  decode-pool texture needs the `"SHADER"` `av_hwdevice_ctx_create()` opts
+  key to get `D3D11_BIND_SHADER_RESOURCE` at all (default is `D3D11_BIND_
+  DECODER` only, confirmed by reading `hwcontext_d3d11va.c`/`dxva2.c`
+  directly) -- without it every `CreateShaderResourceView1()` call fails
+  with `E_INVALIDARG`; (2) a serious, silent ABI-corruption bug in this
+  project's own Windows C++ build: `-fwchar-type=int` (a deliberate,
+  project-wide 4-byte `wchar_t` override) makes the real SDK
+  `DXGI_ADAPTER_DESC`/`DXGI_ADAPTER_DESC1` structs' `WCHAR Description[128]`
+  field the wrong size relative to what the real system `dxgi.dll` writes,
+  silently misaligning every field after it (`VendorId`, `AdapterLuid`,
+  ...) -- `gpu_win32.c` already had its own workaround for this
+  (`crtgfx_dxgi_wchar`); `skia_bridge.cc`'s new device-affinity check
+  needed the same pattern applied to two more struct shapes. A real,
+  CPU-blocking `ID3D11Query`/`D3D11_QUERY_EVENT` sync was also added after
+  the compute-shader copy (a plain `Flush()` only submits, does not wait
+  for completion, and the D3D12 side could otherwise race the D3D11
+  write), and the destination Y/UV shareable textures are now a small,
+  persistent per-plane cache (created once, refreshed via the compute
+  shader every frame) rather than recreated from scratch every frame.
+  **Still open:** the isolated `04-gfx-media` distribution stage has not
+  yet built this bridge (same deferral as macOS Tranche 1, above).
 * [ ] **3. Linux (VA-API -> Vulkan).** Decide whether to use FFmpeg's own
   Vulkan frame mapping or a direct DRM PRIME/dma-buf import, verified
   against this project's pinned FFmpeg version and its Vulkan 1.1

@@ -20,9 +20,16 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/crtgfx_gpu_sources.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/crtgfx_gpu_targets.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/crtgfx_skia_targets.cmake")
 set(CRTGFX_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
-# Zero-copy decoded textures Tranche 1 (2026-09-23) -- see crtgfx_skia_
-# targets.cmake's own top comment for why crtgfx_skia_objects needs this.
+# Zero-copy decoded textures Tranche 1/2 (2026-09-23) -- see crtgfx_skia_
+# targets.cmake's own top comment for why crtgfx_skia_objects needs these.
 set(CRTMEDIA_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/libcrtmedia/include")
+# Windows only, private: crtgfx_skia_media's D3D12 branch (skia_bridge.cc)
+# interprets crtmedia_gpu_frame.native_handle as a crtmedia_d3d11_gpu_frame_
+# handle* (libcrtmedia/src/gpu_frame_d3d11.h) -- not a public header, reached
+# the identical way codec_test_control.h's own top comment already
+# documents for crtgfx_skia_media_window_demo (an explicit extra -I, not a
+# general crtmedia<->crtgfx dependency).
+set(CRTMEDIA_SRC_DIR "${CMAKE_SOURCE_DIR}/libcrtmedia/src")
 set(CRTGFX_WIN32_SHIM_ROOT "${CMAKE_SOURCE_DIR}/libstdc++/third_party/win32_shim")
 set(CRTGFX_LIBC_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/libc/include")
 set(CRTGFX_LIBCXX_UNEXPORTED "${CMAKE_SOURCE_DIR}/libstdc++/third_party/libcxx/libc++.unexported.exp")
@@ -1980,7 +1987,24 @@ if(CRTGFX_ENABLE_SKIA)
     ${CRT_STARTUP_OBJECTS}
     tests/skia_raster_smoke.cc
   )
-  target_link_libraries(crtgfx_skia_raster_smoke PRIVATE crt_cxx_build_flags crtgfx_skia)
+  # crtmedia (2026-09-23, Windows Zero-copy decoded textures Tranche 2) --
+  # see crtgfx_skia_gpu_offscreen_smoke's own matching comment further
+  # down this file for the full real reason (skia_bridge.cc's own
+  # crtgfx_skia_import_media_frame() is unconditionally part of
+  # crtgfx_skia_objects once CRTGFX_HAVE_D3D12/CRTGFX_HAVE_METAL is set,
+  # calls crtmedia_gpu_frame_release(), and Windows' own lld link, unlike
+  # macOS's -dead_strip, does not eliminate the reference before needing
+  # it resolved). Applied here too, and to every other real executable
+  # below that statically links plain crtgfx_skia -- confirmed for real
+  # that every one of them hit the identical `undefined symbol:
+  # crtmedia_gpu_frame_release` once this tranche's own D3D12 branch
+  # landed. Static (matching crtgfx_skia's own linkage here, not
+  # crtmedia_shared) -- this is a normal, separate, per-consumer PRIVATE
+  # link (like this one), not crtgfx_skia's own PUBLIC interface, so it
+  # does not risk the real macOS archive-scan-order regression
+  # crt_add_crtgfx_skia_static_target()'s own comment documents for why
+  # crtgfx_skia itself deliberately never links crtmedia.
+  target_link_libraries(crtgfx_skia_raster_smoke PRIVATE crt_cxx_build_flags crtgfx_skia crtmedia)
   crt_wire_skia_executable(crtgfx_skia_raster_smoke)
   crt_link_startup_end_objects(crtgfx_skia_raster_smoke)
   add_dependencies(crtgfx_skia_raster_smoke cxx c crt1 crtgfx_skia port-build-freetype)
@@ -2008,7 +2032,9 @@ if(CRTGFX_ENABLE_SKIA)
     ${CRT_STARTUP_OBJECTS}
     tests/skia_cpu_coverage_test.cc
   )
-  target_link_libraries(crtgfx_skia_cpu_coverage PRIVATE crt_cxx_build_flags crtgfx_skia)
+  # crtmedia -- see crtgfx_skia_raster_smoke's own matching comment above
+  # for the full real reason.
+  target_link_libraries(crtgfx_skia_cpu_coverage PRIVATE crt_cxx_build_flags crtgfx_skia crtmedia)
   crt_wire_skia_executable(crtgfx_skia_cpu_coverage)
   crt_link_startup_end_objects(crtgfx_skia_cpu_coverage)
   add_dependencies(crtgfx_skia_cpu_coverage cxx c crt1 crtgfx_skia)
@@ -2021,7 +2047,9 @@ if(CRTGFX_ENABLE_SKIA)
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_skia_cpu_coverage_runs)
 
   add_executable(crtgfx_skia_sksl_test ${CRT_STARTUP_OBJECTS} tests/skia_sksl_test.cc)
-  target_link_libraries(crtgfx_skia_sksl_test PRIVATE crt_cxx_build_flags crtgfx_skia)
+  # crtmedia -- see crtgfx_skia_raster_smoke's own matching comment above
+  # for the full real reason.
+  target_link_libraries(crtgfx_skia_sksl_test PRIVATE crt_cxx_build_flags crtgfx_skia crtmedia)
   crt_wire_skia_executable(crtgfx_skia_sksl_test)
   crt_link_startup_end_objects(crtgfx_skia_sksl_test)
   add_dependencies(crtgfx_skia_sksl_test cxx c crt1 crtgfx_skia)
@@ -2053,7 +2081,25 @@ if(CRTGFX_ENABLE_SKIA)
       ${CRT_STARTUP_OBJECTS}
       tests/skia_gpu_offscreen_smoke.cc
     )
-    target_link_libraries(crtgfx_skia_gpu_offscreen_smoke PRIVATE crt_cxx_build_flags crtgfx_skia)
+    # crtmedia (2026-09-23, Windows Zero-copy decoded textures Tranche 2):
+    # skia_bridge.cc's own crtgfx_skia_import_media_frame() (crtgfx/
+    # skia_media.h) is unconditionally part of crtgfx_skia_objects once
+    # CRTGFX_HAVE_D3D12/CRTGFX_HAVE_METAL is set (this file's own single
+    # skia_bridge.cc translation unit, not gated behind whether the
+    # *calling* executable actually imports a media frame), and it calls
+    # crtmedia_gpu_frame_release() -- a real symbol from libcrtmedia, never
+    # needed by this smoke test's own draw/readback logic before. Confirmed
+    # for real (2026-09-23): omitting this link produces `ld.lld: error:
+    # undefined symbol: crtmedia_gpu_frame_release` at final link, even
+    # though nothing in tests/skia_gpu_offscreen_smoke.cc itself calls
+    # crtgfx_skia_import_media_frame() -- unlike macOS's own -dead_strip,
+    # this project's Windows lld link does not eliminate the reference
+    # before symbol resolution. crtmedia (static), matching crtgfx_skia's
+    # own static linkage just above -- add_subdirectory(libcrtmedia) is
+    # unconditional at the top-level CMakeLists.txt, so the target exists
+    # (with or without CRTMEDIA_ENABLE_FFMPEG) regardless of this
+    # directory's own cache value.
+    target_link_libraries(crtgfx_skia_gpu_offscreen_smoke PRIVATE crt_cxx_build_flags crtgfx_skia crtmedia)
     # gpu_test_control.h is private and non-installed, but backend-neutral:
     # the test can request owner-controlled device loss without seeing the
     # internal wrapper layout or a native handle.
@@ -2097,7 +2143,9 @@ if(CRTGFX_ENABLE_SKIA)
       ${CRT_STARTUP_OBJECTS}
       tools/skia_gpu_window_demo.cc
     )
-    target_link_libraries(crtgfx_skia_gpu_window_demo PRIVATE crt_cxx_build_flags crtgfx_skia)
+    # crtmedia -- see crtgfx_skia_raster_smoke's own matching comment
+    # further up this file for the full real reason.
+    target_link_libraries(crtgfx_skia_gpu_window_demo PRIVATE crt_cxx_build_flags crtgfx_skia crtmedia)
     # tests/ (not src/, unlike crtgfx_skia_gpu_offscreen_smoke just above --
     # this demo only ever calls the public crtgfx/skia.h API, never reaches
     # into gpu_internal.h itself) -- for tests/skia_reference_scene.h, the
@@ -2126,20 +2174,23 @@ if(CRTGFX_ENABLE_SKIA)
 
   # crtgfx_skia_media_window_demo: manual, real on-screen acceptance demo
   # for the zero-copy decoded-texture bridge (2026-09-23, "Zero-copy
-  # decoded textures" Tranche 1 -- crtgfx/skia_media.h, docs/crtmedia_
+  # decoded textures" Tranche 1/2 -- crtgfx/skia_media.h, docs/crtmedia_
   # zero_copy_decode_acceptance.md) -- see tools/skia_media_window_demo.cc's
-  # own top comment for the full "why". Only ever real on macOS today
-  # (crtgfx_skia_import_media_frame() is declared only under
-  # CRTGFX_HAVE_METAL, crtgfx/skia_media.h's own comment), so gated on
-  # CRT_TARGET_OS macos directly rather than the more general CRTGFX_GPU_
-  # BACKEND_ENABLED condition crtgfx_skia_gpu_window_demo just above uses;
-  # also needs the real crtmedia_codec_dequeue_gpu_frame() this whole
-  # bridge exists to feed, so gated on CRTMEDIA_ENABLE_FFMPEG too (crtmedia_
-  # codec.c, and therefore that function, is compiled out of libcrtmedia
-  # entirely otherwise -- examples/README.md's own "compiled out ... unless
-  # CRTMEDIA_ENABLE_FFMPEG" note). Same "needs a real desktop session,
-  # never add_test()-registered" precedent as that sibling.
-  if(CRTGFX_GPU_BACKEND_ENABLED AND CRT_TARGET_OS STREQUAL "macos" AND CRTMEDIA_ENABLE_FFMPEG)
+  # own top comment for the full "why". Real on macOS and (2026-09-23)
+  # Windows -- crtgfx_skia_import_media_frame() is declared under either
+  # CRTGFX_HAVE_METAL or CRTGFX_HAVE_D3D12 (crtgfx/skia_media.h's own
+  # comment) -- so gated on CRT_TARGET_OS being one of those two directly
+  # rather than the more general CRTGFX_GPU_BACKEND_ENABLED condition
+  # crtgfx_skia_gpu_window_demo just above uses (Linux has no real bridge
+  # implementation yet, docs/crtmedia_zero_copy_decode_acceptance.md's own
+  # "Not started" row); also needs the real crtmedia_codec_dequeue_gpu_
+  # frame() this whole bridge exists to feed, so gated on CRTMEDIA_ENABLE_
+  # FFMPEG too (crtmedia_codec.c, and therefore that function, is compiled
+  # out of libcrtmedia entirely otherwise -- examples/README.md's own
+  # "compiled out ... unless CRTMEDIA_ENABLE_FFMPEG" note). Same "needs a
+  # real desktop session, never add_test()-registered" precedent as that
+  # sibling, on both hosts.
+  if(CRTGFX_GPU_BACKEND_ENABLED AND (CRT_TARGET_OS STREQUAL "macos" OR CRT_TARGET_OS STREQUAL "windows") AND CRTMEDIA_ENABLE_FFMPEG)
     add_executable(crtgfx_skia_media_window_demo
       ${CRT_STARTUP_OBJECTS}
       tools/skia_media_window_demo.cc
@@ -2383,7 +2434,9 @@ if(CRTGFX_ENABLE_SKIA)
   # linking crtgfx_skia here (needed for the real Skia bridge symbols
   # this file's own CRTGFX_HAS_SKIA_HEADERS-gated code path calls) is
   # additive, not a conflict.
-  target_link_libraries(crtgfx_keyboard_interactive PRIVATE crtgfx_skia)
+  # crtmedia -- see crtgfx_skia_raster_smoke's own matching comment
+  # further up this file for the full real reason.
+  target_link_libraries(crtgfx_keyboard_interactive PRIVATE crtgfx_skia crtmedia)
   crt_wire_skia_executable(crtgfx_keyboard_interactive)
   add_dependencies(crtgfx_keyboard_interactive crtgfx_skia port-build-freetype)
 endif()

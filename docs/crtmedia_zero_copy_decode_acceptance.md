@@ -103,7 +103,7 @@ document -- a generic caller must still treat it as opaque):
 | Host | Real identity | Lifetime |
 | --- | --- | --- |
 | macOS | `CVPixelBufferRef` (`avframe->data[3]` on the retained hardware `AVFrame`) | Exactly `frame`'s own lifetime -- not independently retained; the retained `AVFrame` in `release_context` is what actually keeps it alive. |
-| Windows | `ID3D11Texture2D*` (Tranche 2 of this file) | Same shape, once implemented. |
+| Windows | `crtmedia_d3d11_gpu_frame_handle*` (`libcrtmedia/src/gpu_frame_d3d11.h`, private/non-installed) -- a small crtmedia-owned indirection, not a bare `ID3D11Texture2D*` (confirmed necessary while implementing this tranche: `hwcontext_d3d11va.c`'s own real decode output is one array-slice of a shared decode-pool array texture, `frame->data[0]` the `ID3D11Texture2D*` and `frame->data[1]` the array index -- a single pointer cannot carry both). Fields: `void* texture` (the `ID3D11Texture2D*`), `int64_t array_index`. | Exactly `frame`'s own lifetime, same shape as macOS -- the retained `AVFrame` in `release_context` keeps the underlying decode-pool slice alive; the indirection struct itself is heap-allocated alongside that `AVFrame` and freed by the same release function. |
 | Linux | A VA-API surface reference (Tranche 3 of this file; `VASurfaceID` is a scalar, not a pointer, so this will need a small crtmedia-owned indirection, decided when that tranche starts) | Same shape, once implemented. |
 
 On every host, the true owner of the underlying decoder resource is the
@@ -211,5 +211,5 @@ Each host tranche is accepted when:
 | Host | Backend | Status | Evidence |
 | --- | --- | --- | --- |
 | macOS/arm64 | VideoToolbox `CVPixelBuffer` → `CVMetalTextureCache` → Metal Y/UV textures → `GrYUVABackendTextures` → `SkImage` | See `HISTORY.md` | |
-| Windows/x64 | D3D11VA `ID3D11Texture2D` → D3D12 shared resource or measured GPU-copy fallback | Not started | |
+| Windows/x64 | D3D11VA `ID3D11Texture2D` → plane-sliced `ID3D11ShaderResourceView1` → compute-shader copy → NT-handle-shared D3D12 resource → `GrYUVABackendTextures` → `SkImage` (measured GPU-copy fallback, not literal zero-copy -- D3D12/Skia has no multi-plane concept) | See `HISTORY.md` | |
 | Linux | VA-API surface → DRM PRIME/dma-buf → Vulkan `VkImage` | Not started | |

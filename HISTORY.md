@@ -122,6 +122,162 @@ substantive update.
   and Linux (Tranche 3, VA-API/Vulkan interop question first) are not
   started.
 
+- **Zero-copy decoded textures, Tranche 2 (Windows/x64, D3D11VA -> D3D12,
+  measured GPU-copy fallback).** Closes `TODO.md`'s item 2. Unlike macOS's
+  own `native_handle` (a single `CVPixelBufferRef` pointer), FFmpeg's real
+  `hwcontext_d3d11va.c` decode output is one array slice of a *shared
+  decode-pool array texture* (`frame->data[0]` the `ID3D11Texture2D*`,
+  `frame->data[1]` the array index) -- confirmed by reading that file
+  directly, not assumed -- so a single pointer cannot carry the real
+  identity; `libcrtmedia/src/gpu_frame_d3d11.h` (new, private) adds a
+  small crtmedia-owned `crtmedia_d3d11_gpu_frame_handle` indirection
+  (`{ void* texture; int64_t array_index; }`) instead.
+
+  **crtmedia side** (`libcrtmedia/src/codec.c`): new
+  `AV_PIX_FMT_D3D11`/`fill_gpu_video_frame_d3d11()` branch in
+  `crtmedia_codec_dequeue_gpu_frame()`, additive next to the existing
+  VideoToolbox branch -- `av_frame_ref()`s the still-hardware-resident
+  frame, no CPU transfer, `memory_kind = CRTMEDIA_GPU_MEMORY_GPU`,
+  `plane_count = 0`, matching the acceptance doc's own per-host table
+  exactly. Real bug found only by actually decoding on this host's own
+  hardware, not by inspection: `av_hwdevice_ctx_create(AV_HWDEVICE_TYPE_
+  D3D11VA, NULL, NULL, NULL, 0)`'s decode-pool texture gets `BindFlags ==
+  D3D11_BIND_DECODER` only by default (`libavcodec/dxva2.c`'s own
+  `ff_dxva2_common_frame_params()`) -- confirmed by reading FFmpeg's own
+  source -- so every later `ID3D11Device3::CreateShaderResourceView1()`
+  call on it (the crtgfx-side bridge, below) failed with `E_INVALIDARG`
+  until the device is created with the real `"SHADER"` opts-dict key
+  instead (`device_hwctx->BindFlags |= D3D11_BIND_SHADER_RESOURCE`,
+  `hwcontext_d3d11va.c`), which then propagates into the pool's own real
+  texture description at allocation time.
+  `libcrtmedia/tests/zero_copy_test.c`'s own `CRTMEDIA_ZERO_COPY_EXPECTED`
+  for Windows flips from 0 to 1 to match (it predates this branch's
+  existence); real result on this host --
+  `RESULT backend=d3d11va hw_requested=yes hardware_accelerated=yes
+  zero_copy_expected=yes zero_copy_delivered=yes saw_gpu_frame=yes
+  saw_cpu_frame=no frame_count=25`.
+
+  **crtgfx side** (`skia_bridge.cc`'s existing D3D12 branch, extended):
+  D3D12's own `GrD3DTextureResourceInfo` has no multi-plane concept at all
+  (confirmed by reading `GrD3DTypes.h` directly, unlike Metal's
+  `CVMetalTextureCache`, which can make plane-specific texture views of
+  one `IOSurface`), so true zero-copy is not available here -- the
+  acceptance doc's own frozen gate explicitly allows a measured,
+  honestly-reported GPU-copy fallback instead, which is what this closes
+  with: a plane-sliced `ID3D11ShaderResourceView1`
+  (`D3D11_TEX2D_ARRAY_SRV1`/`D3D11_SRV_DIMENSION_TEXTURE2DARRAY` --
+  *not* the plain, non-array `D3D11_TEX2D_SRV1`, since the real source
+  texture is always an array) extracts Y/UV from the decode-pool slice; a
+  tiny runtime-`D3DCompile`d compute shader copies each plane into a
+  small, persistent per-plane cache of NT-handle-shareable destination
+  textures (created once, refreshed in place every frame -- not recreated
+  from scratch, see below for why); each is opened into D3D12 via
+  `IDXGIResource1::CreateSharedHandle()`/`ID3D12Device::OpenSharedHandle()`
+  and fed to `GrYUVABackendTextures` -> `SkImages::TextureFromYUVATextures`,
+  same as the Metal branch, no RGBA intermediate. Real device-affinity
+  check (FFmpeg's own D3D11VA device and `crtgfx_gpu_device`'s own D3D12
+  device are each created independently and are not guaranteed to be the
+  same physical adapter): compares real DXGI adapter LUIDs, bailing out to
+  the existing CPU-transfer fallback on a genuine mismatch. All new hand-
+  declared GUIDs (`IID_ID3D11Device3`, `IID_IDXGIDevice`,
+  `IID_IDXGIResource1`, `IID_ID3D11ShaderResourceView1`) transcribed from
+  the real local mingw-w64 headers, matching `DumbD3DMemoryAllocator`'s
+  own established precedent for this file.
+
+  Three more real, non-obvious bugs found only by actually running the
+  full pipeline on this host's own real (multi-adapter) hardware, none of
+  them visible from inspection or from the standalone probes that
+  preceded this work:
+  1. **Missing GPU-side sync.** `ID3D11DeviceContext::Flush()` alone only
+     *submits* the compute-shader copy's command list -- it does not wait
+     for it to finish. Without a real wait, D3D12's own first sample of
+     the shared resource could race the D3D11 write; fixed with a real,
+     CPU-blocking `ID3D11Query`/`D3D11_QUERY_EVENT` (`End()` + spin on
+     `GetData()` returning non-`S_FALSE`) -- `crtgfx_gpu_fence` stays
+     CPU-only per the acceptance doc's own Scope section, so this is a
+     plain D3D11 query, not a reused cross-API fence.
+  2. **Unbounded per-frame shared-resource churn.** The bridge's first
+     working version created a brand-new NT-shared-handle texture/
+     resource pair from scratch on every single frame; after several
+     dozen frames this reliably corrupted unrelated DXGI state on this
+     host's own Intel iGPU driver (observed as a completely unrelated
+     `IDXGIAdapter1::GetDesc1()` call, in this same function's own device-
+     affinity check, returning garbage). Fixed by caching and reusing a
+     small, fixed number of persistent per-plane resources (refreshed via
+     the compute shader every frame) instead of recreating them.
+  3. **A serious, silent ABI-corruption bug in this project's own Windows
+     C++ build, not specific to this bridge.** This project's `-Xclang
+     -fwchar-type=int` (`CMakeLists.txt`, a deliberate project-wide
+     4-byte `wchar_t` override) makes the real SDK `DXGI_ADAPTER_DESC`/
+     `DXGI_ADAPTER_DESC1` structs' `WCHAR Description[128]` field twice
+     the real Windows ABI's size, silently misaligning every field after
+     it (`VendorId`, `AdapterLuid`, ...) relative to what the real system
+     `dxgi.dll` actually writes -- diagnosed for real by noticing
+     `Description` itself decoded correctly (via `WideCharToMultiByte`)
+     while `AdapterLuid` looked like garbage immediately after it.
+     `gpu_win32.c` already carries its own fix for this exact class of bug
+     (`crtgfx_dxgi_wchar`/`typedef unsigned short crtgfx_dxgi_wchar;`) for
+     its own hand-declared DXGI structs; this adds two correctly-sized
+     local replacements (`RealDxgiAdapterDesc`/`RealDxgiAdapterDesc1`) for
+     the two real SDK struct shapes `skia_bridge.cc` itself needs (a COM
+     vtable call only cares about real memory layout, never the static
+     C++ type name passed at the call site, so this is safe). Worth
+     flagging: any other real Windows C++ code in this project that reads
+     a `WCHAR`-containing struct written by a real system DLL (not just
+     DXGI) is a candidate for the identical bug, not yet audited.
+
+  `crtgfx_skia_media_window_demo` (its own CMake gate widened from macOS-
+  only to `CRT_TARGET_OS STREQUAL "macos" OR "windows"`,
+  `libcrtgfx/CMakeLists.txt`) presents all 25 real decoded frames end to
+  end with a real pixel check and a scripted resize, both passing,
+  `zero_copy=yes`, reproducible across repeated runs: `RESULT
+  backend=d3d12 frames_presented=25 resize_frame=2 pixel_check=pass
+  zero_copy=yes post_resize_present=pass clean_exit=pass`.
+
+  Two more, unrelated-to-each-other real gaps surfaced only by actually
+  building and testing everything, not just this one new demo target:
+  `crtgfx_skia_import_media_frame()` is unconditionally part of
+  `crtgfx_skia_objects` once `CRTGFX_HAVE_D3D12` is set (not gated behind
+  whether the *calling* executable itself imports a media frame), so
+  every one of `crtgfx_skia_raster_smoke`/`crtgfx_skia_cpu_coverage`/
+  `crtgfx_skia_sksl_test`/`crtgfx_skia_gpu_offscreen_smoke`/`crtgfx_skia_
+  gpu_window_demo`/`crtgfx_keyboard_interactive` -- every real executable
+  in this project that statically links plain `crtgfx_skia` on Windows --
+  needed a new, real `crtmedia` link the first time each was actually
+  rebuilt in this configuration (`undefined symbol: crtmedia_gpu_frame_
+  release`; Windows' own lld link, unlike macOS's `-dead_strip`, does not
+  eliminate the unreferenced symbol before needing it resolved); separately,
+  `crtgfx_skia_shared` (the DLL) was missing its own `dxgi.lib` link
+  entirely (`crtgfx_gpu_shared`'s own dxgi.lib link is PRIVATE and does
+  not propagate, the identical, already-documented reason that target's
+  own `d3d12.lib` link had to be explicit too) -- pre-existing, unrelated
+  to this tranche's own logic, simply never previously exercised by an
+  actual from-scratch full build of this exact Debug+Skia+FFmpeg
+  configuration; surfaced as `undefined symbol: DXGIGetDebugInterface1`
+  from Skia's own vendored D3D12 backend debug-layer code. Two new,
+  narrowly-scoped warning suppressions (`libcrtgfx/cmake/crtgfx_skia_
+  targets.cmake`, the actual `crtgfx_skia_objects` compile-options target,
+  not `libcrtgfx/CMakeLists.txt`'s `crt_wire_skia_executable()`, which was
+  the wrong function on a first, build-tested-and-reverted attempt):
+  `-Wno-class-conversion` and `-Wno-error=extern-c-compat` (not plain
+  `-Wno-extern-c-compat` -- found for real that this project's own
+  `-Wall` re-enables that specific warning group later on the same
+  command line, since `crtgfx_skia_objects`' own PRIVATE compile options
+  are always emitted before `crt_build_flags`'s linked-interface-
+  propagated `-Wall -Wextra -Werror`, regardless of source-file call
+  order; `-Wno-error=X` is not subject to that same later-flag-wins
+  re-enable, unlike plain `-Wno-X`) for mingw-w64's own real `d3d11.h`/
+  `d3d10.h` `CD3D11_DEFAULT`/`CD3D11_*_DESC` convenience-helper patterns,
+  the first real code in this project to `#include <d3d11.h>`/
+  `<d3d11_3.h>` directly.
+
+  With every real fix above applied, a genuine from-scratch full build
+  and `ctest` of this dedicated Skia+FFmpeg-enabled directory: 155/155.
+
+  **Still open:** the isolated `04-gfx-media` distribution stage has not
+  yet been rebuilt with this bridge (same deferral as macOS Tranche 1,
+  above); Linux (Tranche 3) is not started.
+
 - **Posted the main public launch (Show HN or equivalent) for CRT.** The
   submission has been made/requested by the maintainer, closing `TODO.md`'s
   "Public Preview / Promotion" item for it. Whatever response it draws

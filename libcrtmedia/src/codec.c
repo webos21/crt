@@ -20,6 +20,9 @@
 #include "crtmedia/codec.h"
 
 #include "codec_test_control.h"
+#if defined(CRT_TARGET_OS_WINDOWS)
+#include "gpu_frame_d3d11.h"
+#endif
 
 #include <libavcodec/avcodec.h>
 #include <libavutil/channel_layout.h>
@@ -234,8 +237,31 @@ crtmedia_result crtmedia_codec_create_decoder(const crtmedia_format* format, crt
    * branch never activates for this instance. */
   if (is_video && prefer_hardware_decode != 0) {
     enum AVHWDeviceType hw_type = hw_type_for_platform();
-    if (hw_type != AV_HWDEVICE_TYPE_NONE &&
-        av_hwdevice_ctx_create(&codec->hw_device_ctx, hw_type, NULL, NULL, 0) >= 0) {
+    AVDictionary* hw_device_opts = NULL;
+    /* "SHADER" (2026-09-23, Windows Zero-copy decoded textures Tranche 2)
+     * -- confirmed by reading FFmpeg's own hwcontext_d3d11va.c directly:
+     * av_hwdevice_ctx_create()'s own opts dict is the only way to make the
+     * real D3D11VA decode-pool texture D3D11_BIND_SHADER_RESOURCE-capable
+     * (device_hwctx->BindFlags |= D3D11_BIND_SHADER_RESOURCE when this key
+     * is present, propagated into the frames context's own real texture
+     * description at pool-allocation time, hwcontext_d3d11va.c's own
+     * d3d11va_frames_init()). Without it the decode-pool texture is
+     * BindFlags == D3D11_BIND_DECODER only (set by libavcodec/dxva2.c's
+     * own ff_dxva2_common_frame_params()), and crtgfx_skia_media's own
+     * D3D12 bridge (skia_bridge.cc) fails every real
+     * CreateShaderResourceView1() call with E_INVALIDARG -- confirmed for
+     * real on this host's own hardware before this fix. The value itself
+     * is never read (av_dict_get(opts, "SHADER", NULL, 0) only checks
+     * presence), so "1" is an arbitrary non-empty placeholder. Harmless,
+     * ignored no-op on every other real hw_type this function handles
+     * (VideoToolbox/VAAPI never look at this key). */
+    if (hw_type == AV_HWDEVICE_TYPE_D3D11VA) {
+      av_dict_set(&hw_device_opts, "SHADER", "1", 0);
+    }
+    int hw_device_created = hw_type != AV_HWDEVICE_TYPE_NONE &&
+        av_hwdevice_ctx_create(&codec->hw_device_ctx, hw_type, NULL, hw_device_opts, 0) >= 0;
+    av_dict_free(&hw_device_opts);
+    if (hw_device_created) {
       switch (hw_type) {
         case AV_HWDEVICE_TYPE_D3D11VA:
           codec->hw_pix_fmt = AV_PIX_FMT_D3D11;
@@ -528,6 +554,64 @@ static void fill_gpu_video_frame_videotoolbox(AVFrame* avframe, crtmedia_gpu_fra
   out_frame->release_context = avframe;
 }
 
+#if defined(CRT_TARGET_OS_WINDOWS)
+/* Backing for the Windows zero-copy branch (Tranche 2, 2026-09-23) -- see
+ * gpu_frame_d3d11.h's own top comment for the full "why". Combines the
+ * retained AVFrame with its own crtmedia_d3d11_gpu_frame_handle in one
+ * allocation so a single release() call frees both together, matching
+ * every other fill_gpu_video_frame_*() sibling's "one owner, one release"
+ * shape even though this one owns two logically distinct things. */
+typedef struct crtmedia_gpu_frame_d3d11_backing {
+  AVFrame* avframe;
+  crtmedia_d3d11_gpu_frame_handle handle;
+} crtmedia_gpu_frame_d3d11_backing;
+
+static void release_gpu_video_frame_d3d11(crtmedia_gpu_frame* frame, void* release_context) {
+  (void)frame;
+  crtmedia_gpu_frame_d3d11_backing* backing = (crtmedia_gpu_frame_d3d11_backing*)release_context;
+  av_frame_free(&backing->avframe);
+  free(backing);
+}
+
+/* Real zero-copy branch (Windows/D3D11VA -- docs/crtmedia_zero_copy_decode_
+ * acceptance.md's own native_handle table). `avframe` here is still
+ * genuinely hardware-resident (its own format equals AV_PIX_FMT_D3D11,
+ * never downloaded). FFmpeg's own hwcontext_d3d11va.c places the real
+ * ID3D11Texture2D pointer/array-index pair at avframe->data[0]/data[1] --
+ * confirmed by reading that file directly (wrap_texture_buf(), d3d11va_
+ * transfer_get()), not assumed; gpu_frame_d3d11.h's own top comment has the
+ * full citation. Returns CRTMEDIA_ERROR_UNSUPPORTED on a real allocation
+ * failure, unlike fill_gpu_video_frame_videotoolbox()'s own unchecked
+ * style -- this function's own extra heap allocation (the combined backing
+ * above) gives it a real failure mode that one does not have. Video is
+ * always reported as NV12 here, matching the macOS branch's own identical
+ * "every real hardware H.264 decoder produces NV12" reasoning -- there is
+ * no downloaded sw_frame to inspect an actual pixel format on. */
+static crtmedia_result fill_gpu_video_frame_d3d11(AVFrame* avframe, crtmedia_gpu_frame* out_frame) {
+  crtmedia_gpu_frame_d3d11_backing* backing =
+      (crtmedia_gpu_frame_d3d11_backing*)malloc(sizeof(*backing));
+  if (backing == NULL) {
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+  backing->avframe = avframe;
+  backing->handle.texture = avframe->data[0];
+  backing->handle.array_index = (int64_t)(intptr_t)avframe->data[1];
+
+  memset(out_frame, 0, sizeof(*out_frame));
+  out_frame->format = CRTMEDIA_PIXEL_FORMAT_NV12;
+  out_frame->width = (uint32_t)avframe->width;
+  out_frame->height = (uint32_t)avframe->height;
+  out_frame->memory_kind = CRTMEDIA_GPU_MEMORY_GPU;
+  out_frame->timestamp_us = avframe->pts != AV_NOPTS_VALUE ? avframe->pts : CRTMEDIA_FRAME_TIMESTAMP_NONE;
+  out_frame->device_id = 0;
+  out_frame->native_handle = &backing->handle;
+  out_frame->plane_count = 0;
+  out_frame->release = release_gpu_video_frame_d3d11;
+  out_frame->release_context = backing;
+  return CRTMEDIA_OK;
+}
+#endif
+
 static void release_audio_buffer(crtmedia_audio_buffer* buffer, void* release_context) {
   (void)buffer;
   free(release_context);
@@ -696,12 +780,33 @@ crtmedia_result crtmedia_codec_dequeue_gpu_frame(
           fill_gpu_video_frame_videotoolbox(owned, out_video_frame);
           codec->hardware_accelerated = 1;
           codec->hw_zero_copy_delivered = 1;
+#if defined(CRT_TARGET_OS_WINDOWS)
+        } else if (codec->hw_pix_fmt == AV_PIX_FMT_D3D11) {
+          /* Real zero-copy path (Windows today -- see fill_gpu_video_frame_
+           * d3d11()'s own comment). Same real, checked av_frame_alloc()/
+           * av_frame_ref() recovery as the macOS branch above. */
+          AVFrame* owned = av_frame_alloc();
+          if (owned == NULL || av_frame_ref(owned, codec->decode_frame) < 0) {
+            if (owned != NULL) {
+              av_frame_free(&owned);
+            }
+            av_frame_unref(codec->decode_frame);
+            return CRTMEDIA_ERROR_UNSUPPORTED;
+          }
+          if (fill_gpu_video_frame_d3d11(owned, out_video_frame) != CRTMEDIA_OK) {
+            av_frame_free(&owned);
+            av_frame_unref(codec->decode_frame);
+            return CRTMEDIA_ERROR_UNSUPPORTED;
+          }
+          codec->hardware_accelerated = 1;
+          codec->hw_zero_copy_delivered = 1;
+#endif
         } else {
           /* No real zero-copy path implemented for this host's hw_pix_fmt
-           * yet (D3D11/VAAPI -- docs/crtmedia_zero_copy_decode_
-           * acceptance.md Tranches 2/3) -- same real CPU download dequeue_
-           * output()'s own hw branch already uses, so this API stays fully
-           * usable everywhere before those tranches land. */
+           * yet (VAAPI -- docs/crtmedia_zero_copy_decode_acceptance.md
+           * Tranche 3) -- same real CPU download dequeue_output()'s own hw
+           * branch already uses, so this API stays fully usable everywhere
+           * before that tranche lands. */
           AVFrame* sw_frame = av_frame_alloc();
           if (sw_frame == NULL || av_hwframe_transfer_data(sw_frame, codec->decode_frame, 0) < 0) {
             if (sw_frame != NULL) {

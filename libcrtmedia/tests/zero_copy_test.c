@@ -51,7 +51,18 @@
 #define CRTMEDIA_ZERO_COPY_EXPECTED 1
 #elif defined(CRT_TARGET_OS_WINDOWS)
 #define CRTMEDIA_HW_BACKEND_NAME "d3d11va"
-#define CRTMEDIA_ZERO_COPY_EXPECTED 0
+// 1, not 0 (2026-09-23, Windows Zero-copy decoded textures Tranche 2):
+// codec.c's own new AV_PIX_FMT_D3D11 branch (fill_gpu_video_frame_d3d11())
+// hands off the decode-pool ID3D11Texture2D pointer/array-index pair
+// directly as native_handle, with no av_hwframe_transfer_data()/CPU copy in
+// codec.c itself -- exactly docs/crtmedia_zero_copy_decode_acceptance.md's
+// own "real zero-copy path implemented for this host" row, the same as
+// macOS. The real GPU-to-GPU copy this host still needs (D3D11 has no
+// direct D3D12 multi-plane share) happens one layer up, inside crtgfx_
+// skia_media's own bridge (skia_bridge.cc) -- a structural, no-CPU-readback
+// guarantee the acceptance doc's own per-tranche gate checks separately,
+// not something this crtmedia-layer diagnostic reports.
+#define CRTMEDIA_ZERO_COPY_EXPECTED 1
 #elif defined(CRT_TARGET_OS_LINUX)
 #define CRTMEDIA_HW_BACKEND_NAME "vaapi"
 #define CRTMEDIA_ZERO_COPY_EXPECTED 0

@@ -623,6 +623,560 @@ crtgfx_result crtgfx_skia_gpu_surface_present(
   return crtgfx_gpu_surface_present(gpu_surface);
 }
 
+// Zero-copy decoded-texture bridge (2026-09-23, "Zero-copy decoded
+// textures" Tranche 2 -- see crtgfx/skia_media.h's own top comment for the
+// full frozen contract, ownership rule, and the real reason this needs a
+// GPU-copy step D3D11VA -> a fresh shareable texture, unlike the macOS
+// branch's own direct CVPixelBuffer wrap). Everything below (the plane-
+// sliced D3D11.3 SRV1 extraction, the compute-shader plane copy, and the
+// NT-handle D3D11->D3D12 share) was confirmed for real via two standalone
+// probes on this exact host before landing: one proving a plain shareable
+// D3D11 texture opens correctly into D3D12 and round-trips a known byte
+// pattern; one proving ID3D11Device3::CreateShaderResourceView1() with
+// D3D11_TEX2D_SRV1::PlaneSlice really does extract the Y/UV planes of a
+// real NV12 texture as independently readable, byte-exact float/float2
+// data.
+#include "crtgfx/skia_media.h"
+
+#if CRTGFX_HAS_SKIA_HEADERS && defined(CRTGFX_HAVE_D3D12)
+
+// Real <d3d11.h>/<d3d11_3.h> inclusion, the identical "third-party source
+// being ported" exception docs/libcrtgfx_api_policy.md's own Non-Goals
+// clause already accepts for this file's own <d3d12.h> above (Skia's own
+// GrD3DTypes.h forces that one) -- extended here to D3D11 rather than
+// hand-declaring a dozen-plus vtable slots for CreateTexture2D/
+// CreateShaderResourceView1/CopyResource/QueryInterface/GetAdapter/
+// CreateSharedHandle by hand, the real error-prone alternative this
+// project's own window_win32.c/gpu_win32.c otherwise prefer for a handful
+// of methods -- not for a surface this wide. gpu_frame_d3d11.h
+// (libcrtmedia/src/, reached via this target's own extra -I --
+// libcrtgfx/cmake/crtgfx_skia_targets.cmake) supplies the real
+// ID3D11Texture2D*/array-index pair this branch reads from crtmedia_gpu_
+// frame.native_handle.
+#include <d3d11.h>
+#include <d3d11_3.h>
+#include <d3dcompiler.h>
+#include <dxgi1_2.h>
+
+#include "gpu_frame_d3d11.h"
+
+#include "include/core/SkYUVAInfo.h"
+#include "include/gpu/ganesh/GrYUVABackendTextures.h"
+#include "include/gpu/ganesh/SkImageGanesh.h"
+
+namespace {
+
+// Real GUIDs, confirmed directly against mingw-w64's own d3d11_3.h/dxgi.h/
+// dxgi1_2.h DEFINE_GUID declarations (not guessed) -- avoids IID_PPV_ARGS()/
+// __uuidof(), both real MSVC-only extensions this project's own mingw-
+// target clang invocation does not support, matching DumbD3DMemoryAllocator's
+// own kIID_ID3D12Resource precedent (this same file, D3D12 branch above).
+const GUID kIID_ID3D11Device3 = {
+    0xa05c8c37, 0xd2c6, 0x4732, {0xb3, 0xa0, 0x9c, 0xe0, 0xb0, 0xdc, 0x9a, 0xe6}};
+const GUID kIID_IDXGIDevice = {
+    0x54ec77fa, 0x1377, 0x44e6, {0x8c, 0x32, 0x88, 0xfd, 0x5f, 0x44, 0xc8, 0x4c}};
+const GUID kIID_IDXGIResource1 = {
+    0x30961379, 0x4609, 0x4a41, {0x99, 0x8e, 0x54, 0xfe, 0x56, 0x7e, 0xe0, 0xc1}};
+
+// Real DXGI_ADAPTER_DESC/DXGI_ADAPTER_DESC1 replacements, NOT the real SDK
+// types -- confirmed necessary for real (2026-09-23), a serious, silent
+// ABI-corruption bug found only by actually running this code and
+// noticing IDXGIAdapter::GetDesc()'s own real `Description` field decoded
+// correctly (via WideCharToMultiByte) while every field *after* it
+// (VendorId, AdapterLuid, ...) came back looking like garbage. Root
+// cause: mingw-w64's own real `WCHAR` is `typedef wchar_t WCHAR;`
+// (wtypesbase.h), and this project's entire Windows C++ build passes
+// `-Xclang -fwchar-type=int` (CMakeLists.txt's own crt_cxx_build_flags,
+// a deliberate project-wide POSIX-style 4-byte wchar_t override) -- so
+// `DXGI_ADAPTER_DESC::Description[128]` occupies 512 bytes in *this
+// project's own compiled code* instead of the real Windows ABI's 256
+// bytes (128 * real 2-byte WCHAR), shifting every subsequent field's
+// real, system-DLL-written offset out from under this project's own
+// (wrongly-sized) struct definition. gpu_win32.c already hit and solved
+// this exact problem for its own hand-declared DXGI structs (see that
+// file's own `crtgfx_dxgi_wchar`/`typedef unsigned short
+// crtgfx_dxgi_wchar;`) -- this mirrors that precedent for the two real
+// SDK struct shapes this file itself needs (COM calls only care about
+// real memory layout, never the static C++ type name, so a locally
+// correctly-sized redeclaration passed to the exact same real
+// GetDesc()/GetDesc1() vtable slot is both safe and correct).
+struct RealDxgiAdapterDesc {
+  unsigned short Description[128];
+  UINT VendorId;
+  UINT DeviceId;
+  UINT SubSysId;
+  UINT Revision;
+  SIZE_T DedicatedVideoMemory;
+  SIZE_T DedicatedSystemMemory;
+  SIZE_T SharedSystemMemory;
+  LUID AdapterLuid;
+};
+struct RealDxgiAdapterDesc1 {
+  unsigned short Description[128];
+  UINT VendorId;
+  UINT DeviceId;
+  UINT SubSysId;
+  UINT Revision;
+  SIZE_T DedicatedVideoMemory;
+  SIZE_T DedicatedSystemMemory;
+  SIZE_T SharedSystemMemory;
+  LUID AdapterLuid;
+  UINT Flags;
+};
+
+// A tiny, local RAII wrapper -- this file has no COM smart-pointer
+// convention of its own beyond Skia's own gr_cp<T> (used only for the
+// handful of objects actually handed to Skia, below); everything else
+// here is a real, temporary COM object this function itself must not
+// leak across its own dozen-plus early-return failure paths.
+template <typename T>
+class ComPtr {
+ public:
+  ComPtr() = default;
+  ~ComPtr() { Reset(); }
+  ComPtr(const ComPtr&) = delete;
+  ComPtr& operator=(const ComPtr&) = delete;
+  T** ReceiveAddressOf() {
+    Reset();
+    return &ptr_;
+  }
+  T* Get() const { return ptr_; }
+  T* operator->() const { return ptr_; }
+  explicit operator bool() const { return ptr_ != nullptr; }
+  void Reset() {
+    if (ptr_ != nullptr) {
+      ptr_->Release();
+      ptr_ = nullptr;
+    }
+  }
+  // Real ownership transfer for the two D3D12 resources this function
+  // hands off into Skia's own gr_cp<ID3D12Resource> (GrD3DTextureResourceInfo::
+  // fResource.retain() below) -- Skia takes its own, independent reference
+  // via .retain(), so this wrapper's own destructor releasing its copy
+  // afterward is correct, ordinary balanced COM refcounting, not a
+  // use-after-free.
+
+ private:
+  T* ptr_ = nullptr;
+};
+
+// One tiny compute shader per plane component count (R8 = float, R8G8 =
+// float2) -- copies exactly one already-plane-sliced source view into an
+// independent, differently-allocated destination, entirely on the GPU.
+// Compiled once per process via D3DCompile (real, present on every
+// DirectX-capable Windows install as d3dcompiler_47.dll -- this project
+// already links CRTGFX_WINDOWS_D3DCOMPILER_LIB for Skia's own D3D backend,
+// libcrtgfx/CMakeLists.txt), not precompiled offline: this project has no
+// existing dependency on a real HLSL compiler toolchain (fxc/dxc) and
+// runtime compilation of two three-line shaders is a real, bounded,
+// one-time cost, not a per-frame one (cached in the two function-local
+// statics below).
+const char kCopyPlaneShaderR8[] =
+    "Texture2D<float> SrcPlane : register(t0);\n"
+    "RWTexture2D<float> DstPlane : register(u0);\n"
+    "[numthreads(8,8,1)]\n"
+    "void CSMain(uint3 id : SV_DispatchThreadID) { DstPlane[id.xy] = SrcPlane[id.xy]; }\n";
+const char kCopyPlaneShaderR8G8[] =
+    "Texture2D<float2> SrcPlane : register(t0);\n"
+    "RWTexture2D<float2> DstPlane : register(u0);\n"
+    "[numthreads(8,8,1)]\n"
+    "void CSMain(uint3 id : SV_DispatchThreadID) { DstPlane[id.xy] = SrcPlane[id.xy]; }\n";
+
+// Compiles `hlsl_source` once and caches the resulting ID3D11ComputeShader
+// on `device` for the rest of this process's lifetime -- `device` here is
+// always the one real ID3D11Device FFmpeg's own hwcontext_d3d11va.c
+// created (borrowed from the decoded texture itself, never independently
+// created by this bridge), so a single cache slot per shader kind is
+// correct for the realistic "one FFmpeg decode device per process" shape
+// this project's own crtmedia_codec_create_decoder() already has (it never
+// takes a device parameter -- one process, one implicit default-adapter
+// D3D11VA device). Returns null on any real compile/create failure; never
+// crashes on a null source.
+ID3D11ComputeShader* GetOrCreateCopyPlaneShader(ID3D11Device* device, const char* hlsl_source, bool* out_created_now) {
+  static ID3D11ComputeShader* cached_r8 = nullptr;
+  static ID3D11ComputeShader* cached_r8g8 = nullptr;
+  ID3D11ComputeShader** cache_slot = (hlsl_source == kCopyPlaneShaderR8) ? &cached_r8 : &cached_r8g8;
+  *out_created_now = false;
+  if (*cache_slot != nullptr) {
+    return *cache_slot;
+  }
+
+  ComPtr<ID3DBlob> blob;
+  ComPtr<ID3DBlob> error_blob;
+  HRESULT hr = D3DCompile(
+      hlsl_source, strlen(hlsl_source), nullptr, nullptr, nullptr, "CSMain", "cs_5_0", 0, 0,
+      blob.ReceiveAddressOf(), error_blob.ReceiveAddressOf());
+  if (FAILED(hr) || !blob) {
+    return nullptr;
+  }
+  ID3D11ComputeShader* shader = nullptr;
+  hr = device->CreateComputeShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, &shader);
+  if (FAILED(hr)) {
+    return nullptr;
+  }
+  *cache_slot = shader;
+  *out_created_now = true;
+  return shader;
+}
+
+// A persistent (process-lifetime), per-plane cache of the destination
+// shareable D3D11 texture and its already-opened D3D12 resource --
+// confirmed necessary for real (2026-09-23): creating a brand-new
+// NT-shared-handle texture/resource pair from scratch on every single
+// frame (this bridge's own original design) works for a while but
+// eventually corrupts unrelated DXGI/driver state on this host's own
+// Intel iGPU driver -- observed for real as a completely unrelated
+// IDXGIAdapter1::GetDesc1() call (this function's own device-affinity
+// check, elsewhere in this file) starting to return garbage-looking data
+// after roughly twenty real frames' worth of accumulated shared-resource
+// churn, a real, apparently finite per-process/per-driver budget for this
+// class of object. A small, fixed number of persistent resources (one
+// per plane, refreshed via the compute-shader copy every frame instead of
+// recreated) avoids the unbounded growth entirely. Video resolution is
+// fixed for the lifetime of a real crtmedia_codec instance in every
+// caller this project has today, so in practice each slot is created
+// once and reused for the rest of the stream; a genuine resolution change
+// mid-stream still works correctly (detected by the width/height/format
+// comparison below), just pays the one-time recreation cost again.
+struct CachedPlaneResource {
+  DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
+  UINT width = 0;
+  UINT height = 0;
+  ComPtr<ID3D11Texture2D> d3d11_texture;
+  ComPtr<ID3D11UnorderedAccessView> uav;
+  ComPtr<ID3D12Resource> d3d12_resource;
+};
+
+// Refreshes (creating or resizing on first use / a real resolution
+// change) the persistent cache slot for `plane_index` (0 = Y, 1 = UV),
+// then copies array slice `array_index`'s plane `plane_slice` of
+// `nv12_texture` into it via the real plane-sliced-SRV1 + compute-shader-
+// copy mechanism (this file's own top comment). Real, confirmed-for-real
+// (this file's own top-comment probe) for a plain (ArraySize == 1) NV12
+// texture via D3D11_TEX2D_SRV1/D3D11_SRV_DIMENSION_TEXTURE2D. FFmpeg's
+// own real hwcontext_d3d11va.c decode-pool texture is always an *array*
+// texture instead (ArraySize == pool size, `frame->data[1]` selects the
+// slice -- gpu_frame_d3d11.h's own top comment), so this uses the
+// array-shaped sibling instead (D3D11_TEX2D_ARRAY_SRV1/
+// D3D11_SRV_DIMENSION_TEXTURE2DARRAY, ArraySize == 1 starting at
+// FirstArraySlice == array_index, still carrying its own independent
+// PlaneSlice) -- the real, correct API for this shape per this project's
+// own local mingw-w64 d3d11_3.h, though not independently re-run through
+// a fresh multi-slice-array probe the way the plain single-texture case
+// was (the probe used ArraySize == 1, which exercises D3D11_TEX2D_SRV1,
+// not this array-indexed sibling). Returns the cache-owned ID3D12Resource*
+// (not an extra AddRef for the caller -- the cache itself keeps this
+// alive across calls; GrD3DTextureResourceInfo::fResource.retain() at the
+// call site takes Skia's own independent reference) on success, nullptr
+// on any real failure (the cache slot is reset to force a clean recreate
+// attempt next call).
+ID3D12Resource* GetOrRefreshPlaneD3D12Resource(
+    ID3D11Device* device, ID3D11DeviceContext* context, ID3D12Device* d3d12_device, ID3D11Texture2D* nv12_texture,
+    UINT array_index, int plane_index, UINT plane_slice, DXGI_FORMAT plane_format, UINT plane_width,
+    UINT plane_height) {
+  static CachedPlaneResource cache[2];
+  CachedPlaneResource& entry = cache[plane_index];
+
+  if (!entry.d3d12_resource || entry.format != plane_format || entry.width != plane_width ||
+      entry.height != plane_height) {
+    entry.d3d11_texture.Reset();
+    entry.uav.Reset();
+    entry.d3d12_resource.Reset();
+    entry.format = DXGI_FORMAT_UNKNOWN;
+
+    D3D11_TEXTURE2D_DESC dst_desc = {};
+    dst_desc.Width = plane_width;
+    dst_desc.Height = plane_height;
+    dst_desc.MipLevels = 1;
+    dst_desc.ArraySize = 1;
+    dst_desc.Format = plane_format;
+    dst_desc.SampleDesc.Count = 1;
+    dst_desc.Usage = D3D11_USAGE_DEFAULT;
+    dst_desc.BindFlags = D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE;
+    // Real, confirmed-for-real (this file's own top comment, probe #1):
+    // D3D11_RESOURCE_MISC_SHARED_NTHANDLE requires D3D11_RESOURCE_MISC_
+    // SHARED set alongside it on this driver.
+    dst_desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED_NTHANDLE | D3D11_RESOURCE_MISC_SHARED;
+    HRESULT hr2 = device->CreateTexture2D(&dst_desc, nullptr, entry.d3d11_texture.ReceiveAddressOf());
+    if (FAILED(hr2)) {
+      return nullptr;
+    }
+
+    HRESULT hr3 =
+        device->CreateUnorderedAccessView(entry.d3d11_texture.Get(), nullptr, entry.uav.ReceiveAddressOf());
+    if (FAILED(hr3)) {
+      entry.d3d11_texture.Reset();
+      return nullptr;
+    }
+
+    ComPtr<IDXGIResource1> dxgi_resource;
+    if (FAILED(entry.d3d11_texture->QueryInterface(kIID_IDXGIResource1, (void**)dxgi_resource.ReceiveAddressOf()))) {
+      entry.d3d11_texture.Reset();
+      entry.uav.Reset();
+      return nullptr;
+    }
+    HANDLE shared_handle = nullptr;
+    if (FAILED(dxgi_resource->CreateSharedHandle(nullptr, DXGI_SHARED_RESOURCE_READ, nullptr, &shared_handle)) ||
+        shared_handle == nullptr) {
+      entry.d3d11_texture.Reset();
+      entry.uav.Reset();
+      return nullptr;
+    }
+    // Real IID for ID3D12Resource -- same real value as
+    // DumbD3DMemoryAllocator::createResource()'s own kIID_ID3D12Resource
+    // above, but that one is a function-local `static const GUID` (no
+    // external linkage to reach via `extern` from here), so this is its
+    // own, separate copy of the same real constant, not a shared
+    // declaration.
+    static const GUID kIID_ID3D12Resource = {
+        0x696442be, 0xa72e, 0x4059, {0xbc, 0x79, 0x5b, 0x5c, 0x98, 0x04, 0x0f, 0xad}};
+    HRESULT hr4 = d3d12_device->OpenSharedHandle(
+        shared_handle, kIID_ID3D12Resource, (void**)entry.d3d12_resource.ReceiveAddressOf());
+    CloseHandle(shared_handle);
+    if (FAILED(hr4)) {
+      entry.d3d11_texture.Reset();
+      entry.uav.Reset();
+      return nullptr;
+    }
+
+    entry.format = plane_format;
+    entry.width = plane_width;
+    entry.height = plane_height;
+  }
+
+  ComPtr<ID3D11Device3> device3;
+  HRESULT hr0 = device->QueryInterface(kIID_ID3D11Device3, (void**)device3.ReceiveAddressOf());
+  if (FAILED(hr0)) {
+    return nullptr;
+  }
+
+  D3D11_SHADER_RESOURCE_VIEW_DESC1 srv_desc = {};
+  srv_desc.Format = plane_format;
+  srv_desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+  srv_desc.Texture2DArray.MostDetailedMip = 0;
+  srv_desc.Texture2DArray.MipLevels = 1;
+  srv_desc.Texture2DArray.FirstArraySlice = array_index;
+  srv_desc.Texture2DArray.ArraySize = 1;
+  srv_desc.Texture2DArray.PlaneSlice = plane_slice;
+  ComPtr<ID3D11ShaderResourceView1> srv;
+  HRESULT hr1 = device3->CreateShaderResourceView1(nv12_texture, &srv_desc, srv.ReceiveAddressOf());
+  if (FAILED(hr1)) {
+    return nullptr;
+  }
+
+  bool created_now = false;
+  ID3D11ComputeShader* shader = GetOrCreateCopyPlaneShader(
+      device, plane_format == DXGI_FORMAT_R8_UNORM ? kCopyPlaneShaderR8 : kCopyPlaneShaderR8G8, &created_now);
+  if (shader == nullptr) {
+    return nullptr;
+  }
+
+  ID3D11ShaderResourceView* raw_srv = srv.Get();
+  ID3D11UnorderedAccessView* raw_uav = entry.uav.Get();
+  context->CSSetShader(shader, nullptr, 0);
+  context->CSSetShaderResources(0, 1, &raw_srv);
+  context->CSSetUnorderedAccessViews(0, 1, &raw_uav, nullptr);
+  context->Dispatch((plane_width + 7u) / 8u, (plane_height + 7u) / 8u, 1);
+  ID3D11ShaderResourceView* null_srv = nullptr;
+  ID3D11UnorderedAccessView* null_uav = nullptr;
+  context->CSSetShaderResources(0, 1, &null_srv);
+  context->CSSetUnorderedAccessViews(0, 1, &null_uav, nullptr);
+
+  return entry.d3d12_resource.Get();
+}
+
+// The one real thing that must outlive the returned SkImage's own use of
+// the two imported D3D12 resources: the retained AVFrame crtmedia_gpu_
+// frame.release_context already owns (see gpu_frame_d3d11.h's own top
+// comment) -- kept alive only so the FFmpeg-owned shared decode-pool
+// texture this bridge's own GPU-copy step reads from is not reused by a
+// later decode while Skia might still (in principle) revisit it; the two
+// destination D3D12 resources this SkImage actually samples are already
+// fully independent copies by this point, matching the "measured GPU-copy
+// fallback" (not literal zero-copy) this tranche's own acceptance gate
+// explicitly allows -- see crtgfx/skia_media.h's own top comment.
+struct MediaFrameReleaseContext {
+  crtmedia_gpu_frame frame;
+};
+
+void ReleaseMediaFrame(SkImages::ReleaseContext release_context) {
+  auto* ctx = static_cast<MediaFrameReleaseContext*>(release_context);
+  crtmedia_gpu_frame_release(&ctx->frame);
+  delete ctx;
+}
+
+}  // namespace
+
+sk_sp<SkImage> crtgfx_skia_import_media_frame(
+    GrDirectContext* context, const crtgfx_gpu_device* device, crtmedia_gpu_frame* frame) {
+  if (context == nullptr || device == nullptr || frame == nullptr ||
+      frame->memory_kind != CRTMEDIA_GPU_MEMORY_GPU || frame->native_handle == nullptr ||
+      frame->format != CRTMEDIA_PIXEL_FORMAT_NV12) {
+    return nullptr;
+  }
+
+  crtgfx_gpu_win32_device_view device_view = {};
+  if (!crtgfx_gpu_win32_borrow_device(device, &device_view)) {
+    return nullptr;
+  }
+  auto* d3d12_device = reinterpret_cast<ID3D12Device*>(device_view.device);
+  auto* d3d12_adapter = reinterpret_cast<IDXGIAdapter1*>(device_view.adapter);
+
+  auto* handle = static_cast<crtmedia_d3d11_gpu_frame_handle*>(frame->native_handle);
+  auto* nv12_texture = static_cast<ID3D11Texture2D*>(handle->texture);
+
+  ComPtr<ID3D11Device> d3d11_device;
+  nv12_texture->GetDevice(d3d11_device.ReceiveAddressOf());
+  if (!d3d11_device) {
+    return nullptr;
+  }
+  ComPtr<ID3D11DeviceContext> d3d11_context;
+  d3d11_device->GetImmediateContext(d3d11_context.ReceiveAddressOf());
+
+  // Real device-affinity check (docs/crtmedia_zero_copy_decode_
+  // acceptance.md's own "Device-affinity pairing" scope item, resolved
+  // here as this tranche's own frozen decision): FFmpeg's own D3D11VA
+  // device and crtgfx_gpu_device's own D3D12 device are each created
+  // independently (av_hwdevice_ctx_create(..., NULL, NULL, 0) and
+  // crtgfx_gpu_win32_device_create(0, ...) respectively) and are not
+  // guaranteed to be the same physical adapter on a real multi-GPU
+  // machine -- NT-handle resource sharing only works within one adapter.
+  // Confirmed for real on this session's own single-GPU host (this file's
+  // own top-comment probe #1); on a host where they differ, this bails out
+  // to the caller's existing CPU-transfer fallback rather than attempting
+  // (and failing) a cross-adapter share.
+  ComPtr<IDXGIDevice> dxgi_device;
+  if (FAILED(d3d11_device->QueryInterface(kIID_IDXGIDevice, (void**)dxgi_device.ReceiveAddressOf()))) {
+    return nullptr;
+  }
+  ComPtr<IDXGIAdapter> d3d11_adapter;
+  if (FAILED(dxgi_device->GetAdapter(d3d11_adapter.ReceiveAddressOf()))) {
+    return nullptr;
+  }
+  // RealDxgiAdapterDesc/RealDxgiAdapterDesc1, not DXGI_ADAPTER_DESC/
+  // DXGI_ADAPTER_DESC1 -- see those structs' own top comment (this file,
+  // above) for the real -fwchar-type=int ABI-corruption bug this avoids.
+  // reinterpret_cast is safe here: GetDesc()/GetDesc1() are real vtable
+  // calls into the system's own dxgi.dll, which writes raw bytes per the
+  // real Windows ABI regardless of this call site's own static pointer
+  // type -- only the byte layout (which these structs now correctly
+  // match) matters.
+  RealDxgiAdapterDesc d3d11_adapter_desc;
+  if (FAILED(d3d11_adapter->GetDesc(reinterpret_cast<DXGI_ADAPTER_DESC*>(&d3d11_adapter_desc)))) {
+    return nullptr;
+  }
+  RealDxgiAdapterDesc1 d3d12_adapter_desc;
+  if (FAILED(d3d12_adapter->GetDesc1(reinterpret_cast<DXGI_ADAPTER_DESC1*>(&d3d12_adapter_desc)))) {
+    return nullptr;
+  }
+  if (d3d11_adapter_desc.AdapterLuid.LowPart != d3d12_adapter_desc.AdapterLuid.LowPart ||
+      d3d11_adapter_desc.AdapterLuid.HighPart != d3d12_adapter_desc.AdapterLuid.HighPart) {
+    return nullptr;
+  }
+  const UINT y_width = frame->width;
+  const UINT y_height = frame->height;
+  const UINT uv_width = (frame->width + 1u) / 2u;
+  const UINT uv_height = (frame->height + 1u) / 2u;
+
+  const UINT array_index = static_cast<UINT>(handle->array_index);
+
+  ID3D12Resource* y_resource_raw = GetOrRefreshPlaneD3D12Resource(
+      d3d11_device.Get(), d3d11_context.Get(), d3d12_device, nv12_texture, array_index, 0, 0, DXGI_FORMAT_R8_UNORM,
+      y_width, y_height);
+  if (y_resource_raw == nullptr) {
+    return nullptr;
+  }
+  ID3D12Resource* uv_resource_raw = GetOrRefreshPlaneD3D12Resource(
+      d3d11_device.Get(), d3d11_context.Get(), d3d12_device, nv12_texture, array_index, 1, 1,
+      DXGI_FORMAT_R8G8_UNORM, uv_width, uv_height);
+  if (uv_resource_raw == nullptr) {
+    return nullptr;
+  }
+  // Real, CPU-blocking GPU sync (2026-09-23, found necessary for real on
+  // this host, not merely theoretical): d3d11_context->Flush() alone only
+  // *submits* the compute-shader copy's command list to the GPU -- it does
+  // not wait for that work to actually finish executing. Without a real
+  // wait here, D3D12's own OpenSharedHandle()+first sample of the shared
+  // resource below can race the D3D11 compute-shader write that produces
+  // its contents -- confirmed for real: without this block, this exact
+  // pipeline read visibly corrupted, garbage-looking data through a
+  // completely unrelated DXGI call (IDXGIAdapter1::GetDesc1() on this
+  // function's own device-affinity-check adapter, several frames later,
+  // once enough outstanding cross-API races had accumulated) -- a real
+  // driver-level hazard from unsynchronized cross-API shared-resource
+  // access, not a logic bug in the LUID check itself. crtgfx_gpu_fence
+  // (crtgfx/gpu.h) is explicitly documented as CPU-only and must not be
+  // reused for this (docs/crtmedia_zero_copy_decode_acceptance.md's own
+  // Scope section) -- a real device-affine GPU fence, if ever needed, is
+  // separate future work; a plain D3D11_QUERY_EVENT CPU-block is the
+  // simple, correct, always-available substitute this tranche's own gate
+  // does not forbid (it only forbids CPU *pixel* readback, not a CPU wait
+  // for GPU completion).
+  D3D11_QUERY_DESC sync_query_desc = {};
+  sync_query_desc.Query = D3D11_QUERY_EVENT;
+  ComPtr<ID3D11Query> sync_query;
+  if (SUCCEEDED(d3d11_device->CreateQuery(&sync_query_desc, sync_query.ReceiveAddressOf()))) {
+    d3d11_context->End(sync_query.Get());
+    d3d11_context->Flush();
+    while (d3d11_context->GetData(sync_query.Get(), nullptr, 0, 0) == S_FALSE) {
+      /* Real, deliberate CPU spin-wait -- this project has no portable
+       * cross-thread sleep primitive available inside this translation
+       * unit, and this wait is expected to be short (one small compute
+       * dispatch's own real completion latency), matching this file's own
+       * "CPU-blocking, not CPU-readback" allowance above. */
+    }
+  } else {
+    // A query is a real, ordinary D3D11 object -- CreateQuery should not
+    // realistically fail here, but if it ever does, fall back to the
+    // weaker Flush()-only behavior rather than hard-failing the whole
+    // import (matches this function's own general "degrade, don't crash"
+    // posture elsewhere).
+    d3d11_context->Flush();
+  }
+
+  GrD3DTextureResourceInfo y_info;
+  y_info.fResource.retain(y_resource_raw);
+  y_info.fResourceState = D3D12_RESOURCE_STATE_COMMON;
+  y_info.fFormat = DXGI_FORMAT_R8_UNORM;
+  y_info.fSampleCount = 1;
+  y_info.fLevelCount = 1;
+
+  GrD3DTextureResourceInfo uv_info;
+  uv_info.fResource.retain(uv_resource_raw);
+  uv_info.fResourceState = D3D12_RESOURCE_STATE_COMMON;
+  uv_info.fFormat = DXGI_FORMAT_R8G8_UNORM;
+  uv_info.fSampleCount = 1;
+  uv_info.fLevelCount = 1;
+
+  GrBackendTexture textures[SkYUVAInfo::kMaxPlanes] = {
+      GrBackendTextures::MakeD3D(static_cast<int>(y_width), static_cast<int>(y_height), y_info),
+      GrBackendTextures::MakeD3D(static_cast<int>(uv_width), static_cast<int>(uv_height), uv_info), {}, {}};
+
+  // BT.709 limited range -- see the Metal branch's own identical comment
+  // above for why (crtmedia_gpu_frame carries no color metadata yet).
+  SkYUVAInfo yuva_info(
+      SkISize::Make(static_cast<int>(frame->width), static_cast<int>(frame->height)), SkYUVAInfo::PlaneConfig::kY_UV,
+      SkYUVAInfo::Subsampling::k420, kRec709_Limited_SkYUVColorSpace);
+  GrYUVABackendTextures yuva_textures(yuva_info, textures, kTopLeft_GrSurfaceOrigin);
+  if (!yuva_textures.isValid()) {
+    return nullptr;
+  }
+
+  // Ownership transfer point (crtgfx/skia_media.h's own frozen contract) --
+  // identical shape to the Metal branch's own matching comment above.
+  auto* release_ctx = new MediaFrameReleaseContext{*frame};
+  sk_sp<SkImage> image =
+      SkImages::TextureFromYUVATextures(context, yuva_textures, nullptr, ReleaseMediaFrame, release_ctx);
+  if (image == nullptr) {
+    delete release_ctx;
+    return nullptr;
+  }
+  memset(frame, 0, sizeof(*frame));
+  return image;
+}
+
+#endif  // CRTGFX_HAS_SKIA_HEADERS && CRTGFX_HAVE_D3D12
+
 #elif defined(CRTGFX_HAVE_METAL)
 
 // Real Ganesh/Metal offscreen vertical slice (2026-09-04) -- the macOS
