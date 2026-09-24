@@ -93,7 +93,8 @@ tranche below closes against).
   two standalone real-clang probes on this host before landing. New demo
   `crtgfx_skia_media_window_demo` presents 20-25 real decoded frames
   end to end with a real pixel check and a scripted resize, both passing,
-  `zero_copy=yes`. Full regression green (138/138 `ctest` with
+  legacy `zero_copy=yes` (Tranche 4 normalization: `interop=zero-copy`).
+  Full regression green (138/138 `ctest` with
   `CRTGFX_ENABLE_SKIA=ON`/`CRT_USE_IMPORTED_LIBCXX=ON`). **Still open:**
   the isolated `04-gfx-media` distribution stage has not yet built this
   bridge (deferred to Step 6 below, mirroring "Hardware video decode"'s
@@ -118,7 +119,8 @@ tranche below closes against).
   readback GPU-to-GPU copy, matching this tranche's own acceptance gate).
   `crtgfx_skia_media_window_demo` presents all 25 real decoded frames end
   to end with a real pixel check and a scripted resize, both passing,
-  `zero_copy=yes`, verified reproducible across repeated runs. Two real,
+  legacy `zero_copy=yes` (Tranche 4 normalization: `interop=gpu-copy`),
+  verified reproducible across repeated runs. Two real,
   non-obvious bugs found and fixed only by actually running this on real
   multi-adapter hardware, not by inspection: (1) FFmpeg's own D3D11VA
   decode-pool texture needs the `"SHADER"` `av_hwdevice_ctx_create()` opts
@@ -156,10 +158,20 @@ tranche below closes against).
   now passed to Skia's capability probe. On this physical Intel UHD 630 host
   (Intel iHD VA-API + Mesa Vulkan), the 25-frame real window demo passed three
   consecutive runs with a scripted `900x520` resize, real pixel readback,
-  `SkImage::isTextureBacked()`, and `zero_copy=yes`; the crtmedia zero-copy
-  test also passes all 25 hardware frames with no CPU fallback.
+  `SkImage::isTextureBacked()`, and legacy `zero_copy=yes` (Tranche 4
+  normalization: `interop=zero-copy`); the crtmedia zero-copy test also
+  passes all 25 hardware frames with no CPU fallback.
 * [ ] **4. Normalize the acceptance matrix across all three hosts,** mirroring
   `docs/crtmedia_hardware_decode_acceptance.md`'s own per-host results table.
+  Use `interop=zero-copy|gpu-copy|cpu-copy` plus independent `gpu_frame`,
+  `texture_backed`, and decoder-path `cpu_readback` fields; legacy
+  `zero_copy=yes` is not accepted as normalized evidence.
+  * [x] Windows/x64 first: schema frozen and real 20-frame D3D12 window run
+    confirmed `interop=gpu-copy gpu_frame=yes texture_backed=yes cpu_readback=no`;
+    focused hardware-decode regression 4/4 passed. Recorded in `HISTORY.md`.
+  * [ ] macOS/arm64: replay the same schema and confirm `interop=zero-copy`.
+  * [ ] Linux/x64: replay the same schema and confirm `interop=zero-copy`,
+    then freeze the three-host table.
 * [ ] **5. Ownership and regression validation:** repeated create/decode/
   destroy cycles leak no platform-native surface, existing CPU-resident and
   software-only paths stay green on every host after this tranche's changes.

@@ -14,7 +14,7 @@
 // header/skia_bridge.cc's Metal/D3D12/Vulkan branches are the only places
 // that include both.
 //
-// Declared only when a real zero-copy import path exists for this host
+// Declared only when a real GPU-frame import path exists for this host
 // (macOS/Metal, Windows/D3D12, Linux/Vulkan, matching crtgfx/skia.h's own
 // per-backend GPU-function precedent -- crtgfx_skia_make_gpu_context() et
 // al. are declared the same conditional way).
@@ -42,9 +42,8 @@
 // GrD3DTypes.h directly), so this bridge extracts the Y/UV planes via a
 // plane-sliced D3D11.3 ID3D11ShaderResourceView1 into two fresh,
 // NT-handle-shareable single-format textures with one small compute-
-// shader copy (real GPU-to-GPU, no CPU involvement -- still satisfies
-// this tranche's own acceptance gate, which only excludes CPU readback,
-// not an internal GPU copy), then opens those into D3D12 via
+// shader copy (real GPU-to-GPU, no CPU involvement, reported as
+// `interop=gpu-copy`, never as zero-copy), then opens those into D3D12 via
 // IDXGIResource1::CreateSharedHandle/ID3D12Device::OpenSharedHandle. Both
 // hosts then feed GrYUVABackendTextures -> SkImages::TextureFromYUVATextures
 // to sample them as YUV directly -- no intermediate RGBA conversion

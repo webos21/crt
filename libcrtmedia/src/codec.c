@@ -74,15 +74,11 @@ struct crtmedia_codec {
   AVBufferRef* hw_device_ctx;
   enum AVPixelFormat hw_pix_fmt;
   int hardware_accelerated;
-  /* Zero-copy decoded textures (2026-09-23, Tranche 0/1 --
-   * docs/crtmedia_zero_copy_decode_acceptance.md): true only once a real
-   * hardware frame was delivered through crtmedia_codec_dequeue_gpu_
-   * frame()'s zero-copy path specifically (memory_kind ==
-   * CRTMEDIA_GPU_MEMORY_GPU), never reset, exposed only through
-   * codec_test_control.h. hardware_accelerated above is now also set
-   * from this path (broadened, not redefined -- see crtmedia_codec_is_
-   * hardware_accelerated()'s own updated comment). */
-  int hw_zero_copy_delivered;
+  /* True only once a real hardware frame was delivered as
+   * CRTMEDIA_GPU_MEMORY_GPU. This is the decoder-to-crtmedia handoff, not
+   * an end-to-end interop claim: the Windows bridge performs a later GPU
+   * copy while macOS/Linux sample decoder storage directly. */
+  int hw_gpu_frame_delivered;
 };
 
 static enum AVCodecID codec_id_for_mime(const char* mime) {
@@ -831,12 +827,13 @@ crtmedia_result crtmedia_codec_dequeue_gpu_frame(
           }
           fill_gpu_video_frame_videotoolbox(owned, out_video_frame);
           codec->hardware_accelerated = 1;
-          codec->hw_zero_copy_delivered = 1;
+          codec->hw_gpu_frame_delivered = 1;
 #if defined(CRT_TARGET_OS_WINDOWS)
         } else if (codec->hw_pix_fmt == AV_PIX_FMT_D3D11) {
-          /* Real zero-copy path (Windows today -- see fill_gpu_video_frame_
-           * d3d11()'s own comment). Same real, checked av_frame_alloc()/
-           * av_frame_ref() recovery as the macOS branch above. */
+          /* GPU-resident D3D11VA handoff (Windows -- see fill_gpu_video_
+           * frame_d3d11()). The downstream D3D11 -> D3D12 bridge performs
+           * one GPU copy, so this must not be treated as end-to-end
+           * zero-copy. */
           AVFrame* owned = av_frame_alloc();
           if (owned == NULL || av_frame_ref(owned, codec->decode_frame) < 0) {
             if (owned != NULL) {
@@ -851,19 +848,19 @@ crtmedia_result crtmedia_codec_dequeue_gpu_frame(
             return CRTMEDIA_ERROR_UNSUPPORTED;
           }
           codec->hardware_accelerated = 1;
-          codec->hw_zero_copy_delivered = 1;
+          codec->hw_gpu_frame_delivered = 1;
 #endif
         } else {
 #if defined(CRT_TARGET_OS_LINUX)
           if (codec->hw_pix_fmt == AV_PIX_FMT_VAAPI) {
             /* Real zero-copy path (Linux -- see fill_gpu_video_frame_vaapi()).
              * On any export failure fall through to the honest CPU download
-             * below; hw_zero_copy_delivered stays 0 for that frame. */
+             * below; hw_gpu_frame_delivered stays 0 for that frame. */
             AVFrame* owned = av_frame_alloc();
             if (owned != NULL && av_frame_ref(owned, codec->decode_frame) == 0) {
               if (fill_gpu_video_frame_vaapi(owned, out_video_frame) == CRTMEDIA_OK) {
                 codec->hardware_accelerated = 1;
-                codec->hw_zero_copy_delivered = 1;
+                codec->hw_gpu_frame_delivered = 1;
                 av_frame_unref(codec->decode_frame);
                 return CRTMEDIA_OK;
               }
@@ -873,7 +870,7 @@ crtmedia_result crtmedia_codec_dequeue_gpu_frame(
             }
           }
 #endif
-          /* No zero-copy path for this frame -- same real CPU download
+          /* No GPU-frame handoff for this frame -- same real CPU download
            * dequeue_output()'s own hw branch already uses, so this API stays
            * fully usable everywhere. */
           AVFrame* sw_frame = av_frame_alloc();
@@ -940,6 +937,6 @@ crtmedia_result crtmedia_codec_test_get_hw_diagnostics(
   out_diagnostics->hw_pixfmt_offered = codec->hw_pixfmt_offered;
   out_diagnostics->hw_frame_observed = codec->hw_frame_observed;
   out_diagnostics->hw_frame_transferred = codec->hardware_accelerated;
-  out_diagnostics->hw_zero_copy_delivered = codec->hw_zero_copy_delivered;
+  out_diagnostics->hw_gpu_frame_delivered = codec->hw_gpu_frame_delivered;
   return CRTMEDIA_OK;
 }

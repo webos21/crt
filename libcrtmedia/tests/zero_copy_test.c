@@ -5,11 +5,12 @@
 // crtmedia_codec_dequeue_output() (libcrtmedia/assets/test_video.mp4 --
 // 64x64, 25 real encoded frames).
 //
-// This is a structural test, not a pixel-correctness test for the
-// zero-copy path: crtmedia_gpu_frame(memory_kind == GPU)'s whole point is
-// that no CPU-addressable pixel data exists to inspect (plane_count == 0)
-// -- that is exactly what makes it zero-copy. Real pixel-content proof for
-// that path is crtgfx_skia_media's own job (the per-host window demo in
+// This is a structural test, not a pixel-correctness or end-to-end interop
+// test: crtmedia_gpu_frame(memory_kind == GPU)'s whole point is that no
+// CPU-addressable pixel data exists to inspect (plane_count == 0). That
+// proves GPU-resident delivery, not whether a downstream bridge performs a
+// GPU copy. Real pixel-content and interop proof is crtgfx_skia_media's own
+// job (the per-host window demo in
 // libcrtgfx/tools/skia_media_window_demo.cc), which imports native_handle
 // into a real GPU texture and presents it. What this test *can* and does
 // prove, honestly, for every host:
@@ -18,10 +19,10 @@
 //     for the same non-degenerate-content check hw_decode_test.c already
 //     established) works identically to dequeue_output(), whether that is
 //     software decode or a hardware-export failure fallback;
-//   - on a host with a real zero-copy path implemented, the real hardware
-//     branch instead produces
+//   - on a host with a real GPU-frame path implemented, the hardware branch
+//     instead produces
 //     memory_kind == GPU, native_handle != NULL, plane_count == 0, and
-//     crtmedia_codec_is_hardware_accelerated()/hw_zero_copy_delivered
+//     crtmedia_codec_is_hardware_accelerated()/hw_gpu_frame_delivered
 //     transition exactly where docs/crtmedia_zero_copy_decode_
 //     acceptance.md says they must;
 //   - a software-only decoder (PREFER_HARDWARE_DECODE unset) never
@@ -46,32 +47,20 @@
 
 #if defined(CRT_TARGET_OS_MACOS)
 #define CRTMEDIA_HW_BACKEND_NAME "videotoolbox"
-#define CRTMEDIA_ZERO_COPY_EXPECTED 1
+#define CRTMEDIA_INTEROP_EXPECTED "zero-copy"
+#define CRTMEDIA_GPU_FRAME_EXPECTED 1
 #elif defined(CRT_TARGET_OS_WINDOWS)
 #define CRTMEDIA_HW_BACKEND_NAME "d3d11va"
-// 1, not 0 (2026-09-23, Windows Zero-copy decoded textures Tranche 2):
-// codec.c's own new AV_PIX_FMT_D3D11 branch (fill_gpu_video_frame_d3d11())
-// hands off the decode-pool ID3D11Texture2D pointer/array-index pair
-// directly as native_handle, with no av_hwframe_transfer_data()/CPU copy in
-// codec.c itself -- exactly docs/crtmedia_zero_copy_decode_acceptance.md's
-// own "real zero-copy path implemented for this host" row, the same as
-// macOS. The real GPU-to-GPU copy this host still needs (D3D11 has no
-// direct D3D12 multi-plane share) happens one layer up, inside crtgfx_
-// skia_media's own bridge (skia_bridge.cc) -- a structural, no-CPU-readback
-// guarantee the acceptance doc's own per-tranche gate checks separately,
-// not something this crtmedia-layer diagnostic reports.
-#define CRTMEDIA_ZERO_COPY_EXPECTED 1
+#define CRTMEDIA_INTEROP_EXPECTED "gpu-copy"
+#define CRTMEDIA_GPU_FRAME_EXPECTED 1
 #elif defined(CRT_TARGET_OS_LINUX)
 #define CRTMEDIA_HW_BACKEND_NAME "vaapi"
-// 1, not 0 (2026-09-24, Linux Zero-copy decoded textures Tranche 3): codec.c's
-// AV_PIX_FMT_VAAPI branch (fill_gpu_video_frame_vaapi()) exports the decoded
-// surface as DRM PRIME dma-bufs (vaExportSurfaceHandle) and hands that
-// descriptor off as native_handle with no av_hwframe_transfer_data()/CPU
-// copy. The Vulkan import happens one layer up in crtgfx_skia_media.
-#define CRTMEDIA_ZERO_COPY_EXPECTED 1
+#define CRTMEDIA_INTEROP_EXPECTED "zero-copy"
+#define CRTMEDIA_GPU_FRAME_EXPECTED 1
 #else
 #define CRTMEDIA_HW_BACKEND_NAME "none"
-#define CRTMEDIA_ZERO_COPY_EXPECTED 0
+#define CRTMEDIA_INTEROP_EXPECTED "cpu-copy"
+#define CRTMEDIA_GPU_FRAME_EXPECTED 0
 #endif
 
 static int failures = 0;
@@ -173,7 +162,7 @@ static crtmedia_extractor* open_fixture_video_track(crtmedia_format** out_video_
 
 // Decodes the whole fixture through crtmedia_codec_dequeue_gpu_frame(),
 // counting frames and, for the *first* frame only, capturing whether it was
-// delivered zero-copy (memory_kind == GPU) or CPU (checked/converted like
+// delivered GPU-resident (memory_kind == GPU) or CPU (checked/converted like
 // hw_decode_test.c's own NV12 check). Mirrors that test's own drive loop
 // exactly, swapped to the new dequeue function.
 static void run_gpu_frame_decode(
@@ -238,11 +227,11 @@ static void run_gpu_frame_decode(
       CHECK(frame.release != NULL, "decoded video frame owns its own storage");
       if (frame.memory_kind == CRTMEDIA_GPU_MEMORY_GPU) {
         saw_gpu_frame = 1;
-        CHECK(frame.native_handle != NULL, "a real zero-copy frame has a non-null native_handle");
-        CHECK(frame.plane_count == 0, "a real zero-copy frame has no CPU-addressable planes");
+        CHECK(frame.native_handle != NULL, "a real GPU frame has a non-null native_handle");
+        CHECK(frame.plane_count == 0, "a real GPU frame has no CPU-addressable planes");
         CHECK(
             frame.format == CRTMEDIA_PIXEL_FORMAT_NV12,
-            "a real zero-copy frame is reported as NV12, matching every real hardware H.264 decoder this project "
+            "a real GPU frame is reported as NV12, matching every real hardware H.264 decoder this project "
             "supports");
       } else {
         saw_cpu_frame = 1;
@@ -271,11 +260,10 @@ static void run_gpu_frame_decode(
   *out_cpu_convert_ok = cpu_convert_ok;
 }
 
-// docs/crtmedia_zero_copy_decode_acceptance.md's own frozen acceptance
-// gate: on a host with a real zero-copy path implemented, a hardware-
-// preferring decoder must actually produce at least one memory_kind == GPU
-// frame (the real point of this whole tranche), and the public/private
-// zero-copy diagnostics must agree with that.
+// Lower-layer half of docs/crtmedia_zero_copy_decode_acceptance.md's frozen
+// gate: a hardware-preferring decoder on a supported host must produce at
+// least one memory_kind == GPU frame. The Skia window demo separately
+// classifies the end-to-end bridge as zero-copy, GPU-copy, or CPU-copy.
 static void run_hardware_preferring_decode(void) {
   crtmedia_format* video_format = NULL;
   int video_track = -1;
@@ -315,16 +303,16 @@ static void run_hardware_preferring_decode(void) {
         "private hw_frame_transferred diagnostic agrees with the public hardware_accelerated value");
 
   if (is_hardware) {
-    CHECK(diagnostics.hw_zero_copy_delivered == CRTMEDIA_ZERO_COPY_EXPECTED,
-          "hw_zero_copy_delivered matches this host's real, documented zero-copy support");
-    if (CRTMEDIA_ZERO_COPY_EXPECTED) {
-      CHECK(saw_gpu_frame, "a real hardware frame was actually delivered zero-copy on a host that supports it");
+    CHECK(diagnostics.hw_gpu_frame_delivered == CRTMEDIA_GPU_FRAME_EXPECTED,
+          "hw_gpu_frame_delivered matches this host's documented GPU-frame support");
+    if (CRTMEDIA_GPU_FRAME_EXPECTED) {
+      CHECK(saw_gpu_frame, "a real hardware frame was delivered GPU-resident on a supported host");
     } else {
-      CHECK(!saw_gpu_frame, "no zero-copy frame is reported on a host with no real zero-copy path yet");
+      CHECK(!saw_gpu_frame, "no GPU frame is reported on a host with no GPU-frame path");
       CHECK(cpu_convert_ok != 0, "the hardware CPU-fallback path still produces real, convertible pixel data");
     }
   } else {
-    CHECK(!saw_gpu_frame, "a software-only decode never reports a zero-copy frame");
+    CHECK(!saw_gpu_frame, "a software-only decode never reports a GPU frame");
   }
 
   crtmedia_codec_release(video_codec);
@@ -332,15 +320,18 @@ static void run_hardware_preferring_decode(void) {
 
   fprintf(
       stderr,
-      "crtmedia_zero_copy_test: RESULT backend=%s hw_requested=%s hardware_accelerated=%s zero_copy_expected=%s "
-      "zero_copy_delivered=%s saw_gpu_frame=%s saw_cpu_frame=%s frame_count=%u\n",
-      CRTMEDIA_HW_BACKEND_NAME, diagnostics.hw_requested ? "yes" : "no", is_hardware ? "yes" : "no",
-      CRTMEDIA_ZERO_COPY_EXPECTED ? "yes" : "no", diagnostics.hw_zero_copy_delivered ? "yes" : "no",
-      saw_gpu_frame ? "yes" : "no", saw_cpu_frame ? "yes" : "no", video_frame_count);
+      "crtmedia_zero_copy_test: RESULT backend=%s interop_expected=%s hw_requested=%s hardware_accelerated=%s "
+      "gpu_frame_expected=%s gpu_frame_delivered=%s saw_gpu_frame=%s saw_cpu_frame=%s cpu_readback=%s "
+      "frame_count=%u\n",
+      CRTMEDIA_HW_BACKEND_NAME, CRTMEDIA_INTEROP_EXPECTED, diagnostics.hw_requested ? "yes" : "no",
+      is_hardware ? "yes" : "no",
+      CRTMEDIA_GPU_FRAME_EXPECTED ? "yes" : "no", diagnostics.hw_gpu_frame_delivered ? "yes" : "no",
+      saw_gpu_frame ? "yes" : "no", saw_cpu_frame ? "yes" : "no", saw_cpu_frame ? "yes" : "no",
+      video_frame_count);
 }
 
 // A software-only decoder (no PREFER_HARDWARE_DECODE) must never produce a
-// zero-copy frame through crtmedia_codec_dequeue_gpu_frame(), on any host --
+// GPU frame through crtmedia_codec_dequeue_gpu_frame(), on any host --
 // the new API's own CPU-fallback branch is the only one it can ever take.
 static void run_software_only_decode(void) {
   crtmedia_format* video_format = NULL;
@@ -365,7 +356,7 @@ static void run_software_only_decode(void) {
   int cpu_convert_ok = -1;
   run_gpu_frame_decode(video_codec, extractor, video_track, &video_frame_count, &saw_gpu_frame, &saw_cpu_frame,
                        &cpu_convert_ok);
-  CHECK(!saw_gpu_frame, "a software-only decoder never produces a zero-copy frame through dequeue_gpu_frame");
+  CHECK(!saw_gpu_frame, "a software-only decoder never produces a GPU frame through dequeue_gpu_frame");
   CHECK(saw_cpu_frame, "a software-only decoder produces real CPU frames through dequeue_gpu_frame");
 
   int is_hardware = 1;

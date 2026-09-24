@@ -1,11 +1,11 @@
-// Manual, real on-screen demo for the zero-copy decoded-texture bridge
+// Manual, real on-screen demo for the decoded-texture GPU bridge
 // (2026-09-23, "Zero-copy decoded textures" Tranche 1 -- crtgfx/skia_media.h,
 // docs/crtmedia_zero_copy_decode_acceptance.md has the full frozen
 // contract). The real, end-to-end proof that tranche's own acceptance gate
 // requires: crtmedia_codec_dequeue_gpu_frame()'s real hardware-resident
 // output (memory_kind == CRTMEDIA_GPU_MEMORY_GPU) reaches a real, live,
 // on-screen Ganesh/Skia window through crtgfx_skia_import_media_frame(),
-// with no CPU readback anywhere in that path, and with the same resize-
+// with no decoder-to-bridge CPU readback, and with the same resize-
 // and-pixel-check discipline docs/libcrtgfx_live_presentation_
 // acceptance.md already established for tools/skia_gpu_window_demo.cc's
 // own synthetic-scene sibling.
@@ -16,8 +16,10 @@
 // instead (the same honest standard libcrtmedia/tests/hw_decode_test.c's
 // own check_nv12_convert() and libcrtmedia/tests/zero_copy_test.c's own
 // check_cpu_gpu_frame_convert() already use for this same fixture's real
-// content), plus that the checked frame was actually delivered zero-copy
-// on a host that supports it.
+// content), plus the normalized end-to-end interop classification:
+// macOS/Linux are zero-copy, Windows is one GPU copy, and a CPU-resident
+// fallback is cpu-copy. The explicit acceptance readPixels() below is a
+// validation probe and is not part of the decoder-to-bridge classification.
 //
 // Requires a usable GPU and desktop session; deliberately not registered
 // with headless CTest, matching tools/skia_gpu_window_demo.cc's own
@@ -60,10 +62,17 @@ const char* backend_name(crtgfx_gpu_backend backend) {
   }
 }
 
+const char* interop_name(crtgfx_gpu_backend backend, crtmedia_gpu_memory_kind memory_kind) {
+  if (memory_kind != CRTMEDIA_GPU_MEMORY_GPU) return "cpu-copy";
+  if (backend == CRTGFX_GPU_BACKEND_D3D12) return "gpu-copy";
+  if (backend == CRTGFX_GPU_BACKEND_METAL || backend == CRTGFX_GPU_BACKEND_VULKAN) return "zero-copy";
+  return "cpu-copy";
+}
+
 // Same real, non-degenerate-content standard this fixture's other real
 // checks already use (see this file's own top comment) -- applied here to
 // the actually-presented Ganesh surface, not an intermediate CPU
-// conversion, so this is genuinely checking the whole zero-copy pipeline's
+// conversion, so this is checking the whole GPU-frame pipeline's
 // real output, not just crtmedia's own half of it.
 bool check_presented_frame_nondegenerate(SkSurface* sk_surface, uint32_t width, uint32_t height) {
   size_t stride = static_cast<size_t>(width) * 4u;
@@ -211,7 +220,9 @@ extern "C" int main(int argc, char** argv) {
   unsigned int timeouts = 0;
   int extractor_eof = 0, video_eof = 0;
   int pixel_check_pending = (scripted_resize_width == 0) ? 1 : 0;
-  int pixel_check_done = 0, pixel_check_ok = 0, zero_copy_check_ok = 0;
+  int pixel_check_done = 0, pixel_check_ok = 0, gpu_frame_check_ok = 0;
+  int checked_gpu_frame = -1, checked_texture_backed = -1, checked_cpu_readback = -1;
+  const char* checked_interop = "n/a";
   unsigned long resize_frame = 0;
   int post_resize_present_ok = -1;
 
@@ -261,6 +272,8 @@ extern "C" int main(int argc, char** argv) {
     }
     if (!have_frame) break;
 
+    crtmedia_gpu_memory_kind frame_memory_kind = frame.memory_kind;
+    const char* frame_interop = interop_name(caps.backend, frame_memory_kind);
     sk_sp<SkImage> image = crtgfx_skia_import_media_frame(context.get(), device, &frame);
     if (image == nullptr) {
       fprintf(stderr, "crtgfx_skia_media_window_demo: crtgfx_skia_import_media_frame failed\n");
@@ -302,7 +315,11 @@ extern "C" int main(int argc, char** argv) {
       crtmedia_codec_hw_diagnostics diagnostics;
       memset(&diagnostics, 0, sizeof(diagnostics));
       crtmedia_codec_test_get_hw_diagnostics(video_codec, &diagnostics);
-      zero_copy_check_ok = diagnostics.hw_zero_copy_delivered;
+      gpu_frame_check_ok = diagnostics.hw_gpu_frame_delivered;
+      checked_gpu_frame = frame_memory_kind == CRTMEDIA_GPU_MEMORY_GPU;
+      checked_texture_backed = image->isTextureBacked();
+      checked_cpu_readback = frame_memory_kind == CRTMEDIA_GPU_MEMORY_CPU;
+      checked_interop = frame_interop;
       pixel_check_done = 1;
       resize_frame = presented + 1;
     }
@@ -351,12 +368,20 @@ extern "C" int main(int argc, char** argv) {
   }
   fprintf(
       stderr,
-      "crtgfx_skia_media_window_demo: RESULT backend=%s frames_presented=%lu resize_frame=%s pixel_check=%s "
-      "zero_copy=%s post_resize_present=%s clean_exit=%s\n",
-      backend_name(caps.backend), presented, resize_frame_str, pixel_check_done ? (pixel_check_ok ? "pass" : "fail") : "n/a",
-      pixel_check_done ? (zero_copy_check_ok ? "yes" : "no") : "n/a",
+      "crtgfx_skia_media_window_demo: RESULT backend=%s interop=%s gpu_frame=%s texture_backed=%s "
+      "cpu_readback=%s frames_presented=%lu resize_frame=%s pixel_check=%s post_resize_present=%s clean_exit=%s\n",
+      backend_name(caps.backend), checked_interop,
+      checked_gpu_frame < 0 ? "n/a" : (checked_gpu_frame ? "yes" : "no"),
+      checked_texture_backed < 0 ? "n/a" : (checked_texture_backed ? "yes" : "no"),
+      checked_cpu_readback < 0 ? "n/a" : (checked_cpu_readback ? "yes" : "no"), presented, resize_frame_str,
+      pixel_check_done ? (pixel_check_ok ? "pass" : "fail") : "n/a",
       post_resize_present_ok < 0 ? "n/a" : (post_resize_present_ok ? "pass" : "fail"),
       clean_exit ? "pass" : "fail");
 
-  return failed || (pixel_check_done && (!pixel_check_ok || !zero_copy_check_ok)) ? 1 : 0;
+  return failed ||
+             (pixel_check_done &&
+              (!pixel_check_ok || !gpu_frame_check_ok || !checked_gpu_frame || !checked_texture_backed ||
+               checked_cpu_readback))
+         ? 1
+         : 0;
 }

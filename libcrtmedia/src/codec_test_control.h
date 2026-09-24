@@ -42,16 +42,15 @@ typedef struct crtmedia_codec_hw_diagnostics {
   /* Equal to crtmedia_codec_is_hardware_accelerated()'s own current
    * value: a real hardware-resident frame was successfully delivered to
    * the caller, either via crtmedia_codec_dequeue_output()'s CPU
-   * transfer or crtmedia_codec_dequeue_gpu_frame()'s zero-copy handoff
+   * transfer or crtmedia_codec_dequeue_gpu_frame()'s GPU-resident handoff
    * (docs/crtmedia_zero_copy_decode_acceptance.md). Included here too so
    * a caller can build a complete diagnostic record from one query. */
   int hw_frame_transferred;
-  /* True only once a real hardware frame was delivered through the
-   * zero-copy path specifically (crtmedia_codec_dequeue_gpu_frame(),
-   * memory_kind == CRTMEDIA_GPU_MEMORY_GPU) -- lets a test distinguish
-   * which delivery path actually set hw_frame_transferred/the public
-   * flag, since either one alone is now sufficient. */
-  int hw_zero_copy_delivered;
+  /* True only once a real hardware frame was delivered as
+   * memory_kind == CRTMEDIA_GPU_MEMORY_GPU. This describes the crtmedia
+   * handoff only: a downstream bridge can still require a GPU copy (Windows
+   * D3D11VA -> D3D12), so it must not be reported as end-to-end zero-copy. */
+  int hw_gpu_frame_delivered;
 } crtmedia_codec_hw_diagnostics;
 
 /* Snapshots every field above for `codec` right now. Every field is

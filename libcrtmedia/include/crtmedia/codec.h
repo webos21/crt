@@ -97,7 +97,7 @@ crtmedia_result crtmedia_codec_queue_input(crtmedia_codec* codec, const void* da
 crtmedia_result crtmedia_codec_dequeue_output(
     crtmedia_codec* codec, crtmedia_frame* out_video_frame, crtmedia_audio_buffer* out_audio_buffer, int* out_eof);
 
-/* Zero-copy sibling of crtmedia_codec_dequeue_output() above (2026-09-23,
+/* GPU-frame sibling of crtmedia_codec_dequeue_output() above (2026-09-23,
  * "Zero-copy decoded textures" Tranche 0/1 --
  * docs/crtmedia_zero_copy_decode_acceptance.md has the full frozen
  * contract). Same calling convention, same CRTMEDIA_WOULD_BLOCK/EOF
@@ -108,21 +108,21 @@ crtmedia_result crtmedia_codec_dequeue_output(
  * Fills `*out_video_frame` (crtmedia/gpu_frame.h) as one of:
  *   - memory_kind == CRTMEDIA_GPU_MEMORY_GPU, native_handle a real
  *     per-host native surface handle, plane_count == 0 -- only when a
- *     real hardware-resident frame was observed AND this host has a real
- *     zero-copy path implemented (currently: macOS/VideoToolbox only,
- *     native_handle == a CVPixelBufferRef borrowed from the retained
- *     AVFrame `crtmedia_gpu_frame.release`/`release_context` keeps
- *     alive).
+ *     real hardware-resident frame was observed and this host can hand its
+ *     native surface to the optional graphics bridge. This guarantees no
+ *     CPU download in this function; it does not by itself claim end-to-end
+ *     zero-copy, because a downstream bridge may require a GPU copy
+ *     (Windows D3D11VA -> D3D12).
  *   - memory_kind == CRTMEDIA_GPU_MEMORY_CPU, native_handle == NULL, real
  *     pixel planes otherwise -- a hardware-resident frame was observed
- *     but this host has no zero-copy path yet (falls back to the same
+ *     but this frame has no GPU-frame handoff path (falls back to the same
  *     av_hwframe_transfer_data() download dequeue_output() itself uses),
  *     or the frame was decoded in software to begin with.
  * A caller must check memory_kind before touching native_handle, exactly
  * like crtmedia_gpu_frame's own existing contract already requires.
  *
  * Broadens (does not redefine) crtmedia_codec_is_hardware_accelerated():
- * it becomes true from either this function's zero-copy delivery or
+ * it becomes true from either this function's GPU-frame delivery or
  * dequeue_output()'s CPU-transfer delivery -- a caller using only
  * dequeue_output() observes byte-identical behavior to before this
  * function existed. */
@@ -146,7 +146,7 @@ crtmedia_result crtmedia_codec_flush(crtmedia_codec* codec);
  * Becomes true once a real hardware-resident `AVFrame` has actually been
  * observed and either (a) crtmedia_codec_dequeue_output()'s CPU download
  * (`av_hwframe_transfer_data()`) has actually succeeded, or (b)
- * crtmedia_codec_dequeue_gpu_frame()'s zero-copy handoff has actually
+ * crtmedia_codec_dequeue_gpu_frame()'s GPU-resident handoff has actually
  * succeeded -- creating the hardware device and opening the codec
  * successfully are both deliberately *not* enough on their own (a
  * decoder can open cleanly with hardware attached and still never decode

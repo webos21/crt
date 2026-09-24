@@ -10,6 +10,29 @@ substantive update.
 
 ## 2026-09-24
 
+- **Zero-copy decoded textures, Tranche 4 acceptance normalization: schema
+  frozen and Windows/x64 first replay passed.** Replaced the ambiguous binary
+  `zero_copy=yes/no` result with independent `interop` (`zero-copy`,
+  `gpu-copy`, or `cpu-copy`), `gpu_frame`, `texture_backed`, and decoder-path
+  `cpu_readback` fields. This corrects the old Windows result without changing
+  the public ABI: D3D11VA still hands `crtmedia` a real GPU frame, but the
+  D3D11-to-D3D12 bridge performs one measured compute copy and must therefore report
+  `interop=gpu-copy`, not zero-copy. The private test-only diagnostic was
+  renamed from `hw_zero_copy_delivered` to `hw_gpu_frame_delivered` so the
+  crtmedia boundary no longer makes an end-to-end claim.
+
+  The normalized lower test passed all 25 fixture frames with
+  `backend=d3d11va interop_expected=gpu-copy hardware_accelerated=yes
+  gpu_frame_delivered=yes saw_gpu_frame=yes saw_cpu_frame=no cpu_readback=no`.
+  A real 20-frame D3D12 window run with scripted `900x520` resize then passed
+  with `interop=gpu-copy gpu_frame=yes texture_backed=yes cpu_readback=no
+  pixel_check=pass post_resize_present=pass clean_exit=pass`. The focused
+  `crtmedia_hw_decode_test`, `_flush_test`, `_lifecycle_test`, and
+  `zero_copy_test` CTest set passed 4/4. The acceptance document now defines
+  that its explicit final-surface `readPixels()` probe is validation only,
+  not a decoder-path CPU readback. Tranche 4 remains open for normalized real-
+  hardware replays on macOS/arm64 and Linux/x64.
+
 - **Zero-copy decoded textures, Tranche 3 (Linux/x64, VA-API -> Vulkan).**
   Closes `TODO.md`'s Linux host tranche with a direct DRM PRIME/dma-buf
   import, selected after checking the pinned FFmpeg 8.1.2 build rather than

@@ -40,21 +40,15 @@ extern "C" {
  * own already-established convention, not a project-wide rule that
  * happens to conflict here.
  *
- * `memory_kind` is always CRTMEDIA_GPU_MEMORY_CPU on every real code
- * path in this project today: no real hardware-decode producer exists
- * anywhere yet (confirmed by direct exploration, 2026-09-03 -- libcrtmedia/
- * src/arch/{linux,macos,windows}/ contain only audio sinks so far), so
- * `native_handle` is always NULL and `device_id` is always 0. crtmedia_
- * gpu_frame_create_cpu() (below) is the one real, working reference
- * producer that exists today -- the software-fallback path this step's
- * own "software fallback must remain a first-class path" requirement
- * calls for -- built directly on the already-existing, already-tested
- * crtmedia_frame_describe_planes() (crtmedia/frame.h) for its own real
- * plane-layout math, not a second implementation of the same stride
- * arithmetic. A real hardware-decode producer (a later, separate roadmap
- * step) fills the exact same struct with memory_kind ==
- * CRTMEDIA_GPU_MEMORY_GPU, a real native_handle, and plane_count == 0
- * (no real CPU-addressable plane data exists for that case). */
+ * Hardware decode now produces CRTMEDIA_GPU_MEMORY_GPU on macOS, Windows,
+ * and Linux when the platform surface can be handed to the optional graphics
+ * bridge. `native_handle` then has the private per-host identity frozen in
+ * docs/crtmedia_zero_copy_decode_acceptance.md and `plane_count == 0`.
+ * CRTMEDIA_GPU_MEMORY_GPU means "GPU-resident frame", not necessarily
+ * end-to-end zero-copy: the Windows D3D11VA -> D3D12 bridge performs one
+ * GPU copy. `crtmedia_gpu_frame_create_cpu()` remains the real CPU-fallback
+ * producer and computes its plane layout through
+ * crtmedia_frame_describe_planes(), not duplicate stride arithmetic. */
 
 /* Where a real crtmedia_gpu_frame's own backing storage actually lives --
  * own copy of crtgfx_gpu_memory_kind's shape (crtgfx/gpu.h), deliberately
@@ -81,15 +75,12 @@ struct crtmedia_gpu_frame {
   /* Real device affinity -- mirrors crtgfx_gpu_device_create()'s own
    * `device_index` shape (crtgfx/gpu.h), deliberately its own separate
    * field, not a shared type (see this file's own top comment). 0 means
-   * "no device affinity" -- the only real value any code path in this
-   * project produces today (memory_kind is always CRTMEDIA_GPU_MEMORY_CPU
-   * today, so device affinity does not yet apply to anything real). */
+   * "default/no separately-addressed device affinity". */
   uint32_t device_id;
-  /* Type-erased -- where a real D3D11/Metal/Vulkan texture handle would
-   * eventually go for a real memory_kind == CRTMEDIA_GPU_MEMORY_GPU
-   * frame, never touched by this contract itself (matching this
-   * project's own established "no host/upstream SDK type in a public
-   * header" policy). Always NULL today. */
+  /* Type-erased per-host hardware-surface/export handle for a real
+   * CRTMEDIA_GPU_MEMORY_GPU frame, never interpreted by this public contract
+   * itself (matching the "no host SDK type in public headers" policy).
+   * NULL for CRTMEDIA_GPU_MEMORY_CPU. */
   void* native_handle;
   /* Only meaningful when memory_kind == CRTMEDIA_GPU_MEMORY_CPU -- 0 for
    * a real CRTMEDIA_GPU_MEMORY_GPU frame (no real CPU-addressable plane

@@ -148,8 +148,8 @@ Per decoded video frame, this new function fills `*out_video_frame` as:
 
 | Decoder result | `memory_kind` | `native_handle` | `plane_count` |
 | --- | --- | --- | --- |
-| Real hardware surface, real zero-copy path implemented for this host | `CRTMEDIA_GPU_MEMORY_GPU` | Real per-host handle (table above) | 0 |
-| Real hardware surface, zero-copy not yet implemented for this host | `CRTMEDIA_GPU_MEMORY_CPU` | `NULL` | 2 or 3 (real pixel data, `av_hwframe_transfer_data()` fallback) |
+| Real hardware surface, GPU-frame handoff implemented for this host | `CRTMEDIA_GPU_MEMORY_GPU` | Real per-host handle (table above) | 0 |
+| Real hardware surface, GPU-frame handoff unavailable for this frame | `CRTMEDIA_GPU_MEMORY_CPU` | `NULL` | 2 or 3 (real pixel data, `av_hwframe_transfer_data()` fallback) |
 | Software-decoded frame | `CRTMEDIA_GPU_MEMORY_CPU` | `NULL` | 2 or 3 (real pixel data) |
 
 A caller always checks `memory_kind` before touching `native_handle`,
@@ -171,10 +171,12 @@ using only `crtmedia_codec_dequeue_output()` observes byte-identical
 behavior to before -- that path's own success condition is unchanged.
 
 The private diagnostic surface (`libcrtmedia/src/codec_test_control.h`)
-gains one new sticky field, `hw_zero_copy_delivered`, additive next to the
+gains one new sticky field, `hw_gpu_frame_delivered`, additive next to the
 existing six-state model, so a test can tell *which* delivery path actually
 set the public flag without inferring it from which dequeue function the
-test itself happened to call.
+test itself happened to call. The name deliberately stops at the crtmedia
+boundary: a GPU-resident handoff does not imply that the downstream graphics
+bridge performs no GPU copy.
 
 ## Acceptance host order
 
@@ -183,6 +185,42 @@ tranche's own order and reasoning (Apple Silicon's simple, effectively
 single-GPU topology first; Windows' multi-GPU device-affinity question and
 Linux's DRM PRIME/dma-buf/Vulkan-version question both deferred past the
 first green).
+
+Tranche 4 normalizes the already-implemented hosts in the different order
+`Windows/x64 → macOS/arm64 → Linux/x64`: Windows is first because its
+D3D11VA-to-D3D12 bridge is the case that proves `gpu_frame=yes` and
+`interop=zero-copy` are not synonyms.
+
+## Normalized result vocabulary
+
+The window demo reports one of exactly three end-to-end interop values:
+
+- `interop=zero-copy`: the graphics backend samples the decoder's backing
+  storage directly. Handle duplication/import, synchronization, and a CPU
+  wait are allowed; no video-plane pixels are copied by the CPU or GPU.
+- `interop=gpu-copy`: the frame remains GPU-resident and no CPU pixel
+  readback occurs, but the bridge performs one or more GPU pixel copies.
+  Windows' D3D11VA-to-shareable-D3D11-to-D3D12 path is this case.
+- `interop=cpu-copy`: the decoder output is downloaded or otherwise copied
+  through CPU-resident video-plane memory before graphics import/presentation.
+
+The accompanying fields have independent meanings:
+
+- `gpu_frame=yes` means `crtmedia_codec_dequeue_gpu_frame()` returned
+  `CRTMEDIA_GPU_MEMORY_GPU` with a native handle. It does not select between
+  `zero-copy` and `gpu-copy`.
+- `texture_backed=yes` means the imported `SkImage` reports
+  `SkImage::isTextureBacked()`.
+- `cpu_readback=no` means the decoder-to-graphics import path did not read
+  video-plane pixels through the CPU. The demo's explicit `readPixels()`
+  acceptance probe is intentionally excluded: it validates the final image
+  and is not part of the production import path being classified.
+
+`crtmedia_zero_copy_test` cannot observe the graphics bridge, so its result
+uses `interop_expected=...` and validates only GPU-frame versus CPU-frame
+delivery. `crtgfx_skia_media_window_demo` crosses the whole bridge and reports
+the actual `interop=...`, `gpu_frame`, `texture_backed`, and `cpu_readback`
+values. A host is normalized only after the latter has run on real hardware.
 
 ## Per-tranche acceptance gate
 
@@ -209,11 +247,16 @@ Each host tranche is accepted when:
 
 ## Results
 
-| Host | Backend | Status | Evidence |
-| --- | --- | --- | --- |
-| macOS/arm64 | VideoToolbox `CVPixelBuffer` → `CVMetalTextureCache` → Metal Y/UV textures → `GrYUVABackendTextures` → `SkImage` | See `HISTORY.md` | |
-| Windows/x64 | D3D11VA `ID3D11Texture2D` → plane-sliced `ID3D11ShaderResourceView1` → compute-shader copy → NT-handle-shared D3D12 resource → `GrYUVABackendTextures` → `SkImage` (measured GPU-copy fallback, not literal zero-copy -- D3D12/Skia has no multi-plane concept) | See `HISTORY.md` | |
-| Linux/x64 | VA-API `VASurfaceID` → `vaSyncSurface()` → `VADRMPRIMESurfaceDescriptor` (`DRM_PRIME_2`, separate R8/GR88 layers) → two directly imported DRM-modifier Vulkan `VkImage`s → `GrYUVABackendTextures` → `SkImage` | Closed 2026-09-24 | Intel iHD VA-API driver + Intel UHD 630/Mesa Vulkan: all 25 real fixture frames presented repeatedly through Wayland with `pixel_check=pass`, `zero_copy=yes`, and the scripted resize passing. See `HISTORY.md`. |
+| Host | Backend | Interop | `gpu_frame` | `texture_backed` | `cpu_readback` | Normalized replay | Evidence |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| macOS/arm64 | VideoToolbox → Metal | `zero-copy` | yes | yes | no | Pending | Tranche 1's legacy demo passed with `zero_copy=yes`; rerun with the normalized schema is required. See `HISTORY.md`. |
+| Windows/x64 | D3D11VA → D3D11 compute copy → D3D12 | `gpu-copy` | yes | yes | no | Passed 2026-09-24 | Real 20-frame window run with scripted `900x520` resize: `pixel_check=pass post_resize_present=pass clean_exit=pass`; the lower 25-frame test reported `interop_expected=gpu-copy gpu_frame_delivered=yes cpu_readback=no`. |
+| Linux/x64 | VA-API DRM PRIME/dma-buf → Vulkan | `zero-copy` | yes | yes | no | Pending | Tranche 3's legacy demo passed with `zero_copy=yes`; rerun with the normalized schema is required. See `HISTORY.md`. |
+
+The three rows describe the implemented paths; the `Normalized replay` column
+is the live Tranche 4 acceptance state. Historical `zero_copy=yes` output is
+retained verbatim in `HISTORY.md` as old evidence, not treated as the current
+result schema.
 
 ### Linux mapping decision
 
