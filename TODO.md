@@ -169,7 +169,11 @@ tranche below closes against).
   * [x] Windows/x64 first: schema frozen and real 20-frame D3D12 window run
     confirmed `interop=gpu-copy gpu_frame=yes texture_backed=yes cpu_readback=no`;
     focused hardware-decode regression 4/4 passed. Recorded in `HISTORY.md`.
-  * [ ] macOS/arm64: replay the same schema and confirm `interop=zero-copy`.
+  * [x] macOS/arm64: normalized 20-frame Metal window replay passed on
+    2026-09-24 with `interop=zero-copy`, `gpu_frame=yes`,
+    `texture_backed=yes`, and `cpu_readback=no`, including Retina resize,
+    pixel, post-resize present, and clean-exit checks. Recorded in
+    `HISTORY.md`.
   * [ ] Linux/x64: replay the same schema and confirm `interop=zero-copy`,
     then freeze the three-host table.
 * [ ] **5. Ownership and regression validation:** repeated create/decode/

@@ -10,6 +10,28 @@ substantive update.
 
 ## 2026-09-24
 
+- **Normalized the macOS/arm64 zero-copy acceptance result and closed its
+  Tranche 4 replay.** Rebuilt the focused hardware-decode/zero-copy targets
+  against the current CRT, imported libc++, Skia, and FFmpeg outputs. The four
+  focused tests (`crtmedia_hw_decode_test`, flush, lifecycle, and
+  `crtmedia_zero_copy_test`) passed with normal host VideoToolbox access; the
+  lower 25-frame result was `interop_expected=zero-copy`,
+  `hardware_accelerated=yes`, `gpu_frame_delivered=yes`, `saw_cpu_frame=no`,
+  and `cpu_readback=no`. The real on-screen Metal bridge then presented 20
+  decoded frames and reported `interop=zero-copy`, `gpu_frame=yes`,
+  `texture_backed=yes`, and `cpu_readback=no`, with pixel check, scripted
+  Retina `900x520 -> 1800x1040` resize, post-resize presentation, and clean
+  exit all passing. The complete
+  Skia/FFmpeg/libc++-enabled CTest suite also passed 138/138; the default C
+  workflow passed its intentionally narrower 110/110 suite first.
+
+  A restricted tool-execution sandbox made VideoToolbox initialization fall
+  back to CPU while still satisfying the fallback-oriented unit contract.
+  Re-running the same binaries with normal host framework/GPU access selected
+  VideoToolbox immediately and produced the accepted GPU-resident result;
+  therefore the normalized evidence is the unsandboxed real-host run, not the
+  fallback pass.
+
 - **Zero-copy decoded textures, Tranche 4 acceptance normalization: schema
   frozen and Windows/x64 first replay passed.** Replaced the ambiguous binary
   `zero_copy=yes/no` result with independent `interop` (`zero-copy`,

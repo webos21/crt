@@ -249,7 +249,7 @@ Each host tranche is accepted when:
 
 | Host | Backend | Interop | `gpu_frame` | `texture_backed` | `cpu_readback` | Normalized replay | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| macOS/arm64 | VideoToolbox → Metal | `zero-copy` | yes | yes | no | Pending | Tranche 1's legacy demo passed with `zero_copy=yes`; rerun with the normalized schema is required. See `HISTORY.md`. |
+| macOS/arm64 | VideoToolbox → Metal | `zero-copy` | yes | yes | no | Passed 2026-09-24 | Real 20-frame window run with scripted Retina `900x520` resize (`1800x1040` backing): `pixel_check=pass post_resize_present=pass clean_exit=pass`; the lower 25-frame test reported `interop_expected=zero-copy gpu_frame_delivered=yes cpu_readback=no`. |
 | Windows/x64 | D3D11VA → D3D11 compute copy → D3D12 | `gpu-copy` | yes | yes | no | Passed 2026-09-24 | Real 20-frame window run with scripted `900x520` resize: `pixel_check=pass post_resize_present=pass clean_exit=pass`; the lower 25-frame test reported `interop_expected=gpu-copy gpu_frame_delivered=yes cpu_readback=no`. |
 | Linux/x64 | VA-API DRM PRIME/dma-buf → Vulkan | `zero-copy` | yes | yes | no | Pending | Tranche 3's legacy demo passed with `zero_copy=yes`; rerun with the normalized schema is required. See `HISTORY.md`. |
 
