@@ -148,9 +148,11 @@ STAGES = {
             "libcrtgfx/src/skia_bridge.cc",
             "libcrtgfx/tests/gpu_test.c",
             "libcrtgfx/tests/skia_raster_smoke.cc",
+            "libcrtgfx/tests/skia_media_lifecycle_test.cc",
             "libcrtgfx/tests/skia_reference_scene.h",
             "libcrtgfx/tools/gpu_window_demo.c",
             "libcrtgfx/tools/skia_gpu_window_demo.cc",
+            "libcrtgfx/tools/skia_media_window_demo.cc",
             "libcrtgfx/assets/fonts",
             "libcrtgfx/third_party/skia",
             "libcrtmedia/cmake/crtmedia_targets.cmake",
@@ -180,6 +182,7 @@ STAGES = {
             "libcrtmedia/tests/player_test.c",
             "libcrtmedia/tests/audio_sink_test.c",
             "libcrtmedia/tests/demux_decode_test.c",
+            "libcrtmedia/tests/zero_copy_test.c",
             "libcrtmedia/assets/test_tone.wav",
             # examples/media-player: the playback demo (installed as its
             # main.c), its clip, and the standalone example project.

@@ -25,6 +25,10 @@ set(CRTMEDIA_ROOT "${CRT_STAGE_SOURCE_ROOT}/libcrtmedia")
 # Zero-copy decoded textures Tranche 1 (2026-09-23) -- see crtgfx_skia_
 # targets.cmake's own top comment for why crtgfx_skia_objects needs this.
 set(CRTMEDIA_INCLUDE_DIR "${CRTMEDIA_ROOT}/include")
+# Windows/Linux zero-copy bridge branches interpret the private native-handle
+# structs produced by libcrtmedia. The source-stage asset carries these files;
+# keep the dependency scoped to crtgfx_skia_objects, never the public SDK.
+set(CRTMEDIA_SRC_DIR "${CRTMEDIA_ROOT}/src")
 set(CRTGFX_SKIA_ROOT "${CRT_STAGE_SKIA_PREFIX}/include")
 set(CRTGFX_SKIA_LIBRARIES
   "${CRT_STAGE_SKIA_PREFIX}/lib/libskia.a"
@@ -617,6 +621,16 @@ crt_stage_add_c_test(crtmedia_demux_test "${CRTMEDIA_ROOT}/tests/demux_decode_te
 target_compile_definitions(crtmedia_demux_test PRIVATE
   "CRTMEDIA_TEST_WAV_PATH=\"${CRTMEDIA_ROOT}/assets/test_tone.wav\"")
 
+# Tranche 5 lower-layer regression: hardware GPU-frame delivery plus the
+# independent software-only/CPU-resident dequeue path, built from the isolated
+# source asset rather than inherited from the repository build.
+crt_stage_add_c_test(crtmedia_zero_copy_test
+  "${CRTMEDIA_ROOT}/tests/zero_copy_test.c" crtmedia
+  "crtmedia_zero_copy_test: ok")
+target_include_directories(crtmedia_zero_copy_test PRIVATE "${CRTMEDIA_ROOT}/src")
+target_compile_definitions(crtmedia_zero_copy_test PRIVATE
+  "CRTMEDIA_TEST_VIDEO_PATH=\"${CRTMEDIA_ROOT}/assets/test_video.mp4\"")
+
 # Direct Skia consumers need the per-OS backend definitions themselves:
 # crtgfx/skia.h declares crtgfx_skia_make_gpu_context()/_wrap_gpu_surface()/
 # _gpu_surface_present() only under CRTGFX_HAVE_VULKAN/_D3D12/_METAL, and since
@@ -636,6 +650,25 @@ target_link_libraries(crtgfx_skia_raster_smoke PRIVATE crtgfx_skia_shared)
 crt_stage_register_test(crtgfx_skia_raster_smoke_runs
   crtgfx_skia_raster_smoke "crtgfx_skia_raster_smoke: ok")
 
+# Tranche 5 ownership regression. Fifteen complete decoder lifecycles import,
+# sample, synchronously submit, and release all 25 hardware frames while
+# counting the actual frame release callbacks. Headless: no compositor needed.
+add_executable(crtgfx_skia_media_lifecycle_test
+  "${CRTGFX_ROOT}/tests/skia_media_lifecycle_test.cc")
+target_compile_options(crtgfx_skia_media_lifecycle_test PRIVATE ${stage_cxx_options})
+target_compile_definitions(crtgfx_skia_media_lifecycle_test PRIVATE
+  ${CRTGFX_GPU_BACKEND_DEFINITIONS}
+  "CRTMEDIA_TEST_VIDEO_PATH=\"${CRTMEDIA_ROOT}/assets/test_video.mp4\"")
+target_include_directories(crtgfx_skia_media_lifecycle_test PRIVATE
+  "${CRTGFX_ROOT}/include" "${CRTMEDIA_ROOT}/include"
+  "${CRTMEDIA_ROOT}/src" "${CRTGFX_SKIA_ROOT}")
+target_link_libraries(crtgfx_skia_media_lifecycle_test PRIVATE
+  crtgfx_skia crtmedia)
+crt_stage_register_test(crtgfx_skia_media_lifecycle_test_runs
+  crtgfx_skia_media_lifecycle_test
+  "crtgfx_skia_media_lifecycle_test: (ok|skipped)")
+set_tests_properties(crtgfx_skia_media_lifecycle_test_runs PROPERTIES TIMEOUT 120)
+
 add_executable(crtgfx_gpu_window_demo "${CRTGFX_ROOT}/tools/gpu_window_demo.c")
 target_compile_options(crtgfx_gpu_window_demo PRIVATE ${stage_c_options})
 target_link_libraries(crtgfx_gpu_window_demo PRIVATE crtgfx_gpu)
@@ -648,6 +681,21 @@ target_compile_definitions(crtgfx_skia_gpu_window_demo PRIVATE
 target_include_directories(crtgfx_skia_gpu_window_demo PRIVATE
   "${CRTGFX_ROOT}/tests" "${CRTGFX_SKIA_ROOT}")
 target_link_libraries(crtgfx_skia_gpu_window_demo PRIVATE crtgfx_skia_shared)
+
+# Installed, normalized end-to-end bridge acceptance binary. It links both
+# optional components explicitly, matching the public bridge boundary, and
+# accepts the relocated SDK clip path as its fourth argument.
+add_executable(crtgfx_skia_media_window_demo
+  "${CRTGFX_ROOT}/tools/skia_media_window_demo.cc")
+target_compile_options(crtgfx_skia_media_window_demo PRIVATE ${stage_cxx_options})
+target_compile_definitions(crtgfx_skia_media_window_demo PRIVATE
+  ${CRTGFX_GPU_BACKEND_DEFINITIONS}
+  "CRTMEDIA_TEST_VIDEO_PATH=\"${CRTMEDIA_ROOT}/assets/test_video.mp4\"")
+target_include_directories(crtgfx_skia_media_window_demo PRIVATE
+  "${CRTGFX_ROOT}/include" "${CRTMEDIA_ROOT}/include"
+  "${CRTMEDIA_ROOT}/src" "${CRTGFX_SKIA_ROOT}")
+target_link_libraries(crtgfx_skia_media_window_demo PRIVATE
+  crtgfx_skia crtmedia)
 
 # examples/media-player: the on-screen playback demo (libcrtmedia/tools/
 # media_player_demo.c, installed below as its main.c) and the one place a
@@ -728,13 +776,13 @@ if(CRT_TARGET_OS STREQUAL "macos")
   # (`@loader_path/../../lib`), and it still runs and presents correctly
   # from the new location.
   set_target_properties(crtgfx_gpu_window_demo crtgfx_skia_gpu_window_demo
-      crtmedia_player_demo PROPERTIES
+      crtgfx_skia_media_window_demo crtmedia_player_demo PROPERTIES
     BUILD_RPATH "@loader_path/../../lib;${CMAKE_BUILD_RPATH}"
     INSTALL_RPATH "@loader_path/../../lib"
   )
 elseif(CRT_TARGET_OS STREQUAL "linux")
   set_target_properties(crtgfx_gpu_window_demo crtgfx_skia_gpu_window_demo
-      crtmedia_player_demo PROPERTIES
+      crtgfx_skia_media_window_demo crtmedia_player_demo PROPERTIES
     BUILD_RPATH "$ORIGIN/../../lib;${CMAKE_BUILD_RPATH}"
     INSTALL_RPATH "$ORIGIN/../../lib"
   )
@@ -784,7 +832,8 @@ if(CRT_TARGET_OS STREQUAL "windows")
   add_library(crtgfx_stage_emutls_stub OBJECT "${CRTGFX_EMUTLS_STUB_SOURCE}")
   target_compile_options(crtgfx_stage_emutls_stub PRIVATE ${stage_c_options})
   foreach(skia_direct_consumer
-      crtgfx_skia_raster_smoke crtgfx_skia_gpu_window_demo)
+      crtgfx_skia_raster_smoke crtgfx_skia_gpu_window_demo
+      crtgfx_skia_media_lifecycle_test crtgfx_skia_media_window_demo)
     target_compile_definitions(${skia_direct_consumer} PRIVATE SK_BUILD_FOR_UNIX)
     target_sources(${skia_direct_consumer} PRIVATE
       $<TARGET_OBJECTS:crtgfx_stage_emutls_stub>)
@@ -830,7 +879,7 @@ install(DIRECTORY "${CRTGFX_ROOT}/include/" DESTINATION include)
 install(DIRECTORY "${CRTMEDIA_ROOT}/include/" DESTINATION include)
 install(DIRECTORY "${CRTGFX_SKIA_ROOT}/include" DESTINATION include)
 install(TARGETS crtgfx_gpu_window_demo crtgfx_skia_gpu_window_demo
-                crtmedia_player_demo
+                crtgfx_skia_media_window_demo crtmedia_player_demo
   RUNTIME DESTINATION examples/bin)
 install(FILES "${CRTGFX_ROOT}/tools/gpu_window_demo.c"
   DESTINATION examples/gfx-gpu RENAME main.c)

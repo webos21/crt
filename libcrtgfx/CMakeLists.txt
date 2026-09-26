@@ -2127,6 +2127,41 @@ if(CRTGFX_ENABLE_SKIA)
     set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_skia_gpu_offscreen_smoke_runs)
   endif()
 
+  # Tranche 5 ownership regression: a real hardware decoder and the
+  # per-host Skia media bridge are both required, so keep this next to the
+  # headless GPU smoke but additionally gate it on FFmpeg. The test performs
+  # fifteen complete decoder lifecycles and verifies every imported frame's
+  # release callback, without needing a desktop session.
+  if(CRTGFX_GPU_BACKEND_ENABLED AND CRTMEDIA_ENABLE_FFMPEG AND
+     (CRT_TARGET_OS STREQUAL "macos" OR CRT_TARGET_OS STREQUAL "windows" OR
+      CRT_TARGET_OS STREQUAL "linux"))
+    add_executable(crtgfx_skia_media_lifecycle_test
+      ${CRT_STARTUP_OBJECTS}
+      tests/skia_media_lifecycle_test.cc
+    )
+    target_link_libraries(crtgfx_skia_media_lifecycle_test PRIVATE
+      crt_cxx_build_flags crtgfx_skia crtmedia)
+    target_include_directories(crtgfx_skia_media_lifecycle_test PRIVATE
+      "${CMAKE_SOURCE_DIR}/libcrtmedia/src"
+    )
+    target_compile_definitions(crtgfx_skia_media_lifecycle_test PRIVATE
+      CRTMEDIA_TEST_VIDEO_PATH="${CMAKE_SOURCE_DIR}/libcrtmedia/assets/test_video.mp4"
+    )
+    crt_wire_skia_executable(crtgfx_skia_media_lifecycle_test SKIP_MACOS_DEAD_STRIP)
+    crt_link_startup_end_objects(crtgfx_skia_media_lifecycle_test)
+    add_dependencies(crtgfx_skia_media_lifecycle_test cxx c crt1 crtgfx_skia crtmedia)
+
+    add_test(NAME crtgfx_skia_media_lifecycle_test_runs
+      COMMAND crtgfx_skia_media_lifecycle_test)
+    set_tests_properties(crtgfx_skia_media_lifecycle_test_runs PROPERTIES
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+      PASS_REGULAR_EXPRESSION "crtgfx_skia_media_lifecycle_test: (ok|skipped)"
+      TIMEOUT 120
+    )
+    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS
+      crtgfx_skia_media_lifecycle_test_runs)
+  endif()
+
   # crtgfx_skia_gpu_window_demo: manual, real on-screen verification for
   # the Ganesh-on-swapchain vertical slice (2026-09-07, TODO.md's "Finish
   # live GPU presentation everywhere" step's own last remaining piece) --

@@ -24,10 +24,11 @@
 // Requires a usable GPU and desktop session; deliberately not registered
 // with headless CTest, matching tools/skia_gpu_window_demo.cc's own
 // precedent. Usage: crtgfx_skia_media_window_demo [frame-count
-// [resize-width resize-height]]; omitted/zero frame-count runs until the
-// window is closed or the fixture's real frames are exhausted, whichever
-// comes first (this demo, unlike its synthetic-scene sibling, has a real,
-// finite source of frames -- libcrtmedia/assets/test_video.mp4, 25 frames).
+// [resize-width resize-height [media-path]]]; omitted/zero frame-count runs
+// until the window is closed or the fixture's real frames are exhausted,
+// whichever comes first. The optional path lets an installed stage binary
+// consume the clip from its relocated SDK instead of relying on the in-tree
+// compile-time default (libcrtmedia/assets/test_video.mp4, 25 frames).
 
 #include "crtgfx/gpu.h"
 #include "crtgfx/skia.h"
@@ -112,6 +113,7 @@ extern "C" int main(int argc, char** argv) {
   unsigned long frame_limit = argc > 1 ? strtoul(argv[1], NULL, 10) : 0;
   uint32_t scripted_resize_width = argc > 2 ? (uint32_t)strtoul(argv[2], NULL, 10) : 0;
   uint32_t scripted_resize_height = argc > 3 ? (uint32_t)strtoul(argv[3], NULL, 10) : 0;
+  const char* media_path = argc > 4 ? argv[4] : CRTMEDIA_TEST_VIDEO_PATH;
   if ((scripted_resize_width == 0) != (scripted_resize_height == 0)) {
     fprintf(stderr, "crtgfx_skia_media_window_demo: resize requires nonzero width and height\n");
     return 1;
@@ -165,7 +167,7 @@ extern "C" int main(int argc, char** argv) {
   // The real, hardware-preferring decode side (mirrors libcrtmedia/tests/
   // zero_copy_test.c's own setup exactly).
   crtmedia_extractor* extractor = NULL;
-  crtmedia_result mr = crtmedia_extractor_create(CRTMEDIA_TEST_VIDEO_PATH, &extractor);
+  crtmedia_result mr = crtmedia_extractor_create(media_path, &extractor);
   int video_track = -1;
   crtmedia_format* video_format = NULL;
   int failed = (mr != CRTMEDIA_OK);

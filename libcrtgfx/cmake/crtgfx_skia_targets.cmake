@@ -690,30 +690,16 @@ function(crt_add_crtgfx_skia_shared_target)
         "-framework Metal"
       )
     endif()
-    if(CRT_TARGET_OS STREQUAL "macos")
-      # Zero-copy decoded textures Tranche 1 (2026-09-23): crtgfx_skia_
-      # import_media_frame() (skia_bridge.cc's own Metal branch) calls
-      # crtmedia_gpu_frame_release(). Unlike the plain `crtgfx_skia`
-      # STATIC target (see that function's own matching comment for the
-      # real archive-scan-ordering regression this exact dependency caused
-      # there), crtgfx_skia_shared performs a real dylib-to-dylib link step
-      # right here -- ordinary dynamic linking, no single-pass static-
-      # archive-scan-order hazard at all -- so linking crtmedia_shared
-      # directly on this target is safe. PUBLIC for the identical "a
-      # direct-Skia-consumer-style caller of crtgfx_skia_import_media_
-      # frame() needs this symbol too" reason crtgfx_skia_shared's own
-      # top-of-function comment already documents for CRTGFX_SKIA_LIBRARIES.
-      target_link_libraries(crtgfx_skia_shared PUBLIC crtmedia_shared)
-    endif()
-    if(CRT_TARGET_OS STREQUAL "windows")
-      # Zero-copy decoded textures Tranche 2 (2026-09-23): the identical
-      # real need and the identical "safe here, not on the plain static
-      # crtgfx_skia target" reasoning as the macOS branch's own comment
-      # just above -- crtgfx_skia_import_media_frame()'s own D3D12 branch
-      # (skia_bridge.cc) also calls crtmedia_gpu_frame_release(), and a
-      # Windows DLL-to-DLL import-library link has the same "no single-pass
-      # static-archive-scan-order hazard" property dylib-to-dylib linking
-      # does.
+    if(CRT_TARGET_OS STREQUAL "macos" OR CRT_TARGET_OS STREQUAL "windows" OR
+       CRT_TARGET_OS STREQUAL "linux")
+      # Zero-copy decoded textures Tranches 1-3: every real host branch of
+      # crtgfx_skia_import_media_frame() calls crtmedia_gpu_frame_release().
+      # Unlike the plain STATIC target (whose consumers link crtmedia
+      # explicitly to preserve archive ordering), this is a real DLL/DSO
+      # link and must record the dependency itself. Linux was previously
+      # left unresolved and only happened to work when a final executable
+      # also linked crtmedia; the isolated 04-gfx-media package must carry a
+      # self-contained bridge library, so all three hosts use the same rule.
       target_link_libraries(crtgfx_skia_shared PUBLIC crtmedia_shared)
     endif()
     if(COMMAND crt_configure_shared_runtime)

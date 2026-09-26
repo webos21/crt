@@ -770,7 +770,7 @@ def validate_example_runtime_dependencies(executable: Path, target_os: str) -> N
 
 
 def run_packaged_binary_smoke(staged: Path, relative_path: str,
-                              success_marker: str, env: dict[str, str],
+                              success_marker: str | tuple[str, ...], env: dict[str, str],
                               run_args: list[str] | None = None) -> None:
     # Direct packaged-binary smoke (2026-09-16, TODO.md's "Make the
     # packaged Linux Vulkan/Skia demo directly runnable"): every other
@@ -821,10 +821,12 @@ def run_packaged_binary_smoke(staged: Path, relative_path: str,
         command, env=env, check=True, timeout=60,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     print(result.stdout, end="", flush=True)
-    if success_marker not in result.stdout:
+    markers = (success_marker,) if isinstance(success_marker, str) else success_marker
+    missing = [marker for marker in markers if marker not in result.stdout]
+    if missing:
         raise SystemExit(
             f"{executable}: packaged-binary smoke did not report success "
-            f"(expected {success_marker!r} in its output)")
+            f"(expected {missing!r} in its output)")
 
 
 def main() -> None:
@@ -1142,6 +1144,17 @@ def main() -> None:
                 success_marker=("crtmedia_player_demo: presented=30",
                                  "crtmedia_player_demo: hardware_decode=" +
                                  ("yes" if expect_hardware else "no")))
+        with timings.measure("run packaged zero-copy media bridge acceptance"):
+            expected_interop = "gpu-copy" if target_os == "windows" else "zero-copy"
+            run_packaged_binary_smoke(
+                staged, "examples/bin/crtgfx_skia_media_window_demo",
+                (f"interop={expected_interop}", "gpu_frame=yes",
+                 "texture_backed=yes", "cpu_readback=no",
+                 "frames_presented=20", "pixel_check=pass",
+                 "post_resize_present=pass", "clean_exit=pass"),
+                env,
+                run_args=["20", "900", "520",
+                          str(staged / "examples" / "media-player" / "test_video.mp4")])
         if target_os == "linux":
             with timings.measure("run packaged gfx-skia GPU window demo directly"):
                 run_packaged_binary_smoke(
