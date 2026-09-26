@@ -161,7 +161,7 @@ tranche below closes against).
   `SkImage::isTextureBacked()`, and legacy `zero_copy=yes` (Tranche 4
   normalization: `interop=zero-copy`); the crtmedia zero-copy test also
   passes all 25 hardware frames with no CPU fallback.
-* [ ] **4. Normalize the acceptance matrix across all three hosts,** mirroring
+* [x] **4. Normalize the acceptance matrix across all three hosts,** mirroring
   `docs/crtmedia_hardware_decode_acceptance.md`'s own per-host results table.
   Use `interop=zero-copy|gpu-copy|cpu-copy` plus independent `gpu_frame`,
   `texture_backed`, and decoder-path `cpu_readback` fields; legacy
@@ -174,15 +174,36 @@ tranche below closes against).
     `texture_backed=yes`, and `cpu_readback=no`, including Retina resize,
     pixel, post-resize present, and clean-exit checks. Recorded in
     `HISTORY.md`.
-  * [ ] Linux/x64: replay the same schema and confirm `interop=zero-copy`,
-    then freeze the three-host table.
+  * [x] Linux/x64: normalized 20-frame Vulkan window replay passed on
+    2026-09-26 with `interop=zero-copy`, `gpu_frame=yes`,
+    `texture_backed=yes`, and `cpu_readback=no`, including `900x520`
+    resize, pixel, post-resize present, and clean-exit checks. The frozen
+    three-host table is in `docs/crtmedia_zero_copy_decode_acceptance.md`.
 * [ ] **5. Ownership and regression validation:** repeated create/decode/
   destroy cycles leak no platform-native surface, existing CPU-resident and
   software-only paths stay green on every host after this tranche's changes.
+  * [x] Cross-host gate added: `crtgfx_skia_media_lifecycle_test` performs
+    15 complete extractor/decoder/import/draw/submit/destroy cycles and
+    requires one real release callback for every imported frame.
+  * [x] Linux/x64: 15/15 hardware cycles, 375/375 GPU-frame release
+    callbacks; `crtmedia_zero_copy_test`'s hardware and software-only paths
+    and the existing 15-cycle decoder lifecycle test also pass.
+  * [ ] macOS/arm64: run the new bridge lifecycle gate on real Metal/
+    VideoToolbox hardware after syncing this commit.
+  * [ ] Windows/x64: run the new bridge lifecycle gate on real D3D12/
+    D3D11VA hardware after syncing this commit.
 * [ ] **6. Close distribution and package acceptance** for the new bridge
   component the same way "Hardware video decode" Step 7 did (fresh-clone
   isolated `04-gfx-media` stage build, binary-dependency audit) once every
   host above is green.
+  * [x] Linux/x64: clean source-asset build from commit `24c0530`, with a
+    new work/output tree and no reuse flag, passed 10/10 isolated stage
+    tests, installed-package zero-copy window acceptance, and
+    `verify_dist.py` dependency/RPATH audit. Recorded in `HISTORY.md`.
+  * [ ] macOS/arm64: rebuild the isolated stage with the bridge and run its
+    packaged zero-copy acceptance plus dependency audit.
+  * [ ] Windows/x64: rebuild the isolated stage with the bridge and run its
+    packaged GPU-copy acceptance plus dependency audit.
 
 
 ### Next Release

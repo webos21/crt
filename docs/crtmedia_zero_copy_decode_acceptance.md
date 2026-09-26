@@ -251,12 +251,45 @@ Each host tranche is accepted when:
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | macOS/arm64 | VideoToolbox → Metal | `zero-copy` | yes | yes | no | Passed 2026-09-24 | Real 20-frame window run with scripted Retina `900x520` resize (`1800x1040` backing): `pixel_check=pass post_resize_present=pass clean_exit=pass`; the lower 25-frame test reported `interop_expected=zero-copy gpu_frame_delivered=yes cpu_readback=no`. |
 | Windows/x64 | D3D11VA → D3D11 compute copy → D3D12 | `gpu-copy` | yes | yes | no | Passed 2026-09-24 | Real 20-frame window run with scripted `900x520` resize: `pixel_check=pass post_resize_present=pass clean_exit=pass`; the lower 25-frame test reported `interop_expected=gpu-copy gpu_frame_delivered=yes cpu_readback=no`. |
-| Linux/x64 | VA-API DRM PRIME/dma-buf → Vulkan | `zero-copy` | yes | yes | no | Pending | Tranche 3's legacy demo passed with `zero_copy=yes`; rerun with the normalized schema is required. See `HISTORY.md`. |
+| Linux/x64 | VA-API DRM PRIME/dma-buf → Vulkan | `zero-copy` | yes | yes | no | Passed 2026-09-26 | Real 20-frame window run with scripted `900x520` resize: `pixel_check=pass post_resize_present=pass clean_exit=pass`; the lower 25-frame test reported `interop_expected=zero-copy gpu_frame_delivered=yes cpu_readback=no`. |
 
 The three rows describe the implemented paths; the `Normalized replay` column
 is the live Tranche 4 acceptance state. Historical `zero_copy=yes` output is
 retained verbatim in `HISTORY.md` as old evidence, not treated as the current
 result schema.
+
+## Ownership and package acceptance
+
+Tranche 5 adds `crtgfx_skia_media_lifecycle_test`, a common three-host gate
+that performs 15 complete extractor/decoder create → 25 GPU-frame decode →
+Skia import/draw/synchronous submit → destroy cycles. It wraps every frame's
+real release callback and requires exactly one callback after the imported
+image and GPU resources are destroyed, so the accepted count is 375/375, not
+merely 15 decoder instances that happened to exit. `crtmedia_zero_copy_test`
+remains the independent hardware-GPU-frame and software-only/CPU-frame gate.
+
+Tranche 6 puts that lifecycle test, the lower zero-copy test, and the
+normalized window demo into the isolated `04-gfx-media` source stage. The
+installed window demo accepts a relocated media path, and the stage runner
+requires the platform-specific normalized result from the packaged binary
+before `verify_dist.py` performs the final binary-dependency and RPATH audit.
+The shared Skia bridge now records its `crtmedia_shared` dependency on all
+three hosts instead of relying on a final executable to hide an unresolved
+Linux reference.
+
+| Host | Bridge lifecycle | Fresh isolated `04-gfx-media` package | State |
+| --- | --- | --- | --- |
+| Linux/x64 | Passed 2026-09-26: 15/15 hardware cycles, 375 GPU frames, 375 release callbacks | Passed from clean commit `24c0530`: 10/10 stage tests, packaged `interop=zero-copy` 20-frame run, dependency/RPATH audit | Accepted |
+| macOS/arm64 | New common gate not replayed yet | Bridge-inclusive stage not replayed yet | Pending |
+| Windows/x64 | New common gate not replayed yet | Bridge-inclusive stage not replayed yet | Pending |
+
+The Linux package runner deliberately keeps the older CPU-frame
+`media-player` example on its documented software-only path; that path
+presented 30 frames and reported `hardware_decode=no`. The immediately
+following packaged bridge acceptance independently required and obtained 20
+real VA-API GPU frames with `interop=zero-copy` and `cpu_readback=no`.
+Re-validating the older player's hardware-download mode on Linux remains the
+separate Next Release item in `TODO.md`, not part of this bridge's acceptance.
 
 ### Linux mapping decision
 

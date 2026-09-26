@@ -8,6 +8,48 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-26
+
+- **Closed Zero-copy decoded textures Tranche 4 and the Linux/x64 halves of
+  Tranches 5-6.** The real VA-API DRM PRIME/dma-buf → Vulkan window replay
+  presented 20 frames and produced the normalized result
+  `interop=zero-copy gpu_frame=yes texture_backed=yes cpu_readback=no`, with
+  scripted `900x520` resize, pixel check, post-resize presentation, and clean
+  exit all passing. Together with the already-recorded macOS and Windows
+  replays, this freezes the three-host normalized matrix in
+  `docs/crtmedia_zero_copy_decode_acceptance.md` and closes Tranche 4.
+
+  Added the common `crtgfx_skia_media_lifecycle_test`: 15 complete
+  extractor/decoder create, 25-frame hardware decode, Skia import/draw,
+  synchronous submit, and destroy cycles, wrapping the real frame release
+  callback so ownership is counted rather than inferred. Linux passed
+  `iterations=15 hardware_iterations=15 gpu_frames=375
+  release_callbacks=375`; `crtmedia_zero_copy_test` and the existing
+  15-cycle decoder lifecycle test also passed, retaining independent
+  software-only/CPU-frame coverage. The full in-tree suite was 138/139; its
+  only failure was the pre-existing `crtmedia_playback_pipeline_test` wall-
+  time lower-bound assertion, while every zero-copy/hardware/lifecycle test
+  passed. macOS/Windows still need to replay the new bridge-level lifecycle
+  gate before global Tranche 5 closure.
+
+  Extended the isolated `04-gfx-media` source stage with that lifecycle gate,
+  the lower zero-copy test, and an installed normalized media-window binary;
+  carried the private per-host native-handle headers only inside the stage
+  build, accepted a relocated fixture path, and made `libcrtgfx_skia`'s shared
+  form record its `libcrtmedia` dependency on Linux as it already did on
+  macOS/Windows. The Linux source asset from clean commit `24c0530` (SHA-256
+  `90795afa4404a0156275a1c51ff3acfae1483e1511163fc2a2bd05ae935b56f1`)
+  was built in a new work/output tree with no reuse flag: fresh FreeType,
+  FFmpeg, and Skia; 10/10 isolated stage tests; rebuilt installed examples;
+  packaged 20-frame `interop=zero-copy` bridge acceptance; packaged Ganesh
+  resize/pixel acceptance; and final `verify_dist.py` binary-dependency/RPATH
+  audit all passed in 829.7 seconds. The legacy Linux CPU-frame player smoke
+  uses its documented software-only escape hatch (30 frames,
+  `hardware_decode=no`); the immediately following packaged bridge smoke
+  still requires real VA-API GPU frames, so this does not weaken hardware
+  coverage. macOS/Windows bridge-inclusive stage replays remain open for
+  global Tranche 6 closure.
+
 ## 2026-09-24
 
 - **Normalized the macOS/arm64 zero-copy acceptance result and closed its
