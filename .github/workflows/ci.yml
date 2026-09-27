@@ -61,6 +61,34 @@ jobs:
         with:
           python-version: "3.x"
 
+      # tools/fetch_ports.py already writes every fetched port archive into
+      # this exact --cache directory (CMakeLists.txt's own CRT_PORT_DOWNLOAD_
+      # ROOT, ${CMAKE_BINARY_DIR}/port-tests/downloads == out/<preset>/port-
+      # tests/downloads on every OS) and skips the network entirely on a
+      # cache hit (download()'s own `if os.path.exists(archive_path): return`)
+      # -- but nothing previously persisted that directory across CI runs, so
+      # every run re-fetched from scratch. Real, confirmed break (2026-09-27):
+      # android.googlesource.com's Gitiles archive endpoint (the `make`
+      # bootstrap tool's own source, porting/recipes/make.json) returned a
+      # real HTTP 503 to three CI legs at once; the same-day retry/backoff
+      # fix (download()'s own 5-attempt, up-to-75s-total retry) helps a truly
+      # transient blip but not an extended one, and every subsequent run pays
+      # the same real third-party-availability risk again regardless. Caching
+      # this directory removes the network dependency entirely on every run
+      # after the first successful fetch of a given recipe -- keyed on every
+      # recipe file's own content so a URL/version/checksum bump (the only
+      # thing that should ever change what needs downloading) invalidates it
+      # correctly; restore-keys lets a partial hit (most recipes unchanged)
+      # still skip most of the network work. actions/cache handles the path
+      # correctly on Windows too (no OS-specific step needed).
+      - name: Cache port download sources
+        uses: actions/cache@v4
+        with:
+          path: out/${{ matrix.preset }}/port-tests/downloads
+          key: port-downloads-${{ matrix.preset }}-${{ hashFiles('porting/recipes/*.json') }}
+          restore-keys: |
+            port-downloads-${{ matrix.preset }}-
+
       # ---- Linux: apt already carries a native clang/lld for both amd64
       # and arm64 repos, so the same step works for both matrix legs.
       # libc++-dev/libc++abi-dev are required from here on: CMakeLists.txt

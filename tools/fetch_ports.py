@@ -89,8 +89,17 @@ def download(url, archive_path):
     # transient 5xx/429 or drop connections now and then; CI hit a real
     # `HTTP Error 503` on the `make` bootstrap tool this way. Retry only
     # errors that can plausibly clear by themselves, with backoff, and fail
-    # immediately on definitive ones (404, 403, ...).
-    attempts = 5
+    # immediately on definitive ones (404, 403, ...). 8 attempts with backoff
+    # capped at 60s (5, 10, 20, 40, 60, 60, 60 -- 255s/~4.25min total): the
+    # original 5-attempt/75s-total window (2026-09-27) still left CI exposed
+    # to a Gitiles outage lasting more than about a minute, which is exactly
+    # the class of outage this endpoint has real, confirmed history of (see
+    # this function's own real HTTP 503 above); the CI workflow now also
+    # caches this directory across runs (.github/workflows/ci.yml's own
+    # "Cache port download sources" step) so this window only actually
+    # matters on a cold cache (a recipe's first fetch, or one just bumped).
+    attempts = 8
+    max_delay = 60
     for attempt in range(1, attempts + 1):
         print(f"fetch {url}" + (f" (attempt {attempt}/{attempts})" if attempt > 1 else ""))
         try:
@@ -107,7 +116,7 @@ def download(url, archive_path):
             os.remove(tmp_path)
         if not retryable or attempt == attempts:
             raise SystemExit(f"download failed for {url}: {error}")
-        delay = 5 * 2 ** (attempt - 1)
+        delay = min(5 * 2 ** (attempt - 1), max_delay)
         print(f"  {error}; retrying in {delay}s", flush=True)
         time.sleep(delay)
     os.replace(tmp_path, archive_path)
