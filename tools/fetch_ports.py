@@ -8,6 +8,7 @@ import shutil
 import stat
 import tarfile
 import time
+import urllib.error
 import urllib.request
 import zipfile
 
@@ -84,9 +85,31 @@ def download(url, archive_path):
     if os.path.exists(archive_path):
         return
     tmp_path = archive_path + ".tmp"
-    print(f"fetch {url}")
-    with urllib.request.urlopen(url) as response, open(tmp_path, "wb") as out:
-        shutil.copyfileobj(response, out)
+    # Upstream hosts (android.googlesource.com, GitHub, ftp mirrors) return
+    # transient 5xx/429 or drop connections now and then; CI hit a real
+    # `HTTP Error 503` on the `make` bootstrap tool this way. Retry only
+    # errors that can plausibly clear by themselves, with backoff, and fail
+    # immediately on definitive ones (404, 403, ...).
+    attempts = 5
+    for attempt in range(1, attempts + 1):
+        print(f"fetch {url}" + (f" (attempt {attempt}/{attempts})" if attempt > 1 else ""))
+        try:
+            with urllib.request.urlopen(url, timeout=120) as response, open(tmp_path, "wb") as out:
+                shutil.copyfileobj(response, out)
+            break
+        except urllib.error.HTTPError as exc:
+            retryable = exc.code == 429 or 500 <= exc.code < 600
+            error = f"HTTP {exc.code}"
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+            retryable = True
+            error = str(exc)
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        if not retryable or attempt == attempts:
+            raise SystemExit(f"download failed for {url}: {error}")
+        delay = 5 * 2 ** (attempt - 1)
+        print(f"  {error}; retrying in {delay}s", flush=True)
+        time.sleep(delay)
     os.replace(tmp_path, archive_path)
 
 
