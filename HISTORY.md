@@ -10,6 +10,59 @@ substantive update.
 
 ## 2026-09-27
 
+- **Closed the Windows/x64 halves of Zero-copy decoded textures Tranches 5-6,
+  completing all three hosts.** Bridge lifecycle (Tranche 5): the common
+  `crtgfx_skia_media_lifecycle_test` first **failed** on real D3D12/D3D11VA
+  hardware -- cycle 1 passed, cycle 2 hit `CreateShaderResourceView1() ==
+  DXGI_ERROR_DEVICE_REMOVED` -- a real bug in the Tranche 2 bridge that its
+  single-decoder window demo could not show. The bridge cached D3D11 objects
+  (both compute shaders and the per-plane shareable destination textures)
+  in process-wide statics, but FFmpeg creates a new D3D11 device per
+  `crtmedia_codec`; the second decoder's decode-pool texture was therefore
+  combined with objects bound to the first, already-destroyed decoder's
+  device. The same caches would also have kept the last decoder's device
+  alive after its owner released it -- the leak class this tranche exists to
+  catch. Diagnosed by instrumenting the import's failure points (the failing
+  step was the Y plane's SRV) and reading the test's cycle counter (`iteration
+  1`, zero-based). Fixed by caching only shader *bytecode* (plain memory, no
+  device reference) and creating every D3D11 object per imported frame,
+  releasing all of them before the import returns; only the opened D3D12
+  resources remain, owned by Skia and freed with the image. This also
+  retires the Tranche 2 "persistent per-plane cache" design and its
+  explanation: the churn that entry blamed for the garbage `GetDesc1()`
+  values was, per that same entry's later root cause, the `-fwchar-type=int`
+  struct-layout bug, and per-frame creation now runs 375 imports with no
+  fault. After the fix: 15/15 hardware cycles, 375/375 GPU frames and
+  release callbacks, three consecutive runs; `crtmedia_zero_copy_test`
+  (`interop_expected=gpu-copy gpu_frame_delivered=yes cpu_readback=no`, 25
+  frames) and the existing hardware/flush/15-cycle decoder tests pass; the
+  normalized 20-frame window run (`900x520` resize) still reports
+  `interop=gpu-copy gpu_frame=yes texture_backed=yes cpu_readback=no
+  pixel_check=pass post_resize_present=pass clean_exit=pass`; the in-tree
+  suite is 156/156.
+
+  Package acceptance (Tranche 6): built the isolated `04-gfx-media` stage
+  from a freshly extracted `03-gfx-simple` SDK at `C:\crt-t6` with a new
+  work, cache and output tree. The first attempt stopped at the stage's own
+  link of the lifecycle test -- `ld.lld: error: duplicate symbol: fprintf`
+  (libc.a against compiler-rt's `emutls.c`): the two bridge consumers link the
+  static Skia/media archives, which the in-tree build already handles through
+  `crt_wire_skia_executable()`'s `--allow-multiple-definition` but the stage
+  CMake did not; added to those two targets. That change is in the stage
+  source asset, so the second run (asset SHA-256 `dd47e961a187...`) rebuilt
+  FreeType/FFmpeg (2668 s at `-j4`) and Skia (199 s) again rather than
+  reusing layers -- both runs' dependency phases completed. Result: 10/10
+  stage tests (including the lifecycle gate and the lower zero-copy test),
+  rebuilt installed `gfx-gpu`/`gfx-skia`/`media-player` examples,
+  the packaged 20-frame `interop=gpu-copy gpu_frame=yes texture_backed=yes
+  cpu_readback=no` bridge acceptance with resize, pixel and clean-exit
+  checks, `verify_dist.py`, and atomic publication, 3013 s total. Required
+  environment on Windows: `CRT_CC`/`CRT_CXX`/`CRT_AR`/`CRT_RANLIB` and
+  `CRT_WINDOWS_SDK_LIBPATH`, each reported by the runner one missing item at
+  a time. Provenance limit, recorded on purpose: the source asset was built
+  from a working tree with these two fixes uncommitted on top of commit
+  `ef786e0`.
+
 - **Closed the macOS/arm64 halves of Zero-copy decoded textures Tranches
   5-6.** The common bridge lifecycle gate ran on real VideoToolbox/Metal and
   reported `iterations=15 hardware_iterations=15 gpu_frames=375

@@ -281,7 +281,7 @@ Linux reference.
 | --- | --- | --- | --- |
 | Linux/x64 | Passed 2026-09-26: 15/15 hardware cycles, 375 GPU frames, 375 release callbacks | Passed from clean commit `24c0530`: 10/10 stage tests, packaged `interop=zero-copy` 20-frame run, dependency/RPATH audit | Accepted |
 | macOS/arm64 | Passed 2026-09-27: 15/15 hardware cycles, 375 GPU frames, 375 release callbacks | Passed from fresh source asset `d13ac8c`: 10/10 stage tests, packaged `interop=zero-copy` 20-frame run, dependency/RPATH audit | Accepted |
-| Windows/x64 | New common gate not replayed yet | Bridge-inclusive stage not replayed yet | Pending |
+| Windows/x64 | Passed 2026-09-27: 15/15 hardware cycles, 375 GPU frames, 375 release callbacks, three consecutive runs | Passed from a fresh source asset (SHA-256 `dd47e961a187...`, no prior work root): 10/10 stage tests, packaged `interop=gpu-copy` 20-frame run, dependency audit (`verify_dist.py`) | Accepted |
 
 The Linux package runner deliberately keeps the older CPU-frame
 `media-player` example on its documented software-only path; that path
@@ -313,3 +313,19 @@ the two images sample the decoder-owned memory directly. The first Vulkan use
 acquires ownership from `VK_QUEUE_FAMILY_FOREIGN_EXT`, and Skia's release
 callback destroys both imported images/memory allocations before releasing
 the retained media frame.
+
+### Windows lifecycle finding
+
+The first Windows replay of the lifecycle gate failed on its second cycle:
+`CreateShaderResourceView1()` returned `DXGI_ERROR_DEVICE_REMOVED`. The
+Tranche 2 bridge cached D3D11 objects (compute shaders and per-plane
+destination textures) process-wide, but FFmpeg creates a new D3D11 device per
+`crtmedia_codec`, so the second decoder's texture was combined with objects
+bound to the first, destroyed decoder's device -- and the cache would also
+have pinned the last decoder's device alive after its owner released it. The
+window demo, which uses one decoder, could not expose this. The bridge now
+caches only device-independent shader bytecode; every D3D11 object is created
+per imported frame and released before the import returns, leaving only the
+opened D3D12 resources, which Skia releases with the image. The 25-frame
+window acceptance (`interop=gpu-copy`) and all lower gates were re-run
+unchanged afterward.

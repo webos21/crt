@@ -177,7 +177,7 @@ tranche below closes against).
     `texture_backed=yes`, and `cpu_readback=no`, including `900x520`
     resize, pixel, post-resize present, and clean-exit checks. The frozen
     three-host table is in `docs/crtmedia_zero_copy_decode_acceptance.md`.
-* [ ] **5. Ownership and regression validation:** repeated create/decode/
+* [x] **5. Ownership and regression validation:** repeated create/decode/
   destroy cycles leak no platform-native surface, existing CPU-resident and
   software-only paths stay green on every host after this tranche's changes.
   * [x] Cross-host gate added: `crtgfx_skia_media_lifecycle_test` performs
@@ -189,9 +189,12 @@ tranche below closes against).
   * [x] macOS/arm64: 15/15 real Metal/VideoToolbox cycles, 375/375 GPU
     frames and release callbacks; lower zero-copy and decoder lifecycle
     gates also pass. Recorded in `HISTORY.md`.
-  * [ ] Windows/x64: run the new bridge lifecycle gate on real D3D12/
-    D3D11VA hardware after syncing this commit.
-* [ ] **6. Close distribution and package acceptance** for the new bridge
+  * [x] Windows/x64: 15/15 real D3D12/D3D11VA cycles, 375/375 GPU frames and
+    release callbacks, three consecutive runs. The gate found a real bug (the
+    bridge's process-wide D3D11 caches were bound to the first decoder's
+    device and broke the second decoder); fixed by caching only shader
+    bytecode. Recorded in `HISTORY.md`.
+* [x] **6. Close distribution and package acceptance** for the new bridge
   component the same way "Hardware video decode" Step 7 did (fresh-clone
   isolated `04-gfx-media` stage build, binary-dependency audit) once every
   host above is green.
@@ -203,8 +206,10 @@ tranche below closes against).
     tests, packaged 20-frame `interop=zero-copy` acceptance, installed
     examples, and the final dependency/RPATH audit. Recorded in
     `HISTORY.md`.
-  * [ ] Windows/x64: rebuild the isolated stage with the bridge and run its
-    packaged GPU-copy acceptance plus dependency audit.
+  * [x] Windows/x64: fresh isolated stage (new work/cache/output, FreeType,
+    FFmpeg and Skia rebuilt) passed 10/10 tests, packaged 20-frame
+    `interop=gpu-copy` acceptance, installed examples, and `verify_dist.py`.
+    Recorded in `HISTORY.md`.
 
 
 ### Next Release

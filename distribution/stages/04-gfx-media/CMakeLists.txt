@@ -844,6 +844,20 @@ if(CRT_TARGET_OS STREQUAL "windows")
       -Wno-pragma-pack -Wno-unused-value -Wno-ignored-attributes)
   endforeach()
 
+  # The two bridge consumers link the static crtgfx_skia/crtmedia archives
+  # (matching the bridge's per-consumer link rule) and therefore pull in
+  # libc.a next to compiler-rt's emutls.c, which defines the same fprintf
+  # stub -- the identical duplicate the in-tree build resolves for every
+  # static Skia consumer via crt_wire_skia_executable()'s
+  # --allow-multiple-definition (libcrtgfx/CMakeLists.txt). Found for real
+  # by the first Windows bridge-inclusive isolated stage build (2026-09-27):
+  # `ld.lld: error: duplicate symbol: fprintf` on the lifecycle test.
+  foreach(bridge_consumer
+      crtgfx_skia_media_lifecycle_test crtgfx_skia_media_window_demo)
+    target_link_options(${bridge_consumer} PRIVATE
+      -Wl,--allow-multiple-definition)
+  endforeach()
+
   # examples/gfx-skia needs this exact same "direct Skia consumer"
   # treatment -- its own main.cc *is* skia_gpu_window_demo.cc (installed
   # verbatim below) -- but it is a wholly standalone CMake project built
