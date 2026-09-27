@@ -11,32 +11,53 @@
 extern "C" {
 #endif
 
-/* Async buffer-queue decoder, the third piece of docs/libcrtmedia_
+/* Async buffer-queue codec, the third piece of docs/libcrtmedia_
  * api_policy.md's decided core (TODO.md's "Separate extractor and codec"
  * item). Shaped after AMediaCodec's own real dequeue/queue buffer-queue
  * model -- deliberately NOT the literal `AMediaCodec`/`AMediaCodec_*`
  * symbols, and deliberately NOT AMediaCodec's own raw indexed-buffer-pool
  * bookkeeping either (see docs/libcrtmedia_api_policy.md's own Decision):
- * that machinery exists in the real NDK API to support zero-copy
- * hand-off to real hardware/`ANativeWindow` buffer pools, which this
- * project's own software-only decode has no use for yet -- this crtmedia_
- * codec instead hands out an owned crtmedia_frame/crtmedia_audio_buffer
- * per decoded output, matching this project's own already-established
+ * this crtmedia_codec instead hands out one explicitly owned
+ * crtmedia_frame/crtmedia_gpu_frame/crtmedia_audio_buffer or compressed
+ * sample per output, matching this project's own already-established
  * ownership idiom (crtmedia/frame.h, crtmedia/audio.h, crtmedia/
  * extractor.h's own crtmedia_sample) rather than introducing a second,
- * index-based one. A real hardware decode surface (TODO.md's own later
- * "hardware decode" steps) can still be added as a distinct, additional
- * output path from this same queue model later -- this is the same
- * asynchronous send/receive shape that would need either way.
+ * index-based one. Hardware decode uses the additive GPU-frame dequeue path;
+ * software encode uses the symmetric frame-input/encoded-output path below.
  *
- * One crtmedia_codec decodes exactly one track's worth of samples --
- * crtmedia_extractor_read_sample()'s own output (crtmedia/extractor.h)
- * feeds crtmedia_codec_queue_input() directly, no adaptation needed. No
- * FFmpeg type (`AVCodecContext`, `AVPacket`, `AVFrame`, ...) ever appears
- * here, matching this project's established "no host/upstream SDK type
- * in a public header" policy. */
+ * One crtmedia_codec decodes one track or encodes one stream. crtmedia_
+ * extractor_read_sample() output feeds queue_input() directly; crtmedia_frame
+ * feeds queue_frame() directly. No FFmpeg type (`AVCodecContext`, `AVPacket`,
+ * `AVFrame`, ...) appears here, matching the established no-host/upstream-SDK
+ * type policy for public headers. */
 
 typedef struct crtmedia_codec crtmedia_codec;
+
+typedef struct crtmedia_encoded_sample crtmedia_encoded_sample;
+typedef void (*crtmedia_encoded_sample_release_fn)(
+    crtmedia_encoded_sample* sample, void* release_context);
+
+typedef enum crtmedia_encoded_sample_flags {
+  CRTMEDIA_ENCODED_SAMPLE_FLAG_NONE = 0,
+  CRTMEDIA_ENCODED_SAMPLE_FLAG_KEY_FRAME = 1 << 0,
+} crtmedia_encoded_sample_flags;
+
+/* One owned compressed access unit produced by an encoder. PTS, DTS, and
+ * duration use the same microsecond clock as crtmedia_frame::timestamp_us;
+ * DTS may equal PTS for codecs configured without reordering. The release
+ * callback owns `data` only and is called exactly once by the helper below. */
+struct crtmedia_encoded_sample {
+  void* data;
+  uint32_t size;
+  int64_t pts_us;
+  int64_t dts_us;
+  int64_t duration_us;
+  uint32_t flags;
+  crtmedia_encoded_sample_release_fn release;
+  void* release_context;
+};
+
+void crtmedia_encoded_sample_release(crtmedia_encoded_sample* sample);
 
 typedef enum crtmedia_codec_buffer_flags {
   CRTMEDIA_CODEC_BUFFER_FLAG_NONE = 0,
@@ -50,13 +71,19 @@ typedef enum crtmedia_codec_buffer_flags {
 
 /* Creates a decoder configured from `format` (as produced by crtmedia_
  * extractor_track_format() -- reads CRTMEDIA_FORMAT_KEY_MIME to select a
- * real decoder from this pass's own narrow codec set (H.264 video; AAC/
- * MP3/PCM audio, matching crtmedia/demux.h's own scope) and CRTMEDIA_
+ * real decoder from this pass's own narrow codec set (H.264/MPEG-4 video;
+ * AAC/MP3/PCM audio, matching crtmedia/demux.h's own scope) and CRTMEDIA_
  * FORMAT_KEY_WIDTH/HEIGHT or _SAMPLE_RATE/_CHANNEL_COUNT to configure
  * it). Returns CRTMEDIA_ERROR_INVALID_ARGUMENT for a null format/
  * out_codec, CRTMEDIA_ERROR_UNSUPPORTED if the format's own MIME is
  * missing or outside this pass's own decode set. */
 crtmedia_result crtmedia_codec_create_decoder(const crtmedia_format* format, crtmedia_codec** out_codec);
+
+/* Creates a software video encoder. The first accepted baseline is MPEG-4
+ * Part 2 (`mime=video/mp4v-es`) with YUV420P input; width, height, frame-rate,
+ * pixel-format, and bitrate come from `format`. This deliberately establishes
+ * the portable software fallback before host hardware encoders are added. */
+crtmedia_result crtmedia_codec_create_encoder(const crtmedia_format* format, crtmedia_codec** out_codec);
 
 void crtmedia_codec_release(crtmedia_codec* codec);
 
@@ -76,6 +103,23 @@ void crtmedia_codec_release(crtmedia_codec* codec);
  * error. CRTMEDIA_ERROR_INVALID_ARGUMENT for a null codec, or for null
  * data with nonzero size (or vice versa). */
 crtmedia_result crtmedia_codec_queue_input(crtmedia_codec* codec, const void* data, uint32_t size, int64_t pts_us, uint32_t flags);
+
+/* Submits one CPU frame to an encoder. The encoder copies all input planes
+ * before returning, so the caller retains ownership of `frame`. Queue EOS as
+ * (frame=NULL, flags=END_OF_STREAM); EOS cannot be combined with a real frame.
+ * Backpressure and retry semantics match crtmedia_codec_queue_input(). */
+crtmedia_result crtmedia_codec_queue_frame(
+    crtmedia_codec* codec, const crtmedia_frame* frame, uint32_t flags);
+
+/* Pulls one owned compressed sample. Returns WOULD_BLOCK when more input is
+ * needed and OK/out_eof=1 only after encoder EOS has drained completely. */
+crtmedia_result crtmedia_codec_dequeue_encoded_output(
+    crtmedia_codec* codec, crtmedia_encoded_sample* out_sample, int* out_eof);
+
+/* Returns a new caller-owned format describing an encoder's compressed output,
+ * including codec-specific data (`csd-0`) required by a muxer/decoder. */
+crtmedia_result crtmedia_codec_get_output_format(
+    const crtmedia_codec* codec, crtmedia_format** out_format);
 
 /* Pulls one decoded output -- exactly one of `*out_video_frame`/
  * `*out_audio_buffer` is filled (whichever matches this codec's own real

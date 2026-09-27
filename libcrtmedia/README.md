@@ -1,11 +1,19 @@
 # libcrtmedia
 
-Media upper runtime layer.
+Media upper runtime layer. FFmpeg is the reference codec/container stack;
+public headers expose only CRT-owned frame, sample, format, codec, muxer, and
+player contracts.
 
-FFmpeg is the first planned reference stack. The initial scope is software
-decode into explicit frame/audio-buffer objects; GPU texture and host audio
-device handoff should wait until `libcrtgfx` has a stable surface/frame
-abstraction.
+The cross-host playback baseline, hardware H.264 decode, and decoded-texture
+interop are complete. macOS and Linux import decoded surfaces zero-copy;
+Windows uses the accepted D3D11-to-D3D12 GPU-copy fallback without CPU
+readback. Encode & Capture is active: common encode/mux timing and ownership
+are frozen, and Linux/x86_64 passes the 100-frame software MPEG-4 -> MP4 ->
+decode-back gate. The V4L2 mmap backend and device-gated 30-frame round trip
+are implemented; native-layout conversion passes without hardware, while the
+current host has no `/dev/video*` and leaves physical capture acceptance open. See
+`docs/crtmedia_zero_copy_decode_acceptance.md` and
+`docs/crtmedia_encode_capture_acceptance.md`.
 
 The CPU video frame handoff contract is defined:
 `include/crtmedia/frame.h`'s `crtmedia_frame` (packed RGBA8888/BGRA8888
@@ -54,12 +62,19 @@ implemented and verified on all three hosts: `include/crtmedia/format.h`
 (`crtmedia_format`, a real key-value store including `csd-0` codec-config
 buffers for H.264/AAC), `include/crtmedia/extractor.h` (`crtmedia_
 extractor`, demux-only, no decode), and `include/crtmedia/codec.h`
-(`crtmedia_codec`, the real async buffer-queue decoder --
-`queue_input`/`dequeue_output`/`flush`, `CRTMEDIA_WOULD_BLOCK`
-backpressure). `tests/format_test.c` covers the key-value store
+(`crtmedia_codec`, the real async buffer-queue decoder and encoder --
+`queue_input`/`dequeue_output`, `queue_frame`/`dequeue_encoded_output`,
+`flush`, and `CRTMEDIA_WOULD_BLOCK` backpressure). `include/crtmedia/muxer.h`
+adds an independent multi-track-shaped MP4 writer without exposing FFmpeg
+types. `include/crtmedia/capture.h` similarly keeps V4L2 private while
+returning owned YUV420P frames whose driver buffers have already been
+requeued. `tests/format_test.c` covers the key-value store
 deterministically; `tests/extractor_codec_test.c` decodes the same real
 MP4 fixture `demux_decode_video_test.c` covers, end to end through the
-new core, and gets the identical real result.
+new core, and gets the identical real result. `tests/encode_mux_test.c`
+generates 100 YUV420P frames, software-encodes and muxes them, then reopens
+and decodes the result while checking exact timestamps/count/duration and
+bounded pixels.
 
 `crtmedia_demuxer_*` (`demux.h`) is now rebuilt over this new core too --
 `src/demux.c` composes one `crtmedia_extractor` plus one `crtmedia_codec`

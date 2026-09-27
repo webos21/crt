@@ -560,7 +560,8 @@ See `porting/recipes/freetype.json`'s own notes for the full trail and
   - Linux: `shared-pass`
   - macOS: `shared-pass`
   - Windows: `shared-pass`
-- Automated recipe test: `libcrtmedia`'s own `crtmedia_demux_test` (not a
+- Automated integration tests: `libcrtmedia`'s own `crtmedia_demux_test` and
+  Linux-first `crtmedia_encode_mux_test` (not
   `porting/recipes/*.json` `tests[]` entry -- gated behind the
   `CRTMEDIA_ENABLE_FFMPEG` CMake option instead, see `libcrtmedia/
   CMakeLists.txt`)
@@ -569,10 +570,22 @@ First FFmpeg port for `libcrtmedia`'s demux/software-decode bridge
 (`crtmedia/demux.h`/`audio.h`, `HISTORY.md`'s 2026-09-01 entries).
 Deliberately narrow first pass: local `file`-protocol demux only, one
 container (MOV/MP4/M4A), one video codec (H.264), three audio codecs
-(AAC/MP3/PCM), LGPL-only, no assembly-optimized codec paths. Verified end
+(AAC/MP3/PCM), LGPL-only, no assembly-optimized codec paths. Encode & Capture
+Tranche 1 adds only the native MPEG-4 Part 2 software encoder/decoder/parser
+and MP4 muxer; avdevice, avfilter, and network remain disabled. Verified end
 to end on all three hosts: `crtmedia_demux_test` demuxes+decodes a real,
 tiny, project-authored WAV fixture and checks the exact known sample
 count, not just that the library links.
+
+**Linux/x86_64 Encode & Capture re-verification, 2026-09-27:** a forced
+in-place rebuild found stale installed FFmpeg public headers shadowing the
+fresh source tree, whose private siblings are not installed. The recipe's
+`-iquote.` makes quoted FFmpeg-internal includes prefer the source tree while
+leaving dependency lookup unchanged. Fresh configure/make/install succeeded;
+`crtmedia_encode_mux_test` generated 100 deterministic YUV420P frames,
+software-encoded and MP4-muxed them, then reopened/decoded all 100 with exact
+PTS and 3,333,300-us duration plus pixel-range checks. macOS/Windows execution
+of the new path belongs to their Encode & Capture host tranches.
 
 Windows needed five real, Windows-specific fixes beyond the ones common to
 every host (`--arch=`/`--target-os=`/`--host-cc=`/the `-U_WIN32` family/

@@ -57,181 +57,35 @@ newest entry first) rather than leaving it here.
 
 ## In Progress
 
-### Zero-copy decoded textures
+### Encode and capture
 
-Promoted 2026-09-22 from `Planned` (`HISTORY.md`'s own "Hardware video
-decode" closure entry -- full per-step evidence for macOS/Windows/Linux
-hardware decode lives there now, not in this file). Connect decoded
-hardware surfaces (D3D11 texture, `CVPixelBuffer`/Metal texture, VA-API
-surface) to the native graphics path without a mandatory CPU readback,
-where the host supports it, with a measured copy fallback where it does
-not. Recommended host order and full frozen contract:
-`docs/crtmedia_zero_copy_decode_acceptance.md` (Tranche 0, closed
-2026-09-23 -- ownership/lifetime model, `native_handle` per-host identity,
-the new `crtmedia_codec_dequeue_gpu_frame()` API shape, the
-`crtgfx_skia_media` bridge boundary, and the acceptance gate every host
-tranche below closes against).
+Promoted 2026-09-27 after the three-host Zero-copy decoded textures closure.
+The frozen contract, acceptance gates, and host order live in
+[`docs/crtmedia_encode_capture_acceptance.md`](docs/crtmedia_encode_capture_acceptance.md).
+Keep completed evidence in `HISTORY.md`; this list tracks only tranche state.
 
-* [x] **0. Freeze the zero-copy acceptance contract.**
-  `docs/crtmedia_zero_copy_decode_acceptance.md`. No public ABI changed;
-  `crtmedia_gpu_frame`'s layout stays frozen, `native_handle`'s real
-  per-host identity and lifetime are now documented, and `libcrtmedia` gets
-  no build dependency on `libcrtgfx` (a third bridge component depends on
-  both, mirroring `crtgfx_skia*`'s existing shared-target split).
-* [x] **1. macOS/arm64 first green (VideoToolbox -> Metal).**
-  Closed 2026-09-23, recorded in `HISTORY.md`. `crtmedia_codec_dequeue_
-  gpu_frame()` (`libcrtmedia/src/codec.c`): additive next to `dequeue_
-  output()`, real zero-copy branch when `hw_pix_fmt ==
-  AV_PIX_FMT_VIDEOTOOLBOX` (`native_handle` = the retained `AVFrame`'s own
-  `CVPixelBufferRef`, `plane_count = 0`), CPU-transfer fallback on every
-  other host so the API is already usable everywhere; `crtmedia_codec_is_
-  hardware_accelerated()` broadened (not redefined), existing `dequeue_
-  output()` callers see byte-identical behavior. `crtgfx_skia_import_
-  media_frame()` (`crtgfx/skia_media.h`, `skia_bridge.cc`'s Metal branch):
-  real `CVPixelBuffer` -> `CVMetalTextureCache` Y/UV textures ->
-  `GrYUVABackendTextures` -> `SkImage`, no RGBA intermediate, verified via
-  two standalone real-clang probes on this host before landing. New demo
-  `crtgfx_skia_media_window_demo` presents 20-25 real decoded frames
-  end to end with a real pixel check and a scripted resize, both passing,
-  legacy `zero_copy=yes` (Tranche 4 normalization: `interop=zero-copy`).
-  Full regression green (138/138 `ctest` with
-  `CRTGFX_ENABLE_SKIA=ON`/`CRT_USE_IMPORTED_LIBCXX=ON`). The isolated bridge
-  package acceptance is now closed for this host in Tranche 6 below; device
-  affinity (Tranche 2's own concern) is moot on this host's effectively-
-  single-GPU topology, not yet proven handled in general.
-* [x] **2. Windows/x64 (D3D11VA -> D3D12).** Closed 2026-09-23, recorded
-  in `HISTORY.md`. `crtmedia_codec_dequeue_gpu_frame()`'s new
-  `AV_PIX_FMT_D3D11` branch (`libcrtmedia/src/codec.c`,
-  `gpu_frame_d3d11.h`): `native_handle` is a small crtmedia-owned
-  `ID3D11Texture2D*`/array-index indirection (FFmpeg's own decode output
-  is one slice of a shared decode-pool array texture, a single pointer
-  cannot carry both), no CPU readback in `codec.c` itself. Real device
-  affinity resolved by comparing DXGI adapter LUIDs (bails out to the
-  existing CPU-transfer fallback on a genuine mismatch); this host's own
-  measured, honestly-reported outcome is a **GPU-copy fallback**, not
-  literal zero-copy (Skia's D3D12 backend has no multi-plane concept at
-  all, confirmed by reading `GrD3DTypes.h` directly, so `crtgfx_skia_
-  import_media_frame()`'s D3D12 branch extracts Y/UV via a plane-sliced
-  `ID3D11ShaderResourceView1` and a small compute shader into two fresh
-  NT-handle-shareable textures, opened into D3D12 -- still a real, no-CPU-
-  readback GPU-to-GPU copy, matching this tranche's own acceptance gate).
-  `crtgfx_skia_media_window_demo` presents all 25 real decoded frames end
-  to end with a real pixel check and a scripted resize, both passing,
-  legacy `zero_copy=yes` (Tranche 4 normalization: `interop=gpu-copy`),
-  verified reproducible across repeated runs. Two real,
-  non-obvious bugs found and fixed only by actually running this on real
-  multi-adapter hardware, not by inspection: (1) FFmpeg's own D3D11VA
-  decode-pool texture needs the `"SHADER"` `av_hwdevice_ctx_create()` opts
-  key to get `D3D11_BIND_SHADER_RESOURCE` at all (default is `D3D11_BIND_
-  DECODER` only, confirmed by reading `hwcontext_d3d11va.c`/`dxva2.c`
-  directly) -- without it every `CreateShaderResourceView1()` call fails
-  with `E_INVALIDARG`; (2) a serious, silent ABI-corruption bug in this
-  project's own Windows C++ build: `-fwchar-type=int` (a deliberate,
-  project-wide 4-byte `wchar_t` override) makes the real SDK
-  `DXGI_ADAPTER_DESC`/`DXGI_ADAPTER_DESC1` structs' `WCHAR Description[128]`
-  field the wrong size relative to what the real system `dxgi.dll` writes,
-  silently misaligning every field after it (`VendorId`, `AdapterLuid`,
-  ...) -- `gpu_win32.c` already had its own workaround for this
-  (`crtgfx_dxgi_wchar`); `skia_bridge.cc`'s new device-affinity check
-  needed the same pattern applied to two more struct shapes. A real,
-  CPU-blocking `ID3D11Query`/`D3D11_QUERY_EVENT` sync was also added after
-  the compute-shader copy (a plain `Flush()` only submits, does not wait
-  for completion, and the D3D12 side could otherwise race the D3D11
-  write), and the destination Y/UV shareable textures are now a small,
-  persistent per-plane cache (created once, refreshed via the compute
-  shader every frame) rather than recreated from scratch every frame.
-  **Still open:** the isolated `04-gfx-media` distribution stage has not
-  yet built this bridge (same deferral as macOS Tranche 1, above).
-* [x] **3. Linux/x64 (VA-API -> Vulkan).** Closed 2026-09-24, recorded in
-  `HISTORY.md`. The pinned FFmpeg 8.1.2 recipe does not build its DRM/Vulkan
-  hwcontexts (and its Vulkan device path uses runtime `dlopen()`, which this
-  CRT intentionally does not expose as a general ELF-loader dependency), so
-  this tranche chose direct DRM PRIME/dma-buf import. `libcrtmedia` retains
-  the VAAPI `AVFrame`, synchronizes its `VASurfaceID`, and exports a private
-  `VADRMPRIMESurfaceDescriptor`-shaped handle with separate R8/GR88 NV12
-  layers; the Vulkan bridge imports both layers with explicit DRM modifiers
-  and feeds them directly to `GrYUVABackendTextures` with no CPU readback or
-  RGBA intermediate. The required Vulkan dma-buf extension set is enabled
-  only as one all-supported unit, and the actual enabled extension lists are
-  now passed to Skia's capability probe. On this physical Intel UHD 630 host
-  (Intel iHD VA-API + Mesa Vulkan), the 25-frame real window demo passed three
-  consecutive runs with a scripted `900x520` resize, real pixel readback,
-  `SkImage::isTextureBacked()`, and legacy `zero_copy=yes` (Tranche 4
-  normalization: `interop=zero-copy`); the crtmedia zero-copy test also
-  passes all 25 hardware frames with no CPU fallback.
-* [x] **4. Normalize the acceptance matrix across all three hosts,** mirroring
-  `docs/crtmedia_hardware_decode_acceptance.md`'s own per-host results table.
-  Use `interop=zero-copy|gpu-copy|cpu-copy` plus independent `gpu_frame`,
-  `texture_backed`, and decoder-path `cpu_readback` fields; legacy
-  `zero_copy=yes` is not accepted as normalized evidence.
-  * [x] Windows/x64 first: schema frozen and real 20-frame D3D12 window run
-    confirmed `interop=gpu-copy gpu_frame=yes texture_backed=yes cpu_readback=no`;
-    focused hardware-decode regression 4/4 passed. Recorded in `HISTORY.md`.
-  * [x] macOS/arm64: normalized 20-frame Metal window replay passed on
-    2026-09-24 with `interop=zero-copy`, `gpu_frame=yes`,
-    `texture_backed=yes`, and `cpu_readback=no`, including Retina resize,
-    pixel, post-resize present, and clean-exit checks. Recorded in
-    `HISTORY.md`.
-  * [x] Linux/x64: normalized 20-frame Vulkan window replay passed on
-    2026-09-26 with `interop=zero-copy`, `gpu_frame=yes`,
-    `texture_backed=yes`, and `cpu_readback=no`, including `900x520`
-    resize, pixel, post-resize present, and clean-exit checks. The frozen
-    three-host table is in `docs/crtmedia_zero_copy_decode_acceptance.md`.
-* [x] **5. Ownership and regression validation:** repeated create/decode/
-  destroy cycles leak no platform-native surface, existing CPU-resident and
-  software-only paths stay green on every host after this tranche's changes.
-  * [x] Cross-host gate added: `crtgfx_skia_media_lifecycle_test` performs
-    15 complete extractor/decoder/import/draw/submit/destroy cycles and
-    requires one real release callback for every imported frame.
-  * [x] Linux/x64: 15/15 hardware cycles, 375/375 GPU-frame release
-    callbacks; `crtmedia_zero_copy_test`'s hardware and software-only paths
-    and the existing 15-cycle decoder lifecycle test also pass.
-  * [x] macOS/arm64: 15/15 real Metal/VideoToolbox cycles, 375/375 GPU
-    frames and release callbacks; lower zero-copy and decoder lifecycle
-    gates also pass. Recorded in `HISTORY.md`.
-  * [x] Windows/x64: 15/15 real D3D12/D3D11VA cycles, 375/375 GPU frames and
-    release callbacks, three consecutive runs. The gate found a real bug (the
-    bridge's process-wide D3D11 caches were bound to the first decoder's
-    device and broke the second decoder); fixed by caching only shader
-    bytecode. Recorded in `HISTORY.md`.
-* [x] **6. Close distribution and package acceptance** for the new bridge
-  component the same way "Hardware video decode" Step 7 did (fresh-clone
-  isolated `04-gfx-media` stage build, binary-dependency audit) once every
-  host above is green.
-  * [x] Linux/x64: clean source-asset build from commit `24c0530`, with a
-    new work/output tree and no reuse flag, passed 10/10 isolated stage
-    tests, installed-package zero-copy window acceptance, and
-    `verify_dist.py` dependency/RPATH audit. Recorded in `HISTORY.md`.
-  * [x] macOS/arm64: fresh isolated bridge-inclusive stage passed 10/10
-    tests, packaged 20-frame `interop=zero-copy` acceptance, installed
-    examples, and the final dependency/RPATH audit. Recorded in
-    `HISTORY.md`.
-  * [x] Windows/x64: fresh isolated stage (new work/cache/output, FreeType,
-    FFmpeg and Skia rebuilt) passed 10/10 tests, packaged 20-frame
-    `interop=gpu-copy` acceptance, installed examples, and `verify_dist.py`.
-    Recorded in `HISTORY.md`.
-
-
-### Next Release
-
-* [ ] Re-verify the hardware-decode-by-default packaged
-  `crtmedia_player_demo`/`examples/media-player` (`HISTORY.md`, 2026-09-22)
-  on macOS -- already done and verified on Windows.
-* [ ] Re-verify it on Linux too.
-* [ ] Produce the next release from one frozen tag/commit on every host:
-  `v0.4.0-preview.1`'s three asset sets each record a different commit than
-  the tag, for real, documented reasons (`docs/release_preview.md`);
-  avoiding a repeat is a process fix, not new engineering.
-* [ ] Finish the three-platform visual demo: only a Windows clip exists so
-  far (`README.md`'s "Demo" section); record the same application on Linux
-  and macOS too, with the same evidence (native window, Skia, text, input,
-  resize, GPU presentation, FFmpeg playback where practical).
-* [ ] Watch for and act on real issue reports from the public launch
-  (`HISTORY.md`, 2026-09-23), including any clean-machine problems with the
-  `v0.4.0-preview.1` release artifacts -- this is now how that gets
-  verified, not a dedicated device acquired for it.
-
-
+* [x] **0. Freeze the encode/mux/capture contract.** Microsecond PTS/DTS/
+  duration, frame and encoded-sample ownership, codec queue back-pressure,
+  MP4 mux lifecycle, software fallback, and host order are documented.
+* [x] **1. Linux/x86_64 synthetic software encode -> MP4 -> decode-back.**
+  The new FFmpeg-backed MPEG-4 encoder and MP4 muxer pass the deterministic
+  100-frame round trip with exact PTS/count/duration and pixel-range checks.
+* [ ] **2. Linux/x86_64 V4L2 capture.** The backend, public capture ABI,
+  YUV420/NV12/YUYV conversion, mmap-buffer lifetime, monotonic timestamps,
+  stop behavior, and device-gated MP4 decode-back test are implemented. The
+  resource-free conversion test passes; complete this tranche by running the
+  live gate on a physical host with a supported `/dev/video*` device (the
+  current host has none and reports a precise CTest skip).
+* [ ] **3. Linux/x86_64 VA-API H.264 encode.** Accept captured or existing
+  GPU frames, verify the actually-used hardware path, and compare it with the
+  software fallback without weakening timing/ownership checks.
+* [ ] **4. macOS/arm64.** AVFoundation capture plus VideoToolbox encode on
+  real hardware, with software fallback and decode-back acceptance.
+* [ ] **5. Windows/x64.** Media Foundation capture plus hardware encode on
+  real hardware, with software fallback and decode-back acceptance.
+* [ ] **6. Cross-host closure.** Timestamp discontinuity/drop behavior,
+  lifecycle stress, installed headers/link smoke, isolated stage and packaged
+  SDK acceptance, and final documentation consistency on all three hosts.
 
 ## Planned
 
@@ -241,24 +95,20 @@ The completed cross-host baseline and its exact validation evidence stay in
 [`STATUS.md`](STATUS.md) and [`HISTORY.md`](HISTORY.md); the product boundary
 and dependency order stay in [`docs/runtime_roadmap.md`](docs/runtime_roadmap.md).
 The allocator baseline decision gate is closed: keep the current allocator and
-leave Scudo conditional. Hardware video decode (the roadmap's first tranche)
-is closed (`HISTORY.md`, 2026-09-22); **Zero-copy decoded textures**, the
-next tranche, is promoted into `In Progress` above. Promote the remaining
-tranches below one at a time when their own prerequisite evidence and
-acceptance host are available.
+leave Scudo conditional. Hardware video decode and Zero-copy decoded textures
+are closed (`HISTORY.md`, 2026-09-22..27). **Encode and capture** is promoted
+into `In Progress` above. Promote the remaining tranches one at a time when
+their prerequisite evidence is available.
 
-1. **Encode and capture.** Build capture, conversion, hardware/software encode,
-   timestamp, and muxing paths on top of the accepted media frame contract.
-2. **Networking and streaming.** Add transport, buffering, back-pressure,
+1. **Networking and streaming.** Add transport, buffering, back-pressure,
    reconnect, and protocol integration only after local media timing is stable.
-3. **WebRTC, then JavaScript.** Treat WebRTC as a consumer-driven integration
+2. **WebRTC, then JavaScript.** Treat WebRTC as a consumer-driven integration
    milestone. Build the real QuickJS core and CRT bindings before extending
    isolated distribution acceptance from `04-gfx-media` to `05-js`; a stage
    skeleton alone is not completion.
 
 The intended execution order is encode/capture, networking/streaming, WebRTC,
-and finally the complete JavaScript application-runtime layer, continuing on
-from zero-copy interop above.
+and finally the complete JavaScript application-runtime layer.
 
 
 ### Runtime architecture hardening backlog

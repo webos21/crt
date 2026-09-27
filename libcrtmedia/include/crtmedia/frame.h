@@ -33,6 +33,11 @@ typedef enum crtmedia_result {
    * not AMediaCodec's own INFO_TRY_AGAIN_LATER -- see docs/libcrtmedia_
    * api_policy.md's own Decision on why exact NDK naming is not adopted. */
   CRTMEDIA_WOULD_BLOCK = -3,
+  /* A host resource was present but an operating-system operation failed.
+   * errno remains the detailed diagnostic on POSIX hosts. This is distinct
+   * from UNSUPPORTED (the requested backend/format does not exist) and from
+   * WOULD_BLOCK (a normal retry condition). */
+  CRTMEDIA_ERROR_IO = -4,
 } crtmedia_result;
 
 /* Every format this contract currently covers: two packed 8-bit-per-

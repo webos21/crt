@@ -33,6 +33,8 @@ static const char* mime_for_codec_id(enum AVCodecID codec_id) {
   switch (codec_id) {
     case AV_CODEC_ID_H264:
       return "video/avc";
+    case AV_CODEC_ID_MPEG4:
+      return "video/mp4v-es";
     case AV_CODEC_ID_AAC:
       return "audio/mp4a-latm";
     case AV_CODEC_ID_MP3:

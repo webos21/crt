@@ -12,6 +12,17 @@ function(crt_add_crtmedia_targets)
   if(CRTMEDIA_BACKEND_SOURCES)
     set(crtmedia_backend_sources ${CRTMEDIA_BACKEND_SOURCES})
     list(TRANSFORM crtmedia_backend_sources PREPEND "${CRTMEDIA_ROOT}/")
+    # capture_v4l2.c alone consumes the host Linux UAPI. Isolated stages use
+    # crt-cc -nostdinc, so opt this private boundary file into the real SDK;
+    # public capture headers remain host-neutral.
+    if(CRT_TARGET_OS STREQUAL "linux" AND CMAKE_C_COMPILER MATCHES "crt-cc")
+      foreach(crtmedia_backend_source IN LISTS crtmedia_backend_sources)
+        if(crtmedia_backend_source MATCHES "/capture_v4l2\\.c$")
+          set_source_files_properties(${crtmedia_backend_source}
+            PROPERTIES COMPILE_OPTIONS "-fcrt-real-linux-sdk")
+        endif()
+      endforeach()
+    endif()
     add_library(crtmedia_backend_objects OBJECT ${crtmedia_backend_sources})
     if((CRT_TARGET_OS STREQUAL "linux" OR CRT_TARGET_OS STREQUAL "macos") AND
        TARGET crt_build_flags)
@@ -37,6 +48,7 @@ function(crt_add_crtmedia_targets)
     "${CRTMEDIA_ROOT}/src/format.c"
     "${CRTMEDIA_ROOT}/src/player.c"
     "${CRTMEDIA_ROOT}/src/gpu_frame.c"
+    "${CRTMEDIA_ROOT}/src/capture.c"
     ${CRTMEDIA_BACKEND_OBJECTS}
   )
   if(TARGET crt_build_flags)
@@ -84,6 +96,7 @@ function(crt_add_crtmedia_targets)
     "${CRTMEDIA_ROOT}/src/format.c"
     "${CRTMEDIA_ROOT}/src/player.c"
     "${CRTMEDIA_ROOT}/src/gpu_frame.c"
+    "${CRTMEDIA_ROOT}/src/capture.c"
     ${CRTMEDIA_BACKEND_OBJECTS}
   )
   if(CRT_TARGET_OS STREQUAL "windows" AND TARGET crt_windows_dllcrt)
@@ -123,6 +136,7 @@ function(crt_add_crtmedia_targets)
       "${CRTMEDIA_ROOT}/src/demux.c"
       "${CRTMEDIA_ROOT}/src/extractor.c"
       "${CRTMEDIA_ROOT}/src/codec.c"
+      "${CRTMEDIA_ROOT}/src/muxer.c"
       ${CRTMEDIA_LINUX_VAAPI_EXPORT_SOURCES}
     )
     target_include_directories(crtmedia PRIVATE
@@ -132,6 +146,7 @@ function(crt_add_crtmedia_targets)
       "${CRTMEDIA_ROOT}/src/demux.c"
       "${CRTMEDIA_ROOT}/src/extractor.c"
       "${CRTMEDIA_ROOT}/src/codec.c"
+      "${CRTMEDIA_ROOT}/src/muxer.c"
       ${CRTMEDIA_LINUX_VAAPI_EXPORT_SOURCES}
     )
     target_include_directories(crtmedia_shared PRIVATE

@@ -430,7 +430,9 @@ elseif(CRT_TARGET_OS STREQUAL "macos")
     "-framework AudioToolbox" "-framework VideoToolbox"
     "-framework CoreVideo" "-framework CoreMedia" "-framework CoreFoundation")
 else()
-  set(CRTMEDIA_BACKEND_SOURCES src/arch/linux/audio_sink_linux.c)
+  set(CRTMEDIA_BACKEND_SOURCES
+    src/arch/linux/audio_sink_linux.c
+    src/arch/linux/capture_v4l2.c)
   # Keep in step with CRTMEDIA_LINUX_VAAPI_LIBS in libcrtmedia/CMakeLists.txt
   # (that file explains the real vaInitialize/vaGetDisplayDRM/... link need in
   # full) -- the identical "stage project keeps its own copy" gap
@@ -616,6 +618,22 @@ crt_stage_add_c_test(crtmedia_player_test "${CRTMEDIA_ROOT}/tests/player_test.c"
   crtmedia "crtmedia_player_test: ok")
 crt_stage_add_c_test(crtmedia_audio_sink_test "${CRTMEDIA_ROOT}/tests/audio_sink_test.c"
   crtmedia "crtmedia_audio_sink_test: ok")
+if(CRT_TARGET_OS STREQUAL "linux")
+  crt_stage_add_c_test(crtmedia_capture_conversion_test
+    "${CRTMEDIA_ROOT}/tests/capture_conversion_test.c" crtmedia
+    "crtmedia_capture_conversion_test: ok formats=3")
+  target_include_directories(crtmedia_capture_conversion_test PRIVATE
+    "${CRTMEDIA_ROOT}/src")
+
+  crt_stage_add_c_test(crtmedia_capture_v4l2_test
+    "${CRTMEDIA_ROOT}/tests/capture_v4l2_test.c" crtmedia
+    "crtmedia_capture_v4l2_test: (ok|skip)")
+  target_compile_definitions(crtmedia_capture_v4l2_test PRIVATE
+    "CRTMEDIA_TEST_CAPTURE_OUTPUT_PATH=\"${CMAKE_CURRENT_BINARY_DIR}/crtmedia_capture_v4l2_test.mp4\"")
+  set_tests_properties(crtmedia_capture_v4l2_test_runs PROPERTIES
+    SKIP_REGULAR_EXPRESSION "crtmedia_capture_v4l2_test: skip"
+    TIMEOUT 120)
+endif()
 crt_stage_add_c_test(crtmedia_demux_test "${CRTMEDIA_ROOT}/tests/demux_decode_test.c"
   crtmedia "crtmedia_demux_test: ok")
 target_compile_definitions(crtmedia_demux_test PRIVATE

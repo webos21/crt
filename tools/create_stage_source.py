@@ -164,9 +164,13 @@ STAGES = {
             "libcrtmedia/src/format.c",
             "libcrtmedia/src/player.c",
             "libcrtmedia/src/gpu_frame.c",
+            "libcrtmedia/src/capture.c",
+            "libcrtmedia/src/capture_internal.h",
+            "libcrtmedia/src/capture_v4l2_test_control.h",
             "libcrtmedia/src/demux.c",
             "libcrtmedia/src/extractor.c",
             "libcrtmedia/src/codec.c",
+            "libcrtmedia/src/muxer.c",
             # codec.c's private, non-installed hardware-decode diagnostics
             # header (2026-09-18, hardware-decode Tranche 2).
             "libcrtmedia/src/codec_test_control.h",
@@ -181,6 +185,8 @@ STAGES = {
             "libcrtmedia/tests/format_test.c",
             "libcrtmedia/tests/player_test.c",
             "libcrtmedia/tests/audio_sink_test.c",
+            "libcrtmedia/tests/capture_conversion_test.c",
+            "libcrtmedia/tests/capture_v4l2_test.c",
             "libcrtmedia/tests/demux_decode_test.c",
             "libcrtmedia/tests/zero_copy_test.c",
             "libcrtmedia/assets/test_tone.wav",
@@ -231,6 +237,7 @@ STAGES = {
                 # gpu_vulkan.c and tests/gpu_test.c include this (Linux only).
                 "libcrtgfx/src/arch/linux/gpu_vulkan_test.h",
                 "libcrtmedia/src/arch/linux/audio_sink_linux.c",
+                "libcrtmedia/src/arch/linux/capture_v4l2.c",
             ),
         },
         # Skia, FreeType, FFmpeg, and the Windows D3D headers are fetched by

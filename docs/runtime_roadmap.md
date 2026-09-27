@@ -22,8 +22,8 @@ Development and release follow the cumulative stages defined in
    CPU-writable framebuffer. Skia raster/text is explicitly outside this gate.
 4. **Graphics/Media (`04-gfx-media`)** — Skia CPU and GPU, native
    Vulkan/D3D12/Metal presentation, FFmpeg, audio, playback, and opt-in
-   hardware H.264 decode (verified on all three hosts). Zero-copy
-   decoded-texture interop remains later roadmap work.
+   hardware H.264 decode plus decoded-texture interop (verified on all three
+   hosts; Windows uses the documented GPU-copy fallback).
 5. **JavaScript (`05-js`)** — QuickJS and bindings over the stable lower
    graphics/media contracts.
 
@@ -52,12 +52,15 @@ is not complete merely because an in-tree target links.
   (`../docs/libcrtgfx_live_presentation_acceptance.md`); this was the last
   gap before hardware decode, not a missing common API.
 - The software media baseline includes FFmpeg-backed demux/decode, the common
-  frame/audio/player contracts, and native audio sinks. Hardware H.264 decode
+  frame/audio/player contracts, native audio sinks, software MPEG-4 video
+  encode, and MP4 mux/decode-back. Hardware H.264 decode
   into a CPU-resident frame is now verified on all three hosts: macOS/arm64
   (VideoToolbox), Windows/x64 (D3D11VA), and Linux/x86_64 (VA-API, physical
-  Intel GPU, 2026-09-22). Hardware decode and decoded-texture interop remain
-  separate, explicitly reported capabilities -- zero-copy interop is not
-  implemented on any host yet.
+  Intel GPU, 2026-09-22). Decoded-texture interop is also accepted on all
+  three hosts: direct zero-copy on macOS/Linux and a measured D3D11-to-D3D12
+  GPU-copy fallback on Windows. Encode & Capture Tranches 0-1 are accepted on
+  physical Linux/x86_64; the V4L2 backend and resource-free conversion gate
+  are implemented, with the physical-camera round trip still pending.
 - The cumulative binary-package chain reaches the current `05-js` skeleton.
   Predecessor-only isolated-stage acceptance through the option-ON
   `03-gfx-simple -> 04-gfx-media` transition is complete on Windows, macOS,
@@ -93,15 +96,18 @@ comparisons; promote Scudo only if repeatable evidence exceeds the baseline.
    the correctness fallback and reporting actual hardware use separately.~~
    **Complete 2026-09-22** (`HISTORY.md`): macOS/arm64 (VideoToolbox),
    Windows/x64 (D3D11VA), and Linux/x86_64 (VA-API, physical Intel GPU) all
-   report a real hardware frame observed and downloaded. Remaining
-   housekeeping (the normalized cross-host matrix write-up and a
-   Windows/macOS packaged-stage audit re-run) is tracked in `TODO.md`'s In
-   Progress before the tranche moves to `HISTORY.md`.
-3. Define and verify zero-copy decoded-texture ownership, device affinity, and
-   synchronization. Keep a measured CPU-download fallback where direct interop
-   is unavailable. **Next** once step 2's remaining housekeeping above closes.
+   report a real hardware frame observed and downloaded.
+3. ~~Define and verify zero-copy decoded-texture ownership, device affinity,
+   and synchronization, with a measured fallback where direct interop is
+   unavailable.~~ **Complete 2026-09-27** (`HISTORY.md`): macOS/arm64 and
+   Linux/x86_64 pass direct zero-copy; Windows/x64 passes its documented
+   D3D11-to-D3D12 GPU-copy fallback; lifecycle and packaged-stage gates pass.
 4. Add capture, conversion, hardware/software encode, timestamp, and muxing on
-   top of the accepted frame and playback contracts.
+   top of the accepted frame and playback contracts. **In progress:** common
+   contracts and the Linux synthetic software encode -> MP4 -> decode-back
+   gate are complete. V4L2 capture code and its device-gated end-to-end test
+   are present; a physical-camera pass is the remaining Tranche 2 gate. See
+   `crtmedia_encode_capture_acceptance.md`.
 5. Add transport, buffering, back-pressure, reconnect, and streaming protocol
    integration only after local media timing is stable.
 6. Use WebRTC as a consumer-driven integration milestone, then add the real

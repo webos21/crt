@@ -10,6 +10,65 @@ substantive update.
 
 ## 2026-09-27
 
+- **Implemented Encode & Capture Tranche 2's Linux V4L2 backend and
+  resource-free gates; physical-camera acceptance remains open.** Added the
+  host-neutral `crtmedia/capture.h` enumerate/open/start/dequeue/stop/release
+  API and kept every V4L2 UAPI type, ioctl and fourcc in the private Linux
+  backend. It negotiates YUV420, NV12 or YUYV and frame rate, requests four mmap
+  buffers, converts/copies each dequeue to a tightly packed CRT-owned YUV420P
+  frame, and requeues the driver buffer before returning. This makes frame
+  lifetime independent of V4L2 and prevents encoder back-pressure from
+  exhausting the native queue. Native timestamps become a strictly monotonic
+  capture-relative microsecond timeline.
+
+  Added a byte-exact, camera-free conversion/ownership test for all three
+  native layouts and a device-gated 30-frame V4L2 -> software MPEG-4 -> MP4 ->
+  reopen/decode-back test with count and monotonic-PTS checks. The former
+  passes on Linux/x86_64. This host exposes no `/dev/video*`, so CTest reports
+  the latter as `Skipped` with `reason=no-v4l2-device`; this entry records the
+  completed implementation, not a false Tranche 2 closure. The same sources
+  and tests are carried by the isolated `04-gfx-media` stage asset, with only
+  the private V4L2 translation unit opting into the real Linux UAPI headers.
+  A fresh CMake configure and focused capture/encode tests pass. The full
+  Linux suite is 134 passed, one device-gated skip, and the one already-known
+  unrelated `crtmedia_playback_pipeline_test` current-host wall-time
+  lower-bound failure; no new non-capture regression was introduced. A
+  separate default `CRTMEDIA_ENABLE_FFMPEG=OFF` configure/build also passes
+  the conversion gate, and component installation exports `capture.h` plus
+  all six capture entry points from `libcrtmedia.so`.
+
+- **Closed Zero-copy documentation and opened Encode & Capture Tranches 0-1
+  on physical Linux/x86_64.** The fully accepted three-host zero-copy work
+  moved out of `TODO.md`; `STATUS.md` and `docs/runtime_roadmap.md` now report
+  its real final state (macOS/Linux zero-copy, Windows GPU-copy fallback) and
+  promote Encode & Capture as the active upper-runtime tranche.
+
+  Froze the encode/mux/capture timing and ownership contract in
+  `docs/crtmedia_encode_capture_acceptance.md`, then extended the existing
+  asynchronous `crtmedia_codec` API with a CPU-frame software encoder and an
+  owned compressed-sample queue. Added a public, FFmpeg-type-free MP4 muxer
+  lifecycle and the necessary format keys. The portable baseline uses
+  FFmpeg's built-in MPEG-4 Part 2 encoder (`video/mp4v-es`, YUV420P), avoiding
+  a new x264/OpenH264 dependency while preserving software fallback before
+  hardware encode begins.
+
+  `crtmedia_encode_mux_test` now generates 100 deterministic frames at PTS
+  `0,33333,66666,...`, encodes and muxes them, reopens the generated MP4, and
+  decodes it back. On the physical Linux/x86_64 acceptance host it verifies
+  exactly 100 packets/frames, exact PTS for every frame, exact 3,333,300 us
+  duration, layout/dimensions, and bounded first/last luma; the file is
+  generated under the build tree and removed on success. The narrow FFmpeg
+  8.1.2 recipe now enables MPEG-4 encode/decode/parser and MP4 mux only.
+
+  A forced in-place FFmpeg rebuild exposed an older recipe hygiene bug before
+  the new test could link: `crt-cc` intentionally places the shared installed
+  port prefix on the include path, so stale installed public FFmpeg headers
+  shadowed the fresh source tree and then could not find uninstalled private
+  siblings (`intmath.h`, `x86/bswap.h`). `-iquote.` now gives the fresh source
+  tree priority for FFmpeg's quoted internal includes on every host while
+  leaving dependency-header lookup unchanged. The rebuilt port, new target,
+  and end-to-end acceptance all pass.
+
 - **Closed the Windows/x64 halves of Zero-copy decoded textures Tranches 5-6,
   completing all three hosts.** Bridge lifecycle (Tranche 5): the common
   `crtgfx_skia_media_lifecycle_test` first **failed** on real D3D12/D3D11VA

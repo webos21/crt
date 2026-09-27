@@ -73,7 +73,10 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
   # the ALSA kernel UAPI struct/ioctl layout and the PulseAudio wire
   # protocol itself (neither part of this project's own bundled headers)
   # are hand-transcribed within that file.
-  list(APPEND CRTMEDIA_BACKEND_SOURCES src/arch/linux/audio_sink_linux.c)
+  list(APPEND CRTMEDIA_BACKEND_SOURCES
+    src/arch/linux/audio_sink_linux.c
+    src/arch/linux/capture_v4l2.c
+  )
 elseif(CRT_TARGET_OS STREQUAL "macos")
   # src/arch/macos/audio_sink_coreaudio.c: real CoreAudio AudioQueue
   # playback -- see that file's own top comment for the full reasoning
@@ -587,6 +590,105 @@ if(CRTMEDIA_ENABLE_FFMPEG)
     PASS_REGULAR_EXPRESSION "crtmedia_demux_test: ok"
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_demux_test_runs)
+endif()
+
+# Encode & Capture Tranche 2: the native-layout conversion gate always runs
+# on Linux without a camera or FFmpeg. It exercises the exact helper used by
+# the live dequeue path before the mmap buffer is immediately requeued.
+if(CRT_TARGET_OS STREQUAL "linux")
+  add_executable(crtmedia_capture_conversion_test
+    ${CRT_STARTUP_OBJECTS}
+    tests/capture_conversion_test.c
+  )
+  target_link_libraries(crtmedia_capture_conversion_test PRIVATE
+    crt_build_flags c crtmedia)
+  target_include_directories(crtmedia_capture_conversion_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include" "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  target_link_libraries(crtmedia_capture_conversion_test PRIVATE
+    crt_compiler_rt_builtins)
+  target_link_options(crtmedia_capture_conversion_test PRIVATE
+    -nostdlib -nostartfiles -nodefaultlibs -Wl,-e,_start -Wl,--gc-sections)
+  crt_link_startup_end_objects(crtmedia_capture_conversion_test)
+  add_dependencies(crtmedia_capture_conversion_test c crt1 crtmedia)
+  add_test(NAME crtmedia_capture_conversion_test_runs
+    COMMAND crtmedia_capture_conversion_test)
+  set_tests_properties(crtmedia_capture_conversion_test_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    PASS_REGULAR_EXPRESSION "crtmedia_capture_conversion_test: ok formats=3")
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS
+    crtmedia_capture_conversion_test_runs)
+endif()
+
+# Encode & Capture Tranche 1: deterministic software encode -> MP4 mux ->
+# extractor/decode-back acceptance. It generates its own output under the
+# build tree and removes it on success, so no host camera/GPU is required.
+if(CRTMEDIA_ENABLE_FFMPEG)
+  add_executable(crtmedia_encode_mux_test
+    ${CRT_STARTUP_OBJECTS}
+    tests/encode_mux_test.c
+  )
+  target_link_libraries(crtmedia_encode_mux_test PRIVATE crt_build_flags crtmedia)
+  target_include_directories(crtmedia_encode_mux_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include"
+  )
+  target_compile_definitions(crtmedia_encode_mux_test PRIVATE
+    CRTMEDIA_TEST_ENCODE_OUTPUT_PATH="${CMAKE_CURRENT_BINARY_DIR}/crtmedia_encode_mux_test.mp4"
+  )
+  target_link_libraries(crtmedia_encode_mux_test PRIVATE crt_compiler_rt_builtins)
+  target_link_options(crtmedia_encode_mux_test PRIVATE
+    -nostdlib
+    -nostartfiles
+    -nodefaultlibs
+  )
+  if(CRT_TARGET_OS STREQUAL "macos")
+    target_link_options(crtmedia_encode_mux_test PRIVATE -Wl,-e,_start -Wl,-dead_strip)
+    target_link_libraries(crtmedia_encode_mux_test PRIVATE c m dl cxx)
+    target_link_libraries(crtmedia_encode_mux_test PRIVATE System)
+  elseif(CRT_TARGET_OS STREQUAL "linux")
+    target_link_options(crtmedia_encode_mux_test PRIVATE -Wl,-e,_start -Wl,--gc-sections)
+  elseif(CRT_TARGET_OS STREQUAL "windows")
+    target_link_options(crtmedia_encode_mux_test PRIVATE
+      -Wl,/entry:mainCRTStartup -Wl,/subsystem:console -Wl,/OPT:REF)
+    target_link_libraries(crtmedia_encode_mux_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  endif()
+  crt_link_startup_end_objects(crtmedia_encode_mux_test)
+  add_dependencies(crtmedia_encode_mux_test c crt1 crtmedia)
+  add_test(NAME crtmedia_encode_mux_test_runs COMMAND crtmedia_encode_mux_test)
+  set_tests_properties(crtmedia_encode_mux_test_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    PASS_REGULAR_EXPRESSION "crtmedia_encode_mux_test: ok frames=100"
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_encode_mux_test_runs)
+endif()
+
+# Linux physical-device Tranche 2 gate. A machine without a compatible
+# camera is explicitly classified as skipped; when present, the test runs the
+# complete capture -> encode -> MP4 -> decode-back path.
+if(CRTMEDIA_ENABLE_FFMPEG AND CRT_TARGET_OS STREQUAL "linux")
+  add_executable(crtmedia_capture_v4l2_test
+    ${CRT_STARTUP_OBJECTS}
+    tests/capture_v4l2_test.c
+  )
+  target_link_libraries(crtmedia_capture_v4l2_test PRIVATE
+    crt_build_flags crtmedia)
+  target_include_directories(crtmedia_capture_v4l2_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include")
+  target_compile_definitions(crtmedia_capture_v4l2_test PRIVATE
+    CRTMEDIA_TEST_CAPTURE_OUTPUT_PATH="${CMAKE_CURRENT_BINARY_DIR}/crtmedia_capture_v4l2_test.mp4")
+  target_link_libraries(crtmedia_capture_v4l2_test PRIVATE
+    crt_compiler_rt_builtins)
+  target_link_options(crtmedia_capture_v4l2_test PRIVATE
+    -nostdlib -nostartfiles -nodefaultlibs -Wl,-e,_start -Wl,--gc-sections)
+  crt_link_startup_end_objects(crtmedia_capture_v4l2_test)
+  add_dependencies(crtmedia_capture_v4l2_test c crt1 crtmedia)
+  add_test(NAME crtmedia_capture_v4l2_test_runs COMMAND crtmedia_capture_v4l2_test)
+  set_tests_properties(crtmedia_capture_v4l2_test_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    PASS_REGULAR_EXPRESSION "crtmedia_capture_v4l2_test: (ok|skip)"
+    SKIP_REGULAR_EXPRESSION "crtmedia_capture_v4l2_test: skip"
+    TIMEOUT 120)
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS
+    crtmedia_capture_v4l2_test_runs)
 endif()
 
 # crtmedia_demux_video_test / crtmedia_demux_mp3_test / crtmedia_demux_

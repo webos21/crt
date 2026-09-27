@@ -13,14 +13,16 @@ those headers and not a direct exposure of FFmpeg's own API.
 Three layers, in order of how firmly each is decided:
 
 1. **Core (decided now): `crtmedia_format`/`crtmedia_extractor`/
-   `crtmedia_codec`.** An opaque, async, buffer-queue-based C API,
+   `crtmedia_codec`/`crtmedia_muxer`.** An opaque, async,
+   buffer-queue-based C API,
    conceptually shaped like `AMediaFormat`/`AMediaExtractor`/`AMediaCodec`
    -- key-value format description instead of one fixed struct per
    container/codec, and dequeue/queue/release buffer ownership instead of
    a single blocking "give me the next frame" call. FFmpeg (`AVFormatContext`/
    `AVCodecContext`/`AVPacket`/`AVFrame`) stays entirely behind this layer,
-   never named in a public header. This is the layer everything else in
-   this document builds on.
+   never named in a public header. Decode and encode share the codec queue
+   model; muxing has an independent add-track/start/write/finish lifecycle.
+   This is the layer everything else in this document builds on.
 2. **Convenience (decided now): keep `crtmedia_demuxer_*`.** The existing
    `include/crtmedia/demux.h` (`crtmedia_demuxer_open`/`_read`/...) --
    already implemented, already verified end-to-end on Linux/macOS/Windows
@@ -28,13 +30,19 @@ Three layers, in order of how firmly each is decided:
    callers that just want "decode this file into frames," reimplemented on
    top of the core once the core exists rather than thrown away. Two real,
    working shapes for two real use cases, not competing designs.
-3. **Future, explicitly deferred:** a WebCodecs-shaped `libcrtjs` binding
+3. **Capture (active, separately gated):** real camera/screen sources produce
+   the existing CPU/GPU frame contracts with microsecond timestamps. The
+   public `crtmedia_capture_*` ABI now has its first real V4L2 backend. It
+   returns owned YUV420P copies and requeues native mmap buffers before return,
+   fixing lifetime and back-pressure behavior without leaking host types; see
+   `crtmedia_encode_capture_acceptance.md`.
+4. **Future, explicitly deferred:** a WebCodecs-shaped `libcrtjs` binding
    (JS-facing, wraps the core -- `AMediaCodec`'s own async queue model
    already maps closely onto WebCodecs' `VideoDecoder`/`AudioDecoder`/
    `EncodedChunk` vocabulary, so this is expected to be a thin binding, not
    a redesign) and an optional WebRTC-shaped realtime track/source/sink
-   layer (microphone/camera/realtime capture -- unrelated to file demux/
-   decode, not a prerequisite for it). Neither is designed yet; recorded
+   layer (realtime track/source/sink composition above capture, unrelated to
+   file demux/decode). Neither is designed yet; recorded
    here only to fix their place in the layering.
 
 **Exact AOSP NDK Media source compatibility is explicitly a later, optional

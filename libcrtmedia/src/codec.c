@@ -38,12 +38,17 @@
 struct crtmedia_codec {
   AVCodecContext* codec_ctx;
   int is_video;
+  int is_encoder;
   AVPacket* packet;
   AVFrame* decode_frame;
   SwrContext* swr_ctx; /* audio only */
   crtmedia_sample_format out_sample_format; /* audio only */
   int eof_signaled;
   int eof_drained;
+  int64_t frame_duration_us;
+  int64_t encode_pts_queue[256];
+  uint32_t encode_pts_head;
+  uint32_t encode_pts_count;
   /* Hardware decode, phase A (2026-09-08, TODO.md's "hardware decode,
    * phase A" step) -- video only, and only ever set when the format
    * passed to crtmedia_codec_create_decoder() carried CRTMEDIA_FORMAT_
@@ -85,6 +90,9 @@ static enum AVCodecID codec_id_for_mime(const char* mime) {
   if (strcmp(mime, "video/avc") == 0) {
     return AV_CODEC_ID_H264;
   }
+  if (strcmp(mime, "video/mp4v-es") == 0) {
+    return AV_CODEC_ID_MPEG4;
+  }
   if (strcmp(mime, "audio/mp4a-latm") == 0) {
     return AV_CODEC_ID_AAC;
   }
@@ -95,6 +103,21 @@ static enum AVCodecID codec_id_for_mime(const char* mime) {
     return AV_CODEC_ID_PCM_S16LE;
   }
   return AV_CODEC_ID_NONE;
+}
+
+static void release_encoded_sample(crtmedia_encoded_sample* sample, void* release_context) {
+  (void)sample;
+  free(release_context);
+}
+
+void crtmedia_encoded_sample_release(crtmedia_encoded_sample* sample) {
+  if (sample == NULL) {
+    return;
+  }
+  if (sample->release != NULL) {
+    sample->release(sample, sample->release_context);
+  }
+  memset(sample, 0, sizeof(*sample));
 }
 
 /* Real per-host hwaccel type (2026-09-08, "hardware decode, phase A") --
@@ -363,6 +386,78 @@ crtmedia_result crtmedia_codec_create_decoder(const crtmedia_format* format, crt
   return CRTMEDIA_OK;
 }
 
+crtmedia_result crtmedia_codec_create_encoder(const crtmedia_format* format, crtmedia_codec** out_codec) {
+  if (format == NULL || out_codec == NULL) {
+    return CRTMEDIA_ERROR_INVALID_ARGUMENT;
+  }
+  *out_codec = NULL;
+
+  const char* mime = NULL;
+  int32_t width = 0;
+  int32_t height = 0;
+  int32_t pixel_format = 0;
+  int32_t frame_rate = 0;
+  int32_t bit_rate = 0;
+  if (crtmedia_format_get_string(format, CRTMEDIA_FORMAT_KEY_MIME, &mime) != CRTMEDIA_OK ||
+      strcmp(mime, "video/mp4v-es") != 0 ||
+      crtmedia_format_get_int32(format, CRTMEDIA_FORMAT_KEY_WIDTH, &width) != CRTMEDIA_OK ||
+      crtmedia_format_get_int32(format, CRTMEDIA_FORMAT_KEY_HEIGHT, &height) != CRTMEDIA_OK ||
+      crtmedia_format_get_int32(format, CRTMEDIA_FORMAT_KEY_PIXEL_FORMAT, &pixel_format) != CRTMEDIA_OK ||
+      crtmedia_format_get_int32(format, CRTMEDIA_FORMAT_KEY_FRAME_RATE, &frame_rate) != CRTMEDIA_OK ||
+      width <= 0 || height <= 0 || (width & 1) != 0 || (height & 1) != 0 || frame_rate <= 0 ||
+      pixel_format != CRTMEDIA_PIXEL_FORMAT_YUV420P) {
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+  if (crtmedia_format_get_int32(format, CRTMEDIA_FORMAT_KEY_BIT_RATE, &bit_rate) != CRTMEDIA_OK ||
+      bit_rate <= 0) {
+    bit_rate = 1000000;
+  }
+
+  const AVCodec* av_codec = avcodec_find_encoder(AV_CODEC_ID_MPEG4);
+  if (av_codec == NULL) {
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+  crtmedia_codec* codec = (crtmedia_codec*)calloc(1, sizeof(*codec));
+  if (codec == NULL) {
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+  codec->is_video = 1;
+  codec->is_encoder = 1;
+  codec->hw_pix_fmt = AV_PIX_FMT_NONE;
+  codec->frame_duration_us = 1000000 / frame_rate;
+  codec->codec_ctx = avcodec_alloc_context3(av_codec);
+  codec->packet = av_packet_alloc();
+  codec->decode_frame = av_frame_alloc();
+  if (codec->codec_ctx == NULL || codec->packet == NULL || codec->decode_frame == NULL) {
+    crtmedia_codec_release(codec);
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+
+  codec->codec_ctx->width = width;
+  codec->codec_ctx->height = height;
+  codec->codec_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
+  codec->codec_ctx->time_base = (AVRational){1, 30000};
+  codec->codec_ctx->framerate = (AVRational){frame_rate, 1};
+  codec->codec_ctx->bit_rate = bit_rate;
+  codec->codec_ctx->gop_size = frame_rate;
+  codec->codec_ctx->max_b_frames = 0;
+  codec->codec_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+  if (avcodec_open2(codec->codec_ctx, av_codec, NULL) < 0) {
+    crtmedia_codec_release(codec);
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+
+  codec->decode_frame->format = AV_PIX_FMT_YUV420P;
+  codec->decode_frame->width = width;
+  codec->decode_frame->height = height;
+  if (av_frame_get_buffer(codec->decode_frame, 32) < 0) {
+    crtmedia_codec_release(codec);
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+  *out_codec = codec;
+  return CRTMEDIA_OK;
+}
+
 void crtmedia_codec_release(crtmedia_codec* codec) {
   if (codec == NULL) {
     return;
@@ -387,7 +482,7 @@ void crtmedia_codec_release(crtmedia_codec* codec) {
 
 crtmedia_result crtmedia_codec_queue_input(
     crtmedia_codec* codec, const void* data, uint32_t size, int64_t pts_us, uint32_t flags) {
-  if (codec == NULL || (data == NULL && size > 0)) {
+  if (codec == NULL || codec->is_encoder || (data == NULL && size > 0)) {
     return CRTMEDIA_ERROR_INVALID_ARGUMENT;
   }
 
@@ -413,6 +508,144 @@ crtmedia_result crtmedia_codec_queue_input(
     avcodec_send_packet(codec->codec_ctx, NULL);
     codec->eof_signaled = 1;
   }
+  return CRTMEDIA_OK;
+}
+
+crtmedia_result crtmedia_codec_queue_frame(
+    crtmedia_codec* codec, const crtmedia_frame* frame, uint32_t flags) {
+  if (codec == NULL || !codec->is_encoder) {
+    return CRTMEDIA_ERROR_INVALID_ARGUMENT;
+  }
+  if (frame == NULL) {
+    if ((flags & CRTMEDIA_CODEC_BUFFER_FLAG_END_OF_STREAM) == 0) {
+      return CRTMEDIA_ERROR_INVALID_ARGUMENT;
+    }
+    if (!codec->eof_signaled) {
+      int ret = avcodec_send_frame(codec->codec_ctx, NULL);
+      if (ret == AVERROR(EAGAIN)) {
+        return CRTMEDIA_WOULD_BLOCK;
+      }
+      if (ret < 0) {
+        return CRTMEDIA_ERROR_UNSUPPORTED;
+      }
+      codec->eof_signaled = 1;
+    }
+    return CRTMEDIA_OK;
+  }
+  if ((flags & CRTMEDIA_CODEC_BUFFER_FLAG_END_OF_STREAM) != 0 || codec->eof_signaled ||
+      frame->format != CRTMEDIA_PIXEL_FORMAT_YUV420P ||
+      frame->width != (uint32_t)codec->codec_ctx->width ||
+      frame->height != (uint32_t)codec->codec_ctx->height || frame->plane_count < 3 ||
+      frame->timestamp_us == CRTMEDIA_FRAME_TIMESTAMP_NONE ||
+      codec->encode_pts_count == 256) {
+    return codec->encode_pts_count == 256 ? CRTMEDIA_WOULD_BLOCK : CRTMEDIA_ERROR_INVALID_ARGUMENT;
+  }
+  if (av_frame_make_writable(codec->decode_frame) < 0) {
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+  for (uint32_t plane = 0; plane < 3; ++plane) {
+    uint32_t row_bytes = plane == 0 ? frame->width : (frame->width + 1u) / 2u;
+    uint32_t rows = plane == 0 ? frame->height : (frame->height + 1u) / 2u;
+    if (frame->planes[plane].data == NULL || frame->planes[plane].stride < row_bytes ||
+        frame->planes[plane].width < row_bytes || frame->planes[plane].height < rows) {
+      return CRTMEDIA_ERROR_INVALID_ARGUMENT;
+    }
+    for (uint32_t row = 0; row < rows; ++row) {
+      memcpy(codec->decode_frame->data[plane] + row * codec->decode_frame->linesize[plane],
+             (const uint8_t*)frame->planes[plane].data + row * frame->planes[plane].stride,
+             row_bytes);
+    }
+  }
+  codec->decode_frame->pts = av_rescale_q(
+      frame->timestamp_us, AV_TIME_BASE_Q, codec->codec_ctx->time_base);
+  int ret = avcodec_send_frame(codec->codec_ctx, codec->decode_frame);
+  if (ret == AVERROR(EAGAIN)) {
+    return CRTMEDIA_WOULD_BLOCK;
+  }
+  if (ret < 0) {
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+  uint32_t tail = (codec->encode_pts_head + codec->encode_pts_count) % 256;
+  codec->encode_pts_queue[tail] = frame->timestamp_us;
+  ++codec->encode_pts_count;
+  return CRTMEDIA_OK;
+}
+
+crtmedia_result crtmedia_codec_dequeue_encoded_output(
+    crtmedia_codec* codec, crtmedia_encoded_sample* out_sample, int* out_eof) {
+  if (codec == NULL || !codec->is_encoder || out_sample == NULL || out_eof == NULL) {
+    return CRTMEDIA_ERROR_INVALID_ARGUMENT;
+  }
+  *out_eof = 0;
+  if (codec->eof_drained) {
+    *out_eof = 1;
+    return CRTMEDIA_OK;
+  }
+  av_packet_unref(codec->packet);
+  int ret = avcodec_receive_packet(codec->codec_ctx, codec->packet);
+  if (ret == AVERROR(EAGAIN)) {
+    return CRTMEDIA_WOULD_BLOCK;
+  }
+  if (ret == AVERROR_EOF) {
+    codec->eof_drained = 1;
+    *out_eof = 1;
+    return CRTMEDIA_OK;
+  }
+  if (ret < 0 || codec->encode_pts_count == 0) {
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+
+  void* data = malloc(codec->packet->size > 0 ? (size_t)codec->packet->size : 1u);
+  if (data == NULL) {
+    av_packet_unref(codec->packet);
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+  memcpy(data, codec->packet->data, (size_t)codec->packet->size);
+  int64_t pts_us = codec->encode_pts_queue[codec->encode_pts_head];
+  codec->encode_pts_head = (codec->encode_pts_head + 1) % 256;
+  --codec->encode_pts_count;
+
+  memset(out_sample, 0, sizeof(*out_sample));
+  out_sample->data = data;
+  out_sample->size = (uint32_t)codec->packet->size;
+  out_sample->pts_us = pts_us;
+  out_sample->dts_us = pts_us;
+  out_sample->duration_us = codec->frame_duration_us;
+  out_sample->flags = (codec->packet->flags & AV_PKT_FLAG_KEY) != 0
+                          ? CRTMEDIA_ENCODED_SAMPLE_FLAG_KEY_FRAME
+                          : CRTMEDIA_ENCODED_SAMPLE_FLAG_NONE;
+  out_sample->release = release_encoded_sample;
+  out_sample->release_context = data;
+  av_packet_unref(codec->packet);
+  return CRTMEDIA_OK;
+}
+
+crtmedia_result crtmedia_codec_get_output_format(
+    const crtmedia_codec* codec, crtmedia_format** out_format) {
+  if (codec == NULL || !codec->is_encoder || out_format == NULL) {
+    return CRTMEDIA_ERROR_INVALID_ARGUMENT;
+  }
+  *out_format = NULL;
+  crtmedia_format* format = NULL;
+  if (crtmedia_format_create(&format) != CRTMEDIA_OK) {
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+  if (crtmedia_format_set_string(format, CRTMEDIA_FORMAT_KEY_MIME, "video/mp4v-es") != CRTMEDIA_OK ||
+      crtmedia_format_set_int32(format, CRTMEDIA_FORMAT_KEY_WIDTH, codec->codec_ctx->width) != CRTMEDIA_OK ||
+      crtmedia_format_set_int32(format, CRTMEDIA_FORMAT_KEY_HEIGHT, codec->codec_ctx->height) != CRTMEDIA_OK ||
+      crtmedia_format_set_int32(format, CRTMEDIA_FORMAT_KEY_PIXEL_FORMAT, CRTMEDIA_PIXEL_FORMAT_YUV420P) != CRTMEDIA_OK ||
+      crtmedia_format_set_int32(format, CRTMEDIA_FORMAT_KEY_FRAME_RATE, codec->codec_ctx->framerate.num) != CRTMEDIA_OK ||
+      crtmedia_format_set_int32(format, CRTMEDIA_FORMAT_KEY_BIT_RATE, (int32_t)codec->codec_ctx->bit_rate) != CRTMEDIA_OK) {
+    crtmedia_format_release(format);
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+  if (codec->codec_ctx->extradata != NULL && codec->codec_ctx->extradata_size > 0 &&
+      crtmedia_format_set_buffer(format, CRTMEDIA_FORMAT_KEY_CSD, codec->codec_ctx->extradata,
+                                 (size_t)codec->codec_ctx->extradata_size) != CRTMEDIA_OK) {
+    crtmedia_format_release(format);
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+  *out_format = format;
   return CRTMEDIA_OK;
 }
 
@@ -698,7 +931,7 @@ static crtmedia_result fill_audio_buffer(crtmedia_codec* codec, AVFrame* avframe
 
 crtmedia_result crtmedia_codec_dequeue_output(
     crtmedia_codec* codec, crtmedia_frame* out_video_frame, crtmedia_audio_buffer* out_audio_buffer, int* out_eof) {
-  if (codec == NULL || out_eof == NULL) {
+  if (codec == NULL || codec->is_encoder || out_eof == NULL) {
     return CRTMEDIA_ERROR_INVALID_ARGUMENT;
   }
   *out_eof = 0;
@@ -785,7 +1018,7 @@ crtmedia_result crtmedia_codec_dequeue_output(
 crtmedia_result crtmedia_codec_dequeue_gpu_frame(
     crtmedia_codec* codec, crtmedia_gpu_frame* out_video_frame, crtmedia_audio_buffer* out_audio_buffer,
     int* out_eof) {
-  if (codec == NULL || out_eof == NULL) {
+  if (codec == NULL || codec->is_encoder || out_eof == NULL) {
     return CRTMEDIA_ERROR_INVALID_ARGUMENT;
   }
   *out_eof = 0;
@@ -910,6 +1143,8 @@ crtmedia_result crtmedia_codec_flush(crtmedia_codec* codec) {
   avcodec_flush_buffers(codec->codec_ctx);
   codec->eof_signaled = 0;
   codec->eof_drained = 0;
+  codec->encode_pts_head = 0;
+  codec->encode_pts_count = 0;
   /* Deliberately does not touch hardware_accelerated or any of the private
    * hw_* diagnostic fields above (Tranche 2): crtmedia_codec_is_hardware_
    * accelerated() answers whether this decoder instance has ever actually
@@ -920,7 +1155,7 @@ crtmedia_result crtmedia_codec_flush(crtmedia_codec* codec) {
 }
 
 crtmedia_result crtmedia_codec_is_hardware_accelerated(const crtmedia_codec* codec, int* out_is_hardware) {
-  if (codec == NULL || out_is_hardware == NULL) {
+  if (codec == NULL || codec->is_encoder || out_is_hardware == NULL) {
     return CRTMEDIA_ERROR_INVALID_ARGUMENT;
   }
   *out_is_hardware = codec->hardware_accelerated;

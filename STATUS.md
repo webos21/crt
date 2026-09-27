@@ -135,8 +135,8 @@ The software/CPU graphics baseline is complete on all three hosts:
   native live execution was retired from the acceptance matrix (Apple
   Silicon/macOS 27+ only) rather than left as an unverified gap.
 
-Decoder-texture zero-copy, full font shaping/fallback/ICU, a full Wayland
-compositor, and a Chromium Ozone backend are not completion claims.
+Full font shaping/fallback/ICU, a full Wayland compositor, and a Chromium
+Ozone backend are not completion claims.
 
 ### libcrtmedia
 
@@ -151,15 +151,16 @@ hosts:
 - The synthetic CPU-frame-to-Skia bridge has passed on Linux, macOS, and
   Windows.
 - The opt-in FFmpeg 8.1.2 build is LGPL-only and intentionally narrow: local
-  file input, MOV/MP4/M4A plus WAV/MP3 demux support needed by the enabled
-  paths, H.264 video, and AAC/MP3/PCM audio software decoders. FFmpeg types do
-  not appear in public `crtmedia` headers.
+  file input, MOV/MP4/M4A plus WAV/MP3 demux support, H.264 and MPEG-4 video
+  decode, AAC/MP3/PCM audio decode, the built-in MPEG-4 software video encoder,
+  and MP4 muxing. FFmpeg types do not appear in public `crtmedia` headers.
 - `crtmedia_demux_test` performs a real WAV/PCM demux/decode round trip and has
   passed on all three hosts. FFmpeg was re-verified on macOS after the
   `pthread_create()` fix with pthread support enabled.
 - The public format/extractor/codec split is implemented. The extractor owns
   demux-only track/sample access, while asynchronous codec queues own software
-  decode and explicit output-buffer release.
+  decode/encode and explicit output-buffer release. `crtmedia_muxer` owns the
+  independent MP4 track/start/write/finish lifecycle.
 - `crtmedia_player` supplies the software playback state machine, clocks,
   seek/reset behavior, bounded render planning, and CPU-frame delivery.
 - Host audio sinks are implemented and exercised through WASAPI on Windows,
@@ -183,10 +184,29 @@ hosts:
   and linking the real host `libva.so`/`libva-drm.so`); see
   `docs/crtmedia_hardware_decode_acceptance.md` and `HISTORY.md`'s 2026-09-22
   entry. No platform-native decoded surface is part of the public ABI.
+- Zero-copy decoded-texture interop is complete on all three hosts. macOS/
+  VideoToolbox -> Metal and Linux/VA-API dma-buf -> Vulkan pass direct
+  zero-copy. Windows/D3D11VA -> D3D12 passes the documented no-CPU-readback
+  GPU-copy fallback. Common lifecycle stress, installed/package acceptance,
+  pixel/resize checks, and exact per-host interop reporting are closed; see
+  `docs/crtmedia_zero_copy_decode_acceptance.md` and `HISTORY.md` 2026-09-27.
+- Encode & Capture Tranches 0-1 are complete on physical Linux/x86_64. The
+  frozen microsecond timing/ownership contract and the resource-free
+  `crtmedia_encode_mux_test` cover 100 deterministic YUV420P frames through
+  software MPEG-4 encode -> MP4 mux -> reopen/decode-back, with exact packet/
+  frame count, per-frame PTS, 3,333,300 us duration, layout, and bounded pixel
+  checks. Tranche 2 now has a host-neutral capture ABI and a private Linux
+  V4L2 mmap backend: it negotiates YUV420/NV12/YUYV, returns owned YUV420P
+  frames after immediately requeueing native buffers, and normalizes capture
+  PTS to a monotonic microsecond timeline. The byte-exact conversion gate
+  passes; the 30-frame capture -> software encode -> MP4 -> decode-back gate
+  is registered but skips because this host has no `/dev/video*`. Physical
+  camera evidence remains the active gate; see
+  `docs/crtmedia_encode_capture_acceptance.md`.
 
 This evidence does not yet prove production-complete seeking/track selection,
-network streaming, encoding/capture, decoder-texture zero-copy, or GPU-frame
-handoff.
+network streaming, real-device capture, hardware encode, or long-running
+encode/capture timing under dropped/discontinuous frames.
 
 ### libcrtjs
 
@@ -242,11 +262,10 @@ target.
   release notes document that. Not yet done: a clean-machine test of the
   published archives, and re-running the hardware-decode-default packaged
   demo on macOS and Linux for the *next* release.
-- Zero-copy decoded-texture interop (hardware decoder surface -> Skia, no CPU
-  copy) is the next roadmap tranche, promoted into `TODO.md`'s `In Progress`
-  as a stub (its own phased plan is not written yet); it then proceeds
-  alongside the QuickJS core on top of the completed GPU
-  rendering/presentation contract.
+- Zero-copy decoded-texture interop is closed on all three hosts. Encode &
+  Capture is now `TODO.md`'s active upper-runtime tranche; its common contract
+  and Linux synthetic software encode/mux/decode-back gate are complete. The
+  V4L2 backend is implemented and awaits its physical-camera acceptance run.
 - JavaScript media/gfx binding follows the stable native contracts, using a
   WebCodecs-like asynchronous shape; WebRTC-style realtime services, V8, and a
   Chromium/Ozone probe remain later layers.
@@ -347,7 +366,8 @@ statuses, and exceptions are maintained in:
   across every compositor implementation.
 - Image codecs, shaping, fallback fonts, ICU, and platform font discovery are
   not yet completion claims.
-- GPU decode-texture import and dmabuf-style zero-copy remain future work.
+- GPU decode-texture import is accepted cross-host, including Linux dma-buf
+  import and the documented Windows GPU-copy fallback.
   Linux packaged Skia live presentation passes on the Linux/aarch64
   acceptance host, which is a VM whose Vulkan device is virtio-gpu/lavapipe
   (a paravirtualized or software device, not a physical GPU); a physical-GPU
@@ -373,20 +393,21 @@ statuses, and exceptions are maintained in:
   `virtio_gpu` driver advertises no H.264 decode entrypoint, and on WSL2 (Mesa
   D3D12 VA-API on Intel UHD 630, Windows driver 31.0.101.2140) a real decode
   hangs in a self-deadlock inside Intel's WSL video driver, not in CRT, FFmpeg
-  or Mesa. Decoder surfaces shared with the graphics path, device affinity,
-  fences, and zero-copy Skia import are not implemented on any host yet.
-- No network protocol layer, mux/encode, capture, adaptive streaming, or
-  realtime/WebRTC service exists.
+  or Mesa. Decoder-surface ownership, affinity, synchronization, and Skia
+  import are now covered by the cross-host zero-copy acceptance matrix.
+- Software video encode and MP4 mux/decode-back exist on Linux/x86_64. The
+  real V4L2 implementation exists but still needs a physical-camera pass;
+  hardware encode, macOS/Windows encode/capture acceptance, the
+  network protocol layer, adaptive streaming, and realtime/WebRTC remain open.
 - QuickJS has not been imported. Event-loop/timer/module/native-binding work
   and JavaScript media/gfx APIs remain open.
 
 ## Next Priorities
 
-1. Define and implement zero-copy decoded-texture interop: D3D11VA -> D3D12,
-   VideoToolbox -> Metal, VA-API -> Vulkan, including ownership, device
-   affinity, synchronization, and CPU-download fallback (`TODO.md`'s
-   "Zero-copy decoded textures", promoted into In Progress; currently a
-   stub, no phased plan written yet).
+1. Run the Linux/x86_64 V4L2 capture gate on a physical camera and close its
+   frame/timestamp/ownership evidence, then add VA-API H.264 encode and compare the actually-
+   used hardware path with the accepted software fallback (`TODO.md`'s
+   "Encode and capture").
 2. Complete next-release hardening: re-verify the hardware-decode-by-default
    packaged `crtmedia_player_demo`/`examples/media-player` on macOS and
    Linux (already done and verified on Windows), and build the next release
@@ -397,8 +418,9 @@ statuses, and exceptions are maintained in:
    (only a Windows clip exists so far), a soft launch to targeted technical
    communities, feedback-driven README/FAQ updates, and the main technical
    announcement (`TODO.md`'s "Public Preview / Promotion Preparation").
-4. Add capture/encode, then transport, buffering, reconnect, and streaming
-   services after the native playback and zero-copy contracts are stable.
+4. Extend the accepted encode/mux/decode-back gate to macOS/arm64
+   (AVFoundation/VideoToolbox) and Windows/x64 (Media Foundation), then close
+   cross-host lifecycle, stage, and packaged-SDK acceptance.
 5. Use WebRTC as a consumer milestone, then bring up QuickJS core/event-loop/
    timers/modules and expose stable media/gfx services with WebCodecs-like
    queue semantics.

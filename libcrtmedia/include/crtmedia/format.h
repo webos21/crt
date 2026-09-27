@@ -35,6 +35,9 @@ typedef struct crtmedia_format crtmedia_format;
 #define CRTMEDIA_FORMAT_KEY_MIME "mime" /* string, e.g. "video/avc", "audio/mp4a-latm" */
 #define CRTMEDIA_FORMAT_KEY_WIDTH "width" /* int32, video only */
 #define CRTMEDIA_FORMAT_KEY_HEIGHT "height" /* int32, video only */
+#define CRTMEDIA_FORMAT_KEY_PIXEL_FORMAT "pixel-format" /* int32, crtmedia_pixel_format */
+#define CRTMEDIA_FORMAT_KEY_FRAME_RATE "frame-rate" /* int32, video frames/second */
+#define CRTMEDIA_FORMAT_KEY_BIT_RATE "bitrate" /* int32, encoded bits/second */
 #define CRTMEDIA_FORMAT_KEY_SAMPLE_RATE "sample-rate" /* int32, audio only */
 #define CRTMEDIA_FORMAT_KEY_CHANNEL_COUNT "channel-count" /* int32, audio only */
 #define CRTMEDIA_FORMAT_KEY_DURATION_US "duration-us" /* int64, either */
