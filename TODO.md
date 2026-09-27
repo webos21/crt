@@ -79,8 +79,16 @@ Keep completed evidence in `HISTORY.md`; this list tracks only tranche state.
 * [ ] **3. Linux/x86_64 VA-API H.264 encode.** Accept captured or existing
   GPU frames, verify the actually-used hardware path, and compare it with the
   software fallback without weakening timing/ownership checks.
-* [ ] **4. macOS/arm64.** AVFoundation capture plus VideoToolbox encode on
-  real hardware, with software fallback and decode-back acceptance.
+* [ ] **4. macOS/arm64,** advanced ahead of Tranche 3 (real camera hardware
+  available now; Tranche 3's own number is unchanged, only its execution
+  order -- `docs/crtmedia_encode_capture_acceptance.md`).
+  **4A done 2026-09-27:** `src/arch/macos/capture_avfoundation.c`
+  (AVFoundation capture, driven via `objc_msgSend`, no host SDK header) feeds
+  the existing, unmodified software MPEG-4 encoder. Real result, three
+  consecutive runs on the built-in camera: `crtmedia_capture_avfoundation_
+  test: ok frames=30 ... size=640x480 fps=30`; full `ctest` 142/142.
+  **4B still open:** VideoToolbox H.264 hardware encode on the same capture
+  path, with the actually-used path reported rather than inferred.
 * [ ] **5. Windows/x64.** Media Foundation capture plus hardware encode on
   real hardware, with software fallback and decode-back acceptance.
 * [ ] **6. Cross-host closure.** Timestamp discontinuity/drop behavior,

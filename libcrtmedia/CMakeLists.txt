@@ -84,7 +84,22 @@ elseif(CRT_TARGET_OS STREQUAL "macos")
   # own real SDK headers, cross-checked against a real throwaway probe on
   # real hardware before landing here) and CRTMEDIA_MACOS_FRAMEWORKS below
   # for the real -framework link this file's own AudioQueue calls need.
-  list(APPEND CRTMEDIA_BACKEND_SOURCES src/arch/macos/audio_sink_coreaudio.c)
+  list(APPEND CRTMEDIA_BACKEND_SOURCES
+    src/arch/macos/audio_sink_coreaudio.c
+    src/arch/macos/capture_avfoundation.c
+  )
+  # -Wno-cast-function-type-mismatch (2026-09-27): capture_avfoundation.c's
+  # own objc_msgSend casts are the identical real, intentional pattern
+  # libcrtgfx/CMakeLists.txt already suppresses this same real, fairly new
+  # Clang -Wall/-Wextra diagnostic for (window_cocoa.c/gpu_metal.c, that
+  # file's own fuller comment) -- C has no other supported way to call a
+  # function through a pointer typed differently than how it is declared,
+  # which is exactly what driving objc_msgSend from plain C requires.
+  set_source_files_properties(
+    src/arch/macos/capture_avfoundation.c
+    PROPERTIES
+    COMPILE_OPTIONS "-Wno-cast-function-type-mismatch;-Wno-unknown-warning-option"
+  )
 endif()
 if(CRT_TARGET_OS STREQUAL "windows")
   # ole32.lib: the real flat-export import library for CoInitializeEx()/
@@ -165,6 +180,17 @@ if(CRT_TARGET_OS STREQUAL "macos")
   # needs CoreFoundation directly, independent of the three frameworks
   # above.
   set(CRTMEDIA_MACOS_FRAMEWORKS "-framework AudioToolbox" "-framework VideoToolbox" "-framework CoreVideo" "-framework CoreMedia" "-framework CoreFoundation")
+  # AVFoundation/Foundation/objc (2026-09-27, "Encode and capture" Tranche 4
+  # -- src/arch/macos/capture_avfoundation.c): that file drives AVCaptureSession/
+  # AVCaptureDeviceInput/AVCaptureVideoDataOutput purely through objc_msgSend
+  # (that file's own top comment), same real "a static archive member with
+  # undefined symbols only resolves once something links this framework in"
+  # reasoning as every other entry here -- AVFoundation for the capture
+  # classes themselves, Foundation for NSString/NSNumber/NSDictionary/
+  # NSAutoreleasePool, objc for the Objective-C runtime C API
+  # (objc_allocateClassPair/class_addMethod/... that file's own runtime-
+  # created delegate class needs).
+  list(APPEND CRTMEDIA_MACOS_FRAMEWORKS "-framework AVFoundation" "-framework Foundation" "objc")
 endif()
 
 set(CRTMEDIA_LINUX_VAAPI_LIBS "")
@@ -619,6 +645,35 @@ if(CRT_TARGET_OS STREQUAL "linux")
     crtmedia_capture_conversion_test_runs)
 endif()
 
+# Encode & Capture Tranche 4: the macOS native-layout (NV12/CVPixelBuffer)
+# conversion gate, mirroring the Linux conversion test just above -- always
+# runs without a camera or FFmpeg.
+if(CRT_TARGET_OS STREQUAL "macos")
+  add_executable(crtmedia_capture_avfoundation_conversion_test
+    ${CRT_STARTUP_OBJECTS}
+    tests/capture_avfoundation_conversion_test.c
+  )
+  target_link_libraries(crtmedia_capture_avfoundation_conversion_test PRIVATE
+    crt_build_flags c crtmedia)
+  target_include_directories(crtmedia_capture_avfoundation_conversion_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include" "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  target_link_libraries(crtmedia_capture_avfoundation_conversion_test PRIVATE
+    crt_compiler_rt_builtins)
+  target_link_options(crtmedia_capture_avfoundation_conversion_test PRIVATE
+    -nostdlib -nostartfiles -nodefaultlibs -Wl,-e,_start -Wl,-dead_strip)
+  target_link_libraries(crtmedia_capture_avfoundation_conversion_test PRIVATE c m dl cxx)
+  target_link_libraries(crtmedia_capture_avfoundation_conversion_test PRIVATE System)
+  crt_link_startup_end_objects(crtmedia_capture_avfoundation_conversion_test)
+  add_dependencies(crtmedia_capture_avfoundation_conversion_test c crt1 crtmedia)
+  add_test(NAME crtmedia_capture_avfoundation_conversion_test_runs
+    COMMAND crtmedia_capture_avfoundation_conversion_test)
+  set_tests_properties(crtmedia_capture_avfoundation_conversion_test_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    PASS_REGULAR_EXPRESSION "crtmedia_capture_avfoundation_conversion_test: ok")
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS
+    crtmedia_capture_avfoundation_conversion_test_runs)
+endif()
+
 # Encode & Capture Tranche 1: deterministic software encode -> MP4 mux ->
 # extractor/decode-back acceptance. It generates its own output under the
 # build tree and removes it on success, so no host camera/GPU is required.
@@ -689,6 +744,40 @@ if(CRTMEDIA_ENABLE_FFMPEG AND CRT_TARGET_OS STREQUAL "linux")
     TIMEOUT 120)
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS
     crtmedia_capture_v4l2_test_runs)
+endif()
+
+# macOS physical/environment-gated Tranche 4 gate. A host with no camera, or
+# one where this exact process has not been granted real camera access
+# (src/arch/macos/capture_avfoundation.c's own top comment), is explicitly
+# classified as skipped; when both are available, the test runs the complete
+# capture -> encode -> MP4 -> decode-back path, mirroring the Linux gate above.
+if(CRTMEDIA_ENABLE_FFMPEG AND CRT_TARGET_OS STREQUAL "macos")
+  add_executable(crtmedia_capture_avfoundation_test
+    ${CRT_STARTUP_OBJECTS}
+    tests/capture_avfoundation_test.c
+  )
+  target_link_libraries(crtmedia_capture_avfoundation_test PRIVATE
+    crt_build_flags crtmedia)
+  target_include_directories(crtmedia_capture_avfoundation_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include")
+  target_compile_definitions(crtmedia_capture_avfoundation_test PRIVATE
+    CRTMEDIA_TEST_CAPTURE_OUTPUT_PATH="${CMAKE_CURRENT_BINARY_DIR}/crtmedia_capture_avfoundation_test.mp4")
+  target_link_libraries(crtmedia_capture_avfoundation_test PRIVATE
+    crt_compiler_rt_builtins)
+  target_link_options(crtmedia_capture_avfoundation_test PRIVATE
+    -nostdlib -nostartfiles -nodefaultlibs -Wl,-e,_start -Wl,-dead_strip)
+  target_link_libraries(crtmedia_capture_avfoundation_test PRIVATE c m dl cxx)
+  target_link_libraries(crtmedia_capture_avfoundation_test PRIVATE System)
+  crt_link_startup_end_objects(crtmedia_capture_avfoundation_test)
+  add_dependencies(crtmedia_capture_avfoundation_test c crt1 crtmedia)
+  add_test(NAME crtmedia_capture_avfoundation_test_runs COMMAND crtmedia_capture_avfoundation_test)
+  set_tests_properties(crtmedia_capture_avfoundation_test_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    PASS_REGULAR_EXPRESSION "crtmedia_capture_avfoundation_test: (ok|skip)"
+    SKIP_REGULAR_EXPRESSION "crtmedia_capture_avfoundation_test: skip"
+    TIMEOUT 120)
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS
+    crtmedia_capture_avfoundation_test_runs)
 endif()
 
 # crtmedia_demux_video_test / crtmedia_demux_mp3_test / crtmedia_demux_

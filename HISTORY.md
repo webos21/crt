@@ -10,6 +10,89 @@ substantive update.
 
 ## 2026-09-27
 
+- **Encode & Capture Tranche 4A: real AVFoundation camera capture on macOS,
+  feeding the existing software MPEG-4 encoder end to end.** Advanced ahead
+  of Tranche 3 (Linux VA-API encode, deferred -- no camera on that acceptance
+  host right now) rather than renumbered, matching Tranche 2's own
+  "implementation complete, physical gate pending" split
+  (`docs/crtmedia_encode_capture_acceptance.md`).
+
+  `src/arch/macos/capture_avfoundation.c` implements `capture_internal.h`'s
+  six backend calls (mirroring the Linux V4L2 backend's own shape exactly)
+  by driving real `AVCaptureSession`/`AVCaptureDeviceInput`/
+  `AVCaptureVideoDataOutput` purely through `objc_msgSend` -- no host SDK
+  header, no Objective-C compilation mode, matching `window_cocoa.c`/
+  `gpu_metal.c`'s own established convention. The one genuinely new
+  technique this needed: a delegate object conforming to `AVCaptureVideo
+  DataOutputSampleBufferDelegate` built entirely at runtime through the
+  plain Objective-C runtime C API (`objc_allocateClassPair`/`class_
+  addMethod`/`class_addIvar`/`objc_registerClassPair`/`object_
+  setInstanceVariable`) -- no `@interface`/`@implementation` anywhere.
+  Confirmed for real via three standalone probes on this exact Mac, built
+  and run with the system's own real clang before any of it was written:
+  (1) an Objective-C probe capturing real frames and reading
+  `kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange` (NV12) plane geometry;
+  (2) the identical session/device/input/output wiring driven purely
+  through `objc_msgSend` with a runtime-allocated delegate class, receiving
+  real frames with the same geometry; (3) the same class extended with a
+  per-instance ivar, confirming state can be threaded from `crtmedia_
+  capture_backend_open()` into the delegate callback safely. Requests NV12
+  explicitly and converts directly from the locked `CVPixelBuffer`'s own
+  Y/UV plane pointers into an owned YUV420P `crtmedia_frame` -- `crtmedia_
+  avfoundation_convert_nv12_to_yuv420p()` (new private `capture_
+  avfoundation_test_control.h` seam, mirroring `crtmedia_v4l2_convert_to_
+  yuv420p()`'s own role) -- verified byte-exact against both a tightly
+  packed and a padded-stride synthetic NV12 image (a real `CVPixelBuffer`'s
+  own `bytesPerRow` is commonly larger than `width`, unlike a naive packed
+  test buffer) via the new resource-free `crtmedia_capture_avfoundation_
+  conversion_test`.
+
+  Real, honest environment finding, not a code defect: `authorizationStatus
+  ForMediaType:`/`requestAccessForMediaType:` both proved unreliable probing
+  from a bare, un-launched binary on this exact host (macOS 26.6.2) -- real
+  camera frames only ever arrived once the same binary was invoked through
+  LaunchServices (`open`) from a signed `.app` bundle declaring `NSCamera
+  UsageDescription`. A plain CTest-invoked executable is exactly the case
+  that does not get real frames, so the new device-gated `crtmedia_capture_
+  avfoundation_test` (mirroring `capture_v4l2_test.c`'s own shape exactly,
+  same encoder/muxer/decode-back drive loop) reports a precise `skip
+  reason=camera-authorization-unavailable` there instead of a false pass or
+  a hard failure. The real, camera-hardware-backed acceptance run was done
+  by wrapping the exact same, unmodified CTest binary in a throwaway signed
+  bundle and launching it with `open -W` -- a verification technique for
+  this session, not a change to how the test itself is built or invoked by
+  CTest. Three consecutive real runs on the built-in FaceTime HD camera:
+  `crtmedia_capture_avfoundation_test: ok frames=30
+  device=47B4B64B-7067-4B9C-AD2B-AE273A71F4B5 size=640x480 fps=30` -- 30 real
+  frames captured, software MPEG-4 encoded, MP4 muxed, reopened, and decoded
+  back with the exact frame count and monotonic PTS, through the completely
+  unmodified encoder/muxer/decoder pipeline.
+
+  Along the way, a real, unrelated stale-build regression surfaced and was
+  fixed: this Mac's already-installed FFmpeg predated the Encode & Capture
+  Tranche 0/1 recipe additions (`--enable-encoder=mpeg4`/`--enable-
+  muxer=mp4`), so even the pre-existing, previously-accepted `crtmedia_
+  encode_mux_test` failed at "create software encoder" until the stale
+  `port-tests/install` FFmpeg artifacts were removed and `port-rebuild-
+  ffmpeg` re-run -- confirmed via `nm`/`config_components.h` that the
+  freshly built `libavcodec.a`/`libavformat.a` genuinely contain
+  `ff_mpeg4_encoder`/`ff_mp4_muxer` and `CONFIG_MPEG4_ENCODER 1`/`CONFIG_
+  MP4_MUXER 1` (a real, previously-undocumented trap: FFmpeg 8.1.2's
+  per-component enable flags land in `config_components.h`, not `config.h`,
+  so grepping the latter alone falsely suggested the components were never
+  enabled at all) -- the same known "rebuilding a port does not by itself
+  relink its consumers" gap already documented for the hardware-decode
+  tranche, not specific to capture. `libcrtmedia/CMakeLists.txt` gained
+  `-framework AVFoundation`/`-framework Foundation`/`objc` (macOS
+  `CRTMEDIA_MACOS_FRAMEWORKS`) and the same `-Wno-cast-function-type-
+  mismatch` source-file-property suppression `libcrtgfx/CMakeLists.txt`
+  already established for this identical, intentional `objc_msgSend`
+  cast pattern.
+
+  Full `ctest`: 142/142 (`CRTGFX_ENABLE_SKIA=ON`, `CRT_USE_IMPORTED_
+  LIBCXX=ON`, `CRTMEDIA_ENABLE_FFMPEG=ON`). Not yet done: Tranche 4B
+  (VideoToolbox H.264 hardware encode on this same capture path).
+
 - **Implemented Encode & Capture Tranche 2's Linux V4L2 backend and
   resource-free gates; physical-camera acceptance remains open.** Added the
   host-neutral `crtmedia/capture.h` enumerate/open/start/dequeue/stop/release

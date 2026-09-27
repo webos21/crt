@@ -106,10 +106,88 @@ affinity permits it, mux MP4, decode back, and compare timing/ownership with
 the software fallback. Report the actually-used path rather than capability
 inference.
 
-### 4. macOS/arm64
+Deferred, not blocked: this host's own physical VA-API acceptance is out of
+order relative to macOS below for a real resource reason (no available camera
+on the Linux/x86_64 acceptance host at the time macOS's own real camera made
+it the more productive next tranche to run), not a design or implementation
+gap. No VA-API H.264 encode closure is claimed until this tranche itself runs.
 
-Add AVFoundation capture and VideoToolbox encode behind the same contracts,
-including a software fallback and MP4 decode-back acceptance on real hardware.
+### 4. macOS/arm64 — advanced ahead of Tranche 3
+
+Advanced out of the plan's own numeric execution order (2026-09-27) because
+the macOS/arm64 acceptance host has real capture hardware (a built-in FaceTime
+HD camera) immediately available, unlike the Linux host at Tranche 3 above --
+the tranche *number* is not reassigned; only the order it actually ran in
+changed, exactly mirroring Tranche 2's own "implementation complete, physical
+gate pending" split. Split internally into 4A and 4B specifically so a real
+capture-contract problem and a real hardware-encoder problem can never be
+confused with each other: 4A proves the existing, unmodified `crtmedia_
+capture` ABI and the existing software MPEG-4 encoder both work against a
+second, completely independent OS backend; only once that is green does 4B
+add a second, real encode backend on top of the same already-proven capture
+path.
+
+**4A. AVFoundation capture -> existing software MPEG-4 encoder — complete on
+2026-09-27.** `src/arch/macos/capture_avfoundation.c` implements the same six
+`capture_internal.h` backend calls the Linux V4L2 backend does, driven
+entirely through `objc_msgSend` against real `AVCaptureSession`/
+`AVCaptureDeviceInput`/`AVCaptureVideoDataOutput` (no host SDK header, no
+Objective-C compilation mode -- matching `window_cocoa.c`/`gpu_metal.c`'s own
+established convention). The one genuinely new technique this backend needed,
+confirmed for real via three standalone probes on this exact Mac before any
+of it was written: a delegate object conforming to
+`AVCaptureVideoDataOutputSampleBufferDelegate` can be built entirely at
+runtime through the plain Objective-C runtime C API
+(`objc_allocateClassPair`/`class_addMethod`/`class_addIvar`/
+`objc_registerClassPair`), including a per-instance ivar carrying this
+backend's own C state pointer into the delegate callback -- no
+`@interface`/`@implementation` needed anywhere in this project's own source.
+Requests `kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange` (NV12) explicitly
+and converts directly from the locked `CVPixelBuffer`'s own Y/UV plane
+pointers into an owned, tightly packed YUV420P `crtmedia_frame` --
+`crtmedia_avfoundation_convert_nv12_to_yuv420p()`
+(`capture_avfoundation_test_control.h`) is the private, resource-free-
+testable seam, mirroring `crtmedia_v4l2_convert_to_yuv420p()`'s own role.
+
+Real, honest environment finding, not a code defect: `authorizationStatus
+ForMediaType:` and `requestAccessForMediaType:` both proved unreliable when
+probing from a bare, un-launched binary on this exact host (macOS 26) -- real
+camera frames only ever arrived when the same binary was invoked through
+LaunchServices (`open`) from a signed `.app` bundle declaring
+`NSCameraUsageDescription`. A plain CTest-invoked executable is exactly the
+case that does not get it, so `crtmedia_capture_avfoundation_test` reports a
+precise `skip reason=camera-authorization-unavailable` there rather than a
+false pass or a hard failure -- the real, camera-hardware-backed run below
+was done by wrapping the exact same, unmodified CTest binary in a throwaway
+signed bundle and launching it with `open -W`, a verification technique, not
+a change to how the test itself is built or invoked by CTest.
+
+Real result, three consecutive runs, the built-in FaceTime HD camera:
+`crtmedia_capture_avfoundation_test: ok frames=30
+device=47B4B64B-7067-4B9C-AD2B-AE273A71F4B5 size=640x480 fps=30` -- 30 real
+captured frames, software MPEG-4 encoded, MP4 muxed, reopened, and decoded
+back with exact frame count and monotonic PTS, using the unmodified existing
+encoder/muxer/decoder pipeline. `crtmedia_capture_avfoundation_conversion_
+test` (resource-free: tightly packed and padded-stride synthetic NV12,
+plus three rejected-misuse cases) and the full `ctest` suite (142/142 with
+`CRTGFX_ENABLE_SKIA=ON`/`CRT_USE_IMPORTED_LIBCXX=ON`/
+`CRTMEDIA_ENABLE_FFMPEG=ON`) both pass. A real, unrelated stale-build
+regression surfaced and was fixed along the way: this Mac's already-installed
+FFmpeg predated the "Encode and capture" Tranche 0/1 recipe additions
+(`--enable-encoder=mpeg4`/`--enable-muxer=mp4`), so `crtmedia_codec_create_
+encoder()` failed even for the pre-existing, previously-accepted
+`crtmedia_encode_mux_test` until the stale `port-tests/install` FFmpeg
+artifacts were removed and `port-rebuild-ffmpeg` re-run -- the same known,
+already-documented "rebuilding a port does not by itself relink its
+consumers" gap `docs/release_preview.md`/`HISTORY.md` record for the
+hardware-decode tranche; not specific to capture.
+
+**4B. VideoToolbox H.264 hardware encode — not started.** Add a second,
+real hardware encoder behind `crtmedia_codec_create_encoder()`
+(`mime=video/avc`) on top of the exact same, now-proven AVFoundation capture
+path above, reporting the actually-used path rather than capability inference
+(mirroring Tranche 3's own requirement), before this tranche is considered
+closed.
 
 ### 5. Windows/x64
 
