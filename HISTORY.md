@@ -8,6 +8,35 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-27
+
+- **Closed the macOS/arm64 halves of Zero-copy decoded textures Tranches
+  5-6.** The common bridge lifecycle gate ran on real VideoToolbox/Metal and
+  reported `iterations=15 hardware_iterations=15 gpu_frames=375
+  release_callbacks=375`; the lower `crtmedia_zero_copy_test` and existing
+  hardware-decoder lifecycle gate passed in the same focused run.
+
+  A first genuinely fresh `04-gfx-media` stage replay exposed one package-
+  only link gap: `libcrtgfx_skia.dylib` called the CoreVideo
+  `CVMetalTextureCache*`/`CVPixelBuffer*` API directly but relied on a final
+  executable's unrelated media link to provide `CoreVideo.framework`. The
+  shared bridge now resolves that direct framework dependency itself, while
+  the static bridge propagates it to final consumers from the common target
+  definition used by both in-tree and isolated builds.
+
+  Regenerated source asset SHA-256
+  `d13ac8cbb8b44ee9fc7d2fec7b700ccbd36208ed37eb29e79f38b3d9b353dfdf`
+  was then built in a second new work/output tree with no reuse flag. Fresh
+  FreeType, FFmpeg 8.1.2 with VideoToolbox, and Skia m148 builds completed;
+  all 10 isolated stage tests passed; installed GPU, Skia, and media-player
+  examples rebuilt and ran; and the packaged bridge presented 20 decoded
+  frames with `interop=zero-copy gpu_frame=yes texture_backed=yes
+  cpu_readback=no`, Retina `900x520 -> 1800x1040` resize, pixel check,
+  post-resize presentation, and clean exit all passing. Final
+  `verify_dist.py` dependency/RPATH audit passed both before and after atomic
+  publication. Total fresh-stage time was 499.5 seconds. Windows remains the
+  only open host for global Tranches 5-6 closure.
+
 ## 2026-09-26
 
 - **Closed Zero-copy decoded textures Tranche 4 and the Linux/x64 halves of

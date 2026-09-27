@@ -383,6 +383,14 @@ function(crt_add_crtgfx_skia_static_target)
       # HLSL source into real shader bytecode at runtime) -- confirmed via
       # `ld.lld: error: undefined symbol: D3DCompile`.
       target_link_libraries(crtgfx_skia PUBLIC "${CRTGFX_WINDOWS_D3DCOMPILER_LIB}")
+    elseif(CRT_TARGET_OS STREQUAL "macos")
+      # skia_bridge.cc's VideoToolbox -> Metal zero-copy path calls the
+      # CVMetalTextureCache/CVPixelBuffer APIs directly. A static archive
+      # cannot resolve those calls itself, so carry CoreVideo to every final
+      # consumer instead of relying on an unrelated crtmedia link to happen
+      # to provide it. The isolated 04-gfx-media package exposed this gap
+      # when it linked the bridge as its own shared library.
+      target_link_libraries(crtgfx_skia PUBLIC "-framework CoreVideo")
     endif()
     # Zero-copy decoded textures Tranche 1 (2026-09-23): crtgfx_skia does
     # NOT link crtmedia itself, deliberately, even though crtgfx_skia_
@@ -671,7 +679,7 @@ function(crt_add_crtgfx_skia_shared_target)
       # for architecture arm64" on every _objc_storeWeak/_objc_
       # loadWeakRetained/_objc_initWeak/... reference.
       #
-      # CoreFoundation/Foundation/Metal: same real-first-link discovery,
+      # CoreFoundation/Foundation/Metal/CoreVideo: same real-first-link discovery,
       # one rebuild later -- once the objc *runtime* itself resolved,
       # libskia.a's own Metal backend and skia_bridge.cc's own SkCFObject.h
       # use (see that header's own #ifdef __APPLE__ story) still left
@@ -679,7 +687,11 @@ function(crt_add_crtgfx_skia_shared_target)
       # (CoreFoundation), _NSLog/_OBJC_CLASS_$_NSString (Foundation), and
       # _OBJC_CLASS_$_MTL* -- every Cocoa class reference GrMtlCommand
       # Buffer.cpp/GrMtlUtil.cpp/GrMtlDepthStencil.cpp/... instantiate --
-      # (Metal) undefined. Same root cause as objc just above: these are
+      # (Metal) undefined. The decoded-frame bridge additionally calls
+      # CVMetalTextureCacheCreate/CVMetalTextureCacheCreateTextureFromImage/
+      # CVMetalTextureGetTexture and CVPixelBufferGet*OfPlane directly, so
+      # CoreVideo is an equally direct dependency. Same root cause as objc
+      # just above: these are
       # crtgfx_skia_shared's own direct, first-ever real link-time need,
       # not something crtgfx_gpu_shared's own (PRIVATE, non-propagating)
       # framework list could ever have covered here.
@@ -688,6 +700,7 @@ function(crt_add_crtgfx_skia_shared_target)
         "-framework CoreFoundation"
         "-framework Foundation"
         "-framework Metal"
+        "-framework CoreVideo"
       )
     endif()
     if(CRT_TARGET_OS STREQUAL "macos" OR CRT_TARGET_OS STREQUAL "windows" OR

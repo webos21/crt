@@ -280,7 +280,7 @@ Linux reference.
 | Host | Bridge lifecycle | Fresh isolated `04-gfx-media` package | State |
 | --- | --- | --- | --- |
 | Linux/x64 | Passed 2026-09-26: 15/15 hardware cycles, 375 GPU frames, 375 release callbacks | Passed from clean commit `24c0530`: 10/10 stage tests, packaged `interop=zero-copy` 20-frame run, dependency/RPATH audit | Accepted |
-| macOS/arm64 | New common gate not replayed yet | Bridge-inclusive stage not replayed yet | Pending |
+| macOS/arm64 | Passed 2026-09-27: 15/15 hardware cycles, 375 GPU frames, 375 release callbacks | Passed from fresh source asset `d13ac8c`: 10/10 stage tests, packaged `interop=zero-copy` 20-frame run, dependency/RPATH audit | Accepted |
 | Windows/x64 | New common gate not replayed yet | Bridge-inclusive stage not replayed yet | Pending |
 
 The Linux package runner deliberately keeps the older CPU-frame

@@ -95,12 +95,10 @@ tranche below closes against).
   end to end with a real pixel check and a scripted resize, both passing,
   legacy `zero_copy=yes` (Tranche 4 normalization: `interop=zero-copy`).
   Full regression green (138/138 `ctest` with
-  `CRTGFX_ENABLE_SKIA=ON`/`CRT_USE_IMPORTED_LIBCXX=ON`). **Still open:**
-  the isolated `04-gfx-media` distribution stage has not yet built this
-  bridge (deferred to Step 6 below, mirroring "Hardware video decode"'s
-  own Step 7 precedent), and device affinity (Tranche 2's own concern) is
-  moot on this host's effectively-single-GPU topology, not yet proven
-  handled in general.
+  `CRTGFX_ENABLE_SKIA=ON`/`CRT_USE_IMPORTED_LIBCXX=ON`). The isolated bridge
+  package acceptance is now closed for this host in Tranche 6 below; device
+  affinity (Tranche 2's own concern) is moot on this host's effectively-
+  single-GPU topology, not yet proven handled in general.
 * [x] **2. Windows/x64 (D3D11VA -> D3D12).** Closed 2026-09-23, recorded
   in `HISTORY.md`. `crtmedia_codec_dequeue_gpu_frame()`'s new
   `AV_PIX_FMT_D3D11` branch (`libcrtmedia/src/codec.c`,
@@ -188,8 +186,9 @@ tranche below closes against).
   * [x] Linux/x64: 15/15 hardware cycles, 375/375 GPU-frame release
     callbacks; `crtmedia_zero_copy_test`'s hardware and software-only paths
     and the existing 15-cycle decoder lifecycle test also pass.
-  * [ ] macOS/arm64: run the new bridge lifecycle gate on real Metal/
-    VideoToolbox hardware after syncing this commit.
+  * [x] macOS/arm64: 15/15 real Metal/VideoToolbox cycles, 375/375 GPU
+    frames and release callbacks; lower zero-copy and decoder lifecycle
+    gates also pass. Recorded in `HISTORY.md`.
   * [ ] Windows/x64: run the new bridge lifecycle gate on real D3D12/
     D3D11VA hardware after syncing this commit.
 * [ ] **6. Close distribution and package acceptance** for the new bridge
@@ -200,8 +199,10 @@ tranche below closes against).
     new work/output tree and no reuse flag, passed 10/10 isolated stage
     tests, installed-package zero-copy window acceptance, and
     `verify_dist.py` dependency/RPATH audit. Recorded in `HISTORY.md`.
-  * [ ] macOS/arm64: rebuild the isolated stage with the bridge and run its
-    packaged zero-copy acceptance plus dependency audit.
+  * [x] macOS/arm64: fresh isolated bridge-inclusive stage passed 10/10
+    tests, packaged 20-frame `interop=zero-copy` acceptance, installed
+    examples, and the final dependency/RPATH audit. Recorded in
+    `HISTORY.md`.
   * [ ] Windows/x64: rebuild the isolated stage with the bridge and run its
     packaged GPU-copy acceptance plus dependency audit.
 
