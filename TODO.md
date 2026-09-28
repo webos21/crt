@@ -80,8 +80,10 @@ consumers, not completion gates for this tranche.
   free and host-neutral, real-pthread deterministic acceptance
   (`crtmedia_transport_queue_test: ok watermark=pass timeout=pass eof=pass
   stress_producer_faster=pass stress_consumer_faster=pass
-  cancel_writer=pass cancel_reader=pass release_wakes_all=pass`). Linux/
-  x86_64 and macOS/arm64 replay of the same unmodified source is next.
+  cancel_writer=pass cancel_reader=pass release_wakes_all=pass`).
+  **macOS/arm64 done 2026-09-29:** same unmodified source, identical
+  result across 5 consecutive runs, no code changes needed. Full in-tree
+  `ctest`: 146/146. Linux/x86_64 replay remains.
 * [ ] **2. Add progressive HTTP input and extractor integration.** Two
   separate fixtures, not one: (A) Range-capable regular MP4 through the
   seekable custom-AVIO path, (B) chunked/no-Range delivery through the

@@ -247,6 +247,20 @@ EOF -> remaining buffered bytes drain first, EOF reported only after
 release -> every waiter wakes, every thread joins, no leak
 ```
 
+**Windows/x64 done 2026-09-28** (`HISTORY.md`): `crtmedia_transport_queue_
+test: ok watermark=pass timeout=pass eof=pass stress_producer_faster=pass
+stress_consumer_faster=pass cancel_writer=pass cancel_reader=pass
+release_wakes_all=pass`, 5 consecutive runs with no flakiness; full `ctest`
+156/156.
+
+**macOS/arm64 done 2026-09-29.** Same source, unmodified: identical result
+across 5 consecutive runs, no code changes needed anywhere -- confirming
+this primitive really is host-neutral by construction, not just by
+intention. Full in-tree `ctest`: 146/146 (this host's own total test count
+naturally differs from Windows' 156, per-OS test registration, same as
+every other cross-host tranche in this project; no test regressed).
+Linux/x86_64 replay remains.
+
 ### 2. Progressive HTTP input and extractor integration
 
 The accepted transport becomes private FFmpeg custom AVIO; the pinned

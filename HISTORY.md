@@ -8,6 +8,25 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-29
+
+- **Networking & Streaming Tranche 1 replayed on macOS/arm64: unmodified
+  source, identical result, no code changes needed.** `docs/crtmedia_
+  networking_acceptance.md`'s own Tranche 1 section has the full detail.
+
+  `libcrtmedia/src/transport_queue.{c,h}` and `tests/transport_queue_
+  test.c` (Windows/x64, 2026-09-28) already compiled and linked on macOS
+  with zero changes -- `crtmedia_transport_queue_test`'s own CMake target
+  was already host-generic (macOS/Linux/Windows link-option branches all
+  already present). Real result across 5 consecutive runs: `crtmedia_
+  transport_queue_test: ok watermark=pass timeout=pass eof=pass
+  stress_producer_faster=pass stress_consumer_faster=pass
+  cancel_writer=pass cancel_reader=pass release_wakes_all=pass`, identical
+  every time, no flakiness -- confirming this primitive really is
+  host-neutral by construction (no socket/curl/TLS dependency, pure
+  pthread producer/consumer), not just by intention. Full in-tree `ctest`:
+  146/146. Linux/x86_64 replay of the same unmodified source remains.
+
 ## 2026-09-28
 
 - **Networking & Streaming Tranche 0 frozen and Tranche 1 closed on
