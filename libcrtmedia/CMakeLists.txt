@@ -482,6 +482,60 @@ set_tests_properties(crtmedia_gpu_frame_test_runs PROPERTIES
 )
 set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_gpu_frame_test_runs)
 
+# crtmedia_transport_queue_test: Networking & Streaming Tranche 1
+# (docs/crtmedia_networking_acceptance.md) -- deterministic, fully
+# resource-free coverage (real pthread producer/consumer threads, but no
+# socket/curl/TLS/FFmpeg dependency) for the private bounded transport
+# queue (libcrtmedia/src/transport_queue.h) that a later HTTP transport
+# sits behind. Same plain-C-executable shape as crtmedia_gpu_frame_test
+# above, unconditional, no FFmpeg dependency -- needs libcrtmedia/src on
+# its own include path for the private header, matching capture_v4l2_
+# test_control.h/codec_test_control.h's own established precedent for
+# testing an internal component directly through its own private header.
+add_executable(crtmedia_transport_queue_test
+  ${CRT_STARTUP_OBJECTS}
+  tests/transport_queue_test.c
+)
+target_link_libraries(crtmedia_transport_queue_test PRIVATE crt_build_flags c crtmedia)
+target_include_directories(crtmedia_transport_queue_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/libc/include" "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(crtmedia_transport_queue_test PRIVATE crt_compiler_rt_builtins)
+target_link_options(crtmedia_transport_queue_test PRIVATE
+  -nostdlib
+  -nostartfiles
+  -nodefaultlibs
+)
+if(CRT_TARGET_OS STREQUAL "macos")
+  target_link_options(crtmedia_transport_queue_test PRIVATE
+    -Wl,-e,_start
+    -Wl,-dead_strip
+  )
+  target_link_libraries(crtmedia_transport_queue_test PRIVATE System)
+elseif(CRT_TARGET_OS STREQUAL "linux")
+  target_link_options(crtmedia_transport_queue_test PRIVATE
+    -Wl,-e,_start
+    -Wl,--gc-sections
+  )
+elseif(CRT_TARGET_OS STREQUAL "windows")
+  target_link_options(crtmedia_transport_queue_test PRIVATE
+    -Wl,/entry:mainCRTStartup
+    -Wl,/subsystem:console
+    -Wl,/OPT:REF
+  )
+  target_link_libraries(crtmedia_transport_queue_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+endif()
+crt_link_startup_end_objects(crtmedia_transport_queue_test)
+add_dependencies(crtmedia_transport_queue_test c crt1 crtmedia)
+
+add_test(NAME crtmedia_transport_queue_test_runs COMMAND crtmedia_transport_queue_test)
+set_tests_properties(crtmedia_transport_queue_test_runs PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  PASS_REGULAR_EXPRESSION "crtmedia_transport_queue_test: ok"
+  TIMEOUT 60
+)
+set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_transport_queue_test_runs)
+
 # crtmedia_format_test: deterministic, FFmpeg-free coverage for crtmedia/
 # format.h (docs/libcrtmedia_api_policy.md's decided core, TODO.md's
 # "Separate extractor and codec" item) -- unconditional, not gated behind

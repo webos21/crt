@@ -38,6 +38,23 @@ typedef enum crtmedia_result {
    * from UNSUPPORTED (the requested backend/format does not exist) and from
    * WOULD_BLOCK (a normal retry condition). */
   CRTMEDIA_ERROR_IO = -4,
+  /* A bounded wait (connect/read/write) elapsed with no progress. Distinct
+   * from WOULD_BLOCK: WOULD_BLOCK means "call again, no waiting implied";
+   * TIMEOUT means a real caller-requested deadline was reached (docs/
+   * crtmedia_networking_acceptance.md's own Tranche 0 error-model section
+   * has the full contract this and the next two values are part of). */
+  CRTMEDIA_ERROR_TIMEOUT = -5,
+  /* The caller's own explicit cancellation (never a spontaneous transport
+   * decision) unblocked an in-progress operation. A cancelled object must
+   * not be reused; release it. */
+  CRTMEDIA_ERROR_CANCELLED = -6,
+  /* The remote peer or its data violated the protocol this layer relies on
+   * for correctness (for example an HTTP response that cannot be trusted
+   * to resume safely, or a TLS verification failure). Distinct from
+   * CRTMEDIA_ERROR_IO (the connection itself failed, no data to distrust)
+   * and from UNSUPPORTED (this host/build cannot do this at all,
+   * independent of any remote peer). */
+  CRTMEDIA_ERROR_PROTOCOL = -7,
 } crtmedia_result;
 
 /* Every format this contract currently covers: two packed 8-bit-per-

@@ -106,6 +106,11 @@ function(crt_add_crtmedia_targets)
     "${CRTMEDIA_ROOT}/src/player.c"
     "${CRTMEDIA_ROOT}/src/gpu_frame.c"
     "${CRTMEDIA_ROOT}/src/capture.c"
+    # Networking & Streaming Tranche 1 (docs/crtmedia_networking_
+    # acceptance.md): no socket/curl/TLS/FFmpeg dependency at all, so this
+    # is always built, not gated behind CRTMEDIA_ENABLE_FFMPEG like demux.c/
+    # extractor.c/codec.c/muxer.c below.
+    "${CRTMEDIA_ROOT}/src/transport_queue.c"
     ${CRTMEDIA_BACKEND_OBJECTS}
   )
   if(TARGET crt_build_flags)
@@ -160,6 +165,7 @@ function(crt_add_crtmedia_targets)
     "${CRTMEDIA_ROOT}/src/player.c"
     "${CRTMEDIA_ROOT}/src/gpu_frame.c"
     "${CRTMEDIA_ROOT}/src/capture.c"
+    "${CRTMEDIA_ROOT}/src/transport_queue.c"
     ${CRTMEDIA_BACKEND_OBJECTS}
   )
   if(CRT_TARGET_OS STREQUAL "windows" AND TARGET crt_windows_dllcrt)

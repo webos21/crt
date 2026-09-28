@@ -10,6 +10,73 @@ substantive update.
 
 ## 2026-09-28
 
+- **Networking & Streaming Tranche 0 frozen and Tranche 1 closed on
+  Windows/x64: transport/streaming acceptance contract, error model, and
+  the bounded transport core.** `docs/crtmedia_networking_acceptance.md`
+  (new) is now the single source of truth for this roadmap item's frozen
+  contract, tranches, and host order, mirroring `docs/crtmedia_encode_
+  capture_acceptance.md`'s own established shape; `TODO.md`'s own
+  Networking section was trimmed down to tranche state only, per that same
+  precedent.
+
+  Tranche 0's real, public change: `crtmedia_result` (`crtmedia/frame.h`)
+  gained `CRTMEDIA_ERROR_TIMEOUT`, `CRTMEDIA_ERROR_CANCELLED`, and
+  `CRTMEDIA_ERROR_PROTOCOL` alongside the existing `WOULD_BLOCK`/`IO`, so a
+  caller can distinguish "a real deadline elapsed" from "call again" from
+  "the caller's own cancellation" from "the remote peer's data cannot be
+  trusted" -- all four collapsed into `UNSUPPORTED` before this, which
+  would have made any real reconnect policy unbuildable. Purely additive;
+  no existing `switch` over this enum exists anywhere in the tree to break.
+
+  Tranche 1's deliverable, `libcrtmedia/src/transport_queue.{c,h}`: a
+  fixed-capacity byte queue with explicit high/low-watermark hysteresis
+  (a blocked writer only wakes once the buffered count drains to at or
+  below the low watermark, not on the first byte freed, avoiding mutex/
+  condvar thrashing right at the boundary), partial read/write, sticky
+  one-directional EOF (already-buffered bytes always drain before EOF is
+  reported; writing after EOF is `CRTMEDIA_ERROR_INVALID_ARGUMENT`, not a
+  transport condition), caller-driven cancellation (every already-blocked
+  or future call returns `CRTMEDIA_ERROR_CANCELLED` once cancelled), and a
+  `release()` that itself cancels, waits for every currently-blocked
+  waiter to actually leave its own `pthread_cond_wait`/`timedwait` before
+  destroying the mutex/condvars, then frees -- avoiding the real
+  undefined-behavior trap of destroying a condvar a thread is still
+  parked on. Deliberately has no socket, curl, or TLS dependency at all,
+  by design: this is the private, host-neutral primitive a later HTTP
+  transport sits behind, not the transport itself; it is built
+  unconditionally (unlike `demux.c`/`extractor.c`/`codec.c`/`muxer.c`),
+  never gated behind `CRTMEDIA_ENABLE_FFMPEG`.
+
+  `tests/transport_queue_test.c` proves the full contract with real
+  `pthread` producer/consumer threads (never single-threaded simulation):
+  high/low watermark hysteresis and `WOULD_BLOCK`/`TIMEOUT` distinction; a
+  256 KiB transfer through a 4 KiB queue in both a producer-faster and a
+  consumer-faster configuration, verifying every byte arrives in order
+  followed by EOF; cancellation waking an already-blocked writer and,
+  separately, an already-blocked reader, each confirmed `CANCELLED`; and
+  `release()` waking two concurrently blocked writers at once and
+  returning cleanly without any thread hanging. One real bug was found and
+  fixed in the test itself, not the implementation, while writing it: a
+  zero-capacity `read()` call was asserted as a caller error, but the
+  actual, correct contract (matching POSIX `read()`'s own `count=0`
+  semantics) is a harmless no-op -- `crtmedia_transport_queue_read()`'s own
+  validation already agreed; the test's assumption was simply wrong.
+  Real result: `crtmedia_transport_queue_test: ok watermark=pass
+  timeout=pass eof=pass stress_producer_faster=pass
+  stress_consumer_faster=pass cancel_writer=pass cancel_reader=pass
+  release_wakes_all=pass`, 5 consecutive runs with no flakiness. Full
+  `ctest` suite: 156/156 (one unrelated, honest, pre-existing-discipline
+  skip -- `crtmedia_capture_mf_test`'s own webcam not being enumerable at
+  the moment this pass ran, an environmental fluctuation, not a
+  regression from this work).
+
+  Linux/x86_64 and macOS/arm64 replay of this same, unmodified Tranche 1
+  source is the immediate next step, per this tranche's own "quick replay
+  after each Windows-first tranche" host-order discipline (`docs/
+  crtmedia_networking_acceptance.md`'s own "Scope and host order" section)
+  -- not deferred to a single three-host pass at Tranche 5/6 the way
+  Encode & Capture's own host order worked.
+
 - **Encode & Capture Tranche 6 closed on all three hosts: Linux/x86_64
   replay of the two host-generic Tranche 6 tests, plus its own isolated-
   stage closure, found and fixed one real, project-wide `tools/crt-cc`
