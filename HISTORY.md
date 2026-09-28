@@ -10,6 +10,87 @@ substantive update.
 
 ## 2026-09-28
 
+- **Encode & Capture Tranche 6 closed on Windows/x64: cross-host timing/
+  lifecycle gates plus real packaged-SDK/isolated-stage closure, finding
+  and fixing two more real packaging gaps along the way.**
+  `docs/crtmedia_encode_capture_acceptance.md`'s own Tranche 6 section has
+  the full detail; summary here.
+
+  Two new tests, both host-generic (unmodified across all three hosts --
+  `crtmedia_capture_enumerate()`/`crtmedia_codec_create_encoder("video/
+  avc")` already dispatch to whichever real backend each host's own recipe
+  enables), verified on this host's real hardware, ready to replay
+  unmodified on macOS/Linux:
+
+  `tests/timing_discontinuity_test.c` freezes the timing half of Tranche
+  0's contract before networking/transport work begins: 20 deterministic
+  synthetic frames with two real timeline gaps (one ~2x, one ~10x) through
+  software mp4v-es encode -> MP4 mux -> reopen -> decode-back, asserting
+  every timestamp survives *exactly* at both the encoded-sample and muxed-
+  container level. This is provably exact, not just "close enough",
+  because of two real properties confirmed by reading the source directly:
+  `libcrtmedia/src/codec.c`'s encoder keeps an explicit PTS FIFO of the
+  caller's own submitted timestamps (never derived from frame-rate
+  cadence), and `libcrtmedia/src/muxer.c` sets the MP4 stream's own
+  time_base to `AV_TIME_BASE_Q` (microseconds), making every
+  `av_rescale_q()` at mux/demux time an exact identity conversion. Real
+  result: `crtmedia_timing_discontinuity_test: ok frames=20 gap1_us=66666
+  gap2_us=500000`.
+
+  `tests/capture_encode_lifecycle_test.c` runs 15 iterations each of real
+  Media Foundation capture (enumerate/open/start/dequeue 30 frames/stop/
+  release, each frame software-encoded/muxed/decoded back) and real
+  `h264_mf` hardware encode (100 synthetic frames, muxed, decoded back) --
+  modeled directly on the Windows zero-copy Tranche 5/6 lifecycle test
+  precedent (a real `DXGI_ERROR_DEVICE_REMOVED` found only on the *second*
+  of 15 decoder cycles, this same file, above). Real result: both halves
+  completed all 15 iterations cleanly, every frame released exactly once
+  (`capture_iterations=15 capture_frames=450 capture_releases=450
+  hw_iterations=15 hw_samples=1500 hw_releases=1500`) -- unlike the bug
+  this test's design mirrors, no device-lifetime bug was found here, a
+  real positive closure result rather than an absence of testing.
+
+  Re-running the *ordinary* cumulative `crt-gfx-media-dist` after Tranche 5
+  surfaced two more real packaging gaps. `tools/verify_dist.py` failed the
+  packaged `libcrtmedia.dll` outright ("unresolved packaged binary
+  dependencies: ... undeclared MFPlat.DLL/MFReadWrite.dll/MF.dll") --
+  `tools/crt_dist_prerequisites.py` had no entry declaring these as
+  expected external Windows runtime dependencies, unlike `ole32.dll`'s own
+  pre-existing entry; fixed by adding a `windows-media-foundation-runtime`
+  entry alongside it. `distribution/stages/04-gfx-media/CMakeLists.txt`'s
+  Windows branch also needed the same `capture_mf.c` source and MF/uuid
+  import-library wiring `libcrtmedia/CMakeLists.txt` already carries --
+  its per-file compile-options wiring was moved into the shared
+  `crt_add_crtmedia_targets()` (`libcrtmedia/cmake/crtmedia_targets.cmake`)
+  rather than duplicated per caller, mirroring the existing Linux
+  `capture_v4l2.c` special case already in that same function.
+
+  Separately, `tools/create_stage_source.py`'s file registry turned out to
+  be stale since *before the whole "Encode and capture" roadmap began*:
+  every Tranche 1/3/4A/4B/5/6 test file, `capture_mf.c` itself, macOS's
+  `capture_avfoundation.c` itself, and its own private `capture_
+  avfoundation_test_control.h` header were all silently absent from every
+  isolated stage source asset on all three hosts, not just Windows --
+  found by inspecting a freshly generated `04-gfx-media` source archive
+  directly and confirming even the already-committed `capture_mf.c` was
+  missing from it. `tools/test_stage_source_closure.py` (which checks
+  exactly this) now passes again after adding all of them.
+
+  With those fixed, a real, full, from-scratch isolated `04-gfx-media`
+  stage rebuild (`tools/crt-stage-build.py`, real FreeType/FFmpeg/Skia)
+  passed end to end: 3165.5s total (`build and install FreeType/FFmpeg`
+  alone: 2817.6s) -- `--enable-mediafoundation --enable-encoder=h264_mf`
+  configured and built cleanly through the packaged `tools/crt-cc` too,
+  confirming the Tranche 5 linker fix is portable, not an in-tree-only
+  artifact. The isolated stage's own smaller ctest subset (10 tests, no
+  real-hardware capture/encode coverage by design -- that bar is carried
+  by the two host-generic tests above, run in-tree) passed 10/10, all four
+  packaged examples (`gfx-gpu`, `gfx-skia`, `media-player`, and the
+  zero-copy `crtgfx_skia_media_window_demo` bridge -- the one that actually
+  links `capture_mf.c.obj` in) rebuilt and ran successfully against the
+  freshly packaged SDK, `verify_dist.py` passed, and the SDK published
+  atomically. Full in-tree `ctest`: 155/155.
+
 - **Encode & Capture Tranche 5 closed: real Media Foundation H.264 hardware
   encode and capture on Windows, plus a genuinely new, project-wide
   `tools/crt-cc` Windows linker bug found and fixed along the way.**

@@ -413,12 +413,41 @@ crt_add_crtgfx_gpu_shared_target()
 crt_add_crtgfx_skia_shared_target()
 
 if(CRT_TARGET_OS STREQUAL "windows")
-  set(CRTMEDIA_BACKEND_SOURCES src/arch/windows/audio_sink_wasapi.c)
+  # capture_mf.c (Encode & Capture Tranche 5/6, 2026-09-28) -- real Media
+  # Foundation capture, added alongside the pre-existing WASAPI audio sink.
+  # libcrtmedia/CMakeLists.txt's own comment on this file's real-mingw-w64-
+  # headers deviation applies identically here; its per-file compile-options
+  # wiring lives in crt_add_crtmedia_targets() (cmake/crtmedia_targets.cmake,
+  # included below), shared with the in-tree build rather than duplicated --
+  # CRTMEDIA_WIN32_SHIM_ROOT/CRTMEDIA_LIBC_INCLUDE_DIR just below are that
+  # shared function's only required inputs for it.
+  set(CRTMEDIA_BACKEND_SOURCES
+    src/arch/windows/audio_sink_wasapi.c
+    src/arch/windows/capture_mf.c)
+  set(CRTMEDIA_WIN32_SHIM_ROOT "${CRTGFX_WIN32_SHIM_ROOT}")
+  set(CRTMEDIA_LIBC_INCLUDE_DIR "${CMAKE_SYSROOT}/include")
   # "-Wl,<name>.lib", not bare "<name>.lib": same CMake bare-name-to-"-l"
   # mis-conversion as CRTGFX_WINDOWS_DXGI_LIB above, same fix.
   set(CRTMEDIA_WINDOWS_OLE32_LIB -Wl,ole32.lib)
   set(CRTMEDIA_WINDOWS_D3D11_LIB -Wl,d3d11.lib)
   set(CRTMEDIA_WINDOWS_DXGI_LIB -Wl,dxgi.lib)
+  # mfuuid.lib/strmiids.lib/mfplat.lib/mfreadwrite.lib/Mf.lib/uuid.lib
+  # (Tranche 5/6) -- libcrtmedia/CMakeLists.txt's own comments on each of
+  # these explain the real, non-obvious reason each is needed (mfuuid/
+  # strmiids for real extern-GUID data FFmpeg's h264_mf and this file's own
+  # MF_MT_.../MFVideoFormat_... references need; mfplat/mfreadwrite for the
+  # ordinary MFStartup/MFCreateSourceReaderFromMediaSource import-library
+  # links this file makes directly; Mf.lib specifically for
+  # MFEnumDeviceSources, which mfplat.lib/mfreadwrite.lib do not export
+  # despite being declared in the same header; uuid.lib for LLD's MinGW
+  # driver's own implicit "-luuid" default-library addition once any final
+  # link actually pulls capture_mf.c.obj in).
+  set(CRTMEDIA_WINDOWS_MFUUID_LIB -Wl,mfuuid.lib)
+  set(CRTMEDIA_WINDOWS_STRMIIDS_LIB -Wl,strmiids.lib)
+  set(CRTMEDIA_WINDOWS_MFPLAT_LIB -Wl,mfplat.lib)
+  set(CRTMEDIA_WINDOWS_MFREADWRITE_LIB -Wl,mfreadwrite.lib)
+  set(CRTMEDIA_WINDOWS_MF_LIB -Wl,Mf.lib)
+  set(CRTMEDIA_WINDOWS_UUID_LIB -Wl,uuid.lib)
 elseif(CRT_TARGET_OS STREQUAL "macos")
   set(CRTMEDIA_BACKEND_SOURCES src/arch/macos/audio_sink_coreaudio.c)
   # Keep in step with CRTMEDIA_MACOS_FRAMEWORKS in libcrtmedia/CMakeLists.txt

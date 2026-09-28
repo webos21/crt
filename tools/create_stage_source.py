@@ -167,6 +167,11 @@ STAGES = {
             "libcrtmedia/src/capture.c",
             "libcrtmedia/src/capture_internal.h",
             "libcrtmedia/src/capture_v4l2_test_control.h",
+            # capture_avfoundation.c's own private test hook header (Tranche
+            # 4A) -- same real gap the comment on the tests list further
+            # down explains; found for real by tools/test_stage_source_
+            # closure.py itself once capture_avfoundation.c was added.
+            "libcrtmedia/src/capture_avfoundation_test_control.h",
             "libcrtmedia/src/demux.c",
             "libcrtmedia/src/extractor.c",
             "libcrtmedia/src/codec.c",
@@ -189,6 +194,26 @@ STAGES = {
             "libcrtmedia/tests/capture_v4l2_test.c",
             "libcrtmedia/tests/demux_decode_test.c",
             "libcrtmedia/tests/zero_copy_test.c",
+            # "Encode and capture" roadmap tests (Tranches 1-6): this
+            # registry had not been updated since before that roadmap began,
+            # so every one of these was silently missing from every isolated
+            # stage build -- found for real (2026-09-28) while closing
+            # Tranche 6, after confirming capture_mf.c itself (Tranche 5,
+            # already committed) was *also* absent from a freshly generated
+            # 04-gfx-media source archive. Per-host tests are bundled
+            # unconditionally here (not project_paths_by_os), matching
+            # capture_v4l2_test.c's own precedent just above: CMake's own
+            # per-CRT_TARGET_OS if() blocks decide which ones actually get
+            # built, so packaging all of them plainly is correct and simpler
+            # than mirroring that same per-OS gate a second time here.
+            "libcrtmedia/tests/encode_mux_test.c",
+            "libcrtmedia/tests/encode_vaapi_test.c",
+            "libcrtmedia/tests/capture_avfoundation_test.c",
+            "libcrtmedia/tests/encode_videotoolbox_test.c",
+            "libcrtmedia/tests/encode_mf_test.c",
+            "libcrtmedia/tests/capture_mf_test.c",
+            "libcrtmedia/tests/timing_discontinuity_test.c",
+            "libcrtmedia/tests/capture_encode_lifecycle_test.c",
             "libcrtmedia/assets/test_tone.wav",
             # examples/media-player: the playback demo (installed as its
             # main.c), its clip, and the standalone example project.
@@ -212,6 +237,11 @@ STAGES = {
                 # gpu_win32.c's private test hooks (see gpu_test_control.h).
                 "libcrtgfx/src/arch/windows/gpu_win32_test.h",
                 "libcrtmedia/src/arch/windows/audio_sink_wasapi.c",
+                # Encode & Capture Tranche 5/6 (2026-09-28) -- same real gap
+                # as the tests list comment above: missing here since the
+                # file's own first commit, never caught because no isolated
+                # stage build had been run since.
+                "libcrtmedia/src/arch/windows/capture_mf.c",
                 "libc/src/arch/windows/common/emutls_link_stubs.c",
                 # The whole shim is required: Skia's D3D include chain uses
                 # its forwarding windows.h plus exclusive excpt/malloc/etc.
@@ -225,6 +255,10 @@ STAGES = {
                 # which already got this right.
                 "libcrtgfx/src/arch/macos/window_cocoa_gpu.h",
                 "libcrtmedia/src/arch/macos/audio_sink_coreaudio.c",
+                # Encode & Capture Tranche 4A (2026-09-27) -- same real gap
+                # as capture_mf.c's own comment in the windows tuple above:
+                # missing since the file's own first commit.
+                "libcrtmedia/src/arch/macos/capture_avfoundation.c",
                 "libstdc++/third_party/libcxx/libc++.unexported.exp",
             ),
             "linux": (

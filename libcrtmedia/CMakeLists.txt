@@ -90,11 +90,13 @@ if(CRT_TARGET_OS STREQUAL "windows")
   # project) is API-only, no C runtime headers, so that resolves against
   # this project's own libc (the same crt_build_flags would have added):
   # confirmed for real (missing this produced "fatal error: 'ctype.h'
-  # file not found" from winnt.h on the first-ever compile attempt).
-  set_source_files_properties(src/arch/windows/capture_mf.c PROPERTIES
-    COMPILE_OPTIONS
-      "-I${CMAKE_SOURCE_DIR}/libstdc++/third_party/win32_shim;-I${CRT_MINGW_W64_HEADERS_INCLUDE_ROOT};-I${CMAKE_SOURCE_DIR}/include;-include;${CMAKE_SOURCE_DIR}/libstdc++/third_party/win32_shim/mingw_w64_compat.h;-Wno-pragma-pack;-Wno-unused-value;-Wno-ignored-attributes;-Wno-extern-c-compat;-Wno-class-conversion"
-  )
+  # file not found" from winnt.h on the first-ever compile attempt). The
+  # actual per-file compile-options wiring lives in crt_add_crtmedia_
+  # targets() (cmake/crtmedia_targets.cmake), shared with every isolated
+  # stage rather than duplicated here -- these two variables are that
+  # shared function's only required inputs for it.
+  set(CRTMEDIA_WIN32_SHIM_ROOT "${CMAKE_SOURCE_DIR}/libstdc++/third_party/win32_shim")
+  set(CRTMEDIA_LIBC_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/include")
 elseif(CRT_TARGET_OS STREQUAL "linux")
   # src/arch/linux/audio_sink_linux.c: raw ALSA kernel PCM ioctl, falling
   # back to a hand-rolled real PulseAudio native-protocol client -- see
@@ -853,6 +855,105 @@ if(CRTMEDIA_ENABLE_FFMPEG)
     PASS_REGULAR_EXPRESSION "crtmedia_encode_mux_test: ok frames=100"
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_encode_mux_test_runs)
+endif()
+
+# Encode & Capture Tranche 6: deterministic, irregularly spaced (real
+# timeline gaps, not evenly spaced) synthetic PTS through software encode ->
+# MP4 mux -> extractor/decode-back, freezing the timing half of Tranche 0's
+# contract before networking/transport work begins (tests/timing_
+# discontinuity_test.c's own top comment has the full "why exact equality is
+# valid here"). Host-generic like crtmedia_encode_mux_test above: no capture
+# backend or hardware encoder involved, so this runs identically, unmodified,
+# on all three hosts.
+if(CRTMEDIA_ENABLE_FFMPEG)
+  add_executable(crtmedia_timing_discontinuity_test
+    ${CRT_STARTUP_OBJECTS}
+    tests/timing_discontinuity_test.c
+  )
+  target_link_libraries(crtmedia_timing_discontinuity_test PRIVATE crt_build_flags crtmedia)
+  target_include_directories(crtmedia_timing_discontinuity_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include"
+  )
+  target_compile_definitions(crtmedia_timing_discontinuity_test PRIVATE
+    CRTMEDIA_TEST_TIMING_DISCONTINUITY_OUTPUT_PATH="${CMAKE_CURRENT_BINARY_DIR}/crtmedia_timing_discontinuity_test.mp4"
+  )
+  target_link_libraries(crtmedia_timing_discontinuity_test PRIVATE crt_compiler_rt_builtins)
+  target_link_options(crtmedia_timing_discontinuity_test PRIVATE
+    -nostdlib
+    -nostartfiles
+    -nodefaultlibs
+  )
+  if(CRT_TARGET_OS STREQUAL "macos")
+    target_link_options(crtmedia_timing_discontinuity_test PRIVATE -Wl,-e,_start -Wl,-dead_strip)
+    target_link_libraries(crtmedia_timing_discontinuity_test PRIVATE c m dl cxx)
+    target_link_libraries(crtmedia_timing_discontinuity_test PRIVATE System)
+  elseif(CRT_TARGET_OS STREQUAL "linux")
+    target_link_options(crtmedia_timing_discontinuity_test PRIVATE -Wl,-e,_start -Wl,--gc-sections)
+  elseif(CRT_TARGET_OS STREQUAL "windows")
+    target_link_options(crtmedia_timing_discontinuity_test PRIVATE
+      -Wl,/entry:mainCRTStartup -Wl,/subsystem:console -Wl,/OPT:REF)
+    target_link_libraries(crtmedia_timing_discontinuity_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  endif()
+  crt_link_startup_end_objects(crtmedia_timing_discontinuity_test)
+  add_dependencies(crtmedia_timing_discontinuity_test c crt1 crtmedia)
+  add_test(NAME crtmedia_timing_discontinuity_test_runs COMMAND crtmedia_timing_discontinuity_test)
+  set_tests_properties(crtmedia_timing_discontinuity_test_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    PASS_REGULAR_EXPRESSION "crtmedia_timing_discontinuity_test: ok frames=20"
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_timing_discontinuity_test_runs)
+endif()
+
+# Encode & Capture Tranche 6: 15-iteration real-device-capture and real-
+# hardware-H.264-encoder create/destroy lifecycle stress, each iteration
+# followed by a real mux -> reopen -> decode-back check
+# (tests/capture_encode_lifecycle_test.c's own top comment has the full
+# "why" -- the Windows zero-copy DEVICE_REMOVED precedent this mirrors).
+# Host-generic like crtmedia_encode_mux_test/crtmedia_timing_discontinuity_
+# test above: crtmedia_capture_enumerate()/crtmedia_codec_create_encoder(
+# "video/avc") already dispatch to whichever real backend this host's own
+# recipe enables, so this file is unmodified across all three hosts. A host
+# with neither a usable capture device nor a usable hardware H.264 encoder
+# reports a precise CTest skip; either one alone is still real evidence.
+if(CRTMEDIA_ENABLE_FFMPEG)
+  add_executable(crtmedia_capture_encode_lifecycle_test
+    ${CRT_STARTUP_OBJECTS}
+    tests/capture_encode_lifecycle_test.c
+  )
+  target_link_libraries(crtmedia_capture_encode_lifecycle_test PRIVATE crt_build_flags crtmedia)
+  target_include_directories(crtmedia_capture_encode_lifecycle_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include"
+  )
+  target_compile_definitions(crtmedia_capture_encode_lifecycle_test PRIVATE
+    CRTMEDIA_TEST_LIFECYCLE_CAPTURE_OUTPUT_PATH="${CMAKE_CURRENT_BINARY_DIR}/crtmedia_capture_encode_lifecycle_test_capture.mp4"
+    CRTMEDIA_TEST_LIFECYCLE_HW_OUTPUT_PATH="${CMAKE_CURRENT_BINARY_DIR}/crtmedia_capture_encode_lifecycle_test_hw.mp4"
+  )
+  target_link_libraries(crtmedia_capture_encode_lifecycle_test PRIVATE crt_compiler_rt_builtins)
+  target_link_options(crtmedia_capture_encode_lifecycle_test PRIVATE
+    -nostdlib
+    -nostartfiles
+    -nodefaultlibs
+  )
+  if(CRT_TARGET_OS STREQUAL "macos")
+    target_link_options(crtmedia_capture_encode_lifecycle_test PRIVATE -Wl,-e,_start -Wl,-dead_strip)
+    target_link_libraries(crtmedia_capture_encode_lifecycle_test PRIVATE c m dl cxx)
+    target_link_libraries(crtmedia_capture_encode_lifecycle_test PRIVATE System)
+  elseif(CRT_TARGET_OS STREQUAL "linux")
+    target_link_options(crtmedia_capture_encode_lifecycle_test PRIVATE -Wl,-e,_start -Wl,--gc-sections)
+  elseif(CRT_TARGET_OS STREQUAL "windows")
+    target_link_options(crtmedia_capture_encode_lifecycle_test PRIVATE
+      -Wl,/entry:mainCRTStartup -Wl,/subsystem:console -Wl,/OPT:REF)
+    target_link_libraries(crtmedia_capture_encode_lifecycle_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  endif()
+  crt_link_startup_end_objects(crtmedia_capture_encode_lifecycle_test)
+  add_dependencies(crtmedia_capture_encode_lifecycle_test c crt1 crtmedia)
+  add_test(NAME crtmedia_capture_encode_lifecycle_test_runs COMMAND crtmedia_capture_encode_lifecycle_test)
+  set_tests_properties(crtmedia_capture_encode_lifecycle_test_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    PASS_REGULAR_EXPRESSION "crtmedia_capture_encode_lifecycle_test: (ok|skip)"
+    SKIP_REGULAR_EXPRESSION "crtmedia_capture_encode_lifecycle_test: skip"
+    TIMEOUT 300)
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_capture_encode_lifecycle_test_runs)
 endif()
 
 # Encode & Capture Tranche 3: VA-API H.264 hardware encode -> MP4 mux ->

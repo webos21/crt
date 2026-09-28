@@ -122,6 +122,16 @@ Keep completed evidence in `HISTORY.md`; this list tracks only tranche state.
 * [ ] **6. Cross-host closure.** Timestamp discontinuity/drop behavior,
   lifecycle stress, installed headers/link smoke, isolated stage and packaged
   SDK acceptance, and final documentation consistency on all three hosts.
+  **Windows/x64 done 2026-09-28** (`HISTORY.md`, `docs/crtmedia_encode_
+  capture_acceptance.md`'s own Tranche 6 section): two new host-generic
+  tests (unmodified across hosts, ready to replay on macOS/Linux) verified
+  on real hardware, two real packaged-SDK gaps found and fixed (undeclared
+  Media Foundation DLL dependencies; a stale `create_stage_source.py` file
+  registry that had silently dropped every "Encode and capture" tranche's
+  files from every isolated stage on all three hosts, not just Windows),
+  and a full from-scratch isolated `04-gfx-media` stage rebuild passed end
+  to end. macOS/arm64 and Linux/x86_64 replays of the same two tests, plus
+  their own isolated-stage closure, remain.
 
 ## Planned
 

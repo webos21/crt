@@ -149,6 +149,25 @@ _GFX_MEDIA = {
             "bundled": False,
         },
         {
+            # Encode & Capture Tranche 5/6 (2026-09-28): libcrtmedia.dll's
+            # h264_mf encoder support (mfuuid.lib/strmiids.lib link real
+            # extern-GUID data at build time, no runtime DLL load) and
+            # src/arch/windows/capture_mf.c's own direct MFStartup/
+            # MFCreateSourceReaderFromMediaSource/MFEnumDeviceSources calls
+            # (mfplat.lib/mfreadwrite.lib/Mf.lib import libraries) both pull
+            # these three real Windows Media Foundation DLLs into
+            # libcrtmedia.dll's own import table -- found for real by
+            # tools/verify_dist.py's own binary-dependency check
+            # ("unresolved packaged binary dependencies: ... undeclared
+            # MFPlat.DLL/MFReadWrite.dll/MF.dll") on the first packaged
+            # 04-gfx-media dist build after Tranche 5 landed.
+            "id": "windows-media-foundation-runtime",
+            "kind": "os-runtime",
+            "required_for": ["media"],
+            "components": ["MFPlat.DLL", "MFReadWrite.dll", "MF.dll"],
+            "bundled": False,
+        },
+        {
             "id": "windows-gpu-driver",
             "kind": "device-driver",
             "required_for": ["gpu-rendering", "hardware-video"],

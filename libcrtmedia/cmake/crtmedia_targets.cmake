@@ -23,6 +23,30 @@ function(crt_add_crtmedia_targets)
         endif()
       endforeach()
     endif()
+    # capture_mf.c alone #includes real mingw-w64 Media Foundation headers
+    # instead of this library's own usual hand-declared-COM-vtable
+    # convention (src/arch/windows/capture_mf.c's own top comment has the
+    # full "why"). Needs its own win32_shim-first-then-real-headers include
+    # order plus this project's own libc include dir (winnt.h reaches for
+    # <ctype.h>, which mingw-w64-headers does not itself provide -- see that
+    # file's own top comment) -- shared here, not duplicated per caller,
+    # exactly like the Linux capture_v4l2.c case above, since both the
+    # in-tree build and every isolated stage need the identical treatment,
+    # just with different real path *values* for CRTMEDIA_WIN32_SHIM_ROOT/
+    # CRTMEDIA_LIBC_INCLUDE_DIR (the caller's own job to set correctly).
+    if(CRT_TARGET_OS STREQUAL "windows")
+      foreach(crtmedia_backend_source IN LISTS crtmedia_backend_sources)
+        if(crtmedia_backend_source MATCHES "/capture_mf\\.c$")
+          if(NOT CRTMEDIA_WIN32_SHIM_ROOT OR NOT CRTMEDIA_LIBC_INCLUDE_DIR)
+            message(FATAL_ERROR "crt_add_crtmedia_targets(): capture_mf.c requires CRTMEDIA_WIN32_SHIM_ROOT and CRTMEDIA_LIBC_INCLUDE_DIR")
+          endif()
+          set_source_files_properties(${crtmedia_backend_source} PROPERTIES
+            COMPILE_OPTIONS
+              "-I${CRTMEDIA_WIN32_SHIM_ROOT};-I${CRT_MINGW_W64_HEADERS_INCLUDE_ROOT};-I${CRTMEDIA_LIBC_INCLUDE_DIR};-include;${CRTMEDIA_WIN32_SHIM_ROOT}/mingw_w64_compat.h;-Wno-pragma-pack;-Wno-unused-value;-Wno-ignored-attributes;-Wno-extern-c-compat;-Wno-class-conversion"
+          )
+        endif()
+      endforeach()
+    endif()
     add_library(crtmedia_backend_objects OBJECT ${crtmedia_backend_sources})
     if((CRT_TARGET_OS STREQUAL "linux" OR CRT_TARGET_OS STREQUAL "macos") AND
        TARGET crt_build_flags)
