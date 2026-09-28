@@ -192,6 +192,25 @@ _GFX_MEDIA = {
                 "VideoToolbox.framework",
                 "CoreVideo.framework",
                 "CoreMedia.framework",
+                # AVFoundation.framework (Encode & Capture Tranche 4A,
+                # 2026-09-27): src/arch/macos/capture_avfoundation.c's own
+                # real AVCaptureSession/AVCaptureDevice/AVCaptureVideoData
+                # Output link, a real, confirmed LC_LOAD_DYLIB entry in
+                # libcrtmedia.dylib (and every executable that pulls
+                # capture_avfoundation.c.o in transitively). Missing here
+                # since that file's own first commit -- never caught
+                # because the isolated 04-gfx-media stage's own verify_
+                # dist.py pass had never actually linked this object at all
+                # until distribution/stages/04-gfx-media/CMakeLists.txt's
+                # own separate, real gap (capture_avfoundation.c missing
+                # from CRTMEDIA_BACKEND_SOURCES there) was found and fixed
+                # the same day. Foundation.framework/CoreFoundation.
+                # framework/libobjc.A.dylib (this file's own objc-runtime
+                # and NSAutoreleasePool needs) are already declared under
+                # macos-cocoa-window-runtime above and inherited
+                # cumulatively here, so only this one framework was
+                # actually missing.
+                "AVFoundation.framework",
             ],
             "bundled": False,
         },

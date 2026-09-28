@@ -47,6 +47,26 @@ function(crt_add_crtmedia_targets)
         endif()
       endforeach()
     endif()
+    # capture_avfoundation.c alone drives AVFoundation/CoreVideo purely
+    # through objc_msgSend from plain C (src/arch/macos/capture_
+    # avfoundation.c's own top comment) -- the same real, intentional
+    # function-pointer-cast pattern libcrtgfx/CMakeLists.txt already
+    # suppresses this same Clang diagnostic for (window_cocoa.c/gpu_metal.c).
+    # Shared here, not duplicated per caller (this exact block used to live
+    # only in libcrtmedia/CMakeLists.txt, so every isolated stage's own
+    # crtmedia_backend_objects never got it and failed to link with real
+    # undefined _crtmedia_capture_backend_* symbols -- found for real
+    # 2026-09-28 running the isolated 04-gfx-media stage on macOS for the
+    # first time since this file was added), exactly like capture_mf.c
+    # above.
+    if(CRT_TARGET_OS STREQUAL "macos")
+      foreach(crtmedia_backend_source IN LISTS crtmedia_backend_sources)
+        if(crtmedia_backend_source MATCHES "/capture_avfoundation\\.c$")
+          set_source_files_properties(${crtmedia_backend_source} PROPERTIES
+            COMPILE_OPTIONS "-Wno-cast-function-type-mismatch;-Wno-unknown-warning-option")
+        endif()
+      endforeach()
+    endif()
     add_library(crtmedia_backend_objects OBJECT ${crtmedia_backend_sources})
     if((CRT_TARGET_OS STREQUAL "linux" OR CRT_TARGET_OS STREQUAL "macos") AND
        TARGET crt_build_flags)

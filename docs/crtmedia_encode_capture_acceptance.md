@@ -407,8 +407,8 @@ capture/encoder ownership stress, installed-header/link smoke, isolated
 consistency on all three hosts.
 
 **Windows/x64 done 2026-09-28.** macOS/arm64's own replay of the same two
-tests is done too (below); Linux/x86_64's replay, and macOS's own isolated-
-stage closure, remain.
+tests, and its own isolated-stage closure, are done too (below); Linux/
+x86_64's replay and isolated-stage closure remain.
 
 Two new tests, both host-generic (unmodified across all three hosts --
 `crtmedia_capture_enumerate()`/`crtmedia_codec_create_encoder("video/avc")`
@@ -530,9 +530,56 @@ build: `porting/shims/macos/ffmpeg_videotoolboxenc_pthread_dlfcn_compat.h`
 C source's `#include`) was missing from the macOS `project_paths_by_os`
 list -- the same class of gap `tools/test_stage_source_closure.py` cannot
 catch (it only scans bundled sources' own `#include` directives) that the
-Windows Tranche 6 pass already found for `capture_mf.c`. Fixed by adding
-it; a full from-scratch isolated `04-gfx-media` stage rebuild on macOS,
-proving this fix actually matters, has not yet been run.
+Windows Tranche 6 pass already found for `capture_mf.c`. Fixed by adding it.
+
+**macOS/arm64 isolated-stage closure, done 2026-09-28.** Running the actual
+isolated `04-gfx-media` stage build on macOS -- the first time since Tranche
+4A landed -- immediately surfaced two more real gaps, both predating this
+whole tranche and both invisible to any in-tree build or to `tools/
+test_stage_source_closure.py`:
+
+- `distribution/stages/04-gfx-media/CMakeLists.txt`'s own macOS branch set
+  `CRTMEDIA_BACKEND_SOURCES` to only `audio_sink_coreaudio.c` --
+  `capture_avfoundation.c` itself (Tranche 4A) was never added, so the
+  isolated stage's own `libcrtmedia.dylib` failed to link with real
+  undefined `_crtmedia_capture_backend_*` symbols the moment its own
+  `capture.c` was compiled in. The exact same class of gap `capture_mf.c`
+  had on Windows (this section's own Windows paragraph above), just
+  undiscovered until now since this was the first real isolated macOS
+  stage build attempted since Tranche 4A.
+- `capture_avfoundation.c`'s own `-Wno-cast-function-type-mismatch`
+  compile-flag override (needed for its `objc_msgSend` casts) lived only
+  in `libcrtmedia/CMakeLists.txt`'s own `set_source_files_properties()`
+  call, never reached by the isolated stage's own separate CMakeLists.txt.
+  Fixed by moving it into the shared `crt_add_crtmedia_targets()`
+  (`libcrtmedia/cmake/crtmedia_targets.cmake`), mirroring how `capture_
+  mf.c`'s/`capture_v4l2.c`'s own per-file compile-flag overrides already
+  live there instead of being duplicated per caller -- both callers now
+  get it automatically, and the duplicate in `libcrtmedia/CMakeLists.txt`
+  was removed.
+- Once the library actually linked, `verify_dist.py` immediately reported
+  a third real gap: `tools/crt_dist_prerequisites.py`'s own
+  `macos-media-runtime` entry listed AudioToolbox/VideoToolbox/CoreVideo/
+  CoreMedia but not `AVFoundation.framework` -- a real, confirmed
+  `LC_LOAD_DYLIB` dependency of `libcrtmedia.dylib` since Tranche 4A that
+  had simply never been exercised by `verify_dist.py` before, since no
+  isolated stage had ever actually linked `capture_avfoundation.c.o` until
+  the two fixes above. Fixed by adding it (`Foundation.framework`/
+  `CoreFoundation.framework`/`libobjc.A.dylib` were already covered by the
+  existing `macos-cocoa-window-runtime` entry, inherited cumulatively).
+
+With all three fixed, a real, full, from-scratch isolated `04-gfx-media`
+stage rebuild on macOS (`tools/crt-stage-build.py`, real FreeType/FFmpeg/
+Skia) passed end to end: 497.7s total (FreeType/FFmpeg 374.0s, Skia 60.9s,
+everything else under 10s each). The isolated stage's own smaller ctest
+subset passed 10/10, all four packaged examples (`gfx-gpu`, `gfx-skia`,
+`media-player`, and the zero-copy `crtgfx_skia_media_window_demo` bridge --
+the one that actually links `capture_avfoundation.c.o` in, real result:
+`RESULT backend=metal interop=zero-copy gpu_frame=yes texture_backed=yes
+... frames_presented=20 ... pixel_check=pass`) rebuilt and ran successfully
+against the freshly packaged SDK, `verify_dist.py` passed, and the SDK
+published atomically. Full in-tree `ctest`, re-confirmed after these
+CMake/prerequisite changes: 145/145.
 
 ## Non-goals for the current tranche
 

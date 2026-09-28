@@ -10,6 +10,43 @@ substantive update.
 
 ## 2026-09-28
 
+- **Encode & Capture Tranche 6, macOS/arm64 isolated-stage closure: the
+  first-ever isolated `04-gfx-media` build on macOS found and fixed three
+  more real, first-run-only packaging gaps predating this whole tranche.**
+  `docs/crtmedia_encode_capture_acceptance.md`'s own Tranche 6 section has
+  the full detail; summary here.
+
+  Running `tools/crt-stage-build.py`'s isolated `04-gfx-media` rebuild on
+  macOS for the first time since Tranche 4A landed (2026-09-27) failed
+  immediately with real undefined `_crtmedia_capture_backend_*` symbols
+  linking `libcrtmedia.dylib`: `distribution/stages/04-gfx-media/
+  CMakeLists.txt`'s own macOS branch had never added `capture_
+  avfoundation.c` to `CRTMEDIA_BACKEND_SOURCES` -- the exact same class of
+  gap the Windows Tranche 6 pass already found for `capture_mf.c`, just
+  undiscovered on macOS until this first real isolated-stage attempt.
+  Fixed by adding it, and by moving its own `-Wno-cast-function-type-
+  mismatch` compile-flag override (previously duplicated only in
+  `libcrtmedia/CMakeLists.txt`) into the shared `crt_add_crtmedia_
+  targets()` (`libcrtmedia/cmake/crtmedia_targets.cmake`), mirroring how
+  `capture_mf.c`/`capture_v4l2.c` already work there -- both the in-tree
+  build and every isolated stage now get it automatically, with no
+  duplication.
+
+  Once the library actually linked, `verify_dist.py` immediately found a
+  third real gap: `tools/crt_dist_prerequisites.py`'s `macos-media-runtime`
+  entry never declared `AVFoundation.framework`, a real `LC_LOAD_DYLIB`
+  dependency of `libcrtmedia.dylib` since Tranche 4A that no isolated stage
+  had ever actually exercised before now. Fixed by adding it.
+
+  With all three fixed, a real, full, from-scratch isolated `04-gfx-media`
+  stage rebuild on macOS passed end to end in 497.7s: 10/10 stage tests,
+  all four packaged examples (including the zero-copy `crtgfx_skia_media_
+  window_demo` bridge -- the one that actually links `capture_
+  avfoundation.c.o` in, real result: `interop=zero-copy gpu_frame=yes
+  texture_backed=yes ... pixel_check=pass`), `verify_dist.py`, and atomic
+  publish. Full in-tree `ctest`, re-confirmed after these CMake/
+  prerequisite changes: 145/145.
+
 - **Encode & Capture Tranche 6, macOS/arm64 replay: both host-generic tests
   run for real, one real skip-classification bug and one real stage-source
   registry gap found and fixed.** `docs/crtmedia_encode_capture_acceptance.

@@ -449,15 +449,31 @@ if(CRT_TARGET_OS STREQUAL "windows")
   set(CRTMEDIA_WINDOWS_MF_LIB -Wl,Mf.lib)
   set(CRTMEDIA_WINDOWS_UUID_LIB -Wl,uuid.lib)
 elseif(CRT_TARGET_OS STREQUAL "macos")
-  set(CRTMEDIA_BACKEND_SOURCES src/arch/macos/audio_sink_coreaudio.c)
+  # capture_avfoundation.c (Encode & Capture Tranche 4A/4B, 2026-09-27/28) --
+  # real AVFoundation capture, added alongside the pre-existing CoreAudio
+  # audio sink. Missing here since the file's own first commit (found for
+  # real 2026-09-28 running this isolated stage on macOS for the first time
+  # since Tranche 4A landed: a real "undefined symbols ... _crtmedia_
+  # capture_backend_*" libcrtmedia.dylib link failure, the same class of gap
+  # capture_mf.c's own comment in the windows branch above documents for
+  # Windows) -- its own -Wno-cast-function-type-mismatch compile-options
+  # override lives in crt_add_crtmedia_targets() itself now (cmake/
+  # crtmedia_targets.cmake), shared with the in-tree build rather than
+  # duplicated here.
+  set(CRTMEDIA_BACKEND_SOURCES
+    src/arch/macos/audio_sink_coreaudio.c
+    src/arch/macos/capture_avfoundation.c)
   # Keep in step with CRTMEDIA_MACOS_FRAMEWORKS in libcrtmedia/CMakeLists.txt
   # (that file explains each framework); tools/test_stage_source_closure.py
   # fails when this list lacks one. CoreFoundation is what FFmpeg's
   # videotoolbox.o/hwcontext_videotoolbox.o need for CFDictionary/CFData/
   # CFNumber; without it this isolated stage cannot link libcrtmedia.dylib.
+  # AVFoundation/Foundation/objc (Tranche 4A) are capture_avfoundation.c's
+  # own real AVCaptureSession/NSAutoreleasePool/objc-runtime needs.
   set(CRTMEDIA_MACOS_FRAMEWORKS
     "-framework AudioToolbox" "-framework VideoToolbox"
-    "-framework CoreVideo" "-framework CoreMedia" "-framework CoreFoundation")
+    "-framework CoreVideo" "-framework CoreMedia" "-framework CoreFoundation"
+    "-framework AVFoundation" "-framework Foundation" "objc")
 else()
   set(CRTMEDIA_BACKEND_SOURCES
     src/arch/linux/audio_sink_linux.c

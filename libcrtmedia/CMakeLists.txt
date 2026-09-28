@@ -125,18 +125,12 @@ elseif(CRT_TARGET_OS STREQUAL "macos")
     src/arch/macos/audio_sink_coreaudio.c
     src/arch/macos/capture_avfoundation.c
   )
-  # -Wno-cast-function-type-mismatch (2026-09-27): capture_avfoundation.c's
-  # own objc_msgSend casts are the identical real, intentional pattern
-  # libcrtgfx/CMakeLists.txt already suppresses this same real, fairly new
-  # Clang -Wall/-Wextra diagnostic for (window_cocoa.c/gpu_metal.c, that
-  # file's own fuller comment) -- C has no other supported way to call a
-  # function through a pointer typed differently than how it is declared,
-  # which is exactly what driving objc_msgSend from plain C requires.
-  set_source_files_properties(
-    src/arch/macos/capture_avfoundation.c
-    PROPERTIES
-    COMPILE_OPTIONS "-Wno-cast-function-type-mismatch;-Wno-unknown-warning-option"
-  )
+  # capture_avfoundation.c's own -Wno-cast-function-type-mismatch override
+  # (its objc_msgSend casts are the same real, intentional pattern
+  # libcrtgfx/CMakeLists.txt already suppresses for window_cocoa.c/
+  # gpu_metal.c) now lives in crt_add_crtmedia_targets() itself
+  # (cmake/crtmedia_targets.cmake), shared with every isolated stage
+  # rather than duplicated here -- see that function's own comment.
 endif()
 if(CRT_TARGET_OS STREQUAL "windows")
   # ole32.lib: the real flat-export import library for CoInitializeEx()/

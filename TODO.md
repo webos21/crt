@@ -144,8 +144,22 @@ Keep completed evidence in `HISTORY.md`; this list tracks only tranche state.
   fixed along the way: the new Tranche 4B shim header (`porting/shims/
   macos/ffmpeg_videotoolboxenc_pthread_dlfcn_compat.h`) was missing from
   the macOS isolated-stage file list. Full in-tree `ctest`: 145/145.
-  macOS's own isolated-stage rebuild, and both tests' Linux/x86_64 replay,
-  remain.
+  **macOS/arm64 isolated-stage rebuild done 2026-09-28:** the first-ever
+  isolated `04-gfx-media` stage build on macOS found two more real,
+  first-run-only packaging gaps predating this whole tranche -- `capture_
+  avfoundation.c` (Tranche 4A) was never added to `distribution/stages/
+  04-gfx-media/CMakeLists.txt`'s own `CRTMEDIA_BACKEND_SOURCES` (a real
+  undefined-symbol `libcrtmedia.dylib` link failure) or to `tools/
+  crt_dist_prerequisites.py`'s macOS framework list (`AVFoundation.
+  framework` undeclared). Fixed both, plus centralized capture_
+  avfoundation.c's own compile-flag override into `crt_add_crtmedia_
+  targets()` (`cmake/crtmedia_targets.cmake`) so every caller gets it
+  automatically. Full isolated rebuild then passed end to end (497.7s
+  total): 10/10 stage tests, all four packaged examples (including the
+  zero-copy `crtgfx_skia_media_window_demo` bridge), `verify_dist.py`, and
+  atomic publish. Full in-tree `ctest` re-confirmed at 145/145 after the
+  fix. Both tests' Linux/x86_64 replay, and Linux's own isolated-stage
+  closure, remain.
 
 ## Planned
 
