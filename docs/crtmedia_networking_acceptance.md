@@ -259,7 +259,16 @@ this primitive really is host-neutral by construction, not just by
 intention. Full in-tree `ctest`: 146/146 (this host's own total test count
 naturally differs from Windows' 156, per-OS test registration, same as
 every other cross-host tranche in this project; no test regressed).
-Linux/x86_64 replay remains.
+
+**Linux/x86_64 done 2026-09-29.** Same source, unmodified, no code changes
+needed: identical result across 5 consecutive runs -- `crtmedia_transport_
+queue_test: ok watermark=pass timeout=pass eof=pass stress_producer_
+faster=pass stress_consumer_faster=pass cancel_writer=pass
+cancel_reader=pass release_wakes_all=pass`. Full in-tree `ctest`: 139/140
+(the one failure is the same pre-existing, environment-caused
+`crtmedia_playback_pipeline_test_runs` gap this host has had since before
+this tranche began -- no sound card at all -- unrelated to the transport
+queue). This tranche is now closed on all three hosts.
 
 ### 2. Progressive HTTP input and extractor integration
 

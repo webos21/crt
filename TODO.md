@@ -74,16 +74,18 @@ consumers, not completion gates for this tranche.
   sink API shape, back-pressure/drop policy, reconnect (`Range`+`If-Range`)
   rule, and the real TLS trust policy are all frozen in `docs/
   crtmedia_networking_acceptance.md`.
-* [ ] **1. Implement and prove the bounded transport core.** Windows/x64
-  done 2026-09-28, recorded in `HISTORY.md`: `libcrtmedia/src/
-  transport_queue.{c,h}`, no socket/curl/TLS dependency, fully resource-
-  free and host-neutral, real-pthread deterministic acceptance
+* [x] **1. Implement and prove the bounded transport core.** Closed
+  2026-09-29 on all three hosts, recorded in `HISTORY.md`. `libcrtmedia/
+  src/transport_queue.{c,h}`, no socket/curl/TLS dependency, fully
+  resource-free and host-neutral, real-pthread deterministic acceptance
   (`crtmedia_transport_queue_test: ok watermark=pass timeout=pass eof=pass
   stress_producer_faster=pass stress_consumer_faster=pass
-  cancel_writer=pass cancel_reader=pass release_wakes_all=pass`).
-  **macOS/arm64 done 2026-09-29:** same unmodified source, identical
-  result across 5 consecutive runs, no code changes needed. Full in-tree
-  `ctest`: 146/146. Linux/x86_64 replay remains.
+  cancel_writer=pass cancel_reader=pass release_wakes_all=pass`). Windows/
+  x64 done 2026-09-28; macOS/arm64 and Linux/x86_64 both replayed the
+  identical, unmodified source on 2026-09-29 with no code changes needed --
+  5 consecutive runs each, no flakiness. Full in-tree `ctest` on Linux:
+  139/140 (the one failure is the pre-existing, unrelated no-sound-card
+  gap).
 * [ ] **2. Add progressive HTTP input and extractor integration.** Two
   separate fixtures, not one: (A) Range-capable regular MP4 through the
   seekable custom-AVIO path, (B) chunked/no-Range delivery through the

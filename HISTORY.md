@@ -10,6 +10,24 @@ substantive update.
 
 ## 2026-09-29
 
+- **Networking & Streaming Tranche 1 closed on all three hosts: Linux/
+  x86_64 replay, unmodified source, identical result, no code changes
+  needed.** `docs/crtmedia_networking_acceptance.md`'s own Tranche 1
+  section has the full detail.
+
+  Same `libcrtmedia/src/transport_queue.{c,h}`/`tests/transport_queue_
+  test.c` pair already verified on Windows/x64 and macOS/arm64 (below),
+  unchanged, built and ran cleanly on this host: 5 consecutive runs, all
+  identical -- `crtmedia_transport_queue_test: ok watermark=pass
+  timeout=pass eof=pass stress_producer_faster=pass
+  stress_consumer_faster=pass cancel_writer=pass cancel_reader=pass
+  release_wakes_all=pass`. Full in-tree `ctest`: 139/140 (the one failure
+  is the same pre-existing, environment-caused `crtmedia_playback_
+  pipeline_test_runs` gap this host has had since before this tranche
+  began -- no sound card at all, confirmed via `aplay -l` -- unrelated to
+  the transport queue). "Networking and streaming" Tranche 1 is now closed
+  on Linux/x86_64, macOS/arm64, and Windows/x64 alike.
+
 - **Networking & Streaming Tranche 1 replayed on macOS/arm64: unmodified
   source, identical result, no code changes needed.** `docs/crtmedia_
   networking_acceptance.md`'s own Tranche 1 section has the full detail.
@@ -25,7 +43,7 @@ substantive update.
   every time, no flakiness -- confirming this primitive really is
   host-neutral by construction (no socket/curl/TLS dependency, pure
   pthread producer/consumer), not just by intention. Full in-tree `ctest`:
-  146/146. Linux/x86_64 replay of the same unmodified source remains.
+  146/146.
 
 ## 2026-09-28
 
