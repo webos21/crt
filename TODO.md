@@ -130,8 +130,22 @@ Keep completed evidence in `HISTORY.md`; this list tracks only tranche state.
   registry that had silently dropped every "Encode and capture" tranche's
   files from every isolated stage on all three hosts, not just Windows),
   and a full from-scratch isolated `04-gfx-media` stage rebuild passed end
-  to end. macOS/arm64 and Linux/x86_64 replays of the same two tests, plus
-  their own isolated-stage closure, remain.
+  to end.
+  **macOS/arm64 tests done 2026-09-28:** the same two host-generic tests
+  replayed cleanly -- `crtmedia_timing_discontinuity_test: ok frames=20 ...`
+  unchanged, and `crtmedia_capture_encode_lifecycle_test` found and fixed a
+  real skip-classification gap (a device that opens but never yields its
+  first real frame -- this host's own already-documented Tranche 4A camera-
+  authorization finding -- was a hard failure instead of a skip); after the
+  fix: `ok capture_iterations=0 ... hw_iterations=15 hw_samples=1500
+  hw_releases=1500 ...` (15/15 VideoToolbox hardware-encode lifecycle
+  cycles clean, capture half an honest skip in this non-interactive
+  environment). One more `create_stage_source.py` registry gap found and
+  fixed along the way: the new Tranche 4B shim header (`porting/shims/
+  macos/ffmpeg_videotoolboxenc_pthread_dlfcn_compat.h`) was missing from
+  the macOS isolated-stage file list. Full in-tree `ctest`: 145/145.
+  macOS's own isolated-stage rebuild, and both tests' Linux/x86_64 replay,
+  remain.
 
 ## Planned
 

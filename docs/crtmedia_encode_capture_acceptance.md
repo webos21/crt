@@ -406,8 +406,9 @@ capture/encoder ownership stress, installed-header/link smoke, isolated
 `04-gfx-media` stage coverage, packaged-SDK acceptance, and documentation
 consistency on all three hosts.
 
-**Windows/x64 done 2026-09-28.** macOS/arm64 and Linux/x86_64 replays of the
-same two host-generic tests, plus their own isolated-stage closure, remain.
+**Windows/x64 done 2026-09-28.** macOS/arm64's own replay of the same two
+tests is done too (below); Linux/x86_64's replay, and macOS's own isolated-
+stage closure, remain.
 
 Two new tests, both host-generic (unmodified across all three hosts --
 `crtmedia_capture_enumerate()`/`crtmedia_codec_create_encoder("video/avc")`
@@ -484,6 +485,54 @@ above, run in-tree) passed 10/10, all four packaged examples (`gfx-gpu`,
 demo` bridge -- the one that actually links `capture_mf.c.obj` in) rebuilt
 and ran successfully against the freshly packaged SDK, `verify_dist.py`
 passed, and the SDK published atomically. Full in-tree `ctest`: 155/155.
+
+**macOS/arm64 replay, done 2026-09-28.** `crtmedia_timing_discontinuity_
+test` needed no changes at all and reproduced the identical result:
+`crtmedia_timing_discontinuity_test: ok frames=20 gap1_us=66666
+gap2_us=500000`.
+
+`crtmedia_capture_encode_lifecycle_test` surfaced one real gap in the
+shared test itself, not in this host's own capture/encode backends: its
+`run_capture_cycle()` classified `device_count==0`/a failed `open()` as an
+honest skip, but had no equivalent classification for a device that opens
+successfully and then never yields even its first real frame -- exactly
+what happens on this host when the compiled test binary is invoked as a
+plain, un-launched process, per Tranche 4A's own already-documented finding
+(`authorizationStatus`/`requestAccessForMediaType:` are unreliable outside a
+LaunchServices-launched, signed bundle). Reproduced directly: a fresh,
+ad-hoc-signed throwaway `.app` bundle around the same, unmodified test
+binary, launched with `open -W`, still failed the same way -- a brand-new
+bundle identifier gets a real, interactive TCC camera-permission prompt the
+first time, and nothing in this environment can click "Allow" -- so this is
+a genuine environment property, not a stale-permission artifact. Fixed in
+`tests/capture_encode_lifecycle_test.c` itself (host-generic, so Linux's own
+future replay benefits too): a failure on the *first* dequeue of a cycle is
+now classified the same honest way as a missing device; a failure *after*
+at least one real frame was already captured is unchanged, still a genuine
+regression. Real result after the fix: `crtmedia_capture_encode_lifecycle_
+test: ok capture_iterations=0 capture_frames=0 capture_releases=0
+capture_decoded=0 hw_iterations=15 hw_samples=1500 hw_releases=1500
+hw_decoded=1500` -- all 15 VideoToolbox hardware-encode create/queue/drain/
+EOS/destroy cycles completed cleanly with no resource-lifetime bug found
+(a real, positive closure result for that half, matching the Windows
+lifecycle test's own outcome), while the capture half reports an honest,
+precise skip rather than a false failure in this non-interactive
+environment. A real capture-half pass on this host is possible in principle
+(the exact LaunchServices-launch technique Tranche 4A itself used, once a
+human has interactively approved that one specific bundle's camera access
+at least once) but is out of scope for an automated verification pass.
+
+One more real `create_stage_source.py` registry gap surfaced while checking
+whether this replay's own new code would carry over to an isolated stage
+build: `porting/shims/macos/ffmpeg_videotoolboxenc_pthread_dlfcn_compat.h`
+(Tranche 4B's own compatibility shim, referenced only from a string inside
+`porting/recipes/ffmpeg.json`'s own Makefile patch, never from a bundled
+C source's `#include`) was missing from the macOS `project_paths_by_os`
+list -- the same class of gap `tools/test_stage_source_closure.py` cannot
+catch (it only scans bundled sources' own `#include` directives) that the
+Windows Tranche 6 pass already found for `capture_mf.c`. Fixed by adding
+it; a full from-scratch isolated `04-gfx-media` stage rebuild on macOS,
+proving this fix actually matters, has not yet been run.
 
 ## Non-goals for the current tranche
 

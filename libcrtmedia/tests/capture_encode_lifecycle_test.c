@@ -20,7 +20,19 @@
  * is independently, honestly skippable (no camera; no hardware H.264
  * encoder) -- this test needs at least one of the two to be real hardware
  * evidence, matching every other Tranche 2-5 test's own skip discipline;
- * skipping both halves is the only case classified as a CTest skip. */
+ * skipping both halves is the only case classified as a CTest skip.
+ *
+ * macOS/arm64 replay (2026-09-28) found one more real, honest skip case
+ * run_capture_cycle() below did not yet classify correctly: a device that
+ * enumerates and opens successfully but then never yields even its first
+ * frame (confirmed for real: this is exactly docs/crtmedia_encode_capture_
+ * acceptance.md's own Tranche 4A finding -- a bare, un-launched process's
+ * camera authorization on this host never actually completes) was
+ * previously treated as a hard failure rather than a skip, since only
+ * device_count==0/open-failure were classified that way. Fixed by
+ * classifying a failure on the very first dequeue of a cycle the same way
+ * -- a device that yields at least one real frame and then fails partway
+ * through is still a genuine failure, unchanged. */
 
 #include "crtmedia/capture.h"
 #include "crtmedia/codec.h"
@@ -164,12 +176,26 @@ static int run_capture_cycle(
   int encoded_packets = 0;
   int64_t last_capture_pts = -1;
   int failed = 0;
+  /* Set only when the very first dequeue of this cycle fails -- an opened
+   * device that never yields even one real frame is indistinguishable,
+   * from this API alone, from a device held exclusively elsewhere, a
+   * hardware fault, or (confirmed for real on macOS, docs/crtmedia_encode_
+   * capture_acceptance.md's own Tranche 4A finding) a bare, un-launched
+   * process whose camera authorization never actually completes -- the
+   * same real, honest skip this test's own device_count==0/capture==NULL
+   * checks above already give a "no device at all" failure, just
+   * discovered one step later. A device that yields at least one real
+   * frame and then fails partway through stays a genuine failure below:
+   * that is a real regression this test exists to catch, not an
+   * environment limitation. */
+  int no_frames_ever = 0;
   for (int index = 0; index < CAPTURE_FRAME_COUNT && !failed; ++index) {
     crtmedia_frame frame;
     crtmedia_result r = crtmedia_capture_dequeue_frame(capture, DEQUEUE_TIMEOUT_MS, &frame);
     if (r != CRTMEDIA_OK || frame.timestamp_us <= last_capture_pts ||
         frame.format != CRTMEDIA_PIXEL_FORMAT_YUV420P || frame.release == NULL) {
       failed = 1;
+      if (index == 0) no_frames_ever = 1;
       break;
     }
     last_capture_pts = frame.timestamp_us;
@@ -188,6 +214,11 @@ static int run_capture_cycle(
   }
   CHECK(crtmedia_capture_stop(capture) == CRTMEDIA_OK, "stop capture");
   crtmedia_capture_release(capture);
+  if (no_frames_ever) {
+    crtmedia_muxer_release(muxer);
+    crtmedia_codec_release(encoder);
+    return 1;
+  }
   if (!failed) {
     crtmedia_result eos_result;
     while ((eos_result = crtmedia_codec_queue_frame(

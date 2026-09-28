@@ -10,6 +10,48 @@ substantive update.
 
 ## 2026-09-28
 
+- **Encode & Capture Tranche 6, macOS/arm64 replay: both host-generic tests
+  run for real, one real skip-classification bug and one real stage-source
+  registry gap found and fixed.** `docs/crtmedia_encode_capture_acceptance.
+  md`'s own Tranche 6 section has the full detail; summary here.
+
+  `crtmedia_timing_discontinuity_test` (software-only, no hardware
+  dependency) reproduced Windows' own result unchanged: `ok frames=20
+  gap1_us=66666 gap2_us=500000`.
+
+  `crtmedia_capture_encode_lifecycle_test` initially failed outright rather
+  than skipping: its capture half's `run_capture_cycle()` only classified
+  `device_count==0`/a failed `open()` as an honest skip, not a device that
+  opens successfully and then never yields even its first frame -- exactly
+  what happens on this host for a plain, un-launched test binary (Tranche
+  4A's own already-documented camera-authorization finding). Reproduced
+  even through a fresh, ad-hoc-signed `.app` bundle launched with `open -W`
+  (the exact technique Tranche 4A itself used): a brand-new bundle
+  identifier triggers a real, interactive TCC permission prompt nothing in
+  this environment can answer, confirming this is a genuine environment
+  property. Fixed in the shared (host-generic) test itself: a failure on
+  the *first* dequeue of a cycle is now classified as a skip the same way a
+  missing device already was; a failure after at least one real frame was
+  captured remains a genuine failure. Real result after the fix:
+  `crtmedia_capture_encode_lifecycle_test: ok capture_iterations=0 ...
+  hw_iterations=15 hw_samples=1500 hw_releases=1500 hw_decoded=1500` -- all
+  15 VideoToolbox hardware-encode create/queue/drain/EOS/destroy cycles
+  clean (a real, positive lifecycle-closure result), capture half an honest
+  skip rather than a false failure.
+
+  Also found: `tools/create_stage_source.py`'s macOS `project_paths_by_os`
+  list was missing Tranche 4B's own `porting/shims/macos/ffmpeg_
+  videotoolboxenc_pthread_dlfcn_compat.h` -- the same class of gap
+  `tools/test_stage_source_closure.py` cannot catch (that check only scans
+  bundled sources' own `#include` directives, not a string embedded in a
+  JSON recipe's Makefile patch) that the Windows Tranche 6 pass already
+  found for `capture_mf.c`. Fixed by adding it; a full isolated `04-gfx-
+  media` stage rebuild on macOS, which would exercise this path for real,
+  has not yet been run.
+
+  Full in-tree `ctest`: 145/145 (144 pass, 1 expected
+  `crtmedia_capture_avfoundation_test` skip).
+
 - **Encode & Capture Tranche 6 closed on Windows/x64: cross-host timing/
   lifecycle gates plus real packaged-SDK/isolated-stage closure, finding
   and fixing two more real packaging gaps along the way.**

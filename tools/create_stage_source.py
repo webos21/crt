@@ -259,6 +259,26 @@ STAGES = {
                 # as capture_mf.c's own comment in the windows tuple above:
                 # missing since the file's own first commit.
                 "libcrtmedia/src/arch/macos/capture_avfoundation.c",
+                # Encode & Capture Tranche 4B (2026-09-28): porting/recipes/
+                # ffmpeg.json's own macOS target_overrides references this
+                # shim by its real repo-relative path (@ROOT@-substituted,
+                # tools/crt-port-build.py) from a Makefile CFLAGS patch's
+                # own `-include $(CRT_FFMPEG_VTENC_SHIM)` -- an isolated
+                # stage's own copy of ffmpeg.json needs the same file
+                # present at that same path, or its own videotoolboxenc.o
+                # build fails with a real "file not found" the same way
+                # capture_avfoundation.c's own comment above already
+                # documents for a missing arch source file. The generic
+                # "porting/recipes/*.json" entries above cover the recipe
+                # itself but not this shim, since create_stage_source.py has
+                # no mechanism that parses a recipe's own Makefile-patch
+                # text for further file references -- found for real
+                # (2026-09-28) while replaying Tranche 6 on macOS, the same
+                # way capture_mf.c's own gap was found on Windows: neither
+                # is caught by tools/test_stage_source_closure.py, which
+                # only scans bundled C sources' own #include directives, not
+                # a JSON recipe's patch strings.
+                "porting/shims/macos/ffmpeg_videotoolboxenc_pthread_dlfcn_compat.h",
                 "libstdc++/third_party/libcxx/libc++.unexported.exp",
             ),
             "linux": (
