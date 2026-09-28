@@ -90,7 +90,7 @@ Keep completed evidence in `HISTORY.md`; this list tracks only tranche state.
   software mp4v-es round trip on the identical source --
   `docs/crtmedia_encode_capture_acceptance.md`'s Tranche 3 section has the
   full detail.
-* [ ] **4. macOS/arm64,** advanced ahead of Tranche 3 (real camera hardware
+* [x] **4. macOS/arm64,** advanced ahead of Tranche 3 (real camera hardware
   available now; Tranche 3's own number is unchanged, only its execution
   order -- `docs/crtmedia_encode_capture_acceptance.md`).
   **4A done 2026-09-27:** `src/arch/macos/capture_avfoundation.c`
@@ -98,8 +98,18 @@ Keep completed evidence in `HISTORY.md`; this list tracks only tranche state.
   the existing, unmodified software MPEG-4 encoder. Real result, three
   consecutive runs on the built-in camera: `crtmedia_capture_avfoundation_
   test: ok frames=30 ... size=640x480 fps=30`; full `ctest` 142/142.
-  **4B still open:** VideoToolbox H.264 hardware encode on the same capture
-  path, with the actually-used path reported rather than inferred.
+  **4B done 2026-09-28:** VideoToolbox H.264 hardware encode
+  (`avcodec_find_encoder_by_name("h264_videotoolbox")`, plain software
+  YUV420P input frames, no `hw_frames_ctx` needed) with the software
+  mp4v-es fallback run back to back on the identical synthetic source --
+  `tests/encode_videotoolbox_test.c`, mirroring Tranche 3's own VA-API
+  test shape. Real result: `crtmedia_encode_videotoolbox_test: ok
+  path=videotoolbox frames=100 ...`; full `ctest` 143/143. Required a new
+  per-object compatibility shim (`porting/shims/macos/ffmpeg_
+  videotoolboxenc_pthread_dlfcn_compat.h`) since FFmpeg's own
+  `libavcodec/videotoolboxenc.c` is the first real-Apple-SDK file in this
+  project that also uses this project's own pthread/dl surface for real --
+  see that shim's own top comment for the full ABI-mismatch story.
 * [ ] **5. Windows/x64.** Media Foundation capture plus hardware encode on
   real hardware, with software fallback and decode-back acceptance.
 * [ ] **6. Cross-host closure.** Timestamp discontinuity/drop behavior,

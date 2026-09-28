@@ -101,6 +101,20 @@ struct crtmedia_codec {
   int is_vaapi_encoder;
   AVBufferRef* hw_frames_ctx;
   AVFrame* hw_encode_frame;
+  /* macOS VideoToolbox H.264 hardware encode (2026-09-28, "Encode and
+   * capture" Tranche 4B). Unlike is_vaapi_encoder above, this backend needs
+   * no hw_frames_ctx/hw_encode_frame at all: FFmpeg's own libavcodec/
+   * videotoolboxenc.c lists AV_PIX_FMT_YUV420P directly in its own
+   * avc_pix_fmts[] (confirmed by reading that file), so a plain software
+   * AVFrame is handed straight to avcodec_send_frame() exactly like the
+   * existing mp4v-es path -- VTCompressionSession copies the planes into
+   * its own internally pooled CVPixelBuffer (vtenc_send_frame(), read
+   * directly, not assumed). This flag exists only so crtmedia_codec_get_
+   * output_format() reports mime="video/avc" for this instance; every
+   * other codepath below (queue_frame's plane copy, dequeue_encoded_
+   * output) already takes the same route as mp4v-es via the shared
+   * `!is_vaapi_encoder` branches. */
+  int is_videotoolbox_encoder;
 };
 
 static enum AVCodecID codec_id_for_mime(const char* mime) {
@@ -415,14 +429,21 @@ crtmedia_result crtmedia_codec_create_encoder(const crtmedia_format* format, crt
   int32_t pixel_format = 0;
   int32_t frame_rate = 0;
   int32_t bit_rate = 0;
-  int want_vaapi_h264 = 0;
+  /* want_h264 picks the per-OS real hardware H.264 encoder: h264_vaapi on
+   * Linux (Tranche 3), h264_videotoolbox on macOS (Tranche 4B). There is no
+   * software H.264 fallback within this function on either OS (this file's
+   * own established "real hardware path, honest failure otherwise"
+   * discipline -- see is_vaapi_encoder's own struct comment); a caller
+   * wanting a guaranteed-available encoder uses the existing mp4v-es
+   * software path instead. */
+  int want_h264 = 0;
   int mime_ok = 0;
   if (crtmedia_format_get_string(format, CRTMEDIA_FORMAT_KEY_MIME, &mime) == CRTMEDIA_OK) {
     if (strcmp(mime, "video/mp4v-es") == 0) {
       mime_ok = 1;
     } else if (strcmp(mime, "video/avc") == 0) {
       mime_ok = 1;
-      want_vaapi_h264 = 1;
+      want_h264 = 1;
     }
   }
   if (!mime_ok ||
@@ -434,8 +455,8 @@ crtmedia_result crtmedia_codec_create_encoder(const crtmedia_format* format, crt
       pixel_format != CRTMEDIA_PIXEL_FORMAT_YUV420P) {
     return CRTMEDIA_ERROR_UNSUPPORTED;
   }
-#if !defined(CRT_TARGET_OS_LINUX)
-  if (want_vaapi_h264) {
+#if !defined(CRT_TARGET_OS_LINUX) && !defined(CRT_TARGET_OS_MACOS)
+  if (want_h264) {
     return CRTMEDIA_ERROR_UNSUPPORTED;
   }
 #endif
@@ -444,8 +465,16 @@ crtmedia_result crtmedia_codec_create_encoder(const crtmedia_format* format, crt
     bit_rate = 1000000;
   }
 
-  const AVCodec* av_codec = want_vaapi_h264 ? avcodec_find_encoder_by_name("h264_vaapi")
-                                             : avcodec_find_encoder(AV_CODEC_ID_MPEG4);
+  const AVCodec* av_codec = NULL;
+  if (want_h264) {
+#if defined(CRT_TARGET_OS_LINUX)
+    av_codec = avcodec_find_encoder_by_name("h264_vaapi");
+#elif defined(CRT_TARGET_OS_MACOS)
+    av_codec = avcodec_find_encoder_by_name("h264_videotoolbox");
+#endif
+  } else {
+    av_codec = avcodec_find_encoder(AV_CODEC_ID_MPEG4);
+  }
   if (av_codec == NULL) {
     return CRTMEDIA_ERROR_UNSUPPORTED;
   }
@@ -474,7 +503,8 @@ crtmedia_result crtmedia_codec_create_encoder(const crtmedia_format* format, crt
   codec->codec_ctx->max_b_frames = 0;
   codec->codec_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
-  if (want_vaapi_h264) {
+#if defined(CRT_TARGET_OS_LINUX)
+  if (want_h264) {
     /* Real VA-API hardware encode device (this project's own libva/
      * libva-drm, already required by porting/recipes/ffmpeg.json's
      * --enable-vaapi for decode -- Tranche 3 adds no new host
@@ -516,8 +546,20 @@ crtmedia_result crtmedia_codec_create_encoder(const crtmedia_format* format, crt
       return CRTMEDIA_ERROR_UNSUPPORTED;
     }
     codec->is_vaapi_encoder = 1;
-  } else {
+  } else
+#endif
+  {
+    /* Plain software-frame path: the existing mp4v-es software encoder
+     * (want_h264 == 0 everywhere), and macOS's h264_videotoolbox (want_h264
+     * == 1 on macOS -- see is_videotoolbox_encoder's own struct comment for
+     * why this hardware backend takes the same plain-YUV420P route as
+     * software, unlike VA-API above). */
     codec->codec_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
+#if defined(CRT_TARGET_OS_MACOS)
+    if (want_h264) {
+      codec->is_videotoolbox_encoder = 1;
+    }
+#endif
   }
 
   if (avcodec_open2(codec->codec_ctx, av_codec, NULL) < 0) {
@@ -528,8 +570,9 @@ crtmedia_result crtmedia_codec_create_encoder(const crtmedia_format* format, crt
   /* The encoder-input scratch frame: NV12 for the VA-API path (matching
    * frames_ctx->sw_format above -- crtmedia_codec_queue_frame() writes the
    * caller's YUV420P planes into it that way before uploading), plain
-   * YUV420P for the existing software path, unchanged. */
-  codec->decode_frame->format = want_vaapi_h264 ? AV_PIX_FMT_NV12 : AV_PIX_FMT_YUV420P;
+   * YUV420P for every other path (existing software mp4v-es, and macOS
+   * VideoToolbox), unchanged. */
+  codec->decode_frame->format = codec->is_vaapi_encoder ? AV_PIX_FMT_NV12 : AV_PIX_FMT_YUV420P;
   codec->decode_frame->width = width;
   codec->decode_frame->height = height;
   if (av_frame_get_buffer(codec->decode_frame, 32) < 0) {
@@ -752,7 +795,8 @@ crtmedia_result crtmedia_codec_get_output_format(
     return CRTMEDIA_ERROR_UNSUPPORTED;
   }
   if (crtmedia_format_set_string(
-          format, CRTMEDIA_FORMAT_KEY_MIME, codec->is_vaapi_encoder ? "video/avc" : "video/mp4v-es") != CRTMEDIA_OK ||
+          format, CRTMEDIA_FORMAT_KEY_MIME,
+          (codec->is_vaapi_encoder || codec->is_videotoolbox_encoder) ? "video/avc" : "video/mp4v-es") != CRTMEDIA_OK ||
       crtmedia_format_set_int32(format, CRTMEDIA_FORMAT_KEY_WIDTH, codec->codec_ctx->width) != CRTMEDIA_OK ||
       crtmedia_format_set_int32(format, CRTMEDIA_FORMAT_KEY_HEIGHT, codec->codec_ctx->height) != CRTMEDIA_OK ||
       crtmedia_format_set_int32(format, CRTMEDIA_FORMAT_KEY_PIXEL_FORMAT, CRTMEDIA_PIXEL_FORMAT_YUV420P) != CRTMEDIA_OK ||

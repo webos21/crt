@@ -257,12 +257,71 @@ already-documented "rebuilding a port does not by itself relink its
 consumers" gap `docs/release_preview.md`/`HISTORY.md` record for the
 hardware-decode tranche; not specific to capture.
 
-**4B. VideoToolbox H.264 hardware encode — not started.** Add a second,
-real hardware encoder behind `crtmedia_codec_create_encoder()`
-(`mime=video/avc`) on top of the exact same, now-proven AVFoundation capture
-path above, reporting the actually-used path rather than capability inference
-(mirroring Tranche 3's own requirement), before this tranche is considered
-closed.
+**4B. VideoToolbox H.264 hardware encode — complete on 2026-09-28.**
+`crtmedia_codec_create_encoder()` (`mime=video/avc`) now selects
+`avcodec_find_encoder_by_name("h264_videotoolbox")` on macOS, the direct
+counterpart of Tranche 3's own `h264_vaapi` selection on Linux. Unlike the
+VA-API path, VideoToolbox's own encoder lists `AV_PIX_FMT_YUV420P` directly
+in its own `avc_pix_fmts[]` (confirmed by reading `libavcodec/
+videotoolboxenc.c` directly), so this backend needs no `hw_frames_ctx`/
+upload step at all -- the existing plain software-frame `codec->decode_frame`
+path (already shared with the mp4v-es encoder) is reused unmodified;
+`is_videotoolbox_encoder` exists purely so `crtmedia_codec_get_output_
+format()` reports `mime=video/avc` for this instance. `porting/recipes/
+ffmpeg.json`'s macOS `target_overrides` gained `--enable-encoder=
+h264_videotoolbox` and a new `libavcodec/Makefile` patch giving
+`videotoolboxenc.o` the same per-object `-fcrt-real-apple-sdk` CoreMedia/
+CoreVideo/VideoToolbox framework access `videotoolbox.c`/`hwcontext_
+videotoolbox.c` already had.
+
+A second, genuinely new problem surfaced building this, distinct from (and
+more subtle than) the framework-header need above: `videotoolboxenc.c` is
+the first real-Apple-SDK file in this project that *also* directly uses this
+project's own pthread/dl surface for real (a file-scope `pthread_once`
+guarding lazy compat-symbol loading via `dlsym(RTLD_DEFAULT, ...)`, plus a
+real per-instance `pthread_mutex_t`/`pthread_cond_t` pair). Confirmed for
+real: letting this file see the real Apple SDK's own `<pthread.h>`
+(exactly like its two siblings, which never touch pthread at all) produced
+a real, reproduced infinite spin -- this project's own linked `pthread_
+once()` (the only implementation ever linked into this project's own
+binaries; real Apple libSystem's own is never linked) spinning forever on
+memory laid out per Apple's real, much larger opaque `pthread_once_t`
+struct. Three narrower fixes were tried and rejected in turn (pre-defining
+just the `<pthread.h>` include guard; declaring a competing `pthread_once_t`
+typedef; swapping this whole compile's header-search order to prefer this
+project's own sysroot) -- each confirmed broken for a different reason, all
+recorded in full in `porting/shims/macos/ffmpeg_videotoolboxenc_pthread_
+dlfcn_compat.h`'s own top comment. The fix that actually works leaves
+`<pthread.h>` completely untouched (Apple's real types are unavoidably what
+`once_ctrl`/`lock`/`cv_sample_sent` really are in this translation unit,
+since CoreFoundation's own header chain pulls them in independently of
+anything done to the `<pthread.h>` umbrella itself) and instead uses
+`#pragma redefine_extname` to redirect just the 9 specific pthread calls
+this file makes to wrapper functions that resolve and call through the
+*real* Apple implementation in `/usr/lib/system/libsystem_pthread.dylib` via
+this project's own `dlopen()`/`dlsym()` -- correct precisely because that
+memory really is Apple-shaped, so only Apple's own real implementation can
+safely interpret it. A separate, simpler half of the same shim blocks just
+`<dlfcn.h>` (via `-D_DLFCN_H_`, a plain macro guard with no opaque-struct
+fallout) so this file's own `dlsym(RTLD_DEFAULT, ...)` compat-symbol lookups
+use this project's own `RTLD_DEFAULT=(void*)0` convention instead of Apple's
+real `(void*)-2` (which this project's own `dlsym()` would otherwise
+misinterpret as a real image-handle pointer and crash on, confirmed for
+real with a standalone probe). Both halves were verified independently with
+standalone probes against this exact host's real SDK before landing in the
+recipe, matching this project's own established discipline.
+
+Real result: `tests/encode_videotoolbox_test.c` (a structural mirror of
+Tranche 3's own `encode_vaapi_test.c` -- 100 deterministic synthetic frames,
+VideoToolbox H.264 encode, MP4 mux, reopen, decode-back, compared against
+the same round trip through the Tranche 1 software mp4v-es encoder run back
+to back on the identical source) reports `crtmedia_encode_videotoolbox_test:
+ok path=videotoolbox frames=100 encode_ms=102.8 decode_ms=15.1
+fallback_frames=100 fallback_encode_ms=4.2 fallback_decode_ms=6.7` on this
+host's real Apple Silicon VideoToolbox hardware encoder. Full `ctest` suite:
+143/143 (142 pass, plus `crtmedia_capture_avfoundation_test`'s own already-
+documented, expected `skip reason=camera-authorization-unavailable` when run
+outside a LaunchServices-launched bundle -- see 4A above).
 
 ### 5. Windows/x64
 

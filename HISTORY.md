@@ -10,6 +10,50 @@ substantive update.
 
 ## 2026-09-28
 
+- **Encode & Capture Tranche 4B closed: real VideoToolbox H.264 hardware
+  encode on macOS, plus a genuinely new real-Apple-SDK/pthread ABI
+  mismatch found and fixed.** `docs/crtmedia_encode_capture_acceptance.md`'s
+  own Tranche 4B section has the full detail; summary here.
+
+  `crtmedia_codec_create_encoder("video/avc")` now selects FFmpeg's
+  `h264_videotoolbox` encoder on macOS (the direct counterpart of Tranche
+  3's own `h264_vaapi` on Linux), needing no `hw_frames_ctx`/upload step at
+  all since VideoToolbox's own encoder accepts plain software YUV420P
+  frames directly -- the existing mp4v-es software path's own frame-copy
+  code is reused unmodified. `porting/recipes/ffmpeg.json` gained
+  `--enable-encoder=h264_videotoolbox` and a matching per-object
+  `libavcodec/Makefile` CFLAGS patch for `videotoolboxenc.o`.
+
+  Building this surfaced a real, previously-unseen problem: `videotoolboxenc.c`
+  is the first real-Apple-SDK-needing FFmpeg file in this project that also
+  directly uses this project's own pthread/dl surface (a file-scope
+  `pthread_once` plus a real per-instance `pthread_mutex_t`/`pthread_cond_t`
+  pair). Letting it see the real Apple SDK's own `<pthread.h>` produced a
+  real, reproduced infinite spin: this project's own linked `pthread_once()`
+  (the only implementation ever linked into this project's binaries)
+  spinning forever on memory laid out per Apple's real, much larger opaque
+  `pthread_once_t` struct. Three narrower fixes were tried and rejected in
+  turn (blocking just the `<pthread.h>` include guard; a competing
+  `pthread_once_t` typedef; swapping the whole compile's header-search
+  order to prefer this project's own sysroot, which broke CoreFoundation's
+  own real header chain outright) before landing on the one that works:
+  `porting/shims/macos/ffmpeg_videotoolboxenc_pthread_dlfcn_compat.h` uses
+  `#pragma redefine_extname` to redirect the 9 specific pthread calls this
+  file makes to wrappers that resolve and call through the *real* Apple
+  implementation in `/usr/lib/system/libsystem_pthread.dylib` via this
+  project's own `dlopen()`/`dlsym()`, leaving `<pthread.h>` itself
+  completely untouched. A separate, simpler half of the same shim blocks
+  `<dlfcn.h>` so this file's own `dlsym(RTLD_DEFAULT, ...)` compat-symbol
+  lookups use this project's own `RTLD_DEFAULT` convention instead of real
+  Apple's (which this project's own `dlsym()` would otherwise misinterpret
+  as a pointer and crash on). Both halves were verified with standalone
+  probes against this host's real SDK before landing.
+
+  Real result: `crtmedia_encode_videotoolbox_test: ok path=videotoolbox
+  frames=100 encode_ms=102.8 decode_ms=15.1 fallback_frames=100
+  fallback_encode_ms=4.2 fallback_decode_ms=6.7` on this host's real Apple
+  Silicon VideoToolbox hardware encoder; full `ctest` suite 143/143.
+
 - **Encode & Capture Tranche 2 closed: real USB UVC camera capture on
   Linux/x86_64, plus a real, honest MJPEG-only-hardware finding.**
   `docs/crtmedia_encode_capture_acceptance.md`'s own Tranche 2 section has
