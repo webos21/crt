@@ -406,9 +406,9 @@ capture/encoder ownership stress, installed-header/link smoke, isolated
 `04-gfx-media` stage coverage, packaged-SDK acceptance, and documentation
 consistency on all three hosts.
 
-**Windows/x64 done 2026-09-28.** macOS/arm64's own replay of the same two
-tests, and its own isolated-stage closure, are done too (below); Linux/
-x86_64's replay and isolated-stage closure remain.
+**Windows/x64 done 2026-09-28.** macOS/arm64's and Linux/x86_64's own
+replays of the same two tests, and their own isolated-stage closures, are
+all done too (below) -- this tranche is now closed on all three hosts.
 
 Two new tests, both host-generic (unmodified across all three hosts --
 `crtmedia_capture_enumerate()`/`crtmedia_codec_create_encoder("video/avc")`
@@ -580,6 +580,80 @@ the one that actually links `capture_avfoundation.c.o` in, real result:
 against the freshly packaged SDK, `verify_dist.py` passed, and the SDK
 published atomically. Full in-tree `ctest`, re-confirmed after these
 CMake/prerequisite changes: 145/145.
+
+**Linux/x86_64 replay, done 2026-09-28.** `crtmedia_timing_discontinuity_
+test` needed no changes and reproduced the identical result: `crtmedia_
+timing_discontinuity_test: ok frames=20 gap1_us=66666 gap2_us=500000`.
+
+`crtmedia_capture_encode_lifecycle_test` needed no code changes on this
+host either. Its first run happened while the USB UVC webcam this session
+had been using (Tranche 2's own acceptance camera) was not physically
+connected -- a real, honest `capture_iterations=0` result via the exact
+same first-dequeue skip classification the macOS replay's own fix already
+added, with the VA-API hardware-encode half still completing all 15
+iterations cleanly (`hw_iterations=15 hw_samples=1500 hw_releases=1500
+hw_decoded=1500`). Reconnecting the camera and rerunning the identical,
+unmodified binary produced a full real-hardware pass on both halves: `ok
+capture_iterations=15 capture_frames=450 capture_releases=450
+capture_decoded=450 hw_iterations=15 hw_samples=1500 hw_releases=1500
+hw_decoded=1500` -- no resource-lifetime bug found in either the V4L2
+capture path or the VA-API encode path across 15 create/destroy cycles
+each. Full in-tree `ctest`: 138/139 (the one failure is the same pre-
+existing, environment-caused `crtmedia_playback_pipeline_test_runs` gap
+this host has had since before this tranche began -- no sound card at all,
+confirmed via `aplay -l`, unrelated to capture/encode).
+
+**Linux/x86_64 isolated-stage closure, done 2026-09-28.** Running the
+actual isolated `04-gfx-media` stage build on Linux -- the first time
+since `capture_v4l2.c` gained its MJPEG branch and VA-API H.264 encode
+landed (this tranche's own Tranche 2/3 sections above) -- immediately
+surfaced one real, previously-undiscovered gap, invisible to any in-tree
+build:
+
+- `tools/crt-cc`'s own `-fcrt-real-linux-sdk` sentinel (added for VA-API's
+  `<va/va.h>` in the "Hardware video decode"/"Zero-copy decoded textures"
+  tranches) exposes only plain `/usr/include` as a lowest-priority
+  `-isystem` fallback -- correct for `va/va.h` itself (confirmed installed
+  directly there), but `capture_v4l2.c`'s own `<linux/videodev2.h>` pulls
+  in `<linux/ioctl.h>`, which itself does `#include <asm/ioctl.h>`. This
+  exact real Debian/Ubuntu host has no plain `/usr/include/asm` symlink at
+  all -- only the real multiarch location, `/usr/include/x86_64-linux-gnu/
+  asm/ioctl.h` (confirmed directly) -- so the isolated stage's own
+  `crt-cc`-driven compile failed outright: `fatal error: 'asm/ioctl.h'
+  file not found`. This is the identical class of gap `distribution/
+  stages/04-gfx-media/CMakeLists.txt`'s own `CRTGFX_LINUX_VULKAN_LIB`/
+  `CRTMEDIA_LINUX_VAAPI_LIB` `find_library()` calls already document and
+  fall back from (this isolated stage's own `crt-toolchain.cmake` skips
+  the host ABI probe that would otherwise populate this automatically) --
+  just never hit before now because no isolated stage had ever actually
+  compiled a kernel-UAPI-including source (as opposed to a userspace
+  library header like `va/va.h`) through this sentinel until `capture_
+  v4l2.c` did. Fixed in `tools/crt-cc` itself: when `-fcrt-real-linux-sdk`
+  is requested, it now also probes `dpkg-architecture -qDEB_HOST_MULTIARCH`
+  (the identical fallback mechanism, reused rather than duplicated) and
+  adds `/usr/include/<triplet>` as a second, still-lower-priority `-isystem`
+  fallback when it exists -- best-effort, so a non-Debian host or one with
+  a plain `/usr/include/asm` symlink already (common on Fedora/RHEL) is
+  unaffected.
+
+With that one fix, a real, full, from-scratch isolated `04-gfx-media` stage
+rebuild on Linux (`tools/crt-stage-build.py`, real FreeType/FFmpeg/Skia --
+FFmpeg configured and built with both the MJPEG decoder and the `h264_vaapi`
+encoder through the packaged `tools/crt-cc` too, confirming both Tranche 2's
+and Tranche 3's own fixes are portable, not in-tree-only artifacts) passed
+end to end: 876.5s total (FreeType/FFmpeg 699.0s, Skia 154.7s, everything
+else under 10s each). The isolated stage's own smaller ctest subset passed
+12/12 (including `crtmedia_capture_v4l2_test`, real hardware: `ok frames=30
+device=/dev/video0 size=640x480 fps=30`, and `crtmedia_zero_copy_test`),
+all packaged examples (`gfx-gpu`, `gfx-skia`, `media-player`, and the
+zero-copy `crtgfx_skia_media_window_demo` bridge -- real result: `RESULT
+backend=vulkan interop=zero-copy gpu_frame=yes texture_backed=yes
+cpu_readback=no frames_presented=20 ... pixel_check=pass
+post_resize_present=pass clean_exit=pass`) rebuilt and ran successfully
+against the freshly packaged SDK, `verify_dist.py` passed, and the SDK
+published atomically. Full in-tree `ctest`, re-confirmed after the
+`tools/crt-cc` fix: 138/139 (the same pre-existing no-sound-card gap noted
+above).
 
 ## Non-goals for the current tranche
 

@@ -57,109 +57,10 @@ newest entry first) rather than leaving it here.
 
 ## In Progress
 
-### Encode and capture
-
-Promoted 2026-09-27 after the three-host Zero-copy decoded textures closure.
-The frozen contract, acceptance gates, and host order live in
-[`docs/crtmedia_encode_capture_acceptance.md`](docs/crtmedia_encode_capture_acceptance.md).
-Keep completed evidence in `HISTORY.md`; this list tracks only tranche state.
-
-* [x] **0. Freeze the encode/mux/capture contract.** Microsecond PTS/DTS/
-  duration, frame and encoded-sample ownership, codec queue back-pressure,
-  MP4 mux lifecycle, software fallback, and host order are documented.
-* [x] **1. Linux/x86_64 synthetic software encode -> MP4 -> decode-back.**
-  The new FFmpeg-backed MPEG-4 encoder and MP4 muxer pass the deterministic
-  100-frame round trip with exact PTS/count/duration and pixel-range checks.
-* [x] **2. Linux/x86_64 V4L2 capture.** Closed 2026-09-28, recorded in
-  `HISTORY.md`. The backend, public capture ABI, YUV420/NV12/YUYV/MJPEG
-  conversion, mmap-buffer lifetime, monotonic timestamps, and stop behavior
-  are implemented and verified live: `crtmedia_capture_v4l2_test: ok
-  frames=30 device=/dev/video0 size=640x480 fps=30` on a real USB UVC
-  webcam, three consecutive runs. Real finding: this camera streams only
-  MJPEG/JPEG, not any raw format, so the backend gained an FFmpeg-decoder
-  MJPEG fallback (4:2:2-to-4:2:0 chroma downsample included) --
-  `docs/crtmedia_encode_capture_acceptance.md`'s Tranche 2 section has the
-  full detail.
-* [x] **3. Linux/x86_64 VA-API H.264 encode.** Closed 2026-09-28, recorded
-  in `HISTORY.md`. `crtmedia_codec_create_encoder("video/avc")` drives
-  FFmpeg's own `h264_vaapi` encoder over a real VA-API hardware frame pool;
-  no software H.264 fallback exists (FFmpeg ships none), so a successful
-  create is itself the "actually used, not inferred" hardware-path
-  evidence. New `crtmedia_encode_vaapi_test` (100 synthetic frames -> VA-API
-  H.264 -> MP4 -> decode-back) passes and is compared against the existing
-  software mp4v-es round trip on the identical source --
-  `docs/crtmedia_encode_capture_acceptance.md`'s Tranche 3 section has the
-  full detail.
-* [x] **4. macOS/arm64,** advanced ahead of Tranche 3 (real camera hardware
-  available now; Tranche 3's own number is unchanged, only its execution
-  order -- `docs/crtmedia_encode_capture_acceptance.md`).
-  **4A done 2026-09-27:** `src/arch/macos/capture_avfoundation.c`
-  (AVFoundation capture, driven via `objc_msgSend`, no host SDK header) feeds
-  the existing, unmodified software MPEG-4 encoder. Real result, three
-  consecutive runs on the built-in camera: `crtmedia_capture_avfoundation_
-  test: ok frames=30 ... size=640x480 fps=30`; full `ctest` 142/142.
-  **4B done 2026-09-28:** VideoToolbox H.264 hardware encode
-  (`avcodec_find_encoder_by_name("h264_videotoolbox")`, plain software
-  YUV420P input frames, no `hw_frames_ctx` needed) with the software
-  mp4v-es fallback run back to back on the identical synthetic source --
-  `tests/encode_videotoolbox_test.c`, mirroring Tranche 3's own VA-API
-  test shape. Real result: `crtmedia_encode_videotoolbox_test: ok
-  path=videotoolbox frames=100 ...`; full `ctest` 143/143. Required a new
-  per-object compatibility shim (`porting/shims/macos/ffmpeg_
-  videotoolboxenc_pthread_dlfcn_compat.h`) since FFmpeg's own
-  `libavcodec/videotoolboxenc.c` is the first real-Apple-SDK file in this
-  project that also uses this project's own pthread/dl surface for real --
-  see that shim's own top comment for the full ABI-mismatch story.
-* [x] **5. Windows/x64.** Closed 2026-09-28, recorded in `HISTORY.md`. Media
-  Foundation H.264 hardware encode (`h264_mf`) and a new Media Foundation
-  capture backend, both with software fallback/decode-back acceptance,
-  verified on real hardware: `crtmedia_capture_mf_test: ok frames=30 ...`
-  and `crtmedia_encode_mf_test: ok path=mf frames=100 ...`. Found and fixed
-  a real, project-wide `tools/crt-cc` linker bug along the way (`-Wl,
-  /libpath:` is a silent no-op under this project's actual MinGW-flavor LLD
-  driver) -- `docs/crtmedia_encode_capture_acceptance.md`'s Tranche 5
-  section has the full detail.
-* [ ] **6. Cross-host closure.** Timestamp discontinuity/drop behavior,
-  lifecycle stress, installed headers/link smoke, isolated stage and packaged
-  SDK acceptance, and final documentation consistency on all three hosts.
-  **Windows/x64 done 2026-09-28** (`HISTORY.md`, `docs/crtmedia_encode_
-  capture_acceptance.md`'s own Tranche 6 section): two new host-generic
-  tests (unmodified across hosts, ready to replay on macOS/Linux) verified
-  on real hardware, two real packaged-SDK gaps found and fixed (undeclared
-  Media Foundation DLL dependencies; a stale `create_stage_source.py` file
-  registry that had silently dropped every "Encode and capture" tranche's
-  files from every isolated stage on all three hosts, not just Windows),
-  and a full from-scratch isolated `04-gfx-media` stage rebuild passed end
-  to end.
-  **macOS/arm64 tests done 2026-09-28:** the same two host-generic tests
-  replayed cleanly -- `crtmedia_timing_discontinuity_test: ok frames=20 ...`
-  unchanged, and `crtmedia_capture_encode_lifecycle_test` found and fixed a
-  real skip-classification gap (a device that opens but never yields its
-  first real frame -- this host's own already-documented Tranche 4A camera-
-  authorization finding -- was a hard failure instead of a skip); after the
-  fix: `ok capture_iterations=0 ... hw_iterations=15 hw_samples=1500
-  hw_releases=1500 ...` (15/15 VideoToolbox hardware-encode lifecycle
-  cycles clean, capture half an honest skip in this non-interactive
-  environment). One more `create_stage_source.py` registry gap found and
-  fixed along the way: the new Tranche 4B shim header (`porting/shims/
-  macos/ffmpeg_videotoolboxenc_pthread_dlfcn_compat.h`) was missing from
-  the macOS isolated-stage file list. Full in-tree `ctest`: 145/145.
-  **macOS/arm64 isolated-stage rebuild done 2026-09-28:** the first-ever
-  isolated `04-gfx-media` stage build on macOS found two more real,
-  first-run-only packaging gaps predating this whole tranche -- `capture_
-  avfoundation.c` (Tranche 4A) was never added to `distribution/stages/
-  04-gfx-media/CMakeLists.txt`'s own `CRTMEDIA_BACKEND_SOURCES` (a real
-  undefined-symbol `libcrtmedia.dylib` link failure) or to `tools/
-  crt_dist_prerequisites.py`'s macOS framework list (`AVFoundation.
-  framework` undeclared). Fixed both, plus centralized capture_
-  avfoundation.c's own compile-flag override into `crt_add_crtmedia_
-  targets()` (`cmake/crtmedia_targets.cmake`) so every caller gets it
-  automatically. Full isolated rebuild then passed end to end (497.7s
-  total): 10/10 stage tests, all four packaged examples (including the
-  zero-copy `crtgfx_skia_media_window_demo` bridge), `verify_dist.py`, and
-  atomic publish. Full in-tree `ctest` re-confirmed at 145/145 after the
-  fix. Both tests' Linux/x86_64 replay, and Linux's own isolated-stage
-  closure, remain.
+Nothing in progress right now -- see `Planned` below for what to pick up next.
+When an item is promoted into progress, give it its own subsection here;
+when it finishes, move the detail to `HISTORY.md` and remove the subsection
+(matching this file's own `Done` section, which stays empty by design).
 
 ## Planned
 
@@ -169,10 +70,11 @@ The completed cross-host baseline and its exact validation evidence stay in
 [`STATUS.md`](STATUS.md) and [`HISTORY.md`](HISTORY.md); the product boundary
 and dependency order stay in [`docs/runtime_roadmap.md`](docs/runtime_roadmap.md).
 The allocator baseline decision gate is closed: keep the current allocator and
-leave Scudo conditional. Hardware video decode and Zero-copy decoded textures
-are closed (`HISTORY.md`, 2026-09-22..27). **Encode and capture** is promoted
-into `In Progress` above. Promote the remaining tranches one at a time when
-their prerequisite evidence is available.
+leave Scudo conditional. Hardware video decode, Zero-copy decoded textures,
+and Encode and capture are all closed on Linux/x86_64, macOS/arm64, and
+Windows/x64 (`HISTORY.md`, 2026-09-22..28; full tranche-by-tranche detail in
+`docs/crtmedia_encode_capture_acceptance.md`). Promote the next tranche below
+when its prerequisite evidence is available.
 
 1. **Networking and streaming.** Add transport, buffering, back-pressure,
    reconnect, and protocol integration only after local media timing is stable.

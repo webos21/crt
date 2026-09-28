@@ -392,12 +392,39 @@ fi
 # (e.g. bits/), never needed here since run_cc() below adds this as the
 # lowest-priority fallback, searched only after this project's own sysroot
 # has already had a chance to satisfy any given #include.
+#
+# linux_sdk_multiarch_include (2026-09-28, "Encode and capture" Tranche 6
+# isolated-stage closure): a second, real gap found the first time this
+# sentinel was ever asked to expose a genuine Linux kernel UAPI header
+# rather than a userspace library header -- capture_v4l2.c's own
+# <linux/videodev2.h> pulls in <linux/ioctl.h>, which itself does
+# `#include <asm/ioctl.h>`. On a Debian/Ubuntu host with no plain
+# /usr/include/asm symlink at all (confirmed for real: this exact host only
+# has /usr/include/x86_64-linux-gnu/asm/ioctl.h, the real linux-libc-dev
+# multiarch layout), -nostdinc's own disabling of every default search path
+# means this sentinel's own single plain /usr/include is not enough --
+# `dpkg-architecture -qDEB_HOST_MULTIARCH` is the same real, already-
+# established fallback distribution/stages/04-gfx-media/CMakeLists.txt's own
+# CRTGFX_LINUX_VULKAN_LIB/CRTMEDIA_LINUX_VAAPI_LIB find_library() fallbacks
+# already use for the identical "this isolated build's own crt-toolchain.cmake
+# skips the host ABI probe that would otherwise populate this automatically"
+# class of gap. Best-effort: a host without dpkg-architecture (non-Debian)
+# or with a plain /usr/include/asm symlink already (common on Fedora/RHEL)
+# simply gets an empty/unused value here, matching every other optional
+# fallback in this file.
+linux_sdk_multiarch_include=""
 linux_sdk_include=""
 if [ "$target_os" = linux ] && [ "$want_real_linux_sdk" -eq 1 ]; then
   linux_sdk_include="/usr/include"
   if [ ! -d "$linux_sdk_include" ]; then
     echo "crt-cc: -fcrt-real-linux-sdk requested but $linux_sdk_include does not exist" >&2
     exit 1
+  fi
+  if command -v dpkg-architecture >/dev/null 2>&1; then
+    multiarch_triplet=$(dpkg-architecture -qDEB_HOST_MULTIARCH 2>/dev/null || true)
+    if [ -n "$multiarch_triplet" ] && [ -d "/usr/include/$multiarch_triplet" ]; then
+      linux_sdk_multiarch_include="/usr/include/$multiarch_triplet"
+    fi
   fi
 fi
 
@@ -532,11 +559,17 @@ run_cc() {
   # above -- see that variable's own top comment for why this project's own
   # sysroot must keep winning any real name collision here, with the real
   # host's /usr/include only ever a fallback for a header this project's own
-  # sysroot genuinely does not provide.
+  # sysroot genuinely does not provide. linux_sdk_multiarch_include (see its
+  # own top comment) is lower priority still, appended after it, only ever
+  # non-empty alongside linux_sdk_include itself.
+  linux_sdk_multiarch_flag=""
+  if [ -n "$linux_sdk_multiarch_include" ]; then
+    linux_sdk_multiarch_flag="-isystem $linux_sdk_multiarch_include"
+  fi
   if [ -n "$resource_dir" ] && [ -n "$linux_sdk_include" ]; then
     # shellcheck disable=SC2086
     exec "$cc" $common_flags "-isystem${CRT_SYSROOT}/include" \
-      -isystem "$resource_dir/include" -isystem "$linux_sdk_include" "$@"
+      -isystem "$resource_dir/include" -isystem "$linux_sdk_include" $linux_sdk_multiarch_flag "$@"
   fi
   if [ -n "$resource_dir" ]; then
     # shellcheck disable=SC2086
@@ -546,7 +579,7 @@ run_cc() {
   if [ -n "$linux_sdk_include" ]; then
     # shellcheck disable=SC2086
     exec "$cc" $common_flags "-isystem${CRT_SYSROOT}/include" \
-      -isystem "$linux_sdk_include" "$@"
+      -isystem "$linux_sdk_include" $linux_sdk_multiarch_flag "$@"
   fi
   # shellcheck disable=SC2086
   exec "$cc" $common_flags "-isystem${CRT_SYSROOT}/include" "$@"
