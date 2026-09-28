@@ -8,6 +8,112 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-28
+
+- **Encode & Capture Tranche 2 closed: real USB UVC camera capture on
+  Linux/x86_64, plus a real, honest MJPEG-only-hardware finding.**
+  `docs/crtmedia_encode_capture_acceptance.md`'s own Tranche 2 section has
+  the full detail; summary here.
+
+  With a real USB webcam connected (`gspca_zc3xx` driver) and camera-group
+  permission confirmed, `crtmedia_capture_v4l2_test` (which had been
+  "implementation complete, physical gate pending" since the previous V4L2
+  backend landing) still reported `skip reason=no-supported-yuv-streaming-
+  device` -- `v4l2-ctl --list-formats-ext` on this real camera confirmed
+  why: it offers only `'JPEG'` (`V4L2_PIX_FMT_JPEG`, not even `V4L2_PIX_FMT_
+  MJPEG`'s own fourcc -- a real driver-level substitution `VIDIOC_S_FMT`
+  performs silently), no raw YUV420/NV12/YUYV format at all, matching the
+  common reality for most UVC webcams at useful resolutions/frame rates.
+  `libcrtmedia/src/arch/linux/capture_v4l2.c` gained an MJPEG/JPEG
+  negotiation fallback (tried last, after every raw format) that decodes
+  each captured JPEG through FFmpeg's own built-in `AV_CODEC_ID_MJPEG`
+  decoder (`porting/recipes/ffmpeg.json` gained `--enable-decoder=mjpeg`,
+  self-contained, no external libjpeg, no new host dependency) into the same
+  owned, tightly packed YUV420P frame contract every other source format
+  already produces -- gated behind a new `CRTMEDIA_CAPTURE_HAVE_MJPEG`
+  compile definition (only set when `CRTMEDIA_ENABLE_FFMPEG` is also on,
+  `libcrtmedia/cmake/crtmedia_targets.cmake`) so a plain FFmpeg-less
+  configure gains no new dependency, and `crtmedia_v4l2_convert_to_yuv420p()`
+  itself (the resource-free-testable seam) stays untouched. A second real
+  finding on the same camera: its JPEG frames decode as `AV_PIX_FMT_
+  YUVJ422P` (4:2:2 chroma subsampling), not 4:2:0 -- handled by vertically
+  downsampling adjacent decoded chroma row pairs, the identical technique
+  the existing raw-YUYV branch already uses to go from 4:2:2 to 4:2:0.
+
+  Also fixed, found while chasing an incorrect diagnostic line: `libcrtmedia/
+  tests/capture_v4l2_test.c`'s own final `printf` reused the device-
+  enumeration loop's `index` variable (by then advanced past the frame-
+  capture loop, out of the `devices[16]` array's real bounds) instead of the
+  index the device was actually opened at -- a real out-of-bounds stack read
+  that happened to print garbage (`device=SKTOP=com.anthropic.Claude.
+  desktop`) rather than `/dev/video0`; fixed by capturing the opened index
+  into its own variable. Real result, three consecutive runs, this physical
+  USB UVC camera: `crtmedia_capture_v4l2_test: ok frames=30 device=/dev/
+  video0 size=640x480 fps=30`. Full `ctest` 137/137 except one pre-existing,
+  environment-caused failure unrelated to this change
+  (`crtmedia_playback_pipeline_test_runs`'s own real-wall-time-pacing check,
+  which needs a real audio device this host does not have -- `aplay -l`
+  reports no soundcards).
+
+- **Encode & Capture Tranche 3 closed: real VA-API H.264 hardware encode on
+  the same Linux/x86_64 host.** `docs/crtmedia_encode_capture_acceptance.md`'s
+  own Tranche 3 section has the full detail; summary here.
+
+  `crtmedia_codec_create_encoder()` (`libcrtmedia/src/codec.c`) gained a
+  `mime="video/avc"` branch: creates a real `AV_HWDEVICE_TYPE_VAAPI` device
+  and an `AV_PIX_FMT_VAAPI`/`sw_format=AV_PIX_FMT_NV12` hardware frame pool,
+  then opens FFmpeg's own `h264_vaapi` encoder against it (`porting/recipes/
+  ffmpeg.json` gained `--enable-encoder=h264_vaapi` plus the matching
+  `vaapi_encode.o`/`vaapi_encode_h264.o` `-fcrt-real-linux-sdk` Makefile
+  CFLAGS overrides those two objects' own direct `<va/va.h>`/`<va/
+  va_enc_h264.h>` includes need -- the identical per-object-sentinel pattern
+  the existing VA-API decode objects already established; reuses the same
+  libva/libva-drm the recipe's `--enable-vaapi` decode support already
+  requires, no new host dependency). `crtmedia_codec_queue_frame()` converts
+  the caller's YUV420P planes into an NV12 scratch frame (Y direct copy, U/V
+  interleaved), uploads it into a real hardware surface via `av_hwframe_get_
+  buffer()`/`av_hwframe_transfer_data()`, and sends that hardware frame to
+  the encoder. There is no software H.264 fallback inside this codec
+  instance -- FFmpeg ships no built-in H.264 encoder (only external x264/
+  OpenH264, which this project's own porting policy declines) -- so creation
+  itself fails honestly (`CRTMEDIA_ERROR_UNSUPPORTED`) on a host with no
+  usable VA-API encode device rather than silently downgrading to a
+  different codec; reaching `CRTMEDIA_OK` for `mime="video/avc"` is therefore
+  itself the "actually used VA-API, not inferred" evidence, no separate
+  diagnostic API needed.
+
+  `crtmedia_muxer_add_track()` (`libcrtmedia/src/muxer.c`) gained the
+  matching `mime="video/avc"` -> `AV_CODEC_ID_H264` branch. No bitstream-
+  format conversion code was needed on this project's own side: FFmpeg's
+  `h264_vaapi` encoder emits Annex-B (start-code-prefixed) NAL units for
+  both extradata and every packet (confirmed by reading `cbs_h2645.c`'s own
+  `ff_cbs_h2645_assemble_fragment()` directly), and libavformat's own
+  `movenc.c` already detects Annex-B H.264 extradata and reformats both the
+  extradata and every packet into the MP4-required avcC/length-prefixed form
+  automatically (`ff_isom_write_avcc()`/`ff_nal_parse_units()`) -- a real,
+  already-existing FFmpeg feature this tranche only needed to discover and
+  rely on, not reimplement. One real build-time bug found and fixed along
+  the way: the first attempt at the `vaapi_encode_h264.o` Makefile CFLAGS
+  patch inserted the new target-specific-variable line in the middle of a
+  backslash-continued `OBJS-$(...) +=` assignment, breaking Make's own line-
+  continuation parsing (`missing separator` at the now-orphaned continuation
+  line) -- fixed by moving the insertion after the complete two-physical-
+  line assignment.
+
+  New `crtmedia_encode_vaapi_test` (100 deterministic synthetic YUV420P
+  frames, the identical generator Tranche 1's `crtmedia_encode_mux_test`
+  uses) exercises VA-API H.264 encode -> MP4 mux -> reopen -> plain software
+  H.264 decode-back, then repeats the identical 100-frame source through the
+  existing mp4v-es software encoder for the "compare with the software
+  fallback" requirement. Real result, three consecutive runs, this physical
+  host's Intel UHD 630 (confirmed real `VAEntrypointEncSlice` for
+  `VAProfileH264*` via `vainfo`): both round trips decode back exactly 100
+  frames with monotonic PTS (`path=vaapi frames=100 ... fallback_frames=100
+  ...`). A standalone system-`ffmpeg` sanity encode (unrelated to this
+  project's own build) independently confirmed the driver/MP4 combination
+  produces a standard, `ffprobe`-verified `h264`/`yuv420p` MP4 on this same
+  hardware.
+
 ## 2026-09-27
 
 - **Encode & Capture Tranche 4A: real AVFoundation camera capture on macOS,

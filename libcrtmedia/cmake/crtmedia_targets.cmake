@@ -37,6 +37,19 @@ function(crt_add_crtmedia_targets)
     set_target_properties(crtmedia_backend_objects PROPERTIES
       POSITION_INDEPENDENT_CODE ON
     )
+    if(CRT_TARGET_OS STREQUAL "linux" AND CRTMEDIA_ENABLE_FFMPEG)
+      # V4L2 MJPEG-only webcams (2026-09-28, Encode and capture Tranche 2
+      # real-hardware gate -- capture_v4l2_test_control.h's own CRTMEDIA_
+      # V4L2_SOURCE_MJPEG comment has the full "why"): capture_v4l2.c's
+      # MJPEG branch decodes through FFmpeg's own built-in avcodec MJPEG
+      # decoder. crtmedia_backend_objects only needs the FFmpeg include
+      # dir here -- the undefined avcodec_*/av_frame_*/av_packet_* symbols
+      # this pulls in are resolved once this OBJECT library's outputs are
+      # folded into the `crtmedia`/`crtmedia_shared` targets below, which
+      # already link CRTMEDIA_FFMPEG_LIBRARIES when this flag is on.
+      target_compile_definitions(crtmedia_backend_objects PRIVATE CRTMEDIA_CAPTURE_HAVE_MJPEG=1)
+      target_include_directories(crtmedia_backend_objects PRIVATE "${CRTMEDIA_FFMPEG_PORT_PREFIX}/include")
+    endif()
     set(CRTMEDIA_BACKEND_OBJECTS $<TARGET_OBJECTS:crtmedia_backend_objects>)
   endif()
 

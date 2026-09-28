@@ -7,6 +7,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <linux/videodev2.h>
 #include <poll.h>
 #include <stdint.h>
@@ -15,6 +16,18 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
+
+#ifdef CRTMEDIA_CAPTURE_HAVE_MJPEG
+/* MJPEG decode (2026-09-28, Encode and capture Tranche 2 real-hardware
+ * gate) -- see capture_v4l2_test_control.h's own CRTMEDIA_V4L2_SOURCE_
+ * MJPEG comment for the full "why". Only reached when CRTMEDIA_ENABLE_
+ * FFMPEG is on (libcrtmedia/cmake/crtmedia_targets.cmake defines this
+ * macro), exactly like every other FFmpeg-dependent source in this
+ * library -- a plain FFmpeg-less configure never sees these includes. */
+#include <libavcodec/avcodec.h>
+#include <libavutil/frame.h>
+#include <libavutil/pixfmt.h>
+#endif
 
 /* linux/videodev2.h brings asm-generic/ioctl.h's UAPI request macros. The
  * CRT's public sys/ioctl.h intentionally defines the same macros, so including
@@ -43,6 +56,11 @@ typedef struct crtmedia_v4l2_capture {
   int have_timestamp_origin;
   int64_t timestamp_origin_us;
   int64_t last_timestamp_us;
+#ifdef CRTMEDIA_CAPTURE_HAVE_MJPEG
+  struct AVCodecContext* mjpeg_decoder;
+  struct AVFrame* mjpeg_frame;
+  struct AVPacket* mjpeg_packet;
+#endif
 } crtmedia_v4l2_capture;
 
 static int retry_ioctl(int fd, unsigned long request, void* argument) {
@@ -106,6 +124,17 @@ static crtmedia_v4l2_source_format source_format_from_fourcc(uint32_t fourcc) {
       return CRTMEDIA_V4L2_SOURCE_NV12;
     case V4L2_PIX_FMT_YUYV:
       return CRTMEDIA_V4L2_SOURCE_YUYV;
+    case V4L2_PIX_FMT_MJPEG:
+    /* V4L2_PIX_FMT_JPEG ('JPEG', full still-image JFIF, V4L2_COLORSPACE_
+     * JPEG) is what several real UVC drivers (e.g. gspca_zc3xx, confirmed
+     * on this project's own physical acceptance webcam) report even when
+     * V4L2_PIX_FMT_MJPEG ('MJPG') is what gets requested -- a real,
+     * driver-level substitution, not a bug in the request above (VIDIOC_
+     * S_FMT succeeds and silently returns 'JPEG' instead). Both are the
+     * same baseline JPEG bitstream a JPEG decoder consumes identically;
+     * FFmpeg's own AV_CODEC_ID_MJPEG decoder handles either. */
+    case V4L2_PIX_FMT_JPEG:
+      return CRTMEDIA_V4L2_SOURCE_MJPEG;
     default:
       return 0;
   }
@@ -289,6 +318,183 @@ crtmedia_result crtmedia_v4l2_convert_to_yuv420p(
   return CRTMEDIA_OK;
 }
 
+#ifdef CRTMEDIA_CAPTURE_HAVE_MJPEG
+static crtmedia_result init_mjpeg_decoder(crtmedia_v4l2_capture* capture) {
+  const AVCodec* codec = avcodec_find_decoder(AV_CODEC_ID_MJPEG);
+  if (codec == NULL) {
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+  capture->mjpeg_decoder = avcodec_alloc_context3(codec);
+  capture->mjpeg_frame = av_frame_alloc();
+  capture->mjpeg_packet = av_packet_alloc();
+  if (capture->mjpeg_decoder == NULL || capture->mjpeg_frame == NULL ||
+      capture->mjpeg_packet == NULL) {
+    return CRTMEDIA_ERROR_IO;
+  }
+  if (avcodec_open2(capture->mjpeg_decoder, codec, NULL) < 0) {
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+  return CRTMEDIA_OK;
+}
+
+static void release_mjpeg_decoder(crtmedia_v4l2_capture* capture) {
+  if (capture->mjpeg_packet != NULL) {
+    av_packet_free(&capture->mjpeg_packet);
+  }
+  if (capture->mjpeg_frame != NULL) {
+    av_frame_free(&capture->mjpeg_frame);
+  }
+  if (capture->mjpeg_decoder != NULL) {
+    avcodec_free_context(&capture->mjpeg_decoder);
+  }
+}
+
+/* One V4L2 buffer is already one complete JPEG image (a UVC MJPEG stream
+ * carries no inter-frame prediction), so this is a plain, synchronous
+ * send-one/receive-one call, not a queue -- no parser, no drain loop.
+ * `source` must stay valid for the whole call (still the mmap'd V4L2
+ * buffer, not yet requeued by the caller), matching crtmedia_v4l2_
+ * convert_to_yuv420p()'s own identical borrowing contract. Builds a fresh,
+ * tightly packed, owned YUV420P frame the same shape that function
+ * produces -- the only difference a caller can observe is the source
+ * decode path, never the output contract. */
+static crtmedia_result decode_mjpeg_to_yuv420p(
+    crtmedia_v4l2_capture* capture, const void* source, size_t source_size,
+    crtmedia_frame* out_frame) {
+  AVFrame* frame = capture->mjpeg_frame;
+  AVPacket* packet = capture->mjpeg_packet;
+  uint8_t* storage;
+  uint8_t* y_plane;
+  uint8_t* u_plane;
+  uint8_t* v_plane;
+  uint32_t width, height, chroma_width, chroma_height;
+  size_t y_size, chroma_size, storage_size;
+  uint32_t row;
+  int send_result;
+  int receive_result;
+  int full_range;
+  int vertically_subsampled;
+
+  if (capture->mjpeg_decoder == NULL || source == NULL || source_size == 0 ||
+      source_size > (size_t)INT_MAX || out_frame == NULL) {
+    return CRTMEDIA_ERROR_INVALID_ARGUMENT;
+  }
+  memset(out_frame, 0, sizeof(*out_frame));
+  av_packet_unref(packet);
+  /* Points at the caller-owned V4L2 buffer for the duration of this call
+   * only (packet->buf stays NULL, so av_packet_unref() above/below never
+   * tries to free it) -- avcodec_send_packet() copies whatever it needs
+   * to decode synchronously; nothing retains this pointer afterward. */
+  packet->data = (uint8_t*)(uintptr_t)source;
+  packet->size = (int)source_size;
+  send_result = avcodec_send_packet(capture->mjpeg_decoder, packet);
+  packet->data = NULL;
+  packet->size = 0;
+  if (send_result < 0) {
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+  receive_result = avcodec_receive_frame(capture->mjpeg_decoder, frame);
+  if (receive_result < 0) {
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+  /* Real UVC webcams commonly encode MJPEG at 4:2:2 chroma subsampling,
+   * not 4:2:0 -- confirmed on this project's own physical acceptance
+   * camera (a gspca_zc3xx-driven USB UVC device), whose JPEG frames
+   * libavcodec's own mjpegdec.c decodes as AV_PIX_FMT_YUVJ422P. Both
+   * layouts are accepted here; 4:2:2 is downsampled vertically (average
+   * adjacent chroma row pairs) to reach this contract's fixed 4:2:0
+   * output -- the same real technique the raw-YUYV branch above already
+   * uses to go from 4:2:2 to 4:2:0. */
+  if (frame->format == AV_PIX_FMT_YUVJ420P || frame->format == AV_PIX_FMT_YUV420P) {
+    vertically_subsampled = 0;
+  } else if (frame->format == AV_PIX_FMT_YUVJ422P || frame->format == AV_PIX_FMT_YUV422P) {
+    vertically_subsampled = 1;
+  } else {
+    av_frame_unref(frame);
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+  full_range = frame->format == AV_PIX_FMT_YUVJ420P || frame->format == AV_PIX_FMT_YUVJ422P;
+  if (frame->width <= 0 || frame->height <= 0) {
+    av_frame_unref(frame);
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+  width = (uint32_t)frame->width;
+  height = (uint32_t)frame->height;
+  chroma_width = (width + 1u) / 2u;
+  chroma_height = (height + 1u) / 2u;
+  if (!multiply_size((size_t)width, height, &y_size) ||
+      !multiply_size((size_t)chroma_width, chroma_height, &chroma_size) ||
+      chroma_size > (((size_t)-1) - y_size) / 2u) {
+    av_frame_unref(frame);
+    return CRTMEDIA_ERROR_INVALID_ARGUMENT;
+  }
+  storage_size = y_size + chroma_size * 2u;
+  storage = (uint8_t*)malloc(storage_size);
+  if (storage == NULL) {
+    av_frame_unref(frame);
+    return CRTMEDIA_ERROR_IO;
+  }
+  y_plane = storage;
+  u_plane = y_plane + y_size;
+  v_plane = u_plane + chroma_size;
+  for (row = 0; row < height; ++row) {
+    memcpy(y_plane + (size_t)row * width, frame->data[0] + (size_t)row * frame->linesize[0], width);
+  }
+  if (!vertically_subsampled) {
+    for (row = 0; row < chroma_height; ++row) {
+      memcpy(u_plane + (size_t)row * chroma_width, frame->data[1] + (size_t)row * frame->linesize[1], chroma_width);
+      memcpy(v_plane + (size_t)row * chroma_width, frame->data[2] + (size_t)row * frame->linesize[2], chroma_width);
+    }
+  } else {
+    uint32_t column;
+    for (row = 0; row < chroma_height; ++row) {
+      uint32_t source_row0 = row * 2u;
+      uint32_t source_row1 = source_row0 + 1u < height ? source_row0 + 1u : source_row0;
+      const uint8_t* u_row0 = frame->data[1] + (size_t)source_row0 * frame->linesize[1];
+      const uint8_t* u_row1 = frame->data[1] + (size_t)source_row1 * frame->linesize[1];
+      const uint8_t* v_row0 = frame->data[2] + (size_t)source_row0 * frame->linesize[2];
+      const uint8_t* v_row1 = frame->data[2] + (size_t)source_row1 * frame->linesize[2];
+      for (column = 0; column < chroma_width; ++column) {
+        u_plane[(size_t)row * chroma_width + column] =
+            (uint8_t)(((uint32_t)u_row0[column] + u_row1[column] + 1u) / 2u);
+        v_plane[(size_t)row * chroma_width + column] =
+            (uint8_t)(((uint32_t)v_row0[column] + v_row1[column] + 1u) / 2u);
+      }
+    }
+  }
+
+  out_frame->format = CRTMEDIA_PIXEL_FORMAT_YUV420P;
+  out_frame->width = width;
+  out_frame->height = height;
+  /* JFIF/MJPEG is conventionally full-range; libavcodec's own mjpegdec.c
+   * reports the real per-frame answer via frame->format (the 'J' variants)
+   * rather than always assuming it, so this reads that back instead of
+   * hardcoding LIMITED the way the raw-format branches above do (V4L2
+   * does not itself carry a per-frame JPEG range flag). */
+  out_frame->color_range = full_range ? CRTMEDIA_COLOR_RANGE_FULL : CRTMEDIA_COLOR_RANGE_LIMITED;
+  out_frame->color_space =
+      height <= 576u ? CRTMEDIA_COLOR_SPACE_BT601 : CRTMEDIA_COLOR_SPACE_BT709;
+  out_frame->timestamp_us = CRTMEDIA_FRAME_TIMESTAMP_NONE;
+  out_frame->plane_count = 3;
+  out_frame->planes[0].data = y_plane;
+  out_frame->planes[0].stride = width;
+  out_frame->planes[0].width = width;
+  out_frame->planes[0].height = height;
+  out_frame->planes[1].data = u_plane;
+  out_frame->planes[1].stride = chroma_width;
+  out_frame->planes[1].width = chroma_width;
+  out_frame->planes[1].height = chroma_height;
+  out_frame->planes[2].data = v_plane;
+  out_frame->planes[2].stride = chroma_width;
+  out_frame->planes[2].width = chroma_width;
+  out_frame->planes[2].height = chroma_height;
+  out_frame->release = owned_frame_release;
+  out_frame->release_context = storage;
+  av_frame_unref(frame);
+  return CRTMEDIA_OK;
+}
+#endif
+
 static void release_backend(crtmedia_v4l2_capture* capture) {
   uint32_t index;
   if (capture == NULL) {
@@ -298,6 +504,9 @@ static void release_backend(crtmedia_v4l2_capture* capture) {
     enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     retry_ioctl(capture->fd, VIDIOC_STREAMOFF, &type);
   }
+#ifdef CRTMEDIA_CAPTURE_HAVE_MJPEG
+  release_mjpeg_decoder(capture);
+#endif
   for (index = 0; index < capture->buffer_count; ++index) {
     if (capture->buffers[index].address != NULL &&
         capture->buffers[index].address != MAP_FAILED) {
@@ -314,7 +523,15 @@ crtmedia_result crtmedia_capture_backend_open(
     const char* device_id, const crtmedia_capture_config* requested,
     void** out_backend, crtmedia_capture_config* out_actual) {
   static const uint32_t preferred_formats[] = {
-      V4L2_PIX_FMT_YUV420, V4L2_PIX_FMT_NV12, V4L2_PIX_FMT_YUYV};
+      V4L2_PIX_FMT_YUV420, V4L2_PIX_FMT_NV12, V4L2_PIX_FMT_YUYV,
+#ifdef CRTMEDIA_CAPTURE_HAVE_MJPEG
+      /* Last resort, after every raw format -- MJPEG costs a real decode
+       * per frame, so a device that also offers a raw format keeps using
+       * it unchanged (identical negotiation order to before this format
+       * existed). Only reached at all when CRTMEDIA_ENABLE_FFMPEG is on. */
+      V4L2_PIX_FMT_MJPEG, V4L2_PIX_FMT_JPEG,
+#endif
+  };
   crtmedia_v4l2_capture* capture;
   struct v4l2_capability capability;
   struct v4l2_format format;
@@ -378,6 +595,16 @@ crtmedia_result crtmedia_capture_backend_open(
                                  ? capture->width * 2u : capture->width;
   }
   capture->frame_rate = requested_rate;
+
+#ifdef CRTMEDIA_CAPTURE_HAVE_MJPEG
+  if (capture->source_format == CRTMEDIA_V4L2_SOURCE_MJPEG) {
+    crtmedia_result mjpeg_result = init_mjpeg_decoder(capture);
+    if (mjpeg_result != CRTMEDIA_OK) {
+      release_backend(capture);
+      return mjpeg_result;
+    }
+  }
+#endif
 
   {
     struct v4l2_streamparm parameters;
@@ -499,11 +726,21 @@ crtmedia_result crtmedia_capture_backend_dequeue(
   if (buffer.index >= capture->buffer_count) {
     return CRTMEDIA_ERROR_IO;
   }
-  result = crtmedia_v4l2_convert_to_yuv420p(
-      capture->buffers[buffer.index].address,
-      buffer.bytesused != 0 ? buffer.bytesused : capture->buffers[buffer.index].length,
-      capture->source_format, capture->width, capture->height,
-      capture->source_stride, out_frame);
+#ifdef CRTMEDIA_CAPTURE_HAVE_MJPEG
+  if (capture->source_format == CRTMEDIA_V4L2_SOURCE_MJPEG) {
+    result = decode_mjpeg_to_yuv420p(
+        capture, capture->buffers[buffer.index].address,
+        buffer.bytesused != 0 ? buffer.bytesused : capture->buffers[buffer.index].length,
+        out_frame);
+  } else
+#endif
+  {
+    result = crtmedia_v4l2_convert_to_yuv420p(
+        capture->buffers[buffer.index].address,
+        buffer.bytesused != 0 ? buffer.bytesused : capture->buffers[buffer.index].length,
+        capture->source_format, capture->width, capture->height,
+        capture->source_stride, out_frame);
+  }
   if (retry_ioctl(capture->fd, VIDIOC_QBUF, &buffer) < 0) {
     if (result == CRTMEDIA_OK) {
       crtmedia_frame_release(out_frame);

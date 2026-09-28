@@ -70,15 +70,26 @@ Keep completed evidence in `HISTORY.md`; this list tracks only tranche state.
 * [x] **1. Linux/x86_64 synthetic software encode -> MP4 -> decode-back.**
   The new FFmpeg-backed MPEG-4 encoder and MP4 muxer pass the deterministic
   100-frame round trip with exact PTS/count/duration and pixel-range checks.
-* [ ] **2. Linux/x86_64 V4L2 capture.** The backend, public capture ABI,
-  YUV420/NV12/YUYV conversion, mmap-buffer lifetime, monotonic timestamps,
-  stop behavior, and device-gated MP4 decode-back test are implemented. The
-  resource-free conversion test passes; complete this tranche by running the
-  live gate on a physical host with a supported `/dev/video*` device (the
-  current host has none and reports a precise CTest skip).
-* [ ] **3. Linux/x86_64 VA-API H.264 encode.** Accept captured or existing
-  GPU frames, verify the actually-used hardware path, and compare it with the
-  software fallback without weakening timing/ownership checks.
+* [x] **2. Linux/x86_64 V4L2 capture.** Closed 2026-09-28, recorded in
+  `HISTORY.md`. The backend, public capture ABI, YUV420/NV12/YUYV/MJPEG
+  conversion, mmap-buffer lifetime, monotonic timestamps, and stop behavior
+  are implemented and verified live: `crtmedia_capture_v4l2_test: ok
+  frames=30 device=/dev/video0 size=640x480 fps=30` on a real USB UVC
+  webcam, three consecutive runs. Real finding: this camera streams only
+  MJPEG/JPEG, not any raw format, so the backend gained an FFmpeg-decoder
+  MJPEG fallback (4:2:2-to-4:2:0 chroma downsample included) --
+  `docs/crtmedia_encode_capture_acceptance.md`'s Tranche 2 section has the
+  full detail.
+* [x] **3. Linux/x86_64 VA-API H.264 encode.** Closed 2026-09-28, recorded
+  in `HISTORY.md`. `crtmedia_codec_create_encoder("video/avc")` drives
+  FFmpeg's own `h264_vaapi` encoder over a real VA-API hardware frame pool;
+  no software H.264 fallback exists (FFmpeg ships none), so a successful
+  create is itself the "actually used, not inferred" hardware-path
+  evidence. New `crtmedia_encode_vaapi_test` (100 synthetic frames -> VA-API
+  H.264 -> MP4 -> decode-back) passes and is compared against the existing
+  software mp4v-es round trip on the identical source --
+  `docs/crtmedia_encode_capture_acceptance.md`'s Tranche 3 section has the
+  full detail.
 * [ ] **4. macOS/arm64,** advanced ahead of Tranche 3 (real camera hardware
   available now; Tranche 3's own number is unchanged, only its execution
   order -- `docs/crtmedia_encode_capture_acceptance.md`).

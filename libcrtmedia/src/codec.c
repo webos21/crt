@@ -84,6 +84,23 @@ struct crtmedia_codec {
    * an end-to-end interop claim: the Windows bridge performs a later GPU
    * copy while macOS/Linux sample decoder storage directly. */
   int hw_gpu_frame_delivered;
+  /* Linux VA-API H.264 hardware encode (2026-09-28, "Encode and capture"
+   * Tranche 3, docs/crtmedia_encode_capture_acceptance.md). Set only when
+   * crtmedia_codec_create_encoder() was asked for mime="video/avc" and a
+   * real VA-API encode device+frame pool actually came up -- there is no
+   * software H.264 fallback within this codec instance (FFmpeg ships no
+   * built-in H.264 encoder; only x264/OpenH264, both external and
+   * deliberately not ported here), so creation itself fails honestly
+   * (CRTMEDIA_ERROR_UNSUPPORTED) when this cannot be satisfied; a caller
+   * wanting a guaranteed-available encoder uses the existing mp4v-es
+   * software path instead, exactly like every other "real hardware path,
+   * honest failure otherwise" precedent in this file. hw_device_ctx above
+   * is reused for the VAAPI device (a crtmedia_codec instance is never
+   * simultaneously an encoder and a decoder, so there is no aliasing
+   * concern); hw_frames_ctx/hw_encode_frame are additive, encoder-only. */
+  int is_vaapi_encoder;
+  AVBufferRef* hw_frames_ctx;
+  AVFrame* hw_encode_frame;
 };
 
 static enum AVCodecID codec_id_for_mime(const char* mime) {
@@ -398,8 +415,17 @@ crtmedia_result crtmedia_codec_create_encoder(const crtmedia_format* format, crt
   int32_t pixel_format = 0;
   int32_t frame_rate = 0;
   int32_t bit_rate = 0;
-  if (crtmedia_format_get_string(format, CRTMEDIA_FORMAT_KEY_MIME, &mime) != CRTMEDIA_OK ||
-      strcmp(mime, "video/mp4v-es") != 0 ||
+  int want_vaapi_h264 = 0;
+  int mime_ok = 0;
+  if (crtmedia_format_get_string(format, CRTMEDIA_FORMAT_KEY_MIME, &mime) == CRTMEDIA_OK) {
+    if (strcmp(mime, "video/mp4v-es") == 0) {
+      mime_ok = 1;
+    } else if (strcmp(mime, "video/avc") == 0) {
+      mime_ok = 1;
+      want_vaapi_h264 = 1;
+    }
+  }
+  if (!mime_ok ||
       crtmedia_format_get_int32(format, CRTMEDIA_FORMAT_KEY_WIDTH, &width) != CRTMEDIA_OK ||
       crtmedia_format_get_int32(format, CRTMEDIA_FORMAT_KEY_HEIGHT, &height) != CRTMEDIA_OK ||
       crtmedia_format_get_int32(format, CRTMEDIA_FORMAT_KEY_PIXEL_FORMAT, &pixel_format) != CRTMEDIA_OK ||
@@ -408,12 +434,18 @@ crtmedia_result crtmedia_codec_create_encoder(const crtmedia_format* format, crt
       pixel_format != CRTMEDIA_PIXEL_FORMAT_YUV420P) {
     return CRTMEDIA_ERROR_UNSUPPORTED;
   }
+#if !defined(CRT_TARGET_OS_LINUX)
+  if (want_vaapi_h264) {
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+#endif
   if (crtmedia_format_get_int32(format, CRTMEDIA_FORMAT_KEY_BIT_RATE, &bit_rate) != CRTMEDIA_OK ||
       bit_rate <= 0) {
     bit_rate = 1000000;
   }
 
-  const AVCodec* av_codec = avcodec_find_encoder(AV_CODEC_ID_MPEG4);
+  const AVCodec* av_codec = want_vaapi_h264 ? avcodec_find_encoder_by_name("h264_vaapi")
+                                             : avcodec_find_encoder(AV_CODEC_ID_MPEG4);
   if (av_codec == NULL) {
     return CRTMEDIA_ERROR_UNSUPPORTED;
   }
@@ -435,19 +467,69 @@ crtmedia_result crtmedia_codec_create_encoder(const crtmedia_format* format, crt
 
   codec->codec_ctx->width = width;
   codec->codec_ctx->height = height;
-  codec->codec_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
   codec->codec_ctx->time_base = (AVRational){1, 30000};
   codec->codec_ctx->framerate = (AVRational){frame_rate, 1};
   codec->codec_ctx->bit_rate = bit_rate;
   codec->codec_ctx->gop_size = frame_rate;
   codec->codec_ctx->max_b_frames = 0;
   codec->codec_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+
+  if (want_vaapi_h264) {
+    /* Real VA-API hardware encode device (this project's own libva/
+     * libva-drm, already required by porting/recipes/ffmpeg.json's
+     * --enable-vaapi for decode -- Tranche 3 adds no new host
+     * dependency). No sw_frames fallback exists for this mime inside
+     * this function -- a host without a usable VA-API display fails
+     * creation itself, honestly, rather than silently downgrading to a
+     * different codec the caller did not ask for. */
+    if (av_hwdevice_ctx_create(&codec->hw_device_ctx, AV_HWDEVICE_TYPE_VAAPI, NULL, NULL, 0) < 0) {
+      crtmedia_codec_release(codec);
+      return CRTMEDIA_ERROR_UNSUPPORTED;
+    }
+    AVBufferRef* frames_ref = av_hwframe_ctx_alloc(codec->hw_device_ctx);
+    if (frames_ref == NULL) {
+      crtmedia_codec_release(codec);
+      return CRTMEDIA_ERROR_UNSUPPORTED;
+    }
+    AVHWFramesContext* frames_ctx = (AVHWFramesContext*)frames_ref->data;
+    frames_ctx->format = AV_PIX_FMT_VAAPI;
+    frames_ctx->sw_format = AV_PIX_FMT_NV12;
+    frames_ctx->width = width;
+    frames_ctx->height = height;
+    /* A small, fixed margin above "one in flight" -- this codec's own
+     * max_b_frames=0 means no reference reordering, but the VAAPI driver
+     * still wants a short real pipeline (reconstructed reference + the
+     * surface currently being read back), matching FFmpeg's own vaapi_
+     * encode.c default pool sizing discipline for a B-frame-less config. */
+    frames_ctx->initial_pool_size = 4;
+    if (av_hwframe_ctx_init(frames_ref) < 0) {
+      av_buffer_unref(&frames_ref);
+      crtmedia_codec_release(codec);
+      return CRTMEDIA_ERROR_UNSUPPORTED;
+    }
+    codec->hw_frames_ctx = frames_ref;
+    codec->codec_ctx->hw_frames_ctx = av_buffer_ref(codec->hw_frames_ctx);
+    codec->codec_ctx->pix_fmt = AV_PIX_FMT_VAAPI;
+    codec->hw_encode_frame = av_frame_alloc();
+    if (codec->codec_ctx->hw_frames_ctx == NULL || codec->hw_encode_frame == NULL) {
+      crtmedia_codec_release(codec);
+      return CRTMEDIA_ERROR_UNSUPPORTED;
+    }
+    codec->is_vaapi_encoder = 1;
+  } else {
+    codec->codec_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
+  }
+
   if (avcodec_open2(codec->codec_ctx, av_codec, NULL) < 0) {
     crtmedia_codec_release(codec);
     return CRTMEDIA_ERROR_UNSUPPORTED;
   }
 
-  codec->decode_frame->format = AV_PIX_FMT_YUV420P;
+  /* The encoder-input scratch frame: NV12 for the VA-API path (matching
+   * frames_ctx->sw_format above -- crtmedia_codec_queue_frame() writes the
+   * caller's YUV420P planes into it that way before uploading), plain
+   * YUV420P for the existing software path, unchanged. */
+  codec->decode_frame->format = want_vaapi_h264 ? AV_PIX_FMT_NV12 : AV_PIX_FMT_YUV420P;
   codec->decode_frame->width = width;
   codec->decode_frame->height = height;
   if (av_frame_get_buffer(codec->decode_frame, 32) < 0) {
@@ -464,6 +546,12 @@ void crtmedia_codec_release(crtmedia_codec* codec) {
   }
   if (codec->hw_device_ctx != NULL) {
     av_buffer_unref(&codec->hw_device_ctx);
+  }
+  if (codec->hw_frames_ctx != NULL) {
+    av_buffer_unref(&codec->hw_frames_ctx);
+  }
+  if (codec->hw_encode_frame != NULL) {
+    av_frame_free(&codec->hw_encode_frame);
   }
   if (codec->swr_ctx != NULL) {
     swr_free(&codec->swr_ctx);
@@ -550,15 +638,48 @@ crtmedia_result crtmedia_codec_queue_frame(
         frame->planes[plane].width < row_bytes || frame->planes[plane].height < rows) {
       return CRTMEDIA_ERROR_INVALID_ARGUMENT;
     }
-    for (uint32_t row = 0; row < rows; ++row) {
-      memcpy(codec->decode_frame->data[plane] + row * codec->decode_frame->linesize[plane],
-             (const uint8_t*)frame->planes[plane].data + row * frame->planes[plane].stride,
-             row_bytes);
+    if (!codec->is_vaapi_encoder) {
+      /* Direct planar YUV420P copy -- the existing software path,
+       * byte-identical to before this tranche. */
+      for (uint32_t row = 0; row < rows; ++row) {
+        memcpy(codec->decode_frame->data[plane] + row * codec->decode_frame->linesize[plane],
+               (const uint8_t*)frame->planes[plane].data + row * frame->planes[plane].stride,
+               row_bytes);
+      }
+    } else if (plane == 0) {
+      /* Y plane: still a direct copy, decode_frame->data[0] either way. */
+      for (uint32_t row = 0; row < rows; ++row) {
+        memcpy(codec->decode_frame->data[0] + row * codec->decode_frame->linesize[0],
+               (const uint8_t*)frame->planes[0].data + row * frame->planes[0].stride, row_bytes);
+      }
+    } else {
+      /* U/V -> interleaved NV12 UV (decode_frame->data[1]) -- the VA-API
+       * driver's own sw_format above (frames_ctx->sw_format = NV12,
+       * crtmedia_codec_create_encoder()). U writes even bytes, V writes
+       * odd bytes; this plane==1 (U) and plane==2 (V) pass both target
+       * the same NV12 plane. */
+      uint32_t dst_offset = plane == 1 ? 0u : 1u;
+      const uint8_t* source = (const uint8_t*)frame->planes[plane].data;
+      for (uint32_t row = 0; row < rows; ++row) {
+        uint8_t* dst_row = codec->decode_frame->data[1] + (size_t)row * codec->decode_frame->linesize[1];
+        const uint8_t* src_row = source + (size_t)row * frame->planes[plane].stride;
+        for (uint32_t column = 0; column < row_bytes; ++column) {
+          dst_row[column * 2u + dst_offset] = src_row[column];
+        }
+      }
     }
   }
-  codec->decode_frame->pts = av_rescale_q(
-      frame->timestamp_us, AV_TIME_BASE_Q, codec->codec_ctx->time_base);
-  int ret = avcodec_send_frame(codec->codec_ctx, codec->decode_frame);
+  AVFrame* send_frame = codec->decode_frame;
+  if (codec->is_vaapi_encoder) {
+    av_frame_unref(codec->hw_encode_frame);
+    if (av_hwframe_get_buffer(codec->codec_ctx->hw_frames_ctx, codec->hw_encode_frame, 0) < 0 ||
+        av_hwframe_transfer_data(codec->hw_encode_frame, codec->decode_frame, 0) < 0) {
+      return CRTMEDIA_ERROR_UNSUPPORTED;
+    }
+    send_frame = codec->hw_encode_frame;
+  }
+  send_frame->pts = av_rescale_q(frame->timestamp_us, AV_TIME_BASE_Q, codec->codec_ctx->time_base);
+  int ret = avcodec_send_frame(codec->codec_ctx, send_frame);
   if (ret == AVERROR(EAGAIN)) {
     return CRTMEDIA_WOULD_BLOCK;
   }
@@ -630,7 +751,8 @@ crtmedia_result crtmedia_codec_get_output_format(
   if (crtmedia_format_create(&format) != CRTMEDIA_OK) {
     return CRTMEDIA_ERROR_UNSUPPORTED;
   }
-  if (crtmedia_format_set_string(format, CRTMEDIA_FORMAT_KEY_MIME, "video/mp4v-es") != CRTMEDIA_OK ||
+  if (crtmedia_format_set_string(
+          format, CRTMEDIA_FORMAT_KEY_MIME, codec->is_vaapi_encoder ? "video/avc" : "video/mp4v-es") != CRTMEDIA_OK ||
       crtmedia_format_set_int32(format, CRTMEDIA_FORMAT_KEY_WIDTH, codec->codec_ctx->width) != CRTMEDIA_OK ||
       crtmedia_format_set_int32(format, CRTMEDIA_FORMAT_KEY_HEIGHT, codec->codec_ctx->height) != CRTMEDIA_OK ||
       crtmedia_format_set_int32(format, CRTMEDIA_FORMAT_KEY_PIXEL_FORMAT, CRTMEDIA_PIXEL_FORMAT_YUV420P) != CRTMEDIA_OK ||

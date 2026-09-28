@@ -716,6 +716,43 @@ if(CRTMEDIA_ENABLE_FFMPEG)
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_encode_mux_test_runs)
 endif()
 
+# Encode & Capture Tranche 3: VA-API H.264 hardware encode -> MP4 mux ->
+# extractor/decode-back acceptance, compared against the Tranche 1 software
+# fallback on the identical synthetic source (tests/encode_vaapi_test.c's
+# own top comment). Linux only: no other host's recipe enables h264_vaapi.
+# A host with no usable VA-API encode device reports a precise CTest skip,
+# same SKIP_REGULAR_EXPRESSION discipline as crtmedia_capture_v4l2_test.
+if(CRTMEDIA_ENABLE_FFMPEG AND CRT_TARGET_OS STREQUAL "linux")
+  add_executable(crtmedia_encode_vaapi_test
+    ${CRT_STARTUP_OBJECTS}
+    tests/encode_vaapi_test.c
+  )
+  target_link_libraries(crtmedia_encode_vaapi_test PRIVATE crt_build_flags crtmedia)
+  target_include_directories(crtmedia_encode_vaapi_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include"
+  )
+  target_compile_definitions(crtmedia_encode_vaapi_test PRIVATE
+    CRTMEDIA_TEST_ENCODE_VAAPI_OUTPUT_PATH="${CMAKE_CURRENT_BINARY_DIR}/crtmedia_encode_vaapi_test.mp4"
+    CRTMEDIA_TEST_ENCODE_VAAPI_FALLBACK_OUTPUT_PATH="${CMAKE_CURRENT_BINARY_DIR}/crtmedia_encode_vaapi_test_fallback.mp4"
+  )
+  target_link_libraries(crtmedia_encode_vaapi_test PRIVATE crt_compiler_rt_builtins)
+  target_link_options(crtmedia_encode_vaapi_test PRIVATE
+    -nostdlib
+    -nostartfiles
+    -nodefaultlibs
+    -Wl,-e,_start -Wl,--gc-sections
+  )
+  crt_link_startup_end_objects(crtmedia_encode_vaapi_test)
+  add_dependencies(crtmedia_encode_vaapi_test c crt1 crtmedia)
+  add_test(NAME crtmedia_encode_vaapi_test_runs COMMAND crtmedia_encode_vaapi_test)
+  set_tests_properties(crtmedia_encode_vaapi_test_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    PASS_REGULAR_EXPRESSION "crtmedia_encode_vaapi_test: (ok|skip)"
+    SKIP_REGULAR_EXPRESSION "crtmedia_encode_vaapi_test: skip"
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_encode_vaapi_test_runs)
+endif()
+
 # Linux physical-device Tranche 2 gate. A machine without a compatible
 # camera is explicitly classified as skipped; when present, the test runs the
 # complete capture -> encode -> MP4 -> decode-back path.

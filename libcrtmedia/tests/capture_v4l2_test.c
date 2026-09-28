@@ -69,6 +69,7 @@ int main(void) {
   size_t device_count = 0;
   size_t candidate_count;
   size_t index;
+  size_t opened_device_index = 0;
   crtmedia_capture* capture = NULL;
   crtmedia_capture_config requested = {640, 480, 30, CRTMEDIA_PIXEL_FORMAT_YUV420P};
   crtmedia_capture_config actual;
@@ -84,6 +85,7 @@ int main(void) {
   for (index = 0; index < candidate_count; ++index) {
     if (crtmedia_capture_open(devices[index].id, &requested, &capture, &actual) ==
         CRTMEDIA_OK) {
+      opened_device_index = index;
       break;
     }
   }
@@ -214,7 +216,7 @@ int main(void) {
   crtmedia_extractor_release(extractor);
   remove(output_path);
   printf("crtmedia_capture_v4l2_test: ok frames=%d device=%s size=%ux%u fps=%u\n",
-         decoded_count, devices[index].id, actual.width, actual.height,
+         decoded_count, devices[opened_device_index].id, actual.width, actual.height,
          actual.frame_rate);
   return 0;
 }

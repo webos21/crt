@@ -65,8 +65,26 @@ crtmedia_result crtmedia_muxer_add_track(
   int32_t height = 0;
   int32_t bit_rate = 0;
   int32_t frame_rate = 0;
-  if (crtmedia_format_get_string(format, CRTMEDIA_FORMAT_KEY_MIME, &mime) != CRTMEDIA_OK ||
-      strcmp(mime, "video/mp4v-es") != 0 ||
+  enum AVCodecID codec_id = AV_CODEC_ID_NONE;
+  if (crtmedia_format_get_string(format, CRTMEDIA_FORMAT_KEY_MIME, &mime) == CRTMEDIA_OK) {
+    if (strcmp(mime, "video/mp4v-es") == 0) {
+      codec_id = AV_CODEC_ID_MPEG4;
+    } else if (strcmp(mime, "video/avc") == 0) {
+      /* VA-API H.264 hardware encode (2026-09-28, "Encode and capture"
+       * Tranche 3) -- the encoded bitstream/extradata FFmpeg's own h264_
+       * vaapi encoder produces is Annex-B (start-code-prefixed NAL
+       * units), not the AVCC/length-prefixed form MP4 normally stores.
+       * No conversion is needed here: libavformat's own mov muxer
+       * (movenc.c, mov_write_single_packet()) already detects Annex-B
+       * H.264 extradata (its own first byte != 1, the avcC
+       * configurationVersion) and reformats both the extradata and every
+       * packet into avcC form automatically (ff_isom_write_avcc()/
+       * ff_nal_parse_units()) -- confirmed by reading movenc.c directly,
+       * not assumed. */
+      codec_id = AV_CODEC_ID_H264;
+    }
+  }
+  if (codec_id == AV_CODEC_ID_NONE ||
       crtmedia_format_get_int32(format, CRTMEDIA_FORMAT_KEY_WIDTH, &width) != CRTMEDIA_OK ||
       crtmedia_format_get_int32(format, CRTMEDIA_FORMAT_KEY_HEIGHT, &height) != CRTMEDIA_OK ||
       width <= 0 || height <= 0) {
@@ -84,7 +102,7 @@ crtmedia_result crtmedia_muxer_add_track(
     stream->avg_frame_rate = (AVRational){frame_rate, 1};
   }
   stream->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
-  stream->codecpar->codec_id = AV_CODEC_ID_MPEG4;
+  stream->codecpar->codec_id = codec_id;
   stream->codecpar->format = AV_PIX_FMT_YUV420P;
   stream->codecpar->width = width;
   stream->codecpar->height = height;
