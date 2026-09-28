@@ -5,7 +5,7 @@ does not repeat the implementation diary in [`HISTORY.md`](HISTORY.md), the
 open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting_status.md`](docs/porting_status.md).
 
-Last synchronized with the source tree and git history: **2026-09-22**.
+Last synchronized with the source tree and git history: **2026-09-28**.
 Updated only on explicit request from here on, not as part of routine
 documentation passes -- see `TODO.md`'s Notice section. It may lag behind
 `HISTORY.md`/`TODO.md` between syncs; those two are the source of truth.
@@ -190,23 +190,19 @@ hosts:
   GPU-copy fallback. Common lifecycle stress, installed/package acceptance,
   pixel/resize checks, and exact per-host interop reporting are closed; see
   `docs/crtmedia_zero_copy_decode_acceptance.md` and `HISTORY.md` 2026-09-27.
-- Encode & Capture Tranches 0-1 are complete on physical Linux/x86_64. The
-  frozen microsecond timing/ownership contract and the resource-free
-  `crtmedia_encode_mux_test` cover 100 deterministic YUV420P frames through
-  software MPEG-4 encode -> MP4 mux -> reopen/decode-back, with exact packet/
-  frame count, per-frame PTS, 3,333,300 us duration, layout, and bounded pixel
-  checks. Tranche 2 now has a host-neutral capture ABI and a private Linux
-  V4L2 mmap backend: it negotiates YUV420/NV12/YUYV, returns owned YUV420P
-  frames after immediately requeueing native buffers, and normalizes capture
-  PTS to a monotonic microsecond timeline. The byte-exact conversion gate
-  passes; the 30-frame capture -> software encode -> MP4 -> decode-back gate
-  is registered but skips because this host has no `/dev/video*`. Physical
-  camera evidence remains the active gate; see
-  `docs/crtmedia_encode_capture_acceptance.md`.
+- Encode and capture is complete on Linux/x86_64, macOS/arm64, and
+  Windows/x64. The common capture ABI feeds V4L2, AVFoundation, and Media
+  Foundation backends; software MPEG-4 plus VA-API, VideoToolbox, and Media
+  Foundation H.264 encoders pass mux/decode-back checks with the same
+  microsecond timestamp and ownership contract. Deterministic discontinuity
+  tests and 15-cycle capture/encode lifecycle gates are closed, including a
+  real Linux UVC camera and all three hardware encoders. Each host also passed
+  a fresh isolated `04-gfx-media` rebuild with installed consumers,
+  dependency/RPATH audit, `verify_dist.py`, and atomic publication; see
+  `docs/crtmedia_encode_capture_acceptance.md` and `HISTORY.md` 2026-09-27..28.
 
 This evidence does not yet prove production-complete seeking/track selection,
-network streaming, real-device capture, hardware encode, or long-running
-encode/capture timing under dropped/discontinuous frames.
+network streaming, adaptive protocols, or realtime/WebRTC behavior.
 
 ### libcrtjs
 
@@ -259,13 +255,15 @@ target.
   Windows/x64, macOS/arm64, and Linux/x86_64 asset sets, checksums, and
   manifests. Its packaged `crtmedia_player_demo` predates the hardware-decode
   default above and still only decodes in software on every host; the
-  release notes document that. Not yet done: a clean-machine test of the
-  published archives, and re-running the hardware-decode-default packaged
-  demo on macOS and Linux for the *next* release.
-- Zero-copy decoded-texture interop is closed on all three hosts. Encode &
-  Capture is now `TODO.md`'s active upper-runtime tranche; its common contract
-  and Linux synthetic software encode/mux/decode-back gate are complete. The
-  V4L2 backend is implemented and awaits its physical-camera acceptance run.
+  release notes document that. A dedicated clean-machine run was explicitly
+  removed from the project queue in favor of acting on real downloader
+  reports (`HISTORY.md`, 2026-09-23). Replaying the later hardware-decode-
+  default demo on macOS/Linux belongs to a future release build, not the
+  completed preview or the active runtime tranche.
+- Zero-copy decoded-texture interop and Encode and capture are closed on all
+  three hosts. Networking and streaming is now `TODO.md`'s active upper-
+  runtime tranche; it begins with a bounded, host-neutral transport contract
+  before progressive HTTP input/output, reconnect, TLS, and package gates.
 - JavaScript media/gfx binding follows the stable native contracts, using a
   WebCodecs-like asynchronous shape; WebRTC-style realtime services, V8, and a
   Chromium/Ozone probe remain later layers.
@@ -308,10 +306,12 @@ of truth.
 | Evidence | Automated | Remaining live evidence |
 | --- | --- | --- |
 | CPU plane geometry, ownership, and color conversion | `crtmedia_frame_test` | none for the covered formats |
-| CPU frame handoff into Skia | `crtmedia_frame_skia_smoke` | GPU texture handoff is not implemented |
+| CPU/GPU frame handoff into Skia | `crtmedia_frame_skia_smoke`, `crtmedia_zero_copy_test`, `crtgfx_skia_media_lifecycle_test` | accepted cross-host; Windows is the documented GPU-copy fallback |
 | Extractor/codec separation and software decode queues | `crtmedia_extractor_codec_test` plus `crtmedia_demux_test` | broader fixture/seek/track-selection coverage |
 | Player clock/state and CPU-frame planning | `crtmedia_player_test` | longer mixed audio/video sessions and underrun/recovery coverage |
 | Host audio output contract | `crtmedia_audio_sink_test` | real-device behavior remains host/environment dependent |
+| Encode/mux timing and ownership | `crtmedia_encode_mux_test`, `crtmedia_timing_discontinuity_test`, `crtmedia_capture_encode_lifecycle_test` | accepted with real capture/hardware encode on all three hosts |
+| Network streaming | none yet beyond the lower socket/DNS and libcurl port tests | active bounded-transport and loopback-protocol tranche |
 
 Headless Linux is allowed to report `CRTGFX_ERROR_UNSUPPORTED` for native
 window creation. That verifies graceful fallback, not live presentation; a
@@ -395,33 +395,23 @@ statuses, and exceptions are maintained in:
   hangs in a self-deadlock inside Intel's WSL video driver, not in CRT, FFmpeg
   or Mesa. Decoder-surface ownership, affinity, synchronization, and Skia
   import are now covered by the cross-host zero-copy acceptance matrix.
-- Software video encode and MP4 mux/decode-back exist on Linux/x86_64. The
-  real V4L2 implementation exists but still needs a physical-camera pass;
-  hardware encode, macOS/Windows encode/capture acceptance, the
-  network protocol layer, adaptive streaming, and realtime/WebRTC remain open.
+- Software video encode, MP4 mux/decode-back, real host capture, and hardware
+  H.264 encode are accepted on Linux/x86_64, macOS/arm64, and Windows/x64.
+  The network transport/protocol layer, adaptive streaming, and realtime/
+  WebRTC remain open. FFmpeg is still intentionally file-only
+  (`--disable-network`); the active tranche will first put bounded buffering,
+  back-pressure, cancellation, and reconnect under a CRT-owned contract.
 - QuickJS has not been imported. Event-loop/timer/module/native-binding work
   and JavaScript media/gfx APIs remain open.
 
 ## Next Priorities
 
-1. Run the Linux/x86_64 V4L2 capture gate on a physical camera and close its
-   frame/timestamp/ownership evidence, then add VA-API H.264 encode and compare the actually-
-   used hardware path with the accepted software fallback (`TODO.md`'s
-   "Encode and capture").
-2. Complete next-release hardening: re-verify the hardware-decode-by-default
-   packaged `crtmedia_player_demo`/`examples/media-player` on macOS and
-   Linux (already done and verified on Windows), and build the next release
-   from one frozen tag/commit on all hosts (`v0.4.0-preview.1`'s three asset
-   sets each record a different commit than the tag; avoiding a repeat is a
-   process fix) (`TODO.md`'s "Next release hardening").
-3. Continue the public-preview rollout: the three-platform visual demo
-   (only a Windows clip exists so far), a soft launch to targeted technical
-   communities, feedback-driven README/FAQ updates, and the main technical
-   announcement (`TODO.md`'s "Public Preview / Promotion Preparation").
-4. Extend the accepted encode/mux/decode-back gate to macOS/arm64
-   (AVFoundation/VideoToolbox) and Windows/x64 (Media Foundation), then close
-   cross-host lifecycle, stage, and packaged-SDK acceptance.
-5. Use WebRTC as a consumer milestone, then bring up QuickJS core/event-loop/
+1. Freeze and implement `TODO.md`'s active Networking and streaming contract:
+   bounded transport state, loopback progressive HTTP input, streaming output,
+   reconnect/discontinuity behavior, HTTPS, three-host lifecycle, and isolated
+   `04-gfx-media` package acceptance.
+2. Use WebRTC as a consumer milestone after the transport tranche, then bring
+   up QuickJS core/event-loop/
    timers/modules and expose stable media/gfx services with WebCodecs-like
    queue semantics.
 

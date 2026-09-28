@@ -58,9 +58,11 @@ is not complete merely because an in-tree target links.
   (VideoToolbox), Windows/x64 (D3D11VA), and Linux/x86_64 (VA-API, physical
   Intel GPU, 2026-09-22). Decoded-texture interop is also accepted on all
   three hosts: direct zero-copy on macOS/Linux and a measured D3D11-to-D3D12
-  GPU-copy fallback on Windows. Encode & Capture Tranches 0-1 are accepted on
-  physical Linux/x86_64; the V4L2 backend and resource-free conversion gate
-  are implemented, with the physical-camera round trip still pending.
+  GPU-copy fallback on Windows. Encode & Capture Tranches 0-6 are also closed
+  on Linux/x86_64, macOS/arm64, and Windows/x64: real host capture, software
+  and hardware encode, mux/decode-back, timestamp-discontinuity and lifecycle
+  gates, plus isolated `04-gfx-media` package acceptance are recorded in
+  `crtmedia_encode_capture_acceptance.md` and `HISTORY.md` (2026-09-27..28).
 - The cumulative binary-package chain reaches the current `05-js` skeleton.
   Predecessor-only isolated-stage acceptance through the option-ON
   `03-gfx-simple -> 04-gfx-media` transition is complete on Windows, macOS,
@@ -102,14 +104,19 @@ comparisons; promote Scudo only if repeatable evidence exceeds the baseline.
    unavailable.~~ **Complete 2026-09-27** (`HISTORY.md`): macOS/arm64 and
    Linux/x86_64 pass direct zero-copy; Windows/x64 passes its documented
    D3D11-to-D3D12 GPU-copy fallback; lifecycle and packaged-stage gates pass.
-4. Add capture, conversion, hardware/software encode, timestamp, and muxing on
-   top of the accepted frame and playback contracts. **In progress:** common
-   contracts and the Linux synthetic software encode -> MP4 -> decode-back
-   gate are complete. V4L2 capture code and its device-gated end-to-end test
-   are present; a physical-camera pass is the remaining Tranche 2 gate. See
+4. ~~Add capture, conversion, hardware/software encode, timestamp, and muxing
+   on top of the accepted frame and playback contracts.~~ **Complete
+   2026-09-28** (`HISTORY.md`): Linux/x86_64, macOS/arm64, and Windows/x64
+   pass real capture, software/hardware encode, deterministic timing and
+   lifecycle tests, and isolated-package acceptance. See
    `crtmedia_encode_capture_acceptance.md`.
-5. Add transport, buffering, back-pressure, reconnect, and streaming protocol
-   integration only after local media timing is stable.
+5. Add transport, bounded buffering, explicit back-pressure, cancellation,
+   reconnect, and streaming protocol integration. **In progress 2026-09-28:**
+   begin with a host-neutral transport contract and deterministic loopback
+   HTTP/HTTPS acceptance, keep FFmpeg network ownership disabled unless a
+   later audited requirement changes that decision, then replay the same
+   source/sink contract on Windows/x64, Linux/x86_64, and macOS/arm64. See
+   `TODO.md`'s active "Networking and streaming" tranche.
 6. Use WebRTC as a consumer-driven integration milestone, then add the real
    QuickJS core, event loop, modules, native bindings, and JavaScript-visible
    graphics/media services. Only then extend isolated-stage acceptance from

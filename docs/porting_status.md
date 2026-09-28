@@ -75,8 +75,9 @@ zlib -> libpng -> SQLite amalgamation -> bzip2 -> xz -> pcre2 -> mbedTLS -> curl
 
 `curl` closes the current networking/TLS porting queue: Linux, macOS, and
 Windows all passed real HTTP and HTTPS round trips against `example.com` for
-both static and shared libcurl. **Windows has since regressed** (found
-2026-09-01, unrelated `ffmpeg` work) -- see the `curl` section below.
+both static and shared libcurl. Windows temporarily regressed during unrelated
+`ffmpeg` work on 2026-09-01, but the PAL defects were fixed and the same
+static/shared round trips passed again that day; see the `curl` section below.
 
 `ffmpeg` (added 2026-09-01) is `libcrtmedia`'s first demux/software-decode
 port, outside the networking/TLS queue -- `shared-pass` on all three hosts.

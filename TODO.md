@@ -57,10 +57,65 @@ newest entry first) rather than leaving it here.
 
 ## In Progress
 
-Nothing in progress right now -- see `Planned` below for what to pick up next.
-When an item is promoted into progress, give it its own subsection here;
-when it finishes, move the detail to `HISTORY.md` and remove the subsection
-(matching this file's own `Done` section, which stays empty by design).
+### Networking and streaming
+
+Promoted 2026-09-28 after Encode and capture closed on Linux/x86_64,
+macOS/arm64, and Windows/x64. Preserve those accepted timing, ownership,
+back-pressure, and package boundaries. Start on Windows/x64 (the most
+different POSIX-socket/PAL host), then replay on Linux/x86_64 and macOS/arm64.
+Adaptive streaming, RTSP, WebRTC, and JavaScript bindings are later consumers,
+not completion gates for this tranche.
+
+* [ ] **0. Audit and freeze the transport/streaming acceptance contract.**
+  Record the current facts before adding APIs: FFmpeg is deliberately built
+  with `--disable-network` and only the `file` protocol; `crtmedia_extractor`
+  accepts local paths; CRT sockets/DNS and the libcurl+mbedTLS HTTP/HTTPS port
+  already pass on all three hosts. Decide the host-neutral source/sink,
+  cancellation, timeout, retry, ownership, and error model. Prefer a
+  CRT-owned transport feeding FFmpeg through private custom AVIO over silently
+  enabling FFmpeg's own network stack; no curl/FFmpeg/host type enters a public
+  header.
+* [ ] **1. Implement and prove the bounded transport core.** Add a fixed-
+  capacity byte queue with explicit high/low watermarks, partial read/write,
+  EOF, cancellation, timeout, and sticky-error states. Deterministic threaded
+  tests must force producer-faster-than-consumer and consumer-faster-than-
+  producer cases, prove writers block or return `WOULD_BLOCK` rather than grow
+  memory without bound, and prove release wakes every waiter without leaks or
+  deadlocks.
+* [ ] **2. Add progressive HTTP input and extractor integration.** Use the
+  accepted transport as private FFmpeg custom AVIO, leaving the pinned FFmpeg
+  network configuration unchanged. A repository-owned loopback HTTP/1.1 test
+  server must exercise short/chunked delivery, Content-Length, byte ranges,
+  EOF, cancellation, redirects within the frozen policy, and a real MP4
+  extractor -> decoder frame-count/PTS/content round trip. No public API may
+  imply that a non-seekable stream supports arbitrary seek.
+* [ ] **3. Add encoded streaming output.** Feed the already-accepted software
+  and hardware encode sample contract into a non-seekable streaming container
+  (fragmented MP4 first, subject to Tranche 0's pinned-FFmpeg audit) and an
+  HTTP upload sink with the same bounded back-pressure. The loopback receiver
+  must reopen/decode the captured bytes and verify exact sample/frame count,
+  monotonic PTS, EOS drain, and bounded memory; a slow receiver must throttle
+  capture/encode rather than drop ownership or allocate indefinitely.
+* [ ] **4. Define reconnect and discontinuity behavior.** Reproduce a server
+  closing mid-response/mid-upload. Resume input only when protocol metadata
+  makes the byte offset safe (for example a validated range response), never
+  duplicate already-delivered samples, bound retry count/backoff, and surface
+  non-resumable output failure honestly. Re-run the accepted timestamp-gap,
+  flush, lifecycle, and software-fallback tests around reconnect boundaries.
+* [ ] **5. Add HTTPS and cross-host acceptance.** Reuse the existing
+  libcurl+mbedTLS trust/certificate policy rather than adding host TLS types to
+  CRT headers. Keep deterministic protocol tests on loopback with a pinned
+  test certificate/IP literal so the current minimal DNS resolver is not
+  mistaken for a streaming prerequisite; run separate resolver coverage where
+  names are actually required. Replay the unchanged contract on Windows/x64,
+  Linux/x86_64, and macOS/arm64.
+* [ ] **6. Close lifecycle and isolated-package acceptance.** Stress repeated
+  connect/stream/cancel/reconnect/destroy cycles, audit sockets/threads/native
+  handles, and keep local file playback plus capture/encode green. Rebuild the
+  isolated `04-gfx-media` stage from its predecessor SDK with every new private
+  dependency and prerequisite declared, rebuild an installed HTTP streaming
+  consumer, run `verify_dist.py` plus PE/ELF/Mach-O dependency/RPATH checks,
+  and publish only after all three hosts pass.
 
 ## Planned
 
@@ -73,18 +128,17 @@ The allocator baseline decision gate is closed: keep the current allocator and
 leave Scudo conditional. Hardware video decode, Zero-copy decoded textures,
 and Encode and capture are all closed on Linux/x86_64, macOS/arm64, and
 Windows/x64 (`HISTORY.md`, 2026-09-22..28; full tranche-by-tranche detail in
-`docs/crtmedia_encode_capture_acceptance.md`). Promote the next tranche below
-when its prerequisite evidence is available.
+`docs/crtmedia_encode_capture_acceptance.md`). Networking and streaming is
+promoted into `In Progress` above; the remaining roadmap item stays here until
+that transport contract is accepted.
 
-1. **Networking and streaming.** Add transport, buffering, back-pressure,
-   reconnect, and protocol integration only after local media timing is stable.
-2. **WebRTC, then JavaScript.** Treat WebRTC as a consumer-driven integration
+1. **WebRTC, then JavaScript.** Treat WebRTC as a consumer-driven integration
    milestone. Build the real QuickJS core and CRT bindings before extending
    isolated distribution acceptance from `04-gfx-media` to `05-js`; a stage
    skeleton alone is not completion.
 
-The intended execution order is encode/capture, networking/streaming, WebRTC,
-and finally the complete JavaScript application-runtime layer.
+The remaining execution order is networking/streaming, WebRTC, and finally the
+complete JavaScript application-runtime layer.
 
 
 ### Runtime architecture hardening backlog

@@ -112,8 +112,9 @@ state on that host, not a promise.
 | FFmpeg software media | Verified | Verified | Verified | Opt-in, narrow LGPL build: MOV/MP4/M4A, WAV, MP3 demux; H.264, AAC, MP3, PCM software decode; player and playback-pipeline tests. |
 | Native audio output | Partial | Verified | Verified | WASAPI, CoreAudio, and ALSA or PulseAudio. Linux real-device behavior is environment dependent; WSLg's PulseAudio bridge is recorded as stopping to respond after about a second of continuous audio. |
 | Hardware H.264 decode (frames delivered to CPU) | Verified | Verified | Verified | D3D11VA on Windows, VideoToolbox on macOS, and VA-API on Linux (physical Intel GPU, native Ubuntu desktop) all deliver real hardware frames; software decode stays the default and the fallback. |
-| Hardware decode to GPU texture (zero-copy) | Planned | Planned | Planned | Decoded surfaces are not shared with the graphics path yet. |
-| Encode, capture, streaming | Planned | Planned | Planned | No mux/encode, capture, or network streaming layer exists. |
+| Decoded GPU texture interop | Verified | Verified | Verified | Direct zero-copy on Linux/Vulkan and macOS/Metal; measured no-CPU-readback GPU-copy fallback on Windows/D3D12. Lifecycle and isolated-package gates pass. |
+| Video encode and capture | Verified | Verified | Verified | V4L2/VA-API, Media Foundation, and AVFoundation/VideoToolbox paths pass real capture, hardware/software encode, mux/decode-back, timing, lifecycle, and isolated-package acceptance. |
+| Network streaming | In progress | In progress | In progress | Lower sockets/DNS and libcurl+mbedTLS are verified; bounded transport, progressive HTTP input/output, reconnect, and package acceptance are the active tranche. |
 | JavaScript runtime (QuickJS) | Planned | Planned | Planned | `05-js` packages a `libcrtjs` skeleton only. |
 
 Hosts: Linux is an aarch64 VM (the acceptance host) plus x86_64 under WSL2,
@@ -121,22 +122,22 @@ plus a native (non-VM, non-WSL) x86_64 desktop with a physical Intel GPU used
 for the hardware-decode and physical-GPU Skia evidence above (2026-09-22);
 Windows is x86_64; macOS is arm64 (Apple Silicon).
 
-Evidence dates: the full `ctest` suite last ran 149/149 on Windows/x64
-(2026-09-19), 121/121 on Linux/x86_64 under WSL2 (2026-09-21; two TTY-dependent
-termios tests excluded from that non-interactive run), 132/132 on the native
-Linux/x86_64 desktop (2026-09-22, with `CRTMEDIA_ENABLE_FFMPEG=ON` and VA-API
-enabled), and 132/132 on macOS/arm64 (2026-09-18, as recorded in
-[`HISTORY.md`](HISTORY.md)). The
-Linux/aarch64 results come from its recorded acceptance runs there. Details and
-per-host limits stay in [`STATUS.md`](STATUS.md), which is authoritative if it
-and this table ever disagree.
+The latest cross-host upper-runtime evidence is the 2026-09-27..28 zero-copy
+and Encode and capture closure: host lifecycle tests plus fresh isolated
+`04-gfx-media` builds passed on Windows/x64, macOS/arm64, and Linux/x86_64.
+Exact suite counts, environment-specific skips, and Linux/aarch64 acceptance
+runs stay in [`HISTORY.md`](HISTORY.md) and [`STATUS.md`](STATUS.md), which is
+authoritative if it and this table ever disagree.
 
 ## Hardware Decode Status
 
 CRT can decode H.264 on the platform's hardware decoder and hand each frame to
 your code as a CPU-resident `crtmedia_frame`. It is opt-in, and software decode
-is always the default and the fallback. Zero-copy sharing of decoded surfaces
-with the GPU is not implemented yet.
+is always the default and the fallback. The additive GPU-frame path is also
+accepted: VideoToolbox/Metal and VA-API/Vulkan import decoder storage directly,
+while D3D11VA/D3D12 uses the documented GPU-copy fallback without CPU
+readback. Ownership/lifecycle and packaged-stage evidence is recorded in
+[`docs/crtmedia_zero_copy_decode_acceptance.md`](docs/crtmedia_zero_copy_decode_acceptance.md).
 
 | Host | Backend | Status |
 | --- | --- | --- |

@@ -180,8 +180,8 @@ hardware-decode evidence; the real hardware-decode evidence is each host's
 own `crtmedia_hw_decode_test` `RESULT` line (`docs/
 crtmedia_hardware_decode_acceptance.md`). This demo requests hardware decode
 by default starting after this release (`HISTORY.md`, 2026-09-22); see
-`TODO.md`'s "Next release hardening" for re-verifying that on macOS and
-Linux.
+the later release-specific verification note below. It is not evidence about
+this already-published preview asset.
 
 Verified on Windows/x64 (2026-09-21):
 
@@ -361,8 +361,8 @@ Not yet done:
   (`HISTORY.md`, 2026-09-22) on macOS and Linux -- this release's own
   `crtmedia_player_demo` predates that change and still only decodes in
   software on every host, which the release notes already say; the change
-  itself is scoped to whatever CRT publishes next (`TODO.md`'s "Next release
-  hardening").
+  itself is scoped to whatever CRT publishes next. It is no longer a live
+  `TODO.md` item and does not reopen this preview's completed acceptance.
 
 ## Release notes template
 
