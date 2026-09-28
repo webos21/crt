@@ -10,6 +10,83 @@ substantive update.
 
 ## 2026-09-28
 
+- **Encode & Capture Tranche 5 closed: real Media Foundation H.264 hardware
+  encode and capture on Windows, plus a genuinely new, project-wide
+  `tools/crt-cc` Windows linker bug found and fixed along the way.**
+  `docs/crtmedia_encode_capture_acceptance.md`'s own Tranche 5 section has
+  the full detail; summary here.
+
+  `crtmedia_codec_create_encoder("video/avc")` now selects FFmpeg's
+  `h264_mf` encoder on Windows (the direct counterpart of Tranche 3/4B's
+  own `h264_vaapi`/`h264_videotoolbox`), needing no `hw_frames_ctx`/upload
+  step since `h264_mf` accepts plain software YUV420P frames directly.
+  `porting/recipes/ffmpeg.json` gained `--enable-mediafoundation
+  --enable-encoder=h264_mf`, two `configure`-probe patches
+  (`-fcrt-real-windows-sdk` on the `mftransform.h`/`MFCreateAlignedMemoryBuffer`
+  checks), and a matching per-object `libavcodec/Makefile` CFLAGS patch for
+  `mfenc.o`/`mf_utils.o`. A new real Media Foundation capture backend
+  (`src/arch/windows/capture_mf.c`, driven through real mingw-w64 headers
+  rather than this project's usual hand-declared-COM-vtable convention --
+  that file's own top comment has the full "why") implements
+  `crtmedia/capture.h` via one dedicated background `IMFSourceReader::
+  ReadSample()` thread feeding a fixed-capacity queue, mirroring
+  `capture_avfoundation.c`'s own delegate-thread-plus-queue shape.
+
+  Building `--enable-mediafoundation` surfaced a real, project-wide bug in
+  `tools/crt-cc`, not specific to Media Foundation: FFmpeg's own
+  `check_func_headers mfapi.h MFCreateAlignedMemoryBuffer -lmfplat
+  -fcrt-real-windows-sdk` configure probe failed to link
+  (`lld: error: unable to find library -lmfplat`) even with
+  `CRT_WINDOWS_SDK_LIBPATH` set correctly. Root cause, confirmed by
+  manually reproducing the exact probe outside FFmpeg's configure: this
+  project's Windows target (`x86_64-w64-windows-gnu`) links through LLD's
+  *MinGW* driver flavor (`clang -v` shows `ld.lld -m i386pep`), not
+  `lld-link`, and that driver silently ignores `-Wl,/libpath:` (an
+  MSVC/`lld-link`-only flag, ignored rather than rejected). This had never
+  surfaced before because `kernel32.lib`/`synchronization.lib`
+  (`CRT_WINDOWS_SYSTEM_LIBS`) already resolve through mingw-w64's own
+  bundled `x86_64-w64-mingw32/lib` import stubs -- `CRT_WINDOWS_SDK_LIBPATH`
+  was never actually load-bearing until `mfplat.lib` (a real-SDK-only
+  import library with no mingw-w64 stub) needed it. Fixed in `tools/crt-cc`
+  by changing both Windows link sites from
+  `-Wl,/libpath:${CRT_WINDOWS_SDK_LIBPATH}` to plain
+  `-L${CRT_WINDOWS_SDK_LIBPATH}`, confirmed with a minimal clang/lld repro
+  before and after, then confirmed for real by rebuilding FFmpeg end to end.
+
+  Two more real, `libcrtmedia`-scoped link gaps followed, building the new
+  backend/test targets for the first time: (1) any final link that actually
+  pulls `capture_mf.c.obj` in (`crtmedia_shared`'s DLL; any executable
+  whose own code calls a `crtmedia_capture_*` function) failed with
+  `ld.lld: error: could not open 'libuuid.a'` -- LLD's MinGW driver adds
+  `-luuid` to its own internal default-library set whenever such an object
+  is present, independent of clang's `-nodefaultlibs`; fixed by linking the
+  real SDK's `uuid.lib` explicitly. (2) `MFEnumDeviceSources` is declared
+  in `mfidl.h` alongside everything else `mfplat.lib`/`mfreadwrite.lib`
+  cover, but is actually exported from a third, separate import library,
+  `Mf.lib` -- found by grepping every real SDK `um/x64` `.lib` for the
+  symbol after `ld.lld: undefined symbol: MFEnumDeviceSources`.
+
+  A further real finding came from running the new capture test against
+  this host's own real webcam (a Logitech UVC camera): requesting
+  `IMFSourceReader::SetCurrentMediaType()` with subtype NV12 directly --
+  even with `MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING` set, meant to let
+  Media Foundation's built-in video processor MFT convert from whatever the
+  device natively streams -- failed with `MF_E_INVALIDMEDIATYPE`
+  (`0xC00D5212`). This camera's own native types are RGB24 and I420 only
+  (no NV12), found by enumerating every native type by index. Fixed by
+  having `crtmedia_capture_backend_open()` prefer the camera's own native
+  NV12 or I420 type directly (no conversion requested at all), falling back
+  to the original NV12-via-video-processor request only if neither is
+  natively offered. I420 is byte-for-byte this project's own packed
+  YUV420P plane layout, so the reader thread copies it out directly instead
+  of running the NV12 de-interleave path.
+
+  Real results, three consecutive runs each: `crtmedia_capture_mf_test: ok
+  frames=30 device=\\?\usb#vid_046d&pid_08d8&mi_00#... size=320x240 fps=30`
+  and `crtmedia_encode_mf_test: ok path=mf frames=100 encode_ms=~18
+  decode_ms=~28 fallback_frames=100 fallback_encode_ms=~24
+  fallback_decode_ms=~11`. Full `ctest` suite: 153/153.
+
 - **Encode & Capture Tranche 4B closed: real VideoToolbox H.264 hardware
   encode on macOS, plus a genuinely new real-Apple-SDK/pthread ABI
   mismatch found and fixed.** `docs/crtmedia_encode_capture_acceptance.md`'s

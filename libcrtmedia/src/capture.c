@@ -15,7 +15,8 @@ crtmedia_result crtmedia_capture_enumerate(
   if (out_count == NULL || (capacity != 0 && devices == NULL)) {
     return CRTMEDIA_ERROR_INVALID_ARGUMENT;
   }
-#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS)
+#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS) || \
+    defined(CRT_TARGET_OS_WINDOWS)
   return crtmedia_capture_backend_enumerate(devices, capacity, out_count);
 #else
   (void)devices;
@@ -38,7 +39,8 @@ crtmedia_result crtmedia_capture_open(
     return CRTMEDIA_ERROR_INVALID_ARGUMENT;
   }
   *out_capture = NULL;
-#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS)
+#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS) || \
+    defined(CRT_TARGET_OS_WINDOWS)
   result = crtmedia_capture_backend_open(
       device_id, requested, &backend, out_actual);
   if (result != CRTMEDIA_OK) {
@@ -65,7 +67,8 @@ crtmedia_result crtmedia_capture_start(crtmedia_capture* capture) {
   if (capture == NULL || capture->backend == NULL) {
     return CRTMEDIA_ERROR_INVALID_ARGUMENT;
   }
-#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS)
+#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS) || \
+    defined(CRT_TARGET_OS_WINDOWS)
   return crtmedia_capture_backend_start(capture->backend);
 #else
   return CRTMEDIA_ERROR_UNSUPPORTED;
@@ -78,7 +81,8 @@ crtmedia_result crtmedia_capture_dequeue_frame(
       timeout_ms < -1) {
     return CRTMEDIA_ERROR_INVALID_ARGUMENT;
   }
-#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS)
+#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS) || \
+    defined(CRT_TARGET_OS_WINDOWS)
   return crtmedia_capture_backend_dequeue(capture->backend, timeout_ms, out_frame);
 #else
   return CRTMEDIA_ERROR_UNSUPPORTED;
@@ -89,7 +93,8 @@ crtmedia_result crtmedia_capture_stop(crtmedia_capture* capture) {
   if (capture == NULL || capture->backend == NULL) {
     return CRTMEDIA_ERROR_INVALID_ARGUMENT;
   }
-#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS)
+#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS) || \
+    defined(CRT_TARGET_OS_WINDOWS)
   return crtmedia_capture_backend_stop(capture->backend);
 #else
   return CRTMEDIA_ERROR_UNSUPPORTED;
@@ -100,7 +105,8 @@ void crtmedia_capture_release(crtmedia_capture* capture) {
   if (capture == NULL) {
     return;
   }
-#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS)
+#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS) || \
+    defined(CRT_TARGET_OS_WINDOWS)
   if (capture->backend != NULL) {
     crtmedia_capture_backend_release(capture->backend);
   }

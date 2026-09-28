@@ -59,7 +59,42 @@ endif()
 # mutex/cond from a real foreign CoreAudio-spawned thread is safe).
 set(CRTMEDIA_BACKEND_SOURCES "")
 if(CRT_TARGET_OS STREQUAL "windows")
-  list(APPEND CRTMEDIA_BACKEND_SOURCES src/arch/windows/audio_sink_wasapi.c)
+  list(APPEND CRTMEDIA_BACKEND_SOURCES
+    src/arch/windows/audio_sink_wasapi.c
+    src/arch/windows/capture_mf.c
+  )
+  # capture_mf.c deliberately deviates from audio_sink_wasapi.c's own
+  # "hand-declare every COM type, never #include a host SDK header"
+  # convention (this file's own top comment has the full "why": Media
+  # Foundation's real interface surface -- IMFAttributes alone has ~29
+  # methods, before IMFActivate/IMFMediaType/IMFSourceReader/IMFSample/
+  # IMFMediaBuffer even start -- makes hand-counting every vtable slot
+  # correctly a real, serious risk of the exact same class of subtle ABI
+  # bug this project already hit for real once elsewhere (a struct-field-
+  # size mismatch under -fwchar-type=int, HISTORY.md 2026-09-23), just
+  # multiplied across several much larger interfaces instead of one
+  # struct). Real mingw-w64 headers are already vendored for this exact
+  # in-tree build (CRT_MINGW_W64_HEADERS_INCLUDE_ROOT, top-level
+  # CMakeLists.txt) and are the same header set FFmpeg's own libavcodec/
+  # mfenc.c already compiles against successfully via COBJMACROS -- using
+  # them here directly, the same way libcrtgfx/src/skia_bridge.cc's own
+  # D3D12 zero-copy bridge already does for an equally complex real SDK
+  # surface, is safe (the compiler and the headers agree on real layout
+  # automatically) and far less error-prone than hand-declaring ~150
+  # vtable slots across six interfaces.
+  # capture_mf.c is compiled without crt_build_flags (see the comment
+  # above this OS block for why crtmedia_backend_objects skips it on
+  # Windows for audio_sink_wasapi.c's sake), but unlike that file it
+  # #includes real mingw-w64 headers, and mingw-w64's own winnt.h reaches
+  # for <ctype.h> unconditionally -- mingw-w64-headers (fetched by this
+  # project) is API-only, no C runtime headers, so that resolves against
+  # this project's own libc (the same crt_build_flags would have added):
+  # confirmed for real (missing this produced "fatal error: 'ctype.h'
+  # file not found" from winnt.h on the first-ever compile attempt).
+  set_source_files_properties(src/arch/windows/capture_mf.c PROPERTIES
+    COMPILE_OPTIONS
+      "-I${CMAKE_SOURCE_DIR}/libstdc++/third_party/win32_shim;-I${CRT_MINGW_W64_HEADERS_INCLUDE_ROOT};-I${CMAKE_SOURCE_DIR}/include;-include;${CMAKE_SOURCE_DIR}/libstdc++/third_party/win32_shim/mingw_w64_compat.h;-Wno-pragma-pack;-Wno-unused-value;-Wno-ignored-attributes;-Wno-extern-c-compat;-Wno-class-conversion"
+  )
 elseif(CRT_TARGET_OS STREQUAL "linux")
   # src/arch/linux/audio_sink_linux.c: raw ALSA kernel PCM ioctl, falling
   # back to a hand-rolled real PulseAudio native-protocol client -- see
@@ -148,6 +183,110 @@ if(CRT_TARGET_OS STREQUAL "windows")
   endif()
   if(NOT CRTMEDIA_WINDOWS_DXGI_LIB)
     set(CRTMEDIA_WINDOWS_DXGI_LIB dxgi.lib CACHE FILEPATH "Windows dxgi import library")
+  endif()
+
+  # mfuuid.lib/strmiids.lib (2026-09-28, "Encode and capture" Tranche 5) --
+  # unlike D3D11_LIB/DXGI_LIB above, these two are real, actually-referenced
+  # link inputs, not currently-unused ones: FFmpeg's own h264_mf encoder
+  # (porting/recipes/ffmpeg.json's --enable-mediafoundation) dynamically
+  # loads mfplat.dll itself (dlopen()/dlsym(), confirmed by reading
+  # libavcodec/mfenc.c's own mf_load_library() directly -- no mfplat.lib
+  # needed), but mfenc.c/mf_utils.c still reference real MF_MT_*/
+  # MFVideoFormat_*/CODECAPI_* GUIDs as plain `extern const GUID` data
+  # (declared in mfapi.h/mfobjects.h, defined in mfuuid.lib/strmiids.lib),
+  # which only a real linker symbol resolution -- not dlsym() -- can
+  # satisfy. capture_mf.c (this library's own Windows Media Foundation
+  # capture backend, src/arch/windows/capture_mf.c) also references
+  # several of the same GUIDs directly for its own MFEnumDeviceSources/
+  # IMFAttributes/IMFMediaType calls.
+  find_file(CRTMEDIA_WINDOWS_MFUUID_LIB
+    NAMES mfuuid.lib
+    PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES}
+    NO_DEFAULT_PATH
+  )
+  find_file(CRTMEDIA_WINDOWS_STRMIIDS_LIB
+    NAMES strmiids.lib
+    PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES}
+    NO_DEFAULT_PATH
+  )
+  if(NOT CRTMEDIA_WINDOWS_MFUUID_LIB)
+    set(CRTMEDIA_WINDOWS_MFUUID_LIB mfuuid.lib CACHE FILEPATH "Windows mfuuid import library")
+  endif()
+  if(NOT CRTMEDIA_WINDOWS_STRMIIDS_LIB)
+    set(CRTMEDIA_WINDOWS_STRMIIDS_LIB strmiids.lib CACHE FILEPATH "Windows strmiids import library")
+  endif()
+
+  # mfplat.lib/mfreadwrite.lib (2026-09-28, "Encode and capture" Tranche 5)
+  # -- capture_mf.c (this library's own Windows Media Foundation capture
+  # backend) calls MFStartup/MFShutdown/MFCreateAttributes/MFCreateMediaType/
+  # MFEnumDeviceSources (mfplat.dll) and MFCreateSourceReaderFromMediaSource
+  # (mfreadwrite.dll) directly, via ordinary import-library linking --
+  # deliberately simpler than mfenc.c's own dlopen()/dlsym() approach
+  # (that file's own comment further up explains why FFmpeg needs it: a
+  # `Windows N` edition without Media Foundation installed must not
+  # prevent the whole of ffmpeg.exe from *loading*). crtmedia_shared/
+  # every crtmedia-linking executable is not held to that same bar
+  # anywhere else in this project (D3D11/DXGI are already unconditionally
+  # imported the same ordinary way, immediately above), so a plain,
+  # ordinary import-library link is the right, simpler choice here; a
+  # `Windows N` host without Media Foundation installed will fail to load
+  # this DLL/executable at all rather than reporting a graceful per-call
+  # CRTMEDIA_ERROR_UNSUPPORTED -- a real, deliberate scope limit, not an
+  # oversight.
+  find_file(CRTMEDIA_WINDOWS_MFPLAT_LIB
+    NAMES mfplat.lib
+    PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES}
+    NO_DEFAULT_PATH
+  )
+  find_file(CRTMEDIA_WINDOWS_MFREADWRITE_LIB
+    NAMES mfreadwrite.lib
+    PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES}
+    NO_DEFAULT_PATH
+  )
+  if(NOT CRTMEDIA_WINDOWS_MFPLAT_LIB)
+    set(CRTMEDIA_WINDOWS_MFPLAT_LIB mfplat.lib CACHE FILEPATH "Windows mfplat import library")
+  endif()
+  if(NOT CRTMEDIA_WINDOWS_MFREADWRITE_LIB)
+    set(CRTMEDIA_WINDOWS_MFREADWRITE_LIB mfreadwrite.lib CACHE FILEPATH "Windows mfreadwrite import library")
+  endif()
+
+  # mf.lib (2026-09-28, "Encode and capture" Tranche 5) -- capture_mf.c's
+  # MFEnumDeviceSources() call (device enumeration) is declared in mfidl.h
+  # alongside everything else mfplat.lib/mfreadwrite.lib cover, but is
+  # actually exported from a third, separate import library: confirmed for
+  # real (ld.lld: undefined symbol: MFEnumDeviceSources, with mfplat.lib/
+  # mfreadwrite.lib already linked) by grepping every um/x64 .lib in this
+  # SDK for the symbol -- only Mf.lib and Mfcore.lib export it; Mf.lib is
+  # the conventional choice (it re-exports Mfcore.lib's own set).
+  find_file(CRTMEDIA_WINDOWS_MF_LIB
+    NAMES Mf.lib mf.lib
+    PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES}
+    NO_DEFAULT_PATH
+  )
+  if(NOT CRTMEDIA_WINDOWS_MF_LIB)
+    set(CRTMEDIA_WINDOWS_MF_LIB Mf.lib CACHE FILEPATH "Windows mf import library")
+  endif()
+
+  # uuid.lib (2026-09-28, "Encode and capture" Tranche 5) -- unlike every
+  # other Windows import library above, nothing in this project's own
+  # source calls a symbol from it directly. Confirmed for real that any
+  # final link actually pulling capture_mf.c.obj in (crtmedia_shared's DLL,
+  # which lists it as a direct source, and any executable whose own code
+  # calls a crtmedia_capture_* function, so the linker pulls that member out
+  # of lib/libcrtmedia.a -- crtmedia_capture_mf_test but not crtmedia_
+  # encode_mf_test, which never references capture.c) fails with "ld.lld:
+  # error: could not open 'libuuid.a'" without this: LLD's MinGW driver adds
+  # "-luuid" to its own internal default-library set whenever it actually
+  # processes an object needing it, independent of clang's -nodefaultlibs
+  # (which only suppresses *clang's* defaults, not LLD's own). Same
+  # find_file()-with-CACHE-fallback pattern as every entry above.
+  find_file(CRTMEDIA_WINDOWS_UUID_LIB
+    NAMES uuid.lib
+    PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES}
+    NO_DEFAULT_PATH
+  )
+  if(NOT CRTMEDIA_WINDOWS_UUID_LIB)
+    set(CRTMEDIA_WINDOWS_UUID_LIB uuid.lib CACHE FILEPATH "Windows uuid import library")
   endif()
 endif()
 
@@ -793,6 +932,86 @@ if(CRTMEDIA_ENABLE_FFMPEG AND CRT_TARGET_OS STREQUAL "macos")
     SKIP_REGULAR_EXPRESSION "crtmedia_encode_videotoolbox_test: skip"
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_encode_videotoolbox_test_runs)
+endif()
+
+# Encode & Capture Tranche 5: Media Foundation H.264 hardware encode -> MP4
+# mux -> extractor/decode-back acceptance, compared against the Tranche 1
+# software fallback on the identical synthetic source
+# (tests/encode_mf_test.c's own top comment) -- the Windows twin of
+# crtmedia_encode_vaapi_test/crtmedia_encode_videotoolbox_test above, same
+# shape, same skip/pass contract. Windows only: no other host's recipe
+# enables h264_mf. A host with no usable Media Foundation H.264 encode MFT
+# reports a precise CTest skip, same SKIP_REGULAR_EXPRESSION discipline.
+if(CRTMEDIA_ENABLE_FFMPEG AND CRT_TARGET_OS STREQUAL "windows")
+  add_executable(crtmedia_encode_mf_test
+    ${CRT_STARTUP_OBJECTS}
+    tests/encode_mf_test.c
+  )
+  target_link_libraries(crtmedia_encode_mf_test PRIVATE crt_build_flags crtmedia)
+  target_include_directories(crtmedia_encode_mf_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include"
+  )
+  target_compile_definitions(crtmedia_encode_mf_test PRIVATE
+    CRTMEDIA_TEST_ENCODE_MF_OUTPUT_PATH="${CMAKE_CURRENT_BINARY_DIR}/crtmedia_encode_mf_test.mp4"
+    CRTMEDIA_TEST_ENCODE_MF_FALLBACK_OUTPUT_PATH="${CMAKE_CURRENT_BINARY_DIR}/crtmedia_encode_mf_test_fallback.mp4"
+  )
+  target_link_libraries(crtmedia_encode_mf_test PRIVATE crt_compiler_rt_builtins)
+  target_link_options(crtmedia_encode_mf_test PRIVATE
+    -nostdlib
+    -nostartfiles
+    -nodefaultlibs
+    -Wl,/entry:mainCRTStartup
+    -Wl,/subsystem:console
+    -Wl,/OPT:REF
+  )
+  target_link_libraries(crtmedia_encode_mf_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  crt_link_startup_end_objects(crtmedia_encode_mf_test)
+  add_dependencies(crtmedia_encode_mf_test c crt1 crtmedia)
+  add_test(NAME crtmedia_encode_mf_test_runs COMMAND crtmedia_encode_mf_test)
+  set_tests_properties(crtmedia_encode_mf_test_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    PASS_REGULAR_EXPRESSION "crtmedia_encode_mf_test: (ok|skip)"
+    SKIP_REGULAR_EXPRESSION "crtmedia_encode_mf_test: skip"
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_encode_mf_test_runs)
+endif()
+
+# Windows physical-device Tranche 5 capture gate, mirroring the Linux V4L2
+# gate above (tests/capture_mf_test.c's own top comment has the full "why"
+# it follows that file's shape rather than the macOS AVFoundation one). A
+# machine without a usable webcam is explicitly classified as skipped; when
+# present, the test runs the complete capture -> encode -> MP4 -> decode-
+# back path.
+if(CRTMEDIA_ENABLE_FFMPEG AND CRT_TARGET_OS STREQUAL "windows")
+  add_executable(crtmedia_capture_mf_test
+    ${CRT_STARTUP_OBJECTS}
+    tests/capture_mf_test.c
+  )
+  target_link_libraries(crtmedia_capture_mf_test PRIVATE crt_build_flags crtmedia)
+  target_include_directories(crtmedia_capture_mf_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include"
+  )
+  target_compile_definitions(crtmedia_capture_mf_test PRIVATE
+    CRTMEDIA_TEST_CAPTURE_OUTPUT_PATH="${CMAKE_CURRENT_BINARY_DIR}/crtmedia_capture_mf_test.mp4")
+  target_link_libraries(crtmedia_capture_mf_test PRIVATE crt_compiler_rt_builtins)
+  target_link_options(crtmedia_capture_mf_test PRIVATE
+    -nostdlib
+    -nostartfiles
+    -nodefaultlibs
+    -Wl,/entry:mainCRTStartup
+    -Wl,/subsystem:console
+    -Wl,/OPT:REF
+  )
+  target_link_libraries(crtmedia_capture_mf_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+  crt_link_startup_end_objects(crtmedia_capture_mf_test)
+  add_dependencies(crtmedia_capture_mf_test c crt1 crtmedia)
+  add_test(NAME crtmedia_capture_mf_test_runs COMMAND crtmedia_capture_mf_test)
+  set_tests_properties(crtmedia_capture_mf_test_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    PASS_REGULAR_EXPRESSION "crtmedia_capture_mf_test: (ok|skip)"
+    SKIP_REGULAR_EXPRESSION "crtmedia_capture_mf_test: skip"
+    TIMEOUT 120)
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_capture_mf_test_runs)
 endif()
 
 # Linux physical-device Tranche 2 gate. A machine without a compatible

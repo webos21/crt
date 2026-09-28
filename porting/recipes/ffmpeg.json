@@ -66,7 +66,9 @@
           "--disable-response-files",
           "--extra-cflags=-U_WIN32 -U_WIN32_WCE -U__WIN32__ -UWIN32 -U__MINGW32__",
           "--enable-d3d11va",
-          "--enable-hwaccel=h264_d3d11va,h264_d3d11va2"
+          "--enable-hwaccel=h264_d3d11va,h264_d3d11va2",
+          "--enable-mediafoundation",
+          "--enable-encoder=h264_mf"
         ],
         "make_args": [
           "INSTALL=@ROOT@/porting/shims/win32/install-sh"
@@ -85,6 +87,18 @@
             "reason": "The ID3D11VideoDecoder/ID3D11VideoContext half of the d3d11va probe set -- see the previous patch's reason."
           },
           {
+            "file": "configure",
+            "find": "check_headers mftransform.h",
+            "replace": "check_headers mftransform.h -fcrt-real-windows-sdk",
+            "reason": "Windows Media Foundation H.264 hardware encode (2026-09-28, \"Encode and capture\" Tranche 5). mediafoundation's own configure dependency is `mftransform_h MFCreateAlignedMemoryBuffer` -- two probes, this one and the next patch -- needing the identical real-header sentinel the D3D11VA probes above already use, for the identical reason (mftransform.h/mfapi.h are real mingw-w64 headers, unreachable under this recipe's own global -U_WIN32 policy)."
+          },
+          {
+            "file": "configure",
+            "find": "check_func_headers mfapi.h MFCreateAlignedMemoryBuffer -lmfplat",
+            "replace": "check_func_headers mfapi.h MFCreateAlignedMemoryBuffer -lmfplat -fcrt-real-windows-sdk",
+            "reason": "The MFCreateAlignedMemoryBuffer half of the mediafoundation probe set -- see the previous patch's reason. check_func_headers' own test_ld() splits -l*/*.so args (the link step) from every other flag (the compile step) automatically, so -fcrt-real-windows-sdk reaches only the mfapi.h compile probe and -lmfplat still reaches only the link probe."
+          },
+          {
             "file": "libavutil/Makefile",
             "find": "OBJS-$(CONFIG_D3D11VA)                  += hwcontext_d3d11va.o",
             "replace": "OBJS-$(CONFIG_D3D11VA)                  += hwcontext_d3d11va.o\n$(SUBDIR)hwcontext_d3d11va.o: CFLAGS += -fcrt-real-windows-sdk",
@@ -95,6 +109,12 @@
             "find": "OBJS-$(CONFIG_D3D11VA)                    += dxva2.o",
             "replace": "OBJS-$(CONFIG_D3D11VA)                    += dxva2.o\nifdef CONFIG_D3D11VA\n$(SUBDIR)dxva2.o $(SUBDIR)dxva2_h264.o $(SUBDIR)d3d11va.o: CFLAGS += -fcrt-real-windows-sdk\nendif",
             "reason": "The libavcodec-side objects of the D3D11VA path (dxva2.c and its H.264 picture-parameter builder dxva2_h264.c, plus d3d11va.c, which only includes d3d11va.h under CONFIG_D3D11VA) -- see the libavutil/Makefile patch above for the full explanation. Guarded by ifdef CONFIG_D3D11VA so a D3D11VA-less configure never hands the sentinel to d3d11va.o, which is otherwise built unconditionally."
+          },
+          {
+            "file": "libavcodec/Makefile",
+            "find": "OBJS-$(CONFIG_H264_MF_ENCODER)         += mfenc.o mf_utils.o",
+            "replace": "OBJS-$(CONFIG_H264_MF_ENCODER)         += mfenc.o mf_utils.o\nifdef CONFIG_H264_MF_ENCODER\n$(SUBDIR)mfenc.o $(SUBDIR)mf_utils.o: CFLAGS += -fcrt-real-windows-sdk\nendif",
+            "reason": "Windows Media Foundation H.264 hardware encode (2026-09-28, \"Encode and capture\" Tranche 5). mfenc.c/mf_utils.c both `#define COBJMACROS` and directly #include real mfapi.h/mfobjects.h/mfreadwrite.h/mfidl.h -- same real-header need as the D3D11VA objects above, same sentinel. This recipe only enables the h264 MF encoder (not aac/ac3/hevc/mp3), so CONFIG_H264_MF_ENCODER is the only real trigger for this shared pair of objects; guarded the same way the dxva2.o patch guards d3d11va.o so an MF-less configure never hands the sentinel here."
           }
         ],
         "post_configure_patch": [
@@ -269,6 +289,7 @@
     "2026-09-19 Windows D3D11VA hardware decode (\"Hardware video decode\" Tranche 3, HISTORY.md 2026-09-19): target_overrides.windows now passes --enable-d3d11va --enable-hwaccel=h264_d3d11va,h264_d3d11va2 (h264_d3d11va2 is the variant that offers AV_PIX_FMT_D3D11 through a hw_device_ctx, which libcrtmedia's codec.c selects). Real Windows headers (mingw-w64 windows.h/d3d11.h/dxva.h) are visible only to the three D3D11VA configure probes and to hwcontext_d3d11va.o/dxva2.o/dxva2_h264.o/d3d11va.o, via tools/crt-cc's -fcrt-real-windows-sdk sentinel handed to them by the windows-only patches above; the recipe's global -U_WIN32 policy is unchanged for every other object. The global alternative was measured and rejected (about 20 unrelated HAVE_* flips, CPPFLAGS gaining -D__USE_MINGW_ANSI_STDIO/-D_POSIX_C_SOURCE, compat/strtod.o dropped). The sentinel needs CRT_MINGW_W64_HEADERS_ROOT/CRT_WIN32_SHIM_DIR, which tools/crt-port-build.py exports (fetching the pinned mingw-w64 headers on demand in repository mode; a packaged SDK must pass --mingw-w64-headers-root/--win32-shim-dir, as tools/build_stage_04_gfx_media.py now does).",
     "2026-09-27 Encode & Capture Tranche 1: the narrow build now enables native LGPL MPEG-4 Part 2 encode/decode/parser plus the MP4 muxer, with no external x264/OpenH264 dependency and avdevice/avfilter/network still disabled. A forced physical-Linux/x86_64 rebuild exposed stale installed public FFmpeg headers shadowing the fresh source tree because CRT_PORT_INCLUDE_DIR intentionally precedes upstream -I flags; --extra-cflags=-iquote. now gives FFmpeg's own quoted internal includes source-tree priority on all hosts without changing angle-bracket dependency lookup. The rebuilt archives pass crtmedia_encode_mux_test: 100 deterministic frames, exact PTS/count/3,333,300-us duration, MP4 reopen/decode-back, and bounded pixel checks. macOS/Windows execution is intentionally deferred to their host tranches.",
     "2026-09-28 (Encode and capture Tranche 2 real-hardware gate): added mjpeg to the base --enable-decoder list. This project's own physical Linux/x86_64 acceptance webcam (a USB UVC camera) offers no raw YUV420/NV12/YUYV V4L2 streaming format at all -- confirmed via 'v4l2-ctl --list-formats-ext', which lists only 'JPEG' at 320x240/640x480 -- matching the common reality that most UVC webcams only stream MJPEG at useful resolutions/frame rates. FFmpeg's own MJPEG decoder is self-contained (no external libjpeg, no zlib -- this recipe's own --disable-zlib stays unaffected) and was already a zero-new-dependency addition; wired into libcrtmedia/src/arch/linux/capture_v4l2.c's own new MJPEG source-format branch (capture_v4l2_test_control.h's own CRTMEDIA_V4L2_SOURCE_MJPEG comment has the full design), gated behind CRTMEDIA_CAPTURE_HAVE_MJPEG (defined only when CRTMEDIA_ENABLE_FFMPEG is also on) so a plain FFmpeg-less configure gains no new dependency. No parser needed: each V4L2 buffer is already one complete JPEG image, fed to avcodec_send_packet() whole.",
-    "2026-09-28 (Encode and capture Tranche 3): added --enable-encoder=h264_vaapi to target_overrides.linux and the matching vaapi_encode.o/vaapi_encode_h264.o Makefile CFLAGS patches (same -fcrt-real-linux-sdk-per-object pattern as the existing VA-API decode objects above). No new host dependency: this reuses the same libva/libva-drm this recipe's --enable-vaapi already requires for decode. Software H.264 encode is deliberately not added in this recipe (FFmpeg ships no built-in H.264 encoder; only external x264/OpenH264 -- docs/crtmedia_encode_capture_acceptance.md's own Tranche 0 note -- which this project's own porting policy declines), so VA-API is the only H.264 encode path; the existing native MPEG-4 Part 2 encoder remains the universal software fallback."
+    "2026-09-28 (Encode and capture Tranche 3): added --enable-encoder=h264_vaapi to target_overrides.linux and the matching vaapi_encode.o/vaapi_encode_h264.o Makefile CFLAGS patches (same -fcrt-real-linux-sdk-per-object pattern as the existing VA-API decode objects above). No new host dependency: this reuses the same libva/libva-drm this recipe's --enable-vaapi already requires for decode. Software H.264 encode is deliberately not added in this recipe (FFmpeg ships no built-in H.264 encoder; only external x264/OpenH264 -- docs/crtmedia_encode_capture_acceptance.md's own Tranche 0 note -- which this project's own porting policy declines), so VA-API is the only H.264 encode path; the existing native MPEG-4 Part 2 encoder remains the universal software fallback.",
+    "2026-09-28 (Encode and capture Tranche 5): added --enable-mediafoundation --enable-encoder=h264_mf to target_overrides.windows, the matching check_headers/check_func_headers configure sentinel patches, and a mfenc.o/mf_utils.o Makefile CFLAGS override (same -fcrt-real-windows-sdk per-object pattern the D3D11VA decode objects above already use). No mfplat.lib link is needed: mfenc.c dynamically loads mfplat.dll itself via dlopen()/dlsym() (confirmed by reading mf_load_library() directly), so only mfuuid.lib/strmiids.lib (for the real MF_MT_*/MFVideoFormat_* GUID data mfenc.c/mf_utils.c reference as extern const GUID, resolved at link time, not dlsym'd) are new link inputs -- added to libcrtmedia/cmake/crtmedia_targets.cmake's existing Windows PUBLIC link list alongside the already-present ole32.lib/d3d11.lib/dxgi.lib. Unlike Linux's h264_vaapi and macOS's h264_videotoolbox, h264_mf lists AV_PIX_FMT_YUV420P directly in its own CODEC_PIXFMTS (confirmed by reading mfenc.c's own MF_ENCODER(VIDEO, h264, ...) macro invocation), so this backend needs no hw_frames_ctx/upload step either -- the identical plain-software-frame shape as h264_videotoolbox, not h264_vaapi's NV12-hw-surface-upload shape."
   ]
 }

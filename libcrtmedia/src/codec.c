@@ -115,6 +115,21 @@ struct crtmedia_codec {
    * output) already takes the same route as mp4v-es via the shared
    * `!is_vaapi_encoder` branches. */
   int is_videotoolbox_encoder;
+  /* Windows Media Foundation H.264 hardware encode (2026-09-28, "Encode and
+   * capture" Tranche 5). Exactly the same shape as is_videotoolbox_encoder
+   * above, for the same real reason: FFmpeg's own libavcodec/mfenc.c lists
+   * AV_PIX_FMT_YUV420P directly in h264_mf's own CODEC_PIXFMTS (confirmed
+   * by reading mfenc.c's own MF_ENCODER(VIDEO, h264, ...) invocation), so
+   * no hw_frames_ctx/upload step is needed here either -- the MFT's own
+   * input media-type negotiation accepts plain software YUV420P
+   * (MFVideoFormat_IYUV/I420) directly, matching mf_encv_input_score()'s
+   * own real logic (read directly): `pix_fmt != avctx->pix_fmt` fails
+   * only when avctx->pix_fmt is AV_PIX_FMT_D3D11, which this codec never
+   * sets. This flag exists only so crtmedia_codec_get_output_format()
+   * reports mime="video/avc" for this instance; every other codepath
+   * (queue_frame's plane copy, dequeue_encoded_output) already takes the
+   * same route as mp4v-es via the shared `!is_vaapi_encoder` branches. */
+  int is_mf_encoder;
 };
 
 static enum AVCodecID codec_id_for_mime(const char* mime) {
@@ -455,7 +470,7 @@ crtmedia_result crtmedia_codec_create_encoder(const crtmedia_format* format, crt
       pixel_format != CRTMEDIA_PIXEL_FORMAT_YUV420P) {
     return CRTMEDIA_ERROR_UNSUPPORTED;
   }
-#if !defined(CRT_TARGET_OS_LINUX) && !defined(CRT_TARGET_OS_MACOS)
+#if !defined(CRT_TARGET_OS_LINUX) && !defined(CRT_TARGET_OS_MACOS) && !defined(CRT_TARGET_OS_WINDOWS)
   if (want_h264) {
     return CRTMEDIA_ERROR_UNSUPPORTED;
   }
@@ -471,6 +486,8 @@ crtmedia_result crtmedia_codec_create_encoder(const crtmedia_format* format, crt
     av_codec = avcodec_find_encoder_by_name("h264_vaapi");
 #elif defined(CRT_TARGET_OS_MACOS)
     av_codec = avcodec_find_encoder_by_name("h264_videotoolbox");
+#elif defined(CRT_TARGET_OS_WINDOWS)
+    av_codec = avcodec_find_encoder_by_name("h264_mf");
 #endif
   } else {
     av_codec = avcodec_find_encoder(AV_CODEC_ID_MPEG4);
@@ -558,6 +575,10 @@ crtmedia_result crtmedia_codec_create_encoder(const crtmedia_format* format, crt
 #if defined(CRT_TARGET_OS_MACOS)
     if (want_h264) {
       codec->is_videotoolbox_encoder = 1;
+    }
+#elif defined(CRT_TARGET_OS_WINDOWS)
+    if (want_h264) {
+      codec->is_mf_encoder = 1;
     }
 #endif
   }
@@ -796,7 +817,8 @@ crtmedia_result crtmedia_codec_get_output_format(
   }
   if (crtmedia_format_set_string(
           format, CRTMEDIA_FORMAT_KEY_MIME,
-          (codec->is_vaapi_encoder || codec->is_videotoolbox_encoder) ? "video/avc" : "video/mp4v-es") != CRTMEDIA_OK ||
+          (codec->is_vaapi_encoder || codec->is_videotoolbox_encoder || codec->is_mf_encoder) ? "video/avc"
+                                                                                               : "video/mp4v-es") != CRTMEDIA_OK ||
       crtmedia_format_set_int32(format, CRTMEDIA_FORMAT_KEY_WIDTH, codec->codec_ctx->width) != CRTMEDIA_OK ||
       crtmedia_format_set_int32(format, CRTMEDIA_FORMAT_KEY_HEIGHT, codec->codec_ctx->height) != CRTMEDIA_OK ||
       crtmedia_format_set_int32(format, CRTMEDIA_FORMAT_KEY_PIXEL_FORMAT, CRTMEDIA_PIXEL_FORMAT_YUV420P) != CRTMEDIA_OK ||

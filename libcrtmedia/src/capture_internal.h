@@ -4,7 +4,8 @@
 
 #include "crtmedia/capture.h"
 
-#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS)
+#if defined(CRT_TARGET_OS_LINUX) || defined(CRT_TARGET_OS_MACOS) || \
+    defined(CRT_TARGET_OS_WINDOWS)
 crtmedia_result crtmedia_capture_backend_enumerate(
     crtmedia_capture_device_info* devices, size_t capacity, size_t* out_count);
 crtmedia_result crtmedia_capture_backend_open(

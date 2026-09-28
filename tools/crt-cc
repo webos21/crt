@@ -804,6 +804,21 @@ if [ -n "${CRT_PORT_RPATH_DIR:-}" ]; then
     set -- "$@" "-Wl,-rpath,${CRT_PORT_RPATH_DIR}"
   fi
 fi
+# CRT_WINDOWS_SDK_LIBPATH is appended as a plain "-L" (compiler-level flag,
+# not "-Wl,/libpath:") below: this project's Windows target is
+# x86_64-w64-windows-gnu, linked via -fuse-ld=lld's *MinGW* driver flavor
+# (confirmed with `clang -v`: it invokes `ld.lld -m i386pep`, the GNU/MinGW
+# PE frontend, not lld-link). That frontend's argument parser does not
+# recognize "/libpath:" as a search-path flag at all -- unlike its "/entry:"/
+# "/subsystem:"/"/OPT:REF" siblings above, which happen to have MinGW-driver
+# support, "/libpath:" was silently dropped with no error. This stayed
+# invisible because kernel32.lib/synchronization.lib (CRT_WINDOWS_SYSTEM_LIBS)
+# already resolve via mingw-w64's own bundled x86_64-w64-mingw32/lib import
+# stubs -- CRT_WINDOWS_SDK_LIBPATH was never actually on the search path for
+# them. The first real Windows-SDK-only import lib with no mingw-w64 stub
+# (mfplat.lib, for FFmpeg's h264_mf encoder) exposed it: `-lmfplat` failed
+# with "unable to find library" even with CRT_WINDOWS_SDK_LIBPATH set.
+# Confirmed with a minimal clang/lld repro that swapping to "-L" resolves it.
 if [ "$target_os" = windows ]; then
   windows_system_libs="${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"
   if [ "$shared_mode" -eq 1 ]; then
@@ -818,7 +833,7 @@ if [ "$target_os" = windows ]; then
       "$@" "-L${CRT_SYSROOT}/lib" \
       "${CRT_SYSROOT}/lib/libc.a" "${CRT_SYSROOT}/lib/libm.a" \
       "${CRT_SYSROOT}/lib/libdl.a" $windows_system_libs \
-      ${CRT_WINDOWS_SDK_LIBPATH:+"-Wl,/libpath:${CRT_WINDOWS_SDK_LIBPATH}"}
+      ${CRT_WINDOWS_SDK_LIBPATH:+"-L${CRT_WINDOWS_SDK_LIBPATH}"}
   fi
   # shellcheck disable=SC2086
   run_cc -nostdlib -nostartfiles -nodefaultlibs \
@@ -831,7 +846,7 @@ if [ "$target_os" = windows ]; then
     "${CRT_SYSROOT}/lib/libc.a" "${CRT_SYSROOT}/lib/libm.a" \
     "${CRT_SYSROOT}/lib/libdl.a" $windows_system_libs \
     "${CRT_SYSROOT}/lib/crt1_ctors_end.o" \
-    ${CRT_WINDOWS_SDK_LIBPATH:+"-Wl,/libpath:${CRT_WINDOWS_SDK_LIBPATH}"}
+    ${CRT_WINDOWS_SDK_LIBPATH:+"-L${CRT_WINDOWS_SDK_LIBPATH}"}
 fi
 
 # Keep non-Windows wrapper-owned sysroot paths as argv entries too. The

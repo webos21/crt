@@ -325,8 +325,79 @@ outside a LaunchServices-launched bundle -- see 4A above).
 
 ### 5. Windows/x64
 
-Add Media Foundation capture and hardware encode behind the same contracts,
-including a software fallback and MP4 decode-back acceptance on real hardware.
+Done 2026-09-28. Media Foundation H.264 hardware encode
+(`avcodec_find_encoder_by_name("h264_mf")`, FFmpeg's own `libavcodec/mfenc.c`,
+`porting/recipes/ffmpeg.json`'s `--enable-mediafoundation
+--enable-encoder=h264_mf`) and a new real Media Foundation capture backend
+(`src/arch/windows/capture_mf.c`), with the software fallback and MP4
+decode-back round trip run back to back on the identical synthetic source,
+mirroring Tranche 3/4B's own shape.
+
+**A real, project-wide `tools/crt-cc` linker bug, found while wiring
+`--enable-mediafoundation`'s own configure probe.** FFmpeg's
+`check_func_headers mfapi.h MFCreateAlignedMemoryBuffer -lmfplat
+-fcrt-real-windows-sdk` probe failed to link (`lld: error: unable to find
+library -lmfplat`) even with `CRT_WINDOWS_SDK_LIBPATH` set correctly.
+Root-caused by manually reproducing the exact probe outside FFmpeg's
+configure: this project's Windows target (`x86_64-w64-windows-gnu`) links
+through LLD's *MinGW* driver flavor (`clang -v` shows `ld.lld -m i386pep`),
+not `lld-link`, and that driver silently ignores `-Wl,/libpath:` (an
+MSVC/`lld-link`-only flag) -- it is not an error, just a no-op. This had
+never surfaced before because `kernel32.lib`/`synchronization.lib`
+(`CRT_WINDOWS_SYSTEM_LIBS`) already resolve through mingw-w64's own bundled
+`x86_64-w64-mingw32/lib` import stubs, so `CRT_WINDOWS_SDK_LIBPATH` was
+never actually load-bearing until `mfplat.lib` (a real-SDK-only import
+library with no mingw-w64 stub) needed it. Fixed in `tools/crt-cc` by
+changing both Windows link sites from `-Wl,/libpath:${CRT_WINDOWS_SDK_LIBPATH}`
+to plain `-L${CRT_WINDOWS_SDK_LIBPATH}` (a normal clang driver flag, correctly
+recognized by the MinGW driver); confirmed with a minimal clang/lld repro
+before and after the fix, then confirmed for real by rebuilding FFmpeg
+end to end (`--enable-mediafoundation --enable-encoder=h264_mf` now
+configures, builds, and installs cleanly).
+
+**Two more real, `libcrtmedia`-scoped link gaps, found building the new
+Windows backend/test targets for the first time.** (1) Any final link that
+actually pulls in `capture_mf.c.obj` (`crtmedia_shared`'s DLL, and any
+executable whose own code calls a `crtmedia_capture_*` function -- not
+`crtmedia_encode_mf_test`, which never does) failed with `ld.lld: error:
+could not open 'libuuid.a'`: LLD's MinGW driver adds `-luuid` to its own
+internal default-library set whenever such an object is present, independent
+of clang's `-nodefaultlibs` (which only suppresses *clang's* defaults, not
+LLD's own) -- fixed by linking the real SDK's `uuid.lib` explicitly
+(`CRTMEDIA_WINDOWS_UUID_LIB`). (2) `MFEnumDeviceSources` (device
+enumeration) is declared in `mfidl.h` alongside everything else
+`mfplat.lib`/`mfreadwrite.lib` cover, but is actually exported from a third,
+separate import library, `Mf.lib` -- found by grepping every `um/x64` `.lib`
+in the real SDK for the symbol after `ld.lld: undefined symbol:
+MFEnumDeviceSources` with `mfplat.lib`/`mfreadwrite.lib` already linked.
+
+**Real finding in `capture_mf.c` itself, found running the new capture test
+against this host's own real webcam (a Logitech UVC camera).** Requesting
+`IMFSourceReader::SetCurrentMediaType()` with subtype NV12 directly --
+even with `MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING` set, which is supposed
+to let Media Foundation's built-in video processor MFT convert from
+whatever the device natively streams -- failed with `MF_E_INVALIDMEDIATYPE`
+(`0xC00D5212`). This camera's own native types are RGB24 and I420 only (no
+NV12); enumerating every native type by index showed I420 already present
+verbatim. Fixed by having `crtmedia_capture_backend_open()` prefer the
+camera's own native NV12 or I420 type directly (no conversion requested at
+all) over asking the video processor to convert some other native type,
+falling back to the original NV12-via-video-processor request only if
+neither is natively offered. I420 is byte-for-byte this project's own
+packed YUV420P plane layout, so the reader thread copies it out directly
+(`crtmedia_mf_copy_i420_to_yuv420p()`) instead of running the NV12
+de-interleave path (`crtmedia_mf_convert_nv12_to_yuv420p()`, kept for the
+video-processor fallback and for any camera that does stream NV12 natively).
+
+Real results, three consecutive runs each:
+`crtmedia_capture_mf_test: ok frames=30
+device=\\?\usb#vid_046d&pid_08d8&mi_00#... size=320x240 fps=30` (real
+capture -> software encode -> MP4 -> decode-back) and
+`crtmedia_encode_mf_test: ok path=mf frames=100 encode_ms=~18
+decode_ms=~28 fallback_frames=100 fallback_encode_ms=~24
+fallback_decode_ms=~11` (synthetic frames -> real `h264_mf` hardware encode
+-> MP4 -> decode-back, compared against the Tranche 1 software mp4v-es
+fallback on the identical source). Full `ctest` suite: 153/153.
 
 ### 6. Cross-host closure
 
