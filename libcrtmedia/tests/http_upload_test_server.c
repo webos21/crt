@@ -145,7 +145,7 @@ static int handle_upload(http_upload_test_server* server, int client_fd) {
       "HTTP/1.1 201 Created\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
   size_t sent = 0;
   while (sent < sizeof(response) - 1) {
-    ssize_t n = send(client_fd, response + sent, sizeof(response) - 1 - sent, CRTMEDIA_TEST_SEND_FLAGS);
+    ssize_t n = crtmedia_test_send(client_fd, response + sent, sizeof(response) - 1 - sent);
     if (n <= 0) return -1;
     sent += (size_t)n;
   }

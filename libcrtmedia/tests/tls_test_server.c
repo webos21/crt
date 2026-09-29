@@ -126,7 +126,7 @@ typedef struct fd_io {
 
 static int bio_send(void* context, const unsigned char* buffer, size_t length) {
   fd_io* io = (fd_io*)context;
-  ssize_t n = send(io->fd, (const char*)buffer, length, CRTMEDIA_TEST_SEND_FLAGS);
+  ssize_t n = crtmedia_test_send(io->fd, (const char*)buffer, length);
   return n < 0 ? MBEDTLS_ERR_SSL_INTERNAL_ERROR : (int)n;
 }
 
@@ -168,7 +168,7 @@ static int connect_backend(int port) {
 static int send_all_plain(int fd, const unsigned char* data, size_t size) {
   size_t sent = 0;
   while (sent < size) {
-    ssize_t n = send(fd, (const char*)data + sent, size - sent, CRTMEDIA_TEST_SEND_FLAGS);
+    ssize_t n = crtmedia_test_send(fd, (const char*)data + sent, size - sent);
     if (n <= 0) {
       return -1;
     }

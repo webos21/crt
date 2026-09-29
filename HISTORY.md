@@ -10,6 +10,24 @@ substantive update.
 
 ## 2026-09-29
 
+- **Networking & Streaming Tranche 6 replayed on macOS/arm64: lifecycle
+  stress and isolated `04-gfx-media` rebuild pass after two real macOS fixes.**
+  `docs/crtmedia_networking_acceptance.md`'s Tranche 6 section has the detail.
+
+  `crtmedia_http_lifecycle_test` first died with exit 141: the loopback
+  fixtures' `send()` raised SIGPIPE when a client cancelled mid-transfer
+  (macOS has no `MSG_NOSIGNAL`). `tests/test_socket_flags.h` now provides
+  `crtmedia_test_send()` (fixture-only SIGPIPE suppression per host); 3
+  identical runs, `handles=6->4`. The isolated stage then passed 17/17 stage
+  tests and the installed `examples/media-stream` consumer but failed
+  `verify_dist.py`: the curl/mbedTLS/zlib dylibs carried absolute install ids
+  and dependency paths into the temporary SDK dir. `tools/build_stage_04_gfx_
+  media.py` now rewrites them to `@rpath/<name>` and gives `bin/` executables
+  an `@executable_path/../lib` RPATH. Rebuild passed end to end (612.6 s),
+  verified and published. Full `ctest` 152/152 (1 expected camera skip);
+  tooling 77/77. Linux/x86_64 replay remains; publish only after all three
+  hosts pass.
+
 - **Networking & Streaming Tranche 6 closed on Windows/x64: lifecycle stress
   with a native handle audit, and the isolated `04-gfx-media` stage rebuilt
   with the curl/mbedTLS/zlib chain and an installed HTTP streaming consumer.**

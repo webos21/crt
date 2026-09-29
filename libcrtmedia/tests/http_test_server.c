@@ -34,7 +34,7 @@ static void send_all(int fd, const void* data, size_t size) {
   const uint8_t* p = (const uint8_t*)data;
   size_t sent = 0;
   while (sent < size) {
-    ssize_t n = send(fd, p + sent, size - sent, CRTMEDIA_TEST_SEND_FLAGS);
+    ssize_t n = crtmedia_test_send(fd, p + sent, size - sent);
     if (n <= 0) {
       return; /* best-effort: a real test client never legitimately fails mid-send here */
     }

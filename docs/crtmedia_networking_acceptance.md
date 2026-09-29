@@ -830,6 +830,37 @@ Linux/x86_64 and macOS/arm64 replay is next, including the Linux (static FFmpeg
 Tranche 6 -- and with it this roadmap item -- closes only when all three hosts
 pass.
 
+**macOS/arm64 done 2026-09-29.** Two real macOS-only bugs found and fixed:
+
+- *Fixture SIGPIPE.* `crtmedia_http_lifecycle_test` died with exit 141 and no
+  output: its transport-cancel cycles abandon an 8 MiB body mid-send, and the
+  loopback fixtures' `send()` raised SIGPIPE. Linux already used `MSG_NOSIGNAL`
+  (`tests/test_socket_flags.h`) but macOS has no such flag. The header now
+  provides `crtmedia_test_send()` (Linux `MSG_NOSIGNAL`; macOS ignores SIGPIPE
+  once, fixture-only; Windows plain `send`), used by all three fixtures.
+  Result, 3 identical runs: `ok transport=40 extractor=30 reconnect=8
+  upload=20 tls=15 tls_refused=15 handles=6->4` (`/dev/fd` audit, no growth).
+- *Non-relocatable curl layer.* The isolated stage got through 17/17 stage
+  tests and the installed `examples/media-stream` consumer (`samples=70
+  bytes=17375 tracks=2 seekable=1 size_known=1` against a real host HTTP
+  server), then `verify_dist.py` rejected the new curl/mbedTLS/zlib dylibs:
+  configure/make installed them with absolute `LC_ID_DYLIB`/`LC_LOAD_DYLIB`
+  paths into the stage's temporary SDK directory, and `bin/curl` had `@rpath`
+  dependencies with no portable RPATH. `tools/build_stage_04_gfx_media.py`
+  gained `portable_macho_dependency_paths()`, run after the existing RPATH
+  canonicalization: ids/dependencies under the staged root become
+  `@rpath/<name>`, `bin/` executables get `@executable_path/../lib`, static
+  archives are skipped. The published tree now shows `@rpath/libcurl.4.dylib`
+  ids and an `@executable_path/../lib` RPATH on `bin/curl`.
+
+Stage rebuilt from the freshly regenerated `03-gfx-simple` SDK
+(FreeType/FFmpeg 383.8 s, Skia 62.1 s, curl/mbedTLS/zlib layer 102.7 s, 612.6 s
+total), `verify_dist.py` passed, published atomically. As on Windows,
+android.googlesource.com was returning HTTP 503 for the `make` port, so the
+checksum-verified tarballs were seeded from the in-tree download cache.
+Full in-tree `ctest` 152/152 (one expected camera skip); tooling 77/77.
+Linux/x86_64 remains.
+
 ## Non-goals for the current tranche
 
 - RTSP, WebRTC, or adaptive streaming (HLS/DASH) -- later consumers of this

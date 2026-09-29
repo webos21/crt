@@ -108,8 +108,12 @@ consumers, not completion gates for this tranche.
   thread audit) and the isolated `04-gfx-media` stage rebuilt with curl/
   mbedTLS/zlib, the whole networking suite (17/17 stage tests), an installed
   `examples/media-stream` consumer, `verify_dist.py` and atomic publication.
-  Linux/x86_64 and macOS/arm64 replay (including the Linux/macOS branches of
-  `examples/media-stream`) is next; publish only after all three hosts pass.
+  **macOS/arm64 done 2026-09-29:** lifecycle test 3 identical runs, isolated
+  stage rebuilt end to end (17/17 stage tests, installed `examples/media-stream`
+  consumer, `verify_dist.py`, atomic publish); found and fixed two real macOS
+  bugs (fixture SIGPIPE; non-relocatable curl/zlib dylib ids). Linux/x86_64
+  replay (incl. its `examples/media-stream` branch) remains; publish only
+  after all three hosts pass.
 
 ## Planned
 

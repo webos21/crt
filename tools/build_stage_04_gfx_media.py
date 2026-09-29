@@ -189,6 +189,69 @@ def rewrite_stale_macho_rpaths(root: Path, old_root: Path, new_root: Path) -> No
                 existing_rpaths.add(new_value)
 
 
+def portable_macho_dependency_paths(root: Path) -> None:
+    """Make Mach-O dylib ids/dependencies installed under `root` relocatable.
+
+    The curl/mbedTLS/zlib layer (Networking & Streaming Tranche 6) is built by
+    configure/make with install_name == <install prefix>/lib/<name>, i.e. this
+    isolated stage's temporary SDK directory, so every dylib in that layer
+    carries an absolute LC_ID_DYLIB and any sibling it links carries an
+    absolute LC_LOAD_DYLIB into that same temporary tree (`bin/curl` and
+    `libcurl -> libz` too). verify_dist.py's Mach-O gate rejects those, and
+    they would dangle after publication. Rewrite each one under `root` to
+    `@rpath/<basename>` and give a bin/ executable a portable
+    `@executable_path/../lib` RPATH; libraries already resolve siblings via
+    the `@loader_path` RPATH rewrite_stale_macho_rpaths() installs. Only paths
+    under `root` are touched -- system/framework dependencies stay as they are.
+    """
+    root_strs = {str(root), str(root.resolve())}
+
+    def under_root(value: str) -> bool:
+        return any(value == r or value.startswith(r + os.sep) for r in root_strs)
+
+    for path in root.rglob("*"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            with path.open("rb") as handle:
+                magic = handle.read(4)
+        except OSError:
+            continue
+        if magic not in _MACHO_MAGICS:
+            continue
+        if path.suffix == ".a":
+            continue  # static archives (e.g. libclang_rt.builtins.a) carry no ids
+        ident = subprocess.run(
+            ["otool", "-D", str(path)], capture_output=True, text=True, check=False)
+        if ident.returncode != 0:
+            continue
+        id_lines = ident.stdout.splitlines()[1:]
+        if id_lines and under_root(id_lines[0].strip()):
+            subprocess.run(
+                ["install_name_tool", "-id",
+                 "@rpath/" + Path(id_lines[0].strip()).name, str(path)], check=True)
+        deps = subprocess.run(
+            ["otool", "-L", str(path)], capture_output=True, text=True, check=False)
+        for line in deps.stdout.splitlines()[1:]:
+            dep = line.strip().split(" (compatibility", 1)[0]
+            if under_root(dep):
+                subprocess.run(
+                    ["install_name_tool", "-change", dep,
+                     "@rpath/" + Path(dep).name, str(path)], check=True)
+        if path.parent.name == "bin":
+            listing = subprocess.run(
+                ["otool", "-l", str(path)], capture_output=True, text=True, check=False)
+            uses_rpath = "@rpath/" in subprocess.run(
+                ["otool", "-L", str(path)], capture_output=True, text=True,
+                check=False).stdout
+            has_portable = ("path @executable_path" in listing.stdout or
+                            "path @loader_path" in listing.stdout)
+            if uses_rpath and not has_portable:
+                subprocess.run(
+                    ["install_name_tool", "-add_rpath", "@executable_path/../lib",
+                     str(path)], check=True)
+
+
 def remove_staged_absolute_elf_rpaths(root: Path) -> None:
     """Keep packaged ELF runtime paths relocatable."""
     for path in root.rglob("*"):
@@ -1224,6 +1287,7 @@ def main() -> None:
             # specific build, already correct.
             with timings.measure("portable-ize self-referential macOS rpaths"):
                 rewrite_stale_macho_rpaths(staged, staged, staged)
+                portable_macho_dependency_paths(staged)
         elif target_os == "linux":
             # crt-cc keeps an absolute sysroot fallback for configure-time
             # probes. In this installed tree every runtime dependency sits
