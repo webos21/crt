@@ -101,7 +101,11 @@ consumers, not completion gates for this tranche.
   (`crtmedia_http_reconnect_test: ok ...`). Found and fixed three real bugs
   on the way (a lost connection read as a clean EOF; a broken `Content-Range`
   parser that left nonzero-offset 206 responses unvalidated; Windows `poll()`
-  timeouts ~15x too long). Linux/x86_64 and macOS/arm64 replay is next.
+  timeouts ~15x too long). **macOS/arm64 done 2026-09-29:** same unmodified
+  source, 3 consecutive identical runs (`ok samples=70 resumes=2
+  bounded_retries=3 changed_resource=protocol no_validator=io upload_drop=io`),
+  no code changes; full in-tree `ctest` 150/150 (1 expected camera skip),
+  tooling 77/77. Linux/x86_64 replay remains.
 * [ ] **5. Add HTTPS and cross-host acceptance.** Exercise the real TLS
   trust policy on a repository-owned loopback fixture (correct-CA/wrong-CA/
   wrong-SAN matrix), not just TLS handshake/decrypt. Replay the full,

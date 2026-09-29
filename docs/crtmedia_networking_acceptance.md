@@ -624,6 +624,21 @@ code):
 
 Linux/x86_64 and macOS/arm64 replay is next.
 
+**macOS/arm64 done 2026-09-29.** Same, unmodified source (`CRTMEDIA_ENABLE_
+CURL=ON`, curl stack already built in this tree). `crtmedia_http_reconnect_
+test` passed 3 consecutive runs with the identical result line as Windows --
+`ok samples=70 resumes=2 bounded_retries=3 changed_resource=protocol
+no_validator=io upload_drop=io` -- covering every row of the fault-injection
+table above. The `moov atom not found` lines FFmpeg logs during the run come
+from the deliberately truncated/refused cases and are expected. The
+regressions named above (`crtmedia_timing_discontinuity_test`, `crtmedia_
+capture_encode_lifecycle_test`, `crtmedia_encode_mux_test`, `crtmedia_hw_
+decode_{,flush_,lifecycle_}test`, Tranche 1-3 tests) all passed unchanged.
+The Windows-only `poll()` timeout fix has no macOS counterpart (macOS uses
+the host `poll()`). Full in-tree `ctest`: 150/150 (one expected `crtmedia_
+capture_avfoundation_test` camera-authorization skip); tooling tests 77/77.
+Linux/x86_64 replay remains.
+
 ### 5. HTTPS and cross-host acceptance
 
 Exercise the TLS trust policy above (verify-on-by-default, caller-supplied

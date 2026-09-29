@@ -10,6 +10,20 @@ substantive update.
 
 ## 2026-09-29
 
+- **Networking & Streaming Tranche 4 replayed on macOS/arm64: unmodified
+  source, identical result, no code changes.** `docs/crtmedia_networking_
+  acceptance.md`'s Tranche 4 section has the full detail.
+
+  `crtmedia_http_reconnect_test` (Range + If-Range resume, bounded retries,
+  protocol-error on changed resource, no auto-resume for upload) passed 3
+  consecutive runs with the same line as Windows: `ok samples=70 resumes=2
+  bounded_retries=3 changed_resource=protocol no_validator=io
+  upload_drop=io`. Accepted regressions (timing discontinuity, capture/encode
+  lifecycle, encode/mux, hardware decode, Tranche 1-3 tests) unchanged and
+  green. The Windows PAL `poll()` timeout fix is Windows-only. Full in-tree
+  `ctest` 150/150 (1 expected camera skip); tooling 77/77. Linux/x86_64
+  replay remains.
+
 - **Networking & Streaming Tranche 4 closed on Windows/x64: safe HTTP
   reconnect (`Range` + `If-Range` + three response checks), a lost connection
   is never a clean EOF, output never auto-resumes -- and three real,
