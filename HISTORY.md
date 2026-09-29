@@ -10,6 +10,42 @@ substantive update.
 
 ## 2026-09-29
 
+- **Networking & Streaming Tranche 2 replayed on macOS/arm64: both
+  progressive-HTTP paths pass unchanged, and a later macOS wrapper RPATH
+  regression was found and fixed.** The CRT dependency stack was rebuilt
+  locally first because this build tree did not yet contain curl/mbedTLS/
+  zlib. That exposed a regression introduced after curl's earlier macOS
+  `shared-pass`: `tools/crt-cc`/`tools/crt-c++` had changed every macOS
+  `CRT_PORT_RPATH_DIR` link to `@loader_path`. That is correct for a dylib
+  installed beside sibling port dylibs, but curl's configure creates its
+  runtime-libraries probe in the build directory; its `@loader_path` was
+  therefore the wrong directory and dyld could not resolve
+  `@rpath/libmbedtls.dylib` despite a successful link. The wrappers now
+  distinguish the link shape: shared libraries retain portable
+  `@loader_path`, while build-time executables receive the real port library
+  path. Distribution staging continues to canonicalize published RPATHs.
+  The previously failing curl probe then reported `runtime libs
+  availability... fine`, and static/shared curl built and installed through
+  the CRT toolchain. Both recipe round trips then passed against the real
+  network (`curl_http_roundtrip_test: ok http=200 https=200`).
+
+  With `CRTMEDIA_ENABLE_CURL=ON`, the unchanged Tranche 2 implementation
+  passed its two real repository-owned loopback fixtures 3 consecutive times
+  each: `crtmedia_http_input_range_test: ok` (validated Range support and
+  seek-via-reconnect) and `crtmedia_http_input_chunked_test: ok` (fragmented
+  MP4 over non-seekable chunked transfer). The local extractor regression
+  also passed 3 consecutive times, and the queue test passed 5 consecutive
+  times with `sticky_error=pass` plus every previously accepted watermark,
+  timeout, EOF, stress, cancellation, and release-wakeup check.
+
+  Full in-tree CTest: 147/148. Both new HTTP tests passed; the sole failure
+  was the independent real-camera `crtmedia_capture_encode_lifecycle_test`
+  (`capture lifecycle cycle`), reproducible alone while the same run's
+  standalone AVFoundation capture, VideoToolbox encode, playback, hardware
+  decode, and zero-copy tests all passed. It is recorded as a separate
+  hardware lifecycle issue, not misclassified as a networking regression.
+  Linux/x86_64 is now the only remaining Tranche 2 replay.
+
 - **Networking & Streaming Tranche 2 closed on Windows/x64: progressive
   HTTP input, a real seek-via-reconnect, and a real, previously-unknown
   Windows PAL bug found and fixed.** `docs/crtmedia_networking_

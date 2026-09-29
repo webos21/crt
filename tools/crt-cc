@@ -814,25 +814,20 @@ esac
 # and is intentionally word-split like the historical implementation.
 if [ -n "${CRT_PORT_RPATH_DIR:-}" ]; then
   if [ "$target_os" = macos ]; then
-    # @loader_path, not the real ${CRT_PORT_RPATH_DIR} value -- a real,
-    # confirmed bug (2026-09-16, found on a genuine clean `out/`-deleted
-    # build): this project's own macOS Mach-O acceptance gate rejects
-    # *any* absolute LC_RPATH on a packaged file outright (see tools/
-    # crt_binary_dependencies.py's own comment), and every one of this
-    # variable's own consumers -- a port's own shared library depending on
-    # a sibling port's shared library, both always installed directly into
-    # this exact same $CRT_PORT_RPATH_DIR itself -- lives in that identical
-    # directory, so a bare, portable `@loader_path` (no offset) is not just
-    # gate-compliant but the *correct* spelling: "look next to me," exactly
-    # matching CRT_PORT_RPATH_DIR's own stated purpose (see its own
-    # tools/crt-port-build.py comment). Confirmed for real: `libfreetype.
-    # dylib`/`libfreetype.6.dylib` (which need no other port's shared
-    # library at all) carried this absolute path as pure dead weight,
-    # unconditionally added regardless of whether anything actually needed
-    # it. Scoped to macOS only -- Linux's own equivalent has no such gate
-    # yet and is left unchanged rather than risking an unverified change
-    # with no Linux hardware in this session.
-    set -- "$@" "-Wl,-rpath,@loader_path"
+    if [ "$shared_mode" -eq 1 ]; then
+      # Port dylibs are installed beside their sibling dependencies, so the
+      # portable spelling is exactly "look next to me". This also keeps the
+      # packaged Mach-O tree free of absolute LC_RPATH entries.
+      set -- "$@" "-Wl,-rpath,@loader_path"
+    else
+      # Configure probes are executables created in an arbitrary work
+      # directory, not in PORT_PREFIX/lib. @loader_path therefore points at
+      # the probe directory and cannot resolve @rpath dependencies such as
+      # libmbedtls.dylib. Use the real build-time port path for executables;
+      # distribution staging rewrites/removes stale absolute RPATHs before
+      # publishing relocatable artifacts.
+      set -- "$@" "-Wl,-rpath,${CRT_PORT_RPATH_DIR}"
+    fi
   else
     set -- "$@" "-Wl,-rpath,${CRT_PORT_RPATH_DIR}"
   fi

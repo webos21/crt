@@ -330,6 +330,16 @@ three hosts. The tests perform real HTTP and HTTPS requests against
 behavior, and the CRT sysroot. This is intentionally not a local
 loopback-only test.
 
+The macOS dependency build was replayed on 2026-09-29 while enabling
+libcrtmedia progressive HTTP input. It exposed a later wrapper regression:
+port dylibs correctly used `@loader_path`, but configure executables outside
+the install `lib/` directory had inherited that same RPATH and could not load
+`@rpath/libmbedtls.dylib`. `tools/crt-cc`/`tools/crt-c++` now distinguish the
+two link shapes (`@loader_path` for dylibs, the real build-time port path for
+executables), after which curl's runtime-libraries probe and static/shared
+build/install completed cleanly against the CRT toolchain. Both recipe tests
+also passed against `example.com` (`http=200 https=200`).
+
 **Windows regression, found 2026-09-01 (unrelated work, verifying `ffmpeg`
 on Windows), fixed the same day:** `http-roundtrip-static` started failing
 at runtime with `curl_http_roundtrip_test: http://example.com/ failed: Out

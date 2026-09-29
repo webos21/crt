@@ -905,17 +905,15 @@ esac
 # compiler resource directory, and Windows SDK to contain spaces.
 if [ -n "${CRT_PORT_RPATH_DIR:-}" ]; then
   if [ "$target_os" = macos ]; then
-    # @loader_path, not the real ${CRT_PORT_RPATH_DIR} value -- see the
-    # matching comment in tools/crt-cc for the full story: this project's
-    # own macOS Mach-O acceptance gate rejects any absolute LC_RPATH on a
-    # packaged file outright, and every consumer of this variable (a
-    # port's shared library depending on a sibling port's shared library)
-    # lives in this exact same directory, so a bare `@loader_path` is both
-    # gate-compliant and the semantically correct spelling. Confirmed for
-    # real: FreeType's own libfreetype.dylib/libfreetype.6.dylib (which
-    # need no other port's shared library) carried the absolute path as
-    # pure dead weight. Scoped to macOS only; Linux is left unchanged.
-    set -- "$@" "-Wl,-rpath,@loader_path"
+    if [ "$shared_mode" -eq 1 ]; then
+      # Port dylibs are installed beside their sibling dependencies.
+      set -- "$@" "-Wl,-rpath,@loader_path"
+    else
+      # Configure probes and other build-time executables live outside the
+      # port lib directory. They need the real path while running; the
+      # distribution staging pass canonicalizes published Mach-O RPATHs.
+      set -- "$@" "-Wl,-rpath,${CRT_PORT_RPATH_DIR}"
+    fi
   else
     set -- "$@" "-Wl,-rpath,${CRT_PORT_RPATH_DIR}"
   fi

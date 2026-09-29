@@ -373,7 +373,37 @@ memory regardless of the transport's real seekability) -- neither is a
 contract violation. `CRTMEDIA_SOURCE_SEEKABLE` is the one reliable,
 documented signal this contract actually promises, and it is correct.
 
-Linux/x86_64 and macOS/arm64 replay is next.
+**macOS/arm64 done 2026-09-29.** The unchanged implementation built against
+this project's own FFmpeg, curl, mbedTLS, zlib, libc, libm, libdl, and libc++
+artifacts and passed both real loopback fixtures 3 consecutive times:
+`crtmedia_http_input_range_test: ok` and
+`crtmedia_http_input_chunked_test: ok`. The updated Tranche 1 queue regression
+also passed 5 consecutive times, including `sticky_error=pass`, and the local
+file extractor regression passed 3 consecutive times.
+
+This replay exposed an independent build-tool regression before the media
+tests could be enabled: a 2026-09-16 macOS RPATH cleanup made every
+`CRT_PORT_RPATH_DIR` consumer use `@loader_path`, which is correct for a port
+dylib installed beside its dependencies but wrong for configure executables
+created in an arbitrary work directory. curl's strict runtime-libraries probe
+therefore linked but could not load `@rpath/libmbedtls.dylib`. `tools/crt-cc`
+and `tools/crt-c++` now retain `@loader_path` for shared-library links and use
+the real build-time port library path for executable links; distribution
+staging remains responsible for canonicalizing published RPATHs. A fresh CRT
+curl dependency build then passed the formerly failing probe (`runtime libs
+availability... fine`) and installed both static and shared libcurl; the
+recipe's static and shared real-network round trips both returned
+`curl_http_roundtrip_test: ok http=200 https=200`.
+
+Full in-tree CTest was 147/148. Both Tranche 2 tests passed in that run; the
+one failure was the independent real-camera `crtmedia_capture_encode_
+lifecycle_test` (`capture lifecycle cycle`). The same run's standalone
+AVFoundation capture, VideoToolbox encode, playback, hardware decode, and
+zero-copy tests all passed; repeating the lifecycle test alone reproduced its
+device-cycle failure, so it is recorded honestly rather than attributed to
+this networking tranche.
+
+Linux/x86_64 replay is next.
 
 ### 3. Encoded streaming output
 

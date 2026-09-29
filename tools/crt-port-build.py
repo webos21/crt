@@ -680,8 +680,11 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
     env["CXXFLAGS"] = join_flags(env.get("CRT_PORT_CXXFLAGS", "-O2"), env.get("CRT_EXTRA_CXXFLAGS", ""))
     # -rpath here (macOS/Linux only -- PE/COFF has no rpath concept, and
     # lld-link in MSVC-compatible mode doesn't understand the flag at
-    # all) is what lets one port's shared library find *another port's*
-    # shared library at runtime -- e.g. libpng.so depending on libz.so.
+    # all) is what lets one port find *another port's* shared library at
+    # runtime -- e.g. libpng.so depending on libz.so, or a configure probe
+    # linked against mbedTLS. On macOS the wrappers turn this into
+    # @loader_path for dylibs installed beside their dependencies, but keep
+    # the real build-time path for executables created elsewhere.
     # tools/crt-cc/tools/crt-c++'s own -Wl,-rpath addition (see their
     # Linux shared_mode comment) only covers this project's own sysroot
     # (libc.so/libm.so/...), which is a different directory entirely from
