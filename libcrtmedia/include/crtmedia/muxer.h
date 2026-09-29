@@ -30,9 +30,33 @@ typedef enum crtmedia_muxer_output_format {
   CRTMEDIA_MUXER_OUTPUT_MPEG_4_FRAGMENTED = 2,
 } crtmedia_muxer_output_format;
 
+typedef enum crtmedia_sink_capability {
+  CRTMEDIA_SINK_WRITABLE = 1 << 1,
+  CRTMEDIA_SINK_SEEKABLE = 1 << 2,
+  CRTMEDIA_SINK_SIZE_KNOWN = 1 << 3,
+} crtmedia_sink_capability;
+
 crtmedia_result crtmedia_muxer_create(
     const char* path, crtmedia_muxer_output_format output_format,
     crtmedia_muxer** out_muxer);
+
+/* Networking & Streaming Tranche 3: creates a forward-only HTTP PUT sink.
+ * Only CRTMEDIA_MUXER_OUTPUT_MPEG_4_FRAGMENTED is accepted because a live
+ * upload cannot seek back to rewrite a regular MP4 header. `queue_capacity`
+ * is the hard upper bound for bytes waiting between FFmpeg and libcurl; 0
+ * selects the implementation default. A full queue applies synchronous
+ * back-pressure to crtmedia_muxer_write_sample() -- it never grows without
+ * bound and never silently drops an encoded sample. The URL sink reports
+ * CRTMEDIA_SINK_WRITABLE only; curl, FFmpeg, and host socket types remain
+ * private implementation details. HTTP upload redirects and automatic
+ * resume are deliberately unsupported in this tranche. */
+crtmedia_result crtmedia_muxer_create_for_url(
+    const char* url, crtmedia_muxer_output_format output_format,
+    uint32_t queue_capacity, crtmedia_muxer** out_muxer);
+
+/* Local-file muxers report WRITABLE | SEEKABLE. URL muxers report WRITABLE
+ * only. Returns 0 for NULL. */
+uint32_t crtmedia_muxer_get_capabilities(const crtmedia_muxer* muxer);
 void crtmedia_muxer_release(crtmedia_muxer* muxer);
 
 /* Adds one encoder output format before start and returns its stable track

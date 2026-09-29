@@ -251,6 +251,7 @@ function(crt_add_crtmedia_targets)
       set(CRTMEDIA_HTTP_SOURCES
         "${CRTMEDIA_ROOT}/src/http_transport.c"
         "${CRTMEDIA_ROOT}/src/http_avio.c"
+        "${CRTMEDIA_ROOT}/src/http_upload.c"
       )
       # curl/curl.h #includes <winsock2.h> whenever _WIN32 is defined
       # (this PAL has no such header): the same -U_WIN32 family curl.json's

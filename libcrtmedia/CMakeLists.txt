@@ -1578,6 +1578,49 @@ if(CRTMEDIA_ENABLE_FFMPEG)
       TIMEOUT 60
     )
     set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_http_input_chunked_test_runs)
+
+    # Networking & Streaming Tranche 3: software encode -> fragmented MP4
+    # -> bounded HTTP PUT -> deliberately slow loopback receiver -> exact
+    # reopen/decode-back. Host-generic and resource-free, using the same
+    # CRT socket API and libcurl port as the two input tests above.
+    add_executable(crtmedia_http_output_test
+      ${CRT_STARTUP_OBJECTS}
+      tests/http_output_test.c
+      tests/http_upload_test_server.c
+    )
+    target_link_libraries(crtmedia_http_output_test PRIVATE crt_build_flags crtmedia)
+    target_include_directories(crtmedia_http_output_test PRIVATE
+      "${CMAKE_SOURCE_DIR}/libc/include"
+    )
+    target_compile_definitions(crtmedia_http_output_test PRIVATE
+      CRTMEDIA_TEST_HTTP_OUTPUT_PATH="${CMAKE_CURRENT_BINARY_DIR}/crtmedia_http_output_test.mp4"
+    )
+    target_link_libraries(crtmedia_http_output_test PRIVATE crt_compiler_rt_builtins)
+    target_link_options(crtmedia_http_output_test PRIVATE
+      -nostdlib
+      -nostartfiles
+      -nodefaultlibs
+    )
+    if(CRT_TARGET_OS STREQUAL "macos")
+      target_link_options(crtmedia_http_output_test PRIVATE -Wl,-e,_start -Wl,-dead_strip)
+      target_link_libraries(crtmedia_http_output_test PRIVATE c m dl cxx)
+      target_link_libraries(crtmedia_http_output_test PRIVATE System)
+    elseif(CRT_TARGET_OS STREQUAL "linux")
+      target_link_options(crtmedia_http_output_test PRIVATE -Wl,-e,_start -Wl,--gc-sections)
+    elseif(CRT_TARGET_OS STREQUAL "windows")
+      target_link_options(crtmedia_http_output_test PRIVATE
+        -Wl,/entry:mainCRTStartup -Wl,/subsystem:console -Wl,/OPT:REF)
+      target_link_libraries(crtmedia_http_output_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+    endif()
+    crt_link_startup_end_objects(crtmedia_http_output_test)
+    add_dependencies(crtmedia_http_output_test c crt1 crtmedia)
+    add_test(NAME crtmedia_http_output_test_runs COMMAND crtmedia_http_output_test)
+    set_tests_properties(crtmedia_http_output_test_runs PROPERTIES
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+      PASS_REGULAR_EXPRESSION "crtmedia_http_output_test: ok samples=90 frames=90"
+      TIMEOUT 90
+    )
+    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_http_output_test_runs)
   endif()
 
   # crtmedia_hw_decode_test: TODO.md's "hardware decode, phase A" step

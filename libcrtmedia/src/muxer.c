@@ -3,10 +3,16 @@
 
 #include "crtmedia/muxer.h"
 
+#if defined(CRTMEDIA_HAVE_HTTP_TRANSPORT)
+#include "http_upload.h"
+#endif
+
 #include <libavcodec/codec_id.h>
 #include <libavformat/avformat.h>
+#include <libavutil/error.h>
 #include <libavutil/mem.h>
 
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -15,6 +21,12 @@ struct crtmedia_muxer {
   int fragmented;
   int started;
   int finished;
+  crtmedia_result finish_result;
+  uint32_t capabilities;
+#if defined(CRTMEDIA_HAVE_HTTP_TRANSPORT)
+  crtmedia_http_upload* upload;
+  AVIOContext* upload_io;
+#endif
 };
 
 crtmedia_result crtmedia_muxer_create(
@@ -30,6 +42,7 @@ crtmedia_result crtmedia_muxer_create(
     return CRTMEDIA_ERROR_UNSUPPORTED;
   }
   muxer->fragmented = output_format == CRTMEDIA_MUXER_OUTPUT_MPEG_4_FRAGMENTED;
+  muxer->capabilities = CRTMEDIA_SINK_WRITABLE | CRTMEDIA_SINK_SEEKABLE;
   if (avformat_alloc_output_context2(&muxer->format_context, NULL, "mp4", path) < 0 ||
       muxer->format_context == NULL) {
     free(muxer);
@@ -44,16 +57,89 @@ crtmedia_result crtmedia_muxer_create(
   return CRTMEDIA_OK;
 }
 
+#if defined(CRTMEDIA_HAVE_HTTP_TRANSPORT)
+static int http_upload_write_packet(void* opaque, const uint8_t* buffer, int buffer_size) {
+  crtmedia_http_upload* upload = (crtmedia_http_upload*)opaque;
+  crtmedia_result result = crtmedia_http_upload_write(upload, buffer, (size_t)buffer_size);
+  return result == CRTMEDIA_OK ? buffer_size : AVERROR(EIO);
+}
+#endif
+
+crtmedia_result crtmedia_muxer_create_for_url(
+    const char* url, crtmedia_muxer_output_format output_format,
+    uint32_t queue_capacity, crtmedia_muxer** out_muxer) {
+  if (url == NULL || out_muxer == NULL || output_format != CRTMEDIA_MUXER_OUTPUT_MPEG_4_FRAGMENTED) {
+    return CRTMEDIA_ERROR_INVALID_ARGUMENT;
+  }
+  *out_muxer = NULL;
+#if !defined(CRTMEDIA_HAVE_HTTP_TRANSPORT)
+  (void)queue_capacity;
+  return CRTMEDIA_ERROR_UNSUPPORTED;
+#else
+  crtmedia_muxer* muxer = (crtmedia_muxer*)calloc(1, sizeof(*muxer));
+  if (muxer == NULL) {
+    return CRTMEDIA_ERROR_IO;
+  }
+  muxer->fragmented = 1;
+  muxer->capabilities = CRTMEDIA_SINK_WRITABLE;
+  if (avformat_alloc_output_context2(&muxer->format_context, NULL, "mp4", NULL) < 0 ||
+      muxer->format_context == NULL) {
+    free(muxer);
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+  crtmedia_result upload_result = crtmedia_http_upload_open(
+      url, (size_t)queue_capacity, &muxer->upload);
+  if (upload_result != CRTMEDIA_OK) {
+    avformat_free_context(muxer->format_context);
+    free(muxer);
+    return upload_result;
+  }
+  unsigned char* avio_buffer = (unsigned char*)av_malloc(32768);
+  if (avio_buffer == NULL) {
+    crtmedia_http_upload_close(muxer->upload);
+    avformat_free_context(muxer->format_context);
+    free(muxer);
+    return CRTMEDIA_ERROR_IO;
+  }
+  muxer->upload_io = avio_alloc_context(
+      avio_buffer, 32768, 1, muxer->upload, NULL, http_upload_write_packet, NULL);
+  if (muxer->upload_io == NULL) {
+    av_free(avio_buffer);
+    crtmedia_http_upload_close(muxer->upload);
+    avformat_free_context(muxer->format_context);
+    free(muxer);
+    return CRTMEDIA_ERROR_IO;
+  }
+  muxer->format_context->pb = muxer->upload_io;
+  muxer->format_context->flags |= AVFMT_FLAG_CUSTOM_IO;
+  *out_muxer = muxer;
+  return CRTMEDIA_OK;
+#endif
+}
+
+uint32_t crtmedia_muxer_get_capabilities(const crtmedia_muxer* muxer) {
+  return muxer != NULL ? muxer->capabilities : 0;
+}
+
 void crtmedia_muxer_release(crtmedia_muxer* muxer) {
   if (muxer == NULL) {
     return;
   }
   if (muxer->format_context != NULL) {
+#if defined(CRTMEDIA_HAVE_HTTP_TRANSPORT)
+    if (muxer->upload_io != NULL) {
+      muxer->format_context->pb = NULL;
+      avio_context_free(&muxer->upload_io);
+    } else
+#endif
     if (muxer->format_context->pb != NULL) {
       avio_closep(&muxer->format_context->pb);
     }
     avformat_free_context(muxer->format_context);
   }
+#if defined(CRTMEDIA_HAVE_HTTP_TRANSPORT)
+  crtmedia_http_upload_close(muxer->upload);
+#endif
   free(muxer);
 }
 
@@ -147,7 +233,11 @@ crtmedia_result crtmedia_muxer_start(crtmedia_muxer* muxer) {
   int ret = avformat_write_header(muxer->format_context, &options);
   av_dict_free(&options);
   if (ret < 0) {
+#if defined(CRTMEDIA_HAVE_HTTP_TRANSPORT)
+    return muxer->upload != NULL ? CRTMEDIA_ERROR_IO : CRTMEDIA_ERROR_UNSUPPORTED;
+#else
     return CRTMEDIA_ERROR_UNSUPPORTED;
+#endif
   }
   muxer->started = 1;
   return CRTMEDIA_OK;
@@ -177,7 +267,14 @@ crtmedia_result crtmedia_muxer_write_sample(
   }
   int ret = av_interleaved_write_frame(muxer->format_context, packet);
   av_packet_free(&packet);
-  return ret < 0 ? CRTMEDIA_ERROR_UNSUPPORTED : CRTMEDIA_OK;
+  if (ret >= 0) {
+    return CRTMEDIA_OK;
+  }
+#if defined(CRTMEDIA_HAVE_HTTP_TRANSPORT)
+  return muxer->upload != NULL ? CRTMEDIA_ERROR_IO : CRTMEDIA_ERROR_UNSUPPORTED;
+#else
+  return CRTMEDIA_ERROR_UNSUPPORTED;
+#endif
 }
 
 crtmedia_result crtmedia_muxer_finish(crtmedia_muxer* muxer) {
@@ -185,15 +282,27 @@ crtmedia_result crtmedia_muxer_finish(crtmedia_muxer* muxer) {
     return CRTMEDIA_ERROR_INVALID_ARGUMENT;
   }
   if (muxer->finished) {
-    return CRTMEDIA_OK;
+    return muxer->finish_result;
   }
   if (!muxer->started) {
     return CRTMEDIA_ERROR_INVALID_ARGUMENT;
   }
   int ret = av_write_trailer(muxer->format_context);
   muxer->finished = 1;
+#if defined(CRTMEDIA_HAVE_HTTP_TRANSPORT)
+  if (muxer->upload != NULL) {
+    avio_flush(muxer->format_context->pb);
+    if (ret < 0) {
+      muxer->finish_result = CRTMEDIA_ERROR_IO;
+      return muxer->finish_result;
+    }
+    muxer->finish_result = crtmedia_http_upload_finish(muxer->upload);
+    return muxer->finish_result;
+  }
+#endif
   if (muxer->format_context->pb != NULL) {
     avio_closep(&muxer->format_context->pb);
   }
-  return ret < 0 ? CRTMEDIA_ERROR_UNSUPPORTED : CRTMEDIA_OK;
+  muxer->finish_result = ret < 0 ? CRTMEDIA_ERROR_UNSUPPORTED : CRTMEDIA_OK;
+  return muxer->finish_result;
 }

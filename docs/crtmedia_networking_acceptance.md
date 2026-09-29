@@ -449,6 +449,50 @@ back-pressure contract above (block, `WOULD_BLOCK`, or an explicit counted
 drop for an unstoppable live producer; never unbounded growth, never
 silent ownership loss).
 
+**Windows/x64 done 2026-09-29; Linux/macOS replay pending.** The additive
+public entry point is `crtmedia_muxer_create_for_url()` (`crtmedia/muxer.h`).
+It accepts fragmented MP4 only, reports `CRTMEDIA_SINK_WRITABLE` without
+claiming seekability or a known size, and takes the queue capacity as an
+explicit hard memory bound. The existing local-file muxer is unchanged. A
+private FFmpeg write-only `AVIOContext` feeds `libcrtmedia/src/http_upload.c`;
+that worker consumes the already-accepted Tranche 1 queue through libcurl on
+a background pthread and sends an unknown-length HTTP/1.1 PUT with chunked
+transfer encoding. Curl, FFmpeg, and socket types remain private. Redirects
+and upload resume are disabled; release cancels the queue and curl progress
+callback so a blocked writer/network operation can terminate.
+
+The resource-free `crtmedia_http_output_test` uses a repository-owned slow
+loopback PUT receiver built on CRT sockets. It software-encodes 90
+deterministic 160x120 YUV420P frames, writes every one into fragmented MP4
+over a 4 KiB queue, receives a 1,034,884-byte body (well above the hard queue
+capacity), requires real `ftyp`/`moof`/`mdat` boxes and chunked transfer, then
+reopens and decodes the captured body. Exact result:
+
+```text
+crtmedia_http_output_test: ok samples=90 frames=90 bytes=1034884
+    queue_capacity=4096 slow_receiver_ms=291
+```
+
+Every PTS is checked against the original 33,333-us timeline, EOS drains on
+both encoder and decoder, the first/last decoded content is bounded-checked,
+and no sample is duplicated or lost. The intentionally slow receiver proves
+the synchronous block form of the frozen back-pressure contract: the bounded
+queue stalls the encoded-sample writer; it does not pretend a live camera can
+be paused and it does not silently drop an owned frame.
+
+Windows validation: the new acceptance passed alone and with the existing
+transport queue, HTTP range/chunked input, encode/mux, and timing-
+discontinuity tests; static and shared `crtmedia` both rebuilt. Full in-tree
+CTest passed 159/159, with the pre-existing no-webcam
+`crtmedia_capture_mf_test` classified as the one expected skip.
+
+An exploratory WSL replay was deliberately stopped at the maintainer's
+request and is not acceptance evidence: that old build tree first exposed a
+stale pre-encode FFmpeg cache, and rebuilding it would still not provide the
+real Linux media-device boundary required for this stage. Replay the exact
+source on the physical Linux device instead; macOS/arm64 remains the other
+required host before this tranche is checked complete in `TODO.md`.
+
 ### 4. Reconnect and discontinuity
 
 Reproduce a server closing mid-response/mid-upload. Resume input only per

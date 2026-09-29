@@ -92,8 +92,13 @@ consumers, not completion gates for this tranche.
   `HISTORY.md` and `docs/crtmedia_networking_acceptance.md`.
 * [ ] **3. Add encoded streaming output.** Fragmented MP4 + HTTP upload
   sink over the same bounded transport; the documented back-pressure/drop
-  contract, not "throttle the camera." Windows/x64 first, quick Linux/macOS
-  replay.
+  contract, not "throttle the camera." Windows/x64 implementation and
+  acceptance are complete (2026-09-29): 90 samples/frames, 1,034,884-byte
+  fragmented MP4 through a 4 KiB hard queue into a deliberately slow
+  loopback PUT receiver, then exact decode-back; full Windows CTest 159/159
+  with one expected camera skip. Keep this item open until the unchanged
+  source passes on physical Linux and macOS. WSL is deliberately not the
+  Linux acceptance host for this media tranche.
 * [ ] **4. Define reconnect and discontinuity behavior.** `Range` +
   `If-Range`/entity-validator resume only when all three response checks
   pass (`206`, `Content-Range` start, matching validator); output never

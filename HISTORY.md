@@ -10,6 +10,39 @@ substantive update.
 
 ## 2026-09-29
 
+- **Networking & Streaming Tranche 3 implemented and accepted on Windows/
+  x64: bounded fragmented-MP4 HTTP output, slow-receiver back-pressure, and
+  exact decode-back.** `crtmedia_muxer_create_for_url()` is the additive
+  public sink API; the local-file muxer remains unchanged. URL output accepts
+  only `CRTMEDIA_MUXER_OUTPUT_MPEG_4_FRAGMENTED`, honestly reports
+  `CRTMEDIA_SINK_WRITABLE` without seek/size claims, and takes an explicit
+  hard queue capacity. A private write-only FFmpeg `AVIOContext` feeds the
+  existing Tranche 1 bounded queue; a new private libcurl worker consumes it
+  on a pthread and performs a forward-only, unknown-length HTTP/1.1 PUT with
+  chunked transfer encoding. Curl/FFmpeg/socket types stay private. Upload
+  redirect/resume is disabled, errors are sticky through `finish()`, and
+  release drives both queue cancellation and curl's progress callback so a
+  blocked operation can terminate rather than leak a thread.
+
+  The new repository-owned `crtmedia_http_output_test` receiver deliberately
+  reads slowly over CRT sockets. Real result: `ok samples=90 frames=90
+  bytes=1034884 queue_capacity=4096 slow_receiver_ms=291`. The 1,034,884-byte
+  body is far larger than the 4 KiB queue, contains real `ftyp`/`moof`/`mdat`
+  boxes, and reopens/decodes to all 90 frames with the original exact PTS and
+  bounded first/last content checks. This proves the frozen contract's block
+  form of back-pressure without claiming a live camera itself can be
+  throttled and without silently dropping sample ownership.
+
+  The new test passed together with transport-queue, HTTP range/chunked input,
+  encode/mux, and timing-discontinuity regressions. Static and shared
+  `crtmedia` rebuilt; full Windows CTest passed 159/159 with the one
+  pre-existing Media Foundation camera absence classified as an expected
+  skip. Tranche 3 stays open in `TODO.md` until unchanged physical Linux and
+  macOS replay. An exploratory WSL run was intentionally stopped and is not
+  acceptance evidence: its build tree had a stale pre-encode FFmpeg cache and
+  cannot supply the real Linux media-device boundary requested for final
+  validation.
+
 - **Networking & Streaming Tranche 2 closed on all three hosts: Linux/
   x86_64 passed both progressive-HTTP fixtures and exposed two real static/
   shared link-closure bugs.** The local CRT curl dependency stack was built
