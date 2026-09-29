@@ -70,13 +70,15 @@ first-class input mode from Tranche 2, not a later add-on.
 
 ## Tranches and gates
 
-### 0. Contract freeze and stage rename
+### 0. Contract freeze and stage creation
 
 Freeze the table above in this document, add the resource-free contract test,
-and rename the skeleton `05-js`/`libcrtjs` stage and its build targets to
-`05-ui` (`tools/create_dist.py`, `tools/verify_dist.py`,
+and create the `05-ui` stage. The superseded skeleton was already deleted
+(2026-09-29: `libcrtjs/`, `05-js`, `crt-js-*`), so this is a fresh addition,
+not a rename: new `libcrtui`, `crt-ui-build/test/dist` targets, `05-ui` in
+`tools/create_dist.py`, `tools/verify_dist.py`,
 `tools/crt_dist_prerequisites.py`, `tools/prepare_release_assets.py`,
-`distribution.md`, root `CMakeLists.txt`, tests). Pin the LVGL release and
+`distribution.md`, root `CMakeLists.txt`, and tests. Pin the LVGL release and
 record its license/provenance under `third_party/`; the candidate is LVGL
 v9.6.x (public-API separation and system-library-style install are the reason)
 -- **verify the exact tag and hash at import time, do not trust this line.**

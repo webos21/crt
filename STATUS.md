@@ -20,7 +20,7 @@ documentation passes -- see `TODO.md`'s Notice section. It may lag behind
 - The default workflow builds and tests only the C stage. Explicit cumulative
   distributions then add C++, Simple Graphics, and advanced Graphics/Media
   under `out/<preset>/dist/`; the planned `05-ui` and `06-web` stages follow
-  (a superseded `05-js` skeleton directory is still emitted until renamed).
+  (the superseded `05-js`/`libcrtjs` skeleton was removed on 2026-09-29).
 - No distribution bundles LLVM/Clang/LLD. Desktop and embedded consumers
   provide the host or vendor toolchain; CRT supplies the staged sysroot,
   startup/runtime objects, wrappers, configuration, and manifest.
@@ -225,18 +225,19 @@ hosts:
 This evidence does not yet prove production-complete seeking/track selection,
 adaptive streaming (HLS/DASH), RTSP, or realtime/WebRTC behavior.
 
-### libcrtjs
+### Removed: libcrtjs / 05-js
 
-`libcrtjs` builds and installs static/shared skeleton libraries only and is
-superseded: the QuickJS plan is retired in favor of the `05-ui` and `06-web`
-stages (WebKit brings JavaScriptCore). No JavaScript engine or binding exists.
-The skeleton, and the `05-js` stage directory that packages it, stay in the
-tree until `TODO.md`'s `crtui` Tranche 0 renames them.
+The `libcrtjs` skeleton (static/shared skeleton libraries only, no engine) and
+the `05-js` stage that packaged it were deleted on 2026-09-29, together with
+the `crt-js-*` targets, the `crtjs_` test-filter entries, and the `05-js`
+stage in `tools/verify_dist.py`/`tools/crt_dist_prerequisites.py`. The QuickJS
+plan is retired in favor of the `05-ui` and `06-web` stages (WebKit brings
+JavaScriptCore). No JavaScript engine or binding exists.
 
 ### Upper Runtime Direction
 
-- The runtime is packaged through the cumulative C, C++, Simple Graphics,
-  Graphics/Media, and JavaScript stages.
+- The runtime is packaged through the cumulative C, C++, Simple Graphics, and
+  Graphics/Media stages (`05-ui` and `06-web` are planned, not built).
 - Each cumulative stage can also be bootstrapped and verified in isolation,
   purely from its own predecessor's already-packaged SDK rather than the
   in-repo build tree. The complete predecessor-only chain through
@@ -404,7 +405,7 @@ statuses, and exceptions are maintained in:
   Linux compositor in visible presentation behavior. It is useful evidence,
   but is not a substitute for a real Linux desktop run.
 
-### libcrtmedia And libcrtjs
+### libcrtmedia
 
 - The software extractor/codec/player and all three host audio sinks exist,
   but seeking/track-selection breadth, long-running queue/backpressure
@@ -424,14 +425,15 @@ statuses, and exceptions are maintained in:
   on all three hosts (loopback fixtures). Adaptive streaming (HLS/DASH), RTSP,
   and realtime/WebRTC remain open. FFmpeg is still intentionally file-only
   (`--disable-network`); network I/O goes through the CRT-owned transport.
-- No JavaScript engine exists; QuickJS is no longer planned as a stage. The
-  `05-ui` (`crtui`/LVGL) and `06-web` (WebKit) stages are not started.
+- No JavaScript engine exists and `libcrtjs` is gone; QuickJS is no longer
+  planned as a stage. The `05-ui` (`crtui`/LVGL) and `06-web` (WebKit) stages
+  are not started.
 
 ## Next Priorities
 
 1. Start `TODO.md`'s active Application UI (`05-ui`) tranche: freeze the
-   `crtui` contract, pin LVGL with provenance, rename the skeleton `05-js`
-   stage to `05-ui`, then LVGL first pixels on Windows/x64 (macOS/arm64 and
+   `crtui` contract, pin LVGL with provenance, create the `05-ui` stage
+   (new `libcrtui`, `crt-ui-*` targets), then LVGL first pixels on Windows/x64 (macOS/arm64 and
    Linux replays follow). See `docs/crtui_acceptance.md`.
 2. After `05-ui`'s External Surface contract is accepted, begin `06-web`: a
    JavaScriptCore/JSCOnly bring-up (Linux first, early three-host replay), a

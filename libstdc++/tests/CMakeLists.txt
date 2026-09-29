@@ -35,7 +35,7 @@ set_tests_properties(cxx_allocation_test_runs PROPERTIES
 # This is the last directory the default host workflow's test tree
 # processes (add_subdirectory(libc/tests), then add_subdirectory(
 # libstdc++/tests), from the top-level CMakeLists.txt) -- libcrtgfx/
-# libcrtjs/libcrtmedia's own tests are registered earlier via their own
+# libcrtmedia's own tests are registered earlier via their own
 # add_subdirectory() calls further up that same file, so this total is
 # the full CRT_REGISTERED_TESTS count across the whole configure.
 get_property(CRT_REGISTERED_TESTS GLOBAL PROPERTY CRT_REGISTERED_TESTS)

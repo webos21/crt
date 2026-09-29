@@ -25,11 +25,12 @@ external toolchain contract.
 | `05-ui` (planned) | `04-gfx-media` plus `crtui`/LVGL and external-surface composition | native application UI |
 | `06-web` (planned) | `05-ui` plus JavaScriptCore/WebKit, `libcrtweb`, and the WebView | web runtime |
 
-The repository still emits a skeleton `05-js` directory (a `libcrtjs`
-skeleton, no engine) until `crtui` Tranche 0 renames that stage to `05-ui`
-(`TODO.md`). It is superseded by the two planned stages above and is not a
-supported stage; the QuickJS plan behind it is retired
-([`runtime_roadmap.md`](runtime_roadmap.md)).
+The repository builds nothing past `04-gfx-media`. The former `05-js`
+skeleton (`libcrtjs`, no engine) and its `crt-js-*` targets were deleted on
+2026-09-29; the QuickJS plan behind it is retired
+([`runtime_roadmap.md`](runtime_roadmap.md)). `05-ui` is created fresh by
+`crtui` Tranche 0 (`TODO.md`), with `crt-ui-build/test/dist` targets added
+then.
 
 Each binary stage is cumulative and independently consumable. The repository
 build currently creates each later directory by copying the preceding
@@ -101,10 +102,6 @@ cmake --build --preset <preset> --target crt-gfx-simple-dist
 cmake --build --preset <preset> --target crt-gfx-media-build
 cmake --build --preset <preset> --target crt-gfx-media-test
 cmake --build --preset <preset> --target crt-gfx-media-dist
-
-cmake --build --preset <preset> --target crt-js-build
-cmake --build --preset <preset> --target crt-js-test
-cmake --build --preset <preset> --target crt-js-dist
 ```
 
 The more focused `crt-gfx-build/test` and `crt-media-build/test` targets are
@@ -138,7 +135,6 @@ out/<preset>/dist/01-c/
 out/<preset>/dist/02-cxx/
 out/<preset>/dist/03-gfx-simple/
 out/<preset>/dist/04-gfx-media/
-out/<preset>/dist/05-js/
 ```
 
 Windows packages are emitted as `.zip`; Linux and macOS packages as
@@ -223,8 +219,7 @@ moved here from `04-gfx-media` (2026-09-15, real Linux/aarch64 binary-
 dependency-gate acceptance): `libcrtgfx.so`/`crtgfx_window_demo` already
 carry a genuine `DT_NEEDED` on it at this stage, not just from
 `04-gfx-media` onward -- found running the cumulative dependency gate for
-the first time on a native Linux host. The current `05-js` skeleton adds
-none beyond `04-gfx-media`. (The Networking and streaming curl/mbedTLS/zlib
+the first time on a native Linux host. (The Networking and streaming curl/mbedTLS/zlib
 layer is part of `04-gfx-media`, redistributed as static libraries plus the
 `curl` tool.)
 Compiler/toolchain inputs remain in the separate external-toolchain fields

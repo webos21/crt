@@ -19,7 +19,7 @@ BANNED_TOOLS = {
 }
 
 SUPPORTED_STAGES = (
-    "01-c", "02-cxx", "03-gfx-simple", "04-gfx-media", "05-js",
+    "01-c", "02-cxx", "03-gfx-simple", "04-gfx-media",
 )
 SUPPORTED_TARGET_OSES = {"linux", "macos", "windows"}
 EXTERNAL_PREREQUISITE_KINDS = {
@@ -388,8 +388,6 @@ def main() -> None:
                                         "libcrtgfx_skia.dylib"), "shared crtgfx_skia")
             require_any(dist / "lib", ("*crtmedia*dll*", "libcrtmedia.so*",
                                         "libcrtmedia.dylib"), "shared crtmedia")
-    if args.stage >= "05-js":
-        require(dist / "include" / "crtjs")
     print(f"CRT distribution verified: {dist}")
 
 

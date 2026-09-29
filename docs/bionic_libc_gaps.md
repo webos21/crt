@@ -117,7 +117,7 @@ All four items originally listed here are now **done** -- see `HISTORY.md`'s
   own recommended client integration pattern is "get the display's fd,
   epoll it alongside your other event sources," and this is also the
   standard shape for a `libuv`-style event loop, directly relevant to
-  `libcrtjs`'s own "grow event loop... against the CRT/PAL" roadmap item).
+  any future upper-runtime event loop, e.g. `libcrtweb`'s).
   Declared on every host (`include/sys/{epoll,eventfd,timerfd}.h`) so
   portable code that merely includes and compiles against the surface
   keeps working everywhere -- matching this project's existing

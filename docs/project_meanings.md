@@ -136,7 +136,7 @@ The intended shape is:
   a WebView.
 - `libcrtweb` (planned, `06-web`): a WebKit CRT Port (`PlatformCRT`), using
   WPE WebKit as the reference. WebKit brings JavaScriptCore, so the earlier
-  QuickJS-first plan (`libcrtjs`) is superseded; V8/Chromium stay later
+  QuickJS-first plan (the removed `libcrtjs` skeleton) is superseded; V8/Chromium stay later
   benchmarks.
 
 That upper layer is now underway: the first `libcrtgfx` CPU-raster/input/text
@@ -238,7 +238,7 @@ A practical order is:
    facilities needed by source-rebuilt libraries.
 10. Define the upper-layer runtime as separate libraries after the libc/PAL
    layer is stable enough to support large native libraries: `libcrtgfx`,
-   `libcrtmedia`, and `libcrtjs`.
+   `libcrtmedia`, then `crtui` and `libcrtweb`.
 11. Defer `linker/` to a later phase, starting with Linux ELF support before
    considering Windows PE/COFF or macOS Mach-O implications.
 

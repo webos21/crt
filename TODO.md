@@ -67,10 +67,13 @@ gates, and host order live in
 frozen). Keep completed evidence in `HISTORY.md`; this list tracks only tranche
 state. Windows/x64 is the first host, then macOS/arm64, then Linux.
 
-* [ ] **0. Freeze the `crtui` contract and rename the stage.** Thread
+* [ ] **0. Freeze the `crtui` contract and create the stage.** Thread
   ownership, lifetime, events, focus/input routing, geometry, surfaces, errors,
-  plus a resource-free contract test; pin and record LVGL provenance; rename the
-  skeleton `05-js`/`libcrtjs` stage and its targets/tools/docs to `05-ui`.
+  plus a resource-free contract test; pin and record LVGL provenance; create
+  the `05-ui` stage (`libcrtui`, `crt-ui-*` targets, `verify_dist.py`/
+  `crt_dist_prerequisites.py`/`create_dist.py` stage entries, `distribution.md`).
+  The superseded `05-js`/`libcrtjs` skeleton was already deleted on
+  2026-09-29, so nothing needs renaming.
 * [ ] **1. LVGL import and first pixels.** Software draw buffer through the
   existing `crtgfx` present path; small Window/Column/Label/Button/Slider/
   Progress demo.
@@ -136,8 +139,8 @@ that had to precede further Upper Runtime expansion is complete (`HISTORY.md`,
    superbuild stage (libc++/Wayland/Skia/FFmpeg as one dependency-prefix-
    producing phase) feeding a single, cycle-free runtime configure for
    `libcrtgfx`/`libcrtmedia` -- not another one-off `EXISTS` gate per new
-   dependency. Budget real effort here given `05-js`'s QuickJS/V8 work will
-   add at least one more such external dependency.
+   dependency. Budget real effort here given `05-ui`'s LVGL and `06-web`'s
+   WebKit/JavaScriptCore work will add more such external dependencies.
 
 2. **Move `tools/crt_dist_prerequisites.py`-style manifest thinking to
    `libc.so`'s own ELF export surface.** The current `CRT_1.0 { global: *;
@@ -170,7 +173,7 @@ be replaced.
    `malloc_unlocked()` first-fits linearly; `coalesce_free_blocks()`
    rescans the whole free list on every `free()`), all under one global
    `heap_lock` spinlock -- `O(N)` per operation as allocation count `N`
-   grows, a real risk once Skia/FFmpeg/QuickJS/libc++ are all allocating
+   grows, a real risk once Skia/FFmpeg/LVGL/WebKit/libc++ are all allocating
    heavily through it. Keep this implementation as the bootstrap/reference/
    diagnostic allocator; evaluate LLVM's Scudo Hardened Allocator (size-
    class allocators, per-thread caches, mmap-backed large allocations,
@@ -273,7 +276,7 @@ project's own mksh build has job control compiled out entirely on every host
 (`MKSH_NOPROSPECTOFWORK`), not just Windows -- see that section for why this
 is forward-looking policy, not a current gap being actively worked.
 Re-evaluated (2026-08-16) against `docs/runtime_roadmap.md`: none of the
-planned upper-runtime components (`libcrtjs`/QuickJS+V8, `libcrtgfx`, `libcrtmedia`)
+planned upper-runtime components (`crtui`/LVGL, `libcrtweb`/WebKit, `libcrtgfx`, `libcrtmedia`)
 actually depend on POSIX job-control signals (`SIGSTOP`/`SIGTSTP`/`SIGCONT`)
 or real fg/bg switching -- confirmed genuinely optional infrastructure, not
 something blocking the roadmap. (V8's own "signal/process behavior"

@@ -66,9 +66,10 @@ container, or translation layer.
 - **`05-ui` and `06-web` are roadmap, not supported features.** The next stage
   is `crtui` (LVGL behind a CRT-owned API, with external-surface composition
   for video and later a WebView), followed by a WebKit-based web runtime.
-  The repository still packages an old `libcrtjs` skeleton under `05-js`; it is
-  superseded and is being renamed, not a feature. QuickJS is no longer planned
-  as a stage. See [`docs/runtime_roadmap.md`](docs/runtime_roadmap.md).
+  The old `libcrtjs`/`05-js` skeleton was removed from the repository
+  (2026-09-29) and QuickJS is no longer planned as a stage; `05-ui` is created
+  fresh by `crtui` Tranche 0. See
+  [`docs/runtime_roadmap.md`](docs/runtime_roadmap.md).
 
 The per-capability matrix is under [What Already Works](#what-already-works).
 The exact evidence, per-port results, and open work are in
@@ -245,8 +246,8 @@ see the [FAQ](docs/faq.md).
 CRT owns the low-level portability boundary: files, sockets, threads, TLS,
 memory mapping, clocks, signals, process basics, dynamic-loading policy,
 startup objects, libc/libm/libdl, and the C++ runtime. Higher layers add a
-window/input/software-framebuffer API, accelerated graphics and media, and a
-JavaScript runtime.
+window/input/software-framebuffer API, accelerated graphics and media, and
+(planned) an application UI layer and a WebKit-based Web runtime.
 
 The compatibility model is source rebuilding against a Bionic-shaped public
 surface. CRT does not aim to run unmodified glibc binaries or APKs, reproduce
@@ -285,9 +286,8 @@ have not yet been added. Full details, artifact layout, package naming, and
 acceptance rules are in
 [`docs/distribution.md`](docs/distribution.md).
 
-The repository still builds a skeleton `05-js` directory containing the
-installable `libcrtjs` skeleton; that stage is superseded by `05-ui`/`06-web`
-and will be renamed, so it is not a completion claim. Likewise, the ordinary developer preset keeps Skia and FFmpeg disabled by default;
+The repository builds no stage past `04-gfx-media` (`05-ui` and `06-web` are
+planned). The ordinary developer preset keeps Skia and FFmpeg disabled by default;
 release-grade `04-gfx-media` acceptance uses the separate option-ON isolated
 stage path.
 
@@ -370,10 +370,6 @@ cmake --build --preset <preset> --target crt-gfx-simple-dist
 cmake --build --preset <preset> --target crt-gfx-media-build
 cmake --build --preset <preset> --target crt-gfx-media-test
 cmake --build --preset <preset> --target crt-gfx-media-dist
-
-cmake --build --preset <preset> --target crt-js-build
-cmake --build --preset <preset> --target crt-js-test
-cmake --build --preset <preset> --target crt-js-dist
 ```
 
 The outputs are cumulative directories and archives under
@@ -471,7 +467,6 @@ libstdc++/        bootstrap ABI shim and imported libc++ build integration
 shell/            tiny shell, mksh, toybox, and awk
 libcrtgfx/        window/input/framebuffer and advanced Skia/GPU integration
 libcrtmedia/      media runtime and optional FFmpeg integration
-libcrtjs/         superseded JavaScript skeleton (to become the `05-ui` stage)
 porting/recipes/  upstream porting test recipes
 tools/            wrappers, rootfs/dist builders, porting automation
 libc/tests/       libc, PAL, shell-level, ABI, and integration tests

@@ -888,7 +888,6 @@ add_subdirectory(libdl)
 add_subdirectory(libstdc++)
 add_subdirectory(shell)
 add_subdirectory(libcrtgfx)
-add_subdirectory(libcrtjs)
 add_subdirectory(libcrtmedia)
 
 # Hoisted ahead of add_subdirectory(libc/tests)/add_subdirectory(
@@ -1247,7 +1246,7 @@ if(Python3_Interpreter_FOUND)
   get_property(CRT_ALL_REGISTERED_TESTS GLOBAL PROPERTY CRT_REGISTERED_TESTS)
   set(CRT_C_TEST_TARGETS)
   foreach(CRT_REGISTERED_TEST IN LISTS CRT_ALL_REGISTERED_TESTS)
-    if(NOT CRT_REGISTERED_TEST MATCHES "^(crtgfx_|crtmedia_|crtjs_)" AND
+    if(NOT CRT_REGISTERED_TEST MATCHES "^(crtgfx_|crtmedia_)" AND
        NOT CRT_REGISTERED_TEST MATCHES "cxx")
       string(REGEX REPLACE "_runs$" "" CRT_REGISTERED_TEST_TARGET "${CRT_REGISTERED_TEST}")
       if(TARGET "${CRT_REGISTERED_TEST_TARGET}")
@@ -1506,20 +1505,6 @@ if(Python3_Interpreter_FOUND)
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
       --dist "${CRT_DIST_ROOT}/04-gfx-media" --stage 04-gfx-media
     DEPENDS crt-gfx-simple-dist crt-gfx-media-build
-    USES_TERMINAL
-  )
-
-  add_custom_target(crt-js-build DEPENDS crtjs crtjs_shared)
-  add_custom_target(crt-js-test DEPENDS crt-js-build)
-  add_custom_target(crt-js-dist
-    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
-      --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
-      --dest "${CRT_DIST_ROOT}/05-js" --base "${CRT_DIST_ROOT}/04-gfx-media"
-      --component crt-js --cmake "${CMAKE_COMMAND}" --stage 05-js
-      --target-os "${CRT_TARGET_OS}" --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" ${CRT_DIST_TOOL_ARGS} --archive
-    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
-      --dist "${CRT_DIST_ROOT}/05-js" --stage 05-js
-    DEPENDS crt-gfx-media-dist crt-js-build
     USES_TERMINAL
   )
 endif()

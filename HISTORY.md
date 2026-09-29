@@ -10,6 +10,35 @@ substantive update.
 
 ## 2026-09-29
 
+- **`libcrtjs` and the `05-js` stage removed; roadmap documents made
+  consistent with the `05-ui` -> `06-web` plan.** The superseded QuickJS
+  skeleton was deleted rather than renamed: `libcrtjs/` (skeleton static/
+  shared libraries, no engine), `add_subdirectory(libcrtjs)`, the
+  `crt-js-build`/`crt-js-test`/`crt-js-dist` targets, the `crtjs_` entries in
+  the ctest exclude filters (`CMakeLists.txt`, `CMakePresets.json`,
+  `cmake/run_core_tests.cmake`), the `05-js` stage in `tools/verify_dist.py`
+  (`SUPPORTED_STAGES` and its `include/crtjs` check) and
+  `tools/crt_dist_prerequisites.py` (`STAGE_ORDER`), and the matching test
+  cases. `05-ui`, `libcrtui` and the `crt-ui-*` targets are therefore created
+  fresh by `crtui` Tranche 0, not renamed. Verified: reconfigure and full
+  rebuild clean, tooling tests OK (`test_verify_dist.py`,
+  `test_prepare_release_assets.py`), in-tree `ctest` 162/162 (one expected
+  no-webcam skip). No non-history file references `libcrtjs`/`crt-js`/`05-js`
+  except the removal notes themselves.
+
+  Documentation fixes from a cross-document review: `TODO.md` no longer
+  attributes future external dependencies, allocator load or job-control needs
+  to `05-js`/QuickJS/V8 (now `05-ui`'s LVGL, `06-web`'s WebKit/JavaScriptCore,
+  `crtui`/`libcrtweb`); `STATUS.md` and `README.md` no longer claim a
+  JavaScript stage or runtime (the README scope sentence, its build-target
+  list and its directory list were updated); `docs/distribution.md`,
+  `docs/runtime_roadmap.md`, `docs/crtui_acceptance.md` (Tranche 0 is now
+  "create the stage", not "rename"), `docs/project_meanings.md`, the
+  `libcrtgfx`/`libcrtmedia` API policies, `docs/bionic_libc_gaps.md` and
+  `docs/release_preview.md` were brought in line. Earlier `HISTORY.md` entries,
+  `docs/study/`, `docs/marketing/` and the v0.4.0-preview.1 release notes keep
+  their original wording as historical records.
+
 - **Roadmap reordered to `04-gfx-media -> 05-ui -> 06-web`; QuickJS/WebRTC
   removed from the stage gates.** Documentation only, no code change.
   `docs/runtime_roadmap.md`, `TODO.md`, `README.md`, `STATUS.md`,

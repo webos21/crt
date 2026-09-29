@@ -47,7 +47,7 @@ class ManifestSchemaTests(unittest.TestCase):
     def test_rejects_wrong_format_stage_and_target(self) -> None:
         cases = (
             ("format", 2),
-            ("stage", "05-js"),
+            ("stage", "05-ui"),
             ("target", {"os": "android", "arch": "x86_64"}),
             ("target", {"os": "windows", "arch": ""}),
         )
@@ -124,7 +124,7 @@ class ExternalPrerequisiteTests(unittest.TestCase):
         for target_os in ("linux", "macos", "windows"):
             previous_ids: set[str] = set()
             for stage in ("01-c", "02-cxx", "03-gfx-simple",
-                          "04-gfx-media", "05-js"):
+                          "04-gfx-media"):
                 with self.subTest(target_os=target_os, stage=stage):
                     manifest = valid_manifest()
                     manifest["target"]["os"] = target_os

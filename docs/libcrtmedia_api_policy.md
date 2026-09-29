@@ -36,7 +36,7 @@ Three layers, in order of how firmly each is decided:
    returns owned YUV420P copies and requeues native mmap buffers before return,
    fixing lifetime and back-pressure behavior without leaking host types; see
    `crtmedia_encode_capture_acceptance.md`.
-4. **Future, explicitly deferred:** a WebCodecs-shaped `libcrtjs` binding
+4. **Future, explicitly deferred:** a WebCodecs-shaped JavaScript binding (via a future `libcrtweb`)
    (JS-facing, wraps the core -- `AMediaCodec`'s own async queue model
    already maps closely onto WebCodecs' `VideoDecoder`/`AudioDecoder`/
    `EncodedChunk` vocabulary, so this is expected to be a thin binding, not
@@ -81,7 +81,7 @@ that do not apply to graphics:
   layer above it a real consumer would prefer instead. FFmpeg's
   `AVFormatContext`/`AVCodecContext` is demux/decode plumbing; real
   consumers (a player, a `<video>`-shaped UI element, this project's own
-  eventual WebCodecs-style `libcrtjs` binding) want a queue/callback
+  eventual WebCodecs-style JavaScript binding) want a queue/callback
   abstraction one level up, not raw packet/frame structs. Android's own
   `AMediaCodec` exists for exactly this reason -- a thin, stable C layer
   over a lower engine (Stagefright, in AOSP's case; FFmpeg, here) -- and
@@ -150,7 +150,7 @@ judgment calls:
   A real compatibility adapter is a later, separate, opt-in addition for a
   concrete ported consumer, not the core ABI -- see Decision above.
 - Do not design the WebRTC-shaped realtime track layer or the WebCodecs
-  `libcrtjs` binding yet. Both are real future work (`TODO.md` steps 9-12
+  JavaScript binding yet. Both are real future work (`TODO.md` steps 9-12
   and step 4 above); this document only fixes where they sit relative to
   the core once they exist.
 - Do not require every simple "decode this file" caller to use the full

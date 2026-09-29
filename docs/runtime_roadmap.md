@@ -34,9 +34,9 @@ Development and release follow the cumulative stages defined in
 
 The earlier plan named a QuickJS stage (`05-js`). It is superseded: WebKit
 brings JavaScriptCore in anyway, so a separate QuickJS stage would be
-duplicate investment. The repository still builds and packages a skeleton
-`05-js`/`libcrtjs` until UI Tranche 0 renames that stage to `05-ui` (see
-[`../TODO.md`](../TODO.md)); nothing in it is a supported feature.
+duplicate investment. The `05-js`/`libcrtjs` skeleton and its build targets
+were deleted on 2026-09-29; `05-ui` is created fresh by UI Tranche 0 (see
+[`../TODO.md`](../TODO.md)).
 
 The installed output of one stage is the input boundary for the next. A stage
 is not complete merely because an in-tree target links.
@@ -85,13 +85,13 @@ is not complete merely because an in-tree target links.
   `crtmedia_networking_acceptance.md` and `HISTORY.md` (2026-09-28..29).
   FFmpeg's own network stack stays disabled; libcurl sits under a CRT-owned
   transport contract.
-- The cumulative binary-package chain currently reaches a `05-js` skeleton
-  that is being replaced by `05-ui`/`06-web`. Predecessor-only isolated-stage acceptance through the option-ON
+- The cumulative binary-package chain currently ends at `04-gfx-media`
+  (`05-ui`/`06-web` are planned). Predecessor-only isolated-stage acceptance through the option-ON
   `03-gfx-simple -> 04-gfx-media` transition is complete on Windows, macOS,
   and native Linux/aarch64, including final distribution verification and
   atomic publication.
-- `libcrtjs` contains skeleton libraries only and is superseded by the
-  `06-web` direction; no QuickJS engine, event loop, or bindings exist.
+- `libcrtjs` was a skeleton only and was removed (2026-09-29); no QuickJS
+  engine, event loop, or bindings exist or are planned as a stage.
 - The bootstrap/reference allocator has API, debug-mode, contention,
   fragmented-fork, and expected-fault coverage. Windows/x86_64, macOS/arm64,
   and Linux/aarch64 have current-schema baseline data; Linux did not exceed

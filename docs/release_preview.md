@@ -13,7 +13,7 @@ works today, see the README and [`STATUS.md`](../STATUS.md).
 
 That preview is positioned as the first public developer preview of the CRT
 Graphics/Media SDK stage (`04-gfx-media`).
-The JavaScript stage (`05-js`) is a `libcrtjs` skeleton and is not part of the
+Later stages (`05-ui`, `06-web`) do not exist yet and are not part of the
 preview.
 
 ## What a release contains
@@ -373,8 +373,8 @@ previews:
 
 ```text
 CRT v0.4.0-preview.1: first public developer preview of the CRT Graphics/Media
-SDK stage (04-gfx-media). Pre-1.0; interfaces may change. 05-js is roadmap work
-and is not part of this preview.
+SDK stage (04-gfx-media). Pre-1.0; interfaces may change. Later stages (05-ui, 06-web) are roadmap
+work and are not part of this preview.
 
 Verified: <per-host table from README "What Already Works">
 Hardware H.264 decode: verified on all three hosts -- macOS (VideoToolbox),

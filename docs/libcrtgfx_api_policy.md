@@ -29,7 +29,7 @@ does not standardize for this project:
 - event-loop integration;
 - software/GPU backend selection;
 - Wayland-compatible compositor boundary and host adapter policy;
-- handoff points for `libcrtjs` and `libcrtmedia`.
+- handoff points for `crtui`, `libcrtweb` and `libcrtmedia`.
 
 In short: Simple Graphics owns only the window/input/framebuffer contract.
 At the advanced level Skia owns drawing, while `libcrtgfx` owns where drawing
