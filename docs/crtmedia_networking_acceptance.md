@@ -449,7 +449,7 @@ back-pressure contract above (block, `WOULD_BLOCK`, or an explicit counted
 drop for an unstoppable live producer; never unbounded growth, never
 silent ownership loss).
 
-**Windows/x64 done 2026-09-29; Linux/macOS replay pending.** The additive
+**Windows/x64 done 2026-09-29; macOS/arm64 and Linux/x86_64 replays done the same day (below).** The additive
 public entry point is `crtmedia_muxer_create_for_url()` (`crtmedia/muxer.h`).
 It accepts fragmented MP4 only, reports `CRTMEDIA_SINK_WRITABLE` without
 claiming seekability or a known size, and takes the queue capacity as an
@@ -526,8 +526,24 @@ used for `capture_mf.c`/`capture_avfoundation.c` -- no isolated stage passes
 the three `http_*.c` implementation files are currently inert there, not yet
 exercised. Full tooling test suite: 77/77 after the fix.
 
-Linux/x86_64 replay of this same, unmodified source remains before this
-tranche is checked complete in `TODO.md`.
+**Linux/x86_64 done 2026-09-29, on the physical Linux acceptance host** (native
+Intel UHD 630 -- not WSL, per the stale-cache/no-real-device-boundary note
+above). Same, unmodified source, `CRTMEDIA_ENABLE_CURL=ON` against the
+curl/mbedTLS stack already built for Tranche 2's own Linux closure (shared
+`libcurl.so` for `libcrtmedia.so`); no code, CMake, or recipe change was
+needed. Real result across 5 consecutive runs, identical every time:
+`crtmedia_http_output_test: ok samples=90 frames=90 bytes=1034884
+queue_capacity=4096 slow_receiver_ms=~110`. The byte count matches
+Windows' 1,034,884 exactly (macOS' 1,034,862 is the outlier -- box sizes
+are per-FFmpeg-build, not part of the acceptance bar; the sample/frame
+count, exact-PTS, EOS-drain, and bounded-content checks are). Ran together
+with the transport-queue, HTTP range/chunked input, extractor, encode/mux,
+timing-discontinuity, and V4L2 capture regressions (8/8, camera present)
+with no interference. Full in-tree `ctest`: 142/143 (the one failure is the
+pre-existing, environment-caused `crtmedia_playback_pipeline_test_runs` gap
+-- no sound card on this host -- unrelated to networking); tooling suite
+(including `tools/test_stage_source_closure.py`, which macOS' registry fix
+already made pass): 77/77. This tranche is now closed on all three hosts.
 
 ### 4. Reconnect and discontinuity
 

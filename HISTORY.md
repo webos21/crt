@@ -10,6 +10,25 @@ substantive update.
 
 ## 2026-09-29
 
+- **Networking & Streaming Tranche 3 closed on all three hosts: Linux/x86_64
+  replay on the physical Linux host, unmodified source, identical result, no
+  code changes needed.** `docs/crtmedia_networking_acceptance.md`'s own
+  Tranche 3 section has the full detail.
+
+  `crtmedia_http_output_test` (fragmented MP4 over a 4 KiB hard-bounded queue
+  into a deliberately slow loopback PUT receiver, via `crtmedia_muxer_create_
+  for_url()` and the libcurl upload worker) built and ran cleanly with the
+  curl/mbedTLS stack already in this tree from Tranche 2's Linux closure.
+  Real result, 5 consecutive identical runs: `ok samples=90 frames=90
+  bytes=1034884 queue_capacity=4096 slow_receiver_ms=~110` -- the byte count
+  matches Windows exactly (macOS' 1,034,862 differs by FFmpeg-build box
+  sizing, not an acceptance criterion). Ran cleanly alongside the transport-
+  queue, HTTP range/chunked input, extractor, encode/mux, timing-discontinuity,
+  and V4L2 capture tests (8/8). Full in-tree `ctest`: 142/143 (the one
+  failure is the pre-existing no-sound-card `crtmedia_playback_pipeline_
+  test_runs` gap, unrelated); tooling suite 77/77. WSL was deliberately not
+  used, per the Windows entry's own note.
+
 - **Networking & Streaming Tranche 3 replayed on macOS/arm64: unmodified
   source, identical semantics, plus a real host-independent
   `create_stage_source.py` registry gap found and fixed.** `docs/crtmedia_
