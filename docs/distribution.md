@@ -22,7 +22,14 @@ external toolchain contract.
 | `02-cxx` | `01-c` plus libc++, libc++abi, and libunwind | C++ applications and libraries |
 | `03-gfx-simple` | `02-cxx` plus one window, keyboard/mouse input, and a CPU-writable software framebuffer | Industrial HMI and simple native UI |
 | `04-gfx-media` | `03-gfx-simple` plus the GPU API, Skia CPU/GPU rendering, Vulkan/D3D12/Metal presentation, and FFmpeg media | accelerated UI and playback |
-| `05-js` | `04-gfx-media` plus QuickJS and CRT bindings | JavaScript application runtime |
+| `05-ui` (planned) | `04-gfx-media` plus `crtui`/LVGL and external-surface composition | native application UI |
+| `06-web` (planned) | `05-ui` plus JavaScriptCore/WebKit, `libcrtweb`, and the WebView | web runtime |
+
+The repository still emits a skeleton `05-js` directory (a `libcrtjs`
+skeleton, no engine) until `crtui` Tranche 0 renames that stage to `05-ui`
+(`TODO.md`). It is superseded by the two planned stages above and is not a
+supported stage; the QuickJS plan behind it is retired
+([`runtime_roadmap.md`](runtime_roadmap.md)).
 
 Each binary stage is cumulative and independently consumable. The repository
 build currently creates each later directory by copying the preceding
@@ -217,7 +224,9 @@ dependency-gate acceptance): `libcrtgfx.so`/`crtgfx_window_demo` already
 carry a genuine `DT_NEEDED` on it at this stage, not just from
 `04-gfx-media` onward -- found running the cumulative dependency gate for
 the first time on a native Linux host. The current `05-js` skeleton adds
-none beyond `04-gfx-media`.
+none beyond `04-gfx-media`. (The Networking and streaming curl/mbedTLS/zlib
+layer is part of `04-gfx-media`, redistributed as static libraries plus the
+`curl` tool.)
 Compiler/toolchain inputs remain in the separate external-toolchain fields
 and redistributable third-party ports remain in `redistributed_dependencies`.
 
@@ -225,8 +234,8 @@ The first supported transitions are `01-c -> 02-cxx`, then
 `02-cxx -> 03-gfx-simple -> 04-gfx-media`. Thus `01-c` can fetch the pinned
 libc++/libc++abi/libunwind source package and build `02-cxx`; `02-cxx` can
 fetch the Simple Graphics and advanced Graphics/Media packages and build them
-in dependency order. The `04-gfx-media -> 05-js` transition follows the same
-model after these transitions are stable.
+in dependency order. The `04-gfx-media -> 05-ui` and `05-ui -> 06-web` transitions follow the same
+model once those stages exist.
 
 The SHA-256 is over the exact release asset bytes, not merely a Git ref. Git
 commit IDs remain provenance metadata, while the digest is the download

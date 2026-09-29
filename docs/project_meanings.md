@@ -21,12 +21,13 @@ The central hypothesis is:
 > related OS primitives.
 
 The intended runtime scope includes libc, libm, libdl, libstdc++, and optional
-graphics/media/JavaScript layers, with support limited to 64-bit x86 and
+graphics/media/UI/web layers, with support limited to 64-bit x86 and
 64-bit ARM. The `linker/` directory is reserved, but implementing a CRT-owned
 dynamic linker is deferred outside the current roadmap.
 
 The deliverable is a cumulative staged sysroot, not a bundled toolchain.
-`01-c`, `02-cxx`, `03-gfx-simple`, `04-gfx-media`, and `05-js` let an
+`01-c`, `02-cxx`, `03-gfx-simple`, `04-gfx-media`, and the planned `05-ui` and
+`06-web` let an
 embedded product stop at the capability level it needs. Every distribution
 uses an external host or board-vendor compiler; see
 [`distribution.md`](distribution.md).
@@ -130,8 +131,13 @@ The intended shape is:
   Skia, a Wayland-compatible compositor boundary, and a future Chromium Ozone
   backend path.
 - `libcrtmedia`: FFmpeg plus explicit codec, audio, and video libraries.
-- `libcrtjs`: QuickJS first as the JavaScript bring-up engine, with V8 as the
-  later browser-class target.
+- `crtui` (planned, `05-ui`): a CRT-owned application UI API with LVGL as a
+  private implementation and an external-surface view for video and, later,
+  a WebView.
+- `libcrtweb` (planned, `06-web`): a WebKit CRT Port (`PlatformCRT`), using
+  WPE WebKit as the reference. WebKit brings JavaScriptCore, so the earlier
+  QuickJS-first plan (`libcrtjs`) is superseded; V8/Chromium stay later
+  benchmarks.
 
 That upper layer is now underway: the first `libcrtgfx` CPU-raster/input/text
 milestone passes on Linux, macOS, and Windows. New graphics, media, or

@@ -135,8 +135,10 @@ It is a developer preview in preparation. The graphics/media stage
 (`04-gfx-media`) is the current milestone, verified on Linux, Windows, and
 macOS with the per-host limits listed in the README's capability matrix.
 Hardware H.264 decode is verified on all three hosts (VideoToolbox on macOS,
-D3D11VA on Windows, VA-API on Linux). The JavaScript stage (`05-js`) is
-roadmap work, not a supported feature.
+D3D11VA on Windows, VA-API on Linux). Network streaming (HTTP/HTTPS input and
+output, reconnect) is also verified on all three. The next stages -- `05-ui`
+(`crtui`/LVGL) and `06-web` (a WebKit-based web runtime) -- are roadmap work,
+not supported features; the earlier QuickJS stage was dropped.
 
 ## What do I need to build with it?
 

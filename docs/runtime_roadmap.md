@@ -24,8 +24,19 @@ Development and release follow the cumulative stages defined in
    Vulkan/D3D12/Metal presentation, FFmpeg, audio, playback, and opt-in
    hardware H.264 decode plus decoded-texture interop (verified on all three
    hosts; Windows uses the documented GPU-copy fallback).
-5. **JavaScript (`05-js`)** — QuickJS and bindings over the stable lower
-   graphics/media contracts.
+5. **Application UI (`05-ui`)** — `crtui`, LVGL, application widgets, and
+   external-surface composition (video today, WebView later) over the stable
+   lower graphics/media contracts. Planned; see [`crtui_acceptance.md`](crtui_acceptance.md).
+6. **Web Runtime (`06-web`)** — JavaScriptCore, WebCore, the WebKit
+   multi-process runtime, a `PlatformCRT` port, and `crtweb`/WebView
+   integration. Planned; see [`crtweb_acceptance.md`](crtweb_acceptance.md)
+   and [`crtweb_porting.md`](crtweb_porting.md).
+
+The earlier plan named a QuickJS stage (`05-js`). It is superseded: WebKit
+brings JavaScriptCore in anyway, so a separate QuickJS stage would be
+duplicate investment. The repository still builds and packages a skeleton
+`05-js`/`libcrtjs` until UI Tranche 0 renames that stage to `05-ui` (see
+[`../TODO.md`](../TODO.md)); nothing in it is a supported feature.
 
 The installed output of one stage is the input boundary for the next. A stage
 is not complete merely because an in-tree target links.
@@ -63,13 +74,24 @@ is not complete merely because an in-tree target links.
   and hardware encode, mux/decode-back, timestamp-discontinuity and lifecycle
   gates, plus isolated `04-gfx-media` package acceptance are recorded in
   `crtmedia_encode_capture_acceptance.md` and `HISTORY.md` (2026-09-27..28).
-- The cumulative binary-package chain reaches the current `05-js` skeleton.
-  Predecessor-only isolated-stage acceptance through the option-ON
+- Networking and streaming (Tranches 0-6) is closed on Linux/x86_64,
+  macOS/arm64, and Windows/x64: a bounded, cancellable transport core;
+  progressive HTTP input (Range and chunked) into the extractor; fragmented
+  MP4 output over an HTTP upload sink with a hard memory bound; bounded
+  `Range`+`If-Range` reconnect that never splices a changed resource and never
+  auto-resumes output; HTTPS with an explicit trust policy and a loopback
+  correct-CA/wrong-CA/wrong-SAN matrix; and lifecycle/isolated-package
+  acceptance with an installed streaming consumer. See
+  `crtmedia_networking_acceptance.md` and `HISTORY.md` (2026-09-28..29).
+  FFmpeg's own network stack stays disabled; libcurl sits under a CRT-owned
+  transport contract.
+- The cumulative binary-package chain currently reaches a `05-js` skeleton
+  that is being replaced by `05-ui`/`06-web`. Predecessor-only isolated-stage acceptance through the option-ON
   `03-gfx-simple -> 04-gfx-media` transition is complete on Windows, macOS,
   and native Linux/aarch64, including final distribution verification and
   atomic publication.
-- `libcrtjs` still contains skeleton libraries only. QuickJS, its event loop,
-  modules, and graphics/media bindings have not been implemented.
+- `libcrtjs` contains skeleton libraries only and is superseded by the
+  `06-web` direction; no QuickJS engine, event loop, or bindings exist.
 - The bootstrap/reference allocator has API, debug-mode, contention,
   fragmented-fork, and expected-fault coverage. Windows/x86_64, macOS/arm64,
   and Linux/aarch64 have current-schema baseline data; Linux did not exceed
@@ -110,17 +132,24 @@ comparisons; promote Scudo only if repeatable evidence exceeds the baseline.
    pass real capture, software/hardware encode, deterministic timing and
    lifecycle tests, and isolated-package acceptance. See
    `crtmedia_encode_capture_acceptance.md`.
-5. Add transport, bounded buffering, explicit back-pressure, cancellation,
-   reconnect, and streaming protocol integration. **In progress 2026-09-28:**
-   begin with a host-neutral transport contract and deterministic loopback
-   HTTP/HTTPS acceptance, keep FFmpeg network ownership disabled unless a
-   later audited requirement changes that decision, then replay the same
-   source/sink contract on Windows/x64, Linux/x86_64, and macOS/arm64. See
-   `TODO.md`'s active "Networking and streaming" tranche.
-6. Use WebRTC as a consumer-driven integration milestone, then add the real
-   QuickJS core, event loop, modules, native bindings, and JavaScript-visible
-   graphics/media services. Only then extend isolated-stage acceptance from
-   `04-gfx-media` to `05-js`.
+5. ~~Add transport, bounded buffering, explicit back-pressure, cancellation,
+   reconnect, and streaming protocol integration.~~ **Complete 2026-09-29**
+   (`HISTORY.md`): Linux/x86_64, macOS/arm64, and Windows/x64 pass the bounded
+   transport core, progressive HTTP input and fragmented-MP4 HTTP output,
+   reconnect/discontinuity, HTTPS trust matrix, and isolated-package
+   acceptance. See `crtmedia_networking_acceptance.md`.
+6. **Application UI (`05-ui`) — next.** Freeze the `crtui` contract, import
+   LVGL behind it, wire CRT input/focus/resize, add the external-surface view
+   and a media view over the zero-copy path, then close cross-host and
+   isolated-package acceptance. Windows/x64 first (fast interactive
+   iteration), then macOS/arm64, then Linux. See `crtui_acceptance.md`.
+7. **Web Runtime (`06-web`).** JavaScriptCore/JSCOnly bring-up, a Linux WPE
+   reference baseline, `PlatformCRT` graphics/input, `libcrtweb` and the
+   WebView, multi-process lifecycle, then Windows and macOS replay, CRT
+   subsystem substitution, GPU integration, and distribution/security
+   closure. Linux first, with an early three-host JavaScriptCore replay; the
+   WebView plugs into the `05-ui` external-surface contract. See
+   `crtweb_acceptance.md`.
 
 Each step may expose a lower CRT/PAL gap. Fix that gap at the
 Bionic-compatible public surface or the controlled PAL boundary, rerun the
@@ -147,7 +176,33 @@ host facility is unavailable.
 
 ## Deferred Scope
 
-Graphite, V8, Chromium/Ozone, a full compositor/desktop environment, Android
-framework or APK compatibility, and unmodified glibc binary compatibility are
-not gates for the current Ganesh/FFmpeg/QuickJS sequence. They remain later
-consumers or benchmarks after the lower contracts have stable evidence.
+Not gates for the `05-ui`/`06-web` sequence; each is a later consumer or a
+benchmark once the lower contracts have stable evidence:
+
+- **WebRTC** — a consumer-driven integration after the browser baseline, wired
+  through WebCore's backend only when a real consumer requires it. It is no
+  longer a prerequisite of anything.
+- **QuickJS** — deferred unless a non-WebKit lightweight JavaScript runtime
+  becomes an actual product requirement; not a stage.
+- **WebGPU, EME/DRM, WebXR, camera/microphone in the web runtime, and JS-native
+  application bindings.**
+- Graphite, V8, Chromium/Ozone, Gecko, a full compositor/desktop environment,
+  Android framework or APK compatibility, and unmodified glibc binary
+  compatibility.
+
+## Host Order
+
+| Work | First host | Reason |
+| --- | --- | --- |
+| `05-ui` | Windows/x64 | fastest loop for interactive input, focus, and resize checks |
+| `05-ui` replay | macOS/arm64, then Linux | event semantics first, embedded/product closure last |
+| `06-web` JavaScriptCore | Linux, replayed on all three hosts early | exposes threads/TLS/executable-memory/signal gaps in the lower runtime |
+| `06-web` WPE reference and `PlatformCRT` | Linux | WPE is the known-good reference to compare against |
+| `06-web` replay | Windows/x64, then macOS/arm64 | proves `PlatformCRT` is OS-neutral rather than a Linux port |
+
+The document set that follows this roadmap: this file records dependency
+order and stage boundaries only; [`../TODO.md`](../TODO.md) records the
+current and next tranche; [`../HISTORY.md`](../HISTORY.md) records completed
+work and host evidence; [`../STATUS.md`](../STATUS.md) is the point-in-time
+support matrix; `crtui_acceptance.md`, `crtweb_acceptance.md`, and
+`crtweb_porting.md` hold each stage's detailed contract and evidence.

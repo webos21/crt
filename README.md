@@ -59,9 +59,16 @@ container, or translation layer.
   (macOS/arm64), D3D11VA (Windows/x64), and VA-API (Linux/x86_64, a physical
   Intel GPU) all decode real hardware frames into the CPU-resident
   `crtmedia_frame`, with software decode as the default and the fallback.
-- **`05-js` is roadmap, not a supported feature.** It currently packages a
-  `libcrtjs` skeleton; QuickJS, the event loop, modules, and JavaScript-visible
-  graphics/media bindings are planned.
+- **Network streaming is verified on all three platforms.** A bounded,
+  cancellable transport core, progressive HTTP input, fragmented-MP4 HTTP
+  output, bounded reconnect, and HTTPS with an explicit trust policy pass on
+  Linux, Windows, and macOS, with FFmpeg's own network stack left disabled.
+- **`05-ui` and `06-web` are roadmap, not supported features.** The next stage
+  is `crtui` (LVGL behind a CRT-owned API, with external-surface composition
+  for video and later a WebView), followed by a WebKit-based web runtime.
+  The repository still packages an old `libcrtjs` skeleton under `05-js`; it is
+  superseded and is being renamed, not a feature. QuickJS is no longer planned
+  as a stage. See [`docs/runtime_roadmap.md`](docs/runtime_roadmap.md).
 
 The per-capability matrix is under [What Already Works](#what-already-works).
 The exact evidence, per-port results, and open work are in
@@ -114,17 +121,19 @@ state on that host, not a promise.
 | Hardware H.264 decode (frames delivered to CPU) | Verified | Verified | Verified | D3D11VA on Windows, VideoToolbox on macOS, and VA-API on Linux (physical Intel GPU, native Ubuntu desktop) all deliver real hardware frames; software decode stays the default and the fallback. |
 | Decoded GPU texture interop | Verified | Verified | Verified | Direct zero-copy on Linux/Vulkan and macOS/Metal; measured no-CPU-readback GPU-copy fallback on Windows/D3D12. Lifecycle and isolated-package gates pass. |
 | Video encode and capture | Verified | Verified | Verified | V4L2/VA-API, Media Foundation, and AVFoundation/VideoToolbox paths pass real capture, hardware/software encode, mux/decode-back, timing, lifecycle, and isolated-package acceptance. |
-| Network streaming | In progress | In progress | In progress | Lower sockets/DNS and libcurl+mbedTLS are verified; bounded transport, progressive HTTP input/output, reconnect, and package acceptance are the active tranche. |
-| JavaScript runtime (QuickJS) | Planned | Planned | Planned | `05-js` packages a `libcrtjs` skeleton only. |
+| Network streaming | Verified | Verified | Verified | Bounded transport core; progressive HTTP input (Range and chunked); fragmented-MP4 HTTP upload with a hard memory bound; `Range`+`If-Range` reconnect that never splices a changed resource and never auto-resumes output; HTTPS with a caller-supplied CA and a correct-CA/wrong-CA/wrong-SAN matrix; lifecycle stress and isolated-package acceptance with an installed streaming consumer. Loopback/IP-literal fixtures; the resolver is still IPv4/UDP A-record only. |
+| Application UI (`crtui`, LVGL) | Planned | Planned | Planned | Next stage (`05-ui`); contract drafted in [`docs/crtui_acceptance.md`](docs/crtui_acceptance.md). |
+| Web runtime (WebKit CRT Port) | Planned | Planned | Planned | Stage `06-web`, after `05-ui`; see [`docs/crtweb_acceptance.md`](docs/crtweb_acceptance.md). |
 
 Hosts: Linux is an aarch64 VM (the acceptance host) plus x86_64 under WSL2,
 plus a native (non-VM, non-WSL) x86_64 desktop with a physical Intel GPU used
 for the hardware-decode and physical-GPU Skia evidence above (2026-09-22);
 Windows is x86_64; macOS is arm64 (Apple Silicon).
 
-The latest cross-host upper-runtime evidence is the 2026-09-27..28 zero-copy
-and Encode and capture closure: host lifecycle tests plus fresh isolated
-`04-gfx-media` builds passed on Windows/x64, macOS/arm64, and Linux/x86_64.
+The latest cross-host upper-runtime evidence is the 2026-09-27..29 zero-copy,
+Encode and capture, and Networking and streaming closure: host lifecycle tests
+plus fresh isolated `04-gfx-media` builds passed on Windows/x64, macOS/arm64,
+and Linux/x86_64.
 Exact suite counts, environment-specific skips, and Linux/aarch64 acceptance
 runs stay in [`HISTORY.md`](HISTORY.md) and [`STATUS.md`](STATUS.md), which is
 authoritative if it and this table ever disagree.
@@ -257,7 +266,8 @@ CRT is built and verified as cumulative distributions:
 | `02-cxx` | `01-c` + libc++/libc++abi/libunwind |
 | `03-gfx-simple` | `02-cxx` + window, keyboard/mouse, software framebuffer |
 | `04-gfx-media` | `03-gfx-simple` + Skia CPU/GPU, Vulkan/D3D12/Metal, FFmpeg |
-| `05-js` | `04-gfx-media` + JavaScript runtime/bindings layer |
+| `05-ui` (planned) | `04-gfx-media` + `crtui`/LVGL application UI and external-surface composition |
+| `06-web` (planned) | `05-ui` + JavaScriptCore/WebKit web runtime and WebView |
 
 Simple Graphics deliberately excludes Skia CPU raster/text and Skia GPU. Its
 drawing surface is the CPU-writable framebuffer in `crtgfx/window.h`.
@@ -270,15 +280,14 @@ repository build tree. The complete predecessor-only chain through the
 option-ON `03-gfx-simple -> 04-gfx-media` transition is verified on Windows,
 macOS, and native Linux/aarch64. Linux passes the cold-cache Skia presentation
 matrix with Vulkan validation both disabled and enabled, distribution
-verification, and atomic publication. `04-gfx-media -> 05-js`
-has not yet been added. Full details, artifact layout, package naming, and
+verification, and atomic publication. The transitions to `05-ui` and `06-web`
+have not yet been added. Full details, artifact layout, package naming, and
 acceptance rules are in
 [`docs/distribution.md`](docs/distribution.md).
 
-The current `05-js` package contains the installable `libcrtjs` skeleton. The
-QuickJS engine, event loop, modules, and JavaScript-visible graphics/media
-bindings remain planned work rather than a current completion claim. Likewise,
-the ordinary developer preset keeps Skia and FFmpeg disabled by default;
+The repository still builds a skeleton `05-js` directory containing the
+installable `libcrtjs` skeleton; that stage is superseded by `05-ui`/`06-web`
+and will be renamed, so it is not a completion claim. Likewise, the ordinary developer preset keeps Skia and FFmpeg disabled by default;
 release-grade `04-gfx-media` acceptance uses the separate option-ON isolated
 stage path.
 
@@ -462,7 +471,7 @@ libstdc++/        bootstrap ABI shim and imported libc++ build integration
 shell/            tiny shell, mksh, toybox, and awk
 libcrtgfx/        window/input/framebuffer and advanced Skia/GPU integration
 libcrtmedia/      media runtime and optional FFmpeg integration
-libcrtjs/         JavaScript runtime skeleton; QuickJS integration is planned
+libcrtjs/         superseded JavaScript skeleton (to become the `05-ui` stage)
 porting/recipes/  upstream porting test recipes
 tools/            wrappers, rootfs/dist builders, porting automation
 libc/tests/       libc, PAL, shell-level, ABI, and integration tests
@@ -479,7 +488,11 @@ docs/             design, policy, roadmap, and verification documents
 - [Stack and toolchain policy](docs/project_stacks.md)
 - [Distribution stages](docs/distribution.md) and the
   [developer-preview release contract](docs/release_preview.md)
-- [Runtime roadmap](docs/runtime_roadmap.md)
+- [Runtime roadmap](docs/runtime_roadmap.md), with the planned
+  [crtui](docs/crtui_acceptance.md) and [crtweb](docs/crtweb_acceptance.md)
+  stage contracts
+- [Networking acceptance](docs/crtmedia_networking_acceptance.md) and
+  [Encode and capture acceptance](docs/crtmedia_encode_capture_acceptance.md)
 - [C++ runtime](docs/cxx_runtime.md)
 - [Graphics API policy](docs/libcrtgfx_api_policy.md)
 - [Media API policy](docs/libcrtmedia_api_policy.md)

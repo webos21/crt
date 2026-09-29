@@ -57,10 +57,35 @@ newest entry first) rather than leaving it here.
 
 ## In Progress
 
-Nothing in progress right now -- see `Planned` below for what to pick up next.
-When an item is promoted into progress, give it its own subsection here;
-when it finishes, move the detail to `HISTORY.md` and remove the subsection
-(matching this file's own `Done` section, which stays empty by design).
+### Application UI (`05-ui`: crtui + LVGL)
+
+Promoted 2026-09-29 after Networking and streaming closed on Linux/x86_64,
+macOS/arm64, and Windows/x64, and after the roadmap was reordered to
+`04-gfx-media -> 05-ui -> 06-web` (`docs/runtime_roadmap.md`). The contract,
+gates, and host order live in
+[`docs/crtui_acceptance.md`](docs/crtui_acceptance.md) (drafted, not yet
+frozen). Keep completed evidence in `HISTORY.md`; this list tracks only tranche
+state. Windows/x64 is the first host, then macOS/arm64, then Linux.
+
+* [ ] **0. Freeze the `crtui` contract and rename the stage.** Thread
+  ownership, lifetime, events, focus/input routing, geometry, surfaces, errors,
+  plus a resource-free contract test; pin and record LVGL provenance; rename the
+  skeleton `05-js`/`libcrtjs` stage and its targets/tools/docs to `05-ui`.
+* [ ] **1. LVGL import and first pixels.** Software draw buffer through the
+  existing `crtgfx` present path; small Window/Column/Label/Button/Slider/
+  Progress demo.
+* [ ] **2. Input, focus, resize.** Pointer, keyboard (Tab/arrows/Enter/Space),
+  wheel, touch where available; STB-style keyboard navigation from the start.
+* [ ] **3. `crtui` wrapper (first green).** The sample calls no `lv_*` symbol;
+  LVGL is private.
+* [ ] **4. Layout, styling, v1 widget set.** CRT-neutral properties only.
+* [ ] **5. External Surface view.** Producer-agnostic surface composition; the
+  `06-web` prerequisite.
+* [ ] **6. MediaView.** Zero-copy video composed in the final present, not via
+  an LVGL image buffer.
+* [ ] **7. Cross-host and isolated-package closure.** Isolated `05-ui` build
+  from the installed `04-gfx-media` SDK; update `tools/create_stage_source.py`
+  and `tools/crt_dist_prerequisites.py` in the same change.
 
 ## Planned
 
@@ -74,16 +99,23 @@ leave Scudo conditional. Hardware video decode, Zero-copy decoded textures,
 Encode and capture, and Networking and streaming are all closed on
 Linux/x86_64, macOS/arm64, and Windows/x64 (`HISTORY.md`, 2026-09-22..29; full
 tranche-by-tranche detail in `docs/crtmedia_encode_capture_acceptance.md` and
-`docs/crtmedia_networking_acceptance.md`). Promote the next tranche below when
-its prerequisite evidence is available.
+`docs/crtmedia_networking_acceptance.md`). The Application UI stage
+(`05-ui`) is promoted into `In Progress` above; the remaining roadmap item
+stays here until its External Surface contract is accepted.
 
-1. **WebRTC, then JavaScript.** Treat WebRTC as a consumer-driven integration
-   milestone. Build the real QuickJS core and CRT bindings before extending
-   isolated distribution acceptance from `04-gfx-media` to `05-js`; a stage
-   skeleton alone is not completion.
+1. **Web Runtime (`06-web`): the WebKit CRT Port.** JavaScriptCore/JSCOnly
+   bring-up (Linux first, early three-host replay), a Linux WPE reference
+   baseline, `PlatformCRT` graphics/input, `libcrtweb` and the WebView,
+   multi-process lifecycle, Windows and macOS replay, CRT subsystem
+   substitution, GPU integration, and distribution/security closure. Starts
+   only after `05-ui`'s External Surface contract is accepted. Detail belongs
+   in `docs/crtweb_acceptance.md` and `docs/crtweb_porting.md`, not here.
 
-The remaining execution order is WebRTC, then the complete JavaScript
-application-runtime layer.
+Deferred (not gates; see `docs/runtime_roadmap.md`): WebRTC, QuickJS (unless a
+non-WebKit lightweight runtime becomes a real product requirement), WebGPU,
+EME/DRM, and JS-native application bindings.
+
+The remaining execution order is `05-ui`, then `06-web`.
 
 
 ### Runtime architecture hardening backlog

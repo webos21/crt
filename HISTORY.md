@@ -10,6 +10,38 @@ substantive update.
 
 ## 2026-09-29
 
+- **Roadmap reordered to `04-gfx-media -> 05-ui -> 06-web`; QuickJS/WebRTC
+  removed from the stage gates.** Documentation only, no code change.
+  `docs/runtime_roadmap.md`, `TODO.md`, `README.md`, `STATUS.md`,
+  `docs/distribution.md`, `docs/faq.md`, and `docs/project_meanings.md` were
+  brought in line with the decision after Networking and streaming closed on
+  all three hosts.
+
+  The old plan put a QuickJS stage (`05-js`) after WebRTC. Because a WebKit
+  runtime brings JavaScriptCore anyway, a separate QuickJS stage would be
+  duplicate investment, and WebRTC is a consumer-driven integration that
+  belongs after a working browser, not before it. The new stages are `05-ui`
+  (`crtui`, with LVGL as a private implementation and a producer-agnostic
+  external-surface view so video and later a WebView are composed by `crtgfx`
+  instead of being copied through an LVGL framebuffer) and `06-web` (a WebKit
+  CRT Port, `PlatformCRT`, with WPE WebKit as the reference implementation and
+  `libcrtweb` as the application API). Host order: `05-ui` Windows -> macOS ->
+  Linux; `06-web` Linux first (with an early three-host JavaScriptCore replay)
+  -> Windows -> macOS. Deferred, not gates: WebRTC, QuickJS (unless a non-WebKit
+  lightweight runtime becomes a real requirement), WebGPU, EME/DRM, V8,
+  Chromium/Ozone.
+
+  New documents: `docs/crtui_acceptance.md`, `docs/crtweb_acceptance.md`, and
+  `docs/crtweb_porting.md`. All three are drafts -- contracts unfrozen, no
+  implementation -- and mark upstream version pins (LVGL v9.6.x, WPE WebKit
+  2.54) as candidates to verify at each stage's Tranche 0, not as facts.
+  Deliberately not changed yet: the skeleton `05-js`/`libcrtjs` stage and its
+  build targets, tools, and tests still exist; renaming them to `05-ui` is
+  `crtui` Tranche 0, so the docs describe it as superseded rather than gone.
+  `TODO.md`'s `In Progress` now holds the `05-ui` tranche list; `06-web` stays
+  a one-paragraph pointer under `Planned` per this file's own rule against
+  piling long plans into the work queue.
+
 - **Networking & Streaming Tranche 6 closed on Linux/x86_64 -- and with it
   the whole roadmap item on all three hosts: two real Linux-only packaging
   gaps found by the first isolated stage build with the curl layer.**

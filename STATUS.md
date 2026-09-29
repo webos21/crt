@@ -5,7 +5,7 @@ does not repeat the implementation diary in [`HISTORY.md`](HISTORY.md), the
 open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting_status.md`](docs/porting_status.md).
 
-Last synchronized with the source tree and git history: **2026-09-28**.
+Last synchronized with the source tree and git history: **2026-09-29**.
 Updated only on explicit request from here on, not as part of routine
 documentation passes -- see `TODO.md`'s Notice section. It may lag behind
 `HISTORY.md`/`TODO.md` between syncs; those two are the source of truth.
@@ -18,8 +18,9 @@ documentation passes -- see `TODO.md`'s Notice section. It may lag behind
   Linux, macOS, and Windows. It is not a glibc binary-compatibility layer, a
   WSL/container replacement, or an Android APK runtime.
 - The default workflow builds and tests only the C stage. Explicit cumulative
-  distributions then add C++, Simple Graphics, advanced Graphics/Media, and
-  JavaScript under `out/<preset>/dist/`.
+  distributions then add C++, Simple Graphics, and advanced Graphics/Media
+  under `out/<preset>/dist/`; the planned `05-ui` and `06-web` stages follow
+  (a superseded `05-js` skeleton directory is still emitted until renamed).
 - No distribution bundles LLVM/Clang/LLD. Desktop and embedded consumers
   provide the host or vendor toolchain; CRT supplies the staged sysroot,
   startup/runtime objects, wrappers, configuration, and manifest.
@@ -201,15 +202,36 @@ hosts:
   dependency/RPATH audit, `verify_dist.py`, and atomic publication; see
   `docs/crtmedia_encode_capture_acceptance.md` and `HISTORY.md` 2026-09-27..28.
 
+- Networking and streaming is complete on Linux/x86_64, macOS/arm64, and
+  Windows/x64. `libcrtmedia` owns a bounded, cancellable transport queue with
+  no socket/TLS dependency, an HTTP input path (Range-capable and chunked
+  non-seekable) under the extractor, and an HTTP upload sink that carries
+  fragmented MP4 through a hard-bounded queue (`crtmedia_muxer_create_for_url`).
+  Reconnect resumes only with `Range` plus `If-Range` and accepts a response
+  only when it is a `206`, the `Content-Range` start matches, and the entity
+  validator is unchanged; retries are bounded, a changed resource is a protocol
+  error (never spliced), and output never auto-resumes. HTTPS is verify-on by
+  default with a caller-supplied CA (`crtmedia/tls.h`) and a loopback
+  correct-CA/wrong-CA/wrong-SAN matrix that also gates the upload path.
+  Connect/stream/cancel/reconnect/destroy stress audits sockets, threads, and
+  native handles, and each host passed a fresh isolated `04-gfx-media` rebuild
+  with the curl/mbedTLS/zlib layer, an installed `examples/media-stream`
+  consumer, `verify_dist.py`, and atomic publication. FFmpeg's own network
+  stack stays disabled; libcurl sits under the CRT-owned contract. Loopback and
+  IP-literal fixtures keep the minimal IPv4/UDP resolver out of the streaming
+  path. See `docs/crtmedia_networking_acceptance.md` and `HISTORY.md`
+  2026-09-28..29.
+
 This evidence does not yet prove production-complete seeking/track selection,
-network streaming, adaptive protocols, or realtime/WebRTC behavior.
+adaptive streaming (HLS/DASH), RTSP, or realtime/WebRTC behavior.
 
 ### libcrtjs
 
-`libcrtjs` currently builds and installs static/shared skeleton libraries. No
-QuickJS engine or JavaScript-visible graphics/media service is integrated yet.
-The intended first engine remains QuickJS; V8 remains the browser-class later
-target.
+`libcrtjs` builds and installs static/shared skeleton libraries only and is
+superseded: the QuickJS plan is retired in favor of the `05-ui` and `06-web`
+stages (WebKit brings JavaScriptCore). No JavaScript engine or binding exists.
+The skeleton, and the `05-js` stage directory that packages it, stay in the
+tree until `TODO.md`'s `crtui` Tranche 0 renames them.
 
 ### Upper Runtime Direction
 
@@ -260,13 +282,14 @@ target.
   reports (`HISTORY.md`, 2026-09-23). Replaying the later hardware-decode-
   default demo on macOS/Linux belongs to a future release build, not the
   completed preview or the active runtime tranche.
-- Zero-copy decoded-texture interop and Encode and capture are closed on all
-  three hosts. Networking and streaming is now `TODO.md`'s active upper-
-  runtime tranche; it begins with a bounded, host-neutral transport contract
-  before progressive HTTP input/output, reconnect, TLS, and package gates.
-- JavaScript media/gfx binding follows the stable native contracts, using a
-  WebCodecs-like asynchronous shape; WebRTC-style realtime services, V8, and a
-  Chromium/Ozone probe remain later layers.
+- Zero-copy decoded-texture interop, Encode and capture, and Networking and
+  streaming are closed on all three hosts.
+- The roadmap is now `04-gfx-media -> 05-ui -> 06-web`. `05-ui` is `crtui`
+  with LVGL as a private implementation, plus an external-surface view so video
+  (and later a WebView) is composed by `crtgfx` rather than copied through an
+  LVGL framebuffer; `06-web` is a WebKit CRT Port (`PlatformCRT`) with
+  `libcrtweb` and a WebView, using WPE WebKit as the reference. WebRTC,
+  QuickJS, WebGPU, EME/DRM, V8, and Chromium/Ozone are deferred, not gates.
 
 The sequencing and ownership boundaries are recorded in
 [`docs/runtime_roadmap.md`](docs/runtime_roadmap.md); the isolated-acceptance
@@ -311,7 +334,7 @@ of truth.
 | Player clock/state and CPU-frame planning | `crtmedia_player_test` | longer mixed audio/video sessions and underrun/recovery coverage |
 | Host audio output contract | `crtmedia_audio_sink_test` | real-device behavior remains host/environment dependent |
 | Encode/mux timing and ownership | `crtmedia_encode_mux_test`, `crtmedia_timing_discontinuity_test`, `crtmedia_capture_encode_lifecycle_test` | accepted with real capture/hardware encode on all three hosts |
-| Network streaming | none yet beyond the lower socket/DNS and libcurl port tests | active bounded-transport and loopback-protocol tranche |
+| Network streaming | `crtmedia_transport_queue_test`, `crtmedia_http_input_range_test`, `crtmedia_http_input_chunked_test`, `crtmedia_http_output_test`, `crtmedia_http_reconnect_test`, `crtmedia_https_test`, `crtmedia_http_lifecycle_test` | accepted on all three hosts against loopback/IP-literal fixtures; no real-name resolution or public-server evidence |
 
 Headless Linux is allowed to report `CRTGFX_ERROR_UNSUPPORTED` for native
 window creation. That verifies graceful fallback, not live presentation; a
@@ -397,23 +420,23 @@ statuses, and exceptions are maintained in:
   import are now covered by the cross-host zero-copy acceptance matrix.
 - Software video encode, MP4 mux/decode-back, real host capture, and hardware
   H.264 encode are accepted on Linux/x86_64, macOS/arm64, and Windows/x64.
-  The network transport/protocol layer, adaptive streaming, and realtime/
-  WebRTC remain open. FFmpeg is still intentionally file-only
-  (`--disable-network`); the active tranche will first put bounded buffering,
-  back-pressure, cancellation, and reconnect under a CRT-owned contract.
-- QuickJS has not been imported. Event-loop/timer/module/native-binding work
-  and JavaScript media/gfx APIs remain open.
+  The HTTP/HTTPS transport, streaming input/output, and reconnect are accepted
+  on all three hosts (loopback fixtures). Adaptive streaming (HLS/DASH), RTSP,
+  and realtime/WebRTC remain open. FFmpeg is still intentionally file-only
+  (`--disable-network`); network I/O goes through the CRT-owned transport.
+- No JavaScript engine exists; QuickJS is no longer planned as a stage. The
+  `05-ui` (`crtui`/LVGL) and `06-web` (WebKit) stages are not started.
 
 ## Next Priorities
 
-1. Freeze and implement `TODO.md`'s active Networking and streaming contract:
-   bounded transport state, loopback progressive HTTP input, streaming output,
-   reconnect/discontinuity behavior, HTTPS, three-host lifecycle, and isolated
-   `04-gfx-media` package acceptance.
-2. Use WebRTC as a consumer milestone after the transport tranche, then bring
-   up QuickJS core/event-loop/
-   timers/modules and expose stable media/gfx services with WebCodecs-like
-   queue semantics.
+1. Start `TODO.md`'s active Application UI (`05-ui`) tranche: freeze the
+   `crtui` contract, pin LVGL with provenance, rename the skeleton `05-js`
+   stage to `05-ui`, then LVGL first pixels on Windows/x64 (macOS/arm64 and
+   Linux replays follow). See `docs/crtui_acceptance.md`.
+2. After `05-ui`'s External Surface contract is accepted, begin `06-web`: a
+   JavaScriptCore/JSCOnly bring-up (Linux first, early three-host replay), a
+   Linux WPE reference baseline, then `PlatformCRT`. See
+   `docs/crtweb_acceptance.md` and `docs/crtweb_porting.md`.
 
 Also ongoing, opportunistically rather than sequenced: closing the focused
 CRT/PAL limitations above when an upstream consumer exposes a concrete
