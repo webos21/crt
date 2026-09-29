@@ -102,8 +102,10 @@ consumers, not completion gates for this tranche.
   2026-09-29, recorded in `HISTORY.md`: verify-on-by-default, caller-supplied
   CA (`crtmedia/tls.h`, `*_with_tls()` entry points), explicit insecure
   opt-in, and the loopback correct-CA/wrong-CA/wrong-SAN matrix plus HTTPS
-  upload (`crtmedia_https_test: ok ...`). Linux/x86_64 and macOS/arm64
-  replay of the unchanged contract is next.
+  upload (`crtmedia_https_test: ok ...`). **macOS/arm64 done 2026-09-29:**
+  same unmodified source, 4 consecutive identical runs, no code changes; full
+  in-tree `ctest` 151/151 (1 expected camera skip), tooling 77/77. Linux/x86_64
+  replay remains.
 * [ ] **6. Close lifecycle and isolated-package acceptance.** Stress
   repeated connect/stream/cancel/reconnect/destroy cycles, audit sockets/
   threads/native handles, keep local file playback plus capture/encode

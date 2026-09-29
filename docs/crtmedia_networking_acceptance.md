@@ -716,6 +716,18 @@ and no real-name resolution is exercised here. Full in-tree `ctest`: 161/161
 macOS/arm64 replay of the unchanged contract is next (Tranche 5 closes only
 when all three hosts pass).
 
+**macOS/arm64 done 2026-09-29.** Same, unmodified source and fixture (the
+in-memory mbedTLS CA/server-certificate generation is host-neutral).
+`crtmedia_https_test` passed 4 consecutive runs with the identical result
+line as Windows -- `ok correct_ca=pass wrong_ca=protocol wrong_san=protocol
+default=protocol insecure_opt_in=pass upload_correct_ca=pass
+upload_wrong_ca=protocol samples=70` -- covering every row of the matrix
+above, including the refused-certificate upload never sending its body. The
+Tranche 1-4 network tests (`transport_queue`, HTTP range/chunked input, HTTP
+output, reconnect) passed together unchanged. Full in-tree `ctest`: 151/151
+(one expected `crtmedia_capture_avfoundation_test` camera-authorization
+skip); tooling tests 77/77. Linux/x86_64 replay remains.
+
 ### 6. Lifecycle and isolated-package acceptance
 
 Stress repeated connect/stream/cancel/reconnect/destroy cycles (matching

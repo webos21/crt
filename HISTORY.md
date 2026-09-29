@@ -10,6 +10,18 @@ substantive update.
 
 ## 2026-09-29
 
+- **Networking & Streaming Tranche 5 replayed on macOS/arm64: unmodified
+  source, identical result, no code changes.** `docs/crtmedia_networking_
+  acceptance.md`'s Tranche 5 section has the full detail.
+
+  `crtmedia_https_test` (verify-on-by-default, caller CA, correct-CA/wrong-CA/
+  wrong-SAN matrix, explicit insecure opt-in, HTTPS upload) passed 4
+  consecutive runs with the same line as Windows: `ok correct_ca=pass
+  wrong_ca=protocol wrong_san=protocol default=protocol insecure_opt_in=pass
+  upload_correct_ca=pass upload_wrong_ca=protocol samples=70`. Tranche 1-4
+  network tests unchanged and green. Full in-tree `ctest` 151/151 (1 expected
+  camera skip); tooling 77/77. Linux/x86_64 replay remains.
+
 - **Networking & Streaming Tranche 5 closed on Windows/x64: HTTPS is now
   actually authenticated -- verify-on-by-default, caller-supplied CA, and a
   loopback correct-CA / wrong-CA / wrong-SAN matrix that passes.**
