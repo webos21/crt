@@ -10,6 +10,29 @@ substantive update.
 
 ## 2026-09-29
 
+- **Networking & Streaming Tranche 5 closed on all three hosts: Linux/x86_64
+  replay on the physical Linux host found and fixed one Linux-only test-
+  fixture bug (SIGPIPE).** `docs/crtmedia_networking_acceptance.md`'s
+  Tranche 5 section has the full detail.
+
+  `crtmedia_https_test` first exited 141 (SIGPIPE, no output). `strace`:
+  in the refused-certificate cases libcurl aborts the handshake and the TLS
+  test terminator (`tests/tls_test_server.c`) then `send(..., 0)`s to the
+  closed socket -- on Linux that raises SIGPIPE and kills the whole test
+  process; libcurl's own sends already use `MSG_NOSIGNAL`, so no production
+  code path was exposed, and Windows (no SIGPIPE) / macOS never hit it.
+  Fixed in the fixtures only, via a shared `tests/test_socket_flags.h`
+  (`MSG_NOSIGNAL`, else the Linux ABI value 0x4000 since the project's
+  `<sys/socket.h>` does not expose it -- noted as a Bionic-surface gap, not
+  widened here) at all four fixture send sites, and registered in `tools/
+  create_stage_source.py`. Afterwards: identical result line to Windows and
+  macOS, 4 consecutive runs then 25/25 in a loop -- `ok correct_ca=pass
+  wrong_ca=protocol wrong_san=protocol default=protocol insecure_opt_in=pass
+  upload_correct_ca=pass upload_wrong_ca=protocol samples=70`. Tranche 1-4
+  network tests green together (6/6); full in-tree `ctest` 144/145 (the one
+  failure is the pre-existing no-sound-card `crtmedia_playback_pipeline_
+  test_runs` gap, unrelated); tooling 77/77.
+
 - **Networking & Streaming Tranche 5 replayed on macOS/arm64: unmodified
   source, identical result, no code changes.** `docs/crtmedia_networking_
   acceptance.md`'s Tranche 5 section has the full detail.

@@ -98,14 +98,10 @@ consumers, not completion gates for this tranche.
   Windows/x64, macOS/arm64, and Linux/x86_64; implementation, the three real
   bugs found on the way, and complete acceptance evidence are recorded in
   `HISTORY.md` and `docs/crtmedia_networking_acceptance.md`.
-* [ ] **5. Add HTTPS and cross-host acceptance.** Windows/x64 done
-  2026-09-29, recorded in `HISTORY.md`: verify-on-by-default, caller-supplied
-  CA (`crtmedia/tls.h`, `*_with_tls()` entry points), explicit insecure
-  opt-in, and the loopback correct-CA/wrong-CA/wrong-SAN matrix plus HTTPS
-  upload (`crtmedia_https_test: ok ...`). **macOS/arm64 done 2026-09-29:**
-  same unmodified source, 4 consecutive identical runs, no code changes; full
-  in-tree `ctest` 151/151 (1 expected camera skip), tooling 77/77. Linux/x86_64
-  replay remains.
+* [x] **5. Add HTTPS and cross-host acceptance.** Closed 2026-09-29 on
+  Windows/x64, macOS/arm64, and Linux/x86_64; implementation, the Linux-only
+  fixture `SIGPIPE` finding, and complete acceptance evidence are recorded in
+  `HISTORY.md` and `docs/crtmedia_networking_acceptance.md`.
 * [ ] **6. Close lifecycle and isolated-package acceptance.** Stress
   repeated connect/stream/cancel/reconnect/destroy cycles, audit sockets/
   threads/native handles, keep local file playback plus capture/encode

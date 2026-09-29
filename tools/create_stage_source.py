@@ -249,6 +249,7 @@ STAGES = {
             "libcrtmedia/tests/https_test.c",
             "libcrtmedia/tests/tls_test_server.c",
             "libcrtmedia/tests/tls_test_server.h",
+            "libcrtmedia/tests/test_socket_flags.h",
             "libcrtmedia/tests/http_test_server.c",
             "libcrtmedia/tests/http_test_server.h",
             "libcrtmedia/tests/http_upload_test_server.c",

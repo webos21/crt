@@ -726,7 +726,37 @@ above, including the refused-certificate upload never sending its body. The
 Tranche 1-4 network tests (`transport_queue`, HTTP range/chunked input, HTTP
 output, reconnect) passed together unchanged. Full in-tree `ctest`: 151/151
 (one expected `crtmedia_capture_avfoundation_test` camera-authorization
-skip); tooling tests 77/77. Linux/x86_64 replay remains.
+skip); tooling tests 77/77.
+
+**Linux/x86_64 done 2026-09-29, on the physical Linux host.** Same
+production source (`crtmedia/tls.h`, `http_*`, the mbedTLS-backed curl
+stack already in this tree); unlike Windows/macOS it needed one *test-fixture*
+fix. First run: `crtmedia_https_test` exited 141 (SIGPIPE) with no output.
+`strace` showed the cause exactly: in the deliberate refused-certificate
+cases (wrong CA / wrong SAN) libcurl aborts the handshake, and the fixture
+(`tls_test_server.c`'s BIO send, and its plain-send fallback) then wrote to
+the already-closed socket with `send(..., 0)`, which on Linux raises SIGPIPE
+and silently kills the whole test process. libcurl's own sends already
+passed `MSG_NOSIGNAL` (visible in the trace), so no production path was
+exposed; Windows has no SIGPIPE and macOS did not hit it. Fixed in the
+fixtures only: a small shared `tests/test_socket_flags.h` defines
+`CRTMEDIA_TEST_SEND_FLAGS` (`MSG_NOSIGNAL`, falling back to the Linux ABI
+value 0x4000 because this project's public `<sys/socket.h>` does not
+currently expose `MSG_NOSIGNAL` -- a Bionic-surface gap noted here, not
+widened as part of this tranche; other hosts keep 0), used at all four
+fixture send sites (`tls_test_server.c` x2, `http_test_server.c`,
+`http_upload_test_server.c` -- the latter two shared the same latent risk),
+and the header was added to `tools/create_stage_source.py`'s registry in the
+same change. After the fix, 4 consecutive runs and then 25/25 in a loop gave
+the identical result line as Windows and macOS -- `ok correct_ca=pass
+wrong_ca=protocol wrong_san=protocol default=protocol insecure_opt_in=pass
+upload_correct_ca=pass upload_wrong_ca=protocol samples=70`, ~0.8 s --
+covering every row of the matrix. The Tranche 1-4 network tests
+(`transport_queue`, HTTP range/chunked input, HTTP output, reconnect) passed
+together unchanged (6/6 with HTTPS). Full in-tree `ctest`: 144/145 (the one
+failure is the pre-existing no-sound-card `crtmedia_playback_pipeline_
+test_runs` gap, unrelated); tooling tests 77/77. This tranche is now closed
+on all three hosts.
 
 ### 6. Lifecycle and isolated-package acceptance
 

@@ -14,6 +14,8 @@
 #include <string.h>
 #include <sys/random.h>
 #include <sys/socket.h>
+
+#include "test_socket_flags.h"
 #include <time.h>
 #include <unistd.h>
 
@@ -124,7 +126,7 @@ typedef struct fd_io {
 
 static int bio_send(void* context, const unsigned char* buffer, size_t length) {
   fd_io* io = (fd_io*)context;
-  ssize_t n = send(io->fd, (const char*)buffer, length, 0);
+  ssize_t n = send(io->fd, (const char*)buffer, length, CRTMEDIA_TEST_SEND_FLAGS);
   return n < 0 ? MBEDTLS_ERR_SSL_INTERNAL_ERROR : (int)n;
 }
 
@@ -166,7 +168,7 @@ static int connect_backend(int port) {
 static int send_all_plain(int fd, const unsigned char* data, size_t size) {
   size_t sent = 0;
   while (sent < size) {
-    ssize_t n = send(fd, (const char*)data + sent, size - sent, 0);
+    ssize_t n = send(fd, (const char*)data + sent, size - sent, CRTMEDIA_TEST_SEND_FLAGS);
     if (n <= 0) {
       return -1;
     }

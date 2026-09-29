@@ -9,6 +9,8 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/socket.h>
+
+#include "test_socket_flags.h"
 #include <time.h>
 #include <unistd.h>
 
@@ -143,7 +145,7 @@ static int handle_upload(http_upload_test_server* server, int client_fd) {
       "HTTP/1.1 201 Created\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
   size_t sent = 0;
   while (sent < sizeof(response) - 1) {
-    ssize_t n = send(client_fd, response + sent, sizeof(response) - 1 - sent, 0);
+    ssize_t n = send(client_fd, response + sent, sizeof(response) - 1 - sent, CRTMEDIA_TEST_SEND_FLAGS);
     if (n <= 0) return -1;
     sent += (size_t)n;
   }

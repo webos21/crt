@@ -9,6 +9,8 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/socket.h>
+
+#include "test_socket_flags.h"
 #include <unistd.h>
 
 struct http_test_server {
@@ -32,7 +34,7 @@ static void send_all(int fd, const void* data, size_t size) {
   const uint8_t* p = (const uint8_t*)data;
   size_t sent = 0;
   while (sent < size) {
-    ssize_t n = send(fd, p + sent, size - sent, 0);
+    ssize_t n = send(fd, p + sent, size - sent, CRTMEDIA_TEST_SEND_FLAGS);
     if (n <= 0) {
       return; /* best-effort: a real test client never legitimately fails mid-send here */
     }
