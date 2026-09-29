@@ -10,6 +10,24 @@ substantive update.
 
 ## 2026-09-29
 
+- **Networking & Streaming Tranche 4 closed on all three hosts: Linux/x86_64
+  replay on the physical Linux host, unmodified source, identical result, no
+  code changes.** `docs/crtmedia_networking_acceptance.md`'s Tranche 4
+  section has the full detail.
+
+  `crtmedia_http_reconnect_test` (loopback server with fault injection:
+  mid-response drops with `Range`+`If-Range` resume, no-validator, changed
+  resource via `200` and via `206`+new ETag, refused resumes, receiver dying
+  mid-upload) built and ran cleanly with the curl/mbedTLS stack already in
+  this tree. Real result, 3 consecutive identical runs (~2.75 s each): `ok
+  samples=70 resumes=2 bounded_retries=3 changed_resource=protocol
+  no_validator=io upload_drop=io`, the same line as Windows and macOS. The
+  accepted timing-discontinuity, capture/encode lifecycle (webcam present),
+  encode/mux, VA-API encode, hardware-decode, zero-copy, and Tranche 1-3
+  regressions all passed unchanged (14/14 in one pass). Full in-tree `ctest`:
+  143/144 (the one failure is the pre-existing no-sound-card
+  `crtmedia_playback_pipeline_test_runs` gap, unrelated); tooling 77/77.
+
 - **Networking & Streaming Tranche 4 replayed on macOS/arm64: unmodified
   source, identical result, no code changes.** `docs/crtmedia_networking_
   acceptance.md`'s Tranche 4 section has the full detail.

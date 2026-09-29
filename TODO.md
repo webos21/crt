@@ -94,18 +94,10 @@ consumers, not completion gates for this tranche.
   macOS/arm64, and Linux/x86_64 (physical Linux host, not WSL); implementation,
   host-specific findings, and complete acceptance evidence are recorded in
   `HISTORY.md` and `docs/crtmedia_networking_acceptance.md`.
-* [ ] **4. Define reconnect and discontinuity behavior.** Windows/x64 done
-  2026-09-29, recorded in `HISTORY.md`: `Range` + `If-Range` resume only when
-  all three response checks pass (`206`, `Content-Range` start, matching
-  validator), bounded retries, output never auto-resumes
-  (`crtmedia_http_reconnect_test: ok ...`). Found and fixed three real bugs
-  on the way (a lost connection read as a clean EOF; a broken `Content-Range`
-  parser that left nonzero-offset 206 responses unvalidated; Windows `poll()`
-  timeouts ~15x too long). **macOS/arm64 done 2026-09-29:** same unmodified
-  source, 3 consecutive identical runs (`ok samples=70 resumes=2
-  bounded_retries=3 changed_resource=protocol no_validator=io upload_drop=io`),
-  no code changes; full in-tree `ctest` 150/150 (1 expected camera skip),
-  tooling 77/77. Linux/x86_64 replay remains.
+* [x] **4. Define reconnect and discontinuity behavior.** Closed 2026-09-29 on
+  Windows/x64, macOS/arm64, and Linux/x86_64; implementation, the three real
+  bugs found on the way, and complete acceptance evidence are recorded in
+  `HISTORY.md` and `docs/crtmedia_networking_acceptance.md`.
 * [ ] **5. Add HTTPS and cross-host acceptance.** Exercise the real TLS
   trust policy on a repository-owned loopback fixture (correct-CA/wrong-CA/
   wrong-SAN matrix), not just TLS handshake/decrypt. Replay the full,

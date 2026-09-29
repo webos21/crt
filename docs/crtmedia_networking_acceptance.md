@@ -637,7 +637,25 @@ decode_{,flush_,lifecycle_}test`, Tranche 1-3 tests) all passed unchanged.
 The Windows-only `poll()` timeout fix has no macOS counterpart (macOS uses
 the host `poll()`). Full in-tree `ctest`: 150/150 (one expected `crtmedia_
 capture_avfoundation_test` camera-authorization skip); tooling tests 77/77.
-Linux/x86_64 replay remains.
+
+**Linux/x86_64 done 2026-09-29, on the physical Linux host.** Same,
+unmodified source (`CRTMEDIA_ENABLE_CURL=ON`, curl/mbedTLS stack already in
+this tree from Tranche 2). `crtmedia_http_reconnect_test` passed 3
+consecutive runs with the identical result line as Windows and macOS --
+`ok samples=70 resumes=2 bounded_retries=3 changed_resource=protocol
+no_validator=io upload_drop=io`, ~2.75 s each -- covering every row of the
+fault-injection table. No code, CMake, or recipe change was needed; the
+Windows-only `poll()` fix has no Linux counterpart (Linux uses the host
+`poll()`, and the ~2.7 s runtime is already the loopback servers' own
+bounded shutdown wait, not a timeout-accounting artifact). The regressions
+named above ran unchanged and green in one pass (14/14): `crtmedia_timing_
+discontinuity_test`, `crtmedia_capture_encode_lifecycle_test` (camera
+present), `crtmedia_encode_mux_test`, `crtmedia_encode_vaapi_test`,
+`crtmedia_hw_decode_{,flush_,lifecycle_}test`, `crtmedia_zero_copy_test`,
+the Tranche 1-3 tests, and the extractor tests. Full in-tree `ctest`:
+143/144 (the one failure is the pre-existing no-sound-card
+`crtmedia_playback_pipeline_test_runs` gap, unrelated); tooling tests
+77/77. This tranche is now closed on all three hosts.
 
 ### 5. HTTPS and cross-host acceptance
 
