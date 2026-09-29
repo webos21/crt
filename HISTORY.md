@@ -10,6 +10,57 @@ substantive update.
 
 ## 2026-09-29
 
+- **Networking & Streaming Tranche 6 closed on Windows/x64: lifecycle stress
+  with a native handle audit, and the isolated `04-gfx-media` stage rebuilt
+  with the curl/mbedTLS/zlib chain and an installed HTTP streaming consumer.**
+  `docs/crtmedia_networking_acceptance.md`'s own Tranche 6 section has the
+  full detail.
+
+  New in-tree `crtmedia_http_lifecycle_test` (3 consecutive identical runs,
+  ~13 s): `ok transport=40 extractor=30 reconnect=8 upload=20 tls=15
+  tls_refused=15 handles=147->139`. It cycles every network path in one
+  process -- transport open/read/cancel against a body far larger than the
+  bounded queue (worker genuinely blocked mid-transfer), extractor open/read/
+  release mid-stream, reconnect cycles that survive two server drops and stay
+  byte-exact, upload open/stream/cancel, TLS mid-stream release and refused
+  certificates -- and audits `GetProcessHandleCount()` (Windows) or
+  `/proc/self/fd` + `/proc/self/task` (Linux) or `/dev/fd` (macOS) per
+  scenario and overall. Mutation-checked: skipping the transport `close()`
+  makes it fail (`handle/fd count grew 154 -> 254`). Full in-tree `ctest`:
+  162/162 (one expected no-webcam skip), so local file playback, capture,
+  encode, timing-discontinuity and hardware-decode tests stay green.
+
+  Isolated `04-gfx-media` stage: `tools/build_stage_04_gfx_media.py` now fetches
+  and builds curl (with mbedTLS, zlib and make through its recipe
+  dependencies) as its own cached layer built after FreeType/FFmpeg and Skia,
+  so adding it did not invalidate their multi-hour caches (rerun proof: both
+  reused in ~3 s, curl layer 1446.5 s at -j4). The stage's CMake turns on
+  `CRTMEDIA_ENABLE_CURL` unconditionally (a missing port is an error, never a
+  silent `CRTMEDIA_ERROR_UNSUPPORTED`), runs the whole networking suite from
+  the isolated source asset (transport queue, HTTP input range/chunked, output,
+  reconnect, HTTPS matrix, lifecycle -- 17/17 stage tests), installs the
+  new `examples/media-stream` consumer (public `crtmedia` API only), rebuilds
+  it externally against the packaged SDK and runs it against a real host
+  HTTP/1.1 server (`crtmedia_stream_example: samples=70 ... seekable=1
+  size_known=1`). `verify_dist.py` requires the curl/mbedtls/zlib dependency
+  records, headers, static libs, `crtmedia/tls.h` and the new example;
+  `libcrtmedia.dll`'s imports are unchanged in kind (ole32/MF*/KERNEL32/synch,
+  no ws2_32). Published atomically; every stage phase ok.
+
+  One real packaging gap found by the first isolated run, exactly the class the
+  acceptance doc warned about: `tools/create_stage_source.py` bundled only
+  `freetype.json`/`ffmpeg.json`, so the stage script's fingerprint of
+  `curl.json` died with `FileNotFoundError`. Added the `curl`/`mbedtls`/`zlib`/
+  `make` recipes and (Windows) `mbedtls-windows-exclude-symbols.rsp`. The
+  isolated run also fetches `make` from android.googlesource.com, which was
+  returning HTTP 503 at the time; the already checksum-verified tarballs from
+  the in-tree `port-tests/downloads` were placed in the stage's download cache.
+  The predecessor SDK was regenerated first so it carries the Tranche 4
+  Windows `poll()` fix (stage `crtmedia_http_reconnect_test` 4.05 s instead of
+  ~32 s). `examples/media-stream/CMakeLists.txt`'s Linux branch (static
+  FFmpeg + curl chain + host libva) and macOS path are written but not yet run.
+  Linux/x86_64 and macOS/arm64 replay is next.
+
 - **Networking & Streaming Tranche 5 closed on all three hosts: Linux/x86_64
   replay on the physical Linux host found and fixed one Linux-only test-
   fixture bug (SIGPIPE).** `docs/crtmedia_networking_acceptance.md`'s

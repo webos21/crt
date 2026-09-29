@@ -772,6 +772,64 @@ Tranche 6; do not repeat that gap for networking), rebuild an installed
 HTTP streaming consumer, run `verify_dist.py` plus PE/ELF/Mach-O
 dependency/RPATH checks, and publish only after all three hosts pass.
 
+**Windows/x64 done 2026-09-29.**
+
+*Lifecycle stress.* `crtmedia_http_lifecycle_test` cycles every network path in
+one process and audits native resources around each scenario and overall
+(Windows `GetProcessHandleCount()`, Linux `/proc/self/fd` + `/proc/self/task`,
+macOS `/dev/fd`; a warm-up pass first so one-time library initialization is not
+counted). Real result, 3 identical runs, ~13 s:
+
+```text
+crtmedia_http_lifecycle_test: ok transport=40 extractor=30 reconnect=8
+    upload=20 tls=15 tls_refused=15 handles=147->139 threads=-1->-1
+```
+
+Scenarios: transport open/read/cancel against an 8 MiB body through a 32 KiB
+queue (the worker is blocked mid-transfer at every cancel); extractor
+open/read/release mid-stream; reconnect cycles (server drops twice, resumes,
+result byte-exact vs. the local file, then destroy); upload open/stream/cancel
+without `finish()`; TLS authenticated mid-stream release; refused certificates
+stay refused every cycle. The audit is meaningful: skipping the transport
+`close()` in the test makes it fail (`handle/fd count grew 154 -> 254`). Full
+in-tree `ctest` 162/162 (one expected no-webcam skip), which keeps local file
+playback, capture, encode, timing-discontinuity and hardware-decode tests green
+throughout.
+
+*Isolated `04-gfx-media` stage.* Built from the freshly regenerated Windows
+`03-gfx-simple` SDK with `tools/crt-stage-build.py` (curl layer 1446.5 s at
+`-j4`; FreeType/FFmpeg 2799.5 s and Skia 212 s on the first run, then reused
+from the work-root cache in ~3 s on the rerun, proving the new layer did not
+invalidate them). The stage's CMake enables `CRTMEDIA_ENABLE_CURL`
+unconditionally, so a missing port is an error rather than a silent
+`CRTMEDIA_ERROR_UNSUPPORTED`; it runs the networking suite from the isolated
+source asset (17/17 stage tests including transport queue, HTTP input
+range/chunked, output, reconnect, HTTPS matrix and lifecycle), installs the new
+`examples/media-stream` consumer, and `tools/build_stage_04_gfx_media.py`
+rebuilds it externally against the packaged SDK and runs it against a real host
+HTTP/1.1 server: `crtmedia_stream_example: samples=70 ... seekable=1
+size_known=1`. `verify_dist.py` (extended) requires the curl/mbedtls/zlib
+redistributed-dependency records, headers, static libraries, `crtmedia/tls.h`
+and the example; the PE dependency scan is clean (`libcrtmedia.dll` imports
+ole32/MFPlat/MFReadWrite/MF/KERNEL32/synch only, nothing new). Published
+atomically.
+
+Real gaps found and fixed (the class this section warned about):
+`tools/create_stage_source.py` bundled only `freetype.json`/`ffmpeg.json`, so
+the stage script died reading `curl.json` on the first isolated run; the
+`curl`/`mbedtls`/`zlib`/`make` recipes and (Windows) `mbedtls-windows-exclude-
+symbols.rsp` are now bundled. `tools/crt_dist_prerequisites.py` needed no new
+entry on Windows (curl/mbedTLS/zlib are static, no new runtime library). The
+stage ran with checksum-verified tarballs copied from the in-tree download
+cache because android.googlesource.com was returning HTTP 503 for the `make`
+port at the time.
+
+Linux/x86_64 and macOS/arm64 replay is next, including the Linux (static FFmpeg
++ curl chain + host libva) and macOS branches of
+`examples/media-stream/CMakeLists.txt`, which are written but not yet run.
+Tranche 6 -- and with it this roadmap item -- closes only when all three hosts
+pass.
+
 ## Non-goals for the current tranche
 
 - RTSP, WebRTC, or adaptive streaming (HLS/DASH) -- later consumers of this

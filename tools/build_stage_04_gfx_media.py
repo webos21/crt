@@ -543,6 +543,12 @@ def fetch_port_sources(asset: Path, staged: Path, temp_root: Path,
         "--cache", str(Path(asset).parent / "port-downloads"),
         "--port", "freetype",
         "--port", "ffmpeg",
+        # Networking & Streaming Tranche 6: curl (and, through its recipe
+        # dependencies, mbedtls/zlib/make) is fetched and checksum-verified
+        # here too so add_redistributed_dependencies() can read each
+        # license from a verified checkout; the slow build is a separate,
+        # separately cached layer (build_curl_ports() below).
+        "--port", "curl",
     ], env, asset)
     return source_root
 
@@ -595,6 +601,79 @@ def build_ports(asset: Path, source_root: Path, staged: Path, temp_root: Path,
             str(asset / "libstdc++" / "third_party" / "win32_shim"),
         ]
     run(command, env, asset)
+
+
+def build_curl_ports(asset: Path, source_root: Path, staged: Path, temp_root: Path,
+                     manifest: dict, env: dict[str, str], jobs: int) -> None:
+    """Networking & Streaming Tranche 6: the libcurl -> mbedTLS -> zlib chain
+    crtmedia's HTTP(S) transport links (CRTMEDIA_ENABLE_CURL). Deliberately a
+    separate layer built AFTER FreeType/FFmpeg and Skia, so adding it never
+    invalidates their (multi-hour) caches. Uses a work root of its own: the
+    ports layer's stamps live in port-build/, and crt-port-build.py rebuilds
+    `make` (seconds) per work root."""
+    run([
+        sys.executable, str(staged / "tools" / "crt-port-build.py"),
+        "--sdk-root", str(staged),
+        "--target-os", manifest["target"]["os"],
+        "--target-arch", manifest["target"]["arch"],
+        "--source-root", str(source_root),
+        "--work-root", str(temp_root / "port-build-curl"),
+        "--install-prefix", str(staged),
+        "--jobs", str(jobs),
+        "--port", "curl",
+    ], env, asset)
+
+
+def start_range_http_server(clip: Path):
+    """A tiny host-side HTTP/1.1 server (Range + ETag + Connection: close)
+    for the installed streaming example. Deliberately the *host's* real
+    sockets, so the packaged consumer is exercised against a server that is
+    not CRT code."""
+    import http.server
+    import threading
+
+    data = clip.read_bytes()
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *_args):
+            pass
+
+        def do_GET(self):
+            start = 0
+            status = 200
+            header = self.headers.get("Range")
+            if header and header.startswith("bytes="):
+                start = int(header[len("bytes="):].split("-")[0] or 0)
+                if start >= len(data):
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{len(data)}")
+                    self.send_header("Content-Length", "0")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    return
+                status = 206
+            body = data[start:]
+            self.send_response(status)
+            if status == 206:
+                self.send_header(
+                    "Content-Range", f"bytes {start}-{len(data) - 1}/{len(data)}")
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("ETag", '"crt-stage-clip"')
+            self.send_header("Content-Type", "video/mp4")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            try:
+                self.wfile.write(body)
+            except OSError:
+                pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server
 
 
 def fetch_skia_source(asset: Path, temp_root: Path,
@@ -669,8 +748,13 @@ def add_redistributed_dependencies(asset: Path, staged: Path,
                                    manifest: dict) -> None:
     freetype_source = next(port_sources.glob("freetype-*"), None)
     ffmpeg_source = next(port_sources.glob("ffmpeg-*"), None)
+    curl_source = next(port_sources.glob("curl-*"), None)
+    mbedtls_source = next(port_sources.glob("mbedtls-*"), None)
+    zlib_source = next(port_sources.glob("zlib-*"), None)
     if freetype_source is None or ffmpeg_source is None:
         raise SystemExit("the port driver did not leave verified FreeType/FFmpeg sources")
+    if curl_source is None or mbedtls_source is None or zlib_source is None:
+        raise SystemExit("the port driver did not leave verified curl/mbedtls/zlib sources")
 
     dependencies = [
         copy_dependency_record(
@@ -699,9 +783,32 @@ def add_redistributed_dependencies(asset: Path, staged: Path,
             first_existing(skia_source, ("LICENSE",)),
             ["include/include", "include/modules/skcms"],
             ["lib/libskia.a"], []),
+        # Networking & Streaming Tranche 6: crtmedia's HTTP(S) transport.
+        copy_dependency_record(
+            staged, "curl", asset / "porting" / "recipes" / "curl.json",
+            first_existing(curl_source, ("COPYING", "LICENSES/curl.txt")),
+            ["include/curl"], ["lib/libcurl.a"],
+            existing_relative_files(staged, (
+                "lib/libcurl.so*", "lib/libcurl*.dylib",
+                "bin/libcurl*.dll", "lib/libcurl*.dll.a"))),
+        copy_dependency_record(
+            staged, "mbedtls", asset / "porting" / "recipes" / "mbedtls.json",
+            first_existing(mbedtls_source, ("LICENSE", "LICENSE.md")),
+            ["include/mbedtls", "include/psa"],
+            ["lib/libmbedtls.a", "lib/libmbedx509.a", "lib/libmbedcrypto.a"],
+            existing_relative_files(staged, (
+                "lib/libmbed*.so*", "lib/libmbed*.dylib",
+                "bin/libmbed*.dll", "lib/libmbed*.dll.a"))),
+        copy_dependency_record(
+            staged, "zlib", asset / "porting" / "recipes" / "zlib.json",
+            first_existing(zlib_source, ("LICENSE", "README")),
+            ["include/zlib.h", "include/zconf.h"], ["lib/libz.a"],
+            existing_relative_files(staged, (
+                "lib/libz.so*", "lib/libz*.dylib", "bin/libz*.dll", "lib/libz*.dll.a"))),
     ]
     retained = [item for item in manifest.get("redistributed_dependencies", [])
-                if item.get("name") not in {"freetype", "ffmpeg", "skia"}]
+                if item.get("name") not in {"freetype", "ffmpeg", "skia",
+                                            "curl", "mbedtls", "zlib"}]
     manifest["redistributed_dependencies"] = retained + dependencies
 
 
@@ -1027,6 +1134,48 @@ def main() -> None:
                     capture_install_layer(staged, before_skia, skia_layer)
                     skia_marker.write_text(skia_key, encoding="utf-8")
 
+        # Networking & Streaming Tranche 6: the curl -> mbedTLS -> zlib layer,
+        # keyed from the post-Skia staged content plus its own recipes, so it
+        # rebuilds only when it (or anything below it) changed.
+        curl_inputs_key = fingerprint([
+            build_asset / "porting" / "recipes" / "curl.json",
+            build_asset / "porting" / "recipes" / "mbedtls.json",
+            build_asset / "porting" / "recipes" / "zlib.json",
+            build_asset / "porting" / "recipes" / "make.json",
+        ] + ([build_asset / "porting" / "recipes" /
+              "mbedtls-windows-exclude-symbols.rsp"]
+             if target_os == "windows" else []))
+        with timings.measure("fingerprint installed FreeType/FFmpeg/Skia layer"):
+            curl_key = inventory_fingerprint(
+                tree_inventory(staged)) + "-" + curl_inputs_key
+        curl_layer = cache_dir / "curl-layer"
+        curl_marker = cache_dir / "curl.key"
+        curl_cached = (
+            args.reuse_work_root and curl_layer.is_dir() and
+            (curl_layer / ".layer.json").is_file() and
+            curl_marker.is_file() and
+            curl_marker.read_text(encoding="utf-8").strip() == curl_key and
+            install_layer_valid(curl_layer))
+        if curl_cached:
+            with timings.measure("reuse cached curl/mbedTLS/zlib install"):
+                apply_install_layer(curl_layer, staged)
+                print(f"+ [work-root cache] reusing curl/mbedTLS/zlib install "
+                      f"layer in {staged} (key {curl_key})", flush=True)
+        else:
+            before_curl = tree_inventory(staged) if args.reuse_work_root else {}
+            curl_build_root = temp_root / "port-build-curl"
+            if curl_build_root.exists():
+                remove_tree(curl_build_root)
+            with timings.measure(
+                    f"build and install curl/mbedTLS/zlib (-j{args.dependency_jobs})"):
+                build_curl_ports(build_asset, port_sources, staged, temp_root,
+                                 manifest, env, args.dependency_jobs)
+            if args.reuse_work_root:
+                with timings.measure("capture curl/mbedTLS/zlib install layer"):
+                    cache_dir.mkdir(parents=True, exist_ok=True)
+                    capture_install_layer(staged, before_curl, curl_layer)
+                    curl_marker.write_text(curl_key, encoding="utf-8")
+
         build_dir = temp_root / "gfx-media-build"
         if build_dir.exists():
             remove_tree(build_dir)
@@ -1040,6 +1189,7 @@ def main() -> None:
             f"-DCRT_STAGE_SKIA_PREFIX={cmake_path(staged)}",
             f"-DCRT_STAGE_FREETYPE_PREFIX={cmake_path(staged)}",
             f"-DCRT_STAGE_FFMPEG_PREFIX={cmake_path(staged)}",
+            f"-DCRT_STAGE_CURL_PREFIX={cmake_path(staged)}",
         ]
         if mingw_checkout is not None:
             configure.append(
@@ -1150,6 +1300,23 @@ def main() -> None:
                 success_marker=("crtmedia_player_demo: presented=30",
                                  "crtmedia_player_demo: hardware_decode=" +
                                  ("yes" if expect_hardware else "no")))
+        with timings.measure("rebuild and run installed media-stream example"):
+            # Networking & Streaming Tranche 6: an installed, externally
+            # rebuilt HTTP streaming consumer (public crtmedia API only)
+            # against a real host HTTP/1.1 server. samples=70 is the clip's
+            # real track content (identical to every in-tree extraction).
+            clip = staged / "examples" / "media-player" / "test_video.mp4"
+            stream_server = start_range_http_server(clip)
+            try:
+                build_example(
+                    staged, temp_root, "media-stream", "crtmedia_stream_example",
+                    env,
+                    run_args=[f"http://127.0.0.1:{stream_server.server_address[1]}/test_video.mp4"],
+                    success_marker=("crtmedia_stream_example: samples=70 ",
+                                    "seekable=1 size_known=1"))
+            finally:
+                stream_server.shutdown()
+                stream_server.server_close()
         with timings.measure("run packaged zero-copy media bridge acceptance"):
             expected_interop = "gpu-copy" if target_os == "windows" else "zero-copy"
             run_packaged_binary_smoke(

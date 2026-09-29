@@ -1711,6 +1711,50 @@ if(CRTMEDIA_ENABLE_FFMPEG)
       TIMEOUT 120
     )
     set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_https_test_runs)
+
+    # Networking & Streaming Tranche 6: connect/stream/cancel/reconnect/
+    # destroy lifecycle stress with a native handle/fd/thread audit.
+    add_executable(crtmedia_http_lifecycle_test
+      ${CRT_STARTUP_OBJECTS}
+      tests/http_lifecycle_test.c
+      tests/tls_test_server.c
+      tests/http_test_server.c
+      tests/http_upload_test_server.c
+    )
+    target_link_libraries(crtmedia_http_lifecycle_test PRIVATE crt_build_flags crtmedia)
+    target_include_directories(crtmedia_http_lifecycle_test PRIVATE
+      "${CMAKE_SOURCE_DIR}/libc/include" "${CMAKE_CURRENT_SOURCE_DIR}/src"
+      "${CRTMEDIA_CURL_PORT_PREFIX}/include"
+    )
+    target_compile_definitions(crtmedia_http_lifecycle_test PRIVATE
+      CRTMEDIA_TEST_VIDEO_PATH="${CMAKE_SOURCE_DIR}/libcrtmedia/assets/test_video.mp4"
+    )
+    target_link_libraries(crtmedia_http_lifecycle_test PRIVATE crt_compiler_rt_builtins)
+    target_link_options(crtmedia_http_lifecycle_test PRIVATE
+      -nostdlib
+      -nostartfiles
+      -nodefaultlibs
+    )
+    if(CRT_TARGET_OS STREQUAL "macos")
+      target_link_options(crtmedia_http_lifecycle_test PRIVATE -Wl,-e,_start -Wl,-dead_strip)
+      target_link_libraries(crtmedia_http_lifecycle_test PRIVATE c m dl cxx)
+      target_link_libraries(crtmedia_http_lifecycle_test PRIVATE System)
+    elseif(CRT_TARGET_OS STREQUAL "linux")
+      target_link_options(crtmedia_http_lifecycle_test PRIVATE -Wl,-e,_start -Wl,--gc-sections)
+    elseif(CRT_TARGET_OS STREQUAL "windows")
+      target_link_options(crtmedia_http_lifecycle_test PRIVATE
+        -Wl,/entry:mainCRTStartup -Wl,/subsystem:console -Wl,/OPT:REF)
+      target_link_libraries(crtmedia_http_lifecycle_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+    endif()
+    crt_link_startup_end_objects(crtmedia_http_lifecycle_test)
+    add_dependencies(crtmedia_http_lifecycle_test c crt1 crtmedia)
+    add_test(NAME crtmedia_http_lifecycle_test_runs COMMAND crtmedia_http_lifecycle_test)
+    set_tests_properties(crtmedia_http_lifecycle_test_runs PROPERTIES
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+      PASS_REGULAR_EXPRESSION "crtmedia_http_lifecycle_test: ok"
+      TIMEOUT 300
+    )
+    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_http_lifecycle_test_runs)
   endif()
 
   # crtmedia_hw_decode_test: TODO.md's "hardware decode, phase A" step

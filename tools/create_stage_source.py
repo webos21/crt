@@ -247,6 +247,7 @@ STAGES = {
             "libcrtmedia/tests/http_output_test.c",
             "libcrtmedia/tests/http_reconnect_test.c",
             "libcrtmedia/tests/https_test.c",
+            "libcrtmedia/tests/http_lifecycle_test.c",
             "libcrtmedia/tests/tls_test_server.c",
             "libcrtmedia/tests/tls_test_server.h",
             "libcrtmedia/tests/test_socket_flags.h",
@@ -261,13 +262,28 @@ STAGES = {
             "libcrtmedia/assets/test_video.mp4",
             "porting/recipes/freetype.json",
             "porting/recipes/ffmpeg.json",
+            # Networking & Streaming Tranche 6: the curl -> mbedTLS -> zlib
+            # chain crtmedia's HTTP(S) transport links. The stage script
+            # fingerprints these and records them as dependency provenance;
+            # found missing for real by the first isolated run (FileNotFound
+            # on curl.json), the same class of registry gap as the earlier
+            # capture_mf.c / videotoolbox-shim ones.
+            "porting/recipes/curl.json",
+            "porting/recipes/mbedtls.json",
+            "porting/recipes/zlib.json",
+            "porting/recipes/make.json",
             "examples/README.md",
             "examples/gfx-gpu/CMakeLists.txt",
             "examples/gfx-skia/CMakeLists.txt",
             "examples/media-player/CMakeLists.txt",
+            "examples/media-stream/CMakeLists.txt",
+            "examples/media-stream/main.c",
         ),
         "project_paths_by_os": {
             "windows": (
+                # mbedtls.json's Windows LDFLAGS references this response
+                # file by its repo-relative path (@ROOT@-substituted).
+                "porting/recipes/mbedtls-windows-exclude-symbols.rsp",
                 "libcrtgfx/src/arch/windows/gpu_win32.c",
                 # libcrtgfx/src/gpu.c #includes this directly; missing here
                 # produced "file not found" isolated-stage build failures

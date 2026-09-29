@@ -102,16 +102,14 @@ consumers, not completion gates for this tranche.
   Windows/x64, macOS/arm64, and Linux/x86_64; implementation, the Linux-only
   fixture `SIGPIPE` finding, and complete acceptance evidence are recorded in
   `HISTORY.md` and `docs/crtmedia_networking_acceptance.md`.
-* [ ] **6. Close lifecycle and isolated-package acceptance.** Stress
-  repeated connect/stream/cancel/reconnect/destroy cycles, audit sockets/
-  threads/native handles, keep local file playback plus capture/encode
-  green. Rebuild the isolated `04-gfx-media` stage with every new private
-  dependency/prerequisite declared (`tools/create_stage_source.py`,
-  `tools/crt_dist_prerequisites.py` -- both had real, silently stale
-  registries found closing Encode & Capture Tranche 6; do not repeat that),
-  rebuild an installed HTTP streaming consumer, run `verify_dist.py` plus
-  PE/ELF/Mach-O dependency/RPATH checks, and publish only after all three
-  hosts pass.
+* [ ] **6. Close lifecycle and isolated-package acceptance.** Windows/x64
+  done 2026-09-29, recorded in `HISTORY.md`: `crtmedia_http_lifecycle_test`
+  (connect/stream/cancel/reconnect/destroy stress with a native handle/fd/
+  thread audit) and the isolated `04-gfx-media` stage rebuilt with curl/
+  mbedTLS/zlib, the whole networking suite (17/17 stage tests), an installed
+  `examples/media-stream` consumer, `verify_dist.py` and atomic publication.
+  Linux/x86_64 and macOS/arm64 replay (including the Linux/macOS branches of
+  `examples/media-stream`) is next; publish only after all three hosts pass.
 
 ## Planned
 

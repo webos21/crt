@@ -3,7 +3,7 @@ project(crt_stage_04_gfx_media C CXX)
 
 foreach(required CRT_STAGE_SOURCE_ROOT CRT_STAGE_TARGET_OS
                  CRT_STAGE_FFMPEG_PREFIX CRT_STAGE_FREETYPE_PREFIX
-                 CRT_STAGE_SKIA_PREFIX)
+                 CRT_STAGE_SKIA_PREFIX CRT_STAGE_CURL_PREFIX)
   if(NOT DEFINED ${required})
     message(FATAL_ERROR "${required} is required")
   endif()
@@ -18,6 +18,11 @@ endif()
 set(CRT_TARGET_OS "${CRT_STAGE_TARGET_OS}")
 set(CRTGFX_ENABLE_SKIA ON)
 set(CRTMEDIA_ENABLE_FFMPEG ON)
+# Networking & Streaming (Tranche 6): the HTTP(S) input/output transport is
+# part of this stage too, so a missing curl/mbedTLS/zlib port is an error, not
+# a reason to ship a crtmedia whose *_from_url()/*_for_url() entry points
+# silently return CRTMEDIA_ERROR_UNSUPPORTED.
+set(CRTMEDIA_ENABLE_CURL ON)
 set(CRT_USE_IMPORTED_LIBCXX ON)
 set(CRT_LIBCXX_SYSROOT "${CMAKE_SYSROOT}")
 set(CRTGFX_ROOT "${CRT_STAGE_SOURCE_ROOT}/libcrtgfx")
@@ -49,11 +54,29 @@ foreach(required_file
     "${CRT_STAGE_FFMPEG_PREFIX}/lib/libavformat.a"
     "${CRT_STAGE_FFMPEG_PREFIX}/lib/libavcodec.a"
     "${CRT_STAGE_FFMPEG_PREFIX}/lib/libswresample.a"
-    "${CRT_STAGE_FFMPEG_PREFIX}/lib/libavutil.a")
+    "${CRT_STAGE_FFMPEG_PREFIX}/lib/libavutil.a"
+    "${CRT_STAGE_CURL_PREFIX}/include/curl/curl.h"
+    "${CRT_STAGE_CURL_PREFIX}/include/mbedtls/ssl.h"
+    "${CRT_STAGE_CURL_PREFIX}/lib/libcurl.a"
+    "${CRT_STAGE_CURL_PREFIX}/lib/libmbedtls.a"
+    "${CRT_STAGE_CURL_PREFIX}/lib/libmbedx509.a"
+    "${CRT_STAGE_CURL_PREFIX}/lib/libmbedcrypto.a"
+    "${CRT_STAGE_CURL_PREFIX}/lib/libz.a")
   if(NOT EXISTS "${required_file}")
     message(FATAL_ERROR "required 04-gfx-media dependency is missing: ${required_file}")
   endif()
 endforeach()
+
+# curl -> mbedtls -> mbedx509 -> mbedcrypto -> z, same order as
+# libcrtmedia/CMakeLists.txt's own CRTMEDIA_CURL_LIBRARIES.
+set(CRTMEDIA_CURL_PORT_PREFIX "${CRT_STAGE_CURL_PREFIX}")
+set(CRTMEDIA_CURL_LIBRARIES
+  "${CRT_STAGE_CURL_PREFIX}/lib/libcurl.a"
+  "${CRT_STAGE_CURL_PREFIX}/lib/libmbedtls.a"
+  "${CRT_STAGE_CURL_PREFIX}/lib/libmbedx509.a"
+  "${CRT_STAGE_CURL_PREFIX}/lib/libmbedcrypto.a"
+  "${CRT_STAGE_CURL_PREFIX}/lib/libz.a"
+)
 
 set(CRTMEDIA_FFMPEG_PORT_PREFIX "${CRT_STAGE_FFMPEG_PREFIX}")
 set(CRTMEDIA_FFMPEG_LIBRARIES
@@ -684,6 +707,47 @@ crt_stage_add_c_test(crtmedia_demux_test "${CRTMEDIA_ROOT}/tests/demux_decode_te
 target_compile_definitions(crtmedia_demux_test PRIVATE
   "CRTMEDIA_TEST_WAV_PATH=\"${CRTMEDIA_ROOT}/assets/test_tone.wav\"")
 
+
+# Networking & Streaming Tranches 1-6, run from the isolated source asset
+# against the freshly ported curl/mbedTLS/zlib: the bounded transport queue,
+# HTTP input (Range and chunked fixtures), HTTP upload, reconnect, the HTTPS
+# trust-policy matrix (in-memory PKI, so it needs mbedTLS's own headers), and
+# the connect/stream/cancel/reconnect/destroy lifecycle stress with its native
+# handle/fd/thread audit. Private headers live in libcrtmedia/src.
+function(crt_stage_add_net_test target expected)
+  add_executable(${target} ${ARGN})
+  target_compile_options(${target} PRIVATE ${stage_c_options})
+  target_include_directories(${target} PRIVATE
+    "${CRTMEDIA_ROOT}/include" "${CRTMEDIA_ROOT}/src"
+    "${CRT_STAGE_CURL_PREFIX}/include")
+  target_compile_definitions(${target} PRIVATE
+    "CRTMEDIA_TEST_VIDEO_PATH=\"${CRTMEDIA_ROOT}/assets/test_video.mp4\""
+    "CRTMEDIA_TEST_HTTP_CHUNKED_FIXTURE_PATH=\"${CMAKE_CURRENT_BINARY_DIR}/${target}_fixture.mp4\""
+    "CRTMEDIA_TEST_HTTP_OUTPUT_PATH=\"${CMAKE_CURRENT_BINARY_DIR}/${target}_output.mp4\"")
+  target_link_libraries(${target} PRIVATE crtmedia)
+  crt_stage_register_test(${target}_runs ${target} "${expected}")
+  set_tests_properties(${target}_runs PROPERTIES TIMEOUT 300)
+endfunction()
+
+set(CRT_STAGE_NET_TESTS "${CRTMEDIA_ROOT}/tests")
+crt_stage_add_net_test(crtmedia_transport_queue_test "crtmedia_transport_queue_test: ok"
+  "${CRT_STAGE_NET_TESTS}/transport_queue_test.c")
+crt_stage_add_net_test(crtmedia_http_input_range_test "crtmedia_http_input_range_test: ok"
+  "${CRT_STAGE_NET_TESTS}/http_input_range_test.c" "${CRT_STAGE_NET_TESTS}/http_test_server.c")
+crt_stage_add_net_test(crtmedia_http_input_chunked_test "crtmedia_http_input_chunked_test: ok"
+  "${CRT_STAGE_NET_TESTS}/http_input_chunked_test.c" "${CRT_STAGE_NET_TESTS}/http_test_server.c")
+crt_stage_add_net_test(crtmedia_http_output_test "crtmedia_http_output_test: ok samples=90 frames=90"
+  "${CRT_STAGE_NET_TESTS}/http_output_test.c" "${CRT_STAGE_NET_TESTS}/http_upload_test_server.c")
+crt_stage_add_net_test(crtmedia_http_reconnect_test "crtmedia_http_reconnect_test: ok"
+  "${CRT_STAGE_NET_TESTS}/http_reconnect_test.c" "${CRT_STAGE_NET_TESTS}/http_test_server.c"
+  "${CRT_STAGE_NET_TESTS}/http_upload_test_server.c")
+crt_stage_add_net_test(crtmedia_https_test "crtmedia_https_test: ok"
+  "${CRT_STAGE_NET_TESTS}/https_test.c" "${CRT_STAGE_NET_TESTS}/tls_test_server.c"
+  "${CRT_STAGE_NET_TESTS}/http_test_server.c" "${CRT_STAGE_NET_TESTS}/http_upload_test_server.c")
+crt_stage_add_net_test(crtmedia_http_lifecycle_test "crtmedia_http_lifecycle_test: ok"
+  "${CRT_STAGE_NET_TESTS}/http_lifecycle_test.c" "${CRT_STAGE_NET_TESTS}/tls_test_server.c"
+  "${CRT_STAGE_NET_TESTS}/http_test_server.c" "${CRT_STAGE_NET_TESTS}/http_upload_test_server.c")
+
 # Tranche 5 lower-layer regression: hardware GPU-frame delivery plus the
 # independent software-only/CPU-resident dequeue path, built from the isolated
 # source asset rather than inherited from the repository build.
@@ -974,3 +1038,9 @@ install(FILES "${CRTMEDIA_ROOT}/assets/test_video.mp4"
   DESTINATION examples/media-player)
 install(FILES "${CRT_STAGE_SOURCE_ROOT}/examples/media-player/CMakeLists.txt"
   DESTINATION examples/media-player)
+# examples/media-stream: an installed HTTP(S) streaming consumer built only on
+# crtmedia's public API; tools/build_stage_04_gfx_media.py rebuilds it
+# externally and runs it against a real loopback HTTP server.
+install(FILES "${CRT_STAGE_SOURCE_ROOT}/examples/media-stream/main.c"
+              "${CRT_STAGE_SOURCE_ROOT}/examples/media-stream/CMakeLists.txt"
+  DESTINATION examples/media-stream)

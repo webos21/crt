@@ -344,7 +344,7 @@ def main() -> None:
             # The isolated transition is deliberately option-ON, unlike the
             # ordinary cumulative packaging target that shares this stage
             # label and remains default-OFF for Skia/FFmpeg.
-            for name in ("freetype", "ffmpeg", "skia"):
+            for name in ("freetype", "ffmpeg", "skia", "curl", "mbedtls", "zlib"):
                 if name not in redistributed:
                     raise SystemExit(
                         f"isolated 04-gfx-media does not declare its {name} dependency")
@@ -361,7 +361,13 @@ def main() -> None:
                     "lib/libavformat.a", "lib/libavcodec.a",
                     "lib/libswresample.a", "lib/libavutil.a",
                     "lib/libskia.a",
-                    "include/crtgfx/skia.h"):
+                    "include/crtgfx/skia.h",
+                    # Networking & Streaming Tranche 6: crtmedia's HTTP(S)
+                    # transport chain and its public TLS-policy header.
+                    "include/curl/curl.h", "include/mbedtls/ssl.h",
+                    "include/crtmedia/tls.h",
+                    "lib/libcurl.a", "lib/libmbedtls.a",
+                    "lib/libmbedx509.a", "lib/libmbedcrypto.a", "lib/libz.a"):
                 require(dist / relative)
             # FFmpeg is present here, so the playback example that needs it
             # must ship too (source, clip, standalone project, prebuilt
@@ -370,6 +376,9 @@ def main() -> None:
             for relative in ("CMakeLists.txt", "main.c", "test_video.mp4"):
                 require(dist / "examples" / "media-player" / relative)
             require(dist / "examples" / "bin" / f"crtmedia_player_demo{suffix}")
+            # The installed HTTP(S) streaming consumer (source + project).
+            for relative in ("CMakeLists.txt", "main.c"):
+                require(dist / "examples" / "media-stream" / relative)
             require_any(dist / "lib", ("libcrtgfx_gpu.a",), "static crtgfx_gpu")
             require_any(dist / "lib", ("libcrtgfx_skia.a",), "static crtgfx_skia")
             require_any(dist / "lib", ("libcrtmedia.a",), "static crtmedia")
