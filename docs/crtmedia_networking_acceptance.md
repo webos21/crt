@@ -490,8 +490,44 @@ An exploratory WSL replay was deliberately stopped at the maintainer's
 request and is not acceptance evidence: that old build tree first exposed a
 stale pre-encode FFmpeg cache, and rebuilding it would still not provide the
 real Linux media-device boundary required for this stage. Replay the exact
-source on the physical Linux device instead; macOS/arm64 remains the other
-required host before this tranche is checked complete in `TODO.md`.
+source on the physical Linux device instead.
+
+**macOS/arm64 done 2026-09-29.** Same, unmodified source. `CRTMEDIA_ENABLE_
+CURL=ON` against the curl/mbedTLS/zlib stack already built in this tree
+during Tranche 2's own macOS work (no new port build needed). Real result
+across 4 consecutive runs, identical every time: `crtmedia_http_output_test:
+ok samples=90 frames=90 bytes=1034862 queue_capacity=4096
+slow_receiver_ms=...`. The byte count (1,034,862 vs. Windows' 1,034,884) is
+an expected, honest per-host difference -- fragmented-MP4 box sizes are not
+byte-identical across FFmpeg builds/hosts -- and is not itself part of the
+acceptance bar; the sample/frame count (90/90), exact-PTS checks, and
+bounded first/last content checks all matched exactly, and the test's own
+`ok` line is what actually gates acceptance. Ran together with the existing
+transport-queue, HTTP range/chunked input, and extractor regressions with no
+interference. Full in-tree `ctest`: 149/149 (one expected `crtmedia_
+capture_avfoundation_test` camera-authorization skip, `docs/crtmedia_
+encode_capture_acceptance.md`'s own Tranche 4A finding, unrelated to
+networking).
+
+A real, host-independent packaging gap surfaced running the tooling test
+suite (`tools/test_stage_source_closure.py`), not specific to macOS:
+`extractor.c`/`muxer.c` now unconditionally `#include "http_avio.h"`/
+`"http_upload.h"` (the header/API surface always compiles; only the `.c`
+implementation and actual behavior are gated on `CRTMEDIA_ENABLE_CURL`),
+but neither those headers, `transport_queue.{c,h}`, `http_transport.{c,h}`,
+`http_upload.c`, nor any of the new Tranche 1-3 test files had ever been
+added to `tools/create_stage_source.py`'s file registry -- the identical
+class of gap Encode & Capture Tranche 6 found repeatedly, now recurring for
+Networking's own new files, on all three hosts equally. Fixed by adding all
+of them, following the same "bundle unconditionally, let the isolated
+stage's own CMake decide whether to actually compile it" precedent already
+used for `capture_mf.c`/`capture_avfoundation.c` -- no isolated stage passes
+`--enable-curl` yet (that wiring is this tranche's own Tranche 6 item), so
+the three `http_*.c` implementation files are currently inert there, not yet
+exercised. Full tooling test suite: 77/77 after the fix.
+
+Linux/x86_64 replay of this same, unmodified source remains before this
+tranche is checked complete in `TODO.md`.
 
 ### 4. Reconnect and discontinuity
 

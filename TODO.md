@@ -96,9 +96,23 @@ consumers, not completion gates for this tranche.
   acceptance are complete (2026-09-29): 90 samples/frames, 1,034,884-byte
   fragmented MP4 through a 4 KiB hard queue into a deliberately slow
   loopback PUT receiver, then exact decode-back; full Windows CTest 159/159
-  with one expected camera skip. Keep this item open until the unchanged
-  source passes on physical Linux and macOS. WSL is deliberately not the
-  Linux acceptance host for this media tranche.
+  with one expected camera skip.
+  **macOS/arm64 done 2026-09-29:** same unmodified source, `CRTMEDIA_ENABLE_
+  CURL=ON` against the curl/mbedTLS/zlib stack already built in this tree
+  (Tranche 2's own macOS work); identical semantics across 4 consecutive
+  runs (`ok samples=90 frames=90 bytes=1034862 queue_capacity=4096
+  slow_receiver_ms=...` -- byte count differs slightly from Windows'
+  1,034,884, an expected per-host fragmented-MP4-box-size difference, never
+  the sample/frame count). Also found and fixed a real, host-independent
+  `tools/create_stage_source.py` registry gap the Windows implementation
+  introduced: `extractor.c`/`muxer.c` now unconditionally `#include
+  "http_avio.h"`/`"http_upload.h"`, but neither those headers nor any of
+  the new Tranche 1-3 networking source/test files were ever added to the
+  stage-source registry, so `tools/test_stage_source_closure.py` failed on
+  all three hosts, not just macOS. Full in-tree `ctest`: 149/149 (1
+  expected camera skip); full tooling test suite: 77/77. Keep this item
+  open until the unchanged source passes on physical Linux. WSL is
+  deliberately not the Linux acceptance host for this media tranche.
 * [ ] **4. Define reconnect and discontinuity behavior.** `Range` +
   `If-Range`/entity-validator resume only when all three response checks
   pass (`206`, `Content-Range` start, matching validator); output never

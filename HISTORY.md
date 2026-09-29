@@ -10,6 +10,39 @@ substantive update.
 
 ## 2026-09-29
 
+- **Networking & Streaming Tranche 3 replayed on macOS/arm64: unmodified
+  source, identical semantics, plus a real host-independent
+  `create_stage_source.py` registry gap found and fixed.** `docs/crtmedia_
+  networking_acceptance.md`'s own Tranche 3 section has the full detail.
+
+  `crtmedia_http_output_test` passed with no code changes, using the curl/
+  mbedTLS/zlib stack already built in this tree during Tranche 2's own
+  macOS work (`CRTMEDIA_ENABLE_CURL=ON`, no new port build needed). Real
+  result across 4 consecutive runs, identical every time: `ok samples=90
+  frames=90 bytes=1034862 queue_capacity=4096 slow_receiver_ms=...`. The
+  byte count differs from Windows' 1,034,884 (an expected, honest per-host
+  fragmented-MP4 box-size difference, not a regression -- sample/frame
+  count, exact-PTS, and bounded-content checks all matched). Full in-tree
+  `ctest`: 149/149 (one expected, already-documented camera-authorization
+  skip).
+
+  Running the tooling test suite surfaced a real, host-independent (not
+  macOS-specific) gap: `tools/test_stage_source_closure.py` failed on all
+  three hosts because `extractor.c`/`muxer.c` now unconditionally
+  `#include "http_avio.h"`/`"http_upload.h"` (Tranche 2/3's own additions),
+  but neither those headers nor any of the new Networking Tranche 1-3
+  source/test files (`transport_queue.{c,h}`, `http_avio.{c,h}`,
+  `http_transport.{c,h}`, `http_upload.{c,h}`, and their test files) had
+  ever been added to `tools/create_stage_source.py`'s file registry -- the
+  same recurring class of gap Encode & Capture Tranche 6 found repeatedly
+  for its own new files. Fixed by adding all of them, bundled
+  unconditionally (matching `capture_mf.c`/`capture_avfoundation.c`'s own
+  precedent -- no isolated stage passes `--enable-curl` yet, so the three
+  `http_*.c` implementation files are currently inert there). Full tooling
+  test suite: 77/77 after the fix.
+
+  Linux/x86_64 replay of this same, unmodified source remains.
+
 - **Networking & Streaming Tranche 3 implemented and accepted on Windows/
   x64: bounded fragmented-MP4 HTTP output, slow-receiver back-pressure, and
   exact decode-back.** `crtmedia_muxer_create_for_url()` is the additive

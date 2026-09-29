@@ -172,6 +172,31 @@ STAGES = {
             # down explains; found for real by tools/test_stage_source_
             # closure.py itself once capture_avfoundation.c was added.
             "libcrtmedia/src/capture_avfoundation_test_control.h",
+            # Networking & Streaming Tranches 1-3 (docs/crtmedia_networking_
+            # acceptance.md): found missing here for real (2026-09-29,
+            # verifying Tranche 3 on macOS) the same way every other
+            # networking/encode-capture gap in this registry was found --
+            # tools/test_stage_source_closure.py failed on all three hosts
+            # because extractor.c/muxer.c now #include "http_avio.h"/
+            # "http_upload.h" unconditionally (the header/API surface always
+            # compiles; only the .c implementation and actual behavior are
+            # gated on CRTMEDIA_ENABLE_CURL -- see cmake/crtmedia_
+            # targets.cmake's own comment). transport_queue.c is core, never
+            # gated at all (Tranche 1). The three http_*.c implementation
+            # files are bundled unconditionally too, matching capture_mf.c/
+            # capture_avfoundation.c's own "bundle now, an isolated stage's
+            # own CMake decides whether to actually compile it" precedent --
+            # no isolated stage passes --enable-curl yet (that wiring is
+            # Networking Tranche 6's own job), so these are currently inert
+            # there, not yet exercised.
+            "libcrtmedia/src/transport_queue.c",
+            "libcrtmedia/src/transport_queue.h",
+            "libcrtmedia/src/http_avio.c",
+            "libcrtmedia/src/http_avio.h",
+            "libcrtmedia/src/http_transport.c",
+            "libcrtmedia/src/http_transport.h",
+            "libcrtmedia/src/http_upload.c",
+            "libcrtmedia/src/http_upload.h",
             "libcrtmedia/src/demux.c",
             "libcrtmedia/src/extractor.c",
             "libcrtmedia/src/codec.c",
@@ -214,6 +239,16 @@ STAGES = {
             "libcrtmedia/tests/capture_mf_test.c",
             "libcrtmedia/tests/timing_discontinuity_test.c",
             "libcrtmedia/tests/capture_encode_lifecycle_test.c",
+            # Networking & Streaming Tranches 1-3 test files -- same
+            # bundle-unconditionally precedent as the block just above.
+            "libcrtmedia/tests/transport_queue_test.c",
+            "libcrtmedia/tests/http_input_range_test.c",
+            "libcrtmedia/tests/http_input_chunked_test.c",
+            "libcrtmedia/tests/http_output_test.c",
+            "libcrtmedia/tests/http_test_server.c",
+            "libcrtmedia/tests/http_test_server.h",
+            "libcrtmedia/tests/http_upload_test_server.c",
+            "libcrtmedia/tests/http_upload_test_server.h",
             "libcrtmedia/assets/test_tone.wav",
             # examples/media-player: the playback demo (installed as its
             # main.c), its clip, and the standalone example project.
