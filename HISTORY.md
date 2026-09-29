@@ -10,6 +10,39 @@ substantive update.
 
 ## 2026-09-29
 
+- **Networking & Streaming Tranche 2 closed on all three hosts: Linux/
+  x86_64 passed both progressive-HTTP fixtures and exposed two real static/
+  shared link-closure bugs.** The local CRT curl dependency stack was built
+  first; its static and shared HTTP/HTTPS round trips both passed
+  (`curl_http_roundtrip_test: ok http=200 https=200`). Enabling
+  `CRTMEDIA_ENABLE_CURL=ON` then reproduced a Linux-only final-link failure:
+  `libcurl.a` introduced `basename()` after the existing CRT+FFmpeg archive
+  group had closed, so GNU ld did not rescan this project's `libc.a` and
+  instead diagnosed a host-glibc `DSO missing from command line`. The static
+  `crtmedia` dependency closure now keeps CRT, FFmpeg, curl, mbedTLS, and zlib
+  in one rescan group; the same curl chain was added to the player demo's
+  explicit all-static group. The resulting HTTP test binary defines
+  `basename` from this CRT rather than leaving a host symbol unresolved.
+
+  A full build exposed the complementary shared-target problem:
+  `libcrtmedia.so` had been folding the non-PIC Linux `libz.a` into a shared
+  object. Linux `crtmedia_shared` now links the already-produced shared
+  `libcurl.so`, whose own dependency metadata carries mbedTLS and zlib,
+  while the static target retains the intentional all-static closure.
+  Both `libcrtmedia.so` and the on-screen player demo now build successfully
+  with HTTP input enabled.
+
+  Real acceptance results: `crtmedia_http_input_range_test` 3/3 (validated
+  `206`/`Content-Range`, regular MP4 decode, real seek-via-reconnect),
+  `crtmedia_http_input_chunked_test` 3/3 (non-seekable chunked fragmented
+  MP4), local `crtmedia_extractor_codec_test` 3/3, and the complete bounded
+  queue regression 5/5 including sticky-error behavior. Full in-tree CTest:
+  141/142; both HTTP tests passed. The sole failure is the same pre-existing
+  `crtmedia_playback_pipeline_test_runs` real-wall-time pacing check already
+  recorded during Tranche 1 on this host, which still has no sound card
+  (`aplay -l`: `no soundcards found`), and is unrelated to networking.
+  Tranche 2 is now closed on Linux/x86_64, macOS/arm64, and Windows/x64.
+
 - **Networking & Streaming Tranche 2 replayed on macOS/arm64: both
   progressive-HTTP paths pass unchanged, and a later macOS wrapper RPATH
   regression was found and fixed.** The CRT dependency stack was rebuilt

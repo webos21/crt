@@ -4,7 +4,9 @@
 #
 # The caller provides CRTMEDIA_ROOT, CRTMEDIA_BACKEND_SOURCES,
 # CRTMEDIA_ENABLE_FFMPEG, CRTMEDIA_FFMPEG_PORT_PREFIX,
-# CRTMEDIA_FFMPEG_LIBRARIES, CRTMEDIA_CRT_STATIC_LIBS,
+# CRTMEDIA_FFMPEG_LIBRARIES, CRTMEDIA_ENABLE_CURL,
+# CRTMEDIA_CURL_PORT_PREFIX, CRTMEDIA_CURL_LIBRARIES,
+# CRTMEDIA_CURL_SHARED_LIBRARIES, CRTMEDIA_CRT_STATIC_LIBS,
 # CRTMEDIA_CRT_SHARED_LIBS, CRTMEDIA_LINUX_VAAPI_LIBS, and the platform
 # library variables used below.
 function(crt_add_crtmedia_targets)
@@ -132,12 +134,21 @@ function(crt_add_crtmedia_targets)
     target_link_libraries(crtmedia PUBLIC ${CRTMEDIA_MACOS_FRAMEWORKS})
   endif()
 
-  # GNU ld needs the CRT and FFmpeg static archives in one rescan group.
-  # Other hosts retain their already-verified plain ordering.
-  if(CRT_TARGET_OS STREQUAL "linux" AND CRTMEDIA_ENABLE_FFMPEG)
+  # GNU ld needs the mutually-dependent CRT, FFmpeg, and curl dependency
+  # archives in one rescan group. In particular, libcurl.a can introduce a
+  # late basename() reference that must rescan this project's libc.a rather
+  # than leak through to the host libc. Other hosts retain their already-
+  # verified plain ordering.
+  if(CRT_TARGET_OS STREQUAL "linux" AND
+     (CRTMEDIA_ENABLE_FFMPEG OR CRTMEDIA_ENABLE_CURL))
     target_link_libraries(crtmedia PRIVATE -Wl,--start-group)
     target_link_libraries(crtmedia PRIVATE ${CRTMEDIA_CRT_STATIC_LIBS})
-    target_link_libraries(crtmedia PRIVATE ${CRTMEDIA_FFMPEG_LIBRARIES})
+    if(CRTMEDIA_ENABLE_FFMPEG)
+      target_link_libraries(crtmedia PRIVATE ${CRTMEDIA_FFMPEG_LIBRARIES})
+    endif()
+    if(CRTMEDIA_ENABLE_CURL)
+      target_link_libraries(crtmedia PRIVATE ${CRTMEDIA_CURL_LIBRARIES})
+    endif()
     target_link_libraries(crtmedia PRIVATE -Wl,--end-group)
     # Real host .so's, not static archives -- no archive-member-selection
     # ordering concern the --start-group/--end-group rescan above exists
@@ -148,6 +159,9 @@ function(crt_add_crtmedia_targets)
     target_link_libraries(crtmedia PRIVATE ${CRTMEDIA_CRT_STATIC_LIBS})
     if(CRTMEDIA_ENABLE_FFMPEG)
       target_link_libraries(crtmedia PRIVATE ${CRTMEDIA_FFMPEG_LIBRARIES})
+    endif()
+    if(CRTMEDIA_ENABLE_CURL)
+      target_link_libraries(crtmedia PRIVATE ${CRTMEDIA_CURL_LIBRARIES})
     endif()
   endif()
   target_include_directories(crtmedia PUBLIC "${CRTMEDIA_ROOT}/include")
@@ -257,10 +271,13 @@ function(crt_add_crtmedia_targets)
       target_compile_definitions(crtmedia_shared PRIVATE CRTMEDIA_HAVE_HTTP_TRANSPORT=1)
       target_sources(crtmedia PRIVATE ${CRTMEDIA_HTTP_SOURCES})
       target_include_directories(crtmedia PRIVATE "${CRTMEDIA_CURL_PORT_PREFIX}/include")
-      target_link_libraries(crtmedia PRIVATE ${CRTMEDIA_CURL_LIBRARIES})
       target_sources(crtmedia_shared PRIVATE ${CRTMEDIA_HTTP_SOURCES})
       target_include_directories(crtmedia_shared PRIVATE "${CRTMEDIA_CURL_PORT_PREFIX}/include")
-      target_link_libraries(crtmedia_shared PRIVATE ${CRTMEDIA_CURL_LIBRARIES})
+      if(CRT_TARGET_OS STREQUAL "linux")
+        target_link_libraries(crtmedia_shared PRIVATE ${CRTMEDIA_CURL_SHARED_LIBRARIES})
+      else()
+        target_link_libraries(crtmedia_shared PRIVATE ${CRTMEDIA_CURL_LIBRARIES})
+      endif()
     endif()
   endif()
 

@@ -403,7 +403,40 @@ zero-copy tests all passed; repeating the lifecycle test alone reproduced its
 device-cycle failure, so it is recorded honestly rather than attributed to
 this networking tranche.
 
-Linux/x86_64 replay is next.
+**Linux/x86_64 done 2026-09-29.** The CRT curl dependency stack built first,
+and both its static and shared real-network HTTP/HTTPS round trips passed
+(`curl_http_roundtrip_test: ok http=200 https=200`). The two repository-owned
+loopback fixtures then passed 3 consecutive runs each:
+`crtmedia_http_input_range_test: ok` (validated `206`/`Content-Range`, local
+MP4 decode, and real seek-via-reconnect) and
+`crtmedia_http_input_chunked_test: ok` (non-seekable fragmented MP4 over
+chunked transfer). The local-file extractor regression also passed 3
+consecutive times, and the bounded queue regression passed 5 consecutive
+times including `sticky_error=pass`.
+
+This replay found and fixed two Linux link-closure defects before the tests
+could run as part of a complete build:
+
+- The static curl dependency chain was appended after the existing CRT+
+  FFmpeg rescan group. `libcurl.a`'s late `basename()` reference therefore
+  could not select the implementation from this project's earlier
+  `libc.a`; GNU ld instead diagnosed the host-glibc symbol as `DSO missing
+  from command line`. CRT, FFmpeg, curl, mbedTLS, and zlib now share one
+  static rescan group, including the player demo's explicit all-static
+  closure. The final HTTP test binary defines `basename` from CRT.
+- `libcrtmedia.so` had also tried to fold the Linux non-PIC `libz.a` into a
+  shared object. The Linux shared target now links the port's shared
+  `libcurl.so`, which records its own mbedTLS/zlib dependencies, while the
+  static target keeps the all-static dependency chain. The complete build,
+  including `libcrtmedia.so` and `crtmedia_player_demo`, succeeds with HTTP
+  input enabled.
+
+Full in-tree CTest was 141/142. Both HTTP fixtures passed. The sole failure
+was the same pre-existing `crtmedia_playback_pipeline_test_runs` wall-time
+pacing check already recorded during Tranche 1 on this Linux host; `aplay -l`
+still reports `no soundcards found`, so it remains an environmental playback
+gap rather than a networking regression. Tranche 2 is now closed on all
+three hosts.
 
 ### 3. Encoded streaming output
 

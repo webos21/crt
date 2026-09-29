@@ -86,20 +86,10 @@ consumers, not completion gates for this tranche.
   5 consecutive runs each, no flakiness. Full in-tree `ctest` on Linux:
   139/140 (the one failure is the pre-existing, unrelated no-sound-card
   gap).
-* [ ] **2. Add progressive HTTP input and extractor integration.** Windows/
-  x64 and macOS/arm64 done 2026-09-29, recorded in `HISTORY.md`:
-  `crtmedia_extractor_create_from_url()`, both fixtures passing (`crtmedia_http_input_
-  range_test: ok`, `crtmedia_http_input_chunked_test: ok`). Found and fixed
-  a real, previously-unknown Windows PAL bug along the way (`poll()` never
-  reported a listening socket's own pending-connection readiness, only
-  ever `FIONREAD`'s "bytes queued" question -- `libc/src/arch/windows/
-  common/syscall.c`'s `poll_socket()`), added a sticky-error state
-  Tranche 1's original design was missing (`crtmedia_transport_queue_
-  write_error()`), and added fragmented-MP4 muxer output
-  (`CRTMEDIA_MUXER_OUTPUT_MPEG_4_FRAGMENTED`) needed for fixture B and
-  reusable by Tranche 3. The unchanged macOS implementation passed both
-  fixtures 3 consecutive times and the queue regression 5 consecutive
-  times; Linux/x86_64 replay is the remaining closure gate.
+* [x] **2. Add progressive HTTP input and extractor integration.** Closed
+  2026-09-29 on Windows/x64, macOS/arm64, and Linux/x86_64; implementation,
+  host-specific findings, and complete acceptance evidence are recorded in
+  `HISTORY.md` and `docs/crtmedia_networking_acceptance.md`.
 * [ ] **3. Add encoded streaming output.** Fragmented MP4 + HTTP upload
   sink over the same bounded transport; the documented back-pressure/drop
   contract, not "throttle the camera." Windows/x64 first, quick Linux/macOS

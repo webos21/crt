@@ -44,6 +44,7 @@ endif()
 set(CRTMEDIA_CURL_PORT_PREFIX "${CMAKE_BINARY_DIR}/port-tests/install" CACHE PATH
   "Shared porting/recipes install prefix (curl) for libcrtmedia's HTTP transport")
 set(CRTMEDIA_CURL_LIBRARIES "")
+set(CRTMEDIA_CURL_SHARED_LIBRARIES "")
 if(EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libcurl.a" AND
    EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libmbedtls.a" AND
    EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libmbedx509.a" AND
@@ -59,12 +60,25 @@ if(EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libcurl.a" AND
     "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libz.a"
   )
 endif()
+if(CRT_TARGET_OS STREQUAL "linux" AND
+   EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libcurl.so")
+  # The Linux zlib static archive is intentionally not PIC, so it cannot be
+  # folded into libcrtmedia.so. curl's shared artifact already records its
+  # mbedTLS/zlib/runtime dependencies and is the correct shared-target edge.
+  set(CRTMEDIA_CURL_SHARED_LIBRARIES
+    "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libcurl.so"
+  )
+endif()
 option(CRTMEDIA_ENABLE_CURL "Build libcrtmedia's libcurl-backed HTTP transport when available" OFF)
 if(CRTMEDIA_ENABLE_CURL AND NOT EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/include/curl/curl.h")
   message(FATAL_ERROR "CRTMEDIA_ENABLE_CURL=ON but ${CRTMEDIA_CURL_PORT_PREFIX}/include/curl/curl.h was not found")
 endif()
 if(CRTMEDIA_ENABLE_CURL AND NOT CRTMEDIA_CURL_LIBRARIES)
   message(FATAL_ERROR "CRTMEDIA_ENABLE_CURL=ON requires CRTMEDIA_CURL_LIBRARIES. Run the port-build-curl target, then reconfigure.")
+endif()
+if(CRTMEDIA_ENABLE_CURL AND CRT_TARGET_OS STREQUAL "linux" AND
+   NOT CRTMEDIA_CURL_SHARED_LIBRARIES)
+  message(FATAL_ERROR "CRTMEDIA_ENABLE_CURL=ON on Linux requires shared libcurl for libcrtmedia.so. Run the port-build-curl target, then reconfigure.")
 endif()
 
 # crtmedia_backend_objects: real per-host audio output backends for
@@ -1848,7 +1862,8 @@ if(CRTMEDIA_ENABLE_FFMPEG)
     # left the FFmpeg archives after libc.a/libm.a (undefined cos/sin/...).
     # Neither order can satisfy both, so state the one real cycle
     # explicitly -- crtmedia, crtgfx_window, xkbcommon, FFmpeg and the CRT
-    # runtime in a single --start-group/--end-group -- the same shape
+    # runtime (plus curl's static dependency chain when HTTP input is on)
+    # in a single --start-group/--end-group -- the same shape
     # tools/crt-cc gives every SDK consumer, and the reason libxkbcommon.a
     # and libav*.a are listed before the C runtime in examples/media-player.
     # The plain crtmedia/crtgfx_window entries above stay for their include
@@ -1857,6 +1872,7 @@ if(CRTMEDIA_ENABLE_FFMPEG)
       crtmedia crtgfx_window
       ${CRTGFX_XKBCOMMON_LIBRARIES}
       ${CRTMEDIA_FFMPEG_LIBRARIES}
+      ${CRTMEDIA_CURL_LIBRARIES}
       ${CRTMEDIA_CRT_STATIC_LIBS})
     target_link_libraries(crtmedia_player_demo PRIVATE
       "$<LINK_GROUP:RESCAN,${CRTMEDIA_PLAYER_DEMO_RESCAN_LIBS}>")
