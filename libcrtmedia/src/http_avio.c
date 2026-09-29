@@ -35,7 +35,14 @@ struct crtmedia_http_avio {
    * extractor asks this object for the real reason instead of guessing --
    * a lost connection must never look like a clean end of stream. */
   crtmedia_result last_error;
+  /* Deep copy of the caller's TLS options, reused by every reconnect/seek. */
+  char* ca_pem;
+  crtmedia_tls_options tls;
 };
+
+static const crtmedia_tls_options* avio_tls(const crtmedia_http_avio* avio) {
+  return &avio->tls;
+}
 
 static void sleep_ms(int ms) {
   struct timespec delay;
@@ -63,7 +70,7 @@ static crtmedia_result try_resume(crtmedia_http_avio* avio, crtmedia_result orig
     crtmedia_http_transport* resumed = NULL;
     crtmedia_http_transport_info info;
     crtmedia_result result = crtmedia_http_transport_open_resume(
-        avio->url, avio->position, avio->validator, CRTMEDIA_HTTP_QUEUE_CAPACITY, &resumed, &info);
+        avio->url, avio->position, avio->validator, CRTMEDIA_HTTP_QUEUE_CAPACITY, avio_tls(avio), &resumed, &info);
     if (result == CRTMEDIA_OK) {
       crtmedia_http_transport_close(avio->transport);
       avio->transport = resumed;
@@ -148,8 +155,10 @@ static int64_t avio_seek_callback(void* opaque, int64_t offset, int whence) {
   crtmedia_result result =
       avio->validator[0] != '\0'
           ? crtmedia_http_transport_open_resume(
-                avio->url, target, avio->validator, CRTMEDIA_HTTP_QUEUE_CAPACITY, &new_transport, &info)
-          : crtmedia_http_transport_open(avio->url, target, CRTMEDIA_HTTP_QUEUE_CAPACITY, &new_transport, &info);
+                avio->url, target, avio->validator, CRTMEDIA_HTTP_QUEUE_CAPACITY, avio_tls(avio),
+                &new_transport, &info)
+          : crtmedia_http_transport_open(
+                avio->url, target, CRTMEDIA_HTTP_QUEUE_CAPACITY, avio_tls(avio), &new_transport, &info);
   if (result != CRTMEDIA_OK) {
     return AVERROR_UNKNOWN;
   }
@@ -159,8 +168,15 @@ static int64_t avio_seek_callback(void* opaque, int64_t offset, int whence) {
   return target;
 }
 
+static void free_avio_shell(crtmedia_http_avio* avio) {
+  free(avio->ca_pem);
+  free(avio->url);
+  free(avio);
+}
+
 crtmedia_result crtmedia_http_avio_open(
-    const char* url, crtmedia_http_avio** out_avio, crtmedia_http_avio_info* out_info) {
+    const char* url, const crtmedia_tls_options* tls, crtmedia_http_avio** out_avio,
+    crtmedia_http_avio_info* out_info) {
   if (url == NULL || out_avio == NULL || out_info == NULL) {
     return CRTMEDIA_ERROR_INVALID_ARGUMENT;
   }
@@ -176,12 +192,23 @@ crtmedia_result crtmedia_http_avio_open(
     return CRTMEDIA_ERROR_IO;
   }
 
+  if (tls != NULL) {
+    avio->tls.insecure_skip_verify_for_local_development = tls->insecure_skip_verify_for_local_development;
+    if (tls->ca_pem != NULL) {
+      avio->ca_pem = strdup(tls->ca_pem);
+      if (avio->ca_pem == NULL) {
+        free_avio_shell(avio);
+        return CRTMEDIA_ERROR_IO;
+      }
+      avio->tls.ca_pem = avio->ca_pem;
+    }
+  }
+
   crtmedia_http_transport_info info;
-  crtmedia_result result =
-      crtmedia_http_transport_open(url, 0, CRTMEDIA_HTTP_QUEUE_CAPACITY, &avio->transport, &info);
+  crtmedia_result result = crtmedia_http_transport_open(
+      url, 0, CRTMEDIA_HTTP_QUEUE_CAPACITY, avio_tls(avio), &avio->transport, &info);
   if (result != CRTMEDIA_OK) {
-    free(avio->url);
-    free(avio);
+    free_avio_shell(avio);
     return result;
   }
   avio->size = info.size;
@@ -192,8 +219,7 @@ crtmedia_result crtmedia_http_avio_open(
   uint8_t* avio_buffer = (uint8_t*)av_malloc(CRTMEDIA_HTTP_AVIO_BUFFER_SIZE);
   if (avio_buffer == NULL) {
     crtmedia_http_transport_close(avio->transport);
-    free(avio->url);
-    free(avio);
+    free_avio_shell(avio);
     return CRTMEDIA_ERROR_IO;
   }
   avio->avio_ctx = avio_alloc_context(
@@ -202,8 +228,7 @@ crtmedia_result crtmedia_http_avio_open(
   if (avio->avio_ctx == NULL) {
     av_free(avio_buffer);
     crtmedia_http_transport_close(avio->transport);
-    free(avio->url);
-    free(avio);
+    free_avio_shell(avio);
     return CRTMEDIA_ERROR_IO;
   }
   avio->avio_ctx->seekable = avio->seekable ? AVIO_SEEKABLE_NORMAL : 0;
@@ -234,6 +259,5 @@ void crtmedia_http_avio_close(crtmedia_http_avio* avio) {
     avio_context_free(&avio->avio_ctx);
   }
   crtmedia_http_transport_close(avio->transport);
-  free(avio->url);
-  free(avio);
+  free_avio_shell(avio);
 }

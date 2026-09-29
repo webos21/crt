@@ -104,6 +104,11 @@ crtmedia_result crtmedia_extractor_create(const char* path, crtmedia_extractor**
 
 #ifdef CRTMEDIA_HAVE_HTTP_TRANSPORT
 crtmedia_result crtmedia_extractor_create_from_url(const char* url, crtmedia_extractor** out_extractor) {
+  return crtmedia_extractor_create_from_url_with_tls(url, NULL, out_extractor);
+}
+
+crtmedia_result crtmedia_extractor_create_from_url_with_tls(
+    const char* url, const crtmedia_tls_options* tls, crtmedia_extractor** out_extractor) {
   if (url == NULL || out_extractor == NULL) {
     return CRTMEDIA_ERROR_INVALID_ARGUMENT;
   }
@@ -111,7 +116,7 @@ crtmedia_result crtmedia_extractor_create_from_url(const char* url, crtmedia_ext
 
   crtmedia_http_avio* http_avio = NULL;
   crtmedia_http_avio_info avio_info;
-  crtmedia_result open_result = crtmedia_http_avio_open(url, &http_avio, &avio_info);
+  crtmedia_result open_result = crtmedia_http_avio_open(url, tls, &http_avio, &avio_info);
   if (open_result != CRTMEDIA_OK) {
     return open_result;
   }
@@ -167,13 +172,19 @@ crtmedia_result crtmedia_extractor_create_from_url(const char* url, crtmedia_ext
   return CRTMEDIA_OK;
 }
 #else
-crtmedia_result crtmedia_extractor_create_from_url(const char* url, crtmedia_extractor** out_extractor) {
+crtmedia_result crtmedia_extractor_create_from_url_with_tls(
+    const char* url, const crtmedia_tls_options* tls, crtmedia_extractor** out_extractor) {
   (void)url;
+  (void)tls;
   if (out_extractor == NULL) {
     return CRTMEDIA_ERROR_INVALID_ARGUMENT;
   }
   *out_extractor = NULL;
   return CRTMEDIA_ERROR_UNSUPPORTED;
+}
+
+crtmedia_result crtmedia_extractor_create_from_url(const char* url, crtmedia_extractor** out_extractor) {
+  return crtmedia_extractor_create_from_url_with_tls(url, NULL, out_extractor);
 }
 #endif
 

@@ -212,9 +212,37 @@ static void* http_worker_main(void* argument) {
   return NULL;
 }
 
+/* Applies the Tranche 5 TLS trust policy to an easy handle. Verification is
+ * on by default (libcurl's own default, restated explicitly so a future
+ * libcurl/recipe change cannot silently weaken it); the caller's PEM is the
+ * only trust anchor. Only http and https are ever spoken, including across
+ * redirects. Returns 0 on success. */
+static int apply_tls_policy(CURL* easy, const crtmedia_tls_options* tls) {
+  curl_easy_setopt(easy, CURLOPT_PROTOCOLS_STR, "http,https");
+  curl_easy_setopt(easy, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
+  if (tls != NULL && tls->insecure_skip_verify_for_local_development != 0) {
+    curl_easy_setopt(easy, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(easy, CURLOPT_SSL_VERIFYHOST, 0L);
+    return 0;
+  }
+  curl_easy_setopt(easy, CURLOPT_SSL_VERIFYPEER, 1L);
+  curl_easy_setopt(easy, CURLOPT_SSL_VERIFYHOST, 2L);
+  if (tls != NULL && tls->ca_pem != NULL) {
+    struct curl_blob blob;
+    blob.data = (void*)tls->ca_pem;
+    blob.len = strlen(tls->ca_pem);
+    blob.flags = CURL_BLOB_COPY;
+    if (curl_easy_setopt(easy, CURLOPT_CAINFO_BLOB, &blob) != CURLE_OK) {
+      return -1;
+    }
+  }
+  return 0;
+}
+
 static crtmedia_result http_transport_open_internal(
     const char* url, int64_t offset, const char* resume_validator, size_t queue_capacity,
-    crtmedia_http_transport** out_transport, crtmedia_http_transport_info* out_info) {
+    const crtmedia_tls_options* tls, crtmedia_http_transport** out_transport,
+    crtmedia_http_transport_info* out_info) {
   if (url == NULL || offset < 0 || out_transport == NULL || out_info == NULL) {
     return CRTMEDIA_ERROR_INVALID_ARGUMENT;
   }
@@ -279,6 +307,15 @@ static crtmedia_result http_transport_open_internal(
   curl_easy_setopt(transport->easy, CURLOPT_WRITEDATA, transport);
   curl_easy_setopt(transport->easy, CURLOPT_CONNECTTIMEOUT, 20L);
   curl_easy_setopt(transport->easy, CURLOPT_NOSIGNAL, 1L);
+  if (apply_tls_policy(transport->easy, tls) != 0) {
+    curl_slist_free_all(transport->request_headers);
+    curl_easy_cleanup(transport->easy);
+    crtmedia_transport_queue_release(transport->queue);
+    pthread_cond_destroy(&transport->ready_cond);
+    pthread_mutex_destroy(&transport->lock);
+    free(transport);
+    return CRTMEDIA_ERROR_IO;
+  }
 
   if (pthread_create(&transport->thread, NULL, http_worker_main, transport) != 0) {
     curl_easy_cleanup(transport->easy);
@@ -311,18 +348,19 @@ static crtmedia_result http_transport_open_internal(
 }
 
 crtmedia_result crtmedia_http_transport_open(
-    const char* url, int64_t offset, size_t queue_capacity, crtmedia_http_transport** out_transport,
-    crtmedia_http_transport_info* out_info) {
-  return http_transport_open_internal(url, offset, NULL, queue_capacity, out_transport, out_info);
+    const char* url, int64_t offset, size_t queue_capacity, const crtmedia_tls_options* tls,
+    crtmedia_http_transport** out_transport, crtmedia_http_transport_info* out_info) {
+  return http_transport_open_internal(url, offset, NULL, queue_capacity, tls, out_transport, out_info);
 }
 
 crtmedia_result crtmedia_http_transport_open_resume(
     const char* url, int64_t offset, const char* validator, size_t queue_capacity,
-    crtmedia_http_transport** out_transport, crtmedia_http_transport_info* out_info) {
+    const crtmedia_tls_options* tls, crtmedia_http_transport** out_transport,
+    crtmedia_http_transport_info* out_info) {
   if (validator == NULL) {
     return CRTMEDIA_ERROR_INVALID_ARGUMENT;
   }
-  return http_transport_open_internal(url, offset, validator, queue_capacity, out_transport, out_info);
+  return http_transport_open_internal(url, offset, validator, queue_capacity, tls, out_transport, out_info);
 }
 
 crtmedia_result crtmedia_http_transport_read(

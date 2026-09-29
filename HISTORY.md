@@ -10,6 +10,49 @@ substantive update.
 
 ## 2026-09-29
 
+- **Networking & Streaming Tranche 5 closed on Windows/x64: HTTPS is now
+  actually authenticated -- verify-on-by-default, caller-supplied CA, and a
+  loopback correct-CA / wrong-CA / wrong-SAN matrix that passes.**
+  `docs/crtmedia_networking_acceptance.md`'s own Tranche 5 section has the
+  full detail.
+
+  Public, additive API (`crtmedia/tls.h`): `crtmedia_tls_options { ca_pem,
+  insecure_skip_verify_for_local_development }`, taken by
+  `crtmedia_extractor_create_from_url_with_tls()` and
+  `crtmedia_muxer_create_for_url_with_tls()`; the existing entry points are
+  the `NULL`-options case. Certificate-chain and host/IP verification are
+  always on (libcurl's defaults restated explicitly), the caller's PEM is the
+  only trust anchor (CRT vendors no CA store, `CURLOPT_CAINFO_BLOB`), the
+  only way to skip verification is the explicitly, loudly named
+  `insecure_skip_verify_for_local_development`, protocols are limited to
+  http/https (including across redirects), and the options are copied and
+  reused by every reconnect and seek. A refused certificate is
+  `CRTMEDIA_ERROR_PROTOCOL`.
+
+  New `crtmedia_https_test` (Windows real result, 4 consecutive identical
+  runs, ~1.1 s): `ok correct_ca=pass wrong_ca=protocol wrong_san=protocol
+  default=protocol insecure_opt_in=pass upload_correct_ca=pass
+  upload_wrong_ca=protocol samples=70`. Fixture: a repository-owned mbedTLS
+  terminator (`tests/tls_test_server.c`) that generates an ECDSA P-256 CA, an
+  unrelated CA and a CA-signed server certificate with an `IP:127.0.0.1` SAN
+  in memory at test time (validity now-1d..now+1d, nothing checked in), serves
+  TLS 1.2 over CRT sockets, and relays decrypted bytes to the existing plain
+  Tranche 2/3 loopback servers -- only after a handshake succeeded, so a
+  refused certificate can never cause a backend connection. Results: correct
+  CA -> extracted samples identical to the local file (70/70); unrelated CA,
+  and correct CA with a certificate that only covers `10.255.255.1`, are both
+  refused with zero completed handshakes; `NULL` and empty options are refused
+  (no implicit trust store); the explicit opt-in connects even to the
+  mismatching certificate; `http://` is unaffected. Upload: correct CA is
+  byte-exact after TLS (200 KiB), wrong CA is refused and the upload backend
+  saw zero connections (the body never left the client).
+
+  Full in-tree `ctest`: 161/161 (the one expected `crtmedia_capture_mf_test`
+  no-webcam skip). `libcrtmedia/tests/{https_test.c,tls_test_server.*}` are in
+  `tools/create_stage_source.py`'s registry. Deterministic tests use the
+  literal IP `127.0.0.1`, so the minimal UDP/IPv4 DNS resolver is not a
+  prerequisite. Linux/x86_64 and macOS/arm64 replay is next.
+
 - **Networking & Streaming Tranche 4 closed on all three hosts: Linux/x86_64
   replay on the physical Linux host, unmodified source, identical result, no
   code changes.** `docs/crtmedia_networking_acceptance.md`'s Tranche 4

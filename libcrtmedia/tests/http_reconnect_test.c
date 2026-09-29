@@ -289,11 +289,11 @@ int main(void) {
     server = start_server(body, body_size, &options, url, sizeof(url));
     crtmedia_http_transport* t = NULL;
     crtmedia_http_transport_info info;
-    CHECK(crtmedia_http_transport_open(url, 0, 4096, &t, &info) == CRTMEDIA_OK, "plain open");
+    CHECK(crtmedia_http_transport_open(url, 0, 4096, NULL, &t, &info) == CRTMEDIA_OK, "plain open");
     CHECK(strcmp(info.validator, "\"v1\"") == 0, "strong ETag captured as the entity validator");
     crtmedia_http_transport_close(t);
     t = NULL;
-    CHECK(crtmedia_http_transport_open_resume(url, 1000, info.validator, 4096, &t, &info) == CRTMEDIA_OK,
+    CHECK(crtmedia_http_transport_open_resume(url, 1000, info.validator, 4096, NULL, &t, &info) == CRTMEDIA_OK,
           "resume with the matching validator succeeds (206 + Content-Range + same ETag)");
     unsigned char* tail = (unsigned char*)malloc(body_size);
     size_t tail_size = 0;
@@ -314,10 +314,10 @@ int main(void) {
     server = start_server(body, body_size, &options, url, sizeof(url));
     crtmedia_http_transport* t = NULL;
     crtmedia_http_transport_info info;
-    CHECK(crtmedia_http_transport_open(url, 0, 4096, &t, &info) == CRTMEDIA_OK, "plain open (changing server)");
+    CHECK(crtmedia_http_transport_open(url, 0, 4096, NULL, &t, &info) == CRTMEDIA_OK, "plain open (changing server)");
     crtmedia_http_transport_close(t);
     t = NULL;
-    CHECK(crtmedia_http_transport_open_resume(url, 1000, info.validator, 4096, &t, &info) == CRTMEDIA_ERROR_PROTOCOL,
+    CHECK(crtmedia_http_transport_open_resume(url, 1000, info.validator, 4096, NULL, &t, &info) == CRTMEDIA_ERROR_PROTOCOL,
           "206 with a different ETag is refused");
     CHECK(t == NULL, "no transport handed out for a refused resume");
     http_test_server_stop(server);
@@ -331,7 +331,7 @@ int main(void) {
     char upload_url[128];
     snprintf(upload_url, sizeof(upload_url), "http://127.0.0.1:%d/upload.mp4", port);
     crtmedia_http_upload* upload = NULL;
-    CHECK(crtmedia_http_upload_open(upload_url, 4096, &upload) == CRTMEDIA_OK, "open upload");
+    CHECK(crtmedia_http_upload_open(upload_url, 4096, NULL, &upload) == CRTMEDIA_OK, "open upload");
     unsigned char block[8192];
     memset(block, 0x5a, sizeof(block));
     crtmedia_result write_result = CRTMEDIA_OK;

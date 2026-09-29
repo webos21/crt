@@ -90,8 +90,32 @@ static void* upload_worker_main(void* argument) {
   return NULL;
 }
 
+/* Same Tranche 5 policy as http_transport.c's apply_tls_policy(); kept as a
+ * small private copy so this file stays independent of the input path. */
+static int apply_upload_tls_policy(CURL* easy, const crtmedia_tls_options* tls) {
+  curl_easy_setopt(easy, CURLOPT_PROTOCOLS_STR, "http,https");
+  if (tls != NULL && tls->insecure_skip_verify_for_local_development != 0) {
+    curl_easy_setopt(easy, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(easy, CURLOPT_SSL_VERIFYHOST, 0L);
+    return 0;
+  }
+  curl_easy_setopt(easy, CURLOPT_SSL_VERIFYPEER, 1L);
+  curl_easy_setopt(easy, CURLOPT_SSL_VERIFYHOST, 2L);
+  if (tls != NULL && tls->ca_pem != NULL) {
+    struct curl_blob blob;
+    blob.data = (void*)tls->ca_pem;
+    blob.len = strlen(tls->ca_pem);
+    blob.flags = CURL_BLOB_COPY;
+    if (curl_easy_setopt(easy, CURLOPT_CAINFO_BLOB, &blob) != CURLE_OK) {
+      return -1;
+    }
+  }
+  return 0;
+}
+
 crtmedia_result crtmedia_http_upload_open(
-    const char* url, size_t queue_capacity, crtmedia_http_upload** out_upload) {
+    const char* url, size_t queue_capacity, const crtmedia_tls_options* tls,
+    crtmedia_http_upload** out_upload) {
   if (url == NULL || out_upload == NULL) {
     return CRTMEDIA_ERROR_INVALID_ARGUMENT;
   }
@@ -140,6 +164,13 @@ crtmedia_result crtmedia_http_upload_open(
   curl_easy_setopt(upload->easy, CURLOPT_NOPROGRESS, 0L);
   curl_easy_setopt(upload->easy, CURLOPT_XFERINFOFUNCTION, upload_progress_callback);
   curl_easy_setopt(upload->easy, CURLOPT_XFERINFODATA, upload);
+  if (apply_upload_tls_policy(upload->easy, tls) != 0) {
+    curl_slist_free_all(upload->headers);
+    curl_easy_cleanup(upload->easy);
+    crtmedia_transport_queue_release(upload->queue);
+    free(upload);
+    return CRTMEDIA_ERROR_IO;
+  }
 
   if (pthread_create(&upload->thread, NULL, upload_worker_main, upload) != 0) {
     curl_slist_free_all(upload->headers);

@@ -42,6 +42,7 @@
 #include <stdint.h>
 
 #include "crtmedia/frame.h"
+#include "crtmedia/tls.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -60,13 +61,18 @@ typedef struct crtmedia_http_transport_info {
   char validator[CRTMEDIA_HTTP_VALIDATOR_CAPACITY];
 } crtmedia_http_transport_info;
 
-/* queue_capacity is the internal bounded transport_queue's own capacity
+/* `tls` (may be NULL) carries the Tranche 5 trust policy for https:// URLs:
+ * peer and host verification are always on unless tls explicitly opts out,
+ * and the only trust anchors are tls->ca_pem (see crtmedia/tls.h). A failed
+ * verification is CRTMEDIA_ERROR_PROTOCOL, never a silent downgrade.
+ *
+ * queue_capacity is the internal bounded transport_queue's own capacity
  * (transport_queue.h) -- the same host-neutral primitive Tranche 1
  * already proved, unmodified here except for the new sticky-error path
  * that header's own top comment documents. */
 crtmedia_result crtmedia_http_transport_open(
-    const char* url, int64_t offset, size_t queue_capacity, crtmedia_http_transport** out_transport,
-    crtmedia_http_transport_info* out_info);
+    const char* url, int64_t offset, size_t queue_capacity, const crtmedia_tls_options* tls,
+    crtmedia_http_transport** out_transport, crtmedia_http_transport_info* out_info);
 
 /* Tranche 4 reconnect: like open(), but sends `Range: bytes=<offset>-` plus
  * `If-Range: <validator>` and succeeds only when the response is a 206 whose
@@ -76,7 +82,8 @@ crtmedia_result crtmedia_http_transport_open(
  * or the real connection error. `validator` must be non-empty. */
 crtmedia_result crtmedia_http_transport_open_resume(
     const char* url, int64_t offset, const char* validator, size_t queue_capacity,
-    crtmedia_http_transport** out_transport, crtmedia_http_transport_info* out_info);
+    const crtmedia_tls_options* tls, crtmedia_http_transport** out_transport,
+    crtmedia_http_transport_info* out_info);
 
 /* Thin passthrough to the internal transport_queue's own read() -- see
  * transport_queue.h for the full timeout_ms/out_eof/sticky-error

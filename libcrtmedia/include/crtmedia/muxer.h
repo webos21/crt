@@ -4,6 +4,7 @@
 
 #include "crtmedia/codec.h"
 #include "crtmedia/format.h"
+#include "crtmedia/tls.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -53,6 +54,18 @@ crtmedia_result crtmedia_muxer_create(
 crtmedia_result crtmedia_muxer_create_for_url(
     const char* url, crtmedia_muxer_output_format output_format,
     uint32_t queue_capacity, crtmedia_muxer** out_muxer);
+
+/* Networking & Streaming Tranche 5: same as crtmedia_muxer_create_for_url()
+ * with an explicit TLS trust policy (crtmedia/tls.h) for https:// URLs.
+ * `tls` may be NULL, which is exactly crtmedia_muxer_create_for_url():
+ * server authentication ON and no trust anchors, so an https:// upload
+ * fails (CRTMEDIA_ERROR_PROTOCOL, reported by write/finish) until the caller
+ * supplies tls->ca_pem. The uploaded body is never sent to an
+ * unauthenticated peer unless the caller sets the explicit insecure
+ * opt-in. */
+crtmedia_result crtmedia_muxer_create_for_url_with_tls(
+    const char* url, crtmedia_muxer_output_format output_format,
+    uint32_t queue_capacity, const crtmedia_tls_options* tls, crtmedia_muxer** out_muxer);
 
 /* Local-file muxers report WRITABLE | SEEKABLE. URL muxers report WRITABLE
  * only. Returns 0 for NULL. */

@@ -30,6 +30,7 @@
  * the failure is surfaced through crtmedia_http_avio_last_error(). */
 
 #include "crtmedia/frame.h"
+#include "crtmedia/tls.h"
 
 #include <libavformat/avio.h>
 
@@ -44,8 +45,11 @@ typedef struct crtmedia_http_avio_info {
   int64_t size; /* -1 if unknown */
 } crtmedia_http_avio_info;
 
+/* `tls` (may be NULL) is deep-copied: every seek/reconnect transport opened
+ * later applies the same Tranche 5 trust policy as the first. */
 crtmedia_result crtmedia_http_avio_open(
-    const char* url, crtmedia_http_avio** out_avio, crtmedia_http_avio_info* out_info);
+    const char* url, const crtmedia_tls_options* tls, crtmedia_http_avio** out_avio,
+    crtmedia_http_avio_info* out_info);
 
 /* Borrowed pointer, valid until crtmedia_http_avio_close(). The caller
  * (crtmedia_extractor.c) assigns this directly to AVFormatContext::pb. */

@@ -668,6 +668,54 @@ resolver is never mistaken for a streaming prerequisite; separate resolver
 coverage exists where a real name lookup is actually required. Replay the
 full, unchanged contract on Windows/x64, Linux/x86_64, and macOS/arm64.
 
+**Windows/x64 done 2026-09-29.** Public, additive API in
+`crtmedia/tls.h`: `crtmedia_tls_options { ca_pem,
+insecure_skip_verify_for_local_development }`, taken by
+`crtmedia_extractor_create_from_url_with_tls()` and
+`crtmedia_muxer_create_for_url_with_tls()` (the existing entry points are the
+`NULL`-options case, so nothing that worked before changes meaning). Policy as
+frozen above: peer and host/IP verification always on
+(`CURLOPT_SSL_VERIFYPEER=1`, `CURLOPT_SSL_VERIFYHOST=2`, restated explicitly),
+the caller's PEM is the only trust anchor (`CURLOPT_CAINFO_BLOB`), the sole
+opt-out is the loudly named `insecure_skip_verify_for_local_development`, only
+`http`/`https` are spoken (redirects included), and the options are deep-copied
+and reused by every reconnect and seek. A refused certificate is
+`CRTMEDIA_ERROR_PROTOCOL`; no curl, mbedTLS or host TLS type is in any public
+header.
+
+`crtmedia_https_test` runs against `tests/tls_test_server.c`: an mbedTLS
+(3.6.7, the production stack) TLS 1.2 terminator over CRT sockets that
+generates, in memory at test time, an ECDSA P-256 CA, an unrelated CA, and a
+CA-signed server certificate (SAN `IP:127.0.0.1`, validity now-1d..now+1d),
+then relays decrypted bytes to the plain Tranche 2/3 loopback servers -- only
+after a completed handshake. Real result, 4 consecutive identical runs, ~1.1 s:
+
+```text
+crtmedia_https_test: ok correct_ca=pass wrong_ca=protocol wrong_san=protocol
+    default=protocol insecure_opt_in=pass upload_correct_ca=pass
+    upload_wrong_ca=protocol samples=70
+```
+
+| Case | Required outcome | Result |
+| --- | --- | --- |
+| correct CA | connects; sample stream identical to the local file | pass (70/70) |
+| unrelated CA | `CRTMEDIA_ERROR_PROTOCOL`, zero completed handshakes | pass |
+| correct CA, cert covers only `10.255.255.1` | `CRTMEDIA_ERROR_PROTOCOL`, zero completed handshakes | pass |
+| `NULL` options / empty options | refused (no implicit trust store) | pass |
+| explicit insecure opt-in vs. the mismatching cert | connects | pass |
+| `http://` with TLS options set | unaffected | pass |
+| upload, correct CA | 2xx, 200 KiB byte-exact after TLS | pass |
+| upload, unrelated CA | `CRTMEDIA_ERROR_PROTOCOL`, backend saw 0 connections (body never sent) | pass |
+
+The matrix proves *authentication*, not only decryption: the correct-CA case
+shows the TLS path works end to end with the same fixture, so each refusal is
+attributable to the CA or SAN check alone. Deterministic tests use the literal
+IP `127.0.0.1`; the minimal UDP/IPv4/A-record resolver is not a prerequisite
+and no real-name resolution is exercised here. Full in-tree `ctest`: 161/161
+(one expected `crtmedia_capture_mf_test` no-webcam skip). Linux/x86_64 and
+macOS/arm64 replay of the unchanged contract is next (Tranche 5 closes only
+when all three hosts pass).
+
 ### 6. Lifecycle and isolated-package acceptance
 
 Stress repeated connect/stream/cancel/reconnect/destroy cycles (matching

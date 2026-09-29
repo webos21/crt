@@ -68,12 +68,19 @@ static int http_upload_write_packet(void* opaque, const uint8_t* buffer, int buf
 crtmedia_result crtmedia_muxer_create_for_url(
     const char* url, crtmedia_muxer_output_format output_format,
     uint32_t queue_capacity, crtmedia_muxer** out_muxer) {
+  return crtmedia_muxer_create_for_url_with_tls(url, output_format, queue_capacity, NULL, out_muxer);
+}
+
+crtmedia_result crtmedia_muxer_create_for_url_with_tls(
+    const char* url, crtmedia_muxer_output_format output_format,
+    uint32_t queue_capacity, const crtmedia_tls_options* tls, crtmedia_muxer** out_muxer) {
   if (url == NULL || out_muxer == NULL || output_format != CRTMEDIA_MUXER_OUTPUT_MPEG_4_FRAGMENTED) {
     return CRTMEDIA_ERROR_INVALID_ARGUMENT;
   }
   *out_muxer = NULL;
 #if !defined(CRTMEDIA_HAVE_HTTP_TRANSPORT)
   (void)queue_capacity;
+  (void)tls;
   return CRTMEDIA_ERROR_UNSUPPORTED;
 #else
   crtmedia_muxer* muxer = (crtmedia_muxer*)calloc(1, sizeof(*muxer));
@@ -88,7 +95,7 @@ crtmedia_result crtmedia_muxer_create_for_url(
     return CRTMEDIA_ERROR_UNSUPPORTED;
   }
   crtmedia_result upload_result = crtmedia_http_upload_open(
-      url, (size_t)queue_capacity, &muxer->upload);
+      url, (size_t)queue_capacity, tls, &muxer->upload);
   if (upload_result != CRTMEDIA_OK) {
     avformat_free_context(muxer->format_context);
     free(muxer);

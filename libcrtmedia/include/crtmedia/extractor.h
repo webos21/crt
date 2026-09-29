@@ -4,6 +4,7 @@
 
 #include "crtmedia/format.h"
 #include "crtmedia/frame.h"
+#include "crtmedia/tls.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -85,7 +86,8 @@ void crtmedia_sample_release(crtmedia_sample* sample);
 crtmedia_result crtmedia_extractor_create(const char* path, crtmedia_extractor** out_extractor);
 
 /* Networking & Streaming Tranche 2 (docs/crtmedia_networking_acceptance.md)
- * -- opens `url` (http:// only; https:// is Tranche 5's own scope) over a
+ * -- opens `url` (http://, or https:// with the Tranche 5 trust policy of
+ * crtmedia_extractor_create_from_url_with_tls() below) over a
  * private CRT-owned HTTP transport feeding FFmpeg through private custom
  * AVIO, additive to crtmedia_extractor_create()'s own local-file path, not
  * a replacement for it. Always issues a real, validated byte-range probe
@@ -100,6 +102,16 @@ crtmedia_result crtmedia_extractor_create(const char* path, crtmedia_extractor**
  * be demuxed once the bytes do arrive (the same failure class as a local
  * file that cannot be demuxed). */
 crtmedia_result crtmedia_extractor_create_from_url(const char* url, crtmedia_extractor** out_extractor);
+
+/* Networking & Streaming Tranche 5: same as crtmedia_extractor_create_from_
+ * url() with an explicit TLS trust policy (crtmedia/tls.h) for https:// URLs.
+ * `tls` may be NULL, which is exactly crtmedia_extractor_create_from_url():
+ * server authentication ON, no trust anchors, so every https:// open fails
+ * with CRTMEDIA_ERROR_PROTOCOL (certificate/host verification failure)
+ * until the caller supplies tls->ca_pem. The options are copied and reused
+ * by every internal reconnect and seek. */
+crtmedia_result crtmedia_extractor_create_from_url_with_tls(
+    const char* url, const crtmedia_tls_options* tls, crtmedia_extractor** out_extractor);
 
 /* crtmedia_source_capability bits OR'd together (0 for a null extractor).
  * A local-file extractor (crtmedia_extractor_create()) always reports

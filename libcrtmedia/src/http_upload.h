@@ -8,11 +8,14 @@
 #include <stddef.h>
 
 #include "crtmedia/frame.h"
+#include "crtmedia/tls.h"
 
 typedef struct crtmedia_http_upload crtmedia_http_upload;
 
+/* `tls` (may be NULL): Tranche 5 trust policy, see crtmedia/tls.h. */
 crtmedia_result crtmedia_http_upload_open(
-    const char* url, size_t queue_capacity, crtmedia_http_upload** out_upload);
+    const char* url, size_t queue_capacity, const crtmedia_tls_options* tls,
+    crtmedia_http_upload** out_upload);
 
 /* Blocks under sustained receiver back-pressure. On success every requested
  * byte has entered the bounded queue, not necessarily the network socket. */
