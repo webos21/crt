@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from crt_elf import remove_absolute_runtime_paths, runtime_paths
+from crt_elf import relocate_absolute_runtime_paths, remove_absolute_runtime_paths, runtime_paths
 from verify_dist import validate_elf_runtime_paths
 
 
@@ -52,6 +52,27 @@ class ElfRuntimePathTests(unittest.TestCase):
                 validate_elf_runtime_paths(dist)
             remove_absolute_runtime_paths(binary, require_origin=True)
             validate_elf_runtime_paths(dist)
+
+    def test_absolute_only_executable_runpath_is_relocated(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            binary = Path(temporary) / "curl"
+            write_elf(binary, "/temporary/stage/sdk/lib")
+            original_size = binary.stat().st_size
+            with self.assertRaises(ValueError):
+                remove_absolute_runtime_paths(binary, require_origin=True)
+            self.assertTrue(relocate_absolute_runtime_paths(binary, "$ORIGIN/../lib"))
+            self.assertEqual(["$ORIGIN/../lib"], runtime_paths(binary))
+            self.assertEqual(original_size, binary.stat().st_size)
+            # Already portable now: the normal cleanup is a no-op, not an error.
+            self.assertFalse(remove_absolute_runtime_paths(binary, require_origin=True))
+            self.assertFalse(relocate_absolute_runtime_paths(binary, "$ORIGIN/../lib"))
+
+    def test_relocate_leaves_origin_runpath_alone(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            binary = Path(temporary) / "libexample.so"
+            write_elf(binary, "$ORIGIN:/checkout/lib")
+            self.assertFalse(relocate_absolute_runtime_paths(binary, "$ORIGIN/../lib"))
+            self.assertEqual(["$ORIGIN:/checkout/lib"], runtime_paths(binary))
 
     def test_non_elf_is_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -859,7 +859,62 @@ total), `verify_dist.py` passed, published atomically. As on Windows,
 android.googlesource.com was returning HTTP 503 for the `make` port, so the
 checksum-verified tarballs were seeded from the in-tree download cache.
 Full in-tree `ctest` 152/152 (one expected camera skip); tooling 77/77.
-Linux/x86_64 remains.
+
+**Linux/x86_64 done 2026-09-29, on the physical Linux host -- Tranche 6 and
+this whole roadmap item are now closed on all three hosts.**
+
+*Lifecycle stress.* `crtmedia_http_lifecycle_test`, unmodified, 3 consecutive
+identical runs (~4.5 s each): `ok transport=40 extractor=30 reconnect=8
+upload=20 tls=15 tls_refused=15 handles=6->4 threads=3->1` (`/proc/self/fd` +
+`/proc/self/task` audit; no fd or thread growth across cycles). No SIGPIPE
+problem here -- the Tranche 5 fixture fix (`MSG_NOSIGNAL`) already covers it.
+
+*Isolated `04-gfx-media` stage.* Rebuilt from the freshly regenerated
+`03-gfx-simple` SDK with `tools/crt-stage-build.py` (FreeType/FFmpeg
+718.4 s at `-j12`, Skia 149.1 s, curl/mbedTLS/zlib layer 109.9 s, 1012.5 s
+total). 19/19 stage tests (the whole networking suite plus everything
+before it), all packaged examples including the new `examples/media-stream`
+consumer -- whose Linux branch (static `libcrtmedia.a` + FFmpeg + the curl
+chain + host libva) had been written but never run: `crtmedia_stream_example:
+samples=70 bytes=17375 tracks=2 seekable=1 size_known=1`, identical to macOS
+-- and the zero-copy bridge (`interop=zero-copy ... cpu_readback=no ...
+pixel_check=pass`). `verify_dist.py` passed and the SDK published atomically.
+The ELF scan needs no new prerequisite entry: `libcrtmedia.so` still imports
+only libva/libva-drm plus the CRT libs (curl/mbedTLS/zlib are linked in
+statically), and every packaged runpath is relocatable.
+
+Two real Linux-only packaging gaps found and fixed (the class this section
+warned about; neither is visible to an in-tree build):
+
+- *Non-relocatable `bin/curl`.* curl's own `make install` gives the `curl`
+  executable `RUNPATH=<temporary stage sdk>/lib` and nothing else, unlike the
+  libraries (which keep `$ORIGIN`). The Linux cleanup step
+  (`remove_staged_absolute_elf_rpaths()`) correctly refuses to strip the only
+  usable runtime path (`ValueError: refusing to remove the only usable runtime
+  path from .../bin/curl`), so the first isolated run died there after
+  19/19 stage tests. The ELF counterpart of the macOS `@executable_path/../lib`
+  fix: new `crt_elf.relocate_absolute_runtime_paths()` rewrites an executable's
+  all-absolute runpath in place (never growing the file) to `$ORIGIN/../lib`,
+  applied to `bin/` before the existing cleanup; two new unit tests in
+  `tools/test_crt_elf.py` (including that the normal cleanup then no-ops and
+  that a slot with `$ORIGIN` is left alone). The published `bin/curl` now
+  shows `RUNPATH [$ORIGIN/../lib]`.
+- *`examples/media-player` no longer linked.* The previously passing example
+  links the static `libcrtmedia.a`, whose extractor/muxer now always carry the
+  HTTP transport, so the packaged rebuild died with `undefined reference to
+  curl_easy_cleanup`/`curl_slist_free_all`. Windows and macOS were unaffected
+  (they link the shared library, which embeds curl). Added the same
+  libcurl -> mbedTLS -> zlib chain, in the same order, as `examples/media-
+  stream` uses to the Linux branch of `examples/media-player/CMakeLists.txt`.
+  These were found in two consecutive isolated reruns, each needing the
+  shipped tools/examples regenerated (`crt-gfx-simple-dist`) first.
+
+Full in-tree `ctest`: 145/146 (the one failure is the pre-existing
+no-sound-card `crtmedia_playback_pipeline_test_runs` gap, unrelated); tooling
+79/79 (77 plus the two new ELF tests).
+
+Publication of release assets remains a separate, deliberate, manual step;
+nothing was uploaded or tagged.
 
 ## Non-goals for the current tranche
 

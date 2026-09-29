@@ -134,6 +134,35 @@ def is_absolute_runtime_entry(entry: str) -> bool:
     return PurePosixPath(entry).is_absolute() or PureWindowsPath(entry).is_absolute()
 
 
+def relocate_absolute_runtime_paths(path: Path, replacement: str) -> bool:
+    """Replace an all-absolute ELF RPATH/RUNPATH with a portable entry.
+
+    For installed executables whose only runtime path is an absolute directory
+    of the temporary build tree (e.g. `bin/curl`, installed by upstream's own
+    `make install` with `RUNPATH=<prefix>/lib`): unlike the libraries, they
+    carry no `$ORIGIN` entry that remove_absolute_runtime_paths() could keep,
+    so it (correctly) refuses them. Rewrites in place without growing the file
+    and leaves any slot that already has a non-absolute entry alone.
+    """
+    contents = _read_elf(path)
+    if contents is None:
+        return False
+    data = bytearray(contents)
+    encoded = replacement.encode("utf-8")
+    changed = False
+    for start, size, value in _runtime_path_slots(data):
+        entries = [entry for entry in value.split(":") if entry]
+        if not entries or not all(is_absolute_runtime_entry(e) for e in entries):
+            continue
+        if len(encoded) > size:
+            raise ValueError(f"portable runtime path does not fit in {path}")
+        data[start:start + len(encoded) + 1] = encoded + b"\0"
+        changed = True
+    if changed:
+        path.write_bytes(data)
+    return changed
+
+
 def remove_absolute_runtime_paths(path: Path, require_origin: bool = False) -> bool:
     """Remove absolute ELF RPATH/RUNPATH entries without growing the file."""
     contents = _read_elf(path)

@@ -57,6 +57,16 @@ if(NOT WIN32 AND NOT APPLE)
     "${CMAKE_SYSROOT}/lib/libavcodec.a"
     "${CMAKE_SYSROOT}/lib/libswresample.a"
     "${CMAKE_SYSROOT}/lib/libavutil.a"
+    # libcrtmedia.a's extractor/muxer now always carry the HTTP transport
+    # (Networking & Streaming), which calls libcurl -> mbedTLS -> zlib; the
+    # static archive records no dependency metadata, so a Linux static
+    # consumer must list them too (Windows/macOS link the shared library,
+    # which embeds them). Same chain and order as examples/media-stream.
+    "${CMAKE_SYSROOT}/lib/libcurl.a"
+    "${CMAKE_SYSROOT}/lib/libmbedtls.a"
+    "${CMAKE_SYSROOT}/lib/libmbedx509.a"
+    "${CMAKE_SYSROOT}/lib/libmbedcrypto.a"
+    "${CMAKE_SYSROOT}/lib/libz.a"
     "${CMAKE_SYSROOT}/lib/libxkbcommon.a")
 
   # Real host libwayland-client.so (2026-09-22, "Hardware video decode"

@@ -10,6 +10,39 @@ substantive update.
 
 ## 2026-09-29
 
+- **Networking & Streaming Tranche 6 closed on Linux/x86_64 -- and with it
+  the whole roadmap item on all three hosts: two real Linux-only packaging
+  gaps found by the first isolated stage build with the curl layer.**
+  `docs/crtmedia_networking_acceptance.md`'s Tranche 6 section has the full
+  detail.
+
+  `crtmedia_http_lifecycle_test`, unmodified, 3 consecutive identical runs:
+  `ok transport=40 extractor=30 reconnect=8 upload=20 tls=15 tls_refused=15
+  handles=6->4 threads=3->1` (no fd/thread growth). The isolated
+  `04-gfx-media` rebuild (FreeType/FFmpeg 718 s, Skia 149 s, curl/mbedTLS/
+  zlib 110 s) got through 19/19 stage tests and then failed twice, each time
+  on something no in-tree build can show: (1) curl's own `make install` gives
+  `bin/curl` an absolute-only `RUNPATH` into the temporary stage SDK (its
+  libraries keep `$ORIGIN`), so `remove_staged_absolute_elf_rpaths()`
+  refused it -- fixed with a new `crt_elf.relocate_absolute_runtime_paths()`
+  that rewrites an executable's all-absolute runpath in place to
+  `$ORIGIN/../lib` (the ELF counterpart of macOS' `@executable_path/../lib`
+  fix; two new unit tests); (2) `examples/media-player`, which links the
+  static `libcrtmedia.a`, no longer linked because that archive now always
+  carries the HTTP transport (`undefined reference to curl_easy_cleanup`) --
+  fixed by adding the libcurl -> mbedTLS -> zlib chain to its Linux branch,
+  as `examples/media-stream` already does (Windows/macOS link the shared
+  library, which embeds curl). After both: 19/19 stage tests, all packaged
+  examples including the never-before-run Linux `examples/media-stream`
+  consumer (`samples=70 bytes=17375 tracks=2 seekable=1 size_known=1`,
+  identical to macOS) and the zero-copy bridge (`cpu_readback=no`,
+  `pixel_check=pass`), `verify_dist.py` (no new prerequisite needed:
+  `libcrtmedia.so` still imports only libva/libva-drm plus CRT libs), and
+  atomic publish; published `bin/curl` shows `RUNPATH [$ORIGIN/../lib]`.
+  Full in-tree `ctest` 145/146 (the one failure is the pre-existing
+  no-sound-card `crtmedia_playback_pipeline_test_runs` gap); tooling 79/79.
+  Release assets were not uploaded or tagged.
+
 - **Networking & Streaming Tranche 6 replayed on macOS/arm64: lifecycle
   stress and isolated `04-gfx-media` rebuild pass after two real macOS fixes.**
   `docs/crtmedia_networking_acceptance.md`'s Tranche 6 section has the detail.

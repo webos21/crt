@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 
 from crt_dist_prerequisites import external_prerequisites_for
-from crt_elf import needed_libraries, remove_absolute_runtime_paths
+from crt_elf import needed_libraries, relocate_absolute_runtime_paths, remove_absolute_runtime_paths
 
 
 DEFAULT_DEPENDENCY_JOBS = max(1, min(os.cpu_count() or 2, 4))
@@ -254,6 +254,17 @@ def portable_macho_dependency_paths(root: Path) -> None:
 
 def remove_staged_absolute_elf_rpaths(root: Path) -> None:
     """Keep packaged ELF runtime paths relocatable."""
+    # Installed executables (bin/curl from the Networking & Streaming curl
+    # layer) come out of upstream's `make install` with only an absolute
+    # RUNPATH into this temporary tree and no $ORIGIN entry to keep -- the
+    # ELF counterpart of portable_macho_dependency_paths()'s bin/ handling.
+    # Their libraries are always at ../lib.
+    bin_dir = root / "bin"
+    if bin_dir.is_dir():
+        for path in bin_dir.iterdir():
+            if path.is_symlink() or not path.is_file():
+                continue
+            relocate_absolute_runtime_paths(path, "$ORIGIN/../lib")
     for path in root.rglob("*"):
         if path.is_symlink() or not path.is_file():
             continue

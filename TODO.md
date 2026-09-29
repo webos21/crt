@@ -57,63 +57,10 @@ newest entry first) rather than leaving it here.
 
 ## In Progress
 
-### Networking and streaming
-
-Promoted 2026-09-28 after Encode and capture closed on Linux/x86_64,
-macOS/arm64, and Windows/x64. The frozen contract, acceptance gates, and
-host order live in
-[`docs/crtmedia_networking_acceptance.md`](docs/crtmedia_networking_acceptance.md).
-Keep completed evidence in `HISTORY.md`; this list tracks only tranche state.
-Adaptive streaming, RTSP, WebRTC, and JavaScript bindings are later
-consumers, not completion gates for this tranche.
-
-* [x] **0. Freeze the transport/streaming acceptance contract.** Closed
-  2026-09-28, recorded in `HISTORY.md`. Error model
-  (`CRTMEDIA_ERROR_TIMEOUT`/`CANCELLED`/`PROTOCOL`, added to
-  `crtmedia_result`), source/sink capability bits, additive stream source/
-  sink API shape, back-pressure/drop policy, reconnect (`Range`+`If-Range`)
-  rule, and the real TLS trust policy are all frozen in `docs/
-  crtmedia_networking_acceptance.md`.
-* [x] **1. Implement and prove the bounded transport core.** Closed
-  2026-09-29 on all three hosts, recorded in `HISTORY.md`. `libcrtmedia/
-  src/transport_queue.{c,h}`, no socket/curl/TLS dependency, fully
-  resource-free and host-neutral, real-pthread deterministic acceptance
-  (`crtmedia_transport_queue_test: ok watermark=pass timeout=pass eof=pass
-  stress_producer_faster=pass stress_consumer_faster=pass
-  cancel_writer=pass cancel_reader=pass release_wakes_all=pass`). Windows/
-  x64 done 2026-09-28; macOS/arm64 and Linux/x86_64 both replayed the
-  identical, unmodified source on 2026-09-29 with no code changes needed --
-  5 consecutive runs each, no flakiness. Full in-tree `ctest` on Linux:
-  139/140 (the one failure is the pre-existing, unrelated no-sound-card
-  gap).
-* [x] **2. Add progressive HTTP input and extractor integration.** Closed
-  2026-09-29 on Windows/x64, macOS/arm64, and Linux/x86_64; implementation,
-  host-specific findings, and complete acceptance evidence are recorded in
-  `HISTORY.md` and `docs/crtmedia_networking_acceptance.md`.
-* [x] **3. Add encoded streaming output.** Closed 2026-09-29 on Windows/x64,
-  macOS/arm64, and Linux/x86_64 (physical Linux host, not WSL); implementation,
-  host-specific findings, and complete acceptance evidence are recorded in
-  `HISTORY.md` and `docs/crtmedia_networking_acceptance.md`.
-* [x] **4. Define reconnect and discontinuity behavior.** Closed 2026-09-29 on
-  Windows/x64, macOS/arm64, and Linux/x86_64; implementation, the three real
-  bugs found on the way, and complete acceptance evidence are recorded in
-  `HISTORY.md` and `docs/crtmedia_networking_acceptance.md`.
-* [x] **5. Add HTTPS and cross-host acceptance.** Closed 2026-09-29 on
-  Windows/x64, macOS/arm64, and Linux/x86_64; implementation, the Linux-only
-  fixture `SIGPIPE` finding, and complete acceptance evidence are recorded in
-  `HISTORY.md` and `docs/crtmedia_networking_acceptance.md`.
-* [ ] **6. Close lifecycle and isolated-package acceptance.** Windows/x64
-  done 2026-09-29, recorded in `HISTORY.md`: `crtmedia_http_lifecycle_test`
-  (connect/stream/cancel/reconnect/destroy stress with a native handle/fd/
-  thread audit) and the isolated `04-gfx-media` stage rebuilt with curl/
-  mbedTLS/zlib, the whole networking suite (17/17 stage tests), an installed
-  `examples/media-stream` consumer, `verify_dist.py` and atomic publication.
-  **macOS/arm64 done 2026-09-29:** lifecycle test 3 identical runs, isolated
-  stage rebuilt end to end (17/17 stage tests, installed `examples/media-stream`
-  consumer, `verify_dist.py`, atomic publish); found and fixed two real macOS
-  bugs (fixture SIGPIPE; non-relocatable curl/zlib dylib ids). Linux/x86_64
-  replay (incl. its `examples/media-stream` branch) remains; publish only
-  after all three hosts pass.
+Nothing in progress right now -- see `Planned` below for what to pick up next.
+When an item is promoted into progress, give it its own subsection here;
+when it finishes, move the detail to `HISTORY.md` and remove the subsection
+(matching this file's own `Done` section, which stays empty by design).
 
 ## Planned
 
@@ -124,19 +71,19 @@ The completed cross-host baseline and its exact validation evidence stay in
 and dependency order stay in [`docs/runtime_roadmap.md`](docs/runtime_roadmap.md).
 The allocator baseline decision gate is closed: keep the current allocator and
 leave Scudo conditional. Hardware video decode, Zero-copy decoded textures,
-and Encode and capture are all closed on Linux/x86_64, macOS/arm64, and
-Windows/x64 (`HISTORY.md`, 2026-09-22..28; full tranche-by-tranche detail in
-`docs/crtmedia_encode_capture_acceptance.md`). Networking and streaming is
-promoted into `In Progress` above; the remaining roadmap item stays here until
-that transport contract is accepted.
+Encode and capture, and Networking and streaming are all closed on
+Linux/x86_64, macOS/arm64, and Windows/x64 (`HISTORY.md`, 2026-09-22..29; full
+tranche-by-tranche detail in `docs/crtmedia_encode_capture_acceptance.md` and
+`docs/crtmedia_networking_acceptance.md`). Promote the next tranche below when
+its prerequisite evidence is available.
 
 1. **WebRTC, then JavaScript.** Treat WebRTC as a consumer-driven integration
    milestone. Build the real QuickJS core and CRT bindings before extending
    isolated distribution acceptance from `04-gfx-media` to `05-js`; a stage
    skeleton alone is not completion.
 
-The remaining execution order is networking/streaming, WebRTC, and finally the
-complete JavaScript application-runtime layer.
+The remaining execution order is WebRTC, then the complete JavaScript
+application-runtime layer.
 
 
 ### Runtime architecture hardening backlog
