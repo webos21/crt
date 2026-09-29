@@ -103,6 +103,38 @@ static int test_eof_drains_before_reporting(void) {
   return 0;
 }
 
+static int test_sticky_error_drains_before_reporting(void) {
+  crtmedia_transport_queue* queue = NULL;
+  CHECK(crtmedia_transport_queue_create(32, 0, 0, &queue) == CRTMEDIA_OK, "create 32-byte queue");
+
+  unsigned char data[5] = {1, 2, 3, 4, 5};
+  size_t written = 0;
+  CHECK(crtmedia_transport_queue_write(queue, data, 5, -1, &written) == CRTMEDIA_OK && written == 5,
+        "write 5 bytes");
+  CHECK(crtmedia_transport_queue_write_error(queue, CRTMEDIA_ERROR_IO) == CRTMEDIA_OK, "signal a producer error");
+
+  CHECK(crtmedia_transport_queue_write_eof(queue) == CRTMEDIA_ERROR_INVALID_ARGUMENT,
+        "write_eof() after write_error() is rejected -- the two terminal states are mutually exclusive");
+
+  unsigned char writing_after_error = 0xFF;
+  CHECK(crtmedia_transport_queue_write(queue, &writing_after_error, 1, 0, &written) == CRTMEDIA_ERROR_INVALID_ARGUMENT,
+        "writing after a sticky error is a programming error, same as writing after EOF");
+
+  unsigned char drain[32];
+  size_t read_count = 0;
+  int eof = 0;
+  CHECK(crtmedia_transport_queue_read(queue, drain, sizeof(drain), 0, &read_count, &eof) == CRTMEDIA_OK &&
+            read_count == 5 && eof == 0 && memcmp(drain, data, 5) == 0,
+        "already-buffered bytes are delivered before the sticky error is reported");
+
+  CHECK(crtmedia_transport_queue_read(queue, drain, sizeof(drain), 0, &read_count, &eof) == CRTMEDIA_ERROR_IO &&
+            read_count == 0 && eof == 0,
+        "the sticky error itself is returned (not CRTMEDIA_OK/eof=1) once the buffer is drained");
+
+  crtmedia_transport_queue_release(queue);
+  return 0;
+}
+
 /* Real concurrent stress: N bytes of a deterministic pattern, written in
  * small chunks by one real pthread and read back by another, through a
  * queue much smaller than the total transfer -- forces many real block/
@@ -299,13 +331,14 @@ int main(void) {
   if (test_would_block_and_high_low_watermark() != 0) return 1;
   if (test_timeout() != 0) return 1;
   if (test_eof_drains_before_reporting() != 0) return 1;
+  if (test_sticky_error_drains_before_reporting() != 0) return 1;
   if (run_stress(/*slow_producer=*/0, /*slow_consumer=*/1) != 0) return 1; /* producer faster */
   if (run_stress(/*slow_producer=*/1, /*slow_consumer=*/0) != 0) return 1; /* consumer faster */
   if (test_cancel_wakes_blocked_writer() != 0) return 1;
   if (test_cancel_wakes_blocked_reader() != 0) return 1;
   if (test_release_wakes_every_waiter() != 0) return 1;
 
-  printf("crtmedia_transport_queue_test: ok watermark=pass timeout=pass eof=pass "
+  printf("crtmedia_transport_queue_test: ok watermark=pass timeout=pass eof=pass sticky_error=pass "
          "stress_producer_faster=pass stress_consumer_faster=pass cancel_writer=pass "
          "cancel_reader=pass release_wakes_all=pass\n");
   return 0;

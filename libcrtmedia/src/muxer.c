@@ -12,6 +12,7 @@
 
 struct crtmedia_muxer {
   AVFormatContext* format_context;
+  int fragmented;
   int started;
   int finished;
 };
@@ -19,7 +20,8 @@ struct crtmedia_muxer {
 crtmedia_result crtmedia_muxer_create(
     const char* path, crtmedia_muxer_output_format output_format,
     crtmedia_muxer** out_muxer) {
-  if (path == NULL || out_muxer == NULL || output_format != CRTMEDIA_MUXER_OUTPUT_MPEG_4) {
+  if (path == NULL || out_muxer == NULL ||
+      (output_format != CRTMEDIA_MUXER_OUTPUT_MPEG_4 && output_format != CRTMEDIA_MUXER_OUTPUT_MPEG_4_FRAGMENTED)) {
     return CRTMEDIA_ERROR_INVALID_ARGUMENT;
   }
   *out_muxer = NULL;
@@ -27,6 +29,7 @@ crtmedia_result crtmedia_muxer_create(
   if (muxer == NULL) {
     return CRTMEDIA_ERROR_UNSUPPORTED;
   }
+  muxer->fragmented = output_format == CRTMEDIA_MUXER_OUTPUT_MPEG_4_FRAGMENTED;
   if (avformat_alloc_output_context2(&muxer->format_context, NULL, "mp4", path) < 0 ||
       muxer->format_context == NULL) {
     free(muxer);
@@ -127,7 +130,23 @@ crtmedia_result crtmedia_muxer_start(crtmedia_muxer* muxer) {
   if (muxer == NULL || muxer->started || muxer->format_context->nb_streams == 0) {
     return CRTMEDIA_ERROR_INVALID_ARGUMENT;
   }
-  if (avformat_write_header(muxer->format_context, NULL) < 0) {
+  AVDictionary* options = NULL;
+  if (muxer->fragmented) {
+    /* frag_keyframe: start a new fragment at every keyframe (this
+     * project's own encoders never request non-keyframe-aligned flushes,
+     * so this is always safe). empty_moov: write a minimal moov with no
+     * sample table before any data, instead of the buffer/rewrite dance
+     * mov_flush_fragment() would otherwise need on a non-seekable pb --
+     * required for this to work at all when writing straight to a
+     * genuinely non-seekable sink (Tranche 3's own HTTP upload). default_
+     * base_moof: each moof's own track fragment header carries its base
+     * data offset directly, avoiding a dependency on the file's overall
+     * moov-relative layout a strict streaming reader might not have. */
+    av_dict_set(&options, "movflags", "frag_keyframe+empty_moov+default_base_moof", 0);
+  }
+  int ret = avformat_write_header(muxer->format_context, &options);
+  av_dict_free(&options);
+  if (ret < 0) {
     return CRTMEDIA_ERROR_UNSUPPORTED;
   }
   muxer->started = 1;

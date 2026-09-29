@@ -4394,7 +4394,6 @@ struct crt_ws_timeval {
 };
 
 static short poll_socket(SOCKET socket_handle, short events) {
-  unsigned long bytes_available = 0;
   short revents = 0;
 
   if ((events & POLLOUT) != 0) {
@@ -4439,10 +4438,37 @@ static short poll_socket(SOCKET socket_handle, short events) {
     }
   }
   if ((events & POLLIN) != 0) {
-    if (winsock.ioctlsocket(socket_handle, CRT_WS_FIONREAD, &bytes_available) == SOCKET_ERROR) {
+    /* FIONREAD alone is wrong for a *listening* socket: found for real
+     * chasing a loopback HTTP test server (Networking & Streaming Tranche
+     * 2, docs/crtmedia_networking_acceptance.md) whose own accept() loop
+     * never woke up even though a real client had already connected and
+     * sent a full request -- confirmed with a minimal standalone repro
+     * (connect() returns 0 immediately, as expected for loopback, but
+     * poll(POLLIN) on the listening socket never returns readable, tens
+     * of iterations straight). FIONREAD answers "how many bytes are
+     * queued to read", which is simply not the question a listening
+     * socket's own readiness represents (it has no byte stream at all,
+     * only pending connections) -- Winsock's ioctlsocket(FIONREAD) on a
+     * listening socket just always reports 0, so this always failed
+     * silently rather than erroring. Winsock's own select() readfds,
+     * exactly like the POLLOUT case immediately above, correctly reports
+     * a listening socket as readable once a connection is pending
+     * (real, documented Winsock behavior, not an extension) as well as a
+     * connected socket once real data (or a graceful peer close) is
+     * available -- one check that is actually correct for both cases,
+     * unlike FIONREAD which only ever covered the second. */
+    struct crt_ws_fd_set1 read_set;
+    struct crt_ws_timeval zero_timeout;
+
+    read_set.fd_count = 1;
+    read_set.fd_array[0] = socket_handle;
+    zero_timeout.tv_sec = 0;
+    zero_timeout.tv_usec = 0;
+
+    if (winsock.select(0, &read_set, 0, 0, &zero_timeout) == SOCKET_ERROR) {
       return POLLERR;
     }
-    if (bytes_available != 0) {
+    if (read_set.fd_count != 0) {
       revents |= POLLIN;
     }
   }

@@ -35,6 +35,38 @@ if(CRTMEDIA_ENABLE_FFMPEG AND NOT CRTMEDIA_FFMPEG_LIBRARIES)
   message(FATAL_ERROR "CRTMEDIA_ENABLE_FFMPEG=ON requires CRTMEDIA_FFMPEG_LIBRARIES. Run the port-build-ffmpeg target, then reconfigure.")
 endif()
 
+# libcurl-backed HTTP transport (crtmedia/extractor.h's additive URL-based
+# open, Networking & Streaming Tranche 2, docs/crtmedia_networking_
+# acceptance.md) -- opt-in, off by default, same CRTMEDIA_ENABLE_FFMPEG
+# pattern immediately above. porting/recipes/curl.json is `shared-pass` on
+# all three hosts (HISTORY.md) and installs into the same shared port-
+# tests/install prefix FFmpeg/FreeType already use.
+set(CRTMEDIA_CURL_PORT_PREFIX "${CMAKE_BINARY_DIR}/port-tests/install" CACHE PATH
+  "Shared porting/recipes install prefix (curl) for libcrtmedia's HTTP transport")
+set(CRTMEDIA_CURL_LIBRARIES "")
+if(EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libcurl.a" AND
+   EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libmbedtls.a" AND
+   EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libmbedx509.a" AND
+   EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libmbedcrypto.a" AND
+   EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libz.a")
+  # Same static link order curl.json's own http-roundtrip-static test uses:
+  # curl -> mbedtls -> mbedx509 -> mbedcrypto -> z.
+  set(CRTMEDIA_CURL_LIBRARIES
+    "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libcurl.a"
+    "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libmbedtls.a"
+    "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libmbedx509.a"
+    "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libmbedcrypto.a"
+    "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libz.a"
+  )
+endif()
+option(CRTMEDIA_ENABLE_CURL "Build libcrtmedia's libcurl-backed HTTP transport when available" OFF)
+if(CRTMEDIA_ENABLE_CURL AND NOT EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/include/curl/curl.h")
+  message(FATAL_ERROR "CRTMEDIA_ENABLE_CURL=ON but ${CRTMEDIA_CURL_PORT_PREFIX}/include/curl/curl.h was not found")
+endif()
+if(CRTMEDIA_ENABLE_CURL AND NOT CRTMEDIA_CURL_LIBRARIES)
+  message(FATAL_ERROR "CRTMEDIA_ENABLE_CURL=ON requires CRTMEDIA_CURL_LIBRARIES. Run the port-build-curl target, then reconfigure.")
+endif()
+
 # crtmedia_backend_objects: real per-host audio output backends for
 # crtmedia/audio_sink.h (TODO.md's upper-runtime roadmap "Build the
 # software player" step -- "host audio sinks: WASAPI, CoreAudio, and
@@ -1443,6 +1475,96 @@ if(CRTMEDIA_ENABLE_FFMPEG)
     PASS_REGULAR_EXPRESSION "crtmedia_extractor_codec_test: ok"
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_extractor_codec_test_runs)
+
+  # crtmedia_http_input_range_test / crtmedia_http_input_chunked_test:
+  # Networking & Streaming Tranche 2 (docs/crtmedia_networking_
+  # acceptance.md) -- fixtures A and B, a real repository-owned loopback
+  # HTTP/1.1 server (tests/http_test_server.h) driving crtmedia_extractor_
+  # create_from_url() end to end. Host-generic like crtmedia_extractor_
+  # codec_test above (this project's own CRT socket API, no host raw
+  # sockets), gated additionally on CRTMEDIA_ENABLE_CURL since that is what
+  # actually makes crtmedia_extractor_create_from_url() do more than return
+  # CRTMEDIA_ERROR_UNSUPPORTED (extractor.c's own CRTMEDIA_HAVE_HTTP_
+  # TRANSPORT compile-time gate, crtmedia_targets.cmake).
+  if(CRTMEDIA_ENABLE_CURL)
+    add_executable(crtmedia_http_input_range_test
+      ${CRT_STARTUP_OBJECTS}
+      tests/http_input_range_test.c
+      tests/http_test_server.c
+    )
+    target_link_libraries(crtmedia_http_input_range_test PRIVATE crt_build_flags crtmedia)
+    target_include_directories(crtmedia_http_input_range_test PRIVATE
+      "${CMAKE_SOURCE_DIR}/libc/include"
+    )
+    target_compile_definitions(crtmedia_http_input_range_test PRIVATE
+      CRTMEDIA_TEST_VIDEO_PATH="${CMAKE_SOURCE_DIR}/libcrtmedia/assets/test_video.mp4"
+    )
+    target_link_libraries(crtmedia_http_input_range_test PRIVATE crt_compiler_rt_builtins)
+    target_link_options(crtmedia_http_input_range_test PRIVATE
+      -nostdlib
+      -nostartfiles
+      -nodefaultlibs
+    )
+    if(CRT_TARGET_OS STREQUAL "macos")
+      target_link_options(crtmedia_http_input_range_test PRIVATE -Wl,-e,_start -Wl,-dead_strip)
+      target_link_libraries(crtmedia_http_input_range_test PRIVATE c m dl cxx)
+      target_link_libraries(crtmedia_http_input_range_test PRIVATE System)
+    elseif(CRT_TARGET_OS STREQUAL "linux")
+      target_link_options(crtmedia_http_input_range_test PRIVATE -Wl,-e,_start -Wl,--gc-sections)
+    elseif(CRT_TARGET_OS STREQUAL "windows")
+      target_link_options(crtmedia_http_input_range_test PRIVATE
+        -Wl,/entry:mainCRTStartup -Wl,/subsystem:console -Wl,/OPT:REF)
+      target_link_libraries(crtmedia_http_input_range_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+    endif()
+    crt_link_startup_end_objects(crtmedia_http_input_range_test)
+    add_dependencies(crtmedia_http_input_range_test c crt1 crtmedia)
+    add_test(NAME crtmedia_http_input_range_test_runs COMMAND crtmedia_http_input_range_test)
+    set_tests_properties(crtmedia_http_input_range_test_runs PROPERTIES
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+      PASS_REGULAR_EXPRESSION "crtmedia_http_input_range_test: ok"
+      TIMEOUT 60
+    )
+    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_http_input_range_test_runs)
+
+    add_executable(crtmedia_http_input_chunked_test
+      ${CRT_STARTUP_OBJECTS}
+      tests/http_input_chunked_test.c
+      tests/http_test_server.c
+    )
+    target_link_libraries(crtmedia_http_input_chunked_test PRIVATE crt_build_flags crtmedia)
+    target_include_directories(crtmedia_http_input_chunked_test PRIVATE
+      "${CMAKE_SOURCE_DIR}/libc/include"
+    )
+    target_compile_definitions(crtmedia_http_input_chunked_test PRIVATE
+      CRTMEDIA_TEST_HTTP_CHUNKED_FIXTURE_PATH="${CMAKE_CURRENT_BINARY_DIR}/crtmedia_http_input_chunked_test_fixture.mp4"
+    )
+    target_link_libraries(crtmedia_http_input_chunked_test PRIVATE crt_compiler_rt_builtins)
+    target_link_options(crtmedia_http_input_chunked_test PRIVATE
+      -nostdlib
+      -nostartfiles
+      -nodefaultlibs
+    )
+    if(CRT_TARGET_OS STREQUAL "macos")
+      target_link_options(crtmedia_http_input_chunked_test PRIVATE -Wl,-e,_start -Wl,-dead_strip)
+      target_link_libraries(crtmedia_http_input_chunked_test PRIVATE c m dl cxx)
+      target_link_libraries(crtmedia_http_input_chunked_test PRIVATE System)
+    elseif(CRT_TARGET_OS STREQUAL "linux")
+      target_link_options(crtmedia_http_input_chunked_test PRIVATE -Wl,-e,_start -Wl,--gc-sections)
+    elseif(CRT_TARGET_OS STREQUAL "windows")
+      target_link_options(crtmedia_http_input_chunked_test PRIVATE
+        -Wl,/entry:mainCRTStartup -Wl,/subsystem:console -Wl,/OPT:REF)
+      target_link_libraries(crtmedia_http_input_chunked_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+    endif()
+    crt_link_startup_end_objects(crtmedia_http_input_chunked_test)
+    add_dependencies(crtmedia_http_input_chunked_test c crt1 crtmedia)
+    add_test(NAME crtmedia_http_input_chunked_test_runs COMMAND crtmedia_http_input_chunked_test)
+    set_tests_properties(crtmedia_http_input_chunked_test_runs PROPERTIES
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+      PASS_REGULAR_EXPRESSION "crtmedia_http_input_chunked_test: ok"
+      TIMEOUT 60
+    )
+    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_http_input_chunked_test_runs)
+  endif()
 
   # crtmedia_hw_decode_test: TODO.md's "hardware decode, phase A" step
   # (2026-09-08) -- see tests/hw_decode_test.c's own top comment for the

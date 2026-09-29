@@ -229,6 +229,39 @@ function(crt_add_crtmedia_targets)
     )
     target_link_libraries(crtmedia_shared PRIVATE ${CRTMEDIA_FFMPEG_LIBRARIES})
     target_link_libraries(crtmedia_shared PRIVATE ${CRTMEDIA_LINUX_VAAPI_LIBS})
+
+    # libcurl-backed HTTP transport (Networking & Streaming Tranche 2,
+    # docs/crtmedia_networking_acceptance.md) -- additive, only makes sense
+    # together with FFmpeg's extractor (the custom AVIOContext this feeds).
+    if(CRTMEDIA_ENABLE_CURL)
+      set(CRTMEDIA_HTTP_SOURCES
+        "${CRTMEDIA_ROOT}/src/http_transport.c"
+        "${CRTMEDIA_ROOT}/src/http_avio.c"
+      )
+      # curl/curl.h #includes <winsock2.h> whenever _WIN32 is defined
+      # (this PAL has no such header): the same -U_WIN32 family curl.json's
+      # own http-roundtrip-static/-shared tests already need to compile
+      # against these installed headers, routing curl's own public header
+      # onto its portable-POSIX-host branch instead of native Windows.
+      if(CRT_TARGET_OS STREQUAL "windows")
+        set_source_files_properties(${CRTMEDIA_HTTP_SOURCES} PROPERTIES
+          COMPILE_OPTIONS "-U_WIN32;-U_WIN32_WCE;-U__WIN32__;-UWIN32;-U__MINGW32__")
+      endif()
+      # extractor.c's own crtmedia_extractor_create_from_url() is gated on
+      # this compile definition, not just CMake source selection -- it is
+      # always *compiled* (unconditionally part of extractor.c), but only
+      # *implemented* (rather than a plain CRTMEDIA_ERROR_UNSUPPORTED stub)
+      # when this is defined, so extractor.c itself never needs a curl/
+      # libavformat AVIOContext #include unless this whole feature is on.
+      target_compile_definitions(crtmedia PRIVATE CRTMEDIA_HAVE_HTTP_TRANSPORT=1)
+      target_compile_definitions(crtmedia_shared PRIVATE CRTMEDIA_HAVE_HTTP_TRANSPORT=1)
+      target_sources(crtmedia PRIVATE ${CRTMEDIA_HTTP_SOURCES})
+      target_include_directories(crtmedia PRIVATE "${CRTMEDIA_CURL_PORT_PREFIX}/include")
+      target_link_libraries(crtmedia PRIVATE ${CRTMEDIA_CURL_LIBRARIES})
+      target_sources(crtmedia_shared PRIVATE ${CRTMEDIA_HTTP_SOURCES})
+      target_include_directories(crtmedia_shared PRIVATE "${CRTMEDIA_CURL_PORT_PREFIX}/include")
+      target_link_libraries(crtmedia_shared PRIVATE ${CRTMEDIA_CURL_LIBRARIES})
+    endif()
   endif()
 
   if(COMMAND crt_configure_shared_runtime)

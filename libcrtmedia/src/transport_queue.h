@@ -23,6 +23,22 @@
  * after EOF has been signaled is a programming error
  * (CRTMEDIA_ERROR_INVALID_ARGUMENT), not a transport condition.
  *
+ * A sticky producer *error* works the same way as EOF but is distinct from
+ * it: crtmedia_transport_queue_write_error() marks the producer done with a
+ * real failure (e.g. a dropped HTTP connection, Networking & Streaming
+ * Tranche 2's own first real producer) rather than a clean end of stream.
+ * Already-buffered bytes still drain first; once the buffer is empty,
+ * read() returns the stored error itself instead of CRTMEDIA_OK with
+ * *out_eof set.
+ * A caller that only checks *out_eof without checking the return code
+ * would otherwise treat a truncated transfer as a clean, complete one --
+ * exactly the corruption docs/crtmedia_networking_acceptance.md's own
+ * reconnect section warns about. This was missing from Tranche 1's
+ * original delivery (only EOF/cancellation existed) -- a real gap found
+ * wiring the first real producer on top of it, added additively here
+ * rather than amending that already-closed, already-replayed-on-all-three-
+ * hosts work.
+ *
  * Cancellation is caller-driven only (crtmedia_transport_queue_cancel()),
  * never a spontaneous decision by this queue itself. Once cancelled, every
  * call -- including ones already blocked -- returns CRTMEDIA_ERROR_CANCELLED
@@ -64,14 +80,30 @@ crtmedia_result crtmedia_transport_queue_write(
     crtmedia_transport_queue* queue, const void* data, size_t size, int timeout_ms, size_t* out_written);
 
 /* Marks the producer side done. Idempotent. Wakes any blocked reader so it
- * can drain the remaining buffered bytes and then observe EOF. */
+ * can drain the remaining buffered bytes and then observe EOF. Returns
+ * CRTMEDIA_ERROR_INVALID_ARGUMENT if a sticky error was already recorded
+ * (write_error() and write_eof() are mutually exclusive terminal states;
+ * the first one recorded wins). */
 crtmedia_result crtmedia_transport_queue_write_eof(crtmedia_transport_queue* queue);
 
+/* Marks the producer side done with a real failure instead of a clean EOF
+ * -- see this header's own top comment for the full "why". `error` must be
+ * a negative crtmedia_result other than CRTMEDIA_WOULD_BLOCK or
+ * CRTMEDIA_ERROR_CANCELLED (cancellation already has its own, caller-
+ * driven path: crtmedia_transport_queue_cancel()). Idempotent: only the
+ * first call's error is stored; later calls (including a write_eof() after
+ * this) are no-ops. Wakes any blocked reader so it can drain the remaining
+ * buffered bytes and then observe the error. */
+crtmedia_result crtmedia_transport_queue_write_error(crtmedia_transport_queue* queue, crtmedia_result error);
+
 /* Copies up to `capacity` bytes out of the queue into `data`, blocking per
- * timeout_ms while the queue is empty and EOF has not been signaled yet.
- * On CRTMEDIA_OK: *out_read > 0 and *out_eof = 0 means data; *out_read == 0
- * and *out_eof = 1 means the queue is drained and the producer signaled
- * EOF; *out_read is never 0 with *out_eof 0. */
+ * timeout_ms while the queue is empty and neither EOF nor a sticky error
+ * has been signaled yet. On CRTMEDIA_OK: *out_read > 0 and *out_eof = 0
+ * means data; *out_read == 0 and *out_eof = 1 means the queue is drained
+ * and the producer signaled a clean EOF; *out_read is never 0 with
+ * *out_eof 0. If the producer instead signaled a sticky error via
+ * write_error(), that error itself is returned (not CRTMEDIA_OK) once the
+ * buffer is drained, with *out_read == 0 and *out_eof == 0. */
 crtmedia_result crtmedia_transport_queue_read(
     crtmedia_transport_queue* queue, void* data, size_t capacity, int timeout_ms, size_t* out_read, int* out_eof);
 

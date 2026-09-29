@@ -17,6 +17,8 @@ struct crtmedia_transport_queue {
 
   int eof_written;
   int cancelled;
+  int has_error;
+  crtmedia_result stored_error;
 
   /* Teardown safety: release() must not destroy lock/not_full/not_empty
    * while a producer or consumer thread is still inside its own
@@ -108,7 +110,7 @@ crtmedia_result crtmedia_transport_queue_write(
     pthread_mutex_unlock(&queue->lock);
     return CRTMEDIA_ERROR_CANCELLED;
   }
-  if (queue->eof_written) {
+  if (queue->eof_written || queue->has_error) {
     pthread_mutex_unlock(&queue->lock);
     return CRTMEDIA_ERROR_INVALID_ARGUMENT;
   }
@@ -155,7 +157,29 @@ crtmedia_result crtmedia_transport_queue_write_eof(crtmedia_transport_queue* que
     pthread_mutex_unlock(&queue->lock);
     return CRTMEDIA_ERROR_CANCELLED;
   }
+  if (queue->has_error) {
+    pthread_mutex_unlock(&queue->lock);
+    return CRTMEDIA_ERROR_INVALID_ARGUMENT;
+  }
   queue->eof_written = 1;
+  pthread_cond_broadcast(&queue->not_empty);
+  pthread_mutex_unlock(&queue->lock);
+  return CRTMEDIA_OK;
+}
+
+crtmedia_result crtmedia_transport_queue_write_error(crtmedia_transport_queue* queue, crtmedia_result error) {
+  if (queue == NULL || error == CRTMEDIA_OK || error == CRTMEDIA_WOULD_BLOCK || error == CRTMEDIA_ERROR_CANCELLED) {
+    return CRTMEDIA_ERROR_INVALID_ARGUMENT;
+  }
+  pthread_mutex_lock(&queue->lock);
+  if (queue->cancelled) {
+    pthread_mutex_unlock(&queue->lock);
+    return CRTMEDIA_ERROR_CANCELLED;
+  }
+  if (!queue->has_error && !queue->eof_written) {
+    queue->has_error = 1;
+    queue->stored_error = error;
+  }
   pthread_cond_broadcast(&queue->not_empty);
   pthread_mutex_unlock(&queue->lock);
   return CRTMEDIA_OK;
@@ -173,7 +197,7 @@ crtmedia_result crtmedia_transport_queue_read(
     pthread_mutex_unlock(&queue->lock);
     return CRTMEDIA_ERROR_CANCELLED;
   }
-  while (queue->count == 0 && !queue->eof_written) {
+  while (queue->count == 0 && !queue->eof_written && !queue->has_error) {
     if (timeout_ms == 0) {
       pthread_mutex_unlock(&queue->lock);
       return CRTMEDIA_WOULD_BLOCK;
@@ -190,6 +214,13 @@ crtmedia_result crtmedia_transport_queue_read(
   }
 
   if (queue->count == 0) {
+    if (queue->has_error) {
+      /* Drained and the producer signaled a real failure: report the
+       * stored error itself, not a clean EOF. */
+      crtmedia_result stored_error = queue->stored_error;
+      pthread_mutex_unlock(&queue->lock);
+      return stored_error;
+    }
     /* Drained and EOF was signaled: report EOF, not a zero-byte data read. */
     *out_eof = 1;
     pthread_mutex_unlock(&queue->lock);

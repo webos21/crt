@@ -31,6 +31,23 @@ extern "C" {
 
 typedef struct crtmedia_extractor crtmedia_extractor;
 
+/* Source/sink capability bits (docs/crtmedia_networking_acceptance.md's
+ * own Tranche 0 "source/sink capability" section) -- crtmedia_extractor_
+ * create()'s own local-file path is always READABLE | SEEKABLE |
+ * SIZE_KNOWN (unchanged, not queryable -- a real local file always has
+ * all three). crtmedia_extractor_create_from_url()'s own HTTP path
+ * queries the server for real: SEEKABLE | SIZE_KNOWN only when a real,
+ * validated Range response proved it (never inferred from a header claim
+ * alone); a chunked/non-Range source is READABLE only, permanently, for
+ * the lifetime of that extractor -- never implied to support an arbitrary
+ * crtmedia_extractor_seek_to() call after the fact. */
+typedef enum crtmedia_source_capability {
+  CRTMEDIA_SOURCE_READABLE = 1 << 0,
+  CRTMEDIA_SOURCE_WRITABLE = 1 << 1,
+  CRTMEDIA_SOURCE_SEEKABLE = 1 << 2,
+  CRTMEDIA_SOURCE_SIZE_KNOWN = 1 << 3,
+} crtmedia_source_capability;
+
 /* One raw, still-encoded sample read from a selected track -- owns its
  * own storage (release is never NULL once a real sample is produced),
  * mirroring crtmedia_frame/crtmedia_audio_buffer's own established
@@ -66,6 +83,31 @@ void crtmedia_sample_release(crtmedia_sample* sample);
  * out_extractor, CRTMEDIA_ERROR_UNSUPPORTED if the file cannot be opened
  * or demuxed at all. */
 crtmedia_result crtmedia_extractor_create(const char* path, crtmedia_extractor** out_extractor);
+
+/* Networking & Streaming Tranche 2 (docs/crtmedia_networking_acceptance.md)
+ * -- opens `url` (http:// only; https:// is Tranche 5's own scope) over a
+ * private CRT-owned HTTP transport feeding FFmpeg through private custom
+ * AVIO, additive to crtmedia_extractor_create()'s own local-file path, not
+ * a replacement for it. Always issues a real, validated byte-range probe
+ * at open time (never infers seekability from a header claim) --
+ * crtmedia_extractor_get_capabilities() reports the real result once this
+ * call returns CRTMEDIA_OK. Returns CRTMEDIA_ERROR_INVALID_ARGUMENT for a
+ * null url/out_extractor, CRTMEDIA_ERROR_UNSUPPORTED if this build has no
+ * HTTP transport, CRTMEDIA_ERROR_PROTOCOL for a real HTTP-level failure
+ * (a non-2xx status, or a server that cannot honor the requested byte
+ * range), CRTMEDIA_ERROR_IO/CRTMEDIA_ERROR_TIMEOUT for a real connection
+ * failure, or CRTMEDIA_ERROR_UNSUPPORTED if the container itself cannot
+ * be demuxed once the bytes do arrive (the same failure class as a local
+ * file that cannot be demuxed). */
+crtmedia_result crtmedia_extractor_create_from_url(const char* url, crtmedia_extractor** out_extractor);
+
+/* crtmedia_source_capability bits OR'd together (0 for a null extractor).
+ * A local-file extractor (crtmedia_extractor_create()) always reports
+ * READABLE | SEEKABLE | SIZE_KNOWN. A URL extractor (crtmedia_extractor_
+ * create_from_url()) reports whatever crtmedia_networking_acceptance.md's
+ * own Tranche 0 capability rule actually validated for that specific
+ * source at open time -- see that function's own comment. */
+uint32_t crtmedia_extractor_get_capabilities(const crtmedia_extractor* extractor);
 
 void crtmedia_extractor_release(crtmedia_extractor* extractor);
 

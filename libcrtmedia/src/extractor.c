@@ -18,6 +18,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef CRTMEDIA_HAVE_HTTP_TRANSPORT
+#include "http_avio.h"
+#endif
+
 struct crtmedia_extractor {
   AVFormatContext* fmt_ctx;
   AVPacket* packet;
@@ -27,6 +31,18 @@ struct crtmedia_extractor {
    * AMediaExtractor's own "only selected tracks produce samples"
    * contract. */
   uint8_t* selected;
+  /* crtmedia_source_capability bits (crtmedia/extractor.h) -- always set,
+   * regardless of build configuration: READABLE | SEEKABLE | SIZE_KNOWN
+   * for a local-file extractor, or whatever crtmedia_extractor_create_
+   * from_url() actually validated for a URL extractor. */
+  uint32_t capabilities;
+  /* NULL for a local-file extractor (crtmedia_extractor_create()).
+   * Non-NULL for a URL extractor (crtmedia_extractor_create_from_url()):
+   * owns fmt_ctx->pb (AVFMT_FLAG_CUSTOM_IO is set on fmt_ctx, so
+   * avformat_close_input() never touches it), released after fmt_ctx. */
+#ifdef CRTMEDIA_HAVE_HTTP_TRANSPORT
+  crtmedia_http_avio* http_avio;
+#endif
 };
 
 static const char* mime_for_codec_id(enum AVCodecID codec_id) {
@@ -76,6 +92,7 @@ crtmedia_result crtmedia_extractor_create(const char* path, crtmedia_extractor**
   extractor->fmt_ctx = fmt_ctx;
   extractor->packet = av_packet_alloc();
   extractor->selected = (uint8_t*)calloc(fmt_ctx->nb_streams, sizeof(uint8_t));
+  extractor->capabilities = CRTMEDIA_SOURCE_READABLE | CRTMEDIA_SOURCE_SEEKABLE | CRTMEDIA_SOURCE_SIZE_KNOWN;
   if (extractor->packet == NULL || (fmt_ctx->nb_streams > 0 && extractor->selected == NULL)) {
     crtmedia_extractor_release(extractor);
     return CRTMEDIA_ERROR_UNSUPPORTED;
@@ -83,6 +100,81 @@ crtmedia_result crtmedia_extractor_create(const char* path, crtmedia_extractor**
 
   *out_extractor = extractor;
   return CRTMEDIA_OK;
+}
+
+#ifdef CRTMEDIA_HAVE_HTTP_TRANSPORT
+crtmedia_result crtmedia_extractor_create_from_url(const char* url, crtmedia_extractor** out_extractor) {
+  if (url == NULL || out_extractor == NULL) {
+    return CRTMEDIA_ERROR_INVALID_ARGUMENT;
+  }
+  *out_extractor = NULL;
+
+  crtmedia_http_avio* http_avio = NULL;
+  crtmedia_http_avio_info avio_info;
+  crtmedia_result open_result = crtmedia_http_avio_open(url, &http_avio, &avio_info);
+  if (open_result != CRTMEDIA_OK) {
+    return open_result;
+  }
+
+  AVFormatContext* fmt_ctx = avformat_alloc_context();
+  if (fmt_ctx == NULL) {
+    crtmedia_http_avio_close(http_avio);
+    return CRTMEDIA_ERROR_IO;
+  }
+  fmt_ctx->pb = crtmedia_http_avio_context(http_avio);
+  fmt_ctx->flags |= AVFMT_FLAG_CUSTOM_IO;
+
+  if (avformat_open_input(&fmt_ctx, NULL, NULL, NULL) < 0) {
+    /* avformat_open_input() frees fmt_ctx itself on failure, but
+     * AVFMT_FLAG_CUSTOM_IO means it never touches pb -- ours to close
+     * either way. */
+    crtmedia_http_avio_close(http_avio);
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+  if (avformat_find_stream_info(fmt_ctx, NULL) < 0) {
+    avformat_close_input(&fmt_ctx);
+    crtmedia_http_avio_close(http_avio);
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+
+  crtmedia_extractor* extractor = (crtmedia_extractor*)calloc(1, sizeof(crtmedia_extractor));
+  if (extractor == NULL) {
+    avformat_close_input(&fmt_ctx);
+    crtmedia_http_avio_close(http_avio);
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+  extractor->fmt_ctx = fmt_ctx;
+  extractor->http_avio = http_avio;
+  extractor->packet = av_packet_alloc();
+  extractor->selected = (uint8_t*)calloc(fmt_ctx->nb_streams, sizeof(uint8_t));
+  extractor->capabilities = CRTMEDIA_SOURCE_READABLE;
+  if (avio_info.seekable) {
+    extractor->capabilities |= CRTMEDIA_SOURCE_SEEKABLE;
+  }
+  if (avio_info.size >= 0) {
+    extractor->capabilities |= CRTMEDIA_SOURCE_SIZE_KNOWN;
+  }
+  if (extractor->packet == NULL || (fmt_ctx->nb_streams > 0 && extractor->selected == NULL)) {
+    crtmedia_extractor_release(extractor);
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
+
+  *out_extractor = extractor;
+  return CRTMEDIA_OK;
+}
+#else
+crtmedia_result crtmedia_extractor_create_from_url(const char* url, crtmedia_extractor** out_extractor) {
+  (void)url;
+  if (out_extractor == NULL) {
+    return CRTMEDIA_ERROR_INVALID_ARGUMENT;
+  }
+  *out_extractor = NULL;
+  return CRTMEDIA_ERROR_UNSUPPORTED;
+}
+#endif
+
+uint32_t crtmedia_extractor_get_capabilities(const crtmedia_extractor* extractor) {
+  return extractor != NULL ? extractor->capabilities : 0;
 }
 
 void crtmedia_extractor_release(crtmedia_extractor* extractor) {
@@ -96,6 +188,11 @@ void crtmedia_extractor_release(crtmedia_extractor* extractor) {
   if (extractor->fmt_ctx != NULL) {
     avformat_close_input(&extractor->fmt_ctx);
   }
+#ifdef CRTMEDIA_HAVE_HTTP_TRANSPORT
+  if (extractor->http_avio != NULL) {
+    crtmedia_http_avio_close(extractor->http_avio);
+  }
+#endif
   free(extractor);
 }
 

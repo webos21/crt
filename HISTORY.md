@@ -10,6 +10,97 @@ substantive update.
 
 ## 2026-09-29
 
+- **Networking & Streaming Tranche 2 closed on Windows/x64: progressive
+  HTTP input, a real seek-via-reconnect, and a real, previously-unknown
+  Windows PAL bug found and fixed.** `docs/crtmedia_networking_
+  acceptance.md`'s own Tranche 2 section has the full detail; summary here.
+
+  `crtmedia_extractor_create_from_url()` (`crtmedia/extractor.h`) is the
+  new additive entry point: a private libcurl-backed producer thread
+  (`libcrtmedia/src/http_transport.c`) feeds the already-accepted Tranche 1
+  bounded queue, which a private FFmpeg custom `AVIOContext`
+  (`libcrtmedia/src/http_avio.c`) reads from. Capability detection always
+  issues a real `Range: bytes=<offset>-` request, even at offset 0 --
+  proving `SEEKABLE`/`SIZE_KNOWN` from a validated `206` response, never
+  inferring it from an `Accept-Ranges` header claim, matching this
+  tranche's own frozen contract. Seeking (the seekable fixture only)
+  closes the current transport and opens a brand new one with a freshly
+  validated `Range` request at the target offset -- never a silent,
+  unvalidated jump.
+
+  Two real, repository-owned loopback HTTP/1.1 fixtures
+  (`libcrtmedia/tests/http_test_server.c`, this project's own `<sys/
+  socket.h>`, no host raw sockets), deliberately kept separate so a
+  failure points at one cause instead of three: fixture A serves the
+  existing real `libcrtmedia/assets/test_video.mp4` with real `Range`
+  support (`crtmedia_http_input_range_test.c` -- exercises the seekable
+  path, decodes byte-identical to the existing local-file `crtmedia_
+  extractor_codec_test`, and exercises a real seek-via-reconnect); fixture
+  B serves a fragmented MP4 generated at test time with chunked transfer-
+  encoding and no `Range` support at all (`crtmedia_http_input_chunked_
+  test.c` -- exercises the non-seekable path). Real results: both `ok`, 3
+  consecutive runs each with no flakiness. Full `ctest`: 158/158 (one
+  unrelated, pre-existing environmental skip).
+
+  **A real, previously-unknown Windows PAL bug**, found the moment this
+  project's own code needed to be a real client *and* a real server in the
+  same process for the first time: `poll_socket()` (`libc/src/arch/
+  windows/common/syscall.c`) answered `POLLIN` for every socket using
+  `ioctlsocket(FIONREAD)` -- correct for a connected, data-carrying
+  socket, but `FIONREAD` on a *listening* socket always reports 0 on
+  Winsock (a listening socket has no byte stream, only pending
+  connections), so a real client connecting to fixture A/B's own listening
+  socket never woke that server's own `poll()` loop, ever -- both new
+  tests simply hung forever on the very first request. `porting/recipes/
+  curl.json`'s own extensive Windows debugging history (`HISTORY.md`,
+  earlier entries) never hit this: every prior curl test was a client
+  only, against a real remote host (`example.com`), never this project's
+  own code on both ends of a loopback socket pair. Root-caused with a
+  minimal standalone repro compiled directly against this project's own
+  CRT sysroot via `tools/crt-cc` (`connect()` returns 0 immediately, as
+  expected for loopback, but `poll(POLLIN)` on the listening socket never
+  returned readable across dozens of iterations) before touching any real
+  crtmedia code, confirming the bug lived in the PAL, not the new HTTP
+  layer. Fixed by switching `poll_socket()`'s own `POLLIN` case to a
+  zero-timeout `winsock.select()` readfds check -- the exact same pattern
+  its own `POLLOUT` case already uses for the analogous non-blocking-
+  connect-completion problem (`HISTORY.md`, curl.json's Windows trail) --
+  which correctly reports both "data available" and "a connection is
+  pending" as readable, matching real POSIX `poll()`/`select()` semantics
+  for a listening socket; `FIONREAD` simply answers a different question
+  ("how many bytes are queued") that a listening socket has no answer to
+  at all. Re-verified against the full `ctest` suite (158/158, no
+  regression) since this is a core, shared PAL path, not scoped to
+  networking.
+
+  Two smaller, real findings along the way: (1) Tranche 1's own bounded
+  transport queue had no way to distinguish a truncated transfer (a
+  dropped HTTP connection) from a clean end of stream -- `crtmedia_
+  transport_queue_write_error()` (`libcrtmedia/src/transport_queue.h`)
+  adds a sticky error state, additive to that already-closed, already-
+  three-host-replayed work rather than amending it, covered by a new test
+  case in the existing `crtmedia_transport_queue_test`. (2) Fixture B
+  needed a genuinely forward-streamable MP4 fixture (a plain MP4's `moov`
+  atom sits after all sample data by default, unreachable by a non-
+  seekable reader), so fragmented MP4 write support was added to the
+  muxer (`CRTMEDIA_MUXER_OUTPUT_MPEG_4_FRAGMENTED`, `crtmedia/muxer.h`,
+  `movflags=frag_keyframe+empty_moov+default_base_moof`) -- the same
+  capability Tranche 3's own non-seekable HTTP upload sink will need, real
+  correctly-sequenced shared infrastructure rather than scope creep.
+
+  A negative seek check was deliberately left out of fixture B beyond the
+  capability-bit assertion: real, confirmed FFmpeg behavior found while
+  writing this test makes a seek call's own success/failure an unreliable
+  signal on its own (`av_seek_frame()` on a fragmented MP4 can report
+  success without ever touching the `AVIOContext`, and `AVIOContext`'s own
+  internal read-ahead buffer can silently satisfy a small seek from
+  already-buffered memory regardless of the transport's real seekability)
+  -- neither is a contract violation; `CRTMEDIA_SOURCE_SEEKABLE` is the
+  one reliable, documented signal this contract actually promises, and it
+  is correct.
+
+  Linux/x86_64 and macOS/arm64 replay is next.
+
 - **Networking & Streaming Tranche 1 closed on all three hosts: Linux/
   x86_64 replay, unmodified source, identical result, no code changes
   needed.** `docs/crtmedia_networking_acceptance.md`'s own Tranche 1
