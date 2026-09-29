@@ -245,6 +245,7 @@ STAGES = {
             "libcrtmedia/tests/http_input_range_test.c",
             "libcrtmedia/tests/http_input_chunked_test.c",
             "libcrtmedia/tests/http_output_test.c",
+            "libcrtmedia/tests/http_reconnect_test.c",
             "libcrtmedia/tests/http_test_server.c",
             "libcrtmedia/tests/http_test_server.h",
             "libcrtmedia/tests/http_upload_test_server.c",

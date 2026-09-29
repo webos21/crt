@@ -20,6 +20,12 @@ struct http_test_server {
   const uint8_t* body;
   size_t body_size;
   http_test_server_mode mode;
+  http_test_server_options options;
+  char etag_storage[128];
+  int connection_index; /* 0-based, incremented per accepted connection */
+
+  pthread_mutex_t stats_lock;
+  http_test_server_stats stats;
 };
 
 static void send_all(int fd, const void* data, size_t size) {
@@ -104,22 +110,69 @@ static void send_chunked_response(http_test_server* server, int client_fd) {
   send_all(client_fd, "0\r\n\r\n", 5);
 }
 
+/* Builds the ETag header line for this connection ("" if none). */
+static void format_etag_line(http_test_server* server, char* out, size_t capacity) {
+  out[0] = '\0';
+  if (server->options.etag == NULL) {
+    return;
+  }
+  if (server->options.change_etag_after_first && server->connection_index > 0) {
+    snprintf(out, capacity, "ETag: \"%s-changed\"\r\n", server->options.etag);
+  } else {
+    snprintf(out, capacity, "ETag: \"%s\"\r\n", server->options.etag);
+  }
+}
+
 static void send_range_capable_response(http_test_server* server, int client_fd, const char* request) {
   const char* range_value = find_header_value(request, "Range:");
+  const char* if_range_value = find_header_value(request, "If-Range:");
   int64_t start = -1;
   int64_t end = -1;
   int has_range = range_value != NULL && parse_range_value(range_value, &start, &end);
 
+  pthread_mutex_lock(&server->stats_lock);
+  ++server->stats.requests;
+  if (has_range) {
+    ++server->stats.ranged_requests;
+    server->stats.last_range_start = (int)start;
+    if (start > 0) {
+      ++server->stats.resume_requests;
+      if (if_range_value != NULL) {
+        ++server->stats.resume_requests_with_if_range;
+      }
+    }
+  }
+  pthread_mutex_unlock(&server->stats_lock);
+
+  char etag_line[192];
+  format_etag_line(server, etag_line, sizeof(etag_line));
+
+  /* RFC 9110 If-Range: the Range is honored only when the validator still
+   * matches; otherwise the full current representation is returned. */
+  if (has_range && if_range_value != NULL && server->options.honor_if_range && etag_line[0] != '\0') {
+    while (*if_range_value == ' ') ++if_range_value;
+    char expected[192];
+    snprintf(expected, sizeof(expected), "%s", etag_line + 6); /* skip "ETag: " */
+    size_t expected_len = strlen(expected);
+    while (expected_len > 0 && (expected[expected_len - 1] == '\r' || expected[expected_len - 1] == '\n')) {
+      expected[--expected_len] = '\0';
+    }
+    if (strncmp(if_range_value, expected, expected_len) != 0) {
+      has_range = 0;
+    }
+  }
+
   if (!has_range) {
-    char header[256];
+    char header[384];
     int header_len = snprintf(
         header, sizeof(header),
         "HTTP/1.1 200 OK\r\n"
         "Content-Length: %zu\r\n"
         "Accept-Ranges: bytes\r\n"
+        "%s"
         "Connection: close\r\n"
         "\r\n",
-        server->body_size);
+        server->body_size, etag_line);
     send_all(client_fd, header, (size_t)header_len);
     send_all(client_fd, server->body, server->body_size);
     return;
@@ -140,18 +193,24 @@ static void send_range_capable_response(http_test_server* server, int client_fd,
   int64_t clamped_end = (end < 0 || (size_t)end >= server->body_size) ? (int64_t)server->body_size - 1 : end;
   size_t length = (size_t)(clamped_end - start + 1);
 
-  char header[256];
+  char header[384];
   int header_len = snprintf(
       header, sizeof(header),
       "HTTP/1.1 206 Partial Content\r\n"
       "Content-Range: bytes %lld-%lld/%zu\r\n"
       "Content-Length: %zu\r\n"
       "Accept-Ranges: bytes\r\n"
+      "%s"
       "Connection: close\r\n"
       "\r\n",
-      (long long)start, (long long)clamped_end, server->body_size, length);
+      (long long)start, (long long)clamped_end, server->body_size, length, etag_line);
   send_all(client_fd, header, (size_t)header_len);
-  send_all(client_fd, server->body + start, length);
+  size_t to_send = length;
+  if (server->connection_index < server->options.truncate_connections &&
+      server->options.truncate_after_bytes < to_send) {
+    to_send = server->options.truncate_after_bytes; /* then the caller closes: a mid-response drop */
+  }
+  send_all(client_fd, server->body + start, to_send);
 }
 
 static void handle_connection(http_test_server* server, int client_fd) {
@@ -172,6 +231,12 @@ static void handle_connection(http_test_server* server, int client_fd) {
     }
   }
 
+  if (server->options.refuse_after_first && server->connection_index > 0) {
+    pthread_mutex_lock(&server->stats_lock);
+    ++server->stats.requests;
+    pthread_mutex_unlock(&server->stats_lock);
+    return; /* request read, closed with no response */
+  }
   if (server->mode == HTTP_TEST_SERVER_CHUNKED_NO_RANGE) {
     send_chunked_response(server, client_fd);
   } else {
@@ -198,14 +263,16 @@ static void* server_thread_main(void* argument) {
       continue;
     }
     handle_connection(server, client_fd);
+    ++server->connection_index;
     shutdown(client_fd, SHUT_RDWR);
     close(client_fd);
   }
   return NULL;
 }
 
-int http_test_server_start(
-    const void* body, size_t body_size, http_test_server_mode mode, http_test_server** out_server, int* out_port) {
+int http_test_server_start_ex(
+    const void* body, size_t body_size, http_test_server_mode mode, const http_test_server_options* options,
+    http_test_server** out_server, int* out_port) {
   if (body == NULL || out_server == NULL || out_port == NULL) {
     return -1;
   }
@@ -248,9 +315,19 @@ int http_test_server_start(
   server->body = (const uint8_t*)body;
   server->body_size = body_size;
   server->mode = mode;
+  pthread_mutex_init(&server->stats_lock, NULL);
+  server->stats.last_range_start = -1;
+  if (options != NULL) {
+    server->options = *options;
+    if (options->etag != NULL) {
+      snprintf(server->etag_storage, sizeof(server->etag_storage), "%s", options->etag);
+      server->options.etag = server->etag_storage; /* own a copy: the caller's string may not outlive us */
+    }
+  }
 
   if (pthread_create(&server->thread, NULL, server_thread_main, server) != 0) {
     close(listen_fd);
+    pthread_mutex_destroy(&server->stats_lock);
     free(server);
     return -1;
   }
@@ -259,6 +336,17 @@ int http_test_server_start(
   *out_server = server;
   *out_port = (int)ntohs(bound.sin_port);
   return 0;
+}
+
+int http_test_server_start(
+    const void* body, size_t body_size, http_test_server_mode mode, http_test_server** out_server, int* out_port) {
+  return http_test_server_start_ex(body, body_size, mode, NULL, out_server, out_port);
+}
+
+void http_test_server_get_stats(http_test_server* server, http_test_server_stats* out_stats) {
+  pthread_mutex_lock(&server->stats_lock);
+  *out_stats = server->stats;
+  pthread_mutex_unlock(&server->stats_lock);
 }
 
 void http_test_server_stop(http_test_server* server) {
@@ -270,5 +358,6 @@ void http_test_server_stop(http_test_server* server) {
     pthread_join(server->thread, NULL);
   }
   close(server->listen_fd);
+  pthread_mutex_destroy(&server->stats_lock);
   free(server);
 }

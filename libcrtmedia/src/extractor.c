@@ -128,13 +128,17 @@ crtmedia_result crtmedia_extractor_create_from_url(const char* url, crtmedia_ext
     /* avformat_open_input() frees fmt_ctx itself on failure, but
      * AVFMT_FLAG_CUSTOM_IO means it never touches pb -- ours to close
      * either way. */
+    crtmedia_result network_error = crtmedia_http_avio_last_error(http_avio);
     crtmedia_http_avio_close(http_avio);
-    return CRTMEDIA_ERROR_UNSUPPORTED;
+    /* An unrecoverable network failure while probing the container is a
+     * transport error, not "this is not media" (Networking Tranche 4). */
+    return network_error != CRTMEDIA_OK ? network_error : CRTMEDIA_ERROR_UNSUPPORTED;
   }
   if (avformat_find_stream_info(fmt_ctx, NULL) < 0) {
     avformat_close_input(&fmt_ctx);
+    crtmedia_result network_error = crtmedia_http_avio_last_error(http_avio);
     crtmedia_http_avio_close(http_avio);
-    return CRTMEDIA_ERROR_UNSUPPORTED;
+    return network_error != CRTMEDIA_OK ? network_error : CRTMEDIA_ERROR_UNSUPPORTED;
   }
 
   crtmedia_extractor* extractor = (crtmedia_extractor*)calloc(1, sizeof(crtmedia_extractor));
@@ -273,6 +277,16 @@ crtmedia_result crtmedia_extractor_read_sample(
   for (;;) {
     int read_ret = av_read_frame(extractor->fmt_ctx, extractor->packet);
     if (read_ret < 0) {
+#ifdef CRTMEDIA_HAVE_HTTP_TRANSPORT
+      if (extractor->http_avio != NULL) {
+        /* A network read that could not be recovered is an error, never a
+         * clean end of stream (which would silently truncate the media). */
+        crtmedia_result network_error = crtmedia_http_avio_last_error(extractor->http_avio);
+        if (network_error != CRTMEDIA_OK) {
+          return network_error;
+        }
+      }
+#endif
       *out_eof = 1;
       return CRTMEDIA_OK;
     }

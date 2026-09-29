@@ -49,10 +49,15 @@ extern "C" {
 
 typedef struct crtmedia_http_transport crtmedia_http_transport;
 
+#define CRTMEDIA_HTTP_VALIDATOR_CAPACITY 160
+
 typedef struct crtmedia_http_transport_info {
   int seekable;      /* 1 if this exact request got a validated 206 */
   int64_t size;      /* total resource size in bytes if known, else -1 */
   long status_code;  /* the final (post-redirect) HTTP status */
+  /* The entity validator usable in a later If-Range: a strong ETag, else
+   * Last-Modified, else "" (no safe resume possible). */
+  char validator[CRTMEDIA_HTTP_VALIDATOR_CAPACITY];
 } crtmedia_http_transport_info;
 
 /* queue_capacity is the internal bounded transport_queue's own capacity
@@ -62,6 +67,16 @@ typedef struct crtmedia_http_transport_info {
 crtmedia_result crtmedia_http_transport_open(
     const char* url, int64_t offset, size_t queue_capacity, crtmedia_http_transport** out_transport,
     crtmedia_http_transport_info* out_info);
+
+/* Tranche 4 reconnect: like open(), but sends `Range: bytes=<offset>-` plus
+ * `If-Range: <validator>` and succeeds only when the response is a 206 whose
+ * Content-Range start equals `offset` AND whose own entity validator equals
+ * `validator`. Any other outcome is CRTMEDIA_ERROR_PROTOCOL (a changed
+ * resource must never be spliced into an already-partly-delivered stream),
+ * or the real connection error. `validator` must be non-empty. */
+crtmedia_result crtmedia_http_transport_open_resume(
+    const char* url, int64_t offset, const char* validator, size_t queue_capacity,
+    crtmedia_http_transport** out_transport, crtmedia_http_transport_info* out_info);
 
 /* Thin passthrough to the internal transport_queue's own read() -- see
  * transport_queue.h for the full timeout_ms/out_eof/sticky-error

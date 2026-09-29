@@ -556,6 +556,74 @@ already-accepted timestamp-gap (`crtmedia_timing_discontinuity_test`'s own
 exact-PTS-preservation contract), flush, lifecycle, and software-fallback
 tests around reconnect boundaries specifically, not just in isolation.
 
+**Windows/x64 done 2026-09-29.** Reconnect lives entirely in the private
+`libcrtmedia/src/http_avio.c` read path, on top of `http_transport.c`'s new
+`crtmedia_http_transport_open_resume()`; no public API changed. When a read
+fails with `CRTMEDIA_ERROR_IO`/`_TIMEOUT` (the queue's sticky error, reported
+only after every already-buffered byte was delivered) and the original response
+gave a usable entity validator (strong ETag, else `Last-Modified`; a weak
+`W/` ETag is not a valid `If-Range` validator), it reopens at exactly the count
+of bytes already handed to FFmpeg with `Range: bytes=<n>-` plus
+`If-Range: <validator>`, and accepts the result only when the response is a
+`206`, `Content-Range` starts at `<n>`, and the response carries the same
+validator. Anything else is `CRTMEDIA_ERROR_PROTOCOL` and is not retried.
+Retries are bounded: 3 consecutive attempts with 25/50/100 ms backoff; any
+byte delivered after a resume resets the count. Seeks (`av_seek_frame`) use the
+same validated open when a validator is known. The first unrecoverable failure
+is sticky and reported by `crtmedia_extractor_read_sample()` and
+`crtmedia_extractor_create_from_url()` (`crtmedia_http_avio_last_error()`),
+never as a clean end of stream.
+
+`crtmedia_http_reconnect_test` (repository-owned loopback server with fault
+injection, `tests/http_test_server.h`; extracted sample streams are compared
+by track/PTS/size/payload hash against a clean local-file extraction). Real
+result, 3 consecutive identical runs, ~3.3 s:
+
+```text
+crtmedia_http_reconnect_test: ok samples=70 resumes=2 bounded_retries=3
+    changed_resource=protocol no_validator=io upload_drop=io
+```
+
+| Injected fault | Required outcome | Result |
+| --- | --- | --- |
+| Server closes mid-response twice, validator present | 2 resumes, all with `If-Range`; sample stream identical to local (70/70), max PTS preserved | pass |
+| Same drop, server offers no validator | `CRTMEDIA_ERROR_IO`, zero resume requests | pass |
+| Resource changed, server answers `200` to `If-Range` | `CRTMEDIA_ERROR_PROTOCOL`, no splice | pass |
+| Resource changed, server ignores `If-Range`, `206` with new ETag | `CRTMEDIA_ERROR_PROTOCOL`, no splice | pass |
+| Every resume refused | exactly 3 resume attempts, then `CRTMEDIA_ERROR_IO` | pass |
+| Transport level: matching validator | 206, resumed bytes equal the body from the offset | pass |
+| Receiver dies mid-upload | writer gets `CRTMEDIA_ERROR_IO`; `finish()` not OK; exactly one connection (no auto-resume) | pass |
+
+Regressions run unchanged and green around this work: `crtmedia_timing_
+discontinuity_test` (exact-PTS contract), `crtmedia_capture_encode_lifecycle_
+test`, `crtmedia_encode_mux_test`, `crtmedia_hw_decode_{,flush_,lifecycle_}
+test`, and the Tranche 1-3 tests. The PTS-exactness of a reconnect boundary is
+proven directly by the hash comparison above (PTS is part of the hash); the
+hardware-decode and software-fallback paths do not touch the network reader, so
+their existing tests are the boundary check for them on this host. Full
+in-tree `ctest`: 160/160 (one expected `crtmedia_capture_mf_test` no-webcam
+skip).
+
+Three real bugs found and fixed (none introduced by this tranche's own new
+code):
+
+- `crtmedia_extractor_read_sample()` mapped *every* `av_read_frame()` failure
+  to a clean end of stream, so a dropped connection silently truncated the
+  media. URL extractors now surface the real error; local-file behavior is
+  unchanged.
+- `http_transport.c`'s `Content-Range` parser read the word "bytes" as the
+  start offset (always 0). A nonzero-offset `206` was effectively unvalidated
+  since Tranche 2 (whose tests only ever compared offset 0). It now parses
+  `bytes <start>-<end>/<total>`, and any `206` whose start differs from the
+  request is `CRTMEDIA_ERROR_PROTOCOL`.
+- Windows PAL `poll()` counted one loop iteration as one millisecond while
+  `Sleep(1)` sleeps a full ~15.6 ms timer tick, so a 200 ms timeout blocked
+  ~3 s (every loopback test server took ~3 s to stop; this test took 31.9 s
+  before the fix, 3.3 s after). `__crt_sys_poll()` now measures the timeout
+  against `QueryPerformanceCounter`.
+
+Linux/x86_64 and macOS/arm64 replay is next.
+
 ### 5. HTTPS and cross-host acceptance
 
 Exercise the TLS trust policy above (verify-on-by-default, caller-supplied

@@ -19,7 +19,15 @@
  * documented "seek not supported" convention and this project's own
  * source/sink capability contract (docs/crtmedia_networking_acceptance.md
  * -- "no public API may imply that a non-seekable stream supports
- * arbitrary seek"). */
+ * arbitrary seek").
+ *
+ * Reconnect (Tranche 4): when a read fails mid-stream (server closed early,
+ * timeout) and the original response gave a usable entity validator, the
+ * read transparently resumes at the exact next byte with `Range` +
+ * `If-Range`, requiring 206 + matching Content-Range start + the same
+ * validator on the new response (http_transport.h open_resume()); bounded
+ * retries with backoff. Without a validator, or if the resource changed,
+ * the failure is surfaced through crtmedia_http_avio_last_error(). */
 
 #include "crtmedia/frame.h"
 
@@ -42,6 +50,12 @@ crtmedia_result crtmedia_http_avio_open(
 /* Borrowed pointer, valid until crtmedia_http_avio_close(). The caller
  * (crtmedia_extractor.c) assigns this directly to AVFormatContext::pb. */
 AVIOContext* crtmedia_http_avio_context(crtmedia_http_avio* avio);
+
+/* The first hard failure a read hit that could not be recovered (resume
+ * exhausted, resource changed, server cannot resume), or CRTMEDIA_OK if the
+ * stream has only ever ended cleanly. Networking Tranche 4: the extractor
+ * reports this instead of a clean EOF when av_read_frame() fails. */
+crtmedia_result crtmedia_http_avio_last_error(const crtmedia_http_avio* avio);
 
 void crtmedia_http_avio_close(crtmedia_http_avio* avio);
 

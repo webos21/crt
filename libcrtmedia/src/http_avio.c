@@ -8,9 +8,18 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define CRTMEDIA_HTTP_AVIO_BUFFER_SIZE (64 * 1024)
 #define CRTMEDIA_HTTP_QUEUE_CAPACITY (256 * 1024)
+
+/* Tranche 4 reconnect policy: a lost connection is resumed at most this many
+ * times in a row, with exponentially growing (bounded) backoff between
+ * attempts. Progress -- any byte delivered after a resume -- resets the
+ * count, so a long stream can survive several separate drops, but a server
+ * that keeps failing without delivering anything is given up on quickly. */
+#define CRTMEDIA_HTTP_MAX_CONSECUTIVE_RETRIES 3
+#define CRTMEDIA_HTTP_RETRY_BACKOFF_BASE_MS 25
 
 struct crtmedia_http_avio {
   char* url;
@@ -19,22 +28,91 @@ struct crtmedia_http_avio {
   int64_t position; /* current logical stream position */
   int64_t size;     /* -1 if unknown */
   int seekable;
+  char validator[CRTMEDIA_HTTP_VALIDATOR_CAPACITY]; /* "" => no safe resume */
+  int consecutive_retries;
+  /* First hard read failure (never CRTMEDIA_OK once set). FFmpeg's demuxer
+   * folds any read failure into a generic error or even EOF, so the
+   * extractor asks this object for the real reason instead of guessing --
+   * a lost connection must never look like a clean end of stream. */
+  crtmedia_result last_error;
 };
+
+static void sleep_ms(int ms) {
+  struct timespec delay;
+  delay.tv_sec = ms / 1000;
+  delay.tv_nsec = (long)(ms % 1000) * 1000000L;
+  nanosleep(&delay, NULL);
+}
+
+/* Reopens the byte stream at avio->position after a lost connection, only
+ * when that is provably safe (a validated Range response, an entity
+ * validator known from the original response, and the same validator again
+ * on the resumed one -- http_transport.h's open_resume()). Returns 1 with
+ * avio->transport replaced, or 0 with avio->transport left as the failed
+ * one so the original error is reported. Never delivers a byte twice: the
+ * resume offset is exactly the count of bytes already handed to FFmpeg.
+ * Returns CRTMEDIA_OK once resumed, else the reason to surface. */
+static crtmedia_result try_resume(crtmedia_http_avio* avio, crtmedia_result original_error) {
+  crtmedia_result failure = original_error;
+  if (!avio->seekable || avio->validator[0] == '\0') {
+    return failure;
+  }
+  while (avio->consecutive_retries < CRTMEDIA_HTTP_MAX_CONSECUTIVE_RETRIES) {
+    sleep_ms(CRTMEDIA_HTTP_RETRY_BACKOFF_BASE_MS << avio->consecutive_retries);
+    ++avio->consecutive_retries;
+    crtmedia_http_transport* resumed = NULL;
+    crtmedia_http_transport_info info;
+    crtmedia_result result = crtmedia_http_transport_open_resume(
+        avio->url, avio->position, avio->validator, CRTMEDIA_HTTP_QUEUE_CAPACITY, &resumed, &info);
+    if (result == CRTMEDIA_OK) {
+      crtmedia_http_transport_close(avio->transport);
+      avio->transport = resumed;
+      return CRTMEDIA_OK;
+    }
+    failure = result;
+    if (result == CRTMEDIA_ERROR_PROTOCOL) {
+      break; /* the resource changed or the server cannot resume: never retry into a splice */
+    }
+  }
+  return failure;
+}
 
 static int avio_read_packet(void* opaque, uint8_t* buf, int buf_size) {
   crtmedia_http_avio* avio = (crtmedia_http_avio*)opaque;
-  size_t read_count = 0;
-  int eof = 0;
-  crtmedia_result result =
-      crtmedia_http_transport_read(avio->transport, buf, (size_t)buf_size, -1, &read_count, &eof);
-  if (result != CRTMEDIA_OK) {
-    return result == CRTMEDIA_ERROR_CANCELLED ? AVERROR_EXIT : AVERROR_UNKNOWN;
+  if (avio->last_error != CRTMEDIA_OK) {
+    /* Sticky: once a stream failed for good, FFmpeg retrying the read must
+     * not trigger fresh reconnect attempts. */
+    return avio->last_error == CRTMEDIA_ERROR_CANCELLED ? AVERROR_EXIT : AVERROR_UNKNOWN;
   }
-  if (eof) {
-    return AVERROR_EOF;
+  for (;;) {
+    size_t read_count = 0;
+    int eof = 0;
+    crtmedia_result result =
+        crtmedia_http_transport_read(avio->transport, buf, (size_t)buf_size, -1, &read_count, &eof);
+    if (result == CRTMEDIA_ERROR_IO || result == CRTMEDIA_ERROR_TIMEOUT) {
+      /* Bytes still buffered were drained first (transport_queue's sticky
+       * error semantics), so avio->position is exactly the next byte needed. */
+      crtmedia_result resumed = try_resume(avio, result);
+      if (resumed == CRTMEDIA_OK) {
+        continue;
+      }
+      result = resumed;
+    }
+    if (result != CRTMEDIA_OK) {
+      if (avio->last_error == CRTMEDIA_OK) {
+        avio->last_error = result;
+      }
+      return result == CRTMEDIA_ERROR_CANCELLED ? AVERROR_EXIT : AVERROR_UNKNOWN;
+    }
+    if (eof) {
+      return AVERROR_EOF;
+    }
+    if (read_count > 0) {
+      avio->consecutive_retries = 0;
+    }
+    avio->position += (int64_t)read_count;
+    return (int)read_count;
   }
-  avio->position += (int64_t)read_count;
-  return (int)read_count;
 }
 
 static int64_t avio_seek_callback(void* opaque, int64_t offset, int whence) {
@@ -65,8 +143,13 @@ static int64_t avio_seek_callback(void* opaque, int64_t offset, int whence) {
 
   crtmedia_http_transport* new_transport = NULL;
   crtmedia_http_transport_info info;
+  /* A seek is also a resume of "the same resource": with a known validator,
+   * insist on the same one so a changed resource is never silently mixed in. */
   crtmedia_result result =
-      crtmedia_http_transport_open(avio->url, target, CRTMEDIA_HTTP_QUEUE_CAPACITY, &new_transport, &info);
+      avio->validator[0] != '\0'
+          ? crtmedia_http_transport_open_resume(
+                avio->url, target, avio->validator, CRTMEDIA_HTTP_QUEUE_CAPACITY, &new_transport, &info)
+          : crtmedia_http_transport_open(avio->url, target, CRTMEDIA_HTTP_QUEUE_CAPACITY, &new_transport, &info);
   if (result != CRTMEDIA_OK) {
     return AVERROR_UNKNOWN;
   }
@@ -103,6 +186,7 @@ crtmedia_result crtmedia_http_avio_open(
   }
   avio->size = info.size;
   avio->seekable = info.seekable;
+  memcpy(avio->validator, info.validator, sizeof(avio->validator));
   avio->position = 0;
 
   uint8_t* avio_buffer = (uint8_t*)av_malloc(CRTMEDIA_HTTP_AVIO_BUFFER_SIZE);
@@ -128,6 +212,10 @@ crtmedia_result crtmedia_http_avio_open(
   out_info->size = avio->size;
   *out_avio = avio;
   return CRTMEDIA_OK;
+}
+
+crtmedia_result crtmedia_http_avio_last_error(const crtmedia_http_avio* avio) {
+  return avio != NULL ? avio->last_error : CRTMEDIA_OK;
 }
 
 AVIOContext* crtmedia_http_avio_context(crtmedia_http_avio* avio) {

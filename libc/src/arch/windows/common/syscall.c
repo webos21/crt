@@ -4502,9 +4502,15 @@ long __crt_sys_poll(struct pollfd* fds, unsigned long nfds, int timeout) {
   unsigned long i;
   long ready;
   DWORD slept = 0;
+  long long qpc_frequency = 0;
+  long long qpc_start = 0;
 
   if (fds == 0 && nfds != 0) {
     return -EFAULT;
+  }
+  if (timeout > 0 &&
+      (!QueryPerformanceFrequency(&qpc_frequency) || qpc_frequency <= 0 || !QueryPerformanceCounter(&qpc_start))) {
+    qpc_frequency = 0;
   }
   do {
     ready = 0;
@@ -4551,7 +4557,20 @@ long __crt_sys_poll(struct pollfd* fds, unsigned long nfds, int timeout) {
       Sleep(1);
       continue;
     }
-    if (slept >= (DWORD)timeout) {
+    /* Measure the timeout against real elapsed time, not iterations:
+     * Sleep(1) sleeps a whole timer tick (~15.6 ms by default on Windows),
+     * so counting one iteration as one millisecond stretched a 200 ms poll
+     * timeout to ~3 s. The iteration count remains only as a fallback if
+     * the performance counter is unavailable. */
+    if (qpc_frequency > 0) {
+      long long now_count;
+      if (!QueryPerformanceCounter(&now_count)) {
+        qpc_frequency = 0;
+      } else if (((now_count - qpc_start) * 1000LL) / qpc_frequency >= (long long)timeout) {
+        return 0;
+      }
+    }
+    if (qpc_frequency <= 0 && slept >= (DWORD)timeout) {
       return 0;
     }
     Sleep(1);

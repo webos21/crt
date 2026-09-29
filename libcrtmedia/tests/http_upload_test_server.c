@@ -26,6 +26,8 @@ struct http_upload_test_server {
   size_t body_size;
   size_t body_capacity;
   size_t bytes_since_pause;
+  size_t drop_after_bytes; /* 0 = never drop */
+  volatile int connections;
 };
 
 static int contains_case_insensitive(const char* haystack, const char* needle) {
@@ -59,6 +61,9 @@ static int receive_body_slow(http_upload_test_server* server, int fd, void* data
     if (n <= 0) return -1;
     received += (size_t)n;
     server->bytes_since_pause += (size_t)n;
+    if (server->drop_after_bytes != 0 && server->body_size + received >= server->drop_after_bytes) {
+      return -1;
+    }
     if (server->bytes_since_pause >= 65536) {
       /* Deliberately slow but bounded. Pausing per 64 KiB keeps this test
        * quick even with Windows' coarse sleep clock, while a ~1 MiB body
@@ -155,15 +160,19 @@ static void* upload_server_main(void* argument) {
     socklen_t client_size = sizeof(client_addr);
     int client_fd = accept(server->listen_fd, (struct sockaddr*)&client_addr, &client_size);
     if (client_fd < 0) continue;
+    ++server->connections;
     server->result = handle_upload(server, client_fd);
     shutdown(client_fd, SHUT_RDWR);
     close(client_fd);
-    break;
+    if (server->drop_after_bytes == 0) {
+      break;
+    }
   }
   return NULL;
 }
 
-int http_upload_test_server_start(http_upload_test_server** out_server, int* out_port) {
+static int upload_server_start(
+    size_t drop_after_bytes, http_upload_test_server** out_server, int* out_port) {
   if (out_server == NULL || out_port == NULL) return -1;
   *out_server = NULL;
   *out_port = 0;
@@ -192,6 +201,7 @@ int http_upload_test_server_start(http_upload_test_server** out_server, int* out
     return -1;
   }
   server->listen_fd = listen_fd;
+  server->drop_after_bytes = drop_after_bytes;
   if (pthread_create(&server->thread, NULL, upload_server_main, server) != 0) {
     close(listen_fd);
     free(server);
@@ -201,6 +211,19 @@ int http_upload_test_server_start(http_upload_test_server** out_server, int* out
   *out_server = server;
   *out_port = (int)ntohs(bound.sin_port);
   return 0;
+}
+
+int http_upload_test_server_start(http_upload_test_server** out_server, int* out_port) {
+  return upload_server_start(0, out_server, out_port);
+}
+
+int http_upload_test_server_start_dropping(
+    size_t drop_after_bytes, http_upload_test_server** out_server, int* out_port) {
+  return drop_after_bytes == 0 ? -1 : upload_server_start(drop_after_bytes, out_server, out_port);
+}
+
+int http_upload_test_server_connection_count(http_upload_test_server* server) {
+  return server->connections;
 }
 
 int http_upload_test_server_wait_and_copy(

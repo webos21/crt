@@ -10,6 +10,67 @@ substantive update.
 
 ## 2026-09-29
 
+- **Networking & Streaming Tranche 4 closed on Windows/x64: safe HTTP
+  reconnect (`Range` + `If-Range` + three response checks), a lost connection
+  is never a clean EOF, output never auto-resumes -- and three real,
+  previously-hidden bugs found and fixed along the way.**
+  `docs/crtmedia_networking_acceptance.md`'s own Tranche 4 section has the
+  full detail.
+
+  New `crtmedia_http_reconnect_test` (Windows real result, 3 consecutive
+  identical runs, ~3.3 s): `ok samples=70 resumes=2 bounded_retries=3
+  changed_resource=protocol no_validator=io upload_drop=io`. A repository-owned
+  loopback server injects real faults (closing mid-response, changing the
+  resource between connections, refusing every resume) and the test compares
+  the extracted sample stream (track, PTS, size, every payload byte) against a
+  clean local-file extraction. A server that closes mid-response twice is
+  resumed twice, transparently: `Range: bytes=<next-byte>-` plus
+  `If-Range: <strong ETag or Last-Modified>`, accepted only if the response is
+  a 206, its `Content-Range` start equals the requested offset, and it carries
+  the same validator. The resumed sample stream is byte- and PTS-identical to
+  local (70/70 samples, none lost or duplicated). Retries are bounded (3 in a
+  row, exponential backoff, progress resets the count). No validator, a
+  changed resource (both the "200 to If-Range" and the "206 with a different
+  ETag" shapes), or a server that refuses every resume all fail honestly
+  (`CRTMEDIA_ERROR_IO`/`CRTMEDIA_ERROR_PROTOCOL`), never a splice. A receiver
+  dying mid-upload gives `CRTMEDIA_ERROR_IO` to the writer and the client opens
+  exactly one connection -- output does not auto-resume.
+
+  Three real bugs found by actually running this, none introduced by the
+  tranche itself:
+
+  1. **`crtmedia_extractor_read_sample()` turned every `av_read_frame()`
+     failure -- including a lost network connection -- into a clean
+     end-of-stream** (`CRTMEDIA_OK`, `*out_eof = 1`), silently truncating the
+     media. URL extractors now report the real unrecoverable network error
+     (`crtmedia_http_avio_last_error()`), both from `read_sample()` and from
+     `crtmedia_extractor_create_from_url()` when the drop happens while probing
+     the container (previously a misleading `CRTMEDIA_ERROR_UNSUPPORTED`).
+     Local-file behavior is unchanged.
+  2. **`http_transport.c`'s `Content-Range` parser skipped only up to the first
+     space, so it read the word "bytes" as the start offset (always 0).**
+     Tranche 2's own tests passed only because they requested offset 0 (or
+     never checked the value for a nonzero offset); a resumed or seeked 206
+     response was effectively unvalidated. Rewritten to parse `bytes
+     <start>-<end>/<total>`, and any 206 whose start differs from the request is
+     now `CRTMEDIA_ERROR_PROTOCOL`.
+  3. **Windows PAL `poll()` timeouts ran ~15x too long** (`libc/src/arch/
+     windows/common/syscall.c`, `__crt_sys_poll()`): it counted one loop
+     iteration as one millisecond, but `Sleep(1)` sleeps a full ~15.6 ms timer
+     tick, so `poll(fds, n, 200)` blocked ~3 s. It showed up as every loopback
+     test server taking ~3 s to stop (the reconnect test took 31.9 s before,
+     3.3 s after). The timeout is now measured against `QueryPerformanceCounter`
+     real elapsed time, with the old iteration count kept only as a fallback.
+     Full in-tree `ctest`: 160/160 (the one expected `crtmedia_capture_mf_test`
+     no-webcam skip).
+
+  Also added: `crtmedia_http_transport_open_resume()` (private), test-server
+  fault injection (`http_test_server_start_ex()`, request/`If-Range` stats,
+  dying-upload receiver), and `libcrtmedia/tests/http_reconnect_test.c` in
+  `tools/create_stage_source.py`'s registry. Re-ran the accepted timing-
+  discontinuity, flush/lifecycle, encode/mux, and hardware-decode tests
+  unchanged: all green. Linux/x86_64 and macOS/arm64 replay is next.
+
 - **Networking & Streaming Tranche 3 closed on all three hosts: Linux/x86_64
   replay on the physical Linux host, unmodified source, identical result, no
   code changes needed.** `docs/crtmedia_networking_acceptance.md`'s own

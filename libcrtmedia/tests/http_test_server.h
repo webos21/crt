@@ -35,6 +35,47 @@ typedef enum http_test_server_mode {
   HTTP_TEST_SERVER_CHUNKED_NO_RANGE,
 } http_test_server_mode;
 
+/* Networking & Streaming Tranche 4 fault injection (all default to "off",
+ * i.e. the plain Tranche 2 behavior, when the options struct is zeroed).
+ * Only meaningful in HTTP_TEST_SERVER_RANGE_CAPABLE mode. */
+typedef struct http_test_server_options {
+  /* Entity validator sent as `ETag: "<etag>"` on every response; NULL = the
+   * server offers no validator at all (so a client can never prove a resume
+   * safe). */
+  const char* etag;
+  /* The first `truncate_connections` connections send the full headers
+   * (Content-Length is the honest full length) but close after only
+   * `truncate_after_bytes` body bytes -- a server closing mid-response. */
+  int truncate_connections;
+  size_t truncate_after_bytes;
+  /* Every connection after the first accepts and immediately closes without
+   * any response: a resumed request that never succeeds. */
+  int refuse_after_first;
+  /* From the second connection on, the resource "changed": ETag becomes
+   * "<etag>-changed". With honor_if_range, a mismatching If-Range gets a
+   * full 200 (RFC 9110 behavior); without it the server ignores If-Range and
+   * answers 206 carrying the new ETag -- the two shapes a client must both
+   * refuse to splice. */
+  int change_etag_after_first;
+  int honor_if_range;
+} http_test_server_options;
+
+typedef struct http_test_server_stats {
+  int requests;                    /* every accepted connection with a parsed request */
+  int ranged_requests;             /* requests carrying a Range header */
+  int resume_requests;             /* Range with start > 0 */
+  int resume_requests_with_if_range; /* of those, how many carried If-Range */
+  int last_range_start;            /* start offset of the most recent Range, or -1 */
+} http_test_server_stats;
+
+/* Like http_test_server_start() with fault-injection options. */
+int http_test_server_start_ex(
+    const void* body, size_t body_size, http_test_server_mode mode, const http_test_server_options* options,
+    http_test_server** out_server, int* out_port);
+
+/* Snapshot of what the server has seen so far. */
+void http_test_server_get_stats(http_test_server* server, http_test_server_stats* out_stats);
+
 /* Starts the server on a background thread bound to 127.0.0.1 with an
  * OS-assigned port (*out_port). `body` must outlive the server (this
  * project's own established "caller owns the buffer" convention, matching

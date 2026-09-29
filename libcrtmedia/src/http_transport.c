@@ -22,6 +22,10 @@ struct crtmedia_http_transport {
   int ready;
 
   int64_t requested_offset;
+  char required_validator[CRTMEDIA_HTTP_VALIDATOR_CAPACITY]; /* non-empty => resume mode */
+  char etag[CRTMEDIA_HTTP_VALIDATOR_CAPACITY];               /* this hop's ETag header */
+  char last_modified[CRTMEDIA_HTTP_VALIDATOR_CAPACITY];      /* this hop's Last-Modified header */
+  char validator[CRTMEDIA_HTTP_VALIDATOR_CAPACITY];          /* chosen entity validator */
   int64_t content_length; /* -1 unknown */
   int64_t range_start;    /* -1 if no Content-Range seen this hop */
   long status_code;
@@ -42,10 +46,32 @@ static crtmedia_result map_curl_code(CURLcode code) {
     case CURLE_SEND_ERROR:
     case CURLE_RECV_ERROR:
     case CURLE_GOT_NOTHING:
+    case CURLE_PARTIAL_FILE: /* server closed before delivering Content-Length bytes */
       return CRTMEDIA_ERROR_IO;
     default:
       return CRTMEDIA_ERROR_PROTOCOL;
   }
+}
+
+/* Copies a header's value (the text after "Name:") into out, trimmed of
+ * surrounding whitespace and the trailing CRLF. A value too long for the
+ * buffer is stored as empty, i.e. "no usable validator", never truncated --
+ * a truncated validator could falsely compare equal. */
+static void copy_header_value(const char* value, size_t length, char* out, size_t capacity) {
+  while (length > 0 && (*value == ' ' || *value == '\t')) {
+    ++value;
+    --length;
+  }
+  while (length > 0 && (value[length - 1] == '\r' || value[length - 1] == '\n' || value[length - 1] == ' ' ||
+                        value[length - 1] == '\t')) {
+    --length;
+  }
+  if (length == 0 || length >= capacity) {
+    out[0] = '\0';
+    return;
+  }
+  memcpy(out, value, length);
+  out[length] = '\0';
 }
 
 /* Signals open()'s own blocking wait with a final outcome, exactly once --
@@ -71,18 +97,31 @@ static size_t http_header_callback(char* buffer, size_t size, size_t nitems, voi
      * reset this hop's own accumulated header fields. */
     transport->content_length = -1;
     transport->range_start = -1;
+    transport->etag[0] = '\0';
+    transport->last_modified[0] = '\0';
+  } else if (total > 5 && strncasecmp(buffer, "ETag:", 5) == 0) {
+    copy_header_value(buffer + 5, total - 5, transport->etag, sizeof(transport->etag));
+  } else if (total > 14 && strncasecmp(buffer, "Last-Modified:", 14) == 0) {
+    copy_header_value(buffer + 14, total - 14, transport->last_modified, sizeof(transport->last_modified));
   } else if (total > 15 && strncasecmp(buffer, "Content-Length:", 15) == 0) {
     transport->content_length = strtoll(buffer + 15, NULL, 10);
   } else if (total > 14 && strncasecmp(buffer, "Content-Range:", 14) == 0) {
-    /* "Content-Range: bytes <start>-<end>/<total-or-*>" */
-    const char* space = strchr(buffer + 14, ' ');
-    const char* dash = space != NULL ? strchr(space, '-') : NULL;
-    const char* slash = dash != NULL ? strchr(dash, '/') : NULL;
-    if (space != NULL) {
-      transport->range_start = strtoll(space + 1, NULL, 10);
-    }
-    if (slash != NULL && slash[1] != '*') {
-      transport->content_length = strtoll(slash + 1, NULL, 10);
+    /* "Content-Range: bytes <start>-<end>/<total-or-*>". A value that does
+     * not parse leaves range_start at -1, which no request offset matches. */
+    const char* cursor = buffer + 14;
+    while (*cursor == ' ' || *cursor == '	') ++cursor;
+    if (strncasecmp(cursor, "bytes", 5) == 0) {
+      cursor += 5;
+      while (*cursor == ' ' || *cursor == '	') ++cursor;
+      char* after_start = NULL;
+      long long start = strtoll(cursor, &after_start, 10);
+      if (after_start != cursor && *after_start == '-') {
+        transport->range_start = start;
+        const char* slash = strchr(after_start, '/');
+        if (slash != NULL && slash[1] >= '0' && slash[1] <= '9') {
+          transport->content_length = strtoll(slash + 1, NULL, 10);
+        }
+      }
     }
   } else if (total <= 2) {
     /* The blank line terminating one hop's headers. */
@@ -96,8 +135,26 @@ static size_t http_header_callback(char* buffer, size_t size, size_t nitems, voi
       } else if (status == 200 && transport->requested_offset == 0) {
         transport->seekable = 0; /* server ignored Range; a legitimate outcome only at offset 0 */
       }
+      /* If-Range (RFC 9110) only accepts a strong ETag or a Last-Modified
+       * date, so a weak ETag is not a usable validator. */
+      if (transport->etag[0] != '\0' && strncmp(transport->etag, "W/", 2) != 0) {
+        memcpy(transport->validator, transport->etag, sizeof(transport->validator));
+      } else {
+        memcpy(transport->validator, transport->last_modified, sizeof(transport->validator));
+      }
       crtmedia_result result = CRTMEDIA_OK;
-      if (status == 200 && transport->requested_offset != 0) {
+      if (transport->required_validator[0] != '\0' &&
+          (status != 206 || transport->range_start != transport->requested_offset ||
+           strcmp(transport->validator, transport->required_validator) != 0)) {
+        /* Resume needs all three of 206, matching Content-Range start, and
+         * the same entity validator (docs/crtmedia_networking_acceptance.md,
+         * Reconnect). Anything less may splice two versions of the resource. */
+        result = CRTMEDIA_ERROR_PROTOCOL;
+      } else if (status == 206 && transport->range_start != transport->requested_offset) {
+        /* A 206 whose Content-Range starts somewhere other than what was
+         * asked for would deliver the wrong bytes at this offset. */
+        result = CRTMEDIA_ERROR_PROTOCOL;
+      } else if (status == 200 && transport->requested_offset != 0) {
         /* The server cannot give us the byte range we asked for -- never
          * silently substitute the wrong bytes (docs/crtmedia_networking_
          * acceptance.md's own reconnect-safety rule). */
@@ -155,19 +212,26 @@ static void* http_worker_main(void* argument) {
   return NULL;
 }
 
-crtmedia_result crtmedia_http_transport_open(
-    const char* url, int64_t offset, size_t queue_capacity, crtmedia_http_transport** out_transport,
-    crtmedia_http_transport_info* out_info) {
+static crtmedia_result http_transport_open_internal(
+    const char* url, int64_t offset, const char* resume_validator, size_t queue_capacity,
+    crtmedia_http_transport** out_transport, crtmedia_http_transport_info* out_info) {
   if (url == NULL || offset < 0 || out_transport == NULL || out_info == NULL) {
     return CRTMEDIA_ERROR_INVALID_ARGUMENT;
   }
   *out_transport = NULL;
+  if (resume_validator != NULL &&
+      (resume_validator[0] == '\0' || strlen(resume_validator) >= CRTMEDIA_HTTP_VALIDATOR_CAPACITY)) {
+    return CRTMEDIA_ERROR_INVALID_ARGUMENT;
+  }
 
   crtmedia_http_transport* transport = (crtmedia_http_transport*)calloc(1, sizeof(*transport));
   if (transport == NULL) {
     return CRTMEDIA_ERROR_IO;
   }
   transport->requested_offset = offset;
+  if (resume_validator != NULL) {
+    memcpy(transport->required_validator, resume_validator, strlen(resume_validator) + 1);
+  }
   transport->content_length = -1;
   transport->range_start = -1;
   pthread_mutex_init(&transport->lock, NULL);
@@ -193,6 +257,20 @@ crtmedia_result crtmedia_http_transport_open(
   snprintf(range_value, sizeof(range_value), "%lld-", (long long)offset);
   curl_easy_setopt(transport->easy, CURLOPT_URL, url);
   curl_easy_setopt(transport->easy, CURLOPT_RANGE, range_value);
+  if (resume_validator != NULL) {
+    char if_range[CRTMEDIA_HTTP_VALIDATOR_CAPACITY + 16];
+    snprintf(if_range, sizeof(if_range), "If-Range: %s", resume_validator);
+    transport->request_headers = curl_slist_append(NULL, if_range);
+    if (transport->request_headers == NULL) {
+      curl_easy_cleanup(transport->easy);
+      crtmedia_transport_queue_release(transport->queue);
+      pthread_cond_destroy(&transport->ready_cond);
+      pthread_mutex_destroy(&transport->lock);
+      free(transport);
+      return CRTMEDIA_ERROR_IO;
+    }
+    curl_easy_setopt(transport->easy, CURLOPT_HTTPHEADER, transport->request_headers);
+  }
   curl_easy_setopt(transport->easy, CURLOPT_FOLLOWLOCATION, 1L);
   curl_easy_setopt(transport->easy, CURLOPT_MAXREDIRS, 5L);
   curl_easy_setopt(transport->easy, CURLOPT_HEADERFUNCTION, http_header_callback);
@@ -220,6 +298,7 @@ crtmedia_result crtmedia_http_transport_open(
   out_info->seekable = transport->seekable;
   out_info->size = transport->content_length;
   out_info->status_code = transport->status_code;
+  memcpy(out_info->validator, transport->validator, sizeof(out_info->validator));
   pthread_mutex_unlock(&transport->lock);
 
   if (open_result != CRTMEDIA_OK) {
@@ -229,6 +308,21 @@ crtmedia_result crtmedia_http_transport_open(
 
   *out_transport = transport;
   return CRTMEDIA_OK;
+}
+
+crtmedia_result crtmedia_http_transport_open(
+    const char* url, int64_t offset, size_t queue_capacity, crtmedia_http_transport** out_transport,
+    crtmedia_http_transport_info* out_info) {
+  return http_transport_open_internal(url, offset, NULL, queue_capacity, out_transport, out_info);
+}
+
+crtmedia_result crtmedia_http_transport_open_resume(
+    const char* url, int64_t offset, const char* validator, size_t queue_capacity,
+    crtmedia_http_transport** out_transport, crtmedia_http_transport_info* out_info) {
+  if (validator == NULL) {
+    return CRTMEDIA_ERROR_INVALID_ARGUMENT;
+  }
+  return http_transport_open_internal(url, offset, validator, queue_capacity, out_transport, out_info);
 }
 
 crtmedia_result crtmedia_http_transport_read(
