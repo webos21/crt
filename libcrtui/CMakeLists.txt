@@ -93,6 +93,17 @@ target_include_directories(crtui_shared PUBLIC
 )
 target_include_directories(crtui_shared PUBLIC "${CMAKE_SOURCE_DIR}/libcrtgfx/include")
 crt_configure_shared_runtime(crtui_shared)
+if(CRT_TARGET_OS STREQUAL "macos")
+  # Bind libc symbols (pthread_*, malloc, ...) to the CRT's libc.dylib, not Apple's
+  # libSystem. crt_configure_shared_runtime() leaves -lSystem ahead of libc.dylib,
+  # and two-level namespace binding takes the first dylib that defines a symbol,
+  # so libcrtui would call Apple's 64-byte pthread_mutex_init() on the CRT's
+  # 40-byte pthread_mutex_t embedded in a crtui context: a heap overflow that
+  # aborted crtui_context_destroy() in an externally built sample (Tranche 3
+  # macOS replay). Naming libc.dylib first fixes the binding; libc.dylib still
+  # loads libSystem itself.
+  target_link_options(crtui_shared PRIVATE "$<TARGET_FILE:c_shared>")
+endif()
 set_target_properties(crtui_shared PROPERTIES
   OUTPUT_NAME crtui
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
@@ -213,6 +224,41 @@ set_tests_properties(crtui_input_test_runs PROPERTIES
   TIMEOUT 60
 )
 set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtui_input_test_runs)
+
+# crtui_contract_shared_test (macOS): the same contract test, linked against the
+# installed-style libcrtui.dylib instead of libcrtui.a. The static-link tests
+# above cannot notice which libc a *shared* crtui binds to; this one aborted with
+# a heap overflow before the link-order fix above (docs/crtui_acceptance.md,
+# Tranche 3 macOS replay), and it proves the dylib exports the whole contract API.
+if(CRT_TARGET_OS STREQUAL "macos")
+  add_executable(crtui_contract_shared_test
+    ${CRT_STARTUP_OBJECTS}
+    tests/contract_test.c
+  )
+  target_link_libraries(crtui_contract_shared_test PRIVATE crt_build_flags c crtui_shared)
+  target_include_directories(crtui_contract_shared_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/include"
+  )
+  target_link_libraries(crtui_contract_shared_test PRIVATE crt_compiler_rt_builtins)
+  target_link_options(crtui_contract_shared_test PRIVATE
+    -nostdlib
+    -nostartfiles
+    -nodefaultlibs
+    -Wl,-e,_start
+    -Wl,-dead_strip
+  )
+  target_link_libraries(crtui_contract_shared_test PRIVATE System)
+  crt_link_startup_end_objects(crtui_contract_shared_test)
+  add_dependencies(crtui_contract_shared_test c crt1 crtui_shared)
+
+  add_test(NAME crtui_contract_shared_test_runs COMMAND crtui_contract_shared_test)
+  set_tests_properties(crtui_contract_shared_test_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    PASS_REGULAR_EXPRESSION "crtui_contract_test: ok"
+    TIMEOUT 60
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtui_contract_shared_test_runs)
+endif()
 
 # crtui_render_test: Tranche 1 acceptance -- renders a Window > Container >
 # Label/Button/Slider/Progress scene through the private LVGL software renderer

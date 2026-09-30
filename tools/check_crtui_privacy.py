@@ -20,6 +20,7 @@ Exports are read with llvm-readobj (Windows PE), llvm-nm -D (ELF) or llvm-nm -g
 
 import argparse
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -33,6 +34,14 @@ def tool(llvm_bin: Path, name: str) -> str:
     for candidate in (llvm_bin / name, llvm_bin / f"{name}.exe"):
         if candidate.is_file():
             return str(candidate)
+    # Apple's /usr/bin/clang is a shim: the LLVM binutils live in the Xcode
+    # toolchain, reachable through PATH or `xcrun`, not next to the compiler.
+    found = shutil.which(name)
+    if found is None and sys.platform == "darwin":
+        result = subprocess.run(["xcrun", "--find", name], capture_output=True, text=True)
+        found = result.stdout.strip() if result.returncode == 0 else None
+    if found:
+        return found
     raise SystemExit(f"{name} not found in {llvm_bin}")
 
 

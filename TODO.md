@@ -89,7 +89,8 @@ state. Windows/x64 is the first host, then macOS/arm64, then Linux.
   `examples/ui-basic` uses crtui/crtgfx only and was rebuilt externally from the
   packaged SDK, and `tools/check_crtui_privacy.py` (`crtui_privacy_test_runs`)
   proves headers, exports, sample objects and sample source are LVGL-free.
-  macOS/arm64 and Linux replay next (they verify the ELF/Mach-O visibility side).
+  macOS/arm64 replayed 2026-09-30 (Mach-O visibility verified; found and fixed a
+  libc-binding heap overflow in `libcrtui.dylib`); Linux replay next.
 * [ ] **4. Layout, styling, v1 widget set.** CRT-neutral properties only.
 * [ ] **5. External Surface view.** Producer-agnostic surface composition; the
   `06-web` prerequisite.
@@ -261,6 +262,19 @@ These are real remaining limitations, but none blocks the completed
 `libcrtgfx` CPU-raster milestone. Promote one into active work when a consumer
 or host investigation supplies the required evidence.
 
+- macOS shared libraries bind libc symbols to Apple's `libSystem`, not the CRT's
+  `libc.dylib`: `crt_configure_shared_runtime()` leaves `-lSystem` ahead of
+  `libc.dylib` and two-level namespace binding takes the first definer. Code
+  compiled against the CRT's 40-byte `pthread_mutex_t` therefore calls Apple's
+  64-byte `pthread_mutex_init()`. `libcrtui.dylib` hit this as a heap overflow
+  (fixed for crtui only, in `libcrtui/CMakeLists.txt`, with
+  `crtui_contract_shared_test_runs` as the guard). `libcrtgfx.dylib`,
+  `libcrtmedia.dylib` and the other CRT dylibs have the same binding
+  (`nm -m` shows `_pthread_mutex_init (from libSystem)`); crtmedia embeds a
+  mutex in its transport structs, so it is exposed too, just not crashing so far.
+  Decide whether to fix `crt_configure_shared_runtime()` for all of them and
+  add a dylib-linked test per library. Found 2026-09-30
+  (`docs/crtui_acceptance.md`, Tranche 3 macOS replay).
 - Make the ordinary in-tree Linux `crt-gfx-media-dist` verifiable with
   `CRTMEDIA_ENABLE_CURL=ON`: `libcrtmedia.so` links the shared `libcurl.so.4`
   in-tree (static zlib is not PIC) and `verify_dist.py` reports `undeclared

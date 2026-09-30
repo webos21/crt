@@ -10,6 +10,22 @@ substantive update.
 
 ## 2026-09-30
 
+- **`crtui` Tranche 3 replayed on macOS/arm64: two real gaps found and fixed.**
+  (1) `crtui_privacy_test_runs` could not find `llvm-nm` (Apple's clang shim);
+  `tools/check_crtui_privacy.py` now falls back to `PATH`/`xcrun`. The Mach-O
+  export control works: exactly 35 `crtui_*` exports, and removing
+  `-fvisibility=hidden` exports 2,286 `lv_*` symbols like the Windows DLL.
+  (2) The installed `examples/ui-basic`, built externally from the packaged SDK,
+  aborted at `crtui_context_destroy()` (`pointer being freed was not allocated`):
+  `libcrtui.dylib` bound `pthread_mutex_init`/`malloc` to Apple's `libSystem`
+  because `-lSystem` preceded `libc.dylib`, so Apple's 64-byte mutex init
+  overflowed the CRT's 40-byte `pthread_mutex_t` embedded in the context. Fixed by
+  linking `libc.dylib` first in `libcrtui/CMakeLists.txt`, guarded by the new
+  `crtui_contract_shared_test_runs` (aborts without the fix). Sample now runs
+  3/3; full ctest 157/157 (expected camera skip), tooling 79/79, `crt-ui-dist`
+  verified. `libcrtgfx`/`libcrtmedia` dylibs share the same link order and were
+  not changed; recorded as a CRT/PAL follow-up in `TODO.md`. Linux replay next.
+
 - **`crtui` Tranche 3 closed on Windows/x64: LVGL is now genuinely private --
   and the check found that it was not.** `docs/crtui_acceptance.md`'s Tranche 3
   section has the full detail.

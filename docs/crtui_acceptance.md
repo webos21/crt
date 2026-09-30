@@ -460,7 +460,7 @@ already covers the demo).
 The sample application calls no `lv_*` symbol. LVGL becomes a private
 dependency: not in installed headers, not in the public link line of the API.
 
-**Windows/x64 done 2026-09-30.**
+**Windows/x64 and macOS/arm64 done 2026-09-30.**
 
 The application-facing surface was already LVGL-free at the header level; this
 tranche made the *binary* surface match and made both provable.
@@ -510,6 +510,49 @@ tranche made the *binary* surface match and made both provable.
 - Not yet covered: the Linux/macOS variants of the export control and of
   `examples/ui-basic/CMakeLists.txt` (written, unverified), and the isolated
   stage build that fetches LVGL and rebuilds this sample (Tranche 7).
+
+**Tranche 3 replay (macOS/arm64, 2026-09-30).** Two real findings; both fixed.
+
+- **Finding 1 -- privacy tool could not run on macOS.** `crtui_privacy_test_runs`
+  failed with `llvm-nm not found in /usr/bin`: on macOS `CMAKE_C_COMPILER` is
+  Apple's `/usr/bin/clang` shim and the LLVM binutils live in the Xcode
+  toolchain. `tools/check_crtui_privacy.py` now falls back to `PATH`, then
+  `xcrun --find`. Result: `crtui_privacy: ok declared=35 exports=35
+  lvgl_exports=0 objects=1 headers=3`.
+- **Visibility control verified on Mach-O.** `libcrtui.dylib` exports exactly
+  the 35 `crtui_*` functions. Mutation: dropping `-fvisibility=hidden` makes the
+  dylib export 2,286 `lv_*` symbols plus `frogfs_decomp_raw`/`load_kern`, the same
+  count as the Windows DLL, and the privacy test fails; restored and green. A
+  sample that calls `lv_obj_create` fails both the object and source checks.
+- **Finding 2 -- the shared library corrupted the heap.** The installed
+  `examples/ui-basic`, rebuilt externally from the packaged SDK with the packaged
+  `crt-toolchain.cmake` (links `libcrtui.dylib`/`libcrtgfx.dylib`), ran its 30
+  frames and then aborted in `crtui_context_destroy()` with `pointer being freed
+  was not allocated` (exit 134). The prebuilt `examples/bin/crtui_window_demo` and
+  every in-tree test passed because they link the static library. Cause:
+  `libcrtui.dylib` was linked `... -lSystem libc.dylib`; two-level namespace
+  binding takes the first dylib that defines a symbol, so `pthread_mutex_init`,
+  `malloc`, etc. bound to Apple's `libSystem`, while the structs were laid out
+  with the CRT header's 40-byte `pthread_mutex_t` (Apple's is 64). Initializing
+  the `post_lock` embedded in the context overwrote the following fields. Fix
+  (`libcrtui/CMakeLists.txt`, macOS): name `libc.dylib` first on the crtui link
+  line; the dylib now shows `_pthread_mutex_init (from libc)`. Guard:
+  `crtui_contract_shared_test_runs` (macOS) runs the whole contract test linked
+  against `libcrtui.dylib`; with the fix removed it aborts (exit 134), with it
+  it passes.
+- **Broader exposure, not fixed here.** The other CRT dylibs are linked the same
+  way (`libcrtgfx`, `libcrtmedia`), so they bind libc to `libSystem` with the same
+  struct-size mismatch. Recorded in `TODO.md` as a CRT/PAL follow-up rather than
+  changed under a crtui tranche.
+- After the fix: the externally built sample runs 3/3 (`presented=30
+  pixel_check=pass input_check=pass`) with only `@rpath` crtui/crtgfx plus
+  `libSystem` in its load commands; the privacy tool passes against the packaged
+  dylib, headers, sample object and source. Full in-tree `ctest` 157/157
+  (expected camera skip); `crtui_*`-excluding preset 110/110; tooling 79/79;
+  `crt-ui-dist` verified.
+- Not covered here: the isolated stage build that rebuilds the sample
+  (Tranche 7). Linux replay remains (`examples/ui-basic`'s Linux link list is
+  still unverified).
 
 ### 4. Layout, styling, and the v1 widget set
 
