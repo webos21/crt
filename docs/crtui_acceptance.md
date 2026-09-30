@@ -326,7 +326,7 @@ input model. Tests: pointer hit-test, Tab focus traversal, Enter/Space
 activation, arrow navigation, slider keyboard adjustment, resize/re-layout,
 focus loss and recovery.
 
-**Windows/x64 done 2026-09-30.**
+**Windows/x64 and macOS/arm64 done 2026-09-30.**
 
 *Design.* crtui's CRT-owned model already owned hit-testing, focus and event
 routing (Tranche 0); "mapping to LVGL's input model" therefore means the model
@@ -394,6 +394,30 @@ copy of the state living in LVGL indevs. Three additions:
   preset stays 127/127; `crt-ui-dist` verifies.
 - Not covered here: text entry, IME, touch (no crtgfx source), automatic layout
   (Tranche 4), hover states.
+
+**Tranche 2 replay (macOS/arm64, 2026-09-30).** No code change was needed.
+
+- `crtui_input_test` passes unmodified with all eight groups `pass`,
+  byte-identical over three runs. `crtui_contract_test` (now thirteen groups,
+  including `arrow_nav`, `slider_pointer`) and `crtui_render_test` (fourteen
+  groups, including `focus_ring`, `pressed`, `slider_drag`, `relayout`;
+  `handles=4->4`) pass unmodified too.
+- Mutation check reproduced with the same counts as Windows: flipping the
+  slider's Left/Right step sign fails `crtui_input_test` (1 failure, line 202)
+  and `crtui_contract_test` (4 failures, lines 394/397/403/678); reverted and
+  re-confirmed green (`git diff` clean).
+- `crtui_window_demo 30` drove a real Cocoa crtgfx window with the scripted
+  input sequence: `presented=30 pixel_check=pass input_check=pass`, exit 0.
+- Full in-tree `ctest` 155/155 (expected camera skip); the `crtui_*`-excluding
+  preset 110/110; tooling 79/79; `crt-ui-dist` and `verify_dist.py --stage 05-ui`
+  pass (`@rpath/libcrtui.dylib`, only `@rpath` CRT deps plus `libSystem`, both
+  `crtui/ui.h` and `crtui/crtgfx.h` installed, no LVGL file in the SDK).
+- Not verified here: *interactive* real keyboard/mouse/trackpad input and live
+  window resizing. The scripted run injects events through crtgfx's test hook
+  onto the queue real events use, so it covers crtui's mapping but not AppKit's
+  own delivery. The macOS wheel sign is host-native (crtgfx reads AppKit's
+  `deltaY`, already adjusted for the user's natural-scrolling setting) and
+  remains unverified, as the Windows entry also noted. Linux replay remains.
 
 ### 3. `crtui` wrapper (first green)
 

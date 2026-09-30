@@ -81,7 +81,8 @@ state. Windows/x64 is the first host, then macOS/arm64, then Linux.
   revision: a focused slider keeps Left/Right), slider drag with pointer capture
   and wheel, drawn focus/pressed state, application-driven re-layout on resize,
   `POINTER_CANCEL` on focus loss (`crtui_input_test: ok ...`, and
-  `crtui_window_demo 30`: `input_check=pass`). macOS/arm64 and Linux replay next.
+  `crtui_window_demo 30`: `input_check=pass`). macOS/arm64 replayed 2026-09-30
+  with no code change; Linux replay next.
 * [ ] **3. `crtui` wrapper (first green).** The sample calls no `lv_*` symbol;
   LVGL is private.
 * [ ] **4. Layout, styling, v1 widget set.** CRT-neutral properties only.

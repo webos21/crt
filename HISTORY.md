@@ -10,6 +10,15 @@ substantive update.
 
 ## 2026-09-30
 
+- **`crtui` Tranche 2 replayed on macOS/arm64 with no code change.**
+  `crtui_input_test`, `crtui_contract_test` and `crtui_render_test` pass
+  unmodified (input test byte-identical over three runs); the slider-step-sign
+  mutation fails them with the same counts as Windows (1 and 4);
+  `crtui_window_demo 30` in a real Cocoa window reports `presented=30
+  pixel_check=pass input_check=pass`. Full ctest 155/155 (expected camera
+  skip), tooling 79/79, `crt-ui-dist` verified. Interactive hardware input and
+  the macOS wheel sign were not exercised. Linux replay is next.
+
 - **`crtui` Tranche 2 closed on Windows/x64: crtgfx input, spatial focus
   navigation, slider drag/wheel, drawn focus state, and resize -- driven end to
   end through a real crtgfx window.** `docs/crtui_acceptance.md`'s Tranche 2
