@@ -1,6 +1,6 @@
 # crtui Acceptance (Stage `05-ui`)
 
-**Status: contract frozen (Tranche 0, Windows/x64 2026-09-30); LVGL rendering
+**Status: contract frozen (Tranche 0, Windows/x64 and macOS/arm64 2026-09-30); LVGL rendering
 is not started.** The public contract in `libcrtui/include/crtui/ui.h` and the
 rules in the table below are frozen and covered by a resource-free test.
 Tranches 1-7 add rendering, input mapping, the LVGL-backed widgets, external
@@ -76,7 +76,7 @@ first-class input mode from Tranche 2, not a later add-on.
 
 ### 0. Contract freeze and stage creation
 
-**Windows/x64 done 2026-09-30.** (details after the gate text below)
+**Windows/x64 and macOS/arm64 done 2026-09-30.** (details after the gate text below)
 
 Freeze the table above in this document, add the resource-free contract test,
 and create the `05-ui` stage. The superseded skeleton was already deleted
@@ -125,6 +125,21 @@ unless it finds a host-specific gap.
   bytes; `lv_version.h` reads 9.6.0). The archive is ~111 MB because it carries
   tests/docs/examples, so Tranche 1 should import only `src/`, `include/`,
   the licence and the `lv_conf` template.
+
+**Tranche 0 replay (macOS/arm64, 2026-09-30).** No code change was needed; the
+contract is host-neutral as intended.
+
+- `crtui_contract_test` prints the identical line as on Windows (all nine
+  groups `pass`), with byte-identical output over three runs.
+- Mutation check reproduced: dropping the "handled stops the bubble" rule fails
+  the test at `contract_test.c:320` and `:491`; reverted afterward.
+- Full in-tree `ctest` 153/153 (the camera-authorization test is the expected
+  skip in a non-interactive run); tooling tests 79/79.
+- `crt-ui-dist` builds and `verify_dist.py --stage 05-ui` passes (about 3 min on
+  top of `04-gfx-media`): `libcrtui.dylib` has id `@rpath/libcrtui.dylib`, only
+  `@rpath` CRT deps plus `libSystem.B.dylib`, and no LVGL header in the SDK.
+- Not covered here by design: the isolated stage build and
+  `create_stage_source.py` registration belong to Tranche 7. Linux replay remains.
 
 ### 1. LVGL import and first pixels (Windows/x64 first)
 

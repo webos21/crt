@@ -74,7 +74,8 @@ state. Windows/x64 is the first host, then macOS/arm64, then Linux.
   stage (`libcrtui`, `crt-ui-*` targets, `verify_dist.py`/
   `crt_dist_prerequisites.py` entries); LVGL v9.6.0 pinned with provenance
   (not imported). The `05-js`/`libcrtjs` skeleton was deleted on 2026-09-29, so
-  nothing was renamed. macOS/arm64 and Linux replay is next.
+  nothing was renamed. macOS/arm64 replayed 2026-09-30 with no code change (same
+  test output, mutation check, `crt-ui-dist` verified); Linux replay is next.
 * [ ] **1. LVGL import and first pixels.** Software draw buffer through the
   existing `crtgfx` present path; small Window/Column/Label/Button/Slider/
   Progress demo.

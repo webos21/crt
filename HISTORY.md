@@ -10,6 +10,13 @@ substantive update.
 
 ## 2026-09-30
 
+- **`crtui` Tranche 0 replayed on macOS/arm64 with no code change.**
+  `crtui_contract_test` gives the same all-`pass` line as Windows (byte-identical
+  over three runs) and the "handled stops the bubble" mutation still fails it;
+  full ctest 153/153 (expected camera skip), tooling 79/79; `crt-ui-dist` and
+  `verify_dist.py --stage 05-ui` pass (`@rpath` install id, no LVGL header).
+  Linux replay is next.
+
 - **`crtui` Tranche 0 closed on Windows/x64: the UI contract is frozen and
   tested, the `05-ui` stage exists, and LVGL v9.6.0 is pinned.**
   `docs/crtui_acceptance.md`'s Tranche 0 section has the full detail.
