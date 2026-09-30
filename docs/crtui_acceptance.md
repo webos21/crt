@@ -76,7 +76,7 @@ first-class input mode from Tranche 2, not a later add-on.
 
 ### 0. Contract freeze and stage creation
 
-**Windows/x64 and macOS/arm64 done 2026-09-30.** (details after the gate text below)
+**Closed 2026-09-30 on Windows/x64, macOS/arm64, and Linux/x86_64.** (details after the gate text below)
 
 Freeze the table above in this document, add the resource-free contract test,
 and create the `05-ui` stage. The superseded skeleton was already deleted
@@ -90,8 +90,7 @@ v9.6.x (public-API separation and system-library-style install are the reason)
 -- **verify the exact tag and hash at import time, do not trust this line.**
 
 **Tranche 0 result (Windows/x64, 2026-09-30).** The contract is host-neutral and
-resource-free; macOS/arm64 and Linux replay is next and needs no code change
-unless it finds a host-specific gap.
+resource-free; the macOS/arm64 and Linux replays needed no code change.
 
 - `libcrtui/include/crtui/ui.h` is the frozen public header (no LVGL type);
   `libcrtui/src/core.c` is a headless model of the tree, event routing, focus
@@ -139,7 +138,43 @@ contract is host-neutral as intended.
   top of `04-gfx-media`): `libcrtui.dylib` has id `@rpath/libcrtui.dylib`, only
   `@rpath` CRT deps plus `libSystem.B.dylib`, and no LVGL header in the SDK.
 - Not covered here by design: the isolated stage build and
-  `create_stage_source.py` registration belong to Tranche 7. Linux replay remains.
+  `create_stage_source.py` registration belong to Tranche 7.
+
+**Tranche 0 replay (Linux/x86_64, native Intel host, 2026-09-30).** No code
+change was needed.
+
+- `crtui_contract_test` prints the identical all-`pass` line as Windows and
+  macOS, byte-identical over five runs (this host exercises the real-pthread
+  thread-ownership rows with the CRT's own pthreads).
+- Mutation check reproduced: dropping the "handled stops the bubble" rule
+  (`libcrtui/src/core.c`, `deliver()` loop condition) fails the test at
+  `contract_test.c:320` and `:491`, the same lines as macOS; reverted and
+  re-confirmed green (`git diff` clean).
+- The LVGL pin was re-checked without downloading anything: `git ls-remote`
+  resolves tag `v9.6.0` to commit `80ca777e37a2b176770726a02e07a6fb79ef0b39`,
+  matching `recipe.json`. The 111 MB archive and its SHA-256 were *not*
+  re-downloaded here; that part rests on the Windows verification.
+- `crt-ui-dist` was built in a **fresh, options-default build directory**
+  (`cmake --preset linux-host-ninja-debug -B ...`, FFmpeg/curl/Skia OFF, all of
+  `01-c` .. `05-ui` from scratch) and every stage `verified`. `verify_dist.py
+  --stage 05-ui` passes on the directory and again on the *extracted*
+  `crt-development-linux-x86_64-05-ui.tar.xz` (9.2 MB). `libcrtui.so`:
+  `NEEDED` only `libm/libdl/libc++/libc`, `RUNPATH $ORIGIN`, SONAME
+  `libcrtui.so`, and its undefined symbols are only CRT-versioned libc/pthread
+  functions (`@CRT_1.0`) -- no host library. No LVGL header or file is in the
+  SDK.
+- Full dev-tree `ctest` 146/147 (the one failure is the pre-existing
+  no-sound-card `crtmedia_playback_pipeline_test_runs` gap); tooling tests 79/79.
+- Finding, *not* a `crtui` defect: running `crt-ui-dist` in the long-lived dev
+  tree (`CRTMEDIA_ENABLE_CURL=ON` for the networking work) fails inside the
+  predecessor `crt-gfx-media-dist` with `lib/libcrtmedia.so -> undeclared
+  libcurl.so.4`. On Linux the in-tree `libcrtmedia.so` deliberately links the
+  shared `libcurl.so` (the static zlib is not PIC; `libcrtmedia/CMakeLists.txt`),
+  and `verify_dist.py` has no entry for it. The docs already call the ordinary
+  `crt-gfx-media-dist` the options-OFF path, so this is an unsupported
+  combination rather than a regression, and the isolated stage links curl
+  statically and is unaffected. Recorded in `TODO.md` as a follow-up, not fixed
+  here.
 
 ### 1. LVGL import and first pixels (Windows/x64 first)
 

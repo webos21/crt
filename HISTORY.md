@@ -10,6 +10,29 @@ substantive update.
 
 ## 2026-09-30
 
+- **`crtui` Tranche 0 closed on Linux/x86_64 (native Intel host) with no code
+  change, plus one unrelated in-tree packaging finding.**
+  `docs/crtui_acceptance.md`'s Tranche 0 section has the full detail.
+  `crtui_contract_test` gives the same all-`pass` line as Windows/macOS,
+  byte-identical over five runs; the "handled stops the bubble" mutation fails
+  it at the same lines (`contract_test.c:320`, `:491`) and is reverted. LVGL's
+  pin was re-checked read-only (`git ls-remote`: `v9.6.0` -> `80ca777e...`, as
+  recorded; the 111 MB archive was not re-downloaded). `crt-ui-dist` built and
+  verified from scratch in a fresh options-default tree (`01-c` .. `05-ui`);
+  `verify_dist.py --stage 05-ui` passes on the directory and the extracted
+  `.tar.xz`; `libcrtui.so` needs only CRT libs, has `RUNPATH $ORIGIN`, imports
+  only CRT-versioned symbols, and no LVGL header is shipped. Dev-tree `ctest`
+  146/147 (pre-existing no-sound-card failure), tooling 79/79.
+
+  Finding: in the long-lived dev tree (`CRTMEDIA_ENABLE_CURL=ON`),
+  `crt-ui-dist` fails inside the predecessor `crt-gfx-media-dist` with
+  `libcrtmedia.so -> undeclared libcurl.so.4` -- on Linux the in-tree library
+  deliberately links the shared libcurl (static zlib is not PIC) and
+  `verify_dist.py` does not know about it. Not a `crtui` defect and an
+  unsupported combination per the docs (ordinary dist = options OFF); the
+  isolated stage (static curl) is unaffected. Logged in `TODO.md` under the
+  focused follow-ups, not fixed here.
+
 - **`crtui` Tranche 0 replayed on macOS/arm64 with no code change.**
   `crtui_contract_test` gives the same all-`pass` line as Windows (byte-identical
   over three runs) and the "handled stops the bubble" mutation still fails it;

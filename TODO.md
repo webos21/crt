@@ -67,15 +67,10 @@ gates, and host order live in
 Tranche 0). Keep completed evidence in `HISTORY.md`; this list tracks only tranche
 state. Windows/x64 is the first host, then macOS/arm64, then Linux.
 
-* [ ] **0. Freeze the `crtui` contract and create the stage.** Windows/x64
-  done 2026-09-30, recorded in `HISTORY.md`: frozen `crtui/ui.h` contract
-  (thread ownership, lifetime, events, focus/input routing, geometry, surfaces,
-  errors) with a headless model and `crtui_contract_test: ok ...`; the `05-ui`
-  stage (`libcrtui`, `crt-ui-*` targets, `verify_dist.py`/
-  `crt_dist_prerequisites.py` entries); LVGL v9.6.0 pinned with provenance
-  (not imported). The `05-js`/`libcrtjs` skeleton was deleted on 2026-09-29, so
-  nothing was renamed. macOS/arm64 replayed 2026-09-30 with no code change (same
-  test output, mutation check, `crt-ui-dist` verified); Linux replay is next.
+* [x] **0. Freeze the `crtui` contract and create the stage.** Closed
+  2026-09-30 on Windows/x64, macOS/arm64, and Linux/x86_64 (frozen `crtui/ui.h`,
+  headless model, `crtui_contract_test`, the `05-ui` stage, LVGL v9.6.0 pinned
+  but not imported); evidence in `HISTORY.md` and `docs/crtui_acceptance.md`.
 * [ ] **1. LVGL import and first pixels.** Software draw buffer through the
   existing `crtgfx` present path; small Window/Column/Label/Button/Slider/
   Progress demo.
@@ -254,6 +249,13 @@ These are real remaining limitations, but none blocks the completed
 `libcrtgfx` CPU-raster milestone. Promote one into active work when a consumer
 or host investigation supplies the required evidence.
 
+- Make the ordinary in-tree Linux `crt-gfx-media-dist` verifiable with
+  `CRTMEDIA_ENABLE_CURL=ON`: `libcrtmedia.so` links the shared `libcurl.so.4`
+  in-tree (static zlib is not PIC) and `verify_dist.py` reports `undeclared
+  libcurl.so.4`, which blocks `crt-ui-dist` in a curl-enabled dev tree. Either
+  ship/declare the shared curl chain or document that the ordinary dist is
+  options-OFF only; the isolated stage (static curl) is unaffected. Found
+  2026-09-30 (`docs/crtui_acceptance.md`, Tranche 0 Linux replay).
 - Extend the resolver from its current synchronous UDP IPv4/A-record baseline
   when IPv6, TCP fallback, search domains, or caching becomes a consumer
   requirement.
