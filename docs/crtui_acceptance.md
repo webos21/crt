@@ -183,7 +183,7 @@ LVGL software draw buffer -> a CRT display adapter -> the existing
 `Window > Column > Label/Button/Slider/Progress` demo produces expected pixels
 and shuts down cleanly (no leaked handles/threads).
 
-**Windows/x64 and macOS/arm64 done 2026-09-30.** (details below)
+**Closed 2026-09-30 on Windows/x64, macOS/arm64, and Linux/x86_64.** (details below)
 
 LVGL v9.6.0 is imported as a private dependency and renders through a CRT
 display adapter into a caller-supplied buffer; crtgfx presents that buffer.
@@ -274,7 +274,49 @@ display adapter into a caller-supplied buffer; crtgfx presents that buffer.
   only `@rpath` CRT libraries and `libSystem.B.dylib`, undefined symbols are
   only libc/pthread calls, and no LVGL file or header is in the SDK.
 - Not covered here by design: isolated-stage packaging of the fetched LVGL
-  source (Tranche 7). Linux replay remains.
+  source (Tranche 7).
+
+**Tranche 1 replay (Linux/x86_64, native Intel host, 2026-09-30).** The
+library and both tests needed no change; one *build-wiring* fix was needed for
+the demo.
+
+- `tools/fetch_lvgl.py` (run through `crtui-lvgl-fetch`; no cached archive
+  existed on this host, so it downloaded `v9.6.0.tar.gz` from GitHub) passed the
+  size, SHA-256 and pax-commit checks and extracted the same 1445 files. All 483
+  LVGL sources plus `lvgl_backend.c` compiled on the CRT toolchain with no source
+  or `lv_conf.h` change and no new CRT/PAL gap. A full first build of
+  `crtui`/`crtui_shared`/tests took ~9 s of wall time on 12 cores.
+- `crtui_render_test` passes unmodified: `lifecycle cycles=40 handles=4->4
+  threads=1->1` and all ten groups `pass`, byte-identical over three runs
+  (handle counts are per-host; the requirement is equality). The dumped first
+  frame was inspected and matches the Windows/macOS look (`Hello crtui`, blue OK
+  button, slider with knob, green progress).
+- Mutation check reproduced: changing `CRTUI_COLOR_PROGRESS_FILL` fails the same
+  three checks (`render_test.c:212/213/220`); reverted, `git diff` clean, green.
+- Present path: `crtui_window_demo 30` opened a real Wayland window through
+  crtgfx and reports `presented=30 pixel_check=pass`, exit 0, on three runs.
+  **Linux-only fix:** the demo first failed to *link* (`undefined reference to
+  strndup@@GLIBC_2.2.5`, "DSO missing"). The CRT `libc.so` does export
+  `strndup`; the cause was static-archive order. `crtgfx_window` pulls
+  `libxkbcommon.a`, which needs libc's `strndup`, but with `crtui` listed first
+  CMake hoisted `crtui`'s `c/m/dl/cxx` ahead of `libxkbcommon.a`, so the linker
+  fell through to the host libc. Listing `crtgfx_window` before `crtui` (plus a
+  trailing `c`) in `libcrtui/CMakeLists.txt` puts the final `libc.a` after it,
+  as `crtgfx_window_demo`'s own link does; the comment there records why.
+- `crt-ui-dist` with LVGL compiled in (fresh options-default tree,
+  `-DCRTUI_ENABLE_LVGL=ON`, reusing the fetched source) builds all of
+  `01-c`..`05-ui` and every stage verifies. `libcrtui.so` (3.4 MB): `NEEDED` only
+  `libm/libdl/libc++/libc`, `RUNPATH $ORIGIN`, every undefined symbol
+  `@CRT_1.0`-versioned, and no LVGL file or header in the SDK.
+- Full dev-tree `ctest` 147/148 (the one failure is the pre-existing
+  no-sound-card `crtmedia_playback_pipeline_test_runs` gap); tooling 79/79.
+  One earlier full run also reported `crtgfx_synthetic_event_runs` failing while
+  the `crt-ui-dist` build was running in parallel; it was not reproduced (5/5
+  alone, 72 concurrent runs on 12 cores, and a second full run all passed) and
+  its output was not captured, so it is recorded here as an unexplained one-off
+  (that test needs a live Wayland connection), not as a cause found.
+- Not covered here by design: isolated-stage packaging of the fetched LVGL
+  source (Tranche 7).
 
 ### 2. Input, focus, and resize
 

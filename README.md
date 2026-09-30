@@ -123,7 +123,7 @@ state on that host, not a promise.
 | Decoded GPU texture interop | Verified | Verified | Verified | Direct zero-copy on Linux/Vulkan and macOS/Metal; measured no-CPU-readback GPU-copy fallback on Windows/D3D12. Lifecycle and isolated-package gates pass. |
 | Video encode and capture | Verified | Verified | Verified | V4L2/VA-API, Media Foundation, and AVFoundation/VideoToolbox paths pass real capture, hardware/software encode, mux/decode-back, timing, lifecycle, and isolated-package acceptance. |
 | Network streaming | Verified | Verified | Verified | Bounded transport core; progressive HTTP input (Range and chunked); fragmented-MP4 HTTP upload with a hard memory bound; `Range`+`If-Range` reconnect that never splices a changed resource and never auto-resumes output; HTTPS with a caller-supplied CA and a correct-CA/wrong-CA/wrong-SAN matrix; lifecycle stress and isolated-package acceptance with an installed streaming consumer. Loopback/IP-literal fixtures; the resolver is still IPv4/UDP A-record only. |
-| Application UI (`crtui`, LVGL) | Planned | Planned | Contract verified; LVGL software rendering verified on Windows (Tranche 1) | Stage `05-ui`; input/widgets/surfaces still to come; see [`docs/crtui_acceptance.md`](docs/crtui_acceptance.md). |
+| Application UI (`crtui`, LVGL) | In progress | In progress | In progress | Stage `05-ui`: Tranches 0-1 are closed on all three hosts (frozen `crtui` contract; LVGL v9.6.0 software rendering through a CRT display adapter, presented by crtgfx). Input/focus, layout/widgets, external surfaces, and the isolated package are still to come; see [`docs/crtui_acceptance.md`](docs/crtui_acceptance.md). |
 | Web runtime (WebKit CRT Port) | Planned | Planned | Planned | Stage `06-web`, after `05-ui`; see [`docs/crtweb_acceptance.md`](docs/crtweb_acceptance.md). |
 
 Hosts: Linux is an aarch64 VM (the acceptance host) plus x86_64 under WSL2,
@@ -267,7 +267,7 @@ CRT is built and verified as cumulative distributions:
 | `02-cxx` | `01-c` + libc++/libc++abi/libunwind |
 | `03-gfx-simple` | `02-cxx` + window, keyboard/mouse, software framebuffer |
 | `04-gfx-media` | `03-gfx-simple` + Skia CPU/GPU, Vulkan/D3D12/Metal, FFmpeg |
-| `05-ui` (in progress) | `04-gfx-media` + `crtui` (contract and headless model so far; LVGL rendering and external-surface composition planned) |
+| `05-ui` (in progress) | `04-gfx-media` + `crtui` (frozen contract, headless model, and LVGL software rendering so far; input, widgets, and external-surface composition planned) |
 | `06-web` (planned) | `05-ui` + JavaScriptCore/WebKit web runtime and WebView |
 
 Simple Graphics deliberately excludes Skia CPU raster/text and Skia GPU. Its
@@ -286,8 +286,9 @@ have not yet been added. Full details, artifact layout, package naming, and
 acceptance rules are in
 [`docs/distribution.md`](docs/distribution.md).
 
-The repository builds `05-ui` as a contract-only stage (frozen `crtui` API and
-headless model, no LVGL rendering yet); `06-web` is planned. The ordinary developer preset keeps Skia and FFmpeg disabled by default;
+The repository builds `05-ui` with the frozen `crtui` API and headless model,
+and with LVGL software rendering when configured with `-DCRTUI_ENABLE_LVGL=ON`
+(default off; the pinned LVGL source is fetched, not bundled); `06-web` is planned. The ordinary developer preset keeps Skia and FFmpeg disabled by default;
 release-grade `04-gfx-media` acceptance uses the separate option-ON isolated
 stage path.
 

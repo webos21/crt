@@ -208,7 +208,13 @@ if(CRTUI_ENABLE_LVGL)
     ${CRT_STARTUP_OBJECTS}
     tools/window_demo.c
   )
-  target_link_libraries(crtui_window_demo PRIVATE crt_build_flags c crtui crtgfx_window)
+  # crtgfx_window *before* crtui (and a trailing `c`): on Linux crtgfx_window
+  # pulls libxkbcommon.a, which needs libc's strndup/asprintf/mmap, and static
+  # archive order matters -- with crtui first, CMake hoisted crtui's c/m/dl/cxx
+  # ahead of libxkbcommon.a, so the linker fell through to the host libc
+  # (Linux Tranche 1 replay: undefined 'strndup@@GLIBC_2.2.5'). This order puts
+  # the final libc.a after it, as crtgfx_window_demo's own link does.
+  target_link_libraries(crtui_window_demo PRIVATE crt_build_flags crtgfx_window crtui c)
   target_include_directories(crtui_window_demo PRIVATE
     "${CMAKE_SOURCE_DIR}/libc/include"
   )

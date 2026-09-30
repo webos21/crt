@@ -10,6 +10,29 @@ substantive update.
 
 ## 2026-09-30
 
+- **`crtui` Tranche 1 closed on Linux/x86_64 (native Intel host): LVGL
+  renders and presents, after one Linux-only link-order fix.**
+  `docs/crtui_acceptance.md`'s Tranche 1 section has the full detail.
+  `tools/fetch_lvgl.py` (no cached archive existed here, so it downloaded the
+  pinned 111 MB `v9.6.0.tar.gz`) passed its size/SHA-256/commit checks and
+  extracted 1445 files; all 483 LVGL sources compiled with no source/conf
+  change. `crtui_render_test` passes (`handles=4->4 threads=1->1`, all ten
+  groups, byte-identical over three runs), the rendered frame was inspected, and
+  the progress-color mutation fails the same three checks as macOS.
+  `crtui_window_demo 30` presents through a real Wayland window
+  (`presented=30 pixel_check=pass`, three runs). The demo first failed to link
+  (`undefined strndup@@GLIBC_2.2.5`): `libxkbcommon.a` (pulled by
+  `crtgfx_window`) needs libc's `strndup`, but with `crtui` listed first CMake
+  hoisted the CRT libs ahead of it and the linker fell through to host glibc;
+  listing `crtgfx_window` before `crtui` in `libcrtui/CMakeLists.txt` fixes it.
+  `crt-ui-dist` with LVGL on verifies across `01-c`..`05-ui` in a fresh tree;
+  `libcrtui.so` needs only CRT libs, `RUNPATH $ORIGIN`, CRT-versioned symbols,
+  no LVGL file in the SDK. Dev-tree `ctest` 147/148 (pre-existing no-sound-card
+  failure), tooling 79/79. One earlier full run also saw
+  `crtgfx_synthetic_event_runs` fail while a build ran in parallel; not
+  reproduced in 5 solo runs, 72 concurrent runs, or a second full run, and its
+  output was not captured -- recorded as an unexplained one-off, not a finding.
+
 - **`crtui` Tranche 1 replayed on macOS/arm64 with no code change.** The pinned
   LVGL archive fetched and verified, all 483 sources compiled on the CRT
   toolchain, `crtui_render_test` passes unmodified (byte-identical over three
