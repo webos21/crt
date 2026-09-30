@@ -10,6 +10,15 @@ substantive update.
 
 ## 2026-09-30
 
+- **`crtui` Tranche 1 replayed on macOS/arm64 with no code change.** The pinned
+  LVGL archive fetched and verified, all 483 sources compiled on the CRT
+  toolchain, `crtui_render_test` passes unmodified (byte-identical over three
+  runs, `handles=4->4`; the progress-color mutation fails the same three checks),
+  and `crtui_window_demo 30` presents through a real Cocoa window
+  (`presented=30 pixel_check=pass`). Full ctest 154/154 (expected camera skip),
+  tooling 79/79, `crt-ui-dist` verified with no LVGL file in the SDK. Linux
+  replay is next.
+
 - **`crtui` Tranche 1 closed on Windows/x64: LVGL v9.6.0 is imported as a private
   dependency and renders the first real pixels through a CRT display adapter
   into crtgfx.** `docs/crtui_acceptance.md`'s Tranche 1 section has the full

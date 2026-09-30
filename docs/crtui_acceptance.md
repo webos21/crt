@@ -183,7 +183,7 @@ LVGL software draw buffer -> a CRT display adapter -> the existing
 `Window > Column > Label/Button/Slider/Progress` demo produces expected pixels
 and shuts down cleanly (no leaked handles/threads).
 
-**Windows/x64 done 2026-09-30.** (details below)
+**Windows/x64 and macOS/arm64 done 2026-09-30.** (details below)
 
 LVGL v9.6.0 is imported as a private dependency and renders through a CRT
 display adapter into a caller-supplied buffer; crtgfx presents that buffer.
@@ -248,6 +248,33 @@ display adapter into a caller-supplied buffer; crtgfx presents that buffer.
   wrapper-only sample and system-library-style install of LVGL (Tranche 3),
   automatic layout and the v1 widget set (Tranche 4), isolated-stage packaging
   of the fetched LVGL source (Tranche 7).
+
+**Tranche 1 replay (macOS/arm64, 2026-09-30).** No code change was needed.
+
+- `tools/fetch_lvgl.py` downloaded the 111 MB archive, passed the size,
+  SHA-256 and pax-commit checks, and extracted 1445 files; all 483 LVGL sources
+  plus `lvgl_backend.c` compiled on the CRT toolchain (Apple clang/arm64) with no
+  source or conf change and no new CRT/PAL gap. Incremental build of
+  `crtui`/`crtui_shared`/tests: ~11 s.
+- `crtui_render_test` passes unmodified: `lifecycle cycles=40 handles=4->4
+  threads=-1->-1` and all ten groups `pass` (handle counts are per-host: 77 on
+  Windows, 4 here; the requirement is equality). Output is byte-identical over
+  three runs. The dumped first frame was inspected (`Hello crtui`, blue OK
+  button, slider with knob, green progress) and matches the Windows look.
+- Mutation check reproduced: changing `CRTUI_COLOR_PROGRESS_FILL` fails the
+  same three checks (`render_test.c:212/213/220`); reverted and re-confirmed
+  green (`git diff` clean).
+- Present path: `crtui_window_demo 30` opened a real Cocoa window through
+  crtgfx and reports `presented=30 pixel_check=pass`, exit 0.
+- Full in-tree `ctest` 154/154 (camera-authorization test is the expected
+  skip); the `macos-host-ninja-debug` test preset (which excludes `crtui_*`)
+  110/110; tooling tests 79/79.
+- `crt-ui-dist` (LVGL compiled in) builds and `verify_dist.py --stage 05-ui`
+  passes in 3 min: `libcrtui.dylib` id `@rpath/libcrtui.dylib`, dependencies
+  only `@rpath` CRT libraries and `libSystem.B.dylib`, undefined symbols are
+  only libc/pthread calls, and no LVGL file or header is in the SDK.
+- Not covered here by design: isolated-stage packaging of the fetched LVGL
+  source (Tranche 7). Linux replay remains.
 
 ### 2. Input, focus, and resize
 

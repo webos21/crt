@@ -77,7 +77,8 @@ state. Windows/x64 is the first host, then macOS/arm64, then Linux.
   (`-DCRTUI_ENABLE_LVGL=ON`), rendered through a CRT display adapter
   (`crtui_window_render()`, BGRA8888) and presented by crtgfx; `crtui_render_
   test: ok ...` checks real pixels and a handle audit, `crtui_window_demo 30`
-  reports `presented=30 pixel_check=pass`. macOS/arm64 and Linux replay next.
+  reports `presented=30 pixel_check=pass`. macOS/arm64 replayed 2026-09-30
+  with no code change; Linux replay next.
 * [ ] **2. Input, focus, resize.** Pointer, keyboard (Tab/arrows/Enter/Space),
   wheel, touch where available; STB-style keyboard navigation from the start.
 * [ ] **3. `crtui` wrapper (first green).** The sample calls no `lv_*` symbol;
