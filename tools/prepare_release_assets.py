@@ -46,8 +46,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-#: Stages published in a developer preview.  Later stages (``05-ui``, ``06-web``)
-#: do not exist yet and are deliberately not offered.
+#: Stages published in a developer preview.  ``05-ui`` (contract and headless
+#: model only so far) and ``06-web`` are deliberately not offered yet.
 RELEASE_STAGES = ("01-c", "02-cxx", "03-gfx-simple", "04-gfx-media")
 
 #: Dependencies a genuine option-ON 04-gfx-media must redistribute.

@@ -19,7 +19,7 @@ BANNED_TOOLS = {
 }
 
 SUPPORTED_STAGES = (
-    "01-c", "02-cxx", "03-gfx-simple", "04-gfx-media",
+    "01-c", "02-cxx", "03-gfx-simple", "04-gfx-media", "05-ui",
 )
 SUPPORTED_TARGET_OSES = {"linux", "macos", "windows"}
 EXTERNAL_PREREQUISITE_KINDS = {
@@ -388,6 +388,16 @@ def main() -> None:
                                         "libcrtgfx_skia.dylib"), "shared crtgfx_skia")
             require_any(dist / "lib", ("*crtmedia*dll*", "libcrtmedia.so*",
                                         "libcrtmedia.dylib"), "shared crtmedia")
+    if args.stage >= "05-ui":
+        # crtui: the public header and both libraries. No LVGL header may leak
+        # into the installed SDK (LVGL is a private dependency, docs/crtui_
+        # acceptance.md), so its absence is checked too.
+        require(dist / "include" / "crtui" / "ui.h")
+        require_any(dist / "lib", ("libcrtui.a",), "static crtui")
+        require_any(dist / "lib", ("*crtui*dll*", "libcrtui.so*", "libcrtui.dylib"), "shared crtui")
+        for leaked in ("lvgl", "lvgl.h", "lv_conf.h"):
+            if (dist / "include" / leaked).exists():
+                raise SystemExit(f"LVGL header leaked into the public SDK: include/{leaked}")
     print(f"CRT distribution verified: {dist}")
 
 

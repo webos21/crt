@@ -1,10 +1,12 @@
 # crtui Acceptance (Stage `05-ui`)
 
-**Status: planned, contract not yet frozen.** This document records the
-intended shape and tranche order so Tranche 0 can freeze it. Nothing here is
-implemented; update the tranche sections with evidence as each closes, in the
-same way `crtmedia_encode_capture_acceptance.md` and
-`crtmedia_networking_acceptance.md` do. Completed work is recorded in
+**Status: contract frozen (Tranche 0, Windows/x64 2026-09-30); LVGL rendering
+is not started.** The public contract in `libcrtui/include/crtui/ui.h` and the
+rules in the table below are frozen and covered by a resource-free test.
+Tranches 1-7 add rendering, input mapping, the LVGL-backed widgets, external
+surfaces and packaging behind that contract. Update the tranche sections with
+evidence as each closes, in the same way `crtmedia_encode_capture_acceptance.md`
+and `crtmedia_networking_acceptance.md` do. Completed work is recorded in
 `../HISTORY.md`; the current tranche state is in `../TODO.md`.
 
 ## Purpose
@@ -47,23 +49,25 @@ on-screen-keyboard widgets until a real consumer needs them, accessibility,
 multi-window desktop behavior, and anything WebKit-specific (that arrives in
 `06-web` through the External Surface contract below).
 
-## Frozen common contract (to be frozen in Tranche 0)
+## Frozen common contract (Tranche 0)
 
-The public API exposes no LVGL type. Opaque handles: `crtui_context`,
-`crtui_window`, `crtui_widget`. Constructors follow the media/gfx idiom
-(`crtui_window_create`, `crtui_container_create`, `crtui_text_create`,
-`crtui_button_create`, `crtui_image_create`, `crtui_slider_create`, ...).
-Tranche 0 must pin, in prose and in a resource-free test:
+The public API exposes no LVGL type. `crtui_context` is an opaque pointer;
+widgets are opaque 64-bit ids (`crtui_widget`, with `crtui_window` an alias)
+that carry a generation, so a stale id is *detected* rather than dereferenced.
+Constructors follow the media/gfx idiom (`crtui_window_create`,
+`crtui_container_create`, `crtui_text_create`, `crtui_button_create`,
+`crtui_slider_create`, `crtui_surface_view_create`, ...). The rules below are
+the frozen contract; each is asserted by `crtui_contract_test`.
 
-| Topic | Rule to freeze |
+| Topic | Frozen rule |
 | --- | --- |
-| Thread ownership | UI tree mutation happens only on the UI/event thread; calls from other threads are rejected or marshalled by an explicit, documented entry point |
-| Lifetime | parent/child ownership, when a widget handle becomes invalid, release-while-event-dispatching |
-| Events | dispatch order, re-entrancy, callback ownership |
-| Focus and input routing | who receives keyboard/pointer input, focus loss/recovery, hit-testing, modal behavior |
-| Geometry | layout ownership, resize, visibility, clipping, DPI |
-| Surfaces | external-surface attach/detach, damage, z-order, ownership of the producer frame |
-| Errors | reuse `crtmedia_result`-style codes; no silent failure |
+| Thread ownership | A context belongs to the thread that created it. Every call except `crtui_context_post()` must come from that thread, otherwise `CRTUI_ERROR_WRONG_THREAD` and nothing changes (this includes `crtui_context_destroy()`). `crtui_context_post()` is the single thread-safe entry: it queues a function that `crtui_context_pump()` runs on the UI thread in FIFO order, never inline |
+| Lifetime | A parent owns its children; destroying a widget destroys its whole subtree at once and every id in it is invalid from that moment (`CRTUI_ERROR_INVALID_HANDLE`), including from inside a callback. A reused slot never yields an equal id. No reparenting in v1. `crtui_context_destroy()` destroys all widgets and discards posted functions that never ran. Callback `user` pointers are borrowed |
+| Events | Input enters through `crtui_context_send_input()`. The event goes to the target's callback, then bubbles to each ancestor up to the window; a callback returning `CRTUI_EVENT_HANDLED` stops the bubble; `event->target` stays the original target. `FOCUS_IN`/`FOCUS_OUT`/`RESIZED` do not bubble. Default actions (Tab/Shift+Tab focus, Enter/Space activate a button, arrows step a slider) run only if `KEY_DOWN` was not handled. Programmatic changes emit no event. Input sent from inside a callback is queued and delivered after the current event finishes (FIFO), never nested; no callback fires for a destroyed widget |
+| Focus and input routing | One focus per context. Pointer/wheel goes to the topmost visible widget under the point (later siblings on top, children clipped to every ancestor); a press on a focusable widget focuses it, and releasing over the same button activates it. Key input goes to the focused widget of the addressed window, else the window. Traversal is tree pre-order over widgets that are focusable, enabled and visible (all ancestors too), Tab wraps. When the focused widget is destroyed, hidden or disabled, focus moves to the next eligible widget after it (wrapping), else clears; `FOCUS_OUT` is never sent to a destroyed widget. A disabled widget (or one under a disabled ancestor) receives nothing: the input is dropped, not passed through. A modal window (the most recently made modal wins) drops all input for every other window and refuses focus into them; making a window modal moves focus into it |
+| Geometry | Bounds are integer logical pixels relative to the parent. A window's size and DPI scale (physical = logical x scale, scale > 0) come from `crtui_window_set_size()`, which emits `RESIZED` (x,y = size, value = scale in percent) to the window. Hit-testing uses the clipped, visible area. Automatic layout arrives in Tranche 4; until then bounds are application-set and authoritative |
+| Surfaces | `crtui_surface_view_create()` reserves the API and returns `CRTUI_ERROR_UNSUPPORTED` until Tranche 5. Frozen ownership rule: the view owns only position, size, clip, opacity, visibility, z-order, damage and hit-testing, never the producer's frame |
+| Errors | `crtui_result`: `0..-7` numerically identical to `crtmedia_result` (`OK`, `INVALID_ARGUMENT`, `UNSUPPORTED`, `WOULD_BLOCK`, `IO`, `TIMEOUT`, `CANCELLED`, `PROTOCOL`), plus `WRONG_THREAD = -8`, `INVALID_HANDLE = -9`, `STATE = -10`. A failed create always clears its output. No silent failure |
 
 STB/HMI use means remote-style keyboard navigation (Tab/arrow/Enter/Space) is a
 first-class input mode from Tranche 2, not a later add-on.
@@ -71,6 +75,8 @@ first-class input mode from Tranche 2, not a later add-on.
 ## Tranches and gates
 
 ### 0. Contract freeze and stage creation
+
+**Windows/x64 done 2026-09-30.** (details after the gate text below)
 
 Freeze the table above in this document, add the resource-free contract test,
 and create the `05-ui` stage. The superseded skeleton was already deleted
@@ -82,6 +88,43 @@ not a rename: new `libcrtui`, `crt-ui-build/test/dist` targets, `05-ui` in
 record its license/provenance under `third_party/`; the candidate is LVGL
 v9.6.x (public-API separation and system-library-style install are the reason)
 -- **verify the exact tag and hash at import time, do not trust this line.**
+
+**Tranche 0 result (Windows/x64, 2026-09-30).** The contract is host-neutral and
+resource-free; macOS/arm64 and Linux replay is next and needs no code change
+unless it finds a host-specific gap.
+
+- `libcrtui/include/crtui/ui.h` is the frozen public header (no LVGL type);
+  `libcrtui/src/core.c` is a headless model of the tree, event routing, focus
+  and geometry -- the state LVGL will later render, not a stand-in for it.
+- `crtui_contract_test` covers every table row: errors, lifetime (stale ids,
+  subtree invalidation, slot reuse), thread ownership (rejection from another
+  thread, FIFO `post`/`pump` on the UI thread), event order/bubbling/handled,
+  keyboard defaults, focus traversal and recovery, re-entrancy (self-destroy in
+  a callback, queued nested input), modal routing, hit-testing/clipping/
+  z-order, and resize/DPI. Real result:
+
+  ```text
+  crtui_contract_test: ok errors=pass lifetime=pass threads=pass events=pass
+      keyboard_focus=pass focus_recovery=pass reentrancy=pass modal=pass
+      hit_test=pass geometry=pass
+  ```
+
+  Mutation-checked: removing the "handled stops the bubble" rule makes it fail.
+- The `05-ui` stage exists: `libcrtui` static and shared libraries, the
+  `crt-ui-build`/`crt-ui-test`/`crt-ui-dist` targets, `05-ui` in
+  `tools/verify_dist.py` (public header, both libraries, and a check that no
+  LVGL header leaks into the SDK) and `tools/crt_dist_prerequisites.py`.
+  `crt-ui-dist` builds and verifies `out/<preset>/dist/05-ui` on Windows
+  (3 min on top of the existing `04-gfx-media` package). `crtui_*` tests are
+  excluded from the default C-stage `ctest` filters like `crtgfx_*`/`crtmedia_*`.
+  `05-ui` is not yet offered by `tools/prepare_release_assets.py`.
+- LVGL is pinned, not imported: `libcrtui/third_party/lvgl/{recipe.json,
+  README.md}` record v9.6.0 (released 2026-09-16, commit
+  `80ca777e37a2b176770726a02e07a6fb79ef0b39`, MIT), verified against the GitHub
+  API and the downloaded archive (SHA-256 `b20ee3ac...a84df`, 111,467,067
+  bytes; `lv_version.h` reads 9.6.0). The archive is ~111 MB because it carries
+  tests/docs/examples, so Tranche 1 should import only `src/`, `include/`,
+  the licence and the `lv_conf` template.
 
 ### 1. LVGL import and first pixels (Windows/x64 first)
 

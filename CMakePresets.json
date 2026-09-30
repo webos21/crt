@@ -70,7 +70,7 @@
         "outputOnFailure": true
       },
       "filter": {
-        "exclude": {"name": "^(crtgfx_|crtmedia_|.*cxx)"}
+        "exclude": {"name": "^(crtgfx_|crtmedia_|crtui_|.*cxx)"}
       }
     },
     {
@@ -80,7 +80,7 @@
         "outputOnFailure": true
       },
       "filter": {
-        "exclude": {"name": "^(crtgfx_|crtmedia_|.*cxx)"}
+        "exclude": {"name": "^(crtgfx_|crtmedia_|crtui_|.*cxx)"}
       }
     },
     {
@@ -90,7 +90,7 @@
         "outputOnFailure": true
       },
       "filter": {
-        "exclude": {"name": "^(crtgfx_|crtmedia_|.*cxx)"}
+        "exclude": {"name": "^(crtgfx_|crtmedia_|crtui_|.*cxx)"}
       }
     }
   ],

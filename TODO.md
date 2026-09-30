@@ -63,17 +63,18 @@ Promoted 2026-09-29 after Networking and streaming closed on Linux/x86_64,
 macOS/arm64, and Windows/x64, and after the roadmap was reordered to
 `04-gfx-media -> 05-ui -> 06-web` (`docs/runtime_roadmap.md`). The contract,
 gates, and host order live in
-[`docs/crtui_acceptance.md`](docs/crtui_acceptance.md) (drafted, not yet
-frozen). Keep completed evidence in `HISTORY.md`; this list tracks only tranche
+[`docs/crtui_acceptance.md`](docs/crtui_acceptance.md) (contract frozen in
+Tranche 0). Keep completed evidence in `HISTORY.md`; this list tracks only tranche
 state. Windows/x64 is the first host, then macOS/arm64, then Linux.
 
-* [ ] **0. Freeze the `crtui` contract and create the stage.** Thread
-  ownership, lifetime, events, focus/input routing, geometry, surfaces, errors,
-  plus a resource-free contract test; pin and record LVGL provenance; create
-  the `05-ui` stage (`libcrtui`, `crt-ui-*` targets, `verify_dist.py`/
-  `crt_dist_prerequisites.py`/`create_dist.py` stage entries, `distribution.md`).
-  The superseded `05-js`/`libcrtjs` skeleton was already deleted on
-  2026-09-29, so nothing needs renaming.
+* [ ] **0. Freeze the `crtui` contract and create the stage.** Windows/x64
+  done 2026-09-30, recorded in `HISTORY.md`: frozen `crtui/ui.h` contract
+  (thread ownership, lifetime, events, focus/input routing, geometry, surfaces,
+  errors) with a headless model and `crtui_contract_test: ok ...`; the `05-ui`
+  stage (`libcrtui`, `crt-ui-*` targets, `verify_dist.py`/
+  `crt_dist_prerequisites.py` entries); LVGL v9.6.0 pinned with provenance
+  (not imported). The `05-js`/`libcrtjs` skeleton was deleted on 2026-09-29, so
+  nothing was renamed. macOS/arm64 and Linux replay is next.
 * [ ] **1. LVGL import and first pixels.** Software draw buffer through the
   existing `crtgfx` present path; small Window/Column/Label/Button/Slider/
   Progress demo.

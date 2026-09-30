@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "name": "lvgl",
+  "version": "9.6.0",
+  "source": {
+    "type": "github-archive",
+    "repository": "https://github.com/lvgl/lvgl",
+    "tag": "v9.6.0",
+    "expected_commit": "80ca777e37a2b176770726a02e07a6fb79ef0b39",
+    "archive_url": "https://github.com/lvgl/lvgl/archive/refs/tags/v9.6.0.tar.gz",
+    "archive_sha256": "b20ee3acc1bba13c62d854f9ebd62e4c51e0b443b1e0225892e86442defa84df",
+    "archive_size": 111467067,
+    "source_dir": "lvgl-9.6.0"
+  },
+  "license": {
+    "spdx": "MIT",
+    "file": "LICENCE.txt",
+    "copyright": "Copyright (c) 2025 LVGL Kft"
+  },
+  "verification": {
+    "date": "2026-09-30",
+    "release_published_at": "2026-09-16T14:42:43Z",
+    "release_url": "https://github.com/lvgl/lvgl/releases/tag/v9.6.0",
+    "checks": [
+      "GitHub Releases API lists v9.6.0 as the newest non-prerelease v9 release (previous: v9.5.0, 2026-02-18).",
+      "git/ref/tags/v9.6.0 resolves to commit 80ca777e37a2b176770726a02e07a6fb79ef0b39 (type: commit).",
+      "The downloaded archive's include/lvgl/lv_version.h defines LVGL_VERSION_MAJOR 9 / MINOR 6 / PATCH 0 / INFO \"\".",
+      "The archive's LICENCE.txt is the MIT licence, copyright LVGL Kft.",
+      "The archive's SHA-256 was computed locally from the downloaded bytes, not copied from a web page."
+    ]
+  },
+  "import": {
+    "status": "pinned, not imported",
+    "planned_tranche": 1,
+    "notes": [
+      "Nothing from LVGL is vendored in Tranche 0: this file records the pin only.",
+      "The full archive is ~111 MB because it carries tests/, docs/, examples/ and demos/; Tranche 1 should import only what the build needs (src/, include/, LICENCE.txt, the lv_conf template) and record the import method in this file, the way libcrtgfx/third_party/skia/recipe.json records its sparse paths.",
+      "The archive hash is of GitHub's generated tarball as observed on 2026-09-30. GitHub can regenerate archives, so expected_commit is the authoritative pin; if the archive hash ever differs for the same commit, re-derive it and update this file rather than trusting either blindly.",
+      "Do not patch LVGL's own source to make a build error go away. A build failure first means a missing CRT/PAL/C runtime surface (AGENTS.md porting loop); only build-configuration edits (lv_conf.h) belong in patches."
+    ]
+  },
+  "public_api_policy": [
+    "LVGL is a private implementation dependency of libcrtui. No lv_* type, macro or header appears in any installed crtui header.",
+    "tools/verify_dist.py (stage 05-ui and later) fails if include/lvgl, include/lvgl.h or include/lv_conf.h appear in the distribution.",
+    "LVGL's own GPU backends stay disabled; rendering goes through its software draw buffer into the existing crtgfx present path."
+  ]
+}

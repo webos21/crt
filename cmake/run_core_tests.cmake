@@ -4,7 +4,7 @@ endif()
 
 execute_process(
   COMMAND "${CRT_CTEST}" --output-on-failure
-          -E "^(crtgfx_|crtmedia_|.*cxx)"
+          -E "^(crtgfx_|crtmedia_|crtui_|.*cxx)"
   WORKING_DIRECTORY "${CRT_BINARY_DIR}"
   RESULT_VARIABLE CRT_TEST_RESULT
 )

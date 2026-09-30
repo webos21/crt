@@ -9,6 +9,7 @@ STAGE_ORDER = {
     "02-cxx": 2,
     "03-gfx-simple": 3,
     "04-gfx-media": 4,
+    "05-ui": 5,
 }
 
 

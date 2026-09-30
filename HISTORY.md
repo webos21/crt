@@ -8,6 +8,43 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-09-30
+
+- **`crtui` Tranche 0 closed on Windows/x64: the UI contract is frozen and
+  tested, the `05-ui` stage exists, and LVGL v9.6.0 is pinned.**
+  `docs/crtui_acceptance.md`'s Tranche 0 section has the full detail.
+
+  Public contract: `libcrtui/include/crtui/ui.h` (no LVGL type). Contexts are
+  bound to their creating thread and reject every other thread
+  (`CRTUI_ERROR_WRONG_THREAD`) except `crtui_context_post()`; widgets are
+  generation-checked 64-bit ids, so a stale id is detected, never dereferenced;
+  events go to the target then bubble to the window, a callback can stop the
+  bubble, defaults (Tab/Enter/Space/arrows) run only if `KEY_DOWN` was not
+  handled; input sent from a callback is queued, not nested; focus traversal
+  and recovery, modal routing, clipped hit-testing and DPI-aware resize are all
+  specified. `crtui_result` mirrors `crtmedia_result` for 0..-7 and adds
+  `WRONG_THREAD`, `INVALID_HANDLE` and `STATE`. Surface views are reserved and
+  return `UNSUPPORTED` until Tranche 5.
+
+  Evidence: `crtui_contract_test` against the headless model in
+  `libcrtui/src/core.c` -- `ok errors=pass lifetime=pass threads=pass
+  events=pass keyboard_focus=pass focus_recovery=pass reentrancy=pass
+  modal=pass hit_test=pass geometry=pass`, mutation-checked (dropping the
+  "handled stops the bubble" rule fails it). The `05-ui` stage builds and
+  verifies on Windows (`crt-ui-dist`, 3 min on top of the existing
+  `04-gfx-media` package); `verify_dist.py` requires the public header and both
+  libraries and rejects any LVGL header in the SDK; `crtui_*` tests are excluded
+  from the default C-stage ctest like `crtgfx_*`/`crtmedia_*`.
+
+  LVGL is pinned, not imported (`libcrtui/third_party/lvgl/`): v9.6.0, released
+  2026-09-16, commit `80ca777e37a2b176770726a02e07a6fb79ef0b39`, MIT; the
+  release, tag-to-commit mapping, `lv_version.h` and licence were checked
+  against the GitHub API and the downloaded archive (SHA-256
+  `b20ee3acc1bba13c62d854f9ebd62e4c51e0b443b1e0225892e86442defa84df`,
+  111,467,067 bytes). Tranche 1 should import only `src/`, `include/`, the
+  licence and the `lv_conf` template (the full archive is ~111 MB). macOS/arm64
+  and Linux replay is next.
+
 ## 2026-09-29
 
 - **`libcrtjs` and the `05-js` stage removed; roadmap documents made

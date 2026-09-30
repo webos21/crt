@@ -257,7 +257,7 @@ class Prepare(TempCase):
 
     def test_unpublishable_stage_is_refused(self):
         with self.assertRaisesRegex(release.ReleaseError, "not part of the preview"):
-            release.prepare(self.tmp / "dist", TAG, self.tmp / "out", ("05-ui",),
+            release.prepare(self.tmp / "dist", TAG, self.tmp / "out", ("06-web",),
                             {}, self.tmp / "s", True, True)
 
 

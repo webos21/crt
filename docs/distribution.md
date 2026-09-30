@@ -22,15 +22,16 @@ external toolchain contract.
 | `02-cxx` | `01-c` plus libc++, libc++abi, and libunwind | C++ applications and libraries |
 | `03-gfx-simple` | `02-cxx` plus one window, keyboard/mouse input, and a CPU-writable software framebuffer | Industrial HMI and simple native UI |
 | `04-gfx-media` | `03-gfx-simple` plus the GPU API, Skia CPU/GPU rendering, Vulkan/D3D12/Metal presentation, and FFmpeg media | accelerated UI and playback |
-| `05-ui` (planned) | `04-gfx-media` plus `crtui`/LVGL and external-surface composition | native application UI |
+| `05-ui` (in progress) | `04-gfx-media` plus `crtui` (frozen API and headless model so far; LVGL rendering and external-surface composition planned) | native application UI |
 | `06-web` (planned) | `05-ui` plus JavaScriptCore/WebKit, `libcrtweb`, and the WebView | web runtime |
 
-The repository builds nothing past `04-gfx-media`. The former `05-js`
+The repository builds `05-ui` (contract and headless model, no LVGL yet) and
+nothing past it. The former `05-js`
 skeleton (`libcrtjs`, no engine) and its `crt-js-*` targets were deleted on
 2026-09-29; the QuickJS plan behind it is retired
-([`runtime_roadmap.md`](runtime_roadmap.md)). `05-ui` is created fresh by
-`crtui` Tranche 0 (`TODO.md`), with `crt-ui-build/test/dist` targets added
-then.
+([`runtime_roadmap.md`](runtime_roadmap.md)). `05-ui` was created fresh by
+`crtui` Tranche 0 (2026-09-30) with `crt-ui-build/test/dist` targets; it is not
+yet offered as a release asset.
 
 Each binary stage is cumulative and independently consumable. The repository
 build currently creates each later directory by copying the preceding
@@ -102,6 +103,10 @@ cmake --build --preset <preset> --target crt-gfx-simple-dist
 cmake --build --preset <preset> --target crt-gfx-media-build
 cmake --build --preset <preset> --target crt-gfx-media-test
 cmake --build --preset <preset> --target crt-gfx-media-dist
+
+cmake --build --preset <preset> --target crt-ui-build
+cmake --build --preset <preset> --target crt-ui-test
+cmake --build --preset <preset> --target crt-ui-dist
 ```
 
 The more focused `crt-gfx-build/test` and `crt-media-build/test` targets are
@@ -135,6 +140,7 @@ out/<preset>/dist/01-c/
 out/<preset>/dist/02-cxx/
 out/<preset>/dist/03-gfx-simple/
 out/<preset>/dist/04-gfx-media/
+out/<preset>/dist/05-ui/
 ```
 
 Windows packages are emitted as `.zip`; Linux and macOS packages as

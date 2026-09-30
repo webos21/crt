@@ -19,8 +19,9 @@ documentation passes -- see `TODO.md`'s Notice section. It may lag behind
   WSL/container replacement, or an Android APK runtime.
 - The default workflow builds and tests only the C stage. Explicit cumulative
   distributions then add C++, Simple Graphics, and advanced Graphics/Media
-  under `out/<preset>/dist/`; the planned `05-ui` and `06-web` stages follow
-  (the superseded `05-js`/`libcrtjs` skeleton was removed on 2026-09-29).
+  under `out/<preset>/dist/`; `05-ui` (contract and headless model only so far)
+  and the planned `06-web` follow (the superseded `05-js`/`libcrtjs` skeleton
+  was removed on 2026-09-29).
 - No distribution bundles LLVM/Clang/LLD. Desktop and embedded consumers
   provide the host or vendor toolchain; CRT supplies the staged sysroot,
   startup/runtime objects, wrappers, configuration, and manifest.
@@ -237,7 +238,7 @@ JavaScriptCore). No JavaScript engine or binding exists.
 ### Upper Runtime Direction
 
 - The runtime is packaged through the cumulative C, C++, Simple Graphics, and
-  Graphics/Media stages (`05-ui` and `06-web` are planned, not built).
+  Graphics/Media stages, plus a contract-only `05-ui` (`06-web` is planned).
 - Each cumulative stage can also be bootstrapped and verified in isolation,
   purely from its own predecessor's already-packaged SDK rather than the
   in-repo build tree. The complete predecessor-only chain through
@@ -431,9 +432,10 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-1. Start `TODO.md`'s active Application UI (`05-ui`) tranche: freeze the
-   `crtui` contract, pin LVGL with provenance, create the `05-ui` stage
-   (new `libcrtui`, `crt-ui-*` targets), then LVGL first pixels on Windows/x64 (macOS/arm64 and
+1. Continue `TODO.md`'s active Application UI (`05-ui`) work. Tranche 0 (frozen
+   `crtui` contract, headless model, `05-ui` stage, LVGL v9.6.0 pinned) is done
+   on Windows/x64 (2026-09-30); next are its macOS/arm64 and Linux replays, then
+   LVGL first pixels on Windows/x64 (macOS/arm64 and
    Linux replays follow). See `docs/crtui_acceptance.md`.
 2. After `05-ui`'s External Surface contract is accepted, begin `06-web`: a
    JavaScriptCore/JSCOnly bring-up (Linux first, early three-host replay), a

@@ -889,6 +889,7 @@ add_subdirectory(libstdc++)
 add_subdirectory(shell)
 add_subdirectory(libcrtgfx)
 add_subdirectory(libcrtmedia)
+add_subdirectory(libcrtui)
 
 # Hoisted ahead of add_subdirectory(libc/tests)/add_subdirectory(
 # libstdc++/tests) below, out of the if(Python3_Interpreter_FOUND) block
@@ -1246,7 +1247,7 @@ if(Python3_Interpreter_FOUND)
   get_property(CRT_ALL_REGISTERED_TESTS GLOBAL PROPERTY CRT_REGISTERED_TESTS)
   set(CRT_C_TEST_TARGETS)
   foreach(CRT_REGISTERED_TEST IN LISTS CRT_ALL_REGISTERED_TESTS)
-    if(NOT CRT_REGISTERED_TEST MATCHES "^(crtgfx_|crtmedia_)" AND
+    if(NOT CRT_REGISTERED_TEST MATCHES "^(crtgfx_|crtmedia_|crtui_)" AND
        NOT CRT_REGISTERED_TEST MATCHES "cxx")
       string(REGEX REPLACE "_runs$" "" CRT_REGISTERED_TEST_TARGET "${CRT_REGISTERED_TEST}")
       if(TARGET "${CRT_REGISTERED_TEST_TARGET}")
@@ -1505,6 +1506,23 @@ if(Python3_Interpreter_FOUND)
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
       --dist "${CRT_DIST_ROOT}/04-gfx-media" --stage 04-gfx-media
     DEPENDS crt-gfx-simple-dist crt-gfx-media-build
+    USES_TERMINAL
+  )
+
+  # 05-ui: crtui (Tranche 0 ships the frozen contract and its headless model).
+  add_custom_target(crt-ui-build DEPENDS crtui crtui_shared)
+  add_custom_target(crt-ui-test DEPENDS crt-ui-build crtui_contract_test
+    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtui_.*_runs"
+  )
+  add_custom_target(crt-ui-dist
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
+      --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
+      --dest "${CRT_DIST_ROOT}/05-ui" --base "${CRT_DIST_ROOT}/04-gfx-media"
+      --component crt-ui --cmake "${CMAKE_COMMAND}" --stage 05-ui
+      --target-os "${CRT_TARGET_OS}" --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" ${CRT_DIST_TOOL_ARGS} --archive
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
+      --dist "${CRT_DIST_ROOT}/05-ui" --stage 05-ui
+    DEPENDS crt-gfx-media-dist crt-ui-build
     USES_TERMINAL
   )
 endif()
