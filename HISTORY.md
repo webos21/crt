@@ -10,6 +10,22 @@ substantive update.
 
 ## 2026-09-30
 
+- **`crtui` Tranche 2 closed on Linux/x86_64 (native Intel host, Wayland)
+  with no code change.** `docs/crtui_acceptance.md`'s Tranche 2 section has the
+  full detail. `crtui_input_test` (8 groups), `crtui_contract_test` (13) and
+  `crtui_render_test` (14, `handles=4->4 threads=1->1`) pass unmodified and are
+  byte-identical over three runs each. The slider-step-sign mutation fails the
+  same lines as Windows/macOS (`input_test.c:202`; `contract_test.c:394/397/
+  403/678`) and is reverted. `crtui_window_demo 30` drives a real Wayland window
+  with the scripted input sequence: `presented=30 pixel_check=pass
+  input_check=pass` (three runs). Full `ctest` 148/149 on an idle machine (the
+  pre-existing no-sound-card failure; `crtgfx_synthetic_event_runs` passed),
+  tooling 79/79; `crt-ui-dist` with LVGL verifies, installs both `crtui/ui.h`
+  and `crtui/crtgfx.h`, and `libcrtui.so` needs only CRT libs with no crtgfx
+  symbol. Not verified: interactive real input, Wayland scroll direction, and
+  live resizing -- no input-injection tool exists on this host, and the scripted
+  run covers crtui's mapping but not Wayland seat delivery.
+
 - **`crtui` Tranche 2 replayed on macOS/arm64 with no code change.**
   `crtui_input_test`, `crtui_contract_test` and `crtui_render_test` pass
   unmodified (input test byte-identical over three runs); the slider-step-sign

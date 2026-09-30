@@ -326,7 +326,7 @@ input model. Tests: pointer hit-test, Tab focus traversal, Enter/Space
 activation, arrow navigation, slider keyboard adjustment, resize/re-layout,
 focus loss and recovery.
 
-**Windows/x64 and macOS/arm64 done 2026-09-30.**
+**Closed 2026-09-30 on Windows/x64, macOS/arm64, and Linux/x86_64.**
 
 *Design.* crtui's CRT-owned model already owned hit-testing, focus and event
 routing (Tranche 0); "mapping to LVGL's input model" therefore means the model
@@ -417,7 +417,42 @@ copy of the state living in LVGL indevs. Three additions:
   onto the queue real events use, so it covers crtui's mapping but not AppKit's
   own delivery. The macOS wheel sign is host-native (crtgfx reads AppKit's
   `deltaY`, already adjusted for the user's natural-scrolling setting) and
-  remains unverified, as the Windows entry also noted. Linux replay remains.
+  remains unverified, as the Windows entry also noted.
+
+**Tranche 2 replay (Linux/x86_64, native Intel host, Wayland, 2026-09-30).**
+No code, test, or build-wiring change was needed (Tranche 1's link-order fix
+already covers the demo).
+
+- `crtui_input_test` (all eight groups), `crtui_contract_test` (thirteen
+  groups, including `arrow_nav` and `slider_pointer`) and `crtui_render_test`
+  (fourteen groups, including `focus_ring`, `pressed`, `slider_drag`,
+  `relayout`; `handles=4->4 threads=1->1`) pass unmodified, each byte-identical
+  over three runs.
+- Mutation check reproduced with the same counts and lines as Windows/macOS:
+  flipping the slider's Left/Right step sign (`libcrtui/src/core.c`) fails
+  `crtui_input_test` (1 failure, `input_test.c:202`) and `crtui_contract_test`
+  (4 failures, `contract_test.c:394/397/403/678`); reverted, `git diff` clean,
+  re-confirmed green.
+- `crtui_window_demo 30` drove a real Wayland window through crtgfx with the
+  scripted input sequence: `presented=30 pixel_check=pass input_check=pass`,
+  exit 0, three runs.
+- Full dev-tree `ctest` 148/149 run on an otherwise idle machine (the one
+  failure is the pre-existing no-sound-card `crtmedia_playback_pipeline_test_
+  runs` gap; `crtgfx_synthetic_event_runs`, which failed once in the Tranche 1
+  replay under parallel build load, passed); tooling tests 79/79.
+- `crt-ui-dist` with LVGL on (fresh options-default tree, ~3.5 min incremental)
+  builds and `verify_dist.py --stage 05-ui` passes: both `crtui/ui.h` and
+  `crtui/crtgfx.h` are installed, `libcrtui.so` has `NEEDED` only
+  `libm/libdl/libc++/libc`, `RUNPATH $ORIGIN`, every undefined symbol
+  `@CRT_1.0`-versioned and none from crtgfx (the adapter has no link
+  dependency, as designed), and no LVGL file or header is in the SDK.
+- Not verified here: *interactive* real keyboard/mouse input, real scroll-wheel
+  direction, and live window resizing on Wayland. This host has no input
+  injection tool (`wtype`, `ydotool` and `dotool` are all absent), and the
+  scripted run injects through crtgfx's test hook, so it covers crtui's mapping
+  but not the Wayland seat/pointer/keyboard delivery. The Wayland scroll sign is
+  host-native and unverified, as on the other hosts. Running `crtui_window_demo`
+  with no frame limit on a desktop session is the manual check.
 
 ### 3. `crtui` wrapper (first green)
 
